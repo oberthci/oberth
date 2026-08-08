@@ -305,7 +305,7 @@ func (bootstrap UpstreamSSHBootstrap) acquireHostKeys(ctx context.Context, confi
 	if len(keys) == 0 {
 		return nil, fmt.Errorf("app: SSH host %s:%s returned no supported host keys", host, port)
 	}
-	if _, err := fmt.Fprintf(bootstrap.Output, "SSH host-key fingerprints offered by %s:%s:\n", host, port); err != nil {
+	if _, err := fmt.Fprintf(bootstrap.Output, "\nSSH host-key fingerprints offered by %s:%s:\n", host, port); err != nil {
 		return nil, err
 	}
 	for _, key := range keys {
@@ -326,14 +326,14 @@ func (bootstrap UpstreamSSHBootstrap) acquireHostKeys(ctx context.Context, confi
 
 func (bootstrap UpstreamSSHBootstrap) printGeneratedIdentity(identity privateIdentity, host, port string) error {
 	_, err := fmt.Fprintf(bootstrap.Output,
-		"Generated upstream deploy public key (%s):\n%sAdd this public key to the SSH upstream for %s:%s with the required repository write access.\n",
-		identity.fingerprint, identity.publicKey, host, port)
+		"\nGenerated upstream deploy public key (%s) for %s:%s:\n\n%s\n",
+		identity.fingerprint, host, port, identity.publicKey)
 	return err
 }
 
 func (bootstrap UpstreamSSHBootstrap) printPersistedIdentity(identity privateIdentity, host, port string) error {
 	_, err := fmt.Fprintf(bootstrap.Output,
-		"Persisted upstream deploy public key (%s):\n%sEnsure this public key is registered for %s:%s; Oberth will now verify authenticated Git access.\n",
+		"\nPersisted upstream deploy public key (%s):\n\n%s\nEnsure this public key is registered for %s:%s with repository write access.\n",
 		identity.fingerprint, identity.publicKey, host, port)
 	return err
 }

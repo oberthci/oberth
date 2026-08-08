@@ -22,6 +22,20 @@ import (
 
 const administrativeActor = "admin@localhost"
 
+// defaultPodNamespace returns the namespace of the pod the command runs in,
+// read from the mounted ServiceAccount projection, so in-pod administrative
+// commands need no --namespace flag. Outside a pod it falls back to "oberth".
+func defaultPodNamespace() string {
+	data, err := os.ReadFile("/var/run/secrets/kubernetes.io/serviceaccount/namespace")
+	if err != nil {
+		return "oberth"
+	}
+	if value := strings.TrimSpace(string(data)); value != "" {
+		return value
+	}
+	return "oberth"
+}
+
 type upstreamDependencies struct {
 	input            io.Reader
 	kubernetesClient func() (kubernetes.Interface, error)
@@ -60,7 +74,7 @@ func runUpstreamWithDependencies(ctx context.Context, arguments []string, output
 	databasePath := flags.String("database", "/data/oberth.sqlite", "SQLite database path")
 	upstreamKey := flags.String("upstream-key", "/etc/oberth/upstream-key/id_ed25519", "upstream SSH private key")
 	knownHosts := flags.String("known-hosts", "/etc/oberth/known-hosts/known_hosts", "upstream known_hosts")
-	namespace := flags.String("namespace", "oberth", "Kubernetes namespace")
+	namespace := flags.String("namespace", defaultPodNamespace(), "Kubernetes namespace")
 	upstreamKeySecret := flags.String("upstream-key-secret", "oberth-upstream-key", "upstream SSH private-key Secret")
 	knownHostsSecret := flags.String("known-hosts-secret", "oberth-known-hosts", "upstream known_hosts Secret")
 	if err := flags.Parse(arguments[1:]); err != nil {
@@ -99,6 +113,14 @@ func runUpstreamWithDependencies(ctx context.Context, arguments []string, output
 			KnownHostsDataKey: filepath.Base(*knownHosts),
 			MutationGate:      secretGate,
 		}).Ensure(ctx, baseURL); err != nil {
+			if errors.Is(err, app.ErrUpstreamBootstrapIncomplete) {
+				// The flow completed normally: the key was generated, persisted,
+				// and printed. Registering it upstream is the user's next step,
+				// not a failure, so this path exits zero.
+				_, printErr := fmt.Fprintf(output,
+					"→ Register this key with the upstream, then rerun:\n\n    oberth upstream add %s %s\n", name, baseURL)
+				return printErr
+			}
 			return fmt.Errorf("upstream SSH identity is not ready: %w", err)
 		}
 	}

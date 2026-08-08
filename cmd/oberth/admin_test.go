@@ -23,7 +23,6 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 	k8stesting "k8s.io/client-go/testing"
 
-	"github.com/oberthci/oberth/internal/app"
 	"github.com/oberthci/oberth/internal/store"
 )
 
@@ -157,8 +156,14 @@ func TestUpstreamAddGeneratesConfirmsPersistsAndRecovers(t *testing.T) {
 	}
 	var output bytes.Buffer
 	err := runUpstreamWithDependencies(ctx, arguments, &output, dependencies)
-	if !errors.Is(err, app.ErrUpstreamBootstrapIncomplete) {
-		t.Fatalf("generated bootstrap error = %v", err)
+	// Issue #839: a completed generation flow exits zero — the key was
+	// generated, persisted, and printed with a rerun hint; nothing failed.
+	if err != nil {
+		t.Fatalf("generated bootstrap error = %v, want nil with rerun hint", err)
+	}
+	if !strings.Contains(output.String(), "then rerun:") ||
+		!strings.Contains(output.String(), "oberth upstream add codeberg ssh://git@codeberg.org/acme") {
+		t.Fatalf("bootstrap output missing rerun hint: %q", output.String())
 	}
 	if scanCalls != 1 || probeCalls != 0 || upstreamCount(t, databasePath) != 0 {
 		t.Fatalf("initial bootstrap: scans=%d probes=%d upstreams=%d", scanCalls, probeCalls, upstreamCount(t, databasePath))
