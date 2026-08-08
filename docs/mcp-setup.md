@@ -32,14 +32,14 @@ The token is never stored or recoverable. If lost, create a new uplink.
 
 Add to `.claude/settings.json` (project or user level):
 
-### Via Cloudflare tunnel (recommended)
+### Via the HTTPS NodePort
 
 ```json
 {
   "mcpServers": {
     "oberth": {
       "type": "url",
-      "url": "https://watch.oberth.ci/mcp",
+      "url": "https://<node-address>:30443/mcp",
       "headers": {
         "Authorization": "Bearer oberth_xxxxxxxxxxxxxxxx"
       }
@@ -48,24 +48,11 @@ Add to `.claude/settings.json` (project or user level):
 }
 ```
 
-Cloudflare terminates TLS with a valid public certificate. No fingerprint
-pinning is needed on the client side.
-
-### Via direct NodePort
-
-```json
-{
-  "mcpServers": {
-    "oberth": {
-      "type": "url",
-      "url": "https://192.168.1.208:30443/mcp",
-      "headers": {
-        "Authorization": "Bearer oberth_xxxxxxxxxxxxxxxx"
-      }
-    }
-  }
-}
-```
+This is the shipped access path — Oberth exposes fixed NodePorts and carries
+no tunnel subsystem. If you front the NodePort with your own TLS-terminating
+proxy (an ingress, a Cloudflare Tunnel you operate), point the URL at that
+hostname instead; a publicly trusted certificate there removes the
+client-side trust step below.
 
 Direct access uses a self-signed certificate. The client must trust it.
 Export the certificate and add it to the system trust store:
@@ -96,15 +83,16 @@ by asking Claude Code to call any Oberth tool, or test manually:
 ```bash
 curl --fail-with-body --silent \
   --cacert oberth-tls.crt \
-  --resolve "oberth:30443:192.168.1.208" \
+  --resolve "oberth:30443:<node-address>" \
   -H "Authorization: Bearer oberth_xxxxxxxxxxxxxxxx" \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' \
   "https://oberth:30443/mcp"
 ```
 
-A successful response returns 13 tools. For the tunnel path, use
-`https://watch.oberth.ci/mcp` without `--cacert` or `--resolve`.
+A successful response returns 13 tools. Behind an operator-run TLS-terminating
+proxy with a publicly trusted certificate, drop `--cacert` and `--resolve` and
+call the proxy hostname directly.
 
 ## MCP tools
 
