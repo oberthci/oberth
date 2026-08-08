@@ -54,7 +54,9 @@ if test ! -f "$work_dir/trivy" || test -L "$work_dir/trivy" || test ! -x "$work_
 fi
 test "$(sha256sum "$work_dir/trivy" | cut -d ' ' -f 1)" = "$binary_sha" || \
   fail "Trivy binary checksum mismatch"
-test "$("$work_dir/trivy" --version 2>/dev/null)" = 'Version: 0.73.0' || fail "Trivy version mismatch"
+# Isolate the cache: a populated host trivy DB cache appends "Vulnerability DB"
+# lines to --version output, which would break this exact-match sanity check.
+test "$(XDG_CACHE_HOME="$work_dir" "$work_dir/trivy" --version 2>/dev/null)" = 'Version: 0.73.0' || fail "Trivy version mismatch"
 
 mkdir -p "$repo_root/bin"
 staged_output=$repo_root/bin/.trivy.$$
