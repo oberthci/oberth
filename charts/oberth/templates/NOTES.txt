@@ -1,100 +1,23 @@
-Oberth is exposed on fixed NodePorts:
+Oberth {{ .Chart.AppVersion }} — SSH NodePort {{ .Values.service.sshNodePort }}, HTTPS/MCP NodePort {{ .Values.service.httpsNodePort }}.
 
-  SSH:   {{ .Values.service.sshNodePort }}
-  HTTPS: {{ .Values.service.httpsNodePort }}
+1. Register the upstream (interactive — generates and persists the deploy key):
 
-This install has no manual node preparation: the prepare-caches init container
-creates and owns the isolated host cache roots, the SSH host key and TLS
-identity are generated on first install (and kept across upgrades and
-uninstalls), and an empty persistent volume starts a fresh verified audit
-genesis. `charts/oberth/files/prepare-node.sh` remains only for preparing a
-node out of band.
+     kubectl exec -it -n {{ .Release.Namespace }} deploy/{{ include "oberth.fullname" . }} -- \
+       oberth upstream add {{ .Values.upstream.name }} {{ .Values.upstream.baseURL }}
 
-Register the upstream and first uplink from the pod:
+2. Add your first uplink (prints its bearer token and TLS fingerprint once):
 
-  kubectl exec -it -n {{ .Release.Namespace }} deploy/{{ include "oberth.fullname" . }} -- \
-    oberth upstream add \
-      --namespace={{ .Release.Namespace | quote }} \
-      --upstream-key={{ printf "/etc/oberth/upstream-key/%s" .Values.upstream.keyFile | quote }} \
-      --known-hosts={{ printf "/etc/oberth/known-hosts/%s" .Values.upstream.knownHostsKey | quote }} \
-      --upstream-key-secret={{ .Values.upstream.keySecret | quote }} \
-      --known-hosts-secret={{ .Values.upstream.knownHostsSecret | quote }} \
-      {{ .Values.upstream.name | quote }} {{ .Values.upstream.baseURL | quote }}
-  kubectl exec -i -n {{ .Release.Namespace }} deploy/{{ include "oberth.fullname" . }} -- \
-    oberth uplink add - operator@host < ~/.ssh/id_ed25519.pub
+     kubectl exec -i -n {{ .Release.Namespace }} deploy/{{ include "oberth.fullname" . }} -- \
+       oberth uplink add - operator@host < ~/.ssh/id_ed25519.pub
 
-The uplink command prints its bearer token once and the TLS certificate fingerprint.
-Like a vault before initialization, a freshly installed pod stays Running but
-intentionally not ready (0/1) until the upstream above is registered; kubectl
-exec works throughout, and readiness then also requires the upstream's durable
-SSH key and pinned known_hosts data.
-Both commands use the live daemon's private in-pod Unix socket. If external
-audit continuity cannot be proven, they fail closed before changing SQLite or
-the upstream identity Secrets.
-
-Secure MCP bootstrap (never use curl -k):
-
-  export OBERTH_NODE_IP=<node-address>
-  export OBERTH_HTTPS_PORT={{ .Values.service.httpsNodePort }}
-  export OBERTH_TLS_FINGERPRINT='SHA256:<value printed by uplink add>'
-  export OBERTH_TLS_CERT="$PWD/oberth-tls.crt"
-  kubectl get secret -n {{ .Release.Namespace }} {{ include "oberth.tlsSecretName" . }} \
-    -o jsonpath='{.data.tls\.crt}' | base64 --decode >"$OBERTH_TLS_CERT"
-  actual_fingerprint="$(openssl x509 -in "$OBERTH_TLS_CERT" -outform DER | \
-    openssl dgst -sha256 -binary | openssl base64 -A | tr -d '=')"
-  test "$OBERTH_TLS_FINGERPRINT" = "SHA256:$actual_fingerprint"
-  oberth_auth="$(mktemp)"; chmod 0600 "$oberth_auth"
-  read -rsp 'Oberth bearer token: ' oberth_token; printf '\n'
-  printf 'Authorization: Bearer %s\n' "$oberth_token" >"$oberth_auth"; unset oberth_token
-
-  oberth_mcp() {
-    curl --fail-with-body --silent --show-error \
-      --cacert "$OBERTH_TLS_CERT" \
-      --resolve "oberth:${OBERTH_HTTPS_PORT}:${OBERTH_NODE_IP}" \
-      --header "@$oberth_auth" --header 'Content-Type: application/json' \
-      --data "$1" "https://oberth:${OBERTH_HTTPS_PORT}/mcp"
-  }
-  oberth_mcp '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"bootstrap","version":"1"}}}'
-  oberth_mcp '{"jsonrpc":"2.0","id":2,"method":"tools/list"}'
-  rm -f -- "$oberth_auth"
-
-The exact leaf certificate is the trust anchor and --resolve preserves its
-oberth hostname check. For tls.existingSecret, export that Secret's tls.crt.
-Execution Pod names include the repository and a short run identity. Watch the
-current burn and step with:
-
-  kubectl get pods -n {{ .Release.Namespace }} --watch \
-    -L oberth.ci/repo,oberth.ci/trigger,oberth.ci/burn,oberth.ci/step
-
-The default values generate every identity Secret on first install and keep it
-across uninstall. To adopt restored credentials instead (for example after a
-cluster rebuild), set `ssh.hostKey.existingSecret=<restored-secret>`; Helm then
-neither adopts nor overwrites that Secret. The SSH host key derives the public
-audit-witness identity: reinstalling with a restored host key but no restored
-local state fails closed against the published Rekor witness chain until the
-one-shot `auditAnchor.acceptWitnessChainReset=<latest-witness-UUID>`
-acknowledgment permanently abandons the prior chain.
-`releaseSecrets` is only the administrator allowlist. Each repository must
-declare a literal `var ReleaseSecrets = []string{...}` in periapsis.go; a tag
-Job receives exactly that allowed subset and no other release credential.
+Like a vault before initialization, the pod stays Running but not ready (0/1)
+until step 1 completes; kubectl exec works throughout.
 {{- if .Values.secretstore.enabled }}
 
-Secret store release secrets are enabled ({{ .Values.secretstore.address }}).
-{{- if eq .Values.secretstore.address "https://openbao.openbao.svc:8200" }}
-Using the default in-cluster address — this assumes OpenBao was installed with
-`helm install openbao ... -n openbao --create-namespace`. If OpenBao lives in a
-different namespace or at an external endpoint, set secretstore.address.
+Secret store: {{ .Values.secretstore.address }}. If the store side is not set
+up yet, run scripts/setup-secretstore.sh next to your OpenBao/Vault, then:
+kubectl exec -n {{ .Release.Namespace }} deploy/{{ include "oberth.fullname" . }} -- oberth secretstore verify
 {{- end }}
-If the store side is not configured yet, run scripts/setup-secretstore.sh next
-to your OpenBao/Vault (extract the identical script from this signed image with
-`oberth secretstore setup --print-script`). Then prove the whole trust chain —
-ServiceAccount login, TokenReview, read policy, TLS — from inside the pod:
 
-  kubectl exec -n {{ .Release.Namespace }} deploy/{{ include "oberth.fullname" . }} -- \
-    oberth secretstore verify
-
-`secretstore.allowedPaths` is only the administrator allowlist; each repository
-must request its exact subset through a literal `var SecretStoreSecrets =
-map[string]string{...}` in periapsis.go. Values are fetched at release
-admission and delivered only into release-Job memory — never etcd, never disk.
-{{- end }}
+Docs — MCP client setup, secret store, restore after a rebuild, release
+secrets: https://github.com/oberthci/oberth#documentation (docs/mcp-setup.md)

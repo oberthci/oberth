@@ -231,6 +231,12 @@ unauthenticated.
   `auditAnchor.rekorCA` / `auditAnchor.tsaCA` pin private CAs for self-hosted
   witnesses, and `auditAnchor.acceptWitnessChainReset` is the one-shot,
   loudly-logged acknowledgment for reinstalls that abandon a published chain.
+- **Rebuild and restore** — every identity Secret is generated on first
+  install and kept across uninstall (`helm.sh/resource-policy: keep`). To
+  adopt restored credentials after a cluster rebuild, set
+  `ssh.hostKey.existingSecret`; Helm then neither adopts nor overwrites that
+  Secret. A restored host key without restored local state fails closed
+  against the published witness chain until the reset acknowledgment above.
 
 ## Security
 
@@ -274,6 +280,13 @@ go test -race -count=1 ./...
 golangci-lint run ./...
 make build       # server and runner binaries
 make local-flow  # executable FAB Example-flow gate, no cluster required
+```
+
+Watch a live run's current burn and step:
+
+```bash
+kubectl get pods -n oberth --watch \
+  -L oberth.ci/repo,oberth.ci/trigger,oberth.ci/burn,oberth.ci/step
 ```
 
 Oberth is its own CI authority: this repository carries
