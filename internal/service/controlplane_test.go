@@ -1427,6 +1427,69 @@ func TestLogsReturnOnlyOneNamedStep(t *testing.T) {
 	}
 }
 
+func TestDashboardRunDetailAndLogViewsAreReadOnly(t *testing.T) {
+	fixture := newControlFixture(t, JobResult{
+		Status: model.RunFailed, Phase: "test", FailedBurn: "test", FailedStep: "unit", Error: "unit failed",
+		Steps: []model.StepResult{
+			{Burn: "lint", Step: "vet", Status: model.StepPassed, ExitCode: 0},
+			{Burn: "test", Step: "unit", Status: model.StepFailed, ExitCode: 1},
+		},
+	})
+	const sha = "abababababababababababababababababababab"
+	ctx := context.Background()
+	enqueued, err := fixture.scheduler.EnqueueCI(ctx, CIRequest{
+		EventID: "receive-dashboard-detail", Repository: fixture.repo,
+		Branch: "feature/dashboard-detail", SHA: sha, Actor: "agent@host",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.scheduler.ProcessNext(ctx); err != nil {
+		t.Fatal(err)
+	}
+	control := fixture.api(t)
+
+	value, err := control.Run(ctx, api.Actor{Identity: "agent@host"}, enqueued.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	detail := value.(RunDetailResponse)
+	if detail.Run.ID != enqueued.ID || detail.Run.Status != model.RunFailed || detail.Repository.Name != fixture.repo.Name {
+		t.Fatalf("run detail = %#v", detail)
+	}
+	if len(detail.Steps) != 2 || detail.Steps[0].Burn != "lint" || detail.Steps[1].Step != "unit" || detail.Steps[1].Status != model.StepFailed {
+		t.Fatalf("run detail steps = %#v", detail.Steps)
+	}
+	// The red run's CI issue stays locked for the pushing actor exactly as the
+	// scheduler left it: the read-only view neither stole, released, nor
+	// renewed that lock, and the dashboard viewer identity owns nothing.
+	issue, err := fixture.store.OpenCIIssue(ctx, fixture.repo.ID, "feature/dashboard-detail")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fixture.store.AcquireIssueLock(ctx, issue.ID, "another@agent"); !errors.Is(err, store.ErrLockHeld) {
+		t.Fatalf("pusher's CI issue lock was disturbed by the dashboard view: %v", err)
+	}
+	if _, err := fixture.store.RenewIssueLock(ctx, issue.ID, "dashboard@viewer"); !errors.Is(err, store.ErrLockNotOwned) {
+		t.Fatalf("dashboard viewer unexpectedly holds issue coordination state: %v", err)
+	}
+
+	logValue, err := control.RunLog(ctx, api.Actor{Identity: "agent@host"}, enqueued.ID, "test", "unit")
+	if err != nil {
+		t.Fatal(err)
+	}
+	logResponse := logValue.(LogResponse)
+	if logResponse.RunID != enqueued.ID || !strings.Contains(logResponse.Output, "[test/unit]") || strings.Contains(logResponse.Output, "[lint/vet]") {
+		t.Fatalf("dashboard log response = %#v", logResponse)
+	}
+	if _, err := control.RunLog(ctx, api.Actor{Identity: "agent@host"}, enqueued.ID, "test", "vet"); err == nil {
+		t.Fatal("log view served a burn/step pair that was never recorded")
+	}
+	if _, err := control.Run(ctx, api.Actor{Identity: "agent@host"}, "run-does-not-exist"); err == nil {
+		t.Fatal("run detail view served an unknown run")
+	}
+}
+
 func TestDefaultBranchUsesOrdinaryCIPublicationAndSync(t *testing.T) {
 	fixture := newControlFixture(t, JobResult{
 		Status: model.RunPassed, Phase: "passed", Steps: []model.StepResult{stepResult(model.StepPassed)},

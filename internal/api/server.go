@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"html"
 	"io"
 	"net/http"
 	"strconv"
@@ -37,6 +38,8 @@ type IssueFilter struct {
 
 type ViewService interface {
 	Runs(context.Context, Actor, int) (any, error)
+	Run(context.Context, Actor, string) (any, error)
+	RunLog(context.Context, Actor, string, string, string) (any, error)
 	Repositories(context.Context, Actor) (any, error)
 	Issues(context.Context, Actor, IssueFilter) (any, error)
 	Status(context.Context, Actor) (any, error)
@@ -88,17 +91,19 @@ func (server *Server) routes() {
 	})
 	server.mux.Handle("POST /mcp", server.requireAuth(http.HandlerFunc(server.handleMCP)))
 	server.mux.Handle("GET /api/runs", server.requireAuth(http.HandlerFunc(server.handleRuns)))
+	server.mux.Handle("GET /api/runs/{run}", server.requireAuth(http.HandlerFunc(server.handleRunDetail)))
+	server.mux.Handle("GET /api/runs/{run}/logs", server.requireAuth(http.HandlerFunc(server.handleRunLog)))
 	server.mux.Handle("GET /api/repos", server.requireAuth(http.HandlerFunc(server.handleRepos)))
 	server.mux.Handle("GET /api/issues", server.requireAuth(http.HandlerFunc(server.handleIssues)))
 	server.mux.Handle("GET /api/status", server.requireAuth(http.HandlerFunc(server.handleStatus)))
-	server.mux.HandleFunc("GET /assets/oberth.css", serveCSS)
-	server.mux.HandleFunc("GET /assets/oberth.js", serveJavaScript)
+	server.mux.HandleFunc("GET /assets/{asset...}", serveAsset)
 	server.mux.HandleFunc("GET /{$}", func(writer http.ResponseWriter, request *http.Request) {
 		http.Redirect(writer, request, "/runs", http.StatusTemporaryRedirect)
 	})
+	server.mux.HandleFunc("GET /runs/{run}", func(writer http.ResponseWriter, _ *http.Request) { server.servePage(writer, "runs") })
 	for _, path := range []string{"/runs", "/repos", "/issues", "/status"} {
-		path := path
-		server.mux.HandleFunc("GET "+path, func(writer http.ResponseWriter, _ *http.Request) { servePage(writer, strings.TrimPrefix(path, "/")) })
+		view := strings.TrimPrefix(path, "/")
+		server.mux.HandleFunc("GET "+path, func(writer http.ResponseWriter, _ *http.Request) { server.servePage(writer, view) })
 	}
 }
 
@@ -139,6 +144,35 @@ func actorFrom(ctx context.Context) Actor {
 func (server *Server) handleRuns(writer http.ResponseWriter, request *http.Request) {
 	value, err := server.views.Runs(request.Context(), actorFrom(request.Context()), queryLimit(request, 100, 500))
 	writeView(writer, value, err)
+}
+
+func (server *Server) handleRunDetail(writer http.ResponseWriter, request *http.Request) {
+	id := request.PathValue("run")
+	if !validRunSelector(id) {
+		writeJSON(writer, http.StatusBadRequest, map[string]string{"error": "invalid run ID"})
+		return
+	}
+	value, err := server.views.Run(request.Context(), actorFrom(request.Context()), id)
+	writeView(writer, value, err)
+}
+
+func (server *Server) handleRunLog(writer http.ResponseWriter, request *http.Request) {
+	id := request.PathValue("run")
+	query := request.URL.Query()
+	burn, step := query.Get("burn"), query.Get("step")
+	if !validRunSelector(id) || !validRunSelector(burn) || !validRunSelector(step) {
+		writeJSON(writer, http.StatusBadRequest, map[string]string{"error": "run ID plus burn and step query parameters are required"})
+		return
+	}
+	value, err := server.views.RunLog(request.Context(), actorFrom(request.Context()), id, burn, step)
+	writeView(writer, value, err)
+}
+
+// validRunSelector bounds dashboard path and query selectors before they reach
+// storage: non-empty, trimmed, single-line, and shorter than any legitimate
+// run ID, burn, or step name could ever be.
+func validRunSelector(value string) bool {
+	return value != "" && len(value) <= 200 && strings.TrimSpace(value) == value && !strings.ContainsAny(value, "\t\r\n")
 }
 
 func (server *Server) handleRepos(writer http.ResponseWriter, request *http.Request) {
@@ -232,20 +266,27 @@ func writeJSON(writer http.ResponseWriter, status int, value any) {
 	_ = json.NewEncoder(writer).Encode(value)
 }
 
-func servePage(writer http.ResponseWriter, view string) {
+// servePage writes the dashboard shell: server-rendered chrome (brand, tabs,
+// status segments) plus the embedded stylesheet and script. All dynamic state
+// is fetched by the script from the authenticated /api views with the
+// browser-held bearer token, so this shell exposes no repository or run data.
+func (server *Server) servePage(writer http.ResponseWriter, view string) {
 	writer.Header().Set("Content-Type", "text/html; charset=utf-8")
-	writer.Header().Set("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'")
-	_, _ = io.WriteString(writer, `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Oberth</title><link rel="stylesheet" href="/assets/oberth.css"></head><body><nav><strong>Oberth</strong><a href="/runs">Runs</a><a href="/repos">Repositories</a><a href="/issues">Issues</a><a href="/status">Status</a></nav><main data-view="`+view+`"><h1>`+strings.ToUpper(view[:1])+view[1:]+`</h1><form id="token-form"><label>Uplink token <input id="token" type="password" autocomplete="off"></label><button>Connect</button></form><p id="message">Enter an uplink token to load this view.</p><pre id="content" hidden></pre></main><script src="/assets/oberth.js" defer></script></body></html>`)
+	writer.Header().Set("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; font-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'")
+	_, _ = io.WriteString(writer, `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Oberth Dashboard</title><link rel="stylesheet" href="/assets/app.css"></head><body data-version="`+html.EscapeString(server.version)+`"><div class="app"><header class="top"><button class="brand" data-route="/runs"><span class="mark">[▲]</span><span>oberth</span><span id="brandSub" class="sub">/ dashboard</span></button><nav class="tabs"><button id="tabRuns" class="tab" data-route="/runs">runs</button><button id="tabRepos" class="tab" data-route="/repos">repos</button><button id="tabIssues" class="tab" data-route="/issues">issues</button><button id="tabStatus" class="tab" data-route="/status">status</button></nav><div class="top-right"><div class="top-status" aria-label="System status"><span class="status-segment backend" title="loading" aria-label="loading"><span id="connLed" class="led" aria-hidden="true"></span><span id="connText">api</span></span><span class="status-divider" aria-hidden="true"></span><span id="versionStatus" class="status-segment version-mode unknown" role="status" aria-live="polite"><span>oberth</span> <span id="verLabel" class="ver">...</span></span></div><button class="iconbtn" data-action="toggle-theme" title="Theme">T</button><button class="iconbtn" data-action="refresh" title="Refresh">R</button><button class="iconbtn" data-action="clear-token" title="Sign out">L</button></div></header><main id="app" class="main" data-view="`+view+`"><noscript><p>The Oberth dashboard requires JavaScript. The JSON views remain available at /api/runs, /api/repos, /api/issues, and /api/status with a bearer token.</p></noscript></main></div><dialog id="issueDialog" class="dlg" aria-labelledby="issueDialogTitle"><div class="dlg-shell"><header class="dlg-head"><h2 id="issueDialogTitle">Issue</h2><span id="issueDialogMeta" class="meta"></span><button class="dlg-close" data-action="close-issue" aria-label="Close issue details">×</button></header><div id="issueDialogContent" class="dlg-body"></div></div></dialog><script src="/assets/app.js" defer></script></body></html>`)
 }
 
-func serveCSS(writer http.ResponseWriter, _ *http.Request) {
-	writer.Header().Set("Content-Type", "text/css; charset=utf-8")
+// serveAsset serves the embedded dashboard assets with explicit content types
+// so nosniff never blocks them. The request name is only a key into the fixed
+// startup-materialized asset map: unknown names are 404s and no request value
+// ever reaches a filesystem read.
+func serveAsset(writer http.ResponseWriter, request *http.Request) {
+	asset, ok := staticAssets[request.PathValue("asset")]
+	if !ok {
+		http.NotFound(writer, request)
+		return
+	}
+	writer.Header().Set("Content-Type", asset.contentType)
 	writer.Header().Set("Cache-Control", "public, max-age=3600")
-	_, _ = io.WriteString(writer, `:root{color-scheme:dark;font:16px/1.5 system-ui,sans-serif;background:#0b1118;color:#e7edf4}body{max-width:1100px;margin:auto;padding:24px}nav{display:flex;gap:18px;align-items:center}nav strong{font-size:1.3rem;margin-right:auto}a{color:#8fd8b5}main{margin-top:36px}form{display:flex;gap:10px;align-items:end;background:#151e28;padding:16px;border-radius:10px}label{display:grid;gap:6px;flex:1}input,button{font:inherit;padding:9px;border-radius:6px;border:1px solid #405064;background:#0b1118;color:inherit}button{cursor:pointer;background:#174631}pre{white-space:pre-wrap;overflow:auto;background:#111923;padding:16px;border-radius:10px}`)
-}
-
-func serveJavaScript(writer http.ResponseWriter, _ *http.Request) {
-	writer.Header().Set("Content-Type", "text/javascript; charset=utf-8")
-	writer.Header().Set("Cache-Control", "public, max-age=3600")
-	_, _ = io.WriteString(writer, `"use strict";const main=document.querySelector("main[data-view]");const form=document.getElementById("token-form");const input=document.getElementById("token");const message=document.getElementById("message");const content=document.getElementById("content");const endpoint="/api/"+main.dataset.view;async function load(token){message.textContent="Loading…";content.hidden=true;try{const response=await fetch(endpoint,{headers:{Authorization:"Bearer "+token},cache:"no-store"});if(!response.ok){throw new Error(response.status===401?"Token rejected":"Request failed ("+response.status+")")}const body=await response.json();content.textContent=JSON.stringify(body,null,2);content.hidden=false;message.textContent=""}catch(error){message.textContent=error.message}}form.addEventListener("submit",event=>{event.preventDefault();const token=input.value;input.value="";load(token)});`)
+	_, _ = writer.Write(asset.body)
 }

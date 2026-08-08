@@ -270,6 +270,74 @@ func (service *API) Runs(ctx context.Context, _ api.Actor, limit int) (any, erro
 	return service.history.ListRecentRuns(ctx, model.RunListFilter{Limit: limit})
 }
 
+// Run is the read-only dashboard view of one exact run: the durable record,
+// its recorded step results, and the owning repository. Unlike the MCP status
+// tool it resolves by run ID, never renews an issue lock, and has no other
+// side effects, so an idle dashboard cannot hold agent coordination state.
+func (service *API) Run(ctx context.Context, _ api.Actor, id string) (any, error) {
+	if service.history == nil {
+		return nil, fmt.Errorf("%w: run history", ErrUnavailable)
+	}
+	if strings.TrimSpace(id) == "" {
+		return nil, fmt.Errorf("%w: run ID is required", ErrInvalidInput)
+	}
+	run, err := service.history.Run(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	steps, err := service.history.StepResults(ctx, run.ID)
+	if err != nil {
+		return nil, fmt.Errorf("load run steps: %w", err)
+	}
+	response := RunDetailResponse{Run: run, Steps: steps}
+	if service.repositories != nil {
+		repository, repositoryErr := service.repositories.Repository(ctx, run.RepoID)
+		if repositoryErr != nil && !errors.Is(repositoryErr, store.ErrNotFound) {
+			return nil, fmt.Errorf("load run repository: %w", repositoryErr)
+		}
+		if repositoryErr == nil {
+			response.Repository = repository
+		}
+	}
+	return response, nil
+}
+
+// RunLog is the read-only dashboard view of one recorded step's bounded
+// retained log. The burn and step must name an exactly recorded step result
+// for the run, so the dashboard can never probe the log store outside the
+// run's own indexed ranges.
+func (service *API) RunLog(ctx context.Context, _ api.Actor, id, burn, step string) (any, error) {
+	if service.logs == nil || service.history == nil {
+		return nil, fmt.Errorf("%w: logs", ErrUnavailable)
+	}
+	if strings.TrimSpace(id) == "" || strings.TrimSpace(burn) == "" || strings.TrimSpace(step) == "" {
+		return nil, fmt.Errorf("%w: run ID, burn, and step are required", ErrInvalidInput)
+	}
+	run, err := service.history.Run(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	steps, err := service.history.StepResults(ctx, run.ID)
+	if err != nil {
+		return nil, fmt.Errorf("load run steps: %w", err)
+	}
+	recorded := false
+	for _, result := range steps {
+		if result.Burn == burn && result.Step == step {
+			recorded = true
+			break
+		}
+	}
+	if !recorded {
+		return nil, fmt.Errorf("service: no log range for burn %q step %q", burn, step)
+	}
+	body, err := service.logs.Read(run.ID, burn, step)
+	if err != nil {
+		return nil, fmt.Errorf("read bounded run log: %w", err)
+	}
+	return LogResponse{RunID: run.ID, Burn: burn, Step: step, Output: string(body)}, nil
+}
+
 func (service *API) Repositories(ctx context.Context, _ api.Actor) (any, error) {
 	if service.repositories != nil {
 		return service.repositories.ListRepositories(ctx)

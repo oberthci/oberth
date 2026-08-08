@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"golang.org/x/crypto/ssh"
 )
 
 // GitSSHCommand returns the fixed, non-interactive SSH transport used for all
@@ -48,6 +50,32 @@ func GitSSHCommandPaths(privateKeyPath, knownHostsPath string) (string, error) {
 		quoted[index] = shellQuote(argument)
 	}
 	return strings.Join(quoted, " "), nil
+}
+
+// SSHPublicKeyFingerprint derives the SHA-256 public-key fingerprint of the
+// upstream Git identity for read-only display. Only the fingerprint of the
+// public half ever leaves this function; the private key bytes stay local and
+// an encrypted or missing key is simply an error.
+func SSHPublicKeyFingerprint(privateKeyPath string) (string, error) {
+	if err := validateOperatorFile(privateKeyPath, true); err != nil {
+		return "", fmt.Errorf("app: upstream private key: %w", err)
+	}
+	info, err := os.Stat(privateKeyPath)
+	if err != nil {
+		return "", fmt.Errorf("app: upstream private key: %w", err)
+	}
+	if info.Size() > 1<<20 {
+		return "", errors.New("app: upstream private key exceeds the 1 MiB bound")
+	}
+	body, err := os.ReadFile(privateKeyPath) // #nosec G304 -- validated operator-supplied identity path.
+	if err != nil {
+		return "", fmt.Errorf("app: read upstream private key: %w", err)
+	}
+	signer, err := ssh.ParsePrivateKey(body)
+	if err != nil {
+		return "", fmt.Errorf("app: parse upstream private key: %w", err)
+	}
+	return ssh.FingerprintSHA256(signer.PublicKey()), nil
 }
 
 func validateOperatorFile(path string, private bool) error {

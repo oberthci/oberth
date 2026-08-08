@@ -429,6 +429,34 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 		_, err := kube.Discovery().ServerVersion()
 		return err
 	}}
+	health.Version = version
+	health.Identity = func(ctx context.Context) (string, error) {
+		if err := ctx.Err(); err != nil {
+			return "", err
+		}
+		return app.SSHPublicKeyFingerprint(options.upstreamKey)
+	}
+	health.SecretStore = secretStoreStatus(options)
+	health.AuditChain = func(ctx context.Context) (app.AuditChainStatus, error) {
+		chain := app.AuditChainStatus{}
+		head, err := database.AuditHeadHint(ctx)
+		if err != nil {
+			return chain, err
+		}
+		chain.HeadID = head.ID
+		chain.HeadSHA256 = hex.EncodeToString(head.SHA256)
+		anchor, err := database.LatestAuditAnchor(ctx)
+		if err != nil {
+			if errors.Is(err, store.ErrNotFound) {
+				return chain, nil
+			}
+			return chain, err
+		}
+		chain.AnchorID = anchor.ID
+		chain.TSAURL = anchor.TSAURL
+		chain.AnchoredAt = anchor.AnchoredAt.UTC().Format(time.RFC3339)
+		return chain, nil
+	}
 	controlAPI, err := service.NewAPI(service.APIConfig{
 		Runs: database, History: database, Repositories: database, Issues: database,
 		Promotions: database, PromotionRuns: database, Enqueues: scheduler, Git: git,
@@ -953,6 +981,31 @@ func waitForAuditIntegrity(ctx context.Context, gate func(context.Context) error
 			return ctx.Err()
 		case <-ticker.C:
 		}
+	}
+}
+
+// secretStoreStatus summarizes the operator-supplied OpenBao configuration for
+// the read-only status view. Address, mount, and role are deployment
+// configuration already visible in the pod spec; no credential material is
+// ever included.
+func secretStoreStatus(options serveOptions) *app.SecretStoreStatus {
+	if options.secretStoreAddress == "" {
+		return &app.SecretStoreStatus{Configured: false}
+	}
+	transport := "https"
+	if strings.HasPrefix(options.secretStoreAddress, "http://") {
+		transport = "insecure-http"
+	}
+	mount := options.secretStoreAuthMount
+	if mount == "" {
+		mount = secretstore.DefaultAuthMountPath
+	}
+	return &app.SecretStoreStatus{
+		Configured: true,
+		Address:    options.secretStoreAddress,
+		AuthMount:  mount,
+		Role:       options.secretStoreRole,
+		Transport:  transport,
 	}
 }
 
