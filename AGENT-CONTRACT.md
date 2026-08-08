@@ -91,8 +91,8 @@ an implementation detail disagree.
   identity. Plaintext tokens are displayed once and are never persisted.
 - MCP exposes status, bounded named-step logs (`logs <sha> <step>`), wait, sync, promote,
   promote-status, and issue create/get/update/close/delete/list/lock operations.
-  This is the complete tool surface. `issue_create` takes only a title and text
-  and creates a workspace-global manual issue. Run selectors are resolved across
+  This is the complete tool surface. `issue_create` takes only a `title` and a
+  `body` and creates a workspace-global manual issue. Run selectors are resolved across
   repositories without a repository input. `issue_list` takes only an optional
   `before` cursor and returns CI and manual issue IDs/states in fixed pages of 50.
 
