@@ -89,7 +89,7 @@ func TestAdministrativeBootstrapRegistersUpstreamAndBoundToken(t *testing.T) {
 	var upstreamOutput bytes.Buffer
 	if err := runUpstreamWithDependencies(ctx, []string{
 		"add", "--database", databasePath, "--upstream-key", upstreamKeyPath, "--known-hosts", knownHostsPath,
-		"codeberg", "ssh://git@codeberg.org/cloudtaser",
+		"codeberg", "ssh://git@codeberg.org/acme",
 	}, &upstreamOutput, upstreamDependencies{
 		input:        strings.NewReader(""),
 		mutationGate: allowTestMutation,

@@ -54,8 +54,8 @@ ssh:
     existingSecret: ""
 
 upstream:
-  name: codeberg
-  baseURL: ssh://git@codeberg.org/cloudtaser
+  name: github
+  baseURL: ssh://git@github.com/your-org
   createSecrets: true
   keySecret: oberth-upstream-key
   keyFile: id_ed25519

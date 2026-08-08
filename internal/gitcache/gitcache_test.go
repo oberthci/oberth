@@ -29,7 +29,7 @@ func TestValidationAndProtocolAllowlist(t *testing.T) {
 			t.Fatalf("ValidateTag(%q) unexpectedly succeeded", value)
 		}
 	}
-	if repo, err := NormalizeRepo("/cloudtaser-cli.git"); err != nil || repo != "cloudtaser-cli" {
+	if repo, err := NormalizeRepo("/acme-cli.git"); err != nil || repo != "acme-cli" {
 		t.Fatalf("NormalizeRepo canonical path = %q, %v", repo, err)
 	}
 	for _, service := range []string{"git-upload-pack", "git-receive-pack"} {
@@ -41,8 +41,8 @@ func TestValidationAndProtocolAllowlist(t *testing.T) {
 		t.Fatal("non-Git service unexpectedly allowed")
 	}
 	for _, value := range []string{
-		"ssh://git@codeberg.org/cloudtaser/example.git",
-		"https://codeberg.org/cloudtaser/example.git",
+		"ssh://git@codeberg.org/acme/example.git",
+		"https://codeberg.org/acme/example.git",
 		filepath.Join(t.TempDir(), "upstream.git"),
 	} {
 		if err := ValidateUpstream(value); err != nil {
@@ -52,15 +52,15 @@ func TestValidationAndProtocolAllowlist(t *testing.T) {
 	for _, value := range []string{
 		"ext::sh -c id",
 		"file:///tmp/repo.git",
-		"git://codeberg.org/cloudtaser/example.git",
-		"http://codeberg.org/cloudtaser/example.git",
-		"https://token@codeberg.org/cloudtaser/example.git",
-		"ssh://git:password@codeberg.org/cloudtaser/example.git",
+		"git://codeberg.org/acme/example.git",
+		"http://codeberg.org/acme/example.git",
+		"https://token@codeberg.org/acme/example.git",
+		"ssh://git:password@codeberg.org/acme/example.git",
 		"--upload-pack=helper",
-		"ssh://git@codeberg.org/cloudtaser/example.git\n--config=x",
-		"ssh://git@codeberg.org/cloudtaser/example%0a.git",
-		"ssh://-oProxyCommand@codeberg.org/cloudtaser/example.git",
-		"ssh://git@codeberg.org/cloudtaser/%2e%2e/example.git",
+		"ssh://git@codeberg.org/acme/example.git\n--config=x",
+		"ssh://git@codeberg.org/acme/example%0a.git",
+		"ssh://-oProxyCommand@codeberg.org/acme/example.git",
+		"ssh://git@codeberg.org/acme/%2e%2e/example.git",
 	} {
 		if err := ValidateUpstream(value); err == nil {
 			t.Fatalf("ValidateUpstream(%q) unexpectedly succeeded", value)

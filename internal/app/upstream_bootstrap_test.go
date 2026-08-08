@@ -60,12 +60,12 @@ func TestProbeSSHCapabilityAuthenticatesAndRequestsWriteCommandWithoutUpdates(t 
 	knownHosts := []byte(knownhosts.Line([]string{address}, hostKey) + "\n")
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if err := ProbeSSHCapability(ctx, "ssh://git@"+address+"/cloudtaser", pem.EncodeToMemory(privateBlock), knownHosts); err != nil {
+	if err := ProbeSSHCapability(ctx, "ssh://git@"+address+"/acme", pem.EncodeToMemory(privateBlock), knownHosts); err != nil {
 		t.Fatal(err)
 	}
 	select {
 	case command := <-commands:
-		if command != "git-receive-pack '/cloudtaser/oberth.git'" {
+		if command != "git-receive-pack '/acme/oberth.git'" {
 			t.Fatalf("probe command = %q", command)
 		}
 	case <-ctx.Done():

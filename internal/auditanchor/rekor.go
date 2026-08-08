@@ -46,7 +46,10 @@ import (
 )
 
 const (
-	rekorRequestTimeout          = 15 * time.Second
+	rekorRequestTimeout = 15 * time.Second
+	// witnessKeyInfo is a compatibility-frozen HKDF info string: the derived
+	// witness identity of every deployment depends on it. Changing it orphans
+	// all previously published Rekor witness chains. Never rename in place.
 	witnessKeyInfo               = "cloudtaser-oberth-audit-witness-v1"
 	maximumRekorBody             = 1 << 20
 	witnessMetadataHost          = "audit-witness.oberth.invalid"

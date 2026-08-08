@@ -25,7 +25,7 @@ func baseConfig() Config {
 }
 
 func baseRequest() Request {
-	return Request{RunID: "r-0142", Repo: "cloudtaser-cli", Ref: "feature/test", SHA: strings.Repeat("a", 40)}
+	return Request{RunID: "r-0142", Repo: "acme-cli", Ref: "feature/test", SHA: strings.Repeat("a", 40)}
 }
 
 func testSecretSnapshot(request Request, secrets []ReleaseSecret) *SecretSnapshot {
@@ -231,7 +231,7 @@ func TestBuildIsolatesCachesByRepository(t *testing.T) {
 	}
 	secondRequest := baseRequest()
 	secondRequest.RunID = "r-0143"
-	secondRequest.Repo = "cloudtaser-beacon"
+	secondRequest.Repo = "acme-beacon"
 	second, err := Build(baseConfig(), secondRequest)
 	if err != nil {
 		t.Fatal(err)

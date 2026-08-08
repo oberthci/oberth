@@ -612,7 +612,7 @@ func TestCopyLogsRedactsEveryKnownValueAcrossReadBoundaries(t *testing.T) {
 func TestCopyLogsPublishesCurrentBurnAndStepFromChunkedLog(t *testing.T) {
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: "oberth-cloudtaser-cli-2d2f0986-pod", Namespace: "oberth", Labels: map[string]string{"oberth.ci/run": "run-1"},
+			Name: "oberth-acme-cli-2d2f0986-pod", Namespace: "oberth", Labels: map[string]string{"oberth.ci/run": "run-1"},
 		},
 		Status: corev1.PodStatus{Phase: corev1.PodSucceeded, ContainerStatuses: []corev1.ContainerStatus{{
 			Name: "run", State: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{ExitCode: 0}},
@@ -644,7 +644,7 @@ func TestCopyLogsPublishesCurrentBurnAndStepFromChunkedLog(t *testing.T) {
 func TestCopyLogsKeepsFailedStepWhenLaterStepsAreSkipped(t *testing.T) {
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: "oberth-cloudtaser-cli-2d2f0986-pod", Namespace: "oberth", Labels: map[string]string{"oberth.ci/run": "run-1"},
+			Name: "oberth-acme-cli-2d2f0986-pod", Namespace: "oberth", Labels: map[string]string{"oberth.ci/run": "run-1"},
 		},
 		Status: corev1.PodStatus{Phase: corev1.PodSucceeded, ContainerStatuses: []corev1.ContainerStatus{{
 			Name: "run", State: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{ExitCode: 1}},
@@ -670,7 +670,7 @@ func TestCopyLogsKeepsFailedStepWhenLaterStepsAreSkipped(t *testing.T) {
 func TestCopyLogsTreatsPodProgressPatchFailureAsBestEffort(t *testing.T) {
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: "oberth-cloudtaser-cli-2d2f0986-pod", Namespace: "oberth", Labels: map[string]string{"oberth.ci/run": "run-1"},
+			Name: "oberth-acme-cli-2d2f0986-pod", Namespace: "oberth", Labels: map[string]string{"oberth.ci/run": "run-1"},
 		},
 		Status: corev1.PodStatus{Phase: corev1.PodSucceeded, ContainerStatuses: []corev1.ContainerStatus{{
 			Name: "run", State: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{ExitCode: 0}},

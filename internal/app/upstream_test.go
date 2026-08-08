@@ -42,14 +42,14 @@ func TestUpstreamsUsesDurableRepositoryMapping(t *testing.T) {
 		repositories: map[string]model.Repository{"oberth": {Name: "oberth", UpstreamID: 2}},
 		upstreams: []model.Upstream{
 			{ID: 1, Name: "other", BaseURL: "ssh://git@example.invalid/other"},
-			{ID: 2, Name: "codeberg", BaseURL: "ssh://git@codeberg.org/cloudtaser"},
+			{ID: 2, Name: "codeberg", BaseURL: "ssh://git@codeberg.org/acme"},
 		},
 	}
 	remote, err := (Upstreams{Catalog: catalog}).Remote("oberth")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if remote != "ssh://git@codeberg.org/cloudtaser/oberth.git" {
+	if remote != "ssh://git@codeberg.org/acme/oberth.git" {
 		t.Fatalf("remote = %q", remote)
 	}
 }
@@ -86,15 +86,15 @@ func TestUpstreamsRejectsAmbiguousUnknownRepository(t *testing.T) {
 func TestValidateUpstreamBaseRejectsRepositoryAndCredentials(t *testing.T) {
 	t.Parallel()
 	for _, value := range []string{
-		"ssh://git@codeberg.org/cloudtaser/oberth.git",
-		"https://user:secret@example.invalid/cloudtaser",
-		"https://example.invalid/cloudtaser?token=secret",
+		"ssh://git@codeberg.org/acme/oberth.git",
+		"https://user:secret@example.invalid/acme",
+		"https://example.invalid/acme?token=secret",
 	} {
 		if err := ValidateUpstreamBase(value); err == nil {
 			t.Fatalf("base %q passed validation", value)
 		}
 	}
-	kind, err := UpstreamKind("ssh://git@codeberg.org/cloudtaser")
+	kind, err := UpstreamKind("ssh://git@codeberg.org/acme")
 	if err != nil || kind != "ssh" {
 		t.Fatalf("kind = %q, %v", kind, err)
 	}

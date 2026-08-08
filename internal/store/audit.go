@@ -124,6 +124,8 @@ VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)`, id, spec.Actor, spec.Action, spec.ResourceTy
 
 func auditActionSHA256(id int64, previous []byte, spec model.AuditActionSpec, createdAt int64) []byte {
 	digest := sha256.New()
+	// Compatibility-frozen domain-separation tag: changing it breaks hash-chain
+	// verification of every existing audit record. Never rename in place.
 	_, _ = digest.Write([]byte("cloudtaser-oberth-audit-v1\x00"))
 	writeAuditUint64(digest, uint64(id)) // #nosec G115 -- audit IDs are created as positive, monotonically increasing int64 values.
 	writeAuditBytes(digest, previous)

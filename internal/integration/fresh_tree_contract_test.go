@@ -131,7 +131,7 @@ func TestChartValidationIsClusterIndependent(t *testing.T) {
 		`--show-only templates/notes-contract.yaml`,
 		`--namespace="default"`,
 		`--upstream-key-secret="oberth-upstream-key"`,
-		`"codeberg" "ssh://git@codeberg.org/cloudtaser"`,
+		`"github" "ssh://git@github.com/your-org"`,
 		`oberth uplink add - operator@host < ~/.ssh/id_ed25519.pub`,
 		`--cacert "$OBERTH_TLS_CERT"`,
 		`--resolve "oberth:${OBERTH_HTTPS_PORT}:${OBERTH_NODE_IP}"`,

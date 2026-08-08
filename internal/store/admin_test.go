@@ -13,7 +13,7 @@ func TestAdministrativeRegistrationsAreAtomicWithAudit(t *testing.T) {
 	now := time.Date(2026, 8, 4, 21, 0, 0, 0, time.UTC)
 	database := testStore(t, &now)
 	upstream, err := database.RegisterUpstream(context.Background(), "admin@localhost", model.UpstreamSpec{
-		Name: "codeberg", Kind: "ssh", BaseURL: "ssh://git@codeberg.org/cloudtaser",
+		Name: "codeberg", Kind: "ssh", BaseURL: "ssh://git@codeberg.org/acme",
 	})
 	if err != nil {
 		t.Fatal(err)

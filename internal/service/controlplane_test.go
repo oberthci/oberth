@@ -1238,7 +1238,7 @@ func newControlFixture(t *testing.T, results ...JobResult) *controlFixture {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = database.Close() })
-	upstream, err := database.CreateUpstream(ctx, model.UpstreamSpec{Name: "codeberg", Kind: "ssh", BaseURL: "ssh://codeberg.org/cloudtaser"})
+	upstream, err := database.CreateUpstream(ctx, model.UpstreamSpec{Name: "codeberg", Kind: "ssh", BaseURL: "ssh://codeberg.org/acme"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1547,15 +1547,15 @@ func TestSchedulerCompletesSupersedeAndRestartCancellationObligations(t *testing
 func TestDeterministicJobNameExposesRepositoryAndDistinctRunIdentity(t *testing.T) {
 	firstRun := "2d2f0986" + strings.Repeat("a", 24)
 	secondRun := "2d2f0986" + strings.Repeat("b", 24)
-	first, err := deterministicJobName("CloudTaser_CLI", firstRun)
+	first, err := deterministicJobName("Acme_CLI", firstRun)
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := deterministicJobName("CloudTaser_CLI", secondRun)
+	second, err := deterministicJobName("Acme_CLI", secondRun)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if prefix := "oberth-cloudtaser-cli-2d2f0986-"; !strings.HasPrefix(first, prefix) || !strings.HasPrefix(second, prefix) {
+	if prefix := "oberth-acme-cli-2d2f0986-"; !strings.HasPrefix(first, prefix) || !strings.HasPrefix(second, prefix) {
 		t.Fatalf("Job names = %q and %q, want prefix %q", first, second, prefix)
 	}
 	if first == second || len(first) > 57 || len(second) > 57 {

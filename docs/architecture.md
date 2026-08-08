@@ -116,8 +116,9 @@ same CI and green-publication path as every other branch. Explicit promotion is
 available when an uplink wants Oberth to merge and prove a source against a
 chosen target; its required audit is durable before its CI run becomes claimable.
 
-The database retains immutable identity `cloudtaser-oberth-schema-v1` and a
-strict migration ledger. The schema builder can convert every populated
+The database retains the immutable identity `cloudtaser-oberth-schema-v1` (a
+compatibility-frozen legacy literal — renaming it would be a breaking schema
+migration for every existing deployment) and a strict migration ledger. The schema builder can convert every populated
 version-1 audit row into one gap-free SHA-256 chain inside a single immediate
 transaction; a malformed or missing historical row fails the conversion. The
 live daemon does not run that conversion: it copies the existing database and

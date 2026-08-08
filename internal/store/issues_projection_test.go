@@ -21,7 +21,7 @@ func projectionRepository(t *testing.T, database *Store) model.Repository {
 	t.Helper()
 	ctx := context.Background()
 	upstream, err := database.CreateUpstream(ctx, model.UpstreamSpec{
-		Name: "codeberg", Kind: "ssh", BaseURL: "ssh://codeberg.org/cloudtaser",
+		Name: "codeberg", Kind: "ssh", BaseURL: "ssh://codeberg.org/acme",
 	})
 	if err != nil {
 		t.Fatal(err)

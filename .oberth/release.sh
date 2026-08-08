@@ -134,7 +134,7 @@ build_artifacts() {
 			-o "$release_dir/$output.repro" ./cmd/oberth
 		cmp -s "$release_dir/$output" "$release_dir/$output.repro" || fail "$output is not reproducible"
 		rm -f -- "$release_dir/$output.repro"
-		go version -m "$release_dir/$output" | grep -Eq '^[[:space:]]*path[[:space:]]+go\.cloudtaser\.io/oberth/cmd/oberth$' || \
+		go version -m "$release_dir/$output" | grep -Eq '^[[:space:]]*path[[:space:]]+github\.com/oberthci/oberth/cmd/oberth$' || \
 			fail "$output does not identify the Oberth command module"
 	done
 

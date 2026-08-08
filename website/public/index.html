@@ -371,7 +371,7 @@ agent-02  feat/policy-engine    <span class="c-d">SUPERSEDED</span>    new push
 
   <div class="setup">
     <div class="code rv"><div class="code-h"><span>server <em>deploy + bootstrap identity</em></span><button class="cp">COPY</button></div><pre><span class="c-cm"># deploy — no Argo prerequisite, no CRDs</span>
-helm repo add oberth https://charts.oberth.ci
+helm repo add oberth https://charts.cloudtaser.io/oberth
 helm repo update
 helm upgrade --install oberth oberth/oberth \
   -n oberth --create-namespace
@@ -498,7 +498,7 @@ claude mcp add oberth -- oberth mcp \
   <div class="secno rv"><b>TRY /</b> Quickstart</div>
   <h2 class="rv">Three commands to a live gate.</h2>
   <p class="lead rv">Defaults are fine to start — single node, 10&nbsp;GiB PVC, three concurrent runs. Any Kubernetes works; a k3s box on your desk qualifies.</p>
-  <div class="code rv u-c44a83"><div class="code-h"><span>quickstart <em>server</em></span><button class="cp">COPY</button></div><pre>helm repo add oberth https://charts.oberth.ci
+  <div class="code rv u-c44a83"><div class="code-h"><span>quickstart <em>server</em></span><button class="cp">COPY</button></div><pre>helm repo add oberth https://charts.cloudtaser.io/oberth
 helm repo update
 helm upgrade --install oberth oberth/oberth \
   -n oberth --create-namespace

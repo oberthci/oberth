@@ -585,7 +585,7 @@ func TestAdminClientOpenDoesNotRecoverOwnerRuns(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	upstream, err := owner.CreateUpstream(ctx, model.UpstreamSpec{Name: "codeberg", Kind: "ssh", BaseURL: "ssh://codeberg.org/cloudtaser"})
+	upstream, err := owner.CreateUpstream(ctx, model.UpstreamSpec{Name: "codeberg", Kind: "ssh", BaseURL: "ssh://codeberg.org/acme"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1029,7 +1029,7 @@ func TestConcurrentStoreClientsDeduplicateReceivesAndSerializeEnqueue(t *testing
 		t.Fatal(err)
 	}
 	defer func() { _ = first.Close() }()
-	upstream, err := first.CreateUpstream(ctx, model.UpstreamSpec{Name: "codeberg", Kind: "ssh", BaseURL: "ssh://codeberg.org/cloudtaser"})
+	upstream, err := first.CreateUpstream(ctx, model.UpstreamSpec{Name: "codeberg", Kind: "ssh", BaseURL: "ssh://codeberg.org/acme"})
 	if err != nil {
 		t.Fatal(err)
 	}

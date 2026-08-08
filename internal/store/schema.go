@@ -8,7 +8,10 @@ type migration struct {
 
 const (
 	latestMigrationVersion = 2
-	oberthSchemaIdentity   = "cloudtaser-oberth-schema-v1"
+	// oberthSchemaIdentity is a compatibility-frozen opaque literal: every
+	// deployed database carries this exact identity row and a CHECK constraint
+	// on it. Renaming it is a breaking schema migration, not a string cleanup.
+	oberthSchemaIdentity = "cloudtaser-oberth-schema-v1"
 	createMigrationLedger  = `
 CREATE TABLE IF NOT EXISTS schema_migrations (
     version INTEGER PRIMARY KEY,

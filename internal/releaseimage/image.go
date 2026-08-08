@@ -231,7 +231,7 @@ func Repack(base v1.Image, kind Kind, architecture string, binary []byte, create
 	configFile.Architecture = architecture
 	configFile.OS = "linux"
 	configFile.Created = v1.Time{Time: created}
-	configFile.Author = "CloudTaser"
+	configFile.Author = "Oberth"
 	configFile.Config = definition.config
 	configFile.Config.Labels = map[string]string{
 		"org.opencontainers.image.created":  created.Format(time.RFC3339),

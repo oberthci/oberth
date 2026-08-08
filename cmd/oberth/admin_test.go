@@ -89,7 +89,7 @@ func TestUpstreamSecretMutationFailsClosedBeforePatch(t *testing.T) {
 		"add", "--database", databasePath,
 		"--upstream-key", filepath.Join(directory, "missing-key"),
 		"--known-hosts", filepath.Join(directory, "missing-hosts"),
-		"codeberg", "ssh://git@codeberg.org/cloudtaser",
+		"codeberg", "ssh://git@codeberg.org/acme",
 	}, io.Discard, upstreamDependencies{
 		input:            strings.NewReader("yes\nyes\n"),
 		kubernetesClient: func() (kubernetes.Interface, error) { return client, nil },
@@ -136,7 +136,7 @@ func TestUpstreamAddGeneratesConfirmsPersistsAndRecovers(t *testing.T) {
 		},
 		probe: func(_ context.Context, baseURL string, privateKey, knownHosts []byte) error {
 			probeCalls++
-			if baseURL != "ssh://git@codeberg.org/cloudtaser" || len(privateKey) == 0 || len(knownHosts) == 0 {
+			if baseURL != "ssh://git@codeberg.org/acme" || len(privateKey) == 0 || len(knownHosts) == 0 {
 				t.Fatalf("probe inputs: base=%q private=%d known_hosts=%d", baseURL, len(privateKey), len(knownHosts))
 			}
 			return probeErr
@@ -153,7 +153,7 @@ func TestUpstreamAddGeneratesConfirmsPersistsAndRecovers(t *testing.T) {
 		"--namespace", "ci",
 		"--upstream-key-secret", "custom-upstream-key",
 		"--known-hosts-secret", "custom-known-hosts",
-		"codeberg", "ssh://git@codeberg.org/cloudtaser",
+		"codeberg", "ssh://git@codeberg.org/acme",
 	}
 	var output bytes.Buffer
 	err := runUpstreamWithDependencies(ctx, arguments, &output, dependencies)
@@ -248,7 +248,7 @@ func TestUpstreamAddRequiresBothExplicitConfirmations(t *testing.T) {
 				"add", "--database", filepath.Join(directory, "oberth.sqlite"),
 				"--upstream-key", filepath.Join(directory, "missing-key"),
 				"--known-hosts", filepath.Join(directory, "missing-hosts"),
-				"codeberg", "ssh://git@codeberg.org/cloudtaser",
+				"codeberg", "ssh://git@codeberg.org/acme",
 			}, &output, upstreamDependencies{
 				input:            strings.NewReader(test.input),
 				mutationGate:     allowTestMutation,
@@ -297,7 +297,7 @@ func TestUpstreamAddUsesProvidedProjectedMaterialWithoutKubernetes(t *testing.T)
 	err := runUpstreamWithDependencies(context.Background(), []string{
 		"add", "--database", filepath.Join(directory, "oberth.sqlite"),
 		"--upstream-key", privatePath, "--known-hosts", knownHostsPath,
-		"codeberg", "ssh://git@codeberg.org/cloudtaser",
+		"codeberg", "ssh://git@codeberg.org/acme",
 	}, &output, upstreamDependencies{
 		input:        strings.NewReader(""),
 		mutationGate: allowTestMutation,
@@ -341,7 +341,7 @@ func TestUpstreamAddProjectedProbeFailureReadvertisesOnlyPublicKey(t *testing.T)
 	err := runUpstreamWithDependencies(context.Background(), []string{
 		"add", "--database", databasePath,
 		"--upstream-key", privatePath, "--known-hosts", knownHostsPath,
-		"codeberg", "ssh://git@codeberg.org/cloudtaser",
+		"codeberg", "ssh://git@codeberg.org/acme",
 	}, &output, upstreamDependencies{
 		input:        strings.NewReader(""),
 		mutationGate: allowTestMutation,
