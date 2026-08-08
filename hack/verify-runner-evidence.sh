@@ -127,7 +127,7 @@ test "$gate_sha" = "$(jq -er '.source.gateSHA256' "$receipt")" || \
 mkdir -p -- "$work_dir/context"
 tar -C "$repo_root" -cf "$work_dir/context.tar" -- \
   Dockerfile.runner Dockerfile.runner.dockerignore go.mod go.sum \
-  cmd/oberth-runner internal/runner pkg/periapsis
+  cmd/oberth-runner internal/gitoid internal/runner pkg/periapsis
 tar -C "$work_dir/context" -xf "$work_dir/context.tar"
 find "$work_dir/context" -type d -exec chmod 0755 {} +
 find "$work_dir/context" -type f -perm -0100 -exec chmod 0755 {} +
