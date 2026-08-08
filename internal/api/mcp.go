@@ -189,7 +189,7 @@ func toolDefinitions() []map[string]any {
 		tool("sync", "Park the exact SHA's corresponding WIP branch upstream without a green gate; this is not completion or promotion evidence.", object(map[string]any{"repo": stringProperty("Repository name when the SHA is ambiguous"), "sha": stringProperty("Full SHA")}, "sha")),
 		tool("promote", "Green-gate a SHA, merge it with the target branch, prove the resulting tree when needed, and push without force.", object(map[string]any{"repo": stringProperty("Repository name when the SHA is ambiguous"), "sha": stringProperty("Full SHA"), "branch": stringProperty("Target branch")}, "sha", "branch")),
 		tool("promote_status", "Wait for an append-only promotion record to become terminal.", object(map[string]any{"id": stringProperty("Promotion ID"), "timeout": timeoutProperty()}, "id")),
-		tool("issue_create", "Create a global manual issue.", object(map[string]any{"title": stringProperty("Issue title"), "text": stringProperty("Issue body")}, "title", "text")),
+		tool("issue_create", "Create a global manual issue.", object(map[string]any{"title": stringProperty("Issue title"), "body": stringProperty("Issue body")}, "title", "body")),
 		tool("issue_get", "Get an issue by ID.", object(map[string]any{"id": integerProperty("Issue ID")}, "id")),
 		tool("issue_update", "Update an issue title and body.", object(map[string]any{"id": integerProperty("Issue ID"), "title": stringProperty("Issue title"), "body": stringProperty("Issue body")}, "id", "title", "body")),
 		tool("issue_close", "Close an issue without deleting its history.", object(map[string]any{"id": integerProperty("Issue ID")}, "id")),

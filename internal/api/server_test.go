@@ -324,12 +324,12 @@ func TestIssueCreateRequiresOnlyFABArguments(t *testing.T) {
 			t.Fatalf("issue_create schema = %#v", definition["inputSchema"])
 		}
 		required, ok := schema["required"].([]string)
-		if !ok || !slices.Equal(required, []string{"title", "text"}) {
-			t.Fatalf("issue_create required fields = %#v, want exact title/text", schema["required"])
+		if !ok || !slices.Equal(required, []string{"title", "body"}) {
+			t.Fatalf("issue_create required fields = %#v, want exact title/body", schema["required"])
 		}
 		properties, ok := schema["properties"].(map[string]any)
 		if !ok || properties["repo"] != nil {
-			t.Fatalf("issue_create properties = %#v, want only FAB title/text", schema["properties"])
+			t.Fatalf("issue_create properties = %#v, want only FAB title/body", schema["properties"])
 		}
 		return
 	}
@@ -340,7 +340,7 @@ func TestMCPCreateIssueResponseContainsOnlyDurableID(t *testing.T) {
 	t.Parallel()
 	server, backend := testServer(t)
 	backend.toolResult = IssueCreateResponse{ID: 42}
-	body := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"issue_create","arguments":{"title":"follow up","text":"details"}}}`
+	body := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"issue_create","arguments":{"title":"follow up","body":"details"}}}`
 	request := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(body))
 	request.Header.Set("Authorization", "Bearer valid-token")
 	response := httptest.NewRecorder()

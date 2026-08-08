@@ -2964,7 +2964,7 @@ func TestIssueToolsListBothKindsAndUseActingIdentity(t *testing.T) {
 	service := fixture.api(t)
 	ctx := context.Background()
 	actor := api.Actor{Identity: "agent@host", Fingerprint: "SHA256:agent"}
-	createdValue, err := service.CallTool(ctx, actor, "issue_create", json.RawMessage(`{"title":"manual","text":"body"}`))
+	createdValue, err := service.CallTool(ctx, actor, "issue_create", json.RawMessage(`{"title":"manual","body":"body"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2976,11 +2976,11 @@ func TestIssueToolsListBothKindsAndUseActingIdentity(t *testing.T) {
 	if created.RepoID != 0 {
 		t.Fatalf("manual issue repository = %d, want workspace-global", created.RepoID)
 	}
-	if _, err := service.CallTool(ctx, actor, "issue_create", json.RawMessage(`{"repo":"oberth","title":"extra","text":"body"}`)); !errors.Is(err, ErrInvalidInput) {
+	if _, err := service.CallTool(ctx, actor, "issue_create", json.RawMessage(`{"repo":"oberth","title":"extra","body":"body"}`)); !errors.Is(err, ErrInvalidInput) {
 		t.Fatalf("non-FAB issue_create field error = %v", err)
 	}
-	if _, err := service.CallTool(ctx, actor, "issue_create", json.RawMessage(`{"title":"missing text"}`)); !errors.Is(err, ErrInvalidInput) {
-		t.Fatalf("missing issue text error = %v", err)
+	if _, err := service.CallTool(ctx, actor, "issue_create", json.RawMessage(`{"title":"missing body"}`)); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("missing issue body error = %v", err)
 	}
 	ciIssue, err := fixture.store.UpsertCIIssue(ctx, "runner@oberth", fixture.repo.ID, "feature/red", "CI red", "failed")
 	if err != nil {

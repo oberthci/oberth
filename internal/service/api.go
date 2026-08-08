@@ -172,15 +172,15 @@ func (service *API) CallTool(ctx context.Context, actor api.Actor, name string, 
 	case "issue_create":
 		var arguments struct {
 			Title string  `json:"title"`
-			Text  *string `json:"text"`
+			Body  *string `json:"body"`
 		}
 		if err := decodeTool(raw, &arguments); err != nil {
 			return nil, err
 		}
-		if arguments.Text == nil {
-			return nil, fmt.Errorf("%w: issue text is required", ErrInvalidInput)
+		if arguments.Body == nil {
+			return nil, fmt.Errorf("%w: issue body is required", ErrInvalidInput)
 		}
-		issue, err := service.issueCreate(ctx, actor, arguments.Title, *arguments.Text)
+		issue, err := service.issueCreate(ctx, actor, arguments.Title, *arguments.Body)
 		if err != nil {
 			return nil, err
 		}
