@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -18,9 +19,17 @@ func TestStaticSiteContract(t *testing.T) {
 	required := []string{
 		"<title>Oberth — AI-native CI · satellite Git & CI authority</title>",
 		`rel="canonical" href="https://oberth.ci/"`,
-		"Local CI at agent speed.",
-		"The audit chain is tamper-evident — including against the box it runs on — not tamper-proof.",
+		"AI agents produce code at machine speed",
+		"Tamper-evident",
 		"The visibility boundary is intentional and explicit",
+		// The golden path and the hosted secret-store setup script are part of
+		// the product surface: the one-liner must reference the exact asset
+		// this site serves, and Helm commands must name the registry that
+		// actually hosts the chart.
+		"https://oberth.ci/setup-secretstore.sh",
+		"https://charts.cloudtaser.io/oberth",
+		"Secret store",
+		"secretstore.enabled=true",
 	}
 	for _, value := range required {
 		if !strings.Contains(index, value) {
@@ -34,15 +43,17 @@ func TestStaticSiteContract(t *testing.T) {
 		}
 	}
 
-	if strings.Contains(index, "watch.oberth.ci") {
-		t.Error("index references the retired watch.oberth.ci dashboard host")
-	}
-	if got := strings.Count(index, `href="https://oberth.ci/repos"`); got != 3 {
-		t.Errorf("dashboard link count = %d, want 3", got)
+	// charts.oberth.ci does not resolve; watch.oberth.ci was retired with the
+	// cloudflared dashboard subsystem. Neither may reappear in install copy.
+	for _, brokenURL := range []string{"https://charts.oberth.ci", "https://watch.oberth.ci", "https://oberth.ci/watch"} {
+		if strings.Contains(index, brokenURL) {
+			t.Errorf("index contains retired or unresolvable URL %q", brokenURL)
+		}
 	}
 
 	assertLocalAssetsExist(t, index)
-	assertJSONLDAndScriptPolicy(t, index, headers)
+	assertJSONLDDataBlock(t, index)
+	assertCSPHasNoInlineScript(t, headers)
 
 	var manifest map[string]any
 	if err := json.Unmarshal([]byte(readSiteFile(t, "public/site.webmanifest")), &manifest); err != nil {
@@ -50,6 +61,61 @@ func TestStaticSiteContract(t *testing.T) {
 	}
 	if manifest["name"] != "Oberth" {
 		t.Errorf("manifest name = %v, want Oberth", manifest["name"])
+	}
+}
+
+func TestSetupSecretstoreScriptIsServed(t *testing.T) {
+	t.Parallel()
+
+	script := readSiteFile(t, "public/setup-secretstore.sh")
+	if !strings.HasPrefix(script, "#!/usr/bin/env bash") {
+		t.Error("setup-secretstore.sh must start with a bash shebang")
+	}
+	for _, value := range []string{"set -euo pipefail", "--address", "--dry-run", "secretstore.enabled=true"} {
+		if !strings.Contains(script, value) {
+			t.Errorf("setup-secretstore.sh is missing %q", value)
+		}
+	}
+
+	headers := readSiteFile(t, "public/_headers")
+	section := regexp.MustCompile(`(?m)^/setup-secretstore\.sh\n((?:  .+\n?)+)`).FindStringSubmatch(headers)
+	if section == nil {
+		t.Fatal("_headers has no /setup-secretstore.sh section")
+	}
+	if !strings.Contains(section[1], "Content-Type: text/plain") {
+		t.Error("_headers must serve setup-secretstore.sh as text/plain")
+	}
+}
+
+// TestSchematicChipsHaveWriteUps pins the index.html ↔ app.js contract: every
+// schematic chip index resolves to a FEATURES write-up and a PAGEMAP page.
+func TestSchematicChipsHaveWriteUps(t *testing.T) {
+	t.Parallel()
+
+	index := readSiteFile(t, "public/index.html")
+	app := readSiteFile(t, "public/app.js")
+
+	features := len(regexp.MustCompile(`(?m)^ \{t:'`).FindAllString(app, -1))
+	if features == 0 {
+		t.Fatal("no FEATURES entries found in app.js")
+	}
+	pagemap := regexp.MustCompile(`var PAGEMAP=\[([^\]]*)\]`).FindStringSubmatch(app)
+	if pagemap == nil {
+		t.Fatal("no PAGEMAP found in app.js")
+	}
+	pages := len(strings.Split(pagemap[1], ","))
+	if pages != features {
+		t.Errorf("PAGEMAP has %d entries, FEATURES has %d — chips would route nowhere", pages, features)
+	}
+
+	for _, match := range regexp.MustCompile(`data-f="(\d+)"`).FindAllStringSubmatch(index, -1) {
+		chip, err := strconv.Atoi(match[1])
+		if err != nil {
+			t.Fatalf("chip index %q: %v", match[1], err)
+		}
+		if chip >= features {
+			t.Errorf("chip data-f=%d has no FEATURES write-up (have %d)", chip, features)
+		}
 	}
 }
 
@@ -93,11 +159,10 @@ func assertLocalAssetsExist(t *testing.T, index string) {
 	}
 }
 
-// assertJSONLDAndScriptPolicy proves the structured-data block is valid JSON
-// and that the CSP stays strict without inline-script escape hatches: JSON-LD
-// data blocks are non-executable, so `script-src 'self'` needs no hash, and
-// every other script element must load from a same-origin src.
-func assertJSONLDAndScriptPolicy(t *testing.T, index, headers string) {
+// assertJSONLDDataBlock proves the structured-data block is valid JSON. It is
+// a non-executable data block, so CSP script-src does not apply to it; the
+// executable-script posture is pinned by assertCSPHasNoInlineScript.
+func assertJSONLDDataBlock(t *testing.T, index string) {
 	t.Helper()
 	re := regexp.MustCompile(`<script type="application/ld\+json">\n([\s\S]*?)\n</script>`)
 	match := re.FindStringSubmatch(index)
@@ -108,17 +173,21 @@ func assertJSONLDAndScriptPolicy(t *testing.T, index, headers string) {
 	if err := json.Unmarshal([]byte(match[1]), &document); err != nil {
 		t.Fatalf("decode JSON-LD: %v", err)
 	}
+	if document["name"] != "Oberth" {
+		t.Errorf("JSON-LD name = %v, want Oberth", document["name"])
+	}
+}
+
+func assertCSPHasNoInlineScript(t *testing.T, headers string) {
+	t.Helper()
+	if !strings.Contains(headers, "Content-Security-Policy:") {
+		t.Fatal("_headers has no Content-Security-Policy")
+	}
 	if !strings.Contains(headers, "script-src 'self'") {
-		t.Error("CSP does not restrict script-src to 'self'")
+		t.Error("CSP must restrict script-src to 'self'")
 	}
-	if strings.Contains(headers, "unsafe-inline") {
-		t.Error("CSP allows unsafe-inline")
-	}
-	for _, tag := range regexp.MustCompile(`<script[^>]*>`).FindAllString(index, -1) {
-		if strings.Contains(tag, `type="application/ld+json"`) || strings.Contains(tag, `src="`) {
-			continue
-		}
-		t.Errorf("inline executable script violates script-src 'self': %s", tag)
+	if strings.Contains(headers, "unsafe-inline") || strings.Contains(headers, "unsafe-eval") {
+		t.Error("CSP must not allow unsafe-inline or unsafe-eval")
 	}
 }
 

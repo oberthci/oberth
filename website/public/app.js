@@ -33,9 +33,12 @@ var FEATURES=[
   c:['<b>gate</b> ancestry from default branch','<b>mount</b> ReleaseSecrets ∩ allowlist','<b>logs</b> streaming redaction']},
  {t:'Audit chain, anchored outside',one:'SHA-256-chained history, timestamped and witnessed where the box itself can\u2019t rewrite it.',
   b:'Audit rows form a gap-free SHA-256 chain with the acting uplink on every mutation. Chain heads receive RFC 3161 timestamps from an independent TSA and are published as Rekor witnesses under a stable identity. Before each publication, an immutable Kubernetes intent record is created that Oberth can create, get and list — but never update, patch or delete. Rolling back the entire PVC with a stale-but-valid public prefix therefore <b>fails closed</b>: the system detects the rewritten history instead of forgetting it.',
-  c:['<b>TSA</b> Sectigo · RFC 3161 over HTTPS','<b>witness</b> Rekor, pinned by UUID','<b>rollback</b> detected, fail-closed']}
+  c:['<b>TSA</b> Sectigo · RFC 3161 over HTTPS','<b>witness</b> Rekor, pinned by UUID','<b>rollback</b> detected, fail-closed']},
+ {t:'Secret store release secrets',one:'Declared in one literal map, fetched from your OpenBao or Vault at release admission, delivered to build memory only — never etcd.',
+  b:'Point Oberth at your OpenBao or HashiCorp Vault and release pipelines get their credentials the way they should: fetched at release admission with the server’s own Kubernetes ServiceAccount identity — validated by TokenReview, with no code path that accepts a store admin token. Values travel over the Kubernetes exec stream into a memory-backed volume inside the running release Job — <code>$OBERTH_SECRETSTORE_DIR/&lt;name&gt;/&lt;key&gt;</code>, <code>0400</code>, tmpfs — never a Kubernetes Secret, never etcd, never a node disk, and every value is masked in the live log stream. Before the Job exists, Oberth logs in and reads every declared path: a missing secret, an unreachable store, or a path outside the administrator allowlist fails the release immediately, with the exact path in the error. Setup is one drift-guarded script — <code>curl -fsSL https://oberth.ci/setup-secretstore.sh | bash</code> — run next to your store; <code>oberth secretstore verify</code> proves the whole trust chain from inside the pod, no credentials needed.',
+  c:['<b>store</b> OpenBao · HashiCorp Vault','<b>tokens</b> read-only · 10-min TTL · revoked after fetch','<b>delivery</b> exec stream → tmpfs · masked logs','<b>branch builds</b> zero credentials']}
 ];
-var PAGEMAP=['setup','trust','pipeline','pipeline','pipeline','agents','agents','trust','trust'];
+var PAGEMAP=['setup','trust','pipeline','pipeline','pipeline','agents','agents','trust','trust','trust'];
 function layoutReturn(){
   var flow=document.getElementById('sflow');if(!flow)return;
   var agent=document.getElementById('agentNode'),issue=document.getElementById('issueChip');
@@ -663,8 +666,8 @@ mcpIO.observe(document.getElementById('mcpLog'));
 
 /* ---------- config tabs ---------- */
 var CFG={
- claude:{t:'.mcp.json',c:'{\n  <span class="c-s">"mcpServers"</span>: {\n    <span class="c-s">"oberth"</span>: {\n      <span class="c-s">"command"</span>: <span class="c-s">"oberth"</span>,\n      <span class="c-s">"args"</span>: [<span class="c-s">"mcp"</span>,\n        <span class="c-s">"--remote"</span>, <span class="c-s">"https://oberth.host:30443"</span>,\n        <span class="c-s">"--token-file"</span>, <span class="c-s">"~/.config/oberth/token"</span>]\n    }\n  }\n}'},
- codex:{t:'config.toml',c:'[mcp_servers.oberth]\ncommand = <span class="c-s">"oberth"</span>\nargs = [<span class="c-s">"mcp"</span>,\n        <span class="c-s">"--remote"</span>, <span class="c-s">"https://oberth.host:30443"</span>,\n        <span class="c-s">"--token-file"</span>, <span class="c-s">"~/.config/oberth/token"</span>]'}
+ claude:{t:'.claude/settings.json',c:'{\n  <span class="c-s">"mcpServers"</span>: {\n    <span class="c-s">"oberth"</span>: {\n      <span class="c-s">"type"</span>: <span class="c-s">"url"</span>,\n      <span class="c-s">"url"</span>: <span class="c-s">"https://oberth.host:30443/mcp"</span>,\n      <span class="c-s">"headers"</span>: {\n        <span class="c-s">"Authorization"</span>: <span class="c-s">"Bearer oberth_…"</span>\n      }\n    }\n  }\n}'},
+ codex:{t:'config.toml',c:'<span class="c-cm"># via the standard stdio→HTTP bridge</span>\n[mcp_servers.oberth]\ncommand = <span class="c-s">"npx"</span>\nargs = [<span class="c-s">"-y"</span>, <span class="c-s">"mcp-remote"</span>,\n        <span class="c-s">"https://oberth.host:30443/mcp"</span>,\n        <span class="c-s">"--header"</span>,\n        <span class="c-s">"Authorization: Bearer oberth_…"</span>]'}
 };
 document.querySelectorAll('.tab2').forEach(function(b){
   b.addEventListener('click',function(){

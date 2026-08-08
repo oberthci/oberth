@@ -178,6 +178,7 @@
       <div class="sgroup"><div class="gt">EGRESS</div>
         <button class="schip" data-f="6">Promote</button>
         <button class="schip" data-f="7">Release burns</button>
+        <button class="schip" data-f="9">Secret store</button>
       </div>
       <div class="slane grn"><span class="lbl">synced</span><i class="u-084650"></i><span class="ar">▶</span></div>
       <div class="snode" id="upstreamNode"><b>UPSTREAM</b><br><span class="rotor u-632ddf"><span class="rotor-in u-3e62f1"><span>github</span><span>codeberg</span><span>gitlab</span><span>github</span></span></span></div>
@@ -288,13 +289,14 @@ agent-02  feat/policy-engine    <span class="c-d">SUPERSEDED</span>    new push
         <button class="tab2 on" data-cfg="claude">Claude Code</button>
         <button class="tab2" data-cfg="codex">Codex</button>
       </div>
-      <div class="code rv u-acef09"><div class="code-h"><span id="cfgTitle">.mcp.json</span><button class="cp">COPY</button></div><pre id="cfgCode">{
+      <div class="code rv u-acef09"><div class="code-h"><span id="cfgTitle">.claude/settings.json</span><button class="cp">COPY</button></div><pre id="cfgCode">{
   <span class="c-s">"mcpServers"</span>: {
     <span class="c-s">"oberth"</span>: {
-      <span class="c-s">"command"</span>: <span class="c-s">"oberth"</span>,
-      <span class="c-s">"args"</span>: [<span class="c-s">"mcp"</span>,
-        <span class="c-s">"--remote"</span>, <span class="c-s">"https://oberth.host:30443"</span>,
-        <span class="c-s">"--token-file"</span>, <span class="c-s">"~/.config/oberth/token"</span>]
+      <span class="c-s">"type"</span>: <span class="c-s">"url"</span>,
+      <span class="c-s">"url"</span>: <span class="c-s">"https://oberth.host:30443/mcp"</span>,
+      <span class="c-s">"headers"</span>: {
+        <span class="c-s">"Authorization"</span>: <span class="c-s">"Bearer oberth_…"</span>
+      }
     }
   }
 }</pre></div>
@@ -369,6 +371,37 @@ agent-02  feat/policy-engine    <span class="c-d">SUPERSEDED</span>    new push
   <h2 class="rv">Deploy and use.</h2>
   <p class="lead rv">Server side: a Helm chart and two bootstrap commands. Client side: push. No signup flow, no dependency on Argo — a k3s box on your desk qualifies.</p>
 
+  <div class="code rv"><div class="code-h"><span>golden path <em>laptop to gated releases — five commands</em></span><button class="cp">COPY</button></div><pre><span class="c-cm"># 1 · any Kubernetes — a k3s box qualifies</span>
+curl -sfL https://get.k3s.io | sh -s - --disable=traefik
+
+<span class="c-cm"># 2 · a secret store — OpenBao (dev mode: evaluation only)</span>
+helm repo add openbao https://openbao.github.io/openbao-helm
+helm install openbao openbao/openbao -n openbao \
+  --create-namespace --set server.dev.enabled=true
+
+<span class="c-cm"># 3 · point your store at Oberth — one command,</span>
+<span class="c-cm">#     run where your bao/vault CLI is authenticated</span>
+curl -fsSL https://oberth.ci/setup-secretstore.sh | bash -s -- \
+  --address https://openbao.openbao.svc:8200 --namespace oberth
+
+<span class="c-cm"># 4 · Oberth itself</span>
+helm repo add oberth https://charts.cloudtaser.io/oberth
+helm install oberth oberth/oberth -n oberth \
+  --create-namespace --set secretstore.enabled=true
+
+<span class="c-cm"># 5 · connect your AI — MCP over HTTPS</span>
+<span class="c-cm">#     .claude/settings.json → mcpServers → oberth</span>
+<span class="c-cm">#     then bootstrap identity below, and push</span></pre></div>
+
+  <div class="fit rv">
+    <div class="lh">FIVE STEPS TO A GATED PUSH</div>
+    <div class="fitem"><span class="no">01</span><div><h4>Install</h4><p><code class="inline-c">helm upgrade --install oberth oberth/oberth</code> — one chart, one pod, no Argo, no CRDs. Live immediately; ready after bootstrap.</p></div></div>
+    <div class="fitem"><span class="no">02</span><div><h4>Connect your forge</h4><p><code class="inline-c">oberth upstream add codeberg ssh://git@codeberg.org/your-org</code> offers to mint a deploy key and prints it once — register it at your forge and Oberth fetches and caches repos on demand.</p></div></div>
+    <div class="fitem"><span class="no">03</span><div><h4>Register an agent</h4><p><code class="inline-c">oberth uplink add "&lt;public key&gt;" agent-07@runner</code> — one key, one identity, one bearer token, printed once and stored only as a SHA-256 digest.</p></div></div>
+    <div class="fitem"><span class="no">04</span><div><h4>Wire your secret store — optional</h4><p>One command next to your OpenBao or HashiCorp Vault: <code class="inline-c">curl -fsSL https://oberth.ci/setup-secretstore.sh | bash</code> — it enables Kubernetes auth, writes a read-only policy, binds a role to Oberth's ServiceAccount and prints the exact Helm values, without ever touching a token or a secret value. Then <code class="inline-c">oberth secretstore verify</code> proves the whole trust chain from inside the pod.</p></div></div>
+    <div class="fitem"><span class="no">05</span><div><h4>Push</h4><p><code class="inline-c">git push oberth feat/my-branch</code> — one Job, one verdict, one issue per red branch. Only green reaches your forge.</p></div></div>
+  </div>
+
   <div class="setup">
     <div class="code rv"><div class="code-h"><span>server <em>deploy + bootstrap identity</em></span><button class="cp">COPY</button></div><pre><span class="c-cm"># deploy — no Argo prerequisite, no CRDs</span>
 helm repo add oberth https://charts.cloudtaser.io/oberth
@@ -380,13 +413,14 @@ helm upgrade --install oberth oberth/oberth \
 <span class="c-cm"># 1 · connect your forge (offers to mint a key,</span>
 <span class="c-cm">#     stored in a K8s Secret, survives restarts)</span>
 kubectl exec -n oberth deploy/oberth -- \
-  oberth <span class="c-f">upstream add</span> codeberg.org
+  oberth <span class="c-f">upstream add</span> codeberg \
+  ssh://git@codeberg.org/your-org
 <span class="c-cm"># → add the printed key to your forge</span>
 
 <span class="c-cm"># 2 · register an agent or human key</span>
 kubectl exec -n oberth deploy/oberth -- \
   oberth <span class="c-f">uplink add</span> \
-  "$(cat ~/.ssh/id_ed25519.pub) <span class="c-y">agent-07@runner</span>"
+  "$(cat ~/.ssh/id_ed25519.pub)" <span class="c-y">agent-07@runner</span>
 <span class="c-cm"># → bearer token printed once · stored as sha256</span></pre></div>
     <div class="code rv d1"><div class="code-h"><span>client <em>start pushing</em></span><button class="cp">COPY</button></div><pre><span class="c-cm"># SSH on NodePort 30022 · HTTPS/MCP on 30443 (TLS 1.3,</span>
 <span class="c-cm"># pin the fingerprint uplink-add printed)</span>
@@ -398,9 +432,9 @@ git clone ssh://git@oberth.host:30022/myorg/payments-api
 git push oberth feat/my-branch
 
 <span class="c-cm"># wire the agent (MCP, 13 tools)</span>
-claude mcp add oberth -- oberth mcp \
-  --remote https://oberth.host:30443 \
-  --token-file ~/.config/oberth/token
+claude mcp add --transport http oberth \
+  https://oberth.host:30443/mcp \
+  --header "Authorization: Bearer $(cat ~/.config/oberth/token)"
 
 <span class="c-cm"># the loop from the agent's seat:</span>
 <span class="c-d">status feat/my-branch   → red · failed: build_arm64</span>
@@ -449,6 +483,7 @@ claude mcp add oberth -- oberth mcp \
         <div class="li rv"><span class="m ok">✓</span><span>Release admission: ancestry check + declared-secrets boundary</span></div>
         <div class="li rv"><span class="m ok">✓</span><span>All 13 MCP tools over authenticated streamable HTTP</span></div>
         <div class="li rv"><span class="m ok">✓</span><span>Audit chain + RFC 3161 + Rekor + rollback-external records</span></div>
+        <div class="li rv"><span class="m ok">✓</span><span>Secret-store release secrets from OpenBao/Vault — fetched at release admission, delivered to build memory only</span></div>
         <div class="li rv"><span class="m ok">✓</span><span>Dashboard pages: <code class="inline-c">/runs · /repos · /issues · /status</code></span></div>
       </div>
     </div>
@@ -465,14 +500,16 @@ claude mcp add oberth -- oberth mcp \
   </div>
 
   <div class="ledger rv">
-    <div class="ledger-h"><span>ACCEPTANCE LEDGER · UPDATED WITH EVERY MILESTONE</span><span>ALPHA</span></div>
+    <div class="ledger-h"><span>ACCEPTANCE LEDGER · UPDATED WITH EVERY MILESTONE</span><span>ALPHA · v0.10.51</span></div>
     <div class="led done"><span class="bx">[✓]</span><span>control plane deployed &amp; healthy — audit continuity verified across the schema transition</span></div>
     <div class="led done"><span class="bx">[✓]</span><span>lightweight digest-pinned runner live — the 542 MiB image is history</span></div>
     <div class="led done"><span class="bx">[✓]</span><span>live RFC 3161 receipts + Rekor witnesses verified</span></div>
     <div class="led done"><span class="bx">[✓]</span><span>13/13 MCP tool definitions verified over authenticated HTTP</span></div>
-    <div class="led todo"><span class="bx">[ ]</span><span>complete example flow recorded end-to-end: red → dedup/lock → green → publish → promote → tag</span></div>
-    <div class="led todo"><span class="bx">[ ]</span><span>first real component release through the corrected pipeline, proven downstream</span></div>
-    <div class="led todo"><span class="bx">[ ]</span><span>protected-main promotion proof on an exact fix SHA</span></div>
+    <div class="led done"><span class="bx">[✓]</span><span>complete example flow proven end-to-end: red → dedup/lock → green → publish → promote → tag</span></div>
+    <div class="led done"><span class="bx">[✓]</span><span>real releases through the pipeline, proven downstream — v0.10.51 chart, signed images, published binaries</span></div>
+    <div class="led done"><span class="bx">[✓]</span><span>promotion proofs on exact SHAs — fast-forward, divergent-merge and concurrent-race batteries green</span></div>
+    <div class="led done"><span class="bx">[✓]</span><span>187-scenario acceptance matrix executed on k3s, kind and k0s — zero product-blocking failures</span></div>
+    <div class="led done"><span class="bx">[✓]</span><span>secret-store release secrets live — pre-flight fetch, memory-only delivery, zero etcd</span></div>
   </div>
 
   <div class="friendly rv"><b>Friendly mode.</b> <span class="ink">Oberth is designed for your team and your trusted AI agents, not external collaborators.</span> The security model assumes trust within your uplink set: any token can promote, and release logs are readable by every uplink (mounted secret values are masked; your release scripts still shouldn't <span class="inline-c">set -x</span>). The audit chain is tamper-evident — including against the box it runs on — not tamper-proof. Need isolation for outsiders? Deploy them their own instance.</div>
@@ -487,7 +524,7 @@ claude mcp add oberth -- oberth mcp \
     <details class="qa"><summary>What runs when a branch is pushed? And a tag?<span class="pm">+</span></summary><div class="ans"><b>Branch push → CI burn:</b> one Job, FIFO-queued (default 3 concurrent), zero secrets, no ServiceAccount token, non-root, resource-limited. A newer push to the same branch supersedes the run. <b>Tag push → release burn</b>, only if the tag's commit is reachable from the default branch — with exactly the secrets your repo's literal <code>ReleaseSecrets</code> declares, intersected with the admin allowlist, snapshotted and masked in logs.</div></details>
     <details class="qa"><summary>Does an agent need an Oberth SDK?<span class="pm">+</span></summary><div class="ans">No. Standard Git is the base integration. For structured access there's a built-in MCP server with <b>13 tools</b> — status (by branch, because agents lose SHAs to context compaction), single-step logs, long-poll <code>wait</code>, red-tolerant <code>sync</code>, append-only <code>promote</code>, and an issue queue with uplink-owned locks. Claude Code and Codex work out of the box.</div></details>
     <details class="qa"><summary>What is public and what requires authentication?<span class="pm">+</span></summary><div class="ans">Status pages at oberth.ci — runs, repos, issues, upstream/cluster status — are public. Step logs, audit records, MCP and the JSON API require a bearer token tied to your uplink (stored server-side only as a SHA-256 digest). Git push requires an authorized SSH key. The visibility boundary is intentional and explicit.</div></details>
-    <details class="qa"><summary>Can I deploy my own instance?<span class="pm">+</span></summary><div class="ans">Yes — that's the intended shape. One Helm chart on any Kubernetes, including a single k3s machine. State lives on one PVC (SQLite, git cache, logs, workspaces) with a keep policy; identities live in K8s Secrets so pod restarts don't retrain your agents' <code>known_hosts</code>. <b>No external dependencies — not even Argo.</b> Oberth is proprietary, currently offered through the alpha pilot.</div></details>
+    <details class="qa"><summary>Can I deploy my own instance?<span class="pm">+</span></summary><div class="ans">Yes — that's the intended shape. One Helm chart on any Kubernetes, including a single k3s machine — the 187-scenario acceptance matrix runs green on k3s, kind and k0s. State lives on one PVC (SQLite, git cache, logs, workspaces) with a keep policy; identities live in K8s Secrets so pod restarts don't retrain your agents' <code>known_hosts</code>. <b>No external dependencies — not even Argo.</b> Oberth is proprietary, currently offered through the alpha pilot.</div></details>
   </div>
 </div></section>
 <div class="cta-mini"><div class="in"><div><div class="tx">Put your real agent workflow through the gate.</div><div class="sub">DIRECT ENGINEERING CONVERSATION · NO GENERIC SALES FUNNEL</div></div><a class="btn p" href="mailto:hello@oberth.ci?subject=Oberth%20alpha%20pilot">Join the pilot <span class="ar">→</span></a></div></div>
