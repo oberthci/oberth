@@ -75,6 +75,12 @@ func newMockVault(t *testing.T) *mockVault {
 		}
 		_, _ = writer.Write([]byte(`{"data":{"data":{},"metadata":{"deletion_time":"2026-08-08T00:00:00Z"}}}`))
 	})
+	handler.HandleFunc("GET /v1/ci/data/soft-deleted-null", func(writer http.ResponseWriter, request *http.Request) {
+		if !authenticated(writer, request) {
+			return
+		}
+		_, _ = writer.Write([]byte(`{"data":{"data":null,"metadata":{"deletion_time":"2026-08-08T00:00:00Z","version":3}}}`))
+	})
 	handler.HandleFunc("PUT /v1/auth/token/revoke-self", func(writer http.ResponseWriter, request *http.Request) {
 		if !authenticated(writer, request) {
 			return
@@ -144,7 +150,8 @@ func TestFetchKVFailsClosed(t *testing.T) {
 	}{
 		{name: "missing entry", path: "ci/data/does-not-exist", want: `secret store entry "ci/data/does-not-exist" is unavailable: not found`},
 		{name: "non-string value", path: "ci/data/broken", want: "must be a string value"},
-		{name: "deleted kv v2 entry", path: "ci/data/deleted", want: "deleted or has no data"},
+		{name: "deleted kv v2 entry", path: "ci/data/deleted", want: "secret path not found or deleted"},
+		{name: "soft-deleted null data", path: "ci/data/soft-deleted-null", want: "secret path not found or deleted"},
 		{name: "reserved path", path: "sys/raw/ci", want: "reserved"},
 	}
 	for _, test := range tests {

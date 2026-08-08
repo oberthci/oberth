@@ -230,10 +230,15 @@ func (client *Client) readKV(ctx context.Context, session *vaultapi.Client, path
 	}
 	data := response.Data
 	// KV v2 read responses nest the entry under "data" beside "metadata".
-	if inner, ok := data[kvDataField].(map[string]any); ok {
-		if _, hasMetadata := data[kvMetadataField].(map[string]any); hasMetadata {
-			if len(inner) == 0 {
-				return nil, 0, fmt.Errorf("secret store entry %q is unavailable: the entry is deleted or has no data", path)
+	// A soft-deleted entry returns data.data as null (nil interface) or an
+	// empty map; detect both shapes before falling through to the string
+	// iteration that would produce a confusing "must be a string value" error.
+	if _, hasMetadata := data[kvMetadataField].(map[string]any); hasMetadata {
+		rawData, hasDataKey := data[kvDataField]
+		if hasDataKey {
+			inner, isMap := rawData.(map[string]any)
+			if !isMap || len(inner) == 0 {
+				return nil, 0, fmt.Errorf("secret store entry %q is unavailable: secret path not found or deleted", path)
 			}
 			data = inner
 		}
