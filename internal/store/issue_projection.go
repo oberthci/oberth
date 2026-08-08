@@ -100,9 +100,13 @@ func projectRunIssue(ctx context.Context, tx *sql.Tx, run model.Run, failureTail
 	if phase == "" {
 		phase = "run"
 	}
+	title := fmt.Sprintf("CI red: %s — %s failed", work.Branch, phase)
+	if run.Status == model.RunInterrupted {
+		title = fmt.Sprintf("CI red: %s — interrupted", work.Branch)
+	}
 	projection := ciIssueProjection{
 		Work:       work,
-		Title:      fmt.Sprintf("CI red: %s — %s failed", work.Branch, phase),
+		Title:      title,
 		Body:       runIssueBody(run, failureTail),
 		Resolution: fmt.Sprintf("resolved by %s (run %s)", run.TestedSHA, run.ID),
 	}
@@ -114,10 +118,11 @@ func runIssueBody(run model.Run, failureTail string) string {
 	if sha == "" {
 		sha = strings.TrimSpace(run.SHA)
 	}
-	sections := []string{fmt.Sprintf(
-		"run %s, sha %s\nfailed: %s / %s",
-		run.ID, sha, run.FailedBurn, run.FailedStep,
-	)}
+	header := fmt.Sprintf("run %s, sha %s", run.ID, sha)
+	if burn, step := strings.TrimSpace(run.FailedBurn), strings.TrimSpace(run.FailedStep); burn != "" || step != "" {
+		header += fmt.Sprintf("\nfailed: %s / %s", burn, step)
+	}
+	sections := []string{header}
 	if runError := strings.TrimSpace(run.Error); runError != "" {
 		sections = append(sections, runError)
 	}
