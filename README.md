@@ -131,6 +131,61 @@ MCP client (full walkthrough in [docs/mcp-setup.md](docs/mcp-setup.md)):
    memory, every value is masked in logs, and the proven tag syncs upstream.
    Your own release pipelines take it from there.
 
+## The pipeline is a Go file
+
+`.oberth/periapsis.go` is what workflow YAML always wanted to be: burns and
+steps with real exit codes and named logs, in a language you can run locally
+before pushing. Tool installation is inline pipeline steps — fetch, pin,
+unpack — not a wrapper script. Every command is visible and auditable, each
+fetch gets its own named red/green, and version pins live in repository files
+next to the code that uses them:
+
+```go
+//go:build ignore
+
+package main
+
+import "oberth"
+
+// A release Job receives only these names, intersected with the
+// administrator allowlist. Branch CI receives nothing.
+var ReleaseSecrets = []string{"r2-upload-token", "cosign-secret"}
+
+// Fetched from your OpenBao/Vault at release admission, delivered to
+// build memory only. Statically parsed, never executed.
+var SecretStoreSecrets = map[string]string{
+	"r2-token": "oberth/data/r2-upload",
+}
+
+func Pipeline(ctx *oberth.Context) oberth.Pipeline {
+	return oberth.New().
+		Retrograde("setup",
+			oberth.Step{Name: "fetch-go", Command: "curl", Args: []string{
+				"-fsSL", "-o", "/tmp/go.tgz",
+				"https://go.dev/dl/go1.26.0.linux-amd64.tar.gz"}},
+			oberth.Step{Name: "pin-go", Command: "sha256sum",
+				Args: []string{"-c", ".oberth/pins/go.tgz.sha256"}},
+			oberth.Step{Name: "unpack-go", Command: "tar",
+				Args: []string{"-C", "/tmp/tools", "-xzf", "/tmp/go.tgz"}},
+		).
+		Retrograde("lint", ctx.Go.Vet("./...")).DependsOn("setup").
+		Retrograde("test",
+			ctx.Go.TestRace("./...").WithTimeout(45*oberth.Minute),
+		).DependsOn("lint").
+		Prograde("build", ctx.Go.Build("./cmd/...")).DependsOn("test").
+		Release("release", // tag-trigger only
+			oberth.Step{Name: "publish", Command: "go",
+				Args: []string{"run", "./release"}},
+		).
+		Build()
+}
+```
+
+Only the Job-side runner interprets this file — the server never executes
+repository-authored Go. Steps resolve commands from their own declared
+environment, never from the runner image's ambient `PATH`; a tool merely
+present in an execution image is never an implicit dependency.
+
 ## MCP tools (13)
 
 | Tool | Description |

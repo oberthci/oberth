@@ -224,23 +224,28 @@
     <div class="code rv"><div class="code-h"><span>.oberth/periapsis.go <em>excerpt</em></span><button class="cp">COPY</button></div><pre><span class="c-cm">// release burns get exactly these — nothing else, ever.</span>
 <span class="c-k">var</span> ReleaseSecrets = []<span class="c-f">string</span>{<span class="c-s">"r2-publisher"</span>, <span class="c-s">"cosign-key"</span>}
 
-<span class="c-k">func</span> <span class="c-f">Pipeline</span>(p *periapsis.P) {
-  setup := p.<span class="c-f">Burn</span>(<span class="c-s">"setup"</span>)
-  setup.<span class="c-f">Step</span>(<span class="c-s">"toolchain"</span>,        <span class="c-cm">// pinned + checksummed</span>
-    <span class="c-s">"./tools/install.sh go1.24.5 golangci-lint trivy"</span>)
-
-  ci := p.<span class="c-f">Burn</span>(<span class="c-s">"ci"</span>, setup)
-  ci.<span class="c-f">Step</span>(<span class="c-s">"lint"</span>,  <span class="c-s">"golangci-lint run ./..."</span>)
-  ci.<span class="c-f">Step</span>(<span class="c-s">"test"</span>,  <span class="c-s">"go test -race ./..."</span>).<span class="c-f">Timeout</span>(<span class="c-y">45</span>*time.Minute)
-  ci.<span class="c-f">Step</span>(<span class="c-s">"build"</span>, <span class="c-s">"go build ./cmd/..."</span>)
-
-  rel := p.<span class="c-f">ReleaseBurn</span>(<span class="c-s">"release"</span>, ci)  <span class="c-cm">// tag-trigger only</span>
-  rel.<span class="c-f">Step</span>(<span class="c-s">"publish"</span>, <span class="c-s">"./tools/publish.sh"</span>)
+<span class="c-k">func</span> <span class="c-f">Pipeline</span>(ctx *oberth.Context) oberth.Pipeline {
+  <span class="c-k">return</span> oberth.<span class="c-f">New</span>().
+    <span class="c-f">Retrograde</span>(<span class="c-s">"setup"</span>,  <span class="c-cm">// tools inline: fetch → pin → unpack.</span>
+                          <span class="c-cm">// no wrapper scripts, every command visible</span>
+      oberth.Step{Name: <span class="c-s">"fetch-go"</span>, Command: <span class="c-s">"curl"</span>, Args: []<span class="c-f">string</span>{
+        <span class="c-s">"-fsSL"</span>, <span class="c-s">"-o"</span>, <span class="c-s">"/tmp/go.tgz"</span>,
+        <span class="c-s">"https://go.dev/dl/go1.26.0.linux-amd64.tar.gz"</span>}},
+      oberth.Step{Name: <span class="c-s">"pin-go"</span>, Command: <span class="c-s">"sha256sum"</span>,
+        Args: []<span class="c-f">string</span>{<span class="c-s">"-c"</span>, <span class="c-s">".oberth/pins/go.tgz.sha256"</span>}},
+      oberth.Step{Name: <span class="c-s">"unpack-go"</span>, Command: <span class="c-s">"tar"</span>,
+        Args: []<span class="c-f">string</span>{<span class="c-s">"-C"</span>, <span class="c-s">"/tmp/tools"</span>, <span class="c-s">"-xzf"</span>, <span class="c-s">"/tmp/go.tgz"</span>}}).
+    <span class="c-f">Retrograde</span>(<span class="c-s">"lint"</span>, ctx.Go.<span class="c-f">Vet</span>(<span class="c-s">"./..."</span>)).<span class="c-f">DependsOn</span>(<span class="c-s">"setup"</span>).
+    <span class="c-f">Retrograde</span>(<span class="c-s">"test"</span>, ctx.Go.<span class="c-f">TestRace</span>(<span class="c-s">"./..."</span>).<span class="c-f">WithTimeout</span>(<span class="c-y">45</span>*oberth.Minute)).<span class="c-f">DependsOn</span>(<span class="c-s">"lint"</span>).
+    <span class="c-f">Prograde</span>(<span class="c-s">"build"</span>, ctx.Go.<span class="c-f">Build</span>(<span class="c-s">"./cmd/..."</span>)).<span class="c-f">DependsOn</span>(<span class="c-s">"test"</span>).
+    <span class="c-f">Release</span>(<span class="c-s">"release"</span>,  <span class="c-cm">// tag-trigger only</span>
+      oberth.Step{Name: <span class="c-s">"publish"</span>, Command: <span class="c-s">"go"</span>, Args: []<span class="c-f">string</span>{<span class="c-s">"run"</span>, <span class="c-s">"./release"</span>}}).
+    <span class="c-f">Build</span>()
 }</pre></div>
     <div>
       <div class="list u-926d3b">
         <div class="li rv"><span class="m ok">→</span><span><b>Steps are subprocesses, not containers.</b> One Job, one container; each step gets its own process group, exit code, bounded timeout (30 min default, overridable) and a named log slice you can fetch alone.</span></div>
-        <div class="li rv d1"><span class="m ok">→</span><span><b>Dependencies are declared, never ambient.</b> No workflow may rely on a tool merely existing in the runner image. Setup steps install pinned versions with SHA-256 checks; the runner resolves commands from the merged step <code class="inline-c">PATH</code>, never its own.</span></div>
+        <div class="li rv d1"><span class="m ok">→</span><span><b>Dependencies are declared, never ambient.</b> No workflow may rely on a tool merely existing in the runner image. Tools are fetched, pinned and unpacked by inline steps — no wrapper scripts, each fetch with its own SHA-256 check and named verdict; the runner resolves commands from the merged step <code class="inline-c">PATH</code>, never its own.</span></div>
         <div class="li rv d2"><span class="m ok">→</span><span><b>Caches accelerate, they don't decide.</b> Persistent Go caches are split by repository <i>and</i> trust tier — a poisoned branch build can't feed bytes into a signed release artifact.</span></div>
         <div class="li rv d3"><span class="m ok">→</span><span><b>A hung step can't wedge the queue.</b> Timed-out steps have their whole process group killed and joined; the outer Job deadline defaults to 12 hours; logs cap at 64 MiB with per-step byte ranges that survive pod reaping.</span></div>
       </div>
