@@ -886,6 +886,9 @@ func (jobs *completingJobs) Wait(_ context.Context, _ string, output io.Writer) 
 	return jobs.result, nil
 }
 func (*completingJobs) Delete(context.Context, string, string) error { return nil }
+func (*completingJobs) TerminalResult(context.Context, string) (JobResult, error) {
+	return JobResult{}, ErrJobNotTerminal
+}
 
 type mutableMutationGate struct {
 	mu  sync.RWMutex
@@ -948,6 +951,10 @@ func (jobs *createCancellationRaceJobs) Delete(context.Context, string, string) 
 	return nil
 }
 
+func (*createCancellationRaceJobs) TerminalResult(context.Context, string) (JobResult, error) {
+	return JobResult{}, ErrJobNotTerminal
+}
+
 type runReadFailStore struct {
 	*store.Store
 	failNextRun bool
@@ -1005,6 +1012,10 @@ func (jobs *blockingJobs) Delete(_ context.Context, name, _ string) error {
 	return nil
 }
 
+func (*blockingJobs) TerminalResult(context.Context, string) (JobResult, error) {
+	return JobResult{}, ErrJobNotTerminal
+}
+
 func (jobs *fakeJobs) CreateCI(_ context.Context, request JobRequest) error {
 	jobs.mu.Lock()
 	defer jobs.mu.Unlock()
@@ -1044,6 +1055,10 @@ func (jobs *fakeJobs) Delete(_ context.Context, name, _ string) error {
 	defer jobs.mu.Unlock()
 	jobs.deleted = append(jobs.deleted, name)
 	return nil
+}
+
+func (*fakeJobs) TerminalResult(context.Context, string) (JobResult, error) {
+	return JobResult{}, ErrJobNotTerminal
 }
 
 type controlFixture struct {

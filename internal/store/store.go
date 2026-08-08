@@ -789,6 +789,12 @@ ORDER BY queue_sequence`)
 		return fmt.Errorf("list active recovery runs: %w", err)
 	}
 	for _, active := range activeRuns {
+		if active.JobName != "" {
+			// Runs with a known Job name stay in "running" status so the
+			// scheduler's startup reconciliation can query K8s for their
+			// terminal state before deciding whether to interrupt.
+			continue
+		}
 		recovered, updateErr := scanRun(tx.QueryRowContext(ctx, `
 UPDATE runs
 SET status = 'interrupted', phase = 'interrupted', reason = 'oberth restarted',

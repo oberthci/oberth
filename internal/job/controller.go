@@ -1194,6 +1194,26 @@ func terminalJob(job *batchv1.Job) bool {
 	return false
 }
 
+// TerminalState checks whether a named Job has reached a terminal Kubernetes
+// state without blocking. Returns (completion, nil) when the Job is terminal;
+// nil when the Job does not exist or has not terminated. A non-nil error
+// alongside a non-nil completion means the Job's conditions were read but
+// pod-level details could not be extracted.
+func (controller *Controller) TerminalState(ctx context.Context, name string) (*Completion, error) {
+	current, err := controller.client.BatchV1().Jobs(controller.config.Namespace).Get(ctx, name, metav1.GetOptions{})
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("get Job %s terminal state: %w", name, err)
+	}
+	if !terminalJob(current) {
+		return nil, nil
+	}
+	completion, completionErr := controller.completion(ctx, current, "")
+	return &completion, completionErr
+}
+
 func (controller *Controller) completion(ctx context.Context, terminal *batchv1.Job, preferredPod string) (Completion, error) {
 	result := Completion{JobName: terminal.Name, PodName: preferredPod, ExitCode: -1}
 	for _, condition := range terminal.Status.Conditions {

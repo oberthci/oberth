@@ -249,6 +249,9 @@ func (scheduler *Scheduler) Run(ctx context.Context) error {
 		}
 		return err
 	}
+	if err := scheduler.reconcileStrandedRunsWithGate(workerCtx, scheduler.awaitMutation); err != nil {
+		return err
+	}
 	if err := scheduler.completePendingCancellationsWithGate(workerCtx, scheduler.awaitMutation); err != nil {
 		return err
 	}
@@ -462,12 +465,21 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 	if ctx.Err() != nil {
 		finalizeCtx, cancelFinalize = context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancelFinalize()
-		if deleteErr := scheduler.jobs.Delete(finalizeCtx, jobName, run.ID); deleteErr != nil {
-			_ = logFile.Close()
-			return fmt.Errorf("cancel Job %s during scheduler shutdown: %w", jobName, deleteErr)
+		// Check whether the Job already reached a terminal state before the
+		// scheduler stopped. A completed Job must record its real result, not
+		// a fabricated "interrupted."
+		if reconciled, termErr := scheduler.jobs.TerminalResult(finalizeCtx, jobName); termErr == nil {
+			jobResult = reconciled
+			waitErr = nil
+		} else {
+			// Job not terminal, absent, or state unreadable — delete and interrupt.
+			if deleteErr := scheduler.jobs.Delete(finalizeCtx, jobName, run.ID); deleteErr != nil {
+				_ = logFile.Close()
+				return fmt.Errorf("cancel Job %s during scheduler shutdown: %w", jobName, deleteErr)
+			}
+			jobResult = JobResult{Status: model.RunInterrupted, Phase: "interrupted", Error: "scheduler stopped"}
+			waitErr = nil
 		}
-		jobResult = JobResult{Status: model.RunInterrupted, Phase: "interrupted", Error: "scheduler stopped"}
-		waitErr = nil
 	}
 	closeErr := logFile.Close()
 	if closeErr != nil && waitErr == nil {
@@ -732,6 +744,116 @@ func (scheduler *Scheduler) finishInfrastructureFailure(ctx context.Context, run
 		if promotionErr != nil {
 			return errors.Join(failure, promotionErr)
 		}
+		scheduler.signals.NotifyPromotion(promotion.ID)
+	}
+	scheduler.signals.NotifyRun(run.ID)
+	return nil
+}
+
+// reconcileStrandedRunsWithGate queries K8s for runs that were in-flight when
+// the previous scheduler process stopped. Runs whose Jobs completed get their
+// real durable result; runs whose Jobs are absent or still active are
+// interrupted. This must run before completePendingCancellationsWithGate,
+// which would delete the K8s Jobs before their terminal state can be read.
+func (scheduler *Scheduler) reconcileStrandedRunsWithGate(ctx context.Context, require mutationRequirement) error {
+	if err := require(ctx); err != nil {
+		return err
+	}
+	runs, err := scheduler.store.RunningRunsWithJobs(ctx)
+	if err != nil {
+		return fmt.Errorf("load stranded runs for reconciliation: %w", err)
+	}
+	for _, run := range runs {
+		reconciled, termErr := scheduler.jobs.TerminalResult(ctx, run.JobName)
+		if termErr == nil {
+			if err := scheduler.finalizeReconciledRun(ctx, run, reconciled, require); err != nil {
+				return err
+			}
+		} else {
+			deleteCtx, cancelDelete := boundedWorkspaceCleanupContext(ctx)
+			_ = scheduler.jobs.Delete(deleteCtx, run.JobName, run.ID)
+			cancelDelete()
+			errMsg := "job not in terminal state at restart; result unrecoverable"
+			if !errors.Is(termErr, ErrJobNotTerminal) {
+				errMsg = fmt.Sprintf("job state unreadable at restart: %v", termErr)
+			}
+			if gateErr := require(ctx); gateErr != nil {
+				return gateErr
+			}
+			_, finishErr := scheduler.store.FinishRun(ctx, run.ID, model.RunResult{
+				Status: model.RunInterrupted, Phase: "interrupted", Error: errMsg,
+			})
+			if finishErr != nil && !errors.Is(finishErr, store.ErrInvalidState) {
+				return fmt.Errorf("interrupt stranded run %s: %w", run.ID, finishErr)
+			}
+			if run.Trigger == "promotion" {
+				if promotion, promotionErr := scheduler.store.PromotionByRun(ctx, run.ID); promotionErr == nil {
+					scheduler.signals.NotifyPromotion(promotion.ID)
+				}
+			}
+			scheduler.signals.NotifyRun(run.ID)
+		}
+		_ = scheduler.store.CompleteRunCancellation(ctx, run.ID, run.JobName)
+		cleanupCtx, cancelCleanup := boundedWorkspaceCleanupContext(ctx)
+		_ = scheduler.workspaces.cleanupRun(cleanupCtx, run.ID)
+		if run.Trigger == "promotion" {
+			if promotion, promotionErr := scheduler.store.PromotionByRun(cleanupCtx, run.ID); promotionErr == nil {
+				_ = scheduler.workspaces.cleanupPromotion(cleanupCtx, promotion.ID)
+			}
+		}
+		cancelCleanup()
+	}
+	return nil
+}
+
+// finalizeReconciledRun records the durable result of a K8s Job that completed
+// while the scheduler was not observing it. Passing runs are routed through
+// the publication path so promotion runs finalize correctly.
+func (scheduler *Scheduler) finalizeReconciledRun(ctx context.Context, run model.Run, jobResult JobResult, require mutationRequirement) error {
+	if err := require(ctx); err != nil {
+		return err
+	}
+	repository, err := scheduler.store.Repository(ctx, run.RepoID)
+	if err != nil {
+		return scheduler.finishInfrastructureFailure(ctx, run, model.Repository{}, fmt.Errorf("load reconciled run repository: %w", err))
+	}
+	if err := scheduler.persistSteps(ctx, run.ID, jobResult.Steps, runlog.Index{}); err != nil {
+		jobResult = JobResult{Status: model.RunFailed, Phase: "collect", Error: err.Error()}
+	}
+	promotion, promotionErr := scheduler.promotionForRun(ctx, run)
+	if promotionErr != nil {
+		jobResult = JobResult{Status: model.RunFailed, Phase: "promotion", Error: promotionErr.Error()}
+	}
+	if jobResult.Status == model.RunPassed {
+		if gateErr := require(ctx); gateErr != nil {
+			return gateErr
+		}
+		publication, beginErr := scheduler.beginRunPublication(ctx, repository, run, promotion)
+		if beginErr != nil {
+			jobResult.Status = model.RunFailed
+			jobResult.Phase = "publishing"
+			jobResult.Error = beginErr.Error()
+		} else {
+			_, deliveryErr := scheduler.deliverPublicationWithGate(ctx, publication.ID, require)
+			if deliveryErr != nil {
+				return fmt.Errorf("reconciled publication %s: %w", publication.ID, deliveryErr)
+			}
+			return nil
+		}
+	}
+	_, err = scheduler.store.FinishRun(ctx, run.ID, model.RunResult{
+		Status: jobResult.Status, Phase: jobResult.Phase,
+		FailedBurn: jobResult.FailedBurn, FailedStep: jobResult.FailedStep,
+		Error: jobResult.Error,
+	})
+	if errors.Is(err, store.ErrInvalidState) {
+		scheduler.signals.NotifyRun(run.ID)
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("finish reconciled run %s: %w", run.ID, err)
+	}
+	if promotion.ID != "" {
 		scheduler.signals.NotifyPromotion(promotion.ID)
 	}
 	scheduler.signals.NotifyRun(run.ID)

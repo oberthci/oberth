@@ -169,6 +169,36 @@ RETURNING `+runColumns, now, now))
 	return value, nil
 }
 
+// RunningRunsWithJobs returns runs in status "running" that have a known
+// deterministic Job name, excluding runs owned by a pending publication.
+// The scheduler uses this at startup to reconcile runs stranded by a crash.
+func (s *Store) RunningRunsWithJobs(ctx context.Context) ([]model.Run, error) {
+	rows, err := s.db.QueryContext(ctx, `
+SELECT `+runColumns+` FROM runs
+WHERE status = 'running' AND job_name != ''
+  AND NOT EXISTS (
+      SELECT 1 FROM publications
+      WHERE publications.run_id = runs.id AND publications.status = 'pending'
+  )
+ORDER BY queue_sequence`)
+	if err != nil {
+		return nil, fmt.Errorf("list running runs with jobs: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var runs []model.Run
+	for rows.Next() {
+		value, err := scanRun(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan running run with job: %w", err)
+		}
+		runs = append(runs, value)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list running runs with jobs: %w", err)
+	}
+	return runs, nil
+}
+
 func (s *Store) Run(ctx context.Context, id string) (model.Run, error) {
 	value, err := scanRun(s.db.QueryRowContext(ctx, `SELECT `+runColumns+` FROM runs WHERE id = ?`, id))
 	if err != nil {

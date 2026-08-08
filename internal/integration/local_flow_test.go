@@ -168,6 +168,10 @@ func (control *localJobControl) Cancel(_ context.Context, name, _ string) error 
 	return nil
 }
 
+func (*localJobControl) TerminalState(context.Context, string) (*job.Completion, error) {
+	return nil, nil
+}
+
 func (*localJobControl) SecretSnapshot(_ context.Context, jobName string, requested []string) (job.SecretSnapshot, error) {
 	if !slices.Equal(requested, []string{"local-release"}) {
 		return job.SecretSnapshot{}, fmt.Errorf("unexpected local release Secret request %v", requested)

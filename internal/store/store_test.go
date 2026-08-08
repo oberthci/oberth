@@ -566,8 +566,10 @@ func TestRestartRecoveryInterruptsRunningRuns(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if recovered.Status != model.RunInterrupted || recovered.FinishedAt == nil || recovered.FinishedAt.UnixNano() != now.UnixNano() {
-		t.Fatalf("recovered run = %#v", recovered)
+	// Runs with a known job_name stay in "running" after store recovery so the
+	// scheduler's startup reconciliation can query K8s for their terminal state.
+	if recovered.Status != model.RunRunning {
+		t.Fatalf("recovered run status = %q, want running (scheduler reconciles)", recovered.Status)
 	}
 	cancellations, err := s.PendingRunCancellations(ctx)
 	if err != nil {
@@ -575,6 +577,30 @@ func TestRestartRecoveryInterruptsRunningRuns(t *testing.T) {
 	}
 	if len(cancellations) != 1 || cancellations[0].RunID != run.ID || cancellations[0].JobName != "job-before-restart" || cancellations[0].Reason != "owner_restart" {
 		t.Fatalf("restart cancellations = %#v", cancellations)
+	}
+	// Runs without a job_name are still interrupted by store recovery.
+	noJobRun, err := s.EnqueueRun(ctx, testRunSpec(repo.ID, "feature/no-job", "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ClaimNextRun(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	now = now.Add(time.Minute)
+	s, err = Open(ctx, path, Options{Now: func() time.Time { return now }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	noJobRecovered, err := s.Run(ctx, noJobRun.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if noJobRecovered.Status != model.RunInterrupted || noJobRecovered.FinishedAt == nil {
+		t.Fatalf("no-job recovered run = %#v, want interrupted", noJobRecovered)
 	}
 }
 

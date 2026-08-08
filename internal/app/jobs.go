@@ -23,6 +23,7 @@ type jobControl interface {
 	Create(context.Context, job.Request) (string, error)
 	Wait(context.Context, string, string, io.Writer, [][]byte, []byte) (job.Completion, error)
 	Cancel(context.Context, string, string) error
+	TerminalState(context.Context, string) (*job.Completion, error)
 }
 
 type releaseSecretControl interface {
@@ -346,6 +347,56 @@ func (jobs *Jobs) forget(name, runID string) {
 		delete(jobs.intents, name)
 		current.zero()
 	}
+}
+
+// TerminalResult checks whether a named K8s Job has reached a terminal state
+// and maps its completion to a durable JobResult. It does not require an
+// in-process intent: the method reads the K8s API directly, making it safe to
+// call during startup reconciliation for Jobs created by a previous process.
+func (jobs *Jobs) TerminalResult(ctx context.Context, name string) (service.JobResult, error) {
+	completion, err := jobs.controller.TerminalState(ctx, name)
+	if completion == nil {
+		if err != nil {
+			return service.JobResult{}, err
+		}
+		return service.JobResult{}, service.ErrJobNotTerminal
+	}
+	result := service.JobResult{Status: model.RunFailed, Phase: "job"}
+	if completion.Succeeded && completion.ExitCode == 0 {
+		result.Status = model.RunPassed
+		result.Phase = "passed"
+		if len(completion.Summary) == 0 {
+			note := "reconciled without runner step evidence"
+			if err != nil {
+				note += ": " + err.Error()
+			}
+			result.Error = note
+		}
+	} else {
+		result.Error = humanizeJobReason(strings.TrimSpace(completion.Reason))
+		if result.Error == "" {
+			result.Error = fmt.Sprintf("runner exited with code %d", completion.ExitCode)
+		}
+	}
+	if len(completion.Summary) != 0 {
+		steps, stepsErr := decodeModelSteps(completion.Summary)
+		if stepsErr == nil && len(steps) > 0 {
+			result.Steps = steps
+			for _, step := range steps {
+				if step.Status == model.StepPassed || step.Status == model.StepSkipped {
+					continue
+				}
+				result.FailedBurn, result.FailedStep = step.Burn, step.Step
+				result.Phase = step.Burn
+			}
+		}
+	}
+	if result.Status == model.RunPassed && result.FailedStep != "" {
+		result.Status = model.RunFailed
+		result.Phase = result.FailedBurn
+		result.Error = "reconciled: successful Job reported a failed step"
+	}
+	return result, nil
 }
 
 // humanizeJobReason replaces raw Kubernetes Job condition reasons with

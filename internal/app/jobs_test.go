@@ -83,6 +83,10 @@ func (control *blockingReleaseControl) Cancel(_ context.Context, name, _ string)
 	return nil
 }
 
+func (*blockingReleaseControl) TerminalState(context.Context, string) (*job.Completion, error) {
+	return nil, nil
+}
+
 func (control *fakeJobControl) Create(_ context.Context, request job.Request) (string, error) {
 	control.requests = append(control.requests, request)
 	return request.JobName, nil
@@ -103,6 +107,10 @@ func (control *fakeJobControl) Wait(_ context.Context, name, _ string, _ io.Writ
 func (control *fakeJobControl) Cancel(_ context.Context, name, _ string) error {
 	control.canceledNames = append(control.canceledNames, name)
 	return nil
+}
+
+func (*fakeJobControl) TerminalState(context.Context, string) (*job.Completion, error) {
+	return nil, nil
 }
 
 func (control *fakeJobControl) SecretSnapshot(_ context.Context, jobName string, requested []string) (job.SecretSnapshot, error) {

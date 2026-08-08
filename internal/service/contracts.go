@@ -69,6 +69,7 @@ type RunQueueStore interface {
 	CompleteSupersededRunCancellationWithoutJob(context.Context, string) error
 	FinishRun(context.Context, string, model.RunResult) (model.Run, error)
 	PutStepResult(context.Context, model.StepResult) (model.StepResult, error)
+	RunningRunsWithJobs(context.Context) ([]model.Run, error)
 }
 
 type ReceiveRecorder interface {
@@ -242,10 +243,19 @@ type JobResult struct {
 	Steps      []model.StepResult
 }
 
+// ErrJobNotTerminal is returned by TerminalResult when the named Job has not
+// reached a terminal Kubernetes state (either absent or still active).
+var ErrJobNotTerminal = errors.New("service: job has not reached terminal state")
+
 type JobController interface {
 	CreateCI(context.Context, JobRequest) error
 	Wait(context.Context, string, io.Writer) (JobResult, error)
 	Delete(context.Context, string, string) error
+	// TerminalResult checks whether a named K8s Job has reached a terminal
+	// state. Returns (result, nil) when the Job completed or failed; returns
+	// (_, ErrJobNotTerminal) when the Job is absent or still active; returns
+	// (_, err) on transient API failure.
+	TerminalResult(context.Context, string) (JobResult, error)
 }
 
 type ReleaseJobController interface {

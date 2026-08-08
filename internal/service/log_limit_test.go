@@ -34,6 +34,9 @@ type overflowingJobs struct{}
 
 func (overflowingJobs) CreateCI(context.Context, JobRequest) error   { return nil }
 func (overflowingJobs) Delete(context.Context, string, string) error { return nil }
+func (overflowingJobs) TerminalResult(context.Context, string) (JobResult, error) {
+	return JobResult{}, ErrJobNotTerminal
+}
 func (overflowingJobs) Wait(_ context.Context, _ string, destination io.Writer) (JobResult, error) {
 	_, err := io.WriteString(destination, "[test/unit] "+strings.Repeat("x", 128)+"\n")
 	return JobResult{Status: model.RunPassed, Phase: "passed"}, err
