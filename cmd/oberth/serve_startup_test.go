@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/oberthci/oberth/internal/auditanchor"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
 )
@@ -360,6 +361,55 @@ func TestOpenStartupDatabaseLeavesRejectedExistingStateByteExact(t *testing.T) {
 		if _, ok := before[suffix]; !ok {
 			t.Fatalf("authoritative SQLite file %q appeared before continuity approval", suffix)
 		}
+	}
+}
+
+func TestOpenStartupDatabasePropagatesWitnessUnavailableWithIntactDatabase(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "oberth.sqlite")
+	database, err := store.CreateGenesis(ctx, path, store.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.AppendAuditAction(ctx, model.AuditActionSpec{
+		Actor: "agent@host", Action: "test", ResourceType: "startup", ResourceID: "rekor-down",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+	rekorErr := fmt.Errorf("audit anchor: startup recover external witness history: %w: search Rekor: connection refused", auditanchor.ErrWitnessUnavailable)
+	opened, err := openStartupDatabase(ctx, path, &staticStartupContinuity{}, witnessChainReset{}, func(inspection *store.Store) error {
+		// Local verification passes; only external witness recovery fails.
+		if _, verifyErr := inspection.VerifyAuditState(ctx); verifyErr != nil {
+			t.Fatalf("local verification should pass: %v", verifyErr)
+		}
+		return rekorErr
+	})
+	if opened != nil {
+		_ = opened.Close()
+	}
+	if !errors.Is(err, auditanchor.ErrWitnessUnavailable) {
+		t.Fatalf("error = %v, want wrapped ErrWitnessUnavailable", err)
+	}
+	// The database should be safe to reopen: local integrity was verified
+	// before the external witness recovery failed.
+	reopened, err := store.OpenCurrent(ctx, path, store.Options{})
+	if err != nil {
+		t.Fatalf("reopen after deferred witness recovery: %v", err)
+	}
+	head, err := reopened.VerifyAuditState(ctx)
+	if err != nil {
+		_ = reopened.Close()
+		t.Fatalf("verify audit state after reopen: %v", err)
+	}
+	if head.ID != 1 {
+		_ = reopened.Close()
+		t.Fatalf("reopened audit head ID = %d, want 1", head.ID)
+	}
+	if err := reopened.Close(); err != nil {
+		t.Fatal(err)
 	}
 }
 

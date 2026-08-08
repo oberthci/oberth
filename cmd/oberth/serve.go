@@ -272,6 +272,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 		reset.acknowledgedTip = acknowledged
 		reset.chain = rekorWitness
 	}
+	witnessRecoveryDeferred := false
 	database, err := openStartupDatabase(ctx, options.database, continuity, reset, func(inspection *store.Store) error {
 		verifier, managerErr := auditanchor.NewManager(auditanchor.ManagerConfig{
 			Store: inspection, Authority: tsaClient, Witness: rekorWitness, Continuity: continuity,
@@ -283,7 +284,18 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 		return verifier.VerifyStartup(ctx)
 	})
 	if err != nil {
-		return err
+		// A witness chain reset requires Rekor to verify the acknowledgment;
+		// deferring recovery in that case would violate the operator's explicit
+		// intent, so only the normal startup path enters degraded mode.
+		if !errors.Is(err, auditanchor.ErrWitnessUnavailable) || options.acceptWitnessChainReset != "" {
+			return err
+		}
+		logger.Printf("WARNING: audit witness recovery deferred: Rekor unavailable at startup: %v", err)
+		witnessRecoveryDeferred = true
+		database, err = store.OpenCurrent(ctx, options.database, store.Options{})
+		if err != nil {
+			return fmt.Errorf("open database after deferred witness recovery: %w", err)
+		}
 	}
 	closed := false
 	closeDatabase := func() error {
@@ -301,8 +313,18 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 	if err != nil {
 		return err
 	}
-	if err := anchors.Initialize(ctx); err != nil {
-		return fmt.Errorf("initialize verified audit continuity: %w", err)
+	if !witnessRecoveryDeferred {
+		if err := anchors.Initialize(ctx); err != nil {
+			if !errors.Is(err, auditanchor.ErrWitnessUnavailable) {
+				return fmt.Errorf("initialize verified audit continuity: %w", err)
+			}
+			logger.Printf("WARNING: audit anchor initialization deferred: Rekor unavailable: %v", err)
+			witnessRecoveryDeferred = true
+		}
+	}
+	if witnessRecoveryDeferred {
+		logger.Printf("WARNING: pod alive (liveness passes) but not ready (readiness blocked, mutations gated)")
+		logger.Printf("WARNING: background audit anchor cycle will restore readiness when Rekor becomes available")
 	}
 
 	sshCommand, err := app.GitSSHCommandPaths(options.upstreamKey, options.knownHosts)

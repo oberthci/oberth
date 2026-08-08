@@ -1114,3 +1114,71 @@ func TestManagerRejectsRollbackAcrossPrePublicationIntentCrash(t *testing.T) {
 		t.Fatalf("pre-publication intent rollback error = %v", err)
 	}
 }
+
+func TestManagerRecoversDegradedStartupWhenWitnessBecomeAvailable(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, 8, 8, 10, 0, 0, 0, time.UTC)
+	database, err := store.OpenAdminClient(ctx, filepath.Join(t.TempDir(), "oberth.sqlite"), store.Options{Now: func() time.Time { return now }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = database.Close() }()
+	external := &fakeWitness{now: &now}
+	external.historyErr = fmt.Errorf("%w: Rekor offline", ErrWitnessUnavailable)
+	manager, err := NewManager(ManagerConfig{
+		Store: database, Authority: &fakeAuthority{now: &now}, Witness: external, Continuity: newTestContinuity(t),
+		Interval: 10 * time.Minute, MaxAge: 30 * time.Minute, Now: func() time.Time { return now },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Simulate degraded startup: Initialize fails because Rekor is unavailable.
+	if err := manager.Initialize(ctx); !errors.Is(err, ErrWitnessUnavailable) {
+		t.Fatalf("initialize during Rekor outage error = %v, want wrapped ErrWitnessUnavailable", err)
+	}
+	// The Manager's Run cycle will retry. Simulate Rekor becoming available.
+	external.historyErr = nil
+	manager.cycle(ctx)
+	if err := manager.Ready(ctx); err != nil {
+		t.Fatalf("readiness after Rekor recovery: %v", err)
+	}
+	if err := manager.AllowMutation(ctx); err != nil {
+		t.Fatalf("mutation gate after Rekor recovery: %v", err)
+	}
+}
+
+func TestManagerDegradedStartupBlocksMutationsUntilRecovery(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, 8, 8, 10, 5, 0, 0, time.UTC)
+	database, err := store.OpenAdminClient(ctx, filepath.Join(t.TempDir(), "oberth.sqlite"), store.Options{Now: func() time.Time { return now }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = database.Close() }()
+	external := &fakeWitness{now: &now}
+	external.historyErr = fmt.Errorf("%w: Rekor offline", ErrWitnessUnavailable)
+	manager, err := NewManager(ManagerConfig{
+		Store: database, Authority: &fakeAuthority{now: &now}, Witness: external, Continuity: newTestContinuity(t),
+		Interval: 10 * time.Minute, MaxAge: 30 * time.Minute, Now: func() time.Time { return now },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Skip Initialize (degraded startup path in serve.go).
+	// The Manager has never completed a cycle, so Ready and AllowMutation must fail.
+	if err := manager.Ready(ctx); err == nil {
+		t.Fatal("readiness should fail before any successful cycle")
+	}
+	if err := manager.AllowMutation(ctx); err == nil {
+		t.Fatal("mutation gate should block before any successful cycle")
+	}
+	// Simulate Rekor recovery and a successful cycle.
+	external.historyErr = nil
+	manager.cycle(ctx)
+	if err := manager.Ready(ctx); err != nil {
+		t.Fatalf("readiness after recovery cycle: %v", err)
+	}
+	if err := manager.AllowMutation(ctx); err != nil {
+		t.Fatalf("mutation gate after recovery cycle: %v", err)
+	}
+}
