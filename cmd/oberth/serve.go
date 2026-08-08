@@ -98,6 +98,8 @@ type serveOptions struct {
 	auditTSAURL             string
 	auditRekorURL           string
 	auditTSARoots           string
+	auditRekorCA            string
+	auditTSACA              string
 	auditAnchorInterval     time.Duration
 	auditAnchorMaxAge       time.Duration
 	acceptWitnessChainReset string
@@ -153,6 +155,8 @@ func parseServeOptions(arguments []string) (serveOptions, error) {
 	flags.StringVar(&options.auditTSAURL, "audit-tsa-url", "https://timestamp.sectigo.com/rfc3161", "RFC 3161 timestamp authority HTTPS URL")
 	flags.StringVar(&options.auditRekorURL, "audit-rekor-url", "https://rekor.sigstore.dev", "Rekor transparency log URL")
 	flags.StringVar(&options.auditTSARoots, "audit-tsa-roots", "", "optional PEM file containing pinned TSA trust roots")
+	flags.StringVar(&options.auditRekorCA, "audit-rekor-ca", "", "optional PEM file pinning the Rekor HTTPS TLS trust anchors")
+	flags.StringVar(&options.auditTSACA, "audit-tsa-ca", "", "optional PEM file pinning the TSA HTTPS TLS trust anchors")
 	flags.DurationVar(&options.auditAnchorInterval, "audit-anchor-interval", 10*time.Minute, "external audit checkpoint interval")
 	flags.DurationVar(&options.auditAnchorMaxAge, "audit-anchor-max-age", 30*time.Minute, "maximum checkpoint age allowed by readiness")
 	flags.StringVar(&options.acceptWitnessChainReset, "accept-witness-chain-reset", "",
@@ -195,6 +199,12 @@ func validateServeOptions(options serveOptions) error {
 	}
 	if options.auditTSARoots != "" && (!filepath.IsAbs(options.auditTSARoots) || filepath.Clean(options.auditTSARoots) != options.auditTSARoots) {
 		return errors.New("serve: audit TSA roots must be a clean absolute path")
+	}
+	if options.auditRekorCA != "" && (!filepath.IsAbs(options.auditRekorCA) || filepath.Clean(options.auditRekorCA) != options.auditRekorCA) {
+		return errors.New("serve: audit Rekor CA certificate must be a clean absolute path")
+	}
+	if options.auditTSACA != "" && (!filepath.IsAbs(options.auditTSACA) || filepath.Clean(options.auditTSACA) != options.auditTSACA) {
+		return errors.New("serve: audit TSA CA certificate must be a clean absolute path")
 	}
 	if options.acceptWitnessChainReset != "" && !witnessChainResetUUIDPattern.MatchString(options.acceptWitnessChainReset) {
 		return errors.New("serve: accept-witness-chain-reset must be the exact Rekor UUID (64 or 80 lowercase hex characters) of the latest published witness")
@@ -255,11 +265,19 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 	if err != nil {
 		return err
 	}
-	tsaClient, err := auditanchor.NewClient(auditanchor.ClientConfig{Endpoint: options.auditTSAURL, Roots: tsaRoots})
+	rekorCACert, err := loadOptionalCACert(options.auditRekorCA)
+	if err != nil {
+		return fmt.Errorf("load Rekor CA certificate: %w", err)
+	}
+	tsaCACert, err := loadOptionalCACert(options.auditTSACA)
+	if err != nil {
+		return fmt.Errorf("load TSA CA certificate: %w", err)
+	}
+	tsaClient, err := auditanchor.NewClient(auditanchor.ClientConfig{Endpoint: options.auditTSAURL, Roots: tsaRoots, TLSCACert: tsaCACert})
 	if err != nil {
 		return err
 	}
-	rekorWitness, err := auditanchor.NewRekorWitness(ctx, options.auditRekorURL, hostKey)
+	rekorWitness, err := auditanchor.NewRekorWitness(ctx, options.auditRekorURL, hostKey, rekorCACert)
 	if err != nil {
 		return err
 	}
