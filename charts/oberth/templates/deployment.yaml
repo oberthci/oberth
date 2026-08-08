@@ -104,6 +104,12 @@ spec:
             {{- if .Values.auditAnchor.rootsSecret }}
             - --audit-tsa-roots=/etc/oberth/audit-tsa/{{ .Values.auditAnchor.rootsKey }}
             {{- end }}
+            {{- if .Values.auditAnchor.rekorCA }}
+            - --audit-rekor-ca=/etc/oberth/audit-rekor-ca/ca.crt
+            {{- end }}
+            {{- if .Values.auditAnchor.tsaCA }}
+            - --audit-tsa-ca=/etc/oberth/audit-tsa-ca/ca.crt
+            {{- end }}
             {{- if .Values.auditAnchor.acceptWitnessChainReset }}
             - --accept-witness-chain-reset={{ .Values.auditAnchor.acceptWitnessChainReset }}
             {{- end }}
@@ -183,6 +189,16 @@ spec:
               mountPath: /etc/oberth/audit-tsa
               readOnly: true
             {{- end }}
+            {{- if .Values.auditAnchor.rekorCA }}
+            - name: audit-rekor-ca
+              mountPath: /etc/oberth/audit-rekor-ca
+              readOnly: true
+            {{- end }}
+            {{- if .Values.auditAnchor.tsaCA }}
+            - name: audit-tsa-ca
+              mountPath: /etc/oberth/audit-tsa-ca
+              readOnly: true
+            {{- end }}
             {{- if and .Values.secretstore.enabled .Values.secretstore.caCert }}
             - name: secretstore-ca
               mountPath: /etc/oberth/secretstore-ca
@@ -224,6 +240,16 @@ spec:
             items:
               - key: {{ .Values.auditAnchor.rootsKey }}
                 path: {{ .Values.auditAnchor.rootsKey }}
+        {{- end }}
+        {{- if .Values.auditAnchor.rekorCA }}
+        - name: audit-rekor-ca
+          configMap:
+            name: {{ include "oberth.fullname" . }}-audit-rekor-ca
+        {{- end }}
+        {{- if .Values.auditAnchor.tsaCA }}
+        - name: audit-tsa-ca
+          configMap:
+            name: {{ include "oberth.fullname" . }}-audit-tsa-ca
         {{- end }}
         {{- if and .Values.secretstore.enabled .Values.secretstore.caCert }}
         - name: secretstore-ca

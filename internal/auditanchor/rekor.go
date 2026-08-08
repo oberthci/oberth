@@ -9,6 +9,7 @@ import (
 	"crypto/hkdf"
 	cryptorand "crypto/rand"
 	"crypto/sha256"
+	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/base64"
@@ -84,13 +85,27 @@ func (signer witnessCertificateSigner) Sign(_ io.Reader, digest []byte, options 
 	return signer.private.Sign(nil, digest, options)
 }
 
-func NewRekorWitness(ctx context.Context, endpoint string, hostKeyMaterial []byte) (*RekorWitness, error) {
+// NewRekorWitness creates a Rekor transparency log witness backed by the
+// given endpoint and derived from the persistent SSH host key material.
+// When tlsCACert is non-nil it pins the TLS trust anchors for the Rekor
+// HTTPS connection, enabling self-hosted or air-gapped Rekor deployments
+// behind a private CA.
+func NewRekorWitness(ctx context.Context, endpoint string, hostKeyMaterial []byte, tlsCACert *x509.CertPool) (*RekorWitness, error) {
 	parsed, err := url.ParseRequestURI(endpoint)
 	if err != nil || parsed.Host == "" || parsed.Scheme != "https" || parsed.User != nil || parsed.Fragment != "" {
 		return nil, errors.New("audit anchor: Rekor endpoint must be an absolute HTTPS URL without credentials or a fragment")
 	}
-	client, err := rekorclient.GetRekorClient(parsed.String(),
-		rekorclient.WithUserAgent("oberth-audit-witness"), rekorclient.WithRetryCount(2))
+	clientOpts := []rekorclient.Option{
+		rekorclient.WithUserAgent("oberth-audit-witness"),
+		rekorclient.WithRetryCount(2),
+	}
+	if tlsCACert != nil {
+		clientOpts = append(clientOpts, rekorclient.WithTLSConfig(&tls.Config{
+			MinVersion: tls.VersionTLS13,
+			RootCAs:    tlsCACert,
+		}))
+	}
+	client, err := rekorclient.GetRekorClient(parsed.String(), clientOpts...)
 	if err != nil {
 		return nil, fmt.Errorf("audit anchor: create Rekor client: %w", err)
 	}

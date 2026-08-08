@@ -1038,6 +1038,24 @@ func loadTSARoots(path string) (*x509.CertPool, error) {
 	return roots, nil
 }
 
+// loadOptionalCACert loads a PEM-encoded CA certificate bundle for pinning an
+// HTTPS connection's TLS trust anchors. Returns nil when the path is empty,
+// indicating the system trust store should be used.
+func loadOptionalCACert(path string) (*x509.CertPool, error) {
+	if path == "" {
+		return nil, nil
+	}
+	body, err := readBoundedFile(path, 4<<20)
+	if err != nil {
+		return nil, err
+	}
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM(body) {
+		return nil, fmt.Errorf("%s: PEM file contains no certificates", path)
+	}
+	return pool, nil
+}
+
 func readBoundedFile(path string, maximum int64) ([]byte, error) {
 	// #nosec G304 -- the operator explicitly supplies this in-pod identity path.
 	file, err := os.Open(path)

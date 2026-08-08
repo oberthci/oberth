@@ -8,6 +8,7 @@ import (
 	"crypto"
 	cryptorand "crypto/rand"
 	"crypto/sha256"
+	"crypto/tls"
 	"crypto/x509"
 	"encoding/asn1"
 	"errors"
@@ -43,6 +44,7 @@ var ErrAuthorityUnavailable = errors.New("audit anchor: timestamp authority unav
 type ClientConfig struct {
 	Endpoint        string
 	Roots           *x509.CertPool
+	TLSCACert       *x509.CertPool // optional TLS trust anchors for the TSA HTTPS connection
 	HTTPClient      *http.Client
 	Now             func() time.Time
 	MaxResponseSize int64
@@ -68,7 +70,16 @@ func NewClient(config ClientConfig) (*Client, error) {
 		return nil, errors.New("audit anchor: TSA trust roots are required")
 	}
 	if config.HTTPClient == nil {
-		config.HTTPClient = &http.Client{Timeout: defaultHTTPTimeout}
+		httpClient := &http.Client{Timeout: defaultHTTPTimeout}
+		if config.TLSCACert != nil {
+			httpClient.Transport = &http.Transport{
+				TLSClientConfig: &tls.Config{
+					MinVersion: tls.VersionTLS13,
+					RootCAs:    config.TLSCACert,
+				},
+			}
+		}
+		config.HTTPClient = httpClient
 	}
 	httpClient := *config.HTTPClient
 	httpClient.CheckRedirect = func(*http.Request, []*http.Request) error {

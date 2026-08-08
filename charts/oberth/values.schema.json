@@ -51,6 +51,8 @@
         "maxAge",
         "rootsSecret",
         "rootsKey",
+        "rekorCA",
+        "tsaCA",
         "acceptWitnessChainReset"
       ],
       "properties": {
@@ -75,6 +77,14 @@
         },
         "rootsKey": {
           "$ref": "#/definitions/secretDataKey"
+        },
+        "rekorCA": {
+          "type": "string",
+          "description": "Optional PEM bundle pinning the Rekor HTTPS TLS trust anchors (public material, delivered via ConfigMap)."
+        },
+        "tsaCA": {
+          "type": "string",
+          "description": "Optional PEM bundle pinning the TSA HTTPS TLS trust anchors (public material, delivered via ConfigMap)."
         },
         "acceptWitnessChainReset": {
           "type": "string",

@@ -16,6 +16,14 @@ auditAnchor:
   maxAge: 30m
   rootsSecret: ""
   rootsKey: roots.pem
+  # Optional PEM bundle pinning the Rekor HTTPS TLS trust anchors. Public CA
+  # material, delivered via ConfigMap. Enables self-hosted or air-gapped Rekor
+  # deployments behind a private CA. When empty the system trust store is used.
+  rekorCA: ""
+  # Optional PEM bundle pinning the TSA HTTPS TLS trust anchors. Public CA
+  # material, delivered via ConfigMap. Enables self-hosted or air-gapped TSA
+  # deployments behind a private CA. When empty the system trust store is used.
+  tsaCA: ""
   # One-shot operator acknowledgment for reinstalling with an SSH host key that
   # already has published Rekor witnesses but no surviving local state. Set to
   # the exact Rekor UUID of the LATEST witness entry to permanently abandon that
