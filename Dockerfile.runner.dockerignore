@@ -6,6 +6,8 @@
 !cmd/oberth-runner/
 !cmd/oberth-runner/**
 !internal/
+!internal/gitoid/
+!internal/gitoid/**
 !internal/runner/
 !internal/runner/**
 !pkg/
