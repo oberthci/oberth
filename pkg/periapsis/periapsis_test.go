@@ -155,9 +155,9 @@ func TestBuilderBuildReturnsDeepCopy(t *testing.T) {
 
 func TestValidateAndOrderBurns(t *testing.T) {
 	pipeline := Pipeline{Burns: []Burn{
-		{Name: "build", Type: Prograde, DependsOn: []string{"test"}, Steps: []Step{{Name: "build", Command: "true"}}},
-		{Name: "lint", Type: Retrograde, Steps: []Step{{Name: "lint", Command: "true"}}},
-		{Name: "test", Type: Retrograde, DependsOn: []string{"lint"}, Steps: []Step{{Name: "test", Command: "true"}}},
+		{Name: "build", Type: Prograde, DependsOn: []string{"test"}, Steps: []Step{{Name: "build", Command: "true", Args: []string{"build"}}}},
+		{Name: "lint", Type: Retrograde, Steps: []Step{{Name: "lint", Command: "true", Args: []string{"lint"}}}},
+		{Name: "test", Type: Retrograde, DependsOn: []string{"lint"}, Steps: []Step{{Name: "test", Command: "true", Args: []string{"test"}}}},
 	}}
 	ordered, err := OrderedBurns(pipeline)
 	if err != nil {
@@ -208,6 +208,16 @@ func TestValidateRejectsUnsafeAndAmbiguousDefinitions(t *testing.T) {
 			}},
 			want: "cannot depend on release burn",
 		},
+		{
+			// The #797 defect class: burns named for different platforms whose
+			// steps are byte-identical native builds.
+			name: "identical invocation across burns in one class",
+			p: Pipeline{Burns: []Burn{
+				{Name: "build-amd64", Type: Prograde, Steps: []Step{(&GoSDK{}).Build(".")}},
+				{Name: "build-darwin-arm64", Type: Prograde, Steps: []Step{(&GoSDK{}).Build(".")}},
+			}},
+			want: "identical command, arguments, and environment",
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -216,6 +226,75 @@ func TestValidateRejectsUnsafeAndAmbiguousDefinitions(t *testing.T) {
 				t.Fatalf("Validate() error = %v, want %q", err, test.want)
 			}
 		})
+	}
+}
+
+func TestValidateStepIdentityScopes(t *testing.T) {
+	sdk := &GoSDK{}
+	t.Run("cross-compile targets are distinct", func(t *testing.T) {
+		pipeline := Pipeline{Burns: []Burn{
+			{Name: "build-amd64", Type: Prograde, Steps: []Step{sdk.BuildFor("linux", "amd64", ".")}},
+			{Name: "build-arm64", Type: Prograde, Steps: []Step{sdk.BuildFor("linux", "arm64", ".")}},
+			{Name: "build-darwin-arm64", Type: Prograde, Steps: []Step{sdk.BuildFor("darwin", "arm64", ".")}},
+		}}
+		if err := Validate(pipeline); err != nil {
+			t.Fatalf("BuildFor pipeline rejected: %v", err)
+		}
+	})
+	t.Run("WithEnv differentiation is sufficient", func(t *testing.T) {
+		pipeline := Pipeline{Burns: []Burn{
+			{Name: "build-amd64", Type: Prograde, Steps: []Step{sdk.Build(".").WithEnv("GOARCH", "amd64")}},
+			{Name: "build-arm64", Type: Prograde, Steps: []Step{sdk.Build(".").WithEnv("GOARCH", "arm64")}},
+		}}
+		if err := Validate(pipeline); err != nil {
+			t.Fatalf("WithEnv-differentiated pipeline rejected: %v", err)
+		}
+	})
+	t.Run("release burns may repeat CI verification steps", func(t *testing.T) {
+		pipeline := Pipeline{Burns: []Burn{
+			{Name: "test", Type: Retrograde, Steps: []Step{sdk.TestRace("./...")}},
+			{Name: "release-test", Type: Release, Steps: []Step{sdk.TestRace("./...")}},
+		}}
+		if err := Validate(pipeline); err != nil {
+			t.Fatalf("cross-class repetition rejected: %v", err)
+		}
+	})
+	t.Run("identical steps inside one burn are rejected", func(t *testing.T) {
+		pipeline := Pipeline{Burns: []Burn{
+			{Name: "build", Type: Prograde, Steps: []Step{
+				namedTestStep("one", sdk.Build(".")),
+				namedTestStep("two", sdk.Build(".")),
+			}},
+		}}
+		err := Validate(pipeline)
+		if err == nil || !strings.Contains(err.Error(), "identical command, arguments, and environment") {
+			t.Fatalf("Validate() error = %v, want identical-invocation rejection", err)
+		}
+	})
+}
+
+func namedTestStep(name string, step Step) Step {
+	step.Name = name
+	return step
+}
+
+func TestGoBuildForPinsTargetPlatform(t *testing.T) {
+	step := (&GoSDK{}).BuildFor("darwin", "arm64", "./cmd/tool")
+	if step.Env["GOOS"] != "darwin" || step.Env["GOARCH"] != "arm64" || step.Env["CGO_ENABLED"] != "0" {
+		t.Fatalf("BuildFor env = %v", step.Env)
+	}
+	if step.Command != "go" || !slices.Equal(step.Args, []string{"build", "./cmd/tool"}) {
+		t.Fatalf("BuildFor invocation = %s %v", step.Command, step.Args)
+	}
+	if err := validateDefinitionName(step.Name); err != nil {
+		t.Fatalf("BuildFor step name %q invalid: %v", step.Name, err)
+	}
+	if !strings.Contains(step.Name, "darwin-arm64") {
+		t.Fatalf("BuildFor step name %q does not carry the target", step.Name)
+	}
+	withArgs := step.WithArgs("-trimpath")
+	if !slices.Equal(withArgs.Args, []string{"build", "-trimpath", "./cmd/tool"}) {
+		t.Fatalf("BuildFor WithArgs insertion = %v", withArgs.Args)
 	}
 }
 
@@ -293,6 +372,9 @@ func terminationBudgetBurn(name string, burnType BurnType) Burn {
 		steps[index] = Step{
 			Name:    strings.Repeat("s", nameBytes-len(suffix)) + suffix,
 			Command: "true",
+			// Arguments keep every step's invocation identity distinct; the
+			// termination summary budget under test counts only names.
+			Args: []string{suffix},
 		}
 	}
 	return Burn{Name: name, Type: burnType, Steps: steps}

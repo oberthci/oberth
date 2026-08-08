@@ -3,6 +3,7 @@ package periapsis
 import (
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 )
 
@@ -33,6 +34,7 @@ func Validate(p Pipeline) error {
 
 	names := make(map[string]BurnType, len(p.Burns))
 	var ciSummary, releaseSummary terminationSummaryBudget
+	identities := make(map[string]stepLocation)
 	var errs []error
 	for index, burn := range p.Burns {
 		if err := validateDefinitionName(burn.Name); err != nil {
@@ -92,6 +94,24 @@ func Validate(p Pipeline) error {
 			if step.Timeout < 0 {
 				errs = append(errs, fmt.Errorf("burn %q step %q: timeout must be greater than zero", burn.Name, step.Name))
 			}
+			// Two steps with a byte-identical command, argument list, and
+			// resolved environment inside one trigger class execute the same
+			// invocation twice and can only produce duplicate evidence. The
+			// recurring real instance is a cross-compile burn that never sets
+			// GOOS/GOARCH: "build-darwin-arm64" reports green while shipping
+			// a native binary. Names are excluded from the identity on
+			// purpose — a name states an intent the invocation must realize.
+			// CI (retrograde and prograde) and release classes are tracked
+			// separately: a release burn legitimately repeats CI verification
+			// steps because the two classes never run in the same Job.
+			identity := stepIdentity(burn.Type, step)
+			if first, exists := identities[identity]; exists {
+				errs = append(errs, fmt.Errorf(
+					"burn %q step %q: identical command, arguments, and environment as burn %q step %q in the same trigger class; differentiate the invocations (cross-compiles pin the target explicitly, e.g. Go.BuildFor or WithEnv GOOS/GOARCH)",
+					burn.Name, step.Name, first.burn, first.step))
+			} else {
+				identities[identity] = stepLocation{burn: burn.Name, step: step.Name}
+			}
 		}
 	}
 
@@ -120,6 +140,44 @@ func Validate(p Pipeline) error {
 		errs = append(errs, err)
 	}
 	return errors.Join(errs...)
+}
+
+type stepLocation struct {
+	burn string
+	step string
+}
+
+// stepIdentity canonicalizes the execution-relevant fields of a step within
+// its trigger class. Step names and timeouts are deliberately excluded: they
+// change neither the invocation nor its artifact. Separator bytes cannot occur
+// in validated commands, arguments, or environment entries, so distinct field
+// vectors cannot collide.
+func stepIdentity(class BurnType, step Step) string {
+	trigger := TriggerCI
+	if class == Release {
+		trigger = TriggerRelease
+	}
+	keys := make([]string, 0, len(step.Env))
+	for key := range step.Env {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	var builder strings.Builder
+	builder.WriteString(string(trigger))
+	builder.WriteByte(0)
+	builder.WriteString(step.Command)
+	for _, argument := range step.Args {
+		builder.WriteByte(0)
+		builder.WriteString(argument)
+	}
+	builder.WriteByte(1)
+	for _, key := range keys {
+		builder.WriteByte(0)
+		builder.WriteString(key)
+		builder.WriteByte(2)
+		builder.WriteString(step.Env[key])
+	}
+	return builder.String()
 }
 
 type terminationSummaryBudget struct {

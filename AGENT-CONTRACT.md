@@ -47,6 +47,14 @@ an implementation detail disagree.
   repository-authored Go.
 - Pipeline steps receive `OBERTH_REPO`, `OBERTH_REF`, `OBERTH_SHA`, and
   `OBERTH_TRIGGER`, plus the documented Go cache variables.
+- Pipeline admission rejects two steps whose command, argument list, and
+  resolved environment are byte-identical within one trigger class (CI =
+  retrograde + prograde; release separately). Identical invocations can only
+  produce duplicate evidence — the canonical defect is a cross-compile burn
+  that never sets `GOOS`/`GOARCH` and greens a platform it never built.
+  Cross-compiles pin their target explicitly (`Go.BuildFor` or
+  `WithEnv("GOOS"/"GOARCH", ...)`); a release burn may repeat a CI
+  verification step because the two classes never run in the same Job.
 - A repository may declare secret-store-sourced release credentials with one
   literal `var SecretStoreSecrets = map[string]string{"name": "kv/api/path"}`
   beside `ReleaseSecrets`. The declaration is statically parsed, never
