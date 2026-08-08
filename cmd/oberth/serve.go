@@ -403,7 +403,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 	if err != nil {
 		return err
 	}
-	httpAPI, err := api.New(authenticator, controlAPI, controlAPI)
+	httpAPI, err := api.New(authenticator, controlAPI, controlAPI, version)
 	if err != nil {
 		return err
 	}

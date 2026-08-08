@@ -90,7 +90,7 @@ func (server *Server) handleMCP(writer http.ResponseWriter, request *http.Reques
 		response.Result = map[string]any{
 			"protocolVersion": mcpProtocolVersion,
 			"capabilities":    map[string]any{"tools": map[string]any{}},
-			"serverInfo":      map[string]string{"name": "oberth", "version": "dev"},
+			"serverInfo":      map[string]string{"name": "oberth", "version": server.version},
 			"instructions":    "Use status/wait/logs for CI, sync only to park the selected exact WIP branch upstream without a green gate, and promote to merge, test, and push a target branch. Sync is not completion evidence. Authenticated JSON dashboard state is available at /api/runs, /api/repos, /api/issues, and /api/status.",
 		}
 	case "ping":

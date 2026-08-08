@@ -61,7 +61,7 @@ func (backend *fakeBackend) Ready(context.Context) error { return backend.readyE
 func testServer(t *testing.T) (*Server, *fakeBackend) {
 	t.Helper()
 	backend := &fakeBackend{}
-	server, err := New(backend, backend, backend)
+	server, err := New(backend, backend, backend, "test")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -44,19 +44,23 @@ type ViewService interface {
 }
 
 type Server struct {
-	auth  Authenticator
-	tools ToolService
-	views ViewService
-	mux   *http.ServeMux
+	auth    Authenticator
+	tools   ToolService
+	views   ViewService
+	version string
+	mux     *http.ServeMux
 }
 
 type contextKey struct{}
 
-func New(auth Authenticator, tools ToolService, views ViewService) (*Server, error) {
+func New(auth Authenticator, tools ToolService, views ViewService, version string) (*Server, error) {
 	if auth == nil || tools == nil || views == nil {
 		return nil, errors.New("authenticator, tool service, and view service are required")
 	}
-	server := &Server{auth: auth, tools: tools, views: views, mux: http.NewServeMux()}
+	if version == "" {
+		version = "dev"
+	}
+	server := &Server{auth: auth, tools: tools, views: views, version: version, mux: http.NewServeMux()}
 	server.routes()
 	return server, nil
 }

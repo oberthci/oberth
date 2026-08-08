@@ -403,7 +403,7 @@ func TestAnswer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	httpAPI, err := api.New(authenticator, controlAPI, controlAPI)
+	httpAPI, err := api.New(authenticator, controlAPI, controlAPI, "test")
 	if err != nil {
 		t.Fatal(err)
 	}
