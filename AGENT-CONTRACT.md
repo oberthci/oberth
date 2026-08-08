@@ -87,6 +87,19 @@ an implementation detail disagree.
   readiness to hold.
 - `/mcp` and `/api/*` require a bearer token. Static connection guidance may be
   served unauthenticated without exposing repository or run data.
+- The dashboard pages `/runs`, `/repos`, `/issues`, `/status`, and
+  `/runs/{run}` serve a static shell (plus `/assets/*` stylesheet, script, and
+  fonts) with zero repository or run data; the browser holds the bearer token
+  in localStorage and fetches everything from the authenticated read-only
+  views. Those views are `/api/runs`, `/api/runs/{run}` (run record, burn/step
+  results, owning repository), `/api/runs/{run}/logs?burn=&step=` (one exactly
+  recorded step's bounded retained log), `/api/repos`, `/api/issues`, and
+  `/api/status`. The run views resolve by exact run ID and, unlike the MCP
+  `status` tool, never acquire or renew a CI issue lock. `/api/status`
+  additionally reports the server version, per-upstream probe results, the
+  upstream SSH public-key fingerprint, the secret-store connection summary
+  (configuration only — never a token or secret value), and the audit-chain
+  head and latest external checkpoint.
 - A bearer credential maps to exactly one uplink public-key fingerprint and
   identity. Plaintext tokens are displayed once and are never persisted.
 - MCP exposes status, bounded named-step logs (`logs <sha> <step>`), wait, sync, promote,

@@ -54,6 +54,7 @@ type RunLookup interface {
 
 type RunHistory interface {
 	ListRecentRuns(context.Context, model.RunListFilter) ([]model.Run, error)
+	Run(context.Context, string) (model.Run, error)
 	StepResults(context.Context, string) ([]model.StepResult, error)
 }
 
@@ -299,6 +300,16 @@ type LogResponse struct {
 	Burn   string `json:"burn"`
 	Step   string `json:"step,omitempty"`
 	Output string `json:"output"`
+}
+
+// RunDetailResponse is the read-only dashboard view of one run: the durable
+// run record, its recorded burn/step results, and the owning repository. It
+// intentionally mirrors the raw /api/runs list encoding (Go field names) so
+// the dashboard reads one consistent shape.
+type RunDetailResponse struct {
+	Repository model.Repository
+	Run        model.Run
+	Steps      []model.StepResult
 }
 
 // MCPToolText keeps the MCP text block as the exact bounded log slice while

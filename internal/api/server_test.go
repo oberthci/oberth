@@ -19,6 +19,10 @@ type fakeBackend struct {
 	issueFilter IssueFilter
 	issueCalls  int
 	toolResult  any
+	runID       string
+	logBurn     string
+	logStep     string
+	logCalls    int
 }
 
 func (backend *fakeBackend) Authenticate(_ context.Context, token string) (Actor, error) {
@@ -44,6 +48,15 @@ func (result rawToolResult) MCPToolText() string { return result.Output }
 
 func (backend *fakeBackend) Runs(context.Context, Actor, int) (any, error) {
 	return map[string]any{"runs": []any{}}, nil
+}
+func (backend *fakeBackend) Run(_ context.Context, _ Actor, id string) (any, error) {
+	backend.runID = id
+	return map[string]any{"Run": map[string]any{"ID": id}, "Steps": []any{}}, nil
+}
+func (backend *fakeBackend) RunLog(_ context.Context, _ Actor, id, burn, step string) (any, error) {
+	backend.runID, backend.logBurn, backend.logStep = id, burn, step
+	backend.logCalls++
+	return map[string]string{"run_id": id, "burn": burn, "step": step, "output": "[test/unit] ok\n"}, nil
 }
 func (backend *fakeBackend) Repositories(context.Context, Actor) (any, error) {
 	return map[string]any{"repositories": []any{}}, nil
@@ -216,6 +229,91 @@ func TestUIUsesStaticScriptAndSecurityHeaders(t *testing.T) {
 	}
 	if policy := response.Header().Get("Content-Security-Policy"); strings.Contains(policy, "unsafe-inline") || !strings.Contains(policy, "default-src 'none'") {
 		t.Fatalf("CSP = %q", policy)
+	}
+	if body := response.Body.String(); !strings.Contains(body, `data-version="test"`) || !strings.Contains(body, "/assets/app.js") || !strings.Contains(body, "/assets/app.css") {
+		t.Fatalf("dashboard shell missing version or asset references: %s", body)
+	}
+}
+
+func TestDashboardShellCoversRunDetailDeepLinks(t *testing.T) {
+	t.Parallel()
+	server, backend := testServer(t)
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/runs/run-0123456789abcdef", nil))
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `data-view="runs"`) {
+		t.Fatalf("run deep link shell = %d %s", response.Code, response.Body.String())
+	}
+	if backend.runID != "" {
+		t.Fatalf("serving the shell must not touch the view backend, got run lookup %q", backend.runID)
+	}
+}
+
+func TestDashboardAssetsServeWithExplicitTypes(t *testing.T) {
+	t.Parallel()
+	server, _ := testServer(t)
+	for _, testCase := range []struct {
+		path     string
+		kind     string
+		fragment string
+	}{
+		{"/assets/app.css", "text/css; charset=utf-8", ".pill"},
+		{"/assets/app.js", "text/javascript; charset=utf-8", "oberth-token"},
+		{"/assets/fonts/IBMPlexMono-Regular.woff2", "font/woff2", ""},
+	} {
+		response := httptest.NewRecorder()
+		server.Handler().ServeHTTP(response, httptest.NewRequest(http.MethodGet, testCase.path, nil))
+		if response.Code != http.StatusOK {
+			t.Fatalf("%s status = %d", testCase.path, response.Code)
+		}
+		if kind := response.Header().Get("Content-Type"); kind != testCase.kind {
+			t.Fatalf("%s content type = %q, want %q", testCase.path, kind, testCase.kind)
+		}
+		if testCase.fragment != "" && !strings.Contains(response.Body.String(), testCase.fragment) {
+			t.Fatalf("%s is missing %q", testCase.path, testCase.fragment)
+		}
+	}
+	for _, path := range []string{"/assets/app.txt", "/assets/../server.go", "/assets/missing.css"} {
+		response := httptest.NewRecorder()
+		server.Handler().ServeHTTP(response, httptest.NewRequest(http.MethodGet, path, nil))
+		if response.Code == http.StatusOK {
+			t.Fatalf("%s must not be served", path)
+		}
+	}
+}
+
+func TestRunDetailAndLogViewsRequireAuthAndForwardSelectors(t *testing.T) {
+	server, backend := testServer(t)
+	unauthenticated := httptest.NewRecorder()
+	server.Handler().ServeHTTP(unauthenticated, httptest.NewRequest(http.MethodGet, "/api/runs/run-1", nil))
+	if unauthenticated.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated run detail = %d", unauthenticated.Code)
+	}
+	request := httptest.NewRequest(http.MethodGet, "/api/runs/run-1", nil)
+	request.Header.Set("Authorization", "Bearer valid-token")
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusOK || backend.runID != "run-1" {
+		t.Fatalf("run detail = %d, forwarded id %q", response.Code, backend.runID)
+	}
+	logRequest := httptest.NewRequest(http.MethodGet, "/api/runs/run-1/logs?burn=test&step=unit", nil)
+	logRequest.Header.Set("Authorization", "Bearer valid-token")
+	logResponse := httptest.NewRecorder()
+	server.Handler().ServeHTTP(logResponse, logRequest)
+	if logResponse.Code != http.StatusOK || backend.logBurn != "test" || backend.logStep != "unit" {
+		t.Fatalf("run log = %d, forwarded %q/%q", logResponse.Code, backend.logBurn, backend.logStep)
+	}
+	backend.logCalls = 0
+	for _, query := range []string{"", "burn=test", "step=unit", "burn=%20&step=unit"} {
+		malformed := httptest.NewRequest(http.MethodGet, "/api/runs/run-1/logs?"+query, nil)
+		malformed.Header.Set("Authorization", "Bearer valid-token")
+		rejected := httptest.NewRecorder()
+		server.Handler().ServeHTTP(rejected, malformed)
+		if rejected.Code != http.StatusBadRequest {
+			t.Fatalf("log query %q = %d, want 400", query, rejected.Code)
+		}
+	}
+	if backend.logCalls != 0 {
+		t.Fatalf("malformed log selectors reached the backend %d times", backend.logCalls)
 	}
 }
 
