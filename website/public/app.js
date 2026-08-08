@@ -556,7 +556,7 @@ var TITLES={
   trust:'Oberth — the trigger is the security boundary',
   setup:'Oberth — deploy and use',
   alpha:'Oberth — alpha pilot ledger',
-  try:'Oberth — three commands to a live gate'
+  try:'Oberth — quickstart: five steps to a gated push'
 };
 function route(){
   var h=(location.hash||'#/').replace('#/','')||'home';
@@ -686,3 +686,22 @@ document.querySelectorAll('.cp').forEach(function(b){
     var o=b.textContent;b.textContent='COPIED ✓';setTimeout(function(){b.textContent=o},1300);
   });
 });
+
+/* ---------- quickstart engine tabs ---------- */
+var K8S={
+ k3s:{t:'k3s <em>single binary, systemd-managed</em>',c:'<span class="c-cm"># Install k3s — lightweight, production-grade</span>\ncurl -sfL https://get.k3s.io | sh -s - --disable=traefik \\\n  --write-kubeconfig-mode 644'},
+ kind:{t:'kind <em>runs in Docker, ephemeral</em>',c:'<span class="c-cm"># Install kind — clusters inside Docker containers</span>\nkind create cluster --name oberth'},
+ k0s:{t:'k0s <em>single binary, controller + worker</em>',c:'<span class="c-cm"># Install k0s — zero-friction Kubernetes</span>\ncurl -sSfL https://get.k0s.sh | sudo sh\nsudo k0s install controller --single --enable-worker\nsudo k0s start'}
+};
+(function(){
+  var tabs=document.getElementById('k8sTabs');if(!tabs)return;
+  tabs.querySelectorAll('.tab2').forEach(function(b){
+    b.addEventListener('click',function(){
+      tabs.querySelectorAll('.tab2').forEach(function(x){x.classList.remove('on')});
+      b.classList.add('on');
+      var k=b.dataset.k8s;
+      document.getElementById('k8sTitle').innerHTML=K8S[k].t;
+      document.getElementById('k8sCode').innerHTML=K8S[k].c;
+    });
+  });
+})();

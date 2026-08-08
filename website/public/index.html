@@ -110,7 +110,7 @@
         <li><span class="y">▸</span><span>Pipeline is a <b>Go file you can run locally</b>. Agents drive it through <b>13 MCP tools</b>.</span></li>
         <li><span class="y">▸</span><span>Every action attributed and <b>audit-chained outside the box</b> — timestamped, publicly witnessed.</span></li>
       </ul>
-      <div class="tf">3 commands to try it → <a href="#/try">quickstart</a></div>
+      <div class="tf">5 steps to try it → <a href="#/try">quickstart</a></div>
     </div>
   </div>
 
@@ -537,18 +537,96 @@ claude mcp add --transport http oberth \
 <main class="page" tabindex="-1" id="pg-try">
 <section><div class="wrap">
   <div class="secno rv"><b>TRY /</b> Quickstart</div>
-  <h2 class="rv">Three commands to a live gate.</h2>
-  <p class="lead rv">Defaults are fine to start — single node, 10&nbsp;GiB PVC, three concurrent runs. Any Kubernetes works; a k3s box on your desk qualifies.</p>
-  <div class="code rv u-c44a83"><div class="code-h"><span>quickstart <em>server</em></span><button class="cp">COPY</button></div><pre>helm repo add oberth https://charts.cloudtaser.io/oberth
-helm repo update
-helm upgrade --install oberth oberth/oberth \
-  -n oberth --create-namespace
-<span class="c-cm"># live, not ready — two bootstrap commands remain:</span>
-<span class="c-cm"># connect your forge and register a key → <b>Setup</b></span></pre></div>
-  <div class="hero-cta rv u-ec72ea">
-    <a class="btn p" href="#/setup">Bootstrap identity → Setup</a>
-    <a class="btn g" href="mailto:hello@oberth.ci?subject=Oberth%20alpha%20pilot">Talk to the team →</a>
+  <h2 class="rv">From zero to a gated push <span class="soft">in five steps.</span></h2>
+  <p class="lead rv">Five steps from a Linux box to a gated push. Each one is a copy-paste block. Five minutes total.</p>
+
+  <div class="qs rv">
+    <div class="qs-n">01</div>
+    <div class="qs-c">
+      <h3>Choose your Kubernetes engine</h3>
+      <p>Any conformant cluster works. Pick what fits your setup.</p>
+      <div class="tabs2" id="k8sTabs">
+        <button class="tab2 on" data-k8s="k3s">k3s <span class="qs-rec">recommended</span></button>
+        <button class="tab2" data-k8s="kind">kind</button>
+        <button class="tab2" data-k8s="k0s">k0s</button>
+      </div>
+      <div class="code"><div class="code-h"><span id="k8sTitle">k3s <em>single binary, systemd-managed</em></span><button class="cp">COPY</button></div><pre id="k8sCode"><span class="c-cm"># Install k3s — lightweight, production-grade</span>
+curl -sfL https://get.k3s.io | sh -s - --disable=traefik \
+  --write-kubeconfig-mode 644</pre></div>
+      <div class="qs-hint"><span class="qs-hi">i</span><span><code class="inline-c">kubectl get nodes</code> should show one node in <b>Ready</b> state within 30 seconds.</span></div>
+    </div>
   </div>
+
+  <div class="qs rv">
+    <div class="qs-n">02</div>
+    <div class="qs-c">
+      <h3>Install OpenBao</h3>
+      <p>The secret store Oberth reads release credentials from. Dev mode for evaluation — root token is <code class="inline-c">root</code>.</p>
+      <div class="code"><div class="code-h"><span>openbao <em>dev mode, evaluation only</em></span><button class="cp">COPY</button></div><pre>helm repo add openbao https://openbao.github.io/openbao-helm
+helm install openbao openbao/openbao -n openbao --create-namespace \
+  --set server.dev.enabled=true \
+  --set injector.enabled=false</pre></div>
+      <div class="qs-hint"><span class="qs-hi">i</span><span>The pod shows <b>0/1 Running</b> briefly — that is correct. It becomes <b>1/1</b> once dev-mode init completes, usually under 15 seconds.</span></div>
+    </div>
+  </div>
+
+  <div class="qs rv">
+    <div class="qs-n">03</div>
+    <div class="qs-c">
+      <h3>Connect your vault</h3>
+      <p>One script configures Kubernetes auth, writes a read-only policy, and binds a role to Oberth's ServiceAccount.</p>
+      <div class="code"><div class="code-h"><span>secret store setup <em>run where bao CLI is available</em></span><button class="cp">COPY</button></div><pre>kubectl port-forward -n openbao svc/openbao 8200:8200 &amp;
+export BAO_ADDR=http://localhost:8200 BAO_TOKEN=root
+
+curl -fsSL https://oberth.ci/setup-secretstore.sh | bash -s -- \
+  --address http://localhost:8200</pre></div>
+      <div class="qs-hint"><span class="qs-hi">i</span><span>The script prints Helm values for step 04. Copy them — they contain the role and mount path Oberth needs.</span></div>
+    </div>
+  </div>
+
+  <div class="qs rv">
+    <div class="qs-n">04</div>
+    <div class="qs-c">
+      <h3>Install Oberth</h3>
+      <p>One Helm chart, one pod. No CRDs, no Argo prerequisite.</p>
+      <div class="code"><div class="code-h"><span>oberth <em>with secret store enabled</em></span><button class="cp">COPY</button></div><pre>helm repo add oberth https://charts.cloudtaser.io/oberth
+helm install oberth oberth/oberth -n oberth --create-namespace \
+  --set secretstore.enabled=true \
+  --set secretstore.insecureHTTPForDev=true</pre></div>
+      <div class="qs-hint"><span class="qs-hi">i</span><span>Pod starts immediately. It is <b>live but not ready</b> until you bootstrap identity in step 05.</span></div>
+    </div>
+  </div>
+
+  <div class="qs rv">
+    <div class="qs-n">05</div>
+    <div class="qs-c">
+      <h3>Configure and connect</h3>
+      <p>Connect your forge, register your SSH key, and push. The bearer token is shown once — save it.</p>
+      <div class="code"><div class="code-h"><span>bootstrap <em>identity + first push</em></span><button class="cp">COPY</button></div><pre><span class="c-cm"># Connect your forge — offers to mint a deploy key</span>
+kubectl exec -it -n oberth deploy/oberth -- \
+  oberth upstream add github ssh://git@github.com/your-org
+<span class="c-cm"># → add the printed key to your forge's deploy keys</span>
+
+<span class="c-cm"># Register your SSH key — prints a bearer token once</span>
+kubectl exec -i -n oberth deploy/oberth -- \
+  oberth uplink add "$(cat ~/.ssh/id_ed25519.pub)" "me@laptop"
+<span class="c-cm"># → save this token for MCP configuration</span>
+
+<span class="c-cm"># Push. Oberth gates it.</span>
+git push oberth feat/my-branch</pre></div>
+      <div class="qs-hint"><span class="qs-hi">i</span><span>The bearer token is stored only as a SHA-256 digest. There is no "show token again."</span></div>
+    </div>
+  </div>
+
+  <div class="qs-next rv">
+    <div class="qs-done">You are live.</div>
+    <p>Every push now runs full CI in one Kubernetes Job. Green syncs upstream automatically. Red files an issue and stays on the box until an agent fixes it. Connect your AI agent via MCP for the full loop.</p>
+    <div class="hero-cta">
+      <a class="btn p" href="#/agents">Wire your AI agent <span class="ar">→</span></a>
+      <a class="btn g" href="#/setup">Full setup reference →</a>
+    </div>
+  </div>
+
 </div></section>
 <div class="cta-mini"><div class="in"><div><div class="tx">Put your real agent workflow through the gate.</div><div class="sub">DIRECT ENGINEERING CONVERSATION · NO GENERIC SALES FUNNEL</div></div><a class="btn p" href="mailto:hello@oberth.ci?subject=Oberth%20alpha%20pilot">Join the pilot <span class="ar">→</span></a></div></div>
 </main>
