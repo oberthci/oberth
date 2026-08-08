@@ -489,6 +489,34 @@ func (c *Cache) receiveLock(repo string) *sync.Mutex {
 	return value.(*sync.Mutex)
 }
 
+// RefSHA resolves a branch to its commit SHA in the cached bare repository
+// without contacting the upstream. Returns an error if the cache does not
+// exist or the branch is not present.
+func (c *Cache) RefSHA(ctx context.Context, input string, branch string) (string, error) {
+	if err := ValidateBranch(branch); err != nil {
+		return "", err
+	}
+	repo, path, err := c.path(input)
+	if err != nil {
+		return "", err
+	}
+	lock := c.repoLock(repo)
+	lock.Lock()
+	defer lock.Unlock()
+	if !c.isBare(ctx, path) {
+		return "", fmt.Errorf("repository %s is not cached", repo)
+	}
+	output, err := c.capture(ctx, path, "rev-parse", "--verify", "refs/heads/"+branch+"^{commit}")
+	if err != nil {
+		return "", fmt.Errorf("branch %s not found in %s", branch, repo)
+	}
+	sha := strings.TrimSpace(output)
+	if err := ValidateSHA(sha); err != nil {
+		return "", err
+	}
+	return sha, nil
+}
+
 // SnapshotRefs returns only client-owned public branch and tag refs.
 func (c *Cache) SnapshotRefs(ctx context.Context, input string) (map[string]string, error) {
 	repo, path, err := c.path(input)

@@ -1051,10 +1051,25 @@ type controlFixture struct {
 	repo      model.Repository
 	logs      *runlog.Store
 	git       *controlGit
+	refs      RefResolver
 	jobs      *fakeJobs
 	scheduler *Scheduler
 	signals   *Signals
 	root      string
+}
+
+// stubRefResolver maps repo -> branch -> sha for testing.
+type stubRefResolver struct {
+	branches map[string]map[string]string
+}
+
+func (s stubRefResolver) RefSHA(_ context.Context, repo, branch string) (string, error) {
+	if branches, ok := s.branches[repo]; ok {
+		if sha, ok := branches[branch]; ok {
+			return sha, nil
+		}
+	}
+	return "", fmt.Errorf("branch %s not found in %s", branch, repo)
 }
 
 type finalizeFailStore struct {
@@ -1268,7 +1283,8 @@ func (fixture *controlFixture) api(t *testing.T) *API {
 	service, err := NewAPI(APIConfig{
 		Runs: fixture.store, History: fixture.store, Repositories: fixture.store,
 		Issues: fixture.store, Promotions: fixture.store, PromotionRuns: fixture.store,
-		Enqueues: fixture.scheduler, Git: fixture.git, Logs: fixture.logs, Auditor: fixture.store,
+		Enqueues: fixture.scheduler, Git: fixture.git, Refs: fixture.refs,
+		Logs: fixture.logs, Auditor: fixture.store,
 		Signals: fixture.signals, MaximumWait: 50 * time.Millisecond,
 		PromotionWorkspaceRoot: filepath.Join(fixture.root, "promotion-work"),
 	})
@@ -1390,6 +1406,86 @@ func TestSchedulerUpdatesOneCIIssueAcrossRedRedGreen(t *testing.T) {
 	}
 	if len(fixture.git.syncedBranches) != 1 || fixture.git.syncedBranches[0] != "oberth:feature/red-green:"+shas[2] {
 		t.Fatalf("green branch syncs = %#v", fixture.git.syncedBranches)
+	}
+}
+
+func TestStatusReturnsRefWithoutRunWhenBranchExists(t *testing.T) {
+	const branchSHA = "dddddddddddddddddddddddddddddddddddddddd"
+	fixture := newControlFixture(t)
+	fixture.refs = stubRefResolver{branches: map[string]map[string]string{
+		"oberth": {"feature/no-runs": branchSHA},
+	}}
+	ctx := context.Background()
+
+	// (a) Branch with no runs returns structured no-runs response.
+	value, err := fixture.api(t).CallTool(ctx, api.Actor{Identity: "agent@host"}, "status",
+		json.RawMessage(`{"ref":"feature/no-runs"}`))
+	if err != nil {
+		t.Fatalf("status for branch with no runs: %v", err)
+	}
+	status := value.(StatusResponse)
+	if status.Repo != "oberth" || status.Ref != "feature/no-runs" || status.SHA != branchSHA ||
+		status.Status != "no-runs" || status.RunID != "" || len(status.Burns) != 0 {
+		t.Fatalf("no-runs response = %#v", status)
+	}
+	encoded, err := json.Marshal(status)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wire := string(encoded)
+	if !strings.Contains(wire, `"status":"no-runs"`) || !strings.Contains(wire, `"sha":"`+branchSHA+`"`) ||
+		!strings.Contains(wire, `"repo":"oberth"`) || !strings.Contains(wire, `"ref":"feature/no-runs"`) ||
+		!strings.Contains(wire, `"run":""`) || strings.Contains(wire, `"repository"`) {
+		t.Fatalf("no-runs wire JSON = %s", wire)
+	}
+
+	// (b) Unknown selector still returns not-found.
+	_, err = fixture.api(t).CallTool(ctx, api.Actor{Identity: "agent@host"}, "status",
+		json.RawMessage(`{"ref":"does-not-exist"}`))
+	if err == nil || !strings.Contains(err.Error(), "not found") {
+		t.Fatalf("unknown selector error = %v, want not-found", err)
+	}
+
+	// (c) Existing run resolution is unchanged.
+	const runSHA = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	if _, err := fixture.scheduler.EnqueueCI(ctx, CIRequest{
+		EventID: "receive-run", Repository: fixture.repo,
+		Branch: "feature/has-run", SHA: runSHA, Actor: "agent@host",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.scheduler.ProcessNext(ctx); err != nil {
+		t.Fatal(err)
+	}
+	value, err = fixture.api(t).CallTool(ctx, api.Actor{Identity: "agent@host"}, "status",
+		json.RawMessage(`{"ref":"feature/has-run"}`))
+	if err != nil {
+		t.Fatalf("status for branch with run: %v", err)
+	}
+	runStatus := value.(StatusResponse)
+	if runStatus.Repo != "oberth" || runStatus.Ref != "feature/has-run" || runStatus.SHA != runSHA ||
+		runStatus.RunID == "" || runStatus.Status == "no-runs" {
+		t.Fatalf("run status response = %#v", runStatus)
+	}
+}
+
+func TestStatusRefWithoutRunRespectsRepoDisambiguator(t *testing.T) {
+	const branchSHA = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+	fixture := newControlFixture(t)
+	fixture.refs = stubRefResolver{branches: map[string]map[string]string{
+		"oberth": {"shared-branch": branchSHA},
+	}}
+	ctx := context.Background()
+
+	// With explicit repo, resolves correctly.
+	value, err := fixture.api(t).CallTool(ctx, api.Actor{Identity: "agent@host"}, "status",
+		json.RawMessage(`{"repo":"oberth","ref":"shared-branch"}`))
+	if err != nil {
+		t.Fatalf("disambiguated status: %v", err)
+	}
+	status := value.(StatusResponse)
+	if status.Repo != "oberth" || status.SHA != branchSHA || status.Status != "no-runs" {
+		t.Fatalf("disambiguated no-runs = %#v", status)
 	}
 }
 

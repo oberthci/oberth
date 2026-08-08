@@ -86,6 +86,12 @@ type RunResolver interface {
 	RunLookup
 }
 
+// RefResolver resolves a branch name to its current commit SHA from a local
+// bare Git cache without contacting the upstream forge.
+type RefResolver interface {
+	RefSHA(ctx context.Context, repo string, branch string) (string, error)
+}
+
 type IssueRepository interface {
 	CreateManualIssue(context.Context, string, model.ManualIssueSpec) (model.Issue, error)
 	Issue(context.Context, int64) (model.Issue, error)

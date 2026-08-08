@@ -460,7 +460,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 	controlAPI, err := service.NewAPI(service.APIConfig{
 		Runs: database, History: database, Repositories: database, Issues: database,
 		Promotions: database, PromotionRuns: database, Enqueues: scheduler, Git: git,
-		Logs: logs, Auditor: database, Health: health, Signals: signals,
+		Refs: git, Logs: logs, Auditor: database, Health: health, Signals: signals,
 		MutationGate:           anchors.AllowMutation,
 		PromotionWorkspaceRoot: filepath.Join(options.dataRoot, "work"),
 	})

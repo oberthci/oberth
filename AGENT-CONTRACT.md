@@ -112,6 +112,9 @@ an implementation detail disagree.
   identity. Plaintext tokens are displayed once and are never persisted.
 - MCP exposes status, bounded named-step logs (`logs <sha> <step>`), wait, sync, promote,
   promote-status, and issue create/get/update/close/delete/list/lock operations.
+- A `status` selector naming an existing cached branch with no recorded run
+  returns the ref's repository, branch, and current commit SHA with status
+  `no-runs` instead of a not-found error; unknown selectors keep not-found.
   This is the complete tool surface. `issue_create` takes only a `title` and a
   `body` and creates a workspace-global manual issue. Run selectors are resolved across
   repositories without a repository input. `issue_list` takes only an optional

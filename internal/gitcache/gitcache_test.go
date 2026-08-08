@@ -94,6 +94,44 @@ func TestEnsureFallsBackToStaleCache(t *testing.T) {
 	}
 }
 
+func TestRefSHAResolvesLocalBranchWithoutUpstream(t *testing.T) {
+	t.Parallel()
+	repository := newTestRepository(t)
+	cache := newTestCache(t, repository.upstream)
+	ctx := context.Background()
+
+	if _, err := cache.Ensure(ctx, "example"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Resolve the default branch.
+	sha, err := cache.RefSHA(ctx, "example", "main")
+	if err != nil {
+		t.Fatalf("RefSHA(main): %v", err)
+	}
+	if sha != repository.initialSHA {
+		t.Fatalf("RefSHA(main) = %s, want %s", sha, repository.initialSHA)
+	}
+
+	// Non-existent branch returns an error.
+	if _, err := cache.RefSHA(ctx, "example", "does-not-exist"); err == nil {
+		t.Fatal("RefSHA for missing branch unexpectedly succeeded")
+	}
+
+	// Works offline (no upstream contact).
+	offline := repository.upstream + ".offline"
+	if err := os.Rename(repository.upstream, offline); err != nil {
+		t.Fatal(err)
+	}
+	sha, err = cache.RefSHA(ctx, "example", "main")
+	if err != nil {
+		t.Fatalf("RefSHA offline: %v", err)
+	}
+	if sha != repository.initialSHA {
+		t.Fatalf("RefSHA offline = %s, want %s", sha, repository.initialSHA)
+	}
+}
+
 func TestEnsureDiscoversAndAllowsNonMainDefaultBranch(t *testing.T) {
 	t.Parallel()
 	repository := newTestRepositoryWithBranch(t, "trunk")

@@ -28,6 +28,7 @@ type APIConfig struct {
 	PromotionRuns          PromotionRunStore
 	Enqueues               EnqueueObserver
 	Git                    DeliveryGit
+	Refs                   RefResolver
 	Logs                   LogStore
 	Auditor                Auditor
 	Health                 Health
@@ -48,6 +49,7 @@ type API struct {
 	enqueues               EnqueueObserver
 	git                    DeliveryGit
 	logs                   LogStore
+	refs                   RefResolver
 	auditor                Auditor
 	health                 Health
 	signals                *Signals
@@ -89,7 +91,7 @@ func NewAPI(config APIConfig) (*API, error) {
 	return &API{
 		runs: config.Runs, history: config.History, repositories: config.Repositories,
 		issues: config.Issues, promotions: config.Promotions, promotionRuns: config.PromotionRuns,
-		enqueues: config.Enqueues, git: config.Git, logs: config.Logs, auditor: config.Auditor,
+		enqueues: config.Enqueues, git: config.Git, refs: config.Refs, logs: config.Logs, auditor: config.Auditor,
 		health: config.Health, signals: signals, maximumWait: maximumWait, mutationGate: mutationGate,
 		promotionWorkspaceRoot: promotionWorkspaceRoot, workspaces: workspaces,
 	}, nil
@@ -366,6 +368,9 @@ func (service *API) Ready(ctx context.Context) error {
 func (service *API) status(ctx context.Context, repositoryName, selector, actor string) (StatusResponse, error) {
 	repository, run, err := service.resolveRun(ctx, repositoryName, selector)
 	if err != nil {
+		if errors.Is(err, store.ErrNotFound) && service.refs != nil {
+			return service.statusRefWithoutRun(ctx, repositoryName, selector)
+		}
 		return StatusResponse{}, err
 	}
 	response := StatusResponse{
@@ -396,6 +401,48 @@ func (service *API) status(ctx context.Context, repositoryName, selector, actor 
 		}
 	}
 	return response, nil
+}
+
+// statusRefWithoutRun resolves a selector as a branch name in the bare Git
+// cache when no run exists. It mirrors resolveRun's repository disambiguation.
+func (service *API) statusRefWithoutRun(ctx context.Context, repositoryName, selector string) (StatusResponse, error) {
+	if strings.TrimSpace(repositoryName) != "" {
+		repository, err := service.runs.RepositoryByName(ctx, repositoryName)
+		if err != nil {
+			return StatusResponse{}, err
+		}
+		sha, err := service.refs.RefSHA(ctx, repository.Name, selector)
+		if err != nil {
+			return StatusResponse{}, fmt.Errorf("%w: run selector %q", store.ErrNotFound, selector)
+		}
+		return StatusResponse{
+			Repository: repository, Repo: repository.Name, Ref: selector,
+			SHA: sha, Status: "no-runs", Burns: map[string]string{},
+		}, nil
+	}
+	repositories, err := service.runs.ListRepositories(ctx)
+	if err != nil {
+		return StatusResponse{}, err
+	}
+	var matched model.Repository
+	var matchedSHA string
+	for _, repository := range repositories {
+		sha, refErr := service.refs.RefSHA(ctx, repository.Name, selector)
+		if refErr != nil {
+			continue
+		}
+		if matched.ID != 0 {
+			return StatusResponse{}, fmt.Errorf("%w: %q", ErrAmbiguousRepository, selector)
+		}
+		matched, matchedSHA = repository, sha
+	}
+	if matched.ID == 0 {
+		return StatusResponse{}, fmt.Errorf("%w: run selector %q", store.ErrNotFound, selector)
+	}
+	return StatusResponse{
+		Repository: matched, Repo: matched.Name, Ref: selector,
+		SHA: matchedSHA, Status: "no-runs", Burns: map[string]string{},
+	}, nil
 }
 
 func wireRunStatus(status model.RunStatus) string {
