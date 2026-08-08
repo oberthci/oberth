@@ -65,6 +65,29 @@ func TestHealthRequiresConfiguredUpstreamAndCluster(t *testing.T) {
 	}
 }
 
+func TestHealthSkipsSSHCheckForLocalOnlyUpstreams(t *testing.T) {
+	t.Parallel()
+	health := Health{
+		Store: fakeHealthStore{upstreams: []model.Upstream{{ID: 1, Kind: "local"}}},
+		Configured: func(context.Context) error { return errors.New("SSH identity missing") },
+		Cluster:    func(context.Context) error { return nil },
+		Audit:      func(context.Context) error { return nil },
+		VCS:        func(context.Context, model.Upstream) error { return nil },
+	}
+	// A local-only upstream does not need SSH credentials.
+	if err := health.Ready(context.Background()); err != nil {
+		t.Fatalf("local-only readiness failed: %v", err)
+	}
+	// Adding a non-local upstream should require SSH credentials.
+	health.Store = fakeHealthStore{upstreams: []model.Upstream{
+		{ID: 1, Kind: "local"},
+		{ID: 2, Kind: "ssh"},
+	}}
+	if err := health.Ready(context.Background()); err == nil {
+		t.Fatal("readiness passed without SSH credentials despite non-local upstream")
+	}
+}
+
 func TestHealthStatusIsUsefulDuringOutage(t *testing.T) {
 	t.Parallel()
 	health := Health{

@@ -39,8 +39,8 @@ type HealthStatus struct {
 // its first upstream is registered: the pod accepts in-pod administration
 // (liveness passes, so no restarts) while the readiness probe keeps it out of
 // Service endpoints. Once an upstream exists, readiness additionally requires
-// its durable SSH credentials, a responsive Kubernetes API, and externally
-// anchored audit integrity.
+// its durable SSH credentials (when any non-local upstream exists), a
+// responsive Kubernetes API, and externally anchored audit integrity.
 func (health Health) Ready(ctx context.Context) error {
 	if health.Store == nil || health.Configured == nil || health.Cluster == nil || health.Audit == nil || health.VCS == nil {
 		return errors.New("app: health dependencies are unavailable")
@@ -52,8 +52,10 @@ func (health Health) Ready(ctx context.Context) error {
 	if len(upstreams) == 0 {
 		return errors.New("app: no upstream is configured")
 	}
-	if err := health.Configured(ctx); err != nil {
-		return fmt.Errorf("app: upstream configuration is unavailable: %w", err)
+	if requiresSSHIdentity(upstreams) {
+		if err := health.Configured(ctx); err != nil {
+			return fmt.Errorf("app: upstream configuration is unavailable: %w", err)
+		}
 	}
 	if err := health.Cluster(ctx); err != nil {
 		return fmt.Errorf("app: Kubernetes API is unavailable: %w", err)
@@ -62,6 +64,17 @@ func (health Health) Ready(ctx context.Context) error {
 		return fmt.Errorf("app: audit integrity is unavailable: %w", err)
 	}
 	return nil
+}
+
+// requiresSSHIdentity returns true when at least one upstream uses an SSH-based
+// transport (anything other than a local filesystem path).
+func requiresSSHIdentity(upstreams []model.Upstream) bool {
+	for _, upstream := range upstreams {
+		if upstream.Kind != "local" {
+			return true
+		}
+	}
+	return false
 }
 
 func (health Health) Status(ctx context.Context) (any, error) {
