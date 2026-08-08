@@ -264,6 +264,7 @@ func newRunnerImageGateFixture(t *testing.T) *runnerImageGateFixture {
 		"go.mod":                         "module example.test/runner-gate\n\ngo 1.26\n",
 		"go.sum":                         "",
 		"cmd/oberth-runner/main.go":      "package main\nfunc main() {}\n",
+		"internal/gitoid/gitoid.go":      "package gitoid\n",
 		"internal/runner/runner.go":      "package runner\n",
 		"pkg/periapsis/periapsis.go":     "package periapsis\n",
 	} {

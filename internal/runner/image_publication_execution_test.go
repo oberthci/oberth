@@ -476,6 +476,7 @@ func TestRunnerEvidenceGateRejectsUnsafeOCIArchive(t *testing.T) {
 	repo := filepath.Join(root, "repo")
 	for _, path := range []string{
 		"cmd/oberth-runner/main.go",
+		"internal/gitoid/gitoid.go",
 		"internal/runner/runner.go",
 		"pkg/periapsis/types.go",
 		"Dockerfile.runner",
@@ -598,7 +599,7 @@ epoch=$3
 mkdir -p "$work/context"
 tar -C "$repo" -cf "$work/context.tar" -- \
   Dockerfile.runner Dockerfile.runner.dockerignore go.mod go.sum \
-  cmd/oberth-runner internal/runner pkg/periapsis
+  cmd/oberth-runner internal/gitoid internal/runner pkg/periapsis
 tar -C "$work/context" -xf "$work/context.tar"
 find "$work/context" -type d -exec chmod 0755 {} +
 find "$work/context" -type f -perm -0100 -exec chmod 0755 {} +

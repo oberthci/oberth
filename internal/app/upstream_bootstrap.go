@@ -375,8 +375,17 @@ func (bootstrap UpstreamSSHBootstrap) applySecret(ctx context.Context, client ku
 	if err != nil {
 		return fmt.Errorf("app: encode upstream Secret apply: %w", err)
 	}
+	// The chart's zero-prerequisite install pre-creates these Secrets with an
+	// empty data map, so the "helm" field manager owns .data before the first
+	// bootstrap write, and every later `helm upgrade` re-claims it via the
+	// lookup-preserving template. The bootstrap is the authoritative writer of
+	// exactly the fields it applies (audit-gated immediately above), so it must
+	// force server-side-apply conflicts as Kubernetes prescribes for
+	// controllers; a non-forced apply fails closed against the placeholder.
+	force := true
 	if _, err := client.CoreV1().Secrets(bootstrap.Namespace).Patch(ctx, name, types.ApplyPatchType, body, metav1.PatchOptions{
 		FieldManager: bootstrapFieldManager,
+		Force:        &force,
 	}); err != nil {
 		return fmt.Errorf("app: apply upstream Secret %s/%s: %w", bootstrap.Namespace, name, err)
 	}
