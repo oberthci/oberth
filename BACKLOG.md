@@ -67,6 +67,13 @@ marked **deadline-bound** carry an external clock.
 
 ## MCP and client surface
 
+- **Uplink revocation command** (found during the 2026-08-08 live
+  verification sessions): `oberth uplink add` has no remove/revoke
+  counterpart — a leaked or retired bearer token (1:1 with an uplink key)
+  can only be invalidated by store surgery. Two throwaway verification
+  uplinks remain registered on the live instance (their private keys are
+  destroyed). Add `oberth uplink remove` behind the admin socket and the
+  audit mutation gate.
 - **`oberth watch` CLI** (from #789): follow a push's CI outcome from the
   terminal on top of the server's `wait` long-poll; exit non-zero on red.
 - **`repos_list` MCP tool** (from #822): the 13-tool surface is deliberately
