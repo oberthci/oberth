@@ -568,6 +568,7 @@ function route(){
   if(h==='home'&&window.obSimResize)setTimeout(window.obSimResize,30);
   if(h==='home'&&typeof layoutReturn==='function')setTimeout(layoutReturn,60);
   document.querySelectorAll('#pg-'+h+' .rv:not(.in)').forEach(function(el){io.observe(el)});
+  if(h==='try')setTimeout(bindK8sTabs,0);
 }
 addEventListener('hashchange',route);
 route();
@@ -693,8 +694,10 @@ var K8S={
  kind:{t:'kind <em>runs in Docker, ephemeral</em>',c:'<span class="c-cm"># Install kind — clusters inside Docker containers</span>\nkind create cluster --name oberth'},
  k0s:{t:'k0s <em>single binary, controller + worker</em>',c:'<span class="c-cm"># Install k0s — zero-friction Kubernetes</span>\ncurl -sSfL https://get.k0s.sh | sudo sh\nsudo k0s install controller --single --enable-worker\nsudo k0s start'}
 };
-(function(){
+function bindK8sTabs(){
   var tabs=document.getElementById('k8sTabs');if(!tabs)return;
+  if(tabs.dataset.bound)return;
+  tabs.dataset.bound='1';
   tabs.querySelectorAll('.tab2').forEach(function(b){
     b.addEventListener('click',function(){
       tabs.querySelectorAll('.tab2').forEach(function(x){x.classList.remove('on')});
@@ -704,4 +707,5 @@ var K8S={
       document.getElementById('k8sCode').innerHTML=K8S[k].c;
     });
   });
-})();
+}
+bindK8sTabs();
