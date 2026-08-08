@@ -213,6 +213,19 @@ BAO_ADDR="https://127.0.0.1:8200" run_script
 check '[ "$status" = 0 ]' "loopback address must still configure the store (status=$status)"
 check 'contains "address-reachable-from-your-cluster"' "helm handoff must not embed the loopback address"
 
+# --- 8b. --address overrides the environment and keeps posture checks --------
+begin "address-flag"
+fresh_state
+BAO_ADDR="https://ambient.example:8200" run_script --address https://flag.example:8200
+check '[ "$status" = 0 ]' "--address must be accepted (status=$status)"
+check 'contains "secretstore.address=https://flag.example:8200"' "--address must override the ambient environment"
+
+begin "address-flag-http"
+fresh_state
+run_script --address http://flag.example:8200
+check '[ "$status" = 0 ]' "plain-HTTP --address must warn, not fail (status=$status)"
+check 'contains "PLAIN HTTP"' "plain-HTTP --address must be subject to the posture warning"
+
 # --- 9. dry-run performs no mutation -----------------------------------------
 begin "dry-run"
 fresh_state

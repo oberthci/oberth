@@ -35,6 +35,7 @@ KV_PREFIX="oberth"
 NAMESPACE="oberth"
 SERVICE_ACCOUNT="oberth"
 KUBERNETES_HOST=""
+ADDRESS=""
 CLI=""
 FORCE_AUTH_CONFIG="false"
 FORCE="false"
@@ -54,6 +55,8 @@ Options:
   --kubernetes-host URL    API server URL the secret store uses for TokenReview
                            (default: in-cluster service URL when run in-cluster,
                             otherwise the current kubeconfig server)
+  --address URL            secret store URL for this run
+                           (default: BAO_ADDR / VAULT_ADDR from the environment)
   --cli bao|vault          force a specific CLI              (default: autodetect)
   --force                  overwrite a drifted policy or role
   --force-auth-config      overwrite an existing auth mount config
@@ -76,6 +79,7 @@ while [ $# -gt 0 ]; do
     --namespace) NAMESPACE="$2"; shift 2 ;;
     --service-account) SERVICE_ACCOUNT="$2"; shift 2 ;;
     --kubernetes-host) KUBERNETES_HOST="$2"; shift 2 ;;
+    --address) ADDRESS="$2"; shift 2 ;;
     --cli) CLI="$2"; shift 2 ;;
     --force) FORCE="true"; shift ;;
     --force-auth-config) FORCE_AUTH_CONFIG="true"; shift ;;
@@ -98,8 +102,13 @@ if [ -z "$CLI" ]; then
 fi
 command -v "$CLI" >/dev/null 2>&1 || fail "CLI '$CLI' not found in PATH"
 
+if [ -n "$ADDRESS" ]; then
+  # One address for whichever CLI runs below; the posture checks that follow
+  # apply to a flag-supplied address exactly as they do to an ambient one.
+  export BAO_ADDR="$ADDRESS" VAULT_ADDR="$ADDRESS"
+fi
 STORE_ADDR="${BAO_ADDR:-${VAULT_ADDR:-}}"
-[ -n "$STORE_ADDR" ] || fail "set BAO_ADDR or VAULT_ADDR to your secret store URL first"
+[ -n "$STORE_ADDR" ] || fail "set --address, BAO_ADDR, or VAULT_ADDR to your secret store URL first"
 
 # --- security posture checks -------------------------------------------------
 case "$STORE_ADDR" in
