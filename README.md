@@ -1,245 +1,239 @@
 # Oberth
 
-Oberth is a small, single-node CI service for Kubernetes. It accepts Git over
-SSH, runs repository-owned `.oberth/periapsis.go` pipelines as one Kubernetes
-Job per push, and exposes concise run, log, promotion, and issue operations over
-an authenticated MCP/HTTPS API.
+AI-native CI for Kubernetes — a self-hosted gate that runs every AI-agent push
+as one Kubernetes Job and lets only green reach your forge.
 
-The design is intentionally narrow:
+Agents `git push` to Oberth over SSH. Each push runs the repository's own
+`.oberth/periapsis.go` pipeline in a single Job — no forge queue, no API rate
+limits, feedback at local speed. Green branches sync upstream automatically;
+red runs become issues an agent can lock and fix. Every action is attributed
+to a durable uplink identity and recorded in an audit chain anchored outside
+the box.
 
-- one long-lived `oberth` Deployment and one `oberth-runner` container per run;
-- SQLite, bare Git caches, workspaces, and logs on one PVC mounted at `/data`;
-- fixed SSH and HTTPS NodePorts `30022` and `30443`;
-- oldest-eligible execution with a default global limit of three Jobs; a
-  publication in flight gates only its exact repository/ref while unrelated
-  work continues;
-- branch pushes receive no Kubernetes Secrets and use the CI cache root;
-- reachable tag pushes use release caches and only the repository-declared
-  subset of administrator-allowed release Secrets;
-- every branch is published after green; explicit promotion green-gates a source,
-  merges it locally, tests the merged tree when necessary, and pushes without force;
-- one open CI issue per repository and branch, plus five-minute uplink-owned locks.
+Current release: **v0.10.51** · Helm chart at `https://charts.cloudtaser.io/oberth` ·
+Website: [oberth.ci](https://oberth.ci)
 
-Accepted receives and upstream publications are durable obligations. The server
-records their exact actor, ref, and result before the external side effect, then
-performs one bounded startup recovery from Git state after a restart. Promotions
-also bind their exact target predecessor; ordinary green branches deliberately
-force-sync as required by FAB. SQLite terminal state, CI issue projection, and
-publication finalization commit atomically.
+## What it does
 
-Audit actions form a gap-free SHA-256 chain whose heads receive RFC 3161
-timestamps and linked Rekor witnesses. Before any Rekor publication, Oberth
-creates a deterministic immutable witness intent outside the SQLite PVC. Before
-readiness or any mutation, it verifies the complete public witness history and
-the intent/completion sequence against SQLite and immutable namespace
-ConfigMaps. Its Role can create, get, and list these continuity records but
-cannot update, patch, or delete them, so a crash followed by whole-database
-rollback cannot hide an accepted Rekor entry. Pinned witnesses use exact Rekor
-UUID reads; only the single pending intent is recovered through an authenticated
-exact-certificate-and-hash query. An unresolved intent blocks every new mutation
-and completes its exact local-chain prefix before any in-flight suffix is
-witnessed. Initial continuity loading is paginated with no fixed record-count
-lifetime; steady-state checks cache the canonical immutable prefix and exact-read
-its current tips. On startup, an existing database and nonempty WAL are copied
-into a private read-only inspection snapshot; verification leaves the source
-database, WAL, and derived WAL index byte-exact. The source is opened writable
-only after the snapshot passes at the exact current schema; the live daemon never
-performs an online schema migration. Fresh genesis is allowed only after both complete
-immutable continuity lists are empty, and genesis is witnessed before listeners
-or application mutation paths start.
+- **Git ingress** — authenticated Git-over-SSH (NodePort `30022`), smart
+  protocol only. Oberth fetches and caches upstream repositories on demand;
+  force-pushed feature branches are accepted, tags are creation-only.
+- **CI** — one Kubernetes Job per push runs `.oberth/periapsis.go`; steps are
+  subprocesses with per-step exit codes and named log slices. FIFO queue with
+  a concurrency knob (default 3); a newer push to the same branch supersedes
+  its own in-flight run.
+- **Issues** — a red run files exactly one issue per repository and branch;
+  repeated reds update it, green auto-closes it. Five-minute uplink-owned
+  locks keep two agents off the same issue.
+- **Promotion** — `promote` green-gates an exact SHA, merges with the target
+  locally, runs CI on the merged tree when the target diverged, and pushes
+  without force. A moved target fails the promotion; records are append-only.
+- **Release** — a tag runs the release burn only if its commit is reachable
+  from the default branch, with exactly the secrets the repository declares,
+  intersected with the administrator allowlist.
+- **MCP** — thirteen tools over authenticated HTTPS for AI agents: status by
+  branch, single-step logs, long-poll wait, promotion, and the issue queue.
+- **Audit** — every mutation joins a gap-free SHA-256 chain; chain heads
+  receive RFC 3161 timestamps and public Rekor witnesses, reconciled against
+  rollback-external immutable Kubernetes records.
 
-There is no workflow-controller integration, reconciliation layer, shadow main
-branch, or separate release controller.
+### Release secrets from your secret store — never through etcd
 
-## Repository layout
+A repository declares release credentials in one literal map in
+`.oberth/periapsis.go`:
 
-- `cmd/oberth`, `cmd/oberth-runner` — the server and the Job-side runner;
-  `cmd/oberth-release-support` and `cmd/oberth-release-image` are built only
-  inside release burns.
-- `internal/`, `pkg/periapsis` — server internals and the pipeline SDK whose
-  exported surface repository pipelines import as `oberth`.
-- `charts/oberth` — the Helm chart.
-- `.oberth/` — this repository's own `periapsis.go` pipeline, pinned tool
-  installer, and release script. Oberth is the CI authority for this
-  repository; the hosted upstream is a publication target and carries no
-  forge-native CI.
-- `website/` — the oberth.ci static site.
-- `homebrew/` — the Homebrew formula and its verification script.
-- `docs/`, `scripts/`, `hack/` — documentation, the embedded secret-store
-  setup script, and contract/verification helpers.
+```go
+var SecretStoreSecrets = map[string]string{
+	"r2-token": "oberth/data/r2-upload",
+}
+```
 
-## Local validation
+At release admission Oberth fetches every declared path from your OpenBao or
+HashiCorp Vault with its own Kubernetes ServiceAccount identity — before the
+release Job exists. A missing secret, an unreachable store, or a path outside
+the administrator allowlist fails the release immediately, with the exact path
+in the error. Values are injected over the Kubernetes exec stream into a
+memory-backed volume inside the running release Job
+(`$OBERTH_SECRETSTORE_DIR/<name>/<key>`, `0400`, tmpfs) — never a Kubernetes
+Secret, never etcd, never node disk — and every value is masked in the live
+log stream. Branch builds receive zero release credentials, always.
 
-The repository requires the same checks locally and in CI:
+Setup is one script run where your own `bao`/`vault` CLI is authenticated —
+the Oberth binary has no code path that accepts a store admin token — and
+`oberth secretstore verify` proves the whole trust chain from inside the pod.
+
+## Quick start
+
+Five commands from a laptop to gated releases:
+
+```bash
+# 1 · any Kubernetes — a k3s box qualifies
+curl -sfL https://get.k3s.io | sh -s - --disable=traefik
+
+# 2 · a secret store — OpenBao (dev mode: evaluation only)
+helm repo add openbao https://openbao.github.io/openbao-helm
+helm install openbao openbao/openbao -n openbao \
+  --create-namespace --set server.dev.enabled=true
+
+# 3 · point your store at Oberth — run where your bao/vault CLI is authenticated
+curl -fsSL https://oberth.ci/setup-secretstore.sh | bash -s -- \
+  --address https://openbao.openbao.svc:8200 --namespace oberth
+
+# 4 · Oberth itself
+helm repo add oberth https://charts.cloudtaser.io/oberth
+helm install oberth oberth/oberth -n oberth \
+  --create-namespace --set secretstore.enabled=true
+
+# 5 · bootstrap identity
+kubectl exec -n oberth deploy/oberth -- \
+  oberth upstream add github ssh://git@github.com/your-org
+kubectl exec -i -n oberth deploy/oberth -- \
+  oberth uplink add - agent-07@runner < ~/.ssh/id_ed25519.pub
+```
+
+The chart has zero prerequisites: the SSH host key and TLS certificate are
+generated once into Secrets and reused across upgrades; an init container
+prepares the cache directories; the pod stays `0/1 Running` — live, not
+ready — until the first upstream is registered. `upstream add` offers to mint
+a deploy key and prints it once for registration at your forge. `uplink add`
+prints the TLS fingerprint and a bearer token exactly once; wire it into your
+MCP client (full walkthrough in [docs/mcp-setup.md](docs/mcp-setup.md)):
+
+```json
+{
+  "mcpServers": {
+    "oberth": {
+      "type": "url",
+      "url": "https://<node>:30443/mcp",
+      "headers": { "Authorization": "Bearer oberth_…" }
+    }
+  }
+}
+```
+
+## How it works
+
+1. **Push** — an agent pushes a branch over SSH; the push is attributed to its
+   uplink identity and durably recorded before anything else happens.
+2. **Run** — Oberth spawns one Kubernetes Job. Inside it, yaegi interprets the
+   repository's `periapsis.go`; each step runs as a subprocess with its own
+   exit code, timeout, and named log slice. The server never executes
+   repository code.
+3. **Record** — green publishes the exact branch SHA to the upstream forge;
+   red creates or updates the branch's single CI issue. Nothing lives only on
+   the box.
+4. **Promote** — `promote <sha> <branch>` verifies the SHA is green, merges
+   locally, proves the merged tree when the target diverged, and pushes
+   without force.
+5. **Release** — a tag reachable from the default branch runs the release
+   burn: Kubernetes release Secrets are snapshotted immutably, secret-store
+   values are fetched pre-flight from your vault and injected into build
+   memory, every value is masked in logs, and the proven tag syncs upstream.
+   Your own release pipelines take it from there.
+
+## MCP tools (13)
+
+| Tool | Description |
+|------|-------------|
+| `status` | CI status for a SHA or branch, including the failed step |
+| `logs` | One named step's log output for a SHA |
+| `wait` | Long-poll until a SHA reaches a terminal state |
+| `sync` | Park a WIP branch upstream without a green gate (not completion evidence) |
+| `promote` | Green-gate a SHA, merge with target branch, push without force |
+| `promote_status` | Wait for a promotion record to become terminal |
+| `issue_create` | Create a manual issue |
+| `issue_get` | Get an issue by ID |
+| `issue_update` | Update an issue title and body |
+| `issue_close` | Close an issue (history is kept) |
+| `issue_delete` | Delete an accidentally created manual issue |
+| `issue_list` | List issue IDs and states (pages of 50) |
+| `issue_lock` | Acquire or renew a five-minute caller-owned issue lock |
+
+Authenticated `GET` endpoints (`/api/runs`, `/api/repos`, `/api/issues`,
+`/api/status`) serve the same state; `/healthz` and `/readyz` are
+unauthenticated.
+
+## Architecture
+
+- **One pod, two ports** — SSH on NodePort `30022`, HTTPS/MCP on `30443`
+  (TLS 1.3 or newer). No Argo, no CRDs, no controllers, no step containers.
+- **One Job per run, one container** — the digest-pinned ~14 MB runner image
+  carries no toolchains; repository setup steps install pinned, checksummed
+  tools into the Job's own tool directory. yaegi interprets `periapsis.go`
+  inside the Job only.
+- **PVC for state** — SQLite, bare Git caches, run workspaces, and retained
+  logs on one volume, kept across uninstall. hostPath Go caches are split by
+  repository *and* trust tier, so a poisoned branch build can never feed bytes
+  into a signed release artifact.
+- **Audit chain with external witnesses** — gap-free SHA-256 action chain →
+  RFC 3161 timestamps from an independent TSA → linked Rekor witnesses under a
+  stable identity derived from the SSH host key → immutable Kubernetes
+  continuity records the server can create but never modify. A whole-database
+  rollback fails closed instead of forgetting.
+- **Degraded-mode startup** — if the Rekor witness endpoint is unreachable at
+  startup, the pod comes up running-but-not-ready with every mutation gate
+  closed and retries recovery with backoff; it does not crash-loop.
+  `auditAnchor.rekorCA` / `auditAnchor.tsaCA` pin private CAs for self-hosted
+  witnesses, and `auditAnchor.acceptWitnessChainReset` is the one-shot,
+  loudly-logged acknowledgment for reinstalls that abandon a published chain.
+
+## Security
+
+- Job pods run with `automountServiceAccountToken: false`, as non-root 65534,
+  all capabilities dropped, read-only root filesystem, seccomp
+  `RuntimeDefault`, bounded resources and deadlines.
+- **The trigger is the security boundary.** A branch push is a CI burn and
+  mounts nothing — no Secrets, no store access, no ServiceAccount token. A tag
+  push is a release burn and receives only `ReleaseSecrets` ∩ administrator
+  allowlist (statically parsed from the literal declaration, never evaluated)
+  plus `SecretStoreSecrets` ∩ allowlisted paths, fetched pre-flight and
+  delivered to memory only.
+- Secret-store values never appear in etcd, Kubernetes objects, node disk, or
+  logs; per-run store tokens are read-only, short-lived, and revoked after
+  every fetch. Every fetch is an actor-attributed entry in the audit chain.
+- Bearer tokens map 1:1 to uplink SSH-key fingerprints and are stored only as
+  SHA-256 digests, displayed exactly once. SSH accepts the two Git smart-
+  protocol commands and nothing else — no shell, no PTY, no forwarding.
+- RBAC is namespace-scoped with one documented exception: an optional
+  `system:auth-delegator` binding so the store validates logins via
+  TokenReview. Audit continuity records are create/get/list only.
+- The audit chain is tamper-evident — including against the box it runs on —
+  not tamper-proof. See [docs/security.md](docs/security.md) for the full
+  invariant list.
+
+## Tested on
+
+**k3s, kind, and k0s** — a 187-scenario acceptance matrix covering Git
+ingress, the CI lifecycle, promotion (including concurrent races), release
+burns, the secret-store battery, MCP, persistence across restarts, and the
+security posture, executed end-to-end on all three engines with **zero
+product-blocking failures** and identical behavior across engines. The two
+resilience findings it produced — degraded-mode startup during a public Rekor
+outage and CA-trust knobs for self-hosted witnesses — shipped in v0.10.51.
+
+## Development
 
 ```bash
 go vet ./...
 go test -race -count=1 ./...
 golangci-lint run ./...
+make build       # server and runner binaries
+make local-flow  # executable FAB Example-flow gate, no cluster required
 ```
 
-Run `make build` for the server and runner binaries. Run `make local-flow` for
-the executable FAB Example-flow gate: authenticated clone/push, wait timeout,
-supersession, red → red → green issue handling, burn-scoped logs, sync,
-divergent/fast-forward/already-contained promotion, unreachable-tag rejection,
-invalid public-ref rejection with clean restart replay, and a reachable release
-burn with immutable tags and masked logs. It uses
-temporary Git repositories, SQLite, pinned SSH/TLS identities, and an in-process
-runner; Kubernetes Job isolation is checked separately and no container runtime
-is required for this gate.
+Oberth is its own CI authority: this repository carries
+[`.oberth/periapsis.go`](.oberth/periapsis.go), and an admitted tag runs the
+release burns that build, sign, publish, and read back every artifact.
 
-The execution image is not a build environment. It contains the runner plus the
-small shell, Git, SSH, TLS, curl, and archive substrate needed to fetch and
-install tools. Each repository's setup burns install pinned Go, lint, scan,
-chart, signing, and other dependencies into the Job's writable tool directory.
-CI and release use separate, per-repository Go caches; neither trust domain can
-borrow executable tools from the image or the other cache.
+## Documentation
 
-An admitted Oberth tag runs only the `Release` burns in `.oberth/periapsis.go`.
-Those burns repeat vet, lint, race, source-scan, and chart gates; build six
-reproducible binaries; publish signed immutable R2 objects; repack the exact
-server and runner binaries into clean two-platform GAR images; scan, sign, and
-fully read those images back; package a chart containing only their digest
-references; publish and verify the chart from GAR and public R2; and finally
-advance stable binary aliases and the classic Helm index with compare-and-swap.
-The release path uses no Docker daemon and never puts a credential on a command
-line or in retained logs.
+- [docs/mcp-setup.md](docs/mcp-setup.md) — connect Claude Code or any MCP client
+- [docs/architecture.md](docs/architecture.md) — run lifecycle and recovery
+- [docs/security.md](docs/security.md) — security invariants
+- [docs/secretstore-verification.md](docs/secretstore-verification.md) — three-tier secret-store verification
+- [AGENT-CONTRACT.md](AGENT-CONTRACT.md) — the cross-component compatibility contract
 
-## Install
+## License
 
-For source development, render or install the local chart into the dedicated
-namespace. A released chart already contains the exact signed server and runner
-GAR digests selected by its tag burn:
-
-```bash
-helm upgrade --install oberth ./charts/oberth \
-  --namespace oberth --create-namespace
-```
-
-The public chart repository is `https://charts.cloudtaser.io/oberth`; its
-`index.yaml` is advanced only after the corresponding binaries, GAR images, and
-chart have passed their remote verification gates. Artifact publication is not
-deployment: roll out that released chart through the declared deployment owner.
-
-The chart creates only namespace-scoped RBAC. Its default upstream Secret names
-match the restored Oberth estate and `upstream.createSecrets` defaults to false.
-For a greenfield install, set `upstream.createSecrets=true`; Helm creates and
-retains the empty name-scoped Secrets, the server stays live but not ready, and
-`oberth upstream add` performs the confirmed key/host bootstrap. The persistent
-SSH host-key and TLS Secrets are generated once when existing names are not
-provided and are reused across upgrades.
-
-Both setup commands reach the running daemon through a mode-`0600` in-pod Unix
-socket; every SQLite write and bootstrap Secret patch passes the same fail-closed
-external audit gate as SSH and MCP mutations. A missing daemon or unavailable
-audit proof leaves setup unchanged.
-
-The chart-managed PVC is marked `helm.sh/resource-policy: keep`: uninstalling
-the release intentionally leaves SQLite, Git caches, workspaces, and logs
-behind. Delete that orphaned PVC only as a separate, explicit data-destruction
-operation after a verified backup.
-
-Register the upstream and an uplink from the running pod:
-
-```bash
-oberth upstream add github ssh://git@github.com/oberthci
-oberth uplink add ~/.ssh/id_ed25519.pub operator@host
-```
-
-The uplink command prints the bearer token once and reports the HTTPS
-certificate fingerprint. Tokens are stored only as SHA-256 digests.
-
-### Secure MCP connection
-
-Pin the exact leaf certificate reported by `uplink add`; never bypass TLS with
-`-k`. The chart certificate is valid for the DNS name `oberth`, so use that name
-even when reaching the HTTPS NodePort through a node address:
-
-```bash
-export OBERTH_NODE_IP=<node-address>
-export OBERTH_HTTPS_PORT=30443
-export OBERTH_TLS_FINGERPRINT='SHA256:<value printed by uplink add>'
-export OBERTH_TLS_CERT="$PWD/oberth-tls.crt"
-
-kubectl get secret -n oberth oberth-tls \
-  -o jsonpath='{.data.tls\.crt}' | base64 --decode >"$OBERTH_TLS_CERT"
-actual_fingerprint="$(
-  openssl x509 -in "$OBERTH_TLS_CERT" -outform DER |
-    openssl dgst -sha256 -binary | openssl base64 -A | tr -d '='
-)"
-test "$OBERTH_TLS_FINGERPRINT" = "SHA256:$actual_fingerprint"
-```
-
-For `tls.existingSecret`, export its `tls.crt` instead. After the fingerprint
-comparison, the exact leaf file is the trust anchor and `--resolve` preserves
-hostname verification. Put the one-time bearer value in a private header file
-so it does not appear in the curl process arguments, then make the first two MCP
-JSON-RPC calls:
-
-```bash
-oberth_auth="$(mktemp)"
-chmod 0600 "$oberth_auth"
-read -rsp 'Oberth bearer token: ' oberth_token; printf '\n'
-printf 'Authorization: Bearer %s\n' "$oberth_token" >"$oberth_auth"
-unset oberth_token
-
-curl --fail-with-body --silent --show-error \
-  --cacert "$OBERTH_TLS_CERT" \
-  --resolve "oberth:${OBERTH_HTTPS_PORT}:${OBERTH_NODE_IP}" \
-  --header "@$oberth_auth" --header 'Content-Type: application/json' \
-  --data '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"bootstrap","version":"1"}}}' \
-  "https://oberth:${OBERTH_HTTPS_PORT}/mcp"
-curl --fail-with-body --silent --show-error \
-  --cacert "$OBERTH_TLS_CERT" \
-  --resolve "oberth:${OBERTH_HTTPS_PORT}:${OBERTH_NODE_IP}" \
-  --header "@$oberth_auth" --header 'Content-Type: application/json' \
-  --data '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' \
-  "https://oberth:${OBERTH_HTTPS_PORT}/mcp"
-
-rm -f -- "$oberth_auth"
-```
-
-A durable MCP client uses the same URL, bearer header, exact certificate trust
-anchor, and hostname mapping. Keep both the token and certificate pin outside
-the repository.
-
-`/readyz` checks durable configuration and Kubernetes availability. Transient
-upstream reachability is reported separately by `/api/status`, so a VCS outage
-is visible without restarting an otherwise healthy control plane.
-
-## Repository pipeline
-
-Repositories keep an interpreted file behind a build constraint:
-
-```go
-//go:build ignore
-
-package main
-
-import "oberth"
-
-// The server parses this literal without executing repository code. A release
-// Job receives only names that are also in the administrator allowlist.
-var ReleaseSecrets = []string{"r2-upload-token", "cosign-secret"}
-
-func Pipeline(ctx *oberth.Context) oberth.Pipeline {
-	return oberth.New().
-		Retrograde("setup",
-			oberth.Step{Name: "install-go", Command: "./.oberth/install-tools.sh", Args: []string{"go"}},
-			oberth.Step{Name: "install-lint", Command: "./.oberth/install-tools.sh", Args: []string{"golangci"}},
-		).
-		Retrograde("lint", ctx.Go.Vet("./..."), ctx.Lint.GolangciLint("./...")).DependsOn("setup").
-		Retrograde("test", ctx.Go.TestRace("./...")).DependsOn("lint").
-		Prograde("build", ctx.Go.Build("./...")).DependsOn("test").
-		Release("release", oberth.Step{Name: "publish", Command: "./.oberth/release.sh"}).
-		Build()
-}
-```
-
-Only the Job-side runner interprets this code. Before a release Job is created,
-the server statically parses the exact top-level `ReleaseSecrets` string-slice
-literal and snapshots only its intersection with the administrator allowlist;
-computed declarations, undeclared credentials, and requests outside the
-allowlist fail closed. The server never executes repository-authored Go. The
-install script and every tool checksum remain in that repository; a tool merely
-present in an execution image is never an implicit pipeline dependency.
+Proprietary — see [LICENSE](LICENSE). Use is governed by the Oberth commercial
+license agreement. Licensing and alpha-pilot inquiries: hello@oberth.ci.
