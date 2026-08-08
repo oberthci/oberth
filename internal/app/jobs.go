@@ -292,7 +292,7 @@ func (jobs *Jobs) Wait(ctx context.Context, name string, destination io.Writer) 
 		result.Status = model.RunPassed
 		result.Phase = "passed"
 	} else {
-		result.Error = strings.TrimSpace(completion.Reason)
+		result.Error = humanizeJobReason(strings.TrimSpace(completion.Reason))
 		if result.Error == "" {
 			result.Error = fmt.Sprintf("runner exited with code %d", completion.ExitCode)
 		}
@@ -345,6 +345,19 @@ func (jobs *Jobs) forget(name, runID string) {
 	if current, ok := jobs.intents[name]; ok && current.runID == runID {
 		delete(jobs.intents, name)
 		current.zero()
+	}
+}
+
+// humanizeJobReason replaces raw Kubernetes Job condition reasons with
+// human-readable text suitable for CI issue bodies.
+func humanizeJobReason(reason string) string {
+	switch reason {
+	case "BackoffLimitExceeded":
+		return "Job failed (backoff limit exceeded)"
+	case "DeadlineExceeded":
+		return "Job failed (deadline exceeded)"
+	default:
+		return reason
 	}
 }
 
