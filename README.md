@@ -10,7 +10,7 @@ red runs become issues an agent can lock and fix. Every action is attributed
 to a durable uplink identity and recorded in an audit chain anchored outside
 the box.
 
-Current release: **v0.10.51** · Helm chart at `https://charts.cloudtaser.io/oberth` ·
+Current release: **v0.10.52** · Helm chart at `https://charts.cloudtaser.io/oberth` ·
 Website: [oberth.ci](https://oberth.ci)
 
 ## What it does

@@ -1,9 +1,9 @@
 image:
-  ref: europe-west4-docker.pkg.dev/skipopsmain/cloudtaser/cloudtaser-oberth@sha256:1dd6e7c4de4432daa9b0eb9382d608f54e7d3ff7ca97585e08a92b66f58874a2
+  ref: europe-west4-docker.pkg.dev/skipopsmain/cloudtaser/cloudtaser-oberth@sha256:d6745eeb0a0906c2454bd801f430a048931363c35dfe9e5a1a612e8acf86b397
   pullPolicy: IfNotPresent
 
 runnerImage:
-  ref: europe-west4-docker.pkg.dev/skipopsmain/cloudtaser/cloudtaser-oberth-ci@sha256:37f8d85049d01eeffe2cc5aa10ecf24cae242016fbcc95b2834f104d4db64896
+  ref: europe-west4-docker.pkg.dev/skipopsmain/cloudtaser/cloudtaser-oberth-ci@sha256:c6fba4ff197c4f4780a65cbb5594c0f0264ce6bda044bfc3f51db1d5ff154064
 
 replicaCount: 1
 maxConcurrentJobs: 3
