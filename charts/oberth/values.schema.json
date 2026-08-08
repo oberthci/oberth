@@ -1,0 +1,442 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "image",
+    "runnerImage",
+    "replicaCount",
+    "maxConcurrentJobs",
+    "stepTimeout",
+    "auditAnchor",
+    "service",
+    "persistence",
+    "tls",
+    "ssh",
+    "upstream",
+    "releaseSecrets",
+    "cache",
+    "jobs",
+    "resources",
+    "podAnnotations",
+    "podLabels",
+    "secretCreatePolicy"
+  ],
+  "properties": {
+    "image": {
+      "$ref": "#/definitions/image"
+    },
+    "runnerImage": {
+      "$ref": "#/definitions/runnerImage"
+    },
+    "replicaCount": {
+      "type": "integer",
+      "const": 1
+    },
+    "maxConcurrentJobs": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 64
+    },
+    "stepTimeout": {
+      "$ref": "#/definitions/duration"
+    },
+    "auditAnchor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "tsaURL",
+        "rekorURL",
+        "interval",
+        "maxAge",
+        "rootsSecret",
+        "rootsKey",
+        "acceptWitnessChainReset"
+      ],
+      "properties": {
+        "tsaURL": {
+          "type": "string",
+          "format": "uri",
+          "pattern": "^https://[^/?#@\\s]+(?:[/?][^#\\s]*)?$"
+        },
+        "rekorURL": {
+          "type": "string",
+          "format": "uri",
+          "pattern": "^https://[^/?#@\\s]+(?:[/?][^#\\s]*)?$"
+        },
+        "interval": {
+          "$ref": "#/definitions/duration"
+        },
+        "maxAge": {
+          "$ref": "#/definitions/duration"
+        },
+        "rootsSecret": {
+          "$ref": "#/definitions/optionalKubernetesName"
+        },
+        "rootsKey": {
+          "$ref": "#/definitions/secretDataKey"
+        },
+        "acceptWitnessChainReset": {
+          "type": "string",
+          "pattern": "^$|^[0-9a-f]{64}$|^[0-9a-f]{80}$"
+        }
+      }
+    },
+    "service": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sshNodePort",
+        "httpsNodePort"
+      ],
+      "properties": {
+        "sshNodePort": {
+          "type": "integer",
+          "const": 30022
+        },
+        "httpsNodePort": {
+          "type": "integer",
+          "const": 30443
+        }
+      }
+    },
+    "persistence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "existingClaim",
+        "storageClassName",
+        "size"
+      ],
+      "properties": {
+        "existingClaim": {
+          "type": "string"
+        },
+        "storageClassName": {
+          "type": "string"
+        },
+        "size": {
+          "type": "string",
+          "pattern": "^([1-9][0-9]*Gi|[1-9][0-9]*Ti)$"
+        }
+      }
+    },
+    "tls": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "existingSecret"
+      ],
+      "properties": {
+        "existingSecret": {
+          "type": "string"
+        }
+      }
+    },
+    "ssh": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "hostKey"
+      ],
+      "properties": {
+        "hostKey": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "existingSecret"
+          ],
+          "properties": {
+            "existingSecret": {
+              "$ref": "#/definitions/optionalKubernetesName"
+            }
+          }
+        }
+      }
+    },
+    "upstream": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "baseURL",
+        "createSecrets",
+        "keySecret",
+        "keyFile",
+        "knownHostsSecret",
+        "knownHostsKey"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+        },
+        "baseURL": {
+          "type": "string",
+          "pattern": "^ssh://[^\\s]+$"
+        },
+        "createSecrets": {
+          "type": "boolean"
+        },
+        "keySecret": {
+          "$ref": "#/definitions/kubernetesName"
+        },
+        "keyFile": {
+          "$ref": "#/definitions/secretDataKey"
+        },
+        "knownHostsSecret": {
+          "$ref": "#/definitions/kubernetesName"
+        },
+        "knownHostsKey": {
+          "$ref": "#/definitions/secretDataKey"
+        }
+      }
+    },
+    "releaseSecrets": {
+      "type": "array",
+      "uniqueItems": true,
+      "description": "Administrator allowlist; each repository requests an exact subset in .oberth/periapsis.go.",
+      "items": {
+        "$ref": "#/definitions/kubernetesName"
+      }
+    },
+    "cache": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ciRoot",
+        "releaseRoot"
+      ],
+      "properties": {
+        "ciRoot": {
+          "type": "string",
+          "pattern": "^/[^\\s]*[^/\\s]$"
+        },
+        "releaseRoot": {
+          "type": "string",
+          "pattern": "^/[^\\s]*[^/\\s]$"
+        }
+      }
+    },
+    "jobs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "timeout",
+        "ttlSecondsAfterFinished",
+        "resources"
+      ],
+      "properties": {
+        "timeout": {
+          "$ref": "#/definitions/duration"
+        },
+        "ttlSecondsAfterFinished": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2147483647
+        },
+        "resources": {
+          "$ref": "#/definitions/resources"
+        }
+      }
+    },
+    "resources": {
+      "$ref": "#/definitions/resources"
+    },
+    "podAnnotations": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "podLabels": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "secretCreatePolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enabled"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        }
+      }
+    },
+    "secretstore": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Secret-store-sourced release secrets from OpenBao: fetched at release admission, delivered into release-Job memory over exec, never stored in etcd or on disk.",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "address": {
+          "type": "string",
+          "default": "https://openbao.openbao.svc:8200",
+          "description": "OpenBao API base URL. Defaults to the standard in-cluster OpenBao Helm chart service; override if OpenBao is in a different namespace or external. HTTPS required unless insecureHTTPForDev.",
+          "pattern": "^$|^https?://"
+        },
+        "k8sAuthMount": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9._/-]+$",
+          "description": "Kubernetes auth mount path configured in OpenBao."
+        },
+        "role": {
+          "type": "string",
+          "description": "OpenBao Kubernetes auth role bound to the chart ServiceAccount."
+        },
+        "caCert": {
+          "type": "string",
+          "description": "Optional PEM bundle pinning the OpenBao TLS trust anchors (public material, delivered via ConfigMap)."
+        },
+        "insecureHTTPForDev": {
+          "type": "boolean",
+          "description": "DEVELOPMENT ONLY: allow a plain-HTTP OpenBao address."
+        },
+        "allowedPaths": {
+          "type": "array",
+          "uniqueItems": true,
+          "description": "Administrator allowlist of KV API paths repositories may declare through SecretStoreSecrets.",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512,
+            "pattern": "^[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*$",
+            "not": {
+              "pattern": "^(auth|sys|identity|cubbyhole)/"
+            }
+          }
+        },
+        "createAuthDelegatorBinding": {
+          "type": "boolean",
+          "description": "Create the system:auth-delegator ClusterRoleBinding for TokenReview-based logins."
+        }
+      },
+      "required": [
+        "enabled"
+      ],
+      "if": {
+        "properties": {
+          "enabled": {
+            "const": true
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "address": {
+            "minLength": 1
+          },
+          "role": {
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9._-]+$"
+          }
+        },
+        "required": [
+          "address",
+          "role"
+        ]
+      }
+    }
+  },
+  "definitions": {
+    "secretDataKey": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+    },
+    "kubernetesName": {
+      "type": "string",
+      "maxLength": 253,
+      "pattern": "^[a-z0-9](?:[-a-z0-9]{0,61}[a-z0-9])?(?:\\.[a-z0-9](?:[-a-z0-9]{0,61}[a-z0-9])?)*$"
+    },
+    "optionalKubernetesName": {
+      "type": "string",
+      "maxLength": 253,
+      "pattern": "^(?:[a-z0-9](?:[-a-z0-9]{0,61}[a-z0-9])?(?:\\.[a-z0-9](?:[-a-z0-9]{0,61}[a-z0-9])?)*)?$"
+    },
+    "duration": {
+      "type": "string",
+      "pattern": "^[1-9][0-9]*(ns|us|ms|s|m|h)$"
+    },
+    "image": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ref",
+        "pullPolicy"
+      ],
+      "properties": {
+        "ref": {
+          "type": "string",
+          "pattern": "^.+@sha256:[a-f0-9]{64}$"
+        },
+        "pullPolicy": {
+          "type": "string",
+          "enum": [
+            "Always",
+            "IfNotPresent",
+            "Never"
+          ]
+        }
+      }
+    },
+    "runnerImage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ref"
+      ],
+      "properties": {
+        "ref": {
+          "type": "string",
+          "pattern": "^.+@sha256:[a-f0-9]{64}$"
+        }
+      }
+    },
+    "resources": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "requests",
+        "limits"
+      ],
+      "properties": {
+        "requests": {
+          "$ref": "#/definitions/resourcePair"
+        },
+        "limits": {
+          "$ref": "#/definitions/resourcePair"
+        }
+      }
+    },
+    "resourcePair": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "cpu",
+        "memory",
+        "ephemeral-storage"
+      ],
+      "properties": {
+        "cpu": {
+          "type": "string",
+          "minLength": 1
+        },
+        "memory": {
+          "type": "string",
+          "minLength": 1
+        },
+        "ephemeral-storage": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    }
+  }
+}

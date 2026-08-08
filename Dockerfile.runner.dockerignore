@@ -1,0 +1,13 @@
+**
+!Dockerfile.runner
+!go.mod
+!go.sum
+!cmd/
+!cmd/oberth-runner/
+!cmd/oberth-runner/**
+!internal/
+!internal/runner/
+!internal/runner/**
+!pkg/
+!pkg/periapsis/
+!pkg/periapsis/**

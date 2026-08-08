@@ -1,0 +1,68 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "oberth.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "oberth.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["create", "get", "list", "watch", "delete"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch", "patch"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["create", "get", "list"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames:
+      - {{ .Values.upstream.keySecret | quote }}
+      - {{ .Values.upstream.knownHostsSecret | quote }}
+    verbs: ["get", "patch"]
+  # Unbounded create: release snapshot Secrets are named with a deterministic
+  # SHA-256 hash of the Job name, so their names are not known at Role definition
+  # time and resourceNames cannot restrict them. The optional
+  # ValidatingAdmissionPolicy template (secretCreatePolicy.enabled) can enforce
+  # a prefix allowlist at the API server level instead.
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["create"]
+  {{- if .Values.releaseSecrets }}
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames:
+      {{- range .Values.releaseSecrets }}
+      - {{ . | quote }}
+      {{- end }}
+    verbs: ["get"]
+  {{- end }}
+  {{- if .Values.secretstore.enabled }}
+  # Store-sourced release secrets are delivered into the running release Pod
+  # over the exec subresource so their values never exist in etcd or on node
+  # disk. Runner Pod names are run-scoped, so resourceNames cannot restrict
+  # this; the namespace contains only Oberth's own Pods.
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["create"]
+  {{- end }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "oberth.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "oberth.labels" . | nindent 4 }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "oberth.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "oberth.fullname" . }}

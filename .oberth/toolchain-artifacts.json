@@ -1,0 +1,87 @@
+{
+  "schema": "oberth.toolchain-artifacts.v1",
+  "status": "published-and-read-back",
+  "publishedAt": "2026-08-07T06:52:40Z",
+  "origin": "https://releases.cloudtaser.io/oberth/toolchains/",
+  "generator": {
+    "goVersion": "go1.26.5",
+    "compression": "gzip -n -9"
+  },
+  "artifacts": [
+    {
+      "name": "golangci-lint",
+      "source": {
+        "module": "github.com/golangci/golangci-lint/v2@v2.12.2",
+        "sum": "h1:7+d1uY0bq1MU2UV3R5pW5Q7QWdcoq4naMRXM+gsJKrs=",
+        "goModSum": "h1:opqHHuIcTG2R+4akzWMd4o1BnD9/1LcjICWOujr91U8=",
+        "patchedDependency": "golang.org/x/text@v0.39.0"
+      },
+      "build": {
+        "environment": "CGO_ENABLED=0 GOOS=linux GOARCH=amd64",
+        "package": "./cmd/golangci-lint",
+        "flags": "-trimpath -buildvcs=false",
+        "ldflags": "-s -w -buildid= -X main.version=2.12.2+oberth.1 -X main.commit=c0d3ddc9cf3faa61a4e378e879ece580256d76e5 -X main.date=2026-08-05T00:00:00Z"
+      },
+      "archive": {
+        "url": "https://releases.cloudtaser.io/oberth/toolchains/sha256-5675ce9cba0d39c751a6c4302b26d79a38cc4904e8eba586395b70796acb16a0/golangci-lint-2.12.2-oberth.1-linux-amd64.gz",
+        "sha256": "5675ce9cba0d39c751a6c4302b26d79a38cc4904e8eba586395b70796acb16a0",
+        "size": 14783489
+      },
+      "binary": {
+        "sha256": "30d5e2e3715aed6e3a1008c9e074e50291926213d1b4fc50fa27e08ccaed7438",
+        "size": 40685694,
+        "identity": "golangci-lint 2.12.2+oberth.1"
+      }
+    },
+    {
+      "name": "trivy",
+      "source": {
+        "module": "github.com/aquasecurity/trivy@v0.73.0",
+        "sum": "h1:KOhSU8XlhYiHpYlOVFmue/akNU+adLb5gXDtrlmuwqs=",
+        "goModSum": "h1:rvWBubBeHD4aYtjlHH2NJ/eeFSnqEpAJGOd9+syR6Z4=",
+        "patchedDependency": "oras.land/oras-go/v2@v2.6.2"
+      },
+      "build": {
+        "environment": "GOEXPERIMENT=jsonv2 CGO_ENABLED=0 GOOS=linux GOARCH=amd64",
+        "package": "./cmd/trivy",
+        "flags": "-trimpath -buildvcs=false",
+        "ldflags": "-s -w -buildid= -X github.com/aquasecurity/trivy/pkg/version/app.ver=0.73.0+oberth.1"
+      },
+      "archive": {
+        "url": "https://releases.cloudtaser.io/oberth/toolchains/sha256-9faca4cd2dc9a1acd72e195ff1f5fed084b5cb0b11086aa3b2ffca7420e6c029/trivy-0.73.0-oberth.1-linux-amd64.gz",
+        "sha256": "9faca4cd2dc9a1acd72e195ff1f5fed084b5cb0b11086aa3b2ffca7420e6c029",
+        "size": 48757831
+      },
+      "binary": {
+        "sha256": "cce775a873e9df2468a5578148907380cf1f07b4c27ecec25d9b1da10dec0406",
+        "size": 166244478,
+        "identity": "trivy 0.73.0+oberth.1"
+      }
+    },
+    {
+      "name": "helm",
+      "source": {
+        "module": "helm.sh/helm/v4@v4.2.3",
+        "sum": "h1:JEejtPE04+SvyRomOfgRXVxyJ/lude7eShio30oQr0Y=",
+        "goModSum": "h1:azI2XpxowOGXAgzeXcqyfskUmIfILqIcJxiFw1M6PuM=",
+        "patchedDependency": "oras.land/oras-go/v2@v2.6.2"
+      },
+      "build": {
+        "environment": "CGO_ENABLED=0 GOOS=linux GOARCH=amd64",
+        "package": "./cmd/helm",
+        "flags": "-trimpath -buildvcs=false",
+        "ldflags": "-s -w -buildid= -X helm.sh/helm/v4/internal/version.version=v4.2.3 -X helm.sh/helm/v4/internal/version.metadata=oberth.1.g43e8b7f -X helm.sh/helm/v4/internal/version.gitTreeState=patched"
+      },
+      "archive": {
+        "url": "https://releases.cloudtaser.io/oberth/toolchains/sha256-e04e9b95e7a8377354b74f727033731ee095e8316401c8ac2423b058e614b1bd/helm-4.2.3-oberth.1-linux-amd64.gz",
+        "sha256": "e04e9b95e7a8377354b74f727033731ee095e8316401c8ac2423b058e614b1bd",
+        "size": 19653291
+      },
+      "binary": {
+        "sha256": "ae8c0c2bcd766239f8ef834e622449a1d1261a33e63e63287dfb4f9dc4072cd9",
+        "size": 64270462,
+        "identity": "helm v4.2.3+oberth.1.g43e8b7f"
+      }
+    }
+  ]
+}

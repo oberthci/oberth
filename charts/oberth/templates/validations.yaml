@@ -1,0 +1,45 @@
+{{- if or (not (regexMatch "^[^[:space:]@]+@sha256:[0-9a-f]{64}$" .Values.image.ref)) (contains "@sha256:0000000000000000000000000000000000000000000000000000000000000000" .Values.image.ref) -}}
+{{- fail "image.ref must be replaced with the built server image's sha256 digest" -}}
+{{- end -}}
+{{- if or (not (regexMatch "^[^[:space:]@]+@sha256:[0-9a-f]{64}$" .Values.runnerImage.ref)) (contains "@sha256:0000000000000000000000000000000000000000000000000000000000000000" .Values.runnerImage.ref) -}}
+{{- fail "runnerImage.ref must be replaced with the built CI image's sha256 digest" -}}
+{{- end -}}
+{{- if ne (int .Values.service.sshNodePort) 30022 -}}
+{{- fail "service.sshNodePort is fixed at 30022" -}}
+{{- end -}}
+{{- if ne (int .Values.service.httpsNodePort) 30443 -}}
+{{- fail "service.httpsNodePort is fixed at 30443" -}}
+{{- end -}}
+{{- if ne (int .Values.replicaCount) 1 -}}
+{{- fail "replicaCount is fixed at one for the single-writer SQLite service" -}}
+{{- end -}}
+{{- $ciRoot := .Values.cache.ciRoot -}}
+{{- $releaseRoot := .Values.cache.releaseRoot -}}
+{{- if or (ne (clean $ciRoot) $ciRoot) (ne (clean $releaseRoot) $releaseRoot) (not (hasPrefix "/" $ciRoot)) (not (hasPrefix "/" $releaseRoot)) (eq $ciRoot $releaseRoot) (hasPrefix (printf "%s/" $ciRoot) $releaseRoot) (hasPrefix (printf "%s/" $releaseRoot) $ciRoot) -}}
+{{- fail "CI and release cache roots must be distinct, absolute, and non-nested" -}}
+{{- end -}}
+{{- /* The prepare-caches init container takes ownership of these host paths as
+       root. Refuse system directories so a misconfigured value cannot chown
+       critical host state to the unprivileged service user. */ -}}
+{{- range $root := list $ciRoot $releaseRoot -}}
+{{- if lt (len (regexSplit "/" (trimPrefix "/" $root) -1)) 2 -}}
+{{- fail (printf "cache root %s must be at least two path segments deep" $root) -}}
+{{- end -}}
+{{- range $forbidden := list "/bin" "/boot" "/dev" "/etc" "/home" "/lib" "/lib64" "/opt" "/proc" "/root" "/run" "/sbin" "/sys" "/usr" "/var/lib" "/var/log" "/var/run" -}}
+{{- if or (eq $root $forbidden) (hasPrefix (printf "%s/" $forbidden) $root) -}}
+{{- fail (printf "cache root %s must not live under the system directory %s" $root $forbidden) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- if eq .Values.upstream.keySecret .Values.upstream.knownHostsSecret -}}
+{{- fail "upstream key and known_hosts Secrets must be distinct" -}}
+{{- end -}}
+{{- $persistenceSize := .Values.persistence.size -}}
+{{- $persistenceUnits := regexFind "(Gi|Ti)$" $persistenceSize -}}
+{{- $persistenceAmount := int (regexFind "^[0-9]+" $persistenceSize) -}}
+{{- if or (and (eq $persistenceUnits "Gi") (lt $persistenceAmount 10)) (and (eq $persistenceUnits "Ti") (lt $persistenceAmount 1)) -}}
+{{- fail "persistence.size must be at least 10Gi" -}}
+{{- end -}}
+{{- if or (lt (int .Values.maxConcurrentJobs) 1) (gt (int .Values.maxConcurrentJobs) 64) -}}
+{{- fail "maxConcurrentJobs must be between one and 64" -}}
+{{- end -}}

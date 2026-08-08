@@ -1,0 +1,532 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Oberth — AI-native CI · satellite Git & CI authority</title>
+<meta name="description" content="Oberth gates every AI agent push — one Kubernetes Job, a Go pipeline you can run locally, an audit chain anchored outside the box — before anything reaches your forge.">
+<link rel="canonical" href="https://oberth.ci/">
+<meta name="theme-color" content="#282a36">
+<meta name="color-scheme" content="dark">
+
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Oberth">
+<meta property="og:title" content="Oberth — AI-native CI · satellite Git & CI authority">
+<meta property="og:description" content="Oberth gates every AI agent push — one Kubernetes Job, a Go pipeline you can run locally, an audit chain anchored outside the box — before anything reaches your forge.">
+<meta property="og:url" content="https://oberth.ci/">
+<meta property="og:image" content="https://oberth.ci/og-image.svg">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Oberth — AI-native CI · satellite Git & CI authority">
+<meta name="twitter:description" content="Oberth gates every AI agent push — one Kubernetes Job, a Go pipeline you can run locally, an audit chain anchored outside the box — before anything reaches your forge.">
+<meta name="twitter:image" content="https://oberth.ci/og-image.svg">
+
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="/site.webmanifest">
+<link rel="preload" href="/fonts/inter-var-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/fonts/jetbrainsmono-var-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/styles.css">
+
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "name": "Oberth",
+  "url": "https://oberth.ci/",
+  "applicationCategory": "DeveloperApplication",
+  "operatingSystem": "Linux, macOS, Kubernetes",
+  "description": "Oberth gates every AI agent push with one Kubernetes Job running a Go pipeline you can run locally, before anything reaches your forge.",
+  "creator": {
+    "@type": "Organization",
+    "name": "skipOPS",
+    "url": "https://skipops.ltd/"
+  }
+}
+</script>
+</head>
+<body id="top">
+<div id="prog"></div>
+
+<a class="skip-link" href="#pg-home">Skip to content</a>
+<nav aria-label="Primary"><div class="nav-in">
+  <a class="mk" href="#/"><span class="tri">[▲]</span> oberth</a>
+  <div class="nl" id="nl">
+    <a href="#/pipeline" data-r="pipeline">Pipeline</a>
+    <a href="#/agents" data-r="agents">Agents</a>
+    <a href="#/trust" data-r="trust">Trust</a>
+    <a href="#/setup" data-r="setup">Setup</a>
+    <a href="#/alpha" data-r="alpha">Alpha</a>
+    <a href="https://oberth.ci/repos">Dashboard ↗</a>
+    <a href="https://github.com/oberthci/oberth" title="Source on GitHub" class="u-eabd78"><svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>GitHub ↗</a>
+  </div>
+  <a class="btn p sm u-20e7e1" href="#/try">Try it out <span class="ar">→</span></a>
+</div></nav>
+
+<main class="page" tabindex="-1" id="pg-home">
+<!-- ================= HERO ================= -->
+<header class="hero"><div class="wrap">
+  <div class="hero-grid">
+    <div>
+      <span class="eyebrow y rv in"><i></i>AI-native CI</span>
+      <h1 class="rv in u-44362b">Local CI at agent speed. <span class="soft">Only green reaches your <span class="rotor"><span class="rotor-in"><span>GitHub.</span><span>Codeberg.</span><span>GitLab.</span><span>GitHub.</span></span></span></span></h1>
+      <p class="lead rv in d1">AI agents produce code at machine speed. Oberth gates every push — <b>one Kubernetes Job</b>, a <b>Go pipeline you can run locally</b>, an <b>audit chain anchored outside the box</b> — before anything reaches your forge.</p>
+      <div class="hero-cta rv in d2">
+        <a class="btn p" href="#/try">Try it out <span class="ar">→</span></a>
+        <button class="btn g" id="howBtn">How it works ↓</button>
+      </div>
+      <div class="hero-meta rv in d3">
+        <span class="chip">ALPHA</span><span class="sep">/</span>
+        <span>Self-hosted · single-node friendly</span><span class="sep">/</span>
+        <span>Codeberg · GitHub · Gitea · GitLab</span>
+      </div>
+    </div>
+    <div class="term rv in d2" id="heroTerm">
+      <div class="term-bar"><i class="r"></i><i class="y"></i><i class="g"></i><span class="t"><b>agent-07</b> / payments-api</span><span class="tr"><i></i>git ingress</span></div>
+      <div class="term-b" id="heroLog"></div>
+      <div class="term-f"><span>ILLUSTRATIVE CONTROL LOOP</span><button id="replayBtn">Replay ↺</button></div>
+    </div>
+  </div>
+
+  <div class="strip rv">
+    <div>ONE CONTROL POINT</div>
+    <div><div class="k">Git transport</div><div class="v">SSH <span>· smart protocol only</span></div></div>
+    <div><div class="k">CI</div><div class="v">One K8s Job <span>· periapsis.go</span></div></div>
+    <div><div class="k">Upstream</div><div class="v">Your forge <span>· source of truth</span></div></div>
+    <div><div class="k">Agent feedback</div><div class="v">stderr · MCP <span>· 13 tools</span></div></div>
+  </div>
+</div></header>
+<!-- ================= OBERTH EFFECT SIM ================= -->
+<section class="obsim"><div class="wrap">
+  <div class="secno rv"><b>00 /</b> Why "Oberth"</div>
+  <div class="obsim-top">
+    <div>
+      <h2 class="rv">CI at local speed. <span class="soft">Upstream gets only green.</span></h2>
+      <p class="lead rv">Every agent push runs full CI on your own box — no forge queue, no rate limits, feedback in seconds. <b>Green work syncs upstream automatically. Red work never leaves the box</b>: it becomes an issue, gets fixed, and re-runs until it passes. Your forge only ever receives code that's already proven. The name? A burn at periapsis — closest approach — buys the most orbit for the least fuel. Same idea: <b>spend the energy at the push</b>.</p>
+    </div>
+    <div class="tldr rv d1">
+      <div class="th">TL;DR — IF YOU READ ONE THING</div>
+      <ul>
+        <li><span class="y">▸</span><span><b>Self-hosted CI gate for AI coding agents.</b> One Helm chart on your own Kubernetes — a k3s box counts.</span></li>
+        <li><span class="y">▸</span><span>Agents <b>git push to Oberth</b>. Every push runs full CI in one Kubernetes Job — <b>no forge queue, no rate limits</b>.</span></li>
+        <li><span class="y">▸</span><span><b>Green auto-syncs</b> to GitHub / Codeberg / GitLab. <b>Red stays on the box</b> as an issue until an agent fixes it.</span></li>
+        <li><span class="y">▸</span><span>Pipeline is a <b>Go file you can run locally</b>. Agents drive it through <b>13 MCP tools</b>.</span></li>
+        <li><span class="y">▸</span><span>Every action attributed and <b>audit-chained outside the box</b> — timestamped, publicly witnessed.</span></li>
+      </ul>
+      <div class="tf">3 commands to try it → <a href="#/try">quickstart</a></div>
+    </div>
+  </div>
+
+  <div class="obsim-panel rv u-a0ec95">
+    <div class="obsim-h"><i class="r"></i><i class="y"></i><i class="g"></i><span class="t"><b>two-body sim</b> · gravity is real, the metaphor is free</span><span class="leg"><span class="g2">◆ prograde burn → escape → GREEN</span><span class="r2">◆ retrograde burn → decay → RED</span></span></div>
+    <canvas id="obCanvas" role="img" aria-label="Animated illustration: two CI pipelines orbit toward a release boundary — the passing pipeline burns forward and docks upstream, the failing pipeline is redirected to the issue queue."></canvas>
+    <div class="obsim-f"><span id="obStatus" aria-live="polite">initializing orbit…</span><span>CLICK TO SKIP AHEAD</span></div>
+  </div>
+
+  <div class="obsim-cap">
+    <div class="li rv"><span class="m ok u-a19217">◆</span><span><b class="u-789157">Prograde at periapsis:</b> the ship adds velocity where it's already moving fastest, energy compounds, the orbit opens into an escape hyperbola. In Oberth terms — the run goes green and the branch flies upstream.</span></div>
+    <div class="li rv d1"><span class="m u-45e7ae">◆</span><span><b class="u-789157">Retrograde at periapsis:</b> velocity bleeds off at the worst possible place, the orbit collapses, the ship comes down. The run goes red — and the wreck is filed as issue #47 for the next agent to pick up.</span></div>
+  </div>
+</div></section>
+<!-- ================= 01 CONTROL LOOP ================= -->
+<section id="how-it-works-sec"><div class="wrap">
+  <div class="secno rv"><b>01 /</b> The control loop</div>
+  <h2 class="rv">A gate at the one boundary every coding agent already understands.</h2>
+  <p class="lead rv">No editor plugin, no SDK. A push enters Oberth through standard Git, gets a run in one Kubernetes Job, and moves upstream only when it's green. When it isn't — the failure becomes an issue an agent can pick up.</p>
+
+  <div class="stepper rv">
+    <div class="step-tabs" id="stepTabs">
+      <button class="step-tab on" data-i="0"><span class="no">01</span><span class="nm">Receive</span><span class="glyph">$</span></button>
+      <button class="step-tab" data-i="1"><span class="no">02</span><span class="nm">Run</span><span class="glyph">▣</span></button>
+      <button class="step-tab" data-i="2"><span class="no">03</span><span class="nm">Record</span><span class="glyph">✓✗</span></button>
+      <button class="step-tab" data-i="3"><span class="no">04</span><span class="nm">Promote</span><span class="glyph">⇗</span></button>
+      <button class="step-tab" data-i="4"><span class="no">05</span><span class="nm">Release</span><span class="glyph">⬢</span></button>
+    </div>
+    <div class="step-panel">
+      <p class="desc" id="stepDesc"></p>
+      <div class="term"><div class="term-bar"><i class="r"></i><i class="y"></i><i class="g"></i><span class="t" id="stepTermTitle"></span></div>
+      <div class="term-b u-185da8" id="stepTerm"></div></div>
+    </div>
+  </div>
+
+  <div class="fineprint rv"><span class="i">i</span><span><b>Your forge remains the source of truth.</b> Oberth is a satellite CI and quality gate — not a replacement for pull requests, review, issue tracking, or your release governance. Green work is force-synced to your forge; nothing lives only on the box.</span></div>
+</div></section>
+<!-- ================= 02 FLIGHT MANUAL ================= -->
+<section id="features"><div class="wrap">
+  <div class="secno rv"><b>02 /</b> What's built</div>
+  <h2 class="rv">What Oberth does today.</h2>
+  <p class="lead rv">Honest inventory, drawn as the machine it is. Follow a push left to right; click any part for the full story.</p>
+
+  <div class="schem rv">
+    <div class="schem-h"><span>SYSTEM SCHEMATIC</span><span><button class="schip u-9af3dc" data-f="8">⛓ audit chain</button></span></div>
+    <div class="sflow" id="sflow">
+      <div class="snode" id="agentNode"><b>AI AGENT</b><br>claude · codex · …</div>
+      <div class="slane"><span class="lbl">git push</span><i></i><span class="ar">▶</span></div>
+      <div class="sgroup"><div class="gt">INGRESS</div>
+        <button class="schip" data-f="0">Git ingress &amp; cache</button>
+        <button class="schip" data-f="1">Uplink identity</button>
+      </div>
+      <div class="slane"><span class="lbl">one run</span><i class="u-fd4425"></i><span class="ar">▶</span></div>
+      <div class="sburncol">
+        <div class="sgroup"><div class="gt">BURN · ONE K8S JOB</div>
+          <button class="schip" data-f="4">periapsis.go</button>
+          <button class="schip" data-f="3">Minimal runner</button>
+          <button class="schip" data-f="2">Queue &amp; supersession</button>
+        </div>
+        <div class="sdrop"><i></i></div>
+        <div class="sissue"><button class="schip" data-f="5" id="issueChip">✗ Issue queue</button></div>
+      </div>
+      <div class="slane grn"><span class="lbl">green</span><i class="u-6e5b5f"></i><span class="ar">▶</span></div>
+      <div class="sgroup"><div class="gt">EGRESS</div>
+        <button class="schip" data-f="6">Promote</button>
+        <button class="schip" data-f="7">Release burns</button>
+      </div>
+      <div class="slane grn"><span class="lbl">synced</span><i class="u-084650"></i><span class="ar">▶</span></div>
+      <div class="snode" id="upstreamNode"><b>UPSTREAM</b><br><span class="rotor u-632ddf"><span class="rotor-in u-3e62f1"><span>github</span><span>codeberg</span><span>gitlab</span><span>github</span></span></span></div>
+    </div>
+  </div>
+  <p class="schem-cap rv">One push, one Job, one verdict. An agent pushes over SSH; Oberth attributes it to an <b>uplink</b> and runs the repo's <b>periapsis.go</b> in a single Kubernetes Job. <b>Red</b> files exactly one issue per branch and stays on the box until an agent fixes it. <b>Green — and only green — syncs upstream.</b> Click any part of the schematic for the full story.</p>
+
+  
+</div></section>
+<!-- ================= PILOT ================= -->
+<section id="pilot"><div class="wrap">
+  <div class="bigcard rv u-b8241a">
+    <div class="pilot-grid">
+      <div class="pilot">
+        <span class="eyebrow p"><i></i>Alpha pilot program</span>
+        <h2 class="u-43a96e">Put your real agent workflow through the gate.</h2>
+        <p class="lead">We are inviting a small group of platform and security teams to validate Oberth on real branches — not synthetic demos.</p>
+        <div class="hero-cta">
+          <a class="btn p" href="mailto:hello@oberth.ci?subject=Oberth%20alpha%20pilot&body=Team%20size%3A%0AForge%3A%0ACoding%20agents%3A%0AWhat%20hurts%20today%3A">Talk to the Oberth team <span class="ar">→</span></a>
+        </div>
+        <div class="micro">Direct engineering conversation · no generic sales funnel</div>
+      </div>
+      <div class="fit">
+        <div class="lh">Strong pilot fit</div>
+        <div class="fitem"><span class="no">01</span><div><h4>AI agents in production</h4><p>Claude Code, Codex, or similar agents producing real commits.</p></div></div>
+        <div class="fitem"><span class="no">02</span><div><h4>CI friction slows agent loops</h4><p>API rate limits, queuing, or slow feedback loops are a visible cost.</p></div></div>
+        <div class="fitem"><span class="no">03</span><div><h4>Audit trail matters</h4><p>You need to know which agent pushed what — and to trust that record more than the box it sits on.</p></div></div>
+        <div class="fitem"><span class="no">04</span><div><h4>Self-hosted is acceptable</h4><p>Your team can deploy a Helm chart to a Kubernetes cluster. A k3s box counts.</p></div></div>
+      </div>
+    </div>
+  </div>
+</div></section>
+</main>
+
+<main class="page" tabindex="-1" id="pg-pipeline">
+<!-- ================= 03 PIPELINE ================= -->
+<section id="pipeline"><div class="wrap">
+  <div class="secno rv"><b>PIPELINE /</b> periapsis.go</div>
+  <h2 class="rv">Your pipeline is a Go file. <span class="soft">Run it locally first.</span></h2>
+  <p class="lead rv"><code>.oberth/periapsis.go</code> is what a workflow YAML always wanted to be: named burns and steps with real exit codes and named log capture — in a language your agents already write, executable on a laptop before it's pushed. yaegi interprets it inside the Job; the server never evaluates repository code.</p>
+
+  <div class="mcp-grid">
+    <div class="code rv"><div class="code-h"><span>.oberth/periapsis.go <em>excerpt</em></span><button class="cp">COPY</button></div><pre><span class="c-cm">// release burns get exactly these — nothing else, ever.</span>
+<span class="c-k">var</span> ReleaseSecrets = []<span class="c-f">string</span>{<span class="c-s">"r2-publisher"</span>, <span class="c-s">"cosign-key"</span>}
+
+<span class="c-k">func</span> <span class="c-f">Pipeline</span>(p *periapsis.P) {
+  setup := p.<span class="c-f">Burn</span>(<span class="c-s">"setup"</span>)
+  setup.<span class="c-f">Step</span>(<span class="c-s">"toolchain"</span>,        <span class="c-cm">// pinned + checksummed</span>
+    <span class="c-s">"./tools/install.sh go1.24.5 golangci-lint trivy"</span>)
+
+  ci := p.<span class="c-f">Burn</span>(<span class="c-s">"ci"</span>, setup)
+  ci.<span class="c-f">Step</span>(<span class="c-s">"lint"</span>,  <span class="c-s">"golangci-lint run ./..."</span>)
+  ci.<span class="c-f">Step</span>(<span class="c-s">"test"</span>,  <span class="c-s">"go test -race ./..."</span>).<span class="c-f">Timeout</span>(<span class="c-y">45</span>*time.Minute)
+  ci.<span class="c-f">Step</span>(<span class="c-s">"build"</span>, <span class="c-s">"go build ./cmd/..."</span>)
+
+  rel := p.<span class="c-f">ReleaseBurn</span>(<span class="c-s">"release"</span>, ci)  <span class="c-cm">// tag-trigger only</span>
+  rel.<span class="c-f">Step</span>(<span class="c-s">"publish"</span>, <span class="c-s">"./tools/publish.sh"</span>)
+}</pre></div>
+    <div>
+      <div class="list u-926d3b">
+        <div class="li rv"><span class="m ok">→</span><span><b>Steps are subprocesses, not containers.</b> One Job, one container; each step gets its own process group, exit code, bounded timeout (30 min default, overridable) and a named log slice you can fetch alone.</span></div>
+        <div class="li rv d1"><span class="m ok">→</span><span><b>Dependencies are declared, never ambient.</b> No workflow may rely on a tool merely existing in the runner image. Setup steps install pinned versions with SHA-256 checks; the runner resolves commands from the merged step <code class="inline-c">PATH</code>, never its own.</span></div>
+        <div class="li rv d2"><span class="m ok">→</span><span><b>Caches accelerate, they don't decide.</b> Persistent Go caches are split by repository <i>and</i> trust tier — a poisoned branch build can't feed bytes into a signed release artifact.</span></div>
+        <div class="li rv d3"><span class="m ok">→</span><span><b>A hung step can't wedge the queue.</b> Timed-out steps have their whole process group killed and joined; the outer Job deadline defaults to 12 hours; logs cap at 64 MiB with per-step byte ranges that survive pod reaping.</span></div>
+      </div>
+      <div class="fineprint rv u-ec72ea"><span class="i">λ</span><span><b>Why not Argo?</b> Earlier alphas dispatched Argo Workflows. The rewrite runs one plain Kubernetes Job per push — no CRDs, no controllers, no step containers. Multi-container orchestration was a road that ends with rebuilding Argo; we turned around.</span></div>
+    </div>
+  </div>
+</div></section>
+<section class="u-4260eb"><div class="wrap"><div class="bigcard rv">
+      <div>
+        <h3>No rate limits. No 429s.</h3>
+        <p class="lead">Oberth processes git operations in-process and creates Jobs directly via the Kubernetes API. No forge API quota between an agent and its CI. The queue is yours: a concurrency knob, FIFO for the rest, and supersession so a rebase-happy agent cancels its own stale runs instead of stacking them.</p>
+      </div>
+      <div class="code"><div class="code-h"><span>throughput <em>single-node reality</em></span></div><pre><span class="c-cm"># AI agents pushing concurrently</span>
+agent-01  feat/auth-refactor    <span class="c-s">RUN STARTED</span>   0ms
+agent-02  feat/policy-engine    <span class="c-s">RUN STARTED</span>   0ms
+agent-03  fix/schema-drift      <span class="c-s">RUN STARTED</span>   0ms
+agent-04  feat/retry-budget     <span class="c-y">QUEUED #1</span>     fifo
+agent-02  feat/policy-engine    <span class="c-d">SUPERSEDED</span>    new push
+<span class="c-cm"># no forge API quota · no 429 · your cluster is the limit</span></pre></div>
+    </div>
+    </div></section>
+<div class="cta-mini"><div class="in"><div><div class="tx">Put your real agent workflow through the gate.</div><div class="sub">DIRECT ENGINEERING CONVERSATION · NO GENERIC SALES FUNNEL</div></div><a class="btn p" href="mailto:hello@oberth.ci?subject=Oberth%20alpha%20pilot">Join the pilot <span class="ar">→</span></a></div></div>
+</main>
+
+<main class="page" tabindex="-1" id="pg-agents">
+<!-- ================= 04 MCP ================= -->
+<section id="mcp"><div class="wrap">
+  <div class="secno rv"><b>AGENTS /</b> MCP interface</div>
+  <h2 class="rv">Thirteen tools. <span class="soft">Zero babysitting.</span></h2>
+  <p class="lead rv">Agents lose SHAs to context compaction — so <code>status</code> takes a branch. Agents can't sleep-poll politely — so <code>wait</code> long-polls to a terminal state and returns a clean <i>still running</i> at the timeout. The failure that would be lost when an agent is reaped becomes an issue another agent can lock and fix.</p>
+
+  <div class="mcp-grid">
+    <div>
+      <div class="tools rv">
+        <div class="tool"><span class="tn">status</span><span class="td">CI state for <b>branch, short or full SHA</b> — failed step, issue, burn states</span></div>
+        <div class="tool"><span class="tn">logs</span><span class="td">exactly one named-step log slice — no verbose dumps</span></div>
+        <div class="tool"><span class="tn">wait</span><span class="td">long-poll to terminal state; clean <b>still_running</b> at timeout, call again</span></div>
+        <div class="tool"><span class="tn">sync</span><span class="td">park the WIP branch upstream <b>without a green gate</b> — even red</span></div>
+        <div class="tool"><span class="tn">promote</span><span class="td">green-gate → local merge → CI on merged tree → non-forced push · returns ID</span></div>
+        <div class="tool"><span class="tn">promote_status</span><span class="td">wait semantics on the append-only promotion record</span></div>
+        <div class="tool"><span class="tn">issue_create / get / update</span><span class="td">plain records, no format ceremony</span></div>
+        <div class="tool"><span class="tn">issue_close / delete / list</span><span class="td">close keeps history; delete is for mistakes; list pages by 50</span></div>
+        <div class="tool"><span class="tn">issue_lock</span><span class="td">5-min TTL lock owned by <b>your uplink</b>, renews while you work it</span></div>
+      </div>
+      <div class="tabs2 rv">
+        <button class="tab2 on" data-cfg="claude">Claude Code</button>
+        <button class="tab2" data-cfg="codex">Codex</button>
+      </div>
+      <div class="code rv u-acef09"><div class="code-h"><span id="cfgTitle">.mcp.json</span><button class="cp">COPY</button></div><pre id="cfgCode">{
+  <span class="c-s">"mcpServers"</span>: {
+    <span class="c-s">"oberth"</span>: {
+      <span class="c-s">"command"</span>: <span class="c-s">"oberth"</span>,
+      <span class="c-s">"args"</span>: [<span class="c-s">"mcp"</span>,
+        <span class="c-s">"--remote"</span>, <span class="c-s">"https://oberth.host:30443"</span>,
+        <span class="c-s">"--token-file"</span>, <span class="c-s">"~/.config/oberth/token"</span>]
+    }
+  }
+}</pre></div>
+    </div>
+    <div class="term rv d1 u-ff8e6e">
+      <div class="term-bar"><i class="r"></i><i class="y"></i><i class="g"></i><span class="t"><b>agent session</b> · mcp</span><span class="tr"><i></i>replay</span></div>
+      <div class="term-b u-f044bf" id="mcpLog"></div>
+      <div class="term-f"><span>THE LOOP, AS AN AGENT LIVES IT</span><button id="mcpReplay">Replay ↺</button></div>
+    </div>
+  </div>
+</div></section>
+<div class="cta-mini"><div class="in"><div><div class="tx">Put your real agent workflow through the gate.</div><div class="sub">DIRECT ENGINEERING CONVERSATION · NO GENERIC SALES FUNNEL</div></div><a class="btn p" href="mailto:hello@oberth.ci?subject=Oberth%20alpha%20pilot">Join the pilot <span class="ar">→</span></a></div></div>
+</main>
+
+<main class="page" tabindex="-1" id="pg-trust">
+<!-- ================= 05 RELEASE ================= -->
+<section id="release"><div class="wrap">
+  <div class="secno rv"><b>TRUST /</b> The release boundary</div>
+  <h2 class="rv">The trigger <span class="soft">is</span> the security boundary.</h2>
+  <p class="lead rv">One rule decides everything: a <b>branch push is a CI burn</b> and mounts nothing. A <b>tag push is a release burn</b> and mounts exactly the secrets your repository names — intersected with the administrator allowlist. Oberth mounts, periapsis.go names, nothing else changes.</p>
+
+  <div class="term rv u-bf6a2b">
+    <div class="term-bar"><i class="r"></i><i class="y"></i><i class="g"></i><span class="t"><b>three pushes</b> · one rule</span></div>
+    <div class="term-b u-64e0df">
+<div class="tl show"><span class="pr">$</span> git push oberth <span class="u-a19217">feat/rotate-keys</span></div>
+<div class="tl show"><span class="rm">&nbsp;&nbsp;trigger:</span> branch → CI burn</div>
+<div class="tl show"><span class="rm">&nbsp;&nbsp;secrets mounted:</span> <b>none</b> <span class="cm">· no SA token · non-root · that's the whole story</span></div>
+<div class="tl show u-314783"><span class="pr">$</span> git push oberth <span class="u-e3ec2a">v0.11.0</span></div>
+<div class="tl show"><span class="rm">&nbsp;&nbsp;gate:</span> commit reachable from default branch ✓ <span class="cm">· merge-base --is-ancestor</span></div>
+<div class="tl show"><span class="rm">&nbsp;&nbsp;trigger:</span> tag → release burn</div>
+<div class="tl show"><span class="rm">&nbsp;&nbsp;secrets mounted:</span> <span class="u-e3ec2a">r2-publisher, cosign-key</span> <span class="cm">← ReleaseSecrets ∩ allowlist, nothing else</span></div>
+<div class="tl show"><span class="rm">&nbsp;&nbsp;logs:</span> every mounted value registered with the redactor <span class="cm">before disk or API</span></div>
+<div class="tl show u-314783"><span class="pr">$</span> git push oberth <span class="u-e3ec2a">v9.9.9</span> <span class="cm"># tag on an un-promoted sha</span></div>
+<div class="tl show"><span class="rm">&nbsp;&nbsp;gate:</span> <span class="u-45e7ae">not reachable from default branch → no burn</span> <span class="cm">· nothing runs, nothing mounts</span></div>
+    </div>
+  </div>
+
+  <div class="relnotes rv">
+    <div class="relnote"><b>declared, statically</b><span>The server parses the literal <span class="inline-c">var ReleaseSecrets = []string{…}</span> from periapsis.go without executing repository code. An undeclared credential is never mounted; a requested-but-unapproved name fails admission.</span></div>
+    <div class="relnote"><b>snapshotted, immutable</b><span>Secret bytes are copied into a Job-owned snapshot Secret so values can't change mid-release, projected read-only at <span class="inline-c">/secrets/&lt;name&gt;/&lt;key&gt;</span>.</span></div>
+    <div class="relnote"><b>satellite, not sovereign</b><span>Oberth builds, tests against the real published artifacts, and syncs the proven tag upstream. Your own release pipelines take it from there — Oberth marks the tag complete, it doesn't own your rollout.</span></div>
+  </div>
+</div></section>
+<!-- ================= 06 AUDIT ================= -->
+<section id="audit"><div class="wrap">
+  <div class="secno rv"><b>TRUST /</b> The audit chain</div>
+  <h2 class="rv">Tamper-evident <span class="soft">against its own host.</span></h2>
+  <p class="lead rv">Every push, sync, promotion and issue mutation is attributed to a durable uplink and chained. The chain head is then anchored where Oberth — and whoever holds Oberth's disk — cannot rewrite it. Roll back the whole PVC and the system fails closed instead of forgetting.</p>
+
+  <div class="chainvis rv">
+    <div class="cblock"><div class="ct">SQLite audit rows</div><div class="cs">gap-free SHA-256 chain · actor on every mutation</div><span class="cbadge">ON THE PVC</span></div>
+    <div class="clink"><i></i></div>
+    <div class="cblock"><div class="ct">RFC 3161 timestamp</div><div class="cs">independent TSA (Sectigo) signs each chain head over HTTPS</div><span class="cbadge">OUTSIDE THE BOX</span></div>
+    <div class="clink"><i></i></div>
+    <div class="cblock"><div class="ct">Rekor witness</div><div class="cs">signed heads published to the public transparency log under a stable witness identity</div><span class="cbadge">PUBLIC</span></div>
+    <div class="clink"><i></i></div>
+    <div class="cblock"><div class="ct">Immutable K8s records</div><div class="cs">intent/completion objects Oberth can create, get, list — never update, patch or delete</div><span class="cbadge">ROLLBACK-EXTERNAL</span></div>
+  </div>
+
+  <div class="audit-pts">
+    <div class="li rv"><span class="m ok">→</span><span><b>Fail-closed by construction.</b> Before readiness and before every mutation, Oberth verifies the local chain, the signed timestamp, the Rekor history and the external continuity records. A pending intent with no completed witness keeps every mutation gate shut.</span></div>
+    <div class="li rv d1"><span class="m ok">→</span><span><b>Even bootstrap obeys the gate.</b> In-pod <code class="inline-c">upstream add</code> and <code class="inline-c">uplink add</code> go through the live daemon's same fail-closed mutation gate over a private socket. If the audit proof is unavailable, setup changes nothing.</span></div>
+  </div>
+</div></section>
+<div class="cta-mini"><div class="in"><div><div class="tx">Put your real agent workflow through the gate.</div><div class="sub">DIRECT ENGINEERING CONVERSATION · NO GENERIC SALES FUNNEL</div></div><a class="btn p" href="mailto:hello@oberth.ci?subject=Oberth%20alpha%20pilot">Join the pilot <span class="ar">→</span></a></div></div>
+</main>
+
+<main class="page" tabindex="-1" id="pg-setup">
+<!-- ================= 07 SETUP ================= -->
+<section id="setup"><div class="wrap">
+  <div class="secno rv"><b>SETUP /</b> Deploy and use</div>
+  <h2 class="rv">Deploy and use.</h2>
+  <p class="lead rv">Server side: a Helm chart and two bootstrap commands. Client side: push. No signup flow, no dependency on Argo — a k3s box on your desk qualifies.</p>
+
+  <div class="setup">
+    <div class="code rv"><div class="code-h"><span>server <em>deploy + bootstrap identity</em></span><button class="cp">COPY</button></div><pre><span class="c-cm"># deploy — no Argo prerequisite, no CRDs</span>
+helm repo add oberth https://charts.oberth.ci
+helm repo update
+helm upgrade --install oberth oberth/oberth \
+  -n oberth --create-namespace
+<span class="c-cm"># → live, not ready. bootstrap identity:</span>
+
+<span class="c-cm"># 1 · connect your forge (offers to mint a key,</span>
+<span class="c-cm">#     stored in a K8s Secret, survives restarts)</span>
+kubectl exec -n oberth deploy/oberth -- \
+  oberth <span class="c-f">upstream add</span> codeberg.org
+<span class="c-cm"># → add the printed key to your forge</span>
+
+<span class="c-cm"># 2 · register an agent or human key</span>
+kubectl exec -n oberth deploy/oberth -- \
+  oberth <span class="c-f">uplink add</span> \
+  "$(cat ~/.ssh/id_ed25519.pub) <span class="c-y">agent-07@runner</span>"
+<span class="c-cm"># → bearer token printed once · stored as sha256</span></pre></div>
+    <div class="code rv d1"><div class="code-h"><span>client <em>start pushing</em></span><button class="cp">COPY</button></div><pre><span class="c-cm"># SSH on NodePort 30022 · HTTPS/MCP on 30443 (TLS 1.3,</span>
+<span class="c-cm"># pin the fingerprint uplink-add printed)</span>
+
+<span class="c-cm"># clone through oberth — it fetches &amp; caches on demand</span>
+git clone ssh://git@oberth.host:30022/myorg/payments-api
+
+<span class="c-cm"># push. oberth gates it.</span>
+git push oberth feat/my-branch
+
+<span class="c-cm"># wire the agent (MCP, 13 tools)</span>
+claude mcp add oberth -- oberth mcp \
+  --remote https://oberth.host:30443 \
+  --token-file ~/.config/oberth/token
+
+<span class="c-cm"># the loop from the agent's seat:</span>
+<span class="c-d">status feat/my-branch   → red · failed: build_arm64</span>
+<span class="c-d">logs 8f3a2c build_arm64 → just that step's log</span>
+<span class="c-d">…fix, push, wait, promote, done.</span></pre></div>
+  </div>
+</div></section>
+<section class="u-4260eb"><div class="wrap"><div class="bigcard grn rv">
+      <div>
+        <span class="eyebrow g"><i></i>Live at oberth.ci</span>
+        <h3 class="u-2239d6">See every repo. Watch every build.</h3>
+        <p class="lead">The dashboard shows real CI activity — runs, repos, issues, upstream and cluster status. Status pages are public; step logs, audit records and MCP need a bearer token tied to your uplink.</p>
+        <div class="hero-cta u-5913c7">
+          <a class="btn p" href="https://oberth.ci/repos">Browse repositories <span class="ar">→</span></a>
+          <a class="btn g" href="https://oberth.ci/runs">Watch live CI →</a>
+        </div>
+      </div>
+      <div class="code"><div class="code-h"><span>pages <em>read-only, on purpose</em></span></div><pre><span class="c-f">/runs</span>    <span class="c-d">every run · per-step status &amp; logs</span>
+<span class="c-f">/repos</span>   <span class="c-d">cached repos · branch health · history</span>
+<span class="c-f">/issues</span>  <span class="c-d">the CI work queue a monitor agent watches</span>
+<span class="c-f">/status</span>  <span class="c-d">upstream &amp; cluster reachability</span>
+
+<span class="c-cm"># no buttons. oberth observes auditable agent work —</span>
+<span class="c-cm"># orchestration happens through git, nowhere else.</span></pre></div>
+    </div>
+  </div></section>
+<div class="cta-mini"><div class="in"><div><div class="tx">Put your real agent workflow through the gate.</div><div class="sub">DIRECT ENGINEERING CONVERSATION · NO GENERIC SALES FUNNEL</div></div><a class="btn p" href="mailto:hello@oberth.ci?subject=Oberth%20alpha%20pilot">Join the pilot <span class="ar">→</span></a></div></div>
+</main>
+
+<main class="page" tabindex="-1" id="pg-alpha">
+<!-- ================= 08 ALPHA ================= -->
+<section id="alpha"><div class="wrap">
+  <div class="secno rv"><b>ALPHA /</b> The honest ledger</div>
+  <h2 class="rv">Oberth is in alpha. <span class="soft">Here's the ledger.</span></h2>
+  <p class="lead rv">A quality gate for AI-generated code — not a deployment tool, not a web UI with buttons. The rewrite is deployed and healthy; product acceptance is a sequence of proofs, and we publish which ones have passed.</p>
+
+  <div class="alpha-grid">
+    <div>
+      <div class="lh rv">What works today</div>
+      <div class="list">
+        <div class="li rv"><span class="m ok">✓</span><span>Git-over-SSH ingress with uplink identity &amp; clone-through cache</span></div>
+        <div class="li rv"><span class="m ok">✓</span><span>One-Job CI with the digest-pinned minimal runner</span></div>
+        <div class="li rv"><span class="m ok">✓</span><span><code class="inline-c">periapsis.go</code> burns/steps with named logs &amp; per-step exit codes</span></div>
+        <div class="li rv"><span class="m ok">✓</span><span>Issue queue with dedupe, auto-close and uplink locks</span></div>
+        <div class="li rv"><span class="m ok">✓</span><span>Green publication, WIP <code class="inline-c">sync</code>, exact-SHA <code class="inline-c">promote</code></span></div>
+        <div class="li rv"><span class="m ok">✓</span><span>Release admission: ancestry check + declared-secrets boundary</span></div>
+        <div class="li rv"><span class="m ok">✓</span><span>All 13 MCP tools over authenticated streamable HTTP</span></div>
+        <div class="li rv"><span class="m ok">✓</span><span>Audit chain + RFC 3161 + Rekor + rollback-external records</span></div>
+        <div class="li rv"><span class="m ok">✓</span><span>Dashboard pages: <code class="inline-c">/runs · /repos · /issues · /status</code></span></div>
+      </div>
+    </div>
+    <div>
+      <div class="lh rv">What doesn't exist — on purpose or yet</div>
+      <div class="list">
+        <div class="li rv"><span class="m no">—</span><span><b>No RBAC.</b> Friendly mode: every uplink has equal authority, including promote to main. Attribution is total; authorization is flat.</span></div>
+        <div class="li rv"><span class="m no">—</span><span><b>No HA.</b> Single node, single replica, single owner — a satellite CI authority by design, not a platform.</span></div>
+        <div class="li rv"><span class="m no">—</span><span><b>No Argo.</b> Workflows, templates and <code class="inline-c">.oberth/ci.yaml</code> are retired and not coming back.</span></div>
+        <div class="li rv"><span class="m no">—</span><span><b>No buttons.</b> The web UI observes; orchestration happens through git and MCP only.</span></div>
+        <div class="li rv"><span class="m no">—</span><span><b>No issue sync.</b> SQLite issues are the ephemeral CI work queue; your forge stays the tracker of record. They never pretend otherwise.</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="ledger rv">
+    <div class="ledger-h"><span>ACCEPTANCE LEDGER · UPDATED WITH EVERY MILESTONE</span><span>ALPHA</span></div>
+    <div class="led done"><span class="bx">[✓]</span><span>control plane deployed &amp; healthy — audit continuity verified across the schema transition</span></div>
+    <div class="led done"><span class="bx">[✓]</span><span>lightweight digest-pinned runner live — the 542 MiB image is history</span></div>
+    <div class="led done"><span class="bx">[✓]</span><span>live RFC 3161 receipts + Rekor witnesses verified</span></div>
+    <div class="led done"><span class="bx">[✓]</span><span>13/13 MCP tool definitions verified over authenticated HTTP</span></div>
+    <div class="led todo"><span class="bx">[ ]</span><span>complete example flow recorded end-to-end: red → dedup/lock → green → publish → promote → tag</span></div>
+    <div class="led todo"><span class="bx">[ ]</span><span>first real component release through the corrected pipeline, proven downstream</span></div>
+    <div class="led todo"><span class="bx">[ ]</span><span>protected-main promotion proof on an exact fix SHA</span></div>
+  </div>
+
+  <div class="friendly rv"><b>Friendly mode.</b> <span class="ink">Oberth is designed for your team and your trusted AI agents, not external collaborators.</span> The security model assumes trust within your uplink set: any token can promote, and release logs are readable by every uplink (mounted secret values are masked; your release scripts still shouldn't <span class="inline-c">set -x</span>). The audit chain is tamper-evident — including against the box it runs on — not tamper-proof. Need isolation for outsiders? Deploy them their own instance.</div>
+</div></section>
+<!-- ================= 09 FAQ ================= -->
+<section id="faq"><div class="wrap">
+  <div class="secno rv"><b>ALPHA /</b> Straight answers</div>
+  <h2 class="rv">Before you route a push through anything.</h2>
+  <div class="faq rv">
+    <details class="qa"><summary>Does Oberth replace GitHub, GitLab, or Codeberg?<span class="pm">+</span></summary><div class="ans">No. Your forge remains authoritative for pull requests, review, issues, releases and collaboration. Oberth is a <b>satellite CI</b> in front of it — it proves AI-generated code before it reaches the forge, force-syncs green work so nothing lives only on the box, and syncs proven tags so <b>your</b> release pipelines can take over.</div></details>
+    <details class="qa"><summary>What happened to Argo Workflows?<span class="pm">+</span></summary><div class="ans">Retired in the rewrite. Every run is now <b>one plain Kubernetes Job</b> — single container, no CRDs, no controllers, no init-container step chains. The pipeline is <code>.oberth/periapsis.go</code>, interpreted by yaegi inside the Job pod; steps run as subprocesses with per-step exit codes and named logs. Multi-container orchestration is a road that ends with rebuilding Argo, so we don't walk it.</div></details>
+    <details class="qa"><summary>What runs when a branch is pushed? And a tag?<span class="pm">+</span></summary><div class="ans"><b>Branch push → CI burn:</b> one Job, FIFO-queued (default 3 concurrent), zero secrets, no ServiceAccount token, non-root, resource-limited. A newer push to the same branch supersedes the run. <b>Tag push → release burn</b>, only if the tag's commit is reachable from the default branch — with exactly the secrets your repo's literal <code>ReleaseSecrets</code> declares, intersected with the admin allowlist, snapshotted and masked in logs.</div></details>
+    <details class="qa"><summary>Does an agent need an Oberth SDK?<span class="pm">+</span></summary><div class="ans">No. Standard Git is the base integration. For structured access there's a built-in MCP server with <b>13 tools</b> — status (by branch, because agents lose SHAs to context compaction), single-step logs, long-poll <code>wait</code>, red-tolerant <code>sync</code>, append-only <code>promote</code>, and an issue queue with uplink-owned locks. Claude Code and Codex work out of the box.</div></details>
+    <details class="qa"><summary>What is public and what requires authentication?<span class="pm">+</span></summary><div class="ans">Status pages at oberth.ci — runs, repos, issues, upstream/cluster status — are public. Step logs, audit records, MCP and the JSON API require a bearer token tied to your uplink (stored server-side only as a SHA-256 digest). Git push requires an authorized SSH key. The visibility boundary is intentional and explicit.</div></details>
+    <details class="qa"><summary>Can I deploy my own instance?<span class="pm">+</span></summary><div class="ans">Yes — that's the intended shape. One Helm chart on any Kubernetes, including a single k3s machine. State lives on one PVC (SQLite, git cache, logs, workspaces) with a keep policy; identities live in K8s Secrets so pod restarts don't retrain your agents' <code>known_hosts</code>. <b>No external dependencies — not even Argo.</b> Oberth is proprietary, currently offered through the alpha pilot.</div></details>
+  </div>
+</div></section>
+<div class="cta-mini"><div class="in"><div><div class="tx">Put your real agent workflow through the gate.</div><div class="sub">DIRECT ENGINEERING CONVERSATION · NO GENERIC SALES FUNNEL</div></div><a class="btn p" href="mailto:hello@oberth.ci?subject=Oberth%20alpha%20pilot">Join the pilot <span class="ar">→</span></a></div></div>
+</main>
+
+<main class="page" tabindex="-1" id="pg-try">
+<section><div class="wrap">
+  <div class="secno rv"><b>TRY /</b> Quickstart</div>
+  <h2 class="rv">Three commands to a live gate.</h2>
+  <p class="lead rv">Defaults are fine to start — single node, 10&nbsp;GiB PVC, three concurrent runs. Any Kubernetes works; a k3s box on your desk qualifies.</p>
+  <div class="code rv u-c44a83"><div class="code-h"><span>quickstart <em>server</em></span><button class="cp">COPY</button></div><pre>helm repo add oberth https://charts.oberth.ci
+helm repo update
+helm upgrade --install oberth oberth/oberth \
+  -n oberth --create-namespace
+<span class="c-cm"># live, not ready — two bootstrap commands remain:</span>
+<span class="c-cm"># connect your forge and register a key → <b>Setup</b></span></pre></div>
+  <div class="hero-cta rv u-ec72ea">
+    <a class="btn p" href="#/setup">Bootstrap identity → Setup</a>
+    <a class="btn g" href="mailto:hello@oberth.ci?subject=Oberth%20alpha%20pilot">Talk to the team →</a>
+  </div>
+</div></section>
+<div class="cta-mini"><div class="in"><div><div class="tx">Put your real agent workflow through the gate.</div><div class="sub">DIRECT ENGINEERING CONVERSATION · NO GENERIC SALES FUNNEL</div></div><a class="btn p" href="mailto:hello@oberth.ci?subject=Oberth%20alpha%20pilot">Join the pilot <span class="ar">→</span></a></div></div>
+</main>
+
+<footer><div class="wrap">
+  <div class="foot">
+    <div>
+      <span class="mk"><span class="tri">[▲]</span> oberth</span><br>
+      <span class="u-229fef">Local CI and a (not so) dumb pipe.<br>Auditable quality gates for AI-generated code.</span>
+    </div>
+    <div class="cols">
+      <div><div class="h">Product</div><a href="https://oberth.ci/repos">Dashboard</a><a href="#/">How it works</a><a href="#/pipeline">Pipeline</a><a href="#/setup">Setup</a></div>
+      <div><div class="h">Program</div><a href="#/alpha">Alpha</a><a href="mailto:hello@oberth.ci?subject=Oberth%20alpha%20pilot">Contact</a></div>
+      
+    </div>
+  </div>
+  <div class="colo"><span>© 2026 SKIPOPS · DESIGNED AND OPERATED FROM EUROPE</span><span>K8S-NATIVE · SELF-HOSTED · ZERO ARGO</span></div>
+</div></footer>
+
+<script src="/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,17 @@
+{
+  "name": "oberth-website",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Static marketing site for oberth.ci",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "check": "node scripts/check-site.mjs"
+  },
+  "devDependencies": {
+    "wrangler": "4.111.0"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

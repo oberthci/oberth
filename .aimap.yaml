@@ -1,0 +1,55 @@
+version: 1
+component: oberth
+purpose: single-node Git-over-SSH CI with Kubernetes Job execution and an authenticated HTTPS/MCP control surface
+
+load_order:
+  - AGENT-CONTRACT.md
+  - docs/architecture.md
+  - docs/security.md
+  - internal/model/types.go
+  - internal/store/schema.go
+
+subsystems:
+  persistence:
+    paths: [internal/model, internal/store]
+    contract: SQLite is the durable single-writer state for runs, promotions, issues, uplinks, and audit.
+  git_ingress:
+    paths: [internal/gitcache, internal/sshserver]
+    contract: Authenticated smart protocol accepts only branch/tag refs and records actor-bound push events durably.
+  execution:
+    paths: [internal/job, internal/runner, pkg/periapsis, cmd/oberth-runner]
+    contract: One bounded Kubernetes Job per run; repository code is interpreted only inside the Job.
+  control_plane:
+    paths: [internal/api, internal/service, internal/app, internal/secretstore, cmd/oberth]
+    contract: TLS 1.3 HTTPS/MCP and SSH compose the same durable identity and run state. Secret-store release secrets are fetched server-side at admission and exec-delivered to release Pods, never via etcd.
+  deployment:
+    paths: [charts/oberth, Dockerfile, Dockerfile.runner]
+    contract: One namespace-scoped Deployment, digest-only images, one PVC, and fixed NodePorts.
+
+skip_paths:
+  - .worktrees
+  - bin
+  - dist
+
+cross_component_contracts:
+  - AGENT-CONTRACT.md
+  - charts/oberth/values.yaml
+  - pkg/periapsis/types.go
+
+verification:
+  tier_1:
+    - go vet ./...
+    - go test -race -count=1 ./...
+    - golangci-lint run ./...
+  tier_2:
+    - make build
+    - make helm-lint
+  tier_3:
+    - fresh-cluster feature/red/green/supersede/promote/tag-release validation
+
+symptom_index:
+  push_not_queued: [internal/sshserver, internal/gitcache, internal/store/runs.go]
+  job_stuck: [internal/job/controller.go, internal/store/runs.go]
+  token_rejected: [internal/auth, internal/store/store.go]
+  issue_missing: [internal/store/issues.go, internal/api/mcp.go]
+  log_slice_wrong: [internal/runlog]

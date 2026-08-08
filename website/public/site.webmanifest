@@ -1,0 +1,17 @@
+{
+  "name": "Oberth",
+  "short_name": "Oberth",
+  "description": "Oberth gates every AI agent push with one Kubernetes Job, a Go pipeline you can run locally, before anything reaches your forge.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#1e1f28",
+  "theme_color": "#282a36",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

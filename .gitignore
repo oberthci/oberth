@@ -1,0 +1,9 @@
+bin/
+dist/
+/artifacts/
+coverage.out
+/oberth
+*.test
+.worktrees/
+website/node_modules/
+website/.wrangler/

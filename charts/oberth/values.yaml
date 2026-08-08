@@ -1,0 +1,128 @@
+image:
+  ref: europe-west4-docker.pkg.dev/skipopsmain/cloudtaser/cloudtaser-oberth@sha256:24c78208f674e0c7ab0b958c721171d4dd9338ef4f0d5e6b8a275c3c9e0d27bb
+  pullPolicy: IfNotPresent
+
+runnerImage:
+  ref: europe-west4-docker.pkg.dev/skipopsmain/cloudtaser/cloudtaser-oberth-ci@sha256:f0e64899e9e2da24af1b5b0e4894cacf98a9ef38c0d5796e4a4ed17b1ab01234
+
+replicaCount: 1
+maxConcurrentJobs: 3
+stepTimeout: 30m
+
+auditAnchor:
+  tsaURL: https://timestamp.sectigo.com/rfc3161
+  rekorURL: https://rekor.sigstore.dev
+  interval: 10m
+  maxAge: 30m
+  rootsSecret: ""
+  rootsKey: roots.pem
+  # One-shot operator acknowledgment for reinstalling with an SSH host key that
+  # already has published Rekor witnesses but no surviving local state. Set to
+  # the exact Rekor UUID of the LATEST witness entry to permanently abandon that
+  # chain and start a new one bound to it; remove after the first successful
+  # startup. Leave empty in every other situation — the empty default preserves
+  # the fail-closed rollback protection unchanged.
+  acceptWitnessChainReset: ""
+
+service:
+  sshNodePort: 30022
+  httpsNodePort: 30443
+
+persistence:
+  existingClaim: ""
+  storageClassName: ""
+  size: 10Gi
+
+tls:
+  existingSecret: ""
+
+# The SSH host key is the durable identity of this deployment: Git clients pin
+# it AND the external audit witness identity is derived from it. By default the
+# chart generates it once, reuses it on every upgrade, and keeps it across
+# uninstall (helm.sh/resource-policy: keep). Point existingSecret at a restored
+# Secret to adopt a previous identity instead — never regenerate one casually.
+ssh:
+  hostKey:
+    existingSecret: ""
+
+upstream:
+  name: codeberg
+  baseURL: ssh://git@codeberg.org/cloudtaser
+  createSecrets: true
+  keySecret: oberth-upstream-key
+  keyFile: id_ed25519
+  knownHostsSecret: oberth-known-hosts
+  knownHostsKey: known_hosts
+
+# Administrator allowlist only. Each repository must request its exact subset
+# through literal ReleaseSecrets in .oberth/periapsis.go.
+releaseSecrets:
+  - gar-sa-key
+  - r2-upload-token
+  - cosign-secret
+  - ssh-git-key
+  - git-known-hosts
+
+# Secret-store-sourced release secrets from OpenBao (or Vault). When enabled,
+# the server authenticates with its own ServiceAccount (Kubernetes auth), fetches
+# every repository-declared SecretStoreSecrets path at release admission — a missing
+# or unreachable secret fails the run before its Job exists — and injects the
+# values into the running release Job's memory-backed volume over exec. The
+# values never exist in etcd, a Kubernetes Secret, or node disk.
+# Configure OpenBao once with scripts/setup-secretstore.sh.
+secretstore:
+  enabled: false
+  # OpenBao API base URL. Defaults to the standard in-cluster OpenBao Helm
+  # chart service (openbao service in openbao namespace). Override if OpenBao
+  # is in a different namespace or at an external endpoint. HTTPS is required.
+  address: "https://openbao.openbao.svc:8200"
+  # Kubernetes auth mount path configured in OpenBao.
+  k8sAuthMount: kubernetes
+  # OpenBao Kubernetes auth role bound to this chart's ServiceAccount.
+  role: oberth-ci
+  # Optional PEM bundle pinning the OpenBao TLS trust anchors. Public material,
+  # delivered via ConfigMap. When empty the system trust store is used.
+  caCert: ""
+  # DEVELOPMENT ONLY: allow a plain-HTTP OpenBao address.
+  insecureHTTPForDev: false
+  # Administrator allowlist of KV API paths (e.g. "oberth/data/r2-upload") a
+  # repository may request through its literal SecretStoreSecrets declaration.
+  allowedPaths: []
+  # Grant this ServiceAccount system:auth-delegator so OpenBao can validate
+  # its tokens via TokenReview without storing a reviewer JWT. This is the one
+  # cluster-scoped object the chart creates; disable it if the binding is
+  # managed elsewhere.
+  createAuthDelegatorBinding: true
+
+cache:
+  ciRoot: /var/cache/oberth/ci
+  releaseRoot: /var/cache/oberth/release
+
+jobs:
+  timeout: 12h
+  ttlSecondsAfterFinished: 3600
+  resources:
+    requests:
+      cpu: "1"
+      memory: 2Gi
+      ephemeral-storage: 1Gi
+    limits:
+      cpu: "3"
+      memory: 4Gi
+      ephemeral-storage: 8Gi
+
+resources:
+  requests:
+    cpu: 200m
+    memory: 256Mi
+    ephemeral-storage: 256Mi
+  limits:
+    cpu: "1"
+    memory: 1Gi
+    ephemeral-storage: 2Gi
+
+secretCreatePolicy:
+  enabled: false
+
+podAnnotations: {}
+podLabels: {}

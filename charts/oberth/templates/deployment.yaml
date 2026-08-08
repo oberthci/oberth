@@ -1,0 +1,235 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "oberth.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "oberth.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "oberth.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "oberth.selectorLabels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      serviceAccountName: {{ include "oberth.serviceAccountName" . }}
+      automountServiceAccountToken: true
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        runAsGroup: 65534
+        fsGroup: 65534
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        # hostPath volumes receive no fsGroup ownership management from the
+        # kubelet. This container replaces the former manual prepare-node.sh
+        # step: it creates the isolated cache roots and hands them to the
+        # unprivileged service and runner user before anything else starts.
+        - name: prepare-caches
+          image: {{ .Values.image.ref | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["/bin/sh", "-c", "exec install -d -m 0750 -o 65534 -g 65534 \"$@\"", "prepare-caches"]
+          args:
+            - {{ .Values.cache.ciRoot | quote }}
+            - {{ .Values.cache.releaseRoot | quote }}
+          securityContext:
+            runAsUser: 0
+            runAsGroup: 0
+            runAsNonRoot: false
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+              add: ["CHOWN", "DAC_OVERRIDE", "FOWNER"]
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+          volumeMounts:
+            - name: ci-cache
+              mountPath: {{ .Values.cache.ciRoot }}
+            - name: release-cache
+              mountPath: {{ .Values.cache.releaseRoot }}
+      containers:
+        - name: oberth
+          image: {{ .Values.image.ref | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            - serve
+            - --data=/data
+            - --database=/data/oberth.sqlite
+            - --ssh-listen=:2222
+            - --https-listen=:8443
+            - --tls-cert=/etc/oberth/tls/tls.crt
+            - --tls-key=/etc/oberth/tls/tls.key
+            - --ssh-host-key=/etc/oberth/ssh/ssh_host_key
+            - --upstream-key=/etc/oberth/upstream-key/{{ .Values.upstream.keyFile }}
+            - --known-hosts=/etc/oberth/known-hosts/{{ .Values.upstream.knownHostsKey }}
+            - --namespace={{ .Release.Namespace }}
+            - --runner-image={{ .Values.runnerImage.ref }}
+            - --pvc={{ include "oberth.pvcName" . }}
+            - --max-concurrent-jobs={{ .Values.maxConcurrentJobs }}
+            - --ci-cache-root={{ .Values.cache.ciRoot }}
+            - --release-cache-root={{ .Values.cache.releaseRoot }}
+            - --step-timeout={{ .Values.stepTimeout }}
+            - --job-timeout={{ .Values.jobs.timeout }}
+            - --job-ttl={{ .Values.jobs.ttlSecondsAfterFinished }}
+            - --job-cpu-request={{ .Values.jobs.resources.requests.cpu }}
+            - --job-memory-request={{ .Values.jobs.resources.requests.memory }}
+            - --job-cpu-limit={{ .Values.jobs.resources.limits.cpu }}
+            - --job-memory-limit={{ .Values.jobs.resources.limits.memory }}
+            - --job-ephemeral-storage-request={{ index .Values.jobs.resources.requests "ephemeral-storage" }}
+            - --job-ephemeral-storage-limit={{ index .Values.jobs.resources.limits "ephemeral-storage" }}
+            - --audit-tsa-url={{ .Values.auditAnchor.tsaURL }}
+            - --audit-rekor-url={{ .Values.auditAnchor.rekorURL }}
+            - --audit-anchor-interval={{ .Values.auditAnchor.interval }}
+            - --audit-anchor-max-age={{ .Values.auditAnchor.maxAge }}
+            {{- if .Values.auditAnchor.rootsSecret }}
+            - --audit-tsa-roots=/etc/oberth/audit-tsa/{{ .Values.auditAnchor.rootsKey }}
+            {{- end }}
+            {{- if .Values.auditAnchor.acceptWitnessChainReset }}
+            - --accept-witness-chain-reset={{ .Values.auditAnchor.acceptWitnessChainReset }}
+            {{- end }}
+            {{- range .Values.releaseSecrets }}
+            - --release-secret={{ . }}
+            {{- end }}
+            {{- if .Values.secretstore.enabled }}
+            - --secretstore-address={{ .Values.secretstore.address }}
+            - --secretstore-k8s-auth-mount={{ .Values.secretstore.k8sAuthMount }}
+            - --secretstore-role={{ required "secretstore.role is required when secretstore.enabled is true" .Values.secretstore.role }}
+            {{- if .Values.secretstore.caCert }}
+            - --secretstore-ca-cert=/etc/oberth/secretstore-ca/ca.crt
+            {{- end }}
+            {{- if .Values.secretstore.insecureHTTPForDev }}
+            - --secretstore-insecure-http
+            {{- end }}
+            {{- range .Values.secretstore.allowedPaths }}
+            - --secretstore-path={{ . }}
+            {{- end }}
+            {{- end }}
+          env:
+            - name: SIGSTORE_NO_CACHE
+              value: "true"
+          ports:
+            - name: ssh
+              containerPort: 2222
+            - name: https
+              containerPort: 8443
+          readinessProbe:
+            httpGet:
+              scheme: HTTPS
+              path: /readyz
+              port: https
+            initialDelaySeconds: 2
+            periodSeconds: 5
+          startupProbe:
+            httpGet:
+              scheme: HTTPS
+              path: /healthz
+              port: https
+            periodSeconds: 5
+            failureThreshold: 60
+          livenessProbe:
+            httpGet:
+              scheme: HTTPS
+              path: /healthz
+              port: https
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: ci-cache
+              mountPath: {{ .Values.cache.ciRoot }}
+            - name: release-cache
+              mountPath: {{ .Values.cache.releaseRoot }}
+            - name: tls
+              mountPath: /etc/oberth/tls
+              readOnly: true
+            - name: host-key
+              mountPath: /etc/oberth/ssh
+              readOnly: true
+            - name: upstream-key
+              mountPath: /etc/oberth/upstream-key
+              readOnly: true
+            - name: known-hosts
+              mountPath: /etc/oberth/known-hosts
+              readOnly: true
+            {{- if .Values.auditAnchor.rootsSecret }}
+            - name: audit-tsa-roots
+              mountPath: /etc/oberth/audit-tsa
+              readOnly: true
+            {{- end }}
+            {{- if and .Values.secretstore.enabled .Values.secretstore.caCert }}
+            - name: secretstore-ca
+              mountPath: /etc/oberth/secretstore-ca
+              readOnly: true
+            {{- end }}
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ include "oberth.pvcName" . }}
+        - name: ci-cache
+          hostPath:
+            path: {{ .Values.cache.ciRoot }}
+            type: DirectoryOrCreate
+        - name: release-cache
+          hostPath:
+            path: {{ .Values.cache.releaseRoot }}
+            type: DirectoryOrCreate
+        - name: tls
+          secret:
+            secretName: {{ include "oberth.tlsSecretName" . }}
+        - name: host-key
+          secret:
+            secretName: {{ include "oberth.hostKeySecretName" . }}
+        - name: upstream-key
+          secret:
+            secretName: {{ .Values.upstream.keySecret }}
+            defaultMode: 0400
+            optional: true
+        - name: known-hosts
+          secret:
+            secretName: {{ .Values.upstream.knownHostsSecret }}
+            optional: true
+        {{- if .Values.auditAnchor.rootsSecret }}
+        - name: audit-tsa-roots
+          secret:
+            secretName: {{ .Values.auditAnchor.rootsSecret }}
+            items:
+              - key: {{ .Values.auditAnchor.rootsKey }}
+                path: {{ .Values.auditAnchor.rootsKey }}
+        {{- end }}
+        {{- if and .Values.secretstore.enabled .Values.secretstore.caCert }}
+        - name: secretstore-ca
+          configMap:
+            name: {{ include "oberth.fullname" . }}-secretstore-ca
+        {{- end }}
+        - name: tmp
+          emptyDir:
+            sizeLimit: {{ index .Values.resources.limits "ephemeral-storage" | quote }}
