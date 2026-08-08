@@ -392,7 +392,7 @@ func (controller *Controller) Create(ctx context.Context, request Request) (stri
 	if err != nil {
 		return "", err
 	}
-	if request.Release {
+	if request.Release && len(request.ReleaseSecrets.Data) > 0 {
 		if err := controller.ensureReleaseSnapshot(ctx, created, *request.ReleaseSecrets); err != nil {
 			cleanupCtx, cancelCleanup := context.WithTimeout(context.Background(), jobCancellationTimeout)
 			defer cancelCleanup()
