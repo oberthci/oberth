@@ -540,6 +540,18 @@ claude mcp add --transport http oberth \
   <h2 class="rv">From zero to a gated push <span class="soft">in five steps.</span></h2>
   <p class="lead rv">Five steps from a Linux box to a gated push. Each one is a copy-paste block. Five minutes total.</p>
 
+  <div class="code tldr rv">
+    <div class="code-h"><span class="tldr-l">TLDR — paste and go</span><button class="cp">COPY ALL</button></div>
+    <pre>curl -sfL https://get.k3s.io | sh -s - --disable=traefik --write-kubeconfig-mode 644
+helm repo add openbao https://openbao.github.io/openbao-helm
+helm repo add oberth https://charts.cloudtaser.io/oberth
+helm repo update
+helm install openbao openbao/openbao -n openbao --create-namespace --set server.dev.enabled=true --set injector.enabled=false
+kubectl port-forward -n openbao svc/openbao 8200:8200 &amp; export BAO_ADDR=http://localhost:8200 BAO_TOKEN=root &amp;&amp; curl -fsSL https://oberth.ci/setup-secretstore.sh | bash -s -- --address http://localhost:8200
+helm install oberth oberth/oberth -n oberth --create-namespace --set secretstore.enabled=true --set secretstore.insecureHTTPForDev=true</pre>
+    <div class="tldr-f">Scroll down for the guided walkthrough with explanations.</div>
+  </div>
+
   <div class="qs rv">
     <div class="qs-n">01</div>
     <div class="qs-c">

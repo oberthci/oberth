@@ -64,6 +64,47 @@ func TestStaticSiteContract(t *testing.T) {
 	}
 }
 
+// TestTryTLDRCard pins the #/try TLDR card: commands-only quickstart at the
+// top of the page, wired into the existing .cp copy delegation (CSP forbids
+// inline handlers, so the button must ride a .code container).
+func TestTryTLDRCard(t *testing.T) {
+	t.Parallel()
+
+	index := readSiteFile(t, "public/index.html")
+
+	card := regexp.MustCompile(`(?s)<div class="code tldr rv">.*?</div>\n  </div>`).FindString(index)
+	if card == "" {
+		t.Fatal("index has no TLDR card with class \"code tldr rv\" — COPY ALL depends on the .code class for the .cp delegation")
+	}
+
+	for _, value := range []string{
+		"TLDR — paste and go",
+		`<button class="cp">COPY ALL</button>`,
+		"curl -sfL https://get.k3s.io | sh -s - --disable=traefik --write-kubeconfig-mode 644",
+		"helm repo add openbao https://openbao.github.io/openbao-helm",
+		"helm repo add oberth https://charts.cloudtaser.io/oberth",
+		"helm repo update",
+		"helm install openbao openbao/openbao -n openbao --create-namespace --set server.dev.enabled=true --set injector.enabled=false",
+		"kubectl port-forward -n openbao svc/openbao 8200:8200 &amp; export BAO_ADDR=http://localhost:8200 BAO_TOKEN=root &amp;&amp; curl -fsSL https://oberth.ci/setup-secretstore.sh | bash -s -- --address http://localhost:8200",
+		"helm install oberth oberth/oberth -n oberth --create-namespace --set secretstore.enabled=true --set secretstore.insecureHTTPForDev=true",
+		"Scroll down for the guided walkthrough",
+	} {
+		if !strings.Contains(card, value) {
+			t.Errorf("TLDR card is missing %q", value)
+		}
+	}
+
+	// The card must hold exactly the seven golden-path commands — no prose
+	// lines inside the pre.
+	pre := regexp.MustCompile(`(?s)<pre>(.*?)</pre>`).FindStringSubmatch(card)
+	if pre == nil {
+		t.Fatal("TLDR card has no <pre> block")
+	}
+	if lines := len(strings.Split(strings.TrimSpace(pre[1]), "\n")); lines != 7 {
+		t.Errorf("TLDR pre holds %d lines, want exactly 7 commands", lines)
+	}
+}
+
 func TestSetupSecretstoreScriptIsServed(t *testing.T) {
 	t.Parallel()
 

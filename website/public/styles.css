@@ -11,7 +11,7 @@
   --grn:#4ade80;--yel:#f5d76e;--org:#fbbf6e;--red:#ff6b6b;--cyn:#7dd3fc;
   --sans:'Inter',system-ui,sans-serif;--mono:'JetBrains Mono',ui-monospace,monospace;
 }
-html{scroll-behavior:smooth;font-size:clamp(15px,0.5vw + 7px,18px)}
+html{scroll-behavior:smooth;font-size:clamp(17px,0.55vw + 8px,20px)}
 body{
   background:radial-gradient(130% 110% at 50% 26%, #292b38 0%, #262835 62%, #222331 100%) fixed;
   color:var(--ink);font-family:var(--sans);line-height:1.6;-webkit-font-smoothing:antialiased}
@@ -428,6 +428,15 @@ footer{border-top:1px solid var(--line);padding:3rem 0 3.5rem;font-size:.72rem;c
 .qs-hint .qs-hi{color:var(--pur);font-family:var(--mono);flex-shrink:0}
 .qs-hint b{color:var(--mut)}
 .qs-rec{font-size:.5rem;color:var(--grn);border:1px solid var(--linegrn);border-radius:.7rem;padding:.05rem .4rem;margin-left:.35rem;letter-spacing:.06em;vertical-align:1px;font-weight:400}
+
+/* ---------- /try TLDR card — warm amber, commands only ---------- */
+.tldr{margin-top:1.8rem;background:rgba(255,200,50,.12);border:1px solid rgba(240,192,64,.28);border-left:3px solid #f0c040}
+.tldr .code-h{border-bottom:1px solid rgba(240,192,64,.22)}
+.tldr-l{font-family:var(--mono);font-size:.62rem;font-weight:700;letter-spacing:.16em;text-transform:uppercase;color:#f0c040}
+.tldr .code-h .cp{border-color:rgba(240,192,64,.4);color:#f0c040}
+.tldr .code-h .cp:hover{color:#f5d76e;border-color:#f0c040;background:rgba(240,192,64,.12)}
+.tldr pre{font-size:.68rem;line-height:2.05}
+.tldr-f{padding:.55rem 1.2rem;border-top:1px solid rgba(240,192,64,.22);font-family:var(--mono);font-size:.6rem;letter-spacing:.06em;color:var(--mut)}
 .qs-next{margin-top:3.2rem;padding-top:2.4rem;border-top:1px solid var(--line)}
 .qs-done{font-family:var(--mono);font-size:.88rem;font-weight:700;color:var(--grn)}
 .qs-next>p{font-size:.82rem;color:var(--mut);margin-top:.5rem;line-height:1.8;max-width:36rem}
