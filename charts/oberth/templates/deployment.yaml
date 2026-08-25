@@ -194,7 +194,8 @@ spec:
             {{- end }}
             - --argo-namespace={{ required "argo.namespace is required" .Values.argo.namespace }}
             - --argo-pipeline-serviceaccount={{ .Values.argo.pipelineServiceAccount | default .Values.argo.ciServiceAccount | default "oberth-argo-pipeline" }}
-            - --argo-credentialed-serviceaccount={{ .Values.argo.credentialedServiceAccount | default .Values.argo.ciSecretsServiceAccount | default "oberth-argo-credentialed" }}
+            - --argo-credentialed-serviceaccount={{ .Values.argo.credentialedServiceAccount | default "oberth-argo-credentialed" }}
+            - --argo-ci-secrets-serviceaccount={{ (.Values.argo.ciSecrets).serviceAccount | default "oberth-argo-ci-secrets" }}
             - --argo-executor-serviceaccount={{ .Values.argo.executorServiceAccount }}
             - --argo-workflow-timeout={{ .Values.argo.workflowTimeout }}
             - --argo-workflow-ttl={{ .Values.argo.workflowTTL }}
@@ -203,7 +204,12 @@ spec:
             {{- end }}
             {{- if .Values.argo.vault.address }}
             - --argo-vault-address={{ .Values.argo.vault.address }}
-            - --argo-vault-credentialed-role={{ .Values.argo.vault.credentialedRole | default .Values.argo.vault.ciSecretsRole | required "argo.vault.credentialedRole is required when argo.vault.address is set" }}
+            - --argo-vault-credentialed-role={{ .Values.argo.vault.credentialedRole | required "argo.vault.credentialedRole is required when argo.vault.address is set" }}
+            {{- /* Defaulted inline (not only in values.yaml) so a
+                 --reuse-values upgrade from a pre-split revision still names
+                 the branch-tier role; without it, CI pipelines with approved
+                 upstream secrets are refused at admission (fail closed). */}}
+            - --argo-vault-ci-secrets-role={{ (.Values.argo.ciSecrets).vaultRole | default "oberth-argo-ci-secrets" }}
             {{- if .Values.argo.vault.caCert }}
             - --argo-vault-ca-cert=/etc/oberth/argo-vault-ca/ca.crt
             {{- end }}

@@ -135,17 +135,32 @@ argo:
   # to start if this equals the release namespace.
   namespace: "oberth-argo"
 
-  # The two pipeline identities plus the executor. All three must differ:
-  # pipeline==credentialed defeats the secret access gate, and executor
-  # sharing either hands step containers Argo's Kubernetes access.
+  # The three pipeline identities plus the executor. All four must differ:
+  # pipeline==credentialed defeats the secret access gate, ciSecrets==
+  # credentialed collapses the branch and release trust tiers back into one
+  # Vault-visible identity, and executor sharing any of them hands step
+  # containers Argo's Kubernetes access.
   #
   # pipelineServiceAccount runs templates that declare no secrets. No
   # Kubernetes permissions, no Vault role, no token in the step container.
   pipelineServiceAccount: "oberth-argo-pipeline"
-  # credentialedServiceAccount runs templates with approved secrets in the
-  # approval table. Carries a projected SA token so envconsul can authenticate
-  # to OpenBao. The bound role's policy is derived from `oberth access allow`.
+  # credentialedServiceAccount runs RELEASE templates with approved secrets in
+  # the approval table. Carries a projected SA token so the credential chain
+  # can authenticate to OpenBao. The bound role's policy is derived from
+  # `oberth access allow` and is the only one that may carry release grants.
   credentialedServiceAccount: "oberth-argo-credentialed"
+  # ciSecrets is the branch-tier credentialed identity: CI templates with
+  # approved upstream-scoped secret paths run as this ServiceAccount and log
+  # in with this role. Binding branch pods to a ServiceAccount the release
+  # role does not accept is what keeps release credentials unreachable from a
+  # branch push at the Vault layer — the release role's bound_service_account_names
+  # never lists this account, and this role's policy covers
+  # oberth/data/upstream/* only and never receives approval-table grants.
+  # `oberth install --install-secretstore` and setup-secretstore.sh create
+  # the matching OpenBao policy and role under these default names.
+  ciSecrets:
+    serviceAccount: "oberth-argo-ci-secrets"
+    vaultRole: "oberth-argo-ci-secrets"
   # executorServiceAccount runs Argo's own init and wait containers. Argo
   # mounts its token into the executor container only.
   executorServiceAccount: "oberth-argo-executor"
@@ -164,15 +179,24 @@ argo:
   vault:
     # Injected into credentialed containers as VAULT_ADDR and
     # OBERTH_VAULT_ROLE, so a repository's envconsul invocation never hardcodes
-    # either. HTTPS is required.
+    # either. HTTPS is required. The role each run is told to use follows its
+    # trigger: release runs get credentialedRole, CI runs get
+    # argo.ciSecrets.vaultRole.
     #
-    # Bind the role to exactly this namespace and the credentialed SA:
+    # Bind the release-tier role to exactly this namespace and the
+    # credentialed SA (setup-secretstore.sh and `oberth install
+    # --install-secretstore` do this, plus the ci-secrets pair):
     #   bao write auth/kubernetes/role/oberth-argo-credentialed \
     #       bound_service_account_names=oberth-argo-credentialed \
     #       bound_service_account_namespaces=oberth-argo \
     #       policies=oberth-argo-credentialed ttl=20m
     #
     # A "*" on either bound field defeats the approval gate.
+    #
+    # (The retired aliases argo.ciSecretsServiceAccount and
+    # argo.vault.ciSecretsRole named THIS release-tier pair in older
+    # revisions; the chart refuses to render while either is still set, so a
+    # reused-values upgrade cannot silently misassign a tier.)
     address: ""
     credentialedRole: ""
     # Optional PEM bundle pinning the trust anchors a release-tier container

@@ -1261,6 +1261,7 @@ func TestOberthHelmArgs(t *testing.T) {
 				// the first credentialed release step can reach OpenBao.
 				"--set", "argo.vault.address=https://openbao.openbao.svc:8200",
 				"--set", "argo.vault.credentialedRole=oberth-argo-credentialed",
+				"--set", "argo.ciSecrets.vaultRole=oberth-argo-ci-secrets",
 				// The CA cert is auto-pinned because the defaulted address
 				// matches the installed store's ServiceAddress.
 				"--set-string", "argo.vault.caCert=" + caPEM,
@@ -1279,6 +1280,7 @@ func TestOberthHelmArgs(t *testing.T) {
 			openbao: OpenBaoResult{ServiceAddress: "http://openbao.openbao.svc:8200"},
 			settings: []string{
 				"--set", "argo.vault.credentialedRole=oberth-argo-credentialed",
+				"--set", "argo.ciSecrets.vaultRole=oberth-argo-ci-secrets",
 				"--set", "secretstore.enabled=true",
 				"--set", "secretstore.address=http://openbao.openbao.svc:8200",
 				"--set", "secretstore.role=oberth-ci",
@@ -1971,6 +1973,10 @@ func freshStoreResponses() map[string]fakeBaoResponse {
 		"policy write oberth-argo-credentialed -":                         {out: "Success!"},
 		"read -format=json auth/kubernetes/role/oberth-argo-credentialed": {out: "No value found at auth/kubernetes/role/oberth-argo-credentialed", err: errors.New("exit status 2")},
 		"write auth/kubernetes/role/oberth-argo-credentialed -":           {out: "Success!"},
+		"policy read oberth-argo-ci-secrets":                              {out: "No policy named: oberth-argo-ci-secrets", err: errors.New("exit status 2")},
+		"policy write oberth-argo-ci-secrets -":                           {out: "Success!"},
+		"read -format=json auth/kubernetes/role/oberth-argo-ci-secrets":   {out: "No value found at auth/kubernetes/role/oberth-argo-ci-secrets", err: errors.New("exit status 2")},
+		"write auth/kubernetes/role/oberth-argo-ci-secrets -":             {out: "Success!"},
 	}
 }
 
@@ -2016,6 +2022,14 @@ func configuredStoreResponses() map[string]fakeBaoResponse {
 			`"bound_service_account_names":["oberth-argo-credentialed"],` +
 			`"bound_service_account_namespaces":["oberth-argo"],` +
 			`"token_policies":["oberth-argo-credentialed"],` +
+			`"token_no_default_policy":true,` +
+			`"token_ttl":1200,` +
+			`"token_max_ttl":1800}}`},
+		"policy read oberth-argo-ci-secrets": {out: OberthCISecretsPolicy("oberth")},
+		"read -format=json auth/kubernetes/role/oberth-argo-ci-secrets": {out: `{"request_id":"4","data":{` +
+			`"bound_service_account_names":["oberth-argo-ci-secrets"],` +
+			`"bound_service_account_namespaces":["oberth-argo"],` +
+			`"token_policies":["oberth-argo-ci-secrets"],` +
 			`"token_no_default_policy":true,` +
 			`"token_ttl":1200,` +
 			`"token_max_ttl":1800}}`},
@@ -4557,6 +4571,37 @@ func TestCredentialedPolicyWithGrantsAddsExactPaths(t *testing.T) {
 	}
 	if strings.Contains(policy, "release/*") {
 		t.Fatal("policy contains release/* wildcard alongside exact paths")
+	}
+}
+
+// TestCISecretsPolicyIsGrantFree proves the branch-tier policy covers the
+// upstream subtree and token self-revocation and NOTHING else. The function
+// deliberately takes no grants parameter, so this test is the tripwire for
+// anyone re-adding one: a CI-trigger pod's Vault token must never be able to
+// read a release secret, whatever the approval table says (issue #200).
+func TestCISecretsPolicyIsGrantFree(t *testing.T) {
+	policy := OberthCISecretsPolicy("oberth")
+	if !strings.Contains(policy, `path "oberth/data/upstream/*"`) {
+		t.Fatal("ci-secrets policy is missing the upstream subtree")
+	}
+	if !strings.Contains(policy, "revoke-self") {
+		t.Fatal("ci-secrets policy is missing token self-revocation")
+	}
+	for _, stanza := range []string{`path "oberth/data/release`, `path "oberth/release`, `path "oberth/data/*`} {
+		if strings.Contains(policy, stanza) {
+			t.Fatalf("ci-secrets policy grants %s; the branch tier must never reach release paths", stanza)
+		}
+	}
+	// Exactly two path stanzas: the upstream subtree and revoke-self. A third
+	// means someone taught this policy to carry grants.
+	if got := strings.Count(policy, `path "`); got != 2 {
+		t.Fatalf("ci-secrets policy has %d path stanzas, want exactly 2:\n%s", got, policy)
+	}
+	// The credentialed policy WITH grants must still never leak into the
+	// ci-secrets one: the two are separate objects with separate contents.
+	granted := OberthCredentialedPolicyWithGrants("oberth", []string{"release/cosign-secret"})
+	if policy == granted {
+		t.Fatal("the ci-secrets policy and the granted credentialed policy are the same text")
 	}
 }
 

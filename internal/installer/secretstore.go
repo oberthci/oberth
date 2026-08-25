@@ -806,6 +806,48 @@ func ConfigureSecretStore(ctx context.Context, cfg Config, deps Deps, store open
 	}
 	result.Items = append(result.Items, configItem{Name: "credentialed policy", Status: "✓"})
 
+	// --- CI-secrets tier: CI templates with approved upstream-scoped secrets ---
+	//
+	// Reconciled unconditionally, exactly like the credentialed tier: without
+	// this pair, a server that binds CI credentialed pods to the ci-secrets
+	// ServiceAccount would fail every such run at Vault login. The policy is
+	// grant-free by construction (OberthCISecretsPolicy takes no grants), so
+	// unlike the credentialed policy there is nothing approval-driven to sync
+	// — drift from the managed shape is always rewritten back.
+
+	wantCISecretsPolicy := OberthCISecretsPolicy(defaultKVPrefix)
+	haveCISecretsPolicy, ciSecretsPolicyExists, err := store.policyRead(ctx, rootToken, defaultCISecretsPolicy)
+	if err != nil {
+		return result, err
+	}
+	if !ciSecretsPolicyExists || strings.TrimSpace(haveCISecretsPolicy) != strings.TrimSpace(wantCISecretsPolicy) {
+		if err := store.policyWrite(ctx, rootToken, defaultCISecretsPolicy, wantCISecretsPolicy); err != nil {
+			return result, err
+		}
+	}
+
+	ciSecretsRolePath := "auth/" + defaultAuthMount + "/role/" + defaultCISecretsRole
+	existingCISecretsRole, err := store.readData(ctx, rootToken, ciSecretsRolePath)
+	if err != nil {
+		return result, err
+	}
+	if existingCISecretsRole != nil && !ciSecretsRoleMatches(existingCISecretsRole, argoNS) {
+		return result, fmt.Errorf("role %s exists with an unsafe or incompatible binding or token lifetime; refusing to overwrite it", defaultCISecretsRole)
+	}
+	if existingCISecretsRole == nil {
+		if err := store.writeJSON(ctx, rootToken, ciSecretsRolePath, map[string]any{
+			"bound_service_account_names":      defaultCISecretsServiceAccount,
+			"bound_service_account_namespaces": argoNS,
+			"token_policies":                   defaultCISecretsPolicy,
+			"token_no_default_policy":          true,
+			"token_ttl":                        "20m",
+			"token_max_ttl":                    "30m",
+		}); err != nil {
+			return result, err
+		}
+	}
+	result.Items = append(result.Items, configItem{Name: "ci-secrets policy", Status: "✓"})
+
 	// Reaching this point proves each production object was either observed
 	// with its exact managed shape or created through the exact bounded command
 	// above. Callers must carry this positive result into Oberth Helm enablement;
@@ -848,6 +890,16 @@ func credentialedRoleMatches(role map[string]any, namespace string) bool {
 	return exactSingletonString(role["bound_service_account_names"], defaultCredentialedServiceAccount) &&
 		exactSingletonString(role["bound_service_account_namespaces"], namespace) &&
 		exactSingletonString(role["token_policies"], defaultCredentialedPolicy) &&
+		noDefaultPolicyOK && noDefaultPolicy && tokenTTLOK && tokenTTL == 1200 && tokenMaxTTLOK && tokenMaxTTL == 1800
+}
+
+func ciSecretsRoleMatches(role map[string]any, namespace string) bool {
+	noDefaultPolicy, noDefaultPolicyOK := role["token_no_default_policy"].(bool)
+	tokenTTL, tokenTTLOK := role["token_ttl"].(float64)
+	tokenMaxTTL, tokenMaxTTLOK := role["token_max_ttl"].(float64)
+	return exactSingletonString(role["bound_service_account_names"], defaultCISecretsServiceAccount) &&
+		exactSingletonString(role["bound_service_account_namespaces"], namespace) &&
+		exactSingletonString(role["token_policies"], defaultCISecretsPolicy) &&
 		noDefaultPolicyOK && noDefaultPolicy && tokenTTLOK && tokenTTL == 1200 && tokenMaxTTLOK && tokenMaxTTL == 1800
 }
 
@@ -945,6 +997,27 @@ path "%s/data/upstream/*" {
 
 	builder.WriteString("\n\n# Allow the fetch client to revoke its own short-lived login token.\npath \"auth/token/revoke-self\" {\n  capabilities = [\"update\"]\n}")
 	return builder.String()
+}
+
+// OberthCISecretsPolicy returns the HCL policy for CI-trigger credentialed
+// pipelines: the upstream subtree and token self-revocation, nothing else.
+//
+// It deliberately takes no grants parameter. The credentialed (release-tier)
+// policy is synced with approval-table grants; this one is structurally
+// incapable of carrying them, so no reconciliation input — however
+// misconfigured — can put a release secret within reach of a branch push.
+func OberthCISecretsPolicy(kvPrefix string) string {
+	return fmt.Sprintf(`# CI-trigger credentialed pipelines: read-only, upstream subtree only. This
+# policy never carries approval-table grants; release secrets are reachable
+# only through the release-tier credentialed role. Managed by oberth install.
+path "%s/data/upstream/*" {
+  capabilities = ["read"]
+}
+
+# Allow the fetch client to revoke its own short-lived login token.
+path "auth/token/revoke-self" {
+  capabilities = ["update"]
+}`, kvPrefix)
 }
 
 // OberthProductionPolicy adds exactly the two Transit data operations needed

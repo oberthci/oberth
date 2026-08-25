@@ -362,6 +362,12 @@ spec:
 `
 	request := testRequest(periapsis.TriggerRelease, document)
 	request.ApprovedSecrets = map[string]bool{"oberth/data/release/r2-upload-token": true}
+	request.SourceDir = writeEnvconsulWorkspace(t, map[string]string{
+		"test.hcl": `secret {
+  path = "oberth/data/release/r2-upload-token"
+}
+`,
+	})
 	workflow, err := Build(testConfig(), request)
 	if err != nil {
 		t.Fatalf("build release: %v", err)

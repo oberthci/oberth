@@ -51,10 +51,12 @@ func buildArgoEngine(
 		Namespace:                  options.argoNamespace,
 		PipelineServiceAccount:     options.argoPipelineAccount,
 		CredentialedServiceAccount: options.argoCredentialedAccount,
+		CISecretsServiceAccount:    options.argoCISecretsAccount,
 		ExecutorServiceAccount:     options.argoExecutorAccount,
 		RunnerImagePrefixes:        splitRunnerImagePrefixes(options.runnerImagePrefixes),
 		VaultAddress:               options.argoVaultAddress,
 		VaultCredentialedRole:      options.argoVaultCredentialedRole,
+		VaultCISecretsRole:         options.argoVaultCISecretsRole,
 		VaultCACertPEM:             vaultCACertPEM,
 		// Pipeline containers read this revision's checkout from a claim the
 		// server creates and fills in the pipeline namespace, because a Pod
@@ -103,6 +105,9 @@ func validateArgoServeOptions(options serveOptions) error {
 	if options.argoVaultCredentialedRole != "" && options.argoVaultAddress == "" {
 		return errors.New("serve: --argo-vault-credentialed-role needs --argo-vault-address")
 	}
+	if options.argoVaultCISecretsRole != "" && options.argoVaultAddress == "" {
+		return errors.New("serve: --argo-vault-ci-secrets-role needs --argo-vault-address")
+	}
 	if options.argoVaultCACert != "" &&
 		(!filepath.IsAbs(options.argoVaultCACert) || filepath.Clean(options.argoVaultCACert) != options.argoVaultCACert) {
 		return errors.New("serve: --argo-vault-ca-cert must be a clean absolute path")
@@ -114,17 +119,19 @@ func validateArgoServeOptions(options serveOptions) error {
 	if err != nil {
 		return err
 	}
-	// argojob.Config.Validate carries the rest: DNS-1123 names, all three
+	// argojob.Config.Validate carries the rest: DNS-1123 names, all four
 	// ServiceAccounts distinct, an https:// Vault address, and a well-formed
 	// runner image allowlist. Running it here means a bad flag fails startup.
 	return argojob.Config{
 		Namespace:                  options.argoNamespace,
 		PipelineServiceAccount:     options.argoPipelineAccount,
 		CredentialedServiceAccount: options.argoCredentialedAccount,
+		CISecretsServiceAccount:    options.argoCISecretsAccount,
 		ExecutorServiceAccount:     options.argoExecutorAccount,
 		RunnerImagePrefixes:        splitRunnerImagePrefixes(options.runnerImagePrefixes),
 		VaultAddress:               options.argoVaultAddress,
 		VaultCredentialedRole:      options.argoVaultCredentialedRole,
+		VaultCISecretsRole:         options.argoVaultCISecretsRole,
 		VaultCACertPEM:             vaultCACertPEM,
 		// Carried here too so a cache root that is relative, unclean, or shared
 		// between the two tiers fails the process at startup rather than

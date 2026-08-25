@@ -92,11 +92,21 @@ const (
 	defaultTransitKey     = "trusted-plan-artifacts"
 	defaultServiceAccount = "oberth"
 
-	// Credentialed tier: templates with approved secrets.
+	// Credentialed tier: release templates with approved secrets.
 	defaultCredentialedRole   = "oberth-argo-credentialed" // #nosec G101 -- an OpenBao role name, not a credential.
 	defaultCredentialedPolicy = "oberth-argo-credentialed" // #nosec G101 -- an OpenBao policy name, not a credential.
 	// #nosec G101 -- a ServiceAccount name, not a credential.
 	defaultCredentialedServiceAccount = "oberth-argo-credentialed"
+
+	// CI-secrets tier: CI templates with approved upstream-scoped secrets.
+	// A separate identity from the credentialed tier on purpose — its policy
+	// covers the upstream subtree only and never receives approval-table
+	// grants, so a branch push can never present an identity the release
+	// role accepts (issue #200).
+	defaultCISecretsRole   = "oberth-argo-ci-secrets" // #nosec G101 -- an OpenBao role name, not a credential.
+	defaultCISecretsPolicy = "oberth-argo-ci-secrets" // #nosec G101 -- an OpenBao policy name, not a credential.
+	// #nosec G101 -- a ServiceAccount name, not a credential.
+	defaultCISecretsServiceAccount = "oberth-argo-ci-secrets"
 )
 
 // Config holds options for the install command.

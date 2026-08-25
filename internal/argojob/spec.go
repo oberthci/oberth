@@ -71,11 +71,22 @@ type Config struct {
 	// no Vault role. Its Pods run with automountServiceAccountToken false.
 	PipelineServiceAccount string
 
-	// CredentialedServiceAccount runs templates that have approved secrets in
-	// the secret_access table. It carries a projected token so envconsul can
-	// authenticate to OpenBao. The bound Vault role's policy is derived from
-	// the approval table.
+	// CredentialedServiceAccount runs RELEASE templates that have approved
+	// secrets in the secret_access table. It carries a projected token so the
+	// credential chain can authenticate to OpenBao. The bound Vault role's
+	// policy is derived from the approval table and is the only identity whose
+	// policy may carry system-namespace (release) grants.
 	CredentialedServiceAccount string
+
+	// CISecretsServiceAccount runs CI-trigger templates that declare approved
+	// upstream-scoped secret paths. It is deliberately a separate identity
+	// from CredentialedServiceAccount: OpenBao's Kubernetes auth validates
+	// (namespace, ServiceAccount) pairs, so binding branch-tier pods to a
+	// different ServiceAccount is what makes the release-tier role — and every
+	// release grant attached to it — unreachable from a branch push at the
+	// Vault layer, independent of the admission gate. Its role's policy covers
+	// the upstream subtree only and never receives approval-table grants.
+	CISecretsServiceAccount string
 
 	// ExecutorServiceAccount is what Argo's own init and wait containers run
 	// as. It holds only the workflowtaskresults permissions the executor needs
@@ -98,6 +109,13 @@ type Config struct {
 	// role is bound to the ServiceAccount Oberth forced.
 	VaultAddress          string
 	VaultCredentialedRole string
+
+	// VaultCISecretsRole is the OpenBao Kubernetes-auth role CI-trigger
+	// credentialed pipelines log in with, bound to exactly (Namespace,
+	// CISecretsServiceAccount) with the upstream-only policy. Empty fails
+	// closed: a CI pipeline that declares secret paths is refused at
+	// admission rather than submitted under the release-tier role.
+	VaultCISecretsRole string
 
 	// VaultCACertPEM is the trust anchor a release-tier container verifies the
 	// Vault address against. It is delivered as a file into the run's own
@@ -195,6 +213,7 @@ func (config Config) Validate() error {
 	accounts := map[string]string{
 		"pipeline ServiceAccount":     config.PipelineServiceAccount,
 		"credentialed ServiceAccount": config.CredentialedServiceAccount,
+		"ci-secrets ServiceAccount":   config.CISecretsServiceAccount,
 		"executor ServiceAccount":     config.ExecutorServiceAccount,
 	}
 	for name, account := range accounts {
@@ -204,8 +223,10 @@ func (config Config) Validate() error {
 		}
 	}
 	// Any shared identity erases a boundary: pipeline==credentialed defeats
-	// the secret access gate, and executor==any pipeline identity hands step
-	// containers the Kubernetes access the executor needs for bookkeeping.
+	// the secret access gate, ci-secrets==credentialed collapses the branch
+	// and release trust tiers back into one Vault-visible identity, and
+	// executor==any pipeline identity hands step containers the Kubernetes
+	// access the executor needs for bookkeeping.
 	distinct := map[string]struct{}{}
 	for _, account := range accounts {
 		if account == "" {
@@ -213,7 +234,7 @@ func (config Config) Validate() error {
 		}
 		if _, duplicate := distinct[account]; duplicate {
 			problems = append(problems, fmt.Errorf(
-				"argojob: the pipeline, credentialed, and executor ServiceAccounts must all differ; %q is used more than once", account))
+				"argojob: the pipeline, credentialed, ci-secrets, and executor ServiceAccounts must all differ; %q is used more than once", account))
 		}
 		distinct[account] = struct{}{}
 	}
@@ -240,6 +261,15 @@ func (config Config) Validate() error {
 		problems = append(problems, fmt.Errorf(
 			"argojob: Vault address and credentialed role must both be set or both be empty; got address=%q, role=%q",
 			config.VaultAddress, config.VaultCredentialedRole))
+	}
+	// The CI-secrets role without an address is the same misconfiguration in
+	// the other direction. The address WITHOUT a CI role is legal — it means
+	// this deployment admits no CI-trigger credentialed pipelines, and Build
+	// fails such a submission closed at admission with the flag to set.
+	if strings.TrimSpace(config.VaultCISecretsRole) != "" && !hasAddr {
+		problems = append(problems, fmt.Errorf(
+			"argojob: a CI-secrets Vault role (%q) without a Vault address configures a login no pipeline is told how to reach",
+			config.VaultCISecretsRole))
 	}
 	problems = append(problems, validateCacheRoots(config.CICacheRoot, config.ReleaseCacheRoot)...)
 	return errors.Join(problems...)
@@ -408,8 +438,12 @@ type Request struct {
 // submit: decoded, admitted, identity-forced, and stamped with the server's own
 // metadata and bounds.
 //
-// It is a pure function so the whole admission chain is testable without a
-// cluster, exactly like internal/job.Build.
+// It needs no cluster, exactly like internal/job.Build, so the whole admission
+// chain is testable from a directory. Its one filesystem dependency is
+// deliberate: envconsul admission reads the repository's own credential
+// configuration out of the immutable run workspace named by
+// request.SourceDir, because those files — not the document — decide what a
+// legacy-chain step fetches.
 func Build(config Config, request Request) (*wfv1.Workflow, error) {
 	config.applyDefaults()
 	if err := config.Validate(); err != nil {
@@ -483,13 +517,23 @@ func Build(config Config, request Request) (*wfv1.Workflow, error) {
 	}
 	// A credentialed run without Vault coordinates would proceed through the
 	// entire build and die at the first envconsul login — a worse signal than
-	// failing at admission. Require both non-empty before any build work.
+	// failing at admission. Require both non-empty before any build work. The
+	// role is the TRIGGER'S OWN tier's role: a deployment that has never
+	// configured the CI-secrets role fails a CI credentialed submission here,
+	// closed, instead of submitting it under the release-tier role.
 	if credentialed {
 		if strings.TrimSpace(config.VaultAddress) == "" {
 			return nil, errors.New("argojob: credentialed pipeline requires a Vault address (argo.vault.address / --argo-vault-address)")
 		}
-		if strings.TrimSpace(config.VaultCredentialedRole) == "" {
-			return nil, errors.New("argojob: credentialed pipeline requires a Vault credentialed role (argo.vault.credentialedRole / --argo-vault-credentialed-role)")
+		if config.vaultRoleFor(request.Trigger) == "" {
+			switch request.Trigger {
+			case periapsis.TriggerCI:
+				return nil, fmt.Errorf("argojob: refusing the CI run for %q: it declares secret-store paths but no "+
+					"CI-secrets Vault role is configured (argo.ciSecrets.vaultRole / --argo-vault-ci-secrets-role); "+
+					"a CI pipeline never runs under the release-tier credentialed role", request.Repo)
+			default:
+				return nil, errors.New("argojob: credentialed pipeline requires a Vault credentialed role (argo.vault.credentialedRole / --argo-vault-credentialed-role)")
+			}
 		}
 	}
 	// Admission gate: for every template that uses `oberth secretstore exec`,
@@ -497,6 +541,16 @@ func Build(config Config, request Request) (*wfv1.Workflow, error) {
 	// A wrapper invocation in a workflow with no declared paths is refused: it
 	// would run as the pipeline SA with no token and fail at the vault login.
 	if err := admitSecretstoreExecPaths(workflow, declaredPaths); err != nil {
+		return nil, err
+	}
+	// Admission gate for the legacy envconsul chain: every secret path its
+	// repository-authored configuration would fetch — `secret {}` stanzas in
+	// each -config file, -secret command-line flags — must appear in the same
+	// declared annotation, read from the immutable run workspace this
+	// submission executes. Without this, the annotation gates only the
+	// declaration while the fetch obeys the files (issue #200, second
+	// manifestation).
+	if err := admitEnvconsulSecretPaths(workflow, declaredPaths, request.SourceDir); err != nil {
 		return nil, err
 	}
 
@@ -540,9 +594,11 @@ func authorizeWithApprovalTable(paths []string, request Request) error {
 			}
 		}
 		// CI pipelines may not declare system-namespace paths regardless of
-		// what the approval table says. The vault policy for the credentialed
-		// SA does not carry system paths, so allowing them at admission would
-		// let the run proceed and fail at Vault login time — a worse signal.
+		// what the approval table says. The identity switch already binds CI
+		// runs to the ci-secrets ServiceAccount, whose Vault policy covers
+		// the upstream subtree only, so admitting the declaration would let
+		// the run proceed and fail at Vault read time — a worse signal — and
+		// the admission record would misstate what the run could reach.
 		if !upstreamScoped && request.Trigger == periapsis.TriggerCI {
 			problems = append(problems, fmt.Errorf(
 				"argojob: secret store path %q is a system-namespace path; "+
@@ -576,23 +632,24 @@ func admitSecretstoreExecPaths(workflow *wfv1.Workflow, declaredPaths []string) 
 		declared[p] = struct{}{}
 	}
 	var problems []error
-	for index := range workflow.Spec.Templates {
-		template := &workflow.Spec.Templates[index]
+	// Inline templates are visited too: the credential mount injection reaches
+	// them, so the admission that governs the same invocation must as well.
+	walkTemplates(workflow, func(template *wfv1.Template) {
 		if !templateUsesOberthSecretstore(template) {
-			continue
+			return
 		}
 		execPaths := extractExecPaths(template)
 		if len(execPaths) == 0 {
 			// A materialize invocation does not declare --path flags; it reads
 			// from environment variables set by envconsul. No path check needed.
-			continue
+			return
 		}
 		if len(declaredPaths) == 0 {
 			problems = append(problems, fmt.Errorf(
 				"argojob: template %q uses oberth secretstore exec with --path flags "+
 					"but the workflow declares no %s annotation",
 				template.Name, argoworkflow.SecretPathsAnnotation))
-			continue
+			return
 		}
 		for _, execPath := range execPaths {
 			if _, ok := declared[execPath]; !ok {
@@ -602,33 +659,83 @@ func admitSecretstoreExecPaths(workflow *wfv1.Workflow, declaredPaths []string) 
 					template.Name, execPath, argoworkflow.SecretPathsAnnotation))
 			}
 		}
-	}
+	})
 	return errors.Join(problems...)
 }
 
-// identityFor selects the ServiceAccount based on whether the pipeline has
-// approved secrets. There is no trigger-type distinction: both CI and release
-// pipelines use the same two identities. Templates without secrets get the
-// pipeline SA (no token); templates with approved secrets get the credentialed
-// SA (projected token for Vault login).
+// identityFor selects the ServiceAccount from the trigger AND whether the
+// pipeline declares approved secrets. Pipelines without secret paths get the
+// pipeline SA (no token) on every trigger. Pipelines with secret paths split
+// by trust tier: the release trigger gets the credentialed SA, whose Vault
+// role's policy carries the approval-table grants (release credentials); the
+// CI trigger gets the ci-secrets SA, whose Vault role's policy covers the
+// upstream subtree only and never receives grants.
+//
+// The split is the Vault-layer half of the trust-tier separation. Admission
+// already refuses a CI document that DECLARES a system-namespace path, but a
+// pod's projected token can attempt any read its bound role's policy allows,
+// declared or not — repository-authored code runs in that pod. Binding CI
+// pods to a ServiceAccount the release role does not accept is what makes
+// release credentials unreachable from a branch push even then (issue #200).
 func (config Config) identityFor(trigger periapsis.Trigger, hasSecretPaths bool) (argoworkflow.Identity, error) {
 	if !trigger.Valid() {
 		return argoworkflow.Identity{}, fmt.Errorf("argojob: unknown trigger %q", trigger)
 	}
-	if hasSecretPaths {
+	if !hasSecretPaths {
+		return argoworkflow.Identity{
+			Namespace:                    config.Namespace,
+			ServiceAccountName:           config.PipelineServiceAccount,
+			ExecutorServiceAccountName:   config.ExecutorServiceAccount,
+			AutomountServiceAccountToken: false,
+		}, nil
+	}
+	switch trigger {
+	case periapsis.TriggerRelease:
 		return argoworkflow.Identity{
 			Namespace:                    config.Namespace,
 			ServiceAccountName:           config.CredentialedServiceAccount,
 			ExecutorServiceAccountName:   config.ExecutorServiceAccount,
 			AutomountServiceAccountToken: true,
 		}, nil
+	case periapsis.TriggerCI:
+		// Config.Validate requires the account, so this is a defensive
+		// backstop for direct construction: absent configuration must fail
+		// the submission, never fall through to the release-tier identity.
+		if strings.TrimSpace(config.CISecretsServiceAccount) == "" {
+			return argoworkflow.Identity{}, errors.New(
+				"argojob: no CI-secrets ServiceAccount is configured (--argo-ci-secrets-serviceaccount); " +
+					"refusing to run a CI pipeline with declared secret paths under the release-tier identity")
+		}
+		return argoworkflow.Identity{
+			Namespace:                    config.Namespace,
+			ServiceAccountName:           config.CISecretsServiceAccount,
+			ExecutorServiceAccountName:   config.ExecutorServiceAccount,
+			AutomountServiceAccountToken: true,
+		}, nil
+	default:
+		return argoworkflow.Identity{}, fmt.Errorf("argojob: no credentialed identity exists for trigger %q", trigger)
 	}
-	return argoworkflow.Identity{
-		Namespace:                    config.Namespace,
-		ServiceAccountName:           config.PipelineServiceAccount,
-		ExecutorServiceAccountName:   config.ExecutorServiceAccount,
-		AutomountServiceAccountToken: false,
-	}, nil
+}
+
+// vaultRoleFor selects the OpenBao Kubernetes-auth role a credentialed run's
+// containers are told to log in with, matching the ServiceAccount identityFor
+// selected for the same trigger. It is the same shape as cacheRootFor,
+// deliberately: one answer to "what tier is this run".
+//
+// Naming a role is advisory — the pod could name any role — so this is not
+// the boundary. The boundary is that each role's bound_service_account_names
+// accepts only its own tier's ServiceAccount, which identityFor already
+// forced. An unknown trigger returns no role, which fails closed at the
+// credentialed-coordinates check in Build.
+func (config Config) vaultRoleFor(trigger periapsis.Trigger) string {
+	switch trigger {
+	case periapsis.TriggerCI:
+		return strings.TrimSpace(config.VaultCISecretsRole)
+	case periapsis.TriggerRelease:
+		return strings.TrimSpace(config.VaultCredentialedRole)
+	default:
+		return ""
+	}
 }
 
 func applyServerMetadata(workflow *wfv1.Workflow, config Config, request Request, declaredPaths []string) {
@@ -1528,9 +1635,14 @@ func injectRunEnvironment(workflow *wfv1.Workflow, config Config, request Reques
 		)
 	}
 	if credentialed {
+		// The role matches the tier identityFor selected: the ci-secrets role
+		// on the CI trigger, the credentialed role on the release trigger.
+		// Advertising the release role to a CI pod would only name a login
+		// its ServiceAccount cannot complete, and every failure would blame
+		// the wrong tier.
 		environment = append(environment,
 			corev1.EnvVar{Name: "VAULT_ADDR", Value: config.VaultAddress},
-			corev1.EnvVar{Name: "OBERTH_VAULT_ROLE", Value: config.VaultCredentialedRole},
+			corev1.EnvVar{Name: "OBERTH_VAULT_ROLE", Value: config.vaultRoleFor(request.Trigger)},
 		)
 		if request.vaultCADelivered() {
 			// The path, never the bytes. envconsul's Vault client reads

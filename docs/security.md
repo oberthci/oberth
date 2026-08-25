@@ -22,6 +22,19 @@
   capacity.
 - CI Jobs have no Secret volumes. Release Secrets and writable caches are wholly
   separate from branch CI.
+- Pipeline pods run under trigger-selected ServiceAccounts: no declared secret
+  paths means the tokenless pipeline identity on every trigger; declared paths
+  bind release runs to the credentialed identity and CI runs to the separate
+  ci-secrets identity. The two credentialed OpenBao roles bind those exact
+  (namespace, ServiceAccount) pairs, the ci-secrets policy covers the
+  upstream subtree only and never receives approval-table grants, and only
+  the release-tier policy carries exact release-secret grants — so a branch
+  push cannot reach release credentials at the Vault layer, independent of
+  the admission gate that already rejects a CI document declaring a
+  system-namespace path. Secret paths a repository-authored envconsul
+  configuration or `oberth secretstore exec` invocation would fetch are
+  admission-checked against the same declared annotation, read from the
+  immutable run workspace.
 - Release credentials are fetched in-Pod by `oberth secretstore exec`, which
   authenticates to OpenBao with the Pod's ServiceAccount, writes each KV field
   to a tmpfs-backed directory, and wraps the child process with

@@ -29,10 +29,12 @@
 #
 # RELATIONSHIP: this is the server-embedded canonical script, extractable via
 # `oberth secretstore setup --print-script`. The public installer at
-# website/public/setup-secretstore.sh extends it with Argo credentialed-tier
-# setup (sections 7-8: credentialed policy and role for the pipeline
-# namespace). Security hardening (read_field error classification,
-# KUBERNETES_HOST validation) must be kept in sync across both copies.
+# website/public/setup-secretstore.sh extends it with Argo pipeline-tier
+# setup (sections 7-8: release-tier credentialed policy and role; sections
+# 9-10: branch-tier ci-secrets policy and role, each bound to its own
+# pipeline-namespace ServiceAccount). Security hardening (read_field error
+# classification, KUBERNETES_HOST validation) must be kept in sync across
+# both copies.
 
 set -euo pipefail
 

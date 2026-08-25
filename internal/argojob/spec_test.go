@@ -22,10 +22,12 @@ const (
 	testNamespace             = "oberth-argo"
 	testPipelineAcct          = "oberth-argo-pipeline"
 	testCredentialedAcct      = "oberth-argo-credentialed"
+	testCISecretsAcct         = "oberth-argo-ci-secrets"
 	testExecutorAcct          = "oberth-argo-executor"
 	testSHA                   = "0123456789abcdef0123456789abcdef01234567"
 	testVaultAddress          = "https://openbao.oberth.svc:8200"
 	testVaultCredentialedRole = "oberth-argo-credentialed"
+	testVaultCISecretsRole    = "oberth-argo-ci-secrets"
 )
 
 // testVaultAnchorPEM is the fixture deployment's trust anchor. It is a
@@ -40,9 +42,11 @@ func testConfig() Config {
 		Namespace:                  testNamespace,
 		PipelineServiceAccount:     testPipelineAcct,
 		CredentialedServiceAccount: testCredentialedAcct,
+		CISecretsServiceAccount:    testCISecretsAcct,
 		ExecutorServiceAccount:     testExecutorAcct,
 		VaultAddress:               testVaultAddress,
 		VaultCredentialedRole:      testVaultCredentialedRole,
+		VaultCISecretsRole:         testVaultCISecretsRole,
 		VaultCACertPEM:             testVaultAnchorPEM,
 		WorkflowTimeout:            2 * time.Hour,
 	}
@@ -257,10 +261,14 @@ func TestBuildAuthorizesDeclaredSecretPaths(t *testing.T) {
 	}
 }
 
-// TestBuildGrantsCredentialedIdentityWithSecretPaths proves a pipeline that
-// declares secret-store paths receives the credentialed ServiceAccount and
-// token, while a pipeline without secret paths keeps the pipeline identity.
-func TestBuildGrantsCredentialedIdentityWithSecretPaths(t *testing.T) {
+// TestBuildGrantsCISecretsIdentityWithSecretPaths proves a CI pipeline that
+// declares approved upstream-scoped secret paths receives the ci-secrets
+// ServiceAccount — never the release-tier credentialed one — plus its own
+// Vault role and a projected token, while a pipeline without secret paths
+// keeps the pipeline identity. This is issue #200's resolution: the identity
+// switch keys on trigger AND paths, so a branch push cannot present the
+// identity the release role binds.
+func TestBuildGrantsCISecretsIdentityWithSecretPaths(t *testing.T) {
 	withPaths := strings.Replace(greedyDocument, "    oberth.ci/size: L\n",
 		"    oberth.ci/size: L\n    oberth.ci/secret-paths: oberth/upstream/skipops/oberth/test-secret\n", 1)
 
@@ -270,14 +278,18 @@ func TestBuildGrantsCredentialedIdentityWithSecretPaths(t *testing.T) {
 	if err != nil {
 		t.Fatalf("build credentialed CI: %v", err)
 	}
-	if credentialed.Spec.ServiceAccountName != testCredentialedAcct {
+	if credentialed.Spec.ServiceAccountName != testCISecretsAcct {
 		t.Fatalf("credentialed CI ServiceAccount = %q, want %q",
-			credentialed.Spec.ServiceAccountName, testCredentialedAcct)
+			credentialed.Spec.ServiceAccountName, testCISecretsAcct)
+	}
+	if credentialed.Spec.ServiceAccountName == testCredentialedAcct {
+		t.Fatal("a CI pipeline received the release-tier credentialed ServiceAccount")
 	}
 	if credentialed.Spec.AutomountServiceAccountToken == nil || !*credentialed.Spec.AutomountServiceAccountToken {
 		t.Fatal("credentialed CI does not automount a ServiceAccount token")
 	}
-	// The projected token volume must be present for envconsul to authenticate.
+	// The projected token volume must be present for the credential chain to
+	// authenticate — as the ci-secrets identity, which is the pod's own.
 	var hasTokenVolume bool
 	for _, volume := range credentialed.Spec.Volumes {
 		if volume.Name == ReleaseTokenVolumeName {
@@ -291,8 +303,11 @@ func TestBuildGrantsCredentialedIdentityWithSecretPaths(t *testing.T) {
 	if environment["VAULT_ADDR"] != testVaultAddress {
 		t.Fatalf("credentialed CI VAULT_ADDR = %q, want %q", environment["VAULT_ADDR"], testVaultAddress)
 	}
-	if environment["OBERTH_VAULT_ROLE"] != testVaultCredentialedRole {
-		t.Fatalf("credentialed CI OBERTH_VAULT_ROLE = %q, want %q", environment["OBERTH_VAULT_ROLE"], testVaultCredentialedRole)
+	if environment["OBERTH_VAULT_ROLE"] != testVaultCISecretsRole {
+		t.Fatalf("credentialed CI OBERTH_VAULT_ROLE = %q, want %q", environment["OBERTH_VAULT_ROLE"], testVaultCISecretsRole)
+	}
+	if environment["OBERTH_VAULT_ROLE"] == testVaultCredentialedRole {
+		t.Fatal("a CI pipeline was told to log in with the release-tier Vault role")
 	}
 	if _, present := environment["OBERTH_RELEASE_TAG"]; present {
 		t.Fatal("credentialed CI was given OBERTH_RELEASE_TAG")
@@ -309,6 +324,33 @@ func TestBuildGrantsCredentialedIdentityWithSecretPaths(t *testing.T) {
 	}
 	if plain.Spec.AutomountServiceAccountToken == nil || *plain.Spec.AutomountServiceAccountToken {
 		t.Fatal("plain CI automounts a ServiceAccount token")
+	}
+}
+
+// TestBuildRefusesCICredentialedWithoutCISecretsRole proves the fail-closed
+// path: a CI pipeline with approved secret paths on a deployment that never
+// configured the CI-secrets Vault role is refused at admission — it must not
+// fall back to the release-tier role.
+func TestBuildRefusesCICredentialedWithoutCISecretsRole(t *testing.T) {
+	withPaths := strings.Replace(greedyDocument, "    oberth.ci/size: L\n",
+		"    oberth.ci/size: L\n    oberth.ci/secret-paths: oberth/upstream/skipops/oberth/test-secret\n", 1)
+	request := testRequest(periapsis.TriggerCI, withPaths)
+	request.ApprovedSecrets = map[string]bool{"oberth/upstream/skipops/oberth/test-secret": true}
+	config := testConfig()
+	config.VaultCISecretsRole = ""
+	_, err := Build(config, request)
+	if err == nil {
+		t.Fatal("expected a CI credentialed pipeline without a CI-secrets role to be refused")
+	}
+	if !strings.Contains(err.Error(), "never runs under the release-tier credentialed role") {
+		t.Fatalf("refusal does not explain the tier boundary: %v", err)
+	}
+	// The release trigger is unaffected by the missing CI role.
+	release := releaseRequestWithAnchor(strings.Replace(greedyDocument, "    oberth.ci/size: L\n",
+		"    oberth.ci/size: L\n    oberth.ci/secret-paths: oberth/data/release/r2-upload-token\n", 1))
+	release.ApprovedSecrets = map[string]bool{"oberth/data/release/r2-upload-token": true}
+	if _, err := Build(config, release); err != nil {
+		t.Fatalf("release build must not depend on the CI-secrets role: %v", err)
 	}
 }
 
@@ -768,10 +810,11 @@ func TestBuildAdmitsApprovedSecretPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("approved path was rejected: %v", err)
 	}
-	// The workflow should use the credentialed SA because it declares secrets.
-	if workflow.Spec.ServiceAccountName != testCredentialedAcct {
+	// A CI workflow with approved secrets uses the ci-secrets SA — the
+	// branch-tier credentialed identity, never the release-tier one.
+	if workflow.Spec.ServiceAccountName != testCISecretsAcct {
 		t.Fatalf("ServiceAccount = %q, want %q",
-			workflow.Spec.ServiceAccountName, testCredentialedAcct)
+			workflow.Spec.ServiceAccountName, testCISecretsAcct)
 	}
 }
 
@@ -944,6 +987,13 @@ spec:
 `
 	request := releaseRequestWithAnchor(documentWithInitAndSidecar)
 	request.ApprovedSecrets = map[string]bool{"oberth/data/release/r2-upload-token": true}
+	request.SourceDir = writeEnvconsulWorkspace(t, map[string]string{
+		".oberth/envconsul.hcl": `secret {
+  no_prefix = true
+  path      = "oberth/data/release/r2-upload-token"
+}
+`,
+	})
 	workflow, err := Build(testConfig(), request)
 	if err != nil {
 		t.Fatalf("build: %v", err)

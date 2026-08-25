@@ -29,10 +29,12 @@
 #
 # RELATIONSHIP: this is the public-facing installer variant of
 # scripts/setup-secretstore.sh (server-embedded canonical). It adds Argo
-# credentialed-tier setup (sections 7-8: credentialed policy and role for
-# the pipeline namespace ServiceAccount). Security hardening (read_field
-# error classification, KUBERNETES_HOST validation) must be kept in sync
-# with the canonical copy.
+# credentialed-tier setup (sections 7-8: release-tier credentialed policy and
+# role; sections 9-10: branch-tier ci-secrets policy and role, each bound to
+# its own pipeline-namespace ServiceAccount — the branch tier must never be
+# able to present an identity the release role accepts). Security hardening
+# (read_field error classification, KUBERNETES_HOST validation) must be kept
+# in sync with the canonical copy.
 
 set -euo pipefail
 
@@ -49,6 +51,9 @@ ARGO_NAMESPACE="oberth-argo"
 CREDENTIALED_SERVICE_ACCOUNT="oberth-argo-credentialed"
 CREDENTIALED_ROLE="oberth-argo-credentialed"
 CREDENTIALED_POLICY="oberth-argo-credentialed"
+CI_SECRETS_SERVICE_ACCOUNT="oberth-argo-ci-secrets"
+CI_SECRETS_ROLE="oberth-argo-ci-secrets"
+CI_SECRETS_POLICY="oberth-argo-ci-secrets"
 KUBERNETES_HOST=""
 ADDRESS=""
 CLI=""
@@ -103,6 +108,9 @@ while [ $# -gt 0 ]; do
     --credentialed-service-account) CREDENTIALED_SERVICE_ACCOUNT="$2"; shift 2 ;;
     --credentialed-role) CREDENTIALED_ROLE="$2"; shift 2 ;;
     --credentialed-policy) CREDENTIALED_POLICY="$2"; shift 2 ;;
+    --ci-secrets-service-account) CI_SECRETS_SERVICE_ACCOUNT="$2"; shift 2 ;;
+    --ci-secrets-role) CI_SECRETS_ROLE="$2"; shift 2 ;;
+    --ci-secrets-policy) CI_SECRETS_POLICY="$2"; shift 2 ;;
     --kubernetes-host) KUBERNETES_HOST="$2"; shift 2 ;;
     --address) ADDRESS="$2"; shift 2 ;;
     --cli) CLI="$2"; shift 2 ;;
@@ -114,13 +122,22 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-case "$MOUNT$ROLE$POLICY$KV_PREFIX$TRANSIT_MOUNT$TRANSIT_KEY$NAMESPACE$SERVICE_ACCOUNT$ARGO_NAMESPACE$CREDENTIALED_SERVICE_ACCOUNT$CREDENTIALED_ROLE$CREDENTIALED_POLICY" in
+case "$MOUNT$ROLE$POLICY$KV_PREFIX$TRANSIT_MOUNT$TRANSIT_KEY$NAMESPACE$SERVICE_ACCOUNT$ARGO_NAMESPACE$CREDENTIALED_SERVICE_ACCOUNT$CREDENTIALED_ROLE$CREDENTIALED_POLICY$CI_SECRETS_SERVICE_ACCOUNT$CI_SECRETS_ROLE$CI_SECRETS_POLICY" in
   *[!A-Za-z0-9_.-]*) fail "names may use only letters, digits, dots, dashes, and underscores" ;;
 esac
-for required_name in "$MOUNT" "$ROLE" "$POLICY" "$KV_PREFIX" "$TRANSIT_MOUNT" "$TRANSIT_KEY" "$NAMESPACE" "$SERVICE_ACCOUNT" "$ARGO_NAMESPACE" "$CREDENTIALED_SERVICE_ACCOUNT" "$CREDENTIALED_ROLE" "$CREDENTIALED_POLICY"; do
+for required_name in "$MOUNT" "$ROLE" "$POLICY" "$KV_PREFIX" "$TRANSIT_MOUNT" "$TRANSIT_KEY" "$NAMESPACE" "$SERVICE_ACCOUNT" "$ARGO_NAMESPACE" "$CREDENTIALED_SERVICE_ACCOUNT" "$CREDENTIALED_ROLE" "$CREDENTIALED_POLICY" "$CI_SECRETS_SERVICE_ACCOUNT" "$CI_SECRETS_ROLE" "$CI_SECRETS_POLICY"; do
   [ -n "$required_name" ] || fail "names must not be empty"
   case "$required_name" in .|..) fail "names must be clean path segments, not . or .." ;; esac
 done
+# The branch-tier identity must not alias the release-tier one: OpenBao's
+# Kubernetes auth binds (namespace, ServiceAccount) pairs, so a shared account
+# would let a branch pipeline complete the release-tier login.
+[ "$CI_SECRETS_SERVICE_ACCOUNT" != "$CREDENTIALED_SERVICE_ACCOUNT" ] || \
+  fail "--ci-secrets-service-account must differ from --credentialed-service-account: a shared identity collapses the branch and release trust tiers"
+[ "$CI_SECRETS_ROLE" != "$CREDENTIALED_ROLE" ] || \
+  fail "--ci-secrets-role must differ from --credentialed-role"
+[ "$CI_SECRETS_POLICY" != "$CREDENTIALED_POLICY" ] || \
+  fail "--ci-secrets-policy must differ from --credentialed-policy"
 case "$TRANSIT_MOUNT" in auth|sys|identity|cubbyhole) fail "Transit mount must not use a reserved API namespace" ;; esac
 
 # --- CLI detection -----------------------------------------------------------
@@ -511,6 +528,80 @@ if [ "$WRITE_CRED_ROLE" = "true" ]; then
     token_max_ttl=30m
 fi
 
+# --- 9. ci-secrets-tier policy (branch tier: upstream subtree, never grants) --
+# Same subtree as the credentialed policy today, but a separate object on
+# purpose: exact release-secret grants are synced into the credentialed policy
+# by `oberth install --credentialed-secret-path`, and this one must never
+# receive them. Branch (CI-trigger) pipelines log in with this policy's role
+# only.
+WANT_CI_POLICY="$(cat <<CIPOLICYEOF
+# CI-trigger credentialed pipelines: read-only, upstream subtree only. This
+# policy never carries approval-table grants; release secrets are reachable
+# only through the release-tier credentialed role. Managed by
+# setup-secretstore.sh.
+path "$KV_PREFIX/data/upstream/*" {
+  capabilities = ["read"]
+}
+
+# Allow the fetch client to revoke its own short-lived login token.
+path "auth/token/revoke-self" {
+  capabilities = ["update"]
+}
+CIPOLICYEOF
+)"
+HAVE_CI_POLICY="$("$CLI" policy read "$CI_SECRETS_POLICY" 2>/dev/null || true)"
+if [ -n "$HAVE_CI_POLICY" ] && [ "$(printf '%s' "$HAVE_CI_POLICY")" = "$(printf '%s' "$WANT_CI_POLICY")" ]; then
+  note "policy $CI_SECRETS_POLICY already matches — unchanged"
+elif [ -n "$HAVE_CI_POLICY" ] && [ "$FORCE" != "true" ]; then
+  warn "policy $CI_SECRETS_POLICY exists with different content:"
+  printf '%s\n' "$HAVE_CI_POLICY" | sed 's/^/    | /' >&2
+  fail "re-run with --force to replace it, or pass --ci-secrets-policy <other-name>"
+else
+  note "writing policy $CI_SECRETS_POLICY (upstream subtree read-only, grant-free)"
+  if [ "$DRY_RUN" = "true" ]; then
+    log "DRY-RUN: $CLI policy write $CI_SECRETS_POLICY <managed ci-secrets policy>"
+  else
+    printf '%s\n' "$WANT_CI_POLICY" | "$CLI" policy write "$CI_SECRETS_POLICY" - >/dev/null
+  fi
+fi
+
+# --- 10. ci-secrets role bound to the Argo ci-secrets ServiceAccount ----------
+HAVE_CI_ROLE_NAMES="$(read_field bound_service_account_names "auth/$MOUNT/role/$CI_SECRETS_ROLE")"
+if [ -n "$HAVE_CI_ROLE_NAMES" ]; then
+  HAVE_CI_ROLE_NAMESPACES="$(read_field bound_service_account_namespaces "auth/$MOUNT/role/$CI_SECRETS_ROLE")"
+  HAVE_CI_ROLE_POLICIES="$(read_field token_policies "auth/$MOUNT/role/$CI_SECRETS_ROLE")"
+  HAVE_CI_ROLE_NO_DEFAULT="$(read_field token_no_default_policy "auth/$MOUNT/role/$CI_SECRETS_ROLE")"
+  HAVE_CI_ROLE_TTL="$(read_field token_ttl "auth/$MOUNT/role/$CI_SECRETS_ROLE")"
+  HAVE_CI_ROLE_MAX_TTL="$(read_field token_max_ttl "auth/$MOUNT/role/$CI_SECRETS_ROLE")"
+  CI_ROLE_TTLS_MATCH="false"
+  case "$HAVE_CI_ROLE_TTL:$HAVE_CI_ROLE_MAX_TTL" in 1200:1800|20m:30m) CI_ROLE_TTLS_MATCH="true" ;; esac
+  if [ "$HAVE_CI_ROLE_NAMES" = "[$CI_SECRETS_SERVICE_ACCOUNT]" ] && [ "$HAVE_CI_ROLE_NAMESPACES" = "[$ARGO_NAMESPACE]" ] && \
+     [ "$HAVE_CI_ROLE_POLICIES" = "[$CI_SECRETS_POLICY]" ] && [ "$HAVE_CI_ROLE_NO_DEFAULT" = "true" ] && \
+     [ "$CI_ROLE_TTLS_MATCH" = "true" ]; then
+    note "role $CI_SECRETS_ROLE already binds ServiceAccount $ARGO_NAMESPACE/$CI_SECRETS_SERVICE_ACCOUNT with policy $CI_SECRETS_POLICY — unchanged"
+    WRITE_CI_ROLE="false"
+  elif [ "$FORCE" != "true" ]; then
+    warn "role $CI_SECRETS_ROLE exists with a different binding or token lifetime:"
+    log "current: names=$HAVE_CI_ROLE_NAMES namespaces=$HAVE_CI_ROLE_NAMESPACES policies=$HAVE_CI_ROLE_POLICIES no_default=$HAVE_CI_ROLE_NO_DEFAULT ttl=$HAVE_CI_ROLE_TTL max_ttl=$HAVE_CI_ROLE_MAX_TTL"
+    log "wanted:  names=[$CI_SECRETS_SERVICE_ACCOUNT] namespaces=[$ARGO_NAMESPACE] policies=[$CI_SECRETS_POLICY] no_default=true ttl=20m max_ttl=30m"
+    fail "re-run with --force to replace it, or pass --ci-secrets-role <other-name>"
+  else
+    WRITE_CI_ROLE="true"
+  fi
+else
+  WRITE_CI_ROLE="true"
+fi
+if [ "$WRITE_CI_ROLE" = "true" ]; then
+  note "writing role $CI_SECRETS_ROLE bound to ServiceAccount $ARGO_NAMESPACE/$CI_SECRETS_SERVICE_ACCOUNT"
+  run "$CLI" write "auth/$MOUNT/role/$CI_SECRETS_ROLE" \
+    bound_service_account_names="$CI_SECRETS_SERVICE_ACCOUNT" \
+    bound_service_account_namespaces="$ARGO_NAMESPACE" \
+    token_policies="$CI_SECRETS_POLICY" \
+    token_no_default_policy=true \
+    token_ttl=20m \
+    token_max_ttl=30m
+fi
+
 # --- summary -----------------------------------------------------------------
 HELM_ADDR="$STORE_ADDR"
 case "$STORE_ADDR" in
@@ -524,13 +615,18 @@ cat <<SUMMARY
 
 Done. The secret store now trusts:
   - Server tier:       $NAMESPACE/$SERVICE_ACCOUNT (role $ROLE, policy $POLICY)
-  - Credentialed tier: $ARGO_NAMESPACE/$CREDENTIALED_SERVICE_ACCOUNT (role $CREDENTIALED_ROLE, policy $CREDENTIALED_POLICY)
+  - Release tier:      $ARGO_NAMESPACE/$CREDENTIALED_SERVICE_ACCOUNT (role $CREDENTIALED_ROLE, policy $CREDENTIALED_POLICY)
+  - Branch CI tier:    $ARGO_NAMESPACE/$CI_SECRETS_SERVICE_ACCOUNT (role $CI_SECRETS_ROLE, policy $CI_SECRETS_POLICY)
 
-The server tier has read access to $KV_PREFIX/data/*. The credentialed tier
-has read access to the upstream subtree only ($KV_PREFIX/data/upstream/*);
-the approval table in the Oberth database is the fine-grained gate. That covers
-both Oberth secret namespaces on this mount; Oberth enforces the org/repo
-scoping below at release admission, per triggering repository:
+The server tier has read access to $KV_PREFIX/data/*. Both pipeline tiers
+start from the upstream subtree only ($KV_PREFIX/data/upstream/*); exact
+release-secret grants are ever synced into the RELEASE-tier policy alone
+(oberth install --credentialed-secret-path), and Oberth binds branch (CI)
+runs to the branch-tier ServiceAccount, so release credentials are not
+reachable from a branch push at the Vault layer. The approval table in the
+Oberth database is the fine-grained gate on top. That covers both Oberth
+secret namespaces on this mount; Oberth enforces the org/repo scoping below
+at release admission, per triggering repository:
 
   $KV_PREFIX/data/...                        system namespace (exact allowlist)
   oberth/upstream/<org>/<secret>          org-scoped: every repo of that upstream
@@ -560,7 +656,8 @@ Next steps:
        --set secretstore.kvMount=$KV_PREFIX \\
        --set secretstore.transit.enabled=$TRANSIT_ENABLED \\
        --set argo.vault.address=$HELM_ADDR \\
-       --set argo.vault.credentialedRole=$CREDENTIALED_ROLE
+       --set argo.vault.credentialedRole=$CREDENTIALED_ROLE \\
+       --set argo.ciSecrets.vaultRole=$CI_SECRETS_ROLE
 
    (When Transit is enabled, keep its managed identifiers aligned:
        --set secretstore.transit.mount=$TRANSIT_MOUNT \\

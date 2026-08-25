@@ -84,6 +84,7 @@ func (cluster liveCluster) config() Config {
 		Namespace:                  cluster.namespace,
 		PipelineServiceAccount:     "oberth-argo-pipeline",
 		CredentialedServiceAccount: "oberth-argo-credentialed",
+		CISecretsServiceAccount:    "oberth-argo-ci-secrets",
 		ExecutorServiceAccount:     "oberth-argo-executor",
 		RunnerImagePrefixes:        []string{"golang:", "alpine:", "busybox:"},
 		WorkflowTimeout:            10 * time.Minute,
@@ -91,11 +92,12 @@ func (cluster liveCluster) config() Config {
 	}
 }
 
-// ensureServiceAccounts creates the same three identities hack/argo-identities.yaml
-// declares, so the live suite exercises the real deployment shape.
+// ensureServiceAccounts creates the same four identities the chart's
+// argo-identities.yaml declares, so the live suite exercises the real
+// deployment shape.
 func (cluster liveCluster) ensureServiceAccounts(t *testing.T, ctx context.Context) {
 	t.Helper()
-	for _, name := range []string{"oberth-argo-pipeline", "oberth-argo-credentialed", "oberth-argo-executor"} {
+	for _, name := range []string{"oberth-argo-pipeline", "oberth-argo-credentialed", "oberth-argo-ci-secrets", "oberth-argo-executor"} {
 		_, err := cluster.kube.CoreV1().ServiceAccounts(cluster.namespace).Create(ctx,
 			&corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{Name: name}}, metav1.CreateOptions{})
 		if err != nil && !apierrors.IsAlreadyExists(err) {

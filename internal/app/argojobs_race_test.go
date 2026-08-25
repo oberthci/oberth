@@ -103,6 +103,7 @@ func newRaceFixture(t *testing.T) *raceFixture {
 		Namespace:                  "test-pipeline",
 		PipelineServiceAccount:     "test-pipeline",
 		CredentialedServiceAccount: "test-credentialed",
+		CISecretsServiceAccount:    "test-ci-secrets",
 		ExecutorServiceAccount:     "test-executor",
 	}
 	auditor := &stubAuditor{}
@@ -305,6 +306,7 @@ func TestDeleteBeforeCreateSeeding(t *testing.T) {
 		Namespace:                  "test-pipeline",
 		PipelineServiceAccount:     "test-pipeline",
 		CredentialedServiceAccount: "test-credentialed",
+		CISecretsServiceAccount:    "test-ci-secrets",
 		ExecutorServiceAccount:     "test-executor",
 	}
 	auditor := &stubAuditor{}

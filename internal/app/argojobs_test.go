@@ -148,6 +148,7 @@ spec:
 		Namespace:                  "oberth-pipeline",
 		PipelineServiceAccount:     "oberth-pipeline",
 		CredentialedServiceAccount: "oberth-credentialed",
+		CISecretsServiceAccount:    "oberth-ci-secrets",
 		ExecutorServiceAccount:     "oberth-executor",
 	}
 	jobs := &ArgoJobs{auditor: auditor, config: config, intents: map[string]argoIntent{}}

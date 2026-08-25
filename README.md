@@ -279,12 +279,16 @@ unauthenticated.
 - Job pods run with `automountServiceAccountToken: false`, as non-root 65534,
   all capabilities dropped, read-only root filesystem, seccomp
   `RuntimeDefault`, bounded resources and deadlines.
-- **Declared paths are the security boundary.** Pipelines without declared
-  secret-store paths bind to the pipeline ServiceAccount and receive no
-  secrets on either trigger. Pipelines with approved paths bind to the
-  credentialed ServiceAccount. Branch pipelines may only declare
-  upstream-scoped paths; system-namespace paths require a release trigger
-  and an administrator allowlist entry. Explicit trusted Plan and Apply
+- **Declared paths and the trigger together are the security boundary.**
+  Pipelines without declared secret-store paths bind to the pipeline
+  ServiceAccount and receive no secrets on either trigger. Release pipelines
+  with approved paths bind to the credentialed ServiceAccount — the only
+  identity whose OpenBao role carries release-secret grants; branch (CI)
+  pipelines with approved paths bind to the separate ci-secrets
+  ServiceAccount, whose role reaches the upstream subtree only, so release
+  credentials are unreachable from a branch push at the Vault layer. Branch
+  pipelines may only declare upstream-scoped paths; system-namespace paths
+  require a release trigger and an administrator allowlist entry. Explicit trusted Plan and Apply
   triggers receive only their distinct, phase-scoped paths; neither
   phase can consume the other's operator-owned path namespace. All fetched
   secret-store values are delivered to memory only.

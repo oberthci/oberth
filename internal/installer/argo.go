@@ -236,11 +236,18 @@ func argoOberthHelmValues(cfg Config, openbao OpenBaoResult) []string {
 	if role := strings.TrimSpace(cfg.ArgoVaultCredentialedRole); role != "" {
 		values = append(values, "--set", "argo.vault.credentialedRole="+role)
 	}
-	// The credentialed role is always set when the installer manages the store,
-	// because ConfigureSecretStore creates it. The chart value enables the
-	// server to inject it into credentialed containers as OBERTH_VAULT_ROLE.
+	// The credentialed and ci-secrets roles are always set when the installer
+	// manages the store, because ConfigureSecretStore creates both. The chart
+	// values enable the server to inject the trigger's own role into its
+	// containers as OBERTH_VAULT_ROLE. Pinned explicitly here rather than
+	// trusted to chart defaults: `helm upgrade --reuse-values` never consults
+	// a new chart's values.yaml, so an unpinned new value stays absent on
+	// every upgraded install.
 	if cfg.wantsSecretStore() {
-		values = append(values, "--set", "argo.vault.credentialedRole="+defaultCredentialedRole)
+		values = append(values,
+			"--set", "argo.vault.credentialedRole="+defaultCredentialedRole,
+			"--set", "argo.ciSecrets.vaultRole="+defaultCISecretsRole,
+		)
 	}
 	// The installer issues the OpenBao serving certificate from a CA of its
 	// own, so a release-tier pipeline has no way to verify that endpoint unless

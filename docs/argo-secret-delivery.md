@@ -98,7 +98,9 @@ writable layer, which is the disk this design exists to avoid.
   it does it by name rather than by discarding everything.
 - **`-vault-k8s-auth-role-name "$(OBERTH_VAULT_ROLE)"`** — the role is the
   administrator's, injected into every release-tier container by
-  `internal/argojob/spec.go` from `--argo-vault-release-role`, and expanded by the
+  `internal/argojob/spec.go` from the trigger's own role flag
+  (`--argo-vault-credentialed-role` on release, `--argo-vault-ci-secrets-role`
+  on CI), and expanded by the
   kubelet from the container's own environment. A literal in the document would
   drift from the server's configuration silently and surface as an authentication
   failure at publish time.
@@ -148,41 +150,59 @@ Not envconsul, and not the declared paths. **The ServiceAccount Oberth forces
 server-side, and the Vault role bound to it.**
 
 Vault's Kubernetes auth method validates *identity*, not intent: a role bound
-to `(namespace, oberth-argo-release)` will issue a token to any Pod running as
-that ServiceAccount, whatever caused the Pod to exist. So the only thing
-between a branch push and a release credential is that Oberth — not the
-repository's YAML — decides which ServiceAccount the Pod runs as.
+to `(namespace, oberth-argo-credentialed)` will issue a token to any Pod
+running as that ServiceAccount, whatever caused the Pod to exist. So the only
+thing between a branch push and a release credential is that Oberth — not the
+repository's YAML — decides which ServiceAccount the Pod runs as, from the
+trigger AND the declared paths.
 
-Three identities, three roles:
+Four identities, and a role per credentialed tier:
 
-| ServiceAccount | Runs | Kubernetes permissions | Vault role |
+| ServiceAccount | Runs | Kubernetes permissions | Vault role → policy |
 |---|---|---|---|
-| `oberth-argo-ci` | branch and promotion pipelines | none | none |
-| `oberth-argo-release` | admitted release tags | none | `oberth-release` |
+| `oberth-argo-pipeline` | any trigger with no declared paths | none | none |
+| `oberth-argo-credentialed` | admitted release tags with approved paths | none | `oberth-argo-credentialed` → upstream subtree + exact approval-table grants (release secrets) |
+| `oberth-argo-ci-secrets` | branch pipelines with approved upstream paths | none | `oberth-argo-ci-secrets` → upstream subtree only, never grants |
 | `oberth-argo-executor` | Argo's init/wait containers | `workflowtaskresults` create/patch | none |
 
-Branch-tier Pods additionally run with `automountServiceAccountToken: false`,
-so the step container holds **no token at all** and cannot even attempt a Vault
-login. Argo's executor still gets one, under the executor identity, mounted
-into the executor container only. That is a second, independent layer below the
-role binding.
+The two credentialed tiers are separate identities on purpose (issue #200):
+admission already refuses a CI document that *declares* a system-namespace
+path, but a pod's projected token can attempt any read its bound role's
+policy allows, declared or not — and repository-authored code runs in that
+pod. Binding CI pods to a ServiceAccount the release role does not accept is
+what makes release credentials unreachable from a branch push even then.
 
-The Vault role must name the release ServiceAccount and namespace exactly:
+Pods without declared paths additionally run with
+`automountServiceAccountToken: false`, so the step container holds **no token
+at all** and cannot even attempt a Vault login; on the credentialed tiers the
+server mounts a ten-minute projected token onto exactly the templates whose
+command is a credential chain. Argo's executor still gets one, under the
+executor identity, mounted into the executor container only. That is a
+second, independent layer below the role binding.
+
+Each Vault role must name its own tier's ServiceAccount and namespace exactly
+(`oberth install --install-secretstore` and setup-secretstore.sh write both):
 
 ```bash
-bao write auth/kubernetes/role/oberth-release \
-    bound_service_account_names=oberth-argo-release \
+bao write auth/kubernetes/role/oberth-argo-credentialed \
+    bound_service_account_names=oberth-argo-credentialed \
     bound_service_account_namespaces=oberth-argo \
-    policies=oberth-release ttl=20m
+    policies=oberth-argo-credentialed ttl=20m
+
+bao write auth/kubernetes/role/oberth-argo-ci-secrets \
+    bound_service_account_names=oberth-argo-ci-secrets \
+    bound_service_account_namespaces=oberth-argo \
+    policies=oberth-argo-ci-secrets ttl=20m
 ```
 
-A `*` on either bound field would let the CI identity assume the release role
-and defeat the whole switch.
+A `*` on either bound field would let any pipeline identity assume the
+release-tier role and defeat the whole switch — including the tier split
+itself.
 
 ## Residual risk, stated plainly
 
 1. **The Pod holds a live Vault credential for its token's TTL, not just the
-   one declared secret.** It can read anything the `oberth-release` policy
+   one declared secret.** It can read anything its own tier's policy
    allows. This is bounded by short TTLs and by the policy's own scope, not
    eliminated. It is the normal shape of every OIDC- or Kubernetes-federated
    CI system.

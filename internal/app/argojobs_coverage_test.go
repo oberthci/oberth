@@ -53,6 +53,7 @@ func TestNewArgoJobs_ValidConstruction(t *testing.T) {
 		Namespace:                  "test-pipeline",
 		PipelineServiceAccount:     "test-pipeline",
 		CredentialedServiceAccount: "test-credentialed",
+		CISecretsServiceAccount:    "test-ci-secrets",
 		ExecutorServiceAccount:     "test-executor",
 	}
 	jobs, err := NewArgoJobs(newBlockingController(), config, &stubAuditor{}, nil)
@@ -80,6 +81,7 @@ func TestSetReconcilerHealth(t *testing.T) {
 		Namespace:                  "test-pipeline",
 		PipelineServiceAccount:     "test-pipeline",
 		CredentialedServiceAccount: "test-credentialed",
+		CISecretsServiceAccount:    "test-ci-secrets",
 		ExecutorServiceAccount:     "test-executor",
 	}
 	jobs, err := NewArgoJobs(newBlockingController(), config, &stubAuditor{}, nil)
@@ -121,6 +123,7 @@ func TestCreateRelease_Success(t *testing.T) {
 		Namespace:                  "test-pipeline",
 		PipelineServiceAccount:     "test-pipeline",
 		CredentialedServiceAccount: "test-credentialed",
+		CISecretsServiceAccount:    "test-ci-secrets",
 		ExecutorServiceAccount:     "test-executor",
 	}
 	jobs, err := NewArgoJobs(controller, config, &stubAuditor{}, emptySecretAccess{})
@@ -178,6 +181,7 @@ func TestCreateRelease_TriggerMismatch(t *testing.T) {
 		Namespace:                  "test-pipeline",
 		PipelineServiceAccount:     "test-pipeline",
 		CredentialedServiceAccount: "test-credentialed",
+		CISecretsServiceAccount:    "test-ci-secrets",
 		ExecutorServiceAccount:     "test-executor",
 	}
 	jobs, err := NewArgoJobs(newBlockingController(), config, &stubAuditor{}, emptySecretAccess{})
@@ -345,6 +349,7 @@ func TestWait_Success(t *testing.T) {
 		Namespace:                  "test-pipeline",
 		PipelineServiceAccount:     "test-pipeline",
 		CredentialedServiceAccount: "test-credentialed",
+		CISecretsServiceAccount:    "test-ci-secrets",
 		ExecutorServiceAccount:     "test-executor",
 	}
 	jobs, err := NewArgoJobs(controller, config, &stubAuditor{}, nil)
@@ -386,6 +391,7 @@ func TestWait_NoIntent(t *testing.T) {
 		Namespace:                  "test-pipeline",
 		PipelineServiceAccount:     "test-pipeline",
 		CredentialedServiceAccount: "test-credentialed",
+		CISecretsServiceAccount:    "test-ci-secrets",
 		ExecutorServiceAccount:     "test-executor",
 	}
 	jobs, err := NewArgoJobs(controller, config, &stubAuditor{}, nil)
@@ -410,6 +416,7 @@ func TestWait_ControllerError(t *testing.T) {
 		Namespace:                  "test-pipeline",
 		PipelineServiceAccount:     "test-pipeline",
 		CredentialedServiceAccount: "test-credentialed",
+		CISecretsServiceAccount:    "test-ci-secrets",
 		ExecutorServiceAccount:     "test-executor",
 	}
 	jobs, err := NewArgoJobs(controller, config, &stubAuditor{}, nil)
@@ -450,6 +457,7 @@ func TestTerminalResult_Succeeded(t *testing.T) {
 		Namespace:                  "test-pipeline",
 		PipelineServiceAccount:     "test-pipeline",
 		CredentialedServiceAccount: "test-credentialed",
+		CISecretsServiceAccount:    "test-ci-secrets",
 		ExecutorServiceAccount:     "test-executor",
 	}
 	jobs, err := NewArgoJobs(controller, config, &stubAuditor{}, nil)
@@ -479,6 +487,7 @@ func TestTerminalResult_NotTerminal(t *testing.T) {
 		Namespace:                  "test-pipeline",
 		PipelineServiceAccount:     "test-pipeline",
 		CredentialedServiceAccount: "test-credentialed",
+		CISecretsServiceAccount:    "test-ci-secrets",
 		ExecutorServiceAccount:     "test-executor",
 	}
 	jobs, err := NewArgoJobs(controller, config, &stubAuditor{}, nil)
@@ -503,6 +512,7 @@ func TestTerminalResult_NilCompletion(t *testing.T) {
 		Namespace:                  "test-pipeline",
 		PipelineServiceAccount:     "test-pipeline",
 		CredentialedServiceAccount: "test-credentialed",
+		CISecretsServiceAccount:    "test-ci-secrets",
 		ExecutorServiceAccount:     "test-executor",
 	}
 	jobs, err := NewArgoJobs(controller, config, &stubAuditor{}, nil)
@@ -527,6 +537,7 @@ func TestTerminalResult_ControllerError(t *testing.T) {
 		Namespace:                  "test-pipeline",
 		PipelineServiceAccount:     "test-pipeline",
 		CredentialedServiceAccount: "test-credentialed",
+		CISecretsServiceAccount:    "test-ci-secrets",
 		ExecutorServiceAccount:     "test-executor",
 	}
 	jobs, err := NewArgoJobs(controller, config, &stubAuditor{}, nil)
@@ -554,6 +565,7 @@ func TestOwns_Delegation(t *testing.T) {
 		Namespace:                  "test-pipeline",
 		PipelineServiceAccount:     "test-pipeline",
 		CredentialedServiceAccount: "test-credentialed",
+		CISecretsServiceAccount:    "test-ci-secrets",
 		ExecutorServiceAccount:     "test-executor",
 	}
 	jobs, err := NewArgoJobs(controller, config, &stubAuditor{}, nil)
@@ -580,6 +592,7 @@ func TestOwns_NotOwned(t *testing.T) {
 		Namespace:                  "test-pipeline",
 		PipelineServiceAccount:     "test-pipeline",
 		CredentialedServiceAccount: "test-credentialed",
+		CISecretsServiceAccount:    "test-ci-secrets",
 		ExecutorServiceAccount:     "test-executor",
 	}
 	jobs, err := NewArgoJobs(controller, config, &stubAuditor{}, nil)
@@ -606,6 +619,7 @@ func TestForget_CleansMatchingIntent(t *testing.T) {
 		Namespace:                  "test-pipeline",
 		PipelineServiceAccount:     "test-pipeline",
 		CredentialedServiceAccount: "test-credentialed",
+		CISecretsServiceAccount:    "test-ci-secrets",
 		ExecutorServiceAccount:     "test-executor",
 	}
 	jobs, err := NewArgoJobs(newBlockingController(), config, &stubAuditor{}, nil)
@@ -635,6 +649,7 @@ func TestForget_IgnoresDifferentRunID(t *testing.T) {
 		Namespace:                  "test-pipeline",
 		PipelineServiceAccount:     "test-pipeline",
 		CredentialedServiceAccount: "test-credentialed",
+		CISecretsServiceAccount:    "test-ci-secrets",
 		ExecutorServiceAccount:     "test-executor",
 	}
 	jobs, err := NewArgoJobs(newBlockingController(), config, &stubAuditor{}, nil)
@@ -669,6 +684,7 @@ func TestResultMapping(t *testing.T) {
 		Namespace:                  "test-pipeline",
 		PipelineServiceAccount:     "test-pipeline",
 		CredentialedServiceAccount: "test-credentialed",
+		CISecretsServiceAccount:    "test-ci-secrets",
 		ExecutorServiceAccount:     "test-executor",
 	}
 	jobs, err := NewArgoJobs(newBlockingController(), config, &stubAuditor{}, nil)
@@ -775,6 +791,7 @@ func TestDelete_EmptyRunID(t *testing.T) {
 		Namespace:                  "test-pipeline",
 		PipelineServiceAccount:     "test-pipeline",
 		CredentialedServiceAccount: "test-credentialed",
+		CISecretsServiceAccount:    "test-ci-secrets",
 		ExecutorServiceAccount:     "test-executor",
 	}
 	jobs, err := NewArgoJobs(newBlockingController(), config, &stubAuditor{}, nil)
@@ -794,6 +811,7 @@ func TestDelete_WrongRunIDForIntent(t *testing.T) {
 		Namespace:                  "test-pipeline",
 		PipelineServiceAccount:     "test-pipeline",
 		CredentialedServiceAccount: "test-credentialed",
+		CISecretsServiceAccount:    "test-ci-secrets",
 		ExecutorServiceAccount:     "test-executor",
 	}
 	jobs, err := NewArgoJobs(newBlockingController(), config, &stubAuditor{}, nil)
@@ -819,6 +837,7 @@ func TestDelete_CreatedIntent(t *testing.T) {
 		Namespace:                  "test-pipeline",
 		PipelineServiceAccount:     "test-pipeline",
 		CredentialedServiceAccount: "test-credentialed",
+		CISecretsServiceAccount:    "test-ci-secrets",
 		ExecutorServiceAccount:     "test-executor",
 	}
 	jobs, err := NewArgoJobs(controller, config, &stubAuditor{}, nil)
@@ -866,6 +885,7 @@ func TestDelete_NoIntent(t *testing.T) {
 		Namespace:                  "test-pipeline",
 		PipelineServiceAccount:     "test-pipeline",
 		CredentialedServiceAccount: "test-credentialed",
+		CISecretsServiceAccount:    "test-ci-secrets",
 		ExecutorServiceAccount:     "test-executor",
 	}
 	jobs, err := NewArgoJobs(controller, config, &stubAuditor{}, nil)
@@ -890,6 +910,7 @@ func TestCreate_EmptyJobName(t *testing.T) {
 		Namespace:                  "test-pipeline",
 		PipelineServiceAccount:     "test-pipeline",
 		CredentialedServiceAccount: "test-credentialed",
+		CISecretsServiceAccount:    "test-ci-secrets",
 		ExecutorServiceAccount:     "test-executor",
 	}
 	jobs, err := NewArgoJobs(newBlockingController(), config, &stubAuditor{}, nil)

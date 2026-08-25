@@ -1,32 +1,56 @@
 {{- $namespace := required "argo.namespace is required" .Values.argo.namespace }}
+{{- /*
+The former aliases argo.ciSecretsServiceAccount and argo.vault.ciSecretsRole
+named the RELEASE-tier credentialed identity. Since the branch tier gained its
+own separate ci-secrets identity (issue #200), silently reading either alias
+could bind a branch-tier name onto the release-tier role — the exact trust
+collapse the split removes — so a values file still carrying one refuses to
+render instead.
+*/}}
+{{- if .Values.argo.ciSecretsServiceAccount }}
+{{- fail "argo.ciSecretsServiceAccount is retired: it aliased the RELEASE-tier credentialed ServiceAccount. Set argo.credentialedServiceAccount for the release tier; the separate branch-tier identity is argo.ciSecrets.serviceAccount" }}
+{{- end }}
+{{- if (.Values.argo.vault).ciSecretsRole }}
+{{- fail "argo.vault.ciSecretsRole is retired: it aliased the RELEASE-tier argo.vault.credentialedRole. Set argo.vault.credentialedRole for the release tier; the separate branch-tier role is argo.ciSecrets.vaultRole" }}
+{{- end }}
 {{- $pipeline := .Values.argo.pipelineServiceAccount | default .Values.argo.ciServiceAccount | default "oberth-argo-pipeline" }}
-{{- $credentialed := .Values.argo.credentialedServiceAccount | default .Values.argo.ciSecretsServiceAccount | default "oberth-argo-credentialed" }}
+{{- $credentialed := .Values.argo.credentialedServiceAccount | default "oberth-argo-credentialed" }}
+{{- $ciSecrets := (.Values.argo.ciSecrets).serviceAccount | default "oberth-argo-ci-secrets" }}
 {{- $executor := .Values.argo.executorServiceAccount }}
-{{- $allSAs := list $pipeline $credentialed $executor }}
+{{- $allSAs := list $pipeline $credentialed $ciSecrets $executor }}
 {{- range $i, $a := $allSAs }}
 {{- range $j, $b := $allSAs }}
 {{- if and (ne $i $j) (eq $a $b) }}
-{{- fail "argo.pipelineServiceAccount, argo.credentialedServiceAccount, and argo.executorServiceAccount must all differ: a shared identity defeats the secret access boundary" }}
+{{- fail "argo.pipelineServiceAccount, argo.credentialedServiceAccount, argo.ciSecrets.serviceAccount, and argo.executorServiceAccount must all differ: a shared identity defeats the secret access boundary" }}
 {{- end }}
 {{- end }}
 {{- end }}
 {{- if eq $namespace .Release.Namespace }}
 {{- fail "argo.namespace must differ from the release namespace: Vault Kubernetes-auth roles bind (namespace, ServiceAccount) pairs, so pipeline identities must not sit beside server ones" }}
 {{- end }}
-# The three Kubernetes identities the Argo execution engine binds:
-# pipeline (no secrets), credentialed (approved secrets), executor (Argo
-# bookkeeping). The approval table in the Oberth database controls which
-# templates receive the credentialed identity.
+# The four Kubernetes identities the Argo execution engine binds: pipeline
+# (no secrets), credentialed (release trigger with approved secrets),
+# ci-secrets (CI trigger with approved upstream-scoped secrets), executor
+# (Argo bookkeeping). The trigger and the approval table in the Oberth
+# database together decide which identity a submission receives.
 #
-# Bind the credentialed role from an administrator's own bao session:
+# Bind the two credentialed roles from an administrator's own bao session
+# (setup-secretstore.sh and `oberth install --install-secretstore` do both):
 #
-#   bao write auth/kubernetes/role/{{ .Values.argo.vault.credentialedRole | default .Values.argo.vault.ciSecretsRole | default "oberth-argo-credentialed" }} \
+#   bao write auth/kubernetes/role/{{ .Values.argo.vault.credentialedRole | default "oberth-argo-credentialed" }} \
 #       bound_service_account_names={{ $credentialed }} \
 #       bound_service_account_namespaces={{ $namespace }} \
 #       policies=oberth-argo-credentialed ttl=20m
 #
+#   bao write auth/kubernetes/role/{{ (.Values.argo.ciSecrets).vaultRole | default "oberth-argo-ci-secrets" }} \
+#       bound_service_account_names={{ $ciSecrets }} \
+#       bound_service_account_namespaces={{ $namespace }} \
+#       policies=oberth-argo-ci-secrets ttl=20m
+#
 # The bound fields must be exact. A "*" on either lets the pipeline identity
-# assume the credentialed role, defeating the approval gate.
+# assume a credentialed role, defeating the approval gate — and would also
+# let the ci-secrets identity assume the release role, defeating the tier
+# split itself.
 ---
 # Pipeline templates without approved secrets. No Kubernetes permissions, no
 # Vault role, and automountServiceAccountToken false so step containers hold
@@ -65,7 +89,27 @@ metadata:
     {{- include "oberth.labels" . | nindent 4 }}
 automountServiceAccountToken: false
 ---
-# Argo's own init and wait containers. This is the only one of the three with
+# CI templates with approved upstream-scoped secrets. The branch-tier
+# counterpart of the credentialed identity above, and a separate account on
+# purpose: the release-tier Vault role binds the credentialed name exactly, so
+# a branch pod running as this account cannot complete that login no matter
+# what its repository-authored steps attempt. Its own role's policy covers the
+# upstream subtree only and never receives approval-table grants.
+#
+# automountServiceAccountToken is false for the same reason as above: the
+# server injects a projected, ten-minute token onto exactly the templates
+# whose command is a credential chain, and no other step container of the
+# Workflow ever holds one.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $ciSecrets }}
+  namespace: {{ $namespace }}
+  labels:
+    {{- include "oberth.labels" . | nindent 4 }}
+automountServiceAccountToken: false
+---
+# Argo's own init and wait containers. This is the only one of the four with
 # any Kubernetes access, which is exactly why it must not be an identity a
 # pipeline step ever runs as.
 apiVersion: v1

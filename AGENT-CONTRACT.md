@@ -62,7 +62,13 @@ implementation detail disagree.
   commit proven reachable from the freshly fetched upstream default branch.
 - Secret-store-sourced release secrets (OpenBao) never become Kubernetes
   Secrets. Pipelines that declare approved secret-store paths bind to the
-  credentialed ServiceAccount. Two credential chains are supported:
+  trigger's own credentialed identity: release runs to the credentialed
+  ServiceAccount — the only identity whose OpenBao role's policy carries
+  approval-table release grants — and CI runs to the separate ci-secrets
+  ServiceAccount, whose role's policy covers the upstream subtree only and
+  never receives grants. The release role binds its exact ServiceAccount
+  name, so release credentials are unreachable from a branch push at the
+  Vault layer, not only at admission. Two credential chains are supported:
   - **Native (preferred):** `oberth secretstore exec` authenticates to
     OpenBao in-Pod using the ServiceAccount's projected token, fetches the
     declared paths, validates the `--dir` mount is tmpfs, writes files at
@@ -99,15 +105,23 @@ implementation detail disagree.
   `argoproj.io/v1alpha1 Workflow` resources. Oberth sets `metadata.name`,
   `metadata.namespace`, and labels (`oberth.ci/repo`, `oberth.ci/trigger`,
   `oberth.ci/ref`, `oberth.ci/sha`) at submission time.
-- Oberth forces the `serviceAccountName` via a path-gated switch: a pipeline
-  that declares no approved secret-store paths binds to the pipeline
-  ServiceAccount with no Vault/OpenBao access and
-  `automountServiceAccountToken: false`; a pipeline that declares approved
-  paths binds to the credentialed ServiceAccount, which carries a projected
-  token for OpenBao Kubernetes-auth login. The CI system-path prohibition
-  (branch pipelines may not declare system-namespace paths) and the
-  approval-table grant check are enforced as defense in depth, independently
-  of the identity switch. The YAML must not declare `serviceAccountName`.
+- Oberth forces the `serviceAccountName` via a trigger-and-path-gated switch:
+  a pipeline that declares no approved secret-store paths binds to the
+  pipeline ServiceAccount with no Vault/OpenBao access and
+  `automountServiceAccountToken: false`; a release pipeline with approved
+  paths binds to the credentialed ServiceAccount, and a CI pipeline with
+  approved paths binds to the ci-secrets ServiceAccount — each carrying a
+  projected token that only its own tier's OpenBao role accepts, with the
+  trigger's role injected as `OBERTH_VAULT_ROLE`. The CI system-path
+  prohibition (branch pipelines may not declare system-namespace paths) and
+  the approval-table grant check are enforced as defense in depth on top of
+  the identity switch. Secret paths a repository-authored envconsul
+  configuration (`secret {}` stanzas in `-config` files, `-secret` flags) or
+  an `oberth secretstore exec --path` invocation would fetch are
+  admission-checked against the declared annotation, with envconsul
+  configuration read from the immutable run workspace; a config file outside
+  the source checkout is refused. The YAML must not declare
+  `serviceAccountName`.
 - Oberth injects the source checkout into every container template as a
   read-only mount at `/work/src`. Templates set `workingDir: /work/src` but
   do not declare the source mount themselves.

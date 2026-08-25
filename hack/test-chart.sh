@@ -40,8 +40,10 @@ desired_service_manifest=$(mktemp)
 netpol_manifest=$(mktemp)
 alt_netpol=$(mktemp)
 ext_netpol=$(mktemp)
+argo_vault_manifest=$(mktemp)
+argo_legacy_manifest=$(mktemp)
 package_dir=$(mktemp -d)
-trap 'rm -f "$manifest" "$empty_release_manifest" "$generated_secrets_manifest" "$custom_anchor_manifest" "$custom_rekor_manifest" "$rotated_rekor_manifest" "$custom_rekor_deployment" "$rotated_rekor_deployment" "$rekor_public_key" "$rotated_rekor_public_key" "$empty_rekor_public_key" "$insecure_rekor_manifest" "$insecure_tsa_manifest" "$secure_secretstore_manifest" "$rotated_secretstore_manifest" "$dev_secretstore_manifest" "$staged_transit_manifest" "$secretstore_ca" "$rotated_secretstore_ca" "$default_service_manifest" "$default_nodeport_manifest" "$adoption_service_manifest" "$desired_service_manifest" "$netpol_manifest" "$alt_netpol" "$ext_netpol"; rm -rf -- "$package_dir"' EXIT
+trap 'rm -f "$manifest" "$empty_release_manifest" "$generated_secrets_manifest" "$custom_anchor_manifest" "$custom_rekor_manifest" "$rotated_rekor_manifest" "$custom_rekor_deployment" "$rotated_rekor_deployment" "$rekor_public_key" "$rotated_rekor_public_key" "$empty_rekor_public_key" "$insecure_rekor_manifest" "$insecure_tsa_manifest" "$secure_secretstore_manifest" "$rotated_secretstore_manifest" "$dev_secretstore_manifest" "$staged_transit_manifest" "$secretstore_ca" "$rotated_secretstore_ca" "$default_service_manifest" "$default_nodeport_manifest" "$adoption_service_manifest" "$desired_service_manifest" "$netpol_manifest" "$alt_netpol" "$ext_netpol" "$argo_vault_manifest" "$argo_legacy_manifest"; rm -rf -- "$package_dir"' EXIT
 cat >"$rekor_public_key" <<'EOF'
 -----BEGIN PUBLIC KEY-----
 MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE4XEptRLUdhdCPBXSRJWiuCYQZ3HO
@@ -527,6 +529,49 @@ if render --set upstream.name=-github >/dev/null 2>&1; then
 fi
 # Trailing hyphen: rejected.
 if render --set upstream.name=github- >/dev/null 2>&1; then
+  exit 1
+fi
+
+# --- Argo identity tiers (issue #200) ----------------------------------------
+# The default render declares all four pipeline-side identities.
+for identity in oberth-argo-pipeline oberth-argo-credentialed oberth-argo-ci-secrets oberth-argo-executor; do
+  grep -q "^  name: $identity$" "$manifest"
+done
+# The server is told both the branch-tier account and (with a vault address)
+# the branch-tier role, with template-inline defaults so a --reuse-values
+# upgrade from a pre-split revision still carries them.
+grep -q -- '--argo-ci-secrets-serviceaccount=oberth-argo-ci-secrets' "$manifest"
+render \
+  --set argo.vault.address=https://openbao.openbao.svc:8200 \
+  --set argo.vault.credentialedRole=oberth-argo-credentialed \
+  --set-file argo.vault.caCert="$secretstore_ca" >"$argo_vault_manifest"
+grep -q -- '--argo-vault-ci-secrets-role=oberth-argo-ci-secrets' "$argo_vault_manifest"
+# Legacy reused values: a release installed before argo.ciSecrets existed has
+# no such key in its merged values, and --reuse-values never consults the new
+# chart's values.yaml. Nulling the block reproduces that shape; the inline
+# defaults must still produce the branch-tier identity and role.
+render \
+  --set argo.ciSecrets=null \
+  --set argo.vault.address=https://openbao.openbao.svc:8200 \
+  --set argo.vault.credentialedRole=oberth-argo-credentialed \
+  --set-file argo.vault.caCert="$secretstore_ca" >"$argo_legacy_manifest"
+grep -q -- '--argo-ci-secrets-serviceaccount=oberth-argo-ci-secrets' "$argo_legacy_manifest"
+grep -q -- '--argo-vault-ci-secrets-role=oberth-argo-ci-secrets' "$argo_legacy_manifest"
+grep -q '^  name: oberth-argo-ci-secrets$' "$argo_legacy_manifest"
+# The retired aliases named the RELEASE-tier identity; a values file still
+# carrying one must refuse to render rather than silently misassign a tier.
+if render --set argo.ciSecretsServiceAccount=oberth-argo-credentialed >/dev/null 2>&1; then
+  exit 1
+fi
+if render \
+  --set argo.vault.address=https://openbao.openbao.svc:8200 \
+  --set argo.vault.ciSecretsRole=oberth-argo-credentialed \
+  --set-file argo.vault.caCert="$secretstore_ca" >/dev/null 2>&1; then
+  exit 1
+fi
+# A branch-tier account aliasing the release-tier one collapses the trust
+# split and must refuse to render.
+if render --set argo.ciSecrets.serviceAccount=oberth-argo-credentialed >/dev/null 2>&1; then
   exit 1
 fi
 

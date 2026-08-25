@@ -453,6 +453,7 @@ func minimalValidServeOptions() serveOptions {
 		argoNamespace:           "oberth-argo",
 		argoPipelineAccount:     "oberth-argo-pipeline",
 		argoCredentialedAccount: "oberth-argo-credentialed",
+		argoCISecretsAccount:    "oberth-argo-ci-secrets",
 		argoExecutorAccount:     "oberth-argo-executor",
 		argoWorkflowTimeout:     12 * time.Hour,
 		argoWorkflowTTL:         3600,

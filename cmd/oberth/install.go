@@ -63,7 +63,8 @@ func runInstall(ctx context.Context, arguments []string, input io.Reader, output
 	flags.Var(&credentialedSecretPaths, "credentialed-secret-path",
 		"full KV data path approved in the secret-access table (repeatable, exactly the string "+
 			"`oberth access allow` records, e.g. oberth/data/release/cosign-secret); synced into the "+
-			"credentialed Vault policy as an exact read grant when --install-secretstore reconciles the store")
+			"RELEASE-tier credentialed Vault policy as an exact read grant when --install-secretstore "+
+			"reconciles the store — the branch-tier ci-secrets policy never receives grants")
 	timeout := flags.Duration("timeout", 5*time.Minute, "wait timeout for pod readiness")
 
 	if err := flags.Parse(arguments); err != nil {
