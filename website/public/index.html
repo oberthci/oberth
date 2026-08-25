@@ -359,7 +359,7 @@ agent-02  feat/policy-engine    <span class="c-d">SUPERSEDED</span>    new push
 <div class="tl show"><span class="pr">$</span> git push oberth <span class="u-a19217">feat/rotate-keys</span></div>
 <div class="tl show"><span class="rm">&nbsp;&nbsp;trigger:</span> branch → CI run</div>
 <div class="tl show"><span class="rm">&nbsp;&nbsp;secrets:</span> <b>approved upstream-scoped only</b> <span class="cm">· release credentials unreachable · non-root</span></div>
-<div class="tl show u-314783"><span class="pr">$</span> git push oberth <span class="u-e3ec2a">v0.12.29</span></div>
+<div class="tl show u-314783"><span class="pr">$</span> git push oberth <span class="u-e3ec2a">v0.13.22</span></div>
 <div class="tl show"><span class="rm">&nbsp;&nbsp;gate:</span> commit reachable from default branch ✓ <span class="cm">· merge-base --is-ancestor</span></div>
 <div class="tl show"><span class="rm">&nbsp;&nbsp;trigger:</span> tag → release run</div>
 <div class="tl show"><span class="rm">&nbsp;&nbsp;secrets:</span> <span class="u-e3ec2a">r2-publisher, cosign-key</span> <span class="cm">← declared ∩ allowlist, fetched from OpenBao in-pod</span></div>
@@ -497,13 +497,13 @@ kubectl exec -n oberth deploy/oberth -- oberth <span class="c-f">uplink add</spa
   </div>
 
   <div class="ledger rv">
-    <div class="ledger-h"><span>ACCEPTANCE LEDGER · UPDATED WITH EVERY MILESTONE</span><span>ALPHA · v0.12.29</span></div>
+    <div class="ledger-h"><span>ACCEPTANCE LEDGER · UPDATED WITH EVERY MILESTONE</span><span>ALPHA · v0.13.22</span></div>
     <div class="led done"><span class="bx">[✓]</span><span>control plane deployed &amp; healthy — audit continuity verified across the schema transition</span></div>
     <div class="led done"><span class="bx">[✓]</span><span>Argo Workflow pipelines live — one pod per DAG task, right-sized containers per step</span></div>
     <div class="led done"><span class="bx">[✓]</span><span>live RFC 3161 receipts + Rekor witnesses verified</span></div>
     <div class="led done"><span class="bx">[✓]</span><span>18/18 MCP tool definitions verified over authenticated HTTP</span></div>
     <div class="led done"><span class="bx">[✓]</span><span>complete example flow proven end-to-end: red → dedup/lock → green → publish → promote → tag</span></div>
-    <div class="led done"><span class="bx">[✓]</span><span>real releases through the pipeline, proven downstream — v0.12.29 chart, signed images, published binaries</span></div>
+    <div class="led done"><span class="bx">[✓]</span><span>real releases through the pipeline, proven downstream — v0.13.22 chart, signed images, published binaries</span></div>
     <div class="led done"><span class="bx">[✓]</span><span>promotion proofs on exact SHAs — fast-forward, divergent-merge and concurrent-race batteries green</span></div>
     <div class="led done"><span class="bx">[✓]</span><span>187-scenario acceptance matrix executed on k3s, kind and k0s — zero product-blocking failures</span></div>
     <div class="led done"><span class="bx">[✓]</span><span>secret-store release secrets live — exec-stream delivery to tmpfs, memory-only, zero etcd</span></div>
