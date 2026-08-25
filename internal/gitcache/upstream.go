@@ -300,3 +300,29 @@ func (c *Cache) PeelObject(ctx context.Context, input, objectSHA string) (Peeled
 func (c *Cache) isAncestor(ctx context.Context, path, older, newer string) bool {
 	return c.run(ctx, commandSpec{dir: path, args: []string{"merge-base", "--is-ancestor", older, newer}}) == nil
 }
+
+// LsRemoteHeads probes the upstream for a repository with git ls-remote
+// --heads. It returns the number of branch refs visible. A failure means
+// the upstream is unreachable, the repository does not exist, or the SSH
+// key lacks read access — the exact conditions that would cause an opaque
+// "exit status 128" on the first push. The error includes the forge's
+// stderr (bounded and redacted by the execute path, issue #212 part 1),
+// so the caller gets "Permission denied (publickey)" or "repository not
+// found" instead of a bare exit code.
+func (c *Cache) LsRemoteHeads(ctx context.Context, input string) (int, error) {
+	remote, err := c.validatedUpstream(input)
+	if err != nil {
+		return 0, err
+	}
+	output, err := c.execute(ctx, commandSpec{args: []string{"ls-remote", "--heads", remote}}, true)
+	if err != nil {
+		return 0, fmt.Errorf("ls-remote probe for %s: %w", input, err)
+	}
+	count := 0
+	for _, line := range strings.Split(strings.TrimSpace(output), "\n") {
+		if line != "" {
+			count++
+		}
+	}
+	return count, nil
+}

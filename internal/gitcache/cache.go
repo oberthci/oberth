@@ -372,6 +372,12 @@ func (c *Cache) ensureLockedMayRecover(ctx context.Context, input, repo, path st
 		return Repository{}, err
 	}
 	if err := c.fetchTracking(ctx, temporary); err != nil {
+		// Log the fetch failure so it is visible in the server's structured log
+		// even though no receive event, audit action, or CI issue is created at
+		// this point — the fetch fails before any reservation exists (issue #212
+		// part 4). The error now includes the forge's stderr (part 1), so the
+		// operator sees the actual reason rather than a bare exit code.
+		c.logger.Printf("initial upstream fetch failed for %s: %v", repo, err)
 		return Repository{}, fmt.Errorf("initial upstream fetch for %s: %w", repo, err)
 	}
 	if err := c.materialize(ctx, temporary, nil); err != nil {

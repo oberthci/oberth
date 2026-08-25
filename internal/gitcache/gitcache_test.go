@@ -959,6 +959,40 @@ func TestLegacyOverflowRecoversMaterializationNotBricked(t *testing.T) {
 	}
 }
 
+func TestLsRemoteHeadsSucceedsForReachableUpstream(t *testing.T) {
+	t.Parallel()
+	repository := newTestRepository(t)
+	cache := newTestCache(t, repository.upstream)
+	if _, err := cache.Ensure(context.Background(), "example"); err != nil {
+		t.Fatal(err)
+	}
+	count, err := cache.LsRemoteHeads(context.Background(), "example")
+	if err != nil {
+		t.Fatalf("LsRemoteHeads: %v", err)
+	}
+	if count < 1 {
+		t.Fatalf("expected at least 1 branch, got %d", count)
+	}
+}
+
+func TestLsRemoteHeadsFailsForUnreachableUpstream(t *testing.T) {
+	t.Parallel()
+	cache, err := New(Config{
+		Root:           t.TempDir(),
+		CommandTimeout: 5 * time.Second,
+		Upstream: func(repo string) (string, error) {
+			return "/nonexistent/upstream/" + repo + ".git", nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = cache.LsRemoteHeads(context.Background(), "example")
+	if err == nil {
+		t.Fatal("expected error for unreachable upstream")
+	}
+}
+
 type testLogger struct{ writer *bytes.Buffer }
 
 func (l testLogger) Printf(format string, args ...any) {

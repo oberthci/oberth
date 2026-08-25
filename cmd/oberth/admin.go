@@ -975,15 +975,17 @@ func runRepo(ctx context.Context, arguments []string, output io.Writer) error {
 // runRepoWithDependencies dispatches repository administration subcommands.
 func runRepoWithDependencies(ctx context.Context, arguments []string, output io.Writer, dependencies repoDependencies) error {
 	if len(arguments) == 0 {
-		return fmt.Errorf("%w: repo add|remove", errUsage)
+		return fmt.Errorf("%w: repo add|remove|verify", errUsage)
 	}
 	switch arguments[0] {
 	case "add":
 		return runRepoAdd(ctx, arguments[1:], output, dependencies)
 	case "remove":
 		return runRepoRemove(ctx, arguments[1:], output, dependencies)
+	case "verify":
+		return runRepoVerify(ctx, arguments[1:], output)
 	default:
-		return fmt.Errorf("%w: repo add [--database PATH] [--default-branch NAME] <repository> <upstream-name> | repo remove [--database PATH] [--git-cache-root PATH] <repository>", errUsage)
+		return fmt.Errorf("%w: repo add|remove|verify", errUsage)
 	}
 }
 
@@ -1063,6 +1065,104 @@ func runRepoAdd(ctx context.Context, arguments []string, output io.Writer, depen
 	_, err = fmt.Fprintf(output, "registered repository %s -> upstream %s (%s); the first push proves the mapping and refreshes the default branch\n",
 		value.Name, upstream.Name, upstream.BaseURL)
 	return err
+}
+
+// runRepoVerify probes each registered repository's upstream with
+// git ls-remote to verify that the mapping resolves and the forge
+// grants read access. A failure here is exactly the error a first push
+// would hit (issue #212 part 3): "exit status 128" with no durable
+// record. Running verify after repo add catches typos and permission
+// issues immediately; running verify --all catches key rotations.
+func runRepoVerify(ctx context.Context, arguments []string, output io.Writer) error {
+	flags := flag.NewFlagSet("repo verify", flag.ContinueOnError)
+	flags.SetOutput(io.Discard)
+	databasePath := flags.String("database", "/data/oberth.sqlite", "SQLite database path")
+	gitCacheRoot := flags.String("git-cache-root", "/data/git", "root directory for bare Git caches")
+	all := flags.Bool("all", false, "verify every registered repository")
+	if err := flags.Parse(arguments); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			flags.SetOutput(output)
+			flags.Usage()
+			return nil
+		}
+		return fmt.Errorf("%w: %w", errUsage, err)
+	}
+	if !*all && flags.NArg() == 0 {
+		return fmt.Errorf("%w: repo verify <repository> | repo verify --all", errUsage)
+	}
+	database, err := store.OpenAdminClient(ctx, *databasePath, store.Options{})
+	if err != nil {
+		return err
+	}
+	defer func() { _ = database.Close() }()
+	upstreams, err := database.ListUpstreams(ctx)
+	if err != nil {
+		return err
+	}
+	upstreamMap := make(map[int64]model.Upstream, len(upstreams))
+	for _, upstream := range upstreams {
+		upstreamMap[upstream.ID] = upstream
+	}
+	var repos []model.Repository
+	if *all {
+		repos, err = database.ListRepositories(ctx)
+		if err != nil {
+			return err
+		}
+	} else {
+		for i := 0; i < flags.NArg(); i++ {
+			name, normErr := gitcache.NormalizeRepo(flags.Arg(i))
+			if normErr != nil {
+				return normErr
+			}
+			repo, lookupErr := database.RepositoryByName(ctx, name)
+			if lookupErr != nil {
+				return fmt.Errorf("repository %s: %w", name, lookupErr)
+			}
+			repos = append(repos, repo)
+		}
+	}
+	if len(repos) == 0 {
+		_, _ = fmt.Fprintln(output, "no repositories registered")
+		return nil
+	}
+	// Build a minimal git cache for ls-remote probing. The cache is read-only:
+	// it never modifies the actual cache directory.
+	resolver := app.Upstreams{Catalog: database}
+	cache, cacheErr := gitcache.New(gitcache.Config{
+		Root:     *gitCacheRoot,
+		Upstream: resolver.Remote,
+	})
+	if cacheErr != nil {
+		return fmt.Errorf("initialize git cache for verification: %w", cacheErr)
+	}
+	var failures int
+	for _, repo := range repos {
+		_, ok := upstreamMap[repo.UpstreamID]
+		if !ok {
+			_, _ = fmt.Fprintf(output, "FAIL  %s: upstream id %d not found\n", repo.Name, repo.UpstreamID)
+			failures++
+			continue
+		}
+		remote, resolveErr := resolver.Remote(repo.Name)
+		if resolveErr != nil {
+			_, _ = fmt.Fprintf(output, "FAIL  %s: cannot resolve upstream: %v\n", repo.Name, resolveErr)
+			failures++
+			continue
+		}
+		// Use the cache to run ls-remote with the configured SSH env.
+		_, lsErr := cache.LsRemoteHeads(ctx, repo.Name)
+		if lsErr != nil {
+			_, _ = fmt.Fprintf(output, "FAIL  %s -> %s: %v\n", repo.Name, remote, lsErr)
+			failures++
+		} else {
+			_, _ = fmt.Fprintf(output, "OK    %s -> %s\n", repo.Name, remote)
+		}
+	}
+	if failures > 0 {
+		return fmt.Errorf("%d of %d repositories failed verification", failures, len(repos))
+	}
+	return nil
 }
 
 // runRepoRemove deletes a repository mapping and its Git cache directory.
