@@ -1,0 +1,142 @@
+{{- if .Values.kubedock.enabled }}
+# Kubedock: a Docker API shim that orchestrates Kubernetes pods.
+#
+# It exists so Testcontainers-backed tests can run inside an Oberth pipeline.
+# Pipeline containers are non-root on a read-only root filesystem with no
+# container runtime, so a repository whose suite starts a Postgres or an
+# emulator has to exclude those classes otherwise.
+#
+# The alternative was mounting the host's Docker socket, which hands a build
+# pod control of every container on the machine, Oberth and OpenBao included.
+# Kubedock's blast radius is instead exactly the Role below: pods, services
+# and configmaps in the pipeline namespace and nowhere else.
+#
+# It is off by default and it is not a general dependency: it is deployed only
+# where a pipeline needs a Docker API, which is what `oberth install
+# --testcontainers` asks for. That flag also opens in-namespace egress,
+# because the shim is unreachable from a pipeline pod without it.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "oberth.fullname" . }}-kubedock
+  namespace: {{ required "argo.namespace is required" .Values.argo.namespace }}
+  labels:
+    {{- include "oberth.labels" . | nindent 4 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "oberth.fullname" . }}-kubedock
+  namespace: {{ .Values.argo.namespace }}
+  labels:
+    {{- include "oberth.labels" . | nindent 4 }}
+rules:
+  # Pods are the containers Testcontainers asks for. exec and log are how the
+  # Docker API's exec and logs calls are served; wait strategies use both.
+  - apiGroups: [""]
+    resources: ["pods", "pods/log", "pods/exec", "pods/attach", "pods/portforward"]
+    verbs: ["get", "list", "watch", "create", "delete"]
+  # Services expose a test container to the pipeline pod. Kubedock flattens
+  # networking, so a network alias becomes a Service of that name.
+  - apiGroups: [""]
+    resources: ["services"]
+    verbs: ["get", "list", "watch", "create", "delete"]
+  # Volumes that point at a single file are converted to ConfigMaps.
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "list", "watch", "create", "delete"]
+  # Only needed with --lock, which serialises namespace ownership when more
+  # than one kubedock shares a namespace. Granted now so enabling it later is
+  # not a second RBAC change.
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["get", "list", "watch", "create", "update", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "oberth.fullname" . }}-kubedock
+  namespace: {{ .Values.argo.namespace }}
+  labels:
+    {{- include "oberth.labels" . | nindent 4 }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "oberth.fullname" . }}-kubedock
+    namespace: {{ .Values.argo.namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "oberth.fullname" . }}-kubedock
+---
+apiVersion: v1
+kind: Service
+metadata:
+  # The name a pipeline's DOCKER_HOST points at, so it is fixed rather than
+  # derived from the release name: a build.yaml naming tcp://kubedock:2475 is
+  # the documented setting and must not change with the release.
+  name: kubedock
+  namespace: {{ .Values.argo.namespace }}
+  labels:
+    {{- include "oberth.labels" . | nindent 4 }}
+spec:
+  # Headless on purpose. Kubedock's reverse proxy opens a fresh random port per
+  # test container (38981 for a Postgres 5432, and a different one next run),
+  # and a ClusterIP Service can only forward ports named up front. Resolving
+  # the name straight to the pod IP means every proxied port is reachable
+  # without enumerating any of them.
+  clusterIP: None
+  selector:
+    app.kubernetes.io/name: kubedock
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  ports:
+    - name: api
+      port: 2475
+      targetPort: 2475
+      protocol: TCP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "oberth.fullname" . }}-kubedock
+  namespace: {{ .Values.argo.namespace }}
+  labels:
+    {{- include "oberth.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: kubedock
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: kubedock
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      serviceAccountName: {{ include "oberth.fullname" . }}-kubedock
+      containers:
+        - name: kubedock
+          image: {{ required "kubedock.image is required when kubedock.enabled" .Values.kubedock.image | quote }}
+          args:
+            - "server"
+            - "--namespace={{ .Values.argo.namespace }}"
+            # Kubedock creates a Service for each test container but does not
+            # itself listen on the mapped ports. Testcontainers derives its
+            # host from DOCKER_HOST and connects to kubedock:<mappedPort>, so
+            # without this the connection times out even though the container
+            # is healthy.
+            - "--reverse-proxy"
+            # Reap orphaned test pods. Testcontainers' own reaper (Ryuk) is
+            # disabled in a pipeline because it needs a Docker socket, so this
+            # is what stops a failed run leaving Postgres pods behind.
+            - "--reapmax={{ .Values.kubedock.reapMax }}"
+            # Give test containers a resource request so the scheduler can
+            # place them. Without one they compete unpredictably with the
+            # pipeline pod on a small node.
+            - "--request-cpu={{ .Values.kubedock.requestCPU }}"
+            - "--request-memory={{ .Values.kubedock.requestMemory }}"
+          ports:
+            - containerPort: 2475
+          resources:
+            {{- toYaml .Values.kubedock.resources | nindent 12 }}
+{{- end }}

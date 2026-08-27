@@ -336,6 +336,44 @@
         }
       }
     },
+    "kubedock": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Kubedock, a Docker API shim deployed into argo.namespace so Testcontainers-backed tests can run in a pipeline container that has no container runtime. Requires networkPolicy.inNamespaceAllPorts (or an inNamespacePorts entry for 2475 plus the proxied ports) to be reachable.",
+      "required": [
+        "enabled"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Deploy kubedock into the pipeline namespace. Default: false."
+        },
+        "image": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Kubedock container image."
+        },
+        "reapMax": {
+          "type": "string",
+          "minLength": 1,
+          "description": "How long an orphaned test pod survives, as a Go duration (e.g. 60m). Testcontainers' own reaper needs a Docker socket and is disabled in a pipeline."
+        },
+        "requestCPU": {
+          "type": "string",
+          "minLength": 1,
+          "description": "min,max CPU request for pods kubedock creates on a test's behalf (e.g. 100m,1000m)."
+        },
+        "requestMemory": {
+          "type": "string",
+          "minLength": 1,
+          "description": "min,max memory request for pods kubedock creates on a test's behalf (e.g. 256Mi,1Gi)."
+        },
+        "resources": {
+          "type": "object",
+          "description": "Resource requests and limits for the kubedock deployment itself."
+        }
+      }
+    },
     "networkPolicy": {
       "type": "object",
       "additionalProperties": false,

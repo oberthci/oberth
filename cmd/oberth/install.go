@@ -53,6 +53,10 @@ func runInstall(ctx context.Context, arguments []string, input io.Reader, output
 	flags.StringVar(&cfg.ArgoChartVersion, "argo-chart-version", "", "argo-workflows chart version")
 	flags.StringVar(&cfg.ArgoVaultAddress, "argo-vault-address", "",
 		"OpenBao/Vault base URL injected into credentialed pipeline containers as VAULT_ADDR (https only)")
+	flags.BoolVar(&cfg.Testcontainers, "testcontainers", false,
+		"deploy kubedock (a Docker API shim) into the pipeline namespace and open in-namespace egress, "+
+			"so a repository whose suite starts containers can run it in a pipeline container that has no "+
+			"container runtime; both are needed and neither works alone")
 	flags.StringVar(&cfg.NetworkPolicy, "network-policy", "",
 		"pipeline egress NetworkPolicy: auto (default: enable on conforming CNIs, disable on k3s+kube-router), "+
 			"true (always enable), false (always disable)")
