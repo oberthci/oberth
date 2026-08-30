@@ -133,6 +133,10 @@ func emitJSON(ctx context.Context, api *client.Client, path string, query map[st
 	if err != nil {
 		return err
 	}
+	return writeIndentedJSON(raw, output)
+}
+
+func writeIndentedJSON(raw []byte, output io.Writer) error {
 	var indented bytes.Buffer
 	if err := json.Indent(&indented, raw, "", "  "); err != nil {
 		// Not valid JSON; pass through unchanged.
@@ -140,7 +144,7 @@ func emitJSON(ctx context.Context, api *client.Client, path string, query map[st
 		return writeErr
 	}
 	indented.WriteByte('\n')
-	_, err = output.Write(indented.Bytes())
+	_, err := output.Write(indented.Bytes())
 	return err
 }
 
@@ -428,6 +432,12 @@ func runRemoteStatus(ctx context.Context, arguments []string, output io.Writer) 
 			return err
 		}
 	}
+	// Status is where the two versions are already both in hand, and it is the
+	// command someone runs when something is behaving oddly. An older CLI
+	// against a newer server is a real cause of that, and it was invisible:
+	// the server's version was printed and this binary's own was not anywhere
+	// near it.
+	warnVersionDrift(output, version, status.Version)
 	return nil
 }
 
