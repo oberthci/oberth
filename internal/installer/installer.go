@@ -183,6 +183,12 @@ type Config struct {
 	// "auto" (default) enables on all CNIs except k3s's built-in kube-router
 	// (which has a DNAT incompatibility), "true" forces on, "false" forces off.
 	NetworkPolicy string
+	// ShellProfile decides whether the install appends the sourcing line to
+	// the operator's shell profile: "yes", "no", or empty to ask when there
+	// is a terminal to ask on. Empty in a script means no: an install that was
+	// not told to edit a file the caller never mentioned does not edit it.
+	ShellProfile string
+
 	// ChartPath installs the Oberth chart from a local directory or archive
 	// instead of the published repository (--chart). This is the loop the
 	// rollout depends on: build the server image, install the working tree's
@@ -323,6 +329,12 @@ type Deps struct {
 	// Kubernetes REST client is used directly.
 	PodLogs    func(ctx context.Context, namespace, pod string) ([]byte, error)
 	IsTerminal func() bool
+	// HomeDir resolves the operator's home directory. Injectable because the
+	// shell-profile step writes inside it, and a test that reaches the real
+	// one edits the developer's own machine.
+	//
+	// Nil means os.UserHomeDir, which is correct everywhere except a test.
+	HomeDir func() (string, error)
 	// LookPath resolves a host binary, so a step that adapts to what is
 	// installed can be tested without depending on the test machine's PATH.
 	// Nil selects exec.LookPath.
@@ -439,6 +451,14 @@ func (cfg *Config) Validate() error {
 	}
 	if cfg.InstallSecretStore && cfg.InstallSecretStoreDev {
 		return errors.New("--install-secretstore and --install-secretstore-dev are mutually exclusive")
+	}
+	// Refused rather than read as "no": a typo that silently declines is a
+	// typo that produces the exact behavior the flag was passed to avoid.
+	switch strings.ToLower(strings.TrimSpace(cfg.ShellProfile)) {
+	case "", "yes", "no":
+		cfg.ShellProfile = strings.ToLower(strings.TrimSpace(cfg.ShellProfile))
+	default:
+		return fmt.Errorf("--shell-profile %q is not yes or no", cfg.ShellProfile)
 	}
 	if !cfg.Dev {
 		cfg.Dev = true
