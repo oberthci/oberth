@@ -810,11 +810,17 @@ func TestValidateRefusesAVaultCABundleThatIsNotAnAnchor(t *testing.T) {
 // --- Approval-table enforcement boundary tests ---
 
 // TestBuildRejectsUnapprovedSecretPath proves that a pipeline declaring a
-// secret path not in the approval table is rejected at admission.
+// SYSTEM secret path not in the approval table is rejected at admission.
+//
+// The path here is a system one on purpose. This test used to declare an
+// oberth/upstream/ path, which needs no grant: that namespace is authorized
+// structurally against the pushing repository's own upstream, so a grant row
+// could only restate a constraint already enforced. A system path is the case
+// the approval table actually decides.
 func TestBuildRejectsUnapprovedSecretPath(t *testing.T) {
 	withPaths := strings.Replace(greedyDocument, "    oberth.ci/size: L\n",
-		"    oberth.ci/size: L\n    oberth.ci/secret-paths: oberth/upstream/skipops/oberth/test-secret\n", 1)
-	request := testRequest(periapsis.TriggerCI, withPaths)
+		"    oberth.ci/size: L\n    oberth.ci/secret-paths: oberth/data/release/test-secret\n", 1)
+	request := testRequest(periapsis.TriggerRelease, withPaths)
 	// ApprovedSecrets is set but empty — no grants.
 	request.ApprovedSecrets = map[string]bool{}
 	if _, err := Build(testConfig(), request); err == nil {
@@ -824,8 +830,29 @@ func TestBuildRejectsUnapprovedSecretPath(t *testing.T) {
 	}
 }
 
+// TestBuildAdmitsUpstreamScopedPathWithoutAGrant is the same boundary from the
+// other side, end to end through Build: a repository reaching its own org's
+// subtree needs no administrator step first.
+func TestBuildAdmitsUpstreamScopedPathWithoutAGrant(t *testing.T) {
+	withPaths := strings.Replace(greedyDocument, "    oberth.ci/size: L\n",
+		"    oberth.ci/size: L\n    oberth.ci/secret-paths: oberth/upstream/skipops/shared-token\n", 1)
+	request := testRequest(periapsis.TriggerCI, withPaths)
+	request.ApprovedSecrets = map[string]bool{}
+	workflow, err := Build(testConfig(), request)
+	if err != nil {
+		t.Fatalf("an org-scoped path was rejected without a grant: %v", err)
+	}
+	// It is still a credentialed run, so it still gets the branch-tier
+	// identity rather than the plain pipeline one.
+	if workflow.Spec.ServiceAccountName != testCISecretsAcct {
+		t.Fatalf("ServiceAccount = %q, want %q", workflow.Spec.ServiceAccountName, testCISecretsAcct)
+	}
+}
+
 // TestBuildAdmitsApprovedSecretPath proves that a pipeline declaring a path
-// present in the approval table is admitted.
+// present in the approval table is admitted, and that a granted upstream path
+// keeps working exactly as before: the change removed a requirement, it did
+// not make an existing grant an error.
 func TestBuildAdmitsApprovedSecretPath(t *testing.T) {
 	withPaths := strings.Replace(greedyDocument, "    oberth.ci/size: L\n",
 		"    oberth.ci/size: L\n    oberth.ci/secret-paths: oberth/upstream/skipops/oberth/test-secret\n", 1)
