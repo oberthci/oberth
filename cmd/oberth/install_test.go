@@ -184,3 +184,15 @@ func TestRunCLIRoutesEveryCommandViaHelp(t *testing.T) {
 		})
 	}
 }
+
+// TestRunInstallWiresSecretStoreFlag guards the flag→Config wiring. A dropped
+// StringVar line leaves --secretstore parsing as an unknown flag rather than
+// selecting anything, and a scripted install that believes it asked for a
+// store would get whatever the non-interactive default happens to be.
+func TestRunInstallWiresSecretStoreFlag(t *testing.T) {
+	t.Parallel()
+	err := runInstall(context.Background(), []string{"--secretstore", "bogus"}, strings.NewReader(""), io.Discard)
+	if err == nil || !strings.Contains(err.Error(), "production, dev or none") {
+		t.Fatalf("--secretstore should reach Config validation, got: %v", err)
+	}
+}

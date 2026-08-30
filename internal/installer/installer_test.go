@@ -2947,6 +2947,69 @@ func existingKindCommandRunner(t *testing.T, inspectOutput []byte) CommandRunner
 	}
 }
 
+// --- Secret-store selection flag ---
+
+// TestValidateSecretStoreSelection pins --secretstore onto the two booleans
+// the rest of the installer reads, because those booleans are what every
+// later branch tests and a selection that does not reach them is a flag that
+// parses and does nothing.
+func TestValidateSecretStoreSelection(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name       string
+		selection  string
+		production bool
+		dev        bool
+		undecided  bool
+	}{
+		{name: "production", selection: "production", production: true},
+		{name: "dev", selection: "dev", dev: true},
+		{name: "none", selection: "none"},
+		{name: "case insensitive", selection: "  Production ", production: true},
+		{name: "empty stays undecided", selection: "", undecided: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			cfg := Config{SecretStore: tc.selection, SecretStoreUndecided: true}
+			if err := cfg.Validate(); err != nil {
+				t.Fatal(err)
+			}
+			if cfg.InstallSecretStore != tc.production {
+				t.Fatalf("InstallSecretStore = %v, want %v", cfg.InstallSecretStore, tc.production)
+			}
+			if cfg.InstallSecretStoreDev != tc.dev {
+				t.Fatalf("InstallSecretStoreDev = %v, want %v", cfg.InstallSecretStoreDev, tc.dev)
+			}
+			if cfg.SecretStoreUndecided != tc.undecided {
+				t.Fatalf("SecretStoreUndecided = %v, want %v", cfg.SecretStoreUndecided, tc.undecided)
+			}
+		})
+	}
+}
+
+func TestValidateRejectsUnknownSecretStoreSelection(t *testing.T) {
+	t.Parallel()
+	cfg := Config{SecretStore: "vault"}
+	err := cfg.Validate()
+	if err == nil || !strings.Contains(err.Error(), "production, dev or none") {
+		t.Fatalf("expected a usage error naming the accepted values, got: %v", err)
+	}
+}
+
+// TestSecretStoreSelectionNoneOverridesInstallFlag proves --secretstore none
+// can say no to a store an earlier flag said yes to, which is the answer that
+// had no spelling at all before.
+func TestSecretStoreSelectionNoneOverridesInstallFlag(t *testing.T) {
+	t.Parallel()
+	cfg := Config{InstallSecretStore: true, SecretStore: "none"}
+	if err := cfg.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.wantsSecretStore() {
+		t.Fatal("--secretstore none must leave no secret store requested")
+	}
+}
+
 // --- Secret-store prompt ---
 
 func TestPromptSecretStoreChoiceInteractiveDefaultsToProduction(t *testing.T) {

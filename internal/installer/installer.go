@@ -183,6 +183,14 @@ type Config struct {
 	// "auto" (default) enables on all CNIs except k3s's built-in kube-router
 	// (which has a DNAT incompatibility), "true" forces on, "false" forces off.
 	NetworkPolicy string
+	// SecretStore settles the release secret store without a terminal:
+	// "production", "dev" or "none". Empty is undecided, which leaves the
+	// existing behaviour alone -- ask when there is a terminal, skip when
+	// there is not. It exists because the choice was reachable only by an
+	// operator answering a prompt, so neither a scripted install nor a test
+	// could make it, and --install-secretstore could say yes but nothing
+	// could say no.
+	SecretStore string
 	// ChartPath installs the Oberth chart from a local directory or archive
 	// instead of the published repository (--chart). This is the loop the
 	// rollout depends on: build the server image, install the working tree's
@@ -207,14 +215,15 @@ func (cfg Config) wantsSecretStore() bool {
 }
 
 // promptSecretStoreChoice proposes installing OpenBao when no explicit
-// --install-secretstore or --install-secretstore-dev flag was passed. In an
+// --secretstore, --install-secretstore or --install-secretstore-dev flag was
+// passed. In an
 // interactive terminal it presents a three-option menu; in a non-interactive
 // session it skips with guidance (credentials printed during production
 // setup must never land in CI logs or transcripts unsolicited).
 func promptSecretStoreChoice(ctx context.Context, cfg *Config, deps Deps) error {
 	interactive := deps.IsTerminal != nil && deps.IsTerminal() && deps.Input != nil
 	if !interactive {
-		_, _ = fmt.Fprintln(deps.Output, "No secret store selected. Re-run with --install-secretstore to enable release secret management.")
+		_, _ = fmt.Fprintln(deps.Output, "No secret store selected. Pass --secretstore production or --install-secretstore to enable release secret management.")
 		return nil
 	}
 
@@ -439,6 +448,22 @@ func (cfg *Config) Validate() error {
 	}
 	if cfg.InstallSecretStore && cfg.InstallSecretStoreDev {
 		return errors.New("--install-secretstore and --install-secretstore-dev are mutually exclusive")
+	}
+	switch strings.ToLower(strings.TrimSpace(cfg.SecretStore)) {
+	case "":
+		// Undecided: promptSecretStoreChoice settles it.
+	case "production":
+		cfg.InstallSecretStore = true
+		cfg.SecretStoreUndecided = false
+	case "dev":
+		cfg.InstallSecretStoreDev = true
+		cfg.SecretStoreUndecided = false
+	case "none":
+		cfg.InstallSecretStore = false
+		cfg.InstallSecretStoreDev = false
+		cfg.SecretStoreUndecided = false
+	default:
+		return fmt.Errorf("--secretstore %q is not production, dev or none", cfg.SecretStore)
 	}
 	if !cfg.Dev {
 		cfg.Dev = true
