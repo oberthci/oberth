@@ -138,6 +138,17 @@ func runClientAccessOffer(ctx context.Context, cfg Config, deps Deps, tw *tableW
 	baseURL := "https://" + clientReachableHost(deps) + ":" + httpsNodePort
 	tokenCommand, tokenHint := tokenCommandForHost()
 
+	// The evidence, not the exit code: the handshake a client is about to
+	// make, with the pool that client was just given and nothing else in it.
+	trustVerified := true
+	if verifyErr := verifyServerTrust(ctx, baseURL, authority); verifyErr != nil {
+		trustVerified = false
+		tw.AppendRow("Server certificate", verifyErr.Error(), "⚠ unverified", false)
+	} else {
+		tw.AppendRow("Server certificate", "verified with "+displayPath(caPath), "✓ trusted", false)
+	}
+
+	var trustNotes []string
 	if choice == clientAccessBoth || choice == clientAccessCLI {
 		path := filepath.Join(root, "env")
 		if err := atomicWriteFile(path, []byte(renderClientEnv(baseURL, caPath, tokenCommand)), 0600); err != nil {
@@ -160,14 +171,39 @@ func runClientAccessOffer(ctx context.Context, cfg Config, deps Deps, tw *tableW
 			// its own documented command where one exists.
 			if registerWithClaudeCode(ctx, deps, body) {
 				tw.AppendRow("MCP access", "registered with Claude Code", "✓ ready", false)
+				// Registered is not the same as able to connect: the server's
+				// signer is private, and a client that does not trust it
+				// fails the handshake and reports the server as unreachable.
+				trust := claudeCATrust(caPath, trustVerified)
+				tw.AppendRow("Claude Code CA trust", trust.detail, trust.status, false)
+				if trust.note != "" {
+					trustNotes = append(trustNotes, trust.note)
+				}
 			} else {
 				tw.AppendRow("MCP access", displayPath(path), "✓ written", false)
+				trustNotes = append(trustNotes, fmt.Sprintf(
+					"An MCP client running on Node needs %s=%s in its environment;\n  Node reads no certificate from the platform's trust store.",
+					nodeExtraCACerts, displayPath(caPath)))
 			}
 		}
 	}
 
+	printCATrustNotes(w, trustNotes)
 	printClientAccessNotes(w, root, choice, tokenHint, freshToken)
 	return nil
+}
+
+// printCATrustNotes says what is left to do for a client whose trust the
+// installer could not arrange itself. Saying nothing here is what produces a
+// configured client whose first request fails for a reason nobody named.
+func printCATrustNotes(w io.Writer, notes []string) {
+	if len(notes) == 0 {
+		return
+	}
+	_, _ = fmt.Fprint(w, "\nThis deployment's certificate is signed by its own CA, so each client has\nto be told about it:\n\n")
+	for _, note := range notes {
+		_, _ = fmt.Fprintf(w, "  %s\n", note)
+	}
 }
 
 // renderClientEnv writes what the CLI reads and deliberately not the token.
