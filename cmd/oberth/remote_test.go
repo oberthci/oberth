@@ -332,3 +332,74 @@ func TestIssuesEmptyShowsNoIssues(t *testing.T) {
 		t.Fatalf("empty issue list did not show a message:\n%s", out.String())
 	}
 }
+
+// The push banner prints twelve characters, and reading the log is the first
+// thing anyone does with them. `oberth run` accepted the abbreviation and
+// `oberth log` did not, so the one command the banner leads to answered 404.
+func TestLogAcceptsTheShortRunIDThePushBannerPrints(t *testing.T) {
+	const full = "ba7760409e48a045ea85e2bc3a01c610"
+	var logPath string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if strings.HasSuffix(r.URL.Path, "/logs") {
+			logPath = r.URL.Path
+			_, _ = w.Write([]byte(`{"run_id":"` + full + `","burn":"ci","step":"test","output":"ok\n","total_lines":1}`))
+			return
+		}
+		_, _ = w.Write([]byte(`[{"ID":"` + full + `"},{"ID":"d34b5c086299373274a65f2e361c0be2"}]`))
+	}))
+	defer server.Close()
+	configure(t, server)
+
+	var out bytes.Buffer
+	if err := runRemoteLog(context.Background(), []string{"--burn", "ci", "--step", "test", "ba7760409e48"}, &out); err != nil {
+		t.Fatal(err)
+	}
+	if logPath != "/api/runs/"+full+"/logs" {
+		t.Fatalf("log was fetched from %q, want the expanded identifier", logPath)
+	}
+}
+
+// Guessing between two runs would be worse than refusing, so the candidates
+// are named and nothing is fetched.
+func TestLogRefusesAnAmbiguousRunIDPrefixAndNamesTheCandidates(t *testing.T) {
+	const first = "ba7760409e48a045ea85e2bc3a01c610"
+	const second = "ba7760409e48ffffffffffffffffffff"
+	configure(t, remoteServer(t, `[{"ID":"`+first+`"},{"ID":"`+second+`"}]`))
+
+	var out bytes.Buffer
+	err := runRemoteLog(context.Background(), []string{"--burn", "ci", "--step", "test", "ba7760"}, &out)
+	if err == nil {
+		t.Fatal("an ambiguous prefix was resolved anyway")
+	}
+	for _, want := range []string{first, second} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("the error does not name candidate %s: %v", want, err)
+		}
+	}
+}
+
+// Artifacts takes the same identifier from the same banner.
+func TestArtifactsAcceptsTheShortRunID(t *testing.T) {
+	const full = "ba7760409e48a045ea85e2bc3a01c610"
+	var artifactsPath string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if strings.Contains(r.URL.Path, "/artifacts") {
+			artifactsPath = r.URL.Path
+			_, _ = w.Write([]byte(`{"run_id":"` + full + `","artifacts":[]}`))
+			return
+		}
+		_, _ = w.Write([]byte(`[{"ID":"` + full + `"}]`))
+	}))
+	defer server.Close()
+	configure(t, server)
+
+	var out bytes.Buffer
+	if err := runArtifacts(context.Background(), []string{"ba7760409e48"}, &out); err != nil {
+		t.Fatal(err)
+	}
+	if artifactsPath != "/api/runs/"+full+"/artifacts" {
+		t.Fatalf("artifacts were listed at %q, want the expanded identifier", artifactsPath)
+	}
+}

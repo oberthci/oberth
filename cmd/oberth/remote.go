@@ -313,7 +313,15 @@ func runRemoteLog(ctx context.Context, arguments []string, output io.Writer) err
 		return err
 	}
 	reportMode("server")
-	path := "/api/runs/" + flags.Arg(0) + "/logs"
+	// The push banner prints twelve characters, and reading a failed run's log
+	// is the first thing anyone does with them. `oberth run` already accepted
+	// the abbreviation; log did not, so the one command the banner leads to
+	// was the one that answered with a 404.
+	runID, err := resolveRemoteRunID(ctx, api, flags.Arg(0))
+	if err != nil {
+		return err
+	}
+	path := "/api/runs/" + runID + "/logs"
 	query := map[string]string{"burn": *burn, "step": *step, "pattern": *pattern}
 	for name, value := range map[string]int{"context": *context_, "offset": *offset, "limit": *limit} {
 		if value > 0 {
@@ -518,15 +526,19 @@ func remoteArtifacts(ctx context.Context, config client.Config, rest []string, o
 		return err
 	}
 	reportMode("server")
+	runID, err := resolveRemoteRunID(ctx, api, rest[0])
+	if err != nil {
+		return err
+	}
 	if len(rest) == 2 {
-		return api.GetTo(ctx, "/api/runs/"+rest[0]+"/artifacts/"+rest[1], nil, output)
+		return api.GetTo(ctx, "/api/runs/"+runID+"/artifacts/"+rest[1], nil, output)
 	}
 	var listing remoteArtifactList
-	if err := api.Get(ctx, "/api/runs/"+rest[0]+"/artifacts", nil, &listing); err != nil {
+	if err := api.Get(ctx, "/api/runs/"+runID+"/artifacts", nil, &listing); err != nil {
 		return err
 	}
 	if len(listing.Artifacts) == 0 {
-		_, err := fmt.Fprintf(output, "run %s kept no artifacts\n", rest[0])
+		_, err := fmt.Fprintf(output, "run %s kept no artifacts\n", runID)
 		return err
 	}
 	if _, err := fmt.Fprintf(output, "%-12s  %-20s  %s\n", "SIZE", "MODIFIED", "NAME"); err != nil {
