@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"io"
+	"net"
 	"net/http"
 	"strings"
+	"syscall"
 	"testing"
 )
 
@@ -64,5 +66,31 @@ func TestBoundedSecretStoreTransportRejectsSuccessfulOversizedResponsesBeforeVau
 				t.Fatal("RoundTrip() did not close oversized response body")
 			}
 		})
+	}
+}
+
+// A sealed store is the one secret-store failure with a one-command fix, and
+// it used to read exactly like a wrong address or a broken CA.
+func TestSealedStoreFailuresNameTheFix(t *testing.T) {
+	sealed := sanitizeSecretStoreHTTPError("Kubernetes auth login",
+		&secretStoreResponseStatusError{statusCode: http.StatusServiceUnavailable})
+	if !strings.Contains(sealed.Error(), "oberth unseal") {
+		t.Fatalf("a 503 login does not name the fix: %v", sealed)
+	}
+
+	// Sealed also fails the readiness probe, which empties the Service of
+	// endpoints, so the next connection is refused before any status exists.
+	refused := sanitizeSecretStoreHTTPError("KV read",
+		&net.OpError{Op: "dial", Err: syscall.ECONNREFUSED})
+	if !strings.Contains(refused.Error(), "connection refused") || !strings.Contains(refused.Error(), "oberth unseal") {
+		t.Fatalf("a refused connection does not name the fix: %v", refused)
+	}
+
+	// Every other status stays as bare as it was: the hint is a claim about
+	// the cause, and it must not be attached to causes it does not explain.
+	forbidden := sanitizeSecretStoreHTTPError("KV read",
+		&secretStoreResponseStatusError{statusCode: http.StatusForbidden})
+	if strings.Contains(forbidden.Error(), "oberth unseal") {
+		t.Fatalf("a 403 was blamed on a sealed store: %v", forbidden)
 	}
 }

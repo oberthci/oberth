@@ -14,6 +14,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
+	"runtime"
 	"strings"
 	"time"
 
@@ -565,16 +567,75 @@ func SetupProductionSecretStoreDeferred(ctx context.Context, cfg Config, interac
 func setupProductionSecretStoreCollect(ctx context.Context, cfg Config, interactiveDeps, quietDeps Deps, openbao OpenBaoResult, creds *heldCredentials) (SecretStoreResult, error) {
 	configured, initResult, err := SetupProductionSecretStoreDeferred(ctx, cfg, interactiveDeps, quietDeps, openbao)
 	if initResult != nil {
-		creds.add("Root token", initResult.RootToken)
-		for i, key := range initResult.UnsealKeysB64 {
-			label := "Unseal key"
-			if len(initResult.UnsealKeysB64) > 1 {
-				label = fmt.Sprintf("Unseal key %d", i+1)
-			}
-			creds.add(label, key)
-		}
+		holdOpenBaoCredentials(ctx, quietDeps, *initResult, creds)
 	}
 	return configured, err
+}
+
+// holdOpenBaoCredentials takes custody of the once-only init credentials.
+//
+// The root token and the unseal key go to the host's secret store, and what
+// reaches the screen is where they were put and how to read them back, not the
+// values. A credential nobody has to copy off a terminal is a credential that
+// does not get lost when the terminal scrolls, and an initialized OpenBao
+// whose unseal key is gone is permanently sealed, so this is the credential
+// pair where losing it costs the whole store.
+//
+// Whatever the store refuses is printed instead, which is the old behavior:
+// a failed save must never be the reason the operator never saw the value.
+func holdOpenBaoCredentials(ctx context.Context, deps Deps, initResult baoInitResult, creds *heldCredentials) {
+	var saved []string
+
+	if err := storeSecret(ctx, deps, openBaoRootTokenLocation, initResult.RootToken); err != nil {
+		creds.add("Root token", initResult.RootToken)
+	} else {
+		saved = append(saved, "root token   "+retrievalCommand(deps, openBaoRootTokenLocation))
+	}
+
+	// A single key share is what operatorInit asks for, so the ordinary case
+	// stores one key. More than one share would need more than one entry to
+	// stay unambiguous; rather than invent a naming scheme for a shape this
+	// installer never produces, they are printed as before.
+	switch {
+	case len(initResult.UnsealKeysB64) == 1:
+		if err := storeSecret(ctx, deps, openBaoUnsealKeyLocation, initResult.UnsealKeysB64[0]); err != nil {
+			creds.add("Unseal key", initResult.UnsealKeysB64[0])
+		} else {
+			saved = append(saved, "unseal key   "+retrievalCommand(deps, openBaoUnsealKeyLocation))
+		}
+	default:
+		for i, key := range initResult.UnsealKeysB64 {
+			creds.add(fmt.Sprintf("Unseal key %d", i+1), key)
+		}
+	}
+
+	if len(saved) == 0 {
+		creds.addNote("This host has no supported secret store, so the credentials above are the only copy. Save them now.")
+		return
+	}
+	creds.addNote("OpenBao credentials saved to " + secretStoreDisplayName(deps) + ". Read them back with:")
+	creds.addNote("")
+	for _, line := range saved {
+		creds.addNote("    " + line)
+	}
+	creds.addNote("")
+	creds.addNote("After a pod restart the store comes back sealed. Unseal it with: oberth unseal")
+}
+
+// secretStoreDisplayName names the store the credentials went to, for the
+// line that tells the operator where to look.
+func secretStoreDisplayName(deps Deps) string {
+	lookPath := deps.LookPath
+	if lookPath == nil {
+		lookPath = exec.LookPath
+	}
+	if runtime.GOOS == "darwin" {
+		return "your macOS Keychain"
+	}
+	if _, err := lookPath("secret-tool"); err == nil {
+		return "your secret-tool keyring"
+	}
+	return "your pass store"
 }
 
 // printProductionCredentials prints the once-only init credentials inside a

@@ -2813,12 +2813,32 @@ type fakeBaoRunner struct {
 	t         *testing.T
 	responses map[string]fakeBaoResponse
 	calls     []fakeBaoCall
+	// hostCalls records the host secret-store commands the installer runs to
+	// take custody of the once-only OpenBao credentials. Only those three
+	// binaries are tolerated; any other host command is still a test failure,
+	// because shelling out from this package is otherwise a mistake.
+	hostCalls []fakeBaoCall
+	// secretStoreErr makes every host secret-store command fail, which is the
+	// path where the installer must fall back to printing the credentials.
+	secretStoreErr error
+	// secretStoreOut is what a read of the host secret store answers with.
+	secretStoreOut string
 }
 
 func (f *fakeBaoRunner) run(_ context.Context, input []byte, name string, args ...string) ([]byte, error) {
 	f.t.Helper()
 	if name != "kubectl" {
-		f.t.Fatalf("unexpected host command %q %v", name, args)
+		switch name {
+		case "security", "secret-tool", "pass":
+			f.hostCalls = append(f.hostCalls, fakeBaoCall{
+				command: name,
+				stdin:   string(input),
+				argv:    append([]string{name}, args...),
+			})
+			return []byte(f.secretStoreOut), f.secretStoreErr
+		default:
+			f.t.Fatalf("unexpected host command %q %v", name, args)
+		}
 	}
 	command, authenticated, err := stripKubectlBaoPlumbing(args)
 	if err != nil {
@@ -3460,13 +3480,87 @@ func TestSetupProductionSecretStoreSealedRerunFails(t *testing.T) {
 // TestSetupProductionSecretStoreCollectKeepsCredentialsOnUnsealFailure is the
 // regression test for the deferred-credentials error path: when `operator
 // init` succeeds and a LATER step fails, the shown-once root token and unseal
-// key exist nowhere but this process. They must land in the held pool before
-// the error is considered, so the caller's deferred flush still prints them.
-// Losing them permanently locks the freshly-initialized store.
+// key exist nowhere but this process. They must be taken into custody before
+// the error is considered. Losing them permanently locks the freshly
+// initialized store.
+//
+// Custody is the host secret store first; the flushed box is the fallback
+// asserted by TestOpenBaoCredentialsArePrintedWhenTheStoreRefusesThem.
 func TestSetupProductionSecretStoreCollectKeepsCredentialsOnUnsealFailure(t *testing.T) {
 	t.Parallel()
 	const rootToken = "s.testroot222"
 	const unsealKey = "testunsealkey111"
+
+	runner, deps := collectCustodyFixture(t, rootToken, unsealKey)
+	cfg := Config{InstallSecretStore: true}
+	if err := cfg.Validate(); err != nil {
+		t.Fatal(err)
+	}
+
+	var creds heldCredentials
+	_, err := setupProductionSecretStoreCollect(context.Background(), cfg, deps, deps, productionOpenBaoResult(), &creds)
+	if err == nil {
+		t.Fatal("unseal failure must surface as an error")
+	}
+
+	stored := strings.Join(hostSecretStoreArgv(runner), "\n")
+	for _, want := range []string{rootToken, unsealKey} {
+		if !strings.Contains(stored, want) {
+			t.Fatalf("credential %q was not handed to the secret store after a post-init failure:\n%s", want, stored)
+		}
+	}
+
+	var out bytes.Buffer
+	creds.flush(&out, false)
+	output := out.String()
+	// The values are in the store, so they are not on the screen: what the
+	// operator gets is where they went and how to read them back.
+	for _, unwanted := range []string{rootToken, unsealKey} {
+		if strings.Contains(output, unwanted) {
+			t.Fatalf("a stored credential was printed anyway:\n%s", output)
+		}
+	}
+	for _, want := range []string{"oberth-openbao-root", "oberth-openbao-unseal", "oberth unseal"} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("flushed notes missing %q:\n%s", want, output)
+		}
+	}
+}
+
+// TestOpenBaoCredentialsArePrintedWhenTheStoreRefusesThem is the other half:
+// a store that cannot hold the credentials must not be the reason the
+// operator never sees them.
+func TestOpenBaoCredentialsArePrintedWhenTheStoreRefusesThem(t *testing.T) {
+	t.Parallel()
+	const rootToken = "s.testroot333"
+	const unsealKey = "testunsealkey333"
+
+	runner, deps := collectCustodyFixture(t, rootToken, unsealKey)
+	runner.secretStoreErr = errors.New("keychain locked")
+	cfg := Config{InstallSecretStore: true}
+	if err := cfg.Validate(); err != nil {
+		t.Fatal(err)
+	}
+
+	var creds heldCredentials
+	_, _ = setupProductionSecretStoreCollect(context.Background(), cfg, deps, deps, productionOpenBaoResult(), &creds)
+
+	var out bytes.Buffer
+	creds.flush(&out, false)
+	output := out.String()
+	for _, want := range []string{"Root token", rootToken, "Unseal key", unsealKey} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("flushed credentials missing %q after the store refused them:\n%s", want, output)
+		}
+	}
+}
+
+// collectCustodyFixture builds a store that initializes successfully and then
+// fails to unseal, which is the shape where custody matters most. LookPath is
+// injected so the non-macOS branch finds secret-tool and the test asserts the
+// same behavior on every platform.
+func collectCustodyFixture(t *testing.T, rootToken, unsealKey string) (*fakeBaoRunner, Deps) {
+	t.Helper()
 
 	responses := freshStoreResponses()
 	responses["status -format=json"] = fakeBaoResponse{
@@ -3481,28 +3575,26 @@ func TestSetupProductionSecretStoreCollectKeepsCredentialsOnUnsealFailure(t *tes
 		err: errors.New("exit status 1"),
 	}
 
-	var buf bytes.Buffer
 	runner := &fakeBaoRunner{t: t, responses: responses}
-	deps := secretStoreTestDeps(runner, &buf, runningOpenBaoPod())
-	cfg := Config{InstallSecretStore: true}
-	if err := cfg.Validate(); err != nil {
-		t.Fatal(err)
-	}
-
-	var creds heldCredentials
-	_, err := setupProductionSecretStoreCollect(context.Background(), cfg, deps, deps, productionOpenBaoResult(), &creds)
-	if err == nil {
-		t.Fatal("unseal failure must surface as an error")
-	}
-
-	var out bytes.Buffer
-	creds.flush(&out, false)
-	output := out.String()
-	for _, want := range []string{"Root token", rootToken, "Unseal key", unsealKey} {
-		if !strings.Contains(output, want) {
-			t.Fatalf("flushed credentials missing %q after post-init failure:\n%s", want, output)
+	deps := secretStoreTestDeps(runner, io.Discard, runningOpenBaoPod())
+	deps.LookPath = func(name string) (string, error) {
+		if name == "secret-tool" {
+			return "/usr/bin/secret-tool", nil
 		}
+		return "", errors.New("not found")
 	}
+	return runner, deps
+}
+
+// hostSecretStoreArgv flattens every host secret-store invocation, argv and
+// stdin alike: the macOS branch passes the value as an argument and the
+// secret-tool branch pipes it, and this test cares only that it arrived.
+func hostSecretStoreArgv(runner *fakeBaoRunner) []string {
+	var out []string
+	for _, call := range runner.hostCalls {
+		out = append(out, strings.Join(call.argv, " ")+" "+call.stdin)
+	}
+	return out
 }
 
 func TestSetupProductionSecretStoreAlreadyInitializedWithoutTokenFailsBeforeRuntimeEnable(t *testing.T) {

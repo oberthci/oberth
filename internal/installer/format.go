@@ -633,7 +633,12 @@ func (tw *tableWriter) writeDataRow(component, detail, status string, sensitive 
 // closes. flush is idempotent — safe to call from a defer and again at the
 // end of a normal flow.
 type heldCredentials struct {
-	rows    []credentialRow
+	rows []credentialRow
+	// notes are plain lines printed after the box: where a credential was
+	// saved and how to read it back. A credential the installer put into the
+	// host's secret store produces a note and no row, because the value the
+	// operator no longer has to copy is a value that should not be on screen.
+	notes   []string
 	printed bool
 }
 
@@ -642,16 +647,26 @@ func (h *heldCredentials) add(label, value string) {
 	h.rows = append(h.rows, credentialRow{Label: label, Value: value})
 }
 
-// flush prints the credential box exactly once. Subsequent calls are no-ops.
-// Does nothing when no credentials have been added.
+// addNote appends one line printed after the box. Must be called before flush.
+func (h *heldCredentials) addNote(line string) {
+	h.notes = append(h.notes, line)
+}
+
+// flush prints the credential box exactly once, followed by any notes.
+// Subsequent calls are no-ops. Does nothing when nothing has been added.
 func (h *heldCredentials) flush(w io.Writer, color bool) {
-	if h.printed || len(h.rows) == 0 {
+	if h.printed || (len(h.rows) == 0 && len(h.notes) == 0) {
 		return
 	}
 	h.printed = true
 	_, _ = fmt.Fprintln(w)
-	credentialBox(w,
-		"Credentials (save now, shown once)",
-		"",
-		h.rows, color)
+	if len(h.rows) > 0 {
+		credentialBox(w,
+			"Credentials (save now, shown once)",
+			"",
+			h.rows, color)
+	}
+	for _, note := range h.notes {
+		_, _ = fmt.Fprintln(w, note)
+	}
 }

@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"syscall"
 
 	vaultapi "github.com/hashicorp/vault/api"
 )
@@ -106,14 +107,29 @@ func (err *secretStoreResponseStatusError) Error() string {
 	return fmt.Sprintf("secret store returned HTTP %d", err.statusCode)
 }
 
+// sealedHint is appended to the two failures a sealed store actually produces.
+//
+// A sealed OpenBao answers 503 on login, and fails its readiness probe, which
+// empties its Service of endpoints so the next connection is refused outright.
+// Both were reported as generic transport or status failures, which is the
+// same text a misconfigured address or a broken CA produces -- so the one
+// cause with a one-command fix looked like the causes that need an
+// investigation.
+const sealedHint = " (the store may be sealed; run: oberth unseal)"
+
+// sealedStatus is the status a sealed store returns to a login attempt.
+const sealedStatus = http.StatusServiceUnavailable
+
 func sanitizeSecretStoreHTTPError(operation string, err error) error {
 	var statusErr *secretStoreResponseStatusError
 	if errors.As(err, &statusErr) {
-		return fmt.Errorf("secret store %s failed: HTTP %d %s", operation, statusErr.statusCode, http.StatusText(statusErr.statusCode))
+		return fmt.Errorf("secret store %s failed: HTTP %d %s%s", operation, statusErr.statusCode,
+			http.StatusText(statusErr.statusCode), hintForStatus(statusErr.statusCode))
 	}
 	var responseErr *vaultapi.ResponseError
 	if errors.As(err, &responseErr) {
-		return fmt.Errorf("secret store %s failed: HTTP %d %s", operation, responseErr.StatusCode, http.StatusText(responseErr.StatusCode))
+		return fmt.Errorf("secret store %s failed: HTTP %d %s%s", operation, responseErr.StatusCode,
+			http.StatusText(responseErr.StatusCode), hintForStatus(responseErr.StatusCode))
 	}
 	var limitErr *secretStoreResponseLimitError
 	if errors.As(err, &limitErr) {
@@ -129,7 +145,21 @@ func sanitizeSecretStoreHTTPError(operation string, err error) error {
 	if errors.Is(err, context.DeadlineExceeded) {
 		return fmt.Errorf("secret store %s failed: %w", operation, context.DeadlineExceeded)
 	}
+	// A refused connection carries no store-supplied content -- it is this
+	// process's own dial result -- so naming it leaks nothing and is the
+	// difference between "transport error" and a fix.
+	if errors.Is(err, syscall.ECONNREFUSED) {
+		return errors.New("secret store " + operation + " failed: connection refused" + sealedHint)
+	}
 	return errors.New("secret store " + operation + " failed: transport error")
+}
+
+// hintForStatus names the sealed store behind the one status it produces.
+func hintForStatus(status int) string {
+	if status == sealedStatus {
+		return sealedHint
+	}
+	return ""
 }
 
 func secretStoreRetryPolicy(ctx context.Context, response *http.Response, err error) (bool, error) {
