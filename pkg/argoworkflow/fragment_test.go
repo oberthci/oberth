@@ -67,8 +67,8 @@ func stepRefTemplate(name, ref, template string) wfv1.Template {
 func TestParseFragmentRef(t *testing.T) {
 	t.Parallel()
 	good := map[string]FragmentKey{
-		"transferz/maven-verify@v3": {Repo: "transferz/maven-verify", Version: "v3"},
-		"org/repo@v1.2.3":           {Repo: "org/repo", Version: "v1.2.3"},
+		"acme/maven-verify@v3": {Repo: "acme/maven-verify", Version: "v3"},
+		"org/repo@v1.2.3":      {Repo: "org/repo", Version: "v1.2.3"},
 	}
 	for input, want := range good {
 		got, err := ParseFragmentRef(input)
@@ -81,14 +81,14 @@ func TestParseFragmentRef(t *testing.T) {
 	}
 	bad := []string{
 		"",
-		"transferz/maven-verify",
-		"transferz/maven-verify@",
+		"acme/maven-verify",
+		"acme/maven-verify@",
 		"@v3",
 		"a@v1@v2",
 		"../escape@v1",
 		"/absolute@v1",
-		"transferz/../../etc@v1",
-		"transferz/maven-verify@ v3",
+		"acme/../../etc@v1",
+		"acme/maven-verify@ v3",
 	}
 	for _, input := range bad {
 		if key, err := ParseFragmentRef(input); err == nil {

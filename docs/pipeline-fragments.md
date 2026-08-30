@@ -9,7 +9,7 @@ holding a Workflow document. It is a separate file from `.oberth/build.yaml`, so
 one repository can both run its own pipeline and publish fragments.
 
 ```yaml
-# .oberth/fragment.yaml in transferz/maven-verify
+# .oberth/fragment.yaml in acme/maven-verify
 apiVersion: argoproj.io/v1alpha1
 kind: Workflow
 spec:
@@ -34,7 +34,7 @@ spec:
       steps:
         - - name: verify
             templateRef:
-              name: transferz/maven-verify@v3
+              name: acme/maven-verify@v3
               template: verify
 ```
 

@@ -22,7 +22,7 @@ spec:
       steps:
         - - name: verify
             templateRef:
-              name: transferz/maven-verify@v3
+              name: acme/maven-verify@v3
               template: run
 `
 
@@ -45,7 +45,7 @@ func TestValidateRefusesToPassADocumentWithUnresolvedFragments(t *testing.T) {
 	if err == nil {
 		t.Fatal("validate passed a document whose fragments it never resolved")
 	}
-	if !strings.Contains(output.String(), "transferz/maven-verify@v3") {
+	if !strings.Contains(output.String(), "acme/maven-verify@v3") {
 		t.Fatalf("validate did not name the unresolved reference:\n%s", output.String())
 	}
 	if strings.Contains(output.String(), "inline the template") {
@@ -65,7 +65,7 @@ func TestValidateReportsFragmentsAsUncheckedWhenAllowed(t *testing.T) {
 }
 
 func TestValidateStillRefusesARawTemplateRefThatIsNotAFragment(t *testing.T) {
-	body := strings.Replace(fragmentConsumer, "transferz/maven-verify@v3", "some-cluster-template", 1)
+	body := strings.Replace(fragmentConsumer, "acme/maven-verify@v3", "some-cluster-template", 1)
 	root := writeConsumer(t, body)
 	var output bytes.Buffer
 	if err := runValidate(context.Background(), []string{root}, &output); err == nil {

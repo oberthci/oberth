@@ -67,7 +67,7 @@ spec:
 func testLoader(t *testing.T, allowlist []string) (*GitFragmentLoader, *fakeFragmentBlobs) {
 	t.Helper()
 	blobs := &fakeFragmentBlobs{
-		tags:  map[string]string{"transferz/maven-verify@v3": strings.Repeat("a", 40)},
+		tags:  map[string]string{"acme/maven-verify@v3": strings.Repeat("a", 40)},
 		blobs: map[string]string{strings.Repeat("a", 40): testFragmentBody},
 	}
 	registry := fakeRegistry{known: map[string]bool{"maven-verify": true}}
@@ -81,7 +81,7 @@ func testLoader(t *testing.T, allowlist []string) (*GitFragmentLoader, *fakeFrag
 func TestFragmentLoaderReadsThePinnedCommit(t *testing.T) {
 	t.Parallel()
 	loader, blobs := testLoader(t, nil)
-	key := argoworkflow.FragmentKey{Repo: "transferz/maven-verify", Version: "v3"}
+	key := argoworkflow.FragmentKey{Repo: "acme/maven-verify", Version: "v3"}
 
 	fragment, err := loader.Load(context.Background(), key)
 	if err != nil {
@@ -113,9 +113,9 @@ func TestFragmentLoaderRefusesAnUnregisteredRepository(t *testing.T) {
 
 func TestFragmentLoaderHonoursTheAllowlist(t *testing.T) {
 	t.Parallel()
-	key := argoworkflow.FragmentKey{Repo: "transferz/maven-verify", Version: "v3"}
+	key := argoworkflow.FragmentKey{Repo: "acme/maven-verify", Version: "v3"}
 
-	blocked, blobs := testLoader(t, []string{"transferz/something-else"})
+	blocked, blobs := testLoader(t, []string{"acme/something-else"})
 	if _, err := blocked.Load(context.Background(), key); err == nil {
 		t.Fatal("a repository outside the allowlist resolved")
 	}
@@ -123,7 +123,7 @@ func TestFragmentLoaderHonoursTheAllowlist(t *testing.T) {
 		t.Fatal("the allowlist check ran after the git read; it must gate it")
 	}
 
-	allowed, _ := testLoader(t, []string{"transferz/maven-verify"})
+	allowed, _ := testLoader(t, []string{"acme/maven-verify"})
 	if _, err := allowed.Load(context.Background(), key); err != nil {
 		t.Fatalf("an allowlisted repository was refused: %v", err)
 	}
@@ -132,7 +132,7 @@ func TestFragmentLoaderHonoursTheAllowlist(t *testing.T) {
 func TestFragmentLoaderRefusesAnUnknownTag(t *testing.T) {
 	t.Parallel()
 	loader, _ := testLoader(t, nil)
-	key := argoworkflow.FragmentKey{Repo: "transferz/maven-verify", Version: "v99"}
+	key := argoworkflow.FragmentKey{Repo: "acme/maven-verify", Version: "v99"}
 
 	if _, err := loader.Load(context.Background(), key); err == nil {
 		t.Fatal("an unknown tag resolved")
@@ -143,9 +143,9 @@ func TestFragmentLoaderRefusesAnUnreachableTagCommit(t *testing.T) {
 	t.Parallel()
 	loader, blobs := testLoader(t, nil)
 	blobs.unreachable = map[string]bool{
-		"transferz/maven-verify@" + strings.Repeat("a", 40): true,
+		"acme/maven-verify@" + strings.Repeat("a", 40): true,
 	}
-	key := argoworkflow.FragmentKey{Repo: "transferz/maven-verify", Version: "v3"}
+	key := argoworkflow.FragmentKey{Repo: "acme/maven-verify", Version: "v3"}
 
 	_, err := loader.Load(context.Background(), key)
 	if err == nil {
@@ -163,7 +163,7 @@ func TestFragmentLoaderFailsClosedWhenReachabilityErrors(t *testing.T) {
 	t.Parallel()
 	loader, blobs := testLoader(t, nil)
 	blobs.reachErr = errors.New("cache unavailable")
-	key := argoworkflow.FragmentKey{Repo: "transferz/maven-verify", Version: "v3"}
+	key := argoworkflow.FragmentKey{Repo: "acme/maven-verify", Version: "v3"}
 
 	if _, err := loader.Load(context.Background(), key); err == nil {
 		t.Fatal("a reachability-check error did not refuse the fragment")
@@ -176,7 +176,7 @@ func TestFragmentLoaderFailsClosedWhenReachabilityErrors(t *testing.T) {
 func TestFragmentLoaderConsultsReachabilityBeforeReading(t *testing.T) {
 	t.Parallel()
 	loader, blobs := testLoader(t, nil)
-	key := argoworkflow.FragmentKey{Repo: "transferz/maven-verify", Version: "v3"}
+	key := argoworkflow.FragmentKey{Repo: "acme/maven-verify", Version: "v3"}
 
 	if _, err := loader.Load(context.Background(), key); err != nil {
 		t.Fatalf("Load: %v", err)
@@ -199,11 +199,11 @@ spec:
       steps:
         - - name: one
             templateRef:
-              name: transferz/maven-verify@v3
+              name: acme/maven-verify@v3
               template: run
         - - name: two
             templateRef:
-              name: transferz/maven-verify@v3
+              name: acme/maven-verify@v3
               template: run
 `)
 	fragments, err := loadFragments(context.Background(), loader, source)
@@ -255,7 +255,7 @@ spec:
       steps:
         - - name: one
             templateRef:
-              name: transferz/maven-verify@v3
+              name: acme/maven-verify@v3
               template: run
 `)
 	if _, err := loadFragments(context.Background(), nil, source); err == nil {

@@ -86,7 +86,7 @@ func remainingRefs(workflow *wfv1.Workflow) int {
 }
 
 func TestBuildResolvesAFragmentBeforeAdmission(t *testing.T) {
-	key, fragment := plainFragment(t, "transferz/maven-verify", "v3")
+	key, fragment := plainFragment(t, "acme/maven-verify", "v3")
 	request := fragmentRequest(t, consumingDocument("    oberth.ci/size: S\n", key.String()),
 		map[argoworkflow.FragmentKey]argoworkflow.Fragment{key: fragment})
 
@@ -116,7 +116,7 @@ func TestBuildResolvesAFragmentBeforeAdmission(t *testing.T) {
 }
 
 func TestBuildChecksAFragmentsSecretPathsAgainstTheApprovalTable(t *testing.T) {
-	key := argoworkflow.FragmentKey{Repo: "transferz/publish", Version: "v1"}
+	key := argoworkflow.FragmentKey{Repo: "acme/publish", Version: "v1"}
 	fragment := argoworkflow.Fragment{Key: key, SHA: testSHA, Source: fragmentDocument(`    - name: run
       container:
         image: ` + fragmentImage + `
@@ -144,7 +144,7 @@ func TestBuildChecksAFragmentsSecretPathsAgainstTheApprovalTable(t *testing.T) {
 }
 
 func TestBuildAcceptsAFragmentUsingADeclaredAndApprovedPath(t *testing.T) {
-	key := argoworkflow.FragmentKey{Repo: "transferz/publish", Version: "v1"}
+	key := argoworkflow.FragmentKey{Repo: "acme/publish", Version: "v1"}
 	fragment := argoworkflow.Fragment{Key: key, SHA: testSHA, Source: fragmentDocument(`    - name: run
       container:
         image: ` + fragmentImage + `
@@ -168,7 +168,7 @@ func TestBuildAcceptsAFragmentUsingADeclaredAndApprovedPath(t *testing.T) {
 }
 
 func TestBuildRefusesAFragmentCarryingAConstructTheGateRejects(t *testing.T) {
-	key := argoworkflow.FragmentKey{Repo: "transferz/evil", Version: "v1"}
+	key := argoworkflow.FragmentKey{Repo: "acme/evil", Version: "v1"}
 	fragment := argoworkflow.Fragment{Key: key, SHA: testSHA, Source: fragmentDocument(`    - name: run
       container:
         image: ` + fragmentImage + `
@@ -189,20 +189,20 @@ func TestBuildRefusesAFragmentCarryingAConstructTheGateRejects(t *testing.T) {
 }
 
 func TestBuildRefusesAReferenceMissingFromTheFragmentMap(t *testing.T) {
-	request := fragmentRequest(t, consumingDocument("    oberth.ci/size: S\n", "transferz/absent@v9"),
+	request := fragmentRequest(t, consumingDocument("    oberth.ci/size: S\n", "acme/absent@v9"),
 		map[argoworkflow.FragmentKey]argoworkflow.Fragment{})
 
 	_, err := Build(testConfig(), request)
 	if err == nil {
 		t.Fatal("a document referencing an unloaded fragment was admitted")
 	}
-	if !strings.Contains(err.Error(), "transferz/absent@v9") {
+	if !strings.Contains(err.Error(), "acme/absent@v9") {
 		t.Fatalf("error does not name the missing fragment: %v", err)
 	}
 }
 
 func TestBuildRefusesFragmentReferencesWithoutAPreLoadedMap(t *testing.T) {
-	request := testRequest(periapsis.TriggerCI, consumingDocument("    oberth.ci/size: S\n", "transferz/x@v1"))
+	request := testRequest(periapsis.TriggerCI, consumingDocument("    oberth.ci/size: S\n", "acme/x@v1"))
 	request.Fragments = nil
 
 	if _, err := Build(testConfig(), request); err == nil {
@@ -211,7 +211,7 @@ func TestBuildRefusesFragmentReferencesWithoutAPreLoadedMap(t *testing.T) {
 }
 
 func TestBuildIsIdenticalWhenCalledTwice(t *testing.T) {
-	key, fragment := plainFragment(t, "transferz/maven-verify", "v3")
+	key, fragment := plainFragment(t, "acme/maven-verify", "v3")
 	request := fragmentRequest(t, consumingDocument("    oberth.ci/size: S\n", key.String()),
 		map[argoworkflow.FragmentKey]argoworkflow.Fragment{key: fragment})
 
@@ -268,7 +268,7 @@ func TestBuildRefusesInliningPastTheTemplateCeiling(t *testing.T) {
 		fmt.Fprintf(&templates, "    - name: %s\n      container:\n        image: %s\n        command: [/bin/true]\n",
 			name, fragmentImage)
 	}
-	key := argoworkflow.FragmentKey{Repo: "transferz/huge", Version: "v1"}
+	key := argoworkflow.FragmentKey{Repo: "acme/huge", Version: "v1"}
 	fragment := argoworkflow.Fragment{Key: key, SHA: testSHA, Source: fragmentDocument(templates.String())}
 	request := fragmentRequest(t, consumingDocument("    oberth.ci/size: S\n", key.String()),
 		map[argoworkflow.FragmentKey]argoworkflow.Fragment{key: fragment})
@@ -279,7 +279,7 @@ func TestBuildRefusesInliningPastTheTemplateCeiling(t *testing.T) {
 }
 
 func TestBuildRecordsTheResolvedFragmentVersions(t *testing.T) {
-	key, fragment := plainFragment(t, "transferz/maven-verify", "v3")
+	key, fragment := plainFragment(t, "acme/maven-verify", "v3")
 	request := fragmentRequest(t, consumingDocument("    oberth.ci/size: S\n", key.String()),
 		map[argoworkflow.FragmentKey]argoworkflow.Fragment{key: fragment})
 
@@ -310,7 +310,7 @@ func TestBuildRecordsTheResolvedFragmentVersions(t *testing.T) {
 }
 
 func TestAMovedTagChangesTheRecordedSHA(t *testing.T) {
-	key, fragment := plainFragment(t, "transferz/maven-verify", "v3")
+	key, fragment := plainFragment(t, "acme/maven-verify", "v3")
 	source := consumingDocument("    oberth.ci/size: S\n", key.String())
 
 	build := func(sha string) string {
