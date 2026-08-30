@@ -314,7 +314,10 @@ secretCreatePolicy:
 # breaks Argo's emissary on CNIs that enforce NetworkPolicy (Calico, Cilium,
 # modern kindnet). RBAC is the access control boundary for the API server.
 #
-# Disable on clusters without a NetworkPolicy-capable CNI.
+# Disable on clusters without a NetworkPolicy-capable CNI. Current kind is not
+# one of those: its kindnetd enforces these rules, so a pipeline needing a port
+# outside the allowlist is dropped on a laptop cluster exactly as it would be
+# on Calico.
 networkPolicy:
   # Enabled by default for pipeline egress isolation: default-deny egress with
   # targeted allowlist for DNS, HTTPS, and the secret store. On k3s with the
