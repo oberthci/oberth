@@ -1,0 +1,24 @@
+{
+  "name": "@acme/web-portal",
+  "private": true,
+  "scripts": {
+    "dev:compose": "docker compose up --force-recreate --build",
+    "dev:app": "npm start",
+    "dev": "concurrently -k -n \"gateway,portal\" -c \"blue,green\" -p \"{time}\" \"npm run dev:compose\" \"npm run dev:app\"",
+    "start": "vite",
+    "dev:local-sdk": "LOCAL_SDK=true rm -rf node_modules/.vite && vite",
+    "build": "NODE_OPTIONS=--max-old-space-size=4096 vite build",
+    "test": "NODE_OPTIONS=--max-old-space-size=4096 TZ=UTC vitest",
+    "coverage": "npm test -- --coverage",
+    "lint": "biome check ./src",
+    "lint:fix": "biome check --write ./src",
+    "format": "biome format --write ./src",
+    "typecheck": "tsc --noEmit",
+    "check": "biome ci ./src && tsc --noEmit",
+    "postinstall": "node scripts/patch-fe-models.cjs",
+    "prepare": "husky install",
+    "gql": "npx graphql-codegen --config codegen.yml",
+    "coverage:domains": "node scripts/runCoverage.mjs",
+    "prettier": "prettier --write \"src/**/*.{js,jsx,ts,tsx,json,css,scss,md}\""
+  }
+}

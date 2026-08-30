@@ -1,0 +1,31 @@
+name: Build
+
+on:
+  push:
+    branches:
+      - '**'
+
+jobs:
+  build:
+    name: Build
+    uses: acme/reusable-workflows/.github/workflows/node-build-deploy.yml@master
+    with:
+      GCR_REPOSITORY: 'web-portal-ui'
+      HELM_VALUES_FOLDER: '${{ github.event.repository.name }}'
+      CLOUD_RUN_SERVICE: '${{ github.event.repository.name }}'
+      CLOUD_RUN_PORT: '8080'
+      NODEJS_VERSION: "20"
+      LEGACY_PEER_DEPS: true
+      SOURCEMAP_PATH: "build/assets"
+      MINIFIED_PATH: "/assets"
+      COVERAGE_SHARDS: "4"
+    secrets:
+      SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+      GCP_ACCOUNT_KEY: ${{ secrets.GCP_ACCOUNT_KEY }}
+      GITHUB_REPO_USERNAME: ${{ secrets.GH_MAVEN_USER }}
+      GITHUB_REPO_PASSWORD: ${{ secrets.GH_MAVEN_PASSWORD }}
+      HELM_REGISTRY_KEY: ${{ secrets.HELM_REGISTRY_KEY }}
+      GCP_INFRA_SSH_KEY: ${{ secrets.GCP_INFRA_SSH_KEY }}
+      DATADOG_API_KEY: ${{ secrets.DATADOG_API_KEY }}
+      DATADOG_APPLICATION_KEY: ${{ secrets.DATADOG_APPLICATION_KEY }}
+      LINEAR_RELEASES_KEY_TEST: ${{ secrets.LINEAR_RELEASES_KEY_TEST }}

@@ -2,115 +2,128 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/oberthci/oberth/internal/pipelinegen"
 )
 
-func TestDetectProjectNodeByPackageJSON(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-	writeTestFile(t, filepath.Join(dir, "package.json"), "{}\n")
-	detected, reason := detectProject(dir)
-	if detected != projectNode || !strings.Contains(reason, "package.json") {
-		t.Fatalf("detect = %s (%s), want node", detected, reason)
-	}
-}
-
-func TestDetectProjectPythonByPyprojectTOML(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-	writeTestFile(t, filepath.Join(dir, "pyproject.toml"), "[project]\nname = \"test\"\n")
-	detected, reason := detectProject(dir)
-	if detected != projectPython || !strings.Contains(reason, "pyproject.toml") {
-		t.Fatalf("detect = %s (%s), want python", detected, reason)
-	}
-}
-
-func TestDetectProjectPythonBySetupPy(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-	writeTestFile(t, filepath.Join(dir, "setup.py"), "from setuptools import setup\nsetup()\n")
-	detected, reason := detectProject(dir)
-	if detected != projectPython || !strings.Contains(reason, "setup.py") {
-		t.Fatalf("detect = %s (%s), want python", detected, reason)
-	}
-}
-
-func TestDetectProjectGenericFallback(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-	detected, reason := detectProject(dir)
-	if detected != projectGeneric || !strings.Contains(reason, "no recognized") {
-		t.Fatalf("detect = %s (%s), want generic", detected, reason)
-	}
-}
-
-func TestDetectProjectGoTakesPrecedenceOverNode(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-	writeTestFile(t, filepath.Join(dir, "go.mod"), "module test\n")
-	writeTestFile(t, filepath.Join(dir, "package.json"), "{}\n")
-	detected, _ := detectProject(dir)
-	if detected != projectGo {
-		t.Fatalf("go/node precedence: detected %s", detected)
-	}
-}
-
-func TestDetectProjectNodeTakesPrecedenceOverPython(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-	writeTestFile(t, filepath.Join(dir, "package.json"), "{}\n")
-	writeTestFile(t, filepath.Join(dir, "pyproject.toml"), "[project]\n")
-	detected, _ := detectProject(dir)
-	if detected != projectNode {
-		t.Fatalf("node/python precedence: detected %s", detected)
-	}
-}
-
-func TestExecuteInitNodeAutoDetect(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-	writeTestFile(t, filepath.Join(dir, "package.json"), "{}\n")
+// readGenerated returns what `oberth init` wrote for a directory.
+func readGenerated(t *testing.T, dir string, typeOverride string) (string, string) {
+	t.Helper()
 	var output bytes.Buffer
-	if err := executeInit(dir, "", false, &output); err != nil {
+	if err := executeInit(context.Background(), dir, typeOverride, "", false, &output); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(output.String(), "detected: node") {
-		t.Fatalf("output = %q, want node detection", output.String())
-	}
-	content, err := os.ReadFile(filepath.Join(dir, ".oberth", "build.yaml"))
+	content, err := os.ReadFile(filepath.Join(dir, ".oberth", "build.yaml")) // #nosec G304 -- test temp dir
 	if err != nil {
 		t.Fatal(err)
 	}
-	// All types generate the same demo template with a debian runner image.
-	if !strings.Contains(string(content), "debian:trixie-slim") {
-		t.Fatal("generated YAML missing debian image reference")
+	return string(content), output.String()
+}
+
+func TestExecuteInitNodeRunsTheRepositoryScripts(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeTestFile(t, filepath.Join(dir, "package.json"),
+		`{"scripts":{"lint":"eslint .","test":"vitest","build":"vite build"}}`+"\n")
+
+	content, output := readGenerated(t, dir, "")
+
+	// The steps must be this repository's, not a fixed demo.
+	for _, want := range []string{"npm ci", "npm run lint", "npm run test", "npm run build"} {
+		if !strings.Contains(content, want) {
+			t.Fatalf("generated pipeline missing %q:\n%s", want, content)
+		}
+	}
+	// A script the repository does not have must not appear: a step that runs
+	// `npm run typecheck` in a repository with no typecheck script fails for a
+	// reason that has nothing to do with the code.
+	if strings.Contains(content, "npm run typecheck") {
+		t.Fatalf("generated a step for a script this repository does not have:\n%s", content)
+	}
+	if !strings.Contains(output, "package.json") {
+		t.Fatalf("init must say what it read, got:\n%s", output)
 	}
 }
 
-func TestExecuteInitPythonAutoDetect(t *testing.T) {
+func TestExecuteInitMavenRunsMaven(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	writeTestFile(t, filepath.Join(dir, "pyproject.toml"), "[project]\nname = \"test\"\n")
-	var output bytes.Buffer
-	if err := executeInit(dir, "", false, &output); err != nil {
-		t.Fatal(err)
+	writeTestFile(t, filepath.Join(dir, "pom.xml"),
+		"<project><modelVersion>4.0.0</modelVersion><artifactId>svc</artifactId></project>\n")
+
+	content, _ := readGenerated(t, dir, "")
+	if !strings.Contains(content, "mvn -B -ntp") {
+		t.Fatalf("a pom.xml must produce Maven steps:\n%s", content)
 	}
-	if !strings.Contains(output.String(), "detected: python") {
-		t.Fatalf("output = %q, want python detection", output.String())
+	if !strings.Contains(content, "maven:3.9-eclipse-temurin-") {
+		t.Fatalf("a pom.xml must run in a Maven image:\n%s", content)
 	}
 }
 
-func TestExecuteInitGenericAutoDetect(t *testing.T) {
+// TestExecuteInitUnrecognizedRepositoryFailsLoudly is the behaviour change
+// that matters. The previous generator wrote a demo that copied a file and
+// checksummed it, and that demo went green for a Python project, a Rust
+// project, and an empty directory alike.
+func TestExecuteInitUnrecognizedRepositoryFailsLoudly(t *testing.T) {
+	t.Parallel()
+	for _, marker := range []string{"pyproject.toml", "Cargo.toml", ""} {
+		t.Run(marker, func(t *testing.T) {
+			t.Parallel()
+			dir := t.TempDir()
+			if marker != "" {
+				writeTestFile(t, filepath.Join(dir, marker), "[project]\n")
+			}
+
+			content, output := readGenerated(t, dir, "")
+			if !strings.Contains(content, "THIS PIPELINE IS NOT FINISHED") {
+				t.Fatalf("the file must say it is unfinished:\n%s", content)
+			}
+			if !strings.Contains(content, "exit 1") {
+				t.Fatalf("the scaffold must fail rather than pass by doing nothing:\n%s", content)
+			}
+			if !strings.Contains(output, "THIS PIPELINE IS NOT FINISHED") {
+				t.Fatalf("the terminal must say it too, got:\n%s", output)
+			}
+			if strings.Contains(output, "next: commit and push") {
+				t.Fatalf("an unfinished pipeline must not be presented as ready to push:\n%s", output)
+			}
+		})
+	}
+}
+
+func TestExecuteInitTypeOverrideWins(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	var output bytes.Buffer
-	if err := executeInit(dir, "", false, &output); err != nil {
-		t.Fatal(err)
+	writeTestFile(t, filepath.Join(dir, "package.json"), `{"scripts":{"test":"vitest"}}`+"\n")
+
+	content, _ := readGenerated(t, dir, "generic")
+	if !strings.Contains(content, "THIS PIPELINE IS NOT FINISHED") {
+		t.Fatalf("--type generic must override detection:\n%s", content)
 	}
-	if !strings.Contains(output.String(), "detected: generic") {
-		t.Fatalf("output = %q, want generic detection", output.String())
+}
+
+func TestParseProjectTypeRejectsUnknown(t *testing.T) {
+	t.Parallel()
+	if _, err := parseProjectType("erlang"); err == nil {
+		t.Fatal("an unknown type must be a usage error")
+	}
+	for value, want := range map[string]pipelinegen.Kind{
+		"go":      pipelinegen.KindGo,
+		"NODE":    pipelinegen.KindNode,
+		"maven":   pipelinegen.KindMaven,
+		"generic": pipelinegen.KindUnknown,
+	} {
+		kind, err := parseProjectType(value)
+		if err != nil {
+			t.Fatalf("%s: %v", value, err)
+		}
+		if kind != want {
+			t.Fatalf("%s -> %s, want %s", value, kind, want)
+		}
 	}
 }

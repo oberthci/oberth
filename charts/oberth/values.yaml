@@ -11,6 +11,11 @@ runnerImagePrefixes:
   - "golang:"
   - "debian:"
   - "aquasec/trivy:"
+  # Node and Maven, because `oberth init` generates pipelines that run them. A
+  # runner cannot install a toolchain at build time under a non-root read-only
+  # rootfs, so the image has to carry one.
+  - "node:"
+  - "maven:"
 
 replicaCount: 1
 maxConcurrentJobs: 3
