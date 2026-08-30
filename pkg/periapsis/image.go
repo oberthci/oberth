@@ -14,7 +14,14 @@ const (
 // configures no explicit --runner-image-prefixes. It must stay in sync with
 // the chart default in charts/oberth/values.yaml; a cross-source drift test
 // enforces the invariant.
-var DefaultRunnerImagePrefixes = []string{"golang:", "debian:", "aquasec/trivy:"}
+var DefaultRunnerImagePrefixes = []string{
+	"golang:", "debian:", "aquasec/trivy:",
+	// Node and Maven, because `oberth init` generates pipelines that run
+	// them. A runner cannot install a toolchain at build time under a
+	// non-root read-only rootfs, so the image has to carry one, and a prefix
+	// that is not allowed here is a generated pipeline that cannot start.
+	"node:", "maven:",
+}
 
 // ValidateRunnerImage enforces the syntax shared by repository declarations
 // and the admission gate. Every runner image reference MUST contain a
