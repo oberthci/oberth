@@ -95,6 +95,15 @@ func runInstall(ctx context.Context, arguments []string, input io.Reader, output
 		return fmt.Errorf("%w: install accepts flags only, no positional arguments", errUsage)
 	}
 
+	// Whether --image was named on this run, not just left at the default the
+	// binary was built with: a re-run must be able to tell those apart before
+	// it replaces an image someone deployed on purpose.
+	flags.Visit(func(f *flag.Flag) {
+		if f.Name == "image" {
+			cfg.ImageRefExplicit = true
+		}
+	})
+
 	cfg.Timeout = *timeout
 	cfg.BinaryVersion = version
 	cfg.SecretStoreUndecided = !cfg.InstallSecretStore && !cfg.InstallSecretStoreDev

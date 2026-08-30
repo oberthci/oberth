@@ -192,9 +192,15 @@ type Config struct {
 	// ImageRef overrides the server image the chart deploys (--image), for the
 	// same loop. A tag that exists only in the node's image store is the normal
 	// case here, so the chart's IfNotPresent pull policy is what makes it work.
-	ImageRef      string
-	Timeout       time.Duration
-	BinaryVersion string
+	ImageRef string
+	// ImageRefExplicit records that --image was passed on this run, as
+	// opposed to ImageRef holding the default this binary was built with.
+	// Without the distinction a re-run cannot tell "deploy this image" from
+	// "deploy whatever you normally would", and keepCustomDeployedImage needs
+	// exactly that difference.
+	ImageRefExplicit bool
+	Timeout          time.Duration
+	BinaryVersion    string
 	// AcceptWitnessGenesis is the one-shot "<auditID>:<sha256hex>" acknowledgment
 	// forwarded to auditAnchor.acceptWitnessGenesis when --install-rekor retrofits
 	// an existing deployment that already has audit history.
@@ -1280,6 +1286,7 @@ func InstallOberth(ctx context.Context, cfg Config, deps Deps, openbao OpenBaoRe
 		maybeHintNewerOberthChart(ctx, deps, result)
 		return result, nil
 	}
+	keepCustomDeployedImage(ctx, &cfg, deps, ns)
 	switch {
 	case strings.TrimSpace(cfg.ChartPath) != "":
 		// A local chart resolves from disk, so there is no repository to add.
@@ -1320,6 +1327,56 @@ func InstallOberth(ctx context.Context, cfg Config, deps Deps, openbao OpenBaoRe
 		return result, fmt.Errorf("helm install Oberth: %w", err)
 	}
 	return result, nil
+}
+
+// keepCustomDeployedImage stops a re-run from replacing an image the operator
+// deployed on purpose.
+//
+// --image was a per-run flag, so a second `oberth install` without it deployed
+// whatever this binary defaults to, over the image the first one was told to
+// use. On a machine where that image exists only in the kind node -- which is
+// the normal shape of local iteration -- the replacement is not even
+// recoverable by re-running: the deployment goes to a ref the node does not
+// have.
+//
+// A published image is left alone: moving one release's image to the next is
+// what a re-run with a newer binary is FOR, so only an image from outside the
+// published registry counts as the operator's own.
+func keepCustomDeployedImage(ctx context.Context, cfg *Config, deps Deps, namespace string) {
+	if cfg.ImageRefExplicit {
+		return
+	}
+	deployed := deployedOberthImage(ctx, deps, namespace)
+	if deployed == "" || deployed == strings.TrimSpace(cfg.ImageRef) {
+		return
+	}
+	if strings.HasPrefix(deployed, canonicalGARPrefix) {
+		return
+	}
+	_, _ = fmt.Fprintf(deps.Output,
+		"Keeping the deployed image %s; this install would otherwise have replaced it. Pass --image to change it.\n",
+		deployed)
+	cfg.ImageRef = deployed
+}
+
+// deployedOberthImage reads the image the oberth container currently runs.
+// An absent deployment, an absent container, or an unreachable API all mean
+// "nothing to preserve" rather than an error: this is an advisory step and
+// must not be able to fail an install.
+func deployedOberthImage(ctx context.Context, deps Deps, namespace string) string {
+	if deps.KubeClient == nil {
+		return ""
+	}
+	deployment, err := deps.KubeClient.AppsV1().Deployments(namespace).Get(ctx, "oberth", metav1.GetOptions{})
+	if err != nil {
+		return ""
+	}
+	for _, container := range deployment.Spec.Template.Spec.Containers {
+		if container.Name == "oberth" {
+			return strings.TrimSpace(container.Image)
+		}
+	}
+	return ""
 }
 
 // maybeHintNewerOberthChart is a best-effort advisory for the skip path:
