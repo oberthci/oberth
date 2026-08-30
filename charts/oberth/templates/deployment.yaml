@@ -131,6 +131,7 @@ spec:
             */}}
             - "--runner-image-prefixes={{ join "," .Values.runnerImagePrefixes }}"
             - --max-concurrent-jobs={{ .Values.maxConcurrentJobs }}
+            - --publish-on-green={{ .Values.publishOnGreen }}
             - --ci-cache-root={{ .Values.cache.ciRoot }}
             - --release-cache-root={{ .Values.cache.releaseRoot }}
             {{- if .Values.pushBannerURL }}

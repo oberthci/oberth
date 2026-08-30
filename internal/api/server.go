@@ -59,6 +59,10 @@ type ViewService interface {
 	Issues(context.Context, Actor, IssueFilter) (any, error)
 	Status(context.Context, Actor) (any, error)
 	Ready(context.Context) error
+	// PublishRun force-syncs an already-green branch run to the upstream on
+	// request. Only reachable when the server runs with --publish-on-green
+	// =false; otherwise the run published itself and this is a no-op error.
+	PublishRun(context.Context, Actor, string) error
 }
 
 // ErrorClassifier maps a service-layer error to an HTTP status code and a
@@ -138,6 +142,7 @@ func (server *Server) routes() {
 	server.mux.Handle("GET /api/repos", server.requireAuth(http.HandlerFunc(server.handleRepos)))
 	server.mux.Handle("GET /api/issues", server.requireAuth(http.HandlerFunc(server.handleIssues)))
 	server.mux.Handle("GET /api/status", server.requireAuth(http.HandlerFunc(server.handleStatus)))
+	server.mux.Handle("POST /api/runs/{run}/publish", server.requireAuth(http.HandlerFunc(server.handleRunPublish)))
 	server.mux.HandleFunc("GET /assets/{asset...}", serveAsset)
 	server.mux.HandleFunc("GET /{$}", func(writer http.ResponseWriter, request *http.Request) {
 		http.Redirect(writer, request, "/runs", http.StatusTemporaryRedirect)
@@ -255,6 +260,24 @@ func logFilterFrom(query url.Values) (runlog.Filter, error) {
 // handleRunLogLive serves the polled live view of a running Job's redacted
 // log stream. The offset query parameter is the caller's next-poll cursor; -1
 // (the default) asks the store to start tailing near the current end.
+// handleRunPublish publishes a green run to the upstream forge on request.
+//
+// POST rather than GET: it mutates the forge. It carries no body because the
+// run ID is the whole request; anything else would be a second way to choose
+// what gets pushed, and one is enough.
+func (server *Server) handleRunPublish(writer http.ResponseWriter, request *http.Request) {
+	id := request.PathValue("run")
+	if !validRunSelector(id) {
+		writeJSON(writer, http.StatusBadRequest, map[string]string{"error": "invalid run ID"})
+		return
+	}
+	if err := server.views.PublishRun(request.Context(), actorFrom(request.Context()), id); err != nil {
+		server.writeView(writer, nil, err)
+		return
+	}
+	writeJSON(writer, http.StatusOK, map[string]string{"status": "published", "run": id})
+}
+
 func (server *Server) handleRunLogLive(writer http.ResponseWriter, request *http.Request) {
 	id := request.PathValue("run")
 	if !validRunSelector(id) {
@@ -383,7 +406,7 @@ func writeJSON(writer http.ResponseWriter, status int, value any) {
 func (server *Server) servePage(writer http.ResponseWriter, view string) {
 	writer.Header().Set("Content-Type", "text/html; charset=utf-8")
 	writer.Header().Set("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; font-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'")
-	_, _ = io.WriteString(writer, `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Oberth Dashboard</title><link rel="stylesheet" href="/assets/app.css"></head><body data-version="`+html.EscapeString(server.version)+`"><div class="app"><header class="top"><button class="brand" data-route="/runs"><span class="mark">[▲]</span><span>oberth</span><span id="brandSub" class="sub">/ dashboard</span></button><nav class="tabs"><button id="tabRuns" class="tab" data-route="/runs">runs</button><button id="tabRepos" class="tab" data-route="/repos">repos</button><button id="tabIssues" class="tab" data-route="/issues">issues</button><button id="tabStatus" class="tab" data-route="/status">status</button></nav><div class="top-right"><div class="top-status" aria-label="System status"><span class="status-segment backend" title="loading" aria-label="loading"><span id="connLed" class="led" aria-hidden="true"></span><span id="connText">api</span></span><span class="status-divider" aria-hidden="true"></span><span id="versionStatus" class="status-segment version-mode unknown" role="status" aria-live="polite"><span>oberth</span> <span id="verLabel" class="ver">...</span></span></div><button class="iconbtn" data-action="toggle-theme" title="Theme">T</button><button class="iconbtn" data-action="refresh" title="Refresh">R</button><button class="iconbtn" data-action="clear-token" title="Sign out">L</button></div></header><main id="app" class="main" data-view="`+view+`"><noscript><p>The Oberth dashboard requires JavaScript. The JSON views remain available at /api/runs, /api/repos, /api/issues, and /api/status with a bearer token.</p></noscript></main></div><dialog id="issueDialog" class="dlg" aria-labelledby="issueDialogTitle"><div class="dlg-shell"><header class="dlg-head"><h2 id="issueDialogTitle">Issue</h2><span id="issueDialogMeta" class="meta"></span><button class="dlg-close" data-action="close-issue" aria-label="Close issue details">×</button></header><div id="issueDialogContent" class="dlg-body"></div></div></dialog><script src="/assets/app.js" defer></script></body></html>`)
+	_, _ = io.WriteString(writer, `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Oberth Dashboard</title><link rel="stylesheet" href="/assets/app.css"></head><body data-version="`+html.EscapeString(server.version)+`"><div class="app"><header class="top"><button class="brand" data-route="/runs"><span class="mark">[▲]</span><span>oberth</span><span id="brandSub" class="sub">/ dashboard</span></button><nav class="tabs"><button id="tabRuns" class="tab" data-route="/runs">runs</button><button id="tabRepos" class="tab" data-route="/repos">repos</button><button id="tabIssues" class="tab" data-route="/issues">issues</button><button id="tabStatus" class="tab" data-route="/status">status</button></nav><div class="top-right"><div class="top-status" aria-label="System status"><span class="status-segment backend" title="loading" aria-label="loading"><span id="connLed" class="led" aria-hidden="true"></span><span id="connText">api</span></span><span class="status-divider" aria-hidden="true"></span><span id="versionStatus" class="status-segment version-mode unknown" role="status" aria-live="polite"><span>oberth</span> <span id="verLabel" class="ver">...</span></span></div><button class="iconbtn" data-action="toggle-theme" title="Theme" aria-label="Toggle theme"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg></button><button class="iconbtn" data-action="refresh" title="Refresh" aria-label="Refresh"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 3v6h-6"/></svg></button><button class="iconbtn" data-action="clear-token" title="Sign out" aria-label="Sign out"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><path d="M10 17l5-5-5-5"/><path d="M15 12H3"/></svg></button></div></header><main id="app" class="main" data-view="`+view+`"><noscript><p>The Oberth dashboard requires JavaScript. The JSON views remain available at /api/runs, /api/repos, /api/issues, and /api/status with a bearer token.</p></noscript></main></div><dialog id="issueDialog" class="dlg" aria-labelledby="issueDialogTitle"><div class="dlg-shell"><header class="dlg-head"><h2 id="issueDialogTitle">Issue</h2><span id="issueDialogMeta" class="meta"></span><button class="dlg-close" data-action="close-issue" aria-label="Close issue details">×</button></header><div id="issueDialogContent" class="dlg-body"></div></div></dialog><script src="/assets/app.js" defer></script></body></html>`)
 }
 
 // serveAsset serves the embedded dashboard assets with explicit content types

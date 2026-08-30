@@ -16,6 +16,8 @@ import (
 )
 
 type fakeBackend struct {
+	publishedRun    string
+	publishErr      error
 	calledName      string
 	calledArguments json.RawMessage
 	calledActor     Actor
@@ -120,6 +122,11 @@ func (backend *fakeBackend) Status(context.Context, Actor) (any, error) {
 	return map[string]string{"vcs": "ok", "cluster": "ok"}, nil
 }
 func (backend *fakeBackend) Ready(context.Context) error { return backend.readyErr }
+
+func (backend *fakeBackend) PublishRun(context.Context, Actor, string) error {
+	backend.publishedRun = "recorded"
+	return backend.publishErr
+}
 
 func testServer(t *testing.T) (*Server, *fakeBackend) {
 	t.Helper()

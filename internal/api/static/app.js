@@ -559,6 +559,10 @@ async function liveLogContent(run, activeBurn, activeStep) {
 async function renderRunDetail(runID, seq, background) {
   if (!background) setChrome("runs", "/ run");
   if (!state.repos.length) { try { await loadRepos(); } catch { /* repo names fall back to IDs */ } }
+  // The compare link needs the upstream base URL, which only /api/status
+  // carries. Without this the button appears only after the reader has happened
+  // to visit a page that loads status, which looks like it renders at random.
+  if (!state.status) { try { await loadStatus(); } catch { /* the button is simply omitted */ } }
   let detail;
   try {
     detail = await api(`/api/runs/${enc(runID)}`);
@@ -606,7 +610,7 @@ async function renderRunDetailView(detail, seq) {
         <span class="v4b ${kind === "pass" ? "pass" : kind === "fail" ? "fail" : kind === "run" ? "run" : "dim"}">${esc(phaseLabel)}</span>
         ${releaseBadge(run)}${credentialedBadge(run)}
         ${run.SupersededBy ? '<span class="v4b superseded">SUPERSEDED</span>' : ""}
-        <div class="time"><span><b>${esc(fmtDur(seconds))}</b></span><span>${esc(ago(runWhen(run)))}</span><button class="v4back" data-action-back>‹ back</button></div>
+        <div class="time">${(() => { const u = compareURL(run); return u ? `<button type="button" class="v4pr" data-action="publish-pr" data-run="${esc(run.ID)}" data-compare="${esc(u)}" title="Push this branch to the forge, then open the pull request form">push &amp; open PR ↗</button>` : ""; })()}<span><b>${esc(fmtDur(seconds))}</b></span><span>${esc(ago(runWhen(run)))}</span><button class="v4back" data-action-back>‹ back</button></div>
       </div>
       <div class="rh2">
         <span>actor <span class="ag" title="${esc(run.Actor)}">${esc(run.Actor || "--")}</span></span>
@@ -643,6 +647,69 @@ async function renderRunDetailView(detail, seq) {
 }
 
 /* ---------- repositories ---------- */
+// compareURL builds a link to the forge's compare page for a green branch run.
+//
+// A link, not an API call: the box holds no forge credential and is not going
+// to acquire one to open a pull request. Constructing the URL keeps the gate
+// advisory, which is the whole point of it being opt-in.
+//
+// Opening the pull request late is deliberate. `pull_request` fires on
+// `synchronize` as well as `opened`, so a pull request opened before the work
+// is done costs one Actions run per green sync; opened at the end it costs two
+// in total.
+// publishThenCompare is the "green, now what" action.
+//
+// The branch has to exist on the forge before a pull request can be opened, and
+// with --publish-on-green=false it does not yet. So this pushes first and only
+// then opens the compare form.
+//
+// The compare page opens even when the push reports an error, because the most
+// likely error by far is that the branch is already there: publishing twice is
+// refused, and that must not strand the reviewer. A genuine failure is still
+// visible in the button text.
+async function publishThenCompare(button) {
+  const runID = button.getAttribute("data-run");
+  const compare = button.getAttribute("data-compare");
+  if (!runID || !compare) return;
+  const original = button.textContent;
+  button.disabled = true;
+  button.textContent = "pushing…";
+  let failed = "";
+  try {
+    const response = await fetch(`/api/runs/${enc(runID)}/publish`, {
+      method: "POST", cache: "no-store", headers: authHeaders(),
+    });
+    if (!response.ok) failed = `push failed (${response.status})`;
+  } catch {
+    failed = "push failed";
+  }
+  // Opened last so the tab is not blocked by the await in some browsers; the
+  // click is still within the user gesture that started this handler.
+  window.open(compare, "_blank", "noopener,noreferrer");
+  button.disabled = false;
+  button.textContent = failed || original;
+  if (failed) button.classList.add("v4pr-bad");
+}
+function compareURL(run) {
+  if (!run || statusKind(run.Status) !== "pass") return "";
+  if (run.Trigger && String(run.Trigger).toLowerCase() === "release") return "";
+  const repo = state.repos.find(r => r.ID === run.RepoID);
+  if (!repo || !repo.Name) return "";
+  const info = (state.status?.upstream_info || []).find(u => u.id === repo.UpstreamID);
+  const base = info && info.base_url ? String(info.base_url) : "";
+  // Accept ssh://git@host/org and git@host:org, reject anything else rather
+  // than guessing at a forge layout we have not seen.
+  const m = base.match(/^(?:ssh:\/\/)?(?:[^@]+@)?([^/:]+)[/:](.+?)\/?$/);
+  if (!m) return "";
+  let host = m[1];
+  const org = m[2];
+  if (!/github\.com$/i.test(host)) return "";
+  host = "github.com"; // ssh.github.com and github.com share one web origin
+  const branch = run.Ref || "";
+  const target = repo.DefaultBranch || "master";
+  if (!branch || branch === target) return "";
+  return `https://${host}/${org}/${repo.Name}/compare/${encodeURIComponent(target)}...${encodeURIComponent(branch)}?expand=1`;
+}
 function upstreamName(upstreamID) {
   const info = (state.status?.upstream_info || []).find(upstream => upstream.id === upstreamID);
   return info ? info.name : (upstreamID ? "#" + upstreamID : "--");
@@ -881,6 +948,8 @@ app.addEventListener("click", event => {
     route(true);
     return;
   }
+  const prButton = event.target.closest('[data-action="publish-pr"]');
+  if (prButton) { publishThenCompare(prButton); return; }
   if (event.target.closest("[data-action-back]")) { go(state.lastList || "/runs"); }
 });
 document.addEventListener("keydown", event => {

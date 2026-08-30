@@ -315,6 +315,15 @@ secretCreatePolicy:
 # modern kindnet). RBAC is the access control boundary for the API server.
 #
 # Disable on clusters without a NetworkPolicy-capable CNI.
+# Force-sync an ordinary green branch run to the upstream forge.
+#
+# true is the original behaviour: green means published. false makes the gate
+# advisory, which is what a developer running Oberth on their own machine
+# usually wants: the verdict is recorded, nothing reaches the forge, and the
+# dashboard offers "push & open PR" on a green run. Promotion runs publish
+# either way, because publishing is what a promotion is for.
+publishOnGreen: true
+
 networkPolicy:
   # Enabled by default for pipeline egress isolation: default-deny egress with
   # targeted allowlist for DNS, HTTPS, and the secret store. On k3s with the

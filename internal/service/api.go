@@ -31,6 +31,10 @@ const revokePolicySyncAdvisory = "Revocation is effective for new Oberth admissi
 	"run `oberth install --install-secretstore --upgrade` to remove it from the Vault policy."
 
 type APIConfig struct {
+	// Publisher force-syncs a green run to the upstream on request. Supplied by
+	// the scheduler, which owns the durable outbox; the API only forwards the
+	// request so there is one publication path rather than two.
+	Publisher              func(context.Context, string) error
 	Runs                   RunResolver
 	History                RunHistory
 	Repositories           RepositoryReader
@@ -78,6 +82,7 @@ type API struct {
 	secretAccessReconciler *AccessReconciler
 	repositoryRemover      RepositoryRemover
 	removeGitCache         func(string) error
+	publisher              func(context.Context, string) error
 }
 
 func NewAPI(config APIConfig) (*API, error) {
@@ -117,6 +122,7 @@ func NewAPI(config APIConfig) (*API, error) {
 		promotionWorkspaceRoot: promotionWorkspaceRoot, workspaces: workspaces,
 		secretAccess: config.SecretAccess, secretAccessReconciler: config.SecretAccessReconciler,
 		repositoryRemover: config.RepositoryRemover, removeGitCache: config.RemoveGitCache,
+		publisher: config.Publisher,
 	}, nil
 }
 
@@ -551,6 +557,22 @@ func (service *API) RunLogLive(ctx context.Context, _ api.Actor, id string, offs
 	// remain in a multi-chunk terminal log.
 	response.Done = terminal && next >= size
 	return response, nil
+}
+
+// PublishRun forwards an on-demand publication request to the scheduler.
+//
+// Present so the dashboard can offer "push, then open a pull request" when the
+// server runs with --publish-on-green=false. When no publisher is wired the
+// server is publishing automatically, so the request is meaningless rather than
+// merely unavailable.
+func (service *API) PublishRun(ctx context.Context, _ api.Actor, id string) error {
+	if service.publisher == nil {
+		return fmt.Errorf("%w: on-demand publication is off; this server publishes every green run automatically", ErrInvalidInput)
+	}
+	if strings.TrimSpace(id) == "" {
+		return fmt.Errorf("%w: run ID is required", ErrInvalidInput)
+	}
+	return service.publisher(ctx, id)
 }
 
 func (service *API) Repositories(ctx context.Context, _ api.Actor) (any, error) {

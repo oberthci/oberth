@@ -40,28 +40,37 @@ type SchedulerConfig struct {
 	MaxConcurrent   int
 	MaxRunLogBytes  int64
 	MutationGate    func(context.Context) error
+	// SuppressGreenPublication stops an ordinary green branch run from
+	// force-syncing itself to the upstream forge. The zero value publishes,
+	// which is the original behaviour and keeps every existing caller correct
+	// without naming the field. Set it to make the gate advisory: the run goes
+	// green, the verdict is recorded, and nothing reaches the forge until
+	// someone asks for it. Promotion runs publish either way, because a
+	// promotion's whole purpose is to publish.
+	SuppressGreenPublication bool
 }
 
 type Scheduler struct {
-	store           SchedulerStore
-	git             WorkspaceGit
-	logs            LogStore
-	jobs            JobController
-	releaseJobs     ReleaseJobController
-	auditor         Auditor
-	signals         *Signals
-	workspaces      *workspaceLifecycle
-	workspaceRoot   string
-	maxConcurrent   int
-	admission       *weightedAdmission
-	maxRunLogBytes  int64
-	mutationGate    func(context.Context) error
-	wake            chan struct{}
-	publicationWake chan struct{}
-	publicationMu   sync.Mutex
-	publicationIDs  []string
-	publicationSet  map[string]struct{}
-	deliveryPermit  chan struct{}
+	store                    SchedulerStore
+	git                      WorkspaceGit
+	logs                     LogStore
+	jobs                     JobController
+	releaseJobs              ReleaseJobController
+	auditor                  Auditor
+	signals                  *Signals
+	workspaces               *workspaceLifecycle
+	workspaceRoot            string
+	maxConcurrent            int
+	admission                *weightedAdmission
+	maxRunLogBytes           int64
+	mutationGate             func(context.Context) error
+	wake                     chan struct{}
+	publicationWake          chan struct{}
+	publicationMu            sync.Mutex
+	publicationIDs           []string
+	publicationSet           map[string]struct{}
+	deliveryPermit           chan struct{}
+	suppressGreenPublication bool
 }
 
 func NewScheduler(config SchedulerConfig) (*Scheduler, error) {
@@ -93,7 +102,8 @@ func NewScheduler(config SchedulerConfig) (*Scheduler, error) {
 	deliveryPermit := make(chan struct{}, 1)
 	deliveryPermit <- struct{}{}
 	return &Scheduler{
-		store: config.Store, git: config.Git, logs: config.Logs, jobs: config.Jobs,
+		suppressGreenPublication: config.SuppressGreenPublication,
+		store:                    config.Store, git: config.Git, logs: config.Logs, jobs: config.Jobs,
 		releaseJobs: config.ReleaseJobs,
 		auditor:     config.Auditor, signals: signals,
 		workspaces: workspaces, workspaceRoot: workspaceRoot, maxConcurrent: config.MaxConcurrent,
@@ -609,7 +619,10 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 	if promotionErr != nil {
 		jobResult = JobResult{Status: model.RunFailed, Phase: "promotion", Error: promotionErr.Error()}
 	}
-	if jobResult.Status == model.RunPassed {
+	// A promotion always publishes: publishing the merged result is what a
+	// promotion is for, and its caller supplied explicit integration authority.
+	// An ordinary branch run publishes only when the operator asked for it.
+	if jobResult.Status == model.RunPassed && (!scheduler.suppressGreenPublication || promotion.ID != "") {
 		if gateErr := require(finalizeCtx); gateErr != nil {
 			return gateErr
 		}
@@ -754,6 +767,44 @@ func (scheduler *Scheduler) promotionForRun(ctx context.Context, run model.Run) 
 		return promotion, errors.New("service: promotion run does not match its immutable record")
 	}
 	return promotion, nil
+}
+
+// PublishRun force-syncs an already-green branch run to the upstream forge on
+// request. It exists because --publish-on-green=false makes the gate advisory:
+// the verdict is recorded and nothing is pushed, so something has to be able to
+// say "now".
+//
+// It reuses the ordinary publication path rather than adding a second way to
+// reach the forge, so the durable outbox, the audit chain and the fail-closed
+// mutation gate all apply exactly as they do for an automatic publish. The only
+// difference is who decided.
+//
+// Refuses anything but a terminal green ordinary branch run. A failed run has
+// nothing to publish, a promotion published itself, and a running one has no
+// result yet.
+func (scheduler *Scheduler) PublishRun(ctx context.Context, runID string) error {
+	run, err := scheduler.store.Run(ctx, runID)
+	if err != nil {
+		return fmt.Errorf("load run for publication: %w", err)
+	}
+	if run.Status != model.RunPassed {
+		return fmt.Errorf("service: run %s is %s; only a green run can be published", runID, run.Status)
+	}
+	if run.Trigger == "promotion" {
+		return fmt.Errorf("service: run %s is a promotion and published itself", runID)
+	}
+	repository, err := scheduler.store.Repository(ctx, run.RepoID)
+	if err != nil {
+		return fmt.Errorf("load repository for publication: %w", err)
+	}
+	publication, err := scheduler.beginRunPublication(ctx, repository, run, model.Promotion{})
+	if err != nil {
+		return fmt.Errorf("begin publication: %w", err)
+	}
+	if _, err := scheduler.deliverPublicationWithGate(ctx, publication.ID, scheduler.requireMutation); err != nil {
+		return fmt.Errorf("deliver publication %s: %w", publication.ID, err)
+	}
+	return nil
 }
 
 func (scheduler *Scheduler) beginRunPublication(ctx context.Context, repository model.Repository, run model.Run, promotion model.Promotion) (model.Publication, error) {
@@ -1001,7 +1052,9 @@ func (scheduler *Scheduler) finalizeReconciledRun(ctx context.Context, run model
 	if promotionErr != nil {
 		jobResult = JobResult{Status: model.RunFailed, Phase: "promotion", Error: promotionErr.Error()}
 	}
-	if jobResult.Status == model.RunPassed {
+	// Mirrors the gate in the primary finalize path. Without it a restart
+	// would publish a run the operator deliberately left unpublished.
+	if jobResult.Status == model.RunPassed && (!scheduler.suppressGreenPublication || promotion.ID != "") {
 		if gateErr := require(ctx); gateErr != nil {
 			return gateErr
 		}
