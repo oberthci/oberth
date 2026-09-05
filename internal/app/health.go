@@ -46,6 +46,10 @@ type Health struct {
 	// secret-store login probe. When non-nil, concurrent dashboard
 	// viewers share one probe cycle; nil probes fresh every time.
 	SecretStoreCache *SecretStoreProbeSnapshot
+	// SecretStoreSealed optionally checks whether the secret store is sealed
+	// using the unauthenticated seal-status endpoint. Called only when the
+	// login probe fails, to distinguish a sealed store from other failures.
+	SecretStoreSealed func(context.Context) (bool, error)
 	// AuditMode reports the configured audit integrity mode: "anchored" when
 	// an external witness or timestamp authority is configured, "local" when
 	// only the SQLite hash chain runs.
@@ -74,6 +78,7 @@ type SecretStoreStatus struct {
 	Role       string `json:"role,omitempty"`
 	Transport  string `json:"transport,omitempty"`
 	Probe      string `json:"probe,omitempty"`
+	Sealed     bool   `json:"sealed,omitempty"`
 }
 
 // AuditChainStatus reports the local audit hash-chain head and the latest
@@ -203,6 +208,9 @@ func (health Health) Status(ctx context.Context) (any, error) {
 		// callers never mutate the shared Health.SecretStore pointer.
 		storeCopy := *health.SecretStore
 		storeCopy.Probe = probe
+		if probe == "sealed" {
+			storeCopy.Sealed = true
+		}
 		status.SecretStore = &storeCopy
 	}
 	return status, nil
@@ -349,10 +357,8 @@ func (health Health) probeSecretStore(ctx context.Context) string {
 		// No shared cache (test or single-caller path): probe directly.
 		probeCtx, cancel := context.WithTimeout(ctx, secretStoreProbeTimeout)
 		defer cancel()
-		if err := health.SecretStoreProbe(probeCtx); err != nil {
-			return boundedDetail(err.Error())
-		}
-		return "ready"
+		err := health.SecretStoreProbe(probeCtx)
+		return health.classifyProbeResult(probeCtx, err)
 	}
 	cache.mu.Lock()
 	if time.Since(cache.age) < secretStoreProbeTTL && cache.result != "" {
@@ -385,10 +391,8 @@ func (health Health) probeSecretStore(ctx context.Context) string {
 
 	probeCtx, cancel := context.WithTimeout(ctx, secretStoreProbeTimeout)
 	defer cancel()
-	result := "ready"
-	if err := health.SecretStoreProbe(probeCtx); err != nil {
-		result = boundedDetail(err.Error())
-	}
+	err := health.SecretStoreProbe(probeCtx)
+	result := health.classifyProbeResult(probeCtx, err)
 
 	cache.mu.Lock()
 	cache.result = result
@@ -397,4 +401,79 @@ func (health Health) probeSecretStore(ctx context.Context) string {
 	cache.mu.Unlock()
 	close(done)
 	return result
+}
+
+// classifyProbeResult distinguishes a sealed store from other login failures.
+// When the login probe fails and a seal-status callback is available, a
+// confirmed sealed state returns the machine-contract string "sealed".
+// If the seal-status check itself errors, the original login error detail is
+// preserved — we cannot distinguish sealed from unreachable in that case.
+func (health Health) classifyProbeResult(ctx context.Context, loginErr error) string {
+	if loginErr == nil {
+		return "ready"
+	}
+	if health.SecretStoreSealed != nil {
+		if sealed, err := health.SecretStoreSealed(ctx); err == nil && sealed {
+			return "sealed"
+		}
+	}
+	return boundedDetail(loginErr.Error())
+}
+
+// RefreshSecretStore forces a fresh secret-store probe, updating the cached
+// snapshot that concurrent Status() callers read. Returns the probe result
+// string ("ready", "sealed", or the bounded error detail). With a 60s
+// periodic tick and 30s TTL, the cache is always stale when the ticker fires,
+// so routing through probeSecretStore naturally refreshes.
+func (health Health) RefreshSecretStore(ctx context.Context) string {
+	if health.SecretStoreProbe == nil || health.SecretStore == nil || !health.SecretStore.Configured {
+		return ""
+	}
+	return health.probeSecretStore(ctx)
+}
+
+// ProbeClass classifies a secret-store probe result string into one of three
+// states for transition detection: "ready" for a healthy or empty probe,
+// "sealed" for a sealed store, and "failing" for any other error.
+func ProbeClass(result string) string {
+	switch result {
+	case "ready", "":
+		return "ready"
+	case "sealed":
+		return "sealed"
+	default:
+		return "failing"
+	}
+}
+
+// SecretStoreObserver tracks probe result transitions and logs only on state
+// changes. Steady-state results produce no output. The Address field is
+// included in log messages for operational context. The Log function is
+// typically logger.Printf.
+type SecretStoreObserver struct {
+	previous string
+	Log      func(string, ...any)
+	Address  string
+}
+
+// Observe classifies the probe result and logs if the state class changed
+// since the last observation. Steady-state (no transition) is silent.
+func (o *SecretStoreObserver) Observe(result string) {
+	current := ProbeClass(result)
+	previous := o.previous
+	if previous == "" {
+		previous = "ready" // zero value: assume healthy at startup
+	}
+	if current == previous {
+		return
+	}
+	switch current {
+	case "sealed":
+		o.Log("WARNING: secret store SEALED at %s \u2014 credentialed releases and access grants will fail until unsealed (branch CI unaffected)", o.Address)
+	case "failing":
+		o.Log("WARNING: secret store probe failing at %s: %s", o.Address, result)
+	case "ready":
+		o.Log("secret store probe recovered at %s", o.Address)
+	}
+	o.previous = current
 }

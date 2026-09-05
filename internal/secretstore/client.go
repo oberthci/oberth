@@ -217,6 +217,18 @@ func (client *Client) VerifyLogin(ctx context.Context) error {
 	return nil
 }
 
+// SealStatus checks whether the secret store is sealed using the
+// unauthenticated /v1/sys/seal-status endpoint. No authentication credentials
+// are sent — the shared client has ClearToken since construction. The caller's
+// context bounds the request timeout.
+func (client *Client) SealStatus(ctx context.Context) (sealed bool, err error) {
+	response, err := client.api.Sys().SealStatusWithContext(ctx)
+	if err != nil {
+		return false, sanitizeSecretStoreHTTPError("seal-status check", err)
+	}
+	return response.Sealed, nil
+}
+
 // Encrypt seals one non-empty trusted-plan envelope with the fixed,
 // administrator-owned OpenBao transit key. Even when KV development access
 // explicitly permits HTTP, trusted plan bytes never cross an unverified

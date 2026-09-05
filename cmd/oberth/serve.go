@@ -682,7 +682,31 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 		health.SecretStoreProbe = func(ctx context.Context) error {
 			return probeClient.VerifyLogin(ctx)
 		}
+		health.SecretStoreSealed = func(ctx context.Context) (bool, error) {
+			return probeClient.SealStatus(ctx)
+		}
 		health.SecretStoreCache = &app.SecretStoreProbeSnapshot{}
+		// Periodic secret-store prober with transition-based logging (#259).
+		// Ticks every 60s; logs only on state transitions (ready/sealed/failing),
+		// never on steady state. Exits cleanly on server context cancellation.
+		const secretStoreProbeInterval = 60 * time.Second
+		observer := &app.SecretStoreObserver{
+			Log:     logger.Printf,
+			Address: options.secretStoreAddress,
+		}
+		go func() {
+			ticker := time.NewTicker(secretStoreProbeInterval)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					result := health.RefreshSecretStore(ctx)
+					observer.Observe(result)
+				}
+			}
+		}()
 	}
 	externallyAnchored := tsaClient != nil || rekorWitness != nil
 	health.AuditMode = "local"

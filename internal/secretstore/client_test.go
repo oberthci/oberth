@@ -23,14 +23,16 @@ import (
 
 type mockVault struct {
 	*httptest.Server
-	caPEM     []byte
-	tokenPath string
-	logins    atomic.Int64
-	revokes   atomic.Int64
-	badLogins atomic.Int64
-	reads     atomic.Int64
-	encrypts  atomic.Int64
-	decrypts  atomic.Int64
+	caPEM      []byte
+	tokenPath  string
+	logins     atomic.Int64
+	revokes    atomic.Int64
+	badLogins  atomic.Int64
+	reads      atomic.Int64
+	encrypts   atomic.Int64
+	decrypts   atomic.Int64
+	sealed     atomic.Bool
+	sealChecks atomic.Int64
 }
 
 const testLoginToken = "s.test-login-token"
@@ -189,6 +191,14 @@ func newMockVault(t *testing.T) *mockVault {
 		}
 		mock.revokes.Add(1)
 		writer.WriteHeader(http.StatusNoContent)
+	})
+	handler.HandleFunc("GET /v1/sys/seal-status", func(writer http.ResponseWriter, request *http.Request) {
+		mock.sealChecks.Add(1)
+		sealed := mock.sealed.Load()
+		_ = json.NewEncoder(writer).Encode(map[string]any{
+			"type": "shamir", "initialized": true, "sealed": sealed,
+			"t": 1, "n": 1, "progress": 0, "nonce": "",
+		})
 	})
 	handler.HandleFunc("/", func(writer http.ResponseWriter, request *http.Request) {
 		writer.WriteHeader(http.StatusNotFound)
@@ -661,5 +671,97 @@ func TestVerifyLoginFailsWithTLSError(t *testing.T) {
 	}
 	if err := client.VerifyLogin(context.Background()); err == nil {
 		t.Fatal("VerifyLogin must fail with TLS certificate validation failure")
+	}
+}
+
+func TestSealStatusDetectsSealed(t *testing.T) {
+	t.Parallel()
+	mock := newMockVault(t)
+	mock.sealed.Store(true)
+	client, err := New(mock.config())
+	if err != nil {
+		t.Fatal(err)
+	}
+	sealed, err := client.SealStatus(context.Background())
+	if err != nil {
+		t.Fatalf("SealStatus() error = %v", err)
+	}
+	if !sealed {
+		t.Fatal("SealStatus() = false, want true when store is sealed")
+	}
+	if mock.sealChecks.Load() != 1 {
+		t.Fatalf("sealChecks = %d, want 1", mock.sealChecks.Load())
+	}
+}
+
+func TestSealStatusDetectsUnsealed(t *testing.T) {
+	t.Parallel()
+	mock := newMockVault(t)
+	// sealed is false by default
+	client, err := New(mock.config())
+	if err != nil {
+		t.Fatal(err)
+	}
+	sealed, err := client.SealStatus(context.Background())
+	if err != nil {
+		t.Fatalf("SealStatus() error = %v", err)
+	}
+	if sealed {
+		t.Fatal("SealStatus() = true, want false when store is unsealed")
+	}
+}
+
+func TestSealStatusReportsNetworkError(t *testing.T) {
+	t.Parallel()
+	mock := newMockVault(t)
+	client, err := New(mock.config())
+	if err != nil {
+		t.Fatal(err)
+	}
+	mock.Close()
+	_, err = client.SealStatus(context.Background())
+	if err == nil {
+		t.Fatal("SealStatus() must fail when the store is unreachable")
+	}
+}
+
+func TestSealStatusSendsNoAuthCredential(t *testing.T) {
+	t.Parallel()
+	var observedToken atomic.Value
+	observedToken.Store("")
+	server := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if token := request.Header.Get("X-Vault-Token"); token != "" {
+			observedToken.Store(token)
+		}
+		if auth := request.Header.Get("Authorization"); auth != "" {
+			observedToken.Store(auth)
+		}
+		_ = json.NewEncoder(writer).Encode(map[string]any{
+			"type": "shamir", "initialized": true, "sealed": false,
+			"t": 1, "n": 1, "progress": 0,
+		})
+	}))
+	defer server.Close()
+	caPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: server.Certificate().Raw})
+	tokenPath := filepath.Join(t.TempDir(), "token")
+	if err := os.WriteFile(tokenPath, []byte(testServiceJWT), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	client, err := New(Config{
+		Address: server.URL, Role: "oberth", CACertPEM: caPEM,
+		ServiceAccountTokenPath: tokenPath,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sealed, err := client.SealStatus(context.Background())
+	if err != nil {
+		t.Fatalf("SealStatus() error = %v", err)
+	}
+	if sealed {
+		t.Fatal("expected unsealed")
+	}
+	if token := observedToken.Load().(string); token != "" {
+		t.Fatalf("seal-status request carried credential header: %q", token)
 	}
 }

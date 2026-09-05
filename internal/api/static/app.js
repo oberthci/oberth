@@ -769,7 +769,7 @@ async function renderStatus(seq) {
   const store = s.secret_store;
   const chain = s.audit_chain;
   const storeMood = !store || !store.configured ? "warn" : store.transport === "insecure-http" ? "warn" : store.probe && store.probe !== "ready" ? "bad" : "ok";
-  const storeValue = !store || !store.configured ? "not configured" : store.transport === "insecure-http" ? "insecure http" : store.probe === "ready" ? "healthy" : store.probe ? "unhealthy" : "configured";
+  const storeValue = !store || !store.configured ? "not configured" : store.transport === "insecure-http" ? "insecure http" : store.probe === "ready" ? "healthy" : store.probe === "sealed" ? "sealed" : store.probe ? "unhealthy" : "configured";
   replaceApp(`
   <section class="screen">
     <div class="bar"><h1>Status</h1><span class="meta">FAB control plane health</span></div>
@@ -797,7 +797,7 @@ async function renderStatus(seq) {
     <div class="vcs-panel">
       <div class="vcs-head">Secret store (OpenBao)</div>
       <div class="vcs-entry"><span class="vcs-led ${store.transport === "insecure-http" ? "err" : "ok"}"></span><span class="vcs-host">address</span><span class="meta">${esc(store.transport)}</span><span class="mono-detail">${esc(store.address)}</span><span class="mono-detail">auth ${esc(store.auth_mount)} · role ${esc(store.role)}</span></div>
-      <div class="vcs-entry"><span class="vcs-led ${store.probe === "ready" ? "ok" : store.probe ? "err" : "na"}"></span><span class="vcs-host">verify</span><span class="meta">${store.probe === "ready" ? "login OK" : store.probe ? "login failed" : "no probe"}</span><span class="mono-detail">${store.probe && store.probe !== "ready" ? esc(store.probe) : "SA token \u2192 K8s-auth login \u2192 TokenReview \u2192 logout"}</span><span class="mono-detail">proves reachability, TLS/CA, unsealed, auth mount, role binding</span></div>
+      <div class="vcs-entry"><span class="vcs-led ${store.probe === "ready" ? "ok" : store.probe ? "err" : "na"}"></span><span class="vcs-host">verify</span><span class="meta">${store.probe === "ready" ? "login OK" : store.probe === "sealed" ? "SEALED" : store.probe ? "login failed" : "no probe"}</span><span class="mono-detail">${store.probe === "sealed" ? "sealed \u2014 unseal required; credentialed releases fail until unsealed" : store.probe && store.probe !== "ready" ? esc(store.probe) : "SA token \u2192 K8s-auth login \u2192 TokenReview \u2192 logout"}</span><span class="mono-detail">proves reachability, TLS/CA, unsealed, auth mount, role binding</span></div>
     </div>` : ""}
   </section>`);
   setAuto(slowPollMs);
