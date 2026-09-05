@@ -40,13 +40,17 @@ const (
 	// There is no runner image: Jobs run repository-declared standard golang
 	// images executing `go -C .oberth run .`.
 	//
-	// Substrate 2026-08-27 (tag substrate-openssl-3.5.8-r0-20260827): rebuilt
-	// from the Dockerfile for CVE-2026-14456. Reviewed content delta vs the
-	// previous substrate, identical on both platforms: libcrypto3/libssl3
-	// 3.5.7-r0 -> 3.5.8-r0 (the CVE fix, exact-pinned in the Dockerfile) and
-	// libexpat 2.8.2-r0 -> 2.8.3-r0 (git dependency, repo patch level);
-	// 36 packages before and after, nothing added or removed.
-	ServerSubstrate = ServerRepository + "@sha256:6684009e6b494e78564644f0140a7499ab84bcf35ce21a5ad1ce72f061be17ea"
+	// Substrate 2026-09-06 (tag substrate-libcurl8220-20260906): rebuilt from
+	// the Dockerfile for the 8-HIGH libcurl CVE set (CVE-2026-11352/-11586/
+	// -12064/-80256/-8286/-8458/-8925/-8927/-9547) that failed the v0.13.32
+	// release gate. Reviewed content delta vs the previous substrate
+	// (6684009e...), identical on both platforms: libcurl 8.20.0-r0 ->
+	// 8.22.0-r0 (the CVE fix, exact-pinned in the Dockerfile), libexpat
+	// 2.8.3-r0 -> 2.8.4-r0 and pcre2 10.47-r0 -> 10.48-r0 (git dependencies,
+	// repo patch level); 36 packages before and after, nothing added or
+	// removed; /usr/local/bin/oberth present; exactly two platform children,
+	// no attestation manifests.
+	ServerSubstrate = ServerRepository + "@sha256:13dccb32a41bb8f67ae50cc6b0a59660ae6e161524a5e865d32880b073028c06"
 )
 
 // Kind selects a release image contract. Only the server image remains.

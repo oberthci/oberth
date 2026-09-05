@@ -31,6 +31,13 @@ RUN apk add --no-cache \
     # favour of a rebuilt base image — never a silent drift.
     libcrypto3=3.5.8-r0 \
     libssl3=3.5.8-r0 \
+    # CVE-2026-11352/-11586/-12064/-80256/-8286/-8458/-8925/-8927/-9547 (all
+    # HIGH): libcurl arrives as git's transitive dependency; the alpine:3.23
+    # base digest above still resolves 8.20.0-r0 while the fixed 8.22.0-r0
+    # exists only in the apk repository. Exact-pinned like libcrypto3 above:
+    # when the repo supersedes 8.22.0-r0 this line fails the build loudly —
+    # re-pin deliberately, never drift silently.
+    libcurl=8.22.0-r0 \
     openssh-client-default=10.2_p1-r0 \
     tzdata=2026c-r0 \
     && rm -f /var/log/apk.log
