@@ -1355,12 +1355,27 @@ func runAccess(ctx context.Context, arguments []string, output io.Writer) error 
 	}
 }
 
+// accessListJSONGrant is the stable machine-readable schema for `access list
+// --json`. Fields match the wire contract in issue #260 — do not rename or
+// reorder without a version bump. Revocation fields use omitempty so active
+// grants carry only the approval metadata.
+type accessListJSONGrant struct {
+	Repo       string  `json:"repo"`
+	Step       string  `json:"step"`
+	Secret     string  `json:"secret"`
+	ApprovedBy string  `json:"approved_by"`
+	ApprovedAt string  `json:"approved_at"`
+	RevokedBy  string  `json:"revoked_by,omitempty"`
+	RevokedAt  *string `json:"revoked_at,omitempty"`
+}
+
 func runAccessList(ctx context.Context, arguments []string, output io.Writer) error {
 	flags := flag.NewFlagSet("access list", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	databasePath := flags.String("database", "/data/oberth.sqlite", "SQLite database path (in-pod; requires the live admin daemon)")
 	repo := flags.String("repo", "", "filter by repository name")
 	revoked := flags.Bool("revoked", false, "include revoked grants")
+	jsonOutput := flags.Bool("json", false, "emit grants as a JSON array (machine-readable)")
 	if err := flags.Parse(arguments); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			flags.SetOutput(output)
@@ -1381,6 +1396,11 @@ func runAccessList(ctx context.Context, arguments []string, output io.Writer) er
 	if err != nil {
 		return err
 	}
+
+	if *jsonOutput {
+		return writeAccessListJSON(output, grants)
+	}
+
 	writer := tabwriter.NewWriter(output, 0, 0, 3, ' ', 0)
 	if _, err := fmt.Fprintln(writer, "REPO\tSTEP\tSECRET\tAPPROVED BY\tAPPROVED AT\tSTATUS"); err != nil {
 		return err
@@ -1398,6 +1418,31 @@ func runAccessList(ctx context.Context, arguments []string, output io.Writer) er
 		}
 	}
 	return writer.Flush()
+}
+
+// writeAccessListJSON emits grants as a JSON array to output. An empty slice
+// produces `[]` (never `null`). RFC 3339 UTC timestamps; revocation fields
+// omitted for active grants.
+func writeAccessListJSON(output io.Writer, grants []store.SecretAccessGrant) error {
+	items := make([]accessListJSONGrant, 0, len(grants))
+	for _, g := range grants {
+		item := accessListJSONGrant{
+			Repo:       g.Repo,
+			Step:       g.Step,
+			Secret:     g.Secret,
+			ApprovedBy: g.ApprovedBy,
+			ApprovedAt: g.ApprovedAt.UTC().Format(time.RFC3339),
+		}
+		if g.RevokedAt != nil {
+			item.RevokedBy = g.RevokedBy
+			ts := g.RevokedAt.UTC().Format(time.RFC3339)
+			item.RevokedAt = &ts
+		}
+		items = append(items, item)
+	}
+	encoder := json.NewEncoder(output)
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(items) //nolint:gosec // G117: "Secret" field is a Vault path name, not credential material.
 }
 
 type accessDependencies struct {

@@ -596,11 +596,21 @@ func Run(ctx context.Context, cfg Config, deps Deps) error {
 		if ns == "" {
 			ns = DefaultNamespace
 		}
-		produced, produceErr := ProducePerRepoIdentities(ctx, deps.KubeClient, deps.RunCommand, deps.ContextName, ns)
+		produced, produceWarnings, produceErr := ProducePerRepoIdentities(ctx, deps.KubeClient, deps.RunCommand, deps.ContextName, ns)
+		for _, warn := range produceWarnings {
+			_, _ = fmt.Fprintf(deps.Output, "WARNING: %s\n", warn)
+		}
 		if produceErr != nil {
 			_, _ = fmt.Fprintf(deps.Output, "WARNING: could not read per-repo identities: %v\n", produceErr)
 		} else if len(produced) > 0 {
 			cfg.PerRepoIdentities = produced
+		}
+		// Warn loudly when producing zero identities but the live release
+		// carries non-empty argo.perRepoIdentities — existing ServiceAccounts
+		// persist only via --reuse-values and new grants will not be
+		// provisioned. (#260 gap 6)
+		if len(cfg.PerRepoIdentities) == 0 {
+			warnPerRepoIdentityDelta(ctx, deps, ns)
 		}
 	}
 
@@ -2053,4 +2063,33 @@ func loadFromRules(rules *clientcmd.ClientConfigLoadingRules, contextName string
 		selectedContext = contextName
 	}
 	return client, restConfig, selectedContext, nil
+}
+
+// warnPerRepoIdentityDelta checks the live Helm release's argo.perRepoIdentities
+// and warns loudly when it is non-empty but the produce returned zero. Existing
+// ServiceAccounts persist only via --reuse-values; grants added since the last
+// successful produce will not be provisioned and those releases will fail at
+// pod admission. (#260 gap 6)
+func warnPerRepoIdentityDelta(ctx context.Context, deps Deps, namespace string) {
+	if deps.RunHelm == nil {
+		return
+	}
+	out, err := deps.RunHelm(ctx, []string{"get", "values", "oberth", "-n", namespace, "-o", "json"})
+	if err != nil {
+		// No release yet (fresh install) or helm error — skip silently.
+		return
+	}
+	var values struct {
+		Argo struct {
+			PerRepoIdentities []string `json:"perRepoIdentities"`
+		} `json:"argo"`
+	}
+	if err := json.Unmarshal(out, &values); err != nil {
+		return
+	}
+	if len(values.Argo.PerRepoIdentities) == 0 {
+		return
+	}
+	_, _ = fmt.Fprintf(deps.Output, "WARNING: per-repo identity produce returned 0 identities, but the live release carries %d (argo.perRepoIdentities).\n", len(values.Argo.PerRepoIdentities))
+	_, _ = fmt.Fprintf(deps.Output, "WARNING: existing per-repo ServiceAccounts persist only via --reuse-values; grants added since the last successful produce will NOT be provisioned and those releases will fail at pod admission.\n")
 }

@@ -1,6 +1,7 @@
 image:
-  # v0.10.64 single-platform digest (linux/amd64). Multi-arch index published
-  # by the release pipeline; this bootstrap digest seeds the first release.
+  # Server image digest. In source this is the bootstrap seed for the first
+  # release; the release pipeline stamps the exact per-release digest here
+  # when packaging the chart.
   ref: europe-west4-docker.pkg.dev/skipopsmain/cloudtaser/cloudtaser-oberth@sha256:093c6f6ed22f5e4bbb34994e545a7180b1d091a7935110ed0129f6bd6a798686
   pullPolicy: IfNotPresent
 
