@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -314,4 +315,242 @@ func TestHealthStatusConcurrentSecretStoreProbeNoDataRace(t *testing.T) {
 		}()
 	}
 	wg.Wait()
+}
+
+func TestHealthProbeReportsSealed(t *testing.T) {
+	t.Parallel()
+	health := Health{
+		Store: fakeHealthStore{
+			upstreams:    []model.Upstream{{ID: 1, Name: "codeberg", Kind: "forgejo", BaseURL: "git@codeberg.org:cloudtaser"}},
+			repositories: []model.Repository{{ID: 1}},
+		},
+		Configured:  func(context.Context) error { return nil },
+		Cluster:     func(context.Context) error { return nil },
+		Audit:       func(context.Context) error { return nil },
+		VCS:         func(context.Context, model.Upstream) error { return nil },
+		SecretStore: &SecretStoreStatus{Configured: true, Address: "https://bao:8200", AuthMount: "kubernetes", Role: "oberth", Transport: "https"},
+		SecretStoreProbe: func(context.Context) error {
+			return errors.New("secret store Kubernetes auth login failed: HTTP 503 Service Unavailable")
+		},
+		SecretStoreSealed: func(context.Context) (bool, error) {
+			return true, nil
+		},
+	}
+	value, err := health.Status(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	status := value.(HealthStatus)
+	if status.SecretStore == nil || status.SecretStore.Probe != "sealed" {
+		t.Fatalf("secret store probe = %+v, want sealed", status.SecretStore)
+	}
+	if !status.SecretStore.Sealed {
+		t.Fatal("SecretStore.Sealed = false, want true")
+	}
+}
+
+func TestHealthProbeReportsLoginDetailWhenSealStatusErrors(t *testing.T) {
+	t.Parallel()
+	health := Health{
+		Store: fakeHealthStore{
+			upstreams:    []model.Upstream{{ID: 1, Name: "codeberg", Kind: "forgejo", BaseURL: "git@codeberg.org:cloudtaser"}},
+			repositories: []model.Repository{{ID: 1}},
+		},
+		Configured:  func(context.Context) error { return nil },
+		Cluster:     func(context.Context) error { return nil },
+		Audit:       func(context.Context) error { return nil },
+		VCS:         func(context.Context, model.Upstream) error { return nil },
+		SecretStore: &SecretStoreStatus{Configured: true, Address: "https://bao:8200", AuthMount: "kubernetes", Role: "oberth", Transport: "https"},
+		SecretStoreProbe: func(context.Context) error {
+			return errors.New("connection refused")
+		},
+		SecretStoreSealed: func(context.Context) (bool, error) {
+			return false, errors.New("seal-status also unreachable")
+		},
+	}
+	value, err := health.Status(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	status := value.(HealthStatus)
+	if status.SecretStore == nil || status.SecretStore.Probe == "sealed" {
+		t.Fatalf("probe should show login error, not sealed: %+v", status.SecretStore)
+	}
+	if !strings.Contains(status.SecretStore.Probe, "connection refused") {
+		t.Fatalf("probe = %q, want login error detail", status.SecretStore.Probe)
+	}
+	if status.SecretStore.Sealed {
+		t.Fatal("SecretStore.Sealed = true, want false when seal-status errored")
+	}
+}
+
+func TestHealthProbeReadyIgnoresSealedCallback(t *testing.T) {
+	t.Parallel()
+	sealCalled := false
+	health := Health{
+		Store: fakeHealthStore{
+			upstreams:    []model.Upstream{{ID: 1, Name: "codeberg", Kind: "forgejo", BaseURL: "git@codeberg.org:cloudtaser"}},
+			repositories: []model.Repository{{ID: 1}},
+		},
+		Configured:  func(context.Context) error { return nil },
+		Cluster:     func(context.Context) error { return nil },
+		Audit:       func(context.Context) error { return nil },
+		VCS:         func(context.Context, model.Upstream) error { return nil },
+		SecretStore: &SecretStoreStatus{Configured: true, Address: "https://bao:8200", AuthMount: "kubernetes", Role: "oberth", Transport: "https"},
+		SecretStoreProbe: func(context.Context) error {
+			return nil // login succeeds
+		},
+		SecretStoreSealed: func(context.Context) (bool, error) {
+			sealCalled = true
+			return true, nil // would report sealed if consulted
+		},
+	}
+	value, err := health.Status(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	status := value.(HealthStatus)
+	if status.SecretStore == nil || status.SecretStore.Probe != "ready" {
+		t.Fatalf("probe = %+v, want ready", status.SecretStore)
+	}
+	if sealCalled {
+		t.Fatal("seal-status callback must not be consulted when login succeeds")
+	}
+}
+
+func TestRefreshSecretStoreUpdatesCachedSnapshot(t *testing.T) {
+	t.Parallel()
+	var probeCalls sync.WaitGroup
+	var probeCount int64
+	health := Health{
+		Store: fakeHealthStore{
+			upstreams:    []model.Upstream{{ID: 1, Name: "codeberg", Kind: "forgejo", BaseURL: "git@codeberg.org:cloudtaser"}},
+			repositories: []model.Repository{{ID: 1}},
+		},
+		Configured:  func(context.Context) error { return nil },
+		Cluster:     func(context.Context) error { return nil },
+		Audit:       func(context.Context) error { return nil },
+		VCS:         func(context.Context, model.Upstream) error { return nil },
+		SecretStore: &SecretStoreStatus{Configured: true, Address: "https://bao:8200", AuthMount: "kubernetes", Role: "oberth", Transport: "https"},
+		SecretStoreProbe: func(context.Context) error {
+			probeCount++
+			probeCalls.Done()
+			return nil
+		},
+		SecretStoreCache: &SecretStoreProbeSnapshot{},
+	}
+	// RefreshSecretStore forces a probe, writing the result to the cache.
+	probeCalls.Add(1)
+	result := health.RefreshSecretStore(context.Background())
+	probeCalls.Wait()
+	if result != "ready" || probeCount != 1 {
+		t.Fatalf("refresh = %q, probeCount = %d", result, probeCount)
+	}
+	// Status() within TTL reads the cached result without re-probing.
+	value, err := health.Status(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	status := value.(HealthStatus)
+	if status.SecretStore.Probe != "ready" || probeCount != 1 {
+		t.Fatalf("cached viewer saw %q, probeCount = %d (want 1, no re-probe)", status.SecretStore.Probe, probeCount)
+	}
+}
+
+func TestProbeClassClassifiesStates(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"ready", "ready"},
+		{"", "ready"},
+		{"sealed", "sealed"},
+		{"connection refused", "failing"},
+		{"secret store Kubernetes auth login failed: HTTP 503", "failing"},
+	}
+	for _, test := range tests {
+		if got := ProbeClass(test.input); got != test.want {
+			t.Errorf("ProbeClass(%q) = %q, want %q", test.input, got, test.want)
+		}
+	}
+}
+
+func TestSecretStoreObserverLogsOnlyTransitions(t *testing.T) {
+	t.Parallel()
+	var messages []string
+	observer := &SecretStoreObserver{
+		Log: func(format string, args ...any) {
+			messages = append(messages, fmt.Sprintf(format, args...))
+		},
+		Address: "https://bao:8200",
+	}
+	// Sequence: ready -> sealed -> sealed (steady) -> ready (recovery)
+	observer.Observe("ready")  // initial state, no log (previous is "" which classifies as "ready")
+	observer.Observe("sealed") // transition -> WARNING
+	observer.Observe("sealed") // steady state, no log
+	observer.Observe("ready")  // recovery -> log
+	if len(messages) != 2 {
+		t.Fatalf("expected 2 log messages, got %d: %v", len(messages), messages)
+	}
+	if !strings.Contains(messages[0], "WARNING") || !strings.Contains(messages[0], "SEALED") {
+		t.Fatalf("first message not a sealed warning: %q", messages[0])
+	}
+	if !strings.Contains(messages[1], "recovered") {
+		t.Fatalf("second message not a recovery: %q", messages[1])
+	}
+}
+
+func TestSecretStoreObserverLogsFailingTransition(t *testing.T) {
+	t.Parallel()
+	var messages []string
+	observer := &SecretStoreObserver{
+		Log: func(format string, args ...any) {
+			messages = append(messages, fmt.Sprintf(format, args...))
+		},
+		Address: "https://bao:8200",
+	}
+	// Sequence: ready -> failing -> failing (steady) -> sealed -> ready
+	observer.Observe("ready")
+	observer.Observe("connection refused") // transition to failing
+	observer.Observe("connection refused") // steady, no log
+	observer.Observe("sealed")             // transition to sealed
+	observer.Observe("ready")              // recovery
+	if len(messages) != 3 {
+		t.Fatalf("expected 3 log messages, got %d: %v", len(messages), messages)
+	}
+	if !strings.Contains(messages[0], "WARNING") || !strings.Contains(messages[0], "probe failing") {
+		t.Fatalf("first message not a failing warning: %q", messages[0])
+	}
+	if !strings.Contains(messages[1], "SEALED") {
+		t.Fatalf("second message not sealed: %q", messages[1])
+	}
+	if !strings.Contains(messages[2], "recovered") {
+		t.Fatalf("third message not recovery: %q", messages[2])
+	}
+}
+
+// TestReadyIgnoresSecretStoreState pins the requirement that a sealed or failing
+// secret store does NOT make the server NotReady — branch CI, git ingress, and
+// MCP must keep working regardless of secret-store health.
+func TestReadyIgnoresSecretStoreState(t *testing.T) {
+	t.Parallel()
+	health := Health{
+		Store:       fakeHealthStore{upstreams: []model.Upstream{{ID: 1, Kind: "local"}}},
+		Configured:  func(context.Context) error { return nil },
+		Cluster:     func(context.Context) error { return nil },
+		Audit:       func(context.Context) error { return nil },
+		VCS:         func(context.Context, model.Upstream) error { return nil },
+		SecretStore: &SecretStoreStatus{Configured: true, Address: "https://bao:8200"},
+		SecretStoreProbe: func(context.Context) error {
+			return errors.New("sealed")
+		},
+		SecretStoreSealed: func(context.Context) (bool, error) {
+			return true, nil
+		},
+	}
+	// A sealed or failing secret store must not affect readiness.
+	if err := health.Ready(context.Background()); err != nil {
+		t.Fatalf("Ready() = %v; secret store state must not gate readiness", err)
+	}
 }
