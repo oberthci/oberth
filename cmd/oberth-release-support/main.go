@@ -618,8 +618,27 @@ func exchange(ctx context.Context, client *http.Client, apiBase, token, account,
 			Status string `json:"status"`
 		} `json:"result"`
 	}
-	if err := requestJSON(ctx, client, http.MethodGet, strings.TrimRight(apiBase, "/")+"/user/tokens/verify", token, nil, &verification); err != nil {
-		return credentials{}, fmt.Errorf("verify R2 parent API token: %w", err)
+	// The release R2 token is ACCOUNT-owned since the 2026-09 Cloudflare
+	// account split (cloudflare_account_token in cloudtaser/terraform), and
+	// account tokens answer only the account-scoped verify endpoint — the
+	// user-scoped one returns 401 for them (v0.13.34 first burn). Try the
+	// account scope first and fall back to /user for a legacy user-owned
+	// seed; both shapes return the token id this exchange forwards as the
+	// R2 parent access key.
+	verifyEndpoints := []string{
+		fmt.Sprintf("%s/accounts/%s/tokens/verify", strings.TrimRight(apiBase, "/"), account),
+		strings.TrimRight(apiBase, "/") + "/user/tokens/verify",
+	}
+	verified := false
+	var verifyErr error
+	for _, verifyEndpoint := range verifyEndpoints {
+		if verifyErr = requestJSON(ctx, client, http.MethodGet, verifyEndpoint, token, nil, &verification); verifyErr == nil {
+			verified = true
+			break
+		}
+	}
+	if !verified {
+		return credentials{}, fmt.Errorf("verify R2 parent API token: %w", verifyErr)
 	}
 	if !verification.Success || verification.Result.Status != "active" || !accountPattern.MatchString(verification.Result.ID) {
 		return credentials{}, errors.New("R2 parent API token verification failed")

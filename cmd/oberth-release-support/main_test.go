@@ -623,6 +623,43 @@ func TestExchangeRequestsOnlyTheOberthPrefix(t *testing.T) {
 	}
 }
 
+// TestExchangeVerifiesAccountOwnedTokenAtAccountScope proves the primary
+// verify path for account-owned R2 tokens (the release contract since the
+// 2026-09 account split): the account-scoped endpoint answers, the
+// user-scoped one rejects with 401 exactly as Cloudflare does for account
+// tokens, and the exchange still succeeds. The pre-existing test above now
+// exercises the legacy /user fallback.
+func TestExchangeVerifiesAccountOwnedTokenAtAccountScope(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		if request.Header.Get("Authorization") != "Bearer parent-token" {
+			response.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		switch request.URL.Path {
+		case "/accounts/" + testAccount + "/tokens/verify":
+			_ = json.NewEncoder(response).Encode(map[string]any{"success": true, "result": map[string]any{"id": testAccount, "status": "active"}})
+		case "/user/tokens/verify":
+			// Cloudflare answers 401 for account-owned tokens here.
+			response.WriteHeader(http.StatusUnauthorized)
+		case "/accounts/" + testAccount + "/r2/temp-access-credentials":
+			_ = json.NewEncoder(response).Encode(map[string]any{
+				"success": true,
+				"result":  map[string]any{"accessKeyId": "access", "secretAccessKey": "secret", "sessionToken": "session"},
+			})
+		default:
+			http.NotFound(response, request)
+		}
+	}))
+	t.Cleanup(server.Close)
+	issued, err := exchange(context.Background(), server.Client(), server.URL, "parent-token", testAccount, "cloudtaser-releases", "oberth/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !validCredentials(issued) {
+		t.Fatalf("issued credentials = %#v", issued)
+	}
+}
+
 func TestSemverCompareAndPrivateCurlConfig(t *testing.T) {
 	var output bytes.Buffer
 	if err := run(context.Background(), []string{"semver-compare", "v1.2.3-rc.1", "v1.2.3"}, &output); err != nil {
