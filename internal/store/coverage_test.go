@@ -3610,3 +3610,69 @@ func TestRecordReceiveEventWithOldSHA(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// TestSameNameRepositoriesAcrossUpstreams proves the #264 store contract end
+// to end: registration of a duplicate name under a second upstream succeeds
+// (compound UNIQUE(upstream_id, name)), bare-name resolution and removal
+// refuse with ErrAmbiguous, and qualified selectors resolve and remove
+// exactly one of the pair.
+func TestSameNameRepositoriesAcrossUpstreams(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 9, 7, 10, 0, 0, 0, time.UTC)
+	s := testStore(t, &now)
+	ctx := context.Background()
+
+	github, err := s.RegisterUpstream(ctx, "admin@host", model.UpstreamSpec{
+		Name: "github", Kind: "ssh", BaseURL: "ssh://git@github.com/oberthci",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	codeberg, err := s.RegisterUpstream(ctx, "admin@host", model.UpstreamSpec{
+		Name: "codeberg", Kind: "ssh", BaseURL: "ssh://git@codeberg.org/cloudtaser",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.RegisterRepository(ctx, "admin@host", model.RepositorySpec{
+		Name: "terraform", UpstreamID: codeberg.ID, DefaultBranch: "main",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.RegisterRepository(ctx, "admin@host", model.RepositorySpec{
+		Name: "terraform", UpstreamID: github.ID, DefaultBranch: "main",
+	}); err != nil {
+		t.Fatalf("second upstream registration of the same name must succeed (issue #264): %v", err)
+	}
+
+	// Bare-name resolution is ambiguous and must refuse.
+	if _, err := s.RepositoryByName(ctx, "terraform"); !errors.Is(err, ErrAmbiguous) {
+		t.Fatalf("bare lookup = %v, want ErrAmbiguous", err)
+	}
+	// Qualified selectors resolve their own repository.
+	githubRepo, err := s.RepositoryByName(ctx, "github/oberthci/terraform")
+	if err != nil || githubRepo.UpstreamID != github.ID {
+		t.Fatalf("github-qualified lookup = %+v, %v", githubRepo, err)
+	}
+	codebergRepo, err := s.RepositoryByName(ctx, "cloudtaser/terraform")
+	if err != nil || codebergRepo.UpstreamID != codeberg.ID {
+		t.Fatalf("org-qualified lookup = %+v, %v", codebergRepo, err)
+	}
+
+	// Bare removal must refuse rather than delete an arbitrary row.
+	if _, err := s.RemoveRepository(ctx, "admin@host", "terraform"); !errors.Is(err, ErrAmbiguous) {
+		t.Fatalf("bare removal = %v, want ErrAmbiguous", err)
+	}
+	// Qualified removal removes exactly the named pair's repository.
+	removed, err := s.RemoveRepository(ctx, "admin@host", "github/oberthci/terraform")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if removed.UpstreamID != github.ID || removed.UpstreamName != "github" || removed.UpstreamOrg != "oberthci" {
+		t.Fatalf("removed = %+v", removed)
+	}
+	survivor, err := s.RepositoryByName(ctx, "terraform")
+	if err != nil || survivor.UpstreamID != codeberg.ID {
+		t.Fatalf("survivor lookup = %+v, %v (bare name is unique again)", survivor, err)
+	}
+}

@@ -406,7 +406,13 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 	if !pathWithin(scheduler.workspaceRoot, sourceDir) {
 		return scheduler.finishInfrastructureFailure(ctx, run, repository, errors.New("workspace path escaped root"))
 	}
-	if err := scheduler.git.Checkout(ctx, repository.Name, checkoutSHA, sourceDir); err != nil {
+	// The cache input is fully qualified so same-named repositories under
+	// different upstreams check out from their own caches (issue #264).
+	upstream, err := scheduler.store.Upstream(ctx, repository.UpstreamID)
+	if err != nil {
+		return scheduler.finishInfrastructureFailure(ctx, run, repository, fmt.Errorf("load run repository upstream: %w", err))
+	}
+	if err := scheduler.git.Checkout(ctx, upstream.QualifiedRepo(repository.Name), checkoutSHA, sourceDir); err != nil {
 		return scheduler.finishInfrastructureFailure(ctx, run, repository, fmt.Errorf("checkout run workspace: %w", err))
 	}
 	logFile, err := scheduler.logs.Create(run.ID)

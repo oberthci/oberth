@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/oberthci/oberth/internal/gitcache"
 	"github.com/oberthci/oberth/internal/gitoid"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
@@ -231,11 +232,18 @@ func (ingestor *PushIngestor) ensureRepository(ctx context.Context, name string)
 	if err != nil {
 		return model.Repository{}, fmt.Errorf("discover repository metadata: %w", err)
 	}
+	// Discovery returns the BARE repository name; the pushed path may be
+	// org- or upstream-qualified (the qualifiers routed upstream selection
+	// and the cache layout, but the catalog registers the bare name).
+	_, _, bareName, parseErr := gitcache.ParseRepoPath(name)
+	if parseErr != nil {
+		return model.Repository{}, fmt.Errorf("parse repository path: %w", parseErr)
+	}
 	if strings.TrimSpace(discovery.Name) == "" {
-		discovery.Name = name
+		discovery.Name = bareName
 	}
 	discovery.DefaultBranch = cache.DefaultBranch
-	if discovery.Name != name || discovery.UpstreamID <= 0 || strings.TrimSpace(discovery.DefaultBranch) == "" {
+	if discovery.Name != bareName || discovery.UpstreamID <= 0 || strings.TrimSpace(discovery.DefaultBranch) == "" {
 		return model.Repository{}, errors.New("service: repository discovery is incomplete")
 	}
 	repository, createErr := ingestor.repositories.CreateRepository(ctx, discovery)

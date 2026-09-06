@@ -1044,12 +1044,13 @@ func runRepoAdd(ctx context.Context, arguments []string, output io.Writer, depen
 	if upstream.ID <= 0 {
 		return fmt.Errorf("upstream %q is not registered (configured: %s)", upstreamName, strings.Join(names, ", "))
 	}
-	if existing, lookupErr := database.RepositoryByName(ctx, name); lookupErr == nil {
-		if existing.UpstreamID == upstream.ID {
-			_, err = fmt.Fprintf(output, "repository %s is already mapped to upstream %s\n", name, upstream.Name)
-			return err
-		}
-		return fmt.Errorf("repository %s is already mapped to a different upstream (id %d); remapping is not supported", name, existing.UpstreamID)
+	// Idempotency is scoped to THIS upstream: same-named repositories may
+	// exist under different upstreams (issue #264), so a name registered
+	// elsewhere no longer blocks registration here. The compound
+	// UNIQUE(upstream_id, name) constraint is the durable guarantee.
+	if _, lookupErr := database.RepositoryByName(ctx, upstream.QualifiedRepo(name)); lookupErr == nil {
+		_, err = fmt.Fprintf(output, "repository %s is already mapped to upstream %s\n", name, upstream.Name)
+		return err
 	} else if !errors.Is(lookupErr, store.ErrNotFound) {
 		return lookupErr
 	}
@@ -1130,28 +1131,32 @@ func runRepoVerify(ctx context.Context, arguments []string, output io.Writer) er
 	// it never modifies the actual cache directory.
 	resolver := app.Upstreams{Catalog: database}
 	cache, cacheErr := gitcache.New(gitcache.Config{
-		Root:     *gitCacheRoot,
-		Upstream: resolver.Remote,
+		Root:          *gitCacheRoot,
+		Upstream:      resolver.Remote,
+		RepoQualifier: resolver.QualifyInput,
 	})
 	if cacheErr != nil {
 		return fmt.Errorf("initialize git cache for verification: %w", cacheErr)
 	}
 	var failures int
 	for _, repo := range repos {
-		_, ok := upstreamMap[repo.UpstreamID]
+		upstream, ok := upstreamMap[repo.UpstreamID]
 		if !ok {
 			_, _ = fmt.Fprintf(output, "FAIL  %s: upstream id %d not found\n", repo.Name, repo.UpstreamID)
 			failures++
 			continue
 		}
-		remote, resolveErr := resolver.Remote(repo.Name)
+		// Fully qualified so same-named repositories under different
+		// upstreams verify their OWN mapping (issue #264).
+		qualified := upstream.QualifiedRepo(repo.Name)
+		remote, resolveErr := resolver.Remote(qualified)
 		if resolveErr != nil {
 			_, _ = fmt.Fprintf(output, "FAIL  %s: cannot resolve upstream: %v\n", repo.Name, resolveErr)
 			failures++
 			continue
 		}
 		// Use the cache to run ls-remote with the configured SSH env.
-		_, lsErr := cache.LsRemoteHeads(ctx, repo.Name)
+		_, lsErr := cache.LsRemoteHeads(ctx, qualified)
 		if lsErr != nil {
 			_, _ = fmt.Fprintf(output, "FAIL  %s -> %s: %v\n", repo.Name, remote, lsErr)
 			failures++
@@ -1183,9 +1188,13 @@ func runRepoRemove(ctx context.Context, arguments []string, output io.Writer, de
 	if flags.NArg() != 1 {
 		return fmt.Errorf("%w: repo remove requires a repository name", errUsage)
 	}
-	name, err := gitcache.NormalizeRepo(flags.Arg(0))
-	if err != nil {
-		return err
+	// The argument is a repository selector: bare, org/repo, or
+	// upstream/org/repo. The store resolves it with the shared rules and
+	// refuses ambiguous bare names, so a same-named repository under another
+	// upstream can never be removed by accident (issue #264).
+	name := strings.TrimSpace(flags.Arg(0))
+	if name == "" {
+		return fmt.Errorf("%w: repo remove requires a repository name", errUsage)
 	}
 	if dependencies.mutationGate == nil {
 		return errors.New("admin audit mutation gate is unavailable")
@@ -1206,12 +1215,27 @@ func runRepoRemove(ctx context.Context, arguments []string, output io.Writer, de
 		return err
 	}
 
-	// Clean up the bare Git cache directory.
-	cachePath := filepath.Join(*gitCacheRoot, name+".git")
+	// Clean up the bare Git cache directory (qualified layout).
+	org := removed.UpstreamOrg
+	if org == "" {
+		org = removed.UpstreamName
+	}
+	cachePath := filepath.Join(*gitCacheRoot, removed.UpstreamName, org, removed.Name+".git")
 	if err := os.RemoveAll(cachePath); err != nil {
 		// Cache cleanup is best-effort: the database record is already gone,
 		// so a stale directory is inert and the next push will re-create it.
 		_, _ = fmt.Fprintf(output, "warning: failed to remove git cache %s: %v\n", cachePath, err)
+	}
+	// A pre-#264 flat cache may survive if the server never migrated it.
+	// Remove it only when no OTHER repository still answers to the bare
+	// name — with a same-named survivor the flat directory cannot be
+	// attributed and deleting it could destroy the survivor's unmigrated
+	// cache.
+	if _, lookupErr := database.RepositoryByName(ctx, removed.Name); errors.Is(lookupErr, store.ErrNotFound) {
+		legacyPath := filepath.Join(*gitCacheRoot, removed.Name+".git")
+		if err := os.RemoveAll(legacyPath); err != nil {
+			_, _ = fmt.Fprintf(output, "warning: failed to remove legacy git cache %s: %v\n", legacyPath, err)
+		}
 	}
 
 	_, err = fmt.Fprintf(output, "removed repository %s (was upstream %s)\n", removed.Name, removed.UpstreamName)

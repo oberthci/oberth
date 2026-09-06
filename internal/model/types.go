@@ -73,6 +73,21 @@ func (upstream Upstream) Org() string {
 	return parts[len(parts)-1]
 }
 
+// QualifiedRepo composes the canonical fully-qualified repository input
+// ("<upstream>/<org>/<repo>") for a repository registered under this
+// upstream. Internal consumers that iterate known repositories pass this
+// form to the git cache and to name-based lookups so that same-named
+// repositories under different upstreams stay unambiguous (issue #264).
+// A missing org identity falls back to the upstream name, matching the
+// schedule engine's historical dedup-key composition.
+func (upstream Upstream) QualifiedRepo(name string) string {
+	org := upstream.Org()
+	if org == "" {
+		org = upstream.Name
+	}
+	return upstream.Name + "/" + org + "/" + name
+}
+
 type UpstreamSpec struct {
 	Name    string
 	Kind    string

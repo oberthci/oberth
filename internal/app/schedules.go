@@ -84,11 +84,7 @@ func (schedules *Schedules) qualifiedRepoName(ctx context.Context, repository mo
 	if err != nil {
 		return "", err
 	}
-	org := upstream.Org()
-	if org == "" {
-		org = upstream.Name
-	}
-	return upstream.Name + "/" + org + "/" + repository.Name, nil
+	return upstream.QualifiedRepo(repository.Name), nil
 }
 
 func (schedules *Schedules) Run(ctx context.Context) error {
@@ -131,11 +127,11 @@ func (schedules *Schedules) tickRepository(ctx context.Context, repository model
 		// fire dedup state (see qualifiedRepoName). The next tick retries.
 		return
 	}
-	sha, err := schedules.config.Git.RefSHA(ctx, repository.Name, branch)
+	sha, err := schedules.config.Git.RefSHA(ctx, qualifiedName, branch)
 	if err != nil {
 		return
 	}
-	raw, err := schedules.config.Git.ReadBlob(ctx, repository.Name, sha, schedule.FileName, schedule.MaxSourceBytes)
+	raw, err := schedules.config.Git.ReadBlob(ctx, qualifiedName, sha, schedule.FileName, schedule.MaxSourceBytes)
 	if err != nil {
 		return
 	}
@@ -180,7 +176,7 @@ func (schedules *Schedules) fire(
 	}
 	target := sha
 	if branch != defaultBranch {
-		resolved, err := schedules.config.Git.RefSHA(ctx, repository.Name, branch)
+		resolved, err := schedules.config.Git.RefSHA(ctx, qualifiedName, branch)
 		if err != nil {
 			schedules.record(ctx, qualifiedName, entry.Name, now, "failed")
 			return

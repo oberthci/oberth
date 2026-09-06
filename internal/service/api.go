@@ -634,6 +634,27 @@ func (service *API) status(ctx context.Context, repositoryName, selector, actor 
 	return response, nil
 }
 
+// upstreamResolver is the optional store capability statusRefWithoutRun uses
+// to compose fully-qualified cache inputs. The production store implements
+// it; fixtures without upstream wiring fall back to the bare name, which
+// resolves for every uniquely-named repository (issue #264).
+type upstreamResolver interface {
+	Upstream(context.Context, int64) (model.Upstream, error)
+}
+
+// cacheInputFor returns the repository input used for git-cache reads:
+// fully qualified when the upstream is resolvable, bare otherwise. A bare
+// name that is ambiguous across upstreams makes the cache read fail closed
+// rather than guess.
+func (service *API) cacheInputFor(ctx context.Context, repository model.Repository) string {
+	if resolver, ok := service.runs.(upstreamResolver); ok {
+		if upstream, err := resolver.Upstream(ctx, repository.UpstreamID); err == nil {
+			return upstream.QualifiedRepo(repository.Name)
+		}
+	}
+	return repository.Name
+}
+
 // statusRefWithoutRun resolves a selector as a branch name in the bare Git
 // cache when no run exists for that ref name. After resolving the SHA it also
 // tries a SHA-based run lookup, which catches promotion runs whose ref is
@@ -644,7 +665,7 @@ func (service *API) statusRefWithoutRun(ctx context.Context, repositoryName, sel
 		if err != nil {
 			return StatusResponse{}, err
 		}
-		sha, err := service.refs.RefSHA(ctx, repository.Name, selector)
+		sha, err := service.refs.RefSHA(ctx, service.cacheInputFor(ctx, repository), selector)
 		if err != nil {
 			return StatusResponse{}, fmt.Errorf("%w: run selector %q", store.ErrNotFound, selector)
 		}
@@ -667,7 +688,7 @@ func (service *API) statusRefWithoutRun(ctx context.Context, repositoryName, sel
 	var matched model.Repository
 	var matchedSHA string
 	for _, repository := range repositories {
-		sha, refErr := service.refs.RefSHA(ctx, repository.Name, selector)
+		sha, refErr := service.refs.RefSHA(ctx, service.cacheInputFor(ctx, repository), selector)
 		if refErr != nil {
 			continue
 		}

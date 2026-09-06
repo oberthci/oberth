@@ -10,6 +10,7 @@ import (
 	"sort"
 
 	"github.com/oberthci/oberth/internal/gitcache"
+	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 )
@@ -68,6 +69,14 @@ func runFragmentsList(ctx context.Context, arguments []string, output io.Writer)
 	if err != nil {
 		return err
 	}
+	upstreams, err := database.ListUpstreams(ctx)
+	if err != nil {
+		return err
+	}
+	upstreamByID := make(map[int64]model.Upstream, len(upstreams))
+	for _, upstream := range upstreams {
+		upstreamByID[upstream.ID] = upstream
+	}
 	cache, err := openFragmentCache(dataRoot)
 	if err != nil {
 		return err
@@ -77,14 +86,21 @@ func runFragmentsList(ctx context.Context, arguments []string, output io.Writer)
 		return err
 	}
 	for _, repository := range repositories {
-		refs, refErr := cache.SnapshotRefs(ctx, repository.Name)
+		upstream, ok := upstreamByID[repository.UpstreamID]
+		if !ok {
+			continue
+		}
+		// Fully qualified so the read hits the org-qualified cache directory
+		// (issue #264); parsed segments route the path without a qualifier.
+		qualified := upstream.QualifiedRepo(repository.Name)
+		refs, refErr := cache.SnapshotRefs(ctx, qualified)
 		if refErr != nil {
 			continue
 		}
 		var versions []string
 		for ref := range refs {
 			if tag, found := trimTagRef(ref); found {
-				if _, err := cache.ReadBlob(ctx, repository.Name, refs[ref], argoworkflow.FragmentFile, argoworkflow.MaxSourceBytes); err == nil {
+				if _, err := cache.ReadBlob(ctx, qualified, refs[ref], argoworkflow.FragmentFile, argoworkflow.MaxSourceBytes); err == nil {
 					versions = append(versions, tag)
 				}
 			}

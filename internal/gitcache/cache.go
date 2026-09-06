@@ -224,6 +224,7 @@ type Cache struct {
 	outboxRoot      string
 	globalConfig    string
 	upstream        func(string) (string, error)
+	qualify         func(string) (RepoQualification, error)
 	gitBinary       string
 	timeout         time.Duration
 	env             map[string]string
@@ -275,6 +276,7 @@ func New(config Config) (*Cache, error) {
 		outboxRoot:      outboxRoot,
 		globalConfig:    globalConfig,
 		upstream:        config.Upstream,
+		qualify:         config.RepoQualifier,
 		gitBinary:       gitBinary,
 		timeout:         defaultTimeout(config.CommandTimeout),
 		env:             cloneMap(config.Env),
@@ -292,7 +294,7 @@ func (c *Cache) Ensure(ctx context.Context, input string) (Repository, error) {
 	if err != nil {
 		return Repository{}, err
 	}
-	lock := c.repoLock(repo)
+	lock := c.repoLock(path)
 	lock.Lock()
 	defer lock.Unlock()
 	return c.ensureLocked(ctx, input, repo, path)
@@ -415,6 +417,11 @@ func (c *Cache) ensureLockedMayRecover(ctx context.Context, input, repo, path st
 	}
 	if err := installReceiveHooks(temporary); err != nil {
 		return Repository{}, fmt.Errorf("install receive policy for %s: %w", repo, err)
+	}
+	// The qualified layout nests caches under <upstream>/<org>/; the parent
+	// directories must exist before the atomic rename publishes the cache.
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return Repository{}, fmt.Errorf("create cache parent for %s: %w", repo, err)
 	}
 	if err := os.Rename(temporary, path); err != nil {
 		return Repository{}, fmt.Errorf("publish cache for %s: %w", repo, err)
@@ -902,6 +909,18 @@ func (c *Cache) path(input string) (string, string, error) {
 	if err != nil {
 		return "", "", err
 	}
+	if c.qualify != nil {
+		qualification, qualifyErr := c.qualify(input)
+		if qualifyErr != nil {
+			return "", "", fmt.Errorf("resolve cache identity for %q: %w", input, qualifyErr)
+		}
+		// The catalog's canonical spellings win over the client-cased
+		// segments: org matching upstream is case-insensitive for operator
+		// convenience, but the on-disk path must be byte-stable. A true
+		// identity mismatch (wrong org for a registered repo) is refused by
+		// the resolver itself before any disk path is derived.
+		upstream, org = qualification.UpstreamName, qualification.Org
+	}
 	cachePath := c.qualifiedCachePath(upstream, org, repo)
 	relative, err := filepath.Rel(c.root, cachePath)
 	if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
@@ -912,21 +931,32 @@ func (c *Cache) path(input string) (string, string, error) {
 
 // qualifiedCachePath resolves the on-disk path for a repository's bare cache.
 //
-// Currently the cache uses a flat layout (<root>/<repo>.git) regardless of
-// input form. The upstream and org from a 3-segment push are validated by
-// ParseRepoPath but do not influence the on-disk path. This ensures that
-// "codeberg/oberthci/oberth" and "oberth" resolve to the same cache
-// directory, preserving the "one repo, one cache" invariant without
-// requiring a startup migration or a RepoQualifier callback.
+// With a full qualification the layout is <root>/<upstream>/<org>/<repo>.git,
+// which lets same-named repositories under different upstreams coexist with
+// strictly disjoint caches (issue #264): "codeberg/cloudtaser/terraform" and
+// "github/oberthci/terraform" resolve to different directories, and every
+// input form of ONE repository resolves to the same directory because the
+// RepoQualifier returns catalog-canonical segments regardless of input form.
 //
-// A future qualified layout (<root>/<upstream>/<org>/<repo>.git) may be
-// introduced with an explicit migration step.
-func (c *Cache) qualifiedCachePath(_, _, repo string) string {
+// Without a qualification (nil RepoQualifier in tests, or a legacy caller)
+// the flat layout (<root>/<repo>.git) is preserved. Existing flat caches are
+// moved to the qualified layout by MigrateToQualifiedLayout at server
+// startup — see migrate_cache.go.
+func (c *Cache) qualifiedCachePath(upstream, org, repo string) string {
+	if upstream != "" && org != "" &&
+		!strings.ContainsAny(upstream, "/\\") && !strings.ContainsAny(org, "/\\") &&
+		upstream != "." && upstream != ".." && org != "." && org != ".." {
+		return filepath.Join(c.root, upstream, org, repo+".git")
+	}
 	return filepath.Join(c.root, repo+".git")
 }
 
-func (c *Cache) repoLock(repo string) *sync.Mutex {
-	value, _ := c.locks.LoadOrStore(repo, &sync.Mutex{})
+// repoLock returns the mutex guarding one cache directory. Locks are keyed
+// by the resolved cache path — never by the bare name — so every spelling of
+// one repository shares a lock and same-named repositories under different
+// upstreams do not contend or alias (issue #264).
+func (c *Cache) repoLock(cachePath string) *sync.Mutex {
+	value, _ := c.locks.LoadOrStore(cachePath, &sync.Mutex{})
 	return value.(*sync.Mutex)
 }
 
@@ -948,14 +978,14 @@ func (c *Cache) receiveLock(repo string) *sync.Mutex {
 // missing directory is success: removal is idempotent, and the next push's
 // Ensure recreates the cache from the upstream.
 func (c *Cache) RemoveRepository(input string) error {
-	repo, path, err := c.path(input)
+	_, path, err := c.path(input)
 	if err != nil {
 		return err
 	}
-	receiveLock := c.receiveLock(repo)
+	receiveLock := c.receiveLock(path)
 	receiveLock.Lock()
 	defer receiveLock.Unlock()
-	lock := c.repoLock(repo)
+	lock := c.repoLock(path)
 	lock.Lock()
 	defer lock.Unlock()
 	if err := os.RemoveAll(path); err != nil {
@@ -975,7 +1005,7 @@ func (c *Cache) RefSHA(ctx context.Context, input string, branch string) (string
 	if err != nil {
 		return "", err
 	}
-	lock := c.repoLock(repo)
+	lock := c.repoLock(path)
 	lock.Lock()
 	defer lock.Unlock()
 	if !c.isBare(ctx, path) {
@@ -994,11 +1024,11 @@ func (c *Cache) RefSHA(ctx context.Context, input string, branch string) (string
 
 // SnapshotRefs returns only client-owned public branch and tag refs.
 func (c *Cache) SnapshotRefs(ctx context.Context, input string) (map[string]string, error) {
-	repo, path, err := c.path(input)
+	_, path, err := c.path(input)
 	if err != nil {
 		return nil, err
 	}
-	lock := c.repoLock(repo)
+	lock := c.repoLock(path)
 	lock.Lock()
 	defer lock.Unlock()
 	return c.listRefsAtMost(ctx, path, maximumReceiveSnapshotRefs, "refs/heads/", "refs/tags/")
@@ -1076,7 +1106,7 @@ func (c *Cache) Serve(ctx context.Context, input string, service Service, protoc
 	if err != nil {
 		return err
 	}
-	lock := c.repoLock(repo)
+	lock := c.repoLock(path)
 	lock.Lock()
 	defer lock.Unlock()
 	if !c.isBare(ctx, path) {

@@ -288,6 +288,14 @@ func (s *Store) RemoveRepository(ctx context.Context, actor, name string) (Remov
 	if strings.TrimSpace(actor) == "" || strings.TrimSpace(name) == "" {
 		return RemovedRepository{}, fmt.Errorf("%w: actor and repository name are required", ErrInvalid)
 	}
+	// Resolve the selector (bare, org/repo, or upstream/org/repo) through the
+	// shared resolution rules FIRST: a bare name that exists under multiple
+	// upstreams returns ErrAmbiguous instead of deleting an arbitrary row
+	// (issue #264).
+	selected, err := s.RepositoryByName(ctx, name)
+	if err != nil {
+		return RemovedRepository{}, err
+	}
 	now := unixNano(s.now())
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -295,18 +303,18 @@ func (s *Store) RemoveRepository(ctx context.Context, actor, name string) (Remov
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	// Resolve the repository and its upstream name.
+	// Re-read the authoritative row by id inside the transaction.
 	var repoID, upstreamID int64
 	var repoName, defaultBranch string
 	var created, updated int64
 	if err := tx.QueryRowContext(ctx, `
 SELECT id, name, upstream_id, default_branch, created_at, updated_at
-FROM repositories WHERE name = ?`, name).Scan(
+FROM repositories WHERE id = ?`, selected.ID).Scan(
 		&repoID, &repoName, &upstreamID, &defaultBranch, &created, &updated); err != nil {
 		return RemovedRepository{}, translateNotFound("repository", err)
 	}
-	var upstreamName string
-	if err := tx.QueryRowContext(ctx, `SELECT name FROM upstreams WHERE id = ?`, upstreamID).Scan(&upstreamName); err != nil {
+	var upstreamName, upstreamBaseURL string
+	if err := tx.QueryRowContext(ctx, `SELECT name, base_url FROM upstreams WHERE id = ?`, upstreamID).Scan(&upstreamName, &upstreamBaseURL); err != nil {
 		return RemovedRepository{}, fmt.Errorf("resolve upstream name: %w", err)
 	}
 
@@ -366,6 +374,7 @@ SELECT COUNT(*) FROM promotions WHERE repo_id = ? AND status = 'pending'`,
 			CreatedAt:     fromUnixNano(created), UpdatedAt: fromUnixNano(updated),
 		},
 		UpstreamName: upstreamName,
+		UpstreamOrg:  model.Upstream{BaseURL: upstreamBaseURL}.Org(),
 	}, nil
 }
 
@@ -375,6 +384,9 @@ SELECT COUNT(*) FROM promotions WHERE repo_id = ? AND status = 'pending'`,
 type RemovedRepository struct {
 	model.Repository
 	UpstreamName string
+	// UpstreamOrg is the upstream's org identity at removal time, used by the
+	// admin CLI to locate the org-qualified cache directory (issue #264).
+	UpstreamOrg string
 }
 
 func listUpstreamRepositoryNames(ctx context.Context, tx *sql.Tx, upstreamID int64) ([]string, error) {

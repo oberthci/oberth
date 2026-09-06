@@ -43,23 +43,29 @@ func (c *Cache) Receive(ctx context.Context, input, actor, protocol string, stdi
 	if err != nil {
 		return err
 	}
+	// The reservation identity is the canonical qualified spelling derived
+	// from the resolved cache path, so same-named repositories under
+	// different upstreams keep strictly disjoint durable reservations
+	// (issue #264). For a flat (legacy) cache it degrades to the bare name,
+	// which keeps pre-migration reservation files readable.
+	identity := c.reservationIdentity(repo, path)
 	if strings.TrimSpace(actor) == "" {
 		return errors.New("receive actor is required")
 	}
 	if handler == nil {
 		return errors.New("receive handler is required")
 	}
-	receiveLock := c.receiveLock(repo)
+	receiveLock := c.receiveLock(path)
 	receiveLock.Lock()
 	defer receiveLock.Unlock()
 
 	// A previous reserved receive must be recovered before Ensure is allowed to
 	// refresh public refs from upstream; otherwise unrelated upstream movement
 	// could be misattributed to the prior actor's crash window.
-	if err := c.replayRepoSerialized(ctx, repo, path, handler); err != nil {
-		return fmt.Errorf("replay earlier receive for %s: %w", repo, err)
+	if err := c.replayRepoSerialized(ctx, identity, path, handler); err != nil {
+		return fmt.Errorf("replay earlier receive for %s: %w", identity, err)
 	}
-	lock := c.repoLock(repo)
+	lock := c.repoLock(path)
 	lock.Lock()
 	repository, err := c.ensureReceiveLocked(ctx, input, repo, path)
 	lock.Unlock()
@@ -74,7 +80,7 @@ func (c *Cache) Receive(ctx context.Context, input, actor, protocol string, stdi
 	} else if repository.Stale && stderr != nil {
 		_, _ = io.WriteString(stderr, "remote: oberth: upstream unavailable; serving cached repository\n")
 	}
-	return c.receiveTransactionSerialized(ctx, repo, path, actor, repository.recoveryOnly, func() (ReleaseAdmission, error) {
+	return c.receiveTransactionSerialized(ctx, identity, path, actor, repository.recoveryOnly, func() (ReleaseAdmission, error) {
 		admission, err := c.prepareReleaseAdmissionLocked(ctx, path, !repository.Stale && !repository.recoveryOnly)
 		if err != nil {
 			return ReleaseAdmission{}, fmt.Errorf("prepare release admission: %w", err)
@@ -92,37 +98,42 @@ func (c *Cache) receiveTransaction(ctx context.Context, repo, path, actor string
 	if receive == nil || handler == nil {
 		return errors.New("receive operation and handler are required")
 	}
-	receiveLock := c.receiveLock(repo)
+	identity := c.reservationIdentity(repo, path)
+	receiveLock := c.receiveLock(path)
 	receiveLock.Lock()
 	defer receiveLock.Unlock()
-	return c.receiveTransactionSerialized(ctx, repo, path, actor, false, nil, receive, handler)
+	return c.receiveTransactionSerialized(ctx, identity, path, actor, false, nil, receive, handler)
 }
 
+// receiveTransactionSerialized requires receiveLock for the repository's
+// path. `identity` is the reservation identity from reservationIdentity —
+// the canonical qualified spelling for a qualified cache, the bare name for
+// a legacy flat one.
 func (c *Cache) receiveTransactionSerialized(
 	ctx context.Context,
-	repo, path, actor string,
+	identity, path, actor string,
 	recoveryOnly bool,
 	prepare func() (ReleaseAdmission, error),
 	receive func() error,
 	handler ReceiveHandler,
 ) error {
-	if err := c.replayRepoSerialized(ctx, repo, path, handler); err != nil {
-		return fmt.Errorf("replay earlier receive for %s: %w", repo, err)
+	if err := c.replayRepoSerialized(ctx, identity, path, handler); err != nil {
+		return fmt.Errorf("replay earlier receive for %s: %w", identity, err)
 	}
 
-	lock := c.repoLock(repo)
+	lock := c.repoLock(path)
 	lock.Lock()
 	if !c.isBare(ctx, path) {
 		lock.Unlock()
-		return fmt.Errorf("repository %s is not cached", repo)
+		return fmt.Errorf("repository %s is not cached", identity)
 	}
 	if err := c.cleanReplacementRefsLocked(ctx, path); err != nil {
 		lock.Unlock()
-		return fmt.Errorf("clean replacement refs for %s: %w", repo, err)
+		return fmt.Errorf("clean replacement refs for %s: %w", identity, err)
 	}
 	if _, err := c.cleanInvalidPublicRefsLocked(ctx, path); err != nil {
 		lock.Unlock()
-		return fmt.Errorf("clean invalid public refs for %s: %w", repo, err)
+		return fmt.Errorf("clean invalid public refs for %s: %w", identity, err)
 	}
 	admission := ReleaseAdmission{}
 	if prepare != nil {
@@ -137,7 +148,7 @@ func (c *Cache) receiveTransactionSerialized(
 	if recoveryOnly {
 		refScanLimit = maximumReceiveSnapshotRefs
 	}
-	reservation, err := c.reserveReceiveAtMostLocked(ctx, repo, path, actor, admission, refScanLimit)
+	reservation, err := c.reserveReceiveAtMostLocked(ctx, identity, path, actor, admission, refScanLimit)
 	if err != nil {
 		lock.Unlock()
 		return err
@@ -174,15 +185,15 @@ func (c *Cache) receiveTransactionSerialized(
 	}
 	// Callback delivery stays under receiveLock for strict per-repository order,
 	// but outside repoLock so handlers can safely inspect accepted Git objects.
-	replayErr := c.replayRepoSerialized(ctx, repo, path, handler)
+	replayErr := c.replayRepoSerialized(ctx, identity, path, handler)
 	return errors.Join(receiveErr, replayErr)
 }
 
-func (c *Cache) reserveReceiveLocked(ctx context.Context, repo, path, actor string, admission ReleaseAdmission) (receiveReservation, error) {
-	return c.reserveReceiveAtMostLocked(ctx, repo, path, actor, admission, maximumPublicRefs)
+func (c *Cache) reserveReceiveLocked(ctx context.Context, identity, path, actor string, admission ReleaseAdmission) (receiveReservation, error) {
+	return c.reserveReceiveAtMostLocked(ctx, identity, path, actor, admission, maximumPublicRefs)
 }
 
-func (c *Cache) reserveReceiveAtMostLocked(ctx context.Context, repo, path, actor string, admission ReleaseAdmission, maximum int) (receiveReservation, error) {
+func (c *Cache) reserveReceiveAtMostLocked(ctx context.Context, identity, path, actor string, admission ReleaseAdmission, maximum int) (receiveReservation, error) {
 	before, err := c.listRefsAtMost(ctx, path, maximum, "refs/heads/", "refs/tags/")
 	if err != nil {
 		return receiveReservation{}, fmt.Errorf("snapshot refs before receive: %w", err)
@@ -194,7 +205,7 @@ func (c *Cache) reserveReceiveAtMostLocked(ctx context.Context, repo, path, acto
 	reservation := receiveReservation{
 		Version:          receiveReservationVersion,
 		ID:               id,
-		Repo:             repo,
+		Repo:             identity,
 		Actor:            actor,
 		State:            receiveReserved,
 		Before:           before,
@@ -262,17 +273,20 @@ func (c *Cache) ReplayPending(ctx context.Context, handler ReceiveHandler) error
 	}
 	var replayErrs []error
 	for _, item := range pending {
-		repo, path, pathErr := c.path(item.Repo)
+		// item.Repo is the reservation identity (a valid repository input:
+		// bare for legacy flat reservations, upstream/org/repo for qualified
+		// ones), so path resolution and replay address exactly one cache.
+		_, path, pathErr := c.path(item.Repo)
 		if pathErr != nil {
 			replayErrs = append(replayErrs, pathErr)
 			continue
 		}
-		receiveLock := c.receiveLock(repo)
+		receiveLock := c.receiveLock(path)
 		receiveLock.Lock()
-		err := c.replayRepoSerialized(ctx, repo, path, handler)
+		err := c.replayRepoSerialized(ctx, item.Repo, path, handler)
 		receiveLock.Unlock()
 		if err != nil {
-			replayErrs = append(replayErrs, fmt.Errorf("replay receive for %s: %w", repo, err))
+			replayErrs = append(replayErrs, fmt.Errorf("replay receive for %s: %w", item.Repo, err))
 		}
 	}
 	return errors.Join(replayErrs...)
@@ -289,8 +303,11 @@ func (c *Cache) PendingReceives() ([]PendingReceive, error) {
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
 			continue
 		}
-		repo := strings.TrimSuffix(entry.Name(), ".json")
-		reservation, err := c.readReservation(repo)
+		// Filenames encode the identity with "@" (a character no valid path
+		// segment may contain) in place of "/"; a legacy bare-name file has
+		// no "@" and round-trips unchanged.
+		identity := strings.ReplaceAll(strings.TrimSuffix(entry.Name(), ".json"), "@", "/")
+		reservation, err := c.readReservation(identity)
 		if err != nil {
 			return nil, err
 		}
@@ -298,35 +315,37 @@ func (c *Cache) PendingReceives() ([]PendingReceive, error) {
 		if remaining < 0 {
 			remaining = 0
 		}
-		result = append(result, PendingReceive{ID: reservation.ID, Repo: repo, Actor: reservation.Actor, State: reservation.State, Remaining: remaining})
+		result = append(result, PendingReceive{ID: reservation.ID, Repo: identity, Actor: reservation.Actor, State: reservation.State, Remaining: remaining})
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].Repo < result[j].Repo })
 	return result, nil
 }
 
-// replayRepoSerialized requires receiveLock for repo. It holds repoLock only
-// while inspecting/finalizing Git state, then releases it before callbacks.
-func (c *Cache) replayRepoSerialized(ctx context.Context, repo, path string, handler ReceiveHandler) error {
-	reservation, err := c.readReservation(repo)
+// replayRepoSerialized requires receiveLock for the repository's path. It
+// holds repoLock only while inspecting/finalizing Git state, then releases
+// it before callbacks. `identity` is the reservation identity (see
+// reservationIdentity).
+func (c *Cache) replayRepoSerialized(ctx context.Context, identity, path string, handler ReceiveHandler) error {
+	reservation, err := c.readReservation(identity)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
 	}
 	if err != nil {
 		return err
 	}
-	lock := c.repoLock(repo)
+	lock := c.repoLock(path)
 	lock.Lock()
 	if !c.isBare(ctx, path) {
 		lock.Unlock()
-		return fmt.Errorf("repository %s is not cached", repo)
+		return fmt.Errorf("repository %s is not cached", identity)
 	}
 	if err := c.cleanReplacementRefsLocked(ctx, path); err != nil {
 		lock.Unlock()
-		return fmt.Errorf("clean replacement refs for %s: %w", repo, err)
+		return fmt.Errorf("clean replacement refs for %s: %w", identity, err)
 	}
 	if _, err := c.cleanInvalidPublicRefsLocked(ctx, path); err != nil {
 		lock.Unlock()
-		return fmt.Errorf("clean invalid public refs for %s: %w", repo, err)
+		return fmt.Errorf("clean invalid public refs for %s: %w", identity, err)
 	}
 	switch reservation.State {
 	case receiveReserved, receiveGateFailed:
@@ -339,7 +358,7 @@ func (c *Cache) replayRepoSerialized(ctx context.Context, repo, path string, han
 		if c.preFinalizeGate != nil {
 			if gateErr := c.preFinalizeGate(ctx); gateErr != nil {
 				lock.Unlock()
-				return fmt.Errorf("replay pre-finalize gate for %s: %w", repo, gateErr)
+				return fmt.Errorf("replay pre-finalize gate for %s: %w", identity, gateErr)
 			}
 		}
 		// Gate passed (or no longer configured) — finalize with original
@@ -349,7 +368,7 @@ func (c *Cache) replayRepoSerialized(ctx context.Context, repo, path string, han
 			return err
 		}
 		lock.Unlock()
-		reservation, err = c.readReservation(repo)
+		reservation, err = c.readReservation(identity)
 		if errors.Is(err, os.ErrNotExist) {
 			return nil
 		}
@@ -373,20 +392,51 @@ func (c *Cache) replayRepoSerialized(ctx context.Context, repo, path string, han
 		}
 		reservation.Next++
 		if reservation.Next == len(reservation.Updates) {
-			return c.removeReservation(repo)
+			return c.removeReservation(identity)
 		}
 		if err := c.writeReservation(reservation); err != nil {
 			return fmt.Errorf("checkpoint receive event %s: %w", event.ID, err)
 		}
 	}
-	return c.removeReservation(repo)
+	return c.removeReservation(identity)
 }
 
-func (c *Cache) reservationPath(repo string) (string, error) {
-	canonical, err := NormalizeRepo(repo)
+// reservationIdentity derives the durable reservation identity for a
+// repository from its resolved cache path: the canonical qualified spelling
+// ("upstream/org/repo") for a qualified cache directory, or the bare name
+// for a legacy flat one. Deriving from the path — never from the client
+// input — makes every spelling of one repository share one reservation and
+// keeps same-named repositories under different upstreams disjoint
+// (issue #264).
+func (c *Cache) reservationIdentity(repo, cachePath string) string {
+	relative, err := filepath.Rel(c.root, cachePath)
 	if err != nil {
-		return "", err
+		return repo
 	}
+	relative = strings.TrimSuffix(filepath.ToSlash(relative), ".git")
+	if relative == "" || strings.HasPrefix(relative, "../") || relative == ".." {
+		return repo
+	}
+	return relative
+}
+
+// reservationPath maps a reservation identity to its durable outbox file.
+// Each "/"-separated segment is canonicalized individually and the filename
+// joins them with "@" — a character the segment charset forbids — so a
+// qualified identity can never collide with a legacy bare-name file and two
+// same-named repositories under different upstreams keep disjoint files
+// (issue #264).
+func (c *Cache) reservationPath(identity string) (string, error) {
+	segments := strings.Split(identity, "/")
+	canonicalSegments := make([]string, 0, len(segments))
+	for _, segment := range segments {
+		canonicalSegment, err := NormalizeRepo(segment)
+		if err != nil {
+			return "", err
+		}
+		canonicalSegments = append(canonicalSegments, canonicalSegment)
+	}
+	canonical := strings.Join(canonicalSegments, "@")
 	path := filepath.Join(c.outboxRoot, canonical+".json")
 	relative, err := filepath.Rel(c.outboxRoot, path)
 	if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {

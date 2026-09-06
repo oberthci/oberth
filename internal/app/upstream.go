@@ -74,13 +74,28 @@ func (upstreams Upstreams) DiscoverRepository(ctx context.Context, input string)
 }
 
 func (upstreams Upstreams) selectUpstream(ctx context.Context, upstreamName, org, repositoryName string) (model.Upstream, error) {
-	repository, err := upstreams.Catalog.RepositoryByName(ctx, repositoryName)
+	// The catalog lookup carries the full client context: the store resolves
+	// bare, org-qualified, and upstream-qualified selectors and detects
+	// bare-name ambiguity itself (issue #264). A repository registered under
+	// a DIFFERENT upstream/org therefore no longer shadows this path — the
+	// scoped lookup misses and resolution falls through to upstream
+	// discovery below, which selects the upstream the path names.
+	selector := repositoryName
+	if org != "" {
+		selector = org + "/" + selector
+	}
+	if upstreamName != "" {
+		selector = upstreamName + "/" + selector
+	}
+	repository, err := upstreams.Catalog.RepositoryByName(ctx, selector)
 	if err == nil {
 		upstream, lookupErr := upstreams.Catalog.Upstream(ctx, repository.UpstreamID)
 		if lookupErr != nil {
 			return model.Upstream{}, fmt.Errorf("app: load repository upstream: %w", lookupErr)
 		}
-		// When an upstream name is provided, it must match the registered upstream.
+		// Defense in depth: the scoped lookup above can only return a
+		// repository matching the provided context, but re-validate so a
+		// store-layer regression cannot silently cross a trust boundary.
 		if upstreamName != "" && !strings.EqualFold(upstream.Name, upstreamName) {
 			return model.Upstream{}, fmt.Errorf("app: repository %s is registered under upstream %q, not %q: %w", repositoryName, upstream.Name, upstreamName, gitcache.ErrUpstreamRefused)
 		}
@@ -88,6 +103,12 @@ func (upstreams Upstreams) selectUpstream(ctx context.Context, upstreamName, org
 			return model.Upstream{}, upstreamOrgMismatch(repositoryName, upstream, org)
 		}
 		return upstream, nil
+	}
+	if errors.Is(err, store.ErrAmbiguous) {
+		// A bare name that exists under multiple upstreams must be refused,
+		// never guessed: the store's error names the conflicting upstreams
+		// and the qualified forms that disambiguate.
+		return model.Upstream{}, fmt.Errorf("app: %w: %w", err, gitcache.ErrUpstreamRefused)
 	}
 	if !errors.Is(err, store.ErrNotFound) {
 		return model.Upstream{}, fmt.Errorf("app: look up repository mapping: %w", err)
@@ -100,10 +121,17 @@ func (upstreams Upstreams) selectUpstream(ctx context.Context, upstreamName, org
 		return model.Upstream{}, errors.New("app: no upstream is configured")
 	}
 
-	// When an upstream name is provided (3-segment path), match by name.
+	// When an upstream name is provided (3-segment path), match by name —
+	// and the org segment must agree with that upstream's identity: a path
+	// like "github/cloudtaser/repo" names an (upstream, org) pair that does
+	// not exist and must refuse rather than silently resolve into the
+	// upstream's real org.
 	if upstreamName != "" {
 		for _, u := range values {
 			if strings.EqualFold(u.Name, upstreamName) {
+				if org != "" && !upstreamMatchesOrg(u, org) {
+					return model.Upstream{}, upstreamOrgMismatch(repositoryName, u, org)
+				}
 				return u, nil
 			}
 		}
@@ -227,4 +255,32 @@ func UpstreamKind(baseURL string) (string, error) {
 		return "", fmt.Errorf("app: parse upstream base: %w", err)
 	}
 	return parsed.Scheme, nil
+}
+
+// QualifyInput resolves any accepted repository input (bare, org-qualified,
+// or upstream-qualified) to its canonical catalog identity for git-cache
+// layout purposes. The returned segments are the catalog's registered
+// spellings, so every input form of one repository maps to one on-disk
+// cache directory (issue #264). Unknown repositories resolve through the
+// same discovery rules a push uses; a bare name that exists under multiple
+// upstreams is refused with the store's disambiguation guidance.
+func (upstreams Upstreams) QualifyInput(input string) (gitcache.RepoQualification, error) {
+	if upstreams.Catalog == nil {
+		return gitcache.RepoQualification{}, errors.New("app: upstream catalog is required")
+	}
+	upstreamName, org, repositoryName, err := gitcache.ParseRepoPath(input)
+	if err != nil {
+		return gitcache.RepoQualification{}, err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), upstreams.timeout())
+	defer cancel()
+	upstream, err := upstreams.selectUpstream(ctx, upstreamName, org, repositoryName)
+	if err != nil {
+		return gitcache.RepoQualification{}, err
+	}
+	qualifiedOrg := upstream.Org()
+	if qualifiedOrg == "" {
+		qualifiedOrg = upstream.Name
+	}
+	return gitcache.RepoQualification{UpstreamName: upstream.Name, Org: qualifiedOrg}, nil
 }

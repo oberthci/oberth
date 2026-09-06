@@ -80,11 +80,34 @@ func TestRepoAddMapsRepositoryToNamedUpstreamAndIsIdempotent(t *testing.T) {
 	if !strings.Contains(output.String(), "already mapped") {
 		t.Fatalf("idempotent repo add output = %q", output.String())
 	}
+	// Rewritten with issue #264: the same bare name under a DIFFERENT
+	// upstream is a distinct repository, not a remap — registration must
+	// succeed, the bare name becomes ambiguous, and qualified selectors
+	// address each repository individually.
+	output.Reset()
 	if err := runRepoWithDependencies(context.Background(), []string{
 		"add", "--database", databasePath, "widget", "codeberg",
-	}, &output, repoDependencies{mutationGate: allowTestMutation}); err == nil ||
-		!strings.Contains(err.Error(), "different upstream") {
-		t.Fatalf("conflicting remap error = %v", err)
+	}, &output, repoDependencies{mutationGate: allowTestMutation}); err != nil {
+		t.Fatalf("cross-upstream same-name add must succeed (issue #264): %v", err)
+	}
+	if !strings.Contains(output.String(), "registered repository widget -> upstream codeberg") {
+		t.Fatalf("cross-upstream repo add output = %q", output.String())
+	}
+	database, err = store.OpenAdminClient(context.Background(), databasePath, store.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = database.Close() }()
+	if _, err := database.RepositoryByName(context.Background(), "widget"); !errors.Is(err, store.ErrAmbiguous) {
+		t.Fatalf("bare lookup after duplicate registration = %v, want ErrAmbiguous", err)
+	}
+	codebergWidget, err := database.RepositoryByName(context.Background(), "codeberg/acme/widget")
+	if err != nil || codebergWidget.UpstreamID != 1 {
+		t.Fatalf("codeberg-qualified widget = %+v, %v", codebergWidget, err)
+	}
+	githubWidget, err := database.RepositoryByName(context.Background(), "github/octocat/widget")
+	if err != nil || githubWidget.UpstreamID != 2 {
+		t.Fatalf("github-qualified widget = %+v, %v", githubWidget, err)
 	}
 }
 

@@ -547,10 +547,22 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 		CommandTimeout:  options.gitCommandTimeout,
 		Env:             map[string]string{"GIT_SSH_COMMAND": sshCommand, "GIT_SSH_VARIANT": "ssh"},
 		Logger:          logger,
+		RepoQualifier:   upstreams.QualifyInput,
 		PreFinalizeGate: anchors.AllowMutation,
 	})
 	if err != nil {
 		return err
+	}
+	// One-time, idempotent, crash-safe move of pre-#264 flat cache
+	// directories (<root>/<repo>.git) to the org-qualified layout the
+	// RepoQualifier now derives. Runs before any listener exists, so no
+	// request can observe a half-migrated repository.
+	qualifications, err := repoCacheQualifications(ctx, database)
+	if err != nil {
+		return fmt.Errorf("resolve git cache qualifications: %w", err)
+	}
+	if err := git.MigrateToQualifiedLayout(qualifications); err != nil {
+		return fmt.Errorf("migrate git cache to qualified layout: %w", err)
 	}
 	logs, err := runlog.Open(filepath.Join(options.dataRoot, "logs"))
 	if err != nil {
@@ -1633,3 +1645,51 @@ const (
 	defaultArtifactsLimitBytes  = 256 << 20
 	defaultArtifactsBudgetBytes = 4 << 30
 )
+
+// repoCacheQualifications maps every registered repository's bare name to its
+// upstream/org identity for the startup git-cache layout migration. Bare
+// names are the migration key because pre-#264 flat caches could only exist
+// while names were globally unique; a duplicate bare name paired with a
+// surviving flat cache directory is unresolvable evidence of manual
+// tampering and fails startup closed rather than migrating a cache into the
+// wrong trust domain.
+func repoCacheQualifications(ctx context.Context, database *store.Store) (map[string]gitcache.RepoQualification, error) {
+	repositories, err := database.ListRepositories(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list repositories: %w", err)
+	}
+	upstreams, err := database.ListUpstreams(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list upstreams: %w", err)
+	}
+	byID := make(map[int64]model.Upstream, len(upstreams))
+	for _, upstream := range upstreams {
+		byID[upstream.ID] = upstream
+	}
+	qualifications := make(map[string]gitcache.RepoQualification, len(repositories))
+	duplicates := map[string]bool{}
+	for _, repository := range repositories {
+		upstream, ok := byID[repository.UpstreamID]
+		if !ok {
+			return nil, fmt.Errorf("repository %s references unknown upstream id %d", repository.Name, repository.UpstreamID)
+		}
+		if _, seen := qualifications[repository.Name]; seen {
+			duplicates[repository.Name] = true
+		}
+		org := upstream.Org()
+		if org == "" {
+			org = upstream.Name
+		}
+		qualifications[repository.Name] = gitcache.RepoQualification{UpstreamName: upstream.Name, Org: org}
+	}
+	// A duplicate bare name can only postdate the qualified layout, so a
+	// flat cache for it cannot legitimately exist; drop such names from the
+	// migration set so MigrateToQualifiedLayout cannot pick an arbitrary
+	// owner. If a flat directory for the name does exist anyway, the
+	// qualifier refuses it at first access with the store's disambiguation
+	// error instead of serving either repository's refs.
+	for name := range duplicates {
+		delete(qualifications, name)
+	}
+	return qualifications, nil
+}

@@ -1452,8 +1452,10 @@ func TestSchedulerUpdatesOneCIIssueAcrossRedRedGreen(t *testing.T) {
 func TestStatusReturnsRefWithoutRunWhenBranchExists(t *testing.T) {
 	const branchSHA = "dddddddddddddddddddddddddddddddddddddddd"
 	fixture := newControlFixture(t)
+	// Ref resolution reaches the git cache with the fully-qualified input
+	// (issue #264): the fixture upstream is codeberg (org acme).
 	fixture.refs = stubRefResolver{branches: map[string]map[string]string{
-		"oberth": {"feature/no-runs": branchSHA},
+		"codeberg/acme/oberth": {"feature/no-runs": branchSHA},
 	}}
 	ctx := context.Background()
 
@@ -1512,8 +1514,9 @@ func TestStatusReturnsRefWithoutRunWhenBranchExists(t *testing.T) {
 func TestStatusRefWithoutRunRespectsRepoDisambiguator(t *testing.T) {
 	const branchSHA = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
 	fixture := newControlFixture(t)
+	// Qualified cache input, as above (issue #264).
 	fixture.refs = stubRefResolver{branches: map[string]map[string]string{
-		"oberth": {"shared-branch": branchSHA},
+		"codeberg/acme/oberth": {"shared-branch": branchSHA},
 	}}
 	ctx := context.Background()
 

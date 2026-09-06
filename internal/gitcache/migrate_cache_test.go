@@ -1,6 +1,7 @@
 package gitcache
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -78,6 +79,12 @@ func TestMigrateToQualifiedLayoutIdempotent(t *testing.T) {
 	}
 }
 
+// Rewritten with issue #264: the flat-layout assertions this test used to
+// pin ("all input forms resolve to <root>/<repo>.git") described the interim
+// compromise, which the qualified layout replaces. Without a RepoQualifier,
+// fully-parsed segments route the nested path and bare names stay flat;
+// with a RepoQualifier every input form of one repository lands on its
+// canonical qualified directory.
 func TestQualifiedCachePath(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
@@ -94,10 +101,12 @@ func TestQualifiedCachePath(t *testing.T) {
 		input string
 		want  string
 	}{
-		// All input forms resolve to the flat layout: <root>/<repo>.git.
-		// The upstream and org segments are validated but do not influence
-		// the on-disk path.
-		{"github/oberthci/oberth", filepath.Join(root, "oberth.git")},
+		// Fully specified segments route the qualified layout directly.
+		{"github/oberthci/oberth", filepath.Join(root, "github", "oberthci", "oberth.git")},
+		// Without a qualifier there is no catalog to resolve the upstream
+		// for a 2-segment or bare input, so those stay flat (production
+		// wiring always sets the qualifier; internal CLI callers pass the
+		// fully-qualified form).
 		{"oberthci/oberth", filepath.Join(root, "oberth.git")},
 		{"oberth", filepath.Join(root, "oberth.git")},
 		{"unknown", filepath.Join(root, "unknown.git")},
@@ -112,6 +121,64 @@ func TestQualifiedCachePath(t *testing.T) {
 		if got != tc.want {
 			t.Errorf("path(%q) = %q, want %q", tc.input, got, tc.want)
 		}
+	}
+}
+
+// TestQualifiedCachePathWithQualifier proves the two #264 core properties:
+// every input form of ONE repository maps to one canonical directory, and
+// same-named repositories under different upstreams map to disjoint
+// directories.
+func TestQualifiedCachePathWithQualifier(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+
+	qualify := func(input string) (RepoQualification, error) {
+		switch input {
+		case "terraform", "cloudtaser/terraform", "codeberg/cloudtaser/terraform", "CODEBERG/CLOUDTASER/terraform":
+			return RepoQualification{UpstreamName: "codeberg", Org: "cloudtaser"}, nil
+		case "oberthci/terraform", "github/oberthci/terraform":
+			return RepoQualification{UpstreamName: "github", Org: "oberthci"}, nil
+		}
+		return RepoQualification{}, fmt.Errorf("repository %q exists under multiple upstreams; qualify the path", input)
+	}
+	cache, err := New(Config{
+		Root:          root,
+		Upstream:      func(repo string) (string, error) { return "/dev/null", nil },
+		RepoQualifier: qualify,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	codebergPath := filepath.Join(root, "codeberg", "cloudtaser", "terraform.git")
+	githubPath := filepath.Join(root, "github", "oberthci", "terraform.git")
+
+	for _, input := range []string{"terraform", "cloudtaser/terraform", "codeberg/cloudtaser/terraform", "CODEBERG/CLOUDTASER/terraform"} {
+		_, got, err := cache.path(input)
+		if err != nil {
+			t.Fatalf("path(%q): %v", input, err)
+		}
+		if got != codebergPath {
+			t.Fatalf("path(%q) = %q, want canonical %q", input, got, codebergPath)
+		}
+	}
+	for _, input := range []string{"oberthci/terraform", "github/oberthci/terraform"} {
+		_, got, err := cache.path(input)
+		if err != nil {
+			t.Fatalf("path(%q): %v", input, err)
+		}
+		if got != githubPath {
+			t.Fatalf("path(%q) = %q, want %q", input, got, githubPath)
+		}
+	}
+	if codebergPath == githubPath {
+		t.Fatal("same-named repositories must map to disjoint cache directories")
+	}
+
+	// A qualifier refusal (unknown or ambiguous identity) refuses the path
+	// derivation instead of guessing a directory.
+	if _, _, err := cache.path("other-repo"); err == nil {
+		t.Fatal("qualifier refusal must propagate")
 	}
 }
 
@@ -141,5 +208,77 @@ func TestListFlatCaches(t *testing.T) {
 	}
 	if len(flat) != 1 || flat[0] != "oberth" {
 		t.Fatalf("ListFlatCaches = %v, want [oberth]", flat)
+	}
+}
+
+// TestReservationIdentityAndPathIsolation proves the durable receive outbox
+// cannot alias across same-named repositories (issue #264): the reservation
+// identity derives from the resolved cache path, filenames encode it with a
+// separator the segment charset forbids, and legacy bare-name files keep
+// round-tripping.
+func TestReservationIdentityAndPathIsolation(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	cache, err := New(Config{
+		Root:     root,
+		Upstream: func(repo string) (string, error) { return "/dev/null", nil },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	githubIdentity := cache.reservationIdentity("terraform", filepath.Join(root, "github", "oberthci", "terraform.git"))
+	codebergIdentity := cache.reservationIdentity("terraform", filepath.Join(root, "codeberg", "cloudtaser", "terraform.git"))
+	flatIdentity := cache.reservationIdentity("terraform", filepath.Join(root, "terraform.git"))
+
+	if githubIdentity != "github/oberthci/terraform" || codebergIdentity != "codeberg/cloudtaser/terraform" {
+		t.Fatalf("identities = %q, %q", githubIdentity, codebergIdentity)
+	}
+	if flatIdentity != "terraform" {
+		t.Fatalf("flat identity = %q, want bare name for legacy layout", flatIdentity)
+	}
+
+	githubFile, err := cache.reservationPath(githubIdentity)
+	if err != nil {
+		t.Fatal(err)
+	}
+	codebergFile, err := cache.reservationPath(codebergIdentity)
+	if err != nil {
+		t.Fatal(err)
+	}
+	flatFile, err := cache.reservationPath(flatIdentity)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if githubFile == codebergFile || githubFile == flatFile || codebergFile == flatFile {
+		t.Fatalf("reservation files must be disjoint: %q %q %q", githubFile, codebergFile, flatFile)
+	}
+	if filepath.Base(githubFile) != "github@oberthci@terraform.json" {
+		t.Fatalf("qualified reservation filename = %q", filepath.Base(githubFile))
+	}
+	if filepath.Base(flatFile) != "terraform.json" {
+		t.Fatalf("legacy reservation filename = %q", filepath.Base(flatFile))
+	}
+
+	// Round-trip: a qualified reservation written under its identity is
+	// listed by PendingReceives with the identity restored from the
+	// filename, alongside a legacy bare-name reservation.
+	for _, reservation := range []receiveReservation{
+		{Version: receiveReservationVersion, ID: "11111111111111111111111111111111", Repo: githubIdentity, Actor: "a@h", State: receiveReady},
+		{Version: receiveReservationVersion, ID: "22222222222222222222222222222222", Repo: "legacy-repo", Actor: "a@h", State: receiveReady},
+	} {
+		if err := cache.writeReservation(reservation); err != nil {
+			t.Fatalf("write reservation %s: %v", reservation.Repo, err)
+		}
+	}
+	pending, err := cache.PendingReceives()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pending) != 2 {
+		t.Fatalf("pending = %d, want 2", len(pending))
+	}
+	if pending[0].Repo != githubIdentity || pending[1].Repo != "legacy-repo" {
+		t.Fatalf("pending identities = %q, %q", pending[0].Repo, pending[1].Repo)
 	}
 }

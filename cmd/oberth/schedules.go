@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/oberthci/oberth/internal/gitcache"
+	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/schedule"
 	"github.com/oberthci/oberth/internal/store"
 )
@@ -52,14 +53,28 @@ func runSchedules(ctx context.Context, arguments []string, output io.Writer) err
 
 	wanted := flags.Arg(0)
 	limits := schedule.Limits{MinInterval: *minInterval, MaxEntries: *maxEntries}
+	upstreams, err := database.ListUpstreams(ctx)
+	if err != nil {
+		return err
+	}
+	upstreamByID := make(map[int64]model.Upstream, len(upstreams))
+	for _, upstream := range upstreams {
+		upstreamByID[upstream.ID] = upstream
+	}
 	now := time.Now().UTC()
 	printed := false
 	for _, repository := range repositories {
 		if wanted != "" && repository.Name != wanted {
 			continue
 		}
+		upstream, ok := upstreamByID[repository.UpstreamID]
+		if !ok {
+			return fmt.Errorf("repository %s references unknown upstream id %d", repository.Name, repository.UpstreamID)
+		}
 		printed = true
-		if err := reportRepositorySchedule(ctx, output, cache, database, repository.Name, repository.DefaultBranch, limits, now); err != nil {
+		// Cache reads and schedule-outcome keys use the fully-qualified
+		// name, matching the schedule engine's dedup keys (issue #264).
+		if err := reportRepositorySchedule(ctx, output, cache, database, repository.Name, upstream.QualifiedRepo(repository.Name), repository.DefaultBranch, limits, now); err != nil {
 			return err
 		}
 	}
@@ -72,13 +87,13 @@ func runSchedules(ctx context.Context, arguments []string, output io.Writer) err
 
 func reportRepositorySchedule(
 	ctx context.Context, output io.Writer, cache *gitcache.Cache, database *store.Store,
-	repo, branch string, limits schedule.Limits, now time.Time,
+	repo, qualifiedRepo, branch string, limits schedule.Limits, now time.Time,
 ) error {
-	sha, err := cache.RefSHA(ctx, repo, branch)
+	sha, err := cache.RefSHA(ctx, qualifiedRepo, branch)
 	if err != nil {
 		return nil
 	}
-	raw, err := cache.ReadBlob(ctx, repo, sha, schedule.FileName, schedule.MaxSourceBytes)
+	raw, err := cache.ReadBlob(ctx, qualifiedRepo, sha, schedule.FileName, schedule.MaxSourceBytes)
 	if err != nil {
 		return nil
 	}
@@ -90,7 +105,7 @@ func reportRepositorySchedule(
 		_, printErr := fmt.Fprintf(output, "  refused: %v\n", err)
 		return printErr
 	}
-	outcomes, _ := database.ScheduleOutcomes(ctx, repo)
+	outcomes, _ := database.ScheduleOutcomes(ctx, qualifiedRepo)
 	last := map[string]store.ScheduleOutcome{}
 	for _, outcome := range outcomes {
 		last[outcome.Entry] = outcome

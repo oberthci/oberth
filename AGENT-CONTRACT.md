@@ -289,12 +289,19 @@ implementation detail disagree.
   `<repo>[.git]`, `<org>/<repo>[.git]`, and
   `<upstream-name>/<org>/<repo>[.git]`. All spellings of one repository
   resolve to the same identity — so one repository has exactly one cache
-  directory (flat `<root>/<repo>.git`; a qualified on-disk layout requires
-  its own explicit migration design), one lock, and one durable receive
-  reservation regardless of spelling. For a registered repository, a
-  supplied upstream name must equal the registered upstream's name and a
-  supplied org must equal that upstream's org identity; mismatches fail
-  closed. Nested paths beyond three segments are rejected.
+  directory, one lock, and one durable receive reservation regardless of
+  spelling. The on-disk layout is org-qualified
+  (`<root>/<upstream>/<org>/<repo>.git`, issue #264): the server derives it
+  from the catalog's canonical identity via the cache's RepoQualifier, so
+  same-named repositories under different upstreams hold strictly disjoint
+  caches, and pre-#264 flat directories (`<root>/<repo>.git`) are moved by
+  an idempotent, crash-safe startup migration before any listener exists.
+  A supplied upstream name must name a registered upstream and a supplied
+  org must equal that upstream's org identity; an org-qualified path always
+  addresses that org's OWN namespace (never another org's same-named
+  repository), and a bare name that exists under multiple upstreams is
+  refused with disambiguation guidance — nothing guesses. Nested paths
+  beyond three segments are rejected.
 - Canonical persistence (#245 G3, schema v11/v12): `repositories` enforces
   compound `UNIQUE(upstream_id, name)`, so the same bare name may exist
   under different upstreams. Store lookups by name accept all three

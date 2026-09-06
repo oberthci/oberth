@@ -37,8 +37,9 @@ func (c *Cache) MigrateToQualifiedLayout(repos map[string]RepoQualification) err
 			continue
 		}
 
-		// Hold the repo lock during rename.
-		lock := c.repoLock(repo)
+		// Hold the repo lock during rename (locks key on the destination
+		// path — the identity every post-migration access resolves to).
+		lock := c.repoLock(qualifiedPath)
 		lock.Lock()
 
 		if err := c.migrateOneRepo(repo, flatPath, qualifiedPath); err != nil {

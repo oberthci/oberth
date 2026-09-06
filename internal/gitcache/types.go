@@ -154,11 +154,19 @@ type Config struct {
 	Env            map[string]string
 	Redact         []string
 	Logger         Logger
-	// RepoQualifier resolves a bare repository name to its upstream name and
-	// org identity. It is used to determine the org-qualified cache directory
-	// path (<root>/<upstream>/<org>/<repo>.git). When nil, the cache falls
-	// back to the flat layout (<root>/<repo>.git).
-	RepoQualifier func(bareName string) (RepoQualification, bool)
+	// RepoQualifier resolves a repository input — bare ("repo"),
+	// org-qualified ("org/repo"), or fully qualified ("upstream/org/repo") —
+	// to its canonical catalog identity. It determines the org-qualified
+	// cache directory path (<root>/<upstream>/<org>/<repo>.git); the
+	// returned values are the catalog's canonical spellings, never the
+	// client's, so the on-disk path is stable across input casings.
+	//
+	// An error refuses the operation: an unknown repository resolves via
+	// upstream discovery rules, and a bare name that exists under multiple
+	// upstreams must be refused (not guessed) — the error should tell the
+	// caller to qualify the path. When nil, the cache falls back to the
+	// flat layout (<root>/<repo>.git); production wiring always sets it.
+	RepoQualifier func(input string) (RepoQualification, error)
 	// PreFinalizeGate is an optional server-owned check invoked after
 	// receive-pack applies ref updates and BEFORE finalization records
 	// the delta in the durable outbox. When it returns an error,

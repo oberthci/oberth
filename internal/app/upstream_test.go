@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -13,11 +14,21 @@ import (
 )
 
 type fakeUpstreamCatalog struct {
+	// repositories is keyed by the exact lookup selector, mirroring the
+	// store's resolution forms: bare ("repo"), org-qualified ("org/repo"),
+	// and fully qualified ("upstream/org/repo"). Register a repo under every
+	// selector the scenario should resolve.
 	repositories map[string]model.Repository
-	upstreams    []model.Upstream
+	// ambiguous marks bare names that exist under multiple upstreams; the
+	// store answers those with ErrAmbiguous rather than picking one.
+	ambiguous map[string]bool
+	upstreams []model.Upstream
 }
 
 func (catalog fakeUpstreamCatalog) RepositoryByName(_ context.Context, name string) (model.Repository, error) {
+	if catalog.ambiguous[name] {
+		return model.Repository{}, fmt.Errorf("%w: repository %q exists under multiple upstreams; qualify as org/repo or upstream/org/repo", store.ErrAmbiguous, name)
+	}
 	value, ok := catalog.repositories[name]
 	if !ok {
 		return model.Repository{}, store.ErrNotFound
@@ -168,16 +179,21 @@ func TestOrgQualifiedValidatesAgainstMappedUpstream(t *testing.T) {
 	if remote != "ssh://git@github.com/oberthci/oberth.git" {
 		t.Fatalf("remote = %q", remote)
 	}
-	// Wrong org for mapped repo fails
-	_, err = (Upstreams{Catalog: catalog}).Remote("cloudtaser/oberth")
-	if err == nil {
-		t.Fatal("expected error for wrong org on mapped repository")
+	// Rewritten for issue #264: an org-qualified path names that org's OWN
+	// namespace. "cloudtaser/oberth" is no longer a "wrong org" for the
+	// github-registered "oberth" — it selects the codeberg upstream (org
+	// cloudtaser), where a same-named repository may legitimately live. The
+	// trust property that matters is that it can NEVER resolve to the
+	// github repository's remote.
+	remote, err = (Upstreams{Catalog: catalog}).Remote("cloudtaser/oberth")
+	if err != nil {
+		t.Fatalf("org-owned namespace resolution failed: %v", err)
 	}
-	// Assert on the two values the reader needs, rather than on the sentence
-	// they arrive in: the org the repository does belong to, and the one that
-	// was asked for.
-	if !strings.Contains(err.Error(), `"oberthci"`) || !strings.Contains(err.Error(), `"cloudtaser"`) {
-		t.Fatalf("error = %q, want it to name both the registered org and the requested one", err.Error())
+	if remote != "ssh://git@codeberg.org/cloudtaser/oberth.git" {
+		t.Fatalf("remote = %q, want the cloudtaser org's own upstream", remote)
+	}
+	if strings.Contains(remote, "github.com") {
+		t.Fatalf("remote = %q leaked the other org's upstream", remote)
 	}
 }
 
@@ -231,7 +247,11 @@ func TestMismatchErrorsWrapErrUpstreamRefused(t *testing.T) {
 		name  string
 		input string
 	}{
-		{"wrong org on mapped repo", "cloudtaser/oberth"},
+		// "wrong org on mapped repo" ("cloudtaser/oberth") left this table in
+		// the #264 rewrite: an org-qualified path is that org's own namespace
+		// and now resolves to its upstream — the positive case is asserted in
+		// TestOrgQualifiedValidatesAgainstMappedUpstream.
+		{"org mismatched with named upstream", "github/cloudtaser/oberth"},
 		{"wrong upstream name on mapped repo", "codeberg/oberthci/oberth"},
 		{"unknown upstream name", "nonexistent/oberthci/oberth"},
 		{"unknown org", "unknown-org/new-repo"},
@@ -246,5 +266,83 @@ func TestMismatchErrorsWrapErrUpstreamRefused(t *testing.T) {
 				t.Fatalf("error %q does not wrap ErrUpstreamRefused", err)
 			}
 		})
+	}
+}
+
+func TestSameNameAcrossUpstreamsResolvesPerOrg(t *testing.T) {
+	t.Parallel()
+	catalog := fakeUpstreamCatalog{
+		repositories: map[string]model.Repository{
+			"github/oberthci/terraform":     {ID: 10, Name: "terraform", UpstreamID: 1},
+			"oberthci/terraform":            {ID: 10, Name: "terraform", UpstreamID: 1},
+			"codeberg/cloudtaser/terraform": {ID: 20, Name: "terraform", UpstreamID: 2},
+			"cloudtaser/terraform":          {ID: 20, Name: "terraform", UpstreamID: 2},
+		},
+		ambiguous: map[string]bool{"terraform": true},
+		upstreams: []model.Upstream{
+			{ID: 1, Name: "github", BaseURL: "ssh://git@github.com/oberthci"},
+			{ID: 2, Name: "codeberg", BaseURL: "ssh://git@codeberg.org/cloudtaser"},
+		},
+	}
+	resolver := Upstreams{Catalog: catalog}
+
+	remote, err := resolver.Remote("github/oberthci/terraform")
+	if err != nil {
+		t.Fatalf("github-qualified: %v", err)
+	}
+	if remote != "ssh://git@github.com/oberthci/terraform.git" {
+		t.Fatalf("github remote = %q", remote)
+	}
+
+	remote, err = resolver.Remote("cloudtaser/terraform")
+	if err != nil {
+		t.Fatalf("codeberg org-qualified: %v", err)
+	}
+	if remote != "ssh://git@codeberg.org/cloudtaser/terraform.git" {
+		t.Fatalf("codeberg remote = %q", remote)
+	}
+
+	// A bare name that exists under multiple upstreams must refuse, not
+	// guess: guessing would route a push (and later its publication) into
+	// the wrong trust domain.
+	_, err = resolver.Remote("terraform")
+	if err == nil {
+		t.Fatal("bare ambiguous name must be refused")
+	}
+	if !errors.Is(err, store.ErrAmbiguous) || !errors.Is(err, gitcache.ErrUpstreamRefused) {
+		t.Fatalf("ambiguous error = %v, want ErrAmbiguous wrapped as an upstream refusal", err)
+	}
+}
+
+func TestQualifyInputReturnsCanonicalIdentity(t *testing.T) {
+	t.Parallel()
+	catalog := fakeUpstreamCatalog{
+		repositories: map[string]model.Repository{
+			"github/oberthci/terraform": {ID: 10, Name: "terraform", UpstreamID: 1},
+		},
+		upstreams: []model.Upstream{
+			{ID: 1, Name: "github", BaseURL: "ssh://git@github.com/oberthci"},
+			{ID: 2, Name: "codeberg", BaseURL: "ssh://git@codeberg.org/cloudtaser"},
+		},
+	}
+	resolver := Upstreams{Catalog: catalog}
+
+	qualification, err := resolver.QualifyInput("github/oberthci/terraform")
+	if err != nil {
+		t.Fatalf("qualify registered: %v", err)
+	}
+	if qualification != (gitcache.RepoQualification{UpstreamName: "github", Org: "oberthci"}) {
+		t.Fatalf("qualification = %+v", qualification)
+	}
+
+	// An unregistered org-qualified input qualifies through discovery rules,
+	// and the returned segments are the catalog's canonical spellings even
+	// when the client cases the org differently.
+	qualification, err = resolver.QualifyInput("CLOUDTASER/new-repo")
+	if err != nil {
+		t.Fatalf("qualify discovered: %v", err)
+	}
+	if qualification != (gitcache.RepoQualification{UpstreamName: "codeberg", Org: "cloudtaser"}) {
+		t.Fatalf("canonical qualification = %+v", qualification)
 	}
 }
