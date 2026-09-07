@@ -1150,7 +1150,7 @@ func (service *API) promote(ctx context.Context, actor api.Actor, repositoryName
 		defer cancelCleanup()
 		result = service.cleanupTerminalPromotionWorkspace(cleanupCtx, result)
 	}()
-	plan, err := service.git.PreparePromotion(ctx, repository.Name, candidate.SHA, target, workspaceSource)
+	plan, err := service.git.PreparePromotion(ctx, service.cacheInputFor(ctx, repository), candidate.SHA, target, workspaceSource)
 	if err != nil {
 		return service.failAdmittedPromotion(ctx, promotion, "prepare promotion: "+err.Error(), "")
 	}

@@ -46,6 +46,7 @@ type controlGit struct {
 	checkoutFiles            map[string][]byte
 	syncedBranches           []string
 	syncedTags               []string
+	preparedRepos            []string
 	promotions               []string
 	events                   *[]string
 }
@@ -305,7 +306,10 @@ func (git *controlGit) SyncTag(_ context.Context, repo, tag, sha string) error {
 	return git.applyThenErr
 }
 
-func (git *controlGit) PreparePromotion(ctx context.Context, _, _, target string, _ string) (gitcache.MergeCandidate, error) {
+func (git *controlGit) PreparePromotion(ctx context.Context, repo, _, target string, _ string) (gitcache.MergeCandidate, error) {
+	git.mu.Lock()
+	git.preparedRepos = append(git.preparedRepos, repo)
+	git.mu.Unlock()
 	if git.prepareStarted != nil {
 		git.prepareOnce.Do(func() { close(git.prepareStarted) })
 	}
@@ -2568,6 +2572,12 @@ func TestPromotionFastForwardDivergentAndNonFastForwardFailure(t *testing.T) {
 		promotion := requireToolPromotion(t, fixture, value)
 		if promotion.Status != model.PromotionPassed || promotion.RunID != "" || len(fixture.git.promotions) != 1 {
 			t.Fatalf("fast-forward promotion = %#v pushes=%#v", promotion, fixture.git.promotions)
+		}
+		// The merge plan must be prepared against the fully-qualified cache
+		// input; a bare repository name is ambiguous once the same name
+		// exists under several upstreams (issue #264).
+		if len(fixture.git.preparedRepos) != 1 || fixture.git.preparedRepos[0] != "codeberg/acme/oberth" {
+			t.Fatalf("prepared promotion repos = %#v, want [codeberg/acme/oberth]", fixture.git.preparedRepos)
 		}
 	})
 
