@@ -488,6 +488,19 @@ func (c *Cache) prepareReleaseAdmissionLocked(ctx context.Context, path string, 
 		return ReleaseAdmission{}, c.deleteRef(ctx, path, admissionRef, "")
 	}
 	upstreamRef := upstreamRefPrefix + "heads/" + defaultBranch
+	// A brand-new empty upstream has an unborn default branch, so no
+	// tracking ref exists yet (issue #264 bootstrap). That is not an error:
+	// it means there is NO admission anchor — the empty admission below
+	// keeps every release tag refused (a tag must be reachable from the
+	// fresh upstream default branch, and nothing is reachable from an
+	// unborn branch) while branch receives proceed. The check is
+	// existence-based, never a guess: any OTHER rev-parse failure still
+	// refuses the receive.
+	if _, refErr := c.capture(ctx, path, "show-ref", "--verify", "--quiet", upstreamRef); refErr != nil {
+		if refs, listErr := c.capture(ctx, path, "for-each-ref", "--count=1", upstreamRefPrefix); listErr == nil && strings.TrimSpace(refs) == "" {
+			return ReleaseAdmission{}, c.deleteRef(ctx, path, admissionRef, "")
+		}
+	}
 	sha, err := c.capture(ctx, path, "rev-parse", "--verify", upstreamRef)
 	if err != nil {
 		return ReleaseAdmission{}, fmt.Errorf("resolve fresh upstream default branch: %w", err)

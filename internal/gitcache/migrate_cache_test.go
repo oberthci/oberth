@@ -330,4 +330,15 @@ func TestDefaultBranchFromSymrefAndEmptyBootstrap(t *testing.T) {
 	if repository.DefaultBranch == "" {
 		t.Fatal("empty upstream must still yield a default branch")
 	}
+
+	// Release admission on the unborn default branch: no anchor exists, so
+	// the admission is EMPTY (which keeps every tag refused) instead of an
+	// error that would block the bootstrap branch push.
+	admission, err := cache.prepareReleaseAdmissionLocked(context.Background(), repository.Path, true)
+	if err != nil {
+		t.Fatalf("admission on empty upstream: %v", err)
+	}
+	if admission.DefaultBranch != "" || admission.SHA != "" {
+		t.Fatalf("admission = %+v, want empty (no anchor on an unborn branch)", admission)
+	}
 }
