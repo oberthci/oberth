@@ -557,7 +557,22 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 			jobResult = reconciled
 			waitErr = nil
 		} else {
-			// Job not terminal, absent, or state unreadable — delete and interrupt.
+			// Job not terminal, absent, or state unreadable at shutdown.
+			// Requeue-with-supersede when eligible (issue #270): the durable
+			// obligation owns the Job deletion, and whichever process next
+			// runs a cancellation pass — the successor's startup in the
+			// upgrade case — executes it before the replacement is claimed.
+			if requeued, requeueErr := scheduler.store.RequeueStrandedRun(finalizeCtx, run.ID); requeueErr == nil {
+				_ = logFile.Close()
+				scheduler.signals.NotifyRun(run.ID)
+				scheduler.signals.NotifyRun(requeued.ID)
+				return nil
+			} else if !errors.Is(requeueErr, store.ErrRequeueIneligible) {
+				_ = logFile.Close()
+				return fmt.Errorf("requeue run %s during scheduler shutdown: %w", run.ID, requeueErr)
+			}
+			// Ineligible work keeps the conservative contract: delete, then
+			// terminalize as interrupted.
 			if deleteErr := scheduler.jobs.Delete(finalizeCtx, jobName, run.ID); deleteErr != nil {
 				_ = logFile.Close()
 				return fmt.Errorf("cancel Job %s during scheduler shutdown: %w", jobName, deleteErr)

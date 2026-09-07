@@ -193,7 +193,12 @@ func TestCompensationPathRecordsRealResultWhenJobCompleted(t *testing.T) {
 	}
 }
 
-func TestCompensationPathInterruptsWhenJobStillRunning(t *testing.T) {
+// TestCompensationPathRequeuesWhenJobStillRunning: shutdown compensation for
+// an ordinary branch run whose Job has no terminal result supersedes it with
+// a fresh queued copy (issue #270). The Job's deletion is owned by the
+// durable obligation — executed by the successor's startup cancellation pass
+// in the upgrade case — never inline during shutdown.
+func TestCompensationPathRequeuesWhenJobStillRunning(t *testing.T) {
 	t.Parallel()
 	fixture := newRecoveryFixture(t)
 	run := fixture.enqueueAndClaim(t, "feature/running", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
@@ -229,14 +234,82 @@ func TestCompensationPathInterruptsWhenJobStillRunning(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if recovered.Status != model.RunInterrupted {
-		t.Fatalf("run status = %q, want %q", recovered.Status, model.RunInterrupted)
+	if recovered.Status != model.RunInterrupted || recovered.SupersededBy == "" {
+		t.Fatalf("run = %#v, want interrupted and superseded by its requeue", recovered)
 	}
-	if recovered.Error != "scheduler stopped" {
-		t.Fatalf("run error = %q, want %q", recovered.Error, "scheduler stopped")
+	requeued, err := fixture.store.Run(context.Background(), recovered.SupersededBy)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if len(jobs.deleted) != 1 {
-		t.Fatalf("expected exactly one Job deletion, got %v", jobs.deleted)
+	if requeued.Status != model.RunQueued || requeued.Ref != recovered.Ref || requeued.SHA != recovered.SHA {
+		t.Fatalf("requeued run = %#v, want queued copy", requeued)
+	}
+	if len(jobs.deleted) != 0 {
+		t.Fatalf("shutdown deleted inline = %v, want deletion left to the durable obligation", jobs.deleted)
+	}
+	pending, err := fixture.store.PendingRunCancellations(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	// execute() replaces the fixture Job name with its deterministic one;
+	// the obligation must carry the run's actual JobName.
+	if len(pending) != 1 || pending[0].RunID != run.ID || pending[0].JobName != recovered.JobName ||
+		pending[0].JobName == "" || pending[0].SupersededBy != requeued.ID {
+		t.Fatalf("pending obligations = %#v, want the stranded Job (%q) owned by the requeue", pending, recovered.JobName)
+	}
+}
+
+// TestCompensationPathInterruptsIneligibleTagRun pins the conservative legacy
+// shutdown contract for release-tier work: a tag run is deleted inline and
+// terminalized as interrupted, never re-fired automatically.
+func TestCompensationPathInterruptsIneligibleTagRun(t *testing.T) {
+	t.Parallel()
+	fixture := newRecoveryFixture(t)
+	enqueued, err := fixture.store.EnqueueRun(context.Background(), model.RunSpec{
+		RepoID: fixture.repo.ID, RefKind: model.RefTag, Ref: "v1.2.3",
+		SHA: "abcdefabcdefabcdefabcdefabcdefabcdefabcd", Actor: "agent@host", Trigger: "tag",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := fixture.store.ClaimNextRun(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.ID != enqueued.ID {
+		t.Fatalf("claimed = %#v, want the tag run", run)
+	}
+	fixture.setJobName(t, run.ID, "oberth-tag-running-job")
+
+	jobs := &recoveryJobs{
+		waitBlocks:  make(chan struct{}),
+		waitEntered: make(chan struct{}),
+		terminalErr: ErrJobNotTerminal,
+	}
+	scheduler := fixture.scheduler(t, jobs)
+	ctx, cancel := context.WithCancel(context.Background())
+	executeErr := make(chan error, 1)
+	go func() {
+		executeErr <- scheduler.executeAndCleanup(ctx, run)
+	}()
+	select {
+	case <-jobs.waitEntered:
+	case err := <-executeErr:
+		t.Fatalf("executeAndCleanup returned before Wait: %v", err)
+	}
+	cancel()
+	if err := <-executeErr; err != nil {
+		t.Fatal(err)
+	}
+	recovered, err := fixture.store.Run(context.Background(), run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if recovered.Status != model.RunInterrupted || recovered.SupersededBy != "" || recovered.Error != "scheduler stopped" {
+		t.Fatalf("tag run = %#v, want terminally interrupted without requeue", recovered)
+	}
+	if len(jobs.deleted) != 1 || jobs.deleted[0] != recovered.JobName || recovered.JobName == "" {
+		t.Fatalf("deleted = %v, want exactly the run's Job %q", jobs.deleted, recovered.JobName)
 	}
 }
 

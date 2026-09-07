@@ -102,7 +102,11 @@ SELECT COUNT(*) FROM publications WHERE run_id = ? AND status = 'pending'`, run.
 // caller's transaction. The caller has already excluded pending-publication
 // owners; this helper owns the trigger-class and newer-work guards.
 func (s *Store) requeueStrandedRunTx(ctx context.Context, tx *sql.Tx, run model.Run, now int64) (model.Run, error) {
-	if run.RefKind != model.RefBranch || run.Trigger == "promotion" || run.Release || run.Credentialed {
+	// Credentialed is NOT an exclusion: on branch runs it only records that
+	// the ci-secrets tier was mounted, and the requeued copy re-earns it
+	// through the scheduler's own pipelineCredentialed admission. Release
+	// (tag-tier) work stays excluded.
+	if run.RefKind != model.RefBranch || run.Trigger == "promotion" || run.Release {
 		return model.Run{}, ErrRequeueIneligible
 	}
 	// A newer push may already have replayed into the queue while this
@@ -119,9 +123,11 @@ WHERE repo_id = ? AND ref_kind = 'branch' AND ref = ? AND id != ?
 	if activeSiblings > 0 {
 		return model.Run{}, ErrRequeueIneligible
 	}
+	// The copy starts uncredentialed: credential mounting is a per-run
+	// admission decision the scheduler re-derives, never inherited state.
 	spec, err := validateRunSpec(model.RunSpec{
 		RepoID: run.RepoID, RefKind: run.RefKind, Ref: run.Ref, SHA: run.SHA,
-		Actor: run.Actor, Release: run.Release, Credentialed: run.Credentialed,
+		Actor: run.Actor, Release: run.Release, Credentialed: false,
 		Trigger: run.Trigger, TestedSHA: run.TestedSHA, BaseSHA: run.BaseSHA,
 	})
 	if err != nil {

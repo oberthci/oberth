@@ -479,16 +479,20 @@ implementation detail disagree.
   and branch marks the older run `interrupted`, records which newer run
   superseded it, and creates a durable cancellation obligation for any in-flight
   Kubernetes Job.
-- A server restart re-fires stranded ordinary branch runs through the same
-  supersede mechanism (issue #270): a run that was claimed or mid-Job when the
-  previous process stopped — and whose Job cannot report a terminal result —
-  is interrupted with a link to a fresh queued copy of the same commit, and
-  the stranded Job's deletion obligation executes before the replacement can
-  be claimed. Jobs that finished while the server was away keep their real
-  result. Promotion CI, tag/release, credentialed, and publication-owning
-  runs are never re-fired automatically; they terminalize conservatively
-  exactly as before, and a branch that already has newer active work keeps
-  only that newest run.
+- A server stop or restart re-fires stranded ordinary branch runs through
+  the same supersede mechanism (issue #270), on all three termination paths:
+  graceful-shutdown compensation in the stopping process, owner startup
+  recovery for claimed runs without a Job, and startup reconciliation for
+  Jobs that cannot report a terminal result. The stranded run is interrupted
+  with a link to a fresh queued copy of the same commit, and the stranded
+  Job's deletion obligation executes before the replacement can be claimed
+  (in the upgrade case, by the successor's startup cancellation pass). Jobs
+  that finished while the server was away keep their real result. Branch
+  runs that mounted ci-secrets are re-fired like any other branch run — the
+  copy starts uncredentialed and re-earns delivery through normal admission.
+  Promotion CI, tag/release, and publication-owning runs are never re-fired
+  automatically; they terminalize conservatively exactly as before, and a
+  branch that already has newer active work keeps only that newest run.
 - Green branch runs force-sync that same branch to the upstream forge. Red runs
   create or update one open CI issue per repository and branch with the new SHA,
   bounded failure tail, and full burn-log command hint; green closes it.

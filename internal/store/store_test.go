@@ -735,6 +735,11 @@ func TestRequeueStrandedRunReplacesOwnerRestartObligation(t *testing.T) {
 	if _, err := s.SetRunJobName(ctx, run.ID, "job-stranded"); err != nil {
 		t.Fatal(err)
 	}
+	// A credentialed (ci-secrets tier) branch run is requeue-eligible; the
+	// copy re-earns credentials through fresh scheduler admission.
+	if err := s.SetRunCredentialed(ctx, run.ID); err != nil {
+		t.Fatal(err)
+	}
 	if err := s.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -756,8 +761,8 @@ func TestRequeueStrandedRunReplacesOwnerRestartObligation(t *testing.T) {
 	if old.Status != model.RunInterrupted || old.SupersededBy != requeued.ID {
 		t.Fatalf("stranded run after requeue = %#v, want interrupted superseded by %s", old, requeued.ID)
 	}
-	if requeued.Status != model.RunQueued || requeued.Ref != run.Ref || requeued.SHA != run.SHA {
-		t.Fatalf("requeued run = %#v, want queued copy", requeued)
+	if requeued.Status != model.RunQueued || requeued.Ref != run.Ref || requeued.SHA != run.SHA || requeued.Credentialed {
+		t.Fatalf("requeued run = %#v, want uncredentialed queued copy", requeued)
 	}
 	pending, err := s.PendingRunCancellations(ctx)
 	if err != nil {
