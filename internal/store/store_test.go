@@ -623,7 +623,11 @@ func TestRestartRecoveryInterruptsRunningRuns(t *testing.T) {
 	if len(cancellations) != 1 || cancellations[0].RunID != run.ID || cancellations[0].JobName != "job-before-restart" || cancellations[0].Reason != "owner_restart" {
 		t.Fatalf("restart cancellations = %#v", cancellations)
 	}
-	// Runs without a job_name are still interrupted by store recovery.
+	// A claimed ordinary branch run without a job_name is requeued by store
+	// recovery (issue #270): the old attempt is interrupted with a link to a
+	// fresh queued copy, and the no-Job cancellation obligation terminalizes
+	// inside the recovery transaction because owner startup proves the
+	// claiming worker is gone.
 	noJobRun, err := s.EnqueueRun(ctx, testRunSpec(repo.ID, "feature/no-job", "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"))
 	if err != nil {
 		t.Fatal(err)
@@ -644,8 +648,129 @@ func TestRestartRecoveryInterruptsRunningRuns(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if noJobRecovered.Status != model.RunInterrupted || noJobRecovered.FinishedAt == nil {
-		t.Fatalf("no-job recovered run = %#v, want interrupted", noJobRecovered)
+	if noJobRecovered.Status != model.RunInterrupted || noJobRecovered.FinishedAt == nil || noJobRecovered.SupersededBy == "" {
+		t.Fatalf("no-job recovered run = %#v, want interrupted and superseded by its requeue", noJobRecovered)
+	}
+	requeued, err := s.Run(ctx, noJobRecovered.SupersededBy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if requeued.Status != model.RunQueued || requeued.Ref != noJobRun.Ref || requeued.SHA != noJobRun.SHA ||
+		requeued.Trigger != noJobRun.Trigger || requeued.Actor != noJobRun.Actor {
+		t.Fatalf("requeued run = %#v, want queued copy of %#v", requeued, noJobRun)
+	}
+	// The JobName-carrying run from the first phase still owns its pending
+	// owner_restart obligation; the requeued no-Job run must not add one.
+	cancellations, err = s.PendingRunCancellations(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cancellations) != 1 || cancellations[0].RunID != run.ID {
+		t.Fatalf("pending cancellations after requeue = %#v, want only the Job-carrying run", cancellations)
+	}
+}
+
+// TestRestartRecoveryDoesNotRequeueTagRun pins the conservative side of the
+// issue #270 requeue: release-tier (tag) work is never re-fired
+// automatically; a claimed tag run without a Job is terminally interrupted
+// exactly as before.
+func TestRestartRecoveryDoesNotRequeueTagRun(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, 9, 7, 6, 0, 0, 0, time.UTC)
+	path := filepath.Join(t.TempDir(), "oberth.db")
+	s, err := Open(ctx, path, Options{Now: func() time.Time { return now }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo := createRepo(t, s)
+	run, err := s.EnqueueRun(ctx, model.RunSpec{
+		RepoID: repo.ID, RefKind: model.RefTag, Ref: "v1.0.0",
+		SHA: "cccccccccccccccccccccccccccccccccccccccc", Actor: "agent@host", Trigger: "tag",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ClaimNextRun(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	now = now.Add(time.Minute)
+	s, err = Open(ctx, path, Options{Now: func() time.Time { return now }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	recovered, err := s.Run(ctx, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if recovered.Status != model.RunInterrupted || recovered.SupersededBy != "" || recovered.Reason != "oberth restarted" {
+		t.Fatalf("recovered tag run = %#v, want terminally interrupted without requeue", recovered)
+	}
+}
+
+// TestRequeueStrandedRunReplacesOwnerRestartObligation covers the scheduler
+// reconciliation path of issue #270 at the store level: a stranded run whose
+// owner_restart cancellation already exists (run_id is the primary key) gets
+// its obligation upserted to a superseded one pointing at the requeued run,
+// re-armed for the cancellation pass.
+func TestRequeueStrandedRunReplacesOwnerRestartObligation(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, 9, 7, 6, 30, 0, 0, time.UTC)
+	path := filepath.Join(t.TempDir(), "oberth.db")
+	s, err := Open(ctx, path, Options{Now: func() time.Time { return now }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo := createRepo(t, s)
+	run, err := s.EnqueueRun(ctx, testRunSpec(repo.ID, "feature/stranded", "abcabcabcabcabcabcabcabcabcabcabcabcabca"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ClaimNextRun(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.SetRunJobName(ctx, run.ID, "job-stranded"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	now = now.Add(time.Minute)
+	s, err = Open(ctx, path, Options{Now: func() time.Time { return now }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+
+	requeued, err := s.RequeueStrandedRun(ctx, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	old, err := s.Run(ctx, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if old.Status != model.RunInterrupted || old.SupersededBy != requeued.ID {
+		t.Fatalf("stranded run after requeue = %#v, want interrupted superseded by %s", old, requeued.ID)
+	}
+	if requeued.Status != model.RunQueued || requeued.Ref != run.Ref || requeued.SHA != run.SHA {
+		t.Fatalf("requeued run = %#v, want queued copy", requeued)
+	}
+	pending, err := s.PendingRunCancellations(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pending) != 1 || pending[0].RunID != run.ID || pending[0].JobName != "job-stranded" ||
+		pending[0].Reason != "superseded" || pending[0].SupersededBy != requeued.ID {
+		t.Fatalf("pending obligations = %#v, want upserted superseded obligation for job-stranded", pending)
+	}
+
+	// A second requeue attempt is refused: the run is no longer running.
+	if _, err := s.RequeueStrandedRun(ctx, run.ID); !errors.Is(err, ErrRequeueIneligible) {
+		t.Fatalf("second requeue error = %v, want ErrRequeueIneligible", err)
 	}
 }
 

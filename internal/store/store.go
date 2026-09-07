@@ -854,6 +854,22 @@ ORDER BY queue_sequence`)
 			// terminal state before deciding whether to interrupt.
 			continue
 		}
+		if _, requeueErr := s.requeueStrandedRunTx(ctx, tx, active, now); requeueErr == nil {
+			// The enqueue's supersede interrupted this run with a link to
+			// its replacement and recorded a no-Job cancellation obligation.
+			// Owner startup proves the claiming worker is gone (the same
+			// argument as the pass above), so that obligation terminalizes
+			// here instead of lingering unexecutable (issue #270).
+			if _, err := tx.ExecContext(ctx, `
+UPDATE run_cancellations
+SET completed_at = ?
+WHERE run_id = ? AND job_name = '' AND completed_at IS NULL`, now, active.ID); err != nil {
+				return fmt.Errorf("complete requeued run cancellation: %w", err)
+			}
+			continue
+		} else if !errors.Is(requeueErr, ErrRequeueIneligible) {
+			return fmt.Errorf("requeue recovered run %s: %w", active.ID, requeueErr)
+		}
 		recovered, updateErr := scanRun(tx.QueryRowContext(ctx, `
 UPDATE runs
 SET status = 'interrupted', phase = 'interrupted', reason = 'oberth restarted',

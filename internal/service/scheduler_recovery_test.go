@@ -337,7 +337,12 @@ func TestStartupReconciliationFinishesRunWhoseJobCompleted(t *testing.T) {
 	}
 }
 
-func TestStartupReconciliationInterruptsRunWithVanishedJob(t *testing.T) {
+// TestStartupReconciliationRequeuesRunWithVanishedJob: a stranded ordinary
+// branch run whose Job cannot report a terminal result is superseded by a
+// fresh queued copy (issue #270) instead of dying terminally interrupted.
+// The stranded Job's deletion is executed by the cancellation pass, not
+// inline, and must happen before the replacement can be claimed.
+func TestStartupReconciliationRequeuesRunWithVanishedJob(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	root := t.TempDir()
@@ -416,14 +421,124 @@ func TestStartupReconciliationInterruptsRunWithVanishedJob(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if recovered.Status != model.RunInterrupted {
-		t.Fatalf("reconciled run status = %q, want interrupted", recovered.Status)
+	if recovered.Status != model.RunInterrupted || recovered.SupersededBy == "" {
+		t.Fatalf("reconciled run = %#v, want interrupted and superseded by its requeue", recovered)
 	}
-	if recovered.Error != "job not in terminal state at restart; result unrecoverable" {
-		t.Fatalf("reconciled run error = %q", recovered.Error)
+	requeued, err := database.Run(ctx, recovered.SupersededBy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if requeued.Status != model.RunQueued || requeued.Ref != recovered.Ref ||
+		requeued.SHA != recovered.SHA || requeued.Trigger != recovered.Trigger ||
+		requeued.Actor != recovered.Actor {
+		t.Fatalf("requeued run = %#v, want queued copy of %#v", requeued, recovered)
+	}
+	// Reconciliation must NOT delete inline: the durable supersede obligation
+	// owns the deletion and stays pending until the cancellation pass.
+	if len(jobs.deleted) != 0 {
+		t.Fatalf("deleted before cancellation pass = %v, want none", jobs.deleted)
+	}
+	pending, err := database.PendingRunCancellations(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pending) != 1 || pending[0].RunID != enqueued.ID ||
+		pending[0].JobName != "oberth-vanished-job" || pending[0].Reason != "superseded" ||
+		pending[0].SupersededBy != requeued.ID {
+		t.Fatalf("pending cancellations = %#v, want superseded obligation for the stranded Job", pending)
+	}
+	if err := scheduler.completePendingCancellationsWithGate(ctx, scheduler.requireMutation); err != nil {
+		t.Fatal(err)
 	}
 	if len(jobs.deleted) != 1 || jobs.deleted[0] != "oberth-vanished-job" {
-		t.Fatalf("deleted = %v, want [oberth-vanished-job]", jobs.deleted)
+		t.Fatalf("deleted after cancellation pass = %v, want [oberth-vanished-job]", jobs.deleted)
+	}
+	pending, err = database.PendingRunCancellations(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pending) != 0 {
+		t.Fatalf("pending cancellations after pass = %#v, want none", pending)
+	}
+}
+
+// TestStartupReconciliationTerminalizesIneligibleStrandedRun pins the legacy
+// conservative path for work the restart requeue must never re-fire: a tag
+// (release-tier) run with a vanished Job is deleted inline and terminally
+// interrupted, exactly as before issue #270.
+func TestStartupReconciliationTerminalizesIneligibleStrandedRun(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	root := t.TempDir()
+	dbPath := filepath.Join(root, "oberth.sqlite")
+
+	database, err := store.Open(ctx, dbPath, store.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	upstream, err := database.CreateUpstream(ctx, model.UpstreamSpec{
+		Name: "codeberg", Kind: "ssh", BaseURL: "ssh://codeberg.org/acme",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo, err := database.CreateRepository(ctx, model.RepositorySpec{
+		Name: "oberth", UpstreamID: upstream.ID, DefaultBranch: "main",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	enqueued, err := database.EnqueueRun(ctx, model.RunSpec{
+		RepoID: repo.ID, RefKind: model.RefTag, Ref: "v9.9.9",
+		SHA: "cccccccccccccccccccccccccccccccccccccccc", Actor: "agent@host", Trigger: "tag",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.ClaimNextRun(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.SetRunJobName(ctx, enqueued.ID, "oberth-tag-job"); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	database, err = store.Open(ctx, dbPath, store.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+	jobs := &recoveryJobs{terminalErr: ErrJobNotTerminal}
+	logs, err := runlog.Open(filepath.Join(root, "logs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	scheduler, err := NewScheduler(SchedulerConfig{
+		Store: database, Git: &controlGit{}, Logs: logs, Jobs: jobs,
+		Auditor: database, Signals: NewSignals(),
+		WorkspaceRoot: filepath.Join(root, "work"), MaxConcurrent: 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := scheduler.reconcileStrandedRunsWithGate(ctx, scheduler.requireMutation); err != nil {
+		t.Fatal(err)
+	}
+
+	recovered, err := database.Run(ctx, enqueued.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if recovered.Status != model.RunInterrupted || recovered.SupersededBy != "" {
+		t.Fatalf("reconciled tag run = %#v, want terminally interrupted without requeue", recovered)
+	}
+	if recovered.Error != "job not in terminal state at restart; result unrecoverable" {
+		t.Fatalf("reconciled tag run error = %q", recovered.Error)
+	}
+	if len(jobs.deleted) != 1 || jobs.deleted[0] != "oberth-tag-job" {
+		t.Fatalf("deleted = %v, want [oberth-tag-job]", jobs.deleted)
 	}
 }
 

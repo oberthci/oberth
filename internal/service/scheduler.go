@@ -951,6 +951,24 @@ func (scheduler *Scheduler) reconcileStrandedRunsWithGate(ctx context.Context, r
 				return err
 			}
 		} else {
+			requeued, requeueErr := scheduler.store.RequeueStrandedRun(ctx, run.ID)
+			if requeueErr == nil {
+				// The stranded Job's deletion is now owned by the durable
+				// supersede obligation the requeue recorded; the cancellation
+				// pass that runs immediately after reconciliation executes it
+				// before any new claim can start the replacement run
+				// (issue #270). The obligation must stay pending here, so the
+				// loop tail's CompleteRunCancellation is skipped.
+				scheduler.signals.NotifyRun(run.ID)
+				scheduler.signals.NotifyRun(requeued.ID)
+				cleanupCtx, cancelCleanup := boundedWorkspaceCleanupContext(ctx)
+				_ = scheduler.workspaces.cleanupRun(cleanupCtx, run.ID)
+				cancelCleanup()
+				continue
+			}
+			if !errors.Is(requeueErr, store.ErrRequeueIneligible) {
+				return fmt.Errorf("requeue stranded run %s: %w", run.ID, requeueErr)
+			}
 			deleteCtx, cancelDelete := boundedWorkspaceCleanupContext(ctx)
 			deleteErr := scheduler.jobs.Delete(deleteCtx, run.JobName, run.ID)
 			cancelDelete()

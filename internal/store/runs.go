@@ -49,6 +49,95 @@ func (s *Store) EnqueueRun(ctx context.Context, spec model.RunSpec) (model.Enque
 	return result, nil
 }
 
+// ErrRequeueIneligible marks a stranded run that restart recovery must
+// terminalize instead of re-firing: promotion CI, tag or release or
+// credentialed work, a run owned by a pending publication, or a branch that
+// already has newer active work (issue #270).
+var ErrRequeueIneligible = errors.New("store: stranded run is not eligible for restart requeue")
+
+// RequeueStrandedRun supersedes one still-running stranded run with a fresh
+// queued copy of the same spec (issue #270). The supersede inside the enqueue
+// marks the old run interrupted with a link to its replacement and records
+// the durable Job cancellation obligation; the scheduler's cancellation pass
+// executes that deletion before any new claim can start the replacement.
+func (s *Store) RequeueStrandedRun(ctx context.Context, runID string) (model.Run, error) {
+	if strings.TrimSpace(runID) == "" {
+		return model.Run{}, fmt.Errorf("%w: run ID is required", ErrInvalid)
+	}
+	now := unixNano(s.now())
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return model.Run{}, fmt.Errorf("begin stranded run requeue: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	run, err := scanRun(tx.QueryRowContext(ctx, `SELECT `+runColumns+` FROM runs WHERE id = ?`, runID))
+	if errors.Is(err, sql.ErrNoRows) {
+		return model.Run{}, fmt.Errorf("%w: run", ErrNotFound)
+	}
+	if err != nil {
+		return model.Run{}, fmt.Errorf("load stranded run: %w", err)
+	}
+	if run.Status != model.RunRunning {
+		return model.Run{}, ErrRequeueIneligible
+	}
+	var pendingPublications int
+	if err := tx.QueryRowContext(ctx, `
+SELECT COUNT(*) FROM publications WHERE run_id = ? AND status = 'pending'`, run.ID).Scan(&pendingPublications); err != nil {
+		return model.Run{}, fmt.Errorf("check stranded run publications: %w", err)
+	}
+	if pendingPublications > 0 {
+		return model.Run{}, ErrRequeueIneligible
+	}
+	requeued, err := s.requeueStrandedRunTx(ctx, tx, run, now)
+	if err != nil {
+		return model.Run{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return model.Run{}, fmt.Errorf("commit stranded run requeue: %w", err)
+	}
+	return requeued, nil
+}
+
+// requeueStrandedRunTx enqueues a fresh copy of a stranded run inside the
+// caller's transaction. The caller has already excluded pending-publication
+// owners; this helper owns the trigger-class and newer-work guards.
+func (s *Store) requeueStrandedRunTx(ctx context.Context, tx *sql.Tx, run model.Run, now int64) (model.Run, error) {
+	if run.RefKind != model.RefBranch || run.Trigger == "promotion" || run.Release || run.Credentialed {
+		return model.Run{}, ErrRequeueIneligible
+	}
+	// A newer push may already have replayed into the queue while this
+	// process was starting; requeueing the older SHA behind it would
+	// supersede the newer work backwards. The branch keeps exactly its
+	// newest active run.
+	var activeSiblings int
+	if err := tx.QueryRowContext(ctx, `
+SELECT COUNT(*) FROM runs
+WHERE repo_id = ? AND ref_kind = 'branch' AND ref = ? AND id != ?
+  AND status IN ('queued', 'running')`, run.RepoID, run.Ref, run.ID).Scan(&activeSiblings); err != nil {
+		return model.Run{}, fmt.Errorf("check active branch siblings: %w", err)
+	}
+	if activeSiblings > 0 {
+		return model.Run{}, ErrRequeueIneligible
+	}
+	spec, err := validateRunSpec(model.RunSpec{
+		RepoID: run.RepoID, RefKind: run.RefKind, Ref: run.Ref, SHA: run.SHA,
+		Actor: run.Actor, Release: run.Release, Credentialed: run.Credentialed,
+		Trigger: run.Trigger, TestedSHA: run.TestedSHA, BaseSHA: run.BaseSHA,
+	})
+	if err != nil {
+		return model.Run{}, err
+	}
+	id, err := randomID()
+	if err != nil {
+		return model.Run{}, fmt.Errorf("generate requeued run id: %w", err)
+	}
+	result, err := s.enqueueRunTx(ctx, tx, spec, id, now)
+	if err != nil {
+		return model.Run{}, fmt.Errorf("requeue stranded run %s: %w", run.ID, err)
+	}
+	return result.Run, nil
+}
+
 func validateRunSpec(spec model.RunSpec) (model.RunSpec, error) {
 	if spec.RepoID <= 0 || !spec.RefKind.Valid() || strings.TrimSpace(spec.Ref) == "" ||
 		!validOID(spec.SHA) || strings.TrimSpace(spec.Actor) == "" || strings.TrimSpace(spec.Trigger) == "" {
@@ -136,9 +225,18 @@ WHERE id != ? AND repo_id = ? AND ref_kind = 'branch' AND ref = ?
 			return model.EnqueueRunResult{}, fmt.Errorf("supersede earlier runs: %w", err)
 		}
 		for _, cancellation := range cancellations {
+			// Upsert: a run superseded across a restart may already carry an
+			// owner_restart obligation (run_id is the primary key). The fresh
+			// supersede obligation replaces it and re-arms completion so the
+			// stranded Job is still deleted exactly once (issue #270).
 			if _, err := tx.ExecContext(ctx, `
 INSERT INTO run_cancellations(run_id, job_name, superseded_by, reason, created_at)
-VALUES(?, ?, ?, 'superseded', ?)`, cancellation.RunID, cancellation.JobName, cancellation.SupersededBy, now); err != nil {
+VALUES(?, ?, ?, 'superseded', ?)
+ON CONFLICT(run_id) DO UPDATE SET
+    job_name = excluded.job_name,
+    superseded_by = excluded.superseded_by,
+    reason = excluded.reason,
+    completed_at = NULL`, cancellation.RunID, cancellation.JobName, cancellation.SupersededBy, now); err != nil {
 				return model.EnqueueRunResult{}, fmt.Errorf("record run cancellation: %w", err)
 			}
 		}
