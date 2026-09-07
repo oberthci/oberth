@@ -68,7 +68,10 @@ func (ingestor *PushIngestor) Branch(ctx context.Context, push BranchPush) (Push
 	if !validOID(push.NewOID) {
 		return PushResult{}, fmt.Errorf("%w: branch object ID is invalid", ErrInvalidInput)
 	}
-	peeled, err := ingestor.git.PeelObject(ctx, repository.Name, strings.ToLower(push.NewOID))
+	// Cache reads use the as-pushed repository input: for an org-scoped
+	// push it stays fully qualified, so same-named repositories under
+	// different upstreams resolve their OWN cache (issue #264).
+	peeled, err := ingestor.git.PeelObject(ctx, push.Repository, strings.ToLower(push.NewOID))
 	if err != nil {
 		return PushResult{}, fmt.Errorf("verify accepted branch commit: %w", err)
 	}
@@ -103,7 +106,7 @@ func (ingestor *PushIngestor) Tag(ctx context.Context, push TagPush) (PushResult
 		if !validOID(push.OldOID) {
 			return PushResult{}, fmt.Errorf("%w: deleted tag object ID is invalid", ErrInvalidInput)
 		}
-		peeled, peelErr := ingestor.git.PeelObject(ctx, repository.Name, strings.ToLower(push.OldOID))
+		peeled, peelErr := ingestor.git.PeelObject(ctx, push.Repository, strings.ToLower(push.OldOID))
 		if peelErr != nil {
 			return PushResult{}, fmt.Errorf("peel rejected tag deletion: %w", peelErr)
 		}
@@ -125,7 +128,7 @@ func (ingestor *PushIngestor) Tag(ctx context.Context, push TagPush) (PushResult
 	if !validOID(push.ReleaseAdmissionSHA) {
 		return PushResult{}, fmt.Errorf("%w: release admission object ID is invalid", ErrInvalidInput)
 	}
-	peeled, err := ingestor.git.PeelObject(ctx, repository.Name, strings.ToLower(push.NewOID))
+	peeled, err := ingestor.git.PeelObject(ctx, push.Repository, strings.ToLower(push.NewOID))
 	if err != nil {
 		return PushResult{}, fmt.Errorf("peel accepted tag: %w", err)
 	}
@@ -155,7 +158,7 @@ func (ingestor *PushIngestor) Tag(ctx context.Context, push TagPush) (PushResult
 		}
 		return PushResult{Repository: repository, Duplicate: duplicate, Reason: "release tags are immutable"}, nil
 	}
-	reachable, err := ingestor.git.ReleaseReachable(ctx, repository.Name, strings.ToLower(peeled.CommitSHA), strings.ToLower(push.ReleaseAdmissionSHA))
+	reachable, err := ingestor.git.ReleaseReachable(ctx, push.Repository, strings.ToLower(peeled.CommitSHA), strings.ToLower(push.ReleaseAdmissionSHA))
 	if err != nil {
 		return PushResult{}, fmt.Errorf("check release ancestry: %w", err)
 	}
@@ -166,7 +169,7 @@ func (ingestor *PushIngestor) Tag(ctx context.Context, push TagPush) (PushResult
 		}
 		return PushResult{Repository: repository, Duplicate: duplicate, Reason: ErrReleaseUnreachable.Error()}, nil
 	}
-	remoteObject, exists, err := ingestor.git.RemoteRef(ctx, repository.Name, "refs/tags/"+push.Tag)
+	remoteObject, exists, err := ingestor.git.RemoteRef(ctx, push.Repository, "refs/tags/"+push.Tag)
 	if err != nil {
 		return PushResult{}, fmt.Errorf("preflight upstream release tag: %w", err)
 	}

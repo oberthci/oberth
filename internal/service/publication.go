@@ -27,16 +27,23 @@ func deliverPublication(
 	git PublicationGit,
 	auditor Auditor,
 	repository model.Repository,
+	repositoryInput string,
 	publication model.Publication,
 ) (model.PublicationFinalization, error) {
 	if publication.Status != model.PublicationPending || publication.RepoID != repository.ID {
 		return model.PublicationFinalization{}, errors.New("service: publication does not match repository or is already terminal")
 	}
+	// repositoryInput is the fully-qualified cache input composed by the
+	// caller; the bare repository.Name is ambiguous once the same name
+	// exists under two upstreams (issue #264).
+	if strings.TrimSpace(repositoryInput) == "" {
+		repositoryInput = repository.Name
+	}
 	ref, err := canonicalPublicationRef(publication.RefKind, publication.Ref)
 	if err != nil {
 		return model.PublicationFinalization{}, err
 	}
-	remoteSHA, exists, err := git.RemoteRef(ctx, repository.Name, ref)
+	remoteSHA, exists, err := git.RemoteRef(ctx, repositoryInput, ref)
 	if err != nil {
 		failure := fmt.Errorf("read remote ref for publication %s: %w", publication.ID, err)
 		return publications.FinalizePublication(ctx, publication.ID, model.PublicationFailed, failure.Error())
@@ -46,7 +53,7 @@ func deliverPublication(
 		if exists && sameOID(remoteSHA, publication.ResultSHA) {
 			return publications.FinalizePublication(ctx, publication.ID, model.PublicationDelivered, "")
 		}
-		return attemptPublicationMutation(ctx, publications, git, auditor, repository, publication, ref, true)
+		return attemptPublicationMutation(ctx, publications, git, auditor, repository, repositoryInput, publication, ref, true)
 	}
 	if !publication.PreviousKnown {
 		publication, err = publications.SetPublicationPredecessor(ctx, publication.ID, remoteSHA, exists)
@@ -61,7 +68,7 @@ func deliverPublication(
 		return publications.FinalizePublication(ctx, publication.ID, model.PublicationFailed,
 			publicationConcurrencyError(publication, remoteSHA, exists).Error())
 	}
-	return attemptPublicationMutation(ctx, publications, git, auditor, repository, publication, ref, false)
+	return attemptPublicationMutation(ctx, publications, git, auditor, repository, repositoryInput, publication, ref, false)
 }
 
 func attemptPublicationMutation(
@@ -70,6 +77,7 @@ func attemptPublicationMutation(
 	git PublicationGit,
 	auditor Auditor,
 	repository model.Repository,
+	repositoryInput string,
 	publication model.Publication,
 	ref string,
 	forceBranch bool,
@@ -77,14 +85,14 @@ func attemptPublicationMutation(
 	mutationErr := auditedGitMutation(ctx, auditor, publication.Actor,
 		publicationAuditAction(publication), publicationAuditResource(publication), publicationAuditResourceID(publication),
 		publicationAuditDetails(repository, publication),
-		func() error { return mutatePublication(ctx, git, repository.Name, publication) })
+		func() error { return mutatePublication(ctx, git, repositoryInput, publication) })
 	if mutationErr == nil {
 		return publications.FinalizePublication(ctx, publication.ID, model.PublicationDelivered, "")
 	}
 
 	// A failed push or audit response can be ambiguous: the remote may already
 	// hold the exact result. Read it before deciding whether the operation is red.
-	remoteSHA, exists, verifyErr := git.RemoteRef(ctx, repository.Name, ref)
+	remoteSHA, exists, verifyErr := git.RemoteRef(ctx, repositoryInput, ref)
 	if verifyErr != nil {
 		failure := errors.Join(
 			fmt.Errorf("publication %s mutation was ambiguous: %w", publication.ID, mutationErr),

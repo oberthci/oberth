@@ -1444,7 +1444,7 @@ func TestSchedulerUpdatesOneCIIssueAcrossRedRedGreen(t *testing.T) {
 			t.Fatalf("status leaked internal model: %s", encoded)
 		}
 	}
-	if len(fixture.git.syncedBranches) != 1 || fixture.git.syncedBranches[0] != "oberth:feature/red-green:"+shas[2] {
+	if len(fixture.git.syncedBranches) != 1 || fixture.git.syncedBranches[0] != "codeberg/acme/oberth:feature/red-green:"+shas[2] {
 		t.Fatalf("green branch syncs = %#v", fixture.git.syncedBranches)
 	}
 }
@@ -1778,14 +1778,14 @@ func TestDefaultBranchUsesOrdinaryCIPublicationAndSync(t *testing.T) {
 	if finished.Status != model.RunPassed || finished.Phase != "passed" || finished.Error != "" {
 		t.Fatalf("default branch run = %#v", finished)
 	}
-	if len(fixture.git.syncedBranches) != 1 || fixture.git.syncedBranches[0] != "oberth:main:"+sha {
+	if len(fixture.git.syncedBranches) != 1 || fixture.git.syncedBranches[0] != "codeberg/acme/oberth:main:"+sha {
 		t.Fatalf("default branch publication = %#v", fixture.git.syncedBranches)
 	}
 	_, err = fixture.api(t).CallTool(ctx, api.Actor{Identity: "agent@host"}, "sync", json.RawMessage(`{"sha":"`+sha+`"}`))
 	if err != nil {
 		t.Fatalf("default branch sync: %v", err)
 	}
-	if len(fixture.git.syncedBranches) != 2 || fixture.git.syncedBranches[1] != "oberth:main:"+sha {
+	if len(fixture.git.syncedBranches) != 2 || fixture.git.syncedBranches[1] != "codeberg/acme/oberth:main:"+sha {
 		t.Fatalf("default branch sync = %#v", fixture.git.syncedBranches)
 	}
 }
@@ -2277,7 +2277,7 @@ func TestReleaseChecksOutCommitButPublishesRawTagObject(t *testing.T) {
 	if len(fixture.git.checkouts) != 1 || fixture.git.checkouts[0] != commitSHA {
 		t.Fatalf("release checkouts = %#v", fixture.git.checkouts)
 	}
-	if len(fixture.git.syncedTags) != 1 || fixture.git.syncedTags[0] != "oberth:v1.2.3:"+objectSHA {
+	if len(fixture.git.syncedTags) != 1 || fixture.git.syncedTags[0] != "codeberg/acme/oberth:v1.2.3:"+objectSHA {
 		t.Fatalf("release tag syncs = %#v", fixture.git.syncedTags)
 	}
 	if len(fixture.jobs.createdReleases) != 1 || len(fixture.jobs.createdCI) != 0 {

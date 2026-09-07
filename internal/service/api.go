@@ -1102,7 +1102,9 @@ func (service *API) sync(ctx context.Context, actor api.Actor, repositoryName, s
 	}
 	if err := auditedGitMutation(ctx, service.auditor, actor.Identity, "sync.branch", "run", run.ID,
 		map[string]any{"repo": repository.Name, "branch": run.Ref, "sha": run.SHA},
-		func() error { return service.git.SyncBranch(ctx, repository.Name, run.Ref, run.SHA) }); err != nil {
+		func() error {
+			return service.git.SyncBranch(ctx, service.cacheInputFor(ctx, repository), run.Ref, run.SHA)
+		}); err != nil {
 		return model.Run{}, fmt.Errorf("sync branch: %w", err)
 	}
 	return run, nil

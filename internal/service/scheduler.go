@@ -865,7 +865,11 @@ func (scheduler *Scheduler) deliverPublicationWithGate(
 	if err := require(ctx); err != nil {
 		return model.PublicationFinalization{}, err
 	}
-	finalization, err := deliverPublication(ctx, scheduler.store, scheduler.git, scheduler.auditor, repository, publication)
+	publicationInput := repository.Name
+	if upstream, upstreamErr := scheduler.store.Upstream(ctx, repository.UpstreamID); upstreamErr == nil {
+		publicationInput = upstream.QualifiedRepo(repository.Name)
+	}
+	finalization, err := deliverPublication(ctx, scheduler.store, scheduler.git, scheduler.auditor, repository, publicationInput, publication)
 	if err != nil {
 		return model.PublicationFinalization{}, err
 	}
