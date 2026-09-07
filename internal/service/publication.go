@@ -131,7 +131,13 @@ func classifyRemotePublication(publication model.Publication, remoteSHA string, 
 	if exists && sameOID(remoteSHA, publication.ResultSHA) {
 		return remotePublicationResult
 	}
-	if (!exists && publication.PreviousSHA == "") || (exists && sameOID(remoteSHA, publication.PreviousSHA)) {
+	// The zero OID is Git's "no object" identity: a publication whose
+	// recorded previous is zeroOID expects the ref to be ABSENT (branch
+	// creation on an unborn target, issue #264), exactly like an empty
+	// previous. A live ref can never equal the zero OID, so the exists
+	// arm cannot misclassify.
+	if (!exists && (publication.PreviousSHA == "" || sameOID(publication.PreviousSHA, zeroOID))) ||
+		(exists && sameOID(remoteSHA, publication.PreviousSHA)) {
 		return remotePublicationPrevious
 	}
 	return remotePublicationOther

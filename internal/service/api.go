@@ -1154,10 +1154,21 @@ func (service *API) promote(ctx context.Context, actor api.Actor, repositoryName
 	if err != nil {
 		return service.failAdmittedPromotion(ctx, promotion, "prepare promotion: "+err.Error(), "")
 	}
-	if !validOID(plan.BaseSHA) || !validOID(plan.MergedSHA) {
+	if !validOID(plan.MergedSHA) ||
+		(plan.TargetUnborn && (plan.BaseSHA != "" || !plan.FastForward)) ||
+		(!plan.TargetUnborn && !validOID(plan.BaseSHA)) {
 		return service.failAdmittedPromotion(ctx, promotion, "promotion plan contains invalid object IDs", "")
 	}
-	planned, err := service.promotions.PlanPromotion(ctx, promotion.ID, plan.BaseSHA, plan.MergedSHA)
+	// An unborn target (brand-new repository, issue #264) has no base
+	// commit. The promotion row records Git's canonical zero OID — the
+	// receive-pack representation of a created ref — because the store
+	// schema requires a concrete planned base; the publication keeps the
+	// empty previous, which is the delivery layer's creation contract.
+	planBase := plan.BaseSHA
+	if plan.TargetUnborn {
+		planBase = zeroOID
+	}
+	planned, err := service.promotions.PlanPromotion(ctx, promotion.ID, planBase, plan.MergedSHA)
 	if err != nil {
 		return service.failAdmittedPromotion(ctx, promotion, "record promotion plan: "+err.Error(), "")
 	}
@@ -1170,7 +1181,7 @@ func (service *API) promote(ctx context.Context, actor api.Actor, repositoryName
 	if plan.FastForward {
 		publication, err := service.promotions.BeginPublication(ctx, model.PublicationSpec{
 			RepoID: repository.ID, PromotionID: promotion.ID, RefKind: model.RefBranch, Ref: target,
-			PreviousSHA: plan.BaseSHA, PreviousKnown: true,
+			PreviousSHA: planBase, PreviousKnown: true,
 			ResultSHA: plan.MergedSHA, Actor: actor.Identity,
 		})
 		if err != nil {

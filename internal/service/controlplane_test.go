@@ -2581,6 +2581,43 @@ func TestPromotionFastForwardDivergentAndNonFastForwardFailure(t *testing.T) {
 		}
 	})
 
+	t.Run("unborn target creates branch from tested source", func(t *testing.T) {
+		// Promotion side of the empty-upstream bootstrap (issue #264): a
+		// brand-new repository's first promotion targets a branch that does
+		// not exist upstream. The plan carries TargetUnborn with an empty
+		// base; publication uses creation semantics (known empty previous).
+		fixture := newControlFixture(t)
+		seedGreen(t, fixture)
+		fixture.git.plan = gitcache.MergeCandidate{MergedSHA: sourceSHA, FastForward: true, TargetUnborn: true}
+		value, err := fixture.api(t).CallTool(context.Background(), api.Actor{Identity: "agent@host"}, "promote", json.RawMessage(`{"sha":"`+sourceSHA+`","branch":"main"}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		promotion := requireToolPromotion(t, fixture, value)
+		if promotion.Status != model.PromotionPassed || promotion.PreviousSHA != zeroOID || promotion.ResultSHA != sourceSHA || len(fixture.git.promotions) != 1 {
+			t.Fatalf("unborn-target promotion = %#v pushes=%#v", promotion, fixture.git.promotions)
+		}
+	})
+
+	t.Run("unborn plan with a base or without fast-forward is invalid", func(t *testing.T) {
+		for _, plan := range []gitcache.MergeCandidate{
+			{BaseSHA: baseSHA, MergedSHA: sourceSHA, FastForward: true, TargetUnborn: true},
+			{MergedSHA: sourceSHA, TargetUnborn: true},
+		} {
+			fixture := newControlFixture(t)
+			seedGreen(t, fixture)
+			fixture.git.plan = plan
+			value, err := fixture.api(t).CallTool(context.Background(), api.Actor{Identity: "agent@host"}, "promote", json.RawMessage(`{"sha":"`+sourceSHA+`","branch":"main"}`))
+			if err != nil {
+				t.Fatal(err)
+			}
+			promotion := requireToolPromotion(t, fixture, value)
+			if promotion.Status != model.PromotionFailed || !strings.Contains(promotion.Error, "invalid object IDs") {
+				t.Fatalf("contradictory unborn plan %+v -> %#v, want failed invalid-object-IDs", plan, promotion)
+			}
+		}
+	})
+
 	t.Run("already-contained source queues target tree CI", func(t *testing.T) {
 		fixture := newControlFixture(t)
 		seedGreen(t, fixture)

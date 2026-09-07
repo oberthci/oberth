@@ -486,6 +486,11 @@ implementation detail disagree.
   fetched target fast-forwards to that exact candidate. Divergent merges and a
   fetched target that already contains the candidate receive target-tree CI.
   The chosen target is pushed without force; a moved target fails the promotion.
+  An unborn target (brand-new repository whose upstream lacks the branch —
+  confirmed by a successful, empty ls-remote, never inferred from a failed
+  fetch) is a fast-forward creation of the tested source; the promotion row
+  records the zero OID as its planned base and delivery expects the ref to be
+  absent, failing closed if the target appeared concurrently.
 - A reachable tag runs the release burn with the release-only cache and
   store-sourced credentials; an unreachable tag receives no release credentials
   and is not synced.

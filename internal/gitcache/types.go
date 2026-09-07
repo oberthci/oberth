@@ -71,6 +71,10 @@ type MergeCandidate struct {
 	BaseSHA     string
 	MergedSHA   string
 	FastForward bool
+	// TargetUnborn marks a promotion whose upstream target branch does not
+	// exist yet (brand-new repository, issue #264 bootstrap chain): BaseSHA
+	// is empty and delivery creates the branch from the tested source.
+	TargetUnborn bool
 }
 
 // PeeledObject preserves the raw tag/ref object identity used for publication

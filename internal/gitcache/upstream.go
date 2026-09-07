@@ -193,7 +193,20 @@ func (c *Cache) PreparePromotion(ctx context.Context, input, sourceSHA, targetBr
 	}
 	tracking := upstreamRefPrefix + "promote/" + targetBranch
 	if err := c.run(ctx, commandSpec{dir: path, args: []string{"fetch", "--no-tags", "upstream", "+refs/heads/" + targetBranch + ":" + tracking}}); err != nil {
-		return MergeCandidate{}, fmt.Errorf("fetch promotion target %s: %w", targetBranch, err)
+		unborn, unbornErr := c.remoteBranchAbsent(ctx, path, targetBranch)
+		if unbornErr != nil || !unborn {
+			return MergeCandidate{}, fmt.Errorf("fetch promotion target %s: %w", targetBranch, err)
+		}
+		// The upstream repository has no target branch yet (brand-new
+		// repository, issue #264 bootstrap chain): the promotion is a
+		// branch creation that publishes the already-tested source SHA
+		// verbatim. A stale tracking ref from an earlier prepared cycle
+		// must not linger as a phantom base.
+		_ = c.run(ctx, commandSpec{dir: path, args: []string{"update-ref", "-d", tracking}})
+		if err := c.pinPromotion(ctx, path, targetBranch, sourceSHA, ""); err != nil {
+			return MergeCandidate{}, err
+		}
+		return MergeCandidate{MergedSHA: sourceSHA, FastForward: true, TargetUnborn: true}, nil
 	}
 	base, err := c.capture(ctx, path, "rev-parse", "--verify", tracking+"^{commit}")
 	if err != nil {
@@ -245,6 +258,18 @@ func (c *Cache) PreparePromotion(ctx context.Context, input, sourceSHA, targetBr
 	}
 	clean = true
 	return MergeCandidate{BaseSHA: base, MergedSHA: merged}, nil
+}
+
+// remoteBranchAbsent reports whether the upstream definitively lacks the
+// branch: ls-remote must itself succeed (transport reachable) and return no
+// matching ref, so a network failure can never masquerade as an unborn
+// target and turn a transient outage into a branch creation.
+func (c *Cache) remoteBranchAbsent(ctx context.Context, path, branch string) (bool, error) {
+	output, err := c.capture(ctx, path, "ls-remote", "--heads", "upstream", "refs/heads/"+branch)
+	if err != nil {
+		return false, err
+	}
+	return strings.TrimSpace(output) == "", nil
 }
 
 func (c *Cache) pinPromotion(ctx context.Context, cachePath, targetBranch, sha, workspace string) error {

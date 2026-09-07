@@ -356,6 +356,75 @@ func TestPromotionPushRejectsMovedNonFastForwardTarget(t *testing.T) {
 	}
 }
 
+// TestPreparePromotionCreatesUnbornTarget pins the promotion side of the
+// empty-upstream bootstrap (issue #264): promoting the first green branch of
+// a brand-new repository targets a branch the upstream does not have yet.
+// The plan must come back as a fast-forward creation (TargetUnborn, empty
+// base) and the follow-up push must create the branch upstream.
+func TestPreparePromotionCreatesUnbornTarget(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	upstream := filepath.Join(root, "new-upstream.git")
+	runGit(t, "", "init", "--bare", "--initial-branch=main", upstream)
+	cache, err := New(Config{
+		Root:           filepath.Join(root, "cache"),
+		CommandTimeout: 10 * time.Second,
+		Upstream:       func(string) (string, error) { return upstream, nil },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ready, err := cache.Ensure(context.Background(), "new-repo")
+	if err != nil {
+		t.Fatalf("Ensure on empty upstream: %v", err)
+	}
+
+	work := filepath.Join(root, "work")
+	runGit(t, "", "init", "--initial-branch=init-terraform", work)
+	runGit(t, work, "-c", "user.name=t", "-c", "user.email=t@localhost", "commit", "--allow-empty", "-m", "first")
+	source := runGit(t, work, "rev-parse", "HEAD")
+	runGit(t, work, "push", ready.Path, source+":refs/heads/init-terraform")
+
+	candidate, err := cache.PreparePromotion(context.Background(), "new-repo", source, "main", filepath.Join(t.TempDir(), "merge"))
+	if err != nil {
+		t.Fatalf("prepare promotion onto unborn target: %v", err)
+	}
+	if !candidate.TargetUnborn || !candidate.FastForward || candidate.BaseSHA != "" || candidate.MergedSHA != source {
+		t.Fatalf("candidate = %+v, want unborn fast-forward creation of %s", candidate, source)
+	}
+
+	if err := cache.PushPromotion(context.Background(), "new-repo", "main", source); err != nil {
+		t.Fatalf("push promotion creating unborn target: %v", err)
+	}
+	if got := remoteRef(t, upstream, "refs/heads/main"); got != source {
+		t.Fatalf("upstream main = %q, want created at %q", got, source)
+	}
+}
+
+// TestPreparePromotionUnreachableUpstreamIsNotUnborn pins the fail-closed
+// side: when the target fetch fails because the upstream is unreachable, the
+// ls-remote confirmation also fails, and the promotion must surface the
+// fetch error instead of misclassifying the outage as a branch creation.
+func TestPreparePromotionUnreachableUpstreamIsNotUnborn(t *testing.T) {
+	t.Parallel()
+	repository := newTestRepository(t)
+	cache := newTestCache(t, repository.upstream)
+	ready, err := cache.Ensure(context.Background(), "example")
+	if err != nil {
+		t.Fatal(err)
+	}
+	feature := repository.featureCommit(t, "feature/orphaned", "orphaned\n")
+	runGit(t, repository.work, "push", ready.Path, feature+":refs/heads/feature/orphaned")
+
+	if err := os.RemoveAll(repository.upstream); err != nil {
+		t.Fatal(err)
+	}
+	_, err = cache.PreparePromotion(context.Background(), "example", feature, "main", filepath.Join(t.TempDir(), "merge"))
+	if err == nil || !strings.Contains(err.Error(), "fetch promotion target") {
+		t.Fatalf("unreachable upstream error = %v, want fetch promotion target failure", err)
+	}
+}
+
 func TestAlreadyContainedPromotionRequiresTargetTreeCI(t *testing.T) {
 	t.Parallel()
 	repository := newTestRepository(t)

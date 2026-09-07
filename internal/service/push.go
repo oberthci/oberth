@@ -291,4 +291,10 @@ func deletionOID(value string) bool {
 
 func validOID(value string) bool { return gitoid.ValidTrimmed(value) }
 
+// zeroOID is Git's canonical "no object" identity — the old-oid receive-pack
+// advertises when a ref is created. Promotion rows use it as the planned
+// base of an unborn target (issue #264) so the append-only store still
+// records a concrete plan while delivery keeps creation semantics.
+const zeroOID = "0000000000000000000000000000000000000000"
+
 func sameOID(first, second string) bool { return gitoid.Same(first, second) }
