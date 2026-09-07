@@ -1,10 +1,13 @@
 package gitcache
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestMigrateToQualifiedLayout(t *testing.T) {
@@ -280,5 +283,51 @@ func TestReservationIdentityAndPathIsolation(t *testing.T) {
 	}
 	if pending[0].Repo != githubIdentity || pending[1].Repo != "legacy-repo" {
 		t.Fatalf("pending identities = %q, %q", pending[0].Repo, pending[1].Repo)
+	}
+}
+
+// TestDefaultBranchFromSymrefAndEmptyBootstrap pins the empty-upstream
+// bootstrap decision (issue #264 rollout): a refless advertisement falls
+// back to "main"; an advertisement WITH refs but no symbolic HEAD stays a
+// hard error; a symbolic HEAD wins outright. The pure helper is tested with
+// the exact shapes GitHub's SSH transport produced for the empty
+// oberthci/terraform repository.
+func TestDefaultBranchFromSymrefAndEmptyBootstrap(t *testing.T) {
+	t.Parallel()
+
+	branch, err := defaultBranchFromSymref("ref: refs/heads/trunk\tHEAD\nabc123\tHEAD\n")
+	if err != nil || branch != "trunk" {
+		t.Fatalf("symref parse = %q, %v", branch, err)
+	}
+
+	if _, err := defaultBranchFromSymref(""); !errors.Is(err, errNoSymbolicDefaultBranch) {
+		t.Fatalf("empty advertisement error = %v", err)
+	}
+	if _, err := defaultBranchFromSymref("abc123\trefs/heads/one\nabc456\trefs/heads/two\n"); !errors.Is(err, errNoSymbolicDefaultBranch) {
+		t.Fatalf("refs-without-symref error = %v", err)
+	}
+
+	// End to end against a local empty bare upstream: Ensure succeeds and
+	// the cache's HEAD lands on a valid branch (the local transport
+	// advertises the unborn symref; servers that do not are covered by the
+	// pure-function cases above plus the refless fallback in
+	// discoverDefaultBranch).
+	root := t.TempDir()
+	upstream := filepath.Join(root, "empty-upstream.git")
+	runGit(t, "", "init", "--bare", "--initial-branch=main", upstream)
+	cache, err := New(Config{
+		Root:           filepath.Join(root, "cache"),
+		CommandTimeout: 10 * time.Second,
+		Upstream:       func(string) (string, error) { return upstream, nil },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	repository, err := cache.Ensure(context.Background(), "empty-repo")
+	if err != nil {
+		t.Fatalf("Ensure on empty upstream: %v", err)
+	}
+	if repository.DefaultBranch == "" {
+		t.Fatal("empty upstream must still yield a default branch")
 	}
 }

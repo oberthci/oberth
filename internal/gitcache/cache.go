@@ -855,10 +855,44 @@ func (c *Cache) writeMaterializeManifest(path string, tracking, owned map[string
 }
 
 func (c *Cache) discoverDefaultBranch(ctx context.Context, path string) (string, error) {
-	output, err := c.capture(ctx, path, "ls-remote", "--symref", "upstream", "HEAD")
+	symrefOutput, err := c.capture(ctx, path, "ls-remote", "--symref", "upstream", "HEAD")
 	if err != nil {
 		return "", err
 	}
+	branch, err := defaultBranchFromSymref(symrefOutput)
+	if err == nil {
+		return branch, nil
+	}
+	if !errors.Is(err, errNoSymbolicDefaultBranch) {
+		return "", err
+	}
+	// No symbolic HEAD in the advertisement. Distinguish a brand-new EMPTY
+	// upstream (repository provisioned on the forge with zero commits —
+	// e.g. github.com/oberthci/terraform at bootstrap; some servers do not
+	// advertise the unborn-HEAD symref over ls-remote) from an upstream
+	// that HAS refs but no symbolic HEAD. The empty case has nothing to
+	// guess between and falls back to "main", the same default `repo add`
+	// records until the first push confirms it; the populated case stays a
+	// hard error because choosing among existing branches would guess the
+	// promotion target and the release reachability anchor.
+	refsOutput, refsErr := c.capture(ctx, path, "ls-remote", "upstream")
+	if refsErr != nil {
+		return "", errors.Join(err, refsErr)
+	}
+	if strings.TrimSpace(refsOutput) == "" {
+		return "main", nil
+	}
+	return "", err
+}
+
+// errNoSymbolicDefaultBranch reports an upstream advertisement that carries
+// no symbolic HEAD; discoverDefaultBranch decides whether that is the empty
+// bootstrap case or a hard error.
+var errNoSymbolicDefaultBranch = errors.New("upstream did not advertise a symbolic default branch")
+
+// defaultBranchFromSymref extracts the default branch from
+// `ls-remote --symref <remote> HEAD` output.
+func defaultBranchFromSymref(output string) (string, error) {
 	for _, line := range strings.Split(output, "\n") {
 		fields := strings.Fields(line)
 		if len(fields) != 3 || fields[0] != "ref:" || fields[2] != "HEAD" || !strings.HasPrefix(fields[1], "refs/heads/") {
@@ -870,7 +904,7 @@ func (c *Cache) discoverDefaultBranch(ctx context.Context, path string) (string,
 		}
 		return branch, nil
 	}
-	return "", errors.New("upstream did not advertise a symbolic default branch")
+	return "", errNoSymbolicDefaultBranch
 }
 
 func (c *Cache) currentDefaultBranch(ctx context.Context, path string) (string, error) {
@@ -894,7 +928,14 @@ func (c *Cache) setHead(ctx context.Context, path, branch string) error {
 	}
 	ref := "refs/heads/" + branch
 	if _, err := c.capture(ctx, path, "show-ref", "--verify", "--quiet", ref); err != nil {
-		return fmt.Errorf("upstream default branch %s was not fetched: %w", branch, err)
+		// Unborn-branch bootstrap: an EMPTY upstream fetched zero refs, so
+		// its default branch cannot exist in the cache yet. Point HEAD at
+		// the unborn branch only when the cache holds no refs at all — a
+		// missing branch in a populated cache still means the fetch failed.
+		refs, listErr := c.capture(ctx, path, "for-each-ref", "--count=1")
+		if listErr != nil || strings.TrimSpace(refs) != "" {
+			return fmt.Errorf("upstream default branch %s was not fetched: %w", branch, err)
+		}
 	}
 	return c.run(ctx, commandSpec{dir: path, args: []string{"symbolic-ref", "HEAD", ref}})
 }
