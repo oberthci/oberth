@@ -193,6 +193,12 @@ spec:
             {{- end }}
             {{- end }}
             - --argo-namespace={{ required "argo.namespace is required" .Values.argo.namespace }}
+            {{- if .Values.argo.controllerProfile }}
+            {{- if ne .Values.argo.controllerProfile "nonroot-static-v1" }}
+            {{- fail "argo.controllerProfile must be empty or nonroot-static-v1" }}
+            {{- end }}
+            - --argo-controller-profile={{ .Values.argo.controllerProfile }}
+            {{- end }}
             - --argo-pipeline-serviceaccount={{ .Values.argo.pipelineServiceAccount | default .Values.argo.ciServiceAccount | default "oberth-argo-pipeline" }}
             - --argo-credentialed-serviceaccount={{ .Values.argo.credentialedServiceAccount | default "oberth-argo-credentialed" }}
             - --argo-ci-secrets-serviceaccount={{ (.Values.argo.ciSecrets).serviceAccount | default "oberth-argo-ci-secrets" }}

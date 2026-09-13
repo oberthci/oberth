@@ -66,6 +66,10 @@ const (
 // Config is the administrator-owned half of the Argo engine. Every field that
 // decides trust is here, not in the repository document.
 type Config struct {
+	// NonrootProfile selects an exact built-in verification policy, not an
+	// unchecked capability. Empty disables selected nonroot leaves.
+	NonrootProfile string
+
 	// Namespace is where every Workflow and its pods are created. It is
 	// deliberately separate from the namespace Oberth itself runs in: the
 	// Vault Kubernetes-auth roles bind (namespace, ServiceAccount) pairs, and
@@ -222,6 +226,9 @@ func (config *Config) applyDefaults() {
 
 // Validate rejects a configuration that could not produce a safe submission.
 func (config Config) Validate() error {
+	if config.NonrootProfile != "" && config.NonrootProfile != argoworkflow.NonrootStaticProfile {
+		return errors.New("argojob: unsupported nonroot controller profile")
+	}
 	var problems []error
 	if messages := k8svalidation.IsDNS1123Label(config.Namespace); len(messages) != 0 {
 		problems = append(problems, fmt.Errorf("argojob: namespace %q is invalid: %s",
@@ -418,7 +425,8 @@ func vaultAddressRequiresPinnedAnchor(address string) bool {
 
 // Request is one run's submission intent.
 type Request struct {
-	RunID string
+	nonrootProof *nonrootProof
+	RunID        string
 	// Name is the durable, deterministic object name the scheduler already
 	// persisted for this run. Both engines use it, so recovery can find the
 	// object without knowing which engine created it.
@@ -585,6 +593,9 @@ func Build(config Config, request Request) (*wfv1.Workflow, error) {
 	injectServerVolumes(workflow, config, request, credentialed)
 	injectWorkspaceEnvironment(workflow)
 	injectRunEnvironment(workflow, config, request, credentialed)
+	if err := applyNonrootLeaves(workflow, config, request); err != nil {
+		return nil, err
+	}
 
 	digest, err := specIdentity(workflow)
 	if err != nil {

@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -194,6 +195,77 @@ spec:
 
 type stubAuditor struct {
 	onAppend func(model.AuditActionSpec)
+}
+
+type orderedNonrootController struct {
+	argoControl
+	prepare func(argojob.Request) (argojob.Request, error)
+	create  func(argojob.Request) (string, error)
+}
+
+func (controller *orderedNonrootController) PrepareNonroot(_ context.Context, request argojob.Request) (argojob.Request, error) {
+	return controller.prepare(request)
+}
+
+func (controller *orderedNonrootController) Create(_ context.Context, request argojob.Request) (string, error) {
+	return controller.create(request)
+}
+
+func TestNonrootPreparationPrecedesAuditAndCreation(t *testing.T) {
+	for _, fail := range []bool{false, true} {
+		fixture := newRaceFixture(t)
+		prepared, audited, created := false, false, false
+		fixture.jobs.controller = &orderedNonrootController{argoControl: fixture.controller,
+			prepare: func(request argojob.Request) (argojob.Request, error) {
+				if audited || created {
+					t.Fatal("preparation occurred after audit/create")
+				}
+				prepared = true
+				if fail {
+					return argojob.Request{}, errors.New("controlled profile rejection")
+				}
+				return request, nil
+			},
+			create: func(request argojob.Request) (string, error) {
+				if !prepared || !audited {
+					t.Fatal("create preceded prepared audit")
+				}
+				created = true
+				return request.Name, nil
+			},
+		}
+		fixture.jobs.auditor = &stubAuditor{onAppend: func(model.AuditActionSpec) {
+			if !prepared || created {
+				t.Fatal("audit is not between preparation and create")
+			}
+			audited = true
+		}}
+		err := fixture.jobs.CreateCI(t.Context(), fixture.request("wf-nonroot-order", "run-nonroot-order"))
+		if (err != nil) != fail || !prepared || audited == fail || created == fail {
+			t.Fatalf("failed=%v prepared=%v audited=%v created=%v error=%v", fail, prepared, audited, created, err)
+		}
+	}
+}
+
+func TestSelectedNonrootWithoutProofCannotBeAudited(t *testing.T) {
+	fixture := newRaceFixture(t)
+	path := filepath.Join(fixture.sourceDir, ".oberth", "build.yaml")
+	source, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	source = []byte(strings.Replace(string(source), "oberth.ci/size: M", "oberth.ci/size: M\n    oberth.ci/nonroot-templates: main", 1))
+	if err := os.WriteFile(path, source, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	fixture.jobs.config.NonrootProfile = argoworkflow.NonrootStaticProfile
+	fixture.jobs.auditor = &stubAuditor{onAppend: func(model.AuditActionSpec) { t.Fatal("unproved nonroot submission audited") }}
+	if err := fixture.jobs.CreateCI(t.Context(), fixture.request("wf-no-proof", "run-no-proof")); err == nil {
+		t.Fatal("nonroot declaration manufactured proof")
+	}
+	if len(fixture.controller.created) != 0 {
+		t.Fatal("unproved nonroot submitted")
+	}
 }
 
 func (a *stubAuditor) AppendAuditAction(_ context.Context, spec model.AuditActionSpec) (model.AuditAction, error) {

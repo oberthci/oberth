@@ -3,10 +3,9 @@
 # not sit beside server-tier ones. That means a second, namespaced Role: the
 # server creates and supervises Workflows there, and reads the step Pods' logs.
 #
-# Note what is absent. No create on secrets, no exec, no configmaps: on this
-# tier Oberth never holds a credential, because envconsul fetches in-Pod. The
-# server's power over an Argo pipeline is exactly the power to submit it, watch
-# it, read its logs, and delete it.
+# The optional nonroot profile adds GET on one exact public immutable ConfigMap.
+# It adds no collection/write or Secret permission; existing executor token and
+# source-seeding permissions below retain their established ownership boundary.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
@@ -15,6 +14,17 @@ metadata:
   labels:
     {{- include "oberth.labels" . | nindent 4 }}
 rules:
+  {{- if .Values.argo.controllerProfile }}
+  {{- if ne .Values.argo.controllerProfile "nonroot-static-v1" }}
+  {{- fail "argo.controllerProfile must be empty or nonroot-static-v1" }}
+  {{- end }}
+  # Verification reads only this public immutable controller profile. No
+  # collection, write or Secret permission accompanies the binding.
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    resourceNames: ["oberth-argo-nr-5f121f7f1f5ef468eb2208b1cf7e911746c8cb6173c1d24e"]
+    verbs: ["get"]
+  {{- end }}
   - apiGroups: ["argoproj.io"]
     resources: ["workflows"]
     verbs: ["create", "get", "list", "watch", "delete"]
@@ -58,4 +68,3 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
   name: {{ include "oberth.fullname" . }}-argo
-

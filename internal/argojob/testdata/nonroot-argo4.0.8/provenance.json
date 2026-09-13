@@ -1,0 +1,21 @@
+{
+  "Path": "github.com/argoproj/argo-workflows/v4",
+  "Version": "v4.0.8",
+  "Sum": "h1:qa2GNFSihNtvI/v9/dgwq84E1mrfbVb8eTXB6YMxMlY=",
+  "GoModSum": "h1:WLJnjr1uNM+6dhpVdnJArvSq90FJ3bdRgHEsHVR00wM=",
+  "source_file": "workflow/controller/workflowpod.go",
+  "source_sha256": "97d059a8ffed7854760fa8c109f657a4d6be0e2496ed193ee1dd541118b8f763",
+  "capture_boundary": "immediately before var podSpecPatchs / processPodSpecPatch",
+  "instrumented_sha256": "8a8c8327d4ff72050f41fef7db4d1fe24244817dc55511351f664b0673a82cf4",
+  "files": {
+    "container-before-patch.json": "493479d23d11650d43c4009f7035bce6f573b9a031ed736cc949c9ae0ab9c331",
+    "container-submitted.json": "878bcf5e9922614962d9faecf7cf7170fc0ef2c87910a7dce8447490744ffecc",
+    "script-before-patch.json": "ffc1cc27dacc51a15070df8128232097903650385eee33b85f206b5ef6aaf782",
+    "script-submitted.json": "bf32be7736829e0adbc04a7f7a7c587448e226b9bc96be4814854e54247850d0",
+    "controller-profile.json": "7ca0f2aff6cf39e67aa5996672363a3a7a8401449a794f32d5cf375e7267a4c0",
+    "container-persisted-workflow.json": "7f2b4b29e66684e40ba6bd9fc4a79a57c87cbc47a4c8c8c867108653d737a653",
+    "script-persisted-workflow.json": "4daf5daf040707ab113e5a58e420943f481651f67f544632f9ba394bfad7419f"
+  },
+  "stage": "Before processPodSpecPatch, workflow/controller/workflowpod.go:405; observed submitted Pod after main emissary/volume rewriting at417-456.",
+  "controller_profile": "nonroot-static-v1; exact executor digest and gloglevel0; raw before-Pods include separate hostile SC control. Persisted Workflows use supported profile and actual operate-to-Running fake API reconciliation."
+}

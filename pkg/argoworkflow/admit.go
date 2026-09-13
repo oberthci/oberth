@@ -67,6 +67,9 @@ func Admit(workflow *wfv1.Workflow, policy Policy) error {
 	problems = append(problems, admitMetadata(workflow)...)
 	problems = append(problems, admitSpec(&workflow.Spec)...)
 	problems = append(problems, admitTemplates(workflow, policy)...)
+	if _, err := DeclaredNonrootTemplates(workflow); err != nil {
+		problems = append(problems, err)
+	}
 	return errors.Join(problems...)
 }
 

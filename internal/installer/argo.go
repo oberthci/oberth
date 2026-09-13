@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/oberthci/oberth/pkg/argoworkflow"
 )
 
 const (
@@ -85,6 +87,10 @@ func InstallArgoWorkflows(ctx context.Context, cfg Config, deps Deps) (ArgoResul
 	if ns == "" {
 		ns = DefaultArgoNamespace
 	}
+	cfg.ArgoNamespace = ns
+	if cfg.ArgoControllerProfile != "" && (cfg.ArgoControllerProfile != argoworkflow.NonrootStaticProfile || cfg.SkipArgo || (cfg.ArgoChartVersion != "" && cfg.ArgoChartVersion != DefaultArgoChartVersion)) {
+		return ArgoResult{}, errors.New("nonroot profile requires the managed exact Argo chart1.0.24")
+	}
 	result := ArgoResult{Namespace: ns}
 	if cfg.SkipArgo {
 		result.Skipped = true
@@ -111,7 +117,16 @@ func InstallArgoWorkflows(ctx context.Context, cfg Config, deps Deps) (ArgoResul
 		result.TargetVersion = DefaultArgoChartVersion
 	}
 
-	switch planHelmAction(exists, result.InstalledVersion, result.TargetVersion, release.Status, cfg.Upgrade) {
+	profileFile, cleanup, err := prepareNonrootArgoValues(ctx, cfg, deps, exists, result.InstalledVersion)
+	if err != nil {
+		return result, err
+	}
+	defer cleanup()
+	action := planHelmAction(exists, result.InstalledVersion, result.TargetVersion, release.Status, cfg.Upgrade)
+	if profileFile != "" && action == actionSkip {
+		action = actionUpgrade
+	}
+	switch action {
 	case actionSkip:
 		result.AlreadyInstalled = true
 		return result, nil
@@ -127,7 +142,11 @@ func InstallArgoWorkflows(ctx context.Context, cfg Config, deps Deps) (ArgoResul
 		_, _ = fmt.Fprintln(deps.Output, "Installing Argo Workflows...")
 	}
 
-	if _, err := deps.RunHelm(ctx, ArgoHelmArgs(cfg)); err != nil {
+	args := ArgoHelmArgs(cfg)
+	if profileFile != "" {
+		args = append(args, "--values", profileFile)
+	}
+	if _, err := deps.RunHelm(ctx, args); err != nil {
 		return result, fmt.Errorf("helm install Argo Workflows: %w", err)
 	}
 	return result, nil
@@ -216,6 +235,9 @@ func argoOberthHelmValues(cfg Config, openbao OpenBaoResult) []string {
 		ns = DefaultArgoNamespace
 	}
 	values := []string{"--set", "argo.namespace=" + ns}
+	if cfg.ArgoControllerProfile != "" {
+		values = append(values, "--set", "argo.controllerProfile="+cfg.ArgoControllerProfile)
+	}
 	address := strings.TrimSpace(cfg.ArgoVaultAddress)
 	// When the installer manages a production secret store and the caller did
 	// not explicitly point pipelines at a different vault, default to the

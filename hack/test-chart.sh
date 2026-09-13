@@ -575,6 +575,24 @@ if render --set argo.ciSecrets.serviceAccount=oberth-argo-credentialed >/dev/nul
   exit 1
 fi
 
+# Ordinary nonroot capability must stay off unless the exact built-in profile
+# is selected. Selection grants one named public ConfigMap GET, not broad reads.
+if grep -q -- '--argo-controller-profile=' "$manifest"; then
+  exit 1
+fi
+render --set argo.controllerProfile=nonroot-static-v1 >"$argo_legacy_manifest"
+grep -q -- '--argo-controller-profile=nonroot-static-v1' "$argo_legacy_manifest"
+render --set argo.controllerProfile=nonroot-static-v1 \
+  --show-only templates/rbac-argo.yaml >"$argo_vault_manifest"
+test "$(grep -c 'resources: \["configmaps"\]' "$argo_vault_manifest")" -eq 1
+grep -A2 'resources: \["configmaps"\]' "$argo_vault_manifest" | \
+  grep -q 'resourceNames: \["oberth-argo-nr-5f121f7f1f5ef468eb2208b1cf7e911746c8cb6173c1d24e"\]'
+grep -A2 'resources: \["configmaps"\]' "$argo_vault_manifest" | \
+  grep -q 'verbs: \["get"\]'
+if render --set argo.controllerProfile=unchecked >/dev/null 2>&1; then
+  exit 1
+fi
+
 helm package "$chart" --destination "$package_dir" >/dev/null
 set -- "$package_dir"/oberth-*.tgz
 test "$#" -eq 1

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"reflect"
 	"sync"
 	"time"
 
@@ -57,6 +58,7 @@ var errRunLogBudget = errors.New("argojob: aggregate run log budget exceeded")
 // Controller submits Workflows and supervises them to a terminal result.
 type Controller struct {
 	workflows WorkflowClient
+	kube      kubernetes.Interface
 	logs      PodLogReader
 	seeder    *SourceSeeder
 	config    Config
@@ -74,7 +76,7 @@ func NewController(workflows WorkflowClient, client kubernetes.Interface, config
 	if err := config.Validate(); err != nil {
 		return nil, err
 	}
-	controller := &Controller{workflows: workflows, config: config, interval: pollInterval}
+	controller := &Controller{workflows: workflows, kube: client, config: config, interval: pollInterval}
 	if client != nil {
 		controller.logs = func(ctx context.Context, namespace, pod, container string) (io.ReadCloser, error) {
 			return client.CoreV1().Pods(namespace).
@@ -109,6 +111,11 @@ func (controller *Controller) Namespace() string { return controller.config.Name
 // and refuses otherwise rather than executing something that was not built
 // from this run's reviewed source.
 func (controller *Controller) Create(ctx context.Context, request Request) (string, error) {
+	var err error
+	request, err = controller.refreshNonroot(ctx, request)
+	if err != nil {
+		return "", err
+	}
 	if controller.seeder == nil {
 		return "", errors.New("argojob: no source seeder is configured; " +
 			"a pipeline cannot mount the server's own claim across namespaces")
@@ -125,6 +132,13 @@ func (controller *Controller) Create(ctx context.Context, request Request) (stri
 	// source in place (finding 2, issue #29).
 	existing, getErr := controller.workflows.Get(ctx, request.Name, metav1.GetOptions{})
 	if getErr == nil {
+		request, err = controller.refreshNonroot(ctx, request)
+		if err != nil {
+			return "", err
+		}
+		if request.nonrootProof != nil {
+			request.SourceVolume = controller.nonrootExpectedSource(request)
+		}
 		// Build the intended spec so we can compare identity digests.
 		// Use a zero SourceVolume; identity comparison excludes the
 		// source claim name from the digest.
@@ -147,11 +161,20 @@ func (controller *Controller) Create(ctx context.Context, request Request) (stri
 	}
 
 	// Workflow definitively does not exist. Seed the source claim.
+	request, err = controller.refreshNonroot(ctx, request)
+	if err != nil {
+		return "", err
+	}
 	volume, err := controller.seeder.Seed(ctx, request.Name, request.SourceDir, credentialed)
 	if err != nil {
 		return "", err
 	}
 	request.SourceVolume = volume
+	request, err = controller.refreshNonroot(ctx, request)
+	if err != nil {
+		controller.seeder.DeleteClaim(context.WithoutCancel(ctx), volume.ClaimName)
+		return "", err
+	}
 
 	intended, err := Build(controller.config, request)
 	if err != nil {
@@ -169,6 +192,9 @@ func (controller *Controller) Create(ctx context.Context, request Request) (stri
 		if getErr != nil {
 			return "", errors.Join(fmt.Errorf("argojob: create Workflow %s: %w", intended.Name, createErr), getErr)
 		}
+		if _, verifyErr := controller.refreshNonroot(ctx, request); verifyErr != nil {
+			return "", verifyErr
+		}
 		if subErr := sameSubmission(existing, intended); subErr != nil {
 			return "", subErr
 		}
@@ -182,6 +208,9 @@ func (controller *Controller) Create(ctx context.Context, request Request) (stri
 			controller.seeder.DeleteClaim(context.WithoutCancel(ctx), volume.ClaimName)
 		}
 		return "", fmt.Errorf("argojob: create Workflow %s: %w", intended.Name, createErr)
+	}
+	if _, verifyErr := controller.refreshNonroot(ctx, request); verifyErr != nil {
+		return "", verifyErr
 	}
 	if subErr := sameSubmission(existing, intended); subErr != nil {
 		return "", subErr
@@ -198,6 +227,14 @@ func (controller *Controller) adoptClaimBestEffort(ctx context.Context, claimNam
 }
 
 func sameSubmission(existing, intended *wfv1.Workflow) error {
+	if binding := intended.Annotations[nonrootProfileAnnotation]; binding != "" {
+		// Recovery cannot accept a forged identity annotation on old/root
+		// semantics. Compare the actual stored spec with current server output,
+		// including selected policies, source volumes and executor patch.
+		if existing.Annotations[nonrootProfileAnnotation] != binding || !reflect.DeepEqual(existing.Spec, intended.Spec) {
+			return errors.New("argojob: existing Workflow does not carry the verified nonroot policy and profile")
+		}
+	}
 	existingRun, existingIdentity, ok := WorkflowMeta(existing)
 	if !ok {
 		return fmt.Errorf("argojob: Workflow %s already exists and is not an Oberth run", intended.Name)

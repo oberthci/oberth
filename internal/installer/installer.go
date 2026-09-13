@@ -150,6 +150,7 @@ type Config struct {
 	OpenBaoChartVersion       string
 	RekorChartVersion         string
 	ArgoChartVersion          string
+	ArgoControllerProfile     string
 	ArgoVaultAddress          string
 	ArgoVaultCredentialedRole string
 	// CredentialedSecretPaths are exact secret paths approved through the

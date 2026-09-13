@@ -1,0 +1,141 @@
+{
+  "chartVersion": "1.0.24",
+  "chartSHA256": "7b1d540095ba32bb8c914432b554c64809b47a6f737b1448273d3a4740be3d50",
+  "valuesSHA256": "6b1b826350f6319387dd2b100048e1333aaaa09120465356bff681e5c7b063af",
+  "configMap": {
+    "apiVersion": "v1",
+    "data": {
+      "config": "{\"failedPodRestart\":{\"enabled\":false,\"maxRestarts\":3},\"nodeEvents\":{\"enabled\":true},\"workflowEvents\":{\"enabled\":true}}"
+    },
+    "immutable": true,
+    "kind": "ConfigMap",
+    "metadata": {
+      "name": "oberth-argo-nr-5f121f7f1f5ef468eb2208b1cf7e911746c8cb6173c1d24e",
+      "namespace": "oberth-argo"
+    }
+  },
+  "podTemplate": {
+    "metadata": {
+      "labels": {
+        "helm.sh/chart": "argo-workflows-1.0.24",
+        "app.kubernetes.io/name": "argo-workflows-workflow-controller",
+        "app.kubernetes.io/instance": "argo-workflows",
+        "app.kubernetes.io/component": "workflow-controller",
+        "app": "workflow-controller",
+        "app.kubernetes.io/managed-by": "Helm",
+        "app.kubernetes.io/part-of": "argo-workflows",
+        "app.kubernetes.io/version": "v4.0.8"
+      }
+    },
+    "spec": {
+      "serviceAccountName": "argo-workflows-workflow-controller",
+      "containers": [
+        {
+          "name": "controller",
+          "image": "quay.io/argoproj/workflow-controller:v4.0.8@sha256:7a156419f80285859fc8f859927b6cc249f0d128e161e080dc17fca8fcbbceb6",
+          "imagePullPolicy": "Always",
+          "command": [
+            "workflow-controller"
+          ],
+          "args": [
+            "--configmap",
+            "oberth-argo-nr-5f121f7f1f5ef468eb2208b1cf7e911746c8cb6173c1d24e",
+            "--executor-image",
+            "quay.io/argoproj/argoexec:v4.0.8@sha256:86a965d7eea176959351156e24f3a2fa8d8e342e477ef425009af95a12e3fe87",
+            "--loglevel",
+            "info",
+            "--gloglevel",
+            "0",
+            "--log-format",
+            "text",
+            "--namespaced"
+          ],
+          "securityContext": {
+            "allowPrivilegeEscalation": false,
+            "capabilities": {
+              "drop": [
+                "ALL"
+              ]
+            },
+            "readOnlyRootFilesystem": true,
+            "runAsNonRoot": true
+          },
+          "env": [
+            {
+              "name": "ARGO_NAMESPACE",
+              "valueFrom": {
+                "fieldRef": {
+                  "apiVersion": "v1",
+                  "fieldPath": "metadata.namespace"
+                }
+              }
+            },
+            {
+              "name": "LEADER_ELECTION_IDENTITY",
+              "valueFrom": {
+                "fieldRef": {
+                  "apiVersion": "v1",
+                  "fieldPath": "metadata.name"
+                }
+              }
+            },
+            {
+              "name": "LEADER_ELECTION_DISABLE",
+              "value": "true"
+            },
+            {
+              "name": "POD_NAMES",
+              "value": "v2"
+            }
+          ],
+          "resources": {},
+          "volumeMounts": [
+            {
+              "mountPath": "/var/run/oberth-controller-profile",
+              "name": "oberth-controller-profile",
+              "readOnly": true
+            }
+          ],
+          "ports": [
+            {
+              "name": "metrics",
+              "containerPort": 9090
+            },
+            {
+              "containerPort": 6060
+            }
+          ],
+          "livenessProbe": {
+            "failureThreshold": 3,
+            "httpGet": {
+              "path": "/healthz",
+              "port": 6060
+            },
+            "initialDelaySeconds": 90,
+            "periodSeconds": 60,
+            "timeoutSeconds": 30
+          }
+        }
+      ],
+      "volumes": [
+        {
+          "configMap": {
+            "defaultMode": 292,
+            "items": [
+              {
+                "key": "config",
+                "path": "config"
+              }
+            ],
+            "name": "oberth-argo-nr-5f121f7f1f5ef468eb2208b1cf7e911746c8cb6173c1d24e",
+            "optional": false
+          },
+          "name": "oberth-controller-profile"
+        }
+      ],
+      "nodeSelector": {
+        "kubernetes.io/os": "linux"
+      }
+    }
+  }
+}

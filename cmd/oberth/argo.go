@@ -56,6 +56,7 @@ func buildArgoEngine(
 		return nil, err
 	}
 	config := argojob.Config{
+		NonrootProfile:             options.argoControllerProfile,
 		Namespace:                  options.argoNamespace,
 		PipelineServiceAccount:     options.argoPipelineAccount,
 		CredentialedServiceAccount: options.argoCredentialedAccount,
@@ -139,6 +140,7 @@ func validateArgoServeOptions(options serveOptions) error {
 	// ServiceAccounts distinct, an https:// Vault address, and a well-formed
 	// runner image allowlist. Running it here means a bad flag fails startup.
 	return argojob.Config{
+		NonrootProfile:             options.argoControllerProfile,
 		Namespace:                  options.argoNamespace,
 		PipelineServiceAccount:     options.argoPipelineAccount,
 		CredentialedServiceAccount: options.argoCredentialedAccount,

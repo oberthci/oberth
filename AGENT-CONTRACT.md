@@ -702,9 +702,24 @@ implementation detail disagree.
   `pods/exec` create for the in-memory secret delivery. Job pods receive no
   service-account token, run as UID/GID 0 with all Linux capabilities dropped
   (`Capabilities.Drop: ["ALL"]`), have bounded resources and deadlines, never
-  retry, and are garbage-collected after completion. Moving to non-root
-  UID 65534 is a separate follow-up requiring toolchain and PVC ownership
-  validation.
+  retry, and are garbage-collected after completion. Argo-authored workflows
+  may select named plain container/script leaves with the static annotation
+  `oberth.ci/nonroot-templates: test-one,test-two`. In this initial mode the
+  entire workflow must be uncredentialed, with no templateDefaults, and selected
+  leaves cannot add init containers, sidecars, plugins, artifacts or nested Pod
+  shapes. The fixed main and Argo init/wait UID/GID is65534, with RuntimeDefault,
+  dropALL, no escalation and a read-only root. Repository security contexts and
+  Pod patches remain forbidden. One server-owned UID0 initializer, using the
+  pinned source-seed image with the same restrictions and no token, prepares
+  only named fresh per-Pod EmptyDirs. It cannot mount source, PVCs or host paths.
+  No chown or fsGroup change is made. Main remains tokenless; Argo's existing
+  executor token remains scoped to its init/wait. Source and shared tool inputs,
+  including their executor mirrors, remain read-only; the selected leaf has no
+  host cache mount. TMPDIR/GOTMPDIR are `/tmp` and Go/tool caches are ephemeral
+  within that bounded private Pod volume. Collected artifacts retain their
+  separate existing run-owned mount. Actual PostgreSQL startup and Chromium's
+  namespace/seccomp sandbox require separate execution proof; this interface
+  alone does not establish either test suite's coverage.
 - Security-backported runner tools are rebuilt from immutable upstream release
   source, identify themselves as Oberth derivatives, and are bound to their
   patched module versions and exact binary digests by the image contract.

@@ -143,6 +143,16 @@ upstream:
 # accepts pushes and then executes nothing. Install the controller with
 # `oberth install`, or point argo.namespace at an existing one.
 argo:
+  # Empty disables nonroot execution. The named profile still requires actual
+  # immutable controller/configuration verification before each submission.
+  controllerProfile: ""
+  # Optional workflow annotation oberth.ci/nonroot-templates selects fixed
+  # UID/GID65534 plain uncredentialed test leaves. This has no chart UID knob:
+  # the server owns all identities, executor patches and bounded Pod scratch.
+  # A trusted initializer using the existing pinned source-seed image prepares
+  # only fresh EmptyDirs; no PVC/host cache ownership or fsGroup is changed.
+  # Repository securityContext overrides remain forbidden. Actual DB/browser
+  # compatibility requires separate execution proof after an authorized rollout.
   # Pipelines run in their own namespace, never the server's. The Vault
   # Kubernetes-auth roles bind (namespace, ServiceAccount) pairs, so a shared
   # namespace would put pipeline identities beside server ones. Oberth refuses

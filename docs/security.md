@@ -1,5 +1,16 @@
 # Security invariants
 
+- Uncredentialed Argo workflows can select fixed UID/GID65534 ordinary test
+  leaves with `oberth.ci/nonroot-templates`. Direct securityContext and Pod
+  patch input remains rejected. Main and generated Argo init/wait retain
+  RuntimeDefault, dropALL, read-only root and no privilege escalation. A fixed
+  server initializer uses UID0 only to prepare fresh per-Pod scratch directories;
+  it has no token, PVC or host mount and never changes shared ownership. Selected
+  leaves consume source/tools read-only and use bounded ephemeral `/tmp` caches.
+  This is separate from trusted VM execution. Browser sandbox compatibility
+  still needs proof under the actual runtime; no capabilities, unconfined
+  seccomp or sandbox-disabling flags are granted by this mode.
+
 - SSH accepts only registered uplink public keys and exactly the two Git smart
   protocol commands. It rejects shells, PTYs, forwarding, traversal, and helper
   protocols. Receive-pack accepts only branch and tag namespaces; Git replacement
