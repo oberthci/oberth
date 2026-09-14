@@ -727,6 +727,7 @@ func DefaultRunCommand(ctx context.Context, input []byte, name string, args ...s
 	// #nosec G204 -- callers select a fixed executable and pass structured
 	// arguments; no shell interpolation occurs.
 	command := exec.CommandContext(ctx, name, args...)
+	command.Env = subprocessEnvironment()
 	if len(input) > 0 {
 		command.Stdin = bytes.NewReader(input)
 	}
@@ -740,6 +741,7 @@ func DefaultRunInteractive(ctx context.Context, name string, args ...string) err
 	// #nosec G204 -- callers select a fixed executable and pass structured
 	// arguments; no shell interpolation occurs.
 	command := exec.CommandContext(ctx, name, args...)
+	command.Env = subprocessEnvironment()
 	command.Stdin = os.Stdin
 	command.Stdout = os.Stdout
 	command.Stderr = os.Stderr

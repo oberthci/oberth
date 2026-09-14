@@ -1972,6 +1972,7 @@ func DefaultRunHelm(ctx context.Context, args []string) ([]byte, error) {
 	// constructed by this package from validated flags (no shell, no
 	// caller-controlled command word).
 	cmd := exec.CommandContext(ctx, "helm", args...)
+	cmd.Env = subprocessEnvironment()
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -2039,6 +2040,24 @@ func loadKubeConfigWithRules(rules *clientcmd.ClientConfigLoadingRules, contextN
 		_, _ = fmt.Fprintf(output, "Using k3s kubeconfig at %s\n", k3sFallbackPath)
 	}
 	return client, restConfig, selectedContext, nil
+}
+
+// subprocessEnvironment is what kubectl and helm run with. The installer's own
+// client finds a kubeconfig through the standard loading rules, and on a k3s
+// host the kubectl binary is k3s itself, whose default is a root-only file:
+// without this the client works and every shelled-out command fails.
+func subprocessEnvironment() []string {
+	environment := os.Environ()
+	if os.Getenv("KUBECONFIG") != "" {
+		return environment
+	}
+	candidates := append(clientcmd.NewDefaultClientConfigLoadingRules().GetLoadingPrecedence(), k3sKubeconfigPath)
+	for _, path := range candidates {
+		if _, err := os.Stat(path); err == nil {
+			return append(environment, "KUBECONFIG="+path)
+		}
+	}
+	return environment
 }
 
 func loadFromRules(rules *clientcmd.ClientConfigLoadingRules, contextName string) (kubernetes.Interface, *rest.Config, string, error) {

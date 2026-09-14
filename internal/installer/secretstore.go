@@ -337,7 +337,12 @@ func pollInterval(deps Deps) time.Duration {
 func waitForOpenBaoStatus(ctx context.Context, cfg Config, deps Deps, namespace string) (openBaoExec, baoStatus, error) {
 	deadline := time.Now().Add(cfg.Timeout)
 	var lastErr error
+	nextReport := time.Now().Add(20 * time.Second)
 	for {
+		if lastErr != nil && time.Now().After(nextReport) {
+			_, _ = fmt.Fprintf(deps.Output, "still waiting for OpenBao to answer bao status: %v\n", lastErr)
+			nextReport = time.Now().Add(30 * time.Second)
+		}
 		pod, err := findOpenBaoPod(ctx, deps, namespace)
 		if err == nil {
 			client := newOpenBaoExec(deps, namespace, pod)
