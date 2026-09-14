@@ -305,8 +305,11 @@ func runRemoteLog(ctx context.Context, arguments []string, output io.Writer) err
 	if flags.NArg() != 1 {
 		return fmt.Errorf("%w: log <run-id> --burn <burn> --step <step>", errUsage)
 	}
+	if strings.TrimSpace(*burn) == "" && strings.TrimSpace(*step) != "" {
+		*burn = *step
+	}
 	if strings.TrimSpace(*burn) == "" || strings.TrimSpace(*step) == "" {
-		return fmt.Errorf("%w: --burn and --step are required; oberth run <id> lists them", errUsage)
+		return fmt.Errorf("%w: --step is required (and --burn when the burn is not named after the step); oberth run <id> lists the steps", errUsage)
 	}
 	api, err := remoteClient(ctx)
 	if err != nil {
