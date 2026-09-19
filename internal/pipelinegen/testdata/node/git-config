@@ -1,0 +1,5 @@
+[core]
+	repositoryformatversion = 0
+[remote "origin"]
+	url = git@github.com:acme/web-portal.git
+	fetch = +refs/heads/*:refs/remotes/origin/*

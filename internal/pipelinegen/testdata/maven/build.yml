@@ -1,0 +1,36 @@
+name: Build
+
+on:
+  push:
+    branches:
+      - '**'
+  workflow_call:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build
+    uses: acme/reusable-workflows/.github/workflows/java-build-deploy.yml@stable
+    with:
+      GCR_REPOSITORY: ${{ github.event.repository.name }}
+      HELM_VALUES_FOLDER: ${{ github.event.repository.name }}
+      JAVA_VERSION: ${{ vars.JAVA_25_VERSION }}
+      GATEWAY_URLS: '[{"url":"https://gateway.staging.acme.com/bookings","description":"Staging environment"},{"url":"https://gateway.test.acme.com/bookings","description":"Test environment"},{"url":"https://gateway.acme.com/bookings","description":"Live environment"}]'
+      PUBLISH_TO_INTERNAL_README: "true"
+    secrets:
+      SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+      GCP_ACCOUNT_KEY: ${{ secrets.GCP_ACCOUNT_KEY }}
+      GITHUB_REPO_USERNAME: ${{ secrets.GH_MAVEN_USER }}
+      GITHUB_REPO_PASSWORD: ${{ secrets.GH_MAVEN_PASSWORD }}
+      HELM_REGISTRY_KEY: ${{ secrets.HELM_REGISTRY_KEY }}
+      GCP_INFRA_SSH_KEY: ${{ secrets.GCP_INFRA_SSH_KEY }}
+      README_IO_API_KEY: ${{ secrets.README_IO_API_KEY }}
+      README_IO_PUBLIC_API_KEY: ${{ secrets.README_IO_PUBLIC_API_KEY }}
+      SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+      DATADOG_APPLICATION_KEY: ${{ secrets.DATADOG_APPLICATION_KEY }}
+      DATADOG_API_KEY: ${{ secrets.DATADOG_API_KEY }}
+      LINEAR_RELEASES_KEY_TEST: ${{ secrets.LINEAR_RELEASES_KEY_TEST }}

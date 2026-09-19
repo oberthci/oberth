@@ -1,0 +1,5 @@
+[core]
+	repositoryformatversion = 0
+[remote "origin"]
+	url = git@github.com:acme/core-api.git
+	fetch = +refs/heads/*:refs/remotes/origin/*
