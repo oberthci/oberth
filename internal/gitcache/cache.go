@@ -390,7 +390,7 @@ func (c *Cache) ensureLockedMayRecover(ctx context.Context, input, repo, path st
 		return Repository{}, fmt.Errorf("create temporary cache: %w", err)
 	}
 	defer func() { _ = os.RemoveAll(temporary) }()
-	if err := c.run(ctx, commandSpec{args: []string{"init", "--bare", temporary}}); err != nil {
+	if err := c.run(ctx, commandSpec{args: []string{"init", "--bare", "--ref-format=reftable", temporary}}); err != nil {
 		return Repository{}, err
 	}
 	if err := c.configureRemote(ctx, input, temporary); err != nil {
