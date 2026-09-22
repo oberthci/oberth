@@ -484,7 +484,7 @@ func Build(config Config, request Request) (*wfv1.Workflow, error) {
 	if err != nil {
 		return nil, err
 	}
-	fragmentLock, err := argoworkflow.Resolve(workflow, request.Fragments)
+	fragmentLock, err := argoworkflow.ResolveForOrg(workflow, request.Fragments, request.UpstreamOrg)
 	if err != nil {
 		return nil, err
 	}

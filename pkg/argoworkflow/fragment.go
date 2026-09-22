@@ -176,7 +176,47 @@ func collectHookSites(hooks wfv1.LifecycleHooks, where string, sites *[]template
 	}
 }
 
+// OrgPlaceholder is what a fragment writes where the consuming repository's
+// upstream organization belongs. A fragment is pinned by every repository that
+// uses it, so an organization spelled into one is a fragment that only one
+// organization can use.
+const OrgPlaceholder = "${org}"
+
+// SubstituteOrg replaces OrgPlaceholder throughout a template's command, args
+// and environment with the consuming repository's organization. The document
+// the admission gate inspects therefore carries the resolved path, not the
+// placeholder, and the check that a step reads only what the repository
+// declared still compares literals.
+func SubstituteOrg(template *wfv1.Template, org string) {
+	if template == nil || org == "" {
+		return
+	}
+	replace := func(values []string) {
+		for i, value := range values {
+			values[i] = strings.ReplaceAll(value, OrgPlaceholder, org)
+		}
+	}
+	if template.Container != nil {
+		replace(template.Container.Command)
+		replace(template.Container.Args)
+		for i := range template.Container.Env {
+			template.Container.Env[i].Value = strings.ReplaceAll(template.Container.Env[i].Value, OrgPlaceholder, org)
+		}
+	}
+	if template.Script != nil {
+		replace(template.Script.Command)
+		replace(template.Script.Args)
+		template.Script.Source = strings.ReplaceAll(template.Script.Source, OrgPlaceholder, org)
+	}
+}
+
 func Resolve(workflow *wfv1.Workflow, fragments map[FragmentKey]Fragment) (Lock, error) {
+	return ResolveForOrg(workflow, fragments, "")
+}
+
+// ResolveForOrg is Resolve with the consuming repository's organization, which
+// every ${org} in an inlined template is replaced with.
+func ResolveForOrg(workflow *wfv1.Workflow, fragments map[FragmentKey]Fragment, org string) (Lock, error) {
 	if workflow == nil {
 		return nil, errors.New("argoworkflow: no Workflow to resolve")
 	}
@@ -228,6 +268,7 @@ func Resolve(workflow *wfv1.Workflow, fragments map[FragmentKey]Fragment) (Lock,
 			copied := *template.DeepCopy()
 			copied.Name = mapping[template.Name]
 			rebindLocalTemplates(&copied, mapping)
+			SubstituteOrg(&copied, org)
 			inlined = append(inlined, copied)
 		}
 		digest := sha256.Sum256(fragment.Source)
