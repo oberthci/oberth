@@ -15,11 +15,11 @@ func (c *Cache) Checkout(ctx context.Context, input, sha, destination string) er
 	if err := ValidateSHA(sha); err != nil {
 		return err
 	}
-	repo, path, err := c.path(input)
+	_, path, err := c.path(input)
 	if err != nil {
 		return err
 	}
-	lock := c.repoLock(repo)
+	lock := c.repoLock(path)
 	lock.Lock()
 	defer lock.Unlock()
 	return c.checkoutLocked(ctx, path, sha, destination)

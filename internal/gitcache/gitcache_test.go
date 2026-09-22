@@ -486,7 +486,7 @@ func TestReleaseAncestryAndTagSync(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	lock := cache.repoLock("example")
+	lock := cache.repoLock(ready.Path)
 	lock.Lock()
 	admission, err := cache.prepareReleaseAdmissionLocked(context.Background(), ready.Path, true)
 	lock.Unlock()
@@ -1327,5 +1327,95 @@ func TestEnsureUnreachableUpstreamStillServesStaleCache(t *testing.T) {
 	}
 	if !second.Stale {
 		t.Fatal("stale Ensure should return Stale=true")
+	}
+}
+
+// TestRepoLockKeyedByPath verifies that repoLock is keyed by the resolved
+// cache path so that two goroutines operating on the same repository through
+// different call sites share the same mutex (#431).
+func TestRepoLockKeyedByPath(t *testing.T) {
+	t.Parallel()
+	repository := newTestRepository(t)
+	cache := newTestCache(t, repository.upstream)
+	ready, err := cache.Ensure(context.Background(), "example")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Acquire the lock via the resolved cache path (the correct key).
+	pathLock := cache.repoLock(ready.Path)
+	pathLock.Lock()
+
+	// A goroutine trying to acquire the lock via the bare name must get a
+	// DIFFERENT mutex (the bug was that it got the same key family, but keyed
+	// differently). After the fix, both callers use the path, so the second
+	// TryLock must fail because the first goroutine holds the same mutex.
+	secondLock := cache.repoLock(ready.Path)
+
+	if secondLock.TryLock() {
+		secondLock.Unlock()
+		pathLock.Unlock()
+		t.Fatal("second repoLock(path) acquired a different mutex than the first; locks are not shared")
+	}
+
+	// Verify that a bare-name key would produce a different (uncontended)
+	// mutex, confirming that the old bug pattern would have allowed
+	// concurrent access.
+	nameLock := cache.repoLock("example")
+	if !nameLock.TryLock() {
+		pathLock.Unlock()
+		t.Fatal("bare-name lock unexpectedly contended with path lock")
+	}
+	nameLock.Unlock()
+	pathLock.Unlock()
+}
+
+// TestGCAllFindsQualifiedLayoutCaches verifies that GCAll discovers caches in
+// the qualified layout (<root>/<upstream>/<org>/<repo>.git) in addition to
+// the flat legacy layout (#438).
+func TestGCAllFindsQualifiedLayoutCaches(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+
+	// Create a flat-layout bare repo.
+	flatPath := filepath.Join(root, "flat-repo.git")
+	runGit(t, "", "init", "--bare", "--initial-branch=main", flatPath)
+
+	// Create a qualified-layout bare repo (3 levels deep).
+	qualifiedPath := filepath.Join(root, "github", "acme", "deep-repo.git")
+	if err := os.MkdirAll(filepath.Dir(qualifiedPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, "", "init", "--bare", "--initial-branch=main", qualifiedPath)
+
+	cache, err := New(Config{
+		Root:           root,
+		CommandTimeout: 10 * time.Second,
+		Upstream:       func(string) (string, error) { return "/dev/null", nil },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	paths := cache.discoverCachePaths()
+	foundFlat, foundQualified := false, false
+	for _, p := range paths {
+		if p == flatPath {
+			foundFlat = true
+		}
+		if p == qualifiedPath {
+			foundQualified = true
+		}
+	}
+	if !foundFlat {
+		t.Fatalf("discoverCachePaths did not find flat-layout cache at %s; found: %v", flatPath, paths)
+	}
+	if !foundQualified {
+		t.Fatalf("discoverCachePaths did not find qualified-layout cache at %s; found: %v", qualifiedPath, paths)
+	}
+
+	// GCAll must succeed on both layouts without error.
+	if err := cache.GCAll(context.Background()); err != nil {
+		t.Fatalf("GCAll: %v", err)
 	}
 }

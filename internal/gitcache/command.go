@@ -48,6 +48,12 @@ const managedGitConfig = `# Managed by Oberth. Generated file; edits are overwri
 	autoDetach = false
 [maintenance]
 	autoDetach = false
+[transfer]
+	fsckObjects = true
+[receive]
+	fsckObjects = true
+[fetch]
+	fsckObjects = true
 `
 
 // captureWaitDelay bounds os/exec's wait for stdout/stderr descriptors held by
@@ -251,11 +257,17 @@ func (c *Cache) commandEnv(extra map[string]string) []string {
 	// matching the GIT_CONFIG_NOSYSTEM=1 already set above.
 	if c.globalConfig != "" {
 		values["GIT_CONFIG_GLOBAL"] = c.globalConfig
-		values["GIT_CONFIG_COUNT"] = "2"
+		values["GIT_CONFIG_COUNT"] = "5"
 		values["GIT_CONFIG_KEY_0"] = "gc.autodetach"
 		values["GIT_CONFIG_VALUE_0"] = "false"
 		values["GIT_CONFIG_KEY_1"] = "maintenance.autodetach"
 		values["GIT_CONFIG_VALUE_1"] = "false"
+		values["GIT_CONFIG_KEY_2"] = "transfer.fsckObjects"
+		values["GIT_CONFIG_VALUE_2"] = "true"
+		values["GIT_CONFIG_KEY_3"] = "receive.fsckObjects"
+		values["GIT_CONFIG_VALUE_3"] = "true"
+		values["GIT_CONFIG_KEY_4"] = "fetch.fsckObjects"
+		values["GIT_CONFIG_VALUE_4"] = "true"
 	}
 	keys := make([]string, 0, len(values))
 	for key := range values {

@@ -14,7 +14,7 @@ func (c *Cache) TagSHA(ctx context.Context, input string, tag string) (string, e
 	if err != nil {
 		return "", err
 	}
-	lock := c.repoLock(repo)
+	lock := c.repoLock(path)
 	lock.Lock()
 	defer lock.Unlock()
 	if !c.isBare(ctx, path) {

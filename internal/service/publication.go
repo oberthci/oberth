@@ -48,7 +48,11 @@ func deliverPublication(
 		failure := fmt.Errorf("read remote ref for publication %s: %w", publication.ID, err)
 		return publications.FinalizePublication(ctx, publication.ID, model.PublicationFailed, failure.Error())
 	}
-	forceBranch := publication.PromotionID == "" && publication.RefKind == model.RefBranch
+	// Feature branches (non-promotion, non-default) use forced push with no
+	// predecessor check. The default branch is excluded: a direct push to the
+	// default branch must go through predecessor tracking and use a non-forced
+	// push so it cannot silently overwrite a just-delivered promotion (#432).
+	forceBranch := publication.PromotionID == "" && publication.RefKind == model.RefBranch && publication.Ref != repository.DefaultBranch
 	if forceBranch {
 		if exists && sameOID(remoteSHA, publication.ResultSHA) {
 			return publications.FinalizePublication(ctx, publication.ID, model.PublicationDelivered, "")
@@ -85,7 +89,7 @@ func attemptPublicationMutation(
 	mutationErr := auditedGitMutation(ctx, auditor, publication.Actor,
 		publicationAuditAction(publication), publicationAuditResource(publication), publicationAuditResourceID(publication),
 		publicationAuditDetails(repository, publication),
-		func() error { return mutatePublication(ctx, git, repositoryInput, publication) })
+		func() error { return mutatePublication(ctx, git, repositoryInput, publication, forceBranch) })
 	if mutationErr == nil {
 		return publications.FinalizePublication(ctx, publication.ID, model.PublicationDelivered, "")
 	}
@@ -117,12 +121,18 @@ func attemptPublicationMutation(
 	}
 }
 
-func mutatePublication(ctx context.Context, git PublicationGit, repository string, publication model.Publication) error {
+func mutatePublication(ctx context.Context, git PublicationGit, repository string, publication model.Publication, forceBranch bool) error {
 	if publication.PromotionID != "" {
 		return git.PushPromotion(ctx, repository, publication.Ref, publication.ResultSHA)
 	}
 	if publication.RefKind == model.RefTag {
 		return git.SyncTag(ctx, repository, publication.Ref, publication.ResultSHA)
+	}
+	// The default branch uses a non-forced push (PushPromotion semantics) so
+	// a direct push to main cannot silently overwrite a just-delivered
+	// promotion. Feature branches keep force-push behavior (#432).
+	if !forceBranch {
+		return git.PushPromotion(ctx, repository, publication.Ref, publication.ResultSHA)
 	}
 	return git.SyncBranch(ctx, repository, publication.Ref, publication.ResultSHA)
 }

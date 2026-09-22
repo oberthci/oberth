@@ -32,7 +32,7 @@ func (c *Cache) ReadBlob(ctx context.Context, input, sha, file string, limit int
 	if err != nil {
 		return nil, err
 	}
-	lock := c.repoLock(repo)
+	lock := c.repoLock(path)
 	lock.Lock()
 	defer lock.Unlock()
 	if !c.isBare(ctx, path) {

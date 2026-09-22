@@ -15,11 +15,11 @@ func (c *Cache) SyncBranch(ctx context.Context, input, branch, sha string) error
 	if err := ValidateSHA(sha); err != nil {
 		return err
 	}
-	repo, path, err := c.path(input)
+	_, path, err := c.path(input)
 	if err != nil {
 		return err
 	}
-	lock := c.repoLock(repo)
+	lock := c.repoLock(path)
 	lock.Lock()
 	defer lock.Unlock()
 	if err := c.assertCommit(ctx, path, sha); err != nil {
@@ -41,11 +41,11 @@ func (c *Cache) SyncTag(ctx context.Context, input, tag, sha string) error {
 	if err := ValidateSHA(sha); err != nil {
 		return err
 	}
-	repo, path, err := c.path(input)
+	_, path, err := c.path(input)
 	if err != nil {
 		return err
 	}
-	lock := c.repoLock(repo)
+	lock := c.repoLock(path)
 	lock.Lock()
 	defer lock.Unlock()
 	if err := c.assertObject(ctx, path, sha); err != nil {
@@ -65,11 +65,11 @@ func (c *Cache) DeleteBranch(ctx context.Context, input, branch string) error {
 	if err := ValidateBranch(branch); err != nil {
 		return err
 	}
-	repo, path, err := c.path(input)
+	_, path, err := c.path(input)
 	if err != nil {
 		return err
 	}
-	lock := c.repoLock(repo)
+	lock := c.repoLock(path)
 	lock.Lock()
 	defer lock.Unlock()
 	ref := "refs/heads/" + branch
@@ -102,11 +102,11 @@ func (c *Cache) ReleaseReachable(ctx context.Context, input, commit, admissionSH
 	if err := ValidateSHA(admissionSHA); err != nil {
 		return false, err
 	}
-	repo, path, err := c.path(input)
+	_, path, err := c.path(input)
 	if err != nil {
 		return false, err
 	}
-	lock := c.repoLock(repo)
+	lock := c.repoLock(path)
 	lock.Lock()
 	defer lock.Unlock()
 	if err := c.assertCommit(ctx, path, admissionSHA); err != nil {
@@ -140,7 +140,7 @@ func (c *Cache) ReachableFromUpstreamDefault(ctx context.Context, input, commit 
 	if err != nil {
 		return false, err
 	}
-	lock := c.repoLock(repo)
+	lock := c.repoLock(path)
 	lock.Lock()
 	defer lock.Unlock()
 	if !c.isBare(ctx, path) {
@@ -181,11 +181,11 @@ func (c *Cache) PreparePromotion(ctx context.Context, input, sourceSHA, targetBr
 	if err := ValidateBranch(targetBranch); err != nil {
 		return MergeCandidate{}, err
 	}
-	repo, path, err := c.path(input)
+	_, path, err := c.path(input)
 	if err != nil {
 		return MergeCandidate{}, err
 	}
-	lock := c.repoLock(repo)
+	lock := c.repoLock(path)
 	lock.Lock()
 	defer lock.Unlock()
 	if err := c.assertCommit(ctx, path, sourceSHA); err != nil {
@@ -293,11 +293,11 @@ func (c *Cache) PushPromotion(ctx context.Context, input, targetBranch, mergedSH
 	if err := ValidateSHA(mergedSHA); err != nil {
 		return err
 	}
-	repo, path, err := c.path(input)
+	_, path, err := c.path(input)
 	if err != nil {
 		return err
 	}
-	lock := c.repoLock(repo)
+	lock := c.repoLock(path)
 	lock.Lock()
 	defer lock.Unlock()
 	if err := c.assertCommit(ctx, path, mergedSHA); err != nil {
@@ -346,11 +346,11 @@ func (c *Cache) PeelObject(ctx context.Context, input, objectSHA string) (Peeled
 	if err := ValidateSHA(objectSHA); err != nil {
 		return PeeledObject{}, err
 	}
-	repo, path, err := c.path(input)
+	_, path, err := c.path(input)
 	if err != nil {
 		return PeeledObject{}, err
 	}
-	lock := c.repoLock(repo)
+	lock := c.repoLock(path)
 	lock.Lock()
 	defer lock.Unlock()
 	if err := c.assertObject(ctx, path, objectSHA); err != nil {

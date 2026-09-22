@@ -114,6 +114,60 @@ func TestGitFailureDetailRedactsConfiguredSecret(t *testing.T) {
 	}
 }
 
+// TestManagedGitConfigEnablesFsck verifies that the managed Git configuration
+// enables fsck on transfer, receive, and fetch — ensuring that corrupt objects
+// pushed or fetched into a cache are rejected at the transport boundary (#441).
+func TestManagedGitConfigEnablesFsck(t *testing.T) {
+	t.Parallel()
+	for _, section := range []string{"transfer", "receive", "fetch"} {
+		key := section + ".fsckObjects"
+		if !strings.Contains(managedGitConfig, key+" = true") {
+			// Try the alternate spacing (tab-indented in .gitconfig format).
+			if !strings.Contains(managedGitConfig, "fsckObjects = true") {
+				t.Fatalf("managedGitConfig must set %s = true", key)
+			}
+		}
+	}
+	// Verify the runtime environment carries the fsck overrides too.
+	cache, err := New(Config{
+		Root:           t.TempDir(),
+		CommandTimeout: 10 * time.Second,
+		Upstream:       func(string) (string, error) { return "unused", nil },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	env := cache.commandEnv(nil)
+	envMap := make(map[string]string, len(env))
+	for _, pair := range env {
+		if idx := strings.IndexByte(pair, '='); idx >= 0 {
+			envMap[pair[:idx]] = pair[idx+1:]
+		}
+	}
+	wantKeys := map[string]string{
+		"transfer.fsckObjects": "true",
+		"receive.fsckObjects":  "true",
+		"fetch.fsckObjects":    "true",
+	}
+	count, err := fmt.Sscan(envMap["GIT_CONFIG_COUNT"], new(int))
+	if err != nil || count != 1 {
+		t.Fatalf("GIT_CONFIG_COUNT parse: count=%d err=%v", count, err)
+	}
+	configCount := 0
+	fmt.Sscan(envMap["GIT_CONFIG_COUNT"], &configCount)
+	found := make(map[string]string)
+	for i := 0; i < configCount; i++ {
+		k := envMap[fmt.Sprintf("GIT_CONFIG_KEY_%d", i)]
+		v := envMap[fmt.Sprintf("GIT_CONFIG_VALUE_%d", i)]
+		found[k] = v
+	}
+	for key, want := range wantKeys {
+		if got := found[key]; got != want {
+			t.Fatalf("GIT_CONFIG env %s = %q, want %q", key, got, want)
+		}
+	}
+}
+
 // TestListRefsSurvivesOutputBeyondCaptureTailLimit locks in the fix for the
 // 64 KB capture truncation: listRefs previously went through the tail-ring
 // capture path, so a ref listing larger than maxCapturedOutput silently lost

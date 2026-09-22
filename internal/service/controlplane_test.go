@@ -1782,14 +1782,18 @@ func TestDefaultBranchUsesOrdinaryCIPublicationAndSync(t *testing.T) {
 	if finished.Status != model.RunPassed || finished.Phase != "passed" || finished.Error != "" {
 		t.Fatalf("default branch run = %#v", finished)
 	}
-	if len(fixture.git.syncedBranches) != 1 || fixture.git.syncedBranches[0] != "codeberg/acme/oberth:main:"+sha {
-		t.Fatalf("default branch publication = %#v", fixture.git.syncedBranches)
+	// The default branch CI publication uses non-forced push (PushPromotion
+	// semantics) so it cannot overwrite a just-delivered promotion (#432).
+	if len(fixture.git.promotions) != 1 || fixture.git.promotions[0] != "codeberg/acme/oberth:main:"+sha {
+		t.Fatalf("default branch publication = promotions %#v, syncedBranches %#v", fixture.git.promotions, fixture.git.syncedBranches)
 	}
+	// The explicit sync tool still uses forced SyncBranch — it is an
+	// operator-initiated action, not an automated CI publication.
 	_, err = fixture.api(t).CallTool(ctx, api.Actor{Identity: "agent@host"}, "sync", json.RawMessage(`{"sha":"`+sha+`"}`))
 	if err != nil {
 		t.Fatalf("default branch sync: %v", err)
 	}
-	if len(fixture.git.syncedBranches) != 2 || fixture.git.syncedBranches[1] != "codeberg/acme/oberth:main:"+sha {
+	if len(fixture.git.syncedBranches) != 1 || fixture.git.syncedBranches[0] != "codeberg/acme/oberth:main:"+sha {
 		t.Fatalf("default branch sync = %#v", fixture.git.syncedBranches)
 	}
 }

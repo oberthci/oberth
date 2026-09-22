@@ -13,11 +13,11 @@ func (c *Cache) RemoteRef(ctx context.Context, input, ref string) (sha string, e
 	if err := validatePublicationRef(ref); err != nil {
 		return "", false, err
 	}
-	repo, path, err := c.path(input)
+	_, path, err := c.path(input)
 	if err != nil {
 		return "", false, err
 	}
-	lock := c.repoLock(repo)
+	lock := c.repoLock(path)
 	lock.Lock()
 	defer lock.Unlock()
 	if err := c.configureRemote(ctx, input, path); err != nil {
