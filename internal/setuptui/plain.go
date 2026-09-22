@@ -233,8 +233,16 @@ func runPlain(ctx context.Context, opts Options, input io.Reader, output io.Writ
 
 	// SSH public key path — required by hasOnboardingConfig() for the
 	// non-interactive onboarding path. Scan ~/.ssh for .pub files like the
-	// TUI does; default to ~/.ssh/id_ed25519.pub.
+	// TUI does; default to the first found key, falling back to
+	// ~/.ssh/id_ed25519.pub.
 	sshKeyDefault := "~/.ssh/id_ed25519.pub"
+	if foundKeys := scanSSHPublicKeys(); len(foundKeys) > 0 {
+		sshKeyDefault = foundKeys[0].path
+	} else {
+		wln("  No SSH public keys found in ~/.ssh.")
+		wln("  Generate one:  ssh-keygen -t ed25519")
+		wln("")
+	}
 	sshKey, err := ask("SSH public key", sshKeyDefault, func(v string) error {
 		expanded := v
 		if v == "~" || strings.HasPrefix(v, "~/") {
@@ -311,7 +319,7 @@ func runPlain(ctx context.Context, opts Options, input io.Reader, output io.Writ
 		return nil
 	}
 
-	confirm, err := ask("Apply? (yes/no)", "no", func(v string) error {
+	confirm, err := ask("Apply? (yes/no)", "yes", func(v string) error {
 		if v != "yes" && v != "y" && v != "no" && v != "n" {
 			return fmt.Errorf("answer yes or no")
 		}
@@ -321,7 +329,8 @@ func runPlain(ctx context.Context, opts Options, input io.Reader, output io.Writ
 		return err
 	}
 	if confirm != "yes" && confirm != "y" {
-		return installer.ErrInterrupted
+		wln("  Aborted — nothing applied; re-run `oberth setup --plain` to try again.")
+		return nil
 	}
 
 	// Page 12: Apply.
@@ -336,9 +345,22 @@ func runPlain(ctx context.Context, opts Options, input io.Reader, output io.Writ
 	// When the user picked "connect existing", both InstallSecretStore flags
 	// are false, but the decision is made: SecretStoreUndecided must be false.
 	state.Config.SecretStoreUndecided = false
+
+	// Wire the wizard-collected onboarding data into Config so the
+	// installer's non-interactive onboarding path uses it instead of
+	// re-prompting (which would EOF or get stuck). This is the same
+	// wiring that the TUI's startApply performs (page_apply.go).
+	state.Config.ForgeType = state.ForgeType
+	state.Config.ForgeOrg = state.ForgeOrg
+	state.Config.ForgeURL = forgeUpstreamURL(state.ForgeType, state.ForgeOrg)
+	state.Config.UplinkIdentity = state.UplinkIdentity
+	state.Config.SSHPublicKeyPath = state.SSHKeyPath
+	state.Config.Yes = true
+
 	return installer.Execute(ctx, state.Config, installer.InstallDeps{
-		Output: output,
-		Input:  input,
+		Output:     output,
+		Input:      input,
+		IsTerminal: func() bool { return false },
 	})
 }
 

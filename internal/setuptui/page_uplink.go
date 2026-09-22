@@ -32,7 +32,11 @@ func newUplinkPage() *uplinkPage {
 func (p *uplinkPage) title() string    { return "crew manifest" }
 func (p *uplinkPage) question() string { return "Who are you?" }
 func (p *uplinkPage) keys() string {
-	return sKey.Render("↑/↓") + " move · " + sKey.Render("enter") + " continue · " + sKey.Render("esc") + " back"
+	keys := sKey.Render("↑/↓") + " move · " + sKey.Render("enter") + " continue · " + sKey.Render("esc") + " back"
+	if len(p.sshKeys) == 0 {
+		keys += " · " + sKey.Render("r") + " rescan keys"
+	}
+	return keys
 }
 
 func (p *uplinkPage) init(state *WizardState) tea.Cmd {
@@ -116,12 +120,23 @@ func (p *uplinkPage) update(msg tea.Msg, state *WizardState) (page, tea.Cmd) {
 				return p, nil
 			}
 			if len(p.sshKeys) == 0 {
-				p.errMsg = "no SSH public keys found in ~/.ssh"
+				p.errMsg = "no SSH public keys found — generate one: ssh-keygen -t ed25519 — then press r to rescan"
 				return p, nil
 			}
 			state.UplinkIdentity = p.identity
 			state.SSHKeyPath = p.sshKeys[p.keyCursor].path
 			return p, func() tea.Msg { return pageCompleteMsg{} }
+		case "r":
+			// Rescan ~/.ssh for public keys — useful after generating a key
+			// in another terminal without leaving the wizard.
+			if p.focusField == 0 {
+				// 'r' on the identity field is text input, not a hotkey.
+				p.identity += "r"
+				return p, nil
+			}
+			p.sshKeys = scanSSHPublicKeys()
+			p.keyCursor = 0
+			p.errMsg = ""
 		case "esc":
 			return p, func() tea.Msg { return pageBackMsg{} }
 		case "backspace":
@@ -160,6 +175,8 @@ func (p *uplinkPage) view(_ *WizardState, _, _ int) string {
 
 	if len(p.sshKeys) == 0 {
 		b.WriteString("  " + sFail.Render("  no public keys found in ~/.ssh") + "\n")
+		b.WriteString("  " + sMuted.Render("  generate one:  ssh-keygen -t ed25519") + "\n")
+		b.WriteString("  " + sMuted.Render("  then press r to rescan") + "\n")
 	} else {
 		// Size the name column to the longest key file so every row's
 		// algorithm and fingerprint start in the same column.
