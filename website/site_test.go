@@ -161,7 +161,7 @@ func TestSetupWizardGoldenPath(t *testing.T) {
 		}
 	}
 	for _, value := range []string{
-		"oberth install <span class=\"c-f\">--install-secretstore-dev</span>",
+		"oberth setup",
 		"brew install oberthci/tap/oberth",
 		"curl -fsSL https://oberth.ci/install.sh | sh",
 		"https://get.k3s.io",
@@ -182,7 +182,7 @@ func TestSetupWizardGoldenPath(t *testing.T) {
 			t.Errorf("index.html advanced section is missing cosign verification guidance %q", value)
 		}
 	}
-	if occurrences := strings.Count(app, "oberth install <span class=\"c-f\">--install-secretstore-dev</span>"); occurrences < 3 {
+	if occurrences := strings.Count(app, "oberth setup"); occurrences < 3 {
 		t.Errorf("only %d combos install via the CLI golden path, want every combo (3+)", occurrences)
 	}
 

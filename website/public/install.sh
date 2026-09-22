@@ -159,7 +159,7 @@ else
 fi
 
 printf '\n  Oberth %s installed to %s/oberth\n' "$VERSION" "$INSTALL_DIR"
-printf '\n  Next step:\n    oberth install --install-secretstore\n\n'
+printf '\n  Next step:\n    oberth setup\n\n'
 
 }
 
