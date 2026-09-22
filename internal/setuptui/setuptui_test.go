@@ -1533,3 +1533,30 @@ func TestNoWizardPageSaysNotImplemented(t *testing.T) {
 		}
 	}
 }
+
+func TestClusterPageKindCreateEntry(t *testing.T) {
+	p := newClusterPage()
+	// Simulate the kind-create entry that loadContexts adds on darwin
+	// when no kubeconfig contexts exist.
+	p.contexts = []kubeContext{{name: kindCreateEntry, isLocal: true}}
+	p.cursor = 0
+	state := &WizardState{}
+	_, cmd := p.update(tea.KeyPressMsg{Code: rune('x'), Text: "enter"}, state)
+	if cmd == nil {
+		t.Fatal("enter on kind-create entry should return a command")
+	}
+	msg := cmd()
+	info, ok := msg.(clusterInfoMsg)
+	if !ok {
+		t.Fatalf("expected clusterInfoMsg, got %T", msg)
+	}
+	if info.engine != "kind" {
+		t.Errorf("engine = %q, want kind", info.engine)
+	}
+	if !info.isLocal {
+		t.Error("kind cluster should be local")
+	}
+	if info.err != nil {
+		t.Errorf("unexpected error: %v", info.err)
+	}
+}

@@ -2,12 +2,15 @@ package setuptui
 
 import (
 	"fmt"
+	"runtime"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"k8s.io/client-go/tools/clientcmd"
 )
+
+const kindCreateEntry = "Create kind cluster"
 
 // kubeContext represents one entry from kubeconfig.
 type kubeContext struct {
@@ -75,6 +78,16 @@ func (p *clusterPage) loadContexts() {
 	// Sort: current context first, then by name.
 	current := rawConfig.CurrentContext
 	sortContexts(p.contexts, current)
+
+	// On macOS with no existing contexts, offer to create a kind cluster.
+	// The installer's Execute already handles kind creation on darwin;
+	// the TUI just needs to let the user through.
+	if len(p.contexts) == 0 && runtime.GOOS == "darwin" {
+		p.contexts = append(p.contexts, kubeContext{
+			name:    kindCreateEntry,
+			isLocal: true,
+		})
+	}
 }
 
 func (p *clusterPage) update(msg tea.Msg, state *WizardState) (page, tea.Cmd) {
@@ -107,6 +120,17 @@ func (p *clusterPage) update(msg tea.Msg, state *WizardState) (page, tea.Cmd) {
 				return p, nil
 			}
 			selected := p.contexts[p.cursor].name
+			if selected == kindCreateEntry {
+				p.checking = false
+				p.errMsg = ""
+				return p, func() tea.Msg {
+					return clusterInfoMsg{
+						context: "",
+						engine:  "kind",
+						isLocal: true,
+					}
+				}
+			}
 			// Guard: the installer targets the current kubeconfig context
 			// (no --context flag). Selecting a non-current context would
 			// apply to the wrong cluster silently.
@@ -132,6 +156,7 @@ func (p *clusterPage) view(_ *WizardState, width, _ int) string {
 
 	if len(p.contexts) == 0 {
 		b.WriteString("  " + sFail.Render("no kubeconfig contexts found") + "\n")
+		b.WriteString("  " + sMuted.Render("install Docker Desktop and kind, then relaunch") + "\n")
 		return b.String()
 	}
 
