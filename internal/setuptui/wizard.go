@@ -192,19 +192,20 @@ func runtimeInterrupted(err error) bool {
 
 // wizard is the root tea.Model that routes between pages.
 type wizard struct {
-	opts        Options
-	state       WizardState
-	band        progress.Model
-	page        int // 0-indexed current page
-	width       int
-	height      int
-	pages       []page
-	showHelp    bool
-	aborted     bool
-	quitting    bool
-	confirmQuit bool // first ctrl+c arms, second aborts (S10: confirmed abort)
-	dryDone     bool // --dry-mode: wizard completed through review
-	started     time.Time
+	opts           Options
+	state          WizardState
+	band           progress.Model
+	page           int // 0-indexed current page
+	width          int
+	height         int
+	pages          []page
+	showHelp       bool
+	aborted        bool
+	quitting       bool
+	confirmQuit    bool // first ctrl+c arms, second aborts (S10: confirmed abort)
+	dryDone        bool // --dry-mode: wizard completed through review
+	returnToReview bool // UX-6: jump from review; completing returns to review
+	started        time.Time
 }
 
 // page is implemented by each wizard page.
@@ -323,6 +324,12 @@ func (w *wizard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case pageJumpMsg:
 		if msg.page >= 1 && msg.page <= len(w.pages) {
+			// UX-6: when jumping from the review page, set the flag so
+			// completing the target page returns to review instead of
+			// advancing sequentially through all subsequent pages.
+			if w.page == pageReview {
+				w.returnToReview = true
+			}
 			w.page = msg.page - 1
 			cmd := w.pages[w.page].init(&w.state)
 			return w, cmd
@@ -344,6 +351,21 @@ func (w *wizard) advance() (*wizard, tea.Cmd) {
 	// Mark current page as valid.
 	if w.page < totalPages {
 		w.state.pageValid[w.page] = true
+	}
+
+	// UX-6: when the user jumped here from the review page, completing
+	// returns to review instead of advancing sequentially. Refresh TLS
+	// derived state — namespace changes affect SANs, and the user did
+	// not walk through the TLS page on the way back.
+	if w.returnToReview {
+		w.returnToReview = false
+		if tp, ok := w.pages[pageTLS].(*tlsPage); ok {
+			tp.init(&w.state)
+			w.state.Config.TLSExtraDNSNames = tp.sans
+		}
+		w.page = pageReview
+		cmd := w.pages[pageReview].init(&w.state)
+		return w, cmd
 	}
 
 	// Skip the store-connect page when installing OpenBao.
@@ -375,9 +397,13 @@ func (w *wizard) advance() (*wizard, tea.Cmd) {
 			if dp, ok := w.pages[pageDone].(*donePage); ok {
 				dp.totalSteps = len(ap.steps)
 				dp.greenCount = 0
+				dp.skippedCount = 0
 				for _, s := range ap.steps {
-					if s.status == "done" {
+					switch s.status {
+					case "done":
 						dp.greenCount++
+					case "skipped":
+						dp.skippedCount++
 					}
 				}
 				// The deploy key is pending when the install completed
@@ -409,6 +435,13 @@ func (w *wizard) teardownSecrets() {
 }
 
 func (w *wizard) goBack() (*wizard, tea.Cmd) {
+	// UX-6: esc while revisiting from review cancels and returns to review.
+	if w.returnToReview {
+		w.returnToReview = false
+		w.page = pageReview
+		cmd := w.pages[pageReview].init(&w.state)
+		return w, cmd
+	}
 	if w.page <= 0 {
 		return w, nil
 	}
@@ -649,5 +682,13 @@ func BuildCommandLine(state *WizardState) string {
 		args = append(args, "--yes")
 	}
 
-	return strings.Join(args, " \\\n  ")
+	result := strings.Join(args, " \\\n  ")
+
+	// UX-10: forge and uplink onboarding are interactive-only — the wizard's
+	// answers are not yet expressible as install flags. Disclose this.
+	if state.ForgeOrg != "" || state.UplinkIdentity != "" {
+		result += "\n\n# Note: forge and uplink onboarding will prompt interactively —\n# the wizard's forge/uplink answers are not yet expressible as install flags."
+	}
+
+	return result
 }

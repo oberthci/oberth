@@ -694,7 +694,14 @@ func TestApplyRetryAfterFailureRestartsInstaller(t *testing.T) {
 			_, _ = deps.Output.Write([]byte("Installing Oberth\n"))
 			return errors.New("helm timeout")
 		}
+		// Second run: succeeds and reports steps via the sink (realistic
+		// behavior). Steps not reported by the sink are "skipped", not "done".
 		_, _ = deps.Output.Write([]byte("audit chain verified\n"))
+		if deps.StepProgressSink != nil {
+			for step := range stepNameToIndex {
+				deps.StepProgressSink(step, "done")
+			}
+		}
 		return nil
 	}
 
@@ -735,9 +742,7 @@ func TestApplyRetryAfterFailureRestartsInstaller(t *testing.T) {
 	if p.holdState {
 		t.Fatal("successful retry must not remain in HOLD")
 	}
-	// The first run's "failed" marker must not survive the retry. (Steps the
-	// output stream skips over remain "pending" — a pre-existing display
-	// quirk of the pattern tracker, not retry state.)
+	// The first run's "failed" marker must not survive the retry.
 	for i, s := range p.steps {
 		if s.status == "failed" {
 			t.Fatalf("step %d still marked failed after successful retry", i)
@@ -1761,5 +1766,318 @@ func TestUplinkKeysShowsRescanWhenNoKeys(t *testing.T) {
 	keys = stripAnsi(p.keys())
 	if strings.Contains(keys, "rescan") {
 		t.Fatalf("key line must NOT advertise rescan when keys exist: %s", keys)
+	}
+}
+
+// --- #444 UX-6: review revisit is round-trip ---
+
+func TestReturnToReviewOnPageComplete(t *testing.T) {
+	w := newWizard(Options{})
+	// Walk through to the review page normally so pages are valid.
+	w.page = pageReview
+	for i := 0; i < pageReview; i++ {
+		w.state.pageValid[i] = true
+	}
+
+	// Jump from review to the namespaces page (section 2).
+	_, cmd := w.Update(keyPress('2', "2"))
+	if cmd == nil {
+		t.Fatal("'2' on review must produce a jump command")
+	}
+	msg := cmd()
+	_, _ = w.Update(msg)
+	if w.page != pageNamespaces {
+		t.Fatalf("after jump, page = %d, want %d (namespaces)", w.page, pageNamespaces)
+	}
+	if !w.returnToReview {
+		t.Fatal("returnToReview must be set after jumping from review")
+	}
+
+	// Complete the page — should return to review, not advance to execution.
+	_, _ = w.Update(pageCompleteMsg{})
+	if w.page != pageReview {
+		t.Fatalf("after completing the jumped-to page, page = %d, want %d (review)", w.page, pageReview)
+	}
+	if w.returnToReview {
+		t.Fatal("returnToReview must be cleared after returning")
+	}
+}
+
+func TestReturnToReviewOnEsc(t *testing.T) {
+	w := newWizard(Options{})
+	w.page = pageReview
+
+	// Jump from review to the TLS page (section 5).
+	_, cmd := w.Update(keyPress('5', "5"))
+	if cmd == nil {
+		t.Fatal("'5' on review must produce a jump command")
+	}
+	msg := cmd()
+	_, _ = w.Update(msg)
+	if w.page != pageTLS {
+		t.Fatalf("after jump, page = %d, want %d (tls)", w.page, pageTLS)
+	}
+
+	// Esc — should return to review, not go to store-connect.
+	_, _ = w.Update(pageBackMsg{})
+	if w.page != pageReview {
+		t.Fatalf("esc from jumped-to page must return to review, got page %d", w.page)
+	}
+	if w.returnToReview {
+		t.Fatal("returnToReview must be cleared after esc return")
+	}
+}
+
+func TestReturnToReviewRefreshesTLSSANs(t *testing.T) {
+	w := newWizard(Options{})
+	w.page = pageReview
+	for i := 0; i < pageReview; i++ {
+		w.state.pageValid[i] = true
+	}
+	// Set initial namespace and TLS SANs.
+	w.state.Config.Namespace = "oberth"
+	w.state.Config.TLSExtraDNSNames = []string{"oberth.oberth.svc"}
+
+	// Jump to namespaces (section 2) and change the namespace.
+	_, cmd := w.Update(keyPress('2', "2"))
+	msg := cmd()
+	_, _ = w.Update(msg)
+	w.state.Config.Namespace = "custom-ns"
+
+	// Complete — returnToReview should refresh TLS SANs.
+	_, _ = w.Update(pageCompleteMsg{})
+	if w.page != pageReview {
+		t.Fatalf("expected return to review, got page %d", w.page)
+	}
+	// The TLS SANs must reflect the new namespace.
+	found := false
+	for _, san := range w.state.Config.TLSExtraDNSNames {
+		if san == "oberth.custom-ns.svc" {
+			found = true
+		}
+		if san == "oberth.oberth.svc" {
+			t.Fatal("old namespace SAN must not survive the refresh")
+		}
+	}
+	if !found {
+		t.Fatalf("TLS SANs must include the new namespace: %v", w.state.Config.TLSExtraDNSNames)
+	}
+}
+
+// --- #444 UX-12: skipped steps ---
+
+func TestUnreportedStepsAreSkippedNotDone(t *testing.T) {
+	p := newApplyPage()
+	state := &WizardState{}
+
+	p.execInstaller = func(_ context.Context, _ installer.Config, deps installer.InstallDeps) error {
+		// Report only a few steps via the sink — the rest should be "skipped".
+		if deps.StepProgressSink != nil {
+			deps.StepProgressSink("render chart", "done")
+			deps.StepProgressSink("deploy oberth", "done")
+			deps.StepProgressSink("audit genesis", "done")
+		}
+		return nil
+	}
+
+	cmd := p.startApply(state)
+	done := pumpApply(t, p, state, cmd, 200)
+	if done == nil {
+		t.Fatal("install must complete")
+	}
+
+	// Steps reported by the sink must be "done".
+	doneSteps := map[int]bool{
+		stepNameToIndex["render chart"]:  true,
+		stepNameToIndex["deploy oberth"]: true,
+		stepNameToIndex["audit genesis"]: true,
+	}
+	for i, s := range p.steps {
+		if doneSteps[i] {
+			if s.status != "done" {
+				t.Errorf("step %d (%s) is %q, want done", i, s.name, s.status)
+			}
+		} else {
+			if s.status != "skipped" {
+				t.Errorf("step %d (%s) is %q, want skipped", i, s.name, s.status)
+			}
+		}
+	}
+}
+
+func TestDonePageSkippedStepsAreComplete(t *testing.T) {
+	// When green + skipped = total, the setup is complete (not "errors").
+	dp := &donePage{totalSteps: 11, greenCount: 5, skippedCount: 6}
+	state := &WizardState{}
+	view := dp.view(state, 80, 40)
+	if !strings.Contains(view, "Setup complete") {
+		t.Fatal("done page must say 'Setup complete' when green + skipped = total")
+	}
+	if strings.Contains(view, "finished with errors") {
+		t.Fatal("done page must not say 'finished with errors' when all steps completed or skipped")
+	}
+	// The green count must still be accurate.
+	if !strings.Contains(view, "5/11") {
+		t.Fatal("done page must show actual green count (5/11)")
+	}
+}
+
+// --- #444 UX-4: fingerprint promise softened ---
+
+func TestTLSPageDoesNotPromiseFingerprint(t *testing.T) {
+	p := newTLSPage()
+	state := &WizardState{}
+	state.ClusterInfo.nodeName = "playground"
+	p.init(state)
+	view := strings.ToLower(stripAnsi(p.view(state, 100, 30)))
+	if strings.Contains(view, "appears on the final screen") {
+		t.Fatal("TLS page must not promise fingerprints on the final screen")
+	}
+	if !strings.Contains(view, "retrieve the fingerprint") {
+		t.Fatal("TLS page must tell the user to retrieve the fingerprint after install")
+	}
+}
+
+func TestDonePageFingerprintRetrievalCommands(t *testing.T) {
+	dp := &donePage{totalSteps: 11, greenCount: 11}
+	state := &WizardState{}
+	view := stripAnsi(dp.view(state, 120, 40))
+	// When fingerprints are not set, the done page must show retrieval
+	// commands, not claim they were generated.
+	if strings.Contains(view, "generated at apply time") {
+		t.Fatal("done page must not say 'generated at apply time' — show retrieval commands instead")
+	}
+	if !strings.Contains(view, "retrieve with the command below") {
+		t.Fatal("done page must tell the user to retrieve fingerprints")
+	}
+	if !strings.Contains(view, "openssl x509 -fingerprint") {
+		t.Fatal("done page must show the openssl fingerprint command")
+	}
+}
+
+// --- #444 UX-10: dry-mode caveat ---
+
+func TestBuildCommandLineCaveatWhenForgeOrUplinkSet(t *testing.T) {
+	// No forge/uplink — no caveat.
+	state := &WizardState{}
+	out := BuildCommandLine(state)
+	if strings.Contains(out, "# Note:") {
+		t.Fatal("caveat must not appear when no forge/uplink data is set")
+	}
+
+	// With forge — caveat appears.
+	state.ForgeOrg = "oberthci"
+	out = BuildCommandLine(state)
+	if !strings.Contains(out, "# Note: forge and uplink onboarding will prompt interactively") {
+		t.Fatal("caveat must appear when forge data is set")
+	}
+
+	// With uplink only — caveat appears.
+	state.ForgeOrg = ""
+	state.UplinkIdentity = "dev@box"
+	out = BuildCommandLine(state)
+	if !strings.Contains(out, "# Note:") {
+		t.Fatal("caveat must appear when uplink identity is set")
+	}
+}
+
+// --- #444 UX-11: store-connect specific guidance ---
+
+func TestStoreConnectSpecificGuidance(t *testing.T) {
+	p := newStoreConnectPage()
+	state := &WizardState{}
+	p.init(state)
+	view := stripAnsi(p.view(state, 100, 30))
+	if !strings.Contains(view, "argo.vault.caCert") {
+		t.Fatal("store-connect must name the argo.vault.caCert helm value")
+	}
+	if !strings.Contains(view, "oberth access allow") {
+		t.Fatal("store-connect must name the access allow command")
+	}
+	// The old vague text must be gone.
+	if strings.Contains(view, "configured after install via") {
+		t.Fatal("store-connect must not use vague guidance")
+	}
+}
+
+// --- #444 UX-12: done page StoreMode check ---
+
+func TestDonePageStoreConnectNoOpenBao(t *testing.T) {
+	dp := &donePage{totalSteps: 11, greenCount: 11}
+	state := &WizardState{StoreMode: "connect"}
+	view := stripAnsi(dp.view(state, 80, 40))
+	if strings.Contains(view, "openbao") {
+		t.Fatal("done page must not mention openbao when StoreMode is 'connect'")
+	}
+
+	// When installing openbao, it must be mentioned.
+	state.StoreMode = "install-prod"
+	view = stripAnsi(dp.view(state, 80, 40))
+	if !strings.Contains(view, "openbao") {
+		t.Fatal("done page must mention openbao when StoreMode is 'install-prod'")
+	}
+}
+
+// --- #444 UX-13: non-current context visual marker ---
+
+func TestClusterPageNonCurrentContextLabel(t *testing.T) {
+	p := newClusterPage()
+	p.currentContext = "default"
+	p.contexts = []kubeContext{
+		{name: "default", server: "https://127.0.0.1:6443", isLocal: true},
+		{name: "other-cluster", server: "https://10.0.0.1:6443", isLocal: false},
+	}
+	p.cursor = 0
+	view := stripAnsi(p.view(nil, 100, 30))
+	if strings.Contains(view, "default (switch first)") {
+		t.Fatal("current context must NOT show '(switch first)'")
+	}
+	if !strings.Contains(view, "other-cluster (switch first)") {
+		t.Fatalf("non-current context must show '(switch first)':\n%s", view)
+	}
+}
+
+// --- #444 UX-13: cluster page rescan ---
+
+func TestClusterPageRescanKey(t *testing.T) {
+	p := newClusterPage()
+	p.contexts = []kubeContext{{name: "old-context", isLocal: true}}
+	p.cursor = 0
+	p.errMsg = "some error"
+	state := &WizardState{}
+
+	// Press 'r' to rescan. On CI there may be no kubeconfig, but the
+	// handler must clear the error and reset the cursor.
+	p.update(keyPress('r', "r"), state)
+	if p.errMsg != "" {
+		t.Fatalf("'r' rescan must clear the error, got %q", p.errMsg)
+	}
+	if p.cursor != 0 {
+		t.Fatalf("rescan must reset cursor to 0, got %d", p.cursor)
+	}
+}
+
+// --- #444 UX-14: Linux-specific cluster advice ---
+
+func TestClusterPageLinuxAdvice(t *testing.T) {
+	p := newClusterPage()
+	p.contexts = nil
+	view := stripAnsi(p.view(nil, 100, 30))
+	// On Linux (this test host), must show k3s advice.
+	if strings.Contains(view, "Docker Desktop and kind") {
+		t.Fatalf("on Linux, cluster page must not say 'Docker Desktop and kind':\n%s", view)
+	}
+	if !strings.Contains(view, "k3s") {
+		t.Fatalf("on Linux, cluster page must mention k3s:\n%s", view)
+	}
+}
+
+// --- #444 UX-13: cluster page keys() advertises rescan ---
+
+func TestClusterPageKeysShowsRescan(t *testing.T) {
+	p := newClusterPage()
+	keys := stripAnsi(p.keys())
+	if !strings.Contains(keys, "rescan") {
+		t.Fatalf("cluster page key line must advertise rescan: %s", keys)
 	}
 }
