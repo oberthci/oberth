@@ -159,6 +159,9 @@ func runRuns(ctx context.Context, arguments []string, output io.Writer) error {
 		}
 		return fmt.Errorf("%w: %w", errUsage, err)
 	}
+	if flags.NArg() != 0 {
+		return fmt.Errorf("%w: runs takes no positional arguments; use --repo and --ref to filter", errUsage)
+	}
 	api, err := remoteClient(ctx)
 	if err != nil {
 		return err
@@ -313,7 +316,11 @@ func runRemoteLog(ctx context.Context, arguments []string, output io.Writer) err
 		return err
 	}
 	reportMode("server")
-	path := "/api/runs/" + flags.Arg(0) + "/logs"
+	runID, err := resolveRemoteRunID(ctx, api, flags.Arg(0))
+	if err != nil {
+		return err
+	}
+	path := "/api/runs/" + runID + "/logs"
 	query := map[string]string{"burn": *burn, "step": *step, "pattern": *pattern}
 	for name, value := range map[string]int{"context": *context_, "offset": *offset, "limit": *limit} {
 		if value > 0 {
@@ -368,6 +375,9 @@ func runRepos(ctx context.Context, arguments []string, output io.Writer) error {
 	if err != nil || flags == nil {
 		return err
 	}
+	if flags.NArg() != 0 {
+		return fmt.Errorf("%w: repos takes no arguments", errUsage)
+	}
 	api, err := remoteClient(ctx)
 	if err != nil {
 		return err
@@ -402,6 +412,9 @@ func runRemoteStatus(ctx context.Context, arguments []string, output io.Writer) 
 	flags, asJSON, err := remoteFlags("status", arguments, output)
 	if err != nil || flags == nil {
 		return err
+	}
+	if flags.NArg() != 0 {
+		return fmt.Errorf("%w: status takes no arguments; for branch CI status use: oberth runs --ref <branch>", errUsage)
 	}
 	api, err := remoteClient(ctx)
 	if err != nil {
@@ -447,6 +460,9 @@ func runIssues(ctx context.Context, arguments []string, output io.Writer) error 
 	flags, asJSON, err := remoteFlags("issues", arguments, output)
 	if err != nil || flags == nil {
 		return err
+	}
+	if flags.NArg() != 0 {
+		return fmt.Errorf("%w: issues takes no arguments; use the dashboard for individual issue detail", errUsage)
 	}
 	api, err := remoteClient(ctx)
 	if err != nil {
@@ -518,15 +534,19 @@ func remoteArtifacts(ctx context.Context, config client.Config, rest []string, o
 		return err
 	}
 	reportMode("server")
+	runID, err := resolveRemoteRunID(ctx, api, rest[0])
+	if err != nil {
+		return err
+	}
 	if len(rest) == 2 {
-		return api.GetTo(ctx, "/api/runs/"+rest[0]+"/artifacts/"+rest[1], nil, output)
+		return api.GetTo(ctx, "/api/runs/"+runID+"/artifacts/"+rest[1], nil, output)
 	}
 	var listing remoteArtifactList
-	if err := api.Get(ctx, "/api/runs/"+rest[0]+"/artifacts", nil, &listing); err != nil {
+	if err := api.Get(ctx, "/api/runs/"+runID+"/artifacts", nil, &listing); err != nil {
 		return err
 	}
 	if len(listing.Artifacts) == 0 {
-		_, err := fmt.Fprintf(output, "run %s kept no artifacts\n", rest[0])
+		_, err := fmt.Fprintf(output, "run %s kept no artifacts\n", runID)
 		return err
 	}
 	if _, err := fmt.Fprintf(output, "%-12s  %-20s  %s\n", "SIZE", "MODIFIED", "NAME"); err != nil {

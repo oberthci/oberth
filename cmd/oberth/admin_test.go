@@ -1220,6 +1220,55 @@ func TestUplinkAddRejectsOversizeAndTrailingStdinKeys(t *testing.T) {
 	}
 }
 
+// --- #445: uplink add error improvements ---
+
+func TestUplinkAddPathLikeKeyReportsStatError(t *testing.T) {
+	t.Parallel()
+	var out bytes.Buffer
+	err := runUplinkWithDependencies(context.Background(), []string{
+		"add", "/nonexistent/path/to/key.pub", "agent@host",
+	}, strings.NewReader(""), &out, uplinkDependencies{mutationGate: allowTestMutation})
+	if err == nil {
+		t.Fatal("expected error for missing key file")
+	}
+	if !strings.Contains(err.Error(), "key file not found") {
+		t.Fatalf("error = %v, want stat error for path-like argument", err)
+	}
+}
+
+func TestUplinkAddDotPubKeyReportsStatError(t *testing.T) {
+	t.Parallel()
+	var out bytes.Buffer
+	err := runUplinkWithDependencies(context.Background(), []string{
+		"add", "id_ed25519.pub", "agent@host",
+	}, strings.NewReader(""), &out, uplinkDependencies{mutationGate: allowTestMutation})
+	if err == nil {
+		t.Fatal("expected error for missing .pub key file")
+	}
+	if !strings.Contains(err.Error(), "key file not found") {
+		t.Fatalf("error = %v, want stat error for .pub argument", err)
+	}
+}
+
+func TestUplinkAddShowsPodHintOnWorkstation(t *testing.T) {
+	t.Parallel()
+	// Skip if running inside a pod (serviceaccount directory exists).
+	if _, err := os.Stat("/var/run/secrets/kubernetes.io/serviceaccount"); err == nil {
+		t.Skip("running inside a pod; workstation hint test not applicable")
+	}
+	_, _, authorized := testSSHIdentity(t)
+	var out bytes.Buffer
+	err := runUplinkWithDependencies(context.Background(), []string{
+		"add", strings.TrimSpace(string(authorized)), "agent@host",
+	}, strings.NewReader(""), &out, uplinkDependencies{mutationGate: allowTestMutation})
+	if err == nil {
+		t.Fatal("expected error about missing TLS cert")
+	}
+	if !strings.Contains(err.Error(), "kubectl exec") {
+		t.Fatalf("error = %v, want kubectl exec hint on workstation", err)
+	}
+}
+
 func codebergSSHHostKey(t *testing.T) ssh.PublicKey {
 	t.Helper()
 	const publishedKey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIIVIC02vnjFyL+I4RHfvIGNtOgJMe769VTF1VR4EB3ZB"

@@ -99,6 +99,19 @@ func TestInitTypeOverride(t *testing.T) {
 	}
 }
 
+func TestInitTypeDeprecationNotice(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	var output bytes.Buffer
+	if err := executeInit(dir, "node", false, &output); err != nil {
+		t.Fatal(err)
+	}
+	out := output.String()
+	if !strings.Contains(out, "--type has no effect yet") {
+		t.Fatalf("output missing deprecation notice: %q", out)
+	}
+}
+
 func TestInitInvalidType(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -177,8 +190,8 @@ func TestInitSummaryOutput(t *testing.T) {
 	if !strings.Contains(out, "wrote: .oberth/build.yaml") {
 		t.Fatalf("output missing 'wrote' line: %q", out)
 	}
-	if !strings.Contains(out, "5 steps") {
-		t.Fatalf("output missing step count: %q", out)
+	if !strings.Contains(out, "5 steps, 4 dependencies") {
+		t.Fatalf("output missing correct step/dependency count: %q", out)
 	}
 	if !strings.Contains(out, "fetch") || !strings.Contains(out, "report") {
 		t.Fatalf("output missing DAG step names: %q", out)
@@ -375,12 +388,15 @@ func TestInitDetectedLanguageDemoSuffix(t *testing.T) {
 				t.Fatal(err)
 			}
 			out := output.String()
-			hasSuffix := strings.Contains(out, "generating demo pipeline")
+			hasSuffix := strings.Contains(out, "generic demo pipeline generated")
 			if tc.wantSuffix && !hasSuffix {
 				t.Fatalf("output for %s missing demo suffix: %q", tc.projType, out)
 			}
 			if !tc.wantSuffix && hasSuffix {
 				t.Fatalf("output for %s has unexpected demo suffix: %q", tc.projType, out)
+			}
+			if tc.wantSuffix && !strings.Contains(out, "customize for your "+tc.projType+" project") {
+				t.Fatalf("output for %s missing project-specific customize hint: %q", tc.projType, out)
 			}
 		})
 	}

@@ -332,3 +332,93 @@ func TestIssuesEmptyShowsNoIssues(t *testing.T) {
 		t.Fatalf("empty issue list did not show a message:\n%s", out.String())
 	}
 }
+
+// --- #445: positional argument rejection ---
+
+func TestStatusRejectsPositionalArgs(t *testing.T) {
+	t.Parallel()
+	var out bytes.Buffer
+	err := runRemoteStatus(context.Background(), []string{"main"}, &out)
+	if err == nil || !strings.Contains(err.Error(), "takes no arguments") {
+		t.Fatalf("error = %v, want positional rejection", err)
+	}
+}
+
+func TestReposRejectsPositionalArgs(t *testing.T) {
+	t.Parallel()
+	var out bytes.Buffer
+	err := runRepos(context.Background(), []string{"myrepo"}, &out)
+	if err == nil || !strings.Contains(err.Error(), "takes no arguments") {
+		t.Fatalf("error = %v, want positional rejection", err)
+	}
+}
+
+func TestIssuesRejectsPositionalArgs(t *testing.T) {
+	t.Parallel()
+	var out bytes.Buffer
+	err := runIssues(context.Background(), []string{"42"}, &out)
+	if err == nil || !strings.Contains(err.Error(), "takes no arguments") {
+		t.Fatalf("error = %v, want positional rejection", err)
+	}
+}
+
+func TestRunsRejectsPositionalArgs(t *testing.T) {
+	t.Parallel()
+	var out bytes.Buffer
+	err := runRuns(context.Background(), []string{"main"}, &out)
+	if err == nil || !strings.Contains(err.Error(), "takes no positional") {
+		t.Fatalf("error = %v, want positional rejection", err)
+	}
+}
+
+// --- #445: short run ID resolution ---
+
+func TestLogResolvesShortRunID(t *testing.T) {
+	var requestedPath string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/runs" {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`[{"ID":"abcdef1234567890abcdef1234567890","Ref":"main","SHA":"0123456789abcdef","Status":"ok"}]`))
+			return
+		}
+		requestedPath = r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"run_id":"abcdef1234567890abcdef1234567890","burn":"ci","step":"test","output":"ok\n","total_lines":1}`))
+	}))
+	defer server.Close()
+	configure(t, server)
+
+	var out bytes.Buffer
+	err := runRemoteLog(context.Background(), []string{"--burn", "ci", "--step", "test", "abcdef12"}, &out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(requestedPath, "abcdef1234567890abcdef1234567890") {
+		t.Fatalf("short ID was not resolved; requested path = %q", requestedPath)
+	}
+}
+
+func TestArtifactsResolvesShortRunID(t *testing.T) {
+	var requestedPath string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/runs" {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`[{"ID":"abcdef1234567890abcdef1234567890","Ref":"main","SHA":"0123456789abcdef","Status":"ok"}]`))
+			return
+		}
+		requestedPath = r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"run_id":"abcdef1234567890abcdef1234567890","artifacts":[]}`))
+	}))
+	defer server.Close()
+	configure(t, server)
+
+	var out bytes.Buffer
+	err := runArtifacts(context.Background(), []string{"abcdef12"}, &out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(requestedPath, "abcdef1234567890abcdef1234567890") {
+		t.Fatalf("short ID was not resolved; requested path = %q", requestedPath)
+	}
+}

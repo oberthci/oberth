@@ -62,12 +62,15 @@ func executeInit(root, typeOverride string, force bool, output io.Writer) error 
 			return fmt.Errorf("%w: unknown project type %q; use go, node, python, or generic", errUsage, typeOverride)
 		}
 		reason = fmt.Sprintf("--type %s", typeOverride)
+		if _, err := fmt.Fprintln(output, "note: --type has no effect yet; all project types generate the same demo pipeline"); err != nil {
+			return err
+		}
 	} else {
 		detected, reason = detectProject(root)
 	}
 
 	if detected != projectGeneric {
-		if _, err := fmt.Fprintf(output, "detected: %s (%s) -- generating demo pipeline\n", detected, reason); err != nil {
+		if _, err := fmt.Fprintf(output, "detected: %s (%s) -- generic demo pipeline generated; customize for your %s project after the first run\n", detected, reason, detected); err != nil {
 			return err
 		}
 	} else {
@@ -129,7 +132,7 @@ func executeInit(root, typeOverride string, force bool, output io.Writer) error 
 	if _, err := fmt.Fprint(output, initDAGDiagram); err != nil {
 		return err
 	}
-	if _, err := fmt.Fprintln(output, "  5 steps, 3 dependencies, ~30 seconds to run."); err != nil {
+	if _, err := fmt.Fprintln(output, "  5 steps, 4 dependencies, ~30 seconds to run."); err != nil {
 		return err
 	}
 	_, printErr := fmt.Fprintln(output, "\nnext: commit and push to Oberth -- watch the pipeline in the dashboard.")
