@@ -555,7 +555,11 @@ func (jobs *ArgoJobs) PipelineCredentialed(_ context.Context, request service.Jo
 	}
 	workflow, err := argoworkflow.Decode(source)
 	if err != nil {
-		return false, nil
+		// Decode failure: the workflow YAML is invalid or unreadable. Return
+		// the error so the scheduler can log it. The false result is correct:
+		// an unparseable pipeline cannot declare secrets, so treating it as
+		// non-credentialed is fail-safe (zero secrets, zero publication rights).
+		return false, fmt.Errorf("decode pipeline for credential detection: %w", err)
 	}
 	paths, err := argoworkflow.DeclaredSecretPaths(workflow)
 	return err == nil && len(paths) > 0, nil

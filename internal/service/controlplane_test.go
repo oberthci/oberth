@@ -381,7 +381,7 @@ func TestFastForwardPromotionOutlivesCanceledRequest(t *testing.T) {
 	}
 	done := make(chan result, 1)
 	go func() {
-		value, err := control.CallTool(ctx, api.Actor{Identity: "agent@host"}, "promote",
+		value, err := control.CallTool(ctx, api.Actor{Identity: "agent@host", Admin: true}, "promote",
 			json.RawMessage(`{"sha":"`+sourceSHA+`","branch":"main"}`))
 		done <- result{value: value, err: err}
 	}()
@@ -456,7 +456,7 @@ func TestFastForwardPendingPublicationRecoversWithoutRestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	value, err := control.CallTool(context.Background(), api.Actor{Identity: "agent@host"}, "promote",
+	value, err := control.CallTool(context.Background(), api.Actor{Identity: "agent@host", Admin: true}, "promote",
 		json.RawMessage(`{"sha":"`+sourceSHA+`","branch":"main"}`))
 	if err != nil {
 		t.Fatal(err)
@@ -1787,14 +1787,14 @@ func TestDefaultBranchUsesOrdinaryCIPublicationAndSync(t *testing.T) {
 	if len(fixture.git.promotions) != 1 || fixture.git.promotions[0] != "codeberg/acme/oberth:main:"+sha {
 		t.Fatalf("default branch publication = promotions %#v, syncedBranches %#v", fixture.git.promotions, fixture.git.syncedBranches)
 	}
-	// The explicit sync tool still uses forced SyncBranch — it is an
-	// operator-initiated action, not an automated CI publication.
+	// The sync tool must refuse the default branch — use promote for
+	// integration. This prevents accidental force-rewind of main (#450).
 	_, err = fixture.api(t).CallTool(ctx, api.Actor{Identity: "agent@host"}, "sync", json.RawMessage(`{"sha":"`+sha+`"}`))
-	if err != nil {
-		t.Fatalf("default branch sync: %v", err)
+	if err == nil {
+		t.Fatal("sync accepted the default branch; expected rejection")
 	}
-	if len(fixture.git.syncedBranches) != 1 || fixture.git.syncedBranches[0] != "codeberg/acme/oberth:main:"+sha {
-		t.Fatalf("default branch sync = %#v", fixture.git.syncedBranches)
+	if !strings.Contains(err.Error(), "default branch") {
+		t.Fatalf("sync error = %v, want default branch rejection", err)
 	}
 }
 
@@ -2484,7 +2484,7 @@ func TestDivergentPromotionRecoversPushBeforeAtomicFinalization(t *testing.T) {
 	}
 	seedGreen()
 	fixture.git.plan = gitcache.MergeCandidate{BaseSHA: baseSHA, MergedSHA: mergedSHA}
-	value, err := fixture.api(t).CallTool(context.Background(), api.Actor{Identity: "agent@host"}, "promote", json.RawMessage(`{"sha":"`+sourceSHA+`","branch":"main"}`))
+	value, err := fixture.api(t).CallTool(context.Background(), api.Actor{Identity: "agent@host", Admin: true}, "promote", json.RawMessage(`{"sha":"`+sourceSHA+`","branch":"main"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2541,7 +2541,7 @@ func TestPublicationFailureTerminalizesWithoutBackgroundRetry(t *testing.T) {
 	fixture.git.plan = gitcache.MergeCandidate{BaseSHA: baseSHA, MergedSHA: sourceSHA, FastForward: true}
 	fixture.git.pushErr = errors.New("upstream unavailable")
 
-	value, err := fixture.api(t).CallTool(context.Background(), api.Actor{Identity: "agent@host"}, "promote",
+	value, err := fixture.api(t).CallTool(context.Background(), api.Actor{Identity: "agent@host", Admin: true}, "promote",
 		json.RawMessage(`{"sha":"`+sourceSHA+`","branch":"main"}`))
 	if err != nil {
 		t.Fatal(err)
@@ -2584,7 +2584,7 @@ func TestPromotionFastForwardDivergentAndNonFastForwardFailure(t *testing.T) {
 		fixture := newControlFixture(t)
 		seedGreen(t, fixture)
 		fixture.git.plan = gitcache.MergeCandidate{BaseSHA: baseSHA, MergedSHA: sourceSHA, FastForward: true}
-		value, err := fixture.api(t).CallTool(context.Background(), api.Actor{Identity: "agent@host"}, "promote", json.RawMessage(`{"sha":"`+sourceSHA+`","branch":"main"}`))
+		value, err := fixture.api(t).CallTool(context.Background(), api.Actor{Identity: "agent@host", Admin: true}, "promote", json.RawMessage(`{"sha":"`+sourceSHA+`","branch":"main"}`))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -2608,7 +2608,7 @@ func TestPromotionFastForwardDivergentAndNonFastForwardFailure(t *testing.T) {
 		fixture := newControlFixture(t)
 		seedGreen(t, fixture)
 		fixture.git.plan = gitcache.MergeCandidate{MergedSHA: sourceSHA, FastForward: true, TargetUnborn: true}
-		value, err := fixture.api(t).CallTool(context.Background(), api.Actor{Identity: "agent@host"}, "promote", json.RawMessage(`{"sha":"`+sourceSHA+`","branch":"main"}`))
+		value, err := fixture.api(t).CallTool(context.Background(), api.Actor{Identity: "agent@host", Admin: true}, "promote", json.RawMessage(`{"sha":"`+sourceSHA+`","branch":"main"}`))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -2626,7 +2626,7 @@ func TestPromotionFastForwardDivergentAndNonFastForwardFailure(t *testing.T) {
 			fixture := newControlFixture(t)
 			seedGreen(t, fixture)
 			fixture.git.plan = plan
-			value, err := fixture.api(t).CallTool(context.Background(), api.Actor{Identity: "agent@host"}, "promote", json.RawMessage(`{"sha":"`+sourceSHA+`","branch":"main"}`))
+			value, err := fixture.api(t).CallTool(context.Background(), api.Actor{Identity: "agent@host", Admin: true}, "promote", json.RawMessage(`{"sha":"`+sourceSHA+`","branch":"main"}`))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -2641,7 +2641,7 @@ func TestPromotionFastForwardDivergentAndNonFastForwardFailure(t *testing.T) {
 		fixture := newControlFixture(t)
 		seedGreen(t, fixture)
 		fixture.git.plan = gitcache.MergeCandidate{BaseSHA: baseSHA, MergedSHA: baseSHA, FastForward: false}
-		value, err := fixture.api(t).CallTool(context.Background(), api.Actor{Identity: "agent@host"}, "promote", json.RawMessage(`{"sha":"`+sourceSHA+`","branch":"main"}`))
+		value, err := fixture.api(t).CallTool(context.Background(), api.Actor{Identity: "agent@host", Admin: true}, "promote", json.RawMessage(`{"sha":"`+sourceSHA+`","branch":"main"}`))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -2681,7 +2681,7 @@ func TestPromotionFastForwardDivergentAndNonFastForwardFailure(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		value, err := service.CallTool(context.Background(), api.Actor{Identity: "agent@host"}, "promote", json.RawMessage(`{"sha":"`+sourceSHA+`","branch":"main"}`))
+		value, err := service.CallTool(context.Background(), api.Actor{Identity: "agent@host", Admin: true}, "promote", json.RawMessage(`{"sha":"`+sourceSHA+`","branch":"main"}`))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -2714,7 +2714,7 @@ func TestPromotionFastForwardDivergentAndNonFastForwardFailure(t *testing.T) {
 		fixture := newControlFixture(t, JobResult{Status: model.RunPassed, Phase: "passed", Steps: []model.StepResult{stepResult(model.StepPassed)}})
 		seedGreen(t, fixture)
 		fixture.git.plan = gitcache.MergeCandidate{BaseSHA: baseSHA, MergedSHA: mergedSHA}
-		value, err := fixture.api(t).CallTool(context.Background(), api.Actor{Identity: "agent@host"}, "promote", json.RawMessage(`{"sha":"`+sourceSHA+`","branch":"main"}`))
+		value, err := fixture.api(t).CallTool(context.Background(), api.Actor{Identity: "agent@host", Admin: true}, "promote", json.RawMessage(`{"sha":"`+sourceSHA+`","branch":"main"}`))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -2737,7 +2737,7 @@ func TestPromotionFastForwardDivergentAndNonFastForwardFailure(t *testing.T) {
 		fixture.git.plan = gitcache.MergeCandidate{BaseSHA: baseSHA, MergedSHA: sourceSHA, FastForward: true}
 		fixture.git.pushErr = errors.New("non-fast-forward")
 		fixture.git.pushMoveSHA = mergedSHA
-		value, err := fixture.api(t).CallTool(context.Background(), api.Actor{Identity: "agent@host"}, "promote", json.RawMessage(`{"sha":"`+sourceSHA+`","branch":"main"}`))
+		value, err := fixture.api(t).CallTool(context.Background(), api.Actor{Identity: "agent@host", Admin: true}, "promote", json.RawMessage(`{"sha":"`+sourceSHA+`","branch":"main"}`))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -2751,7 +2751,7 @@ func TestPromotionFastForwardDivergentAndNonFastForwardFailure(t *testing.T) {
 		fixture := newControlFixture(t)
 		seedGreen(t, fixture)
 		fixture.git.plan = gitcache.MergeCandidate{BaseSHA: baseSHA, MergedSHA: mergedSHA}
-		value, err := fixture.api(t).CallTool(context.Background(), api.Actor{Identity: "agent@host"}, "promote", json.RawMessage(`{"sha":"`+sourceSHA+`","branch":"main"}`))
+		value, err := fixture.api(t).CallTool(context.Background(), api.Actor{Identity: "agent@host", Admin: true}, "promote", json.RawMessage(`{"sha":"`+sourceSHA+`","branch":"main"}`))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -2856,7 +2856,7 @@ func TestFastForwardPromotionPublicationWakesSameRefQueue(t *testing.T) {
 	}
 	promotionDone := make(chan promotionResult, 1)
 	go func() {
-		value, callErr := controlAPI.CallTool(context.Background(), api.Actor{Identity: "agent@host"}, "promote",
+		value, callErr := controlAPI.CallTool(context.Background(), api.Actor{Identity: "agent@host", Admin: true}, "promote",
 			json.RawMessage(`{"sha":"`+sourceSHA+`","branch":"`+target+`"}`))
 		promotionDone <- promotionResult{value: value, err: callErr}
 	}()
@@ -2939,7 +2939,7 @@ func TestAdmittedPromotionAlwaysReturnsDurableID(t *testing.T) {
 		fixture := newControlFixture(t)
 		seedGreen(t, fixture, "feature/conflict")
 		fixture.git.prepareErr = errors.New("merge conflict")
-		value, err := fixture.api(t).CallTool(context.Background(), api.Actor{Identity: "agent@host"}, "promote",
+		value, err := fixture.api(t).CallTool(context.Background(), api.Actor{Identity: "agent@host", Admin: true}, "promote",
 			json.RawMessage(`{"sha":"`+sourceSHA+`","branch":"main"}`))
 		if err != nil {
 			t.Fatal(err)
@@ -3023,7 +3023,7 @@ func TestAdmittedPromotionCompensationSurvivesRequestCancellation(t *testing.T) 
 		service := fixture.api(t)
 		called := make(chan callResult, 1)
 		go func() {
-			value, err := service.CallTool(ctx, api.Actor{Identity: "agent@host"}, "promote",
+			value, err := service.CallTool(ctx, api.Actor{Identity: "agent@host", Admin: true}, "promote",
 				json.RawMessage(`{"sha":"`+sourceSHA+`","branch":"main"}`))
 			called <- callResult{value: value, err: err}
 		}()
@@ -3068,7 +3068,7 @@ func TestAdmittedPromotionCompensationSurvivesRequestCancellation(t *testing.T) 
 		t.Cleanup(cancel)
 		called := make(chan callResult, 1)
 		go func() {
-			value, callErr := service.CallTool(ctx, api.Actor{Identity: "agent@host"}, "promote",
+			value, callErr := service.CallTool(ctx, api.Actor{Identity: "agent@host", Admin: true}, "promote",
 				json.RawMessage(`{"sha":"`+sourceSHA+`","branch":"main"}`))
 			called <- callResult{value: value, err: callErr}
 		}()

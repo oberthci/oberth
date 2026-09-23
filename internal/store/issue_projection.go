@@ -232,6 +232,43 @@ RETURNING `+issueColumns, now, now, resolution, resolution, open.ID))
 		return fmt.Errorf("load desired CI issue projection: %w", desiredErr)
 	}
 
+	// LOGIC-8 (#447): When the newest failure is a promotion failure but the
+	// branch itself has since produced a green run (higher work_sequence),
+	// the branch code is healthy and the stale promotion failure should not
+	// keep the CI issue open. Close it the same way a clean desiredErr path
+	// would.
+	if desired.Origin == ciOriginPromotion {
+		var superseded int
+		if scanErr := tx.QueryRowContext(ctx, `
+SELECT 1 FROM ci_issue_projections
+WHERE repo_id = ? AND branch = ? AND origin = ? AND outcome = ?
+AND work_sequence > ?
+LIMIT 1`, projection.Work.RepoID, projection.Work.Branch,
+			ciOriginBranch, ciOutcomePassed, desired.Sequence).Scan(&superseded); scanErr == nil {
+			// A green branch run supersedes the promotion failure.
+			if errors.Is(openErr, sql.ErrNoRows) {
+				return nil // no open issue to close
+			}
+			resolution := fmt.Sprintf("resolved: branch green supersedes promotion failure %s", desired.WorkID)
+			closed, closeErr := scanIssue(tx.QueryRowContext(ctx, `
+UPDATE issues SET state = 'closed', closed_at = ?, updated_at = ?,
+    body = CASE WHEN body = '' THEN ? ELSE body || char(10) || char(10) || ? END
+WHERE id = ? AND state = 'open'
+RETURNING `+issueColumns, now, now, resolution, resolution, open.ID))
+			if closeErr != nil {
+				return fmt.Errorf("close superseded promotion CI issue: %w", closeErr)
+			}
+			if _, delErr := tx.ExecContext(ctx, `DELETE FROM issue_locks WHERE issue_id = ?`, closed.ID); delErr != nil {
+				return fmt.Errorf("release superseded CI issue lock: %w", delErr)
+			}
+			if auditErr := appendIssueAudit(ctx, tx, projection.Work.Actor, "issue.ci.close", closed.ID,
+				map[string]any{"branch": projection.Work.Branch, "resolution": resolution}, now); auditErr != nil {
+				return auditErr
+			}
+			return nil
+		}
+	}
+
 	var issue model.Issue
 	if errors.Is(openErr, sql.ErrNoRows) {
 		issue, err = scanIssue(tx.QueryRowContext(ctx, `

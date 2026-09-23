@@ -12,6 +12,8 @@ import (
 	"sync"
 	"time"
 
+	"log"
+
 	"github.com/oberthci/oberth/internal/gitoid"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/runlog"
@@ -1129,6 +1131,12 @@ func (scheduler *Scheduler) pipelineSize(ctx context.Context, request JobRequest
 // paths that make it a credentialed run. Releases are always credentialed
 // (already set at enqueue time); this method detects CI pipelines with declared
 // secrets so the run can be marked before the log writer is created.
+//
+// Design: on detector error the result is false (not credentialed). This is
+// fail-open for scheduling (the run proceeds as a non-credentialed branch
+// build, which has zero secrets and zero publication rights) and fail-safe
+// for records (a credentialed run that is not marked will be re-detected at
+// admission time). The false result never grants access it should not.
 func (scheduler *Scheduler) pipelineCredentialed(ctx context.Context, request JobRequest) bool {
 	if request.Run.Release || request.Run.Credentialed {
 		return true
@@ -1136,6 +1144,7 @@ func (scheduler *Scheduler) pipelineCredentialed(ctx context.Context, request Jo
 	if detector, ok := scheduler.jobs.(PipelineCredentialDetector); ok {
 		credentialed, err := detector.PipelineCredentialed(ctx, request)
 		if err != nil {
+			log.Printf("WARN: pipelineCredentialed decode error for run %s: %v (treating as non-credentialed)", request.Run.ID, err)
 			return false
 		}
 		return credentialed

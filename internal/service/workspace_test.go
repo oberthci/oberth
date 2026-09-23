@@ -452,7 +452,7 @@ func TestPromotionOnlyTerminalPathsCleanExactWorkspace(t *testing.T) {
 			seedWorkspacePromotionCandidate(t, fixture, sourceSHA)
 			auditor := test.configure(fixture)
 			service := newWorkspaceAPI(t, fixture, auditor, nil)
-			value, err := service.CallTool(context.Background(), api.Actor{Identity: "agent@host"}, "promote",
+			value, err := service.CallTool(context.Background(), api.Actor{Identity: "agent@host", Admin: true}, "promote",
 				json.RawMessage(`{"sha":"`+sourceSHA+`","branch":"main"}`))
 			if err != nil {
 				t.Fatal(err)
@@ -476,7 +476,7 @@ func TestSchedulerCleansDivergentPromotionAndRunWorkspaces(t *testing.T) {
 	seedWorkspacePromotionCandidate(t, fixture, sourceSHA)
 	fixture.git.plan = gitcache.MergeCandidate{BaseSHA: baseSHA, MergedSHA: mergedSHA}
 	service := newWorkspaceAPI(t, fixture, fixture.store, nil)
-	value, err := service.CallTool(context.Background(), api.Actor{Identity: "agent@host"}, "promote",
+	value, err := service.CallTool(context.Background(), api.Actor{Identity: "agent@host", Admin: true}, "promote",
 		json.RawMessage(`{"sha":"`+sourceSHA+`","branch":"main"}`))
 	if err != nil {
 		t.Fatal(err)
@@ -515,7 +515,7 @@ func TestPromotionCleanupFailureIsObservableWithoutRepaintingOutcome(t *testing.
 		}
 		return os.RemoveAll(path)
 	})
-	value, err := service.CallTool(context.Background(), api.Actor{Identity: "agent@host"}, "promote",
+	value, err := service.CallTool(context.Background(), api.Actor{Identity: "agent@host", Admin: true}, "promote",
 		json.RawMessage(`{"sha":"`+sourceSHA+`","branch":"main"}`))
 	if err != nil {
 		t.Fatalf("durable promotion was reported as an operation failure: %v", err)

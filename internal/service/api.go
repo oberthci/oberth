@@ -1118,6 +1118,13 @@ func (service *API) sync(ctx context.Context, actor api.Actor, repositoryName, s
 				ErrInvalidInput, run.SHA, strings.Join(candidateRefs, ", "))
 		}
 	}
+	// Refuse to sync the default branch — that is promote's job. Syncing
+	// the default branch would bypass the green gate and silently rewind or
+	// force-push main, which is never correct.
+	if run.Ref == repository.DefaultBranch {
+		return model.Run{}, fmt.Errorf("%w: sync refuses the default branch %q — use promote to integrate",
+			ErrInvalidInput, repository.DefaultBranch)
+	}
 	if err := auditedGitMutation(ctx, service.auditor, actor.Identity, "sync.branch", "run", run.ID,
 		map[string]any{"repo": repository.Name, "branch": run.Ref, "sha": run.SHA},
 		func() error {
@@ -1129,6 +1136,9 @@ func (service *API) sync(ctx context.Context, actor api.Actor, repositoryName, s
 }
 
 func (service *API) promote(ctx context.Context, actor api.Actor, repositoryName, selector, target string) (result model.Promotion, resultErr error) {
+	if !actor.Admin {
+		return model.Promotion{}, fmt.Errorf("%w: promote requires an admin uplink; mint one with: oberth uplink add --admin - <identity>@<host> < key.pub", ErrForbidden)
+	}
 	if service.git == nil || service.promotions == nil || service.promotionRuns == nil || service.enqueues == nil || service.auditor == nil {
 		return model.Promotion{}, fmt.Errorf("%w: promotion", ErrUnavailable)
 	}
