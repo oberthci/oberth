@@ -1015,6 +1015,7 @@ func InstallRekorStack(ctx context.Context, cfg Config, deps Deps) (RekorResult,
 		Namespace: ns,
 		// Chart service name "rekor-server" (release "rekor" + component
 		// "server"), service port 80 → container 3000.
+		// In-cluster only; integrity verified via signature against pinned keys (auditanchor/rekor.go).
 		ServiceAddress: fmt.Sprintf("http://rekor-server.%s.svc:80", ns),
 	}
 
@@ -1956,6 +1957,7 @@ func printDryRunPlanWithKind(cfg Config, w io.Writer, cluster ClusterInfo, kindC
 		_, _ = fmt.Fprintf(w, "     Requires ~1Gi additional RAM (requests; ~2Gi limits) — recommended for 32GB+ machines\n")
 		_, _ = fmt.Fprintln(w)
 		rekor = RekorResult{
+			// In-cluster only; integrity verified via signature against pinned keys (auditanchor/rekor.go).
 			ServiceAddress:  fmt.Sprintf("http://rekor-server.%s.svc:80", rekorNS),
 			LogPublicKeyPEM: "<generated-log-public-key-pem>",
 		}

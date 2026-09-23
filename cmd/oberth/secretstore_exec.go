@@ -40,6 +40,13 @@ const (
 	// declare, matching the secretstore client's own limit.
 	maxExecPaths = 32
 
+	// requireSwaplessEnv is the environment variable that, when set to any
+	// non-empty value, makes the swap-active check a hard failure instead of
+	// a warning. The release pipeline can opt in by setting this in the Job
+	// environment; the default remains warn-only to avoid breaking existing
+	// setups that have not yet disabled swap.
+	requireSwaplessEnv = "OBERTH_REQUIRE_SWAPLESS"
+
 	// tmpfsMagic is the Linux filesystem magic number for tmpfs.
 	// See statfs(2). Used to refuse writing secrets to non-tmpfs mounts.
 	tmpfsMagic = 0x01021994
@@ -94,11 +101,18 @@ func runSecretStoreExec(ctx context.Context, arguments []string, standardOut, er
 			"refusing to write credentials to a non-memory-backed filesystem", directory, fsType)
 	}
 
-	// Warn if swap is active -- tmpfs pages can be swapped to disk, breaking
-	// the memory-only guarantee. Swapless nodes are a prerequisite for the
-	// memory-only secret delivery contract; this warning surfaces the gap
-	// without refusing (which would break too many existing setups).
+	// Warn (or refuse) if swap is active -- tmpfs pages can be swapped to
+	// disk, breaking the memory-only guarantee. When OBERTH_REQUIRE_SWAPLESS
+	// is set, this is a hard failure; otherwise it warns to avoid breaking
+	// existing setups that have not yet disabled swap.
 	if checkSwapActive(swapCheckPath) {
+		if os.Getenv(requireSwaplessEnv) != "" {
+			return fmt.Errorf("swap is active on this node and %s is set; "+
+				"refusing to write secrets — tmpfs pages may be paged to disk, "+
+				"breaking the memory-only guarantee. "+
+				"Disable swap (swapoff -a) or unset %s to downgrade to a warning",
+				requireSwaplessEnv, requireSwaplessEnv)
+		}
 		_, _ = fmt.Fprintf(errorOut, "WARNING: swap is active on this node; "+
 			"secrets on tmpfs may be paged to disk, breaking the memory-only guarantee. "+
 			"Disable swap (swapoff -a) for full memory-only assurance.\n")
@@ -351,6 +365,9 @@ func execChild(directory string, command []string, secrets [][]byte, standardOut
 	child := exec.CommandContext(context.Background(), command[0], command[1:]...)
 	child.Env = environment
 	child.Stdin, child.Stdout, child.Stderr = os.Stdin, stdoutRedactor, stderrRedactor
+	// Tie child lifetime to this wrapper: if the wrapper is killed, the kernel
+	// delivers SIGKILL to the child so it cannot outlive the redaction layer.
+	setPdeathsig(child)
 
 	runErr := child.Run()
 
@@ -541,6 +558,9 @@ func executeMaterialize(directory string, mappings []materializeMapping, command
 	child := exec.CommandContext(context.Background(), command[0], command[1:]...)
 	child.Env = environment
 	child.Stdin, child.Stdout, child.Stderr = os.Stdin, stdoutRedactor, stderrRedactor
+	// Tie child lifetime to this wrapper: if the wrapper is killed, the kernel
+	// delivers SIGKILL to the child so it cannot outlive the redaction layer.
+	setPdeathsig(child)
 
 	runErr := child.Run()
 

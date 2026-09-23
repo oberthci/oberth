@@ -1569,6 +1569,14 @@ func TestClusterPageKindCreateEntry(t *testing.T) {
 // --- #436: plain mode must wire onboarding config ---
 
 func TestPlainModeWiresOnboardingConfig(t *testing.T) {
+	// TODO(#449): This test does not reach the actual Config wiring because
+	// dry-mode exits before Apply, and Config fields are populated only at
+	// Apply time. It currently validates that answers are collected (the
+	// prompts are navigated successfully) and that the forge org appears in
+	// the printed equivalent command — a necessary-but-not-sufficient check.
+	// To fully test Config wiring, runPlain would need an internal seam (e.g.
+	// an injectable executor or a state-inspection callback before Apply).
+	//
 	// Feed answers to every plain-mode prompt, including "no" at the
 	// Apply confirmation so we never call installer.Execute (no cluster
 	// needed). The state.Config must carry the forge/uplink/ssh wiring

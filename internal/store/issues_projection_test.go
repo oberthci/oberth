@@ -331,15 +331,19 @@ func TestPromotionIssueProjectionIsOrderedAndProofAware(t *testing.T) {
 		t.Fatalf("delayed result overwrote newer projection: %#v", issue)
 	}
 
+	// LOGIC-8 (#447): a green branch run supersedes the stale promotion
+	// failure and closes the CI issue. The branch code is healthy; the
+	// promotion failure is a historical artifact.
 	green := projectionRun(t, database, repository.ID, branch, projectionSourceSHA)
 	if _, err := database.FinishRun(ctx, green.ID, model.RunResult{Status: model.RunPassed, Phase: "passed"}); err != nil {
 		t.Fatal(err)
 	}
-	issue, err = database.OpenCIIssue(ctx, repository.ID, branch)
-	if err != nil || !strings.Contains(issue.Body, newer.ID) {
-		t.Fatalf("ordinary green resolved promotion proof: %#v, %v", issue, err)
+	if _, err := database.OpenCIIssue(ctx, repository.ID, branch); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("green branch run should close stale promotion-failure issue: %v", err)
 	}
 
+	// A subsequent qualifying promotion with a delivered publication also
+	// keeps the issue closed (no regression from the LOGIC-8 path).
 	qualifying, err := database.AppendPromotion(ctx, spec)
 	if err != nil {
 		t.Fatal(err)
@@ -356,7 +360,7 @@ func TestPromotionIssueProjectionIsOrderedAndProofAware(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := database.OpenCIIssue(ctx, repository.ID, branch); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("qualifying promotion did not resolve issue: %v", err)
+		t.Fatalf("qualifying promotion did not keep issue closed: %v", err)
 	}
 }
 

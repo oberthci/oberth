@@ -1127,6 +1127,40 @@ func TestLsRemoteHeadsFailsForUnreachableUpstream(t *testing.T) {
 	}
 }
 
+func TestEnsureForFetchServesStaleWhenReservationExists(t *testing.T) {
+	t.Parallel()
+	repository := newTestRepository(t)
+	cache := newTestCache(t, repository.upstream)
+	ctx := context.Background()
+
+	// Ensure the repository is cached normally first.
+	fresh, err := cache.Ensure(ctx, "example")
+	if err != nil || fresh.Stale {
+		t.Fatalf("initial Ensure = %+v, %v", fresh, err)
+	}
+
+	// Plant a reservation file in the outbox so EnsureForFetch sees a
+	// pending receive. The reservation is minimal but structurally valid.
+	outboxDir := filepath.Join(cache.root, ".receive-outbox")
+	reservation := `{"version":2,"id":"test-reservation","repo":"example","actor":"test@host","state":"reserved","before":{},"next":0,"release_admission":{}}`
+	if err := os.WriteFile(filepath.Join(outboxDir, "example.json"), []byte(reservation), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// EnsureForFetch must return the cached repository without refreshing
+	// upstream, and it must be marked stale.
+	stale, err := cache.EnsureForFetch(ctx, "example")
+	if err != nil {
+		t.Fatalf("EnsureForFetch with reservation: %v", err)
+	}
+	if !stale.Stale {
+		t.Fatal("EnsureForFetch must return Stale=true when a reservation exists")
+	}
+	if stale.Path != fresh.Path {
+		t.Fatalf("EnsureForFetch path = %q, want %q", stale.Path, fresh.Path)
+	}
+}
+
 type testLogger struct{ writer *bytes.Buffer }
 
 func (l testLogger) Printf(format string, args ...any) {

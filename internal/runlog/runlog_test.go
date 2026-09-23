@@ -118,6 +118,57 @@ func TestLongLineDoesNotRepaintPassingRunAsIndexFailure(t *testing.T) {
 	}
 }
 
+// TestBuildIndexOnReconciledRunProducesReadableIndex verifies that a log
+// file from a reconciled run (partial content, possibly no terminal marker)
+// still produces a valid index whose ranges are readable. Reconciled runs
+// may have incomplete logs because the scheduler was not observing the Job
+// when it completed (#437).
+func TestBuildIndexOnReconciledRunProducesReadableIndex(t *testing.T) {
+	store, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	file, err := store.Create("r-reconciled")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Simulate a reconciled run: the log has a complete first step and an
+	// abruptly-ended second step (no closing line, simulating a crash).
+	body := "[lint/vet] $ go vet ./...\n[lint/vet] ok\n[test/unit] $ go test ./...\n[test/unit] PASS some/pkg\n"
+	if _, err := file.WriteString(body); err != nil {
+		t.Fatal(err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	index, err := store.BuildIndex("r-reconciled")
+	if err != nil {
+		t.Fatalf("BuildIndex on reconciled run: %v", err)
+	}
+	if index.Size != int64(len(body)) {
+		t.Fatalf("index.Size = %d, want %d", index.Size, len(body))
+	}
+	if len(index.Ranges) != 2 {
+		t.Fatalf("index.Ranges = %d, want 2 (lint/vet + test/unit)", len(index.Ranges))
+	}
+	// Both steps must be independently readable.
+	vetSlice, err := store.Read("r-reconciled", "lint", "vet")
+	if err != nil {
+		t.Fatalf("Read lint/vet: %v", err)
+	}
+	if !strings.Contains(string(vetSlice), "go vet") {
+		t.Fatalf("lint/vet slice = %q, want to contain 'go vet'", vetSlice)
+	}
+	unitSlice, err := store.Read("r-reconciled", "test", "unit")
+	if err != nil {
+		t.Fatalf("Read test/unit: %v", err)
+	}
+	if !strings.Contains(string(unitSlice), "go test") {
+		t.Fatalf("test/unit slice = %q, want to contain 'go test'", unitSlice)
+	}
+}
+
 func TestReadFromServesGrowingLogWithTailAndCursor(t *testing.T) {
 	store, err := Open(t.TempDir())
 	if err != nil {

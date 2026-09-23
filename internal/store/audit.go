@@ -219,9 +219,21 @@ func (s *Store) VerifyAuditState(ctx context.Context) (model.AuditHead, error) {
 	return head, nil
 }
 
-// VerifyAuditStateSince verifies only the suffix of the audit chain after
-// sinceID, given that sinceDigest was the verified SHA-256 at that position.
-// When sinceID is 0 or sinceDigest is nil it falls back to full verification.
+// VerifyAuditStateSince verifies only the suffix of the audit chain starting
+// after sinceID, given that sinceDigest was the verified SHA-256 at that
+// position. When sinceID is 0 or sinceDigest is nil it falls back to full
+// verification via VerifyAuditState.
+//
+// This suffix-only window is safe because:
+//  1. Full verification of the complete chain runs at startup (VerifyAuditState).
+//  2. The audit anchor manager's periodic cycle re-verifies the full chain.
+//  3. Between those full passes, this method validates only the entries
+//     appended since the last verified head, which is sufficient for the
+//     mutation gate: the prefix was already verified and is immutable (the
+//     chain is append-only with gap-free sequence IDs and chained SHA-256).
+//
+// Callers hold the verified head from a prior full or incremental pass and
+// advance it forward; any corruption in the suffix is detected immediately.
 func (s *Store) VerifyAuditStateSince(ctx context.Context, sinceID int64, sinceDigest []byte) (model.AuditHead, error) {
 	if sinceID <= 0 || len(sinceDigest) != sha256.Size {
 		return s.VerifyAuditState(ctx)
