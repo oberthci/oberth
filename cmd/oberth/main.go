@@ -47,7 +47,32 @@ func runCLI(ctx context.Context, arguments []string, input io.Reader, output io.
 	}
 	switch arguments[0] {
 	case "--help", "-h":
-		_, err := fmt.Fprintf(output, "Usage: oberth <command> [flags]\n\nCommands: %s\n", usageCommands)
+		_, err := fmt.Fprint(output, `Usage: oberth <command> [flags]
+
+Commands:
+  audit         Verify and inspect the audit chain
+  init          Initialize a bare repository
+  validate      Validate a periapsis.go pipeline
+  install       Install or upgrade Oberth on a cluster
+  setup         Interactive setup wizard
+  upgrade       Upgrade an existing Oberth deployment
+  serve         Start the Oberth server
+  upstream      Manage upstream forge connections
+  repo          Manage repository mappings
+  schedules     List and manage scheduled runs
+  fragments     Manage pipeline fragments
+  artifacts     List and download build artifacts
+  runs          List recent CI/CD runs
+  run           Show details for a single run
+  log           Show step logs for a run
+  repos         List registered repositories
+  issues        List and manage issues
+  status        Show CI status for a ref
+  uplink        Manage uplink identities
+  access        Manage secret access grants
+  secretstore   Verify and inspect the secret store
+  version       Print version information
+`)
 		return err
 	case "audit":
 		return runAudit(ctx, arguments[1:], output)

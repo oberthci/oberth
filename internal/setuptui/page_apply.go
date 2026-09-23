@@ -106,7 +106,7 @@ func (p *applyPage) keys() string {
 		return sKey.Render("r") + " reveal · " + sKey.Render("c") + " copy · " + sKey.Render("enter") + " acknowledge"
 	}
 	if p.holdState {
-		return sKey.Render("r") + " retry · " + sKey.Render(fmt.Sprintf("1..%d", len(reviewSectionPages))) + " revisit page · " + sKey.Render("ctrl+c") + " abort"
+		return sKey.Render("r") + " retry install · " + sKey.Render(fmt.Sprintf("1..%d", len(reviewSectionPages))) + " revisit page · " + sKey.Render("ctrl+c") + " abort"
 	}
 	return sKey.Render("ctrl+c") + " abort"
 }
@@ -662,12 +662,25 @@ func (p *applyPage) viewHold(_ int) string {
 	if p.holdDetail != "" {
 		holdContent += "\n\n" + p.holdDetail
 	}
-	holdContent += "\n\n" + sKey.Render("r") + " retry step · " +
+	holdContent += "\n\n" + sKey.Render("r") + " retry install · " +
 		sKey.Render("esc") + " back · " +
 		sKey.Render("ctrl+c") + " abort"
 
 	gutter := sGutter.Render(holdContent)
 	b.WriteString("  " + gutter + "\n\n")
+
+	// Show the last few log lines so the operator sees what happened without
+	// scrolling back or switching to another terminal.
+	if n := len(p.logLines); n > 0 {
+		start := n - 15
+		if start < 0 {
+			start = 0
+		}
+		for _, line := range p.logLines[start:] {
+			b.WriteString("  " + sMuted.Render(line) + "\n")
+		}
+		b.WriteString("\n")
+	}
 
 	b.WriteString("  " + sMuted.Render("no silent retries · no skipped steps") + "\n")
 

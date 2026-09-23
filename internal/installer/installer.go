@@ -1440,6 +1440,12 @@ func OberthHelmArgs(cfg Config, openbao OpenBaoResult, rekor RekorResult) []stri
 	for index, address := range cfg.TLSExtraIPs {
 		args = append(args, "--set-string", fmt.Sprintf("tls.extraIPs[%d]=%s", index, address))
 	}
+	// Derive pushBannerURL from the node address already known at TLS SAN
+	// time so git-push feedback includes a clickable watch link (UX-21).
+	// Prefer IPs (they are direct), fall back to DNS names.
+	if bannerHost := pushBannerHost(cfg.TLSExtraIPs, cfg.TLSExtraDNSNames); bannerHost != "" {
+		args = append(args, "--set-string", "pushBannerURL=https://"+bannerHost+":"+httpsNodePort+"/runs")
+	}
 	args = append(args, argoOberthHelmValues(cfg, openbao)...)
 	if cfg.wantsSecretStore() {
 		args = append(args,
@@ -2144,4 +2150,21 @@ func warnPerRepoIdentityDelta(ctx context.Context, deps Deps, namespace string) 
 	}
 	_, _ = fmt.Fprintf(deps.Output, "WARNING: per-repo identity produce returned 0 identities, but the live release carries %d (argo.perRepoIdentities).\n", len(values.Argo.PerRepoIdentities))
 	_, _ = fmt.Fprintf(deps.Output, "WARNING: existing per-repo ServiceAccounts persist only via --reuse-values; grants added since the last successful produce will NOT be provisioned and those releases will fail at pod admission.\n")
+}
+
+// pushBannerHost returns the first usable host for the push banner URL.
+// Prefers IPs (they reach the node directly), falls back to DNS names.
+// Returns "" when neither is available.
+func pushBannerHost(ips, dnsNames []string) string {
+	for _, ip := range ips {
+		if ip != "" {
+			return ip
+		}
+	}
+	for _, name := range dnsNames {
+		if name != "" {
+			return name
+		}
+	}
+	return ""
 }

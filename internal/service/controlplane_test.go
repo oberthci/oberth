@@ -3649,6 +3649,31 @@ func TestAccessRevokeRequiresAdminUplink(t *testing.T) {
 	}
 }
 
+func TestPromoteRejectsNonAdmin(t *testing.T) {
+	t.Parallel()
+	fixture := newControlFixture(t)
+	service, err := NewAPI(APIConfig{
+		Runs: fixture.store, History: fixture.store, Repositories: fixture.store,
+		Issues: fixture.store, Promotions: fixture.store, PromotionRuns: fixture.store,
+		Enqueues: fixture.scheduler, Git: fixture.git, Refs: fixture.refs,
+		Logs: fixture.logs, Auditor: fixture.store,
+		Signals: fixture.signals, MaximumWait: 50 * time.Millisecond,
+		PromotionWorkspaceRoot: filepath.Join(fixture.root, "promotion-work"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	nonAdmin := api.Actor{Identity: "agent@host", Fingerprint: "SHA256:agent", Admin: false}
+
+	// Non-admin actor must be rejected before any promotion state is created.
+	_, err = service.CallTool(context.Background(), nonAdmin, "promote",
+		json.RawMessage(`{"sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","branch":"main"}`))
+	if !errors.Is(err, ErrForbidden) {
+		t.Fatalf("promote with non-admin error = %v, want ErrForbidden", err)
+	}
+}
+
 func TestAuthenticatorAdminPropagation(t *testing.T) {
 	t.Parallel()
 

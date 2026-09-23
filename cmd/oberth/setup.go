@@ -39,8 +39,14 @@ func runSetup(ctx context.Context, arguments []string, input io.Reader, output i
 
 	// Auto-select plain mode when the terminal is not interactive.
 	if !opts.Plain && !opts.Accessible {
-		if !isTTY(output) || os.Getenv("TERM") == "dumb" || os.Getenv("NO_COLOR") != "" {
+		if !isTTY(output) {
 			opts.Plain = true
+		} else if os.Getenv("TERM") == "dumb" {
+			opts.Plain = true
+			_, _ = fmt.Fprintln(output, "TERM=dumb — using sequential prompts")
+		} else if os.Getenv("NO_COLOR") != "" {
+			opts.Plain = true
+			_, _ = fmt.Fprintln(output, "NO_COLOR set — using sequential prompts (unset NO_COLOR to use the full TUI)")
 		}
 	}
 

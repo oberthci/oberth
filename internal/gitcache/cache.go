@@ -213,7 +213,7 @@ case "$ref" in
     validate_public_name branch "$default_branch"
     admission_ref=refs/oberth/release-admission/heads/$default_branch
     commit=$(git rev-parse --verify "$new^{commit}") || reject tag "tag does not select a commit"
-    git merge-base --is-ancestor "$commit" "$admission_ref" || reject tag "tag commit is not reachable from the fresh upstream default branch"
+    git merge-base --is-ancestor "$commit" "$admission_ref" || reject tag "tag commit is not reachable from the fresh upstream default branch — promote the commit to the default branch first (promote <sha> $default_branch), then tag"
     ;;
 esac
 `

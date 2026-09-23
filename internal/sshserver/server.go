@@ -137,6 +137,10 @@ func New(config Config) (*Server, error) {
 	}
 	serverConfig := &ssh.ServerConfig{
 		ServerVersion: "SSH-2.0-Oberth",
+		BannerCallback: func(_ ssh.ConnMetadata) string {
+			return "Oberth CI — if your key is not registered, an admin can add it:\n" +
+				"  kubectl exec -i -n oberth deploy/oberth -- oberth uplink add - <you>@<host> < key.pub\n"
+		},
 		PublicKeyCallback: func(_ ssh.ConnMetadata, key ssh.PublicKey) (*ssh.Permissions, error) {
 			fingerprint := ssh.FingerprintSHA256(key)
 			identity, found, err := config.Resolver.ResolveFingerprint(fingerprint)
