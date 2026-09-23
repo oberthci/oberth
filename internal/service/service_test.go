@@ -374,10 +374,12 @@ func TestNormalizeTriggerMapsCIToBranch(t *testing.T) {
 	}
 }
 
-// TestWaitTerminalRunTimeoutNotStillRunning verifies that when a timeout fires
-// and the resolved run is already terminal, still_running is false. This
-// prevents the inconsistency where status=delivered and still_running=true.
-func TestWaitTerminalRunTimeoutNotStillRunning(t *testing.T) {
+// TestWaitUnmatchedTriggerReportsStillRunning verifies that when a timeout
+// fires and the trigger filter does not match the resolved run, still_running
+// is true regardless of the resolved run's terminal state. A caller that
+// checks only the flag must not mistake a terminal branch run for the
+// awaited release run (#439).
+func TestWaitUnmatchedTriggerReportsStillRunning(t *testing.T) {
 	t.Parallel()
 	store := timeoutRunStore{
 		repo: model.Repository{ID: 1, Name: "oberth"},
@@ -392,8 +394,8 @@ func TestWaitTerminalRunTimeoutNotStillRunning(t *testing.T) {
 	}
 	// Trigger filter "release" does not match the stored "branch" trigger,
 	// so the terminal check is skipped and the wait times out. The response
-	// must still report still_running=false because the resolved run IS
-	// terminal.
+	// must report still_running=true because the awaited release run was
+	// never seen — the resolved branch run is not the one the caller asked for.
 	value, err := svc.CallTool(context.Background(), api.Actor{Identity: "agent@host"}, "wait",
 		json.RawMessage(`{"sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","trigger":"release"}`))
 	if err != nil {
@@ -403,8 +405,8 @@ func TestWaitTerminalRunTimeoutNotStillRunning(t *testing.T) {
 	if !ok {
 		t.Fatalf("wait response type = %T", value)
 	}
-	if response.StillRunning {
-		t.Fatal("still_running is true for a terminal run; want false")
+	if !response.StillRunning {
+		t.Fatal("still_running is false for an unmatched trigger filter; want true")
 	}
 }
 

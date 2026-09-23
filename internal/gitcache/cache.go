@@ -300,6 +300,54 @@ func (c *Cache) Ensure(ctx context.Context, input string) (Repository, error) {
 	return c.ensureLocked(ctx, input, repo, path)
 }
 
+// EnsureForFetch is the clone/fetch entry point. It respects the receive
+// invariant (receive.go:62-64): when a pending receive reservation exists,
+// upstream refs must not be refreshed because unrelated upstream movement
+// could be misattributed to the prior actor's crash window. The cache is
+// served stale until the reservation is recovered by ReplayPending or the
+// next Receive (#435).
+//
+// Receive handlers that re-enter the cache to inspect accepted objects must
+// call Ensure (not EnsureForFetch) because they run inside the reservation
+// lifecycle and legitimately need a fresh refresh.
+func (c *Cache) EnsureForFetch(ctx context.Context, input string) (Repository, error) {
+	repo, path, err := c.path(input)
+	if err != nil {
+		return Repository{}, err
+	}
+	lock := c.repoLock(path)
+	lock.Lock()
+	defer lock.Unlock()
+	// A pending reservation means a crashed or gate-failed receive has not
+	// been recovered yet. Serve the cache without refreshing.
+	identity := c.reservationIdentity(repo, path)
+	if _, readErr := c.readReservation(identity); readErr == nil {
+		return c.ensureCachedOnlyLocked(ctx, repo, path)
+	}
+	return c.ensureLocked(ctx, input, repo, path)
+}
+
+// ensureCachedOnlyLocked returns the cached repository without refreshing
+// upstream. It requires repoLock to be held. This path is used when a
+// pending receive reservation exists and the caller cannot replay it
+// (e.g. a clone/fetch with no receive handler).
+func (c *Cache) ensureCachedOnlyLocked(ctx context.Context, repo, path string) (Repository, error) {
+	if stat, err := os.Stat(path); err != nil || !stat.IsDir() || !c.isBare(ctx, path) {
+		return Repository{}, fmt.Errorf("repository %s is not cached and cannot refresh while a receive reservation is pending", repo)
+	}
+	if err := c.cleanReplacementRefsLocked(ctx, path); err != nil {
+		return Repository{}, fmt.Errorf("clean replacement refs for %s: %w", repo, err)
+	}
+	if _, err := c.cleanInvalidPublicRefsLocked(ctx, path); err != nil {
+		return Repository{}, fmt.Errorf("clean invalid public refs for %s: %w", repo, err)
+	}
+	branch, err := c.currentDefaultBranch(ctx, path)
+	if err != nil {
+		return Repository{}, fmt.Errorf("read default branch for %s: %w", repo, err)
+	}
+	return Repository{Path: path, DefaultBranch: branch, Stale: true}, nil
+}
+
 func (c *Cache) ensureLocked(ctx context.Context, input, repo, path string) (Repository, error) {
 	return c.ensureLockedMayRecover(ctx, input, repo, path, false)
 }

@@ -189,6 +189,10 @@ type Config struct {
 // ServiceRunner is the narrow surface consumed by the SSH server.
 type ServiceRunner interface {
 	Ensure(context.Context, string) (Repository, error)
+	// EnsureForFetch is the clone/fetch entry point. Unlike Ensure it skips
+	// upstream refresh when a pending receive reservation exists, preserving
+	// the actor-attribution invariant (#435).
+	EnsureForFetch(context.Context, string) (Repository, error)
 	Serve(context.Context, string, Service, string, io.Reader, io.Writer, io.Writer) error
 	Receive(context.Context, string, string, string, io.Reader, io.Writer, io.Writer, ReceiveHandler) error
 	ReplayPending(context.Context, ReceiveHandler) error

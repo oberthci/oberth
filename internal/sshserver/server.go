@@ -411,7 +411,10 @@ func (s *Server) runGit(ctx context.Context, actor, protocol string, command git
 		return nil
 	}
 
-	repository, err := s.git.Ensure(ctx, repoInput)
+	// EnsureForFetch respects the receive invariant: it skips upstream
+	// refresh when a pending receive reservation exists, preventing
+	// misattribution of unrelated upstream movement (#435).
+	repository, err := s.git.EnsureForFetch(ctx, repoInput)
 	if err != nil {
 		return fmt.Errorf("prepare repository: %w", err)
 	}

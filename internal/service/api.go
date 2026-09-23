@@ -1024,11 +1024,15 @@ func (service *API) waitRun(ctx context.Context, repositoryName, selector, trigg
 		case <-ctx.Done():
 			return WaitResponse{}, ctx.Err()
 		case <-timer.C:
-			// Derive still_running from the actual run state so the flag
-			// and the reported status are always consistent. A resolved run
-			// that is terminal should never be reported as still running,
-			// even when the trigger filter did not match.
-			return WaitResponse{StatusResponse: status, StillRunning: !status.Run.Status.Terminal()}, nil
+			// When a trigger filter is active and the resolved run does not
+			// match it, the awaited run was never seen. Report still_running
+			// so a caller that checks only the flag does not mistake a
+			// terminal branch run for the awaited release run (#439).
+			stillRunning := !status.Run.Status.Terminal()
+			if !triggerMatch {
+				stillRunning = true
+			}
+			return WaitResponse{StatusResponse: status, StillRunning: stillRunning}, nil
 		case <-changed:
 		}
 	}
