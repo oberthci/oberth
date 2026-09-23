@@ -104,11 +104,45 @@ func TestBuildCIKeepsSharedGrantFreeIdentityDespitePerRepo(t *testing.T) {
 	}
 }
 
-// TestBuildFallsBackToSharedIdentityForUnknownRepo proves that a repo without
-// a per-repo identity falls back to the shared tier identity.
-func TestBuildFallsBackToSharedIdentityForUnknownRepo(t *testing.T) {
+// TestBuildRefusesSharedFallbackWhenMultipleReposHaveGrants proves that a
+// repo without a per-repo identity is REFUSED when other repos already have
+// per-repo identities (and thus grants). Falling back to the shared SA would
+// give this repo's release run access to every other repo's secrets because
+// the shared policy folds all repos' grants. (Issue #434)
+func TestBuildRefusesSharedFallbackWhenMultipleReposHaveGrants(t *testing.T) {
 	t.Parallel()
 	cfg := testConfigWithPerRepo()
+	path := "oberth/upstream/skipops/other-repo/test-secret"
+	req := testRequest(periapsis.TriggerRelease, perRepoCredentialedDocument(path))
+	req.Repo = "other-repo"
+	req.UpstreamName = "codeberg"
+	req.UpstreamOrg = "skipops"
+	req.ApprovedSecrets = map[string]bool{path: true}
+	req.SourceVolume = SourceVolume{
+		ClaimName:      "test-claim",
+		SubPath:        "src",
+		VaultCASubPath: "vault-ca",
+		BinarySubPath:  "bin",
+	}
+
+	_, err := Build(cfg, req)
+	if err == nil {
+		t.Fatal("expected refusal when falling back to shared SA with other repos holding grants")
+	}
+	if !strings.Contains(err.Error(), "install --install-secretstore --upgrade") {
+		t.Fatalf("error should include remediation command, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "other-repo") {
+		t.Fatalf("error should name the repo, got: %v", err)
+	}
+}
+
+// TestBuildFallsBackToSharedIdentityForSingleRepo proves that when only one
+// repo has grants and no per-repo identities exist for any repo, the shared
+// SA fallback is safe: the shared policy carries only this repo's grants.
+func TestBuildFallsBackToSharedIdentityForSingleRepo(t *testing.T) {
+	t.Parallel()
+	cfg := testConfig() // no PerRepoIdentities — single-repo case
 	path := "oberth/upstream/skipops/other-repo/test-secret"
 	req := testRequest(periapsis.TriggerRelease, perRepoCredentialedDocument(path))
 	req.Repo = "other-repo"

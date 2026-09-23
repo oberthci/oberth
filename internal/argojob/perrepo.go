@@ -8,6 +8,8 @@ package argojob
 // identity — see identityForWithRepo for the #200 boundary this preserves.
 
 import (
+	"fmt"
+
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 	"github.com/oberthci/oberth/pkg/periapsis"
 )
@@ -93,6 +95,25 @@ func (config Config) identityForWithRepo(trigger periapsis.Trigger, hasSecretPat
 	if trigger == periapsis.TriggerRelease {
 		if identity, ok := config.identityForPerRepo(upstreamName, org, repo); ok {
 			return identity, nil
+		}
+		// The shared credentialed SA's Vault policy
+		// (OberthCredentialedPolicyWithGrants) folds approved paths from
+		// every repo into one policy. When other repos already have
+		// per-repo identities — meaning the approval table holds grants
+		// for more than one repo — falling back to the shared SA would
+		// give this repo's release run read access to every other repo's
+		// secrets. Refuse admission and direct the operator to provision
+		// a per-repo identity. The single-repo case (no other per-repo
+		// identities) is safe: the shared policy carries only this repo's
+		// grants. (Issue #434)
+		if len(config.PerRepoIdentities) > 0 {
+			return argoworkflow.Identity{}, fmt.Errorf(
+				"argojob: refusing release submission for %q: %d other repo(s) hold per-repo "+
+					"identities with their own secret grants, and this repo has no per-repo identity; "+
+					"the shared credentialed service account's Vault policy includes all repos' grants, "+
+					"so falling back to it would leak cross-repo secrets; "+
+					"run \"oberth install --install-secretstore --upgrade\" to provision per-repo identities",
+				repo, len(config.PerRepoIdentities))
 		}
 	}
 
