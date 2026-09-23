@@ -35,7 +35,7 @@ func newClusterPage() *clusterPage {
 func (p *clusterPage) title() string    { return "launch site" }
 func (p *clusterPage) question() string { return "Where will oberth run?" }
 func (p *clusterPage) keys() string {
-	return sKey.Render("↑/↓") + " move · " + sKey.Render("enter") + " select · " + sKey.Render("esc") + " back"
+	return sKey.Render("↑/↓") + " move · " + sKey.Render("enter") + " select · " + sKey.Render("r") + " rescan · " + sKey.Render("esc") + " back"
 }
 
 func (p *clusterPage) init(state *WizardState) tea.Cmd {
@@ -141,6 +141,10 @@ func (p *clusterPage) update(msg tea.Msg, state *WizardState) (page, tea.Cmd) {
 			p.checking = true
 			p.errMsg = ""
 			return p, probeCluster(selected)
+		case "r":
+			p.loadContexts()
+			p.cursor = 0
+			p.errMsg = ""
 		case "esc":
 			return p, func() tea.Msg { return pageBackMsg{} }
 		}
@@ -156,7 +160,11 @@ func (p *clusterPage) view(_ *WizardState, width, _ int) string {
 
 	if len(p.contexts) == 0 {
 		b.WriteString("  " + sFail.Render("no kubeconfig contexts found") + "\n")
-		b.WriteString("  " + sMuted.Render("install Docker Desktop and kind, then relaunch") + "\n")
+		if runtime.GOOS == "linux" {
+			b.WriteString("  " + sMuted.Render("install k3s (curl -sfL https://get.k3s.io | sh -) or docker + kind, then relaunch") + "\n")
+		} else {
+			b.WriteString("  " + sMuted.Render("install Docker Desktop and kind, then relaunch") + "\n")
+		}
 		return b.String()
 	}
 
@@ -177,12 +185,24 @@ func (p *clusterPage) view(_ *WizardState, width, _ int) string {
 			nameStyle = lipgloss.NewStyle().Foreground(cFg).Bold(true)
 		}
 
+		// UX-13: dim non-current contexts — selecting them is refused
+		// because the installer targets the current kubeconfig context.
+		isCurrent := p.currentContext == "" || ctx.name == p.currentContext || ctx.name == kindCreateEntry
+		if !isCurrent {
+			nameStyle = sMuted
+		}
+
 		locality := sInfo.Render("local")
 		if !ctx.isLocal {
 			locality = sHold.Render("remote")
 		}
 
-		line := fmt.Sprintf("%s %s %s", cursor, nameStyle.Render(padTo(truncateRunes(ctx.name, nameWidth), nameWidth)), locality)
+		namePart := nameStyle.Render(padTo(truncateRunes(ctx.name, nameWidth), nameWidth))
+		if !isCurrent {
+			namePart += " " + sMuted.Render("(switch first)")
+		}
+
+		line := fmt.Sprintf("%s %s %s", cursor, namePart, locality)
 		if ctx.version != "" {
 			line += "    " + sMuted.Render(ctx.version)
 		}

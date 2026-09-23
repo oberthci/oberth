@@ -78,8 +78,8 @@ func (p *tlsPage) view(state *WizardState, _, _ int) string {
 		" " + sText.Render("generate a self-signed certificate (ed25519)") + "\n")
 	b.WriteString("          " + sMuted.Render("valid for: "+strings.Join(validFor, " · ")) + "\n\n")
 
-	// Fingerprint note.
-	b.WriteString("  " + sMuted.Render("the fingerprint appears on the final screen — verify it before you trust it") + "\n")
+	// Fingerprint note — the done page shows the retrieval commands.
+	b.WriteString("  " + sMuted.Render("after install, retrieve the fingerprint and verify it out of band") + "\n")
 	b.WriteString("  " + sMuted.Render("bring-your-own certificate support is coming soon") + "\n")
 
 	if p.errMsg != "" {

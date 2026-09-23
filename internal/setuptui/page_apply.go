@@ -381,14 +381,16 @@ func (p *applyPage) runInstaller(ctx context.Context, cfg installer.Config, ch c
 		return
 	}
 
-	// Mark all remaining pending steps as done.
+	// Mark remaining unreported steps as skipped — only steps the
+	// StepProgressSink reported "done" are genuinely done. Skipped steps
+	// show a dim indicator instead of a green checkmark (UX-12).
 	for i := 0; i < totalSteps; i++ {
 		if !doneSet[i] {
 			ch <- applyStepMsg{
 				step:   i,
 				total:  totalSteps,
 				name:   stepNames[i],
-				status: "done",
+				status: "skipped",
 			}
 		}
 	}
@@ -607,6 +609,8 @@ func (p *applyPage) view(state *WizardState, width, height int) string {
 			mark = lipgloss.NewStyle().Foreground(cPurple).Render("⠹")
 		case "failed":
 			mark = sFail.Render("✗")
+		case "skipped":
+			mark = sMuted.Render("–")
 		default:
 			mark = sMuted.Render("○")
 		}

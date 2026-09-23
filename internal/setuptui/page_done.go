@@ -11,6 +11,7 @@ import (
 type donePage struct {
 	totalSteps       int
 	greenCount       int
+	skippedCount     int
 	fingerprint      string
 	sshFingerprint   string
 	context          string
@@ -88,12 +89,12 @@ func (p *donePage) saveReport(state *WizardState) bool {
 	if p.fingerprint != "" {
 		fmt.Fprintf(&b, "TLS 30443: %s\n", p.fingerprint)
 	} else {
-		b.WriteString("TLS 30443: (generated at apply time)\n")
+		fmt.Fprintf(&b, "TLS 30443: kubectl get secret -n %s oberth-tls -o jsonpath='{.data.tls\\.crt}' | base64 -d | openssl x509 -fingerprint -sha256 -noout\n", ns)
 	}
 	if p.sshFingerprint != "" {
 		fmt.Fprintf(&b, "SSH 30022: %s\n", p.sshFingerprint)
 	} else {
-		b.WriteString("SSH 30022: (generated at apply time)\n")
+		b.WriteString("SSH 30022: ssh-keyscan -p 30022 <node-address>\n")
 	}
 	// #nosec G306 -- report is non-sensitive, world-readable is fine.
 	return os.WriteFile("oberth-setup-report.txt", []byte(b.String()), 0644) == nil
@@ -104,8 +105,11 @@ func (p *donePage) view(state *WizardState, width, _ int) string {
 	var b strings.Builder
 
 	// Completion line — reflects actual step results, never fabricated.
+	// Steps the installer skipped (not reported by StepProgressSink) are
+	// not failures — they just were not applicable to this configuration.
+	completedCount := p.greenCount + p.skippedCount
 	greenStr := fmt.Sprintf("%d/%d", p.greenCount, p.totalSteps)
-	if p.greenCount >= p.totalSteps && p.totalSteps > 0 {
+	if completedCount >= p.totalSteps && p.totalSteps > 0 {
 		b.WriteString("  " + sText.Render("Setup complete — ") +
 			sGo.Render(greenStr+" steps green") + sText.Render(".") + "\n\n")
 	} else if p.totalSteps > 0 {
@@ -124,9 +128,11 @@ func (p *donePage) view(state *WizardState, width, _ int) string {
 	if openbaoNs == "" {
 		openbaoNs = "openbao"
 	}
-	b.WriteString("  " + sMuted.Render("running now") + "    " +
-		sText.Render("deployment oberth (ns "+ns+")") +
-		sMuted.Render(" · openbao (ns "+openbaoNs+")") + "\n\n")
+	runningLine := sText.Render("deployment oberth (ns " + ns + ")")
+	if state.StoreMode != "connect" {
+		runningLine += sMuted.Render(" · openbao (ns " + openbaoNs + ")")
+	}
+	b.WriteString("  " + sMuted.Render("running now") + "    " + runningLine + "\n\n")
 
 	// Fingerprints section.
 	b.WriteString("  " + sMuted.Render("verify out of band on every workstation") + "\n")
@@ -136,17 +142,17 @@ func (p *donePage) view(state *WizardState, width, _ int) string {
 			sHighlight.Render(p.fingerprint) + "\n")
 	} else {
 		b.WriteString("    " + sMuted.Render("tls 30443") + "    " +
-			sHighlight.Render("sha-256 (generated at apply time)") + "\n")
+			sMuted.Render("(retrieve with the command below)") + "\n")
 	}
 
-	b.WriteString("      " + sInfo.Render("kubectl get secret -n "+ns+" oberth-tls -o jsonpath='{.data.tls\\.crt}' | base64 -d") + "\n")
+	b.WriteString("      " + sInfo.Render("kubectl get secret -n "+ns+" oberth-tls -o jsonpath='{.data.tls\\.crt}' | base64 -d | openssl x509 -fingerprint -sha256 -noout") + "\n")
 
 	if p.sshFingerprint != "" {
 		b.WriteString("    " + sMuted.Render("ssh 30022") + "    " +
 			sHighlight.Render(p.sshFingerprint) + "\n")
 	} else {
 		b.WriteString("    " + sMuted.Render("ssh 30022") + "    " +
-			sHighlight.Render("ed25519 (generated at apply time)") + "\n")
+			sMuted.Render("(retrieve with the command below)") + "\n")
 	}
 
 	// Use node IP from cluster info for the ssh-keyscan command.

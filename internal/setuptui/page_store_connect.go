@@ -77,9 +77,10 @@ func (p *storeConnectPage) view(_ *WizardState, _, _ int) string {
 	b.WriteString("  " + sMuted.Render("and ") + sText.Render("never") +
 		sMuted.Render(" asks for an admin token — grant the role with setup-secretstore.sh") + "\n\n")
 
-	// Post-install note.
-	b.WriteString("  " + sMuted.Render("CA certificate and allowed paths are configured after install via") + "\n")
-	b.WriteString("  " + sInfo.Render("oberth install --upgrade") + sMuted.Render(" or helm values") + "\n")
+	// Post-install note — specific knobs, not vague hand-waving.
+	b.WriteString("  " + sMuted.Render("after install, configure the CA and approve secret paths:") + "\n")
+	b.WriteString("    " + sInfo.Render("helm upgrade oberth ... --set argo.vault.caCert=$(base64 < ca.pem)") + "\n")
+	b.WriteString("    " + sInfo.Render("oberth access allow <repo> <step> <path>") + "\n")
 
 	if p.errMsg != "" {
 		b.WriteString("\n  " + sFail.Render(p.errMsg) + "\n")
