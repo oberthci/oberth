@@ -1037,7 +1037,14 @@ func (scheduler *Scheduler) finalizeReconciledRun(ctx context.Context, run model
 	if err != nil {
 		return scheduler.finishInfrastructureFailure(ctx, run, model.Repository{}, fmt.Errorf("load reconciled run repository: %w", err))
 	}
-	if err := scheduler.persistSteps(ctx, run.ID, jobResult.Steps, runlog.Index{}); err != nil {
+	// Build the log index from whatever partial log the reconciled run left
+	// behind, so per-step logs remain readable (#437). The log file may not
+	// exist if the run never started streaming; an empty index is acceptable.
+	index, indexErr := scheduler.logs.BuildIndex(run.ID)
+	if indexErr != nil {
+		index = runlog.Index{}
+	}
+	if err := scheduler.persistSteps(ctx, run.ID, jobResult.Steps, index); err != nil {
 		jobResult = JobResult{Status: model.RunFailed, Phase: "collect", Error: err.Error()}
 	}
 	promotion, promotionErr := scheduler.promotionForRun(ctx, run)

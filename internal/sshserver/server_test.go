@@ -739,6 +739,10 @@ func (f *fakeGit) Ensure(_ context.Context, input string) (gitcache.Repository, 
 	return gitcache.Repository{Path: "/data/git/example.git", Stale: f.stale}, nil
 }
 
+func (f *fakeGit) EnsureForFetch(ctx context.Context, input string) (gitcache.Repository, error) {
+	return f.Ensure(ctx, input)
+}
+
 func (f *fakeGit) SnapshotRefs(context.Context, string) (map[string]string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
