@@ -153,6 +153,11 @@ func TestBuildProvidesAWritableTmpVolume(t *testing.T) {
 		if volume.EmptyDir == nil {
 			t.Fatalf("%s is not an emptyDir: %+v", stepTmpVolumeName, volume)
 		}
+		// Issue #440: the injected /tmp emptyDir must carry a bounded
+		// SizeLimit to prevent node-disk exhaustion.
+		if volume.EmptyDir.SizeLimit == nil || volume.EmptyDir.SizeLimit.IsZero() {
+			t.Fatalf("%s emptyDir has no SizeLimit; an uncapped emptyDir can exhaust node disk", stepTmpVolumeName)
+		}
 	}
 	if !found {
 		t.Fatalf("no %s volume; a read-only root filesystem would break every build", stepTmpVolumeName)

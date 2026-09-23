@@ -890,6 +890,71 @@ spec:
 	mustAdmit(t, document, Policy{})
 }
 
+// Issue #440: disk-backed emptyDirs must carry a bounded sizeLimit, just
+// like memory-backed ones. An uncapped disk-backed emptyDir can exhaust the
+// node's ephemeral storage.
+func TestAdmitRefusesDiskEmptyDirWithoutSizeLimit(t *testing.T) {
+	t.Parallel()
+	const document = `
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+spec:
+  entrypoint: main
+  activeDeadlineSeconds: 3600
+  templates:
+    - name: main
+      volumes:
+        - name: scratch
+          emptyDir: {}
+      container:
+        image: golang:1.26-alpine@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+        command: [/bin/true]
+`
+	refuse(t, document, Policy{}, "disk-backed emptyDir without a sizeLimit")
+}
+
+func TestAdmitAcceptsDiskEmptyDirWithBoundedSizeLimit(t *testing.T) {
+	t.Parallel()
+	const document = `
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+spec:
+  entrypoint: main
+  activeDeadlineSeconds: 3600
+  templates:
+    - name: main
+      volumes:
+        - name: scratch
+          emptyDir:
+            sizeLimit: 4Gi
+      container:
+        image: golang:1.26-alpine@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+        command: [/bin/true]
+`
+	mustAdmit(t, document, Policy{})
+}
+
+func TestAdmitRefusesDiskEmptyDirExceedingCeiling(t *testing.T) {
+	t.Parallel()
+	const document = `
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+spec:
+  entrypoint: main
+  activeDeadlineSeconds: 3600
+  templates:
+    - name: main
+      volumes:
+        - name: scratch
+          emptyDir:
+            sizeLimit: 100Gi
+      container:
+        image: golang:1.26-alpine@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+        command: [/bin/true]
+`
+	refuse(t, document, Policy{}, "exceeds the 50Gi ceiling")
+}
+
 func TestAdmitRefusesGPUResources(t *testing.T) {
 	t.Parallel()
 	document := strings.Replace(admissibleDocument, "        command: [/bin/true]\n",

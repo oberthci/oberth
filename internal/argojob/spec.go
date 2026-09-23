@@ -917,9 +917,14 @@ func applyServerSecurity(workflow *wfv1.Workflow) {
 	// A writable scratch mount, so the read-only root filesystem below cannot
 	// break the toolchain. Server-owned: Admit refuses a repository volume of
 	// any kind other than emptyDir, and this name is reserved by collision.
+	// SizeLimit bounds this volume to prevent node-disk exhaustion from an
+	// uncapped emptyDir (issue #440). The limit matches MaxEmptyDirSize.
+	tmpSizeLimit := resource.MustParse("8Gi")
 	workflow.Spec.Volumes = append(workflow.Spec.Volumes, corev1.Volume{
-		Name:         stepTmpVolumeName,
-		VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}},
+		Name: stepTmpVolumeName,
+		VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{
+			SizeLimit: &tmpSizeLimit,
+		}},
 	})
 	mount := corev1.VolumeMount{Name: stepTmpVolumeName, MountPath: stepTmpMountPath}
 	for index := range workflow.Spec.Templates {

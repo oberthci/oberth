@@ -34,6 +34,7 @@ const (
 	MaxContainerMemory    = "16Gi"
 	MaxContainerEphemeral = "32Gi"
 	MaxEmptyDirSize       = "8Gi"
+	MaxDiskEmptyDirSize   = "50Gi"
 	MaxPVCCapacity        = "64Gi"
 )
 
@@ -740,18 +741,30 @@ func admitVolumes(location string, volumes []corev1.Volume) []error {
 		}
 		switch {
 		case volume.EmptyDir != nil:
-			if volume.EmptyDir.Medium == corev1.StorageMediumMemory {
-				if volume.EmptyDir.SizeLimit == nil || volume.EmptyDir.SizeLimit.IsZero() {
-					problems = append(problems, fmt.Errorf(
-						"argoworkflow: %s is a memory-backed emptyDir without a sizeLimit; a bounded sizeLimit is required",
-						where))
+			// Require a bounded sizeLimit on every emptyDir, not just
+			// memory-backed ones. An uncapped disk-backed emptyDir can
+			// exhaust the node's ephemeral storage just as a memory one
+			// exhausts RAM. (Issue #440)
+			if volume.EmptyDir.SizeLimit == nil || volume.EmptyDir.SizeLimit.IsZero() {
+				medium := "disk-backed"
+				if volume.EmptyDir.Medium == corev1.StorageMediumMemory {
+					medium = "memory-backed"
+				}
+				problems = append(problems, fmt.Errorf(
+					"argoworkflow: %s is a %s emptyDir without a sizeLimit; a bounded sizeLimit is required",
+					where, medium))
+			} else {
+				var ceiling string
+				if volume.EmptyDir.Medium == corev1.StorageMediumMemory {
+					ceiling = MaxEmptyDirSize
 				} else {
-					maxEmpty := resource.MustParse(MaxEmptyDirSize)
-					if volume.EmptyDir.SizeLimit.Cmp(maxEmpty) > 0 {
-						problems = append(problems, fmt.Errorf(
-							"argoworkflow: %s memory-backed emptyDir sizeLimit %s exceeds the %s ceiling",
-							where, volume.EmptyDir.SizeLimit.String(), MaxEmptyDirSize))
-					}
+					ceiling = MaxDiskEmptyDirSize
+				}
+				maxEmpty := resource.MustParse(ceiling)
+				if volume.EmptyDir.SizeLimit.Cmp(maxEmpty) > 0 {
+					problems = append(problems, fmt.Errorf(
+						"argoworkflow: %s emptyDir sizeLimit %s exceeds the %s ceiling",
+						where, volume.EmptyDir.SizeLimit.String(), ceiling))
 				}
 			}
 			continue

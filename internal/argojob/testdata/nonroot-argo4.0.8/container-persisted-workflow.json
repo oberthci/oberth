@@ -20,7 +20,7 @@
       "oberth.ci/nonroot-templates": "test",
       "oberth.ci/ref": "refs/heads/main",
       "oberth.ci/run-id": "run-abc123",
-      "oberth.ci/spec-identity": "e26e3a2c40f8c5b0090bfc55629553235940f0aad064e1ad2074e644805d3a4e",
+      "oberth.ci/spec-identity": "7b4d48dcaea26a24892e4678c4da86b17884b05854767e0636d01d6b0781b630",
       "oberth.ci/verified-controller-profile": "nonroot-static-v1:fbe3fb4c2cf6919c959a4f94f56634f901d40a3cfcddd56d85368b7924e2d9d0",
       "workflows.argoproj.io/pod-name-format": "v2"
     }
@@ -233,7 +233,9 @@
     "volumes": [
       {
         "name": "oberth-tmp",
-        "emptyDir": {}
+        "emptyDir": {
+          "sizeLimit": "8Gi"
+        }
       },
       {
         "name": "oberth-cache",
