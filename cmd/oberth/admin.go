@@ -1284,7 +1284,11 @@ func runUplinkWithDependencies(ctx context.Context, arguments []string, input io
 	if flags.Arg(0) == "-" {
 		fingerprint, err = app.AuthorizedKeyFingerprintReader(input)
 	} else if _, statErr := os.Stat(flags.Arg(0)); statErr != nil {
-		fingerprint, err = app.AuthorizedKeyFingerprintReader(strings.NewReader(flags.Arg(0)))
+		arg := flags.Arg(0)
+		if strings.HasPrefix(arg, "/") || strings.HasPrefix(arg, "./") || strings.HasPrefix(arg, "../") || strings.HasPrefix(arg, "~/") || strings.HasSuffix(arg, ".pub") {
+			return fmt.Errorf("key file not found: %w", statErr)
+		}
+		fingerprint, err = app.AuthorizedKeyFingerprintReader(strings.NewReader(arg))
 	} else {
 		fingerprint, err = app.AuthorizedKeyFingerprint(flags.Arg(0))
 	}
@@ -1292,6 +1296,9 @@ func runUplinkWithDependencies(ctx context.Context, arguments []string, input io
 		return err
 	}
 	if _, err := app.TLSCertificateFingerprint(*certificatePath); err != nil {
+		if _, saErr := os.Stat("/var/run/secrets/kubernetes.io/serviceaccount"); saErr != nil {
+			return fmt.Errorf("this command runs inside the Oberth pod; use:\n  kubectl exec -i -n oberth deploy/oberth -- oberth uplink add - <identity@host> < ~/.ssh/id_ed25519.pub\n\npod error: %w", err)
+		}
 		return err
 	}
 	if dependencies.mutationGate == nil {
