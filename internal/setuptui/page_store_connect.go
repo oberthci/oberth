@@ -79,7 +79,7 @@ func (p *storeConnectPage) view(_ *WizardState, _, _ int) string {
 
 	// Post-install note — specific knobs, not vague hand-waving.
 	b.WriteString("  " + sMuted.Render("after install, configure the CA and approve secret paths:") + "\n")
-	b.WriteString("    " + sInfo.Render("helm upgrade oberth ... --set argo.vault.caCert=$(base64 < ca.pem)") + "\n")
+	b.WriteString("    " + sInfo.Render("helm upgrade oberth ... --set argo.vault.caCert=$(base64 < ca.pem | tr -d '\\n')") + "\n")
 	b.WriteString("    " + sInfo.Render("oberth access allow <repo> <step> <path>") + "\n")
 
 	if p.errMsg != "" {
