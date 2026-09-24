@@ -28,7 +28,7 @@ const promotionCompensationTimeout = 30 * time.Second
 // must be triggered externally.
 const revokePolicySyncAdvisory = "Revocation is effective for new Oberth admissions immediately. " +
 	"The Vault credentialed policy still has this path until re-synced: " +
-	"run `oberth install --install-secretstore --upgrade` to remove it from the Vault policy."
+	"run `oberth secretstore sync` (or `oberth install --install-secretstore --upgrade`) to remove it from the Vault policy."
 
 // grantPolicySyncAdvisory is the warning returned by access_allow to inform
 // the caller that the Vault per-repo policy does not yet include the new grant.
@@ -37,7 +37,7 @@ const revokePolicySyncAdvisory = "Revocation is effective for new Oberth admissi
 // will fail with HTTP 403 at the Vault layer even though Oberth's own admission
 // gate accepts the path. (Issue #427)
 const grantPolicySyncAdvisory = "Grant recorded; the Vault per-repo policy does not include this path yet. " +
-	"Run `oberth install --install-secretstore --upgrade` to add it to the Vault policy."
+	"Run `oberth secretstore sync` (or `oberth install --install-secretstore --upgrade`) to add it to the Vault policy."
 
 type APIConfig struct {
 	Runs                   RunResolver

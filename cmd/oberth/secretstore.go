@@ -21,6 +21,7 @@ import (
 	"github.com/oberthci/oberth/pkg/periapsis"
 
 	authenticationv1 "k8s.io/api/authentication/v1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -43,13 +44,15 @@ const maximumServeCmdlineBytes = 1 << 20
 
 func runSecretStore(ctx context.Context, arguments []string, output io.Writer) error {
 	if len(arguments) == 0 {
-		return fmt.Errorf("%w: secretstore setup|verify|exec|materialize", errUsage)
+		return fmt.Errorf("%w: secretstore setup|verify|sync|exec|materialize", errUsage)
 	}
 	switch arguments[0] {
 	case "setup":
 		return runSecretStoreSetup(arguments[1:], output)
 	case "verify":
 		return runSecretStoreVerify(ctx, arguments[1:], output, defaultServeProcCmdline)
+	case "sync":
+		return runSecretStoreSync(ctx, arguments[1:], output)
 	case "bootstrap-tls":
 		return runSecretStoreBootstrapTLS(arguments[1:], output)
 	case "exec":
@@ -985,4 +988,100 @@ func releaseTierConfigFromServeCmdline(path string) (releaseTierVerifyConfig, er
 		}
 	}
 	return config, nil
+}
+
+// runSecretStoreSync re-derives every Vault policy and role that depends on
+// the approval table — per-repo identities (release + CI tiers) and the
+// shared credentialed and CI-secrets policies — without touching anything
+// else (no mounts, no transit keys, no chart install, no helm).
+//
+// This is the targeted alternative to `oberth install --install-secretstore
+// --upgrade` for the specific case where `access_allow` recorded a new grant
+// and the Vault policy needs to include it.
+//
+// It runs under the administrator's own BAO_TOKEN (from the environment),
+// exactly like the full install's secret-store path does. The Oberth server
+// has no code path that accepts a store admin token — the sync is an
+// operator-session action by design.
+func runSecretStoreSync(ctx context.Context, arguments []string, output io.Writer) error {
+	flags := flag.NewFlagSet("secretstore sync", flag.ContinueOnError)
+	flags.SetOutput(io.Discard)
+	namespace := flags.String("namespace", installer.DefaultNamespace, "Oberth namespace")
+	openbaoNamespace := flags.String("openbao-namespace", installer.DefaultOpenBaoNamespace, "OpenBao namespace")
+	argoNamespace := flags.String("argo-namespace", installer.DefaultArgoNamespace, "pipeline namespace")
+	kubeContext := flags.String("context", "", "kubeconfig context (default: current context)")
+	if err := flags.Parse(arguments); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			flags.SetOutput(output)
+			flags.Usage()
+			return nil
+		}
+		return fmt.Errorf("%w: %w", errUsage, err)
+	}
+	if flags.NArg() != 0 {
+		return fmt.Errorf("%w: secretstore sync accepts flags only", errUsage)
+	}
+
+	rootToken := os.Getenv("BAO_TOKEN")
+	if rootToken == "" {
+		rootToken = os.Getenv("VAULT_TOKEN")
+	}
+	if rootToken == "" {
+		return errors.New("BAO_TOKEN (or VAULT_TOKEN) must be set: " +
+			"secretstore sync runs under the administrator's own store session, " +
+			"not the server's identity. " +
+			"Set it without exposing it in shell history:\n\n" +
+			"    read -rs BAO_TOKEN && export BAO_TOKEN\n" +
+			"    oberth secretstore sync")
+	}
+
+	kube, _, resolvedContext, err := installer.LoadKubeConfigForContext(*kubeContext, output)
+	if err != nil {
+		return fmt.Errorf("load kubeconfig: %w", err)
+	}
+	_ = resolvedContext
+
+	// Read per-repo identities from the running Oberth server.
+	_, _ = fmt.Fprintln(output, "Reading per-repo identities from the running server...")
+	identities, warnings, produceErr := installer.ProducePerRepoIdentities(
+		ctx, kube, installer.DefaultRunCommand, *kubeContext, *namespace,
+	)
+	for _, warn := range warnings {
+		_, _ = fmt.Fprintf(output, "  WARNING: %s\n", warn)
+	}
+	if produceErr != nil {
+		return fmt.Errorf("read per-repo identities: %w", produceErr)
+	}
+	_, _ = fmt.Fprintf(output, "  %d per-repo identities found\n", len(identities))
+
+	// Find the OpenBao pod. The sync needs the pod to be running; it does not
+	// poll like the installer does because the operator expects immediate
+	// feedback from a targeted command.
+	pod, err := kube.CoreV1().Pods(*openbaoNamespace).Get(ctx, "openbao-0", metav1.GetOptions{})
+	if err != nil {
+		return fmt.Errorf("find OpenBao pod %s/openbao-0: %w", *openbaoNamespace, err)
+	}
+	if pod.DeletionTimestamp != nil || pod.Status.Phase != corev1.PodRunning {
+		return fmt.Errorf("OpenBao pod %s/openbao-0 is not running (phase: %s)", *openbaoNamespace, pod.Status.Phase)
+	}
+
+	// Run the sync.
+	results, syncErr := installer.RunSync(
+		ctx, installer.DefaultRunCommand, rootToken,
+		*kubeContext, *openbaoNamespace, "openbao-0", *argoNamespace,
+		identities,
+	)
+	for _, r := range results {
+		status := "unchanged"
+		if r.Changed {
+			status = "synced"
+		}
+		_, _ = fmt.Fprintf(output, "  %s: %s\n", r.Name, status)
+	}
+	if syncErr != nil {
+		return fmt.Errorf("sync grant policies: %w", syncErr)
+	}
+
+	_, _ = fmt.Fprintln(output, "secretstore sync: OK — all policies and roles match the approval table")
+	return nil
 }

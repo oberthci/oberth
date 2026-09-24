@@ -39,7 +39,7 @@ func main() {
 	}
 }
 
-const usageCommands = "audit, init, validate, install, setup, upgrade, serve, upstream, repo, schedules, fragments, artifacts, runs, run, log, repos, issues, status, uplink, access, secretstore, or version"
+const usageCommands = "audit, init, validate, install, setup, upgrade, serve, upstream, repo, schedules, fragments, artifacts, runs, run, log, repos, issues, status, uplink, access, secretstore, preflight, or version"
 
 func runCLI(ctx context.Context, arguments []string, input io.Reader, output io.Writer) error {
 	if len(arguments) == 0 {
@@ -71,6 +71,7 @@ Commands:
   uplink        Manage uplink identities
   access        Manage secret access grants
   secretstore   Verify and inspect the secret store
+  preflight     Release pre-flight checks
   version       Print version information
 `)
 		return err
@@ -110,6 +111,8 @@ Commands:
 		return runAccess(ctx, arguments[1:], output)
 	case "secretstore":
 		return runSecretStore(ctx, arguments[1:], output)
+	case "preflight":
+		return runPreflight(ctx, arguments[1:], output)
 	case "install":
 		return runInstall(ctx, arguments[1:], input, output)
 	case "setup":
