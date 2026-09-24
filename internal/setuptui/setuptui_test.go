@@ -580,6 +580,26 @@ func TestStoreConnectEnterValidatesAddress(t *testing.T) {
 	}
 }
 
+// --- #454: store-connect CA cert guidance must strip newlines ---
+
+func TestStoreConnectViewCaCertGuidanceStripsNewlines(t *testing.T) {
+	p := newStoreConnectPage()
+	state := &WizardState{}
+	p.init(state)
+	view := stripAnsi(p.view(state, 100, 40))
+
+	// GNU coreutils base64 wraps at 76 columns by default. A bare
+	// $(base64 < ca.pem) embeds newlines that break --set parsing or
+	// corrupt the certificate value. The guidance must include a
+	// newline-stripping form (tr -d '\n') for portability.
+	if !strings.Contains(view, "tr -d") {
+		t.Fatalf("store-connect CA cert guidance must strip newlines with tr -d, got:\n%s", view)
+	}
+	if strings.Contains(view, "--set argo.vault.caCert=$(base64 < ca.pem)") {
+		t.Fatal("bare $(base64 < ca.pem) without newline stripping must not appear in guidance")
+	}
+}
+
 // --- namespace validation shared shape ---
 
 func TestDNS1123LabelRegexp(t *testing.T) {
