@@ -3867,3 +3867,48 @@ func TestAccessRevokeResponseCarriesPolicySyncWarning(t *testing.T) {
 		t.Fatalf("warning does not name the re-sync command: %q", response.Warning)
 	}
 }
+
+// TestAccessAllowResponseCarriesPolicySyncWarning proves that a successful
+// access_allow returns a warning advising the operator to resync the Vault
+// policy. Without this, a grant lands in the approval table but the Vault
+// per-repo policy does not include the path until the next installer run,
+// causing releases to fail with HTTP 403 at the Vault layer. (Issue #427)
+func TestAccessAllowResponseCarriesPolicySyncWarning(t *testing.T) {
+	t.Parallel()
+	fixture := newControlFixture(t)
+	secretStore := &stubSecretAccessStore{}
+	service, err := NewAPI(APIConfig{
+		Runs: fixture.store, History: fixture.store, Repositories: fixture.store,
+		Issues: fixture.store, Promotions: fixture.store, PromotionRuns: fixture.store,
+		Enqueues: fixture.scheduler, Git: fixture.git, Refs: fixture.refs,
+		Logs: fixture.logs, Auditor: fixture.store,
+		Signals: fixture.signals, MaximumWait: 50 * time.Millisecond,
+		PromotionWorkspaceRoot: filepath.Join(fixture.root, "promotion-work"),
+		SecretAccess:           secretStore,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	admin := api.Actor{Identity: "admin@host", Fingerprint: "SHA256:admin", Admin: true}
+	result, err := service.CallTool(context.Background(), admin, "access_allow",
+		json.RawMessage(`{"repo":"terraform","step":"*","secret":"terraform/credentials"}`))
+	if err != nil {
+		t.Fatalf("access_allow error = %v", err)
+	}
+
+	// The grant is recorded in the approval table, but the Vault per-repo
+	// policy does not include the new path until an external re-sync. The
+	// response must say so, or the operator discovers the gap as a release
+	// HTTP 403 — the exact failure mode issue #427 documents.
+	response, ok := result.(api.AccessGrantResponse)
+	if !ok {
+		t.Fatalf("access_allow result type = %T, want api.AccessGrantResponse", result)
+	}
+	if response.Warning == "" {
+		t.Fatal("access_allow response carries no Vault policy re-sync warning")
+	}
+	if !strings.Contains(response.Warning, "install --install-secretstore --upgrade") {
+		t.Fatalf("warning does not name the re-sync command: %q", response.Warning)
+	}
+}

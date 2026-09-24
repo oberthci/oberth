@@ -654,6 +654,7 @@ func TestReleaseTierVerifyProvesTheDiscoveredConfiguration(t *testing.T) {
 		context.Background(),
 		secretStoreVerifyConfig{},
 		nil,
+		"", "release",
 		45*time.Second,
 		&output,
 		cmdline,
@@ -697,6 +698,7 @@ func TestReleaseTierVerifyAcceptsCandidatePathArguments(t *testing.T) {
 		context.Background(),
 		secretStoreVerifyConfig{},
 		[]string{"oberth/data/r2-upload"},
+		"", "release",
 		45*time.Second,
 		&output,
 		cmdline,
@@ -731,7 +733,7 @@ func TestReleaseTierVerifyFailsClosed(t *testing.T) {
 			"--argo-vault-credentialed-role=oberth-release",
 			"--argo-credentialed-serviceaccount=oberth-argo-credentialed",
 		)
-		err := runReleaseTierVerify(context.Background(), secretStoreVerifyConfig{}, nil, 45*time.Second, &output, cmdline, fakeKubeReturningToken(""))
+		err := runReleaseTierVerify(context.Background(), secretStoreVerifyConfig{}, nil, "", "release", 45*time.Second, &output, cmdline, fakeKubeReturningToken(""))
 		if err == nil || !strings.Contains(err.Error(), "argo-vault-address") {
 			t.Fatalf("error = %v", err)
 		}
@@ -744,7 +746,7 @@ func TestReleaseTierVerifyFailsClosed(t *testing.T) {
 			"--argo-vault-address=https://vault.example:8200",
 			"--argo-credentialed-serviceaccount=oberth-argo-credentialed",
 		)
-		err := runReleaseTierVerify(context.Background(), secretStoreVerifyConfig{}, nil, 45*time.Second, &output, cmdline, fakeKubeReturningToken(""))
+		err := runReleaseTierVerify(context.Background(), secretStoreVerifyConfig{}, nil, "", "release", 45*time.Second, &output, cmdline, fakeKubeReturningToken(""))
 		if err == nil || !strings.Contains(err.Error(), "argo-vault-credentialed-role") {
 			t.Fatalf("error = %v", err)
 		}
@@ -757,7 +759,7 @@ func TestReleaseTierVerifyFailsClosed(t *testing.T) {
 			"--argo-vault-address=https://vault.example:8200",
 			"--argo-vault-credentialed-role=oberth-release",
 		)
-		err := runReleaseTierVerify(context.Background(), secretStoreVerifyConfig{}, nil, 45*time.Second, &output, cmdline, fakeKubeReturningToken(""))
+		err := runReleaseTierVerify(context.Background(), secretStoreVerifyConfig{}, nil, "", "release", 45*time.Second, &output, cmdline, fakeKubeReturningToken(""))
 		if err == nil || !strings.Contains(err.Error(), "argo-credentialed-serviceaccount") {
 			t.Fatalf("error = %v", err)
 		}
@@ -770,7 +772,7 @@ func TestReleaseTierVerifyFailsClosed(t *testing.T) {
 			"--argo-vault-credentialed-role=oberth-release",
 			"--argo-credentialed-serviceaccount=oberth-argo-credentialed",
 		)
-		err := runReleaseTierVerify(context.Background(), secretStoreVerifyConfig{}, nil, 45*time.Second, &output, cmdline, fakeKubeReturningToken(""))
+		err := runReleaseTierVerify(context.Background(), secretStoreVerifyConfig{}, nil, "", "release", 45*time.Second, &output, cmdline, fakeKubeReturningToken(""))
 		if err == nil || !strings.Contains(err.Error(), "argo-namespace") {
 			t.Fatalf("error = %v", err)
 		}
@@ -784,7 +786,7 @@ func TestReleaseTierVerifyFailsClosed(t *testing.T) {
 			"--argo-vault-credentialed-role=oberth-release",
 			"--argo-credentialed-serviceaccount=oberth-argo-credentialed",
 		)
-		err := runReleaseTierVerify(context.Background(), secretStoreVerifyConfig{}, nil, 45*time.Second, &output, cmdline, fakeKubeReturningToken(""))
+		err := runReleaseTierVerify(context.Background(), secretStoreVerifyConfig{}, nil, "", "release", 45*time.Second, &output, cmdline, fakeKubeReturningToken(""))
 		if err == nil || !strings.Contains(err.Error(), "nothing to verify") {
 			t.Fatalf("error = %v", err)
 		}
@@ -806,6 +808,7 @@ func TestReleaseTierVerifyFailsClosed(t *testing.T) {
 			context.Background(),
 			secretStoreVerifyConfig{},
 			nil,
+			"", "release",
 			45*time.Second,
 			&output,
 			cmdline,

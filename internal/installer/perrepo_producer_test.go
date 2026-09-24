@@ -560,21 +560,34 @@ func TestProducerOutputAcceptedByConfigurePerRepoIdentities(t *testing.T) {
 		t.Fatalf("expected 2 identities, got %d: %+v", len(identities), identities)
 	}
 
-	// Script bao responses for both identities' policy + role operations.
+	// Script bao responses for both identities' policy + role operations,
+	// including the CI-tier per-repo identities added by issue #433.
 	beaconName := PerRepoName("codeberg", "cloudtaser", "cloudtaser-beacon")
 	terraformName := PerRepoName("codeberg", "cloudtaser", "terraform")
+	beaconCIName := PerRepoCIName("codeberg", "cloudtaser", "cloudtaser-beacon")
+	terraformCIName := PerRepoCIName("codeberg", "cloudtaser", "terraform")
 
 	responses := map[string]fakeBaoResponse{
-		// beacon: policy and role not yet present
+		// beacon: release policy and role not yet present
 		"policy read " + beaconName:                            {out: "No policy named: " + beaconName, err: errors.New("exit status 2")},
 		"policy write " + beaconName + " -":                    {out: "Success!"},
 		"read -format=json auth/kubernetes/role/" + beaconName: {out: "No value found", err: errors.New("exit status 2")},
 		"write auth/kubernetes/role/" + beaconName + " -":      {out: "Success!"},
-		// terraform: policy and role not yet present
+		// beacon: CI policy and role not yet present
+		"policy read " + beaconCIName:                            {out: "No policy named: " + beaconCIName, err: errors.New("exit status 2")},
+		"policy write " + beaconCIName + " -":                    {out: "Success!"},
+		"read -format=json auth/kubernetes/role/" + beaconCIName: {out: "No value found", err: errors.New("exit status 2")},
+		"write auth/kubernetes/role/" + beaconCIName + " -":      {out: "Success!"},
+		// terraform: release policy and role not yet present
 		"policy read " + terraformName:                            {out: "No policy named: " + terraformName, err: errors.New("exit status 2")},
 		"policy write " + terraformName + " -":                    {out: "Success!"},
 		"read -format=json auth/kubernetes/role/" + terraformName: {out: "No value found", err: errors.New("exit status 2")},
 		"write auth/kubernetes/role/" + terraformName + " -":      {out: "Success!"},
+		// terraform: CI policy and role not yet present
+		"policy read " + terraformCIName:                            {out: "No policy named: " + terraformCIName, err: errors.New("exit status 2")},
+		"policy write " + terraformCIName + " -":                    {out: "Success!"},
+		"read -format=json auth/kubernetes/role/" + terraformCIName: {out: "No value found", err: errors.New("exit status 2")},
+		"write auth/kubernetes/role/" + terraformCIName + " -":      {out: "Success!"},
 	}
 	runner := &fakeBaoRunner{t: t, responses: responses}
 	store := openBaoExec{run: runner.run, namespace: "openbao", pod: "openbao-0"}
@@ -584,9 +597,9 @@ func TestProducerOutputAcceptedByConfigurePerRepoIdentities(t *testing.T) {
 		t.Fatalf("ConfigurePerRepoIdentities rejected producer output: %v", err)
 	}
 
-	// Each identity produces a policy + role = 2 items each.
-	if len(items) != 4 {
-		t.Fatalf("expected 4 config items (2 per identity), got %d: %+v", len(items), items)
+	// Each identity produces release policy + role + CI policy + role = 4 items each.
+	if len(items) != 8 {
+		t.Fatalf("expected 8 config items (4 per identity: release+CI policy+role), got %d: %+v", len(items), items)
 	}
 
 	// Verify that the terraform policy write included the upstream grant.
