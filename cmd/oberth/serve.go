@@ -583,7 +583,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 		return fmt.Errorf("build per-repo identities: %w", err)
 	}
 	if len(perRepoIdentities) > 0 {
-		logger.Printf("per-repo identities: %d repositories with secret grants", len(perRepoIdentities))
+		logger.Printf("per-repo identities: %d repositories with secret grants (release + CI tiers)", len(perRepoIdentities))
 	}
 	argoJobs, err := buildArgoEngine(options, restConfig, kube, database, database, fragmentLoader,
 		artifactStoreAdapter{store: artifactStore, scanPatterns: artifacts.DefaultScanPatterns},

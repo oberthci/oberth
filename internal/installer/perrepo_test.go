@@ -185,12 +185,18 @@ func TestConfigurePerRepoIdentitiesCreatesNewPolicyAndRole(t *testing.T) {
 	t.Parallel()
 
 	name := PerRepoName("codeberg", "oberthci", "oberth")
+	ciName := PerRepoCIName("codeberg", "oberthci", "oberth")
 
 	responses := map[string]fakeBaoResponse{
 		"policy read " + name:                            {out: "No policy named: " + name, err: errors.New("exit status 2")},
 		"policy write " + name + " -":                    {out: "Success!"},
 		"read -format=json auth/kubernetes/role/" + name: {out: "No value found at auth/kubernetes/role/" + name, err: errors.New("exit status 2")},
 		"write auth/kubernetes/role/" + name + " -":      {out: "Success!"},
+		// CI per-repo identity
+		"policy read " + ciName:                            {out: "No policy named: " + ciName, err: errors.New("exit status 2")},
+		"policy write " + ciName + " -":                    {out: "Success!"},
+		"read -format=json auth/kubernetes/role/" + ciName: {out: "No value found at auth/kubernetes/role/" + ciName, err: errors.New("exit status 2")},
+		"write auth/kubernetes/role/" + ciName + " -":      {out: "Success!"},
 	}
 	runner := &fakeBaoRunner{t: t, responses: responses}
 	store := openBaoExec{run: runner.run, namespace: "openbao", pod: "openbao-0"}
@@ -205,17 +211,23 @@ func TestConfigurePerRepoIdentitiesCreatesNewPolicyAndRole(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(items) != 2 {
-		t.Fatalf("expected 2 items (policy + role), got %d", len(items))
+	if len(items) != 4 {
+		t.Fatalf("expected 4 items (release policy + role + CI policy + role), got %d", len(items))
 	}
 
-	// Verify the policy write was called
+	// Verify both release and CI policy writes were called
 	byCommand := runner.callsByCommand()
 	if _, ok := byCommand["policy write "+name+" -"]; !ok {
-		t.Fatal("expected policy write call")
+		t.Fatal("expected release policy write call")
 	}
 	if _, ok := byCommand["write auth/kubernetes/role/"+name+" -"]; !ok {
-		t.Fatal("expected role write call")
+		t.Fatal("expected release role write call")
+	}
+	if _, ok := byCommand["policy write "+ciName+" -"]; !ok {
+		t.Fatal("expected CI policy write call")
+	}
+	if _, ok := byCommand["write auth/kubernetes/role/"+ciName+" -"]; !ok {
+		t.Fatal("expected CI role write call")
 	}
 }
 
@@ -223,17 +235,26 @@ func TestConfigurePerRepoIdentitiesSkipsExistingMatchingRole(t *testing.T) {
 	t.Parallel()
 
 	name := PerRepoName("codeberg", "oberthci", "oberth")
+	ciName := PerRepoCIName("codeberg", "oberthci", "oberth")
 	wantPolicy := PerRepoPolicy(defaultKVPrefix, "oberthci", "oberth", nil)
+	wantCIPolicy := PerRepoCIPolicy(defaultKVPrefix, "oberthci", "oberth")
 
-	responses := map[string]fakeBaoResponse{
-		"policy read " + name: {out: wantPolicy},
-		"read -format=json auth/kubernetes/role/" + name: {out: `{"request_id":"1","data":{` +
-			`"bound_service_account_names":["` + name + `"],` +
+	matchingRoleJSON := func(n string) string {
+		return `{"request_id":"1","data":{` +
+			`"bound_service_account_names":["` + n + `"],` +
 			`"bound_service_account_namespaces":["oberth-argo"],` +
-			`"token_policies":["` + name + `"],` +
+			`"token_policies":["` + n + `"],` +
 			`"token_no_default_policy":true,` +
 			`"token_ttl":1200,` +
-			`"token_max_ttl":1800}}`},
+			`"token_max_ttl":1800}}`
+	}
+
+	responses := map[string]fakeBaoResponse{
+		"policy read " + name:                            {out: wantPolicy},
+		"read -format=json auth/kubernetes/role/" + name: {out: matchingRoleJSON(name)},
+		// CI identity also exists and matches
+		"policy read " + ciName:                            {out: wantCIPolicy},
+		"read -format=json auth/kubernetes/role/" + ciName: {out: matchingRoleJSON(ciName)},
 	}
 	runner := &fakeBaoRunner{t: t, responses: responses}
 	store := openBaoExec{run: runner.run, namespace: "openbao", pod: "openbao-0"}
@@ -248,8 +269,8 @@ func TestConfigurePerRepoIdentitiesSkipsExistingMatchingRole(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(items) != 2 {
-		t.Fatalf("expected 2 items, got %d", len(items))
+	if len(items) != 4 {
+		t.Fatalf("expected 4 items (release + CI, policy + role each), got %d", len(items))
 	}
 
 	// No write calls should have been made
@@ -265,12 +286,18 @@ func TestConfigurePerRepoIdentitiesWithGrants(t *testing.T) {
 	t.Parallel()
 
 	name := PerRepoName("codeberg", "oberthci", "oberth")
+	ciName := PerRepoCIName("codeberg", "oberthci", "oberth")
 
 	responses := map[string]fakeBaoResponse{
 		"policy read " + name:                            {out: "No policy named: " + name, err: errors.New("exit status 2")},
 		"policy write " + name + " -":                    {out: "Success!"},
 		"read -format=json auth/kubernetes/role/" + name: {out: "No value found at auth/kubernetes/role/" + name, err: errors.New("exit status 2")},
 		"write auth/kubernetes/role/" + name + " -":      {out: "Success!"},
+		// CI per-repo identity
+		"policy read " + ciName:                            {out: "No policy named: " + ciName, err: errors.New("exit status 2")},
+		"policy write " + ciName + " -":                    {out: "Success!"},
+		"read -format=json auth/kubernetes/role/" + ciName: {out: "No value found at auth/kubernetes/role/" + ciName, err: errors.New("exit status 2")},
+		"write auth/kubernetes/role/" + ciName + " -":      {out: "Success!"},
 	}
 	runner := &fakeBaoRunner{t: t, responses: responses}
 	store := openBaoExec{run: runner.run, namespace: "openbao", pod: "openbao-0"}
@@ -286,15 +313,21 @@ func TestConfigurePerRepoIdentitiesWithGrants(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(items) != 2 {
-		t.Fatalf("expected 2 items, got %d", len(items))
+	if len(items) != 4 {
+		t.Fatalf("expected 4 items (release + CI, policy + role each), got %d", len(items))
 	}
 
-	// Verify the policy body contains the grant path
+	// Verify the release policy body contains the grant path
 	for _, call := range runner.calls {
 		if call.command == "policy write "+name+" -" {
 			if !strings.Contains(call.stdin, "release/cosign-secret") {
-				t.Fatalf("policy body missing grant path:\n%s", call.stdin)
+				t.Fatalf("release policy body missing grant path:\n%s", call.stdin)
+			}
+		}
+		// Verify the CI policy body does NOT contain the grant path
+		if call.command == "policy write "+ciName+" -" {
+			if strings.Contains(call.stdin, "release/cosign-secret") {
+				t.Fatalf("CI policy body must not contain release grant paths:\n%s", call.stdin)
 			}
 		}
 	}
@@ -327,6 +360,81 @@ func TestPerRepoIdentityNamesDeduplicates(t *testing.T) {
 	names := PerRepoIdentityNames(ids)
 	if len(names) != 1 {
 		t.Fatalf("expected 1 unique name, got %d: %v", len(names), names)
+	}
+}
+
+// --- Per-repo CI identity tests (issue #433) ---
+
+func TestPerRepoCINameIsDeterministic(t *testing.T) {
+	t.Parallel()
+	a := PerRepoCIName("codeberg", "oberthci", "oberth")
+	b := PerRepoCIName("codeberg", "oberthci", "oberth")
+	if a != b {
+		t.Fatalf("PerRepoCIName not deterministic: %q != %q", a, b)
+	}
+}
+
+func TestPerRepoCINameDiffersFromReleaseName(t *testing.T) {
+	t.Parallel()
+	release := PerRepoName("codeberg", "oberthci", "oberth")
+	ci := PerRepoCIName("codeberg", "oberthci", "oberth")
+	if release == ci {
+		t.Fatalf("CI and release names must differ, both are %q", release)
+	}
+}
+
+func TestPerRepoCINameHasCIPrefix(t *testing.T) {
+	t.Parallel()
+	name := PerRepoCIName("codeberg", "oberthci", "oberth")
+	if !strings.HasPrefix(name, "oberth-argo-ci-") {
+		t.Fatalf("CI name %q missing oberth-argo-ci- prefix", name)
+	}
+}
+
+func TestPerRepoCIPolicyScopedToRepoNamespace(t *testing.T) {
+	t.Parallel()
+	policy := PerRepoCIPolicy("oberth", "oberthci", "oberth")
+	if !strings.Contains(policy, `path "oberth/data/upstream/oberthci/oberth/*"`) {
+		t.Fatalf("CI policy missing repo-scoped path:\n%s", policy)
+	}
+}
+
+func TestPerRepoCIPolicyHasNoGrants(t *testing.T) {
+	t.Parallel()
+	policy := PerRepoCIPolicy("oberth", "oberthci", "oberth")
+	if strings.Contains(policy, "Approved via the secret access table") {
+		t.Fatalf("CI policy must not contain approval-table grants:\n%s", policy)
+	}
+	if strings.Contains(policy, "release/") {
+		t.Fatalf("CI policy must not reference release paths:\n%s", policy)
+	}
+}
+
+func TestPerRepoCIPolicyNoCrossOrgAccess(t *testing.T) {
+	t.Parallel()
+	policy := PerRepoCIPolicy("oberth", "oberthci", "oberth")
+	if strings.Contains(policy, "skipops") {
+		t.Fatalf("CI policy for oberthci/oberth must not reference skipops:\n%s", policy)
+	}
+	if strings.Contains(policy, `"oberth/data/upstream/*"`) {
+		t.Fatalf("CI policy must not contain cross-org wildcard:\n%s", policy)
+	}
+}
+
+func TestPerRepoCIIdentityNamesReturnsSorted(t *testing.T) {
+	t.Parallel()
+	ids := []PerRepoIdentity{
+		{Upstream: "github", Org: "skipops", Repo: "terraform"},
+		{Upstream: "codeberg", Org: "oberthci", Repo: "oberth"},
+	}
+	names := PerRepoCIIdentityNames(ids)
+	if len(names) != 2 {
+		t.Fatalf("expected 2 names, got %d", len(names))
+	}
+	for i := 1; i < len(names); i++ {
+		if names[i] < names[i-1] {
+			t.Fatalf("names not sorted: %v", names)
+		}
 	}
 }
 

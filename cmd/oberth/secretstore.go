@@ -16,6 +16,7 @@ import (
 	"time"
 
 	oberth "github.com/oberthci/oberth"
+	"github.com/oberthci/oberth/internal/installer"
 	"github.com/oberthci/oberth/internal/secretstore"
 	"github.com/oberthci/oberth/pkg/periapsis"
 
@@ -190,6 +191,8 @@ func runSecretStoreVerify(ctx context.Context, arguments []string, output io.Wri
 	flags.StringVar(&explicit.kvMount, "kv-mount", "", "KV v2 mount backing the virtual oberth/upstream/ namespace (default: discovered from serve, else oberth)")
 	flags.BoolVar(&explicit.insecureHTTP, "insecure-http", false, "DEVELOPMENT ONLY: allow a plain-HTTP OpenBao address")
 	releaseTier := flags.Bool("release-tier", false, "verify the release-tier OpenBao trust chain (Argo pipeline namespace, release ServiceAccount, --argo-vault-* flags)")
+	repoFlag := flags.String("repo", "", "verify a per-repo identity (upstream/org/repo); with --release-tier, overrides the shared SA")
+	tierFlag := flags.String("tier", "release", "which per-repo tier to verify: release or ci (only with --repo or --release-tier)")
 	timeout := flags.Duration("timeout", 45*time.Second, "overall verification deadline")
 	keys := flags.Bool("keys", false, "verify or list KV field names; use with --expect to assert")
 	var expects stringSliceFlag
@@ -204,6 +207,9 @@ func runSecretStoreVerify(ctx context.Context, arguments []string, output io.Wri
 		}
 		return fmt.Errorf("%w: %w", errUsage, err)
 	}
+	if *tierFlag != "release" && *tierFlag != "ci" {
+		return fmt.Errorf("%w: --tier must be \"release\" or \"ci\"", errUsage)
+	}
 	if *releaseTier {
 		if *keys || len(expects) > 0 {
 			return fmt.Errorf("%w: -keys and --expect are not yet supported with --release-tier", errUsage)
@@ -211,7 +217,7 @@ func runSecretStoreVerify(ctx context.Context, arguments []string, output io.Wri
 		var mergedPaths []string
 		mergedPaths = append(mergedPaths, pathFlags...)
 		mergedPaths = append(mergedPaths, flags.Args()...)
-		return runReleaseTierVerify(ctx, explicit, mergedPaths, *timeout, output, procCmdline, defaultKubeClient)
+		return runReleaseTierVerify(ctx, explicit, mergedPaths, *repoFlag, *tierFlag, *timeout, output, procCmdline, defaultKubeClient)
 	}
 	options := explicit
 	if options.address == "" {
@@ -352,6 +358,8 @@ func runReleaseTierVerify(
 	ctx context.Context,
 	explicit secretStoreVerifyConfig,
 	positionalPaths []string,
+	repo string,
+	tier string,
 	timeout time.Duration,
 	output io.Writer,
 	procCmdline string,
@@ -370,14 +378,23 @@ func runReleaseTierVerify(
 	if releaseConfig.vaultAddress == "" {
 		return errors.New("release tier is not configured: serve runs without --argo-vault-address; set argo.vault.address in the chart")
 	}
+	if releaseConfig.pipelineNamespace == "" {
+		return errors.New("release tier is not configured: serve runs without --argo-namespace")
+	}
+
+	// When --repo is given, verify the per-repo identity instead of the shared one.
+	// The per-repo SA and role name are derived deterministically from the
+	// upstream/org/repo triple, matching the runtime's PerRepoName / PerRepoCIName.
+	if repo != "" {
+		return runPerRepoTierVerify(ctx, releaseConfig, positionalPaths, repo, tier, timeout, output, procCmdline, newKube)
+	}
+
+	// Shared SA verification (existing behavior, backward compatible).
 	if releaseConfig.vaultCredentialedRole == "" {
 		return errors.New("release tier is not configured: serve runs without --argo-vault-credentialed-role; set argo.vault.credentialedRole in the chart")
 	}
 	if releaseConfig.credentialedAccount == "" {
 		return errors.New("release tier is not configured: serve runs without --argo-credentialed-serviceaccount")
-	}
-	if releaseConfig.pipelineNamespace == "" {
-		return errors.New("release tier is not configured: serve runs without --argo-namespace")
 	}
 
 	// The allowlisted paths are shared: the server declares them in
@@ -499,6 +516,175 @@ func runReleaseTierVerify(
 		}
 	}
 	_, err = fmt.Fprintln(output, "release-tier verify: OK — TokenRequest, release SA login, Vault auth, read policy, and TLS all verified end to end")
+	return err
+}
+
+// runPerRepoTierVerify verifies a per-repo identity (release or CI tier) by
+// resolving the per-repo SA and role via PerRepoName / PerRepoCIName,
+// TokenRequesting that SA, and attempting a Vault login + fetch.
+//
+// This is the fix for issue #428: the shared SA verification answered a
+// question no real release asks, because every repo that actually fetches
+// release secrets has its own per-repo identity.
+func runPerRepoTierVerify(
+	ctx context.Context,
+	releaseConfig releaseTierVerifyConfig,
+	positionalPaths []string,
+	repo string,
+	tier string,
+	timeout time.Duration,
+	output io.Writer,
+	procCmdline string,
+	newKube kubeClientFactory,
+) error {
+	parts := strings.Split(repo, "/")
+	if len(parts) != 3 {
+		return fmt.Errorf("%w: --repo must be upstream/org/repo (got %q)", errUsage, repo)
+	}
+	upstream, org, repoName := parts[0], parts[1], parts[2]
+
+	// Derive the per-repo SA name and role name using the same derivation
+	// the runtime uses, so the verification exercises the exact identity
+	// a real run would bind to.
+	var saName string
+	var tierLabel string
+	switch tier {
+	case "release":
+		saName = installer.PerRepoName(upstream, org, repoName)
+		tierLabel = "release"
+	case "ci":
+		saName = installer.PerRepoCIName(upstream, org, repoName)
+		tierLabel = "ci"
+	default:
+		return fmt.Errorf("%w: --tier must be \"release\" or \"ci\"", errUsage)
+	}
+	// Per-repo SA name == role name by convention.
+	roleName := saName
+
+	serverConfig, err := secretStoreConfigFromServeCmdline(procCmdline)
+	if err != nil {
+		return fmt.Errorf("discover server secret store configuration: %w", err)
+	}
+	kvMount := serverConfig.kvMount
+	if kvMount == "" {
+		kvMount = secretstore.DefaultKVMount
+	}
+
+	// For per-repo verification, the paths come from positional args or,
+	// if none are given, we construct a synthetic test path from the repo's
+	// upstream namespace that the per-repo policy should grant.
+	paths := positionalPaths
+	if len(paths) == 0 {
+		paths = serverConfig.paths
+	}
+	declaredByFetch := make(map[string]string, len(paths))
+	for index, path := range paths {
+		scoped, upstreamScoped, err := periapsis.ParseUpstreamSecretStorePath(path)
+		if err != nil {
+			return err
+		}
+		if upstreamScoped {
+			canonical := scoped.FetchPath(kvMount)
+			declaredByFetch[canonical] = path
+			paths[index] = canonical
+		}
+	}
+	if len(paths) == 0 {
+		return fmt.Errorf("nothing to verify: pass one or more KV API paths to test the %s per-repo identity for %s", tierLabel, repo)
+	}
+
+	kube, err := newKube()
+	if err != nil {
+		return err
+	}
+	expirationSeconds := int64(900)
+	tokenRequest, err := kube.CoreV1().ServiceAccounts(releaseConfig.pipelineNamespace).CreateToken(
+		ctx,
+		saName,
+		&authenticationv1.TokenRequest{
+			Spec: authenticationv1.TokenRequestSpec{
+				ExpirationSeconds: &expirationSeconds,
+			},
+		},
+		metav1.CreateOptions{},
+	)
+	if err != nil {
+		return fmt.Errorf("request token for %s per-repo ServiceAccount %s/%s: %w "+
+			"(does the SA exist? run \"oberth install --install-secretstore --upgrade\" to create it)",
+			tierLabel, releaseConfig.pipelineNamespace, saName, err)
+	}
+	token := tokenRequest.Status.Token
+	if token == "" {
+		return fmt.Errorf("TokenRequest returned an empty token for %s per-repo ServiceAccount %s", tierLabel, saName)
+	}
+
+	tokenFile, err := os.CreateTemp("", "oberth-perrepo-verify-*.token")
+	if err != nil {
+		return fmt.Errorf("create temporary token file: %w", err)
+	}
+	tokenPath := tokenFile.Name()
+	defer func() { _ = os.Remove(tokenPath) }()
+	if _, err := tokenFile.WriteString(token); err != nil {
+		_ = tokenFile.Close()
+		return fmt.Errorf("write temporary token file: %w", err)
+	}
+	if err := tokenFile.Close(); err != nil {
+		return fmt.Errorf("close temporary token file: %w", err)
+	}
+
+	var caPEM []byte
+	if releaseConfig.vaultCACertPath != "" {
+		body, err := readBoundedFile(releaseConfig.vaultCACertPath, 4<<20)
+		if err != nil {
+			return fmt.Errorf("read release-tier Vault CA certificate (%s): %w", releaseConfig.vaultCACertPath, err)
+		}
+		caPEM = body
+	}
+
+	client, err := secretstore.New(secretstore.Config{
+		Address:                 releaseConfig.vaultAddress,
+		AuthMountPath:           secretstore.DefaultAuthMountPath,
+		Role:                    roleName,
+		CACertPEM:               caPEM,
+		ServiceAccountTokenPath: tokenPath,
+		Timeout:                 timeout,
+	})
+	if err != nil {
+		return fmt.Errorf("configure %s per-repo verification: %w", tierLabel, err)
+	}
+
+	if _, err := fmt.Fprintf(output, "%s per-repo verify: address=%s role=%s sa=%s/%s repo=%s paths=%d\n",
+		tierLabel, releaseConfig.vaultAddress, roleName,
+		releaseConfig.pipelineNamespace, saName, repo, len(paths)); err != nil {
+		return err
+	}
+
+	deadlineCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	fetched, err := client.FetchKV(deadlineCtx, paths)
+	if err != nil {
+		_, _ = fmt.Fprintf(output, "common causes for %s per-repo verify failure:\n"+
+			"  - the per-repo ServiceAccount %s does not exist\n"+
+			"      -> run \"oberth install --install-secretstore --upgrade\"\n"+
+			"  - the Vault role %s is not bound to this SA\n"+
+			"      -> re-run the installer to provision the role\n"+
+			"  - the Vault policy does not cover the requested path\n"+
+			"      -> check that the grant exists (oberth access list)\n",
+			tierLabel, saName, roleName)
+		return fmt.Errorf("%s per-repo verify failed: %w", tierLabel, err)
+	}
+	defer zeroFetchedSecrets(fetched)
+	for _, path := range paths {
+		label := path
+		if declared, scoped := declaredByFetch[path]; scoped {
+			label = declared + " -> " + path
+		}
+		if _, err := fmt.Fprintf(output, "  ok %s (%d keys)\n", label, len(fetched[path])); err != nil {
+			return err
+		}
+	}
+	_, err = fmt.Fprintf(output, "%s per-repo verify: OK — TokenRequest, %s SA login (%s), Vault auth, read policy, and TLS all verified\n",
+		tierLabel, tierLabel, saName)
 	return err
 }
 

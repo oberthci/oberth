@@ -198,12 +198,23 @@ type Config struct {
 	MaxRunLogBytes int64
 
 	// PerRepoIdentities maps canonical "upstream/org/repo" identity strings
-	// to their per-repo Vault identities. When a credentialed run's repo
-	// has an entry here (keyed by its canonical form), the per-repo SA is
-	// used instead of the shared CredentialedServiceAccount or
-	// CISecretsServiceAccount. The per-repo SA name doubles as the Vault
-	// role name. Nil or empty means all repos use the shared identities.
+	// to their per-repo Vault identities. When a release run's repo has an
+	// entry here (keyed by its canonical form), the per-repo SA is used
+	// instead of the shared CredentialedServiceAccount. The per-repo SA
+	// name doubles as the Vault role name. Nil or empty means all repos use
+	// the shared identity.
 	PerRepoIdentities map[string]PerRepoIdentityConfig
+
+	// PerRepoCIIdentities maps canonical "upstream/org/repo" identity strings
+	// to their per-repo CI-tier Vault identities. When a CI run's repo has
+	// an entry here (keyed by its canonical form), the CI per-repo SA is
+	// used instead of the shared CISecretsServiceAccount. The CI per-repo
+	// SA name doubles as the CI Vault role name. The CI policy is
+	// structurally grant-free: it scopes upstream access to the repo's own
+	// namespace only, closing the org-union gap where the shared ci-secrets
+	// policy gave every CI run read access to every registered org's upstream
+	// subtree (issue #433).
+	PerRepoCIIdentities map[string]PerRepoIdentityConfig
 }
 
 func (config *Config) applyDefaults() {

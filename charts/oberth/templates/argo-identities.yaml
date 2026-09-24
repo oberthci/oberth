@@ -182,3 +182,21 @@ metadata:
     oberth.ci/identity-type: per-repo
 automountServiceAccountToken: false
 {{- end }}
+{{- /*
+Per-repo CI Vault identities. Each entry creates a ServiceAccount whose name
+is the same as its CI-tier Vault role and policy. The CI policy is grant-free
+by construction: it scopes upstream access to the repo's own namespace only,
+closing the org-union gap in the shared ci-secrets identity (issue #433).
+*/}}
+{{- range .Values.argo.perRepoCIIdentities }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ . }}
+  namespace: {{ $namespace }}
+  labels:
+    {{- include "oberth.labels" $ | nindent 4 }}
+    oberth.ci/identity-type: per-repo-ci
+automountServiceAccountToken: false
+{{- end }}

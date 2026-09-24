@@ -79,8 +79,9 @@ func buildArgoEngine(
 		ReleaseCacheRoot: options.releaseCacheRoot,
 		WorkflowTimeout:  options.argoWorkflowTimeout,
 		// #nosec G115 -- validateServeOptions bounds argoWorkflowTTL to a positive int32.
-		TTLSeconds:        int32(options.argoWorkflowTTL),
-		PerRepoIdentities: perRepoIdentities,
+		TTLSeconds:          int32(options.argoWorkflowTTL),
+		PerRepoIdentities:   perRepoIdentities,
+		PerRepoCIIdentities: buildPerRepoCIIdentities(perRepoIdentities),
 	}
 	controller, err := argojob.NewController(
 		argoClient.ArgoprojV1alpha1().Workflows(options.argoNamespace), kube, config)
@@ -282,4 +283,28 @@ func buildPerRepoIdentities(ctx context.Context, db perRepoStore) (map[string]ar
 	}
 
 	return result, nil
+}
+
+// buildPerRepoCIIdentities derives CI-tier per-repo identities from the
+// release-tier per-repo identity map. Every repo with a release per-repo
+// identity gets a corresponding CI per-repo identity. The CI identity uses
+// PerRepoCIName to produce a structurally distinct ServiceAccount name, and
+// its Vault policy is grant-free — scoped to the repo's own upstream namespace
+// only, closing the org-union gap in the shared ci-secrets policy (issue #433).
+func buildPerRepoCIIdentities(releaseIdentities map[string]argojob.PerRepoIdentityConfig) map[string]argojob.PerRepoIdentityConfig {
+	if len(releaseIdentities) == 0 {
+		return nil
+	}
+	result := make(map[string]argojob.PerRepoIdentityConfig, len(releaseIdentities))
+	for key := range releaseIdentities {
+		parts := strings.Split(key, "/")
+		if len(parts) != 3 {
+			continue
+		}
+		ciName := installer.PerRepoCIName(parts[0], parts[1], parts[2])
+		result[key] = argojob.PerRepoIdentityConfig{
+			ServiceAccountName: ciName,
+		}
+	}
+	return result
 }

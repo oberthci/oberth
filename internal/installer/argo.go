@@ -285,5 +285,9 @@ func argoOberthHelmValues(cfg Config, openbao OpenBaoResult) []string {
 	for i, name := range PerRepoIdentityNames(cfg.PerRepoIdentities) {
 		values = append(values, "--set", fmt.Sprintf("argo.perRepoIdentities[%d]=%s", i, name))
 	}
+	// Per-repo CI identity ServiceAccount names (issue #433).
+	for i, name := range PerRepoCIIdentityNames(cfg.PerRepoIdentities) {
+		values = append(values, "--set", fmt.Sprintf("argo.perRepoCIIdentities[%d]=%s", i, name))
+	}
 	return values
 }

@@ -197,6 +197,13 @@ argo:
   # credentialed / ci-secrets identities.
   perRepoIdentities: []
 
+  # Per-repo CI Vault identities. Each entry creates a ServiceAccount in
+  # argo.namespace whose name doubles as the CI-tier Vault role and policy
+  # name. The installer populates this list alongside perRepoIdentities;
+  # the chart creates the ServiceAccounts; the installer creates the
+  # Vault policies and roles. CI policies are grant-free by construction.
+  perRepoCIIdentities: []
+
   # Ceiling on a document's own activeDeadlineSeconds, and how long a finished
   # Workflow object is retained.
   workflowTimeout: 12h

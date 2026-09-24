@@ -31,8 +31,13 @@ type PerRepoIdentity struct {
 	Grants []string
 }
 
-// perRepoNamePrefix is the common prefix for all per-repo Vault identities.
+// perRepoNamePrefix is the common prefix for all per-repo release Vault identities.
 const perRepoNamePrefix = "oberth-argo-"
+
+// perRepoCINamePrefix is the common prefix for all per-repo CI Vault identities.
+// It is distinct from perRepoNamePrefix so the CI and release SAs, policies, and
+// roles are always structurally different names — even for the same repository.
+const perRepoCINamePrefix = "oberth-argo-ci-"
 
 // maxPerRepoNameLength caps the generated name so it fits comfortably within
 // the Kubernetes DNS-1123 subdomain limit (253) and the label value limit (63).
@@ -77,6 +82,61 @@ func PerRepoName(upstream, org, repo string) string {
 		readable = "repo"
 	}
 	return perRepoNamePrefix + readable + "-" + hashSuffix
+}
+
+// PerRepoCIName generates the deterministic, DNS-1123-safe name for a per-repo
+// CI-tier identity. It follows the same scheme as PerRepoName but uses the
+// perRepoCINamePrefix, producing a structurally distinct name. The CI and
+// release identities for the same repository are always different names.
+func PerRepoCIName(upstream, org, repo string) string {
+	canonical := upstream + "/" + org + "/" + repo
+	digest := sha256.Sum256([]byte(canonical))
+	hashSuffix := hex.EncodeToString(digest[:])[:12]
+
+	var safe strings.Builder
+	for _, c := range strings.ToLower(upstream + "-" + org + "-" + repo) {
+		switch {
+		case c >= 'a' && c <= 'z',
+			c >= '0' && c <= '9',
+			c == '-':
+			safe.WriteRune(c)
+		default:
+			safe.WriteByte('-')
+		}
+	}
+	readable := strings.Trim(safe.String(), "-")
+
+	maxReadable := maxPerRepoNameLength - len(perRepoCINamePrefix) - 1 - len(hashSuffix)
+	if len(readable) > maxReadable {
+		readable = strings.TrimRight(readable[:maxReadable], "-")
+	}
+	if readable == "" {
+		readable = "repo"
+	}
+	return perRepoCINamePrefix + readable + "-" + hashSuffix
+}
+
+// PerRepoCIPolicy generates the HCL policy for a single repository's per-repo
+// CI-tier identity. It grants:
+//   - Read access to the repo's upstream org/repo namespace only
+//   - Token self-revocation
+//
+// Unlike the release-tier PerRepoPolicy, it NEVER carries approval-table grants.
+// This is the structural guarantee that a CI run cannot reach release secrets
+// even if a CI per-repo identity is used. The policy is scoped to
+// path "oberth/data/upstream/<org>/<repo>/*" — the same subtree the release
+// policy uses, but without any exact-path grant entries.
+func PerRepoCIPolicy(kvPrefix, org, repo string) string {
+	var builder strings.Builder
+	fmt.Fprintf(&builder, `# Per-repo CI identity: read-only on this repo's upstream namespace.
+# CI-tier policy: no approval-table grants — release secrets are unreachable.
+# Managed by oberth install --install-secretstore. Do not edit manually.
+path "%s/data/upstream/%s/%s/*" {
+  capabilities = ["read"]
+}`, kvPrefix, org, repo)
+
+	builder.WriteString("\n\n# Allow the fetch client to revoke its own short-lived login token.\npath \"auth/token/revoke-self\" {\n  capabilities = [\"update\"]\n}")
+	return builder.String()
 }
 
 // PerRepoPolicy generates the HCL policy for a single repository's per-repo
@@ -195,6 +255,49 @@ func ConfigurePerRepoIdentities(ctx context.Context, store openBaoExec, rootToke
 			}
 		}
 		items = append(items, configItem{Name: "per-repo role " + name, Status: "✓"})
+
+		// --- CI-tier per-repo identity ---
+		// Every repo with a release per-repo identity also gets a CI per-repo
+		// identity. The CI policy is grant-free: it scopes upstream access to
+		// this repo's own namespace only, closing the org-union gap where the
+		// shared ci-secrets policy gave every CI run read access to every
+		// registered org's upstream subtree (issue #433).
+
+		ciName := PerRepoCIName(id.Upstream, id.Org, id.Repo)
+
+		wantCIPolicy := PerRepoCIPolicy(defaultKVPrefix, id.Org, id.Repo)
+		haveCIPolicy, ciPolicyExists, err := store.policyRead(ctx, rootToken, ciName)
+		if err != nil {
+			return items, fmt.Errorf("per-repo CI policy read %s: %w", ciName, err)
+		}
+		if !ciPolicyExists || strings.TrimSpace(haveCIPolicy) != strings.TrimSpace(wantCIPolicy) {
+			if err := store.policyWrite(ctx, rootToken, ciName, wantCIPolicy); err != nil {
+				return items, fmt.Errorf("per-repo CI policy write %s: %w", ciName, err)
+			}
+		}
+		items = append(items, configItem{Name: "per-repo ci policy " + ciName, Status: "✓"})
+
+		ciRolePath := "auth/" + defaultAuthMount + "/role/" + ciName
+		existingCIRole, err := store.readData(ctx, rootToken, ciRolePath)
+		if err != nil {
+			return items, fmt.Errorf("per-repo CI role read %s: %w", ciName, err)
+		}
+		if existingCIRole != nil && !perRepoRoleMatches(existingCIRole, ciName, ciName, argoNamespace) {
+			return items, fmt.Errorf("per-repo CI role %s exists with an unsafe or incompatible binding; refusing to overwrite it", ciName)
+		}
+		if existingCIRole == nil {
+			if err := store.writeJSON(ctx, rootToken, ciRolePath, map[string]any{
+				"bound_service_account_names":      ciName,
+				"bound_service_account_namespaces": argoNamespace,
+				"token_policies":                   ciName,
+				"token_no_default_policy":          true,
+				"token_ttl":                        "20m",
+				"token_max_ttl":                    "30m",
+			}); err != nil {
+				return items, fmt.Errorf("per-repo CI role write %s: %w", ciName, err)
+			}
+		}
+		items = append(items, configItem{Name: "per-repo ci role " + ciName, Status: "✓"})
 	}
 
 	return items, nil
@@ -208,6 +311,23 @@ func PerRepoIdentityNames(identities []PerRepoIdentity) []string {
 	var names []string
 	for _, id := range identities {
 		name := PerRepoName(id.Upstream, id.Org, id.Repo)
+		if _, dup := seen[name]; !dup {
+			seen[name] = struct{}{}
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	return names
+}
+
+// PerRepoCIIdentityNames returns a sorted, deduplicated list of ServiceAccount
+// names for all per-repo CI identities. This is used by the installer to pass
+// per-repo CI SA names to the Helm chart.
+func PerRepoCIIdentityNames(identities []PerRepoIdentity) []string {
+	seen := make(map[string]struct{}, len(identities))
+	var names []string
+	for _, id := range identities {
+		name := PerRepoCIName(id.Upstream, id.Org, id.Repo)
 		if _, dup := seen[name]; !dup {
 			seen[name] = struct{}{}
 			names = append(names, name)

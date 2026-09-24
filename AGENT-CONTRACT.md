@@ -67,12 +67,17 @@ implementation detail disagree.
   carries exactly that repository's org/repo upstream namespace plus its own
   approval-table grants — falling back to the shared credentialed
   ServiceAccount otherwise; these are the only identities whose policies
-  carry approval-table release grants. CI runs bind the separate ci-secrets
-  ServiceAccount, whose role's policy covers the upstream subtree only and
-  never receives grants; per-repo identities are release-tier only, so a
-  branch run never binds one. Each release-capable role binds its exact
-  ServiceAccount name, so release credentials are unreachable from a branch
-  push at the Vault layer, not only at admission. Two credential chains are
+  carry approval-table release grants. CI runs bind the repository's own
+  per-repo CI ServiceAccount when one is provisioned — its OpenBao role's
+  policy carries exactly that repository's org/repo upstream namespace and is
+  structurally grant-free (no approval-table grants, no release secrets) —
+  falling back to the shared ci-secrets ServiceAccount when no per-repo CI
+  identity exists. Per-repo CI identities are always created alongside their
+  release counterparts by the installer, so every repo with grants gets both
+  tiers. Each role binds its exact ServiceAccount name, so release credentials
+  are unreachable from a branch push at the Vault layer, not only at
+  admission, and a CI run can only reach its own repo's upstream namespace,
+  not every registered org's subtree (issue #433). Two credential chains are
   supported:
   - **Native (preferred):** `oberth secretstore exec` authenticates to
     OpenBao in-Pod using the ServiceAccount's projected token, fetches the
@@ -116,12 +121,17 @@ implementation detail disagree.
   `automountServiceAccountToken: false`; a release pipeline with approved
   paths binds to its repository's per-repo ServiceAccount when provisioned
   (the shared credentialed ServiceAccount otherwise), and a CI pipeline with
-  approved paths binds to the ci-secrets ServiceAccount — each carrying a
-  projected token that only its own identity's OpenBao role accepts, with the
-  selected role injected as `OBERTH_VAULT_ROLE`. The CI system-path
-  prohibition (branch pipelines may not declare system-namespace paths) and
-  the approval-table grant check are enforced as defense in depth on top of
-  the identity switch. Secret paths a repository-authored envconsul
+  approved paths binds to its repository's per-repo CI ServiceAccount when
+  provisioned (the shared ci-secrets ServiceAccount otherwise) — each carrying
+  a projected token that only its own identity's OpenBao role accepts, with
+  the selected role injected as `OBERTH_VAULT_ROLE`. When other repos have
+  per-repo identities and the triggering repo does not (either tier), the
+  run is refused at admission with a message directing the operator to
+  provision the identity via the installer — falling back to a shared SA
+  when per-repo isolation exists for other repos would leak cross-repo or
+  cross-org secrets. The CI system-path prohibition (branch pipelines may
+  not declare system-namespace paths) and the approval-table grant check
+  are enforced as defense in depth on top of the identity switch. Secret paths a repository-authored envconsul
   configuration (`secret {}` stanzas in `-config` files, `-secret` flags) or
   an `oberth secretstore exec --path` invocation would fetch are
   admission-checked against the declared annotation, with envconsul

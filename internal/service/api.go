@@ -30,6 +30,15 @@ const revokePolicySyncAdvisory = "Revocation is effective for new Oberth admissi
 	"The Vault credentialed policy still has this path until re-synced: " +
 	"run `oberth install --install-secretstore --upgrade` to remove it from the Vault policy."
 
+// grantPolicySyncAdvisory is the warning returned by access_allow to inform
+// the caller that the Vault per-repo policy does not yet include the new grant.
+// The server's own identity has no Vault policy-write capability, so the resync
+// must be triggered externally. Without the resync, a release run for this repo
+// will fail with HTTP 403 at the Vault layer even though Oberth's own admission
+// gate accepts the path. (Issue #427)
+const grantPolicySyncAdvisory = "Grant recorded; the Vault per-repo policy does not include this path yet. " +
+	"Run `oberth install --install-secretstore --upgrade` to add it to the Vault policy."
+
 type APIConfig struct {
 	Runs                   RunResolver
 	History                RunHistory
@@ -1611,7 +1620,9 @@ func (service *API) accessAllow(ctx context.Context, actor api.Actor, repo, step
 		}
 		for _, grant := range grants {
 			if grant.Repo == repo && grant.Step == step && grant.Secret == secret {
-				return wireAccessGrant(grant), nil
+				response := wireAccessGrant(grant)
+				response.Warning = grantPolicySyncAdvisory
+				return response, nil
 			}
 		}
 		return api.AccessGrantResponse{}, fmt.Errorf("grant was written to ConfigMap but not found in store after reconcile")
@@ -1620,7 +1631,9 @@ func (service *API) accessAllow(ctx context.Context, actor api.Actor, repo, step
 	if err != nil {
 		return api.AccessGrantResponse{}, err
 	}
-	return wireAccessGrant(grant), nil
+	response := wireAccessGrant(grant)
+	response.Warning = grantPolicySyncAdvisory
+	return response, nil
 }
 
 func (service *API) accessRevoke(ctx context.Context, actor api.Actor, repo, step, secret string) (api.AccessGrantResponse, error) {

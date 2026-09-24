@@ -12,14 +12,19 @@ import (
 )
 
 const (
-	testPerRepoSA   = "oberth-argo-codeberg-oberthci-oberth-abcdef012345"
-	testPerRepoRole = testPerRepoSA // SA name == role name by convention
+	testPerRepoSA     = "oberth-argo-codeberg-oberthci-oberth-abcdef012345"
+	testPerRepoRole   = testPerRepoSA // SA name == role name by convention
+	testPerRepoCISA   = "oberth-argo-ci-codeberg-oberthci-oberth-fedcba543210"
+	testPerRepoCIRole = testPerRepoCISA // CI SA name == CI role name by convention
 )
 
 func testConfigWithPerRepo() Config {
 	cfg := testConfig()
 	cfg.PerRepoIdentities = map[string]PerRepoIdentityConfig{
 		"codeberg/oberthci/oberth": {ServiceAccountName: testPerRepoSA},
+	}
+	cfg.PerRepoCIIdentities = map[string]PerRepoIdentityConfig{
+		"codeberg/oberthci/oberth": {ServiceAccountName: testPerRepoCISA},
 	}
 	return cfg
 }
@@ -72,15 +77,16 @@ func TestBuildUsesPerRepoIdentityForRelease(t *testing.T) {
 	}
 }
 
-// TestBuildCIKeepsSharedGrantFreeIdentityDespitePerRepo is the #200 trust-
-// tier regression test for per-repo identities: a per-repo identity's Vault
-// policy carries the repo's approval-table grants (release credentials), so
-// a BRANCH (CI) run must never bind to it — repository-authored code runs in
-// that pod, and its reachable policy would include release secrets. CI runs
-// keep the shared ci-secrets identity, whose policy is structurally
-// grant-free, and the shared CI Vault role, even when the repo has a
-// per-repo identity configured.
-func TestBuildCIKeepsSharedGrantFreeIdentityDespitePerRepo(t *testing.T) {
+// TestBuildCIUsesPerRepoCIIdentity verifies that a CI run with per-repo CI
+// identities uses the CI per-repo SA (not the release per-repo SA, not the
+// shared ci-secrets SA). The CI per-repo policy is structurally grant-free:
+// it scopes upstream access to the repo's own namespace only, closing the
+// org-union gap where the shared ci-secrets policy gave every CI run read
+// access to every registered org's upstream subtree (issue #433). The release
+// per-repo identity is NEVER used for CI — that would put release grants
+// inside the pod's reachable policy and collapse the CI-to-release boundary
+// (issue #200).
+func TestBuildCIUsesPerRepoCIIdentity(t *testing.T) {
 	t.Parallel()
 	cfg := testConfigWithPerRepo()
 	path := "oberth/upstream/oberthci/oberth/test-secret"
@@ -94,13 +100,62 @@ func TestBuildCIKeepsSharedGrantFreeIdentityDespitePerRepo(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if wf.Spec.ServiceAccountName != testCISecretsAcct {
-		t.Fatalf("CI ServiceAccount = %q, want shared grant-free %q (a per-repo identity would put release grants in a branch pod's reachable policy)",
-			wf.Spec.ServiceAccountName, testCISecretsAcct)
+	if wf.Spec.ServiceAccountName != testPerRepoCISA {
+		t.Fatalf("CI ServiceAccount = %q, want per-repo CI %q", wf.Spec.ServiceAccountName, testPerRepoCISA)
 	}
 	env := environmentOf(t, wf, "main")
-	if env["OBERTH_VAULT_ROLE"] != testVaultCISecretsRole {
-		t.Fatalf("CI OBERTH_VAULT_ROLE = %q, want shared %q", env["OBERTH_VAULT_ROLE"], testVaultCISecretsRole)
+	if env["OBERTH_VAULT_ROLE"] != testPerRepoCIRole {
+		t.Fatalf("CI OBERTH_VAULT_ROLE = %q, want per-repo CI %q", env["OBERTH_VAULT_ROLE"], testPerRepoCIRole)
+	}
+}
+
+// TestBuildCIFallsBackToSharedWhenNoCIPerRepoIdentities verifies that when no
+// CI per-repo identities exist at all, CI runs use the shared ci-secrets SA.
+// This is the single-repo / no-grants case.
+func TestBuildCIFallsBackToSharedWhenNoCIPerRepoIdentities(t *testing.T) {
+	t.Parallel()
+	cfg := testConfig() // no PerRepoCIIdentities
+	path := "oberth/upstream/oberthci/oberth/test-secret"
+	req := testRequest(periapsis.TriggerCI, perRepoCredentialedDocument(path))
+	req.Repo = "oberth"
+	req.UpstreamName = "codeberg"
+	req.UpstreamOrg = "oberthci"
+	req.ApprovedSecrets = map[string]bool{path: true}
+
+	wf, err := Build(cfg, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if wf.Spec.ServiceAccountName != testCISecretsAcct {
+		t.Fatalf("CI ServiceAccount = %q, want shared %q (no CI per-repo identities exist)",
+			wf.Spec.ServiceAccountName, testCISecretsAcct)
+	}
+}
+
+// TestBuildCIRefusesSharedFallbackWhenOtherReposHaveCIIdentities proves that a
+// repo without a CI per-repo identity is REFUSED when other repos have CI
+// per-repo identities. Falling back to the shared ci-secrets SA would give
+// this repo's CI run read access to every registered org's upstream secrets
+// because the shared policy is an org-union. (Issue #433, mirrors #434 for CI)
+func TestBuildCIRefusesSharedFallbackWhenOtherReposHaveCIIdentities(t *testing.T) {
+	t.Parallel()
+	cfg := testConfigWithPerRepo() // has CI per-repo for codeberg/oberthci/oberth
+	path := "oberth/upstream/skipops/other-repo/test-secret"
+	req := testRequest(periapsis.TriggerCI, perRepoCredentialedDocument(path))
+	req.Repo = "other-repo"
+	req.UpstreamName = "codeberg"
+	req.UpstreamOrg = "skipops"
+	req.ApprovedSecrets = map[string]bool{path: true}
+
+	_, err := Build(cfg, req)
+	if err == nil {
+		t.Fatal("expected refusal when falling back to shared ci-secrets SA with other repos holding CI per-repo identities")
+	}
+	if !strings.Contains(err.Error(), "install --install-secretstore --upgrade") {
+		t.Fatalf("error should include remediation command, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "other-repo") {
+		t.Fatalf("error should name the repo, got: %v", err)
 	}
 }
 
@@ -237,6 +292,52 @@ func TestFragmentRunUsesHostRepoIdentity(t *testing.T) {
 	}
 	if wf.Spec.ServiceAccountName != testPerRepoSA {
 		t.Fatalf("fragment host ServiceAccount = %q, want %q", wf.Spec.ServiceAccountName, testPerRepoSA)
+	}
+}
+
+// TestCICrossRepoReadRefusedByPerRepoCIRole verifies that different repos get
+// different CI SAs, so cross-org upstream reads at the Vault layer are
+// structurally impossible for CI runs (issue #433).
+func TestCICrossRepoReadRefusedByPerRepoCIRole(t *testing.T) {
+	t.Parallel()
+	cfg := testConfig()
+	cfg.PerRepoCIIdentities = map[string]PerRepoIdentityConfig{
+		"codeberg/org-a/repo-a": {ServiceAccountName: "oberth-argo-ci-upstream-org-a-repo-a-aaa111"},
+		"codeberg/org-b/repo-b": {ServiceAccountName: "oberth-argo-ci-upstream-org-b-repo-b-bbb222"},
+	}
+	// Also need release per-repo identities for the test config to be valid
+	// (the Build path checks both maps).
+	cfg.PerRepoIdentities = map[string]PerRepoIdentityConfig{
+		"codeberg/org-a/repo-a": {ServiceAccountName: "oberth-argo-upstream-org-a-repo-a-aaa111"},
+		"codeberg/org-b/repo-b": {ServiceAccountName: "oberth-argo-upstream-org-b-repo-b-bbb222"},
+	}
+
+	pathA := "oberth/upstream/org-a/repo-a/test-secret"
+	reqA := testRequest(periapsis.TriggerCI, perRepoCredentialedDocument(pathA))
+	reqA.Repo = "repo-a"
+	reqA.UpstreamName = "codeberg"
+	reqA.UpstreamOrg = "org-a"
+	reqA.ApprovedSecrets = map[string]bool{pathA: true}
+
+	wfA, err := Build(cfg, reqA)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	pathB := "oberth/upstream/org-b/repo-b/test-secret"
+	reqB := testRequest(periapsis.TriggerCI, perRepoCredentialedDocument(pathB))
+	reqB.Repo = "repo-b"
+	reqB.UpstreamName = "codeberg"
+	reqB.UpstreamOrg = "org-b"
+	reqB.ApprovedSecrets = map[string]bool{pathB: true}
+
+	wfB, err := Build(cfg, reqB)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if wfA.Spec.ServiceAccountName == wfB.Spec.ServiceAccountName {
+		t.Fatalf("CI repos a and b got the same SA %q; per-repo CI isolation violated", wfA.Spec.ServiceAccountName)
 	}
 }
 
