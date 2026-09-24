@@ -699,11 +699,20 @@ implementation detail disagree.
   Vault credentialed policy retains the exact-path read entry until a policy
   re-sync. The server's own identity has no Vault policy-write capability, so
   `access_revoke` includes an advisory in its response. To complete the
-  revocation at the Vault layer, re-run the installer with the current approval
-  table: `oberth install --install-secretstore --upgrade` (or the equivalent
-  `setup-secretstore.sh` with `--force`). Until re-synced, an already-running
-  credentialed step whose token was obtained before the revocation can still
-  read the path; new runs are blocked by Oberth's own admission gate.
+  revocation at the Vault layer, re-sync policies from the current approval
+  table: `oberth secretstore sync` (targeted: re-derives per-repo release and
+  CI identities plus the shared credentialed/ci-secrets policies, nothing
+  else), or the full `oberth install --install-secretstore --upgrade`, or the
+  equivalent `setup-secretstore.sh` with `--force`. All three run under the
+  ADMINISTRATOR's own store session (`BAO_TOKEN`/`VAULT_TOKEN` in the
+  operator's environment, delivered to the pod over the exec stdin stream) —
+  the sync command exists precisely so the server never needs policy-write
+  capability; grant-triggered auto-sync and admission-time policy composition
+  remain design-rejected. `oberth access allow` returns the mirror-image
+  advisory (`grantPolicySyncAdvisory`) naming the same commands. Until
+  re-synced, an already-running credentialed step whose token was obtained
+  before the revocation can still read the path; new runs are blocked by
+  Oberth's own admission gate.
 - Kubernetes access is namespace-scoped, with one documented exception: when
   `secretstore.enabled` is set, the chart may create a `system:auth-delegator`
   ClusterRoleBinding for the Oberth ServiceAccount so OpenBao validates login

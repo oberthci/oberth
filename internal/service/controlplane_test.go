@@ -3863,6 +3863,11 @@ func TestAccessRevokeResponseCarriesPolicySyncWarning(t *testing.T) {
 	if response.Warning == "" {
 		t.Fatal("access_revoke response carries no Vault policy re-sync warning")
 	}
+	// `oberth secretstore sync` is the recommended targeted re-sync; the full
+	// installer run is the fallback. Both must stay named (issue #427).
+	if !strings.Contains(response.Warning, "oberth secretstore sync") {
+		t.Fatalf("warning does not recommend the targeted sync command: %q", response.Warning)
+	}
 	if !strings.Contains(response.Warning, "install --install-secretstore --upgrade") {
 		t.Fatalf("warning does not name the re-sync command: %q", response.Warning)
 	}
@@ -3907,6 +3912,11 @@ func TestAccessAllowResponseCarriesPolicySyncWarning(t *testing.T) {
 	}
 	if response.Warning == "" {
 		t.Fatal("access_allow response carries no Vault policy re-sync warning")
+	}
+	// `oberth secretstore sync` is the recommended targeted re-sync; the full
+	// installer run is the fallback. Both must stay named (issue #427).
+	if !strings.Contains(response.Warning, "oberth secretstore sync") {
+		t.Fatalf("warning does not recommend the targeted sync command: %q", response.Warning)
 	}
 	if !strings.Contains(response.Warning, "install --install-secretstore --upgrade") {
 		t.Fatalf("warning does not name the re-sync command: %q", response.Warning)

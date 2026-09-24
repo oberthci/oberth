@@ -151,6 +151,12 @@ func TestBuildCIRefusesSharedFallbackWhenOtherReposHaveCIIdentities(t *testing.T
 	if err == nil {
 		t.Fatal("expected refusal when falling back to shared ci-secrets SA with other repos holding CI per-repo identities")
 	}
+	// The targeted command is the recommended remediation; the full installer
+	// run is the fallback. Both must stay named or the operator is pointed at
+	// only the sledgehammer (issue #427).
+	if !strings.Contains(err.Error(), "oberth secretstore sync") {
+		t.Fatalf("error should recommend the targeted sync command, got: %v", err)
+	}
 	if !strings.Contains(err.Error(), "install --install-secretstore --upgrade") {
 		t.Fatalf("error should include remediation command, got: %v", err)
 	}
@@ -183,6 +189,12 @@ func TestBuildRefusesSharedFallbackWhenMultipleReposHaveGrants(t *testing.T) {
 	_, err := Build(cfg, req)
 	if err == nil {
 		t.Fatal("expected refusal when falling back to shared SA with other repos holding grants")
+	}
+	// The targeted command is the recommended remediation; the full installer
+	// run is the fallback. Both must stay named or the operator is pointed at
+	// only the sledgehammer (issue #427).
+	if !strings.Contains(err.Error(), "oberth secretstore sync") {
+		t.Fatalf("error should recommend the targeted sync command, got: %v", err)
 	}
 	if !strings.Contains(err.Error(), "install --install-secretstore --upgrade") {
 		t.Fatalf("error should include remediation command, got: %v", err)
