@@ -784,7 +784,20 @@ func ConfigureSecretStore(ctx context.Context, cfg Config, deps Deps, store open
 	if err != nil {
 		return result, err
 	}
-	wantCredentialedPolicy := OberthCredentialedPolicyWithGrants(defaultKVPrefix, upstreamOrgs, credentialedGrantPaths)
+
+	// When per-repo identities exist, strip the shared policies to zero
+	// stanzas: no upstream org access, no approval-table grants. Admission
+	// never selects the shared identities once per-repo identities exist
+	// (fail-closed in identityForWithRepo), so the remaining policy breadth
+	// is dormant standing privilege. Issue #456. This also aligns the install
+	// path with the sync path — both now produce the same zero-stanza shape.
+	sharedOrgs := upstreamOrgs
+	sharedGrants := credentialedGrantPaths
+	if len(cfg.PerRepoIdentities) > 0 {
+		sharedOrgs = nil
+		sharedGrants = nil
+	}
+	wantCredentialedPolicy := OberthCredentialedPolicyWithGrants(defaultKVPrefix, sharedOrgs, sharedGrants)
 	haveCredentialedPolicy, credentialedPolicyExists, err := store.policyRead(ctx, rootToken, defaultCredentialedPolicy)
 	if err != nil {
 		return result, err
@@ -830,7 +843,7 @@ func ConfigureSecretStore(ctx context.Context, cfg Config, deps Deps, store open
 	// unlike the credentialed policy there is nothing approval-driven to sync
 	// — drift from the managed shape is always rewritten back.
 
-	wantCISecretsPolicy := OberthCISecretsPolicy(defaultKVPrefix, upstreamOrgs)
+	wantCISecretsPolicy := OberthCISecretsPolicy(defaultKVPrefix, sharedOrgs)
 	haveCISecretsPolicy, ciSecretsPolicyExists, err := store.policyRead(ctx, rootToken, defaultCISecretsPolicy)
 	if err != nil {
 		return result, err
