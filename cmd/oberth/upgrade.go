@@ -49,9 +49,14 @@ func runUpgrade(ctx context.Context, arguments []string, output io.Writer) error
 		return fmt.Errorf("load kubeconfig: %w", err)
 	}
 
+	// Resolve helm kubeconfig targeting so helm upgrade targets the same
+	// cluster the binary resolved (#464).
+	helmKubeArgs, _, _ := installer.ResolveHelmKubeArgs(kubeContext)
+	runHelm := installer.HelmWithKubeArgs(installer.DefaultRunHelm, helmKubeArgs)
+
 	_, err = installer.RunUpgrade(ctx, cfg, installer.Deps{
 		Output:      output,
-		RunHelm:     installer.DefaultRunHelm,
+		RunHelm:     runHelm,
 		RunCommand:  installer.DefaultRunCommand,
 		KubeClient:  kubeClient,
 		RestConfig:  restConfig,

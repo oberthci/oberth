@@ -201,10 +201,15 @@ func Execute(ctx context.Context, cfg Config, deps InstallDeps) error {
 		}
 	}()
 
+	// Resolve helm kubeconfig targeting so every helm invocation in the
+	// install flow targets the same cluster the binary resolved (#464).
+	helmKubeArgs, _, _ := ResolveHelmKubeArgs(contextName)
+	runHelm := HelmWithKubeArgs(deps.RunHelm, helmKubeArgs)
+
 	return Run(ctx, cfg, Deps{
 		Output:           deps.Output,
 		Input:            deps.Input,
-		RunHelm:          deps.RunHelm,
+		RunHelm:          runHelm,
 		RunCommand:       deps.RunCommand,
 		RunInteractive:   deps.RunInteractive,
 		IsTerminal:       deps.IsTerminal,

@@ -1360,6 +1360,23 @@ func InstallOberth(ctx context.Context, cfg Config, deps Deps, openbao OpenBaoRe
 		}
 	}
 
+	// Pin the chart's default image.ref when no explicit --image was given
+	// and we are using a published chart (not --chart). --reuse-values
+	// carries the previous release's image.ref forward verbatim, so without
+	// this pin a chart upgrade deploys the old image under the new chart
+	// version — the deploy "succeeds" while deploying nothing (#466).
+	// Kind clusters are excluded: prepareKindImagesForCluster already
+	// loaded the image into the node's containerd, and kind charts use
+	// tag-based refs from the local daemon that are not digest-pinned.
+	if strings.TrimSpace(cfg.ImageRef) == "" && strings.TrimSpace(cfg.ChartPath) == "" && deps.KindClusterName == "" {
+		chart := oberthRepoName + "/oberth"
+		imageRef, err := resolveChartImageRef(ctx, deps, chart, cfg.ChartVersion, false)
+		if err != nil {
+			return result, fmt.Errorf("resolve chart default image for install: %w", err)
+		}
+		cfg.ImageRef = imageRef
+	}
+
 	switch action {
 	case actionUpgrade:
 		result.Upgraded = true
@@ -2018,6 +2035,24 @@ func printDryRunPlanWithKind(cfg Config, w io.Writer, cluster ClusterInfo, kindC
 }
 
 // --- Default implementations ---
+
+// HelmWithKubeArgs wraps a RunHelm function to prepend --kubeconfig and/or
+// --kube-context flags to every invocation, ensuring helm targets the same
+// cluster the binary's kubeconfig resolution selected. Commands that do not
+// interact with the cluster (repo add, show values, search) ignore these
+// flags harmlessly. When kubeArgs is empty the original function is returned
+// unchanged.
+func HelmWithKubeArgs(runHelm func(ctx context.Context, args []string) ([]byte, error), kubeArgs []string) func(ctx context.Context, args []string) ([]byte, error) {
+	if len(kubeArgs) == 0 {
+		return runHelm
+	}
+	return func(ctx context.Context, args []string) ([]byte, error) {
+		merged := make([]string, 0, len(kubeArgs)+len(args))
+		merged = append(merged, kubeArgs...)
+		merged = append(merged, args...)
+		return runHelm(ctx, merged)
+	}
+}
 
 // DefaultRunHelm executes the helm binary with the given arguments.
 // Stdout and stderr are captured separately: on success only stdout is

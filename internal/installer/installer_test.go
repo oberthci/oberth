@@ -32,6 +32,12 @@ import (
 	k8stesting "k8s.io/client-go/testing"
 )
 
+// fakeChartImageRef is the digest-pinned image reference returned by fake
+// RunHelm handlers when the test exercises a code path that resolves the
+// chart's default image.ref (e.g. install --upgrade with no --image).
+const fakeChartImageRef = "europe-west4-docker.pkg.dev/skipopsmain/cloudtaser/cloudtaser-oberth@sha256:abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
+const fakeChartValuesYAML = "image:\n  ref: " + fakeChartImageRef + "\n"
+
 func TestKindClusterConfigMapsPortsAndCaches(t *testing.T) {
 	t.Parallel()
 
@@ -871,11 +877,13 @@ func TestExecuteDarwinNodeListFailureStillLoadsKindImages(t *testing.T) {
 			return kubeClient, &rest.Config{Host: "https://127.0.0.1:6443"}, contextName, nil
 		},
 		RunHelm: func(_ context.Context, args []string) ([]byte, error) {
+			// Kube args (--kube-context, --kubeconfig) may be prepended by
+			// HelmWithKubeArgs; match on substrings instead of exact prefixes.
 			command := strings.Join(args, " ")
 			switch {
-			case command == "list -n openbao -o json", command == "list -n oberth -o json":
+			case strings.Contains(command, "list -n openbao -o json") || strings.Contains(command, "list -n oberth -o json"):
 				return []byte("[]"), nil
-			case strings.HasPrefix(command, "show values oberth-charts/oberth"):
+			case strings.Contains(command, "show values oberth-charts/oberth"):
 				return []byte("image:\n  ref: private.example/oberth:latest\n"), nil
 			default:
 				return nil, nil
@@ -1330,6 +1338,8 @@ func TestInstallOberthUpgradeFromLegacyValuesPinsManagedTransitIdentity(t *testi
 				// v0.10.92 predates the transit.mount/key chart values. Helm's
 				// --reuse-values therefore supplies neither on this upgrade.
 				return []byte(`[{"name":"oberth","namespace":"oberth","status":"deployed","chart":"oberth-0.10.92"}]`), nil
+			case "show":
+				return []byte(fakeChartValuesYAML), nil
 			case "upgrade":
 				upgradeArgs = slices.Clone(args)
 			}
@@ -1670,6 +1680,9 @@ func TestRunInstallRekorWiresOberth(t *testing.T) {
 		RunHelm: func(_ context.Context, args []string) ([]byte, error) {
 			if args[0] == "list" {
 				return []byte("[]"), nil
+			}
+			if args[0] == "show" {
+				return []byte(fakeChartValuesYAML), nil
 			}
 			if args[0] == "upgrade" && len(args) > 3 && args[3] == "oberth-charts/oberth" {
 				oberthArgs = slices.Clone(args)
@@ -2494,6 +2507,8 @@ func TestInstallOberthReconcilesRekorAtInstalledVersion(t *testing.T) {
 							`[{"name":"oberth","namespace":"oberth","status":"deployed","chart":"oberth-%s"}]`,
 							tc.installedVersion,
 						)), nil
+					case "show":
+						return []byte(fakeChartValuesYAML), nil
 					case "upgrade":
 						upgradeArgs = slices.Clone(args)
 					}
@@ -2514,6 +2529,7 @@ func TestInstallOberthReconcilesRekorAtInstalledVersion(t *testing.T) {
 			want := []string{
 				"upgrade", "--install", "oberth", "oberth-charts/oberth",
 				"-n", "oberth", "--create-namespace",
+				"--set-string", "image.ref=" + fakeChartImageRef,
 				"--set", "argo.namespace=oberth-argo",
 				"--set", "auditAnchor.rekorURL=http://rekor-server.rekor.svc:80",
 				"--set", "auditAnchor.rekorInsecureHTTP=true",
@@ -2537,6 +2553,8 @@ func TestInstallOberthReconcilesVerifiedSecretStoreAtInstalledVersion(t *testing
 			switch args[0] {
 			case "list":
 				return []byte(`[{"name":"oberth","namespace":"oberth","status":"deployed","chart":"oberth-0.10.59"}]`), nil
+			case "show":
+				return []byte(fakeChartValuesYAML), nil
 			case "upgrade":
 				upgradeArgs = slices.Clone(args)
 			}
@@ -2638,6 +2656,8 @@ func TestInstallOberthRekorUpgradeAllowsUnknownInstalledVersion(t *testing.T) {
 			switch args[0] {
 			case "list":
 				return []byte(`[{"name":"oberth","namespace":"oberth","status":"deployed"}]`), nil
+			case "show":
+				return []byte(fakeChartValuesYAML), nil
 			case "upgrade":
 				upgradeArgs = slices.Clone(args)
 			}
@@ -2662,6 +2682,7 @@ func TestInstallOberthRekorUpgradeAllowsUnknownInstalledVersion(t *testing.T) {
 	want := []string{
 		"upgrade", "--install", "oberth", "oberth-charts/oberth",
 		"-n", "oberth", "--create-namespace",
+		"--set-string", "image.ref=" + fakeChartImageRef,
 		"--set", "argo.namespace=oberth-argo",
 		"--set", "auditAnchor.rekorURL=http://rekor-server.rekor.svc:80",
 		"--set", "auditAnchor.rekorInsecureHTTP=true",
@@ -2711,8 +2732,11 @@ func TestInstallOberthUpgradesWhenNewerChartTargeted(t *testing.T) {
 		Output: &buf,
 		RunHelm: func(_ context.Context, args []string) ([]byte, error) {
 			helmCalls = append(helmCalls, slices.Clone(args))
-			if args[0] == "list" {
+			switch args[0] {
+			case "list":
 				return []byte(`[{"name":"oberth","namespace":"oberth","status":"deployed","chart":"oberth-0.10.57"}]`), nil
+			case "show":
+				return []byte(fakeChartValuesYAML), nil
 			}
 			return nil, nil
 		},
@@ -3289,8 +3313,11 @@ func TestRunSkipsPromptWhenSecretStoreFlagSet(t *testing.T) {
 		RestConfig:  &rest.Config{Host: "https://127.0.0.1:6443"},
 		ContextName: "test-ctx",
 		RunHelm: func(_ context.Context, args []string) ([]byte, error) {
-			if args[0] == "list" {
+			switch args[0] {
+			case "list":
 				return []byte("[]"), nil
+			case "show":
+				return []byte(fakeChartValuesYAML), nil
 			}
 			return nil, nil
 		},
@@ -3339,8 +3366,11 @@ func TestRunPromptsWhenSecretStoreUndecided(t *testing.T) {
 		RestConfig:  &rest.Config{Host: "https://127.0.0.1:6443"},
 		ContextName: "test-ctx",
 		RunHelm: func(_ context.Context, args []string) ([]byte, error) {
-			if args[0] == "list" {
+			switch args[0] {
+			case "list":
 				return []byte("[]"), nil
+			case "show":
+				return []byte(fakeChartValuesYAML), nil
 			}
 			return nil, nil
 		},
@@ -4991,5 +5021,148 @@ func TestUpstreamOrgsFromIdentitiesEmpty(t *testing.T) {
 	orgs := upstreamOrgsFromIdentities(nil)
 	if len(orgs) != 0 {
 		t.Fatalf("expected 0 orgs from nil identities, got %d", len(orgs))
+	}
+}
+
+// --- #466 image.ref pinning ---
+
+// TestInstallOberthPinsChartDefaultImageRef proves that install --upgrade
+// with no --image resolves the chart's default image.ref and pins it with
+// --set-string, preventing --reuse-values from silently keeping the old image.
+func TestInstallOberthPinsChartDefaultImageRef(t *testing.T) {
+	t.Parallel()
+	const chartImageRef = "europe-west4-docker.pkg.dev/skipopsmain/cloudtaser/cloudtaser-oberth@sha256:abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
+	var upgradeArgs []string
+	deps := Deps{
+		Output: io.Discard,
+		RunHelm: func(_ context.Context, args []string) ([]byte, error) {
+			switch args[0] {
+			case "list":
+				return []byte(`[{"name":"oberth","namespace":"oberth","status":"deployed","chart":"oberth-0.13.42"}]`), nil
+			case "show":
+				return []byte("image:\n  ref: " + chartImageRef + "\n"), nil
+			case "upgrade":
+				upgradeArgs = slices.Clone(args)
+			}
+			return nil, nil
+		},
+	}
+	_, err := InstallOberth(context.Background(), Config{
+		Namespace:    "oberth",
+		ChartVersion: "v0.16.2",
+		Upgrade:      true,
+	}, deps, OpenBaoResult{}, RekorResult{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	joined := strings.Join(upgradeArgs, " ")
+	if !strings.Contains(joined, "--set-string image.ref="+chartImageRef) {
+		t.Fatalf("install --upgrade with no --image must pin image.ref from chart defaults, args:\n%s", joined)
+	}
+	if !strings.Contains(joined, "--reuse-values") {
+		t.Fatalf("install --upgrade must still use --reuse-values, args:\n%s", joined)
+	}
+}
+
+// TestInstallOberthExplicitImageSkipsChartResolution proves that --image
+// uses the user-supplied ref as-is without calling helm show values.
+func TestInstallOberthExplicitImageSkipsChartResolution(t *testing.T) {
+	t.Parallel()
+	const explicitImage = "europe-west4-docker.pkg.dev/skipopsmain/cloudtaser/cloudtaser-oberth@sha256:0000000000000000000000000000000000000000000000000000000000000000"
+	showCalled := false
+	var upgradeArgs []string
+	deps := Deps{
+		Output: io.Discard,
+		RunHelm: func(_ context.Context, args []string) ([]byte, error) {
+			switch args[0] {
+			case "list":
+				return []byte(`[{"name":"oberth","namespace":"oberth","status":"deployed","chart":"oberth-0.13.42"}]`), nil
+			case "show":
+				showCalled = true
+			case "upgrade":
+				upgradeArgs = slices.Clone(args)
+			}
+			return nil, nil
+		},
+	}
+	_, err := InstallOberth(context.Background(), Config{
+		Namespace:    "oberth",
+		ChartVersion: "v0.16.2",
+		ImageRef:     explicitImage,
+		Upgrade:      true,
+	}, deps, OpenBaoResult{}, RekorResult{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if showCalled {
+		t.Fatal("explicit --image must not trigger chart values resolution")
+	}
+	joined := strings.Join(upgradeArgs, " ")
+	if !strings.Contains(joined, "--set-string image.ref="+explicitImage) {
+		t.Fatalf("explicit --image must be pinned as-is, args:\n%s", joined)
+	}
+}
+
+// --- #464 kube args threading ---
+
+// TestHelmWithKubeArgsPrepends proves that HelmWithKubeArgs prepends the
+// resolved --kubeconfig/--kube-context flags to every helm invocation.
+func TestHelmWithKubeArgsPrepends(t *testing.T) {
+	t.Parallel()
+	var captured [][]string
+	fakeHelm := func(_ context.Context, args []string) ([]byte, error) {
+		captured = append(captured, slices.Clone(args))
+		return nil, nil
+	}
+	wrapped := HelmWithKubeArgs(fakeHelm, []string{"--kubeconfig", "/etc/rancher/k3s/k3s.yaml"})
+
+	_, _ = wrapped(context.Background(), []string{"repo", "add", "oberth", "https://charts.example.com"})
+	_, _ = wrapped(context.Background(), []string{"upgrade", "--install", "oberth", "oberth/oberth"})
+	_, _ = wrapped(context.Background(), []string{"list", "-n", "oberth", "-o", "json"})
+
+	if len(captured) != 3 {
+		t.Fatalf("expected 3 calls, got %d", len(captured))
+	}
+	for i, call := range captured {
+		if len(call) < 2 || call[0] != "--kubeconfig" || call[1] != "/etc/rancher/k3s/k3s.yaml" {
+			t.Fatalf("call %d missing kube args prefix: %v", i, call)
+		}
+	}
+	// Verify original args are preserved after the prefix.
+	if captured[1][2] != "upgrade" {
+		t.Fatalf("original args not preserved: %v", captured[1])
+	}
+}
+
+// TestHelmWithKubeArgsEmptyPassthrough proves that an empty kubeArgs slice
+// returns the original function without wrapping.
+func TestHelmWithKubeArgsEmptyPassthrough(t *testing.T) {
+	t.Parallel()
+	calls := 0
+	fakeHelm := func(_ context.Context, args []string) ([]byte, error) {
+		calls++
+		return []byte("ok"), nil
+	}
+	wrapped := HelmWithKubeArgs(fakeHelm, nil)
+	out, _ := wrapped(context.Background(), []string{"list"})
+	if string(out) != "ok" || calls != 1 {
+		t.Fatal("empty kube args should pass through to original function")
+	}
+}
+
+// TestHelmWithKubeArgsDoesNotMutateInput proves that wrapping does not
+// mutate the caller's original args slice.
+func TestHelmWithKubeArgsDoesNotMutateInput(t *testing.T) {
+	t.Parallel()
+	fakeHelm := func(_ context.Context, args []string) ([]byte, error) {
+		return nil, nil
+	}
+	wrapped := HelmWithKubeArgs(fakeHelm, []string{"--kube-context", "test"})
+	original := []string{"upgrade", "--install", "oberth"}
+	before := slices.Clone(original)
+	_, _ = wrapped(context.Background(), original)
+	if !slices.Equal(original, before) {
+		t.Fatalf("input args mutated: was %v, now %v", before, original)
 	}
 }
