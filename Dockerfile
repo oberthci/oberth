@@ -20,8 +20,15 @@ RUN --mount=type=cache,id=oberth-server-${BUILD_CACHE_NAMESPACE}-gomod,target=/g
     go build -trimpath -buildvcs=false -ldflags="-s -w -X main.version=${VERSION}" -o /out/oberth ./cmd/oberth
 
 FROM alpine:3.23@sha256:fd791d74b68913cbb027c6546007b3f0d3bc45125f797758156952bc2d6daf40
+# SUBSTRATE REBUILD REQUIRED: the release image is NOT built from this
+# Dockerfile. It is assembled from a digest-pinned substrate in
+# internal/releaseimage/image.go (ServerSubstrate). Changing a package pin
+# below fixes the NEXT substrate build, not any current or future release,
+# until the substrate is rebuilt from this Dockerfile and its new digest is
+# committed to image.go. Two dead release tags (v0.16.0, v0.16.1) resulted
+# from missing this indirection.
 RUN apk add --no-cache \
-    ca-certificates=20260611-r0 \
+    ca-certificates=20260909-r0 \
     git=2.52.0-r0 \
     # CVE-2026-14456 (HIGH): the alpine:3.23 base at the digest above still
     # ships libcrypto3/libssl3 3.5.7-r0; the fixed 3.5.8-r0 exists only in the
@@ -46,7 +53,7 @@ RUN apk add --no-cache \
     # deliberately, never drift silently.
     libexpat=2.8.5-r0 \
     openssh-client-default=10.2_p1-r0 \
-    tzdata=2026c-r0 \
+    tzdata=2026d-r0 \
     && rm -f /var/log/apk.log
 COPY --from=build /out/oberth /usr/local/bin/oberth
 ENV HOME=/tmp
