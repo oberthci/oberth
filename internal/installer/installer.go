@@ -153,10 +153,12 @@ type Config struct {
 	ArgoControllerProfile     string
 	ArgoVaultAddress          string
 	ArgoVaultCredentialedRole string
-	// CredentialedSecretPaths are exact secret paths approved through the
-	// approval table, included in the credentialed Vault policy as
-	// exact-path grants alongside the upstream/* wildcard. Populated from
-	// the approval table when the installer syncs the policy to OpenBao.
+	// CredentialedSecretPaths are exact secret paths for the shared
+	// credentialed Vault policy, populated from the --credentialed-secret-path
+	// flag. When per-repo identities exist (len(PerRepoIdentities) > 0),
+	// these are not included in the shared policy, which is stripped to zero
+	// stanzas (issue #456); the grants are carried by per-repo policies
+	// instead.
 	CredentialedSecretPaths []string
 	// PerRepoIdentities describes per-repo Vault identities to create.
 	// Each entry results in a ServiceAccount (via the chart), a Vault

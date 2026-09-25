@@ -32,7 +32,10 @@ func RunSync(ctx context.Context, run CommandRunner, rootToken, contextName, ope
 func syncGrantPolicies(ctx context.Context, store openBaoExec, rootToken string, identities []PerRepoIdentity, argoNamespace string) ([]SyncResult, error) {
 	var results []SyncResult
 
-	// Derive upstream orgs from identities for the shared policies.
+	// Validate upstream org names derived from identities. The shared policies
+	// no longer carry these (stripped to zero stanzas below), but early
+	// validation catches bad names before ConfigurePerRepoIdentities — defense
+	// in depth for the per-repo path.
 	upstreamOrgs := upstreamOrgsFromIdentities(identities)
 	for _, org := range upstreamOrgs {
 		if err := ValidateOrgName(org); err != nil {
@@ -42,19 +45,15 @@ func syncGrantPolicies(ctx context.Context, store openBaoExec, rootToken string,
 
 	// --- Shared credentialed policy ---
 	//
-	// Aggregate all grant paths from all per-repo identities. These feed the
-	// shared credentialed policy exactly as --credentialed-secret-path does
-	// in the install flow, so the shared SA has access to the union of all
-	// approved paths.
-	var allGrantPaths []string
-	for _, id := range identities {
-		allGrantPaths = append(allGrantPaths, id.Grants...)
-	}
-	credentialedGrantPaths, err := credentialedPolicyPaths(defaultKVPrefix, allGrantPaths)
-	if err != nil {
-		return results, fmt.Errorf("credentialed policy paths: %w", err)
-	}
-	wantCredentialedPolicy := OberthCredentialedPolicyWithGrants(defaultKVPrefix, upstreamOrgs, credentialedGrantPaths)
+	// Always zero stanzas: no upstream org access, no approval-table grants.
+	// Admission never selects the shared credentialed identity once per-repo
+	// identities exist (fail-closed in identityForWithRepo), so any residual
+	// breadth is dormant standing privilege — strip it rather than re-widen
+	// on every sync. When no identities exist, the policies are naturally
+	// empty (fail closed from zero orgs). Issue #456. This also resolves the
+	// sync/install ping-pong where sync wrote the grant-union and install
+	// wrote grant-free — both now produce the same zero-stanza shape.
+	wantCredentialedPolicy := OberthCredentialedPolicyWithGrants(defaultKVPrefix, nil, nil)
 	haveCredentialedPolicy, credentialedExists, err := store.policyRead(ctx, rootToken, defaultCredentialedPolicy)
 	if err != nil {
 		return results, fmt.Errorf("read credentialed policy: %w", err)
@@ -70,8 +69,8 @@ func syncGrantPolicies(ctx context.Context, store openBaoExec, rootToken string,
 		Changed: credentialedChanged,
 	})
 
-	// --- Shared CI-secrets policy ---
-	wantCISecretsPolicy := OberthCISecretsPolicy(defaultKVPrefix, upstreamOrgs)
+	// --- Shared CI-secrets policy (same zero-stanza treatment as above) ---
+	wantCISecretsPolicy := OberthCISecretsPolicy(defaultKVPrefix, nil)
 	haveCISecretsPolicy, ciSecretsExists, err := store.policyRead(ctx, rootToken, defaultCISecretsPolicy)
 	if err != nil {
 		return results, fmt.Errorf("read ci-secrets policy: %w", err)
