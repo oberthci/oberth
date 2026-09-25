@@ -1,6 +1,7 @@
 package argojob
 
 import (
+	"strings"
 	"sync"
 	"testing"
 )
@@ -34,27 +35,44 @@ func TestIdentityStoreSnapshotIsImmutable(t *testing.T) {
 	}
 }
 
-// TestIdentityStoreConcurrentRace runs concurrent Build calls against a
-// Replace loop. Under -race, this proves the atomic pointer produces no
-// torn reads or data races.
+// TestIdentityStoreConcurrentRace runs concurrent Snapshot readers against a
+// Replace writer. Under -race this proves three things: the atomic pointer
+// publishes snapshots without data races; maps freshly built for each Replace
+// are safely published to readers (the serve-path callback's copy-on-write
+// contract); and the release and CI maps a reader observes always come from
+// the same version — the per-admission identity/role lockstep issue #465
+// requires. A refactor that split the two tiers across separate atomic
+// pointers would fail the lockstep assertion here.
 func TestIdentityStoreConcurrentRace(t *testing.T) {
 	t.Parallel()
-	store := NewIdentityStore(nil, nil)
+	const key = "codeberg/org/repo"
+	// version builds a coherent (release, CI) map pair from scratch. Both
+	// maps of one version share the same suffix; a torn read would surface
+	// as a mixed-suffix pair.
+	version := func(n int) (map[string]PerRepoIdentityConfig, map[string]PerRepoIdentityConfig) {
+		suffix := "A"
+		if n%2 == 1 {
+			suffix = "B"
+		}
+		return map[string]PerRepoIdentityConfig{key: {ServiceAccountName: "sa-" + suffix}},
+			map[string]PerRepoIdentityConfig{key: {ServiceAccountName: "ci-" + suffix}}
+	}
+	release, ci := version(0)
+	store := NewIdentityStore(release, ci)
 
 	var wg sync.WaitGroup
-	// Writer: continuously replace the snapshot.
+	// Writer: continuously replace the snapshot with freshly built maps,
+	// alternating between two coherent versions.
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
 		for i := range 1000 {
-			_ = i
-			store.Replace(
-				map[string]PerRepoIdentityConfig{"codeberg/org/repo": {ServiceAccountName: "writer-sa"}},
-				map[string]PerRepoIdentityConfig{"codeberg/org/repo": {ServiceAccountName: "writer-ci-sa"}},
-			)
+			release, ci := version(i)
+			store.Replace(release, ci)
 		}
 	}()
-	// Readers: continuously snapshot and inspect.
+	// Readers: continuously snapshot and verify version coherence by
+	// reading the map entries themselves, not just the map headers.
 	for range 4 {
 		wg.Add(1)
 		go func() {
@@ -65,9 +83,16 @@ func TestIdentityStoreConcurrentRace(t *testing.T) {
 					t.Error("Snapshot returned nil")
 					return
 				}
-				// Read map fields to exercise the read path under race.
-				_ = snap.Release
-				_ = snap.CI
+				releaseSA := snap.Release[key].ServiceAccountName
+				ciSA := snap.CI[key].ServiceAccountName
+				if releaseSA == "" || ciSA == "" {
+					t.Errorf("snapshot missing identity: release %q, CI %q", releaseSA, ciSA)
+					return
+				}
+				if strings.TrimPrefix(releaseSA, "sa-") != strings.TrimPrefix(ciSA, "ci-") {
+					t.Errorf("torn snapshot: release %q paired with CI %q", releaseSA, ciSA)
+					return
+				}
 			}
 		}()
 	}

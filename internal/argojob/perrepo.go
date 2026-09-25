@@ -151,8 +151,9 @@ func (config Config) identityForWithRepo(trigger periapsis.Trigger, hasSecretPat
 					"so falling back to it would leak cross-repo secrets; "+
 					"to provision the per-repo identity: "+
 					"(1) run \"oberth secretstore sync\" to create the Vault policy and role, "+
-					"(2) run \"oberth install --upgrade\" to create the ServiceAccount and rebuild the identity map "+
-					"(the upgrade restarts the server automatically via the per-repo identities checksum annotation)",
+					"(2) run \"oberth install --install-secretstore --upgrade\" to create the ServiceAccount "+
+					"(no manual restart: the identity map refreshes when the grant reconciles, and the upgrade "+
+					"rolls the server via the per-repo identities checksum annotation when the ServiceAccount list changes)",
 				repo, len(config.PerRepoIdentities))
 		}
 	}
@@ -178,8 +179,9 @@ func (config Config) identityForWithRepo(trigger periapsis.Trigger, hasSecretPat
 					"so falling back to it would leak cross-org secrets; "+
 					"to provision the per-repo CI identity: "+
 					"(1) run \"oberth secretstore sync\" to create the Vault policy and role, "+
-					"(2) run \"oberth install --upgrade\" to create the ServiceAccount and rebuild the identity map "+
-					"(the upgrade restarts the server automatically via the per-repo identities checksum annotation)",
+					"(2) run \"oberth install --install-secretstore --upgrade\" to create the ServiceAccount "+
+					"(no manual restart: the identity map refreshes when the grant reconciles, and the upgrade "+
+					"rolls the server via the per-repo identities checksum annotation when the ServiceAccount list changes)",
 				repo, len(config.PerRepoCIIdentities))
 		}
 	}
