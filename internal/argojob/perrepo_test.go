@@ -151,14 +151,17 @@ func TestBuildCIRefusesSharedFallbackWhenOtherReposHaveCIIdentities(t *testing.T
 	if err == nil {
 		t.Fatal("expected refusal when falling back to shared ci-secrets SA with other repos holding CI per-repo identities")
 	}
-	// The targeted command is the recommended remediation; the full installer
-	// run is the fallback. Both must stay named or the operator is pointed at
-	// only the sledgehammer (issue #427).
+	// The remediation must name the full three-step path (#459): sync for
+	// the Vault side, install --upgrade for the chart-managed SA, and a
+	// deployment rollout to rebuild the startup-frozen identity map.
 	if !strings.Contains(err.Error(), "oberth secretstore sync") {
 		t.Fatalf("error should recommend the targeted sync command, got: %v", err)
 	}
 	if !strings.Contains(err.Error(), "install --install-secretstore --upgrade") {
-		t.Fatalf("error should include remediation command, got: %v", err)
+		t.Fatalf("error should include chart upgrade command, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "rollout restart") {
+		t.Fatalf("error should include deployment rollout restart, got: %v", err)
 	}
 	if !strings.Contains(err.Error(), "other-repo") {
 		t.Fatalf("error should name the repo, got: %v", err)
@@ -190,14 +193,17 @@ func TestBuildRefusesSharedFallbackWhenMultipleReposHaveGrants(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected refusal when falling back to shared SA with other repos holding grants")
 	}
-	// The targeted command is the recommended remediation; the full installer
-	// run is the fallback. Both must stay named or the operator is pointed at
-	// only the sledgehammer (issue #427).
+	// The remediation must name the full three-step path (#459): sync for
+	// the Vault side, install --upgrade for the chart-managed SA, and a
+	// deployment rollout to rebuild the startup-frozen identity map.
 	if !strings.Contains(err.Error(), "oberth secretstore sync") {
 		t.Fatalf("error should recommend the targeted sync command, got: %v", err)
 	}
 	if !strings.Contains(err.Error(), "install --install-secretstore --upgrade") {
-		t.Fatalf("error should include remediation command, got: %v", err)
+		t.Fatalf("error should include chart upgrade command, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "rollout restart") {
+		t.Fatalf("error should include deployment rollout restart, got: %v", err)
 	}
 	if !strings.Contains(err.Error(), "other-repo") {
 		t.Fatalf("error should name the repo, got: %v", err)

@@ -50,6 +50,13 @@ func TestSyncGrantPoliciesCreatesNewPolicies(t *testing.T) {
 		t.Fatalf("expected at least 6 results, got %d: %v", len(results), results)
 	}
 
+	// All items should be Changed since nothing existed (#459).
+	for _, r := range results {
+		if !r.Changed {
+			t.Fatalf("item %q should be Changed=true for new provisioning, got false", r.Name)
+		}
+	}
+
 	// Verify the credentialed policy was written with the grant.
 	byCommand := runner.callsByCommand()
 	call, ok := byCommand["policy write "+defaultCredentialedPolicy+" -"]
@@ -111,6 +118,14 @@ func TestSyncGrantPoliciesIdempotent(t *testing.T) {
 	}
 	if results[1].Name != "ci-secrets policy" || results[1].Changed {
 		t.Fatalf("ci-secrets policy should be unchanged, got: %+v", results[1])
+	}
+
+	// Per-repo items should also be unchanged (#459: Changed was previously
+	// hardcoded to true, making sync output useless as a drift detector).
+	for _, r := range results[2:] {
+		if r.Changed {
+			t.Fatalf("per-repo item %q should be unchanged in idempotent run, got Changed=true", r.Name)
+		}
 	}
 
 	// No policy write or role write calls should exist — the runner would

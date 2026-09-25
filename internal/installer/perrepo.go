@@ -225,12 +225,13 @@ func ConfigurePerRepoIdentities(ctx context.Context, store openBaoExec, rootToke
 		if err != nil {
 			return items, fmt.Errorf("per-repo policy read %s: %w", name, err)
 		}
-		if !policyExists || strings.TrimSpace(havePolicy) != strings.TrimSpace(wantPolicy) {
+		policyChanged := !policyExists || strings.TrimSpace(havePolicy) != strings.TrimSpace(wantPolicy)
+		if policyChanged {
 			if err := store.policyWrite(ctx, rootToken, name, wantPolicy); err != nil {
 				return items, fmt.Errorf("per-repo policy write %s: %w", name, err)
 			}
 		}
-		items = append(items, configItem{Name: "per-repo policy " + name, Status: "✓"})
+		items = append(items, configItem{Name: "per-repo policy " + name, Status: "✓", Changed: policyChanged})
 
 		// --- Role ---
 
@@ -242,7 +243,8 @@ func ConfigurePerRepoIdentities(ctx context.Context, store openBaoExec, rootToke
 		if existingRole != nil && !perRepoRoleMatches(existingRole, name, name, argoNamespace) {
 			return items, fmt.Errorf("per-repo role %s exists with an unsafe or incompatible binding; refusing to overwrite it", name)
 		}
-		if existingRole == nil {
+		roleChanged := existingRole == nil
+		if roleChanged {
 			if err := store.writeJSON(ctx, rootToken, rolePath, map[string]any{
 				"bound_service_account_names":      name,
 				"bound_service_account_namespaces": argoNamespace,
@@ -254,7 +256,7 @@ func ConfigurePerRepoIdentities(ctx context.Context, store openBaoExec, rootToke
 				return items, fmt.Errorf("per-repo role write %s: %w", name, err)
 			}
 		}
-		items = append(items, configItem{Name: "per-repo role " + name, Status: "✓"})
+		items = append(items, configItem{Name: "per-repo role " + name, Status: "✓", Changed: roleChanged})
 
 		// --- CI-tier per-repo identity ---
 		// Every repo with a release per-repo identity also gets a CI per-repo
@@ -270,12 +272,13 @@ func ConfigurePerRepoIdentities(ctx context.Context, store openBaoExec, rootToke
 		if err != nil {
 			return items, fmt.Errorf("per-repo CI policy read %s: %w", ciName, err)
 		}
-		if !ciPolicyExists || strings.TrimSpace(haveCIPolicy) != strings.TrimSpace(wantCIPolicy) {
+		ciPolicyChanged := !ciPolicyExists || strings.TrimSpace(haveCIPolicy) != strings.TrimSpace(wantCIPolicy)
+		if ciPolicyChanged {
 			if err := store.policyWrite(ctx, rootToken, ciName, wantCIPolicy); err != nil {
 				return items, fmt.Errorf("per-repo CI policy write %s: %w", ciName, err)
 			}
 		}
-		items = append(items, configItem{Name: "per-repo ci policy " + ciName, Status: "✓"})
+		items = append(items, configItem{Name: "per-repo ci policy " + ciName, Status: "✓", Changed: ciPolicyChanged})
 
 		ciRolePath := "auth/" + defaultAuthMount + "/role/" + ciName
 		existingCIRole, err := store.readData(ctx, rootToken, ciRolePath)
@@ -285,7 +288,8 @@ func ConfigurePerRepoIdentities(ctx context.Context, store openBaoExec, rootToke
 		if existingCIRole != nil && !perRepoRoleMatches(existingCIRole, ciName, ciName, argoNamespace) {
 			return items, fmt.Errorf("per-repo CI role %s exists with an unsafe or incompatible binding; refusing to overwrite it", ciName)
 		}
-		if existingCIRole == nil {
+		ciRoleChanged := existingCIRole == nil
+		if ciRoleChanged {
 			if err := store.writeJSON(ctx, rootToken, ciRolePath, map[string]any{
 				"bound_service_account_names":      ciName,
 				"bound_service_account_namespaces": argoNamespace,
@@ -297,7 +301,7 @@ func ConfigurePerRepoIdentities(ctx context.Context, store openBaoExec, rootToke
 				return items, fmt.Errorf("per-repo CI role write %s: %w", ciName, err)
 			}
 		}
-		items = append(items, configItem{Name: "per-repo ci role " + ciName, Status: "✓"})
+		items = append(items, configItem{Name: "per-repo ci role " + ciName, Status: "✓", Changed: ciRoleChanged})
 	}
 
 	return items, nil

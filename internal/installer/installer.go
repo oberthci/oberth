@@ -2123,6 +2123,62 @@ func loadFromRules(rules *clientcmd.ClientConfigLoadingRules, contextName string
 	return client, restConfig, selectedContext, nil
 }
 
+// ResolveHelmKubeArgs returns --kubeconfig and/or --kube-context flags that
+// make a helm invocation target the same cluster that LoadKubeConfigForContext
+// would select, plus a human-readable description of the resolved target.
+//
+// When contextName is given, the returned args contain only --kube-context.
+// When no context is given, this function mirrors the fallback chain in
+// LoadKubeConfigForContext: standard client-go rules first, then the k3s
+// fallback at /etc/rancher/k3s/k3s.yaml. When the k3s fallback is used,
+// the returned args include --kubeconfig so helm reads the same file.
+func ResolveHelmKubeArgs(contextName string) (helmArgs []string, target string, err error) {
+	return resolveHelmKubeArgs(clientcmd.NewDefaultClientConfigLoadingRules(), contextName, k3sKubeconfigPath)
+}
+
+// resolveHelmKubeArgs is the testable core of ResolveHelmKubeArgs.
+func resolveHelmKubeArgs(rules *clientcmd.ClientConfigLoadingRules, contextName, k3sFallbackPath string) ([]string, string, error) {
+	if contextName != "" {
+		return []string{"--kube-context", contextName}, "context " + contextName, nil
+	}
+
+	// Try standard client-go loading rules (parse only, no client creation).
+	overrides := &clientcmd.ConfigOverrides{}
+	config := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(rules, overrides)
+	rawConfig, err := config.RawConfig()
+	if err == nil {
+		resolved := rawConfig.CurrentContext
+		if resolved == "" {
+			resolved = "(default)"
+		}
+		return nil, "context " + resolved, nil
+	}
+
+	// Standard rules failed. Try k3s fallback under the same conditions as
+	// LoadKubeConfigForContext: no explicit KUBECONFIG and the k3s file is
+	// readable.
+	if os.Getenv("KUBECONFIG") != "" || k3sFallbackPath == "" {
+		return nil, "", err
+	}
+	probe, openErr := os.Open(k3sFallbackPath) // #nosec G304 -- fixed or test-injected path
+	if openErr != nil {
+		return nil, "", err
+	}
+	_ = probe.Close()
+	k3sRules := &clientcmd.ClientConfigLoadingRules{ExplicitPath: k3sFallbackPath}
+	k3sConfig := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(k3sRules, &clientcmd.ConfigOverrides{})
+	k3sRaw, k3sErr := k3sConfig.RawConfig()
+	if k3sErr != nil {
+		return nil, "", k3sErr
+	}
+	resolved := k3sRaw.CurrentContext
+	if resolved == "" {
+		resolved = "(default)"
+	}
+	return []string{"--kubeconfig", k3sFallbackPath},
+		fmt.Sprintf("context %s (from %s)", resolved, k3sFallbackPath), nil
+}
+
 // warnPerRepoIdentityDelta checks the live Helm release's argo.perRepoIdentities
 // and warns loudly when it is non-empty but the produce returned zero. Existing
 // ServiceAccounts persist only via --reuse-values; grants added since the last

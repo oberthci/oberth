@@ -96,7 +96,7 @@ func syncGrantPolicies(ctx context.Context, store openBaoExec, rootToken string,
 		for _, item := range perRepoItems {
 			results = append(results, SyncResult{
 				Name:    item.Name,
-				Changed: true, // ConfigurePerRepoIdentities reports success; drift detection is internal.
+				Changed: item.Changed,
 			})
 		}
 	}
