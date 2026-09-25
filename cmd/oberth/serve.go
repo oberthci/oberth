@@ -28,6 +28,7 @@ import (
 
 	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/app"
+	"github.com/oberthci/oberth/internal/argojob"
 	"github.com/oberthci/oberth/internal/artifacts"
 	"github.com/oberthci/oberth/internal/auditanchor"
 	"github.com/oberthci/oberth/internal/auth"
@@ -585,9 +586,10 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 	if len(perRepoIdentities) > 0 {
 		logger.Printf("per-repo identities: %d repositories with secret grants (release + CI tiers)", len(perRepoIdentities))
 	}
+	identityStore := argojob.NewIdentityStore(perRepoIdentities, buildPerRepoCIIdentities(perRepoIdentities))
 	argoJobs, err := buildArgoEngine(options, restConfig, kube, database, database, fragmentLoader,
 		artifactStoreAdapter{store: artifactStore, scanPatterns: artifacts.DefaultScanPatterns},
-		options.artifactsLimitBytes, options.artifactsBudgetBytes, perRepoIdentities)
+		options.artifactsLimitBytes, options.artifactsBudgetBytes, perRepoIdentities, identityStore)
 	if err != nil {
 		return err
 	}
@@ -753,6 +755,21 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 		return chain, nil
 	}
 	accessReconciler := service.NewAccessReconciler(kube, options.namespace, database, logger)
+	// After every successful reconciliation, recompute the per-repo identity
+	// maps from the (now-converged) grant table and swap them into the live
+	// store. This makes a grant added via access_allow visible to the next
+	// admission without a server restart. (Issue #465)
+	accessReconciler.OnReconcileSuccess = func() {
+		refreshed, refreshErr := buildPerRepoIdentities(ctx, database)
+		if refreshErr != nil {
+			logger.Printf("WARNING: identity refresh after reconcile failed: %v; the server continues with the previous identity map", refreshErr)
+			return
+		}
+		identityStore.Replace(refreshed, buildPerRepoCIIdentities(refreshed))
+		if len(refreshed) > 0 {
+			logger.Printf("identity refresh: %d per-repo identities (live)", len(refreshed))
+		}
+	}
 	if err := accessReconciler.Reconcile(ctx); err != nil {
 		logger.Printf("WARNING: initial secret access reconcile failed: %v; credentialed admission is blocked until reconciliation succeeds", err)
 	}

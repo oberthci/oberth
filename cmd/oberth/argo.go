@@ -43,6 +43,7 @@ func buildArgoEngine(
 	artifactLimit int64,
 	artifactBudget int64,
 	perRepoIdentities map[string]argojob.PerRepoIdentityConfig,
+	identityStore *argojob.IdentityStore,
 ) (*app.ArgoJobs, error) {
 	argoClient, err := wfclientset.NewForConfig(restConfig)
 	if err != nil {
@@ -98,6 +99,9 @@ func buildArgoEngine(
 	}
 	if artifactStore != nil {
 		jobs.SetArtifacts(seeder, artifactStore, artifactLimit, artifactBudget)
+	}
+	if identityStore != nil {
+		jobs.SetIdentityStore(identityStore)
 	}
 	return jobs, nil
 }

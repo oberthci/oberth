@@ -151,17 +151,17 @@ func TestBuildCIRefusesSharedFallbackWhenOtherReposHaveCIIdentities(t *testing.T
 	if err == nil {
 		t.Fatal("expected refusal when falling back to shared ci-secrets SA with other repos holding CI per-repo identities")
 	}
-	// The remediation must name the full three-step path (#459): sync for
-	// the Vault side, install --upgrade for the chart-managed SA, and a
-	// deployment rollout to rebuild the startup-frozen identity map.
+	// The remediation must name the two-step path (#465): sync for the Vault
+	// side, install --upgrade for the chart-managed SA (which restarts the
+	// server automatically via the per-repo identities checksum annotation).
 	if !strings.Contains(err.Error(), "oberth secretstore sync") {
 		t.Fatalf("error should recommend the targeted sync command, got: %v", err)
 	}
-	if !strings.Contains(err.Error(), "install --install-secretstore --upgrade") {
-		t.Fatalf("error should include chart upgrade command, got: %v", err)
+	if !strings.Contains(err.Error(), "install --upgrade") {
+		t.Fatalf("error should include install --upgrade as the completing action, got: %v", err)
 	}
-	if !strings.Contains(err.Error(), "rollout restart") {
-		t.Fatalf("error should include deployment rollout restart, got: %v", err)
+	if strings.Contains(err.Error(), "rollout restart") {
+		t.Fatalf("error should not mention manual rollout restart (the checksum annotation handles restart), got: %v", err)
 	}
 	if !strings.Contains(err.Error(), "other-repo") {
 		t.Fatalf("error should name the repo, got: %v", err)
@@ -193,17 +193,17 @@ func TestBuildRefusesSharedFallbackWhenMultipleReposHaveGrants(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected refusal when falling back to shared SA with other repos holding grants")
 	}
-	// The remediation must name the full three-step path (#459): sync for
-	// the Vault side, install --upgrade for the chart-managed SA, and a
-	// deployment rollout to rebuild the startup-frozen identity map.
+	// The remediation must name the two-step path (#465): sync for the Vault
+	// side, install --upgrade for the chart-managed SA (which restarts the
+	// server automatically via the per-repo identities checksum annotation).
 	if !strings.Contains(err.Error(), "oberth secretstore sync") {
 		t.Fatalf("error should recommend the targeted sync command, got: %v", err)
 	}
-	if !strings.Contains(err.Error(), "install --install-secretstore --upgrade") {
-		t.Fatalf("error should include chart upgrade command, got: %v", err)
+	if !strings.Contains(err.Error(), "install --upgrade") {
+		t.Fatalf("error should include install --upgrade as the completing action, got: %v", err)
 	}
-	if !strings.Contains(err.Error(), "rollout restart") {
-		t.Fatalf("error should include deployment rollout restart, got: %v", err)
+	if strings.Contains(err.Error(), "rollout restart") {
+		t.Fatalf("error should not mention manual rollout restart (the checksum annotation handles restart), got: %v", err)
 	}
 	if !strings.Contains(err.Error(), "other-repo") {
 		t.Fatalf("error should name the repo, got: %v", err)

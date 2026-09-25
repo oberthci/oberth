@@ -62,6 +62,12 @@ type ArgoJobs struct {
 	artifactFailures  map[string]string
 	reconcilerHealthy ReconcilerHealthChecker
 
+	// identities holds the live per-repo identity maps. When non-nil,
+	// create() snapshots it once per admission so both Builds (audit and
+	// controller) bind the same identity version. Updated by the
+	// reconciler callback in serve.go. (Issue #465)
+	identities *argojob.IdentityStore
+
 	mu      sync.Mutex
 	intents map[string]argoIntent
 }
@@ -127,6 +133,15 @@ func NewArgoJobs(controller argoControl, config argojob.Config, auditor service.
 		return nil, err
 	}
 	return &ArgoJobs{controller: controller, auditor: auditor, config: config, secretAccess: secretAccess, fragments: fragments, intents: map[string]argoIntent{}}, nil
+}
+
+// SetIdentityStore wires the live identity store after construction.
+// When set, create() snapshots it once per admission so both the audit Build
+// and the controller Build bind the same identity version. (Issue #465)
+func (jobs *ArgoJobs) SetIdentityStore(store *argojob.IdentityStore) {
+	jobs.mu.Lock()
+	defer jobs.mu.Unlock()
+	jobs.identities = store
 }
 
 func (jobs *ArgoJobs) CreateCI(ctx context.Context, request service.JobRequest) error {
@@ -285,6 +300,12 @@ func (jobs *ArgoJobs) create(ctx context.Context, request service.JobRequest, tr
 		Ref: request.Run.Ref, SHA: testedSHA, Trigger: trigger, Source: source,
 		SourceDir: request.SourceDir, ApprovedSecrets: approvedSecrets,
 		Fragments: fragments,
+	}
+	// Snapshot the identity store once for both Builds of this admission
+	// (audit and controller), so the audit record and the pod spec agree
+	// on which ServiceAccount the run executes under. (Issue #465)
+	if jobs.identities != nil {
+		submission.Identities = jobs.identities.Snapshot()
 	}
 	if preparer, ok := jobs.controller.(interface {
 		PrepareNonroot(context.Context, argojob.Request) (argojob.Request, error)

@@ -471,6 +471,12 @@ type Request struct {
 	ApprovedSecrets map[string]bool
 
 	Fragments map[argoworkflow.FragmentKey]argoworkflow.Fragment
+
+	// Identities overrides Config.PerRepoIdentities and Config.PerRepoCIIdentities
+	// when non-nil. The caller sets this from IdentityStore.Snapshot() to bind
+	// both Builds of one admission to the same identity version, so the audit
+	// record and the pod spec always agree. (Issue #465)
+	Identities *IdentitySnapshot
 }
 
 // Build turns a repository document into the exact Workflow object Oberth will
@@ -485,6 +491,14 @@ type Request struct {
 // legacy-chain step fetches.
 func Build(config Config, request Request) (*wfv1.Workflow, error) {
 	config.applyDefaults()
+	// When the caller supplies a snapshot, overlay it onto the config copy.
+	// Config is received by value, so this does not mutate the original.
+	// All identity lookups in perrepo.go read these map fields, which are
+	// now set once from the snapshot -- no mid-Build swap possible.
+	if request.Identities != nil {
+		config.PerRepoIdentities = request.Identities.Release
+		config.PerRepoCIIdentities = request.Identities.CI
+	}
 	if err := config.Validate(); err != nil {
 		return nil, err
 	}

@@ -52,6 +52,13 @@ type AccessReconciler struct {
 	// block credentialed submission rather than silently running with stale
 	// state.
 	reconcileSucceeded bool
+
+	// OnReconcileSuccess is called after every successful reconciliation,
+	// outside the reconciler's own lock. It is intended for downstream
+	// consumers that need to recompute state derived from the grant table
+	// (e.g. refreshing the per-repo identity store). Optional; nil is a
+	// no-op. (Issue #465)
+	OnReconcileSuccess func()
 }
 
 // NewAccessReconciler builds a reconciler that watches the named namespace
@@ -80,8 +87,13 @@ func (r *AccessReconciler) ReconcileHealthy() bool {
 // Unparseable ConfigMap = zero grants (fail-closed, log error).
 func (r *AccessReconciler) Reconcile(ctx context.Context) error {
 	r.mu.Lock()
-	defer r.mu.Unlock()
-	return r.reconcileLocked(ctx, "")
+	err := r.reconcileLocked(ctx, "")
+	callback := r.OnReconcileSuccess
+	r.mu.Unlock()
+	if err == nil && callback != nil {
+		callback()
+	}
+	return err
 }
 
 func (r *AccessReconciler) reconcileLocked(ctx context.Context, actorPrefix string) error {
@@ -302,9 +314,15 @@ func (r *AccessReconciler) watchOnce(ctx context.Context, resync <-chan time.Tim
 // receives the current grants (nil when the ConfigMap does not exist) and
 // returns the desired grants. After the ConfigMap is updated, a reconcile
 // is triggered to sync sqlite.
-func (r *AccessReconciler) UpdateConfigMap(ctx context.Context, actor string, modify func([]SecretAccessGrantEntry) ([]SecretAccessGrantEntry, error)) error {
+func (r *AccessReconciler) UpdateConfigMap(ctx context.Context, actor string, modify func([]SecretAccessGrantEntry) ([]SecretAccessGrantEntry, error)) (retErr error) {
 	r.mu.Lock()
-	defer r.mu.Unlock()
+	defer func() {
+		callback := r.OnReconcileSuccess
+		r.mu.Unlock()
+		if retErr == nil && callback != nil {
+			callback()
+		}
+	}()
 
 	cm, err := r.client.CoreV1().ConfigMaps(r.namespace).Get(ctx, secretAccessConfigMapName, metav1.GetOptions{})
 	if err != nil {

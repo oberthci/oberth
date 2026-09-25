@@ -3902,10 +3902,12 @@ func TestAccessAllowResponseCarriesPolicySyncWarning(t *testing.T) {
 		t.Fatalf("access_allow error = %v", err)
 	}
 
-	// The grant is recorded in the approval table, but the Vault per-repo
-	// policy does not include the new path until an external re-sync. The
-	// response must say so, or the operator discovers the gap as a release
-	// HTTP 403 — the exact failure mode issue #427 documents.
+	// The grant is recorded in the approval table, but the Vault policy and
+	// the chart-managed ServiceAccount require install --upgrade. The server
+	// refreshes its identity map on each reconcile (#465), but the Vault
+	// layer still refuses the path until the policy is synced. The response
+	// must say so, or the operator discovers the gap as a release HTTP 403
+	// — the exact failure mode issue #427 documents.
 	response, ok := result.(api.AccessGrantResponse)
 	if !ok {
 		t.Fatalf("access_allow result type = %T, want api.AccessGrantResponse", result)
@@ -3913,12 +3915,17 @@ func TestAccessAllowResponseCarriesPolicySyncWarning(t *testing.T) {
 	if response.Warning == "" {
 		t.Fatal("access_allow response carries no Vault policy re-sync warning")
 	}
-	// `oberth secretstore sync` is the recommended targeted re-sync; the full
-	// installer run is the fallback. Both must stay named (issue #427).
-	if !strings.Contains(response.Warning, "oberth secretstore sync") {
-		t.Fatalf("warning does not recommend the targeted sync command: %q", response.Warning)
+	// install --upgrade is the single completing action: it creates the SA,
+	// syncs the Vault policy, and restarts the server via the checksum
+	// annotation. The advisory must name it and must explain that access
+	// fails closed until then. (Issue #465)
+	if !strings.Contains(response.Warning, "install --upgrade") {
+		t.Fatalf("warning does not recommend install --upgrade: %q", response.Warning)
 	}
-	if !strings.Contains(response.Warning, "install --install-secretstore --upgrade") {
-		t.Fatalf("warning does not name the re-sync command: %q", response.Warning)
+	if !strings.Contains(response.Warning, "fails closed") {
+		t.Fatalf("warning does not explain fail-closed behavior: %q", response.Warning)
+	}
+	if strings.Contains(response.Warning, "rollout restart") {
+		t.Fatalf("warning should not mention manual rollout restart: %q", response.Warning)
 	}
 }

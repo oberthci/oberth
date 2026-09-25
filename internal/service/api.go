@@ -31,13 +31,15 @@ const revokePolicySyncAdvisory = "Revocation is effective for new Oberth admissi
 	"run `oberth secretstore sync` (or `oberth install --install-secretstore --upgrade`) to remove it from the Vault policy."
 
 // grantPolicySyncAdvisory is the warning returned by access_allow to inform
-// the caller that the Vault per-repo policy does not yet include the new grant.
-// The server's own identity has no Vault policy-write capability, so the resync
-// must be triggered externally. Without the resync, a release run for this repo
-// will fail with HTTP 403 at the Vault layer even though Oberth's own admission
-// gate accepts the path. (Issue #427)
-const grantPolicySyncAdvisory = "Grant recorded; the Vault per-repo policy does not include this path yet. " +
-	"Run `oberth secretstore sync` (or `oberth install --install-secretstore --upgrade`) to add it to the Vault policy."
+// the caller that the new grant is recorded but not yet live. The server
+// refreshes its identity map on every successful reconciliation (issue #465),
+// so the identity appears without a restart — but the Vault policy and the
+// chart-managed ServiceAccount still require an explicit install --upgrade.
+// Until that completes, admission fails closed: the grant exists in sqlite
+// but the Vault layer refuses the path. (Issue #427)
+const grantPolicySyncAdvisory = "Grant recorded. Run `oberth install --upgrade` to create the ServiceAccount, " +
+	"sync the Vault policy, and rebuild the identity map (the upgrade restarts the server automatically). " +
+	"Until then this grant is not live; access fails closed."
 
 type APIConfig struct {
 	Runs                   RunResolver
