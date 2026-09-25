@@ -149,7 +149,10 @@ func (config Config) identityForWithRepo(trigger periapsis.Trigger, hasSecretPat
 					"identities with their own secret grants, and this repo has no per-repo identity; "+
 					"the shared credentialed service account's Vault policy includes all repos' grants, "+
 					"so falling back to it would leak cross-repo secrets; "+
-					"run \"oberth secretstore sync\" (or \"oberth install --install-secretstore --upgrade\") to provision per-repo identities",
+					"to provision the per-repo identity: "+
+					"(1) run \"oberth secretstore sync\" to create the Vault policy and role, "+
+					"(2) run \"oberth install --install-secretstore --upgrade\" to create the ServiceAccount, "+
+					"(3) roll the oberth deployment (kubectl rollout restart deploy/oberth -n oberth) to rebuild the identity map",
 				repo, len(config.PerRepoIdentities))
 		}
 	}
@@ -173,7 +176,10 @@ func (config Config) identityForWithRepo(trigger periapsis.Trigger, hasSecretPat
 					"CI identities with scoped upstream access, and this repo has no per-repo CI identity; "+
 					"the shared ci-secrets service account's Vault policy includes all orgs' upstream paths, "+
 					"so falling back to it would leak cross-org secrets; "+
-					"run \"oberth secretstore sync\" (or \"oberth install --install-secretstore --upgrade\") to provision per-repo CI identities",
+					"to provision the per-repo CI identity: "+
+					"(1) run \"oberth secretstore sync\" to create the Vault policy and role, "+
+					"(2) run \"oberth install --install-secretstore --upgrade\" to create the ServiceAccount, "+
+					"(3) roll the oberth deployment (kubectl rollout restart deploy/oberth -n oberth) to rebuild the identity map",
 				repo, len(config.PerRepoCIIdentities))
 		}
 	}

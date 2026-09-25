@@ -31,8 +31,9 @@ type credentialRow struct {
 
 // configItem is one named check result for the config grid.
 type configItem struct {
-	Name   string
-	Status string // "✓" or "✗"
+	Name    string
+	Status  string // "✓" or "✗"
+	Changed bool   // true when the item was written; false when already matching
 }
 
 // phase prints a dot-leader status line flush to the left margin:
