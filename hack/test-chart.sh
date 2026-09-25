@@ -593,6 +593,16 @@ if render --set argo.controllerProfile=unchecked >/dev/null 2>&1; then
   exit 1
 fi
 
+# argojob's fail-closed per-repo ServiceAccount verification (issue #467):
+# the server Role in the pipeline namespace must grant read-only get on
+# serviceaccounts (the plain resource, distinct from the serviceaccounts/token
+# subresource above it) or every credentialed CI and release run dies at Job
+# creation with a Forbidden error. Exactly one such rule, get-only.
+render --show-only templates/rbac-argo.yaml >"$argo_vault_manifest"
+test "$(grep -c 'resources: \["serviceaccounts"\]' "$argo_vault_manifest")" -eq 1
+grep -A1 'resources: \["serviceaccounts"\]' "$argo_vault_manifest" | \
+  grep -q 'verbs: \["get"\]'
+
 helm package "$chart" --destination "$package_dir" >/dev/null
 set -- "$package_dir"/oberth-*.tgz
 test "$#" -eq 1

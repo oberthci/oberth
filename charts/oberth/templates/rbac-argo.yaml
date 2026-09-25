@@ -52,6 +52,16 @@ rules:
     resources: ["serviceaccounts/token"]
     resourceNames: [{{ .Values.argo.credentialedServiceAccount | default "oberth-argo-credentialed" | quote }}]
     verbs: ["create"]
+  # argojob verifies that a credentialed run's per-repo ServiceAccount exists
+  # before creating the Job (fail-closed materialization guard, issues
+  # #433/#459: a grant added before the installer resync would otherwise
+  # produce a Job that binds a non-existent identity). Read-only get; no
+  # resourceNames pin is possible because per-repo names carry a dynamic
+  # hash suffix. Without this rule every credentialed CI and release run
+  # fails closed at Job creation with a Forbidden error (issue #467).
+  - apiGroups: [""]
+    resources: ["serviceaccounts"]
+    verbs: ["get"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding

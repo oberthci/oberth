@@ -77,7 +77,16 @@ implementation detail disagree.
   tiers. Each role binds its exact ServiceAccount name, so release credentials
   are unreachable from a branch push at the Vault layer, not only at
   admission, and a CI run can only reach its own repo's upstream namespace,
-  not every registered org's subtree (issue #433). Two credential chains are
+  not every registered org's subtree (issue #433). Before creating a
+  credentialed Job, argojob verifies the selected per-repo ServiceAccount
+  actually exists in the pipeline namespace and fails closed with a
+  remediation message when it does not (the materialization gap: a grant
+  recorded before the installer resync has an identity on paper but not in
+  the cluster). Contract: this verification requires the chart's server Role
+  in the pipeline namespace to grant read-only `get` on `serviceaccounts`
+  (`charts/oberth/templates/rbac-argo.yaml`); removing that rule turns every
+  credentialed CI and release run into a Forbidden failure at Job creation
+  (issue #467). Two credential chains are
   supported:
   - **Native (preferred):** `oberth secretstore exec` authenticates to
     OpenBao in-Pod using the ServiceAccount's projected token, fetches the
