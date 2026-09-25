@@ -38,6 +38,13 @@ RUN apk add --no-cache \
     # when the repo supersedes 8.22.0-r0 this line fails the build loudly —
     # re-pin deliberately, never drift silently.
     libcurl=8.22.0-r0 \
+    # CVE-2026-93990 (HIGH): libexpat arrives as git's transitive dependency;
+    # the alpine:3.23 base digest above still resolves 2.8.4-r0 while the
+    # fixed 2.8.5-r0 exists only in the apk repository (verified present for
+    # x86_64 and aarch64). Exact-pinned like libcrypto3 above: when the repo
+    # supersedes 2.8.5-r0 this line fails the build loudly — re-pin
+    # deliberately, never drift silently.
+    libexpat=2.8.5-r0 \
     openssh-client-default=10.2_p1-r0 \
     tzdata=2026c-r0 \
     && rm -f /var/log/apk.log
