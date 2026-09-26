@@ -99,6 +99,7 @@ type PromotionRunStore interface {
 type RunResolver interface {
 	RepositoryLookup
 	RunLookup
+	ResolveWaitRun(context.Context, int64, string, string) (model.Run, error)
 }
 
 // BranchRefResolver is an optional capability a RunResolver may implement to

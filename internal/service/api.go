@@ -624,15 +624,20 @@ func (service *API) status(ctx context.Context, repositoryName, selector, actor 
 		}
 		return StatusResponse{}, err
 	}
+	return service.statusForRun(ctx, repository, run)
+}
+
+func (service *API) statusForRun(ctx context.Context, repository model.Repository, run model.Run) (StatusResponse, error) {
 	response := StatusResponse{
 		Repository: repository, Run: run, Repo: repository.Name, Ref: run.Ref,
 		SHA: run.SHA, RunID: run.ID, Status: wireRunStatus(run.Status), Burns: map[string]string{},
 	}
 	if service.history != nil {
-		response.Steps, err = service.stepsForRun(ctx, run)
+		steps, err := service.stepsForRun(ctx, run)
 		if err != nil {
 			return StatusResponse{}, fmt.Errorf("load run steps: %w", err)
 		}
+		response.Steps = steps
 		response.Burns, response.ExitCode = wireBurns(response.Steps, run)
 	}
 	response.FailedStep = run.FailedStep
@@ -1011,15 +1016,12 @@ func (service *API) waitRun(ctx context.Context, repositoryName, selector, trigg
 	timer := time.NewTimer(duration)
 	defer timer.Stop()
 	for {
-		status, err := service.status(ctx, repositoryName, selector, actor)
+		status, err := service.waitStatus(ctx, repositoryName, selector, trigger, actor)
 		if err != nil {
 			return WaitResponse{}, err
 		}
-		// When a trigger filter is active, skip terminal results from runs
-		// whose trigger does not match. A tag push creates a release run
-		// with the same commit SHA as the branch run; without this guard,
-		// wait returns the already-terminal branch run immediately instead
-		// of waiting for the release run to appear and finish.
+		// If no matching trigger exists yet, waitStatus preserves the current
+		// unfiltered status. It must not satisfy the awaited trigger.
 		triggerMatch := trigger == "" || status.Run.Trigger == trigger
 		if triggerMatch && status.Run.Status.Terminal() {
 			return WaitResponse{StatusResponse: status}, nil
@@ -1027,7 +1029,7 @@ func (service *API) waitRun(ctx context.Context, repositoryName, selector, trigg
 		changed := service.signals.Run(status.Run.ID)
 		// Re-read after subscribing so a transition between the first read and
 		// channel lookup cannot be lost.
-		status, err = service.status(ctx, repositoryName, selector, actor)
+		status, err = service.waitStatus(ctx, repositoryName, selector, trigger, actor)
 		if err != nil {
 			return WaitResponse{}, err
 		}
@@ -1053,14 +1055,33 @@ func (service *API) waitRun(ctx context.Context, repositoryName, selector, trigg
 	}
 }
 
-// normalizeTrigger maps accepted trigger aliases to their persisted form.
-// The MCP schema historically documented 'ci' for branch runs, but the
-// stored trigger is 'branch'. Accept both to avoid silent filter misses.
-func normalizeTrigger(trigger string) string {
-	if trigger == "ci" {
-		return "branch"
+func (service *API) waitStatus(ctx context.Context, repositoryName, selector, trigger, actor string) (StatusResponse, error) {
+	resolve := func(ctx context.Context, repoID int64, selector string) (model.Run, error) {
+		return service.runs.ResolveWaitRun(ctx, repoID, selector, trigger)
 	}
-	return trigger
+	repository, run, err := service.resolveRunWith(ctx, repositoryName, selector, resolve)
+	if errors.Is(err, store.ErrNotFound) {
+		// Keep the established timeout response while a release has not yet
+		// been admitted. A terminal branch never completes a release wait.
+		return service.status(ctx, repositoryName, selector, actor)
+	}
+	if err != nil {
+		return StatusResponse{}, err
+	}
+	return service.statusForRun(ctx, repository, run)
+}
+
+// normalizeTrigger maps accepted trigger aliases to their persisted form.
+// The MCP schema documents ci and release; persisted pushes use branch and tag.
+func normalizeTrigger(trigger string) string {
+	switch trigger {
+	case "ci":
+		return "branch"
+	case "release":
+		return "tag"
+	default:
+		return trigger
+	}
 }
 
 func validSHASelector(value string) bool {
@@ -1489,6 +1510,10 @@ func (service *API) requireMutation(ctx context.Context) error {
 }
 
 func (service *API) resolveRun(ctx context.Context, repositoryName, selector string) (model.Repository, model.Run, error) {
+	return service.resolveRunWith(ctx, repositoryName, selector, service.runs.ResolveRun)
+}
+
+func (service *API) resolveRunWith(ctx context.Context, repositoryName, selector string, resolve func(context.Context, int64, string) (model.Run, error)) (model.Repository, model.Run, error) {
 	if strings.TrimSpace(selector) == "" {
 		return model.Repository{}, model.Run{}, fmt.Errorf("%w: run selector is required", ErrInvalidInput)
 	}
@@ -1497,7 +1522,7 @@ func (service *API) resolveRun(ctx context.Context, repositoryName, selector str
 		if err != nil {
 			return model.Repository{}, model.Run{}, err
 		}
-		run, err := service.runs.ResolveRun(ctx, repository.ID, selector)
+		run, err := resolve(ctx, repository.ID, selector)
 		return repository, run, err
 	}
 	repositories, err := service.runs.ListRepositories(ctx)
@@ -1507,7 +1532,7 @@ func (service *API) resolveRun(ctx context.Context, repositoryName, selector str
 	var matchedRepository model.Repository
 	var matchedRun model.Run
 	for _, repository := range repositories {
-		run, resolveErr := service.runs.ResolveRun(ctx, repository.ID, selector)
+		run, resolveErr := resolve(ctx, repository.ID, selector)
 		if errors.Is(resolveErr, store.ErrNotFound) {
 			continue
 		}

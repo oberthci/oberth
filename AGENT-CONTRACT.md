@@ -400,6 +400,13 @@ implementation detail disagree.
   `promote_status`, issue create/get/update/close/delete/list/lock,
   secret-access list/allow/revoke, `repo_list`, `repo_remove`, `run_list`, and
   `system_status`.
+- `wait` accepts full or unambiguous abbreviated tag-object and peeled commit
+  SHAs. It selects the newest matching run after applying the optional trigger
+  filter (`release` aliases `tag`; `ci` aliases `branch`). Several tags on one
+  exact commit select the newest matching release; distinct abbreviated
+  identities or repositories remain ambiguous. A terminal opposite-trigger run
+  cannot complete the wait while the requested run has not yet been admitted.
+  These aliases do not change `status`, `sync`, or promotion selection.
 - A `status` selector naming an existing cached branch with no recorded run
   returns the ref's repository, branch, and current commit SHA with status
   `no-runs` instead of a not-found error; unknown selectors keep not-found.

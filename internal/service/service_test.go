@@ -273,6 +273,13 @@ func (store timeoutRunStore) ResolveRun(context.Context, int64, string) (model.R
 	return store.run, nil
 }
 
+func (fixture timeoutRunStore) ResolveWaitRun(_ context.Context, _ int64, _ string, trigger string) (model.Run, error) {
+	if trigger != "" && fixture.run.Trigger != trigger {
+		return model.Run{}, store.ErrNotFound
+	}
+	return fixture.run, nil
+}
+
 func TestWaitReturnsCleanTimeoutWithoutPolling(t *testing.T) {
 	store := timeoutRunStore{
 		repo: model.Repository{ID: 1, Name: "oberth"},
@@ -366,8 +373,8 @@ func TestNormalizeTriggerMapsCIToBranch(t *testing.T) {
 	if got := normalizeTrigger("branch"); got != "branch" {
 		t.Fatalf("normalizeTrigger(branch) = %q, want branch", got)
 	}
-	if got := normalizeTrigger("release"); got != "release" {
-		t.Fatalf("normalizeTrigger(release) = %q, want release", got)
+	if got := normalizeTrigger("release"); got != "tag" {
+		t.Fatalf("normalizeTrigger(release) = %q, want tag", got)
 	}
 	if got := normalizeTrigger(""); got != "" {
 		t.Fatalf("normalizeTrigger('') = %q, want empty", got)

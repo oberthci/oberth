@@ -391,6 +391,71 @@ WHERE repo_id = ? AND sha LIKE ? ORDER BY queue_sequence DESC LIMIT 1`, repoID, 
 	return s.latestRunForRefWithAmbiguityCheck(ctx, repoID, selector)
 }
 
+// ResolveWaitRun resolves a SHA within the requested trigger before selecting
+// the newest run. Tag runs can be addressed by their immutable tag object or
+// their peeled commit; TestedSHA on other ref kinds is not an alias.
+func (s *Store) ResolveWaitRun(ctx context.Context, repoID int64, selector, trigger string) (model.Run, error) {
+	selector = strings.ToLower(strings.TrimSpace(selector))
+	if repoID <= 0 || !isHexPrefix(selector) || len(selector) < 7 || len(selector) > 64 {
+		return model.Run{}, fmt.Errorf("%w: repository and full or short SHA are required", ErrInvalid)
+	}
+	if validOID(selector) {
+		run, err := s.latestWaitRunForSHA(ctx, repoID, selector, trigger)
+		if err == nil || !errors.Is(err, ErrNotFound) {
+			return run, err
+		}
+	}
+
+	// Count identities, not runs: several annotated tags may peel to the
+	// same selected commit, but a prefix spanning distinct objects is unsafe.
+	rows, err := s.db.QueryContext(ctx, `
+SELECT sha FROM runs
+WHERE repo_id = ? AND (? = '' OR trigger = ?) AND sha LIKE ?
+UNION
+SELECT tested_sha FROM runs
+WHERE repo_id = ? AND (? = '' OR trigger = ?) AND ref_kind = 'tag' AND tested_sha LIKE ?
+LIMIT 2`, repoID, trigger, trigger, selector+"%", repoID, trigger, trigger, selector+"%")
+	if err != nil {
+		return model.Run{}, fmt.Errorf("resolve wait SHA: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var identities []string
+	for rows.Next() {
+		var identity string
+		if err := rows.Scan(&identity); err != nil {
+			return model.Run{}, fmt.Errorf("scan wait SHA: %w", err)
+		}
+		identities = append(identities, identity)
+	}
+	rowsErr := rows.Err()
+	if err := rows.Close(); err != nil {
+		return model.Run{}, fmt.Errorf("close wait SHA lookup: %w", err)
+	}
+	if rowsErr != nil {
+		return model.Run{}, fmt.Errorf("resolve wait SHA: %w", rowsErr)
+	}
+	switch len(identities) {
+	case 0:
+		return model.Run{}, fmt.Errorf("%w: wait SHA %q", ErrNotFound, selector)
+	case 1:
+		return s.latestWaitRunForSHA(ctx, repoID, identities[0], trigger)
+	default:
+		return model.Run{}, fmt.Errorf("%w: %q", ErrAmbiguous, selector)
+	}
+}
+
+func (s *Store) latestWaitRunForSHA(ctx context.Context, repoID int64, sha, trigger string) (model.Run, error) {
+	run, err := scanRun(s.db.QueryRowContext(ctx, `
+SELECT `+runColumns+` FROM runs
+WHERE repo_id = ? AND (? = '' OR trigger = ?)
+  AND (sha = ? OR (ref_kind = 'tag' AND tested_sha = ?))
+ORDER BY queue_sequence DESC LIMIT 1`, repoID, trigger, trigger, sha, sha))
+	if err != nil {
+		return model.Run{}, translateNotFound("wait SHA", err)
+	}
+	return run, nil
+}
+
 // latestRunForRefWithAmbiguityCheck resolves a bare ref name and returns
 // ErrAmbiguous when the same name appears as both a branch and a tag ref.
 func (s *Store) latestRunForRefWithAmbiguityCheck(ctx context.Context, repoID int64, ref string) (model.Run, error) {
