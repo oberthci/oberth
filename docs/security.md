@@ -46,6 +46,14 @@
   configuration or `oberth secretstore exec` invocation would fetch are
   admission-checked against the same declared annotation, read from the
   immutable run workspace.
+- Release preflight (`oberth secretstore verify --release-tier --repo upstream/org/repo`)
+  requests a short-lived token for the same release ServiceAccount a run uses.
+  The server's Role in `argo.namespace` grants `create` on `serviceaccounts/token`
+  only for `argo.credentialedServiceAccount` and the exact release identities in
+  `argo.perRepoIdentities`. The installer populates that list alongside the
+  ServiceAccounts; apply the chart upgrade after provisioning new identities.
+  This adds no token permission for CI-tier, executor or unrelated accounts,
+  and grants no permissions to the per-repo ServiceAccounts themselves.
 - Release credentials are fetched in-Pod by `oberth secretstore exec`, which
   authenticates to OpenBao with the Pod's ServiceAccount, writes each KV field
   to a tmpfs-backed directory, and wraps the child process with

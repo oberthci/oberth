@@ -86,8 +86,13 @@ implementation detail disagree.
   in the pipeline namespace to grant read-only `get` on `serviceaccounts`
   (`charts/oberth/templates/rbac-argo.yaml`); removing that rule turns every
   credentialed CI and release run into a Forbidden failure at Job creation
-  (issue #467). Two credential chains are
-  supported:
+  (issue #467). Release preflight (`secretstore verify --release-tier --repo`)
+  additionally requires `create` on `serviceaccounts/token`, scoped by exact
+  `resourceNames` to the shared credentialed ServiceAccount plus
+  `argo.perRepoIdentities` in that pipeline namespace (issue #478). This grants
+  the server identity token requests, not the pipeline identities; CI-tier,
+  executor and unrelated accounts stay outside the token allowlist. Two
+  credential chains are supported:
   - **Native (preferred):** `oberth secretstore exec` authenticates to
     OpenBao in-Pod using the ServiceAccount's projected token, fetches the
     declared paths, validates the `--dir` mount is tmpfs, writes files at

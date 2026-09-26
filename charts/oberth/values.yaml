@@ -194,7 +194,8 @@ argo:
   # The installer populates this list from the repo registry + grants;
   # the chart creates the ServiceAccounts; the installer creates the
   # Vault policies and roles. Empty means all repos use the shared
-  # credentialed / ci-secrets identities.
+  # credentialed / ci-secrets identities. The server may request short-lived
+  # tokens for these exact release identities to run per-repo verification.
   perRepoIdentities: []
 
   # Per-repo CI Vault identities. Each entry creates a ServiceAccount in

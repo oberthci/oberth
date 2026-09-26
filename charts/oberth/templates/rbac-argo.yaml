@@ -48,9 +48,16 @@ rules:
   # secretstore verify --release-tier requests a short-lived token for the
   # release ServiceAccount to prove the OpenBao trust chain end to end before
   # a real release tag fires. The token never leaves the server process.
+  # --repo selects an exact installer-provisioned release identity. Keep the
+  # allowlist aligned with the ServiceAccounts created by argo-identities.yaml;
+  # pipeline, executor, CI-tier and unrelated accounts gain no token authority.
   - apiGroups: [""]
     resources: ["serviceaccounts/token"]
-    resourceNames: [{{ .Values.argo.credentialedServiceAccount | default "oberth-argo-credentialed" | quote }}]
+    resourceNames:
+      - {{ .Values.argo.credentialedServiceAccount | default "oberth-argo-credentialed" | quote }}
+      {{- range .Values.argo.perRepoIdentities }}
+      - {{ . | quote }}
+      {{- end }}
     verbs: ["create"]
   # argojob verifies that a credentialed run's per-repo ServiceAccount exists
   # before creating the Job (fail-closed materialization guard, issues
