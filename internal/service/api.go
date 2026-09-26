@@ -65,6 +65,7 @@ type APIConfig struct {
 	PromotionWorkspaceRoot string
 	RemoveWorkspace        func(string) error
 	SecretAccess           SecretAccessStore
+	SecretStoreVerifier    SecretStoreVerifier
 	SecretAccessReconciler *AccessReconciler
 	RepositoryRemover      RepositoryRemover
 	RemoveGitCache         func(string) error
@@ -90,6 +91,7 @@ type API struct {
 	promotionWorkspaceRoot string
 	workspaces             *workspaceLifecycle
 	secretAccess           SecretAccessStore
+	secretStoreVerifier    SecretStoreVerifier
 	secretAccessReconciler *AccessReconciler
 	repositoryRemover      RepositoryRemover
 	removeGitCache         func(string) error
@@ -131,7 +133,8 @@ func NewAPI(config APIConfig) (*API, error) {
 		health: config.Health, signals: signals, maximumWait: maximumWait, mutationGate: mutationGate,
 		promotionWorkspaceRoot: promotionWorkspaceRoot, workspaces: workspaces,
 		secretAccess: config.SecretAccess, secretAccessReconciler: config.SecretAccessReconciler,
-		repositoryRemover: config.RepositoryRemover, removeGitCache: config.RemoveGitCache,
+		secretStoreVerifier: config.SecretStoreVerifier,
+		repositoryRemover:   config.RepositoryRemover, removeGitCache: config.RemoveGitCache,
 	}, nil
 }
 
@@ -145,6 +148,8 @@ func (service *API) CallTool(ctx context.Context, actor api.Actor, name string, 
 		}
 	}
 	switch name {
+	case "secretstore_verify":
+		return service.verifySecretStore(ctx, actor, raw)
 	case "status":
 		var arguments struct {
 			Repo string `json:"repo"`

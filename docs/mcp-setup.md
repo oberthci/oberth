@@ -205,6 +205,7 @@ step: a single step can exceed a model's context window.
 | `repo_remove` | Remove a repository mapping and its Git cache (admin-only) |
 | `run_list` | List recent runs with optional repo/ref filter (bounded page) |
 | `system_status` | System health: database, upstreams, cluster, audit, version |
+| `secretstore_verify` | Admin-only real secret-store preflight using configured server or per-repo release/CI identity; paths/key counts only by default |
 
 ## JSON API
 
@@ -231,3 +232,26 @@ Unauthenticated: `/healthz` (liveness) and `/readyz` (dependency readiness).
   completion evidence.
 - `promote` requires explicit integration authority, an exact green SHA, and a
   named target branch. It never force-pushes.
+
+### Secret-store release preflight
+
+An admin uplink can call `secretstore_verify` instead of entering the server pod:
+
+```json
+{"release_tier":true,"repo":"github/oberthci/oberth","paths":["oberth/upstream/oberthci/oberth/signing"],"timeout":45}
+```
+
+Use the exact upstream/org/repo identity and declared paths for the release.
+`release_tier` selects the configured pipeline trust; `tier` defaults to
+`release` and accepts `ci` only with a per-repo identity. Omitting
+`release_tier` checks the server identity; that mode supports `keys` and
+`expect` (for example `["signing/cosign.key,cosign.password"]`). Empty `paths`
+uses the server's configured verification defaults. At most 32 paths and
+expectations are accepted; timeout is bounded to 120 seconds including
+TokenRequest, login and reads. No caller-selected connection or credential
+settings are accepted. Tokens and fetched values remain in memory and never
+appear in output; only field names are exposed when requested.
+
+The result contains `verified` and bounded `output`. Failure sets MCP
+`isError: true`, including when diagnostics exceed 64 KiB. Verification does
+not modify infrastructure, grants, roles, or policies.

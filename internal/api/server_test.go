@@ -570,14 +570,15 @@ func TestDefaultClassifierReturns500(t *testing.T) {
 func TestMCPToolInputsMatchContract(t *testing.T) {
 	t.Parallel()
 	want := map[string][]string{
-		"status":     {"ref", "repo"},
-		"logs":       {"context", "limit", "offset", "pattern", "repo", "sha", "step", "tail"},
-		"run_get":    {"id"},
-		"run_logs":   {"burn", "context", "id", "limit", "offset", "pattern", "step", "tail"},
-		"wait":       {"repo", "sha", "timeout", "trigger"},
-		"sync":       {"branch", "repo", "sha"},
-		"promote":    {"branch", "repo", "sha"},
-		"issue_list": {"before"},
+		"status":             {"ref", "repo"},
+		"logs":               {"context", "limit", "offset", "pattern", "repo", "sha", "step", "tail"},
+		"run_get":            {"id"},
+		"run_logs":           {"burn", "context", "id", "limit", "offset", "pattern", "step", "tail"},
+		"wait":               {"repo", "sha", "timeout", "trigger"},
+		"sync":               {"branch", "repo", "sha"},
+		"promote":            {"branch", "repo", "sha"},
+		"issue_list":         {"before"},
+		"secretstore_verify": {"expect", "keys", "paths", "release_tier", "repo", "tier", "timeout"},
 	}
 	for _, definition := range toolDefinitions() {
 		name, ok := definition["name"].(string)
@@ -714,7 +715,7 @@ func TestMCPToolCountMatchesDocumented(t *testing.T) {
 	t.Parallel()
 	// The documented count in docs/mcp-setup.md must match the registered
 	// tool count. A mismatch means the table drifted from the code.
-	const documented = 24
+	const documented = 25
 	definitions := toolDefinitions()
 	if len(definitions) != documented {
 		t.Fatalf("registered %d tools, documented %d in docs/mcp-setup.md — update the table", len(definitions), documented)
@@ -737,7 +738,7 @@ func TestMCPToolSurfaceMatchesContract(t *testing.T) {
 		"issue_create", "issue_get", "issue_update", "issue_close",
 		"issue_delete", "issue_list", "issue_lock",
 		"access_list", "access_allow", "access_revoke",
-		"repo_list", "repo_remove", "run_list", "system_status",
+		"repo_list", "repo_remove", "run_list", "system_status", "secretstore_verify",
 	}
 	definitions := toolDefinitions()
 	got := make([]string, 0, len(definitions))
@@ -812,5 +813,35 @@ func TestRunsLimitClampedToStoreMaximum(t *testing.T) {
 	}
 	if backend.runFilter.Limit != 50 {
 		t.Fatalf("runs limit = %d, want 50", backend.runFilter.Limit)
+	}
+}
+
+func TestMCPSecretStoreVerifyReportsSuccessAndFailure(t *testing.T) {
+	for _, verified := range []bool{true, false} {
+		t.Run(fmt.Sprint(verified), func(t *testing.T) {
+			server, backend := testServer(t)
+			backend.toolResult = SecretStoreVerifyResponse{Verified: verified, Output: "value-free verification details"}
+			body := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"secretstore_verify","arguments":{"paths":["oberth/data/test"]}}}`
+			request := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(body))
+			request.Header.Set("Authorization", "Bearer valid-token")
+			response := httptest.NewRecorder()
+			server.Handler().ServeHTTP(response, request)
+			var envelope struct {
+				Result struct {
+					IsError    bool                      `json:"isError"`
+					Content    []struct{ Text string }   `json:"content"`
+					Structured SecretStoreVerifyResponse `json:"structuredContent"`
+				} `json:"result"`
+			}
+			if err := json.Unmarshal(response.Body.Bytes(), &envelope); err != nil {
+				t.Fatal(err)
+			}
+			if backend.calledName != "secretstore_verify" || envelope.Result.IsError == verified || envelope.Result.Structured.Verified != verified {
+				t.Fatalf("verification response lost failure state: %s", response.Body.String())
+			}
+			if len(envelope.Result.Content) != 1 || envelope.Result.Content[0].Text != "value-free verification details" {
+				t.Fatalf("verification diagnostics missing: %s", response.Body.String())
+			}
+		})
 	}
 }

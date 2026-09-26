@@ -2,6 +2,7 @@ package secretstore
 
 import (
 	"bytes"
+	"context"
 	"go/ast"
 	"go/parser"
 	"go/printer"
@@ -94,7 +95,7 @@ func TestServiceAccountTokenReturnsIndependentCopy(t *testing.T) {
 	}
 	client := &Client{tokenPath: tokenPath}
 
-	token, err := client.serviceAccountToken()
+	token, err := client.serviceAccountToken(context.Background())
 	if err != nil {
 		t.Fatalf("first read: %v", err)
 	}
@@ -110,7 +111,7 @@ func TestServiceAccountTokenReturnsIndependentCopy(t *testing.T) {
 		}
 	}
 
-	token2, err := client.serviceAccountToken()
+	token2, err := client.serviceAccountToken(context.Background())
 	if err != nil {
 		t.Fatalf("second read after zeroing: %v", err)
 	}

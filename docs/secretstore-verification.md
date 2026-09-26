@@ -67,6 +67,22 @@ causes: missing role binding, missing `system:auth-delegator` for an
 out-of-cluster store, a `kubernetes_host` the store cannot reach, or a path
 outside the read policy.
 
+For an agent using an admin MCP uplink, call `secretstore_verify` directly.
+To prove the identity a real repository release uses:
+
+```json
+{"release_tier":true,"repo":"github/oberthci/oberth","paths":["oberth/upstream/oberthci/oberth/signing"],"timeout":45}
+```
+
+This runs the same verifier using the live server configuration, requests a
+short-lived token for that repository's configured pipeline identity, and
+checks the release-tier CA, Vault role, login, and KV read policy. The JWT
+stays in memory. The default server-tier check is still available by omitting
+`release_tier`; optional `keys` and `expect` apply only to that mode. Errors
+are value-free, bounded diagnostics with `verified: false` and MCP
+`isError: true`. No infrastructure configuration is changed. See
+[MCP setup](mcp-setup.md#secret-store-release-preflight) for the input contract.
+
 ## Tier 3 — full release rehearsal (~15 min, real cluster)
 
 The complete customer-shaped scenario on a disposable environment

@@ -181,11 +181,15 @@ func writeRPC(writer http.ResponseWriter, response rpcResponse) {
 }
 
 func toolSuccess(payload any) map[string]any {
+	isError := false
+	if value, ok := payload.(interface{ MCPToolIsError() bool }); ok {
+		isError = value.MCPToolIsError()
+	}
 	if value, ok := payload.(interface{ MCPToolText() string }); ok {
 		return map[string]any{
 			"content":           []map[string]string{{"type": "text", "text": value.MCPToolText()}},
 			"structuredContent": payload,
-			"isError":           false,
+			"isError":           isError,
 		}
 	}
 	raw, err := json.Marshal(payload)
@@ -286,5 +290,14 @@ func toolDefinitions() []map[string]any {
 			"limit": integerProperty("Maximum runs to return (default 50, max 200)"),
 		})),
 		tool("system_status", "Return system health: database, upstreams, cluster, audit, and version.", object(map[string]any{})),
+		tool("secretstore_verify", "Verify real secret-store login and KV reads using configured server or release-tier trust. Admin uplink required. Returns paths/key counts, optionally field names; never secret values. Does not change infrastructure or grants.", object(map[string]any{
+			"paths":        map[string]any{"type": "array", "items": stringProperty("KV API path or virtual oberth/upstream/... path"), "maxItems": 32, "description": "Paths to verify; defaults to the server's configured verification paths"},
+			"release_tier": map[string]any{"type": "boolean", "description": "Use the configured release-tier trust and ServiceAccount; pair with repo for real per-repo preflight"},
+			"repo":         stringProperty("Exact upstream/org/repo identity; requires release_tier"),
+			"tier":         map[string]any{"type": "string", "enum": []string{"release", "ci"}, "default": "release", "description": "Per-repo identity tier; ci requires release_tier and repo"},
+			"keys":         map[string]any{"type": "boolean", "description": "List field names (server tier only)"},
+			"expect":       map[string]any{"type": "array", "items": stringProperty("Expected <path-base>/<field>[,<field>,...]"), "maxItems": 32, "description": "Assert field names; implies keys (server tier only)"},
+			"timeout":      map[string]any{"type": "integer", "minimum": 1, "maximum": 120, "default": 45, "description": "Overall deadline in seconds, including TokenRequest and login"},
+		})),
 	}
 }

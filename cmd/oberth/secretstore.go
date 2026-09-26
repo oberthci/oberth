@@ -8,6 +8,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"sort"
@@ -16,12 +17,14 @@ import (
 	"time"
 
 	oberth "github.com/oberthci/oberth"
+	"github.com/oberthci/oberth/internal/gitcache"
 	"github.com/oberthci/oberth/internal/installer"
 	"github.com/oberthci/oberth/internal/secretstore"
 	"github.com/oberthci/oberth/pkg/periapsis"
 
 	authenticationv1 "k8s.io/api/authentication/v1"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -182,7 +185,27 @@ func defaultKubeClient() (kubernetes.Interface, error) {
 	return kubernetes.NewForConfig(restConfig)
 }
 
+// Configuration sources keep CLI process discovery separate from the MCP
+// callback, which uses the already-parsed configuration of the running server.
+type secretStoreVerifySources struct {
+	server  func() (secretStoreVerifyConfig, error)
+	release func() (releaseTierVerifyConfig, error)
+	kube    kubeClientFactory
+}
+
+func secretStoreVerifySourcesFromCmdline(procCmdline string, kube kubeClientFactory) secretStoreVerifySources {
+	return secretStoreVerifySources{
+		server:  func() (secretStoreVerifyConfig, error) { return secretStoreConfigFromServeCmdline(procCmdline) },
+		release: func() (releaseTierVerifyConfig, error) { return releaseTierConfigFromServeCmdline(procCmdline) },
+		kube:    kube,
+	}
+}
+
 func runSecretStoreVerify(ctx context.Context, arguments []string, output io.Writer, procCmdline string) error {
+	return runSecretStoreVerifyWithSources(ctx, arguments, output, secretStoreVerifySourcesFromCmdline(procCmdline, defaultKubeClient))
+}
+
+func runSecretStoreVerifyWithSources(ctx context.Context, arguments []string, output io.Writer, sources secretStoreVerifySources) error {
 	flags := flag.NewFlagSet("secretstore verify", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	var explicit secretStoreVerifyConfig
@@ -210,6 +233,12 @@ func runSecretStoreVerify(ctx context.Context, arguments []string, output io.Wri
 		}
 		return fmt.Errorf("%w: %w", errUsage, err)
 	}
+	if *timeout <= 0 {
+		return fmt.Errorf("%w: timeout must be positive", errUsage)
+	}
+	deadlineCtx, cancel := context.WithTimeout(ctx, *timeout)
+	defer cancel()
+	ctx = deadlineCtx
 	if *tierFlag != "release" && *tierFlag != "ci" {
 		return fmt.Errorf("%w: --tier must be \"release\" or \"ci\"", errUsage)
 	}
@@ -220,14 +249,14 @@ func runSecretStoreVerify(ctx context.Context, arguments []string, output io.Wri
 		var mergedPaths []string
 		mergedPaths = append(mergedPaths, pathFlags...)
 		mergedPaths = append(mergedPaths, flags.Args()...)
-		return runReleaseTierVerify(ctx, explicit, mergedPaths, *repoFlag, *tierFlag, *timeout, output, procCmdline, defaultKubeClient)
+		return runReleaseTierVerifyWithSources(ctx, explicit, mergedPaths, *repoFlag, *tierFlag, *timeout, output, sources)
 	}
 	options := explicit
 	if options.address == "" {
 		if options.role != "" || options.authMount != "" || options.caCertPath != "" || options.saTokenPath != "" || options.kvMount != "" || options.insecureHTTP {
 			return fmt.Errorf("%w: explicit secretstore verify flags require --address", errUsage)
 		}
-		discovered, err := secretStoreConfigFromServeCmdline(procCmdline)
+		discovered, err := sources.server()
 		if err != nil {
 			return fmt.Errorf("discover the running server's secret store configuration: %w (run inside the Oberth pod, or pass --address and --role explicitly)", err)
 		}
@@ -257,17 +286,9 @@ func runSecretStoreVerify(ctx context.Context, arguments []string, output io.Wri
 	// Virtual oberth/upstream/ arguments are canonicalized to the KV v2 API
 	// path exactly as release admission does, so the administrator can prove
 	// a scoped secret with the very string a repository declares.
-	declaredByFetch := make(map[string]string, len(paths))
-	for index, path := range paths {
-		scoped, upstreamScoped, err := periapsis.ParseUpstreamSecretStorePath(path)
-		if err != nil {
-			return err
-		}
-		if upstreamScoped {
-			canonical := scoped.FetchPath(kvMount)
-			declaredByFetch[canonical] = path
-			paths[index] = canonical
-		}
+	paths, declaredByFetch, err := secretStoreVerifyPaths(paths, kvMount)
+	if err != nil {
+		return err
 	}
 	var caPEM []byte
 	if options.caCertPath != "" {
@@ -297,9 +318,7 @@ func runSecretStoreVerify(ctx context.Context, arguments []string, output io.Wri
 		options.address, mount, options.role, len(paths)); err != nil {
 		return err
 	}
-	deadlineCtx, cancel := context.WithTimeout(ctx, *timeout)
-	defer cancel()
-	fetched, err := client.FetchKV(deadlineCtx, paths)
+	fetched, err := client.FetchKV(ctx, paths)
 	if err != nil {
 		_, _ = fmt.Fprint(output, secretStoreVerifyHints)
 		return fmt.Errorf("secret store verify failed: %w", err)
@@ -368,13 +387,28 @@ func runReleaseTierVerify(
 	procCmdline string,
 	newKube kubeClientFactory,
 ) error {
+	return runReleaseTierVerifyWithSources(ctx, explicit, positionalPaths, repo, tier, timeout, output, secretStoreVerifySourcesFromCmdline(procCmdline, newKube))
+}
+
+func runReleaseTierVerifyWithSources(
+	ctx context.Context,
+	explicit secretStoreVerifyConfig,
+	positionalPaths []string,
+	repo, tier string,
+	timeout time.Duration,
+	output io.Writer,
+	sources secretStoreVerifySources,
+) error {
+	deadlineCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	ctx = deadlineCtx
 	// --release-tier is mutually exclusive with explicit server-tier flags.
 	if explicit.address != "" || explicit.role != "" || explicit.authMount != "" ||
 		explicit.caCertPath != "" || explicit.saTokenPath != "" || explicit.kvMount != "" || explicit.insecureHTTP {
 		return fmt.Errorf("%w: --release-tier is mutually exclusive with explicit server-tier flags (--address, --role, --ca-cert, etc.)", errUsage)
 	}
 
-	releaseConfig, err := releaseTierConfigFromServeCmdline(procCmdline)
+	releaseConfig, err := sources.release()
 	if err != nil {
 		return fmt.Errorf("discover release-tier configuration: %w (run inside the Oberth pod)", err)
 	}
@@ -389,7 +423,7 @@ func runReleaseTierVerify(
 	// The per-repo SA and role name are derived deterministically from the
 	// upstream/org/repo triple, matching the runtime's PerRepoName / PerRepoCIName.
 	if repo != "" {
-		return runPerRepoTierVerify(ctx, releaseConfig, positionalPaths, repo, tier, timeout, output, procCmdline, newKube)
+		return runPerRepoTierVerify(ctx, releaseConfig, positionalPaths, repo, tier, timeout, output, sources)
 	}
 
 	// Shared SA verification (existing behavior, backward compatible).
@@ -402,7 +436,7 @@ func runReleaseTierVerify(
 
 	// The allowlisted paths are shared: the server declares them in
 	// --secretstore-path and both tiers read the same KV entries.
-	serverConfig, err := secretStoreConfigFromServeCmdline(procCmdline)
+	serverConfig, err := sources.server()
 	if err != nil {
 		return fmt.Errorf("discover server secret store configuration for path allowlist: %w", err)
 	}
@@ -417,61 +451,9 @@ func runReleaseTierVerify(
 	if kvMount == "" {
 		kvMount = secretstore.DefaultKVMount
 	}
-	declaredByFetch := make(map[string]string, len(paths))
-	for index, path := range paths {
-		scoped, upstreamScoped, err := periapsis.ParseUpstreamSecretStorePath(path)
-		if err != nil {
-			return err
-		}
-		if upstreamScoped {
-			canonical := scoped.FetchPath(kvMount)
-			declaredByFetch[canonical] = path
-			paths[index] = canonical
-		}
-	}
-
-	// Obtain a short-lived token for the release ServiceAccount via the
-	// Kubernetes TokenRequest API. This proves the server's own RBAC grants
-	// are correct before touching the store.
-	kube, err := newKube()
+	paths, declaredByFetch, err := secretStoreVerifyPaths(paths, kvMount)
 	if err != nil {
 		return err
-	}
-	expirationSeconds := int64(900) // 15 minutes; Kubernetes rejects durations below 600s
-	tokenRequest, err := kube.CoreV1().ServiceAccounts(releaseConfig.pipelineNamespace).CreateToken(
-		ctx,
-		releaseConfig.credentialedAccount,
-		&authenticationv1.TokenRequest{
-			Spec: authenticationv1.TokenRequestSpec{
-				ExpirationSeconds: &expirationSeconds,
-			},
-		},
-		metav1.CreateOptions{},
-	)
-	if err != nil {
-		return fmt.Errorf("request token for release ServiceAccount %s/%s: %w (does the server's ServiceAccount have serviceaccounts/token create permission in the pipeline namespace?)",
-			releaseConfig.pipelineNamespace, releaseConfig.credentialedAccount, err)
-	}
-	token := tokenRequest.Status.Token
-	if token == "" {
-		return errors.New("TokenRequest returned an empty token for the release ServiceAccount")
-	}
-
-	// Write the token to a temporary file so the secretstore client can
-	// read it through its existing file-based path. The file is removed
-	// immediately after verification completes.
-	tokenFile, err := os.CreateTemp("", "oberth-release-verify-*.token")
-	if err != nil {
-		return fmt.Errorf("create temporary token file: %w", err)
-	}
-	tokenPath := tokenFile.Name()
-	defer func() { _ = os.Remove(tokenPath) }()
-	if _, err := tokenFile.WriteString(token); err != nil {
-		_ = tokenFile.Close()
-		return fmt.Errorf("write temporary token file: %w", err)
-	}
-	if err := tokenFile.Close(); err != nil {
-		return fmt.Errorf("close temporary token file: %w", err)
 	}
 
 	var caPEM []byte
@@ -484,12 +466,12 @@ func runReleaseTierVerify(
 	}
 
 	client, err := secretstore.New(secretstore.Config{
-		Address:                 releaseConfig.vaultAddress,
-		AuthMountPath:           secretstore.DefaultAuthMountPath,
-		Role:                    releaseConfig.vaultCredentialedRole,
-		CACertPEM:               caPEM,
-		ServiceAccountTokenPath: tokenPath,
-		Timeout:                 timeout,
+		Address:                   releaseConfig.vaultAddress,
+		AuthMountPath:             secretstore.DefaultAuthMountPath,
+		Role:                      releaseConfig.vaultCredentialedRole,
+		CACertPEM:                 caPEM,
+		ServiceAccountTokenSource: secretStoreVerifyTokenSource(sources.kube, releaseConfig.pipelineNamespace, releaseConfig.credentialedAccount),
+		Timeout:                   timeout,
 	})
 	if err != nil {
 		return fmt.Errorf("configure release-tier verification: %w", err)
@@ -501,9 +483,7 @@ func runReleaseTierVerify(
 		return err
 	}
 
-	deadlineCtx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-	fetched, err := client.FetchKV(deadlineCtx, paths)
+	fetched, err := client.FetchKV(ctx, paths)
 	if err != nil {
 		_, _ = fmt.Fprint(output, releaseTierVerifyHints)
 		return fmt.Errorf("release-tier verify failed: %w", err)
@@ -537,12 +517,16 @@ func runPerRepoTierVerify(
 	tier string,
 	timeout time.Duration,
 	output io.Writer,
-	procCmdline string,
-	newKube kubeClientFactory,
+	sources secretStoreVerifySources,
 ) error {
 	parts := strings.Split(repo, "/")
 	if len(parts) != 3 {
 		return fmt.Errorf("%w: --repo must be upstream/org/repo (got %q)", errUsage, repo)
+	}
+	for _, part := range parts {
+		if err := gitcache.ValidateSegment("identity", part); err != nil {
+			return fmt.Errorf("%w: %w", errUsage, err)
+		}
 	}
 	upstream, org, repoName := parts[0], parts[1], parts[2]
 
@@ -564,7 +548,7 @@ func runPerRepoTierVerify(
 	// Per-repo SA name == role name by convention.
 	roleName := saName
 
-	serverConfig, err := secretStoreConfigFromServeCmdline(procCmdline)
+	serverConfig, err := sources.server()
 	if err != nil {
 		return fmt.Errorf("discover server secret store configuration: %w", err)
 	}
@@ -580,59 +564,12 @@ func runPerRepoTierVerify(
 	if len(paths) == 0 {
 		paths = serverConfig.paths
 	}
-	declaredByFetch := make(map[string]string, len(paths))
-	for index, path := range paths {
-		scoped, upstreamScoped, err := periapsis.ParseUpstreamSecretStorePath(path)
-		if err != nil {
-			return err
-		}
-		if upstreamScoped {
-			canonical := scoped.FetchPath(kvMount)
-			declaredByFetch[canonical] = path
-			paths[index] = canonical
-		}
-	}
-	if len(paths) == 0 {
-		return fmt.Errorf("nothing to verify: pass one or more KV API paths to test the %s per-repo identity for %s", tierLabel, repo)
-	}
-
-	kube, err := newKube()
+	paths, declaredByFetch, err := secretStoreVerifyPaths(paths, kvMount)
 	if err != nil {
 		return err
 	}
-	expirationSeconds := int64(900)
-	tokenRequest, err := kube.CoreV1().ServiceAccounts(releaseConfig.pipelineNamespace).CreateToken(
-		ctx,
-		saName,
-		&authenticationv1.TokenRequest{
-			Spec: authenticationv1.TokenRequestSpec{
-				ExpirationSeconds: &expirationSeconds,
-			},
-		},
-		metav1.CreateOptions{},
-	)
-	if err != nil {
-		return fmt.Errorf("request token for %s per-repo ServiceAccount %s/%s: %w "+
-			"(does the SA exist? run \"oberth install --install-secretstore --upgrade\" to create it)",
-			tierLabel, releaseConfig.pipelineNamespace, saName, err)
-	}
-	token := tokenRequest.Status.Token
-	if token == "" {
-		return fmt.Errorf("TokenRequest returned an empty token for %s per-repo ServiceAccount %s", tierLabel, saName)
-	}
-
-	tokenFile, err := os.CreateTemp("", "oberth-perrepo-verify-*.token")
-	if err != nil {
-		return fmt.Errorf("create temporary token file: %w", err)
-	}
-	tokenPath := tokenFile.Name()
-	defer func() { _ = os.Remove(tokenPath) }()
-	if _, err := tokenFile.WriteString(token); err != nil {
-		_ = tokenFile.Close()
-		return fmt.Errorf("write temporary token file: %w", err)
-	}
-	if err := tokenFile.Close(); err != nil {
-		return fmt.Errorf("close temporary token file: %w", err)
+	if len(paths) == 0 {
+		return fmt.Errorf("nothing to verify: pass one or more KV API paths to test the %s per-repo identity for %s", tierLabel, repo)
 	}
 
 	var caPEM []byte
@@ -645,12 +582,12 @@ func runPerRepoTierVerify(
 	}
 
 	client, err := secretstore.New(secretstore.Config{
-		Address:                 releaseConfig.vaultAddress,
-		AuthMountPath:           secretstore.DefaultAuthMountPath,
-		Role:                    roleName,
-		CACertPEM:               caPEM,
-		ServiceAccountTokenPath: tokenPath,
-		Timeout:                 timeout,
+		Address:                   releaseConfig.vaultAddress,
+		AuthMountPath:             secretstore.DefaultAuthMountPath,
+		Role:                      roleName,
+		CACertPEM:                 caPEM,
+		ServiceAccountTokenSource: secretStoreVerifyTokenSource(sources.kube, releaseConfig.pipelineNamespace, saName),
+		Timeout:                   timeout,
 	})
 	if err != nil {
 		return fmt.Errorf("configure %s per-repo verification: %w", tierLabel, err)
@@ -662,9 +599,7 @@ func runPerRepoTierVerify(
 		return err
 	}
 
-	deadlineCtx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-	fetched, err := client.FetchKV(deadlineCtx, paths)
+	fetched, err := client.FetchKV(ctx, paths)
 	if err != nil {
 		_, _ = fmt.Fprintf(output, "common causes for %s per-repo verify failure:\n"+
 			"  - the per-repo ServiceAccount %s does not exist\n"+
@@ -689,6 +624,71 @@ func runPerRepoTierVerify(
 	_, err = fmt.Fprintf(output, "%s per-repo verify: OK — TokenRequest, %s SA login (%s), Vault auth, read policy, and TLS all verified\n",
 		tierLabel, tierLabel, saName)
 	return err
+}
+
+func secretStoreVerifyPaths(input []string, kvMount string) ([]string, map[string]string, error) {
+	if len(input) > 32 {
+		return nil, nil, fmt.Errorf("%w: verification allows at most 32 paths", errUsage)
+	}
+	paths := make([]string, 0, len(input))
+	declaredByFetch := make(map[string]string, len(input))
+	seen := make(map[string]bool, len(input))
+	for _, path := range input {
+		scoped, upstreamScoped, err := periapsis.ParseUpstreamSecretStorePath(path)
+		if err != nil {
+			return nil, nil, fmt.Errorf("%w: %w", errUsage, err)
+		}
+		if upstreamScoped {
+			canonical := scoped.FetchPath(kvMount)
+			declaredByFetch[canonical] = path
+			path = canonical
+		}
+		if err := periapsis.ValidateSecretStorePath(path); err != nil {
+			return nil, nil, fmt.Errorf("%w: %w", errUsage, err)
+		}
+		if !seen[path] {
+			seen[path] = true
+			paths = append(paths, path)
+		}
+	}
+	return paths, declaredByFetch, nil
+}
+
+// AI-CONTRACT: TokenRequest identities remain in memory. The client owns and
+// clears the returned []byte; no verifier writes tokens to temporary files.
+func secretStoreVerifyTokenSource(newKube kubeClientFactory, namespace, account string) func(context.Context) ([]byte, error) {
+	return func(ctx context.Context) ([]byte, error) {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		kube, err := newKube()
+		if err != nil {
+			return nil, errors.New("load Kubernetes client for verification failed (run inside the Oberth pod)")
+		}
+		expirationSeconds := int64(900)
+		request, err := kube.CoreV1().ServiceAccounts(namespace).CreateToken(ctx, account,
+			&authenticationv1.TokenRequest{Spec: authenticationv1.TokenRequestSpec{ExpirationSeconds: &expirationSeconds}}, metav1.CreateOptions{})
+		if err != nil {
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			// Kubernetes error messages may reflect request credentials. Keep
+			// only the HTTP code and locally-defined status text in diagnostics.
+			status := "request failed"
+			var apiStatus apierrors.APIStatus
+			if errors.As(err, &apiStatus) {
+				code := int(apiStatus.Status().Code)
+				status = fmt.Sprintf("HTTP %d %s", code, http.StatusText(code))
+			}
+			return nil, fmt.Errorf("request token for ServiceAccount %s/%s: %s; check that the ServiceAccount exists and Oberth has serviceaccounts/token create permission", namespace, account, status)
+		}
+		if request.Status.Token == "" {
+			return nil, fmt.Errorf("TokenRequest returned an empty token for ServiceAccount %s/%s", namespace, account)
+		}
+		token := []byte(request.Status.Token)
+		request.Status.Token = "" // Drop the SDK's immutable string reference.
+		return token, nil
+	}
 }
 
 const secretStoreVerifyHints = `common causes:

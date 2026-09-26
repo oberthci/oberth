@@ -395,11 +395,11 @@ implementation detail disagree.
   authority is configured.
 - A bearer credential maps to exactly one uplink public-key fingerprint and
   identity. Plaintext tokens are displayed once and are never persisted.
-- MCP exposes 24 tools: `status`, bounded named-step `logs`, exact-run
+- MCP exposes 25 tools: `status`, bounded named-step `logs`, exact-run
   `run_get`/`run_logs`, `artifacts`/`artifact_get`, `wait`, `sync`, `promote`,
   `promote_status`, issue create/get/update/close/delete/list/lock,
   secret-access list/allow/revoke, `repo_list`, `repo_remove`, `run_list`, and
-  `system_status`.
+  `system_status`, and admin-only `secretstore_verify`.
 - A `status` selector naming an existing cached branch with no recorded run
   returns the ref's repository, branch, and current commit SHA with status
   `no-runs` instead of a not-found error; unknown selectors keep not-found.
@@ -673,8 +673,8 @@ implementation detail disagree.
   transaction. `uplink add --admin` mints an admin uplink; the admin flag is
   persisted in sqlite and propagated through bearer-token authentication into
   the MCP Actor. Existing uplinks default to non-admin after migration
-  (fail-closed). Only admin uplinks may call `access_allow` and
-  `access_revoke`; non-admin callers receive a clear `ErrForbidden` error
+  (fail-closed). Only admin uplinks may call `access_allow`,
+  `access_revoke`, and `secretstore_verify`; non-admin callers receive a clear `ErrForbidden` error
   before any state read or write.
 - Secret-access grants are ConfigMap-driven: the `oberth-secret-access`
   ConfigMap in the server namespace is the declarative source of truth for
@@ -767,6 +767,26 @@ implementation detail disagree.
   counts only, and zeroes every fetched value. Renaming a `--secretstore-*`
   serve flag is a breaking change for this discovery
   (`TestSecretStoreCmdlineMatchesServeParsing` pins it).
+
+- **AI-CONTRACT:** `secretstore_verify` reuses the CLI's real login/read verifier
+  with the running server's configured identity and TLS trust. Only admin
+  uplinks may invoke it, before any configuration read or network operation.
+  Inputs select `paths` (at most 32), `release_tier`, optional exact
+  `upstream/org/repo` `repo`, per-repo `tier` (`release` or `ci`), server-tier
+  `keys`/`expect`, and an overall `timeout` (default 45, maximum 120 seconds).
+  Callers cannot override endpoints, roles, tokens, token files, CA paths, or
+  insecure transport settings. Release-tier verification uses the same
+  deterministic per-repo ServiceAccount and Vault role as runtime execution.
+  TokenRequest JWTs stay in memory; the deadline includes TokenRequest and
+  Vault login/read. Every owned token/secret byte buffer is cleared on errors;
+  successful reads transfer ownership to the verifier for clearing. Duplicate
+  paths are read once. Output contains paths/key counts (optional server-tier
+  field names), never values or token/error response bodies; diagnostics are
+  capped at 64 KiB. Response `verified: false` also sets MCP `isError: true`;
+  exceeding the output bound fails verification rather than claiming a
+  truncated success. The tool changes no infrastructure configuration, grants,
+  roles, or policies. The Go/Kubernetes SDK's immutable token strings retain
+  the existing runtime/GC limitation; dropping references is not byte zeroing.
 
 ## Compatibility matrix
 

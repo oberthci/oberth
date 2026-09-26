@@ -83,6 +83,10 @@ type Config struct {
 	CACertPEM []byte
 	// ServiceAccountTokenPath overrides the projected token location.
 	ServiceAccountTokenPath string
+	// ServiceAccountTokenSource obtains a fresh projected identity in memory.
+	// Ownership of every returned buffer (even on error) transfers to the
+	// client, which clears it after login. Mutually exclusive with ServiceAccountTokenPath.
+	ServiceAccountTokenSource func(context.Context) ([]byte, error)
 	// Timeout bounds each HTTP round trip.
 	Timeout time.Duration
 	// TransitMountPath is the administrator-owned transit engine mount used
@@ -99,6 +103,7 @@ type Client struct {
 	mount         string
 	role          string
 	tokenPath     string
+	tokenSource   func(context.Context) ([]byte, error)
 	transit       string
 	transitKey    string
 	verifiedHTTPS bool
@@ -150,6 +155,9 @@ func New(config Config) (*Client, error) {
 	if err := validateTransitSegment("key", transitKey); err != nil {
 		return nil, err
 	}
+	if config.ServiceAccountTokenSource != nil && config.ServiceAccountTokenPath != "" {
+		return nil, errors.New("secret store ServiceAccount token source and path are mutually exclusive")
+	}
 	tokenPath := config.ServiceAccountTokenPath
 	if tokenPath == "" {
 		tokenPath = DefaultServiceAccountTokenPath
@@ -197,7 +205,7 @@ func New(config Config) (*Client, error) {
 	apiClient.ClearToken()
 	apiClient.ClearNamespace()
 	return &Client{
-		api: apiClient, mount: mount, role: role, tokenPath: tokenPath,
+		api: apiClient, mount: mount, role: role, tokenPath: tokenPath, tokenSource: config.ServiceAccountTokenSource,
 		transit: transit, transitKey: transitKey, verifiedHTTPS: parsed.Scheme == "https",
 	}, nil
 }
@@ -395,10 +403,30 @@ func (client *Client) FetchKV(ctx context.Context, paths []string) (map[string]m
 	}
 	defer client.logout(ctx, login)
 
+	return fetchKVPaths(paths, func(path string) (map[string][]byte, int, error) {
+		return client.readKV(ctx, login, path)
+	})
+}
+
+// fetchKVPaths transfers ownership only when every requested read succeeds.
+// Failed or duplicate reads must not abandon secret buffers in the server heap.
+func fetchKVPaths(paths []string, read func(string) (map[string][]byte, int, error)) (map[string]map[string][]byte, error) {
 	result := make(map[string]map[string][]byte, len(paths))
+	complete := false
+	defer func() {
+		if !complete {
+			for _, values := range result {
+				clearKVValues(values)
+			}
+		}
+	}()
 	total := 0
 	for _, path := range paths {
-		values, size, err := client.readKV(ctx, login, path)
+		if _, seen := result[path]; seen {
+			continue
+		}
+		values, size, err := read(path)
+		result[path] = values
 		if err != nil {
 			return nil, err
 		}
@@ -406,13 +434,20 @@ func (client *Client) FetchKV(ctx context.Context, paths []string) (map[string]m
 		if total > maxSecretTotalBytes {
 			return nil, fmt.Errorf("secret store secrets exceed %d bytes in total", maxSecretTotalBytes)
 		}
-		result[path] = values
 	}
+	complete = true
 	return result, nil
 }
 
+func clearKVValues(values map[string][]byte) {
+	for key, value := range values {
+		clear(value)
+		delete(values, key)
+	}
+}
+
 func (client *Client) login(ctx context.Context) (*vaultapi.Client, error) {
-	token, err := client.serviceAccountToken()
+	token, err := client.serviceAccountToken(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -479,7 +514,7 @@ func (client *Client) readKV(ctx context.Context, session *vaultapi.Client, path
 	if len(data) > maxSecretKeysPerPath {
 		return nil, 0, fmt.Errorf("secret store entry %q has %d keys, maximum is %d", path, len(data), maxSecretKeysPerPath)
 	}
-	values := make(map[string][]byte, len(data))
+	// Validate every field before allocating mutable secret buffers.
 	size := 0
 	for key, raw := range data {
 		text, ok := raw.(string)
@@ -492,13 +527,27 @@ func (client *Client) readKV(ctx context.Context, session *vaultapi.Client, path
 		if len(text) > maxSecretValueBytes {
 			return nil, 0, fmt.Errorf("secret store entry %q key %q exceeds %d bytes", path, key, maxSecretValueBytes)
 		}
-		values[key] = []byte(text)
 		size += len(text)
+	}
+	values := make(map[string][]byte, len(data))
+	for key, raw := range data {
+		values[key] = []byte(raw.(string))
 	}
 	return values, size, nil
 }
 
-func (client *Client) serviceAccountToken() ([]byte, error) {
+func (client *Client) serviceAccountToken(ctx context.Context) ([]byte, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if client.tokenSource != nil {
+		raw, err := client.tokenSource(ctx)
+		defer clear(raw)
+		if err != nil {
+			return nil, err
+		}
+		return copyServiceAccountToken(raw)
+	}
 	file, err := os.Open(client.tokenPath) // #nosec G304 -- the operator explicitly supplies this in-pod identity path.
 	if err != nil {
 		return nil, fmt.Errorf("read ServiceAccount token for secret store login: %w", err)
@@ -512,19 +561,20 @@ func (client *Client) serviceAccountToken() ([]byte, error) {
 		return nil, errors.New("ServiceAccount token for secret store login must be a non-empty bounded regular file")
 	}
 	raw, err := io.ReadAll(io.LimitReader(file, maxTokenBytes+1))
+	defer clear(raw)
 	if err != nil {
 		return nil, fmt.Errorf("read ServiceAccount token for secret store login: %w", err)
 	}
+	return copyServiceAccountToken(raw)
+}
+
+func copyServiceAccountToken(raw []byte) ([]byte, error) {
 	if len(raw) > maxTokenBytes {
-		clear(raw)
 		return nil, errors.New("ServiceAccount token for secret store login exceeds the size bound")
 	}
 	trimmed := bytes.TrimSpace(raw)
 	if len(trimmed) == 0 {
-		clear(raw)
 		return nil, errors.New("ServiceAccount token for secret store login is empty")
 	}
-	token := bytes.Clone(trimmed)
-	clear(raw) // Zero the file-read buffer; trimmed shares its backing array.
-	return token, nil
+	return bytes.Clone(trimmed), nil
 }

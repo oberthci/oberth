@@ -784,6 +784,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 		MutationGate:           anchors.AllowMutation,
 		PromotionWorkspaceRoot: filepath.Join(options.dataRoot, "work"),
 		SecretAccess:           database,
+		SecretStoreVerifier:    buildSecretStoreVerifier(options, kube),
 		SecretAccessReconciler: accessReconciler,
 		RepositoryRemover:      database,
 		RemoveGitCache:         git.RemoveRepository,
