@@ -409,6 +409,17 @@ continuity checks; it must never be used to reset or bypass those checks.
   no forge release or ref mutation. Oberth alone publishes the exact admitted
   annotated tag object after every release burn is terminal green. A
   human-facing forge release, if desired, is a post-publication operation.
+- The release publisher verifies its existing Cloudflare account token at the
+  fixed HTTPS API, then derives temporary S3 credentials locally using the
+  documented HS256 JWT protocol. The bucket-only parent has no REST object
+  authority: no REST credential-mint fallback or broader grant is allowed.
+  The token binds the selected release bucket, `oberth/` prefix,
+  `object-read-write` scope and 1800-second lifetime. The token ID remains the
+  access key; the parent signing key is ASCII lowercase SHA-256 hex of the
+  API token. The temporary secret is SHA-256 hex of the compact JWT, and the
+  session is standard base64 of `jwt/` followed by that JWT. Parent verification
+  rejects redirects/proxies and uses TLS 1.3; derived curl configuration stays
+  in the existing credential leaf's private tmpfs. No credential is printed.
 - **AI-CONTRACT:** No unlisted objects survive in `oberth/latest/` after
   `release-finalize`. After alias convergence, the finalizer LISTs
   `oberth/latest/` and DELETEs every key not in the converged set ({VERSION,
@@ -1386,3 +1397,48 @@ Both installer paths pin the reviewed connector images. Every object is checked
 again after metadata changes, including objects retained by a forward-repair
 plan. Helm preview output is bounded during subprocess capture and failures
 are sanitized; token staging logs contain no token-derived digest.
+
+Connector resource labels contain application name and instance exactly once.
+The Deployment retains `cloudflared-watch` / `cloudflared-watch-oberth-v2` in
+resource labels, its immutable selector and Pod labels. Its ServiceAccount and
+public CA ConfigMaps retain the release name as their instance. Shared chart
+labels cannot overwrite these identities.
+
+The existing Helm server preview is a target-render check; it does not prove a
+subsequent server-side apply is conflict-free. V1 adoption still requires a
+deployed revision and does not authorize rewriting legacy field ownership or
+accepting a failed revision. V2 implements only the reviewed forward recovery
+of the original failed72 attempt. It verifies the fixed release signing key,
+signed successor installer/chart/checksums, original immutable plan/receipt,
+four original UIDs and fresh failed72 record UID/RV/history. Its maximum
+30-minute public plan binds current full metadata/managedFields/specs and
+separate rendered/defaulted targets. The sole permitted relinquishment is the
+legacy Update apps/v1 manager's fetch-token.args leaf. Full metadata UID/RV CAS
+preserves every other entry and spec; shared/atomic/unknown ownership refuses.
+All four real Force=false SSA DryRunAll requests precede the CAS and repeat
+after it, using the hash-bound Helm4.2.3 manager. Confirmed receipts survive
+later failure; uncertain outcomes stop without automatic retry or rollback.
+Both the recovery API client and sealed Helm kubeconfig derive from one frozen
+validated literal HTTPS credential. Impersonation and caller transport/auth
+hooks are refused; credential file reload and ambient proxy input are removed.
+The signed running installer binds the kernel executable inode, not a mutable
+installation pathname. The CAS index comes from the observed approved array;
+handoff replies preserve complete metadata except confirmed RV/fieldset change.
+The implementation and [regression catalog](docs/watch-csa-test-catalog.md)
+remain source-only and unqualified until separately admitted checks pass.
+There is no general failed-release or manager-transfer mode. A coordinated
+cutover requires the former writer to be quiescent; later drift is still
+detectable and refused. No source packet authorizes a live retry.
+
+V2 also binds the canonical public values digest before sealing and rechecks it
+on the sealed bytes before preparation. Only the three validated deployment
+protocol identities and four exact module-proxy namespace strings may extend
+the v1 connector-only whitelist; no security or enablement override is added.
+API patches 1.36.2 and 1.36.3 have separately pinned fixture tools, while each
+plan retains exact full API GitVersion equality at every effect boundary.
+Only the connector Deployment may retain the public
+`deployment.kubernetes.io/revision` annotation (canonical positive signed-64-bit
+decimal) and the exact `oberth.ci/source` value
+`github.com/oberthci/terraform//k8s/cloudflared-watch`. Their observed values
+remain bound by the complete metadata comparison and CAS; admitting these keys
+does not authorize changing or dropping them during the ownership handoff.

@@ -463,26 +463,21 @@ func runR2Auth(ctx context.Context, arguments []string) error {
 	if len(arguments) != 6 || arguments[0] != "r2-auth" {
 		return errors.New("r2-auth requires TOKEN_FILE ACCOUNT_ID BUCKET PREFIX OUTPUT")
 	}
-	// #nosec G703 -- the release contract supplies a read-only projected Secret path.
-	tokenBody, err := os.ReadFile(arguments[1])
+	if apiBase := os.Getenv("OBERTH_CLOUDFLARE_API_BASE"); apiBase != "" && apiBase != defaultCloudflareAPIBase {
+		return errors.New("R2 token verification requires the fixed Cloudflare API")
+	}
+	var fs syscall.Statfs_t
+	if syscall.Statfs(filepath.Dir(arguments[5]), &fs) != nil || fs.Type != 0x01021994 {
+		return errors.New("R2 credential output requires a memory-backed directory")
+	}
+	tokenBody, err := readR2Token(arguments[1])
 	if err != nil {
-		return errors.New("read R2 parent API token")
+		return err
 	}
-	apiBase := os.Getenv("OBERTH_CLOUDFLARE_API_BASE")
-	if apiBase == "" {
-		apiBase = defaultCloudflareAPIBase
-	}
-	parsed, err := url.Parse(apiBase)
-	if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
-		return errors.New("cloudflare API base must be an HTTPS origin")
-	}
-	client := &http.Client{
-		Timeout: 30 * time.Second,
-		CheckRedirect: func(*http.Request, []*http.Request) error {
-			return http.ErrUseLastResponse
-		},
-	}
-	issued, err := exchange(ctx, client, apiBase, strings.TrimSpace(string(tokenBody)), arguments[2], arguments[3], arguments[4])
+	defer clear(tokenBody)
+	client := r2HTTPClient()
+	defer client.CloseIdleConnections()
+	issued, err := exchange(ctx, client, defaultCloudflareAPIBase, strings.TrimSpace(string(tokenBody)), arguments[2], arguments[3], arguments[4])
 	if err != nil {
 		return err
 	}
@@ -719,7 +714,7 @@ func resolveChartDigest(ctx context.Context, reference, tokenPath string) (strin
 }
 
 func exchange(ctx context.Context, client *http.Client, apiBase, token, account, bucket, prefix string) (credentials, error) {
-	if client == nil || !tokenPattern.MatchString(token) || !accountPattern.MatchString(account) || !bucketPattern.MatchString(bucket) ||
+	if client == nil || len(token) > 4096 || !tokenPattern.MatchString(token) || !accountPattern.MatchString(account) || !bucketPattern.MatchString(bucket) ||
 		!prefixPattern.MatchString(prefix) || strings.Contains(prefix, "..") || strings.HasPrefix(prefix, "/") {
 		return credentials{}, errors.New("R2 temporary-credential request is invalid")
 	}
@@ -755,30 +750,7 @@ func exchange(ctx context.Context, client *http.Client, apiBase, token, account,
 	if !verification.Success || verification.Result.Status != "active" || !accountPattern.MatchString(verification.Result.ID) {
 		return credentials{}, errors.New("R2 parent API token verification failed")
 	}
-	requestBody := struct {
-		Bucket            string   `json:"bucket"`
-		ParentAccessKeyID string   `json:"parentAccessKeyId"`
-		Permission        string   `json:"permission"`
-		TTLSeconds        int      `json:"ttlSeconds"`
-		Prefixes          []string `json:"prefixes"`
-	}{bucket, verification.Result.ID, "object-read-write", 1800, []string{prefix}}
-	var response struct {
-		Success bool `json:"success"`
-		Result  struct {
-			AccessKeyID     string `json:"accessKeyId"`
-			SecretAccessKey string `json:"secretAccessKey"`
-			SessionToken    string `json:"sessionToken"`
-		} `json:"result"`
-	}
-	endpoint := fmt.Sprintf("%s/accounts/%s/r2/temp-access-credentials", strings.TrimRight(apiBase, "/"), account)
-	if err := requestJSON(ctx, client, http.MethodPost, endpoint, token, requestBody, &response); err != nil {
-		return credentials{}, fmt.Errorf("request temporary R2 credentials: %w", err)
-	}
-	issued := credentials{response.Result.AccessKeyID, response.Result.SecretAccessKey, response.Result.SessionToken}
-	if !response.Success || !validCredentials(issued) {
-		return credentials{}, errors.New("temporary R2 credential response is invalid")
-	}
-	return issued, nil
+	return localR2Credentials(token, verification.Result.ID, account, bucket, prefix, time.Now())
 }
 
 func requestJSON(ctx context.Context, client *http.Client, method, endpoint, token string, input, output any) error {

@@ -13,6 +13,12 @@ oberth
 {{- define "oberth.labels" -}}
 app.kubernetes.io/name: {{ include "oberth.name" . }}
 app.kubernetes.io/instance: {{ .Release.Name }}
+{{ include "oberth.chartLabels" . }}
+{{- end }}
+
+{{- /* Shared chart identity excludes application identity: the connector has
+       its own stable name and Deployment instance/selector. */ -}}
+{{- define "oberth.chartLabels" -}}
 app.kubernetes.io/managed-by: {{ .Release.Service }}
 helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" }}
 {{- end }}

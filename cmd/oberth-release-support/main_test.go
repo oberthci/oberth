@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync"
@@ -585,78 +586,56 @@ func (buffer *notifyingBuffer) String() string {
 	return buffer.buffer.String()
 }
 
-func TestExchangeRequestsOnlyTheOberthPrefix(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
-		if request.Header.Get("Authorization") != "Bearer parent-token" {
-			response.WriteHeader(http.StatusUnauthorized)
-			return
-		}
-		switch request.URL.Path {
-		case "/user/tokens/verify":
-			_ = json.NewEncoder(response).Encode(map[string]any{"success": true, "result": map[string]any{"id": testAccount, "status": "active"}})
-		case "/accounts/" + testAccount + "/r2/temp-access-credentials":
-			var requestBody map[string]any
-			if err := json.NewDecoder(request.Body).Decode(&requestBody); err != nil {
-				response.WriteHeader(http.StatusBadRequest)
-				return
+// Both supported token owners verify over the API, but credential derivation
+// performs no REST mint request: a bucket-only parent cannot call that API.
+func TestExchangeVerifiesParentThenLocallyScopesCredentials(t *testing.T) {
+	for _, accountOwned := range []bool{true, false} {
+		t.Run(fmt.Sprint(accountOwned), func(t *testing.T) {
+			var calls []string
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls = append(calls, r.Method+" "+r.URL.Path)
+				if r.Method != http.MethodGet || r.Header.Get("Authorization") != "Bearer public-test-parent-token" {
+					t.Error("unexpected credential request")
+					w.WriteHeader(http.StatusForbidden)
+					return
+				}
+				if r.URL.Path == "/accounts/"+testAccount+"/tokens/verify" && !accountOwned {
+					w.WriteHeader(http.StatusUnauthorized)
+					return
+				}
+				if r.URL.Path != "/accounts/"+testAccount+"/tokens/verify" && r.URL.Path != "/user/tokens/verify" {
+					t.Error("unexpected REST credential mint")
+					w.WriteHeader(http.StatusForbidden)
+					return
+				}
+				_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "result": map[string]any{"id": testAccount, "status": "active"}})
+			}))
+			t.Cleanup(server.Close)
+			before := time.Now().Unix()
+			got, err := exchange(context.Background(), server.Client(), server.URL, "public-test-parent-token", testAccount, "oberth-releases", "oberth/")
+			if err != nil {
+				t.Fatal(err)
 			}
-			prefixes, ok := requestBody["prefixes"].([]any)
-			if !ok || len(prefixes) != 1 || prefixes[0] != "oberth/" {
-				response.WriteHeader(http.StatusBadRequest)
-				return
+			claims := decodeR2TestClaims(t, got)
+			if got.accessKeyID != testAccount || claims["bucket"] != "oberth-releases" || claims["scope"] != "object-read-write" {
+				t.Fatal("temporary scope differs")
 			}
-			_ = json.NewEncoder(response).Encode(map[string]any{
-				"success": true,
-				"result":  map[string]any{"accessKeyId": "access", "secretAccessKey": "secret", "sessionToken": "session"},
-			})
-		default:
-			http.NotFound(response, request)
-		}
-	}))
-	t.Cleanup(server.Close)
-	issued, err := exchange(context.Background(), server.Client(), server.URL, "parent-token", testAccount, "acme-releases", "oberth/")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !validCredentials(issued) {
-		t.Fatalf("issued credentials = %#v", issued)
-	}
-}
-
-// TestExchangeVerifiesAccountOwnedTokenAtAccountScope proves the primary
-// verify path for account-owned R2 tokens (the release contract since the
-// 2026-09 account split): the account-scoped endpoint answers, the
-// user-scoped one rejects with 401 exactly as Cloudflare does for account
-// tokens, and the exchange still succeeds. The pre-existing test above now
-// exercises the legacy /user fallback.
-func TestExchangeVerifiesAccountOwnedTokenAtAccountScope(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
-		if request.Header.Get("Authorization") != "Bearer parent-token" {
-			response.WriteHeader(http.StatusUnauthorized)
-			return
-		}
-		switch request.URL.Path {
-		case "/accounts/" + testAccount + "/tokens/verify":
-			_ = json.NewEncoder(response).Encode(map[string]any{"success": true, "result": map[string]any{"id": testAccount, "status": "active"}})
-		case "/user/tokens/verify":
-			// Cloudflare answers 401 for account-owned tokens here.
-			response.WriteHeader(http.StatusUnauthorized)
-		case "/accounts/" + testAccount + "/r2/temp-access-credentials":
-			_ = json.NewEncoder(response).Encode(map[string]any{
-				"success": true,
-				"result":  map[string]any{"accessKeyId": "access", "secretAccessKey": "secret", "sessionToken": "session"},
-			})
-		default:
-			http.NotFound(response, request)
-		}
-	}))
-	t.Cleanup(server.Close)
-	issued, err := exchange(context.Background(), server.Client(), server.URL, "parent-token", testAccount, "acme-releases", "oberth/")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !validCredentials(issued) {
-		t.Fatalf("issued credentials = %#v", issued)
+			paths := claims["paths"].(map[string]any)
+			if !reflect.DeepEqual(paths["prefixPaths"], []any{"oberth/"}) || len(paths["objectPaths"].([]any)) != 0 {
+				t.Fatal("temporary paths differ")
+			}
+			issued := int64(claims["iat"].(float64))
+			if issued < before || issued > time.Now().Unix() || int64(claims["exp"].(float64)) != issued+1800 {
+				t.Fatal("temporary lifetime differs")
+			}
+			want := []string{"GET /accounts/" + testAccount + "/tokens/verify"}
+			if !accountOwned {
+				want = append(want, "GET /user/tokens/verify")
+			}
+			if !reflect.DeepEqual(calls, want) {
+				t.Fatalf("requests = %v", calls)
+			}
+		})
 	}
 }
 

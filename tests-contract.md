@@ -47,3 +47,21 @@ intact, and the client must not mutate the process environment.
 `TestClientSDKConstructionErrorsDoNotReflectAmbientInput` checks forbidden
 header names and malformed environment configuration at constructor and clone
 boundaries: fixed bounded errors, no reflected marker, and zero HTTP requests.
+
+Watch CSA recovery #671 (prepared, all UNRUN): strict chart YAML must retain the
+four connector identities without duplicate labels. V2 tests require only the
+sole legacy Update apps/v1 fetch-token.args leaf to be relinquished; foreign,
+shared, atomic, malformed and drifted ownership fails. Exact structured409
+causes, all-four identity preflight, full metadata UID/RV CAS, expiry/revision
+guards and retained partial/uncertain receipts prevent unqualified Helm.
+The `watch_real_api` regression uses genuine CSA/API1.36.2/Helm4.2.3 with the
+same private effect engine: original six conflicts and actual FAILED72,
+corrected one conflict, persisted metadata-only subtraction, all-four SSA
+Force=false dry-runs and ordinary deployed73 convergence on the same UIDs.
+The synthetic fixture does not qualify signed released-installer admission or
+live rollout. [The catalog](docs/watch-csa-test-catalog.md) records that boundary,
+the remaining production proof and exact source-bound CPU2 custody/build gates.
+V5 source regressions additionally require one frozen API/Helm identity,
+impersonation/hook refusal, static public credential path-replacement binding,
+kernel executable-inode binding, observed fieldset ordering and complete
+metadata preservation. These remain UNRUN and confer no execution admission.

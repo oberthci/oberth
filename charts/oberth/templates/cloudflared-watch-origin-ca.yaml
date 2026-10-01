@@ -10,8 +10,9 @@ metadata:
   namespace: {{ .Release.Namespace }}
   labels:
     app.kubernetes.io/name: cloudflared-watch
+    app.kubernetes.io/instance: {{ .Release.Name }}
     app.kubernetes.io/component: tunnel-connector
-    {{- include "oberth.labels" . | nindent 4 }}
+    {{- include "oberth.chartLabels" . | nindent 4 }}
 data:
   ca.crt: |
 {{ $wt.originCACert | trim | indent 4 }}

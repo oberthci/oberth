@@ -29,6 +29,10 @@ const watchAdoptionSchema = "oberth.watch-adoption/v1"
 // Adoption values are public connector inputs, not authority to change other
 // installed services or their security policy.
 func readWatchValues(files []string) ([]byte, error) {
+	return readWatchValuesMode(files, false)
+}
+
+func readWatchValuesMode(files []string, recovery bool) ([]byte, error) {
 	if len(files) > 16 {
 		return nil, errors.New("too many public watch values files")
 	}
@@ -50,6 +54,12 @@ func readWatchValues(files []string) ([]byte, error) {
 		for section, fields := range values {
 			if merged[section] == nil {
 				merged[section] = map[string]any{}
+			}
+			if recovery && (section == "compatibility" || section == "argo") {
+				if err := mergeWatchRecoveryValues(merged[section], fields, section); err != nil {
+					return nil, err
+				}
+				continue
 			}
 			if fields == nil || (section != "watchTunnel" && section != "secretstore") {
 				return nil, errors.New("public watch values contain an unrelated setting")
@@ -73,19 +83,15 @@ func readWatchValues(files []string) ([]byte, error) {
 	return json.Marshal(merged)
 }
 
-func validateWatchValues(files []string) error {
-	_, err := readWatchValues(files)
-	return err
-}
-
 func freezeWatchValues(cfg Config) (Config, func(), error) {
-	if cfg.WatchAdoptionPlan == "" || len(cfg.ValuesFiles) == 0 {
+	if cfg.WatchAdoptionPlan == "" {
 		return cfg, func() {}, nil
 	}
-	raw, err := readWatchValues(cfg.ValuesFiles)
+	raw, err := readWatchConfiguredValues(cfg)
 	if err != nil {
 		return cfg, func() {}, err
 	}
+	cfg.watchValuesSHA256 = watchValuesDigest(raw)
 	f, err := sealedWatchValues(raw)
 	if err != nil {
 		return cfg, func() {}, err
@@ -517,6 +523,14 @@ func adoptWatchTunnel(ctx context.Context, cfg Config, deps Deps, dryRun bool) e
 func adoptWatchTunnelReceipt(ctx context.Context, cfg Config, deps Deps, dryRun bool) ([]watchAdopted, error) {
 	if cfg.WatchAdoptionPlan == "" {
 		return nil, nil
+	}
+	if cfg.watchRecovery != nil {
+		return executeWatchRecovery(ctx, cfg, deps, dryRun)
+	}
+	if p, err := readWatchRecoveryPlan(cfg); err != nil {
+		return nil, err
+	} else if p != nil {
+		return nil, errors.New("v2 watch recovery requires prepared signed artifacts")
 	}
 	p, e := readWatchPlan(cfg)
 	if e != nil {

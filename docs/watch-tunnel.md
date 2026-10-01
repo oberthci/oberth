@@ -69,3 +69,37 @@ Helm preview stdout and stderr are bounded as they are read. Mixed release
 values remain in process memory; only the four reviewed public object
 specifications and adoption receipts are exposed. The connector logs successful
 token staging without logging the token or a digest derived from it.
+
+Connector identity labels are emitted once. The Deployment's resource labels,
+selector and Pod labels retain `app.kubernetes.io/name: cloudflared-watch` and
+`app.kubernetes.io/instance: cloudflared-watch-oberth-v2`. The ServiceAccount and
+CA ConfigMaps use the connector name and the Helm release's instance name.
+
+The Helm server preview checks the calculated target, not whether a later SSA
+write can acquire fields held by an imperative manager. A normal Helm conflict
+after metadata adoption is still a failure. The v1 command requires a deployed
+revision; it cannot repair a latest failed revision by replaying an expired plan.
+V2 adds only the original failed72 forward recovery described in
+[the source-review design](watch-csa-recovery-design.md). It binds the original
+immutable attempt and UIDs, fresh failed72 record/history, a signed successor
+installer/chart/server and an expiring public plan. It removes only the sole
+legacy Update manager's fetch-token.args ownership leaf by full metadata
+UID/RV CAS. It preserves current specs and all other ownership, and refuses
+shared, atomic, unknown or drifted ownership. Four genuine Force=false SSA
+DryRunAll requests must report only that planned conflict before the handoff
+and all succeed afterward. Ordinary Helm then applies the approved successor.
+Mixed values and selected HTTPS credentials remain in sealed process RAM;
+only public identities and confirmed metadata receipts are emitted.
+
+The [regression catalog](watch-csa-test-catalog.md) records the prepared unit
+and isolated real-API sources. Compilation, tests and fixtures are unrun;
+released-installer and live qualification remain owed. The former client-side
+writer must be quiescent during an independently coordinated cutover. A source
+review or render preview does not authorize a live retry.
+
+For an existing deployment with explicit protocol or module-proxy identities,
+the v2 plan also requires `values_sha256` over the canonical merged public
+values. Complete identity/namespace groups use the same validation as the
+daemon. The seven permitted public fields are listed in the recovery design;
+other service and security overrides remain forbidden. The installer seals
+these bytes and rechecks the approved digest before recovery begins.

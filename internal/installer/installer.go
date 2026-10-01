@@ -117,6 +117,10 @@ type Config struct {
 	Yes               bool
 	Upgrade           bool
 	WatchAdoptionPlan string
+	// Private prepared state comes only from the signed v2 artifact checks.
+	watchRecovery     *watchRecoveryPlan
+	watchChart        string
+	watchValuesSHA256 string
 	// InstallSecretStore additionally installs a PRODUCTION-mode OpenBao —
 	// standalone server with persistent storage — then initializes it
 	// (1 key share, threshold 1) and unseals it via kubectl exec, prints the
@@ -476,7 +480,7 @@ func (cfg *Config) Validate() error {
 		if cfg.NetworkPolicy != "" && cfg.NetworkPolicy != "auto" {
 			return errors.New("watch adoption must preserve the installed network policy")
 		}
-		if err := validateWatchValues(cfg.ValuesFiles); err != nil {
+		if _, err := readWatchConfiguredValues(*cfg); err != nil {
 			return err
 		}
 	}
@@ -616,6 +620,12 @@ func Run(ctx context.Context, cfg Config, deps Deps) error {
 			return err
 		}
 		defer closeValues()
+		var closeTarget func()
+		cfg, deps, closeTarget, err = prepareWatchRecovery(ctx, cfg, deps)
+		if err != nil {
+			return err
+		}
+		defer closeTarget()
 		// The adoption preview must use the same published image pin that the
 		// real install supplies after resolving the target chart. Otherwise
 		// --reuse-values could preview the old server image instead.
@@ -1352,6 +1362,12 @@ func InstallOberth(ctx context.Context, cfg Config, deps Deps, openbao OpenBaoRe
 		return result, err
 	}
 	defer closeValues()
+	var closeTarget func()
+	cfg, deps, closeTarget, err = prepareWatchRecovery(ctx, cfg, deps)
+	if err != nil {
+		return result, err
+	}
+	defer closeTarget()
 	if cfg.InstallSecretStore {
 		if strings.TrimSpace(openbao.CACertPEM) == "" {
 			return result, errors.New("installer-managed production OpenBao requires a public CA certificate before installing Oberth")
@@ -1398,6 +1414,8 @@ func InstallOberth(ctx context.Context, cfg Config, deps Deps, openbao OpenBaoRe
 		return result, nil
 	}
 	switch {
+	case cfg.watchRecovery != nil:
+		// The source-pinned signature checks froze the exact published archive.
 	case strings.TrimSpace(cfg.ChartPath) != "":
 		// A local chart resolves from disk, so there is no repository to add.
 		// --image was assumed to name an image the node already has, which
@@ -1455,6 +1473,9 @@ func InstallOberth(ctx context.Context, cfg Config, deps Deps, openbao OpenBaoRe
 	if err != nil {
 		return result, err
 	}
+	if err = requireWatchRecoveryBeforeHelm(ctx, cfg, deps); err != nil {
+		return result, err
+	}
 	helmOutput, helmErr := deps.RunHelm(ctx, OberthHelmArgs(cfg, openbao, rekor))
 	if cfg.WatchAdoptionPlan != "" {
 		clear(helmOutput)
@@ -1501,6 +1522,9 @@ func OberthHelmArgs(cfg Config, openbao OpenBaoResult, rekor RekorResult) []stri
 	chart := oberthRepoName + "/oberth"
 	if local := strings.TrimSpace(cfg.ChartPath); local != "" {
 		chart = local
+	}
+	if cfg.watchChart != "" {
+		chart = cfg.watchChart
 	}
 	args := []string{
 		"upgrade", "--install", "oberth", chart,
@@ -1592,7 +1616,7 @@ func OberthHelmArgs(cfg Config, openbao OpenBaoResult, rekor RekorResult) []stri
 		args = append(args, "--set", "networkPolicy.enabled="+cfg.NetworkPolicy)
 	}
 	// --version selects a published chart; a local path already IS the version.
-	if cfg.ChartVersion != "" && strings.TrimSpace(cfg.ChartPath) == "" {
+	if cfg.ChartVersion != "" && strings.TrimSpace(cfg.ChartPath) == "" && cfg.watchChart == "" {
 		args = append(args, "--version", cfg.ChartVersion)
 	}
 	// Idempotent re-runs and upgrades must not reset values a user set on a
