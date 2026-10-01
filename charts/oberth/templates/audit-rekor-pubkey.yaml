@@ -1,0 +1,14 @@
+{{- if .Values.auditAnchor.rekorPublicKey }}
+# The Rekor log key is public verification material; a ConfigMap keeps it out
+# of Kubernetes Secrets while giving the server a stable file path.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "oberth.fullname" . }}-audit-rekor-pubkey
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "oberth.labels" . | nindent 4 }}
+data:
+  rekor.pub: |
+    {{- .Values.auditAnchor.rekorPublicKey | nindent 4 }}
+{{- end }}

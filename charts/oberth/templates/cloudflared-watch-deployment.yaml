@@ -1,0 +1,201 @@
+{{- $wt := .Values.watchTunnel | default dict -}}
+{{- if $wt.enabled }}
+{{- /* Validate digest-pinned images. */ -}}
+{{- if not (regexMatch "@sha256:[0-9a-f]{64}$" $wt.image) -}}
+{{- fail "watchTunnel.image must be digest-pinned (<image>@sha256:<64hex>)" -}}
+{{- end -}}
+{{- if not (regexMatch "@sha256:[0-9a-f]{64}$" $wt.openbaoImage) -}}
+{{- fail "watchTunnel.openbaoImage must be digest-pinned (<image>@sha256:<64hex>)" -}}
+{{- end -}}
+{{- $ob := $wt.openbao | default dict -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cloudflared-watch-oberth-v2
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: cloudflared-watch
+    app.kubernetes.io/instance: cloudflared-watch-oberth-v2
+    app.kubernetes.io/component: tunnel-connector
+    {{- include "oberth.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: cloudflared-watch
+      app.kubernetes.io/instance: cloudflared-watch-oberth-v2
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: cloudflared-watch
+        app.kubernetes.io/instance: cloudflared-watch-oberth-v2
+        app.kubernetes.io/component: tunnel-connector
+    spec:
+      serviceAccountName: cloudflared-watch
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      terminationGracePeriodSeconds: 45
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        - name: fetch-token
+          image: {{ $wt.openbaoImage }}
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/sh", "-euc"]
+          args:
+            - |
+              umask 0277
+              jwt=/var/run/secrets/openbao/token
+              dst=/run/cloudflared/token
+              tmp=/run/cloudflared/.token.partial
+              BAO_TOKEN=""
+              finish() {
+                rc=$?
+                if [ -n "$BAO_TOKEN" ]; then
+                  bao token revoke -self >/dev/null 2>&1 \
+                    || echo "cloudflared-watch: revoke-self failed; the login token still expires with its 10m TTL" >&2
+                fi
+                rm -f "$tmp"
+                exit "$rc"
+              }
+              trap finish EXIT
+              BAO_TOKEN="$(bao write -field=token auth/{{ $ob.authMount | default "kubernetes" }}/login role={{ $ob.role | default "cloudflared-watch" }} jwt=@"$jwt")"
+              export BAO_TOKEN
+              bao kv get -mount={{ $ob.secretMount | default "oberth" }} -field={{ $ob.secretField | default "TUNNEL_TOKEN" }} {{ $ob.secretPath | default "ops/cloudflared-watch-token" }} >"$tmp"
+              if [ ! -s "$tmp" ]; then
+                echo "cloudflared-watch: {{ $ob.secretField | default "TUNNEL_TOKEN" }} is empty" >&2
+                exit 1
+              fi
+              mv -f "$tmp" "$dst"
+              echo "cloudflared-watch: connector token staged (memory-backed emptyDir, mode 0400)"
+          env:
+            - name: BAO_ADDR
+              value: {{ $ob.address | default "https://openbao.openbao.svc:8200" | quote }}
+            - name: BAO_CACERT
+              value: "/etc/openbao-ca/ca.crt"
+            - name: BAO_CLIENT_TIMEOUT
+              value: "30s"
+            - name: HOME
+              value: "/tmp"
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+              ephemeral-storage: 8Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+              ephemeral-storage: 32Mi
+          volumeMounts:
+            - name: token
+              mountPath: /run/cloudflared
+            - name: init-home
+              mountPath: /tmp
+            - name: openbao-ca
+              mountPath: /etc/openbao-ca
+              readOnly: true
+            - name: openbao-sa-token
+              mountPath: /var/run/secrets/openbao
+              readOnly: true
+      containers:
+        - name: cloudflared
+          image: {{ $wt.image }}
+          imagePullPolicy: IfNotPresent
+          args:
+            - tunnel
+            - --no-autoupdate
+            - --metrics
+            - 127.0.0.1:20241
+            - --edge-ip-version
+            - "4"
+            - --management-diagnostics=false
+            - run
+            - --token-file
+            - /run/cloudflared/token
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          startupProbe:
+            exec:
+              command: ["cloudflared", "tunnel", "--metrics", "127.0.0.1:20241", "ready"]
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            exec:
+              command: ["cloudflared", "tunnel", "--metrics", "127.0.0.1:20241", "ready"]
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            exec:
+              command: ["cloudflared", "tunnel", "--metrics", "127.0.0.1:20241", "ready"]
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 6
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+              ephemeral-storage: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+              ephemeral-storage: 256Mi
+          volumeMounts:
+            - name: token
+              mountPath: /run/cloudflared
+              readOnly: true
+            {{- if $wt.originCACert }}
+            - name: oberth-origin-ca
+              mountPath: /etc/oberth-origin-ca
+              readOnly: true
+            {{- end }}
+      volumes:
+        {{- if $wt.originCACert }}
+        - name: oberth-origin-ca
+          configMap:
+            name: cloudflared-watch-oberth-origin-ca
+            items:
+              - key: ca.crt
+                path: ca.crt
+        {{- end }}
+        - name: token
+          emptyDir:
+            medium: Memory
+            sizeLimit: 1Mi
+        - name: init-home
+          emptyDir:
+            medium: Memory
+            sizeLimit: 1Mi
+        - name: openbao-ca
+          configMap:
+            name: cloudflared-watch-openbao-ca
+            items:
+              - key: ca.crt
+                path: ca.crt
+        - name: openbao-sa-token
+          projected:
+            sources:
+              - serviceAccountToken:
+                  audience: openbao
+                  expirationSeconds: 600
+                  path: token
+{{- end }}

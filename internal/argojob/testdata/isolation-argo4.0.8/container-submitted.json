@@ -1,0 +1,465 @@
+{
+  "metadata": {
+    "name": "oberth-oberth-run-abc1-aabbccddeeff",
+    "namespace": "oberth-argo",
+    "creationTimestamp": null,
+    "labels": {
+      "oberth.ci/run": "run-abc123",
+      "oberth.ci/tier": "release",
+      "oberth.ci/trigger": "release",
+      "workflows.argoproj.io/completed": "false",
+      "workflows.argoproj.io/workflow": "oberth-oberth-run-abc1-aabbccddeeff"
+    },
+    "annotations": {
+      "kubectl.kubernetes.io/default-container": "main",
+      "oberth.ci/workspace-env": "none",
+      "oberth.ci/workspace-mounts": "readonly",
+      "workflows.argoproj.io/node-id": "oberth-oberth-run-abc1-aabbccddeeff",
+      "workflows.argoproj.io/node-name": "oberth-oberth-run-abc1-aabbccddeeff"
+    },
+    "ownerReferences": [
+      {
+        "apiVersion": "argoproj.io/v1alpha1",
+        "kind": "Workflow",
+        "name": "oberth-oberth-run-abc1-aabbccddeeff",
+        "uid": "isolation-fixture",
+        "controller": true,
+        "blockOwnerDeletion": true
+      }
+    ]
+  },
+  "spec": {
+    "volumes": [
+      {
+        "name": "var-run-argo",
+        "emptyDir": {}
+      },
+      {
+        "name": "tmp-dir-argo",
+        "emptyDir": {}
+      },
+      {
+        "name": "exec-sa-token",
+        "secret": {
+          "secretName": "executor-token-fixture"
+        }
+      },
+      {
+        "name": "work",
+        "persistentVolumeClaim": {
+          "claimName": "oberth-oberth-run-abc1-aabbccddeeff-work"
+        }
+      },
+      {
+        "name": "oberth-tmp",
+        "emptyDir": {
+          "sizeLimit": "8Gi"
+        }
+      },
+      {
+        "name": "oberth-source",
+        "persistentVolumeClaim": {
+          "claimName": "source-claim",
+          "readOnly": true
+        }
+      }
+    ],
+    "initContainers": [
+      {
+        "name": "init",
+        "image": "quay.io/argoproj/argoexec:v0.0.0",
+        "command": [
+          "argoexec",
+          "init",
+          "--loglevel",
+          "info",
+          "--log-format",
+          "text",
+          "--gloglevel",
+          ""
+        ],
+        "env": [
+          {
+            "name": "ARGO_POD_NAME",
+            "valueFrom": {
+              "fieldRef": {
+                "apiVersion": "v1",
+                "fieldPath": "metadata.name"
+              }
+            }
+          },
+          {
+            "name": "ARGO_POD_UID",
+            "valueFrom": {
+              "fieldRef": {
+                "apiVersion": "v1",
+                "fieldPath": "metadata.uid"
+              }
+            }
+          },
+          {
+            "name": "ARGO_WORKFLOW_NAME",
+            "value": "oberth-oberth-run-abc1-aabbccddeeff"
+          },
+          {
+            "name": "ARGO_WORKFLOW_UID",
+            "value": "isolation-fixture"
+          },
+          {
+            "name": "ARGO_CONTAINER_NAME",
+            "value": "init"
+          },
+          {
+            "name": "ARGO_TEMPLATE",
+            "value": "{\"name\":\"main\",\"inputs\":{},\"outputs\":{},\"metadata\":{\"annotations\":{\"oberth.ci/workspace-env\":\"none\",\"oberth.ci/workspace-mounts\":\"readonly\"},\"labels\":{\"oberth.ci/run\":\"run-abc123\",\"oberth.ci/tier\":\"release\",\"oberth.ci/trigger\":\"release\"}},\"container\":{\"name\":\"\",\"image\":\"golang:1.26-alpine@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"command\":[\"/bin/true\"],\"env\":[{\"name\":\"KEEP_ME\",\"value\":\"yes-please\"},{\"name\":\"PATH\",\"value\":\"/private/bin\"},{\"name\":\"GOCACHE\",\"value\":\"/private/cache\"},{\"name\":\"OBERTH_REPO\",\"value\":\"oberth\"},{\"name\":\"OBERTH_REF\",\"value\":\"refs/heads/main\"},{\"name\":\"OBERTH_SHA\",\"value\":\"0123456789abcdef0123456789abcdef01234567\"},{\"name\":\"OBERTH_TRIGGER\",\"value\":\"release\"},{\"name\":\"OBERTH_RUN_ID\",\"value\":\"run-abc123\"},{\"name\":\"OBERTH_RELEASE_TAG\",\"value\":\"refs/heads/main\"},{\"name\":\"OBERTH_RELEASE_SHA\",\"value\":\"0123456789abcdef0123456789abcdef01234567\"}],\"resources\":{},\"volumeMounts\":[{\"name\":\"work\",\"readOnly\":true,\"mountPath\":\"/tools-alias\",\"subPath\":\"tools/bin\"},{\"name\":\"work\",\"readOnly\":true,\"mountPath\":\"/workspace-parent\"},{\"name\":\"oberth-tmp\",\"mountPath\":\"/tmp\"},{\"name\":\"oberth-source\",\"readOnly\":true,\"mountPath\":\"/work/src\",\"subPath\":\"source\"},{\"name\":\"work\",\"readOnly\":true,\"mountPath\":\"/tmp/oberth-tools\",\"subPath\":\"tools\"},{\"name\":\"work\",\"readOnly\":true,\"mountPath\":\"/cache/gomod\",\"subPath\":\"gomod\"},{\"name\":\"work\",\"readOnly\":true,\"mountPath\":\"/cache/gobuild\",\"subPath\":\"gobuild\"},{\"name\":\"work\",\"readOnly\":true,\"mountPath\":\"/tmp/oberth-trivy\",\"subPath\":\"trivy-cache\"},{\"name\":\"work\",\"readOnly\":true,\"mountPath\":\"/tmp/oberth-release\",\"subPath\":\"release\"}],\"securityContext\":{\"capabilities\":{\"drop\":[\"ALL\"]},\"readOnlyRootFilesystem\":true,\"allowPrivilegeEscalation\":false}},\"serviceAccountName\":\"oberth-argo-credentialed\",\"automountServiceAccountToken\":false,\"podSpecPatch\":\"{\\\"containers\\\":[{\\\"name\\\":\\\"wait\\\",\\\"volumeMounts\\\":[{\\\"name\\\":\\\"work\\\",\\\"readOnly\\\":true,\\\"mountPath\\\":\\\"/mainctrfs/tools-alias\\\",\\\"subPath\\\":\\\"tools/bin\\\"},{\\\"name\\\":\\\"work\\\",\\\"readOnly\\\":true,\\\"mountPath\\\":\\\"/mainctrfs/workspace-parent\\\"},{\\\"name\\\":\\\"oberth-source\\\",\\\"readOnly\\\":true,\\\"mountPath\\\":\\\"/mainctrfs/work/src\\\",\\\"subPath\\\":\\\"source\\\"},{\\\"name\\\":\\\"work\\\",\\\"readOnly\\\":true,\\\"mountPath\\\":\\\"/mainctrfs/tmp/oberth-tools\\\",\\\"subPath\\\":\\\"tools\\\"},{\\\"name\\\":\\\"work\\\",\\\"readOnly\\\":true,\\\"mountPath\\\":\\\"/mainctrfs/cache/gomod\\\",\\\"subPath\\\":\\\"gomod\\\"},{\\\"name\\\":\\\"work\\\",\\\"readOnly\\\":true,\\\"mountPath\\\":\\\"/mainctrfs/cache/gobuild\\\",\\\"subPath\\\":\\\"gobuild\\\"},{\\\"name\\\":\\\"work\\\",\\\"readOnly\\\":true,\\\"mountPath\\\":\\\"/mainctrfs/tmp/oberth-trivy\\\",\\\"subPath\\\":\\\"trivy-cache\\\"},{\\\"name\\\":\\\"work\\\",\\\"readOnly\\\":true,\\\"mountPath\\\":\\\"/mainctrfs/tmp/oberth-release\\\",\\\"subPath\\\":\\\"release\\\"}]}]}\"}"
+          },
+          {
+            "name": "ARGO_NODE_ID",
+            "value": "oberth-oberth-run-abc1-aabbccddeeff"
+          },
+          {
+            "name": "ARGO_INCLUDE_SCRIPT_OUTPUT",
+            "value": "false"
+          },
+          {
+            "name": "ARGO_DEADLINE",
+            "value": "2026-09-27T16:11:52Z"
+          },
+          {
+            "name": "ARGO_PROGRESS_FILE",
+            "value": "/var/run/argo/progress"
+          },
+          {
+            "name": "ARGO_PROGRESS_PATCH_TICK_DURATION",
+            "value": "1m0s"
+          },
+          {
+            "name": "ARGO_PROGRESS_FILE_TICK_DURATION",
+            "value": "3s"
+          }
+        ],
+        "resources": {},
+        "volumeMounts": [
+          {
+            "name": "exec-sa-token",
+            "readOnly": true,
+            "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount"
+          },
+          {
+            "name": "var-run-argo",
+            "mountPath": "/var/run/argo"
+          }
+        ]
+      }
+    ],
+    "containers": [
+      {
+        "name": "wait",
+        "image": "quay.io/argoproj/argoexec:v0.0.0",
+        "command": [
+          "argoexec",
+          "wait",
+          "--loglevel",
+          "info",
+          "--log-format",
+          "text",
+          "--gloglevel",
+          ""
+        ],
+        "env": [
+          {
+            "name": "ARGO_POD_NAME",
+            "valueFrom": {
+              "fieldRef": {
+                "apiVersion": "v1",
+                "fieldPath": "metadata.name"
+              }
+            }
+          },
+          {
+            "name": "ARGO_POD_UID",
+            "valueFrom": {
+              "fieldRef": {
+                "apiVersion": "v1",
+                "fieldPath": "metadata.uid"
+              }
+            }
+          },
+          {
+            "name": "ARGO_WORKFLOW_NAME",
+            "value": "oberth-oberth-run-abc1-aabbccddeeff"
+          },
+          {
+            "name": "ARGO_WORKFLOW_UID",
+            "value": "isolation-fixture"
+          },
+          {
+            "name": "ARGO_ARTIFACT_PLUGIN_NAMES"
+          },
+          {
+            "name": "ARGO_CONTAINER_NAME",
+            "value": "wait"
+          },
+          {
+            "name": "ARGO_NODE_ID",
+            "value": "oberth-oberth-run-abc1-aabbccddeeff"
+          },
+          {
+            "name": "ARGO_INCLUDE_SCRIPT_OUTPUT",
+            "value": "false"
+          },
+          {
+            "name": "ARGO_DEADLINE",
+            "value": "2026-09-27T16:11:52Z"
+          },
+          {
+            "name": "ARGO_PROGRESS_FILE",
+            "value": "/var/run/argo/progress"
+          },
+          {
+            "name": "ARGO_PROGRESS_PATCH_TICK_DURATION",
+            "value": "1m0s"
+          },
+          {
+            "name": "ARGO_PROGRESS_FILE_TICK_DURATION",
+            "value": "3s"
+          }
+        ],
+        "resources": {},
+        "volumeMounts": [
+          {
+            "name": "exec-sa-token",
+            "readOnly": true,
+            "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount"
+          },
+          {
+            "name": "work",
+            "readOnly": true,
+            "mountPath": "/mainctrfs/tools-alias",
+            "subPath": "tools/bin"
+          },
+          {
+            "name": "work",
+            "readOnly": true,
+            "mountPath": "/mainctrfs/workspace-parent"
+          },
+          {
+            "name": "oberth-tmp",
+            "mountPath": "/mainctrfs/tmp"
+          },
+          {
+            "name": "oberth-source",
+            "readOnly": true,
+            "mountPath": "/mainctrfs/work/src",
+            "subPath": "source"
+          },
+          {
+            "name": "work",
+            "readOnly": true,
+            "mountPath": "/mainctrfs/tmp/oberth-tools",
+            "subPath": "tools"
+          },
+          {
+            "name": "work",
+            "readOnly": true,
+            "mountPath": "/mainctrfs/cache/gomod",
+            "subPath": "gomod"
+          },
+          {
+            "name": "work",
+            "readOnly": true,
+            "mountPath": "/mainctrfs/cache/gobuild",
+            "subPath": "gobuild"
+          },
+          {
+            "name": "work",
+            "readOnly": true,
+            "mountPath": "/mainctrfs/tmp/oberth-trivy",
+            "subPath": "trivy-cache"
+          },
+          {
+            "name": "work",
+            "readOnly": true,
+            "mountPath": "/mainctrfs/tmp/oberth-release",
+            "subPath": "release"
+          },
+          {
+            "name": "tmp-dir-argo",
+            "mountPath": "/tmp",
+            "subPath": "0"
+          },
+          {
+            "name": "var-run-argo",
+            "mountPath": "/var/run/argo"
+          }
+        ]
+      },
+      {
+        "name": "main",
+        "image": "golang:1.26-alpine@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "command": [
+          "/var/run/argo/argoexec",
+          "emissary",
+          "--loglevel",
+          "info",
+          "--log-format",
+          "text",
+          "--gloglevel",
+          "",
+          "--",
+          "/bin/true"
+        ],
+        "env": [
+          {
+            "name": "KEEP_ME",
+            "value": "yes-please"
+          },
+          {
+            "name": "PATH",
+            "value": "/private/bin"
+          },
+          {
+            "name": "GOCACHE",
+            "value": "/private/cache"
+          },
+          {
+            "name": "OBERTH_REPO",
+            "value": "oberth"
+          },
+          {
+            "name": "OBERTH_REF",
+            "value": "refs/heads/main"
+          },
+          {
+            "name": "OBERTH_SHA",
+            "value": "0123456789abcdef0123456789abcdef01234567"
+          },
+          {
+            "name": "OBERTH_TRIGGER",
+            "value": "release"
+          },
+          {
+            "name": "OBERTH_RUN_ID",
+            "value": "run-abc123"
+          },
+          {
+            "name": "OBERTH_RELEASE_TAG",
+            "value": "refs/heads/main"
+          },
+          {
+            "name": "OBERTH_RELEASE_SHA",
+            "value": "0123456789abcdef0123456789abcdef01234567"
+          },
+          {
+            "name": "ARGO_CONTAINER_NAME",
+            "value": "main"
+          },
+          {
+            "name": "ARGO_NODE_ID",
+            "value": "oberth-oberth-run-abc1-aabbccddeeff"
+          },
+          {
+            "name": "ARGO_INCLUDE_SCRIPT_OUTPUT",
+            "value": "false"
+          },
+          {
+            "name": "ARGO_DEADLINE",
+            "value": "2026-09-27T16:11:52Z"
+          },
+          {
+            "name": "ARGO_PROGRESS_FILE",
+            "value": "/var/run/argo/progress"
+          },
+          {
+            "name": "ARGO_PROGRESS_PATCH_TICK_DURATION",
+            "value": "1m0s"
+          },
+          {
+            "name": "ARGO_PROGRESS_FILE_TICK_DURATION",
+            "value": "3s"
+          }
+        ],
+        "resources": {},
+        "volumeMounts": [
+          {
+            "name": "work",
+            "readOnly": true,
+            "mountPath": "/tools-alias",
+            "subPath": "tools/bin"
+          },
+          {
+            "name": "work",
+            "readOnly": true,
+            "mountPath": "/workspace-parent"
+          },
+          {
+            "name": "oberth-tmp",
+            "mountPath": "/tmp"
+          },
+          {
+            "name": "oberth-source",
+            "readOnly": true,
+            "mountPath": "/work/src",
+            "subPath": "source"
+          },
+          {
+            "name": "work",
+            "readOnly": true,
+            "mountPath": "/tmp/oberth-tools",
+            "subPath": "tools"
+          },
+          {
+            "name": "work",
+            "readOnly": true,
+            "mountPath": "/cache/gomod",
+            "subPath": "gomod"
+          },
+          {
+            "name": "work",
+            "readOnly": true,
+            "mountPath": "/cache/gobuild",
+            "subPath": "gobuild"
+          },
+          {
+            "name": "work",
+            "readOnly": true,
+            "mountPath": "/tmp/oberth-trivy",
+            "subPath": "trivy-cache"
+          },
+          {
+            "name": "work",
+            "readOnly": true,
+            "mountPath": "/tmp/oberth-release",
+            "subPath": "release"
+          },
+          {
+            "name": "var-run-argo",
+            "mountPath": "/var/run/argo"
+          }
+        ],
+        "securityContext": {
+          "capabilities": {
+            "drop": [
+              "ALL"
+            ]
+          },
+          "readOnlyRootFilesystem": true,
+          "allowPrivilegeEscalation": false
+        }
+      }
+    ],
+    "restartPolicy": "Never",
+    "activeDeadlineSeconds": 7199,
+    "serviceAccountName": "oberth-argo-credentialed",
+    "automountServiceAccountToken": false,
+    "securityContext": {
+      "runAsUser": 0,
+      "runAsGroup": 0,
+      "runAsNonRoot": false,
+      "seccompProfile": {
+        "type": "RuntimeDefault"
+      }
+    }
+  },
+  "status": {}
+}

@@ -1,0 +1,351 @@
+{
+  "kind": "Workflow",
+  "apiVersion": "argoproj.io/v1alpha1",
+  "metadata": {
+    "name": "oberth-oberth-run-abc1-aabbccddeeff",
+    "namespace": "oberth-argo",
+    "labels": {
+      "app.kubernetes.io/name": "oberth-run",
+      "oberth.ci/engine": "argo",
+      "oberth.ci/repo": "oberth",
+      "oberth.ci/run": "run-abc123",
+      "oberth.ci/sha": "0123456789abcdef0123456789abcdef01234567",
+      "oberth.ci/tier": "release",
+      "oberth.ci/trigger": "release"
+    },
+    "annotations": {
+      "oberth.ci/declared-secret-paths": "oberth/data/release/r2-upload-token",
+      "oberth.ci/ref": "refs/heads/main",
+      "oberth.ci/run-id": "run-abc123",
+      "oberth.ci/secret-paths": "oberth/data/release/r2-upload-token",
+      "oberth.ci/size": "L",
+      "oberth.ci/spec-identity": "33dc4b21a758c9cf68b0c16ffd16831e3283320b2a8293d0d1f338fb2a0af2ff",
+      "workflows.argoproj.io/pod-name-format": "v2"
+    }
+  },
+  "spec": {
+    "templates": [
+      {
+        "name": "main",
+        "inputs": {},
+        "outputs": {},
+        "metadata": {
+          "annotations": {
+            "oberth.ci/workspace-env": "none",
+            "oberth.ci/workspace-mounts": "readonly"
+          }
+        },
+        "containerSet": {
+          "containers": [
+            {
+              "name": "main",
+              "image": "golang:1.26-alpine@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "command": [
+                "/bin/true"
+              ],
+              "env": [
+                {
+                  "name": "KEEP_ME",
+                  "value": "yes-please"
+                },
+                {
+                  "name": "PATH",
+                  "value": "/private/bin"
+                },
+                {
+                  "name": "GOCACHE",
+                  "value": "/private/cache"
+                },
+                {
+                  "name": "OBERTH_REPO",
+                  "value": "oberth"
+                },
+                {
+                  "name": "OBERTH_REF",
+                  "value": "refs/heads/main"
+                },
+                {
+                  "name": "OBERTH_SHA",
+                  "value": "0123456789abcdef0123456789abcdef01234567"
+                },
+                {
+                  "name": "OBERTH_TRIGGER",
+                  "value": "release"
+                },
+                {
+                  "name": "OBERTH_RUN_ID",
+                  "value": "run-abc123"
+                },
+                {
+                  "name": "OBERTH_RELEASE_TAG",
+                  "value": "refs/heads/main"
+                },
+                {
+                  "name": "OBERTH_RELEASE_SHA",
+                  "value": "0123456789abcdef0123456789abcdef01234567"
+                }
+              ],
+              "resources": {},
+              "volumeMounts": [
+                {
+                  "name": "work",
+                  "readOnly": true,
+                  "mountPath": "/tools-alias",
+                  "subPath": "tools/bin"
+                },
+                {
+                  "name": "work",
+                  "readOnly": true,
+                  "mountPath": "/workspace-parent"
+                },
+                {
+                  "name": "oberth-tmp",
+                  "mountPath": "/tmp"
+                },
+                {
+                  "name": "oberth-source",
+                  "readOnly": true,
+                  "mountPath": "/work/src",
+                  "subPath": "source"
+                },
+                {
+                  "name": "work",
+                  "readOnly": true,
+                  "mountPath": "/tmp/oberth-tools",
+                  "subPath": "tools"
+                },
+                {
+                  "name": "work",
+                  "readOnly": true,
+                  "mountPath": "/cache/gomod",
+                  "subPath": "gomod"
+                },
+                {
+                  "name": "work",
+                  "readOnly": true,
+                  "mountPath": "/cache/gobuild",
+                  "subPath": "gobuild"
+                },
+                {
+                  "name": "work",
+                  "readOnly": true,
+                  "mountPath": "/tmp/oberth-trivy",
+                  "subPath": "trivy-cache"
+                },
+                {
+                  "name": "work",
+                  "readOnly": true,
+                  "mountPath": "/tmp/oberth-release",
+                  "subPath": "release"
+                }
+              ],
+              "securityContext": {
+                "capabilities": {
+                  "drop": [
+                    "ALL"
+                  ]
+                },
+                "readOnlyRootFilesystem": true,
+                "allowPrivilegeEscalation": false
+              }
+            },
+            {
+              "name": "other",
+              "image": "golang:1.26-alpine@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "command": [
+                "/bin/true"
+              ],
+              "env": [
+                {
+                  "name": "KEEP_ME",
+                  "value": "yes-please"
+                },
+                {
+                  "name": "PATH",
+                  "value": "/private/bin"
+                },
+                {
+                  "name": "GOCACHE",
+                  "value": "/private/cache"
+                },
+                {
+                  "name": "OBERTH_REPO",
+                  "value": "oberth"
+                },
+                {
+                  "name": "OBERTH_REF",
+                  "value": "refs/heads/main"
+                },
+                {
+                  "name": "OBERTH_SHA",
+                  "value": "0123456789abcdef0123456789abcdef01234567"
+                },
+                {
+                  "name": "OBERTH_TRIGGER",
+                  "value": "release"
+                },
+                {
+                  "name": "OBERTH_RUN_ID",
+                  "value": "run-abc123"
+                },
+                {
+                  "name": "OBERTH_RELEASE_TAG",
+                  "value": "refs/heads/main"
+                },
+                {
+                  "name": "OBERTH_RELEASE_SHA",
+                  "value": "0123456789abcdef0123456789abcdef01234567"
+                }
+              ],
+              "resources": {},
+              "volumeMounts": [
+                {
+                  "name": "work",
+                  "readOnly": true,
+                  "mountPath": "/tools-alias",
+                  "subPath": "tools/bin"
+                },
+                {
+                  "name": "work",
+                  "readOnly": true,
+                  "mountPath": "/workspace-parent"
+                },
+                {
+                  "name": "oberth-tmp",
+                  "mountPath": "/tmp"
+                },
+                {
+                  "name": "oberth-source",
+                  "readOnly": true,
+                  "mountPath": "/work/src",
+                  "subPath": "source"
+                },
+                {
+                  "name": "work",
+                  "readOnly": true,
+                  "mountPath": "/tmp/oberth-tools",
+                  "subPath": "tools"
+                },
+                {
+                  "name": "work",
+                  "readOnly": true,
+                  "mountPath": "/cache/gomod",
+                  "subPath": "gomod"
+                },
+                {
+                  "name": "work",
+                  "readOnly": true,
+                  "mountPath": "/cache/gobuild",
+                  "subPath": "gobuild"
+                },
+                {
+                  "name": "work",
+                  "readOnly": true,
+                  "mountPath": "/tmp/oberth-trivy",
+                  "subPath": "trivy-cache"
+                },
+                {
+                  "name": "work",
+                  "readOnly": true,
+                  "mountPath": "/tmp/oberth-release",
+                  "subPath": "release"
+                }
+              ],
+              "securityContext": {
+                "capabilities": {
+                  "drop": [
+                    "ALL"
+                  ]
+                },
+                "readOnlyRootFilesystem": true,
+                "allowPrivilegeEscalation": false
+              }
+            }
+          ]
+        },
+        "serviceAccountName": "oberth-argo-credentialed",
+        "automountServiceAccountToken": false,
+        "podSpecPatch": "{\"containers\":[{\"name\":\"wait\",\"volumeMounts\":[{\"name\":\"work\",\"readOnly\":true,\"mountPath\":\"/mainctrfs/tools-alias\",\"subPath\":\"tools/bin\"},{\"name\":\"work\",\"readOnly\":true,\"mountPath\":\"/mainctrfs/workspace-parent\"},{\"name\":\"oberth-source\",\"readOnly\":true,\"mountPath\":\"/mainctrfs/work/src\",\"subPath\":\"source\"},{\"name\":\"work\",\"readOnly\":true,\"mountPath\":\"/mainctrfs/tmp/oberth-tools\",\"subPath\":\"tools\"},{\"name\":\"work\",\"readOnly\":true,\"mountPath\":\"/mainctrfs/cache/gomod\",\"subPath\":\"gomod\"},{\"name\":\"work\",\"readOnly\":true,\"mountPath\":\"/mainctrfs/cache/gobuild\",\"subPath\":\"gobuild\"},{\"name\":\"work\",\"readOnly\":true,\"mountPath\":\"/mainctrfs/tmp/oberth-trivy\",\"subPath\":\"trivy-cache\"},{\"name\":\"work\",\"readOnly\":true,\"mountPath\":\"/mainctrfs/tmp/oberth-release\",\"subPath\":\"release\"}]}],\"volumes\":[{\"name\":\"work\",\"persistentVolumeClaim\":{\"claimName\":\"oberth-oberth-run-abc1-aabbccddeeff-work\"}},{\"name\":\"oberth-tmp\",\"emptyDir\":{\"sizeLimit\":\"8Gi\"}},{\"name\":\"oberth-source\",\"persistentVolumeClaim\":{\"claimName\":\"source-claim\",\"readOnly\":true}}]}"
+      }
+    ],
+    "entrypoint": "main",
+    "arguments": {},
+    "serviceAccountName": "oberth-argo-credentialed",
+    "automountServiceAccountToken": true,
+    "executor": {
+      "serviceAccountName": "oberth-argo-executor"
+    },
+    "volumes": [
+      {
+        "name": "oberth-tmp",
+        "emptyDir": {
+          "sizeLimit": "8Gi"
+        }
+      },
+      {
+        "name": "oberth-source",
+        "persistentVolumeClaim": {
+          "claimName": "source-claim",
+          "readOnly": true
+        }
+      },
+      {
+        "name": "oberth-release-token",
+        "projected": {
+          "sources": [
+            {
+              "serviceAccountToken": {
+                "expirationSeconds": 600,
+                "path": "token"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "name": "oberth-secrets",
+        "emptyDir": {
+          "medium": "Memory",
+          "sizeLimit": "16Mi"
+        }
+      }
+    ],
+    "volumeClaimTemplates": [
+      {
+        "metadata": {
+          "name": "work"
+        },
+        "spec": {
+          "accessModes": [
+            "ReadWriteOnce"
+          ],
+          "resources": {}
+        },
+        "status": {}
+      }
+    ],
+    "ttlStrategy": {
+      "secondsAfterCompletion": 3600
+    },
+    "activeDeadlineSeconds": 7200,
+    "securityContext": {
+      "runAsUser": 0,
+      "runAsGroup": 0,
+      "runAsNonRoot": false,
+      "seccompProfile": {
+        "type": "RuntimeDefault"
+      }
+    },
+    "podMetadata": {
+      "labels": {
+        "oberth.ci/run": "run-abc123",
+        "oberth.ci/tier": "release",
+        "oberth.ci/trigger": "release"
+      }
+    }
+  },
+  "status": {
+    "startedAt": null,
+    "finishedAt": null
+  }
+}

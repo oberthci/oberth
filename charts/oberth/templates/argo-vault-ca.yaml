@@ -1,0 +1,29 @@
+{{- if .Values.argo.vault.caCert }}
+{{- if not .Values.argo.vault.address }}
+{{- fail "argo.vault.caCert without argo.vault.address pins a trust anchor for a store no pipeline is told to reach" }}
+{{- end }}
+{{- if regexMatch "-----BEGIN [A-Z ]*PRIVATE KEY-----" .Values.argo.vault.caCert }}
+{{- fail "argo.vault.caCert contains a private key: this bundle is streamed into every release-tier pipeline Pod and must hold certificates only" }}
+{{- end }}
+# The trust anchor release-tier pipeline containers verify argo.vault.address
+# against. It is a certificate -- public material -- so a ConfigMap holds it,
+# the same posture the secret-store anchor uses.
+#
+# The server does not use this anchor; it delivers it. Each run's seeding
+# streams these bytes into that run's own source volume over the Kubernetes
+# exec stream, beside the checkout, and the release-tier containers get it
+# read-only at /run/oberth/vault-ca/ca.crt with VAULT_CACERT pointing at it.
+# A pipeline Pod cannot mount this ConfigMap: repository-authored documents may
+# not declare ConfigMap volumes at all, which is the property that keeps a
+# pushed branch from mounting arbitrary cluster state.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "oberth.fullname" . }}-argo-vault-ca
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "oberth.labels" . | nindent 4 }}
+data:
+  ca.crt: |
+    {{- .Values.argo.vault.caCert | nindent 4 }}
+{{- end }}

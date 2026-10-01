@@ -1,0 +1,428 @@
+image:
+  # Server image digest. In source this is the bootstrap seed for the first
+  # release; the release pipeline stamps the exact per-release digest here
+  # when packaging the chart.
+  ref: europe-west4-docker.pkg.dev/skipopsmain/oberth/oberth@sha256:093c6f6ed22f5e4bbb34994e545a7180b1d091a7935110ed0129f6bd6a798686
+  pullPolicy: IfNotPresent
+
+# Public protocol identifiers, fixed for the lifetime of an existing database
+# and witness key. Existing installations must supply their original values
+# explicitly when upgrading to this chart; never reset them to these defaults.
+compatibility:
+  schemaIdentity: oberth-schema-v1
+  auditDomain: oberth-audit-v1
+  witnessKeyInfo: oberth-audit-witness-v1
+
+# Job pods run the repository-declared runner image (default derived from the
+# repository's go.mod: golang:<version>-alpine) executing `go -C .oberth run .`.
+# The server admits only images matching one of these prefixes.
+runnerImagePrefixes:
+  - "golang:"
+  - "debian:"
+  - "aquasec/trivy:"
+
+replicaCount: 1
+maxConcurrentJobs: 3
+
+# Opt-in disk-space admission floor in bytes (#673). When positive, admission
+# is held until the server's data filesystem has at least this many free bytes.
+# Default 0 = disabled. The proposal from #602/#673 is 160000000000 (160 GB).
+admission:
+  diskFloorBytes: 0
+
+# Optional public dashboard URL echoed to every accepted git push as a
+# "remote: watch: <url>" line. Display-only; must be HTTPS when set.
+pushBannerURL: ""
+
+# External audit anchoring is OFF by default. The local gap-free SHA-256 audit
+# chain in SQLite always runs — every action is hash-chained and verified —
+# including manual issue reopening. Issue mutations use the existing audit
+# gate and require no additional Kubernetes RBAC or chart settings.
+# but no external service is contacted, so an outage of a public free service
+# can never take your CI down. Opt in by setting rekorURL and/or tsaURL; both
+# together give the full externally witnessed, rollback-protected posture.
+auditAnchor:
+  # RFC 3161 timestamp authority HTTPS URL. Empty = no external timestamps.
+  # Example: https://timestamp.sectigo.com/rfc3161
+  tsaURL: ""
+  # DEVELOPMENT ONLY: allow a plain-HTTP TSA URL for local/self-hosted
+  # TSA deployments without a native TLS listener.
+  tsaInsecureHTTP: false
+  # Rekor transparency log HTTPS URL. Empty = no external witness publication
+  # and no startup witness recovery. Point at the public instance
+  # (https://rekor.sigstore.dev) or your own Rekor to opt in.
+  rekorURL: ""
+  # DEVELOPMENT ONLY: allow a plain-HTTP Rekor URL for local/self-hosted
+  # Rekor deployments without a native TLS listener.
+  rekorInsecureHTTP: false
+  # Controls the periodic audit cycle even in local mode (chain verification);
+  # with external anchoring enabled it is the checkpoint publication interval.
+  interval: 10m
+  maxAge: 30m
+  rootsSecret: ""
+  rootsKey: roots.pem
+  # Optional PEM bundle pinning the Rekor HTTPS TLS trust anchors. Public CA
+  # material, delivered via ConfigMap. Enables self-hosted or air-gapped Rekor
+  # deployments behind a private CA. When empty the system trust store is used.
+  rekorCA: ""
+  # Optional PKIX PEM public key for the Rekor log. Public key material,
+  # delivered via ConfigMap. When set, entries are verified only against this
+  # key instead of the public Sigstore TUF trust metadata.
+  rekorPublicKey: ""
+  # Optional PEM bundle pinning the TSA HTTPS TLS trust anchors. Public CA
+  # material, delivered via ConfigMap. Enables self-hosted or air-gapped TSA
+  # deployments behind a private CA. When empty the system trust store is used.
+  tsaCA: ""
+  # One-shot operator acknowledgment for reinstalling with an SSH host key that
+  # already has published Rekor witnesses but no surviving local state. Set to
+  # the exact Rekor UUID of the LATEST witness entry to permanently abandon that
+  # chain and start a new one bound to it; remove after the first successful
+  # startup. Leave empty in every other situation — the empty default preserves
+  # the fail-closed rollback protection unchanged.
+  acceptWitnessChainReset: ""
+  # One-shot operator acknowledgment for enabling the Rekor witness on an
+  # EXISTING deployment that already has local audit history. Set to the exact
+  # current audit chain head as "<auditID>:<sha256hex>" (read it with:
+  # kubectl exec -n <ns> deploy/oberth -- oberth audit head). Startup records
+  # the acknowledgment permanently in the audit chain and starts external
+  # witnessing at that point; history before it is trusted by this explicit
+  # operator decision. Remove after the first successful startup. Leave empty
+  # in every other situation — the empty default preserves the fail-closed
+  # startup behavior unchanged.
+  acceptWitnessGenesis: ""
+
+service:
+  # LoadBalancer is the default so a stock k3s exposes both ports on the node
+  # address through svclb with no extra step. On kind/orbstack, where no
+  # load-balancer controller answers, the external IP simply stays pending and
+  # the NodePorts below still serve every client — the same values file works
+  # on both without editing.
+  #
+  # Set NodePort to opt out of svclb entirely; both public shapes keep the
+  # NodePorts. ClusterIP is an explicit internal-only service shape: it does
+  # not allocate NodePorts and cannot be used by the public onboarding URLs.
+  type: LoadBalancer
+
+  # Service ports. Under LoadBalancer, k3s's svclb binds THESE on the host, not
+  # the NodePorts — so a port already owned by a host process leaves the svclb
+  # Pod pending. sshPort therefore defaults to 2222 rather than 22: virtually
+  # every machine that runs a cluster also runs its own sshd on 22, and 22 is
+  # the right override only on a node dedicated to Oberth.
+  sshPort: 2222
+  httpsPort: 443
+
+  # Node-wide ports. Fixed by default because they are the documented
+  # client-facing endpoints, and overridable because two instances on one node
+  # cannot share them.
+  sshNodePort: 30022
+  httpsNodePort: 30443
+
+persistence:
+  existingClaim: ""
+  storageClassName: ""
+  size: 10Gi
+
+tls:
+  existingSecret: ""
+  # Names the generated certificate is issued for, beyond the four in-cluster
+  # ones. The certificate covers oberth, oberth.<namespace>, and the two svc
+  # forms; anything reaching the server on another address -- a NodePort on
+  # localhost, an ingress hostname -- gets a hostname mismatch, and that is the
+  # one TLS failure no trust anchor can repair. Name the address people use.
+  #
+  # An address reached as an IP needs extraIPs: a DNS SAN never matches an IP.
+  #
+  # Both are ignored when existingSecret is set, and the Secret is generated
+  # once and kept, so changing these on an existing release has no effect until
+  # the Secret is deleted.
+  extraDNSNames: []
+  extraIPs: []
+
+# The SSH host key is the durable identity of this deployment: Git clients pin
+# it AND the external audit witness identity is derived from it. By default the
+# chart generates it once, reuses it on every upgrade, and keeps it across
+# uninstall (helm.sh/resource-policy: keep). Point existingSecret at a restored
+# Secret to adopt a previous identity instead — never regenerate one casually.
+ssh:
+  hostKey:
+    existingSecret: ""
+
+upstream:
+  name: github
+  baseURL: ssh://git@github.com/your-org
+  createSecrets: true
+  keySecret: oberth-upstream-key
+  keyFile: id_ed25519
+  knownHostsSecret: oberth-known-hosts
+  knownHostsKey: known_hosts
+
+# Argo Workflows execution engine. This is not optional: every pipeline runs as
+# an Argo Workflow, so a cluster without a controller watching argo.namespace
+# accepts pushes and then executes nothing. Install the controller with
+# `oberth install`, or point argo.namespace at an existing one.
+argo:
+  # Public administrator capabilities only; empty disables release federation.
+  # Tokens/private keys must never be supplied here. See docs/release-wif.md.
+  releaseWIF: {}
+  # Empty disables nonroot execution. The named profile still requires actual
+  # immutable controller/configuration verification before each submission.
+  controllerProfile: ""
+  # Optional workflow annotation oberth.ci/nonroot-templates selects fixed
+  # UID/GID65534 plain uncredentialed test leaves. This has no chart UID knob:
+  # the server owns all identities, executor patches and bounded Pod scratch.
+  # A trusted initializer using the existing pinned source-seed image prepares
+  # only fresh EmptyDirs; no PVC/host cache ownership or fsGroup is changed.
+  # Repository securityContext overrides remain forbidden. Actual DB/browser
+  # compatibility requires separate execution proof after an authorized rollout.
+  # Pipelines run in their own namespace, never the server's. The Vault
+  # Kubernetes-auth roles bind (namespace, ServiceAccount) pairs, so a shared
+  # namespace would put pipeline identities beside server ones. Oberth refuses
+  # to start if this equals the release namespace.
+  namespace: "oberth-argo"
+
+  # The three pipeline identities plus the executor. All four must differ:
+  # pipeline==credentialed defeats the secret access gate, ciSecrets==
+  # credentialed collapses the branch and release trust tiers back into one
+  # Vault-visible identity, and executor sharing any of them hands step
+  # containers Argo's Kubernetes access.
+  #
+  # pipelineServiceAccount runs templates that declare no secrets. No
+  # Kubernetes permissions, no Vault role, no token in the step container.
+  pipelineServiceAccount: "oberth-argo-pipeline"
+  # credentialedServiceAccount runs RELEASE templates with approved secrets in
+  # the approval table. Carries a projected SA token so the credential chain
+  # can authenticate to OpenBao. The bound role's policy is derived from
+  # `oberth access allow` and is the only one that may carry release grants.
+  credentialedServiceAccount: "oberth-argo-credentialed"
+  # A leaf may opt out with automountServiceAccountToken: false. The server
+  # preserves false and omits its injected Vault environment/credential mounts.
+  # Template annotations oberth.ci/workspace-mounts: none|readonly and
+  # oberth.ci/workspace-env: none restrict shared mounts and environment.
+  # These are pipeline fields, not chart values; see docs/workspace-isolation.md.
+  # Workspace isolation requires Pod leaves without templateDefaults.
+  # ciSecrets is the branch-tier credentialed identity: CI templates with
+  # approved upstream-scoped secret paths run as this ServiceAccount and log
+  # in with this role. Binding branch pods to a ServiceAccount the release
+  # role does not accept is what keeps release credentials unreachable from a
+  # branch push at the Vault layer — the release role's bound_service_account_names
+  # never lists this account, and this role's policy covers
+  # oberth/data/upstream/* only and never receives approval-table grants.
+  # `oberth install --install-secretstore` and setup-secretstore.sh create
+  # the matching OpenBao policy and role under these default names.
+  ciSecrets:
+    serviceAccount: "oberth-argo-ci-secrets"
+    vaultRole: "oberth-argo-ci-secrets"
+  # executorServiceAccount runs Argo's own init and wait containers. Argo
+  # mounts its token into the executor container only.
+  executorServiceAccount: "oberth-argo-executor"
+
+  # Per-repo Vault identities. Each entry creates a ServiceAccount in
+  # argo.namespace whose name doubles as the Vault role and policy name.
+  # The installer populates this list from the repo registry + grants;
+  # the chart creates the ServiceAccounts; the installer creates the
+  # Vault policies and roles. Empty means all repos use the shared
+  # credentialed / ci-secrets identities. The server may request short-lived
+  # tokens for these exact release identities to run per-repo verification.
+  perRepoIdentities: []
+
+  # Per-repo CI Vault identities. Each entry creates a ServiceAccount in
+  # argo.namespace whose name doubles as the CI-tier Vault role and policy
+  # name. The installer populates this list alongside perRepoIdentities;
+  # the chart creates the ServiceAccounts; the installer creates the
+  # Vault policies and roles. CI policies are grant-free by construction.
+  perRepoCIIdentities: []
+
+  # Ceiling on a document's own activeDeadlineSeconds, and how long a finished
+  # Workflow object is retained.
+  workflowTimeout: 12h
+  workflowTTL: 3600
+
+  # Storage class for the per-run source volume the server creates in this
+  # namespace. A Pod may only mount claims in its own namespace, so a pipeline
+  # cannot mount the server's checkout directly; the server copies the revision
+  # into a claim of its own here instead. Empty selects the cluster default.
+  sourceStorageClass: ""
+
+  vault:
+    # Injected into credentialed containers as VAULT_ADDR and
+    # OBERTH_VAULT_ROLE, so a repository's envconsul invocation never hardcodes
+    # either. HTTPS is required. The role each run is told to use follows its
+    # trigger: release runs get credentialedRole, CI runs get
+    # argo.ciSecrets.vaultRole.
+    #
+    # Bind the release-tier role to exactly this namespace and the
+    # credentialed SA (setup-secretstore.sh and `oberth install
+    # --install-secretstore` do this, plus the ci-secrets pair):
+    #   bao write auth/kubernetes/role/oberth-argo-credentialed \
+    #       bound_service_account_names=oberth-argo-credentialed \
+    #       bound_service_account_namespaces=oberth-argo \
+    #       policies=oberth-argo-credentialed ttl=20m
+    #
+    # A "*" on either bound field defeats the approval gate.
+    #
+    # (The retired aliases argo.ciSecretsServiceAccount and
+    # argo.vault.ciSecretsRole named THIS release-tier pair in older
+    # revisions; the chart refuses to render while either is still set, so a
+    # reused-values upgrade cannot silently misassign a tier.)
+    address: ""
+    credentialedRole: ""
+    # Optional PEM bundle pinning the trust anchors a release-tier container
+    # verifies `address` against, delivered into the run's own source volume
+    # and advertised as VAULT_CACERT. Required whenever OpenBao presents a
+    # private CA, which is what its own installer issues: without it a release
+    # step's login fails TLS verification and no credential is ever delivered.
+    #
+    # Public material -- certificates only. The server refuses a bundle
+    # carrying a private key, because it is streamed into every release Pod.
+    #
+    # Empty means the store presents a publicly trusted certificate. That
+    # reading is impossible for a cluster-internal `address` -- no public CA
+    # may issue for a .svc name or a literal address -- so the chart refuses
+    # to render that combination rather than deploy a release tier that can
+    # never log in, and the server refuses to submit a release for it. For an
+    # installer-managed OpenBao this is the same PEM as secretstore.caCert.
+    caCert: ""
+
+  # Credential-free Go module proxy for private modules (#662).
+  # Serves the GOPROXY protocol read-only from Oberth's git cache, so pipeline
+  # pods can run `go mod tidy -diff` without git credentials for private modules.
+  # Private failures stop here; only public module misses fall through to the
+  # public proxy. Injected GONOPROXY=none prevents ambient private-proxy bypass.
+  # Enable only after selecting the administrator-owned module namespace and
+  # its exact upstream organization. Existing enabled installs must retain
+  # their mapping explicitly when upgrading.
+  goProxy:
+    enabled: false
+    # Port for the HTTPS listener. ClusterIP-only — never exposed on a NodePort.
+    port: 8444
+    modulePrefix: ""
+    repositoryPrefix: ""
+    upstream: ""
+    organization: ""
+
+# Configure OpenBao once with scripts/setup-secretstore.sh.
+secretstore:
+  enabled: false
+  # OpenBao API base URL. Defaults to the standard in-cluster OpenBao Helm
+  # chart service (openbao service in openbao namespace). Override if OpenBao
+  # is in a different namespace or at an external endpoint. HTTPS is required.
+  address: "https://openbao.openbao.svc:8200"
+  # Kubernetes auth mount path configured in OpenBao.
+  k8sAuthMount: kubernetes
+  # OpenBao Kubernetes auth role bound to this chart's ServiceAccount.
+  role: oberth-ci
+  # Optional PEM bundle pinning the OpenBao TLS trust anchors. Public material,
+  # delivered via ConfigMap. When empty the system trust store is used.
+  caCert: ""
+  # DEVELOPMENT ONLY: allow a plain-HTTP OpenBao address.
+  insecureHTTPForDev: false
+  # Server-owned OpenBao Transit encryption for trusted promotion plan
+  # artifacts. The chart default is fail-closed; the production installer
+  # enables it only after exact mount/key/policy/role provisioning succeeds.
+  transit:
+    enabled: false
+    mount: oberth-transit
+    key: trusted-plan-artifacts
+  # KV v2 mount that physically backs the virtual oberth/upstream/ secret
+  # namespace. Release paths may be org- or repository-scoped. Trusted paths
+  # are always repository- and phase-scoped as
+  # oberth/upstream/<org>/<repo>/{plan|apply}/<secret>. Paths are fetched from
+  # "<kvMount>/data/upstream/...". Must match the mount setup-secretstore.sh
+  # enabled (its --kv-prefix). Almost always "oberth".
+  kvMount: oberth
+  # Administrator allowlist of KV API paths for the SYSTEM namespace only
+  # (e.g. "oberth/data/release/r2-upload"): exact paths a repository may
+  # request through its literal SecretStoreSecrets declaration. Org- and
+  # repo-scoped release secrets are NOT listed here — a declared
+  # oberth/upstream/<org>/<secret> path is readable by every repository of
+  # that upstream org, and oberth/upstream/<org>/<repo>/<secret> only by that
+  # repository; placing the secret at the scoped path is the grant. Plan and
+  # Apply never consult this allowlist and require their exact phase subtree.
+  # Entries addressing the upstream subtree are rejected at startup.
+  allowedPaths: []
+  # Grant this ServiceAccount system:auth-delegator so OpenBao can validate
+  # its tokens via TokenReview without storing a reviewer JWT. This is the one
+  # cluster-scoped object the chart creates; disable it if the binding is
+  # managed elsewhere.
+  createAuthDelegatorBinding: true
+
+cache:
+  ciRoot: /var/cache/oberth/ci
+  releaseRoot: /var/cache/oberth/release
+
+resources:
+  requests:
+    cpu: 200m
+    memory: 256Mi
+    ephemeral-storage: 256Mi
+  limits:
+    cpu: "1"
+    memory: 1Gi
+    ephemeral-storage: 2Gi
+
+secretCreatePolicy:
+  enabled: false
+
+# Egress isolation for the pipeline namespace (argo.namespace). Denies all
+# egress by default, then allows DNS (port 53), HTTPS (port 443/6443), and
+# the secret store for release credentials.
+#
+# Oberth's own NodePorts (30022, 30443) are implicitly blocked because only
+# ports 53, 443, 6443, and the vault port are permitted.
+#
+# The HTTPS rule has no destination restriction so it covers both external
+# endpoints and the cluster-internal API server. Per the K8s spec, ipBlock
+# rules do not match cluster-internal IPs and namespaceSelector cannot match
+# the host-networked API server — any destination restriction on port 443
+# breaks Argo's emissary on CNIs that enforce NetworkPolicy (Calico, Cilium,
+# modern kindnet). RBAC is the access control boundary for the API server.
+#
+# Disable on clusters without a NetworkPolicy-capable CNI.
+networkPolicy:
+  # Enabled by default for pipeline egress isolation: default-deny egress with
+  # targeted allowlist for DNS, HTTPS, and the secret store. On k3s with the
+  # built-in kube-router NetworkPolicy controller this MUST be set false — its
+  # DNAT handling causes TCP RST on repeated ClusterIP connections, which breaks
+  # Argo's emissary executor (POST workflowtaskresult CRs to the API server).
+  # The installer detects k3s and pins false automatically.
+  enabled: true
+  # Extra in-namespace egress for sidecar services the pipeline needs on
+  # non-standard ports, such as a Docker API shim backing Testcontainers.
+  # Both are scoped to the pipeline namespace and grant nothing outside it.
+  # inNamespaceAllPorts wins when both are set.
+  inNamespacePorts: []
+  inNamespaceAllPorts: false
+  # Secret store egress destination. Consistent with argo.vault.address and
+  # secretstore.address. Default: in-cluster openbao namespace, port 8200.
+  # For an external store, set externalCIDRs instead of namespace.
+  # vault:
+  #   namespace: openbao       # in-cluster namespace (default)
+  #   port: 8200               # store port (default)
+  #   externalCIDRs: []        # for external stores: ["10.0.1.5/32"]
+
+# Watch tunnel connector (cloudflared) managed by oberth install/upgrade.
+# Disabled by default in the chart; the installer sets it when configured.
+# The connector token is fetched at runtime into a memory emptyDir via
+# OpenBao Kubernetes auth -- never a Secret, never etcd, never node disk.
+watchTunnel:
+  # Omitted enabled in a legacy reused-values map means false. Upgrades preserve
+  # an explicitly configured true or false value.
+  enabled: false
+  # Public trust anchor for the HTTPS Oberth origin configured on the tunnel.
+  # Never a private key. The origin configuration uses /etc/oberth-origin-ca/ca.crt.
+  originCACert: ""
+  # Digest-pinned cloudflared image. Update deliberately.
+  image: docker.io/cloudflare/cloudflared:2026.9.3@sha256:072c067d25ccbe61d46e18f0d0723255f2bb5304f7317caa95b27031520ff92c
+  # Digest-pinned OpenBao image for the init container that fetches the token.
+  openbaoImage: quay.io/openbao/openbao:2.6.1@sha256:5b2486ab0fb90bbc788cc345b0a08616dfb375873ee8be5df3a2fd4d378a67e0
+  # OpenBao endpoint and auth configuration (non-secret).
+  openbao:
+    address: "https://openbao.openbao.svc:8200"
+    authMount: kubernetes
+    role: cloudflared-watch
+    secretMount: oberth
+    secretPath: ops/cloudflared-watch-token
+    secretField: TUNNEL_TOKEN
+
+podAnnotations: {}
+podLabels: {}

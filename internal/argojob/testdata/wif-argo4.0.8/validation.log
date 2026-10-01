@@ -1,0 +1,14 @@
+PASS /var/tmp/issue557-proof/chart-writer-sa-false-submitted.json
+PASS /var/tmp/issue557-proof/chart-writer-sa-true-submitted.json
+PASS /var/tmp/issue557-proof/helpers-sa-false-submitted.json
+PASS /var/tmp/issue557-proof/helpers-sa-true-submitted.json
+PASS /var/tmp/issue557-proof/image-reader-sa-false-submitted.json
+PASS /var/tmp/issue557-proof/image-reader-sa-true-submitted.json
+PASS /var/tmp/issue557-proof/image-writer-sa-false-submitted.json
+PASS /var/tmp/issue557-proof/image-writer-sa-true-submitted.json
+PASS /var/tmp/issue557-proof/script-sa-false-submitted.json
+PASS /var/tmp/issue557-proof/script-sa-true-submitted.json
+PASS /var/tmp/issue557-proof/sibling-sa-false-submitted.json
+PASS /var/tmp/issue557-proof/sibling-sa-true-submitted.json
+PASS /var/tmp/issue557-proof/vault-sa-false-submitted.json
+PASS /var/tmp/issue557-proof/vault-sa-true-submitted.json

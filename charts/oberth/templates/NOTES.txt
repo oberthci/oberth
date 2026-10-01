@@ -1,0 +1,34 @@
+Oberth {{ .Chart.AppVersion }} — {{ .Values.service.type }} Service, {{ if eq .Values.service.type "ClusterIP" }}internal SSH port {{ .Values.service.sshPort }} and HTTPS/MCP port {{ .Values.service.httpsPort }}; no NodePorts are allocated{{ else }}SSH port {{ .Values.service.sshPort }} on NodePort {{ .Values.service.sshNodePort }}, HTTPS/MCP NodePort {{ .Values.service.httpsNodePort }}{{ end }}.
+
+1. Register the upstream (interactive — generates and persists the deploy key):
+
+     kubectl exec -it -n {{ .Release.Namespace }} deploy/{{ include "oberth.fullname" . }} -- \
+       oberth upstream add {{ .Values.upstream.name }} {{ .Values.upstream.baseURL }}
+
+2. Add your first uplink (prints its bearer token and TLS fingerprint once):
+
+     kubectl exec -i -n {{ .Release.Namespace }} deploy/{{ include "oberth.fullname" . }} -- \
+       oberth uplink add - operator@host < ~/.ssh/id_ed25519.pub
+
+Like a vault before initialization, the pod stays Running but not ready (0/1)
+until step 1 completes; kubectl exec works throughout.
+{{- if .Values.secretstore.enabled }}
+
+Secret store: {{ .Values.secretstore.address }}. If the store side is not set
+up yet, run scripts/setup-secretstore.sh next to your OpenBao/Vault, then:
+kubectl exec -n {{ .Release.Namespace }} deploy/{{ include "oberth.fullname" . }} -- oberth secretstore verify
+Trusted-plan Transit is available when secretstore.transit.enabled is set and
+requires a verified HTTPS secret store address.
+{{- end }}
+
+Upgrading from a pre-v0.10.57 (store schema v2) install? A plain helm upgrade
+crash-loops by design: schema v3 is backup-and-replace only. Follow
+docs/upgrade-schema-v3.md before upgrading.
+
+Docs — MCP client setup, secret store, restore after a rebuild, release
+secrets: https://github.com/oberthci/oberth#documentation (docs/mcp-setup.md)
+
+Enabling the Rekor witness on an existing deployment? Read the current audit
+chain head first:
+kubectl exec -n {{ .Release.Namespace }} deploy/{{ include "oberth.fullname" . }} -- oberth audit head
+Then set auditAnchor.acceptWitnessGenesis to that exact value for one restart.

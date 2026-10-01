@@ -1,0 +1,16 @@
+{{- if .Values.argo.releaseWIF }}
+{{- if ne .Values.argo.releaseWIF.namespace .Values.argo.namespace }}
+{{- fail "argo.releaseWIF.namespace must exactly match argo.namespace" }}
+{{- end }}
+# Public capability configuration only. JWTs are issued by the kubelet and
+# never appear in this ConfigMap, Helm values, or a Kubernetes Secret.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "oberth.fullname" . }}-release-wif
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "oberth.labels" . | nindent 4 }}
+data:
+  capabilities.json: {{ .Values.argo.releaseWIF | toJson | quote }}
+{{- end }}

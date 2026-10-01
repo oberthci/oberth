@@ -1,0 +1,60 @@
+package controller
+
+import (
+ "encoding/json"
+ "os"
+ "path/filepath"
+ "strings"
+ "testing"
+
+ "github.com/stretchr/testify/require"
+ corev1 "k8s.io/api/core/v1"
+ metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+ "k8s.io/utils/ptr"
+ wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
+ "github.com/argoproj/argo-workflows/v4/util/logging"
+)
+
+var isolationCapture func(*corev1.Pod)
+
+func TestOberthIsolationControllerCapture(t *testing.T) {
+ const dir = "/var/tmp/cttv-pretest-20260927/oberth-controller"
+ for _, shape := range []string{"dedicated-tools", "none", "container", "script", "containerset", "sidecars", "inline-dag", "inline-steps"} {
+  t.Run(shape, func(t *testing.T) {
+   data, err := os.ReadFile(filepath.Join(dir, shape+"-workflow.json")); require.NoError(t, err)
+   var wf wfv1.Workflow
+   require.NoError(t, json.Unmarshal(data, &wf))
+   wf.UID = "isolation-fixture"
+   sa := &corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{Name:wf.Spec.ServiceAccountName, Namespace:wf.Namespace}, AutomountServiceAccountToken:ptr.To(true)}
+   executor := &corev1.ServiceAccount{ObjectMeta:metav1.ObjectMeta{Name:wf.Spec.Executor.ServiceAccountName, Namespace:wf.Namespace}, Secrets:[]corev1.ObjectReference{{Name:"executor-token-fixture"}}}
+   ctx := logging.TestContext(t.Context())
+   cancel, controller := newController(ctx, &wf, sa, executor)
+   defer cancel()
+   write := func(name string, value any) { t.Helper(); b,e:=json.MarshalIndent(value,"","  ");require.NoError(t,e);require.NoError(t,os.WriteFile(filepath.Join(dir,shape+"-"+name+".json"),b,0600)) }
+   captured := 0
+   isolationCapture = func(pod *corev1.Pod) { captured++; write("before-patch",pod) }
+   defer func(){isolationCapture=nil}()
+   woc := newWorkflowOperationCtx(ctx, &wf, controller)
+   woc.operate(ctx)
+   pods,err:=controller.kubeclientset.CoreV1().Pods(wf.Namespace).List(ctx,metav1.ListOptions{}); require.NoError(t,err)
+   require.Len(t,pods.Items,1,"phase=%s message=%s nodes=%+v",woc.wf.Status.Phase,woc.wf.Status.Message,woc.wf.Status.Nodes)
+   require.Equal(t,1,captured)
+   pod:=&pods.Items[0]
+   write("submitted",pod)
+   require.NotNil(t,pod.Spec.AutomountServiceAccountToken)
+   require.False(t,*pod.Spec.AutomountServiceAccountToken)
+   for _,c:=range append(pod.Spec.Containers,pod.Spec.InitContainers...) {
+    for _,m:=range c.VolumeMounts {
+     if (m.Name=="work" || m.Name=="release-tools") {require.NotEqual(t,"none",shape,"workspace mount injected into none");require.True(t,m.ReadOnly,"%s mount %+v",c.Name,m)}
+     if c.Name!="init" && c.Name!="wait" {require.NotEqual(t,"exec-sa-token",m.Name,"pipeline container received executor token")}
+     require.NotEqual(t,"oberth-release-token",m.Name)
+    }
+    if c.Name!="init" && c.Name!="wait" {
+     found:=false
+     for _,e:=range c.Env {if e.Name=="PATH" {found=true;require.Equal(t,"/private/bin",e.Value)};require.False(t,strings.HasPrefix(e.Name,"VAULT_"))}
+     require.True(t,found,"%s lost private PATH",c.Name)
+    }
+   }
+  })
+ }
+}

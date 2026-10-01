@@ -1,0 +1,1249 @@
+# Oberth CI pipeline (branch-trigger) for the oberth repository.
+#
+# Every step is its own Argo template with its own container, exit code, and
+# named log slice, which is the per-step granularity the Oberth execution model
+# guarantees. Steps are deliberately not collapsed into shell scripts: a
+# collapsed step reports one status for several pieces of work, and per-step
+# status, logs and red are the entire point of the model.
+#
+# TODO(oberth-admission): Oberth sets metadata.name, metadata.namespace,
+# and labels (oberth.ci/repo, oberth.ci/trigger, oberth.ci/ref,
+# oberth.ci/sha) at submission time. The metadata block carries only the
+# annotations the admission layer reads statically.
+#
+# TODO(oberth-admission): Oberth forces the serviceAccountName via a
+# trigger-gated switch (ForceIdentity). Branch pushes bind to a CI-tier
+# ServiceAccount with no Vault/OpenBao access and no automounted token.
+# The YAML must not declare serviceAccountName.
+#
+# Oberth injects the source checkout into every container template
+# (injectServerVolumes). The mechanism is a read-only mount at /work/src of a
+# per-run PersistentVolumeClaim that the server creates in the pipeline
+# namespace and fills with this revision before submitting: a Pod may only
+# mount claims in its own namespace, so the server's own workspace volume is
+# not reachable from here. Templates set workingDir: /work/src and do not
+# declare the source mount themselves.
+#
+# Oberth injects a persistent Go module and build cache into every container
+# template (injectServerVolumes -> cacheVolumeAndMount). The mechanism is a
+# writable mount at /work/cache of node-local storage under the server's own
+# --ci-cache-root, in a directory scoped to this repository, and the
+# server also sets GOMODCACHE=/work/cache/gomod and GOCACHE=/work/cache/gobuild.
+#
+# That injected environment OVERRIDES whatever this document sets for those two
+# variables, which is why the GOMODCACHE/GOCACHE values and the /cache/gomod and
+# /cache/gobuild mounts below are a fallback rather than the live configuration:
+# they are what a server with no cache root configured falls back to, and they
+# keep the caches shared between the steps of one run in that case. Do not
+# declare a cache volume here -- admission refuses a repository hostPath, and
+# the server decides whether a cache exists at all.
+#
+# Only these two caches persist between runs. Tool binaries stay on the per-run
+# `work` claim on purpose: `go install` publishes into GOBIN with a truncating
+# write, and a warm build cache makes reinstalling them a few seconds anyway.
+#
+# Tool custody (#567): the setup burn is the only writer of those tools. Every
+# later leaf sees /tmp/oberth-tools read-only. The Go leaves (vet, lint, test,
+# build-*) do so through an explicit readOnly request on that mount, which the
+# server honours while keeping the persistent Go caches writable (the
+# `readonly` annotation would make those read-only too, and `none` would drop
+# them for a cold private cache per leaf); golangci-lint gets a Pod-private
+# cache because its default lives inside the tools directory. shellcheck,
+# chart, security (Trivy, Pod-private DB) and release-diagnostic opt out of the
+# shared workspace entirely. This pipeline holds no credential; every leaf
+# declares automountServiceAccountToken: false.
+# internal/argojob/oberth_pipeline_test.go checks the admitted Pods.
+#
+# DAG structure:
+#
+#   setup --+--> lint --+--> test ----------+--> build-amd64
+#           |           |                   |
+#           |           +--> chart ---------+--> build-arm64
+#           |                               |
+#           |                               +--> build-darwin-amd64
+#           |                               |
+#           |                               +--> build-darwin-arm64
+#           |
+#           +--> security  (aquasec/trivy image, no install step needed)
+#           |
+#           +--> shellcheck
+#
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  annotations:
+    oberth.ci/size: L
+spec:
+  entrypoint: ci
+  activeDeadlineSeconds: 3600
+
+  volumeClaimTemplates:
+  - metadata:
+      name: work
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      resources:
+        requests:
+          storage: 10Gi
+
+  templates:
+
+  # ---- DAG entrypoint ----
+  - name: ci
+    dag:
+      tasks:
+      - name: setup
+        template: setup
+      - name: lint
+        template: lint
+        depends: setup
+      - name: test
+        template: test
+        depends: lint
+      - name: security
+        template: security
+        depends: setup
+      - name: shellcheck
+        template: shellcheck
+        depends: setup
+      - name: chart
+        template: chart
+        depends: lint
+      - name: release-diagnostic
+        template: release-diagnostic
+        depends: setup
+      - name: build-amd64
+        template: build-amd64
+        depends: "test && chart"
+      - name: build-arm64
+        template: build-arm64
+        depends: "test && chart"
+      - name: build-darwin-amd64
+        template: build-darwin-amd64
+        depends: "test && chart"
+      - name: build-darwin-arm64
+        template: build-darwin-arm64
+        depends: "test && chart"
+
+  # ---- setup burn (8 sequential steps) ----
+  # Maps to: Test("setup", repositorySteps(inlineToolchainSteps()...)...)
+  #
+  # trivy and cosign are NOT installed here:
+  #   trivy  -- the security burn uses the official aquasec/trivy image directly
+  #   cosign -- not consumed by any branch-pipeline step (release-only tool)
+  - name: setup
+    steps:
+    - - name: tools-dir
+        template: tools-dir
+    - - name: link-go
+        template: link-go
+    - - name: install-golangci-lint
+        template: install-golangci-lint
+    - - name: install-helm
+        template: install-helm
+    - - name: fetch-shellcheck
+        template: fetch-shellcheck
+    - - name: verify-shellcheck
+        template: verify-shellcheck
+    - - name: decompress-shellcheck
+        template: decompress-shellcheck
+    - - name: install-shellcheck
+        template: install-shellcheck
+
+  # [tools-dir] /bin/mkdir -p /tmp/oberth-tools/bin
+  - name: tools-dir
+    automountServiceAccountToken: false
+    container:
+      image: "golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3"
+      workingDir: /work/src
+      command: ["/bin/mkdir"]
+      args: ["-p", "/tmp/oberth-tools/bin"]
+      env:
+      - name: PATH
+        value: "/tmp/oberth-tools/bin:/usr/local/bin:/usr/bin:/bin"
+      - name: OBERTH_TOOLS_DIR
+        value: "/tmp/oberth-tools"
+      - name: HOME
+        value: "/tmp"
+      - name: GOPATH
+        value: "/tmp/oberth-tools/gopath"
+      - name: GOTOOLCHAIN
+        value: "local"
+      - name: GOWORK
+        value: "off"
+      - name: GOENV
+        value: "off"
+      - name: GOMODCACHE
+        value: "/cache/gomod"
+      - name: GOCACHE
+        value: "/cache/gobuild"
+      - name: GIT_TERMINAL_PROMPT
+        value: "0"
+      - name: KUBEBUILDER_ASSETS
+        value: ""
+      - name: TRIVY_CACHE_DIR
+        value: "/tmp/oberth-trivy"
+      - name: GOLANGCI_LINT_CACHE
+        value: "/tmp/oberth-tools/cache/golangci-lint"
+      volumeMounts:
+      - name: work
+        mountPath: /tmp/oberth-tools
+        subPath: tools
+      - name: work
+        mountPath: /cache/gomod
+        subPath: gomod
+      - name: work
+        mountPath: /cache/gobuild
+        subPath: gobuild
+      - name: work
+        mountPath: /tmp/oberth-trivy
+        subPath: trivy-cache
+      resources:
+        requests:
+          cpu: "2"
+          memory: "4Gi"
+        limits:
+          cpu: "2"
+          memory: "4Gi"
+
+  # [link-go] symlink Go toolchain from image into shared tools directory
+  - name: link-go
+    automountServiceAccountToken: false
+    container:
+      image: "golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3"
+      workingDir: /work/src
+      command: ["/bin/ln"]
+      args: ["-sf", "/usr/local/go/bin/go", "/usr/local/go/bin/gofmt", "/tmp/oberth-tools/bin"]
+      env:
+      - name: PATH
+        value: "/tmp/oberth-tools/bin:/usr/local/bin:/usr/bin:/bin"
+      - name: OBERTH_TOOLS_DIR
+        value: "/tmp/oberth-tools"
+      - name: HOME
+        value: "/tmp"
+      - name: GOPATH
+        value: "/tmp/oberth-tools/gopath"
+      - name: GOTOOLCHAIN
+        value: "local"
+      - name: GOWORK
+        value: "off"
+      - name: GOENV
+        value: "off"
+      - name: GOMODCACHE
+        value: "/cache/gomod"
+      - name: GOCACHE
+        value: "/cache/gobuild"
+      - name: GIT_TERMINAL_PROMPT
+        value: "0"
+      - name: KUBEBUILDER_ASSETS
+        value: ""
+      - name: TRIVY_CACHE_DIR
+        value: "/tmp/oberth-trivy"
+      - name: GOLANGCI_LINT_CACHE
+        value: "/tmp/oberth-tools/cache/golangci-lint"
+      volumeMounts:
+      - name: work
+        mountPath: /tmp/oberth-tools
+        subPath: tools
+      - name: work
+        mountPath: /cache/gomod
+        subPath: gomod
+      - name: work
+        mountPath: /cache/gobuild
+        subPath: gobuild
+      - name: work
+        mountPath: /tmp/oberth-trivy
+        subPath: trivy-cache
+      resources:
+        requests:
+          cpu: "2"
+          memory: "4Gi"
+        limits:
+          cpu: "2"
+          memory: "4Gi"
+
+  # [install-golangci-lint] go install golangci-lint v2.12.2
+  - name: install-golangci-lint
+    automountServiceAccountToken: false
+    container:
+      image: "golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3"
+      workingDir: /work/src
+      command: ["/usr/local/go/bin/go"]
+      args: ["install", "github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2"]
+      env:
+      - name: GOBIN
+        value: "/tmp/oberth-tools/bin"
+      - name: PATH
+        value: "/tmp/oberth-tools/bin:/usr/local/bin:/usr/bin:/bin"
+      - name: OBERTH_TOOLS_DIR
+        value: "/tmp/oberth-tools"
+      - name: HOME
+        value: "/tmp"
+      - name: GOPATH
+        value: "/tmp/oberth-tools/gopath"
+      - name: GOTOOLCHAIN
+        value: "local"
+      - name: GOWORK
+        value: "off"
+      - name: GOENV
+        value: "off"
+      - name: GOMODCACHE
+        value: "/cache/gomod"
+      - name: GOCACHE
+        value: "/cache/gobuild"
+      - name: GIT_TERMINAL_PROMPT
+        value: "0"
+      - name: KUBEBUILDER_ASSETS
+        value: ""
+      - name: TRIVY_CACHE_DIR
+        value: "/tmp/oberth-trivy"
+      - name: GOLANGCI_LINT_CACHE
+        value: "/tmp/oberth-tools/cache/golangci-lint"
+      volumeMounts:
+      - name: work
+        mountPath: /tmp/oberth-tools
+        subPath: tools
+      - name: work
+        mountPath: /cache/gomod
+        subPath: gomod
+      - name: work
+        mountPath: /cache/gobuild
+        subPath: gobuild
+      - name: work
+        mountPath: /tmp/oberth-trivy
+        subPath: trivy-cache
+      resources:
+        requests:
+          cpu: "2"
+          memory: "4Gi"
+        limits:
+          cpu: "2"
+          memory: "4Gi"
+
+  # [install-helm] go install helm v4.2.3
+  - name: install-helm
+    automountServiceAccountToken: false
+    container:
+      image: "golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3"
+      workingDir: /work/src
+      command: ["/usr/local/go/bin/go"]
+      args: ["install", "helm.sh/helm/v4/cmd/helm@v4.2.3"]
+      env:
+      - name: GOBIN
+        value: "/tmp/oberth-tools/bin"
+      - name: PATH
+        value: "/tmp/oberth-tools/bin:/usr/local/bin:/usr/bin:/bin"
+      - name: OBERTH_TOOLS_DIR
+        value: "/tmp/oberth-tools"
+      - name: HOME
+        value: "/tmp"
+      - name: GOPATH
+        value: "/tmp/oberth-tools/gopath"
+      - name: GOTOOLCHAIN
+        value: "local"
+      - name: GOWORK
+        value: "off"
+      - name: GOENV
+        value: "off"
+      - name: GOMODCACHE
+        value: "/cache/gomod"
+      - name: GOCACHE
+        value: "/cache/gobuild"
+      - name: GIT_TERMINAL_PROMPT
+        value: "0"
+      - name: KUBEBUILDER_ASSETS
+        value: ""
+      - name: TRIVY_CACHE_DIR
+        value: "/tmp/oberth-trivy"
+      - name: GOLANGCI_LINT_CACHE
+        value: "/tmp/oberth-tools/cache/golangci-lint"
+      volumeMounts:
+      - name: work
+        mountPath: /tmp/oberth-tools
+        subPath: tools
+      - name: work
+        mountPath: /cache/gomod
+        subPath: gomod
+      - name: work
+        mountPath: /cache/gobuild
+        subPath: gobuild
+      - name: work
+        mountPath: /tmp/oberth-trivy
+        subPath: trivy-cache
+      resources:
+        requests:
+          cpu: "2"
+          memory: "4Gi"
+        limits:
+          cpu: "2"
+          memory: "4Gi"
+
+  # [fetch-shellcheck] download shellcheck v0.10.0 static binary from upstream release
+  - name: fetch-shellcheck
+    automountServiceAccountToken: false
+    container:
+      image: "golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3"
+      workingDir: /work/src
+      command: ["/usr/bin/curl"]
+      args:
+      - "--fail"
+      - "--location"
+      - "--no-progress-meter"
+      - "--show-error"
+      - "--connect-timeout"
+      - "10"
+      - "--max-time"
+      - "90"
+      - "--retry"
+      - "2"
+      - "--retry-all-errors"
+      - "--proto"
+      - "=https"
+      - "--proto-redir"
+      - "=https"
+      - "--tlsv1.2"
+      - "--output"
+      - "/tmp/oberth-tools/shellcheck-v0.10.0.linux.x86_64.tar.xz"
+      - "https://github.com/koalaman/shellcheck/releases/download/v0.10.0/shellcheck-v0.10.0.linux.x86_64.tar.xz"
+      env:
+      - name: PATH
+        value: "/tmp/oberth-tools/bin:/usr/local/bin:/usr/bin:/bin"
+      - name: OBERTH_TOOLS_DIR
+        value: "/tmp/oberth-tools"
+      - name: HOME
+        value: "/tmp"
+      - name: GOPATH
+        value: "/tmp/oberth-tools/gopath"
+      - name: GOTOOLCHAIN
+        value: "local"
+      - name: GOWORK
+        value: "off"
+      - name: GOENV
+        value: "off"
+      - name: GOMODCACHE
+        value: "/cache/gomod"
+      - name: GOCACHE
+        value: "/cache/gobuild"
+      - name: GIT_TERMINAL_PROMPT
+        value: "0"
+      - name: KUBEBUILDER_ASSETS
+        value: ""
+      - name: TRIVY_CACHE_DIR
+        value: "/tmp/oberth-trivy"
+      - name: GOLANGCI_LINT_CACHE
+        value: "/tmp/oberth-tools/cache/golangci-lint"
+      volumeMounts:
+      - name: work
+        mountPath: /tmp/oberth-tools
+        subPath: tools
+      - name: work
+        mountPath: /cache/gomod
+        subPath: gomod
+      - name: work
+        mountPath: /cache/gobuild
+        subPath: gobuild
+      - name: work
+        mountPath: /tmp/oberth-trivy
+        subPath: trivy-cache
+      resources:
+        requests:
+          cpu: "2"
+          memory: "4Gi"
+        limits:
+          cpu: "2"
+          memory: "4Gi"
+
+  # [verify-shellcheck] sha256sum check against pinned digest
+  - name: verify-shellcheck
+    automountServiceAccountToken: false
+    container:
+      image: "golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3"
+      workingDir: /work/src
+      command: ["/usr/bin/sha256sum"]
+      args: ["-c", ".oberth/pins/shellcheck.sha256"]
+      env:
+      - name: PATH
+        value: "/tmp/oberth-tools/bin:/usr/local/bin:/usr/bin:/bin"
+      - name: OBERTH_TOOLS_DIR
+        value: "/tmp/oberth-tools"
+      - name: HOME
+        value: "/tmp"
+      - name: GOPATH
+        value: "/tmp/oberth-tools/gopath"
+      - name: GOTOOLCHAIN
+        value: "local"
+      - name: GOWORK
+        value: "off"
+      - name: GOENV
+        value: "off"
+      - name: GOMODCACHE
+        value: "/cache/gomod"
+      - name: GOCACHE
+        value: "/cache/gobuild"
+      - name: GIT_TERMINAL_PROMPT
+        value: "0"
+      - name: KUBEBUILDER_ASSETS
+        value: ""
+      - name: TRIVY_CACHE_DIR
+        value: "/tmp/oberth-trivy"
+      - name: GOLANGCI_LINT_CACHE
+        value: "/tmp/oberth-tools/cache/golangci-lint"
+      volumeMounts:
+      - name: work
+        mountPath: /tmp/oberth-tools
+        subPath: tools
+      - name: work
+        mountPath: /cache/gomod
+        subPath: gomod
+      - name: work
+        mountPath: /cache/gobuild
+        subPath: gobuild
+      - name: work
+        mountPath: /tmp/oberth-trivy
+        subPath: trivy-cache
+      resources:
+        requests:
+          cpu: "2"
+          memory: "4Gi"
+        limits:
+          cpu: "2"
+          memory: "4Gi"
+
+  # [decompress-shellcheck] the golang:1.26.6-trixie image has no xz/unxz binary,
+  # so /bin/tar cannot shell out to decompress a .tar.xz. python3's stdlib lzma
+  # module is present on the same pinned image, so it decompresses the verified
+  # archive into a plain .tar that the next step's tar can extract without an
+  # external helper.
+  - name: decompress-shellcheck
+    automountServiceAccountToken: false
+    container:
+      image: "golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3"
+      workingDir: /work/src
+      command: ["/usr/bin/python3"]
+      args:
+      - "-c"
+      - "import lzma, shutil; shutil.copyfileobj(lzma.open('/tmp/oberth-tools/shellcheck-v0.10.0.linux.x86_64.tar.xz', 'rb'), open('/tmp/oberth-tools/shellcheck-v0.10.0.linux.x86_64.tar', 'wb'))"
+      env:
+      - name: PATH
+        value: "/tmp/oberth-tools/bin:/usr/local/bin:/usr/bin:/bin"
+      - name: OBERTH_TOOLS_DIR
+        value: "/tmp/oberth-tools"
+      - name: HOME
+        value: "/tmp"
+      - name: GOPATH
+        value: "/tmp/oberth-tools/gopath"
+      - name: GOTOOLCHAIN
+        value: "local"
+      - name: GOWORK
+        value: "off"
+      - name: GOENV
+        value: "off"
+      - name: GOMODCACHE
+        value: "/cache/gomod"
+      - name: GOCACHE
+        value: "/cache/gobuild"
+      - name: GIT_TERMINAL_PROMPT
+        value: "0"
+      - name: KUBEBUILDER_ASSETS
+        value: ""
+      - name: TRIVY_CACHE_DIR
+        value: "/tmp/oberth-trivy"
+      - name: GOLANGCI_LINT_CACHE
+        value: "/tmp/oberth-tools/cache/golangci-lint"
+      volumeMounts:
+      - name: work
+        mountPath: /tmp/oberth-tools
+        subPath: tools
+      - name: work
+        mountPath: /cache/gomod
+        subPath: gomod
+      - name: work
+        mountPath: /cache/gobuild
+        subPath: gobuild
+      - name: work
+        mountPath: /tmp/oberth-trivy
+        subPath: trivy-cache
+      resources:
+        requests:
+          cpu: "2"
+          memory: "4Gi"
+        limits:
+          cpu: "2"
+          memory: "4Gi"
+
+  # [install-shellcheck] extract shellcheck binary from decompressed tarball
+  - name: install-shellcheck
+    automountServiceAccountToken: false
+    container:
+      image: "golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3"
+      workingDir: /work/src
+      command: ["/bin/tar"]
+      args:
+      - "-xf"
+      - "/tmp/oberth-tools/shellcheck-v0.10.0.linux.x86_64.tar"
+      - "-C"
+      - "/tmp/oberth-tools/bin"
+      - "--strip-components=1"
+      - "--no-same-owner"
+      - "shellcheck-v0.10.0/shellcheck"
+      env:
+      - name: PATH
+        value: "/tmp/oberth-tools/bin:/usr/local/bin:/usr/bin:/bin"
+      - name: OBERTH_TOOLS_DIR
+        value: "/tmp/oberth-tools"
+      - name: HOME
+        value: "/tmp"
+      - name: GOPATH
+        value: "/tmp/oberth-tools/gopath"
+      - name: GOTOOLCHAIN
+        value: "local"
+      - name: GOWORK
+        value: "off"
+      - name: GOENV
+        value: "off"
+      - name: GOMODCACHE
+        value: "/cache/gomod"
+      - name: GOCACHE
+        value: "/cache/gobuild"
+      - name: GIT_TERMINAL_PROMPT
+        value: "0"
+      - name: KUBEBUILDER_ASSETS
+        value: ""
+      - name: TRIVY_CACHE_DIR
+        value: "/tmp/oberth-trivy"
+      - name: GOLANGCI_LINT_CACHE
+        value: "/tmp/oberth-tools/cache/golangci-lint"
+      volumeMounts:
+      - name: work
+        mountPath: /tmp/oberth-tools
+        subPath: tools
+      - name: work
+        mountPath: /cache/gomod
+        subPath: gomod
+      - name: work
+        mountPath: /cache/gobuild
+        subPath: gobuild
+      - name: work
+        mountPath: /tmp/oberth-trivy
+        subPath: trivy-cache
+      resources:
+        requests:
+          cpu: "2"
+          memory: "4Gi"
+        limits:
+          cpu: "2"
+          memory: "4Gi"
+
+  # ---- shellcheck burn (single step) ----
+  # ShellCheck v0.10.0 gates all shell scripts in .oberth/ and hack/
+  # at --severity=info (errors + warnings + info). The Argo YAML migration
+  # loses the compile-time safety that Go DSL gave us; this gate catches
+  # shell-quoting-class bugs (SC2086/SC2046: unquoted expansions, word-
+  # splitting, etc.) before they reach CI or release logic. SC2086 is
+  # classified as "info" not "warning" in ShellCheck 0.10.0, so gating
+  # at "warning" would miss the exact class of bug this gate exists to
+  # catch. Style-only findings (cosmetic, e.g. backtick notation) are
+  # excluded.
+  - name: shellcheck
+    automountServiceAccountToken: false
+    metadata:
+      annotations:
+        oberth.ci/workspace-mounts: none
+        oberth.ci/workspace-env: none
+    container:
+      image: "golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3"
+      workingDir: /work/src
+      command: ["/usr/bin/find"]
+      args:
+      - ".oberth/"
+      - "hack/"
+      - "-name"
+      - "*.sh"
+      - "-type"
+      - "f"
+      - "-exec"
+      - "/tmp/oberth-tools/bin/shellcheck"
+      - "--severity=info"
+      - "{}"
+      - "+"
+      env:
+      - name: PATH
+        value: "/usr/bin:/bin"
+      - name: HOME
+        value: "/tmp"
+      volumeMounts:
+      - name: work
+        mountPath: /tmp/oberth-tools
+        subPath: tools
+        readOnly: true
+      resources:
+        requests:
+          cpu: "2"
+          memory: "4Gi"
+        limits:
+          cpu: "2"
+          memory: "4Gi"
+
+  # ---- lint burn (2 sequential steps) ----
+  # Maps to: Test("lint", repositorySteps(
+  #   ctx.Go.Vet("./..."),
+  #   ctx.Lint.GolangciLint("./...").Size(L).Env("GOMEMLIMIT","2GiB"))
+  #   ...).After("setup")
+  - name: lint
+    steps:
+    - - name: vet
+        template: vet
+    - - name: golangci-lint-run
+        template: golangci-lint-run
+
+  # [go-vet-./...]
+  - name: vet
+    automountServiceAccountToken: false
+    container:
+      image: "golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3"
+      workingDir: /work/src
+      command: ["/tmp/oberth-tools/bin/go"]
+      args: ["vet", "./..."]
+      env:
+      - name: PATH
+        value: "/tmp/oberth-tools/bin:/usr/local/bin:/usr/bin:/bin"
+      - name: OBERTH_TOOLS_DIR
+        value: "/tmp/oberth-tools"
+      - name: HOME
+        value: "/tmp"
+      - name: GOPATH
+        value: "/tmp/oberth-tools/gopath"
+      - name: GOTOOLCHAIN
+        value: "local"
+      - name: GOWORK
+        value: "off"
+      - name: GOENV
+        value: "off"
+      - name: GOMODCACHE
+        value: "/cache/gomod"
+      - name: GOCACHE
+        value: "/cache/gobuild"
+      - name: GIT_TERMINAL_PROMPT
+        value: "0"
+      - name: KUBEBUILDER_ASSETS
+        value: ""
+      - name: TRIVY_CACHE_DIR
+        value: "/tmp/oberth-trivy"
+      - name: GOLANGCI_LINT_CACHE
+        value: "/tmp/oberth-tools/cache/golangci-lint"
+      volumeMounts:
+      - name: work
+        mountPath: /tmp/oberth-tools
+        subPath: tools
+        readOnly: true
+      - name: work
+        mountPath: /cache/gomod
+        subPath: gomod
+      - name: work
+        mountPath: /cache/gobuild
+        subPath: gobuild
+      - name: work
+        mountPath: /tmp/oberth-trivy
+        subPath: trivy-cache
+      resources:
+        requests:
+          cpu: "2"
+          memory: "4Gi"
+        limits:
+          cpu: "2"
+          memory: "4Gi"
+
+  # [golangci-lint-./...]
+  # golangci-lint exceeds the M (1Gi) budget and is OOMKilled at M --
+  # proven by run 53e6d1d7 (2026-08-09); L grants 3Gi. GOMEMLIMIT rises
+  # with the budget (SDK default 768MiB would GC-thrash inside an L pod).
+  - name: golangci-lint-run
+    automountServiceAccountToken: false
+    container:
+      image: "golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3"
+      workingDir: /work/src
+      command: ["/usr/bin/env"]
+      args: ["GOLANGCI_LINT_CACHE=/tmp/private-golangci-lint", "/tmp/oberth-tools/bin/golangci-lint", "run", "--timeout=10m", "--concurrency=1", "./..."]
+      env:
+      - name: GOMEMLIMIT
+        value: "2GiB"
+      - name: PATH
+        value: "/tmp/oberth-tools/bin:/usr/local/bin:/usr/bin:/bin"
+      - name: OBERTH_TOOLS_DIR
+        value: "/tmp/oberth-tools"
+      - name: HOME
+        value: "/tmp"
+      - name: GOPATH
+        value: "/tmp/oberth-tools/gopath"
+      - name: GOTOOLCHAIN
+        value: "local"
+      - name: GOWORK
+        value: "off"
+      - name: GOENV
+        value: "off"
+      - name: GOMODCACHE
+        value: "/cache/gomod"
+      - name: GOCACHE
+        value: "/cache/gobuild"
+      - name: GIT_TERMINAL_PROMPT
+        value: "0"
+      - name: KUBEBUILDER_ASSETS
+        value: ""
+      - name: TRIVY_CACHE_DIR
+        value: "/tmp/oberth-trivy"
+      - name: GOLANGCI_LINT_CACHE
+        value: "/tmp/oberth-tools/cache/golangci-lint"
+      volumeMounts:
+      - name: work
+        mountPath: /tmp/oberth-tools
+        subPath: tools
+        readOnly: true
+      - name: work
+        mountPath: /cache/gomod
+        subPath: gomod
+      - name: work
+        mountPath: /cache/gobuild
+        subPath: gobuild
+      - name: work
+        mountPath: /tmp/oberth-trivy
+        subPath: trivy-cache
+      resources:
+        requests:
+          cpu: "4"
+          memory: "8Gi"
+        limits:
+          cpu: "4"
+          memory: "8Gi"
+
+  # ---- test burn (single step) ----
+  # Maps to: Test("test", repositorySteps(
+  #   ctx.Go.TestRace("./...").Size(L))...).After("lint")
+  # Race-instrumented full suite links large test binaries and needs more
+  # than the M budget headroom. CGO_ENABLED=1 for the race detector; gcc
+  # from the golang:1.26.6-trixie image provides the C compiler.
+  - name: test
+    automountServiceAccountToken: false
+    container:
+      image: "golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3"
+      workingDir: /work/src
+      command: ["/tmp/oberth-tools/bin/go"]
+      args: ["test", "-race", "-v", "-count=1", "./..."]
+      env:
+      - name: CGO_ENABLED
+        value: "1"
+      - name: PATH
+        value: "/tmp/oberth-tools/bin:/usr/local/bin:/usr/bin:/bin"
+      - name: OBERTH_TOOLS_DIR
+        value: "/tmp/oberth-tools"
+      - name: HOME
+        value: "/tmp"
+      - name: GOPATH
+        value: "/tmp/oberth-tools/gopath"
+      - name: GOTOOLCHAIN
+        value: "local"
+      - name: GOWORK
+        value: "off"
+      - name: GOENV
+        value: "off"
+      - name: GOMODCACHE
+        value: "/cache/gomod"
+      - name: GOCACHE
+        value: "/cache/gobuild"
+      - name: GIT_TERMINAL_PROMPT
+        value: "0"
+      - name: KUBEBUILDER_ASSETS
+        value: ""
+      - name: TRIVY_CACHE_DIR
+        value: "/tmp/oberth-trivy"
+      - name: GOLANGCI_LINT_CACHE
+        value: "/tmp/oberth-tools/cache/golangci-lint"
+      volumeMounts:
+      - name: work
+        mountPath: /tmp/oberth-tools
+        subPath: tools
+        readOnly: true
+      - name: work
+        mountPath: /cache/gomod
+        subPath: gomod
+      - name: work
+        mountPath: /cache/gobuild
+        subPath: gobuild
+      - name: work
+        mountPath: /tmp/oberth-trivy
+        subPath: trivy-cache
+      resources:
+        requests:
+          cpu: "4"
+          memory: "8Gi"
+        limits:
+          cpu: "4"
+          memory: "8Gi"
+
+  # ---- security burn (single step) ----
+  # Maps to: Test("security", repositorySteps(
+  #   ctx.Scan.TrivyFS(".").Size(L))...).After("setup")
+  # Uses the official trivy image pinned by digest -- no install step needed.
+  # Trivy holds its vulnerability DB in memory; M is too tight.
+  - name: security
+    automountServiceAccountToken: false
+    metadata:
+      annotations:
+        oberth.ci/workspace-mounts: none
+        oberth.ci/workspace-env: none
+    container:
+      image: "aquasec/trivy:0.73.0@sha256:7cced7cae583819fc7806d4cbc0dbbc7cad18b99f7d3e235192e6da8c091045c"
+      workingDir: /work/src
+      command: ["/usr/local/bin/trivy"]
+      args:
+      - "fs"
+      - "--cache-dir"
+      - "/tmp/oberth-trivy"
+      - "--no-progress"
+      - "--skip-check-update"
+      - "--skip-vex-repo-update"
+      - "--skip-version-check"
+      - "--disable-telemetry"
+      - "--scanners"
+      - "vuln"
+      - "--exit-code"
+      - "1"
+      - "--severity"
+      - "HIGH,CRITICAL"
+      - "--skip-dirs"
+      - ".git"
+      - "."
+      env:
+      - name: HOME
+        value: "/tmp"
+      - name: TRIVY_CACHE_DIR
+        value: "/tmp/oberth-trivy"
+      resources:
+        requests:
+          cpu: "4"
+          memory: "8Gi"
+        limits:
+          cpu: "4"
+          memory: "8Gi"
+
+  # ---- chart burn (single step) ----
+  # Maps to: Test("chart", repositorySteps(
+  #   oberth.Cmd("helm-contract", "./hack/test-chart.sh"))
+  #   ...).After("lint")
+  - name: chart
+    automountServiceAccountToken: false
+    metadata:
+      annotations:
+        oberth.ci/workspace-mounts: none
+        oberth.ci/workspace-env: none
+    container:
+      image: "golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3"
+      workingDir: /work/src
+      command: ["./hack/test-chart.sh"]
+      args: []
+      env:
+      - name: PATH
+        value: "/tmp/oberth-tools/bin:/usr/local/bin:/usr/bin:/bin"
+      - name: HOME
+        value: "/tmp"
+      volumeMounts:
+      - name: work
+        mountPath: /tmp/oberth-tools
+        subPath: tools
+        readOnly: true
+      resources:
+        requests:
+          cpu: "2"
+          memory: "4Gi"
+        limits:
+          cpu: "2"
+          memory: "4Gi"
+
+  # ---- build-amd64 burn (single step) ----
+  # Maps to: Build("build-amd64", repositorySteps(
+  #   namedStep("build-oberth-amd64",
+  #     ctx.Go.Build("./cmd/oberth").WithArgs("-buildvcs=false").Env("GOARCH","amd64")))
+  #   ...).After("test","chart")
+  # -buildvcs=false matches release.sh and the Dockerfile: verification
+  # builds must be hermetic against repository git state.
+  - name: build-amd64
+    automountServiceAccountToken: false
+    container:
+      image: "golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3"
+      workingDir: /work/src
+      command: ["/tmp/oberth-tools/bin/go"]
+      args: ["build", "-buildvcs=false", "-o", "/dev/null", "./cmd/oberth"]
+      env:
+      - name: CGO_ENABLED
+        value: "0"
+      - name: GOARCH
+        value: "amd64"
+      - name: PATH
+        value: "/tmp/oberth-tools/bin:/usr/local/bin:/usr/bin:/bin"
+      - name: OBERTH_TOOLS_DIR
+        value: "/tmp/oberth-tools"
+      - name: HOME
+        value: "/tmp"
+      - name: GOPATH
+        value: "/tmp/oberth-tools/gopath"
+      - name: GOTOOLCHAIN
+        value: "local"
+      - name: GOWORK
+        value: "off"
+      - name: GOENV
+        value: "off"
+      - name: GOMODCACHE
+        value: "/cache/gomod"
+      - name: GOCACHE
+        value: "/cache/gobuild"
+      - name: GIT_TERMINAL_PROMPT
+        value: "0"
+      - name: KUBEBUILDER_ASSETS
+        value: ""
+      - name: TRIVY_CACHE_DIR
+        value: "/tmp/oberth-trivy"
+      - name: GOLANGCI_LINT_CACHE
+        value: "/tmp/oberth-tools/cache/golangci-lint"
+      volumeMounts:
+      - name: work
+        mountPath: /tmp/oberth-tools
+        subPath: tools
+        readOnly: true
+      - name: work
+        mountPath: /cache/gomod
+        subPath: gomod
+      - name: work
+        mountPath: /cache/gobuild
+        subPath: gobuild
+      - name: work
+        mountPath: /tmp/oberth-trivy
+        subPath: trivy-cache
+      resources:
+        requests:
+          cpu: "2"
+          memory: "4Gi"
+        limits:
+          cpu: "2"
+          memory: "4Gi"
+
+  # ---- build-arm64 burn (single step) ----
+  # Maps to: Build("build-arm64", repositorySteps(
+  #   namedStep("build-oberth-arm64",
+  #     ctx.Go.Build("./cmd/oberth").WithArgs("-buildvcs=false").Env("GOARCH","arm64")))
+  #   ...).After("test","chart")
+  - name: build-arm64
+    automountServiceAccountToken: false
+    container:
+      image: "golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3"
+      workingDir: /work/src
+      command: ["/tmp/oberth-tools/bin/go"]
+      args: ["build", "-buildvcs=false", "-o", "/dev/null", "./cmd/oberth"]
+      env:
+      - name: CGO_ENABLED
+        value: "0"
+      - name: GOARCH
+        value: "arm64"
+      - name: PATH
+        value: "/tmp/oberth-tools/bin:/usr/local/bin:/usr/bin:/bin"
+      - name: OBERTH_TOOLS_DIR
+        value: "/tmp/oberth-tools"
+      - name: HOME
+        value: "/tmp"
+      - name: GOPATH
+        value: "/tmp/oberth-tools/gopath"
+      - name: GOTOOLCHAIN
+        value: "local"
+      - name: GOWORK
+        value: "off"
+      - name: GOENV
+        value: "off"
+      - name: GOMODCACHE
+        value: "/cache/gomod"
+      - name: GOCACHE
+        value: "/cache/gobuild"
+      - name: GIT_TERMINAL_PROMPT
+        value: "0"
+      - name: KUBEBUILDER_ASSETS
+        value: ""
+      - name: TRIVY_CACHE_DIR
+        value: "/tmp/oberth-trivy"
+      - name: GOLANGCI_LINT_CACHE
+        value: "/tmp/oberth-tools/cache/golangci-lint"
+      volumeMounts:
+      - name: work
+        mountPath: /tmp/oberth-tools
+        subPath: tools
+        readOnly: true
+      - name: work
+        mountPath: /cache/gomod
+        subPath: gomod
+      - name: work
+        mountPath: /cache/gobuild
+        subPath: gobuild
+      - name: work
+        mountPath: /tmp/oberth-trivy
+        subPath: trivy-cache
+      resources:
+        requests:
+          cpu: "2"
+          memory: "4Gi"
+        limits:
+          cpu: "2"
+          memory: "4Gi"
+
+  # ---- build-darwin-amd64 burn (single step) ----
+  # Branch verification of the darwin/amd64 release target. release.sh
+  # cross-compiles darwin/{amd64,arm64} and branch CI must exercise the same
+  # target set so a platform-specific type mismatch (e.g. syscall.Statfs_t.Bsize
+  # int64 vs uint32) cannot pass CI and burn only at release time (#699).
+  - name: build-darwin-amd64
+    automountServiceAccountToken: false
+    container:
+      image: "golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3"
+      workingDir: /work/src
+      command: ["/tmp/oberth-tools/bin/go"]
+      args: ["build", "-buildvcs=false", "-o", "/dev/null", "./cmd/oberth"]
+      env:
+      - name: CGO_ENABLED
+        value: "0"
+      - name: GOOS
+        value: "darwin"
+      - name: GOARCH
+        value: "amd64"
+      - name: PATH
+        value: "/tmp/oberth-tools/bin:/usr/local/bin:/usr/bin:/bin"
+      - name: OBERTH_TOOLS_DIR
+        value: "/tmp/oberth-tools"
+      - name: HOME
+        value: "/tmp"
+      - name: GOPATH
+        value: "/tmp/oberth-tools/gopath"
+      - name: GOTOOLCHAIN
+        value: "local"
+      - name: GOWORK
+        value: "off"
+      - name: GOENV
+        value: "off"
+      - name: GOMODCACHE
+        value: "/cache/gomod"
+      - name: GOCACHE
+        value: "/cache/gobuild"
+      - name: GIT_TERMINAL_PROMPT
+        value: "0"
+      - name: KUBEBUILDER_ASSETS
+        value: ""
+      - name: TRIVY_CACHE_DIR
+        value: "/tmp/oberth-trivy"
+      - name: GOLANGCI_LINT_CACHE
+        value: "/tmp/oberth-tools/cache/golangci-lint"
+      volumeMounts:
+      - name: work
+        mountPath: /tmp/oberth-tools
+        subPath: tools
+        readOnly: true
+      - name: work
+        mountPath: /cache/gomod
+        subPath: gomod
+      - name: work
+        mountPath: /cache/gobuild
+        subPath: gobuild
+      - name: work
+        mountPath: /tmp/oberth-trivy
+        subPath: trivy-cache
+      resources:
+        requests:
+          cpu: "2"
+          memory: "4Gi"
+        limits:
+          cpu: "2"
+          memory: "4Gi"
+
+  # ---- build-darwin-arm64 burn (single step) ----
+  # Branch verification of the darwin/arm64 release target (#699).
+  - name: build-darwin-arm64
+    automountServiceAccountToken: false
+    container:
+      image: "golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3"
+      workingDir: /work/src
+      command: ["/tmp/oberth-tools/bin/go"]
+      args: ["build", "-buildvcs=false", "-o", "/dev/null", "./cmd/oberth"]
+      env:
+      - name: CGO_ENABLED
+        value: "0"
+      - name: GOOS
+        value: "darwin"
+      - name: GOARCH
+        value: "arm64"
+      - name: PATH
+        value: "/tmp/oberth-tools/bin:/usr/local/bin:/usr/bin:/bin"
+      - name: OBERTH_TOOLS_DIR
+        value: "/tmp/oberth-tools"
+      - name: HOME
+        value: "/tmp"
+      - name: GOPATH
+        value: "/tmp/oberth-tools/gopath"
+      - name: GOTOOLCHAIN
+        value: "local"
+      - name: GOWORK
+        value: "off"
+      - name: GOENV
+        value: "off"
+      - name: GOMODCACHE
+        value: "/cache/gomod"
+      - name: GOCACHE
+        value: "/cache/gobuild"
+      - name: GIT_TERMINAL_PROMPT
+        value: "0"
+      - name: KUBEBUILDER_ASSETS
+        value: ""
+      - name: TRIVY_CACHE_DIR
+        value: "/tmp/oberth-trivy"
+      - name: GOLANGCI_LINT_CACHE
+        value: "/tmp/oberth-tools/cache/golangci-lint"
+      volumeMounts:
+      - name: work
+        mountPath: /tmp/oberth-tools
+        subPath: tools
+        readOnly: true
+      - name: work
+        mountPath: /cache/gomod
+        subPath: gomod
+      - name: work
+        mountPath: /cache/gobuild
+        subPath: gobuild
+      - name: work
+        mountPath: /tmp/oberth-trivy
+        subPath: trivy-cache
+      resources:
+        requests:
+          cpu: "2"
+          memory: "4Gi"
+        limits:
+          cpu: "2"
+          memory: "4Gi"
+
+  # Credentialless proof of the signed release's numeric-only prefetch refusal.
+  - name: release-diagnostic
+    automountServiceAccountToken: false
+    metadata:
+      annotations:
+        oberth.ci/workspace-mounts: none
+        oberth.ci/workspace-env: none
+    container:
+      image: golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3
+      workingDir: /work/src
+      command: [/usr/bin/python3]
+      args: [-I, -B, hack/test-release-diagnostic.py]
+      env:
+      - name: TMPDIR
+        value: /tmp/diagnostic-work
+      volumeMounts:
+      - name: work
+        mountPath: /tmp/diagnostic-work
+        subPath: diagnostic
+      resources:
+        requests:
+          cpu: "1"
+          memory: 256Mi
+        limits:
+          cpu: "1"
+          memory: 256Mi

@@ -1,0 +1,202 @@
+{{- $namespace := required "argo.namespace is required" .Values.argo.namespace }}
+{{- /*
+The former aliases argo.ciSecretsServiceAccount and argo.vault.ciSecretsRole
+named the RELEASE-tier credentialed identity. Since the branch tier gained its
+own separate ci-secrets identity (issue #200), silently reading either alias
+could bind a branch-tier name onto the release-tier role — the exact trust
+collapse the split removes — so a values file still carrying one refuses to
+render instead.
+*/}}
+{{- if .Values.argo.ciSecretsServiceAccount }}
+{{- fail "argo.ciSecretsServiceAccount is retired: it aliased the RELEASE-tier credentialed ServiceAccount. Set argo.credentialedServiceAccount for the release tier; the separate branch-tier identity is argo.ciSecrets.serviceAccount" }}
+{{- end }}
+{{- if (.Values.argo.vault).ciSecretsRole }}
+{{- fail "argo.vault.ciSecretsRole is retired: it aliased the RELEASE-tier argo.vault.credentialedRole. Set argo.vault.credentialedRole for the release tier; the separate branch-tier role is argo.ciSecrets.vaultRole" }}
+{{- end }}
+{{- $pipeline := .Values.argo.pipelineServiceAccount | default .Values.argo.ciServiceAccount | default "oberth-argo-pipeline" }}
+{{- $credentialed := .Values.argo.credentialedServiceAccount | default "oberth-argo-credentialed" }}
+{{- $ciSecrets := (.Values.argo.ciSecrets).serviceAccount | default "oberth-argo-ci-secrets" }}
+{{- $executor := .Values.argo.executorServiceAccount }}
+{{- $allSAs := list $pipeline $credentialed $ciSecrets $executor }}
+{{- range $i, $a := $allSAs }}
+{{- range $j, $b := $allSAs }}
+{{- if and (ne $i $j) (eq $a $b) }}
+{{- fail "argo.pipelineServiceAccount, argo.credentialedServiceAccount, argo.ciSecrets.serviceAccount, and argo.executorServiceAccount must all differ: a shared identity defeats the secret access boundary" }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- if eq $namespace .Release.Namespace }}
+{{- fail "argo.namespace must differ from the release namespace: Vault Kubernetes-auth roles bind (namespace, ServiceAccount) pairs, so pipeline identities must not sit beside server ones" }}
+{{- end }}
+# The four Kubernetes identities the Argo execution engine binds: pipeline
+# (no secrets), credentialed (release trigger with approved secrets),
+# ci-secrets (CI trigger with approved upstream-scoped secrets), executor
+# (Argo bookkeeping). The trigger and the approval table in the Oberth
+# database together decide which identity a submission receives.
+#
+# Bind the two credentialed roles from an administrator's own bao session
+# (setup-secretstore.sh and `oberth install --install-secretstore` do both):
+#
+#   bao write auth/kubernetes/role/{{ .Values.argo.vault.credentialedRole | default "oberth-argo-credentialed" }} \
+#       bound_service_account_names={{ $credentialed }} \
+#       bound_service_account_namespaces={{ $namespace }} \
+#       policies=oberth-argo-credentialed ttl=20m
+#
+#   bao write auth/kubernetes/role/{{ (.Values.argo.ciSecrets).vaultRole | default "oberth-argo-ci-secrets" }} \
+#       bound_service_account_names={{ $ciSecrets }} \
+#       bound_service_account_namespaces={{ $namespace }} \
+#       policies=oberth-argo-ci-secrets ttl=20m
+#
+# The bound fields must be exact. A "*" on either lets the pipeline identity
+# assume a credentialed role, defeating the approval gate — and would also
+# let the ci-secrets identity assume the release role, defeating the tier
+# split itself.
+---
+# Pipeline templates without approved secrets. No Kubernetes permissions, no
+# Vault role, and automountServiceAccountToken false so step containers hold
+# no token at all.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $pipeline }}
+  namespace: {{ $namespace }}
+  labels:
+    {{- include "oberth.labels" . | nindent 4 }}
+automountServiceAccountToken: false
+---
+# Templates with approved secrets. The bound Vault role's policy is derived
+# from the approval table via `oberth access allow`.
+#
+# automountServiceAccountToken is false here too, deliberately. envconsul does
+# NOT depend on the automount: the server injects a projected, ten-minute
+# ServiceAccount token volume at the default path on exactly the templates
+# whose command is envconsul (internal/argojob/spec.go, releaseTokenVolume).
+# With the automount enabled, every OTHER step container of a credentialed
+# Workflow — setup, test, build, package — also carried a live token for this
+# identity while executing repository-controlled code, letting a compromised
+# test or build dependency log in to OpenBao and read every granted secret.
+# The ambient identity also leaked into tooling: helm resolves its default
+# namespace from the mounted serviceaccount files, which is what turned the
+# release-tier `go test` chart renders red (release run 4c60dcfacf81,
+# v0.12.24). Step containers hold no token unless the server explicitly
+# mounted one.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $credentialed }}
+  namespace: {{ $namespace }}
+  labels:
+    {{- include "oberth.labels" . | nindent 4 }}
+automountServiceAccountToken: false
+---
+# CI templates with approved upstream-scoped secrets. The branch-tier
+# counterpart of the credentialed identity above, and a separate account on
+# purpose: the release-tier Vault role binds the credentialed name exactly, so
+# a branch pod running as this account cannot complete that login no matter
+# what its repository-authored steps attempt. Its own role's policy covers the
+# upstream subtree only and never receives approval-table grants.
+#
+# automountServiceAccountToken is false for the same reason as above: the
+# server injects a projected, ten-minute token onto exactly the templates
+# whose command is a credential chain, and no other step container of the
+# Workflow ever holds one.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $ciSecrets }}
+  namespace: {{ $namespace }}
+  labels:
+    {{- include "oberth.labels" . | nindent 4 }}
+automountServiceAccountToken: false
+---
+# Argo's own init and wait containers. This is the only one of the four with
+# any Kubernetes access, which is exactly why it must not be an identity a
+# pipeline step ever runs as.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $executor }}
+  namespace: {{ $namespace }}
+  labels:
+    {{- include "oberth.labels" . | nindent 4 }}
+automountServiceAccountToken: false
+---
+# Argo resolves the executor identity through a long-lived token Secret rather
+# than a projected volume, and Kubernetes 1.24+ no longer creates one
+# automatically.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $executor }}.service-account-token
+  namespace: {{ $namespace }}
+  annotations:
+    kubernetes.io/service-account.name: {{ $executor }}
+  labels:
+    {{- include "oberth.labels" . | nindent 4 }}
+type: kubernetes.io/service-account-token
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $executor }}
+  namespace: {{ $namespace }}
+  labels:
+    {{- include "oberth.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["argoproj.io"]
+    resources: ["workflowtaskresults"]
+    verbs: ["create", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $executor }}
+  namespace: {{ $namespace }}
+  labels:
+    {{- include "oberth.labels" . | nindent 4 }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $executor }}
+    namespace: {{ $namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $executor }}
+{{- /*
+Per-repo Vault identities. Each entry creates a ServiceAccount whose name
+is the same as its Vault role and policy. The installer populates
+argo.perRepoIdentities from the repo registry + grants; here we just
+create the ServiceAccounts. No Kubernetes permissions, no RBAC, and
+automountServiceAccountToken false — the server injects a projected token
+onto exactly the templates that need it, same as the shared identities.
+*/}}
+{{- range .Values.argo.perRepoIdentities }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ . }}
+  namespace: {{ $namespace }}
+  labels:
+    {{- include "oberth.labels" $ | nindent 4 }}
+    oberth.ci/identity-type: per-repo
+automountServiceAccountToken: false
+{{- end }}
+{{- /*
+Per-repo CI Vault identities. Each entry creates a ServiceAccount whose name
+is the same as its CI-tier Vault role and policy. The CI policy is grant-free
+by construction: it scopes upstream access to the repo's own namespace only,
+closing the org-union gap in the shared ci-secrets identity (issue #433).
+*/}}
+{{- range .Values.argo.perRepoCIIdentities }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ . }}
+  namespace: {{ $namespace }}
+  labels:
+    {{- include "oberth.labels" $ | nindent 4 }}
+    oberth.ci/identity-type: per-repo-ci
+automountServiceAccountToken: false
+{{- end }}

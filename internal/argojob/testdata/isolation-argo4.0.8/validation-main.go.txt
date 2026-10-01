@@ -1,0 +1,22 @@
+package main
+import (
+ "encoding/json"
+ "fmt"
+ "os"
+ corev1 "k8s.io/api/core/v1"
+ core "k8s.io/kubernetes/pkg/apis/core"
+ v1 "k8s.io/kubernetes/pkg/apis/core/v1"
+ "k8s.io/kubernetes/pkg/apis/core/validation"
+)
+func main(){
+ failed:=false
+ for _,file:=range os.Args[1:] {
+  b,err:=os.ReadFile(file);if err!=nil {panic(err)}
+  var external corev1.Pod;if err=json.Unmarshal(b,&external);err!=nil{panic(err)}
+  v1.SetObjectDefaults_Pod(&external)
+  var pod core.Pod;if err=v1.Convert_v1_Pod_To_core_Pod(&external,&pod,nil);err!=nil{panic(err)}
+  errs:=validation.ValidatePodCreate(&pod,validation.PodValidationOptions{})
+  if len(errs)>0 {failed=true;fmt.Printf("FAIL %s: %v\n",file,errs)} else {fmt.Printf("PASS %s\n",file)}
+ }
+ if failed {os.Exit(1)}
+}

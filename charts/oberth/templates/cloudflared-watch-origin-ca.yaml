@@ -1,0 +1,18 @@
+{{- $wt := .Values.watchTunnel | default dict -}}
+{{- if and $wt.enabled $wt.originCACert }}
+{{- if or (contains "PRIVATE KEY" $wt.originCACert) (not (and (contains "-----BEGIN CERTIFICATE-----" $wt.originCACert) (contains "-----END CERTIFICATE-----" $wt.originCACert))) }}
+{{- fail "watchTunnel.originCACert must contain a public PEM certificate" }}
+{{- end }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cloudflared-watch-oberth-origin-ca
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: cloudflared-watch
+    app.kubernetes.io/component: tunnel-connector
+    {{- include "oberth.labels" . | nindent 4 }}
+data:
+  ca.crt: |
+{{ $wt.originCACert | trim | indent 4 }}
+{{- end }}

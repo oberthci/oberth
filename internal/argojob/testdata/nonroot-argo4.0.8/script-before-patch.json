@@ -1,0 +1,424 @@
+{
+  "metadata": {
+    "name": "oberth-oberth-run-abc1-aabbccddeeff",
+    "namespace": "oberth-argo",
+    "creationTimestamp": null,
+    "labels": {
+      "oberth.ci/run": "run-abc123",
+      "oberth.ci/tier": "ci",
+      "oberth.ci/trigger": "ci",
+      "workflows.argoproj.io/completed": "false",
+      "workflows.argoproj.io/workflow": "oberth-oberth-run-abc1-aabbccddeeff"
+    },
+    "annotations": {
+      "kubectl.kubernetes.io/default-container": "main",
+      "workflows.argoproj.io/node-id": "oberth-oberth-run-abc1-aabbccddeeff",
+      "workflows.argoproj.io/node-name": "oberth-oberth-run-abc1-aabbccddeeff"
+    },
+    "ownerReferences": [
+      {
+        "apiVersion": "argoproj.io/v1alpha1",
+        "kind": "Workflow",
+        "name": "oberth-oberth-run-abc1-aabbccddeeff",
+        "uid": "",
+        "controller": true,
+        "blockOwnerDeletion": true
+      }
+    ]
+  },
+  "spec": {
+    "volumes": [
+      {
+        "name": "var-run-argo",
+        "emptyDir": {}
+      },
+      {
+        "name": "tmp-dir-argo",
+        "emptyDir": {}
+      },
+      {
+        "name": "exec-sa-token",
+        "secret": {
+          "secretName": "oberth-argo-executor.service-account-token"
+        }
+      },
+      {
+        "name": "oberth-source",
+        "persistentVolumeClaim": {
+          "claimName": "run-source",
+          "readOnly": true
+        }
+      },
+      {
+        "name": "oberth-artifacts",
+        "persistentVolumeClaim": {
+          "claimName": "run-source"
+        }
+      },
+      {
+        "name": "oberth-nonroot-tmp",
+        "emptyDir": {
+          "sizeLimit": "8Gi"
+        }
+      },
+      {
+        "name": "argo-staging",
+        "emptyDir": {}
+      }
+    ],
+    "initContainers": [
+      {
+        "name": "init",
+        "image": "quay.io/argoproj/argoexec:v4.0.8@sha256:86a965d7eea176959351156e24f3a2fa8d8e342e477ef425009af95a12e3fe87",
+        "command": [
+          "argoexec",
+          "init",
+          "--loglevel",
+          "info",
+          "--log-format",
+          "text",
+          "--gloglevel",
+          "0"
+        ],
+        "env": [
+          {
+            "name": "ARGO_POD_NAME",
+            "valueFrom": {
+              "fieldRef": {
+                "apiVersion": "v1",
+                "fieldPath": "metadata.name"
+              }
+            }
+          },
+          {
+            "name": "ARGO_POD_UID",
+            "valueFrom": {
+              "fieldRef": {
+                "apiVersion": "v1",
+                "fieldPath": "metadata.uid"
+              }
+            }
+          },
+          {
+            "name": "ARGO_WORKFLOW_NAME",
+            "value": "oberth-oberth-run-abc1-aabbccddeeff"
+          },
+          {
+            "name": "ARGO_WORKFLOW_UID"
+          },
+          {
+            "name": "ARGO_CONTAINER_NAME",
+            "value": "init"
+          },
+          {
+            "name": "ARGO_TEMPLATE",
+            "value": "{\"name\":\"test\",\"inputs\":{},\"outputs\":{},\"metadata\":{},\"script\":{\"name\":\"\",\"image\":\"golang:1.26.6-trixie@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"command\":[\"/bin/sh\"],\"env\":[{\"name\":\"OBERTH_REPO\",\"value\":\"oberth\"},{\"name\":\"OBERTH_REF\",\"value\":\"refs/heads/main\"},{\"name\":\"OBERTH_SHA\",\"value\":\"0123456789abcdef0123456789abcdef01234567\"},{\"name\":\"OBERTH_TRIGGER\",\"value\":\"ci\"},{\"name\":\"OBERTH_RUN_ID\",\"value\":\"run-abc123\"},{\"name\":\"OBERTH_ARTIFACTS\",\"value\":\"/work/artifacts\"},{\"name\":\"TMPDIR\",\"value\":\"/tmp\"},{\"name\":\"GOTMPDIR\",\"value\":\"/tmp\"},{\"name\":\"GOCACHE\",\"value\":\"/tmp/gobuild\"},{\"name\":\"GOMODCACHE\",\"value\":\"/tmp/gomod\"},{\"name\":\"OBERTH_CACHE_DIR\",\"value\":\"/tmp/cache\"},{\"name\":\"HOME\",\"value\":\"/tmp\"},{\"name\":\"XDG_CACHE_HOME\",\"value\":\"/tmp/cache\"}],\"resources\":{},\"volumeMounts\":[{\"name\":\"oberth-source\",\"readOnly\":true,\"mountPath\":\"/work/src\",\"subPath\":\"src\"},{\"name\":\"oberth-artifacts\",\"mountPath\":\"/work/artifacts\",\"subPath\":\"artifacts\"},{\"name\":\"oberth-nonroot-tmp\",\"mountPath\":\"/tmp\"}],\"securityContext\":{\"capabilities\":{\"drop\":[\"ALL\"]},\"runAsUser\":65534,\"runAsGroup\":65534,\"runAsNonRoot\":true,\"readOnlyRootFilesystem\":true,\"allowPrivilegeEscalation\":false,\"seccompProfile\":{\"type\":\"RuntimeDefault\"}},\"source\":\"true\"},\"serviceAccountName\":\"oberth-argo-pipeline\",\"automountServiceAccountToken\":false,\"securityContext\":{\"runAsUser\":65534,\"runAsGroup\":65534,\"runAsNonRoot\":true,\"seccompProfile\":{\"type\":\"RuntimeDefault\"}},\"podSpecPatch\":\"{\\\"$setElementOrder/initContainers\\\":[{\\\"name\\\":\\\"oberth-prepare-nonroot\\\"},{\\\"name\\\":\\\"init\\\"}],\\\"containers\\\":[{\\\"name\\\":\\\"wait\\\",\\\"securityContext\\\":{\\\"allowPrivilegeEscalation\\\":false,\\\"appArmorProfile\\\":null,\\\"capabilities\\\":{\\\"add\\\":null,\\\"drop\\\":[\\\"ALL\\\"]},\\\"privileged\\\":null,\\\"procMount\\\":null,\\\"readOnlyRootFilesystem\\\":true,\\\"runAsGroup\\\":65534,\\\"runAsNonRoot\\\":true,\\\"runAsUser\\\":65534,\\\"seLinuxOptions\\\":null,\\\"seccompProfile\\\":{\\\"localhostProfile\\\":null,\\\"type\\\":\\\"RuntimeDefault\\\"},\\\"windowsOptions\\\":null},\\\"volumeMounts\\\":[{\\\"name\\\":\\\"oberth-source\\\",\\\"readOnly\\\":true,\\\"mountPath\\\":\\\"/mainctrfs/work/src\\\",\\\"subPath\\\":\\\"src\\\"},{\\\"name\\\":\\\"oberth-artifacts\\\",\\\"readOnly\\\":true,\\\"mountPath\\\":\\\"/mainctrfs/work/artifacts\\\",\\\"subPath\\\":\\\"artifacts\\\"},{\\\"name\\\":\\\"oberth-nonroot-tmp\\\",\\\"readOnly\\\":true,\\\"mountPath\\\":\\\"/mainctrfs/tmp\\\"},{\\\"name\\\":\\\"argo-staging\\\",\\\"readOnly\\\":true,\\\"mountPath\\\":\\\"/mainctrfs/argo/staging\\\"}]}],\\\"initContainers\\\":[{\\\"name\\\":\\\"oberth-prepare-nonroot\\\",\\\"image\\\":\\\"busybox:1.37@sha256:ab33eacc8251e3807b85bb6dba570e4698c3998eca6f0fc2ccb60575a563ea74\\\",\\\"command\\\":[\\\"/bin/sh\\\",\\\"-ec\\\",\\\"if [ ! -e /prepare/executor/0 ]; then mkdir /prepare/executor/0; fi; test -d /prepare/executor/0 \\\\u0026\\\\u0026 test ! -L /prepare/executor/0 \\\\u0026\\\\u0026 test -O /prepare/executor/0 \\\\u0026\\\\u0026 chmod 1777 /prepare/tmp /prepare/argo /prepare/executor/0 /prepare/staging\\\"],\\\"resources\\\":{\\\"limits\\\":{\\\"cpu\\\":\\\"100m\\\",\\\"memory\\\":\\\"64Mi\\\"},\\\"requests\\\":{\\\"cpu\\\":\\\"10m\\\",\\\"memory\\\":\\\"16Mi\\\"}},\\\"volumeMounts\\\":[{\\\"name\\\":\\\"oberth-nonroot-tmp\\\",\\\"mountPath\\\":\\\"/prepare/tmp\\\"},{\\\"name\\\":\\\"var-run-argo\\\",\\\"mountPath\\\":\\\"/prepare/argo\\\"},{\\\"name\\\":\\\"tmp-dir-argo\\\",\\\"mountPath\\\":\\\"/prepare/executor\\\"},{\\\"name\\\":\\\"argo-staging\\\",\\\"mountPath\\\":\\\"/prepare/staging\\\"}],\\\"securityContext\\\":{\\\"capabilities\\\":{\\\"drop\\\":[\\\"ALL\\\"]},\\\"runAsUser\\\":0,\\\"runAsGroup\\\":0,\\\"runAsNonRoot\\\":false,\\\"readOnlyRootFilesystem\\\":true,\\\"allowPrivilegeEscalation\\\":false,\\\"seccompProfile\\\":{\\\"type\\\":\\\"RuntimeDefault\\\"}}},{\\\"name\\\":\\\"init\\\",\\\"securityContext\\\":{\\\"allowPrivilegeEscalation\\\":false,\\\"appArmorProfile\\\":null,\\\"capabilities\\\":{\\\"add\\\":null,\\\"drop\\\":[\\\"ALL\\\"]},\\\"privileged\\\":null,\\\"procMount\\\":null,\\\"readOnlyRootFilesystem\\\":true,\\\"runAsGroup\\\":65534,\\\"runAsNonRoot\\\":true,\\\"runAsUser\\\":65534,\\\"seLinuxOptions\\\":null,\\\"seccompProfile\\\":{\\\"localhostProfile\\\":null,\\\"type\\\":\\\"RuntimeDefault\\\"},\\\"windowsOptions\\\":null},\\\"volumeMounts\\\":[{\\\"name\\\":\\\"oberth-nonroot-tmp\\\",\\\"mountPath\\\":\\\"/tmp\\\"}]}],\\\"securityContext\\\":{\\\"appArmorProfile\\\":null,\\\"fsGroup\\\":null,\\\"fsGroupChangePolicy\\\":null,\\\"runAsGroup\\\":65534,\\\"runAsNonRoot\\\":true,\\\"runAsUser\\\":65534,\\\"seLinuxChangePolicy\\\":null,\\\"seLinuxOptions\\\":null,\\\"seccompProfile\\\":{\\\"localhostProfile\\\":null,\\\"type\\\":\\\"RuntimeDefault\\\"},\\\"supplementalGroups\\\":null,\\\"supplementalGroupsPolicy\\\":null,\\\"sysctls\\\":null,\\\"windowsOptions\\\":null},\\\"volumes\\\":[{\\\"emptyDir\\\":{\\\"sizeLimit\\\":\\\"128Mi\\\"},\\\"name\\\":\\\"var-run-argo\\\"},{\\\"emptyDir\\\":{\\\"sizeLimit\\\":\\\"64Mi\\\"},\\\"name\\\":\\\"tmp-dir-argo\\\"},{\\\"emptyDir\\\":{\\\"sizeLimit\\\":\\\"16Mi\\\"},\\\"name\\\":\\\"argo-staging\\\"}]}\"}"
+          },
+          {
+            "name": "ARGO_NODE_ID",
+            "value": "oberth-oberth-run-abc1-aabbccddeeff"
+          },
+          {
+            "name": "ARGO_INCLUDE_SCRIPT_OUTPUT",
+            "value": "false"
+          },
+          {
+            "name": "ARGO_DEADLINE",
+            "value": "0001-01-01T00:00:00Z"
+          },
+          {
+            "name": "ARGO_PROGRESS_FILE",
+            "value": "/var/run/argo/progress"
+          },
+          {
+            "name": "ARGO_PROGRESS_PATCH_TICK_DURATION",
+            "value": "1m0s"
+          },
+          {
+            "name": "ARGO_PROGRESS_FILE_TICK_DURATION",
+            "value": "3s"
+          }
+        ],
+        "resources": {},
+        "volumeMounts": [
+          {
+            "name": "exec-sa-token",
+            "readOnly": true,
+            "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount"
+          },
+          {
+            "name": "argo-staging",
+            "mountPath": "/argo/staging"
+          },
+          {
+            "name": "var-run-argo",
+            "mountPath": "/var/run/argo"
+          }
+        ],
+        "securityContext": {
+          "capabilities": {
+            "add": [
+              "SYS_ADMIN"
+            ]
+          },
+          "privileged": true,
+          "runAsUser": 42,
+          "runAsGroup": 43,
+          "procMount": "Unmasked"
+        }
+      }
+    ],
+    "containers": [
+      {
+        "name": "wait",
+        "image": "quay.io/argoproj/argoexec:v4.0.8@sha256:86a965d7eea176959351156e24f3a2fa8d8e342e477ef425009af95a12e3fe87",
+        "command": [
+          "argoexec",
+          "wait",
+          "--loglevel",
+          "info",
+          "--log-format",
+          "text",
+          "--gloglevel",
+          "0"
+        ],
+        "env": [
+          {
+            "name": "ARGO_POD_NAME",
+            "valueFrom": {
+              "fieldRef": {
+                "apiVersion": "v1",
+                "fieldPath": "metadata.name"
+              }
+            }
+          },
+          {
+            "name": "ARGO_POD_UID",
+            "valueFrom": {
+              "fieldRef": {
+                "apiVersion": "v1",
+                "fieldPath": "metadata.uid"
+              }
+            }
+          },
+          {
+            "name": "ARGO_WORKFLOW_NAME",
+            "value": "oberth-oberth-run-abc1-aabbccddeeff"
+          },
+          {
+            "name": "ARGO_WORKFLOW_UID"
+          },
+          {
+            "name": "ARGO_ARTIFACT_PLUGIN_NAMES"
+          },
+          {
+            "name": "ARGO_CONTAINER_NAME",
+            "value": "wait"
+          },
+          {
+            "name": "ARGO_NODE_ID",
+            "value": "oberth-oberth-run-abc1-aabbccddeeff"
+          },
+          {
+            "name": "ARGO_INCLUDE_SCRIPT_OUTPUT",
+            "value": "false"
+          },
+          {
+            "name": "ARGO_DEADLINE",
+            "value": "0001-01-01T00:00:00Z"
+          },
+          {
+            "name": "ARGO_PROGRESS_FILE",
+            "value": "/var/run/argo/progress"
+          },
+          {
+            "name": "ARGO_PROGRESS_PATCH_TICK_DURATION",
+            "value": "1m0s"
+          },
+          {
+            "name": "ARGO_PROGRESS_FILE_TICK_DURATION",
+            "value": "3s"
+          }
+        ],
+        "resources": {},
+        "volumeMounts": [
+          {
+            "name": "exec-sa-token",
+            "readOnly": true,
+            "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount"
+          },
+          {
+            "name": "oberth-source",
+            "mountPath": "/mainctrfs/work/src",
+            "subPath": "src"
+          },
+          {
+            "name": "oberth-artifacts",
+            "mountPath": "/mainctrfs/work/artifacts",
+            "subPath": "artifacts"
+          },
+          {
+            "name": "oberth-nonroot-tmp",
+            "mountPath": "/mainctrfs/tmp"
+          },
+          {
+            "name": "argo-staging",
+            "mountPath": "/mainctrfs/argo/staging"
+          }
+        ],
+        "securityContext": {
+          "capabilities": {
+            "add": [
+              "SYS_ADMIN"
+            ]
+          },
+          "privileged": true,
+          "runAsUser": 42,
+          "runAsGroup": 43,
+          "procMount": "Unmasked"
+        }
+      },
+      {
+        "name": "main",
+        "image": "golang:1.26.6-trixie@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "command": [
+          "/bin/sh"
+        ],
+        "args": [
+          "/argo/staging/script"
+        ],
+        "env": [
+          {
+            "name": "OBERTH_REPO",
+            "value": "oberth"
+          },
+          {
+            "name": "OBERTH_REF",
+            "value": "refs/heads/main"
+          },
+          {
+            "name": "OBERTH_SHA",
+            "value": "0123456789abcdef0123456789abcdef01234567"
+          },
+          {
+            "name": "OBERTH_TRIGGER",
+            "value": "ci"
+          },
+          {
+            "name": "OBERTH_RUN_ID",
+            "value": "run-abc123"
+          },
+          {
+            "name": "OBERTH_ARTIFACTS",
+            "value": "/work/artifacts"
+          },
+          {
+            "name": "TMPDIR",
+            "value": "/tmp"
+          },
+          {
+            "name": "GOTMPDIR",
+            "value": "/tmp"
+          },
+          {
+            "name": "GOCACHE",
+            "value": "/tmp/gobuild"
+          },
+          {
+            "name": "GOMODCACHE",
+            "value": "/tmp/gomod"
+          },
+          {
+            "name": "OBERTH_CACHE_DIR",
+            "value": "/tmp/cache"
+          },
+          {
+            "name": "HOME",
+            "value": "/tmp"
+          },
+          {
+            "name": "XDG_CACHE_HOME",
+            "value": "/tmp/cache"
+          },
+          {
+            "name": "ARGO_CONTAINER_NAME",
+            "value": "main"
+          },
+          {
+            "name": "ARGO_NODE_ID",
+            "value": "oberth-oberth-run-abc1-aabbccddeeff"
+          },
+          {
+            "name": "ARGO_INCLUDE_SCRIPT_OUTPUT",
+            "value": "false"
+          },
+          {
+            "name": "ARGO_DEADLINE",
+            "value": "0001-01-01T00:00:00Z"
+          },
+          {
+            "name": "ARGO_PROGRESS_FILE",
+            "value": "/var/run/argo/progress"
+          },
+          {
+            "name": "ARGO_PROGRESS_PATCH_TICK_DURATION",
+            "value": "1m0s"
+          },
+          {
+            "name": "ARGO_PROGRESS_FILE_TICK_DURATION",
+            "value": "3s"
+          }
+        ],
+        "resources": {},
+        "volumeMounts": [
+          {
+            "name": "oberth-source",
+            "readOnly": true,
+            "mountPath": "/work/src",
+            "subPath": "src"
+          },
+          {
+            "name": "oberth-artifacts",
+            "mountPath": "/work/artifacts",
+            "subPath": "artifacts"
+          },
+          {
+            "name": "oberth-nonroot-tmp",
+            "mountPath": "/tmp"
+          },
+          {
+            "name": "argo-staging",
+            "mountPath": "/argo/staging"
+          }
+        ],
+        "securityContext": {
+          "capabilities": {
+            "drop": [
+              "ALL"
+            ]
+          },
+          "runAsUser": 65534,
+          "runAsGroup": 65534,
+          "runAsNonRoot": true,
+          "readOnlyRootFilesystem": true,
+          "allowPrivilegeEscalation": false,
+          "seccompProfile": {
+            "type": "RuntimeDefault"
+          }
+        }
+      }
+    ],
+    "restartPolicy": "Never",
+    "serviceAccountName": "oberth-argo-pipeline",
+    "automountServiceAccountToken": false,
+    "securityContext": {
+      "runAsUser": 65534,
+      "runAsGroup": 65534,
+      "runAsNonRoot": true,
+      "seccompProfile": {
+        "type": "RuntimeDefault"
+      }
+    }
+  },
+  "status": {}
+}

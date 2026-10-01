@@ -1,0 +1,118 @@
+{{- if or (not (regexMatch "^[^[:space:]@]+@sha256:[0-9a-f]{64}$" .Values.image.ref)) (contains "@sha256:0000000000000000000000000000000000000000000000000000000000000000" .Values.image.ref) -}}
+{{- fail "image.ref must be replaced with the built server image's sha256 digest" -}}
+{{- end -}}
+{{- if not .Values.runnerImagePrefixes -}}
+{{- fail "runnerImagePrefixes must allow at least one runner image prefix (default golang:)" -}}
+{{- end -}}
+{{- range .Values.runnerImagePrefixes -}}
+{{- if or (eq (trim .) "") (ne (trim .) .) (regexMatch "[[:space:]\"'\\\\]" .) -}}
+{{- fail "runnerImagePrefixes entries must be clean nonempty strings" -}}
+{{- end -}}
+{{- end -}}
+{{- /*
+NodePorts default to 30022/30443 -- the documented client-facing ports, and
+what an adopted Service already holds -- but are overridable within the valid
+NodePort range. Pinning them to constants made the chart unable to express a
+second instance on one node, so a canary of Oberth itself had to either
+contend for the live instance's node-wide ports or not use the chart. Both
+are worse than allowing the override.
+*/ -}}
+{{- if not (has .Values.service.type (list "NodePort" "LoadBalancer" "ClusterIP")) -}}
+{{- fail "service.type must be NodePort, LoadBalancer, or ClusterIP" -}}
+{{- end -}}
+{{- if or (lt (int .Values.service.sshNodePort) 30000) (gt (int .Values.service.sshNodePort) 32767) -}}
+{{- fail "service.sshNodePort must be within the NodePort range 30000-32767" -}}
+{{- end -}}
+{{- if or (lt (int .Values.service.httpsNodePort) 30000) (gt (int .Values.service.httpsNodePort) 32767) -}}
+{{- fail "service.httpsNodePort must be within the NodePort range 30000-32767" -}}
+{{- end -}}
+{{- if eq (int .Values.service.sshNodePort) (int .Values.service.httpsNodePort) -}}
+{{- fail "service.sshNodePort and service.httpsNodePort must differ" -}}
+{{- end -}}
+{{- if or (lt (int .Values.service.sshPort) 1) (gt (int .Values.service.sshPort) 65535) -}}
+{{- fail "service.sshPort must be between 1 and 65535" -}}
+{{- end -}}
+{{- if ne (int .Values.replicaCount) 1 -}}
+{{- fail "replicaCount is fixed at one for the single-writer SQLite service" -}}
+{{- end -}}
+{{- $ciRoot := .Values.cache.ciRoot -}}
+{{- $releaseRoot := .Values.cache.releaseRoot -}}
+{{- if or (ne (clean $ciRoot) $ciRoot) (ne (clean $releaseRoot) $releaseRoot) (not (hasPrefix "/" $ciRoot)) (not (hasPrefix "/" $releaseRoot)) (eq $ciRoot $releaseRoot) (hasPrefix (printf "%s/" $ciRoot) $releaseRoot) (hasPrefix (printf "%s/" $releaseRoot) $ciRoot) -}}
+{{- fail "CI and release cache roots must be distinct, absolute, and non-nested" -}}
+{{- end -}}
+{{- /* The prepare-caches init container takes ownership of these host paths as
+       root. Refuse system directories so a misconfigured value cannot chown
+       critical host state to the unprivileged service user. */ -}}
+{{- range $root := list $ciRoot $releaseRoot -}}
+{{- if lt (len (regexSplit "/" (trimPrefix "/" $root) -1)) 2 -}}
+{{- fail (printf "cache root %s must be at least two path segments deep" $root) -}}
+{{- end -}}
+{{- range $forbidden := list "/bin" "/boot" "/dev" "/etc" "/home" "/lib" "/lib64" "/opt" "/proc" "/root" "/run" "/sbin" "/sys" "/usr" "/var/lib" "/var/log" "/var/run" -}}
+{{- if or (eq $root $forbidden) (hasPrefix (printf "%s/" $forbidden) $root) -}}
+{{- fail (printf "cache root %s must not live under the system directory %s" $root $forbidden) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- if eq .Values.upstream.keySecret .Values.upstream.knownHostsSecret -}}
+{{- fail "upstream key and known_hosts Secrets must be distinct" -}}
+{{- end -}}
+{{- $persistenceSize := .Values.persistence.size -}}
+{{- $persistenceUnits := regexFind "(Gi|Ti)$" $persistenceSize -}}
+{{- $persistenceAmount := int (regexFind "^[0-9]+" $persistenceSize) -}}
+{{- if or (and (eq $persistenceUnits "Gi") (lt $persistenceAmount 10)) (and (eq $persistenceUnits "Ti") (lt $persistenceAmount 1)) -}}
+{{- fail "persistence.size must be at least 10Gi" -}}
+{{- end -}}
+{{- if or (lt (int .Values.maxConcurrentJobs) 1) (gt (int .Values.maxConcurrentJobs) 64) -}}
+{{- fail "maxConcurrentJobs must be between one and 64" -}}
+{{- end -}}
+{{- $admission := .Values.admission | default dict -}}
+{{- if lt (int ($admission.diskFloorBytes | default 0)) 0 -}}
+{{- fail "admission.diskFloorBytes must be zero (disabled) or a positive byte count" -}}
+{{- end -}}
+{{- /*
+An empty argo.vault.caCert is documented to mean the store presents a publicly
+trusted certificate. For a cluster-internal name that reading is impossible,
+not merely optimistic: the CA/Browser Forum baseline requirements forbid public
+issuance for internal server names and reserved IP addresses, so the only
+certificate such an endpoint can present comes from a private CA.
+
+Rendered without an anchor, that deployment is structurally incapable of ever
+delivering a release credential -- no ConfigMap, no --argo-vault-ca-cert, no
+VAULT_CACERT in the release-tier containers -- and says nothing about it until a
+real tag has run the entire build and dies on the first credentialed step. Fail
+where the value is being typed instead.
+*/ -}}
+{{- $argoVaultAddress := .Values.argo.vault.address | default "" | trim -}}
+{{- if and $argoVaultAddress (not (.Values.argo.vault.caCert | default "" | trim)) -}}
+{{- $argoVaultHostPort := regexReplaceAll "^[A-Za-z][A-Za-z0-9+.-]*://" $argoVaultAddress "" | splitList "/" | first -}}
+{{- $argoVaultHost := ternary (regexReplaceAll "^\\[([^]]*)\\].*$" $argoVaultHostPort "${1}") ($argoVaultHostPort | splitList ":" | first) (hasPrefix "[" $argoVaultHostPort) | lower | trimSuffix "." -}}
+{{- /* A single-label name, an IPv6 literal, or an IPv4 literal: none of them
+is a name a public CA issues for in a deployment like this one. */ -}}
+{{- $argoVaultInternal := or (not (contains "." $argoVaultHost)) (contains ":" $argoVaultHost) (regexMatch "^[0-9.]+$" $argoVaultHost) -}}
+{{- range $suffix := list ".svc" ".cluster.local" ".local" ".internal" ".localdomain" -}}
+{{- if hasSuffix $suffix $argoVaultHost -}}
+{{- $argoVaultInternal = true -}}
+{{- end -}}
+{{- end -}}
+{{- if $argoVaultInternal -}}
+{{- fail (printf "argo.vault.address %q names a cluster-internal endpoint no publicly trusted CA may issue for, but argo.vault.caCert is empty: release-tier pipeline containers would receive no VAULT_CACERT and every credentialed release step would fail its OpenBao login with \"x509: certificate signed by unknown authority\". Set argo.vault.caCert to the PEM of the CA that signed that endpoint; for an installer-managed OpenBao that is the same value as secretstore.caCert. Remedy: helm upgrade oberth charts/oberth --reuse-values --set argo.vault.address=%s --set-file argo.vault.caCert=/path/to/ca.pem" $argoVaultAddress $argoVaultAddress) -}}
+{{- end -}}
+{{- end -}}
+{{- if .Values.secretstore.enabled -}}
+{{- $secretstoreHTTPS := regexMatch "^https://[^/?#@[:space:]]+([/?][^#[:space:]]*)?$" .Values.secretstore.address -}}
+{{- $secretstoreHTTP := regexMatch "^http://[^/?#@[:space:]]+([/?][^#[:space:]]*)?$" .Values.secretstore.address -}}
+{{- if and (not $secretstoreHTTPS) (not (and $secretstoreHTTP .Values.secretstore.insecureHTTPForDev)) -}}
+{{- fail "secretstore.address must use https unless the explicit HTTP development override is enabled" -}}
+{{- end -}}
+{{- if .Values.secretstore.transit.enabled -}}
+{{- if or (not $secretstoreHTTPS) .Values.secretstore.insecureHTTPForDev -}}
+{{- fail "secretstore.transit requires verified HTTPS and forbids insecureHTTPForDev" -}}
+{{- end -}}
+{{- if or (not (regexMatch "^[A-Za-z0-9._-]+$" .Values.secretstore.transit.mount)) (has .Values.secretstore.transit.mount (list "." ".." "auth" "sys" "identity" "cubbyhole")) -}}
+{{- fail "secretstore.transit.mount must be one clean path segment" -}}
+{{- end -}}
+{{- if or (not (regexMatch "^[A-Za-z0-9._-]+$" .Values.secretstore.transit.key)) (has .Values.secretstore.transit.key (list "." "..")) -}}
+{{- fail "secretstore.transit.key must be one clean path segment" -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}

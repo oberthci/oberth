@@ -1,0 +1,342 @@
+package main
+
+import (
+	"context"
+	"errors"
+	"flag"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+)
+
+type projectType string
+
+const (
+	projectGo      projectType = "go"
+	projectNode    projectType = "node"
+	projectPython  projectType = "python"
+	projectGeneric projectType = "generic"
+)
+
+var allProjectTypes = []projectType{projectGo, projectNode, projectPython, projectGeneric}
+
+func runInit(_ context.Context, arguments []string, output io.Writer) error {
+	var typeOverride string
+	var force bool
+	flags := flag.NewFlagSet("init", flag.ContinueOnError)
+	flags.SetOutput(io.Discard)
+	flags.StringVar(&typeOverride, "type", "", "project type: go|node|python|generic (default: auto-detect)")
+	flags.BoolVar(&force, "force", false, "overwrite existing .oberth/build.yaml")
+	if err := flags.Parse(arguments); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			flags.SetOutput(output)
+			flags.Usage()
+			return nil
+		}
+		return fmt.Errorf("%w: %w", errUsage, err)
+	}
+	if flags.NArg() != 0 {
+		return fmt.Errorf("%w: init accepts flags only", errUsage)
+	}
+	root, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("determine working directory: %w", err)
+	}
+	return executeInit(root, typeOverride, force, output)
+}
+
+func executeInit(root, typeOverride string, force bool, output io.Writer) error {
+	var detected projectType
+	var reason string
+	if typeOverride != "" {
+		detected = projectType(typeOverride)
+		valid := false
+		for _, t := range allProjectTypes {
+			if detected == t {
+				valid = true
+				break
+			}
+		}
+		if !valid {
+			return fmt.Errorf("%w: unknown project type %q; use go, node, python, or generic", errUsage, typeOverride)
+		}
+		reason = fmt.Sprintf("--type %s", typeOverride)
+		if _, err := fmt.Fprintln(output, "note: --type has no effect yet; all project types generate the same demo pipeline"); err != nil {
+			return err
+		}
+	} else {
+		detected, reason = detectProject(root)
+	}
+
+	if detected != projectGeneric {
+		if _, err := fmt.Fprintf(output, "detected: %s (%s) -- generic demo pipeline generated; customize for your %s project after the first run\n", detected, reason, detected); err != nil {
+			return err
+		}
+	} else {
+		if _, err := fmt.Fprintf(output, "detected: %s (%s)\n", detected, reason); err != nil {
+			return err
+		}
+	}
+
+	content := renderBuildYAML(detected)
+
+	oberthDir := filepath.Join(root, ".oberth")
+	target := filepath.Join(oberthDir, "build.yaml")
+	if info, err := os.Lstat(oberthDir); err == nil {
+		if info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf(".oberth is a symlink; refusing to follow")
+		}
+	}
+	if !force {
+		if _, err := os.Stat(target); err == nil {
+			return fmt.Errorf(".oberth/build.yaml already exists; use --force to overwrite")
+		}
+	}
+	if force {
+		if info, err := os.Lstat(target); err == nil {
+			if info.Mode()&os.ModeSymlink != 0 {
+				return fmt.Errorf(".oberth/build.yaml is a symlink; refusing to follow")
+			}
+		}
+	}
+	if err := os.MkdirAll(oberthDir, 0o750); err != nil { // #nosec G301 -- project directory, not secrets
+		return fmt.Errorf("create .oberth directory: %w", err)
+	}
+	tmpFile, err := os.CreateTemp(oberthDir, ".build.yaml.*.tmp")
+	if err != nil {
+		return fmt.Errorf("create temporary file: %w", err)
+	}
+	tmpName := tmpFile.Name()
+	if _, writeErr := tmpFile.WriteString(content); writeErr != nil {
+		_ = tmpFile.Close()
+		_ = os.Remove(tmpName)
+		return writeErr
+	}
+	if err := tmpFile.Chmod(0o600); err != nil {
+		_ = tmpFile.Close()
+		_ = os.Remove(tmpName)
+		return err
+	}
+	if err := tmpFile.Close(); err != nil {
+		_ = os.Remove(tmpName)
+		return err
+	}
+	if err := os.Rename(tmpName, target); err != nil {
+		_ = os.Remove(tmpName)
+		return err
+	}
+	if _, err := fmt.Fprintln(output, "wrote: .oberth/build.yaml"); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprint(output, initDAGDiagram); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintln(output, "  5 steps, 4 dependencies, ~30 seconds to run."); err != nil {
+		return err
+	}
+	_, printErr := fmt.Fprintln(output, "\nnext: commit and push to Oberth -- watch the pipeline in the dashboard.")
+	return printErr
+}
+
+const initDAGDiagram = `
+  DAG: fetch ──┬── analyze ──┐
+               │             ├── report
+               └── validate ─┘
+                      │
+                      └── notify
+
+`
+
+func detectProject(root string) (projectType, string) {
+	if _, err := os.Stat(filepath.Join(root, "go.mod")); err == nil {
+		return projectGo, "go.mod found"
+	}
+	if _, err := os.Stat(filepath.Join(root, "package.json")); err == nil {
+		return projectNode, "package.json found"
+	}
+	if _, err := os.Stat(filepath.Join(root, "pyproject.toml")); err == nil {
+		return projectPython, "pyproject.toml found"
+	}
+	if _, err := os.Stat(filepath.Join(root, "setup.py")); err == nil {
+		return projectPython, "setup.py found"
+	}
+	return projectGeneric, "no recognized project marker"
+}
+
+func renderBuildYAML(_ projectType) string {
+	return buildYAMLDemo
+}
+
+const buildYAMLDemo = `# Oberth CI pipeline -- generated by 'oberth init'.
+#
+# A demo DAG pipeline showcasing parallel execution, fan-out, and fan-in.
+# Customize these steps for your project after the first run.
+#
+# DAG:
+#
+#   fetch ──┬── analyze ──┐
+#           │             ├── report
+#           └── validate ─┘
+#                  │
+#                  └── notify
+#
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  annotations:
+    # Scheduler concurrency tier:
+    #   S  -- lightweight (6 concurrent)
+    #   M  -- standard (3 concurrent, default)
+    #   L  -- heavy (2 concurrent)
+    #   XL -- exclusive (runs alone)
+    # Does NOT set per-container CPU/memory — declare resources:
+    # on each template. Max per-container: cpu 8, memory 16Gi.
+    oberth.ci/size: S
+spec:
+  entrypoint: ci
+  activeDeadlineSeconds: 300
+
+  volumeClaimTemplates:
+  - metadata:
+      name: work
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      resources:
+        requests:
+          storage: 64Mi
+
+  templates:
+
+  - name: ci
+    dag:
+      tasks:
+      - name: fetch
+        template: fetch
+      - name: analyze
+        template: analyze
+        depends: fetch
+      - name: validate
+        template: validate
+        depends: fetch
+      - name: report
+        template: report
+        depends: "analyze && validate"
+      - name: notify
+        template: notify
+        depends: validate
+
+  - name: fetch
+    container:
+      # Refresh digest: crane digest debian:trixie-slim
+      image: debian:trixie-slim@sha256:3a39a0592364683e6bab97937b72cad5a8fa6dcbbee90edb3bb48c7f8e94f258
+      command: [/bin/sh]
+      args:
+      - -c
+      - |
+        set -e
+        mkdir -p /work/artifacts
+        cp /work/src/README.md /work/artifacts/source.txt 2>/dev/null \
+          || echo "Hello from Oberth" > /work/artifacts/source.txt
+        sha256sum /work/artifacts/source.txt > /work/artifacts/checksum.txt
+        echo "fetch: $(cut -d' ' -f1 /work/artifacts/checksum.txt)"
+      volumeMounts:
+      - name: work
+        mountPath: /work
+      resources:
+        requests:
+          cpu: 200m
+          memory: 128Mi
+        limits:
+          cpu: 500m
+          memory: 256Mi
+
+  - name: analyze
+    container:
+      # Refresh digest: crane digest debian:trixie-slim
+      image: debian:trixie-slim@sha256:3a39a0592364683e6bab97937b72cad5a8fa6dcbbee90edb3bb48c7f8e94f258
+      command: [/bin/sh]
+      args:
+      - -c
+      - |
+        set -e
+        f=/work/artifacts/source.txt
+        printf '{"lines":%d,"words":%d,"bytes":%d,"sha256":"%s"}\n' \
+          "$(wc -l <"$f")" "$(wc -w <"$f")" "$(wc -c <"$f")" \
+          "$(cut -d' ' -f1 /work/artifacts/checksum.txt)" > /work/artifacts/summary.json
+        echo "analyze: $(cat /work/artifacts/summary.json)"
+      volumeMounts:
+      - name: work
+        mountPath: /work
+      resources:
+        requests:
+          cpu: 200m
+          memory: 128Mi
+        limits:
+          cpu: 500m
+          memory: 256Mi
+
+  - name: validate
+    container:
+      # Refresh digest: crane digest debian:trixie-slim
+      image: debian:trixie-slim@sha256:3a39a0592364683e6bab97937b72cad5a8fa6dcbbee90edb3bb48c7f8e94f258
+      command: [/bin/sh]
+      args:
+      - -c
+      - |
+        set -e
+        sha256sum -c /work/artifacts/checksum.txt
+        echo "validate: all checks passed"
+      volumeMounts:
+      - name: work
+        mountPath: /work
+      resources:
+        requests:
+          cpu: 200m
+          memory: 128Mi
+        limits:
+          cpu: 500m
+          memory: 256Mi
+
+  - name: report
+    container:
+      # Refresh digest: crane digest debian:trixie-slim
+      image: debian:trixie-slim@sha256:3a39a0592364683e6bab97937b72cad5a8fa6dcbbee90edb3bb48c7f8e94f258
+      command: [/bin/sh]
+      args:
+      - -c
+      - |
+        set -e
+        cat /work/artifacts/summary.json
+        echo "report: fan-in complete (analyze + validate done)"
+      volumeMounts:
+      - name: work
+        mountPath: /work
+      resources:
+        requests:
+          cpu: 200m
+          memory: 128Mi
+        limits:
+          cpu: 500m
+          memory: 256Mi
+
+  - name: notify
+    container:
+      # Refresh digest: crane digest debian:trixie-slim
+      image: debian:trixie-slim@sha256:3a39a0592364683e6bab97937b72cad5a8fa6dcbbee90edb3bb48c7f8e94f258
+      command: [/bin/sh]
+      args:
+      - -c
+      - |
+        echo "notify: pipeline succeeded (${OBERTH_REF:-unknown} @ ${OBERTH_SHA:-unknown})"
+      volumeMounts:
+      - name: work
+        mountPath: /work
+      resources:
+        requests:
+          cpu: 200m
+          memory: 128Mi
+        limits:
+          cpu: 500m
+          memory: 256Mi
+`

@@ -1,0 +1,911 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "image",
+    "runnerImagePrefixes",
+    "replicaCount",
+    "maxConcurrentJobs",
+    "auditAnchor",
+    "service",
+    "persistence",
+    "tls",
+    "ssh",
+    "upstream",
+    "cache",
+    "resources",
+    "podAnnotations",
+    "podLabels",
+    "secretCreatePolicy",
+    "compatibility"
+  ],
+  "properties": {
+    "image": {
+      "$ref": "#/definitions/image"
+    },
+    "runnerImagePrefixes": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 300,
+        "pattern": "^[^\\s\"'\\\\]+$"
+      }
+    },
+    "replicaCount": {
+      "type": "integer",
+      "const": 1
+    },
+    "maxConcurrentJobs": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 64
+    },
+    "admission": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "diskFloorBytes": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Opt-in disk-space admission floor in bytes. 0 = disabled."
+        }
+      }
+    },
+    "pushBannerURL": {
+      "type": "string",
+      "description": "Optional HTTPS dashboard URL echoed to every accepted git push as remote: watch output. Empty disables the line.",
+      "pattern": "^(|https://.+)$"
+    },
+    "auditAnchor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "tsaURL",
+        "tsaInsecureHTTP",
+        "rekorURL",
+        "rekorInsecureHTTP",
+        "interval",
+        "maxAge",
+        "rootsSecret",
+        "rootsKey",
+        "rekorCA",
+        "rekorPublicKey",
+        "tsaCA",
+        "acceptWitnessChainReset",
+        "acceptWitnessGenesis"
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "tsaInsecureHTTP": {
+                "const": false
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "tsaURL": {
+                "pattern": "^$|^https://[^/?#@\\s]+(?:[/?][^#\\s]*)?$"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "rekorInsecureHTTP": {
+                "const": false
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "rekorURL": {
+                "pattern": "^$|^https://[^/?#@\\s]+(?:[/?][^#\\s]*)?$"
+              }
+            }
+          }
+        }
+      ],
+      "properties": {
+        "tsaURL": {
+          "type": "string",
+          "description": "RFC 3161 timestamp authority HTTPS URL. Empty (the default) disables external timestamps; the local audit hash chain always runs. HTTPS is required unless tsaInsecureHTTP is enabled for development.",
+          "pattern": "^$|^https?://[^/?#@\\s]+(?:[/?][^#\\s]*)?$"
+        },
+        "tsaInsecureHTTP": {
+          "type": "boolean",
+          "description": "DEVELOPMENT ONLY: allow a plain-HTTP TSA URL."
+        },
+        "rekorURL": {
+          "type": "string",
+          "description": "Rekor transparency log URL. Empty (the default) disables external witness publication and startup witness recovery; the local audit hash chain always runs. HTTPS is required unless rekorInsecureHTTP is enabled for development.",
+          "pattern": "^$|^https?://[^/?#@\\s]+(?:[/?][^#\\s]*)?$"
+        },
+        "rekorInsecureHTTP": {
+          "type": "boolean",
+          "description": "DEVELOPMENT ONLY: allow a plain-HTTP Rekor URL."
+        },
+        "interval": {
+          "$ref": "#/definitions/duration"
+        },
+        "maxAge": {
+          "$ref": "#/definitions/duration"
+        },
+        "rootsSecret": {
+          "$ref": "#/definitions/optionalKubernetesName"
+        },
+        "rootsKey": {
+          "$ref": "#/definitions/secretDataKey"
+        },
+        "rekorCA": {
+          "type": "string",
+          "description": "Optional PEM bundle pinning the Rekor HTTPS TLS trust anchors (public material, delivered via ConfigMap)."
+        },
+        "rekorPublicKey": {
+          "type": "string",
+          "description": "Optional PKIX PEM public key pinning the Rekor log identity instead of Sigstore TUF (public material, delivered via ConfigMap).",
+          "pattern": "^$|^-----BEGIN PUBLIC KEY-----\\n(?:[A-Za-z0-9+/]{4}\\n?)+(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?\\n-----END PUBLIC KEY-----\\n?$"
+        },
+        "tsaCA": {
+          "type": "string",
+          "description": "Optional PEM bundle pinning the TSA HTTPS TLS trust anchors (public material, delivered via ConfigMap)."
+        },
+        "acceptWitnessChainReset": {
+          "type": "string",
+          "pattern": "^$|^[0-9a-f]{64}$|^[0-9a-f]{80}$"
+        },
+        "acceptWitnessGenesis": {
+          "type": "string",
+          "pattern": "^$|^[1-9][0-9]{0,18}:[0-9a-f]{64}$"
+        }
+      }
+    },
+    "service": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "sshPort",
+        "httpsPort",
+        "sshNodePort",
+        "httpsNodePort"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "NodePort",
+            "LoadBalancer",
+            "ClusterIP"
+          ]
+        },
+        "sshPort": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535,
+          "description": "Service port for SSH. Under LoadBalancer this is the port svclb binds on the host, so it defaults to 2222 to avoid the host's own sshd; 22 is correct on a node dedicated to Oberth."
+        },
+        "httpsPort": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535,
+          "description": "Service port for HTTPS/MCP. Under LoadBalancer this is the port svclb binds on the host."
+        },
+        "sshNodePort": {
+          "type": "integer",
+          "minimum": 30000,
+          "maximum": 32767,
+          "description": "Node-wide SSH NodePort for NodePort/LoadBalancer services. Defaults to 30022 and is unused for ClusterIP."
+        },
+        "httpsNodePort": {
+          "type": "integer",
+          "minimum": 30000,
+          "maximum": 32767,
+          "description": "Node-wide HTTPS/MCP NodePort for NodePort/LoadBalancer services. Defaults to 30443 and is unused for ClusterIP."
+        }
+      }
+    },
+    "persistence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "existingClaim",
+        "storageClassName",
+        "size"
+      ],
+      "properties": {
+        "existingClaim": {
+          "type": "string"
+        },
+        "storageClassName": {
+          "type": "string"
+        },
+        "size": {
+          "type": "string",
+          "pattern": "^([1-9][0-9]*Gi|[1-9][0-9]*Ti)$"
+        }
+      }
+    },
+    "tls": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "existingSecret"
+      ],
+      "properties": {
+        "existingSecret": {
+          "type": "string"
+        },
+        "extraDNSNames": {
+          "type": "array",
+          "description": "Additional DNS names the generated server certificate is issued for, beyond the in-cluster ones. A client reaching the server on any other name hits a hostname mismatch, which no trust anchor can fix. Ignored when tls.existingSecret is set, and applied only when the certificate is generated.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "extraIPs": {
+          "type": "array",
+          "description": "Additional IP addresses the generated server certificate is issued for. An address reached as an IP needs an IP SAN; a DNS name will not match it.",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "ssh": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "hostKey"
+      ],
+      "properties": {
+        "hostKey": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "existingSecret"
+          ],
+          "properties": {
+            "existingSecret": {
+              "$ref": "#/definitions/optionalKubernetesName"
+            }
+          }
+        }
+      }
+    },
+    "upstream": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "baseURL",
+        "createSecrets",
+        "keySecret",
+        "keyFile",
+        "knownHostsSecret",
+        "knownHostsKey"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "maxLength": 53,
+          "pattern": "^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$",
+          "description": "Upstream name: DNS-1123 label (lowercase alphanumerics and hyphens, no leading/trailing hyphen, max 53 chars). Must match app.ValidateUpstreamName."
+        },
+        "baseURL": {
+          "type": "string",
+          "pattern": "^ssh://[^\\s]+$"
+        },
+        "createSecrets": {
+          "type": "boolean"
+        },
+        "keySecret": {
+          "$ref": "#/definitions/kubernetesName"
+        },
+        "keyFile": {
+          "$ref": "#/definitions/secretDataKey"
+        },
+        "knownHostsSecret": {
+          "$ref": "#/definitions/kubernetesName"
+        },
+        "knownHostsKey": {
+          "$ref": "#/definitions/secretDataKey"
+        }
+      }
+    },
+    "cache": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ciRoot",
+        "releaseRoot"
+      ],
+      "properties": {
+        "ciRoot": {
+          "type": "string",
+          "pattern": "^/[^\\s]*[^/\\s]$"
+        },
+        "releaseRoot": {
+          "type": "string",
+          "pattern": "^/[^\\s]*[^/\\s]$"
+        }
+      }
+    },
+    "resources": {
+      "$ref": "#/definitions/resources"
+    },
+    "watchTunnel": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "originCACert": {
+          "type": "string",
+          "maxLength": 65536,
+          "description": "Public PEM CA for the HTTPS Oberth origin; empty uses public trust."
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "image": {
+          "type": "string",
+          "minLength": 1
+        },
+        "openbaoImage": {
+          "type": "string",
+          "minLength": 1
+        },
+        "openbao": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "address": {
+              "type": "string",
+              "minLength": 1
+            },
+            "authMount": {
+              "type": "string",
+              "minLength": 1
+            },
+            "role": {
+              "type": "string",
+              "minLength": 1
+            },
+            "secretMount": {
+              "type": "string",
+              "minLength": 1
+            },
+            "secretPath": {
+              "type": "string",
+              "minLength": 1
+            },
+            "secretField": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      }
+    },
+    "podAnnotations": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "podLabels": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "secretCreatePolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enabled"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        }
+      }
+    },
+    "networkPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Egress isolation for the pipeline namespace. Default-deny with targeted allowlist for DNS, HTTPS (443/6443), and the secret store.",
+      "required": [
+        "enabled"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Create a NetworkPolicy in the pipeline namespace restricting egress. Disable on clusters without a NetworkPolicy-capable CNI."
+        },
+        "vault": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Secret store egress destination. In-cluster: set namespace (default openbao). External: set externalCIDRs. Port defaults to 8200, consistent with argo.vault.address.",
+          "properties": {
+            "namespace": {
+              "type": "string",
+              "description": "Namespace where the secret store runs (used as a namespaceSelector label match). Default: openbao."
+            },
+            "port": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65535,
+              "description": "Secret store port. Default: 8200."
+            },
+            "externalCIDRs": {
+              "type": "array",
+              "description": "CIDRs for an external secret store (e.g. 10.0.1.5/32). When set, namespace is ignored and ipBlock rules are rendered instead.",
+              "items": {
+                "type": "string",
+                "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+/[0-9]+$"
+              }
+            }
+          }
+        },
+        "inNamespacePorts": {
+          "type": "array",
+          "description": "TCP ports on which pipeline pods may reach other pods in the same namespace (e.g. a Docker API shim for Testcontainers). Ignored when inNamespaceAllPorts is true.",
+          "items": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 65535
+          }
+        },
+        "inNamespaceAllPorts": {
+          "type": "boolean",
+          "description": "Allow pipeline pods to reach any pod in the same namespace on any port. Broader than inNamespacePorts; intended for local development clusters."
+        }
+      }
+    },
+    "argo": {
+      "type": "object",
+      "description": "Argo Workflows execution engine. Every pipeline runs as an Argo Workflow.",
+      "properties": {
+        "releaseWIF": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Public administrator release capabilities, empty disables federation. Never credentials.",
+          "properties": {
+            "namespace": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 63,
+              "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$"
+            },
+            "roles": {
+              "type": "object",
+              "propertyNames": {
+                "enum": [
+                  "image-writer",
+                  "image-reader",
+                  "chart-writer"
+                ]
+              },
+              "additionalProperties": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "provider",
+                  "service_account"
+                ],
+                "properties": {
+                  "provider": {
+                    "type": "string",
+                    "pattern": "^projects/[0-9]+/locations/global/workloadIdentityPools/[a-z][a-z0-9-]*/providers/[a-z][a-z0-9-]*$"
+                  },
+                  "service_account": {
+                    "type": "string",
+                    "pattern": "^[a-z][a-z0-9-]*@[a-z][a-z0-9-]*\\.iam\\.gserviceaccount\\.com$"
+                  }
+                }
+              }
+            },
+            "repositories": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "service_account_name",
+                  "templates"
+                ],
+                "properties": {
+                  "service_account_name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 253
+                  },
+                  "templates": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "enum": [
+                        "image-writer",
+                        "image-reader",
+                        "chart-writer"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "anyOf": [
+            {
+              "maxProperties": 0
+            },
+            {
+              "required": [
+                "namespace",
+                "roles",
+                "repositories"
+              ]
+            }
+          ]
+        },
+        "namespace": {
+          "type": "string",
+          "description": "Namespace pipelines run in. Must differ from the release namespace: Vault Kubernetes-auth roles bind (namespace, ServiceAccount) pairs."
+        },
+        "pipelineServiceAccount": {
+          "type": "string",
+          "description": "Identity for pipeline templates without approved secrets. No Vault role, no token."
+        },
+        "credentialedServiceAccount": {
+          "type": "string",
+          "description": "Identity for templates with approved secrets. Carries a projected token for OpenBao login."
+        },
+        "executorServiceAccount": {
+          "type": "string",
+          "description": "Identity for Argo's own executor containers. Must differ from all pipeline identities."
+        },
+        "workflowTimeout": {
+          "type": "string"
+        },
+        "workflowTTL": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "vault": {
+          "type": "object",
+          "properties": {
+            "address": {
+              "type": "string",
+              "description": "OpenBao API base URL injected into credentialed containers as VAULT_ADDR. HTTPS required."
+            },
+            "credentialedRole": {
+              "type": "string",
+              "description": "OpenBao Kubernetes auth role, bound to exactly the credentialed ServiceAccount and namespace."
+            },
+            "caCert": {
+              "type": "string",
+              "description": "PEM trust anchors credentialed containers verify the Vault address against, delivered into the run's source volume and advertised as VAULT_CACERT. Certificates only; the server refuses a bundle carrying a private key."
+            }
+          }
+        },
+        "sourceStorageClass": {
+          "type": "string",
+          "description": "Storage class for the per-run pipeline source volume. Empty selects the cluster default."
+        },
+        "goProxy": {
+          "type": "object",
+          "description": "Credential-free Go module proxy for private modules (#662). Serves the GOPROXY protocol read-only from Oberth's git cache.",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "Enable the read-only Go module proxy after configuring its owned namespace. Default: false."
+            },
+            "port": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65535,
+              "description": "HTTPS port for the module proxy ClusterIP Service. Default: 8444."
+            },
+            "modulePrefix": {
+              "type": "string",
+              "maxLength": 253,
+              "pattern": "^[A-Za-z0-9._/-]*$"
+            },
+            "repositoryPrefix": {
+              "type": "string",
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9._-]*$"
+            },
+            "upstream": {
+              "type": "string",
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9._-]*$"
+            },
+            "organization": {
+              "type": "string",
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9._-]*$"
+            }
+          },
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "enabled": {
+                    "const": true
+                  }
+                },
+                "required": [
+                  "enabled"
+                ]
+              },
+              "then": {
+                "required": [
+                  "modulePrefix",
+                  "upstream",
+                  "organization"
+                ],
+                "properties": {
+                  "modulePrefix": {
+                    "minLength": 1
+                  },
+                  "upstream": {
+                    "minLength": 1
+                  },
+                  "organization": {
+                    "minLength": 1
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "secretstore": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Secret-store-sourced release secrets from OpenBao: fetched at release admission, delivered into release-Job memory over exec, never stored in etcd or on disk.",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "address": {
+          "type": "string",
+          "default": "https://openbao.openbao.svc:8200",
+          "description": "OpenBao API base URL. Defaults to the standard in-cluster OpenBao Helm chart service; override if OpenBao is in a different namespace or external. HTTPS required unless insecureHTTPForDev.",
+          "pattern": "^$|^https?://[^/?#@\\s]+(?:[/?][^#\\s]*)?$"
+        },
+        "k8sAuthMount": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9._/-]+$",
+          "description": "Kubernetes auth mount path configured in OpenBao."
+        },
+        "role": {
+          "type": "string",
+          "description": "OpenBao Kubernetes auth role bound to the chart ServiceAccount."
+        },
+        "caCert": {
+          "type": "string",
+          "description": "Optional PEM bundle pinning the OpenBao TLS trust anchors (public material, delivered via ConfigMap)."
+        },
+        "insecureHTTPForDev": {
+          "type": "boolean",
+          "description": "DEVELOPMENT ONLY: allow a plain-HTTP OpenBao address."
+        },
+        "transit": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "OpenBao Transit engine used for trusted-plan artifact envelopes. Enabled only over verified HTTPS.",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "mount": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9._-]+$",
+              "not": {
+                "enum": [
+                  ".",
+                  "..",
+                  "auth",
+                  "sys",
+                  "identity",
+                  "cubbyhole"
+                ]
+              }
+            },
+            "key": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9._-]+$",
+              "not": {
+                "enum": [
+                  ".",
+                  ".."
+                ]
+              }
+            }
+          },
+          "required": [
+            "enabled",
+            "mount",
+            "key"
+          ]
+        },
+        "kvMount": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512,
+          "pattern": "^[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*$",
+          "description": "KV v2 mount backing the virtual oberth/upstream/ namespace: a declared oberth/upstream/<rest> path is fetched from '<kvMount>/data/upstream/<rest>'. Must match the mount setup-secretstore.sh enabled (its --kv-prefix).",
+          "not": {
+            "pattern": "^oberth/upstream(/|$)"
+          }
+        },
+        "allowedPaths": {
+          "type": "array",
+          "uniqueItems": true,
+          "description": "Administrator allowlist of system-namespace KV API paths repositories may declare through release SecretStoreSecrets. Org/repo-scoped release oberth/upstream/ paths are authorized structurally at admission and are never listed here. Trusted Plan/Apply paths use mandatory repository/phase namespaces and never consult this allowlist; entries addressing the upstream subtree are rejected.",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512,
+            "pattern": "^[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*$",
+            "not": {
+              "pattern": "^(auth|sys|identity|cubbyhole)/|^oberth/upstream(/|$)|(^|/)data/upstream(/|$)"
+            }
+          }
+        },
+        "createAuthDelegatorBinding": {
+          "type": "boolean",
+          "description": "Create the system:auth-delegator ClusterRoleBinding for TokenReview-based logins."
+        }
+      },
+      "required": [
+        "enabled",
+        "transit"
+      ],
+      "if": {
+        "properties": {
+          "enabled": {
+            "const": true
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "address": {
+            "minLength": 1
+          },
+          "role": {
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9._-]+$"
+          }
+        },
+        "required": [
+          "address",
+          "role"
+        ]
+      }
+    },
+    "compatibility": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaIdentity",
+        "auditDomain",
+        "witnessKeyInfo"
+      ],
+      "properties": {
+        "schemaIdentity": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "auditDomain": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "witnessKeyInfo": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        }
+      }
+    }
+  },
+  "definitions": {
+    "secretDataKey": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+    },
+    "kubernetesName": {
+      "type": "string",
+      "maxLength": 253,
+      "pattern": "^[a-z0-9](?:[-a-z0-9]{0,61}[a-z0-9])?(?:\\.[a-z0-9](?:[-a-z0-9]{0,61}[a-z0-9])?)*$"
+    },
+    "optionalKubernetesName": {
+      "type": "string",
+      "maxLength": 253,
+      "pattern": "^(?:[a-z0-9](?:[-a-z0-9]{0,61}[a-z0-9])?(?:\\.[a-z0-9](?:[-a-z0-9]{0,61}[a-z0-9])?)*)?$"
+    },
+    "duration": {
+      "type": "string",
+      "pattern": "^[1-9][0-9]*(ns|us|ms|s|m|h)$"
+    },
+    "image": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ref",
+        "pullPolicy"
+      ],
+      "properties": {
+        "ref": {
+          "type": "string",
+          "pattern": "^.+@sha256:[a-f0-9]{64}$"
+        },
+        "pullPolicy": {
+          "type": "string",
+          "enum": [
+            "Always",
+            "IfNotPresent",
+            "Never"
+          ]
+        }
+      }
+    },
+    "resources": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "requests",
+        "limits"
+      ],
+      "properties": {
+        "requests": {
+          "$ref": "#/definitions/resourcePair"
+        },
+        "limits": {
+          "$ref": "#/definitions/resourcePair"
+        }
+      }
+    },
+    "resourcePair": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "cpu",
+        "memory",
+        "ephemeral-storage"
+      ],
+      "properties": {
+        "cpu": {
+          "type": "string",
+          "minLength": 1
+        },
+        "memory": {
+          "type": "string",
+          "minLength": 1
+        },
+        "ephemeral-storage": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,332 @@
+# Oberth CI pipeline (branch-trigger) for a Go project.
+#
+# Argo Workflow YAML — demonstrates what Oberth's admission and identity
+# enforcement catch that plain YAML CI cannot:
+#
+#   1. Cross-compile identity: each build template must set GOOS/GOARCH
+#      explicitly in its environment. Two templates with identical command,
+#      args, and env are rejected at admission — the canonical defect is a
+#      "build-arm64" that silently compiles native amd64.
+#
+#   2. Credential isolation by trigger tier: Oberth forces the ServiceAccount
+#      identity server-side. Branch Workflows get a CI-tier identity with no
+#      credentials and automountServiceAccountToken: false. The YAML cannot
+#      override this.
+#
+#   NOTE: The periapsis.go version of this example had compile-time
+#   identity-fraud detection via Go step identity hashing. That Go-specific
+#   feature does not carry over to the YAML format — Oberth's admission
+#   validator handles duplicate-step rejection at the server level instead.
+#
+# DAG structure:
+#
+#   setup --> lint --> test --+--> build-amd64
+#                             |
+#                             +--> build-arm64
+#
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  annotations:
+    oberth.ci/size: L
+spec:
+  entrypoint: ci
+  activeDeadlineSeconds: 3600
+
+  volumeClaimTemplates:
+  - metadata:
+      name: work
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      resources:
+        requests:
+          storage: 5Gi
+
+  templates:
+
+  # ---- DAG entrypoint ----
+  - name: ci
+    dag:
+      tasks:
+      - name: setup
+        template: setup
+      - name: lint
+        template: lint
+        depends: setup
+      - name: test
+        template: test
+        depends: lint
+      - name: build-amd64
+        template: build-amd64
+        depends: test
+      - name: build-arm64
+        template: build-arm64
+        depends: test
+
+  # ---- setup: install pinned Go toolchain ----
+  - name: setup
+    steps:
+    - - name: tools-dir
+        template: tools-dir
+    - - name: fetch-go
+        template: fetch-go
+    - - name: verify-go
+        template: verify-go
+    - - name: unpack-go
+        template: unpack-go
+    - - name: link-go
+        template: link-go
+    - - name: install-lint
+        template: install-lint
+
+  - name: tools-dir
+    container:
+      image: "golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3"
+      workingDir: /work/src
+      command: ["/bin/mkdir"]
+      args: ["-p", "/tmp/oberth-tools/bin", "/tmp/oberth-tools/downloads"]
+      env: &common-env
+      - name: PATH
+        value: "/tmp/oberth-tools/bin:/usr/local/bin:/usr/bin:/bin"
+      - name: HOME
+        value: "/tmp"
+      - name: GOTOOLCHAIN
+        value: "local"
+      - name: GOWORK
+        value: "off"
+      - name: GOENV
+        value: "off"
+      - name: GOPATH
+        value: "/tmp/oberth-tools/gopath"
+      - name: GOMODCACHE
+        value: "/cache/gomod"
+      - name: GOCACHE
+        value: "/cache/gobuild"
+      volumeMounts: &common-mounts
+      - name: work
+        mountPath: /tmp/oberth-tools
+        subPath: tools
+      - name: work
+        mountPath: /cache/gomod
+        subPath: gomod
+      - name: work
+        mountPath: /cache/gobuild
+        subPath: gobuild
+      resources: &resources-m
+        requests:
+          cpu: "2"
+          memory: "4Gi"
+        limits:
+          cpu: "2"
+          memory: "4Gi"
+
+  - name: fetch-go
+    container:
+      image: "golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3"
+      workingDir: /work/src
+      command: ["/usr/bin/curl"]
+      args:
+      - "--fail"
+      - "--location"
+      - "--no-progress-meter"
+      - "--proto"
+      - "=https"
+      - "--tlsv1.2"
+      - "--max-time"
+      - "120"
+      - "--retry"
+      - "2"
+      - "-o"
+      - "/tmp/oberth-tools/downloads/go.tar.gz"
+      - "https://go.dev/dl/go1.26.6.linux-amd64.tar.gz"
+      env: *common-env
+      volumeMounts: *common-mounts
+      resources: *resources-m
+
+  - name: verify-go
+    container:
+      image: "golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3"
+      workingDir: /work/src
+      command: ["/usr/bin/sha256sum"]
+      args: ["-c", ".oberth/pins/go.sha256"]
+      env: *common-env
+      volumeMounts: *common-mounts
+      resources: *resources-m
+
+  - name: unpack-go
+    container:
+      image: "golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3"
+      workingDir: /work/src
+      command: ["/bin/tar"]
+      args: ["-C", "/tmp/oberth-tools", "-xzf", "/tmp/oberth-tools/downloads/go.tar.gz"]
+      env: *common-env
+      volumeMounts: *common-mounts
+      resources: *resources-m
+
+  - name: link-go
+    container:
+      image: "golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3"
+      workingDir: /work/src
+      command: ["/bin/ln"]
+      args: ["-sf", "/tmp/oberth-tools/go/bin/go", "/tmp/oberth-tools/go/bin/gofmt", "/tmp/oberth-tools/bin"]
+      env: *common-env
+      volumeMounts: *common-mounts
+      resources: *resources-m
+
+  - name: install-lint
+    container:
+      image: "golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3"
+      workingDir: /work/src
+      command: ["/usr/local/go/bin/go"]
+      args: ["install", "github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2"]
+      env:
+      - name: GOBIN
+        value: "/tmp/oberth-tools/bin"
+      - name: PATH
+        value: "/tmp/oberth-tools/bin:/usr/local/bin:/usr/bin:/bin"
+      - name: HOME
+        value: "/tmp"
+      - name: GOTOOLCHAIN
+        value: "local"
+      - name: GOWORK
+        value: "off"
+      - name: GOENV
+        value: "off"
+      - name: GOPATH
+        value: "/tmp/oberth-tools/gopath"
+      - name: GOMODCACHE
+        value: "/cache/gomod"
+      - name: GOCACHE
+        value: "/cache/gobuild"
+      volumeMounts: *common-mounts
+      resources: *resources-m
+
+  # ---- lint ----
+  - name: lint
+    steps:
+    - - name: vet
+        template: vet
+    - - name: golangci-lint
+        template: golangci-lint
+
+  - name: vet
+    container:
+      image: "golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3"
+      workingDir: /work/src
+      command: ["/tmp/oberth-tools/bin/go"]
+      args: ["vet", "./..."]
+      env: *common-env
+      volumeMounts: *common-mounts
+      resources: *resources-m
+
+  - name: golangci-lint
+    container:
+      image: "golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3"
+      workingDir: /work/src
+      command: ["/tmp/oberth-tools/bin/golangci-lint"]
+      args: ["run", "--timeout=10m", "./..."]
+      env: *common-env
+      volumeMounts: *common-mounts
+      resources: *resources-m
+
+  # ---- test (race detector needs CGO_ENABLED=1) ----
+  - name: test
+    container:
+      image: "golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3"
+      workingDir: /work/src
+      command: ["/tmp/oberth-tools/bin/go"]
+      args: ["test", "-race", "-v", "-count=1", "./..."]
+      env:
+      - name: CGO_ENABLED
+        value: "1"
+      - name: PATH
+        value: "/tmp/oberth-tools/bin:/usr/local/bin:/usr/bin:/bin"
+      - name: HOME
+        value: "/tmp"
+      - name: GOTOOLCHAIN
+        value: "local"
+      - name: GOWORK
+        value: "off"
+      - name: GOENV
+        value: "off"
+      - name: GOPATH
+        value: "/tmp/oberth-tools/gopath"
+      - name: GOMODCACHE
+        value: "/cache/gomod"
+      - name: GOCACHE
+        value: "/cache/gobuild"
+      volumeMounts: *common-mounts
+      resources:
+        requests:
+          cpu: "4"
+          memory: "8Gi"
+        limits:
+          cpu: "4"
+          memory: "8Gi"
+
+  # ---- build: cross-compile for two platforms ----
+  # Each template MUST set GOOS and GOARCH explicitly. If both templates had
+  # identical env, Oberth's admission validator would reject the Workflow.
+  - name: build-amd64
+    container:
+      image: "golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3"
+      workingDir: /work/src
+      command: ["/tmp/oberth-tools/bin/go"]
+      args: ["build", "-trimpath", "-ldflags=-s -w", "-o", "/dev/null", "./cmd/app"]
+      env:
+      - name: CGO_ENABLED
+        value: "0"
+      - name: GOOS
+        value: "linux"
+      - name: GOARCH
+        value: "amd64"
+      - name: PATH
+        value: "/tmp/oberth-tools/bin:/usr/local/bin:/usr/bin:/bin"
+      - name: HOME
+        value: "/tmp"
+      - name: GOTOOLCHAIN
+        value: "local"
+      - name: GOWORK
+        value: "off"
+      - name: GOENV
+        value: "off"
+      - name: GOPATH
+        value: "/tmp/oberth-tools/gopath"
+      - name: GOMODCACHE
+        value: "/cache/gomod"
+      - name: GOCACHE
+        value: "/cache/gobuild"
+      volumeMounts: *common-mounts
+      resources: *resources-m
+
+  - name: build-arm64
+    container:
+      image: "golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3"
+      workingDir: /work/src
+      command: ["/tmp/oberth-tools/bin/go"]
+      args: ["build", "-trimpath", "-ldflags=-s -w", "-o", "/dev/null", "./cmd/app"]
+      env:
+      - name: CGO_ENABLED
+        value: "0"
+      - name: GOOS
+        value: "darwin"
+      - name: GOARCH
+        value: "arm64"
+      - name: PATH
+        value: "/tmp/oberth-tools/bin:/usr/local/bin:/usr/bin:/bin"
+      - name: HOME
+        value: "/tmp"
+      - name: GOTOOLCHAIN
+        value: "local"
+      - name: GOWORK
+        value: "off"
+      - name: GOENV
+        value: "off"
+      - name: GOPATH
+        value: "/tmp/oberth-tools/gopath"
+      - name: GOMODCACHE
+        value: "/cache/gomod"
+      - name: GOCACHE
+        value: "/cache/gobuild"
+      volumeMounts: *common-mounts
+      resources: *resources-m

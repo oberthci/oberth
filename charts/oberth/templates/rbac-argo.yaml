@@ -1,0 +1,121 @@
+# The Argo execution engine runs pipelines in their OWN namespace, separate
+# from the server's, so the Vault Kubernetes-auth roles bind identities that do
+# not sit beside server-tier ones. That means a second, namespaced Role: the
+# server creates and supervises Workflows there, and reads the step Pods' logs.
+#
+# The optional nonroot profile adds GET on one exact public immutable ConfigMap.
+# It adds no collection/write or Secret permission; existing executor token and
+# source-seeding permissions below retain their established ownership boundary.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "oberth.fullname" . }}-argo
+  namespace: {{ required "argo.namespace is required" .Values.argo.namespace }}
+  labels:
+    {{- include "oberth.labels" . | nindent 4 }}
+rules:
+  {{- if .Values.argo.controllerProfile }}
+  {{- if ne .Values.argo.controllerProfile "nonroot-static-v1" }}
+  {{- fail "argo.controllerProfile must be empty or nonroot-static-v1" }}
+  {{- end }}
+  # Verification reads only this public immutable controller profile. No
+  # collection, write or Secret permission accompanies the binding.
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    resourceNames: ["oberth-argo-nr-5f121f7f1f5ef468eb2208b1cf7e911746c8cb6173c1d24e"]
+    verbs: ["get"]
+  {{- end }}
+  - apiGroups: ["argoproj.io"]
+    resources: ["workflows"]
+    verbs: ["create", "get", "list", "watch", "delete"]
+  # A Pod may only mount PersistentVolumeClaims in its own namespace, so the
+  # checkout on the server's volume cannot be handed to a pipeline that runs
+  # here. The server instead creates a claim per run and fills it through a
+  # short-lived Pod over the exec stream — the same transport release secrets
+  # travel on, and the only one that needs no credential in this namespace.
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims"]
+    verbs: ["create", "get", "list", "update", "delete"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["create", "get", "list", "watch", "delete"]
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["create"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+  # secretstore verify --release-tier requests a short-lived token for the
+  # release ServiceAccount to prove the OpenBao trust chain end to end before
+  # a real release tag fires. The token never leaves the server process.
+  # Keep this established Role's rules unchanged when per-repo identities are
+  # added: older installs have a separate field manager on the rules list.
+  # The per-repo token allowlist lives in its own Role below.
+  - apiGroups: [""]
+    resources: ["serviceaccounts/token"]
+    resourceNames:
+      - {{ .Values.argo.credentialedServiceAccount | default "oberth-argo-credentialed" | quote }}
+    verbs: ["create"]
+  # argojob verifies that a credentialed run's per-repo ServiceAccount exists
+  # before creating the Job (fail-closed materialization guard, issues
+  # #433/#459: a grant added before the installer resync would otherwise
+  # produce a Job that binds a non-existent identity). Read-only get; no
+  # resourceNames pin is possible because per-repo names carry a dynamic
+  # hash suffix. Without this rule every credentialed CI and release run
+  # fails closed at Job creation with a Forbidden error (issue #467).
+  - apiGroups: [""]
+    resources: ["serviceaccounts"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "oberth.fullname" . }}-argo
+  namespace: {{ .Values.argo.namespace }}
+  labels:
+    {{- include "oberth.labels" . | nindent 4 }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "oberth.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "oberth.fullname" . }}-argo
+{{- with .Values.argo.perRepoIdentities }}
+---
+# Release verification requests short-lived tokens only for the exact
+# installer-provisioned per-repo release identities. A separate Role avoids
+# changing the long-lived Argo Role's co-owned rules during an upgrade.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "oberth.fullname" $ }}-argo-release-tokens
+  namespace: {{ $.Values.argo.namespace }}
+  labels:
+    {{- include "oberth.labels" $ | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["serviceaccounts/token"]
+    resourceNames:
+      {{- range . }}
+      - {{ . | quote }}
+      {{- end }}
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "oberth.fullname" $ }}-argo-release-tokens
+  namespace: {{ $.Values.argo.namespace }}
+  labels:
+    {{- include "oberth.labels" $ | nindent 4 }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "oberth.serviceAccountName" $ }}
+    namespace: {{ $.Release.Namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "oberth.fullname" $ }}-argo-release-tokens
+{{- end }}

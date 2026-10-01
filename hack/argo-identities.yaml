@@ -1,0 +1,109 @@
+# NOTE: these identities are now shipped by the chart
+# (charts/oberth/templates/argo-identities.yaml) whenever argo.enabled is true,
+# with guardrails that refuse a rendering where any two of the three are the
+# same or the pipeline namespace equals the server's. Prefer the chart.
+#
+# This file remains for two cases the chart does not cover: standing the
+# identities up by hand on a cluster where Oberth is not installed through the
+# chart, and the live Argo test suite in internal/argojob, which creates the
+# same three identities directly. The OpenBao role binding below is operator
+# documentation in either case -- it lives in a different system and no chart
+# can create it.
+#
+# The three Kubernetes identities the Argo execution engine binds, and nothing
+# else. Applied into the namespace Oberth submits Workflows to.
+#
+# The whole tier separation rests on these being three distinct identities with
+# three distinct permission sets:
+#
+#   oberth-argo-ci        branch and promotion pipelines. No Kubernetes
+#                         permissions, no Vault role. Its Pods run with
+#                         automountServiceAccountToken=false, so a step
+#                         container holds no token at all.
+#
+#   oberth-argo-release   admitted release-tag pipelines. No Kubernetes
+#                         permissions either -- its power is entirely outside
+#                         the cluster: it is the ServiceAccount the company
+#                         OpenBao Kubernetes-auth role is bound to.
+#
+#   oberth-argo-executor  Argo's own init and wait containers. Needs the
+#                         Kubernetes API to report task results, and must
+#                         therefore never be an identity a pipeline step runs
+#                         as. Argo mounts its token into the executor container
+#                         only, which is what makes a tokenless step container
+#                         possible.
+#
+# Bind the Vault role with, from an administrator's own bao session:
+#
+#   bao write auth/kubernetes/role/oberth-release \
+#       bound_service_account_names=oberth-argo-release \
+#       bound_service_account_namespaces=<this namespace> \
+#       policies=oberth-release ttl=20m
+#
+# bound_service_account_names must name exactly oberth-argo-release and
+# bound_service_account_namespaces exactly this namespace. A "*" on either
+# would let the CI identity assume the release role, which is the one thing
+# the server-side ServiceAccount switch exists to prevent.
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: oberth-argo-ci
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: oberth-argo-release
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: oberth-argo-executor
+automountServiceAccountToken: false
+---
+# Argo resolves the executor identity through a long-lived token Secret rather
+# than a projected volume (workflow/controller/workflowpod.go builds a
+# SecretVolumeSource from the name util/secrets.TokenNameForServiceAccount
+# returns). Kubernetes 1.24 and later do not create one automatically, so it is
+# declared here.
+#
+# The name is not free: Argo looks for the ServiceAccount's first listed
+# secret, then a workflows.argoproj.io/service-account-token.name annotation,
+# then exactly "<serviceaccount>.service-account-token".
+#
+# This Secret holds a Kubernetes ServiceAccount token, not a workload
+# credential material: it is the same token Kubernetes would otherwise project
+# automatically, scoped to an identity whose only permission is reporting Argo
+# task results.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: oberth-argo-executor.service-account-token
+  annotations:
+    kubernetes.io/service-account.name: oberth-argo-executor
+type: kubernetes.io/service-account-token
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: oberth-argo-executor
+rules:
+  # Exactly what the Argo executor needs to report step results back to the
+  # controller, and nothing more.
+  - apiGroups: ["argoproj.io"]
+    resources: ["workflowtaskresults"]
+    verbs: ["create", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: oberth-argo-executor
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: oberth-argo-executor
+subjects:
+  - kind: ServiceAccount
+    name: oberth-argo-executor

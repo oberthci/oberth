@@ -1,0 +1,350 @@
+# Oberth release pipeline (tag-trigger) for a Go project.
+#
+# Runs only when an annotated tag is pushed whose commit is reachable from
+# the default branch. The oberth.ci/secret-paths annotation declares the
+# secret store paths this pipeline needs; their presence selects the
+# credentialed ServiceAccount, which can authenticate to OpenBao/Vault via
+# Kubernetes auth. Pipelines without approved paths bind to the pipeline
+# ServiceAccount with no store access.
+#
+# Release steps that need credentials wrap their command with envconsul,
+# which reads the declared secret paths and injects them into the child
+# process environment.
+#
+# DAG structure:
+#
+#   release-setup --> release-test --> release-build --> release-sign --> release-publish
+#
+# release-sign derives cosign.pub from the signing key and writes it to the
+# shared artifacts volume alongside the signature. release-publish uploads the
+# binary, signature, and cosign.pub using immutable-create (If-None-Match: *)
+# to prevent silent overwrites of already-published artifacts.
+#
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  annotations:
+    oberth.ci/size: L
+    oberth.ci/secret-paths: myproject/data/release/registry-token,myproject/data/release/cosign-key
+spec:
+  entrypoint: release
+  activeDeadlineSeconds: 7200
+
+  volumeClaimTemplates:
+  - metadata:
+      name: work
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      resources:
+        requests:
+          storage: 5Gi
+
+  templates:
+
+  - name: release
+    dag:
+      tasks:
+      - name: release-setup
+        template: release-setup
+      - name: release-test
+        template: release-test
+        depends: release-setup
+      - name: release-build
+        template: release-build
+        depends: release-test
+      - name: release-sign
+        template: release-sign
+        depends: release-build
+      - name: release-publish
+        template: release-publish
+        depends: release-sign
+
+  # Setup installs the same pinned toolchain as the CI build.yaml, plus
+  # envconsul for credential delivery and cosign for signing.
+  - name: release-setup
+    steps:
+    - - name: tools-dir
+        template: tools-dir
+    - - name: link-go
+        template: link-go
+    - - name: install-envconsul
+        template: install-envconsul
+    - - name: fetch-cosign
+        template: fetch-cosign
+    - - name: verify-cosign
+        template: verify-cosign
+    - - name: install-cosign
+        template: install-cosign
+
+  - name: tools-dir
+    container:
+      image: "golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3"
+      workingDir: /work/src
+      command: ["/bin/mkdir"]
+      args: ["-p", "/tmp/oberth-tools/bin", "/tmp/oberth-release/artifacts"]
+      env: &release-env
+      - name: PATH
+        value: "/tmp/oberth-tools/bin:/usr/local/bin:/usr/bin:/bin"
+      - name: HOME
+        value: "/tmp"
+      - name: GOTOOLCHAIN
+        value: "local"
+      - name: GOWORK
+        value: "off"
+      - name: GOENV
+        value: "off"
+      - name: GOPATH
+        value: "/tmp/oberth-tools/gopath"
+      - name: GOMODCACHE
+        value: "/cache/gomod"
+      - name: GOCACHE
+        value: "/cache/gobuild"
+      volumeMounts: &release-mounts
+      - name: work
+        mountPath: /tmp/oberth-tools
+        subPath: tools
+      - name: work
+        mountPath: /cache/gomod
+        subPath: gomod
+      - name: work
+        mountPath: /cache/gobuild
+        subPath: gobuild
+      - name: work
+        mountPath: /tmp/oberth-release
+        subPath: release
+      resources: &resources-m
+        requests:
+          cpu: "2"
+          memory: "4Gi"
+        limits:
+          cpu: "2"
+          memory: "4Gi"
+
+  - name: link-go
+    container:
+      image: "golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3"
+      workingDir: /work/src
+      command: ["/bin/ln"]
+      args: ["-sf", "/usr/local/go/bin/go", "/usr/local/go/bin/gofmt", "/tmp/oberth-tools/bin"]
+      env: *release-env
+      volumeMounts: *release-mounts
+      resources: *resources-m
+
+  - name: install-envconsul
+    container:
+      image: "golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3"
+      workingDir: /work/src
+      command: ["/usr/local/go/bin/go"]
+      args: ["install", "github.com/hashicorp/envconsul@v0.13.2"]
+      env:
+      - name: GOBIN
+        value: "/tmp/oberth-tools/bin"
+      - name: PATH
+        value: "/tmp/oberth-tools/bin:/usr/local/bin:/usr/bin:/bin"
+      - name: HOME
+        value: "/tmp"
+      - name: GOTOOLCHAIN
+        value: "local"
+      - name: GOWORK
+        value: "off"
+      - name: GOENV
+        value: "off"
+      - name: GOPATH
+        value: "/tmp/oberth-tools/gopath"
+      - name: GOMODCACHE
+        value: "/cache/gomod"
+      - name: GOCACHE
+        value: "/cache/gobuild"
+      volumeMounts: *release-mounts
+      resources: *resources-m
+
+  # Cosign install: fetch, verify SHA-256, make executable. Mirrors the
+  # pattern in Oberth's own .oberth/release.yaml.
+  - name: fetch-cosign
+    container:
+      image: "golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3"
+      workingDir: /work/src
+      command: ["/usr/bin/curl"]
+      args:
+      - "--fail"
+      - "--location"
+      - "--no-progress-meter"
+      - "--proto"
+      - "=https"
+      - "--tlsv1.2"
+      - "--max-time"
+      - "90"
+      - "--retry"
+      - "2"
+      - "--output"
+      - "/tmp/oberth-tools/bin/cosign"
+      - "https://github.com/sigstore/cosign/releases/download/v3.1.1/cosign-linux-amd64"
+      env: *release-env
+      volumeMounts: *release-mounts
+      resources: *resources-m
+
+  - name: verify-cosign
+    container:
+      image: "golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3"
+      workingDir: /work/src
+      command: ["/usr/bin/sha256sum"]
+      args: ["-c", ".oberth/pins/cosign.sha256"]
+      env: *release-env
+      volumeMounts: *release-mounts
+      resources: *resources-m
+
+  - name: install-cosign
+    container:
+      image: "golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3"
+      workingDir: /work/src
+      command: ["/bin/chmod"]
+      args: ["0755", "/tmp/oberth-tools/bin/cosign"]
+      env: *release-env
+      volumeMounts: *release-mounts
+      resources: *resources-m
+
+  - name: release-test
+    container:
+      image: "golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3"
+      workingDir: /work/src
+      command: ["/tmp/oberth-tools/bin/go"]
+      args: ["test", "-race", "-v", "-count=1", "./..."]
+      env:
+      - name: CGO_ENABLED
+        value: "1"
+      - name: PATH
+        value: "/tmp/oberth-tools/bin:/usr/local/bin:/usr/bin:/bin"
+      - name: HOME
+        value: "/tmp"
+      - name: GOTOOLCHAIN
+        value: "local"
+      - name: GOWORK
+        value: "off"
+      - name: GOENV
+        value: "off"
+      - name: GOPATH
+        value: "/tmp/oberth-tools/gopath"
+      - name: GOMODCACHE
+        value: "/cache/gomod"
+      - name: GOCACHE
+        value: "/cache/gobuild"
+      volumeMounts: *release-mounts
+      resources:
+        requests:
+          cpu: "4"
+          memory: "8Gi"
+        limits:
+          cpu: "4"
+          memory: "8Gi"
+
+  # Build writes the binary to a shared artifacts directory on the work claim
+  # so that sign and push tasks in separate pods can access it.
+  - name: release-build
+    container:
+      image: "golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3"
+      workingDir: /work/src
+      command: ["/tmp/oberth-tools/bin/go"]
+      args: ["build", "-trimpath", "-ldflags=-s -w", "-o", "/tmp/oberth-release/artifacts/app-linux-amd64", "./cmd/app"]
+      env:
+      - name: CGO_ENABLED
+        value: "0"
+      - name: GOOS
+        value: "linux"
+      - name: GOARCH
+        value: "amd64"
+      - name: PATH
+        value: "/tmp/oberth-tools/bin:/usr/local/bin:/usr/bin:/bin"
+      - name: HOME
+        value: "/tmp"
+      - name: GOTOOLCHAIN
+        value: "local"
+      - name: GOWORK
+        value: "off"
+      - name: GOENV
+        value: "off"
+      - name: GOPATH
+        value: "/tmp/oberth-tools/gopath"
+      - name: GOMODCACHE
+        value: "/cache/gomod"
+      - name: GOCACHE
+        value: "/cache/gobuild"
+      volumeMounts: *release-mounts
+      resources: *resources-m
+
+  # Credentialed step: envconsul fetches the cosign key from OpenBao.
+  # Signs the binary and derives cosign.pub for downstream verification.
+  # Both operations run in a single envconsul session so the signing key
+  # is materialized exactly once. cosign.pub is written to the shared
+  # artifacts volume so release-publish can upload it alongside the signed
+  # binary -- making verification self-contained per release with no
+  # separate key-fetch step required.
+  - name: release-sign
+    container:
+      image: "golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3"
+      workingDir: /work/src
+      command: ["/tmp/oberth-tools/bin/envconsul"]
+      args:
+      - "-once"
+      - "-pristine"
+      - "-config"
+      - ".oberth/envconsul.hcl"
+      - "/bin/sh"
+      - "-c"
+      - |
+        set -eu
+        /tmp/oberth-tools/bin/cosign sign-blob --yes --key env://COSIGN_KEY \
+          --output-signature /tmp/oberth-release/artifacts/app-linux-amd64.sig \
+          /tmp/oberth-release/artifacts/app-linux-amd64
+        /tmp/oberth-tools/bin/cosign public-key --key env://COSIGN_KEY \
+          >/tmp/oberth-release/artifacts/cosign.pub
+        test -s /tmp/oberth-release/artifacts/cosign.pub || \
+          { printf 'cosign produced an empty public key\n' >&2; exit 1; }
+      env: *release-env
+      volumeMounts: *release-mounts
+      resources: *resources-m
+
+  # Credentialed step: envconsul fetches the registry token from OpenBao.
+  #
+  # Uploads use immutable-create (If-None-Match: *) via the S3-compatible
+  # endpoint to prevent silent overwrites of already-published artifacts.
+  # A re-run against a published tag fails closed (HTTP 412 Precondition
+  # Failed) instead of silently replacing the object. This is the safe
+  # default; see Oberth's own .oberth/release.sh publish_exact_object for
+  # the full pattern with authoritative readback and idempotent convergence.
+  #
+  # cosign.pub is published alongside the signed artifacts so downstream
+  # verification (cosign verify-blob --key cosign.pub ...) is self-contained
+  # per release, matching Oberth's own release layout.
+  - name: release-publish
+    container:
+      image: "golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3"
+      workingDir: /work/src
+      command: ["/tmp/oberth-tools/bin/envconsul"]
+      args:
+      - "-once"
+      - "-pristine"
+      - "-config"
+      - ".oberth/envconsul.hcl"
+      - "/bin/sh"
+      - "-c"
+      - |
+        set -eu
+        # Read the release tag from the environment via shell parameter
+        # expansion (${...}), never Kubernetes $(VAR) substitution: $(...) in a
+        # /bin/sh -c body is text-substituted into the script SOURCE by kubelet
+        # and re-parsed by the shell, so a crafted tag name would execute in
+        # this credentialed step (CWE-78). ${OBERTH_RELEASE_TAG} is expanded by
+        # the shell as inert data. The #refs/tags/ strip is defensive; Oberth
+        # already delivers the bare tag (e.g. "v1.2.3").
+        tag="${OBERTH_RELEASE_TAG#refs/tags/}"
+        base="https://releases.example.com/${tag}"
+        for file in app-linux-amd64 app-linux-amd64.sig cosign.pub; do
+          /usr/bin/curl --fail-with-body --no-progress-meter \
+            --proto '=https' --tlsv1.2 \
+            --header 'If-None-Match: *' \
+            --upload-file "/tmp/oberth-release/artifacts/${file}" \
+            "${base}/${file}"
+        done
+      env: *release-env
+      volumeMounts: *release-mounts
+      resources: *resources-m

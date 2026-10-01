@@ -1,0 +1,19 @@
+{{- $goProxy := .Values.argo.goProxy | default dict -}}
+{{- if $goProxy.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "oberth.fullname" . }}-goproxy
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "oberth.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "oberth.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: goproxy
+      port: {{ $goProxy.port | default 8444 }}
+      targetPort: goproxy
+      protocol: TCP
+{{- end }}

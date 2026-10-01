@@ -1,0 +1,26 @@
+{{- $wt := .Values.watchTunnel | default dict -}}
+{{- if $wt.enabled }}
+{{- /* The CA ConfigMap uses the same PEM as secretstore.caCert when available,
+       so the connector trusts the same OpenBao TLS anchor the server does.
+       When secretstore.caCert is empty (publicly trusted), the connector
+       also needs no private CA anchor and the ConfigMap renders with an
+       empty ca.crt — the template fails closed on an internal-looking
+       address without a CA. */ -}}
+{{- $caCert := .Values.secretstore.caCert | default "" | trim -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cloudflared-watch-openbao-ca
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: cloudflared-watch
+    app.kubernetes.io/component: tunnel-connector
+    {{- include "oberth.labels" . | nindent 4 }}
+data:
+  ca.crt: |
+{{- if $caCert }}
+{{ $caCert | indent 4 }}
+{{- else }}
+    {{- /* empty — the store presents a publicly trusted certificate */ -}}
+{{- end }}
+{{- end }}

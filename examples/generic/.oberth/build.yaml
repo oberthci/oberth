@@ -1,0 +1,187 @@
+# Oberth CI pipeline (branch-trigger) for any language.
+#
+# Argo Workflow YAML — demonstrates language-agnostic pipeline patterns:
+#
+#   1. Every step has an honest exit code. Each template is its own container
+#      with its own command — no `set -e` or `bash -c`. A failure in step 3
+#      of 5 identifies itself by template name.
+#
+#   2. Tool installation is verified. SHA-256 checksums live in the same
+#      commit as the pipeline. If a download is corrupted or tampered, the
+#      verify template fails with a clear name.
+#
+#   3. Timeouts are per-template. A lint template that hangs does not consume
+#      the entire workflow deadline.
+#
+# DAG structure:
+#
+#   setup --> lint --> test --> package
+#
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  annotations:
+    oberth.ci/size: M
+spec:
+  entrypoint: ci
+  activeDeadlineSeconds: 3600
+
+  volumeClaimTemplates:
+  - metadata:
+      name: work
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      resources:
+        requests:
+          storage: 5Gi
+
+  templates:
+
+  - name: ci
+    dag:
+      tasks:
+      - name: setup
+        template: setup
+      - name: lint
+        template: lint
+        depends: setup
+      - name: test
+        template: test
+        depends: lint
+      - name: package
+        template: package
+        depends: test
+
+  # ---- setup: install tools with SHA-256 verification ----
+  - name: setup
+    steps:
+    - - name: tools-dir
+        template: tools-dir
+    - - name: fetch-shellcheck
+        template: fetch-shellcheck
+    - - name: verify-shellcheck
+        template: verify-shellcheck
+    - - name: unpack-shellcheck
+        template: unpack-shellcheck
+
+  - name: tools-dir
+    container:
+      image: "golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3"
+      workingDir: /work/src
+      command: ["/bin/mkdir"]
+      args: ["-p", "/tmp/oberth-tools/bin", "/tmp/oberth-tools/downloads"]
+      env: &common-env
+      - name: PATH
+        value: "/tmp/oberth-tools/bin:/usr/local/bin:/usr/bin:/bin"
+      - name: HOME
+        value: "/tmp"
+      volumeMounts: &common-mounts
+      - name: work
+        mountPath: /tmp/oberth-tools
+        subPath: tools
+      resources: &resources-m
+        requests:
+          cpu: "2"
+          memory: "4Gi"
+        limits:
+          cpu: "2"
+          memory: "4Gi"
+
+  - name: fetch-shellcheck
+    activeDeadlineSeconds: 120
+    container:
+      image: "golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3"
+      workingDir: /work/src
+      command: ["/usr/bin/curl"]
+      args:
+      - "--fail"
+      - "--location"
+      - "--no-progress-meter"
+      - "--proto"
+      - "=https"
+      - "--tlsv1.2"
+      - "--max-time"
+      - "60"
+      - "--retry"
+      - "2"
+      - "-o"
+      - "/tmp/oberth-tools/downloads/shellcheck.tar.xz"
+      - "https://github.com/koalaman/shellcheck/releases/download/v0.10.0/shellcheck-v0.10.0.linux.x86_64.tar.xz"
+      env: *common-env
+      volumeMounts: *common-mounts
+      resources: *resources-m
+
+  - name: verify-shellcheck
+    container:
+      image: "golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3"
+      workingDir: /work/src
+      command: ["/usr/bin/sha256sum"]
+      args: ["-c", ".oberth/pins/tools.sha256"]
+      env: *common-env
+      volumeMounts: *common-mounts
+      resources: *resources-m
+
+  - name: unpack-shellcheck
+    container:
+      image: "golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3"
+      workingDir: /work/src
+      command: ["/bin/tar"]
+      args:
+      - "-C"
+      - "/tmp/oberth-tools/bin"
+      - "--strip-components=1"
+      - "-xJf"
+      - "/tmp/oberth-tools/downloads/shellcheck.tar.xz"
+      - "shellcheck-v0.10.0/shellcheck"
+      env: *common-env
+      volumeMounts: *common-mounts
+      resources: *resources-m
+
+  # ---- lint ----
+  - name: lint
+    container:
+      image: "golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3"
+      workingDir: /work/src
+      command: ["/tmp/oberth-tools/bin/shellcheck"]
+      args: ["--severity=warning", "--shell=bash", "scripts/deploy.sh", "scripts/test.sh"]
+      env: *common-env
+      volumeMounts: *common-mounts
+      resources: *resources-m
+
+  # ---- test ----
+  - name: test
+    activeDeadlineSeconds: 600
+    container:
+      image: "golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3"
+      workingDir: /work/src
+      command: ["/usr/bin/make"]
+      args: ["test"]
+      env:
+      - name: PATH
+        value: "/tmp/oberth-tools/bin:/usr/local/bin:/usr/bin:/bin"
+      - name: HOME
+        value: "/tmp"
+      - name: CI
+        value: "true"
+      volumeMounts: *common-mounts
+      resources: *resources-m
+
+  # ---- package ----
+  - name: package
+    activeDeadlineSeconds: 300
+    container:
+      image: "golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3"
+      workingDir: /work/src
+      command: ["/bin/tar"]
+      args:
+      - "-czf"
+      - "/tmp/release.tar.gz"
+      - "--exclude=.git"
+      - "--exclude=.oberth"
+      - "--exclude=node_modules"
+      - "."
+      env:
+      - name: HOME
+        value: "/tmp"
+      volumeMounts: *common-mounts
+      resources: *resources-m

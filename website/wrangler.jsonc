@@ -1,0 +1,22 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "oberth-ci",
+  "compatibility_date": "2026-07-15",
+  "workers_dev": false,
+  "preview_urls": false,
+  "assets": {
+    "directory": "./public",
+    "not_found_handling": "404-page",
+    "run_worker_first": false
+  },
+  "routes": [
+    {
+      "pattern": "oberth.ci",
+      "custom_domain": true
+    },
+    {
+      "pattern": "www.oberth.ci",
+      "custom_domain": true
+    }
+  ]
+}

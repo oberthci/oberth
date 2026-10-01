@@ -1,0 +1,31 @@
+{{- if .Values.auditAnchor.rekorCA }}
+# The Rekor TLS trust anchor is public CA material; a ConfigMap keeps the
+# zero-Kubernetes-Secrets posture for audit infrastructure.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "oberth.fullname" . }}-audit-rekor-ca
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "oberth.labels" . | nindent 4 }}
+data:
+  ca.crt: |
+    {{- .Values.auditAnchor.rekorCA | nindent 4 }}
+{{- end }}
+{{- if and .Values.auditAnchor.rekorCA .Values.auditAnchor.tsaCA }}
+---
+{{- end }}
+{{- if .Values.auditAnchor.tsaCA }}
+# The TSA TLS trust anchor is public CA material; a ConfigMap keeps the
+# zero-Kubernetes-Secrets posture for audit infrastructure.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "oberth.fullname" . }}-audit-tsa-ca
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "oberth.labels" . | nindent 4 }}
+data:
+  ca.crt: |
+    {{- .Values.auditAnchor.tsaCA | nindent 4 }}
+{{- end }}

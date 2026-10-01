@@ -1,0 +1,12 @@
+package argojob
+
+import("encoding/json";"os";"path/filepath";"testing")
+
+func TestExportWIFControllerInputs(t *testing.T) {
+ dir:=os.Getenv("OBERTH_WIF_PROOF_DIR");if dir=="" {t.Fatal("proof output directory required")}
+ for _,shape:=range wifControllerShapes {
+  c,r:=wifControllerInput(t,shape);wf,err:=Build(c,r);if err!=nil{t.Fatal(err)}
+  b,err:=json.MarshalIndent(wf,"","  ");if err!=nil{t.Fatal(err)}
+  if err=os.WriteFile(filepath.Join(dir,shape+"-workflow.json"),b,0600);err!=nil{t.Fatal(err)}
+ }
+}

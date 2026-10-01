@@ -1,0 +1,9 @@
+package argojob
+import("encoding/json";"os";"path/filepath";"testing")
+func TestExportIsolationControllerInputs(t *testing.T){
+ for _,shape:=range []string{"dedicated-tools","none","container","script","containerset","sidecars","inline-dag","inline-steps"}{
+  wf,err:=Build(testConfig(),isolationControllerRequest(t,shape));if err!=nil{t.Fatal(err)}
+  b,err:=json.MarshalIndent(wf,"","  ");if err!=nil{t.Fatal(err)}
+  if err=os.WriteFile(filepath.Join("/var/tmp/cttv-pretest-20260927/oberth-controller",shape+"-workflow.json"),b,0600);err!=nil{t.Fatal(err)}
+ }
+}

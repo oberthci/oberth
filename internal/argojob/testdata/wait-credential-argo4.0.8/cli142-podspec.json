@@ -1,0 +1,194 @@
+{
+  "containers": [
+    {
+      "name": "wait",
+      "volumeMounts": [
+        {
+          "name": "exec-sa-token",
+          "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
+          "readOnly": true,
+          "subPath": null
+        },
+        {
+          "name": "cli-tools",
+          "mountPath": "/mainctrfs/tmp/oberth-tools",
+          "readOnly": true,
+          "subPath": null
+        },
+        {
+          "name": "work",
+          "mountPath": "/mainctrfs/tmp/oberth-release",
+          "readOnly": null,
+          "subPath": "release"
+        },
+        {
+          "name": "oberth-tmp",
+          "mountPath": "/mainctrfs/tmp",
+          "readOnly": null,
+          "subPath": null
+        },
+        {
+          "name": "oberth-source",
+          "mountPath": "/mainctrfs/work/src",
+          "readOnly": true,
+          "subPath": "src"
+        },
+        {
+          "name": "oberth-source",
+          "mountPath": "/mainctrfs/run/oberth/vault-ca",
+          "readOnly": true,
+          "subPath": "vault-ca"
+        },
+        {
+          "name": "oberth-source",
+          "mountPath": "/mainctrfs/run/oberth/bin",
+          "readOnly": true,
+          "subPath": "oberth-bin"
+        },
+        {
+          "name": "oberth-release-token",
+          "mountPath": "/mainctrfs/var/run/secrets/kubernetes.io/serviceaccount",
+          "readOnly": true,
+          "subPath": null
+        },
+        {
+          "name": "oberth-secrets",
+          "mountPath": "/mainctrfs/run/oberth-secrets",
+          "readOnly": null,
+          "subPath": null
+        },
+        {
+          "name": "tmp-dir-argo",
+          "mountPath": "/tmp",
+          "readOnly": null,
+          "subPath": "0"
+        },
+        {
+          "name": "var-run-argo",
+          "mountPath": "/var/run/argo",
+          "readOnly": null,
+          "subPath": null
+        }
+      ]
+    },
+    {
+      "name": "main",
+      "volumeMounts": [
+        {
+          "name": "cli-tools",
+          "mountPath": "/tmp/oberth-tools",
+          "readOnly": true,
+          "subPath": null
+        },
+        {
+          "name": "work",
+          "mountPath": "/tmp/oberth-release",
+          "readOnly": null,
+          "subPath": "release"
+        },
+        {
+          "name": "oberth-tmp",
+          "mountPath": "/tmp",
+          "readOnly": null,
+          "subPath": null
+        },
+        {
+          "name": "oberth-source",
+          "mountPath": "/work/src",
+          "readOnly": true,
+          "subPath": "src"
+        },
+        {
+          "name": "oberth-source",
+          "mountPath": "/run/oberth/vault-ca",
+          "readOnly": true,
+          "subPath": "vault-ca"
+        },
+        {
+          "name": "oberth-source",
+          "mountPath": "/run/oberth/bin",
+          "readOnly": true,
+          "subPath": "oberth-bin"
+        },
+        {
+          "name": "oberth-release-token",
+          "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
+          "readOnly": true,
+          "subPath": null
+        },
+        {
+          "name": "oberth-secrets",
+          "mountPath": "/run/oberth-secrets",
+          "readOnly": null,
+          "subPath": null
+        },
+        {
+          "name": "var-run-argo",
+          "mountPath": "/var/run/argo",
+          "readOnly": null,
+          "subPath": null
+        }
+      ]
+    }
+  ],
+  "initContainers": [
+    {
+      "name": "init",
+      "volumeMounts": [
+        {
+          "name": "exec-sa-token",
+          "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
+          "readOnly": true,
+          "subPath": null
+        },
+        {
+          "name": "var-run-argo",
+          "mountPath": "/var/run/argo",
+          "readOnly": null,
+          "subPath": null
+        }
+      ]
+    },
+    {
+      "name": "verify-release-tools",
+      "volumeMounts": [
+        {
+          "name": "cli-tools",
+          "mountPath": "/tmp/oberth-tools",
+          "readOnly": true,
+          "subPath": null
+        },
+        {
+          "name": "oberth-tmp",
+          "mountPath": "/tmp",
+          "readOnly": null,
+          "subPath": null
+        },
+        {
+          "name": "oberth-source",
+          "mountPath": "/work/src",
+          "readOnly": true,
+          "subPath": "src"
+        },
+        {
+          "name": "oberth-source",
+          "mountPath": "/run/oberth/vault-ca",
+          "readOnly": true,
+          "subPath": "vault-ca"
+        },
+        {
+          "name": "oberth-source",
+          "mountPath": "/run/oberth/bin",
+          "readOnly": true,
+          "subPath": "oberth-bin"
+        },
+        {
+          "name": "var-run-argo",
+          "mountPath": "/var/run/argo",
+          "readOnly": null,
+          "subPath": null
+        }
+      ]
+    }
+  ]
+}

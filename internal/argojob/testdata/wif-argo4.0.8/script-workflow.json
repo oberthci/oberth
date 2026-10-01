@@ -1,0 +1,197 @@
+{
+  "kind": "Workflow",
+  "apiVersion": "argoproj.io/v1alpha1",
+  "metadata": {
+    "name": "oberth-oberth-run-abc1-aabbccddeeff",
+    "namespace": "oberth-argo",
+    "labels": {
+      "app.kubernetes.io/name": "oberth-run",
+      "oberth.ci/engine": "argo",
+      "oberth.ci/repo": "oberth",
+      "oberth.ci/run": "run-abc123",
+      "oberth.ci/sha": "0123456789abcdef0123456789abcdef01234567",
+      "oberth.ci/tier": "release",
+      "oberth.ci/trigger": "release"
+    },
+    "annotations": {
+      "oberth.ci/ref": "refs/tags/v1.0.0",
+      "oberth.ci/release-wif-policy-sha256": "6e106f070f957c0e03a28e3b97911a47a2631f4391f2f1b7ff2903f5d4cfdf28",
+      "oberth.ci/run-id": "run-abc123",
+      "oberth.ci/size": "L",
+      "oberth.ci/spec-identity": "808823f42de3a70447448a51a6f45642ba66337d06f07db1c52d8880ccff2877",
+      "workflows.argoproj.io/pod-name-format": "v2"
+    }
+  },
+  "spec": {
+    "templates": [
+      {
+        "name": "main",
+        "inputs": {},
+        "outputs": {},
+        "metadata": {
+          "annotations": {
+            "oberth.ci/release-wif-adc": "{\"audience\":\"//iam.googleapis.com/projects/123/locations/global/workloadIdentityPools/oberth-release-images/providers/tuxbox\",\"credential_source\":{\"file\":\"/run/oberth-gar/token\"},\"service_account_impersonation_url\":\"https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/image-writer@example-project.iam.gserviceaccount.com:generateAccessToken\",\"subject_token_type\":\"urn:ietf:params:oauth:token-type:jwt\",\"token_url\":\"https://sts.googleapis.com/v1/token\",\"type\":\"external_account\"}",
+            "oberth.ci/release-wif-role": "image-writer",
+            "oberth.ci/workspace-env": "none",
+            "oberth.ci/workspace-mounts": "none"
+          }
+        },
+        "script": {
+          "name": "",
+          "image": "golang:1.26-alpine@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "command": [
+            "/bin/true"
+          ],
+          "env": [
+            {
+              "name": "KEEP_ME",
+              "value": "yes-please"
+            },
+            {
+              "name": "OBERTH_REPO",
+              "value": "oberth"
+            },
+            {
+              "name": "OBERTH_REF",
+              "value": "refs/tags/v1.0.0"
+            },
+            {
+              "name": "OBERTH_SHA",
+              "value": "0123456789abcdef0123456789abcdef01234567"
+            },
+            {
+              "name": "OBERTH_TRIGGER",
+              "value": "release"
+            },
+            {
+              "name": "OBERTH_RUN_ID",
+              "value": "run-abc123"
+            },
+            {
+              "name": "OBERTH_RELEASE_TAG",
+              "value": "refs/tags/v1.0.0"
+            },
+            {
+              "name": "OBERTH_RELEASE_SHA",
+              "value": "0123456789abcdef0123456789abcdef01234567"
+            },
+            {
+              "name": "GOOGLE_APPLICATION_CREDENTIALS",
+              "value": "/run/oberth-gar/adc.json"
+            },
+            {
+              "name": "OBERTH_RELEASE_WIF",
+              "value": "1"
+            }
+          ],
+          "resources": {},
+          "volumeMounts": [
+            {
+              "name": "oberth-tmp",
+              "mountPath": "/tmp"
+            },
+            {
+              "name": "oberth-source",
+              "readOnly": true,
+              "mountPath": "/work/src",
+              "subPath": "src"
+            },
+            {
+              "name": "oberth-release-wif",
+              "readOnly": true,
+              "mountPath": "/run/oberth-gar"
+            }
+          ],
+          "securityContext": {
+            "capabilities": {
+              "drop": [
+                "ALL"
+              ]
+            },
+            "readOnlyRootFilesystem": true,
+            "allowPrivilegeEscalation": false
+          },
+          "source": "true"
+        },
+        "volumes": [
+          {
+            "name": "oberth-release-wif",
+            "projected": {
+              "sources": [
+                {
+                  "serviceAccountToken": {
+                    "audience": "https://iam.googleapis.com/projects/123/locations/global/workloadIdentityPools/oberth-release-images/providers/tuxbox",
+                    "expirationSeconds": 600,
+                    "path": "token"
+                  }
+                },
+                {
+                  "downwardAPI": {
+                    "items": [
+                      {
+                        "path": "adc.json",
+                        "fieldRef": {
+                          "apiVersion": "v1",
+                          "fieldPath": "metadata.annotations['oberth.ci/release-wif-adc']"
+                        }
+                      }
+                    ]
+                  }
+                }
+              ],
+              "defaultMode": 256
+            }
+          }
+        ],
+        "serviceAccountName": "oberth-per-repo",
+        "automountServiceAccountToken": false,
+        "podSpecPatch": "{\"containers\":[{\"name\":\"wait\",\"volumeMounts\":[{\"mountPath\":\"/mainctrfs/work/src\",\"name\":\"oberth-source\",\"readOnly\":true,\"subPath\":\"src\"},{\"$patch\":\"delete\",\"mountPath\":\"/mainctrfs/run/oberth-gar\"}]}]}"
+      }
+    ],
+    "entrypoint": "main",
+    "arguments": {},
+    "serviceAccountName": "oberth-per-repo",
+    "automountServiceAccountToken": false,
+    "executor": {
+      "serviceAccountName": "oberth-argo-executor"
+    },
+    "volumes": [
+      {
+        "name": "oberth-tmp",
+        "emptyDir": {
+          "sizeLimit": "8Gi"
+        }
+      },
+      {
+        "name": "oberth-source",
+        "persistentVolumeClaim": {
+          "claimName": "wif-proof-source",
+          "readOnly": true
+        }
+      }
+    ],
+    "ttlStrategy": {
+      "secondsAfterCompletion": 3600
+    },
+    "activeDeadlineSeconds": 7200,
+    "securityContext": {
+      "runAsUser": 0,
+      "runAsGroup": 0,
+      "runAsNonRoot": false,
+      "seccompProfile": {
+        "type": "RuntimeDefault"
+      }
+    },
+    "podMetadata": {
+      "labels": {
+        "oberth.ci/run": "run-abc123",
+        "oberth.ci/tier": "release",
+        "oberth.ci/trigger": "release"
+      }
+    }
+  },
+  "status": {
+    "startedAt": null,
+    "finishedAt": null
+  }
+}

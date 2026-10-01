@@ -1,0 +1,2101 @@
+# Release workflow. Every Pod leaf uses the template-level token and workspace
+# controls every server since v0.16.6 honours (#567): it declares
+# oberth.ci/workspace-mounts: none and oberth.ci/workspace-env: none, and every
+# leaf except the six credentialed ones (release-sign-binaries, release-publish-images,
+# release-publish-homebrew, release-publish-chart, release-verify, release-website) declares
+# automountServiceAccountToken: false. The release-website leaves already
+# required v0.16.6, so the bootstrap leaves' former v0.16.5 admission
+# compatibility bought nothing. internal/argojob/oberth_pipeline_test.go
+# (TestOberthPipelinesIsolateSharedWorkspace) checks the admitted Pods.
+#
+# Do not rename a claim to `work`: the old server gives that reserved claim
+# implicit tools/cache/output mounts in every leaf. Tests instead receive their
+# own copied tools. Neither test Pods nor downloaded-artifact execution Pods
+# receive the trusted publisher-tools claim. The five original test commands
+# and their dependency gates are preserved.
+#
+# With workspace-mounts none the server injects neither the persistent
+# /work/cache hostPath nor /work/artifacts (older servers did); every executed
+# command still replaces its environment and uses pod-private caches. Credentialed
+# shells use only system PATH and absolute hash-verified publisher tools.
+# Init checks source bytes against the admitted commit and all executable pins
+# before secretstore can run. Tool hashes come from two clean independent builds.
+#
+# Token isolation: secretstore leaves get the explicit release token; tests,
+# builders and public runtime verification declare automount false and do not.
+# Older servers additionally relied on the release ServiceAccount setting
+# automountServiceAccountToken: false.
+# This dependency is checked against actual controller and SA-admission output.
+# Argo's wait container mirrors writable mounts; no claim-wide read-only
+# guarantee is inferred from the main container's readOnly flag.
+#
+# The public runtime gate verifies signed bytes before/after execution and
+# writes a source-and-byte-bound receipt. Finalization holds a repo-scoped
+# mutex, consumes the receipt read-only, and never executes release artifacts.
+#
+# All secrets retain exact store field names beneath OBERTH_SECRETSTORE_DIR.
+# Verification fetches only gar-reader-key; it uses the committed public key.
+# Cloudflare upload, finalization and website deployment reuse one closed
+# release-website template. Candidate inputs and runtime receipts mount read-only;
+# public phases snapshot signed inputs into Pod-private scratch and never execute
+# candidate artifacts. The signers have no Cloudflare capability.
+#
+# Website publication (#649). The credential-free setup steps fetch-node,
+# verify-node and stage-website-packages stage only hash-checked inputs (the
+# pinned Node tarball and a content-addressed npm cache) in their own
+# bootstrap-website-inputs claim; npm runs there with lifecycle scripts off,
+# so no package code executes. The release-website leaf's init containers
+# re-verify the admitted source and those inputs, copy them into Pod-private
+# scratch and install wrangler offline against the committed lockfile's
+# sha512 integrity; only then does its main container fetch its single
+# credential (cloudflare-oberth-workers-token) and deploy the oberth.ci
+# Worker. The tokenless release-website-readback leaf proves the public URLs
+# serve the admitted bytes. Website templates declare
+# automountServiceAccountToken: false unless they are the credentialed leaf,
+# and none of them receives shared workspace mounts or environment.
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  annotations:
+    oberth.ci/size: L
+    oberth.ci/secret-paths: oberth/data/release/gar-image-key,oberth/data/release/gar-chart-key,oberth/data/release/gar-reader-key,oberth/data/release/cosign-secret,oberth/data/release/homebrew-tap-key,oberth/data/release/cloudflare-oberth-workers-token
+spec:
+  entrypoint: release
+  activeDeadlineSeconds: 14400
+  volumeClaimTemplates:
+  - metadata:
+      name: bootstrap-tools
+    spec:
+      accessModes:
+      - ReadWriteOnce
+      resources:
+        requests:
+          storage: 4Gi
+  - metadata:
+      name: bootstrap-test-tools
+    spec:
+      accessModes:
+      - ReadWriteOnce
+      resources:
+        requests:
+          storage: 4Gi
+  - metadata:
+      name: bootstrap-output
+    spec:
+      accessModes:
+      - ReadWriteOnce
+      resources:
+        requests:
+          storage: 10Gi
+  - metadata:
+      name: bootstrap-runtime-receipts
+    spec:
+      accessModes:
+      - ReadWriteOnce
+      resources:
+        requests:
+          storage: 1Gi
+  - metadata:
+      name: bootstrap-website-inputs
+    spec:
+      accessModes:
+      - ReadWriteOnce
+      resources:
+        requests:
+          storage: 1Gi
+  templates:
+  - name: release
+    dag:
+      tasks:
+      - name: release-setup
+        template: release-setup
+      - name: release-lint
+        template: release-lint
+        depends: release-setup
+      - name: release-scan
+        template: release-scan
+        depends: release-setup
+      - name: release-test
+        template: release-test
+        depends: release-lint && release-scan
+      - name: release-chart-test
+        template: release-chart-test
+        depends: release-setup
+      - name: release-build
+        template: release-build
+        depends: release-test && release-chart-test
+      - name: release-sign-binaries
+        template: release-sign-binaries
+        depends: release-build
+      - name: release-publish-images
+        template: release-publish-images
+        depends: release-build
+      - name: release-publish-homebrew
+        template: release-publish-homebrew
+        depends: release-publish-public
+      - name: release-package-chart
+        template: release-package-chart
+        depends: release-publish-images
+      - name: release-publish-chart
+        template: release-publish-chart
+        depends: release-sign-binaries && release-package-chart
+      - name: release-publish-public
+        template: release-website
+        arguments:
+          parameters:
+          - name: phase
+            value: publish-public
+        depends: release-publish-chart
+      - name: release-verify
+        template: release-verify
+        depends: release-publish-public && (release-publish-homebrew.Succeeded || release-publish-homebrew.Failed
+          || release-publish-homebrew.Errored)
+      - name: release-runtime
+        template: release-runtime
+        depends: release-verify
+      - name: release-finalize
+        template: release-website
+        arguments:
+          parameters:
+          - name: phase
+            value: finalize
+        depends: release-runtime
+      - name: release-website
+        template: release-website
+        arguments:
+          parameters:
+          - name: phase
+            value: publish-website
+        depends: release-finalize
+      - name: release-website-readback
+        template: release-website-readback
+        depends: release-website
+  - name: release-setup
+    steps:
+    - - name: tools-dir
+        template: tools-dir
+    - - name: copy-trivy
+        template: copy-trivy
+    - - name: link-go
+        template: link-go
+    - - name: install-golangci-lint
+        template: install-golangci-lint
+    - - name: install-helm
+        template: install-helm
+    - - name: fetch-cosign
+        template: fetch-cosign
+    - - name: verify-cosign
+        template: verify-cosign
+    - - name: install-cosign
+        template: install-cosign
+    - - name: build-release-support
+        template: build-release-support
+    - - name: build-release-image
+        template: build-release-image
+    - - name: validate-tag
+        template: validate-tag
+    - - name: fetch-node
+        template: fetch-node
+    - - name: verify-node
+        template: verify-node
+    - - name: stage-website-packages
+        template: stage-website-packages
+    - - name: copy-test-tools
+        template: copy-test-tools
+  - name: tools-dir
+    automountServiceAccountToken: false
+    metadata:
+      annotations:
+        oberth.ci/workspace-mounts: none
+        oberth.ci/workspace-env: none
+    container:
+      image: golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3
+      workingDir: /work/src
+      command:
+      - /bin/sh
+      - -c
+      args:
+      - |
+        set -eu
+        exec /usr/bin/env -i PATH=/tmp/oberth-tools/bin:/usr/local/go/bin:/usr/bin:/bin \
+          HOME=/tmp \
+          OBERTH_TOOLS_DIR=/tmp/oberth-tools \
+          GOTOOLCHAIN=local \
+          GOWORK=off \
+          GOENV=off \
+          GOPATH=/tmp/bootstrap-private/gopath \
+          GOMODCACHE=/tmp/bootstrap-private/gomod \
+          GOCACHE=/tmp/bootstrap-private/gobuild \
+          GOLANGCI_LINT_CACHE=/tmp/bootstrap-private/lint \
+          TRIVY_CACHE_DIR=/tmp/oberth-trivy \
+          GIT_TERMINAL_PROMPT=0 \
+          KUBEBUILDER_ASSETS= \
+          OBERTH_RELEASE_SHA="$OBERTH_RELEASE_SHA" \
+          OBERTH_RELEASE_TAG="$OBERTH_RELEASE_TAG" \
+          GOBIN=/tmp/oberth-tools/bin \
+          CGO_ENABLED=1 "$@"
+      - bootstrap-clean
+      - /bin/mkdir
+      - -p
+      - /tmp/oberth-tools/bin
+      env:
+      - name: PATH
+        value: /usr/bin:/bin
+      volumeMounts:
+      - name: bootstrap-tools
+        mountPath: /tmp/oberth-tools
+        readOnly: false
+      resources:
+        requests:
+          cpu: '2'
+          memory: 4Gi
+        limits:
+          cpu: '2'
+          memory: 4Gi
+  - name: copy-trivy
+    automountServiceAccountToken: false
+    metadata:
+      annotations:
+        oberth.ci/workspace-mounts: none
+        oberth.ci/workspace-env: none
+    container:
+      image: aquasec/trivy:0.73.0@sha256:7cced7cae583819fc7806d4cbc0dbbc7cad18b99f7d3e235192e6da8c091045c
+      workingDir: /work/src
+      command:
+      - /bin/sh
+      - -c
+      args:
+      - |
+        set -eu
+        exec /usr/bin/env -i PATH=/tmp/oberth-tools/bin:/usr/local/go/bin:/usr/bin:/bin \
+          HOME=/tmp \
+          OBERTH_TOOLS_DIR=/tmp/oberth-tools \
+          GOTOOLCHAIN=local \
+          GOWORK=off \
+          GOENV=off \
+          GOPATH=/tmp/bootstrap-private/gopath \
+          GOMODCACHE=/tmp/bootstrap-private/gomod \
+          GOCACHE=/tmp/bootstrap-private/gobuild \
+          GOLANGCI_LINT_CACHE=/tmp/bootstrap-private/lint \
+          TRIVY_CACHE_DIR=/tmp/oberth-trivy \
+          GIT_TERMINAL_PROMPT=0 \
+          KUBEBUILDER_ASSETS= \
+          OBERTH_RELEASE_SHA="$OBERTH_RELEASE_SHA" \
+          OBERTH_RELEASE_TAG="$OBERTH_RELEASE_TAG" \
+          GOBIN=/tmp/oberth-tools/bin \
+          CGO_ENABLED=1 "$@"
+      - bootstrap-clean
+      - /bin/cp
+      - /usr/local/bin/trivy
+      - /tmp/oberth-tools/bin/trivy
+      env:
+      - name: PATH
+        value: /usr/bin:/bin
+      volumeMounts:
+      - name: bootstrap-tools
+        mountPath: /tmp/oberth-tools
+        readOnly: false
+      resources:
+        requests:
+          cpu: '1'
+          memory: 512Mi
+        limits:
+          cpu: '1'
+          memory: 512Mi
+  - name: link-go
+    automountServiceAccountToken: false
+    metadata:
+      annotations:
+        oberth.ci/workspace-mounts: none
+        oberth.ci/workspace-env: none
+    container:
+      image: golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3
+      workingDir: /work/src
+      command:
+      - /bin/sh
+      - -c
+      args:
+      - |
+        set -eu
+        exec /usr/bin/env -i PATH=/tmp/oberth-tools/bin:/usr/local/go/bin:/usr/bin:/bin \
+          HOME=/tmp \
+          OBERTH_TOOLS_DIR=/tmp/oberth-tools \
+          GOTOOLCHAIN=local \
+          GOWORK=off \
+          GOENV=off \
+          GOPATH=/tmp/bootstrap-private/gopath \
+          GOMODCACHE=/tmp/bootstrap-private/gomod \
+          GOCACHE=/tmp/bootstrap-private/gobuild \
+          GOLANGCI_LINT_CACHE=/tmp/bootstrap-private/lint \
+          TRIVY_CACHE_DIR=/tmp/oberth-trivy \
+          GIT_TERMINAL_PROMPT=0 \
+          KUBEBUILDER_ASSETS= \
+          OBERTH_RELEASE_SHA="$OBERTH_RELEASE_SHA" \
+          OBERTH_RELEASE_TAG="$OBERTH_RELEASE_TAG" \
+          GOBIN=/tmp/oberth-tools/bin \
+          CGO_ENABLED=1 "$@"
+      - bootstrap-clean
+      - /bin/ln
+      - -sf
+      - /usr/local/go/bin/go
+      - /usr/local/go/bin/gofmt
+      - /tmp/oberth-tools/bin
+      env:
+      - name: PATH
+        value: /usr/bin:/bin
+      volumeMounts:
+      - name: bootstrap-tools
+        mountPath: /tmp/oberth-tools
+        readOnly: false
+      resources:
+        requests:
+          cpu: '2'
+          memory: 4Gi
+        limits:
+          cpu: '2'
+          memory: 4Gi
+  - name: install-golangci-lint
+    automountServiceAccountToken: false
+    metadata:
+      annotations:
+        oberth.ci/workspace-mounts: none
+        oberth.ci/workspace-env: none
+    container:
+      image: golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3
+      workingDir: /work/src
+      command:
+      - /bin/sh
+      - -c
+      args:
+      - |
+        set -eu
+        exec /usr/bin/env -i PATH=/tmp/oberth-tools/bin:/usr/local/go/bin:/usr/bin:/bin \
+          HOME=/tmp \
+          OBERTH_TOOLS_DIR=/tmp/oberth-tools \
+          GOTOOLCHAIN=local \
+          GOWORK=off \
+          GOENV=off \
+          GOPATH=/tmp/bootstrap-private/gopath \
+          GOMODCACHE=/tmp/bootstrap-private/gomod \
+          GOCACHE=/tmp/bootstrap-private/gobuild \
+          GOLANGCI_LINT_CACHE=/tmp/bootstrap-private/lint \
+          TRIVY_CACHE_DIR=/tmp/oberth-trivy \
+          GIT_TERMINAL_PROMPT=0 \
+          KUBEBUILDER_ASSETS= \
+          OBERTH_RELEASE_SHA="$OBERTH_RELEASE_SHA" \
+          OBERTH_RELEASE_TAG="$OBERTH_RELEASE_TAG" \
+          GOBIN=/tmp/oberth-tools/bin \
+          CGO_ENABLED=1 "$@"
+      - bootstrap-clean
+      - /usr/local/go/bin/go
+      - install
+      - github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2
+      env:
+      - name: PATH
+        value: /usr/bin:/bin
+      volumeMounts:
+      - name: bootstrap-tools
+        mountPath: /tmp/oberth-tools
+        readOnly: false
+      resources:
+        requests:
+          cpu: '2'
+          memory: 4Gi
+        limits:
+          cpu: '2'
+          memory: 4Gi
+  - name: install-helm
+    automountServiceAccountToken: false
+    metadata:
+      annotations:
+        oberth.ci/workspace-mounts: none
+        oberth.ci/workspace-env: none
+    container:
+      image: golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3
+      workingDir: /work/src
+      command:
+      - /bin/sh
+      - -c
+      args:
+      - |
+        set -eu
+        exec /usr/bin/env -i PATH=/tmp/oberth-tools/bin:/usr/local/go/bin:/usr/bin:/bin \
+          HOME=/tmp \
+          OBERTH_TOOLS_DIR=/tmp/oberth-tools \
+          GOTOOLCHAIN=local \
+          GOWORK=off \
+          GOENV=off \
+          GOPATH=/tmp/bootstrap-private/gopath \
+          GOMODCACHE=/tmp/bootstrap-private/gomod \
+          GOCACHE=/tmp/bootstrap-private/gobuild \
+          GOLANGCI_LINT_CACHE=/tmp/bootstrap-private/lint \
+          TRIVY_CACHE_DIR=/tmp/oberth-trivy \
+          GIT_TERMINAL_PROMPT=0 \
+          KUBEBUILDER_ASSETS= \
+          OBERTH_RELEASE_SHA="$OBERTH_RELEASE_SHA" \
+          OBERTH_RELEASE_TAG="$OBERTH_RELEASE_TAG" \
+          GOBIN=/tmp/oberth-tools/bin \
+          CGO_ENABLED=0 \
+          GOOS=linux \
+          GOARCH=amd64 \
+          GOMAXPROCS=1 \
+          GOFLAGS='-p=1' \
+          GOPROXY=https://proxy.golang.org \
+          GOSUMDB=sum.golang.org "$@"
+      - bootstrap-clean
+      - /usr/local/go/bin/go
+      - install
+      - -trimpath
+      - -buildvcs=false
+      - -ldflags=-buildid=
+      - helm.sh/helm/v4/cmd/helm@v4.2.3
+      env:
+      - name: PATH
+        value: /usr/bin:/bin
+      volumeMounts:
+      - name: bootstrap-tools
+        mountPath: /tmp/oberth-tools
+        readOnly: false
+      resources:
+        requests:
+          cpu: '2'
+          memory: 4Gi
+        limits:
+          cpu: '2'
+          memory: 4Gi
+  - name: fetch-cosign
+    automountServiceAccountToken: false
+    metadata:
+      annotations:
+        oberth.ci/workspace-mounts: none
+        oberth.ci/workspace-env: none
+    container:
+      image: golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3
+      workingDir: /work/src
+      command:
+      - /bin/sh
+      - -c
+      args:
+      - |
+        set -eu
+        exec /usr/bin/env -i PATH=/tmp/oberth-tools/bin:/usr/local/go/bin:/usr/bin:/bin \
+          HOME=/tmp \
+          OBERTH_TOOLS_DIR=/tmp/oberth-tools \
+          GOTOOLCHAIN=local \
+          GOWORK=off \
+          GOENV=off \
+          GOPATH=/tmp/bootstrap-private/gopath \
+          GOMODCACHE=/tmp/bootstrap-private/gomod \
+          GOCACHE=/tmp/bootstrap-private/gobuild \
+          GOLANGCI_LINT_CACHE=/tmp/bootstrap-private/lint \
+          TRIVY_CACHE_DIR=/tmp/oberth-trivy \
+          GIT_TERMINAL_PROMPT=0 \
+          KUBEBUILDER_ASSETS= \
+          OBERTH_RELEASE_SHA="$OBERTH_RELEASE_SHA" \
+          OBERTH_RELEASE_TAG="$OBERTH_RELEASE_TAG" \
+          GOBIN=/tmp/oberth-tools/bin \
+          CGO_ENABLED=1 "$@"
+      - bootstrap-clean
+      - /usr/bin/curl
+      - --fail
+      - --location
+      - --no-progress-meter
+      - --show-error
+      - --connect-timeout
+      - '10'
+      - --max-time
+      - '90'
+      - --retry
+      - '2'
+      - --retry-all-errors
+      - --proto
+      - =https
+      - --proto-redir
+      - =https
+      - --tlsv1.2
+      - --output
+      - /tmp/oberth-tools/bin/cosign
+      - https://github.com/sigstore/cosign/releases/download/v3.1.1/cosign-linux-amd64
+      env:
+      - name: PATH
+        value: /usr/bin:/bin
+      volumeMounts:
+      - name: bootstrap-tools
+        mountPath: /tmp/oberth-tools
+        readOnly: false
+      resources:
+        requests:
+          cpu: '2'
+          memory: 4Gi
+        limits:
+          cpu: '2'
+          memory: 4Gi
+  - name: verify-cosign
+    automountServiceAccountToken: false
+    metadata:
+      annotations:
+        oberth.ci/workspace-mounts: none
+        oberth.ci/workspace-env: none
+    container:
+      image: golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3
+      workingDir: /work/src
+      command:
+      - /bin/sh
+      - -c
+      args:
+      - |
+        set -eu
+        exec /usr/bin/env -i PATH=/tmp/oberth-tools/bin:/usr/local/go/bin:/usr/bin:/bin \
+          HOME=/tmp \
+          OBERTH_TOOLS_DIR=/tmp/oberth-tools \
+          GOTOOLCHAIN=local \
+          GOWORK=off \
+          GOENV=off \
+          GOPATH=/tmp/bootstrap-private/gopath \
+          GOMODCACHE=/tmp/bootstrap-private/gomod \
+          GOCACHE=/tmp/bootstrap-private/gobuild \
+          GOLANGCI_LINT_CACHE=/tmp/bootstrap-private/lint \
+          TRIVY_CACHE_DIR=/tmp/oberth-trivy \
+          GIT_TERMINAL_PROMPT=0 \
+          KUBEBUILDER_ASSETS= \
+          OBERTH_RELEASE_SHA="$OBERTH_RELEASE_SHA" \
+          OBERTH_RELEASE_TAG="$OBERTH_RELEASE_TAG" \
+          GOBIN=/tmp/oberth-tools/bin \
+          CGO_ENABLED=1 "$@"
+      - bootstrap-clean
+      - /usr/bin/sha256sum
+      - -c
+      - .oberth/pins/cosign.sha256
+      env:
+      - name: PATH
+        value: /usr/bin:/bin
+      volumeMounts:
+      - name: bootstrap-tools
+        mountPath: /tmp/oberth-tools
+        readOnly: true
+      resources:
+        requests:
+          cpu: '2'
+          memory: 4Gi
+        limits:
+          cpu: '2'
+          memory: 4Gi
+  - name: install-cosign
+    automountServiceAccountToken: false
+    metadata:
+      annotations:
+        oberth.ci/workspace-mounts: none
+        oberth.ci/workspace-env: none
+    container:
+      image: golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3
+      workingDir: /work/src
+      command:
+      - /bin/sh
+      - -c
+      args:
+      - |
+        set -eu
+        exec /usr/bin/env -i PATH=/tmp/oberth-tools/bin:/usr/local/go/bin:/usr/bin:/bin \
+          HOME=/tmp \
+          OBERTH_TOOLS_DIR=/tmp/oberth-tools \
+          GOTOOLCHAIN=local \
+          GOWORK=off \
+          GOENV=off \
+          GOPATH=/tmp/bootstrap-private/gopath \
+          GOMODCACHE=/tmp/bootstrap-private/gomod \
+          GOCACHE=/tmp/bootstrap-private/gobuild \
+          GOLANGCI_LINT_CACHE=/tmp/bootstrap-private/lint \
+          TRIVY_CACHE_DIR=/tmp/oberth-trivy \
+          GIT_TERMINAL_PROMPT=0 \
+          KUBEBUILDER_ASSETS= \
+          OBERTH_RELEASE_SHA="$OBERTH_RELEASE_SHA" \
+          OBERTH_RELEASE_TAG="$OBERTH_RELEASE_TAG" \
+          GOBIN=/tmp/oberth-tools/bin \
+          CGO_ENABLED=1 "$@"
+      - bootstrap-clean
+      - /bin/chmod
+      - '0755'
+      - /tmp/oberth-tools/bin/cosign
+      env:
+      - name: PATH
+        value: /usr/bin:/bin
+      volumeMounts:
+      - name: bootstrap-tools
+        mountPath: /tmp/oberth-tools
+        readOnly: false
+      resources:
+        requests:
+          cpu: '2'
+          memory: 4Gi
+        limits:
+          cpu: '2'
+          memory: 4Gi
+  - name: build-release-support
+    automountServiceAccountToken: false
+    metadata:
+      annotations:
+        oberth.ci/workspace-mounts: none
+        oberth.ci/workspace-env: none
+    container:
+      image: golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3
+      workingDir: /work/src
+      command:
+      - /bin/sh
+      - -c
+      args:
+      - |
+        set -eu
+        exec /usr/bin/env -i PATH=/tmp/oberth-tools/bin:/usr/local/go/bin:/usr/bin:/bin \
+          HOME=/tmp \
+          OBERTH_TOOLS_DIR=/tmp/oberth-tools \
+          GOTOOLCHAIN=local \
+          GOWORK=off \
+          GOENV=off \
+          GOPATH=/tmp/bootstrap-private/gopath \
+          GOMODCACHE=/tmp/bootstrap-private/gomod \
+          GOCACHE=/tmp/bootstrap-private/gobuild \
+          GOLANGCI_LINT_CACHE=/tmp/bootstrap-private/lint \
+          TRIVY_CACHE_DIR=/tmp/oberth-trivy \
+          GIT_TERMINAL_PROMPT=0 \
+          KUBEBUILDER_ASSETS= \
+          OBERTH_RELEASE_SHA="$OBERTH_RELEASE_SHA" \
+          OBERTH_RELEASE_TAG="$OBERTH_RELEASE_TAG" \
+          GOBIN=/tmp/oberth-tools/bin \
+          CGO_ENABLED=0 \
+          GOOS=linux \
+          GOARCH=amd64 \
+          GOMAXPROCS=1 \
+          GOFLAGS='-p=1 -mod=readonly' \
+          GOPROXY=https://proxy.golang.org \
+          GOSUMDB=sum.golang.org "$@"
+      - bootstrap-clean
+      - /usr/local/go/bin/go
+      - build
+      - -trimpath
+      - -buildvcs=false
+      - -ldflags=-buildid=
+      - -o
+      - /tmp/oberth-tools/bin/oberth-release-support
+      - ./cmd/oberth-release-support
+      env:
+      - name: PATH
+        value: /usr/bin:/bin
+      volumeMounts:
+      - name: bootstrap-tools
+        mountPath: /tmp/oberth-tools
+        readOnly: false
+      resources:
+        requests:
+          cpu: '2'
+          memory: 4Gi
+        limits:
+          cpu: '2'
+          memory: 4Gi
+  - name: build-release-image
+    automountServiceAccountToken: false
+    metadata:
+      annotations:
+        oberth.ci/workspace-mounts: none
+        oberth.ci/workspace-env: none
+    container:
+      image: golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3
+      workingDir: /work/src
+      command:
+      - /bin/sh
+      - -c
+      args:
+      - |
+        set -eu
+        exec /usr/bin/env -i PATH=/tmp/oberth-tools/bin:/usr/local/go/bin:/usr/bin:/bin \
+          HOME=/tmp \
+          OBERTH_TOOLS_DIR=/tmp/oberth-tools \
+          GOTOOLCHAIN=local \
+          GOWORK=off \
+          GOENV=off \
+          GOPATH=/tmp/bootstrap-private/gopath \
+          GOMODCACHE=/tmp/bootstrap-private/gomod \
+          GOCACHE=/tmp/bootstrap-private/gobuild \
+          GOLANGCI_LINT_CACHE=/tmp/bootstrap-private/lint \
+          TRIVY_CACHE_DIR=/tmp/oberth-trivy \
+          GIT_TERMINAL_PROMPT=0 \
+          KUBEBUILDER_ASSETS= \
+          OBERTH_RELEASE_SHA="$OBERTH_RELEASE_SHA" \
+          OBERTH_RELEASE_TAG="$OBERTH_RELEASE_TAG" \
+          GOBIN=/tmp/oberth-tools/bin \
+          CGO_ENABLED=0 \
+          GOOS=linux \
+          GOARCH=amd64 \
+          GOMAXPROCS=1 \
+          GOFLAGS='-p=1 -mod=readonly' \
+          GOPROXY=https://proxy.golang.org \
+          GOSUMDB=sum.golang.org "$@"
+      - bootstrap-clean
+      - /usr/local/go/bin/go
+      - build
+      - -trimpath
+      - -buildvcs=false
+      - -ldflags=-buildid=
+      - -o
+      - /tmp/oberth-tools/bin/oberth-release-image
+      - ./cmd/oberth-release-image
+      env:
+      - name: PATH
+        value: /usr/bin:/bin
+      volumeMounts:
+      - name: bootstrap-tools
+        mountPath: /tmp/oberth-tools
+        readOnly: false
+      resources:
+        requests:
+          cpu: '2'
+          memory: 4Gi
+        limits:
+          cpu: '2'
+          memory: 4Gi
+  - name: validate-tag
+    automountServiceAccountToken: false
+    metadata:
+      annotations:
+        oberth.ci/workspace-mounts: none
+        oberth.ci/workspace-env: none
+    container:
+      image: golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3
+      workingDir: /work/src
+      command:
+      - /bin/sh
+      - -c
+      args:
+      - |
+        set -eu
+        exec /usr/bin/env -i PATH=/tmp/oberth-tools/bin:/usr/local/go/bin:/usr/bin:/bin \
+          HOME=/tmp \
+          OBERTH_TOOLS_DIR=/tmp/oberth-tools \
+          GOTOOLCHAIN=local \
+          GOWORK=off \
+          GOENV=off \
+          GOPATH=/tmp/bootstrap-private/gopath \
+          GOMODCACHE=/tmp/bootstrap-private/gomod \
+          GOCACHE=/tmp/bootstrap-private/gobuild \
+          GOLANGCI_LINT_CACHE=/tmp/bootstrap-private/lint \
+          TRIVY_CACHE_DIR=/tmp/oberth-trivy \
+          GIT_TERMINAL_PROMPT=0 \
+          KUBEBUILDER_ASSETS= \
+          OBERTH_RELEASE_SHA="$OBERTH_RELEASE_SHA" \
+          OBERTH_RELEASE_TAG="$OBERTH_RELEASE_TAG" \
+          GOBIN=/tmp/oberth-tools/bin \
+          CGO_ENABLED=1 "$@"
+      - bootstrap-clean
+      - ./.oberth/release.sh
+      - validate
+      env:
+      - name: PATH
+        value: /usr/bin:/bin
+      volumeMounts:
+      - name: bootstrap-tools
+        mountPath: /tmp/oberth-tools
+        readOnly: true
+      resources:
+        requests:
+          cpu: '2'
+          memory: 4Gi
+        limits:
+          cpu: '2'
+          memory: 4Gi
+  - name: fetch-node
+    automountServiceAccountToken: false
+    metadata:
+      annotations:
+        oberth.ci/workspace-mounts: none
+        oberth.ci/workspace-env: none
+    container:
+      image: golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3
+      workingDir: /work/src
+      command:
+      - /bin/sh
+      - -c
+      args:
+      - |
+        set -eu
+        exec /usr/bin/env -i PATH=/usr/bin:/bin \
+          HOME=/tmp \
+          OBERTH_TOOLS_DIR=/tmp/oberth-tools \
+          GOTOOLCHAIN=local \
+          GOWORK=off \
+          GOENV=off \
+          GOPATH=/tmp/bootstrap-private/gopath \
+          GOMODCACHE=/tmp/bootstrap-private/gomod \
+          GOCACHE=/tmp/bootstrap-private/gobuild \
+          GOLANGCI_LINT_CACHE=/tmp/bootstrap-private/lint \
+          TRIVY_CACHE_DIR=/tmp/oberth-trivy \
+          GIT_TERMINAL_PROMPT=0 \
+          KUBEBUILDER_ASSETS= \
+          OBERTH_RELEASE_SHA="$OBERTH_RELEASE_SHA" \
+          OBERTH_RELEASE_TAG="$OBERTH_RELEASE_TAG" \
+          GOBIN=/tmp/oberth-tools/bin \
+          CGO_ENABLED=1 "$@"
+      - bootstrap-clean
+      - /usr/bin/curl
+      - --fail
+      - --location
+      - --no-progress-meter
+      - --show-error
+      - --connect-timeout
+      - '10'
+      - --max-time
+      - '300'
+      - --retry
+      - '2'
+      - --retry-all-errors
+      - --proto
+      - =https
+      - --proto-redir
+      - =https
+      - --tlsv1.2
+      - --output
+      - /tmp/oberth-website-inputs/node.tar.gz
+      - https://nodejs.org/dist/v22.23.2/node-v22.23.2-linux-x64.tar.gz
+      env:
+      - name: PATH
+        value: /usr/bin:/bin
+      volumeMounts:
+      - name: bootstrap-website-inputs
+        mountPath: /tmp/oberth-website-inputs
+        readOnly: false
+      resources:
+        requests:
+          cpu: '1'
+          memory: 512Mi
+        limits:
+          cpu: '1'
+          memory: 512Mi
+  - name: verify-node
+    automountServiceAccountToken: false
+    metadata:
+      annotations:
+        oberth.ci/workspace-mounts: none
+        oberth.ci/workspace-env: none
+    container:
+      image: golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3
+      workingDir: /work/src
+      command:
+      - /bin/sh
+      - -c
+      args:
+      - |
+        set -eu
+        exec /usr/bin/env -i PATH=/usr/bin:/bin \
+          HOME=/tmp \
+          OBERTH_TOOLS_DIR=/tmp/oberth-tools \
+          GOTOOLCHAIN=local \
+          GOWORK=off \
+          GOENV=off \
+          GOPATH=/tmp/bootstrap-private/gopath \
+          GOMODCACHE=/tmp/bootstrap-private/gomod \
+          GOCACHE=/tmp/bootstrap-private/gobuild \
+          GOLANGCI_LINT_CACHE=/tmp/bootstrap-private/lint \
+          TRIVY_CACHE_DIR=/tmp/oberth-trivy \
+          GIT_TERMINAL_PROMPT=0 \
+          KUBEBUILDER_ASSETS= \
+          OBERTH_RELEASE_SHA="$OBERTH_RELEASE_SHA" \
+          OBERTH_RELEASE_TAG="$OBERTH_RELEASE_TAG" \
+          GOBIN=/tmp/oberth-tools/bin \
+          CGO_ENABLED=1 "$@"
+      - bootstrap-clean
+      - /usr/bin/sha256sum
+      - -c
+      - .oberth/pins/node.sha256
+      env:
+      - name: PATH
+        value: /usr/bin:/bin
+      volumeMounts:
+      - name: bootstrap-website-inputs
+        mountPath: /tmp/oberth-website-inputs
+        readOnly: true
+      resources:
+        requests:
+          cpu: '1'
+          memory: 512Mi
+        limits:
+          cpu: '1'
+          memory: 512Mi
+  - name: stage-website-packages
+    automountServiceAccountToken: false
+    metadata:
+      annotations:
+        oberth.ci/workspace-mounts: none
+        oberth.ci/workspace-env: none
+    container:
+      image: golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3
+      workingDir: /work/src
+      command:
+      - /bin/sh
+      - -c
+      args:
+      - |
+        set -eu
+        exec /usr/bin/env -i PATH=/usr/bin:/bin \
+          HOME=/tmp \
+          OBERTH_TOOLS_DIR=/tmp/oberth-tools \
+          GOTOOLCHAIN=local \
+          GOWORK=off \
+          GOENV=off \
+          GOPATH=/tmp/bootstrap-private/gopath \
+          GOMODCACHE=/tmp/bootstrap-private/gomod \
+          GOCACHE=/tmp/bootstrap-private/gobuild \
+          GOLANGCI_LINT_CACHE=/tmp/bootstrap-private/lint \
+          TRIVY_CACHE_DIR=/tmp/oberth-trivy \
+          GIT_TERMINAL_PROMPT=0 \
+          KUBEBUILDER_ASSETS= \
+          OBERTH_RELEASE_SHA="$OBERTH_RELEASE_SHA" \
+          OBERTH_RELEASE_TAG="$OBERTH_RELEASE_TAG" \
+          GOBIN=/tmp/oberth-tools/bin \
+          CGO_ENABLED=1 "$@"
+      - bootstrap-clean
+      - ./.oberth/release.sh
+      - stage-website-packages
+      env:
+      - name: PATH
+        value: /usr/bin:/bin
+      volumeMounts:
+      - name: bootstrap-website-inputs
+        mountPath: /tmp/oberth-website-inputs
+        readOnly: false
+      resources:
+        requests:
+          cpu: '2'
+          memory: 2Gi
+        limits:
+          cpu: '2'
+          memory: 2Gi
+  - name: release-lint
+    steps:
+    - - name: vet
+        template: vet
+    - - name: golangci-lint-run
+        template: golangci-lint-run
+  - name: vet
+    automountServiceAccountToken: false
+    metadata:
+      annotations:
+        oberth.ci/workspace-mounts: none
+        oberth.ci/workspace-env: none
+    container:
+      image: golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3
+      workingDir: /work/src
+      command:
+      - /bin/sh
+      - -c
+      args:
+      - |
+        set -eu
+        exec /usr/bin/env -i PATH=/tmp/oberth-tools/bin:/usr/local/go/bin:/usr/bin:/bin \
+          HOME=/tmp \
+          OBERTH_TOOLS_DIR=/tmp/oberth-tools \
+          GOTOOLCHAIN=local \
+          GOWORK=off \
+          GOENV=off \
+          GOPATH=/tmp/bootstrap-private/gopath \
+          GOMODCACHE=/tmp/bootstrap-private/gomod \
+          GOCACHE=/tmp/bootstrap-private/gobuild \
+          GOLANGCI_LINT_CACHE=/tmp/bootstrap-private/lint \
+          TRIVY_CACHE_DIR=/tmp/oberth-trivy \
+          GIT_TERMINAL_PROMPT=0 \
+          KUBEBUILDER_ASSETS= \
+          OBERTH_RELEASE_SHA="$OBERTH_RELEASE_SHA" \
+          OBERTH_RELEASE_TAG="$OBERTH_RELEASE_TAG" \
+          GOBIN=/tmp/oberth-tools/bin \
+          CGO_ENABLED=1 "$@"
+      - bootstrap-clean
+      - /tmp/oberth-tools/bin/go
+      - vet
+      - ./...
+      env:
+      - name: PATH
+        value: /usr/bin:/bin
+      volumeMounts:
+      - name: bootstrap-test-tools
+        mountPath: /tmp/oberth-tools
+        subPath: vet
+        readOnly: true
+      resources:
+        requests:
+          cpu: '2'
+          memory: 4Gi
+        limits:
+          cpu: '2'
+          memory: 4Gi
+  - name: golangci-lint-run
+    automountServiceAccountToken: false
+    metadata:
+      annotations:
+        oberth.ci/workspace-mounts: none
+        oberth.ci/workspace-env: none
+    container:
+      image: golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3
+      workingDir: /work/src
+      command:
+      - /bin/sh
+      - -c
+      args:
+      - |
+        set -eu
+        exec /usr/bin/env -i PATH=/tmp/oberth-tools/bin:/usr/local/go/bin:/usr/bin:/bin \
+          HOME=/tmp \
+          OBERTH_TOOLS_DIR=/tmp/oberth-tools \
+          GOTOOLCHAIN=local \
+          GOWORK=off \
+          GOENV=off \
+          GOPATH=/tmp/bootstrap-private/gopath \
+          GOMODCACHE=/tmp/bootstrap-private/gomod \
+          GOCACHE=/tmp/bootstrap-private/gobuild \
+          GOLANGCI_LINT_CACHE=/tmp/bootstrap-private/lint \
+          TRIVY_CACHE_DIR=/tmp/oberth-trivy \
+          GIT_TERMINAL_PROMPT=0 \
+          KUBEBUILDER_ASSETS= \
+          OBERTH_RELEASE_SHA="$OBERTH_RELEASE_SHA" \
+          OBERTH_RELEASE_TAG="$OBERTH_RELEASE_TAG" \
+          GOBIN=/tmp/oberth-tools/bin \
+          CGO_ENABLED=1 \
+          GOMEMLIMIT=2GiB "$@"
+      - bootstrap-clean
+      - /tmp/oberth-tools/bin/golangci-lint
+      - run
+      - --timeout=10m
+      - --concurrency=1
+      - ./...
+      env:
+      - name: PATH
+        value: /usr/bin:/bin
+      volumeMounts:
+      - name: bootstrap-test-tools
+        mountPath: /tmp/oberth-tools
+        subPath: golangci-lint-run
+        readOnly: true
+      resources:
+        requests:
+          cpu: '4'
+          memory: 8Gi
+        limits:
+          cpu: '4'
+          memory: 8Gi
+  - name: release-scan
+    automountServiceAccountToken: false
+    metadata:
+      annotations:
+        oberth.ci/workspace-mounts: none
+        oberth.ci/workspace-env: none
+    container:
+      image: aquasec/trivy:0.73.0@sha256:7cced7cae583819fc7806d4cbc0dbbc7cad18b99f7d3e235192e6da8c091045c
+      workingDir: /work/src
+      command:
+      - /bin/sh
+      - -c
+      args:
+      - |
+        set -eu
+        exec /usr/bin/env -i PATH=/tmp/oberth-tools/bin:/usr/local/go/bin:/usr/bin:/bin \
+          HOME=/tmp \
+          OBERTH_TOOLS_DIR=/tmp/oberth-tools \
+          GOTOOLCHAIN=local \
+          GOWORK=off \
+          GOENV=off \
+          GOPATH=/tmp/bootstrap-private/gopath \
+          GOMODCACHE=/tmp/bootstrap-private/gomod \
+          GOCACHE=/tmp/bootstrap-private/gobuild \
+          GOLANGCI_LINT_CACHE=/tmp/bootstrap-private/lint \
+          TRIVY_CACHE_DIR=/tmp/oberth-trivy \
+          GIT_TERMINAL_PROMPT=0 \
+          KUBEBUILDER_ASSETS= \
+          OBERTH_RELEASE_SHA="$OBERTH_RELEASE_SHA" \
+          OBERTH_RELEASE_TAG="$OBERTH_RELEASE_TAG" \
+          GOBIN=/tmp/oberth-tools/bin \
+          CGO_ENABLED=1 "$@"
+      - bootstrap-clean
+      - /usr/local/bin/trivy
+      - fs
+      - --cache-dir
+      - /tmp/oberth-trivy
+      - --no-progress
+      - --skip-check-update
+      - --skip-vex-repo-update
+      - --skip-version-check
+      - --disable-telemetry
+      - --scanners
+      - vuln
+      - --exit-code
+      - '1'
+      - --severity
+      - HIGH,CRITICAL
+      - --skip-dirs
+      - .git
+      - .
+      env:
+      - name: PATH
+        value: /usr/bin:/bin
+      volumeMounts: []
+      resources:
+        requests:
+          cpu: '4'
+          memory: 8Gi
+        limits:
+          cpu: '4'
+          memory: 8Gi
+  - name: release-test
+    automountServiceAccountToken: false
+    metadata:
+      annotations:
+        oberth.ci/workspace-mounts: none
+        oberth.ci/workspace-env: none
+    container:
+      image: golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3
+      workingDir: /work/src
+      command:
+      - /bin/sh
+      - -c
+      args:
+      - |
+        set -eu
+        exec /usr/bin/env -i PATH=/tmp/oberth-tools/bin:/usr/local/go/bin:/usr/bin:/bin \
+          HOME=/tmp \
+          OBERTH_TOOLS_DIR=/tmp/oberth-tools \
+          GOTOOLCHAIN=local \
+          GOWORK=off \
+          GOENV=off \
+          GOPATH=/tmp/bootstrap-private/gopath \
+          GOMODCACHE=/tmp/bootstrap-private/gomod \
+          GOCACHE=/tmp/bootstrap-private/gobuild \
+          GOLANGCI_LINT_CACHE=/tmp/bootstrap-private/lint \
+          TRIVY_CACHE_DIR=/tmp/oberth-trivy \
+          GIT_TERMINAL_PROMPT=0 \
+          KUBEBUILDER_ASSETS= \
+          OBERTH_RELEASE_SHA="$OBERTH_RELEASE_SHA" \
+          OBERTH_RELEASE_TAG="$OBERTH_RELEASE_TAG" \
+          GOBIN=/tmp/oberth-tools/bin \
+          CGO_ENABLED=1 "$@"
+      - bootstrap-clean
+      - /tmp/oberth-tools/bin/go
+      - test
+      - -race
+      - -v
+      - -count=1
+      - ./...
+      env:
+      - name: PATH
+        value: /usr/bin:/bin
+      volumeMounts:
+      - name: bootstrap-test-tools
+        mountPath: /tmp/oberth-tools
+        subPath: release-test
+        readOnly: true
+      resources:
+        requests:
+          cpu: '4'
+          memory: 8Gi
+        limits:
+          cpu: '4'
+          memory: 8Gi
+  - name: release-chart-test
+    automountServiceAccountToken: false
+    metadata:
+      annotations:
+        oberth.ci/workspace-mounts: none
+        oberth.ci/workspace-env: none
+    container:
+      image: golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3
+      workingDir: /work/src
+      command:
+      - /bin/sh
+      - -c
+      args:
+      - |
+        set -eu
+        exec /usr/bin/env -i PATH=/tmp/oberth-tools/bin:/usr/local/go/bin:/usr/bin:/bin \
+          HOME=/tmp \
+          OBERTH_TOOLS_DIR=/tmp/oberth-tools \
+          GOTOOLCHAIN=local \
+          GOWORK=off \
+          GOENV=off \
+          GOPATH=/tmp/bootstrap-private/gopath \
+          GOMODCACHE=/tmp/bootstrap-private/gomod \
+          GOCACHE=/tmp/bootstrap-private/gobuild \
+          GOLANGCI_LINT_CACHE=/tmp/bootstrap-private/lint \
+          TRIVY_CACHE_DIR=/tmp/oberth-trivy \
+          GIT_TERMINAL_PROMPT=0 \
+          KUBEBUILDER_ASSETS= \
+          OBERTH_RELEASE_SHA="$OBERTH_RELEASE_SHA" \
+          OBERTH_RELEASE_TAG="$OBERTH_RELEASE_TAG" \
+          GOBIN=/tmp/oberth-tools/bin \
+          CGO_ENABLED=1 "$@"
+      - bootstrap-clean
+      - ./hack/test-chart.sh
+      env:
+      - name: PATH
+        value: /usr/bin:/bin
+      volumeMounts:
+      - name: bootstrap-test-tools
+        mountPath: /tmp/oberth-tools
+        subPath: release-chart-test
+        readOnly: true
+      resources:
+        requests:
+          cpu: '2'
+          memory: 4Gi
+        limits:
+          cpu: '2'
+          memory: 4Gi
+  - name: release-build
+    automountServiceAccountToken: false
+    metadata:
+      annotations:
+        oberth.ci/workspace-mounts: none
+        oberth.ci/workspace-env: none
+    activeDeadlineSeconds: 3600
+    container:
+      image: golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3
+      workingDir: /work/src
+      command:
+      - /bin/sh
+      - -c
+      args:
+      - |
+        set -eu
+        exec /usr/bin/env -i PATH=/tmp/oberth-tools/bin:/usr/local/go/bin:/usr/bin:/bin \
+          HOME=/tmp \
+          OBERTH_TOOLS_DIR=/tmp/oberth-tools \
+          GOTOOLCHAIN=local \
+          GOWORK=off \
+          GOENV=off \
+          GOPATH=/tmp/bootstrap-private/gopath \
+          GOMODCACHE=/tmp/bootstrap-private/gomod \
+          GOCACHE=/tmp/bootstrap-private/gobuild \
+          GOLANGCI_LINT_CACHE=/tmp/bootstrap-private/lint \
+          TRIVY_CACHE_DIR=/tmp/oberth-trivy \
+          GIT_TERMINAL_PROMPT=0 \
+          KUBEBUILDER_ASSETS= \
+          OBERTH_RELEASE_SHA="$OBERTH_RELEASE_SHA" \
+          OBERTH_RELEASE_TAG="$OBERTH_RELEASE_TAG" \
+          GOBIN=/tmp/oberth-tools/bin \
+          CGO_ENABLED=1 "$@"
+      - bootstrap-clean
+      - ./.oberth/release.sh
+      - build
+      env:
+      - name: PATH
+        value: /usr/bin:/bin
+      volumeMounts:
+      - name: bootstrap-test-tools
+        mountPath: /tmp/oberth-tools
+        subPath: release-build
+        readOnly: true
+      - name: bootstrap-output
+        mountPath: /tmp/oberth-release
+      resources:
+        requests:
+          cpu: '4'
+          memory: 8Gi
+        limits:
+          cpu: '4'
+          memory: 8Gi
+  - name: release-sign-binaries
+    metadata:
+      annotations:
+        oberth.ci/workspace-mounts: none
+        oberth.ci/workspace-env: none
+    activeDeadlineSeconds: 3600
+    retryStrategy:
+      limit: 2
+      retryPolicy: OnFailure
+      backoff:
+        duration: 30s
+        factor: 2
+    container:
+      image: golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3
+      workingDir: /work/src
+      command:
+      - /run/oberth/bin/oberth
+      args:
+      - secretstore
+      - exec
+      - --dir=/run/oberth-secrets/release
+      - --path=oberth/data/release/cosign-secret
+      - --
+      - /bin/sh
+      - -c
+      - |
+        set -eu
+        exec /usr/bin/env -i PATH=/usr/bin:/bin \
+          HOME=/tmp \
+          OBERTH_TOOLS_DIR=/tmp/oberth-tools \
+          GOTOOLCHAIN=local \
+          GOWORK=off \
+          GOENV=off \
+          GOPATH=/tmp/bootstrap-private/gopath \
+          GOMODCACHE=/tmp/bootstrap-private/gomod \
+          GOCACHE=/tmp/bootstrap-private/gobuild \
+          GOLANGCI_LINT_CACHE=/tmp/bootstrap-private/lint \
+          TRIVY_CACHE_DIR=/tmp/oberth-trivy \
+          GIT_TERMINAL_PROMPT=0 \
+          KUBEBUILDER_ASSETS= \
+          OBERTH_RELEASE_SHA="$OBERTH_RELEASE_SHA" \
+          OBERTH_RELEASE_TAG="$OBERTH_RELEASE_TAG" \
+          GOBIN=/tmp/oberth-tools/bin \
+          OBERTH_SECRETSTORE_DIR="$OBERTH_SECRETSTORE_DIR" \
+          CGO_ENABLED=1 "$@"
+      - bootstrap-clean
+      - ./.oberth/release.sh
+      - sign-binaries
+      env:
+      - name: PATH
+        value: /usr/bin:/bin
+      volumeMounts:
+      - name: bootstrap-tools
+        mountPath: /tmp/oberth-tools
+        readOnly: true
+      - name: bootstrap-output
+        mountPath: /tmp/oberth-release
+      resources:
+        requests:
+          cpu: '2'
+          memory: 4Gi
+        limits:
+          cpu: '2'
+          memory: 4Gi
+    initContainers:
+    - name: verify-publisher-tools
+      image: golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3
+      workingDir: /work/src
+      command:
+      - /bin/sh
+      - -c
+      args:
+      - |
+        set -eu
+        exec /usr/bin/env -i PATH=/usr/bin:/bin HOME=/tmp \
+          OBERTH_RELEASE_SHA="$OBERTH_RELEASE_SHA" OBERTH_RELEASE_TAG="$OBERTH_RELEASE_TAG" \
+          /usr/bin/python3 -I -S -B /work/src/.oberth/verify-release-tools.py
+      volumeMounts:
+      - name: bootstrap-tools
+        mountPath: /tmp/oberth-tools
+        readOnly: true
+      resources:
+        requests:
+          cpu: '1'
+          memory: 256Mi
+        limits:
+          cpu: '1'
+          memory: 256Mi
+  - name: release-publish-homebrew
+    metadata:
+      annotations:
+        oberth.ci/workspace-mounts: none
+        oberth.ci/workspace-env: none
+    activeDeadlineSeconds: 900
+    retryStrategy:
+      limit: 2
+      retryPolicy: OnFailure
+      backoff:
+        duration: 30s
+        factor: 2
+    container:
+      image: golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3
+      workingDir: /work/src
+      command:
+      - /run/oberth/bin/oberth
+      args:
+      - secretstore
+      - exec
+      - --dir=/run/oberth-secrets/release
+      - --path=oberth/data/release/homebrew-tap-key
+      - --
+      - /bin/sh
+      - -c
+      - |
+        set -eu
+        exec /usr/bin/env -i PATH=/usr/bin:/bin \
+          HOME=/tmp \
+          OBERTH_TOOLS_DIR=/tmp/oberth-tools \
+          GOTOOLCHAIN=local \
+          GOWORK=off \
+          GOENV=off \
+          GOPATH=/tmp/bootstrap-private/gopath \
+          GOMODCACHE=/tmp/bootstrap-private/gomod \
+          GOCACHE=/tmp/bootstrap-private/gobuild \
+          GOLANGCI_LINT_CACHE=/tmp/bootstrap-private/lint \
+          TRIVY_CACHE_DIR=/tmp/oberth-trivy \
+          GIT_TERMINAL_PROMPT=0 \
+          KUBEBUILDER_ASSETS= \
+          OBERTH_RELEASE_SHA="$OBERTH_RELEASE_SHA" \
+          OBERTH_RELEASE_TAG="$OBERTH_RELEASE_TAG" \
+          GOBIN=/tmp/oberth-tools/bin \
+          OBERTH_SECRETSTORE_DIR="$OBERTH_SECRETSTORE_DIR" \
+          CGO_ENABLED=1 "$@"
+      - bootstrap-clean
+      - ./.oberth/release.sh
+      - publish-homebrew
+      env:
+      - name: PATH
+        value: /usr/bin:/bin
+      volumeMounts:
+      - name: bootstrap-tools
+        mountPath: /tmp/oberth-tools
+        readOnly: true
+      - name: bootstrap-output
+        mountPath: /tmp/oberth-release
+      resources:
+        requests:
+          cpu: '1'
+          memory: 1Gi
+        limits:
+          cpu: '1'
+          memory: 1Gi
+    initContainers:
+    - name: verify-publisher-tools
+      image: golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3
+      workingDir: /work/src
+      command:
+      - /bin/sh
+      - -c
+      args:
+      - |
+        set -eu
+        exec /usr/bin/env -i PATH=/usr/bin:/bin HOME=/tmp \
+          OBERTH_RELEASE_SHA="$OBERTH_RELEASE_SHA" OBERTH_RELEASE_TAG="$OBERTH_RELEASE_TAG" \
+          /usr/bin/python3 -I -S -B /work/src/.oberth/verify-release-tools.py
+      volumeMounts:
+      - name: bootstrap-tools
+        mountPath: /tmp/oberth-tools
+        readOnly: true
+      resources:
+        requests:
+          cpu: '1'
+          memory: 256Mi
+        limits:
+          cpu: '1'
+          memory: 256Mi
+  - name: release-publish-images
+    metadata:
+      annotations:
+        oberth.ci/workspace-mounts: none
+        oberth.ci/workspace-env: none
+    activeDeadlineSeconds: 3600
+    retryStrategy:
+      limit: 2
+      retryPolicy: OnFailure
+      backoff:
+        duration: 30s
+        factor: 2
+    container:
+      image: golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3
+      workingDir: /work/src
+      command:
+      - /run/oberth/bin/oberth
+      args:
+      - secretstore
+      - exec
+      - --dir=/run/oberth-secrets/release
+      - --path=oberth/data/release/gar-image-key
+      - --path=oberth/data/release/cosign-secret
+      - --
+      - /bin/sh
+      - -c
+      - |
+        set -eu
+        exec /usr/bin/env -i PATH=/usr/bin:/bin \
+          HOME=/tmp \
+          OBERTH_TOOLS_DIR=/tmp/oberth-tools \
+          GOTOOLCHAIN=local \
+          GOWORK=off \
+          GOENV=off \
+          GOPATH=/tmp/bootstrap-private/gopath \
+          GOMODCACHE=/tmp/bootstrap-private/gomod \
+          GOCACHE=/tmp/bootstrap-private/gobuild \
+          GOLANGCI_LINT_CACHE=/tmp/bootstrap-private/lint \
+          TRIVY_CACHE_DIR=/tmp/oberth-trivy \
+          GIT_TERMINAL_PROMPT=0 \
+          KUBEBUILDER_ASSETS= \
+          OBERTH_RELEASE_SHA="$OBERTH_RELEASE_SHA" \
+          OBERTH_RELEASE_TAG="$OBERTH_RELEASE_TAG" \
+          GOBIN=/tmp/oberth-tools/bin \
+          OBERTH_SECRETSTORE_DIR="$OBERTH_SECRETSTORE_DIR" \
+          CGO_ENABLED=1 "$@"
+      - bootstrap-clean
+      - ./.oberth/release.sh
+      - publish-images
+      env:
+      - name: PATH
+        value: /usr/bin:/bin
+      volumeMounts:
+      - name: bootstrap-tools
+        mountPath: /tmp/oberth-tools
+        readOnly: true
+      - name: bootstrap-output
+        mountPath: /tmp/oberth-release
+      resources:
+        requests:
+          cpu: '4'
+          memory: 8Gi
+        limits:
+          cpu: '4'
+          memory: 8Gi
+    initContainers:
+    - name: verify-publisher-tools
+      image: golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3
+      workingDir: /work/src
+      command:
+      - /bin/sh
+      - -c
+      args:
+      - |
+        set -eu
+        exec /usr/bin/env -i PATH=/usr/bin:/bin HOME=/tmp \
+          OBERTH_RELEASE_SHA="$OBERTH_RELEASE_SHA" OBERTH_RELEASE_TAG="$OBERTH_RELEASE_TAG" \
+          /usr/bin/python3 -I -S -B /work/src/.oberth/verify-release-tools.py
+      volumeMounts:
+      - name: bootstrap-tools
+        mountPath: /tmp/oberth-tools
+        readOnly: true
+      resources:
+        requests:
+          cpu: '1'
+          memory: 256Mi
+        limits:
+          cpu: '1'
+          memory: 256Mi
+  - name: release-package-chart
+    automountServiceAccountToken: false
+    metadata:
+      annotations:
+        oberth.ci/workspace-mounts: none
+        oberth.ci/workspace-env: none
+    container:
+      image: golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3
+      workingDir: /work/src
+      command:
+      - /bin/sh
+      - -c
+      args:
+      - |
+        set -eu
+        exec /usr/bin/env -i PATH=/tmp/oberth-tools/bin:/usr/local/go/bin:/usr/bin:/bin \
+          HOME=/tmp \
+          OBERTH_TOOLS_DIR=/tmp/oberth-tools \
+          GOTOOLCHAIN=local \
+          GOWORK=off \
+          GOENV=off \
+          GOPATH=/tmp/bootstrap-private/gopath \
+          GOMODCACHE=/tmp/bootstrap-private/gomod \
+          GOCACHE=/tmp/bootstrap-private/gobuild \
+          GOLANGCI_LINT_CACHE=/tmp/bootstrap-private/lint \
+          TRIVY_CACHE_DIR=/tmp/oberth-trivy \
+          GIT_TERMINAL_PROMPT=0 \
+          KUBEBUILDER_ASSETS= \
+          OBERTH_RELEASE_SHA="$OBERTH_RELEASE_SHA" \
+          OBERTH_RELEASE_TAG="$OBERTH_RELEASE_TAG" \
+          GOBIN=/tmp/oberth-tools/bin \
+          CGO_ENABLED=1 "$@"
+      - bootstrap-clean
+      - ./.oberth/release.sh
+      - package-chart
+      env:
+      - name: PATH
+        value: /usr/bin:/bin
+      volumeMounts:
+      - name: bootstrap-tools
+        mountPath: /tmp/oberth-tools
+        readOnly: true
+      - name: bootstrap-output
+        mountPath: /tmp/oberth-release
+      resources:
+        requests:
+          cpu: '2'
+          memory: 4Gi
+        limits:
+          cpu: '2'
+          memory: 4Gi
+  - name: release-publish-chart
+    metadata:
+      annotations:
+        oberth.ci/workspace-mounts: none
+        oberth.ci/workspace-env: none
+    synchronization:
+      mutexes:
+      - name: oberth-chart-index
+    activeDeadlineSeconds: 3600
+    retryStrategy:
+      limit: 2
+      retryPolicy: OnFailure
+      backoff:
+        duration: 30s
+        factor: 2
+    container:
+      image: golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3
+      workingDir: /work/src
+      command:
+      - /run/oberth/bin/oberth
+      args:
+      - secretstore
+      - exec
+      - --dir=/run/oberth-secrets/release
+      - --path=oberth/data/release/gar-chart-key
+      - --path=oberth/data/release/cosign-secret
+      - --
+      - /bin/sh
+      - -c
+      - |
+        set -eu
+        exec /usr/bin/env -i PATH=/usr/bin:/bin \
+          HOME=/tmp \
+          OBERTH_TOOLS_DIR=/tmp/oberth-tools \
+          GOTOOLCHAIN=local \
+          GOWORK=off \
+          GOENV=off \
+          GOPATH=/tmp/bootstrap-private/gopath \
+          GOMODCACHE=/tmp/bootstrap-private/gomod \
+          GOCACHE=/tmp/bootstrap-private/gobuild \
+          GOLANGCI_LINT_CACHE=/tmp/bootstrap-private/lint \
+          TRIVY_CACHE_DIR=/tmp/oberth-trivy \
+          GIT_TERMINAL_PROMPT=0 \
+          KUBEBUILDER_ASSETS= \
+          OBERTH_RELEASE_SHA="$OBERTH_RELEASE_SHA" \
+          OBERTH_RELEASE_TAG="$OBERTH_RELEASE_TAG" \
+          GOBIN=/tmp/oberth-tools/bin \
+          OBERTH_SECRETSTORE_DIR="$OBERTH_SECRETSTORE_DIR" \
+          CGO_ENABLED=1 "$@"
+      - bootstrap-clean
+      - ./.oberth/release.sh
+      - publish-chart
+      env:
+      - name: PATH
+        value: /usr/bin:/bin
+      volumeMounts:
+      - name: bootstrap-tools
+        mountPath: /tmp/oberth-tools
+        readOnly: true
+      - name: bootstrap-output
+        mountPath: /tmp/oberth-release
+      resources:
+        requests:
+          cpu: '2'
+          memory: 4Gi
+        limits:
+          cpu: '2'
+          memory: 4Gi
+    initContainers:
+    - name: verify-publisher-tools
+      image: golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3
+      workingDir: /work/src
+      command:
+      - /bin/sh
+      - -c
+      args:
+      - |
+        set -eu
+        exec /usr/bin/env -i PATH=/usr/bin:/bin HOME=/tmp \
+          OBERTH_RELEASE_SHA="$OBERTH_RELEASE_SHA" OBERTH_RELEASE_TAG="$OBERTH_RELEASE_TAG" \
+          /usr/bin/python3 -I -S -B /work/src/.oberth/verify-release-tools.py
+      volumeMounts:
+      - name: bootstrap-tools
+        mountPath: /tmp/oberth-tools
+        readOnly: true
+      resources:
+        requests:
+          cpu: '1'
+          memory: 256Mi
+        limits:
+          cpu: '1'
+          memory: 256Mi
+  - name: release-verify
+    metadata:
+      annotations:
+        oberth.ci/workspace-mounts: none
+        oberth.ci/workspace-env: none
+    activeDeadlineSeconds: 3600
+    retryStrategy:
+      limit: 2
+      retryPolicy: OnFailure
+      backoff:
+        duration: 30s
+        factor: 2
+    container:
+      image: golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3
+      workingDir: /work/src
+      command:
+      - /run/oberth/bin/oberth
+      args:
+      - secretstore
+      - exec
+      - --dir=/run/oberth-secrets/release
+      - --path=oberth/data/release/gar-reader-key
+      - --
+      - /bin/sh
+      - -c
+      - |
+        set -eu
+        exec /usr/bin/env -i PATH=/usr/bin:/bin \
+          HOME=/tmp \
+          OBERTH_TOOLS_DIR=/tmp/oberth-tools \
+          GOTOOLCHAIN=local \
+          GOWORK=off \
+          GOENV=off \
+          GOPATH=/tmp/bootstrap-private/gopath \
+          GOMODCACHE=/tmp/bootstrap-private/gomod \
+          GOCACHE=/tmp/bootstrap-private/gobuild \
+          GOLANGCI_LINT_CACHE=/tmp/bootstrap-private/lint \
+          TRIVY_CACHE_DIR=/tmp/oberth-trivy \
+          GIT_TERMINAL_PROMPT=0 \
+          KUBEBUILDER_ASSETS= \
+          OBERTH_RELEASE_SHA="$OBERTH_RELEASE_SHA" \
+          OBERTH_RELEASE_TAG="$OBERTH_RELEASE_TAG" \
+          GOBIN=/tmp/oberth-tools/bin \
+          OBERTH_SECRETSTORE_DIR="$OBERTH_SECRETSTORE_DIR" \
+          CGO_ENABLED=1 "$@"
+      - bootstrap-clean
+      - ./.oberth/release.sh
+      - verify
+      env:
+      - name: PATH
+        value: /usr/bin:/bin
+      volumeMounts:
+      - name: bootstrap-tools
+        mountPath: /tmp/oberth-tools
+        readOnly: true
+      - name: bootstrap-output
+        mountPath: /tmp/oberth-release
+      resources:
+        requests:
+          cpu: '2'
+          memory: 4Gi
+        limits:
+          cpu: '2'
+          memory: 4Gi
+    initContainers:
+    - name: verify-publisher-tools
+      image: golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3
+      workingDir: /work/src
+      command:
+      - /bin/sh
+      - -c
+      args:
+      - |
+        set -eu
+        exec /usr/bin/env -i PATH=/usr/bin:/bin HOME=/tmp \
+          OBERTH_RELEASE_SHA="$OBERTH_RELEASE_SHA" OBERTH_RELEASE_TAG="$OBERTH_RELEASE_TAG" \
+          /usr/bin/python3 -I -S -B /work/src/.oberth/verify-release-tools.py
+      volumeMounts:
+      - name: bootstrap-tools
+        mountPath: /tmp/oberth-tools
+        readOnly: true
+      resources:
+        requests:
+          cpu: '1'
+          memory: 256Mi
+        limits:
+          cpu: '1'
+          memory: 256Mi
+  - name: release-runtime
+    automountServiceAccountToken: false
+    metadata:
+      annotations:
+        oberth.ci/workspace-mounts: none
+        oberth.ci/workspace-env: none
+    activeDeadlineSeconds: 3600
+    retryStrategy:
+      limit: 2
+      retryPolicy: OnFailure
+      backoff:
+        duration: 30s
+        factor: 2
+    container:
+      image: golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3
+      workingDir: /work/src
+      command:
+      - /bin/sh
+      - -c
+      args:
+      - |
+        set -eu
+        exec /usr/bin/env -i PATH=/tmp/oberth-tools/bin:/usr/local/go/bin:/usr/bin:/bin \
+          HOME=/tmp \
+          OBERTH_TOOLS_DIR=/tmp/oberth-tools \
+          GOTOOLCHAIN=local \
+          GOWORK=off \
+          GOENV=off \
+          GOPATH=/tmp/bootstrap-private/gopath \
+          GOMODCACHE=/tmp/bootstrap-private/gomod \
+          GOCACHE=/tmp/bootstrap-private/gobuild \
+          GOLANGCI_LINT_CACHE=/tmp/bootstrap-private/lint \
+          TRIVY_CACHE_DIR=/tmp/oberth-trivy \
+          GIT_TERMINAL_PROMPT=0 \
+          KUBEBUILDER_ASSETS= \
+          OBERTH_RELEASE_SHA="$OBERTH_RELEASE_SHA" \
+          OBERTH_RELEASE_TAG="$OBERTH_RELEASE_TAG" \
+          GOBIN=/tmp/oberth-tools/bin \
+          CGO_ENABLED=1 \
+          OBERTH_RUNTIME_RECEIPT=/tmp/oberth-runtime-receipts/receipt \
+          OBERTH_RELEASE_DIR=/tmp/oberth-release-runtime "$@"
+      - bootstrap-clean
+      - ./.oberth/release.sh
+      - verify-public-runtime
+      env:
+      - name: PATH
+        value: /usr/bin:/bin
+      volumeMounts:
+      - name: bootstrap-test-tools
+        mountPath: /tmp/oberth-tools
+        subPath: release-runtime
+        readOnly: true
+      - name: bootstrap-runtime-receipts
+        mountPath: /tmp/oberth-runtime-receipts
+        readOnly: false
+      resources:
+        requests:
+          cpu: '2'
+          memory: 4Gi
+        limits:
+          cpu: '2'
+          memory: 4Gi
+  - name: copy-test-tools
+    automountServiceAccountToken: false
+    metadata:
+      annotations:
+        oberth.ci/workspace-mounts: none
+        oberth.ci/workspace-env: none
+    container:
+      image: golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3
+      workingDir: /work/src
+      command:
+      - /bin/sh
+      - -c
+      args:
+      - |
+        set -eu
+        for leaf in golangci-lint-run release-build release-chart-test release-runtime release-test vet; do
+          /bin/mkdir -p "/test-tools/$leaf"
+          /bin/cp -a /trusted-tools/bin "/test-tools/$leaf/bin"
+        done
+      env:
+      - name: PATH
+        value: /usr/bin:/bin
+      volumeMounts:
+      - name: bootstrap-tools
+        mountPath: /trusted-tools
+        readOnly: true
+      - name: bootstrap-test-tools
+        mountPath: /test-tools
+      resources:
+        requests:
+          cpu: '1'
+          memory: 512Mi
+        limits:
+          cpu: '1'
+          memory: 512Mi
+  - name: release-website
+    inputs:
+      parameters:
+      - name: phase
+        enum: [publish-public, finalize, publish-website]
+    synchronization:
+      mutexes:
+      - name: oberth-release-finalize
+    activeDeadlineSeconds: 3600
+    retryStrategy:
+      limit: 2
+      retryPolicy: OnFailure
+      backoff:
+        duration: 30s
+        factor: 2
+    metadata:
+      annotations:
+        oberth.ci/workspace-mounts: none
+        oberth.ci/workspace-env: none
+    container:
+      image: golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3
+      workingDir: /work/src
+      command:
+      - /run/oberth/bin/oberth
+      args:
+      - secretstore
+      - exec
+      - --dir=/run/oberth-secrets/release
+      - --path=oberth/data/release/cloudflare-oberth-workers-token
+      - --
+      - /bin/sh
+      - -c
+      - |
+        set -eu
+        exec /usr/bin/env -i PATH=/usr/bin:/bin \
+          HOME=/tmp \
+          OBERTH_TOOLS_DIR=/tmp/oberth-tools \
+          GOTOOLCHAIN=local \
+          GOWORK=off \
+          GOENV=off \
+          GOPATH=/tmp/bootstrap-private/gopath \
+          GOMODCACHE=/tmp/bootstrap-private/gomod \
+          GOCACHE=/tmp/bootstrap-private/gobuild \
+          GOLANGCI_LINT_CACHE=/tmp/bootstrap-private/lint \
+          TRIVY_CACHE_DIR=/tmp/oberth-trivy \
+          GIT_TERMINAL_PROMPT=0 \
+          KUBEBUILDER_ASSETS= \
+          OBERTH_RELEASE_SHA="$OBERTH_RELEASE_SHA" \
+          OBERTH_RELEASE_TAG="$OBERTH_RELEASE_TAG" \
+          GOBIN=/tmp/oberth-tools/bin \
+          OBERTH_SECRETSTORE_DIR="$OBERTH_SECRETSTORE_DIR" \
+          CGO_ENABLED=1 "$@"
+      - bootstrap-clean
+      - ./.oberth/release.sh
+      - cloudflare-phase
+      - '{{inputs.parameters.phase}}'
+      env:
+      - name: PATH
+        value: /usr/bin:/bin
+      volumeMounts:
+      - name: bootstrap-tools
+        mountPath: /tmp/oberth-tools
+        readOnly: true
+      - name: bootstrap-output
+        mountPath: /tmp/oberth-release-inputs
+        readOnly: true
+      - name: bootstrap-runtime-receipts
+        mountPath: /tmp/oberth-runtime-receipts
+        readOnly: true
+      resources:
+        requests:
+          cpu: '2'
+          memory: 2Gi
+        limits:
+          cpu: '2'
+          memory: 2Gi
+    initContainers:
+    - name: verify-publisher-tools
+      image: golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3
+      workingDir: /work/src
+      command:
+      - /bin/sh
+      - -c
+      args:
+      - |
+        set -eu
+        exec /usr/bin/env -i PATH=/usr/bin:/bin HOME=/tmp \
+          OBERTH_RELEASE_SHA="$OBERTH_RELEASE_SHA" OBERTH_RELEASE_TAG="$OBERTH_RELEASE_TAG" \
+          /usr/bin/python3 -I -S -B /work/src/.oberth/verify-release-tools.py
+      volumeMounts:
+      - name: bootstrap-tools
+        mountPath: /tmp/oberth-tools
+        readOnly: true
+      resources:
+        requests:
+          cpu: '1'
+          memory: 256Mi
+        limits:
+          cpu: '1'
+          memory: 256Mi
+    - name: verify-website-inputs
+      image: golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3
+      workingDir: /work/src
+      command:
+      - /bin/sh
+      - -c
+      args:
+      - |
+        set -eu
+        exec /usr/bin/env -i PATH=/usr/bin:/bin HOME=/tmp \
+          OBERTH_RELEASE_SHA="$OBERTH_RELEASE_SHA" OBERTH_RELEASE_TAG="$OBERTH_RELEASE_TAG" \
+          /usr/bin/python3 -I -S -B /work/src/.oberth/verify-website-inputs.py
+      volumeMounts:
+      - name: bootstrap-website-inputs
+        mountPath: /tmp/oberth-website-inputs
+        readOnly: true
+      resources:
+        requests:
+          cpu: '1'
+          memory: 1Gi
+        limits:
+          cpu: '1'
+          memory: 1Gi
+    - name: install-website-tools
+      image: golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3
+      workingDir: /work/src
+      command:
+      - /bin/sh
+      - -c
+      args:
+      - |
+        set -eu
+        exec /usr/bin/env -i PATH=/usr/bin:/bin \
+          HOME=/tmp \
+          OBERTH_TOOLS_DIR=/tmp/oberth-tools \
+          GOTOOLCHAIN=local \
+          GOWORK=off \
+          GOENV=off \
+          GOPATH=/tmp/bootstrap-private/gopath \
+          GOMODCACHE=/tmp/bootstrap-private/gomod \
+          GOCACHE=/tmp/bootstrap-private/gobuild \
+          GOLANGCI_LINT_CACHE=/tmp/bootstrap-private/lint \
+          TRIVY_CACHE_DIR=/tmp/oberth-trivy \
+          GIT_TERMINAL_PROMPT=0 \
+          KUBEBUILDER_ASSETS= \
+          OBERTH_RELEASE_SHA="$OBERTH_RELEASE_SHA" \
+          OBERTH_RELEASE_TAG="$OBERTH_RELEASE_TAG" \
+          GOBIN=/tmp/oberth-tools/bin \
+          CGO_ENABLED=1 "$@"
+      - bootstrap-clean
+      - ./.oberth/release.sh
+      - install-website-tools
+      volumeMounts: []
+      resources:
+        requests:
+          cpu: '2'
+          memory: 2Gi
+        limits:
+          cpu: '2'
+          memory: 2Gi
+  - name: release-website-readback
+    activeDeadlineSeconds: 1800
+    automountServiceAccountToken: false
+    metadata:
+      annotations:
+        oberth.ci/workspace-mounts: none
+        oberth.ci/workspace-env: none
+    container:
+      image: golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3
+      workingDir: /work/src
+      command:
+      - /bin/sh
+      - -c
+      args:
+      - |
+        set -eu
+        exec /usr/bin/env -i PATH=/usr/bin:/bin \
+          HOME=/tmp \
+          OBERTH_TOOLS_DIR=/tmp/oberth-tools \
+          GOTOOLCHAIN=local \
+          GOWORK=off \
+          GOENV=off \
+          GOPATH=/tmp/bootstrap-private/gopath \
+          GOMODCACHE=/tmp/bootstrap-private/gomod \
+          GOCACHE=/tmp/bootstrap-private/gobuild \
+          GOLANGCI_LINT_CACHE=/tmp/bootstrap-private/lint \
+          TRIVY_CACHE_DIR=/tmp/oberth-trivy \
+          GIT_TERMINAL_PROMPT=0 \
+          KUBEBUILDER_ASSETS= \
+          OBERTH_RELEASE_SHA="$OBERTH_RELEASE_SHA" \
+          OBERTH_RELEASE_TAG="$OBERTH_RELEASE_TAG" \
+          GOBIN=/tmp/oberth-tools/bin \
+          CGO_ENABLED=1 "$@"
+      - bootstrap-clean
+      - /usr/bin/python3
+      - -I
+      - -S
+      - -B
+      - .oberth/website-readback.py
+      env:
+      - name: PATH
+        value: /usr/bin:/bin
+      volumeMounts: []
+      resources:
+        requests:
+          cpu: '1'
+          memory: 256Mi
+        limits:
+          cpu: '1'
+          memory: 256Mi

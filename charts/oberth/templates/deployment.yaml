@@ -1,0 +1,444 @@
+{{- /* External audit anchoring is opt-in: dependent knobs without their URL
+would render a pod the server refuses to start, so fail at template time. */}}
+{{- if and (not .Values.auditAnchor.tsaURL) (or .Values.auditAnchor.rootsSecret .Values.auditAnchor.tsaCA) }}
+{{- fail "auditAnchor.rootsSecret and auditAnchor.tsaCA require auditAnchor.tsaURL" }}
+{{- end }}
+{{- if and (not .Values.auditAnchor.rekorURL) .Values.auditAnchor.rekorCA }}
+{{- fail "auditAnchor.rekorCA requires auditAnchor.rekorURL" }}
+{{- end }}
+{{- if and (not .Values.auditAnchor.rekorURL) .Values.auditAnchor.rekorPublicKey }}
+{{- fail "auditAnchor.rekorPublicKey requires auditAnchor.rekorURL" }}
+{{- end }}
+{{- if and (not .Values.auditAnchor.tsaURL) .Values.auditAnchor.tsaInsecureHTTP }}
+{{- fail "auditAnchor.tsaInsecureHTTP requires auditAnchor.tsaURL" }}
+{{- end }}
+{{- if and (not .Values.auditAnchor.rekorURL) .Values.auditAnchor.rekorInsecureHTTP }}
+{{- fail "auditAnchor.rekorInsecureHTTP requires auditAnchor.rekorURL" }}
+{{- end }}
+{{- if and (not .Values.auditAnchor.rekorURL) .Values.auditAnchor.acceptWitnessChainReset }}
+{{- fail "auditAnchor.acceptWitnessChainReset requires auditAnchor.rekorURL (the external Rekor witness)" }}
+{{- end }}
+{{- if and (not .Values.auditAnchor.rekorURL) .Values.auditAnchor.acceptWitnessGenesis }}
+{{- fail "auditAnchor.acceptWitnessGenesis requires auditAnchor.rekorURL (the external Rekor witness)" }}
+{{- end }}
+{{- if and .Values.auditAnchor.acceptWitnessGenesis .Values.auditAnchor.acceptWitnessChainReset }}
+{{- fail "auditAnchor.acceptWitnessGenesis and auditAnchor.acceptWitnessChainReset are mutually exclusive" }}
+{{- end }}
+{{- /* Go module proxy guard: an explicitly zero or empty port with enabled=true
+would render a containerPort: 0 and a Service targeting port 0, so fail at
+template time rather than producing a broken deployment (#662). */}}
+{{- $gpGuard := .Values.argo.goProxy | default dict -}}
+{{- if and $gpGuard.enabled (hasKey $gpGuard "port") (not $gpGuard.port) }}
+{{- fail "argo.goProxy.port must be a positive integer when argo.goProxy.enabled is true" }}
+{{- end }}
+{{- if $gpGuard.enabled -}}
+{{- $_ := required "argo.goProxy.modulePrefix is required when enabled" $gpGuard.modulePrefix -}}
+{{- $_ := required "argo.goProxy.upstream is required when enabled" $gpGuard.upstream -}}
+{{- $_ := required "argo.goProxy.organization is required when enabled" $gpGuard.organization -}}
+{{- end -}}
+{{- $compatibility := .Values.compatibility | default dict -}}
+{{- $schemaIdentity := required "compatibility.schemaIdentity must preserve the existing database identity on upgrade" $compatibility.schemaIdentity -}}
+{{- $auditDomain := required "compatibility.auditDomain must preserve the existing audit-chain domain on upgrade" $compatibility.auditDomain -}}
+{{- $witnessKeyInfo := required "compatibility.witnessKeyInfo must preserve the existing witness identity on upgrade" $compatibility.witnessKeyInfo -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "oberth.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "oberth.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "oberth.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "oberth.selectorLabels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      annotations:
+        {{- if .Values.argo.releaseWIF }}
+        checksum/release-wif: {{ .Values.argo.releaseWIF | toJson | sha256sum | quote }}
+        {{- end }}
+        checksum/per-repo-identities: {{ list .Values.argo.perRepoIdentities .Values.argo.perRepoCIIdentities | toJson | sha256sum | quote }}
+        {{- if .Values.auditAnchor.rekorPublicKey }}
+        checksum/audit-rekor-pubkey: {{ .Values.auditAnchor.rekorPublicKey | sha256sum | quote }}
+        {{- end }}
+        {{- if and .Values.secretstore.enabled .Values.secretstore.caCert }}
+        checksum/secretstore-ca: {{ .Values.secretstore.caCert | sha256sum | quote }}
+        {{- end }}
+        {{- if and .Values.argo.vault.address .Values.argo.vault.caCert }}
+        # The server reads this anchor once, at startup, and hands the bytes to
+        # every release run: a rotation that did not restart the pod would keep
+        # delivering the retired certificate until something else happened to.
+        checksum/argo-vault-ca: {{ .Values.argo.vault.caCert | sha256sum | quote }}
+        {{- end }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "oberth.serviceAccountName" . }}
+      automountServiceAccountToken: true
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        runAsGroup: 65534
+        fsGroup: 65534
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        # hostPath volumes receive no fsGroup ownership management from the
+        # kubelet. This container replaces the former manual prepare-node.sh
+        # step: it creates the isolated cache roots and hands them to the
+        # unprivileged service and runner user before anything else starts.
+        - name: prepare-caches
+          image: {{ .Values.image.ref | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["/bin/sh", "-c", "for dir; do if [ -L \"$dir\" ]; then echo \"prepare-caches: refusing symlink at $dir\" >&2; exit 1; fi; if [ -e \"$dir\" ] && ! [ -d \"$dir\" ]; then echo \"prepare-caches: $dir exists and is not a directory\" >&2; exit 1; fi; done; exec install -d -m 0750 -o 65534 -g 65534 \"$@\"", "prepare-caches"]
+          args:
+            - {{ .Values.cache.ciRoot | quote }}
+            - {{ .Values.cache.releaseRoot | quote }}
+          securityContext:
+            runAsUser: 0
+            runAsGroup: 0
+            runAsNonRoot: false
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+              add: ["CHOWN", "DAC_OVERRIDE", "FOWNER"]
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+          volumeMounts:
+            - name: ci-cache
+              mountPath: {{ .Values.cache.ciRoot }}
+            - name: release-cache
+              mountPath: {{ .Values.cache.releaseRoot }}
+      containers:
+        - name: oberth
+          image: {{ .Values.image.ref | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            - serve
+            - --data=/data
+            - --database=/data/oberth.sqlite
+            - --ssh-listen=:2222
+            - --https-listen=:8443
+            - --tls-cert=/etc/oberth/tls/tls.crt
+            - --tls-key=/etc/oberth/tls/tls.key
+            - --ssh-host-key=/etc/oberth/ssh/ssh_host_key
+            - --upstream-key=/etc/oberth/upstream-key/{{ .Values.upstream.keyFile }}
+            - --known-hosts=/etc/oberth/known-hosts/{{ .Values.upstream.knownHostsKey }}
+            - --namespace={{ .Release.Namespace }}
+            {{- /*
+            Quoted because the default prefix ends in a colon ("golang:"), and
+            an unquoted YAML scalar ending in ':' parses as a mapping key --
+            the whole arg became {"--runner-image-prefixes=golang": null}, so
+            the Deployment could not be applied with the chart's own defaults.
+            */}}
+            - "--runner-image-prefixes={{ join "," .Values.runnerImagePrefixes }}"
+            - --max-concurrent-jobs={{ .Values.maxConcurrentJobs }}
+            {{- $admission := .Values.admission | default dict -}}
+            {{- if gt (int ($admission.diskFloorBytes | default 0)) 0 }}
+            - --admission-disk-floor-bytes={{ $admission.diskFloorBytes }}
+            {{- end }}
+            - --ci-cache-root={{ .Values.cache.ciRoot }}
+            - --release-cache-root={{ .Values.cache.releaseRoot }}
+            {{- if .Values.pushBannerURL }}
+            - --push-banner-url={{ .Values.pushBannerURL }}
+            {{- end }}
+            {{- if .Values.auditAnchor.tsaURL }}
+            - --audit-tsa-url={{ .Values.auditAnchor.tsaURL }}
+            {{- if .Values.auditAnchor.tsaInsecureHTTP }}
+            - --audit-tsa-insecure-http
+            {{- end }}
+            {{- end }}
+            {{- if .Values.auditAnchor.rekorURL }}
+            - --audit-rekor-url={{ .Values.auditAnchor.rekorURL }}
+            {{- if .Values.auditAnchor.rekorInsecureHTTP }}
+            - --audit-rekor-insecure-http
+            {{- end }}
+            {{- end }}
+            - --audit-anchor-interval={{ .Values.auditAnchor.interval }}
+            - --audit-anchor-max-age={{ .Values.auditAnchor.maxAge }}
+            {{- if .Values.auditAnchor.rootsSecret }}
+            - --audit-tsa-roots=/etc/oberth/audit-tsa/{{ .Values.auditAnchor.rootsKey }}
+            {{- end }}
+            {{- if .Values.auditAnchor.rekorCA }}
+            - --audit-rekor-ca=/etc/oberth/audit-rekor-ca/ca.crt
+            {{- end }}
+            {{- if .Values.auditAnchor.rekorPublicKey }}
+            - --audit-rekor-pubkey=/etc/oberth/audit-rekor-pubkey/rekor.pub
+            {{- end }}
+            {{- if .Values.auditAnchor.tsaCA }}
+            - --audit-tsa-ca=/etc/oberth/audit-tsa-ca/ca.crt
+            {{- end }}
+            {{- if .Values.auditAnchor.acceptWitnessChainReset }}
+            - --accept-witness-chain-reset={{ .Values.auditAnchor.acceptWitnessChainReset }}
+            {{- end }}
+            {{- if .Values.auditAnchor.acceptWitnessGenesis }}
+            - --accept-witness-genesis={{ .Values.auditAnchor.acceptWitnessGenesis }}
+            {{- end }}
+            {{- if .Values.secretstore.enabled }}
+            - --secretstore-address={{ .Values.secretstore.address }}
+            - --secretstore-k8s-auth-mount={{ .Values.secretstore.k8sAuthMount }}
+            - --secretstore-role={{ required "secretstore.role is required when secretstore.enabled is true" .Values.secretstore.role }}
+            {{- if .Values.secretstore.caCert }}
+            - --secretstore-ca-cert=/etc/oberth/secretstore-ca/ca.crt
+            {{- end }}
+            {{- if .Values.secretstore.insecureHTTPForDev }}
+            - --secretstore-insecure-http
+            {{- end }}
+            {{- if .Values.secretstore.kvMount }}
+            - --secretstore-kv-mount={{ .Values.secretstore.kvMount }}
+            {{- end }}
+            {{- if .Values.secretstore.transit.enabled }}
+            {{- if or .Values.secretstore.insecureHTTPForDev (not (hasPrefix "https://" .Values.secretstore.address)) }}
+            {{- fail "secretstore.transit.enabled requires an HTTPS address and forbids secretstore.insecureHTTPForDev" }}
+            {{- end }}
+            - --secretstore-transit-mount={{ required "secretstore.transit.mount is required when transit is enabled" .Values.secretstore.transit.mount }}
+            - --secretstore-transit-key={{ required "secretstore.transit.key is required when transit is enabled" .Values.secretstore.transit.key }}
+            {{- end }}
+            {{- range .Values.secretstore.allowedPaths }}
+            - --secretstore-path={{ . }}
+            {{- end }}
+            {{- end }}
+            - --argo-namespace={{ required "argo.namespace is required" .Values.argo.namespace }}
+            {{- if .Values.argo.releaseWIF }}
+            - --argo-release-wif-config=/etc/oberth/release-wif/capabilities.json
+            {{- end }}
+            {{- if .Values.argo.controllerProfile }}
+            {{- if ne .Values.argo.controllerProfile "nonroot-static-v1" }}
+            {{- fail "argo.controllerProfile must be empty or nonroot-static-v1" }}
+            {{- end }}
+            - --argo-controller-profile={{ .Values.argo.controllerProfile }}
+            {{- end }}
+            - --argo-pipeline-serviceaccount={{ .Values.argo.pipelineServiceAccount | default .Values.argo.ciServiceAccount | default "oberth-argo-pipeline" }}
+            - --argo-credentialed-serviceaccount={{ .Values.argo.credentialedServiceAccount | default "oberth-argo-credentialed" }}
+            - --argo-ci-secrets-serviceaccount={{ (.Values.argo.ciSecrets).serviceAccount | default "oberth-argo-ci-secrets" }}
+            - --argo-executor-serviceaccount={{ .Values.argo.executorServiceAccount }}
+            - --argo-workflow-timeout={{ .Values.argo.workflowTimeout }}
+            - --argo-workflow-ttl={{ .Values.argo.workflowTTL }}
+            {{- if .Values.argo.sourceStorageClass }}
+            - --argo-source-storage-class={{ .Values.argo.sourceStorageClass }}
+            {{- end }}
+            {{- if .Values.argo.vault.address }}
+            - --argo-vault-address={{ .Values.argo.vault.address }}
+            - --argo-vault-credentialed-role={{ .Values.argo.vault.credentialedRole | required "argo.vault.credentialedRole is required when argo.vault.address is set" }}
+            {{- /* Defaulted inline (not only in values.yaml) so a
+                 --reuse-values upgrade from a pre-split revision still names
+                 the branch-tier role; without it, CI pipelines with approved
+                 upstream secrets are refused at admission (fail closed). */}}
+            - --argo-vault-ci-secrets-role={{ (.Values.argo.ciSecrets).vaultRole | default "oberth-argo-ci-secrets" }}
+            {{- if .Values.argo.vault.caCert }}
+            - --argo-vault-ca-cert=/etc/oberth/argo-vault-ca/ca.crt
+            {{- end }}
+            {{- end }}
+            {{- $goProxy := .Values.argo.goProxy | default dict -}}
+            {{- if $goProxy.enabled }}
+            {{- $goProxyPort := $goProxy.port | default 8444 }}
+            {{- $goProxySvc := printf "%s-goproxy" (include "oberth.fullname" .) }}
+            - --argo-goproxy-listen=:{{ $goProxyPort }}
+            - --argo-goproxy-cert=/etc/oberth/goproxy-tls/tls.crt
+            - --argo-goproxy-key=/etc/oberth/goproxy-tls/tls.key
+            - --argo-goproxy-ca=/etc/oberth/goproxy-tls/ca.crt
+            - --argo-goproxy-url=https://{{ $goProxySvc }}.{{ .Release.Namespace }}.svc:{{ $goProxyPort }}
+            - --argo-goproxy-module-prefix={{ $goProxy.modulePrefix }}
+            - --argo-goproxy-repository-prefix={{ $goProxy.repositoryPrefix | default "" }}
+            - --argo-goproxy-upstream={{ $goProxy.upstream }}
+            - --argo-goproxy-organization={{ $goProxy.organization }}
+            {{- end }}
+          env:
+            - name: OBERTH_SCHEMA_IDENTITY
+              value: {{ $schemaIdentity | quote }}
+            - name: OBERTH_AUDIT_DOMAIN
+              value: {{ $auditDomain | quote }}
+            - name: OBERTH_WITNESS_KEY_INFO
+              value: {{ $witnessKeyInfo | quote }}
+            - name: SIGSTORE_NO_CACHE
+              value: "true"
+          ports:
+            - name: ssh
+              containerPort: 2222
+            - name: https
+              containerPort: 8443
+            {{- $goProxyCfg := .Values.argo.goProxy | default dict -}}
+            {{- if $goProxyCfg.enabled }}
+            - name: goproxy
+              containerPort: {{ $goProxyCfg.port | default 8444 }}
+            {{- end }}
+          readinessProbe:
+            httpGet:
+              scheme: HTTPS
+              path: /readyz
+              port: https
+            initialDelaySeconds: 2
+            periodSeconds: 5
+          startupProbe:
+            httpGet:
+              scheme: HTTPS
+              path: /healthz
+              port: https
+            periodSeconds: 5
+            failureThreshold: 60
+          livenessProbe:
+            httpGet:
+              scheme: HTTPS
+              path: /healthz
+              port: https
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: ci-cache
+              mountPath: {{ .Values.cache.ciRoot }}
+            - name: release-cache
+              mountPath: {{ .Values.cache.releaseRoot }}
+            - name: tls
+              mountPath: /etc/oberth/tls
+              readOnly: true
+            - name: host-key
+              mountPath: /etc/oberth/ssh
+              readOnly: true
+            - name: upstream-key
+              mountPath: /etc/oberth/upstream-key
+              readOnly: true
+            - name: known-hosts
+              mountPath: /etc/oberth/known-hosts
+              readOnly: true
+            {{- if .Values.auditAnchor.rootsSecret }}
+            - name: audit-tsa-roots
+              mountPath: /etc/oberth/audit-tsa
+              readOnly: true
+            {{- end }}
+            {{- if .Values.auditAnchor.rekorCA }}
+            - name: audit-rekor-ca
+              mountPath: /etc/oberth/audit-rekor-ca
+              readOnly: true
+            {{- end }}
+            {{- if .Values.auditAnchor.rekorPublicKey }}
+            - name: audit-rekor-pubkey
+              mountPath: /etc/oberth/audit-rekor-pubkey
+              readOnly: true
+            {{- end }}
+            {{- if .Values.auditAnchor.tsaCA }}
+            - name: audit-tsa-ca
+              mountPath: /etc/oberth/audit-tsa-ca
+              readOnly: true
+            {{- end }}
+            {{- if and .Values.secretstore.enabled .Values.secretstore.caCert }}
+            - name: secretstore-ca
+              mountPath: /etc/oberth/secretstore-ca
+              readOnly: true
+            {{- end }}
+            {{- if and .Values.argo.vault.address .Values.argo.vault.caCert }}
+            - name: argo-vault-ca
+              mountPath: /etc/oberth/argo-vault-ca
+              readOnly: true
+            {{- end }}
+            {{- $goProxyV := .Values.argo.goProxy | default dict -}}
+            {{- if $goProxyV.enabled }}
+            - name: goproxy-tls
+              mountPath: /etc/oberth/goproxy-tls
+              readOnly: true
+            {{- end }}
+            - name: tmp
+              mountPath: /tmp
+            {{- if .Values.argo.releaseWIF }}
+            - name: release-wif
+              mountPath: /etc/oberth/release-wif
+              readOnly: true
+            {{- end }}
+      volumes:
+        {{- if .Values.argo.releaseWIF }}
+        - name: release-wif
+          configMap:
+            name: {{ include "oberth.fullname" . }}-release-wif
+        {{- end }}
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ include "oberth.pvcName" . }}
+        - name: ci-cache
+          hostPath:
+            path: {{ .Values.cache.ciRoot }}
+            type: DirectoryOrCreate
+        - name: release-cache
+          hostPath:
+            path: {{ .Values.cache.releaseRoot }}
+            type: DirectoryOrCreate
+        - name: tls
+          secret:
+            secretName: {{ include "oberth.tlsSecretName" . }}
+        - name: host-key
+          secret:
+            secretName: {{ include "oberth.hostKeySecretName" . }}
+        - name: upstream-key
+          secret:
+            secretName: {{ .Values.upstream.keySecret }}
+            defaultMode: 0400
+            optional: true
+        - name: known-hosts
+          secret:
+            secretName: {{ .Values.upstream.knownHostsSecret }}
+            optional: true
+        {{- if .Values.auditAnchor.rootsSecret }}
+        - name: audit-tsa-roots
+          secret:
+            secretName: {{ .Values.auditAnchor.rootsSecret }}
+            items:
+              - key: {{ .Values.auditAnchor.rootsKey }}
+                path: {{ .Values.auditAnchor.rootsKey }}
+        {{- end }}
+        {{- if .Values.auditAnchor.rekorCA }}
+        - name: audit-rekor-ca
+          configMap:
+            name: {{ include "oberth.fullname" . }}-audit-rekor-ca
+        {{- end }}
+        {{- if .Values.auditAnchor.rekorPublicKey }}
+        - name: audit-rekor-pubkey
+          configMap:
+            name: {{ include "oberth.fullname" . }}-audit-rekor-pubkey
+        {{- end }}
+        {{- if .Values.auditAnchor.tsaCA }}
+        - name: audit-tsa-ca
+          configMap:
+            name: {{ include "oberth.fullname" . }}-audit-tsa-ca
+        {{- end }}
+        {{- if and .Values.secretstore.enabled .Values.secretstore.caCert }}
+        - name: secretstore-ca
+          configMap:
+            name: {{ include "oberth.fullname" . }}-secretstore-ca
+        {{- end }}
+        {{- if and .Values.argo.vault.address .Values.argo.vault.caCert }}
+        - name: argo-vault-ca
+          configMap:
+            name: {{ include "oberth.fullname" . }}-argo-vault-ca
+        {{- end }}
+        {{- $goProxyVol := .Values.argo.goProxy | default dict -}}
+        {{- if $goProxyVol.enabled }}
+        - name: goproxy-tls
+          secret:
+            secretName: {{ include "oberth.fullname" . }}-goproxy-tls
+            defaultMode: 0400
+        {{- end }}
+        - name: tmp
+          emptyDir:
+            sizeLimit: {{ index .Values.resources.limits "ephemeral-storage" | quote }}

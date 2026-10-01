@@ -1,0 +1,213 @@
+{
+  "containers": [
+    {
+      "name": "wait",
+      "volumeMounts": [
+        {
+          "name": "exec-sa-token",
+          "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
+          "readOnly": true,
+          "subPath": null
+        },
+        {
+          "name": "oberth-tmp",
+          "mountPath": "/mainctrfs/tmp",
+          "readOnly": null,
+          "subPath": null
+        },
+        {
+          "name": "oberth-cache",
+          "mountPath": "/mainctrfs/work/cache",
+          "readOnly": null,
+          "subPath": null
+        },
+        {
+          "name": "oberth-source",
+          "mountPath": "/mainctrfs/work/src",
+          "readOnly": null,
+          "subPath": "src"
+        },
+        {
+          "name": "oberth-artifacts",
+          "mountPath": "/mainctrfs/work/artifacts",
+          "readOnly": null,
+          "subPath": "artifacts"
+        },
+        {
+          "name": "oberth-source",
+          "mountPath": "/mainctrfs/run/oberth/vault-ca",
+          "readOnly": null,
+          "subPath": "vault-ca"
+        },
+        {
+          "name": "oberth-source",
+          "mountPath": "/mainctrfs/run/oberth/bin",
+          "readOnly": null,
+          "subPath": "oberth-bin"
+        },
+        {
+          "name": "work",
+          "mountPath": "/mainctrfs/tmp/oberth-tools",
+          "readOnly": null,
+          "subPath": "tools"
+        },
+        {
+          "name": "work",
+          "mountPath": "/mainctrfs/cache/gomod",
+          "readOnly": null,
+          "subPath": "gomod"
+        },
+        {
+          "name": "work",
+          "mountPath": "/mainctrfs/cache/gobuild",
+          "readOnly": null,
+          "subPath": "gobuild"
+        },
+        {
+          "name": "work",
+          "mountPath": "/mainctrfs/tmp/oberth-trivy",
+          "readOnly": null,
+          "subPath": "trivy-cache"
+        },
+        {
+          "name": "work",
+          "mountPath": "/mainctrfs/tmp/oberth-release",
+          "readOnly": null,
+          "subPath": "release"
+        },
+        {
+          "name": "oberth-release-token",
+          "mountPath": "/mainctrfs/var/run/secrets/kubernetes.io/serviceaccount",
+          "readOnly": null,
+          "subPath": null
+        },
+        {
+          "name": "oberth-secrets",
+          "mountPath": "/mainctrfs/run/oberth-secrets",
+          "readOnly": null,
+          "subPath": null
+        },
+        {
+          "name": "tmp-dir-argo",
+          "mountPath": "/tmp",
+          "readOnly": null,
+          "subPath": "0"
+        },
+        {
+          "name": "var-run-argo",
+          "mountPath": "/var/run/argo",
+          "readOnly": null,
+          "subPath": null
+        }
+      ]
+    },
+    {
+      "name": "main",
+      "volumeMounts": [
+        {
+          "name": "oberth-tmp",
+          "mountPath": "/tmp",
+          "readOnly": null,
+          "subPath": null
+        },
+        {
+          "name": "oberth-cache",
+          "mountPath": "/work/cache",
+          "readOnly": null,
+          "subPath": null
+        },
+        {
+          "name": "oberth-source",
+          "mountPath": "/work/src",
+          "readOnly": true,
+          "subPath": "src"
+        },
+        {
+          "name": "oberth-artifacts",
+          "mountPath": "/work/artifacts",
+          "readOnly": null,
+          "subPath": "artifacts"
+        },
+        {
+          "name": "oberth-source",
+          "mountPath": "/run/oberth/vault-ca",
+          "readOnly": true,
+          "subPath": "vault-ca"
+        },
+        {
+          "name": "oberth-source",
+          "mountPath": "/run/oberth/bin",
+          "readOnly": true,
+          "subPath": "oberth-bin"
+        },
+        {
+          "name": "work",
+          "mountPath": "/tmp/oberth-tools",
+          "readOnly": null,
+          "subPath": "tools"
+        },
+        {
+          "name": "work",
+          "mountPath": "/cache/gomod",
+          "readOnly": null,
+          "subPath": "gomod"
+        },
+        {
+          "name": "work",
+          "mountPath": "/cache/gobuild",
+          "readOnly": null,
+          "subPath": "gobuild"
+        },
+        {
+          "name": "work",
+          "mountPath": "/tmp/oberth-trivy",
+          "readOnly": null,
+          "subPath": "trivy-cache"
+        },
+        {
+          "name": "work",
+          "mountPath": "/tmp/oberth-release",
+          "readOnly": null,
+          "subPath": "release"
+        },
+        {
+          "name": "oberth-release-token",
+          "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
+          "readOnly": true,
+          "subPath": null
+        },
+        {
+          "name": "oberth-secrets",
+          "mountPath": "/run/oberth-secrets",
+          "readOnly": null,
+          "subPath": null
+        },
+        {
+          "name": "var-run-argo",
+          "mountPath": "/var/run/argo",
+          "readOnly": null,
+          "subPath": null
+        }
+      ]
+    }
+  ],
+  "initContainers": [
+    {
+      "name": "init",
+      "volumeMounts": [
+        {
+          "name": "exec-sa-token",
+          "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
+          "readOnly": true,
+          "subPath": null
+        },
+        {
+          "name": "var-run-argo",
+          "mountPath": "/var/run/argo",
+          "readOnly": null,
+          "subPath": null
+        }
+      ]
+    }
+  ]
+}

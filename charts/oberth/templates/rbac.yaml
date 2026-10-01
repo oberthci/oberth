@@ -1,0 +1,59 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "oberth.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "oberth.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch", "patch"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["create", "get", "list", "watch"]
+  # The secret-access grants ConfigMap is the only ConfigMap the server may
+  # mutate in place: update is name-scoped so this ServiceAccount can never
+  # rewrite audit-anchor continuity ConfigMaps, whose rollback-detection value
+  # depends on the server being unable to alter them after creation. Watch
+  # stays on the collection rule above because watch requests carry no
+  # resource name in their URL on every supported Kubernetes version, and the
+  # secret-access reconciler needs it to converge sqlite on ConfigMap edits.
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    resourceNames: ["oberth-secret-access"]
+    verbs: ["update"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames:
+      - {{ .Values.upstream.keySecret | quote }}
+      - {{ .Values.upstream.knownHostsSecret | quote }}
+    verbs: ["get", "patch"]
+  {{- if .Values.secretstore.enabled }}
+  # Store-sourced release secrets are delivered into the running release Pod
+  # over the exec subresource so their values never exist in etcd or on node
+  # disk. Runner Pod names are run-scoped, so resourceNames cannot restrict
+  # this; the namespace contains only Oberth's own Pods.
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["create"]
+  {{- end }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "oberth.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "oberth.labels" . | nindent 4 }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "oberth.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "oberth.fullname" . }}

@@ -1,0 +1,105 @@
+{{- if .Values.networkPolicy.enabled }}
+# Default-deny egress for the pipeline namespace with targeted allowlist.
+#
+# Pipeline pods need outbound HTTPS for container registries (GAR), object
+# storage (R2), Go module proxy, GitHub, and Trivy DB downloads. They need
+# DNS resolution and, for release-tier runs, the OpenBao/Vault API.
+#
+# The Kubernetes API server is intentionally NOT blocked: Argo's emissary
+# executor POSTs workflowtaskresult CRs to the API server from inside every
+# step pod. The actual access control is RBAC — the pipeline ServiceAccount
+# is scoped to taskresult writes only.
+#
+# The HTTPS rule has no destination restriction (no "to" block) so it covers
+# both external endpoints and the cluster-internal API server. Per the K8s
+# spec, ipBlock rules do not match cluster-internal IPs, and the API server
+# uses host networking so namespaceSelector cannot match it either — any "to"
+# restriction on port 443 breaks Argo's emissary on CNIs that enforce
+# NetworkPolicy (Calico, Cilium, modern kindnet).
+#
+# Everything else is denied by the policyTypes declaration. In particular:
+#   - Oberth's own NodePorts (30022 SSH, 30443 HTTPS) — implicitly blocked
+#     because only ports 53, 443, 6443, and the vault port are allowed
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "oberth.fullname" . }}-pipeline-egress
+  namespace: {{ required "argo.namespace is required" .Values.argo.namespace }}
+  labels:
+    {{- include "oberth.labels" . | nindent 4 }}
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    # DNS resolution (UDP and TCP). Targets any destination so the policy is
+    # not coupled to the CoreDNS ClusterIP or its namespace placement.
+    - ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    # HTTPS outbound: container registries, object storage, module proxy,
+    # GitHub, Trivy DB, and the Kubernetes API server (Argo emissary).
+    # No destination restriction — ipBlock cannot match cluster-internal IPs
+    # and namespaceSelector cannot match the host-networked API server, so any
+    # "to" block here breaks Argo on policy-enforcing CNIs.
+    - ports:
+        - port: 443
+          protocol: TCP
+        - port: 6443
+          protocol: TCP
+    # In-namespace egress for sidecar services the pipeline needs on
+    # non-standard ports (for example a Docker API shim backing Testcontainers).
+    # Scoped to the pipeline namespace itself via an empty podSelector, so it
+    # grants nothing outside it.
+    {{- if .Values.networkPolicy.inNamespaceAllPorts }}
+    - to:
+        - podSelector: {}
+    {{- else if .Values.networkPolicy.inNamespacePorts }}
+    - to:
+        - podSelector: {}
+      ports:
+        {{- range .Values.networkPolicy.inNamespacePorts }}
+        - port: {{ . }}
+          protocol: TCP
+        {{- end }}
+    {{- end }}
+    # Secret store (OpenBao/Vault) for release credentials. Branch-tier pods
+    # have no Vault token so the network path is harmless; Kubernetes
+    # NetworkPolicy cannot scope egress by ServiceAccount — only by pod
+    # labels — so all pods in the namespace are permitted to reach the store.
+    #
+    # The destination is derived from networkPolicy.vault: in-cluster uses a
+    # namespace selector (matching argo.vault.address); external uses an
+    # ipBlock CIDR. When neither is configured, the rule targets the default
+    # openbao namespace.
+    {{- if .Values.networkPolicy.vault }}
+    {{- if .Values.networkPolicy.vault.externalCIDRs }}
+    {{- range .Values.networkPolicy.vault.externalCIDRs }}
+    - to:
+        - ipBlock:
+            cidr: {{ . }}
+      ports:
+        - port: {{ $.Values.networkPolicy.vault.port | default 8200 }}
+          protocol: TCP
+    {{- end }}
+    {{- else }}
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.networkPolicy.vault.namespace | default "openbao" }}
+      ports:
+        - port: {{ .Values.networkPolicy.vault.port | default 8200 }}
+          protocol: TCP
+    {{- end }}
+    {{- else }}
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: openbao
+      ports:
+        - port: 8200
+          protocol: TCP
+    {{- end }}
+{{- end }}

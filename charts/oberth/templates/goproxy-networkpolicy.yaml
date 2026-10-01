@@ -1,0 +1,36 @@
+{{- $goProxy := .Values.argo.goProxy | default dict -}}
+{{- if and $goProxy.enabled .Values.networkPolicy.enabled }}
+# Ingress policy allowing ONLY Argo pipeline pods to reach the Go module proxy
+# port on the Oberth server. The podSelector matches the server pod; the ingress
+# rule matches pods in the pipeline namespace carrying the oberth.ci/trigger
+# label (set by applyServerMetadata on every pipeline pod's PodMetadata).
+#
+# This is in the SERVER namespace ({{ .Release.Namespace }}), not the pipeline
+# namespace: the goproxy ClusterIP Service lives here, and the NetworkPolicy
+# controls ingress TO the server pod.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "oberth.fullname" . }}-goproxy-ingress
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "oberth.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "oberth.selectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ required "argo.namespace is required" .Values.argo.namespace }}
+          podSelector:
+            matchExpressions:
+              - key: oberth.ci/trigger
+                operator: Exists
+      ports:
+        - port: {{ $goProxy.port | default 8444 }}
+          protocol: TCP
+{{- end }}

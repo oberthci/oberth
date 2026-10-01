@@ -1,0 +1,15 @@
+bin/
+dist/
+/artifacts/
+coverage.out
+/oberth
+*.test
+.worktrees/
+website/node_modules/
+website/.wrangler/
+.claude/settings.local.json
+
+# Loose binary artifacts
+oberth-*
+!cmd/oberth-node-bridge/
+*.tar.gz
