@@ -81,8 +81,8 @@ def verify_tools(root, manifest):
             if not 0 < info.st_size <= 512 * 1024 * 1024:
                 raise VerificationError('publisher tool exceeds size bounds')
             digest = hashlib.file_digest(stream, 'sha256').hexdigest()
-        if digest != wanted:
-            raise VerificationError('publisher tool bytes differ from reviewed pin')
+            if digest != wanted:
+                raise VerificationError('publisher tool bytes differ from reviewed pin: ' + name)
 
 
 def main():

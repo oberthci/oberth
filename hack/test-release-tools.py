@@ -36,7 +36,7 @@ class ToolTests(unittest.TestCase):
 
     def test_changed_tool_fails(self):
         (self.root / 'bin/cosign').write_bytes(b'not reviewed')
-        with self.assertRaises(verifier.VerificationError):
+        with self.assertRaisesRegex(verifier.VerificationError, r'^publisher tool bytes differ from reviewed pin: cosign$'):
             self.verify()
 
     def test_nonexecutable_fails(self):
