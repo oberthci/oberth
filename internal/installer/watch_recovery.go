@@ -60,6 +60,10 @@ type watchRecoveryOrigin struct {
 	Receipt   watchPublicFile `json:"receipt"`
 	Confirmed []watchAdopted  `json:"confirmed"`
 }
+type watchRecoveryResume struct {
+	PriorPlan      watchPublicFile `json:"prior_plan"`
+	HandoffReceipt watchPublicFile `json:"handoff_receipt"`
+}
 type watchRecoveryArtifacts struct {
 	Record          watchPublicFile `json:"record"`
 	RecordBundle    watchPublicFile `json:"record_bundle"`
@@ -86,6 +90,7 @@ type watchRecoveryPlan struct {
 	ExpiresAt     time.Time              `json:"expires_at"`
 	Release       watchReleaseGuard      `json:"release"`
 	Origin        *watchRecoveryOrigin   `json:"origin"`
+	Resume        *watchRecoveryResume   `json:"resume"`
 	Artifacts     watchRecoveryArtifacts `json:"artifacts"`
 	Objects       []watchRecoveryObject  `json:"objects"`
 }
@@ -119,6 +124,9 @@ func exactRecoveryFields(raw []byte) bool {
 	}
 	p, ok := check(raw, "origin", "values_sha256", "schema", "mode", "namespace", "context", "cluster_uid", "server_version", "chart_version", "created_at", "expires_at", "release", "origin", "artifacts", "objects")
 	if !ok {
+		p, ok = check(raw, "resume", "values_sha256", "schema", "mode", "namespace", "context", "cluster_uid", "server_version", "chart_version", "created_at", "expires_at", "release", "origin", "resume", "artifacts", "objects")
+	}
+	if !ok {
 		return false
 	}
 	if _, ok = check(p["release"], "", "revision", "status", "chart", "record_uid", "record_resource_version", "previous_revision"); !ok {
@@ -149,6 +157,17 @@ func exactRecoveryFields(raw []byte) bool {
 		}
 		for _, row := range rows {
 			if _, ok = check(row, "", "kind", "name", "uid", "resource_version"); !ok {
+				return false
+			}
+		}
+	}
+	if resumeRaw, exists := p["resume"]; exists && !bytes.Equal(bytes.TrimSpace(resumeRaw), []byte("null")) {
+		r, good := check(resumeRaw, "", "prior_plan", "handoff_receipt")
+		if !good {
+			return false
+		}
+		for _, key := range []string{"prior_plan", "handoff_receipt"} {
+			if _, ok = check(r[key], "", "path", "sha256"); !ok {
 				return false
 			}
 		}
@@ -221,6 +240,13 @@ func readWatchRecoveryPlan(cfg Config) (*watchRecoveryPlan, error) {
 		if p.Origin == nil || p.Release.Revision != 72 || p.Release.Status != "failed" || p.Release.Chart != "oberth-0.16.25" || p.Release.PreviousRevision != 71 {
 			return nil, errors.New("watch recovery is limited to the reviewed failed adoption revision")
 		}
+		if p.Resume != nil {
+			return nil, errors.New("unsupported watch recovery resume state")
+		}
+	} else if p.Mode == "post-handoff-resume" {
+		if p.Origin == nil || p.Resume == nil || p.Release.Revision != 72 || p.Release.Status != "failed" || p.Release.Chart != "oberth-0.16.25" || p.Release.PreviousRevision != 71 {
+			return nil, errors.New("invalid post-handoff recovery binding")
+		}
 	} else {
 		return nil, errors.New("unsupported watch recovery mode")
 	}
@@ -242,14 +268,106 @@ func readWatchRecoveryPlan(cfg Config) (*watchRecoveryPlan, error) {
 			return nil, err
 		}
 	}
-	for _, o := range p.Objects {
-		if o.Kind == "Deployment" {
-			if _, _, err := watchArgsHandoff(o.ManagedFields); err != nil {
-				return nil, err
+	if p.Mode == "failed-adoption-recovery" {
+		for _, o := range p.Objects {
+			if o.Kind == "Deployment" {
+				if _, _, err := watchArgsHandoff(o.ManagedFields); err != nil {
+					return nil, err
+				}
 			}
 		}
+	} else if err := validateRecoveryResume(p); err != nil {
+		return nil, err
 	}
 	return &p, nil
+}
+
+func validateRecoveryResume(fresh watchRecoveryPlan) error {
+	if fresh.Mode != "post-handoff-resume" || fresh.Resume == nil || fresh.Origin == nil {
+		return errors.New("post-handoff resume binding is absent")
+	}
+	priorRaw, err := watchFile(fresh.Resume.PriorPlan, 2<<20)
+	if err != nil {
+		return err
+	}
+	var prior watchRecoveryPlan
+	if !exactRecoveryFields(priorRaw) || strictWatchDecode(priorRaw, &prior) != nil || prior.Schema != watchRecoverySchema || prior.Mode != "failed-adoption-recovery" || prior.Resume != nil || prior.Origin == nil || prior.Release != fresh.Release || prior.Namespace != fresh.Namespace || prior.Context != fresh.Context || prior.ClusterUID != fresh.ClusterUID || prior.ServerVersion != fresh.ServerVersion || prior.ValuesSHA256 != fresh.ValuesSHA256 || prior.CreatedAt.After(time.Now()) || !prior.ExpiresAt.After(prior.CreatedAt) || prior.ExpiresAt.Sub(prior.CreatedAt) > 30*time.Minute {
+		return errors.New("prior failed recovery plan binding differs")
+	}
+	priorOrigin, _ := json.Marshal(prior.Origin)
+	freshOrigin, _ := json.Marshal(fresh.Origin)
+	if !sameWatchJSON(priorOrigin, freshOrigin) || len(prior.Objects) != 4 {
+		return errors.New("prior recovery origin differs")
+	}
+	receiptRaw, err := watchFile(fresh.Resume.HandoffReceipt, 65536)
+	if err != nil {
+		return err
+	}
+	var receipt []watchAdopted
+	var receiptRows []json.RawMessage
+	if !uniqueWatchJSON(receiptRaw) || strictWatchDecode(receiptRaw, &receipt) != nil || json.Unmarshal(receiptRaw, &receiptRows) != nil || len(receipt) != 1 || len(receiptRows) != 1 || !exactRecoveryReceiptRow(receiptRows[0]) || receipt[0].Kind != "Deployment" || receipt[0].Name != "cloudflared-watch-oberth-v2" || receipt[0].UID == "" || receipt[0].ResourceVersion == "" {
+		return errors.New("confirmed handoff receipt differs")
+	}
+	priorByKey, freshByKey := make(map[string]watchRecoveryObject, 4), make(map[string]watchRecoveryObject, 4)
+	for _, o := range prior.Objects {
+		priorByKey[o.Kind+"/"+o.Name] = o
+	}
+	for _, o := range fresh.Objects {
+		freshByKey[o.Kind+"/"+o.Name] = o
+	}
+	if len(priorByKey) != 4 || len(freshByKey) != 4 {
+		return errors.New("resume object inventory differs")
+	}
+	for key, before := range priorByKey {
+		after, ok := freshByKey[key]
+		if !ok || before.UID != after.UID || before.Generation != after.Generation || !sameRecoveryMetadataFromPlan(before.Metadata, after.Metadata) || !sameWatchJSON(before.Spec, after.Spec) {
+			return errors.New("prior and resumed watch object differ")
+		}
+		beforeTarget, beforeErr := recoveryTarget(before, true, fresh.Namespace)
+		afterTarget, afterErr := recoveryTarget(after, true, fresh.Namespace)
+		beforeMeta, metaErr := watchCompleteMetadata(beforeTarget)
+		afterMeta, afterMetaErr := watchCompleteMetadata(afterTarget)
+		if beforeErr != nil || afterErr != nil || metaErr != nil || afterMetaErr != nil {
+			return errors.New("prior and resumed complete metadata is invalid")
+		}
+		beforeMeta.ManagedFields, afterMeta.ManagedFields = nil, nil
+		if !sameWatchCompleteMetadata(beforeMeta, afterMeta) {
+			return errors.New("prior and resumed complete metadata differs")
+		}
+		if before.Kind != "Deployment" {
+			if before.ResourceVersion != after.ResourceVersion || !sameWatchManaged(before.ManagedFields, after.ManagedFields) {
+				return errors.New("non-Deployment object changed before resume")
+			}
+			continue
+		}
+		if receipt[0].UID != before.UID || receipt[0].ResourceVersion != after.ResourceVersion || receipt[0].ResourceVersion == before.ResourceVersion {
+			return errors.New("confirmed handoff receipt identity differs")
+		}
+		_, expected, handoffErr := watchArgsHandoff(before.ManagedFields)
+		if handoffErr != nil || !sameWatchManaged(expected, after.ManagedFields) {
+			return errors.New("resumed Deployment ownership is not the exact handoff result")
+		}
+	}
+	return nil
+}
+
+func exactRecoveryReceiptRow(raw []byte) bool {
+	var row map[string]json.RawMessage
+	if json.Unmarshal(raw, &row) != nil || len(row) != 4 {
+		return false
+	}
+	for _, name := range []string{"kind", "name", "uid", "resource_version"} {
+		if value, ok := row[name]; !ok || bytes.Equal(bytes.TrimSpace(value), []byte("null")) {
+			return false
+		}
+	}
+	return true
+}
+
+func sameRecoveryMetadataFromPlan(a, b watchPublicMetadata) bool {
+	left, errA := json.Marshal(a)
+	right, errB := json.Marshal(b)
+	return errA == nil && errB == nil && sameWatchJSON(left, right)
 }
 
 func watchRecoveryDeadline(p watchRecoveryPlan) bool {
@@ -485,7 +603,7 @@ func recoveryObserved(ctx context.Context, deps Deps, p watchRecoveryPlan) ([]wa
 		if owner != (watchOwnership{}) && owner != (watchOwnership{"Helm", "oberth", p.Namespace}) {
 			return nil, errors.New("foreign watch ownership")
 		}
-		if p.Mode == "failed-adoption-recovery" && owner != (watchOwnership{"Helm", "oberth", p.Namespace}) {
+		if (p.Mode == "failed-adoption-recovery" || p.Mode == "post-handoff-resume") && owner != (watchOwnership{"Helm", "oberth", p.Namespace}) {
 			return nil, errors.New("failed recovery requires confirmed Helm ownership")
 		}
 		out = append(out, v)

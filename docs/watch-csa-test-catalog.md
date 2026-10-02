@@ -44,6 +44,7 @@ guard. There is no public API, CLI flag or runtime environment origin bypass.
 | same | strict v2 spelling/null/mode/expiry/history/managed-field aliases and annotation refusal; unprepared v2 never reaches API effects |
 | same | Deployment-only public revision/source annotations; bounded canonical revision, exact source literal and unknown-key refusals; changed or omitted approved annotations stop before any effect and changed handoff replies refuse |
 | same | bounded nofollow file and hash mismatch refusal; fixed release key equality, detached signature payload/key binding |
+| same | receipt-bound post-handoff resume reconstructs the exact Deployment fieldset, refuses receipt hash/identity mismatch, remaining owner or spec drift, and force=false qualifies without another JSONPatch |
 | same | all impersonation fields/hooks refuse; public static Go TLS fixtures prove path replacement cannot change either client's literal identity; no key generation or network |
 | same | reordered approved fields select the observed owner index; complete metadata additions and target finalizer authority refuse; an open executable descriptor retains original bytes across pathname replacement |
 | existing `watch_adoption_test.go` | v1 all-four CAS, partial/uncertain receipts, revision/expiry guards, render mismatch and retained receipt on later Helm failure |
@@ -83,7 +84,10 @@ the same four UIDs. It also verifies retained legacy ownership and Helm's new
 ownership of exactly the intended args field. Negative scenarios cover genuine
 shared ownership, an additional actual SSA conflict, another object's RV drift,
 expiry, failed-record RV movement and stop after a confirmed metadata handoff.
-All negatives retain state and prevent an unqualified Helm write.
+The stop scenario then constructs the hash-bound continuation and proves
+same-UID force=false SSA qualification and ordinary Helm73 without another
+persisted metadata write. All negatives retain state and prevent an
+unqualified Helm write.
 
 This seam substitutes owned synthetic history/UIDs for the immutable live
 origin and bypasses only pre-engine released-artifact preparation. It is a

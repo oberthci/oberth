@@ -1407,8 +1407,14 @@ labels cannot overwrite these identities.
 The existing Helm server preview is a target-render check; it does not prove a
 subsequent server-side apply is conflict-free. V1 adoption still requires a
 deployed revision and does not authorize rewriting legacy field ownership or
-accepting a failed revision. V2 implements only the reviewed forward recovery
-of the original failed72 attempt. It verifies the fixed release signing key,
+accepting a failed revision. V2 implements the reviewed forward recovery and
+the explicit post-handoff resume of the original failed72 attempt. Resume
+requires a fresh mode-bound plan hashing the prior failed-adoption
+plan and the one-row confirmed handoff receipt. It reconstructs the exact
+Deployment managedFields subtraction, binds the same UID/new RV and unchanged
+pre-effect specs/generation/public metadata, and requires every other object's
+RV/managedFields to remain exact. Resume performs force=false SSA qualification
+with no metadata patch or write. It verifies the fixed release signing key,
 signed successor installer/chart/checksums, original immutable plan/receipt,
 four original UIDs and fresh failed72 record UID/RV/history. Its maximum
 30-minute public plan binds current full metadata/managedFields/specs and

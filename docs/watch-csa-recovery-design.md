@@ -85,9 +85,10 @@ Bound strict duplicate-free decoding and allowlist the trie grammar. Preserve
 all other reviewed ownership, including controller status; unknown shapes
 cannot be interpreted as absent ownership.
 
-Only mode `failed-adoption-recovery` is implemented. It binds the original
-plan/receipt, confirmed adoption identities and an exact fresh latest failed
-release snapshot. The initial-mode design is deferred and rejected by code.
+Modes `failed-adoption-recovery` and `post-handoff-resume` are implemented.
+Both bind the original plan/receipt, confirmed adoption identities and an
+exact fresh latest failed release snapshot. The initial-mode design remains
+deferred and rejected by code.
 
 ## Preflight and effect ordering
 
@@ -126,6 +127,22 @@ After a confirmed handoff, a dry-run, readback, reply-validation or Helm failure
 must return the persisted confirmed public metadata receipt and stop. Receipt
 retention applies even when no new Helm revision is created. No rollback or
 automatic retry follows any such failure.
+
+A later invocation may use `post-handoff-resume` only with a fresh strict v2
+plan that hash-binds the prior (possibly expired) `failed-adoption-recovery`
+plan and its one-row confirmed Deployment handoff receipt. The prior and fresh plans must
+bind the same origin, release history, cluster/context, values, object UIDs,
+generations, current public metadata and pre-effect specs. The receipt must
+bind the same Deployment UID and its new RV. Reconstruct the expected complete
+Deployment managedFields array by applying the exact one-leaf subtraction to
+the prior plan; the fresh plan must match it, and every other object must keep
+its prior RV and complete managedFields. The current signed chart preview and
+real force=false SSA dry-run independently qualify the fresh prospective
+target. Resume performs no JSONPatch or other metadata write. It refuses any
+remaining or foreign args owner, malformed trie, drift, receipt hash/identity
+mismatch or changed prior plan, then continues through the same final
+observations and ordinary Helm readiness path. The original one-time handoff
+mode is unchanged.
 
 Dry-run handoff does not persist state for a later SSA dry-run. The prospective
 sequence must first pass on an isolated real API with persisted fixture

@@ -250,8 +250,35 @@ func applyWatchRecovery(ctx context.Context, cfg Config, deps Deps, dryRun bool,
 	if err = recoveryPreview(ctx, cfg, deps, p); err != nil {
 		return nil, err
 	}
-	if err = recoverySSAWithGuard(ctx, deps, p, true, func() error { return guard(p) }); err != nil {
+	resume := p.Mode == "post-handoff-resume"
+	if err = recoverySSAWithGuard(ctx, deps, p, !resume, func() error { return guard(p) }); err != nil {
 		return nil, err
+	}
+	if resume {
+		rows, err := watchFile(p.Resume.HandoffReceipt, 65536)
+		if err != nil {
+			return nil, err
+		}
+		var receipt []watchAdopted
+		if !uniqueWatchJSON(rows) || strictWatchDecode(rows, &receipt) != nil || len(receipt) != 1 {
+			return nil, errors.New("confirmed handoff receipt differs")
+		}
+		if dryRun {
+			return nil, nil
+		}
+		if _, err = recoveryObserved(ctx, deps, p); err != nil {
+			return receipt, err
+		}
+		if err = guard(p); err != nil {
+			return receipt, err
+		}
+		encoded, _ := json.Marshal(receipt)
+		if _, err = fmt.Fprintf(deps.Output, "Watch connector confirmed handoff resumed: %s\n", encoded); err != nil {
+			return receipt, errors.New("watch resume receipt output failed; stop and retain state")
+		}
+		p.ready = true
+		*cfg.watchRecovery = p
+		return receipt, nil
 	}
 	index := -1
 	for i, o := range p.Objects {

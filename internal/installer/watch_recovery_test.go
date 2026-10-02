@@ -360,6 +360,152 @@ func TestWatchRecoveryRetainsHandoffReceiptOnPostFailure(t *testing.T) {
 		})
 	}
 }
+
+func writeResumeEvidence(t *testing.T, value any) watchPublicFile {
+	t.Helper()
+	raw, err := json.Marshal(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return writeResumeRawEvidence(t, raw)
+}
+
+func writeResumeRawEvidence(t *testing.T, raw []byte) watchPublicFile {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "evidence.json")
+	if err := os.WriteFile(path, raw, 0600); err != nil {
+		t.Fatal(err)
+	}
+	hash := sha256.Sum256(raw)
+	return watchPublicFile{Path: path, SHA256: hex.EncodeToString(hash[:])}
+}
+
+func makeRecoveryResume(t *testing.T, prior watchRecoveryPlan, committed watchRecoveryPlan, receipt []watchAdopted) watchRecoveryPlan {
+	t.Helper()
+	priorBlob := writeResumeEvidence(t, prior)
+	receiptBlob := writeResumeEvidence(t, receipt)
+	committed.Mode = "post-handoff-resume"
+	committed.Resume = &watchRecoveryResume{PriorPlan: priorBlob, HandoffReceipt: receiptBlob}
+	return committed
+}
+
+func TestWatchRecoveryBoundedResumeValidationAndNoWriteExecution(t *testing.T) {
+	cfg, deps, client, state, out := recoveryUnitFixture(t)
+	prior := *cfg.watchRecovery
+	prior.Context, prior.ClusterUID, prior.ServerVersion = "ctx", "cluster", "v1.36.2+k3s1"
+	prior.ValuesSHA256 = watchValuesDigest([]byte(`{}`))
+	prior.Release.RecordUID, prior.Release.RecordRV = "record-uid", "72"
+	prior.Origin = &watchRecoveryOrigin{Plan: watchPublicFile{Path: "/original/plan", SHA256: originalWatchPlanSHA}, Receipt: watchPublicFile{Path: "/original/receipt", SHA256: originalWatchReceiptSHA}, Confirmed: []watchAdopted{}}
+	*cfg.watchRecovery = prior
+	state.postFailure = true
+	oldReceipt, err := applyWatchRecovery(context.Background(), cfg, deps, false, func(watchRecoveryPlan) error { return nil })
+	if err == nil || len(oldReceipt) != 1 || state.commits != 1 {
+		t.Fatalf("expected confirmed metadata handoff followed by failure, receipt=%v commits=%d err=%v", oldReceipt, state.commits, err)
+	}
+	committed := *cfg.watchRecovery
+	state.postFailure = false
+	resume := makeRecoveryResume(t, prior, committed, oldReceipt)
+	if err = validateRecoveryResume(resume); err != nil {
+		t.Fatalf("valid receipt-bound resume refused: %v", err)
+	}
+	for name, mutate := range map[string]func(*watchRecoveryPlan, []watchAdopted){
+		"wrong_prior_mode": func(p *watchRecoveryPlan, _ []watchAdopted) {
+			wrong := prior
+			wrong.Mode = "post-handoff-resume"
+			p.Resume.PriorPlan = writeResumeEvidence(t, wrong)
+		},
+		"receipt_rv_mismatch": func(p *watchRecoveryPlan, rows []watchAdopted) {
+			rows[0].ResourceVersion = "999"
+			p.Resume = &watchRecoveryResume{PriorPlan: p.Resume.PriorPlan, HandoffReceipt: writeResumeEvidence(t, rows)}
+		},
+		"receipt_uid_mismatch": func(p *watchRecoveryPlan, rows []watchAdopted) {
+			rows[0].UID = "foreign"
+			p.Resume = &watchRecoveryResume{PriorPlan: p.Resume.PriorPlan, HandoffReceipt: writeResumeEvidence(t, rows)}
+		},
+		"duplicate_receipt_key": func(p *watchRecoveryPlan, rows []watchAdopted) {
+			row, _ := json.Marshal(rows[0])
+			duplicate := strings.TrimSuffix(string(row), "}") + `,"kind":"Deployment"}`
+			p.Resume.HandoffReceipt = writeResumeRawEvidence(t, []byte("["+duplicate+"]"))
+		},
+		"prior_hash_mismatch": func(p *watchRecoveryPlan, _ []watchAdopted) { p.Resume.PriorPlan.SHA256 = strings.Repeat("0", 64) },
+		"remaining_args_owner": func(p *watchRecoveryPlan, _ []watchAdopted) {
+			for i := range p.Objects {
+				if p.Objects[i].Kind == "Deployment" {
+					p.Objects[i].ManagedFields = prior.Objects[i].ManagedFields
+				}
+			}
+		},
+		"spec_drift": func(p *watchRecoveryPlan, _ []watchAdopted) {
+			for i := range p.Objects {
+				if p.Objects[i].Kind == "Deployment" {
+					p.Objects[i].Spec = json.RawMessage(`{"drift":true}`)
+				}
+			}
+		},
+		"other_object_rv_drift": func(p *watchRecoveryPlan, _ []watchAdopted) {
+			for i := range p.Objects {
+				if p.Objects[i].Kind == "ConfigMap" {
+					p.Objects[i].ResourceVersion = "999"
+					return
+				}
+			}
+		},
+		"deployment_uid_drift": func(p *watchRecoveryPlan, _ []watchAdopted) {
+			for i := range p.Objects {
+				if p.Objects[i].Kind == "Deployment" {
+					p.Objects[i].UID = "foreign"
+					return
+				}
+			}
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			candidate := resume
+			resumeBinding := *resume.Resume
+			candidate.Resume = &resumeBinding
+			candidate.Objects = append([]watchRecoveryObject(nil), resume.Objects...)
+			rows := append([]watchAdopted(nil), oldReceipt...)
+			mutate(&candidate, rows)
+			if validateRecoveryResume(candidate) == nil {
+				t.Fatal("invalid resume evidence accepted")
+			}
+		})
+	}
+
+	beforeResumeApplies := state.applies
+	expired := resume
+	expired.CreatedAt, expired.ExpiresAt = time.Now().Add(-2*time.Minute), time.Now().Add(-time.Minute)
+	*cfg.watchRecovery = expired
+	if _, err = applyWatchRecovery(context.Background(), cfg, deps, false, func(p watchRecoveryPlan) error {
+		if !watchRecoveryDeadline(p) {
+			return errors.New("expired")
+		}
+		return nil
+	}); err == nil || state.applies != beforeResumeApplies || state.commits != 1 || state.dryCAS != 1 {
+		t.Fatal("expired resume reached effects")
+	}
+	*cfg.watchRecovery = resume
+	state.postFailure = true
+	if _, err = applyWatchRecovery(context.Background(), cfg, deps, false, func(watchRecoveryPlan) error { return nil }); err == nil || cfg.watchRecovery.ready || state.commits != 1 || state.dryCAS != 1 {
+		t.Fatal("failed resumed SSA wrote metadata or became ready")
+	}
+	state.postFailure = false
+	client.ClearActions()
+	*cfg.watchRecovery = resume
+	beforeResumeApplies = state.applies
+	returned, err := applyWatchRecovery(context.Background(), cfg, deps, false, func(watchRecoveryPlan) error { return nil })
+	if err != nil || len(returned) != 1 || !cfg.watchRecovery.ready || state.commits != 1 || state.dryCAS != 1 || state.applies-beforeResumeApplies != 4 {
+		t.Fatalf("resume did not qualify without another write: receipt=%v commits=%d dryCAS=%d applies=%d err=%v", returned, state.commits, state.dryCAS, state.applies, err)
+	}
+	for _, action := range client.Actions() {
+		if patched, ok := action.(ktesting.PatchAction); ok && patched.GetPatchType() == types.JSONPatchType {
+			t.Fatal("resume issued another metadata JSONPatch")
+		}
+	}
+	if !strings.Contains(out.String(), "confirmed handoff resumed") {
+		t.Fatal("resume receipt was not emitted")
+	}
+}
 func mustWatchSpec(t *testing.T, obj any) []byte {
 	t.Helper()
 	v, err := watchSpec(obj)
@@ -467,6 +613,33 @@ func TestWatchRecoveryStrictPublicPlan(t *testing.T) {
 	}
 	if _, err = readWatchRecoveryPlan(cfg); err != nil {
 		t.Fatal("valid public plan shape refused", err)
+	}
+	var historical map[string]any
+	if json.Unmarshal(base, &historical) != nil {
+		t.Fatal("historical plan fixture decode failed")
+	}
+	delete(historical, "resume")
+	historicalRaw, _ := json.Marshal(historical)
+	if os.WriteFile(cfg.WatchAdoptionPlan, historicalRaw, 0600) != nil {
+		t.Fatal("historical plan fixture write failed")
+	}
+	if _, err = readWatchRecoveryPlan(cfg); err != nil {
+		t.Fatalf("historical plan without resume key refused: %v", err)
+	}
+	if os.WriteFile(cfg.WatchAdoptionPlan, base, 0600) != nil {
+		t.Fatal("current plan fixture restore failed")
+	}
+	wrongMode := p
+	wrongMode.Resume = &watchRecoveryResume{PriorPlan: watchPublicFile{Path: "/prior", SHA256: strings.Repeat("a", 64)}, HandoffReceipt: watchPublicFile{Path: "/receipt", SHA256: strings.Repeat("b", 64)}}
+	wrongModeRaw, _ := json.Marshal(wrongMode)
+	if os.WriteFile(cfg.WatchAdoptionPlan, wrongModeRaw, 0600) != nil {
+		t.Fatal("wrong-mode plan fixture write failed")
+	}
+	if _, err = readWatchRecoveryPlan(cfg); err == nil {
+		t.Fatal("normal recovery mode accepted resume evidence")
+	}
+	if os.WriteFile(cfg.WatchAdoptionPlan, base, 0600) != nil {
+		t.Fatal("current plan fixture restore failed")
 	}
 	unprepared := cfg
 	unprepared.watchRecovery = nil

@@ -8,7 +8,9 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -488,6 +490,20 @@ func realWatchPlan(t *testing.T, ctx context.Context, cfg Config, d Deps, target
 	return p
 }
 
+func writeRealResumeArtifact(t *testing.T, value any) watchPublicFile {
+	t.Helper()
+	raw, err := json.Marshal(value)
+	if err != nil {
+		t.Fatal("resume evidence serialization failed")
+	}
+	path := filepath.Join(t.TempDir(), "resume-evidence.json")
+	if err = os.WriteFile(path, raw, 0600); err != nil {
+		t.Fatal("resume evidence write failed")
+	}
+	sum := sha256.Sum256(raw)
+	return watchPublicFile{Path: path, SHA256: hex.EncodeToString(sum[:])}
+}
+
 // Only fixed source literals receive diagnostic IDs. Unknown errors stay opaque;
 // API/Helm output and arbitrary error strings never enter the public receipt.
 func realWatchErrorCode(err error) int {
@@ -664,6 +680,7 @@ func TestWatchRecoveryRealAPI(t *testing.T) {
 					return requireRecoveryGuard(ctx, local, candidate)
 				}
 			}
+			priorPlan := p
 			before, err := d.KubeClient.AppsV1().Deployments(cfg.Namespace).Get(ctx, "cloudflared-watch-oberth-v2", metav1.GetOptions{})
 			if err != nil {
 				t.Fatal("handoff baseline unavailable")
@@ -711,7 +728,40 @@ func TestWatchRecoveryRealAPI(t *testing.T) {
 				if cfg.watchRecovery.ready {
 					t.Fatal("stopped handoff became Helm-ready")
 				}
-				return
+				// Build a fresh, hash-bound continuation from the exact prior plan
+				// and the one-row receipt just emitted by the confirmed CAS.
+				priorPlan.CreatedAt, priorPlan.ExpiresAt = time.Now().Add(-20*time.Minute), time.Now().Add(-time.Minute)
+				priorPlan.Origin = &watchRecoveryOrigin{Plan: watchPublicFile{Path: "synthetic-original-plan", SHA256: strings.Repeat("a", 64)}, Receipt: watchPublicFile{Path: "synthetic-original-receipt", SHA256: strings.Repeat("b", 64)}, Confirmed: []watchAdopted{}}
+				fresh := priorPlan
+				fresh.Objects = append([]watchRecoveryObject(nil), priorPlan.Objects...)
+				fresh.CreatedAt, fresh.ExpiresAt = time.Now().Add(-time.Second), time.Now().Add(15*time.Minute)
+				fresh.Origin = priorPlan.Origin
+				for i := range fresh.Objects {
+					if fresh.Objects[i].Kind == "Deployment" {
+						fresh.Objects[i].ResourceVersion = after.ResourceVersion
+						fresh.Objects[i].ManagedFields = after.ManagedFields
+					}
+				}
+				priorArtifact := writeRealResumeArtifact(t, priorPlan)
+				receiptArtifact := writeRealResumeArtifact(t, rows)
+				fresh.Mode = "post-handoff-resume"
+				fresh.Resume = &watchRecoveryResume{PriorPlan: priorArtifact, HandoffReceipt: receiptArtifact}
+				if err = validateRecoveryResume(fresh); err != nil {
+					t.Fatalf("valid real post-handoff resume refused: %v", err)
+				}
+				resumeRV, resumeFields := after.ResourceVersion, after.ManagedFields
+				cfg.watchRecovery = &fresh
+				var resumeReceipt bytes.Buffer
+				local.Output = &resumeReceipt
+				resumed, resumeErr := applyWatchRecovery(ctx, cfg, local, false, func(candidate watchRecoveryPlan) error { return requireRecoveryGuard(ctx, local, candidate) })
+				if resumeErr != nil || len(resumed) != 1 || !cfg.watchRecovery.ready || !strings.Contains(resumeReceipt.String(), "confirmed handoff resumed") {
+					t.Fatalf("post-handoff resume failed: rows=%v ready=%t err=%v", resumed, cfg.watchRecovery.ready, resumeErr)
+				}
+				afterResume, readErr := d.KubeClient.AppsV1().Deployments(cfg.Namespace).Get(ctx, before.Name, metav1.GetOptions{})
+				if readErr != nil || afterResume.ResourceVersion != resumeRV || !sameWatchManaged(afterResume.ManagedFields, resumeFields) {
+					t.Fatal("read-only resume changed persisted Deployment metadata")
+				}
+				rows, err = resumed, resumeErr
 			}
 			if err = requireWatchRecoveryBeforeHelm(ctx, cfg, local); err != nil {
 				t.Fatal("final real production guard failed")
