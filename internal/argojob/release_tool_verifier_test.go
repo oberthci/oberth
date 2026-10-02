@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
+
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 	"github.com/oberthci/oberth/pkg/periapsis"
 )
@@ -112,6 +114,55 @@ func TestBootstrapRetainsTestsAndSeparatesPublisherAuthority(t *testing.T) {
 	}
 }
 
+func TestPublisherVerifierHasCredentialFreeRetainedLogGate(t *testing.T) {
+	workflow, err := argoworkflow.Decode(loadPipeline(t, "release.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var verifier *wfv1.Template
+	for index := range workflow.Spec.Templates {
+		if workflow.Spec.Templates[index].Name == "verify-publisher-tools" {
+			verifier = &workflow.Spec.Templates[index]
+			break
+		}
+	}
+	if verifier == nil || verifier.Container == nil {
+		t.Fatal("release has no retained-log publisher verifier")
+	}
+	if templateUsesOberthSecretstore(verifier) || len(verifier.InitContainers) != 0 {
+		t.Fatal("publisher verifier must be a credential-free main-container step")
+	}
+	if verifier.AutomountServiceAccountToken == nil || *verifier.AutomountServiceAccountToken {
+		t.Fatal("publisher verifier must not automount a service account token")
+	}
+	foundReadOnlyTools := false
+	for _, mount := range verifier.Container.VolumeMounts {
+		if mount.Name == "bootstrap-tools" && mount.MountPath == "/tmp/oberth-tools" && mount.ReadOnly {
+			foundReadOnlyTools = true
+		}
+	}
+	if !foundReadOnlyTools {
+		t.Fatal("publisher verifier must inspect the shared tool claim read-only")
+	}
+	if !strings.Contains(strings.Join(verifier.Container.Args, "\n"), "/work/src/.oberth/verify-release-tools.py") {
+		t.Fatal("publisher verifier does not run the exact release verifier")
+	}
+	var buildDependency string
+	for _, template := range workflow.Spec.Templates {
+		if template.Name != "release" || template.DAG == nil {
+			continue
+		}
+		for _, task := range template.DAG.Tasks {
+			if task.Name == "release-build" {
+				buildDependency = task.Depends
+			}
+		}
+	}
+	if !strings.Contains(buildDependency, "release-verify-publisher-tools") {
+		t.Fatalf("release-build does not wait for retained-log publisher verifier: %q", buildDependency)
+	}
+}
+
 // Execute the actual wrappers after Build has injected cache and run variables.
 // Merely checking authored env fields misses the deployed server's overrides.
 func TestBootstrapExecutedEnvironmentIgnoresSharedCachesAndCredentials(t *testing.T) {
@@ -186,16 +237,25 @@ func TestBootstrapExecutedEnvironmentIgnoresSharedCachesAndCredentials(t *testin
 			if credentialed && environment["PATH"] != "/usr/bin:/bin" {
 				t.Fatal("credentialed PATH permits shared tool substitution")
 			}
+			if template.Name == "verify-publisher-tools" {
+				if environment["PATH"] != "/usr/bin:/bin" || environment["HOME"] != "/tmp" {
+					t.Fatal("publisher verifier environment is not fixed")
+				}
+				if _, exists := environment["OBERTH_TOOLS_DIR"]; exists {
+					t.Fatal("publisher verifier inherited tool-directory overrides")
+				}
+				return
+			}
 			if environment["OBERTH_TOOLS_DIR"] != "/tmp/oberth-tools" || environment["GOCACHE"] != "/tmp/bootstrap-private/gobuild" || environment["GOMODCACHE"] != "/tmp/bootstrap-private/gomod" {
 				t.Fatal("tool/cache roots are not fixed")
 			}
 		})
 		tested++
 	}
-	// 24 bootstrap wrappers plus the five website templates of #649
+	// 25 bootstrap wrappers plus the five website templates of #649
 	// (fetch-node, verify-node, stage-website-packages, release-website,
 	// release-website-readback).
-	if tested != 29 {
-		t.Fatalf("executed %d wrappers, want all 29", tested)
+	if tested != 30 {
+		t.Fatalf("executed %d wrappers, want all 30", tested)
 	}
 }

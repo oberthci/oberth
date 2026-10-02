@@ -123,7 +123,10 @@ spec:
         depends: release-setup
       - name: release-build
         template: release-build
-        depends: release-test && release-chart-test
+        depends: release-test && release-chart-test && release-verify-publisher-tools
+      - name: release-verify-publisher-tools
+        template: verify-publisher-tools
+        depends: release-setup
       - name: release-sign-binaries
         template: release-sign-binaries
         depends: release-build
@@ -252,6 +255,43 @@ spec:
         limits:
           cpu: '2'
           memory: 4Gi
+  - name: verify-publisher-tools
+    automountServiceAccountToken: false
+    metadata:
+      annotations:
+        oberth.ci/workspace-mounts: none
+        oberth.ci/workspace-env: none
+    container:
+      image: golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3
+      workingDir: /work/src
+      command:
+      - /bin/sh
+      - -c
+      args:
+      - |
+        set -eu
+        exec /usr/bin/env -i PATH=/usr/bin:/bin HOME=/tmp \
+          OBERTH_RELEASE_SHA="$OBERTH_RELEASE_SHA" OBERTH_RELEASE_TAG="$OBERTH_RELEASE_TAG" \
+          "$@"
+      - /usr/bin/python3
+      - -I
+      - -S
+      - -B
+      - /work/src/.oberth/verify-release-tools.py
+      env:
+      - name: PATH
+        value: /usr/bin:/bin
+      volumeMounts:
+      - name: bootstrap-tools
+        mountPath: /tmp/oberth-tools
+        readOnly: true
+      resources:
+        requests:
+          cpu: '1'
+          memory: 256Mi
+        limits:
+          cpu: '1'
+          memory: 256Mi
   - name: copy-trivy
     automountServiceAccountToken: false
     metadata:

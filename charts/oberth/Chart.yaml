@@ -2,6 +2,6 @@ apiVersion: v2
 name: oberth
 description: Namespace-scoped, Job-native CI for a single-node Kubernetes cluster
 type: application
-version: 0.17.2
-appVersion: "v0.17.2"
+version: 0.17.3
+appVersion: "v0.17.3"
 kubeVersion: ">=1.33.0-0"

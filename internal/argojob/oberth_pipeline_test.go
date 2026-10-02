@@ -142,17 +142,18 @@ func TestOberthReleasePipelineIsAdmissible(t *testing.T) {
 	}
 
 	assertBurnGraph(t, built, "release", map[string]string{
-		"release-setup":            "",
-		"release-lint":             "release-setup",
-		"release-scan":             "release-setup",
-		"release-test":             "release-lint && release-scan",
-		"release-chart-test":       "release-setup",
-		"release-build":            "release-test && release-chart-test",
-		"release-sign-binaries":    "release-build",
-		"release-publish-images":   "release-build",
-		"release-publish-homebrew": "release-publish-public",
-		"release-package-chart":    "release-publish-images",
-		"release-publish-chart":    "release-sign-binaries && release-package-chart",
+		"release-setup":                  "",
+		"release-lint":                   "release-setup",
+		"release-scan":                   "release-setup",
+		"release-test":                   "release-lint && release-scan",
+		"release-chart-test":             "release-setup",
+		"release-build":                  "release-test && release-chart-test && release-verify-publisher-tools",
+		"release-verify-publisher-tools": "release-setup",
+		"release-sign-binaries":          "release-build",
+		"release-publish-images":         "release-build",
+		"release-publish-homebrew":       "release-publish-public",
+		"release-package-chart":          "release-publish-images",
+		"release-publish-chart":          "release-sign-binaries && release-package-chart",
 		// TEMPORARY: release-verify absorbs homebrew's outcome via
 		// status functions because the homebrew-tap-key secret is not
 		// yet seeded in OpenBao. Restore to just
