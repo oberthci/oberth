@@ -236,18 +236,19 @@ func readWatchRecoveryPlan(cfg Config) (*watchRecoveryPlan, error) {
 	if !isSHA256Digest("sha256:" + p.ValuesSHA256) {
 		return nil, errors.New("v2 watch public values digest is required")
 	}
-	if p.Mode == "failed-adoption-recovery" {
+	switch p.Mode {
+	case "failed-adoption-recovery":
 		if p.Origin == nil || p.Release.Revision != 72 || p.Release.Status != "failed" || p.Release.Chart != "oberth-0.16.25" || p.Release.PreviousRevision != 71 {
 			return nil, errors.New("watch recovery is limited to the reviewed failed adoption revision")
 		}
 		if p.Resume != nil {
 			return nil, errors.New("unsupported watch recovery resume state")
 		}
-	} else if p.Mode == "post-handoff-resume" {
+	case "post-handoff-resume":
 		if p.Origin == nil || p.Resume == nil || p.Release.Revision != 72 || p.Release.Status != "failed" || p.Release.Chart != "oberth-0.16.25" || p.Release.PreviousRevision != 71 {
 			return nil, errors.New("invalid post-handoff recovery binding")
 		}
-	} else {
+	default:
 		return nil, errors.New("unsupported watch recovery mode")
 	}
 	seen := map[string]bool{}
