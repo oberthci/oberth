@@ -40,17 +40,15 @@ const (
 	// There is no runner image: Jobs run repository-declared standard golang
 	// images executing `go -C .oberth run .`.
 	//
-	// Substrate 2026-09-25 (tag substrate-libexpat2850-20260925): rebuilt
-	// from the Dockerfile for CVE-2026-93990 (HIGH, libexpat XML Injection
-	// via Malformed UTF-16 Input) that failed the v0.16.0 and v0.16.1
-	// release gates. Reviewed content delta vs the previous substrate
-	// (13dccb32..., tag substrate-libcurl8220-20260906), identical on both
-	// platforms: libexpat 2.8.4-r0 -> 2.8.5-r0 (the CVE fix, exact-pinned
-	// in the Dockerfile), ca-certificates 20260611-r0 -> 20260909-r0 and
-	// tzdata 2026c-r0 -> 2026d-r0 (repo patch level); 36 packages before
-	// and after, nothing added or removed; /usr/local/bin/oberth present;
-	// exactly two platform children, no attestation manifests.
-	ServerSubstrate = ServerRepository + "@sha256:d15a8efe44f4c0f1ddba26cf49a1e378b34d33faafc686e4554a1e65a44cf226"
+	// Substrate 2026-10-02 (tag substrate-pcre2-1049-be6edf8d65de): rebuilt
+	// from cleanup source be6edf8d65de3a93877231dad6568fd8ebf2b8c7 with
+	// pcre2 10.49-r0 and libcrypto3/libssl3
+	// 3.5.9-r0 exact-pinned for the reviewed Alpine 3.23 repository. The
+	// package inventory remains 36 packages on both linux/amd64 and
+	// linux/arm64, with no packages added or removed; /usr/local/bin/oberth
+	// is present. This is an OCI index with exactly two platform children and
+	// no attestation manifests.
+	ServerSubstrate = ServerRepository + "@sha256:0122f7889678299dd953ae13f63ca9ab6b02f803475bf75ec6e3ada43ec5bec6"
 )
 
 // Kind selects a release image contract. Only the server image remains.
