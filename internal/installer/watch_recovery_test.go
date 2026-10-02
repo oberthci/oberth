@@ -144,32 +144,56 @@ func TestWatchRecoveryPublicDeploymentAnnotations(t *testing.T) {
 			"oberth.ci/source":                  origin,
 		}}
 	}
+	const deployment = "cloudflared-watch-oberth-v2"
 	for _, revision := range []string{"1", "2", "9223372036854775807"} {
-		if err := validateRecoveryMetadata("Deployment", metadata(revision, source)); err != nil {
+		if err := validateRecoveryMetadata("Deployment", deployment, metadata(revision, source)); err != nil {
 			t.Fatalf("canonical public deployment metadata refused: %v", err)
 		}
 	}
 	for _, revision := range []string{"", "0", "-1", "+2", "02", "2 ", " 2", "2.0", "2e0", "9223372036854775808", strings.Repeat("1", 100)} {
-		if validateRecoveryMetadata("Deployment", metadata(revision, source)) == nil {
+		if validateRecoveryMetadata("Deployment", deployment, metadata(revision, source)) == nil {
 			t.Fatalf("noncanonical or unbounded revision %q accepted", revision)
 		}
 	}
-	for _, origin := range []string{"", source + "/", "https://" + source, strings.Replace(source, "oberthci", "other", 1), strings.ToUpper(source)} {
-		if validateRecoveryMetadata("Deployment", metadata("2", origin)) == nil {
-			t.Fatal("unapproved source accepted")
+
+	allowed := []struct{ kind, name string }{
+		{"ServiceAccount", "cloudflared-watch"},
+		{"ConfigMap", "cloudflared-watch-openbao-ca"},
+		{"ConfigMap", "cloudflared-watch-oberth-origin-ca"},
+		{"Deployment", deployment},
+	}
+	for _, object := range allowed {
+		if err := validateRecoveryMetadata(object.kind, object.name, watchPublicMetadata{Annotations: map[string]string{"oberth.ci/source": source}}); err != nil {
+			t.Errorf("reviewed Terraform source marker refused for %s/%s: %v", object.kind, object.name, err)
+		}
+		if err := validateRecoveryMetadata(object.kind, object.name, watchPublicMetadata{}); err != nil {
+			t.Errorf("missing optional source marker refused for %s/%s: %v", object.kind, object.name, err)
 		}
 	}
-	for _, kind := range []string{"ServiceAccount", "ConfigMap"} {
-		for key, value := range metadata("2", source).Annotations {
-			if validateRecoveryMetadata(kind, watchPublicMetadata{Annotations: map[string]string{key: value}}) == nil {
-				t.Fatalf("deployment-only annotation admitted for %s", kind)
-			}
+
+	for _, object := range []struct{ kind, name string }{
+		{"ServiceAccount", "other"},
+		{"ConfigMap", "cloudflared-watch"},
+		{"Deployment", "other"},
+		{"Secret", "cloudflared-watch"},
+	} {
+		if validateRecoveryMetadata(object.kind, object.name, watchPublicMetadata{Annotations: map[string]string{"oberth.ci/source": source}}) == nil {
+			t.Errorf("Terraform source marker accepted for unreviewed %s/%s", object.kind, object.name)
+		}
+	}
+	for _, origin := range []string{"", source + "/", "https://" + source, strings.Replace(source, "oberthci", "other", 1), strings.ToUpper(source)} {
+		if validateRecoveryMetadata("Deployment", deployment, metadata("2", origin)) == nil {
+			t.Fatal("unapproved source accepted")
 		}
 	}
 	unknown := metadata("2", source)
 	unknown.Annotations["oberth.ci/other"] = "public"
-	if validateRecoveryMetadata("Deployment", unknown) == nil {
+	if validateRecoveryMetadata("Deployment", deployment, unknown) == nil {
 		t.Fatal("new annotation allowance admitted an unrelated key")
+	}
+	wrongKey := watchPublicMetadata{Annotations: map[string]string{"oberth.ci/source-path": source}}
+	if validateRecoveryMetadata("Deployment", deployment, wrongKey) == nil {
+		t.Fatal("Terraform source marker accepted under an unapproved key")
 	}
 }
 

@@ -232,7 +232,7 @@ func readWatchRecoveryPlan(cfg Config) (*watchRecoveryPlan, error) {
 			return nil, errors.New("invalid v2 watch object")
 		}
 		seen[key] = true
-		if err := validateRecoveryMetadata(o.Kind, o.Metadata); err != nil {
+		if err := validateRecoveryMetadata(o.Kind, o.Name, o.Metadata); err != nil {
 			return nil, err
 		}
 		if _, err := recoveryTarget(o, false, p.Namespace); err != nil {
@@ -257,7 +257,7 @@ func watchRecoveryDeadline(p watchRecoveryPlan) bool {
 	return !p.CreatedAt.After(now) && now.Before(p.ExpiresAt) && p.ExpiresAt.After(p.CreatedAt) && p.ExpiresAt.Sub(p.CreatedAt) <= 30*time.Minute
 }
 
-func validateRecoveryMetadata(kind string, m watchPublicMetadata) error {
+func validateRecoveryMetadata(kind, name string, m watchPublicMetadata) error {
 	for key := range m.Labels {
 		if key != "app.kubernetes.io/name" && key != "app.kubernetes.io/instance" && key != "app.kubernetes.io/component" && key != "app.kubernetes.io/managed-by" && key != "helm.sh/chart" {
 			return errors.New("unapproved watch metadata label")
@@ -274,7 +274,7 @@ func validateRecoveryMetadata(kind string, m watchPublicMetadata) error {
 			}
 			continue
 		}
-		if kind == "Deployment" && key == "oberth.ci/source" && value == "github.com/oberthci/terraform//k8s/cloudflared-watch" {
+		if key == "oberth.ci/source" && value == "github.com/oberthci/terraform//k8s/cloudflared-watch" && watchTerraformSourceObject(kind, name) {
 			continue
 		}
 		if key != "kubectl.kubernetes.io/last-applied-configuration" || len(value) > 262144 || !uniqueWatchJSON([]byte(value)) {
@@ -304,6 +304,18 @@ func validateRecoveryMetadata(kind string, m watchPublicMetadata) error {
 		}
 	}
 	return nil
+}
+
+func watchTerraformSourceObject(kind, name string) bool {
+	switch kind + "/" + name {
+	case "ServiceAccount/cloudflared-watch",
+		"ConfigMap/cloudflared-watch-openbao-ca",
+		"ConfigMap/cloudflared-watch-oberth-origin-ca",
+		"Deployment/cloudflared-watch-oberth-v2":
+		return true
+	default:
+		return false
+	}
 }
 
 func recoveryTarget(o watchRecoveryObject, defaulted bool, ns string) (runtime.Object, error) {
@@ -348,7 +360,7 @@ func recoveryTarget(o watchRecoveryObject, defaulted bool, ns string) (runtime.O
 	if defaulted && (string(v.meta.GetUID()) != o.UID || v.meta.GetResourceVersion() != "") {
 		return nil, errors.New("defaulted target must bind UID and omit variable RV")
 	}
-	if validateRecoveryMetadata(o.Kind, watchPublicMetadata{v.meta.GetLabels(), v.meta.GetAnnotations()}) != nil {
+	if validateRecoveryMetadata(o.Kind, o.Name, watchPublicMetadata{v.meta.GetLabels(), v.meta.GetAnnotations()}) != nil {
 		return nil, errors.New("unapproved target metadata")
 	}
 	return obj, nil
