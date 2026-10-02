@@ -144,7 +144,10 @@ func TestPublisherVerifierHasCredentialFreeRetainedLogGate(t *testing.T) {
 	if !foundReadOnlyTools {
 		t.Fatal("publisher verifier must inspect the shared tool claim read-only")
 	}
-	if !strings.Contains(strings.Join(verifier.Container.Args, "\n"), "/work/src/.oberth/verify-release-tools.py") {
+	if len(verifier.Container.Args) < 7 || verifier.Container.Args[1] != "publisher-verifier" ||
+		verifier.Container.Args[2] != "/usr/bin/python3" || verifier.Container.Args[3] != "-I" ||
+		verifier.Container.Args[4] != "-S" || verifier.Container.Args[5] != "-B" ||
+		verifier.Container.Args[6] != "/work/src/.oberth/verify-release-tools.py" {
 		t.Fatal("publisher verifier does not run the exact release verifier")
 	}
 	var buildDependency string

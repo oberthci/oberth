@@ -273,6 +273,7 @@ spec:
         exec /usr/bin/env -i PATH=/usr/bin:/bin HOME=/tmp \
           OBERTH_RELEASE_SHA="$OBERTH_RELEASE_SHA" OBERTH_RELEASE_TAG="$OBERTH_RELEASE_TAG" \
           "$@"
+      - publisher-verifier
       - /usr/bin/python3
       - -I
       - -S
