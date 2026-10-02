@@ -335,6 +335,26 @@ func (fixture *groupFixture) run(t *testing.T, id string) model.Run {
 	return run
 }
 
+// awaitTerminal waits for the durable run notification rather than assuming
+// that admission of its successor means finalization has also completed.
+func (fixture *groupFixture) awaitTerminal(t *testing.T, id string) model.Run {
+	t.Helper()
+	deadline := time.NewTimer(15 * time.Second)
+	defer deadline.Stop()
+	for {
+		changed := fixture.scheduler.signals.Run(id)
+		run := fixture.run(t, id)
+		if run.Status.Terminal() {
+			return run
+		}
+		select {
+		case <-changed:
+		case <-deadline.C:
+			t.Fatalf("run %s did not reach terminal state; last state: %#v", id, run)
+		}
+	}
+}
+
 // awaitCreated waits for the next Job creations and returns them as a set.
 func (fixture *groupFixture) awaitCreated(t *testing.T, count int) map[string]bool {
 	t.Helper()
@@ -564,7 +584,7 @@ func TestSchedulerHoldsTheGroupUntilAFailedWaitsWorkflowIsDeleted(t *testing.T) 
 		t.Fatalf("the next group run was %q while the scheduler read the old Workflow and %q while it deleted it; "+
 			"want it still waiting on the group both times", terminal, deleted)
 	}
-	failed := fixture.run(t, holder.ID)
+	failed := fixture.awaitTerminal(t, holder.ID)
 	if failed.Status != model.RunFailed || failed.Phase != "job" || failed.Error != "watch stream reset" {
 		t.Fatalf("holder whose Wait failed = %#v", failed)
 	}
