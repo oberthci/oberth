@@ -1421,6 +1421,11 @@ four original UIDs and fresh failed72 record UID/RV/history. Its maximum
 separate rendered/defaulted targets. The sole permitted relinquishment is the
 legacy Update apps/v1 manager's fetch-token.args leaf. Full metadata UID/RV CAS
 preserves every other entry and spec; shared/atomic/unknown ownership refuses.
+When a resumed plan uses a newer chart, each prior and fresh rendered/defaulted
+target must carry the exact `helm.sh/chart` label for its plan's chart version;
+that single version-derived label is normalized only for prior/fresh target
+continuity. All other target metadata and the observed live metadata remain
+fully compared.
 All four real Force=false SSA DryRunAll requests precede the CAS and repeat
 after it, using the hash-bound Helm4.2.3 manager. Confirmed receipts survive
 later failure; uncertain outcomes stop without automatic retry or rollback.

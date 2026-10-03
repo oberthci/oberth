@@ -236,7 +236,7 @@ func realWatchObjects(ns, ca string) []runtime.Object {
 	}
 }
 
-func realWatchManifest(t *testing.T, objects []runtime.Object, original bool, ns string) string {
+func realWatchManifest(t *testing.T, objects []runtime.Object, original bool, chartVersion, ns string) string {
 	t.Helper()
 	var out strings.Builder
 	for _, obj := range objects {
@@ -247,6 +247,13 @@ func realWatchManifest(t *testing.T, objects []runtime.Object, original bool, ns
 		}
 		labels := v.meta.GetLabels()
 		labels["app.kubernetes.io/managed-by"] = "Helm"
+		if !original {
+			version := canonicalChartVersion(chartVersion)
+			if version == "" {
+				t.Fatal("invalid real fixture chart version")
+			}
+			labels["helm.sh/chart"] = "oberth-" + strings.ReplaceAll(strings.TrimPrefix(version, "v"), "+", "_")
+		}
 		v.meta.SetAnnotations(map[string]string{"meta.helm.sh/release-name": "oberth", "meta.helm.sh/release-namespace": ns})
 		if dep, ok := x.(*appsv1.Deployment); ok {
 			dep.Spec.Template.Spec.InitContainers[0].Args = []string{"public-successor-args"}
@@ -415,7 +422,7 @@ func realWatchFailedScenario(t *testing.T, ctx context.Context, d Deps, tools re
 	if _, err = runBoundedRecoveryHelm(ctx, tools.Kubectl, []string{"--kubeconfig", *realWatchConfig, "apply", "--server-side=false", "-f", input, "-n", ns.Name}); err != nil {
 		t.Fatal("genuine CSA fixture creation failed")
 	}
-	oldChart := realWatchChart(t, "0.16.25", realWatchManifest(t, objects, true, ns.Name))
+	oldChart := realWatchChart(t, "0.16.25", realWatchManifest(t, objects, true, "v0.16.25", ns.Name))
 	cfg := Config{Namespace: ns.Name, ChartVersion: "v0.16.25", ChartPath: oldChart, Upgrade: true, WatchAdoptionPlan: filepath.Join(t.TempDir(), "public-v1-plan.json")}
 	targets := realWatchTargets(t, ctx, cfg, d)
 	got := realWatchConflicts(t, ctx, d, ns.Name, targets)
@@ -443,7 +450,7 @@ func realWatchFailedScenario(t *testing.T, ctx context.Context, d Deps, tools re
 		t.Fatal("original normal Helm unexpectedly succeeded")
 	}
 	realWatchPreserveOriginal(t, ctx, d, ns.Name, got, receipt)
-	corrected := realWatchChart(t, "0.16.26", realWatchManifest(t, objects, false, ns.Name))
+	corrected := realWatchChart(t, "0.16.26", realWatchManifest(t, objects, false, "v0.16.26", ns.Name))
 	cfg.ChartVersion = "v0.16.26"
 	cfg.ChartPath = ""
 	cfg.watchChart = corrected
@@ -485,6 +492,7 @@ func realWatchPlan(t *testing.T, ctx context.Context, cfg Config, d Deps, target
 			dep.Generation++
 		}
 		def, _ := json.Marshal(defaulted)
+		def = recoveryTargetWithChartLabel(t, def, p.ChartVersion)
 		p.Objects = append(p.Objects, watchRecoveryObject{Kind: kind, Name: tv.meta.GetName(), UID: string(observed.meta.GetUID()), ResourceVersion: observed.meta.GetResourceVersion(), Generation: observed.meta.GetGeneration(), Metadata: watchPublicMetadata{observed.meta.GetLabels(), observed.meta.GetAnnotations()}, ManagedFields: observed.meta.GetManagedFields(), Spec: observed.spec, Target: render, DefaultedTarget: def})
 	}
 	return p
@@ -732,16 +740,14 @@ func TestWatchRecoveryRealAPI(t *testing.T) {
 				// and the one-row receipt just emitted by the confirmed CAS.
 				priorPlan.CreatedAt, priorPlan.ExpiresAt = time.Now().Add(-20*time.Minute), time.Now().Add(-time.Minute)
 				priorPlan.Origin = &watchRecoveryOrigin{Plan: watchPublicFile{Path: "synthetic-original-plan", SHA256: strings.Repeat("a", 64)}, Receipt: watchPublicFile{Path: "synthetic-original-receipt", SHA256: strings.Repeat("b", 64)}, Confirmed: []watchAdopted{}}
-				fresh := priorPlan
-				fresh.Objects = append([]watchRecoveryObject(nil), priorPlan.Objects...)
+				cfg.ChartVersion = "v0.16.27"
+				objects := realWatchObjects(cfg.Namespace, string(d.RestConfig.CAData))
+				cfg.watchChart = realWatchChart(t, "0.16.27", realWatchManifest(t, objects, false, cfg.ChartVersion, cfg.Namespace))
+				freshTargets := realWatchTargets(t, ctx, cfg, local)
+				fresh := realWatchPlan(t, ctx, cfg, local, freshTargets)
+				fresh.ValuesSHA256 = priorPlan.ValuesSHA256
 				fresh.CreatedAt, fresh.ExpiresAt = time.Now().Add(-time.Second), time.Now().Add(15*time.Minute)
 				fresh.Origin = priorPlan.Origin
-				for i := range fresh.Objects {
-					if fresh.Objects[i].Kind == "Deployment" {
-						fresh.Objects[i].ResourceVersion = after.ResourceVersion
-						fresh.Objects[i].ManagedFields = after.ManagedFields
-					}
-				}
 				priorArtifact := writeRealResumeArtifact(t, priorPlan)
 				receiptArtifact := writeRealResumeArtifact(t, rows)
 				fresh.Mode = "post-handoff-resume"

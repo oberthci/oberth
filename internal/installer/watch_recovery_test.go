@@ -247,6 +247,8 @@ func recoveryUnitFixture(t *testing.T) (Config, Deps, *fake.Clientset, *recovery
 		dv.meta.SetUID(types.UID(o.UID))
 		render, _ := json.Marshal(target)
 		def, _ := json.Marshal(defaulted)
+		render = recoveryTargetWithChartLabel(t, render, p.ChartVersion)
+		def = recoveryTargetWithChartLabel(t, def, p.ChartVersion)
 		entries := v.meta.GetManagedFields()
 		if entries == nil {
 			entries = []metav1.ManagedFieldsEntry{}
@@ -389,6 +391,51 @@ func makeRecoveryResume(t *testing.T, prior watchRecoveryPlan, committed watchRe
 	return committed
 }
 
+func recoveryTargetWithChartLabel(t *testing.T, raw json.RawMessage, chartVersion string) json.RawMessage {
+	t.Helper()
+	var object map[string]any
+	if err := json.Unmarshal(raw, &object); err != nil {
+		t.Fatal(err)
+	}
+	metadata, ok := object["metadata"].(map[string]any)
+	if !ok {
+		t.Fatal("target metadata missing")
+	}
+	labels, ok := metadata["labels"].(map[string]any)
+	if !ok {
+		t.Fatal("target labels missing")
+	}
+	version := canonicalChartVersion(chartVersion)
+	if version == "" {
+		t.Fatalf("invalid test chart version %q", chartVersion)
+	}
+	labels["helm.sh/chart"] = "oberth-" + strings.ReplaceAll(strings.TrimPrefix(version, "v"), "+", "_")
+	updated, err := json.Marshal(object)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return updated
+}
+
+func setRecoveryPlanChartVersion(t *testing.T, p *watchRecoveryPlan, version string) {
+	t.Helper()
+	p.ChartVersion = version
+	for i := range p.Objects {
+		p.Objects[i].Target = recoveryTargetWithChartLabel(t, p.Objects[i].Target, version)
+		p.Objects[i].DefaultedTarget = recoveryTargetWithChartLabel(t, p.Objects[i].DefaultedTarget, version)
+	}
+}
+
+func cloneRecoveryPlanObjects(objects []watchRecoveryObject) []watchRecoveryObject {
+	cloned := append([]watchRecoveryObject(nil), objects...)
+	for i := range cloned {
+		cloned[i].Spec = append(json.RawMessage(nil), objects[i].Spec...)
+		cloned[i].Target = append(json.RawMessage(nil), objects[i].Target...)
+		cloned[i].DefaultedTarget = append(json.RawMessage(nil), objects[i].DefaultedTarget...)
+	}
+	return cloned
+}
+
 func TestWatchRecoveryBoundedResumeValidationAndNoWriteExecution(t *testing.T) {
 	cfg, deps, client, state, out := recoveryUnitFixture(t)
 	prior := *cfg.watchRecovery
@@ -407,6 +454,61 @@ func TestWatchRecoveryBoundedResumeValidationAndNoWriteExecution(t *testing.T) {
 	resume := makeRecoveryResume(t, prior, committed, oldReceipt)
 	if err = validateRecoveryResume(resume); err != nil {
 		t.Fatalf("valid receipt-bound resume refused: %v", err)
+	}
+	// The current objects were rendered by the prior chart version. A resume
+	// renders the same targets from the new chart; only helm.sh/chart changes.
+	prior.ChartVersion = "v0.17.6"
+	committed.ChartVersion = "v0.17.7"
+	prior.Objects = cloneRecoveryPlanObjects(prior.Objects)
+	committed.Objects = cloneRecoveryPlanObjects(committed.Objects)
+	setRecoveryPlanChartVersion(t, &prior, prior.ChartVersion)
+	setRecoveryPlanChartVersion(t, &committed, committed.ChartVersion)
+	versionChanged := makeRecoveryResume(t, prior, committed, oldReceipt)
+	if err = validateRecoveryResume(versionChanged); err != nil {
+		t.Fatalf("resume across chart versions was refused: %v", err)
+	}
+	badChartLabel := versionChanged
+	badChartLabel.Objects = append([]watchRecoveryObject(nil), versionChanged.Objects...)
+	badChartLabel.Objects[0].DefaultedTarget = recoveryTargetWithChartLabel(t, badChartLabel.Objects[0].DefaultedTarget, "v0.17.6")
+	if validateRecoveryResume(badChartLabel) == nil {
+		t.Fatal("resume accepted a chart label that did not match its plan version")
+	}
+	badRenderedChartLabel := versionChanged
+	badRenderedChartLabel.Objects = cloneRecoveryPlanObjects(versionChanged.Objects)
+	badRenderedChartLabel.Objects[0].Target = recoveryTargetWithChartLabel(t, badRenderedChartLabel.Objects[0].Target, "v0.17.6")
+	if validateRecoveryResume(badRenderedChartLabel) == nil {
+		t.Fatal("resume accepted a rendered target chart label that did not match its plan version")
+	}
+	otherMetadataDrift := versionChanged
+	otherMetadataDrift.Objects = cloneRecoveryPlanObjects(versionChanged.Objects)
+	var changedTarget map[string]any
+	if json.Unmarshal(otherMetadataDrift.Objects[0].DefaultedTarget, &changedTarget) != nil {
+		t.Fatal("could not decode target metadata fixture")
+	}
+	changedLabels := changedTarget["metadata"].(map[string]any)["labels"].(map[string]any)
+	changedLabels["app.kubernetes.io/name"] = "different-name"
+	otherMetadataDrift.Objects[0].DefaultedTarget, _ = json.Marshal(changedTarget)
+	if validateRecoveryResume(otherMetadataDrift) == nil {
+		t.Fatal("resume accepted unrelated target metadata drift")
+	}
+
+	// Exercise the configured-values path used by the CLI dry-run, where v1
+	// rejects these compatibility values before the v2 plan can authorize them.
+	valuesCfg, _, canonicalValues := recoveryValuesFixture(t)
+	prior.ValuesSHA256 = watchValuesDigest(canonicalValues)
+	versionChanged.ValuesSHA256 = prior.ValuesSHA256
+	versionChanged.Resume = &watchRecoveryResume{PriorPlan: writeResumeEvidence(t, prior), HandoffReceipt: writeResumeEvidence(t, oldReceipt)}
+	valuesCfg.Namespace = versionChanged.Namespace
+	valuesCfg.ChartVersion = versionChanged.ChartVersion
+	planPath := filepath.Join(t.TempDir(), "resume-plan.json")
+	planRaw, marshalErr := json.Marshal(versionChanged)
+	if marshalErr != nil || os.WriteFile(planPath, planRaw, 0600) != nil {
+		t.Fatal("could not write resumed public plan")
+	}
+	valuesCfg.WatchAdoptionPlan = planPath
+	configured, valuesErr := readWatchConfiguredValues(valuesCfg)
+	if valuesErr != nil || !bytes.Equal(configured, canonicalValues) {
+		t.Fatalf("configured values path refused the valid cross-version resume: %v", valuesErr)
 	}
 	for name, mutate := range map[string]func(*watchRecoveryPlan, []watchAdopted){
 		"wrong_prior_mode": func(p *watchRecoveryPlan, _ []watchAdopted) {

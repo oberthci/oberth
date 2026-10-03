@@ -324,15 +324,30 @@ func validateRecoveryResume(fresh watchRecoveryPlan) error {
 		if !ok || before.UID != after.UID || before.Generation != after.Generation || !sameRecoveryMetadataFromPlan(before.Metadata, after.Metadata) || !sameWatchJSON(before.Spec, after.Spec) {
 			return errors.New("prior and resumed watch object differ")
 		}
+		beforeRendered, beforeRenderedErr := recoveryTarget(before, false, fresh.Namespace)
+		afterRendered, afterRenderedErr := recoveryTarget(after, false, fresh.Namespace)
 		beforeTarget, beforeErr := recoveryTarget(before, true, fresh.Namespace)
 		afterTarget, afterErr := recoveryTarget(after, true, fresh.Namespace)
+		beforeRenderedMeta, beforeRenderedMetaErr := watchCompleteMetadata(beforeRendered)
+		afterRenderedMeta, afterRenderedMetaErr := watchCompleteMetadata(afterRendered)
 		beforeMeta, metaErr := watchCompleteMetadata(beforeTarget)
 		afterMeta, afterMetaErr := watchCompleteMetadata(afterTarget)
-		if beforeErr != nil || afterErr != nil || metaErr != nil || afterMetaErr != nil {
+		if beforeRenderedErr != nil || afterRenderedErr != nil || beforeErr != nil || afterErr != nil || beforeRenderedMetaErr != nil || afterRenderedMetaErr != nil || metaErr != nil || afterMetaErr != nil {
 			return errors.New("prior and resumed complete metadata is invalid")
 		}
+		if !recoveryTargetChartLabel(beforeRenderedMeta, prior.ChartVersion) || !recoveryTargetChartLabel(afterRenderedMeta, fresh.ChartVersion) || !recoveryTargetChartLabel(beforeMeta, prior.ChartVersion) || !recoveryTargetChartLabel(afterMeta, fresh.ChartVersion) {
+			return errors.New("prior or resumed chart metadata label differs from its plan")
+		}
+		// Helm renders helm.sh/chart from the selected chart version. A resume
+		// may therefore change only this label while all other complete target
+		// metadata remains byte-for-byte equivalent.
+		delete(beforeRenderedMeta.Labels, "helm.sh/chart")
+		delete(afterRenderedMeta.Labels, "helm.sh/chart")
+		delete(beforeMeta.Labels, "helm.sh/chart")
+		delete(afterMeta.Labels, "helm.sh/chart")
+		beforeRenderedMeta.ManagedFields, afterRenderedMeta.ManagedFields = nil, nil
 		beforeMeta.ManagedFields, afterMeta.ManagedFields = nil, nil
-		if !sameWatchCompleteMetadata(beforeMeta, afterMeta) {
+		if !sameWatchCompleteMetadata(beforeRenderedMeta, afterRenderedMeta) || !sameWatchCompleteMetadata(beforeMeta, afterMeta) {
 			return errors.New("prior and resumed complete metadata differs")
 		}
 		if before.Kind != "Deployment" {
@@ -350,6 +365,15 @@ func validateRecoveryResume(fresh watchRecoveryPlan) error {
 		}
 	}
 	return nil
+}
+
+func recoveryTargetChartLabel(meta metav1.ObjectMeta, chartVersion string) bool {
+	version := canonicalChartVersion(chartVersion)
+	if version == "" {
+		return false
+	}
+	want := "oberth-" + strings.ReplaceAll(strings.TrimPrefix(version, "v"), "+", "_")
+	return meta.Labels["helm.sh/chart"] == want
 }
 
 func exactRecoveryReceiptRow(raw []byte) bool {
