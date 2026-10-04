@@ -574,10 +574,35 @@ func applyProvidedDeployKey(ctx context.Context, cfg Config, deps Deps, privateK
 	if err != nil {
 		name = "default"
 	}
-	_, err = run(ctx, privateKey, "kubectl", kubectlOberthArgs(cfg, deps, true, "upstream", "provide-key", name)...)
-	if err != nil {
-		return fmt.Errorf("import existing work key into OpenBao: %w", err)
+	timeout := cfg.Timeout
+	if timeout <= 0 {
+		timeout = DefaultTimeout
 	}
+	readyCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	announced := false
+	for {
+		out, importErr := run(readyCtx, privateKey, "kubectl", kubectlOberthArgs(cfg, deps, true, "upstream", "provide-key", name)...)
+		if importErr == nil {
+			break
+		}
+		// The daemon's witness recovery can lag behind Pod Running. Only the
+		// live audit gate may approve the import; retries never bypass it.
+		gatePending := strings.Contains(string(out), "daemon audit mutation gate rejected upstream.identity.import:") || strings.Contains(string(out), "request daemon audit mutation gate for upstream.identity.import:")
+		if !gatePending {
+			return fmt.Errorf("import existing work key into OpenBao: %w", importErr)
+		}
+		if !announced && deps.Output != nil {
+			_, _ = fmt.Fprintln(deps.Output, "Waiting for audit integrity before importing the work key...")
+			announced = true
+		}
+		select {
+		case <-readyCtx.Done():
+			return fmt.Errorf("waiting for audit integrity before work-key import: %w", readyCtx.Err())
+		case <-time.After(pollInterval(deps)):
+		}
+	}
+
 	return nil
 }
 

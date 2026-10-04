@@ -83,3 +83,5 @@ No credentials are included in this directory.
 026-openbao-unseal-process-arguments.txt
 
 027-install-forge-org-onboarding.txt
+
+028-onboarding-audit-readiness.txt

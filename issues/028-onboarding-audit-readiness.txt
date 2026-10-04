@@ -1,0 +1,17 @@
+Title: Work-key import can race initial Rekor audit readiness
+Status: Fixed; unattended fresh install and full-path clone passed
+Observed: 2026-10-05
+
+On a fresh cluster with Rekor enabled, all infrastructure became available,
+but immediate work-key import failed after Pod Running. The same protected
+import succeeded when retried. Listing upstreams is read-only and can work
+before the daemon's external-witness audit gate permits mutations.
+
+Retry only failures reported by the live audit gate, bounded by the install
+timeout and cancellation. Keep the key on stdin and retain the gate check on
+every attempt. Identity conflicts, authentication failures and other import
+errors must not be retried as readiness failures.
+
+Acceptance: an unattended fresh install with Rekor and work-key import
+finishes without manual retry; a permanently rejected gate times out without
+mutating an identity, and non-gate errors are returned immediately.
