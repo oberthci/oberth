@@ -1,0 +1,25 @@
+Title: Keep bundled Rekor available without Kubernetes Secrets
+Status: Implemented; live signing, restart persistence and role isolation verified
+Observed: 2026-10-04
+
+The current installer stores the Rekor signing key and MySQL credentials in
+Kubernetes Secrets. The no-Secrets patch temporarily disables that bundled
+installation. This is a limitation of our deployment wiring, not of Rekor.
+
+Rekor v1.5.3 registers the HashiVault KMS provider. Its pinned provider
+v1.10.8 accepts both hashivault:// and openbao:// references and performs
+signing through the Transit API. Integrate a scoped, renewable OpenBao login,
+TLS trust, and a stable non-exportable ECDSA P-256 Transit key. Move database
+credentials into OpenBao and deliver them through protected runtime files.
+Restore the setup option only after the whole rendered/runtime stack uses
+zero Kubernetes Secrets and a restart preserves the log signing identity.
+
+References:
+https://github.com/sigstore/rekor/blob/v1.5.3/pkg/signer/signer.go
+https://docs.sigstore.dev/cosign/key_management/overview/#hashicorp-vault-and-openbao
+https://github.com/sigstore/sigstore/blob/pkg/signature/kms/hashivault/v1.10.8/pkg/signature/kms/hashivault/client.go
+
+Acceptance: install in fresh kind, append and verify an audit entry, restart
+Rekor/OpenBao, append again with the same log identity, check token renewal,
+verify pipeline roles cannot sign or read database credentials, and confirm
+zero Secret resources or embedded credential values in Kubernetes objects.

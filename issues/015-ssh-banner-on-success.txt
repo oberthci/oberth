@@ -1,0 +1,25 @@
+ISSUE 015: Successful Git operations print key-registration troubleshooting guidance
+
+Status: Open
+Reported: 2026-10-04
+Affected version: Oberth v0.17.9 (6f40126bc8f6), macOS
+
+Priority: Low
+Evidence: Reproduced for each successful ls-remote in the clone test.
+
+Reproduction and observed behavior
+Use a registered SSH key against a Ready Oberth instance and run:
+  git ls-remote ssh://git@localhost:30022/github/oberthci/oberth.git HEAD
+The request succeeds, but still prints:
+  Oberth CI — if your key is not registered, an admin can add it:
+  kubectl exec -i -n oberth deploy/oberth -- oberth uplink add - <you>@<host> < key.pub
+
+Expected behavior
+Keep routine successful Git output focused on the requested operation. Offer
+registration guidance in authentication diagnostics or an explicit help flow.
+If the banner must be emitted before authentication, make it concise and
+neutral rather than presenting unnecessary troubleshooting on every request.
+
+References
+- ../setup-test-results/02-clone-verification.txt
+- ../setup-test-results/REPORT.txt, finding 13

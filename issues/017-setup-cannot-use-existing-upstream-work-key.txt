@@ -1,0 +1,83 @@
+ISSUE 017: Setup cannot use an existing work SSH key for organization authentication
+
+Status: Open
+Reported: 2026-10-04
+Affected version: Oberth v0.17.9 (6f40126bc8f6), macOS
+Priority: High
+Evidence: User requirement, reproduced wizard flow, and matching release source inspected during the setup review.
+
+User requirement
+An engineer connecting Oberth to a corporate GitHub organization must be able
+to use their existing work SSH identity. Generating a new upstream key must be
+optional. Setup targets the organization, not a single repository.
+
+Reproduction
+1. Have an existing work SSH key registered as an authentication key on a
+   GitHub account with access to the corporate organization and its repos.
+2. Run oberth setup and select GitHub and the organization.
+3. Select the existing public key on the identity/uplink screen.
+4. Try to select that work identity for Oberth-to-GitHub authentication.
+
+Actual behavior
+There is no existing-upstream-key option in the wizard. The existing public
+key selected earlier only authorizes workstation-to-Oberth access. Setup
+always generates a separate upstream key, despite the user's intent to use
+their already-authorized work key. The forge screen labels this behavior
+'deploy key per repo', although the desired connection is organization-wide.
+
+In the observed installation, the account's work key and the generated
+upstream key had different fingerprints. GitHub rejected the generated key,
+the upstream remained unregistered, and local cloning failed because Oberth
+was NotReady. The account's organization/team permissions were not the cause
+of that SSH authentication rejection.
+
+Expected setup flow
+After choosing the upstream name, forge and organization, offer:
+  - Use an existing work SSH key.
+  - Generate a new upstream SSH key.
+
+For an existing key, provide a key picker and a path entry. Show its public
+fingerprint and explicitly label the purpose as Oberth-to-forge authentication.
+Explain how the server will access/store the signing credential. Choosing a
+public key for the uplink must not silently import its corresponding private
+key or imply that the upstream is already configured.
+
+Validate the selected identity, test forge authentication, and complete
+upstream registration automatically. Use the authenticated account's permitted
+repositories under the organization; do not require a per-repo deploy key or
+make repository selection a prerequisite for connecting the organization.
+The resulting clone paths remain <upstream>/<org>/<repo>.git.
+
+Existing implementation to reuse
+The separately inspected interactive oberth install flow already offers
+Generate / Provide for the upstream key. Its provideDeployKey path imports
+an operator-selected private key. The TUI's non-interactive installer path
+instead always chooses generation. Share the existing onboarding capability
+with setup rather than forcing users to discover a different command.
+
+Acceptance criteria
+- TUI, plain and accessible setup all offer existing-key and new-key choices.
+- Selecting an existing usable work key does not generate or substitute a
+  different upstream key; its selected public fingerprint is preserved.
+- Workstation-to-Oberth uplink identity and Oberth-to-forge identity are
+  separate, clearly explained choices, even when the same key is selected.
+- Account-level SSH authentication supports an organization upstream without
+  requiring a repository-specific deploy key.
+- Invalid paths, missing signing material, and unsupported encrypted or
+  agent/hardware-backed keys produce explicit actionable guidance. Do not
+  silently generate a replacement or claim a public key alone can authenticate.
+- Private key contents and passphrases never appear in logs or issue reports.
+- Successful verification automatically registers the organization upstream,
+  checks readiness, and provides qualified clone URL guidance.
+- A rejected key leaves an explicit resumable authentication step, not a
+  completion page that suggests cloning is ready.
+
+Related issues
+- 002: registration recovery and confirmed key mismatch.
+- 004: qualified clone URL guidance.
+- 009: misleading per-repo authentication label.
+- 011: parity between interactive and accessible setup.
+
+Scope
+This report records the required behavior. No work private key was imported
+and no cluster or GitHub configuration was changed while filing it.

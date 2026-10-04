@@ -1,0 +1,77 @@
+{{- if or .Values.imagePullSecrets .Values.trillian.imagePullSecrets .Values.server.signerFileSecretOptions .Values.mysql.enabled .Values.redis.enabled -}}
+{{- fail "the bundled Rekor chart supports only OpenBao credentials and its managed MySQL database" -}}
+{{- end -}}
+{{- if ne .Values.server.signer (printf "openbao://rekor-%s" .Release.Namespace) -}}
+{{- fail "Rekor must use its namespace-bound OpenBao Transit key" -}}
+{{- end -}}
+{{- if or (not (hasPrefix "https://" .Values.global.bao.address)) (not .Values.global.bao.caCert) -}}
+{{- fail "Rekor requires HTTPS OpenBao with a public CA certificate" -}}
+{{- end -}}
+{{- range $role := list "mysql" "db" "rekor" }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: rekor-bao-{{ $role }}
+  namespace: {{ $.Release.Namespace }}
+automountServiceAccountToken: false
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: rekor-bao-{{ $.Release.Namespace }}-{{ $role }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:auth-delegator
+subjects:
+  - kind: ServiceAccount
+    name: rekor-bao-{{ $role }}
+    namespace: {{ $.Release.Namespace }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: rekor-bao-{{ $role }}
+  namespace: {{ $.Release.Namespace }}
+data:
+  ca.crt: |
+{{ $.Values.global.bao.caCert | indent 4 }}
+  agent.hcl: |
+    vault {
+      address = {{ required "OpenBao HTTPS address is required" $.Values.global.bao.address | quote }}
+      ca_cert = "/etc/bao/ca.crt"
+    }
+    auto_auth {
+      method "kubernetes" {
+        mount_path = "auth/kubernetes"
+        config = {
+          role = "rekor-{{ $.Release.Namespace }}-{{ $role }}"
+          token_path = "/var/run/bao/token"
+        }
+      }
+    }
+    template {
+      contents = {{ printf "{{ with secret %q }}{{ .Data.data.password }}{{ end }}" (printf "oberth/data/identities/%s/rekor-db" $.Release.Namespace) | quote }}
+      destination = "/credentials/password"
+      perms = "0600"
+      error_on_missing_key = true
+    }
+    {{- if eq $role "mysql" }}
+    template {
+      contents = {{ printf "{{ with secret %q }}{{ .Data.data.password }}{{ end }}" (printf "oberth/data/identities/%s/rekor-db-root" $.Release.Namespace) | quote }}
+      destination = "/credentials/root-password"
+      perms = "0600"
+      error_on_missing_key = true
+    }
+    {{- end }}
+    {{- if eq $role "rekor" }}
+    listener "tcp" {
+      address = "127.0.0.1:8100"
+      tls_disable = true
+    }
+    api_proxy {
+      use_auto_auth_token = "force"
+    }
+    {{- end }}
+{{- end }}

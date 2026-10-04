@@ -70,8 +70,9 @@
       },
       {
         "name": "exec-sa-token",
-        "secret": {
-          "secretName": "executor-token-fixture"
+        "emptyDir": {
+          "medium": "Memory",
+          "sizeLimit": "1Mi"
         }
       },
       {
@@ -109,6 +110,37 @@
       }
     ],
     "initContainers": [
+      {
+        "name": "oberth-executor-token",
+        "image": "busybox:1.37@sha256:ab33eacc8251e3807b85bb6dba570e4698c3998eca6f0fc2ccb60575a563ea74",
+        "command": [
+          "sh",
+          "-c",
+          "until test -f /var/run/secrets/kubernetes.io/serviceaccount/token; do sleep 1; done"
+        ],
+        "resources": {},
+        "volumeMounts": [
+          {
+            "name": "exec-sa-token",
+            "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount"
+          }
+        ],
+        "securityContext": {
+          "capabilities": {
+            "drop": [
+              "ALL"
+            ]
+          },
+          "runAsUser": 0,
+          "runAsGroup": 0,
+          "runAsNonRoot": false,
+          "readOnlyRootFilesystem": true,
+          "allowPrivilegeEscalation": false,
+          "seccompProfile": {
+            "type": "RuntimeDefault"
+          }
+        }
+      },
       {
         "name": "init",
         "image": "quay.io/argoproj/argoexec:v0.0.0",
@@ -155,7 +187,7 @@
           },
           {
             "name": "ARGO_TEMPLATE",
-            "value": "{\"name\":\"main\",\"inputs\":{},\"outputs\":{},\"metadata\":{\"annotations\":{\"oberth.ci/release-wif-adc\":\"{\\\"audience\\\":\\\"//iam.googleapis.com/projects/123/locations/global/workloadIdentityPools/oberth-release-images/providers/tuxbox\\\",\\\"credential_source\\\":{\\\"file\\\":\\\"/run/oberth-gar/token\\\"},\\\"service_account_impersonation_url\\\":\\\"https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/image-writer@example-project.iam.gserviceaccount.com:generateAccessToken\\\",\\\"subject_token_type\\\":\\\"urn:ietf:params:oauth:token-type:jwt\\\",\\\"token_url\\\":\\\"https://sts.googleapis.com/v1/token\\\",\\\"type\\\":\\\"external_account\\\"}\",\"oberth.ci/release-wif-role\":\"image-writer\",\"oberth.ci/workspace-env\":\"none\",\"oberth.ci/workspace-mounts\":\"none\"},\"labels\":{\"oberth.ci/run\":\"run-abc123\",\"oberth.ci/tier\":\"release\",\"oberth.ci/trigger\":\"release\"}},\"container\":{\"name\":\"\",\"image\":\"golang:1.26-alpine@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"command\":[\"/run/oberth/bin/oberth\",\"secretstore\",\"exec\",\"--dir=/run/oberth-secrets\",\"--path=oberth/data/release/r2-upload-token\",\"--\",\"/bin/true\"],\"env\":[{\"name\":\"KEEP_ME\",\"value\":\"yes-please\"},{\"name\":\"OBERTH_REPO\",\"value\":\"oberth\"},{\"name\":\"OBERTH_REF\",\"value\":\"refs/tags/v1.0.0\"},{\"name\":\"OBERTH_SHA\",\"value\":\"0123456789abcdef0123456789abcdef01234567\"},{\"name\":\"OBERTH_TRIGGER\",\"value\":\"release\"},{\"name\":\"OBERTH_RUN_ID\",\"value\":\"run-abc123\"},{\"name\":\"OBERTH_RELEASE_TAG\",\"value\":\"refs/tags/v1.0.0\"},{\"name\":\"OBERTH_RELEASE_SHA\",\"value\":\"0123456789abcdef0123456789abcdef01234567\"},{\"name\":\"VAULT_ADDR\",\"value\":\"https://openbao.oberth.svc:8200\"},{\"name\":\"OBERTH_VAULT_ROLE\",\"value\":\"oberth-per-repo\"},{\"name\":\"GOOGLE_APPLICATION_CREDENTIALS\",\"value\":\"/run/oberth-gar/adc.json\"},{\"name\":\"OBERTH_RELEASE_WIF\",\"value\":\"1\"}],\"resources\":{},\"volumeMounts\":[{\"name\":\"oberth-tmp\",\"mountPath\":\"/tmp\"},{\"name\":\"oberth-source\",\"readOnly\":true,\"mountPath\":\"/work/src\",\"subPath\":\"src\"},{\"name\":\"oberth-release-token\",\"readOnly\":true,\"mountPath\":\"/var/run/secrets/kubernetes.io/serviceaccount\"},{\"name\":\"oberth-secrets\",\"mountPath\":\"/run/oberth-secrets\"},{\"name\":\"oberth-release-wif\",\"readOnly\":true,\"mountPath\":\"/run/oberth-gar\"}],\"securityContext\":{\"capabilities\":{\"drop\":[\"ALL\"]},\"readOnlyRootFilesystem\":true,\"allowPrivilegeEscalation\":false}},\"volumes\":[{\"name\":\"oberth-release-wif\",\"projected\":{\"sources\":[{\"serviceAccountToken\":{\"audience\":\"https://iam.googleapis.com/projects/123/locations/global/workloadIdentityPools/oberth-release-images/providers/tuxbox\",\"expirationSeconds\":600,\"path\":\"token\"}},{\"downwardAPI\":{\"items\":[{\"path\":\"adc.json\",\"fieldRef\":{\"apiVersion\":\"v1\",\"fieldPath\":\"metadata.annotations['oberth.ci/release-wif-adc']\"}}]}}],\"defaultMode\":256}}],\"serviceAccountName\":\"oberth-per-repo\",\"automountServiceAccountToken\":false,\"podSpecPatch\":\"{\\\"containers\\\":[{\\\"name\\\":\\\"wait\\\",\\\"volumeMounts\\\":[{\\\"mountPath\\\":\\\"/mainctrfs/work/src\\\",\\\"name\\\":\\\"oberth-source\\\",\\\"readOnly\\\":true,\\\"subPath\\\":\\\"src\\\"},{\\\"$patch\\\":\\\"delete\\\",\\\"mountPath\\\":\\\"/mainctrfs/var/run/secrets/kubernetes.io/serviceaccount\\\"},{\\\"$patch\\\":\\\"delete\\\",\\\"mountPath\\\":\\\"/mainctrfs/run/oberth-secrets\\\"},{\\\"$patch\\\":\\\"delete\\\",\\\"mountPath\\\":\\\"/mainctrfs/run/oberth-gar\\\"}]}]}\"}"
+            "value": "{\"name\":\"main\",\"inputs\":{},\"outputs\":{},\"metadata\":{\"annotations\":{\"oberth.ci/release-wif-adc\":\"{\\\"audience\\\":\\\"//iam.googleapis.com/projects/123/locations/global/workloadIdentityPools/oberth-release-images/providers/tuxbox\\\",\\\"credential_source\\\":{\\\"file\\\":\\\"/run/oberth-gar/token\\\"},\\\"service_account_impersonation_url\\\":\\\"https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/image-writer@example-project.iam.gserviceaccount.com:generateAccessToken\\\",\\\"subject_token_type\\\":\\\"urn:ietf:params:oauth:token-type:jwt\\\",\\\"token_url\\\":\\\"https://sts.googleapis.com/v1/token\\\",\\\"type\\\":\\\"external_account\\\"}\",\"oberth.ci/release-wif-role\":\"image-writer\",\"oberth.ci/workspace-env\":\"none\",\"oberth.ci/workspace-mounts\":\"none\"},\"labels\":{\"oberth.ci/run\":\"run-abc123\",\"oberth.ci/tier\":\"release\",\"oberth.ci/trigger\":\"release\"}},\"container\":{\"name\":\"\",\"image\":\"golang:1.26-alpine@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"command\":[\"/run/oberth/bin/oberth\",\"secretstore\",\"exec\",\"--dir=/run/oberth-secrets\",\"--path=oberth/data/release/r2-upload-token\",\"--\",\"/bin/true\"],\"env\":[{\"name\":\"KEEP_ME\",\"value\":\"yes-please\"},{\"name\":\"OBERTH_REPO\",\"value\":\"oberth\"},{\"name\":\"OBERTH_REF\",\"value\":\"refs/tags/v1.0.0\"},{\"name\":\"OBERTH_SHA\",\"value\":\"0123456789abcdef0123456789abcdef01234567\"},{\"name\":\"OBERTH_TRIGGER\",\"value\":\"release\"},{\"name\":\"OBERTH_RUN_ID\",\"value\":\"run-abc123\"},{\"name\":\"OBERTH_RELEASE_TAG\",\"value\":\"refs/tags/v1.0.0\"},{\"name\":\"OBERTH_RELEASE_SHA\",\"value\":\"0123456789abcdef0123456789abcdef01234567\"},{\"name\":\"VAULT_ADDR\",\"value\":\"https://openbao.oberth.svc:8200\"},{\"name\":\"OBERTH_VAULT_ROLE\",\"value\":\"oberth-per-repo\"},{\"name\":\"GOOGLE_APPLICATION_CREDENTIALS\",\"value\":\"/run/oberth-gar/adc.json\"},{\"name\":\"OBERTH_RELEASE_WIF\",\"value\":\"1\"}],\"resources\":{},\"volumeMounts\":[{\"name\":\"oberth-tmp\",\"mountPath\":\"/tmp\"},{\"name\":\"oberth-source\",\"readOnly\":true,\"mountPath\":\"/work/src\",\"subPath\":\"src\"},{\"name\":\"oberth-release-token\",\"readOnly\":true,\"mountPath\":\"/var/run/secrets/kubernetes.io/serviceaccount\"},{\"name\":\"oberth-secrets\",\"mountPath\":\"/run/oberth-secrets\"},{\"name\":\"oberth-release-wif\",\"readOnly\":true,\"mountPath\":\"/run/oberth-gar\"}],\"securityContext\":{\"capabilities\":{\"drop\":[\"ALL\"]},\"readOnlyRootFilesystem\":true,\"allowPrivilegeEscalation\":false}},\"volumes\":[{\"name\":\"oberth-release-wif\",\"projected\":{\"sources\":[{\"serviceAccountToken\":{\"audience\":\"https://iam.googleapis.com/projects/123/locations/global/workloadIdentityPools/oberth-release-images/providers/tuxbox\",\"expirationSeconds\":600,\"path\":\"token\"}},{\"downwardAPI\":{\"items\":[{\"path\":\"adc.json\",\"fieldRef\":{\"apiVersion\":\"v1\",\"fieldPath\":\"metadata.annotations['oberth.ci/release-wif-adc']\"}}]}}],\"defaultMode\":256}}],\"serviceAccountName\":\"oberth-per-repo\",\"automountServiceAccountToken\":false,\"podSpecPatch\":\"{\\\"$setElementOrder/initContainers\\\":[{\\\"name\\\":\\\"oberth-executor-token\\\"},{\\\"name\\\":\\\"init\\\"}],\\\"containers\\\":[{\\\"name\\\":\\\"wait\\\",\\\"volumeMounts\\\":[{\\\"mountPath\\\":\\\"/mainctrfs/work/src\\\",\\\"name\\\":\\\"oberth-source\\\",\\\"readOnly\\\":true,\\\"subPath\\\":\\\"src\\\"},{\\\"$patch\\\":\\\"delete\\\",\\\"mountPath\\\":\\\"/mainctrfs/var/run/secrets/kubernetes.io/serviceaccount\\\"},{\\\"$patch\\\":\\\"delete\\\",\\\"mountPath\\\":\\\"/mainctrfs/run/oberth-secrets\\\"},{\\\"$patch\\\":\\\"delete\\\",\\\"mountPath\\\":\\\"/mainctrfs/run/oberth-gar\\\"}]}],\\\"initContainers\\\":[{\\\"name\\\":\\\"oberth-executor-token\\\",\\\"image\\\":\\\"busybox:1.37@sha256:ab33eacc8251e3807b85bb6dba570e4698c3998eca6f0fc2ccb60575a563ea74\\\",\\\"command\\\":[\\\"sh\\\",\\\"-c\\\",\\\"until test -f /var/run/secrets/kubernetes.io/serviceaccount/token; do sleep 1; done\\\"],\\\"resources\\\":{},\\\"volumeMounts\\\":[{\\\"name\\\":\\\"exec-sa-token\\\",\\\"mountPath\\\":\\\"/var/run/secrets/kubernetes.io/serviceaccount\\\"}],\\\"securityContext\\\":{\\\"capabilities\\\":{\\\"drop\\\":[\\\"ALL\\\"]},\\\"runAsUser\\\":0,\\\"runAsGroup\\\":0,\\\"runAsNonRoot\\\":false,\\\"readOnlyRootFilesystem\\\":true,\\\"allowPrivilegeEscalation\\\":false,\\\"seccompProfile\\\":{\\\"type\\\":\\\"RuntimeDefault\\\"}}},{\\\"name\\\":\\\"init\\\"}],\\\"volumes\\\":[{\\\"emptyDir\\\":{\\\"medium\\\":\\\"Memory\\\",\\\"sizeLimit\\\":\\\"1Mi\\\"},\\\"name\\\":\\\"exec-sa-token\\\",\\\"secret\\\":null}]}\"}"
           },
           {
             "name": "ARGO_NODE_ID",
@@ -167,7 +199,7 @@
           },
           {
             "name": "ARGO_DEADLINE",
-            "value": "2026-10-01T00:01:48Z"
+            "value": "2026-10-04T16:59:31Z"
           },
           {
             "name": "ARGO_PROGRESS_FILE",
@@ -254,7 +286,7 @@
           },
           {
             "name": "ARGO_DEADLINE",
-            "value": "2026-10-01T00:01:48Z"
+            "value": "2026-10-04T16:59:31Z"
           },
           {
             "name": "ARGO_PROGRESS_FILE",
@@ -381,7 +413,7 @@
           },
           {
             "name": "ARGO_DEADLINE",
-            "value": "2026-10-01T00:01:48Z"
+            "value": "2026-10-04T16:59:31Z"
           },
           {
             "name": "ARGO_PROGRESS_FILE",

@@ -40,7 +40,7 @@ func TestOberthWIFControllerCapture(t *testing.T) {
      for _,m:=range c.VolumeMounts {
       if m.Name=="oberth-release-wif" {hasWIF=true;require.Equal(t,"main",c.Name);require.NotEqual(t,"sibling",shape);require.True(t,m.ReadOnly)}
       if c.Name!="main" {require.NotEqual(t,"oberth-release-token",m.Name);require.NotEqual(t,"oberth-secrets",m.Name)}
-      if c.Name!="init"&&c.Name!="wait" {require.NotEqual(t,"exec-sa-token",m.Name)}
+      if c.Name!="init"&&c.Name!="wait"&&c.Name!="oberth-executor-token" {require.NotEqual(t,"exec-sa-token",m.Name)}
      }
      if c.Name=="main" {require.Equal(t,shape!="sibling",hasWIF)}
     }

@@ -2,6 +2,8 @@ package setuptui
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -18,6 +20,7 @@ type forgePage struct {
 	forgeOptions []string
 	forgeCursor  int
 	org          string
+	keyPath      string
 	authCursor   int // index into forgeAuthOptions
 	focusField   int // forgeFocusForge, forgeFocusOrg, forgeFocusAuth
 	errMsg       string
@@ -32,22 +35,19 @@ const (
 	forgeFocusForge = 0
 	forgeFocusOrg   = 1
 	forgeFocusAuth  = 2
-	forgeFieldCount = 3
+	forgeFocusKey   = 3
+	forgeFieldCount = 4
 )
 
 // forgeAuthOptions is the authentication radio. The token option has no
 // delivery path to OpenBao yet: the cursor may rest on it so the user can
 // read what is coming, but enter never accepts it.
 var forgeAuthOptions = []struct {
-	value       string
-	label       string
-	description string
-	comingSoon  bool
+	value, label, description string
+	comingSoon                bool
 }{
-	{value: "deploy-key", label: "deploy key per repo",
-		description: "generated at install, you add the public half"},
-	{value: "token", label: "forge token via openbao",
-		description: "coming soon", comingSoon: true},
+	{value: "existing", label: "use existing work SSH key", description: "import into OpenBao; use your account's organization access"},
+	{value: "deploy-key", label: "generate new upstream SSH key", description: "store in OpenBao; register the public key with your forge account"},
 }
 
 // forgeComingSoon lists forge types displayed but not yet functional (no URL
@@ -79,6 +79,10 @@ func (p *forgePage) init(state *WizardState) tea.Cmd {
 		p.org = state.ForgeOrg
 	}
 	p.authCursor = 0
+	p.keyPath = state.Config.UpstreamPrivateKeyPath
+	if p.keyPath == "" {
+		p.keyPath = strings.TrimSuffix(state.SSHKeyPath, ".pub")
+	}
 	for i, opt := range forgeAuthOptions {
 		if opt.value == state.ForgeAuth {
 			p.authCursor = i
@@ -143,6 +147,11 @@ func (p *forgePage) update(msg tea.Msg, state *WizardState) (page, tea.Cmd) {
 				}
 			}
 		case "d":
+			if p.focusField == forgeFocusKey {
+				p.keyPath += "d"
+				p.errMsg = ""
+				return p, nil
+			}
 			// Guard: do not steal 'd' from the organization text field.
 			if p.focusField == forgeFocusOrg {
 				p.org += "d"
@@ -156,6 +165,21 @@ func (p *forgePage) update(msg tea.Msg, state *WizardState) (page, tea.Cmd) {
 			p.errMsg = ""
 			return p, probeForge(p.forgeOptions[p.forgeCursor], p.org)
 		case "enter":
+			if forgeAuthOptions[p.authCursor].value == "existing" {
+				path := p.keyPath
+				if strings.HasPrefix(path, "~/") {
+					home, _ := os.UserHomeDir()
+					path = filepath.Join(home, path[2:])
+				}
+				info, err := os.Stat(path)
+				if err != nil || !info.Mode().IsRegular() {
+					p.errMsg = "select an existing work private-key file"
+					return p, nil
+				}
+				state.Config.UpstreamPrivateKeyPath = path
+			} else {
+				state.Config.UpstreamPrivateKeyPath = ""
+			}
 			if p.org == "" {
 				p.errMsg = "organization is required"
 				return p, nil
@@ -176,10 +200,18 @@ func (p *forgePage) update(msg tea.Msg, state *WizardState) (page, tea.Cmd) {
 		case "esc":
 			return p, func() tea.Msg { return pageBackMsg{} }
 		case "backspace":
+			if p.focusField == forgeFocusKey && len(p.keyPath) > 0 {
+				p.keyPath = p.keyPath[:len(p.keyPath)-1]
+				p.errMsg = ""
+			}
 			if p.focusField == forgeFocusOrg && len(p.org) > 0 {
 				p.org = p.org[:len(p.org)-1]
 			}
 		default:
+			if p.focusField == forgeFocusKey && len(key) == 1 {
+				p.keyPath += key
+				p.errMsg = ""
+			}
 			if p.focusField == forgeFocusOrg && len(key) == 1 {
 				p.org += key
 			}
@@ -264,6 +296,8 @@ func (p *forgePage) view(_ *WizardState, _, _ int) string {
 			sHighlight.Render(fmt.Sprintf("%d", adopted)), total)
 	}
 
+	b.WriteString("\n  " + sectionLabel("Existing private key", p.focusField == forgeFocusKey) + "\n    " + inputBox(p.keyPath, "~/.ssh/id_ed25519", p.focusField == forgeFocusKey) + "\n")
+	b.WriteString("  " + sMuted.Render("Uplink key: workstation → Oberth. Upstream key: Oberth → forge.") + "\n")
 	if p.errMsg != "" {
 		b.WriteString("\n  " + sFail.Render(p.errMsg) + "\n")
 	}

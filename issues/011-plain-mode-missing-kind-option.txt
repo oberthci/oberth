@@ -1,0 +1,23 @@
+ISSUE 011: Plain and accessible setup omit the kind-creation choice
+
+Status: Open
+Reported: 2026-10-04
+Affected version: Oberth v0.17.9 (6f40126bc8f6), macOS
+
+Priority: Medium
+Evidence: NO_COLOR/plain prompt observed; missing action confirmed in source.
+
+Reproduction
+Run oberth setup with NO_COLOR set, or use --plain / --accessible; compare cluster selection with the interactive UI.
+
+Observed behavior and proposed change
+Plain/accessibility mode is not functionally equivalent.
+Live NO_COLOR switched setup to plain mode. It asks for a kubeconfig
+context without offering Create kind cluster or listing contexts.
+Source: internal/setuptui/plain.go. TUI has the creation action.
+Fix: offer the same cluster choices in all modes and explain prerequisites.
+
+Reference
+- ../setup-test-results/REPORT.txt, finding 10
+- Screenshot times above refer to ../install-log/photo_2026-10-04 <time>.jpeg.
+- Source paths above are relative to ../oberth-source-v0.17.9/.

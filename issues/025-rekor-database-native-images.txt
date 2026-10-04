@@ -1,0 +1,16 @@
+Title: Bundled Rekor database fails at startup on Apple Silicon
+Status: Fixed; native database startup and witness verification passed
+Observed: 2026-10-05
+
+The pinned Trillian db_server image is amd64-only. On the local arm64 kind
+node it is repeatedly OOMKilled immediately at startup under the configured
+1 GiB limit. No database logs are emitted, and Rekor waits indefinitely.
+
+Use a digest-pinned multi-architecture MySQL 8.4 image, file-based credential
+inputs, and compatible startup/readiness probes. The live test initialized
+Trillian's tables, created its tree, and served verified Rekor witness entries.
+Protect legacy installations from an implicit database-major-version upgrade;
+they require an explicit migration rather than replacement credentials.
+
+Acceptance: fresh arm64 kind install, successful witness append/read, restart
+with the same signing identity and database history, bounded memory use.

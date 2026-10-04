@@ -4,6 +4,7 @@
   "metadata": {
     "name": "oberth-oberth-run-abc1-aabbccddeeff",
     "namespace": "oberth-argo",
+    "uid": "nonroot-fixture",
     "creationTimestamp": null,
     "labels": {
       "app.kubernetes.io/name": "oberth-run",
@@ -20,7 +21,7 @@
       "oberth.ci/nonroot-templates": "test",
       "oberth.ci/ref": "refs/heads/main",
       "oberth.ci/run-id": "run-abc123",
-      "oberth.ci/spec-identity": "7b4d48dcaea26a24892e4678c4da86b17884b05854767e0636d01d6b0781b630",
+      "oberth.ci/spec-identity": "70ae154def143d152329098dc07a1842dc8c605ca7fda34e3827ef505b6d40c2",
       "oberth.ci/verified-controller-profile": "nonroot-static-v1:fbe3fb4c2cf6919c959a4f94f56634f901d40a3cfcddd56d85368b7924e2d9d0",
       "workflows.argoproj.io/pod-name-format": "v2"
     }
@@ -136,7 +137,7 @@
             "type": "RuntimeDefault"
           }
         },
-        "podSpecPatch": "{\"$setElementOrder/initContainers\":[{\"name\":\"oberth-prepare-nonroot\"},{\"name\":\"init\"}],\"containers\":[{\"name\":\"wait\",\"securityContext\":{\"allowPrivilegeEscalation\":false,\"appArmorProfile\":null,\"capabilities\":{\"add\":null,\"drop\":[\"ALL\"]},\"privileged\":null,\"procMount\":null,\"readOnlyRootFilesystem\":true,\"runAsGroup\":65534,\"runAsNonRoot\":true,\"runAsUser\":65534,\"seLinuxOptions\":null,\"seccompProfile\":{\"localhostProfile\":null,\"type\":\"RuntimeDefault\"},\"windowsOptions\":null},\"volumeMounts\":[{\"name\":\"oberth-source\",\"readOnly\":true,\"mountPath\":\"/mainctrfs/work/src\",\"subPath\":\"src\"},{\"name\":\"oberth-artifacts\",\"readOnly\":true,\"mountPath\":\"/mainctrfs/work/artifacts\",\"subPath\":\"artifacts\"},{\"name\":\"oberth-nonroot-tmp\",\"readOnly\":true,\"mountPath\":\"/mainctrfs/tmp\"}]}],\"initContainers\":[{\"name\":\"oberth-prepare-nonroot\",\"image\":\"busybox:1.37@sha256:ab33eacc8251e3807b85bb6dba570e4698c3998eca6f0fc2ccb60575a563ea74\",\"command\":[\"/bin/sh\",\"-ec\",\"if [ ! -e /prepare/executor/0 ]; then mkdir /prepare/executor/0; fi; test -d /prepare/executor/0 \\u0026\\u0026 test ! -L /prepare/executor/0 \\u0026\\u0026 test -O /prepare/executor/0 \\u0026\\u0026 chmod 1777 /prepare/tmp /prepare/argo /prepare/executor/0\"],\"resources\":{\"limits\":{\"cpu\":\"100m\",\"memory\":\"64Mi\"},\"requests\":{\"cpu\":\"10m\",\"memory\":\"16Mi\"}},\"volumeMounts\":[{\"name\":\"oberth-nonroot-tmp\",\"mountPath\":\"/prepare/tmp\"},{\"name\":\"var-run-argo\",\"mountPath\":\"/prepare/argo\"},{\"name\":\"tmp-dir-argo\",\"mountPath\":\"/prepare/executor\"}],\"securityContext\":{\"capabilities\":{\"drop\":[\"ALL\"]},\"runAsUser\":0,\"runAsGroup\":0,\"runAsNonRoot\":false,\"readOnlyRootFilesystem\":true,\"allowPrivilegeEscalation\":false,\"seccompProfile\":{\"type\":\"RuntimeDefault\"}}},{\"name\":\"init\",\"securityContext\":{\"allowPrivilegeEscalation\":false,\"appArmorProfile\":null,\"capabilities\":{\"add\":null,\"drop\":[\"ALL\"]},\"privileged\":null,\"procMount\":null,\"readOnlyRootFilesystem\":true,\"runAsGroup\":65534,\"runAsNonRoot\":true,\"runAsUser\":65534,\"seLinuxOptions\":null,\"seccompProfile\":{\"localhostProfile\":null,\"type\":\"RuntimeDefault\"},\"windowsOptions\":null},\"volumeMounts\":[{\"name\":\"oberth-nonroot-tmp\",\"mountPath\":\"/tmp\"}]}],\"securityContext\":{\"appArmorProfile\":null,\"fsGroup\":null,\"fsGroupChangePolicy\":null,\"runAsGroup\":65534,\"runAsNonRoot\":true,\"runAsUser\":65534,\"seLinuxChangePolicy\":null,\"seLinuxOptions\":null,\"seccompProfile\":{\"localhostProfile\":null,\"type\":\"RuntimeDefault\"},\"supplementalGroups\":null,\"supplementalGroupsPolicy\":null,\"sysctls\":null,\"windowsOptions\":null},\"volumes\":[{\"emptyDir\":{\"sizeLimit\":\"128Mi\"},\"name\":\"var-run-argo\"},{\"emptyDir\":{\"sizeLimit\":\"64Mi\"},\"name\":\"tmp-dir-argo\"}]}"
+        "podSpecPatch": "{\"$setElementOrder/initContainers\":[{\"name\":\"oberth-prepare-nonroot\"},{\"name\":\"oberth-executor-token\"},{\"name\":\"init\"}],\"containers\":[{\"name\":\"wait\",\"securityContext\":{\"allowPrivilegeEscalation\":false,\"appArmorProfile\":null,\"capabilities\":{\"add\":null,\"drop\":[\"ALL\"]},\"privileged\":null,\"procMount\":null,\"readOnlyRootFilesystem\":true,\"runAsGroup\":65534,\"runAsNonRoot\":true,\"runAsUser\":65534,\"seLinuxOptions\":null,\"seccompProfile\":{\"localhostProfile\":null,\"type\":\"RuntimeDefault\"},\"windowsOptions\":null},\"volumeMounts\":[{\"mountPath\":\"/mainctrfs/work/src\",\"name\":\"oberth-source\",\"readOnly\":true,\"subPath\":\"src\"},{\"mountPath\":\"/mainctrfs/work/artifacts\",\"name\":\"oberth-artifacts\",\"readOnly\":true,\"subPath\":\"artifacts\"},{\"mountPath\":\"/mainctrfs/tmp\",\"name\":\"oberth-nonroot-tmp\",\"readOnly\":true}]}],\"initContainers\":[{\"command\":[\"/bin/sh\",\"-ec\",\"if [ ! -e /prepare/executor/0 ]; then mkdir /prepare/executor/0; fi; test -d /prepare/executor/0 \\u0026\\u0026 test ! -L /prepare/executor/0 \\u0026\\u0026 test -O /prepare/executor/0 \\u0026\\u0026 chmod 1777 /prepare/tmp /prepare/argo /prepare/executor/0\"],\"image\":\"busybox:1.37@sha256:ab33eacc8251e3807b85bb6dba570e4698c3998eca6f0fc2ccb60575a563ea74\",\"name\":\"oberth-prepare-nonroot\",\"resources\":{\"limits\":{\"cpu\":\"100m\",\"memory\":\"64Mi\"},\"requests\":{\"cpu\":\"10m\",\"memory\":\"16Mi\"}},\"securityContext\":{\"allowPrivilegeEscalation\":false,\"capabilities\":{\"drop\":[\"ALL\"]},\"readOnlyRootFilesystem\":true,\"runAsGroup\":0,\"runAsNonRoot\":false,\"runAsUser\":0,\"seccompProfile\":{\"type\":\"RuntimeDefault\"}},\"volumeMounts\":[{\"mountPath\":\"/prepare/tmp\",\"name\":\"oberth-nonroot-tmp\"},{\"mountPath\":\"/prepare/argo\",\"name\":\"var-run-argo\"},{\"mountPath\":\"/prepare/executor\",\"name\":\"tmp-dir-argo\"}]},{\"name\":\"oberth-executor-token\",\"image\":\"busybox:1.37@sha256:ab33eacc8251e3807b85bb6dba570e4698c3998eca6f0fc2ccb60575a563ea74\",\"command\":[\"sh\",\"-c\",\"until test -f /var/run/secrets/kubernetes.io/serviceaccount/token; do sleep 1; done\"],\"resources\":{},\"volumeMounts\":[{\"name\":\"exec-sa-token\",\"mountPath\":\"/var/run/secrets/kubernetes.io/serviceaccount\"}],\"securityContext\":{\"capabilities\":{\"drop\":[\"ALL\"]},\"runAsUser\":0,\"runAsGroup\":0,\"runAsNonRoot\":false,\"readOnlyRootFilesystem\":true,\"allowPrivilegeEscalation\":false,\"seccompProfile\":{\"type\":\"RuntimeDefault\"}}},{\"name\":\"init\",\"securityContext\":{\"allowPrivilegeEscalation\":false,\"appArmorProfile\":null,\"capabilities\":{\"add\":null,\"drop\":[\"ALL\"]},\"privileged\":null,\"procMount\":null,\"readOnlyRootFilesystem\":true,\"runAsGroup\":65534,\"runAsNonRoot\":true,\"runAsUser\":65534,\"seLinuxOptions\":null,\"seccompProfile\":{\"localhostProfile\":null,\"type\":\"RuntimeDefault\"},\"windowsOptions\":null},\"volumeMounts\":[{\"mountPath\":\"/tmp\",\"name\":\"oberth-nonroot-tmp\"}]}],\"securityContext\":{\"appArmorProfile\":null,\"fsGroup\":null,\"fsGroupChangePolicy\":null,\"runAsGroup\":65534,\"runAsNonRoot\":true,\"runAsUser\":65534,\"seLinuxChangePolicy\":null,\"seLinuxOptions\":null,\"seccompProfile\":{\"localhostProfile\":null,\"type\":\"RuntimeDefault\"},\"supplementalGroups\":null,\"supplementalGroupsPolicy\":null,\"sysctls\":null,\"windowsOptions\":null},\"volumes\":[{\"emptyDir\":{\"sizeLimit\":\"128Mi\"},\"name\":\"var-run-argo\"},{\"emptyDir\":{\"sizeLimit\":\"64Mi\"},\"name\":\"tmp-dir-argo\"},{\"emptyDir\":{\"medium\":\"Memory\",\"sizeLimit\":\"1Mi\"},\"name\":\"exec-sa-token\",\"secret\":null}]}"
       },
       {
         "name": "ordinary",
@@ -220,7 +221,8 @@
           }
         },
         "serviceAccountName": "oberth-argo-pipeline",
-        "automountServiceAccountToken": false
+        "automountServiceAccountToken": false,
+        "podSpecPatch": "{\"$setElementOrder/initContainers\":[{\"name\":\"oberth-executor-token\"},{\"name\":\"init\"}],\"initContainers\":[{\"name\":\"oberth-executor-token\",\"image\":\"busybox:1.37@sha256:ab33eacc8251e3807b85bb6dba570e4698c3998eca6f0fc2ccb60575a563ea74\",\"command\":[\"sh\",\"-c\",\"until test -f /var/run/secrets/kubernetes.io/serviceaccount/token; do sleep 1; done\"],\"resources\":{},\"volumeMounts\":[{\"name\":\"exec-sa-token\",\"mountPath\":\"/var/run/secrets/kubernetes.io/serviceaccount\"}],\"securityContext\":{\"capabilities\":{\"drop\":[\"ALL\"]},\"runAsUser\":0,\"runAsGroup\":0,\"runAsNonRoot\":false,\"readOnlyRootFilesystem\":true,\"allowPrivilegeEscalation\":false,\"seccompProfile\":{\"type\":\"RuntimeDefault\"}}},{\"name\":\"init\"}],\"volumes\":[{\"emptyDir\":{\"medium\":\"Memory\",\"sizeLimit\":\"1Mi\"},\"name\":\"exec-sa-token\",\"secret\":null}]}"
       }
     ],
     "entrypoint": "test",
@@ -286,7 +288,7 @@
   },
   "status": {
     "phase": "Running",
-    "startedAt": "2026-09-13T04:51:54Z",
+    "startedAt": "2026-10-04T15:03:56Z",
     "finishedAt": null,
     "estimatedDuration": 1,
     "progress": "0/1",
@@ -299,7 +301,7 @@
         "templateName": "test",
         "templateScope": "local/oberth-oberth-run-abc1-aabbccddeeff",
         "phase": "Pending",
-        "startedAt": "2026-09-13T04:51:54Z",
+        "startedAt": "2026-10-04T15:03:56Z",
         "finishedAt": null,
         "estimatedDuration": 1,
         "progress": "0/1",

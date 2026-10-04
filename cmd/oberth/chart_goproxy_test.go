@@ -26,17 +26,15 @@ func TestChartRendersConfiguredGoProxy(t *testing.T) {
 	for _, want := range []string{
 		"name: oberth-goproxy\n",
 		"type: ClusterIP",
-		"name: oberth-goproxy-tls",
 		"name: oberth-goproxy-ingress",
 		"--argo-goproxy-listen=:8444",
-		"--argo-goproxy-cert=/etc/oberth/goproxy-tls/tls.crt",
-		"--argo-goproxy-key=/etc/oberth/goproxy-tls/tls.key",
-		"--argo-goproxy-ca=/etc/oberth/goproxy-tls/ca.crt",
+		"--argo-goproxy-cert=/run/oberth-identities/server/tls.crt",
+		"--argo-goproxy-key=/run/oberth-identities/server/tls.key",
+		"--argo-goproxy-ca=/run/oberth-identities/server/tls.crt",
 		"--argo-goproxy-url=https://oberth-goproxy.",
 		"containerPort: 8444",
 		"oberth.ci/trigger",
-		"mountPath: /etc/oberth/goproxy-tls",
-		"secretName: oberth-goproxy-tls",
+		"mountPath: /run/oberth-identities",
 	} {
 		if !strings.Contains(output, want) {
 			t.Errorf("rendered chart is missing %q", want)
@@ -135,7 +133,6 @@ func TestChartGoProxyConfiguredUpgradeRetainsResources(t *testing.T) {
 	for _, want := range []string{
 		"name: oberth-goproxy\n",
 		"type: ClusterIP",
-		"name: oberth-goproxy-tls",
 		"--argo-goproxy-listen=:8444",
 		"containerPort: 8444",
 	} {

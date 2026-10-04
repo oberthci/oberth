@@ -15,8 +15,6 @@ import (
 	"runtime"
 	"slices"
 	"strings"
-
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 // Client access is offered here, immediately after the uplink is registered,
@@ -216,23 +214,26 @@ func renderMCPConfig(baseURL, tokenCommand string) ([]byte, error) {
 	return append(body, '\n'), nil
 }
 
-// serverCACertificate reads the certificate the chart issued, from the Secret
-// the chart wrote it to.
+// serverCACertificate retrieves only the public certificate over authenticated exec.
 func serverCACertificate(ctx context.Context, cfg Config, deps Deps) ([]byte, error) {
-	if deps.KubeClient == nil {
-		return nil, errors.New("no cluster client")
+	if deps.RunCommand == nil {
+		return nil, errors.New("no cluster command runner")
 	}
 	ns := cfg.Namespace
 	if ns == "" {
 		ns = DefaultNamespace
 	}
-	secret, err := deps.KubeClient.CoreV1().Secrets(ns).Get(ctx, "oberth-tls", metav1.GetOptions{})
-	if err != nil {
-		return nil, err
+	args := []string{}
+	if deps.ContextName != "" {
+		args = append(args, "--context", deps.ContextName)
 	}
-	certificate, ok := secret.Data["tls.crt"]
-	if !ok || len(certificate) == 0 {
-		return nil, errors.New("oberth-tls carries no tls.crt")
+	args = append(args, "exec", "-n", ns, "deploy/oberth", "-c", "oberth", "--", "cat", "/run/oberth-identities/server/tls.crt")
+	certificate, err := deps.RunCommand(ctx, nil, "kubectl", args...)
+	if err != nil {
+		return nil, errors.New("could not retrieve server public certificate")
+	}
+	if len(certificate) == 0 {
+		return nil, errors.New("server public certificate is empty")
 	}
 	return certificate, nil
 }
@@ -355,9 +356,8 @@ func certificateNamesNotYetIssued(ctx context.Context, cfg Config, deps Deps) []
 	return missing
 }
 
-// warnCertificateNamesWillNotTakeEffect names the remedy rather than only the
-// problem. Deleting a Secret holding a private key is the operator's decision,
-// so it is printed rather than performed.
+// warnCertificateNamesWillNotTakeEffect explains why changing SAN values does
+// not silently replace an existing, trusted identity.
 func warnCertificateNamesWillNotTakeEffect(w io.Writer, cfg Config, missing []string) {
 	if len(missing) == 0 {
 		return
@@ -366,24 +366,7 @@ func warnCertificateNamesWillNotTakeEffect(w io.Writer, cfg Config, missing []st
 	if ns == "" {
 		ns = DefaultNamespace
 	}
-	_, _ = fmt.Fprintf(w,
-		"\nWARNING: this deployment's certificate does not cover %s, and will not\n"+
-			"gain them: the TLS Secret is kept across upgrades and re-issued only when\n"+
-			"absent. Clients reaching the server by those names will fail verification.\n"+
-			"To re-issue, after which the TLS fingerprint changes but uplinks do not:\n\n"+
-			"    kubectl delete secret -n %s oberth-tls && oberth install%s\n\n",
-		strings.Join(missing, ", "), ns, reinstallFlagsFor(cfg))
-}
-
-func reinstallFlagsFor(cfg Config) string {
-	var flags strings.Builder
-	for _, name := range cfg.TLSExtraDNSNames {
-		flags.WriteString(" --tls-extra-dns-name " + name)
-	}
-	for _, address := range cfg.TLSExtraIPs {
-		flags.WriteString(" --tls-extra-ip " + address)
-	}
-	return flags.String()
+	_, _ = fmt.Fprintf(w, "\nWARNING: the existing server certificate does not cover %s. Its identity is preserved in OpenBao at oberth/identities/%s/server. Configure the required names on a fresh installation or perform an explicit certificate rotation; upgrading will not replace the trusted key.\n", strings.Join(missing, ", "), ns)
 }
 
 // registerWithClaudeCode adds the server through the client's own documented

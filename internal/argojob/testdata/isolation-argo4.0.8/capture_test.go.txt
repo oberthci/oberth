@@ -18,7 +18,7 @@ import (
 var isolationCapture func(*corev1.Pod)
 
 func TestOberthIsolationControllerCapture(t *testing.T) {
- const dir = "/var/tmp/cttv-pretest-20260927/oberth-controller"
+ dir := os.Getenv("OBERTH_ISOLATION_PROOF_DIR"); require.NotEmpty(t,dir)
  for _, shape := range []string{"dedicated-tools", "none", "container", "script", "containerset", "sidecars", "inline-dag", "inline-steps"} {
   t.Run(shape, func(t *testing.T) {
    data, err := os.ReadFile(filepath.Join(dir, shape+"-workflow.json")); require.NoError(t, err)
@@ -46,10 +46,10 @@ func TestOberthIsolationControllerCapture(t *testing.T) {
    for _,c:=range append(pod.Spec.Containers,pod.Spec.InitContainers...) {
     for _,m:=range c.VolumeMounts {
      if (m.Name=="work" || m.Name=="release-tools") {require.NotEqual(t,"none",shape,"workspace mount injected into none");require.True(t,m.ReadOnly,"%s mount %+v",c.Name,m)}
-     if c.Name!="init" && c.Name!="wait" {require.NotEqual(t,"exec-sa-token",m.Name,"pipeline container received executor token")}
+     if c.Name!="init" && c.Name!="wait" && c.Name!="oberth-executor-token" {require.NotEqual(t,"exec-sa-token",m.Name,"pipeline container received executor token")}
      require.NotEqual(t,"oberth-release-token",m.Name)
     }
-    if c.Name!="init" && c.Name!="wait" {
+    if c.Name!="init" && c.Name!="wait" && c.Name!="oberth-executor-token" {
      found:=false
      for _,e:=range c.Env {if e.Name=="PATH" {found=true;require.Equal(t,"/private/bin",e.Value)};require.False(t,strings.HasPrefix(e.Name,"VAULT_"))}
      require.True(t,found,"%s lost private PATH",c.Name)

@@ -16,6 +16,15 @@ func runInstall(ctx context.Context, arguments []string, input io.Reader, output
 	flags.SetOutput(io.Discard)
 
 	var cfg installer.Config
+	flags.StringVar(&cfg.KubeconfigPath, "kubeconfig", "", "kubeconfig file for an existing cluster")
+	flags.StringVar(&cfg.ContextName, "context", "", "context in the selected kubeconfig")
+	flags.BoolVar(&cfg.CreateKind, "create-kind", false, "create or use the local oberth kind cluster")
+	flags.StringVar(&cfg.ForgeURL, "upstream-url", "", "organization upstream base URL, e.g. ssh://git@github.com/oberthci")
+	flags.StringVar(&cfg.ForgeType, "forge", "", "upstream name (github, codeberg, or gitlab)")
+	flags.StringVar(&cfg.ForgeOrg, "organization", "", "upstream organization")
+	flags.StringVar(&cfg.UplinkIdentity, "uplink-identity", "", "workstation identity")
+	flags.StringVar(&cfg.SSHPublicKeyPath, "ssh-public-key", "", "workstation SSH public key path")
+	flags.StringVar(&cfg.UpstreamPrivateKeyPath, "upstream-key-file", "", "existing work SSH private key to import into OpenBao")
 	flags.BoolVar(&cfg.Dev, "dev", false, "install in dev/evaluation mode (default)")
 	flags.BoolVar(&cfg.Production, "production", false, "install in production mode (not implemented)")
 	flags.BoolVar(&cfg.DryRun, "dry-run", false, "print plan without making changes")

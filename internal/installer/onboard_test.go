@@ -7,10 +7,12 @@ import (
 	cryptorand "crypto/rand"
 	"encoding/pem"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"golang.org/x/crypto/ssh"
 )
@@ -791,5 +793,67 @@ func TestOrgFromBaseURL(t *testing.T) {
 		if got != tc.want {
 			t.Errorf("orgFromBaseURL(%q) = %q, want %q", tc.input, got, tc.want)
 		}
+	}
+}
+
+func TestInstallDerivesOrganizationURLForOnboarding(t *testing.T) {
+	for forge, host := range map[string]string{"github": "github.com", "codeberg": "codeberg.org", "gitlab": "gitlab.com"} {
+		t.Run(forge, func(t *testing.T) {
+			cfg := Config{ForgeType: forge, ForgeOrg: "company", UplinkIdentity: "engineer@work", SSHPublicKeyPath: "work.pub"}
+			if err := cfg.Validate(); err != nil {
+				t.Fatal(err)
+			}
+			if cfg.ForgeURL != "ssh://git@"+host+"/company" || !cfg.hasOnboardingConfig() {
+				t.Fatalf("organization configuration does not start onboarding: %+v", cfg)
+			}
+		})
+	}
+	for _, cfg := range []Config{{ForgeType: "github"}, {ForgeOrg: "company"}, {ForgeType: "github", ForgeOrg: "company/repo"}} {
+		if err := cfg.Validate(); err == nil {
+			t.Fatalf("incomplete or repository-specific configuration accepted: %+v", cfg)
+		}
+	}
+}
+
+func TestWorkKeyImportWaitsForAuditGate(t *testing.T) {
+	_, private, err := ed25519.GenerateKey(cryptorand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	block, err := ssh.MarshalPrivateKey(private, "test work key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := pem.EncodeToMemory(block)
+	calls := 0
+	deps := Deps{Output: io.Discard, PollInterval: time.Millisecond, RunCommand: func(_ context.Context, input []byte, _ string, _ ...string) ([]byte, error) {
+		calls++
+		if !bytes.Equal(input, key) {
+			t.Fatal("import payload changed")
+		}
+		if calls == 1 {
+			return []byte("oberth: daemon audit mutation gate rejected upstream.identity.import: audit integrity unavailable"), errors.New("exit status 1")
+		}
+		return nil, nil
+	}}
+	if err := applyProvidedDeployKey(context.Background(), Config{ForgeURL: "github.com/company", Timeout: time.Second}, deps, key); err != nil {
+		t.Fatal(err)
+	}
+	if calls != 2 {
+		t.Fatalf("got %d attempts", calls)
+	}
+	deps.RunCommand = func(context.Context, []byte, string, ...string) ([]byte, error) {
+		return []byte("oberth: daemon audit mutation gate rejected upstream.identity.import: rejected"), errors.New("exit status 1")
+	}
+	if err := applyProvidedDeployKey(context.Background(), Config{Timeout: 5 * time.Millisecond}, deps, key); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("gate rejection did not stay closed until timeout: %v", err)
+	}
+	calls = 0
+	deps.RunCommand = func(context.Context, []byte, string, ...string) ([]byte, error) {
+		calls++
+		return []byte("refusing to replace identity"), errors.New("exit status 1")
+	}
+	if err := applyProvidedDeployKey(context.Background(), Config{}, deps, key); err == nil || calls != 1 {
+		t.Fatal("permanent failure must not be retried")
 	}
 }

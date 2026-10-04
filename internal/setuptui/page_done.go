@@ -89,7 +89,7 @@ func (p *donePage) saveReport(state *WizardState) bool {
 	if p.fingerprint != "" {
 		fmt.Fprintf(&b, "TLS 30443: %s\n", p.fingerprint)
 	} else {
-		fmt.Fprintf(&b, "TLS 30443: kubectl get secret -n %s oberth-tls -o jsonpath='{.data.tls\\.crt}' | base64 -d | openssl x509 -fingerprint -sha256 -noout\n", ns)
+		fmt.Fprintf(&b, "TLS 30443: kubectl exec -n %s deploy/oberth -c oberth -- cat /run/oberth-identities/server/tls.crt | openssl x509 -fingerprint -sha256 -noout\n", ns)
 	}
 	if p.sshFingerprint != "" {
 		fmt.Fprintf(&b, "SSH 30022: %s\n", p.sshFingerprint)
@@ -145,7 +145,7 @@ func (p *donePage) view(state *WizardState, width, _ int) string {
 			sMuted.Render("(retrieve with the command below)") + "\n")
 	}
 
-	b.WriteString("      " + sInfo.Render("kubectl get secret -n "+ns+" oberth-tls -o jsonpath='{.data.tls\\.crt}' | base64 -d | openssl x509 -fingerprint -sha256 -noout") + "\n")
+	b.WriteString("      " + sInfo.Render("kubectl exec -n "+ns+" deploy/oberth -c oberth -- cat /run/oberth-identities/server/tls.crt | openssl x509 -fingerprint -sha256 -noout") + "\n")
 
 	if p.sshFingerprint != "" {
 		b.WriteString("    " + sMuted.Render("ssh 30022") + "    " +
@@ -165,9 +165,10 @@ func (p *donePage) view(state *WizardState, width, _ int) string {
 	// Deploy key pending — the server stays NotReady until the key is
 	// registered at the forge. Show retrieval guidance before next steps.
 	if p.deployKeyPending {
-		b.WriteString("  " + sFail.Render("deploy key pending") + "    " +
-			sText.Render("register it at the forge, then the server will become ready") + "\n")
-		b.WriteString("    " + sInfo.Render("kubectl get secret -n "+ns+" oberth-upstream-key -o jsonpath='{.data.id_ed25519\\.pub}' | base64 -d") + "\n\n")
+		b.WriteString("  " + sFail.Render("upstream authentication pending") + "    " +
+			sText.Render("register the public key with your forge account, then complete upstream registration") + "\n")
+		b.WriteString("    " + sInfo.Render("kubectl exec -n "+ns+" deploy/oberth -c oberth -- cat /run/oberth-identities/upstream/id_ed25519.pub") + "\n\n")
+		b.WriteString("    " + sInfo.Render("kubectl exec -n "+ns+" deploy/oberth -c oberth -- oberth upstream add "+state.ForgeType+" "+forgeUpstreamURL(state.ForgeType, state.ForgeOrg)) + "\n\n")
 	}
 
 	// Next steps.
@@ -176,7 +177,7 @@ func (p *donePage) view(state *WizardState, width, _ int) string {
 	if state.ClusterInfo.nodeIP != "" {
 		gitTarget = state.ClusterInfo.nodeIP
 	}
-	b.WriteString("    " + sInfo.Render("git clone ssh://git@"+gitTarget+":30022/oberth.git") + "\n")
+	b.WriteString("    " + sInfo.Render("git clone ssh://git@"+gitTarget+":30022/"+state.ForgeType+"/"+state.ForgeOrg+"/<repo>.git") + "\n")
 
 	mcpAddr := "https://localhost:30443/mcp"
 	if state.ClusterInfo.nodeIP != "" {

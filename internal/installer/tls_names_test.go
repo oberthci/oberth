@@ -137,7 +137,7 @@ func countOf(values []string, want string) int {
 func TestExistingCertificateMissingNamesIsReported(t *testing.T) {
 	t.Parallel()
 
-	deps := Deps{KubeClient: fake.NewSimpleClientset(secretWithCertificate(t, []string{"oberth"}, nil))}
+	deps := certificateTestDeps(t, []string{"oberth"}, nil)
 	missing := certificateNamesNotYetIssued(context.Background(), Config{
 		TLSExtraDNSNames: []string{"localhost", "oberth.example.internal"},
 		TLSExtraIPs:      []string{"127.0.0.1"},
@@ -155,8 +155,7 @@ func TestExistingCertificateMissingNamesIsReported(t *testing.T) {
 func TestExistingCertificateThatAlreadyCoversTheNamesIsSilent(t *testing.T) {
 	t.Parallel()
 
-	deps := Deps{KubeClient: fake.NewSimpleClientset(
-		secretWithCertificate(t, []string{"oberth", "localhost"}, []string{"127.0.0.1"}))}
+	deps := certificateTestDeps(t, []string{"oberth", "localhost"}, []string{"127.0.0.1"})
 	missing := certificateNamesNotYetIssued(context.Background(), Config{
 		TLSExtraDNSNames: []string{"localhost"},
 		TLSExtraIPs:      []string{"127.0.0.1"},
@@ -180,4 +179,9 @@ func TestFreshInstallReportsNothingMissing(t *testing.T) {
 	if len(missing) != 0 {
 		t.Errorf("a fresh install warned about a certificate that does not exist yet: %v", missing)
 	}
+}
+
+func certificateTestDeps(t *testing.T, names, ips []string) Deps {
+	public := secretWithCertificate(t, names, ips).Data["tls.crt"]
+	return Deps{RunCommand: func(context.Context, []byte, string, ...string) ([]byte, error) { return public, nil }}
 }

@@ -132,17 +132,17 @@ tls:
   #
   # An address reached as an IP needs extraIPs: a DNS SAN never matches an IP.
   #
-  # Both are ignored when existingSecret is set, and the Secret is generated
-  # once and kept, so changing these on an existing release has no effect until
-  # the Secret is deleted.
+  # The identity is created once in OpenBao. Changing names requires an
+  # explicit certificate rotation; upgrading preserves the existing identity.
+  # existingSecret is a rejected legacy setting.
   extraDNSNames: []
   extraIPs: []
 
 # The SSH host key is the durable identity of this deployment: Git clients pin
 # it AND the external audit witness identity is derived from it. By default the
-# chart generates it once, reuses it on every upgrade, and keeps it across
-# uninstall (helm.sh/resource-policy: keep). Point existingSecret at a restored
-# Secret to adopt a previous identity instead — never regenerate one casually.
+# server creates it once in OpenBao and reuses it on every restart or upgrade.
+# Preserve the OpenBao data and explicitly migrate legacy identities.
+# existingSecret is a rejected legacy setting.
 ssh:
   hostKey:
     existingSecret: ""
@@ -150,7 +150,8 @@ ssh:
 upstream:
   name: github
   baseURL: ssh://git@github.com/your-org
-  createSecrets: true
+  # Legacy names below identify OpenBao bundles; no Secret is created.
+  createSecrets: false
   keySecret: oberth-upstream-key
   keyFile: id_ed25519
   knownHostsSecret: oberth-known-hosts
@@ -302,7 +303,7 @@ argo:
 
 # Configure OpenBao once with scripts/setup-secretstore.sh.
 secretstore:
-  enabled: false
+  enabled: true
   # OpenBao API base URL. Defaults to the standard in-cluster OpenBao Helm
   # chart service (openbao service in openbao namespace). Override if OpenBao
   # is in a different namespace or at an external endpoint. HTTPS is required.

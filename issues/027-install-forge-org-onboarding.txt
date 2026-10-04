@@ -1,0 +1,17 @@
+Title: Noninteractive install ignores forge and organization without redundant URL
+Status: Fixed; regression tests pass
+Observed: 2026-10-05
+
+A compiled installer was invoked with --forge github --organization oberthci,
+--upstream-key-file, --ssh-public-key and --uplink-identity. It installed all
+components but returned "onboarding partial: manual steps remain" because
+hasOnboardingConfig required ForgeURL, which only the wizard derived.
+
+Derive the organization SSH URL from the supported forge and organization
+before onboarding. Reject incomplete pairs and repository paths. Keep an
+explicit --upstream-url for custom hosts. The manual next-steps clone example
+must also include <upstream>/<org>/<repo>.git.
+
+Acceptance: these flags complete an unattended fresh installation, import
+the work key into OpenBao, register the organization and uplink, and permit
+cloning github/oberthci/oberth.git without a redundant --upstream-url flag.

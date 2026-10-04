@@ -114,6 +114,11 @@ func nonrootApplyControllerFixture(t *testing.T, before *corev1.Pod, wf *wfv1.Wo
 	}
 	wait.VolumeMounts = mirrors
 	templateCopy := tmpl.DeepCopy()
+	// The real operate path resolves workflow-level Pod metadata into the
+	// executor template in templateresolution.addPodMetadata.
+	if wf.Spec.PodMetadata != nil {
+		templateCopy.Metadata.Labels = wf.Spec.PodMetadata.Labels
+	}
 	templateCopy.Inputs = wfv1.Inputs{Artifacts: templateCopy.Inputs.Artifacts}
 	encoded, err := json.Marshal(templateCopy)
 	if err != nil {
@@ -216,7 +221,7 @@ func TestNonrootExecutorContextWorksWhenOriginallyAbsent(t *testing.T) {
 		before.Spec.InitContainers[0].SecurityContext = nil
 		before.Spec.Containers[0].SecurityContext = nil
 		pod := nonrootApplyControllerFixture(t, before, nonrootBuiltFixture(t, shape == "script"))
-		for _, c := range []corev1.Container{pod.Spec.InitContainers[1], pod.Spec.Containers[0]} {
+		for _, c := range []corev1.Container{pod.Spec.InitContainers[2], pod.Spec.Containers[0]} {
 			if !reflect.DeepEqual(c.SecurityContext, nonrootContainerSecurity(nonrootUID)) {
 				t.Fatalf("absent %s context was not fully installed", c.Name)
 			}

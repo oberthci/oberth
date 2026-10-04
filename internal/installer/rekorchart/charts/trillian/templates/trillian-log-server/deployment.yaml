@@ -1,0 +1,168 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+{{- if .Values.logServer.deploymentAnnotations }}
+  annotations:
+    {{- toYaml .Values.logServer.deploymentAnnotations | nindent 4 }}
+{{- end }}
+  labels:
+    {{- include "trillian.logServer.labels" . | nindent 4 }}
+  name: {{ template "trillian.logServer.fullname" . }}
+{{ include "trillian.namespace" . | indent 2 }}
+spec:
+  selector:
+    {{- if .Values.schedulerName }}
+    schedulerName: "{{ .Values.schedulerName }}"
+    {{- end }}
+    matchLabels:
+      {{- include "trillian.logServer.matchLabels" . | nindent 6 }}
+  replicas: {{ .Values.logServer.replicaCount }}
+  {{- if .Values.logServer.strategy }}
+  strategy:
+{{ toYaml .Values.logServer.strategy | trim | indent 4 }}
+    {{ if eq .Values.logServer.strategy.type "Recreate" }}rollingUpdate: null{{ end }}
+{{- end }}
+  template:
+    metadata:
+    {{- if .Values.logServer.podAnnotations }}
+      annotations:
+        {{- toYaml .Values.logServer.podAnnotations | nindent 8 }}
+    {{- end }}
+      labels:
+        {{- include "trillian.logServer.labels" . | nindent 8 }}
+        {{- if .Values.logServer.podLabels}}
+        {{ toYaml .Values.logServer.podLabels | nindent 8 }}
+        {{- end}}
+    spec:
+      automountServiceAccountToken: false
+      serviceAccountName: rekor-bao-db
+{{- if .Values.mysql.enabled }}
+      initContainers:
+{{ include "oberth.bao.init" (dict "uid" 65533) | indent 8 }}
+        - name: "wait-for-trillian-db"
+          image: "{{ template "trillian.image" .Values.initContainerImage.netcat }}"
+          imagePullPolicy: {{ .Values.initContainerImage.netcat.imagePullPolicy }}
+          command: ["sh", "-c", "until nc -z -w 10 {{ template "mysql.hostname" . }} {{ .Values.mysql.port }}; do echo waiting for {{ template "mysql.hostname" . }}; sleep 5; done;"]
+      {{- if .Values.initContainerResources }}
+          resources:
+{{ toYaml .Values.initContainerResources | indent 12 }}
+      {{- end }}
+      {{- if .Values.initContainerSecurityContext }}
+          securityContext:
+{{ toYaml .Values.initContainerSecurityContext | indent 12 }}
+      {{- end }}
+      {{- if .Values.logServer.extraInitContainers }}
+{{ toYaml .Values.logServer.extraInitContainers | indent 8 }}
+      {{- end }}
+{{- end }}
+{{- if .Values.logServer.priorityClassName }}
+      priorityClassName: "{{ .Values.logServer.priorityClassName }}"
+{{- end }}
+      containers:
+        {{- if .Values.mysql.gcp.enabled }}
+        - name: cloud-sql-proxy
+          image: "{{ template "trillian.image" .Values.mysql.gcp.cloudsql }}"
+          command:
+            - "/cloud-sql-proxy"
+            {{- if (((.Values.mysql).gcp).cloudsql).iamUsername }}
+            - "--auto-iam-authn"
+            {{- end }}
+            {{- if .Values.mysql.gcp.cloudsql.unixDomainSocket.enabled }}
+            - "--unix-socket"
+            - {{ .Values.mysql.gcp.cloudsql.unixDomainSocket.path | quote }}
+            {{- end }}
+            {{- range .Values.mysql.gcp.cloudsql.extraArgs | default list }}
+            - {{ . | quote }}
+            {{- end }}
+            - "{{ .Values.mysql.gcp.instance }}"
+    {{- if .Values.mysql.gcp.cloudsql.securityContext }}
+          securityContext:
+{{ toYaml .Values.mysql.gcp.cloudsql.securityContext | indent 12 }}
+    {{- end }}
+          resources:
+{{ toYaml .Values.mysql.gcp.cloudsql.resources | indent 12 }}
+          {{- if .Values.mysql.gcp.cloudsql.unixDomainSocket.enabled }}
+          volumeMounts:
+            - mountPath: {{ .Values.mysql.gcp.cloudsql.unixDomainSocket.path }}
+              name: cloud-sql-proxy-unix-domain-socket
+          {{- end }}
+{{- if .Values.mysql.gcp.cloudsql.startupProbe }}
+          startupProbe:
+{{ toYaml .Values.mysql.gcp.cloudsql.startupProbe | indent 12 }}
+{{- end }}
+{{- if .Values.mysql.gcp.cloudsql.livenessProbe }}
+          livenessProbe:
+{{ toYaml .Values.mysql.gcp.cloudsql.livenessProbe | indent 12 }}
+{{- end }}
+{{- if .Values.mysql.gcp.cloudsql.readinessProbe }}
+          readinessProbe:
+{{ toYaml .Values.mysql.gcp.cloudsql.readinessProbe | indent 12 }}
+{{- end }}
+        {{- end }}
+        - name: {{ template "trillian.name" . }}-{{ .Values.logServer.name }}
+          image: "{{ template "trillian.image" .Values.logServer.image }}"
+          imagePullPolicy: "{{ .Values.logServer.image.pullPolicy }}"
+          command: [/tools/busybox, sh, -ec]
+          args:
+            - |
+              password=$(/tools/busybox cat /credentials/password)
+              exec "$0" "$@" "--mysql_uri=mysql:${password}@tcp(trillian-mysql:3306)/trillian?parseTime=true&interpolateParams=true"
+            - /ko-app/trillian_log_server
+{{  include "trillian.logServer.args" . | indent 12 }}
+
+          ports:
+{{- include "trillian.containerPorts" .Values.logServer.service.ports | indent 12 }}
+{{- if .Values.logServer.startupProbe }}
+          startupProbe:
+{{ toYaml .Values.logServer.startupProbe | indent 12 }}
+{{- end }}
+{{- if .Values.logServer.livenessProbe }}
+          livenessProbe:
+{{ toYaml .Values.logServer.livenessProbe | indent 12 }}
+{{- end }}
+{{- if .Values.logServer.readinessProbe }}
+          readinessProbe:
+{{ toYaml .Values.logServer.readinessProbe | indent 12 }}
+{{- end }}
+          resources:
+{{ toYaml .Values.logServer.resources | indent 12 }}
+          volumeMounts:
+{{ include "oberth.bao.mounts" . | indent 12 }}
+{{- if and (.Values.mysql.gcp.enabled) (.Values.mysql.gcp.cloudsql.unixDomainSocket.enabled) }}
+            - mountPath: {{ .Values.mysql.gcp.cloudsql.unixDomainSocket.path }}
+              name: cloud-sql-proxy-unix-domain-socket
+{{- end }}
+{{- if .Values.logServer.containerSecurityContext }}
+          securityContext:
+{{ toYaml .Values.logServer.containerSecurityContext | indent 12 }}
+{{- end }}
+    {{- if .Values.imagePullSecrets }}
+      imagePullSecrets:
+{{ toYaml .Values.imagePullSecrets | indent 8 }}
+    {{- end }}
+    {{- if .Values.logServer.nodeSelector }}
+      nodeSelector:
+{{ toYaml .Values.logServer.nodeSelector | indent 8 }}
+    {{- end }}
+    {{- with .Values.logServer.dnsConfig }}
+      dnsConfig:
+{{ toYaml . | indent 8 }}
+    {{- end }}
+    {{- if .Values.logServer.securityContext }}
+      securityContext:
+{{ toYaml .Values.logServer.securityContext | indent 8 }}
+    {{- end }}
+    {{- if .Values.logServer.tolerations }}
+      tolerations:
+{{ toYaml .Values.logServer.tolerations | indent 8 }}
+    {{- end }}
+    {{- if .Values.logServer.affinity }}
+      affinity:
+{{ toYaml .Values.logServer.affinity | indent 8 }}
+    {{- end }}
+      volumes:
+{{ include "oberth.bao.volumes" "db" | indent 8 }}
+{{- if and (.Values.mysql.gcp.enabled) (.Values.mysql.gcp.cloudsql.unixDomainSocket.enabled) }}
+      - name: cloud-sql-proxy-unix-domain-socket
+        emptyDir: {}
+    {{- end }}

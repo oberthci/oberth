@@ -1,0 +1,32 @@
+ISSUE 004: Setup hard-codes the repo and omits upstream/org from clone instructions
+
+Status: Open
+Reported: 2026-10-04
+Affected version: Oberth v0.17.9 (6f40126bc8f6), macOS
+
+Priority: High
+Evidence: Screenshots, live UI, and source confirmed; full-path clone subsequently succeeded.
+
+Reproduction
+Select GitHub / oberthci, inspect the Git information and completion pages, then compare the displayed URL with the registered upstream name and organization.
+
+Observed behavior and proposed change
+Clone instructions discard upstream and organization context.
+Screenshot 15.52.33 shows /<repo>.git; 15.53.01 shows /oberth.git.
+page_done.go hard-codes /oberth.git; setup never asks which repo to clone.
+This happened to name the right repo here, but cannot be general guidance.
+Fix: collect/select a repo, explain upstream name, and print the resolved
+/github/oberthci/oberth.git URL; show short forms only as optional aliases.
+
+Reference
+- ../setup-test-results/REPORT.txt, finding 3
+- Screenshot times above refer to ../install-log/photo_2026-10-04 <time>.jpeg.
+- Source paths above are relative to ../oberth-source-v0.17.9/.
+- ../setup-test-results/01-after-wizard.txt
+- ../setup-test-results/02-clone-verification.txt
+
+Scope clarification
+Three-segment paths ARE supported. A full clone from
+ssh://git@localhost:30022/github/oberthci/oberth.git succeeded after registering
+the public HTTPS upstream. This issue concerns misleading onboarding copy,
+not a failure of the path parser or proof of upstream SSH publishing.

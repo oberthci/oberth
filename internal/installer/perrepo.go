@@ -136,7 +136,7 @@ path "%s/data/upstream/%s/%s/*" {
 }`, kvPrefix, org, repo)
 
 	builder.WriteString("\n\n# Allow the fetch client to revoke its own short-lived login token.\npath \"auth/token/revoke-self\" {\n  capabilities = [\"update\"]\n}")
-	return builder.String()
+	return builder.String() + denyServerIdentities(kvPrefix)
 }
 
 // PerRepoPolicy generates the HCL policy for a single repository's per-repo
@@ -170,7 +170,7 @@ path "%s/data/upstream/%s/%s/*" {
 	}
 
 	builder.WriteString("\n\n# Allow the fetch client to revoke its own short-lived login token.\npath \"auth/token/revoke-self\" {\n  capabilities = [\"update\"]\n}")
-	return builder.String()
+	return builder.String() + denyServerIdentities(kvPrefix)
 }
 
 // perRepoRoleMatches checks whether an existing Vault role matches the expected

@@ -1,0 +1,15 @@
+Title: Submit OpenBao unseal requests without placing the key in process arguments
+Status: Implemented; Linux installer tests pass
+Observed: 2026-10-05
+
+The installer sent an unseal key through kubectl stdin, but its in-pod shell
+expanded the key into `bao operator unseal` arguments. This briefly exposed
+it through the process command line inside the pod and on the node.
+
+Use `bao write -format=json sys/unseal -` with a JSON request on stdin.
+The key stays out of both host and in-pod arguments. Parse the API's data
+response envelope and retain the existing sealed-status check.
+
+Acceptance: fresh production OpenBao initialization/unseal succeeds; command
+arguments contain neither the key nor shell expansion of it. Tests assert
+the JSON stdin payload and credential-free arguments.

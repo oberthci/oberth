@@ -693,11 +693,16 @@ func Build(config Config, request Request) (*wfv1.Workflow, error) {
 		return nil, err
 	}
 
+	if err := projectExecutorTokens(workflow, config); err != nil {
+		return nil, err
+	}
+
 	digest, err := specIdentity(workflow)
 	if err != nil {
 		return nil, err
 	}
 	workflow.Annotations[identityAnnotation] = digest
+
 	return workflow, nil
 }
 

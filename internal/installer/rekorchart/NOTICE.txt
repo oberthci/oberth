@@ -1,0 +1,14 @@
+Adapted from sigstore/helm-charts rekor 1.8.3 and trillian 0.3.16 (Apache-2.0).
+Upstream: https://github.com/sigstore/helm-charts
+
+Oberth modifications: OpenBao Transit signing, Kubernetes auto-auth agents,
+private memory-backed database credentials, explicit application identities,
+a native multi-architecture MySQL 8.4 image and removal of standalone
+Redis/MySQL templates. The installer supplies the
+fixed supported values; this embedded chart is not a general chart distribution.
+
+Trillian exposes database credentials only through its mysql_uri flag. The
+wrapper reads its password from tmpfs and constructs that process argument
+inside the isolated container. No password appears in Kubernetes manifests,
+Helm values, release records or host-side command arguments. Do not add debug
+logging or share the process namespace with untrusted containers.

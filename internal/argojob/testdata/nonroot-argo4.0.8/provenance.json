@@ -6,15 +6,16 @@
   "source_file": "workflow/controller/workflowpod.go",
   "source_sha256": "97d059a8ffed7854760fa8c109f657a4d6be0e2496ed193ee1dd541118b8f763",
   "capture_boundary": "immediately before var podSpecPatchs / processPodSpecPatch",
-  "instrumented_sha256": "8a8c8327d4ff72050f41fef7db4d1fe24244817dc55511351f664b0673a82cf4",
+  "instrumented_sha256": "e94c816c3116278d8b6c363568ab3922aed0a178e6afcd83d6fd0a3270b0e8d4",
   "files": {
-    "container-before-patch.json": "493479d23d11650d43c4009f7035bce6f573b9a031ed736cc949c9ae0ab9c331",
-    "container-submitted.json": "878bcf5e9922614962d9faecf7cf7170fc0ef2c87910a7dce8447490744ffecc",
-    "script-before-patch.json": "ffc1cc27dacc51a15070df8128232097903650385eee33b85f206b5ef6aaf782",
-    "script-submitted.json": "bf32be7736829e0adbc04a7f7a7c587448e226b9bc96be4814854e54247850d0",
+    "container-before-patch.json": "160de996769a27ea1fb614e775c0d67703c1a2d8dacc2c8768ff0aa9f26a7db2",
+    "container-submitted.json": "484b7e5241f7e14fffee69c3b0fd942b875bcbc6385de8d65fcac9daf792d901",
+    "script-before-patch.json": "ce124d9fbbf5de213fbded73a6e970687b975b9d5a4e5756430a8cc1c9df9c27",
+    "script-submitted.json": "7b95f3f5eae2849828160e0dd5eee2e907e4fa9b65edff41b476faad8402785a",
     "controller-profile.json": "7ca0f2aff6cf39e67aa5996672363a3a7a8401449a794f32d5cf375e7267a4c0",
-    "container-persisted-workflow.json": "130ea46423f8f0b63e64e9f5a63d74165e71f3e461841a1985dd88614855ad60",
-    "script-persisted-workflow.json": "1f9dff54337a240d0f1c0d74a7b9be2f5f074087c7b7a5a2e57ae12c3f9107fe"
+    "container-persisted-workflow.json": "b6db6abb98205c7ec2c9f1cedd6ef55eb6e8c0abfbe6d459451fc2f885e6c4a2",
+    "script-persisted-workflow.json": "1e433737652df177e13ebc9eadb4d9afc74a41e3bf1c840036d38f3517d3ffd3",
+    "capture_test.go.txt": "2f75e2e64c0bbe5de567b8cec9bf31601cf62fcb8dfde6a92a5650d8f5f0cf22"
   },
   "stage": "Before processPodSpecPatch, workflow/controller/workflowpod.go:405; observed submitted Pod after main emissary/volume rewriting at417-456.",
   "controller_profile": "nonroot-static-v1; exact executor digest and gloglevel0; raw before-Pods include separate hostile SC control. Persisted Workflows use supported profile and actual operate-to-Running fake API reconciliation."

@@ -52,7 +52,7 @@ func (p *uplinkPage) init(state *WizardState) tea.Cmd {
 		if host == "" {
 			host = "localhost"
 		}
-		p.identity = user + "@" + host
+		p.identity = strings.ReplaceAll(user, "@", "-") + "@" + host
 	}
 
 	// Scan ~/.ssh for public keys (S9: private keys are never read).
@@ -77,6 +77,7 @@ func (p *uplinkPage) init(state *WizardState) tea.Cmd {
 func (p *uplinkPage) update(msg tea.Msg, state *WizardState) (page, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyPressMsg:
+		p.errMsg = ""
 		switch msg.String() {
 		case "tab":
 			p.focusField = (p.focusField + 1) % 2
@@ -139,6 +140,10 @@ func (p *uplinkPage) update(msg tea.Msg, state *WizardState) (page, tea.Cmd) {
 			p.errMsg = ""
 		case "esc":
 			return p, func() tea.Msg { return pageBackMsg{} }
+		case "ctrl+u":
+			if p.focusField == 0 {
+				p.identity = ""
+			}
 		case "backspace":
 			if p.focusField == 0 && len(p.identity) > 0 {
 				p.identity = p.identity[:len(p.identity)-1]

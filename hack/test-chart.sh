@@ -99,11 +99,11 @@ helm template oberth "$notes_chart" --namespace default \
   --show-only templates/notes-contract.yaml >"$notes"
 render >"$manifest"
 render >"$empty_release_manifest"  # default render has no releaseSecrets
-render --set upstream.createSecrets=true --set ssh.hostKey.existingSecret= >"$generated_secrets_manifest"
+render >"$generated_secrets_manifest"
 render \
   --set auditAnchor.tsaURL=https://timestamp.sectigo.com/rfc3161 \
   --set auditAnchor.rekorURL=https://rekor.sigstore.dev \
-  --set auditAnchor.rootsSecret=oberth-audit-tsa-roots >"$custom_anchor_manifest"
+  --set-file auditAnchor.tsaCA="$secretstore_ca" >"$custom_anchor_manifest"
 render --set auditAnchor.rekorURL=https://rekor.sigstore.dev \
   --set-file auditAnchor.rekorPublicKey="$rekor_public_key" >"$custom_rekor_manifest"
 render --set auditAnchor.rekorURL=https://rekor.sigstore.dev \
@@ -146,12 +146,7 @@ grep -A5 '^    - name: ssh$' "$desired_service_manifest" | grep -q '^      nodeP
 grep -A4 '^    - name: https$' "$desired_service_manifest" | grep -q '^      port: 8443$'
 grep -A5 '^    - name: https$' "$desired_service_manifest" | grep -q '^      nodePort: 30443$'
 grep -q '^  name: oberth$' "$manifest"
-grep -q '# Source: oberth/templates/tls-secret.yaml' "$manifest"
-grep -q '^  name: oberth-tls$' "$manifest"
 sed -n '/# Source: oberth\/templates\/pvc.yaml/,/^---$/p' "$manifest" | grep -q '^    helm.sh/resource-policy: keep$'
-grep -q -- '- "oberth-upstream-key"' "$manifest"
-grep -q -- '- "oberth-known-hosts"' "$manifest"
-grep -q 'verbs: \["get", "patch"\]' "$manifest"
 sed -n '/resources: \["pods"\]/,/verbs:/p' "$manifest" | grep -q 'verbs: \["get", "list", "watch", "patch"\]'
 # ConfigMap least privilege: the collection rule is read/create/watch only
 # (watch feeds the secret-access reconciler and cannot be name-scoped
@@ -176,9 +171,7 @@ fi
 if grep -q 'resources: \["jobs"\]' "$manifest"; then
   exit 1
 fi
-test "$(grep -c '^            optional: true$' "$manifest")" -eq 2
-grep -q '^            secretName: oberth-ssh-host-key$' "$manifest"
-grep -q -- '--ssh-host-key=/etc/oberth/ssh/ssh_host_key' "$manifest"
+grep -q -- '--ssh-host-key=/run/oberth-identities/server/ssh_host_key' "$manifest"
 grep -Fq -- '- name: ci-cache' "$manifest"
 grep -Fq -- 'mountPath: /var/cache/oberth/ci' "$manifest"
 grep -Fq -- 'path: /var/cache/oberth/ci' "$manifest"
@@ -269,8 +262,8 @@ if grep -Fq -- '--audit-tsa-roots=' "$manifest"; then
 fi
 grep -Fq -- '--audit-tsa-url=https://timestamp.sectigo.com/rfc3161' "$custom_anchor_manifest"
 grep -Fq -- '--audit-rekor-url=https://rekor.sigstore.dev' "$custom_anchor_manifest"
-grep -Fq -- '--audit-tsa-roots=/etc/oberth/audit-tsa/roots.pem' "$custom_anchor_manifest"
-grep -q '^            secretName: oberth-audit-tsa-roots$' "$custom_anchor_manifest"
+grep -Fq -- '--audit-tsa-ca=/etc/oberth/audit-tsa-ca/ca.crt' "$custom_anchor_manifest"
+grep -q '^            name: oberth-audit-tsa-ca$' "$custom_anchor_manifest"
 # Dependent audit knobs without their URL must fail the render, not produce a
 # pod the server refuses to start.
 if render --set auditAnchor.rootsSecret=oberth-audit-tsa-roots >/dev/null 2>&1; then
@@ -330,50 +323,16 @@ grep -Fq -- 'https://github.com/oberthci/oberth#documentation' "$notes"
 if grep -Eq 'curl[[:space:]]+(-[^[:space:]]*[[:space:]]+)*-k([[:space:]]|$)' "$notes"; then
   exit 1
 fi
-# Secrets: only one named rule for upstream key/known-hosts; no unbounded
-# create, no releaseSecrets conditional.
-if test "$(grep -c 'resources: \["secrets"\]' "$manifest")" -ne 1; then
-	exit 1
-fi
-# Default values generate every identity Secret on first install (documented
-# in NOTES); adopting restored credentials must render NO competing Secrets.
-adopted_secrets_manifest=$(mktemp)
-render --set upstream.createSecrets=false --set ssh.hostKey.existingSecret=restored-host-key >"$adopted_secrets_manifest"
-if grep -q '# Source: oberth/templates/host-key-secret.yaml' "$adopted_secrets_manifest" || grep -q '# Source: oberth/templates/upstream-secrets.yaml' "$adopted_secrets_manifest"; then
-  rm -f "$adopted_secrets_manifest"
+# Every identity comes from OpenBao; neither resources nor mounts use Secrets.
+if grep -Eq 'kind: Secret$|secretKeyRef:|secretName:|resources: \["secrets"\]' "$manifest"; then
   exit 1
 fi
-rm -f "$adopted_secrets_manifest"
-grep -q '# Source: oberth/templates/host-key-secret.yaml' "$generated_secrets_manifest"
-grep -q '# Source: oberth/templates/upstream-secrets.yaml' "$generated_secrets_manifest"
-grep -q '^  name: oberth-ssh-host-key$' "$generated_secrets_manifest"
-grep -q '^  ssh_host_key:' "$generated_secrets_manifest"
-grep -q '^  name: oberth-upstream-key$' "$generated_secrets_manifest"
-grep -q '^  name: oberth-known-hosts$' "$generated_secrets_manifest"
-# Upstream Secrets use a lookup guard: when the Secret already exists
-# (connected upgrade), the template renders NOTHING for it — Helm orphans the
-# live Secret via helm.sh/resource-policy: keep, preserving its data and
-# removing the key from future release-manifest history. When absent (fresh
-# install), the template renders data: {} with resource-policy: keep so no key
-# material ever enters the manifest.
-#
-# NOTE: The existing-install orphan path (lookup returns the Secret) cannot be
-# exercised by offline helm template — lookup always returns empty offline.
-# The orphan behavior is a documented Helm resource-policy:keep semantic.
-#
-# The rendered output must never contain private key material or re-embedded
-# Secret data (no toYaml of existing .data).
-upstream_secrets_section=$(sed -n '/# Source: oberth\/templates\/upstream-secrets.yaml/,/^---$/p' "$generated_secrets_manifest")
-if echo "$upstream_secrets_section" | grep -q 'lookup'; then
-  exit 1
-fi
-# Fresh-install (absent) path: both Secrets render with data: {}
-test "$(echo "$upstream_secrets_section" | grep -c '^data: {}$')" -ge 1
-awk '
-  /^# Source:/ { upstream = ($0 == "# Source: oberth/templates/upstream-secrets.yaml") }
-  upstream && /^    helm.sh\/resource-policy: keep$/ { kept++ }
-  END { exit kept == 2 ? 0 : 1 }
-' "$generated_secrets_manifest"
+grep -q 'name: OBERTH_IDENTITY_STORE' "$manifest"
+grep -q 'medium: Memory' "$manifest"
+for legacy in tls.existingSecret ssh.hostKey.existingSecret auditAnchor.rootsSecret; do
+  if render --set "$legacy=old-identity" >/dev/null 2>&1; then exit 1; fi
+done
+if render --set secretstore.enabled=false >/dev/null 2>&1; then exit 1; fi
 
 if render --set replicaCount=2 >/dev/null 2>&1; then
   exit 1
@@ -605,7 +564,7 @@ render --set argo.controllerProfile=nonroot-static-v1 >"$argo_legacy_manifest"
 grep -q -- '--argo-controller-profile=nonroot-static-v1' "$argo_legacy_manifest"
 render --set argo.controllerProfile=nonroot-static-v1 \
   --show-only templates/rbac-argo.yaml >"$argo_vault_manifest"
-test "$(grep -c 'resources: \["configmaps"\]' "$argo_vault_manifest")" -eq 1
+test "$(grep -c 'resources: \["configmaps"\]' "$argo_vault_manifest")" -eq 2
 grep -A2 'resources: \["configmaps"\]' "$argo_vault_manifest" | \
   grep -q 'resourceNames: \["oberth-argo-nr-5f121f7f1f5ef468eb2208b1cf7e911746c8cb6173c1d24e"\]'
 grep -A2 'resources: \["configmaps"\]' "$argo_vault_manifest" | \

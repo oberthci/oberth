@@ -26,12 +26,6 @@ rules:
     resources: ["configmaps"]
     resourceNames: ["oberth-secret-access"]
     verbs: ["update"]
-  - apiGroups: [""]
-    resources: ["secrets"]
-    resourceNames:
-      - {{ .Values.upstream.keySecret | quote }}
-      - {{ .Values.upstream.knownHostsSecret | quote }}
-    verbs: ["get", "patch"]
   {{- if .Values.secretstore.enabled }}
   # Store-sourced release secrets are delivered into the running release Pod
   # over the exec subresource so their values never exist in etcd or on node

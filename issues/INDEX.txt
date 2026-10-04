@@ -1,0 +1,87 @@
+Oberth setup issues
+===================
+
+Local issue backlog; no issues have been published to an external tracker.
+All entries concern v0.17.9, observed or inspected on 2026-10-04.
+Status and evidence level are recorded in each issue.
+
+001 contains the user-requested missing-kubeconfig UX change.
+Other entries split the earlier review into individual actionable reports.
+
+001  Offer an existing cluster or kind creation instead of a red missing-kubeconfig error
+     001-missing-kubeconfig-shown-as-error.txt
+
+002  Completion instructions omit the required upstream registration rerun
+     002-missing-upstream-registration-recovery.txt
+
+003  Setup recommends cloning before the Git service is ready
+     003-clone-advertised-before-ready.txt
+
+004  Setup hard-codes the repo and omits upstream/org from clone instructions
+     004-clone-url-omits-qualified-path.txt
+
+005  Kind selection appears as not selected and leaves the report context empty
+     005-kind-selection-context-summary.txt
+
+006  Generated identity fails validation and corrected input retains the error
+     006-invalid-default-identity-and-editing.txt
+
+007  TLS algorithm and names shown by setup do not match the installed certificate
+     007-tls-preview-does-not-match-certificate.txt
+
+008  Review makes an inaccurate blanket claim that no secrets reach disk or etcd
+     008-inaccurate-secret-storage-guarantee.txt
+
+009  Per-repo deploy-key label does not match the organization-level setup flow
+     009-per-repo-deploy-key-label.txt
+
+010  Copying one credential enables acknowledgement and discard of all credentials
+     010-credential-ceremony-acknowledges-all.txt
+
+011  Plain and accessible setup omit the kind-creation choice
+     011-plain-mode-missing-kind-option.txt
+
+012  Saved setup report omits pending-step details and recovery commands
+     012-setup-report-missing-diagnostics.txt
+
+013  Fresh installation warns about querying an Oberth pod that does not exist
+     013-fresh-install-access-list-warning.txt
+
+014  Narrow terminal clips setup commands and hides useful progress detail
+     014-clipped-commands-and-progress-log.txt
+
+015  Successful Git operations print key-registration troubleshooting guidance
+     015-ssh-banner-on-success.txt
+
+016  Any partial green-step count is classified as a pending deploy key
+     016-partial-result-misclassified-as-deploy-key.txt
+
+017  Setup cannot use an existing work SSH key for organization authentication
+     017-setup-cannot-use-existing-upstream-work-key.txt
+
+Evidence: ../setup-test-results/REPORT.txt and the referenced screenshots/logs.
+No credentials are included in this directory.
+
+018  Keep installation and runtime credentials out of Kubernetes Secrets
+     018-no-kubernetes-secrets.txt
+
+019  Docker Desktop mount rewriting prevents safe reuse of kind
+     019-docker-desktop-kind-cache-mounts.txt
+
+020  Local digest-pinned images cannot be resolved in kind
+     020-kind-local-image-canonical-name.txt
+
+021  Installer tests modify the operator SSH config and race on temporary files
+     021-onboarding-tests-write-real-ssh-config.txt
+
+022  Secret-backed installations need explicit identity migration before upgrade
+     022-legacy-identity-migration.txt
+
+023-rekor-openbao-integration.txt
+024-pipeline-memory-preflight.txt
+025-rekor-database-native-images.txt
+026-openbao-unseal-process-arguments.txt
+
+027-install-forge-org-onboarding.txt
+
+028-onboarding-audit-readiness.txt

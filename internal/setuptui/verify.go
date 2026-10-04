@@ -2,6 +2,7 @@ package setuptui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -14,6 +15,8 @@ import (
 )
 
 // ---------- typed messages for async verification results ----------
+
+var errNoCluster = errors.New("no Kubernetes cluster configured")
 
 // clusterInfoMsg carries the result of the cluster preflight probe.
 type clusterInfoMsg struct {
@@ -45,9 +48,12 @@ type discoveredRepo struct {
 
 // probeCluster returns a tea.Cmd that loads kubeconfig for the given context
 // and runs preflight checks against the cluster.
-func probeCluster(contextName string) tea.Cmd {
+func probeCluster(contextName string) tea.Cmd { return probeClusterWithPath(contextName, "") }
+
+func probeClusterWithPath(contextName, path string) tea.Cmd {
 	return func() tea.Msg {
 		rules := clientcmd.NewDefaultClientConfigLoadingRules()
+		rules.ExplicitPath = path
 		overrides := &clientcmd.ConfigOverrides{}
 		if contextName != "" {
 			overrides.CurrentContext = contextName
@@ -57,6 +63,9 @@ func probeCluster(contextName string) tea.Cmd {
 		rawConfig, err := config.RawConfig()
 		if err != nil {
 			return clusterInfoMsg{err: fmt.Errorf("load kubeconfig: %w", err)}
+		}
+		if len(rawConfig.Contexts) == 0 {
+			return clusterInfoMsg{err: errNoCluster}
 		}
 		selectedContext := rawConfig.CurrentContext
 		if contextName != "" {

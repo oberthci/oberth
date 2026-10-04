@@ -1,0 +1,14 @@
+Title: Explain pipeline jobs that cannot fit the local kind node
+Status: Reproduced during fresh-cluster verification
+Observed: 2026-10-04
+
+Docker Desktop allocated about 8 GiB to its VM. The repository's lint and
+security jobs each request 8 GiB, while the node has only 8122332 Ki allocatable
+memory before other Pods. Both jobs remain Pending/Unschedulable even though
+setup, cloning and small pipelines pass.
+
+Show a clear capacity diagnosis and the requested versus allocatable resource
+amount before accepting an impossible local job, or prominently in run status.
+Do not reduce or mutate admitted workflow resource requests to make a run pass.
+For this machine, allocate 20 GiB to Docker Desktop and restart, then unseal
+OpenBao and rerun the unchanged pipeline.

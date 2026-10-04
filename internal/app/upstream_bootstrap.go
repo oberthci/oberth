@@ -69,7 +69,13 @@ type SSHAuthProbe func(context.Context, string, []byte, []byte) error
 // upstream is either already projected or durably stored in name-scoped
 // Kubernetes Secrets. KubernetesClient is lazy so a fully configured install
 // does not need to contact the API during an ordinary upstream registration.
+type BootstrapIdentityStore interface {
+	Load(context.Context, string) (map[string][]byte, error)
+	Save(context.Context, string, map[string][]byte) error
+}
+
 type UpstreamSSHBootstrap struct {
+	Store  BootstrapIdentityStore
 	Input  io.Reader
 	Output io.Writer
 
@@ -167,9 +173,12 @@ func (bootstrap UpstreamSSHBootstrap) Ensure(ctx context.Context, baseURL string
 		confirmations = newConfirmationReader(bootstrap.Input)
 	}
 
-	client, err := bootstrap.KubernetesClient()
-	if err != nil {
-		return UpstreamSSHIdentity{}, fmt.Errorf("app: create Kubernetes client for upstream bootstrap: %w", err)
+	var client kubernetes.Interface
+	if bootstrap.Store == nil {
+		client, err = bootstrap.KubernetesClient()
+		if err != nil {
+			return UpstreamSSHIdentity{}, fmt.Errorf("create identity storage client: %w", err)
+		}
 	}
 	persisted, err := bootstrap.loadPersisted(ctx, client)
 	if err != nil {
@@ -342,7 +351,7 @@ func terseProbeError(err error) string {
 }
 
 func (bootstrap UpstreamSSHBootstrap) validate() error {
-	if bootstrap.Input == nil || bootstrap.Output == nil || bootstrap.KubernetesClient == nil || bootstrap.ScanHostKeys == nil || bootstrap.Probe == nil {
+	if bootstrap.Input == nil || bootstrap.Output == nil || (bootstrap.KubernetesClient == nil && bootstrap.Store == nil) || bootstrap.ScanHostKeys == nil || bootstrap.Probe == nil {
 		return errors.New("app: upstream bootstrap input, output, Kubernetes client, host-key scanner, and authentication probe are required")
 	}
 	if bootstrap.PrivateKeySecret == bootstrap.KnownHostsSecret {
@@ -399,7 +408,7 @@ func (bootstrap UpstreamSSHBootstrap) selectPrivateIdentity(confirmations *confi
 		return privateIdentity{}, false, false, fmt.Errorf("app: configured upstream private key is invalid; refusing to replace it: %w", projectedErr)
 	}
 	accepted, err := confirmations.confirmShort(bootstrap.Output,
-		fmt.Sprintf("No upstream SSH private key is configured. Generate an Ed25519 key and store it in Secret %s/%s? [y/N]: ", bootstrap.Namespace, bootstrap.PrivateKeySecret))
+		fmt.Sprintf("No upstream SSH private key is configured. Generate an Ed25519 key in the configured identity store for %s/%s? [y/N]: ", bootstrap.Namespace, bootstrap.PrivateKeySecret))
 	if err != nil {
 		return privateIdentity{}, false, false, err
 	}
@@ -547,6 +556,18 @@ func (bootstrap UpstreamSSHBootstrap) printPersistedIdentity(identity privateIde
 }
 
 func (bootstrap UpstreamSSHBootstrap) loadPersisted(ctx context.Context, client kubernetes.Interface) (secretMaterial, error) {
+	if bootstrap.Store != nil {
+		keys, err := bootstrap.Store.Load(ctx, bootstrap.PrivateKeySecret)
+		if err != nil {
+			return secretMaterial{}, err
+		}
+		hosts, err := bootstrap.Store.Load(ctx, bootstrap.KnownHostsSecret)
+		if err != nil {
+			return secretMaterial{}, err
+		}
+		return secretMaterial{privateKey: keys[bootstrap.PrivateKeyDataKey], publicKey: keys[bootstrap.PublicKeyDataKey], knownHosts: hosts[bootstrap.KnownHostsDataKey]}, nil
+	}
+
 	privateSecret, err := client.CoreV1().Secrets(bootstrap.Namespace).Get(ctx, bootstrap.PrivateKeySecret, metav1.GetOptions{})
 	if err != nil && !apierrors.IsNotFound(err) {
 		return secretMaterial{}, fmt.Errorf("app: read upstream private-key Secret %s/%s: %w", bootstrap.Namespace, bootstrap.PrivateKeySecret, err)
@@ -567,6 +588,16 @@ func (bootstrap UpstreamSSHBootstrap) loadPersisted(ctx context.Context, client 
 }
 
 func (bootstrap UpstreamSSHBootstrap) applySecret(ctx context.Context, client kubernetes.Interface, name string, data map[string][]byte, fieldManager string) error {
+	if bootstrap.Store != nil {
+		if bootstrap.MutationGate == nil {
+			return errors.New("identity write requires the audit mutation gate")
+		}
+		if err := bootstrap.MutationGate(ctx, "upstream.identity."+name); err != nil {
+			return err
+		}
+		return bootstrap.Store.Save(ctx, name, data)
+	}
+
 	if bootstrap.MutationGate == nil {
 		return errors.New("app: audit mutation gate is required before applying an upstream Secret")
 	}
@@ -604,6 +635,24 @@ func (bootstrap UpstreamSSHBootstrap) applySecret(ctx context.Context, client ku
 }
 
 func (bootstrap UpstreamSSHBootstrap) verifySecretData(ctx context.Context, client kubernetes.Interface, name string, expected map[string][]byte) error {
+	if bootstrap.Store != nil {
+		data, err := bootstrap.Store.Load(ctx, name)
+		if err != nil {
+			return err
+		}
+		defer func() {
+			for _, v := range data {
+				clear(v)
+			}
+		}()
+		for key, value := range expected {
+			if !bytes.Equal(data[key], value) {
+				return errors.New("identity store readback mismatch")
+			}
+		}
+		return nil
+	}
+
 	secret, err := client.CoreV1().Secrets(bootstrap.Namespace).Get(ctx, name, metav1.GetOptions{})
 	if err != nil {
 		return fmt.Errorf("app: verify upstream Secret %s/%s: %w", bootstrap.Namespace, name, err)

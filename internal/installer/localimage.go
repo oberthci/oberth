@@ -58,7 +58,7 @@ func ensureLocalImageInNode(ctx context.Context, deps Deps, pinned string) error
 	}
 	for _, node := range nodes {
 		if output, tagErr := run(ctx, nil, "docker", "exec", node,
-			"ctr", "--namespace=k8s.io", "images", "tag", "--force", local, pinned); tagErr != nil {
+			"ctr", "--namespace=k8s.io", "images", "tag", "--force", canonicalLocalImage(local), canonicalLocalImage(pinned)); tagErr != nil {
 			return fmt.Errorf("alias %s on kind node %s: %w%s", pinned, node, tagErr, commandOutputSuffix(output))
 		}
 	}
@@ -106,4 +106,15 @@ func localTagForDigest(ctx context.Context, run CommandRunner, pinned string) (s
 		}
 	}
 	return "", errors.New("no local image carries that digest")
+}
+
+func canonicalLocalImage(ref string) string {
+	first, _, hasSlash := strings.Cut(ref, "/")
+	if !hasSlash {
+		return "docker.io/library/" + ref
+	}
+	if !strings.ContainsAny(first, ".:") && first != "localhost" {
+		return "docker.io/" + ref
+	}
+	return ref
 }

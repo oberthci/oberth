@@ -1,6 +1,7 @@
 package setuptui
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -53,6 +54,8 @@ func (p *welcomePage) update(msg tea.Msg, state *WizardState) (page, tea.Cmd) {
 			p.detectedLine = fmt.Sprintf("%s %s · %s · %d node ready · %d cores",
 				msg.engine, msg.version, msg.context, msg.nodeCount, msg.cores)
 			state.SelectedContext = msg.context
+		} else if errors.Is(msg.err, errNoCluster) {
+			p.detectedLine = "No Kubernetes cluster configured.\nProvide a kubeconfig path for an existing cluster, or create a new one with kind."
 		} else {
 			p.detectedLine = sMuted.Render("cluster detection: ") + sFail.Render(msg.err.Error())
 		}

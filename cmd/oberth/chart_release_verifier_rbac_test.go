@@ -95,6 +95,9 @@ func TestChartReleaseVerifierTokenRequestRBAC(t *testing.T) {
 							t.Fatalf("token authority escaped pipeline Role: %s %s/%s", role.Kind, role.Namespace, role.Name)
 						}
 						wantNames := tc.wantShared
+						if slices.Equal(rule.ResourceNames, []string{"oberth-argo-executor"}) {
+							wantNames = []string{"oberth-argo-executor"}
+						}
 						if role.Name == tc.serverAccount+"-argo-release-tokens" {
 							wantNames = tc.wantPerRepo
 						} else if role.Name != tc.serverAccount+"-argo" {
@@ -120,8 +123,8 @@ func TestChartReleaseVerifierTokenRequestRBAC(t *testing.T) {
 			if len(tc.wantPerRepo) > 0 {
 				wantRoleNames = append(wantRoleNames, tc.serverAccount+"-argo-release-tokens")
 			}
-			if tokenRules != len(wantRoleNames) {
-				t.Fatalf("got %d token rules, want %d", tokenRules, len(wantRoleNames))
+			if tokenRules != len(wantRoleNames)+1 {
+				t.Fatalf("got %d token rules, want %d", tokenRules, len(wantRoleNames)+1)
 			}
 			for _, name := range wantRoleNames {
 				role, ok := roles[name]

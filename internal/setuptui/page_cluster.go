@@ -2,7 +2,8 @@ package setuptui
 
 import (
 	"fmt"
-	"runtime"
+	"os"
+	"path/filepath"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -11,6 +12,7 @@ import (
 )
 
 const kindCreateEntry = "Create kind cluster"
+const kubeconfigEntry = "Provide kubeconfig path"
 
 // kubeContext represents one entry from kubeconfig.
 type kubeContext struct {
@@ -21,6 +23,8 @@ type kubeContext struct {
 }
 
 type clusterPage struct {
+	path           string
+	enteringPath   bool
 	contexts       []kubeContext
 	cursor         int
 	currentContext string // the kubeconfig current-context at load time
@@ -52,10 +56,12 @@ func (p *clusterPage) init(state *WizardState) tea.Cmd {
 
 func (p *clusterPage) loadContexts() {
 	rules := clientcmd.NewDefaultClientConfigLoadingRules()
+	rules.ExplicitPath = p.path
 	config := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(rules, &clientcmd.ConfigOverrides{})
 	rawConfig, err := config.RawConfig()
 	if err != nil {
-		p.contexts = nil
+		p.contexts = []kubeContext{{name: kubeconfigEntry}, {name: kindCreateEntry, isLocal: true}}
+		p.errMsg = fmt.Sprintf("Cannot read kubeconfig: %v", err)
 		return
 	}
 
@@ -79,15 +85,7 @@ func (p *clusterPage) loadContexts() {
 	current := rawConfig.CurrentContext
 	sortContexts(p.contexts, current)
 
-	// On macOS with no existing contexts, offer to create a kind cluster.
-	// The installer's Execute already handles kind creation on darwin;
-	// the TUI just needs to let the user through.
-	if len(p.contexts) == 0 && runtime.GOOS == "darwin" {
-		p.contexts = append(p.contexts, kubeContext{
-			name:    kindCreateEntry,
-			isLocal: true,
-		})
-	}
+	p.contexts = append(p.contexts, kubeContext{name: kubeconfigEntry}, kubeContext{name: kindCreateEntry, isLocal: true})
 }
 
 func (p *clusterPage) update(msg tea.Msg, state *WizardState) (page, tea.Cmd) {
@@ -100,9 +98,41 @@ func (p *clusterPage) update(msg tea.Msg, state *WizardState) (page, tea.Cmd) {
 		}
 		state.ClusterInfo = msg
 		state.SelectedContext = msg.context
+		state.Config.ContextName = msg.context
+		state.Config.KubeconfigPath = p.path
 		return p, func() tea.Msg { return pageCompleteMsg{} }
 
 	case tea.KeyPressMsg:
+		if p.enteringPath {
+			switch msg.String() {
+			case "esc":
+				p.enteringPath = false
+			case "ctrl+u":
+				p.path = ""
+			case "backspace":
+				if len(p.path) > 0 {
+					p.path = p.path[:len(p.path)-1]
+				}
+			case "enter":
+				if strings.HasPrefix(p.path, "~/") {
+					home, _ := os.UserHomeDir()
+					p.path = filepath.Join(home, p.path[2:])
+				}
+				if _, err := clientcmd.LoadFromFile(p.path); err != nil {
+					p.errMsg = fmt.Sprintf("Read kubeconfig: %v", err)
+					return p, nil
+				}
+				p.enteringPath = false
+				p.errMsg = ""
+				p.loadContexts()
+				p.cursor = 0
+			default:
+				if text := msg.String(); len(text) == 1 {
+					p.path += text
+				}
+			}
+			return p, nil
+		}
 		switch msg.String() {
 		case "up", "k":
 			if p.cursor > 0 {
@@ -120,27 +150,30 @@ func (p *clusterPage) update(msg tea.Msg, state *WizardState) (page, tea.Cmd) {
 				return p, nil
 			}
 			selected := p.contexts[p.cursor].name
+			if selected == kubeconfigEntry {
+				p.enteringPath = true
+				p.path = ""
+				p.errMsg = ""
+				return p, nil
+			}
 			if selected == kindCreateEntry {
+				state.Config.CreateKind = true
+				state.Config.KubeconfigPath = ""
+				p.path = ""
 				p.checking = false
 				p.errMsg = ""
 				return p, func() tea.Msg {
 					return clusterInfoMsg{
-						context: "",
+						context: "kind-oberth",
 						engine:  "kind",
 						isLocal: true,
 					}
 				}
 			}
-			// Guard: the installer targets the current kubeconfig context
-			// (no --context flag). Selecting a non-current context would
-			// apply to the wrong cluster silently.
-			if p.currentContext != "" && selected != p.currentContext {
-				p.errMsg = fmt.Sprintf("installing into a non-current context is not supported yet — run: kubectl config use-context %s", selected)
-				return p, nil
-			}
+			state.Config.CreateKind = false
 			p.checking = true
 			p.errMsg = ""
-			return p, probeCluster(selected)
+			return p, probeClusterWithPath(selected, p.path)
 		case "r":
 			p.loadContexts()
 			p.cursor = 0
@@ -157,14 +190,13 @@ func (p *clusterPage) view(_ *WizardState, width, _ int) string {
 
 	b.WriteString("  " + sQuestion.Render(p.question()) + "\n")
 	b.WriteString("\n")
+	if p.enteringPath {
+		b.WriteString("  Kubeconfig path: " + inputBox(p.path, "~/.kube/config", true) + "\n  enter load · ctrl+u clear · esc back\n" + p.errMsg)
+		return b.String()
+	}
 
 	if len(p.contexts) == 0 {
-		b.WriteString("  " + sFail.Render("no kubeconfig contexts found") + "\n")
-		if runtime.GOOS == "linux" {
-			b.WriteString("  " + sMuted.Render("install k3s (curl -sfL https://get.k3s.io | sh -) or docker + kind, then relaunch") + "\n")
-		} else {
-			b.WriteString("  " + sMuted.Render("install Docker Desktop and kind, then relaunch") + "\n")
-		}
+		b.WriteString("  Provide a kubeconfig path for an existing cluster or create a new one with kind.\n")
 		return b.String()
 	}
 
@@ -185,22 +217,12 @@ func (p *clusterPage) view(_ *WizardState, width, _ int) string {
 			nameStyle = lipgloss.NewStyle().Foreground(cFg).Bold(true)
 		}
 
-		// UX-13: dim non-current contexts — selecting them is refused
-		// because the installer targets the current kubeconfig context.
-		isCurrent := p.currentContext == "" || ctx.name == p.currentContext || ctx.name == kindCreateEntry
-		if !isCurrent {
-			nameStyle = sMuted
-		}
-
 		locality := sInfo.Render("local")
 		if !ctx.isLocal {
 			locality = sHold.Render("remote")
 		}
 
 		namePart := nameStyle.Render(padTo(truncateRunes(ctx.name, nameWidth), nameWidth))
-		if !isCurrent {
-			namePart += " " + sMuted.Render("(switch first)")
-		}
 
 		line := fmt.Sprintf("%s %s %s", cursor, namePart, locality)
 		if ctx.version != "" {
@@ -209,11 +231,17 @@ func (p *clusterPage) view(_ *WizardState, width, _ int) string {
 		listContent.WriteString(line + "\n")
 	}
 
+	count := 0
+	for _, entry := range p.contexts {
+		if entry.name != kindCreateEntry && entry.name != kubeconfigEntry {
+			count++
+		}
+	}
 	noun := "contexts"
-	if len(p.contexts) == 1 {
+	if count == 1 {
 		noun = "context"
 	}
-	tally := sMuted.Render(fmt.Sprintf("  %d %s", len(p.contexts), noun))
+	tally := sMuted.Render(fmt.Sprintf("  %d %s", count, noun))
 	listContent.WriteString("\n" + tally)
 
 	boxWidth := min(60, width-20)

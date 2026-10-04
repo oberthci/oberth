@@ -16,6 +16,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
 
 	"github.com/oberthci/oberth/internal/runprogress"
@@ -312,6 +313,7 @@ func (controller *Controller) Wait(ctx context.Context, name, runID string, dest
 	ticker := time.NewTicker(controller.interval)
 	defer ticker.Stop()
 	var budgetBreachErr error
+	delivered := map[types.UID]bool{}
 	for {
 		workflow, err := controller.workflows.Get(ctx, name, metav1.GetOptions{})
 		if err != nil {
@@ -321,6 +323,9 @@ func (controller *Controller) Wait(ctx context.Context, name, runID string, dest
 			return Completion{}, fmt.Errorf("argojob: read Workflow %s: %w", name, err)
 		}
 		if err := controller.verifyOwnership(workflow, runID); err != nil {
+			return Completion{}, err
+		}
+		if err := controller.deliverExecutorTokens(ctx, workflow, delivered); err != nil {
 			return Completion{}, err
 		}
 		if publishErr := controller.publish(ctx, workflow, reporter, budget); publishErr != nil && budgetBreachErr == nil {
@@ -337,6 +342,9 @@ func (controller *Controller) Wait(ctx context.Context, name, runID string, dest
 			}
 			reporter.finish(budget)
 			completion := completionFor(settled)
+			if err := controller.retireExecutorIdentity(ctx, settled); err != nil {
+				return completion, fmt.Errorf("retire executor identity: %w", err)
+			}
 			if budgetBreachErr != nil {
 				return completion, budgetBreachErr
 			}

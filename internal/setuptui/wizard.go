@@ -88,6 +88,8 @@ var reviewSectionPages = map[int]int{
 
 // Options holds the CLI-level options for the setup wizard.
 type Options struct {
+	ChartPath  string
+	ImageRef   string
 	DryMode    bool // wizard only, print the command, no apply
 	Plain      bool // no TUI, sequential prompts
 	Accessible bool // screen reader mode
@@ -231,9 +233,12 @@ func newWizard(opts Options) *wizard {
 			TLSMode:   "self-signed",
 			StoreMode: "install-prod",
 			ForgeType: "codeberg",
-			ForgeAuth: "deploy-key",
+			ForgeAuth: "existing",
 		},
 	}
+
+	w.state.Config.ChartPath = opts.ChartPath
+	w.state.Config.ImageRef = opts.ImageRef
 
 	// Thread the binary version so TUI apply resolves the same chart
 	// version the installer would (never a hardcoded "dev" placeholder).
@@ -637,6 +642,18 @@ func stripAnsi(s string) string {
 func BuildCommandLine(state *WizardState) string {
 	var args []string
 	args = append(args, "oberth install")
+	if state.Config.CreateKind {
+		args = append(args, "--create-kind")
+	}
+	if state.Config.KubeconfigPath != "" {
+		args = append(args, "--kubeconfig="+shellQuote(state.Config.KubeconfigPath))
+	}
+	if state.Config.ContextName != "" {
+		args = append(args, "--context="+shellQuote(state.Config.ContextName))
+	}
+	if state.Config.UpstreamPrivateKeyPath != "" {
+		args = append(args, "--upstream-key-file="+shellQuote(state.Config.UpstreamPrivateKeyPath))
+	}
 
 	if state.Config.Dev {
 		args = append(args, "--dev")
@@ -682,13 +699,25 @@ func BuildCommandLine(state *WizardState) string {
 		args = append(args, "--yes")
 	}
 
-	result := strings.Join(args, " \\\n  ")
-
-	// UX-10: forge and uplink onboarding are interactive-only — the wizard's
-	// answers are not yet expressible as install flags. Disclose this.
-	if state.ForgeOrg != "" || state.UplinkIdentity != "" {
-		result += "\n\n# Note: forge and uplink onboarding will prompt interactively —\n# the wizard's forge/uplink answers are not yet expressible as install flags."
+	if state.Config.ChartPath != "" {
+		args = append(args, "--chart="+shellQuote(state.Config.ChartPath))
 	}
+	if state.Config.ImageRef != "" {
+		args = append(args, "--image="+shellQuote(state.Config.ImageRef))
+	}
+	if state.ForgeOrg != "" {
+		args = append(args, "--forge="+shellQuote(state.ForgeType), "--organization="+shellQuote(state.ForgeOrg), "--upstream-url="+shellQuote(forgeUpstreamURL(state.ForgeType, state.ForgeOrg)))
+	}
+	if state.UplinkIdentity != "" {
+		args = append(args, "--uplink-identity="+shellQuote(state.UplinkIdentity))
+	}
+	if state.SSHKeyPath != "" {
+		args = append(args, "--ssh-public-key="+shellQuote(state.SSHKeyPath))
+	}
+
+	result := strings.Join(args, " \\\n  ")
 
 	return result
 }
+
+func shellQuote(value string) string { return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'" }
