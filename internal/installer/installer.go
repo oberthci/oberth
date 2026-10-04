@@ -465,6 +465,15 @@ type RekorResult struct {
 
 // Validate checks Config for invalid flag combinations and applies defaults.
 func (cfg *Config) Validate() error {
+	if cfg.ForgeURL == "" && (cfg.ForgeType != "" || cfg.ForgeOrg != "") {
+		hosts := map[string]string{"github": "github.com", "codeberg": "codeberg.org", "gitlab": "gitlab.com"}
+		host, ok := hosts[cfg.ForgeType]
+		if !ok || cfg.ForgeOrg == "" || strings.ContainsAny(cfg.ForgeOrg, "/\\?#@ \t\r\n") || cfg.ForgeOrg == "." || cfg.ForgeOrg == ".." {
+			return errors.New("provide --forge github, codeberg, or gitlab with --organization; use --upstream-url for other hosts")
+		}
+		cfg.ForgeURL = "ssh://git@" + host + "/" + cfg.ForgeOrg
+	}
+
 	if cfg.InstallRekor {
 		if cfg.InstallSecretStoreDev {
 			return errors.New("rekor requires persistent production OpenBao; dev storage cannot preserve log identity")
@@ -1082,8 +1091,8 @@ func OpenBaoHelmArgs(cfg Config) []string {
 // --- Phase 2b: Local Rekor stack (--install-rekor) ---
 
 // InstallRekorStack installs the local Rekor transparency-log stack — MySQL,
-// Trillian log server + signer, and the Rekor server — via the official
-// sigstore/rekor umbrella chart, pinned to DefaultRekorChartVersion. The
+// Trillian log server + signer, and the Rekor server — via the embedded
+// OpenBao adaptation of sigstore/rekor, pinned to DefaultRekorChartVersion. The
 // stack uses durable MySQL for both Trillian and its search index, and
 // OpenBao Transit for a persistent, non-exportable signing identity.
 func InstallRekorStack(ctx context.Context, cfg Config, deps Deps) (RekorResult, error) {
@@ -1855,7 +1864,7 @@ Next steps:
 
   3. Clone an existing repository through Oberth:
 
-       git clone ssh://git@localhost:30022/<org>/<repo>.git
+       git clone ssh://git@localhost:30022/<upstream>/<org>/<repo>.git
 
   4. Generate a pipeline and push:
 

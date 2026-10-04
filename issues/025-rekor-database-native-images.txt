@@ -1,5 +1,5 @@
 Title: Bundled Rekor database fails at startup on Apple Silicon
-Status: Fixed in the OpenBao integration; full clean-install verification pending
+Status: Fixed; native database startup and witness verification passed
 Observed: 2026-10-05
 
 The pinned Trillian db_server image is amd64-only. On the local arm64 kind

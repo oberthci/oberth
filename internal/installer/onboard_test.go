@@ -793,3 +793,22 @@ func TestOrgFromBaseURL(t *testing.T) {
 		}
 	}
 }
+
+func TestInstallDerivesOrganizationURLForOnboarding(t *testing.T) {
+	for forge, host := range map[string]string{"github": "github.com", "codeberg": "codeberg.org", "gitlab": "gitlab.com"} {
+		t.Run(forge, func(t *testing.T) {
+			cfg := Config{ForgeType: forge, ForgeOrg: "company", UplinkIdentity: "engineer@work", SSHPublicKeyPath: "work.pub"}
+			if err := cfg.Validate(); err != nil {
+				t.Fatal(err)
+			}
+			if cfg.ForgeURL != "ssh://git@"+host+"/company" || !cfg.hasOnboardingConfig() {
+				t.Fatalf("organization configuration does not start onboarding: %+v", cfg)
+			}
+		})
+	}
+	for _, cfg := range []Config{{ForgeType: "github"}, {ForgeOrg: "company"}, {ForgeType: "github", ForgeOrg: "company/repo"}} {
+		if err := cfg.Validate(); err == nil {
+			t.Fatalf("incomplete or repository-specific configuration accepted: %+v", cfg)
+		}
+	}
+}

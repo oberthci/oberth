@@ -1,5 +1,5 @@
 Title: Keep bundled Rekor available without Kubernetes Secrets
-Status: Implemented; live witness verification passed, restart/fresh-cluster checks pending
+Status: Implemented; live signing, restart persistence and role isolation verified
 Observed: 2026-10-04
 
 The current installer stores the Rekor signing key and MySQL credentials in
