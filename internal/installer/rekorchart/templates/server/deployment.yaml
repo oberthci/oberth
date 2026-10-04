@@ -1,0 +1,233 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+{{- if .Values.server.deploymentAnnotations }}
+  annotations:
+    {{- toYaml .Values.server.deploymentAnnotations | nindent 4 }}
+{{- end }}
+  labels:
+    {{- include "rekor.server.labels" . | nindent 4 }}
+  name: {{ template "rekor.server.fullname" . }}
+{{ include "rekor.namespace" . | indent 2 }}
+spec:
+  selector:
+    {{- if .Values.schedulerName }}
+    schedulerName: "{{ .Values.schedulerName }}"
+    {{- end }}
+    matchLabels:
+      {{- include "rekor.server.matchLabels" . | nindent 6 }}
+  replicas: {{ .Values.server.replicaCount }}
+  {{- if .Values.server.strategy }}
+  strategy:
+{{ toYaml .Values.server.strategy | trim | indent 4 }}
+    {{ if eq .Values.server.strategy.type "Recreate" }}rollingUpdate: null{{ end }}
+{{- end }}
+  template:
+    metadata:
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/server/configmap.yaml") . | sha256sum }}
+        checksum/sharding_config: {{ include (print $.Template.BasePath "/server/configmap-sharding.yaml") . | sha256sum }}
+        {{- if .Values.server.podAnnotations }}
+        {{- toYaml .Values.server.podAnnotations | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "rekor.server.labels" . | nindent 8 }}
+        {{- if .Values.server.podLabels}}
+        {{ toYaml .Values.server.podLabels | nindent 8 }}
+        {{- end}}
+    spec:
+      automountServiceAccountToken: false
+      serviceAccountName: rekor-bao-rekor
+      initContainers:
+{{ include "oberth.bao.init" (dict "uid" 65533) | indent 8 }}
+        - name: "wait-for-trillian-log-server"
+          image: "{{ template "rekor.image" .Values.initContainerImage.curl }}"
+          imagePullPolicy: {{ .Values.initContainerImage.curl.imagePullPolicy }}
+          command: ["sh", "-c", "until curl --max-time 10 http://{{ .Values.trillian.logServer.name }}.{{ .Values.trillian.forceNamespace }}:{{ .Values.trillian.logServer.portHTTP}}; do echo waiting for {{ .Values.trillian.logServer.name }}; sleep 5; done;"]
+{{- if .Values.server.initContainerSecurityContext }}
+          securityContext:
+{{ toYaml .Values.server.initContainerSecurityContext | indent 12 }}
+{{- end }}
+          resources:
+{{ toYaml .Values.initContainerResources | indent 12 }}
+      {{- if .Values.server.extraInitContainers }}
+{{ toYaml .Values.server.extraInitContainers | indent 8 }}
+      {{- end }}
+{{- if .Values.server.priorityClassName }}
+      priorityClassName: "{{ .Values.server.priorityClassName }}"
+{{- end }}
+      containers:
+        {{- if ((.Values.mysql).gcp).enabled }}
+        - name: cloud-sql-proxy
+          image: "{{ template "rekor.image" .Values.mysql.gcp.cloudsql }}"
+          command:
+            - "/cloud-sql-proxy"
+            {{- if (((.Values.mysql).gcp).cloudsql).iamUsername }}
+            - "--auto-iam-authn"
+            {{- end }}
+            {{- if ((((.Values.mysql).gcp).cloudsql).unixDomainSocket).enabled }}
+            - "--unix-socket"
+            - {{ .Values.mysql.gcp.cloudsql.unixDomainSocket.path | quote }}
+            {{- end }}
+            {{- range (((.Values.mysql).gcp).cloudsql).extraArgs | default list }}
+            - {{ . | quote }}
+            {{- end }}
+            - "{{ .Values.mysql.gcp.instance }}"
+    {{- if (((.Values.mysql).gcp).cloudsql).securityContext }}
+          securityContext:
+{{ toYaml .Values.mysql.gcp.cloudsql.securityContext | indent 12 }}
+    {{- end }}
+          resources:
+{{ toYaml (((.Values.mysql).gcp).cloudsql).resources | indent 12 }}
+          {{- if ((((.Values.mysql).gcp).cloudsql).unixDomainSocket).enabled }}
+          volumeMounts:
+{{ include "oberth.bao.mounts" . | indent 12 }}
+            - mountPath: {{ .Values.mysql.gcp.cloudsql.unixDomainSocket.path }}
+              name: cloud-sql-proxy-unix-domain-socket
+          {{- end }}
+{{- if (((.Values.mysql).gcp).cloudsql).startupProbe }}
+          startupProbe:
+{{ toYaml .Values.mysql.gcp.cloudsql.startupProbe | indent 12 }}
+{{- end }}
+{{- if (((.Values.mysql).gcp).cloudsql).livenessProbe }}
+          livenessProbe:
+{{ toYaml .Values.mysql.gcp.cloudsql.livenessProbe | indent 12 }}
+{{- end }}
+{{- if (((.Values.mysql).gcp).cloudsql).readinessProbe }}
+          readinessProbe:
+{{ toYaml .Values.mysql.gcp.cloudsql.readinessProbe | indent 12 }}
+{{- end }}
+        {{- end }}
+        - name: {{ template "rekor.name" . }}-{{ .Values.server.name }}
+          image: "{{ template "rekor.image" .Values.server.image }}"
+          imagePullPolicy: "{{ .Values.server.image.pullPolicy }}"
+          env:
+            - {name: VAULT_ADDR, value: "http://127.0.0.1:8100"}
+            # The local proxy replaces this non-credential with its renewed token.
+            - {name: VAULT_TOKEN, value: "agent-proxy"}
+            - {name: TRANSIT_SECRET_ENGINE_PATH, value: "oberth-transit"}
+            - name: TREE_ID
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ template "rekor.config" . }}
+                  key: {{ .Values.server.config.key }}
+{{- if eq (.Values.server.searchIndex).storageProvider "mysql" }}
+
+{{- end }}
+            {{- if eq .Values.server.kmsType "aws" }}
+            - name: AWS_DEFAULT_REGION
+              value: {{ .Values.server.awsKmsRegion }}
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.server.awsKmsCredentialsSecretName }}
+                  key: accessKeyId
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.server.awsKmsCredentialsSecretName }}
+                  key: secretAccessKey
+            {{- end }}
+            {{- if .Values.server.gomemlimit }}
+            - name: GOMEMLIMIT
+              value: {{ .Values.server.gomemlimit | quote }}
+            {{- end }}
+          command: [/tools/busybox, sh, -ec]
+          args:
+            - |
+              password=$(/tools/busybox cat /credentials/password)
+              exec "$0" "$@" "--search_index.mysql.dsn=mysql:${password}@tcp(trillian-mysql:3306)/trillian?parseTime=true&interpolateParams=true"
+            - /ko-app/rekor-server
+{{  include "rekor.server.args" . | indent 12 }}
+          ports:
+{{- include "rekor.containerPorts" .Values.server.service.ports | indent 12 }}
+          volumeMounts:
+{{ include "oberth.bao.mounts" . | indent 12 }}
+            - name: {{ template "rekor.sharding-config" . }}
+              mountPath: {{ .Values.server.sharding.mountPath }}
+{{- if eq "true" (include "rekor.server.fileAttestationStorage" .) }}
+            - name: storage
+              mountPath: {{ template "rekor.server.fileAttestationStorage.path" . }}
+{{- end -}}
+{{- if .Values.server.signerFileSecretOptions }}
+            - name: {{ .Values.server.signerFileSecretOptions.secretName }}-volume
+              mountPath: {{ .Values.server.signerFileSecretOptions.secretMountPath }}
+              readOnly: true
+{{- end }}
+{{- if and (((.Values.mysql).gcp).enabled) (((((.Values.mysql).gcp).cloudsql).unixDomainSocket).enabled) }}
+            - mountPath: {{ .Values.mysql.gcp.cloudsql.unixDomainSocket.path }}
+              name: cloud-sql-proxy-unix-domain-socket
+{{- end }}
+          startupProbe:
+            httpGet: {path: /ping, port: 3000}
+            periodSeconds: 2
+            failureThreshold: 150
+{{- if .Values.server.livenessProbe }}
+          livenessProbe:
+{{ toYaml .Values.server.livenessProbe | indent 12 }}
+{{- end }}
+{{- if .Values.server.readinessProbe }}
+          readinessProbe:
+{{ toYaml .Values.server.readinessProbe | indent 12 }}
+{{- end }}
+          resources:
+{{ toYaml .Values.server.resources | indent 12 }}
+{{- if .Values.server.containerSecurityContext }}
+          securityContext:
+{{ toYaml .Values.server.containerSecurityContext | indent 12 }}
+{{- end }}
+    {{- if .Values.imagePullSecrets }}
+      imagePullSecrets:
+{{ toYaml .Values.imagePullSecrets | indent 8 }}
+    {{- end }}
+    {{- if .Values.server.nodeSelector }}
+      nodeSelector:
+{{ toYaml .Values.server.nodeSelector | indent 8 }}
+    {{- end }}
+    {{- with .Values.server.dnsConfig }}
+      dnsConfig:
+{{ toYaml . | indent 8 }}
+    {{- end }}
+    {{- if .Values.server.securityContext }}
+      securityContext:
+{{ toYaml .Values.server.securityContext | indent 8 }}
+    {{- end }}
+    {{- if .Values.server.tolerations }}
+      tolerations:
+{{ toYaml .Values.server.tolerations | indent 8 }}
+    {{- end }}
+    {{- if .Values.server.affinity }}
+      affinity:
+{{ toYaml .Values.server.affinity | indent 8 }}
+    {{- end }}
+      volumes:
+{{ include "oberth.bao.volumes" "rekor" | indent 8 }}
+        - name: {{ template "rekor.sharding-config" . }}
+          configMap:
+            name: {{ template "rekor.sharding-config" . }}
+{{- if eq "true" (include "rekor.server.fileAttestationStorage" .) }}
+  {{- if not .Values.server.attestation_storage.persistence.enabled }}
+        - name: storage
+          emptyDir: {}
+  {{- else if .Values.server.attestation_storage.persistence.existingClaim }}
+        - name: storage
+          persistentVolumeClaim:
+            claimName: {{ .Values.server.attestation_storage.persistence.existingClaim }}
+  {{- else }}
+        - name: storage
+          persistentVolumeClaim:
+            claimName: {{ template "rekor.server.fullname" . }}
+  {{- end }}
+{{- end }}
+{{- if .Values.server.signerFileSecretOptions }}
+        - name: {{ .Values.server.signerFileSecretOptions.secretName }}-volume
+          secret:
+            secretName: {{ .Values.server.signerFileSecretOptions.secretName }}
+            items:
+            - key: {{ .Values.server.signerFileSecretOptions.privateKeySecretKey }}
+              path: {{ .Values.server.signerFileSecretOptions.secretMountSubPath }}
+{{- end }}
+{{- if and (((.Values.mysql).gcp).enabled) (((((.Values.mysql).gcp).cloudsql).unixDomainSocket).enabled) }}
+        - name: cloud-sql-proxy-unix-domain-socket
+          emptyDir: {}
+{{- end }}

@@ -76,3 +76,8 @@ No credentials are included in this directory.
 
 022  Secret-backed installations need explicit identity migration before upgrade
      022-legacy-identity-migration.txt
+
+023-rekor-openbao-integration.txt
+024-pipeline-memory-preflight.txt
+025-rekor-database-native-images.txt
+026-openbao-unseal-process-arguments.txt

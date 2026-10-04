@@ -45,24 +45,6 @@ const (
 	// shell quoting of caller data ever happens.
 	tokenShellPreamble = `read -r BAO_TOKEN && export BAO_TOKEN VAULT_TOKEN="$BAO_TOKEN" && exec bao "$@"` // #nosec G101 — shell plumbing that RECEIVES the token via stdin; contains no credential material.
 
-	// unsealShell submits the unseal key via stdin to the kubectl exec
-	// stream, keeping it out of:
-	//   - the host process argv (kubectl receives no key argument),
-	//   - the Kubernetes API server exec audit log (the key travels in the
-	//     stdin data stream, not in the exec request parameters).
-	//
-	// Residual exposure: inside the pod, the shell expands $UNSEAL_KEY into
-	// bao's argv, so the key is visible in /proc/<bao-pid>/cmdline for the
-	// (sub-second) lifetime of the unseal call — and on the node if host-PID-
-	// namespace visibility is enabled. This cannot be eliminated without
-	// upstream changes: OpenBao's `operator unseal` does not accept "-" for
-	// stdin reading (it requires a tty for interactive input; the only non-
-	// interactive path is a positional argument). The tokenShellPreamble
-	// avoids this by exporting into an env var, but bao operator unseal does
-	// not read the key from any environment variable. Filed as a residual;
-	// the host-side and audit-log guarantees are the primary security
-	// boundary.
-	unsealShell = `read -r UNSEAL_KEY && exec bao operator unseal -format=json "$UNSEAL_KEY"`
 )
 
 // openBaoExec runs bao commands inside one OpenBao pod via `kubectl exec`.
@@ -176,11 +158,18 @@ func (b openBaoExec) operatorInit(ctx context.Context) (baoInitResult, error) {
 
 // unseal submits one unseal key via stdin and returns the resulting status.
 func (b openBaoExec) unseal(ctx context.Context, key string) (baoStatus, error) {
-	out, err := b.run(ctx, []byte(key+"\n"), "kubectl", b.kubectlExecArgs("sh", "-c", unsealShell)...)
-	var status baoStatus
-	if parseErr := parseBaoJSON(out, &status); parseErr == nil {
-		return status, nil
+	input, err := json.Marshal(map[string]string{"key": key})
+	if err != nil {
+		return baoStatus{}, err
 	}
+	out, err := b.bao(ctx, input, "write", "-format=json", "sys/unseal", "-")
+	var response struct {
+		Data baoStatus `json:"data"`
+	}
+	if parseErr := parseBaoJSON(out, &response); parseErr == nil {
+		return response.Data, nil
+	}
+
 	if err != nil {
 		return baoStatus{}, fmt.Errorf("bao operator unseal: %w%s", err, commandOutputSuffix(out))
 	}
@@ -889,6 +878,13 @@ func ConfigureSecretStore(ctx context.Context, cfg Config, deps Deps, store open
 	// with its exact managed shape or created through the exact bounded command
 	// above. Callers must carry this positive result into Oberth Helm enablement;
 	// absence of proof is not equivalent to successful provisioning.
+	if cfg.InstallRekor {
+		var err error
+		result.RekorPublicKey, err = configureRekorBao(ctx, cfg, deps, store, rootToken)
+		if err != nil {
+			return result, fmt.Errorf("configure Rekor OpenBao identity: %w", err)
+		}
+	}
 	result.TrustedTransitVerified = cfg.InstallSecretStore
 
 	result.Skipped = !result.AuthMountConfigured && !result.TransitMountEnabled && !result.TransitKeyCreated &&

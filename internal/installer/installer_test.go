@@ -3,10 +3,8 @@ package installer
 import (
 	"bytes"
 	"context"
-	"crypto/ecdsa"
 	"crypto/ed25519"
 	cryptorand "crypto/rand"
-	"crypto/x509"
 	"encoding/json"
 	"encoding/pem"
 	"errors"
@@ -1658,97 +1656,15 @@ func TestConfigValidateInstallRekorDryRunAllowed(t *testing.T) {
 	}
 }
 
-func TestRunInstallRekorWiresOberth(t *testing.T) {
-	t.Parallel()
-
-	node := &corev1.Node{
-		ObjectMeta: metav1.ObjectMeta{Name: "k3s-node"},
-		Status: corev1.NodeStatus{
-			NodeInfo: corev1.NodeSystemInfo{KubeletVersion: "v1.31.4+k3s1"},
-		},
-	}
-	readyCondition := []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionTrue}}
-	rekorPod := &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "rekor-server",
-			Namespace: DefaultRekorNamespace,
-			Labels: map[string]string{
-				"app.kubernetes.io/instance":  "rekor",
-				"app.kubernetes.io/component": "server",
-			},
-		},
-		Status: corev1.PodStatus{Phase: corev1.PodRunning, Conditions: readyCondition},
-	}
-	oberthPod := &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "oberth",
-			Namespace: DefaultNamespace,
-			Labels:    map[string]string{"app.kubernetes.io/instance": "oberth"},
-		},
-		Status: corev1.PodStatus{Phase: corev1.PodRunning, Conditions: readyCondition},
-	}
-	client := fake.NewClientset(node, rekorPod, oberthPod, readyArgoControllerPod())
-	var oberthArgs []string
-	deps := Deps{
-		Output:      io.Discard,
-		KubeClient:  client,
-		RestConfig:  &rest.Config{Host: "https://127.0.0.1:6443"},
-		ContextName: "test-ctx",
-		RunHelm: func(_ context.Context, args []string) ([]byte, error) {
-			if args[0] == "list" {
-				return []byte("[]"), nil
-			}
-			if args[0] == "show" {
-				return []byte(fakeChartValuesYAML), nil
-			}
-			if args[0] == "upgrade" && len(args) > 3 && args[3] == "oberth-charts/oberth" {
-				oberthArgs = slices.Clone(args)
-			}
-			return nil, nil
-		},
-		RunCommand: func(context.Context, []byte, string, ...string) ([]byte, error) {
-			return []byte("NAME\tKIND\tURL\nrepo\tgit\tssh://git@example.test/repo\n"), nil
-		},
-		PollInterval: time.Millisecond,
-	}
-
-	if err := Run(context.Background(), Config{InstallRekor: true, Timeout: time.Second}, deps); err != nil {
-		t.Fatal(err)
-	}
-	if oberthArgs == nil {
-		t.Fatal("Oberth helm install was not called")
-	}
-	secret, err := client.CoreV1().Secrets(DefaultRekorNamespace).Get(
-		context.Background(), rekorSignerSecretName, metav1.GetOptions{},
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-	publicKeyPEM, err := rekorPublicKeyPEM(secret.Data[rekorSignerSecretKey])
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, want := range []string{
-		"auditAnchor.rekorURL=http://rekor-server.rekor.svc:80",
-		"auditAnchor.rekorInsecureHTTP=true",
-		"auditAnchor.rekorPublicKey=" + publicKeyPEM,
-	} {
-		if !slices.Contains(oberthArgs, want) {
-			t.Fatalf("Oberth helm args missing %q: %v", want, oberthArgs)
-		}
-	}
-}
-
 func TestRekorHelmArgs(t *testing.T) {
 	t.Parallel()
 	cfg := Config{RekorNamespace: "rekor", RekorChartVersion: "1.8.3"}
 	args := RekorHelmArgs(cfg, "/tmp/values.yaml")
 	want := []string{
-		"upgrade", "--install", "rekor", "sigstore/rekor",
+		"upgrade", "--install", "rekor", "bundled-rekor",
 		"-n", "rekor", "--create-namespace",
 		"--version", "1.8.3",
 		"-f", "/tmp/values.yaml",
-		"--reuse-values",
 		"--wait",
 	}
 	assertSliceEqual(t, args, want)
@@ -1761,14 +1677,10 @@ func TestRekorHelmValuesYAML(t *testing.T) {
 		// Single-namespace layout: forceNamespace also feeds the
 		// --trillian_log_server.address chart argument.
 		"forceNamespace: custom-rekor",
-		// Persistent file signer wired through the chart's secret mount.
-		"signer: /etc/rekor/signer/private.pem",
-		"secretName: rekor-signer",
-		"privateKeySecretKey: private.pem",
+		// Signing remains inside OpenBao Transit.
+		"signer: openbao://rekor-custom-rekor",
 		// Durable MySQL search index on the Trillian MySQL; redis off.
 		"storageProvider: mysql",
-		"name: trillian-mysql",
-		"key: mysql-password",
 		// Tuned MySQL memory (the untuned test-matrix run ballooned).
 		"memory: 512Mi",
 		"memory: 1Gi",
@@ -1781,59 +1693,6 @@ func TestRekorHelmValuesYAML(t *testing.T) {
 	}
 	if strings.Contains(values, "rekor-system") || strings.Contains(values, "trillian-system") {
 		t.Fatalf("values must not reference the chart-default namespaces:\n%s", values)
-	}
-}
-
-func TestEnsureRekorSignerKeyMintsAndReuses(t *testing.T) {
-	t.Parallel()
-	deps := Deps{KubeClient: fake.NewClientset()}
-	cfg := Config{RekorNamespace: "rekor"}
-
-	first, err := EnsureRekorSignerKey(context.Background(), cfg, deps)
-	if err != nil {
-		t.Fatal(err)
-	}
-	block, _ := pem.Decode([]byte(first))
-	if block == nil || block.Type != "PUBLIC KEY" {
-		t.Fatalf("want PUBLIC KEY PEM, got:\n%s", first)
-	}
-	parsed, err := x509.ParsePKIXPublicKey(block.Bytes)
-	if err != nil {
-		t.Fatalf("public key does not parse: %v", err)
-	}
-	if _, ok := parsed.(*ecdsa.PublicKey); !ok {
-		t.Fatalf("want ECDSA public key, got %T", parsed)
-	}
-
-	secret, err := deps.KubeClient.CoreV1().Secrets("rekor").Get(context.Background(), "rekor-signer", metav1.GetOptions{})
-	if err != nil {
-		t.Fatalf("signer secret not created: %v", err)
-	}
-	if len(secret.Data["private.pem"]) == 0 {
-		t.Fatal("signer secret missing private.pem")
-	}
-
-	// A second run must REUSE the key — rotation would invalidate every
-	// previously published witness entry.
-	second, err := EnsureRekorSignerKey(context.Background(), cfg, deps)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if second != first {
-		t.Fatal("signer key was rotated on re-run; existing keys must be reused")
-	}
-}
-
-func TestEnsureRekorSignerKeyRefusesMalformedSecret(t *testing.T) {
-	t.Parallel()
-	malformed := &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{Name: "rekor-signer", Namespace: "rekor"},
-		Data:       map[string][]byte{"wrong-key": []byte("x")},
-	}
-	deps := Deps{KubeClient: fake.NewClientset(malformed)}
-	_, err := EnsureRekorSignerKey(context.Background(), Config{RekorNamespace: "rekor"}, deps)
-	if err == nil || !strings.Contains(err.Error(), "refusing to overwrite") {
-		t.Fatalf("want refusal to overwrite malformed signer secret, got %v", err)
 	}
 }
 
@@ -1877,7 +1736,7 @@ func TestDryRunFullPlanRendersAllPhases(t *testing.T) {
 		"Enable Transit mount: oberth-transit/ and create non-exportable key trusted-plan-artifacts",
 		"update only exact Transit encrypt/decrypt paths",
 		"Install the local Rekor stack",
-		"sigstore/rekor",
+		"bundled-rekor",
 		"auditAnchor.rekorURL=http://rekor-server.rekor.svc:80",
 		"auditAnchor.rekorInsecureHTTP=true",
 		"auditAnchor.rekorPublicKey=<generated-log-public-key-pem>",
@@ -2931,9 +2790,6 @@ func stripKubectlBaoPlumbing(args []string) (string, bool, error) {
 			}
 			return strings.Join(command[4:], " "), true, nil
 		}
-		if script == unsealShell {
-			return "operator unseal", false, nil
-		}
 		return "", false, errors.New("unexpected shell script: " + script)
 	default:
 		return "", false, errors.New("unexpected in-pod command: " + strings.Join(command, " "))
@@ -3450,8 +3306,8 @@ func TestSetupProductionSecretStoreInitializesAndConfigures(t *testing.T) {
 	responses["operator init -key-shares=1 -key-threshold=1 -format=json"] = fakeBaoResponse{
 		out: `{"unseal_keys_b64":["` + unsealKey + `"],"root_token":"` + rootToken + `"}`,
 	}
-	responses["operator unseal"] = fakeBaoResponse{
-		out: `{"initialized":true,"sealed":false,"storage_type":"file"}`,
+	responses["write -format=json sys/unseal -"] = fakeBaoResponse{
+		out: `{"data":{"initialized":true,"sealed":false,"storage_type":"file"}}`,
 	}
 
 	var buf bytes.Buffer
@@ -3483,11 +3339,11 @@ func TestSetupProductionSecretStoreInitializesAndConfigures(t *testing.T) {
 	}
 
 	byCommand := runner.callsByCommand()
-	unsealCall, ok := byCommand["operator unseal"]
+	unsealCall, ok := byCommand["write -format=json sys/unseal -"]
 	if !ok {
 		t.Fatal("unseal was not executed")
 	}
-	if unsealCall.stdin != unsealKey+"\n" {
+	if unsealCall.stdin != `{"key":"`+unsealKey+`"}` {
 		t.Fatalf("unseal key must arrive via stdin, got %q", unsealCall.stdin)
 	}
 	for _, call := range runner.calls {
@@ -3542,7 +3398,7 @@ func TestSetupProductionSecretStoreCollectKeepsCredentialsOnUnsealFailure(t *tes
 	responses["operator init -key-shares=1 -key-threshold=1 -format=json"] = fakeBaoResponse{
 		out: `{"unseal_keys_b64":["` + unsealKey + `"],"root_token":"` + rootToken + `"}`,
 	}
-	responses["operator unseal"] = fakeBaoResponse{
+	responses["write -format=json sys/unseal -"] = fakeBaoResponse{
 		out: "connection refused",
 		err: errors.New("exit status 1"),
 	}

@@ -32,8 +32,8 @@ func newExecutionPage() *executionPage {
 				options: []string{"auto", "strict", "off"}, optionIndex: 0,
 				description: "auto — where supported · strict — firewall CI jobs' network egress · off"},
 			{label: "external anchoring", value: "off", fieldType: "select",
-				options: []string{"off"}, optionIndex: 0,
-				description: "Configure an external Rekor witness after setup; the bundled stack requires Kubernetes Secrets."},
+				options: []string{"off", "on"}, optionIndex: 0,
+				description: "Local Rekor witness; OpenBao keeps its signing key and database credentials."},
 		},
 	}
 }

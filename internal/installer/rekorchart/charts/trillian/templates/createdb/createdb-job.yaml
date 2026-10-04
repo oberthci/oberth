@@ -1,0 +1,87 @@
+{{- if .Values.createdb.enabled }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ template "trillian.createdb.fullname" . }}-{{ .Release.Revision }}
+{{ include "trillian.namespace" . | indent 2 }}
+  labels:
+    {{- include "trillian.mysql.labels" . | nindent 4 }}
+{{- if .Values.createdb.annotations }}
+  annotations:
+{{ toYaml .Values.createdb.annotations | indent 4 }}
+{{- end }}
+spec:
+{{- if .Values.createdb.ttlSecondsAfterFinished }}
+  ttlSecondsAfterFinished: {{ .Values.createdb.ttlSecondsAfterFinished }}
+{{- end }}
+  template:
+    metadata:
+    {{- if .Values.createdb.podAnnotations }}
+      annotations:
+        {{ toYaml .Values.createdb.podAnnotations | nindent 8 }}
+    {{- end }}
+      labels:
+        {{- include "trillian.mysql.labels" . | nindent 8 }}
+        {{- if .Values.createdb.podLabels }}
+        {{ toYaml .Values.createdb.podLabels | nindent 8 }}
+        {{- end }}
+    spec:
+      automountServiceAccountToken: false
+      serviceAccountName: rekor-bao-db
+      restartPolicy: Never
+      {{- if .Values.imagePullSecrets }}
+      imagePullSecrets:
+{{ toYaml .Values.imagePullSecrets | indent 8 }}
+      {{- end }}
+      initContainers:
+{{ include "oberth.bao.init" (dict "uid" 65533) | indent 8 }}
+      containers:
+        - name: {{ template "trillian.createdb.fullname" . }}
+          image: "{{ template "trillian.image" .Values.createdb.image }}"
+          imagePullPolicy: "{{ .Values.createdb.image.pullPolicy }}"
+          env:
+            - name: NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: EXIT_DIR
+              value: "/var/exitdir"
+          command: [/tools/busybox, sh, -ec]
+          args:
+            - |
+              until /tools/busybox nc -z -w 2 trillian-mysql 3306; do /tools/busybox sleep 2; done
+              password=$(/tools/busybox cat /credentials/password)
+              exec /ko-app/createdb --db_name=trillian "--mysql_uri=mysql:${password}@tcp(trillian-mysql:3306)/"
+          volumeMounts:
+{{ include "oberth.bao.mounts" . | indent 12 }}
+            - name: exit-dir
+              mountPath: "/var/exitdir"
+    {{- if .Values.createdb.resources }}
+          resources:
+{{ toYaml .Values.createdb.resources | indent 12 }}
+    {{- end }}
+    {{- if .Values.createdb.containerSecurityContext }}
+          securityContext:
+{{ toYaml .Values.createdb.containerSecurityContext | indent 12 }}
+    {{- end }}
+    {{- if .Values.createdb.securityContext }}
+      securityContext:
+{{ toYaml .Values.createdb.securityContext | indent 8 }}
+    {{- end }}
+      volumes:
+{{ include "oberth.bao.volumes" "db" | indent 8 }}
+        - name: exit-dir
+          emptyDir: {}
+{{- end }}
+    {{- if .Values.createdb.nodeSelector }}
+      nodeSelector:
+{{ toYaml .Values.createdb.nodeSelector | indent 8 }}
+    {{- end }}
+    {{- if .Values.createdb.tolerations }}
+      tolerations:
+{{ toYaml .Values.createdb.tolerations | indent 8 }}
+    {{- end }}
+    {{- if .Values.createdb.affinity }}
+      affinity:
+{{ toYaml .Values.createdb.affinity | indent 8 }}
+    {{- end }}

@@ -1,0 +1,230 @@
+namespace:
+  create: false
+  name: trillian-system
+
+imagePullSecrets: []
+
+initContainerImage:
+  curl:
+    registry: docker.io
+    repository: curlimages/curl
+    # -- 8.21.0
+    version: sha256:7c12af72ceb38b7432ab85e1a265cff6ae58e06f95539d539b654f2cfa64bb13
+    imagePullPolicy: IfNotPresent
+  netcat:
+    registry: docker.io
+    repository: subfuzion/netcat
+    # -- 2024-09-03
+    version: sha256:7e808e84a631d9c2cd5a04f6a084f925ea388e3127553461536c1248c3333c8a
+    imagePullPolicy: IfNotPresent
+
+storageSystem:
+  driver: mysql
+  envCredentials: []
+quotaSystem:
+  driver: mysql
+
+mysql:
+  gcp:
+    enabled: false
+    instance: ""
+    scaffoldSQLProxy:
+      registry: ghcr.io
+      repository: sigstore/scaffolding/cloudsqlproxy
+      # -- v0.7.37 which is based on cloud-sql-proxy:2.23.0-alpine
+      version: sha256:2cb6ff4ebe7ae82b4c39e5c2b40365b0e4a47adcc244167c7cd364a6f8a9fdda
+      resources:
+        requests:
+          memory: "2Gi"
+          cpu: "1"
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        runAsNonRoot: true
+        capabilities:
+          drop:
+            - ALL
+    cloudsql:
+      registry: gcr.io
+      repository: cloud-sql-connectors/cloud-sql-proxy:2.23.0-alpine
+      # -- crane digest gcr.io/cloud-sql-connectors/cloud-sql-proxy:2.23.0-alpine
+      version: sha256:7cf46b7a0251486351cf7ed18dab04d96f05e26deb19d426e237f390e3baef14
+      resources:
+        requests:
+          memory: "2Gi"
+          cpu: "1"
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        runAsNonRoot: true
+        capabilities:
+          drop:
+            - ALL
+      unixDomainSocket:
+        enabled: false
+        path: /cloudsql
+  enabled: true
+  replicaCount: 1
+  name: mysql
+  hostname: ""
+  port: 3306
+  strategy:
+    type: Recreate
+  image:
+    registry: docker.io
+    repository: library/mysql
+    pullPolicy: IfNotPresent
+    # -- crane digest docker.io/library/mysql:v1.5.3
+    version: sha256:6ea90827b1100f8f2ae306a539f86d2c264a26ed435a2a9f75551dd5c3aeb242
+  resources: {}
+  args:
+    - "--innodb-buffer-pool-size=128M"
+  service:
+    type: ClusterIP
+    ports:
+      - name: 3306-tcp
+        port: 3306
+        protocol: TCP
+        targetPort: 3306
+  livenessProbe:
+    initialDelaySeconds: 30
+    periodSeconds: 10
+    timeoutSeconds: 1
+    failureThreshold: 3
+    successThreshold: 1
+    exec:
+      command:
+        - /etc/init.d/mysql
+        - status
+  readinessProbe:
+    initialDelaySeconds: 10
+    periodSeconds: 10
+    timeoutSeconds: 1
+    failureThreshold: 3
+    successThreshold: 1
+    exec:
+      command:
+        - /etc/init.d/mysql
+        - status
+  secret:
+    annotations: {}
+  auth:
+    username: "mysql"
+    password: ""
+    rootPassword: ""
+    existingSecret: ""
+  persistence:
+    enabled: true
+    annotations: {}
+    storageClass: null
+    size: 5Gi
+    mountPath: /var/lib/mysql
+    subPath: ""
+    existingClaim: ""
+    accessModes:
+      - ReadWriteOnce
+  podAnnotations: {}
+  podLabels: {}
+  serviceAccount:
+    create: true
+    name: ""
+    annotations: {}
+
+logServer:
+  enabled: true
+  replicaCount: 1
+  name: log-server
+  portRPC: 8091
+  portHTTP: 8090
+  image:
+    registry: ghcr.io
+    repository: sigstore/scaffolding/trillian_log_server
+    pullPolicy: IfNotPresent
+    # -- trillian v1.7.3 (scaffolding v0.7.37)
+    version: sha256:5a878e4e4f03790d2dda4b07a551ff9832128b307447d4156255c73690aa2da3
+  podAnnotations: {}
+  podLabels: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  service:
+    type: ClusterIP
+    headless: false
+    ports:
+      - name: 8091-tcp
+        port: 8091
+        protocol: TCP
+        targetPort: 8091
+      - name: 8090-tcp
+        port: 8090
+        protocol: TCP
+        targetPort: 8090
+  livenessProbe: {}
+  readinessProbe: {}
+  resources: {}
+  extraArgs: []
+  serviceAccount:
+    create: true
+    name: ""
+    annotations: {}
+
+logSigner:
+  enabled: true
+  replicaCount: 1
+  name: log-signer
+  forceMaster: true
+  etcdServers: []
+  portRPC: 8091
+  portHTTP: 8090
+  image:
+    registry: ghcr.io
+    repository: sigstore/scaffolding/trillian_log_signer
+    pullPolicy: IfNotPresent
+    # -- trillian v1.7.3 (scaffolding v0.7.37)
+    version: sha256:28c5ff40963f83ffdf4e2d9ea1e4e2c877c33cfb0ff068f3daad1c1080aad0ac
+  podAnnotations: {}
+  podLabels: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  service:
+    type: ClusterIP
+    headless: false
+    ports:
+      - name: 8091-tcp
+        port: 8091
+        protocol: TCP
+        targetPort: 8091
+  livenessProbe: {}
+  readinessProbe: {}
+  resources: {}
+  extraArgs: []
+  serviceAccount:
+    create: true
+    name: ""
+    annotations: {}
+
+createdb:
+  enabled: true
+  dbname: trillian
+  ttlSecondsAfterFinished: 3600
+  name: createdb
+  image:
+    registry: ghcr.io
+    repository: sigstore/scaffolding/createdb
+    pullPolicy: IfNotPresent
+    # -- v0.7.31
+    version: sha256:3cee6c78973b82af6c3c3632bf8d44dafbab1632b3999a7292b170237c5dd5cc
+  serviceAccount:
+    create: false
+    name: ""
+    annotations: {}
+  annotations: {}
+  podAnnotations: {}
+  podLabels: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+# Force namespace of namespaced resources
+forceNamespace: ""

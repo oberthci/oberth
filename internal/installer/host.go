@@ -115,9 +115,6 @@ func (deps InstallDeps) withDefaults() InstallDeps {
 // kubeconfig, and runs the cluster install flow.
 func Execute(ctx context.Context, cfg Config, deps InstallDeps) error {
 	deps = deps.withDefaults()
-	if cfg.InstallRekor {
-		return errors.New("the bundled Rekor stack requires Kubernetes Secrets and is disabled; configure an external auditAnchor.rekorURL instead")
-	}
 	if cfg.CreateKind && cfg.KubeconfigPath != "" {
 		return errors.New("choose either --kubeconfig for an existing cluster or --create-kind")
 	}

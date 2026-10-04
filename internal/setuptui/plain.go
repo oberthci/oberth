@@ -190,9 +190,9 @@ func runPlain(ctx context.Context, opts Options, input io.Reader, output io.Writ
 	if canonical, ok := canonicalNetworkPolicy(np); ok {
 		state.Config.NetworkPolicy = canonical
 	}
-	anchor, err := ask("External anchoring (off; external witness can be configured later)", "off", func(v string) error {
-		if v != "off" {
-			return fmt.Errorf("the bundled Rekor stack requires Kubernetes Secrets; choose off and configure an external witness after setup")
+	anchor, err := ask("Local Rekor witness with OpenBao (on/off)", "off", func(v string) error {
+		if v != "off" && v != "on" {
+			return fmt.Errorf("choose on or off")
 		}
 		return nil
 	})

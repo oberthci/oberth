@@ -1,0 +1,311 @@
+namespace:
+  create: false
+  name: rekor-system
+imagePullSecrets: []
+
+initContainerImage:
+  curl:
+    registry: docker.io
+    repository: curlimages/curl
+    # -- 8.17.0
+    version: sha256:935d9100e9ba842cdb060de42472c7ca90cfe9a7c96e4dacb55e79e560b3ff40
+    imagePullPolicy: IfNotPresent
+initContainerResources: {}
+
+redis:
+  enabled: true
+  replicaCount: 1
+  hostname: ""
+  port: 6379
+  args:
+    - --bind
+    - 0.0.0.0
+    - --appendonly
+    - "yes"
+  name: redis
+  image:
+    registry: docker.io
+    repository: redis
+    pullPolicy: IfNotPresent
+    # -- 6.2.17-alpine3.21
+    version: "sha256:148bb5411c184abd288d9aaed139c98123eeb8824c5d3fce03cf721db58066d8"
+  resources: {}
+  persistence:
+    enabled: false
+    annotations: {}
+    existingClaim: ""
+    storageClass: ""
+    accessModes:
+      - ReadWriteOnce
+    size: 5Gi
+  readinessProbe:
+    initialDelaySeconds: 5
+    periodSeconds: 10
+    timeoutSeconds: 1
+    failureThreshold: 3
+    successThreshold: 1
+    exec:
+      command:
+        - /bin/sh
+        - -i
+        - -c
+        - test "$(redis-cli -h 127.0.0.1 ping)" = "PONG"
+  livenessProbe:
+    initialDelaySeconds: 5
+    periodSeconds: 10
+    timeoutSeconds: 1
+    failureThreshold: 3
+    successThreshold: 1
+    exec:
+      command:
+        - /bin/sh
+        - -i
+        - -c
+        - test "$(redis-cli -h 127.0.0.1 ping)" = "PONG"
+  service:
+    type: ClusterIP
+    ports:
+      - name: 6379-tcp
+        port: 6379
+        protocol: TCP
+        targetPort: 6379
+  serviceAccount:
+    create: true
+    name: ""
+    annotations: {}
+  tolerations: []
+  nodeSelector: {}
+  affinity: {}
+
+mysql:
+  gcp:
+    enabled: false
+    instance: ""
+    cloudsql:
+      registry: gcr.io
+      repository: cloud-sql-connectors/cloud-sql-proxy:2.19.0-alpine
+      # -- crane digest gcr.io/cloud-sql-connectors/cloud-sql-proxy:2.19.0-alpine
+      version: sha256:7d760797955e765e9f8c793e3b86be6ed0cbd5684d4b401c8cfa81d185176fc6
+      resources:
+        requests:
+          memory: "2Gi"
+          cpu: "1"
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        runAsNonRoot: true
+        capabilities:
+          drop:
+            - ALL
+      unixDomainSocket:
+        enabled: false
+        path: /cloudsql
+  enabled: false
+  replicaCount: 1
+  name: mysql
+  hostname: ""
+  port: 3306
+  strategy:
+    type: Recreate
+  image:
+    registry: gcr.io
+    repository: trillian-opensource-ci/db_server
+    pullPolicy: IfNotPresent
+
+server:
+  enabled: true
+  replicaCount: 1
+  name: server
+  port: 3000
+  image:
+    registry: ghcr.io
+    repository: sigstore/rekor/rekor-server
+    pullPolicy: IfNotPresent
+    # crane digest ghcr.io/sigstore/rekor/rekor-server:v1.5.3
+    version: v1.5.3@sha256:ef3ac5d318fe8fb50997d6bf3e39c04e8ccc87708ff991e16d74e956f85ca74e
+  # -- KMS type for signing key (possible values: "" / "none", "aws")
+  kmsType: none
+  # -- AWS region if using AWS KMS for signing key
+  awsKmsRegion: us-east-1
+  # -- kubernetes secret name containing IAM credentials for use with AWS KMS
+  awsKmsCredentialsSecretName: aws-kms-credentials
+  logging:
+    production: false
+  ingress:
+    enabled: true
+    className: "nginx"
+    hosts:
+      - path: /
+        host: root
+    annotations: {}
+    tls: []
+  ingresses:
+    - enabled: false
+      name: "gce-ingress"
+      className: "gce"
+      hosts:
+        - path: /
+          host: root
+      annotations: {}
+      tls: []
+      staticGlobalIP: lb-ext-ip
+      frontendConfigSpec:   # https://cloud.google.com/kubernetes-engine/docs/how-to/ingress-configuration#configuring_ingress_features_through_frontendconfig_parameters
+        sslPolicy: rekor-ssl-policy
+        redirectToHttps:
+          enabled: true
+      backendConfigSpec:   # https://cloud.google.com/kubernetes-engine/docs/how-to/ingress-configuration#configuring_ingress_features_through_backendconfig_parameters
+        securityPolicy:
+          name: rekor-security-policy
+        logging:
+          enable: true
+  service:
+    type: ClusterIP
+    ports:
+      - name: 3000-tcp
+        port: 80
+        protocol: TCP
+        targetPort: 3000
+      - name: 2112-tcp
+        port: 2112
+        protocol: TCP
+        targetPort: 2112
+  signer: memory
+  readinessProbe:
+    initialDelaySeconds: 10
+    periodSeconds: 10
+    timeoutSeconds: 1
+    failureThreshold: 3
+    successThreshold: 1
+    httpGet:
+      port: 3000
+      path: /ping
+  sharding:
+    mountPath: /sharding
+    filename: sharding-config.yaml
+    contents: ""
+  livenessProbe:
+    initialDelaySeconds: 30
+    periodSeconds: 10
+    timeoutSeconds: 1
+    failureThreshold: 3
+    successThreshold: 1
+    httpGet:
+      port: 3000
+      path: /ping
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 65533
+  config:
+    key: treeID
+    treeID: ""
+  retrieve_api:
+    enabled: true
+  attestation_storage:
+    enabled: true
+    bucket: file:///var/run/attestations
+    persistence:
+      enabled: true
+      annotations: {}
+      storageClass: ""
+      size: 5Gi
+      mountPath: /var/lib/mysql
+      subPath: ""
+      existingClaim: ""
+      accessModes:
+        - ReadWriteOnce
+  podAnnotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/path: /metrics
+    prometheus.io/port: "2112"
+  resources: {}
+  extraArgs: []
+  gomemlimit: ""
+  serviceAccount:
+    create: true
+    name: ""
+    annotations: {}
+  searchIndex:
+    storageProvider: ""
+    mysql: {}
+  tolerations: []
+  nodeSelector: {}
+  affinity: {}
+
+createtree:
+  name: createtree
+  force: false
+  image:
+    registry: ghcr.io
+    repository: sigstore/scaffolding/createtree
+    pullPolicy: IfNotPresent
+    # v0.7.31
+    version: sha256:e5232e8c9122fcf87260b48f4b05bcb95c35c8aaa57581b42f0fde7460bd3e91
+  ttlSecondsAfterFinished: 3600
+  serviceAccount:
+    create: true
+    name: ""
+    annotations: {}
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 65533
+  resources: {}
+  annotations: {}
+  podAnnotations: {}
+  podLabels: {}
+  tolerations: []
+  nodeSelector: {}
+  affinity: {}
+
+# Configure backfillredis to repair indices that were not inserted into Redis.
+backfillredis:
+  name: backfillredis
+  enabled: false
+  image:
+    registry: ghcr.io
+    repository: sigstore/rekor/backfill-redis
+    pullPolicy: IfNotPresent
+    # v1.3.6
+    version: sha256:a13cd8b2a554d6116888fd1f383cf6e91fc1716df5eda392b82e6bfc66995ec3
+  ttlSecondsAfterFinished: 3600
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 65533
+  rekorAddress: rekor.rekor-system.svc
+  startIndex: -1
+  endIndex: -1
+  resources: {}
+  annotations: {}
+  podAnnotations: {}
+  podLabels: {}
+  tolerations: []
+  nodeSelector: {}
+  affinity: {}
+
+# Configure Trillian dependency
+trillian:
+  enabled: true
+  namespace:
+    name: trillian-system
+    create: true
+  forceNamespace: trillian-system
+  fullnameOverride: trillian
+  adminServer: ""
+  logServer:
+    name: trillian-logserver
+    fullnameOverride: trillian-logserver
+    portHTTP: 8090
+    portRPC: 8091
+  logSigner:
+    name: trillian-logsigner
+    fullnameOverride: trillian-logsigner
+  mysql:
+    fullnameOverride: trillian-mysql
+
+# Force namespace of namespaced resources
+forceNamespace: ""
+
+# Managed by the installer; public connection settings only.
+global:
+  bao:
+    address: ""
+    caCert: ""

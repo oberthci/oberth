@@ -10,12 +10,7 @@ package installer
 import (
 	"bytes"
 	"context"
-	"crypto/ecdsa"
-	"crypto/elliptic"
-	cryptorand "crypto/rand"
-	"crypto/x509"
 	"encoding/json"
-	"encoding/pem"
 	"errors"
 	"fmt"
 	"io"
@@ -23,6 +18,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -63,21 +59,10 @@ const (
 	// DefaultRekorNamespace is the namespace for the local Rekor stack.
 	DefaultRekorNamespace = "rekor"
 	// DefaultRekorChartVersion is the pinned sigstore/rekor umbrella chart
-	// version (appVersion v1.5.3; bundles trillian chart 0.3.16). Bump
+	// adaptation (appVersion v1.5.3; bundles trillian chart 0.3.16). Bump
 	// deliberately and re-verify the local witness flow against
 	// RekorHelmValuesYAML; never float to latest.
-	DefaultRekorChartVersion = "1.8.3"
-
-	sigstoreRepoName = "sigstore"
-
-	// rekorSignerSecretName/Key hold the persistent Rekor log signing key
-	// (PKCS#8 ECDSA P-256 PEM) consumed via the chart's
-	// server.signerFileSecretOptions. The key is minted once and reused on
-	// every subsequent install: it IS the local log's identity, and rotating
-	// it would invalidate every previously published witness entry.
-	rekorSignerSecretName = "rekor-signer" // #nosec G101 — Kubernetes Secret NAME (an identifier), not credential material.
-	rekorSignerSecretKey  = "private.pem"
-	rekorSignerMountPath  = "/etc/rekor/signer"
+	DefaultRekorChartVersion = "1.8.3-oberth.1"
 
 	// devRootToken is the OpenBao dev-mode default root token — well-known,
 	// documented, and printed to the operator after a dev-mode install so
@@ -145,7 +130,10 @@ type Config struct {
 	// InstallRekor additionally installs a local Rekor transparency-log
 	// stack — MySQL + Trillian log server/signer + Rekor server — as the
 	// audit witness (--install-rekor). Independent of the secret store.
-	InstallRekor bool
+	InstallRekor    bool
+	rekorPublicKey  string
+	rekorBaoAddress string
+	rekorBaoCA      string
 	// SkipArgo opts out of installing the Argo Workflows controller
 	// (--skip-argo-workflows), for a cluster that already runs one watching
 	// ArgoNamespace. It does not make pipelines execute any other way: Argo is
@@ -424,6 +412,7 @@ type OpenBaoResult struct {
 
 // SecretStoreResult describes the outcome of secretstore configuration.
 type SecretStoreResult struct {
+	RekorPublicKey         string
 	AuthMountConfigured    bool
 	TransitMountEnabled    bool
 	TransitKeyCreated      bool
@@ -476,6 +465,13 @@ type RekorResult struct {
 
 // Validate checks Config for invalid flag combinations and applies defaults.
 func (cfg *Config) Validate() error {
+	if cfg.InstallRekor {
+		if cfg.InstallSecretStoreDev {
+			return errors.New("rekor requires persistent production OpenBao; dev storage cannot preserve log identity")
+		}
+		cfg.InstallSecretStore = true
+	}
+
 	if cfg.WatchAdoptionPlan != "" && (!cfg.Upgrade || !cfg.SkipArgo || cfg.InstallSecretStore || cfg.InstallSecretStoreDev || cfg.InstallRekor) {
 		return errors.New("watch adoption requires --upgrade --skip-argo-workflows and cannot install other services")
 	}
@@ -526,6 +522,14 @@ func (cfg *Config) Validate() error {
 	}
 	if cfg.ArgoChartVersion == "" {
 		cfg.ArgoChartVersion = DefaultArgoChartVersion
+	}
+	if cfg.InstallRekor {
+		if cfg.RekorNamespace == cfg.Namespace || cfg.RekorNamespace == cfg.ArgoNamespace || cfg.RekorNamespace == cfg.OpenBaoNamespace {
+			return errors.New("rekor requires its own namespace to isolate database credentials")
+		}
+		if cfg.RekorChartVersion != DefaultRekorChartVersion {
+			return errors.New("bundled Rekor requires the verified chart version shipped with this installer")
+		}
 	}
 	if cfg.ArgoNamespace == cfg.Namespace {
 		return fmt.Errorf("--argo-namespace %q must differ from --namespace: OpenBao Kubernetes-auth "+
@@ -756,6 +760,9 @@ func Run(ctx context.Context, cfg Config, deps Deps) error {
 				return fmt.Errorf("set up production secret store: %w", err)
 			}
 			openbao.TrustedTransitVerified = configured.TrustedTransitVerified
+			cfg.rekorPublicKey = configured.RekorPublicKey
+			cfg.rekorBaoAddress = openbao.ServiceAddress
+			cfg.rekorBaoCA = openbao.CACertPEM
 			secretStoreItems = configured.Items
 			stepDone("secretstore server")
 			stepDone("secretstore release")
@@ -1077,10 +1084,8 @@ func OpenBaoHelmArgs(cfg Config) []string {
 // InstallRekorStack installs the local Rekor transparency-log stack — MySQL,
 // Trillian log server + signer, and the Rekor server — via the official
 // sigstore/rekor umbrella chart, pinned to DefaultRekorChartVersion. The
-// stack mirrors the docker-compose configuration validated during the
-// 2026-08-08 test matrix: MySQL-backed Trillian AND a MySQL-backed search
-// index (witness recovery depends on POST /api/v1/index/retrieve surviving
-// pod restarts), plus a persistent file-based log signer.
+// stack uses durable MySQL for both Trillian and its search index, and
+// OpenBao Transit for a persistent, non-exportable signing identity.
 func InstallRekorStack(ctx context.Context, cfg Config, deps Deps) (RekorResult, error) {
 	ns := cfg.RekorNamespace
 	if ns == "" {
@@ -1094,17 +1099,10 @@ func InstallRekorStack(ctx context.Context, cfg Config, deps Deps) (RekorResult,
 		ServiceAddress: fmt.Sprintf("http://rekor-server.%s.svc:80", ns),
 	}
 
-	if _, err := deps.RunHelm(ctx, []string{"repo", "add", "--force-update", sigstoreRepoName, SigstoreHelmRepoURL}); err != nil {
-		return result, fmt.Errorf("add Sigstore helm repo: %w", err)
+	if cfg.rekorPublicKey == "" || cfg.rekorBaoAddress == "" || cfg.rekorBaoCA == "" {
+		return result, errors.New("rekor requires verified production OpenBao provisioning")
 	}
-
-	// Mint or reuse the persistent log signer key before the chart install:
-	// the server deployment mounts the Secret at startup.
-	publicPEM, err := EnsureRekorSignerKey(ctx, cfg, deps)
-	if err != nil {
-		return result, err
-	}
-	result.LogPublicKeyPEM = publicPEM
+	result.LogPublicKeyPEM = cfg.rekorPublicKey
 
 	release, exists := findHelmRelease(ctx, deps, "rekor", ns)
 	result.InstalledVersion = chartVersionFromRelease(release.Chart, "rekor")
@@ -1145,9 +1143,22 @@ func InstallRekorStack(ctx context.Context, cfg Config, deps Deps) (RekorResult,
 		return result, fmt.Errorf("close Rekor values file: %w", err)
 	}
 
-	if _, err := deps.RunHelm(ctx, RekorHelmArgs(cfg, valuesFile.Name())); err != nil {
+	dir, err := extractRekorChart()
+	if err != nil {
+		return result, err
+	}
+	defer func() { _ = os.RemoveAll(dir) }()
+	connectionPath := filepath.Join(dir, "connection.json")
+	if err := os.WriteFile(connectionPath, []byte(rekorConnectionValues(cfg)), 0600); err != nil {
+		return result, err
+	}
+	args := RekorHelmArgs(cfg, valuesFile.Name())
+	args[3] = filepath.Join(dir, "rekorchart")
+	args = append(args, "-f", connectionPath, "--timeout", cfg.Timeout.String())
+	if _, err := deps.RunHelm(ctx, args); err != nil {
 		return result, fmt.Errorf("helm install Rekor: %w", err)
 	}
+
 	return result, nil
 }
 
@@ -1163,14 +1174,10 @@ func RekorHelmArgs(cfg Config, valuesPath string) []string {
 		chartVersion = DefaultRekorChartVersion
 	}
 	return []string{
-		"upgrade", "--install", "rekor", sigstoreRepoName + "/rekor",
+		"upgrade", "--install", "rekor", "bundled-rekor",
 		"-n", ns, "--create-namespace",
 		"--version", chartVersion,
 		"-f", valuesPath,
-		// Idempotent re-runs and upgrades must not reset values a user set on
-		// a previous install (OBERTH-RELEASE-024); the -f values above still
-		// override reused ones. No-op on first install.
-		"--reuse-values",
 		"--wait",
 	}
 }
@@ -1189,9 +1196,8 @@ func RekorHelmArgs(cfg Config, valuesPath string) []string {
 //     chart-default redis has no persistence, and losing the search index
 //     breaks witness-history recovery (POST /api/v1/index/retrieve) after a
 //     restart. One durable store for both the log and its index.
-//   - persistent file signer: the default memory signer regenerates the log
-//     key on every pod restart, invalidating all previously published
-//     witness entries.
+//   - OpenBao Transit signer: the private key never leaves the store, and
+//     Kubernetes authentication is renewed by a pod-local agent.
 //   - tuned resources: the untuned test-matrix MySQL ballooned to ~16GB
 //     VSZ; requests total ≈1Gi for the whole stack, limits ≈2Gi.
 func RekorHelmValuesYAML(cfg Config) string {
@@ -1217,12 +1223,16 @@ trillian:
       limits:
         memory: 1Gi
   logServer:
+    containerSecurityContext: {runAsUser: 65533, runAsGroup: 65533, runAsNonRoot: true}
     resources:
       requests:
         memory: 128Mi
       limits:
         memory: 256Mi
+  createdb:
+    containerSecurityContext: {runAsUser: 65533, runAsGroup: 65533, runAsNonRoot: true}
   logSigner:
+    containerSecurityContext: {runAsUser: 65533, runAsGroup: 65533, runAsNonRoot: true}
     resources:
       requests:
         memory: 128Mi
@@ -1235,12 +1245,8 @@ mysql:
 server:
   ingress:
     enabled: false
-  signer: %[2]s
-  signerFileSecretOptions:
-    secretName: %[3]s
-    secretMountPath: %[4]s
-    privateKeySecretKey: %[5]s
-    secretMountSubPath: %[5]s
+  signer: openbao://rekor-%[1]s
+  signerFileSecretOptions: null
   gomemlimit: 400MiB
   resources:
     requests:
@@ -1250,118 +1256,9 @@ server:
   searchIndex:
     storageProvider: mysql
     mysql:
-      envCredentials:
-        - name: MYSQL_USER
-          valueFrom:
-            secretKeyRef:
-              name: trillian-mysql
-              key: mysql-user
-        - name: MYSQL_PASSWORD
-          valueFrom:
-            secretKeyRef:
-              name: trillian-mysql
-              key: mysql-password
-        - name: MYSQL_DATABASE
-          valueFrom:
-            secretKeyRef:
-              name: trillian-mysql
-              key: mysql-database
-        - name: MYSQL_HOSTNAME
-          value: trillian-mysql
-        - name: MYSQL_PORT
-          value: "3306"
-`, ns, rekorSignerMountPath+"/"+rekorSignerSecretKey, rekorSignerSecretName, rekorSignerMountPath, rekorSignerSecretKey)
-}
+      envCredentials: []
+`, ns)
 
-// EnsureRekorSignerKey mints — or reuses — the persistent Rekor log signing
-// key and returns the log's PKIX PEM public key (the value Oberth will pin via
-// auditAnchor.rekorPublicKey).
-//
-// An existing key is always reused, never rotated: the signing key is the
-// local log's identity, and every witness entry ever published verifies
-// against it. A malformed existing Secret is an error, not an overwrite.
-func EnsureRekorSignerKey(ctx context.Context, cfg Config, deps Deps) (string, error) {
-	ns := cfg.RekorNamespace
-	if ns == "" {
-		ns = DefaultRekorNamespace
-	}
-
-	namespace := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns}}
-	if _, err := deps.KubeClient.CoreV1().Namespaces().Create(ctx, namespace, metav1.CreateOptions{}); err != nil && !apierrors.IsAlreadyExists(err) {
-		return "", fmt.Errorf("create namespace %s: %w", ns, err)
-	}
-
-	existing, err := deps.KubeClient.CoreV1().Secrets(ns).Get(ctx, rekorSignerSecretName, metav1.GetOptions{})
-	if err == nil {
-		material, ok := existing.Data[rekorSignerSecretKey]
-		if !ok || len(material) == 0 {
-			return "", fmt.Errorf("secret %s/%s exists without key %q; refusing to overwrite a signer secret",
-				ns, rekorSignerSecretName, rekorSignerSecretKey)
-		}
-		return rekorPublicKeyPEM(material)
-	}
-	if !apierrors.IsNotFound(err) {
-		return "", fmt.Errorf("read signer secret: %w", err)
-	}
-
-	private, err := ecdsa.GenerateKey(elliptic.P256(), cryptorand.Reader)
-	if err != nil {
-		return "", fmt.Errorf("generate signer key: %w", err)
-	}
-	der, err := x509.MarshalPKCS8PrivateKey(private)
-	if err != nil {
-		return "", fmt.Errorf("encode signer key: %w", err)
-	}
-	privatePEM := pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der})
-	// Best-effort zeroing of the local key copies once the Secret exists.
-	// The authoritative copy intentionally lives in the cluster Secret —
-	// the sigstore chart's file-signer mechanism — which is proportionate
-	// for a local dev/evaluation transparency log.
-	defer func() {
-		for i := range der {
-			der[i] = 0
-		}
-		for i := range privatePEM {
-			privatePEM[i] = 0
-		}
-	}()
-
-	secret := &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{Name: rekorSignerSecretName, Namespace: ns},
-		Type:       corev1.SecretTypeOpaque,
-		Data:       map[string][]byte{rekorSignerSecretKey: privatePEM},
-	}
-	if _, err := deps.KubeClient.CoreV1().Secrets(ns).Create(ctx, secret, metav1.CreateOptions{}); err != nil {
-		return "", fmt.Errorf("create signer secret: %w", err)
-	}
-
-	publicDER, err := x509.MarshalPKIXPublicKey(&private.PublicKey)
-	if err != nil {
-		return "", fmt.Errorf("encode signer public key: %w", err)
-	}
-	return string(pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: publicDER})), nil
-}
-
-// rekorPublicKeyPEM derives the PKIX PEM public key from a PKCS#8 ECDSA
-// private key PEM as stored in the signer Secret.
-func rekorPublicKeyPEM(privatePEM []byte) (string, error) {
-	block, _ := pem.Decode(privatePEM)
-	if block == nil {
-		return "", errors.New("signer secret does not contain PEM data")
-	}
-	parsed, err := x509.ParsePKCS8PrivateKey(block.Bytes)
-	if err != nil {
-		return "", fmt.Errorf("parse signer private key: %w", err)
-	}
-	private, ok := parsed.(*ecdsa.PrivateKey)
-	if !ok {
-		return "", errors.New("signer private key is not ECDSA")
-	}
-	publicDER, err := x509.MarshalPKIXPublicKey(&private.PublicKey)
-	if err != nil {
-		return "", fmt.Errorf("encode signer public key: %w", err)
-	}
-	return string(pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: publicDER})), nil
 }
 
 // --- Phase 4: Oberth install ---
@@ -2088,7 +1985,7 @@ func printDryRunPlanWithKind(cfg Config, w io.Writer, cluster ClusterInfo, kindC
 			rekorNS = DefaultRekorNamespace
 		}
 		_, _ = fmt.Fprintf(w, "  %d. Install the local Rekor stack (MySQL + Trillian + Rekor server) into namespace %q\n", step, rekorNS)
-		_, _ = fmt.Fprintf(w, "     Mint persistent log signer key: Secret %s/%s (reused if already present)\n", rekorNS, rekorSignerSecretName)
+		_, _ = fmt.Fprintf(w, "     Reuse OpenBao Transit signing key rekor-%s and memory-only database credentials\n", rekorNS)
 		rekorArgs := RekorHelmArgs(cfg, "<generated-values.yaml>")
 		_, _ = fmt.Fprintf(w, "     helm %s\n", strings.Join(rekorArgs, " "))
 		_, _ = fmt.Fprintf(w, "     Requires ~1Gi additional RAM (requests; ~2Gi limits) — recommended for 32GB+ machines\n")
