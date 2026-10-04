@@ -33,11 +33,19 @@ type baoIdentityStore struct {
 }
 
 func newBaoIdentityStore(namespace string) (*baoIdentityStore, error) {
-	ca, err := readBoundedFile(os.Getenv("VAULT_CACERT"), 4<<20)
-	if err != nil {
-		return nil, fmt.Errorf("read identity store trust anchor: %w", err)
+	var ca []byte
+	if path := os.Getenv("VAULT_CACERT"); path != "" {
+		var err error
+		ca, err = readBoundedFile(path, 4<<20)
+		if err != nil {
+			return nil, fmt.Errorf("read identity store trust anchor: %w", err)
+		}
 	}
-	client, err := secretstore.New(secretstore.Config{Address: os.Getenv("VAULT_ADDR"), Role: os.Getenv("OBERTH_VAULT_ROLE"), CACertPEM: ca})
+	client, err := secretstore.New(secretstore.Config{
+		Address: os.Getenv("VAULT_ADDR"), Role: os.Getenv("OBERTH_VAULT_ROLE"), CACertPEM: ca,
+		AuthMountPath:     os.Getenv("OBERTH_VAULT_AUTH_MOUNT"),
+		AllowInsecureHTTP: os.Getenv("OBERTH_VAULT_INSECURE_DEV_HTTP") == "true",
+	})
 	if err != nil {
 		return nil, err
 	}

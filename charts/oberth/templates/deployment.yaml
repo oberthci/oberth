@@ -282,7 +282,11 @@ spec:
             - name: VAULT_ADDR
               value: {{ .Values.secretstore.address | quote }}
             - name: VAULT_CACERT
-              value: /etc/oberth/secretstore-ca/ca.crt
+              value: {{ ternary "/etc/oberth/secretstore-ca/ca.crt" "" (not (empty .Values.secretstore.caCert)) | quote }}
+            - name: OBERTH_VAULT_AUTH_MOUNT
+              value: {{ .Values.secretstore.k8sAuthMount | quote }}
+            - name: OBERTH_VAULT_INSECURE_DEV_HTTP
+              value: {{ .Values.secretstore.insecureDevHTTP | quote }}
             - name: OBERTH_VAULT_ROLE
               value: {{ .Values.secretstore.role | quote }}
             - name: OBERTH_TLS_NAMES

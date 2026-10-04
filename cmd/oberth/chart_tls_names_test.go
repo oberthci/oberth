@@ -45,3 +45,18 @@ func TestChartCarriesPublicNamesAndNoPrivateIdentities(t *testing.T) {
 		}
 	}
 }
+
+func TestIdentityStoreRequiresExplicitDevelopmentHTTP(t *testing.T) {
+	t.Setenv("VAULT_ADDR", "http://openbao.openbao.svc:8200")
+	t.Setenv("VAULT_CACERT", "")
+	t.Setenv("OBERTH_VAULT_ROLE", "oberth-ci")
+	t.Setenv("OBERTH_VAULT_AUTH_MOUNT", "custom-kubernetes")
+	t.Setenv("OBERTH_VAULT_INSECURE_DEV_HTTP", "false")
+	if _, err := newBaoIdentityStore("oberth"); err == nil {
+		t.Fatal("plaintext store allowed without explicit development setting")
+	}
+	t.Setenv("OBERTH_VAULT_INSECURE_DEV_HTTP", "true")
+	if _, err := newBaoIdentityStore("oberth"); err != nil {
+		t.Fatal(err)
+	}
+}
