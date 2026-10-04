@@ -330,6 +330,14 @@ func (service *API) CallTool(ctx context.Context, actor api.Actor, name string, 
 			return nil, err
 		}
 		return wireIssue(issue), nil
+	case "issue_get_many":
+		var arguments struct {
+			IDs []int64 `json:"ids"`
+		}
+		if err := decodeTool(raw, &arguments); err != nil {
+			return nil, err
+		}
+		return service.issueGetMany(ctx, actor, arguments.IDs)
 	case "issue_update":
 		var arguments struct {
 			ID    int64   `json:"id"`
@@ -386,12 +394,26 @@ func (service *API) CallTool(ctx context.Context, actor api.Actor, name string, 
 		return nil, service.issueDelete(ctx, actor, arguments.ID)
 	case "issue_list":
 		var arguments struct {
-			Before int64 `json:"before"`
+			Repo   string `json:"repo"`
+			Kind   string `json:"kind"`
+			State  string `json:"state"`
+			Before int64  `json:"before"`
+			Limit  *int   `json:"limit"`
 		}
 		if err := decodeTool(raw, &arguments); err != nil {
 			return nil, err
 		}
-		page, err := service.issueList(ctx, "", "", "", arguments.Before, maximumIssuePage)
+		limit := maximumIssuePage
+		if arguments.Limit != nil {
+			limit = *arguments.Limit
+			if limit < 1 || limit > maximumIssuePage {
+				return nil, fmt.Errorf("%w: issue limit must be between 1 and 50", ErrInvalidInput)
+			}
+		}
+		if arguments.State == "all" {
+			arguments.State = ""
+		}
+		page, err := service.issueList(ctx, arguments.Repo, arguments.Kind, arguments.State, arguments.Before, limit)
 		if err != nil {
 			return nil, err
 		}

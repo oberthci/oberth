@@ -3480,8 +3480,8 @@ func TestIssueToolsListBothKindsAndUseActingIdentity(t *testing.T) {
 	if listed[created.ID] != string(model.IssueClosed) || listed[ciIssue.ID] != string(model.IssueOpen) {
 		t.Fatalf("issue list response = %#v", page)
 	}
-	if _, err := service.CallTool(ctx, actor, "issue_list", json.RawMessage(`{"limit":50}`)); !errors.Is(err, ErrInvalidInput) {
-		t.Fatalf("non-FAB issue_list field error = %v", err)
+	if _, err := service.CallTool(ctx, actor, "issue_list", json.RawMessage(`{"unknown":50}`)); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("unknown issue_list field error = %v", err)
 	}
 	if _, err := service.CallTool(ctx, actor, "issue_delete", json.RawMessage(fmt.Sprintf(`{"id":%d}`, created.ID))); err != nil {
 		t.Fatal(err)

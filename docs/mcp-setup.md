@@ -161,11 +161,12 @@ call the proxy hostname directly.
 | `publish_retry` | Retry upstream publication for a run/promotion whose burns passed but whose upstream push failed |
 | `issue_create` | Create a workspace-global manual issue |
 | `issue_get` | Get an issue by ID |
+| `issue_get_many` | Get 1..50 complete issues in request order, with explicit missing/size-limit results |
 | `issue_update` | Update an issue title and body |
 | `issue_close` | Close an issue |
 | `issue_reopen` | Reopen a manual issue by ID; an already-open issue is unchanged, CI issues are rejected |
 | `issue_delete` | Delete an accidentally created manual issue |
-| `issue_list` | List issue IDs and states (paginated, 50 per page) |
+| `issue_list` | List issue metadata with repo/kind/state filters and 1..50 records per page |
 | `issue_lock` | Acquire or renew a five-minute caller-owned issue lock |
 | `access_list` | List secret access grants for a repository |
 | `access_allow` | Grant a step access to a secret path (admin-only) |
@@ -324,3 +325,26 @@ a run or result. Pass `next_before` as `before` with the same filters to recover
 older records. Each page observes current status; a status may change between
 pages. The list neither retries a promotion nor proves publication; use its
 full ID with `promote_status` and verify the resulting published ref normally.
+
+### Scanning and reading the issue queue
+
+Use `issue_list({"state":"open"})` for the open queue. A page contains up to
+50 metadata records; follow `next_before` as `before`, keeping the same filters,
+until the cursor is absent. Filtering happens before pagination. Omitted
+arguments preserve the all-issues default. `state` accepts `open`, `closed`, or
+`all`; `kind` accepts `manual` or `ci`. The optional `repo` selects actual stored
+repository association: global manual issues are excluded even if their titles
+mention that component.
+
+For the latest 5, 10, or 50 created issues, set `limit` accordingly (1..50).
+Ordering is descending issue ID, not most recently updated. Listing does not
+include bodies.
+
+Read selected bodies in one call: `issue_get_many({"ids":[787,743,426]})`.
+The `results` array preserves that order. Each result contains `id` and either
+`issue` (the complete existing issue record) or `error` (`not_found` or
+`response_limit`). The encoded structured response is limited to 256 KiB;
+no body is truncated and every requested ID has a result. Later small issues
+can still fit after a large issue. Retrieve any `response_limit` IDs with
+`issue_get`. Requests must contain 1..50 unique positive IDs. Neither read tool
+acquires or renews locks. This is live pagination, not a point-in-time snapshot.

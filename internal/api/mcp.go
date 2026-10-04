@@ -98,6 +98,20 @@ type IssueResponse struct {
 	UpdatedAt   string `json:"updated_at,omitempty"`
 }
 
+// IssueGetManyMaximumBytes bounds encoded structured content, including all
+// result rows. Complete records that do not fit use an explicit fallback row.
+const IssueGetManyMaximumBytes = 256 << 10
+
+type IssueGetManyResult struct {
+	ID    int64          `json:"id"`
+	Issue *IssueResponse `json:"issue,omitempty"`
+	Error string         `json:"error,omitempty"`
+}
+
+type IssueGetManyResponse struct {
+	Results []IssueGetManyResult `json:"results"`
+}
+
 type IssueListItem struct {
 	ID          int64  `json:"id"`
 	State       string `json:"state"`
@@ -312,11 +326,18 @@ func toolDefinitions() []map[string]any {
 		tool("promote_status", "Wait for an append-only promotion record to become terminal.", object(map[string]any{"id": stringProperty("Promotion ID"), "timeout": timeoutProperty()}, "id")),
 		tool("issue_create", "Create a global manual issue.", object(map[string]any{"title": stringProperty("Issue title"), "body": stringProperty("Issue body")}, "title", "body")),
 		tool("issue_get", "Get an issue by ID.", object(map[string]any{"id": integerProperty("Issue ID")}, "id")),
+		tool("issue_get_many", "Get complete issue records for 1..50 unique positive IDs in request order. Each result contains issue or error (not_found or response_limit). Structured JSON is bounded to 256 KiB; use issue_get for response_limit IDs. Bodies are never truncated. Read-only; does not renew locks.", object(map[string]any{"ids": map[string]any{"type": "array", "minItems": 1, "maxItems": 50, "uniqueItems": true, "items": map[string]any{"type": "integer", "minimum": 1}}}, "ids")),
 		tool("issue_update", "Update an issue title and body.", object(map[string]any{"id": integerProperty("Issue ID"), "title": stringProperty("Issue title"), "body": stringProperty("Issue body")}, "id", "title", "body")),
 		tool("issue_close", "Close an issue without deleting its history.", object(map[string]any{"id": integerProperty("Issue ID")}, "id")),
 		tool("issue_reopen", "Reopen a manual issue without changing its ID or history. Already-open manual issues are unchanged; CI issues cannot be reopened manually.", object(map[string]any{"id": integerProperty("Issue ID")}, "id")),
 		tool("issue_delete", "Delete an accidentally created manual issue.", object(map[string]any{"id": integerProperty("Issue ID")}, "id")),
-		tool("issue_list", "List issue IDs and states in fixed pages of 50.", object(map[string]any{"before": integerProperty("Cursor issue ID")})),
+		tool("issue_list", "List issue metadata, newest creation ID first (not latest updated). Filters apply before pagination. Defaults to all issues, 50 per page; pass next_before as before with the same filters until absent for a complete queue scan.", object(map[string]any{
+			"repo":   stringProperty("Exact repository name; global manual issues have no repository"),
+			"kind":   map[string]any{"type": "string", "enum": []string{"manual", "ci"}},
+			"state":  map[string]any{"type": "string", "enum": []string{"open", "closed", "all"}},
+			"before": map[string]any{"type": "integer", "minimum": 0, "description": "Exclusive issue ID cursor; zero starts the first page"},
+			"limit":  map[string]any{"type": "integer", "minimum": 1, "maximum": 50, "description": "Page size (default 50)"},
+		})),
 		tool("issue_lock", "Acquire or renew the caller-owned five-minute issue lock.", object(map[string]any{"id": integerProperty("Issue ID")}, "id")),
 		tool("access_list", "List secret access grants for a repository.", object(map[string]any{"repo": stringProperty("Repository name (empty lists all)"), "revoked": map[string]any{"type": "boolean", "description": "Include revoked grants"}})),
 		tool("access_allow", "Grant a step access to a secret path. Requires admin uplink.", object(map[string]any{"repo": stringProperty("Repository name"), "step": stringProperty("Step/template name"), "secret": stringProperty("Short secret path (e.g. terraform/credentials)")}, "repo", "step", "secret")),

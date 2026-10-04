@@ -577,7 +577,8 @@ func TestMCPToolInputsMatchContract(t *testing.T) {
 		"wait":               {"repo", "sha", "timeout", "trigger"},
 		"sync":               {"branch", "repo", "sha"},
 		"promote":            {"branch", "repo", "sha"},
-		"issue_list":         {"before"},
+		"issue_list":         {"before", "kind", "limit", "repo", "state"},
+		"issue_get_many":     {"ids"},
 		"secretstore_verify": {"expect", "keys", "paths", "release_tier", "repo", "tier", "timeout"},
 	}
 	for _, definition := range toolDefinitions() {
@@ -715,7 +716,7 @@ func TestMCPToolCountMatchesDocumented(t *testing.T) {
 	t.Parallel()
 	// The documented count in docs/mcp-setup.md must match the registered
 	// tool count. A mismatch means the table drifted from the code.
-	const documented = 30
+	const documented = 31
 	definitions := toolDefinitions()
 	if len(definitions) != documented {
 		t.Fatalf("registered %d tools, documented %d in docs/mcp-setup.md — update the table", len(definitions), documented)
@@ -735,7 +736,7 @@ func TestMCPToolCountMatchesDocumented(t *testing.T) {
 func TestMCPToolSurfaceMatchesContract(t *testing.T) {
 	want := []string{
 		"status", "logs", "run_get", "artifacts", "artifact_get", "run_logs", "wait", "sync", "promote", "promotion_list", "promote_status",
-		"issue_create", "issue_get", "issue_update", "issue_close", "issue_reopen",
+		"issue_create", "issue_get", "issue_get_many", "issue_update", "issue_close", "issue_reopen",
 		"issue_delete", "issue_list", "issue_lock",
 		"access_list", "access_allow", "access_revoke",
 		"repo_list", "repo_remove", "run_list", "system_status", "publish_retry", "secretstore_plan", "secretstore_sync_receipt", "secretstore_verify",

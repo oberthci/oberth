@@ -552,7 +552,7 @@ continuity checks; it must never be used to reset or bypass those checks.
   hexadecimal prefix of at least 12 characters (the push-feedback ID); responses retain the full
   canonical ID. Ambiguous prefixes are rejected with guidance to use the full
   ID; malformed or shorter prefixes are invalid input. These views never
-  acquire or renew a CI issue lock; the MCP `status`, `wait`, and `issue_get` tools are
+  acquire or renew a CI issue lock; the MCP `status`, `wait`, `issue_get`, and `issue_get_many` tools are
   equally read-only and do not renew locks — renewal happens only through the
   explicit `issue_lock` tool, which is a mutating operation gated by the
   audit mutation gate. `/api/status`
@@ -565,10 +565,10 @@ continuity checks; it must never be used to reset or bypass those checks.
   authority is configured.
 - A bearer credential maps to exactly one uplink public-key fingerprint and
   identity. Plaintext tokens are displayed once and are never persisted.
-- MCP exposes 30 tools: `status`, bounded named-step `logs`, exact-run
+- MCP exposes 31 tools: `status`, bounded named-step `logs`, exact-run
   `run_get`/`run_logs`, `artifacts`/`artifact_get`, `wait`, `sync`, `promote`,
   `promotion_list`, `promote_status`, `publish_retry`, issue
-  create/get/update/close/reopen/delete/list/lock,
+  create/get/get_many/update/close/reopen/delete/list/lock,
   secret-access list/allow/revoke, `repo_list`, `repo_remove`, `run_list`,
   `system_status`, and admin-only `secretstore_plan` (#611),
   `secretstore_sync_receipt` (#712), and `secretstore_verify`.
@@ -600,8 +600,25 @@ continuity checks; it must never be used to reset or bypass those checks.
   not fetch upstream or alter sync, promotion or trigger-filtered wait rules.
   This is the complete tool surface. `issue_create` takes only a `title` and a
   `body` and creates a workspace-global manual issue. Run selectors are resolved across
-  repositories without a repository input. `issue_list` takes only an optional
-  `before` cursor and returns CI and manual issue IDs/states in fixed pages of 50.
+  repositories without a repository input. `issue_list` accepts optional `repo`,
+  `kind` (`manual` or `ci`), `state` (`open`, `closed`, or `all`), `limit`
+  (1..50, default 50), and exclusive `before` issue-ID cursor. Omitted filters
+  retain the all-issues default. Filters apply before pagination; records are
+  ordered by descending creation ID, not update time. Follow `next_before`
+  with the same filters until absent for a complete scan. Repository filtering
+  uses stored association: global manual issues have no repository, regardless
+  of component names in their titles.
+- `issue_get_many` accepts 1..50 unique positive `ids`, validated before reads.
+  Its `results` preserve request order, each containing `id` and either a full
+  `issue` (the existing `issue_get` wire record) or `error`: `not_found` or
+  `response_limit`. Encoded structured JSON is bounded to 256 KiB, reserving
+  a status row for every ID. Bodies are never truncated; later smaller records
+  can still fit after an oversized record. Use `issue_get` for any
+  `response_limit` ID. Unexpected storage errors fail the tool rather than
+  masquerading as missing records. Reads neither acquire nor renew locks.
+  Existing MCP encoding duplicates the JSON as text and structured content;
+  the encoded tool result is bounded by three times this payload budget plus
+  128 bytes of envelope overhead (excluding the JSON-RPC request ID).
 - `publish_retry` retries the upstream publication for a run or promotion whose
   burns all passed but whose upstream push failed (#696). Input is exactly one
   durable run ID or promotion ID — never a ref, SHA, or tag name.
