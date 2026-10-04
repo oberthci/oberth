@@ -286,7 +286,7 @@ spec:
             - name: OBERTH_VAULT_AUTH_MOUNT
               value: {{ .Values.secretstore.k8sAuthMount | quote }}
             - name: OBERTH_VAULT_INSECURE_DEV_HTTP
-              value: {{ .Values.secretstore.insecureDevHTTP | quote }}
+              value: {{ .Values.secretstore.insecureHTTPForDev | quote }}
             - name: OBERTH_VAULT_ROLE
               value: {{ .Values.secretstore.role | quote }}
             - name: OBERTH_TLS_NAMES

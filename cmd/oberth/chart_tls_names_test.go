@@ -60,3 +60,20 @@ func TestIdentityStoreRequiresExplicitDevelopmentHTTP(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestChartForwardsIdentityConnectionSettings(t *testing.T) {
+	out, err := exec.Command("helm", "template", "oberth", "../../charts/oberth", "--set", "secretstore.insecureHTTPForDev=true", "--set", "secretstore.k8sAuthMount=custom-kubernetes").CombinedOutput()
+	if err != nil {
+		t.Fatalf("render: %v %s", err, out)
+	}
+	for _, pair := range []struct{ name, value string }{
+		{"OBERTH_VAULT_INSECURE_DEV_HTTP", "true"},
+		{"OBERTH_VAULT_AUTH_MOUNT", "custom-kubernetes"},
+		{"VAULT_CACERT", ""},
+	} {
+		want := "name: " + pair.name + "\n              value: \"" + pair.value + "\""
+		if !strings.Contains(string(out), want) {
+			t.Errorf("missing identity connection setting %s", pair.name)
+		}
+	}
+}
