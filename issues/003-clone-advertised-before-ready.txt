@@ -1,0 +1,31 @@
+ISSUE 003: Setup recommends cloning before the Git service is ready
+
+Status: Open
+Reported: 2026-10-04
+Affected version: Oberth v0.17.9 (6f40126bc8f6), macOS
+
+Priority: High
+Evidence: Reproduced: setup exited 0 with 9/11 green; clone exited 128.
+
+Reproduction
+Finish the same fresh setup with a pending deploy key. Run the suggested clone command and inspect the pod readiness and process exit status.
+
+Observed behavior and proposed change
+Setup suggests cloning while its Git endpoint is unavailable.
+Screenshot 15.53.01 and live result: 9/11 green, then 'next: git clone'.
+Clone fails with a generic connection closure, hiding the actionable cause.
+Fix: separate installed / awaiting forge authorization / ready; explain
+the two pending steps and withhold the clone-ready claim until verified.
+The partial setup currently exits 0; callers cannot distinguish it from
+completed onboarding by exit status.
+
+Reference
+- ../setup-test-results/REPORT.txt, finding 2
+- Screenshot times above refer to ../install-log/photo_2026-10-04 <time>.jpeg.
+- Source paths above are relative to ../oberth-source-v0.17.9/.
+- ../setup-test-results/01-after-wizard.txt
+- ../setup-test-results/02-clone-verification.txt
+
+Manual reinstall reconfirmed on 2026-10-04: correct full-path clone fails
+with connection closure while the pod is 0/1 Ready, /readyz is HTTP 503,
+and the upstream catalog is empty. See the follow-up evidence in issue 002.

@@ -1,0 +1,30 @@
+ISSUE 016: Any partial green-step count is classified as a pending deploy key
+
+Status: Open
+Reported: 2026-10-04
+Affected version: Oberth v0.17.9 (6f40126bc8f6), macOS
+
+Priority: Medium
+Evidence: Source inspection only; a different partial-failure cause was not induced.
+
+Observed implementation
+In wizard.go, advancing to the done page computes:
+  dp.deployKeyPending = dp.greenCount > 0 && dp.greenCount < dp.totalSteps
+The completion page then uses that flag to advise forge deploy-key registration.
+A count of completed steps does not identify why other steps are incomplete.
+This can give incorrect recovery instructions for other partial results.
+
+Expected behavior
+Carry the actual pending/failure reason from installation into completion state.
+Show deploy-key advice only when forge key registration is actually pending.
+Treat skipped/not-applicable steps separately from failed or pending work.
+
+Acceptance criteria
+Exercise pending deploy-key registration, a different partial failure, and
+skipped steps. Each must show the correct cause and relevant recovery action.
+The report should preserve the same reason, rather than only a numeric count.
+
+References
+- ../oberth-source-v0.17.9/internal/setuptui/wizard.go, done-page transition
+- ../oberth-source-v0.17.9/internal/setuptui/page_done.go
+- ../setup-test-results/REPORT.txt, additional source-level concern

@@ -1,0 +1,25 @@
+ISSUE 012: Saved setup report omits pending-step details and recovery commands
+
+Status: Open
+Reported: 2026-10-04
+Affected version: Oberth v0.17.9 (6f40126bc8f6), macOS
+
+Priority: Medium
+Evidence: Original saved report inspected; overwrite and error-reporting behavior confirmed in source.
+
+Reproduction
+After a partial 9/11 setup, save the report and compare its contents with the remaining work needed to reach Ready.
+
+Observed behavior and proposed change
+Saved report omits the diagnosis and recovery instructions.
+Original report: 9/11 green, empty Context, fingerprint commands only.
+No failed/pending step names, registration command, clone URL, endpoints,
+or CLI/server version. The save action uses a fixed filename and can
+overwrite an earlier report; I preserved yours unchanged.
+Fix: report actual final state, versions, endpoints, step results and exact
+recovery commands; show the saved path and surface write failures.
+
+Reference
+- ../setup-test-results/REPORT.txt, finding 11
+- Screenshot times above refer to ../install-log/photo_2026-10-04 <time>.jpeg.
+- Source paths above are relative to ../oberth-source-v0.17.9/.

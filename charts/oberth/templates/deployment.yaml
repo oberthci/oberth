@@ -1,3 +1,17 @@
+{{- $existing := lookup "apps/v1" "Deployment" .Release.Namespace (include "oberth.fullname" .) -}}
+{{- if $existing -}}
+{{- range $existing.spec.template.spec.volumes -}}
+{{- if .secret -}}
+{{- fail "existing deployment uses Kubernetes Secrets; migrate and verify its SSH/TLS identities in OpenBao before upgrading, or use a fresh cluster for evaluation" -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- if not .Values.secretstore.enabled }}
+{{- fail "OpenBao is required for server and upstream identities; configure secretstore.enabled" }}
+{{- end }}
+{{- if or .Values.tls.existingSecret .Values.ssh.hostKey.existingSecret .Values.auditAnchor.rootsSecret }}
+{{- fail "Kubernetes Secrets are not supported; migrate private identities to OpenBao and public trust anchors to ConfigMaps" }}
+{{- end }}
 {{- /* External audit anchoring is opt-in: dependent knobs without their URL
 would render a pod the server refuses to start, so fail at template time. */}}
 {{- if and (not .Values.auditAnchor.tsaURL) (or .Values.auditAnchor.rootsSecret .Values.auditAnchor.tsaCA) }}
@@ -104,6 +118,7 @@ spec:
           args:
             - {{ .Values.cache.ciRoot | quote }}
             - {{ .Values.cache.releaseRoot | quote }}
+            - /run/oberth-identities
           securityContext:
             runAsUser: 0
             runAsGroup: 0
@@ -121,6 +136,8 @@ spec:
               cpu: 100m
               memory: 64Mi
           volumeMounts:
+            - name: identities
+              mountPath: /run/oberth-identities
             - name: ci-cache
               mountPath: {{ .Values.cache.ciRoot }}
             - name: release-cache
@@ -135,11 +152,11 @@ spec:
             - --database=/data/oberth.sqlite
             - --ssh-listen=:2222
             - --https-listen=:8443
-            - --tls-cert=/etc/oberth/tls/tls.crt
-            - --tls-key=/etc/oberth/tls/tls.key
-            - --ssh-host-key=/etc/oberth/ssh/ssh_host_key
-            - --upstream-key=/etc/oberth/upstream-key/{{ .Values.upstream.keyFile }}
-            - --known-hosts=/etc/oberth/known-hosts/{{ .Values.upstream.knownHostsKey }}
+            - --tls-cert=/run/oberth-identities/server/tls.crt
+            - --tls-key=/run/oberth-identities/server/tls.key
+            - --ssh-host-key=/run/oberth-identities/server/ssh_host_key
+            - --upstream-key=/run/oberth-identities/upstream/{{ .Values.upstream.keyFile }}
+            - --known-hosts=/run/oberth-identities/hosts/{{ .Values.upstream.knownHostsKey }}
             - --namespace={{ .Release.Namespace }}
             {{- /*
             Quoted because the default prefix ends in a colon ("golang:"), and
@@ -250,9 +267,9 @@ spec:
             {{- $goProxyPort := $goProxy.port | default 8444 }}
             {{- $goProxySvc := printf "%s-goproxy" (include "oberth.fullname" .) }}
             - --argo-goproxy-listen=:{{ $goProxyPort }}
-            - --argo-goproxy-cert=/etc/oberth/goproxy-tls/tls.crt
-            - --argo-goproxy-key=/etc/oberth/goproxy-tls/tls.key
-            - --argo-goproxy-ca=/etc/oberth/goproxy-tls/ca.crt
+            - --argo-goproxy-cert=/run/oberth-identities/server/tls.crt
+            - --argo-goproxy-key=/run/oberth-identities/server/tls.key
+            - --argo-goproxy-ca=/run/oberth-identities/server/tls.crt
             - --argo-goproxy-url=https://{{ $goProxySvc }}.{{ .Release.Namespace }}.svc:{{ $goProxyPort }}
             - --argo-goproxy-module-prefix={{ $goProxy.modulePrefix }}
             - --argo-goproxy-repository-prefix={{ $goProxy.repositoryPrefix | default "" }}
@@ -260,6 +277,16 @@ spec:
             - --argo-goproxy-organization={{ $goProxy.organization }}
             {{- end }}
           env:
+            - name: OBERTH_IDENTITY_STORE
+              value: openbao
+            - name: VAULT_ADDR
+              value: {{ .Values.secretstore.address | quote }}
+            - name: VAULT_CACERT
+              value: /etc/oberth/secretstore-ca/ca.crt
+            - name: OBERTH_VAULT_ROLE
+              value: {{ .Values.secretstore.role | quote }}
+            - name: OBERTH_TLS_NAMES
+              value: {{ concat (.Values.tls.extraDNSNames | default list) (.Values.tls.extraIPs | default list) | join "," | quote }}
             - name: OBERTH_SCHEMA_IDENTITY
               value: {{ $schemaIdentity | quote }}
             - name: OBERTH_AUDIT_DOMAIN
@@ -312,18 +339,8 @@ spec:
               mountPath: {{ .Values.cache.ciRoot }}
             - name: release-cache
               mountPath: {{ .Values.cache.releaseRoot }}
-            - name: tls
-              mountPath: /etc/oberth/tls
-              readOnly: true
-            - name: host-key
-              mountPath: /etc/oberth/ssh
-              readOnly: true
-            - name: upstream-key
-              mountPath: /etc/oberth/upstream-key
-              readOnly: true
-            - name: known-hosts
-              mountPath: /etc/oberth/known-hosts
-              readOnly: true
+            - name: identities
+              mountPath: /run/oberth-identities
             {{- if .Values.auditAnchor.rootsSecret }}
             - name: audit-tsa-roots
               mountPath: /etc/oberth/audit-tsa
@@ -354,12 +371,6 @@ spec:
               mountPath: /etc/oberth/argo-vault-ca
               readOnly: true
             {{- end }}
-            {{- $goProxyV := .Values.argo.goProxy | default dict -}}
-            {{- if $goProxyV.enabled }}
-            - name: goproxy-tls
-              mountPath: /etc/oberth/goproxy-tls
-              readOnly: true
-            {{- end }}
             - name: tmp
               mountPath: /tmp
             {{- if .Values.argo.releaseWIF }}
@@ -384,21 +395,10 @@ spec:
           hostPath:
             path: {{ .Values.cache.releaseRoot }}
             type: DirectoryOrCreate
-        - name: tls
-          secret:
-            secretName: {{ include "oberth.tlsSecretName" . }}
-        - name: host-key
-          secret:
-            secretName: {{ include "oberth.hostKeySecretName" . }}
-        - name: upstream-key
-          secret:
-            secretName: {{ .Values.upstream.keySecret }}
-            defaultMode: 0400
-            optional: true
-        - name: known-hosts
-          secret:
-            secretName: {{ .Values.upstream.knownHostsSecret }}
-            optional: true
+        - name: identities
+          emptyDir:
+            medium: Memory
+            sizeLimit: 16Mi
         {{- if .Values.auditAnchor.rootsSecret }}
         - name: audit-tsa-roots
           secret:
@@ -431,13 +431,6 @@ spec:
         - name: argo-vault-ca
           configMap:
             name: {{ include "oberth.fullname" . }}-argo-vault-ca
-        {{- end }}
-        {{- $goProxyVol := .Values.argo.goProxy | default dict -}}
-        {{- if $goProxyVol.enabled }}
-        - name: goproxy-tls
-          secret:
-            secretName: {{ include "oberth.fullname" . }}-goproxy-tls
-            defaultMode: 0400
         {{- end }}
         - name: tmp
           emptyDir:

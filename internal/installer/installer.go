@@ -111,6 +111,11 @@ const (
 
 // Config holds options for the install command.
 type Config struct {
+	KubeconfigPath         string
+	ContextName            string
+	CreateKind             bool
+	UpstreamPrivateKeyPath string
+
 	Dev               bool
 	Production        bool
 	DryRun            bool
@@ -341,6 +346,8 @@ func isValidDNS1123Label(s string) bool {
 
 // Deps holds injectable dependencies for testing.
 type Deps struct {
+	// UserHomeDir isolates host configuration in tests. Nil uses os.UserHomeDir.
+	UserHomeDir    func() (string, error)
 	Output         io.Writer
 	Input          io.Reader
 	RunHelm        func(ctx context.Context, args []string) ([]byte, error)
@@ -643,7 +650,11 @@ func Run(ctx context.Context, cfg Config, deps Deps) error {
 		return printDryRunPlan(cfg, deps.Output, cluster)
 	}
 
-	// Before anything is installed: naming an address the kept TLS Secret will
+	if err := rejectLegacySecretDeployment(ctx, cfg, deps); err != nil {
+		return err
+	}
+
+	// Before anything is installed: naming an address the kept TLS identity will
 	// not gain is silent otherwise, and surfaces weeks later as a hostname
 	// mismatch nobody connects back to this run.
 	warnCertificateNamesWillNotTakeEffect(deps.Output, cfg,
@@ -689,7 +700,14 @@ func Run(ctx context.Context, cfg Config, deps Deps) error {
 		if ns == "" {
 			ns = DefaultNamespace
 		}
-		produced, produceWarnings, produceErr := ProducePerRepoIdentities(ctx, deps.KubeClient, deps.RunCommand, deps.ContextName, ns)
+		identityRunner := deps.RunCommand
+		if deps.KubeClient != nil {
+			_, err := deps.KubeClient.AppsV1().Deployments(ns).Get(ctx, "oberth", metav1.GetOptions{})
+			if apierrors.IsNotFound(err) {
+				identityRunner = nil
+			}
+		}
+		produced, produceWarnings, produceErr := ProducePerRepoIdentities(ctx, deps.KubeClient, identityRunner, deps.ContextName, ns)
 		for _, warn := range produceWarnings {
 			_, _ = fmt.Fprintf(deps.Output, "WARNING: %s\n", warn)
 		}
@@ -2163,6 +2181,7 @@ func DefaultRunHelm(ctx context.Context, args []string) ([]byte, error) {
 	// constructed by this package from validated flags (no shell, no
 	// caller-controlled command word).
 	cmd := exec.CommandContext(ctx, "helm", args...)
+	cmd.Env = append(os.Environ(), "HELM_DRIVER=configmap")
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -2357,4 +2376,28 @@ func pushBannerHost(ips, dnsNames []string) string {
 		}
 	}
 	return ""
+}
+
+// Refuse to replace an existing private identity while changing storage backends.
+func rejectLegacySecretDeployment(ctx context.Context, cfg Config, deps Deps) error {
+	if deps.KubeClient == nil {
+		return nil
+	}
+	ns := cfg.Namespace
+	if ns == "" {
+		ns = DefaultNamespace
+	}
+	deployment, err := deps.KubeClient.AppsV1().Deployments(ns).Get(ctx, "oberth", metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("check existing identity storage: %w", err)
+	}
+	for _, volume := range deployment.Spec.Template.Spec.Volumes {
+		if volume.Secret != nil {
+			return errors.New("existing Oberth deployment uses Kubernetes Secrets; migrate and verify its SSH/TLS identities in OpenBao before upgrading, or use a fresh cluster for evaluation; existing identities have not been changed")
+		}
+	}
+	return nil
 }

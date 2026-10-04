@@ -3822,7 +3822,9 @@ func finishInstallTest(ctx context.Context, cfg Config, deps Deps, buf *bytes.Bu
 
 func onboardingDeps(t *testing.T, host *fakeOberthHost, buf *bytes.Buffer, input io.Reader, interactive bool) Deps {
 	t.Helper()
+	testHome := t.TempDir()
 	deps := Deps{
+		UserHomeDir:  func() (string, error) { return testHome, nil },
 		Output:       buf,
 		Input:        input,
 		KubeClient:   fake.NewClientset(readyOberthPod()),
@@ -4374,41 +4376,36 @@ func TestUpstreamListHasRows(t *testing.T) {
 	}
 }
 
-func TestApplyProvidedDeployKeyStoresAndRefusesOverwrite(t *testing.T) {
-	t.Parallel()
+func TestApplyProvidedKeyUsesOnlyAuthenticatedExecStdin(t *testing.T) {
 	_, private, err := ed25519.GenerateKey(cryptorand.Reader)
 	if err != nil {
 		t.Fatal(err)
 	}
-	block, err := ssh.MarshalPrivateKey(private, "test deploy key")
+	block, err := ssh.MarshalPrivateKey(private, "test work key")
 	if err != nil {
 		t.Fatal(err)
 	}
 	privatePEM := pem.EncodeToMemory(block)
-
-	deps := Deps{KubeClient: fake.NewClientset()}
-	cfg := Config{}
-	_ = cfg.Validate()
-
-	if err := applyProvidedDeployKey(context.Background(), cfg, deps, privatePEM); err != nil {
+	client := fake.NewClientset()
+	called := false
+	deps := Deps{KubeClient: client, RunCommand: func(_ context.Context, input []byte, name string, args ...string) ([]byte, error) {
+		called = true
+		if name != "kubectl" || !strings.Contains(strings.Join(args, " "), "upstream provide-key github") {
+			t.Fatalf("wrong transport: %s %v", name, args)
+		}
+		if !bytes.Equal(input, privatePEM) {
+			t.Fatal("private key was not streamed on stdin")
+		}
+		if strings.Contains(strings.Join(args, " "), string(privatePEM)) {
+			t.Fatal("private key in command arguments")
+		}
+		return nil, nil
+	}}
+	if err := applyProvidedDeployKey(context.Background(), Config{ForgeURL: "ssh://git@github.com/oberthci"}, deps, privatePEM); err != nil {
 		t.Fatal(err)
 	}
-	secret, err := deps.KubeClient.CoreV1().Secrets(DefaultNamespace).Get(context.Background(), upstreamKeySecretName, metav1.GetOptions{})
-	if err != nil {
-		t.Fatalf("deploy-key secret not created: %v", err)
-	}
-	if !bytes.Equal(secret.Data[upstreamPrivateKeyField], privatePEM) {
-		t.Fatal("private key not stored verbatim")
-	}
-	if !strings.HasPrefix(string(secret.Data[upstreamPublicKeyField]), "ssh-ed25519 ") ||
-		!strings.Contains(string(secret.Data[upstreamPublicKeyField]), " oberth") {
-		t.Fatalf("derived public key wrong: %q", secret.Data[upstreamPublicKeyField])
-	}
-
-	// A Secret that already holds a key is an identity — never overwritten.
-	err = applyProvidedDeployKey(context.Background(), cfg, deps, privatePEM)
-	if err == nil || !strings.Contains(err.Error(), "refusing to overwrite") {
-		t.Fatalf("want overwrite refusal, got %v", err)
+	if !called || len(client.Actions()) != 0 {
+		t.Fatal("key import must not create a Kubernetes Secret")
 	}
 }
 
@@ -4675,8 +4672,8 @@ func TestCISecretsPolicyIsGrantFree(t *testing.T) {
 	}
 	// Exactly two path stanzas: the per-org upstream rule and revoke-self.
 	// A third means someone taught this policy to carry grants.
-	if got := strings.Count(policy, `path "`); got != 2 {
-		t.Fatalf("ci-secrets policy has %d path stanzas, want exactly 2:\n%s", got, policy)
+	if got := strings.Count(policy, `path "`); got != 3 {
+		t.Fatalf("ci-secrets policy has %d path stanzas, want upstream, revoke-self and identity denial:\n%s", got, policy)
 	}
 	// The credentialed policy WITH grants must still never leak into the
 	// ci-secrets one: the two are separate objects with separate contents.
@@ -4984,8 +4981,8 @@ func TestCISecretsPolicyEmptyOrgsFailsClosed(t *testing.T) {
 		t.Fatal("policy missing token self-revocation")
 	}
 	// Only the revoke-self path stanza
-	if got := strings.Count(policy, `path "`); got != 1 {
-		t.Fatalf("empty-orgs policy has %d path stanzas, want 1 (revoke-self only):\n%s", got, policy)
+	if got := strings.Count(policy, `path "`); got != 2 {
+		t.Fatalf("empty-orgs policy has %d path stanzas, want revoke-self and identity denial:\n%s", got, policy)
 	}
 }
 

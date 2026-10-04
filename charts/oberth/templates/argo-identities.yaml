@@ -121,20 +121,6 @@ metadata:
     {{- include "oberth.labels" . | nindent 4 }}
 automountServiceAccountToken: false
 ---
-# Argo resolves the executor identity through a long-lived token Secret rather
-# than a projected volume, and Kubernetes 1.24+ no longer creates one
-# automatically.
-apiVersion: v1
-kind: Secret
-metadata:
-  name: {{ $executor }}.service-account-token
-  namespace: {{ $namespace }}
-  annotations:
-    kubernetes.io/service-account.name: {{ $executor }}
-  labels:
-    {{- include "oberth.labels" . | nindent 4 }}
-type: kubernetes.io/service-account-token
----
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:

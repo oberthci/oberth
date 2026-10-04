@@ -20,7 +20,7 @@
       "oberth.ci/run-id": "run-abc123",
       "oberth.ci/secret-paths": "oberth/data/release/r2-upload-token",
       "oberth.ci/size": "L",
-      "oberth.ci/spec-identity": "e05c23dee2ea837b321640568e4f8db2e23ac0d5d147f4221a0d060e32a8742d",
+      "oberth.ci/spec-identity": "43e8a215846ff2326de927f5334687c1e07b2b1bff6d6eab1483a52bf302c60e",
       "workflows.argoproj.io/pod-name-format": "v2"
     }
   },
@@ -169,7 +169,7 @@
         ],
         "serviceAccountName": "oberth-per-repo",
         "automountServiceAccountToken": false,
-        "podSpecPatch": "{\"containers\":[{\"name\":\"wait\",\"volumeMounts\":[{\"mountPath\":\"/mainctrfs/work/src\",\"name\":\"oberth-source\",\"readOnly\":true,\"subPath\":\"src\"},{\"$patch\":\"delete\",\"mountPath\":\"/mainctrfs/var/run/secrets/kubernetes.io/serviceaccount\"},{\"$patch\":\"delete\",\"mountPath\":\"/mainctrfs/run/oberth-secrets\"},{\"$patch\":\"delete\",\"mountPath\":\"/mainctrfs/run/oberth-gar\"}]}]}"
+        "podSpecPatch": "{\"$setElementOrder/initContainers\":[{\"name\":\"oberth-executor-token\"},{\"name\":\"init\"}],\"containers\":[{\"name\":\"wait\",\"volumeMounts\":[{\"mountPath\":\"/mainctrfs/work/src\",\"name\":\"oberth-source\",\"readOnly\":true,\"subPath\":\"src\"},{\"$patch\":\"delete\",\"mountPath\":\"/mainctrfs/var/run/secrets/kubernetes.io/serviceaccount\"},{\"$patch\":\"delete\",\"mountPath\":\"/mainctrfs/run/oberth-secrets\"},{\"$patch\":\"delete\",\"mountPath\":\"/mainctrfs/run/oberth-gar\"}]}],\"initContainers\":[{\"name\":\"oberth-executor-token\",\"image\":\"busybox:1.37@sha256:ab33eacc8251e3807b85bb6dba570e4698c3998eca6f0fc2ccb60575a563ea74\",\"command\":[\"sh\",\"-c\",\"until test -f /var/run/secrets/kubernetes.io/serviceaccount/token; do sleep 1; done\"],\"resources\":{},\"volumeMounts\":[{\"name\":\"exec-sa-token\",\"mountPath\":\"/var/run/secrets/kubernetes.io/serviceaccount\"}],\"securityContext\":{\"capabilities\":{\"drop\":[\"ALL\"]},\"runAsUser\":0,\"runAsGroup\":0,\"runAsNonRoot\":false,\"readOnlyRootFilesystem\":true,\"allowPrivilegeEscalation\":false,\"seccompProfile\":{\"type\":\"RuntimeDefault\"}}},{\"name\":\"init\"}],\"volumes\":[{\"emptyDir\":{\"medium\":\"Memory\",\"sizeLimit\":\"1Mi\"},\"name\":\"exec-sa-token\",\"secret\":null}]}"
       }
     ],
     "entrypoint": "main",

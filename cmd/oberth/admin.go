@@ -192,6 +192,16 @@ func runUpstreamWithDependencies(ctx context.Context, arguments []string, output
 	if *dedicatedKey && kind == "ssh" {
 		keyName = app.UpstreamKeyDataKey(filepath.Base(*upstreamKey), name)
 	}
+	var identityStore app.BootstrapIdentityStore
+	if identityStoreEnabled() {
+		configured, err := newBaoIdentityStore(*namespace)
+		if err != nil {
+			return err
+		}
+		identityStore = configured
+		*upstreamKey = identityRoot + "/upstream/id_ed25519"
+		*knownHosts = identityRoot + "/hosts/known_hosts"
+	}
 	if kind == "ssh" {
 		privateKeyPath, privateDataKey, keyFieldManager := *upstreamKey, filepath.Base(*upstreamKey), ""
 		if keyName != "" {
@@ -210,6 +220,7 @@ func runUpstreamWithDependencies(ctx context.Context, arguments []string, output
 			return dependencies.mutationGate(ctx, operation, *databasePath)
 		}
 		if _, err := (app.UpstreamSSHBootstrap{
+			Store: identityStore,
 			Input: dependencies.input, Output: output,
 			KubernetesClient:        dependencies.kubernetesClient,
 			ScanHostKeys:            dependencies.scanHostKeys,
@@ -569,6 +580,23 @@ func runUpstreamProvideKey(ctx context.Context, arguments []string, input io.Rea
 	}
 	publicKey := append(bytes.TrimSpace(ssh.MarshalAuthorizedKey(signer.PublicKey())), []byte(" oberth\n")...)
 
+	if identityStoreEnabled() {
+		if dependencies.mutationGate == nil {
+			return errors.New("admin audit mutation gate is unavailable")
+		}
+		if err := dependencies.mutationGate(ctx, "upstream.identity.import", *databasePath); err != nil {
+			return err
+		}
+		store, err := newBaoIdentityStore(*namespace)
+		if err != nil {
+			return err
+		}
+		if err := store.Save(ctx, *upstreamKeySecret, map[string][]byte{dataKey: privateKey, publicDataKey: publicKey}); err != nil {
+			return err
+		}
+		_, err = fmt.Fprintf(output, "Stored existing upstream identity in OpenBao (%s).\n", ssh.FingerprintSHA256(signer.PublicKey()))
+		return err
+	}
 	// Get Kubernetes client.
 	if dependencies.kubernetesClient == nil {
 		return errors.New("kubernetes client is required for upstream provide-key")
@@ -753,6 +781,9 @@ func runUpstreamList(ctx context.Context, arguments []string, output io.Writer) 
 	flags.SetOutput(io.Discard)
 	databasePath := flags.String("database", "/data/oberth.sqlite", "SQLite database path (in-pod; requires the live admin daemon)")
 	upstreamKey := flags.String("upstream-key", "/etc/oberth/upstream-key/id_ed25519", "upstream SSH private key")
+	if identityStoreEnabled() {
+		*upstreamKey = identityRoot + "/upstream/id_ed25519"
+	}
 	if err := flags.Parse(arguments); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			flags.SetOutput(output)
@@ -1262,7 +1293,11 @@ func runUplinkWithDependencies(ctx context.Context, arguments []string, input io
 	flags := flag.NewFlagSet("uplink add", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	databasePath := flags.String("database", "/data/oberth.sqlite", "SQLite database path (in-pod; requires the live admin daemon)")
-	certificatePath := flags.String("tls-cert", "/etc/oberth/tls/tls.crt", "HTTPS certificate path (in-pod; requires the live admin daemon)")
+	defaultCertificate := "/etc/oberth/tls/tls.crt"
+	if identityStoreEnabled() {
+		defaultCertificate = identityRoot + "/server/tls.crt"
+	}
+	certificatePath := flags.String("tls-cert", defaultCertificate, "HTTPS certificate path (in-pod; requires the live admin daemon)")
 	isAdmin := flags.Bool("admin", false, "Grant admin privileges (required for access_allow/access_revoke)")
 	if err := flags.Parse(arguments[1:]); err != nil {
 		if errors.Is(err, flag.ErrHelp) {

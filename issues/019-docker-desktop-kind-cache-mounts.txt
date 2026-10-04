@@ -1,0 +1,9 @@
+Title: Reusing a freshly created kind cluster falsely reports missing cache mounts
+Status: Fix in local verification
+
+Observed during a clean setup and retry on Docker Desktop. Docker reports bind
+sources as /host_mnt/Users/... while setup compares /Users/... literally. Setup
+then refuses the cluster it just created and recommends deleting it.
+
+Expected: recognize Docker Desktop's documented host mount prefix while still
+requiring the exact source, destination, mount type and loopback port bindings.

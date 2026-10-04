@@ -518,7 +518,7 @@ func TestGrantlessRepoGetsNoPerRepoSA(t *testing.T) {
 			pathCount++
 		}
 	}
-	if pathCount != 2 { // org wildcard + revoke-self
-		t.Fatalf("grantless policy should have exactly 2 path entries, got %d:\n%s", pathCount, policy)
+	if pathCount != 3 { // org wildcard + revoke-self
+		t.Fatalf("grantless policy should have upstream, revoke-self and identity denial entries, got %d:\n%s", pathCount, policy)
 	}
 }

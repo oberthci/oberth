@@ -31,6 +31,8 @@ func runPlain(ctx context.Context, opts Options, input io.Reader, output io.Writ
 	state := &WizardState{
 		Config: installer.Config{
 			Dev:       true,
+			ChartPath: opts.ChartPath,
+			ImageRef:  opts.ImageRef,
 			Namespace: "oberth",
 		},
 		StoreMode: "install-prod",
@@ -97,17 +99,45 @@ func runPlain(ctx context.Context, opts Options, input io.Reader, output io.Writ
 	if raw, err := clientcmd.NewDefaultClientConfigLoadingRules().Load(); err == nil {
 		currentContext = raw.CurrentContext
 	}
-	ctxAnswer, err := ask("Kubeconfig context (empty for current)", currentContext, func(v string) error {
-		if v != "" && currentContext != "" && v != currentContext {
-			return fmt.Errorf("installing into a non-current context is not supported yet — "+
-				"run `kubectl config use-context %s` first, then re-run setup", v)
+	choiceCluster, err := ask("Cluster (existing/kind)", "kind", func(v string) error {
+		if v != "existing" && v != "kind" {
+			return errors.New("choose existing or kind")
 		}
 		return nil
 	})
 	if err != nil {
 		return err
 	}
-	state.SelectedContext = ctxAnswer
+	state.Config.CreateKind = choiceCluster == "kind"
+	if !state.Config.CreateKind {
+		path, err := ask("Kubeconfig path (empty for default)", "", nil)
+		if err != nil {
+			return err
+		}
+		if path != "" {
+			path, err = expandSetupPath(path)
+			if err != nil {
+				return err
+			}
+			raw, err := clientcmd.LoadFromFile(path)
+			if err != nil {
+				return fmt.Errorf("read kubeconfig: %w", err)
+			}
+			currentContext = raw.CurrentContext
+			state.Config.KubeconfigPath = path
+		}
+	}
+	if state.Config.CreateKind {
+		state.SelectedContext = "kind-oberth"
+		state.Config.ContextName = "kind-oberth"
+	} else {
+		answer, err := ask("Kubeconfig context (empty for current)", currentContext, nil)
+		if err != nil {
+			return err
+		}
+		state.SelectedContext = answer
+		state.Config.ContextName = answer
+	}
 
 	// Page 3: Namespaces — DNS-1123 validated and pairwise distinct, the
 	// same rules the TUI page enforces. (There is no mode page: the wizard
@@ -160,9 +190,9 @@ func runPlain(ctx context.Context, opts Options, input io.Reader, output io.Writ
 	if canonical, ok := canonicalNetworkPolicy(np); ok {
 		state.Config.NetworkPolicy = canonical
 	}
-	anchor, err := ask("External anchoring (on/off)", "off", func(v string) error {
-		if v != "on" && v != "off" {
-			return fmt.Errorf("answer on or off")
+	anchor, err := ask("External anchoring (off; external witness can be configured later)", "off", func(v string) error {
+		if v != "off" {
+			return fmt.Errorf("the bundled Rekor stack requires Kubernetes Secrets; choose off and configure an external witness after setup")
 		}
 		return nil
 	})
@@ -215,7 +245,7 @@ func runPlain(ctx context.Context, opts Options, input io.Reader, output io.Writ
 
 	// Page 8: Uplink.
 	step(8, "crew manifest")
-	user := os.Getenv("USER")
+	user := strings.ReplaceAll(os.Getenv("USER"), "@", "-")
 	if user == "" {
 		user = "admin"
 	}
@@ -269,8 +299,8 @@ func runPlain(ctx context.Context, opts Options, input io.Reader, output io.Writ
 	// Page 9: Git (informational).
 	step(9, "comms check")
 	wln("  Push to Oberth over SSH — every push is linked to your identity.")
-	wln("  clone: ssh://git@localhost:30022/<repo>.git   (from this machine)")
-	wln("         ssh://git@<node-ip>:30022/<repo>.git   (from your network)")
+	wln("  clone: ssh://git@localhost:30022/<upstream>/<org>/<repo>.git   (from this machine)")
+	wln("         ssh://git@<node-ip>:30022/<upstream>/<org>/<repo>.git   (from your network)")
 	wln("  push → CI runs → green publishes upstream · red opens an issue")
 	wln("  Tags are immutable — only green branches reach the upstream forge.")
 
@@ -299,6 +329,25 @@ func runPlain(ctx context.Context, opts Options, input io.Reader, output io.Writ
 		return err
 	}
 	state.ForgeOrg = org
+	auth, err := ask("Upstream SSH identity (existing/generate)", "existing", func(v string) error {
+		if v != "existing" && v != "generate" {
+			return errors.New("choose existing or generate")
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	if auth == "existing" {
+		key, err := ask("Existing work private-key path (imported into OpenBao)", strings.TrimSuffix(state.SSHKeyPath, ".pub"), nil)
+		if err != nil {
+			return err
+		}
+		state.Config.UpstreamPrivateKeyPath, err = expandSetupPath(key)
+		if err != nil {
+			return err
+		}
+	}
 
 	// Page 11: Review.
 	step(11, "go/no-go")

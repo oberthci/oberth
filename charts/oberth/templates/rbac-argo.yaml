@@ -14,6 +14,14 @@ metadata:
   labels:
     {{- include "oberth.labels" . | nindent 4 }}
 rules:
+  - apiGroups: [""]
+    resources: ["serviceaccounts/token"]
+    resourceNames: [{{ .Values.argo.executorServiceAccount | quote }}]
+    verbs: ["create"]
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    resourceNames: ["kube-root-ca.crt"]
+    verbs: ["get"]
   {{- if .Values.argo.controllerProfile }}
   {{- if ne .Values.argo.controllerProfile "nonroot-static-v1" }}
   {{- fail "argo.controllerProfile must be empty or nonroot-static-v1" }}

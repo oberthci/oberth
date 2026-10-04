@@ -726,9 +726,9 @@ func ConfigureSecretStore(ctx context.Context, cfg Config, deps Deps, store open
 		result.Items = append(result.Items, configItem{Name: "transit key", Status: "✓"})
 	}
 
-	wantPolicy := OberthPolicy(defaultKVPrefix)
+	wantPolicy := OberthPolicy(defaultKVPrefix, ns)
 	if cfg.InstallSecretStore {
-		wantPolicy = OberthProductionPolicy(defaultKVPrefix, defaultTransitMount, defaultTransitKey)
+		wantPolicy = OberthProductionPolicy(defaultKVPrefix, defaultTransitMount, defaultTransitKey, ns)
 	}
 	havePolicy, policyExists, err := store.policyRead(ctx, rootToken, defaultPolicy)
 	if err != nil {
@@ -950,7 +950,7 @@ func exactSingletonString(value any, want string) bool {
 }
 
 // OberthPolicy returns the HCL policy for Oberth's read-only secret access.
-func OberthPolicy(kvPrefix string) string {
+func OberthPolicy(kvPrefix string, namespace ...string) string {
 	return fmt.Sprintf(`# Oberth release secrets: read-only, data endpoints only. No list, no
 # metadata, no write, no delete. Managed by oberth install.
 path "%s/data/*" {
@@ -960,7 +960,7 @@ path "%s/data/*" {
 # Allow the fetch client to revoke its own short-lived login token.
 path "auth/token/revoke-self" {
   capabilities = ["update"]
-}`, kvPrefix)
+}`, kvPrefix) + serverIdentityPolicy(kvPrefix, namespace...)
 }
 
 // credentialedPolicyPaths converts approval-table path vocabulary into the
@@ -1006,6 +1006,9 @@ func credentialedPolicyPaths(kvPrefix string, paths []string) ([]string, error) 
 		if strings.ContainsAny(rest, "*+") || strings.HasSuffix(rest, "/") || strings.Contains(rest, "//") {
 			return nil, fmt.Errorf(
 				"credentialed secret path %q must be one exact path, not a pattern", trimmed)
+		}
+		if rest == "identities" || strings.HasPrefix(rest, "identities/") {
+			return nil, errors.New("server identities cannot be granted to pipelines")
 		}
 		if err := validateSecretPath(rest); err != nil {
 			return nil, err
@@ -1060,7 +1063,7 @@ func OberthCredentialedPolicyWithGrants(kvPrefix string, upstreamOrgs []string, 
 	}
 
 	builder.WriteString("\n\n# Allow the fetch client to revoke its own short-lived login token.\npath \"auth/token/revoke-self\" {\n  capabilities = [\"update\"]\n}")
-	return builder.String()
+	return builder.String() + denyServerIdentities(kvPrefix)
 }
 
 // OberthCISecretsPolicy returns the HCL policy for CI-trigger credentialed
@@ -1084,7 +1087,7 @@ func OberthCISecretsPolicy(kvPrefix string, upstreamOrgs []string) string {
 	builder.WriteString("# only through the release-tier credentialed role. Managed by oberth install.\n")
 	writeUpstreamOrgRules(&builder, kvPrefix, upstreamOrgs)
 	builder.WriteString("\n\n# Allow the fetch client to revoke its own short-lived login token.\npath \"auth/token/revoke-self\" {\n  capabilities = [\"update\"]\n}")
-	return builder.String()
+	return builder.String() + denyServerIdentities(kvPrefix)
 }
 
 // secretPathPattern matches valid characters for a credentialed secret path
@@ -1172,7 +1175,7 @@ func writeUpstreamOrgRules(builder *strings.Builder, kvPrefix string, upstreamOr
 // OberthProductionPolicy adds exactly the two Transit data operations needed
 // for trusted-plan envelopes. It grants no key-management, export, rotate,
 // backup, configuration, list, or wildcard Transit capability.
-func OberthProductionPolicy(kvPrefix, transitMount, transitKey string) string {
+func OberthProductionPolicy(kvPrefix, transitMount, transitKey string, namespace ...string) string {
 	return fmt.Sprintf(`# Oberth release secrets: read-only, data endpoints only. No list, no
 # metadata, no write, no delete. Managed by oberth install.
 path "%s/data/*" {
@@ -1191,7 +1194,7 @@ path "%s/decrypt/%s" {
 # Allow the client to revoke its own short-lived login token.
 path "auth/token/revoke-self" {
   capabilities = ["update"]
-}`, kvPrefix, transitMount, transitKey, transitMount, transitKey)
+}`, kvPrefix, transitMount, transitKey, transitMount, transitKey) + serverIdentityPolicy(kvPrefix, namespace...)
 }
 
 func getClusterCA(ctx context.Context, deps Deps) (string, error) {
@@ -1205,4 +1208,20 @@ func getClusterCA(ctx context.Context, deps Deps) (string, error) {
 		return string(deps.RestConfig.CAData), nil
 	}
 	return "", errors.New("could not read cluster CA certificate; ensure kube-root-ca.crt ConfigMap exists in kube-public namespace")
+}
+
+func serverIdentityPolicy(mount string, namespace ...string) string {
+	ns := DefaultNamespace
+	if len(namespace) > 0 {
+		ns = namespace[0]
+	}
+	return fmt.Sprintf(`
+path "%s/data/identities/%s/*" { capabilities = ["create", "read", "update"] }
+`, mount, ns)
+}
+
+func denyServerIdentities(mount string) string {
+	return fmt.Sprintf(`
+path "%s/data/identities/*" { capabilities = ["deny"] }
+`, mount)
 }

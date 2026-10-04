@@ -20,6 +20,7 @@ import (
 	"golang.org/x/term"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/clientcmd"
 	"sigs.k8s.io/yaml"
 )
 
@@ -114,6 +115,12 @@ func (deps InstallDeps) withDefaults() InstallDeps {
 // kubeconfig, and runs the cluster install flow.
 func Execute(ctx context.Context, cfg Config, deps InstallDeps) error {
 	deps = deps.withDefaults()
+	if cfg.InstallRekor {
+		return errors.New("the bundled Rekor stack requires Kubernetes Secrets and is disabled; configure an external auditAnchor.rekorURL instead")
+	}
+	if cfg.CreateKind && cfg.KubeconfigPath != "" {
+		return errors.New("choose either --kubeconfig for an existing cluster or --create-kind")
+	}
 	if cfg.WatchAdoptionPlan != "" && deps.GOOS != "linux" {
 		return errors.New("watch adoption requires an existing Linux cluster context; cluster bootstrap is forbidden")
 	}
@@ -121,9 +128,9 @@ func Execute(ctx context.Context, cfg Config, deps InstallDeps) error {
 		return err
 	}
 
-	contextName := ""
+	contextName := cfg.ContextName
 	kindClusterName := ""
-	if deps.GOOS == "darwin" {
+	if cfg.CreateKind || (deps.GOOS == "darwin" && cfg.KubeconfigPath == "" && cfg.ContextName == "") {
 		kindClusterName = KindClusterName
 		cfg.TLSExtraDNSNames, cfg.TLSExtraIPs = certificateNamesForKind(cfg.TLSExtraDNSNames, cfg.TLSExtraIPs)
 		cacheRoot, err := deps.UserCacheDir()
@@ -154,6 +161,28 @@ func Execute(ctx context.Context, cfg Config, deps InstallDeps) error {
 		}
 	}
 
+	if cfg.KubeconfigPath != "" {
+		deps.LoadKubeConfig = func(name string) (kubernetes.Interface, *rest.Config, string, error) {
+			rules := clientcmd.NewDefaultClientConfigLoadingRules()
+			rules.ExplicitPath = cfg.KubeconfigPath
+			return loadKubeConfigWithRules(rules, name, "", deps.Output)
+		}
+		originalInteractive := deps.RunInteractive
+		deps.RunInteractive = func(ctx context.Context, name string, args ...string) error {
+			if name == "kubectl" {
+				args = append([]string{"--kubeconfig", cfg.KubeconfigPath}, args...)
+			}
+			return originalInteractive(ctx, name, args...)
+		}
+		originalRun := deps.RunCommand
+		path := cfg.KubeconfigPath
+		deps.RunCommand = func(ctx context.Context, input []byte, name string, args ...string) ([]byte, error) {
+			if name == "kubectl" {
+				args = append([]string{"--kubeconfig", path}, args...)
+			}
+			return originalRun(ctx, input, name, args...)
+		}
+	}
 	kubeClient, restConfig, selectedContext, err := deps.LoadKubeConfig(contextName)
 	if err != nil {
 		if contextName != "" {
@@ -207,6 +236,9 @@ func Execute(ctx context.Context, cfg Config, deps InstallDeps) error {
 	// Resolve helm kubeconfig targeting so every helm invocation in the
 	// install flow targets the same cluster the binary resolved (#464).
 	helmKubeArgs, _, _ := ResolveHelmKubeArgs(contextName)
+	if cfg.KubeconfigPath != "" {
+		helmKubeArgs = []string{"--kubeconfig", cfg.KubeconfigPath, "--kube-context", selectedContext}
+	}
 	runHelm := HelmWithKubeArgs(deps.RunHelm, helmKubeArgs)
 
 	return Run(ctx, cfg, Deps{
@@ -453,7 +485,7 @@ func hasNonLoopbackPortBinding(bindings []dockerPortBinding, hostPort string) bo
 
 func hasBindMount(mounts []dockerMount, source, destination string) bool {
 	for _, mount := range mounts {
-		if mount.Type == "bind" && filepath.Clean(mount.Source) == filepath.Clean(source) && filepath.Clean(mount.Destination) == filepath.Clean(destination) {
+		if mount.Type == "bind" && (filepath.Clean(mount.Source) == filepath.Clean(source) || (strings.HasPrefix(source, "/Users/") && filepath.Clean(mount.Source) == "/host_mnt"+filepath.Clean(source))) && filepath.Clean(mount.Destination) == filepath.Clean(destination) {
 			return true
 		}
 	}

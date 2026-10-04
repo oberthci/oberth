@@ -1,0 +1,27 @@
+ISSUE 009: Per-repo deploy-key label does not match the organization-level setup flow
+
+Status: Open
+Reported: 2026-10-04
+Affected version: Oberth v0.17.9 (6f40126bc8f6), macOS
+
+Priority: Medium
+Evidence: Screenshot and setup source confirmed.
+
+Reproduction
+Select deploy key per repo for GitHub / oberthci; observe that no repo is selected and inspect the registration path and generated Secret identity.
+
+Observed behavior and proposed change
+'deploy key per repo' does not describe this setup path.
+Screenshot 15.52.34 uses that label, but setup takes only an organization,
+generates the shared oberth-upstream-key, and registers an org-level
+upstream without a dedicated key selector. It offers no per-repo key flow.
+Fix: make the label match organization-level authentication and offer an
+existing work SSH key or a newly generated upstream key. The user explicitly
+wants a corporate organization connection, not mandatory repository selection.
+A repository-specific deploy key may be a separate restricted option.
+See issue 017 for the missing existing-work-key requirement.
+
+Reference
+- ../setup-test-results/REPORT.txt, finding 8
+- Screenshot times above refer to ../install-log/photo_2026-10-04 <time>.jpeg.
+- Source paths above are relative to ../oberth-source-v0.17.9/.

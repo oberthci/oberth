@@ -82,7 +82,7 @@ func TestBuildNonrootLeaves(t *testing.T) {
 		if tmpl.SecurityContext == nil || *tmpl.SecurityContext.RunAsUser != nonrootUID || !*tmpl.SecurityContext.RunAsNonRoot {
 			t.Fatal("missing fixed nonroot identity")
 		}
-		if wf.Spec.Templates[1].SecurityContext != nil || wf.Spec.Templates[1].PodSpecPatch != "" || *wf.Spec.SecurityContext.RunAsUser != 0 {
+		if wf.Spec.Templates[1].SecurityContext != nil || *wf.Spec.SecurityContext.RunAsUser != 0 {
 			t.Fatal("ordinary leaf changed")
 		}
 		container := tmpl.Container

@@ -1,0 +1,26 @@
+ISSUE 007: TLS algorithm and names shown by setup do not match the installed certificate
+
+Status: Open
+Reported: 2026-10-04
+Affected version: Oberth v0.17.9 (6f40126bc8f6), macOS
+
+Priority: Medium
+Evidence: Reproduced by examining the actual certificate.
+
+Reproduction
+Inspect the TLS and review pages, complete setup, and compare them with the public certificate in the oberth-tls Secret.
+
+Observed behavior and proposed change
+TLS screen contradicts installed certificate.
+Screenshot 15.52.31: self-signed ed25519, valid for oberth.oberth.svc.
+Review: valid for one name. Actual cert: RSA-2048, issuer oberth-local-ca,
+SANs include localhost, 127.0.0.1 and multiple service DNS names. The leaf
+is signed by a generated local CA, not literally self-signed.
+Source: page_tls.go versus charts/oberth/templates/tls-secret.yaml.
+Fix: derive the preview from the real certificate plan; explain local CA
+trust and show the actual post-install fingerprint and SANs.
+
+Reference
+- ../setup-test-results/REPORT.txt, finding 6
+- Screenshot times above refer to ../install-log/photo_2026-10-04 <time>.jpeg.
+- Source paths above are relative to ../oberth-source-v0.17.9/.

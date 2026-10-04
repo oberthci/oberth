@@ -1,0 +1,26 @@
+ISSUE 005: Kind selection appears as not selected and leaves the report context empty
+
+Status: Open
+Reported: 2026-10-04
+Affected version: Oberth v0.17.9 (6f40126bc8f6), macOS
+
+Priority: Medium
+Evidence: Live review reproduced; saved-report behavior evidenced by the original report and source.
+
+Reproduction
+Start with no kubeconfig contexts, select Create kind cluster, inspect review, and inspect the saved report.
+
+Observed behavior and proposed change
+Kind creation is shown as 'not selected' with GO.
+Screenshots 15.52.27 and 15.52.35; reproduced live. The synthetic Create kind
+entry is also counted as '1 context' when there are zero real contexts.
+Existing saved report's Context field is empty.
+Source: page_cluster.go sets an empty context for create-kind;
+page_review.go formatClusterSummary; page_done.go uses SelectedContext.
+Fix: show 'Create kind cluster oberth'; propagate kind-oberth after creation
+and distinguish available actions from existing context count.
+
+Reference
+- ../setup-test-results/REPORT.txt, finding 4
+- Screenshot times above refer to ../install-log/photo_2026-10-04 <time>.jpeg.
+- Source paths above are relative to ../oberth-source-v0.17.9/.

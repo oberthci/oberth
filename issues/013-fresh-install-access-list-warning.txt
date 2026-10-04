@@ -1,0 +1,28 @@
+ISSUE 013: Fresh installation warns about querying an Oberth pod that does not exist
+
+Status: Open
+Reported: 2026-10-04
+Affected version: Oberth v0.17.9 (6f40126bc8f6), macOS
+
+Priority: Low
+Evidence: Reproduced during the fresh install; screenshot 15.52.36.
+
+Reproduction and observed behavior
+Start setup on a new kind cluster before any Oberth deployment exists.
+The apply screen shows an access-list exec failure and fallback to a ConfigMap
+with zero qualified entries. Expected absence on first installation is
+presented as a warning about an operation that cannot yet succeed.
+
+Expected behavior
+Detect a fresh installation and use the intended empty initial access state
+without attempting an exec into a nonexistent deployment. Preserve actionable
+warnings for unexpected access-list failures on existing installations.
+
+Acceptance criteria
+A fresh install does not display an access-list exec warning solely because
+Oberth is not deployed yet. Upgrade failures remain visible and distinguishable.
+
+References
+- ../install-log/photo_2026-10-04 15.52.36.jpeg
+- ../setup-test-results/REPORT.txt, finding 12
+- ../oberth-source-v0.17.9/internal/installer/

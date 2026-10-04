@@ -82,13 +82,13 @@ func TestIsolationMatchesActualControllerObservation(t *testing.T) {
 			}
 			tokens := map[string]bool{}
 			for _, v := range submitted.Spec.Volumes {
-				if v.Secret != nil || v.Projected != nil {
+				if v.Secret != nil || v.Projected != nil || v.Name == executorTokenVolume {
 					tokens[v.Name] = true
 				}
 			}
 			mirrors := 0
 			for _, c := range append(submitted.Spec.Containers, submitted.Spec.InitContainers...) {
-				executor := c.Name == "init" || c.Name == "wait"
+				executor := c.Name == "init" || c.Name == "wait" || c.Name == executorTokenWaiter
 				paths := map[string]bool{}
 				for _, m := range c.VolumeMounts {
 					if paths[m.MountPath] {

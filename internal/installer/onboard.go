@@ -11,7 +11,6 @@ package installer
 // over kubectl exec, and only then waits for readiness.
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -25,9 +24,6 @@ import (
 	"time"
 
 	"golang.org/x/crypto/ssh"
-	corev1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 // ErrInterrupted is returned when the user presses Ctrl+C (sends ETX / 0x03)
@@ -45,17 +41,7 @@ var ErrOnboardingPartial = errors.New("onboarding partial: manual steps remain")
 const (
 	// oberthWebUIURL is where the chart's fixed HTTPS NodePort (30443)
 	// serves the web UI on a local cluster.
-	oberthWebUIURL = "https://localhost:30443/runs"
-
-	// upstreamKeySecretName and its data keys mirror the in-pod `oberth
-	// upstream add` defaults (Secret oberth-upstream-key, projected at
-	// /etc/oberth/upstream-key/id_ed25519): a key provided during onboarding
-	// is stored exactly where the pod-side bootstrap recovers persisted
-	// material from.
-	upstreamKeySecretName   = "oberth-upstream-key" // #nosec G101 — Kubernetes Secret NAME (an identifier), not credential material.
-	upstreamPrivateKeyField = "id_ed25519"
-	upstreamPublicKeyField  = "id_ed25519.pub"
-
+	oberthWebUIURL       = "https://localhost:30443/runs"
 	defaultUplinkKeyPath = "~/.ssh/id_ed25519.pub"
 )
 
@@ -342,10 +328,11 @@ func runOnboarding(ctx context.Context, cfg Config, deps Deps, tw *tableWriter, 
 		}
 		_, _ = fmt.Fprintf(w, "\nDeploy key not yet registered at %s.\n", hostnameFromURL(baseURL))
 		if deployPubKey != "" {
-			_, _ = fmt.Fprintf(w, "Install the deploy key, then the server will become ready.\n")
+			_, _ = fmt.Fprintf(w, "Register the upstream public key, then verify the connection:\n")
 		} else {
-			_, _ = fmt.Fprintf(w, "Retrieve the public key and install it at your forge, then the server will become ready.\n")
+			_, _ = fmt.Fprintf(w, "Retrieve the upstream public key, register it with your forge account, then verify the connection:\n")
 		}
+		_, _ = fmt.Fprintf(w, "\n    kubectl exec -n %s deploy/oberth -- oberth upstream add --yes --no-wait %s %s\n", cfg.Namespace, name, baseURL)
 		return ErrOnboardingPartial
 	}
 
@@ -356,7 +343,7 @@ func runOnboarding(ctx context.Context, cfg Config, deps Deps, tw *tableWriter, 
 	if deps.StepProgressSink != nil {
 		deps.StepProgressSink("audit genesis", "done")
 	}
-	printReadyWithNextSteps(w, baseURL, sshConfigured, color)
+	printReadyWithNextSteps(w, name, baseURL, sshConfigured, color)
 	return nil
 }
 
@@ -435,7 +422,27 @@ func upstreamFromInput(raw string) (string, string, error) {
 // raw mode is unavailable (pipes, CI, tests), it falls back to the text-based
 // [G]enerate / [P]rovide prompt.
 func promptDeployKey(ctx context.Context, cfg Config, deps Deps, tw *tableWriter) (bool, error) {
-	// Non-interactive (TUI wizard): always generate the deploy key.
+	if cfg.UpstreamPrivateKeyPath != "" {
+		path, err := expandSSHKeyPath(cfg.UpstreamPrivateKeyPath)
+		if err != nil {
+			return false, err
+		}
+		// #nosec G304 -- operator-selected work key path, imported over stdin.
+		key, err := os.ReadFile(path)
+		if err != nil {
+			return false, fmt.Errorf("read selected work key: %w", err)
+		}
+		defer clear(key)
+		if len(key) > 1<<20 {
+			return false, errors.New("selected work key exceeds size limit")
+		}
+		if err := applyProvidedDeployKey(ctx, cfg, deps, key); err != nil {
+			return false, err
+		}
+		tw.AppendRow("Upstream identity", path, "stored in OpenBao", false)
+		return true, nil
+	}
+	// Non-interactive setup generates only when that option was selected.
 	if !isInteractive(deps) {
 		tw.AppendRow("Deploy key", "generated", "✓ stored", false)
 		return false, nil
@@ -551,7 +558,7 @@ func provideDeployKey(ctx context.Context, cfg Config, deps Deps, tw *tableWrite
 }
 
 func applyProvidedDeployKey(ctx context.Context, cfg Config, deps Deps, privateKey []byte) error {
-	signer, err := ssh.ParsePrivateKey(privateKey)
+	_, err := ssh.ParsePrivateKey(privateKey)
 	if err != nil {
 		var passphraseErr *ssh.PassphraseMissingError
 		if errors.As(err, &passphraseErr) {
@@ -559,40 +566,17 @@ func applyProvidedDeployKey(ctx context.Context, cfg Config, deps Deps, privateK
 		}
 		return fmt.Errorf("parse SSH private key: %w", err)
 	}
-	publicKey := append(bytes.TrimSpace(ssh.MarshalAuthorizedKey(signer.PublicKey())), []byte(" oberth\n")...)
-
-	ns := cfg.Namespace
-	if ns == "" {
-		ns = DefaultNamespace
+	run := deps.RunCommand
+	if run == nil {
+		run = DefaultRunCommand
 	}
-	data := map[string][]byte{
-		upstreamPrivateKeyField: privateKey,
-		upstreamPublicKeyField:  publicKey,
+	name, _, err := upstreamFromInput(cfg.ForgeURL)
+	if err != nil {
+		name = "default"
 	}
-	existing, err := deps.KubeClient.CoreV1().Secrets(ns).Get(ctx, upstreamKeySecretName, metav1.GetOptions{})
-	if err == nil {
-		// The chart pre-creates the Secret with empty data; filling it in is
-		// the normal path. A Secret that already holds a key is an identity —
-		// never silently replaced, matching the pod-side bootstrap's stance.
-		if len(existing.Data[upstreamPrivateKeyField]) > 0 {
-			return fmt.Errorf("the Secret %s/%s already holds a deploy key; refusing to overwrite it (delete the Secret first if replacement is intended)", ns, upstreamKeySecretName)
-		}
-		existing.Data = data
-		if _, err := deps.KubeClient.CoreV1().Secrets(ns).Update(ctx, existing, metav1.UpdateOptions{}); err != nil {
-			return fmt.Errorf("update Secret %s/%s: %w", ns, upstreamKeySecretName, err)
-		}
-		return nil
-	}
-	if !apierrors.IsNotFound(err) {
-		return fmt.Errorf("read Secret %s/%s: %w", ns, upstreamKeySecretName, err)
-	}
-	secret := &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{Name: upstreamKeySecretName, Namespace: ns},
-		Type:       corev1.SecretTypeOpaque,
-		Data:       data,
-	}
-	if _, err := deps.KubeClient.CoreV1().Secrets(ns).Create(ctx, secret, metav1.CreateOptions{}); err != nil {
-		return fmt.Errorf("create Secret %s/%s: %w", ns, upstreamKeySecretName, err)
+	_, err = run(ctx, privateKey, "kubectl", kubectlOberthArgs(cfg, deps, true, "upstream", "provide-key", name)...)
+	if err != nil {
+		return fmt.Errorf("import existing work key into OpenBao: %w", err)
 	}
 	return nil
 }
@@ -859,7 +843,11 @@ func offerSSHConfig(ctx context.Context, deps Deps, pubKeyPath string, tw *table
 		return nil
 	}
 
-	home, err := os.UserHomeDir()
+	homeDir := deps.UserHomeDir
+	if homeDir == nil {
+		homeDir = os.UserHomeDir
+	}
+	home, err := homeDir()
 	if err != nil {
 		tw.AppendRow("SSH config", "no home dir", "⚠ skip", false)
 		return nil
@@ -1526,7 +1514,7 @@ func sshHostBlockExists() bool {
 
 // printReadyWithNextSteps prints the Ready banner followed by a table of
 // next-step commands using the operator's configured SSH alias.
-func printReadyWithNextSteps(w io.Writer, baseURL string, sshConfigured, color bool) {
+func printReadyWithNextSteps(w io.Writer, upstream, baseURL string, sshConfigured, color bool) {
 	if color {
 		_, _ = fmt.Fprintf(w, "\n\033[1;32mReady\033[0m — %s\n", oberthWebUIURL)
 	} else {
@@ -1534,9 +1522,9 @@ func printReadyWithNextSteps(w io.Writer, baseURL string, sshConfigured, color b
 	}
 
 	org := orgFromBaseURL(baseURL)
-	repoRef := "<repo>"
+	repoRef := upstream + "/<org>/<repo>"
 	if org != "" {
-		repoRef = org + "/<repo>"
+		repoRef = upstream + "/" + org + "/<repo>"
 	}
 
 	var cloneCmd string
@@ -1585,16 +1573,23 @@ func orgFromBaseURL(baseURL string) string {
 // not yet fully written — the rename is atomic on POSIX filesystems, so the
 // target is either the old content or the complete new content.
 func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, perm); err != nil { //nolint:gosec // G306: caller controls perm
-		_ = os.Remove(tmp)
+	file, err := os.CreateTemp(filepath.Dir(path), ".oberth-config-*")
+	if err != nil {
 		return err
 	}
-	if err := os.Rename(tmp, path); err != nil {
-		_ = os.Remove(tmp)
+	tmp := file.Name()
+	defer func() { _ = os.Remove(tmp) }()
+	if err = file.Chmod(perm); err == nil {
+		_, err = file.Write(data)
+	}
+	closeErr := file.Close()
+	if err != nil {
 		return err
 	}
-	return nil
+	if closeErr != nil {
+		return closeErr
+	}
+	return os.Rename(tmp, path)
 }
 
 // ---------------------------------------------------------------------------

@@ -1,0 +1,15 @@
+Title: Preserve private identities when migrating existing installations to OpenBao
+Status: Upgrade blocked safely; automated migration remains follow-up work
+Evidence: Inspection of the old chart and the new identity storage paths
+
+A fresh deployment can create SSH and TLS identities in OpenBao. Applying that
+chart over a Secret-backed deployment would otherwise create new identities,
+breaking client pins and the audit witness identity. Helm metadata also moves
+from Secrets to ConfigMaps.
+
+The installer and chart now refuse this upgrade before replacing the server.
+Use a fresh cluster for evaluation. A migration tool must copy the existing
+SSH host key, TLS certificate/private key, upstream keys and host trust into
+OpenBao, verify fingerprints and backup recovery, transition Helm metadata,
+and only then remove the old Secret resources. Do not delete a production
+cluster to work around this guard.

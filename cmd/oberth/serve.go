@@ -416,6 +416,11 @@ func validAuditURL(raw string, insecureHTTP bool) bool {
 }
 
 func serve(ctx context.Context, options serveOptions, logger *log.Logger) (result error) {
+	if identityStoreEnabled() {
+		if err := bootstrapRuntimeIdentities(ctx, &options); err != nil {
+			return fmt.Errorf("load OpenBao identities: %w", err)
+		}
+	}
 	if err := os.MkdirAll(options.dataRoot, 0o700); err != nil {
 		return fmt.Errorf("create data root: %w", err)
 	}
@@ -665,7 +670,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 		// may take up to ~60s to project the update into the volume mount.
 		// Reading the Secrets directly confirms configuration without
 		// waiting for file projection.
-		if checkUpstreamSecretConfigured(ctx, kube, options.namespace, options.upstreamKey, options.knownHosts, registered) == nil {
+		if !identityStoreEnabled() && checkUpstreamSecretConfigured(ctx, kube, options.namespace, options.upstreamKey, options.knownHosts, registered) == nil {
 			return nil
 		}
 		return globalErr

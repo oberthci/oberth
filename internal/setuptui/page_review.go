@@ -141,9 +141,8 @@ func (p *reviewPage) view(state *WizardState, width, _ int) string {
 	b.WriteString("\n")
 
 	// Secrets guarantee line.
-	b.WriteString("  " + sMuted.Render("no secret leaves memory: ") +
-		sGo.Render("none") + sMuted.Render(" on disk · ") +
-		sGo.Render("none") + sMuted.Render(" in etcd · token shown once") + "\n\n")
+	b.WriteString("  " + sMuted.Render("credentials: ") +
+		sGo.Render("OpenBao") + sMuted.Render(" storage · runtime keys in memory · no Kubernetes Secrets") + "\n\n")
 
 	// Apply button.
 	allGo := p.allGo(state)
@@ -163,6 +162,9 @@ func (p *reviewPage) view(state *WizardState, width, _ int) string {
 // Helper formatters for the review summary column.
 
 func formatClusterSummary(state *WizardState) string {
+	if state.Config.CreateKind {
+		return "Create kind cluster oberth (kind-oberth)"
+	}
 	if state.ClusterInfo.context == "" {
 		return "not selected"
 	}

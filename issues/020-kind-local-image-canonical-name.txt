@@ -1,0 +1,10 @@
+Title: Local digest-pinned build fails while aliasing an image into kind
+Status: Fix in local verification
+
+A local image named oberth-local:bao-2 loads successfully, but containerd stores
+it as docker.io/library/oberth-local:bao-2. The installer invokes ctr with the
+short source name and receives image not found, aborting OpenBao bootstrap.
+
+Expected: normalize local image references to canonical registry names when
+querying and tagging in containerd. Preserve digest verification and do not
+substitute a registry image for an explicitly supplied local build.

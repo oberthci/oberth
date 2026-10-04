@@ -18,7 +18,7 @@
       "oberth.ci/release-wif-policy-sha256": "c166d883b302ffe2f946f218b6a5133faef5168ff8f4118d99b3837c273cfdf1",
       "oberth.ci/run-id": "run-abc123",
       "oberth.ci/size": "L",
-      "oberth.ci/spec-identity": "335f8e636ab36899be09a1af2823baefd3198e67b62ca1f315c49102b4b71186",
+      "oberth.ci/spec-identity": "f1744b2bf9c5046e8aa3186f17aa3a19518a0f1cc1961b0535b60d0c9fe52c9b",
       "workflows.argoproj.io/pod-name-format": "v2"
     }
   },
@@ -144,7 +144,7 @@
         ],
         "serviceAccountName": "oberth-per-repo",
         "automountServiceAccountToken": false,
-        "podSpecPatch": "{\"containers\":[{\"name\":\"wait\",\"volumeMounts\":[{\"mountPath\":\"/mainctrfs/work/src\",\"name\":\"oberth-source\",\"readOnly\":true,\"subPath\":\"src\"},{\"$patch\":\"delete\",\"mountPath\":\"/mainctrfs/run/oberth-gar\"}]}]}"
+        "podSpecPatch": "{\"$setElementOrder/initContainers\":[{\"name\":\"oberth-executor-token\"},{\"name\":\"init\"}],\"containers\":[{\"name\":\"wait\",\"volumeMounts\":[{\"mountPath\":\"/mainctrfs/work/src\",\"name\":\"oberth-source\",\"readOnly\":true,\"subPath\":\"src\"},{\"$patch\":\"delete\",\"mountPath\":\"/mainctrfs/run/oberth-gar\"}]}],\"initContainers\":[{\"name\":\"oberth-executor-token\",\"image\":\"busybox:1.37@sha256:ab33eacc8251e3807b85bb6dba570e4698c3998eca6f0fc2ccb60575a563ea74\",\"command\":[\"sh\",\"-c\",\"until test -f /var/run/secrets/kubernetes.io/serviceaccount/token; do sleep 1; done\"],\"resources\":{},\"volumeMounts\":[{\"name\":\"exec-sa-token\",\"mountPath\":\"/var/run/secrets/kubernetes.io/serviceaccount\"}],\"securityContext\":{\"capabilities\":{\"drop\":[\"ALL\"]},\"runAsUser\":0,\"runAsGroup\":0,\"runAsNonRoot\":false,\"readOnlyRootFilesystem\":true,\"allowPrivilegeEscalation\":false,\"seccompProfile\":{\"type\":\"RuntimeDefault\"}}},{\"name\":\"init\"}],\"volumes\":[{\"emptyDir\":{\"medium\":\"Memory\",\"sizeLimit\":\"1Mi\"},\"name\":\"exec-sa-token\",\"secret\":null}]}"
       }
     ],
     "entrypoint": "main",

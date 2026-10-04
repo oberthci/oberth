@@ -1,0 +1,105 @@
+ISSUE 002: Completion instructions omit the required upstream registration rerun
+
+Status: Open
+Reported: 2026-10-04
+Affected version: Oberth v0.17.9 (6f40126bc8f6), macOS
+
+Priority: High
+Evidence: Reproduced; missing-rerun behavior also confirmed in source.
+
+Reproduction
+Complete fresh setup with GitHub / oberthci and a newly generated deploy key. Leave forge registration pending, exit setup, and inspect the upstream list inside the pod.
+
+Observed behavior and proposed change
+Completion guidance cannot finish the SSH onboarding it describes.
+Screenshot 15.53.01: 'register it at the forge, then the server will become
+ready'. Reproduced: no upstream row exists. Required rerun is omitted.
+Source: internal/installer/onboard.go registerUpstreamQuiet and keyPending
+branch; cmd/oberth/admin.go ErrUpstreamBootstrapIncomplete branch;
+internal/setuptui/page_done.go deployKeyPending block.
+Fix: display the public key, exact GitHub repo settings destination, and an
+explicit Verify action that reruns registration; retain a resumable pending
+state until Ready. If exiting, print the exact recovery command.
+
+Reference
+- ../setup-test-results/REPORT.txt, finding 1
+- Screenshot times above refer to ../install-log/photo_2026-10-04 <time>.jpeg.
+- Source paths above are relative to ../oberth-source-v0.17.9/.
+- ../setup-test-results/01-after-wizard.txt
+- ../setup-test-results/02-clone-verification.txt
+
+FOLLOW-UP: USER'S MANUAL REINSTALL, 2026-10-04
+
+The user retried setup and then cloned the correct full URL:
+  ssh://git@localhost:30022/github/oberthci/oberth.git
+Git failed with Connection closed by 127.0.0.1 port 30022.
+
+Read-only inspection of the new cluster:
+- Context kind-oberth; Docker maps localhost 30022/30443 correctly.
+- Pod oberth-75b7c44b8-9zlwg: Running, 0/1 Ready, no restarts.
+- Service has no ready endpoints; EndpointSlice explicitly says ready=false.
+- In-pod oberth upstream list: empty.
+- Uplink dimaxmas@workhorse exists with the expected client public key.
+- Direct HTTPS through a temporary pod port-forward: /healthz 200 ok;
+  /readyz 503 not ready. Used the user's supplied bearer credential without
+  printing it; verified the server certificate obtained through kubectl.
+- In-pod git ls-remote ssh://git@github.com/oberthci/oberth.git HEAD, using
+  the generated upstream key and strict known_hosts checking, failed with
+  Permission denied (publickey), exit 128.
+- Generated deploy-key public fingerprint:
+  SHA256:aohmEmoiq5u91hRKsS0Uj9Q+pojg+6I73N/X3lV57xQ
+
+Conclusion: installation has not completed upstream authorization and
+registration. The client URL is valid. The client's key is registered, but
+GitHub rejects the server's separate generated upstream key. An empty upstream
+catalog keeps the pod NotReady, so the normal Service cannot deliver SSH.
+
+Required recovery for this SSH setup: register the current generated PUBLIC
+key in the intended GitHub repository, then rerun upstream add inside Oberth.
+Do not assume a deploy key from a deleted cluster matches this new key.
+
+No upstream or cluster configuration was changed during this diagnosis.
+The temporary port-forward was stopped afterward. This was not the HTTPS
+workaround used in the earlier successful clone test.
+
+FOLLOW-UP: USER REPORTS ACCOUNT-LEVEL KEY REGISTRATION
+
+User says this key is installed on a GitHub user account with org/team write
+access. A repository deploy key is not inherently required; an authorized
+account authentication key should also work.
+
+Verified all three local representations have the SAME public fingerprint:
+- Public key derived from the mounted private key inside the pod.
+- Mounted id_ed25519.pub.
+- Public key stored in the current Kubernetes Secret.
+Fingerprint: SHA256:aohmEmoiq5u91hRKsS0Uj9Q+pojg+6I73N/X3lV57xQ
+
+A fresh ssh -vT test, with IdentitiesOnly=yes and verified GitHub known_hosts,
+connects to GitHub and explicitly offers that fingerprint. GitHub responds
+with another publickey authentication request and rejects it. No authenticated
+GitHub username is returned. Therefore rejection occurs during SSH account
+authentication, before repository/team authorization. The offered private and
+public key are not mismatched locally. GitHub account key registration/type
+must be compared with this exact fingerprint; remote cause is not yet proven.
+
+RESOLVED DIAGNOSIS: GITHUB ACCOUNT KEY DOES NOT MATCH OBERTH'S KEY
+
+Public GitHub API checked for username dimaxmas on 2026-10-04:
+  GET https://api.github.com/users/dimaxmas/keys
+One authentication key, ID 165343541:
+  SHA256:bbGvaCPgVNAih+cPxG5W9s9hmhUHEgVaqeoSJy+ipZw
+This is the user's client/uplink key fingerprint, not the pod's upstream key.
+  GET https://api.github.com/users/dimaxmas/ssh_signing_keys
+Zero signing keys returned.
+
+Current Oberth upstream key, derived from its mounted private key:
+  SHA256:aohmEmoiq5u91hRKsS0Uj9Q+pojg+6I73N/X3lV57xQ
+No matching authentication key is published on the supplied GitHub account.
+This explains the observed GitHub rejection. Org/team write access cannot
+make a different, unregistered SSH key authenticate as that account.
+
+Setup should explicitly distinguish workstation-to-Oberth uplink keys from
+Oberth-to-forge upstream keys, display the public fingerprint for each, and
+verify the newly generated upstream identity before claiming clone readiness.
+The user's account-level registration approach is valid; using the matching
+key is what matters. No GitHub or cluster configuration was modified.

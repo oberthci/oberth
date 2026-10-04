@@ -1,0 +1,12 @@
+Title: Onboarding tests overwrite the operator SSH configuration
+Status: Fix in local verification
+
+The finish-install tests create temporary SSH keys but let offerSSHConfig use
+the real home directory. Parallel cases replace the real Host oberth block with
+deleted test key paths. The shared config.tmp filename also lets concurrent
+writers interleave and leave invalid trailing directives.
+
+Fix: inject the home-directory resolver, supply a private temporary home from
+the onboarding test helper, and use a unique temporary file for atomic writes.
+Local recovery: preserve the damaged file and restore the generated Oberth block
+to the existing work key. Test fixtures must never modify operator configuration.

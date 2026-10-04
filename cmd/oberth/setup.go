@@ -18,6 +18,8 @@ func runSetup(ctx context.Context, arguments []string, input io.Reader, output i
 	flags.SetOutput(io.Discard)
 
 	var opts setuptui.Options
+	flags.StringVar(&opts.ChartPath, "chart", "", "local chart for development")
+	flags.StringVar(&opts.ImageRef, "image", "", "local server image for development")
 	flags.BoolVar(&opts.DryMode, "dry-mode", false,
 		"run the wizard fully, print the equivalent oberth install command, exit without applying")
 	flags.BoolVar(&opts.Plain, "plain", false,

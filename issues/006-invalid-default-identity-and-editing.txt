@@ -1,0 +1,25 @@
+ISSUE 006: Generated identity fails validation and corrected input retains the error
+
+Status: Open
+Reported: 2026-10-04
+Affected version: Oberth v0.17.9 (6f40126bc8f6), macOS
+
+Priority: Medium
+Evidence: Invalid default reproduced; stale error shown in screenshot and confirmed in source.
+
+Reproduction
+Run setup with USER containing an @ sign, accept the default identity, then correct it by editing the identity field.
+
+Observed behavior and proposed change
+Invalid generated identity, awkward correction, stale error.
+Live default dr@valarian.com@JN77NH2CYT fails exactly-one-@ validation.
+The screenshot 15.52.32 also shows the error below a now-valid identity.
+Source: page_uplink.go concatenates USER + '@' + hostname, accepts only
+append/backspace editing, and does not clear errMsg when text changes.
+Fix: normalize the suggested identity, provide normal cursor/edit controls,
+and clear/revalidate the error as the user edits.
+
+Reference
+- ../setup-test-results/REPORT.txt, finding 5
+- Screenshot times above refer to ../install-log/photo_2026-10-04 <time>.jpeg.
+- Source paths above are relative to ../oberth-source-v0.17.9/.

@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -1166,8 +1168,10 @@ func TestArrowKeysMoveBetweenSectionsOnForgePage(t *testing.T) {
 	}{
 		{downKey(), forgeFocusOrg, 0},
 		{downKey(), forgeFocusAuth, 0},
-		{downKey(), forgeFocusAuth, 1},  // walks the auth list first
-		{downKey(), forgeFocusForge, 1}, // then wraps to the first section
+		{downKey(), forgeFocusAuth, 1}, // walks the auth list first
+		{downKey(), forgeFocusKey, 1},
+		{downKey(), forgeFocusForge, 1},
+		{upKey(), forgeFocusKey, 1},
 		{upKey(), forgeFocusAuth, 1},
 		{upKey(), forgeFocusAuth, 0},
 		{upKey(), forgeFocusOrg, 0},
@@ -1197,38 +1201,23 @@ func TestArrowKeysMoveBetweenSectionsOnForgePage(t *testing.T) {
 	}
 }
 
-func TestForgeComingSoonAuthIsVisibleButNotSelectable(t *testing.T) {
+func TestForgeAcceptsGeneratedAndExistingWorkKeys(t *testing.T) {
 	p := newForgePage()
-	state := &WizardState{ForgeType: "codeberg", ForgeAuth: "deploy-key"}
+	state := &WizardState{ForgeType: "github", ForgeAuth: "existing"}
 	p.init(state)
 	p.org = "oberthci"
-	p.focusField = forgeFocusAuth
-
-	p.update(downKey(), state)
-	if p.authCursor != 1 {
-		t.Fatalf("down must let the cursor rest on the coming-soon option, got %d", p.authCursor)
+	p.keyPath = filepath.Join(t.TempDir(), "work-key")
+	if err := os.WriteFile(p.keyPath, []byte("private-key-fixture"), 0600); err != nil {
+		t.Fatal(err)
 	}
 	_, cmd := p.update(enterKey(), state)
-	if cmd != nil {
-		t.Fatal("enter on the coming-soon auth option must not advance")
+	if cmd == nil || state.Config.UpstreamPrivateKeyPath != p.keyPath {
+		t.Fatalf("existing work key was not selected: %s", p.errMsg)
 	}
-	if !strings.Contains(p.errMsg, "coming soon") || strings.Contains(p.errMsg, "not yet implemented") {
-		t.Fatalf("error must use the coming-soon register, got %q", p.errMsg)
-	}
-	if state.ForgeAuth != "deploy-key" {
-		t.Fatalf("ForgeAuth must be untouched, got %q", state.ForgeAuth)
-	}
-
-	p.update(upKey(), state)
+	p.authCursor = 1
 	_, cmd = p.update(enterKey(), state)
-	if cmd == nil {
-		t.Fatal("enter on deploy key must advance")
-	}
-	if msg := cmd(); msg != (pageCompleteMsg{}) {
-		t.Fatalf("expected pageCompleteMsg, got %T", msg)
-	}
-	if state.ForgeAuth != "deploy-key" || state.ForgeOrg != "oberthci" || state.ForgeType != "codeberg" {
-		t.Fatalf("state not written: %q %q %q", state.ForgeType, state.ForgeOrg, state.ForgeAuth)
+	if cmd == nil || state.Config.UpstreamPrivateKeyPath != "" {
+		t.Fatal("generated key must clear the prior import path")
 	}
 }
 
@@ -1242,7 +1231,7 @@ func TestForgePageViewHasLabelledSections(t *testing.T) {
 	for _, want := range []string{
 		"Forge", "Organization", "Authentication",
 		"❯ codeberg", "oberthci",
-		"(•) deploy key per repo", "( ) forge token via openbao — coming soon",
+		"(•) use existing work SSH key", "( ) generate new upstream SSH key",
 	} {
 		if !strings.Contains(view, want) {
 			t.Errorf("forge page missing %q:\n%s", want, view)
@@ -1616,6 +1605,7 @@ func TestPlainModeWiresOnboardingConfig(t *testing.T) {
 		"~/.ssh/id_ed25519.pub", // SSH key (will fail validation but test is dry-mode)
 		"github",                // forge
 		"testorg",               // org
+		"generate",              // upstream authentication
 	}, "\n")
 	answers += "\n"
 
@@ -1985,27 +1975,13 @@ func TestDonePageFingerprintRetrievalCommands(t *testing.T) {
 
 // --- #444 UX-10: dry-mode caveat ---
 
-func TestBuildCommandLineCaveatWhenForgeOrUplinkSet(t *testing.T) {
-	// No forge/uplink — no caveat.
-	state := &WizardState{}
+func TestBuildCommandLineIncludesOnboarding(t *testing.T) {
+	state := &WizardState{ForgeType: "github", ForgeOrg: "oberthci", UplinkIdentity: "dev@box", SSHKeyPath: "/home/dev/work key.pub"}
 	out := BuildCommandLine(state)
-	if strings.Contains(out, "# Note:") {
-		t.Fatal("caveat must not appear when no forge/uplink data is set")
-	}
-
-	// With forge — caveat appears.
-	state.ForgeOrg = "oberthci"
-	out = BuildCommandLine(state)
-	if !strings.Contains(out, "# Note: forge and uplink onboarding will prompt interactively") {
-		t.Fatal("caveat must appear when forge data is set")
-	}
-
-	// With uplink only — caveat appears.
-	state.ForgeOrg = ""
-	state.UplinkIdentity = "dev@box"
-	out = BuildCommandLine(state)
-	if !strings.Contains(out, "# Note:") {
-		t.Fatal("caveat must appear when uplink identity is set")
+	for _, flag := range []string{"--forge='github'", "--organization='oberthci'", "--upstream-url='github.com/oberthci'", "--uplink-identity='dev@box'", "--ssh-public-key='/home/dev/work key.pub'"} {
+		if !strings.Contains(out, flag) {
+			t.Errorf("missing %s in %s", flag, out)
+		}
 	}
 }
 
@@ -2060,8 +2036,8 @@ func TestClusterPageNonCurrentContextLabel(t *testing.T) {
 	if strings.Contains(view, "default (switch first)") {
 		t.Fatal("current context must NOT show '(switch first)'")
 	}
-	if !strings.Contains(view, "other-cluster (switch first)") {
-		t.Fatalf("non-current context must show '(switch first)':\n%s", view)
+	if strings.Contains(view, "other-cluster (switch first)") {
+		t.Fatalf("selectable non-current context must not show '(switch first)':\n%s", view)
 	}
 }
 
@@ -2095,8 +2071,8 @@ func TestClusterPageLinuxAdvice(t *testing.T) {
 	if strings.Contains(view, "Docker Desktop and kind") {
 		t.Fatalf("on Linux, cluster page must not say 'Docker Desktop and kind':\n%s", view)
 	}
-	if !strings.Contains(view, "k3s") {
-		t.Fatalf("on Linux, cluster page must mention k3s:\n%s", view)
+	if !strings.Contains(view, "kubeconfig") || !strings.Contains(view, "kind") {
+		t.Fatalf("cluster page must offer existing config and kind:\n%s", view)
 	}
 }
 

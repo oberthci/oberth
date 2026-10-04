@@ -1,0 +1,30 @@
+ISSUE 014: Narrow terminal clips setup commands and hides useful progress detail
+
+Status: Open
+Reported: 2026-10-04
+Affected version: Oberth v0.17.9 (6f40126bc8f6), macOS
+
+Priority: Medium
+Evidence: Observed in the live 80-column terminal; not inferred from the wide screenshots.
+
+Reproduction and observed behavior
+Run interactive setup in an 80-column terminal. Inspect long public-key paths,
+fingerprint retrieval commands, the credential ceremony and completion page.
+Commands and explanatory text extend beyond the visible width; progress mainly
+shows the latest log line, making earlier warnings difficult to inspect.
+
+Expected behavior
+Wrap long text and commands, support scrolling when content exceeds terminal
+height, and provide an accessible log/details view. Provide copyable complete
+commands or save them intact in the non-secret report.
+
+Acceptance criteria
+At 80 columns every required action is readable or accessible through an
+explicit scrolling/copy/details control. Preserve secret masking in any
+persistent diagnostic log. Previous failures remain available for inspection.
+
+References
+- ../setup-test-results/REPORT.txt, finding 12
+- ../oberth-source-v0.17.9/internal/setuptui/page_apply.go
+- ../oberth-source-v0.17.9/internal/setuptui/page_done.go
+- ../oberth-source-v0.17.9/internal/setuptui/ceremony_token.go

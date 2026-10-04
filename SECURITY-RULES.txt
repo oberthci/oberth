@@ -1,0 +1,12 @@
+Credential storage rule
+
+Do not create or depend on Kubernetes Secret resources. Store Oberth private
+credentials in OpenBao; use projected ServiceAccount tokens to authenticate.
+Materialize runtime key files only on a private memory-backed volume. Public
+certificates and host trust records may be stored in ConfigMaps. Never put
+private key bytes, bearer tokens or unseal material in Helm values, manifests,
+release metadata, command arguments, logs or issue reports.
+
+OpenBao must bootstrap independently: its listener keys live on its own
+protected persistent volume. Use ConfigMaps for Helm release metadata, and
+verify that generated manifests contain no private credential material.

@@ -139,7 +139,7 @@ func assertWIFPodIsolation(t *testing.T, shape string, spec corev1.PodSpec) {
 				t.Fatal("secretstore credential leaked to helper/executor")
 			}
 			if m.Name == "exec-sa-token" {
-				if c.Name != "init" && c.Name != "wait" {
+				if c.Name != "init" && c.Name != "wait" && c.Name != executorTokenWaiter {
 					t.Fatal("executor token leaked")
 				}
 				executor = true

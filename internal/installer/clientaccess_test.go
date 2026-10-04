@@ -34,6 +34,9 @@ func clientAccessDeps(t *testing.T, input string) (Deps, *bytes.Buffer, string) 
 		// on. A test that wants that path stubs LookPath itself.
 		LookPath: func(string) (string, error) { return "", errors.New("not found in test") },
 		RunCommand: func(_ context.Context, _ []byte, name string, args ...string) ([]byte, error) {
+			if name == "kubectl" && len(args) > 0 && args[len(args)-1] == "/run/oberth-identities/server/tls.crt" {
+				return []byte("-----BEGIN CERTIFICATE-----\ntest\n-----END CERTIFICATE-----\n"), nil
+			}
 			return nil, fmt.Errorf("test ran an unstubbed command: %s %s", name, strings.Join(args, " "))
 		},
 		KubeClient: fake.NewSimpleClientset(&corev1.Secret{
@@ -160,6 +163,9 @@ func TestClientAccessRegistersWithClaudeCodeWhenItIsPresent(t *testing.T) {
 	var ran [][]string
 	deps.LookPath = func(name string) (string, error) { return "/usr/local/bin/" + name, nil }
 	deps.RunCommand = func(_ context.Context, _ []byte, name string, args ...string) ([]byte, error) {
+		if name == "kubectl" && len(args) > 0 && args[len(args)-1] == "/run/oberth-identities/server/tls.crt" {
+			return []byte("-----BEGIN CERTIFICATE-----\ntest\n-----END CERTIFICATE-----\n"), nil
+		}
 		ran = append(ran, append([]string{name}, args...))
 		return nil, nil
 	}
@@ -193,7 +199,10 @@ func TestClientAccessDoesNotInventAClientThatIsNotInstalled(t *testing.T) {
 	deps, _, _ := clientAccessDeps(t, "\n")
 	deps.LookPath = func(string) (string, error) { return "", errors.New("not found") }
 	var ran int
-	deps.RunCommand = func(context.Context, []byte, string, ...string) ([]byte, error) {
+	deps.RunCommand = func(_ context.Context, _ []byte, name string, args ...string) ([]byte, error) {
+		if name == "kubectl" {
+			return []byte("-----BEGIN CERTIFICATE-----\ntest\n-----END CERTIFICATE-----\n"), nil
+		}
 		ran++
 		return nil, nil
 	}
