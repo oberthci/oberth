@@ -2085,3 +2085,55 @@ func TestClusterPageKeysShowsRescan(t *testing.T) {
 		t.Fatalf("cluster page key line must advertise rescan: %s", keys)
 	}
 }
+
+func TestEmptyKubeconfigOffersBothSetupPaths(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config")
+	if err := os.WriteFile(path, []byte("apiVersion: v1\nkind: Config\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("KUBECONFIG", path)
+	info := probeCluster("")().(clusterInfoMsg)
+	if !errors.Is(info.err, errNoCluster) {
+		t.Fatalf("unexpected empty-config result: %v", info.err)
+	}
+	state := &WizardState{}
+	welcome := newWelcomePage()
+	welcome.update(info, state)
+	view := stripAnsi(welcome.view(state, 120, 30))
+	if !strings.Contains(view, "Provide a kubeconfig path") || !strings.Contains(view, "create a new one with kind") || strings.Contains(view, "cluster detection:") {
+		t.Fatal(view)
+	}
+	cluster := newClusterPage()
+	cluster.init(state)
+	if len(cluster.contexts) != 2 || cluster.contexts[0].name != kubeconfigEntry || cluster.contexts[1].name != kindCreateEntry {
+		t.Fatalf("missing cluster choices: %+v", cluster.contexts)
+	}
+	cluster.cursor = 1
+	_, cmd := cluster.update(enterKey(), state)
+	cluster.update(cmd(), state)
+	if !state.Config.CreateKind || state.Config.ContextName != "kind-oberth" || state.Config.KubeconfigPath != "" {
+		t.Fatal("kind selection was not carried into the install")
+	}
+}
+
+func TestExplicitKubeconfigSelectionIsRetained(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "custom config")
+	data := "apiVersion: v1\nkind: Config\nclusters:\n- name: test\n  cluster:\n    server: https://cluster.example:6443\ncontexts:\n- name: chosen\n  context:\n    cluster: test\ncurrent-context: chosen\n"
+	if err := os.WriteFile(path, []byte(data), 0600); err != nil {
+		t.Fatal(err)
+	}
+	page := newClusterPage()
+	page.enteringPath, page.path = true, path
+	state := &WizardState{}
+	page.update(enterKey(), state)
+	if page.errMsg != "" || page.enteringPath || page.contexts[0].name != "chosen" {
+		t.Fatalf("custom kubeconfig was not loaded: %+v", page)
+	}
+	page.update(clusterInfoMsg{context: "chosen", isLocal: false}, state)
+	if state.Config.KubeconfigPath != path || state.Config.ContextName != "chosen" {
+		t.Fatal("explicit target was lost")
+	}
+	if !strings.Contains(BuildCommandLine(state), "--kubeconfig='"+path+"'") {
+		t.Fatal("command preview lost the quoted path")
+	}
+}
