@@ -1,4 +1,6 @@
 # Oberth CI pipeline (branch-trigger) for the oberth repository.
+# Its Golang image pins the Linux amd64 manifest, matching release.yaml so
+# branch CI and release compile with the same toolchain on arm64 kind nodes.
 #
 # Every step is its own Argo template with its own container, exit code, and
 # named log slice, which is the per-step granularity the Oberth execution model
@@ -154,7 +156,7 @@ spec:
   - name: tools-dir
     automountServiceAccountToken: false
     container:
-      image: "golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3"
+      image: "golang:1.26.6-trixie@sha256:23fdfd3a6abc97c81e32a724cdd1cf541c06c416eb04d717815f4ed7c75623d0"
       workingDir: /work/src
       command: ["/bin/mkdir"]
       args: ["-p", "/tmp/oberth-tools/bin"]
@@ -210,7 +212,7 @@ spec:
   - name: link-go
     automountServiceAccountToken: false
     container:
-      image: "golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3"
+      image: "golang:1.26.6-trixie@sha256:23fdfd3a6abc97c81e32a724cdd1cf541c06c416eb04d717815f4ed7c75623d0"
       workingDir: /work/src
       command: ["/bin/ln"]
       args: ["-sf", "/usr/local/go/bin/go", "/usr/local/go/bin/gofmt", "/tmp/oberth-tools/bin"]
@@ -266,7 +268,7 @@ spec:
   - name: install-golangci-lint
     automountServiceAccountToken: false
     container:
-      image: "golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3"
+      image: "golang:1.26.6-trixie@sha256:23fdfd3a6abc97c81e32a724cdd1cf541c06c416eb04d717815f4ed7c75623d0"
       workingDir: /work/src
       command: ["/usr/local/go/bin/go"]
       args: ["install", "github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2"]
@@ -324,7 +326,7 @@ spec:
   - name: install-helm
     automountServiceAccountToken: false
     container:
-      image: "golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3"
+      image: "golang:1.26.6-trixie@sha256:23fdfd3a6abc97c81e32a724cdd1cf541c06c416eb04d717815f4ed7c75623d0"
       workingDir: /work/src
       command: ["/usr/local/go/bin/go"]
       args: ["install", "helm.sh/helm/v4/cmd/helm@v4.2.3"]
@@ -382,7 +384,7 @@ spec:
   - name: fetch-shellcheck
     automountServiceAccountToken: false
     container:
-      image: "golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3"
+      image: "golang:1.26.6-trixie@sha256:23fdfd3a6abc97c81e32a724cdd1cf541c06c416eb04d717815f4ed7c75623d0"
       workingDir: /work/src
       command: ["/usr/bin/curl"]
       args:
@@ -457,7 +459,7 @@ spec:
   - name: verify-shellcheck
     automountServiceAccountToken: false
     container:
-      image: "golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3"
+      image: "golang:1.26.6-trixie@sha256:23fdfd3a6abc97c81e32a724cdd1cf541c06c416eb04d717815f4ed7c75623d0"
       workingDir: /work/src
       command: ["/usr/bin/sha256sum"]
       args: ["-c", ".oberth/pins/shellcheck.sha256"]
@@ -517,7 +519,7 @@ spec:
   - name: decompress-shellcheck
     automountServiceAccountToken: false
     container:
-      image: "golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3"
+      image: "golang:1.26.6-trixie@sha256:23fdfd3a6abc97c81e32a724cdd1cf541c06c416eb04d717815f4ed7c75623d0"
       workingDir: /work/src
       command: ["/usr/bin/python3"]
       args:
@@ -575,7 +577,7 @@ spec:
   - name: install-shellcheck
     automountServiceAccountToken: false
     container:
-      image: "golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3"
+      image: "golang:1.26.6-trixie@sha256:23fdfd3a6abc97c81e32a724cdd1cf541c06c416eb04d717815f4ed7c75623d0"
       workingDir: /work/src
       command: ["/bin/tar"]
       args:
@@ -651,7 +653,7 @@ spec:
         oberth.ci/workspace-mounts: none
         oberth.ci/workspace-env: none
     container:
-      image: "golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3"
+      image: "golang:1.26.6-trixie@sha256:23fdfd3a6abc97c81e32a724cdd1cf541c06c416eb04d717815f4ed7c75623d0"
       workingDir: /work/src
       command: ["/usr/bin/find"]
       args:
@@ -700,7 +702,7 @@ spec:
   - name: vet
     automountServiceAccountToken: false
     container:
-      image: "golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3"
+      image: "golang:1.26.6-trixie@sha256:23fdfd3a6abc97c81e32a724cdd1cf541c06c416eb04d717815f4ed7c75623d0"
       workingDir: /work/src
       command: ["/tmp/oberth-tools/bin/go"]
       args: ["vet", "./..."]
@@ -760,7 +762,7 @@ spec:
   - name: golangci-lint-run
     automountServiceAccountToken: false
     container:
-      image: "golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3"
+      image: "golang:1.26.6-trixie@sha256:23fdfd3a6abc97c81e32a724cdd1cf541c06c416eb04d717815f4ed7c75623d0"
       workingDir: /work/src
       command: ["/usr/bin/env"]
       args: ["GOLANGCI_LINT_CACHE=/tmp/private-golangci-lint", "/tmp/oberth-tools/bin/golangci-lint", "run", "--timeout=10m", "--concurrency=1", "./..."]
@@ -824,7 +826,7 @@ spec:
   - name: test
     automountServiceAccountToken: false
     container:
-      image: "golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3"
+      image: "golang:1.26.6-trixie@sha256:23fdfd3a6abc97c81e32a724cdd1cf541c06c416eb04d717815f4ed7c75623d0"
       workingDir: /work/src
       command: ["/tmp/oberth-tools/bin/go"]
       args: ["test", "-race", "-v", "-count=1", "./..."]
@@ -936,7 +938,7 @@ spec:
         oberth.ci/workspace-mounts: none
         oberth.ci/workspace-env: none
     container:
-      image: "golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3"
+      image: "golang:1.26.6-trixie@sha256:23fdfd3a6abc97c81e32a724cdd1cf541c06c416eb04d717815f4ed7c75623d0"
       workingDir: /work/src
       command: ["./hack/test-chart.sh"]
       args: []
@@ -968,7 +970,7 @@ spec:
   - name: build-amd64
     automountServiceAccountToken: false
     container:
-      image: "golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3"
+      image: "golang:1.26.6-trixie@sha256:23fdfd3a6abc97c81e32a724cdd1cf541c06c416eb04d717815f4ed7c75623d0"
       workingDir: /work/src
       command: ["/tmp/oberth-tools/bin/go"]
       args: ["build", "-buildvcs=false", "-o", "/dev/null", "./cmd/oberth"]
@@ -1033,7 +1035,7 @@ spec:
   - name: build-arm64
     automountServiceAccountToken: false
     container:
-      image: "golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3"
+      image: "golang:1.26.6-trixie@sha256:23fdfd3a6abc97c81e32a724cdd1cf541c06c416eb04d717815f4ed7c75623d0"
       workingDir: /work/src
       command: ["/tmp/oberth-tools/bin/go"]
       args: ["build", "-buildvcs=false", "-o", "/dev/null", "./cmd/oberth"]
@@ -1098,7 +1100,7 @@ spec:
   - name: build-darwin-amd64
     automountServiceAccountToken: false
     container:
-      image: "golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3"
+      image: "golang:1.26.6-trixie@sha256:23fdfd3a6abc97c81e32a724cdd1cf541c06c416eb04d717815f4ed7c75623d0"
       workingDir: /work/src
       command: ["/tmp/oberth-tools/bin/go"]
       args: ["build", "-buildvcs=false", "-o", "/dev/null", "./cmd/oberth"]
@@ -1162,7 +1164,7 @@ spec:
   - name: build-darwin-arm64
     automountServiceAccountToken: false
     container:
-      image: "golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3"
+      image: "golang:1.26.6-trixie@sha256:23fdfd3a6abc97c81e32a724cdd1cf541c06c416eb04d717815f4ed7c75623d0"
       workingDir: /work/src
       command: ["/tmp/oberth-tools/bin/go"]
       args: ["build", "-buildvcs=false", "-o", "/dev/null", "./cmd/oberth"]
@@ -1229,7 +1231,7 @@ spec:
         oberth.ci/workspace-mounts: none
         oberth.ci/workspace-env: none
     container:
-      image: golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3
+      image: golang:1.26.6-trixie@sha256:23fdfd3a6abc97c81e32a724cdd1cf541c06c416eb04d717815f4ed7c75623d0
       workingDir: /work/src
       command: [/usr/bin/python3]
       args: [-I, -B, hack/test-release-diagnostic.py]

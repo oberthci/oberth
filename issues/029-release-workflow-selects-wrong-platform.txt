@@ -1,0 +1,18 @@
+Title: Release workflow selects node architecture for amd64-only publisher tools
+Status: Fixed in release pipeline; awaiting end-to-end release verification
+Observed: 2026-10-05
+
+The v0.17.10 release workflow failed in install-helm before publication:
+`go: cannot install cross-compiled binaries when GOBIN is set`. The
+multi-platform Golang image selected arm64 on an arm64 kind node while that
+step sets GOARCH=amd64. Other release setup assets, including the reviewed
+bootstrap tool hashes, cosign binary and Node archive, also target amd64.
+
+Pin the exact Linux amd64 child manifests for Golang and Trivy in release.
+Keep branch CI on the identical Go manifest so tests cover the compiler used
+for release binaries. Both child manifests ran as Pods on the arm64 kind node.
+
+Acceptance: branch CI and release admit the pinned images; install-helm and
+the complete release workflow pass on the arm64 kind cluster; curl and the
+Homebrew tap resolve the published release. Do not move the failed immutable
+v0.17.10 tag; use a new version after merging the fix.
