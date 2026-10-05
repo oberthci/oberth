@@ -28,7 +28,7 @@ var (
 )
 
 const (
-	defaultMaximumWait = 2 * time.Minute
+	defaultMaximumWait = 10 * time.Minute
 	maximumToolBytes   = 1 << 20
 	maximumIssuePage   = 50
 )

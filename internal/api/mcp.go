@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"time"
 )
 
 const mcpProtocolVersion = "2025-03-26"
@@ -201,6 +202,13 @@ func (server *Server) handleMCP(writer http.ResponseWriter, request *http.Reques
 		if len(call.Arguments) == 0 {
 			call.Arguments = json.RawMessage("{}")
 		}
+		// Extend the write deadline for long-poll tools so the HTTP
+		// server's default WriteTimeout does not terminate the response
+		// before the requested wait duration expires (#789).
+		if call.Name == "wait" || call.Name == "promote_status" {
+			rc := http.NewResponseController(writer)
+			_ = rc.SetWriteDeadline(time.Now().Add(11 * time.Minute))
+		}
 		result, err := server.tools.CallTool(request.Context(), actorFrom(request.Context()), call.Name, call.Arguments)
 		if err != nil {
 			response.Result = server.classifyToolFailure(err)
@@ -294,7 +302,7 @@ func toolDefinitions() []map[string]any {
 		return properties
 	}
 	timeoutProperty := func() map[string]any {
-		return map[string]any{"type": "integer", "description": "Timeout seconds (maximum 120)", "minimum": 1, "maximum": 120}
+		return map[string]any{"type": "integer", "description": "Timeout seconds (maximum 600)", "minimum": 1, "maximum": 600}
 	}
 	object := func(properties map[string]any, required ...string) map[string]any {
 		schema := map[string]any{"type": "object", "properties": properties, "additionalProperties": false}
