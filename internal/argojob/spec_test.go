@@ -1878,6 +1878,81 @@ func TestPerStepIdentityNilMapBackwardCompatible(t *testing.T) {
 	}
 }
 
+// TestPerStepIdentityMissingDeniesAdmission proves that when per-step
+// identities are configured but a specific (repo, step) identity is NOT
+// materialized, admission is DENIED with a clear message directing the
+// operator to run `oberth secretstore sync`. Issue #623, finding 2.
+func TestPerStepIdentityMissingDeniesAdmission(t *testing.T) {
+	config := testConfig()
+	config.PerRepoIdentities = map[string]PerRepoIdentityConfig{
+		"oberth": {ServiceAccountName: "oberth-argo-test-repo"},
+	}
+	// Per-step identities exist for SOME step, but not release-publish-images.
+	config.PerStepIdentities = map[string]PerRepoIdentityConfig{
+		"oberth/release-publish-r2": {ServiceAccountName: "oberth-step-test-r2"},
+	}
+
+	request := testRequest(periapsis.TriggerRelease, multiTemplateExecDocument)
+	request.ApprovedSecrets = map[string]bool{
+		"oberth/data/release/r2-upload-token": true,
+		"oberth/data/release/gar-image-key":   true,
+	}
+	// Named grants for both templates.
+	request.StepGrants = map[string]map[string]bool{
+		"oberth/data/release/r2-upload-token": {"release-publish-r2": true},
+		"oberth/data/release/gar-image-key":   {"release-publish-images": true},
+	}
+
+	_, err := Build(config, request)
+	if err == nil {
+		t.Fatal("expected admission denial when per-step identity is not materialized")
+	}
+	if !strings.Contains(err.Error(), "secret grant denied") {
+		t.Fatalf("expected 'secret grant denied' in error, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "release-publish-images") {
+		t.Fatalf("expected step name in error, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "not materialized") {
+		t.Fatalf("expected 'not materialized' in error, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "secretstore sync") {
+		t.Fatalf("expected 'secretstore sync' remediation in error, got: %v", err)
+	}
+}
+
+// TestPerStepIdentityEmptySADeniesAdmission proves that a per-step entry
+// with an empty ServiceAccountName is treated as not materialized.
+// Issue #623, finding 2.
+func TestPerStepIdentityEmptySADeniesAdmission(t *testing.T) {
+	config := testConfig()
+	config.PerRepoIdentities = map[string]PerRepoIdentityConfig{
+		"oberth": {ServiceAccountName: "oberth-argo-test-repo"},
+	}
+	// Per-step entry exists but SA is empty.
+	config.PerStepIdentities = map[string]PerRepoIdentityConfig{
+		"oberth/release-publish-images": {ServiceAccountName: ""},
+	}
+
+	request := testRequest(periapsis.TriggerRelease, multiTemplateExecDocument)
+	request.ApprovedSecrets = map[string]bool{
+		"oberth/data/release/r2-upload-token": true,
+		"oberth/data/release/gar-image-key":   true,
+	}
+	request.StepGrants = map[string]map[string]bool{
+		"oberth/data/release/r2-upload-token": {"*": true},
+		"oberth/data/release/gar-image-key":   {"release-publish-images": true},
+	}
+
+	_, err := Build(config, request)
+	if err == nil {
+		t.Fatal("expected admission denial when per-step SA is empty")
+	}
+	if !strings.Contains(err.Error(), "not materialized") {
+		t.Fatalf("expected 'not materialized' in error, got: %v", err)
+	}
+}
+
 func TestSpecIdentityIgnoresSourceVolumeFields(t *testing.T) {
 	// Two workflows that differ ONLY in per-run source-volume fields
 	// (PVC claim name and subPaths) must produce the same identity digest.

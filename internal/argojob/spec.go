@@ -715,8 +715,13 @@ func Build(config Config, request Request) (*wfv1.Workflow, error) {
 	// ForceIdentity (which set the per-repo SA on all templates) and AFTER
 	// injectRunEnvironment (which set the per-repo VAULT_ROLE), so the
 	// per-step values take precedence for exactly the templates that need them.
+	//
+	// Fail-closed (finding 2): if a template has named grants but its per-step
+	// identity is not materialized, admission is denied with a clear message.
 	if credentialed {
-		applyPerStepIdentities(workflow, config, request)
+		if err := applyPerStepIdentities(workflow, config, request); err != nil {
+			return nil, err
+		}
 	}
 	if err := injectReleaseWIF(workflow, wifLeaves, config.ReleaseWIF); err != nil {
 		return nil, err
@@ -2061,10 +2066,20 @@ func injectTemplateEnvironment(template *wfv1.Template, environment []corev1.Env
 //  5. A per-step identity exists in config.PerStepIdentities for this
 //     (repo, step) combination
 //
-// Templates with only wildcard grants keep the per-repo identity. Issue #623.
-func applyPerStepIdentities(workflow *wfv1.Workflow, config Config, request Request) {
+// Templates with only wildcard grants keep the per-repo identity.
+//
+// Fail-closed (issue #623, finding 2): when a template consumes a
+// named-step-granted path but the per-step identity is not materialized
+// (missing from config.PerStepIdentities or SA is empty), admission is
+// DENIED. Silently keeping the per-repo union identity is the exact
+// residual this issue closes.
+func applyPerStepIdentities(workflow *wfv1.Workflow, config Config, request Request) error {
+	// When no per-step identities are configured at all (nil or empty map),
+	// this is the pre-#623 backward-compatible state: no per-step enforcement
+	// at the Vault identity layer. The admission-level per-step grant check
+	// (admitSecretstoreExecPaths) still runs.
 	if len(config.PerStepIdentities) == 0 {
-		return
+		return nil
 	}
 
 	// Build a set of top-level template pointers for stable-name detection.
@@ -2072,6 +2087,8 @@ func applyPerStepIdentities(workflow *wfv1.Workflow, config Config, request Requ
 	for i := range workflow.Spec.Templates {
 		topLevel[&workflow.Spec.Templates[i]] = true
 	}
+
+	var problems []error
 
 	for i := range workflow.Spec.Templates {
 		template := &workflow.Spec.Templates[i]
@@ -2088,27 +2105,30 @@ func applyPerStepIdentities(workflow *wfv1.Workflow, config Config, request Requ
 
 		// Check if any of this template's paths has a named-step grant.
 		hasNamedGrant := false
+		var namedGrantPath string
 		for _, path := range execPaths {
 			if request.StepGrants == nil {
 				break
 			}
 			steps := request.StepGrants[path]
-			if steps != nil && steps[template.Name] && !steps["*"] {
+			if steps == nil {
+				continue
+			}
+			// Check if this template has a named grant (not wildcard) for this path.
+			if steps[template.Name] && !steps["*"] {
 				hasNamedGrant = true
+				namedGrantPath = path
 				break
 			}
-			// Also check: if there are named-step grants for this path
-			// (any step), and this template is one of them.
-			if steps != nil {
-				for step := range steps {
-					if step != "*" && step == template.Name {
-						hasNamedGrant = true
-						break
-					}
-				}
-				if hasNamedGrant {
+			for step := range steps {
+				if step != "*" && step == template.Name {
+					hasNamedGrant = true
+					namedGrantPath = path
 					break
 				}
+			}
+			if hasNamedGrant {
+				break
 			}
 		}
 
@@ -2119,7 +2139,17 @@ func applyPerStepIdentities(workflow *wfv1.Workflow, config Config, request Requ
 		// Look up the per-step identity for this (repo, step).
 		stepKey := canonicalRepoKey(request.UpstreamName, request.UpstreamOrg, request.Repo) + "/" + template.Name
 		perStep, exists := config.PerStepIdentities[stepKey]
+
+		// Fail-closed (finding 2): if the per-step identity is not
+		// materialized, deny admission. The residual this closes is a
+		// template running under the per-repo union identity (which can
+		// read all the repo's granted paths, not just its own).
 		if !exists || perStep.ServiceAccountName == "" {
+			problems = append(problems, fmt.Errorf(
+				"secret grant denied: step %q has a named grant for path %q "+
+					"but its per-step identity is not materialized -- "+
+					"run `oberth secretstore sync` then `oberth install --install-secretstore --upgrade`",
+				template.Name, namedGrantPath))
 			continue
 		}
 
@@ -2134,6 +2164,8 @@ func applyPerStepIdentities(workflow *wfv1.Workflow, config Config, request Requ
 			c.Env = overrideEnvironment(c.Env, stepRole)
 		})
 	}
+
+	return errors.Join(problems...)
 }
 
 func overrideEnvironment(existing []corev1.EnvVar, injected []corev1.EnvVar) []corev1.EnvVar {
