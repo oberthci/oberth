@@ -75,7 +75,9 @@ metadata:
     oberth.ci/size: L
 spec:
   entrypoint: ci
-  activeDeadlineSeconds: 3600
+  # Cold kind runs have spent nearly an hour in setup and scheduling before
+  # race tests start. Allow the full two-hour administrator ceiling.
+  activeDeadlineSeconds: 7200
 
   volumeClaimTemplates:
   - metadata:
