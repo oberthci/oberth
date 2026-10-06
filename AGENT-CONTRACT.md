@@ -1442,6 +1442,7 @@ version that is recorded on live databases must never be rewritten.
 | v15 | v0.15.5 | vm_suite_executions: add attach_json column | Database restore |
 | v16 | v0.16.0 | runs: add concurrency_group column with DNS-label grammar constraint | Database restore |
 | v17 | v0.16.18 | Publish retry (#696): replace publications_guard_update and ci_issue_projection_monotonic triggers to permit failed-to-pending publication retry and same-sequence outcome transition | Database restore |
+| v18 | -- | Grant declarations (#623): grant_declarations table for declared-but-not-granted path tracking; `access_list --pending` query; recorded at Workflow admission | Database restore |
 
 **Contract test:** `TestEveryMigrationDocumentedInAgentContract` asserts that
 every migration version in `internal/store/schema.go` has a corresponding

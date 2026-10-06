@@ -26,8 +26,8 @@ func (e sqliteResultError) Code() int { return int(e) }
 func TestSchemaMigrationsAreContiguous(t *testing.T) {
 	t.Parallel()
 
-	if latestMigrationVersion != 17 {
-		t.Fatalf("latest migration version = %d, want 17", latestMigrationVersion)
+	if latestMigrationVersion != 18 {
+		t.Fatalf("latest migration version = %d, want 18", latestMigrationVersion)
 	}
 	if len(migrations) != latestMigrationVersion {
 		t.Fatalf("migration count = %d, want %d", len(migrations), latestMigrationVersion)
@@ -931,6 +931,7 @@ func TestFreshSchemaIsCompleteAndIdempotent(t *testing.T) {
 		"audit_anchors",
 		"ci_issue_projections",
 		"ci_issue_work",
+		"grant_declarations",
 		"issue_locks",
 		"issues",
 		"pending_token_credentials",
