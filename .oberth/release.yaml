@@ -1,4 +1,8 @@
-# Release workflow. Every Pod leaf uses the template-level token and workspace
+# Release workflow. The Golang and Trivy images pin their Linux amd64
+# platform manifests, not multi-platform indexes: bootstrap tools and their
+# reviewed digests target amd64 even when the Kubernetes node is arm64.
+# Release Pod execution of both pinned manifests was verified on arm64 kind.
+# Every Pod leaf uses the template-level token and workspace
 # controls every server since v0.16.6 honours (#567): it declares
 # oberth.ci/workspace-mounts: none and oberth.ci/workspace-env: none, and every
 # leaf except the six credentialed ones (release-sign-binaries, release-publish-images,
@@ -212,7 +216,7 @@ spec:
         oberth.ci/workspace-mounts: none
         oberth.ci/workspace-env: none
     container:
-      image: golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3
+      image: golang:1.26.6-trixie@sha256:23fdfd3a6abc97c81e32a724cdd1cf541c06c416eb04d717815f4ed7c75623d0
       workingDir: /work/src
       command:
       - /bin/sh
@@ -262,7 +266,7 @@ spec:
         oberth.ci/workspace-mounts: none
         oberth.ci/workspace-env: none
     container:
-      image: golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3
+      image: golang:1.26.6-trixie@sha256:23fdfd3a6abc97c81e32a724cdd1cf541c06c416eb04d717815f4ed7c75623d0
       workingDir: /work/src
       command:
       - /bin/sh
@@ -300,7 +304,7 @@ spec:
         oberth.ci/workspace-mounts: none
         oberth.ci/workspace-env: none
     container:
-      image: aquasec/trivy:0.73.0@sha256:7cced7cae583819fc7806d4cbc0dbbc7cad18b99f7d3e235192e6da8c091045c
+      image: aquasec/trivy:0.73.0@sha256:4bbf3824d974b70f27631005e2e6194d4d8fbd6e72c4a9e04cf521e25c5cb07f
       workingDir: /work/src
       command:
       - /bin/sh
@@ -350,7 +354,7 @@ spec:
         oberth.ci/workspace-mounts: none
         oberth.ci/workspace-env: none
     container:
-      image: golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3
+      image: golang:1.26.6-trixie@sha256:23fdfd3a6abc97c81e32a724cdd1cf541c06c416eb04d717815f4ed7c75623d0
       workingDir: /work/src
       command:
       - /bin/sh
@@ -402,7 +406,7 @@ spec:
         oberth.ci/workspace-mounts: none
         oberth.ci/workspace-env: none
     container:
-      image: golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3
+      image: golang:1.26.6-trixie@sha256:23fdfd3a6abc97c81e32a724cdd1cf541c06c416eb04d717815f4ed7c75623d0
       workingDir: /work/src
       command:
       - /bin/sh
@@ -452,7 +456,7 @@ spec:
         oberth.ci/workspace-mounts: none
         oberth.ci/workspace-env: none
     container:
-      image: golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3
+      image: golang:1.26.6-trixie@sha256:23fdfd3a6abc97c81e32a724cdd1cf541c06c416eb04d717815f4ed7c75623d0
       workingDir: /work/src
       command:
       - /bin/sh
@@ -511,7 +515,7 @@ spec:
         oberth.ci/workspace-mounts: none
         oberth.ci/workspace-env: none
     container:
-      image: golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3
+      image: golang:1.26.6-trixie@sha256:23fdfd3a6abc97c81e32a724cdd1cf541c06c416eb04d717815f4ed7c75623d0
       workingDir: /work/src
       command:
       - /bin/sh
@@ -578,7 +582,7 @@ spec:
         oberth.ci/workspace-mounts: none
         oberth.ci/workspace-env: none
     container:
-      image: golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3
+      image: golang:1.26.6-trixie@sha256:23fdfd3a6abc97c81e32a724cdd1cf541c06c416eb04d717815f4ed7c75623d0
       workingDir: /work/src
       command:
       - /bin/sh
@@ -628,7 +632,7 @@ spec:
         oberth.ci/workspace-mounts: none
         oberth.ci/workspace-env: none
     container:
-      image: golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3
+      image: golang:1.26.6-trixie@sha256:23fdfd3a6abc97c81e32a724cdd1cf541c06c416eb04d717815f4ed7c75623d0
       workingDir: /work/src
       command:
       - /bin/sh
@@ -678,7 +682,7 @@ spec:
         oberth.ci/workspace-mounts: none
         oberth.ci/workspace-env: none
     container:
-      image: golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3
+      image: golang:1.26.6-trixie@sha256:23fdfd3a6abc97c81e32a724cdd1cf541c06c416eb04d717815f4ed7c75623d0
       workingDir: /work/src
       command:
       - /bin/sh
@@ -739,7 +743,7 @@ spec:
         oberth.ci/workspace-mounts: none
         oberth.ci/workspace-env: none
     container:
-      image: golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3
+      image: golang:1.26.6-trixie@sha256:23fdfd3a6abc97c81e32a724cdd1cf541c06c416eb04d717815f4ed7c75623d0
       workingDir: /work/src
       command:
       - /bin/sh
@@ -800,7 +804,7 @@ spec:
         oberth.ci/workspace-mounts: none
         oberth.ci/workspace-env: none
     container:
-      image: golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3
+      image: golang:1.26.6-trixie@sha256:23fdfd3a6abc97c81e32a724cdd1cf541c06c416eb04d717815f4ed7c75623d0
       workingDir: /work/src
       command:
       - /bin/sh
@@ -849,7 +853,7 @@ spec:
         oberth.ci/workspace-mounts: none
         oberth.ci/workspace-env: none
     container:
-      image: golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3
+      image: golang:1.26.6-trixie@sha256:23fdfd3a6abc97c81e32a724cdd1cf541c06c416eb04d717815f4ed7c75623d0
       workingDir: /work/src
       command:
       - /bin/sh
@@ -916,7 +920,7 @@ spec:
         oberth.ci/workspace-mounts: none
         oberth.ci/workspace-env: none
     container:
-      image: golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3
+      image: golang:1.26.6-trixie@sha256:23fdfd3a6abc97c81e32a724cdd1cf541c06c416eb04d717815f4ed7c75623d0
       workingDir: /work/src
       command:
       - /bin/sh
@@ -966,7 +970,7 @@ spec:
         oberth.ci/workspace-mounts: none
         oberth.ci/workspace-env: none
     container:
-      image: golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3
+      image: golang:1.26.6-trixie@sha256:23fdfd3a6abc97c81e32a724cdd1cf541c06c416eb04d717815f4ed7c75623d0
       workingDir: /work/src
       command:
       - /bin/sh
@@ -1021,7 +1025,7 @@ spec:
         oberth.ci/workspace-mounts: none
         oberth.ci/workspace-env: none
     container:
-      image: golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3
+      image: golang:1.26.6-trixie@sha256:23fdfd3a6abc97c81e32a724cdd1cf541c06c416eb04d717815f4ed7c75623d0
       workingDir: /work/src
       command:
       - /bin/sh
@@ -1072,7 +1076,7 @@ spec:
         oberth.ci/workspace-mounts: none
         oberth.ci/workspace-env: none
     container:
-      image: golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3
+      image: golang:1.26.6-trixie@sha256:23fdfd3a6abc97c81e32a724cdd1cf541c06c416eb04d717815f4ed7c75623d0
       workingDir: /work/src
       command:
       - /bin/sh
@@ -1126,7 +1130,7 @@ spec:
         oberth.ci/workspace-mounts: none
         oberth.ci/workspace-env: none
     container:
-      image: aquasec/trivy:0.73.0@sha256:7cced7cae583819fc7806d4cbc0dbbc7cad18b99f7d3e235192e6da8c091045c
+      image: aquasec/trivy:0.73.0@sha256:4bbf3824d974b70f27631005e2e6194d4d8fbd6e72c4a9e04cf521e25c5cb07f
       workingDir: /work/src
       command:
       - /bin/sh
@@ -1188,7 +1192,7 @@ spec:
         oberth.ci/workspace-mounts: none
         oberth.ci/workspace-env: none
     container:
-      image: golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3
+      image: golang:1.26.6-trixie@sha256:23fdfd3a6abc97c81e32a724cdd1cf541c06c416eb04d717815f4ed7c75623d0
       workingDir: /work/src
       command:
       - /bin/sh
@@ -1242,7 +1246,7 @@ spec:
         oberth.ci/workspace-mounts: none
         oberth.ci/workspace-env: none
     container:
-      image: golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3
+      image: golang:1.26.6-trixie@sha256:23fdfd3a6abc97c81e32a724cdd1cf541c06c416eb04d717815f4ed7c75623d0
       workingDir: /work/src
       command:
       - /bin/sh
@@ -1292,7 +1296,7 @@ spec:
         oberth.ci/workspace-env: none
     activeDeadlineSeconds: 3600
     container:
-      image: golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3
+      image: golang:1.26.6-trixie@sha256:23fdfd3a6abc97c81e32a724cdd1cf541c06c416eb04d717815f4ed7c75623d0
       workingDir: /work/src
       command:
       - /bin/sh
@@ -1350,7 +1354,7 @@ spec:
         duration: 30s
         factor: 2
     container:
-      image: golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3
+      image: golang:1.26.6-trixie@sha256:23fdfd3a6abc97c81e32a724cdd1cf541c06c416eb04d717815f4ed7c75623d0
       workingDir: /work/src
       command:
       - /run/oberth/bin/oberth
@@ -1403,7 +1407,7 @@ spec:
           memory: 4Gi
     initContainers:
     - name: verify-publisher-tools
-      image: golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3
+      image: golang:1.26.6-trixie@sha256:23fdfd3a6abc97c81e32a724cdd1cf541c06c416eb04d717815f4ed7c75623d0
       workingDir: /work/src
       command:
       - /bin/sh
@@ -1438,7 +1442,7 @@ spec:
         duration: 30s
         factor: 2
     container:
-      image: golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3
+      image: golang:1.26.6-trixie@sha256:23fdfd3a6abc97c81e32a724cdd1cf541c06c416eb04d717815f4ed7c75623d0
       workingDir: /work/src
       command:
       - /run/oberth/bin/oberth
@@ -1491,7 +1495,7 @@ spec:
           memory: 1Gi
     initContainers:
     - name: verify-publisher-tools
-      image: golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3
+      image: golang:1.26.6-trixie@sha256:23fdfd3a6abc97c81e32a724cdd1cf541c06c416eb04d717815f4ed7c75623d0
       workingDir: /work/src
       command:
       - /bin/sh
@@ -1526,7 +1530,7 @@ spec:
         duration: 30s
         factor: 2
     container:
-      image: golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3
+      image: golang:1.26.6-trixie@sha256:23fdfd3a6abc97c81e32a724cdd1cf541c06c416eb04d717815f4ed7c75623d0
       workingDir: /work/src
       command:
       - /run/oberth/bin/oberth
@@ -1580,7 +1584,7 @@ spec:
           memory: 8Gi
     initContainers:
     - name: verify-publisher-tools
-      image: golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3
+      image: golang:1.26.6-trixie@sha256:23fdfd3a6abc97c81e32a724cdd1cf541c06c416eb04d717815f4ed7c75623d0
       workingDir: /work/src
       command:
       - /bin/sh
@@ -1609,7 +1613,7 @@ spec:
         oberth.ci/workspace-mounts: none
         oberth.ci/workspace-env: none
     container:
-      image: golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3
+      image: golang:1.26.6-trixie@sha256:23fdfd3a6abc97c81e32a724cdd1cf541c06c416eb04d717815f4ed7c75623d0
       workingDir: /work/src
       command:
       - /bin/sh
@@ -1669,7 +1673,7 @@ spec:
         duration: 30s
         factor: 2
     container:
-      image: golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3
+      image: golang:1.26.6-trixie@sha256:23fdfd3a6abc97c81e32a724cdd1cf541c06c416eb04d717815f4ed7c75623d0
       workingDir: /work/src
       command:
       - /run/oberth/bin/oberth
@@ -1723,7 +1727,7 @@ spec:
           memory: 4Gi
     initContainers:
     - name: verify-publisher-tools
-      image: golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3
+      image: golang:1.26.6-trixie@sha256:23fdfd3a6abc97c81e32a724cdd1cf541c06c416eb04d717815f4ed7c75623d0
       workingDir: /work/src
       command:
       - /bin/sh
@@ -1758,7 +1762,7 @@ spec:
         duration: 30s
         factor: 2
     container:
-      image: golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3
+      image: golang:1.26.6-trixie@sha256:23fdfd3a6abc97c81e32a724cdd1cf541c06c416eb04d717815f4ed7c75623d0
       workingDir: /work/src
       command:
       - /run/oberth/bin/oberth
@@ -1811,7 +1815,7 @@ spec:
           memory: 4Gi
     initContainers:
     - name: verify-publisher-tools
-      image: golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3
+      image: golang:1.26.6-trixie@sha256:23fdfd3a6abc97c81e32a724cdd1cf541c06c416eb04d717815f4ed7c75623d0
       workingDir: /work/src
       command:
       - /bin/sh
@@ -1847,7 +1851,7 @@ spec:
         duration: 30s
         factor: 2
     container:
-      image: golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3
+      image: golang:1.26.6-trixie@sha256:23fdfd3a6abc97c81e32a724cdd1cf541c06c416eb04d717815f4ed7c75623d0
       workingDir: /work/src
       command:
       - /bin/sh
@@ -1902,7 +1906,7 @@ spec:
         oberth.ci/workspace-mounts: none
         oberth.ci/workspace-env: none
     container:
-      image: golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3
+      image: golang:1.26.6-trixie@sha256:23fdfd3a6abc97c81e32a724cdd1cf541c06c416eb04d717815f4ed7c75623d0
       workingDir: /work/src
       command:
       - /bin/sh
@@ -1950,7 +1954,7 @@ spec:
         oberth.ci/workspace-mounts: none
         oberth.ci/workspace-env: none
     container:
-      image: golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3
+      image: golang:1.26.6-trixie@sha256:23fdfd3a6abc97c81e32a724cdd1cf541c06c416eb04d717815f4ed7c75623d0
       workingDir: /work/src
       command:
       - /run/oberth/bin/oberth
@@ -2008,7 +2012,7 @@ spec:
           memory: 2Gi
     initContainers:
     - name: verify-publisher-tools
-      image: golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3
+      image: golang:1.26.6-trixie@sha256:23fdfd3a6abc97c81e32a724cdd1cf541c06c416eb04d717815f4ed7c75623d0
       workingDir: /work/src
       command:
       - /bin/sh
@@ -2031,7 +2035,7 @@ spec:
           cpu: '1'
           memory: 256Mi
     - name: verify-website-inputs
-      image: golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3
+      image: golang:1.26.6-trixie@sha256:23fdfd3a6abc97c81e32a724cdd1cf541c06c416eb04d717815f4ed7c75623d0
       workingDir: /work/src
       command:
       - /bin/sh
@@ -2054,7 +2058,7 @@ spec:
           cpu: '1'
           memory: 1Gi
     - name: install-website-tools
-      image: golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3
+      image: golang:1.26.6-trixie@sha256:23fdfd3a6abc97c81e32a724cdd1cf541c06c416eb04d717815f4ed7c75623d0
       workingDir: /work/src
       command:
       - /bin/sh
@@ -2098,7 +2102,7 @@ spec:
         oberth.ci/workspace-mounts: none
         oberth.ci/workspace-env: none
     container:
-      image: golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3
+      image: golang:1.26.6-trixie@sha256:23fdfd3a6abc97c81e32a724cdd1cf541c06c416eb04d717815f4ed7c75623d0
       workingDir: /work/src
       command:
       - /bin/sh
