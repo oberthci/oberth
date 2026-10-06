@@ -1081,6 +1081,25 @@ continuity checks; it must never be used to reset or bypass those checks.
   `secretstore sync` render these per-step roles/policies/SAs alongside
   per-repo identities. The chart renders per-step SAs from the
   `argo.perStepIdentities` values list.
+  **Fail-closed admission (finding 2):** when per-step identities are
+  configured (the map is non-empty) and a template has a named grant but its
+  per-step identity is missing from the server's identity store or has an
+  empty SA, admission is DENIED with the message: `secret grant denied: step
+  "<s>" has a named grant for path "<p>" but its per-step identity is not
+  materialized -- run \`oberth secretstore sync\``. This closes the residual
+  where a template would run under the per-repo union identity.
+  **Orphan removal (finding 5):** `secretstore sync` enumerates existing
+  `oberth-step-*` policies and removes any that are not in the desired set
+  (derived from current step identities). Both the policy and the
+  Kubernetes-auth role are deleted. Tokens outstanding under a removed role
+  expire by TTL (<=30m `token_max_ttl`). This handles revoked grants: the
+  per-step identity stays in OpenBao until the next sync removes it.
+  **Pending declarations (finding 4):** `access_list --pending` returns
+  (repo, step, path) declarations observed at Workflow admission that have
+  no matching active grant. Declarations are recorded at admission time
+  (schema migration 18: `grant_declarations` table) and never auto-approve.
+  A wildcard grant (`step="*"`) covers any named-step declaration for the
+  same (repo, path). Revoking a grant re-pends its declaration.
   The server's own identity has no Vault policy-write capability, so
   `access_revoke` includes an advisory in its response. To complete the
   revocation at the Vault layer, re-sync policies from the current approval
