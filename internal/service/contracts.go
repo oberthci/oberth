@@ -197,6 +197,10 @@ type SecretAccessStore interface {
 	// same qualified persisted key the migrations and API handlers write
 	// instead of endlessly re-creating bare rows (#245 BLOCKER B).
 	RepositoryByName(ctx context.Context, name string) (model.Repository, error)
+	// PendingGrantDeclarations returns declarations that have no matching
+	// active grant. A wildcard grant (step="*") covers any step's declaration.
+	// Issue #623, finding 4.
+	PendingGrantDeclarations(ctx context.Context, repo string) ([]store.PendingGrantDeclaration, error)
 }
 
 type SchedulerStore interface {

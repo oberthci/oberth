@@ -13,7 +13,7 @@ type migration struct {
 func LatestMigrationVersion() int { return latestMigrationVersion }
 
 const (
-	latestMigrationVersion = 17
+	latestMigrationVersion = 18
 	// oberthSchemaIdentity is the fresh-deployment default. Existing deployments
 	// supply their original immutable identity through ProtocolConfig; bootstrap
 	// SQL and legacy schema validation use that exact configured operand.
@@ -869,5 +869,22 @@ WHEN (NEW.repo_id != OLD.repo_id
 BEGIN
     SELECT RAISE(ABORT, 'CI issue projection must advance monotonically');
 END;`,
+	},
+	{
+		// v18: Grant declarations table (issue #623, finding 4).
+		// Records (repo, step, path) declarations observed at Workflow
+		// admission so `access_list --pending` can show declared-not-granted
+		// paths without reading the git cache at query time. The table is
+		// upserted on every admission; last_seen_sha and last_seen_at track
+		// the most recent observation.
+		version: 18,
+		sql: `CREATE TABLE grant_declarations (
+    repo TEXT NOT NULL,
+    step TEXT NOT NULL,
+    path TEXT NOT NULL,
+    last_seen_sha TEXT NOT NULL,
+    last_seen_at INTEGER NOT NULL,
+    PRIMARY KEY (repo, step, path)
+) WITHOUT ROWID;`,
 	},
 }

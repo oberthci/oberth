@@ -3605,6 +3605,10 @@ func (s *stubSecretAccessStore) RepositoryByName(_ context.Context, name string)
 	return model.Repository{}, fmt.Errorf("%w: repository %q", store.ErrNotFound, name)
 }
 
+func (s *stubSecretAccessStore) PendingGrantDeclarations(_ context.Context, _ string) ([]store.PendingGrantDeclaration, error) {
+	return nil, nil
+}
+
 func TestAccessAllowRequiresAdminUplink(t *testing.T) {
 	t.Parallel()
 	fixture := newControlFixture(t)

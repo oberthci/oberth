@@ -157,6 +157,21 @@ type AccessListResponse struct {
 	Grants []AccessGrantResponse `json:"grants"`
 }
 
+// AccessListPendingResponse wraps pending (declared-but-not-granted) entries.
+// Issue #623, finding 4.
+type AccessListPendingResponse struct {
+	Declarations []PendingDeclaration `json:"declarations"`
+}
+
+// PendingDeclaration describes one declared-but-not-granted (repo, step, path).
+type PendingDeclaration struct {
+	Repo        string `json:"repo"`
+	Step        string `json:"step"`
+	Path        string `json:"path"`
+	LastSeenSHA string `json:"last_seen_sha"`
+	LastSeenAt  string `json:"last_seen_at"`
+}
+
 // RunListResponse wraps run_list results as a JSON object so MCP
 // structuredContent satisfies the record requirement (#794).
 type RunListResponse struct {
@@ -362,7 +377,7 @@ func toolDefinitions() []map[string]any {
 			"limit":  map[string]any{"type": "integer", "minimum": 1, "maximum": 50, "description": "Page size (default 50)"},
 		})),
 		tool("issue_lock", "Acquire or renew the caller-owned five-minute issue lock.", object(map[string]any{"id": integerProperty("Issue ID")}, "id")),
-		tool("access_list", "List secret access grants for a repository.", object(map[string]any{"repo": stringProperty("Repository name (empty lists all)"), "revoked": map[string]any{"type": "boolean", "description": "Include revoked grants"}})),
+		tool("access_list", "List secret access grants for a repository.", object(map[string]any{"repo": stringProperty("Repository name (empty lists all)"), "revoked": map[string]any{"type": "boolean", "description": "Include revoked grants"}, "pending": map[string]any{"type": "boolean", "description": "Return declared-but-not-granted paths observed at Workflow admission (issue #623)"}})),
 		tool("access_allow", "Grant a step access to a secret path. Requires admin uplink.", object(map[string]any{"repo": stringProperty("Repository name"), "step": stringProperty("Step/template name"), "secret": stringProperty("Short secret path (e.g. terraform/credentials)")}, "repo", "step", "secret")),
 		tool("access_revoke", "Revoke a step's access to a secret path. Requires admin uplink.", object(map[string]any{"repo": stringProperty("Repository name"), "step": stringProperty("Step/template name"), "secret": stringProperty("Short secret path (e.g. terraform/credentials)")}, "repo", "step", "secret")),
 		tool("repo_list", "List registered repositories with their upstream and probe state.", object(map[string]any{})),

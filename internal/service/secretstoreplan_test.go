@@ -465,6 +465,141 @@ func TestSecretStorePlanLastMaterializedCurrent(t *testing.T) {
 	}
 }
 
+// --- access_list --pending tests (issue #623, finding 4) ---
+
+func TestAccessListPendingDeclaredNotGranted(t *testing.T) {
+	service := testService(t)
+	admin := api.Actor{Identity: "admin@host", Admin: true}
+
+	// Record a grant declaration (normally done at Workflow admission).
+	ctx := context.Background()
+	err := service.secretAccess.(*store.Store).RecordGrantDeclarations(ctx, "codeberg/acme/oberth", "abc123", []store.GrantDeclaration{
+		{Step: "release-publish-images", Path: "oberth/data/release/gar-image-key"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Query pending — should return the declaration since no grant exists.
+	result, err := service.CallTool(ctx, admin, "access_list",
+		json.RawMessage(`{"pending":true}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pending, ok := result.(api.AccessListPendingResponse)
+	if !ok {
+		t.Fatalf("unexpected type: %T", result)
+	}
+	if len(pending.Declarations) != 1 {
+		t.Fatalf("expected 1 pending declaration, got %d", len(pending.Declarations))
+	}
+	if pending.Declarations[0].Step != "release-publish-images" {
+		t.Fatalf("unexpected step: %s", pending.Declarations[0].Step)
+	}
+}
+
+func TestAccessListPendingGrantedNotPending(t *testing.T) {
+	service := testService(t)
+	admin := api.Actor{Identity: "admin@host", Admin: true}
+	ctx := context.Background()
+
+	db := service.secretAccess.(*store.Store)
+
+	// Record a declaration.
+	err := db.RecordGrantDeclarations(ctx, "codeberg/acme/oberth", "abc123", []store.GrantDeclaration{
+		{Step: "release-publish-images", Path: "oberth/data/release/gar-image-key"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Grant the exact (repo, step, path).
+	_, err = db.Grant(ctx, "codeberg/acme/oberth", "release-publish-images", "oberth/data/release/gar-image-key", "admin@host")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Query pending — should be empty since the grant covers the declaration.
+	result, err := service.CallTool(ctx, admin, "access_list",
+		json.RawMessage(`{"pending":true}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pending := result.(api.AccessListPendingResponse)
+	if len(pending.Declarations) != 0 {
+		t.Fatalf("expected 0 pending declarations after grant, got %d", len(pending.Declarations))
+	}
+}
+
+func TestAccessListPendingWildcardGrantCoversNamedDeclaration(t *testing.T) {
+	service := testService(t)
+	admin := api.Actor{Identity: "admin@host", Admin: true}
+	ctx := context.Background()
+
+	db := service.secretAccess.(*store.Store)
+
+	// Record a named-step declaration.
+	err := db.RecordGrantDeclarations(ctx, "codeberg/acme/oberth", "abc123", []store.GrantDeclaration{
+		{Step: "release-publish-images", Path: "oberth/data/release/gar-image-key"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Grant with wildcard step — should cover the named declaration.
+	_, err = db.Grant(ctx, "codeberg/acme/oberth", "*", "oberth/data/release/gar-image-key", "admin@host")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := service.CallTool(ctx, admin, "access_list",
+		json.RawMessage(`{"pending":true}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pending := result.(api.AccessListPendingResponse)
+	if len(pending.Declarations) != 0 {
+		t.Fatalf("expected wildcard grant to cover named declaration, got %d pending", len(pending.Declarations))
+	}
+}
+
+func TestAccessListPendingRevokedGrantRePends(t *testing.T) {
+	service := testService(t)
+	admin := api.Actor{Identity: "admin@host", Admin: true}
+	ctx := context.Background()
+
+	db := service.secretAccess.(*store.Store)
+
+	// Record a declaration.
+	err := db.RecordGrantDeclarations(ctx, "codeberg/acme/oberth", "abc123", []store.GrantDeclaration{
+		{Step: "release-publish-images", Path: "oberth/data/release/gar-image-key"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Grant then revoke.
+	_, err = db.Grant(ctx, "codeberg/acme/oberth", "release-publish-images", "oberth/data/release/gar-image-key", "admin@host")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.Revoke(ctx, "codeberg/acme/oberth", "release-publish-images", "oberth/data/release/gar-image-key", "admin@host")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Should be pending again after revocation.
+	result, err := service.CallTool(ctx, admin, "access_list",
+		json.RawMessage(`{"pending":true}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pending := result.(api.AccessListPendingResponse)
+	if len(pending.Declarations) != 1 {
+		t.Fatalf("expected 1 pending after revocation, got %d", len(pending.Declarations))
+	}
+}
+
 func TestSecretStorePlanLastMaterializedStale(t *testing.T) {
 	// After recording a receipt with a mismatched digest, the tool must
 	// render last_materialized with status "stale" (#712).

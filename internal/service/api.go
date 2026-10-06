@@ -437,9 +437,13 @@ func (service *API) CallTool(ctx context.Context, actor api.Actor, name string, 
 		var arguments struct {
 			Repo    string `json:"repo"`
 			Revoked bool   `json:"revoked"`
+			Pending bool   `json:"pending"`
 		}
 		if err := decodeTool(raw, &arguments); err != nil {
 			return nil, err
+		}
+		if arguments.Pending {
+			return service.accessListPending(ctx, arguments.Repo)
 		}
 		return service.accessList(ctx, arguments.Repo, arguments.Revoked)
 	case "access_allow":
@@ -1730,6 +1734,41 @@ func (service *API) accessList(ctx context.Context, repo string, includeRevoked 
 	response := api.AccessListResponse{Grants: make([]api.AccessGrantResponse, len(grants))}
 	for index, grant := range grants {
 		response.Grants[index] = wireAccessGrant(grant)
+	}
+	return response, nil
+}
+
+// accessListPending returns declared-but-not-granted paths observed at Workflow
+// admission. A declaration appears when a pipeline's `oberth secretstore exec`
+// references a path; it disappears when an active grant covers that (repo, step,
+// path) — either an exact step match or a wildcard grant. Pending never
+// auto-approves. Issue #623, finding 4.
+func (service *API) accessListPending(ctx context.Context, repo string) (api.AccessListPendingResponse, error) {
+	if service.secretAccess == nil {
+		return api.AccessListPendingResponse{}, fmt.Errorf("%w: secret access", ErrUnavailable)
+	}
+	if strings.TrimSpace(repo) != "" {
+		canonical, err := service.canonicalAccessRepo(ctx, repo)
+		if err != nil {
+			return api.AccessListPendingResponse{}, err
+		}
+		repo = canonical
+	}
+	pending, err := service.secretAccess.PendingGrantDeclarations(ctx, repo)
+	if err != nil {
+		return api.AccessListPendingResponse{}, err
+	}
+	response := api.AccessListPendingResponse{
+		Declarations: make([]api.PendingDeclaration, len(pending)),
+	}
+	for i, p := range pending {
+		response.Declarations[i] = api.PendingDeclaration{
+			Repo:        p.Repo,
+			Step:        p.Step,
+			Path:        p.Path,
+			LastSeenSHA: p.LastSeenSHA,
+			LastSeenAt:  p.LastSeenAt.UTC().Format("2006-01-02T15:04:05Z"),
+		}
 	}
 	return response, nil
 }

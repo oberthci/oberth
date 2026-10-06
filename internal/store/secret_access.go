@@ -250,6 +250,92 @@ WHERE repo = ? AND revoked_at IS NULL`, qualifiedName)
 	return grants, nil
 }
 
+// RecordGrantDeclarations upserts (repo, step, path) declarations observed
+// at Workflow admission. This captures what a repository's pipeline actually
+// declares so `access_list --pending` can show declared-but-not-granted paths
+// without reading the git cache at query time. Issue #623, finding 4.
+func (s *Store) RecordGrantDeclarations(ctx context.Context, repo, sha string, declarations []GrantDeclaration) error {
+	if len(declarations) == 0 {
+		return nil
+	}
+	now := unixNano(s.now())
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin grant declarations tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	stmt, err := tx.PrepareContext(ctx, `
+INSERT INTO grant_declarations (repo, step, path, last_seen_sha, last_seen_at)
+VALUES (?, ?, ?, ?, ?)
+ON CONFLICT (repo, step, path)
+DO UPDATE SET last_seen_sha = excluded.last_seen_sha, last_seen_at = excluded.last_seen_at`)
+	if err != nil {
+		return fmt.Errorf("prepare grant declarations: %w", err)
+	}
+	defer func() { _ = stmt.Close() }()
+	for _, d := range declarations {
+		if _, err := stmt.ExecContext(ctx, repo, d.Step, d.Path, sha, now); err != nil {
+			return fmt.Errorf("upsert grant declaration (%s, %s, %s): %w", repo, d.Step, d.Path, err)
+		}
+	}
+	return tx.Commit()
+}
+
+// GrantDeclaration is a single (step, path) observation from Workflow admission.
+type GrantDeclaration struct {
+	Step string
+	Path string
+}
+
+// PendingGrantDeclaration is a declared-but-not-granted entry.
+type PendingGrantDeclaration struct {
+	Repo        string    `json:"repo"`
+	Step        string    `json:"step"`
+	Path        string    `json:"path"`
+	LastSeenSHA string    `json:"last_seen_sha"`
+	LastSeenAt  time.Time `json:"last_seen_at"`
+}
+
+// PendingGrantDeclarations returns declarations that have no matching active
+// grant. A wildcard grant (step="*") for the same (repo, path) covers any
+// step's declaration. Issue #623, finding 4.
+func (s *Store) PendingGrantDeclarations(ctx context.Context, repo string) ([]PendingGrantDeclaration, error) {
+	query := `
+SELECT d.repo, d.step, d.path, d.last_seen_sha, d.last_seen_at
+FROM grant_declarations d
+WHERE NOT EXISTS (
+    SELECT 1 FROM secret_access sa
+    WHERE sa.repo = d.repo
+      AND sa.secret = d.path
+      AND sa.revoked_at IS NULL
+      AND (sa.step = d.step OR sa.step = '*')
+)`
+	args := []any{}
+	if repo != "" {
+		query += " AND d.repo = ?"
+		args = append(args, repo)
+	}
+	query += " ORDER BY d.repo, d.step, d.path"
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query pending grant declarations: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var result []PendingGrantDeclaration
+	for rows.Next() {
+		var p PendingGrantDeclaration
+		var lastSeenAt int64
+		if err := rows.Scan(&p.Repo, &p.Step, &p.Path, &p.LastSeenSHA, &lastSeenAt); err != nil {
+			return nil, fmt.Errorf("scan pending grant declaration: %w", err)
+		}
+		p.LastSeenAt = fromUnixNano(lastSeenAt)
+		result = append(result, p)
+	}
+	return result, rows.Err()
+}
+
 func scanSecretAccess(row rowScanner) (SecretAccessGrant, error) {
 	var grant SecretAccessGrant
 	var approvedAt int64
