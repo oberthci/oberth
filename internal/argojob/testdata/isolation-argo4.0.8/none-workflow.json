@@ -19,7 +19,7 @@
       "oberth.ci/run-id": "run-abc123",
       "oberth.ci/secret-paths": "oberth/data/release/r2-upload-token",
       "oberth.ci/size": "L",
-      "oberth.ci/spec-identity": "56c729abaf46c08ed448d32e1a56522c135eb06df6287a347cebd92630a277c7",
+      "oberth.ci/spec-identity": "25f287be4dedeab2bf597d99922273e51af1fc7fabe155605a8d54052d5fb513",
       "workflows.argoproj.io/pod-name-format": "v2"
     }
   },
@@ -81,6 +81,10 @@
             {
               "name": "OBERTH_RELEASE_SHA",
               "value": "0123456789abcdef0123456789abcdef01234567"
+            },
+            {
+              "name": "OBERTH_STEP",
+              "value": "main"
             }
           ],
           "resources": {},

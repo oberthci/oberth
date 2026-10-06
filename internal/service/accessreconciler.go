@@ -397,6 +397,11 @@ func (r *AccessReconciler) UpdateConfigMap(ctx context.Context, actor string, mo
 // arbitrary policy rules (issue #416, same class as #411 and #414).
 var grantEntryRepoPattern = regexp.MustCompile(`^[A-Za-z0-9._/-]+$`)
 
+// grantEntryStepPattern matches a DNS-1123 label: the grammar Argo Workflow
+// template names must satisfy. The wildcard "*" is handled separately in
+// ValidateGrantEntry before this pattern is tested.
+var grantEntryStepPattern = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`)
+
 // ValidateGrantEntry checks one grant entry for validity. It is shared by
 // ParseGrants (ConfigMap reconciliation) and the API (before any ConfigMap
 // mutation), so a malformed entry is rejected before it can trigger a
@@ -411,14 +416,15 @@ func ValidateGrantEntry(index int, entry SecretAccessGrantEntry) error {
 	if strings.ContainsAny(entry.Secret, "*?[]") {
 		return fmt.Errorf("entry %d: wildcard and glob characters are not allowed in secret", index)
 	}
-	// Until the runtime can enforce grants per Argo template, the step
-	// dimension is not enforceable at the Workflow level — a template
-	// granted to step "release" would receive the credential regardless of
-	// which DAG task invokes it. Accept only the explicit wildcard "*" so
-	// existing non-wildcard entries fail closed rather than granting wider
-	// access than the entry's author intended.
+	// Step must be either the wildcard "*" (grants access to all templates)
+	// or a DNS-1123 label (grants access only to the named Argo template).
+	// Per-step grants are enforced at admission: admitSecretstoreExecPaths
+	// checks that each template's --path arguments have a wildcard grant or
+	// a grant naming that exact template. Issue #623.
 	if entry.Step != "*" {
-		return fmt.Errorf("entry %d: step must be \"*\" (per-step grants are not yet enforceable at runtime; use \"*\" to grant to all steps)", index)
+		if len(entry.Step) > 63 || !grantEntryStepPattern.MatchString(entry.Step) {
+			return fmt.Errorf("entry %d: step %q must be \"*\" (all templates) or a DNS-1123 label (lowercase alphanumeric and hyphens, 1-63 characters)", index, entry.Step)
+		}
 	}
 	return nil
 }

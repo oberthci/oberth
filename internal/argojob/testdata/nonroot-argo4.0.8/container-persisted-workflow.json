@@ -5,7 +5,6 @@
     "name": "oberth-oberth-run-abc1-aabbccddeeff",
     "namespace": "oberth-argo",
     "uid": "nonroot-fixture",
-    "creationTimestamp": null,
     "labels": {
       "app.kubernetes.io/name": "oberth-run",
       "oberth.ci/engine": "argo",
@@ -21,7 +20,7 @@
       "oberth.ci/nonroot-templates": "test",
       "oberth.ci/ref": "refs/heads/main",
       "oberth.ci/run-id": "run-abc123",
-      "oberth.ci/spec-identity": "70ae154def143d152329098dc07a1842dc8c605ca7fda34e3827ef505b6d40c2",
+      "oberth.ci/spec-identity": "4670f2c1391d59de890cb3e4143f46eaa4f9e62742167a204d46f0e965b7f7ef",
       "oberth.ci/verified-controller-profile": "nonroot-static-v1:fbe3fb4c2cf6919c959a4f94f56634f901d40a3cfcddd56d85368b7924e2d9d0",
       "workflows.argoproj.io/pod-name-format": "v2"
     }
@@ -63,6 +62,10 @@
             {
               "name": "OBERTH_ARTIFACTS",
               "value": "/work/artifacts"
+            },
+            {
+              "name": "OBERTH_STEP",
+              "value": "test"
             },
             {
               "name": "TMPDIR",
@@ -186,6 +189,10 @@
             {
               "name": "OBERTH_CACHE_DIR",
               "value": "/work/cache"
+            },
+            {
+              "name": "OBERTH_STEP",
+              "value": "ordinary"
             }
           ],
           "resources": {},

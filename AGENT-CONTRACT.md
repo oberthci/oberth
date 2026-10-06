@@ -294,11 +294,14 @@ continuity checks; it must never be used to reset or bypass those checks.
   capture/acknowledge/deliver/load) are exec'd through the same
   `go -C /work/src/.oberth run .` invocation with explicit flags; the SDK's
   `Main` dispatches them before any pipeline evaluation.
-- Pipeline steps receive `OBERTH_REPO`, `OBERTH_REF`, `OBERTH_SHA`, and
-  `OBERTH_TRIGGER`, plus the documented Go cache variables. The SDK itself is
-  configured through `OBERTH_SOURCE_DIR`, `OBERTH_STEP_TIMEOUT`,
-  `OBERTH_SECRET_DIR`, `OBERTH_SECRETSTORE_DIR`, and (Apply only)
-  `OBERTH_PLAN_DIGEST`/`OBERTH_PLAN_SIZE`.
+- Pipeline steps receive `OBERTH_REPO`, `OBERTH_REF`, `OBERTH_SHA`,
+  `OBERTH_TRIGGER`, and `OBERTH_STEP` (the Argo template name), plus the
+  documented Go cache variables. `OBERTH_STEP` is set on every template for
+  observability and diagnostic correlation with per-step grant denials; it is
+  NOT a security control (the value is self-declared by the workflow document).
+  The SDK itself is configured through `OBERTH_SOURCE_DIR`,
+  `OBERTH_STEP_TIMEOUT`, `OBERTH_SECRET_DIR`, `OBERTH_SECRETSTORE_DIR`, and
+  (Apply only) `OBERTH_PLAN_DIGEST`/`OBERTH_PLAN_SIZE`.
 - The SDK's declaration vocabulary is flat: `Steps(...)` assembles named
   burns built by `Test`/`Build`/`Release`/`Plan`/`Apply`, each step is one
   `Cmd(name, command, args...)` line, and modifiers chain onto the value
@@ -1037,8 +1040,10 @@ continuity checks; it must never be used to reset or bypass those checks.
   watcher-driven reconciles keep plain `configmap@rv=N`. Grant is
   duplicate-tolerant via `INSERT ... ON CONFLICT(repo, step, secret) WHERE
   revoked_at IS NULL DO NOTHING`; a concurrent race returns the existing
-  active row without error. Grant entries may use `*` for step; `*` and glob
-  characters (`?`, `[`, `]`) in repo or secret are rejected at parse. The
+  active row without error. Grant step values are `*` (wildcard: all
+  templates) or a DNS-1123 label (specific Argo template name, e.g.
+  `release-publish-images`); `*` and glob characters (`?`, `[`, `]`) in repo
+  or secret are rejected at parse. The
   namespace Role carries collection `watch` on ConfigMaps for the reconciler
   and `update` scoped by `resourceNames` to exactly
   `oberth-secret-access`; unnamed ConfigMap update, patch, or delete stay
@@ -1047,7 +1052,22 @@ continuity checks; it must never be used to reset or bypass those checks.
 - Grant revocation is immediately effective for Oberth admission (the sqlite
   approval table is updated atomically with ConfigMap reconciliation), but the
   Vault credentialed policy retains the exact-path read entry until a policy
-  re-sync. The server's own identity has no Vault policy-write capability, so
+  re-sync. Per-step grants (issue #623) scope a secret path to a named Argo
+  template: `access_allow repo=X step=release-publish-images
+  secret=oberth/data/release/gar-image-key` restricts the path to templates
+  named `release-publish-images`; `step="*"` is the backward-compatible
+  wildcard granting access to all templates. Enforcement is at admission:
+  `admitSecretstoreExecPaths` checks each template's `--path` arguments
+  against the step grants before any Workflow is submitted. A path with only
+  named-step grants is refused when consumed by an inline, unnamed, or
+  fragment-renamed template (fail-closed: the name is not stable or
+  authoritative). Known residual: Vault policy is still the per-repo union,
+  so this prevents a declared `secretstore exec` in template Y from using a
+  path granted to template X, but code in another credentialed template
+  reading Vault directly with the mounted token is NOT prevented — that
+  requires per-step identity (Vault role per template), which is the Slice
+  A/B/C work tracked under #623.
+  The server's own identity has no Vault policy-write capability, so
   `access_revoke` includes an advisory in its response. To complete the
   revocation at the Vault layer, re-sync policies from the current approval
   table: `oberth secretstore sync` (targeted: re-derives per-repo release and
