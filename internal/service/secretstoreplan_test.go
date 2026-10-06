@@ -163,6 +163,89 @@ func TestSecretStorePlanDigestChangesWithGrants(t *testing.T) {
 	}
 }
 
+// --- Per-step plan tests (issue #623) ---
+
+func TestSecretStorePlanPerStepEntries(t *testing.T) {
+	now := time.Now()
+	grants := []store.SecretAccessGrant{
+		{ID: 1, Repo: "codeberg/acme/port", Step: "*", Secret: "upstream/acme/port/config", ApprovedBy: "admin", ApprovedAt: now},
+		{ID: 2, Repo: "codeberg/acme/port", Step: "release-publish-images", Secret: "release/gar-image-key", ApprovedBy: "admin", ApprovedAt: now},
+		{ID: 3, Repo: "codeberg/acme/port", Step: "release-publish-r2", Secret: "release/r2-token", ApprovedBy: "admin", ApprovedAt: now},
+	}
+	result := computeSecretStorePlan(grants)
+	if len(result.Repos) != 1 {
+		t.Fatalf("expected 1 repo, got %d", len(result.Repos))
+	}
+	repo := result.Repos[0]
+	if len(repo.Steps) != 2 {
+		t.Fatalf("expected 2 per-step entries, got %d", len(repo.Steps))
+	}
+	// Steps should be sorted.
+	if repo.Steps[0].Step != "release-publish-images" {
+		t.Fatalf("expected first step 'release-publish-images', got %q", repo.Steps[0].Step)
+	}
+	if repo.Steps[1].Step != "release-publish-r2" {
+		t.Fatalf("expected second step 'release-publish-r2', got %q", repo.Steps[1].Step)
+	}
+	// Each step should have its named path PLUS the wildcard-inherited path.
+	for _, step := range repo.Steps {
+		if len(step.Paths) != 2 {
+			t.Fatalf("step %q: expected 2 paths (named + inherited wildcard), got %d: %v",
+				step.Step, len(step.Paths), step.Paths)
+		}
+	}
+}
+
+func TestSecretStorePlanWildcardOnlyNoStepEntries(t *testing.T) {
+	now := time.Now()
+	grants := []store.SecretAccessGrant{
+		{ID: 1, Repo: "codeberg/acme/terraform", Step: "*", Secret: "terraform/credentials", ApprovedBy: "admin", ApprovedAt: now},
+	}
+	result := computeSecretStorePlan(grants)
+	if len(result.Repos) != 1 {
+		t.Fatalf("expected 1 repo, got %d", len(result.Repos))
+	}
+	if len(result.Repos[0].Steps) != 0 {
+		t.Fatalf("wildcard-only grants should produce no per-step entries, got %d", len(result.Repos[0].Steps))
+	}
+}
+
+func TestSecretStorePlanPerStepPolicyName(t *testing.T) {
+	name := deriveStepPolicyName("codeberg/acme/port", "release-publish-images")
+	if name != "oberth-step-codeberg-acme-port-release-publish-images" {
+		t.Fatalf("unexpected step policy name: %s", name)
+	}
+}
+
+func TestSecretStorePlanDigestChangesWithStepGrants(t *testing.T) {
+	now := time.Now()
+	// Baseline: wildcard only.
+	grants1 := []store.SecretAccessGrant{
+		{ID: 1, Repo: "codeberg/acme/port", Step: "*", Secret: "release/key", ApprovedBy: "admin", ApprovedAt: now},
+	}
+	// Named step grant added.
+	grants2 := []store.SecretAccessGrant{
+		{ID: 1, Repo: "codeberg/acme/port", Step: "*", Secret: "release/key", ApprovedBy: "admin", ApprovedAt: now},
+		{ID: 2, Repo: "codeberg/acme/port", Step: "release-publish", Secret: "release/image-key", ApprovedBy: "admin", ApprovedAt: now},
+	}
+	result1 := computeSecretStorePlan(grants1)
+	result2 := computeSecretStorePlan(grants2)
+	if result1.Digest == result2.Digest {
+		t.Fatal("digest should change when a per-step grant is added")
+	}
+}
+
+func TestSecretStorePlanTextIncludesStepEntries(t *testing.T) {
+	now := time.Now()
+	grants := []store.SecretAccessGrant{
+		{ID: 1, Repo: "codeberg/acme/port", Step: "release-publish", Secret: "release/key", ApprovedBy: "admin", ApprovedAt: now},
+	}
+	result := computeSecretStorePlan(grants)
+	if !strings.Contains(result.Text, "step: release-publish") {
+		t.Fatalf("plan text should mention the step: %s", result.Text)
+	}
+}
+
 func TestSecretStoreSyncReceiptNoSecretValues(t *testing.T) {
 	// Verify that the audit details JSON from a sync receipt contains no
 	// secret values — only names, digests, and counts.

@@ -2,12 +2,15 @@ package argojob
 
 import "sync/atomic"
 
-// IdentitySnapshot is a frozen, immutable view of the per-repo identity maps.
-// Published snapshots are never mutated; Replace installs freshly built maps.
-// Old snapshots remain valid as immutable reads -- no reader locking required.
+// IdentitySnapshot is a frozen, immutable view of the per-repo and per-step
+// identity maps. Published snapshots are never mutated; Replace installs
+// freshly built maps. Old snapshots remain valid as immutable reads -- no
+// reader locking required.
 type IdentitySnapshot struct {
 	Release map[string]PerRepoIdentityConfig
 	CI      map[string]PerRepoIdentityConfig
+	// Step maps "upstream/org/repo/step" to per-step identities. Issue #623.
+	Step map[string]PerRepoIdentityConfig
 }
 
 // IdentityStore holds the current per-repo identity configuration behind an
@@ -29,6 +32,13 @@ func NewIdentityStore(release, ci map[string]PerRepoIdentityConfig) *IdentitySto
 	return store
 }
 
+// NewIdentityStoreWithSteps creates a store seeded with repo and step maps.
+func NewIdentityStoreWithSteps(release, ci, step map[string]PerRepoIdentityConfig) *IdentityStore {
+	store := &IdentityStore{}
+	store.ReplaceWithSteps(release, ci, step)
+	return store
+}
+
 // Snapshot returns the current immutable view. The returned pointer is safe
 // to hold and read indefinitely; a concurrent Replace publishes a new
 // snapshot without mutating this one.
@@ -40,4 +50,10 @@ func (s *IdentityStore) Snapshot() *IdentitySnapshot {
 // Callers must build new maps rather than mutating old ones.
 func (s *IdentityStore) Replace(release, ci map[string]PerRepoIdentityConfig) {
 	s.current.Store(&IdentitySnapshot{Release: release, CI: ci})
+}
+
+// ReplaceWithSteps installs freshly built identity maps including per-step
+// identities as the new current snapshot. Issue #623.
+func (s *IdentityStore) ReplaceWithSteps(release, ci, step map[string]PerRepoIdentityConfig) {
+	s.current.Store(&IdentitySnapshot{Release: release, CI: ci, Step: step})
 }

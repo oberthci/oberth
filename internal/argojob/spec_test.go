@@ -1751,6 +1751,133 @@ func TestPerStepGrantNilStepGrantsBackwardCompatible(t *testing.T) {
 	}
 }
 
+// --- Per-step identity admission tests (issue #623 vault identity) ---
+
+// TestPerStepIdentityAssignedToTemplate proves that when a per-step identity
+// exists, Build assigns the per-step ServiceAccountName and OBERTH_VAULT_ROLE
+// to the template that consumes the named-step-granted path. Issue #623.
+func TestPerStepIdentityAssignedToTemplate(t *testing.T) {
+	config := testConfig()
+	// canonicalRepoKey("", "skipops", "oberth") = "oberth" when UpstreamName is empty.
+	config.PerRepoIdentities = map[string]PerRepoIdentityConfig{
+		"oberth": {ServiceAccountName: "oberth-argo-test-repo"},
+	}
+	config.PerStepIdentities = map[string]PerRepoIdentityConfig{
+		"oberth/release-publish-images": {ServiceAccountName: "oberth-step-test-images"},
+	}
+
+	request := testRequest(periapsis.TriggerRelease, multiTemplateExecDocument)
+	request.ApprovedSecrets = map[string]bool{
+		"oberth/data/release/r2-upload-token": true,
+		"oberth/data/release/gar-image-key":   true,
+	}
+	// r2-upload-token is wildcard, gar-image-key is named to release-publish-images
+	request.StepGrants = map[string]map[string]bool{
+		"oberth/data/release/r2-upload-token": {"*": true},
+		"oberth/data/release/gar-image-key":   {"release-publish-images": true},
+	}
+
+	workflow, err := Build(config, request)
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+
+	for _, tmpl := range workflow.Spec.Templates {
+		if tmpl.Container == nil {
+			continue
+		}
+		switch tmpl.Name {
+		case "release-publish-images":
+			// This template should have the per-step SA.
+			if tmpl.ServiceAccountName != "oberth-step-test-images" {
+				t.Fatalf("release-publish-images: expected SA 'oberth-step-test-images', got %q",
+					tmpl.ServiceAccountName)
+			}
+			// And the per-step VAULT_ROLE.
+			var roleVal string
+			for _, env := range tmpl.Container.Env {
+				if env.Name == "OBERTH_VAULT_ROLE" {
+					roleVal = env.Value
+				}
+			}
+			if roleVal != "oberth-step-test-images" {
+				t.Fatalf("release-publish-images: expected OBERTH_VAULT_ROLE='oberth-step-test-images', got %q", roleVal)
+			}
+		case "release-publish-r2":
+			// This template consumes a wildcard-granted path — should keep the
+			// per-repo SA (the testConfig credentialed SA, forced by ForceIdentity).
+			if tmpl.ServiceAccountName == "oberth-step-test-images" {
+				t.Fatal("release-publish-r2 should NOT have the per-step SA")
+			}
+		}
+	}
+}
+
+// TestPerStepIdentityWildcardKeepsPerRepo proves that templates consuming only
+// wildcard-granted paths keep the per-repo identity even when per-step
+// identities exist for other templates. Issue #623.
+func TestPerStepIdentityWildcardKeepsPerRepo(t *testing.T) {
+	config := testConfig()
+	config.PerRepoIdentities = map[string]PerRepoIdentityConfig{
+		"oberth": {ServiceAccountName: "oberth-argo-test-repo"},
+	}
+	config.PerStepIdentities = map[string]PerRepoIdentityConfig{
+		"oberth/release-publish-images": {ServiceAccountName: "oberth-step-test-images"},
+	}
+
+	request := testRequest(periapsis.TriggerRelease, multiTemplateExecDocument)
+	request.ApprovedSecrets = map[string]bool{
+		"oberth/data/release/r2-upload-token": true,
+		"oberth/data/release/gar-image-key":   true,
+	}
+	// Both paths are wildcard-granted.
+	request.StepGrants = map[string]map[string]bool{
+		"oberth/data/release/r2-upload-token": {"*": true},
+		"oberth/data/release/gar-image-key":   {"*": true},
+	}
+
+	workflow, err := Build(config, request)
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+
+	for _, tmpl := range workflow.Spec.Templates {
+		if tmpl.Container == nil {
+			continue
+		}
+		// No template should have the per-step SA when all grants are wildcard.
+		if tmpl.ServiceAccountName == "oberth-step-test-images" {
+			t.Fatalf("template %q has per-step SA but all grants are wildcard", tmpl.Name)
+		}
+	}
+}
+
+// TestPerStepIdentityNilMapBackwardCompatible proves that a nil PerStepIdentities
+// map does not break Build — backward compatibility with pre-#623 config.
+func TestPerStepIdentityNilMapBackwardCompatible(t *testing.T) {
+	config := testConfig()
+	config.PerStepIdentities = nil
+
+	request := testRequest(periapsis.TriggerRelease, multiTemplateExecDocument)
+	request.ApprovedSecrets = map[string]bool{
+		"oberth/data/release/r2-upload-token": true,
+		"oberth/data/release/gar-image-key":   true,
+	}
+	request.StepGrants = map[string]map[string]bool{
+		"oberth/data/release/r2-upload-token": {"release-publish-r2": true},
+		"oberth/data/release/gar-image-key":   {"release-publish-images": true},
+	}
+
+	workflow, err := Build(config, request)
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	// Should succeed without per-step identity assignment.
+	if workflow == nil {
+		t.Fatal("expected non-nil workflow")
+	}
+}
+
 func TestSpecIdentityIgnoresSourceVolumeFields(t *testing.T) {
 	// Two workflows that differ ONLY in per-run source-volume fields
 	// (PVC claim name and subPaths) must produce the same identity digest.

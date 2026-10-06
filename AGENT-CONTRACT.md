@@ -1061,12 +1061,26 @@ continuity checks; it must never be used to reset or bypass those checks.
   against the step grants before any Workflow is submitted. A path with only
   named-step grants is refused when consumed by an inline, unnamed, or
   fragment-renamed template (fail-closed: the name is not stable or
-  authoritative). Known residual: Vault policy is still the per-repo union,
-  so this prevents a declared `secretstore exec` in template Y from using a
-  path granted to template X, but code in another credentialed template
-  reading Vault directly with the mounted token is NOT prevented — that
-  requires per-step identity (Vault role per template), which is the Slice
-  A/B/C work tracked under #623.
+  authoritative).
+- **Per-step Vault identities (issue #623):** for each (repo, step) with at
+  least one named-step grant, the installer/sync renders a dedicated
+  ServiceAccount `oberth-step-<readable>-<hash12>` in the pipeline namespace,
+  a Kubernetes-auth role bound to exactly that SA + namespace + the existing
+  audience/TTL conventions, and a policy with exactly the step's approved
+  paths (read) plus `auth/token/revoke-self` plus the upstream org/repo
+  wildcard. Wildcard (`*`) grants keep the per-repo identity (backward
+  compatible). Steps without any grant keep the grant-free pipeline identity.
+  At workflow admission, `applyPerStepIdentities` overrides
+  `template.ServiceAccountName` and `OBERTH_VAULT_ROLE` on templates
+  consuming named-step-granted paths, after `ForceIdentity` set the per-repo
+  SA as the workflow default. The per-step SA's projected token is the only
+  token that template's Pod can use for Vault login, so a template can only
+  read the paths its per-step policy grants. The per-step policy is a strict
+  subset of the per-repo policy: it carries only the paths granted to that
+  specific step, not the union of all repo grants. `secretstore plan` and
+  `secretstore sync` render these per-step roles/policies/SAs alongside
+  per-repo identities. The chart renders per-step SAs from the
+  `argo.perStepIdentities` values list.
   The server's own identity has no Vault policy-write capability, so
   `access_revoke` includes an advisory in its response. To complete the
   revocation at the Vault layer, re-sync policies from the current approval

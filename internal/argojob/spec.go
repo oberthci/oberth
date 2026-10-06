@@ -239,6 +239,14 @@ type Config struct {
 	// subtree (issue #433).
 	PerRepoCIIdentities map[string]PerRepoIdentityConfig
 
+	// PerStepIdentities maps canonical "upstream/org/repo/step" identity
+	// strings to their per-step Vault identities. When a template consumes
+	// a named-step-granted path, the per-step SA is set on that template
+	// (overriding the per-repo workflow-level SA), and OBERTH_VAULT_ROLE is
+	// overridden to the per-step role. Wildcard grants keep the per-repo
+	// identity. Issue #623.
+	PerStepIdentities map[string]PerRepoIdentityConfig
+
 	// ReleaseWIF is the administrator's startup-pinned capability allowlist.
 	// Nil disables federation; repository documents cannot supply this map.
 	ReleaseWIF *ReleaseWIFConfig
@@ -568,6 +576,9 @@ func Build(config Config, request Request) (*wfv1.Workflow, error) {
 	if request.Identities != nil {
 		config.PerRepoIdentities = request.Identities.Release
 		config.PerRepoCIIdentities = request.Identities.CI
+		if request.Identities.Step != nil {
+			config.PerStepIdentities = request.Identities.Step
+		}
 	}
 	if err := config.Validate(); err != nil {
 		return nil, err
@@ -698,6 +709,15 @@ func Build(config Config, request Request) (*wfv1.Workflow, error) {
 	injectServerVolumes(workflow, config, request, credentialed)
 	injectWorkspaceEnvironment(workflow)
 	injectRunEnvironment(workflow, config, request, credentialed)
+	// Per-step identity override (issue #623): for templates consuming
+	// named-step-granted paths, override the ServiceAccountName and
+	// OBERTH_VAULT_ROLE with the per-step identity. This runs AFTER
+	// ForceIdentity (which set the per-repo SA on all templates) and AFTER
+	// injectRunEnvironment (which set the per-repo VAULT_ROLE), so the
+	// per-step values take precedence for exactly the templates that need them.
+	if credentialed {
+		applyPerStepIdentities(workflow, config, request)
+	}
 	if err := injectReleaseWIF(workflow, wifLeaves, config.ReleaseWIF); err != nil {
 		return nil, err
 	}
@@ -2022,6 +2042,97 @@ func injectTemplateEnvironment(template *wfv1.Template, environment []corev1.Env
 		for task := range template.DAG.Tasks {
 			injectTemplateEnvironment(template.DAG.Tasks[task].Inline, environment, depth+1)
 		}
+	}
+}
+
+// applyPerStepIdentities overrides ServiceAccountName and OBERTH_VAULT_ROLE
+// on templates that consume named-step-granted paths. This is a server-owned
+// post-Build pass: the document's own SA declarations were already cleared by
+// ForceIdentity, and the per-repo SA + role were already set by
+// identityForWithRepo and injectRunEnvironment. This pass narrows individual
+// templates to their per-step identity.
+//
+// A template receives a per-step identity when ALL of these hold:
+//  1. It is a top-level template (not inline)
+//  2. It has a stable name (not frag-* renamed)
+//  3. It uses `oberth secretstore exec` with --path flags
+//  4. At least one of its --path arguments has a named-step grant (not
+//     wildcard) for this template name
+//  5. A per-step identity exists in config.PerStepIdentities for this
+//     (repo, step) combination
+//
+// Templates with only wildcard grants keep the per-repo identity. Issue #623.
+func applyPerStepIdentities(workflow *wfv1.Workflow, config Config, request Request) {
+	if len(config.PerStepIdentities) == 0 {
+		return
+	}
+
+	// Build a set of top-level template pointers for stable-name detection.
+	topLevel := make(map[*wfv1.Template]bool, len(workflow.Spec.Templates))
+	for i := range workflow.Spec.Templates {
+		topLevel[&workflow.Spec.Templates[i]] = true
+	}
+
+	for i := range workflow.Spec.Templates {
+		template := &workflow.Spec.Templates[i]
+		if !topLevel[template] || template.Name == "" || strings.HasPrefix(template.Name, "frag-") {
+			continue
+		}
+		if !templateUsesOberthSecretstore(template) {
+			continue
+		}
+		execPaths := extractExecPaths(template)
+		if len(execPaths) == 0 {
+			continue
+		}
+
+		// Check if any of this template's paths has a named-step grant.
+		hasNamedGrant := false
+		for _, path := range execPaths {
+			if request.StepGrants == nil {
+				break
+			}
+			steps := request.StepGrants[path]
+			if steps != nil && steps[template.Name] && !steps["*"] {
+				hasNamedGrant = true
+				break
+			}
+			// Also check: if there are named-step grants for this path
+			// (any step), and this template is one of them.
+			if steps != nil {
+				for step := range steps {
+					if step != "*" && step == template.Name {
+						hasNamedGrant = true
+						break
+					}
+				}
+				if hasNamedGrant {
+					break
+				}
+			}
+		}
+
+		if !hasNamedGrant {
+			continue
+		}
+
+		// Look up the per-step identity for this (repo, step).
+		stepKey := canonicalRepoKey(request.UpstreamName, request.UpstreamOrg, request.Repo) + "/" + template.Name
+		perStep, exists := config.PerStepIdentities[stepKey]
+		if !exists || perStep.ServiceAccountName == "" {
+			continue
+		}
+
+		// Override the template's ServiceAccountName.
+		template.ServiceAccountName = perStep.ServiceAccountName
+
+		// Override OBERTH_VAULT_ROLE in the template's containers.
+		stepRole := []corev1.EnvVar{
+			{Name: "OBERTH_VAULT_ROLE", Value: perStep.ServiceAccountName},
+		}
+		templateContainers(template, func(c *corev1.Container) {
+			c.Env = overrideEnvironment(c.Env, stepRole)
+		})
 	}
 }
 

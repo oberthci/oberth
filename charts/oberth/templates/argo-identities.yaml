@@ -186,3 +186,24 @@ metadata:
     oberth.ci/identity-type: per-repo-ci
 automountServiceAccountToken: false
 {{- end }}
+{{- /*
+Per-step Vault identities (issue #623). Each entry creates a ServiceAccount
+whose name is the same as its Vault role and policy. A per-step identity is
+created for each (repo, step) pair with a named-step grant (step != "*").
+The per-step policy contains only the paths granted to that specific step,
+enforcing least privilege at the Vault layer. Wildcard grants keep the
+per-repo identity (backward compatible). The installer populates
+argo.perStepIdentities from the grant table; here we just create the SAs.
+*/}}
+{{- range .Values.argo.perStepIdentities }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ . }}
+  namespace: {{ $namespace }}
+  labels:
+    {{- include "oberth.labels" $ | nindent 4 }}
+    oberth.ci/identity-type: per-step
+automountServiceAccountToken: false
+{{- end }}

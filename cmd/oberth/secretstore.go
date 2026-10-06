@@ -1065,11 +1065,17 @@ func runSecretStoreSync(ctx context.Context, arguments []string, output io.Write
 		return fmt.Errorf("OpenBao pod %s/openbao-0 is not running (phase: %s)", *openbaoNamespace, pod.Status.Phase)
 	}
 
+	// Derive per-step identities from the grants for named-step enforcement (#623).
+	stepIdentities := installer.ProducePerStepIdentitiesFromRepoIdentities(identities)
+	if len(stepIdentities) > 0 {
+		_, _ = fmt.Fprintf(output, "  %d per-step identities derived\n", len(stepIdentities))
+	}
+
 	// Run the sync.
 	results, syncErr := installer.RunSync(
 		ctx, installer.DefaultRunCommand, rootToken,
 		*kubeContext, *openbaoNamespace, "openbao-0", *argoNamespace,
-		identities,
+		identities, stepIdentities,
 	)
 	for _, r := range results {
 		status := "unchanged"

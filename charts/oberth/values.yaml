@@ -233,6 +233,13 @@ argo:
   # Vault policies and roles. CI policies are grant-free by construction.
   perRepoCIIdentities: []
 
+  # Per-step Vault identities (issue #623): list of ServiceAccount names, one
+  # per (repo, step) with named-step grants. The installer populates this from
+  # the grant table; the chart creates the ServiceAccounts; the installer creates
+  # the Vault policies and roles. Each policy contains only the paths granted to
+  # that specific step. Wildcard grants keep the per-repo identity.
+  perStepIdentities: []
+
   # Ceiling on a document's own activeDeadlineSeconds, and how long a finished
   # Workflow object is retained.
   workflowTimeout: 12h

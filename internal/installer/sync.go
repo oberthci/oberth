@@ -7,29 +7,29 @@ import (
 )
 
 // RunSync re-derives every Vault policy and role that depends on the approval
-// table — per-repo identities (release + CI tiers) and the shared
-// credentialed and CI-secrets policies — without touching anything else (no
-// mounts, no transit keys, no chart install, no helm). It runs under the
-// administrator's own BAO_TOKEN, exactly as the full
+// table — per-repo identities (release + CI tiers), per-step identities
+// (issue #623), and the shared credentialed and CI-secrets policies — without
+// touching anything else (no mounts, no transit keys, no chart install, no
+// helm). It runs under the administrator's own BAO_TOKEN, exactly as the full
 // `install --install-secretstore --upgrade` path does.
 //
 // This is the entry point that `oberth secretstore sync` dispatches to. It
 // creates the internal openBaoExec from the provided CommandRunner and
 // cluster coordinates, then calls the internal syncGrantPolicies.
-func RunSync(ctx context.Context, run CommandRunner, rootToken, contextName, openbaoNamespace, openbaoPod, argoNamespace string, identities []PerRepoIdentity) ([]SyncResult, error) {
+func RunSync(ctx context.Context, run CommandRunner, rootToken, contextName, openbaoNamespace, openbaoPod, argoNamespace string, identities []PerRepoIdentity, stepIdentities []PerStepIdentity) ([]SyncResult, error) {
 	store := openBaoExec{
 		run:         run,
 		contextName: contextName,
 		namespace:   openbaoNamespace,
 		pod:         openbaoPod,
 	}
-	return syncGrantPolicies(ctx, store, rootToken, identities, argoNamespace)
+	return syncGrantPolicies(ctx, store, rootToken, identities, stepIdentities, argoNamespace)
 }
 
 // syncGrantPolicies re-derives every Vault policy and role that depends on
 // the approval table. It is idempotent: policies that already match the
 // expected shape are left untouched and reported as unchanged.
-func syncGrantPolicies(ctx context.Context, store openBaoExec, rootToken string, identities []PerRepoIdentity, argoNamespace string) ([]SyncResult, error) {
+func syncGrantPolicies(ctx context.Context, store openBaoExec, rootToken string, identities []PerRepoIdentity, stepIdentities []PerStepIdentity, argoNamespace string) ([]SyncResult, error) {
 	var results []SyncResult
 
 	// Validate upstream org names derived from identities. The shared policies
@@ -93,6 +93,23 @@ func syncGrantPolicies(ctx context.Context, store openBaoExec, rootToken string,
 			return results, fmt.Errorf("per-repo identities: %w", err)
 		}
 		for _, item := range perRepoItems {
+			results = append(results, SyncResult{
+				Name:    item.Name,
+				Changed: item.Changed,
+			})
+		}
+	}
+
+	// --- Per-step identities (issue #623) ---
+	// For each (repo, step) with named grants, render a dedicated SA+policy+role
+	// scoped to exactly that step's paths. Wildcard grants keep the per-repo
+	// identity (backward compatible).
+	if len(stepIdentities) > 0 {
+		perStepItems, err := ConfigurePerStepIdentities(ctx, store, rootToken, stepIdentities, argoNamespace)
+		if err != nil {
+			return results, fmt.Errorf("per-step identities: %w", err)
+		}
+		for _, item := range perStepItems {
 			results = append(results, SyncResult{
 				Name:    item.Name,
 				Changed: item.Changed,

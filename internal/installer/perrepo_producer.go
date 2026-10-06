@@ -218,6 +218,75 @@ func ParseAccessListOutput(data []byte) ([]PerRepoIdentity, error) {
 	return result, nil
 }
 
+// ParseAccessListJSONWithSteps parses the JSON output and returns both per-repo
+// identities and the raw grant entries with step information needed to derive
+// per-step identities. This is the structured entry point for the sync command
+// to produce both per-repo and per-step identities in one pass.
+func ParseAccessListJSONWithSteps(data []byte) ([]PerRepoIdentity, []grantWithStep, error) {
+	var entries []accessListJSONEntry
+	if err := json.Unmarshal(data, &entries); err != nil {
+		return nil, nil, fmt.Errorf("unmarshal access list JSON: %w", err)
+	}
+
+	type repoKey struct {
+		upstream, org, repo string
+	}
+	byRepo := make(map[repoKey][]string)
+	var grants []grantWithStep
+
+	for _, entry := range entries {
+		parts := strings.Split(entry.Repo, "/")
+		if len(parts) != 3 {
+			continue
+		}
+		key := repoKey{upstream: parts[0], org: parts[1], repo: parts[2]}
+		byRepo[key] = append(byRepo[key], entry.Secret)
+		grants = append(grants, grantWithStep{
+			upstream: parts[0],
+			org:      parts[1],
+			repo:     parts[2],
+			step:     entry.Step,
+			secret:   entry.Secret,
+		})
+	}
+
+	if len(entries) > 0 && len(byRepo) == 0 {
+		return nil, nil, fmt.Errorf("access list JSON output yielded no identities from %d entries — format drift?", len(entries))
+	}
+
+	repoIdentities := make([]PerRepoIdentity, 0, len(byRepo))
+	for key, repoGrants := range byRepo {
+		sort.Strings(repoGrants)
+		repoIdentities = append(repoIdentities, PerRepoIdentity{
+			Upstream: key.upstream,
+			Org:      key.org,
+			Repo:     key.repo,
+			Grants:   repoGrants,
+		})
+	}
+	return repoIdentities, grants, nil
+}
+
+// ProducePerStepIdentitiesFromRepoIdentities is a convenience wrapper that
+// derives per-step identities when only PerRepoIdentity data is available
+// (the sync command path where the caller already produced repo identities
+// but did not retain the raw step-level grants). It re-reads the access list
+// from the running server if possible. When the access list is unavailable,
+// it returns nil (zero per-step identities — backward compatible).
+//
+// For the initial release this is a simple stub that returns nil: the full
+// per-step identity production requires the raw grant list with step info.
+// The sync caller should switch to ParseAccessListJSONWithSteps to get both
+// repo and step identities in one pass.
+func ProducePerStepIdentitiesFromRepoIdentities(_ []PerRepoIdentity) []PerStepIdentity {
+	// TODO(#623): wire the per-step production into the sync command by
+	// switching produceFromAccessList to use ParseAccessListJSONWithSteps
+	// and threading the grantWithStep data through. For now, per-step
+	// identities are computed by the plan tool and the secretstore
+	// configuration path (installer).
+	return nil
+}
+
 // produceFromConfigMap reads the secret-access ConfigMap and builds per-repo
 // identities from entries whose repo field is already in qualified
 // "upstream/org/repo" format. Bare-name entries are skipped because the

@@ -40,7 +40,16 @@ type SecretStorePlanLastMaterialized struct {
 
 // SecretStorePlanRepo describes the desired policy state for one repository.
 type SecretStorePlanRepo struct {
-	Repo   string   `json:"repo"`
+	Repo   string                `json:"repo"`
+	Paths  []string              `json:"paths"`
+	Policy string                `json:"policy"`
+	Steps  []SecretStorePlanStep `json:"steps,omitempty"`
+}
+
+// SecretStorePlanStep describes the desired per-step policy state for one
+// (repo, step) combination. Issue #623.
+type SecretStorePlanStep struct {
+	Step   string   `json:"step"`
 	Paths  []string `json:"paths"`
 	Policy string   `json:"policy"`
 }
@@ -88,16 +97,30 @@ func (service *API) secretStorePlan(ctx context.Context, actor api.Actor, raw js
 }
 
 // computeSecretStorePlan groups grants by repo and computes the desired
-// policy structure for each. This is a pure computation with no side effects
-// and no secret values.
+// policy structure for each, including per-step entries for named grants
+// (issue #623). This is a pure computation with no side effects and no
+// secret values.
 func computeSecretStorePlan(grants []store.SecretAccessGrant) SecretStorePlanResponse {
-	// Group paths by repo.
+	// Group paths by repo and by (repo, step).
 	repoPathsMap := make(map[string][]string)
+	// stepPathsMap[repo][step] = []paths for named-step grants.
+	stepPathsMap := make(map[string]map[string][]string)
+	// wildcardPaths[repo] = []paths with step="*".
+	wildcardPaths := make(map[string][]string)
 	for _, grant := range grants {
 		if grant.RevokedAt != nil {
 			continue
 		}
 		repoPathsMap[grant.Repo] = append(repoPathsMap[grant.Repo], grant.Secret)
+		if grant.Step == "*" {
+			wildcardPaths[grant.Repo] = append(wildcardPaths[grant.Repo], grant.Secret)
+		} else {
+			if stepPathsMap[grant.Repo] == nil {
+				stepPathsMap[grant.Repo] = make(map[string][]string)
+			}
+			stepPathsMap[grant.Repo][grant.Step] = append(
+				stepPathsMap[grant.Repo][grant.Step], grant.Secret)
+		}
 	}
 	// Sort repos for deterministic output.
 	repos := make([]string, 0, len(repoPathsMap))
@@ -113,19 +136,59 @@ func computeSecretStorePlan(grants []store.SecretAccessGrant) SecretStorePlanRes
 	for _, repo := range repos {
 		paths := repoPathsMap[repo]
 		sort.Strings(paths)
-		// Derive the policy name from the repo identity, matching the
-		// installer's naming convention.
 		policyName := derivePolicyName(repo)
 		entry := SecretStorePlanRepo{
 			Repo:   repo,
 			Paths:  paths,
 			Policy: policyName,
 		}
+
+		// Per-step entries for named grants.
+		if steps, ok := stepPathsMap[repo]; ok {
+			stepNames := make([]string, 0, len(steps))
+			for step := range steps {
+				stepNames = append(stepNames, step)
+			}
+			sort.Strings(stepNames)
+			for _, step := range stepNames {
+				stepPaths := steps[step]
+				// Merge wildcard-granted paths (inherited by all steps).
+				merged := make([]string, 0, len(stepPaths)+len(wildcardPaths[repo]))
+				merged = append(merged, stepPaths...)
+				for _, wp := range wildcardPaths[repo] {
+					found := false
+					for _, sp := range merged {
+						if sp == wp {
+							found = true
+							break
+						}
+					}
+					if !found {
+						merged = append(merged, wp)
+					}
+				}
+				sort.Strings(merged)
+				stepPolicyName := deriveStepPolicyName(repo, step)
+				entry.Steps = append(entry.Steps, SecretStorePlanStep{
+					Step:   step,
+					Paths:  merged,
+					Policy: stepPolicyName,
+				})
+			}
+		}
+
 		result = append(result, entry)
 		lines = append(lines, fmt.Sprintf("repo: %s", repo))
 		lines = append(lines, fmt.Sprintf("  policy: %s", policyName))
 		for _, path := range paths {
 			lines = append(lines, fmt.Sprintf("  path: %s", path))
+		}
+		for _, stepEntry := range entry.Steps {
+			lines = append(lines, fmt.Sprintf("  step: %s", stepEntry.Step))
+			lines = append(lines, fmt.Sprintf("    policy: %s", stepEntry.Policy))
+			for _, path := range stepEntry.Paths {
+				lines = append(lines, fmt.Sprintf("    path: %s", path))
+			}
 		}
 	}
 	digest := ComputePlanDigest(result)
@@ -141,6 +204,10 @@ func computeSecretStorePlan(grants []store.SecretAccessGrant) SecretStorePlanRes
 // name with each repo's paths sorted. This digest is the same value the
 // secretstore_plan tool prints and the sync receipt records — comparing them
 // answers "is the materialized state current?"
+//
+// v2: includes per-step entries in the digest (issue #623). The digest is
+// backward compatible: repos with no steps produce the same bytes as the
+// v1 format because the step loop simply doesn't write anything.
 func ComputePlanDigest(repos []SecretStorePlanRepo) string {
 	h := sha256.New()
 	h.Write([]byte("oberth-secretstore-plan-v1\x00"))
@@ -153,6 +220,19 @@ func ComputePlanDigest(repos []SecretStorePlanRepo) string {
 			h.Write([]byte(path))
 			h.Write([]byte{0})
 		}
+		// Per-step entries (issue #623). Repos without steps produce no
+		// additional bytes, preserving backward compatibility with v1 digests.
+		for _, step := range repo.Steps {
+			h.Write([]byte("step:"))
+			h.Write([]byte(step.Step))
+			h.Write([]byte{0})
+			h.Write([]byte(step.Policy))
+			h.Write([]byte{0})
+			for _, path := range step.Paths {
+				h.Write([]byte(path))
+				h.Write([]byte{0})
+			}
+		}
 		h.Write([]byte{0})
 	}
 	return hex.EncodeToString(h.Sum(nil))
@@ -164,6 +244,16 @@ func derivePolicyName(repo string) string {
 	// Replace / with - and prepend "oberth-argo-"
 	safe := strings.NewReplacer("/", "-", ".", "-").Replace(repo)
 	return "oberth-argo-" + safe
+}
+
+// deriveStepPolicyName converts a qualified repo identity and step name into
+// the conventional per-step Vault policy name. This mirrors the installer's
+// PerStepName but uses the same simple derivation for the plan (the exact
+// hash-suffixed name is computed at install/sync time by
+// installer.PerStepName).
+func deriveStepPolicyName(repo, step string) string {
+	safe := strings.NewReplacer("/", "-", ".", "-").Replace(repo)
+	return "oberth-step-" + safe + "-" + step
 }
 
 // renderLastMaterialized returns the text line for the last_materialized
