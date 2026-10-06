@@ -414,7 +414,8 @@ spec:
       args:
       - |
         set -eu
-        exec /usr/bin/env -i PATH=/tmp/oberth-tools/bin:/usr/local/go/bin:/usr/bin:/bin \
+        for attempt in 1 2 3 4 5; do
+          if /usr/bin/env -i PATH=/tmp/oberth-tools/bin:/usr/local/go/bin:/usr/bin:/bin \
           HOME=/tmp \
           OBERTH_TOOLS_DIR=/tmp/oberth-tools \
           GOTOOLCHAIN=local \
@@ -430,7 +431,14 @@ spec:
           OBERTH_RELEASE_SHA="$OBERTH_RELEASE_SHA" \
           OBERTH_RELEASE_TAG="$OBERTH_RELEASE_TAG" \
           GOBIN=/tmp/oberth-tools/bin \
-          CGO_ENABLED=1 "$@"
+          CGO_ENABLED=1 "$@"; then
+            exit 0
+          fi
+          if [ "$attempt" -eq 5 ]; then
+            exit 1
+          fi
+          sleep "$((attempt * 3))"
+        done
       - bootstrap-clean
       - /usr/local/go/bin/go
       - install
@@ -464,7 +472,8 @@ spec:
       args:
       - |
         set -eu
-        exec /usr/bin/env -i PATH=/tmp/oberth-tools/bin:/usr/local/go/bin:/usr/bin:/bin \
+        for attempt in 1 2 3 4 5; do
+          if /usr/bin/env -i PATH=/tmp/oberth-tools/bin:/usr/local/go/bin:/usr/bin:/bin \
           HOME=/tmp \
           OBERTH_TOOLS_DIR=/tmp/oberth-tools \
           GOTOOLCHAIN=local \
@@ -486,7 +495,14 @@ spec:
           GOMAXPROCS=1 \
           GOFLAGS='-p=1' \
           GOPROXY=https://proxy.golang.org \
-          GOSUMDB=sum.golang.org "$@"
+          GOSUMDB=sum.golang.org "$@"; then
+            exit 0
+          fi
+          if [ "$attempt" -eq 5 ]; then
+            exit 1
+          fi
+          sleep "$((attempt * 3))"
+        done
       - bootstrap-clean
       - /usr/local/go/bin/go
       - install
@@ -690,7 +706,8 @@ spec:
       args:
       - |
         set -eu
-        exec /usr/bin/env -i PATH=/tmp/oberth-tools/bin:/usr/local/go/bin:/usr/bin:/bin \
+        for attempt in 1 2 3 4 5; do
+          if /usr/bin/env -i PATH=/tmp/oberth-tools/bin:/usr/local/go/bin:/usr/bin:/bin \
           HOME=/tmp \
           OBERTH_TOOLS_DIR=/tmp/oberth-tools \
           GOTOOLCHAIN=local \
@@ -712,7 +729,14 @@ spec:
           GOMAXPROCS=1 \
           GOFLAGS='-p=1 -mod=readonly' \
           GOPROXY=https://proxy.golang.org \
-          GOSUMDB=sum.golang.org "$@"
+          GOSUMDB=sum.golang.org "$@"; then
+            exit 0
+          fi
+          if [ "$attempt" -eq 5 ]; then
+            exit 1
+          fi
+          sleep "$((attempt * 3))"
+        done
       - bootstrap-clean
       - /usr/local/go/bin/go
       - build
@@ -751,7 +775,8 @@ spec:
       args:
       - |
         set -eu
-        exec /usr/bin/env -i PATH=/tmp/oberth-tools/bin:/usr/local/go/bin:/usr/bin:/bin \
+        for attempt in 1 2 3 4 5; do
+          if /usr/bin/env -i PATH=/tmp/oberth-tools/bin:/usr/local/go/bin:/usr/bin:/bin \
           HOME=/tmp \
           OBERTH_TOOLS_DIR=/tmp/oberth-tools \
           GOTOOLCHAIN=local \
@@ -773,7 +798,14 @@ spec:
           GOMAXPROCS=1 \
           GOFLAGS='-p=1 -mod=readonly' \
           GOPROXY=https://proxy.golang.org \
-          GOSUMDB=sum.golang.org "$@"
+          GOSUMDB=sum.golang.org "$@"; then
+            exit 0
+          fi
+          if [ "$attempt" -eq 5 ]; then
+            exit 1
+          fi
+          sleep "$((attempt * 3))"
+        done
       - bootstrap-clean
       - /usr/local/go/bin/go
       - build
@@ -1138,7 +1170,8 @@ spec:
       args:
       - |
         set -eu
-        exec /usr/bin/env -i PATH=/tmp/oberth-tools/bin:/usr/local/go/bin:/usr/bin:/bin \
+        for attempt in 1 2 3; do
+          if /usr/bin/env -i PATH=/tmp/oberth-tools/bin:/usr/local/go/bin:/usr/bin:/bin \
           HOME=/tmp \
           OBERTH_TOOLS_DIR=/tmp/oberth-tools \
           GOTOOLCHAIN=local \
@@ -1154,7 +1187,14 @@ spec:
           OBERTH_RELEASE_SHA="$OBERTH_RELEASE_SHA" \
           OBERTH_RELEASE_TAG="$OBERTH_RELEASE_TAG" \
           GOBIN=/tmp/oberth-tools/bin \
-          CGO_ENABLED=1 "$@"
+          CGO_ENABLED=1 "$@"; then
+            exit 0
+          fi
+          if [ "$attempt" -eq 3 ]; then
+            exit 1
+          fi
+          sleep "$((attempt * 3))"
+        done
       - bootstrap-clean
       - /usr/local/bin/trivy
       - fs
