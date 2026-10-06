@@ -96,6 +96,7 @@ func buildArgoEngine(
 		TTLSeconds:          int32(options.argoWorkflowTTL),
 		PerRepoIdentities:   perRepoIdentities,
 		PerRepoCIIdentities: buildPerRepoCIIdentities(perRepoIdentities),
+		KVMEnabled:          options.vmKVMEnabled,
 	}
 	controller, err := argojob.NewController(
 		argoClient.ArgoprojV1alpha1().Workflows(options.argoNamespace), kube, config)
@@ -219,6 +220,7 @@ func validateArgoServeOptions(options serveOptions) error {
 		// silently mounting one tier's writable state into the other's steps.
 		CICacheRoot:      options.ciCacheRoot,
 		ReleaseCacheRoot: options.releaseCacheRoot,
+		KVMEnabled:       options.vmKVMEnabled,
 	}.Validate()
 }
 

@@ -666,6 +666,26 @@
         }
       }
     },
+    "vm": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Server-injected VM capability switches. Does not grant any repository a device; it enables the server to inject one when the repository's annotation requests it.",
+      "properties": {
+        "kvm": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "KVM device injection for annotated leaves. Requires the KubeVirt device plugin on the node.",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "When true, leaves declared in oberth.ci/kvm-templates receive devices.kubevirt.io/kvm: 1 and OBERTH_KVM=1. When false (default), such declarations fail at admission."
+            }
+          },
+          "required": ["enabled"]
+        }
+      },
+      "required": ["kvm"]
+    },
     "secretstore": {
       "type": "object",
       "additionalProperties": false,

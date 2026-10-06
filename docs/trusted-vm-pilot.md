@@ -1,5 +1,28 @@
 # Trusted VM pilot foundation
 
+## Lane A (KVM leaves) -- coverage acceleration
+
+Lane A provides server-injected KVM device access for annotated, non-credentialed
+Argo leaves. This is coverage acceleration under the ordinary trust model (same
+pod, same deadline, kubelet exit code), NOT the Lane B trusted-suite verdict.
+
+A repository declares `oberth.ci/kvm-templates: leaf-one,leaf-two` on its
+Workflow metadata. Each named leaf must be a plain container or script template
+with `oberth.ci/workspace-mounts: none`, `oberth.ci/workspace-env: none`,
+`automountServiceAccountToken: false`, no `templateDefaults`, and must not be
+credentialed (no secret-paths, no release WIF, not in nonroot-templates).
+`inputs.parameters` are allowed.
+
+When the server switch `vm.kvm.enabled` is true (chart default: false), the
+server injects `devices.kubevirt.io/kvm: "1"` (request == limit) and
+`OBERTH_KVM=1` on each declared leaf's main container. When the switch is off,
+a workflow declaring KVM leaves fails at admission with an infrastructure-class
+error rather than silently falling back to TCG.
+
+The consumer checks `OBERTH_KVM=1` and uses `-accel kvm` only when present.
+Residual: Lane B (trusted suites / tests.yaml v2), allocatable pre-check,
+`vm.maxConcurrentRuns`, and per-consumer annotation follow-up.
+
 Required-suite dispatch remains unavailable. `.oberth/tests.yaml` retains its
 closed version-1 offline eBPF profile; a requirement or unreadable policy fails
 before build creation and publication, including recovery and fast-forward

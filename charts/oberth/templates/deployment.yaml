@@ -276,6 +276,11 @@ spec:
             - --argo-goproxy-upstream={{ $goProxy.upstream }}
             - --argo-goproxy-organization={{ $goProxy.organization }}
             {{- end }}
+            {{- $vm := .Values.vm | default dict -}}
+            {{- $vmKVM := $vm.kvm | default dict -}}
+            {{- if $vmKVM.enabled }}
+            - --vm-kvm-enabled=true
+            {{- end }}
           env:
             - name: OBERTH_IDENTITY_STORE
               value: openbao

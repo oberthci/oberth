@@ -347,6 +347,16 @@ secretstore:
   # managed elsewhere.
   createAuthDelegatorBinding: true
 
+# Server-injected KVM device access for annotated leaves. Requires the
+# KubeVirt device plugin (devices.kubevirt.io/kvm) on the node. When enabled,
+# leaves declared in oberth.ci/kvm-templates receive the device resource and
+# OBERTH_KVM=1. When disabled (default), a workflow declaring KVM leaves fails
+# at admission with an infrastructure-class error rather than silently running
+# TCG. This is Lane A (coverage acceleration) under the ordinary trust model.
+vm:
+  kvm:
+    enabled: false
+
 cache:
   ciRoot: /var/cache/oberth/ci
   releaseRoot: /var/cache/oberth/release

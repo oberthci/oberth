@@ -241,6 +241,14 @@ type Config struct {
 	// ReleaseWIF is the administrator's startup-pinned capability allowlist.
 	// Nil disables federation; repository documents cannot supply this map.
 	ReleaseWIF *ReleaseWIFConfig
+
+	// KVMEnabled gates server-injected KVM device access for annotated leaves.
+	// When true, leaves declared in oberth.ci/kvm-templates receive
+	// devices.kubevirt.io/kvm: "1" (request == limit) and OBERTH_KVM=1.
+	// When false and a workflow declares KVM leaves, admission fails with an
+	// infrastructure-class error rather than silently running TCG.
+	// Default: false (must be explicitly enabled via vm.kvm.enabled chart value).
+	KVMEnabled bool
 }
 
 func (config *Config) applyDefaults() {
@@ -690,6 +698,9 @@ func Build(config Config, request Request) (*wfv1.Workflow, error) {
 		return nil, err
 	}
 	if err := applyNonrootLeaves(workflow, config, request); err != nil {
+		return nil, err
+	}
+	if err := applyKVMLeaves(workflow, config); err != nil {
 		return nil, err
 	}
 

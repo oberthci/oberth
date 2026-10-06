@@ -136,6 +136,12 @@ type serveOptions struct {
 	argoGoProxyURL       string
 	argoGoProxyNamespace goproxy.NamespaceConfig
 
+	// VM capability switches. KVM device injection is a server-owned
+	// infrastructure decision: a repository declares which leaves want it
+	// (oberth.ci/kvm-templates), but the device is only injected when this
+	// switch is on.
+	vmKVMEnabled bool
+
 	gitCommandTimeout       time.Duration
 	gcInterval              time.Duration
 	pushBannerURL           string
@@ -222,6 +228,7 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 	flags.StringVar(&options.argoGoProxyNamespace.Organization, "argo-goproxy-organization", "", "Exact organization owning private module repositories")
 	flags.DurationVar(&options.argoWorkflowTimeout, "argo-workflow-timeout", 12*time.Hour, "ceiling on a Workflow's own activeDeadlineSeconds")
 	flags.IntVar(&options.argoWorkflowTTL, "argo-workflow-ttl", 3600, "finished Workflow retention in seconds")
+	flags.BoolVar(&options.vmKVMEnabled, "vm-kvm-enabled", false, "enable server-injected KVM device access for annotated leaves (requires KubeVirt device plugin)")
 	flags.DurationVar(&options.gitCommandTimeout, "git-timeout", 10*time.Minute, "Git command timeout")
 	flags.DurationVar(&options.gcInterval, "git-gc-interval", 24*time.Hour, "periodic Git GC interval")
 	flags.StringVar(&options.pushBannerURL, "push-banner-url", "", "optional HTTPS dashboard URL echoed to every accepted git push")

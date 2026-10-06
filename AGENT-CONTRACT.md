@@ -1089,6 +1089,22 @@ continuity checks; it must never be used to reset or bypass those checks.
   separate existing run-owned mount. Actual PostgreSQL startup and Chromium's
   namespace/seccomp sandbox require separate execution proof; this interface
   alone does not establish either test suite's coverage.
+- Argo-authored workflows may select named plain container/script leaves for
+  server-injected KVM device access with the annotation
+  `oberth.ci/kvm-templates: leaf-one,leaf-two`. Each named leaf must be a plain
+  container or script leaf with `oberth.ci/workspace-mounts: none`,
+  `oberth.ci/workspace-env: none`, `automountServiceAccountToken: false`, no
+  `templateDefaults`, and must not be credentialed (no secret-paths, no release
+  WIF role, not also in `oberth.ci/nonroot-templates`). Repository-declared
+  `devices.kubevirt.io/*` resources are refused. `inputs.parameters` are allowed
+  (unlike nonroot leaves). When `vm.kvm.enabled` is true on the server, each
+  declared leaf receives `devices.kubevirt.io/kvm: "1"` (request == limit) and
+  `OBERTH_KVM=1` in its environment. When the switch is false, a workflow
+  declaring KVM leaves fails at admission with an infrastructure-class error.
+  This is Lane A (coverage acceleration) under the ordinary trust model: same
+  pod, same deadline, kubelet exit code. It is not Lane B (trusted-suite
+  verdict). The consumer asserts `-accel kvm` only when `OBERTH_KVM=1` is
+  present; no TCG fallback is permitted with the env set.
 - Security-backported runner tools are rebuilt from immutable upstream release
   source, identify themselves as Oberth derivatives, and are bound to their
   patched module versions and exact binary digests by the image contract.
