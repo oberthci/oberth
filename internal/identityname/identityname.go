@@ -26,7 +26,7 @@ const (
 	PerRepoCIPrefix = "oberth-argo-ci-"
 )
 
-// Per-step prefix.
+// PerStepPrefix is the common prefix for all per-step Vault identities.
 const PerStepPrefix = "oberth-step-"
 
 // PerStepName generates the deterministic, DNS-1123-safe name for a per-step

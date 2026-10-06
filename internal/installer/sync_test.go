@@ -322,8 +322,8 @@ func TestSyncGrantPoliciesRemovesOrphanPerStepIdentities(t *testing.T) {
 		// Policy list returns the orphan per-step policy.
 		"policy list": {out: "default\nroot\n" + defaultCredentialedPolicy + "\n" + defaultCISecretsPolicy + "\n" + name + "\n" + ciName + "\n" + orphanStepName + "\n"},
 		// Orphan removal: delete the policy and role.
-		"policy delete " + orphanStepName:                             {out: "Success!"},
-		"delete auth/kubernetes/role/" + orphanStepName:               {out: "Success!"},
+		"policy delete " + orphanStepName:               {out: "Success!"},
+		"delete auth/kubernetes/role/" + orphanStepName: {out: "Success!"},
 	}
 	runner := &fakeBaoRunner{t: t, responses: responses}
 	store := openBaoExec{run: runner.run, namespace: "openbao", pod: "openbao-0"}
