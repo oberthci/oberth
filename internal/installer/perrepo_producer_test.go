@@ -613,3 +613,38 @@ func TestProducerOutputAcceptedByConfigurePerRepoIdentities(t *testing.T) {
 	}
 	t.Fatal("terraform policy write call not found")
 }
+
+// TestProducePerStepIdentitiesExecFailureReturnsError verifies that
+// ProducePerStepIdentities returns a hard error when the kubectl exec fails,
+// rather than silently returning nil. Issue #623, finding 1: a nil return
+// on failure causes orphan removal to delete all per-step identities.
+func TestProducePerStepIdentitiesExecFailureReturnsError(t *testing.T) {
+	t.Parallel()
+
+	failingRunner := func(_ context.Context, _ []byte, _ string, _ ...string) ([]byte, error) {
+		return nil, errors.New("connection refused")
+	}
+	_, err := ProducePerStepIdentities(context.Background(), failingRunner, "", "oberth")
+	if err == nil {
+		t.Fatal("expected an error when exec fails, got nil")
+	}
+	if !strings.Contains(err.Error(), "exec access list --json") {
+		t.Fatalf("error should mention exec access list --json: %v", err)
+	}
+}
+
+// TestProducePerStepIdentitiesNilRunnerReturnsNil verifies backward compat:
+// when run is nil (no exec possible, e.g. fresh install), the function returns
+// nil, nil — this is safe because there are no grants to produce and no
+// orphans to remove.
+func TestProducePerStepIdentitiesNilRunnerReturnsNil(t *testing.T) {
+	t.Parallel()
+
+	identities, err := ProducePerStepIdentities(context.Background(), nil, "", "oberth")
+	if err != nil {
+		t.Fatalf("unexpected error for nil runner: %v", err)
+	}
+	if identities != nil {
+		t.Fatalf("expected nil identities for nil runner, got %v", identities)
+	}
+}

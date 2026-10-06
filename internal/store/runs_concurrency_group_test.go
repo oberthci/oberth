@@ -179,6 +179,7 @@ func TestMigration16AddsAnUngroupedConcurrencyGroupToExistingRuns(t *testing.T) 
 		t.Fatal(err)
 	}
 	if _, err := raw.ExecContext(ctx, `ALTER TABLE runs DROP COLUMN concurrency_group;
+DROP TABLE IF EXISTS grant_declarations;
 DELETE FROM schema_migrations WHERE version >= 16;`); err != nil {
 		t.Fatal(err)
 	}

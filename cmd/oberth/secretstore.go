@@ -1066,11 +1066,15 @@ func runSecretStoreSync(ctx context.Context, arguments []string, output io.Write
 	}
 
 	// Derive per-step identities from the grants for named-step enforcement (#623).
+	// A producer failure is a hard error: proceeding with an empty desired set
+	// would cause orphan removal to delete every existing per-step identity.
+	// Issue #623, finding 1.
+	_, _ = fmt.Fprintln(output, "Reading per-step identities from the running server...")
 	stepIdentities, stepErr := installer.ProducePerStepIdentities(
 		ctx, installer.DefaultRunCommand, *kubeContext, *namespace,
 	)
 	if stepErr != nil {
-		_, _ = fmt.Fprintf(output, "  WARNING: per-step identity derivation failed: %v\n", stepErr)
+		return fmt.Errorf("read per-step identities: %w (aborting sync to prevent orphan removal with an empty desired set)", stepErr)
 	}
 	if len(stepIdentities) > 0 {
 		_, _ = fmt.Fprintf(output, "  %d per-step identities derived\n", len(stepIdentities))
@@ -1080,7 +1084,7 @@ func runSecretStoreSync(ctx context.Context, arguments []string, output io.Write
 	results, syncErr := installer.RunSync(
 		ctx, installer.DefaultRunCommand, rootToken,
 		*kubeContext, *openbaoNamespace, "openbao-0", *argoNamespace,
-		identities, stepIdentities,
+		identities, stepIdentities, output,
 	)
 	for _, r := range results {
 		status := "unchanged"

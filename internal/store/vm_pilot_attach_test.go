@@ -42,6 +42,7 @@ func TestMigration15PreservesSealedPilotAndStartsUnclaimed(t *testing.T) {
 	// Reconstruct a v14 database: undo v15 and every later migration.
 	_, err = db.Exec(`ALTER TABLE vm_suite_executions DROP COLUMN attach_json;
 ALTER TABLE runs DROP COLUMN concurrency_group;
+DROP TABLE IF EXISTS grant_declarations;
 DELETE FROM schema_migrations WHERE version>=15`)
 	mustPilot(t, err)
 	mustPilot(t, db.Close())

@@ -99,6 +99,7 @@ DROP TABLE vm_suite_executions;
 DROP TABLE vm_capacity_slots;
 DROP TABLE vm_executions;
 ALTER TABLE runs DROP COLUMN concurrency_group;
+DROP TABLE IF EXISTS grant_declarations;
 DELETE FROM schema_migrations WHERE version > 10;
 PRAGMA foreign_keys = ON;`); err != nil {
 		t.Fatal(err)

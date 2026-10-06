@@ -1750,6 +1750,13 @@ func templateUsesCredentialChain(template *wfv1.Template) bool {
 	return templateUsesEnvconsul(template) || templateUsesOberthSecretstore(template)
 }
 
+// ExtractExecPaths returns the --path arguments from an `oberth secretstore exec`
+// invocation in a template's container command+args. Exported for use by the
+// declaration recorder (issue #623, finding 4).
+func ExtractExecPaths(template *wfv1.Template) []string {
+	return extractExecPaths(template)
+}
+
 // extractExecPaths returns the --path arguments from an `oberth secretstore exec`
 // invocation in a template's container command+args.
 func extractExecPaths(template *wfv1.Template) []string {
@@ -2074,14 +2081,6 @@ func injectTemplateEnvironment(template *wfv1.Template, environment []corev1.Env
 // DENIED. Silently keeping the per-repo union identity is the exact
 // residual this issue closes.
 func applyPerStepIdentities(workflow *wfv1.Workflow, config Config, request Request) error {
-	// When no per-step identities are configured at all (nil or empty map),
-	// this is the pre-#623 backward-compatible state: no per-step enforcement
-	// at the Vault identity layer. The admission-level per-step grant check
-	// (admitSecretstoreExecPaths) still runs.
-	if len(config.PerStepIdentities) == 0 {
-		return nil
-	}
-
 	// Build a set of top-level template pointers for stable-name detection.
 	topLevel := make(map[*wfv1.Template]bool, len(workflow.Spec.Templates))
 	for i := range workflow.Spec.Templates {

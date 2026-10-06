@@ -1088,16 +1088,48 @@ continuity checks; it must never be used to reset or bypass those checks.
   "<s>" has a named grant for path "<p>" but its per-step identity is not
   materialized -- run \`oberth secretstore sync\``. This closes the residual
   where a template would run under the per-repo union identity.
+  **Prune safety (finding 1):** `ProducePerStepIdentities` returns a hard
+  error when the `kubectl exec ... access list --json` call fails — it never
+  returns `nil, nil` on exec failure. `secretstore sync` aborts before any
+  Vault write when the per-step producer fails, preventing orphan removal
+  from running against an empty desired set. The sync prints each planned
+  per-step removal before performing it. A `nil` runner (fresh install, no
+  pod) is the only case that returns `nil, nil` — safe because there are no
+  grants and no orphans. The installer's `PerStepIdentities` in the chart
+  args are only set when the per-repo producer AND the per-step producer
+  both succeeded (prune-safety: an empty list from a producer failure never
+  reaches the chart or the sync).
+  **Fail-closed admission (finding 2):** `applyPerStepIdentities` does NOT
+  have a `len(config.PerStepIdentities) == 0` early return. Whenever a
+  template consumes a path with a named grant and the snapshot has no entry
+  (or an empty SA), admission is DENIED with the message: `secret grant
+  denied: step "<s>" has a named grant for path "<p>" but its per-step
+  identity is not materialized -- run \`oberth secretstore sync\` then
+  \`oberth install --install-secretstore --upgrade\``. This closes the
+  residual where a template would run under the per-repo union identity.
+  At controller.Create, each per-step SA assigned to a template is verified
+  to exist in the pipeline namespace using the same mechanism as the
+  workflow-level `verifyServiceAccount`; a missing per-step SA produces the
+  same denial class with the same remediation instructions.
+  **Chart SA creation (finding 3):** `argoOberthHelmValues` sets
+  `argo.perStepIdentities[i]` from `PerStepIdentityNames(cfg.PerStepIdentities)`
+  alongside the existing per-repo and per-repo-CI identity lists. The chart
+  creates these ServiceAccounts in the pipeline namespace. The values are
+  only set when the per-step producer succeeded (prune-safety).
   **Orphan removal (finding 5):** `secretstore sync` enumerates existing
   `oberth-step-*` policies and removes any that are not in the desired set
   (derived from current step identities). Both the policy and the
-  Kubernetes-auth role are deleted. Tokens outstanding under a removed role
+  Kubernetes-auth role are deleted; each removal is printed before it is
+  performed. Tokens outstanding under a removed role
   expire by TTL (<=30m `token_max_ttl`). This handles revoked grants: the
   per-step identity stays in OpenBao until the next sync removes it.
   **Pending declarations (finding 4):** `access_list --pending` returns
   (repo, step, path) declarations observed at Workflow admission that have
   no matching active grant. Declarations are recorded at admission time
+  by `ArgoJobs.recordDeclarations` via the `DeclarationRecorder` interface
+  (wired to `store.Store.RecordGrantDeclarations` in serve.go)
   (schema migration 18: `grant_declarations` table) and never auto-approve.
+  Recording failures are logged and never block admission.
   A wildcard grant (`step="*"`) covers any named-step declaration for the
   same (repo, path). Revoking a grant re-pends its declaration.
   The server's own identity has no Vault policy-write capability, so

@@ -289,6 +289,13 @@ func argoOberthHelmValues(cfg Config, openbao OpenBaoResult) []string {
 	for i, name := range PerRepoCIIdentityNames(cfg.PerRepoIdentities) {
 		values = append(values, "--set", fmt.Sprintf("argo.perRepoCIIdentities[%d]=%s", i, name))
 	}
+	// Per-step identity ServiceAccount names (issue #623, finding 3).
+	// The chart creates these SAs in the pipeline namespace. Only set when
+	// per-step identities were successfully derived (prune-safety: never set
+	// from an empty list that came from a producer failure).
+	for i, name := range PerStepIdentityNames(cfg.PerStepIdentities) {
+		values = append(values, "--set", fmt.Sprintf("argo.perStepIdentities[%d]=%s", i, name))
+	}
 	// Preserve proxy enablement and its administrator-selected namespace in
 	// reused values. Fresh installs leave it disabled until a mapping is supplied.
 	values = append(values,

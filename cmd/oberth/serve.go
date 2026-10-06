@@ -827,6 +827,9 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 	// the initial ConfigMap read succeeds. Without this, a transient startup
 	// failure would leave stale grants active in sqlite for admission to consume.
 	argoJobs.SetReconcilerHealth(accessReconciler)
+	// Wire the declaration recorder so Workflow admission records (repo, step,
+	// path) declarations for `access_list --pending`. Issue #623, finding 4.
+	argoJobs.SetDeclarationRecorder(database)
 	controlAPI, err := service.NewAPI(service.APIConfig{
 		SchedulingObserver: argoJobs, Admission: scheduler,
 		Runs: database, History: database, Repositories: database, Issues: database,

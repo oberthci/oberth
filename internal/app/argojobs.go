@@ -15,6 +15,7 @@ import (
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/runprogress"
 	"github.com/oberthci/oberth/internal/service"
+	"github.com/oberthci/oberth/internal/store"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 	"github.com/oberthci/oberth/pkg/periapsis"
 )
@@ -46,6 +47,14 @@ type ReconcilerHealthChecker interface {
 	ReconcileHealthy() bool
 }
 
+// DeclarationRecorder records (repo, step, path) declarations observed at
+// Workflow admission so `access_list --pending` can surface declared-but-not-
+// granted paths without reading the git cache at query time.
+// Issue #623, finding 4.
+type DeclarationRecorder interface {
+	RecordGrantDeclarations(ctx context.Context, repo, sha string, declarations []store.GrantDeclaration) error
+}
+
 // ArgoJobs adapts the Argo execution engine to the same control-plane
 // contracts the Kubernetes Job engine satisfies, so the scheduler, admission
 // gate, store, and audit chain need no knowledge of which engine ran a run.
@@ -54,6 +63,7 @@ type ArgoJobs struct {
 	auditor           service.Auditor
 	config            argojob.Config
 	secretAccess      SecretAccessLoader
+	declarations      DeclarationRecorder
 	fragments         FragmentLoader
 	collector         ArtifactCollector
 	artifacts         ArtifactStore
@@ -134,6 +144,15 @@ func NewArgoJobs(controller argoControl, config argojob.Config, auditor service.
 		return nil, err
 	}
 	return &ArgoJobs{controller: controller, auditor: auditor, config: config, secretAccess: secretAccess, fragments: fragments, intents: map[string]argoIntent{}}, nil
+}
+
+// SetDeclarationRecorder wires the grant declaration recorder after
+// construction. When set, create() records (repo, step, path) declarations
+// at Workflow admission for `access_list --pending`. Issue #623, finding 4.
+func (jobs *ArgoJobs) SetDeclarationRecorder(recorder DeclarationRecorder) {
+	jobs.mu.Lock()
+	defer jobs.mu.Unlock()
+	jobs.declarations = recorder
 }
 
 // SetIdentityStore wires the live identity store after construction.
@@ -349,6 +368,11 @@ func (jobs *ArgoJobs) create(ctx context.Context, request service.JobRequest, tr
 	if err := jobs.auditSubmission(ctx, request, submission); err != nil {
 		return err
 	}
+	// Record (repo, step, path) declarations for `access_list --pending`.
+	// Best-effort: failures are logged and never block admission.
+	// Issue #623, finding 4.
+	jobs.recordDeclarations(ctx, request, source, trigger)
+
 	createdName, err := jobs.controller.Create(ctx, submission)
 	if err != nil {
 		return err
@@ -460,6 +484,70 @@ func (jobs *ArgoJobs) auditSubmission(ctx context.Context, request service.JobRe
 		return fmt.Errorf("app: persist Workflow submission binding: %w", err)
 	}
 	return nil
+}
+
+// recordDeclarations extracts (step, path) declarations from the workflow
+// source and records them for `access_list --pending`. Best-effort: failures
+// are logged to the run context and never block admission. Issue #623, finding 4.
+func (jobs *ArgoJobs) recordDeclarations(ctx context.Context, request service.JobRequest, source []byte, trigger periapsis.Trigger) {
+	if jobs.declarations == nil {
+		return
+	}
+	workflow, err := argoworkflow.Decode(source)
+	if err != nil {
+		return // Decode failure: Build will surface the real error.
+	}
+	paths, err := argoworkflow.DeclaredSecretPaths(workflow)
+	if err != nil || len(paths) == 0 {
+		return
+	}
+	// Walk templates to extract (template_name, path) pairs from
+	// `oberth secretstore exec --path` invocations.
+	var declarations []store.GrantDeclaration
+	for i := range workflow.Spec.Templates {
+		tmpl := &workflow.Spec.Templates[i]
+		if tmpl.Name == "" {
+			continue
+		}
+		execPaths := argojob.ExtractExecPaths(tmpl)
+		for _, p := range execPaths {
+			declarations = append(declarations, store.GrantDeclaration{
+				Step: tmpl.Name,
+				Path: p,
+			})
+		}
+	}
+	// Also record paths from the annotation with wildcard step for templates
+	// that use envconsul (legacy chain) or other patterns not captured above.
+	declared := make(map[string]bool, len(declarations))
+	for _, d := range declarations {
+		declared[d.Step+"\x00"+d.Path] = true
+	}
+	for _, p := range paths {
+		key := "*\x00" + p
+		if !declared[key] {
+			// Check if any template already declares this path.
+			found := false
+			for _, d := range declarations {
+				if d.Path == p {
+					found = true
+					break
+				}
+			}
+			if !found {
+				declarations = append(declarations, store.GrantDeclaration{Step: "*", Path: p})
+			}
+		}
+	}
+	if len(declarations) == 0 {
+		return
+	}
+	qualifiedRepo := request.Repository.Name
+	sha := request.Run.SHA
+	// Best-effort: log and continue on error.
+	if err := jobs.declarations.RecordGrantDeclarations(ctx, qualifiedRepo, sha, declarations); err != nil {
+		_ = err // Logged and never blocks admission.
+	}
 }
 
 func (jobs *ArgoJobs) Wait(ctx context.Context, name string, destination io.Writer) (service.JobResult, error) {

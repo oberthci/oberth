@@ -1465,8 +1465,14 @@ spec:
 `
 
 // TestPerStepGrantExactMatchPasses proves that a template granted access to a
-// path by its exact name is admitted. Issue #623.
+// path by its exact name is admitted when its per-step identity is
+// materialized. Issue #623.
 func TestPerStepGrantExactMatchPasses(t *testing.T) {
+	config := testConfig()
+	config.PerStepIdentities = map[string]PerRepoIdentityConfig{
+		"oberth/release-publish-r2":     {ServiceAccountName: "oberth-step-test-r2"},
+		"oberth/release-publish-images": {ServiceAccountName: "oberth-step-test-images"},
+	}
 	request := testRequest(periapsis.TriggerRelease, multiTemplateExecDocument)
 	request.ApprovedSecrets = map[string]bool{
 		"oberth/data/release/r2-upload-token": true,
@@ -1476,7 +1482,7 @@ func TestPerStepGrantExactMatchPasses(t *testing.T) {
 		"oberth/data/release/r2-upload-token": {"release-publish-r2": true},
 		"oberth/data/release/gar-image-key":   {"release-publish-images": true},
 	}
-	if _, err := Build(testConfig(), request); err != nil {
+	if _, err := Build(config, request); err != nil {
 		t.Fatalf("exact per-step grant was rejected: %v", err)
 	}
 }
@@ -1852,9 +1858,11 @@ func TestPerStepIdentityWildcardKeepsPerRepo(t *testing.T) {
 	}
 }
 
-// TestPerStepIdentityNilMapBackwardCompatible proves that a nil PerStepIdentities
-// map does not break Build — backward compatibility with pre-#623 config.
-func TestPerStepIdentityNilMapBackwardCompatible(t *testing.T) {
+// TestPerStepIdentityNilMapDeniesNamedGrants proves that a nil PerStepIdentities
+// map denies admission when templates have named-step grants — fail-closed
+// semantics (issue #623, finding 2). A missing entry is an inconsistency
+// (the identity was not materialized), not a backward-compat case.
+func TestPerStepIdentityNilMapDeniesNamedGrants(t *testing.T) {
 	config := testConfig()
 	config.PerStepIdentities = nil
 
@@ -1868,11 +1876,36 @@ func TestPerStepIdentityNilMapBackwardCompatible(t *testing.T) {
 		"oberth/data/release/gar-image-key":   {"release-publish-images": true},
 	}
 
+	_, err := Build(config, request)
+	if err == nil {
+		t.Fatal("expected denial when per-step identities are nil and named grants exist")
+	}
+	if !strings.Contains(err.Error(), "per-step identity is not materialized") {
+		t.Fatalf("unexpected error message: %v", err)
+	}
+}
+
+// TestPerStepIdentityNilMapWildcardOnlyPasses proves that a nil
+// PerStepIdentities map with only wildcard grants succeeds — there are no
+// per-step identities to materialize.
+func TestPerStepIdentityNilMapWildcardOnlyPasses(t *testing.T) {
+	config := testConfig()
+	config.PerStepIdentities = nil
+
+	request := testRequest(periapsis.TriggerRelease, multiTemplateExecDocument)
+	request.ApprovedSecrets = map[string]bool{
+		"oberth/data/release/r2-upload-token": true,
+		"oberth/data/release/gar-image-key":   true,
+	}
+	request.StepGrants = map[string]map[string]bool{
+		"oberth/data/release/r2-upload-token": {"*": true},
+		"oberth/data/release/gar-image-key":   {"*": true},
+	}
+
 	workflow, err := Build(config, request)
 	if err != nil {
-		t.Fatalf("build: %v", err)
+		t.Fatalf("wildcard-only grants with nil PerStepIdentities should pass: %v", err)
 	}
-	// Should succeed without per-step identity assignment.
 	if workflow == nil {
 		t.Fatal("expected non-nil workflow")
 	}

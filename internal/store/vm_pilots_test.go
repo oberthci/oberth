@@ -370,7 +370,8 @@ func TestPilotJournalMigration14PreservesLegacyCapacity(t *testing.T) {
 	mustPilot(t, s.SubmitVMExecution(ctx, legacy.Spec.RunID))
 	// Reconstruct precisely the v13 journal shape with an unknown create.
 	_, err = s.db.Exec(`DROP TABLE vm_suite_resources; DROP TABLE vm_suite_executions; DROP TABLE vm_capacity_slots;
-ALTER TABLE runs DROP COLUMN concurrency_group; DELETE FROM schema_migrations WHERE version>=14;`)
+ALTER TABLE runs DROP COLUMN concurrency_group; DROP TABLE IF EXISTS grant_declarations;
+DELETE FROM schema_migrations WHERE version>=14;`)
 	mustPilot(t, err)
 	mustPilot(t, s.Close())
 	s, err = Open(ctx, path, Options{Now: func() time.Time { return now }})

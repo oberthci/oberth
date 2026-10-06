@@ -163,6 +163,12 @@ type Config struct {
 	// policy, and a Vault role (via ConfigurePerRepoIdentities). The
 	// installer populates this from the repo registry + approval table.
 	PerRepoIdentities []PerRepoIdentity
+	// PerStepIdentities describes per-step Vault identities to create.
+	// Each entry results in a ServiceAccount (via the chart), a Vault
+	// policy, and a Vault role (via ConfigurePerStepIdentities). The
+	// installer populates this from the access list's named-step grants.
+	// Issue #623, finding 3.
+	PerStepIdentities []PerStepIdentity
 
 	// TLSExtraDNSNames and TLSExtraIPs are addresses the generated server
 	// certificate must carry beyond the four in-cluster names. A client
@@ -735,6 +741,17 @@ func Run(ctx context.Context, cfg Config, deps Deps) error {
 		// provisioned. (#260 gap 6)
 		if len(cfg.PerRepoIdentities) == 0 {
 			warnPerRepoIdentityDelta(ctx, deps, ns)
+		}
+		// Per-step identities (issue #623, finding 3). Only produce when the
+		// per-repo producer succeeded (prune-safety: an empty per-step list
+		// from a producer failure must never reach the chart or the sync).
+		if len(cfg.PerStepIdentities) == 0 && identityRunner != nil && produceErr == nil {
+			stepIds, stepErr := ProducePerStepIdentities(ctx, identityRunner, deps.ContextName, ns)
+			if stepErr != nil {
+				_, _ = fmt.Fprintf(deps.Output, "WARNING: could not read per-step identities: %v\n", stepErr)
+			} else if len(stepIds) > 0 {
+				cfg.PerStepIdentities = stepIds
+			}
 		}
 	}
 

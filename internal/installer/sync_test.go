@@ -3,6 +3,7 @@ package installer
 import (
 	"context"
 	"errors"
+	"io"
 	"strings"
 	"testing"
 )
@@ -42,7 +43,7 @@ func TestSyncGrantPoliciesCreatesNewPolicies(t *testing.T) {
 		Grants:   []string{"oberth/data/release/cosign-secret"},
 	}}
 
-	results, err := syncGrantPolicies(context.Background(), store, "root", identities, nil, "oberth-argo")
+	results, err := syncGrantPolicies(context.Background(), store, "root", identities, nil, "oberth-argo", io.Discard)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -136,7 +137,7 @@ func TestSyncGrantPoliciesIdempotent(t *testing.T) {
 	runner := &fakeBaoRunner{t: t, responses: responses}
 	store := openBaoExec{run: runner.run, namespace: "openbao", pod: "openbao-0"}
 
-	results, err := syncGrantPolicies(context.Background(), store, "root", identities, nil, "oberth-argo")
+	results, err := syncGrantPolicies(context.Background(), store, "root", identities, nil, "oberth-argo", io.Discard)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -203,7 +204,7 @@ func TestSyncGrantPoliciesSharedPoliciesZeroStanzaWithIdentities(t *testing.T) {
 		Grants:   []string{"oberth/data/release/cosign-secret"},
 	}}
 
-	results, err := syncGrantPolicies(context.Background(), store, "root", identities, nil, "oberth-argo")
+	results, err := syncGrantPolicies(context.Background(), store, "root", identities, nil, "oberth-argo", io.Discard)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -254,7 +255,7 @@ func TestSyncGrantPoliciesNoIdentities(t *testing.T) {
 	runner := &fakeBaoRunner{t: t, responses: responses}
 	store := openBaoExec{run: runner.run, namespace: "openbao", pod: "openbao-0"}
 
-	results, err := syncGrantPolicies(context.Background(), store, "root", nil, nil, "oberth-argo")
+	results, err := syncGrantPolicies(context.Background(), store, "root", nil, nil, "oberth-argo", io.Discard)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -277,7 +278,7 @@ func TestSyncGrantPoliciesRejectsInvalidOrg(t *testing.T) {
 		return nil, errors.New("should not be called")
 	}, namespace: "openbao", pod: "openbao-0"}
 
-	_, err := syncGrantPolicies(context.Background(), store, "root", identities, nil, "oberth-argo")
+	_, err := syncGrantPolicies(context.Background(), store, "root", identities, nil, "oberth-argo", io.Discard)
 	if err == nil {
 		t.Fatal("expected error for invalid org name")
 	}
@@ -335,7 +336,7 @@ func TestSyncGrantPoliciesRemovesOrphanPerStepIdentities(t *testing.T) {
 	}}
 
 	// No per-step identities desired — the orphan should be removed.
-	results, err := syncGrantPolicies(context.Background(), store, "root", identities, nil, "oberth-argo")
+	results, err := syncGrantPolicies(context.Background(), store, "root", identities, nil, "oberth-argo", io.Discard)
 	if err != nil {
 		t.Fatal(err)
 	}

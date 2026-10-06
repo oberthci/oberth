@@ -191,6 +191,15 @@ func (controller *Controller) Create(ctx context.Context, request Request) (stri
 		controller.seeder.DeleteClaim(context.WithoutCancel(ctx), volume.ClaimName)
 		return "", saErr
 	}
+	// Verify per-step SAs exist in the pipeline namespace (issue #623,
+	// finding 2). Templates with per-step identities have their own
+	// ServiceAccountName set by applyPerStepIdentities; a missing SA here
+	// means `oberth install --install-secretstore --upgrade` has not been
+	// run since the grant was created.
+	if saErr := controller.verifyPerStepServiceAccounts(ctx, intended); saErr != nil {
+		controller.seeder.DeleteClaim(context.WithoutCancel(ctx), volume.ClaimName)
+		return "", saErr
+	}
 	created, createErr := controller.workflows.Create(ctx, intended, metav1.CreateOptions{})
 	if createErr == nil {
 		controller.adoptClaimBestEffort(ctx, volume.ClaimName, created.Name, string(created.UID))
@@ -261,6 +270,43 @@ func (controller *Controller) verifyServiceAccount(ctx context.Context, namespac
 				"for newly granted repositories", name, namespace)
 		}
 		return fmt.Errorf("argojob: verify ServiceAccount %q in %q: %w", name, namespace, err)
+	}
+	return nil
+}
+
+// verifyPerStepServiceAccounts checks that every per-step SA assigned to a
+// template by applyPerStepIdentities exists in the pipeline namespace. A
+// template-level SA that differs from the workflow-level SA and is not one of
+// the shared SAs is a per-step (or per-repo) SA that may not have been
+// materialized yet. Issue #623, finding 2.
+func (controller *Controller) verifyPerStepServiceAccounts(ctx context.Context, workflow *wfv1.Workflow) error {
+	if controller.kube == nil {
+		return nil
+	}
+	workflowSA := workflow.Spec.ServiceAccountName
+	checked := make(map[string]bool)
+	for _, tmpl := range workflow.Spec.Templates {
+		sa := tmpl.ServiceAccountName
+		if sa == "" || sa == workflowSA {
+			continue
+		}
+		if checked[sa] {
+			continue
+		}
+		checked[sa] = true
+		if controller.isSharedServiceAccount(sa) {
+			continue
+		}
+		_, err := controller.kube.CoreV1().ServiceAccounts(workflow.Namespace).Get(ctx, sa, metav1.GetOptions{})
+		if err != nil {
+			if apierrors.IsNotFound(err) {
+				return fmt.Errorf("argojob: per-step ServiceAccount %q does not exist in namespace %q — "+
+					"run `oberth secretstore sync` and `oberth install --install-secretstore --upgrade` "+
+					"to materialize per-step identities for named grants",
+					sa, workflow.Namespace)
+			}
+			return fmt.Errorf("argojob: verify per-step ServiceAccount %q in %q: %w", sa, workflow.Namespace, err)
+		}
 	}
 	return nil
 }

@@ -283,7 +283,7 @@ func ProducePerStepIdentities(ctx context.Context, run CommandRunner, contextNam
 	jsonArgs := append(append([]string(nil), baseArgs...), "--json")
 	out, err := run(ctx, nil, "kubectl", jsonArgs...)
 	if err != nil {
-		return nil, nil // Server may not support --json or may not be running.
+		return nil, fmt.Errorf("exec access list --json in Oberth pod: %w", err)
 	}
 	_, grants, parseErr := ParseAccessListJSONWithSteps(out)
 	if parseErr != nil {

@@ -20,6 +20,9 @@ import (
 	"time"
 
 	oberth "github.com/oberthci/oberth"
+	"github.com/oberthci/oberth/internal/installer"
+	"github.com/oberthci/oberth/internal/service"
+	"github.com/oberthci/oberth/internal/store"
 
 	authenticationv1 "k8s.io/api/authentication/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -1033,5 +1036,89 @@ func TestSecretStoreVerifyExpectImpliesKeysMode(t *testing.T) {
 	}
 	if !strings.Contains(output.String(), "field names match expectations") {
 		t.Fatalf("output misses success message:\n%s", output.String())
+	}
+}
+
+// TestPlanDigestCLIEqualsServer verifies that planDigestFromIdentities (CLI)
+// produces the same digest as ComputePlanDigest(computeSecretStorePlan(grants))
+// (server) for the same grant table with named and wildcard grants.
+// Issue #623, finding 5.
+func TestPlanDigestCLIEqualsServer(t *testing.T) {
+	t.Parallel()
+
+	// Construct the same grant table that both sides would see.
+	grants := []store.SecretAccessGrant{
+		{Repo: "codeberg/oberthci/oberth", Step: "*", Secret: "oberth/data/release/cosign-secret"},
+		{Repo: "codeberg/oberthci/oberth", Step: "release-publish-images", Secret: "oberth/data/release/gar-image-key"},
+		{Repo: "codeberg/cloudtaser/cloudtaser-port", Step: "*", Secret: "oberth/data/release/cosign-secret"},
+	}
+
+	// Server side: computeSecretStorePlan + ComputePlanDigest.
+	serverPlan := service.ExportComputeSecretStorePlan(grants)
+	serverDigest := service.ComputePlanDigest(serverPlan.Repos)
+
+	// CLI side: build PerRepoIdentity and PerStepIdentity, then planDigestFromIdentities.
+	// These are the same identities the CLI would derive from the access list output.
+	cliRepoIdentities := []installer.PerRepoIdentity{
+		{
+			Upstream: "codeberg",
+			Org:      "oberthci",
+			Repo:     "oberth",
+			Grants:   []string{"oberth/data/release/cosign-secret", "oberth/data/release/gar-image-key"},
+		},
+		{
+			Upstream: "codeberg",
+			Org:      "cloudtaser",
+			Repo:     "cloudtaser-port",
+			Grants:   []string{"oberth/data/release/cosign-secret"},
+		},
+	}
+	// Per-step identities: the named grant (step="release-publish-images")
+	// produces one identity with its own path + inherited wildcard paths.
+	cliStepIdentities := []installer.PerStepIdentity{
+		{
+			Upstream: "codeberg",
+			Org:      "oberthci",
+			Repo:     "oberth",
+			Step:     "release-publish-images",
+			GrantPaths: []string{
+				"oberth/data/release/cosign-secret", // inherited from wildcard
+				"oberth/data/release/gar-image-key", // named grant
+			},
+		},
+	}
+
+	cliDigest := planDigestFromIdentities(cliRepoIdentities, cliStepIdentities)
+
+	if cliDigest != serverDigest {
+		t.Fatalf("CLI digest %q != server digest %q", cliDigest, serverDigest)
+	}
+}
+
+// TestPlanDigestCLIEqualsServerWildcardOnly verifies digest agreement when
+// all grants are wildcard (no per-step identities).
+func TestPlanDigestCLIEqualsServerWildcardOnly(t *testing.T) {
+	t.Parallel()
+
+	grants := []store.SecretAccessGrant{
+		{Repo: "codeberg/oberthci/oberth", Step: "*", Secret: "oberth/data/release/cosign-secret"},
+	}
+
+	serverPlan := service.ExportComputeSecretStorePlan(grants)
+	serverDigest := service.ComputePlanDigest(serverPlan.Repos)
+
+	cliRepoIdentities := []installer.PerRepoIdentity{
+		{
+			Upstream: "codeberg",
+			Org:      "oberthci",
+			Repo:     "oberth",
+			Grants:   []string{"oberth/data/release/cosign-secret"},
+		},
+	}
+	// No per-step identities for wildcard-only grants.
+	cliDigest := planDigestFromIdentities(cliRepoIdentities, nil)
+
+	if cliDigest != serverDigest {
+		t.Fatalf("CLI digest %q != server digest %q (wildcard-only)", cliDigest, serverDigest)
 	}
 }

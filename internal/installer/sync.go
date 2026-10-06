@@ -3,6 +3,7 @@ package installer
 import (
 	"context"
 	"fmt"
+	"io"
 	"strings"
 
 	"github.com/oberthci/oberth/internal/identityname"
@@ -18,20 +19,20 @@ import (
 // This is the entry point that `oberth secretstore sync` dispatches to. It
 // creates the internal openBaoExec from the provided CommandRunner and
 // cluster coordinates, then calls the internal syncGrantPolicies.
-func RunSync(ctx context.Context, run CommandRunner, rootToken, contextName, openbaoNamespace, openbaoPod, argoNamespace string, identities []PerRepoIdentity, stepIdentities []PerStepIdentity) ([]SyncResult, error) {
+func RunSync(ctx context.Context, run CommandRunner, rootToken, contextName, openbaoNamespace, openbaoPod, argoNamespace string, identities []PerRepoIdentity, stepIdentities []PerStepIdentity, output io.Writer) ([]SyncResult, error) {
 	store := openBaoExec{
 		run:         run,
 		contextName: contextName,
 		namespace:   openbaoNamespace,
 		pod:         openbaoPod,
 	}
-	return syncGrantPolicies(ctx, store, rootToken, identities, stepIdentities, argoNamespace)
+	return syncGrantPolicies(ctx, store, rootToken, identities, stepIdentities, argoNamespace, output)
 }
 
 // syncGrantPolicies re-derives every Vault policy and role that depends on
 // the approval table. It is idempotent: policies that already match the
 // expected shape are left untouched and reported as unchanged.
-func syncGrantPolicies(ctx context.Context, store openBaoExec, rootToken string, identities []PerRepoIdentity, stepIdentities []PerStepIdentity, argoNamespace string) ([]SyncResult, error) {
+func syncGrantPolicies(ctx context.Context, store openBaoExec, rootToken string, identities []PerRepoIdentity, stepIdentities []PerStepIdentity, argoNamespace string, output io.Writer) ([]SyncResult, error) {
 	var results []SyncResult
 
 	// Validate upstream org names derived from identities. The shared policies
@@ -141,7 +142,8 @@ func syncGrantPolicies(ctx context.Context, store openBaoExec, rootToken string,
 			if _, desired := desiredStepNames[name]; desired {
 				continue
 			}
-			// Orphan: remove the policy and role.
+			// Orphan: print the planned removal, then remove the policy and role.
+			_, _ = fmt.Fprintf(output, "  removing orphan per-step identity %s (not in desired set)\n", name)
 			if err := store.policyDelete(ctx, rootToken, name); err != nil {
 				return results, fmt.Errorf("remove orphan per-step policy %s: %w", name, err)
 			}
