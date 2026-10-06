@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/oberthci/oberth/internal/api"
+	"github.com/oberthci/oberth/internal/identityname"
+	"github.com/oberthci/oberth/internal/installer"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
 )
@@ -211,9 +213,19 @@ func TestSecretStorePlanWildcardOnlyNoStepEntries(t *testing.T) {
 }
 
 func TestSecretStorePlanPerStepPolicyName(t *testing.T) {
-	name := deriveStepPolicyName("codeberg/acme/port", "release-publish-images")
-	if name != "oberth-step-codeberg-acme-port-release-publish-images" {
-		t.Fatalf("unexpected step policy name: %s", name)
+	// The plan's step policy name must equal the installer's PerStepName.
+	// Issue #623, finding 3: a mismatch means the plan shows one name and
+	// the installer creates a different one, making the admin-facing output
+	// misleading and the plan digest wrong.
+	planName := deriveStepPolicyName("codeberg/acme/port", "release-publish-images")
+	installerName := installer.PerStepName("codeberg", "acme", "port", "release-publish-images")
+	if planName != installerName {
+		t.Fatalf("plan step name %q != installer step name %q", planName, installerName)
+	}
+	// Also verify the shared package produces the same.
+	sharedName := identityname.PerStepName("codeberg", "acme", "port", "release-publish-images")
+	if planName != sharedName {
+		t.Fatalf("plan step name %q != identityname step name %q", planName, sharedName)
 	}
 }
 

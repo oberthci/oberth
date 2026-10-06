@@ -3,6 +3,8 @@ package installer
 import (
 	"strings"
 	"testing"
+
+	"github.com/oberthci/oberth/internal/identityname"
 )
 
 func TestPerStepNameDeterministic(t *testing.T) {
@@ -15,8 +17,8 @@ func TestPerStepNameDeterministic(t *testing.T) {
 
 func TestPerStepNameHasCorrectPrefix(t *testing.T) {
 	name := PerStepName("codeberg", "cloudtaser", "cloudtaser-port", "release-publish-images")
-	if !strings.HasPrefix(name, perStepNamePrefix) {
-		t.Fatalf("PerStepName %q does not start with %q", name, perStepNamePrefix)
+	if !strings.HasPrefix(name, identityname.PerStepPrefix) {
+		t.Fatalf("PerStepName %q does not start with %q", name, identityname.PerStepPrefix)
 	}
 }
 

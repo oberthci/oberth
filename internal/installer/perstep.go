@@ -13,11 +13,11 @@ package installer
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/oberthci/oberth/internal/identityname"
 )
 
 // PerStepIdentity describes one (repo, step) combination's per-step Vault
@@ -39,43 +39,11 @@ type PerStepIdentity struct {
 	GrantPaths []string
 }
 
-// perStepNamePrefix is the common prefix for all per-step Vault identities.
-const perStepNamePrefix = "oberth-step-"
-
 // PerStepName generates the deterministic, DNS-1123-safe name for a per-step
-// identity. The name is shared across the ServiceAccount, the Vault policy,
-// and the Vault role, because they are a single identity.
-//
-// The hash input is the full canonical quad (upstream/org/repo/step) so two
-// steps in different repos that sanitise to the same readable portion get
-// different names.
+// identity. Delegates to internal/identityname so the plan and the installer
+// always produce the same name (issue #623, finding 3).
 func PerStepName(upstream, org, repo, step string) string {
-	canonical := upstream + "/" + org + "/" + repo + "/" + step
-	digest := sha256.Sum256([]byte(canonical))
-	hashSuffix := hex.EncodeToString(digest[:])[:12]
-
-	var safe strings.Builder
-	for _, c := range strings.ToLower(upstream + "-" + org + "-" + repo + "-" + step) {
-		switch {
-		case c >= 'a' && c <= 'z',
-			c >= '0' && c <= '9',
-			c == '-':
-			safe.WriteRune(c)
-		default:
-			safe.WriteByte('-')
-		}
-	}
-	readable := strings.Trim(safe.String(), "-")
-
-	// Budget: prefix(12) + readable + "-" + hash(12) = total ≤ 63
-	maxReadable := maxPerRepoNameLength - len(perStepNamePrefix) - 1 - len(hashSuffix)
-	if len(readable) > maxReadable {
-		readable = strings.TrimRight(readable[:maxReadable], "-")
-	}
-	if readable == "" {
-		readable = "step"
-	}
-	return perStepNamePrefix + readable + "-" + hashSuffix
+	return identityname.PerStepName(upstream, org, repo, step)
 }
 
 // PerStepPolicy generates the HCL policy for a single per-step identity. It

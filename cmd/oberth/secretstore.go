@@ -1091,7 +1091,7 @@ func runSecretStoreSync(ctx context.Context, arguments []string, output io.Write
 	_, _ = fmt.Fprintln(output, "secretstore sync: OK — all policies and roles match the approval table")
 
 	// Compute the plan digest from the identities and build the sync receipt.
-	planDigest := planDigestFromIdentities(identities)
+	planDigest := planDigestFromIdentities(identities, stepIdentities)
 	receipt := installer.ComputeSyncReceipt(results, planDigest)
 
 	_, _ = fmt.Fprintf(output, "\nReceipt: plan_digest=%s changed=%d/%d\n", receipt.PlanDigest, receipt.ChangedCount, receipt.TotalCount)
@@ -1103,10 +1103,13 @@ func runSecretStoreSync(ctx context.Context, arguments []string, output io.Write
 }
 
 // planDigestFromIdentities builds the canonical plan digest from PerRepoIdentity
-// values. The same computation runs on the server side via computeSecretStorePlan;
-// both produce identical digests for the same approval table because both sort
-// repos and paths deterministically.
-func planDigestFromIdentities(identities []installer.PerRepoIdentity) string {
+// and PerStepIdentity values. The same computation runs on the server side via
+// computeSecretStorePlan; both produce identical digests for the same approval
+// table because both sort repos, steps, and paths deterministically.
+//
+// Issue #623, finding 3: step identities are included in the digest so the
+// CLI's sync receipt matches the server's plan when named-step grants exist.
+func planDigestFromIdentities(identities []installer.PerRepoIdentity, stepIdentities []installer.PerStepIdentity) string {
 	repoPathsMap := make(map[string][]string)
 	for _, id := range identities {
 		qualified := id.Upstream + "/" + id.Org + "/" + id.Repo
@@ -1118,16 +1121,35 @@ func planDigestFromIdentities(identities []installer.PerRepoIdentity) string {
 	}
 	sort.Strings(repos)
 
+	// Index step identities by qualified repo.
+	stepsByRepo := make(map[string][]planStepForDigest)
+	for _, sid := range stepIdentities {
+		qualified := sid.Upstream + "/" + sid.Org + "/" + sid.Repo
+		stepsByRepo[qualified] = append(stepsByRepo[qualified], planStepForDigest{
+			step:   sid.Step,
+			paths:  sid.GrantPaths,
+			policy: installer.PerStepName(sid.Upstream, sid.Org, sid.Repo, sid.Step),
+		})
+	}
+	// Sort steps within each repo for deterministic output.
+	for repo := range stepsByRepo {
+		entries := stepsByRepo[repo]
+		sort.Slice(entries, func(i, j int) bool { return entries[i].step < entries[j].step })
+		stepsByRepo[repo] = entries
+	}
+
 	var planRepos []planRepoForDigest
 	for _, repo := range repos {
 		paths := repoPathsMap[repo]
 		sort.Strings(paths)
 		safe := strings.NewReplacer("/", "-", ".", "-").Replace(repo)
-		planRepos = append(planRepos, planRepoForDigest{
+		entry := planRepoForDigest{
 			Repo:   repo,
 			Paths:  paths,
 			Policy: "oberth-argo-" + safe,
-		})
+			Steps:  stepsByRepo[repo],
+		}
+		planRepos = append(planRepos, entry)
 	}
 	return computePlanDigestLocal(planRepos)
 }
@@ -1138,11 +1160,22 @@ type planRepoForDigest struct {
 	Repo   string
 	Paths  []string
 	Policy string
+	Steps  []planStepForDigest
+}
+
+// planStepForDigest mirrors the per-step entry in the plan digest.
+type planStepForDigest struct {
+	step   string
+	paths  []string
+	policy string
 }
 
 // computePlanDigestLocal computes the same sha256 digest as
 // service.ComputePlanDigest. The algorithm is frozen: changing it breaks
 // current/stale detection for all prior syncs.
+//
+// v2: includes per-step entries (issue #623). Repos without steps produce
+// the same bytes as the v1 format because the step loop doesn't write anything.
 func computePlanDigestLocal(repos []planRepoForDigest) string {
 	h := sha256.New()
 	h.Write([]byte("oberth-secretstore-plan-v1\x00"))
@@ -1154,6 +1187,19 @@ func computePlanDigestLocal(repos []planRepoForDigest) string {
 		for _, path := range repo.Paths {
 			h.Write([]byte(path))
 			h.Write([]byte{0})
+		}
+		// Per-step entries (issue #623). Repos without steps produce no
+		// additional bytes, preserving backward compatibility.
+		for _, step := range repo.Steps {
+			h.Write([]byte("step:"))
+			h.Write([]byte(step.step))
+			h.Write([]byte{0})
+			h.Write([]byte(step.policy))
+			h.Write([]byte{0})
+			for _, path := range step.paths {
+				h.Write([]byte(path))
+				h.Write([]byte{0})
+			}
 		}
 		h.Write([]byte{0})
 	}

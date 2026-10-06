@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/oberthci/oberth/internal/api"
+	"github.com/oberthci/oberth/internal/identityname"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
 )
@@ -168,7 +169,7 @@ func computeSecretStorePlan(grants []store.SecretAccessGrant) SecretStorePlanRes
 					}
 				}
 				sort.Strings(merged)
-				stepPolicyName := deriveStepPolicyName(repo, step)
+				stepPolicyName := identityname.PerStepNameFromQualified(repo, step)
 				entry.Steps = append(entry.Steps, SecretStorePlanStep{
 					Step:   step,
 					Paths:  merged,
@@ -246,14 +247,11 @@ func derivePolicyName(repo string) string {
 	return "oberth-argo-" + safe
 }
 
-// deriveStepPolicyName converts a qualified repo identity and step name into
-// the conventional per-step Vault policy name. This mirrors the installer's
-// PerStepName but uses the same simple derivation for the plan (the exact
-// hash-suffixed name is computed at install/sync time by
-// installer.PerStepName).
+// deriveStepPolicyName is retained for backward-compatible digest computation
+// only. New code uses identityname.PerStepNameFromQualified directly.
+// Issue #623, finding 3: the plan and the installer must produce the same name.
 func deriveStepPolicyName(repo, step string) string {
-	safe := strings.NewReplacer("/", "-", ".", "-").Replace(repo)
-	return "oberth-step-" + safe + "-" + step
+	return identityname.PerStepNameFromQualified(repo, step)
 }
 
 // renderLastMaterialized returns the text line for the last_materialized
