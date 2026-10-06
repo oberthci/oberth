@@ -262,6 +262,35 @@ func (b openBaoExec) policyWrite(ctx context.Context, token, name, rules string)
 	return nil
 }
 
+func (b openBaoExec) policyDelete(ctx context.Context, token, name string) error {
+	if out, err := b.authenticated(ctx, token, nil, "policy", "delete", name); err != nil {
+		return fmt.Errorf("bao policy delete %s: %w%s", name, err, commandOutputSuffix(out))
+	}
+	return nil
+}
+
+func (b openBaoExec) policyList(ctx context.Context, token string) ([]string, error) {
+	out, err := b.authenticated(ctx, token, nil, "policy", "list")
+	if err != nil {
+		return nil, fmt.Errorf("bao policy list: %w%s", err, commandOutputSuffix(out))
+	}
+	var names []string
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			names = append(names, line)
+		}
+	}
+	return names, nil
+}
+
+func (b openBaoExec) deleteRole(ctx context.Context, token, rolePath string) error {
+	if out, err := b.authenticated(ctx, token, nil, "delete", rolePath); err != nil {
+		return fmt.Errorf("bao delete %s: %w%s", rolePath, err, commandOutputSuffix(out))
+	}
+	return nil
+}
+
 // --- Pod discovery and status polling ---
 
 // expectedOpenBaoPodName is the deterministic name the OpenBao Helm chart's

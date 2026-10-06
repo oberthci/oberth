@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"strings"
+
+	"github.com/oberthci/oberth/internal/identityname"
 )
 
 // RunSync re-derives every Vault policy and role that depends on the approval
@@ -104,6 +106,7 @@ func syncGrantPolicies(ctx context.Context, store openBaoExec, rootToken string,
 	// For each (repo, step) with named grants, render a dedicated SA+policy+role
 	// scoped to exactly that step's paths. Wildcard grants keep the per-repo
 	// identity (backward compatible).
+	desiredStepNames := make(map[string]struct{})
 	if len(stepIdentities) > 0 {
 		perStepItems, err := ConfigurePerStepIdentities(ctx, store, rootToken, stepIdentities, argoNamespace)
 		if err != nil {
@@ -113,6 +116,43 @@ func syncGrantPolicies(ctx context.Context, store openBaoExec, rootToken string,
 			results = append(results, SyncResult{
 				Name:    item.Name,
 				Changed: item.Changed,
+			})
+		}
+		for _, sid := range stepIdentities {
+			desiredStepNames[PerStepName(sid.Upstream, sid.Org, sid.Repo, sid.Step)] = struct{}{}
+		}
+	}
+
+	// --- Orphan removal (issue #623, finding 5) ---
+	// List existing oberth-step-* policies and remove any that are not in
+	// the desired set. This handles revoked grants: the per-step identity
+	// stays in OpenBao until the next sync removes it. Tokens outstanding
+	// under a removed role expire by TTL (≤30m token_max_ttl).
+	existingPolicies, err := store.policyList(ctx, rootToken)
+	if err != nil {
+		// Policy list is best-effort for orphan removal — do not fail the
+		// entire sync if the store does not support listing.
+		_ = err
+	} else {
+		for _, name := range existingPolicies {
+			if !identityname.HasPerStepPrefix(name) {
+				continue
+			}
+			if _, desired := desiredStepNames[name]; desired {
+				continue
+			}
+			// Orphan: remove the policy and role.
+			if err := store.policyDelete(ctx, rootToken, name); err != nil {
+				return results, fmt.Errorf("remove orphan per-step policy %s: %w", name, err)
+			}
+			rolePath := "auth/" + defaultAuthMount + "/role/" + name
+			if err := store.deleteRole(ctx, rootToken, rolePath); err != nil {
+				// Role may already be gone; log but do not fail.
+				_ = err
+			}
+			results = append(results, SyncResult{
+				Name:    "removed per-step " + name,
+				Changed: true,
 			})
 		}
 	}

@@ -29,6 +29,8 @@ func TestSyncGrantPoliciesCreatesNewPolicies(t *testing.T) {
 		"policy write " + ciName + " -":                    {out: "Success!"},
 		"read -format=json auth/kubernetes/role/" + ciName: {out: "No value found at auth/kubernetes/role/" + ciName, err: errors.New("exit status 2")},
 		"write auth/kubernetes/role/" + ciName + " -":      {out: "Success!"},
+		// No orphan per-step policies.
+		"policy list": {out: "default\nroot\n"},
 	}
 	runner := &fakeBaoRunner{t: t, responses: responses}
 	store := openBaoExec{run: runner.run, namespace: "openbao", pod: "openbao-0"}
@@ -128,6 +130,8 @@ func TestSyncGrantPoliciesIdempotent(t *testing.T) {
 		"read -format=json auth/kubernetes/role/" + name:   {out: matchingRoleJSON(name)},
 		"policy read " + ciName:                            {out: wantPerRepoCIPolicy},
 		"read -format=json auth/kubernetes/role/" + ciName: {out: matchingRoleJSON(ciName)},
+		// No orphan per-step policies.
+		"policy list": {out: "default\nroot\n" + name + "\n" + ciName + "\n"},
 	}
 	runner := &fakeBaoRunner{t: t, responses: responses}
 	store := openBaoExec{run: runner.run, namespace: "openbao", pod: "openbao-0"}
@@ -186,6 +190,8 @@ func TestSyncGrantPoliciesSharedPoliciesZeroStanzaWithIdentities(t *testing.T) {
 		"read -format=json auth/kubernetes/role/" + name:   {out: `{"request_id":"1","data":{"bound_service_account_names":["` + name + `"],"bound_service_account_namespaces":["oberth-argo"],"token_policies":["` + name + `"],"token_no_default_policy":true,"token_ttl":1200,"token_max_ttl":1800}}`},
 		"policy read " + ciName:                            {out: PerRepoCIPolicy(defaultKVPrefix, "skipops", "terraform")},
 		"read -format=json auth/kubernetes/role/" + ciName: {out: `{"request_id":"1","data":{"bound_service_account_names":["` + ciName + `"],"bound_service_account_namespaces":["oberth-argo"],"token_policies":["` + ciName + `"],"token_no_default_policy":true,"token_ttl":1200,"token_max_ttl":1800}}`},
+		// No orphan per-step policies.
+		"policy list": {out: "default\nroot\n" + name + "\n" + ciName + "\n"},
 	}
 	runner := &fakeBaoRunner{t: t, responses: responses}
 	store := openBaoExec{run: runner.run, namespace: "openbao", pod: "openbao-0"}
@@ -242,6 +248,8 @@ func TestSyncGrantPoliciesNoIdentities(t *testing.T) {
 	responses := map[string]fakeBaoResponse{
 		"policy read " + defaultCredentialedPolicy: {out: wantCredentialedPolicy},
 		"policy read " + defaultCISecretsPolicy:    {out: wantCISecretsPolicy},
+		// No orphan per-step policies.
+		"policy list": {out: "default\nroot\n"},
 	}
 	runner := &fakeBaoRunner{t: t, responses: responses}
 	store := openBaoExec{run: runner.run, namespace: "openbao", pod: "openbao-0"}
@@ -275,6 +283,84 @@ func TestSyncGrantPoliciesRejectsInvalidOrg(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "org name") {
 		t.Fatalf("error should mention org name: %v", err)
+	}
+}
+
+// TestSyncGrantPoliciesRemovesOrphanPerStepIdentities proves that when a
+// per-step grant is revoked, the next sync removes the orphaned policy and
+// role. Issue #623, finding 5.
+func TestSyncGrantPoliciesRemovesOrphanPerStepIdentities(t *testing.T) {
+	t.Parallel()
+
+	name := PerRepoName("codeberg", "oberthci", "oberth")
+	ciName := PerRepoCIName("codeberg", "oberthci", "oberth")
+	orphanStepName := PerStepName("codeberg", "oberthci", "oberth", "old-step")
+
+	// Pre-compute expected policies so the fake store returns matching shapes.
+	wantCredentialedPolicy := OberthCredentialedPolicyWithGrants(defaultKVPrefix, nil, nil)
+	wantCISecretsPolicy := OberthCISecretsPolicy(defaultKVPrefix, nil)
+	wantPerRepoPolicy := PerRepoPolicy(defaultKVPrefix, "oberthci", "oberth", nil)
+	wantPerRepoCIPolicy := PerRepoCIPolicy(defaultKVPrefix, "oberthci", "oberth")
+
+	matchingRoleJSON := func(n string) string {
+		return `{"request_id":"1","data":{` +
+			`"bound_service_account_names":["` + n + `"],` +
+			`"bound_service_account_namespaces":["oberth-argo"],` +
+			`"token_policies":["` + n + `"],` +
+			`"token_no_default_policy":true,` +
+			`"token_ttl":1200,` +
+			`"token_max_ttl":1800}}`
+	}
+
+	responses := map[string]fakeBaoResponse{
+		"policy read " + defaultCredentialedPolicy:         {out: wantCredentialedPolicy},
+		"policy read " + defaultCISecretsPolicy:            {out: wantCISecretsPolicy},
+		"policy read " + name:                              {out: wantPerRepoPolicy},
+		"read -format=json auth/kubernetes/role/" + name:   {out: matchingRoleJSON(name)},
+		"policy read " + ciName:                            {out: wantPerRepoCIPolicy},
+		"read -format=json auth/kubernetes/role/" + ciName: {out: matchingRoleJSON(ciName)},
+		// Policy list returns the orphan per-step policy.
+		"policy list": {out: "default\nroot\n" + defaultCredentialedPolicy + "\n" + defaultCISecretsPolicy + "\n" + name + "\n" + ciName + "\n" + orphanStepName + "\n"},
+		// Orphan removal: delete the policy and role.
+		"policy delete " + orphanStepName:                             {out: "Success!"},
+		"delete auth/kubernetes/role/" + orphanStepName:               {out: "Success!"},
+	}
+	runner := &fakeBaoRunner{t: t, responses: responses}
+	store := openBaoExec{run: runner.run, namespace: "openbao", pod: "openbao-0"}
+
+	identities := []PerRepoIdentity{{
+		Upstream: "codeberg",
+		Org:      "oberthci",
+		Repo:     "oberth",
+	}}
+
+	// No per-step identities desired — the orphan should be removed.
+	results, err := syncGrantPolicies(context.Background(), store, "root", identities, nil, "oberth-argo")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Find the removal result.
+	var found bool
+	for _, r := range results {
+		if strings.Contains(r.Name, "removed per-step") && strings.Contains(r.Name, orphanStepName) {
+			found = true
+			if !r.Changed {
+				t.Fatal("orphan removal should be marked as Changed")
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("expected orphan %q to be removed, results: %v", orphanStepName, results)
+	}
+
+	// Verify that the policy delete and role delete were called.
+	byCommand := runner.callsByCommand()
+	if _, ok := byCommand["policy delete "+orphanStepName]; !ok {
+		t.Fatal("orphan policy was not deleted")
+	}
+	if _, ok := byCommand["delete auth/kubernetes/role/"+orphanStepName]; !ok {
+		t.Fatal("orphan role was not deleted")
 	}
 }
 
