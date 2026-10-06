@@ -302,15 +302,21 @@ func (jobs *ArgoJobs) create(ctx context.Context, request service.JobRequest, tr
 	}
 	// Pre-load approved secrets from the approval table.
 	var approvedSecrets map[string]bool
+	var stepGrants map[string]map[string]bool
 	if jobs.secretAccess != nil {
 		grants, loadErr := jobs.secretAccess.ActiveSecretGrants(ctx, request.Repository.ID)
 		if loadErr != nil {
 			return fmt.Errorf("app: load approved secrets for %s: %w", request.Repository.Name, loadErr)
 		}
 		approvedSecrets = make(map[string]bool)
-		for _, secrets := range grants {
+		stepGrants = make(map[string]map[string]bool)
+		for step, secrets := range grants {
 			for secret := range secrets {
 				approvedSecrets[secret] = true
+				if stepGrants[secret] == nil {
+					stepGrants[secret] = make(map[string]bool)
+				}
+				stepGrants[secret][step] = true
 			}
 		}
 	}
@@ -323,7 +329,8 @@ func (jobs *ArgoJobs) create(ctx context.Context, request service.JobRequest, tr
 		Repo: request.Repository.Name, UpstreamName: request.UpstreamName, UpstreamOrg: request.UpstreamOrg,
 		Ref: request.Run.Ref, SHA: testedSHA, Trigger: trigger, Source: source,
 		SourceDir: request.SourceDir, ApprovedSecrets: approvedSecrets,
-		Fragments: fragments,
+		StepGrants: stepGrants,
+		Fragments:  fragments,
 	}
 	// Snapshot the identity store once for both Builds of this admission
 	// (audit and controller), so the audit record and the pod spec agree

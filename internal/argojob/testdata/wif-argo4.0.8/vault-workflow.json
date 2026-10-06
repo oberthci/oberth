@@ -20,7 +20,7 @@
       "oberth.ci/run-id": "run-abc123",
       "oberth.ci/secret-paths": "oberth/data/release/r2-upload-token",
       "oberth.ci/size": "L",
-      "oberth.ci/spec-identity": "43e8a215846ff2326de927f5334687c1e07b2b1bff6d6eab1483a52bf302c60e",
+      "oberth.ci/spec-identity": "dde3f6dacc00a57e891c141e013e379e447fbeb304ef9bfedb5e5beb1587146f",
       "workflows.argoproj.io/pod-name-format": "v2"
     }
   },
@@ -90,6 +90,10 @@
             {
               "name": "OBERTH_VAULT_ROLE",
               "value": "oberth-per-repo"
+            },
+            {
+              "name": "OBERTH_STEP",
+              "value": "main"
             },
             {
               "name": "GOOGLE_APPLICATION_CREDENTIALS",

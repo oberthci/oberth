@@ -22,6 +22,7 @@ import (
 	"net/netip"
 	"net/url"
 	"path"
+	"sort"
 	"strings"
 	"time"
 
@@ -530,6 +531,15 @@ type Request struct {
 	// programming error (the caller forgot to load the approval table).
 	ApprovedSecrets map[string]bool
 
+	// StepGrants maps each approved secret path to the set of step names
+	// (Argo template names) that are authorized to consume it. A step name
+	// of "*" is the wildcard: any template may consume the path. A named
+	// step restricts consumption to the exact template with that name.
+	// Pre-loaded by the caller from store.ActiveSecretGrants (inverted:
+	// path -> set of steps). May be nil when ApprovedSecrets is empty.
+	// Issue #623.
+	StepGrants map[string]map[string]bool
+
 	Fragments map[argoworkflow.FragmentKey]argoworkflow.Fragment
 
 	// Identities overrides Config.PerRepoIdentities and Config.PerRepoCIIdentities
@@ -660,7 +670,7 @@ func Build(config Config, request Request) (*wfv1.Workflow, error) {
 	// parse its --path arguments and verify each is in the declared paths set.
 	// A wrapper invocation in a workflow with no declared paths is refused: it
 	// would run as the pipeline SA with no token and fail at the vault login.
-	if err := admitSecretstoreExecPaths(workflow, declaredPaths); err != nil {
+	if err := admitSecretstoreExecPaths(workflow, declaredPaths, request.StepGrants); err != nil {
 		return nil, err
 	}
 	// Admission gate for the legacy envconsul chain: every secret path its
@@ -765,18 +775,26 @@ func authorizeWithApprovalTable(paths []string, request Request) error {
 
 // admitSecretstoreExecPaths walks every template in the workflow and, for any
 // that invoke `oberth secretstore exec`, checks that every --path argument
-// appears in the workflow's declared secret-paths annotation. This makes
-// per-step secret intent visible and checkable at admission rather than
-// deferring to a vault policy error at runtime.
+// appears in the workflow's declared secret-paths annotation and that the
+// template is authorized by a per-step grant. Per-step enforcement (issue #623)
+// requires either a wildcard ("*") grant for the path or a grant naming the
+// exact template. Fail-closed: a path with only named-step grants is refused
+// when consumed by an inline template, a fragment-renamed template, or any
+// template that does not have a stable, unambiguous name.
 //
 // A workflow with no declared paths that contains an `oberth secretstore exec`
 // invocation is refused: the template would run as the pipeline SA with no
 // token and fail at vault login, which is a worse signal than a clear
 // admission error.
-func admitSecretstoreExecPaths(workflow *wfv1.Workflow, declaredPaths []string) error {
+func admitSecretstoreExecPaths(workflow *wfv1.Workflow, declaredPaths []string, stepGrants map[string]map[string]bool) error {
 	declared := make(map[string]struct{}, len(declaredPaths))
 	for _, p := range declaredPaths {
 		declared[p] = struct{}{}
+	}
+	// Build a set of top-level template pointers for stable-name detection.
+	topLevel := make(map[*wfv1.Template]bool, len(workflow.Spec.Templates))
+	for i := range workflow.Spec.Templates {
+		topLevel[&workflow.Spec.Templates[i]] = true
 	}
 	var problems []error
 	// Inline templates are visited too: the credential mount injection reaches
@@ -798,13 +816,56 @@ func admitSecretstoreExecPaths(workflow *wfv1.Workflow, declaredPaths []string) 
 				template.Name, argoworkflow.SecretPathsAnnotation))
 			return
 		}
+		// Determine whether this template has a stable, unambiguous name
+		// suitable for per-step grant matching: it must be a top-level
+		// template (not inline), have a non-empty name, and not be a
+		// fragment-renamed template (frag-<hash>-<name>).
+		stableName := topLevel[template] &&
+			template.Name != "" &&
+			!strings.HasPrefix(template.Name, "frag-")
 		for _, execPath := range execPaths {
 			if _, ok := declared[execPath]; !ok {
 				problems = append(problems, fmt.Errorf(
 					"argojob: template %q declares --path %q which is not in the "+
 						"workflow's %s annotation",
 					template.Name, execPath, argoworkflow.SecretPathsAnnotation))
+				continue
 			}
+			// Per-step grant check: when stepGrants is populated, verify
+			// the template is authorized for this specific path.
+			if stepGrants == nil {
+				continue
+			}
+			steps := stepGrants[execPath]
+			if steps["*"] {
+				// Wildcard grant covers all templates.
+				continue
+			}
+			if !stableName {
+				// Fail closed: a path with only named-step grants cannot
+				// be consumed by an inline, unnamed, or fragment-renamed
+				// template because the name is not stable or authoritative.
+				problems = append(problems, fmt.Errorf(
+					"secret grant denied: step %q not authorized for path %q "+
+						"-- template does not have a stable name (inline, unnamed, or fragment-renamed); "+
+						"only wildcard grants (step \"*\") may authorize these templates",
+					template.Name, execPath))
+				continue
+			}
+			if steps[template.Name] {
+				// Exact named-step match.
+				continue
+			}
+			// Named-step grant exists but does not match this template.
+			var granted []string
+			for s := range steps {
+				granted = append(granted, s)
+			}
+			sort.Strings(granted)
+			problems = append(problems, fmt.Errorf(
+				"secret grant denied: step %q not authorized for path %q "+
+					"-- granted to step %q only",
+				template.Name, execPath, strings.Join(granted, "\", \"")))
 		}
 	})
 	return errors.Join(problems...)
@@ -1943,6 +2004,13 @@ func injectTemplateEnvironment(template *wfv1.Template, environment []corev1.Env
 			continue
 		}
 		localEnvironment = append(localEnvironment, env)
+	}
+	// OBERTH_STEP: the Argo template name, set on every template for
+	// observability. Not a security control (the value is self-declared by
+	// the workflow document), but useful for diagnostic correlation between
+	// per-step grant denials and in-pod log lines. Issue #623.
+	if template.Name != "" {
+		localEnvironment = append(localEnvironment, corev1.EnvVar{Name: "OBERTH_STEP", Value: template.Name})
 	}
 	templateContainers(template, func(c *corev1.Container) { c.Env = overrideEnvironment(c.Env, localEnvironment) })
 	for group := range template.Steps {

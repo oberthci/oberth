@@ -1418,6 +1418,339 @@ func TestExtractExecPathsStopsAtSeparator(t *testing.T) {
 	}
 }
 
+// --- Per-step grant admission tests (issue #623) ---
+
+// multiTemplateExecDocument has two templates that each use secretstore exec
+// with different --path arguments, allowing per-step grant testing.
+const multiTemplateExecDocument = `
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  annotations:
+    oberth.ci/secret-paths: oberth/data/release/r2-upload-token,oberth/data/release/gar-image-key
+    oberth.ci/size: L
+spec:
+  entrypoint: main
+  activeDeadlineSeconds: 600
+  templates:
+    - name: main
+      dag:
+        tasks:
+          - name: publish-r2
+            template: release-publish-r2
+          - name: publish-images
+            template: release-publish-images
+    - name: release-publish-r2
+      container:
+        image: golang:1.26-alpine@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+        command: [/run/oberth/bin/oberth]
+        args:
+          - secretstore
+          - exec
+          - --dir=/run/oberth-secrets
+          - --path=oberth/data/release/r2-upload-token
+          - --
+          - publish-r2.sh
+    - name: release-publish-images
+      container:
+        image: golang:1.26-alpine@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+        command: [/run/oberth/bin/oberth]
+        args:
+          - secretstore
+          - exec
+          - --dir=/run/oberth-secrets
+          - --path=oberth/data/release/gar-image-key
+          - --
+          - publish-images.sh
+`
+
+// TestPerStepGrantExactMatchPasses proves that a template granted access to a
+// path by its exact name is admitted. Issue #623.
+func TestPerStepGrantExactMatchPasses(t *testing.T) {
+	request := testRequest(periapsis.TriggerRelease, multiTemplateExecDocument)
+	request.ApprovedSecrets = map[string]bool{
+		"oberth/data/release/r2-upload-token": true,
+		"oberth/data/release/gar-image-key":   true,
+	}
+	request.StepGrants = map[string]map[string]bool{
+		"oberth/data/release/r2-upload-token": {"release-publish-r2": true},
+		"oberth/data/release/gar-image-key":   {"release-publish-images": true},
+	}
+	if _, err := Build(testConfig(), request); err != nil {
+		t.Fatalf("exact per-step grant was rejected: %v", err)
+	}
+}
+
+// TestPerStepGrantWildcardPasses proves that a wildcard step grant ("*")
+// authorizes any template to consume the path. Issue #623.
+func TestPerStepGrantWildcardPasses(t *testing.T) {
+	request := testRequest(periapsis.TriggerRelease, multiTemplateExecDocument)
+	request.ApprovedSecrets = map[string]bool{
+		"oberth/data/release/r2-upload-token": true,
+		"oberth/data/release/gar-image-key":   true,
+	}
+	request.StepGrants = map[string]map[string]bool{
+		"oberth/data/release/r2-upload-token": {"*": true},
+		"oberth/data/release/gar-image-key":   {"*": true},
+	}
+	if _, err := Build(testConfig(), request); err != nil {
+		t.Fatalf("wildcard step grant was rejected: %v", err)
+	}
+}
+
+// TestPerStepGrantMismatchRejected proves that a template consuming a path
+// granted only to a different template is rejected with the exact error
+// message. Issue #623.
+func TestPerStepGrantMismatchRejected(t *testing.T) {
+	request := testRequest(periapsis.TriggerRelease, multiTemplateExecDocument)
+	request.ApprovedSecrets = map[string]bool{
+		"oberth/data/release/r2-upload-token": true,
+		"oberth/data/release/gar-image-key":   true,
+	}
+	// Grant gar-image-key only to release-publish-r2 (wrong template).
+	request.StepGrants = map[string]map[string]bool{
+		"oberth/data/release/r2-upload-token": {"*": true},
+		"oberth/data/release/gar-image-key":   {"release-publish-r2": true},
+	}
+	_, err := Build(testConfig(), request)
+	if err == nil {
+		t.Fatal("expected per-step grant mismatch to be rejected")
+	}
+	if !strings.Contains(err.Error(), "secret grant denied") {
+		t.Fatalf("expected 'secret grant denied' in error, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "release-publish-images") {
+		t.Fatalf("expected requesting template name in error, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "release-publish-r2") {
+		t.Fatalf("expected granted step name in error, got: %v", err)
+	}
+}
+
+// TestPerStepGrantCrossTemplateRejected proves that when two templates each
+// consume a different path, and each path is granted only to its intended
+// template, a template cannot consume the other's path. Issue #623.
+func TestPerStepGrantCrossTemplateRejected(t *testing.T) {
+	// Swap the grants: r2-upload-token granted to release-publish-images,
+	// gar-image-key granted to release-publish-r2. Both templates should be
+	// rejected because each consumes the wrong path.
+	request := testRequest(periapsis.TriggerRelease, multiTemplateExecDocument)
+	request.ApprovedSecrets = map[string]bool{
+		"oberth/data/release/r2-upload-token": true,
+		"oberth/data/release/gar-image-key":   true,
+	}
+	request.StepGrants = map[string]map[string]bool{
+		"oberth/data/release/r2-upload-token": {"release-publish-images": true},
+		"oberth/data/release/gar-image-key":   {"release-publish-r2": true},
+	}
+	_, err := Build(testConfig(), request)
+	if err == nil {
+		t.Fatal("expected cross-template per-step grant to be rejected")
+	}
+	// Both templates should be denied.
+	errStr := err.Error()
+	if !strings.Contains(errStr, "release-publish-r2") || !strings.Contains(errStr, "release-publish-images") {
+		t.Fatalf("expected both template names in error, got: %v", err)
+	}
+}
+
+// TestPerStepGrantFailsClosedForInlineTemplate proves that a path with only
+// named-step grants is refused when consumed by an inline template, because
+// the inline template's name is not stable or authoritative. Issue #623.
+func TestPerStepGrantFailsClosedForInlineTemplate(t *testing.T) {
+	inlineExecDoc := `
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  annotations:
+    oberth.ci/secret-paths: oberth/data/release/r2-upload-token
+    oberth.ci/size: L
+spec:
+  entrypoint: main
+  activeDeadlineSeconds: 600
+  templates:
+    - name: main
+      dag:
+        tasks:
+          - name: inline-publish
+            inline:
+              container:
+                image: golang:1.26-alpine@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+                command: [/run/oberth/bin/oberth]
+                args:
+                  - secretstore
+                  - exec
+                  - --dir=/run/oberth-secrets
+                  - --path=oberth/data/release/r2-upload-token
+                  - --
+                  - publish.sh
+`
+	request := testRequest(periapsis.TriggerRelease, inlineExecDoc)
+	request.ApprovedSecrets = map[string]bool{
+		"oberth/data/release/r2-upload-token": true,
+	}
+	// Named-step grant only (no wildcard) — inline template must be refused.
+	request.StepGrants = map[string]map[string]bool{
+		"oberth/data/release/r2-upload-token": {"release-publish-r2": true},
+	}
+	_, err := Build(testConfig(), request)
+	if err == nil {
+		t.Fatal("expected inline template to be refused with named-step-only grant")
+	}
+	if !strings.Contains(err.Error(), "secret grant denied") {
+		t.Fatalf("expected 'secret grant denied' in error, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "stable name") {
+		t.Fatalf("expected 'stable name' explanation in error, got: %v", err)
+	}
+}
+
+// TestPerStepGrantFailsClosedForFragmentTemplate proves that a path with only
+// named-step grants is refused when consumed by a fragment-renamed template
+// (frag-<hash>-<name>). Issue #623.
+func TestPerStepGrantFailsClosedForFragmentTemplate(t *testing.T) {
+	fragmentExecDoc := `
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  annotations:
+    oberth.ci/secret-paths: oberth/data/release/r2-upload-token
+    oberth.ci/size: L
+spec:
+  entrypoint: main
+  activeDeadlineSeconds: 600
+  templates:
+    - name: main
+      dag:
+        tasks:
+          - name: publish
+            template: frag-a1b2c3d4-release-publish
+    - name: frag-a1b2c3d4-release-publish
+      container:
+        image: golang:1.26-alpine@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+        command: [/run/oberth/bin/oberth]
+        args:
+          - secretstore
+          - exec
+          - --dir=/run/oberth-secrets
+          - --path=oberth/data/release/r2-upload-token
+          - --
+          - publish.sh
+`
+	request := testRequest(periapsis.TriggerRelease, fragmentExecDoc)
+	request.ApprovedSecrets = map[string]bool{
+		"oberth/data/release/r2-upload-token": true,
+	}
+	// Named-step grant only — fragment template must be refused.
+	request.StepGrants = map[string]map[string]bool{
+		"oberth/data/release/r2-upload-token": {"release-publish": true},
+	}
+	_, err := Build(testConfig(), request)
+	if err == nil {
+		t.Fatal("expected fragment template to be refused with named-step-only grant")
+	}
+	if !strings.Contains(err.Error(), "secret grant denied") {
+		t.Fatalf("expected 'secret grant denied' in error, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "stable name") {
+		t.Fatalf("expected 'stable name' explanation in error, got: %v", err)
+	}
+}
+
+// TestPerStepGrantWildcardPassesForInlineTemplate proves that a wildcard grant
+// still authorizes an inline template. Issue #623.
+func TestPerStepGrantWildcardPassesForInlineTemplate(t *testing.T) {
+	inlineExecDoc := `
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  annotations:
+    oberth.ci/secret-paths: oberth/data/release/r2-upload-token
+    oberth.ci/size: L
+spec:
+  entrypoint: main
+  activeDeadlineSeconds: 600
+  templates:
+    - name: main
+      dag:
+        tasks:
+          - name: inline-publish
+            inline:
+              container:
+                image: golang:1.26-alpine@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+                command: [/run/oberth/bin/oberth]
+                args:
+                  - secretstore
+                  - exec
+                  - --dir=/run/oberth-secrets
+                  - --path=oberth/data/release/r2-upload-token
+                  - --
+                  - publish.sh
+`
+	request := testRequest(periapsis.TriggerRelease, inlineExecDoc)
+	request.ApprovedSecrets = map[string]bool{
+		"oberth/data/release/r2-upload-token": true,
+	}
+	// Wildcard grant — inline template should be admitted.
+	request.StepGrants = map[string]map[string]bool{
+		"oberth/data/release/r2-upload-token": {"*": true},
+	}
+	if _, err := Build(testConfig(), request); err != nil {
+		t.Fatalf("wildcard grant for inline template was rejected: %v", err)
+	}
+}
+
+// TestOberthStepEnvironmentInjected proves that OBERTH_STEP is set to the
+// template name on every template after Build. Issue #623.
+func TestOberthStepEnvironmentInjected(t *testing.T) {
+	request := testRequest(periapsis.TriggerRelease, multiTemplateExecDocument)
+	request.ApprovedSecrets = map[string]bool{
+		"oberth/data/release/r2-upload-token": true,
+		"oberth/data/release/gar-image-key":   true,
+	}
+	request.StepGrants = map[string]map[string]bool{
+		"oberth/data/release/r2-upload-token": {"*": true},
+		"oberth/data/release/gar-image-key":   {"*": true},
+	}
+	workflow, err := Build(testConfig(), request)
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	for _, tmpl := range workflow.Spec.Templates {
+		if tmpl.Container == nil {
+			continue
+		}
+		var found bool
+		for _, env := range tmpl.Container.Env {
+			if env.Name == "OBERTH_STEP" {
+				if env.Value != tmpl.Name {
+					t.Fatalf("template %q: OBERTH_STEP = %q, want %q", tmpl.Name, env.Value, tmpl.Name)
+				}
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("template %q: OBERTH_STEP not found in container env", tmpl.Name)
+		}
+	}
+}
+
+// TestPerStepGrantNilStepGrantsBackwardCompatible proves that a nil StepGrants
+// map (pre-existing callers that only populate ApprovedSecrets) still passes
+// admission — backward compatibility with the wildcard-only era. Issue #623.
+func TestPerStepGrantNilStepGrantsBackwardCompatible(t *testing.T) {
+	request := testRequest(periapsis.TriggerRelease, oberthExecDocument)
+	request.ApprovedSecrets = map[string]bool{
+		"oberth/data/release/r2-upload-token": true,
+		"oberth/data/release/cosign-secret":   true,
+	}
+	// StepGrants is nil — all paths should pass.
+	request.StepGrants = nil
+	if _, err := Build(testConfig(), request); err != nil {
+		t.Fatalf("nil StepGrants rejected (backward compatibility broken): %v", err)
+	}
+}
+
 func TestSpecIdentityIgnoresSourceVolumeFields(t *testing.T) {
 	// Two workflows that differ ONLY in per-run source-volume fields
 	// (PVC claim name and subPaths) must produce the same identity digest.

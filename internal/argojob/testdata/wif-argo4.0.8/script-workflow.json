@@ -18,7 +18,7 @@
       "oberth.ci/release-wif-policy-sha256": "6e106f070f957c0e03a28e3b97911a47a2631f4391f2f1b7ff2903f5d4cfdf28",
       "oberth.ci/run-id": "run-abc123",
       "oberth.ci/size": "L",
-      "oberth.ci/spec-identity": "aa30b83719632c47ff76becc5c08e3a14a51dad6a29cea9a7a78a6ddf5e67fd9",
+      "oberth.ci/spec-identity": "25eff2b653df3f283006f7ef29df1dc3e85eca58f3cc916d969c64f233b33e38",
       "workflows.argoproj.io/pod-name-format": "v2"
     }
   },
@@ -74,6 +74,10 @@
             {
               "name": "OBERTH_RELEASE_SHA",
               "value": "0123456789abcdef0123456789abcdef01234567"
+            },
+            {
+              "name": "OBERTH_STEP",
+              "value": "main"
             },
             {
               "name": "GOOGLE_APPLICATION_CREDENTIALS",

@@ -314,7 +314,8 @@ func TestParseGrantsValidation(t *testing.T) {
 	}{
 		{name: "empty", data: "", ok: true},
 		{name: "valid wildcard step", data: `- {repo: a, step: "*", secret: c}`, ok: true},
-		{name: "non-wildcard step rejected", data: `- {repo: a, step: build, secret: c}`, ok: false},
+		{name: "dns1123 label step accepted", data: `- {repo: a, step: build, secret: c}`, ok: true},
+		{name: "invalid step uppercase rejected", data: `- {repo: a, step: Build, secret: c}`, ok: false},
 		{name: "wildcard secret", data: `- {repo: a, step: "*", secret: "*"}`, ok: false},
 		{name: "wildcard repo", data: `- {repo: "*", step: "*", secret: c}`, ok: false},
 		{name: "glob question in repo", data: `- {repo: "a?b", step: "*", secret: c}`, ok: false},
@@ -344,26 +345,44 @@ func TestParseGrantsValidation(t *testing.T) {
 	}
 }
 
-// TestParseGrantsRejectsNonWildcardStep proves that step values other than "*"
-// are rejected at parse time, closing the gap where the grant model promises
-// per-step scoping but the runtime cannot enforce it. Issue #27, finding 1.
-func TestParseGrantsRejectsNonWildcardStep(t *testing.T) {
-	for _, step := range []string{"build", "release", "test", "apply", "setup"} {
+// TestParseGrantsValidatesStepGrammar proves that step values are validated
+// against the DNS-1123 label grammar (the Argo template name grammar) or the
+// wildcard "*". Rewritten from TestParseGrantsRejectsNonWildcardStep when
+// per-step admission enforcement landed (issue #623): named steps are now
+// accepted so the grant can scope a secret to a specific template.
+func TestParseGrantsValidatesStepGrammar(t *testing.T) {
+	// Accepted: wildcard and valid DNS-1123 labels.
+	for _, step := range []string{"*", "build", "release", "release-publish-images", "a", "test-1", "a1b2c3"} {
+		data := fmt.Sprintf(`- {repo: terraform, step: %q, secret: terraform/credentials}`, step)
+		if _, err := ParseGrants(data); err != nil {
+			t.Fatalf("step %q was rejected; expected acceptance: %v", step, err)
+		}
+	}
+	// Rejected: uppercase, special characters, leading/trailing hyphens,
+	// too long, empty-ish.
+	for _, step := range []string{
+		"Build",                 // uppercase
+		"release_images",        // underscore
+		"-leading-hyphen",       // leading hyphen
+		"trailing-hyphen-",      // trailing hyphen
+		"has space",             // space
+		"has.dot",               // dot (not in DNS-1123 label)
+		strings.Repeat("a", 64), // exceeds 63-char limit
+		"release/images",        // slash
+	} {
 		data := fmt.Sprintf(`- {repo: terraform, step: %q, secret: terraform/credentials}`, step)
 		if _, err := ParseGrants(data); err == nil {
 			t.Fatalf("step %q was accepted; expected rejection", step)
 		}
 	}
-	// The wildcard step must still work.
-	if _, err := ParseGrants(`- {repo: terraform, step: "*", secret: terraform/credentials}`); err != nil {
-		t.Fatalf("wildcard step was rejected: %v", err)
-	}
 }
 
 // TestMalformedAllowPreservesExistingGrants proves that a malformed allow
-// request (glob characters in repo/secret, or non-wildcard step) is rejected
+// request (glob characters in repo/secret, or an invalid step name) is rejected
 // before the ConfigMap is modified, so existing valid grants are not revoked by
 // a reconcile-to-zero triggered by the malformed entry. Issue #27, finding 12.
+// Updated for #623: valid DNS-1123 label steps are now accepted; this test uses
+// an invalid step (uppercase) to exercise the rejection path.
 func TestMalformedAllowPreservesExistingGrants(t *testing.T) {
 	cm := &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
@@ -395,9 +414,10 @@ func TestMalformedAllowPreservesExistingGrants(t *testing.T) {
 		t.Fatal("expected a glob-in-repo grant to be rejected")
 	}
 
-	// Attempt to add a grant with a non-wildcard step — must be rejected.
-	if err := reconciler.UpdateConfigMap(ctx, "admin", AddGrant("terraform", "build", "terraform/credentials")); err == nil {
-		t.Fatal("expected a non-wildcard-step grant to be rejected")
+	// Attempt to add a grant with an invalid step (uppercase, not a DNS-1123
+	// label) — must be rejected.
+	if err := reconciler.UpdateConfigMap(ctx, "admin", AddGrant("terraform", "Build", "terraform/credentials")); err == nil {
+		t.Fatal("expected an invalid-step grant to be rejected")
 	}
 
 	// The original grant must still be active.
@@ -410,6 +430,62 @@ func TestMalformedAllowPreservesExistingGrants(t *testing.T) {
 	}
 	if grants[0].Repo != "terraform" || grants[0].Secret != "terraform/credentials" {
 		t.Fatalf("unexpected surviving grant: %+v", grants[0])
+	}
+}
+
+// TestNamedStepGrantAcceptedAndReturned proves that access_allow with a valid
+// DNS-1123 label step name is accepted, persisted to the ConfigMap and sqlite,
+// and returned by access_list with the step name intact. Issue #623.
+func TestNamedStepGrantAcceptedAndReturned(t *testing.T) {
+	cm := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:            secretAccessConfigMapName,
+			Namespace:       "oberth",
+			ResourceVersion: "100",
+		},
+		Data: map[string]string{
+			secretAccessConfigMapKey: `- {repo: terraform, step: "*", secret: terraform/credentials}`,
+		},
+	}
+	reconciler, database := testAccessReconciler(t, cm)
+	ctx := context.Background()
+
+	if err := reconciler.Reconcile(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	// Add a grant with a named step.
+	if err := reconciler.UpdateConfigMap(ctx, "admin", AddGrant("terraform", "release-publish-images", "oberth/data/release/gar-image-key")); err != nil {
+		t.Fatalf("named step grant was rejected: %v", err)
+	}
+	if err := reconciler.Reconcile(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	// Verify the named-step grant is persisted in sqlite.
+	grants, err := database.SecretAccessList(ctx, "terraform", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found bool
+	for _, g := range grants {
+		if g.Step == "release-publish-images" && g.Secret == "oberth/data/release/gar-image-key" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("named-step grant not found in sqlite; grants: %+v", grants)
+	}
+
+	// Verify the wildcard grant is still present alongside the named-step grant.
+	var wildcardFound bool
+	for _, g := range grants {
+		if g.Step == "*" && g.Secret == "terraform/credentials" {
+			wildcardFound = true
+		}
+	}
+	if !wildcardFound {
+		t.Fatal("wildcard grant disappeared after adding a named-step grant")
 	}
 }
 
