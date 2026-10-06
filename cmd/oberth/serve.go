@@ -622,7 +622,14 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 	if len(perRepoIdentities) > 0 {
 		logger.Printf("per-repo identities: %d repositories with secret grants (release + CI tiers)", len(perRepoIdentities))
 	}
-	identityStore := argojob.NewIdentityStore(perRepoIdentities, buildPerRepoCIIdentities(perRepoIdentities))
+	perStepIdentities, err := buildPerStepIdentities(ctx, database)
+	if err != nil {
+		return fmt.Errorf("build per-step identities: %w", err)
+	}
+	if len(perStepIdentities) > 0 {
+		logger.Printf("per-step identities: %d (repo, step) pairs with named grants", len(perStepIdentities))
+	}
+	identityStore := argojob.NewIdentityStoreWithSteps(perRepoIdentities, buildPerRepoCIIdentities(perRepoIdentities), perStepIdentities)
 	argoJobs, err := buildArgoEngine(options, restConfig, kube, database, database, fragmentLoader,
 		artifactStoreAdapter{store: artifactStore, scanPatterns: artifacts.DefaultScanPatterns},
 		options.artifactsLimitBytes, options.artifactsBudgetBytes, perRepoIdentities, identityStore)
@@ -803,9 +810,14 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 			logger.Printf("WARNING: identity refresh after reconcile failed: %v; the server continues with the previous identity map", refreshErr)
 			return
 		}
-		identityStore.Replace(refreshed, buildPerRepoCIIdentities(refreshed))
+		refreshedSteps, stepErr := buildPerStepIdentities(ctx, database)
+		if stepErr != nil {
+			logger.Printf("WARNING: per-step identity refresh after reconcile failed: %v; the server continues with the previous identity map", stepErr)
+			return
+		}
+		identityStore.ReplaceWithSteps(refreshed, buildPerRepoCIIdentities(refreshed), refreshedSteps)
 		if len(refreshed) > 0 {
-			logger.Printf("identity refresh: %d per-repo identities (live)", len(refreshed))
+			logger.Printf("identity refresh: %d per-repo, %d per-step identities (live)", len(refreshed), len(refreshedSteps))
 		}
 	}
 	if err := accessReconciler.Reconcile(ctx); err != nil {

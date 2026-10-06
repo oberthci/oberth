@@ -372,3 +372,56 @@ func buildPerRepoCIIdentities(releaseIdentities map[string]argojob.PerRepoIdenti
 	}
 	return result
 }
+
+// buildPerStepIdentities reads the repo registry and approval table, and
+// builds the per-step identity map that scopes each named-step grant to its
+// own Vault policy at the ServiceAccount level. Only (repo, step) combinations
+// with named-step grants (step != "*") get a per-step identity; wildcard grants
+// keep the per-repo identity (backward compatible). Issue #623, finding 1.
+func buildPerStepIdentities(ctx context.Context, db perRepoStore) (map[string]argojob.PerRepoIdentityConfig, error) {
+	repos, err := db.ListRepositories(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list repositories for per-step identities: %w", err)
+	}
+	upstreams, err := db.ListUpstreams(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list upstreams for per-step identities: %w", err)
+	}
+
+	upstreamByID := make(map[int64]model.Upstream, len(upstreams))
+	for _, u := range upstreams {
+		upstreamByID[u.ID] = u
+	}
+
+	result := make(map[string]argojob.PerRepoIdentityConfig)
+	for _, repo := range repos {
+		upstream, ok := upstreamByID[repo.UpstreamID]
+		if !ok {
+			continue
+		}
+		org := upstream.Org()
+		if org == "" {
+			continue
+		}
+
+		grants, err := db.ActiveSecretGrants(ctx, repo.ID)
+		if err != nil {
+			return nil, fmt.Errorf("load grants for %s: %w", repo.Name, err)
+		}
+
+		// grants is map[step]map[secret]bool. Scan for named steps.
+		for step := range grants {
+			if step == "*" {
+				continue
+			}
+			// Named-step grant: create a per-step identity.
+			key := upstream.Name + "/" + org + "/" + repo.Name + "/" + step
+			saName := installer.PerStepName(upstream.Name, org, repo.Name, step)
+			result[key] = argojob.PerRepoIdentityConfig{
+				ServiceAccountName: saName,
+			}
+		}
+	}
+
+	return result, nil
+}

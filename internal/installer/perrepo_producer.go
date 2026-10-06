@@ -267,24 +267,31 @@ func ParseAccessListJSONWithSteps(data []byte) ([]PerRepoIdentity, []grantWithSt
 	return repoIdentities, grants, nil
 }
 
-// ProducePerStepIdentitiesFromRepoIdentities is a convenience wrapper that
-// derives per-step identities when only PerRepoIdentity data is available
-// (the sync command path where the caller already produced repo identities
-// but did not retain the raw step-level grants). It re-reads the access list
-// from the running server if possible. When the access list is unavailable,
-// it returns nil (zero per-step identities — backward compatible).
-//
-// For the initial release this is a simple stub that returns nil: the full
-// per-step identity production requires the raw grant list with step info.
-// The sync caller should switch to ParseAccessListJSONWithSteps to get both
-// repo and step identities in one pass.
-func ProducePerStepIdentitiesFromRepoIdentities(_ []PerRepoIdentity) []PerStepIdentity {
-	// TODO(#623): wire the per-step production into the sync command by
-	// switching produceFromAccessList to use ParseAccessListJSONWithSteps
-	// and threading the grantWithStep data through. For now, per-step
-	// identities are computed by the plan tool and the secretstore
-	// configuration path (installer).
-	return nil
+// ProducePerStepIdentities reads the access list from the running server and
+// derives per-step identities. For each named-step grant (step != "*"), a
+// per-step identity is produced with paths = the step's named grants PLUS any
+// wildcard-granted paths for the same repo (inherited). Issue #623, finding 1.
+func ProducePerStepIdentities(ctx context.Context, run CommandRunner, contextName, namespace string) ([]PerStepIdentity, error) {
+	if run == nil {
+		return nil, nil
+	}
+	baseArgs := []string{"exec", "-i", "-c", "oberth"}
+	if contextName != "" {
+		baseArgs = append(baseArgs, "--context", contextName)
+	}
+	baseArgs = append(baseArgs, "-n", namespace, "deploy/oberth", "--", "oberth", "access", "list")
+	jsonArgs := append(append([]string(nil), baseArgs...), "--json")
+	out, err := run(ctx, nil, "kubectl", jsonArgs...)
+	if err != nil {
+		return nil, nil // Server may not support --json or may not be running.
+	}
+	_, grants, parseErr := ParseAccessListJSONWithSteps(out)
+	if parseErr != nil {
+		return nil, fmt.Errorf("parse access list for per-step identities: %w", parseErr)
+	}
+	// Derive per-step identities from the grants. DerivePerStepIdentities
+	// does the wildcard-inheritance merge and produces the sorted list.
+	return DerivePerStepIdentities(nil, grants), nil
 }
 
 // produceFromConfigMap reads the secret-access ConfigMap and builds per-repo

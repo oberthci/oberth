@@ -1066,7 +1066,12 @@ func runSecretStoreSync(ctx context.Context, arguments []string, output io.Write
 	}
 
 	// Derive per-step identities from the grants for named-step enforcement (#623).
-	stepIdentities := installer.ProducePerStepIdentitiesFromRepoIdentities(identities)
+	stepIdentities, stepErr := installer.ProducePerStepIdentities(
+		ctx, installer.DefaultRunCommand, *kubeContext, *namespace,
+	)
+	if stepErr != nil {
+		_, _ = fmt.Fprintf(output, "  WARNING: per-step identity derivation failed: %v\n", stepErr)
+	}
 	if len(stepIdentities) > 0 {
 		_, _ = fmt.Fprintf(output, "  %d per-step identities derived\n", len(stepIdentities))
 	}
