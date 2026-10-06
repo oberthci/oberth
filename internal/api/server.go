@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/oberthci/oberth/internal/runlog"
 )
@@ -66,13 +67,20 @@ type ViewService interface {
 // import service or store.
 type ErrorClassifier func(error) (int, string)
 
+// writeDeadlineMargin is added to MaximumToolWait to derive the HTTP
+// write-deadline extension for long-poll tools. It must exceed the maximum
+// wait ceiling so the HTTP timeout never terminates a response that the
+// service layer would still return.
+const writeDeadlineMargin = 1 * time.Minute
+
 type Server struct {
-	auth          Authenticator
-	tools         ToolService
-	views         ViewService
-	version       string
-	classifyError ErrorClassifier
-	mux           *http.ServeMux
+	auth            Authenticator
+	tools           ToolService
+	views           ViewService
+	version         string
+	classifyError   ErrorClassifier
+	maximumToolWait time.Duration
+	mux             *http.ServeMux
 }
 
 type contextKey struct{}
@@ -91,6 +99,9 @@ func New(auth Authenticator, tools ToolService, views ViewService, version strin
 	if server.classifyError == nil {
 		server.classifyError = defaultClassifyError
 	}
+	if server.maximumToolWait <= 0 {
+		server.maximumToolWait = 10 * time.Minute
+	}
 	server.routes()
 	return server, nil
 }
@@ -99,6 +110,13 @@ func New(auth Authenticator, tools ToolService, views ViewService, version strin
 // classifier for the dashboard view endpoints.
 func WithErrorClassifier(classifier ErrorClassifier) func(*Server) {
 	return func(server *Server) { server.classifyError = classifier }
+}
+
+// WithMaximumToolWait sets the service-layer wait ceiling so the HTTP
+// write-deadline extension for long-poll tools can be derived from it
+// rather than a hand-maintained literal (#793).
+func WithMaximumToolWait(d time.Duration) func(*Server) {
+	return func(server *Server) { server.maximumToolWait = d }
 }
 
 // defaultClassifyError is the fallback when no classifier is injected. It

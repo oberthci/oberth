@@ -157,6 +157,17 @@ type AccessListResponse struct {
 	Grants []AccessGrantResponse `json:"grants"`
 }
 
+// RunListResponse wraps run_list results as a JSON object so MCP
+// structuredContent satisfies the record requirement (#794).
+type RunListResponse struct {
+	Runs any `json:"runs"`
+}
+
+// RepoListResponse wraps repo_list results as a JSON object (#794).
+type RepoListResponse struct {
+	Repositories any `json:"repositories"`
+}
+
 func (server *Server) handleMCP(writer http.ResponseWriter, request *http.Request) {
 	// MaxBytesReader enforces the body limit at the HTTP layer, returning a
 	// 413 and closing the connection on oversize bodies rather than allowing a
@@ -204,10 +215,14 @@ func (server *Server) handleMCP(writer http.ResponseWriter, request *http.Reques
 		}
 		// Extend the write deadline for long-poll tools so the HTTP
 		// server's default WriteTimeout does not terminate the response
-		// before the requested wait duration expires (#789).
+		// before the requested wait duration expires (#789). The margin
+		// is derived from the service wait ceiling so the two cannot
+		// drift independently (#793).
 		if call.Name == "wait" || call.Name == "promote_status" {
 			rc := http.NewResponseController(writer)
-			_ = rc.SetWriteDeadline(time.Now().Add(11 * time.Minute))
+			if err := rc.SetWriteDeadline(time.Now().Add(server.maximumToolWait + writeDeadlineMargin)); err != nil {
+				log.Printf("mcp: SetWriteDeadline: %v (long-poll may be truncated by WriteTimeout)", err)
+			}
 		}
 		result, err := server.tools.CallTool(request.Context(), actorFrom(request.Context()), call.Name, call.Arguments)
 		if err != nil {

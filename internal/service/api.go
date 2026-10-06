@@ -106,8 +106,8 @@ func NewAPI(config APIConfig) (*API, error) {
 		return nil, errors.New("service: run resolver is required")
 	}
 	maximumWait := config.MaximumWait
-	if maximumWait <= 0 || maximumWait > defaultMaximumWait {
-		maximumWait = defaultMaximumWait
+	if maximumWait <= 0 || maximumWait > DefaultMaximumWait {
+		maximumWait = DefaultMaximumWait
 	}
 	promotionWorkspaceRoot := config.PromotionWorkspaceRoot
 	if strings.TrimSpace(promotionWorkspaceRoot) == "" {
@@ -463,7 +463,11 @@ func (service *API) CallTool(ctx context.Context, actor api.Actor, name string, 
 		}
 		return service.accessRevoke(ctx, actor, arguments.Repo, arguments.Step, arguments.Secret)
 	case "repo_list":
-		return service.Repositories(ctx, actor)
+		repos, err := service.Repositories(ctx, actor)
+		if err != nil {
+			return nil, err
+		}
+		return api.RepoListResponse{Repositories: repos}, nil
 	case "repo_remove":
 		var arguments struct {
 			Repo string `json:"repo"`
@@ -488,7 +492,11 @@ func (service *API) CallTool(ctx context.Context, actor api.Actor, name string, 
 		if limit > 200 {
 			limit = 200
 		}
-		return service.Runs(ctx, actor, api.RunFilter{Repository: arguments.Repo, Ref: arguments.Ref, Limit: limit})
+		runs, err := service.Runs(ctx, actor, api.RunFilter{Repository: arguments.Repo, Ref: arguments.Ref, Limit: limit})
+		if err != nil {
+			return nil, err
+		}
+		return api.RunListResponse{Runs: runs}, nil
 	case "publish_retry":
 		var arguments struct {
 			ID string `json:"id"`

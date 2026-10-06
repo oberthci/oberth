@@ -28,7 +28,10 @@ var (
 )
 
 const (
-	defaultMaximumWait = 10 * time.Minute
+	// DefaultMaximumWait is the ceiling the service applies to wait and
+	// promote_status long-poll requests. Exported so the HTTP layer can
+	// derive its write-deadline extension from it (#793).
+	DefaultMaximumWait = 10 * time.Minute
 	maximumToolBytes   = 1 << 20
 	maximumIssuePage   = 50
 )

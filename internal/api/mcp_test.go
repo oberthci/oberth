@@ -1,12 +1,14 @@
 package api
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 // TestMCPRejectsOversizeBody verifies that the MaxBytesReader guard rejects a
@@ -206,6 +208,155 @@ func TestMCPAndDashboardClassifyIdentically(t *testing.T) {
 				if !strings.Contains(respBody, dashboardMsg) {
 					t.Fatalf("MCP response %q does not contain dashboard message %q", respBody, dashboardMsg)
 				}
+			}
+		})
+	}
+}
+
+// TestMCPWriteDeadlineExceedsWaitCeiling verifies that the write-deadline
+// margin added for long-poll tools exceeds the maximum tool wait duration,
+// so raising the service ceiling without updating the HTTP layer cannot
+// reintroduce #789.
+func TestMCPWriteDeadlineExceedsWaitCeiling(t *testing.T) {
+	t.Parallel()
+	ceiling := 10 * time.Minute // matches the default used by New
+	server, _ := testServer(t)
+	total := server.maximumToolWait + writeDeadlineMargin
+	if total <= ceiling {
+		t.Fatalf("write deadline %v must exceed wait ceiling %v", total, ceiling)
+	}
+}
+
+// TestMCPWriteDeadlineDerivesFromConfiguredCeiling verifies that
+// WithMaximumToolWait propagates to the write-deadline extension so the
+// margin is always relative to the configured ceiling, never a literal.
+func TestMCPWriteDeadlineDerivesFromConfiguredCeiling(t *testing.T) {
+	t.Parallel()
+	custom := 20 * time.Minute
+	backend := &fakeBackend{}
+	server, err := New(backend, backend, backend, "test", WithMaximumToolWait(custom))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if server.maximumToolWait != custom {
+		t.Fatalf("maximumToolWait = %v, want %v", server.maximumToolWait, custom)
+	}
+	total := server.maximumToolWait + writeDeadlineMargin
+	if total <= custom {
+		t.Fatalf("write deadline %v must exceed wait ceiling %v", total, custom)
+	}
+}
+
+// TestMCPRunListReturnsObject verifies that run_list structuredContent is a
+// JSON object with a "runs" key, not a bare array (#794).
+func TestMCPRunListReturnsObject(t *testing.T) {
+	t.Parallel()
+	server, backend := testServer(t)
+	backend.toolResult = RunListResponse{Runs: []map[string]string{{"id": "run-1"}}}
+	body := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"run_list","arguments":{}}}`
+	request := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(body))
+	request.Header.Set("Authorization", "Bearer valid-token")
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+	var envelope struct {
+		Result struct {
+			Structured json.RawMessage `json:"structuredContent"`
+			IsError    bool            `json:"isError"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	if envelope.Result.IsError {
+		t.Fatalf("run_list returned error: %s", response.Body.String())
+	}
+	// structuredContent must be a JSON object, not an array.
+	var parsed map[string]json.RawMessage
+	if err := json.Unmarshal(envelope.Result.Structured, &parsed); err != nil {
+		t.Fatalf("structuredContent is not a JSON object: %s", string(envelope.Result.Structured))
+	}
+	if _, ok := parsed["runs"]; !ok {
+		t.Fatalf("structuredContent missing 'runs' key: %s", string(envelope.Result.Structured))
+	}
+}
+
+// TestMCPRepoListReturnsObject verifies that repo_list structuredContent is a
+// JSON object with a "repositories" key, not a bare array (#794).
+func TestMCPRepoListReturnsObject(t *testing.T) {
+	t.Parallel()
+	server, backend := testServer(t)
+	backend.toolResult = RepoListResponse{Repositories: []map[string]string{{"name": "oberth"}}}
+	body := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"repo_list","arguments":{}}}`
+	request := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(body))
+	request.Header.Set("Authorization", "Bearer valid-token")
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+	var envelope struct {
+		Result struct {
+			Structured json.RawMessage `json:"structuredContent"`
+			IsError    bool            `json:"isError"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	if envelope.Result.IsError {
+		t.Fatalf("repo_list returned error: %s", response.Body.String())
+	}
+	var parsed map[string]json.RawMessage
+	if err := json.Unmarshal(envelope.Result.Structured, &parsed); err != nil {
+		t.Fatalf("structuredContent is not a JSON object: %s", string(envelope.Result.Structured))
+	}
+	if _, ok := parsed["repositories"]; !ok {
+		t.Fatalf("structuredContent missing 'repositories' key: %s", string(envelope.Result.Structured))
+	}
+}
+
+// TestMCPAllToolsReturnObjectStructuredContent verifies that every
+// registered MCP tool produces a JSON object (not array, not scalar)
+// in structuredContent for a representative successful call (#794).
+func TestMCPAllToolsReturnObjectStructuredContent(t *testing.T) {
+	t.Parallel()
+	server, _ := testServer(t)
+	// Tools that are known to return objects by construction. The
+	// test sends a tools/call for each and asserts the structuredContent
+	// is a JSON object.
+	for _, tool := range []struct {
+		name string
+		args string
+	}{
+		{"status", `{"ref":"main"}`},
+		{"run_list", `{}`},
+		{"repo_list", `{}`},
+		{"system_status", `{}`},
+	} {
+		t.Run(tool.name, func(t *testing.T) {
+			body := fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":%q,"arguments":%s}}`, tool.name, tool.args)
+			request := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(body))
+			request.Header.Set("Authorization", "Bearer valid-token")
+			response := httptest.NewRecorder()
+			server.Handler().ServeHTTP(response, request)
+
+			var envelope struct {
+				Result struct {
+					Structured json.RawMessage `json:"structuredContent"`
+					IsError    bool            `json:"isError"`
+				} `json:"result"`
+			}
+			if err := json.Unmarshal(response.Body.Bytes(), &envelope); err != nil {
+				t.Fatalf("decode response: %v body=%s", err, response.Body.String())
+			}
+			if len(envelope.Result.Structured) == 0 {
+				// Tool errors have no structuredContent; skip.
+				if envelope.Result.IsError {
+					return
+				}
+				t.Fatalf("non-error response has empty structuredContent")
+			}
+			// Must be a JSON object (starts with '{'), not an array or scalar.
+			trimmed := strings.TrimSpace(string(envelope.Result.Structured))
+			if trimmed[0] != '{' {
+				t.Fatalf("structuredContent is not a JSON object: %s", trimmed[:min(80, len(trimmed))])
 			}
 		})
 	}

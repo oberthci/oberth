@@ -828,7 +828,10 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 	if err != nil {
 		return err
 	}
-	httpAPI, err := api.New(authenticator, controlAPI, controlAPI, version, api.WithErrorClassifier(classifyViewError))
+	httpAPI, err := api.New(authenticator, controlAPI, controlAPI, version,
+		api.WithErrorClassifier(classifyViewError),
+		api.WithMaximumToolWait(service.DefaultMaximumWait),
+	)
 	if err != nil {
 		return err
 	}
