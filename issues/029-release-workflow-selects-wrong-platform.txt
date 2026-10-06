@@ -16,6 +16,12 @@ workflow deadline under emulation. The pipeline test now checks the reviewed
 Go index/amd64 child pair and exact patch release. Both child manifests ran
 as Pods on the arm64 kind node.
 
+A second local branch run returned to native CI and passed setup and vet, but
+Trivy's vulnerability DB download ended with an unexpected EOF and the lint
+Pod missed its start deadline. The complete internal/argojob package passed
+in the pinned native Linux Go image. The branch was published to GitHub for
+review with these CI limitations recorded.
+
 Acceptance: branch CI and release admit the pinned images; install-helm and
 the complete release workflow pass on the arm64 kind cluster; curl and the
 Homebrew tap resolve the published release. Do not move the failed immutable
