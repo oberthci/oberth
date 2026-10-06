@@ -515,7 +515,7 @@ func pipelineImages(t *testing.T, name string) map[string]string {
 	return images
 }
 
-// TestOberthPipelinesPinOneExactGoToolchain is the regression guard for the
+// TestOberthPipelinesPinCompatibleGoToolchains is the regression guard for the
 // v0.12.5 release failure: release-publish-images' trivy scan found eight HIGH
 // stdlib CVEs (CVE-2026-33818, CVE-2026-39821, CVE-2026-46600, CVE-2026-56853,
 // CVE-2026-56858, CVE-2026-56859, CVE-2026-56860, CVE-2026-56862) in the
@@ -528,13 +528,18 @@ func pipelineImages(t *testing.T, name string) map[string]string {
 //     the released binary is readable in the pipeline text. A floating minor
 //     tag pinned to a stale digest reads as current while shipping an old
 //     stdlib -- that is what hid these CVEs.
-//   - Branch CI and the release burn share one toolchain reference. The
-//     release binary is never compiled by a Go that branch CI never exercised,
-//     and a half-finished bump fails here rather than at release time, after
-//     the tag is already immutable.
-func TestOberthPipelinesPinOneExactGoToolchain(t *testing.T) {
-	toolchains := map[string][]string{}
-	for _, document := range []string{"build.yaml", "release.yaml"} {
+//   - Branch CI uses the reviewed multi-platform index and release uses its
+//     Linux amd64 child manifest. Both are Go 1.26.6 from the same image index.
+//     The child runs release's amd64-only publisher tools on arm64 kind nodes;
+//     CI stays native so its tests finish before the workflow deadline.
+//     A partial image update fails here before an immutable tag is pushed.
+func TestOberthPipelinesPinCompatibleGoToolchains(t *testing.T) {
+	expected := map[string]string{
+		"build.yaml":   "golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3",
+		"release.yaml": "golang:1.26.6-trixie@sha256:23fdfd3a6abc97c81e32a724cdd1cf541c06c416eb04d717815f4ed7c75623d0",
+	}
+	for document, want := range expected {
+		count := 0
 		for template, image := range pipelineImages(t, document) {
 			if !strings.HasPrefix(image, "golang:") {
 				// Every other image must still be digest-pinned.
@@ -548,17 +553,14 @@ func TestOberthPipelinesPinOneExactGoToolchain(t *testing.T) {
 					document, template, image)
 				continue
 			}
-			toolchains[image] = append(toolchains[image], document+"/"+template)
+			count++
+			if image != want {
+				t.Errorf("%s template %q uses Go image %q, want %q", document, template, image, want)
+			}
 		}
-	}
-	if len(toolchains) == 0 {
-		t.Fatal("neither pipeline declares a Go toolchain image")
-	}
-	if len(toolchains) > 1 {
-		for image, templates := range toolchains {
-			t.Errorf("Go toolchain %q is used by %d template(s), e.g. %s", image, len(templates), templates[0])
+		if count == 0 {
+			t.Errorf("%s declares no Go toolchain image", document)
 		}
-		t.Fatal("branch CI and the release burn must compile with one identical Go toolchain; a split toolchain ships a binary no branch run ever scanned")
 	}
 }
 

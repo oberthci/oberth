@@ -9,8 +9,12 @@ step sets GOARCH=amd64. Other release setup assets, including the reviewed
 bootstrap tool hashes, cosign binary and Node archive, also target amd64.
 
 Pin the exact Linux amd64 child manifests for Golang and Trivy in release.
-Keep branch CI on the identical Go manifest so tests cover the compiler used
-for release binaries. Both child manifests ran as Pods on the arm64 kind node.
+Keep branch CI on the corresponding multi-platform Go index, which selects
+arm64 on the kind node. An initial CI attempt with the amd64 Go child passed
+vet, lint, chart, security and Helm, but its tests exceeded the one-hour
+workflow deadline under emulation. The pipeline test now checks the reviewed
+Go index/amd64 child pair and exact patch release. Both child manifests ran
+as Pods on the arm64 kind node.
 
 Acceptance: branch CI and release admit the pinned images; install-helm and
 the complete release workflow pass on the arm64 kind cluster; curl and the
