@@ -199,8 +199,8 @@ DELETE FROM schema_migrations WHERE version >= 16;`); err != nil {
 		}
 	}()
 	var version int
-	if err := migrated.db.QueryRowContext(ctx, `SELECT max(version) FROM schema_migrations`).Scan(&version); err != nil || version != 17 {
-		t.Fatalf("schema version after upgrade = %d, %v; want 17", version, err)
+	if err := migrated.db.QueryRowContext(ctx, `SELECT max(version) FROM schema_migrations`).Scan(&version); err != nil || version != 18 {
+		t.Fatalf("schema version after upgrade = %d, %v; want 18", version, err)
 	}
 	for _, want := range []struct {
 		id     string
