@@ -32,6 +32,8 @@ spec:
       app.kubernetes.io/instance: cloudflared-watch-oberth-v2
   template:
     metadata:
+      annotations:
+        checksum/origin-ca: {{ $wt.originCACert | default "" | sha256sum | quote }}
       labels:
         app.kubernetes.io/name: cloudflared-watch
         app.kubernetes.io/instance: cloudflared-watch-oberth-v2

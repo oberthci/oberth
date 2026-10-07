@@ -99,3 +99,70 @@ func TestChartWatchLabelsAreUniqueAndPreserveConnectorIdentity(t *testing.T) {
 		})
 	}
 }
+
+// TestChartOriginCARollsCloudflaredPod asserts that the cloudflared pod
+// template carries a checksum/origin-ca annotation that changes when
+// watchTunnel.originCACert changes, ensuring a ConfigMap rotation rolls
+// the pod.
+func TestChartOriginCARollsCloudflaredPod(t *testing.T) {
+	certA := "-----BEGIN CERTIFICATE-----\npublic-cert-A\n-----END CERTIFICATE-----\n"
+	certB := "-----BEGIN CERTIFICATE-----\npublic-cert-B\n-----END CERTIFICATE-----\n"
+
+	renderChecksum := func(cert string) string {
+		t.Helper()
+		values, err := json.Marshal(map[string]any{
+			"watchTunnel": map[string]any{"enabled": true, "originCACert": cert},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		valuesPath := filepath.Join(t.TempDir(), "values.json")
+		if err := os.WriteFile(valuesPath, values, 0600); err != nil {
+			t.Fatal(err)
+		}
+		out, err := exec.Command("helm", "template", "oberth", "../../charts/oberth",
+			"--namespace", "origin-ca-test",
+			"--set", "image.ref=example.invalid/oberth@"+goProxyDigest,
+			"--values", valuesPath,
+			"--show-only", "templates/cloudflared-watch-deployment.yaml",
+		).CombinedOutput()
+		if err != nil {
+			t.Fatalf("render: %v %s", err, out)
+		}
+		reader := utilyaml.NewYAMLReader(bufio.NewReader(bytes.NewReader(out)))
+		raw, err := reader.Read()
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, err := sigsyaml.YAMLToJSONStrict(raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var object struct {
+			Spec struct {
+				Template struct {
+					Metadata metav1.ObjectMeta `json:"metadata"`
+				} `json:"template"`
+			} `json:"spec"`
+		}
+		if err := json.Unmarshal(body, &object); err != nil {
+			t.Fatal(err)
+		}
+		checksum, ok := object.Spec.Template.Metadata.Annotations["checksum/origin-ca"]
+		if !ok || checksum == "" {
+			t.Fatal("cloudflared pod template missing checksum/origin-ca annotation")
+		}
+		return checksum
+	}
+
+	checksumA1 := renderChecksum(certA)
+	checksumA2 := renderChecksum(certA)
+	checksumB := renderChecksum(certB)
+
+	if checksumA1 != checksumA2 {
+		t.Fatalf("same cert produced different checksums: %s vs %s", checksumA1, checksumA2)
+	}
+	if checksumA1 == checksumB {
+		t.Fatalf("different certs produced the same checksum: %s", checksumA1)
+	}
+}
