@@ -206,7 +206,10 @@ func generateRuntimeIdentity(namespace string, extra []string) (map[string][]byt
 	}
 	now := time.Now()
 	cert := &x509.Certificate{SerialNumber: serial, Subject: pkix.Name{CommonName: "oberth"}, NotBefore: now.Add(-time.Minute), NotAfter: now.AddDate(10, 0, 0), KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}, BasicConstraintsValid: true}
-	names := []string{"oberth", "oberth." + namespace, "oberth." + namespace + ".svc", "oberth." + namespace + ".svc.cluster.local", "oberth-goproxy." + namespace + ".svc"}
+	names := []string{
+		"oberth", "oberth." + namespace, "oberth." + namespace + ".svc", "oberth." + namespace + ".svc.cluster.local",
+		"oberth-goproxy", "oberth-goproxy." + namespace, "oberth-goproxy." + namespace + ".svc", "oberth-goproxy." + namespace + ".svc.cluster.local",
+	}
 	for _, name := range append(names, extra...) {
 		name = strings.TrimSpace(name)
 		if name == "" {

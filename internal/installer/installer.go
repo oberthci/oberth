@@ -190,6 +190,12 @@ type Config struct {
 	// "auto" (default) enables on all CNIs except k3s's built-in kube-router
 	// (which has a DNAT incompatibility), "true" forces on, "false" forces off.
 	NetworkPolicy string
+	// watchTunnelOriginCACert is set by the identity preflight when the server
+	// certificate was rotated and the live watchTunnel.originCACert pins the
+	// old server leaf. OberthHelmArgs uses it to update the pin in the same
+	// helm upgrade so cloudflared keeps working.
+	watchTunnelOriginCACert string
+
 	// ChartPath installs the Oberth chart from a local directory or archive
 	// instead of the published repository (--chart). This is the loop the
 	// rollout depends on: build the server image, install the working tree's
@@ -638,6 +644,14 @@ func Run(ctx context.Context, cfg Config, deps Deps) error {
 		}
 	}
 
+	// Identity preflight: verify OpenBao bundles and server certificate SANs.
+	// Runs on both the real and dry-run paths; reads only on dry-run, except
+	// for an explicit CAS-bound certificate rotation when goproxy SANs are
+	// missing and a token is available.
+	if err := preflightServerIdentities(ctx, &cfg, deps, cfg.DryRun); err != nil {
+		return err
+	}
+
 	if cfg.DryRun {
 		displayValues := cfg.ValuesFiles
 		var closeValues func()
@@ -667,10 +681,6 @@ func Run(ctx context.Context, cfg Config, deps Deps) error {
 		}
 		cfg.ValuesFiles = displayValues
 		return printDryRunPlan(cfg, deps.Output, cluster)
-	}
-
-	if err := rejectLegacySecretDeployment(ctx, cfg, deps); err != nil {
-		return err
 	}
 
 	// Before anything is installed: naming an address the kept TLS identity will
@@ -1500,6 +1510,12 @@ func OberthHelmArgs(cfg Config, openbao OpenBaoResult, rekor RekorResult) []stri
 		"--set-string", "watchTunnel.image="+watchTunnelImageDefault,
 		"--set-string", "watchTunnel.openbaoImage="+watchTunnelOpenbaoImageDefault,
 	)
+	// When the identity preflight rotated the server certificate and the live
+	// watchTunnel.originCACert pinned the old leaf, replace the pin so
+	// cloudflared keeps trusting the server after the upgrade.
+	if cfg.watchTunnelOriginCACert != "" {
+		args = append(args, "--set-string", "watchTunnel.originCACert="+cfg.watchTunnelOriginCACert)
+	}
 	if cfg.wantsSecretStore() {
 		args = append(args,
 			"--set", "secretstore.enabled=true",
@@ -2104,7 +2120,7 @@ func DefaultRunHelm(ctx context.Context, args []string) ([]byte, error) {
 	// constructed by this package from validated flags (no shell, no
 	// caller-controlled command word).
 	cmd := exec.CommandContext(ctx, "helm", args...)
-	cmd.Env = append(os.Environ(), "HELM_DRIVER=configmap")
+	cmd.Env = os.Environ()
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -2299,28 +2315,4 @@ func pushBannerHost(ips, dnsNames []string) string {
 		}
 	}
 	return ""
-}
-
-// Refuse to replace an existing private identity while changing storage backends.
-func rejectLegacySecretDeployment(ctx context.Context, cfg Config, deps Deps) error {
-	if deps.KubeClient == nil {
-		return nil
-	}
-	ns := cfg.Namespace
-	if ns == "" {
-		ns = DefaultNamespace
-	}
-	deployment, err := deps.KubeClient.AppsV1().Deployments(ns).Get(ctx, "oberth", metav1.GetOptions{})
-	if apierrors.IsNotFound(err) {
-		return nil
-	}
-	if err != nil {
-		return fmt.Errorf("check existing identity storage: %w", err)
-	}
-	for _, volume := range deployment.Spec.Template.Spec.Volumes {
-		if volume.Secret != nil {
-			return errors.New("existing Oberth deployment uses Kubernetes Secrets; migrate and verify its SSH/TLS identities in OpenBao before upgrading, or use a fresh cluster for evaluation; existing identities have not been changed")
-		}
-	}
-	return nil
 }

@@ -1,11 +1,3 @@
-{{- $existing := lookup "apps/v1" "Deployment" .Release.Namespace (include "oberth.fullname" .) -}}
-{{- if $existing -}}
-{{- range $existing.spec.template.spec.volumes -}}
-{{- if .secret -}}
-{{- fail "existing deployment uses Kubernetes Secrets; migrate and verify its SSH/TLS identities in OpenBao before upgrading, or use a fresh cluster for evaluation" -}}
-{{- end -}}
-{{- end -}}
-{{- end -}}
 {{- if not .Values.secretstore.enabled }}
 {{- fail "OpenBao is required for server and upstream identities; configure secretstore.enabled" }}
 {{- end }}

@@ -1,15 +1,21 @@
 Title: Preserve private identities when migrating existing installations to OpenBao
-Status: Upgrade blocked safely; automated migration remains follow-up work
-Evidence: Inspection of the old chart and the new identity storage paths
+Status: Implemented as preflight verification (v0.17.11); manual seeding documented
+Evidence: preflightServerIdentities in internal/installer/identity_preflight.go
 
-A fresh deployment can create SSH and TLS identities in OpenBao. Applying that
-chart over a Secret-backed deployment would otherwise create new identities,
-breaking client pins and the audit witness identity. Helm metadata also moves
-from Secrets to ConfigMaps.
+The installer verifies that server, upstream-key, and known-hosts identity
+bundles are present in OpenBao before upgrading a Secret-backed deployment.
+When a legacy Deployment (Secret volumes) is detected, the administrator must
+seed the identities into OpenBao manually with BAO_TOKEN, then re-run the
+installer with --install-secretstore. The preflight cross-checks the OpenBao
+server certificate against the running pod's certificate and prints the SSH
+host key fingerprint (public data only) so the administrator can compare it
+with their known_hosts entry.
 
-The installer and chart now refuse this upgrade before replacing the server.
-Use a fresh cluster for evaluation. A migration tool must copy the existing
-SSH host key, TLS certificate/private key, upstream keys and host trust into
-OpenBao, verify fingerprints and backup recovery, transition Helm metadata,
-and only then remove the old Secret resources. Do not delete a production
-cluster to work around this guard.
+Certificate rotation: when the server certificate lacks goproxy SANs required
+by the live argo.goProxy configuration, the preflight rotates the certificate
+in place (CAS-bound write of tls.crt only, private key unchanged, same NotAfter)
+and updates watchTunnel.originCACert when the live value pinned the old leaf.
+
+The chart's lookup-based gate (deployment.yaml) and the installer's
+rejectLegacySecretDeployment function have been removed in favour of the
+preflight, which runs on both real and dry-run paths.
