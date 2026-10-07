@@ -601,14 +601,18 @@ func adoptWatchTunnelReceipt(ctx context.Context, cfg Config, deps Deps, dryRun 
 
 // transferConfigMapDataOwnership transfers ownership of a ConfigMap's .data
 // field to manager "helm" using a server-side apply with Force=true. The
-// apply body contains only apiVersion, kind, metadata (name/namespace), and
+// apply body contains only apiVersion, kind, metadata (name/namespace plus the
+// uid and resourceVersion confirmed by the metadata CAS that just ran), and
 // the target data from the reviewed plan. The Force flag takes ownership of
 // conflicting fields from whatever manager currently owns them (typically
 // kubectl-client-side-apply from the imperative creation).
 //
 // This is the scoped force-apply described in #813: it touches only the data
-// fields the chart renders, uses the reviewed plan's target content, and is
-// UID/RV-bound through the adoption preflight that preceded it.
+// fields the chart renders and uses the reviewed plan's target content. It is
+// UID/RV-bound by construction: the API server rejects a server-side apply
+// whose metadata.uid does not match the live object and reports a conflict
+// when metadata.resourceVersion is stale, so an object replaced or modified
+// between the CAS and this apply is never force-overwritten.
 func transferConfigMapDataOwnership(ctx context.Context, deps Deps, ns string, o watchAdoptionObject) error {
 	// Parse the target spec to extract the data field.
 	var targetData struct {
@@ -621,13 +625,19 @@ func transferConfigMapDataOwnership(ctx context.Context, deps Deps, ns string, o
 		return nil // no data fields to transfer
 	}
 
-	// Build the SSA apply body with only the fields whose ownership we need.
+	// Build the SSA apply body with only the fields whose ownership we need,
+	// bound to the exact object the reviewed plan and the metadata CAS saw.
+	if o.UID == "" || o.ResourceVersion == "" {
+		return fmt.Errorf("adoption object %s/%s has no confirmed uid/resourceVersion; refusing an unbound force-apply", o.Kind, o.Name)
+	}
 	applyBody := map[string]any{
 		"apiVersion": "v1",
 		"kind":       "ConfigMap",
 		"metadata": map[string]any{
-			"name":      o.Name,
-			"namespace": ns,
+			"name":            o.Name,
+			"namespace":       ns,
+			"uid":             o.UID,
+			"resourceVersion": o.ResourceVersion,
 		},
 		"data": targetData.Data,
 	}

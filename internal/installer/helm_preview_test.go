@@ -24,10 +24,11 @@ func TestPreviewHelmUpgradeRefusesOnSSAConflict(t *testing.T) {
 			if strings.HasPrefix(joined, "list") {
 				return []byte(`[{"name":"oberth","namespace":"oberth","status":"deployed","chart":"oberth-0.17.11"}]`), nil
 			}
-			// helm upgrade --dry-run=server → SSA conflict
+			// helm upgrade --dry-run=server → SSA conflict, verbatim Helm
+			// v4.2.3 output as recorded on tuxbox (helm history rev 75,
+			// 2026-10-07): two objects in two namespaces joined by " && ".
 			if strings.Contains(joined, "--dry-run=server") {
-				return nil, errors.New(`UPGRADE FAILED: cannot patch "cloudflared-watch-oberth-origin-ca" with kind ConfigMap: ` +
-					`oberth/cloudflared-watch-oberth-origin-ca ConfigMap: conflict with "kubectl-client-side-apply" using v1: .data.ca.crt`)
+				return nil, errors.New(helm4TwoObjectConflict)
 			}
 			return nil, nil
 		},
@@ -47,7 +48,25 @@ func TestPreviewHelmUpgradeRefusesOnSSAConflict(t *testing.T) {
 	if !strings.Contains(err.Error(), "no OpenBao writes") {
 		t.Fatalf("error should confirm zero mutations: %v", err)
 	}
+	// The exact transfer command, per object, in the object's OWN namespace:
+	// the Role lives in oberth-argo, not in the release namespace.
+	for _, want := range []string{
+		"kubectl -n oberth get configmap cloudflared-watch-oberth-origin-ca -o yaml | kubectl -n oberth apply --server-side --field-manager=helm --force-conflicts -f -",
+		"kubectl -n oberth-argo get role oberth-argo -o yaml | kubectl -n oberth-argo apply --server-side --field-manager=helm --force-conflicts -f -",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("refusal must print the per-object transfer command %q, got:\n%v", want, err)
+		}
+	}
 }
+
+// helm4TwoObjectConflict is the verbatim UPGRADE FAILED text Helm v4.2.3
+// produced on tuxbox for release revision 75 (2026-10-07 17:42Z), minus the
+// `Upgrade "oberth" failed: ` prefix.
+const helm4TwoObjectConflict = `conflict occurred while applying object oberth/cloudflared-watch-oberth-origin-ca /v1, Kind=ConfigMap: ` +
+	`Apply failed with 1 conflict: conflict with "kubectl-client-side-apply" using v1: .data.ca.crt && ` +
+	`conflict occurred while applying object oberth-argo/oberth-argo rbac.authorization.k8s.io/v1, Kind=Role: ` +
+	`Apply failed with 1 conflict: conflict with "kubectl-patch" using rbac.authorization.k8s.io/v1: .rules`
 
 func TestPreviewHelmUpgradePassesOnCleanPreview(t *testing.T) {
 	t.Parallel()
@@ -178,31 +197,54 @@ func TestDetectFailedHelmRevision(t *testing.T) {
 func TestParseSSAConflicts(t *testing.T) {
 	t.Parallel()
 
-	errMsg := `UPGRADE FAILED: cannot patch "cloudflared-watch-oberth-origin-ca" with kind ConfigMap: ` +
-		`oberth/cloudflared-watch-oberth-origin-ca ConfigMap: conflict with "kubectl-client-side-apply" using v1: .data.ca.crt && ` +
-		`oberth/oberth-argo Role: conflict with "kubectl-patch" using rbac.authorization.k8s.io/v1: .rules`
-
-	conflicts := parseSSAConflicts(errMsg)
-	if len(conflicts) < 2 {
-		t.Fatalf("expected at least 2 conflicts, got %d: %+v", len(conflicts), conflicts)
+	conflicts := parseSSAConflicts(`Upgrade "oberth" failed: ` + helm4TwoObjectConflict)
+	want := []ssaConflict{
+		{ssaObject: ssaObject{Namespace: "oberth", Name: "cloudflared-watch-oberth-origin-ca", APIVersion: "v1", Kind: "ConfigMap"},
+			Manager: "kubectl-client-side-apply", Field: ".data.ca.crt"},
+		{ssaObject: ssaObject{Namespace: "oberth-argo", Name: "oberth-argo", APIVersion: "rbac.authorization.k8s.io/v1", Kind: "Role"},
+			Manager: "kubectl-patch", Field: ".rules"},
 	}
-
-	// Verify the first conflict has the expected fields.
-	foundOriginCA := false
-	foundRole := false
-	for _, c := range conflicts {
-		if c.Manager == "kubectl-client-side-apply" && c.Field == ".data.ca.crt" {
-			foundOriginCA = true
-		}
-		if c.Manager == "kubectl-patch" && c.Field == ".rules" {
-			foundRole = true
+	if len(conflicts) != len(want) {
+		t.Fatalf("expected %d conflicts, got %d: %+v", len(want), len(conflicts), conflicts)
+	}
+	for i := range want {
+		if conflicts[i] != want[i] {
+			t.Fatalf("conflict %d = %+v, want %+v", i, conflicts[i], want[i])
 		}
 	}
-	if !foundOriginCA {
-		t.Fatalf("missing origin-CA conflict: %+v", conflicts)
+}
+
+// TestParseSSAConflictsDashList covers the API server's multi-field shape
+// ("Apply failed with 2 conflicts: conflicts with ... :\n- .a\n- .b") and a
+// cluster-scoped object (no namespace in the object reference).
+func TestParseSSAConflictsDashList(t *testing.T) {
+	t.Parallel()
+
+	msg := "conflict occurred while applying object oberth-argo-executor rbac.authorization.k8s.io/v1, Kind=ClusterRole: " +
+		"Apply failed with 2 conflicts: conflicts with \"kubectl-client-side-apply\" using rbac.authorization.k8s.io/v1:\n- .rules\n- .metadata.labels.app"
+	conflicts := parseSSAConflicts(msg)
+	want := []ssaConflict{
+		{ssaObject: ssaObject{Namespace: "", Name: "oberth-argo-executor", APIVersion: "rbac.authorization.k8s.io/v1", Kind: "ClusterRole"},
+			Manager: "kubectl-client-side-apply", Field: ".rules"},
+		{ssaObject: ssaObject{Namespace: "", Name: "oberth-argo-executor", APIVersion: "rbac.authorization.k8s.io/v1", Kind: "ClusterRole"},
+			Manager: "kubectl-client-side-apply", Field: ".metadata.labels.app"},
 	}
-	if !foundRole {
-		t.Fatalf("missing role conflict: %+v", conflicts)
+	if len(conflicts) != len(want) {
+		t.Fatalf("expected %d conflicts, got %d: %+v", len(want), len(conflicts), conflicts)
+	}
+	for i := range want {
+		if conflicts[i] != want[i] {
+			t.Fatalf("conflict %d = %+v, want %+v", i, conflicts[i], want[i])
+		}
+	}
+	// A message with manager/field but no object header still yields the
+	// pair and the refusal says the command cannot be derived.
+	bare := parseSSAConflicts(`conflict with "kubectl-patch" using v1: .data.x`)
+	if len(bare) != 1 || bare[0].Name != "" || bare[0].Field != ".data.x" {
+		t.Fatalf("bare conflict = %+v", bare)
+	}
+	if out := formatConflictRefusal(bare, "oberth"); !strings.Contains(out, "did not identify the object") || strings.Contains(out, "kubectl -n") {
+		t.Fatalf("unexpected refusal for an unidentified object:\n%s", out)
 	}
 }
 
