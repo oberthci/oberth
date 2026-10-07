@@ -1181,26 +1181,37 @@ func TestDryRunZeroWrites(t *testing.T) {
 // HELM_DRIVER=configmap would make Helm see an empty release list and treat
 // the upgrade as a fresh install, dropping --reuse-values state.
 func TestDefaultRunHelmDoesNotOverrideHelmDriver(t *testing.T) {
-	// DefaultRunHelm sets cmd.Env = os.Environ() without appending HELM_DRIVER.
-	// We verify by inspecting the source behaviour: the function should not
-	// inject HELM_DRIVER into the environment. Since we cannot intercept
-	// exec.Command in a unit test, we verify the contract indirectly: calling
-	// DefaultRunHelm with a trivial "version" command and checking that the
-	// environment it inherited does not carry a HELM_DRIVER override that the
-	// function itself set.
-	//
-	// Guard: if this test runs in an environment where HELM_DRIVER is already
-	// set, it would be a false negative. Clear it.
-	t.Setenv("HELM_DRIVER", "")
+	// Verify that DefaultRunHelm does not inject HELM_DRIVER into the
+	// environment. Use a shell script as a helm stub that prints
+	// $HELM_DRIVER to stdout.
+	dir := t.TempDir()
+	helmStub := filepath.Join(dir, "helm")
+	if err := os.WriteFile(helmStub, []byte("#!/bin/sh\nprintf '%s' \"$HELM_DRIVER\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir)
 
-	// The actual exec will fail because we may not have helm on PATH in the
-	// test environment — that is fine; we only need to reach the exec.Command
-	// to verify the env is clean.
-	_, err := DefaultRunHelm(context.Background(), []string{"version", "--short"})
-	// err is expected (helm may not be on PATH); the point is that we did not
-	// inject HELM_DRIVER=configmap. If helm IS available and succeeds, that
-	// also proves it ran under the default driver.
-	_ = err
+	t.Run("empty env passes no driver", func(t *testing.T) {
+		t.Setenv("HELM_DRIVER", "")
+		out, err := DefaultRunHelm(context.Background(), []string{"version"})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got := string(out); got != "" {
+			t.Fatalf("expected empty HELM_DRIVER, got %q", got)
+		}
+	})
+
+	t.Run("operator HELM_DRIVER=secret passes through", func(t *testing.T) {
+		t.Setenv("HELM_DRIVER", "secret")
+		out, err := DefaultRunHelm(context.Background(), []string{"version"})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got := string(out); got != "secret" {
+			t.Fatalf("expected HELM_DRIVER=secret, got %q", got)
+		}
+	})
 }
 
 // --- Helm arg construction ---

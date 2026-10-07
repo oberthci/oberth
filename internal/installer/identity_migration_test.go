@@ -331,7 +331,7 @@ func TestPreflightOpenBaoCertMismatchRefuses(t *testing.T) {
 	t.Setenv(baoTokenEnvVar, "test-root-token")
 
 	baoCertPEM, _ := testCertAndKey(t, []string{"oberth"})
-	podCertPEM, _ := testCertAndKey(t, []string{"oberth"}) // different cert
+	podCertPEM, _ := testCertAndKey(t, []string{"oberth"}) // different key
 
 	runner := &fakeBaoRunner{t: t, responses: map[string]fakeBaoResponse{
 		"read -format=json " + defaultKVPrefix + "/data/identities/oberth/server": {
@@ -358,6 +358,17 @@ func TestPreflightOpenBaoCertMismatchRefuses(t *testing.T) {
 	err := preflightServerIdentities(context.Background(), &cfg, deps, false)
 	if err == nil || !strings.Contains(err.Error(), "does not match") {
 		t.Fatalf("expected cert mismatch error, got: %v", err)
+	}
+	// Fix 1: the error must contain both leaf SHA-256 fingerprints.
+	baoBlock, _ := pem.Decode(baoCertPEM)
+	wantBaoFP := certSHA256Fingerprint(baoBlock.Bytes)
+	podBlock, _ := pem.Decode(podCertPEM)
+	wantPodFP := certSHA256Fingerprint(podBlock.Bytes)
+	if !strings.Contains(err.Error(), wantBaoFP) {
+		t.Fatalf("error should contain the OpenBao cert fingerprint %s: %v", wantBaoFP, err)
+	}
+	if !strings.Contains(err.Error(), wantPodFP) {
+		t.Fatalf("error should contain the pod cert fingerprint %s: %v", wantPodFP, err)
 	}
 }
 
@@ -628,6 +639,358 @@ func TestReadyCloneInstructionsIncludeQualifiedPath(t *testing.T) {
 		if !strings.Contains(out.String(), "github/oberthci/<repo>.git") {
 			t.Fatal(out.String())
 		}
+	}
+}
+
+// --- Fix 1 additional tests: cross-check compares public key, not PEM bytes ---
+
+func TestPreflightSameKeyDifferentCertPassesCrossCheck(t *testing.T) {
+	// Same key, different cert bytes (e.g. rotated cert with new SANs).
+	t.Setenv(baoTokenEnvVar, "test-root-token")
+
+	certPEM, keyPEM := testCertAndKey(t, []string{"oberth"})
+	block, _ := pem.Decode(certPEM)
+	cert, _ := x509.ParseCertificate(block.Bytes)
+
+	// Rotate the cert (new SANs, same key) to get different PEM bytes.
+	rotatedCertPEM, err := rotateCertificate(cert, keyPEM, []string{"oberth.new"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	runner := &fakeBaoRunner{t: t, responses: map[string]fakeBaoResponse{
+		"read -format=json " + defaultKVPrefix + "/data/identities/oberth/server": {
+			out: baoIdentityJSON(1, map[string]string{
+				"tls.crt": string(rotatedCertPEM), "tls.key": string(keyPEM), "ssh_host_key": "fake-ssh-key",
+			}),
+		},
+		"read -format=json " + defaultKVPrefix + "/data/identities/oberth/oberth-upstream-key": {
+			out: baoIdentityJSON(1, map[string]string{"id_ed25519": "priv", "id_ed25519.pub": "pub"}),
+		},
+		"read -format=json " + defaultKVPrefix + "/data/identities/oberth/oberth-known-hosts": {
+			out: baoIdentityJSON(1, map[string]string{"known_hosts": "known"}),
+		},
+	}}
+	// Pod still serves the OLD cert (different PEM, same key).
+	pr := &preflightRunner{t: t, baoRunner: runner, podCertPEM: certPEM}
+
+	var buf bytes.Buffer
+	deps := Deps{
+		Output:      &buf,
+		KubeClient:  fake.NewClientset(legacyDeployment(), runningOpenBaoPod()),
+		RunCommand:  pr.run,
+		ContextName: "test-ctx",
+	}
+
+	cfg := Config{InstallSecretStore: true}
+	if err := preflightServerIdentities(context.Background(), &cfg, deps, false); err != nil {
+		t.Fatalf("same key with different cert bytes should pass: %v", err)
+	}
+}
+
+func TestPreflightUnparseableBaoCertRefuses(t *testing.T) {
+	t.Setenv(baoTokenEnvVar, "test-root-token")
+
+	_, keyPEM := testCertAndKey(t, []string{"oberth"})
+	podCertPEM, _ := testCertAndKey(t, []string{"oberth"})
+
+	runner := &fakeBaoRunner{t: t, responses: map[string]fakeBaoResponse{
+		"read -format=json " + defaultKVPrefix + "/data/identities/oberth/server": {
+			out: baoIdentityJSON(1, map[string]string{
+				"tls.crt": "not-valid-pem", "tls.key": string(keyPEM), "ssh_host_key": "ssh",
+			}),
+		},
+		"read -format=json " + defaultKVPrefix + "/data/identities/oberth/oberth-upstream-key": {
+			out: baoIdentityJSON(1, map[string]string{"id_ed25519": "priv", "id_ed25519.pub": "pub"}),
+		},
+		"read -format=json " + defaultKVPrefix + "/data/identities/oberth/oberth-known-hosts": {
+			out: baoIdentityJSON(1, map[string]string{"known_hosts": "known"}),
+		},
+	}}
+	pr := &preflightRunner{t: t, baoRunner: runner, podCertPEM: podCertPEM}
+
+	var buf bytes.Buffer
+	deps := Deps{
+		Output:      &buf,
+		KubeClient:  fake.NewClientset(legacyDeployment(), runningOpenBaoPod()),
+		RunCommand:  pr.run,
+		ContextName: "test-ctx",
+	}
+
+	cfg := Config{InstallSecretStore: true}
+	err := preflightServerIdentities(context.Background(), &cfg, deps, false)
+	if err == nil {
+		t.Fatal("expected error for unparseable OpenBao cert")
+	}
+	if !strings.Contains(err.Error(), "OpenBao") || !strings.Contains(err.Error(), "not valid") {
+		t.Fatalf("error should name the OpenBao side: %v", err)
+	}
+}
+
+// --- Fix 2 tests: unknown Secret volumes refuse before OpenBao reads ---
+
+func deploymentWithSecretVolumes(names ...string) *appsv1.Deployment {
+	d := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "oberth", Namespace: "oberth"}}
+	for _, name := range names {
+		d.Spec.Template.Spec.Volumes = append(d.Spec.Template.Spec.Volumes, corev1.Volume{
+			Name:         name,
+			VolumeSource: corev1.VolumeSource{Secret: &corev1.SecretVolumeSource{SecretName: name}},
+		})
+	}
+	return d
+}
+
+func TestPreflightUnknownSecretVolumeRefuses(t *testing.T) {
+	// No BAO_TOKEN needed — the refusal happens before any token check.
+	t.Setenv(baoTokenEnvVar, "")
+
+	var buf bytes.Buffer
+	deps := Deps{
+		Output:     &buf,
+		KubeClient: fake.NewClientset(deploymentWithSecretVolumes("my-custom-tls")),
+	}
+
+	cfg := Config{}
+	err := preflightServerIdentities(context.Background(), &cfg, deps, false)
+	if err == nil {
+		t.Fatal("expected refusal for unknown Secret volume")
+	}
+	if !strings.Contains(err.Error(), "unsupported deployment shape") {
+		t.Fatalf("error should say unsupported deployment shape: %v", err)
+	}
+	if !strings.Contains(err.Error(), "my-custom-tls") {
+		t.Fatalf("error should name the unknown volume: %v", err)
+	}
+}
+
+func TestPreflightLegacyPlusUnknownVolumeRefuses(t *testing.T) {
+	t.Setenv(baoTokenEnvVar, "")
+
+	var buf bytes.Buffer
+	deps := Deps{
+		Output:     &buf,
+		KubeClient: fake.NewClientset(deploymentWithSecretVolumes("oberth-tls", "my-custom-tls")),
+	}
+
+	cfg := Config{}
+	err := preflightServerIdentities(context.Background(), &cfg, deps, false)
+	if err == nil {
+		t.Fatal("expected refusal for legacy deployment with unknown volume")
+	}
+	if !strings.Contains(err.Error(), "unsupported deployment shape") {
+		t.Fatalf("error should say unsupported deployment shape: %v", err)
+	}
+	if !strings.Contains(err.Error(), "my-custom-tls") {
+		t.Fatalf("error should name the unknown volume: %v", err)
+	}
+}
+
+// --- Fix 3 tests: only URL name is hard-required for goProxy SAN check ---
+
+func TestPreflightCertWithOnlySvcNameNoRotation(t *testing.T) {
+	// Cert has only oberth-goproxy.oberth.svc (the URL name) — no rotation.
+	t.Setenv(baoTokenEnvVar, "test-root-token")
+
+	certPEM, keyPEM := testCertAndKey(t, []string{
+		"oberth", "oberth.oberth", "oberth.oberth.svc", "oberth.oberth.svc.cluster.local",
+		"oberth-goproxy.oberth.svc", // only the URL name
+	})
+
+	liveValues := liveHelmValuesSubset{}
+	liveValues.Argo.GoProxy.Enabled = true
+	liveValuesJSON, _ := json.Marshal(liveValues)
+
+	// Use a current-shape deployment (no Secret volumes) so no legacy checks.
+	var buf bytes.Buffer
+	deps := Deps{
+		Output:     &buf,
+		KubeClient: fake.NewClientset(currentDeployment(), runningOpenBaoPod()),
+		RunCommand: func(ctx context.Context, input []byte, name string, args ...string) ([]byte, error) {
+			// Pod cert reads.
+			return certPEM, nil
+		},
+		RunHelm: func(_ context.Context, args []string) ([]byte, error) {
+			if len(args) > 0 && args[0] == "get" {
+				return liveValuesJSON, nil
+			}
+			return nil, nil
+		},
+		ContextName: "test-ctx",
+	}
+
+	// Wire the bao store to serve the server identity.
+	baoRunner := &fakeBaoRunner{t: t, responses: map[string]fakeBaoResponse{
+		"read -format=json " + defaultKVPrefix + "/data/identities/oberth/server": {
+			out: baoIdentityJSON(1, map[string]string{
+				"tls.crt": string(certPEM), "tls.key": string(keyPEM), "ssh_host_key": "ssh",
+			}),
+		},
+	}}
+
+	// Override RunCommand to dispatch between pod cert and bao calls.
+	deps.RunCommand = func(ctx context.Context, input []byte, name string, args ...string) ([]byte, error) {
+		for _, arg := range args {
+			if arg == "deploy/oberth" {
+				return certPEM, nil
+			}
+		}
+		return baoRunner.run(ctx, input, name, args...)
+	}
+
+	cfg := Config{InstallSecretStore: true}
+	err := preflightServerIdentities(context.Background(), &cfg, deps, false)
+	if err != nil {
+		t.Fatalf("cert with the URL name should not trigger rotation: %v", err)
+	}
+	// Verify no kv patch was issued.
+	for _, call := range baoRunner.calls {
+		if strings.Contains(call.command, "kv patch") {
+			t.Fatal("should not rotate when the URL name is present")
+		}
+	}
+}
+
+func TestPreflightCertWithoutSvcNameRotatesAllFour(t *testing.T) {
+	// Cert without the goproxy URL name → rotation adds all four forms.
+	t.Setenv(baoTokenEnvVar, "test-root-token")
+
+	certPEM, keyPEM := testCertAndKey(t, []string{
+		"oberth", "oberth.oberth", "oberth.oberth.svc", "oberth.oberth.svc.cluster.local",
+	})
+
+	liveValues := liveHelmValuesSubset{}
+	liveValues.Argo.GoProxy.Enabled = true
+	liveValuesJSON, _ := json.Marshal(liveValues)
+
+	patchSeen := false
+	serverReadCount := 0
+
+	runner := func(ctx context.Context, input []byte, name string, args ...string) ([]byte, error) {
+		if name != "kubectl" {
+			t.Fatalf("unexpected command %q", name)
+		}
+		for _, arg := range args {
+			if arg == "deploy/oberth" {
+				return certPEM, nil
+			}
+		}
+		command, _, err := stripKubectlBaoPlumbing(args)
+		if err != nil {
+			t.Fatalf("%v", err)
+		}
+		switch {
+		case command == "read -format=json "+defaultKVPrefix+"/data/identities/oberth/server":
+			serverReadCount++
+			if patchSeen {
+				return []byte(baoIdentityJSON(2, map[string]string{
+					"tls.crt": string(certPEM), "tls.key": string(keyPEM), "ssh_host_key": "ssh",
+				})), nil
+			}
+			return []byte(baoIdentityJSON(1, map[string]string{
+				"tls.crt": string(certPEM), "tls.key": string(keyPEM), "ssh_host_key": "ssh",
+			})), nil
+		case strings.HasPrefix(command, "kv patch"):
+			patchSeen = true
+			return []byte(`{"data":{"version":2}}`), nil
+		default:
+			t.Fatalf("unscripted command %q", command)
+			return nil, nil
+		}
+	}
+
+	var buf bytes.Buffer
+	deps := Deps{
+		Output:     &buf,
+		KubeClient: fake.NewClientset(currentDeployment(), runningOpenBaoPod()),
+		RunCommand: runner,
+		RunHelm: func(_ context.Context, args []string) ([]byte, error) {
+			if len(args) > 0 && args[0] == "get" {
+				return liveValuesJSON, nil
+			}
+			return nil, nil
+		},
+		ContextName: "test-ctx",
+	}
+
+	cfg := Config{InstallSecretStore: true}
+	err := preflightServerIdentities(context.Background(), &cfg, deps, false)
+	if err != nil {
+		t.Fatalf("rotation should succeed: %v", err)
+	}
+	if !patchSeen {
+		t.Fatal("expected rotation when the URL name is missing")
+	}
+}
+
+// --- Fix 4 test: Helm error propagates from the preflight ---
+
+func TestPreflightHelmErrorPropagates(t *testing.T) {
+	t.Setenv(baoTokenEnvVar, "test-root-token")
+
+	certPEM, keyPEM := testCertAndKey(t, []string{
+		"oberth", "oberth.oberth", "oberth.oberth.svc", "oberth.oberth.svc.cluster.local",
+	})
+
+	runner := &fakeBaoRunner{t: t, responses: map[string]fakeBaoResponse{
+		"read -format=json " + defaultKVPrefix + "/data/identities/oberth/server": {
+			out: baoIdentityJSON(1, map[string]string{
+				"tls.crt": string(certPEM), "tls.key": string(keyPEM), "ssh_host_key": "ssh",
+			}),
+		},
+	}}
+
+	deps := Deps{
+		Output:     &bytes.Buffer{},
+		KubeClient: fake.NewClientset(currentDeployment(), runningOpenBaoPod()),
+		RunCommand: func(ctx context.Context, input []byte, name string, args ...string) ([]byte, error) {
+			for _, arg := range args {
+				if arg == "deploy/oberth" {
+					return certPEM, nil
+				}
+			}
+			return runner.run(ctx, input, name, args...)
+		},
+		RunHelm: func(_ context.Context, args []string) ([]byte, error) {
+			return nil, fmt.Errorf("helm: HELM_DRIVER=configmap: release not found")
+		},
+		ContextName: "test-ctx",
+	}
+
+	cfg := Config{InstallSecretStore: true}
+	err := preflightServerIdentities(context.Background(), &cfg, deps, false)
+	if err == nil {
+		t.Fatal("expected error when RunHelm fails")
+	}
+	if !strings.Contains(err.Error(), "read live Helm values for the identity preflight") {
+		t.Fatalf("error should mention the identity preflight context: %v", err)
+	}
+	if !strings.Contains(err.Error(), "release not found") {
+		t.Fatalf("error should include the Helm error: %v", err)
+	}
+}
+
+// --- Fix 6 test: BAO_TOKEN set but pod lookup fails ---
+
+func TestPreflightLegacyTokenSetPodNotFound(t *testing.T) {
+	t.Setenv(baoTokenEnvVar, "test-root-token")
+
+	var buf bytes.Buffer
+	// No OpenBao pod in the cluster.
+	deps := Deps{
+		Output:     &buf,
+		KubeClient: fake.NewClientset(legacyDeployment()),
+	}
+
+	cfg := Config{InstallSecretStore: true}
+	err := preflightServerIdentities(context.Background(), &cfg, deps, false)
+	if err == nil {
+		t.Fatal("expected error for missing OpenBao pod")
+	}
+	if !strings.Contains(err.Error(), baoTokenEnvVar) {
+		t.Fatalf("error should mention %s: %v", baoTokenEnvVar, err)
+	}
+	if !strings.Contains(err.Error(), "could not be found") {
+		t.Fatalf("error should say the pod could not be found: %v", err)
 	}
 }
 

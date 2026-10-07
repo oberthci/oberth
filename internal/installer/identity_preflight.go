@@ -50,19 +50,25 @@ type liveHelmValuesSubset struct {
 }
 
 // readLiveHelmValuesSubset reads the current Helm release values for the
-// identity preflight. Errors are non-fatal: a missing release or unparseable
-// output returns zero values (fresh install, goProxy disabled).
-func readLiveHelmValuesSubset(ctx context.Context, deps Deps, ns string) liveHelmValuesSubset {
+// identity preflight. When deps.RunHelm is nil (tests that do not wire
+// Helm), zero values are returned. When RunHelm is wired and returns an
+// error, the error is propagated — a Helm failure must not silently disable
+// the SAN check.
+func readLiveHelmValuesSubset(ctx context.Context, deps Deps, ns string) (liveHelmValuesSubset, error) {
 	var values liveHelmValuesSubset
 	if deps.RunHelm == nil {
-		return values
+		return values, nil
 	}
 	out, err := deps.RunHelm(ctx, []string{"get", "values", "oberth", "-n", ns, "-o", "json"})
 	if err != nil {
-		return values
+		return values, err
 	}
-	_ = json.Unmarshal(out, &values)
-	return values
+	if len(out) > 0 {
+		if err := json.Unmarshal(out, &values); err != nil {
+			return values, fmt.Errorf("parse Helm values JSON: %w", err)
+		}
+	}
+	return values, nil
 }
 
 // identityBundleSpec maps a legacy Secret name to its required OpenBao bundle.
@@ -115,8 +121,12 @@ func preflightServerIdentities(ctx context.Context, cfg *Config, deps Deps, dryR
 
 	// Resolve the admin token and OpenBao exec client.
 	token := os.Getenv(baoTokenEnvVar)
+	if token == "" && cfg.InstallSecretStoreDev {
+		token = devRootToken
+	}
 	var store openBaoExec
 	var haveStore bool
+	var podLookupErr error
 
 	openbaoNS := cfg.OpenBaoNamespace
 	if openbaoNS == "" {
@@ -124,10 +134,12 @@ func preflightServerIdentities(ctx context.Context, cfg *Config, deps Deps, dryR
 	}
 
 	if token != "" {
-		pod, podErr := findOpenBaoPod(ctx, deps, openbaoNS)
-		if podErr == nil {
+		pod, err := findOpenBaoPod(ctx, deps, openbaoNS)
+		if err == nil {
 			store = newOpenBaoExec(deps, openbaoNS, pod)
 			haveStore = true
+		} else {
+			podLookupErr = err
 		}
 	}
 
@@ -136,14 +148,38 @@ func preflightServerIdentities(ctx context.Context, cfg *Config, deps Deps, dryR
 	var serverVersion int
 
 	if hasLegacySecrets {
-		if token == "" || !haveStore {
+		// Refuse unknown Secret volumes before any OpenBao reads or token checks.
+		var unknownVolumes []string
+		for _, secretName := range legacySecretNames {
+			if _, ok := legacySecretToBaoBundle[secretName]; !ok && secretName != "oberth-goproxy-tls" { // #nosec G101 — Secret object name, not a credential
+				unknownVolumes = append(unknownVolumes, secretName)
+			}
+		}
+		if len(unknownVolumes) > 0 {
+			quoted := make([]string, len(unknownVolumes))
+			for i, name := range unknownVolumes {
+				quoted[i] = fmt.Sprintf("%q", name)
+			}
+			return fmt.Errorf("unsupported deployment shape: Secret volume %s is not a known "+
+				"Oberth identity Secret; refusing to replace the Deployment",
+				strings.Join(quoted, ", "))
+		}
+
+		if token == "" {
 			return fmt.Errorf("the existing Oberth deployment uses Kubernetes Secret volumes for identities; " +
 				"upgrading requires --install-secretstore with " + baoTokenEnvVar + " set so the installer " +
 				"can verify the identities are seeded in OpenBao before replacing the Deployment")
 		}
+		if !haveStore {
+			return fmt.Errorf(baoTokenEnvVar+" is set but the OpenBao pod in namespace %s could not be found: %w",
+				openbaoNS, podLookupErr)
+		}
 
 		// Determine which bundles are needed (deduplicate by baoName).
-		needed := map[string]identityBundleSpec{}
+		// The server bundle is always required for legacy shapes.
+		needed := map[string]identityBundleSpec{
+			"server": legacySecretToBaoBundle["oberth-tls"],
+		}
 		for _, secretName := range legacySecretNames {
 			if bundle, ok := legacySecretToBaoBundle[secretName]; ok {
 				needed[bundle.baoName] = bundle
@@ -187,14 +223,26 @@ func preflightServerIdentities(ctx context.Context, cfg *Config, deps Deps, dryR
 				strings.Join(missing, "; "))
 		}
 
-		// Cross-check: the OpenBao server cert must match the running pod's cert.
+		// Cross-check: the OpenBao server cert's public key must match the
+		// running pod's cert public key. Comparing keys (not PEM bytes) allows
+		// a partial-failure re-run where the cert was rotated in OpenBao (new
+		// SANs) but the pod still serves the old cert with the same key.
 		if serverData != nil {
 			if baoCertPEM, ok := serverData["tls.crt"].(string); ok && baoCertPEM != "" {
 				podCert, podErr := readPodServerCert(ctx, *cfg, deps)
 				if podErr == nil {
-					if string(podCert) != baoCertPEM {
-						return errors.New("the server identity in OpenBao does not match " +
-							"the running deployment; refusing to replace the trusted identity")
+					baoPubDER, baoFP, baoParseErr := parseCertPublicKey([]byte(baoCertPEM))
+					if baoParseErr != nil {
+						return fmt.Errorf("the server certificate in OpenBao is not valid: %w", baoParseErr)
+					}
+					podPubDER, podFP, podParseErr := parseCertPublicKey(podCert)
+					if podParseErr != nil {
+						return fmt.Errorf("the server certificate in the running pod is not valid: %w", podParseErr)
+					}
+					if !bytesEqual(baoPubDER, podPubDER) {
+						return fmt.Errorf("the server identity key in OpenBao does not match "+
+							"the running deployment; refusing to replace the trusted identity "+
+							"(OpenBao cert %s, pod cert %s)", baoFP, podFP)
 					}
 				} else {
 					_, _ = fmt.Fprintf(w, "WARNING: could not read the server certificate from the running pod; "+
@@ -256,12 +304,18 @@ func preflightServerIdentities(ctx context.Context, cfg *Config, deps Deps, dryR
 	oldFingerprint := certSHA256Fingerprint(cert.Raw)
 
 	// Read live Helm values for goProxy and watchTunnel state.
-	liveValues := readLiveHelmValuesSubset(ctx, deps, ns)
+	liveValues, liveErr := readLiveHelmValuesSubset(ctx, deps, ns)
+	if liveErr != nil {
+		return fmt.Errorf("read live Helm values for the identity preflight: %w", liveErr)
+	}
 
-	// Build the required name set.
+	// Build the required name set. The only hard-required name is the URL
+	// name that pipeline pods use: <fullname>-goproxy.<ns>.svc. When
+	// rotation is needed, all four goproxy forms are added.
 	const fullname = "oberth"
+	urlName := fullname + "-goproxy." + ns + ".svc"
 	var missingNames []string
-	if liveValues.Argo.GoProxy.Enabled {
+	if liveValues.Argo.GoProxy.Enabled && !stringSliceContains(cert.DNSNames, urlName) {
 		for _, name := range goProxyDNSNames(fullname, ns) {
 			if !stringSliceContains(cert.DNSNames, name) {
 				missingNames = append(missingNames, name)
@@ -291,13 +345,15 @@ func preflightServerIdentities(ctx context.Context, cfg *Config, deps Deps, dryR
 	}
 
 	// -- Rotate the certificate: add the missing goproxy SANs --
+	// Note: serverData["tls.key"] is a Go string returned by readData;
+	// clearing a []byte(string) copy would be a no-op. Tracked as a
+	// follow-up to review readData's return type.
 	keyPEM, ok := serverData["tls.key"].(string)
 	if !ok || keyPEM == "" {
 		return errors.New("server identity in OpenBao is missing tls.key; cannot rotate certificate")
 	}
 
 	newCertPEM, rotateErr := rotateCertificate(cert, []byte(keyPEM), missingNames)
-	clear([]byte(keyPEM))
 	if rotateErr != nil {
 		return fmt.Errorf("rotate server certificate: %w", rotateErr)
 	}
@@ -382,6 +438,26 @@ func certSHA256Fingerprint(der []byte) string {
 		parts[i] = fmt.Sprintf("%02X", b)
 	}
 	return strings.Join(parts, ":")
+}
+
+// parseCertPublicKey parses a PEM-encoded certificate and returns the
+// PKIX-marshalled public key DER and the certificate's SHA-256 fingerprint.
+// The caller uses the DER bytes for identity comparison and the fingerprint
+// for human-readable error messages.
+func parseCertPublicKey(certPEM []byte) (pubDER []byte, fingerprint string, err error) {
+	block, _ := pem.Decode(certPEM)
+	if block == nil {
+		return nil, "", errors.New("no PEM block found")
+	}
+	cert, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		return nil, "", err
+	}
+	pubDER, err = x509.MarshalPKIXPublicKey(cert.PublicKey)
+	if err != nil {
+		return nil, "", err
+	}
+	return pubDER, certSHA256Fingerprint(cert.Raw), nil
 }
 
 // sshPublicFingerprint parses an SSH private key PEM and returns the public
