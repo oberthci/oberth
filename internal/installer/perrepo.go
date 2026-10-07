@@ -24,10 +24,13 @@ type PerRepoIdentity struct {
 	Org string
 	// Repo is the repository's bare name (e.g. "oberth", "acme-operator").
 	Repo string
-	// Grants are the full KV data paths this repo has active approval-table
-	// grants for. Each is a path like "oberth/data/release/cosign-secret".
-	// Only release-tier repos need grants; CI-tier repos get org-scoped
-	// upstream access only.
+	// Grants are the full KV data paths this repo has active wildcard-step
+	// ("*") approval-table grants for. Each is a path like
+	// "oberth/data/release/cosign-secret". Named-step grants are never listed
+	// here — they belong to the per-step identity (PerStepIdentity.GrantPaths),
+	// so the per-repo policy can only ever read what every template of the
+	// repo may read (issue #814). Only release-tier repos need grants; CI-tier
+	// repos get org-scoped upstream access only.
 	Grants []string
 }
 

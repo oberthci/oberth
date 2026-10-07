@@ -639,3 +639,45 @@ func TestSecretStorePlanLastMaterializedStale(t *testing.T) {
 		t.Fatalf("text should not contain 'last_materialized: never' after recording a receipt:\n%s", planResponse.Text)
 	}
 }
+
+// TestSecretStorePlanPerRepoExcludesNamedStepPaths: the plan the server
+// prints must describe the same two path sets the sync materializes
+// (issue #814): per-repo = wildcard grants only; per-step = named grants plus
+// inherited wildcards. A named-step path listed under the repo policy would
+// both misdescribe the live policy and desynchronize the plan digest from the
+// sync receipt.
+func TestSecretStorePlanPerRepoExcludesNamedStepPaths(t *testing.T) {
+	now := time.Now()
+	grants := []store.SecretAccessGrant{
+		{ID: 1, Repo: "codeberg/acme/port", Step: "*", Secret: "release/cosign-secret", ApprovedBy: "admin", ApprovedAt: now},
+		{ID: 2, Repo: "codeberg/acme/port", Step: "release-publish-images", Secret: "release/gar-image-key", ApprovedBy: "admin", ApprovedAt: now},
+	}
+	result := computeSecretStorePlan(grants)
+	if len(result.Repos) != 1 {
+		t.Fatalf("expected 1 repo, got %d", len(result.Repos))
+	}
+	repo := result.Repos[0]
+	if got := strings.Join(repo.Paths, ","); got != "release/cosign-secret" {
+		t.Fatalf("per-repo plan paths must be the wildcard grants only, got %q", got)
+	}
+	if len(repo.Steps) != 1 {
+		t.Fatalf("expected 1 per-step entry, got %d", len(repo.Steps))
+	}
+	if got := strings.Join(repo.Steps[0].Paths, ","); got != "release/cosign-secret,release/gar-image-key" {
+		t.Fatalf("per-step plan paths must be named ∪ wildcard, got %q", got)
+	}
+	// The text form lists the named path under the step only.
+	repoBlock := result.Text[:strings.Index(result.Text, "  step: ")]
+	if strings.Contains(repoBlock, "gar-image-key") {
+		t.Fatalf("plan text lists the named-step path under the repo policy:\n%s", result.Text)
+	}
+
+	// A repo whose grants are all named keeps its per-repo entry (its
+	// ServiceAccount and zero-grant policy still exist) with no paths.
+	namedOnly := computeSecretStorePlan([]store.SecretAccessGrant{
+		{ID: 3, Repo: "codeberg/acme/cttv", Step: "release-publish-images", Secret: "release/gar-image-key", ApprovedBy: "admin", ApprovedAt: now},
+	})
+	if len(namedOnly.Repos) != 1 || len(namedOnly.Repos[0].Paths) != 0 || len(namedOnly.Repos[0].Steps) != 1 {
+		t.Fatalf("named-only repo must keep a per-repo entry with no paths and one step: %+v", namedOnly.Repos)
+	}
+}

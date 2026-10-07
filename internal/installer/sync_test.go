@@ -394,3 +394,111 @@ func TestComputeSyncReceiptNoSecretValues(t *testing.T) {
 		t.Fatal("credentialed policy should be unchanged")
 	}
 }
+
+// TestSyncPrunesNamedStepPathFromPerRepoPolicy is the sync-level reproduction
+// of issue #814. Live state before the fix: the per-repo policy for a repo
+// carried a path that only a named step was granted (the union), so revoking
+// the wildcard grant for that path left the per-repo ServiceAccount able to
+// read it. The sync must rewrite the per-repo policy without the named-step
+// path and keep that path on the per-step policy alone.
+func TestSyncPrunesNamedStepPathFromPerRepoPolicy(t *testing.T) {
+	t.Parallel()
+
+	accessList := `[
+	  {"repo":"codeberg/cloudtaser/cloudtaser-port","step":"*","secret":"oberth/data/release/cosign-secret"},
+	  {"repo":"codeberg/cloudtaser/cloudtaser-port","step":"release-publish-images","secret":"oberth/data/release/gar-image-key"}
+	]`
+	identities, grants, err := ParseAccessListJSONWithSteps([]byte(accessList))
+	if err != nil {
+		t.Fatal(err)
+	}
+	stepIdentities := DerivePerStepIdentities(identities, grants)
+	if len(identities) != 1 || len(stepIdentities) != 1 {
+		t.Fatalf("expected 1 per-repo and 1 per-step identity, got %d and %d", len(identities), len(stepIdentities))
+	}
+
+	name := PerRepoName("codeberg", "cloudtaser", "cloudtaser-port")
+	ciName := PerRepoCIName("codeberg", "cloudtaser", "cloudtaser-port")
+	stepName := PerStepName("codeberg", "cloudtaser", "cloudtaser-port", "release-publish-images")
+
+	// The policy a pre-#814 sync left behind: wildcard ∪ named.
+	unionPaths, err := credentialedPolicyPaths(defaultKVPrefix, []string{
+		"oberth/data/release/cosign-secret",
+		"oberth/data/release/gar-image-key",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stalePerRepoPolicy := PerRepoPolicy(defaultKVPrefix, "cloudtaser", "cloudtaser-port", unionPaths)
+	if !strings.Contains(stalePerRepoPolicy, "gar-image-key") {
+		t.Fatal("fixture is wrong: the stale per-repo policy must carry the named-step path")
+	}
+
+	matchingRoleJSON := func(n string) string {
+		return `{"request_id":"1","data":{` +
+			`"bound_service_account_names":["` + n + `"],` +
+			`"bound_service_account_namespaces":["oberth-argo"],` +
+			`"token_policies":["` + n + `"],` +
+			`"token_no_default_policy":true,` +
+			`"token_ttl":1200,` +
+			`"token_max_ttl":1800}}`
+	}
+
+	responses := map[string]fakeBaoResponse{
+		"policy read " + defaultCredentialedPolicy: {out: OberthCredentialedPolicyWithGrants(defaultKVPrefix, nil, nil)},
+		"policy read " + defaultCISecretsPolicy:    {out: OberthCISecretsPolicy(defaultKVPrefix, nil)},
+		// Per-repo release identity: stale union policy present, role matches.
+		"policy read " + name:                            {out: stalePerRepoPolicy},
+		"policy write " + name + " -":                    {out: "Success!"},
+		"read -format=json auth/kubernetes/role/" + name: {out: matchingRoleJSON(name)},
+		// Per-repo CI identity: already current.
+		"policy read " + ciName:                            {out: PerRepoCIPolicy(defaultKVPrefix, "cloudtaser", "cloudtaser-port")},
+		"read -format=json auth/kubernetes/role/" + ciName: {out: matchingRoleJSON(ciName)},
+		// Per-step identity: created by this sync.
+		"policy read " + stepName:                            {out: "No policy named: " + stepName, err: errors.New("exit status 2")},
+		"policy write " + stepName + " -":                    {out: "Success!"},
+		"read -format=json auth/kubernetes/role/" + stepName: {out: "No value found at auth/kubernetes/role/" + stepName, err: errors.New("exit status 2")},
+		"write auth/kubernetes/role/" + stepName + " -":      {out: "Success!"},
+		"policy list": {out: "default\nroot\n" + name + "\n" + ciName + "\n" + stepName + "\n"},
+	}
+	runner := &fakeBaoRunner{t: t, responses: responses}
+	store := openBaoExec{run: runner.run, namespace: "openbao", pod: "openbao-0"}
+
+	results, err := syncGrantPolicies(context.Background(), store, "root", identities, stepIdentities, "oberth-argo", io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	byCommand := runner.callsByCommand()
+	perRepoWrite, ok := byCommand["policy write "+name+" -"]
+	if !ok {
+		t.Fatalf("the stale per-repo policy was not rewritten; results: %v", results)
+	}
+	if strings.Contains(perRepoWrite.stdin, "gar-image-key") {
+		t.Fatalf("per-repo policy must not carry the named-step path after sync (issue #814):\n%s", perRepoWrite.stdin)
+	}
+	if !strings.Contains(perRepoWrite.stdin, `path "oberth/data/release/cosign-secret"`) {
+		t.Fatalf("per-repo policy lost its wildcard grant:\n%s", perRepoWrite.stdin)
+	}
+	perStepWrite, ok := byCommand["policy write "+stepName+" -"]
+	if !ok {
+		t.Fatal("per-step policy was not written")
+	}
+	for _, want := range []string{`path "oberth/data/release/gar-image-key"`, `path "oberth/data/release/cosign-secret"`} {
+		if !strings.Contains(perStepWrite.stdin, want) {
+			t.Fatalf("per-step policy must carry named ∪ wildcard paths, missing %s:\n%s", want, perStepWrite.stdin)
+		}
+	}
+	var reported bool
+	for _, r := range results {
+		if r.Name == "per-repo policy "+name {
+			reported = true
+			if !r.Changed {
+				t.Fatal("per-repo policy rewrite must be reported as changed")
+			}
+		}
+	}
+	if !reported {
+		t.Fatalf("per-repo policy result missing: %v", results)
+	}
+}

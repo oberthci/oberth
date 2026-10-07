@@ -186,7 +186,7 @@ func DerivePerStepIdentities(repoIdentities []PerRepoIdentity, grants []grantWit
 
 	for _, g := range grants {
 		key := repoKey{upstream: g.upstream, org: g.org, repo: g.repo}
-		if g.step == "*" {
+		if g.step == wildcardStep {
 			wildcardPaths[key] = appendUnique(wildcardPaths[key], g.secret)
 		} else {
 			if stepPaths[key] == nil {

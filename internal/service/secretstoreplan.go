@@ -112,8 +112,18 @@ func computeSecretStorePlan(grants []store.SecretAccessGrant) SecretStorePlanRes
 		if grant.RevokedAt != nil {
 			continue
 		}
-		repoPathsMap[grant.Repo] = append(repoPathsMap[grant.Repo], grant.Secret)
+		// Every granted repo has a per-repo identity, but its policy carries
+		// wildcard paths only: a named-step path belongs to that step's
+		// per-step policy and must not be readable by the per-repo
+		// ServiceAccount that every other template of the repo runs under.
+		// This mirrors installer.appendPerRepoGrant so the plan digest the
+		// server prints and the one `secretstore sync` records agree
+		// (issues #623, #814).
+		if _, seen := repoPathsMap[grant.Repo]; !seen {
+			repoPathsMap[grant.Repo] = nil
+		}
 		if grant.Step == "*" {
+			repoPathsMap[grant.Repo] = append(repoPathsMap[grant.Repo], grant.Secret)
 			wildcardPaths[grant.Repo] = append(wildcardPaths[grant.Repo], grant.Secret)
 		} else {
 			if stepPathsMap[grant.Repo] == nil {

@@ -1075,11 +1075,21 @@ continuity checks; it must never be used to reset or bypass those checks.
   consuming named-step-granted paths, after `ForceIdentity` set the per-repo
   SA as the workflow default. The per-step SA's projected token is the only
   token that template's Pod can use for Vault login, so a template can only
-  read the paths its per-step policy grants. The per-step policy is a strict
-  subset of the per-repo policy: it carries only the paths granted to that
-  specific step, not the union of all repo grants. `secretstore plan` and
-  `secretstore sync` render these per-step roles/policies/SAs alongside
-  per-repo identities. The chart renders per-step SAs from the
+  read the paths its per-step policy grants. **The two path sets (issue
+  #814):** the per-repo policy carries exactly the repo's wildcard (`*`)
+  grants — never a named-step path — because the per-repo SA is the default
+  for every template without a named grant; the per-step policy carries the
+  step's named grants plus the inherited wildcards. A repo whose grants are
+  all named still gets its per-repo identity, with a zero-grant policy. Every
+  producer applies the same rule (`installer.appendPerRepoGrant` for the
+  `access list --json`, tabwriter, and ConfigMap paths;
+  `service.computeSecretStorePlan` for the `secretstore_plan` tool) so the
+  plan digest and the sync receipt agree. Consequence: revoking a wildcard
+  grant narrows the per-repo policy on the next sync even while a named-step
+  grant for the same path remains, and `secretstore_verify` with the
+  per-repo identity must be denied on a named-step-only path. `secretstore
+  plan` and `secretstore sync` render these per-step roles/policies/SAs
+  alongside per-repo identities. The chart renders per-step SAs from the
   `argo.perStepIdentities` values list.
   **Fail-closed admission (finding 2):** when per-step identities are
   configured (the map is non-empty) and a template has a named grant but its

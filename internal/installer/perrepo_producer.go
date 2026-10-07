@@ -17,7 +17,32 @@ import (
 const (
 	secretAccessConfigMapName = "oberth-secret-access" // #nosec G101 — Kubernetes ConfigMap NAME (an identifier), not credential material.
 	secretAccessConfigMapKey  = "grants"
+
+	// wildcardStep is the approval-table step value that grants a path to
+	// every template of a repository. Any other value names one Argo template.
+	wildcardStep = "*"
 )
+
+// appendPerRepoGrant adds secret to a per-repo identity's grant list only when
+// the grant is a wildcard grant. A named-step grant belongs to the per-step
+// identity alone (DerivePerStepIdentities): the per-repo ServiceAccount is the
+// workflow default for every template without a named grant, so a path it can
+// read is a path every such template can read from Vault with its own token.
+// Carrying named-step paths here made the per-step boundary of issue #623
+// exist only at admission, not at the Vault layer, and meant revoking a
+// wildcard grant could never narrow the per-repo policy while a named grant
+// for the same path remained (issue #814).
+//
+// The caller assigns the result back into its map even when nothing was
+// appended, so a repository whose grants are all named still produces a
+// per-repo identity (with an empty grant list): its ServiceAccount is still
+// the workflow default and the chart's SA list depends on it.
+func appendPerRepoGrant(grants []string, step, secret string) []string {
+	if step != wildcardStep {
+		return grants
+	}
+	return append(grants, secret)
+}
 
 // grantEntry mirrors service.SecretAccessGrantEntry for ConfigMap parsing
 // without importing the service package (which would pull in transitive
@@ -116,6 +141,8 @@ func produceFromAccessList(ctx context.Context, run CommandRunner, contextName, 
 // --json` into per-repo identities. Only qualified 3-segment repo names
 // produce identities; bare rows are skipped. Returns an error if the array
 // has entries but zero survive the 3-segment filter (format drift detection).
+// Per-repo grants carry wildcard-step rows only; named-step rows reach the
+// per-step identities through ParseAccessListJSONWithSteps (issue #814).
 func ParseAccessListJSON(data []byte) ([]PerRepoIdentity, error) {
 	var entries []accessListJSONEntry
 	if err := json.Unmarshal(data, &entries); err != nil {
@@ -133,7 +160,7 @@ func ParseAccessListJSON(data []byte) ([]PerRepoIdentity, error) {
 			continue // skip bare names
 		}
 		key := repoKey{upstream: parts[0], org: parts[1], repo: parts[2]}
-		byRepo[key] = append(byRepo[key], entry.Secret)
+		byRepo[key] = appendPerRepoGrant(byRepo[key], entry.Step, entry.Secret)
 	}
 
 	if len(entries) > 0 && len(byRepo) == 0 {
@@ -190,6 +217,7 @@ func ParseAccessListOutput(data []byte) ([]PerRepoIdentity, error) {
 		}
 
 		repo := strings.TrimSpace(fields[0])
+		step := strings.TrimSpace(fields[1])
 		secret := strings.TrimSpace(fields[2])
 
 		parts := strings.Split(repo, "/")
@@ -198,7 +226,7 @@ func ParseAccessListOutput(data []byte) ([]PerRepoIdentity, error) {
 		}
 
 		key := repoKey{upstream: parts[0], org: parts[1], repo: parts[2]}
-		byRepo[key] = append(byRepo[key], secret)
+		byRepo[key] = appendPerRepoGrant(byRepo[key], step, secret)
 	}
 
 	if dataLines > 0 && len(byRepo) == 0 {
@@ -221,7 +249,10 @@ func ParseAccessListOutput(data []byte) ([]PerRepoIdentity, error) {
 // ParseAccessListJSONWithSteps parses the JSON output and returns both per-repo
 // identities and the raw grant entries with step information needed to derive
 // per-step identities. This is the structured entry point for the sync command
-// to produce both per-repo and per-step identities in one pass.
+// to produce both per-repo and per-step identities in one pass. The two path
+// sets are disjoint by construction: a per-repo identity carries only the
+// wildcard-step grants, a per-step identity carries its named grants plus the
+// inherited wildcards (issue #814).
 func ParseAccessListJSONWithSteps(data []byte) ([]PerRepoIdentity, []grantWithStep, error) {
 	var entries []accessListJSONEntry
 	if err := json.Unmarshal(data, &entries); err != nil {
@@ -240,7 +271,7 @@ func ParseAccessListJSONWithSteps(data []byte) ([]PerRepoIdentity, []grantWithSt
 			continue
 		}
 		key := repoKey{upstream: parts[0], org: parts[1], repo: parts[2]}
-		byRepo[key] = append(byRepo[key], entry.Secret)
+		byRepo[key] = appendPerRepoGrant(byRepo[key], entry.Step, entry.Secret)
 		grants = append(grants, grantWithStep{
 			upstream: parts[0],
 			org:      parts[1],
@@ -351,7 +382,7 @@ func produceFromConfigMap(ctx context.Context, kube kubernetes.Interface, namesp
 			rg = &repoGrants{key: repoKey{upstream: upstream, org: org, repo: repo}}
 			byRepo[mapKey] = rg
 		}
-		rg.grants = append(rg.grants, entry.Secret)
+		rg.grants = appendPerRepoGrant(rg.grants, entry.Step, entry.Secret)
 	}
 
 	var result []PerRepoIdentity

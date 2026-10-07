@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"sort"
 	"strings"
 	"testing"
@@ -646,5 +647,145 @@ func TestProducePerStepIdentitiesNilRunnerReturnsNil(t *testing.T) {
 	}
 	if identities != nil {
 		t.Fatalf("expected nil identities for nil runner, got %v", identities)
+	}
+}
+
+// --- Issue #814: per-repo identities carry wildcard grants only ---
+
+// TestParseAccessListJSONExcludesNamedStepGrantsFromPerRepo is the unit
+// reproduction of issue #814: a wildcard and a named-step grant for one repo
+// must yield a per-repo identity whose grant list is the wildcard path only.
+// Before the fix the per-repo list was the union, so every template of the
+// repo running under the per-repo ServiceAccount could read the named-step
+// path from Vault, and revoking a wildcard grant could never narrow it.
+func TestParseAccessListJSONExcludesNamedStepGrantsFromPerRepo(t *testing.T) {
+	t.Parallel()
+	entries := []accessListJSONEntry{
+		{Repo: "codeberg/cloudtaser/cloudtaser-port", Step: "*", Secret: "oberth/data/release/cosign-secret"},
+		{Repo: "codeberg/cloudtaser/cloudtaser-port", Step: "release-publish-images", Secret: "oberth/data/release/gar-image-key"},
+		{Repo: "codeberg/cloudtaser/cloudtaser-port", Step: "*", Secret: "oberth/data/release/r2-upload-token"},
+	}
+	data, _ := json.Marshal(entries)
+	result, err := ParseAccessListJSON(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result) != 1 {
+		t.Fatalf("expected 1 identity, got %d: %+v", len(result), result)
+	}
+	want := []string{"oberth/data/release/cosign-secret", "oberth/data/release/r2-upload-token"}
+	if got := result[0].Grants; !reflect.DeepEqual(got, want) {
+		t.Fatalf("per-repo grants must be the wildcard paths only (issue #814): got %v want %v", got, want)
+	}
+}
+
+// TestParseAccessListJSONWithStepsSplitsPerRepoAndPerStepPaths proves the two
+// path sets the per-step design (#623) promises: the per-repo identity reads
+// wildcard paths only; the per-step identity reads its named paths plus the
+// inherited wildcards. A named-step path never appears on the per-repo side.
+func TestParseAccessListJSONWithStepsSplitsPerRepoAndPerStepPaths(t *testing.T) {
+	t.Parallel()
+	entries := []accessListJSONEntry{
+		{Repo: "codeberg/cloudtaser/cloudtaser-port", Step: "*", Secret: "oberth/data/release/cosign-secret"},
+		{Repo: "codeberg/cloudtaser/cloudtaser-port", Step: "release-publish-images", Secret: "oberth/data/release/gar-image-key"},
+	}
+	data, _ := json.Marshal(entries)
+	repoIdentities, grants, err := ParseAccessListJSONWithSteps(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(repoIdentities) != 1 {
+		t.Fatalf("expected 1 per-repo identity, got %d: %+v", len(repoIdentities), repoIdentities)
+	}
+	if got, want := repoIdentities[0].Grants, []string{"oberth/data/release/cosign-secret"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("per-repo grants: got %v want %v", got, want)
+	}
+	if len(grants) != 2 {
+		t.Fatalf("expected both raw grants to be carried for per-step derivation, got %d", len(grants))
+	}
+	steps := DerivePerStepIdentities(repoIdentities, grants)
+	if len(steps) != 1 || steps[0].Step != "release-publish-images" {
+		t.Fatalf("expected one per-step identity for release-publish-images, got %+v", steps)
+	}
+	wantStep := []string{"oberth/data/release/cosign-secret", "oberth/data/release/gar-image-key"}
+	if !reflect.DeepEqual(steps[0].GrantPaths, wantStep) {
+		t.Fatalf("per-step paths must be named ∪ wildcard: got %v want %v", steps[0].GrantPaths, wantStep)
+	}
+}
+
+// TestParseAccessListJSONNamedOnlyRepoKeepsIdentityWithoutGrants: a repo whose
+// grants are all named still needs its per-repo ServiceAccount (workflow
+// default, chart SA list, admission bookkeeping). It must be produced with an
+// empty grant list rather than dropped, which would also trip the
+// format-drift guard.
+func TestParseAccessListJSONNamedOnlyRepoKeepsIdentityWithoutGrants(t *testing.T) {
+	t.Parallel()
+	entries := []accessListJSONEntry{
+		{Repo: "codeberg/cloudtaser/cttv", Step: "release-publish-images", Secret: "oberth/data/release/gar-image-key"},
+	}
+	data, _ := json.Marshal(entries)
+	result, err := ParseAccessListJSON(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result) != 1 {
+		t.Fatalf("expected the named-only repo to keep its per-repo identity, got %d: %+v", len(result), result)
+	}
+	if len(result[0].Grants) != 0 {
+		t.Fatalf("named-only repo must have no per-repo grants, got %v", result[0].Grants)
+	}
+	if result[0].Repo != "cttv" || result[0].Org != "cloudtaser" || result[0].Upstream != "codeberg" {
+		t.Fatalf("unexpected identity: %+v", result[0])
+	}
+}
+
+// TestParseAccessListOutputExcludesNamedStepGrants covers the tabwriter
+// fallback path (older deployed binaries): the STEP column decides.
+func TestParseAccessListOutputExcludesNamedStepGrants(t *testing.T) {
+	t.Parallel()
+	output := strings.Join([]string{
+		"REPO                                      STEP                     SECRET                                 APPROVED BY   APPROVED AT        STATUS",
+		"codeberg/cloudtaser/cloudtaser-port       *                        oberth/data/release/cosign-secret      admin         2026-08-21 16:40   active",
+		"codeberg/cloudtaser/cloudtaser-port       release-publish-images   oberth/data/release/gar-image-key      fabian        2026-10-07 18:00   active",
+	}, "\n")
+	result, err := ParseAccessListOutput([]byte(output))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result) != 1 {
+		t.Fatalf("expected 1 identity, got %d: %+v", len(result), result)
+	}
+	if got, want := result[0].Grants, []string{"oberth/data/release/cosign-secret"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("tabwriter per-repo grants: got %v want %v", got, want)
+	}
+}
+
+// TestProduceFromConfigMapExcludesNamedStepGrants covers the ConfigMap
+// fallback (no running pod): the step field decides there too.
+func TestProduceFromConfigMapExcludesNamedStepGrants(t *testing.T) {
+	t.Parallel()
+	cm := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{Name: secretAccessConfigMapName, Namespace: "oberth"},
+		Data: map[string]string{
+			secretAccessConfigMapKey: `
+- repo: codeberg/cloudtaser/cloudtaser-port
+  step: "*"
+  secret: oberth/data/release/cosign-secret
+- repo: codeberg/cloudtaser/cloudtaser-port
+  step: release-publish-images
+  secret: oberth/data/release/gar-image-key
+`,
+		},
+	}
+	kube := fake.NewSimpleClientset(cm)
+	result, _, err := ProducePerRepoIdentities(context.Background(), kube, nil, "", "oberth")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result) != 1 {
+		t.Fatalf("expected 1 identity, got %d: %+v", len(result), result)
+	}
+	if got, want := result[0].Grants, []string{"oberth/data/release/cosign-secret"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("ConfigMap per-repo grants: got %v want %v", got, want)
 	}
 }
