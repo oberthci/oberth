@@ -56,14 +56,25 @@ func watchFixture(t *testing.T) (Config, Deps, *fake.Clientset, watchAdoptionPla
 			return []byte(`[{"name":"oberth","namespace":"oberth","revision":"71","status":"deployed","chart":"oberth-0.16.24"}]`), nil
 		}
 		joined := strings.Join(args, " ")
+		// SSA preview from previewHelmUpgrade: --dry-run=server without --take-ownership.
+		// This is a read-only conflict check; return success (no conflicts).
+		if args[0] == "upgrade" && strings.Contains(joined, "--dry-run=server") && !strings.Contains(joined, "--take-ownership") {
+			return json.Marshal(map[string]any{"name": "oberth", "namespace": "oberth", "version": 72, "manifest": "", "chart": map[string]any{"metadata": map[string]any{"name": "oberth", "version": "0.16.25"}}})
+		}
+		// Adoption preview: --dry-run=server with --take-ownership.
 		if args[0] != "upgrade" || !strings.Contains(joined, "--dry-run=server") || !strings.Contains(joined, "--no-hooks") || !strings.Contains(joined, "--take-ownership") || !strings.Contains(joined, "--reuse-values") {
 			t.Fatalf("unexpected mutation or helm call: %v", args)
 		}
 		return json.Marshal(map[string]any{"name": "oberth", "namespace": "oberth", "version": 72, "manifest": rendered.String(), "chart": map[string]any{"metadata": map[string]any{"name": "oberth", "version": "0.16.25"}}})
 	}}
 	// Model API JSONPatch test+atomic metadata update and monotonically changed RV.
+	// Also accept ApplyPatchType for the data field ownership transfer (#813).
 	client.PrependReactor("patch", "*", func(a ktesting.Action) (bool, runtime.Object, error) {
 		x := a.(ktesting.PatchAction)
+		// Allow SSA apply patches for data field ownership transfer.
+		if x.GetPatchType() == types.ApplyPatchType {
+			return false, nil, nil // let the default handler process it
+		}
 		if x.GetPatchType() != types.JSONPatchType {
 			t.Fatal("non-CAS patch")
 		}
@@ -181,7 +192,9 @@ func TestRunWatchAdoptionRetainsPublicReceiptOnFollowingFailure(t *testing.T) {
 			}
 			want := 1
 			if boundary == "helm" {
-				want = 4
+				// 4 metadata CAS patches + 2 ConfigMap data field ownership
+				// transfers (#813) = 6 patches before the Helm upgrade.
+				want = 6
 			}
 			if watchPatchCount(c) != want || (boundary != "helm" && mutations != 0) {
 				t.Fatalf("continued after %s: patches=%d helm=%d", boundary, watchPatchCount(c), mutations)
@@ -220,8 +233,9 @@ func TestWatchAdoptionPreflightsAllAndChangesOnlyMetadata(t *testing.T) {
 	if e := adoptWatchTunnel(context.Background(), cfg, deps, false); e != nil {
 		t.Fatal(e)
 	}
-	if watchPatchCount(c) != 4 {
-		t.Fatal("wrong mutation inventory")
+	// 4 metadata CAS patches + 2 ConfigMap data field ownership transfers (#813).
+	if watchPatchCount(c) != 6 {
+		t.Fatalf("wrong mutation inventory: got %d patches, want 6 (4 metadata + 2 data)", watchPatchCount(c))
 	}
 	for i, a := range c.Actions() {
 		if i < 4 && a.GetVerb() != "get" {
@@ -355,8 +369,10 @@ func TestInstallOberthAdoptsReviewedConnectorBeforeHelmAndRetainsOnHelmFailure(t
 				t.Fatal("actual Helm upgrade bypassed ownership")
 			}
 			helmMutations++
-			if watchPatchCount(c) != 4 {
-				t.Fatal("Helm ran before complete metadata adoption")
+			// 4 metadata CAS patches + 2 ConfigMap data field ownership
+			// transfers (#813) = 6 patches before the Helm upgrade.
+			if watchPatchCount(c) != 6 {
+				t.Fatal("Helm ran before complete metadata and data field adoption")
 			}
 			return nil, errors.New("simulated Helm failure")
 		default:

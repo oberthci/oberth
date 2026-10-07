@@ -191,10 +191,16 @@ type Config struct {
 	// (which has a DNAT incompatibility), "true" forces on, "false" forces off.
 	NetworkPolicy string
 	// watchTunnelOriginCACert is set by the identity preflight when the server
-	// certificate was rotated and the live watchTunnel.originCACert pins the
-	// old server leaf. OberthHelmArgs uses it to update the pin in the same
-	// helm upgrade so cloudflared keeps working.
+	// certificate was rotated (or its public key matches but its fingerprint
+	// differs from the live watchTunnel.originCACert pin). OberthHelmArgs uses
+	// it to update the pin in the same helm upgrade so cloudflared keeps
+	// working.
 	watchTunnelOriginCACert string
+	// pendingCertRotation holds the deferred certificate rotation state.
+	// Phase 1 of the identity preflight computes the rotation but does NOT
+	// write to OpenBao; phase 2 (commitServerIdentityRotation) writes after
+	// the Helm SSA preview confirms no conflicts.
+	pendingCertRotation *pendingRotation
 
 	// ChartPath installs the Oberth chart from a local directory or archive
 	// instead of the published repository (--chart). This is the loop the
@@ -645,9 +651,10 @@ func Run(ctx context.Context, cfg Config, deps Deps) error {
 	}
 
 	// Identity preflight: verify OpenBao bundles and server certificate SANs.
-	// Runs on both the real and dry-run paths; reads only on dry-run, except
-	// for an explicit CAS-bound certificate rotation when goproxy SANs are
-	// missing and a token is available.
+	// Runs on both the real and dry-run paths. On the real path, a needed
+	// certificate rotation is COMPUTED but NOT WRITTEN here; the actual
+	// write happens in commitServerIdentityRotation after the Helm SSA
+	// preview confirms no field-ownership conflicts (#812 remediation 1).
 	if err := preflightServerIdentities(ctx, &cfg, deps, cfg.DryRun); err != nil {
 		return err
 	}
@@ -766,6 +773,40 @@ func Run(ctx context.Context, cfg Config, deps Deps) error {
 	}
 
 	stepDone("render chart")
+
+	// --- Helm SSA preview: detect field-ownership conflicts BEFORE any
+	// OpenBao write, Argo install, or cert rotation (#812 remediation 1) ---
+	// The preview uses the same Helm args the real upgrade will produce,
+	// with cfg.watchTunnelOriginCACert already set by the identity preflight
+	// (either from a pending rotation or from the idempotent pin). If the
+	// preview reports SSA conflicts, the installer refuses and prints the
+	// exact ownership-transfer commands. Nothing has been mutated at this
+	// point.
+	if err := previewHelmUpgrade(ctx, cfg, deps, openbao, ""); err != nil {
+		return err
+	}
+
+	// --- Failed-revision detection (#812 remediation 3) ---
+	// A failed latest Helm revision means --reuse-values pulls values from
+	// the previous deployed revision, silently dropping any values that were
+	// present only in the failed attempt (e.g. a rotated originCACert).
+	// Refuse and print guidance instead of compounding the failure.
+	{
+		ns := cfg.Namespace
+		if ns == "" {
+			ns = DefaultNamespace
+		}
+		if err := detectFailedHelmRevision(ctx, deps, ns); err != nil {
+			return err
+		}
+	}
+
+	// --- Commit the deferred cert rotation (#812 remediation 1) ---
+	// The Helm SSA preview confirmed no conflicts; it is now safe to write
+	// the rotated certificate to OpenBao.
+	if err := commitServerIdentityRotation(ctx, &cfg, deps); err != nil {
+		return err
+	}
 
 	if cfg.wantsSecretStore() {
 		quietDeps := deps

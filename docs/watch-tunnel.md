@@ -53,10 +53,28 @@ before any adoption write. The preview is explicitly `--dry-run=server` with
 calculate the target before adoption. It never passes that flag to the actual
 upgrade. The existing release revision and plan deadline are rechecked before
 each metadata effect. It then
-changes only Helm ownership metadata with UID and resource-version JSONPatch
-tests. It refuses foreign or partial release ownership, scope/spec drift,
-duplicate JSON fields, extra objects, private key bundles and expired plans.
-No blanket Helm ownership mutation, delete or recreation is used.
+changes Helm ownership metadata with UID and resource-version JSONPatch tests,
+and transfers ownership of chart-rendered data fields (`.data.ca.crt` on both
+connector ConfigMaps) to manager `helm` via a Force=true server-side apply
+bound to the reviewed plan's target content. This ensures a subsequent
+`watchTunnel.originCACert` change does not conflict with the imperative manager
+that created the ConfigMap. It refuses foreign or partial release ownership,
+scope/spec drift, duplicate JSON fields, extra objects, private key bundles
+and expired plans. No blanket Helm ownership mutation, delete or recreation
+is used.
+
+On every upgrade, a nonmutating Helm server-side preview (`--dry-run=server
+--no-hooks`, WITHOUT `--take-ownership`) runs before any OpenBao write, Argo
+install, or certificate rotation. When the preview reports SSA
+field-ownership conflicts, the installer refuses with the object/field/manager
+list and the exact ownership-transfer command, with nothing mutated.
+
+The identity preflight sets `watchTunnel.originCACert` idempotently: whenever
+`watchTunnel.enabled` and the live `originCACert` parses to a cert whose
+public key equals the OpenBao server leaf's key but whose fingerprint differs,
+the pin is updated without an OpenBao write. This covers the case where a
+prior run rotated the certificate but the pin was never carried into Helm
+values (e.g. because the Helm upgrade failed).
 
 If a CAS or its reply fails, the command reports the confirmed public subset and
 the object whose outcome is uncertain. It stops without retry or rollback. Retain

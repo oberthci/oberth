@@ -284,8 +284,19 @@ func TestPreflightCertLacksGoProxySANsRotates(t *testing.T) {
 	if err != nil {
 		t.Fatalf("preflight failed: %v", err)
 	}
+	// With deferred writes (#812), the preflight stores the pending rotation.
+	if cfg.pendingCertRotation == nil {
+		t.Fatal("expected pending cert rotation")
+	}
+	if patchSeen {
+		t.Fatal("preflight must NOT write to OpenBao before the Helm SSA preview")
+	}
+	// Commit the deferred rotation.
+	if err := commitServerIdentityRotation(context.Background(), &cfg, deps); err != nil {
+		t.Fatalf("commit rotation failed: %v", err)
+	}
 	if !patchSeen {
-		t.Fatal("expected a kv patch call for certificate rotation")
+		t.Fatal("expected a kv patch call after commitServerIdentityRotation")
 	}
 	if !patchAuthenticated {
 		t.Fatal("kv patch was not authenticated")
@@ -917,8 +928,20 @@ func TestPreflightCertWithoutSvcNameRotatesAllFour(t *testing.T) {
 	if err != nil {
 		t.Fatalf("rotation should succeed: %v", err)
 	}
+	// With deferred writes (#812), the preflight computes the rotation but
+	// does not write it. Verify the pending state is set.
+	if cfg.pendingCertRotation == nil {
+		t.Fatal("expected pending cert rotation after preflight")
+	}
+	if patchSeen {
+		t.Fatal("preflight must NOT write to OpenBao before the Helm SSA preview")
+	}
+	// Commit the deferred rotation.
+	if err := commitServerIdentityRotation(context.Background(), &cfg, deps); err != nil {
+		t.Fatalf("commit rotation should succeed: %v", err)
+	}
 	if !patchSeen {
-		t.Fatal("expected rotation when the URL name is missing")
+		t.Fatal("expected kv patch after commitServerIdentityRotation")
 	}
 }
 
@@ -1074,16 +1097,28 @@ func TestPreflightClearsIdentityReadBuffers(t *testing.T) {
 	if err := preflightServerIdentities(context.Background(), &cfg, deps, false); err != nil {
 		t.Fatalf("preflight failed: %v", err)
 	}
-	if !patchSeen {
-		t.Fatal("expected a kv patch call for certificate rotation")
+	// With deferred writes (#812), the preflight computes the rotation
+	// but does not write it. Verify the pending state.
+	if cfg.pendingCertRotation == nil {
+		t.Fatal("expected pending cert rotation")
 	}
-	// server (legacy check) + upstream key + known_hosts + server (readback).
+	if patchSeen {
+		t.Fatal("preflight must NOT write to OpenBao before the Helm SSA preview")
+	}
+	// Commit the deferred rotation.
+	if err := commitServerIdentityRotation(context.Background(), &cfg, deps); err != nil {
+		t.Fatalf("commit rotation failed: %v", err)
+	}
+	if !patchSeen {
+		t.Fatal("expected a kv patch call after commitServerIdentityRotation")
+	}
+	// server (legacy check) + upstream key + known_hosts + server (readback after commit).
 	if len(handedOut) < 4 {
 		t.Fatalf("expected at least 4 identity reads, got %d", len(handedOut))
 	}
 	for i, out := range handedOut {
 		if !allZero(out) {
-			t.Fatalf("identity read buffer %d still holds material after preflight returned", i)
+			t.Fatalf("identity read buffer %d still holds material after rotation returned", i)
 		}
 	}
 	for i, in := range stdins {
@@ -1093,5 +1128,115 @@ func TestPreflightClearsIdentityReadBuffers(t *testing.T) {
 	}
 	if strings.Contains(buf.String(), string(keyPEM)) {
 		t.Fatal("private key reached the output stream")
+	}
+}
+
+// TestIdempotentOriginPinSameKeyDifferentFingerprint verifies #812
+// remediation 2: when the live watchTunnel.originCACert parses to a cert
+// whose public key equals the OpenBao server leaf's key but whose fingerprint
+// differs (e.g. the cert was rotated in a prior run and the pin was never
+// carried forward), cfg.watchTunnelOriginCACert is set to the current server
+// cert WITHOUT any OpenBao write.
+func TestIdempotentOriginPinSameKeyDifferentFingerprint(t *testing.T) {
+	t.Setenv(baoTokenEnvVar, "test-root-token")
+
+	// Generate a key and TWO certs with the same key but different serial
+	// numbers (= different fingerprints).
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyDER, _ := x509.MarshalPKCS8PrivateKey(key)
+	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyDER})
+
+	makeCert := func(serial int64, dnsNames []string) []byte {
+		tmpl := &x509.Certificate{
+			SerialNumber:          big.NewInt(serial),
+			Subject:               pkix.Name{CommonName: "oberth"},
+			NotBefore:             time.Now().Add(-time.Hour),
+			NotAfter:              time.Now().Add(10 * 365 * 24 * time.Hour),
+			KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
+			ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+			BasicConstraintsValid: true,
+			DNSNames:              dnsNames,
+		}
+		der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
+	}
+
+	// allNames includes the goproxy names so the preflight doesn't need to rotate.
+	allNames := []string{
+		"oberth", "oberth.oberth", "oberth.oberth.svc", "oberth.oberth.svc.cluster.local",
+		"oberth-goproxy", "oberth-goproxy.oberth", "oberth-goproxy.oberth.svc", "oberth-goproxy.oberth.svc.cluster.local",
+	}
+
+	// oldCert: the value currently pinned in watchTunnel.originCACert.
+	oldCertPEM := makeCert(1, allNames)
+	// newCert: the server cert in OpenBao (same key, different fingerprint).
+	newCertPEM := makeCert(2, allNames)
+
+	runner := &fakeBaoRunner{t: t, responses: map[string]fakeBaoResponse{
+		"read -format=json " + defaultKVPrefix + "/data/identities/oberth/server": {
+			out: baoIdentityJSON(2, map[string]string{"tls.crt": string(newCertPEM), "tls.key": string(keyPEM), "ssh_host_key": "ssh-key-material"}),
+		},
+		"read -format=json " + defaultKVPrefix + "/data/identities/oberth/oberth-upstream-key": {
+			out: baoIdentityJSON(1, map[string]string{"id_ed25519": "priv", "id_ed25519.pub": "pub"}),
+		},
+		"read -format=json " + defaultKVPrefix + "/data/identities/oberth/oberth-known-hosts": {
+			out: baoIdentityJSON(1, map[string]string{"known_hosts": "known"}),
+		},
+	}}
+	pr := &preflightRunner{t: t, baoRunner: runner, podCertPEM: newCertPEM}
+
+	liveValues := liveHelmValuesSubset{}
+	liveValues.Argo.GoProxy.Enabled = true
+	liveValues.WatchTunnel.Enabled = true
+	liveValues.WatchTunnel.OriginCACert = string(oldCertPEM) // same key, different fingerprint
+	liveValuesJSON, _ := json.Marshal(liveValues)
+
+	var buf bytes.Buffer
+	deps := Deps{
+		Output:     &buf,
+		KubeClient: fake.NewClientset(legacyDeployment(), runningOpenBaoPod()),
+		RunCommand: pr.run,
+		RunHelm: func(_ context.Context, args []string) ([]byte, error) {
+			if len(args) > 0 && args[0] == "get" {
+				return liveValuesJSON, nil
+			}
+			return nil, nil
+		},
+		ContextName: "test-ctx",
+	}
+
+	cfg := Config{InstallSecretStore: true}
+	if err := preflightServerIdentities(context.Background(), &cfg, deps, false); err != nil {
+		t.Fatalf("preflight should succeed: %v", err)
+	}
+
+	// The pin should be updated to the new cert (same key, different fingerprint).
+	if cfg.watchTunnelOriginCACert == "" {
+		t.Fatal("expected watchTunnelOriginCACert to be set by idempotent pin")
+	}
+	if cfg.watchTunnelOriginCACert != string(newCertPEM) {
+		t.Fatal("watchTunnelOriginCACert should equal the OpenBao server cert")
+	}
+
+	// No rotation should have been computed (all goproxy SANs present).
+	if cfg.pendingCertRotation != nil {
+		t.Fatal("no rotation should be pending when all SANs are present")
+	}
+
+	// Verify no kv patch was issued (no rotation needed = no write).
+	for _, call := range runner.calls {
+		if strings.Contains(call.command, "kv patch") {
+			t.Fatal("no OpenBao write should occur when only the pin is stale")
+		}
+	}
+
+	if !strings.Contains(buf.String(), "updated to current server certificate") {
+		t.Fatalf("output should mention idempotent origin pin update: %s", buf.String())
 	}
 }

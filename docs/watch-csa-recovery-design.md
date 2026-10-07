@@ -266,3 +266,25 @@ string again. The owned fixture tools independently bind each version's actual
 API-server binary and expected reported version; Helm remains pinned to 4.2.3.
 Fixture qualification proves the private effect engine under synthetic history;
 it does not prove the signed released-installer preparation or live rollout.
+
+## Data field ownership transfer (#813 remediation 2)
+
+At adoption time, after the four metadata CAS patches complete, the installer
+transfers ownership of chart-rendered data fields on both connector ConfigMaps
+to manager `helm` using a Force=true server-side apply. The apply body contains
+only `apiVersion`, `kind`, `metadata` (name/namespace), and the target `.data`
+from the reviewed plan. Force=true takes ownership of conflicting fields from
+whatever manager currently owns them (typically `kubectl-client-side-apply`
+from the imperative creation). This is a scoped force-apply: it touches only
+the data fields the chart renders, uses the reviewed plan's target content,
+and is UID/RV-bound through the adoption preflight that preceded it.
+
+This was chosen over content-hash-named immutable ConfigMaps because:
+1. It is consistent with how Helm operates (SSA with manager `helm`).
+2. Content-hash-named ConfigMaps would require chart template changes and
+   break the stable object name contract the adoption flow relies on.
+3. The scope is narrow: exactly 2 ConfigMaps' `.data.ca.crt`.
+
+The pre-mutation Helm SSA preview (`--dry-run=server --no-hooks`, without
+`--take-ownership`) serves as the backstop for any remaining foreign ownership
+that adoption did not transfer.

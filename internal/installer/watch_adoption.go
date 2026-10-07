@@ -569,6 +569,23 @@ func adoptWatchTunnelReceipt(ctx context.Context, cfg Config, deps Deps, dryRun 
 		p.Objects[i].ResourceVersion = v.meta.GetResourceVersion()
 		p.Objects[i].Ownership = watchOwnership{"Helm", "oberth", p.Namespace}
 	}
+	// --- Data field ownership transfer (#813 remediation 2) ---
+	// After metadata adoption, transfer ownership of the chart-rendered data
+	// fields (.data.ca.crt on both ConfigMaps, Deployment spec) to manager
+	// "helm" via a reviewed, UID/RV-bound SSA apply with Force=true. This
+	// prevents SSA conflicts on the first originCACert change after adoption.
+	// The apply uses the TargetSpec from the reviewed plan and the confirmed
+	// UID/RV from the metadata CAS result.
+	if deps.KubeClient != nil {
+		for _, o := range p.Objects {
+			if o.Kind == "ConfigMap" {
+				if err := transferConfigMapDataOwnership(ctx, deps, p.Namespace, o); err != nil {
+					return committed, fmt.Errorf("transfer data field ownership for %s/%s: %w", o.Kind, o.Name, err)
+				}
+			}
+		}
+	}
+
 	if _, e = preflightWatchObjects(ctx, deps, p); e != nil {
 		return committed, e
 	}
@@ -580,6 +597,51 @@ func adoptWatchTunnelReceipt(ctx context.Context, cfg Config, deps Deps, dryRun 
 		_, _ = fmt.Fprintf(deps.Output, "Watch connector metadata adopted: %s\n", b)
 	}
 	return committed, nil
+}
+
+// transferConfigMapDataOwnership transfers ownership of a ConfigMap's .data
+// field to manager "helm" using a server-side apply with Force=true. The
+// apply body contains only apiVersion, kind, metadata (name/namespace), and
+// the target data from the reviewed plan. The Force flag takes ownership of
+// conflicting fields from whatever manager currently owns them (typically
+// kubectl-client-side-apply from the imperative creation).
+//
+// This is the scoped force-apply described in #813: it touches only the data
+// fields the chart renders, uses the reviewed plan's target content, and is
+// UID/RV-bound through the adoption preflight that preceded it.
+func transferConfigMapDataOwnership(ctx context.Context, deps Deps, ns string, o watchAdoptionObject) error {
+	// Parse the target spec to extract the data field.
+	var targetData struct {
+		Data map[string]string `json:"data"`
+	}
+	if err := json.Unmarshal(o.TargetSpec, &targetData); err != nil {
+		return fmt.Errorf("parse target spec for data ownership transfer: %w", err)
+	}
+	if len(targetData.Data) == 0 {
+		return nil // no data fields to transfer
+	}
+
+	// Build the SSA apply body with only the fields whose ownership we need.
+	applyBody := map[string]any{
+		"apiVersion": "v1",
+		"kind":       "ConfigMap",
+		"metadata": map[string]any{
+			"name":      o.Name,
+			"namespace": ns,
+		},
+		"data": targetData.Data,
+	}
+	body, err := json.Marshal(applyBody)
+	if err != nil {
+		return err
+	}
+
+	force := true
+	_, err = deps.KubeClient.CoreV1().ConfigMaps(ns).Patch(ctx, o.Name, types.ApplyPatchType, body, metav1.PatchOptions{
+		FieldManager: "helm",
+		Force:        &force,
+	})
+	return err
 }
 
 // Reject ambiguity before typed decoding, including duplicate fields inside
