@@ -94,13 +94,18 @@ func TestChartReleaseVerifierTokenRequestRBAC(t *testing.T) {
 						if role.Kind != "Role" || role.Namespace != tc.pipelineNamespace {
 							t.Fatalf("token authority escaped pipeline Role: %s %s/%s", role.Kind, role.Namespace, role.Name)
 						}
-						wantNames := tc.wantShared
-						if slices.Equal(rule.ResourceNames, []string{"oberth-argo-executor"}) {
+						// Each token-granting Role carries exactly one token rule for
+						// one identity set; the executor token lives in its own Role
+						// so the frozen -argo Role never changes (issue #813).
+						var wantNames []string
+						switch role.Name {
+						case tc.serverAccount + "-argo":
+							wantNames = tc.wantShared
+						case tc.serverAccount + "-argo-executor-tokens":
 							wantNames = []string{"oberth-argo-executor"}
-						}
-						if role.Name == tc.serverAccount+"-argo-release-tokens" {
+						case tc.serverAccount + "-argo-release-tokens":
 							wantNames = tc.wantPerRepo
-						} else if role.Name != tc.serverAccount+"-argo" {
+						default:
 							t.Fatalf("unexpected token Role %s", role.Name)
 						}
 						if !slices.Equal(rule.APIGroups, []string{""}) || !slices.Equal(rule.Resources, []string{"serviceaccounts/token"}) ||
@@ -119,12 +124,12 @@ func TestChartReleaseVerifierTokenRequestRBAC(t *testing.T) {
 					}
 				}
 			}
-			wantRoleNames := []string{tc.serverAccount + "-argo"}
+			wantRoleNames := []string{tc.serverAccount + "-argo", tc.serverAccount + "-argo-executor-tokens"}
 			if len(tc.wantPerRepo) > 0 {
 				wantRoleNames = append(wantRoleNames, tc.serverAccount+"-argo-release-tokens")
 			}
-			if tokenRules != len(wantRoleNames)+1 {
-				t.Fatalf("got %d token rules, want %d", tokenRules, len(wantRoleNames)+1)
+			if tokenRules != len(wantRoleNames) {
+				t.Fatalf("got %d token rules, want %d (one per token Role)", tokenRules, len(wantRoleNames))
 			}
 			for _, name := range wantRoleNames {
 				role, ok := roles[name]
@@ -133,6 +138,9 @@ func TestChartReleaseVerifierTokenRequestRBAC(t *testing.T) {
 				}
 				if name == tc.serverAccount+"-argo-release-tokens" && len(role.Rules) != 1 {
 					t.Fatalf("per-repo Role has %d rules, want only TokenRequest", len(role.Rules))
+				}
+				if name == tc.serverAccount+"-argo-executor-tokens" && len(role.Rules) != 2 {
+					t.Fatalf("executor Role has %d rules, want TokenRequest and kube-root-ca.crt get only", len(role.Rules))
 				}
 				binding, ok := bindings[name]
 				if !ok {

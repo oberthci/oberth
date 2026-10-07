@@ -4,8 +4,18 @@
 # server creates and supervises Workflows there, and reads the step Pods' logs.
 #
 # The optional nonroot profile adds GET on one exact public immutable ConfigMap.
-# It adds no collection/write or Secret permission; existing executor token and
-# source-seeding permissions below retain their established ownership boundary.
+# It adds no collection/write or Secret permission; existing source-seeding
+# permissions below retain their established ownership boundary.
+#
+# FROZEN RULES (issue #813): the rules list of this Role is fixed at its
+# v0.17.9 shape. Older installs carry a separate field manager (kubectl-patch
+# from an emergency repair, or kubectl-client-side-apply from adoption) on
+# `.rules`, and Helm 4 applies server-side: any value that differs from the
+# one that manager owns is a conflict that half-applies the upgrade. New
+# permissions are therefore never added here — they go into a new Role bound
+# to the same ServiceAccount (see -argo-executor-tokens and
+# -argo-release-tokens below). cmd/oberth/chart_argo_role_frozen_test.go
+# renders this Role and compares it with the v0.17.9 fixture.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
@@ -14,14 +24,6 @@ metadata:
   labels:
     {{- include "oberth.labels" . | nindent 4 }}
 rules:
-  - apiGroups: [""]
-    resources: ["serviceaccounts/token"]
-    resourceNames: [{{ .Values.argo.executorServiceAccount | quote }}]
-    verbs: ["create"]
-  - apiGroups: [""]
-    resources: ["configmaps"]
-    resourceNames: ["kube-root-ca.crt"]
-    verbs: ["get"]
   {{- if .Values.argo.controllerProfile }}
   {{- if ne .Values.argo.controllerProfile "nonroot-static-v1" }}
   {{- fail "argo.controllerProfile must be empty or nonroot-static-v1" }}
@@ -90,6 +92,46 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
   name: {{ include "oberth.fullname" . }}-argo
+---
+# Executor identity support (v0.17.10+): the server requests short-lived
+# tokens for Argo's executor ServiceAccount and reads the cluster root CA
+# ConfigMap when it materializes executor identities into tmpfs. These rules
+# live in their own Role, not in the frozen `-argo` Role above, so adding them
+# never changes a rules list another field manager may own (issue #813). Both
+# Roles bind the same server ServiceAccount; the effective permissions are the
+# union.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "oberth.fullname" . }}-argo-executor-tokens
+  namespace: {{ .Values.argo.namespace }}
+  labels:
+    {{- include "oberth.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["serviceaccounts/token"]
+    resourceNames: [{{ .Values.argo.executorServiceAccount | quote }}]
+    verbs: ["create"]
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    resourceNames: ["kube-root-ca.crt"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "oberth.fullname" . }}-argo-executor-tokens
+  namespace: {{ .Values.argo.namespace }}
+  labels:
+    {{- include "oberth.labels" . | nindent 4 }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "oberth.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "oberth.fullname" . }}-argo-executor-tokens
 {{- with .Values.argo.perRepoIdentities }}
 ---
 # Release verification requests short-lived tokens only for the exact
