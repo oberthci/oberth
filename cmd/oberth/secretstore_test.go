@@ -1057,35 +1057,38 @@ func TestPlanDigestCLIEqualsServer(t *testing.T) {
 	serverPlan := service.ExportComputeSecretStorePlan(grants)
 	serverDigest := service.ComputePlanDigest(serverPlan.Repos)
 
-	// CLI side: build PerRepoIdentity and PerStepIdentity, then planDigestFromIdentities.
-	// These are the same identities the CLI would derive from the access list output.
-	cliRepoIdentities := []installer.PerRepoIdentity{
-		{
-			Upstream: "codeberg",
-			Org:      "oberthci",
-			Repo:     "oberth",
-			Grants:   []string{"oberth/data/release/cosign-secret", "oberth/data/release/gar-image-key"},
-		},
-		{
-			Upstream: "codeberg",
-			Org:      "cloudtaser",
-			Repo:     "cloudtaser-port",
-			Grants:   []string{"oberth/data/release/cosign-secret"},
-		},
+	// CLI side: derive the identities exactly as `secretstore sync` does —
+	// through the access-list parser fed the same grant table — so this test
+	// proves the two aggregations agree instead of restating one of them by
+	// hand. Per-repo identities carry wildcard grants only; the named grant
+	// lives on the per-step identity (issue #814).
+	type accessListRow struct {
+		Repo   string `json:"repo"`
+		Step   string `json:"step"`
+		Secret string `json:"secret"`
 	}
-	// Per-step identities: the named grant (step="release-publish-images")
-	// produces one identity with its own path + inherited wildcard paths.
-	cliStepIdentities := []installer.PerStepIdentity{
-		{
-			Upstream: "codeberg",
-			Org:      "oberthci",
-			Repo:     "oberth",
-			Step:     "release-publish-images",
-			GrantPaths: []string{
-				"oberth/data/release/cosign-secret", // inherited from wildcard
-				"oberth/data/release/gar-image-key", // named grant
-			},
-		},
+	rows := make([]accessListRow, 0, len(grants))
+	for _, g := range grants {
+		rows = append(rows, accessListRow{Repo: g.Repo, Step: g.Step, Secret: g.Secret})
+	}
+	accessList, err := json.Marshal(rows)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cliRepoIdentities, rawGrants, err := installer.ParseAccessListJSONWithSteps(accessList)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cliStepIdentities := installer.DerivePerStepIdentities(cliRepoIdentities, rawGrants)
+	if len(cliRepoIdentities) != 2 || len(cliStepIdentities) != 1 {
+		t.Fatalf("expected 2 per-repo and 1 per-step identity, got %d and %d", len(cliRepoIdentities), len(cliStepIdentities))
+	}
+	for _, id := range cliRepoIdentities {
+		for _, grant := range id.Grants {
+			if grant == "oberth/data/release/gar-image-key" {
+				t.Fatalf("per-repo identity %s/%s/%s carries the named-step path (issue #814): %v", id.Upstream, id.Org, id.Repo, id.Grants)
+			}
+		}
 	}
 
 	cliDigest := planDigestFromIdentities(cliRepoIdentities, cliStepIdentities)

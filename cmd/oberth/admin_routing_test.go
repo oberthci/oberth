@@ -796,10 +796,15 @@ func TestRoundTripTabwriterOutputThroughProducerParser(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Seed qualified grants.
+	// Seed qualified grants: two named-step rows and one wildcard row for
+	// oberth, one wildcard row for terraform. The per-repo identity carries
+	// wildcard grants only (issue #814), so the expected count proves the
+	// parser reads the STEP column of the real emitter output — not that the
+	// named rows were lost.
 	for _, g := range []struct{ repo, step, secret string }{
 		{"codeberg/oberthci/oberth", "release", "oberth/data/release/cosign-secret"},
 		{"codeberg/oberthci/oberth", "release", "oberth/data/release/r2-upload-token"},
+		{"codeberg/oberthci/oberth", "*", "oberth/data/release/gar-reader-key"},
 		{"github/skipops/terraform", "*", "oberth/upstream/skipops/terraform/gcp-sa"},
 	} {
 		if _, err := database.Grant(context.Background(), g.repo, g.step, g.secret, "admin@localhost"); err != nil {
@@ -823,9 +828,14 @@ func TestRoundTripTabwriterOutputThroughProducerParser(t *testing.T) {
 	}
 
 	assertIdentitySet(t, identities, map[string]int{
-		"codeberg/oberthci/oberth": 2,
+		"codeberg/oberthci/oberth": 1,
 		"github/skipops/terraform": 1,
 	})
+	for _, id := range identities {
+		if id.Repo == "oberth" && id.Grants[0] != "oberth/data/release/gar-reader-key" {
+			t.Fatalf("oberth per-repo grant must be the wildcard row, got %v\nraw output:\n%s", id.Grants, tabOutput.String())
+		}
+	}
 }
 
 func TestRoundTripJSONOutputThroughProducerParser(t *testing.T) {
@@ -835,9 +845,13 @@ func TestRoundTripJSONOutputThroughProducerParser(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Same seed as the tabwriter round-trip: the per-repo side keeps the
+	// wildcard row only (issue #814); the named rows must reach the per-step
+	// side through the same real emitter output.
 	for _, g := range []struct{ repo, step, secret string }{
 		{"codeberg/oberthci/oberth", "release", "oberth/data/release/cosign-secret"},
 		{"codeberg/oberthci/oberth", "release", "oberth/data/release/r2-upload-token"},
+		{"codeberg/oberthci/oberth", "*", "oberth/data/release/gar-reader-key"},
 		{"github/skipops/terraform", "*", "oberth/upstream/skipops/terraform/gcp-sa"},
 	} {
 		if _, err := database.Grant(context.Background(), g.repo, g.step, g.secret, "admin@localhost"); err != nil {
@@ -861,9 +875,20 @@ func TestRoundTripJSONOutputThroughProducerParser(t *testing.T) {
 	}
 
 	assertIdentitySet(t, identities, map[string]int{
-		"codeberg/oberthci/oberth": 2,
+		"codeberg/oberthci/oberth": 1,
 		"github/skipops/terraform": 1,
 	})
+
+	// The named-step rows are not lost: they round-trip to the per-step
+	// identity, which carries them plus the inherited wildcard path.
+	repoIdentities, rawGrants, err := installer.ParseAccessListJSONWithSteps(jsonOutput.Bytes())
+	if err != nil {
+		t.Fatalf("JSON round-trip parse (with steps) failed: %v", err)
+	}
+	steps := installer.DerivePerStepIdentities(repoIdentities, rawGrants)
+	if len(steps) != 1 || steps[0].Repo != "oberth" || steps[0].Step != "release" || len(steps[0].GrantPaths) != 3 {
+		t.Fatalf("expected one per-step identity oberth/release with 3 paths (2 named + 1 inherited), got %+v\nraw output:\n%s", steps, jsonOutput.String())
+	}
 }
 
 // assertIdentitySet checks that identities match a map of
