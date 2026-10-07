@@ -6,7 +6,6 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/x509"
-	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
 	"errors"
@@ -144,8 +143,12 @@ func preflightServerIdentities(ctx context.Context, cfg *Config, deps Deps, dryR
 	}
 
 	// -- Legacy shape: verify identity bundles in OpenBao before Helm --
-	var serverData map[string]any
+	// The server bundle holds the TLS private key and the SSH host key. It is
+	// decoded straight to byte slices and cleared on every exit path; nothing
+	// below converts a bundle value to a Go string (issue #811).
+	var server *identityBundle
 	var serverVersion int
+	defer func() { server.clear() }()
 
 	if hasLegacySecrets {
 		// Refuse unknown Secret volumes before any OpenBao reads or token checks.
@@ -189,29 +192,33 @@ func preflightServerIdentities(ctx context.Context, cfg *Config, deps Deps, dryR
 		var missing []string
 		for baoName, bundle := range needed {
 			path := defaultKVPrefix + "/data/identities/" + ns + "/" + baoName
-			result, readErr := store.readData(ctx, token, path)
+			raw, readErr := store.readRaw(ctx, token, path)
 			if readErr != nil {
 				return fmt.Errorf("read identity bundle %s: %w", baoName, readErr)
 			}
-			if result == nil {
+			if raw == nil {
 				missing = append(missing, fmt.Sprintf("%s/identities/%s/%s (%s)",
 					defaultKVPrefix, ns, baoName, strings.Join(bundle.fields, ", ")))
 				continue
 			}
-			dataMap, _ := result["data"].(map[string]any)
+			decoded, decodeErr := decodeIdentityBundle(raw)
+			clear(raw)
+			if decodeErr != nil {
+				return fmt.Errorf("read identity bundle %s: %w", baoName, decodeErr)
+			}
 			for _, field := range bundle.fields {
-				if v, ok := dataMap[field]; !ok || v == nil || v == "" {
+				if len(decoded.field(field)) == 0 {
 					missing = append(missing, fmt.Sprintf("%s/identities/%s/%s field %q",
 						defaultKVPrefix, ns, baoName, field))
 				}
 			}
 			if baoName == "server" {
-				serverData = dataMap
-				if metaMap, ok := result["metadata"].(map[string]any); ok {
-					if v, ok := metaMap["version"].(float64); ok {
-						serverVersion = int(v)
-					}
-				}
+				server = decoded
+				serverVersion = decoded.version
+			} else {
+				// Presence is all the preflight needs from the upstream deploy
+				// key and known_hosts bundles; drop the private material now.
+				decoded.clear()
 			}
 			if dryRun {
 				_, _ = fmt.Fprintf(w, "  Identity preflight: %s bundle present (%s)\n",
@@ -227,11 +234,11 @@ func preflightServerIdentities(ctx context.Context, cfg *Config, deps Deps, dryR
 		// running pod's cert public key. Comparing keys (not PEM bytes) allows
 		// a partial-failure re-run where the cert was rotated in OpenBao (new
 		// SANs) but the pod still serves the old cert with the same key.
-		if serverData != nil {
-			if baoCertPEM, ok := serverData["tls.crt"].(string); ok && baoCertPEM != "" {
+		if server != nil {
+			if baoCertPEM := server.field("tls.crt"); len(baoCertPEM) > 0 {
 				podCert, podErr := readPodServerCert(ctx, *cfg, deps)
 				if podErr == nil {
-					baoPubDER, baoFP, baoParseErr := parseCertPublicKey([]byte(baoCertPEM))
+					baoPubDER, baoFP, baoParseErr := parseCertPublicKey(baoCertPEM)
 					if baoParseErr != nil {
 						return fmt.Errorf("the server certificate in OpenBao is not valid: %w", baoParseErr)
 					}
@@ -251,8 +258,8 @@ func preflightServerIdentities(ctx context.Context, cfg *Config, deps Deps, dryR
 			}
 
 			// Print SSH host key public fingerprint (never the private key).
-			if sshKeyPEM, ok := serverData["ssh_host_key"].(string); ok && sshKeyPEM != "" {
-				fp, fpErr := sshPublicFingerprint([]byte(sshKeyPEM))
+			if sshKeyPEM := server.field("ssh_host_key"); len(sshKeyPEM) > 0 {
+				fp, fpErr := sshPublicFingerprint(sshKeyPEM)
 				if fpErr == nil {
 					_, _ = fmt.Fprintf(w, "SSH host key fingerprint (from OpenBao): %s\n", fp)
 				}
@@ -262,25 +269,23 @@ func preflightServerIdentities(ctx context.Context, cfg *Config, deps Deps, dryR
 
 	// -- SAN check: goproxy names required when goProxy is enabled --
 	// Read server identity from OpenBao when not already loaded above.
-	if serverData == nil && haveStore {
+	if server == nil && haveStore {
 		path := defaultKVPrefix + "/data/identities/" + ns + "/server"
-		result, readErr := store.readData(ctx, token, path)
-		if readErr == nil && result != nil {
-			serverData, _ = result["data"].(map[string]any)
-			if metaMap, ok := result["metadata"].(map[string]any); ok {
-				if v, ok := metaMap["version"].(float64); ok {
-					serverVersion = int(v)
-				}
+		raw, readErr := store.readRaw(ctx, token, path)
+		if readErr == nil && raw != nil {
+			decoded, decodeErr := decodeIdentityBundle(raw)
+			clear(raw)
+			if decodeErr == nil {
+				server = decoded
+				serverVersion = decoded.version
 			}
 		}
 	}
 
 	// Determine which cert to inspect: OpenBao (preferred) or the running pod.
 	var certPEM []byte
-	if serverData != nil {
-		if c, ok := serverData["tls.crt"].(string); ok && c != "" {
-			certPEM = []byte(c)
-		}
+	if c := server.field("tls.crt"); len(c) > 0 {
+		certPEM = c
 	}
 	if certPEM == nil {
 		podCert, podErr := readPodServerCert(ctx, *cfg, deps)
@@ -327,7 +332,7 @@ func preflightServerIdentities(ctx context.Context, cfg *Config, deps Deps, dryR
 	}
 
 	// Missing goproxy names detected.
-	if !haveStore || serverData == nil {
+	if !haveStore || server == nil {
 		return fmt.Errorf("the server certificate does not cover the goproxy service names (%s); "+
 			"every Go pipeline step will fail after the upgrade. Re-run with --install-secretstore "+
 			"and %s set so the installer can rotate the certificate",
@@ -345,15 +350,20 @@ func preflightServerIdentities(ctx context.Context, cfg *Config, deps Deps, dryR
 	}
 
 	// -- Rotate the certificate: add the missing goproxy SANs --
-	// Note: serverData["tls.key"] is a Go string returned by readData;
-	// clearing a []byte(string) copy would be a no-op. Tracked as a
-	// follow-up to review readData's return type.
-	keyPEM, ok := serverData["tls.key"].(string)
-	if !ok || keyPEM == "" {
+	keyPEM := server.field("tls.key")
+	if len(keyPEM) == 0 {
 		return errors.New("server identity in OpenBao is missing tls.key; cannot rotate certificate")
 	}
+	// Hash the private fields now so the key bytes can be cleared before the
+	// network round trip; verifyRotation compares the readback against these
+	// digests, never against retained key material (issue #811).
+	oldPrivateHashes := map[string][sha256.Size]byte{
+		"tls.key":      sha256.Sum256(keyPEM),
+		"ssh_host_key": sha256.Sum256(server.field("ssh_host_key")),
+	}
 
-	newCertPEM, rotateErr := rotateCertificate(cert, []byte(keyPEM), missingNames)
+	newCertPEM, rotateErr := rotateCertificate(cert, keyPEM, missingNames)
+	clear(keyPEM)
 	if rotateErr != nil {
 		return fmt.Errorf("rotate server certificate: %w", rotateErr)
 	}
@@ -368,7 +378,7 @@ func preflightServerIdentities(ctx context.Context, cfg *Config, deps Deps, dryR
 	}
 
 	// Read back and verify.
-	if err := verifyRotation(ctx, store, token, ns, serverVersion, serverData, newCertPEM, cert, w); err != nil {
+	if err := verifyRotation(ctx, store, token, ns, serverVersion, oldPrivateHashes, newCertPEM, cert, w); err != nil {
 		return err
 	}
 
@@ -542,37 +552,40 @@ func parseAnyPrivateKey(der []byte) (crypto.PrivateKey, error) {
 }
 
 // verifyRotation reads back the server identity from OpenBao after a CAS write
-// and verifies the rotation preserved the private key and SSH host key.
-func verifyRotation(ctx context.Context, store openBaoExec, token, ns string, oldVersion int, oldData map[string]any, newCertPEM []byte, oldCert *x509.Certificate, w io.Writer) error {
+// and verifies the rotation preserved the private key and SSH host key. The
+// comparison is digest-to-digest: the caller passes SHA-256 digests of the
+// pre-rotation private fields, and the readback bundle is cleared before
+// return (issue #811).
+func verifyRotation(ctx context.Context, store openBaoExec, token, ns string, oldVersion int, oldPrivateHashes map[string][sha256.Size]byte, newCertPEM []byte, oldCert *x509.Certificate, w io.Writer) error {
 	path := defaultKVPrefix + "/data/identities/" + ns + "/server"
-	readback, err := store.readData(ctx, token, path)
+	raw, err := store.readRaw(ctx, token, path)
 	if err != nil {
 		return fmt.Errorf("readback after rotation: %w", err)
 	}
-	if readback == nil {
+	if raw == nil {
 		return errors.New("server identity disappeared after rotation")
 	}
+	readback, decodeErr := decodeIdentityBundle(raw)
+	clear(raw)
+	if decodeErr != nil {
+		return fmt.Errorf("readback after rotation: %w", decodeErr)
+	}
+	defer readback.clear()
 
 	// Verify version incremented.
-	metaMap, _ := readback["metadata"].(map[string]any)
-	newVersionF, _ := metaMap["version"].(float64)
-	if int(newVersionF) != oldVersion+1 {
-		return fmt.Errorf("rotation version mismatch: expected %d, got %d", oldVersion+1, int(newVersionF))
+	if readback.version != oldVersion+1 {
+		return fmt.Errorf("rotation version mismatch: expected %d, got %d", oldVersion+1, readback.version)
 	}
 
-	dataMap, _ := readback["data"].(map[string]any)
-
-	// Verify tls.key and ssh_host_key are unchanged (by SHA-256 hash).
+	// Verify tls.key and ssh_host_key are unchanged (by SHA-256 digest).
 	for _, field := range []string{"tls.key", "ssh_host_key"} {
-		oldVal, _ := oldData[field].(string)
-		newVal, _ := dataMap[field].(string)
-		if sha256hex([]byte(oldVal)) != sha256hex([]byte(newVal)) {
+		if sha256.Sum256(readback.field(field)) != oldPrivateHashes[field] {
 			return fmt.Errorf("%s changed during rotation; refusing to proceed", field)
 		}
 	}
 
 	// Verify the new cert parses and its public key equals the original.
-	newCertBlock, _ := pem.Decode([]byte(dataMap["tls.crt"].(string)))
+	newCertBlock, _ := pem.Decode(readback.field("tls.crt"))
 	if newCertBlock == nil {
 		return errors.New("readback tls.crt is not valid PEM")
 	}
@@ -588,11 +601,6 @@ func verifyRotation(ctx context.Context, store openBaoExec, token, ns string, ol
 	}
 
 	return nil
-}
-
-func sha256hex(data []byte) string {
-	h := sha256.Sum256(data)
-	return hex.EncodeToString(h[:])
 }
 
 func bytesEqual(a, b []byte) bool {

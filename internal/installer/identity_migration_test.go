@@ -997,3 +997,101 @@ func TestPreflightLegacyTokenSetPodNotFound(t *testing.T) {
 // Suppress unused imports for net (used in testCertAndKey via IPAddresses).
 var _ = net.ParseIP
 var _ = os.Getenv
+
+// TestPreflightClearsIdentityReadBuffers proves issue #811's contract on the
+// rotation path: every exec stdout buffer that carried identity material
+// (the server bundle, read before and after rotation, and the sibling
+// bundles) and every exec stdin buffer (token line, kv patch body) is
+// zero-filled by the time preflightServerIdentities returns.
+func TestPreflightClearsIdentityReadBuffers(t *testing.T) {
+	t.Setenv(baoTokenEnvVar, "test-root-token")
+
+	certPEM, keyPEM := testCertAndKey(t, []string{
+		"oberth", "oberth.oberth", "oberth.oberth.svc", "oberth.oberth.svc.cluster.local",
+	})
+	liveValues := liveHelmValuesSubset{}
+	liveValues.Argo.GoProxy.Enabled = true
+	liveValuesJSON, _ := json.Marshal(liveValues)
+
+	var handedOut [][]byte
+	var stdins [][]byte
+	hand := func(s string) []byte {
+		b := []byte(s)
+		handedOut = append(handedOut, b)
+		return b
+	}
+	patchSeen := false
+	runner := func(_ context.Context, input []byte, name string, args ...string) ([]byte, error) {
+		if name != "kubectl" {
+			t.Fatalf("unexpected command %q", name)
+		}
+		for _, arg := range args {
+			if arg == "deploy/oberth" {
+				return certPEM, nil
+			}
+		}
+		command, _, err := stripKubectlBaoPlumbing(args)
+		if err != nil {
+			t.Fatal(err)
+		}
+		stdins = append(stdins, input)
+		version := 1
+		if patchSeen {
+			version = 2
+		}
+		switch {
+		case command == "read -format=json "+defaultKVPrefix+"/data/identities/oberth/server":
+			return hand(baoIdentityJSON(version, map[string]string{
+				"tls.crt": string(certPEM), "tls.key": string(keyPEM), "ssh_host_key": "fake-ssh-key",
+			})), nil
+		case command == "read -format=json "+defaultKVPrefix+"/data/identities/oberth/oberth-upstream-key":
+			return hand(baoIdentityJSON(1, map[string]string{"id_ed25519": "priv", "id_ed25519.pub": "pub"})), nil
+		case command == "read -format=json "+defaultKVPrefix+"/data/identities/oberth/oberth-known-hosts":
+			return hand(baoIdentityJSON(1, map[string]string{"known_hosts": "known\n"})), nil
+		case strings.HasPrefix(command, "kv patch"):
+			patchSeen = true
+			return []byte(`{"data":{"version":2}}`), nil
+		default:
+			t.Fatalf("unscripted command %q", command)
+			return nil, nil
+		}
+	}
+
+	var buf bytes.Buffer
+	deps := Deps{
+		Output:     &buf,
+		KubeClient: fake.NewClientset(legacyDeployment(), runningOpenBaoPod()),
+		RunCommand: runner,
+		RunHelm: func(_ context.Context, args []string) ([]byte, error) {
+			if len(args) > 0 && args[0] == "get" {
+				return liveValuesJSON, nil
+			}
+			return nil, nil
+		},
+		ContextName: "test-ctx",
+	}
+	cfg := Config{InstallSecretStore: true}
+	if err := preflightServerIdentities(context.Background(), &cfg, deps, false); err != nil {
+		t.Fatalf("preflight failed: %v", err)
+	}
+	if !patchSeen {
+		t.Fatal("expected a kv patch call for certificate rotation")
+	}
+	// server (legacy check) + upstream key + known_hosts + server (readback).
+	if len(handedOut) < 4 {
+		t.Fatalf("expected at least 4 identity reads, got %d", len(handedOut))
+	}
+	for i, out := range handedOut {
+		if !allZero(out) {
+			t.Fatalf("identity read buffer %d still holds material after preflight returned", i)
+		}
+	}
+	for i, in := range stdins {
+		if !allZero(in) {
+			t.Fatalf("exec stdin buffer %d (token line / patch body) was not cleared", i)
+		}
+	}
+	if strings.Contains(buf.String(), string(keyPEM)) {
+		t.Fatal("private key reached the output stream")
+	}
+}
