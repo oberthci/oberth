@@ -64,15 +64,24 @@ func configureRekorBao(ctx context.Context, cfg Config, deps Deps, store openBao
 	}
 	for _, name := range []string{"rekor-db", "rekor-db-root"} {
 		path := "identities/" + ns + "/" + name
-		existing, err := store.readData(ctx, token, defaultKVPrefix+"/data/"+path)
+		// The password is read and written as bytes only; no map[string]any
+		// or string copy of it exists in this process (issue #811).
+		raw, err := store.readRaw(ctx, token, defaultKVPrefix+"/data/"+path)
 		if err != nil {
 			return "", err
 		}
-		if existing != nil {
-			data, _ := existing["data"].(map[string]any)
-			password, _ := data["password"].(string)
-			decoded, err := hex.DecodeString(password)
-			if err != nil || len(decoded) != 32 {
+		if raw != nil {
+			existing, decodeErr := decodeIdentityBundle(raw)
+			clear(raw)
+			if decodeErr != nil {
+				return "", fmt.Errorf("invalid existing Rekor database credential %s; refusing to replace it", name)
+			}
+			password := existing.field("password")
+			decoded := make([]byte, hex.DecodedLen(len(password)))
+			n, hexErr := hex.Decode(decoded, password)
+			clear(decoded)
+			existing.clear()
+			if hexErr != nil || n != 32 {
 				return "", fmt.Errorf("invalid existing Rekor database credential %s; refusing to replace it", name)
 			}
 			continue
@@ -91,8 +100,18 @@ func configureRekorBao(ctx context.Context, cfg Config, deps Deps, store openBao
 		if _, err := rand.Read(password); err != nil {
 			return "", err
 		}
-		if err := store.writeJSON(ctx, token, defaultKVPrefix+"/data/"+path, map[string]any{"options": map[string]any{"cas": 0}, "data": map[string]any{"password": hex.EncodeToString(password)}}); err != nil {
-			return "", err
+		// Same JSON json.Marshal produced (keys sorted), built as bytes so the
+		// hex password never becomes a string; both buffers are cleared once
+		// the write has been issued.
+		body := make([]byte, 0, 48+hex.EncodedLen(len(password)))
+		body = append(body, `{"data":{"password":"`...)
+		body = hex.AppendEncode(body, password)
+		body = append(body, `"},"options":{"cas":0}}`...)
+		clear(password)
+		writeErr := store.writeRaw(ctx, token, defaultKVPrefix+"/data/"+path, body)
+		clear(body)
+		if writeErr != nil {
+			return "", writeErr
 		}
 	}
 	for _, component := range []string{"mysql", "db", "rekor"} {

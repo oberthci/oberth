@@ -87,7 +87,11 @@ func (b openBaoExec) authenticated(ctx context.Context, token string, stdin []by
 	input = append(input, token...)
 	input = append(input, '\n')
 	input = append(input, stdin...)
-	return b.run(ctx, input, "kubectl", b.kubectlExecArgs(command...)...)
+	out, err := b.run(ctx, input, "kubectl", b.kubectlExecArgs(command...)...)
+	// The token line and any secret body are needed only while the exec
+	// runs; zero this copy as soon as the command has consumed it (#811).
+	clear(input)
+	return out, err
 }
 
 // baoStatus is the subset of `bao status -format=json` the installer needs.
