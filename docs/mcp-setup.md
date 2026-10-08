@@ -289,6 +289,27 @@ Unauthenticated: `/healthz` (liveness) and `/readyz` (dependency readiness).
 - `promote` requires explicit integration authority, an exact green SHA, and a
   named target branch. It never force-pushes.
 
+### Long-poll tool timeouts
+
+`wait` and `promote_status` long-poll until the target reaches a terminal
+state or the server-side `timeout` expires (maximum 600 seconds). The server
+extends its HTTP write deadline for these tools, so a large `timeout` does not
+hit the server's own `WriteTimeout`.
+
+A large `timeout` only helps if the **client's** MCP tool timeout is at least
+as long. Clients typically enforce their own idle or total timeout:
+
+- Claude Code's `MCP_TOOL_TIMEOUT` and per-server `timeout` setting
+- Codex's remote-tool idle timeout
+- HTTP reverse proxies (Cloudflare non-Enterprise origin TTFB limit is
+  documented at 100 seconds; 120 seconds empirically passed through the
+  proxied `watch.oberth.ci` endpoint, but 600 seconds has not been verified)
+
+When a client timeout is shorter than the requested `timeout`, the client
+closes the connection before the server returns. The server logs a write error
+but the run's state is unaffected. Use shorter `timeout` values (60-120s) and
+retry in a loop when operating through a proxy with an unknown idle limit.
+
 ### Secret-store release preflight
 
 An admin uplink can call `secretstore_verify` instead of entering the server pod:

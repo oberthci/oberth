@@ -1,9 +1,12 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -315,6 +318,9 @@ func TestMCPRepoListReturnsObject(t *testing.T) {
 // TestMCPAllToolsReturnObjectStructuredContent verifies that every
 // registered MCP tool produces a JSON object (not array, not scalar)
 // in structuredContent for a representative successful call (#794).
+// NOTE: this test exercises the fakeBackend, which always returns an
+// object. The service-level shape test in internal/service/mcp_shape_test.go
+// exercises the real API.CallTool and is the mutation-evidence test for #794.
 func TestMCPAllToolsReturnObjectStructuredContent(t *testing.T) {
 	t.Parallel()
 	server, _ := testServer(t)
@@ -360,4 +366,104 @@ func TestMCPAllToolsReturnObjectStructuredContent(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestMCPWriteTimeoutRegressionLongPoll verifies that a long-poll tool
+// (wait) completes successfully even when the HTTP server's WriteTimeout
+// is shorter than the tool's execution time. This is the regression test
+// for #789/#793: without the SetWriteDeadline extension in handleMCP, the
+// server's WriteTimeout terminates the response mid-stream.
+func TestMCPWriteTimeoutRegressionLongPoll(t *testing.T) {
+	t.Parallel()
+
+	// Backend that sleeps on "wait" calls, simulating a long-poll.
+	backend := &fakeBackend{}
+	server, err := New(backend, backend, backend, "test", WithMaximumToolWait(10*time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Start a real HTTP server with a short WriteTimeout on a loopback
+	// listener. If SetWriteDeadline is not extended for long-poll tools,
+	// the WriteTimeout fires and truncates the response.
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = ln.Close() }()
+
+	httpServer := &http.Server{
+		Handler:      server.Handler(),
+		WriteTimeout: 200 * time.Millisecond,
+	}
+	go func() { _ = httpServer.Serve(ln) }()
+	defer func() { _ = httpServer.Close() }()
+
+	// The backend returns after 400ms, which exceeds WriteTimeout.
+	backend.toolResult = map[string]string{"status": "terminal", "sha": strings.Repeat("a", 40)}
+	origCallTool := backend.CallTool
+	_ = origCallTool
+	// Override CallTool to add a sleep for "wait" tool.
+	slowBackend := &slowWaitBackend{fakeBackend: backend, delay: 400 * time.Millisecond}
+	server2, err := New(slowBackend, slowBackend, slowBackend, "test", WithMaximumToolWait(10*time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	httpServer2 := &http.Server{
+		Handler:      server2.Handler(),
+		WriteTimeout: 200 * time.Millisecond,
+	}
+	ln2, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = ln2.Close() }()
+	go func() { _ = httpServer2.Serve(ln2) }()
+	defer func() { _ = httpServer2.Close() }()
+
+	// Make a request for "wait" which will exceed WriteTimeout.
+	body := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"wait","arguments":{"sha":"` + strings.Repeat("a", 40) + `"}}}`
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, "http://"+ln2.Addr().String()+"/mcp", strings.NewReader(body))
+	req.Header.Set("Authorization", "Bearer valid-token")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("reading response body: %v (WriteTimeout likely truncated the response)", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body = %s", resp.StatusCode, string(respBody))
+	}
+
+	// The response must be a complete JSON-RPC 2.0 response.
+	var envelope rpcResponse
+	if err := json.Unmarshal(respBody, &envelope); err != nil {
+		t.Fatalf("response is not valid JSON (truncated by WriteTimeout?): %v body=%s", err, string(respBody))
+	}
+	if envelope.JSONRPC != "2.0" || envelope.Error != nil {
+		t.Fatalf("response = %#v, want complete JSON-RPC 2.0 success", envelope)
+	}
+}
+
+// slowWaitBackend wraps fakeBackend and adds a delay only for "wait" calls.
+type slowWaitBackend struct {
+	*fakeBackend
+	delay time.Duration
+}
+
+func (s *slowWaitBackend) CallTool(ctx context.Context, actor Actor, name string, arguments json.RawMessage) (any, error) {
+	if name == "wait" {
+		select {
+		case <-time.After(s.delay):
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	return s.fakeBackend.CallTool(ctx, actor, name, arguments)
 }

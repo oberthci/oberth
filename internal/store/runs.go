@@ -768,7 +768,7 @@ ORDER BY queue_sequence DESC LIMIT ?`,
 		return nil, fmt.Errorf("list recent runs: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
-	var runs []model.Run
+	runs := make([]model.Run, 0)
 	for rows.Next() {
 		value, err := scanRun(rows)
 		if err != nil {
