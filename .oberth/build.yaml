@@ -64,6 +64,8 @@
 #           |                               |
 #           |                               +--> build-darwin-arm64
 #           |
+#           +--> test-openbao  (real OpenBao policy isolation, #803)
+#           |
 #           +--> security  (aquasec/trivy image, no install step needed)
 #           |
 #           +--> shellcheck
@@ -100,6 +102,9 @@ spec:
       - name: test
         template: test
         depends: lint
+      - name: test-openbao
+        template: test-openbao
+        depends: setup
       - name: security
         template: security
         depends: setup
@@ -1247,3 +1252,61 @@ spec:
         limits:
           cpu: "1"
           memory: 256Mi
+
+  # ---- test-openbao burn (#803) ----
+  # Real OpenBao integration test: starts a dev server, applies rendered
+  # per-repo/per-step policies, and asserts ACL isolation with real reads.
+  # Hermetic: no network beyond the pinned OpenBao download.
+  - name: test-openbao
+    activeDeadlineSeconds: 300
+    automountServiceAccountToken: false
+    metadata:
+      annotations:
+        oberth.ci/workspace-mounts: none
+        oberth.ci/workspace-env: none
+    script:
+      image: "golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3"
+      workingDir: /work/src
+      command: [bash]
+      source: |
+        set -euo pipefail
+        # Fetch and verify the pinned OpenBao binary.
+        BAO_VERSION=2.6.1
+        BAO_ARCHIVE="openbao_${BAO_VERSION}_linux_amd64.tar.gz"
+        BAO_URL="https://github.com/openbao/openbao/releases/download/v${BAO_VERSION}/${BAO_ARCHIVE}"
+        BAO_DIR="/tmp/openbao"
+        mkdir -p "$BAO_DIR"
+        curl -fsSL -o "$BAO_DIR/$BAO_ARCHIVE" "$BAO_URL"
+        cd "$BAO_DIR"
+        sha256sum -c /work/src/.oberth/pins/openbao.sha256
+        tar xzf "$BAO_ARCHIVE" bao
+        chmod +x bao
+        cd /work/src
+        # Run the integration tests.
+        export BAO_PATH="$BAO_DIR/bao"
+        export CGO_ENABLED=1
+        export GOTOOLCHAIN=local
+        export GOWORK=off
+        export GOENV=off
+        go test -tags=openbao_integration -race -count=1 -v -timeout=120s \
+          -run 'TestPolicyIsolation' ./internal/installer/
+      env:
+      - name: PATH
+        value: "/usr/local/go/bin:/usr/local/bin:/usr/bin:/bin"
+      - name: HOME
+        value: "/tmp"
+      - name: TMPDIR
+        value: "/tmp"
+      - name: GOMODCACHE
+        value: "/tmp/private-gomod"
+      - name: GOCACHE
+        value: "/tmp/private-gobuild"
+      - name: GOFLAGS
+        value: "-mod=vendor"
+      resources:
+        requests:
+          cpu: "1"
+          memory: 512Mi
+        limits:
+          cpu: "2"
+          memory: 1Gi
