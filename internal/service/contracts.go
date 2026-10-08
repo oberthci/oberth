@@ -127,6 +127,7 @@ type IssueRepository interface {
 	Issue(context.Context, int64) (model.Issue, error)
 	UpdateIssue(context.Context, string, int64, model.IssuePatch) (model.Issue, error)
 	UpdateManualIssue(context.Context, string, int64, model.IssuePatch) (model.Issue, error)
+	AppendIssueBody(context.Context, string, int64, string) (model.Issue, error)
 	ReopenManualIssue(context.Context, string, int64) (model.Issue, error)
 	DeleteManualIssue(context.Context, string, int64) error
 	ListIssues(context.Context, model.IssueListFilter) (model.IssuePage, error)

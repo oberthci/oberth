@@ -162,7 +162,8 @@ call the proxy hostname directly.
 | `issue_create` | Create a workspace-global manual issue |
 | `issue_get` | Get an issue by ID |
 | `issue_get_many` | Get 1..50 complete issues in request order, with explicit missing/size-limit results |
-| `issue_update` | Update an issue title and body |
+| `issue_update` | Update an issue title and body; optional `expected_body_sha256` rejects the update on mismatch |
+| `issue_append` | Append text to an issue body with a dated separator (no full-body re-send) |
 | `issue_close` | Close an issue |
 | `issue_reopen` | Reopen a manual issue by ID; an already-open issue is unchanged, CI issues are rejected |
 | `issue_delete` | Delete an accidentally created manual issue |

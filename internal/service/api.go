@@ -3,6 +3,8 @@ package service
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -340,14 +342,28 @@ func (service *API) CallTool(ctx context.Context, actor api.Actor, name string, 
 		return service.issueGetMany(ctx, actor, arguments.IDs)
 	case "issue_update":
 		var arguments struct {
-			ID    int64   `json:"id"`
-			Title *string `json:"title"`
-			Body  *string `json:"body"`
+			ID                 int64   `json:"id"`
+			Title              *string `json:"title"`
+			Body               *string `json:"body"`
+			ExpectedBodySHA256 string  `json:"expected_body_sha256"`
 		}
 		if err := decodeTool(raw, &arguments); err != nil {
 			return nil, err
 		}
-		issue, err := service.issueUpdate(ctx, actor, arguments.ID, arguments.Title, arguments.Body)
+		issue, err := service.issueUpdate(ctx, actor, arguments.ID, arguments.Title, arguments.Body, arguments.ExpectedBodySHA256)
+		if err != nil {
+			return nil, err
+		}
+		return wireIssue(issue), nil
+	case "issue_append":
+		var arguments struct {
+			ID   int64  `json:"id"`
+			Text string `json:"text"`
+		}
+		if err := decodeTool(raw, &arguments); err != nil {
+			return nil, err
+		}
+		issue, err := service.issueAppend(ctx, actor, arguments.ID, arguments.Text)
 		if err != nil {
 			return nil, err
 		}
@@ -1501,11 +1517,40 @@ func (service *API) issueGet(ctx context.Context, _ api.Actor, id int64) (model.
 	return service.issues.Issue(ctx, id)
 }
 
-func (service *API) issueUpdate(ctx context.Context, actor api.Actor, id int64, title, body *string) (model.Issue, error) {
+func (service *API) issueUpdate(ctx context.Context, actor api.Actor, id int64, title, body *string, expectedBodySHA256 string) (model.Issue, error) {
 	if service.issues == nil || id <= 0 || title == nil || body == nil {
 		return model.Issue{}, fmt.Errorf("%w: issue ID, title, and body are required", ErrInvalidInput)
 	}
+	// When the caller sends expected_body_sha256, verify that the current body
+	// matches before replacing it. This catches silently truncated payloads: if
+	// the model harness cuts the MCP call mid-payload, the hash of the intended
+	// body will not match the existing body, and the server rejects the update.
+	if expectedBodySHA256 != "" {
+		existing, err := service.issues.Issue(ctx, id)
+		if err != nil {
+			return model.Issue{}, err
+		}
+		sum := sha256.Sum256([]byte(existing.Body))
+		actual := hex.EncodeToString(sum[:])
+		if actual != expectedBodySHA256 {
+			return model.Issue{}, fmt.Errorf("%w: expected_body_sha256 mismatch: the existing body has changed or the caller's hash is wrong (got %s)", ErrInvalidInput, actual)
+		}
+	}
 	issue, err := service.issues.UpdateIssue(ctx, actor.Identity, id, model.IssuePatch{Title: title, Body: body})
+	if err != nil {
+		return model.Issue{}, err
+	}
+	return issue, nil
+}
+
+func (service *API) issueAppend(ctx context.Context, actor api.Actor, id int64, text string) (model.Issue, error) {
+	if service.issues == nil || id <= 0 {
+		return model.Issue{}, fmt.Errorf("%w: issue ID is required", ErrInvalidInput)
+	}
+	if strings.TrimSpace(text) == "" {
+		return model.Issue{}, fmt.Errorf("%w: append text is required", ErrInvalidInput)
+	}
+	issue, err := service.issues.AppendIssueBody(ctx, actor.Identity, id, text)
 	if err != nil {
 		return model.Issue{}, err
 	}
@@ -1609,7 +1654,7 @@ func wireIssueLock(lock model.IssueLock) api.IssueLockResponse {
 
 func mutatingTool(name string) bool {
 	switch name {
-	case "sync", "promote", "publish_retry", "issue_create", "issue_update", "issue_close", "issue_reopen", "issue_delete", "issue_lock",
+	case "sync", "promote", "publish_retry", "issue_create", "issue_update", "issue_append", "issue_close", "issue_reopen", "issue_delete", "issue_lock",
 		"access_allow", "access_revoke",
 		"repo_remove",
 		"secretstore_sync_receipt":

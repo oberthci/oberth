@@ -30,6 +30,9 @@ const (
 	mcpAcceptStreamable    = "application/json, text/event-stream"
 	mcpContentTypeSSE      = "text/event-stream"
 	mcpTokenFilePermission = 0o600
+
+	// maximumToolBytes mirrors the server-side limit for tool arguments.
+	maximumToolBytes = 1 << 20
 )
 
 // mcpConfig holds resolved MCP client configuration.
@@ -113,9 +116,11 @@ Environment:
   OBERTH_TOKEN      Bearer token for authentication
 
 Flags:
-  --url <url>         MCP server URL
-  --token-file <path> Path to a file containing the bearer token (0600)
-  --ca-file <path>    PEM CA certificate for TLS verification
+  --url <url>          MCP server URL
+  --token-file <path>  Path to a file containing the bearer token (0600)
+  --ca-file <path>     PEM CA certificate for TLS verification
+  --args-file <path>   Read tool arguments JSON from a file (or "-" for stdin);
+                       bypasses the shell argv length ceiling for large payloads
 `)
 		return err
 	default:
@@ -160,11 +165,33 @@ func runMCPCall(ctx context.Context, arguments []string, output io.Writer) error
 	}
 	positional := cfg.positional
 	if len(positional) == 0 {
-		return fmt.Errorf("%w: oberth mcp call <tool> ['{\"json\":\"args\"}']", errUsage)
+		return fmt.Errorf("%w: oberth mcp call <tool> ['{\"json\":\"args\"}'] [--args-file <path>]", errUsage)
 	}
 	toolName := positional[0]
 	var args json.RawMessage
-	if len(positional) > 1 {
+	switch {
+	case cfg.argsFile != "":
+		// --args-file takes precedence over a positional JSON argument.
+		if len(positional) > 1 {
+			return fmt.Errorf("%w: --args-file and a positional JSON argument are mutually exclusive", errUsage)
+		}
+		var data []byte
+		if cfg.argsFile == "-" {
+			data, err = io.ReadAll(io.LimitReader(os.Stdin, maximumToolBytes+1))
+		} else {
+			data, err = os.ReadFile(cfg.argsFile) //nolint:gosec // G304: operator-supplied path.
+		}
+		if err != nil {
+			return fmt.Errorf("read args file: %w", err)
+		}
+		if len(data) > maximumToolBytes {
+			return fmt.Errorf("args file exceeds %d bytes", maximumToolBytes)
+		}
+		if !json.Valid(data) {
+			return fmt.Errorf("args file is not valid JSON")
+		}
+		args = json.RawMessage(data)
+	case len(positional) > 1:
 		raw := positional[1]
 		if !json.Valid([]byte(raw)) {
 			return fmt.Errorf("tool arguments must be valid JSON: %s", raw)
@@ -212,6 +239,7 @@ var errMCPToolError = errors.New("tool returned an error")
 type mcpFlagResult struct {
 	mcpConfig
 	positional []string
+	argsFile   string // --args-file: path to a JSON file, or "-" for stdin
 }
 
 // parseMCPFlags parses the common MCP flags from arguments. wantPositional
@@ -239,6 +267,11 @@ func parseMCPFlags(name string, arguments []string, wantPositional int) (mcpFlag
 			result.CAFile = arguments[i]
 		case strings.HasPrefix(arg, "--ca-file="):
 			result.CAFile = strings.TrimPrefix(arg, "--ca-file=")
+		case arg == "--args-file" && i+1 < len(arguments):
+			i++
+			result.argsFile = arguments[i]
+		case strings.HasPrefix(arg, "--args-file="):
+			result.argsFile = strings.TrimPrefix(arg, "--args-file=")
 		case arg == "--help" || arg == "-h":
 			return result, fmt.Errorf("%w: %s [--url <url>] [--token-file <path>] [--ca-file <path>]", errUsage, name)
 		case strings.HasPrefix(arg, "-"):

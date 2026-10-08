@@ -568,10 +568,10 @@ continuity checks; it must never be used to reset or bypass those checks.
   authority is configured.
 - A bearer credential maps to exactly one uplink public-key fingerprint and
   identity. Plaintext tokens are displayed once and are never persisted.
-- MCP exposes 31 tools: `status`, bounded named-step `logs`, exact-run
+- MCP exposes 32 tools: `status`, bounded named-step `logs`, exact-run
   `run_get`/`run_logs`, `artifacts`/`artifact_get`, `wait`, `sync`, `promote`,
   `promotion_list`, `promote_status`, `publish_retry`, issue
-  create/get/get_many/update/close/reopen/delete/list/lock,
+  create/get/get_many/update/append/close/reopen/delete/list/lock,
   secret-access list/allow/revoke, `repo_list`, `repo_remove`, `run_list`,
   `system_status`, and admin-only `secretstore_plan` (#611),
   `secretstore_sync_receipt` (#712), and `secretstore_verify`.

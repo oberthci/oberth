@@ -219,6 +219,45 @@ func (s *Store) updateIssue(ctx context.Context, actor string, id int64, patch m
 	return value, nil
 }
 
+// AppendIssueBody concatenates text to the existing body of any issue with a
+// dated separator line. The operation is lock-aware: if a non-expired lock
+// exists for another owner, the append is refused. The separator format is
+// deterministic: "\n\n---\n_Appended YYYY-MM-DDTHH:MM:SSZ_\n\n".
+func (s *Store) AppendIssueBody(ctx context.Context, actor string, id int64, text string) (model.Issue, error) {
+	if strings.TrimSpace(actor) == "" || id <= 0 {
+		return model.Issue{}, fmt.Errorf("%w: actor and issue ID are required", ErrInvalid)
+	}
+	if strings.TrimSpace(text) == "" {
+		return model.Issue{}, fmt.Errorf("%w: append text is empty", ErrInvalid)
+	}
+	appendedAt := s.now().UTC()
+	now := unixNano(appendedAt)
+	separator := "\n\n---\n_Appended " + appendedAt.Format(time.RFC3339) + "_\n\n"
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return model.Issue{}, fmt.Errorf("begin append issue body: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := s.requireIssueMutationLock(ctx, tx, id, actor, appendedAt, true); err != nil {
+		return model.Issue{}, err
+	}
+	value, err := scanIssue(tx.QueryRowContext(ctx, `
+UPDATE issues SET body = body || ? || ?, updated_at = ?
+WHERE id = ?
+RETURNING `+issueColumns, separator, text, now, id))
+	if err != nil {
+		return model.Issue{}, translateNotFound("issue", err)
+	}
+	if err := s.appendIssueAudit(ctx, tx, actor, "issue.append", value.ID,
+		map[string]any{"appended_bytes": len(text)}, now); err != nil {
+		return model.Issue{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return model.Issue{}, fmt.Errorf("commit append issue body: %w", err)
+	}
+	return value, nil
+}
+
 func (s *Store) DeleteManualIssue(ctx context.Context, actor string, id int64) error {
 	if strings.TrimSpace(actor) == "" || id <= 0 {
 		return fmt.Errorf("%w: actor and issue are required", ErrInvalid)
