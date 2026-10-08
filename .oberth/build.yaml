@@ -1260,10 +1260,6 @@ spec:
   - name: test-openbao
     activeDeadlineSeconds: 300
     automountServiceAccountToken: false
-    metadata:
-      annotations:
-        oberth.ci/workspace-mounts: none
-        oberth.ci/workspace-env: none
     script:
       image: "golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3"
       workingDir: /work/src
@@ -1298,11 +1294,11 @@ spec:
       - name: TMPDIR
         value: "/tmp"
       - name: GOMODCACHE
-        value: "/tmp/private-gomod"
+        value: "/cache/gomod"
       - name: GOCACHE
-        value: "/tmp/private-gobuild"
-      - name: GOFLAGS
-        value: "-mod=vendor"
+        value: "/cache/gobuild"
+      - name: GIT_TERMINAL_PROMPT
+        value: "0"
       resources:
         requests:
           cpu: "1"
