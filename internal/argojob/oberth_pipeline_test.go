@@ -93,6 +93,7 @@ func TestOberthBuildPipelineIsAdmissible(t *testing.T) {
 		"setup":              "",
 		"lint":               "setup",
 		"test":               "lint",
+		"test-openbao":       "setup",
 		"security":           "setup",
 		"shellcheck":         "setup",
 		"chart":              "lint",

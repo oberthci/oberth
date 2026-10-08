@@ -65,7 +65,7 @@ var (
 		"build-darwin-amd64": true, "build-darwin-arm64": true,
 	}
 	oberthBuildIsolatedLeaves = map[string]bool{
-		"shellcheck": true, "chart": true, "security": true, "release-diagnostic": true,
+		"shellcheck": true, "chart": true, "security": true, "release-diagnostic": true, "test-openbao": true,
 	}
 )
 
