@@ -29,8 +29,8 @@ func applyKVMLeaves(workflow *wfv1.Workflow, config Config) error {
 	}
 
 	if !config.KVMEnabled {
-		return fmt.Errorf("argojob: workflow declares %s but vm.kvm.enabled is false on this Oberth; "+
-			"the server cannot schedule KVM device access", argoworkflow.KVMTemplatesAnnotation)
+		return fmt.Errorf("%w: workflow declares %s; the server cannot schedule KVM device access",
+			ErrKVMNotEnabled, argoworkflow.KVMTemplatesAnnotation)
 	}
 
 	nameSet := make(map[string]bool, len(names))

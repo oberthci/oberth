@@ -1,6 +1,7 @@
 package argojob
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -167,8 +168,8 @@ func TestBuildKVMSwitchOff(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected infrastructure error when KVMEnabled is false")
 	}
-	if !strings.Contains(err.Error(), "vm.kvm.enabled is false") {
-		t.Fatalf("error should mention vm.kvm.enabled: %v", err)
+	if !errors.Is(err, ErrKVMNotEnabled) {
+		t.Fatalf("error should wrap ErrKVMNotEnabled: %v", err)
 	}
 	if !strings.Contains(err.Error(), argoworkflow.KVMTemplatesAnnotation) {
 		t.Fatalf("error should mention the annotation: %v", err)
