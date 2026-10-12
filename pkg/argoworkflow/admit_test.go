@@ -96,7 +96,7 @@ spec:
           duration: "5"
           factor: "2"
       container:
-        image: golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3
+        image: golang:1.26.9-trixie@sha256:f06b7122f888680048afb247c4e5f49c0069eb6c4c1ccae0f3f4834527a8d22c
         command: [/usr/local/go/bin/go, version]
         resources:
           requests:

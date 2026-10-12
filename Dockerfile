@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1.7@sha256:a57df69d0ea827fb7266491f2813635de6f17269be881f696fbfdf2d83dda33e
 # The build stage runs on the build host's native platform and cross-compiles
 # with GOOS/GOARCH; only the runtime stage below is per-target-platform.
-FROM --platform=$BUILDPLATFORM golang:1.26.6-alpine3.23@sha256:5978cc992ad5ef96a7469713c8af849c1433824761ce3be2c56381403cd8d9a3 AS build
+FROM --platform=$BUILDPLATFORM golang:1.26.9-alpine3.23@sha256:6750308561953d451210ed1a8086d36c8c8bdcbf672d38d9d0d424b8a7a0216c AS build
 ENV GOTOOLCHAIN=local GOWORK=off
 ARG BUILD_CACHE_NAMESPACE=default
 

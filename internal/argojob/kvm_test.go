@@ -31,7 +31,7 @@ spec:
         depends: build
   - name: build
     container:
-      image: golang:1.26.6-trixie@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      image: golang:1.26.9-trixie@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
       command: [/bin/true]
   - name: kernel-test
     metadata:
@@ -52,7 +52,7 @@ spec:
       - name: timeout
         default: "300"
     container:
-      image: golang:1.26.6-trixie@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      image: golang:1.26.9-trixie@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
       command: [/bin/sh, -c]
       args: ["echo running {{inputs.parameters.kernel-version}} {{inputs.parameters.arch}}"]
       resources:

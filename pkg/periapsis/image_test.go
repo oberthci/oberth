@@ -40,7 +40,7 @@ func TestValidateRunnerImageAcceptsGoodImages(t *testing.T) {
 	for _, image := range []string{
 		// tag + digest (the recommended form)
 		"golang:1.26-alpine@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-		"golang:1.26-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3",
+		"golang:1.26-trixie@sha256:f06b7122f888680048afb247c4e5f49c0069eb6c4c1ccae0f3f4834527a8d22c",
 		"registry.example/base/go:1.26@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
 		// digest-only (no tag, but repository + digest)
 		"golang@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",

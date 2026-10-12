@@ -20,8 +20,8 @@
       "oberth.ci/nonroot-templates": "test",
       "oberth.ci/ref": "refs/heads/main",
       "oberth.ci/run-id": "run-abc123",
-      "oberth.ci/spec-identity": "fffdd1deac54586941579d0cd523ef3dccef580e6e315dafeee62806277c7cd9",
-      "oberth.ci/verified-controller-profile": "nonroot-static-v1:147a79f1082934c1b8308d3d19d109e57b60eb0cf9452d4167841f86a5711303",
+      "oberth.ci/spec-identity": "ef759180214ecaa8b689408b527c5ec3703d4c8e14caf68384422a4f20e4f0b4",
+      "oberth.ci/verified-controller-profile": "nonroot-static-v1:958ebb5671694b6ec353653a5d104fb1d666ff46322afdd76d44840192e21609",
       "workflows.argoproj.io/pod-name-format": "v2"
     }
   },
@@ -34,7 +34,7 @@
         "metadata": {},
         "script": {
           "name": "",
-          "image": "golang:1.26.6-trixie@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "image": "golang:1.26.9-trixie@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
           "command": [
             "/bin/sh"
           ],
@@ -150,7 +150,7 @@
         "metadata": {},
         "container": {
           "name": "",
-          "image": "golang:1.26.6-trixie@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "image": "golang:1.26.9-trixie@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
           "command": [
             "/bin/true"
           ],

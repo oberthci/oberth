@@ -492,7 +492,7 @@ func assertBurnGraph(t *testing.T, workflow *wfv1.Workflow, entrypoint string, w
 
 // digestPinnedImage matches an image reference that names an exact Go patch
 // release and an immutable digest, e.g.
-// golang:1.26.6-trixie@sha256:<64 hex>.
+// golang:1.26.9-trixie@sha256:<64 hex>.
 var digestPinnedImage = regexp.MustCompile(`^golang:\d+\.\d+\.\d+-[a-z0-9.]+@sha256:[0-9a-f]{64}$`)
 
 // pipelineImages returns every container image the document declares, keyed by
@@ -530,14 +530,14 @@ func pipelineImages(t *testing.T, name string) map[string]string {
 //     tag pinned to a stale digest reads as current while shipping an old
 //     stdlib -- that is what hid these CVEs.
 //   - Branch CI uses the reviewed multi-platform index and release uses its
-//     Linux amd64 child manifest. Both are Go 1.26.6 from the same image index.
+//     Linux amd64 child manifest. Both are Go 1.26.9 from the same image index.
 //     The child runs release's amd64-only publisher tools on arm64 kind nodes;
 //     CI stays native so its tests finish before the workflow deadline.
 //     A partial image update fails here before an immutable tag is pushed.
 func TestOberthPipelinesPinCompatibleGoToolchains(t *testing.T) {
 	expected := map[string]string{
-		"build.yaml":   "golang:1.26.6-trixie@sha256:ab563819a16cfe5faff0f96a8bb598fbb0e400ab2ac751996e60abcb23b106a3",
-		"release.yaml": "golang:1.26.6-trixie@sha256:23fdfd3a6abc97c81e32a724cdd1cf541c06c416eb04d717815f4ed7c75623d0",
+		"build.yaml":   "golang:1.26.9-trixie@sha256:f06b7122f888680048afb247c4e5f49c0069eb6c4c1ccae0f3f4834527a8d22c",
+		"release.yaml": "golang:1.26.9-trixie@sha256:cf7e928cb9edc2ed8b3cc6fe77ee1ee30b9fea28149564c8840097321a7600ea",
 	}
 	for document, want := range expected {
 		count := 0
@@ -550,7 +550,7 @@ func TestOberthPipelinesPinCompatibleGoToolchains(t *testing.T) {
 				continue
 			}
 			if !digestPinnedImage.MatchString(image) {
-				t.Errorf("%s template %q image %q must name an exact Go patch release and a digest, e.g. golang:1.26.6-trixie@sha256:<64 hex>",
+				t.Errorf("%s template %q image %q must name an exact Go patch release and a digest, e.g. golang:1.26.9-trixie@sha256:<64 hex>",
 					document, template, image)
 				continue
 			}

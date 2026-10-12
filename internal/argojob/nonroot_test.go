@@ -27,14 +27,14 @@ spec:
   templates:
   - name: test
     container:
-      image: golang:1.26.6-trixie@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      image: golang:1.26.9-trixie@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
       command: [/bin/true]
       env:
       - {name: GOCACHE, value: /bad/shared}
       - {name: GOTMPDIR, value: /bad/long/path}
   - name: ordinary
     container:
-      image: golang:1.26.6-trixie@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      image: golang:1.26.9-trixie@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
       command: [/bin/true]
 `
 

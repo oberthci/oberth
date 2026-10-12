@@ -39,7 +39,7 @@ spec:
       - name: arch
         default: amd64
     container:
-      image: golang:1.26.6-trixie@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      image: golang:1.26.9-trixie@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
       command: [/bin/sh, -c]
       args: ["echo running kernel test for {{inputs.parameters.kernel-version}}"]
 `))
