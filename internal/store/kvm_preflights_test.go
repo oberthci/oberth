@@ -243,13 +243,15 @@ func TestKVMPreflightLifecycleAndReceiptAttacks(t *testing.T) {
 	mustPilot(t, s.RecordKVMReceipt(ctx, intent.RunID, receipt))
 	receipt.Report.ArtifactSetDigest = strings.Repeat("f", 64)
 	requireKVMStateError(t, s.RecordKVMReceipt(ctx, intent.RunID, receipt))
-	// Persisted corruption is rejected on reads, including the publication path.
+	// SQL writes cannot replace accepted evidence; reads also reject corrupt evidence.
 	receipt.Termination.ExitCode = 1
 	body, err := json.Marshal(receipt)
 	mustPilot(t, err)
 	_, err = s.db.Exec(`UPDATE vm_executions SET receipt_json=? WHERE run_id=?`, string(body), intent.RunID)
-	mustPilot(t, err)
-	_, err = s.KVMPreflight(ctx, intent.RunID)
+	requireVMJournalGuard(t, err, "VM execution evidence is immutable")
+	// Exercise decoding independently without removing the database guard.
+	_, err = scanKVMExecution(s.db.QueryRow(`SELECT execution_kind,intent_json,spec_identity,
+        workflow_uid,submitted,rejected,cleaned,?,refusal_json FROM vm_executions WHERE run_id=?`, string(body), intent.RunID))
 	requireKVMStateError(t, err)
 }
 func TestKVMPreflightDefinitiveRejectionAndAuditRollback(t *testing.T) {
