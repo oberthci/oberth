@@ -14,7 +14,7 @@ import (
 	"github.com/oberthci/oberth/internal/vmrunner"
 )
 
-const kvmExecutionColumns = `execution_kind,intent_json,spec_identity,workflow_uid,submitted,rejected,cleaned,receipt_json`
+const kvmExecutionColumns = `execution_kind,intent_json,spec_identity,workflow_uid,submitted,rejected,cleaned,receipt_json,refusal_json`
 
 // ReserveKVMPreflight admits a credential-free preflight before the parent Job.
 // AI-INVARIANT: the empty parent job_name is the delivery interlock even when
@@ -112,7 +112,7 @@ func (s *Store) PendingKVMPreflights(ctx context.Context) ([]vmrunner.KVMExecuti
 
 func (s *Store) SubmitKVMPreflight(ctx context.Context, runID string) error {
 	return s.changeKVMExecution(ctx, runID, "kvm.create-submitted", func(tx *sql.Tx, current vmrunner.KVMExecution, now int64) error {
-		if current.Submitted || current.Rejected || current.Cleaned || !fromUnixNano(now).Before(current.Intent.Deadline) {
+		if current.Submitted || current.Rejected || current.Cleaned || current.Refusal != nil || !fromUnixNano(now).Before(current.Intent.Deadline) {
 			return ErrInvalidState
 		}
 		if _, err := eligibleKVMParent(ctx, tx, current.Intent); err != nil {
@@ -159,7 +159,7 @@ func (s *Store) RejectKVMPreflight(ctx context.Context, runID string) error {
 
 func (s *Store) RecordKVMReceipt(ctx context.Context, runID string, receipt vmrunner.KVMReceipt) error {
 	return s.changeKVMExecution(ctx, runID, "kvm.receipt", func(tx *sql.Tx, current vmrunner.KVMExecution, now int64) error {
-		if !current.Submitted || current.Rejected || current.Cleaned || current.WorkflowUID == "" || receipt.WorkflowUID != current.WorkflowUID || receipt.Validate(current.Intent) != nil || receipt.FinishedAt.After(fromUnixNano(now)) {
+		if !current.Submitted || current.Rejected || current.Cleaned || current.Refusal != nil || current.WorkflowUID == "" || receipt.WorkflowUID != current.WorkflowUID || receipt.Validate(current.Intent) != nil || receipt.FinishedAt.After(fromUnixNano(now)) {
 			return ErrInvalidState
 		}
 		if _, err := eligibleKVMParent(ctx, tx, current.Intent); err != nil {
@@ -246,8 +246,8 @@ func (s *Store) auditKVMExecution(ctx context.Context, tx *sql.Tx, actor, action
 
 func scanKVMExecution(row rowScanner) (vmrunner.KVMExecution, error) {
 	var value vmrunner.KVMExecution
-	var kind, intent, identity, receipt string
-	if err := row.Scan(&kind, &intent, &identity, &value.WorkflowUID, &value.Submitted, &value.Rejected, &value.Cleaned, &receipt); err != nil {
+	var kind, intent, identity, receipt, refusal string
+	if err := row.Scan(&kind, &intent, &identity, &value.WorkflowUID, &value.Submitted, &value.Rejected, &value.Cleaned, &receipt, &refusal); err != nil {
 		return value, err
 	}
 	if kind != "kvm-preflight" {
@@ -270,7 +270,44 @@ func scanKVMExecution(row rowScanner) (vmrunner.KVMExecution, error) {
 			return value, fmt.Errorf("%w: corrupted KVM receipt", ErrInvalidState)
 		}
 	}
+	if refusal != "" {
+		value.Refusal = &vmrunner.KVMRefusal{}
+		if err := json.Unmarshal([]byte(refusal), value.Refusal); err != nil {
+			return value, err
+		}
+		canonical, _ := json.Marshal(value.Refusal)
+		if string(canonical) != refusal || value.Refusal.Validate() != nil || value.Receipt != nil || (value.Refusal.Termination != nil && value.Refusal.Termination.WorkflowUID != value.WorkflowUID) {
+			return value, fmt.Errorf("%w: corrupted KVM refusal", ErrInvalidState)
+		}
+	}
+
 	return value, nil
 }
 
 var _ vmrunner.KVMJournal = (*Store)(nil)
+
+// RecordKVMRefusal records bounded negative evidence even after parent
+// cancellation; it can never replace a successful receipt or another refusal.
+func (s *Store) RecordKVMRefusal(ctx context.Context, runID string, refusal vmrunner.KVMRefusal) error {
+	return s.changeKVMExecution(ctx, runID, "kvm.refusal", func(tx *sql.Tx, current vmrunner.KVMExecution, now int64) error {
+		if refusal.Validate() != nil || refusal.ObservedAt.After(fromUnixNano(now)) || refusal.ObservedAt.Before(current.Intent.AdmittedAt) || current.Receipt != nil || current.Cleaned {
+			return ErrInvalidState
+		}
+		if refusal.Termination != nil && (current.WorkflowUID == "" || refusal.Termination.WorkflowUID != current.WorkflowUID) {
+			return ErrInvalidState
+		}
+		body, err := json.Marshal(refusal)
+		if err != nil || len(body) > 4096 {
+			return ErrInvalid
+		}
+		if current.Refusal != nil {
+			previous, _ := json.Marshal(current.Refusal)
+			if string(previous) == string(body) {
+				return nil
+			}
+			return ErrInvalidState
+		}
+		_, err = tx.ExecContext(ctx, `UPDATE vm_executions SET refusal_json=?,updated_at=? WHERE run_id=?`, string(body), now, runID)
+		return err
+	})
+}

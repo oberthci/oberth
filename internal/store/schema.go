@@ -997,6 +997,7 @@ END;`,
     instance_json TEXT NOT NULL DEFAULT '',
     workflow_uid TEXT NOT NULL DEFAULT '',
     receipt_json TEXT NOT NULL DEFAULT '',
+    refusal_json TEXT NOT NULL DEFAULT '',
     submitted INTEGER NOT NULL DEFAULT 0 CHECK (submitted IN (0,1)),
     rejected INTEGER NOT NULL DEFAULT 0 CHECK (rejected IN (0,1)),
     cleaning INTEGER NOT NULL DEFAULT 0 CHECK (cleaning IN (0,1)),
@@ -1004,7 +1005,8 @@ END;`,
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL,
     CHECK (cleaned=0 OR cleaning=1),
-    CHECK (execution_kind!='vm' OR (workflow_uid='' AND receipt_json=''
+    CHECK (receipt_json='' OR refusal_json=''),
+    CHECK (execution_kind!='vm' OR (workflow_uid='' AND receipt_json='' AND refusal_json=''
         AND (instance_json='' OR submitted=1)
         AND (rejected=0 OR (submitted=1 AND instance_json=''))
         AND (cleaned=0 OR submitted=0 OR rejected=1 OR instance_json!=''))),

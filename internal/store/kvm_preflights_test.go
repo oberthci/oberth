@@ -417,3 +417,49 @@ func TestKVMPreflightRecoveryRetainsCleanedUndeliveredParent(t *testing.T) {
 		t.Fatal("terminal cleaned parent still pending")
 	}
 }
+
+func TestKVMPreflightRefusalIsImmutableAndSurvivesCleanup(t *testing.T) {
+	ctx := context.Background()
+	now := time.Now().UTC()
+	s := testStore(t, &now)
+	intent := kvmIntent(t, s)
+	_, err := s.ReserveKVMPreflight(ctx, intent)
+	mustPilot(t, err)
+	mustPilot(t, s.SubmitKVMPreflight(ctx, intent.RunID))
+	mustPilot(t, s.BindKVMPreflight(ctx, intent.RunID, "workflow-uid"))
+	terminated := kvmReceipt(intent).Termination
+	terminated.RestartCount = 1
+	refusal := vmrunner.KVMRefusal{Code: "observation_refused", ObservedAt: now, Termination: &terminated}
+	mustPilot(t, s.RecordKVMRefusal(ctx, intent.RunID, refusal))
+	mustPilot(t, s.RecordKVMRefusal(ctx, intent.RunID, refusal))
+	replacement := refusal
+	replacement.Code = "canceled"
+	requireKVMStateError(t, s.RecordKVMRefusal(ctx, intent.RunID, replacement))
+	requireKVMStateError(t, s.RecordKVMReceipt(ctx, intent.RunID, kvmReceipt(intent)))
+	mustPilot(t, s.CompleteKVMPreflightCleanup(ctx, intent.RunID, "workflow-uid"))
+	value, err := s.KVMPreflight(ctx, intent.RunID)
+	mustPilot(t, err)
+	if !value.Cleaned || value.Receipt != nil || value.Refusal == nil || value.Refusal.Termination.RestartCount != 1 {
+		t.Fatalf("negative evidence lost: %#v", value)
+	}
+	_, err = s.SetRunJobName(ctx, intent.RunID, "main")
+	requireKVMStateError(t, err)
+}
+func TestKVMPreflightRefusalRejectsReplayAndCannotReplaceSuccess(t *testing.T) {
+	ctx := context.Background()
+	now := time.Now().UTC()
+	s := testStore(t, &now)
+	intent := kvmIntent(t, s)
+	_, err := s.ReserveKVMPreflight(ctx, intent)
+	mustPilot(t, err)
+	for _, refusal := range []vmrunner.KVMRefusal{
+		{Code: "free-form log", ObservedAt: now}, {Code: "canceled"}, {Code: "deadline", ObservedAt: now.Add(time.Second)},
+		{Code: "observation_refused", ObservedAt: now, Termination: &vmrunner.KVMTerminationRecord{WorkflowUID: "foreign"}},
+	} {
+		requireKVMStateError(t, s.RecordKVMRefusal(ctx, intent.RunID, refusal))
+	}
+	mustPilot(t, s.SubmitKVMPreflight(ctx, intent.RunID))
+	mustPilot(t, s.BindKVMPreflight(ctx, intent.RunID, "workflow-uid"))
+	mustPilot(t, s.RecordKVMReceipt(ctx, intent.RunID, kvmReceipt(intent)))
+	requireKVMStateError(t, s.RecordKVMRefusal(ctx, intent.RunID, vmrunner.KVMRefusal{Code: "canceled", ObservedAt: now}))
+}
