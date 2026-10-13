@@ -319,6 +319,7 @@ type Promotion struct {
 	Actor        string
 	Status       PromotionStatus
 	RunID        string
+	GrantID      string
 	Error        string
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
@@ -346,6 +347,47 @@ type PromotionSpec struct {
 	PreviousSHA  string
 	ResultSHA    string
 	Actor        string
+	GrantID      string
+}
+
+// PromotionGrant is an append-only, audited record that authorizes a non-admin
+// uplink to promote an exact (repository, SHA, target) tuple. Created by an
+// admin uplink; consumed atomically when its matching promotion succeeds.
+type PromotionGrant struct {
+	ID                string
+	RepoID            int64
+	SourceSHA         string
+	TargetRef         string
+	Issuer            string
+	IssuerFingerprint string
+	Note              string
+	CreatedAt         time.Time
+	ExpiresAt         time.Time
+	RevokedBy         string
+	RevokedAt         *time.Time
+	ConsumedBy        string // Promotion ID
+	ConsumedAt        *time.Time
+}
+
+// Active reports whether the grant is neither expired, revoked, nor consumed.
+func (g PromotionGrant) Active(now time.Time) bool {
+	return g.RevokedAt == nil && g.ConsumedAt == nil && now.Before(g.ExpiresAt)
+}
+
+type PromotionGrantSpec struct {
+	RepoID            int64
+	SourceSHA         string
+	TargetRef         string
+	Issuer            string
+	IssuerFingerprint string
+	Note              string
+	ExpiresAt         time.Time
+}
+
+type PromotionGrantListFilter struct {
+	RepoID    int64
+	SourceSHA string
+	Active    *bool // nil = all, true = active only, false = inactive only
 }
 
 // Publication is the durable handoff between a passing CI result and the

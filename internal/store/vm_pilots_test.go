@@ -371,6 +371,47 @@ func TestPilotJournalMigration14PreservesLegacyCapacity(t *testing.T) {
 	// Reconstruct precisely the v13 journal shape with an unknown create.
 	_, err = s.db.Exec(`DROP TABLE vm_suite_resources; DROP TABLE vm_suite_executions; DROP TABLE vm_capacity_slots;
 ALTER TABLE runs DROP COLUMN concurrency_group; DROP TABLE IF EXISTS grant_declarations;
+DROP TRIGGER IF EXISTS promotions_guard_update;
+DROP TRIGGER IF EXISTS promotion_grants_no_delete;
+DROP TRIGGER IF EXISTS promotion_grants_guard_update;
+DROP TABLE IF EXISTS promotion_grants;
+ALTER TABLE promotions DROP COLUMN grant_id;
+CREATE TRIGGER promotions_guard_update
+BEFORE UPDATE ON promotions
+WHEN NOT (
+    OLD.status = 'pending'
+    AND NEW.sequence = OLD.sequence
+    AND NEW.id = OLD.id
+    AND NEW.repo_id = OLD.repo_id
+    AND NEW.source_branch = OLD.source_branch
+    AND NEW.source_sha = OLD.source_sha
+    AND NEW.target_ref = OLD.target_ref
+    AND NEW.actor = OLD.actor
+    AND NEW.created_at = OLD.created_at
+    AND (
+        (
+            NEW.status = 'pending'
+            AND NEW.error = OLD.error
+            AND (
+                (NEW.previous_sha = OLD.previous_sha AND NEW.result_sha = OLD.result_sha)
+                OR (
+                    OLD.previous_sha = '' AND OLD.result_sha = ''
+                    AND NEW.previous_sha != '' AND NEW.result_sha != ''
+                )
+            )
+            AND (NEW.run_id = OLD.run_id OR OLD.run_id = '')
+        )
+        OR (
+            NEW.status IN ('passed', 'failed', 'interrupted')
+            AND NEW.previous_sha = OLD.previous_sha
+            AND NEW.result_sha = OLD.result_sha
+            AND (NEW.run_id = OLD.run_id OR OLD.run_id = '')
+        )
+    )
+)
+BEGIN
+    SELECT RAISE(ABORT, 'promotion transition is immutable');
+END;
 DELETE FROM schema_migrations WHERE version>=14;`)
 	mustPilot(t, err)
 	mustPilot(t, s.Close())

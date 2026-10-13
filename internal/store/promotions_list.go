@@ -20,7 +20,7 @@ func (s *Store) ListPromotions(ctx context.Context, filter model.PromotionListFi
 	}
 	rows, err := s.db.QueryContext(ctx, `
 SELECT sequence, id, repo_id, source_branch, source_sha, target_ref, previous_sha,
-       result_sha, actor, status, run_id, error, created_at, updated_at
+       result_sha, actor, status, run_id, grant_id, error, created_at, updated_at
 FROM promotions
 WHERE (? = 0 OR repo_id = ?) AND (? = '' OR source_sha = ?)
   AND (? = '' OR status = ?) AND (? = 0 OR sequence < ?)

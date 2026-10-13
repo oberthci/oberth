@@ -568,13 +568,15 @@ continuity checks; it must never be used to reset or bypass those checks.
   authority is configured.
 - A bearer credential maps to exactly one uplink public-key fingerprint and
   identity. Plaintext tokens are displayed once and are never persisted.
-- MCP exposes 32 tools: `status`, bounded named-step `logs`, exact-run
+- MCP exposes 35 tools: `status`, bounded named-step `logs`, exact-run
   `run_get`/`run_logs`, `artifacts`/`artifact_get`, `wait`, `sync`, `promote`,
   `promotion_list`, `promote_status`, `publish_retry`, issue
   create/get/get_many/update/append/close/reopen/delete/list/lock,
   secret-access list/allow/revoke, `repo_list`, `repo_remove`, `run_list`,
-  `system_status`, and admin-only `secretstore_plan` (#611),
-  `secretstore_sync_receipt` (#712), and `secretstore_verify`.
+  `system_status`, admin-only `secretstore_plan` (#611),
+  `secretstore_sync_receipt` (#712), `secretstore_verify`, and
+  admin-only `promote_grant`, `promote_grant_revoke`, plus read-only
+  `promote_grant_list` (#826).
 - MCP `run_get` and `run_logs` accept the same full IDs and unique prefixes
   as the dashboard run views. ID prefix resolution is read-only; scheduler
   and mutation lookups still require exact durable IDs. `run_logs` and `logs`
@@ -1239,6 +1241,25 @@ continuity checks; it must never be used to reset or bypass those checks.
   truncated success. The tool changes no infrastructure configuration, grants,
   roles, or policies. The Go/Kubernetes SDK's immutable token strings retain
   the existing runtime/GC limitation; dropping references is not byte zeroing.
+
+### Promotion grants (#826)
+
+Non-admin uplinks may promote only when a matching unexpired, unrevoked,
+unconsumed promotion grant exists for the exact (repository, SHA, target).
+Admin uplinks retain direct authority; their promotions record an empty
+`grant_id` (distinguishable as "direct" in the audit chain).
+
+The `promotion_grants` table is append-only (delete trigger refuses, update
+trigger permits only revocation and consumption transitions). Every creation,
+revocation, and consumption appends to the gap-free audit chain. Grants are
+single-use: consumed atomically with promotion creation.
+
+MCP tools: `promote_grant` (admin, creates a time-bounded grant),
+`promote_grant_revoke` (admin, revokes an active grant),
+`promote_grant_list` (read-only, optional repo/sha/status filters).
+
+Maximum grant lifetime is a documented knob
+(`PromotionGrantMaxLifetime`, default 24 h, hard ceiling 168 h / 7 days).
 
 ### Trivy cache guard (#655)
 

@@ -204,6 +204,18 @@ type SecretAccessStore interface {
 	PendingGrantDeclarations(ctx context.Context, repo string) ([]store.PendingGrantDeclaration, error)
 }
 
+// PromotionGrantStore is the narrow contract for promotion grant operations.
+// Non-admin uplinks must present a matching grant to promote; admin uplinks
+// retain direct authority.
+type PromotionGrantStore interface {
+	AppendPromotionGrant(context.Context, model.PromotionGrantSpec) (model.PromotionGrant, error)
+	RevokePromotionGrant(ctx context.Context, id, actor string) (model.PromotionGrant, error)
+	MatchingPromotionGrant(ctx context.Context, repoID int64, sha, target string) (model.PromotionGrant, error)
+	ConsumePromotionGrant(ctx context.Context, grantID, promotionID, actor string) error
+	ListPromotionGrants(context.Context, model.PromotionGrantListFilter) ([]model.PromotionGrant, error)
+	PromotionGrant(context.Context, string) (model.PromotionGrant, error)
+}
+
 type SchedulerStore interface {
 	Repository(context.Context, int64) (model.Repository, error)
 	// Upstream resolves a repository's registered upstream so release

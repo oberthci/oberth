@@ -13,7 +13,7 @@ type migration struct {
 func LatestMigrationVersion() int { return latestMigrationVersion }
 
 const (
-	latestMigrationVersion = 18
+	latestMigrationVersion = 19
 	// oberthSchemaIdentity is the fresh-deployment default. Existing deployments
 	// supply their original immutable identity through ProtocolConfig; bootstrap
 	// SQL and legacy schema validation use that exact configured operand.
@@ -886,5 +886,105 @@ END;`,
     last_seen_at INTEGER NOT NULL,
     PRIMARY KEY (repo, step, path)
 ) WITHOUT ROWID;`,
+	},
+	{
+		// v19: Promotion grants (issue #826). Audited per-uplink exact-SHA
+		// promotion authorization records. A non-admin uplink must present a
+		// matching unexpired, unrevoked, unconsumed grant to promote.
+		version: 19,
+		sql: `CREATE TABLE promotion_grants (
+    id TEXT PRIMARY KEY,
+    repo_id INTEGER NOT NULL REFERENCES repositories(id),
+    source_sha TEXT NOT NULL CHECK (length(source_sha) = 40),
+    target_ref TEXT NOT NULL CHECK (target_ref != ''),
+    issuer TEXT NOT NULL CHECK (issuer != ''),
+    issuer_fingerprint TEXT NOT NULL CHECK (issuer_fingerprint != ''),
+    note TEXT NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL,
+    expires_at INTEGER NOT NULL,
+    revoked_by TEXT NOT NULL DEFAULT '',
+    revoked_at INTEGER,
+    consumed_by TEXT NOT NULL DEFAULT '',
+    consumed_at INTEGER,
+    CHECK (expires_at > created_at),
+    CHECK ((revoked_at IS NULL) = (revoked_by = '')),
+    CHECK ((consumed_at IS NULL) = (consumed_by = ''))
+);
+CREATE INDEX promotion_grants_repo_idx ON promotion_grants(repo_id, created_at DESC);
+CREATE INDEX promotion_grants_match_idx ON promotion_grants(repo_id, source_sha, target_ref)
+    WHERE revoked_at IS NULL AND consumed_at IS NULL;
+
+ALTER TABLE promotions ADD COLUMN grant_id TEXT NOT NULL DEFAULT '';
+
+DROP TRIGGER promotions_guard_update;
+CREATE TRIGGER promotions_guard_update
+BEFORE UPDATE ON promotions
+WHEN NOT (
+    OLD.status = 'pending'
+    AND NEW.sequence = OLD.sequence
+    AND NEW.id = OLD.id
+    AND NEW.repo_id = OLD.repo_id
+    AND NEW.source_branch = OLD.source_branch
+    AND NEW.source_sha = OLD.source_sha
+    AND NEW.target_ref = OLD.target_ref
+    AND NEW.actor = OLD.actor
+    AND NEW.grant_id = OLD.grant_id
+    AND NEW.created_at = OLD.created_at
+    AND (
+        (
+            NEW.status = 'pending'
+            AND NEW.error = OLD.error
+            AND (
+                (NEW.previous_sha = OLD.previous_sha AND NEW.result_sha = OLD.result_sha)
+                OR (
+                    OLD.previous_sha = '' AND OLD.result_sha = ''
+                    AND NEW.previous_sha != '' AND NEW.result_sha != ''
+                )
+            )
+            AND (NEW.run_id = OLD.run_id OR OLD.run_id = '')
+        )
+        OR (
+            NEW.status IN ('passed', 'failed', 'interrupted')
+            AND NEW.previous_sha = OLD.previous_sha
+            AND NEW.result_sha = OLD.result_sha
+            AND (NEW.run_id = OLD.run_id OR OLD.run_id = '')
+        )
+    )
+)
+BEGIN
+    SELECT RAISE(ABORT, 'promotion transition is immutable');
+END;
+
+CREATE TRIGGER promotion_grants_no_delete
+BEFORE DELETE ON promotion_grants
+BEGIN
+    SELECT RAISE(ABORT, 'promotion grants are append-only');
+END;
+
+CREATE TRIGGER promotion_grants_guard_update
+BEFORE UPDATE ON promotion_grants
+WHEN NOT (
+    NEW.id = OLD.id
+    AND NEW.repo_id = OLD.repo_id
+    AND NEW.source_sha = OLD.source_sha
+    AND NEW.target_ref = OLD.target_ref
+    AND NEW.issuer = OLD.issuer
+    AND NEW.issuer_fingerprint = OLD.issuer_fingerprint
+    AND NEW.note = OLD.note
+    AND NEW.created_at = OLD.created_at
+    AND NEW.expires_at = OLD.expires_at
+    AND (
+        (OLD.revoked_at IS NULL AND NEW.revoked_at IS NOT NULL
+         AND OLD.revoked_by = '' AND NEW.revoked_by != ''
+         AND NEW.consumed_by = OLD.consumed_by AND NEW.consumed_at IS OLD.consumed_at)
+        OR
+        (OLD.consumed_at IS NULL AND NEW.consumed_at IS NOT NULL
+         AND OLD.consumed_by = '' AND NEW.consumed_by != ''
+         AND NEW.revoked_by = OLD.revoked_by AND NEW.revoked_at IS OLD.revoked_at)
+    )
+)
+BEGIN
+    SELECT RAISE(ABORT, 'promotion grant transition is immutable');
+END;`,
 	},
 }

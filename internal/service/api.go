@@ -48,59 +48,63 @@ const grantPolicySyncAdvisory = "Grant recorded; the identity map refreshes auto
 	"Until then, access fails closed."
 
 type APIConfig struct {
-	SchedulingObserver     SchedulingObserver
-	Admission              AdmissionObserver
-	Runs                   RunResolver
-	History                RunHistory
-	Repositories           RepositoryReader
-	Issues                 IssueRepository
-	Promotions             PromotionRepository
-	PromotionRuns          PromotionRunStore
-	Enqueues               EnqueueObserver
-	Git                    DeliveryGit
-	Refs                   RefResolver
-	Logs                   LogStore
-	Artifacts              ArtifactStore
-	Auditor                Auditor
-	Health                 Health
-	Signals                *Signals
-	MaximumWait            time.Duration
-	MutationGate           func(context.Context) error
-	PromotionWorkspaceRoot string
-	RemoveWorkspace        func(string) error
-	SecretAccess           SecretAccessStore
-	SecretStoreVerifier    SecretStoreVerifier
-	SecretAccessReconciler *AccessReconciler
-	RepositoryRemover      RepositoryRemover
-	RemoveGitCache         func(string) error
+	SchedulingObserver        SchedulingObserver
+	Admission                 AdmissionObserver
+	Runs                      RunResolver
+	History                   RunHistory
+	Repositories              RepositoryReader
+	Issues                    IssueRepository
+	Promotions                PromotionRepository
+	PromotionRuns             PromotionRunStore
+	Enqueues                  EnqueueObserver
+	Git                       DeliveryGit
+	Refs                      RefResolver
+	Logs                      LogStore
+	Artifacts                 ArtifactStore
+	Auditor                   Auditor
+	Health                    Health
+	Signals                   *Signals
+	MaximumWait               time.Duration
+	MutationGate              func(context.Context) error
+	PromotionWorkspaceRoot    string
+	RemoveWorkspace           func(string) error
+	SecretAccess              SecretAccessStore
+	SecretStoreVerifier       SecretStoreVerifier
+	SecretAccessReconciler    *AccessReconciler
+	RepositoryRemover         RepositoryRemover
+	RemoveGitCache            func(string) error
+	PromotionGrants           PromotionGrantStore
+	PromotionGrantMaxLifetime time.Duration // Default 24h, hard ceiling 168h (7 days).
 }
 
 type API struct {
-	schedulingObserver     SchedulingObserver
-	admission              AdmissionObserver
-	runs                   RunResolver
-	history                RunHistory
-	repositories           RepositoryReader
-	issues                 IssueRepository
-	promotions             PromotionRepository
-	promotionRuns          PromotionRunStore
-	enqueues               EnqueueObserver
-	git                    DeliveryGit
-	logs                   LogStore
-	artifacts              ArtifactStore
-	refs                   RefResolver
-	auditor                Auditor
-	health                 Health
-	signals                *Signals
-	maximumWait            time.Duration
-	mutationGate           func(context.Context) error
-	promotionWorkspaceRoot string
-	workspaces             *workspaceLifecycle
-	secretAccess           SecretAccessStore
-	secretStoreVerifier    SecretStoreVerifier
-	secretAccessReconciler *AccessReconciler
-	repositoryRemover      RepositoryRemover
-	removeGitCache         func(string) error
+	schedulingObserver        SchedulingObserver
+	admission                 AdmissionObserver
+	runs                      RunResolver
+	history                   RunHistory
+	repositories              RepositoryReader
+	issues                    IssueRepository
+	promotions                PromotionRepository
+	promotionRuns             PromotionRunStore
+	enqueues                  EnqueueObserver
+	git                       DeliveryGit
+	logs                      LogStore
+	artifacts                 ArtifactStore
+	refs                      RefResolver
+	auditor                   Auditor
+	health                    Health
+	signals                   *Signals
+	maximumWait               time.Duration
+	mutationGate              func(context.Context) error
+	promotionWorkspaceRoot    string
+	workspaces                *workspaceLifecycle
+	secretAccess              SecretAccessStore
+	secretStoreVerifier       SecretStoreVerifier
+	secretAccessReconciler    *AccessReconciler
+	repositoryRemover         RepositoryRemover
+	removeGitCache            func(string) error
+	promotionGrants           PromotionGrantStore
+	promotionGrantMaxLifetime time.Duration
 }
 
 func NewAPI(config APIConfig) (*API, error) {
@@ -132,6 +136,14 @@ func NewAPI(config APIConfig) (*API, error) {
 	if mutationGate == nil {
 		mutationGate = func(context.Context) error { return nil }
 	}
+	promotionGrantMaxLifetime := config.PromotionGrantMaxLifetime
+	if promotionGrantMaxLifetime <= 0 {
+		promotionGrantMaxLifetime = 24 * time.Hour
+	}
+	const promotionGrantHardCeiling = 168 * time.Hour // 7 days
+	if promotionGrantMaxLifetime > promotionGrantHardCeiling {
+		promotionGrantMaxLifetime = promotionGrantHardCeiling
+	}
 	return &API{
 		schedulingObserver: config.SchedulingObserver, admission: config.Admission,
 		runs: config.Runs, history: config.History, repositories: config.Repositories,
@@ -142,6 +154,7 @@ func NewAPI(config APIConfig) (*API, error) {
 		secretAccess: config.SecretAccess, secretAccessReconciler: config.SecretAccessReconciler,
 		secretStoreVerifier: config.SecretStoreVerifier,
 		repositoryRemover:   config.RepositoryRemover, removeGitCache: config.RemoveGitCache,
+		promotionGrants: config.PromotionGrants, promotionGrantMaxLifetime: promotionGrantMaxLifetime,
 	}, nil
 }
 
@@ -530,6 +543,12 @@ func (service *API) CallTool(ctx context.Context, actor api.Actor, name string, 
 		return service.publishRetry(ctx, actor, arguments.ID)
 	case "system_status":
 		return service.Status(ctx, actor)
+	case "promote_grant":
+		return service.promoteGrant(ctx, actor, raw)
+	case "promote_grant_revoke":
+		return service.promoteGrantRevoke(ctx, actor, raw)
+	case "promote_grant_list":
+		return service.promoteGrantList(ctx, actor, raw)
 	default:
 		return nil, fmt.Errorf("%w: unknown tool %q", ErrInvalidInput, name)
 	}
@@ -1310,7 +1329,10 @@ func (service *API) sync(ctx context.Context, actor api.Actor, repositoryName, s
 }
 
 func (service *API) promote(ctx context.Context, actor api.Actor, repositoryName, selector, target string) (result model.Promotion, resultErr error) {
-	if !actor.Admin {
+	// Fast-path rejection: a non-admin uplink without grant capability is
+	// rejected before any state is read, preserving the original behavior and
+	// the TestPromoteRejectsNonAdmin contract.
+	if !actor.Admin && service.promotionGrants == nil {
 		return model.Promotion{}, fmt.Errorf("%w: promote requires an admin uplink; mint one with: oberth uplink add --admin - <identity>@<host> < key.pub", ErrForbidden)
 	}
 	if service.git == nil || service.promotions == nil || service.promotionRuns == nil || service.enqueues == nil || service.auditor == nil {
@@ -1329,12 +1351,34 @@ func (service *API) promote(ctx context.Context, actor api.Actor, repositoryName
 	if candidate.RefKind != model.RefBranch || candidate.Status != model.RunPassed || !sameOID(candidate.TestedSHA, candidate.SHA) {
 		return model.Promotion{}, errors.New("service: promotion source must be the exactly tested green branch commit")
 	}
+
+	// Authorization: admin uplinks promote directly (grantID stays empty,
+	// recorded as "direct" authority in the audit chain). Non-admin uplinks
+	// must present a matching unexpired, unrevoked, unconsumed grant for the
+	// exact (repository, SHA, target). The grant ID is recorded on the
+	// promotion for audit linkage.
+	var grantID string
+	if !actor.Admin {
+		grant, matchErr := service.promotionGrants.MatchingPromotionGrant(ctx, repository.ID, candidate.SHA, target)
+		if matchErr != nil {
+			return model.Promotion{}, fmt.Errorf("%w: no matching promotion grant for repository %q, SHA %s, target %q; request one from an admin with promote_grant",
+				ErrForbidden, repositoryName, candidate.SHA, target)
+		}
+		grantID = grant.ID
+	}
+
 	promotion, err := service.promotions.AppendPromotion(ctx, model.PromotionSpec{
 		RepoID: repository.ID, SourceBranch: candidate.Ref, SourceSHA: candidate.SHA,
-		TargetRef: target, Actor: actor.Identity,
+		TargetRef: target, Actor: actor.Identity, GrantID: grantID,
 	})
 	if err != nil {
 		return model.Promotion{}, fmt.Errorf("admit promotion: %w", err)
+	}
+	// Consume the grant atomically with promotion creation: prevent reuse.
+	if grantID != "" && service.promotionGrants != nil {
+		if consumeErr := service.promotionGrants.ConsumePromotionGrant(ctx, grantID, promotion.ID, actor.Identity); consumeErr != nil {
+			return service.failAdmittedPromotion(ctx, promotion, "consume promotion grant: "+consumeErr.Error(), "")
+		}
 	}
 	if err := os.MkdirAll(service.promotionWorkspaceRoot, 0o750); err != nil {
 		return service.failAdmittedPromotion(ctx, promotion, "create promotion workspace root: "+err.Error(), "")
@@ -1657,7 +1701,8 @@ func mutatingTool(name string) bool {
 	case "sync", "promote", "publish_retry", "issue_create", "issue_update", "issue_append", "issue_close", "issue_reopen", "issue_delete", "issue_lock",
 		"access_allow", "access_revoke",
 		"repo_remove",
-		"secretstore_sync_receipt":
+		"secretstore_sync_receipt",
+		"promote_grant", "promote_grant_revoke":
 		return true
 	default:
 		return false

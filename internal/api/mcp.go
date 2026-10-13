@@ -408,5 +408,20 @@ func toolDefinitions() []map[string]any {
 			"expect":       map[string]any{"type": "array", "items": stringProperty("Expected <path-base>/<field>[,<field>,...]"), "maxItems": 32, "description": "Assert field names; implies keys (server tier only)"},
 			"timeout":      map[string]any{"type": "integer", "minimum": 1, "maximum": 120, "default": 45, "description": "Overall deadline in seconds, including TokenRequest and login"},
 		})),
+		tool("promote_grant", "Create a time-bounded promotion grant authorizing any non-admin uplink to promote an exact (repository, SHA, target) tuple. Admin uplink required. The grant is single-use: consumed atomically when a matching promotion succeeds.", object(map[string]any{
+			"repo":    stringProperty("Repository name"),
+			"sha":     stringProperty("Full 40-character source commit SHA"),
+			"branch":  stringProperty("Target branch"),
+			"expires": stringProperty("Expiry as RFC3339 timestamp or Go duration (e.g. 24h, 1h30m); defaults to the configured maximum lifetime"),
+			"note":    stringProperty("Optional free-text note for audit context"),
+		}, "repo", "sha", "branch")),
+		tool("promote_grant_revoke", "Revoke an active promotion grant. Admin uplink required. Already-consumed or already-revoked grants are refused.", object(map[string]any{
+			"id": stringProperty("Grant ID to revoke"),
+		}, "id")),
+		tool("promote_grant_list", "List promotion grants with optional repository, SHA, and status filters. Read-only.", object(map[string]any{
+			"repo":   stringProperty("Filter by exact repository name"),
+			"sha":    stringProperty("Filter by exact full source SHA"),
+			"status": map[string]any{"type": "string", "enum": []string{"active", "revoked", "expired", "consumed", "all"}, "description": "Filter by grant status (default: all)"},
+		})),
 	}
 }
