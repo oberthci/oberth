@@ -944,7 +944,7 @@ continuity checks; it must never be used to reset or bypass those checks.
     the profile in `tests.yaml` but cannot author the leaf, choose its image,
     or set its resource limits. After the workflow completes, the server reads
     the kubelet termination record (pod UID, container ID, exit code, restart
-    count, image digest), builds an audited receipt (schema v19
+    count, image digest), builds an audited receipt (schema v20
     `trusted_test_receipts`), and writes it to the store. A passing verdict
     requires exit 0, restart count 0, within the contract deadline, and the
     kubelet-reported image digest matching the configured harness image. Any
@@ -979,7 +979,7 @@ continuity checks; it must never be used to reset or bypass those checks.
   ```
   verdict=PASS|FAIL candidate=<40-hex> suite=<40-hex> guest=sha256:<64-hex>
   ```
-  **Receipt schema** (`trusted_test_receipts`, schema v19):
+  **Receipt schema** (`trusted_test_receipts`, schema v20):
   `run_id` (PK, FK runs), `profile`, `candidate_sha` (40), `suite_identity`
   (40), `guest_digest`, `contract_digest` (64), `verdict` (pending|passed|
   refused), `pod_uid`, `container_id`, `exit_code`, `restart_count`,
