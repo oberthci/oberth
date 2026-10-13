@@ -13,7 +13,7 @@ type migration struct {
 func LatestMigrationVersion() int { return latestMigrationVersion }
 
 const (
-	latestMigrationVersion = 19
+	latestMigrationVersion = 20
 	// oberthSchemaIdentity is the fresh-deployment default. Existing deployments
 	// supply their original immutable identity through ProtocolConfig; bootstrap
 	// SQL and legacy schema validation use that exact configured operand.
@@ -986,5 +986,38 @@ WHEN NOT (
 BEGIN
     SELECT RAISE(ABORT, 'promotion grant transition is immutable');
 END;`,
+	},
+	{
+		version: 20,
+		sql: `CREATE TABLE vm_executions_v20 (
+    run_id TEXT PRIMARY KEY REFERENCES runs(id),
+    execution_kind TEXT NOT NULL DEFAULT 'vm' CHECK (execution_kind IN ('vm','kvm-preflight')),
+    intent_json TEXT NOT NULL,
+    spec_identity TEXT NOT NULL,
+    instance_json TEXT NOT NULL DEFAULT '',
+    workflow_uid TEXT NOT NULL DEFAULT '',
+    receipt_json TEXT NOT NULL DEFAULT '',
+    submitted INTEGER NOT NULL DEFAULT 0 CHECK (submitted IN (0,1)),
+    rejected INTEGER NOT NULL DEFAULT 0 CHECK (rejected IN (0,1)),
+    cleaning INTEGER NOT NULL DEFAULT 0 CHECK (cleaning IN (0,1)),
+    cleaned INTEGER NOT NULL DEFAULT 0 CHECK (cleaned IN (0,1)),
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    CHECK (cleaned=0 OR cleaning=1),
+    CHECK (execution_kind!='vm' OR (workflow_uid='' AND receipt_json=''
+        AND (instance_json='' OR submitted=1)
+        AND (rejected=0 OR (submitted=1 AND instance_json=''))
+        AND (cleaned=0 OR submitted=0 OR rejected=1 OR instance_json!=''))),
+    CHECK (execution_kind!='kvm-preflight' OR (instance_json=''
+        AND (workflow_uid='' OR (submitted=1 AND rejected=0))
+        AND (rejected=0 OR (submitted=1 AND workflow_uid=''))
+        AND (receipt_json='' OR (submitted=1 AND rejected=0 AND workflow_uid!=''))
+        AND (cleaned=0 OR submitted=0 OR rejected=1 OR workflow_uid!='')))
+);
+INSERT INTO vm_executions_v20(run_id,intent_json,spec_identity,instance_json,submitted,rejected,cleaning,cleaned,created_at,updated_at)
+SELECT run_id,intent_json,spec_identity,instance_json,submitted,rejected,cleaning,cleaned,created_at,updated_at FROM vm_executions;
+DROP TABLE vm_executions;
+ALTER TABLE vm_executions_v20 RENAME TO vm_executions;
+CREATE UNIQUE INDEX vm_execution_capacity ON vm_executions(cleaned) WHERE cleaned=0;`,
 	},
 }

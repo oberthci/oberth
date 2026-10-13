@@ -567,6 +567,7 @@ WHERE id = ? AND (
     status IN ('queued', 'running') OR
     (status = 'interrupted' AND superseded_by != '')
 )
+AND NOT EXISTS (SELECT 1 FROM vm_executions WHERE run_id=runs.id AND execution_kind='kvm-preflight' AND (cleaned=0 OR receipt_json=''))
 RETURNING `+runColumns, jobName, unixNano(s.now()), id))
 	if errors.Is(err, sql.ErrNoRows) {
 		var exists int
@@ -962,7 +963,7 @@ func (s *Store) SetRunCredentialed(ctx context.Context, id string) error {
 SELECT COUNT(*) FROM runs
 WHERE id=? AND status IN ('queued','running') AND credentialed=0
   AND (EXISTS (SELECT 1 FROM vm_executions
-               WHERE run_id=runs.id AND submitted=1 AND cleaned=0)
+               WHERE run_id=runs.id AND (submitted=1 OR execution_kind='kvm-preflight') AND cleaned=0)
        OR EXISTS (SELECT 1 FROM vm_suite_executions
                   WHERE run_id=runs.id AND submitted=1 AND cleaned=0))`, id).Scan(&conflicts); err != nil {
 		return fmt.Errorf("check credential transition ownership: %w", err)

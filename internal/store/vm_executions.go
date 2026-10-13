@@ -16,7 +16,7 @@ import (
 
 var ErrVMCapacity = errors.New("store: VM capacity remains reserved")
 
-const vmExecutionColumns = `intent_json, spec_identity, instance_json, submitted, rejected, cleaning, cleaned, created_at, updated_at`
+const vmExecutionColumns = `execution_kind, intent_json, spec_identity, instance_json, submitted, rejected, cleaning, cleaned, created_at, updated_at`
 
 func (s *Store) ReserveVMExecution(ctx context.Context, intent vmrunner.ExecutionIntent) (vmrunner.Execution, error) {
 	if err := vmrunner.ValidateVMRunSpec(intent.Spec); err != nil {
@@ -39,7 +39,7 @@ func (s *Store) ReserveVMExecution(ctx context.Context, intent vmrunner.Executio
 		return vmrunner.Execution{}, err
 	}
 	defer func() { _ = tx.Rollback() }()
-	existing, err := scanVMExecution(tx.QueryRowContext(ctx, `SELECT `+vmExecutionColumns+` FROM vm_executions WHERE run_id=?`, intent.Spec.RunID))
+	existing, err := scanVMExecution(tx.QueryRowContext(ctx, `SELECT `+vmExecutionColumns+` FROM vm_executions WHERE execution_kind='vm' AND run_id=?`, intent.Spec.RunID))
 	if err == nil {
 		existingBody, _ := json.Marshal(existing.Intent)
 		if string(existingBody) != string(body) {
@@ -79,7 +79,7 @@ func (s *Store) ReserveVMExecution(ctx context.Context, intent vmrunner.Executio
 }
 
 func (s *Store) VMExecution(ctx context.Context, runID string) (vmrunner.Execution, error) {
-	value, err := scanVMExecution(s.db.QueryRowContext(ctx, `SELECT `+vmExecutionColumns+` FROM vm_executions WHERE run_id=?`, runID))
+	value, err := scanVMExecution(s.db.QueryRowContext(ctx, `SELECT `+vmExecutionColumns+` FROM vm_executions WHERE execution_kind='vm' AND run_id=?`, runID))
 	if errors.Is(err, sql.ErrNoRows) {
 		return value, ErrNotFound
 	}
@@ -203,7 +203,7 @@ func releaseVMCapacity(ctx context.Context, tx *sql.Tx, runID string) error {
 }
 
 func (s *Store) PendingVMExecutions(ctx context.Context) ([]vmrunner.Execution, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT `+vmExecutionColumns+` FROM vm_executions WHERE cleaned=0 ORDER BY created_at,run_id`)
+	rows, err := s.db.QueryContext(ctx, `SELECT `+vmExecutionColumns+` FROM vm_executions WHERE execution_kind='vm' AND cleaned=0 ORDER BY created_at,run_id`)
 	if err != nil {
 		return nil, err
 	}
@@ -225,7 +225,7 @@ func (s *Store) changeVMExecution(ctx context.Context, runID, action string, cha
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	current, err := scanVMExecution(tx.QueryRowContext(ctx, `SELECT `+vmExecutionColumns+` FROM vm_executions WHERE run_id=?`, runID))
+	current, err := scanVMExecution(tx.QueryRowContext(ctx, `SELECT `+vmExecutionColumns+` FROM vm_executions WHERE execution_kind='vm' AND run_id=?`, runID))
 	if err != nil {
 		return err
 	}
@@ -237,7 +237,7 @@ func (s *Store) changeVMExecution(ctx context.Context, runID, action string, cha
 	if err := change(tx, current, now); err != nil {
 		return err
 	}
-	after, err := scanVMExecution(tx.QueryRowContext(ctx, `SELECT `+vmExecutionColumns+` FROM vm_executions WHERE run_id=?`, runID))
+	after, err := scanVMExecution(tx.QueryRowContext(ctx, `SELECT `+vmExecutionColumns+` FROM vm_executions WHERE execution_kind='vm' AND run_id=?`, runID))
 	if err != nil {
 		return err
 	}
@@ -254,7 +254,7 @@ func (s *Store) changeVMExecution(ctx context.Context, runID, action string, cha
 }
 
 func (s *Store) auditVMExecution(ctx context.Context, tx *sql.Tx, actor, action, runID string, now int64) error {
-	current, err := scanVMExecution(tx.QueryRowContext(ctx, `SELECT `+vmExecutionColumns+` FROM vm_executions WHERE run_id=?`, runID))
+	current, err := scanVMExecution(tx.QueryRowContext(ctx, `SELECT `+vmExecutionColumns+` FROM vm_executions WHERE execution_kind='vm' AND run_id=?`, runID))
 	if err != nil {
 		return err
 	}
@@ -268,10 +268,13 @@ func (s *Store) auditVMExecution(ctx context.Context, tx *sql.Tx, actor, action,
 
 func scanVMExecution(row rowScanner) (vmrunner.Execution, error) {
 	var value vmrunner.Execution
-	var intent, identity, instance string
+	var kind, intent, identity, instance string
 	var created, updated int64
-	if err := row.Scan(&intent, &identity, &instance, &value.Submitted, &value.Rejected, &value.Cleaning, &value.Cleaned, &created, &updated); err != nil {
+	if err := row.Scan(&kind, &intent, &identity, &instance, &value.Submitted, &value.Rejected, &value.Cleaning, &value.Cleaned, &created, &updated); err != nil {
 		return value, err
+	}
+	if kind != "vm" {
+		return value, fmt.Errorf("%w: unexpected VM execution kind", ErrInvalidState)
 	}
 	if err := json.Unmarshal([]byte(intent), &value.Intent); err != nil {
 		return value, err
