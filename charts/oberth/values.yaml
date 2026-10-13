@@ -450,3 +450,9 @@ watchTunnel:
 
 podAnnotations: {}
 podLabels: {}
+
+# Public operator policy for protected host-side test suites. Each recipe binds
+# suite_sha256, guest_sha256, harness_image (OCI @sha256), suite_url and guest_url
+# (public HTTPS, no credentials/query). Empty keeps the feature disabled.
+trustedTests:
+  recipes: []

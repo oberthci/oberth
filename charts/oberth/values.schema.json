@@ -681,10 +681,14 @@
               "description": "When true, leaves declared in oberth.ci/kvm-templates receive devices.kubevirt.io/kvm: 1 and OBERTH_KVM=1. When false (default), such declarations fail at admission."
             }
           },
-          "required": ["enabled"]
+          "required": [
+            "enabled"
+          ]
         }
       },
-      "required": ["kvm"]
+      "required": [
+        "kvm"
+      ]
     },
     "promotion": {
       "type": "object",
@@ -855,6 +859,55 @@
           "minLength": 1,
           "maxLength": 128,
           "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        }
+      }
+    },
+    "trustedTests": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "recipes"
+      ],
+      "properties": {
+        "recipes": {
+          "type": "array",
+          "maxItems": 128,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "suite_sha256",
+              "guest_sha256",
+              "harness_image",
+              "suite_url",
+              "guest_url"
+            ],
+            "properties": {
+              "suite_sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "guest_sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "harness_image": {
+                "type": "string",
+                "maxLength": 512,
+                "pattern": "^[^@]+@sha256:[0-9a-f]{64}$"
+              },
+              "suite_url": {
+                "type": "string",
+                "maxLength": 2048,
+                "pattern": "^https://[^?@#]+$"
+              },
+              "guest_url": {
+                "type": "string",
+                "maxLength": 2048,
+                "pattern": "^https://[^?@#]+$"
+              }
+            }
+          }
         }
       }
     }

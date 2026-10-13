@@ -724,3 +724,12 @@ if render --set promotion.grantMaxLifetime=notaduration >/dev/null 2>&1; then ex
 render --set promotion=null >"$promotion_manifest"
 grep -Fq -- '--promotion-grant-max-lifetime=24h' "$promotion_manifest"
 rm -f "$promotion_manifest"
+
+# Reused pre-Lane-B values omit trustedTests entirely; empty stays disabled.
+trusted_legacy_manifest=$(mktemp)
+render --set trustedTests=null >"$trusted_legacy_manifest"
+if grep -Fq -- '--trusted-tests-recipes=' "$trusted_legacy_manifest"; then
+  echo "legacy values unexpectedly enabled trusted suites" >&2
+  exit 1
+fi
+rm -f "$trusted_legacy_manifest"

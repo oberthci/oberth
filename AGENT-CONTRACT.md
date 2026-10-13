@@ -935,10 +935,9 @@ continuity checks; it must never be used to reset or bypass those checks.
   scheduler reads the exact tested commit and a freshly fetched private
   upstream default ref before build creation and publication. A candidate
   cannot delete a published requirement. Unreadable policy fails closed,
-  including on publication recovery and fast-forward promotion. No protected
-  suite executor is activated yet, so a required profile fails explicitly;
+  including on publication recovery and fast-forward promotion. The legacy v1 profile still fails explicitly;
   build success, VM shutdown and guest log markers cannot replace test evidence.
-- The inactive Lane B foundation also decodes `.oberth/tests.yaml` version 2.
+- Lane B also decodes `.oberth/tests.yaml` version 2.
   Its exact fields are `version: 2`, `profile: kvm-suite-amd64-v1`,
   `suite_sha256`, `guest_sha256` (each 64 lowercase hexadecimal characters),
   and `artifacts` (1–32 unique canonical relative file paths). It accepts no
@@ -966,19 +965,23 @@ continuity checks; it must never be used to reset or bypass those checks.
   timestamps within the admitted deadline. Missing records and last-attempt
   termination do not count. Unsupported image-ID encodings fail closed.
   This validator does not establish the Pod's command, arguments or isolation;
-  future server admission must verify the effective immutable template,
-  sidecars and mounts independently. Container-written termination messages
-  are not a source of verdicts or authenticated inventory.
-- Lane B is **not activated** by these source foundations. Build and publication
-  gates still refuse every required v1 or v2 contract, including deleted
-  declarations retained from the upstream default branch and publication
-  recovery. Remaining implementation is: independently authenticated suite
-  and guest acquisition; a real pinned harness and protected guest result
-  protocol; server-appended isolated `trusted-tests` execution; exact candidate
-  artifact and process binding; durable receipts in `vm_executions` read by
-  the publication gate; restart/cleanup recovery and live negative receipts.
-  Neither bundle hashing nor successful QEMU shutdown proves test execution.
-  No new schema, RBAC, runtime flag or harness activation is introduced here.
+  the trusted controller additionally verifies the effective immutable template,
+  sidecars and mounts. Only the expected attested pinned harness can supply
+  the compact inventory report; guest/container text alone is never a verdict.
+- Lane B v2 execution requires an independent administrator recipe allowlist
+  (suite+guest digests, complete harness image digest, public HTTPS endpoints).
+  Empty recipes keep it disabled. The fixed approved static host `suite-driver`
+  owns assertions and host waitpid outcomes; guest output is untrusted input.
+  Candidate artifacts are privately snapshotted and enter only a pinned KVM
+  guest through read-only data transport. The server appends an isolated
+  trusted leaf after credential-free producers. Main CI/release delivery is
+  blocked until the v20 `vm_executions` receipt passes and exact owned resources
+  are gone. Release credentials and publication commands therefore follow
+  the suite gate. Publication rereads policy, exact recipe and actual normalized
+  kubelet evidence, including candidate/tag identity, inventory and artifact
+  digest. Uncertain creates/cleanup keep capacity; restart cleans and interrupts.
+  See `docs/trusted-kvm-suites.md` for the closed producer protocol, packaging,
+  trust assumptions, baseline-change behavior and external rollout prerequisites.
 - VM lifecycle state uses the audited schema-v13 `vm_executions` journal.
   Reserve immutable run/candidate/suite/image/profile identity before create;
   bind the API-issued UID before treating the object as owned. An ambiguous

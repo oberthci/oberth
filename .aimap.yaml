@@ -20,8 +20,8 @@ subsystems:
     paths: [pkg/argoworkflow, internal/argojob]
     contract: Each push submits an Argo Workflow from the repository's .oberth/build.yaml or .oberth/release.yaml; the server sets metadata, forces ServiceAccount identity by trigger tier, and injects the source checkout.
   vm_lifecycle:
-    paths: [internal/vmrunner, internal/store/vm_executions.go, internal/store/vm_pilots.go, internal/service/trusted_policy.go, docs/trusted-vm-pilot.md]
-    contract: Required-suite policy gates builds and publication; v13 lifecycle and inactive v14 Beacon pilot journals share one capacity authority. Protected result, restart and cleanup contracts do not activate a suite executor.
+    paths: [internal/vmrunner, internal/store/vm_executions.go, internal/store/kvm_preflights.go, internal/trustedharness, internal/store/vm_pilots.go, internal/service/trusted_policy.go, docs/trusted-vm-pilot.md]
+    contract: Required-suite policy gates builds and publication; v13 lifecycle and inactive v14 Beacon pilot journals share one capacity authority. Operator-approved v2 KVM suites execute in a separate credential-free preflight; immutable v20 receipts and cleanup gate delivery/publication. Empty recipe policy keeps execution disabled.
   control_plane:
     paths: [internal/api, internal/service, internal/app, internal/secretstore, cmd/oberth]
     contract: TLS 1.3 HTTPS/MCP and SSH compose the same durable identity and run state. Secret-store release secrets are fetched server-side at admission and exec-delivered to release Pods, never via etcd.

@@ -140,7 +140,8 @@ type serveOptions struct {
 	// infrastructure decision: a repository declares which leaves want it
 	// (oberth.ci/kvm-templates), but the device is only injected when this
 	// switch is on.
-	vmKVMEnabled bool
+	vmKVMEnabled       bool
+	trustedRecipesFile string
 
 	// Promotion grant maximum lifetime. Default 24h, hard ceiling 168h (7 days).
 	promotionGrantMaxLifetime time.Duration
@@ -232,6 +233,7 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 	flags.DurationVar(&options.argoWorkflowTimeout, "argo-workflow-timeout", 12*time.Hour, "ceiling on a Workflow's own activeDeadlineSeconds")
 	flags.IntVar(&options.argoWorkflowTTL, "argo-workflow-ttl", 3600, "finished Workflow retention in seconds")
 	flags.BoolVar(&options.vmKVMEnabled, "vm-kvm-enabled", false, "enable server-injected KVM device access for annotated leaves (requires KubeVirt device plugin)")
+	flags.StringVar(&options.trustedRecipesFile, "trusted-tests-recipes", "", "public operator-approved trusted suite recipes JSON file (requires --vm-kvm-enabled)")
 	flags.DurationVar(&options.promotionGrantMaxLifetime, "promotion-grant-max-lifetime", 24*time.Hour, "maximum lifetime for promotion grants (default 24h, hard ceiling 168h)")
 	flags.DurationVar(&options.gitCommandTimeout, "git-timeout", 10*time.Minute, "Git command timeout")
 	flags.DurationVar(&options.gcInterval, "git-gc-interval", 24*time.Hour, "periodic Git GC interval")
@@ -646,10 +648,21 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 	if len(options.secretStorePaths) > 0 {
 		logger.Printf("--secretstore-path values are used only by 'oberth secretstore verify' as default paths; admission uses the approval table exclusively")
 	}
+	recipes, err := readTrustedRecipes(options.trustedRecipesFile)
+	if err != nil {
+		return err
+	}
+	var trusted service.TrustedPreflight
+	if len(recipes) > 0 {
+		trusted, err = app.NewTrustedPreflights(argoJobs, database, recipes, filepath.Join(options.dataRoot, "work"), anchors.AllowMutation)
+		if err != nil {
+			return err
+		}
+	}
 	signals := service.NewSignals()
 	scheduler, err := service.NewScheduler(service.SchedulerConfig{
 		Store: database, Git: git, Logs: logs, Jobs: argoJobs, ReleaseJobs: argoJobs, Auditor: database,
-		Signals: signals, WorkspaceRoot: filepath.Join(options.dataRoot, "work"), MaxConcurrent: options.maxConcurrent,
+		TrustedPreflight: trusted, Signals: signals, WorkspaceRoot: filepath.Join(options.dataRoot, "work"), MaxConcurrent: options.maxConcurrent,
 		MutationGate:            anchors.AllowMutation,
 		AdmissionDiskFloorBytes: options.admissionDiskFloorBytes,
 	})

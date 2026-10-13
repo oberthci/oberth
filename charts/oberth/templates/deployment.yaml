@@ -1,3 +1,4 @@
+{{- $trustedTests := .Values.trustedTests | default dict -}}
 {{- if not .Values.secretstore.enabled }}
 {{- fail "OpenBao is required for server and upstream identities; configure secretstore.enabled" }}
 {{- end }}
@@ -46,6 +47,11 @@ template time rather than producing a broken deployment (#662). */}}
 {{- $schemaIdentity := required "compatibility.schemaIdentity must preserve the existing database identity on upgrade" $compatibility.schemaIdentity -}}
 {{- $auditDomain := required "compatibility.auditDomain must preserve the existing audit-chain domain on upgrade" $compatibility.auditDomain -}}
 {{- $witnessKeyInfo := required "compatibility.witnessKeyInfo must preserve the existing witness identity on upgrade" $compatibility.witnessKeyInfo -}}
+{{- $trustedVM := .Values.vm | default dict -}}
+{{- $trustedKVM := $trustedVM.kvm | default dict -}}
+{{- if and $trustedTests.recipes (not $trustedKVM.enabled) }}
+{{- fail "trustedTests.recipes requires vm.kvm.enabled" }}
+{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -70,6 +76,9 @@ spec:
       annotations:
         {{- if .Values.argo.releaseWIF }}
         checksum/release-wif: {{ .Values.argo.releaseWIF | toJson | sha256sum | quote }}
+        {{- end }}
+        {{- if $trustedTests.recipes }}
+        checksum/trusted-recipes: {{ $trustedTests.recipes | toJson | sha256sum | quote }}
         {{- end }}
         checksum/per-repo-identities: {{ list .Values.argo.perRepoIdentities .Values.argo.perRepoCIIdentities | toJson | sha256sum | quote }}
         {{- if .Values.auditAnchor.rekorPublicKey }}
@@ -273,6 +282,9 @@ spec:
             {{- if $vmKVM.enabled }}
             - --vm-kvm-enabled=true
             {{- end }}
+            {{- if $trustedTests.recipes }}
+            - --trusted-tests-recipes=/etc/oberth/trusted-tests/recipes.json
+            {{- end }}
             {{- $promotion := .Values.promotion | default dict -}}
             {{- $grantMaxLifetime := $promotion.grantMaxLifetime | default "24h" -}}
             {{- if $grantMaxLifetime }}
@@ -339,6 +351,11 @@ spec:
             capabilities:
               drop: ["ALL"]
           volumeMounts:
+            {{- if $trustedTests.recipes }}
+            - name: trusted-test-recipes
+              mountPath: /etc/oberth/trusted-tests
+              readOnly: true
+            {{- end }}
             - name: data
               mountPath: /data
             - name: ci-cache
@@ -385,6 +402,11 @@ spec:
               readOnly: true
             {{- end }}
       volumes:
+        {{- if $trustedTests.recipes }}
+        - name: trusted-test-recipes
+          configMap:
+            name: {{ include "oberth.fullname" . }}-trusted-tests
+        {{- end }}
         {{- if .Values.argo.releaseWIF }}
         - name: release-wif
           configMap:

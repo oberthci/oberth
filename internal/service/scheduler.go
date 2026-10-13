@@ -19,6 +19,7 @@ import (
 	"github.com/oberthci/oberth/internal/runlog"
 	"github.com/oberthci/oberth/internal/runprogress"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/internal/vmrunner"
 	"github.com/oberthci/oberth/pkg/periapsis"
 )
 
@@ -30,18 +31,19 @@ var errMutationBlocked = errors.New("service: mutation blocked by unavailable au
 type mutationRequirement func(context.Context) error
 
 type SchedulerConfig struct {
-	Store           SchedulerStore
-	Git             WorkspaceGit
-	Logs            LogStore
-	Jobs            JobController
-	ReleaseJobs     ReleaseJobController
-	Auditor         Auditor
-	Signals         *Signals
-	WorkspaceRoot   string
-	RemoveWorkspace func(string) error
-	MaxConcurrent   int
-	MaxRunLogBytes  int64
-	MutationGate    func(context.Context) error
+	Store            SchedulerStore
+	Git              WorkspaceGit
+	Logs             LogStore
+	Jobs             JobController
+	ReleaseJobs      ReleaseJobController
+	TrustedPreflight TrustedPreflight
+	Auditor          Auditor
+	Signals          *Signals
+	WorkspaceRoot    string
+	RemoveWorkspace  func(string) error
+	MaxConcurrent    int
+	MaxRunLogBytes   int64
+	MutationGate     func(context.Context) error
 	// AdmissionDiskFloorBytes is an opt-in disk-space admission floor (#673).
 	// When positive, admission is held until the filesystem containing
 	// WorkspaceRoot has at least this many free bytes. Default 0 = disabled.
@@ -54,6 +56,7 @@ type Scheduler struct {
 	logs            LogStore
 	jobs            JobController
 	releaseJobs     ReleaseJobController
+	trusted         TrustedPreflight
 	auditor         Auditor
 	signals         *Signals
 	workspaces      *workspaceLifecycle
@@ -100,8 +103,8 @@ func NewScheduler(config SchedulerConfig) (*Scheduler, error) {
 	deliveryPermit <- struct{}{}
 	scheduler := &Scheduler{
 		store: config.Store, git: config.Git, logs: config.Logs, jobs: config.Jobs,
-		releaseJobs: config.ReleaseJobs,
-		auditor:     config.Auditor, signals: signals,
+		releaseJobs: config.ReleaseJobs, trusted: config.TrustedPreflight,
+		auditor: config.Auditor, signals: signals,
 		workspaces: workspaces, workspaceRoot: workspaceRoot, maxConcurrent: config.MaxConcurrent,
 		admission:      newWeightedAdmissionForJobs(config.MaxConcurrent),
 		maxRunLogBytes: config.MaxRunLogBytes, mutationGate: mutationGate,
@@ -273,6 +276,9 @@ func (scheduler *Scheduler) Run(ctx context.Context) error {
 		if ctx.Err() != nil {
 			return nil
 		}
+		return err
+	}
+	if err := scheduler.recoverTrustedPreflights(workerCtx); err != nil {
 		return err
 	}
 	if err := scheduler.reconcileStrandedRunsWithGate(workerCtx, scheduler.awaitMutation); err != nil {
@@ -453,7 +459,8 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 	if err := scheduler.git.Checkout(ctx, upstream.QualifiedRepo(repository.Name), checkoutSHA, sourceDir); err != nil {
 		return scheduler.finishInfrastructureFailure(ctx, run, repository, fmt.Errorf("checkout run workspace: %w", err))
 	}
-	if err := scheduler.requireTrustedTestPolicy(ctx, repository, checkoutSHA); err != nil {
+	requirement, err := scheduler.trustedRequirement(ctx, repository, checkoutSHA)
+	if err != nil {
 		return scheduler.finishInfrastructureFailure(ctx, run, repository, err)
 	}
 	logFile, err := scheduler.logs.Create(run.ID)
@@ -465,7 +472,12 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 		_ = logFile.Close()
 		return scheduler.finishInfrastructureFailure(ctx, run, repository, err)
 	}
-	current, err := scheduler.store.SetRunJobName(ctx, run.ID, jobName)
+	var current model.Run
+	if requirement.Contract == nil {
+		current, err = scheduler.store.SetRunJobName(ctx, run.ID, jobName)
+	} else {
+		current, err = scheduler.store.Run(ctx, run.ID)
+	}
 	if err != nil {
 		_ = logFile.Close()
 		return scheduler.finishInfrastructureFailure(ctx, run, repository, fmt.Errorf("persist deterministic Job intent: %w", err))
@@ -484,6 +496,20 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 		_ = logFile.Close()
 		return scheduler.finishInfrastructureFailure(ctx, run, repository, fmt.Errorf("read pipeline resource size: %w", err))
 	}
+	if requirement.Contract != nil {
+		if sized, ok := scheduler.trusted.(interface {
+			Size(context.Context, JobRequest) (periapsis.Size, error)
+		}); ok {
+			preflightSize, sizeErr := sized.Size(ctx, jobRequest)
+			if sizeErr != nil {
+				_ = logFile.Close()
+				return scheduler.finishInfrastructureFailure(ctx, run, repository, sizeErr)
+			}
+			if sizeWeight(preflightSize) > sizeWeight(size) {
+				size = preflightSize
+			}
+		}
+	}
 	jobRequest.Size = size
 	group, err := scheduler.pipelineConcurrencyGroup(ctx, jobRequest)
 	if err != nil {
@@ -501,13 +527,7 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 		jobRequest.Run.ConcurrencyGroup = group
 		jobRequest.ConcurrencyGroup = group
 	}
-	if !run.Credentialed && scheduler.pipelineCredentialed(ctx, jobRequest) {
-		if credErr := scheduler.store.SetRunCredentialed(ctx, run.ID); credErr != nil {
-			_ = logFile.Close()
-			return scheduler.finishInfrastructureFailure(ctx, run, repository, fmt.Errorf("mark run credentialed: %w", credErr))
-		}
-		run.Credentialed = true
-	}
+
 	releaseAdmission, err := reservation.acquireRequest(ctx, admissionRequest{
 		RunID: run.ID, RepoID: run.RepoID, Size: size, Group: group,
 	})
@@ -544,6 +564,49 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 		jobRequest.UpstreamName = upstream.Name
 		jobRequest.UpstreamOrg = upstream.Org()
 	}
+	if requirement.Contract != nil {
+		if err := scheduler.trusted.Execute(ctx, jobRequest, requirement, logFile); err != nil {
+			_ = logFile.Close()
+			journal := scheduler.store.(vmrunner.KVMJournal)
+			state, stateErr := journal.KVMPreflight(context.WithoutCancel(ctx), run.ID)
+			if (stateErr != nil && !errors.Is(stateErr, store.ErrNotFound)) || (stateErr == nil && !state.Cleaned) {
+				reservation.retain()
+				return errors.Join(err, stateErr)
+			}
+			return scheduler.finishInfrastructureFailure(ctx, run, repository, fmt.Errorf("trusted preflight: %w", err))
+		}
+		fresh, err := scheduler.trustedRequirement(ctx, repository, checkoutSHA)
+		if err == nil {
+			err = scheduler.trustedReceipt(ctx, repository, run, fresh)
+		}
+		if err != nil {
+			_ = logFile.Close()
+			return scheduler.finishInfrastructureFailure(ctx, run, repository, err)
+		}
+	}
+	if !run.Credentialed && scheduler.pipelineCredentialed(ctx, jobRequest) {
+		if credErr := scheduler.store.SetRunCredentialed(ctx, run.ID); credErr != nil {
+			_ = logFile.Close()
+			return scheduler.finishInfrastructureFailure(ctx, run, repository, fmt.Errorf("mark run credentialed: %w", credErr))
+		}
+		run.Credentialed = true
+	}
+	if err = require(ctx); err != nil {
+		_ = logFile.Close()
+		return err
+	}
+	if requirement.Contract != nil {
+		current, err = scheduler.store.SetRunJobName(ctx, run.ID, jobName)
+	}
+	if err != nil {
+		_ = logFile.Close()
+		return scheduler.finishInfrastructureFailure(ctx, run, repository, fmt.Errorf("persist deterministic Job intent: %w", err))
+	}
+	if current.Status != model.RunRunning {
+		_ = logFile.Close()
+		return nil
+	}
+
 	switch {
 	case run.Release:
 		if scheduler.releaseJobs == nil {
