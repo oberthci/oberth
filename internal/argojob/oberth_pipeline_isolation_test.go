@@ -66,6 +66,7 @@ var (
 	}
 	oberthBuildIsolatedLeaves = map[string]bool{
 		"shellcheck": true, "chart": true, "security": true, "release-diagnostic": true, "test-openbao": true,
+		"vpt-build-and-fetch": true, "vpt-copy-trivy": true, "vpt-verify": true,
 	}
 )
 

@@ -90,18 +90,19 @@ func TestOberthBuildPipelineIsAdmissible(t *testing.T) {
 	// Every burn build.yaml declares for the CI trigger is present, with the
 	// same dependency edges.
 	assertBurnGraph(t, built, "ci", map[string]string{
-		"setup":              "",
-		"lint":               "setup",
-		"test":               "lint",
-		"test-openbao":       "setup",
-		"security":           "setup",
-		"shellcheck":         "setup",
-		"chart":              "lint",
-		"release-diagnostic": "setup",
-		"build-amd64":        "test && chart",
-		"build-arm64":        "test && chart",
-		"build-darwin-amd64": "test && chart",
-		"build-darwin-arm64": "test && chart",
+		"setup":                  "",
+		"lint":                   "setup",
+		"test":                   "lint",
+		"test-openbao":           "setup",
+		"security":               "setup",
+		"shellcheck":             "setup",
+		"chart":                  "lint",
+		"release-diagnostic":     "setup",
+		"verify-publisher-tools": "setup",
+		"build-amd64":            "test && chart",
+		"build-arm64":            "test && chart",
+		"build-darwin-amd64":     "test && chart",
+		"build-darwin-arm64":     "test && chart",
 	})
 }
 

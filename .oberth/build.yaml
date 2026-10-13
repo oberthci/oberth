@@ -117,6 +117,9 @@ spec:
       - name: release-diagnostic
         template: release-diagnostic
         depends: setup
+      - name: verify-publisher-tools
+        template: verify-publisher-tools
+        depends: setup
       - name: build-amd64
         template: build-amd64
         depends: "test && chart"
@@ -1245,6 +1248,167 @@ spec:
       - name: work
         mountPath: /tmp/diagnostic-work
         subPath: diagnostic
+      resources:
+        requests:
+          cpu: "1"
+          memory: 256Mi
+        limits:
+          cpu: "1"
+          memory: 256Mi
+
+  # ---- verify-publisher-tools burn (#829) ----
+  # Reproduces every release-setup tool install with the exact flags, images and
+  # isolated caches used in release.yaml, then verifies the output bytes against
+  # .oberth/pins/bootstrap-tools.sha256.  A Go toolchain bump that forgets the
+  # pins turns the branch red before an immutable tag is wasted.
+  - name: verify-publisher-tools
+    steps:
+    - - name: vpt-build-and-fetch
+        template: vpt-build-and-fetch
+      - name: vpt-copy-trivy
+        template: vpt-copy-trivy
+    - - name: vpt-verify
+        template: vpt-verify
+
+  # Build helm, oberth-release-support, oberth-release-image and fetch cosign,
+  # matching release.yaml's exact env -i, flags, and Go toolchain.
+  - name: vpt-build-and-fetch
+    automountServiceAccountToken: false
+    metadata:
+      annotations:
+        oberth.ci/workspace-mounts: none
+        oberth.ci/workspace-env: none
+    script:
+      image: "golang:1.26.9-trixie@sha256:f06b7122f888680048afb247c4e5f49c0069eb6c4c1ccae0f3f4834527a8d22c"
+      workingDir: /work/src
+      command: [/bin/sh]
+      source: |
+        set -eu
+        mkdir -p /tmp/vpt-tools/bin
+
+        # helm (release.yaml install-helm)
+        env -i \
+          PATH=/usr/local/go/bin:/usr/bin:/bin \
+          HOME=/tmp \
+          GOTOOLCHAIN=local GOWORK=off GOENV=off \
+          GOPATH=/tmp/vpt-private/gopath \
+          GOMODCACHE=/tmp/vpt-private/gomod \
+          GOCACHE=/tmp/vpt-private/gobuild \
+          GOBIN=/tmp/vpt-tools/bin \
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+          GOMAXPROCS=1 GOFLAGS='-p=1' \
+          GOPROXY=https://proxy.golang.org \
+          GOSUMDB=sum.golang.org \
+          /usr/local/go/bin/go install \
+          -trimpath -buildvcs=false '-ldflags=-buildid=' \
+          helm.sh/helm/v4/cmd/helm@v4.2.3
+
+        # oberth-release-support (release.yaml build-release-support)
+        env -i \
+          PATH=/usr/local/go/bin:/usr/bin:/bin \
+          HOME=/tmp \
+          GOTOOLCHAIN=local GOWORK=off GOENV=off \
+          GOPATH=/tmp/vpt-private/gopath \
+          GOMODCACHE=/tmp/vpt-private/gomod \
+          GOCACHE=/tmp/vpt-private/gobuild \
+          GOBIN=/tmp/vpt-tools/bin \
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+          GOMAXPROCS=1 GOFLAGS='-p=1 -mod=readonly' \
+          GOPROXY=https://proxy.golang.org \
+          GOSUMDB=sum.golang.org \
+          /usr/local/go/bin/go build \
+          -trimpath -buildvcs=false '-ldflags=-buildid=' \
+          -o /tmp/vpt-tools/bin/oberth-release-support \
+          ./cmd/oberth-release-support
+
+        # oberth-release-image (release.yaml build-release-image)
+        env -i \
+          PATH=/usr/local/go/bin:/usr/bin:/bin \
+          HOME=/tmp \
+          GOTOOLCHAIN=local GOWORK=off GOENV=off \
+          GOPATH=/tmp/vpt-private/gopath \
+          GOMODCACHE=/tmp/vpt-private/gomod \
+          GOCACHE=/tmp/vpt-private/gobuild \
+          GOBIN=/tmp/vpt-tools/bin \
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+          GOMAXPROCS=1 GOFLAGS='-p=1 -mod=readonly' \
+          GOPROXY=https://proxy.golang.org \
+          GOSUMDB=sum.golang.org \
+          /usr/local/go/bin/go build \
+          -trimpath -buildvcs=false '-ldflags=-buildid=' \
+          -o /tmp/vpt-tools/bin/oberth-release-image \
+          ./cmd/oberth-release-image
+
+        # cosign (release.yaml fetch-cosign: upstream binary)
+        /usr/bin/curl --fail --location --no-progress-meter --show-error \
+          --connect-timeout 10 --max-time 90 --retry 2 --retry-all-errors \
+          --proto =https --proto-redir =https --tlsv1.2 \
+          --output /tmp/vpt-tools/bin/cosign \
+          https://github.com/sigstore/cosign/releases/download/v3.1.1/cosign-linux-amd64
+      env:
+      - name: PATH
+        value: /usr/bin:/bin
+      volumeMounts:
+      - name: work
+        mountPath: /tmp/vpt-tools
+        subPath: vpt-tools
+      - name: work
+        mountPath: /tmp/vpt-private
+        subPath: vpt-private
+      resources:
+        requests:
+          cpu: "2"
+          memory: 4Gi
+        limits:
+          cpu: "2"
+          memory: 4Gi
+
+  # Copy trivy from its pinned image (release.yaml copy-trivy).
+  - name: vpt-copy-trivy
+    automountServiceAccountToken: false
+    metadata:
+      annotations:
+        oberth.ci/workspace-mounts: none
+        oberth.ci/workspace-env: none
+    container:
+      image: "aquasec/trivy:0.73.0@sha256:4bbf3824d974b70f27631005e2e6194d4d8fbd6e72c4a9e04cf521e25c5cb07f"
+      command: [/bin/cp]
+      args: [/usr/local/bin/trivy, /tmp/vpt-tools/bin/trivy]
+      env:
+      - name: PATH
+        value: /usr/bin:/bin
+      volumeMounts:
+      - name: work
+        mountPath: /tmp/vpt-tools
+        subPath: vpt-tools
+      resources:
+        requests:
+          cpu: "1"
+          memory: 256Mi
+        limits:
+          cpu: "1"
+          memory: 256Mi
+
+  # Verify all five publisher tools against the reviewed pin manifest.
+  - name: vpt-verify
+    automountServiceAccountToken: false
+    metadata:
+      annotations:
+        oberth.ci/workspace-mounts: none
+        oberth.ci/workspace-env: none
+    container:
+      image: "golang:1.26.9-trixie@sha256:f06b7122f888680048afb247c4e5f49c0069eb6c4c1ccae0f3f4834527a8d22c"
+      workingDir: /tmp/vpt-tools/bin
+      command: [/usr/bin/sha256sum]
+      args: [-c, /work/src/.oberth/pins/bootstrap-tools.sha256]
+      env:
+      - name: PATH
+        value: /usr/bin:/bin
+      volumeMounts:
+      - name: work
+        mountPath: /tmp/vpt-tools
+        subPath: vpt-tools
+        readOnly: true
       resources:
         requests:
           cpu: "1"
