@@ -371,6 +371,7 @@ func TestPilotJournalMigration14PreservesLegacyCapacity(t *testing.T) {
 	// Reconstruct precisely the v13 journal shape with an unknown create.
 	_, err = s.db.Exec(`DROP TABLE vm_suite_resources; DROP TABLE vm_suite_executions; DROP TABLE vm_capacity_slots;
 ALTER TABLE runs DROP COLUMN concurrency_group; DROP TABLE IF EXISTS grant_declarations;
+DROP TABLE IF EXISTS trusted_test_receipts;
 DELETE FROM schema_migrations WHERE version>=14;`)
 	mustPilot(t, err)
 	mustPilot(t, s.Close())

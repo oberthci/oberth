@@ -46,28 +46,33 @@ type SchedulerConfig struct {
 	// When positive, admission is held until the filesystem containing
 	// WorkspaceRoot has at least this many free bytes. Default 0 = disabled.
 	AdmissionDiskFloorBytes int64
+	// TrustedTestsEnabled gates server-appended trusted-tests leaves (#278
+	// Lane B). When true and a v2 tests.yaml contract exists, the scheduler
+	// injects the trusted leaf instead of blocking the run.
+	TrustedTestsEnabled bool
 }
 
 type Scheduler struct {
-	store           SchedulerStore
-	git             WorkspaceGit
-	logs            LogStore
-	jobs            JobController
-	releaseJobs     ReleaseJobController
-	auditor         Auditor
-	signals         *Signals
-	workspaces      *workspaceLifecycle
-	workspaceRoot   string
-	maxConcurrent   int
-	admission       *weightedAdmission
-	maxRunLogBytes  int64
-	mutationGate    func(context.Context) error
-	wake            chan struct{}
-	publicationWake chan struct{}
-	publicationMu   sync.Mutex
-	publicationIDs  []string
-	publicationSet  map[string]struct{}
-	deliveryPermit  chan struct{}
+	store               SchedulerStore
+	git                 WorkspaceGit
+	logs                LogStore
+	jobs                JobController
+	releaseJobs         ReleaseJobController
+	auditor             Auditor
+	signals             *Signals
+	workspaces          *workspaceLifecycle
+	workspaceRoot       string
+	maxConcurrent       int
+	admission           *weightedAdmission
+	maxRunLogBytes      int64
+	mutationGate        func(context.Context) error
+	wake                chan struct{}
+	publicationWake     chan struct{}
+	publicationMu       sync.Mutex
+	publicationIDs      []string
+	publicationSet      map[string]struct{}
+	deliveryPermit      chan struct{}
+	trustedTestsEnabled bool
 }
 
 func NewScheduler(config SchedulerConfig) (*Scheduler, error) {
@@ -113,6 +118,7 @@ func NewScheduler(config SchedulerConfig) (*Scheduler, error) {
 	// newly parked run wakes the dispatch loop to claim past it.
 	scheduler.admission.maxRuns = config.MaxConcurrent
 	scheduler.admission.onPark = scheduler.signalQueue
+	scheduler.trustedTestsEnabled = config.TrustedTestsEnabled
 	// Opt-in disk floor (#673): when positive, admission holds until the
 	// filesystem has enough free bytes.
 	if config.AdmissionDiskFloorBytes > 0 {

@@ -26,8 +26,8 @@ func (e sqliteResultError) Code() int { return int(e) }
 func TestSchemaMigrationsAreContiguous(t *testing.T) {
 	t.Parallel()
 
-	if latestMigrationVersion != 18 {
-		t.Fatalf("latest migration version = %d, want 18", latestMigrationVersion)
+	if latestMigrationVersion != 19 {
+		t.Fatalf("latest migration version = %d, want 19", latestMigrationVersion)
 	}
 	if len(migrations) != latestMigrationVersion {
 		t.Fatalf("migration count = %d, want %d", len(migrations), latestMigrationVersion)
@@ -949,6 +949,7 @@ func TestFreshSchemaIsCompleteAndIdempotent(t *testing.T) {
 		"token_credentials",
 		"trusted_applies",
 		"trusted_plans",
+		"trusted_test_receipts",
 		"uplinks",
 		"upstreams",
 		"vm_capacity_slots",
@@ -986,6 +987,7 @@ func TestFreshSchemaIsCompleteAndIdempotent(t *testing.T) {
 		"trusted_plans_expiry_idx",
 		"trusted_plans_promotion_idx",
 		"trusted_plans_repo_idx",
+		"trusted_test_receipts_verdict_idx",
 		"uplinks_token_credential_idx",
 		"vm_execution_capacity",
 		"vm_suite_resource_uid",
@@ -1034,6 +1036,7 @@ func TestFreshSchemaIsCompleteAndIdempotent(t *testing.T) {
 		"secret_access":             {"id", "repo", "step", "secret", "approved_by", "approved_at", "revoked_by", "revoked_at"},
 		"trusted_plans":             {"sequence", "id", "repo_id", "upstream_id", "source_ref", "source_sha", "target_ref", "base_sha", "result_sha", "green_run_id", "plan_run_id", "promotion_id", "apply_id", "apply_enqueue_error", "backend_identity", "backend_key", "tool_digest", "lock_digest", "config_digest", "artifact_digest", "artifact_size", "transit_ciphertext", "actor", "status", "error", "created_at", "expires_at", "consumed_at", "updated_at"},
 		"trusted_applies":           {"sequence", "id", "plan_id", "promotion_id", "repo_id", "target_ref", "sha", "run_id", "artifact_digest", "backend_key", "actor", "status", "error", "created_at", "started_at", "finished_at", "updated_at"},
+		"trusted_test_receipts":     {"run_id", "profile", "candidate_sha", "suite_identity", "guest_digest", "contract_digest", "verdict", "pod_uid", "container_id", "exit_code", "restart_count", "termination_hash", "refusal_reason", "created_at", "updated_at"},
 	}
 	for table, expected := range expectedColumns {
 		actual := schemaTableColumns(t, store.db, table)

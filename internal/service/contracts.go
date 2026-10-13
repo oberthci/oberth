@@ -215,6 +215,14 @@ type SchedulerStore interface {
 	IssueRepository
 	PromotionRepository
 	WorkspaceCleanupStore
+	TrustedTestReceiptStore
+}
+
+// TrustedTestReceiptStore provides durable trusted test receipt operations
+// for the publication gate (#278 Lane B).
+type TrustedTestReceiptStore interface {
+	WriteTrustedTestReceipt(context.Context, vmrunner.TrustedTestReceipt) error
+	TrustedTestReceipt(context.Context, string) (vmrunner.TrustedTestReceipt, error)
 }
 
 type RepositoryDiscoverer interface {

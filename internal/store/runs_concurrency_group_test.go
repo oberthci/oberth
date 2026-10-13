@@ -180,6 +180,7 @@ func TestMigration16AddsAnUngroupedConcurrencyGroupToExistingRuns(t *testing.T) 
 	}
 	if _, err := raw.ExecContext(ctx, `ALTER TABLE runs DROP COLUMN concurrency_group;
 DROP TABLE IF EXISTS grant_declarations;
+DROP TABLE IF EXISTS trusted_test_receipts;
 DELETE FROM schema_migrations WHERE version >= 16;`); err != nil {
 		t.Fatal(err)
 	}
@@ -200,8 +201,8 @@ DELETE FROM schema_migrations WHERE version >= 16;`); err != nil {
 		}
 	}()
 	var version int
-	if err := migrated.db.QueryRowContext(ctx, `SELECT max(version) FROM schema_migrations`).Scan(&version); err != nil || version != 18 {
-		t.Fatalf("schema version after upgrade = %d, %v; want 18", version, err)
+	if err := migrated.db.QueryRowContext(ctx, `SELECT max(version) FROM schema_migrations`).Scan(&version); err != nil || version != latestMigrationVersion {
+		t.Fatalf("schema version after upgrade = %d, %v; want %d", version, err, latestMigrationVersion)
 	}
 	for _, want := range []struct {
 		id     string
