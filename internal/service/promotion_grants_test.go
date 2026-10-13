@@ -248,6 +248,59 @@ func TestParseExpiry(t *testing.T) {
 	}
 }
 
+func TestGrantsViewIsReadOnly(t *testing.T) {
+	t.Parallel()
+	fixture := newControlFixture(t)
+	grantStore := &stubPromotionGrantStore{
+		grants: []model.PromotionGrant{
+			{
+				ID:                "grant-aaa",
+				RepoID:            1,
+				SourceSHA:         "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+				TargetRef:         "main",
+				Issuer:            "admin@host",
+				IssuerFingerprint: "SHA256:admin",
+				CreatedAt:         time.Now().Add(-1 * time.Hour),
+				ExpiresAt:         time.Now().Add(23 * time.Hour),
+			},
+		},
+	}
+	service := fixture.apiWithGrants(t, grantStore)
+
+	// Any authenticated uplink can read grants.
+	nonAdmin := api.Actor{Identity: "agent@host", Fingerprint: "SHA256:agent", Admin: false}
+	result, err := service.Grants(context.Background(), nonAdmin, api.GrantFilter{})
+	if err != nil {
+		t.Fatalf("Grants error = %v", err)
+	}
+	grants, ok := result.([]map[string]any)
+	if !ok {
+		t.Fatalf("Grants result type = %T, want []map[string]any", result)
+	}
+	if len(grants) != 1 {
+		t.Fatalf("Grants result length = %d, want 1", len(grants))
+	}
+	if grants[0]["id"] != "grant-aaa" {
+		t.Fatalf("Grants result id = %v, want grant-aaa", grants[0]["id"])
+	}
+	if grants[0]["status"] != "active" {
+		t.Fatalf("Grants result status = %v, want active", grants[0]["status"])
+	}
+}
+
+func TestGrantsViewInvalidStatusReturnsError(t *testing.T) {
+	t.Parallel()
+	fixture := newControlFixture(t)
+	grantStore := &stubPromotionGrantStore{}
+	service := fixture.apiWithGrants(t, grantStore)
+
+	nonAdmin := api.Actor{Identity: "agent@host", Fingerprint: "SHA256:agent", Admin: false}
+	_, err := service.Grants(context.Background(), nonAdmin, api.GrantFilter{Status: "bogus"})
+	if !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("Grants with invalid status error = %v, want ErrInvalidInput", err)
+	}
+}
+
 // apiWithGrants is a helper that creates an API with promotion grants enabled.
 func (fixture *controlFixture) apiWithGrants(t *testing.T, grants PromotionGrantStore) *API {
 	t.Helper()

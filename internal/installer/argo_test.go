@@ -357,3 +357,19 @@ func TestArgoOberthHelmValuesOmitsVaultWithoutStore(t *testing.T) {
 		t.Errorf("CA cert must not be set without a store: %s", joined)
 	}
 }
+
+// argoOberthHelmValues must pin promotion.grantMaxLifetime explicitly so a
+// `helm upgrade --reuse-values` from a pre-#826 release still carries the
+// default (#826).
+func TestArgoOberthHelmValuesPinsPromotionGrantMaxLifetime(t *testing.T) {
+	t.Parallel()
+	cfg := Config{}
+	if err := cfg.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	values := argoOberthHelmValues(cfg, OpenBaoResult{})
+	joined := strings.Join(values, " ")
+	if !strings.Contains(joined, "promotion.grantMaxLifetime=24h") {
+		t.Errorf("expected promotion.grantMaxLifetime=24h pinned in helm values, got: %s", joined)
+	}
+}

@@ -24,6 +24,12 @@ runnerImagePrefixes:
 replicaCount: 1
 maxConcurrentJobs: 3
 
+# Maximum lifetime for promotion grants issued via promote_grant. A Go
+# duration string (e.g. "24h", "168h"). Must be positive and at most 168h
+# (7 days). The server defaults to 24h when absent; the hard ceiling is 168h.
+promotion:
+  grantMaxLifetime: "24h"
+
 # Opt-in disk-space admission floor in bytes (#673). When positive, admission
 # is held until the server's data filesystem has at least this many free bytes.
 # Default 0 = disabled. The proposal from #602/#673 is 160000000000 (160 GB).

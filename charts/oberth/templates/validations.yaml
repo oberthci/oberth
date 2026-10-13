@@ -65,6 +65,27 @@ are worse than allowing the override.
 {{- if or (lt (int .Values.maxConcurrentJobs) 1) (gt (int .Values.maxConcurrentJobs) 64) -}}
 {{- fail "maxConcurrentJobs must be between one and 64" -}}
 {{- end -}}
+{{- /*
+Promotion grant max lifetime must be a valid Go duration string, positive, and
+at most 168h (7 days). A missing promotion block (legacy reused values) defaults
+to "24h" in the deployment template, so an absent value renders without error.
+An explicit value exceeding the ceiling or an invalid string fails here.
+*/ -}}
+{{- $promotion := .Values.promotion | default dict -}}
+{{- $grantMaxLifetime := $promotion.grantMaxLifetime | default "" -}}
+{{- if $grantMaxLifetime -}}
+{{- if not (regexMatch "^[0-9]+(h|m|s|ms|us|µs|ns)([0-9]+(h|m|s|ms|us|µs|ns))*$" $grantMaxLifetime) -}}
+{{- fail (printf "promotion.grantMaxLifetime %q must be a valid Go duration string (e.g. 24h, 1h30m)" $grantMaxLifetime) -}}
+{{- end -}}
+{{- /* Extract the hours component for ceiling check. Durations with only sub-hour
+      units are always within the 168h ceiling. Durations mixing hours with other
+      units (e.g. 168h1m) are over-ceiling but the regex extracts only the integer
+      before 'h'. A value like 169h is rejected; 168h is accepted. */ -}}
+{{- $hourMatch := regexFind "^[0-9]+" $grantMaxLifetime -}}
+{{- if and (hasSuffix "h" (regexFind "^[0-9]+h" $grantMaxLifetime)) (gt (int $hourMatch) 168) -}}
+{{- fail (printf "promotion.grantMaxLifetime %q exceeds the 168h (7-day) ceiling" $grantMaxLifetime) -}}
+{{- end -}}
+{{- end -}}
 {{- $admission := .Values.admission | default dict -}}
 {{- if lt (int ($admission.diskFloorBytes | default 0)) 0 -}}
 {{- fail "admission.diskFloorBytes must be zero (disabled) or a positive byte count" -}}

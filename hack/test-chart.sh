@@ -700,3 +700,27 @@ for arg in module-prefix=go.example.test repository-prefix=sample- upstream=forg
 done
 render >"$manifest"
 if grep -q -- '--argo-goproxy-listen=' "$manifest"; then exit 1; fi
+
+# --- Promotion grant max lifetime (#826) -------------------------------------
+# Default renders the 24h lifetime flag.
+promotion_manifest=$(mktemp)
+render >"$promotion_manifest"
+grep -Fq -- '--promotion-grant-max-lifetime=24h' "$promotion_manifest"
+
+# Custom valid value renders correctly.
+render --set promotion.grantMaxLifetime=48h >"$promotion_manifest"
+grep -Fq -- '--promotion-grant-max-lifetime=48h' "$promotion_manifest"
+
+# Over-ceiling value (>168h) must fail.
+if render --set promotion.grantMaxLifetime=200h >/dev/null 2>&1; then exit 1; fi
+
+# Invalid duration string must fail.
+if render --set promotion.grantMaxLifetime=notaduration >/dev/null 2>&1; then exit 1; fi
+
+# Legacy reused values: a release installed before promotion existed has no
+# promotion key in its merged values, and --reuse-values never consults the
+# new chart's values.yaml. Nulling the block reproduces that shape; the
+# template must render without error and default to 24h.
+render --set promotion=null >"$promotion_manifest"
+grep -Fq -- '--promotion-grant-max-lifetime=24h' "$promotion_manifest"
+rm -f "$promotion_manifest"

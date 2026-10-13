@@ -37,6 +37,8 @@ type fakeBackend struct {
 	artifactFilter  runlog.Filter
 	artifactBody    string
 	artifactErr     error
+	grantFilter     GrantFilter
+	grantCalls      int
 }
 
 func (backend *fakeBackend) Authenticate(_ context.Context, token string) (Actor, error) {
@@ -115,6 +117,11 @@ func (backend *fakeBackend) Issues(_ context.Context, _ Actor, filter IssueFilte
 	backend.issueCalls++
 	backend.issueFilter = filter
 	return map[string]any{"issues": []any{}}, backend.issueErr
+}
+func (backend *fakeBackend) Grants(_ context.Context, _ Actor, filter GrantFilter) (any, error) {
+	backend.grantFilter = filter
+	backend.grantCalls++
+	return []map[string]any{}, nil
 }
 func (backend *fakeBackend) Status(context.Context, Actor) (any, error) {
 	return map[string]string{"vcs": "ok", "cluster": "ok"}, nil
@@ -232,7 +239,7 @@ func TestMCPInitializeAdvertisesAgentReadableDashboardState(t *testing.T) {
 	if err := json.Unmarshal(response.Body.Bytes(), &decoded); err != nil {
 		t.Fatal(err)
 	}
-	for _, route := range []string{"/api/runs", "/api/repos", "/api/issues", "/api/status"} {
+	for _, route := range []string{"/api/runs", "/api/repos", "/api/issues", "/api/grants", "/api/status"} {
 		if !strings.Contains(decoded.Result.Instructions, route) {
 			t.Fatalf("initialize instructions omit %s: %q", route, decoded.Result.Instructions)
 		}
@@ -873,5 +880,48 @@ func TestMCPPromotionListPreservesPublicPageAndRequiresAuthentication(t *testing
 	}
 	if response.Code != http.StatusOK || decoded.Result.IsError || backend.calledName != "promotion_list" || decoded.Result.Structured.NextBefore != 17 || len(decoded.Result.Structured.Promotions) != 1 || decoded.Result.Structured.Promotions[0].ID != "0123456789abcdef0123456789abcdef" {
 		t.Fatalf("promotion page = %d %#v", response.Code, decoded)
+	}
+}
+
+func TestGrantsAPIRequiresAuth(t *testing.T) {
+	t.Parallel()
+	server, _ := testServer(t)
+	request := httptest.NewRequest(http.MethodGet, "/api/grants", nil)
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated grants status = %d, want 401", response.Code)
+	}
+}
+
+func TestGrantsAPIPassesFilters(t *testing.T) {
+	t.Parallel()
+	server, backend := testServer(t)
+	request := httptest.NewRequest(http.MethodGet, "/api/grants?repo=my-repo&sha=abc123&status=active", nil)
+	request.Header.Set("Authorization", "Bearer valid-token")
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("grants status = %d, want 200", response.Code)
+	}
+	if backend.grantCalls != 1 {
+		t.Fatalf("grant calls = %d, want 1", backend.grantCalls)
+	}
+	if backend.grantFilter.Repository != "my-repo" || backend.grantFilter.SHA != "abc123" || backend.grantFilter.Status != "active" {
+		t.Fatalf("grant filter = %+v", backend.grantFilter)
+	}
+}
+
+func TestGrantsAPIRejectsMutation(t *testing.T) {
+	t.Parallel()
+	server, _ := testServer(t)
+	request := httptest.NewRequest(http.MethodPost, "/api/grants", nil)
+	request.Header.Set("Authorization", "Bearer valid-token")
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+	// POST to /api/grants must not match any route; Go's ServeMux returns 405
+	// for a known path with a wrong method.
+	if response.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("POST /api/grants status = %d, want 405", response.Code)
 	}
 }

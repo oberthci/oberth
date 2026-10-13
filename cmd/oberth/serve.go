@@ -142,6 +142,9 @@ type serveOptions struct {
 	// switch is on.
 	vmKVMEnabled bool
 
+	// Promotion grant maximum lifetime. Default 24h, hard ceiling 168h (7 days).
+	promotionGrantMaxLifetime time.Duration
+
 	gitCommandTimeout       time.Duration
 	gcInterval              time.Duration
 	pushBannerURL           string
@@ -229,6 +232,7 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 	flags.DurationVar(&options.argoWorkflowTimeout, "argo-workflow-timeout", 12*time.Hour, "ceiling on a Workflow's own activeDeadlineSeconds")
 	flags.IntVar(&options.argoWorkflowTTL, "argo-workflow-ttl", 3600, "finished Workflow retention in seconds")
 	flags.BoolVar(&options.vmKVMEnabled, "vm-kvm-enabled", false, "enable server-injected KVM device access for annotated leaves (requires KubeVirt device plugin)")
+	flags.DurationVar(&options.promotionGrantMaxLifetime, "promotion-grant-max-lifetime", 24*time.Hour, "maximum lifetime for promotion grants (default 24h, hard ceiling 168h)")
 	flags.DurationVar(&options.gitCommandTimeout, "git-timeout", 10*time.Minute, "Git command timeout")
 	flags.DurationVar(&options.gcInterval, "git-gc-interval", 24*time.Hour, "periodic Git GC interval")
 	flags.StringVar(&options.pushBannerURL, "push-banner-url", "", "optional HTTPS dashboard URL echoed to every accepted git push")
@@ -835,13 +839,15 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 		Runs: database, History: database, Repositories: database, Issues: database,
 		Promotions: database, PromotionRuns: database, Enqueues: scheduler, Git: git,
 		Refs: git, Logs: logs, Artifacts: artifactStore, Auditor: database, Health: health, Signals: signals,
-		MutationGate:           anchors.AllowMutation,
-		PromotionWorkspaceRoot: filepath.Join(options.dataRoot, "work"),
-		SecretAccess:           database,
-		SecretStoreVerifier:    buildSecretStoreVerifier(options, kube),
-		SecretAccessReconciler: accessReconciler,
-		RepositoryRemover:      database,
-		RemoveGitCache:         git.RemoveRepository,
+		MutationGate:              anchors.AllowMutation,
+		PromotionWorkspaceRoot:    filepath.Join(options.dataRoot, "work"),
+		SecretAccess:              database,
+		SecretStoreVerifier:       buildSecretStoreVerifier(options, kube),
+		SecretAccessReconciler:    accessReconciler,
+		RepositoryRemover:         database,
+		RemoveGitCache:            git.RemoveRepository,
+		PromotionGrants:           database,
+		PromotionGrantMaxLifetime: options.promotionGrantMaxLifetime,
 	})
 	if err != nil {
 		return err

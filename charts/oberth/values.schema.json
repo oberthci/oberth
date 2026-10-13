@@ -686,6 +686,18 @@
       },
       "required": ["kvm"]
     },
+    "promotion": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Promotion governance knobs (#826).",
+      "properties": {
+        "grantMaxLifetime": {
+          "type": "string",
+          "description": "Maximum lifetime for promotion grants. Go duration string (e.g. 24h, 1h30m). Must be positive and at most 168h (7 days).",
+          "pattern": "^[0-9]+(h|m|s|ms|us|ns)([0-9]+(h|m|s|ms|us|ns))*$"
+        }
+      }
+    },
     "secretstore": {
       "type": "object",
       "additionalProperties": false,

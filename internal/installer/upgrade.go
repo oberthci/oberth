@@ -458,6 +458,8 @@ func upgradeHelmArgs(cfg UpgradeConfig, chart, imageRef string) []string {
 		"--set-string", "image.ref=" + imageRef,
 		// Keep the existing proxy enablement and mapping from reused values.
 		"--set", "argo.goProxy.port=8444",
+		// Pin promotion grant lifetime (#826): --reuse-values drops new defaults.
+		"--set", "promotion.grantMaxLifetime=24h",
 		// Preserve the administrator's enablement through --reuse-values.
 		// An absent enabled key renders false; a present value remains subject
 		// to the chart's boolean schema. Only the reviewed image pins override

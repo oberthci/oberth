@@ -273,6 +273,11 @@ spec:
             {{- if $vmKVM.enabled }}
             - --vm-kvm-enabled=true
             {{- end }}
+            {{- $promotion := .Values.promotion | default dict -}}
+            {{- $grantMaxLifetime := $promotion.grantMaxLifetime | default "24h" -}}
+            {{- if $grantMaxLifetime }}
+            - --promotion-grant-max-lifetime={{ $grantMaxLifetime }}
+            {{- end }}
           env:
             - name: OBERTH_IDENTITY_STORE
               value: openbao

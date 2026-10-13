@@ -569,6 +569,46 @@ func (service *API) Runs(ctx context.Context, _ api.Actor, filter api.RunFilter)
 	return service.history.ListRecentRuns(ctx, storeFilter)
 }
 
+// Grants is the read-only dashboard/API view of promotion grants, mirroring
+// the MCP promote_grant_list tool with query-string filters. No mutation
+// endpoints exist; mutations stay MCP-only, admin-only.
+func (service *API) Grants(ctx context.Context, _ api.Actor, filter api.GrantFilter) (any, error) {
+	if service.promotionGrants == nil || service.runs == nil {
+		return nil, fmt.Errorf("%w: promotion grants", ErrUnavailable)
+	}
+	storeFilter := model.PromotionGrantListFilter{
+		SourceSHA: filter.SHA,
+	}
+	if strings.TrimSpace(filter.Repository) != "" {
+		repository, err := service.runs.RepositoryByName(ctx, filter.Repository)
+		if err != nil {
+			return nil, err
+		}
+		storeFilter.RepoID = repository.ID
+	}
+	switch filter.Status {
+	case "active":
+		active := true
+		storeFilter.Active = &active
+	case "revoked", "expired", "consumed":
+		inactive := false
+		storeFilter.Active = &inactive
+	case "all", "":
+		// No filter.
+	default:
+		return nil, fmt.Errorf("%w: status must be one of: active, revoked, expired, consumed, all", ErrInvalidInput)
+	}
+	grants, err := service.promotionGrants.ListPromotionGrants(ctx, storeFilter)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]map[string]any, 0, len(grants))
+	for _, grant := range grants {
+		result = append(result, promotionGrantResponse(grant))
+	}
+	return result, nil
+}
+
 // resolveReadRunID accepts the unique ID prefix emitted by push feedback.
 // Mutation paths continue using exact durable IDs through Store.Run.
 func (service *API) resolveReadRunID(ctx context.Context, id string) (model.Run, error) {

@@ -916,6 +916,31 @@ func TestValidateAuditURLVariants(t *testing.T) {
 	}
 }
 
+func TestParseServeOptionsPromotionGrantMaxLifetimeDefault(t *testing.T) {
+	t.Parallel()
+	options, err := parseServeOptions([]string{"--argo-namespace", "argo-pipelines"}, io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if options.promotionGrantMaxLifetime != 24*time.Hour {
+		t.Fatalf("default promotion-grant-max-lifetime = %v, want 24h", options.promotionGrantMaxLifetime)
+	}
+}
+
+func TestParseServeOptionsPromotionGrantMaxLifetimeCustom(t *testing.T) {
+	t.Parallel()
+	options, err := parseServeOptions([]string{
+		"--argo-namespace", "argo-pipelines",
+		"--promotion-grant-max-lifetime", "48h",
+	}, io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if options.promotionGrantMaxLifetime != 48*time.Hour {
+		t.Fatalf("custom promotion-grant-max-lifetime = %v, want 48h", options.promotionGrantMaxLifetime)
+	}
+}
+
 func mustBigInt() *big.Int {
 	n, _ := cryptorand.Int(cryptorand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
 	return n

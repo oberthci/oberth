@@ -1324,6 +1324,8 @@ func TestOberthHelmArgs(t *testing.T) {
 				// Go module proxy pins: --reuse-values discards new chart
 				// defaults; pinned unconditionally (#662).
 				"--set", "argo.goProxy.port=8444",
+				// Promotion grant lifetime (#826).
+				"--set", "promotion.grantMaxLifetime=24h",
 				"--set-string", "watchTunnel.image=" + watchTunnelImageDefault,
 				"--set-string", "watchTunnel.openbaoImage=" + watchTunnelOpenbaoImageDefault,
 				"--set", "secretstore.enabled=true",
@@ -1344,6 +1346,8 @@ func TestOberthHelmArgs(t *testing.T) {
 				"--set", "argo.ciSecrets.vaultRole=oberth-argo-ci-secrets",
 				// Go module proxy pins (#662).
 				"--set", "argo.goProxy.port=8444",
+				// Promotion grant lifetime (#826).
+				"--set", "promotion.grantMaxLifetime=24h",
 				"--set-string", "watchTunnel.image=" + watchTunnelImageDefault,
 				"--set-string", "watchTunnel.openbaoImage=" + watchTunnelOpenbaoImageDefault,
 				"--set", "secretstore.enabled=true",
@@ -1512,6 +1516,8 @@ func TestOberthHelmArgsWithoutSecretStore(t *testing.T) {
 		"--set", "argo.namespace=oberth-argo",
 		// Go module proxy pins (#662).
 		"--set", "argo.goProxy.port=8444",
+		// Promotion grant lifetime (#826).
+		"--set", "promotion.grantMaxLifetime=24h",
 		"--set-string", "watchTunnel.image=" + watchTunnelImageDefault,
 		"--set-string", "watchTunnel.openbaoImage=" + watchTunnelOpenbaoImageDefault,
 		"--version", "v0.10.54",
@@ -1540,6 +1546,8 @@ func TestOberthHelmArgsWithRekor(t *testing.T) {
 		"--set", "argo.namespace=oberth-argo",
 		// Go module proxy pins (#662).
 		"--set", "argo.goProxy.port=8444",
+		// Promotion grant lifetime (#826).
+		"--set", "promotion.grantMaxLifetime=24h",
 		"--set-string", "watchTunnel.image=" + watchTunnelImageDefault,
 		"--set-string", "watchTunnel.openbaoImage=" + watchTunnelOpenbaoImageDefault,
 		"--set", "auditAnchor.rekorURL=http://rekor-server.rekor.svc:80",
@@ -2448,6 +2456,8 @@ func TestInstallOberthReconcilesRekorAtInstalledVersion(t *testing.T) {
 				"--set", "argo.namespace=oberth-argo",
 				// Go module proxy pins (#662).
 				"--set", "argo.goProxy.port=8444",
+				// Promotion grant lifetime (#826).
+				"--set", "promotion.grantMaxLifetime=24h",
 				"--set-string", "watchTunnel.image=" + watchTunnelImageDefault,
 				"--set-string", "watchTunnel.openbaoImage=" + watchTunnelOpenbaoImageDefault,
 				"--set", "auditAnchor.rekorURL=http://rekor-server.rekor.svc:80",
@@ -2605,6 +2615,8 @@ func TestInstallOberthRekorUpgradeAllowsUnknownInstalledVersion(t *testing.T) {
 		"--set", "argo.namespace=oberth-argo",
 		// Go module proxy pins (#662).
 		"--set", "argo.goProxy.port=8444",
+		// Promotion grant lifetime (#826).
+		"--set", "promotion.grantMaxLifetime=24h",
 		"--set-string", "watchTunnel.image=" + watchTunnelImageDefault,
 		"--set-string", "watchTunnel.openbaoImage=" + watchTunnelOpenbaoImageDefault,
 		"--set", "auditAnchor.rekorURL=http://rekor-server.rekor.svc:80",

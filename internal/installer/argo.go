@@ -301,5 +301,9 @@ func argoOberthHelmValues(cfg Config, openbao OpenBaoResult) []string {
 	values = append(values,
 		"--set", "argo.goProxy.port=8444",
 	)
+	// Pin promotion.grantMaxLifetime explicitly: `helm upgrade --reuse-values`
+	// never consults the new chart's values.yaml, so an unpinned new value
+	// stays absent on every upgraded install (#826).
+	values = append(values, "--set", "promotion.grantMaxLifetime=24h")
 	return values
 }

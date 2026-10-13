@@ -550,7 +550,9 @@ continuity checks; it must never be used to reset or bypass those checks.
   recorded step's bounded retained log), `/api/runs/{run}/livelog?offset=`
   (polled live slice of a running Job's redacted log stream — bytes from the
   cursor, the next cursor, and the terminal flag; offset -1 starts tailing;
-  responses are bounded to 256 KiB per poll), `/api/repos`, `/api/issues`, and
+  responses are bounded to 256 KiB per poll), `/api/repos`, `/api/issues`,
+  `/api/grants` (read-only promotion grant list; filters `repo`, `sha`,
+  `status`; mirrors `promote_grant_list`; no mutation endpoints), and
   `/api/status`. The run views resolve by full run ID or an unambiguous
   hexadecimal prefix of at least 12 characters (the push-feedback ID); responses retain the full
   canonical ID. Ambiguous prefixes are rejected with guidance to use the full
@@ -576,7 +578,11 @@ continuity checks; it must never be used to reset or bypass those checks.
   `system_status`, admin-only `secretstore_plan` (#611),
   `secretstore_sync_receipt` (#712), `secretstore_verify`, and
   admin-only `promote_grant`, `promote_grant_revoke`, plus read-only
-  `promote_grant_list` (#826).
+  `promote_grant_list` (#826). The `promote_grant` tool's maximum lifetime is
+  configurable via the `--promotion-grant-max-lifetime` flag (chart value
+  `promotion.grantMaxLifetime`, default `24h`, hard ceiling `168h` / 7 days).
+  The installer pins this value explicitly so `helm upgrade --reuse-values`
+  carries the default.
 - MCP `run_get` and `run_logs` accept the same full IDs and unique prefixes
   as the dashboard run views. ID prefix resolution is read-only; scheduler
   and mutation lookups still require exact durable IDs. `run_logs` and `logs`
