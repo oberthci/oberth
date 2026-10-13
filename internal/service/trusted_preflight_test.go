@@ -17,6 +17,8 @@ type protectedFixture struct {
 	store                                  *store.Store
 	fail, omitReceipt, omitCleanup, revoke bool
 	intent                                 vmrunner.KVMIntent
+	recoverIDs                             []string
+	recoverErr                             error
 }
 
 func (p *protectedFixture) Supports(vmrunner.Contract) error { return nil }
@@ -26,7 +28,9 @@ func (p *protectedFixture) RecipeAllowed(vmrunner.KVMRecipe) error {
 	}
 	return nil
 }
-func (p *protectedFixture) Recover(context.Context) ([]string, error) { return nil, nil }
+func (p *protectedFixture) Recover(context.Context) ([]string, error) {
+	return p.recoverIDs, p.recoverErr
+}
 func (p *protectedFixture) Execute(ctx context.Context, job JobRequest, requirement vmrunner.Requirement, _ io.Writer) error {
 	run, err := p.store.Run(ctx, job.Run.ID)
 	if err != nil {

@@ -980,6 +980,13 @@ continuity checks; it must never be used to reset or bypass those checks.
   the suite gate. Publication rereads policy, exact recipe and actual normalized
   kubelet evidence, including candidate/tag identity, inventory and artifact
   digest. Uncertain creates/cleanup keep capacity; restart cleans and interrupts.
+  Unbound startup submissions require 60 continuous seconds of exact Workflow,
+  source claim and seed/source-consuming Pod absence within a 90-second budget;
+  API errors retain the row, auxiliary presence resets the interval. Per-row
+  recovery failures cannot stop scheduler startup; a missing executor with
+  pending rows remains fatal. v20 SQL triggers retain journal identity, accepted
+  UID/evidence and irreversible cleanup against direct writes. QEMU always uses
+  `-sandbox on,obsolete=deny,elevateprivileges=deny,spawn=deny,resourcecontrol=deny`.
   See `docs/trusted-kvm-suites.md` for the closed producer protocol, packaging,
   trust assumptions, baseline-change behavior and external rollout prerequisites.
 - VM lifecycle state uses the audited schema-v13 `vm_executions` journal.

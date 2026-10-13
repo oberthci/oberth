@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"path/filepath"
 	"strings"
 	"time"
@@ -282,53 +283,79 @@ func (p *TrustedPreflights) Recover(ctx context.Context) ([]string, error) {
 		return nil, err
 	}
 	var ids []string
+	var failures []error
 	for _, execution := range pending {
-		intent := execution.Intent
-		uid := execution.WorkflowUID
-		if !execution.Cleaned {
-			if execution.Submitted && !execution.Rejected && uid == "" {
-				run, e := p.store.Run(ctx, intent.RunID)
-				if e != nil {
-					return nil, e
-				}
-				repo, e := p.store.Repository(ctx, intent.RepoID)
-				if e != nil {
-					return nil, e
-				}
-				upstream, e := p.store.Upstream(ctx, repo.UpstreamID)
-				if e != nil {
-					return nil, e
-				}
-				job := service.JobRequest{Run: run, Repository: repo, UpstreamName: upstream.Name, UpstreamOrg: upstream.Org(), SourceDir: filepath.Join(p.workspaceRoot, run.ID, "src")}
-				request, e := p.request(job, intent)
-				if e != nil {
-					return nil, e
-				}
-				uid, e = p.controller.TrustedKVMWorkflowUID(ctx, request)
-				if e != nil {
-					return nil, fmt.Errorf("uncertain trusted create still requires reconciliation: %w", e)
-				}
-				if e = p.store.BindKVMPreflight(ctx, intent.RunID, uid); e != nil {
-					return nil, e
-				}
+		if err := p.recoverOne(ctx, execution); err != nil {
+			log.Printf("WARN: trusted preflight recovery pending for run %s: %v", execution.Intent.RunID, err)
+			failures = append(failures, err)
+			continue
+		}
+		ids = append(ids, execution.Intent.RunID)
+	}
+	return ids, errors.Join(failures...)
+}
+
+func (p *TrustedPreflights) recoverOne(ctx context.Context, execution vmrunner.KVMExecution) error {
+	intent := execution.Intent
+	uid := execution.WorkflowUID
+	if execution.Cleaned {
+		return nil
+	}
+	if execution.Submitted && !execution.Rejected && uid == "" {
+		observer, ok := p.controller.(interface {
+			ConfirmTrustedKVMAbsent(context.Context, string) error
+		})
+		if !ok {
+			return errors.New("trusted absence observer unavailable")
+		}
+		// This path intentionally precedes checkout/repository reads: the process
+		// may have died before Create, and its workspace may no longer exist.
+		absenceErr := observer.ConfirmTrustedKVMAbsent(ctx, intent.WorkflowName)
+		if absenceErr == nil {
+			if err := p.store.RejectKVMPreflight(ctx, intent.RunID); err != nil {
+				return err
 			}
-			if execution.Receipt == nil && execution.Refusal == nil {
-				if err = p.store.RecordKVMRefusal(ctx, intent.RunID, vmrunner.KVMRefusal{Code: "canceled", ObservedAt: time.Now().UTC()}); err != nil {
-					return nil, err
-				}
+		} else {
+			if !errors.Is(absenceErr, argojob.ErrTrustedKVMWorkflowPresent) {
+				return absenceErr
 			}
-			if uid != "" {
-				if err = p.controller.CleanupTrustedKVM(ctx, intent.WorkflowName, intent.RunID, uid); err != nil {
-					return nil, err
-				}
+			run, err := p.store.Run(ctx, intent.RunID)
+			if err != nil {
+				return err
 			}
-			if err = p.store.CompleteKVMPreflightCleanup(ctx, intent.RunID, uid); err != nil {
-				return nil, err
+			repo, err := p.store.Repository(ctx, intent.RepoID)
+			if err != nil {
+				return err
+			}
+			upstream, err := p.store.Upstream(ctx, repo.UpstreamID)
+			if err != nil {
+				return err
+			}
+			job := service.JobRequest{Run: run, Repository: repo, UpstreamName: upstream.Name, UpstreamOrg: upstream.Org(), SourceDir: filepath.Join(p.workspaceRoot, run.ID, "src")}
+			request, err := p.request(job, intent)
+			if err != nil {
+				return err
+			}
+			uid, err = p.controller.TrustedKVMWorkflowUID(ctx, request)
+			if err != nil {
+				return fmt.Errorf("uncertain trusted create still requires reconciliation: %w", err)
+			}
+			if err := p.store.BindKVMPreflight(ctx, intent.RunID, uid); err != nil {
+				return err
 			}
 		}
-		ids = append(ids, intent.RunID)
 	}
-	return ids, nil
+	if execution.Receipt == nil && execution.Refusal == nil {
+		if err := p.store.RecordKVMRefusal(ctx, intent.RunID, vmrunner.KVMRefusal{Code: "canceled", ObservedAt: time.Now().UTC()}); err != nil {
+			return err
+		}
+	}
+	if uid != "" {
+		if err := p.controller.CleanupTrustedKVM(ctx, intent.WorkflowName, intent.RunID, uid); err != nil {
+			return err
+		}
+	}
+	return p.store.CompleteKVMPreflightCleanup(ctx, intent.RunID, uid)
 }
 
 var _ service.TrustedPreflight = (*TrustedPreflights)(nil)

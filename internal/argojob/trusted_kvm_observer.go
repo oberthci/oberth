@@ -494,45 +494,73 @@ func (controller *Controller) cleanTrustedKVMOnce(ctx context.Context, name, run
 	return false, nil
 }
 
-// ErrTrustedKVMCreateRefused means this first submission attempt never issued a
-// Workflow POST and its seeding auxiliaries are now observed absent. A POST
-// error, including timeout followed by NotFound, never carries this sentinel.
-var ErrTrustedKVMCreateRefused = errors.New("argojob: trusted Workflow create definitively not attempted")
+// ErrTrustedKVMCreateRefused proves no Workflow was admitted and all seeding
+// auxiliaries are absent. It covers pre-POST failures and explicit API admission
+// rejections, never ambiguous timeout, transport or server failures.
+var ErrTrustedKVMCreateRefused = errors.New("argojob: trusted Workflow create definitively refused")
 
-func (controller *Controller) confirmTrustedKVMNoCreate(ctx context.Context, name string) error {
-	if controller.kube == nil || name == "" {
-		return errors.New("argojob: cannot establish pre-create cleanup")
-	}
-	ticker := time.NewTicker(controller.interval)
-	defer ticker.Stop()
-	for {
-		if _, err := controller.workflows.Get(ctx, name, metav1.GetOptions{}); !apierrors.IsNotFound(err) {
-			return errors.New("argojob: Workflow absence before create is unproven")
+// ErrTrustedKVMWorkflowPresent directs recovery to immutable UID/spec attestation.
+var ErrTrustedKVMWorkflowPresent = errors.New("argojob: trusted Workflow exists")
+
+// trustedCreateAbsenceWindow covers the maximum Kubernetes API request timeout.
+// A restart cannot recover the in-flight POST's start time, so absence must be
+// freshly observed for this entire interval before releasing its reservation.
+const trustedCreateAbsenceWindow = 60 * time.Second
+
+func (controller *Controller) ConfirmTrustedKVMAbsent(ctx context.Context, name string) error {
+	ctx, cancel := context.WithTimeout(ctx, trustedCreateAbsenceWindow+30*time.Second)
+	defer cancel()
+	return controller.observeTrustedKVMAbsence(ctx, name, time.Now, func(ctx context.Context) error {
+		timer := time.NewTimer(controller.interval)
+		defer timer.Stop()
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-timer.C:
+			return nil
 		}
-		// SourceSeeder already requests cleanup on failure. This observer never
-		// deletes an unbound object based on labels or a name collision.
-		claimName := sourceClaimName(name)
-		pods, err := controller.kube.CoreV1().Pods(controller.config.Namespace).List(ctx, metav1.ListOptions{})
+	})
+}
+
+// now/wait form a private deterministic time seam; production always uses a
+// monotonic wall clock and real timers. Every observation must succeed.
+func (controller *Controller) observeTrustedKVMAbsence(ctx context.Context, name string, now func() time.Time, wait func(context.Context) error) error {
+	var since time.Time
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		absent, err := controller.trustedKVMAbsentOnce(ctx, name)
 		if err != nil {
 			return err
 		}
-		mounted := false
-		for _, pod := range pods.Items {
-			if pod.Name == claimName {
-				mounted = true
+		if !absent {
+			since = time.Time{}
+		} else {
+			observed := now()
+			if since.IsZero() {
+				since = observed
 			}
-			for _, v := range pod.Spec.Volumes {
-				if v.PersistentVolumeClaim != nil && v.PersistentVolumeClaim.ClaimName == claimName {
-					mounted = true
-				}
+			if observed.Sub(since) >= trustedCreateAbsenceWindow {
+				return nil
 			}
 		}
-		_, err = controller.kube.CoreV1().PersistentVolumeClaims(controller.config.Namespace).Get(ctx, claimName, metav1.GetOptions{})
-		if apierrors.IsNotFound(err) && !mounted {
-			return nil
-		}
-		if err != nil && !apierrors.IsNotFound(err) {
+		if err := wait(ctx); err != nil {
 			return err
+		}
+	}
+}
+
+func (controller *Controller) confirmTrustedKVMNoCreate(ctx context.Context, name string) error {
+	ticker := time.NewTicker(controller.interval)
+	defer ticker.Stop()
+	for {
+		absent, err := controller.trustedKVMAbsentOnce(ctx, name)
+		if err != nil {
+			return err
+		}
+		if absent {
+			return nil
 		}
 		select {
 		case <-ctx.Done():
@@ -540,6 +568,38 @@ func (controller *Controller) confirmTrustedKVMNoCreate(ctx context.Context, nam
 		case <-ticker.C:
 		}
 	}
+}
+
+func (controller *Controller) trustedKVMAbsentOnce(ctx context.Context, name string) (bool, error) {
+	if controller.kube == nil || name == "" {
+		return false, errors.New("argojob: cannot establish pre-create cleanup")
+	}
+	if _, err := controller.workflows.Get(ctx, name, metav1.GetOptions{}); err == nil {
+		return false, ErrTrustedKVMWorkflowPresent
+	} else if !apierrors.IsNotFound(err) {
+		return false, err
+	}
+	// Never delete an unbound object based on labels or a name collision.
+	claimName := sourceClaimName(name)
+	pods, err := controller.kube.CoreV1().Pods(controller.config.Namespace).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return false, err
+	}
+	for _, pod := range pods.Items {
+		if pod.Name == claimName {
+			return false, nil
+		}
+		for _, volume := range pod.Spec.Volumes {
+			if volume.PersistentVolumeClaim != nil && volume.PersistentVolumeClaim.ClaimName == claimName {
+				return false, nil
+			}
+		}
+	}
+	_, err = controller.kube.CoreV1().PersistentVolumeClaims(controller.config.Namespace).Get(ctx, claimName, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		return true, nil
+	}
+	return false, err
 }
 
 func trustedArgoRuntimeValue(env corev1.EnvVar, workflow *wfv1.Workflow, pod *corev1.Pod) bool {

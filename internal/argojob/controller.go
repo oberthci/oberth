@@ -114,9 +114,10 @@ func (controller *Controller) Namespace() string { return controller.config.Name
 // from this run's reviewed source.
 func (controller *Controller) Create(ctx context.Context, request Request) (name string, resultErr error) {
 	attemptedCreate := false
+	definitelyRejected := false
 	if request.TrustedKVM != nil {
 		defer func() {
-			if resultErr != nil && !attemptedCreate {
+			if resultErr != nil && (!attemptedCreate || definitelyRejected) {
 				cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 				defer cancel()
 				if err := controller.confirmTrustedKVMNoCreate(cleanupCtx, request.Name); err == nil {
@@ -241,6 +242,7 @@ func (controller *Controller) Create(ctx context.Context, request Request) (name
 	existing, getErr = controller.workflows.Get(ctx, intended.Name, metav1.GetOptions{})
 	if getErr != nil {
 		if apierrors.IsNotFound(getErr) {
+			definitelyRejected = apierrors.IsInvalid(createErr) || apierrors.IsForbidden(createErr) || apierrors.IsBadRequest(createErr)
 			controller.seeder.DeleteClaim(context.WithoutCancel(ctx), volume.ClaimName)
 		}
 		return "", fmt.Errorf("argojob: create Workflow %s: %w", intended.Name, createErr)

@@ -269,7 +269,7 @@ func run(ctx context.Context, intent vmrunner.KVMIntent, artifactRoot, privateRo
 	}
 	qmp := filepath.Join(dir, "qmp.sock")
 	control := filepath.Join(dir, "guest.sock")
-	qemu := deps.qemu("-nodefaults", "-no-user-config", "-display", "none", "-accel", "kvm", "-cpu", "host", "-m", "2048", "-smp", "2", "-nic", "none", "-kernel", filepath.Join(dir, "kernel"), "-initrd", filepath.Join(dir, "initramfs"), "-append", "console=ttyS0 panic=1", "-serial", "null", "-qmp", "unix:"+qmp+",server=on,wait=off", "-device", "virtio-serial-pci", "-chardev", "socket,id=control,path="+control+",server=on,wait=off", "-device", "virtserialport,chardev=control,name=org.oberth.probe", "-fw_cfg", "name=opt/oberth/artifacts,file="+input)
+	qemu := deps.qemu("-sandbox", "on,obsolete=deny,elevateprivileges=deny,spawn=deny,resourcecontrol=deny", "-nodefaults", "-no-user-config", "-display", "none", "-accel", "kvm", "-cpu", "host", "-m", "2048", "-smp", "2", "-nic", "none", "-kernel", filepath.Join(dir, "kernel"), "-initrd", filepath.Join(dir, "initramfs"), "-append", "console=ttyS0 panic=1", "-serial", "null", "-qmp", "unix:"+qmp+",server=on,wait=off", "-device", "virtio-serial-pci", "-chardev", "socket,id=control,path="+control+",server=on,wait=off", "-device", "virtserialport,chardev=control,name=org.oberth.probe", "-fw_cfg", "name=opt/oberth/artifacts,file="+input)
 	qemu.Env = []string{"PATH=/usr/bin:/bin"}
 	qemu.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	if e = qemu.Start(); e != nil {

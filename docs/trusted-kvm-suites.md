@@ -67,7 +67,9 @@ QEMU fw_cfg `opt/oberth/artifacts`. Guest init can read that data via Linux
 fw_cfg sysfs and stage it inside the guest. This channel carries data only.
 No driver, result file, host directory or QMP socket is mounted into the guest.
 QEMU is forced to KVM on Linux/amd64, two CPUs/2 GiB, no NIC, no default devices
-and no user configuration. Suite authors provide actual guest initialization
+and no user configuration. Its mandatory seccomp sandbox uses
+`-sandbox on,obsolete=deny,elevateprivileges=deny,spawn=deny,resourcecontrol=deny`.
+Suite authors provide actual guest initialization
 and host assertions; Oberth does not fabricate a passing generic guest.
 
 ## Execution, evidence and releases
@@ -97,7 +99,19 @@ Refusals preserve available actual kubelet records (including nonzero exits and
 restarts), while missing/failed evidence can never open the delivery gate. Shared VM capacity
 remains reserved until exact owned Workflow/Pod/PVC cleanup is observed.
 Uncertain creates or cleanup preserve the obligation; recovery cleans and
-interrupts rather than manufacturing success.
+interrupts rather than manufacturing success. An unbound submission can be
+rejected on recovery only after at least 60 continuous seconds of successful
+exact-name Workflow, source-claim and source-consuming/seed Pod absence checks,
+within a 90-second observation budget. Auxiliary presence resets that interval;
+API errors retain the obligation. This path does not require the old checkout.
+Individual recovery failures are logged and left pending without stopping the
+scheduler; pending rows without a configured executor still block startup.
+Explicit API Invalid/Forbidden/BadRequest admission rejection is definitive only
+with follow-up Workflow absence and observed auxiliary cleanup.
+
+Database triggers enforce immutable intent/identity, one-way Workflow UID and
+receipt/refusal assignment, irreversible cleanup, and journal retention even for
+raw SQL writes. Store methods retain the audited lifecycle checks.
 
 Only after the successful receipt and cleanup does the scheduler record the
 main Job intent and create the main CI or credentialed release Workflow. Thus

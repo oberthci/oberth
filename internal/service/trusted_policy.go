@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log"
 
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/vmrunner"
@@ -118,7 +119,8 @@ func (scheduler *Scheduler) recoverTrustedPreflights(ctx context.Context) error 
 	}
 	pending, err := journal.PendingKVMPreflights(ctx)
 	if err != nil {
-		return err
+		log.Printf("WARN: trusted preflight recovery inventory unavailable: %v", err)
+		return nil
 	}
 	if len(pending) == 0 {
 		return nil
@@ -128,23 +130,29 @@ func (scheduler *Scheduler) recoverTrustedPreflights(ctx context.Context) error 
 	}
 	runs, err := scheduler.trusted.Recover(ctx)
 	if err != nil {
-		return err
+		log.Printf("WARN: trusted preflight recovery remains pending: %v", err)
 	}
+	// Even a partial recovery must interrupt successfully cleaned parents. Other
+	// rows retain their journal/capacity obligation and cannot publish.
 	for _, id := range runs {
-		run, e := scheduler.store.Run(ctx, id)
-		if e != nil {
-			return e
-		}
-		if run.Status != model.RunRunning {
-			continue
-		}
-		repo, e := scheduler.store.Repository(ctx, run.RepoID)
-		if e != nil {
-			return e
-		}
-		if e = scheduler.finishInfrastructureFailure(ctx, run, repo, fmt.Errorf("trusted preflight interrupted before main delivery; retry required")); e != nil {
-			return e
+		if err := scheduler.interruptRecoveredPreflight(ctx, id); err != nil {
+			log.Printf("WARN: recovered trusted preflight parent %s remains pending: %v", id, err)
 		}
 	}
 	return nil
+}
+
+func (scheduler *Scheduler) interruptRecoveredPreflight(ctx context.Context, id string) error {
+	run, err := scheduler.store.Run(ctx, id)
+	if err != nil {
+		return err
+	}
+	if run.Status != model.RunRunning {
+		return nil
+	}
+	repo, err := scheduler.store.Repository(ctx, run.RepoID)
+	if err != nil {
+		return err
+	}
+	return scheduler.finishInfrastructureFailure(ctx, run, repo, fmt.Errorf("trusted preflight interrupted before main delivery; retry required"))
 }

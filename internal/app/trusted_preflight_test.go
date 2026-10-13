@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -23,13 +24,24 @@ import (
 
 type protectedControllerFixture struct {
 	*blockingController
-	request   argojob.Request
-	createErr error
-	failed    bool
-	waitRunID string
-	cleaned   bool
+	request    argojob.Request
+	createErr  error
+	failed     bool
+	waitRunID  string
+	cleaned    bool
+	absent     bool
+	absenceErr error
 }
 
+func (c *protectedControllerFixture) ConfirmTrustedKVMAbsent(context.Context, string) error {
+	if c.absenceErr != nil {
+		return c.absenceErr
+	}
+	if c.absent {
+		return nil
+	}
+	return argojob.ErrTrustedKVMWorkflowPresent
+}
 func (c *protectedControllerFixture) Namespace() string { return "test-pipeline" }
 func (c *protectedControllerFixture) Create(_ context.Context, r argojob.Request) (string, error) {
 	c.request = r
@@ -56,7 +68,7 @@ func (c *protectedControllerFixture) TrustedKVMReceipt(_ context.Context, r argo
 	return vmrunner.KVMReceipt{IntentDigest: d, WorkflowUID: uid, Binding: vmrunner.KVMTerminationBinding{Namespace: intent.Namespace, WorkflowName: intent.WorkflowName, WorkflowUID: uid, PodName: "pod", PodUID: "pod-uid", ContainerID: "containerd://id", HarnessImageRef: intent.Recipe.HarnessImage, AdmittedAt: intent.AdmittedAt, Deadline: intent.Deadline}, Report: vmrunner.KVMReport{Version: 1, IntentDigest: d, InventoryDigest: intent.InventoryDigest, CaseCount: intent.CaseCount, ArtifactSetDigest: strings.Repeat("f", 64)}, Termination: vmrunner.KVMTerminationRecord{ImageID: "sha256:" + strings.Repeat("c", 64), ContainerID: "containerd://id", PodUID: "pod-uid", WorkflowUID: uid, StartedAt: intent.AdmittedAt, FinishedAt: now}, FinishedAt: now}, nil
 }
 func TestTrustedPreflightAdapterLifecycle(t *testing.T) {
-	for _, scenario := range []string{"pass", "workflow failed", "definite create refusal", "uncertain create", "unapproved"} {
+	for _, scenario := range []string{"pass", "workflow failed", "definite create refusal", "uncertain create", "recover absent", "unapproved"} {
 		t.Run(scenario, func(t *testing.T) {
 			ctx := context.Background()
 			fixture := newRaceFixture(t)
@@ -64,7 +76,7 @@ func TestTrustedPreflightAdapterLifecycle(t *testing.T) {
 			if scenario == "definite create refusal" {
 				controller.createErr = argojob.ErrTrustedKVMCreateRefused
 			}
-			if scenario == "uncertain create" {
+			if scenario == "uncertain create" || scenario == "recover absent" {
 				controller.createErr = errors.New("transport uncertainty")
 			}
 			fixture.jobs.controller = controller
@@ -135,14 +147,62 @@ func TestTrustedPreflightAdapterLifecycle(t *testing.T) {
 				if err == nil || state.Refusal == nil || state.Receipt != nil {
 					t.Fatalf("failure lost negative receipt: %v %#v", err, state)
 				}
-				if scenario == "uncertain create" {
+				if scenario == "uncertain create" || scenario == "recover absent" {
 					if state.Cleaned {
 						t.Fatal("uncertain create released capacity")
+					}
+					if scenario == "recover absent" {
+						controller.absent = true
+						if e := os.RemoveAll(fixture.sourceDir); e != nil {
+							t.Fatal(e)
+						}
+						ids, recoverErr := p.Recover(ctx)
+						if recoverErr != nil || len(ids) != 1 || ids[0] != run.ID {
+							t.Fatalf("recover absent: %v %v", ids, recoverErr)
+						}
+						state, recoverErr = database.KVMPreflight(ctx, run.ID)
+						if recoverErr != nil || !state.Rejected || !state.Cleaned || state.WorkflowUID != "" {
+							t.Fatalf("absent create not rejected/cleaned: %#v %v", state, recoverErr)
+						}
+						if _, recoverErr = database.EnqueueRun(ctx, model.RunSpec{RepoID: repo.ID, RefKind: model.RefBranch, Ref: "next", SHA: sha, TestedSHA: sha, Actor: "agent", Trigger: "branch"}); recoverErr != nil {
+							t.Fatal(recoverErr)
+						}
+						next, recoverErr := database.ClaimNextRun(ctx)
+						if recoverErr != nil {
+							t.Fatal(recoverErr)
+						}
+						nextIntent := state.Intent
+						nextIntent.RunID = next.ID
+						nextIntent.WorkflowName = "next-trusted"
+						if _, recoverErr = database.ReserveKVMPreflight(ctx, nextIntent); recoverErr != nil {
+							t.Fatalf("VM slot not released: %v", recoverErr)
+						}
 					}
 				} else if !state.Cleaned {
 					t.Fatal("definite failure not cleaned")
 				}
 			}
 		})
+	}
+}
+
+// One unavailable API observation must not hide successful rows behind it.
+type recoveryRowsStore struct {
+	trustedRunStore
+	rows []vmrunner.KVMExecution
+}
+
+func (s *recoveryRowsStore) PendingKVMPreflights(context.Context) ([]vmrunner.KVMExecution, error) {
+	return s.rows, nil
+}
+func TestTrustedPreflightRecoveryContinuesAfterRowError(t *testing.T) {
+	failure := errors.New("API observation unavailable")
+	p := &TrustedPreflights{store: &recoveryRowsStore{rows: []vmrunner.KVMExecution{
+		{Intent: vmrunner.KVMIntent{RunID: "pending", WorkflowName: "unknown"}, Submitted: true},
+		{Intent: vmrunner.KVMIntent{RunID: "cleaned"}, Cleaned: true},
+	}}, controller: &protectedControllerFixture{absenceErr: failure}}
+	ids, err := p.Recover(context.Background())
+	if !errors.Is(err, failure) || len(ids) != 1 || ids[0] != "cleaned" {
+		t.Fatalf("partial recovery lost successful rows: %v %v", ids, err)
 	}
 }
