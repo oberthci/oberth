@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/url"
+	"strings"
 	"time"
 )
 
@@ -73,7 +74,29 @@ type KVMReport struct {
 	ArtifactSetDigest string `json:"artifact_set_digest"`
 	CaseCount         int    `json:"case_count"`
 }
+type KVMTerminationRecord struct {
+	ImageID      string    `json:"image_id"`
+	ContainerID  string    `json:"container_id"`
+	PodUID       string    `json:"pod_uid"`
+	WorkflowUID  string    `json:"workflow_uid"`
+	ExitCode     int32     `json:"exit_code"`
+	Signal       int32     `json:"signal"`
+	RestartCount int32     `json:"restart_count"`
+	StartedAt    time.Time `json:"started_at"`
+	FinishedAt   time.Time `json:"finished_at"`
+}
+
+func (r KVMTerminationRecord) Validate(binding KVMTerminationBinding) error {
+	expected := binding.HarnessImageRef[strings.LastIndex(binding.HarnessImageRef, "@")+1:]
+	if r.ImageID == "" || runtimeImageDigest(r.ImageID) != expected || r.ContainerID == "" || r.ContainerID != binding.ContainerID || r.PodUID == "" || r.PodUID != binding.PodUID || r.WorkflowUID == "" || r.WorkflowUID != binding.WorkflowUID || r.ExitCode != 0 || r.Signal != 0 || r.RestartCount != 0 || r.StartedAt.IsZero() || r.FinishedAt.IsZero() || r.StartedAt.Before(binding.AdmittedAt) || r.FinishedAt.Before(r.StartedAt) || r.FinishedAt.After(binding.Deadline) {
+		return errors.New("invalid journaled kubelet termination record")
+	}
+	return nil
+}
+
 type KVMReceipt struct {
+	Termination KVMTerminationRecord `json:"termination"`
+
 	IntentDigest string                `json:"intent_digest"`
 	WorkflowUID  string                `json:"workflow_uid"`
 	Binding      KVMTerminationBinding `json:"binding"`
@@ -82,7 +105,7 @@ type KVMReceipt struct {
 }
 
 func (r KVMReceipt) Validate(intent KVMIntent) error {
-	if intent.Validate() != nil || r.IntentDigest != KVMIntentDigest(intent) || r.WorkflowUID == "" || r.Binding.WorkflowUID != r.WorkflowUID || r.Binding.WorkflowName != intent.WorkflowName || r.Binding.Namespace != intent.Namespace || r.Binding.PodName == "" || r.Binding.PodUID == "" || r.Binding.ContainerID == "" || r.Binding.HarnessImageRef != intent.Recipe.HarnessImage || !r.Binding.AdmittedAt.Equal(intent.AdmittedAt) || !r.Binding.Deadline.Equal(intent.Deadline) || r.FinishedAt.Before(intent.AdmittedAt) || r.FinishedAt.After(intent.Deadline) || r.Report.Version != 1 || r.Report.IntentDigest != r.IntentDigest || r.Report.InventoryDigest != intent.InventoryDigest || r.Report.CaseCount != intent.CaseCount || !sha256HexPattern.MatchString(r.Report.ArtifactSetDigest) {
+	if intent.Validate() != nil || r.Termination.Validate(r.Binding) != nil || !r.Termination.FinishedAt.Equal(r.FinishedAt) || r.IntentDigest != KVMIntentDigest(intent) || r.WorkflowUID == "" || r.Binding.WorkflowUID != r.WorkflowUID || r.Binding.WorkflowName != intent.WorkflowName || r.Binding.Namespace != intent.Namespace || r.Binding.PodName == "" || r.Binding.PodUID == "" || r.Binding.ContainerID == "" || r.Binding.HarnessImageRef != intent.Recipe.HarnessImage || !r.Binding.AdmittedAt.Equal(intent.AdmittedAt) || !r.Binding.Deadline.Equal(intent.Deadline) || r.FinishedAt.Before(intent.AdmittedAt) || r.FinishedAt.After(intent.Deadline) || r.Report.Version != 1 || r.Report.IntentDigest != r.IntentDigest || r.Report.InventoryDigest != intent.InventoryDigest || r.Report.CaseCount != intent.CaseCount || !sha256HexPattern.MatchString(r.Report.ArtifactSetDigest) {
 		return errors.New("trusted KVM receipt does not match immutable admission")
 	}
 	return nil
