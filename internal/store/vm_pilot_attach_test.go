@@ -43,6 +43,7 @@ func TestMigration15PreservesSealedPilotAndStartsUnclaimed(t *testing.T) {
 	_, err = db.Exec(`ALTER TABLE vm_suite_executions DROP COLUMN attach_json;
 ALTER TABLE runs DROP COLUMN concurrency_group;
 DROP TABLE IF EXISTS grant_declarations;
+DROP TABLE IF EXISTS trusted_test_receipts;
 DROP TRIGGER IF EXISTS promotions_guard_update;
 DROP TRIGGER IF EXISTS promotion_grants_no_delete;
 DROP TRIGGER IF EXISTS promotion_grants_guard_update;

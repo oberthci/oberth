@@ -13,7 +13,7 @@ type migration struct {
 func LatestMigrationVersion() int { return latestMigrationVersion }
 
 const (
-	latestMigrationVersion = 19
+	latestMigrationVersion = 20
 	// oberthSchemaIdentity is the fresh-deployment default. Existing deployments
 	// supply their original immutable identity through ProtocolConfig; bootstrap
 	// SQL and legacy schema validation use that exact configured operand.
@@ -986,5 +986,31 @@ WHEN NOT (
 BEGIN
     SELECT RAISE(ABORT, 'promotion grant transition is immutable');
 END;`,
+	},
+	{
+		// v20: Trusted test receipts (#278 Lane B).
+		// Each trusted test execution writes a durable receipt binding the
+		// run, profile, candidate SHA, suite identity, guest digest, and
+		// kubelet-sourced verdict. The publication gate refuses to publish
+		// a run whose required trusted suites lack a passing receipt.
+		version: 20,
+		sql: `CREATE TABLE trusted_test_receipts (
+    run_id TEXT PRIMARY KEY REFERENCES runs(id),
+    profile TEXT NOT NULL,
+    candidate_sha TEXT NOT NULL CHECK (length(candidate_sha) = 40),
+    suite_identity TEXT NOT NULL CHECK (length(suite_identity) = 40),
+    guest_digest TEXT NOT NULL,
+    contract_digest TEXT NOT NULL CHECK (length(contract_digest) = 64),
+    verdict TEXT NOT NULL CHECK (verdict IN ('pending', 'passed', 'refused')),
+    pod_uid TEXT NOT NULL DEFAULT '',
+    container_id TEXT NOT NULL DEFAULT '',
+    exit_code INTEGER NOT NULL DEFAULT -1,
+    restart_count INTEGER NOT NULL DEFAULT -1,
+    termination_hash TEXT NOT NULL DEFAULT '',
+    refusal_reason TEXT NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+CREATE INDEX trusted_test_receipts_verdict_idx ON trusted_test_receipts(verdict);`,
 	},
 }

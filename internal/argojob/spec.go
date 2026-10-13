@@ -33,6 +33,7 @@ import (
 	k8svalidation "k8s.io/apimachinery/pkg/util/validation"
 
 	"github.com/oberthci/oberth/internal/goproxy"
+	"github.com/oberthci/oberth/internal/vmrunner"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 	"github.com/oberthci/oberth/pkg/periapsis"
 )
@@ -258,6 +259,22 @@ type Config struct {
 	// infrastructure-class error rather than silently running TCG.
 	// Default: false (must be explicitly enabled via vm.kvm.enabled chart value).
 	KVMEnabled bool
+
+	// TrustedTestsEnabled gates server-appended trusted-tests leaves (#278
+	// Lane B). When true and the repository's tests.yaml declares a v2
+	// profile, the server appends a trusted-tests leaf to the workflow with
+	// the HarnessImage. When false and a contract exists, the run fails with
+	// the existing "protected suite executor required" error.
+	TrustedTestsEnabled bool
+
+	// TrustedTestsHarnessImage is the digest-pinned image the server uses
+	// for the trusted-tests leaf. Server-controlled; the repository can
+	// never select this image.
+	TrustedTestsHarnessImage string
+
+	// VMMaxConcurrentRuns limits how many trusted test executions can run
+	// concurrently. Zero means 1 (the existing vm_capacity_slots behavior).
+	VMMaxConcurrentRuns int
 }
 
 func (config *Config) applyDefaults() {
@@ -550,6 +567,18 @@ type Request struct {
 
 	Fragments map[argoworkflow.FragmentKey]argoworkflow.Fragment
 
+	// TrustedTestContract is the resolved contract from the repository's
+	// tests.yaml, if any. When non-nil and Config.TrustedTestsEnabled is
+	// true, Build appends the trusted-tests leaf to the workflow. Set by
+	// the scheduler after resolving the requirement from the immutable
+	// checkout and the upstream default branch. Nil means no trusted test.
+	TrustedTestContract *vmrunner.Contract
+
+	// TrustedTestSuiteIdentity is the suite's pinned revision (40-char hex),
+	// resolved from the upstream default branch independently of the
+	// candidate. Set alongside TrustedTestContract.
+	TrustedTestSuiteIdentity string
+
 	// Identities overrides Config.PerRepoIdentities and Config.PerRepoCIIdentities
 	// when non-nil. The caller sets this from IdentityStore.Snapshot() to bind
 	// both Builds of one admission to the same identity version, so the audit
@@ -736,6 +765,9 @@ func Build(config Config, request Request) (*wfv1.Workflow, error) {
 		return nil, err
 	}
 	if err := applyKVMLeaves(workflow, config); err != nil {
+		return nil, err
+	}
+	if err := appendTrustedTestsLeaf(workflow, config, request); err != nil {
 		return nil, err
 	}
 
