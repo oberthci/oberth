@@ -44,8 +44,8 @@ type kvmSuiteManifest struct {
 // manifest.yaml. V1 bundles are uncompressed tar archives of bounded regular
 // files; links, duplicate/noncanonical paths, extensions and trailing data are
 // refused. Nothing is extracted to the filesystem or executed. An independently
-// authorized contract and publisher-signature verification remain prerequisites
-// for any future runtime use; this function does not activate that runtime.
+// authorized recipe remains a prerequisite for runtime use; content hashing
+// alone never authorizes execution.
 func VerifyKVMSuiteBundle(contract Contract, bundle []byte) (VerifiedKVMSuite, error) {
 	if err := ValidateContract(contract); err != nil || contract.Version != 2 {
 		return VerifiedKVMSuite{}, errors.New("trusted suite requires a valid v2 contract")
@@ -140,7 +140,7 @@ type KVMCaseResult struct {
 
 // VerifyInventory compares a trusted harness's outcomes with the pinned suite.
 // Logs, guest output and a container-written termination message are not trusted
-// outcomes by themselves; the future harness must prove protected execution.
+// outcomes by themselves; the pinned host harness must own protected execution.
 func (suite VerifiedKVMSuite) VerifyInventory(contract Contract, results []KVMCaseResult) error {
 	if suite.contractDigest == "" || suite.contractDigest != ContractDigest(&contract) || len(suite.caseIDs) == 0 || len(results) != len(suite.caseIDs) {
 		return errors.New("trusted case inventory does not match the verified suite")

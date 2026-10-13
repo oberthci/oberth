@@ -13,7 +13,7 @@ var sha256HexPattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
 var artifactPathPattern = regexp.MustCompile(`^[a-zA-Z0-9_][a-zA-Z0-9_./-]{0,254}$`)
 
 // ValidateContract enforces the closed wire schemas without granting execution
-// authority. Both profiles remain disabled at the scheduler's policy boundary.
+// authority. V2 execution additionally requires an operator-approved recipe.
 func ValidateContract(contract Contract) error {
 	switch contract.Version {
 	case 1:
