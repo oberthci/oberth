@@ -33,6 +33,7 @@ import (
 	k8svalidation "k8s.io/apimachinery/pkg/util/validation"
 
 	"github.com/oberthci/oberth/internal/goproxy"
+	"github.com/oberthci/oberth/internal/vmrunner"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 	"github.com/oberthci/oberth/pkg/periapsis"
 )
@@ -506,7 +507,9 @@ func vaultAddressRequiresPinnedAnchor(address string) bool {
 // Request is one run's submission intent.
 type Request struct {
 	nonrootProof *nonrootProof
-	RunID        string
+	// TrustedKVM is a server-created, journaled preflight admission.
+	TrustedKVM *vmrunner.KVMIntent
+	RunID      string
 	// Name is the durable, deterministic object name the scheduler already
 	// persisted for this run. Both engines use it, so recovery can find the
 	// object without knowing which engine created it.
@@ -569,6 +572,11 @@ type Request struct {
 // legacy-chain step fetches.
 func Build(config Config, request Request) (*wfv1.Workflow, error) {
 	config.applyDefaults()
+	if request.TrustedKVM != nil {
+		if err := prepareTrustedKVMRequest(config, &request); err != nil {
+			return nil, err
+		}
+	}
 	// When the caller supplies a snapshot, overlay it onto the config copy.
 	// Config is received by value, so this does not mutate the original.
 	// All identity lookups in perrepo.go read these map fields, which are
@@ -589,6 +597,11 @@ func Build(config Config, request Request) (*wfv1.Workflow, error) {
 	workflow, err := argoworkflow.Decode(request.Source)
 	if err != nil {
 		return nil, err
+	}
+	if request.TrustedKVM != nil {
+		if err := admitTrustedKVMSource(workflow); err != nil {
+			return nil, err
+		}
 	}
 	fragmentLock, err := argoworkflow.Resolve(workflow, request.Fragments)
 	if err != nil {
@@ -739,6 +752,11 @@ func Build(config Config, request Request) (*wfv1.Workflow, error) {
 		return nil, err
 	}
 
+	if request.TrustedKVM != nil {
+		if err := appendTrustedKVM(workflow, config, request); err != nil {
+			return nil, err
+		}
+	}
 	if err := projectExecutorTokens(workflow, config); err != nil {
 		return nil, err
 	}
