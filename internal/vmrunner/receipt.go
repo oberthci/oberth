@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -75,6 +76,7 @@ type TrustedTestReceipt struct {
 type KubeletRecord struct {
 	PodUID       string
 	ContainerID  string
+	ImageID      string // kubelet-reported resolved image digest
 	ExitCode     int32
 	RestartCount int32
 	Message      string
@@ -125,6 +127,14 @@ func ReceiptDigest(receipt TrustedTestReceipt) string {
 //   - restart_detected: restart count > 0
 //   - timeout: the trusted leaf did not finish within the deadline
 func EvaluateKubeletVerdict(record KubeletRecord, expectedDigest string, deadline time.Duration, startedAt time.Time) (TrustedTestVerdict, string) {
+	// Image integrity is the most fundamental check: if the kubelet ran
+	// a different image than the server intended, nothing else matters.
+	if expectedDigest != "" && record.ImageID != "" {
+		if !digestMatches(record.ImageID, expectedDigest) {
+			return VerdictRefused, fmt.Sprintf("wrong_digest: actual image %s does not match expected digest %s", record.ImageID, expectedDigest)
+		}
+	}
+
 	if record.RestartCount > 0 {
 		return VerdictRefused, fmt.Sprintf("restart_detected: restart count %d; the trusted leaf must run exactly once", record.RestartCount)
 	}
@@ -138,6 +148,26 @@ func EvaluateKubeletVerdict(record KubeletRecord, expectedDigest string, deadlin
 	}
 
 	return VerdictPassed, ""
+}
+
+// digestMatches checks whether a kubelet-reported imageID contains the
+// expected digest. The imageID format varies by runtime:
+//
+//	docker://sha256:abc123...
+//	docker-pullable://registry/image@sha256:abc123...
+//	sha256:abc123...
+//
+// The check is a substring match on the sha256:hex64 portion.
+func digestMatches(imageID, expectedDigest string) bool {
+	// Extract the sha256:hex64 from the expected digest if it's a full ref.
+	expected := expectedDigest
+	if idx := strings.LastIndex(expected, "@"); idx >= 0 {
+		expected = expected[idx+1:]
+	}
+	if expected == "" {
+		return true // no digest to compare
+	}
+	return strings.Contains(imageID, expected)
 }
 
 // ValidateReceipt checks that a receipt has the required identity fields.

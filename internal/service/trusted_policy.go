@@ -23,27 +23,6 @@ func (scheduler *Scheduler) resolveTrustedTestRequirement(ctx context.Context, r
 	return vmrunner.ResolveRequirement(ctx, scheduler.git, upstream.QualifiedRepo(repository.Name), candidateSHA)
 }
 
-// requireTrustedTestPolicy is mandatory at build and publication boundaries.
-// When the trusted test executor is enabled (trustedTestsEnabled config) and
-// the contract is version 2, the run proceeds with a server-appended leaf.
-// When disabled or version 1, the existing "protected suite executor
-// required" error is returned.
-func (scheduler *Scheduler) requireTrustedTestPolicy(ctx context.Context, repository model.Repository, candidateSHA string) error {
-	requirement, err := scheduler.resolveTrustedTestRequirement(ctx, repository, candidateSHA)
-	if err != nil {
-		return err
-	}
-	if requirement.Contract == nil {
-		return nil
-	}
-	// Version 2 contracts with the trusted executor enabled are handled by
-	// the trusted-tests leaf injection in Build, not by blocking here.
-	if requirement.Contract.Version >= 2 && scheduler.trustedTestsEnabled {
-		return nil
-	}
-	return fmt.Errorf("%w: trusted test profile %s requires a protected suite executor and verified result evidence", ErrUnavailable, requirement.Contract.Profile)
-}
-
 // requirePublicationTestPolicy gates publication on trusted test evidence.
 // When a trusted test is required, the publication gate checks for a passing
 // receipt in the store. Without a passing receipt, publication is refused.

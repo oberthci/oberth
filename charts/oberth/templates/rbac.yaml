@@ -51,3 +51,38 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
   name: {{ include "oberth.fullname" . }}
+{{- $vm := .Values.vm | default dict -}}
+{{- $vmTrustedTests := $vm.trustedTests | default dict -}}
+{{- if $vmTrustedTests.enabled }}
+---
+# Trusted test allocatable pre-check (#278 Lane B): the server reads node
+# allocatable resources before submitting a trusted-tests leaf to verify
+# that at least one node can schedule the KVM device. Read-only, cluster-
+# scoped. This is the only cluster-scoped RBAC the trusted-tests feature
+# adds; review separately from the namespace Role above.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "oberth.fullname" . }}-trusted-tests
+  labels:
+    {{- include "oberth.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "oberth.fullname" . }}-trusted-tests
+  labels:
+    {{- include "oberth.labels" . | nindent 4 }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "oberth.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "oberth.fullname" . }}-trusted-tests
+{{- end }}

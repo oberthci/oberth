@@ -929,15 +929,70 @@ continuity checks; it must never be used to reset or bypass those checks.
   each credentialed step's stdout and stderr with redact.NewWriter.
 - Every push, sync, promotion, and issue mutation is attributed to the acting
   uplink in the same durable transaction as the state change where applicable.
-- Required VM tests use the closed `.oberth/tests.yaml` version-1 contract:
-  profile `ebpf-offline-amd64-v1`, artifact `ebpf/secret_monitor.o`, with no
-  repository-selected commands, images, identities, or credentials. The
-  scheduler reads the exact tested commit and a freshly fetched private
+- Required VM tests use the closed `.oberth/tests.yaml` contract. Two
+  versions are supported:
+  - **Version 1** (existing): profile `ebpf-offline-amd64-v1`, artifact
+    `ebpf/secret_monitor.o`. No protected suite executor is activated;
+    a required v1 profile fails explicitly at build time.
+  - **Version 2** (#278 Lane B, trusted-tests): closed profile vocabulary
+    (`kvm-suite-amd64-v1`). When `vm.trustedTests.enabled` is true on the
+    server, the scheduler resolves the requirement from the candidate and the
+    upstream default branch, then appends a server-owned `trusted-tests` leaf
+    to the workflow. The leaf's image (`vm.trustedTests.harnessImage`, digest-
+    pinned, schema-validated) command, args, and resource limits are entirely
+    server-controlled; the repository can request a trusted test by declaring
+    the profile in `tests.yaml` but cannot author the leaf, choose its image,
+    or set its resource limits. After the workflow completes, the server reads
+    the kubelet termination record (pod UID, container ID, exit code, restart
+    count, image digest), builds an audited receipt (schema v19
+    `trusted_test_receipts`), and writes it to the store. A passing verdict
+    requires exit 0, restart count 0, within the contract deadline, and the
+    kubelet-reported image digest matching the configured harness image. Any
+    deviation produces a `refused` verdict with a typed reason:
+    `wrong_digest`, `exit_nonzero`, `restart_detected`, `timeout`, or
+    `kubelet_record_unavailable`. A missing or unreadable termination record
+    is always a refusal, never a pass. A refused verdict overrides a passing
+    Argo workflow result and makes the run red with phase `trusted-tests`.
+    The publication gate (`requirePublicationTestPolicy`) requires a passing
+    receipt before any publication of a run with a required v2 contract; the
+    receipt's candidate SHA must match the publication's candidate.
+  The scheduler reads the exact tested commit and a freshly fetched private
   upstream default ref before build creation and publication. A candidate
   cannot delete a published requirement. Unreadable policy fails closed,
-  including on publication recovery and fast-forward promotion. No protected
-  suite executor is activated yet, so a required profile fails explicitly;
-  build success, VM shutdown and guest log markers cannot replace test evidence.
+  including on publication recovery and fast-forward promotion.
+  **Contract file format** (`.oberth/tests.yaml`):
+  ```yaml
+  version: 2
+  profile: kvm-suite-amd64-v1
+  artifact: ebpf/secret_monitor.o
+  guest_image: "registry.example.com/guest@sha256:<64-hex>"
+  resources:
+    cpu_cores: 2       # 1..4
+    memory_mib: 4096   # 512..16384
+  timeout: "30m"       # 1m..2h
+  ```
+  The file must be exactly one YAML document, <=4096 bytes, with no aliases
+  or anchors. `guest_image` must be digest-pinned. `profile` must be in the
+  known vocabulary. Unknown fields are rejected (strict decode).
+  **Termination message format** (written to `/dev/termination-log` by the
+  harness):
+  ```
+  verdict=PASS|FAIL candidate=<40-hex> suite=<40-hex> guest=sha256:<64-hex>
+  ```
+  **Receipt schema** (`trusted_test_receipts`, schema v19):
+  `run_id` (PK, FK runs), `profile`, `candidate_sha` (40), `suite_identity`
+  (40), `guest_digest`, `contract_digest` (64), `verdict` (pending|passed|
+  refused), `pod_uid`, `container_id`, `exit_code`, `restart_count`,
+  `termination_hash`, `refusal_reason`, `created_at`, `updated_at`. Identity
+  fields are immutable; only verdict fields can be updated.
+  **Allocatable pre-check**: when trusted tests are enabled, the server
+  verifies that at least one schedulable node has allocatable
+  `devices.kubevirt.io/kvm` capacity before submitting the workflow. This
+  requires a read-only ClusterRole on `nodes` (get, list), rendered by the
+  chart only when `vm.trustedTests.enabled` is true.
+  **Chart values**: `vm.trustedTests.enabled` (default false),
+  `vm.trustedTests.harnessImage` (required when enabled, must contain
+  `@sha256:`), `vm.maxConcurrentRuns` (default 1).
 - VM lifecycle state uses the audited schema-v13 `vm_executions` journal.
   Reserve immutable run/candidate/suite/image/profile identity before create;
   bind the API-issued UID before treating the object as owned. An ambiguous

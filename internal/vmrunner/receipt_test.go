@@ -80,6 +80,46 @@ func TestEvaluateKubeletVerdictTimeout(t *testing.T) {
 	}
 }
 
+func TestEvaluateKubeletVerdictWrongDigest(t *testing.T) {
+	t.Parallel()
+	start := time.Now()
+	record := KubeletRecord{
+		PodUID:       "uid-123",
+		ContainerID:  "containerd://abc",
+		ImageID:      "docker-pullable://example.com/harness@sha256:" + strings.Repeat("f", 64),
+		ExitCode:     0,
+		RestartCount: 0,
+		FinishedAt:   start.Add(5 * time.Minute),
+	}
+	expectedImage := "example.com/harness@sha256:" + strings.Repeat("a", 64)
+	verdict, reason := EvaluateKubeletVerdict(record, expectedImage, 30*time.Minute, start)
+	if verdict != VerdictRefused {
+		t.Fatalf("verdict = %s, want refused", verdict)
+	}
+	if !strings.Contains(reason, "wrong_digest") {
+		t.Fatalf("reason = %q, want wrong_digest", reason)
+	}
+}
+
+func TestEvaluateKubeletVerdictMatchingDigest(t *testing.T) {
+	t.Parallel()
+	start := time.Now()
+	digest := "sha256:" + strings.Repeat("a", 64)
+	record := KubeletRecord{
+		PodUID:       "uid-123",
+		ContainerID:  "containerd://abc",
+		ImageID:      "docker-pullable://example.com/harness@" + digest,
+		ExitCode:     0,
+		RestartCount: 0,
+		FinishedAt:   start.Add(5 * time.Minute),
+	}
+	expectedImage := "example.com/harness@" + digest
+	verdict, reason := EvaluateKubeletVerdict(record, expectedImage, 30*time.Minute, start)
+	if verdict != VerdictPassed || reason != "" {
+		t.Fatalf("verdict = %s, reason = %q", verdict, reason)
+	}
+}
+
 func TestValidateReceiptRefusesIncomplete(t *testing.T) {
 	t.Parallel()
 	if err := ValidateReceipt(TrustedTestReceipt{}); err == nil {

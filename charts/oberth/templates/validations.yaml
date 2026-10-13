@@ -137,3 +137,10 @@ is a name a public CA issues for in a deployment like this one. */ -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}
+{{- $vm := .Values.vm | default dict -}}
+{{- $vmTrustedTests := $vm.trustedTests | default dict -}}
+{{- if $vmTrustedTests.enabled -}}
+{{- if not (contains "@sha256:" ($vmTrustedTests.harnessImage | default "")) -}}
+{{- fail "vm.trustedTests.harnessImage must be digest-pinned (@sha256:...) when vm.trustedTests.enabled is true" -}}
+{{- end -}}
+{{- end -}}

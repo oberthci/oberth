@@ -682,6 +682,27 @@
             }
           },
           "required": ["enabled"]
+        },
+        "trustedTests": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Trusted test execution (#278 Lane B). When enabled with a digest-pinned harness image, the server appends a trusted-tests leaf to workflows whose tests.yaml declares a v2 closed profile.",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "When true and a repository's tests.yaml declares a v2 profile, the server injects a trusted-tests leaf. When false (default) and a contract exists, the run fails with an infrastructure error."
+            },
+            "harnessImage": {
+              "type": "string",
+              "description": "Digest-pinned image for the trusted-tests leaf. Must contain @sha256: when enabled."
+            }
+          }
+        },
+        "maxConcurrentRuns": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 16,
+          "description": "Maximum concurrent trusted test executions across all repositories. Default 1."
         }
       },
       "required": ["kvm"]

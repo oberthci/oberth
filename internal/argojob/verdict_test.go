@@ -101,6 +101,8 @@ func TestExtractKubeletRecordNotTerminal(t *testing.T) {
 
 func TestBuildTrustedReceiptPassingCase(t *testing.T) {
 	t.Parallel()
+	harnessDigest := "sha256:" + strings.Repeat("e", 64)
+	harnessImage := "example.com/harness@" + harnessDigest
 	contract := vmrunner.Contract{
 		Version:    2,
 		Profile:    vmrunner.KVMSuiteProfile,
@@ -113,6 +115,7 @@ func TestBuildTrustedReceiptPassingCase(t *testing.T) {
 	record := vmrunner.KubeletRecord{
 		PodUID:       "uid-123",
 		ContainerID:  "containerd://abc",
+		ImageID:      "docker-pullable://example.com/harness@" + harnessDigest,
 		ExitCode:     0,
 		RestartCount: 0,
 		Message:      `{"cases":3,"passed":3}`,
@@ -121,7 +124,7 @@ func TestBuildTrustedReceiptPassingCase(t *testing.T) {
 
 	receipt := BuildTrustedReceipt(
 		"run-1", contract, strings.Repeat("d", 40),
-		vmrunner.ContractDigest(&contract), record, start,
+		vmrunner.ContractDigest(&contract), record, harnessImage, start,
 	)
 	if receipt.Verdict != vmrunner.VerdictPassed {
 		t.Fatalf("verdict = %s, want passed", receipt.Verdict)
@@ -153,7 +156,7 @@ func TestBuildTrustedReceiptExitNonzero(t *testing.T) {
 
 	receipt := BuildTrustedReceipt(
 		"run-1", contract, strings.Repeat("d", 40),
-		vmrunner.ContractDigest(&contract), record, time.Now().Add(-5*time.Minute),
+		vmrunner.ContractDigest(&contract), record, "", time.Now().Add(-5*time.Minute),
 	)
 	if receipt.Verdict != vmrunner.VerdictRefused {
 		t.Fatalf("verdict = %s, want refused", receipt.Verdict)
@@ -183,7 +186,7 @@ func TestBuildTrustedReceiptRestartDetected(t *testing.T) {
 
 	receipt := BuildTrustedReceipt(
 		"run-1", contract, strings.Repeat("d", 40),
-		vmrunner.ContractDigest(&contract), record, time.Now().Add(-5*time.Minute),
+		vmrunner.ContractDigest(&contract), record, "", time.Now().Add(-5*time.Minute),
 	)
 	if receipt.Verdict != vmrunner.VerdictRefused {
 		t.Fatalf("verdict = %s, want refused", receipt.Verdict)
@@ -213,12 +216,58 @@ func TestBuildTrustedReceiptTimeout(t *testing.T) {
 
 	receipt := BuildTrustedReceipt(
 		"run-1", contract, strings.Repeat("d", 40),
-		vmrunner.ContractDigest(&contract), record, start,
+		vmrunner.ContractDigest(&contract), record, "", start,
 	)
 	if receipt.Verdict != vmrunner.VerdictRefused {
 		t.Fatalf("verdict = %s, want refused", receipt.Verdict)
 	}
 	if !strings.Contains(receipt.RefusalReason, "timeout") {
 		t.Fatalf("reason = %q, want timeout", receipt.RefusalReason)
+	}
+}
+
+func TestBuildTrustedReceiptWrongDigest(t *testing.T) {
+	t.Parallel()
+	harnessDigest := "sha256:" + strings.Repeat("e", 64)
+	harnessImage := "example.com/harness@" + harnessDigest
+	contract := vmrunner.Contract{
+		Version:    2,
+		Profile:    vmrunner.KVMSuiteProfile,
+		Artifact:   vmrunner.BPFArtifact,
+		GuestImage: "example.com/guest@sha256:" + strings.Repeat("b", 64),
+		Resources:  vmrunner.ContractResources{CPUCores: 2, MemoryMiB: 4096},
+		Timeout:    30 * time.Minute,
+	}
+	record := vmrunner.KubeletRecord{
+		PodUID:      "uid-123",
+		ContainerID: "containerd://abc",
+		ImageID:     "docker-pullable://example.com/harness@sha256:" + strings.Repeat("f", 64), // wrong digest
+		ExitCode:    0,
+		FinishedAt:  time.Now(),
+	}
+
+	receipt := BuildTrustedReceipt(
+		"run-1", contract, strings.Repeat("d", 40),
+		vmrunner.ContractDigest(&contract), record, harnessImage, time.Now().Add(-5*time.Minute),
+	)
+	if receipt.Verdict != vmrunner.VerdictRefused {
+		t.Fatalf("verdict = %s, want refused", receipt.Verdict)
+	}
+	if !strings.Contains(receipt.RefusalReason, "wrong_digest") {
+		t.Fatalf("reason = %q, want wrong_digest", receipt.RefusalReason)
+	}
+}
+
+func TestExtractKubeletRecordImageID(t *testing.T) {
+	t.Parallel()
+	pod := terminatedPod(0, 0, "ok")
+	expectedImageID := "docker-pullable://example.com/harness@sha256:" + strings.Repeat("a", 64)
+	pod.Status.ContainerStatuses[0].ImageID = expectedImageID
+	record, err := extractKubeletRecord(pod)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if record.ImageID != expectedImageID {
+		t.Fatalf("ImageID = %q, want %q", record.ImageID, expectedImageID)
 	}
 }

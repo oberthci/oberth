@@ -145,6 +145,13 @@ type serveOptions struct {
 	// Promotion grant maximum lifetime. Default 24h, hard ceiling 168h (7 days).
 	promotionGrantMaxLifetime time.Duration
 
+	// Trusted test execution (#278 Lane B). When enabled and a repository's
+	// tests.yaml declares a v2 profile, the server appends a trusted-tests
+	// leaf to the workflow using the digest-pinned harness image.
+	vmTrustedTestsEnabled      bool
+	vmTrustedTestsHarnessImage string
+	vmMaxConcurrentRuns        int
+
 	gitCommandTimeout       time.Duration
 	gcInterval              time.Duration
 	pushBannerURL           string
@@ -233,6 +240,9 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 	flags.IntVar(&options.argoWorkflowTTL, "argo-workflow-ttl", 3600, "finished Workflow retention in seconds")
 	flags.BoolVar(&options.vmKVMEnabled, "vm-kvm-enabled", false, "enable server-injected KVM device access for annotated leaves (requires KubeVirt device plugin)")
 	flags.DurationVar(&options.promotionGrantMaxLifetime, "promotion-grant-max-lifetime", 24*time.Hour, "maximum lifetime for promotion grants (default 24h, hard ceiling 168h)")
+	flags.BoolVar(&options.vmTrustedTestsEnabled, "vm-trusted-tests-enabled", false, "enable trusted test execution (#278 Lane B); requires a digest-pinned harness image")
+	flags.StringVar(&options.vmTrustedTestsHarnessImage, "vm-trusted-tests-harness-image", "", "digest-pinned image for the trusted-tests leaf (must contain @sha256:)")
+	flags.IntVar(&options.vmMaxConcurrentRuns, "vm-max-concurrent-runs", 1, "maximum concurrent trusted test executions")
 	flags.DurationVar(&options.gitCommandTimeout, "git-timeout", 10*time.Minute, "Git command timeout")
 	flags.DurationVar(&options.gcInterval, "git-gc-interval", 24*time.Hour, "periodic Git GC interval")
 	flags.StringVar(&options.pushBannerURL, "push-banner-url", "", "optional HTTPS dashboard URL echoed to every accepted git push")
@@ -286,6 +296,14 @@ func validateServeOptions(options serveOptions) error {
 	}
 	if options.maxConcurrent <= 0 || options.maxConcurrent > 64 || options.gitCommandTimeout <= 0 || options.gcInterval <= 0 {
 		return errors.New("serve: concurrency, timeout, and GC values must be positive")
+	}
+	if options.vmTrustedTestsEnabled {
+		if !strings.Contains(options.vmTrustedTestsHarnessImage, "@sha256:") {
+			return errors.New("serve: --vm-trusted-tests-harness-image must be digest-pinned (@sha256:...) when trusted tests are enabled")
+		}
+	}
+	if options.vmMaxConcurrentRuns < 0 || options.vmMaxConcurrentRuns > 16 {
+		return errors.New("serve: --vm-max-concurrent-runs must be 0..16 (0 = default 1)")
 	}
 	if strings.TrimSpace(options.namespace) == "" {
 		return errors.New("serve: namespace is required")
@@ -652,6 +670,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 		Signals: signals, WorkspaceRoot: filepath.Join(options.dataRoot, "work"), MaxConcurrent: options.maxConcurrent,
 		MutationGate:            anchors.AllowMutation,
 		AdmissionDiskFloorBytes: options.admissionDiskFloorBytes,
+		TrustedTestsEnabled:     options.vmTrustedTestsEnabled,
 	})
 	if err != nil {
 		return err

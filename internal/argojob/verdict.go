@@ -87,6 +87,7 @@ func extractKubeletRecord(pod *corev1.Pod) (vmrunner.KubeletRecord, error) {
 	}
 
 	record.ContainerID = mainStatus.ContainerID
+	record.ImageID = mainStatus.ImageID
 	record.RestartCount = mainStatus.RestartCount
 
 	if mainStatus.State.Terminated != nil {
@@ -107,13 +108,16 @@ func extractKubeletRecord(pod *corev1.Pod) (vmrunner.KubeletRecord, error) {
 
 // BuildTrustedReceipt constructs a receipt from the contract, requirement,
 // and kubelet record. The verdict is evaluated according to the closed
-// negative receipt rules.
+// negative receipt rules. The harnessImageRef is the digest-pinned harness
+// image the server configured; the kubelet's imageID is cross-checked
+// against its digest to detect wrong-image substitution.
 func BuildTrustedReceipt(
 	runID string,
 	contract vmrunner.Contract,
 	suiteIdentity string,
 	contractDigest string,
 	record vmrunner.KubeletRecord,
+	harnessImageRef string,
 	startedAt time.Time,
 ) vmrunner.TrustedTestReceipt {
 	// Extract guest digest from the contract's guest image.
@@ -122,7 +126,10 @@ func BuildTrustedReceipt(
 		guestDigest = guestDigest[idx+1:]
 	}
 
-	verdict, reason := vmrunner.EvaluateKubeletVerdict(record, guestDigest, contract.Timeout, startedAt)
+	// The expected digest for wrong-digest cross-check is the harness image
+	// digest, not the guest digest. The harness image is what the kubelet
+	// actually ran; the guest image is an argument to it.
+	verdict, reason := vmrunner.EvaluateKubeletVerdict(record, harnessImageRef, contract.Timeout, startedAt)
 
 	return vmrunner.TrustedTestReceipt{
 		RunID:           runID,

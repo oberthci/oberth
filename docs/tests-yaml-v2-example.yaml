@@ -1,0 +1,39 @@
+# Example .oberth/tests.yaml version 2 — trusted test contract
+#
+# This file is placed in the repository's .oberth/ directory alongside
+# build.yaml and release.yaml. When present and the server has
+# vm.trustedTests.enabled=true, the server appends a trusted-tests leaf
+# to every CI workflow for that repository.
+#
+# This is an EXAMPLE for documentation purposes. Do not copy it into a
+# consumer repo without updating the guest_image digest to the actual
+# pinned guest image for that repository's test suite.
+#
+# Contract rules:
+#   - Exactly one YAML document, no aliases or anchors, <= 4096 bytes
+#   - version must be 2 (version 1 uses a different, closed profile)
+#   - profile must be in the known vocabulary (currently: kvm-suite-amd64-v1)
+#   - artifact is the path relative to the source checkout of the BPF object
+#     or test bundle the harness will exercise
+#   - guest_image must be digest-pinned (@sha256:...)
+#   - resources.cpu_cores: 1..4
+#   - resources.memory_mib: 512..16384
+#   - timeout: 1m..2h (Go duration format)
+#   - Unknown fields are rejected (strict YAML decode)
+#
+# The server NEVER executes repository code in the trusted-tests leaf.
+# The leaf's image, command, args, and resource limits are entirely
+# server-owned. The repository can request a trusted test by declaring
+# this file, but cannot author the leaf or choose its image.
+#
+# A candidate branch cannot remove a published (upstream default branch)
+# requirement. Version downgrades are also rejected.
+
+version: 2
+profile: kvm-suite-amd64-v1
+artifact: ebpf/secret_monitor.o
+guest_image: "europe-west4-docker.pkg.dev/skipopsmain/cloudtaser/trusted-guest@sha256:0000000000000000000000000000000000000000000000000000000000000000"
+resources:
+  cpu_cores: 2
+  memory_mib: 4096
+timeout: "30m"
