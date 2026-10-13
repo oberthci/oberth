@@ -254,6 +254,19 @@ build_artifacts() {
 	)
 	require_artifacts
 	verify_binary_version "$release_dir/$(native_binary)" "$tag" "$sha"
+
+	# Build the trusted harness binary for linux/amd64 only (KVM is x86_64).
+	GOOS=linux GOARCH=amd64 "$go_tool" build \
+		-trimpath -buildvcs=false \
+		-ldflags="-s -w -buildid=" \
+		-o "$release_dir/oberth-trusted-harness-linux-amd64" ./cmd/oberth-trusted-harness
+	GOOS=linux GOARCH=amd64 "$go_tool" build \
+		-trimpath -buildvcs=false \
+		-ldflags="-s -w -buildid=" \
+		-o "$release_dir/oberth-trusted-harness-linux-amd64.repro" ./cmd/oberth-trusted-harness
+	cmp -s "$release_dir/oberth-trusted-harness-linux-amd64" "$release_dir/oberth-trusted-harness-linux-amd64.repro" || \
+		fail "oberth-trusted-harness-linux-amd64 is not reproducible"
+	rm -f -- "$release_dir/oberth-trusted-harness-linux-amd64.repro"
 }
 
 public_object_status() {
@@ -683,6 +696,12 @@ publish_images() {
 	scan_image "$reference"
 	prepare_signing_identity
 	sign_registry_object "$reference"
+	if [ -f "$release_dir/harness-image.txt" ]; then
+		harness_reference=$(sed -n '1p' "$release_dir/harness-image.txt")
+		[ -n "$harness_reference" ] || fail "release harness image helper produced an empty reference"
+		scan_image "$harness_reference"
+		sign_registry_object "$harness_reference"
+	fi
 	clear_signing_identity
 	"$release_image_tool" verify "$tag" "$sha" "$created" "$release_dir" "$gar_key"
 }
@@ -1015,6 +1034,12 @@ verify_release() {
 	reference=$(sed -n '1p' "$release_dir/server-image.txt")
 	"$cosign_tool" verify --key "$release_dir/cosign.pub" --insecure-ignore-tlog "$reference" >/dev/null || fail "GAR image signature is invalid"
 	scan_image "$reference"
+	if [ -f "$release_dir/harness-image.txt" ]; then
+		harness_reference=$(sed -n '1p' "$release_dir/harness-image.txt")
+		"$cosign_tool" verify --key "$release_dir/cosign.pub" --insecure-ignore-tlog "$harness_reference" >/dev/null || fail "GAR harness image signature is invalid"
+		scan_image "$harness_reference"
+		printf 'harness-image: %s\n' "$harness_reference"
+	fi
 	verify_chart
 }
 

@@ -51,17 +51,28 @@ func run(ctx context.Context, arguments []string) error {
 		if err != nil {
 			return err
 		}
-		return releaseimage.Verify(ctx, config, releaseimage.Published{Server: server})
+		published := releaseimage.Published{Server: server}
+		harnessPath := filepath.Join(arguments[4], "harness-image.txt")
+		//nolint:gosec // harnessPath is a fixed filename beneath the explicit release-output directory.
+		if _, statErr := os.Stat(harnessPath); statErr == nil {
+			harness, readErr := readReference(harnessPath)
+			if readErr != nil {
+				return readErr
+			}
+			published.Harness = harness
+		}
+		return releaseimage.Verify(ctx, config, published)
 	}
 	published, err := releaseimage.Publish(ctx, config)
 	if err != nil {
 		return err
 	}
 	result := struct {
-		Schema int    `json:"schema"`
-		SHA    string `json:"source_commit"`
-		Server string `json:"server_image"`
-	}{Schema: 2, SHA: arguments[2], Server: published.Server}
+		Schema  int    `json:"schema"`
+		SHA     string `json:"source_commit"`
+		Server  string `json:"server_image"`
+		Harness string `json:"harness_image,omitempty"`
+	}{Schema: 2, SHA: arguments[2], Server: published.Server, Harness: published.Harness}
 	body, err := json.Marshal(result)
 	if err != nil {
 		return err
@@ -72,7 +83,16 @@ func run(ctx context.Context, arguments []string) error {
 		return err
 	}
 	//nolint:gosec // destination is a fixed filename beneath the explicit release-output directory.
-	return os.WriteFile(filepath.Join(arguments[4], "server-image.txt"), []byte(published.Server+"\n"), 0o600)
+	if err := os.WriteFile(filepath.Join(arguments[4], "server-image.txt"), []byte(published.Server+"\n"), 0o600); err != nil {
+		return err
+	}
+	if published.Harness != "" {
+		//nolint:gosec // destination is a fixed filename beneath the explicit release-output directory.
+		if err := os.WriteFile(filepath.Join(arguments[4], "harness-image.txt"), []byte(published.Harness+"\n"), 0o600); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func readReference(path string) (string, error) {

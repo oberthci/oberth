@@ -695,6 +695,13 @@ continuity checks; it must never be used to reset or bypass those checks.
   repository's Dockerfile; `releaseimage.Repack` removes the substrate's
   executable and re-verifies the required/forbidden path contract per child at
   publish and at verify.
+- When the harness substrate is pinned (`releaseimage.HarnessSubstrate`),
+  the Release burn also publishes the trusted-harness image as a single-arch
+  OCI image (`linux/amd64` only; KVM suites target x86_64 hardware). The
+  substrate carries `qemu-system-x86_64` on a minimal Debian base; QEMU must
+  be in-image because the kubelet termination record's image digest is what
+  the server verifies against `vm.trustedTests.harnessImage`. The published
+  reference is the digest; `release-verify` prints it as `harness-image:`.
 - There is no runner image artifact: Job substrates are public standard
   golang images selected per repository under the administrator prefix
   allowlist.

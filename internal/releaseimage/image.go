@@ -49,13 +49,29 @@ const (
 	// is present. This is an OCI index with exactly two platform children and
 	// no attestation manifests.
 	ServerSubstrate = ServerRepository + "@sha256:0122f7889678299dd953ae13f63ca9ab6b02f803475bf75ec6e3ada43ec5bec6"
+
+	HarnessRepository = "europe-west4-docker.pkg.dev/skipopsmain/oberth/oberth-trusted-harness"
+
+	// The harness substrate carries qemu-system-x86_64 on a minimal Debian
+	// base (trixie-slim). QEMU must be in-image: the kubelet termination
+	// record includes the image digest, and the server verifies it matches
+	// vm.trustedTests.harnessImage — QEMU outside the digest boundary would
+	// let a compromised hypervisor produce false PASS verdicts undetected.
+	// The substrate is single-arch (linux/amd64) because KVM suites target
+	// x86_64 hardware. Build with Dockerfile.harness, push to GAR, and pin
+	// the digest here before the first release that publishes the harness.
+	//
+	// Empty means harness publication is not yet available; Publish skips the
+	// harness kind and Verify requires only what was published.
+	HarnessSubstrate = ""
 )
 
 // Kind selects a release image contract. Only the server image remains.
 type Kind string
 
 const (
-	Server Kind = "server"
+	Server  Kind = "server"
+	Harness Kind = "harness"
 )
 
 // PublishConfig binds an image publication to an exact source revision.
@@ -68,9 +84,10 @@ type PublishConfig struct {
 	RemoteOpts  []remote.Option
 }
 
-// Published records the immutable digest reference for the release image.
+// Published records the immutable digest reference for each release image.
 type Published struct {
-	Server string
+	Server  string
+	Harness string
 }
 
 type imageContract struct {
@@ -99,6 +116,21 @@ func contract(kind Kind) (imageContract, error) {
 			config: v1.Config{
 				User: "65534:65534", Env: []string{"HOME=/tmp", "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"},
 				Entrypoint: []string{"/usr/local/bin/oberth"}, Cmd: []string{"serve"}, WorkingDir: "/tmp",
+			},
+		}, nil
+	case Harness:
+		return imageContract{
+			repository: HarnessRepository,
+			substrate:  HarnessSubstrate,
+			binaryName: "oberth-trusted-harness",
+			imagePath:  "usr/local/bin/oberth-trusted-harness",
+			platforms:  []string{"amd64"},
+			required: []string{
+				"usr/bin/qemu-system-x86_64",
+			},
+			config: v1.Config{
+				User: "65534:65534", Env: []string{"HOME=/tmp", "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"},
+				Entrypoint: []string{"/usr/local/bin/oberth-trusted-harness"}, WorkingDir: "/tmp",
 			},
 		}, nil
 	default:
@@ -265,8 +297,11 @@ func Publish(ctx context.Context, config PublishConfig) (Published, error) {
 	authenticator := garAuthenticator(config.AccessToken)
 	remoteOptions := append([]remote.Option{remote.WithContext(ctx), remote.WithAuth(authenticator), remote.WithUserAgent("oberth-release")}, config.RemoteOpts...)
 	result := Published{}
-	for _, kind := range []Kind{Server} {
+	for _, kind := range []Kind{Server, Harness} {
 		definition, _ := contract(kind)
+		if definition.substrate == "" {
+			continue // substrate not yet pinned; skip this kind
+		}
 		baseReference, err := name.ParseReference(definition.substrate, name.StrictValidation)
 		if err != nil {
 			return Published{}, err
@@ -322,8 +357,11 @@ func Publish(ctx context.Context, config PublishConfig) (Published, error) {
 			return Published{}, fmt.Errorf("registry readback for %s is %s, want %s", tagReference, readback.Digest, digest)
 		}
 		digestReference := definition.repository + "@" + digest.String()
-		if kind == Server {
+		switch kind {
+		case Server:
 			result.Server = digestReference
+		case Harness:
+			result.Harness = digestReference
 		}
 	}
 	return result, nil
@@ -339,12 +377,19 @@ func Verify(ctx context.Context, config PublishConfig, published Published) erro
 	}
 	authenticator := garAuthenticator(config.AccessToken)
 	remoteOptions := append([]remote.Option{remote.WithContext(ctx), remote.WithAuth(authenticator), remote.WithUserAgent("oberth-release")}, config.RemoteOpts...)
-	for _, item := range []struct {
+	items := []struct {
 		kind      Kind
 		reference string
 	}{
 		{Server, published.Server},
-	} {
+	}
+	if published.Harness != "" {
+		items = append(items, struct {
+			kind      Kind
+			reference string
+		}{Harness, published.Harness})
+	}
+	for _, item := range items {
 		definition, err := contract(item.kind)
 		if err != nil {
 			return err
