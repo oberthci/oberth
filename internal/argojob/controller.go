@@ -112,7 +112,23 @@ func (controller *Controller) Namespace() string { return controller.config.Name
 // Workflow when it belongs to the same run and carries the same spec digest,
 // and refuses otherwise rather than executing something that was not built
 // from this run's reviewed source.
-func (controller *Controller) Create(ctx context.Context, request Request) (string, error) {
+func (controller *Controller) Create(ctx context.Context, request Request) (name string, resultErr error) {
+	attemptedCreate := false
+	if request.TrustedKVM != nil {
+		defer func() {
+			if resultErr != nil && !attemptedCreate {
+				cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+				defer cancel()
+				if err := controller.confirmTrustedKVMNoCreate(cleanupCtx, request.Name); err == nil {
+					resultErr = errors.Join(ErrTrustedKVMCreateRefused, resultErr)
+				}
+			}
+		}()
+		if _, err := Build(controller.config, request); err != nil {
+			return "", err
+		}
+	}
+
 	var err error
 	request, err = controller.refreshNonroot(ctx, request)
 	if err != nil {
@@ -200,6 +216,7 @@ func (controller *Controller) Create(ctx context.Context, request Request) (stri
 		controller.seeder.DeleteClaim(context.WithoutCancel(ctx), volume.ClaimName)
 		return "", saErr
 	}
+	attemptedCreate = true
 	created, createErr := controller.workflows.Create(ctx, intended, metav1.CreateOptions{})
 	if createErr == nil {
 		controller.adoptClaimBestEffort(ctx, volume.ClaimName, created.Name, string(created.UID))
@@ -322,6 +339,12 @@ func (controller *Controller) isSharedServiceAccount(name string) bool {
 }
 
 func sameSubmission(existing, intended *wfv1.Workflow) error {
+	if binding := intended.Annotations[trustedKVMAnnotation]; binding != "" {
+		if existing.Annotations[trustedKVMAnnotation] != binding || !reflect.DeepEqual(existing.Spec, intended.Spec) {
+			return errors.New("argojob: existing Workflow differs from trusted KVM server spec")
+		}
+	}
+
 	if binding := intended.Annotations[nonrootProfileAnnotation]; binding != "" {
 		// Recovery cannot accept a forged identity annotation on old/root
 		// semantics. Compare the actual stored spec with current server output,
