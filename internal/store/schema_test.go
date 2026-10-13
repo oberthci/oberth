@@ -1014,6 +1014,9 @@ func TestFreshSchemaIsCompleteAndIdempotent(t *testing.T) {
 		"trusted_applies_no_delete",
 		"trusted_plans_guard_update",
 		"trusted_plans_no_delete",
+		"vm_executions_guard_update",
+		"vm_executions_no_delete",
+		"vm_executions_no_replace",
 	})
 
 	expectedColumns := map[string][]string{

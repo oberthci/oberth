@@ -1020,6 +1020,39 @@ INSERT INTO vm_executions_v20(run_id,intent_json,spec_identity,instance_json,sub
 SELECT run_id,intent_json,spec_identity,instance_json,submitted,rejected,cleaning,cleaned,created_at,updated_at FROM vm_executions;
 DROP TABLE vm_executions;
 ALTER TABLE vm_executions_v20 RENAME TO vm_executions;
-CREATE UNIQUE INDEX vm_execution_capacity ON vm_executions(cleaned) WHERE cleaned=0;`,
+CREATE UNIQUE INDEX vm_execution_capacity ON vm_executions(cleaned) WHERE cleaned=0;
+
+CREATE TRIGGER vm_executions_no_delete
+BEFORE DELETE ON vm_executions
+BEGIN
+    SELECT RAISE(ABORT, 'VM executions are append-only');
+END;
+
+-- REPLACE otherwise bypasses DELETE triggers when recursive_triggers is off.
+-- Its NULL cleaned value also becomes the column default after BEFORE INSERT.
+CREATE TRIGGER vm_executions_no_replace
+BEFORE INSERT ON vm_executions
+WHEN EXISTS (SELECT 1 FROM vm_executions WHERE run_id IS NEW.run_id)
+    OR (COALESCE(NEW.cleaned, 0) = 0 AND EXISTS (SELECT 1 FROM vm_executions WHERE cleaned = 0))
+BEGIN
+    SELECT RAISE(ABORT, 'VM executions are append-only');
+END;
+
+CREATE TRIGGER vm_executions_guard_update
+BEFORE UPDATE ON vm_executions
+WHEN NOT (
+    NEW.run_id IS OLD.run_id
+    AND NEW.execution_kind IS OLD.execution_kind
+    AND NEW.intent_json IS OLD.intent_json
+    AND NEW.spec_identity IS OLD.spec_identity
+    AND NEW.created_at IS OLD.created_at
+    AND (OLD.workflow_uid = '' OR NEW.workflow_uid IS OLD.workflow_uid)
+    AND (OLD.receipt_json = '' OR NEW.receipt_json IS OLD.receipt_json)
+    AND (OLD.refusal_json = '' OR NEW.refusal_json IS OLD.refusal_json)
+    AND COALESCE(NEW.cleaned, 0) >= OLD.cleaned
+)
+BEGIN
+    SELECT RAISE(ABORT, 'VM execution evidence is immutable');
+END;`,
 	},
 }
