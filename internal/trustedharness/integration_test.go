@@ -82,7 +82,8 @@ func TestHarnessProtectedTransportIntegration(t *testing.T) {
 			}}
 			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 			defer cancel()
-			private, err := os.MkdirTemp("/var/tmp", "kh-")
+			// Keep socket paths short while respecting the runner's writable TMPDIR.
+			private, err := os.MkdirTemp("", "kh-")
 			if err != nil {
 				t.Fatal(err)
 			}
