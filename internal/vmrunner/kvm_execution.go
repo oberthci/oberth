@@ -22,12 +22,12 @@ type KVMRecipe struct {
 }
 
 func (r KVMRecipe) Validate() error {
-	if !sha256HexPattern.MatchString(r.SuiteSHA256) || !sha256HexPattern.MatchString(r.GuestSHA256) || len(validateGuestImageRef(r.HarnessImage)) != 0 {
+	if len(r.HarnessImage) > 512 || !sha256HexPattern.MatchString(r.SuiteSHA256) || !sha256HexPattern.MatchString(r.GuestSHA256) || len(validateGuestImageRef(r.HarnessImage)) != 0 {
 		return errors.New("trusted recipe requires complete suite, guest and harness pins")
 	}
 	for _, raw := range []string{r.SuiteURL, r.GuestURL} {
 		u, err := url.Parse(raw)
-		if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.Fragment != "" {
+		if len(raw) > 2048 || err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" {
 			return errors.New("trusted recipe requires credential-free HTTPS bundle endpoints")
 		}
 	}
@@ -111,12 +111,36 @@ func (r KVMReceipt) Validate(intent KVMIntent) error {
 	return nil
 }
 
+// KVMRefusal is bounded server evidence of a failed preflight, never authority
+// to deliver or publish. Candidate logs and free-form errors are not journaled.
+type KVMRefusal struct {
+	Code        string                `json:"code"`
+	ObservedAt  time.Time             `json:"observed_at"`
+	Termination *KVMTerminationRecord `json:"termination,omitempty"`
+}
+
+func (r KVMRefusal) Validate() error {
+	switch r.Code {
+	case "preflight_failed", "create_refused", "observation_refused", "canceled", "deadline":
+	default:
+		return errors.New("invalid trusted refusal code")
+	}
+	if r.ObservedAt.IsZero() {
+		return errors.New("trusted refusal requires observation time")
+	}
+	if r.Termination != nil && (len(r.Termination.ImageID) > 1024 || len(r.Termination.ContainerID) > 512 || len(r.Termination.PodUID) > 128 || len(r.Termination.WorkflowUID) > 128) {
+		return errors.New("trusted refusal evidence exceeds bounds")
+	}
+	return nil
+}
+
 type KVMExecution struct {
 	Intent      KVMIntent
 	WorkflowUID string
 	Submitted   bool
 	Rejected    bool
 	Cleaned     bool
+	Refusal     *KVMRefusal
 	Receipt     *KVMReceipt
 }
 
@@ -128,6 +152,7 @@ type KVMJournal interface {
 	BindKVMPreflight(context.Context, string, string) error
 	RejectKVMPreflight(context.Context, string) error
 	RecordKVMReceipt(context.Context, string, KVMReceipt) error
+	RecordKVMRefusal(context.Context, string, KVMRefusal) error
 	CompleteKVMPreflightCleanup(context.Context, string, string) error
 	KVMPreflight(context.Context, string) (KVMExecution, error)
 	PendingKVMPreflights(context.Context) ([]KVMExecution, error)
