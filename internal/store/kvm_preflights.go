@@ -90,8 +90,11 @@ func (s *Store) KVMPreflight(ctx context.Context, runID string) (vmrunner.KVMExe
 	return value, err
 }
 
+// PendingKVMPreflights also returns cleaned preflights whose active parent has
+// no Job, closing the crash window between cleanup and delivery. Recovery
+// interrupts those parents; it never resumes publication from their receipt.
 func (s *Store) PendingKVMPreflights(ctx context.Context) ([]vmrunner.KVMExecution, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT `+kvmExecutionColumns+` FROM vm_executions WHERE execution_kind='kvm-preflight' AND cleaned=0 ORDER BY created_at,run_id`)
+	rows, err := s.db.QueryContext(ctx, `SELECT `+kvmExecutionColumns+` FROM vm_executions WHERE execution_kind='kvm-preflight' AND (cleaned=0 OR EXISTS (SELECT 1 FROM runs WHERE runs.id=vm_executions.run_id AND runs.status='running' AND runs.job_name='')) ORDER BY created_at,run_id`)
 	if err != nil {
 		return nil, err
 	}

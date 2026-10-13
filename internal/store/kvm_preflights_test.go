@@ -395,3 +395,25 @@ func TestKVMPreflightSharesCapacityWithLegacyReservation(t *testing.T) {
 	_, err = s.ReserveKVMPreflight(ctx, intent)
 	mustPilot(t, err)
 }
+
+func TestKVMPreflightRecoveryRetainsCleanedUndeliveredParent(t *testing.T) {
+	ctx := context.Background()
+	now := time.Now().UTC()
+	s := testStore(t, &now)
+	intent := kvmIntent(t, s)
+	_, err := s.ReserveKVMPreflight(ctx, intent)
+	mustPilot(t, err)
+	mustPilot(t, s.CompleteKVMPreflightCleanup(ctx, intent.RunID, ""))
+	pending, err := s.PendingKVMPreflights(ctx)
+	mustPilot(t, err)
+	if len(pending) != 1 || !pending[0].Cleaned || pending[0].Intent.RunID != intent.RunID {
+		t.Fatalf("lost cleaned undelivered parent: %#v", pending)
+	}
+	_, err = s.db.Exec(`UPDATE runs SET status='interrupted' WHERE id=?`, intent.RunID)
+	mustPilot(t, err)
+	pending, err = s.PendingKVMPreflights(ctx)
+	mustPilot(t, err)
+	if len(pending) != 0 {
+		t.Fatal("terminal cleaned parent still pending")
+	}
+}
