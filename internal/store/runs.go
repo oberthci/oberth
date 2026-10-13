@@ -567,7 +567,7 @@ WHERE id = ? AND (
     status IN ('queued', 'running') OR
     (status = 'interrupted' AND superseded_by != '')
 )
-AND NOT EXISTS (SELECT 1 FROM vm_executions WHERE run_id=runs.id AND execution_kind='kvm-preflight' AND (cleaned=0 OR receipt_json=''))
+AND NOT EXISTS (SELECT 1 FROM vm_executions WHERE run_id=runs.id AND execution_kind='kvm-preflight' AND (cleaned=0 OR receipt_json='' OR refusal_json!=''))
 RETURNING `+runColumns, jobName, unixNano(s.now()), id))
 	if errors.Is(err, sql.ErrNoRows) {
 		var exists int
