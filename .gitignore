@@ -12,4 +12,5 @@ website/.wrangler/
 # Loose binary artifacts
 oberth-*
 !cmd/oberth-node-bridge/
+!cmd/oberth-trusted-harness/
 *.tar.gz

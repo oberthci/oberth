@@ -16,6 +16,7 @@ import (
 	"github.com/oberthci/oberth/internal/runprogress"
 	"github.com/oberthci/oberth/internal/service"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/internal/vmrunner"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 	"github.com/oberthci/oberth/pkg/periapsis"
 )
@@ -29,6 +30,8 @@ type argoControl interface {
 	TerminalState(context.Context, string) (*argojob.Completion, error)
 	Owns(context.Context, string) (bool, error)
 	Namespace() string
+	ReadTrustedLeafVerdict(context.Context, string) (vmrunner.KubeletRecord, error)
+	CheckKVMAllocatable(context.Context) error
 }
 
 // SecretAccessLoader loads approved secret grants for a repository at
@@ -170,6 +173,25 @@ func (jobs *ArgoJobs) CreateCI(ctx context.Context, request service.JobRequest) 
 
 func (jobs *ArgoJobs) CreateRelease(ctx context.Context, request service.JobRequest) error {
 	return jobs.create(ctx, request, periapsis.TriggerRelease)
+}
+
+// ReadTrustedLeafVerdict reads the kubelet termination record of the
+// trusted-tests leaf after a workflow completes. Satisfies
+// service.TrustedLeafVerdictReader.
+func (jobs *ArgoJobs) ReadTrustedLeafVerdict(ctx context.Context, workflowName string) (vmrunner.KubeletRecord, error) {
+	return jobs.controller.ReadTrustedLeafVerdict(ctx, workflowName)
+}
+
+// HarnessImage returns the digest-pinned harness image the server uses for
+// trusted-tests leaves. Used by the scheduler for wrong-digest cross-check.
+func (jobs *ArgoJobs) HarnessImage() string {
+	return jobs.config.TrustedTestsHarnessImage
+}
+
+// CheckKVMAllocatable verifies at least one node has allocatable KVM devices.
+// Satisfies the scheduler's allocatable pre-check requirement.
+func (jobs *ArgoJobs) CheckKVMAllocatable(ctx context.Context) error {
+	return jobs.controller.CheckKVMAllocatable(ctx)
 }
 
 // PipelineSize reads the run's declared scheduler weight from the checked-out
@@ -348,8 +370,10 @@ func (jobs *ArgoJobs) create(ctx context.Context, request service.JobRequest, tr
 		Repo: request.Repository.Name, UpstreamName: request.UpstreamName, UpstreamOrg: request.UpstreamOrg,
 		Ref: request.Run.Ref, SHA: testedSHA, Trigger: trigger, Source: source,
 		SourceDir: request.SourceDir, ApprovedSecrets: approvedSecrets,
-		StepGrants: stepGrants,
-		Fragments:  fragments,
+		StepGrants:               stepGrants,
+		Fragments:                fragments,
+		TrustedTestContract:      request.TrustedTestContract,
+		TrustedTestSuiteIdentity: request.TrustedTestSuiteIdentity,
 	}
 	// Snapshot the identity store once for both Builds of this admission
 	// (audit and controller), so the audit record and the pod spec agree

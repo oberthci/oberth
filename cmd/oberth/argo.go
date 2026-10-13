@@ -93,10 +93,13 @@ func buildArgoEngine(
 		ReleaseCacheRoot: options.releaseCacheRoot,
 		WorkflowTimeout:  options.argoWorkflowTimeout,
 		// #nosec G115 -- validateServeOptions bounds argoWorkflowTTL to a positive int32.
-		TTLSeconds:          int32(options.argoWorkflowTTL),
-		PerRepoIdentities:   perRepoIdentities,
-		PerRepoCIIdentities: buildPerRepoCIIdentities(perRepoIdentities),
-		KVMEnabled:          options.vmKVMEnabled,
+		TTLSeconds:               int32(options.argoWorkflowTTL),
+		PerRepoIdentities:        perRepoIdentities,
+		PerRepoCIIdentities:      buildPerRepoCIIdentities(perRepoIdentities),
+		KVMEnabled:               options.vmKVMEnabled,
+		TrustedTestsEnabled:      options.vmTrustedTestsEnabled,
+		TrustedTestsHarnessImage: options.vmTrustedTestsHarnessImage,
+		VMMaxConcurrentRuns:      options.vmMaxConcurrentRuns,
 	}
 	controller, err := argojob.NewController(
 		argoClient.ArgoprojV1alpha1().Workflows(options.argoNamespace), kube, config)

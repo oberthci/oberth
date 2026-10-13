@@ -14,11 +14,13 @@ import (
 
 	"log"
 
+	"github.com/oberthci/oberth/internal/argojob"
 	"github.com/oberthci/oberth/internal/gitoid"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/runlog"
 	"github.com/oberthci/oberth/internal/runprogress"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/internal/vmrunner"
 	"github.com/oberthci/oberth/pkg/periapsis"
 )
 
@@ -459,8 +461,29 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 	if err := scheduler.git.Checkout(ctx, upstream.QualifiedRepo(repository.Name), checkoutSHA, sourceDir); err != nil {
 		return scheduler.finishInfrastructureFailure(ctx, run, repository, fmt.Errorf("checkout run workspace: %w", err))
 	}
-	if err := scheduler.requireTrustedTestPolicy(ctx, repository, checkoutSHA); err != nil {
-		return scheduler.finishInfrastructureFailure(ctx, run, repository, err)
+	// Resolve the trusted test requirement and attach it to the job request
+	// so Build injects the trusted-tests leaf when needed. The resolution
+	// checks both the candidate and the upstream default, preventing a branch
+	// from removing a published requirement.
+	trustedReq, trustedReqErr := scheduler.resolveTrustedTestRequirement(ctx, repository, checkoutSHA)
+	if trustedReqErr != nil {
+		return scheduler.finishInfrastructureFailure(ctx, run, repository, trustedReqErr)
+	}
+	if trustedReq.Contract != nil {
+		if trustedReq.Contract.Version < 2 || !scheduler.trustedTestsEnabled {
+			return scheduler.finishInfrastructureFailure(ctx, run, repository,
+				fmt.Errorf("%w: trusted test profile %s requires a protected suite executor and verified result evidence", ErrUnavailable, trustedReq.Contract.Profile))
+		}
+		// Allocatable pre-check: verify a node can schedule the KVM device
+		// before creating the workflow. Fail-closed with an infrastructure
+		// error if no node is capable, rather than waiting for the
+		// Kubernetes scheduler to report Unschedulable after submission.
+		if checker, ok := scheduler.jobs.(KVMAllocatableChecker); ok {
+			if allocErr := checker.CheckKVMAllocatable(ctx); allocErr != nil {
+				return scheduler.finishInfrastructureFailure(ctx, run, repository,
+					fmt.Errorf("trusted test KVM pre-check: %w", allocErr))
+			}
+		}
 	}
 	logFile, err := scheduler.logs.Create(run.ID)
 	if err != nil {
@@ -484,7 +507,11 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 		scheduler.signals.NotifyRun(run.ID)
 		return nil
 	}
-	jobRequest := JobRequest{JobName: jobName, Run: run, Repository: repository, SourceDir: sourceDir}
+	jobRequest := JobRequest{
+		JobName: jobName, Run: run, Repository: repository, SourceDir: sourceDir,
+		TrustedTestContract:      trustedReq.Contract,
+		TrustedTestSuiteIdentity: trustedReq.BaselineSHA,
+	}
 	size, err := scheduler.pipelineSize(ctx, jobRequest)
 	if err != nil {
 		_ = logFile.Close()
@@ -704,6 +731,27 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 		jobResult = JobResult{Status: model.RunFailed, Phase: "collect", Error: err.Error()}
 	}
 
+	// Trusted test verdict collection. When the run had a v2 contract,
+	// the server reads the kubelet termination record of the trusted-tests
+	// leaf, builds an audited receipt, and writes it to the store. A missing
+	// or unreadable record is a refusal, never a pass. A refused verdict
+	// overrides a passing Argo workflow result.
+	if trustedReq.Contract != nil && trustedReq.Contract.Version >= 2 && scheduler.trustedTestsEnabled {
+		verdictResult := scheduler.collectTrustedTestVerdict(finalizeCtx, run, trustedReq, jobName, checkoutSHA)
+		if verdictResult.err != nil || verdictResult.verdict != vmrunner.VerdictPassed {
+			if jobResult.Status == model.RunPassed {
+				jobResult.Status = model.RunFailed
+				jobResult.Phase = "trusted-tests"
+				if verdictResult.err != nil {
+					jobResult.Error = verdictResult.err.Error()
+				} else {
+					jobResult.Error = fmt.Sprintf("trusted test verdict: %s — %s", verdictResult.verdict, verdictResult.reason)
+				}
+				jobResult.FailedBurn = vmrunner.BurnName
+			}
+		}
+	}
+
 	promotion, promotionErr := scheduler.promotionForRun(finalizeCtx, run)
 	if promotionErr != nil {
 		jobResult = JobResult{Status: model.RunFailed, Phase: "promotion", Error: promotionErr.Error()}
@@ -759,6 +807,80 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 	}
 	scheduler.signals.NotifyRun(run.ID)
 	return nil
+}
+
+type trustedVerdictResult struct {
+	verdict vmrunner.TrustedTestVerdict
+	reason  string
+	err     error
+}
+
+// collectTrustedTestVerdict reads the kubelet termination record from the
+// trusted-tests leaf, builds and writes an audited receipt. A missing or
+// unreadable record is always a refusal, never a pass.
+func (scheduler *Scheduler) collectTrustedTestVerdict(
+	ctx context.Context,
+	run model.Run,
+	requirement vmrunner.Requirement,
+	jobName string,
+	candidateSHA string,
+) trustedVerdictResult {
+	reader, ok := scheduler.jobs.(TrustedLeafVerdictReader)
+	if !ok {
+		return trustedVerdictResult{
+			verdict: vmrunner.VerdictRefused,
+			reason:  "trusted leaf verdict reader not available on this engine",
+			err:     errors.New("service: trusted leaf verdict reader not available"),
+		}
+	}
+
+	record, err := reader.ReadTrustedLeafVerdict(ctx, jobName)
+	if err != nil {
+		// Missing or unreadable record = refusal. Write a refused receipt.
+		receipt := vmrunner.TrustedTestReceipt{
+			RunID:          run.ID,
+			Profile:        requirement.Contract.Profile,
+			CandidateSHA:   candidateSHA,
+			SuiteIdentity:  requirement.BaselineSHA,
+			GuestDigest:    extractDigest(requirement.Contract.GuestImage),
+			ContractDigest: vmrunner.ContractDigest(requirement.Contract),
+			Verdict:        vmrunner.VerdictRefused,
+			RefusalReason:  fmt.Sprintf("kubelet_record_unavailable: %v", err),
+		}
+		if writeErr := scheduler.store.WriteTrustedTestReceipt(ctx, receipt); writeErr != nil {
+			return trustedVerdictResult{err: fmt.Errorf("write refused receipt: %w (original: %w)", writeErr, err)}
+		}
+		return trustedVerdictResult{verdict: vmrunner.VerdictRefused, reason: receipt.RefusalReason}
+	}
+
+	// Retrieve the configured harness image reference for wrong-digest
+	// cross-check. The config is on the argojob side; the scheduler reads it
+	// from the jobs controller.
+	harnessImage := ""
+	if configReader, configOK := scheduler.jobs.(interface{ HarnessImage() string }); configOK {
+		harnessImage = configReader.HarnessImage()
+	}
+
+	receipt := argojob.BuildTrustedReceipt(
+		run.ID, *requirement.Contract, requirement.BaselineSHA,
+		vmrunner.ContractDigest(requirement.Contract), record,
+		harnessImage, time.Now().Add(-requirement.Contract.Timeout),
+	)
+	receipt.CandidateSHA = candidateSHA
+
+	if writeErr := scheduler.store.WriteTrustedTestReceipt(ctx, receipt); writeErr != nil {
+		return trustedVerdictResult{err: fmt.Errorf("write trusted test receipt: %w", writeErr)}
+	}
+
+	return trustedVerdictResult{verdict: receipt.Verdict, reason: receipt.RefusalReason}
+}
+
+// extractDigest extracts the digest portion from a full image reference.
+func extractDigest(imageRef string) string {
+	if idx := strings.LastIndex(imageRef, "@"); idx >= 0 {
+		return imageRef[idx+1:]
+	}
+	return imageRef
 }
 
 // recordStepPlan enumerates the run's declared steps from the immutable

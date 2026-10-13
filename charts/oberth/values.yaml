@@ -363,6 +363,15 @@ secretstore:
 vm:
   kvm:
     enabled: false
+  # Trusted test execution (#278 Lane B). When enabled and a repository's
+  # tests.yaml declares a v2 closed profile, the server appends a
+  # server-owned trusted-tests leaf to the workflow. The harness image must
+  # be pinned by digest (@sha256:...).
+  trustedTests:
+    enabled: false
+    harnessImage: ""
+  # Maximum concurrent trusted test executions across all repositories.
+  maxConcurrentRuns: 1
 
 cache:
   ciRoot: /var/cache/oberth/ci

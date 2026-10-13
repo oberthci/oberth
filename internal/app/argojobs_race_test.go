@@ -12,6 +12,7 @@ import (
 	"github.com/oberthci/oberth/internal/argojob"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/service"
+	"github.com/oberthci/oberth/internal/vmrunner"
 	"github.com/oberthci/oberth/pkg/periapsis"
 )
 
@@ -78,6 +79,10 @@ func (c *blockingController) TerminalState(context.Context, string) (*argojob.Co
 
 func (c *blockingController) Owns(context.Context, string) (bool, error) { return false, nil }
 func (c *blockingController) Namespace() string                          { return "test" }
+func (c *blockingController) ReadTrustedLeafVerdict(context.Context, string) (vmrunner.KubeletRecord, error) {
+	return vmrunner.KubeletRecord{}, argojob.ErrTrustedLeafNotFound
+}
+func (c *blockingController) CheckKVMAllocatable(context.Context) error { return nil }
 
 // emptySecretAccess returns empty grants so the approval table requirement
 // in argojob.Build (ApprovedSecrets must be non-nil) is satisfied.

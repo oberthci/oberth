@@ -20,6 +20,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 
 	"github.com/oberthci/oberth/internal/runprogress"
+	"github.com/oberthci/oberth/internal/vmrunner"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 	"github.com/oberthci/oberth/pkg/periapsis"
 )
@@ -106,6 +107,20 @@ func (controller *Controller) WithPodLogReader(reader PodLogReader) *Controller 
 
 // Namespace reports where this engine creates Workflows.
 func (controller *Controller) Namespace() string { return controller.config.Namespace }
+
+// ReadTrustedLeafVerdict reads the kubelet termination record of the
+// trusted-tests leaf for a given workflow name. This is the server-side
+// evidence path: the verdict comes from the kubelet, not from repository
+// output.
+func (controller *Controller) ReadTrustedLeafVerdict(ctx context.Context, workflowName string) (vmrunner.KubeletRecord, error) {
+	return ReadTrustedLeafVerdict(ctx, controller.kube, controller.config.Namespace, workflowName)
+}
+
+// CheckKVMAllocatable verifies that at least one node has allocatable KVM
+// device capacity before submitting a trusted-tests workflow.
+func (controller *Controller) CheckKVMAllocatable(ctx context.Context) error {
+	return CheckKVMAllocatable(ctx, controller.kube)
+}
 
 // Create submits one run's Workflow. Submission is idempotent against an
 // identical object: a retry after an ambiguous create adopts the existing

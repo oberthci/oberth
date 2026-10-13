@@ -335,6 +335,16 @@ type JobRequest struct {
 	// this run under (#658), empty for none. Engines record it with the
 	// submission; it never selects identity or resources.
 	ConcurrencyGroup string
+
+	// TrustedTestContract is the resolved v2 contract from the repository's
+	// tests.yaml, if any. Set by the scheduler after resolving the requirement
+	// from the immutable checkout and the upstream default branch. Nil means
+	// no trusted test is required for this run.
+	TrustedTestContract *vmrunner.Contract
+
+	// TrustedTestSuiteIdentity is the suite's pinned revision (40-char hex),
+	// resolved from the upstream default branch independently of the candidate.
+	TrustedTestSuiteIdentity string
 }
 
 type JobResult struct {
@@ -365,6 +375,21 @@ type JobController interface {
 
 type ReleaseJobController interface {
 	CreateRelease(context.Context, JobRequest) error
+}
+
+// TrustedLeafVerdictReader reads the kubelet termination record of the
+// trusted-tests leaf after a workflow completes. Optional: engines that do
+// not support trusted leaves do not implement this interface.
+type TrustedLeafVerdictReader interface {
+	ReadTrustedLeafVerdict(ctx context.Context, workflowName string) (vmrunner.KubeletRecord, error)
+}
+
+// KVMAllocatableChecker verifies that at least one node has allocatable KVM
+// device capacity. Optional: engines that do not support KVM do not implement
+// this interface. When the check is unavailable, the scheduler proceeds
+// without the pre-check and lets the Kubernetes scheduler handle it.
+type KVMAllocatableChecker interface {
+	CheckKVMAllocatable(ctx context.Context) error
 }
 
 // PipelineSizer statically reads the immutable checked-out pipeline without

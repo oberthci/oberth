@@ -273,6 +273,14 @@ spec:
             {{- if $vmKVM.enabled }}
             - --vm-kvm-enabled=true
             {{- end }}
+            {{- $vmTrustedTests := $vm.trustedTests | default dict -}}
+            {{- if $vmTrustedTests.enabled }}
+            - --vm-trusted-tests-enabled=true
+            - --vm-trusted-tests-harness-image={{ $vmTrustedTests.harnessImage }}
+            {{- end }}
+            {{- if $vm.maxConcurrentRuns }}
+            - --vm-max-concurrent-runs={{ $vm.maxConcurrentRuns }}
+            {{- end }}
           env:
             - name: OBERTH_IDENTITY_STORE
               value: openbao
