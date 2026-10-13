@@ -938,6 +938,47 @@ continuity checks; it must never be used to reset or bypass those checks.
   including on publication recovery and fast-forward promotion. No protected
   suite executor is activated yet, so a required profile fails explicitly;
   build success, VM shutdown and guest log markers cannot replace test evidence.
+- The inactive Lane B foundation also decodes `.oberth/tests.yaml` version 2.
+  Its exact fields are `version: 2`, `profile: kvm-suite-amd64-v1`,
+  `suite_sha256`, `guest_sha256` (each 64 lowercase hexadecimal characters),
+  and `artifacts` (1–32 unique canonical relative file paths). It accepts no
+  commands, URLs, images, identities, resource overrides or version-1 fields.
+  Candidate/default-policy reconciliation preserves the complete published
+  contract, including both pins and the ordered artifact list. A candidate
+  cannot remove a requirement or replace its suite/guest pins.
+- Lane B suite bundle format v1 is a bounded, uncompressed USTAR archive
+  (maximum 64 MiB and 1024 regular files). The verifier hashes the complete
+  archive against `suite_sha256` **before** parsing. Paths must be unique,
+  canonical and relative; links, special files and archive extensions are
+  refused. End padding may be zero bytes only. Exactly one `manifest.yaml`
+  (maximum 16 KiB) declares `version: 1`, the same closed `profile`,
+  `guest_sha256`, ordered `artifacts`, and 1–256 unique `cases` IDs. The
+  manifest has no command language. A verified inventory requires exactly
+  those case IDs, once each, all with outcome `passed`; missing, additional,
+  duplicate, skipped and failed cases refuse. The private verified-suite
+  value cannot be constructed from candidate-supplied case results.
+- The separate Lane B termination validator requires a prior server-recorded
+  namespace, Workflow name/UID, Pod name/UID, container ID, digest-pinned
+  harness reference and absolute admission/deadline times. It checks the
+  exact controlling Workflow owner, current successful Pod and current main
+  container termination, matching container IDs, exact resolved image digest,
+  exit zero, signal zero, restart count zero, and nonzero ordered kubelet
+  timestamps within the admitted deadline. Missing records and last-attempt
+  termination do not count. Unsupported image-ID encodings fail closed.
+  This validator does not establish the Pod's command, arguments or isolation;
+  future server admission must verify the effective immutable template,
+  sidecars and mounts independently. Container-written termination messages
+  are not a source of verdicts or authenticated inventory.
+- Lane B is **not activated** by these source foundations. Build and publication
+  gates still refuse every required v1 or v2 contract, including deleted
+  declarations retained from the upstream default branch and publication
+  recovery. Remaining implementation is: independently authenticated suite
+  and guest acquisition; a real pinned harness and protected guest result
+  protocol; server-appended isolated `trusted-tests` execution; exact candidate
+  artifact and process binding; durable receipts in `vm_executions` read by
+  the publication gate; restart/cleanup recovery and live negative receipts.
+  Neither bundle hashing nor successful QEMU shutdown proves test execution.
+  No new schema, RBAC, runtime flag or harness activation is introduced here.
 - VM lifecycle state uses the audited schema-v13 `vm_executions` journal.
   Reserve immutable run/candidate/suite/image/profile identity before create;
   bind the API-issued UID before treating the object as owned. An ambiguous

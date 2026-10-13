@@ -185,3 +185,42 @@ func TestTrustedPolicyRefusesBuildWithoutProtectedExecutor(t *testing.T) {
 		})
 	}
 }
+
+// V2 decoding is a source foundation, not authority to execute or publish.
+func TestTrustedKVMV2PolicyRemainsInactive(t *testing.T) {
+	contract := []byte("version: 2\nprofile: kvm-suite-amd64-v1\nsuite_sha256: " + strings.Repeat("a", 64) + "\nguest_sha256: " + strings.Repeat("b", 64) + "\nartifacts: [ebpf/secret_monitor.o]\n")
+	for _, baselineOnly := range []bool{false, true} {
+		t.Run(map[bool]string{false: "candidate", true: "retained baseline"}[baselineOnly], func(t *testing.T) {
+			ctx := context.Background()
+			fixture := newControlFixture(t, JobResult{Status: model.RunPassed})
+			git := &policyTestGit{controlGit: fixture.git}
+			if baselineOnly {
+				git.baseline = contract
+			} else {
+				git.candidate = contract
+			}
+			fixture.scheduler.git = git
+			sha := strings.Repeat("c", 40)
+			queued, err := fixture.scheduler.EnqueueCI(ctx, CIRequest{EventID: "v2-inactive", Repository: fixture.repo, Branch: "feature/v2", SHA: sha, Actor: "agent@host"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := fixture.scheduler.ProcessNext(ctx); err != nil {
+				t.Fatal(err)
+			}
+			run, err := fixture.store.Run(ctx, queued.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if run.Status != model.RunFailed || len(fixture.jobs.createdCI) != 0 || len(fixture.git.syncedBranches) != 0 || !strings.Contains(run.Error, "protected suite executor") {
+				t.Fatalf("v2 activated without runtime: %#v", run)
+			}
+			for _, publication := range []model.Publication{{ResultSHA: sha}, {ResultSHA: sha, RunID: run.ID}} {
+				err := fixture.scheduler.requirePublicationTestPolicy(ctx, fixture.repo, publication)
+				if err == nil || !strings.Contains(err.Error(), "protected suite executor") {
+					t.Fatalf("publication requires explicit unavailable executor: %v", err)
+				}
+			}
+		})
+	}
+}

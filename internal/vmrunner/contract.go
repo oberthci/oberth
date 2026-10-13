@@ -9,24 +9,30 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"reflect"
+	"slices"
 
 	"go.yaml.in/yaml/v3"
 )
 
 const (
-	ContractFile       = ".oberth/tests.yaml"
-	MaxContractBytes   = 4 << 10
-	OfflineEBPFProfile = "ebpf-offline-amd64-v1"
-	BPFArtifact        = "ebpf/secret_monitor.o"
-	BurnName           = "trusted-tests"
+	ContractFile         = ".oberth/tests.yaml"
+	MaxContractBytes     = 4 << 10
+	KVMSuiteAMD64Profile = "kvm-suite-amd64-v1"
+	OfflineEBPFProfile   = "ebpf-offline-amd64-v1"
+	BPFArtifact          = "ebpf/secret_monitor.o"
+	BurnName             = "trusted-tests"
 )
 
 // Contract is deliberately closed. New profiles and inputs require a product
 // change; a branch cannot choose images, identities, commands or resource limits.
 type Contract struct {
-	Version  int    `json:"version" yaml:"version"`
-	Profile  string `json:"profile" yaml:"profile"`
-	Artifact string `json:"artifact" yaml:"artifact"`
+	Version     int      `json:"version" yaml:"version"`
+	Profile     string   `json:"profile" yaml:"profile"`
+	Artifact    string   `json:"artifact,omitempty" yaml:"artifact,omitempty"`
+	SuiteSHA256 string   `json:"suite_sha256,omitempty" yaml:"suite_sha256,omitempty"`
+	GuestSHA256 string   `json:"guest_sha256,omitempty" yaml:"guest_sha256,omitempty"`
+	Artifacts   []string `json:"artifacts,omitempty" yaml:"artifacts,omitempty"`
 }
 
 // DecodeContract accepts exactly one bounded document. Absence is represented
@@ -53,9 +59,20 @@ func DecodeContract(source []byte) (Contract, error) {
 	if err := strict.Decode(&contract); err != nil {
 		return Contract{}, fmt.Errorf("decode trusted test fields: %w", err)
 	}
-	if contract.Version != 1 || contract.Profile != OfflineEBPFProfile || contract.Artifact != BPFArtifact {
-		return Contract{}, errors.New("trusted test contract requires version 1, profile ebpf-offline-amd64-v1 and artifact ebpf/secret_monitor.o")
+	if err := ValidateContract(contract); err != nil {
+		return Contract{}, err
 	}
+	// Explicit empty fields from another version are not part of either schema.
+	allowed := map[string]bool{"version": true, "profile": true, "artifact": true}
+	if contract.Version == 2 {
+		allowed = map[string]bool{"version": true, "profile": true, "suite_sha256": true, "guest_sha256": true, "artifacts": true}
+	}
+	for i := 0; i < len(document.Content[0].Content); i += 2 {
+		if !allowed[document.Content[0].Content[i].Value] {
+			return Contract{}, errors.New("trusted test contract contains fields outside its version")
+		}
+	}
+
 	return contract, nil
 }
 
@@ -115,9 +132,16 @@ func ReadContract(sourceDir string) (*Contract, error) {
 }
 
 // RequiredContract prevents a branch from removing its published baseline.
-// Version 1 has one fixed profile: any future incompatible union must fail.
+// An incompatible union, including changed v2 pins or artifacts, fails closed.
 func RequiredContract(candidate, baseline *Contract) (*Contract, error) {
-	if candidate != nil && baseline != nil && *candidate != *baseline {
+	for _, contract := range []*Contract{candidate, baseline} {
+		if contract != nil {
+			if err := ValidateContract(*contract); err != nil {
+				return nil, err
+			}
+		}
+	}
+	if candidate != nil && baseline != nil && !reflect.DeepEqual(candidate, baseline) {
 		return nil, errors.New("candidate trusted test contract conflicts with the upstream default requirement")
 	}
 	selected := candidate
@@ -128,6 +152,7 @@ func RequiredContract(candidate, baseline *Contract) (*Contract, error) {
 		return nil, nil
 	}
 	copy := *selected
+	copy.Artifacts = slices.Clone(selected.Artifacts)
 	return &copy, nil
 }
 
