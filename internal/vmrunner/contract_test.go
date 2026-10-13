@@ -3,6 +3,7 @@ package vmrunner
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -41,7 +42,7 @@ func TestRequiredContractRetainsDeletedBaseline(t *testing.T) {
 		t.Fatal(err)
 	}
 	required, err := RequiredContract(nil, &baseline)
-	if err != nil || required == nil || *required != baseline {
+	if err != nil || required == nil || !reflect.DeepEqual(*required, baseline) {
 		t.Fatalf("required = %v, err = %v", required, err)
 	}
 	if ContractDigest(required) == ContractDigest(nil) {
@@ -98,7 +99,7 @@ func FuzzDecodeContract(f *testing.F) {
 	f.Add([]byte(validContract))
 	f.Fuzz(func(t *testing.T, source []byte) {
 		contract, err := DecodeContract(source)
-		if err == nil && (contract.Version != 1 || contract.Profile != OfflineEBPFProfile || contract.Artifact != BPFArtifact) {
+		if err == nil && ValidateContract(contract) != nil {
 			t.Fatal("admitted contract escaped fixed vocabulary")
 		}
 	})
