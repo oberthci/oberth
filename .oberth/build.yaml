@@ -1372,8 +1372,8 @@ spec:
         oberth.ci/workspace-env: none
     container:
       image: "aquasec/trivy:0.73.0@sha256:4bbf3824d974b70f27631005e2e6194d4d8fbd6e72c4a9e04cf521e25c5cb07f"
-      command: [/bin/cp]
-      args: [/usr/local/bin/trivy, /tmp/vpt-tools/bin/trivy]
+      command: [/bin/sh, -c]
+      args: ["mkdir -p /tmp/vpt-tools/bin && cp /usr/local/bin/trivy /tmp/vpt-tools/bin/trivy"]
       env:
       - name: PATH
         value: /usr/bin:/bin
