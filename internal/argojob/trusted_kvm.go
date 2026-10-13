@@ -92,6 +92,11 @@ func admitTrustedKVMSource(workflow *wfv1.Workflow) error {
 			return errors.New("argojob: trusted preflight reserved annotation or WIF declaration")
 		}
 	}
+	for _, claim := range workflow.Spec.VolumeClaimTemplates {
+		if trustedKVMReservedVolume(claim.Name) {
+			return errors.New("argojob: trusted preflight reserved claim")
+		}
+	}
 	var result error
 	walkTemplates(workflow, func(t *wfv1.Template) {
 		for key := range t.Metadata.Annotations {
@@ -103,13 +108,13 @@ func admitTrustedKVMSource(workflow *wfv1.Workflow) error {
 			result = errors.New("argojob: trusted preflight reserved template or unsupported producer")
 		}
 		for _, v := range t.Volumes {
-			if v.Name == trustedKVMArtifacts || v.Name == trustedKVMPrivate {
+			if trustedKVMReservedVolume(v.Name) {
 				result = errors.New("argojob: trusted preflight reserved volume")
 			}
 		}
 	})
 	for _, v := range workflow.Spec.Volumes {
-		if v.Name == trustedKVMArtifacts || v.Name == trustedKVMPrivate {
+		if trustedKVMReservedVolume(v.Name) {
 			return errors.New("argojob: trusted preflight reserved volume")
 		}
 	}
@@ -142,7 +147,17 @@ func appendTrustedKVM(workflow *wfv1.Workflow, config Config, request Request) e
 	}
 	// Argo's wait executor mirrors main mounts. The server deletes those mirrors;
 	// neither executor credentials nor helpers may share the private guest state.
-	patch := map[string]any{"containers": []any{map[string]any{"name": "wait", "volumeMounts": []any{map[string]any{"mountPath": "/mainctrfs/work/artifacts", "$patch": "delete"}, map[string]any{"mountPath": "/mainctrfs/trusted", "$patch": "delete"}}}}}
+	securityBody, _ := json.Marshal(nonrootContainerSecurity(0))
+	var helperSecurity map[string]any
+	if err := json.Unmarshal(securityBody, &helperSecurity); err != nil {
+		return err
+	}
+	helperSecurity["$patch"] = "replace"
+	patch := map[string]any{
+		"initContainers": []any{map[string]any{"name": "init", "securityContext": helperSecurity}},
+		"containers":     []any{map[string]any{"name": "wait", "securityContext": helperSecurity, "volumeMounts": []any{map[string]any{"mountPath": "/mainctrfs/work/artifacts", "$patch": "delete"}, map[string]any{"mountPath": "/mainctrfs/trusted", "$patch": "delete"}}}},
+	}
+
 	body, err := json.Marshal(patch)
 	if err != nil {
 		return err
@@ -162,4 +177,12 @@ func appendTrustedKVM(workflow *wfv1.Workflow, config Config, request Request) e
 	workflow.Spec.ActiveDeadlineSeconds = &seconds
 	workflow.Annotations[trustedKVMAnnotation] = vmrunner.KVMIntentDigest(*intent)
 	return nil
+}
+
+func trustedKVMReservedVolume(name string) bool {
+	switch name {
+	case trustedKVMArtifacts, trustedKVMPrivate, "var-run-argo", "tmp-dir-argo", executorTokenVolume:
+		return true
+	}
+	return false
 }

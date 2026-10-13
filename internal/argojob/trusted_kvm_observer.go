@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"reflect"
+	"strconv"
 	"strings"
 	"time"
 
@@ -27,6 +28,10 @@ func (controller *Controller) trustedKVMWorkflow(ctx context.Context, request Re
 	if request.TrustedKVM == nil {
 		return nil, nil, errors.New("argojob: missing trusted KVM intent")
 	}
+	request, err := controller.PrepareNonroot(ctx, request)
+	if err != nil {
+		return nil, nil, err
+	}
 	expected, err := Build(controller.config, request)
 	if err != nil {
 		return nil, nil, err
@@ -35,7 +40,7 @@ func (controller *Controller) trustedKVMWorkflow(ctx context.Context, request Re
 	if err != nil {
 		return nil, nil, err
 	}
-	if actual.UID == "" || actual.DeletionTimestamp != nil || actual.Name != expected.Name || actual.Namespace != expected.Namespace || actual.Annotations[runIDAnnotation] != request.RunID || actual.Annotations[trustedKVMAnnotation] != expected.Annotations[trustedKVMAnnotation] || !reflect.DeepEqual(actual.Spec, expected.Spec) {
+	if actual.UID == "" || actual.DeletionTimestamp != nil || actual.Name != expected.Name || actual.Namespace != expected.Namespace || actual.Annotations[runIDAnnotation] != request.RunID || actual.Annotations[trustedKVMAnnotation] != expected.Annotations[trustedKVMAnnotation] || actual.Annotations[nonrootProfileAnnotation] != expected.Annotations[nonrootProfileAnnotation] || !reflect.DeepEqual(actual.Spec, expected.Spec) {
 		return nil, nil, errors.New("argojob: trusted Workflow differs from admitted final server spec")
 	}
 	for i := range expected.Spec.Templates {
@@ -95,7 +100,15 @@ func (controller *Controller) TrustedKVMReceipt(ctx context.Context, request Req
 	}
 	for i := range pods.Items {
 		other := &pods.Items[i]
-		if !ownedByWorkflow(other, workflow.Name, workflow.UID) || other.UID == pod.UID {
+		if !ownedByWorkflow(other, workflow.Name, workflow.UID) {
+			for _, owner := range other.OwnerReferences {
+				if owner.UID == workflow.UID {
+					return vmrunner.KVMReceipt{}, errors.New("argojob: ambiguous producer ownership")
+				}
+			}
+			continue
+		}
+		if other.UID == pod.UID {
 			continue
 		}
 		if other.Name == executorIdentityPodName(workflow.UID) && len(other.Spec.SchedulingGates) == 1 && other.Spec.SchedulingGates[0].Name == "oberth.ci/executor-identity" && other.Spec.NodeName == "" {
@@ -217,8 +230,8 @@ func verifyTrustedKVMPod(workflow *wfv1.Workflow, leaf *wfv1.Template, pod *core
 					return invalid("script capture")
 				}
 			case "ARGO_DEADLINE", "ARGO_PROGRESS_FILE", "ARGO_PROGRESS_PATCH_TICK_DURATION", "ARGO_PROGRESS_FILE_TICK_DURATION", "ARGO_TERMINATION_GRACE_PERIOD_SECONDS":
-				if v.ValueFrom != nil {
-					return invalid("Argo environment reference")
+				if !trustedArgoRuntimeValue(v, workflow, pod) {
+					return invalid("Argo runtime environment value")
 				}
 			default:
 				return invalid("unexpected Argo environment")
@@ -226,6 +239,11 @@ func verifyTrustedKVMPod(workflow *wfv1.Workflow, leaf *wfv1.Template, pod *core
 			continue
 		}
 		env = append(env, v)
+	}
+	for _, required := range []string{"ARGO_CONTAINER_NAME", "ARGO_NODE_ID", "ARGO_INCLUDE_SCRIPT_OUTPUT", "ARGO_DEADLINE"} {
+		if !seen[required] {
+			return invalid("missing Argo main binding")
+		}
 	}
 	observed.Env = env
 	var mounts []corev1.VolumeMount
@@ -252,7 +270,7 @@ func verifyTrustedKVMPod(workflow *wfv1.Workflow, leaf *wfv1.Template, pod *core
 	if main.TerminationMessagePath != "/dev/termination-log" || main.TerminationMessagePolicy != corev1.TerminationMessageReadFile || !reflect.DeepEqual(observed, expected) {
 		return invalid("main executable, environment, mounts, resources or security")
 	}
-	if err := verifyTrustedKVMHelpers(pod, wait, config); err != nil {
+	if err := verifyTrustedKVMHelpers(pod, wait, config, workflow, leaf); err != nil {
 		return err
 	}
 	allowed := map[string]corev1.Volume{}
@@ -277,7 +295,7 @@ func verifyTrustedKVMPod(workflow *wfv1.Workflow, leaf *wfv1.Template, pod *core
 	return nil
 }
 
-func verifyTrustedKVMHelpers(pod *corev1.Pod, wait *corev1.Container, config Config) error {
+func verifyTrustedKVMHelpers(pod *corev1.Pod, wait *corev1.Container, config Config, workflow *wfv1.Workflow, leaf *wfv1.Template) error {
 	invalid := func(reason string) error {
 		return fmt.Errorf("argojob: trusted executor attestation failed: %s", reason)
 	}
@@ -300,9 +318,10 @@ func verifyTrustedKVMHelpers(pod *corev1.Pod, wait *corev1.Container, config Con
 		if !reflect.DeepEqual(c.Command, expected) || (len(c.Args) != 0 && !reflect.DeepEqual(c.Args, []string{"--gloglevel", "0"})) {
 			return invalid("executor command")
 		}
-		if sc := c.SecurityContext; sc != nil && ((sc.Privileged != nil && *sc.Privileged) || (sc.AllowPrivilegeEscalation != nil && *sc.AllowPrivilegeEscalation) || (sc.Capabilities != nil && len(sc.Capabilities.Add) != 0) || (sc.SeccompProfile != nil && sc.SeccompProfile.Type == corev1.SeccompProfileTypeUnconfined)) {
+		if !reflect.DeepEqual(c.SecurityContext, nonrootContainerSecurity(0)) {
 			return invalid("executor security")
 		}
+
 		for _, m := range c.VolumeMounts {
 			valid := (m.Name == executorTokenVolume && m.MountPath == executorTokenDir && m.ReadOnly && m.SubPath == "") || (m.Name == "var-run-argo" && m.MountPath == "/var/run/argo" && m.SubPath == "") || (m.Name == "tmp-dir-argo" && m.MountPath == "/tmp" && m.SubPath == "0")
 			if !valid || m.SubPathExpr != "" || m.MountPropagation != nil {
@@ -350,7 +369,11 @@ func verifyTrustedKVMHelpers(pod *corev1.Pod, wait *corev1.Container, config Con
 					return invalid("executor template")
 				}
 				var template wfv1.Template
-				if json.Unmarshal([]byte(e.Value), &template) != nil || template.Name != trustedKVMTemplate || template.Container == nil {
+				expectedTemplate := leaf.DeepCopy()
+				if workflow.Spec.PodMetadata != nil {
+					expectedTemplate.Metadata.Labels = workflow.Spec.PodMetadata.Labels
+				}
+				if json.Unmarshal([]byte(e.Value), &template) != nil || !reflect.DeepEqual(template, *expectedTemplate) {
 					return invalid("executor template data")
 				}
 				// An init template with artifacts or archive directives can run independent
@@ -363,8 +386,8 @@ func verifyTrustedKVMHelpers(pod *corev1.Pod, wait *corev1.Container, config Con
 					return invalid("executor artifact plugin")
 				}
 			case "ARGO_DEADLINE", "ARGO_PROGRESS_FILE", "ARGO_PROGRESS_PATCH_TICK_DURATION", "ARGO_PROGRESS_FILE_TICK_DURATION", "ARGO_TERMINATION_GRACE_PERIOD_SECONDS":
-				if e.ValueFrom != nil {
-					return invalid("executor environment reference")
+				if !trustedArgoRuntimeValue(e, workflow, pod) {
+					return invalid("executor runtime environment value")
 				}
 			default:
 				return invalid("unexpected executor environment")
@@ -423,6 +446,11 @@ func (controller *Controller) cleanTrustedKVMOnce(ctx context.Context, name, run
 	for i := range pods.Items {
 		pod := &pods.Items[i]
 		if !ownedByWorkflow(pod, name, uid) {
+			for _, owner := range pod.OwnerReferences {
+				if owner.UID == uid {
+					return false, errors.New("argojob: Pod retains ambiguous trusted Workflow ownership")
+				}
+			}
 			continue
 		}
 		owned++
@@ -439,6 +467,13 @@ func (controller *Controller) cleanTrustedKVMOnce(ctx context.Context, name, run
 	if !workflowAbsent || owned != 0 {
 		return false, nil
 	}
+	for _, pod := range pods.Items {
+		for _, volume := range pod.Spec.Volumes {
+			if volume.PersistentVolumeClaim != nil && volume.PersistentVolumeClaim.ClaimName == sourceClaimName(name) {
+				return false, errors.New("argojob: source claim still mounted by a Pod")
+			}
+		}
+	}
 	claims := controller.kube.CoreV1().PersistentVolumeClaims(controller.config.Namespace)
 	claim, err := claims.Get(ctx, sourceClaimName(name), metav1.GetOptions{})
 	if apierrors.IsNotFound(err) {
@@ -449,13 +484,6 @@ func (controller *Controller) cleanTrustedKVMOnce(ctx context.Context, name, run
 	}
 	if claim.UID == "" || len(claim.OwnerReferences) != 1 || claim.OwnerReferences[0].UID != uid || claim.OwnerReferences[0].Name != name || claim.OwnerReferences[0].Kind != "Workflow" || claim.OwnerReferences[0].APIVersion != "argoproj.io/v1alpha1" {
 		return false, errors.New("argojob: source claim is not bound to exact trusted Workflow")
-	}
-	for _, pod := range pods.Items {
-		for _, volume := range pod.Spec.Volumes {
-			if volume.PersistentVolumeClaim != nil && volume.PersistentVolumeClaim.ClaimName == claim.Name {
-				return false, errors.New("argojob: source claim still mounted by a Pod")
-			}
-		}
 	}
 	if claim.DeletionTimestamp == nil {
 		err = claims.Delete(ctx, claim.Name, metav1.DeleteOptions{Preconditions: &metav1.Preconditions{UID: &claim.UID}})
@@ -481,48 +509,30 @@ func (controller *Controller) confirmTrustedKVMNoCreate(ctx context.Context, nam
 		if _, err := controller.workflows.Get(ctx, name, metav1.GetOptions{}); !apierrors.IsNotFound(err) {
 			return errors.New("argojob: Workflow absence before create is unproven")
 		}
+		// SourceSeeder already requests cleanup on failure. This observer never
+		// deletes an unbound object based on labels or a name collision.
 		claimName := sourceClaimName(name)
 		pods, err := controller.kube.CoreV1().Pods(controller.config.Namespace).List(ctx, metav1.ListOptions{})
 		if err != nil {
 			return err
 		}
 		mounted := false
-		for i := range pods.Items {
-			pod := &pods.Items[i]
-			for _, v := range pod.Spec.Volumes {
-				if v.PersistentVolumeClaim == nil || v.PersistentVolumeClaim.ClaimName != claimName {
-					continue
-				}
+		for _, pod := range pods.Items {
+			if pod.Name == claimName {
 				mounted = true
-				if pod.Name != claimName || pod.UID == "" || len(pod.OwnerReferences) != 0 || len(pod.Spec.Containers) != 1 || pod.Spec.Containers[0].Name != seedContainer || pod.Spec.Containers[0].Image != controller.config.SourceSeedImage {
-					return errors.New("argojob: unbound source claim has an unexpected consumer")
-				}
-				if pod.DeletionTimestamp == nil {
-					err = controller.kube.CoreV1().Pods(pod.Namespace).Delete(ctx, pod.Name, metav1.DeleteOptions{Preconditions: &metav1.Preconditions{UID: &pod.UID}, GracePeriodSeconds: ptr.To(int64(0))})
-					if err != nil && !apierrors.IsNotFound(err) {
-						return err
-					}
+			}
+			for _, v := range pod.Spec.Volumes {
+				if v.PersistentVolumeClaim != nil && v.PersistentVolumeClaim.ClaimName == claimName {
+					mounted = true
 				}
 			}
 		}
-		if !mounted {
-			claims := controller.kube.CoreV1().PersistentVolumeClaims(controller.config.Namespace)
-			claim, err := claims.Get(ctx, claimName, metav1.GetOptions{})
-			if apierrors.IsNotFound(err) {
-				return nil
-			}
-			if err != nil {
-				return err
-			}
-			if claim.UID == "" || len(claim.OwnerReferences) != 0 || claim.Labels["oberth.ci/component"] != "source" || claim.Labels["oberth.ci/workflow"] != name {
-				return errors.New("argojob: refusing foreign pre-create claim cleanup")
-			}
-			if claim.DeletionTimestamp == nil {
-				err = claims.Delete(ctx, claim.Name, metav1.DeleteOptions{Preconditions: &metav1.Preconditions{UID: &claim.UID}})
-				if err != nil && !apierrors.IsNotFound(err) {
-					return err
-				}
-			}
+		_, err = controller.kube.CoreV1().PersistentVolumeClaims(controller.config.Namespace).Get(ctx, claimName, metav1.GetOptions{})
+		if apierrors.IsNotFound(err) && !mounted {
+			return nil
+		}
+		if err != nil && !apierrors.IsNotFound(err) {
+			return err
 		}
 		select {
 		case <-ctx.Done():
@@ -530,4 +540,69 @@ func (controller *Controller) confirmTrustedKVMNoCreate(ctx context.Context, nam
 		case <-ticker.C:
 		}
 	}
+}
+
+func trustedArgoRuntimeValue(env corev1.EnvVar, workflow *wfv1.Workflow, pod *corev1.Pod) bool {
+	if env.ValueFrom != nil {
+		return false
+	}
+	switch env.Name {
+	case "ARGO_PROGRESS_FILE":
+		return env.Value == "/var/run/argo/progress"
+	case "ARGO_PROGRESS_PATCH_TICK_DURATION":
+		return env.Value == "1m0s"
+	case "ARGO_PROGRESS_FILE_TICK_DURATION":
+		return env.Value == "3s"
+	case "ARGO_TERMINATION_GRACE_PERIOD_SECONDS":
+		return pod.Spec.TerminationGracePeriodSeconds != nil && env.Value == strconv.FormatInt(*pod.Spec.TerminationGracePeriodSeconds, 10)
+	case "ARGO_DEADLINE":
+		return !workflow.Status.StartedAt.IsZero() && workflow.Spec.ActiveDeadlineSeconds != nil && env.Value == workflow.Status.StartedAt.Add(time.Duration(*workflow.Spec.ActiveDeadlineSeconds)*time.Second).UTC().Format(time.RFC3339)
+	}
+	return false
+}
+
+// TrustedKVMRefusal retains actual failed kubelet evidence after the same
+// executable/ownership attestation. It never validates or grants a pass.
+func (controller *Controller) TrustedKVMRefusal(ctx context.Context, request Request, workflowUID string) (*vmrunner.KVMTerminationRecord, error) {
+	workflow, leaf, err := controller.trustedKVMWorkflow(ctx, request)
+	if err != nil {
+		return nil, err
+	}
+	if controller.kube == nil || workflowUID == "" || string(workflow.UID) != workflowUID {
+		return nil, errors.New("argojob: refusal requires the exact bound Workflow")
+	}
+	var selected *wfv1.NodeStatus
+	for _, node := range workflow.Status.Nodes {
+		if node.Type == wfv1.NodeTypePod && node.TemplateName == trustedKVMTemplate {
+			if selected != nil {
+				return nil, errors.New("argojob: ambiguous trusted Pod refusal")
+			}
+			copy := node
+			selected = &copy
+		}
+	}
+	if selected == nil || selected.Name != workflow.Name+"[1].trusted-tests" || selected.BoundaryID != workflow.Status.Nodes[workflow.Name].ID {
+		return nil, errors.New("argojob: trusted refusal has no linked Pod")
+	}
+	pod, err := controller.kube.CoreV1().Pods(workflow.Namespace).Get(ctx, PodName(workflow, *selected), metav1.GetOptions{})
+	if err != nil {
+		return nil, err
+	}
+	if err := verifyTrustedKVMPod(workflow, leaf, pod, selected, controller.config); err != nil {
+		return nil, err
+	}
+	var status *corev1.ContainerStatus
+	for i := range pod.Status.ContainerStatuses {
+		if pod.Status.ContainerStatuses[i].Name == "main" {
+			if status != nil {
+				return nil, errors.New("argojob: duplicate harness refusal statuses")
+			}
+			status = &pod.Status.ContainerStatuses[i]
+		}
+	}
+	if status == nil || status.State.Terminated == nil || status.ContainerID == "" || status.State.Terminated.ContainerID != status.ContainerID {
+		return nil, errors.New("argojob: harness refusal has no current bound termination")
+	}
+	terminated := status.State.Terminated
+	return &vmrunner.KVMTerminationRecord{ImageID: status.ImageID, ContainerID: status.ContainerID, PodUID: string(pod.UID), WorkflowUID: workflowUID, ExitCode: terminated.ExitCode, Signal: terminated.Signal, RestartCount: status.RestartCount, StartedAt: terminated.StartedAt.Time, FinishedAt: terminated.FinishedAt.Time}, nil
 }
