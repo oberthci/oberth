@@ -87,3 +87,7 @@ No credentials are included in this directory.
 028-onboarding-audit-readiness.txt
 
 029-release-workflow-selects-wrong-platform.txt
+
+030-release-bootstrap-transient-checksum-download.txt
+
+031-kind-branch-ci-deadline-after-scheduling-delay.txt

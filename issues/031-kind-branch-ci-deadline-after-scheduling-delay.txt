@@ -1,0 +1,21 @@
+Title: Branch CI global deadline leaves too little time for race tests
+Status: Mitigation drafted; scheduling delay investigation open
+Observed: 2026-10-06
+
+Three local branch runs for the release image fix failed before a green
+mirror. The first compiled and tested under amd64 emulation and exceeded the
+one-hour global deadline. The third used native arm64 Go and passed setup,
+vet, lint, security, shellcheck and chart, but the test Pod started about
+48 minutes into the workflow after long gaps between setup steps. Argo gave
+the test Pod only 751 seconds from the remaining global deadline; it was
+terminated while running the race suite. The second run also hit a lint Pod
+deadline after another scheduling delay, alongside a transient Trivy DB EOF.
+
+Raise the CI workflow to the existing two-hour administrator ceiling so a
+cold run has time for the full race suite and four builds. Investigate the
+controller and kind-node scheduling gaps separately; increasing the deadline
+is a mitigation, not a diagnosis of those gaps.
+
+Acceptance: repeated cold branch runs on the supported kind setup finish
+without a Pod inheriting a near-expired workflow deadline, and real test
+failures still report their own logs and exit codes.

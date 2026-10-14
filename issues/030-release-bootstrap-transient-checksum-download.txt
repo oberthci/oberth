@@ -1,0 +1,19 @@
+Title: Transient checksum-service EOF aborts release bootstrap
+Status: Fix drafted; awaiting release verification
+Observed: 2026-10-06
+
+The v0.17.11 release run failed in install-golangci-lint before publication.
+Go's checksum service returned unexpected EOF while verifying downloaded
+modules. The isolated release tool cache had to fetch the dependency graph
+from scratch; this was a network failure, not a checksum mismatch. A local
+branch Trivy vulnerability DB download also failed once with unexpected EOF.
+
+Retry the release's networked Go install/build commands and pre-publication
+Trivy scan a bounded number of times in the same isolated cache, preserving
+checksum verification and the reviewed publisher-tool hashes. Keep a hard
+failure after the final attempt.
+
+Acceptance: a transient module or checksum-service failure can recover on a
+later attempt; a persistent failure still stops before any credentialed
+publication; the next immutable release completes and publishes curl and
+Homebrew artifacts. Keep failed tags v0.17.10 and v0.17.11 unchanged.
