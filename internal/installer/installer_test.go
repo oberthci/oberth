@@ -110,6 +110,7 @@ func TestExecuteDarwinDryRunPrintsKindAndHelmCommands(t *testing.T) {
 		"hostPort: 30443",
 		"OBERTH_KIND_CONFIG",
 		"helm repo add --force-update oberth-charts https://charts.oberth.ci",
+		"helm repo update oberth-charts",
 		"helm show values oberth-charts/oberth --version v0.10.55",
 		`docker manifest inspect "$OBERTH_IMAGE_REF"`,
 		`docker pull "$OBERTH_IMAGE_CHILD_REF"`,
@@ -117,6 +118,7 @@ func TestExecuteDarwinDryRunPrintsKindAndHelmCommands(t *testing.T) {
 		`kind load docker-image --name oberth "$OBERTH_IMAGE_LOCAL_TAG"`,
 		`docker exec oberth-control-plane ctr --namespace=k8s.io images tag --force "$OBERTH_IMAGE_LOCAL_TAG" "$OBERTH_IMAGE_REF"`,
 		"helm repo add --force-update openbao https://openbao.github.io/openbao-helm",
+		"helm repo update openbao",
 		"helm upgrade --install oberth oberth-charts/oberth",
 	})
 	for _, count := range []struct {
@@ -403,6 +405,7 @@ func TestPrepareKindImagesResolvesDigestRefsAndAliasesNodes(t *testing.T) {
 	}
 	want := []string{
 		"helm repo add --force-update oberth-charts https://charts.oberth.ci",
+		"helm repo update oberth-charts",
 		"helm show values oberth-charts/oberth --version v0.10.55",
 		"docker image inspect " + serverLocal,
 		"docker version --format {{.Server.Arch}}",
@@ -447,6 +450,7 @@ func TestPrepareKindImagesTagRefsKeepDirectLoad(t *testing.T) {
 	}
 	want := []string{
 		"helm repo add --force-update oberth-charts https://charts.oberth.ci",
+		"helm repo update oberth-charts",
 		"helm show values oberth-charts/oberth --version v0.10.55",
 		"docker image inspect " + serverImage,
 		"docker pull " + serverImage,
@@ -485,6 +489,7 @@ func TestPrepareKindImagesExistingLocalRefsSkipPullButStillLoad(t *testing.T) {
 	}
 	assertSliceEqual(t, events, []string{
 		"helm repo add --force-update oberth-charts https://charts.oberth.ci",
+		"helm repo update oberth-charts",
 		"helm show values oberth-charts/oberth",
 		"docker image inspect " + serverImage,
 		"kind load docker-image --name oberth " + serverImage,

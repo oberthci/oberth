@@ -106,7 +106,7 @@ func InstallArgoWorkflows(ctx context.Context, cfg Config, deps Deps) (ArgoResul
 			"so pipeline identities must not sit beside server ones", ns)
 	}
 
-	if _, err := deps.RunHelm(ctx, []string{"repo", "add", "--force-update", argoRepoName, ArgoHelmRepoURL}); err != nil {
+	if err := refreshHelmRepo(ctx, deps, argoRepoName, ArgoHelmRepoURL); err != nil {
 		return result, fmt.Errorf("add Argo helm repo: %w", err)
 	}
 

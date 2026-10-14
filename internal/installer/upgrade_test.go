@@ -224,11 +224,13 @@ func TestRunUpgradeRetriesFailedSameVersionWithPinnedImage(t *testing.T) {
 	if !result.Upgraded || result.AlreadyUpToDate || !strings.Contains(output.String(), "FAILED") || strings.Contains(output.String(), "Already running") {
 		t.Fatalf("failed same-version retry result=%+v, output=%q", result, output.String())
 	}
-	if len(calls) != 4 || calls[0][0] != "list" || calls[1][0] != "repo" || calls[2][0] != "show" || calls[3][0] != "upgrade" {
+	if len(calls) != 5 || calls[0][0] != "list" ||
+		strings.Join(calls[1], " ") != "repo add --force-update oberth-charts https://charts.oberth.ci" ||
+		strings.Join(calls[2], " ") != "repo update oberth-charts" || calls[3][0] != "show" || calls[4][0] != "upgrade" {
 		t.Fatalf("unexpected Helm flow: %v", calls)
 	}
-	show := strings.Join(calls[2], " ")
-	upgrade := strings.Join(calls[3], " ")
+	show := strings.Join(calls[3], " ")
+	upgrade := strings.Join(calls[4], " ")
 	if !strings.Contains(show, "--version "+targetVersion) ||
 		!strings.Contains(upgrade, "--version "+targetVersion) ||
 		!strings.Contains(upgrade, "image.ref="+targetImage) ||

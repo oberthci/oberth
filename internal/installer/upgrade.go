@@ -343,7 +343,7 @@ func RunUpgrade(ctx context.Context, cfg UpgradeConfig, deps Deps) (UpgradeResul
 	// Resolve the chart reference. Use the existing Helm repo if no override.
 	chart := cfg.ChartOverride
 	if chart == "" {
-		if _, err := deps.RunHelm(ctx, []string{"repo", "add", "--force-update", oberthRepoName, OberthHelmRepoURL}); err != nil {
+		if err := refreshHelmRepo(ctx, deps, oberthRepoName, OberthHelmRepoURL); err != nil {
 			return result, fmt.Errorf("add Oberth helm repo: %w", err)
 		}
 		chart = oberthRepoName + "/oberth"
@@ -663,7 +663,8 @@ func printUpgradeDryRun(w io.Writer, cfg UpgradeConfig, result UpgradeResult, re
 	if chart == "" {
 		chart = oberthRepoName + "/oberth"
 		_, _ = fmt.Fprintf(w, "  %d. Add/update Helm repo\n", step)
-		_, _ = fmt.Fprintf(w, "     helm repo add --force-update %s %s\n\n", oberthRepoName, OberthHelmRepoURL)
+		_, _ = fmt.Fprintf(w, "     helm repo add --force-update %s %s\n", oberthRepoName, OberthHelmRepoURL)
+		_, _ = fmt.Fprintf(w, "     helm repo update %s\n\n", oberthRepoName)
 		step++
 	}
 

@@ -525,7 +525,7 @@ func prepareKindImagesForCluster(ctx context.Context, cfg Config, deps Deps, clu
 		deps.Output = io.Discard
 	}
 
-	if _, err := deps.RunHelm(ctx, []string{"repo", "add", "--force-update", oberthRepoName, OberthHelmRepoURL}); err != nil {
+	if err := refreshHelmRepo(ctx, deps, oberthRepoName, OberthHelmRepoURL); err != nil {
 		return fmt.Errorf("add Oberth helm repo before resolving kind images: %w", err)
 	}
 	showArgs := oberthChartValuesArgs(cfg)

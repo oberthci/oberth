@@ -104,7 +104,7 @@ func resolveOberthTLSBootstrapImage(ctx context.Context, cfg Config, deps Deps) 
 		if err := prepareKindImagesForCluster(ctx, cfg, deps, deps.KindClusterName); err != nil {
 			return "", fmt.Errorf("prepare Oberth TLS bootstrap image for kind: %w", err)
 		}
-	} else if _, err := deps.RunHelm(ctx, []string{"repo", "add", "--force-update", oberthRepoName, OberthHelmRepoURL}); err != nil {
+	} else if err := refreshHelmRepo(ctx, deps, oberthRepoName, OberthHelmRepoURL); err != nil {
 		return "", fmt.Errorf("add Oberth helm repo before TLS bootstrap: %w", err)
 	}
 	valuesYAML, err := deps.RunHelm(ctx, oberthChartValuesArgs(cfg))

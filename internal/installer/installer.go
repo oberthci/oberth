@@ -1022,7 +1022,7 @@ func InstallOpenBao(ctx context.Context, cfg Config, deps Deps) (OpenBaoResult, 
 		ServiceAddress: fmt.Sprintf("%s://openbao.%s.svc:8200", scheme, ns),
 	}
 
-	if _, err := deps.RunHelm(ctx, []string{"repo", "add", "--force-update", openBaoRepoName, OpenBaoHelmRepoURL}); err != nil {
+	if err := refreshHelmRepo(ctx, deps, openBaoRepoName, OpenBaoHelmRepoURL); err != nil {
 		return result, fmt.Errorf("add OpenBao helm repo: %w", err)
 	}
 
@@ -1421,7 +1421,7 @@ func InstallOberth(ctx context.Context, cfg Config, deps Deps, openbao OpenBaoRe
 			return result, fmt.Errorf("prepare kind images: %w", err)
 		}
 	default:
-		if _, err := deps.RunHelm(ctx, []string{"repo", "add", "--force-update", oberthRepoName, OberthHelmRepoURL}); err != nil {
+		if err := refreshHelmRepo(ctx, deps, oberthRepoName, OberthHelmRepoURL); err != nil {
 			return result, fmt.Errorf("add Oberth helm repo: %w", err)
 		}
 	}
@@ -1490,7 +1490,7 @@ func maybeHintNewerOberthChart(ctx context.Context, deps Deps, result OberthResu
 	if target == "" {
 		return
 	}
-	if _, err := deps.RunHelm(ctx, []string{"repo", "add", "--force-update", oberthRepoName, OberthHelmRepoURL}); err != nil {
+	if err := refreshHelmRepo(ctx, deps, oberthRepoName, OberthHelmRepoURL); err != nil {
 		return
 	}
 	latest := latestChartVersion(ctx, deps, oberthRepoName+"/oberth")
@@ -1982,6 +1982,7 @@ func printDryRunPlanWithKind(cfg Config, w io.Writer, cluster ClusterInfo, kindC
 		showArgs := oberthChartValuesArgs(cfg)
 		_, _ = fmt.Fprintf(w, "\n  %d. Resolve, pull, and load the chart images into kind\n", step)
 		_, _ = fmt.Fprintf(w, "     helm repo add --force-update %s %s\n", oberthRepoName, OberthHelmRepoURL)
+		_, _ = fmt.Fprintf(w, "     helm repo update %s\n", oberthRepoName)
 		oberthRepoAdded = true
 		_, _ = fmt.Fprintf(w, "     helm %s\n", strings.Join(showArgs, " "))
 		_, _ = fmt.Fprintln(w, "     # Set OBERTH_IMAGE_REF from image.ref above. Job pods pull their own")
@@ -2009,6 +2010,7 @@ func printDryRunPlanWithKind(cfg Config, w io.Writer, cluster ClusterInfo, kindC
 			_, _ = fmt.Fprintf(w, "  %d. Stage verified OpenBao TLS before any listener exists\n", step)
 			if !oberthRepoAdded {
 				_, _ = fmt.Fprintf(w, "     helm repo add --force-update %s %s\n", oberthRepoName, OberthHelmRepoURL)
+				_, _ = fmt.Fprintf(w, "     helm repo update %s\n", oberthRepoName)
 				oberthRepoAdded = true
 			}
 			_, _ = fmt.Fprintf(w, "     helm %s\n", strings.Join(oberthChartValuesArgs(cfg), " "))
@@ -2024,6 +2026,7 @@ func printDryRunPlanWithKind(cfg Config, w io.Writer, cluster ClusterInfo, kindC
 			_, _ = fmt.Fprintf(w, "  %d. Install OpenBao (production mode: standalone server + persistent storage) into namespace %q\n", step, ns)
 		}
 		_, _ = fmt.Fprintf(w, "     helm repo add --force-update %s %s\n", openBaoRepoName, OpenBaoHelmRepoURL)
+		_, _ = fmt.Fprintf(w, "     helm repo update %s\n", openBaoRepoName)
 		args := OpenBaoHelmArgs(cfg)
 		_, _ = fmt.Fprintf(w, "     helm %s\n\n", strings.Join(args, " "))
 		step++
@@ -2094,6 +2097,7 @@ func printDryRunPlanWithKind(cfg Config, w io.Writer, cluster ClusterInfo, kindC
 	} else {
 		_, _ = fmt.Fprintf(w, "  %d. Install Argo Workflows (execution engine) into namespace %q\n", step, argoNS)
 		_, _ = fmt.Fprintf(w, "     helm repo add --force-update %s %s\n", argoRepoName, ArgoHelmRepoURL)
+		_, _ = fmt.Fprintf(w, "     helm repo update %s\n", argoRepoName)
 		_, _ = fmt.Fprintf(w, "     helm %s\n", strings.Join(ArgoHelmArgs(cfg), " "))
 		_, _ = fmt.Fprintln(w, "     Namespace-scoped controller only: no Argo Server, no cluster-scoped RBAC")
 		_, _ = fmt.Fprintln(w)
@@ -2107,6 +2111,7 @@ func printDryRunPlanWithKind(cfg Config, w io.Writer, cluster ClusterInfo, kindC
 	_, _ = fmt.Fprintf(w, "  %d. Install Oberth into namespace %q\n", step, oberthNS)
 	if !oberthRepoAdded {
 		_, _ = fmt.Fprintf(w, "     helm repo add --force-update %s %s\n", oberthRepoName, OberthHelmRepoURL)
+		_, _ = fmt.Fprintf(w, "     helm repo update %s\n", oberthRepoName)
 	}
 	openbao := OpenBaoResult{ServiceAddress: openbaoAddr}
 	if cfg.InstallSecretStore {
