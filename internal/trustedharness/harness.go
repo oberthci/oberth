@@ -9,6 +9,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"crypto/tls"
+	"crypto/x509"
 	"debug/elf"
 	"encoding/hex"
 	"encoding/json"
@@ -35,12 +36,18 @@ const DriverFile = "suite-driver"
 // policy. Redirects are refused; neither credentials nor candidate URLs enter
 // this transport. Complete bytes are hashed before archive interpretation.
 func Fetch(ctx context.Context, raw, expected string, limit int64) ([]byte, error) {
+	return fetch(ctx, raw, expected, limit, nil)
+}
+
+// roots permits isolated HTTPS tests without changing certificate verification,
+// the TLS floor, or redirect policy. Production uses the system trust roots.
+func fetch(ctx context.Context, raw, expected string, limit int64, roots *x509.CertPool) ([]byte, error) {
 	u, err := url.Parse(raw)
 	if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" {
 		return nil, errors.New("invalid trusted bundle endpoint")
 	}
 	transport := http.DefaultTransport.(*http.Transport).Clone()
-	transport.TLSClientConfig = &tls.Config{MinVersion: tls.VersionTLS13}
+	transport.TLSClientConfig = &tls.Config{MinVersion: tls.VersionTLS13, RootCAs: roots}
 	defer transport.CloseIdleConnections()
 	client := &http.Client{Transport: transport, Timeout: 2 * time.Minute, CheckRedirect: func(*http.Request, []*http.Request) error { return errors.New("trusted bundle redirects refused") }}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, raw, nil)
