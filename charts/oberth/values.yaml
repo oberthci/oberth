@@ -456,3 +456,6 @@ podLabels: {}
 # (public HTTPS, no credentials/query). Empty keeps the feature disabled.
 trustedTests:
   recipes: []
+  # Operator must set the actual positive KVM device GID before adding recipes.
+  # Zero disables trusted suite execution; no host-specific group is assumed.
+  kvmSupplementalGroup: 0

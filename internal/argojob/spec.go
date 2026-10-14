@@ -259,6 +259,10 @@ type Config struct {
 	// infrastructure-class error rather than silently running TCG.
 	// Default: false (must be explicitly enabled via vm.kvm.enabled chart value).
 	KVMEnabled bool
+
+	// TrustedKVMGroup is the operator-provided device group for protected suites.
+	// Zero leaves trusted suite execution unavailable; never infer a host GID.
+	TrustedKVMGroup int64
 }
 
 func (config *Config) applyDefaults() {
@@ -281,6 +285,9 @@ func (config *Config) applyDefaults() {
 
 // Validate rejects a configuration that could not produce a safe submission.
 func (config Config) Validate() error {
+	if config.TrustedKVMGroup < 0 || config.TrustedKVMGroup > 2147483647 {
+		return errors.New("argojob: trusted KVM group must be a positive supported GID, or zero when disabled")
+	}
 	if err := config.ReleaseWIF.Validate(); err != nil {
 		return err
 	}

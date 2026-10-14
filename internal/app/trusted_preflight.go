@@ -46,8 +46,8 @@ type TrustedPreflights struct {
 }
 
 func NewTrustedPreflights(jobs *ArgoJobs, journal trustedRunStore, recipes []vmrunner.KVMRecipe, workspaceRoot string, requireMutation func(context.Context) error) (*TrustedPreflights, error) {
-	if requireMutation == nil || jobs == nil || journal == nil || !jobs.config.KVMEnabled || len(recipes) == 0 || len(recipes) > 128 {
-		return nil, errors.New("trusted preflights require KVM, journal and approved recipes")
+	if requireMutation == nil || jobs == nil || journal == nil || !jobs.config.KVMEnabled || jobs.config.TrustedKVMGroup <= 0 || len(recipes) == 0 || len(recipes) > 128 {
+		return nil, errors.New("trusted preflights require KVM, explicit positive KVM group, journal and approved recipes")
 	}
 	controller, ok := jobs.controller.(trustedController)
 	if !ok {

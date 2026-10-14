@@ -16,12 +16,13 @@ type RunScheduling struct {
 }
 
 type AdmissionObservation struct {
-	State    string `json:"state"`
-	Position int    `json:"position,omitempty"`
-	Size     string `json:"size,omitempty"`
-	Weight   int    `json:"weight,omitempty"`
-	Used     int    `json:"used"`
-	Capacity int    `json:"capacity"`
+	VMCapacity bool   `json:"vm_capacity,omitempty"`
+	State      string `json:"state"`
+	Position   int    `json:"position,omitempty"`
+	Size       string `json:"size,omitempty"`
+	Weight     int    `json:"weight,omitempty"`
+	Used       int    `json:"used"`
+	Capacity   int    `json:"capacity"`
 	// Group is the repository-declared concurrency group the run was admitted
 	// or is waiting under (#658). GroupHolder names the run of the same
 	// repository currently holding that group; GroupAhead names the earlier run

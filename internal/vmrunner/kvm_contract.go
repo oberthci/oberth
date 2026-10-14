@@ -42,6 +42,14 @@ func validateArtifactPaths(artifacts []string) error {
 		if !safeSuitePath(artifact) || seen[artifact] {
 			return errors.New("trusted test artifact paths must be unique canonical relative paths")
 		}
+		// artifacts.tar uses USTAR without extensions: its name field is
+		// 100 bytes, optionally preceded by a 155-byte directory prefix.
+		if len(artifact) > 100 {
+			split := strings.LastIndex(artifact[:min(len(artifact), 156)], "/")
+			if split <= 0 || len(artifact)-split-1 > 100 {
+				return errors.New("trusted test artifact paths must fit USTAR entries")
+			}
+		}
 		seen[artifact] = true
 	}
 	return nil

@@ -19,6 +19,7 @@ type protectedFixture struct {
 	intent                                 vmrunner.KVMIntent
 	recoverIDs                             []string
 	recoverErr                             error
+	artifactDigest                         string
 }
 
 func (p *protectedFixture) Supports(vmrunner.Contract) error { return nil }
@@ -54,8 +55,12 @@ func (p *protectedFixture) Execute(ctx context.Context, job JobRequest, requirem
 	if err = p.store.BindKVMPreflight(ctx, run.ID, "workflow"); err != nil {
 		return err
 	}
+	artifactDigest := p.artifactDigest
+	if artifactDigest == "" {
+		artifactDigest = strings.Repeat("b", 64)
+	}
 	digest := vmrunner.KVMIntentDigest(p.intent)
-	receipt := vmrunner.KVMReceipt{IntentDigest: digest, WorkflowUID: "workflow", Binding: vmrunner.KVMTerminationBinding{Namespace: "pipelines", WorkflowName: p.intent.WorkflowName, WorkflowUID: "workflow", PodName: "pod", PodUID: "poduid", ContainerID: "containerd://id", HarnessImageRef: p.intent.Recipe.HarnessImage, AdmittedAt: now, Deadline: p.intent.Deadline}, Report: vmrunner.KVMReport{Version: 1, IntentDigest: digest, InventoryDigest: p.intent.InventoryDigest, ArtifactSetDigest: strings.Repeat("b", 64), CaseCount: 1}, Termination: vmrunner.KVMTerminationRecord{ImageID: "sha256:" + strings.Repeat("e", 64), ContainerID: "containerd://id", PodUID: "poduid", WorkflowUID: "workflow", StartedAt: now, FinishedAt: now}, FinishedAt: now}
+	receipt := vmrunner.KVMReceipt{IntentDigest: digest, WorkflowUID: "workflow", Binding: vmrunner.KVMTerminationBinding{Namespace: "pipelines", WorkflowName: p.intent.WorkflowName, WorkflowUID: "workflow", PodName: "pod", PodUID: "poduid", ContainerID: "containerd://id", HarnessImageRef: p.intent.Recipe.HarnessImage, AdmittedAt: now, Deadline: p.intent.Deadline}, Report: vmrunner.KVMReport{Version: 1, IntentDigest: digest, InventoryDigest: p.intent.InventoryDigest, ArtifactSetDigest: artifactDigest, CaseCount: 1}, Termination: vmrunner.KVMTerminationRecord{ImageID: "sha256:" + strings.Repeat("e", 64), ContainerID: "containerd://id", PodUID: "poduid", WorkflowUID: "workflow", StartedAt: now, FinishedAt: now}, FinishedAt: now}
 	if !p.omitReceipt {
 		if err = p.store.RecordKVMReceipt(ctx, run.ID, receipt); err != nil {
 			return err

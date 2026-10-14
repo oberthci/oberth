@@ -3,6 +3,7 @@ package service
 import (
 	"os"
 	"testing"
+	"time"
 )
 
 func TestDiskFloorDisabled(t *testing.T) {
@@ -59,15 +60,21 @@ func TestDiskFloorAboveFloor(t *testing.T) {
 }
 
 func TestDiskFloorAtFloor(t *testing.T) {
-	// Read the actual free bytes and set the floor exactly there.
-	free := statfsFreeBytes(os.TempDir())
-	if free <= 0 {
-		t.Skip("cannot determine free bytes on this filesystem")
-	}
-	check := newDiskFloorCheck(os.TempDir(), free)
-	// At exactly the floor, freeAboveFloor returns true (>= comparison).
-	if !check.freeAboveFloor() {
-		t.Fatal("at-floor should be accepted (>= comparison)")
+	// Pin one cached observation: two live statfs samples can differ whenever
+	// another writer uses the filesystem. Real statfs behavior is covered above.
+	const floor int64 = 1024
+	for _, test := range []struct {
+		name    string
+		free    int64
+		allowed bool
+	}{{"below", floor - 1, false}, {"at", floor, true}, {"above", floor + 1, true}} {
+		t.Run(test.name, func(t *testing.T) {
+			check := newDiskFloorCheck(os.TempDir(), floor)
+			check.cachedFree, check.cacheTime, check.cacheTTL = test.free, time.Now(), time.Hour
+			if got := check.freeAboveFloor(); got != test.allowed {
+				t.Fatalf("free=%d floor=%d: allowed=%t, want %t", test.free, floor, got, test.allowed)
+			}
+		})
 	}
 }
 

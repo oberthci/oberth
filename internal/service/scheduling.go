@@ -83,6 +83,9 @@ func (service *API) scheduling(ctx context.Context, run model.Run, steps []model
 // grouped run waits on (#658). The group is a validated [a-z0-9-] name and the
 // runs are server-issued IDs, so neither can carry arbitrary text.
 func waitingAdmissionMessage(admission *model.AdmissionObservation) string {
+	if admission.VMCapacity {
+		return "Waiting for trusted VM capacity; no weighted resources or concurrency group held."
+	}
 	switch {
 	case admission.DiskFloor != nil && admission.DiskFloor.BelowFloor:
 		return fmt.Sprintf("Waiting for disk space: %d bytes free, floor is %d bytes. "+

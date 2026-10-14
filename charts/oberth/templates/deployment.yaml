@@ -49,6 +49,9 @@ template time rather than producing a broken deployment (#662). */}}
 {{- $witnessKeyInfo := required "compatibility.witnessKeyInfo must preserve the existing witness identity on upgrade" $compatibility.witnessKeyInfo -}}
 {{- $trustedVM := .Values.vm | default dict -}}
 {{- $trustedKVM := $trustedVM.kvm | default dict -}}
+{{- if and $trustedTests.recipes (le (int64 ($trustedTests.kvmSupplementalGroup | default 0)) 0) }}
+{{- fail "trustedTests.recipes requires an explicit positive trustedTests.kvmSupplementalGroup" }}
+{{- end }}
 {{- if and $trustedTests.recipes (not $trustedKVM.enabled) }}
 {{- fail "trustedTests.recipes requires vm.kvm.enabled" }}
 {{- end }}
@@ -284,6 +287,7 @@ spec:
             {{- end }}
             {{- if $trustedTests.recipes }}
             - --trusted-tests-recipes=/etc/oberth/trusted-tests/recipes.json
+            - --trusted-tests-kvm-group={{ $trustedTests.kvmSupplementalGroup }}
             {{- end }}
             {{- $promotion := .Values.promotion | default dict -}}
             {{- $grantMaxLifetime := $promotion.grantMaxLifetime | default "24h" -}}

@@ -908,6 +908,12 @@
               }
             }
           }
+        },
+        "kvmSupplementalGroup": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 2147483647,
+          "description": "Actual operator-approved KVM device supplemental GID; positive when recipes are configured, zero when disabled."
         }
       }
     }

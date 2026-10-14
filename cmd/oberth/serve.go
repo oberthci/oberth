@@ -142,6 +142,7 @@ type serveOptions struct {
 	// switch is on.
 	vmKVMEnabled       bool
 	trustedRecipesFile string
+	trustedKVMGroup    int64
 
 	// Promotion grant maximum lifetime. Default 24h, hard ceiling 168h (7 days).
 	promotionGrantMaxLifetime time.Duration
@@ -234,6 +235,7 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 	flags.IntVar(&options.argoWorkflowTTL, "argo-workflow-ttl", 3600, "finished Workflow retention in seconds")
 	flags.BoolVar(&options.vmKVMEnabled, "vm-kvm-enabled", false, "enable server-injected KVM device access for annotated leaves (requires KubeVirt device plugin)")
 	flags.StringVar(&options.trustedRecipesFile, "trusted-tests-recipes", "", "public operator-approved trusted suite recipes JSON file (requires --vm-kvm-enabled)")
+	flags.Int64Var(&options.trustedKVMGroup, "trusted-tests-kvm-group", 0, "operator-approved positive /dev/kvm supplemental GID required for trusted suites; no default device group")
 	flags.DurationVar(&options.promotionGrantMaxLifetime, "promotion-grant-max-lifetime", 24*time.Hour, "maximum lifetime for promotion grants (default 24h, hard ceiling 168h)")
 	flags.DurationVar(&options.gitCommandTimeout, "git-timeout", 10*time.Minute, "Git command timeout")
 	flags.DurationVar(&options.gcInterval, "git-gc-interval", 24*time.Hour, "periodic Git GC interval")

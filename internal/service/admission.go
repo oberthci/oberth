@@ -58,6 +58,8 @@ type admissionReservation struct {
 	// pass. Its weight and group stay held for the rest of this process
 	// instead of passing to the next run.
 	retained bool
+	// vmParked owns no weight, group or dispatch slot while durable VM capacity is busy.
+	vmParked bool
 	ready    chan struct{}
 }
 
@@ -152,6 +154,7 @@ func (reservation *admissionReservation) acquireRequest(ctx context.Context, req
 		gate.mu.Unlock()
 		return nil, context.Canceled
 	}
+	reservation.vmParked = false
 	reservation.runID = request.RunID
 	reservation.size = size
 	reservation.weight = min(sizeWeight(size), gate.capacity)
@@ -163,7 +166,7 @@ func (reservation *admissionReservation) acquireRequest(ctx context.Context, req
 	gate.grantLocked()
 	granted := reservation.granted
 	reservation.delayed = !granted
-	// Preparing is the only transition that can park a run: this one, or a
+	// Preparing may park this run on its group, or a
 	// later run of the same group that was waiting without anyone ahead of it.
 	if gate.onPark != nil && gate.parkedLocked() > 0 {
 		gate.onPark()
@@ -250,6 +253,10 @@ func (gate *weightedAdmission) grantLocked() {
 	var parked map[string]struct{}
 	for index := 0; index < len(gate.waiters); {
 		reservation := gate.waiters[index]
+		if reservation.vmParked {
+			index++
+			continue
+		}
 		if !reservation.prepared {
 			return
 		}
@@ -330,13 +337,17 @@ func (gate *weightedAdmission) removeLocked(reservation *admissionReservation) {
 	}
 }
 
-// parkedLocked counts prepared waiters held back only by their own concurrency
+// parkedLocked counts VM-capacity waiters and prepared waiters held back by their concurrency
 // group: another run of the same repository holds it, or an earlier run of the
 // same group is waiting ahead of them.
 func (gate *weightedAdmission) parkedLocked() int {
 	parked := 0
 	var ahead map[string]struct{}
 	for _, reservation := range gate.waiters {
+		if reservation.vmParked {
+			parked++
+			continue
+		}
 		if !reservation.prepared || reservation.group == "" {
 			continue
 		}
@@ -353,7 +364,7 @@ func (gate *weightedAdmission) parkedLocked() int {
 	return parked
 }
 
-// groupParked reports how many claimed runs are parked on their concurrency
+// groupParked reports claimed runs parked on VM capacity or their concurrency
 // group. The dispatch loop does not count them against its ceiling.
 func (gate *weightedAdmission) groupParked() int {
 	gate.mu.Lock()
@@ -375,7 +386,7 @@ func (gate *weightedAdmission) groupBlockerLocked(reservation *admissionReservat
 		if candidate == reservation {
 			break
 		}
-		if candidate.prepared && candidate.group == reservation.group {
+		if candidate.prepared && !candidate.vmParked && candidate.group == reservation.group {
 			return "", candidate.runID
 		}
 	}
@@ -410,6 +421,7 @@ func (scheduler *Scheduler) AdmissionSnapshot(sequence int64) *model.AdmissionOb
 	result := &model.AdmissionObservation{State: "preparing", Used: gate.used, Capacity: gate.capacity}
 	if reservation.prepared {
 		result.State = "waiting"
+		result.VMCapacity = reservation.vmParked
 		result.Size = string(reservation.size)
 		result.Weight = reservation.weight
 		result.Group = reservation.groupName
@@ -429,4 +441,31 @@ func (scheduler *Scheduler) AdmissionSnapshot(sequence int64) *model.AdmissionOb
 		result.DiskFloor = gate.diskFloor.observation()
 	}
 	return result
+}
+
+// parkVM is permitted only after the durable journal proves this run owns no
+// execution. It preserves claim order but releases every scheduling permit.
+func (reservation *admissionReservation) parkVM() error {
+	gate := reservation.gate
+	gate.mu.Lock()
+	defer gate.mu.Unlock()
+	if !reservation.granted || reservation.released || reservation.canceled || reservation.retained {
+		return fmt.Errorf("service: cannot park inactive VM reservation")
+	}
+	reservation.granted = false
+	reservation.vmParked = true
+	reservation.delayed = true
+	reservation.ready = make(chan struct{})
+	gate.used -= reservation.weight
+	gate.runs--
+	if reservation.group != "" && gate.groups[reservation.group] == reservation {
+		delete(gate.groups, reservation.group)
+	}
+	gate.waiters = append(gate.waiters, reservation)
+	sort.SliceStable(gate.waiters, func(i, j int) bool { return gate.waiters[i].sequence < gate.waiters[j].sequence })
+	gate.grantLocked()
+	if gate.onPark != nil {
+		gate.onPark()
+	}
+	return nil
 }

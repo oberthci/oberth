@@ -33,6 +33,9 @@ func prepareTrustedKVMRequest(config Config, request *Request) error {
 	if !config.KVMEnabled {
 		return ErrKVMNotEnabled
 	}
+	if config.TrustedKVMGroup <= 0 {
+		return errors.New("argojob: trusted suites require an explicit positive KVM supplemental group")
+	}
 	digest := sha256.Sum256(request.Source)
 	if intent.Validate() != nil || request.Trigger != periapsis.TriggerCI || request.RunID != intent.RunID || request.Name != intent.WorkflowName || request.SHA != intent.CandidateSHA || config.Namespace != intent.Namespace || hex.EncodeToString(digest[:]) != intent.WorkflowSpecDigest || request.UpstreamName+"/"+request.UpstreamOrg+"/"+request.Repo != intent.Repository || len(request.Fragments) != 0 {
 		return errors.New("argojob: trusted preflight request differs from journaled admission")
@@ -131,6 +134,7 @@ func appendTrustedKVM(workflow *wfv1.Workflow, config Config, request Request) e
 	}
 	leaf := wfv1.Template{
 		Name:               trustedKVMTemplate,
+		SecurityContext:    trustedKVMPodSecurity(config.TrustedKVMGroup),
 		ServiceAccountName: config.PipelineServiceAccount, AutomountServiceAccountToken: ptr.To(false), Executor: &wfv1.ExecutorConfig{ServiceAccountName: config.ExecutorServiceAccount},
 		NodeSelector: map[string]string{"kubernetes.io/arch": "amd64", "kubernetes.io/os": "linux"},
 		Volumes: []corev1.Volume{
@@ -142,7 +146,7 @@ func appendTrustedKVM(workflow *wfv1.Workflow, config Config, request Request) e
 			Env:             []corev1.EnvVar{{Name: "OBERTH_KVM", Value: "1"}},
 			Resources:       corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("2"), corev1.ResourceMemory: resource.MustParse("4Gi"), corev1.ResourceName(kvmDeviceResource): resource.MustParse("1")}, Limits: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("2"), corev1.ResourceMemory: resource.MustParse("4Gi"), corev1.ResourceName(kvmDeviceResource): resource.MustParse("1")}},
 			VolumeMounts:    []corev1.VolumeMount{{Name: trustedKVMArtifacts, MountPath: ArtifactsMountPath, SubPath: artifactsSubPath, ReadOnly: true}, {Name: trustedKVMPrivate, MountPath: "/trusted"}},
-			SecurityContext: nonrootContainerSecurity(0), TerminationMessagePath: "/dev/termination-log", TerminationMessagePolicy: corev1.TerminationMessageReadFile,
+			SecurityContext: nonrootContainerSecurity(nonrootUID), TerminationMessagePath: "/dev/termination-log", TerminationMessagePolicy: corev1.TerminationMessageReadFile,
 		},
 	}
 	// Argo's wait executor mirrors main mounts. The server deletes those mirrors;
@@ -185,4 +189,13 @@ func trustedKVMReservedVolume(name string) bool {
 		return true
 	}
 	return false
+}
+
+func trustedKVMPodSecurity(kvmGroup int64) *corev1.PodSecurityContext {
+	return &corev1.PodSecurityContext{
+		RunAsUser: ptr.To(nonrootUID), RunAsGroup: ptr.To(nonrootUID), RunAsNonRoot: ptr.To(true),
+		FSGroup: ptr.To(nonrootUID), FSGroupChangePolicy: ptr.To(corev1.FSGroupChangeOnRootMismatch),
+		SupplementalGroups: []int64{kvmGroup}, SupplementalGroupsPolicy: ptr.To(corev1.SupplementalGroupsPolicyStrict),
+		SeccompProfile: &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeRuntimeDefault},
+	}
 }
