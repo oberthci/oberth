@@ -38,7 +38,9 @@ func loadPipeline(t *testing.T, name string) []byte {
 }
 
 func oberthConfig() Config {
-	config := testConfig()
+	config := wifTestConfig()
+	config.PerRepoIdentities = map[string]PerRepoIdentityConfig{"github/skipops/oberth": {ServiceAccountName: "oberth-per-repo"}}
+	config.ReleaseWIF.Repositories = map[string]ReleaseWIFRepository{"github/skipops/oberth": {ServiceAccountName: "oberth-per-repo", Templates: map[string]string{"release-publish-images": "image-writer", "release-publish-kvm-harness": "image-writer", "release-publish-chart": "chart-writer", "release-verify": "image-reader"}}}
 	// Oberth's own pipeline uses golang: for toolchain steps and aquasec/trivy:
 	// for the security scan (the official image, pinned by digest).
 	config.RunnerImagePrefixes = []string{"golang:", "aquasec/trivy:"}
@@ -66,7 +68,7 @@ func oberthReleaseApprovedSecrets() map[string]bool {
 func TestOberthBuildPipelineIsAdmissible(t *testing.T) {
 	built, err := Build(oberthConfig(), Request{
 		RunID: "run-abc123", Name: "oberth-oberth-run-abc1-aabbccddeeff",
-		Repo: "oberth", UpstreamOrg: "skipops",
+		Repo: "oberth", UpstreamOrg: "skipops", UpstreamName: "github",
 		Ref: "refs/heads/main", SHA: testSHA, Trigger: periapsis.TriggerCI,
 		Source:          loadPipeline(t, "build.yaml"),
 		ApprovedSecrets: map[string]bool{},
@@ -112,7 +114,7 @@ func TestOberthBuildPipelineIsAdmissible(t *testing.T) {
 func TestOberthReleasePipelineIsAdmissible(t *testing.T) {
 	built, err := Build(oberthConfig(), Request{
 		RunID: "run-abc123", Name: "oberth-oberth-run-abc1-aabbccddeeff",
-		Repo: "oberth", UpstreamOrg: "skipops",
+		Repo: "oberth", UpstreamOrg: "skipops", UpstreamName: "github",
 		Ref: "refs/tags/v0.1.0", SHA: testSHA, Trigger: periapsis.TriggerRelease,
 		Source:          loadPipeline(t, "release.yaml"),
 		ApprovedSecrets: oberthReleaseApprovedSecrets(),
@@ -120,11 +122,11 @@ func TestOberthReleasePipelineIsAdmissible(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Oberth's own release.yaml did not clear admission: %v", err)
 	}
-	if built.Spec.ServiceAccountName != testCredentialedAcct {
+	if built.Spec.ServiceAccountName != "oberth-per-repo" {
 		t.Fatalf("ServiceAccount = %q, want %q", built.Spec.ServiceAccountName, testCredentialedAcct)
 	}
-	if built.Spec.AutomountServiceAccountToken == nil || !*built.Spec.AutomountServiceAccountToken {
-		t.Fatal("the release pipeline does not automount a ServiceAccount token")
+	if built.Spec.AutomountServiceAccountToken == nil || *built.Spec.AutomountServiceAccountToken {
+		t.Fatal("the WIF release pipeline must disable ambient ServiceAccount tokens")
 	}
 
 	paths, err := argoworkflow.DeclaredSecretPaths(built)
@@ -132,9 +134,6 @@ func TestOberthReleasePipelineIsAdmissible(t *testing.T) {
 		t.Fatalf("declared secret paths: %v", err)
 	}
 	want := []string{
-		"oberth/data/release/gar-image-key",
-		"oberth/data/release/gar-chart-key",
-		"oberth/data/release/gar-reader-key",
 		"oberth/data/release/cosign-secret",
 		"oberth/data/release/homebrew-tap-key",
 		"oberth/data/release/cloudflare-oberth-workers-token",
@@ -181,9 +180,9 @@ func TestOberthReleasePipelineIsAdmissible(t *testing.T) {
 func TestOberthReleasePipelineOnBranchPushRefusesSystemPaths(t *testing.T) {
 	_, err := Build(oberthConfig(), Request{
 		RunID: "run-abc123", Name: "oberth-oberth-run-abc1-aabbccddeeff",
-		Repo: "oberth", UpstreamOrg: "skipops",
+		Repo: "oberth", UpstreamOrg: "skipops", UpstreamName: "github",
 		Ref: "refs/heads/main", SHA: testSHA, Trigger: periapsis.TriggerCI,
-		Source:          loadPipeline(t, "release.yaml"),
+		Source:          releasePipelineWithoutWIF(t),
 		ApprovedSecrets: oberthReleaseApprovedSecrets(),
 	})
 	if err == nil {
@@ -202,9 +201,9 @@ func TestOberthReleasePipelineOnBranchRefusedWithoutAllowlist(t *testing.T) {
 	// CI-ineligible regardless.
 	_, err := Build(oberthConfig(), Request{
 		RunID: "run-abc123", Name: "oberth-oberth-run-abc1-aabbccddeeff",
-		Repo: "oberth", UpstreamOrg: "skipops",
+		Repo: "oberth", UpstreamOrg: "skipops", UpstreamName: "github",
 		Ref: "refs/heads/main", SHA: testSHA, Trigger: periapsis.TriggerCI,
-		Source:          loadPipeline(t, "release.yaml"),
+		Source:          releasePipelineWithoutWIF(t),
 		ApprovedSecrets: map[string]bool{},
 	})
 	if err == nil {
@@ -286,7 +285,7 @@ func TestOberthReleasePipelineWrapsCredentialedStepsWithSecretstoreExec(t *testi
 func TestOberthReleasePublisherUsesPrivateChildDir(t *testing.T) {
 	built, err := Build(oberthConfig(), Request{
 		RunID: "run-abc123", Name: "oberth-oberth-run-abc1-aabbccddeeff",
-		Repo: "oberth", UpstreamOrg: "skipops",
+		Repo: "oberth", UpstreamOrg: "skipops", UpstreamName: "github",
 		Ref: "refs/tags/v0.1.0", SHA: testSHA, Trigger: periapsis.TriggerRelease,
 		Source:          loadPipeline(t, "release.yaml"),
 		ApprovedSecrets: oberthReleaseApprovedSecrets(),
@@ -297,10 +296,9 @@ func TestOberthReleasePublisherUsesPrivateChildDir(t *testing.T) {
 	wantPaths := map[string][]string{
 		"release-sign-binaries":       {"--path=oberth/data/release/cosign-secret"},
 		"release-publish-homebrew":    {"--path=oberth/data/release/homebrew-tap-key"},
-		"release-publish-images":      {"--path=oberth/data/release/gar-image-key", "--path=oberth/data/release/cosign-secret"},
-		"release-publish-kvm-harness": {"--path=oberth/data/release/gar-image-key", "--path=oberth/data/release/cosign-secret"},
-		"release-publish-chart":       {"--path=oberth/data/release/gar-chart-key", "--path=oberth/data/release/cosign-secret"},
-		"release-verify":              {"--path=oberth/data/release/gar-reader-key"},
+		"release-publish-images":      {"--path=oberth/data/release/cosign-secret"},
+		"release-publish-kvm-harness": {"--path=oberth/data/release/cosign-secret"},
+		"release-publish-chart":       {"--path=oberth/data/release/cosign-secret"},
 		"release-website":             {"--path=oberth/data/release/cloudflare-oberth-workers-token"},
 	}
 	seen := map[string]bool{}
@@ -415,7 +413,7 @@ func TestOberthPipelinesMountTheServerProvidedSource(t *testing.T) {
 		}
 		built, err := Build(oberthConfig(), Request{
 			RunID: "run-abc123", Name: "oberth-oberth-run-abc1-aabbccddeeff",
-			Repo: "oberth", UpstreamOrg: "skipops", Ref: "refs/heads/main",
+			Repo: "oberth", UpstreamOrg: "skipops", UpstreamName: "github", Ref: "refs/heads/main",
 			SHA: testSHA, Trigger: trigger, Source: loadPipeline(t, name),
 			// The claim the server seeded for this run, in the pipeline
 			// namespace. Before this existed the Workflow named the server's
@@ -576,7 +574,7 @@ func TestOberthPipelinesPinCompatibleGoToolchains(t *testing.T) {
 func TestOberthReleasePipelineScopesTokenToCredentialedTemplates(t *testing.T) {
 	workflow, err := Build(oberthConfig(), Request{
 		RunID: "run-abc123", Name: "oberth-oberth-run-abc1-aabbccddeeff",
-		Repo: "oberth", UpstreamOrg: "skipops",
+		Repo: "oberth", UpstreamOrg: "skipops", UpstreamName: "github",
 		Ref: "refs/tags/v0.1.0", SHA: testSHA, Trigger: periapsis.TriggerRelease,
 		Source:          loadPipeline(t, "release.yaml"),
 		ApprovedSecrets: oberthReleaseApprovedSecrets(),
@@ -743,7 +741,15 @@ func TestOberthReleasePathsCoverAllScriptReferences(t *testing.T) {
 		t.Fatal("release.sh references no $secret_root paths")
 	}
 
-	// Every script reference must have a corresponding --path declaration.
+	// Only the explicit rollback branch retains dormant GAR key readers.
+	rollback := map[string]bool{"gar-image-key": true, "gar-chart-key": true, "gar-reader-key": true}
+	for base := range rollback {
+		if !scriptBases[base] || pathBases[base] {
+			t.Errorf("rollback path %s must remain readable but not actively fetched", base)
+		}
+		delete(scriptBases, base)
+	}
+	// Every active script reference must have a corresponding --path declaration.
 	for base := range scriptBases {
 		if !pathBases[base] {
 			t.Errorf("release.sh reads from $secret_root/%s/ but no credentialed "+
@@ -757,4 +763,11 @@ func TestOberthReleasePathsCoverAllScriptReferences(t *testing.T) {
 				"release.sh never reads from $secret_root/%s/", base, base)
 		}
 	}
+}
+
+// Keep the secret-path boundary tests independent of the earlier WIF gate.
+func releasePipelineWithoutWIF(t *testing.T) []byte {
+	t.Helper()
+	source := string(loadPipeline(t, "release.yaml"))
+	return []byte(regexp.MustCompile(`(?m)^        oberth.ci/release-wif-role: [a-z-]+\n`).ReplaceAllString(source, ""))
 }

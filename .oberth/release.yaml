@@ -5,8 +5,9 @@
 # Every Pod leaf uses the template-level token and workspace
 # controls every server since v0.16.6 honours (#567): it declares
 # oberth.ci/workspace-mounts: none and oberth.ci/workspace-env: none, and every
-# leaf except the six credentialed ones (release-sign-binaries, release-publish-images,
-# release-publish-homebrew, release-publish-chart, release-verify, release-website) declares
+# leaf except the seven credentialed ones (release-sign-binaries, release-publish-images,
+# release-publish-kvm-harness, release-publish-homebrew, release-publish-chart,
+# release-verify, release-website) declares
 # automountServiceAccountToken: false. The release-website leaves already
 # required v0.16.6, so the bootstrap leaves' former v0.16.5 admission
 # compatibility bought nothing. internal/argojob/oberth_pipeline_test.go
@@ -38,7 +39,7 @@
 # mutex, consumes the receipt read-only, and never executes release artifacts.
 #
 # All secrets retain exact store field names beneath OBERTH_SECRETSTORE_DIR.
-# Verification fetches only gar-reader-key; it uses the committed public key.
+# Verification uses image-reader WIF and the committed public signing key.
 # Cloudflare upload, finalization and website deployment reuse one closed
 # release-website template. Candidate inputs and runtime receipts mount read-only;
 # public phases snapshot signed inputs into Pod-private scratch and never execute
@@ -62,7 +63,7 @@ kind: Workflow
 metadata:
   annotations:
     oberth.ci/size: L
-    oberth.ci/secret-paths: oberth/data/release/gar-image-key,oberth/data/release/gar-chart-key,oberth/data/release/gar-reader-key,oberth/data/release/cosign-secret,oberth/data/release/homebrew-tap-key,oberth/data/release/cloudflare-oberth-workers-token
+    oberth.ci/secret-paths: oberth/data/release/cosign-secret,oberth/data/release/homebrew-tap-key,oberth/data/release/cloudflare-oberth-workers-token
 spec:
   entrypoint: release
   activeDeadlineSeconds: 14400
@@ -251,9 +252,8 @@ spec:
           GOBIN=/tmp/oberth-tools/bin \
           CGO_ENABLED=1 "$@"
       - bootstrap-clean
-      - /bin/mkdir
-      - -p
-      - /tmp/oberth-tools/bin
+      - /bin/sh
+      - hack/install-test-pyyaml.sh
       env:
       - name: PATH
         value: /usr/bin:/bin
@@ -1529,6 +1529,7 @@ spec:
   - name: release-publish-images
     metadata:
       annotations:
+        oberth.ci/release-wif-role: image-writer
         oberth.ci/workspace-mounts: none
         oberth.ci/workspace-env: none
     activeDeadlineSeconds: 3600
@@ -1547,7 +1548,6 @@ spec:
       - secretstore
       - exec
       - --dir=/run/oberth-secrets/release
-      - --path=oberth/data/release/gar-image-key
       - --path=oberth/data/release/cosign-secret
       - --
       - /bin/sh
@@ -1569,6 +1569,8 @@ spec:
           KUBEBUILDER_ASSETS= \
           OBERTH_RELEASE_SHA="$OBERTH_RELEASE_SHA" \
           OBERTH_RELEASE_TAG="$OBERTH_RELEASE_TAG" \
+          OBERTH_RELEASE_WIF="${OBERTH_RELEASE_WIF:-}" \
+          GOOGLE_APPLICATION_CREDENTIALS=/run/oberth-gar/adc.json \
           GOBIN=/tmp/oberth-tools/bin \
           OBERTH_SECRETSTORE_DIR="$OBERTH_SECRETSTORE_DIR" \
           CGO_ENABLED=1 "$@"
@@ -1669,6 +1671,7 @@ spec:
   - name: release-publish-chart
     metadata:
       annotations:
+        oberth.ci/release-wif-role: chart-writer
         oberth.ci/workspace-mounts: none
         oberth.ci/workspace-env: none
     synchronization:
@@ -1690,7 +1693,6 @@ spec:
       - secretstore
       - exec
       - --dir=/run/oberth-secrets/release
-      - --path=oberth/data/release/gar-chart-key
       - --path=oberth/data/release/cosign-secret
       - --
       - /bin/sh
@@ -1712,6 +1714,8 @@ spec:
           KUBEBUILDER_ASSETS= \
           OBERTH_RELEASE_SHA="$OBERTH_RELEASE_SHA" \
           OBERTH_RELEASE_TAG="$OBERTH_RELEASE_TAG" \
+          OBERTH_RELEASE_WIF="${OBERTH_RELEASE_WIF:-}" \
+          GOOGLE_APPLICATION_CREDENTIALS=/run/oberth-gar/adc.json \
           GOBIN=/tmp/oberth-tools/bin \
           OBERTH_SECRETSTORE_DIR="$OBERTH_SECRETSTORE_DIR" \
           CGO_ENABLED=1 "$@"
@@ -1761,6 +1765,7 @@ spec:
   - name: release-verify
     metadata:
       annotations:
+        oberth.ci/release-wif-role: image-reader
         oberth.ci/workspace-mounts: none
         oberth.ci/workspace-env: none
     activeDeadlineSeconds: 3600
@@ -1774,14 +1779,8 @@ spec:
       image: golang:1.26.9-trixie@sha256:cf7e928cb9edc2ed8b3cc6fe77ee1ee30b9fea28149564c8840097321a7600ea
       workingDir: /work/src
       command:
-      - /run/oberth/bin/oberth
-      args:
-      - secretstore
-      - exec
-      - --dir=/run/oberth-secrets/release
-      - --path=oberth/data/release/gar-reader-key
-      - --
       - /bin/sh
+      args:
       - -c
       - |
         set -eu
@@ -1800,8 +1799,9 @@ spec:
           KUBEBUILDER_ASSETS= \
           OBERTH_RELEASE_SHA="$OBERTH_RELEASE_SHA" \
           OBERTH_RELEASE_TAG="$OBERTH_RELEASE_TAG" \
+          OBERTH_RELEASE_WIF="${OBERTH_RELEASE_WIF:-}" \
+          GOOGLE_APPLICATION_CREDENTIALS=/run/oberth-gar/adc.json \
           GOBIN=/tmp/oberth-tools/bin \
-          OBERTH_SECRETSTORE_DIR="$OBERTH_SECRETSTORE_DIR" \
           CGO_ENABLED=1 "$@"
       - bootstrap-clean
       - ./.oberth/release.sh
@@ -1926,6 +1926,7 @@ spec:
         for leaf in golangci-lint-run release-build release-chart-test release-runtime release-test vet; do
           /bin/mkdir -p "/test-tools/$leaf"
           /bin/cp -a /trusted-tools/bin "/test-tools/$leaf/bin"
+          /bin/cp -a /trusted-tools/python "/test-tools/$leaf/python"
         done
       env:
       - name: PATH
@@ -2115,6 +2116,7 @@ spec:
   - name: release-publish-kvm-harness
     metadata:
       annotations:
+        oberth.ci/release-wif-role: image-writer
         oberth.ci/workspace-mounts: none
         oberth.ci/workspace-env: none
     activeDeadlineSeconds: 3600
@@ -2133,7 +2135,6 @@ spec:
       - secretstore
       - exec
       - --dir=/run/oberth-secrets/release
-      - --path=oberth/data/release/gar-image-key
       - --path=oberth/data/release/cosign-secret
       - --
       - /bin/sh
@@ -2155,6 +2156,8 @@ spec:
           KUBEBUILDER_ASSETS= \
           OBERTH_RELEASE_SHA="$OBERTH_RELEASE_SHA" \
           OBERTH_RELEASE_TAG="$OBERTH_RELEASE_TAG" \
+          OBERTH_RELEASE_WIF="${OBERTH_RELEASE_WIF:-}" \
+          GOOGLE_APPLICATION_CREDENTIALS=/run/oberth-gar/adc.json \
           GOBIN=/tmp/oberth-tools/bin \
           OBERTH_SECRETSTORE_DIR="$OBERTH_SECRETSTORE_DIR" \
           CGO_ENABLED=1 "$@"

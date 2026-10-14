@@ -60,12 +60,13 @@ const (
 
 // PublishConfig binds an image publication to an exact source revision.
 type PublishConfig struct {
-	Tag         string
-	SHA         string
-	Created     time.Time
-	AccessToken []byte
-	Dist        string
-	RemoteOpts  []remote.Option
+	Tag           string
+	SHA           string
+	Created       time.Time
+	AccessToken   []byte
+	Authenticator authn.Authenticator
+	Dist          string
+	RemoteOpts    []remote.Option
 }
 
 // Published records the immutable digest reference for the release image.
@@ -259,10 +260,10 @@ func cleanTarName(name string) (string, error) {
 // Publish builds and writes deterministic supported-platform indexes, then
 // proves the registry readback digest for each exact source-specific tag.
 func Publish(ctx context.Context, config PublishConfig) (Published, error) {
-	if len(config.AccessToken) == 0 || config.Dist == "" {
+	if len(config.AccessToken) == 0 && config.Authenticator == nil || config.Dist == "" {
 		return Published{}, errors.New("GAR access token and distribution directory are required")
 	}
-	authenticator := garAuthenticator(config.AccessToken)
+	authenticator := config.authenticator()
 	remoteOptions := append([]remote.Option{remote.WithContext(ctx), remote.WithAuth(authenticator), remote.WithUserAgent("oberth-release")}, config.RemoteOpts...)
 	result := Published{}
 	for _, kind := range []Kind{Server} {
@@ -334,10 +335,10 @@ func Publish(ctx context.Context, config PublishConfig) (Published, error) {
 // source-built executable. A manifest-only registry response is not evidence
 // that the referenced blobs or runtime contract are intact.
 func Verify(ctx context.Context, config PublishConfig, published Published) error {
-	if len(config.AccessToken) == 0 || config.Dist == "" || published.Server == "" {
+	if len(config.AccessToken) == 0 && config.Authenticator == nil || config.Dist == "" || published.Server == "" {
 		return errors.New("GAR access token, distribution directory, and the digest reference are required")
 	}
-	authenticator := garAuthenticator(config.AccessToken)
+	authenticator := config.authenticator()
 	remoteOptions := append([]remote.Option{remote.WithContext(ctx), remote.WithAuth(authenticator), remote.WithUserAgent("oberth-release")}, config.RemoteOpts...)
 	for _, item := range []struct {
 		kind      Kind
@@ -502,4 +503,11 @@ func garAuthenticator(accessToken []byte) authn.Authenticator {
 func isNotFound(err error) bool {
 	var transportError *transport.Error
 	return errors.As(err, &transportError) && transportError.StatusCode == 404
+}
+
+func (c PublishConfig) authenticator() authn.Authenticator {
+	if c.Authenticator != nil {
+		return c.Authenticator
+	}
+	return garAuthenticator(c.AccessToken)
 }

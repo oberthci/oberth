@@ -164,8 +164,8 @@ spec:
     container:
       image: "golang:1.26.9-trixie@sha256:f06b7122f888680048afb247c4e5f49c0069eb6c4c1ccae0f3f4834527a8d22c"
       workingDir: /work/src
-      command: ["/bin/mkdir"]
-      args: ["-p", "/tmp/oberth-tools/bin"]
+      command: ["/bin/sh"]
+      args: ["hack/install-test-pyyaml.sh"]
       env:
       - name: PATH
         value: "/tmp/oberth-tools/bin:/usr/local/bin:/usr/bin:/bin"

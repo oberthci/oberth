@@ -61,7 +61,7 @@ func TestBootstrapRetainsTestsAndSeparatesPublisherAuthority(t *testing.T) {
 				t.Errorf("%s can forge the later runtime receipt", template.Name)
 			}
 		}
-		if templateUsesOberthSecretstore(&template) {
+		if templateUsesOberthSecretstore(&template) || template.Metadata.Annotations[argoworkflow.ReleaseWIFRoleAnnotation] != "" {
 			credentialed++
 			// The website leaf verifies its own source and staged inputs and
 			// installs wrangler offline before its secret exists; it never
@@ -80,27 +80,23 @@ func TestBootstrapRetainsTestsAndSeparatesPublisherAuthority(t *testing.T) {
 		}
 		if template.Name == "release-verify" {
 			paths := extractExecPaths(&template)
-			if !reflect.DeepEqual(paths, []string{"oberth/data/release/gar-reader-key"}) {
+			if len(paths) != 0 {
 				t.Errorf("verification fetched unnecessary credentials: %v", paths)
 			}
 		}
 		for _, publisher := range []struct {
-			name, key string
+			name, role string
 		}{
-			{"release-publish-images", "gar-image-key"},
-			{"release-publish-chart", "gar-chart-key"},
+			{"release-publish-images", "image-writer"},
+			{"release-publish-kvm-harness", "image-writer"},
+			{"release-publish-chart", "chart-writer"},
 		} {
 			if template.Name != publisher.name {
 				continue
 			}
 			paths := extractExecPaths(&template)
-			if len(paths) == 0 || paths[0] != "oberth/data/release/"+publisher.key {
-				t.Errorf("%s does not fetch its exact publisher credential: %v", template.Name, paths)
-			}
-			for _, path := range paths[1:] {
-				if strings.HasPrefix(path, "oberth/data/release/gar-") {
-					t.Errorf("%s fetched another GAR principal: %v", template.Name, paths)
-				}
+			if !reflect.DeepEqual(paths, []string{"oberth/data/release/cosign-secret"}) || template.Metadata.Annotations[argoworkflow.ReleaseWIFRoleAnnotation] != publisher.role {
+				t.Errorf("%s must use its exact WIF role and fetch only signing material: %v", template.Name, paths)
 			}
 		}
 		if template.Name == "release-website" {
@@ -174,7 +170,7 @@ func TestBootstrapExecutedEnvironmentIgnoresSharedCachesAndCredentials(t *testin
 	config.ReleaseCacheRoot = "/var/cache/oberth/release"
 	workflow, err := Build(config, Request{
 		RunID: "bootstrap-environment", Name: "oberth-bootstrap-environment",
-		Repo: "oberth", UpstreamOrg: "skipops", Ref: "v1.2.3", SHA: testSHA,
+		Repo: "oberth", UpstreamOrg: "skipops", UpstreamName: "github", Ref: "v1.2.3", SHA: testSHA,
 		Trigger: periapsis.TriggerRelease, Source: loadPipeline(t, "release.yaml"),
 		ApprovedSecrets: oberthReleaseApprovedSecrets(),
 		SourceVolume:    SourceVolume{ClaimName: "source-fixture", SubPath: "source", ArtifactsSubPath: "artifacts"},
@@ -203,6 +199,8 @@ func TestBootstrapExecutedEnvironmentIgnoresSharedCachesAndCredentials(t *testin
 					t.Fatal("credentialed command lost its environment wrapper")
 				}
 				args = args[separator+3:]
+			} else if template.Name == "release-verify" && reflect.DeepEqual(container.Command, []string{"/bin/sh"}) && len(args) > 0 && args[0] == "-c" {
+				args = args[1:]
 			} else if !reflect.DeepEqual(container.Command, []string{"/bin/sh", "-c"}) {
 				t.Fatal("command lost its environment wrapper")
 			}
@@ -231,6 +229,12 @@ func TestBootstrapExecutedEnvironmentIgnoresSharedCachesAndCredentials(t *testin
 				}
 			}
 			for _, key := range []string{"COSIGN_KEY", "COSIGN_PASSWORD", "VAULT_TOKEN", "VAULT_ADDR", "OBERTH_VAULT_ROLE", "GOOGLE_APPLICATION_CREDENTIALS", "PYTHONPATH"} {
+				if key == "GOOGLE_APPLICATION_CREDENTIALS" && template.Metadata.Annotations[argoworkflow.ReleaseWIFRoleAnnotation] != "" {
+					if environment[key] != "/run/oberth-gar/adc.json" || environment["OBERTH_RELEASE_WIF"] != "1" {
+						t.Error("WIF authority was not fixed to server contract")
+					}
+					continue
+				}
 				if _, exists := environment[key]; exists {
 					t.Errorf("executed command inherited %s", key)
 				}

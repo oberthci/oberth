@@ -9,8 +9,10 @@ import subprocess
 import sys
 
 TOOLS = frozenset(('cosign', 'helm', 'trivy', 'oberth-release-support', 'oberth-release-image'))
-SOURCE_FILES = ('.oberth/release.sh', '.oberth/pins/bootstrap-tools.sha256',
-                '.oberth/pins/release-cosign.pub', '.oberth/verify-release-tools.py')
+SOURCE_FILES = (
+    '.oberth/release.sh', '.oberth/pins/bootstrap-tools.sha256',
+                '.oberth/pins/release-cosign.pub', '.oberth/verify-release-tools.py',
+    'scripts/release-wif-credential.py')
 
 
 class VerificationError(Exception):
@@ -88,7 +90,7 @@ def verify_tools(root, manifest):
 def main():
     source = Path('/work/src')
     verify_source(source, os.environ.get('OBERTH_RELEASE_SHA', ''), os.environ.get('OBERTH_RELEASE_TAG', ''))
-    verify_tools(Path('/tmp/oberth-tools'), regular_bytes(source / SOURCE_FILES[1], 16384))
+    verify_tools(Path('/tmp/oberth-tools'), regular_bytes(source / '.oberth/pins/bootstrap-tools.sha256', 16384))
     print('publisher source and tool pins verified before secretstore')
 
 

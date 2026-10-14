@@ -173,7 +173,7 @@ func TestPlannedStepsAgreeWithObservedStepsForOberthsOwnPipelines(t *testing.T) 
 			}
 			built, err := Build(oberthConfig(), Request{
 				RunID: "run-abc123", Name: "oberth-oberth-run-abc1-aabbccddeeff",
-				Repo: "oberth", UpstreamOrg: "skipops",
+				Repo: "oberth", UpstreamOrg: "skipops", UpstreamName: "github",
 				Ref: "refs/heads/main", SHA: testSHA, Trigger: entry.trigger,
 				Source:          loadPipeline(t, entry.file),
 				ApprovedSecrets: approved,

@@ -33,7 +33,7 @@ func builtOberthRelease(t *testing.T) *wfv1.Workflow {
 	config.ReleaseCacheRoot = "/var/cache/oberth/release"
 	workflow, err := Build(config, Request{
 		RunID: "run-website", Name: "oberth-oberth-run-website-aabbccddeeff",
-		Repo: "oberth", UpstreamOrg: "skipops", Ref: "v1.2.3", SHA: testSHA,
+		Repo: "oberth", UpstreamOrg: "skipops", UpstreamName: "github", Ref: "v1.2.3", SHA: testSHA,
 		Trigger: periapsis.TriggerRelease, Source: loadPipeline(t, "release.yaml"),
 		ApprovedSecrets: oberthReleaseApprovedSecrets(),
 		SourceVolume: SourceVolume{

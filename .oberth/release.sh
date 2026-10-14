@@ -38,6 +38,7 @@ gar_chart=${gar_host}/skipopsmain/oberth-helm/oberth
 # — v0.13.1 failed exactly on this divergence.
 r2_config_owned=false
 registry_config_owned=false
+wif_config_dir=
 tools_dir=${OBERTH_TOOLS_DIR:-/tmp/oberth-tools}
 cosign_tool=$tools_dir/bin/cosign
 helm_tool=$tools_dir/bin/helm
@@ -127,6 +128,7 @@ if ! git rev-parse --git-dir >/dev/null 2>&1; then
 fi
 
 cleanup() {
+	if [ -n "$wif_config_dir" ]; then rm -rf -- "$wif_config_dir"; fi
 	rm -f -- "$release_dir/cosign.pub.$$"
 	if [ "$r2_config_owned" = true ]; then
 		rm -f -- "$r2_curl_config"
@@ -628,6 +630,28 @@ publish_homebrew_tap() {
 }
 
 prepare_registry_auth() {
+	case "${OBERTH_RELEASE_WIF:-}" in
+		1)
+			# Public config only. Tokens travel through helper stdout pipes and
+			# remain in consumer memory; no login or token file is created.
+			wif_config_dir=$(mktemp -d /tmp/oberth-wif-config.XXXXXXXX)
+			mkdir -p "$wif_config_dir/bin"
+			cat >"$wif_config_dir/bin/docker-credential-oberth-wif" <<'WIFHELPER'
+#!/bin/sh
+exec /usr/bin/python3 -I -S -B /work/src/scripts/release-wif-credential.py "$@"
+WIFHELPER
+			chmod 0700 "$wif_config_dir/bin/docker-credential-oberth-wif"
+			printf '{"credHelpers":{"%s":"oberth-wif"}}\n' "$gar_host" >"$wif_config_dir/config.json"
+			DOCKER_CONFIG=$wif_config_dir
+			HELM_REGISTRY_CONFIG=$wif_config_dir/config.json
+			PATH=$wif_config_dir/bin:$PATH
+			export DOCKER_CONFIG HELM_REGISTRY_CONFIG PATH
+			gar_key=wif
+			return
+			;;
+		'') ;; # Legacy key path: only the documented two-edit rollback.
+		*) fail "invalid OBERTH_RELEASE_WIF value" ;;
+	esac
 	# Each leaf retains its original source credential. IAM permits only its
 	# matching fixed Oberth principal; no new long-lived key is created.
 	case "$action" in
@@ -820,7 +844,9 @@ publish_chart() {
 	require_artifacts
 	require_chart
 	prepare_registry_auth
-	"$helm_tool" registry login "$gar_host" --username oauth2accesstoken --password-stdin <"$gar_key" >/dev/null
+	if [ -z "${OBERTH_RELEASE_WIF:-}" ]; then
+		"$helm_tool" registry login "$gar_host" --username oauth2accesstoken --password-stdin <"$gar_key" >/dev/null
+	fi
 	chart_version=${tag#v}
 	chart_tag=$(printf '%s' "$chart_version" | tr '+' '_')
 	chart_name=oberth-${chart_version}.tgz
@@ -1560,14 +1586,13 @@ publish_website() {
 
 # ---------------------------------------------------------------------------
 # KVM harness image publication (#278 Lane B).
-# Auth is isolated in prepare_kvm_registry_auth so the WIF swap is one line.
+# KVM uses the same image-writer WIF role and fail-closed auth as server images.
 # ---------------------------------------------------------------------------
 
 apko_tool=$tools_dir/bin/apko
 
 prepare_kvm_registry_auth() {
-	# Single auth function for WIF migration: swap this body to use
-	# workload identity federation instead of a service-account key.
+	# Keep both image publishers on the same WIF/explicit rollback policy.
 	prepare_registry_auth
 }
 
@@ -1601,9 +1626,9 @@ publish_kvm_harness() {
 	validate_source
 	require_artifacts
 	command -v "$release_image_tool" >/dev/null 2>&1 || fail "oberth-release-image is not installed"
+	prepare_kvm_registry_auth
 	build_kvm_runtime
 	build_kvm_harness_binary
-	prepare_kvm_registry_auth
 	created=$(source_created)
 	"$release_image_tool" publish-kvm "$tag" "$sha" "$created" "$release_dir" "$gar_key" "$release_dir/kvm-runtime.tar"
 	runtime_ref=$(sed -n '1p' "$release_dir/kvm-runtime-image.txt")

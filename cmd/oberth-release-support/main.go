@@ -20,7 +20,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/google/go-containerregistry/pkg/authn"
 	"github.com/google/go-containerregistry/pkg/name"
 	"github.com/google/go-containerregistry/pkg/v1/remote"
 	"github.com/google/go-containerregistry/pkg/v1/remote/transport"
@@ -29,6 +28,7 @@ import (
 	"sigs.k8s.io/yaml"
 
 	"github.com/oberthci/oberth/internal/releaseauth"
+	"github.com/oberthci/oberth/internal/releasecredential"
 )
 
 const (
@@ -687,18 +687,13 @@ func resolveChartDigest(ctx context.Context, reference, tokenPath string) (strin
 	if err != nil || parsed.Context().RegistryStr() != garHost || parsed.Context().RepositoryStr() != oberthChartRepository {
 		return "", errors.New("registry-digest accepts only the fixed Oberth chart repository")
 	}
-	//nolint:gosec // tokenPath is the explicit projected GAR credential operand.
-	accessToken, err := os.ReadFile(tokenPath)
-	if err != nil || len(accessToken) == 0 {
-		return "", errors.New("read GAR access token")
+	authenticator, err := releasecredential.FromEnvironment(ctx, tokenPath)
+	if err != nil {
+		return "", err
 	}
-	defer clear(accessToken)
 	requestContext, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
-	descriptor, err := remote.Head(parsed, remote.WithContext(requestContext), remote.WithAuth(authn.FromConfig(authn.AuthConfig{
-		Username: "oauth2accesstoken",
-		Password: string(accessToken),
-	})), remote.WithUserAgent("oberth-release"))
+	descriptor, err := remote.Head(parsed, remote.WithContext(requestContext), remote.WithAuth(authenticator), remote.WithUserAgent("oberth-release"))
 	if err != nil {
 		var transportError *transport.Error
 		if errors.As(err, &transportError) && transportError.StatusCode == http.StatusNotFound {

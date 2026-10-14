@@ -110,6 +110,14 @@ class SourceTests(unittest.TestCase):
         with self.assertRaises(verifier.VerificationError):
             verifier.verify_source(self.root, self.sha, 'v1.2.3')
 
+    def test_dirty_wif_helper_is_rejected(self):
+        helper = 'scripts/release-wif-credential.py'
+        self.assertIn(helper, verifier.SOURCE_FILES)
+        self.git('update-index', '--assume-unchanged', helper)
+        (self.root / helper).write_text('attacker helper')
+        with self.assertRaises(verifier.VerificationError):
+            verifier.verify_source(self.root, self.sha, 'v1.2.3')
+
     def test_different_commit_and_tag_fail(self):
         for sha, tag in (('1' * 40, 'v1.2.3'), (self.sha, 'v9.9.9'),
                          ('short', 'v1.2.3'), (self.sha, '--help')):

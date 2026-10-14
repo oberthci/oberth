@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/oberthci/oberth/internal/releasecredential"
 	"github.com/oberthci/oberth/internal/releaseimage"
 )
 
@@ -51,14 +52,12 @@ func runServer(ctx context.Context, arguments []string) error {
 	if err != nil {
 		return errors.New("release creation time must be RFC3339")
 	}
-	//nolint:gosec // the operand is the explicit read-only projected GAR credential path.
-	accessToken, err := os.ReadFile(arguments[5])
+	authenticator, err := releasecredential.FromEnvironment(ctx, arguments[5])
 	if err != nil {
-		return errors.New("read GAR access token")
+		return err
 	}
-	defer clear(accessToken)
 	config := releaseimage.PublishConfig{
-		Tag: arguments[1], SHA: arguments[2], Created: created, AccessToken: accessToken, Dist: arguments[4],
+		Tag: arguments[1], SHA: arguments[2], Created: created, Authenticator: authenticator, Dist: arguments[4],
 	}
 	if arguments[0] == "verify" {
 		server, err := readReference(filepath.Join(arguments[4], "server-image.txt"))
@@ -100,14 +99,12 @@ func runKVM(ctx context.Context, arguments []string) error {
 	if err != nil {
 		return errors.New("release creation time must be RFC3339")
 	}
-	//nolint:gosec // the operand is the explicit read-only projected GAR credential path.
-	accessToken, err := os.ReadFile(arguments[5])
+	authenticator, err := releasecredential.FromEnvironment(ctx, arguments[5])
 	if err != nil {
-		return errors.New("read GAR access token")
+		return err
 	}
-	defer clear(accessToken)
 	config := releaseimage.PublishConfig{
-		Tag: arguments[1], SHA: arguments[2], Created: created, AccessToken: accessToken, Dist: arguments[4],
+		Tag: arguments[1], SHA: arguments[2], Created: created, Authenticator: authenticator, Dist: arguments[4],
 	}
 	if arguments[0] == "verify-kvm" {
 		runtime, err := readReference(filepath.Join(arguments[4], "kvm-runtime-image.txt"))

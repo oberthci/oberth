@@ -85,7 +85,7 @@ func buildOberthPipelineForIsolation(t *testing.T, trigger periapsis.Trigger, so
 	}
 	return Build(config, Request{
 		RunID: "run-abc123", Name: "oberth-oberth-run-abc1-aabbccddeeff",
-		Repo: "oberth", UpstreamOrg: "skipops",
+		Repo: "oberth", UpstreamOrg: "skipops", UpstreamName: "github",
 		Ref: ref, SHA: testSHA, Trigger: trigger,
 		Source: source, ApprovedSecrets: approved,
 		SourceVolume: SourceVolume{
@@ -208,10 +208,23 @@ func checkOberthReleaseIsolation(workflow *wfv1.Workflow) error {
 		if cache := trivyScanCache(template); cache != "" && trivyCacheBacked(template, cache) {
 			fail("Trivy database is on a shared volume")
 		}
-		if templateUsesCredentialChain(template) {
+		if templateUsesCredentialChain(template) || template.Metadata.Annotations[argoworkflow.ReleaseWIFRoleAnnotation] != "" {
 			credentialed = append(credentialed, name)
-			if tokenless(template) {
-				fail("credentialed leaf disables its token")
+			if !tokenless(template) {
+				fail("credentialed leaf exposes an ambient token")
+			}
+			requiredVolume := ReleaseTokenVolumeName
+			if name == "release-verify" {
+				requiredVolume = releaseWIFVolume
+			}
+			hasToken := false
+			for _, mount := range template.Container.VolumeMounts {
+				if mount.Name == requiredVolume && mount.ReadOnly {
+					hasToken = true
+				}
+			}
+			if !hasToken {
+				fail("credentialed leaf lacks its scoped projected token")
 			}
 			if len(template.InitContainers) == 0 {
 				fail("credentialed leaf has no pre-secret verifier")

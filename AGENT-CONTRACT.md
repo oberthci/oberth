@@ -1671,3 +1671,109 @@ decimal) and the exact `oberth.ci/source` value
 `github.com/oberthci/terraform//k8s/cloudflared-watch`. Their observed values
 remain bound by the complete metadata comparison and CAS; admitting these keys
 does not authorize changing or dropping them during the ownership handoff.
+
+## Keyless GAR publication and verification (#557)
+
+The repository-owned credential helper (`scripts/release-wif-credential.py`)
+serves all three WIF roles via an exact allowlist of (audience, impersonation
+URL) pairs. Role selection is by ADC only -- the helper derives the active
+role from the `audience` field of the Oberth-projected ADC at
+`/run/oberth-gar/adc.json` and requires `service_account_impersonation_url`
+to be the paired service account. Any audience or pairing not in the
+allowlist is refused before any network call.
+
+### Role allowlist
+
+| Role | Pool | Service Account |
+|------|------|-----------------|
+| `image-writer` | `oberth-release-images` | `cloudtaser-release-publisher@skipopsmain` |
+| `image-reader` | `oberth-release-reader` | `cloudtaser-release-reader@skipopsmain` |
+| `chart-writer` | `oberth-release-charts` | `cloudtaser-chart-publisher@skipopsmain` |
+
+All pools use provider `tuxbox` under project `138624361369`.
+
+### Layered trust enforcement
+
+- **Google WIF** enforces namespace-bound ServiceAccount subject, exact
+  per-repo release-SA identity, and role-specific pool audience. A token
+  projected for one pool cannot be exchanged against another.
+- **Oberth** enforces release-trigger-only projection and reachable-tag
+  admission. Branch pipelines never receive a WIF-scoped token. The WIF
+  role annotation is validated against the administrator's per-repo
+  capability grant at admission -- an unapproved template/role pair is
+  rejected before the Job exists.
+- **No custom JWT claims** exist or are needed. The Kubernetes projected
+  token carries the standard issuer, subject, and audience; Google's
+  provider conditions and Oberth's admission gate are the enforcement
+  layers.
+
+### Active WIF templates
+
+- `release-publish-images`: annotation `oberth.ci/release-wif-role: image-writer`.
+  Fetches cosign-secret via secretstore exec for signing. Registry auth via
+  the credential helper using the image-writer role.
+- `release-verify`: annotation `oberth.ci/release-wif-role: image-reader`.
+  Uses the committed public signing key without invoking secretstore.
+  Registry auth via the credential helper using the image-reader role.
+
+- `release-publish-chart`: annotation `oberth.ci/release-wif-role: chart-writer`.
+  Fetches only cosign-secret; Helm OCI uses the helper config without login.
+- `release-publish-kvm-harness`: annotation `oberth.ci/release-wif-role: image-writer`.
+  Shares image auth and fetches only cosign-secret.
+
+### Security controls (all roles)
+
+OBERTH_RELEASE_WIF=1 required, ADC path fixed at `/run/oberth-gar/adc.json`,
+`external_account` type exact, projected token regex enforced, STS exchange
+followed by `generateAccessToken` with 600s lifetime, TLS 1.3 minimum,
+redirects refused, proxies disabled, stdout must be a FIFO, no credential
+in logs/args/files, response sizes bounded at 64 KiB. Only the Docker
+credential-protocol pipe receives the access token.
+
+### Two-edit reviewed rollback (per role)
+
+The legacy static-key authentication remains for an explicit reviewed source
+rollback. For each role, the rollback is exactly two edits in `release.yaml`:
+
+**image-writer rollback** (both release-publish-images and release-publish-kvm-harness):
+1. Remove annotation `oberth.ci/release-wif-role: image-writer`
+2. Add `--path=oberth/data/release/gar-image-key` to secretstore exec args
+   and `oberth/data/release/gar-image-key` to workflow-level secret-paths
+
+**chart-writer rollback** (release-publish-chart):
+1. Remove annotation `oberth.ci/release-wif-role: chart-writer`
+2. Add `--path=oberth/data/release/gar-chart-key` to secretstore exec args
+   and `oberth/data/release/gar-chart-key` to workflow-level secret-paths
+
+**image-reader rollback** (release-verify):
+1. Remove annotation `oberth.ci/release-wif-role: image-reader`
+2. Add `--path=oberth/data/release/gar-reader-key` to secretstore exec args
+   and `oberth/data/release/gar-reader-key` to workflow-level secret-paths
+
+Admission then supplies the ordinary Secretstore projection and the template
+uses its existing legacy auth path. An unconfigured server rejects an
+annotated WIF leaf before execution; there is no automatic fallback on an
+exchange failure.
+
+Oberth also annotates `release-publish-chart` as `chart-writer` and
+`release-publish-kvm-harness` as `image-writer`. All four leaves explicitly
+preserve the server-injected WIF marker and ADC path across `env -i`.
+`release-verify` uses the committed public signing key without secretstore.
+Its rollback's second edit restores the structured `oberth secretstore exec
+--dir=/run/oberth-secrets/release --path=oberth/data/release/gar-reader-key --`
+wrapper and forwards `OBERTH_SECRETSTORE_DIR` to the existing clean shell,
+as well as restoring that workflow secret path. The other three leaves keep
+secretstore solely for signing material; their rollback restores the matching
+GAR key path to that existing wrapper and the workflow declaration.
+
+The image and chart Go consumers invoke the same fixed Python helper through
+an OS stdout pipe on each authentication request, bound output to 64 KiB,
+and discard helper stderr. They never consult ambient Docker credentials.
+Helm, Cosign and Trivy use a private public-only `credHelpers` config; WIF
+never runs Helm registry login or writes an access-token file. The legacy
+key route is selected only when `OBERTH_RELEASE_WIF` is empty; `1` selects
+WIF and every other nonempty value fails closed.
+
+Both Go publisher binaries are rebuilt from admitted source and re-pinned in
+`.oberth/pins/bootstrap-tools.sha256`. Publisher source verification includes
+`scripts/release-wif-credential.py` before any credential is consumed.

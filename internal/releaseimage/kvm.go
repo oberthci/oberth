@@ -133,10 +133,10 @@ func GARAuthenticator(accessToken []byte) authn.Authenticator {
 // PublishKVM builds the harness image from an apko runtime tarball and the
 // local harness binary, then pushes both images to GAR.
 func PublishKVM(ctx context.Context, config PublishConfig, runtimeTarball string) (KVMPublished, error) {
-	if len(config.AccessToken) == 0 || config.Dist == "" {
+	if len(config.AccessToken) == 0 && config.Authenticator == nil || config.Dist == "" {
 		return KVMPublished{}, errors.New("GAR access token and distribution directory are required")
 	}
-	authenticator := GARAuthenticator(config.AccessToken)
+	authenticator := config.authenticator()
 	opts := append([]remote.Option{
 		remote.WithContext(ctx), remote.WithAuth(authenticator),
 		remote.WithUserAgent("oberth-release"),
@@ -216,10 +216,10 @@ func pushSingleImage(img v1.Image, repository string, config PublishConfig, opts
 // VerifyKVM performs a complete authenticated read-back of the published
 // KVM images and verifies the harness image contains the expected binary.
 func VerifyKVM(ctx context.Context, config PublishConfig, published KVMPublished) error {
-	if len(config.AccessToken) == 0 || config.Dist == "" || published.Runtime == "" || published.Harness == "" {
+	if len(config.AccessToken) == 0 && config.Authenticator == nil || config.Dist == "" || published.Runtime == "" || published.Harness == "" {
 		return errors.New("GAR access token, dist, and both digest references are required")
 	}
-	authenticator := GARAuthenticator(config.AccessToken)
+	authenticator := config.authenticator()
 	opts := append([]remote.Option{
 		remote.WithContext(ctx), remote.WithAuth(authenticator),
 		remote.WithUserAgent("oberth-release"),
