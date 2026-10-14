@@ -2046,7 +2046,7 @@ spec:
       - bootstrap-clean
       - /bin/sh
       - -c
-      - cd /tmp/oberth-tools/bin && tar xzf apko.tar.gz && mv apko_1.4.11_linux_amd64/apko
+      - cd /tmp/oberth-tools/bin && tar --no-same-owner -xzf apko.tar.gz && mv apko_1.4.11_linux_amd64/apko
         apko.extracted && rm -rf apko_1.4.11_linux_amd64 apko.tar.gz && mv apko.extracted
         apko && sha256sum -c /work/src/.oberth/pins/apko.sha256
       env:
