@@ -30,6 +30,7 @@ var oberthReleaseCredentialedLeaves = []string{
 	"release-publish-chart",
 	"release-publish-homebrew",
 	"release-publish-images",
+	"release-publish-kvm-harness",
 	"release-sign-binaries",
 	"release-verify",
 	"release-website",
@@ -41,6 +42,7 @@ var oberthReleaseToolWriters = map[string]bool{
 	"tools-dir": true, "copy-trivy": true, "link-go": true, "install-golangci-lint": true,
 	"install-helm": true, "fetch-cosign": true, "install-cosign": true,
 	"build-release-support": true, "build-release-image": true,
+	"fetch-apko": true, "verify-apko": true, "install-apko": true,
 }
 
 // Leaves that run repository tests, linters, scanners or downloaded release

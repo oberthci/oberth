@@ -109,8 +109,9 @@ func TestBootstrapRetainsTestsAndSeparatesPublisherAuthority(t *testing.T) {
 			}
 		}
 	}
-	if seenTests != 5 || credentialed != 6 {
-		t.Fatalf("retained tests=%d credentialed leaves=%d, want 5 and 6", seenTests, credentialed)
+	// 6 original credentialed leaves + release-publish-kvm-harness = 7
+	if seenTests != 5 || credentialed != 7 {
+		t.Fatalf("retained tests=%d credentialed leaves=%d, want 5 and 7", seenTests, credentialed)
 	}
 }
 
@@ -257,8 +258,9 @@ func TestBootstrapExecutedEnvironmentIgnoresSharedCachesAndCredentials(t *testin
 	}
 	// 25 bootstrap wrappers plus the five website templates of #649
 	// (fetch-node, verify-node, stage-website-packages, release-website,
-	// release-website-readback).
-	if tested != 30 {
-		t.Fatalf("executed %d wrappers, want all 30", tested)
+	// release-website-readback) plus four KVM harness templates of #278
+	// (fetch-apko, verify-apko, install-apko, release-publish-kvm-harness).
+	if tested != 34 {
+		t.Fatalf("executed %d wrappers, want all 34", tested)
 	}
 }

@@ -631,7 +631,7 @@ prepare_registry_auth() {
 	# Each leaf retains its original source credential. IAM permits only its
 	# matching fixed Oberth principal; no new long-lived key is created.
 	case "$action" in
-		publish-images) gar_source=$secret_root/gar-image-key/GAR_SA_KEY ;;
+		publish-images|publish-kvm-harness) gar_source=$secret_root/gar-image-key/GAR_SA_KEY ;;
 		publish-chart) gar_source=$secret_root/gar-chart-key/GAR_SA_KEY ;;
 		verify) gar_source=$secret_root/gar-reader-key/GAR_SA_KEY ;;
 		*) fail "GAR credential requested by an unsupported release action" ;;
@@ -788,12 +788,20 @@ for k, v in digests.items():
     record["artifacts"][k] = "sha256:" + v
 if chart_gar_ref:
     record["chart"]["garRef"] = chart_gar_ref
+kvm_runtime_ref = sys.argv[13] if len(sys.argv) > 13 and sys.argv[13] else None
+kvm_harness_ref = sys.argv[14] if len(sys.argv) > 14 and sys.argv[14] else None
+if kvm_runtime_ref and kvm_harness_ref:
+    record["images"]["kvmRuntime"] = {"ref": kvm_runtime_ref}
+    record["images"]["kvmHarness"] = {"ref": kvm_harness_ref}
 with open(sys.argv[12], "w") as f:
     json.dump(record, f, indent=2, sort_keys=True)
     f.write("\n")
 ' "$tag" "$sha" "$created" "$server_ref" "$chart_version" "$chart_digest" \
 		"$chart_gar_ref" "$linux_amd64" "$linux_arm64" "$darwin_amd64" "$darwin_arm64" \
-		"$release_dir/release.json" || fail "release.json generation failed"
+		"$release_dir/release.json" \
+		"$(sed -n '1p' "$release_dir/kvm-runtime-image.txt" 2>/dev/null || true)" \
+		"$(sed -n '1p' "$release_dir/kvm-harness-image.txt" 2>/dev/null || true)" \
+		|| fail "release.json generation failed"
 	test -s "$release_dir/release.json" || fail "release.json is empty"
 	# Validate the generated JSON is well-formed and contains the tag.
 	/usr/bin/python3 -I -S -B -c '
@@ -1015,6 +1023,13 @@ verify_release() {
 	reference=$(sed -n '1p' "$release_dir/server-image.txt")
 	"$cosign_tool" verify --key "$release_dir/cosign.pub" --insecure-ignore-tlog "$reference" >/dev/null || fail "GAR image signature is invalid"
 	scan_image "$reference"
+	# Verify KVM harness images if they were published in this release.
+	if [ -s "$release_dir/kvm-runtime-image.txt" ] && [ -s "$release_dir/kvm-harness-image.txt" ]; then
+		kvm_runtime_ref=$(sed -n '1p' "$release_dir/kvm-runtime-image.txt")
+		kvm_harness_ref=$(sed -n '1p' "$release_dir/kvm-harness-image.txt")
+		"$cosign_tool" verify --key "$release_dir/cosign.pub" --insecure-ignore-tlog "$kvm_runtime_ref" >/dev/null || fail "KVM runtime signature is invalid"
+		"$cosign_tool" verify --key "$release_dir/cosign.pub" --insecure-ignore-tlog "$kvm_harness_ref" >/dev/null || fail "KVM harness signature is invalid"
+	fi
 	verify_chart
 }
 
@@ -1543,11 +1558,72 @@ publish_website() {
 	printf 'deployed the oberth.ci Worker (oberth-ci) from %s (%s)\n' "$tag" "$sha"
 }
 
+# ---------------------------------------------------------------------------
+# KVM harness image publication (#278 Lane B).
+# Auth is isolated in prepare_kvm_registry_auth so the WIF swap is one line.
+# ---------------------------------------------------------------------------
+
+apko_tool=$tools_dir/bin/apko
+
+prepare_kvm_registry_auth() {
+	# Single auth function for WIF migration: swap this body to use
+	# workload identity federation instead of a service-account key.
+	prepare_registry_auth
+}
+
+build_kvm_runtime() {
+	validate_source
+	command -v "$apko_tool" >/dev/null 2>&1 || fail "apko is not installed"
+	kvm_runtime_tar=$release_dir/kvm-runtime.tar
+	rm -f -- "$kvm_runtime_tar"
+	"$apko_tool" build \
+		--lockfile packaging/kvm-harness/runtime.apko.lock.json \
+		packaging/kvm-harness/runtime.apko.yaml \
+		runtime:latest \
+		"$kvm_runtime_tar" || fail "apko build of kvm runtime failed"
+	test -s "$kvm_runtime_tar" || fail "apko produced an empty runtime tarball"
+	printf 'kvm runtime image built: %s\n' "$(sha256sum "$kvm_runtime_tar" | cut -d ' ' -f 1)"
+}
+
+build_kvm_harness_binary() {
+	validate_source
+	harness_binary=$release_dir/oberth-kvm-harness
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GOFLAGS='-p=1 -mod=readonly' \
+		GOPROXY=https://proxy.golang.org GOSUMDB=sum.golang.org \
+		"$go_tool" build -trimpath -buildvcs=false -ldflags=-buildid= \
+		-o "$harness_binary" ./cmd/oberth-kvm-harness || \
+		fail "harness binary build failed"
+	test -s "$harness_binary" || fail "harness binary is empty"
+	sha256sum "$harness_binary"
+}
+
+publish_kvm_harness() {
+	validate_source
+	require_artifacts
+	command -v "$release_image_tool" >/dev/null 2>&1 || fail "oberth-release-image is not installed"
+	build_kvm_runtime
+	build_kvm_harness_binary
+	prepare_kvm_registry_auth
+	created=$(source_created)
+	"$release_image_tool" publish-kvm "$tag" "$sha" "$created" "$release_dir" "$gar_key" "$release_dir/kvm-runtime.tar"
+	runtime_ref=$(sed -n '1p' "$release_dir/kvm-runtime-image.txt")
+	harness_ref=$(sed -n '1p' "$release_dir/kvm-harness-image.txt")
+	[ -n "$runtime_ref" ] || fail "kvm runtime publish produced an empty reference"
+	[ -n "$harness_ref" ] || fail "kvm harness publish produced an empty reference"
+	prepare_signing_identity
+	sign_registry_object "$runtime_ref"
+	sign_registry_object "$harness_ref"
+	clear_signing_identity
+	"$release_image_tool" verify-kvm "$tag" "$sha" "$created" "$release_dir" "$gar_key" "$release_dir/kvm-runtime.tar"
+	printf 'kvm-harness-platform-manifest-digest: %s\n' "$harness_ref"
+}
+
 case "$action" in
 	validate) validate_source ;;
 	build) build_artifacts ;;
 	sign-binaries) sign_binaries ;;
 	publish-images) publish_images ;;
+	publish-kvm-harness) publish_kvm_harness ;;
 	publish-homebrew) publish_homebrew_tap ;;
 	package-chart) prepare_chart ;;
 	publish-chart) publish_chart ;;
@@ -1559,5 +1635,5 @@ case "$action" in
 	stage-website-packages) stage_website_packages ;;
 	install-website-tools) install_website_tools ;;
 	publish-website) publish_website ;;
-	*) fail "usage: $0 validate|build|sign-binaries|publish-images|publish-homebrew|package-chart|publish-chart|publish-public|cloudflare-phase|verify|verify-public-runtime|finalize|stage-website-packages|install-website-tools|publish-website" ;;
+	*) fail "usage: $0 validate|build|sign-binaries|publish-images|publish-kvm-harness|publish-homebrew|package-chart|publish-chart|publish-public|cloudflare-phase|verify|verify-public-runtime|finalize|stage-website-packages|install-website-tools|publish-website" ;;
 esac

@@ -147,6 +147,35 @@ traversable); permission failures refuse the suite. Server-owned executor
 helpers retain their separately attested identities and cannot mount the
 private harness/result directory.
 
+## Published images
+
+The Oberth release pipeline (`.oberth/release.yaml`, template
+`release-publish-kvm-harness`) builds, pushes and cosign-signs two images per
+release to `europe-west4-docker.pkg.dev/skipopsmain/oberth/`:
+
+| Image | Repository suffix | Contents |
+|-------|-------------------|----------|
+| Runtime | `oberth-kvm-runtime` | Alpine 3.22 apko image: `qemu-system-x86_64` 10.0.0-r1, firmware (`bios-256k.bin`, `linuxboot_dma.bin`, `kvmvapic.bin`), `ca-certificates-bundle`. No shell, no package manager beyond busybox. |
+| Harness | `oberth-kvm-harness` | Runtime + `/usr/local/bin/oberth-kvm-harness` (0555). UID/GID 65534, `RunAsNonRoot`. |
+
+Both are single-platform `linux/amd64` manifests (not multi-platform indexes).
+The runtime image is built reproducibly with apko from
+`packaging/kvm-harness/runtime.apko.yaml` and its lockfile; the harness layer
+is appended with go-containerregistry. Digests are recorded in the release's
+`release.json` under `images.kvmRuntime` and `images.kvmHarness`, and
+verified by `release-verify` (signature + readback).
+
+To install a published harness digest into `trustedTests.recipes`, use the
+platform-manifest digest printed by the release step (the `@sha256:...` form
+from `kvm-harness-image.txt`), not a tag or index digest.
+
+### Auth for WIF migration
+
+Registry authentication is isolated in `prepare_kvm_registry_auth()` in
+`.oberth/release.sh`. It currently delegates to `prepare_registry_auth` (GAR
+service-account key via `gar-image-key`). Swapping to Workload Identity
+Federation requires changing only this function body.
+
 Deployment qualification must establish kubelet/runtime support for
 `SupplementalGroupsPolicy: Strict` and refusal on unsupported nodes. Older
 kubelets can silently merge image groups despite the requested Strict policy.

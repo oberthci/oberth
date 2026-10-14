@@ -27,7 +27,21 @@ func main() {
 }
 
 func run(ctx context.Context, arguments []string) error {
-	if len(arguments) != 6 || arguments[0] != "publish" && arguments[0] != "verify" {
+	if len(arguments) < 1 {
+		return errors.New("expected publish, verify, publish-kvm, or verify-kvm")
+	}
+	switch arguments[0] {
+	case "publish", "verify":
+		return runServer(ctx, arguments)
+	case "publish-kvm", "verify-kvm":
+		return runKVM(ctx, arguments)
+	default:
+		return fmt.Errorf("unknown command %q", arguments[0])
+	}
+}
+
+func runServer(ctx context.Context, arguments []string) error {
+	if len(arguments) != 6 {
 		return errors.New("usage: oberth-release-image publish|verify TAG SHA CREATED DIST GAR_ACCESS_TOKEN")
 	}
 	if !semanticVersion.MatchString(arguments[1]) || !commitID.MatchString(arguments[2]) {
@@ -73,6 +87,45 @@ func run(ctx context.Context, arguments []string) error {
 	}
 	//nolint:gosec // destination is a fixed filename beneath the explicit release-output directory.
 	return os.WriteFile(filepath.Join(arguments[4], "server-image.txt"), []byte(published.Server+"\n"), 0o600)
+}
+
+func runKVM(ctx context.Context, arguments []string) error {
+	if len(arguments) != 7 {
+		return errors.New("usage: oberth-release-image publish-kvm|verify-kvm TAG SHA CREATED DIST GAR_ACCESS_TOKEN RUNTIME_TARBALL")
+	}
+	if !semanticVersion.MatchString(arguments[1]) || !commitID.MatchString(arguments[2]) {
+		return errors.New("release tag or source commit is invalid")
+	}
+	created, err := time.Parse(time.RFC3339, arguments[3])
+	if err != nil {
+		return errors.New("release creation time must be RFC3339")
+	}
+	//nolint:gosec // the operand is the explicit read-only projected GAR credential path.
+	accessToken, err := os.ReadFile(arguments[5])
+	if err != nil {
+		return errors.New("read GAR access token")
+	}
+	defer clear(accessToken)
+	config := releaseimage.PublishConfig{
+		Tag: arguments[1], SHA: arguments[2], Created: created, AccessToken: accessToken, Dist: arguments[4],
+	}
+	if arguments[0] == "verify-kvm" {
+		runtime, err := readReference(filepath.Join(arguments[4], "kvm-runtime-image.txt"))
+		if err != nil {
+			return err
+		}
+		harness, err := readReference(filepath.Join(arguments[4], "kvm-harness-image.txt"))
+		if err != nil {
+			return err
+		}
+		return releaseimage.VerifyKVM(ctx, config, releaseimage.KVMPublished{Runtime: runtime, Harness: harness})
+	}
+	published, err := releaseimage.PublishKVM(ctx, config, arguments[6])
+	if err != nil {
+		return err
+	}
+	_, _ = fmt.Fprintf(os.Stdout, "kvm-harness-digest: %s\n", published.Harness)
+	return releaseimage.WriteKVMReferences(arguments[4], published)
 }
 
 func readReference(path string) (string, error) {
