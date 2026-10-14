@@ -176,7 +176,7 @@ func verifyTrustedKVMPod(workflow *wfv1.Workflow, leaf *wfv1.Template, pod *core
 	if pod.Namespace != workflow.Namespace || pod.UID == "" || pod.Name != PodName(workflow, *node) || !ownedByWorkflow(pod, workflow.Name, workflow.UID) || pod.Annotations["workflows.argoproj.io/node-id"] != node.ID || pod.Annotations["workflows.argoproj.io/node-name"] != node.Name {
 		return invalid("ownership and node linkage")
 	}
-	if pod.Spec.HostNetwork || pod.Spec.HostPID || pod.Spec.HostIPC || (pod.Spec.ShareProcessNamespace != nil && *pod.Spec.ShareProcessNamespace) || pod.Spec.ServiceAccountName != config.PipelineServiceAccount || pod.Spec.AutomountServiceAccountToken == nil || *pod.Spec.AutomountServiceAccountToken || pod.Spec.RestartPolicy != corev1.RestartPolicyNever || len(pod.Spec.EphemeralContainers) != 0 || len(pod.Spec.Containers) != 2 || len(pod.Spec.InitContainers) != 2 || !reflect.DeepEqual(pod.Spec.SecurityContext, workflow.Spec.SecurityContext) || !reflect.DeepEqual(pod.Spec.NodeSelector, leaf.NodeSelector) || pod.Spec.NodeName == "" {
+	if pod.Spec.HostNetwork || pod.Spec.HostPID || pod.Spec.HostIPC || (pod.Spec.ShareProcessNamespace != nil && *pod.Spec.ShareProcessNamespace) || pod.Spec.ServiceAccountName != config.PipelineServiceAccount || pod.Spec.AutomountServiceAccountToken == nil || *pod.Spec.AutomountServiceAccountToken || pod.Spec.RestartPolicy != corev1.RestartPolicyNever || len(pod.Spec.EphemeralContainers) != 0 || len(pod.Spec.Containers) != 2 || len(pod.Spec.InitContainers) != 2 || !reflect.DeepEqual(pod.Spec.SecurityContext, leaf.SecurityContext) || !reflect.DeepEqual(pod.Spec.NodeSelector, leaf.NodeSelector) || pod.Spec.NodeName == "" {
 		return invalid("Pod isolation")
 	}
 	var main, wait *corev1.Container

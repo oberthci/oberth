@@ -71,6 +71,7 @@ type Scheduler struct {
 	publicationIDs  []string
 	publicationSet  map[string]struct{}
 	deliveryPermit  chan struct{}
+	capacityWait    func(context.Context) error
 }
 
 func NewScheduler(config SchedulerConfig) (*Scheduler, error) {
@@ -109,7 +110,7 @@ func NewScheduler(config SchedulerConfig) (*Scheduler, error) {
 		admission:      newWeightedAdmissionForJobs(config.MaxConcurrent),
 		maxRunLogBytes: config.MaxRunLogBytes, mutationGate: mutationGate,
 		wake: make(chan struct{}, 1), publicationWake: make(chan struct{}, 1),
-		publicationSet: make(map[string]struct{}), deliveryPermit: deliveryPermit,
+		publicationSet: make(map[string]struct{}), deliveryPermit: deliveryPermit, capacityWait: waitTrustedCapacity,
 	}
 	// Runs parked on their concurrency group (#658) do not hold a dispatch
 	// slot, so the dispatch ceiling is mirrored into the gate itself, and a
@@ -362,7 +363,7 @@ func (scheduler *Scheduler) Run(ctx context.Context) error {
 // dispatchSlotAvailable reports whether the dispatch loop may claim another
 // run while active claimed runs are in flight.
 //
-// A run parked on its concurrency group (#658) waits for another run of its
+// A run parked on VM capacity (#278) or its concurrency group (#658) waits for another run of its
 // own repository, not for node resources, and holds no admission weight. If
 // it also held a dispatch slot, one repository with a few queued runs in one
 // group could fill every slot and stall unrelated repositories: exactly the
@@ -370,7 +371,7 @@ func (scheduler *Scheduler) Run(ctx context.Context) error {
 // do not count, up to MaxConcurrent of them, which bounds the claimed runs (and
 // their checkouts) at twice the ceiling. The gate mirrors MaxConcurrent as its
 // run ceiling, so admitted runs never exceed it when a parked run's group
-// frees up. Without groups this is exactly `active < MaxConcurrent`.
+// frees up. Without parked runs this is exactly `active < MaxConcurrent`.
 func (scheduler *Scheduler) dispatchSlotAvailable(active int) bool {
 	parked := min(scheduler.admission.groupParked(), scheduler.maxConcurrent)
 	return active-parked < scheduler.maxConcurrent
@@ -565,7 +566,12 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 		jobRequest.UpstreamOrg = upstream.Org()
 	}
 	if requirement.Contract != nil {
-		if err := scheduler.trusted.Execute(ctx, jobRequest, requirement, logFile); err != nil {
+		stopped, err := scheduler.executeTrustedWithCapacity(ctx, jobRequest, requirement, logFile, reservation, require)
+		if stopped {
+			_ = logFile.Close()
+			return nil
+		}
+		if err != nil {
 			_ = logFile.Close()
 			journal := scheduler.store.(vmrunner.KVMJournal)
 			state, stateErr := journal.KVMPreflight(context.WithoutCancel(ctx), run.ID)

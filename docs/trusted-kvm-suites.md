@@ -134,9 +134,29 @@ binary, checksum, Dockerfile and exact base-reference record. The runtime must
 supply `/usr/bin/qemu-system-x86_64`, its libraries, and public TLS trust roots.
 An authorized image publisher builds this context with the same `QEMU_RUNTIME`,
 verifies/scans/signs the result and installs its resulting digest into recipes.
-The Dockerfile defaults to UID 65534; the server-owned KVM leaf explicitly
-uses UID 0 for the device-plugin device permissions, with all capabilities
-dropped, escalation disabled, seccomp enabled and a read-only root filesystem.
+The Dockerfile and server-owned trusted main container use UID/GID 65534,
+RunAsNonRoot, dropped capabilities, no escalation, seccomp and a read-only root.
+Operators must explicitly configure `--trusted-tests-kvm-group` (chart
+`trustedTests.kvmSupplementalGroup`) to the actual positive device-plugin KVM
+GID. Zero is the inactive default; configured recipes with no valid group fail
+closed. No group is guessed from a node or candidate YAML, and there is no root
+fallback. The leaf uses fsGroup 65534 with OnRootMismatch for its writable
+private emptyDir independently of the supplemental device group. Producer
+artifacts must be readable by this identity (and their parent directories
+traversable); permission failures refuse the suite. Server-owned executor
+helpers retain their separately attested identities and cannot mount the
+private harness/result directory.
+
+Deployment qualification must establish kubelet/runtime support for
+`SupplementalGroupsPolicy: Strict` and refusal on unsupported nodes. Older
+kubelets can silently merge image groups despite the requested Strict policy.
+Observation attests the requested leaf Pod security context, main UID, fsGroup
+and device group; it does not inspect effective runtime groups or prove that
+unsupported nodes refuse the Pod.
+Changing the configured group can block pending attestation until reconciled.
+Source tests cover configured template fields and Pod-spec observation; they
+do not qualify effective nonroot permissions, a device plugin, actual KVM
+device GID, kubelet Strict support or live volume ownership.
 The source contains no placeholder runtime digest, mutable fallback, secret or
 automatic publishing action.
 
@@ -147,3 +167,30 @@ that live KVM execution has been observed. Promotion 939's earlier failure was
 a Git merge conflict in deployment/serve flag insertions before any CI run;
 the other session rebased that source. That branch's prior green CI was not
 trusted-suite acceptance evidence and it remains outside this implementation.
+
+## Capacity waiting and evidence scope
+
+A refused VM reservation with no own journal row parks the parent while holding
+no weighted admission, concurrency-group or dispatch permit. The scheduler
+rechecks after a bounded five-second wait, reacquires resources in original
+claim order, then rereads cancellation, mutation authorization and retained
+policy before constructing a fresh intent/deadline. At most MaxConcurrent
+parked claims are exempt from dispatch accounting. Once this bounded allowance
+is exhausted, later queued work can be backpressured even though parked runs
+hold no weighted resources or group permits. Existing or uncertain
+journaled executions never enter this retry path. Owner restart interrupts
+parked undelivered parents; it cannot resume directly into release delivery.
+
+Acceptance explicitly covers source identity, the credential-free preflight
+artifact snapshot and its suite outcome. **It does not certify byte identity of
+artifacts rebuilt by the later credentialed release workflow.** Those rebuilt
+bytes cannot overwrite the immutable receipt; no equality comparison is made.
+Consumers requiring tested-byte release identity need an independently reviewed
+artifact-promotion/provenance contract before treating this gate as that proof.
+The regression tests exercise a passing release with different rebuilt bytes
+and verify that the receipt still identifies only the preflight snapshot.
+
+Contract decoding rejects artifact paths that cannot be represented by USTAR's
+100-byte name or 155-byte prefix plus 100-byte suffix fields. HTTPS fixture tests
+verify trusted TLS 1.3 succeeds, TLS 1.2/untrusted authorities fail, and redirects
+are refused without contacting their destination.

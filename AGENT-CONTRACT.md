@@ -970,7 +970,12 @@ continuity checks; it must never be used to reset or bypass those checks.
   the compact inventory report; guest/container text alone is never a verdict.
 - Lane B v2 execution requires an independent administrator recipe allowlist
   (suite+guest digests, complete harness image digest, public HTTPS endpoints).
-  Empty recipes keep it disabled. The fixed approved static host `suite-driver`
+  Empty recipes keep it disabled. Configured recipes require an explicit positive
+  operator KVM supplemental GID; trusted main runs as UID/GID 65534 with private
+  volume fsGroup 65534 and requested Strict supplemental-group policy. Deployment
+  must independently qualify kubelet/runtime support and unsupported-node refusal;
+  Pod-spec attestation does not prove effective groups on older kubelets. There
+  is no inferred device group or root fallback. The fixed approved static host `suite-driver`
   owns assertions and host waitpid outcomes; guest output is untrusted input.
   Candidate artifacts are privately snapshotted and enter only a pinned KVM
   guest through read-only data transport. The server appends an isolated
@@ -980,6 +985,10 @@ continuity checks; it must never be used to reset or bypass those checks.
   the suite gate. Publication rereads policy, exact recipe and actual normalized
   kubelet evidence, including candidate/tag identity, inventory and artifact
   digest. Uncertain creates/cleanup keep capacity; restart cleans and interrupts.
+  Capacity refusal with no journal row parks without weighted/group/dispatch
+  permits and retries after rechecking mutation, cancellation and fresh policy.
+  The receipt certifies preflight artifact bytes only: later release rebuilds
+  are not compared and require their own signed provenance/byte-identity policy.
   Unbound startup submissions require 60 continuous seconds of exact Workflow,
   source claim and seed/source-consuming Pod absence within a 90-second budget;
   API errors retain the row, auxiliary presence resets the interval. Per-row

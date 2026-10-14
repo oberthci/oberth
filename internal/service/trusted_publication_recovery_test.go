@@ -2,8 +2,12 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -162,5 +166,50 @@ func TestTrustedPreflightSchedulerStartupRecovery(t *testing.T) {
 				t.Fatal("restart delivered parent without rerun")
 			}
 		})
+	}
+}
+
+// The release rebuild is a separate producer. Its bytes cannot rewrite the
+// receipt of the immutable credential-free preflight artifact snapshot.
+func TestTrustedReceiptCertifiesPreflightNotRebuiltReleaseBytes(t *testing.T) {
+	ctx := context.Background()
+	f := newControlFixture(t, JobResult{Status: model.RunPassed, Phase: "Succeeded"})
+	raw := []byte("version: 2\nprofile: kvm-suite-amd64-v1\nsuite_sha256: " + strings.Repeat("a", 64) + "\nguest_sha256: " + strings.Repeat("b", 64) + "\nartifacts: [build/program]\n")
+	f.scheduler.git = &policyTestGit{controlGit: f.git, candidate: raw, baseline: raw}
+	preflight := sha256.Sum256([]byte("preflight artifact snapshot"))
+	executor := &protectedFixture{store: f.store, artifactDigest: hex.EncodeToString(preflight[:])}
+	f.scheduler.trusted = executor
+	rebuiltPath := filepath.Join(t.TempDir(), "release-binary")
+	rebuilt := []byte("independently rebuilt release bytes")
+	f.scheduler.jobs = &policyChangingJobs{fakeJobs: f.jobs, afterBuild: func() {
+		if err := os.WriteFile(rebuiltPath, rebuilt, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}}
+	queued, err := f.scheduler.AdmitRelease(ctx, ReleaseRequest{EventID: "byte-scope", Repository: f.repo, Tag: "v1.0.0", ObjectSHA: strings.Repeat("d", 40), CommitSHA: strings.Repeat("c", 40), Actor: "agent"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = f.scheduler.ProcessNext(ctx); err != nil {
+		t.Fatal(err)
+	}
+	run, err := f.store.Run(ctx, queued.ID)
+	if err != nil || run.Status != model.RunPassed || len(f.jobs.createdReleases) != 1 {
+		t.Fatalf("preflight failed to gate release: %#v %v", run, err)
+	}
+	bytes, err := os.ReadFile(rebuiltPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rebuiltDigest := sha256.Sum256(bytes)
+	evidence, err := f.store.KVMPreflight(ctx, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if evidence.Receipt.Report.ArtifactSetDigest != executor.artifactDigest || evidence.Receipt.Report.ArtifactSetDigest == hex.EncodeToString(rebuiltDigest[:]) {
+		t.Fatal("receipt must retain preflight bytes, never certify rebuilt bytes")
+	}
+	if err = f.scheduler.requirePublicationTestPolicy(ctx, f.repo, model.Publication{RunID: run.ID, ResultSHA: run.SHA}); err != nil {
+		t.Fatalf("source/test gate unexpectedly claims rebuilt-byte equality: %v", err)
 	}
 }

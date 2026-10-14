@@ -29,6 +29,7 @@ func trustedKVMRequest(t *testing.T) (Config, Request) {
 	t.Helper()
 	config := testConfig()
 	config.KVMEnabled = true
+	config.TrustedKVMGroup = 1234
 	request := testRequest(periapsis.TriggerCI, greedyDocument)
 	request.UpstreamName = "codeberg"
 	digest := sha256.Sum256(request.Source)
@@ -60,6 +61,9 @@ func TestTrustedKVMBuildClosedLeafAndWrapper(t *testing.T) {
 	config, request, wf, leaf := trustedKVMBuilt(t)
 	if wf.Spec.Entrypoint != trustedKVMWrapper || len(leaf.Container.VolumeMounts) != 2 || leaf.Container.Image != request.TrustedKVM.Recipe.HarnessImage || leaf.Container.WorkingDir != "/trusted" {
 		t.Fatalf("unexpected leaf: %#v", leaf)
+	}
+	if !reflect.DeepEqual(leaf.SecurityContext, trustedKVMPodSecurity(1234)) || !reflect.DeepEqual(leaf.Container.SecurityContext, nonrootContainerSecurity(nonrootUID)) {
+		t.Fatal("trusted main must use exact nonroot UID, private-volume fsGroup and operator KVM group")
 	}
 	for _, env := range leaf.Container.Env {
 		if env.Name != "OBERTH_KVM" {
@@ -136,7 +140,7 @@ func trustedKVMMaterializedPod(t *testing.T, wf *wfv1.Workflow, leaf *wfv1.Templ
 	pod.ObjectMeta = metav1.ObjectMeta{Name: PodName(wf, node), Namespace: wf.Namespace, UID: "pod-uid", Annotations: map[string]string{"workflows.argoproj.io/node-id": node.ID, "workflows.argoproj.io/node-name": node.Name}, OwnerReferences: []metav1.OwnerReference{{APIVersion: "argoproj.io/v1alpha1", Kind: "Workflow", Name: wf.Name, UID: wf.UID, Controller: ptr.To(true)}}}
 	pod.Spec.ServiceAccountName = leaf.ServiceAccountName
 	pod.Spec.AutomountServiceAccountToken = ptr.To(false)
-	pod.Spec.SecurityContext = wf.Spec.SecurityContext.DeepCopy()
+	pod.Spec.SecurityContext = leaf.SecurityContext.DeepCopy()
 	pod.Spec.NodeSelector = leaf.NodeSelector
 	pod.Spec.NodeName = "worker-amd64"
 	pod.Spec.RestartPolicy = corev1.RestartPolicyNever
@@ -223,8 +227,14 @@ func TestTrustedKVMObserverMaterializationAndAttacks(t *testing.T) {
 		t.Fatal("receipt lost pod binding")
 	}
 	attacks := map[string]func(*corev1.Pod){
-		"command": func(p *corev1.Pod) { p.Spec.Containers[1].Command = []string{"/bin/sh", "-c", "true"} },
-		"args":    func(p *corev1.Pod) { p.Spec.Containers[1].Args = []string{"--other"} },
+		"root-main":             func(p *corev1.Pod) { p.Spec.Containers[1].SecurityContext.RunAsUser = ptr.To(int64(0)) },
+		"missing-kvm-group":     func(p *corev1.Pod) { p.Spec.SecurityContext.SupplementalGroups = nil },
+		"changed-kvm-group":     func(p *corev1.Pod) { p.Spec.SecurityContext.SupplementalGroups = []int64{999} },
+		"extra-group":           func(p *corev1.Pod) { p.Spec.SecurityContext.SupplementalGroups = []int64{1234, 999} },
+		"wrong-private-owner":   func(p *corev1.Pod) { p.Spec.SecurityContext.FSGroup = ptr.To(int64(0)) },
+		"implicit-image-groups": func(p *corev1.Pod) { p.Spec.SecurityContext.SupplementalGroupsPolicy = nil },
+		"command":               func(p *corev1.Pod) { p.Spec.Containers[1].Command = []string{"/bin/sh", "-c", "true"} },
+		"args":                  func(p *corev1.Pod) { p.Spec.Containers[1].Args = []string{"--other"} },
 		"mount": func(p *corev1.Pod) {
 			p.Spec.Containers[1].VolumeMounts = append(p.Spec.Containers[1].VolumeMounts, corev1.VolumeMount{Name: executorTokenVolume, MountPath: "/token"})
 		},
@@ -400,5 +410,21 @@ func TestTrustedKVMRefusesReservedRuntimeVolumes(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestTrustedKVMRequiresExplicitDeviceGroup(t *testing.T) {
+	for _, gid := range []int64{0, -1, 2147483648} {
+		config, request := trustedKVMRequest(t)
+		config.TrustedKVMGroup = gid
+		if _, err := Build(config, request); err == nil {
+			t.Fatalf("accepted device group %d", gid)
+		}
+	}
+	config, request := trustedKVMRequest(t)
+	config.TrustedKVMGroup = 0
+	config.KVMEnabled = false
+	if _, err := Build(config, request); !errors.Is(err, ErrKVMNotEnabled) {
+		t.Fatalf("disabled sentinel lost: %v", err)
 	}
 }

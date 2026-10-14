@@ -81,6 +81,7 @@ func TestTrustedPreflightAdapterLifecycle(t *testing.T) {
 			}
 			fixture.jobs.controller = controller
 			fixture.jobs.config.KVMEnabled = true
+			fixture.jobs.config.TrustedKVMGroup = 1234
 			database, err := store.Open(ctx, filepath.Join(t.TempDir(), "db.sqlite"), store.Options{})
 			if err != nil {
 				t.Fatal(err)

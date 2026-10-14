@@ -733,3 +733,19 @@ if grep -Fq -- '--trusted-tests-recipes=' "$trusted_legacy_manifest"; then
   exit 1
 fi
 rm -f "$trusted_legacy_manifest"
+
+# Device access is an explicit operator input; no root or guessed-GID fallback.
+trusted_recipe='[{"suite_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","guest_sha256":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","harness_image":"example.invalid/harness@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","suite_url":"https://example.invalid/suite","guest_url":"https://example.invalid/guest"}]'
+for group in 0 -1 2147483648 null; do
+  if render --set vm.kvm.enabled=true --set-json "trustedTests.recipes=$trusted_recipe" --set "trustedTests.kvmSupplementalGroup=$group" >/dev/null 2>&1; then
+    echo "trusted suites accepted missing/invalid device GID: $group" >&2
+    exit 1
+  fi
+done
+render --set vm.kvm.enabled=true --set-json "trustedTests.recipes=$trusted_recipe" --set trustedTests.kvmSupplementalGroup=1234 >"$manifest"
+grep -Fq -- '--trusted-tests-kvm-group=1234' "$manifest"
+render >"$manifest"
+if grep -Fq -- '--trusted-tests-kvm-group=' "$manifest"; then exit 1; fi
+# Old inactive values with recipes but no new key remain inactive.
+render --set trustedTests.kvmSupplementalGroup=null >"$manifest"
+if grep -Fq -- '--trusted-tests-kvm-group=' "$manifest"; then exit 1; fi

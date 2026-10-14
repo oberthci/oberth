@@ -97,6 +97,7 @@ func buildArgoEngine(
 		PerRepoIdentities:   perRepoIdentities,
 		PerRepoCIIdentities: buildPerRepoCIIdentities(perRepoIdentities),
 		KVMEnabled:          options.vmKVMEnabled,
+		TrustedKVMGroup:     options.trustedKVMGroup,
 	}
 	controller, err := argojob.NewController(
 		argoClient.ArgoprojV1alpha1().Workflows(options.argoNamespace), kube, config)
@@ -221,6 +222,7 @@ func validateArgoServeOptions(options serveOptions) error {
 		CICacheRoot:      options.ciCacheRoot,
 		ReleaseCacheRoot: options.releaseCacheRoot,
 		KVMEnabled:       options.vmKVMEnabled,
+		TrustedKVMGroup:  options.trustedKVMGroup,
 	}.Validate()
 }
 
