@@ -151,12 +151,17 @@ func appendTrustedKVM(workflow *wfv1.Workflow, config Config, request Request) e
 	}
 	// Argo's wait executor mirrors main mounts. The server deletes those mirrors;
 	// neither executor credentials nor helpers may share the private guest state.
-	securityBody, _ := json.Marshal(nonrootContainerSecurity(0))
-	var helperSecurity map[string]any
-	if err := json.Unmarshal(securityBody, &helperSecurity); err != nil {
-		return err
+	// Give every SecurityContext field replacement semantics. A nested
+	// $patch:replace map is discarded by strategic merge when the original
+	// context is absent, so explicitly clear all other fields instead.
+	helperSecurity := map[string]any{
+		"runAsUser": int64(0), "runAsGroup": int64(0), "runAsNonRoot": false,
+		"allowPrivilegeEscalation": false, "readOnlyRootFilesystem": true,
+		"privileged": nil, "seLinuxOptions": nil, "windowsOptions": nil,
+		"procMount": nil, "appArmorProfile": nil,
+		"capabilities":   map[string]any{"add": nil, "drop": []string{"ALL"}},
+		"seccompProfile": map[string]any{"type": string(corev1.SeccompProfileTypeRuntimeDefault), "localhostProfile": nil},
 	}
-	helperSecurity["$patch"] = "replace"
 	patch := map[string]any{
 		"initContainers": []any{map[string]any{"name": "init", "securityContext": helperSecurity}},
 		"containers":     []any{map[string]any{"name": "wait", "securityContext": helperSecurity, "volumeMounts": []any{map[string]any{"mountPath": "/mainctrfs/work/artifacts", "$patch": "delete"}, map[string]any{"mountPath": "/mainctrfs/trusted", "$patch": "delete"}}}},

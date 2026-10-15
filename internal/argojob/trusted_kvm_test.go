@@ -454,3 +454,39 @@ func TestTrustedKVMRequiresExplicitDeviceGroup(t *testing.T) {
 		t.Fatalf("disabled sentinel lost: %v", err)
 	}
 }
+
+func TestTrustedKVMHelperSecurityWorksWhenOriginallyAbsent(t *testing.T) {
+	_, _, _, leaf := trustedKVMBuilt(t)
+	// Construct a PodSpec where init/wait containers have nil security contexts,
+	// matching the Argo nonroot controller profile that omits the field entirely.
+	// A nested $patch:replace map was silently discarded by strategic merge in
+	// this case, leaving executor containers with no hardening at all.
+	spec := corev1.PodSpec{
+		InitContainers: []corev1.Container{{Name: "init"}},
+		Containers:     []corev1.Container{{Name: "wait"}, {Name: "main"}},
+	}
+	body, err := json.Marshal(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err = strategicpatch.StrategicMergePatch(body, []byte(leaf.PodSpecPatch), corev1.PodSpec{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var patched corev1.PodSpec
+	if err := json.Unmarshal(body, &patched); err != nil {
+		t.Fatal(err)
+	}
+	// The observer's check is reflect.DeepEqual(c.SecurityContext,
+	// nonrootContainerSecurity(0)) — exactly the same comparison below.
+	expected := nonrootContainerSecurity(0)
+	if !reflect.DeepEqual(patched.InitContainers[0].SecurityContext, expected) {
+		t.Fatalf("absent init context was not fully installed: %#v", patched.InitContainers[0].SecurityContext)
+	}
+	if patched.Containers[0].Name != "wait" {
+		t.Fatal("container order changed after patch")
+	}
+	if !reflect.DeepEqual(patched.Containers[0].SecurityContext, expected) {
+		t.Fatalf("absent wait context was not fully installed: %#v", patched.Containers[0].SecurityContext)
+	}
+}
