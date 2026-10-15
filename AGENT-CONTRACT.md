@@ -7,6 +7,26 @@ implementation detail disagree.
 
 ## Required inputs
 
+### Source-built maintenance backup
+
+`cmd/oberth-store-backup` is a separate Linux maintenance utility, not a native
+MCP endpoint or an ordinary signed-release artifact. Its source/tool hashes,
+exact live volume and original schema/audit identity, private recipient custody,
+and retained sandbox launcher require a concrete reviewed execution plan.
+Export uses the unchanged stable-copy snapshot primitive and read-only schema,
+integrity, foreign-key and audit verification. It performs no migration or live
+restore. Output write errors are joined even when the pinned crypto tool reports
+success; structural DER completeness is separate from mandatory authenticated
+private rehearsal. Recovery material covers DB/WAL, not full PVC or external
+witness continuity. Never reset witness records to make an old snapshot pass.
+
+In addition to ordinary unit/race/vet/lint gates, backup changes require the
+`backup_synthetic` tagged test binary and the fixed
+`scripts/qualify_database_backup.sh` invocation in the private no-swap sandbox.
+The fixture must pass every assertion and positively join its process/cgroup;
+missing sandbox protection is fatal, not a skip. Exact build/invocation and
+resource/custody requirements are in [database-backup.md](docs/database-backup.md).
+
 ### Persistent data
 
 - One PVC mounted at `/data` stores `oberth.sqlite`, bare Git caches under

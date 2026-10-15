@@ -10,6 +10,9 @@ load_order:
   - internal/store/schema.go
 
 subsystems:
+  maintenance_backup:
+    paths: [cmd/oberth-store-backup, internal/store/backup_archive.go, docs/database-backup.md, scripts/qualify_database_backup.sh]
+    contract: Source-built Linux maintenance utility exports a read-only verified database/WAL snapshot to authenticated CMS; separate private rehearsal precedes acceptance. The tagged synthetic qualification and retained no-swap sandbox joins are mandatory; no live restore or external witness reset is provided.
   persistence:
     paths: [internal/model, internal/store]
     contract: SQLite is the durable single-writer state for runs, promotions, issues, uplinks, and audit.
