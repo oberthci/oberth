@@ -3,6 +3,7 @@ package installer
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -122,10 +123,36 @@ func TestRunUpgradeControllerPartialFailureNeverSucceeds(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, mode := range []string{"argo-failure", "oberth-failure", "rollout-failure", "version-failure", "pod-failure", "complete"} {
+	for _, mode := range []string{"argo-failure", "oberth-failure", "rollout-failure", "version-failure", "pod-failure", "complete", "complete-terminal-history", "ambiguous-controller"} {
 		t.Run(mode, func(t *testing.T) {
 			cfg, deps, calls := controllerUpgradeFixture(t)
 			client := controllerProfileKube(t, "oberth-argo")
+			complete := mode == "complete" || mode == "complete-terminal-history"
+			if mode == "complete-terminal-history" || mode == "ambiguous-controller" {
+				raw, err := os.ReadFile("../argojob/testdata/controller-terminal-history.json")
+				if err != nil {
+					t.Fatal(err)
+				}
+				var history []corev1.Pod
+				if err := json.Unmarshal(raw, &history); err != nil {
+					t.Fatal(err)
+				}
+				for i := range history {
+					if _, err := client.CoreV1().Pods("oberth-argo").Create(t.Context(), &history[i], metav1.CreateOptions{}); err != nil {
+						t.Fatal(err)
+					}
+				}
+				if mode == "ambiguous-controller" {
+					other, err := client.CoreV1().Pods("oberth-argo").Get(t.Context(), "controller-fixture", metav1.GetOptions{})
+					if err != nil {
+						t.Fatal(err)
+					}
+					other.Name, other.UID = "another-controller", "another-controller-uid"
+					if _, err := client.CoreV1().Pods("oberth-argo").Create(t.Context(), other, metav1.CreateOptions{}); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
 			deps.KubeClient = client
 			dep := controllerServerFixture(t, client)
 			if mode == "rollout-failure" {
@@ -160,9 +187,13 @@ func TestRunUpgradeControllerPartialFailureNeverSucceeds(t *testing.T) {
 				}
 				return []byte("oberth v0.17.23"), nil
 			}
+			fixtureActions := len(client.Actions())
 			result, err := RunUpgrade(t.Context(), cfg, deps)
-			if (err == nil) != (mode == "complete") || result.Upgraded != (mode == "complete") {
+			if (err == nil) != complete || result.Upgraded != complete {
 				t.Fatalf("partial transition mislabeled: %+v %v", result, err)
+			}
+			if mode == "ambiguous-controller" && (err == nil || !strings.Contains(err.Error(), "argo profile readback failed")) {
+				t.Fatal("did not reach exact controller ambiguity refusal boundary")
 			}
 			upgrades := []string{}
 			for _, call := range *calls {
@@ -174,14 +205,19 @@ func TestRunUpgradeControllerPartialFailureNeverSucceeds(t *testing.T) {
 				}
 			}
 			want := []string{"argo-workflows", "oberth"}
-			if mode == "argo-failure" {
+			if mode == "argo-failure" || mode == "ambiguous-controller" {
 				want = want[:1]
 			}
 			if !slices.Equal(upgrades, want) {
 				t.Fatalf("wrong mutation order %v", upgrades)
 			}
-			if mode != "complete" && strings.Contains(deps.Output.(*bytes.Buffer).String(), "Ready —") {
+			if !complete && strings.Contains(deps.Output.(*bytes.Buffer).String(), "Ready —") {
 				t.Fatal("partial success output")
+			}
+			for _, action := range client.Actions()[fixtureActions:] {
+				if action.GetResource().Resource == "pods" && slices.Contains([]string{"delete", "delete-collection", "update", "patch"}, action.GetVerb()) {
+					t.Fatal("profile verification mutated historical or current Pods")
+				}
 			}
 		})
 	}

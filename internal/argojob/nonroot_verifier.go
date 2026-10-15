@@ -118,12 +118,9 @@ func verifyNonrootController(ctx context.Context, client kubernetes.Interface, n
 	if err != nil {
 		return nil, errors.New("argojob: cannot verify nonroot controller Pod identity")
 	}
-	if len(pods.Items) != 1 {
-		return nil, errors.New("argojob: nonroot profile requires one unambiguous controller Pod")
-	}
-	pod := &pods.Items[0]
-	if pod.Namespace != namespace {
-		return nil, errors.New("argojob: controller Pod namespace differs from the verified profile")
+	pod, err := selectNonrootController(pods.Items, namespace)
+	if err != nil {
+		return nil, err
 	}
 	if err := verifyNonrootControllerPod(pod); err != nil {
 		return nil, err

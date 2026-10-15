@@ -1,0 +1,192 @@
+[
+  {
+    "metadata": {
+      "creationTimestamp": "2026-09-27T15:41:27Z",
+      "labels": {
+        "app.kubernetes.io/name": "argo-workflows-workflow-controller"
+      },
+      "name": "argo-workflows-workflow-controller-5f74685c96-26zp4",
+      "namespace": "oberth-argo",
+      "ownerReferences": [
+        {
+          "apiVersion": "apps/v1",
+          "blockOwnerDeletion": true,
+          "controller": true,
+          "kind": "ReplicaSet",
+          "name": "argo-workflows-workflow-controller-5f74685c96",
+          "uid": "10ce3820-6080-4c8b-bbad-4b889b0e5922"
+        }
+      ],
+      "resourceVersion": "9845438",
+      "uid": "02e61862-feb0-402c-b803-06598c96978a"
+    },
+    "spec": {
+      "containers": [
+        {
+          "image": "quay.io/argoproj/workflow-controller:v4.0.8",
+          "name": "controller"
+        }
+      ],
+      "restartPolicy": "Always"
+    },
+    "status": {
+      "conditions": [
+        {
+          "lastTransitionTime": "2026-10-03T20:22:01Z",
+          "reason": "TerminationByKubelet",
+          "status": "True",
+          "type": "DisruptionTarget"
+        },
+        {
+          "lastTransitionTime": "2026-10-03T20:22:01Z",
+          "status": "False",
+          "type": "PodReadyToStartContainers"
+        },
+        {
+          "lastTransitionTime": "2026-09-27T16:35:56Z",
+          "status": "True",
+          "type": "Initialized"
+        },
+        {
+          "lastTransitionTime": "2026-10-03T20:22:01Z",
+          "reason": "PodFailed",
+          "status": "False",
+          "type": "Ready"
+        },
+        {
+          "lastTransitionTime": "2026-10-03T20:22:01Z",
+          "reason": "PodFailed",
+          "status": "False",
+          "type": "ContainersReady"
+        },
+        {
+          "lastTransitionTime": "2026-09-27T16:35:56Z",
+          "status": "True",
+          "type": "PodScheduled"
+        }
+      ],
+      "containerStatuses": [
+        {
+          "containerID": "containerd://31f536e547c2644c9ea90c8089bc57a9b1a6af815043c9aaf1602f10f47279df",
+          "image": "quay.io/argoproj/workflow-controller:v4.0.8",
+          "imageID": "quay.io/argoproj/workflow-controller@sha256:7a156419f80285859fc8f859927b6cc249f0d128e161e080dc17fca8fcbbceb6",
+          "lastState": {},
+          "name": "controller",
+          "ready": false,
+          "restartCount": 0,
+          "started": false,
+          "state": {
+            "terminated": {
+              "containerID": "containerd://31f536e547c2644c9ea90c8089bc57a9b1a6af815043c9aaf1602f10f47279df",
+              "exitCode": 137,
+              "finishedAt": "2026-10-03T20:22:01Z",
+              "reason": "Error",
+              "startedAt": "2026-09-27T16:36:14Z"
+            }
+          }
+        }
+      ],
+      "phase": "Failed",
+      "reason": "Evicted"
+    }
+  },
+  {
+    "metadata": {
+      "creationTimestamp": "2026-09-13T21:14:56Z",
+      "labels": {
+        "app.kubernetes.io/name": "argo-workflows-workflow-controller"
+      },
+      "name": "argo-workflows-workflow-controller-5f74685c96-v9kv2",
+      "namespace": "oberth-argo",
+      "ownerReferences": [
+        {
+          "apiVersion": "apps/v1",
+          "blockOwnerDeletion": true,
+          "controller": true,
+          "kind": "ReplicaSet",
+          "name": "argo-workflows-workflow-controller-5f74685c96",
+          "uid": "10ce3820-6080-4c8b-bbad-4b889b0e5922"
+        }
+      ],
+      "resourceVersion": "7778172",
+      "uid": "192591c7-e6f1-4620-bb36-236719ac4331"
+    },
+    "spec": {
+      "containers": [
+        {
+          "image": "quay.io/argoproj/workflow-controller:v4.0.8",
+          "name": "controller"
+        }
+      ],
+      "restartPolicy": "Always"
+    },
+    "status": {
+      "conditions": [
+        {
+          "lastTransitionTime": "2026-09-27T15:41:27Z",
+          "reason": "TerminationByKubelet",
+          "status": "True",
+          "type": "DisruptionTarget"
+        },
+        {
+          "lastTransitionTime": "2026-09-27T15:41:27Z",
+          "status": "False",
+          "type": "PodReadyToStartContainers"
+        },
+        {
+          "lastTransitionTime": "2026-09-13T21:16:23Z",
+          "status": "True",
+          "type": "Initialized"
+        },
+        {
+          "lastTransitionTime": "2026-09-27T15:41:27Z",
+          "reason": "PodFailed",
+          "status": "False",
+          "type": "Ready"
+        },
+        {
+          "lastTransitionTime": "2026-09-27T15:41:27Z",
+          "reason": "PodFailed",
+          "status": "False",
+          "type": "ContainersReady"
+        },
+        {
+          "lastTransitionTime": "2026-09-13T21:16:23Z",
+          "status": "True",
+          "type": "PodScheduled"
+        }
+      ],
+      "containerStatuses": [
+        {
+          "containerID": "containerd://a55114237e0038e534e71f122463b22d2c9a27e1949d5d6735396106e148931f",
+          "image": "quay.io/argoproj/workflow-controller:v4.0.8",
+          "imageID": "quay.io/argoproj/workflow-controller@sha256:7a156419f80285859fc8f859927b6cc249f0d128e161e080dc17fca8fcbbceb6",
+          "lastState": {
+            "terminated": {
+              "containerID": "containerd://1a0bc7d69acc305a397163293324056ca5bedb8941a87be461b632906105c554",
+              "exitCode": 255,
+              "finishedAt": "2026-09-19T18:15:03Z",
+              "reason": "Unknown",
+              "startedAt": "2026-09-13T21:16:44Z"
+            }
+          },
+          "name": "controller",
+          "ready": false,
+          "restartCount": 1,
+          "started": false,
+          "state": {
+            "terminated": {
+              "containerID": "containerd://a55114237e0038e534e71f122463b22d2c9a27e1949d5d6735396106e148931f",
+              "exitCode": 137,
+              "finishedAt": "2026-09-27T15:41:26Z",
+              "reason": "Error",
+              "startedAt": "2026-09-19T18:15:12Z"
+            }
+          }
+        }
+      ],
+      "phase": "Failed",
+      "reason": "Evicted"
+    }
+  }
+]

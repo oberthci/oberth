@@ -1849,6 +1849,22 @@ escaped/noncanonical keys fail before any mutation. Pin, schema and explicit
 controller-profile checks use the same grammar. This is a documented subset
 of Helm strvals, not a replacement parser.
 
+Controller selection (#889) excludes historical Pod records only after a
+complete terminal-incarnation proof: Failed/Succeeded, undeleting fixed
+controller shape, explicit false readiness, matching runtime IDs, ordered
+nonzero termination timestamps, and coherent prior restart history. Synthetic
+or unknown current termination reasons, incomplete/contradictory statuses and
+terminating Pods refuse. Exactly one Running candidate must then pass every
+existing pinned image, process, mount and immutable configuration predicate.
+Historical records are never deleted and confer no authority. This trusts the
+Kubernetes API/kubelet's final status; it is not attestation against a malicious
+node or administrator. A prior restart with a separately identified final
+terminated incarnation is permitted, including an unknown *prior* reason;
+that history cannot substitute for evidence of the current incarnation's exit.
+Pod names and UIDs must be nonempty and unique. Creation and both incarnation
+timestamps are bounded by one observation time captured for the selection;
+ordered timestamps wholly in the future cannot establish termination.
+
 
 ### Fixed-field MCP wait diagnostics (#863)
 

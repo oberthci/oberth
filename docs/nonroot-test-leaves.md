@@ -164,3 +164,18 @@ Repeat flags instead of comma-separated assignments; a literal value comma
 can be escaped as `\,`. List syntax and escaped keys are rejected before
 mutation. For structured values use an explicitly reviewed `--values` file;
 protected image/profile paths remain refused there as well.
+
+Retained Failed/Succeeded controller Pods do not represent live controllers
+when their complete current termination status proves otherwise. Selection
+requires the fixed single-controller shape, matching runtime IDs, false
+readiness, ordered start/finish times and coherent prior restart history.
+Names and UIDs must be unique, and timestamps cannot exceed the selection's
+single captured observation time.
+Unknown or synthetic current termination, missing statuses, terminating Pods,
+and multiple active candidates remain refusals. The selected Running Pod still
+passes the full existing profile verification. This relies on trusted API and
+kubelet status and does not authorize deleting historical Pods to unblock an
+upgrade. If an older CLI has stopped after applying Argo because it counted
+terminal history, preserve both releases and use a freshly reviewed supported
+forward transition with the corrected signed CLI; do not roll back or repeat
+the unchanged command.
