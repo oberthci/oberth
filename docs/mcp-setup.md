@@ -173,6 +173,17 @@ call the proxy hostname directly.
 | `access_allow` | Grant a step access to a secret path (admin-only) |
 | `access_revoke` | Revoke a step's access to a secret path (admin-only) |
 
+For `access_allow` and `access_revoke`, `secret` is the exact path recorded in
+`access_list` or the pipeline declaration, including the mount and KV API prefix
+when present. For example, `oberth/data/release/cosign-secret` is a different
+identity from `release/cosign-secret`; the server does not expand or normalize
+one into the other. Copy the listed `repo`, `step`, and `secret` tuple when
+revoking a grant. The grant ID is returned as evidence, not accepted as a revoke
+selector. `step: "*"` selects the wildcard grant itself; it does not revoke
+named-step grants. A missing exact tuple is refused without changing grants.
+Revocation removes admission approval immediately; complete the documented
+`oberth secretstore sync` procedure to remove the corresponding Bao policy read.
+
 `run_get` and `run_logs` accept the 12-character run ID printed after a push.
 A prefix must be unique across all repositories; if it is ambiguous, use the
 full 32-character ID. Responses always include that full ID.

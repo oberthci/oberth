@@ -58,27 +58,39 @@ official v0.73.0 image. Every credentialed leaf checks all five pins.
 
 ## Publication prerequisites
 
-GAR actions use separate OpenBao KV paths, all with field `GAR_SA_KEY`:
+GAR actions use release-only Workload Identity Federation (WIF), selected by
+`oberth.ci/release-wif-role` on the admitted leaf. The public
+`scripts/release-wif-credential.py` helper exchanges the projected JWT at Google
+STS, impersonates the matching CloudTaser principal, then delegates to the
+matching Oberth principal. All accounts below belong to
+`skipopsmain.iam.gserviceaccount.com`.
 
-| Action | Path under `oberth/data/release/` | Fixed delegated service account in `skipopsmain.iam.gserviceaccount.com` |
-| --- | --- | --- |
-| `publish-images` | `gar-image-key` | `oberth-release-publisher` |
-| `publish-chart` | `gar-chart-key` | `oberth-chart-publisher` |
-| `verify` | `gar-reader-key` | `oberth-release-reader` |
+| Release template | Role / audience pool | First-hop principal | Final principal |
+| --- | --- | --- | --- |
+| `release-publish-images`, `release-publish-kvm-harness` | `image-writer` / `oberth-release-images` | `cloudtaser-release-publisher` | `oberth-release-publisher` |
+| `release-publish-chart` | `chart-writer` / `oberth-release-charts` | `cloudtaser-chart-publisher` | `oberth-chart-publisher` |
+| `release-verify` | `image-reader` / `oberth-release-reader` | `cloudtaser-release-reader` | `oberth-release-reader` |
 
-The source keys remain in their existing, separate OpenBao paths. The pinned
-release helper validates bounded service-account JSON and exchanges it at fixed
-Google OAuth and IAM Credentials endpoints for a one-hour access token of the
-listed principal. Terraform grants each source TokenCreator on only its matching
-target. A source from another role is rejected by IAM; neither ambient ADC nor a
-key-provided token URL can redirect authentication. Tokens and Docker/Helm
-configuration exist only in the leaf's private memory filesystem and are cleared
-on exit. No new private key or secret-store path is needed.
+Each audience is
+`//iam.googleapis.com/projects/138624361369/locations/global/workloadIdentityPools/<pool>/providers/tuxbox`.
+Admission binds the exact repository, release ServiceAccount, template and role;
+branch pipelines receive no WIF projection. The helper validates the fixed ADC
+at `/run/oberth-gar/adc.json` and projected token at `/run/oberth-gar/token`,
+requires `OBERTH_RELEASE_WIF=1`, and fixes both impersonation targets from the
+validated audience. Both IAM requests use a 600-second lifetime. Google enforces
+the existing matching TokenCreator and repository IAM bindings; the reader stays
+read-only. HTTPS uses verified TLS 1.3, without redirects or proxies. A failed
+exchange is fatal, with no fallback to another role or a static key.
 
-Each target has access only to its own GAR repository; the reader retains
-read-only access. Preflight must prove the intended exchanges and cross-role
-refusals with the exact release ServiceAccount and paths. The shared
-`gar-sa-key` is never a fallback.
+Only the final token reaches the private Docker credential-helper pipe.
+Docker/Helm configuration contains the public helper mapping, not an access
+token; registry login and token caching are not used. Image, chart and KVM
+publishers still obtain `cosign-secret` through Secretstore into private tmpfs
+for signing. The verifier uses the committed public signing key and does not
+invoke Secretstore. The retired `gar-image-key`, `gar-reader-key`,
+`gar-chart-key` and older `gar-sa-key` paths are not active prerequisites and
+must not be recreated. Legacy code documents only an explicit reviewed source
+rollback; it does not authorize restoring retired credentials or grants.
 
 The existing website-authorized leaf also publishes signed objects to the
 Oberth-owned `oberth-releases` bucket. Its fixed phases run public upload, then

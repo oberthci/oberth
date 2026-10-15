@@ -1117,6 +1117,14 @@ continuity checks; it must never be used to reset or bypass those checks.
   `oberth-secret-access`; unnamed ConfigMap update, patch, or delete stay
   forbidden so audit-anchor continuity ConfigMaps remain unwritable by the
   server's own identity.
+- Secret paths in `access_allow` and `access_revoke` are literal identities,
+  copied exactly from pipeline declarations or `access_list`; no mount prefix,
+  KV `data/` segment, slash cleanup, or short-path expansion is inferred.
+  For example, `oberth/data/release/cosign-secret` and
+  `release/cosign-secret` are different paths. Revocation selects the exact
+  canonical repository, step and secret tuple; `step="*"` selects only that
+  wildcard grant, not its named-step neighbors. A missing tuple is refused
+  without mutation. Repository-name canonicalization is unchanged.
 - Grant revocation is immediately effective for Oberth admission (the sqlite
   approval table is updated atomically with ConfigMap reconciliation), but the
   Vault credentialed policy retains the exact-path read entry until a policy

@@ -169,12 +169,23 @@ To install a published harness digest into `trustedTests.recipes`, use the
 platform-manifest digest printed by the release step (the `@sha256:...` form
 from `kvm-harness-image.txt`), not a tag or index digest.
 
-### Auth for WIF migration
+### Registry authentication
 
-Registry authentication is isolated in `prepare_kvm_registry_auth()` in
-`.oberth/release.sh`. It currently delegates to `prepare_registry_auth` (GAR
-service-account key via `gar-image-key`). Swapping to Workload Identity
-Federation requires changing only this function body.
+`release-publish-kvm-harness` is admitted with the `image-writer` WIF role.
+`prepare_kvm_registry_auth()` delegates to the shared `prepare_registry_auth`
+path, which installs the public Docker credential-helper mapping. The helper
+uses the `oberth-release-images` audience under project `138624361369`, provider
+`tuxbox`, and the release-only projected token. It exchanges through STS and
+`cloudtaser-release-publisher@skipopsmain.iam.gserviceaccount.com` to the fixed
+`oberth-release-publisher@skipopsmain.iam.gserviceaccount.com` target, using
+600-second IAM tokens and the existing scoped delegation. Only the final token
+enters the credential protocol pipe; no registry login or access-token file is used.
+
+The publisher still receives `cosign-secret` through Secretstore into private
+tmpfs to sign both images. Registry authentication fetches no static GAR key;
+refused WIF exchanges fail closed. Retired GAR paths and grants must not be
+recreated. See [Publication prerequisites](../.oberth/bootstrap.md#publication-prerequisites)
+for all three roles, the exact audience format and credential custody.
 
 Deployment qualification must establish kubelet/runtime support for
 `SupplementalGroupsPolicy: Strict` and refusal on unsupported nodes. Older
