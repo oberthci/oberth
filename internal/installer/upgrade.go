@@ -31,15 +31,16 @@ const watchTunnelOpenbaoImageDefault = "quay.io/openbao/openbao:2.6.1@sha256:5b2
 
 // UpgradeConfig holds options for the upgrade command.
 type UpgradeConfig struct {
-	Namespace           string
-	DryRun              bool
-	Yes                 bool   // --yes: proceed without confirmation for non-local targets
-	ChartOverride       string // --chart: override the chart reference
-	BinaryVersion       string
-	Timeout             time.Duration
-	UserValues          []string // --values/-f: repeatable values file paths
-	UserSet             []string // --set: repeatable key=value pairs
-	BinarySchemaVersion int      // set by the caller to store.LatestMigrationVersion()
+	Namespace             string
+	DryRun                bool
+	Yes                   bool   // --yes: proceed without confirmation for non-local targets
+	ChartOverride         string // --chart: override the chart reference
+	BinaryVersion         string
+	Timeout               time.Duration
+	UserValues            []string // --values/-f: repeatable values file paths
+	UserSet               []string // --set: repeatable key=value pairs
+	ArgoControllerProfile string   // explicit supported controller transition; empty preserves existing profile
+	BinarySchemaVersion   int      // set by the caller to store.LatestMigrationVersion()
 }
 
 // ErrPinnedKeyOverride is returned when a user --set or --values file
@@ -93,6 +94,9 @@ type UpgradeResult struct {
 // ValidateUpgrade checks UpgradeConfig for invalid flag combinations and
 // applies defaults.
 func (cfg *UpgradeConfig) ValidateUpgrade() error {
+	if cfg.ArgoControllerProfile != "" && cfg.ArgoControllerProfile != "nonroot-static-v1" {
+		return errors.New("unsupported Argo controller profile")
+	}
 	if cfg.Namespace == "" {
 		cfg.Namespace = DefaultNamespace
 	}
@@ -119,8 +123,10 @@ func (cfg *UpgradeConfig) ValidateUpgrade() error {
 // to override installer-pinned keys.
 func checkPinnedKeyConflicts(userSet []string, userValues []string) error {
 	for _, kv := range userSet {
-		key, _, _ := strings.Cut(kv, "=")
-		key = strings.TrimSpace(key)
+		key, err := upgradeSetKey(kv)
+		if err != nil {
+			return err
+		}
 		if isPinnedUpgradeKey(key) {
 			return &ErrPinnedKeyOverride{Key: key}
 		}
@@ -196,8 +202,10 @@ func validateUserSetAgainstValues(valuesYAML []byte, userSet []string) error {
 		return fmt.Errorf("parse chart values for schema validation: %w", err)
 	}
 	for _, kv := range userSet {
-		key, _, _ := strings.Cut(kv, "=")
-		key = strings.TrimSpace(key)
+		key, err := upgradeSetKey(kv)
+		if err != nil {
+			return err
+		}
 		if !keyPathExists(values, key) {
 			return &ErrSchemaValidation{Detail: fmt.Sprintf("key %q does not exist in the chart values; check for typos", key)}
 		}
@@ -298,6 +306,8 @@ func RunUpgrade(ctx context.Context, cfg UpgradeConfig, deps Deps) (UpgradeResul
 	retryFailed := false
 	if cmp == 0 {
 		switch {
+		case status == "deployed" && cfg.ArgoControllerProfile != "":
+		// Explicit supported profile reconciliation is not a same-version no-op.
 		case status == "deployed":
 			result.AlreadyUpToDate = true
 			_, _ = fmt.Fprintf(w, "\nAlready running %s\n", displayVersion(targetVersion))
@@ -324,6 +334,12 @@ func RunUpgrade(ctx context.Context, cfg UpgradeConfig, deps Deps) (UpgradeResul
 		return result, err
 	}
 
+	profile, cleanupProfile, err := prepareUpgradeControllerProfile(ctx, cfg, deps)
+	if err != nil {
+		return result, err
+	}
+	defer cleanupProfile()
+
 	// Schema migration announcement: query the running server's schema
 	// version and compare with the target binary's version.
 	if cfg.BinarySchemaVersion > 0 {
@@ -337,6 +353,9 @@ func RunUpgrade(ctx context.Context, cfg UpgradeConfig, deps Deps) (UpgradeResul
 	}
 
 	if cfg.DryRun {
+		if profile != nil {
+			profile.describe(w, cfg.Timeout)
+		}
 		return printUpgradeDryRun(w, cfg, result, retryFailed)
 	}
 
@@ -358,6 +377,12 @@ func RunUpgrade(ctx context.Context, cfg UpgradeConfig, deps Deps) (UpgradeResul
 	// Validate user --set keys against the chart values schema.
 	if err := validateUserSetAgainstValues(valuesYAML, cfg.UserSet); err != nil {
 		return result, err
+	}
+
+	if profile != nil {
+		if err := profile.apply(ctx, cfg, deps); err != nil {
+			return result, fmt.Errorf("argo controller profile transition incomplete: %w", err)
+		}
 	}
 
 	// Build and execute the helm upgrade.
@@ -384,6 +409,11 @@ func RunUpgrade(ctx context.Context, cfg UpgradeConfig, deps Deps) (UpgradeResul
 	}
 	phase(w, "Oberth", "✓ "+displayVersion(runningVersion), color)
 
+	if profile != nil {
+		if err := profile.verifyFinal(ctx, cfg, deps); err != nil {
+			return result, fmt.Errorf("controller transition incomplete after Oberth upgrade: %w", err)
+		}
+	}
 	result.Upgraded = true
 	_, _ = fmt.Fprintf(w, "\nReady — %s\n", oberthWebUIURL)
 	return result, nil
@@ -466,6 +496,9 @@ func upgradeHelmArgs(cfg UpgradeConfig, chart, imageRef string) []string {
 		// stored connector configuration (#671).
 		"--set-string", "watchTunnel.image=" + watchTunnelImageDefault,
 		"--set-string", "watchTunnel.openbaoImage=" + watchTunnelOpenbaoImageDefault,
+	}
+	if cfg.ArgoControllerProfile != "" {
+		args = append(args, "--set-string", "argo.controllerProfile="+cfg.ArgoControllerProfile)
 	}
 	// User values files come after pins. Pinned-key conflicts have already
 	// been refused by checkPinnedKeyConflicts, so these cannot override a pin.

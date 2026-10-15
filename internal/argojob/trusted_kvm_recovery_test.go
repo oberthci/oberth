@@ -13,7 +13,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/client-go/kubernetes/fake"
 	k8stesting "k8s.io/client-go/testing"
 )
 
@@ -25,7 +24,7 @@ func TestTrustedKVMRecoveryRequiresContinuousRequestTimeoutAbsence(t *testing.T)
 		t.Run(mode, func(t *testing.T) {
 			config, request, wf, _ := trustedKVMObservedFixture(t)
 			workflows := &trustedCleanupClient{workflow: wf, deleted: true}
-			kube := fake.NewSimpleClientset()
+			kube := trustedControllerClient()
 			controller, err := NewController(workflows, kube, config)
 			if err != nil {
 				t.Fatal(err)
@@ -124,8 +123,9 @@ func TestTrustedKVMExplicitPOSTRefusalOnly(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			config, request, wf, _ := trustedKVMObservedFixture(t)
 			request.SourceDir = writeCheckout(t)
+			request = prepareTrustedTestRequest(t, config, request)
 			workflows := &rejectingTrustedWorkflowClient{trustedCleanupClient: &trustedCleanupClient{workflow: wf, deleted: true}, createErr: test.err}
-			kube := fake.NewSimpleClientset(&corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{Name: wf.Spec.ServiceAccountName, Namespace: config.Namespace}})
+			kube := trustedControllerClient(&corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{Name: wf.Spec.ServiceAccountName, Namespace: config.Namespace}})
 			runningSeedPods(kube)
 			config.SeedPollInterval = time.Millisecond
 			controller, err := NewController(workflows, kube, config)

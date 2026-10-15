@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -15,15 +16,23 @@ import (
 	"testing"
 	"time"
 
+	wffake "github.com/argoproj/argo-workflows/v4/pkg/client/clientset/versioned/fake"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes/fake"
+	"k8s.io/utils/ptr"
+
 	"github.com/oberthci/oberth/internal/argojob"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/service"
 	"github.com/oberthci/oberth/internal/store"
 	"github.com/oberthci/oberth/internal/vmrunner"
+	"github.com/oberthci/oberth/pkg/argoworkflow"
 )
 
 type protectedControllerFixture struct {
 	*blockingController
+	preparer   *argojob.Controller
 	request    argojob.Request
 	createErr  error
 	failed     bool
@@ -31,6 +40,46 @@ type protectedControllerFixture struct {
 	cleaned    bool
 	absent     bool
 	absenceErr error
+}
+
+func (c *protectedControllerFixture) PrepareNonroot(ctx context.Context, r argojob.Request) (argojob.Request, error) {
+	return c.preparer.PrepareNonroot(ctx, r)
+}
+
+// Use the actual pinned upstream-rendered controller template, then model only
+// Kubernetes metadata/status and its standard service-account admission volume.
+func protectedProfilePreparer(t *testing.T, config argojob.Config) *argojob.Controller {
+	t.Helper()
+	raw, err := os.ReadFile("../argojob/testdata/nonroot-argo4.0.8/controller-profile.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fixture struct {
+		PodTemplate corev1.PodTemplateSpec `json:"podTemplate"`
+		ConfigMap   corev1.ConfigMap       `json:"configMap"`
+	}
+	if err = json.Unmarshal(raw, &fixture); err != nil {
+		t.Fatal(err)
+	}
+	created := metav1.NewTime(time.Date(2026, 9, 13, 0, 0, 0, 0, time.UTC))
+	cm := fixture.ConfigMap.DeepCopy()
+	cm.Namespace = config.Namespace
+	cm.UID = "config-uid"
+	cm.ResourceVersion = "1"
+	cm.CreationTimestamp = created
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "controller-fixture", Namespace: config.Namespace, UID: "pod-uid", Labels: map[string]string{"app.kubernetes.io/name": "argo-workflows-workflow-controller"}, OwnerReferences: []metav1.OwnerReference{{Kind: "ReplicaSet", Name: "controller", UID: "replicaset-uid", Controller: ptr.To(true)}}}, Spec: fixture.PodTemplate.Spec}
+	pod.Spec.Volumes = append(pod.Spec.Volumes, corev1.Volume{Name: "kube-api-access-fixture", VolumeSource: corev1.VolumeSource{Projected: &corev1.ProjectedVolumeSource{DefaultMode: ptr.To(int32(0644)), Sources: []corev1.VolumeProjection{
+		{ServiceAccountToken: &corev1.ServiceAccountTokenProjection{Path: "token", ExpirationSeconds: ptr.To(int64(3607))}},
+		{ConfigMap: &corev1.ConfigMapProjection{LocalObjectReference: corev1.LocalObjectReference{Name: "kube-root-ca.crt"}, Items: []corev1.KeyToPath{{Key: "ca.crt", Path: "ca.crt"}}}},
+		{DownwardAPI: &corev1.DownwardAPIProjection{Items: []corev1.DownwardAPIVolumeFile{{Path: "namespace", FieldRef: &corev1.ObjectFieldSelector{APIVersion: "v1", FieldPath: "metadata.namespace"}}}}},
+	}}}})
+	pod.Spec.Containers[0].VolumeMounts = append(pod.Spec.Containers[0].VolumeMounts, corev1.VolumeMount{Name: "kube-api-access-fixture", MountPath: "/var/run/secrets/kubernetes.io/serviceaccount", ReadOnly: true})
+	pod.Status = corev1.PodStatus{Conditions: []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionTrue}}, ContainerStatuses: []corev1.ContainerStatus{{Name: "controller", Ready: true, ImageID: argoworkflow.NonrootControllerAMD64, State: corev1.ContainerState{Running: &corev1.ContainerStateRunning{StartedAt: created}}}}}
+	controller, err := argojob.NewController(wffake.NewSimpleClientset().ArgoprojV1alpha1().Workflows(config.Namespace), fake.NewClientset(pod, cm), config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return controller
 }
 
 func (c *protectedControllerFixture) ConfirmTrustedKVMAbsent(context.Context, string) error {
@@ -82,6 +131,8 @@ func TestTrustedPreflightAdapterLifecycle(t *testing.T) {
 			fixture.jobs.controller = controller
 			fixture.jobs.config.KVMEnabled = true
 			fixture.jobs.config.TrustedKVMGroup = 1234
+			fixture.jobs.config.NonrootProfile = argoworkflow.NonrootStaticProfile
+			controller.preparer = protectedProfilePreparer(t, fixture.jobs.config)
 			database, err := store.Open(ctx, filepath.Join(t.TempDir(), "db.sqlite"), store.Options{})
 			if err != nil {
 				t.Fatal(err)

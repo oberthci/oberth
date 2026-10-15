@@ -234,3 +234,13 @@ Contract decoding rejects artifact paths that cannot be represented by USTAR's
 100-byte name or 155-byte prefix plus 100-byte suffix fields. HTTPS fixture tests
 verify trusted TLS 1.3 succeeds, TLS 1.2/untrusted authorities fail, and redirects
 are refused without contacting their destination.
+
+Protected-only requests require the exact `nonroot-static-v1` controller profile
+before producers run, even when the repository declares no ordinary nonroot
+leaves. The private proof binds the full trusted intent and is rechecked before
+seeding, creation and adoption. Build rejects a missing, stale or substituted
+proof; ordinary producer templates are not thereby converted to nonroot.
+The executor image and runtime-hook attestation remains unchanged. Use the
+explicit supported upgrade profile transition described in
+[nonroot test leaves](nonroot-test-leaves.md) to prepare an existing managed
+controller; setting the server profile name alone is not qualification.

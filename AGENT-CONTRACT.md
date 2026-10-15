@@ -1825,3 +1825,26 @@ WIF and every other nonempty value fails closed.
 Both Go publisher binaries are rebuilt from admitted source and re-pinned in
 `.oberth/pins/bootstrap-tools.sha256`. Publisher source verification includes
 `scripts/release-wif-credential.py` before any credential is consumed.
+
+### Protected controller prerequisite and upgrade (#887)
+
+Server-appended trusted KVM leaves require the verified nonroot-static-v1
+controller before producer execution. The opaque request proof binds the full
+KVM intent, including approved recipe/inventory, and refreshes at existing
+seed/create/adoption boundaries. Build cannot authorize a protected request
+without this proof. Observer image, runtime-hook and custody predicates remain
+strict.
+
+An explicit `upgrade --argo-controller-profile=nonroot-static-v1` reconciles
+only the existing managed Argo profile and normal Oberth release, including an
+explicit same-version transition. Its dry-run identifies both effects; actual
+execution uses the exact chart archive digest, unchanged reused values and
+strict before/after readbacks. No automatic rollback or partial success is
+allowed. Normal upgrades without the option retain existing behavior.
+
+Upgrade override grammar (#888): each `--set` accepts one canonical dotted key
+and scalar string; repeat the flag for multiple assignments. Escaped literal
+commas in values retain Helm semantics. Unescaped separators, list syntax and
+escaped/noncanonical keys fail before any mutation. Pin, schema and explicit
+controller-profile checks use the same grammar. This is a documented subset
+of Helm strvals, not a replacement parser.

@@ -31,12 +31,13 @@ func runUpgrade(ctx context.Context, arguments []string, output io.Writer) error
 	var userValues, userSet upgradeStringSlice
 	flags.StringVar(&cfg.Namespace, "namespace", "", "Oberth namespace (default: oberth)")
 	flags.StringVar(&kubeContext, "context", "", "kubeconfig context to target (default: current-context)")
+	flags.StringVar(&cfg.ArgoControllerProfile, "argo-controller-profile", "", "explicitly reconcile the managed nonroot-static-v1 Argo profile and verify it before enabling server admission")
 	flags.BoolVar(&cfg.DryRun, "dry-run", false, "show what would change without doing it")
 	flags.BoolVar(&cfg.Yes, "yes", false, "proceed without confirmation for non-local targets")
 	flags.StringVar(&cfg.ChartOverride, "chart", "", "override the chart reference (for testing)")
 	flags.Var(&userValues, "values", "values file to pass to helm upgrade (repeatable)")
 	flags.Var(&userValues, "f", "alias for --values")
-	flags.Var(&userSet, "set", "set a chart value key=value (repeatable)")
+	flags.Var(&userSet, "set", "one canonical dotted key=scalar per flag; escape literal commas (repeatable)")
 	timeout := flags.Duration("timeout", 5*time.Minute, "wait timeout for rollout completion")
 
 	if err := flags.Parse(arguments); err != nil {

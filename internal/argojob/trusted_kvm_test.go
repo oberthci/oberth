@@ -15,6 +15,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/strategicpatch"
@@ -22,6 +23,7 @@ import (
 	"k8s.io/utils/ptr"
 
 	"github.com/oberthci/oberth/internal/vmrunner"
+	"github.com/oberthci/oberth/pkg/argoworkflow"
 	"github.com/oberthci/oberth/pkg/periapsis"
 )
 
@@ -29,6 +31,7 @@ func trustedKVMRequest(t *testing.T) (Config, Request) {
 	t.Helper()
 	config := testConfig()
 	config.KVMEnabled = true
+	config.NonrootProfile = argoworkflow.NonrootStaticProfile
 	config.TrustedKVMGroup = 1234
 	request := testRequest(periapsis.TriggerCI, greedyDocument)
 	request.UpstreamName = "codeberg"
@@ -38,8 +41,28 @@ func trustedKVMRequest(t *testing.T) (Config, Request) {
 		Contract:  vmrunner.Contract{Version: 2, Profile: vmrunner.KVMSuiteAMD64Profile, SuiteSHA256: strings.Repeat("c", 64), GuestSHA256: strings.Repeat("d", 64), Artifacts: []string{"program"}},
 		Recipe:    vmrunner.KVMRecipe{SuiteSHA256: strings.Repeat("c", 64), GuestSHA256: strings.Repeat("d", 64), HarnessImage: "registry.example/harness@sha256:" + strings.Repeat("e", 64), SuiteURL: "https://example.org/suite", GuestURL: "https://example.org/guest"},
 		Namespace: config.Namespace, WorkflowName: request.Name, WorkflowSpecDigest: hex.EncodeToString(digest[:]), InventoryDigest: strings.Repeat("f", 64), CaseCount: 2, AdmittedAt: now, Deadline: now.Add(time.Minute)}
+	request = prepareTrustedTestRequest(t, config, request)
 	return config, request
 }
+
+func trustedControllerClient(objects ...runtime.Object) *fake.Clientset {
+	pod, cm := nonrootVerifierObjects()
+	return fake.NewClientset(append([]runtime.Object{pod, cm}, objects...)...)
+}
+func prepareTrustedTestRequest(t *testing.T, config Config, request Request) Request {
+	t.Helper()
+	request.nonrootProof = nil
+	controller, err := NewController(&staticWorkflowClient{}, trustedControllerClient(), config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prepared, err := controller.PrepareNonroot(t.Context(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return prepared
+}
+
 func trustedKVMBuilt(t *testing.T) (Config, Request, *wfv1.Workflow, *wfv1.Template) {
 	t.Helper()
 	config, request := trustedKVMRequest(t)
@@ -109,6 +132,7 @@ func TestTrustedKVMRejectsProducerEscapeHatches(t *testing.T) {
 			request.Source = []byte(strings.Replace(string(request.Source), "  entrypoint: main", "  "+field+"\n  entrypoint: main", 1))
 			digest := sha256.Sum256(request.Source)
 			request.TrustedKVM.WorkflowSpecDigest = hex.EncodeToString(digest[:])
+			request = prepareTrustedTestRequest(t, config, request)
 			if _, err := Build(config, request); err == nil {
 				t.Fatalf("accepted %s", field)
 			}
@@ -120,6 +144,7 @@ func TestTrustedKVMRejectsProducerEscapeHatches(t *testing.T) {
 			request.Source = []byte(strings.Replace(string(request.Source), "      container:", "      "+field+"\n      container:", 1))
 			digest := sha256.Sum256(request.Source)
 			request.TrustedKVM.WorkflowSpecDigest = hex.EncodeToString(digest[:])
+			request = prepareTrustedTestRequest(t, config, request)
 			if _, err := Build(config, request); err == nil {
 				t.Fatalf("accepted %s", field)
 			}
@@ -215,7 +240,7 @@ func trustedKVMObservedFixture(t *testing.T) (Config, Request, *wfv1.Workflow, *
 }
 func TestTrustedKVMObserverMaterializationAndAttacks(t *testing.T) {
 	config, request, wf, pod := trustedKVMObservedFixture(t)
-	controller, err := NewController(&staticWorkflowClient{workflow: wf}, fake.NewSimpleClientset(pod), config)
+	controller, err := NewController(&staticWorkflowClient{workflow: wf}, trustedControllerClient(pod), config)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -264,7 +289,7 @@ func TestTrustedKVMObserverMaterializationAndAttacks(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			bad := pod.DeepCopy()
 			change(bad)
-			controller, err := NewController(&staticWorkflowClient{workflow: wf}, fake.NewSimpleClientset(bad), config)
+			controller, err := NewController(&staticWorkflowClient{workflow: wf}, trustedControllerClient(bad), config)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -275,7 +300,7 @@ func TestTrustedKVMObserverMaterializationAndAttacks(t *testing.T) {
 	}
 	changed := wf.DeepCopy()
 	changed.Spec.Templates[0].Container.Command = []string{"/bin/false"}
-	controller, err = NewController(&staticWorkflowClient{workflow: changed}, fake.NewSimpleClientset(pod), config)
+	controller, err = NewController(&staticWorkflowClient{workflow: changed}, trustedControllerClient(pod), config)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -309,7 +334,7 @@ func TestTrustedKVMCleanupRequiresExactUIDAndObservedAbsence(t *testing.T) {
 	config, request, wf, pod := trustedKVMObservedFixture(t)
 	claim := &corev1.PersistentVolumeClaim{ObjectMeta: metav1.ObjectMeta{Name: sourceClaimName(wf.Name), Namespace: wf.Namespace, UID: "claim-uid", OwnerReferences: []metav1.OwnerReference{{APIVersion: "argoproj.io/v1alpha1", Kind: "Workflow", Name: wf.Name, UID: wf.UID}}}}
 	client := &trustedCleanupClient{workflow: wf}
-	kube := fake.NewSimpleClientset(pod, claim)
+	kube := trustedControllerClient(pod, claim)
 	controller, err := NewController(client, kube, config)
 	if err != nil {
 		t.Fatal(err)
@@ -352,7 +377,7 @@ func TestTrustedKVMRefusalRetainsActualRestartAndExit(t *testing.T) {
 	pod.Status.Phase = corev1.PodFailed
 	pod.Status.ContainerStatuses[0].RestartCount = 1
 	pod.Status.ContainerStatuses[0].State.Terminated.ExitCode = 7
-	controller, err := NewController(&staticWorkflowClient{workflow: wf}, fake.NewSimpleClientset(pod), config)
+	controller, err := NewController(&staticWorkflowClient{workflow: wf}, trustedControllerClient(pod), config)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -370,7 +395,7 @@ func TestTrustedKVMRefusalRetainsActualRestartAndExit(t *testing.T) {
 func TestTrustedKVMPrecreateRefusalAndUnknownAuxiliary(t *testing.T) {
 	config, request, wf, _ := trustedKVMObservedFixture(t)
 	client := &trustedCleanupClient{workflow: wf, deleted: true}
-	kube := fake.NewSimpleClientset()
+	kube := trustedControllerClient()
 	controller, err := NewController(client, kube, config)
 	if err != nil {
 		t.Fatal(err)
@@ -405,6 +430,7 @@ func TestTrustedKVMRefusesReservedRuntimeVolumes(t *testing.T) {
 				request.Source = []byte(strings.Replace(string(request.Source), "  entrypoint: main", field+"  entrypoint: main", 1))
 				digest := sha256.Sum256(request.Source)
 				request.TrustedKVM.WorkflowSpecDigest = hex.EncodeToString(digest[:])
+				request = prepareTrustedTestRequest(t, config, request)
 				if _, err := Build(config, request); err == nil {
 					t.Fatal("reserved runtime volume admitted")
 				}

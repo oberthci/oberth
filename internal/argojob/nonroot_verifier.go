@@ -16,6 +16,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/utils/ptr"
 
+	"github.com/oberthci/oberth/internal/vmrunner"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 	"github.com/oberthci/oberth/pkg/periapsis"
 )
@@ -35,12 +36,17 @@ func nonrootRequestIdentity(request Request) string {
 	}
 	// Explicit primitive fields avoid JSON's unsupported struct-keyed Fragment
 	// map and include actual fragment bytes (Fragment.Source normally has json:-).
+	trustedIntent := ""
+	if request.TrustedKVM != nil {
+		trustedIntent = vmrunner.KVMIntentDigest(*request.TrustedKVM)
+	}
 	identity := struct {
 		Principal       []string
 		Source          []byte
 		ApprovedSecrets map[string]bool
 		Fragments       map[string][]string
-	}{[]string{request.RunID, request.Name, request.Repo, request.UpstreamName, request.UpstreamOrg, request.Ref, request.SHA, string(request.Trigger), request.SourceDir}, request.Source, request.ApprovedSecrets, fragments}
+		TrustedIntent   string `json:",omitempty"`
+	}{[]string{request.RunID, request.Name, request.Repo, request.UpstreamName, request.UpstreamOrg, request.Ref, request.SHA, string(request.Trigger), request.SourceDir}, request.Source, request.ApprovedSecrets, fragments, trustedIntent}
 	encoded, _ := json.Marshal(identity) // Only primitive serializable types.
 	digest := sha256.Sum256(encoded)
 	return hex.EncodeToString(digest[:])
@@ -58,7 +64,7 @@ func requestSelectsNonroot(request Request) (bool, error) {
 		return false, err
 	}
 	names, err := argoworkflow.DeclaredNonrootTemplates(workflow)
-	return len(names) != 0, err
+	return len(names) != 0 || request.TrustedKVM != nil, err
 }
 
 // PrepareNonroot establishes the request's private capability before the app's
@@ -249,4 +255,14 @@ func verifyNonrootControllerMounts(pod *corev1.Pod) error {
 		delete(wantMounts, mount.Name)
 	}
 	return nil
+}
+
+// VerifyNonrootControllerProfile observes the exact supported installed boundary.
+// It does not issue a submission proof or authorize any repository request.
+func VerifyNonrootControllerProfile(ctx context.Context, client kubernetes.Interface, namespace string) error {
+	if client == nil {
+		return errors.New("argojob: controller profile verification requires Kubernetes")
+	}
+	_, err := verifyNonrootController(ctx, client, namespace, Request{})
+	return err
 }

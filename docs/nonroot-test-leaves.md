@@ -119,3 +119,48 @@ clone/seccomp and kernel compatibility under the real RuntimeDefault container;
 UID65534 alone is insufficient. No SYS_ADMIN, privilege escalation, unconfined
 seccomp or `--no-sandbox` workaround is part of this capability. None of these
 source tests proves KubeVirt, guest enforcement or deployed browser coverage.
+
+## Explicit profile transition on an existing installation
+
+`oberth upgrade --argo-controller-profile=nonroot-static-v1` is an opt-in
+transition of both existing managed releases. It also runs when the Oberth
+version is unchanged; omitting the flag preserves the normal same-version
+no-op. The pipeline namespace is read from the installed Oberth values. The
+command refuses conflicting namespace/profile overrides, absent or unsupported
+Argo releases, pending Helm operations and custom values outside the fixed
+profile. It does not install namespaces, reconcile OpenBao or change uplinks.
+
+Before mutation, review `--dry-run` and the complete rendered diff against the
+current releases, and drain native execution. The command preserves reused
+values, verifies the exact upstream Argo chart1.0.24 archive digest, and applies
+only the built-in public profile overlay to the existing Argo release. It waits
+for the same strict live controller/configuration proof used by submission
+admission before upgrading Oberth and setting `argo.controllerProfile`.
+The existing KVM recipe, harness pin and unrelated identities stay in reused
+values. Final success requires the controller proof and Oberth profile value
+and serving flag to agree after rollout.
+
+This is a two-release forward transition, not an atomic transaction. Failure
+after the Argo update leaves the stronger profile installed and reports an
+incomplete transition. Do not roll back to an unverified controller. A fresh
+reviewed invocation accepts the same exact profile and can repair an existing
+failed Helm revision. A changed revision or values snapshot before apply is a
+refusal; the read checks do not lock out another administrator. No protected
+suite result is implied by installation: its exact run still needs a valid
+receipt and confirmed cleanup.
+
+The transition checks the Argo revision, status, chart and unchanged raw reused
+values both before chart resolution and immediately before the upgrade. These
+observations are not an atomic cross-release lock. Final server verification
+waits for exactly one ready Pod (including waiting out terminating old Pods),
+binds its ReplicaSet and Deployment UID/template plus image and arguments,
+executes the version check by that Pod name, and rechecks its UID. Live rollout
+evidence additionally checks the actual platform image digest. Partial Argo or
+Oberth failure is never reported as success; recovery is a fresh supported
+forward transition, not automatic rollback.
+
+Upgrade `--set` flags accept one canonical dotted key and scalar value each.
+Repeat flags instead of comma-separated assignments; a literal value comma
+can be escaped as `\,`. List syntax and escaped keys are rejected before
+mutation. For structured values use an explicitly reviewed `--values` file;
+protected image/profile paths remain refused there as well.
