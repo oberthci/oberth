@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-"""Docker credential protocol: projected JWT -> STS -> publisher impersonation.
+"""Docker credential protocol: projected JWT -> STS -> CloudTaser -> Oberth role.
 
 Only the credential-helper pipe receives credentials. No credentials are cached,
 written to files, passed in arguments, or included in diagnostics.
@@ -32,6 +32,19 @@ ROLES = {
         'https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/cloudtaser-release-reader@skipopsmain.iam.gserviceaccount.com:generateAccessToken',
     '//iam.googleapis.com/projects/138624361369/locations/global/workloadIdentityPools/oberth-release-charts/providers/tuxbox':
         'https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/cloudtaser-chart-publisher@skipopsmain.iam.gserviceaccount.com:generateAccessToken',
+}
+
+
+# Oberth's repositories already grant each matching Oberth principal access,
+# and each CloudTaser source principal TokenCreator on only that target. Keep
+# this second hop fixed by the validated audience, never ADC/env input (#875).
+OBERTH_ROLES = {
+    '//iam.googleapis.com/projects/138624361369/locations/global/workloadIdentityPools/oberth-release-images/providers/tuxbox':
+        'https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/oberth-release-publisher@skipopsmain.iam.gserviceaccount.com:generateAccessToken',
+    '//iam.googleapis.com/projects/138624361369/locations/global/workloadIdentityPools/oberth-release-reader/providers/tuxbox':
+        'https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/oberth-release-reader@skipopsmain.iam.gserviceaccount.com:generateAccessToken',
+    '//iam.googleapis.com/projects/138624361369/locations/global/workloadIdentityPools/oberth-release-charts/providers/tuxbox':
+        'https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/oberth-chart-publisher@skipopsmain.iam.gserviceaccount.com:generateAccessToken',
 }
 
 
@@ -120,7 +133,11 @@ def credential(server):
     impersonated = post(iam, json.dumps({
         'scope': ['https://www.googleapis.com/auth/cloud-platform'], 'lifetime': '600s',
     }).encode('ascii'), {'Content-Type': 'application/json', 'Authorization': 'Bearer ' + federated})
-    return {'Username': 'oauth2accesstoken', 'Secret': token(impersonated.get('accessToken'))}
+    source = token(impersonated.get('accessToken'))
+    delegated = post(OBERTH_ROLES[audience], json.dumps({
+        'scope': ['https://www.googleapis.com/auth/cloud-platform'], 'lifetime': '600s',
+    }).encode('ascii'), {'Content-Type': 'application/json', 'Authorization': 'Bearer ' + source})
+    return {'Username': 'oauth2accesstoken', 'Secret': token(delegated.get('accessToken'))}
 
 
 def main():

@@ -1692,6 +1692,25 @@ allowlist is refused before any network call.
 
 All pools use provider `tuxbox` under project `138624361369`.
 
+Oberth's helper additionally performs the existing matching delegation (#875):
+image-writer to `oberth-release-publisher@skipopsmain.iam.gserviceaccount.com`,
+image-reader to `oberth-release-reader@skipopsmain.iam.gserviceaccount.com`, and
+chart-writer to `oberth-chart-publisher@skipopsmain.iam.gserviceaccount.com`.
+The exact validated audience fixes both hops. ADC still names the CloudTaser
+first-hop principal; it cannot override the Oberth target. Both IAM requests
+use 600-second tokens over the same verified TLS/no-proxy/no-redirect transport.
+Only the final Oberth token reaches the credential pipe; intermediate tokens
+stay in memory, and second-hop refusal never falls back to the first token or
+static keys. This consumes existing matching TokenCreator and repository IAM,
+without widening either. The helper intentionally specializes the shared
+CloudTaser exchange for Oberth's separate repositories.
+
+The KVM runtime build explicitly directs apko's default enabled SBOM output to
+the existing writable release output directory (#874). Source/workspace mounts
+remain read-only, and the pinned apko binary, lockfile and package verification
+remain unchanged.
+
+
 ### Layered trust enforcement
 
 - **Google WIF** enforces namespace-bound ServiceAccount subject, exact

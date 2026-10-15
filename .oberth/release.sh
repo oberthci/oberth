@@ -1602,6 +1602,7 @@ build_kvm_runtime() {
 	kvm_runtime_tar=$release_dir/kvm-runtime.tar
 	rm -f -- "$kvm_runtime_tar"
 	"$apko_tool" build \
+		--sbom-path "$release_dir" \
 		--lockfile packaging/kvm-harness/runtime.apko.lock.json \
 		packaging/kvm-harness/runtime.apko.yaml \
 		runtime:latest \

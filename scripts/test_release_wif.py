@@ -41,7 +41,7 @@ class ExchangeTests(unittest.TestCase):
     def exchange(self, config=None, replies=None):
         config = CONFIG if config is None else config
         replies = replies or [{'token_type': 'Bearer', 'access_token': 'inert-federated'},
-                              {'accessToken': 'inert-publisher'}]
+                              {'accessToken': 'inert-source'}, {'accessToken': 'inert-publisher'}]
         def read(path):
             return json.dumps(config).encode() if path == wif.ADC else b'inert.jwt.signature'
         with patch.dict(os.environ, {'OBERTH_RELEASE_WIF': '1', 'GOOGLE_APPLICATION_CREDENTIALS': wif.ADC}), \
@@ -52,7 +52,7 @@ class ExchangeTests(unittest.TestCase):
     def test_exact_exchange_and_impersonation(self):
         result, calls = self.exchange()
         self.assertEqual(result, {'Username': 'oauth2accesstoken', 'Secret': 'inert-publisher'})
-        self.assertEqual(len(calls), 2)
+        self.assertEqual(len(calls), 3)
         url, body, headers = calls[0].args
         self.assertEqual(url, wif.STS)
         values = urllib.parse.parse_qs(body.decode())
@@ -62,16 +62,30 @@ class ExchangeTests(unittest.TestCase):
         self.assertEqual(url, _DEFAULT_IAM)
         self.assertEqual(headers['Authorization'], 'Bearer inert-federated')
         self.assertEqual(json.loads(body)['lifetime'], '600s')
+        url, body, headers = calls[2].args
+        self.assertEqual(url, 'https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/oberth-release-publisher@skipopsmain.iam.gserviceaccount.com:generateAccessToken')
+        self.assertEqual(headers['Authorization'], 'Bearer inert-source')
+        self.assertEqual(json.loads(body), {'scope': ['https://www.googleapis.com/auth/cloud-platform'], 'lifetime': '600s'})
 
     def test_all_three_roles_exchange_to_paired_sa(self):
         """Each valid (audience, SA) pair must succeed and reach the correct IAM endpoint."""
+        expected_targets = {
+            'oberth-release-images': 'oberth-release-publisher',
+            'oberth-release-reader': 'oberth-release-reader',
+            'oberth-release-charts': 'oberth-chart-publisher',
+        }
         for audience, expected_iam in wif.ROLES.items():
             with self.subTest(audience=audience):
                 cfg = config_for_audience(audience)
                 result, calls = self.exchange(config=cfg)
                 self.assertEqual(result['Username'], 'oauth2accesstoken')
-                self.assertEqual(len(calls), 2)
+                self.assertEqual(len(calls), 3)
                 self.assertEqual(calls[1].args[0], expected_iam)
+                pool = audience.split('/workloadIdentityPools/')[1].split('/')[0]
+                self.assertEqual(calls[2].args[0], 'https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/' + expected_targets[pool] + '@skipopsmain.iam.gserviceaccount.com:generateAccessToken')
+                self.assertEqual(calls[2].args[2]['Authorization'], 'Bearer inert-source')
+                self.assertEqual(json.loads(calls[2].args[1])['lifetime'], '600s')
+                self.assertEqual(result['Secret'], 'inert-publisher')
 
     def test_cross_paired_audience_and_sa_rejected(self):
         """Publisher audience with reader SA URL must be refused before network."""
@@ -84,6 +98,49 @@ class ExchangeTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 wif.credential(wif.REGISTRY)
         post.assert_not_called()
+
+    def test_all_cross_role_pairs_and_second_hop_overrides_refused(self):
+        for audience in _AUDIENCES:
+            for other in _AUDIENCES:
+                if audience == other:
+                    continue
+                cfg = config_for_audience(audience)
+                cfg['service_account_impersonation_url'] = wif.ROLES[other]
+                with self.subTest(audience=audience, other=other), patch.dict(os.environ, {
+                        'OBERTH_RELEASE_WIF': '1', 'GOOGLE_APPLICATION_CREDENTIALS': wif.ADC}), \
+                        patch.object(wif, 'read', return_value=json.dumps(cfg).encode()), \
+                        patch.object(wif, 'post') as post:
+                    with self.assertRaises(ValueError): wif.credential(wif.REGISTRY)
+                    post.assert_not_called()
+        for key in ('delegates', 'oberth_impersonation_url'):
+            cfg = copy.deepcopy(CONFIG)
+            cfg[key] = wif.OBERTH_ROLES[_AUDIENCES[1]]
+            with self.subTest(key=key), patch.dict(os.environ, {
+                    'OBERTH_RELEASE_WIF': '1', 'GOOGLE_APPLICATION_CREDENTIALS': wif.ADC}), \
+                    patch.object(wif, 'read', return_value=json.dumps(cfg).encode()), \
+                    patch.object(wif, 'post') as post:
+                with self.assertRaises(ValueError): wif.credential(wif.REGISTRY)
+                post.assert_not_called()
+
+    def test_second_hop_failure_never_returns_source_token_or_provider_body(self):
+        for last in (ValueError('inert-sensitive-provider-body'), {}, {'accessToken': 'bad\nheader'}):
+            output, error = io.StringIO(), io.StringIO()
+            def read(path):
+                return json.dumps(CONFIG).encode() if path == wif.ADC else b'inert.jwt.signature'
+            with self.subTest(last=last), patch.dict(os.environ, {
+                    'OBERTH_RELEASE_WIF': '1', 'GOOGLE_APPLICATION_CREDENTIALS': wif.ADC}), \
+                    patch.object(sys, 'argv', ['helper', 'get']), \
+                    patch.object(sys, 'stdin', io.StringIO(wif.REGISTRY + '\n')), \
+                    patch.object(sys, 'stdout', output), patch.object(sys, 'stderr', error), \
+                    patch.object(wif.os, 'fstat') as fstat, patch.object(wif, 'read', side_effect=read), \
+                    patch.object(wif, 'post', side_effect=[
+                        {'token_type': 'Bearer', 'access_token': 'inert-federated'},
+                        {'accessToken': 'inert-source'}, last]) as post:
+                fstat.return_value.st_mode = stat.S_IFIFO | 0o600
+                self.assertEqual(wif.main(), 1)
+                self.assertEqual(post.call_count, 3)
+            self.assertEqual(output.getvalue(), '')
+            self.assertEqual(error.getvalue(), 'keyless registry authentication failed\n')
 
     def test_unknown_pool_rejected(self):
         """A syntactically valid but unknown pool must be refused."""
