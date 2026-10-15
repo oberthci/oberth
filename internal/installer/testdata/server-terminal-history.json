@@ -1,0 +1,123 @@
+{
+  "apiVersion": "v1",
+  "kind": "Pod",
+  "metadata": {
+    "creationTimestamp": "2026-10-03T01:53:25Z",
+    "labels": {
+      "app.kubernetes.io/instance": "oberth",
+      "app.kubernetes.io/name": "oberth",
+      "pod-template-hash": "6bcf895cfb"
+    },
+    "name": "oberth-6bcf895cfb-j8gjd",
+    "namespace": "oberth",
+    "ownerReferences": [
+      {
+        "apiVersion": "apps/v1",
+        "blockOwnerDeletion": true,
+        "controller": true,
+        "kind": "ReplicaSet",
+        "name": "oberth-6bcf895cfb",
+        "uid": "5f796abc-06e8-4287-b820-66a0917e54f9"
+      }
+    ],
+    "resourceVersion": "9845830",
+    "uid": "d15e58f0-cc62-4db6-8326-6b94fea93308"
+  },
+  "spec": {
+    "containers": [
+      {
+        "image": "europe-west4-docker.pkg.dev/skipopsmain/oberth/oberth@sha256:ffe96d3fe2f2cc673d0a37aa3b2c77585be3da0df47a608138b626e89a169fee",
+        "name": "oberth"
+      }
+    ],
+    "ephemeralContainers": [],
+    "initContainers": [
+      {
+        "image": "europe-west4-docker.pkg.dev/skipopsmain/oberth/oberth@sha256:ffe96d3fe2f2cc673d0a37aa3b2c77585be3da0df47a608138b626e89a169fee",
+        "name": "prepare-caches"
+      }
+    ]
+  },
+  "status": {
+    "conditions": [
+      {
+        "lastTransitionTime": "2026-10-03T20:22:34Z",
+        "reason": "TerminationByKubelet",
+        "status": "True",
+        "type": "DisruptionTarget"
+      },
+      {
+        "lastTransitionTime": "2026-10-03T20:22:34Z",
+        "status": "False",
+        "type": "PodReadyToStartContainers"
+      },
+      {
+        "lastTransitionTime": "2026-10-03T01:53:30Z",
+        "reason": "PodCompleted",
+        "status": "True",
+        "type": "Initialized"
+      },
+      {
+        "lastTransitionTime": "2026-10-03T20:22:34Z",
+        "reason": "PodCompleted",
+        "status": "False",
+        "type": "Ready"
+      },
+      {
+        "lastTransitionTime": "2026-10-03T20:22:34Z",
+        "reason": "PodCompleted",
+        "status": "False",
+        "type": "ContainersReady"
+      },
+      {
+        "lastTransitionTime": "2026-10-03T01:53:25Z",
+        "status": "True",
+        "type": "PodScheduled"
+      }
+    ],
+    "containerStatuses": [
+      {
+        "containerID": "containerd://bd6dd047c454988440f827d600e5e3f9682cc88b329e4730a0604878958aaa70",
+        "image": "sha256:8f8c3d08c62c20429433b6ac08b3a9b572f5e16b49b94bb82a5ab2762baf088a",
+        "imageID": "europe-west4-docker.pkg.dev/skipopsmain/oberth/oberth@sha256:ffe96d3fe2f2cc673d0a37aa3b2c77585be3da0df47a608138b626e89a169fee",
+        "lastState": {},
+        "name": "oberth",
+        "ready": false,
+        "restartCount": 0,
+        "started": false,
+        "state": {
+          "terminated": {
+            "containerID": "containerd://bd6dd047c454988440f827d600e5e3f9682cc88b329e4730a0604878958aaa70",
+            "exitCode": 0,
+            "finishedAt": "2026-10-03T20:22:34Z",
+            "reason": "Completed",
+            "startedAt": "2026-10-03T01:53:30Z"
+          }
+        }
+      }
+    ],
+    "ephemeralContainerStatuses": [],
+    "initContainerStatuses": [
+      {
+        "containerID": "containerd://c8b6515204ab592267a846e14ead7dd84c752a1dfafa552ebf33555be5656ed6",
+        "image": "sha256:8f8c3d08c62c20429433b6ac08b3a9b572f5e16b49b94bb82a5ab2762baf088a",
+        "imageID": "europe-west4-docker.pkg.dev/skipopsmain/oberth/oberth@sha256:ffe96d3fe2f2cc673d0a37aa3b2c77585be3da0df47a608138b626e89a169fee",
+        "lastState": {},
+        "name": "prepare-caches",
+        "ready": true,
+        "restartCount": 0,
+        "started": false,
+        "state": {
+          "terminated": {
+            "containerID": "containerd://c8b6515204ab592267a846e14ead7dd84c752a1dfafa552ebf33555be5656ed6",
+            "exitCode": 0,
+            "finishedAt": "2026-10-03T01:53:29Z",
+            "reason": "Completed",
+            "startedAt": "2026-10-03T01:53:29Z"
+          }
+        }
+      }
+    ],
+    "phase": "Succeeded"
+  }
+}

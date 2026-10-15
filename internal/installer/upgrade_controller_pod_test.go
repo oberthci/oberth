@@ -123,12 +123,12 @@ func TestRunUpgradeControllerPartialFailureNeverSucceeds(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, mode := range []string{"argo-failure", "oberth-failure", "rollout-failure", "version-failure", "pod-failure", "complete", "complete-terminal-history", "ambiguous-controller"} {
+	for _, mode := range []string{"argo-failure", "oberth-failure", "rollout-failure", "version-failure", "pod-failure", "complete", "complete-terminal-history", "complete-both-histories", "ambiguous-controller"} {
 		t.Run(mode, func(t *testing.T) {
 			cfg, deps, calls := controllerUpgradeFixture(t)
 			client := controllerProfileKube(t, "oberth-argo")
-			complete := mode == "complete" || mode == "complete-terminal-history"
-			if mode == "complete-terminal-history" || mode == "ambiguous-controller" {
+			complete := mode == "complete" || mode == "complete-terminal-history" || mode == "complete-both-histories"
+			if mode == "complete-terminal-history" || mode == "complete-both-histories" || mode == "ambiguous-controller" {
 				raw, err := os.ReadFile("../argojob/testdata/controller-terminal-history.json")
 				if err != nil {
 					t.Fatal(err)
@@ -155,6 +155,12 @@ func TestRunUpgradeControllerPartialFailureNeverSucceeds(t *testing.T) {
 			}
 			deps.KubeClient = client
 			dep := controllerServerFixture(t, client)
+			if mode == "complete-both-histories" {
+				history := serverHistoryFixture(t)
+				if _, err := client.CoreV1().Pods("oberth").Create(t.Context(), &history, metav1.CreateOptions{}); err != nil {
+					t.Fatal(err)
+				}
+			}
 			if mode == "rollout-failure" {
 				dep.Status.UpdatedReplicas = 0
 				if _, err := client.AppsV1().Deployments("oberth").UpdateStatus(t.Context(), dep, metav1.UpdateOptions{}); err != nil {

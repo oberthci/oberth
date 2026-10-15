@@ -1878,3 +1878,17 @@ Heartbeat ownership, bounded writes and positive join remain unchanged; final
 flush is a server-side observation, never client acknowledgement. Correlation
 adds no authority, retry or durable-work cancellation, and cannot retrospectively
 attribute uncorrelated transport failures.
+
+Server selection during the explicit controller-profile upgrade (#893) applies
+an independent strict historical-record check before the unchanged live
+Deployment/ReplicaSet/template/version proof. Only the fixed Oberth server plus
+one ordinary `prepare-caches` init container is supported. Every declared
+container must have a matching final runtime incarnation, coherent timestamps
+and prior restart history. The init must have completed successfully before the
+server starts; its normal kubelet `Ready=true` is permitted only with
+`Started=false`, a terminated state and no restartable-init policy. Additional,
+missing, waiting, running, unknown or contradictory lifecycle records refuse.
+Exactly one live candidate remains mandatory. This neither deletes history nor
+changes the Argo-controller predicate; it trusts API/kubelet status and does not
+attest against a malicious node. Terminal record identity and observation-time
+checks apply equally to server and init history.

@@ -75,12 +75,15 @@ func controllerServerPod(ctx context.Context, cfg UpgradeConfig, deps Deps, expe
 		return nil, refused
 	}
 	pods, err := deps.KubeClient.CoreV1().Pods(cfg.Namespace).List(ctx, metav1.ListOptions{LabelSelector: selector.String()})
-	// An old terminating Pod means rollout ownership is still ambiguous. Wait;
-	// never silently choose one of multiple candidates.
-	if err != nil || len(pods.Items) != 1 {
+	if err != nil {
 		return nil, refused
 	}
-	pod := &pods.Items[0]
+	// Strictly substantiated terminal history is inert; ambiguous, terminating
+	// or multiple active records still refuse. Live checks below are unchanged.
+	pod, err := selectUpgradeServer(pods.Items, cfg.Namespace, time.Now())
+	if err != nil {
+		return nil, refused
+	}
 	if pod.UID == "" || pod.DeletionTimestamp != nil || pod.Status.Phase != corev1.PodRunning {
 		return nil, refused
 	}
