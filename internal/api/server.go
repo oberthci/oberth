@@ -82,6 +82,7 @@ type ErrorClassifier func(error) (int, string)
 const writeDeadlineMargin = 1 * time.Minute
 
 type Server struct {
+	mcpWaitLog            func(mcpWaitEvent) // Private fixed-schema sink; nil uses the process logger.
 	auth                  Authenticator
 	tools                 ToolService
 	views                 ViewService

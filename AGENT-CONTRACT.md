@@ -1848,3 +1848,17 @@ commas in values retain Helm semantics. Unescaped separators, list syntax and
 escaped/noncanonical keys fail before any mutation. Pin, schema and explicit
 controller-profile checks use the same grammar. This is a documented subset
 of Helm strvals, not a replacement parser.
+
+
+### Fixed-field MCP wait diagnostics (#863)
+
+Only authenticated `wait`/`promote_status` handling emits the private fixed-schema
+start/terminal diagnostic pair and fresh public `X-Oberth-Wait-ID` nonce. JSON
+preparation refusals stay JSON; diagnostic time begins after streaming
+preparation. No argument, actor, target, RPC ID, payload, header or raw error is
+logged. The older internal-error logger is bypassed only for these two tools,
+while public error classification is retained. Counters saturate at 65535.
+Heartbeat ownership, bounded writes and positive join remain unchanged; final
+flush is a server-side observation, never client acknowledgement. Correlation
+adds no authority, retry or durable-work cancellation, and cannot retrospectively
+attribute uncorrelated transport failures.

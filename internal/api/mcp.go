@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"time"
 )
 
 const mcpProtocolVersion = "2025-03-26"
@@ -228,29 +227,9 @@ func (server *Server) handleMCP(writer http.ResponseWriter, request *http.Reques
 		if len(call.Arguments) == 0 {
 			call.Arguments = json.RawMessage("{}")
 		}
-		// Extend the write deadline for long-poll tools so the HTTP
-		// server's default WriteTimeout does not terminate the response
-		// before the requested wait duration expires (#789). The margin
-		// is derived from the service wait ceiling so the two cannot
-		// drift independently (#793).
 		if call.Name == "wait" || call.Name == "promote_status" {
-			deadline := time.Now().Add(server.maximumToolWait + writeDeadlineMargin)
-			rc := http.NewResponseController(writer)
-			deadlineErr := rc.SetWriteDeadline(deadline)
-			if deadlineErr != nil {
-				log.Printf("mcp: SetWriteDeadline: %v (long-poll may be truncated by WriteTimeout)", deadlineErr)
-			}
-			if preparer, ok := server.tools.(LongPollPreparer); ok && deadlineErr == nil && acceptsMCPStream(request.Header) && supportsMCPFlush(writer) {
-				prepared, err := preparer.PrepareLongPoll(request.Context(), actorFrom(request.Context()), call.Name, call.Arguments)
-				if err != nil {
-					response.Result = server.classifyToolFailure(err)
-					break
-				}
-				if err := server.streamLongPoll(writer, request, response, prepared, deadline); err != nil {
-					log.Print("mcp: long-poll stream ended before final delivery")
-				}
-				return
-			}
+			server.handleMCPLongPoll(writer, request, response, call)
+			return
 		}
 		result, err := server.tools.CallTool(request.Context(), actorFrom(request.Context()), call.Name, call.Arguments)
 		if err != nil {

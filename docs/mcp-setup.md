@@ -403,3 +403,23 @@ a receipt is unproven, and an interrupted parent remains interrupted even if
 its preflight receipt is valid. Current recipe changes do not hide historical
 evidence. Refusal termination data retains nonzero exit, signal and restart
 counts. This tool neither changes work nor acquires an issue lock.
+
+### Server-side wait correlation
+
+Authenticated `wait` and `promote_status` requests carry a server-generated
+`X-Oberth-Wait-ID` response header. After selecting JSON or SSE transport, the
+server emits one fixed-schema start event and one terminal event. Preparation
+refusals retain JSON and use `preparation-refused`; their diagnostic duration
+starts after preparation. Events contain only UTC, nonce, fixed tool and mode,
+elapsed milliseconds, bounded frame counts and a closed outcome. Arguments,
+RPC IDs, identities, targets, headers, response bodies and raw errors are absent.
+Unknown internal errors retain their generic public response, using the same
+nonce without the older raw-error log for these two tools.
+
+A `final-frame-flushed` outcome means the server completed its write/flush. It
+is not acknowledgement by the client or proxy. Disconnect, write/deadline,
+marshal and panic outcomes retain the observer cancellation and heartbeat-join
+contract. No automatic retries or durable-operation cancellation are added.
+The nonce is not authority; a client must actually expose the response header
+before a caller can claim client/server correlation. These diagnostics do not
+establish the cause of historical uncorrelated 502 or QUIC failures.

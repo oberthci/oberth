@@ -87,6 +87,10 @@ func writeMCPFrame(writer http.ResponseWriter, frame string, deadline time.Time,
 }
 
 func (server *Server) streamLongPoll(writer http.ResponseWriter, request *http.Request, response rpcResponse, prepared PreparedLongPoll, deadline time.Time) error {
+	return server.streamLongPollObserved(writer, request, response, prepared, deadline, nil)
+}
+
+func (server *Server) streamLongPollObserved(writer http.ResponseWriter, request *http.Request, response rpcResponse, prepared PreparedLongPoll, deadline time.Time, trace *mcpWaitObservation) error {
 	ctx, cancel := context.WithCancel(request.Context())
 	defer cancel()
 	interval := server.mcpHeartbeatInterval
@@ -101,8 +105,10 @@ func (server *Server) streamLongPoll(writer http.ResponseWriter, request *http.R
 	writer.Header().Set("Cache-Control", "no-store")
 	const heartbeat = ": keepalive\n\n"
 	if err := writeMCPFrame(writer, heartbeat, deadline, writeTimeout); err != nil {
+		trace.outcome(mcpWaitWriteOutcome(err, "initial"))
 		return err
 	}
+	trace.frame("initial")
 	stop := make(chan struct{})
 	joined := make(chan error, 1)
 	go func() {
@@ -118,10 +124,12 @@ func (server *Server) streamLongPoll(writer http.ResponseWriter, request *http.R
 				return
 			case <-ticker.C:
 				if err := writeMCPFrame(writer, heartbeat, deadline, writeTimeout); err != nil {
+					trace.outcome(mcpWaitWriteOutcome(err, "heartbeat"))
 					cancel() // Stop this observer, never its durable run or promotion.
 					joined <- err
 					return
 				}
+				trace.frame("heartbeat")
 			}
 		}
 	}()
@@ -140,17 +148,36 @@ func (server *Server) streamLongPoll(writer http.ResponseWriter, request *http.R
 	payload, callErr := prepared(ctx)
 	join()
 	if heartbeatErr != nil || ctx.Err() != nil {
+		if trace != nil && trace.event.Outcome == "panic" {
+			if request.Context().Err() != nil {
+				trace.outcome("request-context-canceled")
+			} else {
+				trace.outcome("observer-context-canceled")
+			}
+		}
 		return errors.Join(heartbeatErr, ctx.Err())
 	}
 	if callErr != nil {
-		response.Result = server.classifyToolFailure(callErr)
+		if trace == nil {
+			response.Result = server.classifyToolFailure(callErr)
+		} else {
+			response.Result = server.classifyWaitFailure(callErr, trace)
+		}
 	} else {
 		response.Result = toolSuccess(payload)
 	}
 	encoded, err := json.Marshal(response)
 	if err != nil {
+		trace.outcome("marshal-failed")
 		return err
 	}
 	// The heartbeat goroutine has joined: exactly one owner writes the final RPC.
-	return writeMCPFrame(writer, "event: message\ndata: "+string(encoded)+"\n\n", deadline, writeTimeout)
+	err = writeMCPFrame(writer, "event: message\ndata: "+string(encoded)+"\n\n", deadline, writeTimeout)
+	if err != nil {
+		trace.outcome(mcpWaitWriteOutcome(err, "final"))
+		return err
+	}
+	trace.frame("final")
+	trace.outcome("final-frame-flushed")
+	return nil
 }
