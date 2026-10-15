@@ -82,13 +82,15 @@ type ErrorClassifier func(error) (int, string)
 const writeDeadlineMargin = 1 * time.Minute
 
 type Server struct {
-	auth            Authenticator
-	tools           ToolService
-	views           ViewService
-	version         string
-	classifyError   ErrorClassifier
-	maximumToolWait time.Duration
-	mux             *http.ServeMux
+	auth                  Authenticator
+	tools                 ToolService
+	views                 ViewService
+	version               string
+	classifyError         ErrorClassifier
+	maximumToolWait       time.Duration
+	mcpHeartbeatInterval  time.Duration
+	mcpStreamWriteTimeout time.Duration
+	mux                   *http.ServeMux
 }
 
 type contextKey struct{}

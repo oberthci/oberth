@@ -570,6 +570,15 @@ continuity checks; it must never be used to reset or bypass those checks.
   authority is configured.
 - A bearer credential maps to exactly one uplink public-key fingerprint and
   identity. Plaintext tokens are displayed once and are never persisted.
+- MCP `wait` and `promote_status` negotiate POST SSE only for explicit
+  acceptable `text/event-stream`; JSON-only/headerless clients and `q=0`
+  exclusions keep JSON. Authentication, strict arguments and initial target
+  resolution precede streaming. Fixed comments flush immediately and every
+  20 seconds, followed by exactly one JSON-RPC `message` event with the request
+  ID. The existing maximum wait and overall write deadline remain unchanged;
+  each write/flush has a five-second bound. Heartbeat writes and the final
+  response never overlap. Disconnect/write failure cancels only observation,
+  never durable work, and joins the heartbeat writer before returning.
 - MCP exposes 35 tools: `status`, bounded named-step `logs`, exact-run
   `run_get`/`run_logs`, `artifacts`/`artifact_get`, `wait`, `sync`, `promote`,
   `promotion_list`, `promote_status`, `publish_retry`, issue

@@ -308,19 +308,24 @@ state or the server-side `timeout` expires (maximum 600 seconds). The server
 extends its HTTP write deadline for these tools, so a large `timeout` does not
 hit the server's own `WriteTimeout`.
 
-A large `timeout` only helps if the **client's** MCP tool timeout is at least
-as long. Clients typically enforce their own idle or total timeout:
+Clients that explicitly accept `text/event-stream` receive a Streamable HTTP
+SSE response for these two tools. Authentication, strict argument validation,
+and the first target lookup complete before the stream begins. Fixed comment
+heartbeats are flushed immediately and every 20 seconds while the observation
+waits. The stream ends after one `message` event containing the normal JSON-RPC
+response with the original request ID. Headerless clients, JSON-only clients,
+and clients excluding SSE with `q=0` retain the JSON response.
 
-- Claude Code's `MCP_TOOL_TIMEOUT` and per-server `timeout` setting
-- Codex's remote-tool idle timeout
-- HTTP reverse proxies (Cloudflare non-Enterprise origin TTFB limit is
-  documented at 100 seconds; 120 seconds empirically passed through the
-  proxied `watch.oberth.ci` endpoint, but 600 seconds has not been verified)
-
-When a client timeout is shorter than the requested `timeout`, the client
-closes the connection before the server returns. The server logs a write error
-but the run's state is unaffected. Use shorter `timeout` values (60-120s) and
-retry in a loop when operating through a proxy with an unknown idle limit.
+Heartbeats prevent an idle reverse proxy from timing out a silent long poll.
+The observed Cloudflare HTTP 524 at approximately 125 seconds is one such
+failure; extending the origin write deadline alone does not prevent it.
+Heartbeats do not extend a client's total MCP request deadline. Keep the tool's
+`timeout` below that configured deadline (for Codex, `tool_timeout_sec`). JSON
+clients behind an idle proxy should use shorter waits and retry; 100 seconds
+is below the observed edge limit. A transport failure leaves the run or
+promotion unchanged: disconnect cancels only its observation, and the heartbeat
+writer is joined before the handler returns. An individual stream write/flush
+is bounded to five seconds, within the existing overall write deadline.
 
 ### Secret-store release preflight
 

@@ -267,17 +267,12 @@ func (service *API) CallTool(ctx context.Context, actor api.Actor, name string, 
 			return nil, err
 		}
 		return service.RunArtifact(ctx, actor, arguments.ID, arguments.Name, filter)
-	case "wait":
-		var arguments struct {
-			Repo    string `json:"repo"`
-			SHA     string `json:"sha"`
-			Trigger string `json:"trigger"`
-			Timeout int    `json:"timeout"`
-		}
-		if err := decodeTool(raw, &arguments); err != nil {
+	case "wait", "promote_status":
+		prepared, err := service.PrepareLongPoll(ctx, actor, name, raw)
+		if err != nil {
 			return nil, err
 		}
-		return service.waitRun(ctx, arguments.Repo, arguments.SHA, arguments.Trigger, arguments.Timeout, actor.Identity)
+		return prepared(ctx)
 	case "sync":
 		var arguments struct {
 			Repo   string `json:"repo"`
@@ -308,15 +303,6 @@ func (service *API) CallTool(ctx context.Context, actor api.Actor, name string, 
 			return nil, err
 		}
 		return service.promotionList(ctx, arguments)
-	case "promote_status":
-		var arguments struct {
-			ID      string `json:"id"`
-			Timeout int    `json:"timeout"`
-		}
-		if err := decodeTool(raw, &arguments); err != nil {
-			return nil, err
-		}
-		return service.waitPromotion(ctx, arguments.ID, arguments.Timeout)
 	case "issue_create":
 		var arguments struct {
 			Title string  `json:"title"`
@@ -1199,57 +1185,72 @@ func selectLogRange(results []model.StepResult, wanted string) (string, string, 
 }
 
 func (service *API) waitRun(ctx context.Context, repositoryName, selector, trigger string, requestedSeconds int, actor string) (WaitResponse, error) {
+	prepared, err := service.prepareWaitRun(ctx, repositoryName, selector, trigger, requestedSeconds, actor)
+	if err != nil {
+		return WaitResponse{}, err
+	}
+	return prepared(ctx)
+}
+
+func (service *API) prepareWaitRun(ctx context.Context, repositoryName, selector, trigger string, requestedSeconds int, actor string) (func(context.Context) (WaitResponse, error), error) {
 	if !validSHASelector(selector) {
-		return WaitResponse{}, fmt.Errorf("%w: full or short SHA is required", ErrInvalidInput)
+		return nil, fmt.Errorf("%w: full or short SHA is required", ErrInvalidInput)
 	}
 	trigger = normalizeTrigger(strings.TrimSpace(trigger))
 	duration, err := service.waitDuration(requestedSeconds)
 	if err != nil {
-		return WaitResponse{}, err
+		return nil, err
 	}
-	timer := time.NewTimer(duration)
-	defer timer.Stop()
-	for {
-		status, err := service.waitStatus(ctx, repositoryName, selector, trigger, actor)
-		if err != nil {
-			return WaitResponse{}, err
-		}
-		// If no matching trigger exists yet, waitStatus preserves the current
-		// unfiltered status. It must not satisfy the awaited trigger.
-		triggerMatch := trigger == "" || status.Run.Trigger == trigger
-		if triggerMatch && status.Run.Status.Terminal() {
-			return WaitResponse{StatusResponse: status}, nil
-		}
-		changed := service.signals.Run(status.Run.ID)
-		// Re-read after subscribing so a transition between the first read and
-		// channel lookup cannot be lost.
-		status, err = service.waitStatus(ctx, repositoryName, selector, trigger, actor)
-		if err != nil {
-			return WaitResponse{}, err
-		}
-		triggerMatch = trigger == "" || status.Run.Trigger == trigger
-		if triggerMatch && status.Run.Status.Terminal() {
-			return WaitResponse{StatusResponse: status}, nil
-		}
-		select {
-		case <-ctx.Done():
-			return WaitResponse{}, ctx.Err()
-		case <-timer.C:
-			// When a trigger filter is active and the resolved run does not
-			// match it, the awaited run was never seen. Report still_running
-			// so a caller that checks only the flag does not mistake a
-			// terminal branch run for the awaited release run (#439).
-			stillRunning := !status.Run.Status.Terminal()
-			if !triggerMatch {
-				stillRunning = true
-			}
-			if status.Scheduling != nil {
-				status.Scheduling.AgeSeconds = max(0, int64(time.Since(status.Scheduling.ObservedAt)/time.Second))
-			}
-			return WaitResponse{StatusResponse: status, StillRunning: stillRunning}, nil
-		case <-changed:
-		}
+	deadline := time.Now().Add(duration)
+	status, err := service.waitStatus(ctx, repositoryName, selector, trigger, actor)
+	if err != nil {
+		return nil, err
 	}
+	return func(ctx context.Context) (WaitResponse, error) {
+		timer := time.NewTimer(time.Until(deadline))
+		defer timer.Stop()
+		for {
+			// If no matching trigger exists yet, waitStatus preserves the current
+			// unfiltered status. It must not satisfy the awaited trigger.
+			triggerMatch := trigger == "" || status.Run.Trigger == trigger
+			if triggerMatch && status.Run.Status.Terminal() {
+				return WaitResponse{StatusResponse: status}, nil
+			}
+			changed := service.signals.Run(status.Run.ID)
+			// Re-read after subscribing so a transition between the first read and
+			// channel lookup cannot be lost.
+			status, err = service.waitStatus(ctx, repositoryName, selector, trigger, actor)
+			if err != nil {
+				return WaitResponse{}, err
+			}
+			triggerMatch = trigger == "" || status.Run.Trigger == trigger
+			if triggerMatch && status.Run.Status.Terminal() {
+				return WaitResponse{StatusResponse: status}, nil
+			}
+			select {
+			case <-ctx.Done():
+				return WaitResponse{}, ctx.Err()
+			case <-timer.C:
+				// When a trigger filter is active and the resolved run does not
+				// match it, the awaited run was never seen. Report still_running
+				// so a caller that checks only the flag does not mistake a
+				// terminal branch run for the awaited release run (#439).
+				stillRunning := !status.Run.Status.Terminal()
+				if !triggerMatch {
+					stillRunning = true
+				}
+				if status.Scheduling != nil {
+					status.Scheduling.AgeSeconds = max(0, int64(time.Since(status.Scheduling.ObservedAt)/time.Second))
+				}
+				return WaitResponse{StatusResponse: status, StillRunning: stillRunning}, nil
+			case <-changed:
+				status, err = service.waitStatus(ctx, repositoryName, selector, trigger, actor)
+				if err != nil {
+					return WaitResponse{}, err
+				}
+			}
+		}
+	}, nil
 }
 
 func (service *API) waitStatus(ctx context.Context, repositoryName, selector, trigger, actor string) (StatusResponse, error) {
@@ -1549,42 +1550,49 @@ func promotionRunRef(target, sha string) string {
 	return "promotion/" + strings.Trim(target, "/") + "/" + suffix
 }
 
-func (service *API) waitPromotion(ctx context.Context, id string, requestedSeconds int) (PromotionWaitResponse, error) {
+func (service *API) prepareWaitPromotion(ctx context.Context, id string, requestedSeconds int) (func(context.Context) (PromotionWaitResponse, error), error) {
 	if service.promotions == nil || strings.TrimSpace(id) == "" {
-		return PromotionWaitResponse{}, fmt.Errorf("%w: promotion ID is required", ErrInvalidInput)
+		return nil, fmt.Errorf("%w: promotion ID is required", ErrInvalidInput)
 	}
 	duration, err := service.waitDuration(requestedSeconds)
 	if err != nil {
-		return PromotionWaitResponse{}, err
+		return nil, err
 	}
-	timer := time.NewTimer(duration)
-	defer timer.Stop()
-	for {
-		promotion, err := service.promotions.Promotion(ctx, id)
-		if err != nil {
-			return PromotionWaitResponse{}, err
-		}
-		if promotion.Status.Terminal() {
-			return PromotionWaitResponse{Promotion: promotion}, nil
-		}
-		changed := service.signals.Promotion(id)
-		promotion, err = service.promotions.Promotion(ctx, id)
-		if err != nil {
-			return PromotionWaitResponse{}, err
-		}
-		if promotion.Status.Terminal() {
-			return PromotionWaitResponse{Promotion: promotion}, nil
-		}
-		select {
-		case <-ctx.Done():
-			return PromotionWaitResponse{}, ctx.Err()
-		case <-timer.C:
-			response := PromotionWaitResponse{Promotion: promotion}
-			response.StillRunning = true
-			return response, nil
-		case <-changed:
-		}
+	deadline := time.Now().Add(duration)
+	promotion, err := service.promotions.Promotion(ctx, id)
+	if err != nil {
+		return nil, err
 	}
+	return func(ctx context.Context) (PromotionWaitResponse, error) {
+		timer := time.NewTimer(time.Until(deadline))
+		defer timer.Stop()
+		for {
+			if promotion.Status.Terminal() {
+				return PromotionWaitResponse{Promotion: promotion}, nil
+			}
+			changed := service.signals.Promotion(id)
+			promotion, err = service.promotions.Promotion(ctx, id)
+			if err != nil {
+				return PromotionWaitResponse{}, err
+			}
+			if promotion.Status.Terminal() {
+				return PromotionWaitResponse{Promotion: promotion}, nil
+			}
+			select {
+			case <-ctx.Done():
+				return PromotionWaitResponse{}, ctx.Err()
+			case <-timer.C:
+				response := PromotionWaitResponse{Promotion: promotion}
+				response.StillRunning = true
+				return response, nil
+			case <-changed:
+				promotion, err = service.promotions.Promotion(ctx, id)
+				if err != nil {
+					return PromotionWaitResponse{}, err
+				}
+			}
+		}
+	}, nil
 }
 
 func (service *API) issueCreate(ctx context.Context, actor api.Actor, title, body string) (model.Issue, error) {
