@@ -149,6 +149,7 @@ call the proxy hostname directly.
 |------|-------------|
 | `status` | CI status for a SHA or branch, including the failed step |
 | `logs` | One named step's log output for a SHA, optionally filtered |
+| `run_kvm_preflight` | Bounded historical KVM intent, receipt/refusal and cleanup by exact run ID or unique 12+ character prefix |
 | `run_get` | One durable run and its steps by full run ID or unique 12+ character prefix |
 | `run_logs` | One exact burn/step log by full run ID or unique 12+ character prefix, optionally filtered |
 | `artifacts` | The files a run kept, with size and modification time |
@@ -386,3 +387,19 @@ no body is truncated and every requested ID has a result. Later small issues
 can still fit after a large issue. Retrieve any `response_limit` IDs with
 `issue_get`. Requests must contain 1..50 unique positive IDs. Neither read tool
 acquires or renews locks. This is live pagination, not a point-in-time snapshot.
+
+### Historical KVM preflight evidence
+
+`run_kvm_preflight {"id":"<run ID or unique 12+ character prefix>"}` is an
+authenticated read. It returns the canonical run ID, qualified repository,
+candidate SHA and parent status. A known run without a KVM preflight returns
+`present: false`; unknown or ambiguous run IDs remain errors.
+
+When present, `evidence` includes the validated immutable intent and its digest,
+submission/rejection/cleanup flags, and the receipt or bounded refusal.
+`receipt_valid` means the historical receipt matches that admission; it does
+not authorize publication or prove the parent run succeeded. `cleaned` without
+a receipt is unproven, and an interrupted parent remains interrupted even if
+its preflight receipt is valid. Current recipe changes do not hide historical
+evidence. Refusal termination data retains nonzero exit, signal and restart
+counts. This tool neither changes work nor acquires an issue lock.

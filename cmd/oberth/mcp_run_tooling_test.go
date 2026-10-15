@@ -62,7 +62,7 @@ func TestMCPRunToolsExposePendingAndInvalidIDs(t *testing.T) {
 	if err := logs.AppendStepProgress(run.ID, runprogress.Event{Version: runprogress.Version, Burn: "release-build-variants", Step: "release-build-variants", Status: runprogress.StepRunning, StartedAt: &started}); err != nil {
 		t.Fatal(err)
 	}
-	control, err := service.NewAPI(service.APIConfig{Runs: database, History: database, Repositories: database, Logs: logs})
+	control, err := service.NewAPI(service.APIConfig{Runs: database, History: database, Repositories: database, Logs: logs, KVMPreflights: database})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -107,6 +107,21 @@ func TestMCPRunToolsExposePendingAndInvalidIDs(t *testing.T) {
 	isError, text = call("run_get", `{"id":"abc123"}`)
 	if !isError || !strings.Contains(text, "12 to 32 hexadecimal") || strings.Contains(text, "internal error") {
 		t.Fatalf("invalid ID error = %q", text)
+	}
+	isError, text = call("run_kvm_preflight", fmt.Sprintf(`{"id":%q}`, run.ID[:12]))
+	var preflight service.KVMPreflightResponse
+	if isError || json.Unmarshal([]byte(text), &preflight) != nil || preflight.Present || preflight.Evidence != nil || preflight.RunID != run.ID {
+		t.Fatalf("KVM absent historical evidence did not roundtrip: %q", text)
+	}
+	isError, text = call("run_kvm_preflight", `{"id":"abc123"}`)
+	if !isError || !strings.Contains(text, "12 to 32 hexadecimal") {
+		t.Fatalf("invalid KVM run ID error = %q", text)
+	}
+	unauthenticated := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(`{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"run_kvm_preflight","arguments":{"id":"`+run.ID+`"}}}`))
+	denied := httptest.NewRecorder()
+	server.Handler().ServeHTTP(denied, unauthenticated)
+	if denied.Code != http.StatusUnauthorized || strings.Contains(denied.Body.String(), run.ID) {
+		t.Fatal("KVM evidence exposed without bearer authentication")
 	}
 	request := httptest.NewRequest(http.MethodGet, "/api/runs/"+run.ID[:12]+"/logs?burn=release-build-variants&step=release-build-variants", nil)
 	request.Header.Set("Authorization", "Bearer test-token")

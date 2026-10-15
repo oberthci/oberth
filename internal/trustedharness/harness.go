@@ -276,7 +276,7 @@ func run(ctx context.Context, intent vmrunner.KVMIntent, artifactRoot, privateRo
 	}
 	qmp := filepath.Join(dir, "qmp.sock")
 	control := filepath.Join(dir, "guest.sock")
-	qemu := deps.qemu("-sandbox", "on,obsolete=deny,elevateprivileges=deny,spawn=deny,resourcecontrol=deny", "-nodefaults", "-no-user-config", "-display", "none", "-accel", "kvm", "-cpu", "host", "-m", "2048", "-smp", "2", "-nic", "none", "-kernel", filepath.Join(dir, "kernel"), "-initrd", filepath.Join(dir, "initramfs"), "-append", "console=ttyS0 panic=1", "-serial", "null", "-qmp", "unix:"+qmp+",server=on,wait=off", "-device", "virtio-serial-pci", "-chardev", "socket,id=control,path="+control+",server=on,wait=off", "-device", "virtserialport,chardev=control,name=org.oberth.probe", "-fw_cfg", "name=opt/oberth/artifacts,file="+input)
+	qemu := deps.qemu("-sandbox", "on,obsolete=deny,elevateprivileges=deny,spawn=deny,resourcecontrol=deny", "-nodefaults", "-no-shutdown", "-no-user-config", "-display", "none", "-accel", "kvm", "-cpu", "host", "-m", "2048", "-smp", "2", "-nic", "none", "-kernel", filepath.Join(dir, "kernel"), "-initrd", filepath.Join(dir, "initramfs"), "-append", "console=ttyS0 panic=1", "-serial", "null", "-qmp", "unix:"+qmp+",server=on,wait=off", "-device", "virtio-serial-pci", "-chardev", "socket,id=control,path="+control+",server=on,wait=off", "-device", "virtserialport,chardev=control,name=org.oberth.probe", "-fw_cfg", "name=opt/oberth/artifacts,file="+input)
 	qemu.Env = []string{"PATH=/usr/bin:/bin"}
 	qemu.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	if e = qemu.Start(); e != nil {
@@ -309,7 +309,8 @@ func run(ctx context.Context, intent vmrunner.KVMIntent, artifactRoot, privateRo
 	if e = suite.VerifyInventory(intent.Contract, results); e != nil {
 		return vmrunner.KVMReport{}, e
 	}
-	// The host ends the guest through its private QMP channel and requires QEMU
+	// -no-shutdown preserves QMP after the suite witnesses guest poweroff.
+	// The host alone ends QEMU through its private QMP channel and requires it
 	// to exit successfully. Timeout/error paths kill and reap its process group.
 	if e = quitQEMU(ctx, qmp); e != nil {
 		return vmrunner.KVMReport{}, e

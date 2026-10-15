@@ -579,8 +579,8 @@ continuity checks; it must never be used to reset or bypass those checks.
   each write/flush has a five-second bound. Heartbeat writes and the final
   response never overlap. Disconnect/write failure cancels only observation,
   never durable work, and joins the heartbeat writer before returning.
-- MCP exposes 35 tools: `status`, bounded named-step `logs`, exact-run
-  `run_get`/`run_logs`, `artifacts`/`artifact_get`, `wait`, `sync`, `promote`,
+- MCP exposes 36 tools: `status`, bounded named-step `logs`, exact-run
+  `run_get`/`run_logs`, `run_kvm_preflight`, `artifacts`/`artifact_get`, `wait`, `sync`, `promote`,
   `promotion_list`, `promote_status`, `publish_retry`, issue
   create/get/get_many/update/append/close/reopen/delete/list/lock,
   secret-access list/allow/revoke, `repo_list`, `repo_remove`, `run_list`,
@@ -592,6 +592,14 @@ continuity checks; it must never be used to reset or bypass those checks.
   `promotion.grantMaxLifetime`, default `24h`, hard ceiling `168h` / 7 days).
   The installer pins this value explicitly so `helm upgrade --reuse-values`
   carries the default.
+- MCP `run_kvm_preflight` reads bounded historical evidence by the same run ID
+  rules. It binds the immutable intent to the canonical run, repository ID,
+  current qualified repository and tested SHA, revalidates receipt/refusal and
+  lifecycle consistency, and never changes work or renews locks. Known runs
+  without preflights return `present: false`. Receipt validity, cleanup and
+  parent status are separate: cleanup alone is not success and historical
+  evidence grants no current publication authority. Current recipe changes
+  do not suppress otherwise valid historical receipts.
 - MCP `run_get` and `run_logs` accept the same full IDs and unique prefixes
   as the dashboard run views. ID prefix resolution is read-only; scheduler
   and mutation lookups still require exact durable IDs. `run_logs` and `logs`
@@ -1005,6 +1013,10 @@ continuity checks; it must never be used to reset or bypass those checks.
   pending rows remains fatal. v20 SQL triggers retain journal identity, accepted
   UID/evidence and irreversible cleanup against direct writes. QEMU always uses
   `-sandbox on,obsolete=deny,elevateprivileges=deny,spawn=deny,resourcecontrol=deny`.
+  `-no-shutdown` preserves QMP after guest poweroff; the suite releases its QMP
+  connection before returning, then the harness alone issues final quit and
+  requires successful host waitpid. Guest shutdown or socket EOF alone is not a
+  passing verdict.
   See `docs/trusted-kvm-suites.md` for the closed producer protocol, packaging,
   trust assumptions, baseline-change behavior and external rollout prerequisites.
 - VM lifecycle state uses the audited schema-v13 `vm_executions` journal.

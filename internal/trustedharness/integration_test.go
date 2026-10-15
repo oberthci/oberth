@@ -104,7 +104,7 @@ func TestHarnessProtectedTransportIntegration(t *testing.T) {
 			}
 			if qemu != nil {
 				joined := strings.Join(argv, " ")
-				for _, must := range []string{"-sandbox on,obsolete=deny,elevateprivileges=deny,spawn=deny,resourcecontrol=deny", "-accel kvm", "-nic none", "-nodefaults", "-fw_cfg name=opt/oberth/artifacts,file="} {
+				for _, must := range []string{"-sandbox on,obsolete=deny,elevateprivileges=deny,spawn=deny,resourcecontrol=deny", "-accel kvm", "-nic none", "-nodefaults", "-no-shutdown", "-fw_cfg name=opt/oberth/artifacts,file="} {
 					if !strings.Contains(joined, must) {
 						t.Fatalf("guest boundary missing %s", must)
 					}

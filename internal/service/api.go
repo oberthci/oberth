@@ -48,6 +48,7 @@ const grantPolicySyncAdvisory = "Grant recorded; the identity map refreshes auto
 	"Until then, access fails closed."
 
 type APIConfig struct {
+	KVMPreflights             KVMPreflightReader
 	SchedulingObserver        SchedulingObserver
 	Admission                 AdmissionObserver
 	Runs                      RunResolver
@@ -78,6 +79,7 @@ type APIConfig struct {
 }
 
 type API struct {
+	kvmPreflights             KVMPreflightReader
 	schedulingObserver        SchedulingObserver
 	admission                 AdmissionObserver
 	runs                      RunResolver
@@ -145,6 +147,7 @@ func NewAPI(config APIConfig) (*API, error) {
 		promotionGrantMaxLifetime = promotionGrantHardCeiling
 	}
 	return &API{
+		kvmPreflights:      config.KVMPreflights,
 		schedulingObserver: config.SchedulingObserver, admission: config.Admission,
 		runs: config.Runs, history: config.History, repositories: config.Repositories,
 		issues: config.Issues, promotions: config.Promotions, promotionRuns: config.PromotionRuns,
@@ -205,6 +208,17 @@ func (service *API) CallTool(ctx context.Context, actor api.Actor, name string, 
 			return nil, err
 		}
 		return service.logsFor(ctx, arguments.Repo, arguments.SHA, arguments.Step, filter)
+	case "run_kvm_preflight":
+		var arguments struct {
+			ID string `json:"id"`
+		}
+		if err := decodeTool(raw, &arguments); err != nil {
+			return nil, err
+		}
+		if strings.TrimSpace(arguments.ID) == "" {
+			return nil, fmt.Errorf("%w: run ID is required", ErrInvalidInput)
+		}
+		return service.readKVMPreflight(ctx, arguments.ID)
 	case "run_get":
 		var arguments struct {
 			ID string `json:"id"`
