@@ -203,6 +203,7 @@ WHEN NOT (
     )
 )
 BEGIN SELECT RAISE(ABORT, 'promotion transition is immutable'); END;
+ALTER TABLE step_results DROP COLUMN termination_json;
 DELETE FROM schema_migrations WHERE version >= 16;`); err != nil {
 		t.Fatal(err)
 	}

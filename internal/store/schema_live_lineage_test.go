@@ -123,6 +123,7 @@ WHEN NOT (
     )
 )
 BEGIN SELECT RAISE(ABORT, 'promotion transition is immutable'); END;
+ALTER TABLE step_results DROP COLUMN termination_json;
 DELETE FROM schema_migrations WHERE version > 10;
 PRAGMA foreign_keys = ON;`); err != nil {
 		t.Fatal(err)

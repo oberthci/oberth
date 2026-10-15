@@ -66,6 +66,7 @@ WHEN NOT (
     )
 )
 BEGIN SELECT RAISE(ABORT, 'promotion transition is immutable'); END;
+ALTER TABLE step_results DROP COLUMN termination_json;
 DELETE FROM schema_migrations WHERE version>=15`)
 	mustPilot(t, err)
 	mustPilot(t, db.Close())

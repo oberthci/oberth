@@ -13,7 +13,7 @@ type migration struct {
 func LatestMigrationVersion() int { return latestMigrationVersion }
 
 const (
-	latestMigrationVersion = 20
+	latestMigrationVersion = 21
 	// oberthSchemaIdentity is the fresh-deployment default. Existing deployments
 	// supply their original immutable identity through ProtocolConfig; bootstrap
 	// SQL and legacy schema validation use that exact configured operand.
@@ -1055,4 +1055,5 @@ BEGIN
     SELECT RAISE(ABORT, 'VM execution evidence is immutable');
 END;`,
 	},
+	{version: 21, sql: `ALTER TABLE step_results ADD COLUMN termination_json TEXT CHECK(termination_json IS NULL OR length(termination_json) <= 4096);`},
 }

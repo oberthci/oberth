@@ -413,6 +413,7 @@ func (controller *Controller) Wait(ctx context.Context, name, runID string, dest
 			}
 			reporter.finish(budget)
 			completion := completionFor(settled)
+			controller.collectStepDiagnostics(ctx, settled, &completion)
 			if err := controller.retireExecutorIdentity(ctx, settled); err != nil {
 				return completion, fmt.Errorf("retire executor identity: %w", err)
 			}
@@ -532,6 +533,7 @@ func (controller *Controller) TerminalState(ctx context.Context, name string) (*
 		return nil, ErrNotTerminal
 	}
 	completion := completionFor(workflow)
+	controller.collectStepDiagnostics(ctx, workflow, &completion)
 	return &completion, nil
 }
 

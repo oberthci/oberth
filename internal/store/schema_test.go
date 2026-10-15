@@ -26,8 +26,8 @@ func (e sqliteResultError) Code() int { return int(e) }
 func TestSchemaMigrationsAreContiguous(t *testing.T) {
 	t.Parallel()
 
-	if latestMigrationVersion != 20 {
-		t.Fatalf("latest migration version = %d, want 20", latestMigrationVersion)
+	if latestMigrationVersion != 21 {
+		t.Fatalf("latest migration version = %d, want 21", latestMigrationVersion)
 	}
 	if len(migrations) != latestMigrationVersion {
 		t.Fatalf("migration count = %d, want %d", len(migrations), latestMigrationVersion)
@@ -602,6 +602,7 @@ DROP TABLE vm_suite_resources;
 DROP TABLE vm_suite_executions;
 DROP TABLE vm_capacity_slots;
 DROP TABLE vm_executions;
+ALTER TABLE step_results DROP COLUMN termination_json;
 DELETE FROM schema_migrations WHERE version > 1;`); err != nil {
 		_ = raw.Close()
 		t.Fatal(err)
@@ -1025,7 +1026,7 @@ func TestFreshSchemaIsCompleteAndIdempotent(t *testing.T) {
 		"upstreams":                 {"id", "name", "kind", "base_url", "created_at", "updated_at", "key_name"},
 		"repositories":              {"id", "name", "upstream_id", "default_branch", "created_at", "updated_at"},
 		"runs":                      {"queue_sequence", "id", "repo_id", "ref_kind", "ref", "sha", "actor", "release", "trigger", "phase", "job_name", "tested_sha", "base_sha", "failed_burn", "failed_step", "error", "status", "reason", "superseded_by", "queued_at", "started_at", "finished_at", "created_at", "updated_at", "credentialed", "concurrency_group"},
-		"step_results":              {"run_id", "burn", "step", "ordinal", "status", "exit_code", "log_start", "log_end", "started_at", "finished_at", "recorded_at", "declared_size", "max_rss_bytes", "user_cpu_ns", "system_cpu_ns"},
+		"step_results":              {"run_id", "burn", "step", "ordinal", "status", "exit_code", "log_start", "log_end", "started_at", "finished_at", "recorded_at", "declared_size", "max_rss_bytes", "user_cpu_ns", "system_cpu_ns", "termination_json"},
 		"promotions":                {"sequence", "id", "repo_id", "source_branch", "source_sha", "target_ref", "previous_sha", "result_sha", "actor", "status", "run_id", "error", "created_at", "updated_at", "grant_id"},
 		"promotion_grants":          {"id", "repo_id", "source_sha", "target_ref", "issuer", "issuer_fingerprint", "note", "created_at", "expires_at", "revoked_by", "revoked_at", "consumed_by", "consumed_at"},
 		"issues":                    {"id", "repo_id", "kind", "branch", "title", "body", "state", "occurrences", "created_at", "updated_at", "closed_at", "ci_origin", "ci_work_sequence", "ci_work_id"},

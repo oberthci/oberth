@@ -830,9 +830,9 @@ func (s *Store) PutStepResult(ctx context.Context, result model.StepResult) (mod
 	row := s.db.QueryRowContext(ctx, `
 INSERT INTO step_results(
     run_id, burn, step, ordinal, status, exit_code, log_start, log_end,
-    declared_size, max_rss_bytes, user_cpu_ns, system_cpu_ns, started_at, finished_at, recorded_at
+    declared_size, max_rss_bytes, user_cpu_ns, system_cpu_ns, started_at, finished_at, recorded_at, termination_json
 )
-VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(run_id, burn, step) DO UPDATE SET
     ordinal = excluded.ordinal,
     status = excluded.status,
@@ -845,13 +845,14 @@ ON CONFLICT(run_id, burn, step) DO UPDATE SET
     system_cpu_ns = excluded.system_cpu_ns,
     started_at = excluded.started_at,
     finished_at = excluded.finished_at,
-    recorded_at = excluded.recorded_at
+    recorded_at = excluded.recorded_at,
+    termination_json = excluded.termination_json
 RETURNING run_id, burn, step, ordinal, status, exit_code, log_start, log_end,
-		  declared_size, max_rss_bytes, user_cpu_ns, system_cpu_ns, started_at, finished_at, recorded_at`,
+		  declared_size, max_rss_bytes, user_cpu_ns, system_cpu_ns, started_at, finished_at, recorded_at, termination_json`,
 		result.RunID, result.Burn, result.Step, result.Ordinal, result.Status,
 		result.ExitCode, result.LogStart, result.LogEnd, result.DeclaredSize,
 		result.MaxRSSBytes, result.UserCPU.Nanoseconds(), result.SystemCPU.Nanoseconds(),
-		nullableUnixNano(result.StartedAt), nullableUnixNano(result.FinishedAt), recorded)
+		nullableUnixNano(result.StartedAt), nullableUnixNano(result.FinishedAt), recorded, stepDiagnosticJSON(result.Termination, result.RunID))
 	value, err := scanStepResult(row)
 	if err != nil {
 		return model.StepResult{}, fmt.Errorf("put step result: %w", err)
@@ -862,7 +863,7 @@ RETURNING run_id, burn, step, ordinal, status, exit_code, log_start, log_end,
 func (s *Store) StepResults(ctx context.Context, runID string) ([]model.StepResult, error) {
 	rows, err := s.db.QueryContext(ctx, `
 SELECT run_id, burn, step, ordinal, status, exit_code, log_start, log_end,
-	   declared_size, max_rss_bytes, user_cpu_ns, system_cpu_ns, started_at, finished_at, recorded_at
+	   declared_size, max_rss_bytes, user_cpu_ns, system_cpu_ns, started_at, finished_at, recorded_at, termination_json
 FROM step_results WHERE run_id = ? ORDER BY ordinal, burn, step`, runID)
 	if err != nil {
 		return nil, fmt.Errorf("list step results: %w", err)
@@ -909,12 +910,14 @@ func scanStepResult(row rowScanner) (model.StepResult, error) {
 	var started, finished sql.NullInt64
 	var userCPUNanos, systemCPUNanos int64
 	var recorded int64
+	var diagnostic sql.NullString
 	if err := row.Scan(&value.RunID, &value.Burn, &value.Step, &value.Ordinal,
 		&value.Status, &value.ExitCode, &value.LogStart, &value.LogEnd,
 		&value.DeclaredSize, &value.MaxRSSBytes, &userCPUNanos, &systemCPUNanos,
-		&started, &finished, &recorded); err != nil {
+		&started, &finished, &recorded, &diagnostic); err != nil {
 		return model.StepResult{}, err
 	}
+	value.Termination = readStepDiagnostic(diagnostic, value.RunID)
 	value.UserCPU = time.Duration(userCPUNanos)
 	value.SystemCPU = time.Duration(systemCPUNanos)
 	value.StartedAt, value.FinishedAt = nullableTime(started), nullableTime(finished)

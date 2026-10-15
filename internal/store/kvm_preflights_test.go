@@ -314,7 +314,7 @@ func TestKVMJournalMigration20PreservesLegacyExecution(t *testing.T) {
 	_, err = s.db.Exec(`ALTER TABLE vm_executions RENAME TO saved_executions; DROP INDEX vm_execution_capacity;` + migrations[12].sql + `
  INSERT INTO vm_executions(run_id,intent_json,spec_identity,instance_json,submitted,rejected,cleaning,cleaned,created_at,updated_at)
  SELECT run_id,intent_json,spec_identity,instance_json,submitted,rejected,cleaning,cleaned,created_at,updated_at FROM saved_executions;
- DROP TABLE saved_executions; DELETE FROM schema_migrations WHERE version=20;`)
+ DROP TABLE saved_executions; ALTER TABLE step_results DROP COLUMN termination_json; DELETE FROM schema_migrations WHERE version>=20;`)
 	mustPilot(t, err)
 	mustPilot(t, s.Close())
 	s, err = Open(ctx, path, Options{Now: func() time.Time { return now }})

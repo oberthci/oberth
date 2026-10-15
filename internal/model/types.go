@@ -270,6 +270,7 @@ func (s StepStatus) Progress() int {
 }
 
 type StepResult struct {
+	Termination  *StepDiagnostic
 	RunID        string
 	Burn         string
 	Step         string

@@ -1603,6 +1603,7 @@ version that is recorded on live databases must never be rewritten.
 | v18 | -- | Grant declarations (#623): grant_declarations table for declared-but-not-granted path tracking; `access_list --pending` query; recorded at Workflow admission | Database restore |
 | v19 | -- | Promotion grants (#826): promotion_grants table with append-only guards; promotions gains grant_id column; replaces promotions_guard_update trigger to guard grant_id immutability | Database restore |
 | v20 | Unreleased (#278) | vm_executions: execution kind, immutable KVM preflight intent/Workflow UID/receipt; preserve legacy VM lifecycle checks and shared capacity | Database restore |
+| v21 | Unreleased (#894) | Nullable bounded step termination diagnostics; old rows remain explicitly unavailable, with no inferred OOM or backfill | Database restore |
 
 **Contract test:** `TestEveryMigrationDocumentedInAgentContract` asserts that
 every migration version in `internal/store/schema.go` has a corresponding
@@ -1892,3 +1893,31 @@ Exactly one live candidate remains mandatory. This neither deletes history nor
 changes the Argo-controller predicate; it trusts API/kubelet status and does not
 attest against a malicious node. Terminal record identity and observation-time
 checks apply equally to server and init history.
+
+## Native step termination observations (#894/#895)
+
+Schema 21 adds optional bounded termination JSON to durable step results. The Argo
+engine retains the exact selected retry node identity and reads its owned Pod
+before normal cleanup under a five-second aggregate observation budget. Only
+current `main` termination with matching Workflow/node/Pod/container identity is
+reported. Retry ambiguity, unsupported container sets, unavailable Pods and
+contradictory status produce a fixed unavailable category; no raw Kubernetes
+message, unknown reason, environment or event is retained. Container OOM reason
+and Pod deadline reason are separate observations; exit 137 alone means neither.
+
+`run_get` exposes this record through the existing typed step JSON. Old NULL
+records explicitly mean `not-recorded`; no historical cause is backfilled.
+Malformed optional evidence cannot replace the original step verdict. These
+records trust the Kubernetes API/kubelet and bind observation time separately
+from container event times; they are not independent execution attestations.
+
+The cold OpenBao CI leaf fixes compiler parallelism at 1, GOMAXPROCS 2 and a
+256 MiB per-process Go memory target within its unchanged 1 GiB container limit.
+Download, cold compilation and execution have separate 45s/600s/120s bounds;
+the 780s outer deadline includes 15s cleanup margin. Download uses 40s plus 5s
+TERM-to-KILL, compilation 595s plus 5s TERM-to-KILL; verification/extraction
+are inside the download phase. Race instrumentation, all
+`TestPolicyIsolation` cases and the widened-policy negative control remain
+required. Compilation uses fresh private caches and verified module downloads;
+this is not a network-free test. Direct execution retains the installer package
+working directory used by `go test`.

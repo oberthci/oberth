@@ -1420,9 +1420,9 @@ spec:
   # ---- test-openbao burn (#803) ----
   # Real OpenBao integration test: starts a dev server, applies rendered
   # per-repo/per-step policies, and asserts ACL isolation with real reads.
-  # Hermetic: no network beyond the pinned OpenBao download.
+  # Cold private caches fetch verified Go modules as well as the pinned OpenBao download.
   - name: test-openbao
-    activeDeadlineSeconds: 300
+    activeDeadlineSeconds: 780
     automountServiceAccountToken: false
     metadata:
       annotations:
@@ -1434,17 +1434,24 @@ spec:
       command: [bash]
       source: |
         set -euo pipefail
-        # Fetch and verify the pinned OpenBao binary.
+        # Bounded phases preserve a full 120-second test window after cold compilation.
+        # Fetch and verify the pinned OpenBao binary (45 seconds total).
+        printf 'openbao-phase=download\n'
         BAO_VERSION=2.6.1
         BAO_ARCHIVE="openbao_${BAO_VERSION}_linux_amd64.tar.gz"
         BAO_URL="https://github.com/openbao/openbao/releases/download/v${BAO_VERSION}/${BAO_ARCHIVE}"
         BAO_DIR="/tmp/openbao"
-        mkdir -p "$BAO_DIR"
-        curl -fsSL -o "$BAO_DIR/$BAO_ARCHIVE" "$BAO_URL"
-        cd "$BAO_DIR"
-        sha256sum -c /work/src/.oberth/pins/openbao.sha256
-        tar xzf "$BAO_ARCHIVE" bao
-        chmod +x bao
+        export BAO_ARCHIVE BAO_URL BAO_DIR
+        # 40s work plus at most 5s TERM-to-KILL = 45s complete phase.
+        timeout --signal=TERM --kill-after=5s 40s bash -c '
+          set -euo pipefail
+          mkdir -p "$BAO_DIR"
+          curl --connect-timeout 10 --max-time 40 -fsSL -o "$BAO_DIR/$BAO_ARCHIVE" "$BAO_URL"
+          cd "$BAO_DIR"
+          sha256sum -c /work/src/.oberth/pins/openbao.sha256
+          tar xzf "$BAO_ARCHIVE" bao
+          chmod +x bao
+        '
         cd /work/src
         # Run the integration tests.
         export BAO_PATH="$BAO_DIR/bao"
@@ -1452,8 +1459,19 @@ spec:
         export GOTOOLCHAIN=local
         export GOWORK=off
         export GOENV=off
-        go test -tags=openbao_integration -race -count=1 -v -timeout=120s \
-          -run 'TestPolicyIsolation' ./internal/installer/
+        # Bound compiler concurrency and per-process GC within the 1 GiB leaf.
+        export GOMAXPROCS=2
+        export GOMEMLIMIT=256MiB
+        printf 'openbao-phase=compile\n'
+        # 595s work plus at most 5s TERM-to-KILL = 600s compile phase.
+        timeout --signal=TERM --kill-after=5s 595s \
+          go test -mod=readonly -p=1 -tags=openbao_integration -race -c \
+          -o "$BAO_DIR/installer.test" ./internal/installer/
+        printf 'openbao-phase=test\n'
+        cd /work/src/internal/installer
+        "$BAO_DIR/installer.test" -test.count=1 -test.v -test.timeout=120s \
+          -test.run='TestPolicyIsolation'
+        printf 'openbao-phase=complete\n'
       env:
       - name: PATH
         value: "/usr/local/go/bin:/usr/local/bin:/usr/bin:/bin"

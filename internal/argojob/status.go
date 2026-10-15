@@ -10,6 +10,7 @@ import (
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/runprogress"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 )
@@ -17,14 +18,17 @@ import (
 // StepResult is one executed pipeline step, in Oberth's vocabulary rather than
 // Argo's. The engine derives it from the Workflow's node tree.
 type StepResult struct {
-	Burn       string
-	Step       string
-	Ordinal    int
-	Status     runprogress.Status
-	ExitCode   int
-	PodName    string
-	StartedAt  *time.Time
-	FinishedAt *time.Time
+	NodeID           string
+	AttemptAmbiguous bool
+	Termination      *model.StepDiagnostic
+	Burn             string
+	Step             string
+	Ordinal          int
+	Status           runprogress.Status
+	ExitCode         int
+	PodName          string
+	StartedAt        *time.Time
+	FinishedAt       *time.Time
 }
 
 // Completion is the terminal outcome of one submitted Workflow.
@@ -76,6 +80,7 @@ func StepResults(workflow *wfv1.Workflow) []StepResult {
 			podName = PodName(workflow, node)
 		}
 		results = append(results, StepResult{
+			NodeID:     node.ID,
 			Burn:       burn,
 			Step:       step,
 			Status:     stepStatus(node.Phase),
@@ -300,7 +305,16 @@ func deduplicateRetries(results []StepResult) []StepResult {
 			continue
 		}
 		emitted[k] = true
-		deduped = append(deduped, results[lastIndex[k]])
+		selected := results[lastIndex[k]]
+		for _, candidate := range results {
+			if candidate.Burn != selected.Burn || candidate.Step != selected.Step || candidate.NodeID == selected.NodeID {
+				continue
+			}
+			if selected.StartedAt == nil || candidate.StartedAt == nil || selected.StartedAt.Equal(*candidate.StartedAt) {
+				selected.AttemptAmbiguous = true
+			}
+		}
+		deduped = append(deduped, selected)
 	}
 	return deduped
 }

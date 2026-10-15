@@ -655,7 +655,7 @@ func (jobs *ArgoJobs) result(completion argojob.Completion) service.JobResult {
 	result.Steps = make([]model.StepResult, 0, len(completion.Steps))
 	for _, step := range completion.Steps {
 		result.Steps = append(result.Steps, model.StepResult{
-			Burn: step.Burn, Step: step.Step, Ordinal: step.Ordinal,
+			Burn: step.Burn, Step: step.Step, Ordinal: step.Ordinal, Termination: step.Termination,
 			Status: model.StepStatus(step.Status), ExitCode: step.ExitCode,
 			StartedAt: step.StartedAt, FinishedAt: step.FinishedAt,
 		})
