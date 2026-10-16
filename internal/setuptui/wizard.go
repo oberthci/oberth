@@ -389,7 +389,9 @@ func (w *wizard) finish(out io.Writer) error {
 	case installFailed:
 		say("The last install failed at %q. Answers are saved in %s; rerun `oberth setup` to continue.\n",
 			w.state.Install.Phase, displayHome(statePath))
-		return nil
+		// Leaving through the menu after a failure must not look like
+		// success to a wrapper script (#003).
+		return fmt.Errorf("%w: install failed at %q", installer.ErrOnboardingPartial, w.state.Install.Phase)
 	}
 	if !w.opts.DryMode && statePath != "" {
 		say("Setup answers are saved in %s (no secrets); rerun `oberth setup` to continue.\n", displayHome(statePath))

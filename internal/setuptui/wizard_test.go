@@ -743,3 +743,17 @@ func TestTabReachesButtons(t *testing.T) {
 		t.Fatalf("got %T", h.w.screen)
 	}
 }
+
+// Leaving through the menu after a failed install exits non-zero, so a
+// wrapper script cannot mistake it for success (#003, review finding).
+func TestFinishAfterFailedInstallReturnsError(t *testing.T) {
+	newTestHost(t)
+	h := newHarness(t, Options{})
+	h.w.state.Install.Status = installFailed
+	h.w.state.Install.Phase = "deploy oberth (digest-pinned)"
+	var out bytes.Buffer
+	err := h.w.finish(&out)
+	if !errors.Is(err, installer.ErrOnboardingPartial) || !strings.Contains(err.Error(), "deploy oberth") {
+		t.Fatalf("finish after a failed install = %v", err)
+	}
+}
