@@ -6,426 +6,361 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
+	"strconv"
 	"strings"
-
-	"golang.org/x/crypto/ssh"
-	"k8s.io/client-go/tools/clientcmd"
 
 	"github.com/oberthci/oberth/internal/installer"
 )
 
-// runPlain implements the accessible/plain sequential fallback (S12).
-// Same pages, same order, same validation, same security properties.
-// No TUI, no color, no cursor addressing. It is reached only through the
-// --plain / --accessible flags (or a non-interactive terminal) — never by a
-// key press inside the TUI.
-func runPlain(ctx context.Context, opts Options, input io.Reader, output io.Writer) error {
-	w := func(format string, a ...any) { _, _ = fmt.Fprintf(output, format, a...) }
-	wln := func(a ...any) { _, _ = fmt.Fprintln(output, a...) }
-	// step prints the same "step n/N — stage" header the TUI's top bar
-	// shows, with N derived from the page table so the two never drift.
-	step := func(n int, stage string) { w("  step %d/%d — %s\n", n, totalPages, stage) }
+// runPlain is the plain/accessible flow (S12): the same steps, questions and
+// validation as the TUI, asked as sequential prompts — no color, no cursor
+// addressing (#047, #011). It is reached only through --plain/--accessible
+// or a non-interactive terminal, never by a key press inside the TUI.
+func runPlain(ctx context.Context, opts Options, st *WizardState, resumed bool, loadErr error, input io.Reader, output io.Writer) error {
+	p := &plainRun{ctx: ctx, opts: opts, st: st, reader: bufio.NewReader(input), out: output, questions: buildQuestions()}
+	return p.run(resumed, loadErr, input)
+}
 
-	reader := bufio.NewReader(input)
-	state := &WizardState{
-		Config: installer.Config{
-			Dev:       true,
-			ChartPath: opts.ChartPath,
-			ImageRef:  opts.ImageRef,
-			Namespace: "oberth",
-		},
-		StoreMode: "install-prod",
-		ForgeType: "codeberg",
-		ForgeAuth: "deploy-key",
-		TLSMode:   "self-signed",
+type plainRun struct {
+	ctx       context.Context
+	opts      Options
+	st        *WizardState
+	reader    *bufio.Reader
+	out       io.Writer
+	questions []*question
+}
+
+func (p *plainRun) say(format string, a ...any) { _, _ = fmt.Fprintf(p.out, format, a...) }
+
+// para prints wrapped, indented text.
+func (p *plainRun) para(text string) {
+	for _, line := range wrapText(text, 76) {
+		p.say("  %s\n", line)
 	}
+}
 
-	// ask prompts until validate accepts the answer (S12: the sequential
-	// path keeps the same field-level validation the TUI enforces). An
-	// empty answer selects def. Three rejected answers abort the wizard —
-	// the same register as the installer's own prompts.
-	ask := func(label, def string, validate func(string) error) (string, error) {
-		for attempt := 0; attempt < 3; attempt++ {
-			if def != "" {
-				w("  %s [%s]: ", label, def)
-			} else {
-				w("  %s: ", label)
-			}
-			line, err := readLine(ctx, reader)
-			if errors.Is(err, installer.ErrInterrupted) {
-				return "", err // ctrl+c: stop here, main exits 130
-			}
-			if err != nil && line == "" {
-				return "", fmt.Errorf("read %s: %w", label, err)
-			}
-			answer := strings.TrimSpace(line)
-			if answer == "" {
-				answer = def
-			}
-			if validate == nil {
-				return answer, nil
-			}
-			if err := validate(answer); err != nil {
-				wln("  ERROR: " + err.Error())
-				continue
-			}
-			return answer, nil
+func (p *plainRun) persist() {
+	if p.opts.DryMode {
+		return
+	}
+	if err := saveSetupState(p.st); err != nil {
+		p.say("  WARNING: answers could not be saved: %v\n", err)
+	}
+}
+
+// ask reads one answer; empty selects def.
+func (p *plainRun) ask(label, def string) (string, error) {
+	if def != "" {
+		p.say("  %s [%s]: ", label, def)
+	} else {
+		p.say("  %s: ", label)
+	}
+	line, err := readLine(p.ctx, p.reader)
+	if errors.Is(err, installer.ErrInterrupted) {
+		return "", err
+	}
+	if err != nil && line == "" {
+		return "", fmt.Errorf("read %s: %w", label, err)
+	}
+	answer := strings.TrimSpace(line)
+	if answer == "" {
+		answer = def
+	}
+	return answer, nil
+}
+
+func (p *plainRun) run(resumed bool, loadErr error, input io.Reader) error {
+	statePath, _ := setupStatePath()
+	p.say("\n  OBERTH SETUP\n\n")
+	p.say("  Steps: ")
+	for i := 0; i < stepCount; i++ {
+		if i > 0 {
+			p.say(" · ")
 		}
-		return "", fmt.Errorf("%s: three invalid answers", label)
+		p.say("%d. %s", i+1, stepID(i).name())
+	}
+	p.say("\n")
+	switch {
+	case loadErr != nil:
+		p.say("  Previous answers were not loaded: %v\n", loadErr)
+	case resumed:
+		p.say("  Resuming the answers saved in %s.\n", displayHome(statePath))
 	}
 
-	validNamespace := func(v string) error {
-		if !dns1123LabelRegexp.MatchString(v) {
-			return fmt.Errorf("%q: %s", v, namespaceRule)
+	if resumed && !p.opts.DryMode && (p.st.Install.Status == installPendingForge || p.st.Install.Status == installPartial) {
+		p.say("\n  The last install is waiting: %s\n", headline(p.st, nil))
+		answer, err := p.choose("Verify it now (yes), or review the answers (no)?", "yes", "yes", "no")
+		if err != nil {
+			return err
 		}
-		return nil
+		if answer == "yes" {
+			return p.verify()
+		}
 	}
 
-	// Page 1: Welcome.
-	wln("")
-	wln("  OBERTH SETUP")
-	wln("  Machine-speed code. Human-grade control.")
-	wln("")
-	step(1, "mission briefing")
-	wln("")
-
-	// Page 2: Cluster. The installer targets the CURRENT kubeconfig
-	// context — there is no --context flag — so naming a different context
-	// here must stop the wizard rather than silently install into whatever
-	// context happens to be current (wrong-cluster hazard).
-	step(2, "launch site")
-	currentContext := ""
-	if raw, err := clientcmd.NewDefaultClientConfigLoadingRules().Load(); err == nil {
-		currentContext = raw.CurrentContext
-	}
-	choiceCluster := "existing"
-	if kindAvailable() {
-		var err error
-		choiceCluster, err = ask("Cluster (existing/kind)", "kind", func(v string) error {
-			if v != "existing" && v != "kind" {
-				return errors.New("choose existing or kind")
+	for {
+		for step := stepCluster; step < stepReview; step++ {
+			if !p.st.done[step] {
+				if err := p.walk(step); err != nil {
+					return err
+				}
 			}
+		}
+		again, err := p.review()
+		if err != nil {
+			return err
+		}
+		if again {
+			continue
+		}
+		if p.opts.DryMode {
+			p.say("\n  --dry-mode: no changes applied. Equivalent command:\n\n  %s\n", BuildCommandLine(p.st))
 			return nil
-		})
+		}
+		answer, err := p.ask(fmt.Sprintf("Install now? yes, no, or a step number (1-%d) to change", int(stepClient)+1), "yes")
 		if err != nil {
 			return err
 		}
-	} else {
-		wln("  Using an existing cluster (kind and Docker are not installed).")
-	}
-	state.Config.CreateKind = choiceCluster == "kind"
-	if !state.Config.CreateKind {
-		path, err := ask("Kubeconfig path (empty for default)", "", nil)
-		if err != nil {
-			return err
+		if n, convErr := strconv.Atoi(answer); convErr == nil && n >= 1 && n <= int(stepClient)+1 {
+			p.st.done[n-1] = false
+			continue
 		}
-		if path != "" {
-			path, err = expandSetupPath(path)
-			if err != nil {
-				return err
-			}
-			raw, err := clientcmd.LoadFromFile(path)
-			if err != nil {
-				return fmt.Errorf("read kubeconfig: %w", err)
-			}
-			currentContext = raw.CurrentContext
-			state.Config.KubeconfigPath = path
-		}
-	}
-	if state.Config.CreateKind {
-		state.SelectedContext = "kind-oberth"
-		state.Config.ContextName = "kind-oberth"
-	} else {
-		answer, err := ask("Kubeconfig context (empty for current)", currentContext, nil)
-		if err != nil {
-			return err
-		}
-		state.SelectedContext = answer
-		state.Config.ContextName = answer
-	}
-
-	// Page 3: Namespaces — DNS-1123 validated and pairwise distinct, the
-	// same rules the TUI page enforces. (There is no mode page: the wizard
-	// installs the dev / evaluation profile, the only one that exists.)
-	step(3, "flight plan")
-	ns, err := ask("Oberth namespace", "oberth", validNamespace)
-	if err != nil {
-		return err
-	}
-	state.Config.Namespace = ns
-	// Default must match installer.DefaultArgoNamespace ("oberth-argo").
-	argoNS, err := ask("Pipeline namespace", "oberth-argo", func(v string) error {
-		if err := validNamespace(v); err != nil {
-			return err
-		}
-		if v == ns {
-			return fmt.Errorf("pipeline namespace must differ from the oberth namespace")
-		}
-		return nil
-	})
-	if err != nil {
-		return err
-	}
-	state.Config.ArgoNamespace = argoNS
-	baoNS, err := ask("OpenBao namespace", "openbao", func(v string) error {
-		if err := validNamespace(v); err != nil {
-			return err
-		}
-		if v == ns || v == argoNS {
-			return fmt.Errorf("openbao namespace must differ from the other namespaces")
-		}
-		return nil
-	})
-	if err != nil {
-		return err
-	}
-	state.Config.OpenBaoNamespace = baoNS
-
-	// Page 4: Execution.
-	step(4, "flight plan")
-	np, err := ask("Network policy (auto/strict/off)", "auto", func(v string) error {
-		if _, ok := canonicalNetworkPolicy(v); !ok {
-			return fmt.Errorf("network policy must be auto, strict, or off")
-		}
-		return nil
-	})
-	if err != nil {
-		return err
-	}
-	if canonical, ok := canonicalNetworkPolicy(np); ok {
-		state.Config.NetworkPolicy = canonical
-	}
-	anchor, err := ask("Local Rekor witness with OpenBao (on/off)", "off", func(v string) error {
-		if v != "off" && v != "on" {
-			return fmt.Errorf("choose on or off")
-		}
-		return nil
-	})
-	if err != nil {
-		return err
-	}
-	state.Config.InstallRekor = anchor == "on"
-
-	// Page 5: Secret store.
-	step(5, "propellant")
-	wln("  [1] Install OpenBao — dev")
-	wln("  [2] Install OpenBao — production")
-	wln("  [3] Connect existing")
-	choice, err := ask("Choice", "2", func(v string) error {
-		if v != "1" && v != "2" && v != "3" {
-			return fmt.Errorf("answer 1, 2, or 3")
-		}
-		return nil
-	})
-	if err != nil {
-		return err
-	}
-	switch choice {
-	case "1":
-		state.Config.InstallSecretStoreDev = true
-		state.StoreMode = "install-dev"
-	case "3":
-		state.StoreMode = "connect"
-		// Page 6: Store connect — same S7 validator as the TUI field.
-		step(6, "propellant")
-		addr, err := ask("Vault address (https://…)", "", func(v string) error {
-			return validateStoreAddress(v)
-		})
-		if err != nil {
-			return err
-		}
-		state.Config.ArgoVaultAddress = addr
-		state.StoreAddress = addr
-	default:
-		state.Config.InstallSecretStore = true
-		state.StoreMode = "install-prod"
-	}
-
-	// Page 7: TLS — self-signed is the only implemented mode (no --tls-cert/
-	// --tls-key in the installer). Informational only, like the TUI page.
-	step(7, "heat shield")
-	wln("  TLS: " + tlsCertificateDescription(state) + ".")
-	wln("  Bring-your-own certificate support is coming soon.")
-	state.TLSMode = "self-signed"
-
-	// Page 8: Uplink.
-	step(8, "crew manifest")
-	user := strings.ReplaceAll(os.Getenv("USER"), "@", "-")
-	if user == "" {
-		user = "admin"
-	}
-	host, _ := os.Hostname()
-	if host == "" {
-		host = "localhost"
-	}
-	identity, err := ask("Identity", user+"@"+host, func(v string) error {
-		return validateUplinkIdentityTUI(v)
-	})
-	if err != nil {
-		return err
-	}
-	state.UplinkIdentity = identity
-
-	// SSH public key path — required by hasOnboardingConfig() for the
-	// non-interactive onboarding path. Scan ~/.ssh for .pub files like the
-	// TUI does; default to the first found key, falling back to
-	// ~/.ssh/id_ed25519.pub.
-	sshKeyDefault := "~/.ssh/id_ed25519.pub"
-	if foundKeys := scanSSHPublicKeys(); len(foundKeys) > 0 {
-		sshKeyDefault = foundKeys[0].path
-	} else {
-		wln("  No SSH public keys found in ~/.ssh.")
-		wln("  Generate one:  ssh-keygen -t ed25519")
-		wln("")
-	}
-	sshKey, err := ask("SSH public key", sshKeyDefault, func(v string) error {
-		expanded := v
-		if v == "~" || strings.HasPrefix(v, "~/") {
-			home, homeErr := os.UserHomeDir()
-			if homeErr != nil {
-				return fmt.Errorf("resolve home directory: %w", homeErr)
-			}
-			expanded = home + v[1:]
-		}
-		data, readErr := os.ReadFile(expanded) //nolint:gosec // G304: operator names their own key
-		if readErr != nil {
-			return fmt.Errorf("cannot read %s: %w", v, readErr)
-		}
-		if _, _, _, _, parseErr := ssh.ParseAuthorizedKey(data); parseErr != nil {
-			return fmt.Errorf("not a valid SSH public key: %w", parseErr)
-		}
-		return nil
-	})
-	if err != nil {
-		return err
-	}
-	state.SSHKeyPath = sshKey
-
-	// Page 9: Git (informational).
-	step(9, "comms check")
-	wln("  Push to Oberth over SSH — every push is linked to your identity.")
-	wln("  clone: ssh://git@localhost:30022/<upstream>/<org>/<repo>.git   (from this machine)")
-	wln("         ssh://git@<node-ip>:30022/<upstream>/<org>/<repo>.git   (from your network)")
-	wln("  push → CI runs → green publishes upstream · red opens an issue")
-	wln("  Tags are immutable — only green branches reach the upstream forge.")
-
-	// Page 10: Forge.
-	step(10, "ground station")
-	forge, err := ask("Forge (codeberg/github/gitlab)", "codeberg", func(v string) error {
-		switch v {
-		case "codeberg", "github", "gitlab":
+		switch strings.ToLower(answer) {
+		case "yes", "y":
+			return p.install(input)
+		case "no", "n":
+			p.say("  Nothing applied. Answers are saved in %s; rerun `oberth setup` to continue.\n", displayHome(statePath))
 			return nil
-		case "forgejo":
-			return fmt.Errorf("forgejo support is coming soon — choose codeberg, github, or gitlab")
 		}
-		return fmt.Errorf("forge must be codeberg, github, or gitlab")
-	})
-	if err != nil {
-		return err
+		p.say("  ERROR: answer yes, no, or a step number\n")
 	}
-	state.ForgeType = forge
-	org, err := ask("Owner/org", "", func(v string) error {
-		if v == "" {
-			return fmt.Errorf("org is required")
+}
+
+// walk asks one step's questions.
+func (p *plainRun) walk(step stepID) error {
+	p.say("\n  Step %d of %d — %s\n", int(step)+1, stepCount, step.name())
+	for _, q := range questionsOf(p.questions, step) {
+		if !q.appliesTo(p.st) {
+			continue
 		}
-		return nil
-	})
-	if err != nil {
-		return err
-	}
-	state.ForgeOrg = org
-	auth, err := ask("Upstream SSH identity (existing/generate)", "generate", func(v string) error {
-		if v != "existing" && v != "generate" {
-			return errors.New("choose existing or generate")
+		if err := p.askQuestion(q); err != nil {
+			return err
 		}
-		return nil
-	})
-	if err != nil {
-		return err
 	}
-	if auth == "existing" {
-		key, err := ask("Existing work private-key path (imported into OpenBao)", "", func(v string) error {
-			if strings.TrimSpace(v) == "" {
-				return errors.New("enter the path of a dedicated work key without a passphrase")
+	p.st.done[step] = true
+	p.persist()
+	return nil
+}
+
+// choose asks for one of a fixed set of words.
+func (p *plainRun) choose(label, def string, allowed ...string) (string, error) {
+	for attempt := 0; attempt < 3; attempt++ {
+		answer, err := p.ask(label, def)
+		if err != nil {
+			return "", err
+		}
+		for _, a := range allowed {
+			if strings.EqualFold(answer, a) || (len(answer) == 1 && strings.HasPrefix(a, strings.ToLower(answer))) {
+				return a, nil
 			}
-			path, err := expandSetupPath(v)
+		}
+		p.say("  ERROR: answer %s\n", strings.Join(allowed, " or "))
+	}
+	return "", fmt.Errorf("%s: three invalid answers", label)
+}
+
+// askQuestion prompts until the shared validation accepts the answer.
+func (p *plainRun) askQuestion(q *question) error {
+	p.say("\n  %s\n", q.heading)
+	p.para(q.explain(p.st))
+	for attempt := 0; attempt < 3; attempt++ {
+		answer, err := p.answer(q)
+		if err != nil {
+			return err
+		}
+		if answer == nil {
+			continue
+		}
+		if err := q.save(p.st, answer); err != nil {
+			p.say("  ERROR: %v\n", err)
+			continue
+		}
+		if q.probe != nil {
+			if work := q.probe(p.st); work != nil {
+				p.say("  Checking…\n")
+				result := work()
+				if result.err != nil {
+					p.say("  ERROR: %v\n", result.err)
+					continue
+				}
+				result.apply(p.st)
+				p.say("  OK\n")
+			}
+		}
+		return nil
+	}
+	return fmt.Errorf("%s: three invalid answers", q.heading)
+}
+
+// answer reads a choice (by number, value or label) or the text fields. A
+// nil answer means the input was rejected and is asked again.
+func (p *plainRun) answer(q *question) ([]string, error) {
+	if !q.isChoice() {
+		current := q.values(p.st)
+		answer := make([]string, len(q.fields))
+		for i, field := range q.fields {
+			v, err := p.ask(field+" (- for none)", current[i])
 			if err != nil {
-				return err
+				return nil, err
 			}
-			return installer.CheckUpstreamPrivateKey(path)
-		})
-		if err != nil {
-			return err
+			if v == "-" {
+				v = ""
+			}
+			answer[i] = v
 		}
-		state.Config.UpstreamPrivateKeyPath, err = expandSetupPath(key)
-		if err != nil {
-			return err
+		return answer, nil
+	}
+	opts := q.options(p.st)
+	selected := q.selected(p.st)
+	def := ""
+	for i, o := range opts {
+		line := fmt.Sprintf("  %d) %s", i+1, o.label)
+		if o.detail != "" {
+			line += " — " + o.detail
+		}
+		p.say("%s\n", line)
+		if o.value == selected {
+			def = strconv.Itoa(i + 1)
 		}
 	}
-
-	// Page 11: Review.
-	step(11, "go/no-go")
-	wln("  Review the plan:")
-	wln("")
-	w("  cluster:    %s\n", state.SelectedContext)
-	w("  namespaces: %s\n", formatNamespacesSummary(state))
-	w("  store:      %s\n", formatStoreSummary(state))
-	w("  tls:        %s\n", state.TLSMode)
-	w("  uplink:     %s\n", state.UplinkIdentity)
-	w("  forge:      %s %s\n", state.ForgeType, state.ForgeOrg)
-	wln("")
-
-	if opts.DryMode {
-		wln("  --dry-mode: equivalent command:")
-		wln("")
-		wln("  " + BuildCommandLine(state))
-		return nil
+	if def == "" && len(opts) > 0 {
+		def = "1"
 	}
-
-	confirm, err := ask("Apply? (yes/no)", "yes", func(v string) error {
-		if v != "yes" && v != "y" && v != "no" && v != "n" {
-			return fmt.Errorf("answer yes or no")
-		}
-		return nil
-	})
+	v, err := p.ask("Choice", def)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	if confirm != "yes" && confirm != "y" {
-		wln("  Aborted — nothing applied; re-run `oberth setup --plain` to try again.")
-		return nil
+	if n, convErr := strconv.Atoi(v); convErr == nil {
+		if n >= 1 && n <= len(opts) {
+			return []string{opts[n-1].value}, nil
+		}
+		p.say("  ERROR: choose 1 to %d\n", len(opts))
+		return nil, nil
 	}
-
-	// Page 12: Apply.
-	step(12, "ignition")
-	wln("  Applying...")
-
-	state.Config.BinaryVersion = opts.BinaryVersion
-	if state.Config.BinaryVersion == "" {
-		state.Config.BinaryVersion = "dev"
+	for _, o := range opts {
+		if strings.EqualFold(v, o.value) || strings.EqualFold(v, o.label) {
+			return []string{o.value}, nil
+		}
 	}
-	// The wizard has resolved the secret store choice — never re-prompt.
-	// When the user picked "connect existing", both InstallSecretStore flags
-	// are false, but the decision is made: SecretStoreUndecided must be false.
-	state.Config.SecretStoreUndecided = false
+	p.say("  ERROR: choose 1 to %d\n", len(opts))
+	return nil, nil
+}
 
-	// Wire the wizard-collected onboarding data into Config so the
-	// installer's non-interactive onboarding path uses it instead of
-	// re-prompting (which would EOF or get stuck). This is the same
-	// wiring that the TUI's startApply performs (page_apply.go).
-	state.Config.ForgeType = state.ForgeType
-	state.Config.ForgeOrg = state.ForgeOrg
-	state.Config.ForgeURL = forgeUpstreamURL(state.ForgeType, state.ForgeOrg)
-	state.Config.UplinkIdentity = state.UplinkIdentity
-	state.Config.SSHPublicKeyPath = state.SSHKeyPath
-	state.Config.Yes = true
+// review prints the plan and re-checks every answer; again reports that a
+// step was reopened because its answer no longer holds.
+func (p *plainRun) review() (bool, error) {
+	p.say("\n  Step %d of %d — %s\n", int(stepReview)+1, stepCount, stepReview.name())
+	for step := stepCluster; step < stepReview; step++ {
+		p.say("  %d. %-22s %s\n", int(step)+1, step.name(), stepSummary(p.st, step))
+	}
+	if q, err := revalidate(p.questions, p.st); err != nil {
+		p.say("  ERROR: %s: %v\n", q.step.name(), err)
+		p.st.done[q.step] = false
+		return true, nil
+	}
+	if !p.st.Config.CreateKind {
+		p.say("  Checking the cluster connection…\n")
+		result := probeContext(p.st.Config.ContextName, p.st.Config.KubeconfigPath)()
+		if result.err != nil {
+			p.say("  ERROR: cluster: %v\n", result.err)
+			p.st.done[stepCluster] = false
+			return true, nil
+		}
+		result.apply(p.st)
+	}
+	p.st.done[stepReview] = true
+	if !p.opts.DryMode {
+		p.say("\n  Equivalent command:\n  %s\n", BuildCommandLine(p.st))
+	}
+	return false, nil
+}
 
-	return installer.Execute(ctx, state.Config, installer.InstallDeps{
-		Output:     output,
+// install runs the installer with its normal terminal output; the
+// installer prints once-only credentials in its own box.
+func (p *plainRun) install(input io.Reader) error {
+	p.say("\n  Step %d of %d — %s\n", int(stepInstall)+1, stepCount, stepInstall.name())
+	statuses := map[string]string{}
+	err := executeInstaller(p.ctx, installConfig(p.st), installer.InstallDeps{
+		Output:     p.out,
 		Input:      input,
 		IsTerminal: func() bool { return false },
+		StepProgressSink: func(step, status string) {
+			statuses[step] = status
+		},
 	})
+	rec := &p.st.Install
+	rec.Phase, rec.Error = "", ""
+	phase := -1
+	switch {
+	case err == nil:
+		rec.Status = installComplete
+	case errors.Is(err, installer.ErrOnboardingPartial):
+		rec.Status = installPartial
+		rec.Error = "onboarding did not finish"
+		if statuses["upstream discovery"] == "pending" && statuses["mint uplink"] == "done" {
+			rec.Status = installPendingForge
+			rec.Error = "the forge has not accepted the upstream key yet"
+		}
+	default:
+		phase = len(installPhases) - 1
+		for name, i := range stepNameToIndex {
+			if statuses[name] != "done" && i < phase {
+				phase = i
+			}
+		}
+		rec.Status = installFailed
+		rec.Phase = installPhases[phase]
+		rec.Error = err.Error()
+	}
+	if rec.Status != installFailed {
+		p.st.done[stepInstall] = true
+	}
+	p.persist()
+	switch rec.Status {
+	case installFailed:
+		step := responsibleStep(phase, rec.Error, p.st)
+		p.say("\n  The install failed at %q. Most likely step %d, %s, needs changing; rerun `oberth setup` and choose it.\n",
+			rec.Phase, int(step)+1, step.name())
+		return err
+	case installPendingForge:
+		p.say("\n  %s\n", headline(p.st, nil))
+		for _, line := range recoveryCommands(p.st) {
+			p.say("  %s\n", line)
+		}
+		p.say("  Or rerun `oberth setup` and answer yes to verify.\n")
+		return installer.ErrOnboardingPartial
+	case installPartial:
+		return err
+	}
+	return nil
+}
+
+// verify re-runs the forge registration and reports readiness (#002).
+func (p *plainRun) verify() error {
+	p.say("  Verifying…\n")
+	v := verifyInstall(p.ctx, *p.st, true)
+	if v.ready && v.upstream {
+		p.st.Install.Status = installComplete
+		p.st.Install.Error = ""
+		p.persist()
+	}
+	for _, line := range finishLines(&wizard{state: *p.st, install: newInstallScreen()}, &v) {
+		p.say("  %s\n", line)
+	}
+	if p.st.Install.Status == installComplete {
+		return nil
+	}
+	return installer.ErrOnboardingPartial
 }
 
 // lineResult carries one line read off the prompt reader.
@@ -435,13 +370,8 @@ type lineResult struct {
 }
 
 // readLine reads one line from r and gives up the moment ctx is canceled.
-// main wires SIGINT into ctx (signal.NotifyContext), so ctrl+c at a prompt
-// does not terminate the process by itself — a read that ignored ctx would
-// sit there until the next enter, with every further ctrl+c swallowed too.
-// Cancellation surfaces as installer.ErrInterrupted so main exits 130 the
-// way every other interrupted prompt does. The reading goroutine may stay
-// blocked on the terminal after cancellation; the process is on its way out
-// and nothing reads that stream afterwards.
+// main wires SIGINT into ctx, so ctrl+c at a prompt surfaces as
+// installer.ErrInterrupted (exit 130) instead of waiting for the next enter.
 func readLine(ctx context.Context, r *bufio.Reader) (string, error) {
 	ch := make(chan lineResult, 1)
 	go func() {

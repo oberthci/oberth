@@ -32,24 +32,10 @@ type clusterInfoMsg struct {
 	err       error
 }
 
-// forgeDiscoveryMsg carries the result of upstream forge discovery.
-type forgeDiscoveryMsg struct {
-	repos []discoveredRepo
-	err   error
-}
-
-type discoveredRepo struct {
-	name    string
-	adopted bool // has .oberth/ directory
-	errMsg  string
-}
-
 // ---------- tea.Cmd functions for async probes ----------
 
-// probeCluster returns a tea.Cmd that loads kubeconfig for the given context
-// and runs preflight checks against the cluster.
-func probeCluster(contextName string) tea.Cmd { return probeClusterWithPath(contextName, "") }
-
+// probeClusterWithPath returns a tea.Cmd that loads a kubeconfig (path, or
+// the default when empty) for the given context and checks the cluster.
 func probeClusterWithPath(contextName, path string) tea.Cmd {
 	return func() tea.Msg {
 		rules := clientcmd.NewDefaultClientConfigLoadingRules()
@@ -165,16 +151,6 @@ func probeClusterWithPath(contextName, path string) tea.Cmd {
 			cores:     totalCores,
 			nodeName:  nodeName,
 			nodeIP:    nodeIP,
-		}
-	}
-}
-
-// probeForge returns a tea.Cmd that discovers repositories on the upstream forge.
-// This is a stub — the real implementation would call the forge API.
-func probeForge(_, _ string) tea.Cmd {
-	return func() tea.Msg {
-		return forgeDiscoveryMsg{
-			err: fmt.Errorf("looking up repositories from here is coming soon — the install discovers them in your organization"),
 		}
 	}
 }
