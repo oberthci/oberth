@@ -72,3 +72,21 @@ func TestResolveRunIDUsesUniquePrefixesAcrossRepositories(t *testing.T) {
 		}
 	}
 }
+
+func TestRunIDsExistReportsEachID(t *testing.T) {
+	now := time.Now()
+	database := testStore(t, &now)
+	repo := createRepo(t, database)
+	run, err := database.EnqueueRun(context.Background(), testRunSpec(repo.ID, "main", strings.Repeat("c", 40)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	unknown := strings.Repeat("0", 32)
+	exists, err := database.RunIDsExist(context.Background(), []string{run.ID, unknown})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !exists[run.ID] || exists[unknown] || len(exists) != 2 {
+		t.Fatalf("exists = %v", exists)
+	}
+}
