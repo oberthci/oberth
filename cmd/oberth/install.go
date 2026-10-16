@@ -6,7 +6,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"time"
 
 	"github.com/oberthci/oberth/internal/installer"
 )
@@ -93,7 +92,7 @@ func runInstall(ctx context.Context, arguments []string, input io.Reader, output
 			"the installer's own settings still win, so a value it computed cannot be "+
 			"overridden by a stale one in a file")
 	flags.Var(&valuesFiles, "f", "shorthand for --values")
-	timeout := flags.Duration("timeout", 5*time.Minute, "wait timeout for pod readiness")
+	timeout := flags.Duration("timeout", installer.DefaultTimeout, "wait timeout for pod readiness")
 
 	if err := flags.Parse(arguments); err != nil {
 		if errors.Is(err, flag.ErrHelp) {

@@ -58,7 +58,7 @@ func runCLI(ctx context.Context, arguments []string, input io.Reader, output io.
 Commands:
   audit         Verify and inspect the audit chain
   init          Initialize a bare repository
-  validate      Validate a periapsis.go pipeline
+  validate      Validate a repository's .oberth pipeline
   install       Install or upgrade Oberth on a cluster
   setup         Interactive setup wizard
   upgrade       Upgrade an existing Oberth deployment

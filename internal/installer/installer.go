@@ -38,7 +38,10 @@ const (
 	// DefaultNamespace is the namespace for Oberth.
 	DefaultNamespace = "oberth"
 	// DefaultTimeout is the default wait-for-ready deadline.
-	DefaultTimeout = 5 * time.Minute
+	// DefaultTimeout bounds each readiness wait. A first install pulls the
+	// OpenBao, Argo and Oberth images (and Rekor's stack) onto an empty node,
+	// which five minutes did not reliably cover.
+	DefaultTimeout = 15 * time.Minute
 	// DefaultOpenBaoChartVersion is the pinned OpenBao chart version.
 	// Bump deliberately and re-verify the dev-mode install flow; never float
 	// to latest.
