@@ -24,6 +24,8 @@ func runInstall(ctx context.Context, arguments []string, input io.Reader, output
 	flags.StringVar(&cfg.UplinkIdentity, "uplink-identity", "", "workstation identity")
 	flags.StringVar(&cfg.SSHPublicKeyPath, "ssh-public-key", "", "workstation SSH public key path")
 	flags.StringVar(&cfg.UpstreamPrivateKeyPath, "upstream-key-file", "", "existing work SSH private key to import into OpenBao")
+	flags.StringVar(&cfg.ClientAccess, "client-access", "",
+		"write this machine's client files without asking: both, cli, mcp, or none")
 	flags.BoolVar(&cfg.Dev, "dev", false, "install in dev/evaluation mode (default)")
 	flags.BoolVar(&cfg.Production, "production", false, "install in production mode (not implemented)")
 	flags.BoolVar(&cfg.DryRun, "dry-run", false, "print plan without making changes")

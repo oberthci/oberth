@@ -294,3 +294,24 @@ func TestRefreshPinnedServerCARewritesStaleCA(t *testing.T) {
 		t.Fatalf("ca.crt mode %v", info.Mode().Perm())
 	}
 }
+
+// A choice made in advance (the setup wizard's client-access screen, or
+// --client-access) is honoured without a terminal: the wizard runs the
+// installer non-interactively and must still get the files it asked for.
+func TestClientAccessDecidedInAdvanceNeedsNoTerminal(t *testing.T) {
+	deps, _, home := clientAccessDeps(t, "")
+	deps.IsTerminal = func() bool { return false }
+	deps.Input = nil
+	tw := newTableWriter(deps.Output, false)
+
+	if err := offerClientAccess(context.Background(), Config{ClientAccess: "cli"}, deps, tw, testToken); err != nil {
+		t.Fatal(err)
+	}
+	root := filepath.Join(home, ".config", "oberth")
+	assertExists(t, filepath.Join(root, "env"), true)
+	assertExists(t, filepath.Join(root, "mcp.json"), false)
+
+	if err := (&Config{ClientAccess: "everything"}).Validate(); err == nil || !strings.Contains(err.Error(), "--client-access") {
+		t.Fatalf("an unknown client-access choice must be rejected, got %v", err)
+	}
+}

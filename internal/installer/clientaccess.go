@@ -45,8 +45,8 @@ func offerClientAccess(ctx context.Context, cfg Config, deps Deps, tw *tableWrit
 	// files, but never drives an interactive subprocess, so RunInteractive is
 	// not among what it needs. Asking for more than it uses would make it
 	// untestable on its own and would skip silently in a session that could in
-	// fact answer.
-	if deps.IsTerminal == nil || !deps.IsTerminal() || deps.Input == nil {
+	// fact answer. A choice made in advance needs no terminal at all.
+	if _, decided := clientAccessDecided(cfg); !decided && (deps.IsTerminal == nil || !deps.IsTerminal() || deps.Input == nil) {
 		// Say so: otherwise a non-interactive install ends with a server that
 		// no CLI or MCP client on this machine is configured to reach.
 		tw.AppendRow("Client access", "no terminal: see docs/mcp-setup.md", "⚠ manual", false)
@@ -76,7 +76,7 @@ func offerClientAccess(ctx context.Context, cfg Config, deps Deps, tw *tableWrit
 // reads one, they never hold it.
 func offerClientAccessToConfiguredDeployment(ctx context.Context, cfg Config, deps Deps, tw *tableWriter) error {
 	refreshPinnedServerCA(ctx, cfg, deps, tw)
-	if deps.IsTerminal == nil || !deps.IsTerminal() || deps.Input == nil {
+	if _, decided := clientAccessDecided(cfg); !decided && (deps.IsTerminal == nil || !deps.IsTerminal() || deps.Input == nil) {
 		return nil
 	}
 	root, err := deps.clientConfigRoot()
@@ -96,8 +96,12 @@ func runClientAccessOffer(ctx context.Context, cfg Config, deps Deps, tw *tableW
 	w := deps.Output
 	color := isColor(deps)
 
-	choice, err := selectOption(ctx, deps, color, "Client access",
-		[]string{"Both", "CLI only", "MCP only", "Neither"}, clientAccessBoth)
+	choice, decided := clientAccessDecided(cfg)
+	var err error
+	if !decided {
+		choice, err = selectOption(ctx, deps, color, "Client access",
+			[]string{"Both", "CLI only", "MCP only", "Neither"}, clientAccessBoth)
+	}
 	if err != nil {
 		if errors.Is(err, ErrInterrupted) {
 			return ErrInterrupted
