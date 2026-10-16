@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/x509"
+	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
 	"errors"
@@ -521,6 +522,8 @@ func commitServerIdentityRotation(ctx context.Context, cfg *Config, deps Deps) e
 	}
 	newFingerprint := certSHA256Fingerprint(newCert.Raw)
 	_, _ = fmt.Fprintf(w, "Server certificate rotated: old=%s new=%s\n", pr.oldFingerprint, newFingerprint)
+	digest := sha256.Sum256(newCert.Raw)
+	cfg.rotatedServerCertSHA256 = hex.EncodeToString(digest[:])
 
 	return nil
 }

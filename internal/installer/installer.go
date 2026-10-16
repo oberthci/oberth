@@ -201,6 +201,11 @@ type Config struct {
 	// write to OpenBao; phase 2 (commitServerIdentityRotation) writes after
 	// the Helm SSA preview confirms no conflicts.
 	pendingCertRotation *pendingRotation
+	// rotatedServerCertSHA256 is set once a rotation is committed to OpenBao.
+	// It becomes a pod annotation: the server reads its identity only at
+	// startup, and a rotation that changes no other value would otherwise
+	// leave the pod serving the retired certificate.
+	rotatedServerCertSHA256 string
 
 	// ChartPath installs the Oberth chart from a local directory or archive
 	// instead of the published repository (--chart). This is the loop the
@@ -1581,6 +1586,9 @@ func OberthHelmArgs(cfg Config, openbao OpenBaoResult, rekor RekorResult) []stri
 	// cloudflared keeps trusting the server after the upgrade.
 	if cfg.watchTunnelOriginCACert != "" {
 		args = append(args, "--set-string", "watchTunnel.originCACert="+cfg.watchTunnelOriginCACert)
+	}
+	if cfg.rotatedServerCertSHA256 != "" {
+		args = append(args, "--set-string", `podAnnotations.oberth\.ci/server-certificate-sha256=`+cfg.rotatedServerCertSHA256)
 	}
 	if cfg.wantsSecretStore() {
 		args = append(args,

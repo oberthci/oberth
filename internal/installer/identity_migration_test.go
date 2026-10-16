@@ -312,6 +312,13 @@ func TestPreflightCertLacksGoProxySANsRotates(t *testing.T) {
 	if !patchSeen {
 		t.Fatal("expected a kv patch call after commitServerIdentityRotation")
 	}
+	// The server reads its identity only at startup: the committed rotation
+	// must change the pod template so the upgrade restarts it.
+	if cfg.rotatedServerCertSHA256 == "" ||
+		!strings.Contains(strings.Join(OberthHelmArgs(cfg, OpenBaoResult{}, RekorResult{}), " "),
+			`podAnnotations.oberth\.ci/server-certificate-sha256=`+cfg.rotatedServerCertSHA256) {
+		t.Fatal("committed rotation must annotate the pod template with the new certificate digest")
+	}
 	if !patchAuthenticated {
 		t.Fatal("kv patch was not authenticated")
 	}
