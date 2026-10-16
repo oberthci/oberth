@@ -64,6 +64,10 @@ func runInstall(ctx context.Context, arguments []string, input io.Reader, output
 	flags.StringVar(&cfg.ArgoControllerProfile, "argo-controller-profile", "", "install the verified nonroot-static-v1 controller profile (requires the managed pinned chart)")
 	flags.StringVar(&cfg.ArgoVaultAddress, "argo-vault-address", "",
 		"OpenBao/Vault base URL injected into credentialed pipeline containers as VAULT_ADDR (https only)")
+	flags.StringVar(&cfg.ServiceType, "service-type", "",
+		"Oberth Service type: NodePort (default for a fresh install; clients use NodePorts 30022/30443), "+
+			"LoadBalancer (on k3s, servicelb also takes host ports 2222 and 443 on the node) or ClusterIP; "+
+			"an upgrade keeps the release's current type unless this is set")
 	flags.StringVar(&cfg.NetworkPolicy, "network-policy", "",
 		"pipeline egress NetworkPolicy: auto (default: enable on conforming CNIs, disable on k3s+kube-router), "+
 			"true (always enable), false (always disable)")

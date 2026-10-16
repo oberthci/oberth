@@ -193,6 +193,10 @@ type Config struct {
 	// "auto" (default) enables on all CNIs except k3s's built-in kube-router
 	// (which has a DNAT incompatibility), "true" forces on, "false" forces off.
 	NetworkPolicy string
+	// ServiceType is the Oberth Service type: NodePort, LoadBalancer or
+	// ClusterIP. Empty means NodePort on a fresh install and whatever the
+	// existing release has on an upgrade.
+	ServiceType string
 	// watchTunnelOriginCACert is set by the identity preflight when the server
 	// certificate was rotated (or its public key matches but its fingerprint
 	// differs from the live watchTunnel.originCACert pin). OberthHelmArgs uses
@@ -553,6 +557,11 @@ func (cfg *Config) Validate() error {
 	if cfg.InstallSecretStore && cfg.InstallSecretStoreDev {
 		return errors.New("--install-secretstore and --install-secretstore-dev are mutually exclusive")
 	}
+	switch cfg.ServiceType {
+	case "", "NodePort", "LoadBalancer", "ClusterIP":
+	default:
+		return fmt.Errorf("--service-type must be NodePort, LoadBalancer or ClusterIP, not %q", cfg.ServiceType)
+	}
 	if !cfg.Dev {
 		cfg.Dev = true
 	}
@@ -681,6 +690,23 @@ func Run(ctx context.Context, cfg Config, deps Deps) error {
 	}
 
 	cfg.serverPKI = cfg.InstallSecretStore
+
+	// The installer's own access path is the NodePorts (30022/30443). A
+	// LoadBalancer Service on k3s makes servicelb take host ports 2222 and
+	// 443 on the node, invisibly (#049): default fresh installs to NodePort
+	// and keep an existing release's choice unless one is requested.
+	if cfg.ServiceType == "" && cfg.WatchAdoptionPlan == "" && !cfg.DryRun {
+		ns := cfg.Namespace
+		if ns == "" {
+			ns = DefaultNamespace
+		}
+		if _, exists := findHelmRelease(ctx, deps, "oberth", ns); !exists {
+			cfg.ServiceType = "NodePort"
+		}
+	}
+	if cfg.ServiceType == "LoadBalancer" && cluster.Engine == "k3s" {
+		_, _ = fmt.Fprintln(deps.Output, "NOTE: service type LoadBalancer on k3s: servicelb binds the Service ports (2222 and 443 by default) on the node's own address; SSH or HTTPS to those host ports reaches Oberth.")
+	}
 
 	// The installer advertises clientReachableHost to the CLI and MCP clients
 	// (and prints it as the Ready URL), so the certificate must carry it.
@@ -1622,6 +1648,9 @@ func OberthHelmArgs(cfg Config, openbao OpenBaoResult, rekor RekorResult) []stri
 			// The tunnel trusts the stable CA, not a leaf that renews monthly.
 			"--set-string", "watchTunnel.originCACert="+openbao.ServerCACertPEM,
 		)
+	}
+	if cfg.ServiceType != "" {
+		args = append(args, "--set", "service.type="+cfg.ServiceType)
 	}
 	if cfg.rotatedServerCertSHA256 != "" {
 		args = append(args, "--set-string", `podAnnotations.oberth\.ci/server-certificate-sha256=`+cfg.rotatedServerCertSHA256)
