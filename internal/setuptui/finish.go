@@ -259,6 +259,10 @@ func (f *finishScreen) start(w *wizard) tea.Cmd {
 	if !w.install.started && w.state.Install.Status == installNone {
 		return nil
 	}
+	// --dry-mode promises no cluster calls; Verify execs kubectl.
+	if w.opts.DryMode {
+		return nil
+	}
 	return f.runVerify(w, false)
 }
 

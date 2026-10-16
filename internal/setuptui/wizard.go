@@ -150,6 +150,14 @@ func (w *wizard) openStep(step stepID) tea.Cmd {
 		w.setScreen(r)
 		return r.start(w)
 	case stepInstall:
+		// A failed install (also one resumed from setup.json) goes back
+		// through Review to a fresh attempt instead of a finish screen with
+		// nothing to verify (review finding).
+		if w.state.Install.Status == installFailed && !w.install.started {
+			r := newReviewScreen()
+			w.setScreen(r)
+			return r.start(w)
+		}
 		if w.install.started || w.state.Install.Status != installNone {
 			f := newFinishScreen(w)
 			w.setScreen(f)

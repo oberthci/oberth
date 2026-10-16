@@ -206,3 +206,16 @@ func TestApplyWriterBackstop(t *testing.T) {
 		t.Fatalf("an unterminated last line must be flushed: %#v", got[2])
 	}
 }
+
+// The error persisted in setup.json is one masked, bounded line (review finding).
+func TestPersistableErrorIsOneMaskedLine(t *testing.T) {
+	m := newMasker()
+	m.register([]byte("oberth_secret_token_value"))
+	got := persistableError(m.mask("upstream add failed: oberth_secret_token_value\nfull log follows\nmore"))
+	if strings.Contains(got, "oberth_secret_token_value") || strings.Contains(got, "\n") || !strings.HasPrefix(got, "upstream add failed") {
+		t.Fatalf("persisted error = %q", got)
+	}
+	if long := persistableError(strings.Repeat("x", 1000)); len(long) > 310 {
+		t.Fatalf("persisted error not bounded: %d", len(long))
+	}
+}

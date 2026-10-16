@@ -200,8 +200,13 @@ func stepSummary(st *WizardState, step stepID) string {
 
 // ---------- review ----------
 
-// preflightDoneMsg reports the review's cluster re-check.
-type preflightDoneMsg struct{ result probeResult }
+// preflightDoneMsg reports the review's cluster re-check. It names the
+// cluster it checked: a late result for a cluster the operator has since
+// changed must not mark the review checked (review finding).
+type preflightDoneMsg struct {
+	context, kubeconfig string
+	result              probeResult
+}
 
 // reviewScreen shows every answer and the equivalent command, and re-checks
 // the answers before the install can start: resumed answers may be stale.
@@ -231,13 +236,17 @@ func (r *reviewScreen) start(w *wizard) tea.Cmd {
 		return nil
 	}
 	r.checking = true
-	work := probeContext(w.state.Config.ContextName, w.state.Config.KubeconfigPath)
-	return func() tea.Msg { return preflightDoneMsg{result: work()} }
+	context, kubeconfig := w.state.Config.ContextName, w.state.Config.KubeconfigPath
+	work := probeContext(context, kubeconfig)
+	return func() tea.Msg { return preflightDoneMsg{context: context, kubeconfig: kubeconfig, result: work()} }
 }
 
 func (r *reviewScreen) update(w *wizard, msg tea.Msg) tea.Cmd {
 	switch msg := msg.(type) {
 	case preflightDoneMsg:
+		if msg.context != w.state.Config.ContextName || msg.kubeconfig != w.state.Config.KubeconfigPath {
+			return nil // a stale check for a cluster no longer selected
+		}
 		r.checking = false
 		if msg.result.err != nil {
 			r.failing = questionsOf(w.questions, stepCluster)[0]

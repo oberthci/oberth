@@ -334,6 +334,15 @@ func printRestorePlan(w io.Writer, cfg RestoreConfig, deps backupDeps, archive r
 	_, _ = fmt.Fprintf(w, "\nRestore plan for context %s (namespace %s, OpenBao %s, Argo %s):\n", deps.ContextName, cfg.Namespace, cfg.OpenBaoNamespace, cfg.ArgoNamespace)
 	_, _ = fmt.Fprintf(w, "  Archive    %s\n             sha256 %s, created %s from context %s (%s)\n",
 		cfg.Input, archive.CipherSHA, m.CreatedAt, displayOr(m.Source.Context, "?"), displayOr(m.Source.ServerVersion, "unknown server version"))
+	// Same cluster means a rollback: every run created after the backup
+	// disappears and its workflows are deleted below (review finding).
+	switch {
+	case m.Source.APIServer != "" && m.Source.APIServer == deps.apiServer:
+		_, _ = fmt.Fprintf(w, "  Cluster    SAME cluster the backup was taken from (%s): this rolls Oberth back to %s; runs created since are dropped\n",
+			deps.apiServer, m.CreatedAt)
+	case m.Source.APIServer != "" && deps.apiServer != "":
+		_, _ = fmt.Fprintf(w, "  Cluster    different cluster: backup from %s, restoring onto %s\n", m.Source.APIServer, deps.apiServer)
+	}
 
 	plan := target.OpenBao
 	if plan.Known {

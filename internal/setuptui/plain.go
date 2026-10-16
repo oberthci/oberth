@@ -290,12 +290,21 @@ func (p *plainRun) review() (bool, error) {
 func (p *plainRun) install(input io.Reader) error {
 	p.say("\n  Step %d of %d — %s\n", int(stepInstall)+1, stepCount, stepInstall.name())
 	statuses := map[string]string{}
+	// Credentials still reach the operator here, once, but are also
+	// registered so nothing derived from the installer's output (the error
+	// persisted in setup.json) can carry one.
+	secrets := newMasker()
+	defer secrets.wipe()
 	err := executeInstaller(p.ctx, installConfig(p.st), installer.InstallDeps{
 		Output:     p.out,
 		Input:      input,
 		IsTerminal: func() bool { return false },
 		StepProgressSink: func(step, status string) {
 			statuses[step] = status
+		},
+		CredentialSink: func(label, value string) {
+			secrets.register([]byte(value))
+			p.say("\n  %s (shown once, save it now): %s\n", label, value)
 		},
 	})
 	rec := &p.st.Install
@@ -320,7 +329,7 @@ func (p *plainRun) install(input io.Reader) error {
 		}
 		rec.Status = installFailed
 		rec.Phase = installPhases[phase]
-		rec.Error = err.Error()
+		rec.Error = persistableError(secrets.mask(err.Error()))
 	}
 	if rec.Status != installFailed {
 		p.st.done[stepInstall] = true
@@ -384,4 +393,17 @@ func readLine(ctx context.Context, r *bufio.Reader) (string, error) {
 	case res := <-ch:
 		return res.line, res.err
 	}
+}
+
+// persistableError keeps the first line of an installer error, bounded, for
+// setup.json and the report: enough to say what failed, never a log dump.
+func persistableError(message string) string {
+	if i := strings.IndexByte(message, '\n'); i >= 0 {
+		message = message[:i]
+	}
+	const limit = 300
+	if len(message) > limit {
+		message = message[:limit] + "…"
+	}
+	return message
 }
