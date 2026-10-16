@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"runtime"
 	"strings"
 	"time"
 
@@ -128,6 +129,11 @@ type WizardState struct {
 // startup decision: --plain / --accessible (or a non-interactive terminal)
 // select the sequential flow, and nothing inside the TUI can switch to it.
 func Run(ctx context.Context, opts Options, input io.Reader, output io.Writer) error {
+	// Refuse before the first page: every apply path needs helm and kubectl,
+	// and finding out at the Helm step wastes the whole walkthrough.
+	if err := installer.CheckHostTools(runtime.GOOS, nil); err != nil {
+		return err
+	}
 	if opts.Plain || opts.Accessible {
 		return runPlain(ctx, opts, input, output)
 	}

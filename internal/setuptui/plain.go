@@ -99,14 +99,20 @@ func runPlain(ctx context.Context, opts Options, input io.Reader, output io.Writ
 	if raw, err := clientcmd.NewDefaultClientConfigLoadingRules().Load(); err == nil {
 		currentContext = raw.CurrentContext
 	}
-	choiceCluster, err := ask("Cluster (existing/kind)", "kind", func(v string) error {
-		if v != "existing" && v != "kind" {
-			return errors.New("choose existing or kind")
+	choiceCluster := "existing"
+	if kindAvailable() {
+		var err error
+		choiceCluster, err = ask("Cluster (existing/kind)", "kind", func(v string) error {
+			if v != "existing" && v != "kind" {
+				return errors.New("choose existing or kind")
+			}
+			return nil
+		})
+		if err != nil {
+			return err
 		}
-		return nil
-	})
-	if err != nil {
-		return err
+	} else {
+		wln("  Using an existing cluster (kind and Docker are not installed).")
 	}
 	state.Config.CreateKind = choiceCluster == "kind"
 	if !state.Config.CreateKind {
@@ -339,7 +345,13 @@ func runPlain(ctx context.Context, opts Options, input io.Reader, output io.Writ
 		return err
 	}
 	if auth == "existing" {
-		key, err := ask("Existing work private-key path (imported into OpenBao)", strings.TrimSuffix(state.SSHKeyPath, ".pub"), nil)
+		key, err := ask("Existing work private-key path (imported into OpenBao)", strings.TrimSuffix(state.SSHKeyPath, ".pub"), func(v string) error {
+			path, err := expandSetupPath(v)
+			if err != nil {
+				return err
+			}
+			return installer.CheckUpstreamPrivateKey(path)
+		})
 		if err != nil {
 			return err
 		}

@@ -5100,3 +5100,37 @@ func TestHelmWithKubeArgsDoesNotMutateInput(t *testing.T) {
 		t.Fatalf("input args mutated: was %v, now %v", before, original)
 	}
 }
+
+// A missing helm or kubectl stops the install before any cluster work,
+// instead of at the first Helm step after the cluster was prepared.
+func TestExecuteRefusesWithoutHostTools(t *testing.T) {
+	t.Parallel()
+
+	for _, missingTool := range []string{"helm", "kubectl"} {
+		ranCommand := false
+		err := Execute(context.Background(), Config{}, InstallDeps{
+			Output: io.Discard,
+			GOOS:   "linux",
+			LookPath: func(name string) (string, error) {
+				if name == missingTool {
+					return "", exec.ErrNotFound
+				}
+				return "/usr/bin/" + name, nil
+			},
+			RunCommand: func(context.Context, []byte, string, ...string) ([]byte, error) {
+				ranCommand = true
+				return nil, nil
+			},
+			LoadKubeConfig: func(string) (kubernetes.Interface, *rest.Config, string, error) {
+				t.Fatal("cluster must not be contacted when a host tool is missing")
+				return nil, nil, "", nil
+			},
+		})
+		if err == nil || !strings.Contains(err.Error(), missingTool+" not found in PATH") {
+			t.Fatalf("missing %s: got %v", missingTool, err)
+		}
+		if ranCommand {
+			t.Fatalf("missing %s: a host command ran before the tool check", missingTool)
+		}
+	}
+}

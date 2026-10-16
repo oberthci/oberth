@@ -492,6 +492,12 @@ func (cfg *Config) Validate() error {
 		cfg.ForgeURL = "ssh://git@" + host + "/" + cfg.ForgeOrg
 	}
 
+	if cfg.UpstreamPrivateKeyPath != "" {
+		if err := CheckUpstreamPrivateKey(cfg.UpstreamPrivateKeyPath); err != nil {
+			return fmt.Errorf("--upstream-key-file: %w", err)
+		}
+	}
+
 	if cfg.InstallRekor {
 		if cfg.InstallSecretStoreDev {
 			return errors.New("rekor requires persistent production OpenBao; dev storage cannot preserve log identity")
@@ -1006,9 +1012,9 @@ func DetectEngine(nodes []corev1.Node) string {
 
 // --- Phase 2: OpenBao install ---
 
-// InstallOpenBao installs OpenBao via the helm binary, in dev mode
-// (--install-secretstore-dev) or production mode (--install-secretstore).
-func InstallOpenBao(ctx context.Context, cfg Config, deps Deps) (OpenBaoResult, error) {
+// openBaoServiceAddress is the in-cluster base URL of the installer-managed
+// OpenBao: HTTPS in production mode, plain HTTP only in explicit dev mode.
+func openBaoServiceAddress(cfg Config) string {
 	ns := cfg.OpenBaoNamespace
 	if ns == "" {
 		ns = DefaultOpenBaoNamespace
@@ -1017,9 +1023,19 @@ func InstallOpenBao(ctx context.Context, cfg Config, deps Deps) (OpenBaoResult, 
 	if cfg.InstallSecretStore {
 		scheme = "https"
 	}
+	return fmt.Sprintf("%s://openbao.%s.svc:8200", scheme, ns)
+}
+
+// InstallOpenBao installs OpenBao via the helm binary, in dev mode
+// (--install-secretstore-dev) or production mode (--install-secretstore).
+func InstallOpenBao(ctx context.Context, cfg Config, deps Deps) (OpenBaoResult, error) {
+	ns := cfg.OpenBaoNamespace
+	if ns == "" {
+		ns = DefaultOpenBaoNamespace
+	}
 	result := OpenBaoResult{
 		Namespace:      ns,
-		ServiceAddress: fmt.Sprintf("%s://openbao.%s.svc:8200", scheme, ns),
+		ServiceAddress: openBaoServiceAddress(cfg),
 	}
 
 	if err := refreshHelmRepo(ctx, deps, openBaoRepoName, OpenBaoHelmRepoURL); err != nil {

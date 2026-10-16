@@ -111,6 +111,34 @@ func (deps InstallDeps) withDefaults() InstallDeps {
 	return deps
 }
 
+// CheckHostTools reports the host binaries every install path drives but that
+// are missing from PATH: helm installs the charts and kubectl runs every
+// in-cluster step. Checked before anything is installed, so a missing tool
+// stops the install up front instead of at its first Helm step.
+func CheckHostTools(goos string, lookPath func(string) (string, error)) error {
+	if lookPath == nil {
+		lookPath = exec.LookPath
+	}
+	hints := map[string]string{
+		"helm":    "https://helm.sh/docs/intro/install/",
+		"kubectl": "https://kubernetes.io/docs/tasks/tools/",
+	}
+	if goos == "darwin" {
+		hints["helm"] = "`brew install helm`"
+		hints["kubectl"] = "`brew install kubernetes-cli`"
+	}
+	var missing []string
+	for _, tool := range []string{"helm", "kubectl"} {
+		if _, err := lookPath(tool); err != nil {
+			missing = append(missing, fmt.Sprintf("%s not found in PATH; install it (%s)", tool, hints[tool]))
+		}
+	}
+	if len(missing) > 0 {
+		return errors.New(strings.Join(missing, "\n") + "\nthen rerun oberth")
+	}
+	return nil
+}
+
 // Execute prepares the platform-selected Kubernetes cluster, loads its
 // kubeconfig, and runs the cluster install flow.
 func Execute(ctx context.Context, cfg Config, deps InstallDeps) error {
@@ -123,6 +151,13 @@ func Execute(ctx context.Context, cfg Config, deps InstallDeps) error {
 	}
 	if err := cfg.Validate(); err != nil {
 		return err
+	}
+	// A dry run only prints the plan, so it stays usable on a host that has
+	// not installed the tools yet.
+	if !cfg.DryRun {
+		if err := CheckHostTools(deps.GOOS, deps.LookPath); err != nil {
+			return err
+		}
 	}
 
 	contextName := cfg.ContextName

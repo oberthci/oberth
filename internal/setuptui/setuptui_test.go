@@ -4,10 +4,14 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -16,6 +20,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"golang.org/x/crypto/ssh"
 
 	"github.com/oberthci/oberth/internal/installer"
 )
@@ -1206,10 +1211,7 @@ func TestForgeAcceptsGeneratedAndExistingWorkKeys(t *testing.T) {
 	state := &WizardState{ForgeType: "github", ForgeAuth: "existing"}
 	p.init(state)
 	p.org = "oberthci"
-	p.keyPath = filepath.Join(t.TempDir(), "work-key")
-	if err := os.WriteFile(p.keyPath, []byte("private-key-fixture"), 0600); err != nil {
-		t.Fatal(err)
-	}
+	p.keyPath = writeWorkKeyFixture(t, "")
 	_, cmd := p.update(enterKey(), state)
 	if cmd == nil || state.Config.UpstreamPrivateKeyPath != p.keyPath {
 		t.Fatalf("existing work key was not selected: %s", p.errMsg)
@@ -1219,6 +1221,45 @@ func TestForgeAcceptsGeneratedAndExistingWorkKeys(t *testing.T) {
 	if cmd == nil || state.Config.UpstreamPrivateKeyPath != "" {
 		t.Fatal("generated key must clear the prior import path")
 	}
+}
+
+// A passphrase-protected work key is refused on the forge page, before the
+// install runs, instead of at onboarding after the whole cluster install.
+func TestForgeRejectsPassphraseProtectedWorkKey(t *testing.T) {
+	p := newForgePage()
+	state := &WizardState{ForgeType: "github", ForgeAuth: "existing"}
+	p.init(state)
+	p.org = "oberthci"
+	p.keyPath = writeWorkKeyFixture(t, "secret")
+	_, cmd := p.update(enterKey(), state)
+	if cmd != nil || state.Config.UpstreamPrivateKeyPath != "" {
+		t.Fatal("passphrase-protected work key must not be accepted")
+	}
+	if !strings.Contains(p.errMsg, "passphrase-protected") {
+		t.Fatalf("error must name the passphrase problem, got %q", p.errMsg)
+	}
+}
+
+func writeWorkKeyFixture(t *testing.T, passphrase string) string {
+	t.Helper()
+	_, private, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var block *pem.Block
+	if passphrase == "" {
+		block, err = ssh.MarshalPrivateKey(private, "")
+	} else {
+		block, err = ssh.MarshalPrivateKeyWithPassphrase(private, "", []byte(passphrase))
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "work-key")
+	if err := os.WriteFile(path, pem.EncodeToMemory(block), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
 }
 
 func TestForgePageViewHasLabelledSections(t *testing.T) {
@@ -1578,6 +1619,7 @@ func TestClusterPageKindCreateEntry(t *testing.T) {
 // --- #436: plain mode must wire onboarding config ---
 
 func TestPlainModeWiresOnboardingConfig(t *testing.T) {
+	stubKindTools(t, true)
 	// TODO(#449): This test does not reach the actual Config wiring because
 	// dry-mode exits before Apply, and Config fields are populated only at
 	// Apply time. It currently validates that answers are collected (the
@@ -2087,6 +2129,7 @@ func TestClusterPageKeysShowsRescan(t *testing.T) {
 }
 
 func TestEmptyKubeconfigOffersBothSetupPaths(t *testing.T) {
+	stubKindTools(t, true)
 	path := filepath.Join(t.TempDir(), "config")
 	if err := os.WriteFile(path, []byte("apiVersion: v1\nkind: Config\n"), 0600); err != nil {
 		t.Fatal(err)
@@ -2135,5 +2178,47 @@ func TestExplicitKubeconfigSelectionIsRetained(t *testing.T) {
 	}
 	if !strings.Contains(BuildCommandLine(state), "--kubeconfig='"+path+"'") {
 		t.Fatal("command preview lost the quoted path")
+	}
+}
+
+// stubKindTools makes kind creation available or unavailable regardless of
+// what the test host has installed.
+func stubKindTools(t *testing.T, available bool) {
+	t.Helper()
+	previous := kindLookPath
+	kindLookPath = func(name string) (string, error) {
+		if available {
+			return "/usr/bin/" + name, nil
+		}
+		return "", exec.ErrNotFound
+	}
+	t.Cleanup(func() { kindLookPath = previous })
+}
+
+// Without kind and docker (a k3s host on Linux), kind creation can only
+// fail, so neither the welcome page nor the cluster page offers it.
+func TestKindCreationHiddenWithoutKindTools(t *testing.T) {
+	stubKindTools(t, false)
+	path := filepath.Join(t.TempDir(), "config")
+	if err := os.WriteFile(path, []byte("apiVersion: v1\nkind: Config\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("KUBECONFIG", path)
+	info := probeCluster("")().(clusterInfoMsg)
+	state := &WizardState{}
+	welcome := newWelcomePage()
+	welcome.update(info, state)
+	if view := stripAnsi(welcome.view(state, 120, 30)); strings.Contains(view, "create a new one with kind") {
+		t.Fatalf("welcome page offers kind creation without kind installed:\n%s", view)
+	}
+	cluster := newClusterPage()
+	cluster.init(state)
+	for _, entry := range cluster.contexts {
+		if entry.name == kindCreateEntry {
+			t.Fatalf("cluster page offers %q without kind installed: %+v", kindCreateEntry, cluster.contexts)
+		}
+	}
+	if len(cluster.contexts) != 1 || cluster.contexts[0].name != kubeconfigEntry {
+		t.Fatalf("cluster page must still offer a kubeconfig path: %+v", cluster.contexts)
 	}
 }

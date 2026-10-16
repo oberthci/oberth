@@ -8,6 +8,8 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+
+	"github.com/oberthci/oberth/internal/installer"
 )
 
 // forgePage asks where green code is published: which forge, which
@@ -174,6 +176,10 @@ func (p *forgePage) update(msg tea.Msg, state *WizardState) (page, tea.Cmd) {
 				info, err := os.Stat(path)
 				if err != nil || !info.Mode().IsRegular() {
 					p.errMsg = "select an existing work private-key file"
+					return p, nil
+				}
+				if err := installer.CheckUpstreamPrivateKey(path); err != nil {
+					p.errMsg = err.Error()
 					return p, nil
 				}
 				state.Config.UpstreamPrivateKeyPath = path

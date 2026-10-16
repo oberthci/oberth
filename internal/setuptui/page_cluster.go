@@ -3,6 +3,7 @@ package setuptui
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -13,6 +14,39 @@ import (
 
 const kindCreateEntry = "Create kind cluster"
 const kubeconfigEntry = "Provide kubeconfig path"
+
+// kindLookPath resolves the binaries kind creation needs; tests replace it.
+var kindLookPath = exec.LookPath
+
+// kindAvailable reports whether this host can create a kind cluster: the
+// installer drives both the kind and docker CLIs. Without them the choice
+// can only fail, so it is not offered (a k3s host on Linux, for example).
+func kindAvailable() bool {
+	for _, tool := range []string{"kind", "docker"} {
+		if _, err := kindLookPath(tool); err != nil {
+			return false
+		}
+	}
+	return true
+}
+
+// clusterSetupEntries are the non-context choices listed after the
+// kubeconfig contexts.
+func clusterSetupEntries() []kubeContext {
+	entries := []kubeContext{{name: kubeconfigEntry}}
+	if kindAvailable() {
+		entries = append(entries, kubeContext{name: kindCreateEntry, isLocal: true})
+	}
+	return entries
+}
+
+// noClusterAdvice is shown when no Kubernetes cluster is configured.
+func noClusterAdvice() string {
+	if kindAvailable() {
+		return "Provide a kubeconfig path for an existing cluster, or create a new one with kind."
+	}
+	return "Provide a kubeconfig path for an existing cluster (install kind and Docker to create a local one)."
+}
 
 // kubeContext represents one entry from kubeconfig.
 type kubeContext struct {
@@ -60,7 +94,7 @@ func (p *clusterPage) loadContexts() {
 	config := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(rules, &clientcmd.ConfigOverrides{})
 	rawConfig, err := config.RawConfig()
 	if err != nil {
-		p.contexts = []kubeContext{{name: kubeconfigEntry}, {name: kindCreateEntry, isLocal: true}}
+		p.contexts = clusterSetupEntries()
 		p.errMsg = fmt.Sprintf("Cannot read kubeconfig: %v", err)
 		return
 	}
@@ -85,7 +119,7 @@ func (p *clusterPage) loadContexts() {
 	current := rawConfig.CurrentContext
 	sortContexts(p.contexts, current)
 
-	p.contexts = append(p.contexts, kubeContext{name: kubeconfigEntry}, kubeContext{name: kindCreateEntry, isLocal: true})
+	p.contexts = append(p.contexts, clusterSetupEntries()...)
 }
 
 func (p *clusterPage) update(msg tea.Msg, state *WizardState) (page, tea.Cmd) {
@@ -196,7 +230,7 @@ func (p *clusterPage) view(_ *WizardState, width, _ int) string {
 	}
 
 	if len(p.contexts) == 0 {
-		b.WriteString("  Provide a kubeconfig path for an existing cluster or create a new one with kind.\n")
+		b.WriteString("  " + noClusterAdvice() + "\n")
 		return b.String()
 	}
 

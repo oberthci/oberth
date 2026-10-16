@@ -35,7 +35,8 @@ func goProxyDNSNames(fullname, namespace string) []string {
 }
 
 // liveHelmValuesSubset is the subset of a Helm release's values the identity
-// preflight inspects: goProxy enablement and watchTunnel origin certificate.
+// preflight and the Helm SSA preview inspect: goProxy enablement, the
+// watchTunnel origin certificate, and the deployed secret-store connection.
 type liveHelmValuesSubset struct {
 	Argo struct {
 		GoProxy struct {
@@ -46,6 +47,13 @@ type liveHelmValuesSubset struct {
 		Enabled      bool   `json:"enabled"`
 		OriginCACert string `json:"originCACert"`
 	} `json:"watchTunnel"`
+	Secretstore struct {
+		Address string `json:"address"`
+		CACert  string `json:"caCert"`
+		Transit struct {
+			Enabled bool `json:"enabled"`
+		} `json:"transit"`
+	} `json:"secretstore"`
 }
 
 // readLiveHelmValuesSubset reads the current Helm release values for the

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -263,5 +264,80 @@ func TestOberthHelmArgsNoAtomicOnInstallPath(t *testing.T) {
 		if arg == "--atomic" {
 			t.Fatal("--atomic must not be present in install helm args: auto-rollback + forward-only migrations = crashloop trap")
 		}
+	}
+}
+
+// A re-run of `oberth install --install-secretstore` against an existing
+// release previews before the OpenBao phase. The preview must render the
+// planned secret-store values, not an empty secretstore.address that the
+// chart schema rejects (observed on tuxbox, v0.17.26 setup retry).
+func TestPreviewHelmUpgradePlansSecretStoreValues(t *testing.T) {
+	t.Parallel()
+
+	const liveCA = "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n"
+	var preview string
+	deps := Deps{
+		Output: &bytes.Buffer{},
+		RunHelm: func(_ context.Context, args []string) ([]byte, error) {
+			joined := strings.Join(args, " ")
+			switch {
+			case strings.HasPrefix(joined, "list"):
+				return []byte(`[{"name":"oberth","namespace":"oberth","status":"deployed","chart":"oberth-0.17.26"}]`), nil
+			case strings.HasPrefix(joined, "get values"):
+				return []byte(`{"secretstore":{"enabled":true,"address":"https://openbao.openbao.svc:8200","caCert":` +
+					strconv.Quote(liveCA) + `,"transit":{"enabled":true}}}`), nil
+			case strings.Contains(joined, "--dry-run=server"):
+				preview = joined
+				return []byte(`{}`), nil
+			}
+			return nil, nil
+		},
+	}
+	cfg := Config{Namespace: "oberth", InstallSecretStore: true}
+
+	if err := previewHelmUpgrade(context.Background(), cfg, deps, OpenBaoResult{}, ""); err != nil {
+		t.Fatalf("preview: %v", err)
+	}
+	for _, want := range []string{
+		"secretstore.address=https://openbao.openbao.svc:8200 ",
+		"secretstore.caCert=" + liveCA,
+		"secretstore.transit.enabled=true",
+	} {
+		if !strings.Contains(preview, want) {
+			t.Fatalf("preview args missing %q:\n%s", want, preview)
+		}
+	}
+	if strings.Contains(preview, "secretstore.address= ") {
+		t.Fatalf("preview rendered an empty secretstore.address:\n%s", preview)
+	}
+}
+
+func TestPreviewHelmUpgradePlansDevSecretStoreAddress(t *testing.T) {
+	t.Parallel()
+
+	var preview string
+	deps := Deps{
+		Output: &bytes.Buffer{},
+		RunHelm: func(_ context.Context, args []string) ([]byte, error) {
+			joined := strings.Join(args, " ")
+			switch {
+			case strings.HasPrefix(joined, "list"):
+				return []byte(`[{"name":"oberth","namespace":"oberth","status":"deployed","chart":"oberth-0.17.26"}]`), nil
+			case strings.HasPrefix(joined, "get values"):
+				t.Fatal("dev mode needs no live trust anchor")
+			case strings.Contains(joined, "--dry-run=server"):
+				preview = joined
+				return []byte(`{}`), nil
+			}
+			return nil, nil
+		},
+	}
+	cfg := Config{Namespace: "oberth", InstallSecretStoreDev: true, OpenBaoNamespace: "bao"}
+
+	if err := previewHelmUpgrade(context.Background(), cfg, deps, OpenBaoResult{}, ""); err != nil {
+		t.Fatalf("preview: %v", err)
+	}
+	if !strings.Contains(preview, "secretstore.address=http://openbao.bao.svc:8200 ") {
+		t.Fatalf("preview did not plan the dev OpenBao address:\n%s", preview)
 	}
 }

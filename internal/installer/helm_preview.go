@@ -55,6 +55,18 @@ func previewHelmUpgrade(ctx context.Context, cfg Config, deps Deps, openbao Open
 		return nil // fresh install — no existing objects to conflict with
 	}
 
+	// The preview runs before the OpenBao phase, so callers pass a zero
+	// result. Rendering it as-is sets secretstore.address to "" and the
+	// chart schema rejects the preview on every re-run of an install with a
+	// secret store. Plan the values the real upgrade will set instead.
+	if cfg.wantsSecretStore() && openbao.ServiceAddress == "" {
+		planned, err := plannedOpenBaoResult(ctx, cfg, deps, ns)
+		if err != nil {
+			return fmt.Errorf("helm server-side preview: %w", err)
+		}
+		openbao = planned
+	}
+
 	// Build the same args the real upgrade will use, plus the preview flags.
 	previewCfg := cfg
 	if sentinelOriginCACert != "" {
@@ -267,4 +279,22 @@ func detectFailedHelmRevision(ctx context.Context, deps Deps, namespace string) 
 	}
 
 	return nil
+}
+
+// plannedOpenBaoResult derives, without touching OpenBao, the secret-store
+// values the real upgrade will pass: the installer-managed service address,
+// and the trust anchor and Transit enablement the live release already
+// carries. The OpenBao phase re-verifies both before the real upgrade.
+func plannedOpenBaoResult(ctx context.Context, cfg Config, deps Deps, ns string) (OpenBaoResult, error) {
+	planned := OpenBaoResult{ServiceAddress: openBaoServiceAddress(cfg)}
+	if cfg.InstallSecretStoreDev {
+		return planned, nil
+	}
+	live, err := readLiveHelmValuesSubset(ctx, deps, ns)
+	if err != nil {
+		return planned, fmt.Errorf("read live secret-store values: %w", err)
+	}
+	planned.CACertPEM = live.Secretstore.CACert
+	planned.TrustedTransitVerified = live.Secretstore.Transit.Enabled
+	return planned, nil
 }

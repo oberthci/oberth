@@ -557,14 +557,50 @@ func provideDeployKey(ctx context.Context, cfg Config, deps Deps, tw *tableWrite
 	return nil
 }
 
-func applyProvidedDeployKey(ctx context.Context, cfg Config, deps Deps, privateKey []byte) error {
-	_, err := ssh.ParsePrivateKey(privateKey)
-	if err != nil {
+// errPassphraseProtectedKey rejects a work key the server cannot use: the pod
+// authenticates to the forge non-interactively, so nobody can type a
+// passphrase for it.
+var errPassphraseProtectedKey = errors.New("the key is passphrase-protected; the pod needs a non-interactive key — generate a dedicated deploy key instead")
+
+// parseUpstreamPrivateKey checks that privateKey is an SSH private key the
+// server can use without a passphrase.
+func parseUpstreamPrivateKey(privateKey []byte) error {
+	if _, err := ssh.ParsePrivateKey(privateKey); err != nil {
 		var passphraseErr *ssh.PassphraseMissingError
 		if errors.As(err, &passphraseErr) {
-			return errors.New("the key is passphrase-protected; the pod needs a non-interactive key — generate a dedicated deploy key instead")
+			return errPassphraseProtectedKey
 		}
 		return fmt.Errorf("parse SSH private key: %w", err)
+	}
+	return nil
+}
+
+// CheckUpstreamPrivateKey validates an operator-selected work key file before
+// anything is installed, so an unusable key is rejected up front instead of
+// after the cluster install, at onboarding.
+func CheckUpstreamPrivateKey(path string) error {
+	expanded, err := expandSSHKeyPath(path)
+	if err != nil {
+		return err
+	}
+	// #nosec G304 -- operator-selected work key path, read only to validate it.
+	key, err := os.ReadFile(expanded)
+	if err != nil {
+		return fmt.Errorf("read work key: %w", err)
+	}
+	defer clear(key)
+	if len(key) > 1<<20 {
+		return errors.New("work key exceeds size limit")
+	}
+	if err := parseUpstreamPrivateKey(key); err != nil {
+		return fmt.Errorf("%s: %w", path, err)
+	}
+	return nil
+}
+
+func applyProvidedDeployKey(ctx context.Context, cfg Config, deps Deps, privateKey []byte) error {
+	if err := parseUpstreamPrivateKey(privateKey); err != nil {
+		return err
 	}
 	run := deps.RunCommand
 	if run == nil {
