@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"sort"
@@ -198,17 +199,19 @@ func (f *fakeOpenBao) handle(command []string, input []byte) ([]byte, error) {
 // --- A fake cluster: kubectl, helm and the Kubernetes API ---
 
 type fakeBackupCluster struct {
-	t         *testing.T
-	mu        sync.Mutex
-	bao       *fakeOpenBao
-	client    *fake.Clientset
-	values    map[string]any
-	chart     string
-	schema    int
-	database  []byte            // what in-pod `oberth backup database` returns
-	rawFiles  map[string][]byte // /data files for the stable-copy fallback
-	oldServer bool              // server predates `oberth backup database`
-	workflows []runWorkflow
+	helmShowChart []string
+	missingChart  bool
+	t             *testing.T
+	mu            sync.Mutex
+	bao           *fakeOpenBao
+	client        *fake.Clientset
+	values        map[string]any
+	chart         string
+	schema        int
+	database      []byte            // what in-pod `oberth backup database` returns
+	rawFiles      map[string][]byte // /data files for the stable-copy fallback
+	oldServer     bool              // server predates `oberth backup database`
+	workflows     []runWorkflow
 
 	argvs       [][]string
 	uploads     map[string][]byte
@@ -405,6 +408,12 @@ func (c *fakeBackupCluster) helm(_ context.Context, args []string) ([]byte, erro
 		return json.Marshal(c.values)
 	case args[0] == "repo":
 		return nil, nil
+	case args[0] == "show" && args[1] == "chart":
+		c.helmShowChart = args
+		if c.missingChart {
+			return nil, errors.New("chart not found")
+		}
+		return []byte("name: oberth\n"), nil
 	case args[0] == "upgrade":
 		c.helmUpgrade = args
 		file := args[slices.Index(args, "-f")+1]
@@ -826,5 +835,60 @@ func TestRoleWritePayloadKeepsEveryFieldButMirroredAliases(t *testing.T) {
 	}
 	if diff := diffRole(fields, map[string]any{"token_policies": []any{"a"}, "token_ttl": float64(600), "ttl": float64(300), "audience": ""}); !slices.Equal(diff, []string{"token_no_default_policy"}) {
 		t.Fatalf("diff = %v, want token_no_default_policy", diff)
+	}
+}
+
+// A chart that cannot be resolved stops the restore before the server is
+// scaled down, not after the database was swapped (review finding).
+func TestRestoreChecksTheChartBeforeStoppingTheServer(t *testing.T) {
+	t.Parallel()
+	archive, runID, _ := backupFixtureArchive(t, false)
+	target := restoreTargetCluster(t, runID)
+	target.missingChart = true
+	var out bytes.Buffer
+	cfg := RestoreConfig{Input: archive, Yes: true, Timeout: 10 * time.Second}
+	cfg.applyDefaults()
+	err := runRestore(context.Background(), cfg, target.deps(&out))
+	if err == nil || !strings.Contains(err.Error(), "is not available") {
+		t.Fatalf("restore with a missing chart = %v", err)
+	}
+	if len(target.scales) != 0 {
+		t.Fatalf("the server was scaled (%v) before the chart was proven available", target.scales)
+	}
+}
+
+// The swap script puts the previous database back when it fails after
+// moving files aside, so the server never starts on an empty volume.
+func TestSwapScriptRollsBackOnFailure(t *testing.T) {
+	t.Parallel()
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("no sh")
+	}
+	dir := t.TempDir()
+	data := filepath.Join(dir, "data")
+	if err := os.MkdirAll(filepath.Join(data, ".oberth-restore"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(data, "oberth.sqlite"), []byte("previous"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	restored := []byte("restored")
+	if err := os.WriteFile(filepath.Join(data, ".oberth-restore", "oberth.sqlite"), restored, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(restored)
+	// Run the script against the temp dir, with stat failing as a late step.
+	script := strings.Replace(swapScript, "cd /data", "cd "+data, 1)
+	script = strings.Replace(script, "stat -c '%u:%g %a' oberth.sqlite", "swapping=1; false", 1)
+	cmd := exec.Command("sh", "-c", script, "sh", "20261017T000000Z", hex.EncodeToString(sum[:]), "-")
+	if out, err := cmd.CombinedOutput(); err == nil {
+		t.Fatalf("expected the forced failure, got success: %s", out)
+	}
+	got, err := os.ReadFile(filepath.Join(data, "oberth.sqlite"))
+	if err != nil || string(got) != "previous" {
+		t.Fatalf("previous database not put back: %q %v", got, err)
+	}
+	if _, err := os.Stat(filepath.Join(data, "pre-restore-20261017T000000Z")); !os.IsNotExist(err) {
+		t.Fatalf("aside directory should be removed after rollback: %v", err)
 	}
 }

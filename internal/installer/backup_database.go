@@ -252,6 +252,21 @@ if [ -e "$aside" ]; then
   exit 1
 fi
 mkdir "$aside"
+# From here on a failure puts the previous database back, so the server is
+# never left without one (or started on an empty one) by a half-done swap.
+swapping=1
+rollback() {
+  rc=$?
+  if [ "$rc" -ne 0 ] && [ -n "$swapping" ]; then
+    rm -f oberth.sqlite oberth.sqlite-wal oberth.sqlite-shm
+    for f in oberth.sqlite oberth.sqlite-wal oberth.sqlite-shm; do
+      if [ -e "$aside/$f" ]; then mv -f "$aside/$f" "$f"; fi
+    done
+    rmdir "$aside" 2>/dev/null || true
+    echo "database swap failed; the previous database was put back" >&2
+  fi
+}
+trap rollback EXIT
 for f in oberth.sqlite oberth.sqlite-wal oberth.sqlite-shm; do
   if [ -e "$f" ]; then mv "$f" "$aside/"; fi
 done
@@ -259,6 +274,7 @@ chmod 0600 .oberth-restore/*
 mv .oberth-restore/oberth.sqlite oberth.sqlite
 if [ -e .oberth-restore/oberth.sqlite-wal ]; then mv .oberth-restore/oberth.sqlite-wal oberth.sqlite-wal; fi
 rmdir .oberth-restore
+swapping=
 stat -c '%u:%g %a' oberth.sqlite`
 
 // restoredDatabase is the database pair extracted from a verified archive.

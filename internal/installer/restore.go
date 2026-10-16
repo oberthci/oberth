@@ -439,9 +439,21 @@ func applyRestore(ctx context.Context, cfg RestoreConfig, deps backupDeps, archi
 	}
 
 	replicas := max(target.Server.Replicas, 1)
+	// What "bring it back" means depends on whether the database was
+	// swapped: before, the previous database is untouched (a failed swap
+	// puts it back itself); after, the restored one is in place.
+	swapped := false
 	stopped := func(err error) error {
-		return fmt.Errorf("%w\nThe restore stopped with deploy/oberth scaled to 0. Fix the cause and rerun oberth restore, "+
-			"or bring the previous state back with: kubectl -n %s scale deploy/oberth --replicas=%d", err, cfg.Namespace, replicas)
+		if !swapped {
+			return fmt.Errorf("%w\nThe restore stopped with deploy/oberth scaled to 0 and the previous database in place. "+
+				"Fix the cause and rerun oberth restore, or start the previous state again with: kubectl -n %s scale deploy/oberth --replicas=%d",
+				err, cfg.Namespace, replicas)
+		}
+		return fmt.Errorf("%w\nThe restore stopped with deploy/oberth scaled to 0 and the RESTORED database already in place "+
+			"(the previous files are in /data/pre-restore-%s/ on PVC %s). Fix the cause and rerun oberth restore. "+
+			"Scaling up now runs the restored database, which needs the restored compatibility values; "+
+			"to return to the previous state instead, move those files back to /data first",
+			err, target.Timestamp, target.Server.ClaimName)
 	}
 
 	_, _ = fmt.Fprintln(w, "Stopping the server...")
@@ -456,6 +468,7 @@ func applyRestore(ctx context.Context, cfg RestoreConfig, deps backupDeps, archi
 	if err := swapDatabase(ctx, cfg, deps, archive, target); err != nil {
 		return stopped(err)
 	}
+	swapped = true
 	_, _ = fmt.Fprintf(w, "  ✓ restored database in place; the previous files are in /data/pre-restore-%s/ on PVC %s\n", target.Timestamp, target.Server.ClaimName)
 
 	if archive.Grants.Present {
@@ -523,6 +536,15 @@ func restoreHelmArgs(ctx context.Context, cfg RestoreConfig, deps backupDeps, ta
 		args = append(args, oberthRepoName+"/oberth", "--version", helmChartVersion(target.ChartVersion))
 	} else {
 		args = append(args, chart)
+	}
+	// Prove the chart resolves now: the upgrade runs after the server is
+	// stopped and the database swapped, too late to find a missing chart.
+	show := []string{"show", "chart", args[2]}
+	if chart == "" {
+		show = append(show, "--version", helmChartVersion(target.ChartVersion))
+	}
+	if _, err := deps.RunHelm(ctx, show); err != nil {
+		return nil, fmt.Errorf("chart %s is not available (pass --chart with the chart release oberth was installed from): %w", args[2], err)
 	}
 	return append(args, "-n", cfg.Namespace, "--reuse-values", "-f", valuesFile), nil
 }
