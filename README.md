@@ -10,7 +10,7 @@ issues an agent can lock and fix. Every action is attributed to a durable
 uplink identity and recorded in a tamper-evident audit chain — optionally
 anchored outside the box.
 
-Releases: [GitHub](https://github.com/oberthci/oberth/releases) · Helm chart at `https://charts.oberth.ci` ·
+Releases: [tags](https://github.com/oberthci/oberth/tags), installed from [oberth.ci](https://oberth.ci) · Helm chart at `https://charts.oberth.ci` ·
 Website: [oberth.ci](https://oberth.ci)
 
 ## What it does
