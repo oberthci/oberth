@@ -151,3 +151,40 @@ func TestPreflightWithoutStoreLeavesClientAddressesToWarning(t *testing.T) {
 		t.Fatal("no rotation is possible without the store")
 	}
 }
+
+// A certificate issued before the server certificate became its own
+// name-constrained anchor is re-issued with the same key, even when it
+// already carries every name, because Claude Code cannot pin it otherwise.
+func TestPreflightReissuesLegacyLeafAsConstrainedAnchor(t *testing.T) {
+	t.Setenv(baoTokenEnvVar, "test-root-token")
+	certPEM, keyPEM := testCertAndKeyShape(t, []string{"oberth", "localhost"}, false)
+	liveValuesJSON, _ := json.Marshal(liveHelmValuesSubset{})
+	deps := Deps{
+		Output:     &bytes.Buffer{},
+		KubeClient: fake.NewClientset(currentDeployment(), runningOpenBaoPod()),
+		RunCommand: func(_ context.Context, _ []byte, _ string, args ...string) ([]byte, error) {
+			if slices.Contains(args, "deploy/oberth") {
+				return certPEM, nil
+			}
+			return []byte(baoIdentityJSON(1, map[string]string{
+				"tls.crt": string(certPEM), "tls.key": string(keyPEM), "ssh_host_key": "fake-ssh-key",
+			})), nil
+		},
+		RunHelm: func(context.Context, []string) ([]byte, error) { return liveValuesJSON, nil },
+	}
+	cfg := Config{InstallSecretStore: true}
+	if err := preflightServerIdentities(context.Background(), &cfg, deps, false); err != nil {
+		t.Fatalf("preflight: %v", err)
+	}
+	if cfg.pendingCertRotation == nil {
+		t.Fatal("a CA:FALSE server certificate must be re-issued as a constrained anchor")
+	}
+	block, _ := pem.Decode(cfg.pendingCertRotation.newCertPEM)
+	rotated, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !rotated.IsCA || !rotated.PermittedDNSDomainsCritical {
+		t.Fatal("re-issued certificate is not a constrained anchor")
+	}
+}

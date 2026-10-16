@@ -16,6 +16,7 @@ import (
 	"math/big"
 	"net"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -24,11 +25,21 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
+
+	"github.com/oberthci/oberth/internal/secretstore"
 )
 
 // testCertAndKey generates a self-signed ECDSA P-256 certificate and private
 // key with the given DNS names. Returns PEM-encoded cert and key.
 func testCertAndKey(t *testing.T, dnsNames []string) (certPEM, keyPEM []byte) {
+	t.Helper()
+	return testCertAndKeyShape(t, dnsNames, true)
+}
+
+// testCertAndKeyShape issues the current server certificate shape (a
+// name-constrained self anchor) or, with anchor false, the CA:FALSE leaf that
+// releases before it issued.
+func testCertAndKeyShape(t *testing.T, dnsNames []string, anchor bool) (certPEM, keyPEM []byte) {
 	t.Helper()
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
@@ -44,6 +55,9 @@ func testCertAndKey(t *testing.T, dnsNames []string) (certPEM, keyPEM []byte) {
 		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth},
 		BasicConstraintsValid: true,
 		DNSNames:              dnsNames,
+	}
+	if anchor {
+		secretstore.ConstrainSelfSignedServerCertificate(tmpl)
 	}
 	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
 	if err != nil {
@@ -637,9 +651,14 @@ func TestRotateCertificatePreservesKeyAndAddsNames(t *testing.T) {
 		t.Errorf("NotAfter changed: old=%v new=%v", cert.NotAfter, newCert.NotAfter)
 	}
 
-	// Verify BasicConstraints.
-	if newCert.IsCA {
-		t.Error("rotated cert should not be a CA")
+	// The rotated certificate is its own name-constrained trust anchor:
+	// BoringSSL clients reject a CA:FALSE self-signed anchor, and the
+	// constraints keep a leaked key from vouching for any other host.
+	if !newCert.IsCA || newCert.KeyUsage&x509.KeyUsageCertSign == 0 || !newCert.MaxPathLenZero {
+		t.Error("rotated cert must be a pathlen-0 CA that can anchor itself")
+	}
+	if !newCert.PermittedDNSDomainsCritical || !slices.Equal(newCert.PermittedDNSDomains, newCert.DNSNames) {
+		t.Errorf("rotated cert must constrain names to its own SANs: %v vs %v", newCert.PermittedDNSDomains, newCert.DNSNames)
 	}
 }
 
@@ -1160,6 +1179,8 @@ func TestIdempotentOriginPinSameKeyDifferentFingerprint(t *testing.T) {
 			BasicConstraintsValid: true,
 			DNSNames:              dnsNames,
 		}
+		// Current issuance shape, so the preflight has no reason to rotate.
+		secretstore.ConstrainSelfSignedServerCertificate(tmpl)
 		der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
 		if err != nil {
 			t.Fatal(err)

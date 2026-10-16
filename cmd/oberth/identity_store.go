@@ -221,6 +221,7 @@ func generateRuntimeIdentity(namespace string, extra []string) (map[string][]byt
 			cert.DNSNames = append(cert.DNSNames, name)
 		}
 	}
+	secretstore.ConstrainSelfSignedServerCertificate(cert)
 	der, err := x509.CreateCertificate(rand.Reader, cert, cert, pub, key)
 	if err != nil {
 		return nil, err

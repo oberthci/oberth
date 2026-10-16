@@ -20,6 +20,8 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
+	"github.com/oberthci/oberth/internal/secretstore"
+
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -384,7 +386,11 @@ func preflightServerIdentities(ctx context.Context, cfg *Config, deps Deps, dryR
 	// public key, different fingerprint) from a prior rotation that completed
 	// in OpenBao but whose pin was never carried into the Helm values. Set
 	// cfg.watchTunnelOriginCACert unconditionally in that case.
-	if len(missingNames) == 0 && len(missingIPs) == 0 {
+	// Certificates issued before the server certificate became its own
+	// name-constrained anchor cannot be pinned by BoringSSL clients (Claude
+	// Code); re-issue them with the same key.
+	needsAnchor := !cert.IsCA || cert.KeyUsage&x509.KeyUsageCertSign == 0 || !cert.PermittedDNSDomainsCritical
+	if len(missingNames) == 0 && len(missingIPs) == 0 && !needsAnchor {
 		idempotentOriginPin(cfg, liveValues, certPEM, cert, w)
 		return nil
 	}
@@ -407,8 +413,13 @@ func preflightServerIdentities(ctx context.Context, cfg *Config, deps Deps, dryR
 		missingSANs = append(missingSANs, ip.String())
 	}
 	if dryRun {
-		_, _ = fmt.Fprintf(w, "  Identity preflight: server certificate lacks SANs: %s\n",
-			strings.Join(missingSANs, ", "))
+		if len(missingSANs) > 0 {
+			_, _ = fmt.Fprintf(w, "  Identity preflight: server certificate lacks SANs: %s\n",
+				strings.Join(missingSANs, ", "))
+		}
+		if needsAnchor {
+			_, _ = fmt.Fprintf(w, "  Identity preflight: server certificate is not a name-constrained trust anchor\n")
+		}
 		_, _ = fmt.Fprintf(w, "  Identity preflight: would rotate server certificate to add the missing names\n")
 		if liveValues.WatchTunnel.Enabled && liveValues.WatchTunnel.OriginCACert != "" {
 			_, _ = fmt.Fprintf(w, "  Identity preflight: would update watchTunnel.originCACert with the rotated certificate\n")
@@ -661,17 +672,16 @@ func rotateCertificate(existing *x509.Certificate, keyPEM []byte, addNames []str
 	}
 
 	tmpl := &x509.Certificate{
-		SerialNumber:          serial,
-		Subject:               existing.Subject,
-		NotBefore:             time.Now().Add(-time.Minute),
-		NotAfter:              existing.NotAfter,
-		KeyUsage:              existing.KeyUsage,
-		ExtKeyUsage:           existing.ExtKeyUsage,
-		BasicConstraintsValid: true,
-		IsCA:                  false,
-		DNSNames:              allDNS,
-		IPAddresses:           allIPs,
+		SerialNumber: serial,
+		Subject:      existing.Subject,
+		NotBefore:    time.Now().Add(-time.Minute),
+		NotAfter:     existing.NotAfter,
+		KeyUsage:     existing.KeyUsage,
+		ExtKeyUsage:  existing.ExtKeyUsage,
+		DNSNames:     allDNS,
+		IPAddresses:  allIPs,
 	}
+	secretstore.ConstrainSelfSignedServerCertificate(tmpl)
 
 	pub := key.(crypto.Signer).Public()
 	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, pub, key)
