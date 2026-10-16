@@ -8,6 +8,7 @@ import (
 
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -123,9 +124,11 @@ func podSchedulingReason(pod corev1.Pod) model.SchedulingReason {
 				result.Reason = "Unschedulable"
 				switch {
 				case strings.Contains(condition.Message, "Insufficient cpu"):
-					result.Message = "Scheduler reports insufficient CPU."
+					result.Message = "Scheduler reports insufficient CPU: the pod requests " +
+						podRequest(pod, corev1.ResourceCPU) + " CPU; compare with node allocatable (kubectl describe nodes)."
 				case strings.Contains(condition.Message, "Insufficient memory"):
-					result.Message = "Scheduler reports insufficient memory."
+					result.Message = "Scheduler reports insufficient memory: the pod requests " +
+						podRequest(pod, corev1.ResourceMemory) + " memory; compare with node allocatable (kubectl describe nodes)."
 				case strings.Contains(condition.Message, "unbound immediate PersistentVolumeClaims"):
 					result.Message = "Scheduler reports an unbound persistent volume claim."
 				}
@@ -157,4 +160,26 @@ func safeWaitingReason(reason string) string {
 	default:
 		return "Waiting"
 	}
+}
+
+// podRequest is the scheduler's effective request for one resource: the sum
+// of the app containers' requests or the largest init container's request,
+// whichever is larger. Only the quantity is reported: it is a number from
+// the admitted spec, never free-form text (#024).
+func podRequest(pod corev1.Pod, name corev1.ResourceName) string {
+	total := resource.Quantity{}
+	for _, container := range pod.Spec.Containers {
+		if request, ok := container.Resources.Requests[name]; ok {
+			total.Add(request)
+		}
+	}
+	for _, container := range pod.Spec.InitContainers {
+		if request, ok := container.Resources.Requests[name]; ok && request.Cmp(total) > 0 {
+			total = request.DeepCopy()
+		}
+	}
+	if total.IsZero() {
+		return "no explicit"
+	}
+	return total.String()
 }
