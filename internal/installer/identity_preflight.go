@@ -12,7 +12,9 @@ import (
 	"fmt"
 	"io"
 	"math/big"
+	"net"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -357,28 +359,56 @@ func preflightServerIdentities(ctx context.Context, cfg *Config, deps Deps, dryR
 			}
 		}
 	}
+	goProxyMissing := len(missingNames) > 0
+	// Addresses clients use (--tls-extra-dns-name/--tls-extra-ip, plus the
+	// host the installer itself advertises) join the same rotation. The key
+	// is kept, so clients that trust it keep working.
+	for _, name := range cfg.TLSExtraDNSNames {
+		if !stringSliceContains(cert.DNSNames, name) && !stringSliceContains(missingNames, name) {
+			missingNames = append(missingNames, name)
+		}
+	}
+	var missingIPs []net.IP
+	for _, address := range cfg.TLSExtraIPs {
+		ip := net.ParseIP(address)
+		if ip == nil {
+			return fmt.Errorf("--tls-extra-ip %q is not an IP address", address)
+		}
+		if !slices.ContainsFunc(cert.IPAddresses, ip.Equal) && !slices.ContainsFunc(missingIPs, ip.Equal) {
+			missingIPs = append(missingIPs, ip)
+		}
+	}
 	// -- Idempotent origin pin (#812 remediation 2) --
 	// Even when the certificate covers all required names and no rotation is
 	// needed, the live watchTunnel.originCACert may pin a stale leaf (same
 	// public key, different fingerprint) from a prior rotation that completed
 	// in OpenBao but whose pin was never carried into the Helm values. Set
 	// cfg.watchTunnelOriginCACert unconditionally in that case.
-	if len(missingNames) == 0 {
+	if len(missingNames) == 0 && len(missingIPs) == 0 {
 		idempotentOriginPin(cfg, liveValues, certPEM, cert, w)
 		return nil
 	}
 
-	// Missing goproxy names detected.
 	if !haveStore || server == nil {
+		if !goProxyMissing {
+			// Only client addresses are missing: the install still works,
+			// and warnCertificateNamesWillNotTakeEffect names them later.
+			idempotentOriginPin(cfg, liveValues, certPEM, cert, w)
+			return nil
+		}
 		return fmt.Errorf("the server certificate does not cover the goproxy service names (%s); "+
 			"every Go pipeline step will fail after the upgrade. Re-run with --install-secretstore "+
 			"and %s set so the installer can rotate the certificate",
 			strings.Join(missingNames, ", "), baoTokenEnvVar)
 	}
 
+	missingSANs := slices.Clone(missingNames)
+	for _, ip := range missingIPs {
+		missingSANs = append(missingSANs, ip.String())
+	}
 	if dryRun {
-		_, _ = fmt.Fprintf(w, "  Identity preflight: server certificate lacks goproxy SANs: %s\n",
-			strings.Join(missingNames, ", "))
+		_, _ = fmt.Fprintf(w, "  Identity preflight: server certificate lacks SANs: %s\n",
+			strings.Join(missingSANs, ", "))
 		_, _ = fmt.Fprintf(w, "  Identity preflight: would rotate server certificate to add the missing names\n")
 		if liveValues.WatchTunnel.Enabled && liveValues.WatchTunnel.OriginCACert != "" {
 			_, _ = fmt.Fprintf(w, "  Identity preflight: would update watchTunnel.originCACert with the rotated certificate\n")
@@ -399,7 +429,7 @@ func preflightServerIdentities(ctx context.Context, cfg *Config, deps Deps, dryR
 		"ssh_host_key": sha256.Sum256(server.field("ssh_host_key")),
 	}
 
-	newCertPEM, rotateErr := rotateCertificate(cert, keyPEM, missingNames)
+	newCertPEM, rotateErr := rotateCertificate(cert, keyPEM, missingNames, missingIPs)
 	clear(keyPEM)
 	if rotateErr != nil {
 		return fmt.Errorf("rotate server certificate: %w", rotateErr)
@@ -591,7 +621,7 @@ func sshPublicFingerprint(privatePEM []byte) (string, error) {
 // KeyUsage, ExtKeyUsage, NotAfter, and existing SANs of the original, adds
 // the specified missing DNS names, and self-signs with the existing private
 // key. The caller must clear keyPEM after this function returns.
-func rotateCertificate(existing *x509.Certificate, keyPEM []byte, addNames []string) ([]byte, error) {
+func rotateCertificate(existing *x509.Certificate, keyPEM []byte, addNames []string, addIPs []net.IP) ([]byte, error) {
 	block, _ := pem.Decode(keyPEM)
 	if block == nil {
 		return nil, errors.New("no PEM block in private key")
@@ -623,6 +653,13 @@ func rotateCertificate(existing *x509.Certificate, keyPEM []byte, addNames []str
 		}
 	}
 
+	allIPs := slices.Clone(existing.IPAddresses)
+	for _, ip := range addIPs {
+		if !slices.ContainsFunc(allIPs, ip.Equal) {
+			allIPs = append(allIPs, ip)
+		}
+	}
+
 	tmpl := &x509.Certificate{
 		SerialNumber:          serial,
 		Subject:               existing.Subject,
@@ -633,7 +670,7 @@ func rotateCertificate(existing *x509.Certificate, keyPEM []byte, addNames []str
 		BasicConstraintsValid: true,
 		IsCA:                  false,
 		DNSNames:              allDNS,
-		IPAddresses:           existing.IPAddresses,
+		IPAddresses:           allIPs,
 	}
 
 	pub := key.(crypto.Signer).Public()

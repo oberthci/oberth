@@ -325,6 +325,20 @@ func certificateNamesForKind(dnsNames, ips []string) ([]string, []string) {
 	return appendMissing(dnsNames, "localhost"), appendMissing(ips, "127.0.0.1")
 }
 
+// certificateNamesForClientHost adds the address host-side clients are told
+// to use: localhost (with 127.0.0.1) for a local API server, otherwise the API
+// server's own host, as an IP or a DNS name.
+func certificateNamesForClientHost(host string, dnsNames, ips []string) ([]string, []string) {
+	switch {
+	case host == "" || host == "localhost":
+		return certificateNamesForKind(dnsNames, ips)
+	case net.ParseIP(host) != nil:
+		return dnsNames, appendMissing(ips, host)
+	default:
+		return appendMissing(dnsNames, host), ips
+	}
+}
+
 func appendMissing(values []string, want string) []string {
 	for _, value := range values {
 		if value == want {

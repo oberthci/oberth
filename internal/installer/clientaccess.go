@@ -46,6 +46,9 @@ func offerClientAccess(ctx context.Context, cfg Config, deps Deps, tw *tableWrit
 	// untestable on its own and would skip silently in a session that could in
 	// fact answer.
 	if deps.IsTerminal == nil || !deps.IsTerminal() || deps.Input == nil {
+		// Say so: otherwise a non-interactive install ends with a server that
+		// no CLI or MCP client on this machine is configured to reach.
+		tw.AppendRow("Client access", "no terminal: see docs/mcp-setup.md", "⚠ manual", false)
 		return nil
 	}
 	if strings.TrimSpace(token) == "" {
@@ -259,7 +262,14 @@ func tokenCommandForHost() (read string, store string) {
 			return "secret-tool lookup service oberth",
 				`secret-tool store --label="Oberth uplink token" service oberth`
 		}
-		return "pass show oberth/token", "pass insert oberth/token"
+		if _, err := exec.LookPath("pass"); err == nil {
+			return "pass show oberth/token", "pass insert oberth/token"
+		}
+		// A headless server often has neither. A command that cannot run
+		// leaves every client failing to authenticate, so fall back to an
+		// owner-only file, which at least works and says what it is.
+		return `cat "${XDG_CONFIG_HOME:-$HOME/.config}/oberth/token"`,
+			`(umask 077 && cat > "${XDG_CONFIG_HOME:-$HOME/.config}/oberth/token")`
 	}
 }
 

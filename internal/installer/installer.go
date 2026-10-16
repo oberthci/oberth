@@ -656,6 +656,12 @@ func Run(ctx context.Context, cfg Config, deps Deps) error {
 		}
 	}
 
+	// The installer advertises clientReachableHost to the CLI and MCP clients
+	// (and prints it as the Ready URL), so the certificate must carry it.
+	if cfg.WatchAdoptionPlan == "" {
+		cfg.TLSExtraDNSNames, cfg.TLSExtraIPs = certificateNamesForClientHost(clientReachableHost(deps), cfg.TLSExtraDNSNames, cfg.TLSExtraIPs)
+	}
+
 	// Identity preflight: verify OpenBao bundles and server certificate SANs.
 	// Runs on both the real and dry-run paths. On the real path, a needed
 	// certificate rotation is COMPUTED but NOT WRITTEN here; the actual
@@ -699,8 +705,11 @@ func Run(ctx context.Context, cfg Config, deps Deps) error {
 	// Before anything is installed: naming an address the kept TLS identity will
 	// not gain is silent otherwise, and surfaces weeks later as a hostname
 	// mismatch nobody connects back to this run.
-	warnCertificateNamesWillNotTakeEffect(deps.Output, cfg,
-		certificateNamesNotYetIssued(ctx, cfg, deps))
+	// A pending rotation is about to add them, so there is nothing to warn of.
+	if cfg.pendingCertRotation == nil {
+		warnCertificateNamesWillNotTakeEffect(deps.Output, cfg,
+			certificateNamesNotYetIssued(ctx, cfg, deps))
+	}
 
 	w := deps.Output
 	color := isColor(deps)

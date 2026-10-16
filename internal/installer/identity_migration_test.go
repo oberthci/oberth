@@ -604,7 +604,7 @@ func TestRotateCertificatePreservesKeyAndAddsNames(t *testing.T) {
 	block, _ := pem.Decode(certPEM)
 	cert, _ := x509.ParseCertificate(block.Bytes)
 
-	newCertPEM, err := rotateCertificate(cert, keyPEM, []string{"oberth-goproxy.oberth.svc"})
+	newCertPEM, err := rotateCertificate(cert, keyPEM, []string{"oberth-goproxy.oberth.svc"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -664,7 +664,7 @@ func TestPreflightSameKeyDifferentCertPassesCrossCheck(t *testing.T) {
 	cert, _ := x509.ParseCertificate(block.Bytes)
 
 	// Rotate the cert (new SANs, same key) to get different PEM bytes.
-	rotatedCertPEM, err := rotateCertificate(cert, keyPEM, []string{"oberth.new"})
+	rotatedCertPEM, err := rotateCertificate(cert, keyPEM, []string{"oberth.new"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
