@@ -762,9 +762,9 @@ RETURNING `+runColumns,
 func (s *Store) ListRecentRuns(ctx context.Context, filter model.RunListFilter) ([]model.Run, error) {
 	rows, err := s.db.QueryContext(ctx, `
 SELECT `+runColumns+` FROM runs
-WHERE (? = 0 OR repo_id = ?) AND (? = '' OR ref = ?)
+WHERE (? = 0 OR repo_id = ?) AND (? = '' OR ref = ?) AND (? <= 0 OR queue_sequence < ?)
 ORDER BY queue_sequence DESC LIMIT ?`,
-		filter.RepoID, filter.RepoID, filter.Ref, filter.Ref, pageLimit(filter.Limit))
+		filter.RepoID, filter.RepoID, filter.Ref, filter.Ref, filter.Before, filter.Before, pageLimit(filter.Limit))
 	if err != nil {
 		return nil, fmt.Errorf("list recent runs: %w", err)
 	}

@@ -511,25 +511,35 @@ func (service *API) CallTool(ctx context.Context, actor api.Actor, name string, 
 		return service.repoRemove(ctx, actor, arguments.Repo)
 	case "run_list":
 		var arguments struct {
-			Repo  string `json:"repo"`
-			Ref   string `json:"ref"`
-			Limit int    `json:"limit"`
+			Repo   string `json:"repo"`
+			Ref    string `json:"ref"`
+			Limit  int    `json:"limit"`
+			Before int64  `json:"before"`
 		}
 		if err := decodeTool(raw, &arguments); err != nil {
 			return nil, err
+		}
+		if arguments.Before < 0 {
+			return nil, fmt.Errorf("%w: before must be a positive run sequence", ErrInvalidInput)
 		}
 		limit := arguments.Limit
 		if limit <= 0 {
 			limit = 50
 		}
-		if limit > 200 {
-			limit = 200
+		// The store pages at most 100 runs; the old "max 200" was silently
+		// clipped to 100 with no way to reach older runs (#050).
+		if limit > 100 {
+			limit = 100
 		}
-		runs, err := service.Runs(ctx, actor, api.RunFilter{Repository: arguments.Repo, Ref: arguments.Ref, Limit: limit})
+		runs, err := service.Runs(ctx, actor, api.RunFilter{Repository: arguments.Repo, Ref: arguments.Ref, Limit: limit, Before: arguments.Before})
 		if err != nil {
 			return nil, err
 		}
-		return api.RunListResponse{Runs: runs}, nil
+		response := api.RunListResponse{Runs: runs}
+		if page, ok := runs.([]model.Run); ok && len(page) == limit {
+			response.NextBefore = page[len(page)-1].QueueSequence
+		}
+		return response, nil
 	case "publish_retry":
 		var arguments struct {
 			ID string `json:"id"`
@@ -558,7 +568,7 @@ func (service *API) Runs(ctx context.Context, _ api.Actor, filter api.RunFilter)
 	if service.history == nil {
 		return nil, fmt.Errorf("%w: run history", ErrUnavailable)
 	}
-	storeFilter := model.RunListFilter{Ref: filter.Ref, Limit: filter.Limit}
+	storeFilter := model.RunListFilter{Ref: filter.Ref, Limit: filter.Limit, Before: filter.Before}
 	if strings.TrimSpace(filter.Repository) != "" {
 		repository, err := service.runs.RepositoryByName(ctx, filter.Repository)
 		if err != nil {

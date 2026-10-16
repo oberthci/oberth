@@ -13,6 +13,8 @@ import (
 	"testing"
 
 	"github.com/oberthci/oberth/internal/runlog"
+
+	"github.com/oberthci/oberth/internal/model"
 )
 
 type fakeBackend struct {
@@ -26,6 +28,7 @@ type fakeBackend struct {
 	toolResult      any
 	toolErr         error
 	runFilter       RunFilter
+	runPage         []model.Run
 	runID           string
 	logBurn         string
 	logStep         string
@@ -67,6 +70,9 @@ func (result rawToolResult) MCPToolText() string { return result.Output }
 
 func (backend *fakeBackend) Runs(_ context.Context, _ Actor, filter RunFilter) (any, error) {
 	backend.runFilter = filter
+	if backend.runPage != nil {
+		return backend.runPage, nil
+	}
 	return map[string]any{"runs": []any{}}, nil
 }
 func (backend *fakeBackend) Run(_ context.Context, _ Actor, id string) (any, error) {
@@ -924,5 +930,29 @@ func TestGrantsAPIRejectsMutation(t *testing.T) {
 	// for a known path with a wrong method.
 	if response.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("POST /api/grants status = %d, want 405", response.Code)
+	}
+}
+
+// /api/runs pages with ?before and names the next cursor on a full page,
+// keeping the body a plain array for existing clients (#050).
+func TestRunsPagesWithBeforeCursor(t *testing.T) {
+	server, backend := testServer(t)
+	backend.runPage = []model.Run{{ID: "a", QueueSequence: 9}, {ID: "b", QueueSequence: 7}}
+	request := httptest.NewRequest(http.MethodGet, "/api/runs?limit=2&before=10", nil)
+	request.Header.Set("Authorization", "Bearer valid-token")
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusOK || backend.runFilter.Before != 10 || backend.runFilter.Limit != 2 {
+		t.Fatalf("status=%d filter=%+v", response.Code, backend.runFilter)
+	}
+	if got := response.Header().Get("X-Oberth-Next-Before"); got != "7" {
+		t.Fatalf("next cursor = %q", got)
+	}
+	bad := httptest.NewRequest(http.MethodGet, "/api/runs?before=-1", nil)
+	bad.Header.Set("Authorization", "Bearer valid-token")
+	response = httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, bad)
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("negative cursor status = %d", response.Code)
 	}
 }
