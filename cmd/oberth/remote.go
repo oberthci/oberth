@@ -16,13 +16,16 @@ import (
 )
 
 type remoteRun struct {
-	ID      string
-	RepoID  int64
-	Ref     string
-	SHA     string
-	Actor   string
-	Trigger string
-	Status  string
+	ID string
+	// QueueSequence orders runs; the oldest one on a page is the cursor for
+	// the next, older page.
+	QueueSequence int64
+	RepoID        int64
+	Ref           string
+	SHA           string
+	Actor         string
+	Trigger       string
+	Status        string
 	// Phase and Error carry why a run failed. Without them the client decodes
 	// a failed run into a struct that says only "failed", which is the one
 	// thing the reader already knows.
@@ -149,7 +152,9 @@ func runRuns(ctx context.Context, arguments []string, output io.Writer) error {
 	flags.SetOutput(io.Discard)
 	repo := flags.String("repo", "", "only this repository")
 	ref := flags.String("ref", "", "only this branch or tag")
-	limit := flags.Int("limit", 20, "how many runs")
+	limit := flags.Int("limit", 20, "runs per page (at most 100)")
+	before := flags.Int64("before", 0, "only runs older than this sequence (the cursor printed after a full page)")
+	all := flags.Bool("all", false, "follow pages to the oldest run")
 	asJSON := flags.Bool("json", false, "emit the server's payload unchanged")
 	if err := flags.Parse(arguments); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -167,13 +172,37 @@ func runRuns(ctx context.Context, arguments []string, output io.Writer) error {
 		return err
 	}
 	reportMode("server")
+	if *limit <= 0 || *limit > 100 {
+		return fmt.Errorf("%w: --limit must be between 1 and 100", errUsage)
+	}
+	if *before < 0 {
+		return fmt.Errorf("%w: --before must be a positive run sequence", errUsage)
+	}
 	query := map[string]string{"repo": *repo, "ref": *ref, "limit": fmt.Sprint(*limit)}
+	if *before > 0 {
+		query["before"] = fmt.Sprint(*before)
+	}
 	if *asJSON {
 		return emitJSON(ctx, api, "/api/runs", query, output)
 	}
+	// The server returns at most one bounded page; --all walks the cursor
+	// to the oldest run instead of stopping at the newest page (#050).
 	var runs []remoteRun
-	if err := api.Get(ctx, "/api/runs", query, &runs); err != nil {
-		return err
+	next := int64(0)
+	for {
+		var page []remoteRun
+		if err := api.Get(ctx, "/api/runs", query, &page); err != nil {
+			return err
+		}
+		runs = append(runs, page...)
+		next = 0
+		if len(page) == *limit {
+			next = page[len(page)-1].QueueSequence
+		}
+		if !*all || next == 0 {
+			break
+		}
+		query["before"] = fmt.Sprint(next)
 	}
 	if len(runs) == 0 {
 		_, err := fmt.Fprintln(output, "no runs")
@@ -188,6 +217,10 @@ func runRuns(ctx context.Context, arguments []string, output io.Writer) error {
 			return err
 		}
 	}
+	if next > 0 {
+		_, err := fmt.Fprintf(output, "more: oberth runs --before %d (or --all)\n", next)
+		return err
+	}
 	return nil
 }
 
@@ -198,13 +231,23 @@ func resolveRemoteRunID(ctx context.Context, api *client.Client, given string) (
 	if !looksAbbreviated(given) {
 		return given, nil
 	}
-	var runs []remoteRun
-	if err := api.Get(ctx, "/api/runs", map[string]string{"limit": "200"}, &runs); err != nil {
-		return "", err
-	}
-	known := make([]string, 0, len(runs))
-	for _, run := range runs {
-		known = append(known, run.ID)
+	// Walk every page: the server returns at most 100 runs per request, so
+	// a short ID from an older run was "not found" (#050). Bounded so a
+	// misbehaving server cannot loop forever.
+	var known []string
+	query := map[string]string{"limit": "100"}
+	for page := 0; page < 1000; page++ {
+		var runs []remoteRun
+		if err := api.Get(ctx, "/api/runs", query, &runs); err != nil {
+			return "", err
+		}
+		for _, run := range runs {
+			known = append(known, run.ID)
+		}
+		if len(runs) < 100 || runs[len(runs)-1].QueueSequence <= 0 {
+			break
+		}
+		query["before"] = fmt.Sprint(runs[len(runs)-1].QueueSequence)
 	}
 	return resolveRunIDPrefix(given, known)
 }

@@ -422,3 +422,41 @@ func TestArtifactsResolvesShortRunID(t *testing.T) {
 		t.Fatalf("short ID was not resolved; requested path = %q", requestedPath)
 	}
 }
+
+// --all follows the before cursor until a short page (#050).
+func TestRunsAllFollowsPages(t *testing.T) {
+	var befores []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		befores = append(befores, r.URL.Query().Get("before"))
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Query().Get("before") {
+		case "":
+			_, _ = w.Write([]byte(`[{"ID":"run-3","QueueSequence":3,"Status":"passed"},{"ID":"run-2","QueueSequence":2,"Status":"passed"}]`))
+		case "2":
+			_, _ = w.Write([]byte(`[{"ID":"run-1","QueueSequence":1,"Status":"failed"}]`))
+		default:
+			t.Errorf("unexpected cursor %q", r.URL.Query().Get("before"))
+		}
+	}))
+	defer server.Close()
+	configure(t, server)
+	var out bytes.Buffer
+	if err := runRuns(context.Background(), []string{"--limit", "2", "--all"}, &out); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"run-3", "run-2", "run-1"} {
+		if !strings.Contains(out.String(), id) {
+			t.Fatalf("missing %s:\n%s", id, out.String())
+		}
+	}
+	if strings.Contains(out.String(), "more:") || len(befores) != 2 {
+		t.Fatalf("cursors=%v output:\n%s", befores, out.String())
+	}
+	out.Reset()
+	if err := runRuns(context.Background(), []string{"--limit", "2"}, &out); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "more: oberth runs --before 2") {
+		t.Fatalf("a full page must name the next cursor:\n%s", out.String())
+	}
+}

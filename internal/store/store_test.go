@@ -1801,3 +1801,43 @@ func TestListLatestRunsPerRepoReturnsQuietReposOutsideGlobalWindow(t *testing.T)
 		}
 	}
 }
+
+// Runs page through a QueueSequence cursor, so history older than one page
+// stays reachable (#050).
+func TestListRecentRunsPagesWithBeforeCursor(t *testing.T) {
+	now := time.Date(2026, 10, 17, 0, 0, 0, 0, time.UTC)
+	s := testStore(t, &now)
+	repo := createRepo(t, s)
+	ctx := context.Background()
+	for i := 0; i < 5; i++ {
+		now = now.Add(time.Second)
+		if _, err := s.EnqueueRun(ctx, testRunSpec(repo.ID, fmt.Sprintf("branch-%d", i), strings.Repeat(fmt.Sprint(i), 40))); err != nil {
+			t.Fatal(err)
+		}
+	}
+	first, err := s.ListRecentRuns(ctx, model.RunListFilter{RepoID: repo.ID, Limit: 2})
+	if err != nil || len(first) != 2 {
+		t.Fatalf("first page = %d, %v", len(first), err)
+	}
+	seen := map[string]bool{first[0].ID: true, first[1].ID: true}
+	before := first[1].QueueSequence
+	for {
+		page, err := s.ListRecentRuns(ctx, model.RunListFilter{RepoID: repo.ID, Limit: 2, Before: before})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, run := range page {
+			if run.QueueSequence >= before || seen[run.ID] {
+				t.Fatalf("page overlaps or is not older: %+v", run)
+			}
+			seen[run.ID] = true
+		}
+		if len(page) < 2 {
+			break
+		}
+		before = page[len(page)-1].QueueSequence
+	}
+	if len(seen) != 5 {
+		t.Fatalf("paging reached %d of 5 runs", len(seen))
+	}
+}

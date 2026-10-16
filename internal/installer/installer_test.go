@@ -5207,3 +5207,20 @@ func TestRegisterUpstreamReportsReusedKey(t *testing.T) {
 		})
 	}
 }
+
+// A fresh install defaults the Service to NodePort so k3s servicelb does not
+// take host ports 2222/443; an explicit choice is passed through (#049).
+func TestServiceTypeHelmArgs(t *testing.T) {
+	t.Parallel()
+	args := strings.Join(OberthHelmArgs(Config{ServiceType: "NodePort"}, OpenBaoResult{}, RekorResult{}), " ")
+	if !strings.Contains(args, "--set service.type=NodePort") {
+		t.Fatalf("args: %s", args)
+	}
+	if strings.Contains(strings.Join(OberthHelmArgs(Config{}, OpenBaoResult{}, RekorResult{}), " "), "service.type") {
+		t.Fatal("an unset service type must leave the release's current value alone")
+	}
+	bad := Config{ServiceType: "Ingress"}
+	if err := bad.Validate(); err == nil || !strings.Contains(err.Error(), "--service-type") {
+		t.Fatalf("invalid service type accepted: %v", err)
+	}
+}

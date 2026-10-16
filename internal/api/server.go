@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/runlog"
 )
 
@@ -38,6 +39,8 @@ type RunFilter struct {
 	Repository string
 	Ref        string
 	Limit      int
+	// Before pages to runs older than this QueueSequence (exclusive).
+	Before int64
 }
 
 type IssueFilter struct {
@@ -220,7 +223,20 @@ func (server *Server) handleRuns(writer http.ResponseWriter, request *http.Reque
 		Ref:        query.Get("ref"),
 		Limit:      queryLimit(request, 100, 100),
 	}
+	if raw := query.Get("before"); raw != "" {
+		before, parseErr := strconv.ParseInt(raw, 10, 64)
+		if parseErr != nil || before < 1 {
+			writeJSON(writer, http.StatusBadRequest, map[string]string{"error": "before must be a positive run sequence"})
+			return
+		}
+		filter.Before = before
+	}
 	value, err := server.views.Runs(request.Context(), actorFrom(request.Context()), filter)
+	// The body stays a plain array for existing clients; a full page names
+	// the cursor for the next, older page (#050).
+	if runs, ok := value.([]model.Run); ok && err == nil && len(runs) > 0 && len(runs) == filter.Limit {
+		writer.Header().Set("X-Oberth-Next-Before", strconv.FormatInt(runs[len(runs)-1].QueueSequence, 10))
+	}
 	server.writeView(writer, value, err)
 }
 

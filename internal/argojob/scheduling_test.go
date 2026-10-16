@@ -11,6 +11,7 @@ import (
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -74,7 +75,7 @@ func TestSchedulingObservationIsBoundedAndReadOnly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(observation.Nodes) != 16 || !observation.Truncated || len(observation.Pods) != 1 || observation.Pods[0].Reason != "Unschedulable" || observation.Pods[0].Message != "Scheduler reports insufficient CPU." {
+	if len(observation.Nodes) != 16 || !observation.Truncated || len(observation.Pods) != 1 || observation.Pods[0].Reason != "Unschedulable" || !strings.HasPrefix(observation.Pods[0].Message, "Scheduler reports insufficient CPU") {
 		t.Fatalf("observation = %#v", observation)
 	}
 	body, _ := json.Marshal(observation)
@@ -168,5 +169,28 @@ func TestSchedulingPodReasons(t *testing.T) {
 				t.Fatalf("leak: %s", body)
 			}
 		})
+	}
+}
+
+// An unschedulable pod reports what it asks for, so an impossible job on a
+// small node is diagnosable from the run status (#024).
+func TestUnschedulablePodReportsItsRequest(t *testing.T) {
+	t.Parallel()
+	pod := corev1.Pod{
+		Spec: corev1.PodSpec{
+			InitContainers: []corev1.Container{{Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceMemory: resource.MustParse("1Gi")}}}},
+			Containers: []corev1.Container{
+				{Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceMemory: resource.MustParse("6Gi")}}},
+				{Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceMemory: resource.MustParse("2Gi")}}},
+			},
+		},
+		Status: corev1.PodStatus{Phase: corev1.PodPending, Conditions: []corev1.PodCondition{{
+			Type: corev1.PodScheduled, Status: corev1.ConditionFalse, Reason: "Unschedulable",
+			Message: "0/1 nodes are available: 1 Insufficient memory.",
+		}}},
+	}
+	got := podSchedulingReason(pod)
+	if got.Reason != "Unschedulable" || !strings.Contains(got.Message, "requests 8Gi memory") {
+		t.Fatalf("reason = %+v", got)
 	}
 }

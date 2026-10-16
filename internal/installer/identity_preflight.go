@@ -266,7 +266,7 @@ func preflightServerIdentities(ctx context.Context, cfg *Config, deps Deps, dryR
 			}
 		}
 		if len(missing) > 0 {
-			return fmt.Errorf("identities must be seeded in OpenBao before upgrading: missing %s",
+			return fmt.Errorf("identities must be seeded in OpenBao before upgrading (see docs/identity-migration.md): missing %s",
 				strings.Join(missing, "; "))
 		}
 

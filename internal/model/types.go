@@ -173,6 +173,9 @@ type RunListFilter struct {
 	RepoID int64
 	Ref    string
 	Limit  int
+	// Before is an exclusive QueueSequence cursor: zero starts at the newest
+	// run, a page's last QueueSequence fetches the next older page.
+	Before int64
 }
 
 type RunCancellation struct {

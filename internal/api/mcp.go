@@ -175,6 +175,9 @@ type PendingDeclaration struct {
 // structuredContent satisfies the record requirement (#794).
 type RunListResponse struct {
 	Runs any `json:"runs"`
+	// NextBefore is set when the page is full: pass it as before for the
+	// next, older page (#050).
+	NextBefore int64 `json:"next_before,omitempty"`
 }
 
 // RepoListResponse wraps repo_list results as a JSON object (#794).
@@ -376,10 +379,11 @@ func toolDefinitions() []map[string]any {
 		tool("access_revoke", "Revoke a step's access to a secret path. Requires admin uplink.", object(map[string]any{"repo": stringProperty("Repository name"), "step": stringProperty("Step/template name"), "secret": stringProperty("Exact secret path from the pipeline declaration or access_list (e.g. oberth/data/release/cosign-secret). Copied verbatim; no prefix expansion or path normalization.")}, "repo", "step", "secret")),
 		tool("repo_list", "List registered repositories with their upstream and probe state.", object(map[string]any{})),
 		tool("repo_remove", "Remove a repository mapping and its Git cache. Requires admin uplink. Refuses if runs are in-flight or promotions are pending.", object(map[string]any{"repo": stringProperty("Repository name")}, "repo")),
-		tool("run_list", "List recent runs with optional repository and ref filters, bounded page.", object(map[string]any{
-			"repo":  stringProperty("Filter by repository name"),
-			"ref":   stringProperty("Filter by branch or tag ref"),
-			"limit": integerProperty("Maximum runs to return (default 50, max 200)"),
+		tool("run_list", "List runs newest first with optional repository and ref filters, in bounded pages. A full page returns next_before; pass it as before with the same filters for older runs until it is absent.", object(map[string]any{
+			"repo":   stringProperty("Filter by repository name"),
+			"ref":    stringProperty("Filter by branch or tag ref"),
+			"limit":  integerProperty("Maximum runs to return (default 50, max 100)"),
+			"before": map[string]any{"type": "integer", "minimum": 1, "description": "Exclusive run sequence cursor returned as next_before"},
 		})),
 		tool("system_status", "Return system health: database, upstreams, cluster, audit, and version.", object(map[string]any{})),
 		tool("publish_retry", "Retry the upstream publication for a run or promotion whose burns all passed but whose upstream push failed. Input is exactly one durable run ID or promotion ID. Refuses when the run is not in a publishing-failed state, or when the cached Git object no longer matches the record.", object(map[string]any{
