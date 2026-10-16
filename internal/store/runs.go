@@ -316,6 +316,22 @@ func (s *Store) Run(ctx context.Context, id string) (model.Run, error) {
 	return value, nil
 }
 
+// RunIDsExist reports which of ids name a run in this database. It reads only
+// the runs table's primary key, so it works on every schema a restore can
+// verify; `oberth restore` uses it to find Argo Workflows whose runs exist
+// only in the database being replaced.
+func (s *Store) RunIDsExist(ctx context.Context, ids []string) (map[string]bool, error) {
+	exists := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		var found int
+		if err := s.db.QueryRowContext(ctx, `SELECT count(*) FROM runs WHERE id = ?`, id).Scan(&found); err != nil {
+			return nil, fmt.Errorf("look up run %s: %w", id, err)
+		}
+		exists[id] = found > 0
+	}
+	return exists, nil
+}
+
 // ResolveRunID is a read-only lookup for a full durable ID or a unique
 // hexadecimal prefix of at least 12 characters, as printed by push feedback.
 // Keep Run exact-only: mutation and scheduler identity lookups never abbreviate.

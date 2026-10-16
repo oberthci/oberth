@@ -1,0 +1,547 @@
+package installer
+
+// `oberth backup`: one encrypted archive of an Oberth installation's state —
+// OpenBao KV secrets, ACL policies and Kubernetes auth roles, a verified
+// snapshot of the server database with the protocol identifiers needed to
+// open it, the release's Helm values and the secret-access table — so that
+// `oberth restore` can rebuild it on a fresh install (issues 038 and 048).
+//
+// Like `oberth install`, it runs on an operator workstation with kubectl,
+// helm, openssl and BAO_TOKEN; every in-cluster operation is a kubectl exec or
+// a Kubernetes API call, and nothing in the cluster is changed.
+
+import (
+	"bytes"
+	"context"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"golang.org/x/term"
+	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/clientcmd"
+
+	"github.com/oberthci/oberth/internal/auditanchor"
+	"github.com/oberthci/oberth/internal/store"
+)
+
+// BackupConfig selects the source installation and the encrypted output.
+type BackupConfig struct {
+	KubeconfigPath   string
+	ContextName      string
+	Namespace        string
+	OpenBaoNamespace string
+	ArgoNamespace    string
+	// Output is the archive to create; it must not exist.
+	Output string
+	// Recipient is the PEM certificate (RSA >= 3072 bits) the archive is
+	// encrypted to. Only the holder of its private key can restore.
+	Recipient   string
+	DryRun      bool
+	ToolVersion string
+}
+
+// backupDeps extends Deps with what backup and restore need beyond install.
+type backupDeps struct {
+	Deps
+	// runStdout runs a host command and returns its stdout alone (binary
+	// database streams must not be mixed with kubectl's stderr warnings).
+	runStdout CommandRunner
+	cipher    archiveCipher
+	openssl   string
+	now       func() time.Time
+	rootToken string
+	apiServer string
+}
+
+func (cfg *BackupConfig) applyDefaults() {
+	if cfg.Namespace == "" {
+		cfg.Namespace = DefaultNamespace
+	}
+	if cfg.OpenBaoNamespace == "" {
+		cfg.OpenBaoNamespace = DefaultOpenBaoNamespace
+	}
+	if cfg.ArgoNamespace == "" {
+		cfg.ArgoNamespace = DefaultArgoNamespace
+	}
+}
+
+// ExecuteBackup resolves the cluster and host tools and runs the backup.
+func ExecuteBackup(ctx context.Context, cfg BackupConfig, host InstallDeps) error {
+	cfg.applyDefaults()
+	if strings.TrimSpace(cfg.Output) == "" {
+		return errors.New("--output is required: the encrypted archive to create")
+	}
+	if strings.TrimSpace(cfg.Recipient) == "" {
+		return errors.New("--recipient is required: the PEM certificate the archive is encrypted to (see docs/backup-restore.md)")
+	}
+	if _, err := os.Lstat(cfg.Output); err == nil {
+		return fmt.Errorf("output %s already exists; refusing to overwrite it", cfg.Output)
+	}
+	if info, err := os.Stat(filepath.Dir(cfg.Output)); err != nil || !info.IsDir() {
+		return fmt.Errorf("output directory %s does not exist", filepath.Dir(cfg.Output))
+	}
+	if err := validateBackupRecipient(cfg.Recipient); err != nil {
+		return err
+	}
+	deps, err := prepareOperatorDeps(host, cfg.KubeconfigPath, cfg.ContextName, !cfg.DryRun)
+	if err != nil {
+		return err
+	}
+	deps.cipher = opensslCMS{binary: deps.openssl, recipient: cfg.Recipient}
+	if deps.rootToken == "" && !cfg.DryRun {
+		return missingRootTokenError("backup")
+	}
+	return runBackup(ctx, cfg, deps)
+}
+
+// prepareOperatorDeps mirrors Execute's host wiring: kubeconfig and context
+// selection for client-go, kubectl and helm alike, the echo-off token prompt,
+// and the root token itself. BAO_TOKEN is removed from this process's
+// environment once read, so no child process (kubectl, helm, openssl)
+// inherits it; the token reaches OpenBao only as the first stdin line. A
+// dry run (live=false) needs neither helm nor a token prompt.
+func prepareOperatorDeps(host InstallDeps, kubeconfigPath, contextName string, live bool) (backupDeps, error) {
+	host = host.withDefaults()
+	if live {
+		if err := CheckHostTools(host.GOOS, host.LookPath); err != nil {
+			return backupDeps{}, err
+		}
+	}
+	openssl, err := host.LookPath("openssl")
+	if err != nil {
+		return backupDeps{}, errors.New("openssl not found in PATH; backup archives use OpenSSL 3 `cms` (AES-256-GCM), install it and rerun")
+	}
+
+	runCommand := host.RunCommand
+	runStdout := CommandRunner(defaultRunCommandStdout)
+	if kubeconfigPath != "" {
+		host.LoadKubeConfig = func(name string) (kubernetes.Interface, *rest.Config, string, error) {
+			rules := clientcmd.NewDefaultClientConfigLoadingRules()
+			rules.ExplicitPath = kubeconfigPath
+			return loadKubeConfigWithRules(rules, name, "", host.Output)
+		}
+		runCommand = withKubeconfigArg(runCommand, kubeconfigPath)
+		runStdout = withKubeconfigArg(runStdout, kubeconfigPath)
+	}
+	kubeClient, restConfig, selectedContext, err := host.LoadKubeConfig(contextName)
+	if err != nil {
+		if contextName != "" {
+			return backupDeps{}, fmt.Errorf("load kubeconfig context %q: %w", contextName, err)
+		}
+		return backupDeps{}, fmt.Errorf("load kubeconfig: %w", err)
+	}
+	helmKubeArgs, _, _ := ResolveHelmKubeArgs(contextName)
+	if kubeconfigPath != "" {
+		helmKubeArgs = []string{"--kubeconfig", kubeconfigPath, "--kube-context", selectedContext}
+	}
+
+	var readPassword func() ([]byte, error)
+	if live && host.IsTerminal != nil && host.IsTerminal() {
+		readPassword = func() ([]byte, error) { return term.ReadPassword(int(os.Stdin.Fd())) }
+	}
+	deps := backupDeps{
+		Deps: Deps{
+			Output:         host.Output,
+			Input:          host.Input,
+			RunHelm:        HelmWithKubeArgs(host.RunHelm, helmKubeArgs),
+			RunCommand:     runCommand,
+			RunInteractive: host.RunInteractive,
+			IsTerminal:     host.IsTerminal,
+			LookPath:       host.LookPath,
+			KubeClient:     kubeClient,
+			RestConfig:     restConfig,
+			ContextName:    selectedContext,
+			ReadPassword:   readPassword,
+		},
+		runStdout: runStdout,
+		openssl:   openssl,
+		now:       time.Now,
+	}
+	if restConfig != nil {
+		deps.apiServer = restConfig.Host
+	}
+	token, err := takeRootToken(deps.Deps)
+	if err != nil {
+		return backupDeps{}, err
+	}
+	deps.rootToken = token
+	return deps, nil
+}
+
+// takeRootToken reads BAO_TOKEN (then clears it from the environment) or,
+// on a terminal, prompts for it with echo disabled.
+func takeRootToken(deps Deps) (string, error) {
+	token := strings.TrimSpace(os.Getenv(baoTokenEnvVar))
+	_ = os.Unsetenv(baoTokenEnvVar)
+	_ = os.Unsetenv("VAULT_TOKEN")
+	if token != "" || deps.ReadPassword == nil {
+		return token, nil
+	}
+	_, _ = fmt.Fprint(deps.Output, "OpenBao root token (echo disabled): ")
+	raw, err := deps.ReadPassword()
+	_, _ = fmt.Fprintln(deps.Output)
+	if err != nil {
+		return "", fmt.Errorf("read root token: %w", err)
+	}
+	token = strings.TrimSpace(string(raw))
+	clear(raw)
+	return token, nil
+}
+
+func missingRootTokenError(command string) error {
+	return fmt.Errorf("%s needs the OpenBao root token; supply it without exposing it in shell history:\n\n"+
+		"    read -rs BAO_TOKEN && export BAO_TOKEN\n\nthen rerun oberth %s", command, command)
+}
+
+// withKubeconfigArg prepends --kubeconfig to every kubectl invocation.
+func withKubeconfigArg(run CommandRunner, path string) CommandRunner {
+	return func(ctx context.Context, input []byte, name string, args ...string) ([]byte, error) {
+		if name == "kubectl" {
+			args = append([]string{"--kubeconfig", path}, args...)
+		}
+		return run(ctx, input, name, args...)
+	}
+}
+
+// defaultRunCommandStdout runs a host command and returns stdout alone; on
+// failure the error carries stderr for diagnosis.
+func defaultRunCommandStdout(ctx context.Context, input []byte, name string, args ...string) ([]byte, error) {
+	// #nosec G204 -- callers select a fixed executable and pass structured
+	// arguments; no shell interpolation occurs on the host.
+	command := exec.CommandContext(ctx, name, args...)
+	if len(input) > 0 {
+		command.Stdin = bytes.NewReader(input)
+	}
+	var stdout, stderr bytes.Buffer
+	command.Stdout = &stdout
+	command.Stderr = &stderr
+	if err := command.Run(); err != nil {
+		return nil, fmt.Errorf("%s: %w%s", name, err, commandOutputSuffix(stderr.Bytes()))
+	}
+	return stdout.Bytes(), nil
+}
+
+// --- Server discovery shared by backup and restore ---
+
+// serverDeployment is what backup and restore need from deploy/oberth.
+type serverDeployment struct {
+	Image         string
+	Replicas      int32
+	Selector      string
+	ClaimName     string
+	Compatibility backupCompatibility
+	PodSpec       corev1.PodSpec
+}
+
+func inspectServerDeployment(ctx context.Context, deps Deps, namespace string) (serverDeployment, error) {
+	deployment, err := deps.KubeClient.AppsV1().Deployments(namespace).Get(ctx, "oberth", metav1.GetOptions{})
+	if err != nil {
+		return serverDeployment{}, fmt.Errorf("get deployment %s/oberth: %w", namespace, err)
+	}
+	info := serverDeployment{Replicas: 1, PodSpec: deployment.Spec.Template.Spec}
+	if deployment.Spec.Replicas != nil {
+		info.Replicas = *deployment.Spec.Replicas
+	}
+	if deployment.Spec.Selector == nil || len(deployment.Spec.Selector.MatchLabels) == 0 {
+		return serverDeployment{}, fmt.Errorf("deployment %s/oberth has no label selector", namespace)
+	}
+	info.Selector = labels.SelectorFromSet(deployment.Spec.Selector.MatchLabels).String()
+	for _, volume := range deployment.Spec.Template.Spec.Volumes {
+		if volume.Name == "data" && volume.PersistentVolumeClaim != nil {
+			info.ClaimName = volume.PersistentVolumeClaim.ClaimName
+		}
+	}
+	defaults := store.DefaultProtocolConfig()
+	info.Compatibility = backupCompatibility{
+		SchemaIdentity: defaults.SchemaIdentity,
+		AuditDomain:    defaults.AuditDomain,
+		WitnessKeyInfo: auditanchor.DefaultWitnessKeyInfo,
+	}
+	found := false
+	for _, container := range deployment.Spec.Template.Spec.Containers {
+		if container.Name != serverContainerName {
+			continue
+		}
+		found = true
+		info.Image = container.Image
+		for _, env := range container.Env {
+			switch env.Name {
+			case "OBERTH_SCHEMA_IDENTITY":
+				info.Compatibility.SchemaIdentity = env.Value
+			case "OBERTH_AUDIT_DOMAIN":
+				info.Compatibility.AuditDomain = env.Value
+			case "OBERTH_WITNESS_KEY_INFO":
+				info.Compatibility.WitnessKeyInfo = env.Value
+			}
+		}
+	}
+	if !found {
+		return serverDeployment{}, fmt.Errorf("deployment %s/oberth has no %q container", namespace, serverContainerName)
+	}
+	if info.ClaimName == "" {
+		return serverDeployment{}, fmt.Errorf("deployment %s/oberth mounts no PersistentVolumeClaim as its data volume", namespace)
+	}
+	return info, nil
+}
+
+// runningServerPod returns a running, non-terminating server pod, or "".
+func runningServerPod(ctx context.Context, deps Deps, namespace, selector string) (string, error) {
+	pods, err := deps.KubeClient.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{LabelSelector: selector})
+	if err != nil {
+		return "", fmt.Errorf("list server pods: %w", err)
+	}
+	for i := range pods.Items {
+		pod := &pods.Items[i]
+		if pod.DeletionTimestamp == nil && isPodRunning(pod) {
+			return pod.Name, nil
+		}
+	}
+	return "", nil
+}
+
+// connectOpenBao finds the verified OpenBao pod and requires it unsealed.
+func connectOpenBao(ctx context.Context, deps Deps, namespace string) (openBaoExec, error) {
+	pod, err := findOpenBaoPod(ctx, deps, namespace)
+	if err != nil {
+		return openBaoExec{}, err
+	}
+	client := newOpenBaoExec(deps, namespace, pod)
+	status, err := client.status(ctx)
+	if err != nil {
+		return openBaoExec{}, err
+	}
+	if !status.Initialized || status.Sealed {
+		return openBaoExec{}, fmt.Errorf("OpenBao in namespace %s is not initialized and unsealed; unseal it first", namespace)
+	}
+	return client, nil
+}
+
+// secretAccessExport is the oberth-secret-access ConfigMap's data. The
+// ConfigMap, not the database, is the source of truth the server reconciles
+// grants from at startup, so it must be restored before the server starts.
+type secretAccessExport struct {
+	Present bool              `json:"present"`
+	Data    map[string]string `json:"data"`
+}
+
+func readSecretAccess(ctx context.Context, deps Deps, namespace string) (secretAccessExport, error) {
+	cm, err := deps.KubeClient.CoreV1().ConfigMaps(namespace).Get(ctx, secretAccessConfigMapName, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		return secretAccessExport{Data: map[string]string{}}, nil
+	}
+	if err != nil {
+		return secretAccessExport{}, fmt.Errorf("get ConfigMap %s/%s: %w", namespace, secretAccessConfigMapName, err)
+	}
+	data := cm.Data
+	if data == nil {
+		data = map[string]string{}
+	}
+	return secretAccessExport{Present: true, Data: data}, nil
+}
+
+// releaseValues returns the oberth release's user-supplied values as JSON.
+func releaseValues(ctx context.Context, deps Deps, namespace string) (json.RawMessage, error) {
+	out, err := deps.RunHelm(ctx, []string{"get", "values", "oberth", "-n", namespace, "-o", "json"})
+	if err != nil {
+		return nil, fmt.Errorf("helm get values oberth: %w", err)
+	}
+	trimmed := bytes.TrimSpace(out)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		trimmed = []byte("{}")
+	}
+	if !json.Valid(trimmed) {
+		return nil, errors.New("helm get values oberth returned invalid JSON")
+	}
+	return json.RawMessage(trimmed), nil
+}
+
+// --- Backup flow ---
+
+func runBackup(ctx context.Context, cfg BackupConfig, deps backupDeps) (resultErr error) {
+	w := deps.Output
+	_, _ = fmt.Fprintf(w, "Backing up Oberth from context %s (namespace %s, OpenBao %s).\n", deps.ContextName, cfg.Namespace, cfg.OpenBaoNamespace)
+
+	server, err := inspectServerDeployment(ctx, deps.Deps, cfg.Namespace)
+	if err != nil {
+		return err
+	}
+	pod, err := runningServerPod(ctx, deps.Deps, cfg.Namespace, server.Selector)
+	if err != nil {
+		return err
+	}
+	if pod == "" {
+		return fmt.Errorf("no running server pod in namespace %s; the database snapshot is taken through the running server", cfg.Namespace)
+	}
+	release, found := findHelmRelease(ctx, deps.Deps, "oberth", cfg.Namespace)
+	if !found {
+		return fmt.Errorf("no oberth Helm release in namespace %s", cfg.Namespace)
+	}
+	protocol := store.ProtocolConfig{SchemaIdentity: server.Compatibility.SchemaIdentity, AuditDomain: server.Compatibility.AuditDomain}
+	if err := protocol.Validate(); err != nil {
+		return fmt.Errorf("deployment compatibility values: %w", err)
+	}
+
+	if cfg.DryRun {
+		_, _ = fmt.Fprintln(w, "Plan (--dry-run):")
+		_, _ = fmt.Fprintf(w, "  OpenBao   every KV v2 secret under %s/, every ACL policy except root and default,\n", defaultKVPrefix)
+		_, _ = fmt.Fprintf(w, "            every auth/%s role (all fields); auth config, Transit and PKI metadata for reference\n", defaultAuthMount)
+		_, _ = fmt.Fprintf(w, "  Database  verified snapshot of %s through pod %s\n", serverDatabasePath, pod)
+		_, _ = fmt.Fprintf(w, "            schema identity %s, audit domain %s, witness key info %s\n",
+			server.Compatibility.SchemaIdentity, server.Compatibility.AuditDomain, server.Compatibility.WitnessKeyInfo)
+		_, _ = fmt.Fprintf(w, "  Helm      values of release oberth (%s)\n", release.Chart)
+		_, _ = fmt.Fprintf(w, "  Grants    ConfigMap %s/%s\n", cfg.Namespace, secretAccessConfigMapName)
+		_, _ = fmt.Fprintf(w, "  Output    %s, encrypted to %s\n", cfg.Output, cfg.Recipient)
+		_, _ = fmt.Fprintln(w, "Nothing was read from OpenBao or written to disk (--dry-run).")
+		return nil
+	}
+
+	bao, err := connectOpenBao(ctx, deps.Deps, cfg.OpenBaoNamespace)
+	if err != nil {
+		return err
+	}
+	schema, err := podSchemaVersion(ctx, deps.RunCommand, deps.ContextName, cfg.Namespace, pod, serverContainerName)
+	if err != nil {
+		return err
+	}
+	if schema > store.LatestMigrationVersion() {
+		return fmt.Errorf("the server writes database schema %d but this oberth CLI understands only up to %d; upgrade the CLI first",
+			schema, store.LatestMigrationVersion())
+	}
+
+	work, err := os.MkdirTemp("", "oberth-backup-")
+	if err != nil {
+		return fmt.Errorf("create private working directory: %w", err)
+	}
+	defer func() { resultErr = errors.Join(resultErr, os.RemoveAll(work)) }()
+
+	_, _ = fmt.Fprintln(w, "Reading OpenBao...")
+	kv, err := exportKV(ctx, bao, deps.rootToken, defaultKVPrefix)
+	if err != nil {
+		return err
+	}
+	policies, err := exportPolicies(ctx, bao, deps.rootToken)
+	if err != nil {
+		return err
+	}
+	roles, err := exportRoles(ctx, bao, deps.rootToken, defaultAuthMount)
+	if err != nil {
+		return err
+	}
+	reference := exportOpenBaoReference(ctx, bao, deps.rootToken)
+	for _, member := range []struct {
+		name  string
+		value any
+	}{
+		{backupMemberKV, kv},
+		{backupMemberPolicies, policies},
+		{backupMemberRoles, roles},
+		{backupMemberReference, reference},
+	} {
+		if err := writeBackupJSON(work, member.name, member.value); err != nil {
+			return err
+		}
+	}
+	secretCount := len(kv.Secrets)
+	// The decoded secret values are no longer needed once written.
+	kv.Secrets = nil
+
+	_, _ = fmt.Fprintln(w, "Snapshotting the server database...")
+	databasePath := filepath.Join(work, filepath.FromSlash(backupMemberDatabase))
+	if err := os.MkdirAll(filepath.Dir(databasePath), 0o700); err != nil {
+		return err
+	}
+	snapshotMode, err := snapshotServerDatabase(ctx, deps, cfg.Namespace, pod, schema, protocol, work, databasePath)
+	if err != nil {
+		return err
+	}
+	report, err := verifyDatabaseArchive(ctx, databasePath, schema, protocol)
+	if err != nil {
+		return err
+	}
+
+	values, err := releaseValues(ctx, deps.Deps, cfg.Namespace)
+	if err != nil {
+		return err
+	}
+	if err := writeBackupFile(work, backupMemberHelmValues, values); err != nil {
+		return err
+	}
+	grants, err := readSecretAccess(ctx, deps.Deps, cfg.Namespace)
+	if err != nil {
+		return err
+	}
+	if err := writeBackupJSON(work, backupMemberSecretAccess, grants); err != nil {
+		return err
+	}
+
+	serverVersion := ""
+	if out, err := deps.RunCommand(ctx, nil, "kubectl", kubectlExecArgs(deps.ContextName, cfg.Namespace, pod, serverContainerName, false, "oberth", "version")...); err == nil {
+		serverVersion = strings.TrimSpace(string(out))
+	}
+	manifest := backupManifest{
+		Format:      backupFormat,
+		CreatedAt:   deps.now().UTC().Format(time.RFC3339),
+		ToolVersion: cfg.ToolVersion,
+		Source: backupSource{
+			Context:          deps.ContextName,
+			APIServer:        deps.apiServer,
+			Namespace:        cfg.Namespace,
+			OpenBaoNamespace: cfg.OpenBaoNamespace,
+			ArgoNamespace:    cfg.ArgoNamespace,
+			ServerImage:      server.Image,
+			ServerVersion:    serverVersion,
+			ChartVersion:     chartVersionFromRelease(release.Chart, "oberth"),
+		},
+		Compatibility: server.Compatibility,
+		Database: backupDatabaseSummary{
+			Schema:          report.Schema,
+			AuditHeadID:     report.AuditHead.ID,
+			AuditHeadSHA256: hex.EncodeToString(report.AuditHead.SHA256),
+			Snapshot:        snapshotMode,
+		},
+		OpenBao: backupOpenBaoSummary{
+			KVMount:   defaultKVPrefix,
+			Secrets:   secretCount,
+			Policies:  len(policies),
+			AuthMount: defaultAuthMount,
+			Roles:     len(roles.Roles),
+		},
+		NotRestored: backupNotRestored,
+	}
+	if err := writeBackupArchive(ctx, work, &manifest, deps.cipher, cfg.Output); err != nil {
+		return err
+	}
+	cipherSHA, err := fileSHA256(cfg.Output)
+	if err != nil {
+		return err
+	}
+
+	_, _ = fmt.Fprintf(w, "\nWrote %s (CMS AES-256-GCM to %s).\n", cfg.Output, cfg.Recipient)
+	_, _ = fmt.Fprintf(w, "  SHA-256      %s\n", cipherSHA)
+	_, _ = fmt.Fprintf(w, "  OpenBao      %d secrets, %d policies, %d roles\n", manifest.OpenBao.Secrets, manifest.OpenBao.Policies, manifest.OpenBao.Roles)
+	_, _ = fmt.Fprintf(w, "  Database     schema %d, audit head %d:%s (%s snapshot, integrity and foreign keys verified)\n",
+		report.Schema, report.AuditHead.ID, manifest.Database.AuditHeadSHA256, snapshotMode)
+	_, _ = fmt.Fprintf(w, "  Protocol     schema identity %s, audit domain %s, witness key info %s\n",
+		manifest.Compatibility.SchemaIdentity, manifest.Compatibility.AuditDomain, manifest.Compatibility.WitnessKeyInfo)
+	if len(reference.Warnings) > 0 {
+		_, _ = fmt.Fprintf(w, "  Note         %d reference-only reads failed and are recorded in the archive\n", len(reference.Warnings))
+	}
+	_, _ = fmt.Fprintln(w, "Not restorable (recorded for reference only):")
+	for _, line := range backupNotRestored {
+		_, _ = fmt.Fprintf(w, "  - %s\n", line)
+	}
+	_, _ = fmt.Fprintln(w, "Store the archive and the recipient's private key separately; the archive holds every secret above.")
+	return nil
+}

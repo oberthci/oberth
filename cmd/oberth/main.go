@@ -40,7 +40,7 @@ func main() {
 	}
 }
 
-const usageCommands = "audit, init, validate, install, setup, upgrade, serve, upstream, repo, schedules, fragments, artifacts, runs, run, log, repos, issues, status, uplink, access, secretstore, mcp, preflight, or version"
+const usageCommands = "audit, init, validate, install, setup, upgrade, backup, restore, serve, upstream, repo, schedules, fragments, artifacts, runs, run, log, repos, issues, status, uplink, access, secretstore, mcp, preflight, or version"
 
 func runCLI(ctx context.Context, arguments []string, input io.Reader, output io.Writer) error {
 	var err error
@@ -62,6 +62,8 @@ Commands:
   install       Install or upgrade Oberth on a cluster
   setup         Interactive setup wizard
   upgrade       Upgrade an existing Oberth deployment
+  backup        Write an encrypted backup of OpenBao state and the server database
+  restore       Restore an oberth backup onto an installed Oberth
   serve         Start the Oberth server
   upstream      Manage upstream forge connections
   repo          Manage repository mappings
@@ -128,6 +130,10 @@ Commands:
 		return runSetup(ctx, arguments[1:], input, output)
 	case "upgrade":
 		return runUpgrade(ctx, arguments[1:], output)
+	case "backup":
+		return runBackup(ctx, arguments[1:], input, output)
+	case "restore":
+		return runRestore(ctx, arguments[1:], input, output)
 	case "version":
 		// AI-CONTRACT: the default (no-flag) output format is consumed by
 		// .oberth/release.sh verify_binary_version() which requires exactly

@@ -13,6 +13,9 @@ subsystems:
   maintenance_backup:
     paths: [cmd/oberth-store-backup, internal/store/backup_archive.go, docs/database-backup.md, scripts/qualify_database_backup.sh]
     contract: Source-built Linux maintenance utility exports a read-only verified database/WAL snapshot to authenticated CMS; separate private rehearsal precedes acceptance. The tagged synthetic qualification and retained no-swap sandbox joins are mandatory; no live restore or external witness reset is provided.
+  operator_backup_restore:
+    paths: [internal/installer/backup.go, internal/installer/backup_archive.go, internal/installer/backup_openbao.go, internal/installer/backup_database.go, internal/installer/restore.go, cmd/oberth/backup.go, docs/backup-restore.md]
+    contract: Workstation `oberth backup` seals OpenBao KV/policies/roles, the in-pod verified database snapshot, compatibility values, Helm values and the secret-access ConfigMap into one CMS AES-256-GCM archive; `oberth restore` verifies it offline, plans, confirms, writes OpenBao with read-back, swaps the database through a PVC-mounting pod, and never puts tokens or secrets in argv.
   persistence:
     paths: [internal/model, internal/store]
     contract: SQLite is the durable single-writer state for runs, promotions, issues, uplinks, and audit.
