@@ -781,9 +781,12 @@ func runUpstreamList(ctx context.Context, arguments []string, output io.Writer) 
 	flags.SetOutput(io.Discard)
 	databasePath := flags.String("database", "/data/oberth.sqlite", "SQLite database path (in-pod; requires the live admin daemon)")
 	upstreamKey := flags.String("upstream-key", "/etc/oberth/upstream-key/id_ed25519", "upstream SSH private key")
+	knownHosts := flags.String("known-hosts", "/etc/oberth/known-hosts/known_hosts", "upstream known_hosts")
 	if identityStoreEnabled() {
 		*upstreamKey = identityRoot + "/upstream/id_ed25519"
+		*knownHosts = identityRoot + "/hosts/known_hosts"
 	}
+	check := flags.Bool("check", false, "authenticate to each SSH upstream now and report whether the forge still accepts its key")
 	if err := flags.Parse(arguments); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			flags.SetOutput(output)
@@ -818,7 +821,11 @@ func runUpstreamList(ctx context.Context, arguments []string, output io.Writer) 
 	globalFingerprint := fileFingerprint(*upstreamKey)
 	keyDirectory := filepath.Dir(*upstreamKey)
 	writer := tabwriter.NewWriter(output, 0, 0, 3, ' ', 0)
-	if _, err := fmt.Fprintln(writer, "NAME\tKIND\tURL\tKEY NAME\tKEY FINGERPRINT"); err != nil {
+	header := "NAME\tKIND\tURL\tKEY NAME\tKEY FINGERPRINT"
+	if *check {
+		header += "\tAUTH"
+	}
+	if _, err := fmt.Fprintln(writer, header); err != nil {
 		return err
 	}
 	for _, upstream := range upstreams {
@@ -833,7 +840,11 @@ func runUpstreamList(ctx context.Context, arguments []string, output io.Writer) 
 				fingerprint = fileFingerprint(filepath.Join(keyDirectory, upstream.KeyName))
 			}
 		}
-		if _, err := fmt.Fprintf(writer, "%s\t%s\t%s\t%s\t%s\n", upstream.Name, upstream.Kind, upstream.BaseURL, keyName, fingerprint); err != nil {
+		row := fmt.Sprintf("%s\t%s\t%s\t%s\t%s", upstream.Name, upstream.Kind, upstream.BaseURL, keyName, fingerprint)
+		if *check {
+			row += "\t" + upstreamAuthStatus(ctx, upstream, *upstreamKey, keyDirectory, *knownHosts)
+		}
+		if _, err := fmt.Fprintln(writer, row); err != nil {
 			return err
 		}
 	}
@@ -1287,8 +1298,10 @@ func runUplinkWithDependencies(ctx context.Context, arguments []string, input io
 		return runUplinkList(ctx, arguments[1:], output)
 	case "remove":
 		return runUplinkRemove(ctx, arguments[1:], output, dependencies.mutationGate)
+	case "rotate":
+		return runUplinkRotate(ctx, arguments[1:], input, output, dependencies)
 	default:
-		return fmt.Errorf("%w: uplink add [--admin] [--database PATH] [--tls-cert PATH] <public-key-file|raw-key|-> <identity@host> | uplink list | uplink remove <identity>", errUsage)
+		return fmt.Errorf("%w: uplink add [--admin] [--database PATH] [--tls-cert PATH] <public-key-file|raw-key|-> <identity@host> | uplink list | uplink remove <identity> | uplink rotate <public-key-file|raw-key|-> <identity@host>", errUsage)
 	}
 	flags := flag.NewFlagSet("uplink add", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
@@ -1314,22 +1327,11 @@ func runUplinkWithDependencies(ctx context.Context, arguments []string, input io
 	if err := app.ValidateUplinkIdentity(identity); err != nil {
 		return err
 	}
-	var fingerprint string
-	var err error
-	if flags.Arg(0) == "-" {
-		fingerprint, err = app.AuthorizedKeyFingerprintReader(input)
-	} else if _, statErr := os.Stat(flags.Arg(0)); statErr != nil {
-		arg := flags.Arg(0)
-		if strings.HasPrefix(arg, "/") || strings.HasPrefix(arg, "./") || strings.HasPrefix(arg, "../") || strings.HasPrefix(arg, "~/") || strings.HasSuffix(arg, ".pub") {
-			return fmt.Errorf("key file not found: %w", statErr)
-		}
-		fingerprint, err = app.AuthorizedKeyFingerprintReader(strings.NewReader(arg))
-	} else {
-		fingerprint, err = app.AuthorizedKeyFingerprint(flags.Arg(0))
-	}
+	fingerprint, err := uplinkKeyFingerprint(flags.Arg(0), input)
 	if err != nil {
 		return err
 	}
+	warnUplinkSharesUpstreamKey(output, fingerprint, upstreamKeyDirectory())
 	if _, err := app.TLSCertificateFingerprint(*certificatePath); err != nil {
 		if _, saErr := os.Stat("/var/run/secrets/kubernetes.io/serviceaccount"); saErr != nil {
 			return fmt.Errorf("this command runs inside the Oberth pod; use:\n  kubectl exec -i -n oberth deploy/oberth -- oberth uplink add - <identity@host> < ~/.ssh/id_ed25519.pub\n\npod error: %w", err)
@@ -1630,4 +1632,168 @@ func runAccessRevokeWithDependencies(ctx context.Context, arguments []string, ou
 	}
 	_, err = fmt.Fprintf(output, "revoked: %s/%s no longer has access to %s\n", repo, step, secret)
 	return err
+}
+
+// uplinkKeyFingerprint resolves an uplink public key given as "-" (stdin), a
+// key file, or the raw authorized_keys line.
+func uplinkKeyFingerprint(source string, input io.Reader) (string, error) {
+	if source == "-" {
+		return app.AuthorizedKeyFingerprintReader(input)
+	}
+	if _, statErr := os.Stat(source); statErr != nil {
+		if strings.HasPrefix(source, "/") || strings.HasPrefix(source, "./") || strings.HasPrefix(source, "../") || strings.HasPrefix(source, "~/") || strings.HasSuffix(source, ".pub") {
+			return "", fmt.Errorf("key file not found: %w", statErr)
+		}
+		return app.AuthorizedKeyFingerprintReader(strings.NewReader(source))
+	}
+	return app.AuthorizedKeyFingerprint(source)
+}
+
+// upstreamKeyDirectory is where the pod holds its upstream SSH identities.
+func upstreamKeyDirectory() string {
+	if identityStoreEnabled() {
+		return identityRoot + "/upstream"
+	}
+	return "/etc/oberth/upstream-key"
+}
+
+// warnUplinkSharesUpstreamKey warns when an uplink is registered with the
+// same keypair the server uses to authenticate to the forge. The workstation
+// then holds the organization-wide upstream key, and replacing the
+// workstation key at the forge silently breaks every fetch and publication
+// (observed on tuxbox, issue 040).
+func warnUplinkSharesUpstreamKey(output io.Writer, uplinkFingerprint, keyDirectory string) {
+	entries, err := os.ReadDir(keyDirectory)
+	if err != nil {
+		return
+	}
+	for _, entry := range entries {
+		if entry.IsDir() || strings.HasSuffix(entry.Name(), ".pub") || strings.HasPrefix(entry.Name(), ".") {
+			continue
+		}
+		data, readErr := readBoundedFile(filepath.Join(keyDirectory, entry.Name()), 1<<20)
+		if readErr != nil {
+			continue
+		}
+		signer, parseErr := ssh.ParsePrivateKey(data)
+		clear(data)
+		if parseErr != nil {
+			continue
+		}
+		if ssh.FingerprintSHA256(signer.PublicKey()) == uplinkFingerprint {
+			_, _ = fmt.Fprintf(output, "WARNING: this uplink key (%s) is the server's upstream identity %q. "+
+				"Use a separate workstation key: replacing it at the forge would also revoke Oberth's access.\n",
+				uplinkFingerprint, entry.Name())
+			return
+		}
+	}
+}
+
+// runUplinkRotate replaces every key of one uplink identity with a new one:
+// it registers the new key (printing its token once) and then revokes the
+// identity's other keys, keeping admin status.
+func runUplinkRotate(ctx context.Context, arguments []string, input io.Reader, output io.Writer, dependencies uplinkDependencies) error {
+	flags := flag.NewFlagSet("uplink rotate", flag.ContinueOnError)
+	flags.SetOutput(io.Discard)
+	databasePath := flags.String("database", "/data/oberth.sqlite", "SQLite database path (in-pod; requires the live admin daemon)")
+	certificatePath := flags.String("tls-cert", "", "HTTPS certificate path passed to uplink add (default: the add default)")
+	if err := flags.Parse(arguments); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			flags.SetOutput(output)
+			flags.Usage()
+			return nil
+		}
+		return fmt.Errorf("%w: %w", errUsage, err)
+	}
+	if flags.NArg() != 2 {
+		return fmt.Errorf("%w: uplink rotate [--database PATH] <public-key-file|raw-key|-> <identity@host>", errUsage)
+	}
+	source, identity := flags.Arg(0), flags.Arg(1)
+	if err := app.ValidateUplinkIdentity(identity); err != nil {
+		return err
+	}
+	// Stdin can be read once: buffer it for both the fingerprint and add.
+	var keyInput io.Reader = input
+	if source == "-" {
+		body, err := io.ReadAll(io.LimitReader(input, 1<<20))
+		if err != nil {
+			return fmt.Errorf("read public key: %w", err)
+		}
+		keyInput = bytes.NewReader(body)
+		input = bytes.NewReader(body)
+	}
+	newFingerprint, err := uplinkKeyFingerprint(source, keyInput)
+	if err != nil {
+		return err
+	}
+	database, err := store.OpenAdminClient(ctx, *databasePath, configuredStoreOptions(ctx))
+	if err != nil {
+		return err
+	}
+	statuses, err := database.ListUplinkStatuses(ctx)
+	_ = database.Close()
+	if err != nil {
+		return err
+	}
+	var old []string
+	admin := false
+	for _, status := range statuses {
+		if status.Identity != identity {
+			continue
+		}
+		admin = admin || status.Admin
+		if status.Fingerprint != newFingerprint {
+			old = append(old, status.Fingerprint)
+		}
+	}
+	if len(old) == 0 {
+		return fmt.Errorf("uplink %s has no other key to rotate from; use uplink add", identity)
+	}
+	addArguments := []string{"add", "--database", *databasePath}
+	if *certificatePath != "" {
+		addArguments = append(addArguments, "--tls-cert", *certificatePath)
+	}
+	if admin {
+		addArguments = append(addArguments, "--admin")
+	}
+	addArguments = append(addArguments, source, identity)
+	if err := runUplinkWithDependencies(ctx, addArguments, input, output, dependencies); err != nil {
+		return fmt.Errorf("register the new key (old keys left in place): %w", err)
+	}
+	for _, fingerprint := range old {
+		if err := runUplinkRemove(ctx, []string{"--database", *databasePath, "--fingerprint", fingerprint, identity}, output, dependencies.mutationGate); err != nil {
+			return fmt.Errorf("the new key is registered, but revoking %s failed: %w", fingerprint, err)
+		}
+	}
+	return nil
+}
+
+// upstreamAuthStatus authenticates to one SSH upstream with the key the
+// server would use and reports the outcome in one table cell. A forge that
+// revoked the key otherwise shows up only as failing fetches (issue 040).
+func upstreamAuthStatus(ctx context.Context, upstream model.Upstream, sharedKey, keyDirectory, knownHosts string) string {
+	if upstream.Kind != "ssh" {
+		return "-"
+	}
+	keyPath := sharedKey
+	if upstream.KeyName != "" && app.ValidUpstreamKeyName(upstream.KeyName) {
+		keyPath = filepath.Join(keyDirectory, upstream.KeyName)
+	}
+	privateKey, err := readBoundedFile(keyPath, 1<<20)
+	if err != nil {
+		return "error: read upstream identity"
+	}
+	defer clear(privateKey)
+	hosts, err := readBoundedFile(knownHosts, 1<<20)
+	if err != nil {
+		return "error: read host pins"
+	}
+	if err := app.ProbeSSHAuthentication(ctx, upstream.BaseURL, privateKey, hosts); err != nil {
+		message := err.Error()
+		if strings.Contains(message, "unable to authenticate") {
+			return "REJECTED: the forge no longer accepts this key"
+		}
+		return "error: " + message
+	}
+	return "ok"
 }

@@ -2154,3 +2154,90 @@ func TestRepoRemoveHelpReturnsNil(t *testing.T) {
 		t.Fatalf("repo remove --help = %v", err)
 	}
 }
+
+func newTestUplinkKey(t *testing.T) (ssh.PublicKey, ed25519.PrivateKey) {
+	t.Helper()
+	publicKey, privateKey, err := ed25519.GenerateKey(cryptorand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sshKey, err := ssh.NewPublicKey(publicKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return sshKey, privateKey
+}
+
+// uplink rotate registers the new key for the identity and revokes the old
+// one, so replacing a workstation key is one step instead of add + remove.
+func TestUplinkRotateReplacesTheIdentityKey(t *testing.T) {
+	t.Parallel()
+	directory := t.TempDir()
+	database := filepath.Join(directory, "oberth.sqlite")
+	oldKey, certificateKey := newTestUplinkKey(t)
+	certificatePath := filepath.Join(directory, "tls.crt")
+	writeTestCertificate(t, certificatePath, certificateKey.Public().(ed25519.PublicKey), certificateKey)
+	deps := uplinkDependencies{mutationGate: allowTestMutation}
+	if err := runUplinkWithDependencies(context.Background(), []string{
+		"add", "--database", database, "--tls-cert", certificatePath,
+		strings.TrimSpace(string(ssh.MarshalAuthorizedKey(oldKey))), "agent@host",
+	}, strings.NewReader(""), io.Discard, deps); err != nil {
+		t.Fatal(err)
+	}
+	newKey, _ := newTestUplinkKey(t)
+	var output bytes.Buffer
+	if err := runUplinkWithDependencies(context.Background(), []string{
+		"rotate", "--database", database, "--tls-cert", certificatePath, "-", "agent@host",
+	}, bytes.NewReader(ssh.MarshalAuthorizedKey(newKey)), &output, deps); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), "Uplink token for agent@host") ||
+		!strings.Contains(output.String(), "removed uplink agent@host ("+ssh.FingerprintSHA256(oldKey)+")") {
+		t.Fatalf("rotate output = %q", output.String())
+	}
+	var list bytes.Buffer
+	if err := runUplinkWithDependencies(context.Background(), []string{"list", "--database", database}, strings.NewReader(""), &list, deps); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(list.String(), ssh.FingerprintSHA256(oldKey)) || !strings.Contains(list.String(), ssh.FingerprintSHA256(newKey)) {
+		t.Fatalf("after rotate the list must hold only the new key:\n%s", list.String())
+	}
+}
+
+func TestWarnUplinkSharesUpstreamKey(t *testing.T) {
+	t.Parallel()
+	directory := t.TempDir()
+	_, private, err := ed25519.GenerateKey(cryptorand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	block, err := ssh.MarshalPrivateKey(private, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(directory, "id_ed25519"), pem.EncodeToMemory(block), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	signer, err := ssh.NewSignerFromKey(private)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var shared, separate bytes.Buffer
+	warnUplinkSharesUpstreamKey(&shared, ssh.FingerprintSHA256(signer.PublicKey()), directory)
+	other, _ := newTestUplinkKey(t)
+	warnUplinkSharesUpstreamKey(&separate, ssh.FingerprintSHA256(other), directory)
+	if !strings.Contains(shared.String(), "WARNING") || separate.Len() != 0 {
+		t.Fatalf("shared=%q separate=%q", shared.String(), separate.String())
+	}
+}
+
+func TestUpstreamAuthStatusReportsWithoutProbingNonSSH(t *testing.T) {
+	t.Parallel()
+	missing := filepath.Join(t.TempDir(), "absent")
+	if got := upstreamAuthStatus(context.Background(), model.Upstream{Kind: "local"}, missing, t.TempDir(), missing); got != "-" {
+		t.Fatalf("local upstream: %q", got)
+	}
+	if got := upstreamAuthStatus(context.Background(), model.Upstream{Kind: "ssh", BaseURL: "ssh://git@example.test/acme"}, missing, t.TempDir(), missing); got != "error: read upstream identity" {
+		t.Fatalf("missing key: %q", got)
+	}
+}
