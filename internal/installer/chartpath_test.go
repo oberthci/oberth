@@ -33,7 +33,7 @@ func TestChartValuesArgsStillReadThePublishedChart(t *testing.T) {
 	t.Parallel()
 
 	args := strings.Join(oberthChartValuesArgs(Config{ChartVersion: "v0.13.24"}), " ")
-	if !strings.Contains(args, oberthRepoName+"/oberth") || !strings.Contains(args, "--version v0.13.24") {
+	if !strings.Contains(args, oberthRepoName+"/oberth") || !strings.Contains(args, "--version 0.13.24") {
 		t.Errorf("published chart lookup changed: %s", args)
 	}
 }
@@ -63,5 +63,19 @@ func TestTLSBootstrapUsesTheGivenImageWithoutConsultingAnyChart(t *testing.T) {
 	}
 	if image != pinned {
 		t.Errorf("resolved %q, want the image that was given, %q", image, pinned)
+	}
+}
+
+func TestHelmChartVersionDropsTagPrefix(t *testing.T) {
+	t.Parallel()
+	for raw, want := range map[string]string{
+		"v0.17.26": "0.17.26",
+		"0.17.26":  "0.17.26",
+		"":         "",
+		"latest":   "latest",
+	} {
+		if got := helmChartVersion(raw); got != want {
+			t.Errorf("helmChartVersion(%q) = %q, want %q", raw, got, want)
+		}
 	}
 }

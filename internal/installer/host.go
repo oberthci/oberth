@@ -803,7 +803,7 @@ func oberthChartValuesArgs(cfg Config) []string {
 	}
 	args := []string{"show", "values", oberthRepoName + "/oberth"}
 	if cfg.ChartVersion != "" {
-		args = append(args, "--version", cfg.ChartVersion)
+		args = append(args, "--version", helmChartVersion(cfg.ChartVersion))
 	}
 	return args
 }

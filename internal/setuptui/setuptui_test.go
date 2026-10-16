@@ -1216,7 +1216,7 @@ func TestForgeAcceptsGeneratedAndExistingWorkKeys(t *testing.T) {
 	if cmd == nil || state.Config.UpstreamPrivateKeyPath != p.keyPath {
 		t.Fatalf("existing work key was not selected: %s", p.errMsg)
 	}
-	p.authCursor = 1
+	p.authCursor = 0 // generate
 	_, cmd = p.update(enterKey(), state)
 	if cmd == nil || state.Config.UpstreamPrivateKeyPath != "" {
 		t.Fatal("generated key must clear the prior import path")
@@ -1272,7 +1272,7 @@ func TestForgePageViewHasLabelledSections(t *testing.T) {
 	for _, want := range []string{
 		"Forge", "Organization", "Authentication",
 		"❯ codeberg", "oberthci",
-		"(•) use existing work SSH key", "( ) generate new upstream SSH key",
+		"(•) generate new upstream SSH key", "( ) use existing work SSH key",
 	} {
 		if !strings.Contains(view, want) {
 			t.Errorf("forge page missing %q:\n%s", want, view)
@@ -2220,5 +2220,40 @@ func TestKindCreationHiddenWithoutKindTools(t *testing.T) {
 	}
 	if len(cluster.contexts) != 1 || cluster.contexts[0].name != kubeconfigEntry {
 		t.Fatalf("cluster page must still offer a kubeconfig path: %+v", cluster.contexts)
+	}
+}
+
+// The forge page defaults to generating a dedicated upstream key and never
+// prefills the operator's uplink (personal) key as the upstream identity.
+func TestForgeDefaultsToGeneratedUpstreamKey(t *testing.T) {
+	p := newForgePage()
+	state := &WizardState{SSHKeyPath: "/home/op/.ssh/id_ed25519.pub"}
+	p.init(state)
+	if forgeAuthOptions[p.authCursor].value != "deploy-key" {
+		t.Fatalf("default auth = %q, want deploy-key", forgeAuthOptions[p.authCursor].value)
+	}
+	if p.keyPath != "" {
+		t.Fatalf("the uplink key must not be prefilled as the upstream key, got %q", p.keyPath)
+	}
+}
+
+// Rows follow the installer's order, so a failure before any row completes
+// blames the first unfinished one: the upstream key import, not the uplink.
+func TestApplyStepsFollowInstallerOrder(t *testing.T) {
+	p := newApplyPage()
+	upstream, uplink := -1, -1
+	for i, step := range p.steps {
+		switch {
+		case strings.HasPrefix(step.name, "upstream discovery"):
+			upstream = i
+		case strings.HasPrefix(step.name, "mint uplink"):
+			uplink = i
+		}
+	}
+	if upstream < 0 || uplink < 0 || upstream > uplink {
+		t.Fatalf("upstream row %d must precede uplink row %d", upstream, uplink)
+	}
+	if stepNameToIndex["upstream discovery"] != upstream || stepNameToIndex["mint uplink"] != uplink {
+		t.Fatal("stepNameToIndex disagrees with the row order")
 	}
 }

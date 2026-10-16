@@ -1648,7 +1648,7 @@ func OberthHelmArgs(cfg Config, openbao OpenBaoResult, rekor RekorResult) []stri
 	}
 	// --version selects a published chart; a local path already IS the version.
 	if cfg.ChartVersion != "" && strings.TrimSpace(cfg.ChartPath) == "" && cfg.watchChart == "" {
-		args = append(args, "--version", cfg.ChartVersion)
+		args = append(args, "--version", helmChartVersion(cfg.ChartVersion))
 	}
 	// Idempotent re-runs and upgrades must not reset values a user set on a
 	// previous install (OBERTH-RELEASE-024) — in particular an existing
@@ -1715,6 +1715,17 @@ func canonicalChartVersion(raw string) string {
 		return ""
 	}
 	return v
+}
+
+// helmChartVersion is the exact version Helm is asked for. Published charts
+// are versioned without the tag's "v"; asking for "v0.17.26" made Helm fall
+// back to the "closest available version", which silently picks a different
+// chart when the exact one is missing. Non-semver values pass through.
+func helmChartVersion(raw string) string {
+	if canonicalChartVersion(raw) == "" {
+		return raw
+	}
+	return strings.TrimPrefix(raw, "v")
 }
 
 // displayVersion renders a chart version for user-facing messages ("0.10.58"

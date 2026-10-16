@@ -48,8 +48,10 @@ var forgeAuthOptions = []struct {
 	value, label, description string
 	comingSoon                bool
 }{
-	{value: "existing", label: "use existing work SSH key", description: "import into OpenBao; use your account's organization access"},
+	// Generating comes first and is the default: a dedicated key, never the
+	// operator's personal workstation key by accident.
 	{value: "deploy-key", label: "generate new upstream SSH key", description: "store in OpenBao; register the public key with your forge account"},
+	{value: "existing", label: "use existing work SSH key", description: "import into OpenBao; needs a dedicated key without a passphrase"},
 }
 
 // forgeComingSoon lists forge types displayed but not yet functional (no URL
@@ -81,15 +83,15 @@ func (p *forgePage) init(state *WizardState) tea.Cmd {
 		p.org = state.ForgeOrg
 	}
 	p.authCursor = 0
-	p.keyPath = state.Config.UpstreamPrivateKeyPath
-	if p.keyPath == "" {
-		p.keyPath = strings.TrimSuffix(state.SSHKeyPath, ".pub")
-	}
 	for i, opt := range forgeAuthOptions {
 		if opt.value == state.ForgeAuth {
 			p.authCursor = i
 		}
 	}
+	// No prefill: offering the uplink key (the operator's personal
+	// workstation key) made pressing Enter store it as the organization-wide
+	// upstream identity.
+	p.keyPath = state.Config.UpstreamPrivateKeyPath
 	p.focusField = forgeFocusForge
 	p.errMsg = ""
 	p.discoveryResult = nil

@@ -335,7 +335,7 @@ func runPlain(ctx context.Context, opts Options, input io.Reader, output io.Writ
 		return err
 	}
 	state.ForgeOrg = org
-	auth, err := ask("Upstream SSH identity (existing/generate)", "existing", func(v string) error {
+	auth, err := ask("Upstream SSH identity (existing/generate)", "generate", func(v string) error {
 		if v != "existing" && v != "generate" {
 			return errors.New("choose existing or generate")
 		}
@@ -345,7 +345,10 @@ func runPlain(ctx context.Context, opts Options, input io.Reader, output io.Writ
 		return err
 	}
 	if auth == "existing" {
-		key, err := ask("Existing work private-key path (imported into OpenBao)", strings.TrimSuffix(state.SSHKeyPath, ".pub"), func(v string) error {
+		key, err := ask("Existing work private-key path (imported into OpenBao)", "", func(v string) error {
+			if strings.TrimSpace(v) == "" {
+				return errors.New("enter the path of a dedicated work key without a passphrase")
+			}
 			path, err := expandSetupPath(v)
 			if err != nil {
 				return err

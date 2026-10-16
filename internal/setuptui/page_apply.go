@@ -72,8 +72,12 @@ func newApplyPage() *applyPage {
 			{name: "secretstore verify — server leg", status: "pending"},
 			{name: "secretstore probe — release leg", status: "pending"},
 			{name: "tls + ssh host keys · fingerprints", status: "pending"},
-			{name: "mint uplink — ceremony pauses here", status: "pending"},
+			// Same order the installer runs them: on failure the first row
+			// that is not done is marked failed, so a misordered list blames
+			// the wrong step (an upstream-key import failure showed up as
+			// "mint uplink").
 			{name: "upstream discovery + deploy keys", status: "pending"},
+			{name: "mint uplink — ceremony pauses here", status: "pending"},
 			{name: "audit chain genesis · verify · readyz", status: "pending"},
 		},
 	}
@@ -258,8 +262,8 @@ var stepNameToIndex = map[string]int{
 	"secretstore server":  5,
 	"secretstore release": 6,
 	"tls fingerprints":    7,
-	"mint uplink":         8,
-	"upstream discovery":  9,
+	"upstream discovery":  8,
+	"mint uplink":         9,
 	"audit genesis":       10,
 }
 

@@ -204,9 +204,13 @@ func runOnboarding(ctx context.Context, cfg Config, deps Deps, tw *tableWriter, 
 	}
 
 	// --- Register upstream (quiet, with result as table row) ---
-	registered, deployPubKey, err := registerUpstreamQuiet(ctx, cfg, deps, name, baseURL)
+	registration, err := registerUpstream(ctx, cfg, deps, name, baseURL)
 	if err != nil {
 		return err
+	}
+	registered, deployPubKey := registration.configured, registration.pubKey
+	if !keyProvided {
+		appendDeployKeyRow(tw, registration)
 	}
 	tw.AppendRow("Upstream", hostnameFromURL(baseURL), "✓ connected", false)
 	if deps.StepProgressSink != nil {
@@ -443,21 +447,24 @@ func promptDeployKey(ctx context.Context, cfg Config, deps Deps, tw *tableWriter
 		return true, nil
 	}
 	// Non-interactive setup generates only when that option was selected.
+	// The row is added after registration (appendDeployKeyRow), which is
+	// when the server says whether it generated a key or reused one.
 	if !isInteractive(deps) {
-		tw.AppendRow("Deploy key", "generated", "✓ stored", false)
 		return false, nil
 	}
 	color := isColor(deps)
 	for attempt := 0; ; attempt++ {
-		idx, err := selectOption(ctx, deps, color, "Deploy key", []string{"Generate", "Provide"}, 1)
+		// Generate is the default: providing a key invites the operator's
+		// personal workstation key, which then becomes the organization-wide
+		// upstream identity.
+		idx, err := selectOption(ctx, deps, color, "Deploy key", []string{"Generate", "Provide"}, 0)
 		if err != nil {
 			return false, fmt.Errorf("read deploy-key choice: %w", err)
 		}
 		switch idx {
 		case 0: // Generate
-			// Erase the prompt, append the result to the table.
+			// Erase the prompt; the row follows registration.
 			erasePromptLines(deps.Output, color, 1)
-			tw.AppendRow("Deploy key", "generated", "✓ stored", false)
 			return false, nil
 		case 1: // Provide
 			erasePromptLines(deps.Output, color, 1)
@@ -661,6 +668,39 @@ func applyProvidedDeployKey(ctx context.Context, cfg Config, deps Deps, privateK
 // here would reintroduce the fail-open classification issue #89 fixed in the
 // pod-side wait loop.
 func registerUpstreamQuiet(ctx context.Context, cfg Config, deps Deps, name, baseURL string) (bool, string, error) {
+	registration, err := registerUpstream(ctx, cfg, deps, name, baseURL)
+	return registration.configured, registration.pubKey, err
+}
+
+// upstreamRegistration is what one `oberth upstream add` run reported.
+type upstreamRegistration struct {
+	configured bool
+	pubKey     string
+	// reusedKey is set when the server reported a key it already held in
+	// OpenBao ("Persisted upstream deploy public key") instead of generating
+	// one, so nothing new needs registering at the forge.
+	reusedKey bool
+}
+
+// persistedDeployKeyMarker is how the pod-side bootstrap introduces a key it
+// loaded rather than generated (app.UpstreamSSHBootstrap.printPersistedIdentity).
+const persistedDeployKeyMarker = "Persisted upstream deploy public key"
+
+// appendDeployKeyRow reports the upstream identity the server used: a reused
+// key with its fingerprint, or a freshly generated one to register.
+func appendDeployKeyRow(tw *tableWriter, registration upstreamRegistration) {
+	if registration.reusedKey {
+		detail := "existing key reused"
+		if key, _, _, _, err := ssh.ParseAuthorizedKey([]byte(registration.pubKey)); err == nil {
+			detail = "reused " + ssh.FingerprintSHA256(key)
+		}
+		tw.AppendRow("Deploy key", detail, "✓ in OpenBao", false)
+		return
+	}
+	tw.AppendRow("Deploy key", "generated", "✓ stored", false)
+}
+
+func registerUpstream(ctx context.Context, cfg Config, deps Deps, name, baseURL string) (upstreamRegistration, error) {
 	run := deps.RunCommand
 	if run == nil {
 		run = DefaultRunCommand
@@ -681,7 +721,7 @@ func registerUpstreamQuiet(ctx context.Context, cfg Config, deps Deps, name, bas
 		if attempt > 0 {
 			select {
 			case <-ctx.Done():
-				return false, pubKey, ctx.Err()
+				return upstreamRegistration{pubKey: pubKey}, ctx.Err()
 			case <-time.After(pollInterval(deps)):
 			}
 		}
@@ -693,7 +733,7 @@ func registerUpstreamQuiet(ctx context.Context, cfg Config, deps Deps, name, bas
 		if pubKey != "" && isExpectedRegistrationPending(string(out)+" "+err.Error()) {
 			// The bootstrap advertised the key and the forge rejected the
 			// authentication — the normal "key not registered yet" state.
-			return false, pubKey, nil
+			return upstreamRegistration{pubKey: pubKey, reusedKey: strings.Contains(string(out), persistedDeployKeyMarker)}, nil
 		}
 		// Server responded with a key but a non-auth error (knownhosts
 		// mismatch, handshake EOF) — a real failure, not a startup race.
@@ -703,10 +743,14 @@ func registerUpstreamQuiet(ctx context.Context, cfg Config, deps Deps, name, bas
 		// No key in the output: the admin socket likely is not ready yet.
 	}
 	if err != nil {
-		return false, pubKey, fmt.Errorf("upstream add: %w%s", err, commandOutputSuffix(out))
+		return upstreamRegistration{pubKey: pubKey}, fmt.Errorf("upstream add: %w%s", err, commandOutputSuffix(out))
 	}
 	configured, _ := upstreamConfigured(ctx, cfg, deps)
-	return configured, pubKey, nil
+	return upstreamRegistration{
+		configured: configured,
+		pubKey:     pubKey,
+		reusedKey:  strings.Contains(string(out), persistedDeployKeyMarker),
+	}, nil
 }
 
 // isExpectedRegistrationPending reports whether captured `upstream add`

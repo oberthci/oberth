@@ -111,7 +111,7 @@ func TestExecuteDarwinDryRunPrintsKindAndHelmCommands(t *testing.T) {
 		"OBERTH_KIND_CONFIG",
 		"helm repo add --force-update oberth-charts https://charts.oberth.ci",
 		"helm repo update oberth-charts",
-		"helm show values oberth-charts/oberth --version v0.10.55",
+		"helm show values oberth-charts/oberth --version 0.10.55",
 		`docker manifest inspect "$OBERTH_IMAGE_REF"`,
 		`docker pull "$OBERTH_IMAGE_CHILD_REF"`,
 		`docker tag "$OBERTH_IMAGE_CHILD_REF" "$OBERTH_IMAGE_LOCAL_TAG"`,
@@ -127,7 +127,7 @@ func TestExecuteDarwinDryRunPrintsKindAndHelmCommands(t *testing.T) {
 	}{
 		{command: "cat <<'OBERTH_KIND_CONFIG' | kind create cluster --name oberth --config=-", want: 1},
 		{command: "helm repo add --force-update oberth-charts https://charts.oberth.ci", want: 1},
-		{command: "helm show values oberth-charts/oberth --version v0.10.55", want: 2},
+		{command: "helm show values oberth-charts/oberth --version 0.10.55", want: 2},
 		{command: `docker manifest inspect "$OBERTH_IMAGE_REF"`, want: 1},
 		{command: `docker pull "$OBERTH_IMAGE_CHILD_REF"`, want: 1},
 		{command: `docker tag "$OBERTH_IMAGE_CHILD_REF" "$OBERTH_IMAGE_LOCAL_TAG"`, want: 1},
@@ -374,7 +374,7 @@ func TestPrepareKindImagesResolvesDigestRefsAndAliasesNodes(t *testing.T) {
 		Output: io.Discard,
 		RunHelm: func(_ context.Context, args []string) ([]byte, error) {
 			events = append(events, "helm "+strings.Join(args, " "))
-			if strings.Join(args, " ") == "show values oberth-charts/oberth --version v0.10.55" {
+			if strings.Join(args, " ") == "show values oberth-charts/oberth --version 0.10.55" {
 				return []byte("image:\n  ref: " + serverImage + "\n"), nil
 			}
 			return nil, nil
@@ -406,7 +406,7 @@ func TestPrepareKindImagesResolvesDigestRefsAndAliasesNodes(t *testing.T) {
 	want := []string{
 		"helm repo add --force-update oberth-charts https://charts.oberth.ci",
 		"helm repo update oberth-charts",
-		"helm show values oberth-charts/oberth --version v0.10.55",
+		"helm show values oberth-charts/oberth --version 0.10.55",
 		"docker image inspect " + serverLocal,
 		"docker version --format {{.Server.Arch}}",
 		"docker manifest inspect " + serverImage,
@@ -430,7 +430,7 @@ func TestPrepareKindImagesTagRefsKeepDirectLoad(t *testing.T) {
 		Output: io.Discard,
 		RunHelm: func(_ context.Context, args []string) ([]byte, error) {
 			events = append(events, "helm "+strings.Join(args, " "))
-			if strings.Join(args, " ") == "show values oberth-charts/oberth --version v0.10.55" {
+			if strings.Join(args, " ") == "show values oberth-charts/oberth --version 0.10.55" {
 				return []byte("image:\n  ref: " + serverImage + "\n"), nil
 			}
 			return nil, nil
@@ -451,7 +451,7 @@ func TestPrepareKindImagesTagRefsKeepDirectLoad(t *testing.T) {
 	want := []string{
 		"helm repo add --force-update oberth-charts https://charts.oberth.ci",
 		"helm repo update oberth-charts",
-		"helm show values oberth-charts/oberth --version v0.10.55",
+		"helm show values oberth-charts/oberth --version 0.10.55",
 		"docker image inspect " + serverImage,
 		"docker pull " + serverImage,
 		"kind load docker-image --name oberth " + serverImage,
@@ -1376,7 +1376,7 @@ func TestOberthHelmArgs(t *testing.T) {
 				"--set", "argo.namespace=oberth-argo",
 			}
 			want = append(want, test.settings...)
-			want = append(want, "--version", "v0.10.54", "--reuse-values")
+			want = append(want, "--version", "0.10.54", "--reuse-values")
 			assertSliceEqual(t, args, want)
 		})
 	}
@@ -1525,7 +1525,7 @@ func TestOberthHelmArgsWithoutSecretStore(t *testing.T) {
 		"--set", "promotion.grantMaxLifetime=24h",
 		"--set-string", "watchTunnel.image=" + watchTunnelImageDefault,
 		"--set-string", "watchTunnel.openbaoImage=" + watchTunnelOpenbaoImageDefault,
-		"--version", "v0.10.54",
+		"--version", "0.10.54",
 		"--reuse-values",
 	}
 	assertSliceEqual(t, args, want)
@@ -1559,7 +1559,7 @@ func TestOberthHelmArgsWithRekor(t *testing.T) {
 		"--set", "auditAnchor.rekorInsecureHTTP=true",
 		"--set-string", "auditAnchor.rekorPublicKey=" + publicKeyPEM,
 		"--set-string", "auditAnchor.acceptWitnessGenesis=",
-		"--version", "v0.10.54",
+		"--version", "0.10.54",
 		"--reuse-values",
 	}
 	assertSliceEqual(t, args, want)
@@ -2521,7 +2521,7 @@ func TestInstallOberthReconcilesVerifiedSecretStoreAtInstalledVersion(t *testing
 			t.Fatalf("secret store reconciliation missing %q: %q", want, joined)
 		}
 	}
-	if strings.Contains(joined, "--version v0.10.58") || strings.Contains(joined, "secretstore.address=http://") {
+	if strings.Contains(joined, "--version 0.10.58") || strings.Contains(joined, "secretstore.address=http://") {
 		t.Fatalf("secret store reconciliation downgraded chart or transport: %q", joined)
 	}
 }
@@ -2628,7 +2628,7 @@ func TestInstallOberthRekorUpgradeAllowsUnknownInstalledVersion(t *testing.T) {
 		"--set", "auditAnchor.rekorInsecureHTTP=true",
 		"--set-string", "auditAnchor.rekorPublicKey=" + publicKeyPEM,
 		"--set-string", "auditAnchor.acceptWitnessGenesis=",
-		"--version", "v0.10.58",
+		"--version", "0.10.58",
 		"--reuse-values",
 	}
 	assertSliceEqual(t, upgradeArgs, want)
@@ -2702,7 +2702,7 @@ func TestInstallOberthUpgradesWhenNewerChartTargeted(t *testing.T) {
 		t.Fatalf("expected a helm upgrade call, got %v", helmCalls)
 	}
 	joined := strings.Join(upgrade, " ")
-	if !strings.Contains(joined, "--version v0.10.58") || !strings.Contains(joined, "--reuse-values") {
+	if !strings.Contains(joined, "--version 0.10.58") || !strings.Contains(joined, "--reuse-values") {
 		t.Fatalf("upgrade args missing version pin or --reuse-values: %q", joined)
 	}
 	if !strings.Contains(buf.String(), "Oberth v0.10.57 installed, v0.10.58 available. Upgrading...") {
@@ -5132,5 +5132,49 @@ func TestExecuteRefusesWithoutHostTools(t *testing.T) {
 		if ranCommand {
 			t.Fatalf("missing %s: a host command ran before the tool check", missingTool)
 		}
+	}
+}
+
+// A key the server already held in OpenBao is reported as reused, with its
+// fingerprint, not as "generated" (which tells the operator to register a key
+// that is in fact already registered).
+func TestRegisterUpstreamReportsReusedKey(t *testing.T) {
+	t.Parallel()
+	pub, _, err := ed25519.GenerateKey(cryptorand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sshPub, err := ssh.NewPublicKey(pub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyLine := strings.TrimSpace(string(ssh.MarshalAuthorizedKey(sshPub))) + " oberth"
+	for _, tc := range []struct {
+		name, out  string
+		wantReused bool
+		wantDetail string
+	}{
+		{"persisted", "\n" + persistedDeployKeyMarker + " (SHA256:x):\n\n" + keyLine + "\nEnsure this public key is registered\n", true, "reused " + ssh.FingerprintSHA256(sshPub)},
+		{"generated", "\nAdd this deploy key to your codeberg.org account with WRITE access:\n\n" + keyLine + "\n", false, "generated"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			host := &fakeOberthHost{t: t, addResults: []fakeAddResult{{out: tc.out}}}
+			var buf bytes.Buffer
+			deps := onboardingDeps(t, host, &buf, strings.NewReader(""), true)
+			registration, err := registerUpstream(context.Background(), Config{}, deps, "codeberg", "ssh://git@codeberg.org/acme")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if registration.reusedKey != tc.wantReused {
+				t.Fatalf("reusedKey = %v, want %v", registration.reusedKey, tc.wantReused)
+			}
+			var table bytes.Buffer
+			tw := newTableWriter(&table, false)
+			appendDeployKeyRow(tw, registration)
+			if !strings.Contains(table.String(), tc.wantDetail) {
+				t.Fatalf("row %q does not mention %q", table.String(), tc.wantDetail)
+			}
+		})
 	}
 }

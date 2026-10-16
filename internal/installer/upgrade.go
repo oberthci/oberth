@@ -441,7 +441,7 @@ func helmRevisionLabel(raw json.RawMessage) string {
 func resolveChartImageRef(ctx context.Context, deps Deps, chart, targetVersion string, isLocalChart bool) (string, []byte, error) {
 	args := []string{"show", "values", chart}
 	if !isLocalChart && targetVersion != "" {
-		args = append(args, "--version", targetVersion)
+		args = append(args, "--version", helmChartVersion(targetVersion))
 	}
 	valuesYAML, err := deps.RunHelm(ctx, args)
 	if err != nil {
@@ -511,7 +511,7 @@ func upgradeHelmArgs(cfg UpgradeConfig, chart, imageRef string) []string {
 	}
 	// Only pin --version for published charts; a local path IS the version.
 	if cfg.ChartOverride == "" && cfg.BinaryVersion != "" {
-		args = append(args, "--version", cfg.BinaryVersion)
+		args = append(args, "--version", helmChartVersion(cfg.BinaryVersion))
 	}
 	// Pass the user's timeout to helm so it respects the same deadline.
 	if cfg.Timeout > 0 {
