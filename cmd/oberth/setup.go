@@ -26,6 +26,8 @@ func runSetup(ctx context.Context, arguments []string, input io.Reader, output i
 		"no TUI, sequential prompts (auto-selected for non-TTY, TERM=dumb, NO_COLOR)")
 	flags.BoolVar(&opts.Accessible, "accessible", false,
 		"screen reader mode (sequential prompts, no cursor addressing)")
+	flags.BoolVar(&opts.Fresh, "fresh", false,
+		"ignore the answers saved by a previous run (~/.config/oberth/setup.json) and start over")
 
 	if err := flags.Parse(arguments); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
