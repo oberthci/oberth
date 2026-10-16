@@ -135,12 +135,12 @@ by asking Claude Code to call any Oberth tool, or test manually:
 
 ```bash
 curl --fail-with-body --silent \
-  --cacert oberth-tls.crt \
-  --resolve "oberth:30443:<node-address>" \
+  --cacert ~/.config/oberth/ca.crt \
   -H "Authorization: Bearer oberth_xxxxxxxxxxxxxxxx" \
   -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' \
-  "https://oberth:30443/mcp"
+  "https://localhost:30443/mcp"
 ```
 
 A successful response lists the server's tools; `oberth version` and this
