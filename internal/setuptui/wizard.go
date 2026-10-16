@@ -128,10 +128,14 @@ type WizardState struct {
 // program with the wizard model and runs it. The interaction model is a
 // startup decision: --plain / --accessible (or a non-interactive terminal)
 // select the sequential flow, and nothing inside the TUI can switch to it.
+// checkHostTools refuses to start without helm and kubectl; tests replace it
+// so they do not depend on the host's tools.
+var checkHostTools = installer.CheckHostTools
+
 func Run(ctx context.Context, opts Options, input io.Reader, output io.Writer) error {
 	// Refuse before the first page: every apply path needs helm and kubectl,
 	// and finding out at the Helm step wastes the whole walkthrough.
-	if err := installer.CheckHostTools(runtime.GOOS, nil); err != nil {
+	if err := checkHostTools(runtime.GOOS, nil); err != nil {
 		return err
 	}
 	if opts.Plain || opts.Accessible {

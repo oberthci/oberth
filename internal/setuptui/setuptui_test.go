@@ -2305,3 +2305,15 @@ func TestDeployKeyPendingOnlyForKeyPendingPath(t *testing.T) {
 		t.Fatal("a failed uplink is not a pending key")
 	}
 }
+
+// Setup refuses before the first page when helm or kubectl is missing (#030).
+func TestRunRefusesWithoutHostTools(t *testing.T) {
+	previous := checkHostTools
+	checkHostTools = func(string, func(string) (string, error)) error { return errors.New("kubectl not found in PATH") }
+	t.Cleanup(func() { checkHostTools = previous })
+	var output bytes.Buffer
+	err := Run(context.Background(), Options{Plain: true}, strings.NewReader(""), &output)
+	if err == nil || !strings.Contains(err.Error(), "kubectl not found") || output.Len() != 0 {
+		t.Fatalf("err=%v output=%q", err, output.String())
+	}
+}
