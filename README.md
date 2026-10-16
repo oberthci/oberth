@@ -10,7 +10,7 @@ issues an agent can lock and fix. Every action is attributed to a durable
 uplink identity and recorded in a tamper-evident audit chain — optionally
 anchored outside the box.
 
-Current release: **v0.17.5** · Helm chart at `https://charts.oberth.ci` ·
+Releases: [GitHub](https://github.com/oberthci/oberth/releases) · Helm chart at `https://charts.oberth.ci` ·
 Website: [oberth.ci](https://oberth.ci)
 
 ## What it does
@@ -97,8 +97,10 @@ helm repo update
 helm show values oberth/oberth
 ```
 
-The chart has zero prerequisites: the SSH host key and TLS certificate are
-generated once into Secrets and reused across upgrades; an init container
+The SSH host key is generated once into OpenBao and reused across upgrades.
+With a production secret store the HTTPS certificate is a 30-day leaf the
+server requests from a name-constrained CA in OpenBao's PKI engine and renews
+in place; clients pin the CA. An init container
 prepares the cache directories; the pod stays `0/1 Running` — live, not
 ready — until the first upstream is registered. `upstream add` offers to mint
 a deploy key and prints it once for registration at your forge. `uplink add`

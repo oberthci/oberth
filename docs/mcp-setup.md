@@ -95,32 +95,38 @@ proxy (an ingress, a Cloudflare Tunnel you operate), point the URL at that
 hostname instead; a publicly trusted certificate there removes the
 client-side trust step below.
 
-Direct access uses a self-signed certificate, and the chart issues it for
-in-cluster names only. Reaching the server on any other address is a hostname
-mismatch, which no amount of trust configuration repairs, so name the address
-first: `oberth install --tls-extra-dns-name <name>` (a macOS kind install adds
-`localhost` and `127.0.0.1` by itself). Only then is trusting the certificate
-the remaining problem.
+Direct access uses Oberth's own CA. With a production secret store
+(`oberth install --install-secretstore`) the server serves a 30-day leaf
+issued by a CA that lives in OpenBao's PKI engine and renews it in place;
+clients pin the CA, which stays the same across renewals. The CA is
+name-constrained to the server's DNS names, and the leaf covers the in-cluster
+names, `localhost`, `127.0.0.1`, the address the installer advertises and every
+`--tls-extra-dns-name` / `--tls-extra-ip`. Reaching the server on any other
+address is a hostname mismatch that no trust configuration repairs, so name
+the address first.
 
-Export it and add it to the system trust store:
+Fetch the CA (an interactive install writes it to `~/.config/oberth/ca.crt`
+and later installs keep that file current):
 
 ```bash
-kubectl get secret -n oberth oberth-tls \
-  -o jsonpath='{.data.tls\.crt}' | base64 --decode > oberth-tls.crt
-
-# Verify fingerprint matches uplink add output
-openssl x509 -in oberth-tls.crt -outform DER | \
-  openssl dgst -sha256 -binary | openssl base64 -A | \
-  sed 's/^/SHA256:/' | tr -d '='
-
-# Linux (Debian/Ubuntu)
-sudo cp oberth-tls.crt /usr/local/share/ca-certificates/oberth.crt
-sudo update-ca-certificates
-
-# macOS
-sudo security add-trusted-cert -d -r trustRoot \
-  -k /Library/Keychains/System.keychain oberth-tls.crt
+kubectl exec -n oberth deploy/oberth -c oberth -- sh -c \
+  'cat /run/oberth-identities/server/ca.crt 2>/dev/null || cat /run/oberth-identities/server/tls.crt' \
+  > ~/.config/oberth/ca.crt
+openssl x509 -in ~/.config/oberth/ca.crt -noout -fingerprint -sha256
 ```
+
+Claude Code reads extra trust anchors from `NODE_EXTRA_CA_CERTS`. Set it in
+`~/.claude/settings.json` so every launch, including terminal multiplexers,
+sees it:
+
+```json
+{ "env": { "NODE_EXTRA_CA_CERTS": "/home/you/.config/oberth/ca.crt" } }
+```
+
+`claude mcp list` should then show the server as connected. For other clients,
+add the CA to the system trust store instead (`update-ca-certificates` on
+Debian/Ubuntu, `security add-trusted-cert` on macOS); the name constraints
+keep it from vouching for any other host.
 
 ## 3. Verify the connection
 
