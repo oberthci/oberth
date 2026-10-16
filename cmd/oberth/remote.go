@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -195,9 +196,18 @@ func runRuns(ctx context.Context, arguments []string, output io.Writer) error {
 			return err
 		}
 		runs = append(runs, page...)
+		previous := next
 		next = 0
 		if len(page) == *limit {
 			next = page[len(page)-1].QueueSequence
+		}
+		// A server older than paging ignores ?before and returns the newest
+		// page again: a cursor that does not move backwards ends the walk
+		// instead of looping forever.
+		if previous > 0 && next >= previous {
+			runs = runs[:len(runs)-len(page)]
+			next = 0
+			break
 		}
 		if !*all || next == 0 {
 			break
@@ -241,13 +251,22 @@ func resolveRemoteRunID(ctx context.Context, api *client.Client, given string) (
 		if err := api.Get(ctx, "/api/runs", query, &runs); err != nil {
 			return "", err
 		}
+		cursor := int64(0)
+		if len(runs) > 0 {
+			cursor = runs[len(runs)-1].QueueSequence
+		}
+		// An older server ignores ?before and repeats the newest page; stop
+		// before counting the same runs twice (each would then "match" twice).
+		if previous, _ := strconv.ParseInt(query["before"], 10, 64); previous > 0 && cursor >= previous {
+			break
+		}
 		for _, run := range runs {
 			known = append(known, run.ID)
 		}
-		if len(runs) < 100 || runs[len(runs)-1].QueueSequence <= 0 {
+		if len(runs) < 100 || cursor <= 0 {
 			break
 		}
-		query["before"] = fmt.Sprint(runs[len(runs)-1].QueueSequence)
+		query["before"] = fmt.Sprint(cursor)
 	}
 	return resolveRunIDPrefix(given, known)
 }

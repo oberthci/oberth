@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -458,5 +459,43 @@ func TestRunsAllFollowsPages(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "more: oberth runs --before 2") {
 		t.Fatalf("a full page must name the next cursor:\n%s", out.String())
+	}
+}
+
+// Against a server older than paging, which ignores ?before and repeats the
+// newest page, --all and short-ID resolution must stop instead of looping
+// or counting each run once per repeated page (review finding).
+func TestRunPagingStopsWhenServerIgnoresCursor(t *testing.T) {
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path != "/api/runs" {
+			_, _ = w.Write([]byte(`{"run_id":"abcdef1234567890abcdef1234567890","burn":"ci","step":"test","output":"ok\n","total_lines":1}`))
+			return
+		}
+		var page []string
+		for i := 0; i < 100; i++ {
+			page = append(page, fmt.Sprintf(`{"ID":"%032x","QueueSequence":%d,"Status":"passed"}`, 1000-i, 1000-i))
+		}
+		page[5] = `{"ID":"abcdef1234567890abcdef1234567890","QueueSequence":995,"Status":"passed"}`
+		_, _ = w.Write([]byte("[" + strings.Join(page, ",") + "]"))
+	}))
+	defer server.Close()
+	configure(t, server)
+
+	var out bytes.Buffer
+	if err := runRuns(context.Background(), []string{"--limit", "100", "--all"}, &out); err != nil {
+		t.Fatal(err)
+	}
+	if requests > 3 || strings.Count(out.String(), "abcdef1234567890abcdef1234567890") != 1 {
+		t.Fatalf("--all against an old server: %d requests", requests)
+	}
+	requests = 0
+	if err := runRemoteLog(context.Background(), []string{"--burn", "ci", "--step", "test", "abcdef12"}, &out); err != nil {
+		t.Fatalf("short ID must resolve once against an old server: %v", err)
+	}
+	if requests > 4 {
+		t.Fatalf("short-ID resolution made %d requests against an old server", requests)
 	}
 }
