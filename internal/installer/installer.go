@@ -249,6 +249,11 @@ type Config struct {
 	// forwarded to auditAnchor.acceptWitnessGenesis when --install-rekor retrofits
 	// an existing deployment that already has audit history.
 	AcceptWitnessGenesis string
+	// ClientAccess decides the client-access offer in advance (both, cli,
+	// mcp, none; --client-access). The setup wizard answers it on its own
+	// screen and runs the installer without a terminal, where the offer could
+	// otherwise only be skipped. Empty keeps the interactive prompt.
+	ClientAccess string
 }
 
 // wantsSecretStore reports whether either secret-store mode was requested.
@@ -507,6 +512,9 @@ type RekorResult struct {
 
 // Validate checks Config for invalid flag combinations and applies defaults.
 func (cfg *Config) Validate() error {
+	if err := ValidClientAccess(cfg.ClientAccess); err != nil {
+		return fmt.Errorf("--client-access: %w", err)
+	}
 	if cfg.ForgeURL == "" && (cfg.ForgeType != "" || cfg.ForgeOrg != "") {
 		hosts := map[string]string{"github": "github.com", "codeberg": "codeberg.org", "gitlab": "gitlab.com"}
 		host, ok := hosts[cfg.ForgeType]
