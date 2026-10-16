@@ -748,11 +748,18 @@ func ConfigureSecretStore(ctx context.Context, cfg Config, deps Deps, store open
 			return result, err
 		}
 		result.Items = append(result.Items, configItem{Name: "transit key", Status: "✓"})
+
+		caPEM, replaced, err := ensureServerPKI(ctx, cfg, store, rootToken, mounts)
+		if err != nil {
+			return result, fmt.Errorf("server PKI: %w", err)
+		}
+		result.ServerCACertPEM, result.ServerCAReplaced = caPEM, replaced
+		result.Items = append(result.Items, configItem{Name: "server CA · leaf role", Status: "✓"})
 	}
 
 	wantPolicy := OberthPolicy(defaultKVPrefix, ns)
 	if cfg.InstallSecretStore {
-		wantPolicy = OberthProductionPolicy(defaultKVPrefix, defaultTransitMount, defaultTransitKey, ns)
+		wantPolicy = OberthProductionPolicy(defaultKVPrefix, defaultTransitMount, defaultTransitKey, ns) + serverPKIPolicy()
 	}
 	havePolicy, policyExists, err := store.policyRead(ctx, rootToken, defaultPolicy)
 	if err != nil {

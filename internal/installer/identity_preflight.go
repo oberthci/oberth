@@ -52,6 +52,11 @@ type liveHelmValuesSubset struct {
 		Enabled      bool   `json:"enabled"`
 		OriginCACert string `json:"originCACert"`
 	} `json:"watchTunnel"`
+	TLS struct {
+		PKI struct {
+			Enabled bool `json:"enabled"`
+		} `json:"pki"`
+	} `json:"tls"`
 	Secretstore struct {
 		Address string `json:"address"`
 		CACert  string `json:"caCert"`
@@ -300,6 +305,15 @@ func preflightServerIdentities(ctx context.Context, cfg *Config, deps Deps, dryR
 				}
 			}
 		}
+	}
+
+	// A production secret store gets the server PKI (ensureServerPKI): the
+	// server serves a short-lived leaf from the name-constrained CA, issued
+	// for the current names at startup, and the tunnel pins that CA. The
+	// bundle's self-signed certificate is then unused, so its SAN checks,
+	// re-issue and origin pin below do not apply.
+	if cfg.serverPKI {
+		return nil
 	}
 
 	// -- SAN check: goproxy names required when goProxy is enabled --

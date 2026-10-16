@@ -1,6 +1,7 @@
 package installer
 
 import (
+	"bytes"
 	"context"
 	"crypto/x509"
 	"encoding/json"
@@ -74,10 +75,11 @@ func offerClientAccess(ctx context.Context, cfg Config, deps Deps, tw *tableWrit
 // token exists on this path and none is needed: the files name a command that
 // reads one, they never hold it.
 func offerClientAccessToConfiguredDeployment(ctx context.Context, cfg Config, deps Deps, tw *tableWriter) error {
+	refreshPinnedServerCA(ctx, cfg, deps, tw)
 	if deps.IsTerminal == nil || !deps.IsTerminal() || deps.Input == nil {
 		return nil
 	}
-	root, err := clientConfigRoot()
+	root, err := deps.clientConfigRoot()
 	if err != nil {
 		return nil
 	}
@@ -111,7 +113,7 @@ func runClientAccessOffer(ctx context.Context, cfg Config, deps Deps, tw *tableW
 		return nil
 	}
 
-	root, err := clientConfigRoot()
+	root, err := deps.clientConfigRoot()
 	if err != nil {
 		tw.AppendRow("Client access", "no config directory", "⚠ manual", false)
 		return nil
@@ -230,7 +232,10 @@ func serverCACertificate(ctx context.Context, cfg Config, deps Deps) ([]byte, er
 	if deps.ContextName != "" {
 		args = append(args, "--context", deps.ContextName)
 	}
-	args = append(args, "exec", "-n", ns, "deploy/oberth", "-c", "oberth", "--", "cat", "/run/oberth-identities/server/tls.crt")
+	// The PKI CA (ca.crt) is what clients pin when the server issues its own
+	// short-lived leaf; older servers only have the self-signed tls.crt.
+	args = append(args, "exec", "-n", ns, "deploy/oberth", "-c", "oberth", "--", "sh", "-c",
+		"cat /run/oberth-identities/server/ca.crt 2>/dev/null || cat /run/oberth-identities/server/tls.crt")
 	certificate, err := deps.RunCommand(ctx, nil, "kubectl", args...)
 	if err != nil {
 		return nil, errors.New("could not retrieve server public certificate")
@@ -271,6 +276,13 @@ func tokenCommandForHost() (read string, store string) {
 		return `cat "${XDG_CONFIG_HOME:-$HOME/.config}/oberth/token"`,
 			`(umask 077 && cat > "${XDG_CONFIG_HOME:-$HOME/.config}/oberth/token")`
 	}
+}
+
+func (deps Deps) clientConfigRoot() (string, error) {
+	if deps.ClientConfigRoot != nil {
+		return deps.ClientConfigRoot()
+	}
+	return clientConfigRoot()
 }
 
 // clientConfigRoot honours XDG_CONFIG_HOME and otherwise uses ~/.config on both
@@ -419,4 +431,48 @@ func claudeServerEntry(config []byte) ([]byte, error) {
 		return nil, errors.New("rendered configuration has no oberth server")
 	}
 	return entry, nil
+}
+
+// refreshPinnedServerCA rewrites the CA this machine's CLI and MCP client
+// pin (~/.config/oberth/ca.crt) when the server's trust anchor changed, for
+// example after the move to the server PKI or a CA re-issued for new names.
+// It touches only a configuration this installer wrote (env or mcp.json
+// beside it), never prompts, and runs without a terminal too.
+func refreshPinnedServerCA(ctx context.Context, cfg Config, deps Deps, tw *tableWriter) {
+	root, err := deps.clientConfigRoot()
+	if err != nil {
+		return
+	}
+	caPath := filepath.Join(root, "ca.crt")
+	have, err := os.ReadFile(caPath) // #nosec G304 -- the client configuration this installer writes.
+	if err != nil {
+		return
+	}
+	_, envErr := os.Stat(filepath.Join(root, "env"))
+	_, mcpErr := os.Stat(filepath.Join(root, "mcp.json"))
+	if envErr != nil && mcpErr != nil {
+		return
+	}
+	want, err := serverCACertificate(ctx, cfg, deps)
+	if err != nil {
+		return
+	}
+	if block, _ := pem.Decode(want); block == nil || block.Type != "CERTIFICATE" {
+		return
+	}
+	if bytes.Equal(bytes.TrimSpace(have), bytes.TrimSpace(want)) {
+		return
+	}
+	temp, err := os.CreateTemp(root, ".ca-")
+	if err != nil {
+		return
+	}
+	_, writeErr := temp.Write(want)
+	closeErr := temp.Close()
+	if writeErr != nil || closeErr != nil || os.Chmod(temp.Name(), 0o600) != nil || os.Rename(temp.Name(), caPath) != nil {
+		_ = os.Remove(temp.Name())
+		tw.AppendRow("Client CA", displayPath(caPath), "⚠ not refreshed", false)
+		return
+	}
+	tw.AppendRow("Client CA", displayPath(caPath), "✓ refreshed", false)
 }

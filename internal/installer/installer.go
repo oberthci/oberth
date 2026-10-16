@@ -204,6 +204,10 @@ type Config struct {
 	// write to OpenBao; phase 2 (commitServerIdentityRotation) writes after
 	// the Helm SSA preview confirms no conflicts.
 	pendingCertRotation *pendingRotation
+	// serverPKI is set by Run for a production secret store: the server then
+	// issues its leaf from the installer-managed CA (ensureServerPKI), so the
+	// self-signed bundle certificate's preflight checks stand down.
+	serverPKI bool
 	// rotatedServerCertSHA256 is set once a rotation is committed to OpenBao.
 	// It becomes a pod annotation: the server reads its identity only at
 	// startup, and a rotation that changes no other value would otherwise
@@ -360,6 +364,9 @@ func isValidDNS1123Label(s string) bool {
 
 // Deps holds injectable dependencies for testing.
 type Deps struct {
+	// ClientConfigRoot overrides where this machine's CLI/MCP client files
+	// live (default ~/.config/oberth); tests point it at their own directory.
+	ClientConfigRoot func() (string, error)
 	// UserHomeDir isolates host configuration in tests. Nil uses os.UserHomeDir.
 	UserHomeDir    func() (string, error)
 	Output         io.Writer
@@ -434,6 +441,9 @@ type OpenBaoResult struct {
 	// positively provisioned or verified the exact managed Transit mount, key,
 	// policy, and Kubernetes role. It gates runtime enablement.
 	TrustedTransitVerified bool
+	// ServerCACertPEM is the server PKI CA; non-empty enables tls.pki so the
+	// server issues its own short-lived leaf. Clients pin this certificate.
+	ServerCACertPEM string
 }
 
 // SecretStoreResult describes the outcome of secretstore configuration.
@@ -445,7 +455,13 @@ type SecretStoreResult struct {
 	PolicyWritten          bool
 	RoleCreated            bool
 	TrustedTransitVerified bool
-	Skipped                bool
+	// ServerCACertPEM is the installer-managed server CA (production only);
+	// non-empty means the server PKI role is provisioned.
+	ServerCACertPEM string
+	// ServerCAReplaced reports a newly generated CA: pinned clients must
+	// refresh their copy.
+	ServerCAReplaced bool
+	Skipped          bool
 	// Items collects the provisioned/verified objects for the config grid.
 	Items []configItem
 }
@@ -664,6 +680,8 @@ func Run(ctx context.Context, cfg Config, deps Deps) error {
 		}
 	}
 
+	cfg.serverPKI = cfg.InstallSecretStore
+
 	// The installer advertises clientReachableHost to the CLI and MCP clients
 	// (and prints it as the Ready URL), so the certificate must carry it.
 	if cfg.WatchAdoptionPlan == "" {
@@ -713,8 +731,9 @@ func Run(ctx context.Context, cfg Config, deps Deps) error {
 	// Before anything is installed: naming an address the kept TLS identity will
 	// not gain is silent otherwise, and surfaces weeks later as a hostname
 	// mismatch nobody connects back to this run.
-	// A pending rotation is about to add them, so there is nothing to warn of.
-	if cfg.pendingCertRotation == nil {
+	// A pending rotation is about to add them, and the server PKI issues for
+	// the current names at every start, so there is nothing to warn of.
+	if cfg.pendingCertRotation == nil && !cfg.serverPKI {
 		warnCertificateNamesWillNotTakeEffect(deps.Output, cfg,
 			certificateNamesNotYetIssued(ctx, cfg, deps))
 	}
@@ -860,6 +879,10 @@ func Run(ctx context.Context, cfg Config, deps Deps) error {
 				return fmt.Errorf("set up production secret store: %w", err)
 			}
 			openbao.TrustedTransitVerified = configured.TrustedTransitVerified
+			openbao.ServerCACertPEM = configured.ServerCACertPEM
+			if configured.ServerCAReplaced {
+				_, _ = fmt.Fprintln(w, "Server CA issued: clients that pinned the previous server certificate or CA must refresh it (oberth install rewrites ~/.config/oberth/ca.crt).")
+			}
 			cfg.rekorPublicKey = configured.RekorPublicKey
 			cfg.rekorBaoAddress = openbao.ServiceAddress
 			cfg.rekorBaoCA = openbao.CACertPEM
@@ -1589,6 +1612,16 @@ func OberthHelmArgs(cfg Config, openbao OpenBaoResult, rekor RekorResult) []stri
 	// cloudflared keeps trusting the server after the upgrade.
 	if cfg.watchTunnelOriginCACert != "" {
 		args = append(args, "--set-string", "watchTunnel.originCACert="+cfg.watchTunnelOriginCACert)
+	}
+	if openbao.ServerCACertPEM != "" {
+		args = append(args,
+			"--set", "tls.pki.enabled=true",
+			"--set-string", "tls.pki.mount="+defaultServerPKIMount,
+			"--set-string", "tls.pki.role="+defaultServerPKIRole,
+			"--set-string", "tls.pki.ttl="+defaultServerLeafTTL,
+			// The tunnel trusts the stable CA, not a leaf that renews monthly.
+			"--set-string", "watchTunnel.originCACert="+openbao.ServerCACertPEM,
+		)
 	}
 	if cfg.rotatedServerCertSHA256 != "" {
 		args = append(args, "--set-string", `podAnnotations.oberth\.ci/server-certificate-sha256=`+cfg.rotatedServerCertSHA256)

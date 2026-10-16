@@ -34,7 +34,7 @@ func clientAccessDeps(t *testing.T, input string) (Deps, *bytes.Buffer, string) 
 		// on. A test that wants that path stubs LookPath itself.
 		LookPath: func(string) (string, error) { return "", errors.New("not found in test") },
 		RunCommand: func(_ context.Context, _ []byte, name string, args ...string) ([]byte, error) {
-			if name == "kubectl" && len(args) > 0 && args[len(args)-1] == "/run/oberth-identities/server/tls.crt" {
+			if name == "kubectl" && len(args) > 0 && strings.Contains(args[len(args)-1], "/run/oberth-identities/server/ca.crt") {
 				return []byte("-----BEGIN CERTIFICATE-----\ntest\n-----END CERTIFICATE-----\n"), nil
 			}
 			return nil, fmt.Errorf("test ran an unstubbed command: %s %s", name, strings.Join(args, " "))
@@ -163,7 +163,7 @@ func TestClientAccessRegistersWithClaudeCodeWhenItIsPresent(t *testing.T) {
 	var ran [][]string
 	deps.LookPath = func(name string) (string, error) { return "/usr/local/bin/" + name, nil }
 	deps.RunCommand = func(_ context.Context, _ []byte, name string, args ...string) ([]byte, error) {
-		if name == "kubectl" && len(args) > 0 && args[len(args)-1] == "/run/oberth-identities/server/tls.crt" {
+		if name == "kubectl" && len(args) > 0 && strings.Contains(args[len(args)-1], "/run/oberth-identities/server/ca.crt") {
 			return []byte("-----BEGIN CERTIFICATE-----\ntest\n-----END CERTIFICATE-----\n"), nil
 		}
 		ran = append(ran, append([]string{name}, args...))
@@ -255,5 +255,42 @@ func TestClientAccessIsNotReofferedWhenItIsAlreadyConfigured(t *testing.T) {
 	}
 	if string(body) != "export OBERTH_BASE_URL=x\n" {
 		t.Error("an existing client configuration was overwritten without being asked about")
+	}
+}
+
+// A machine whose installer-written client config pins an old certificate
+// gets the server's current CA, without a terminal or a prompt.
+func TestRefreshPinnedServerCARewritesStaleCA(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	root := filepath.Join(home, ".config", "oberth")
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for name, body := range map[string]string{"env": "export OBERTH_BASE_URL=x\n", "ca.crt": "old\n"} {
+		if err := os.WriteFile(filepath.Join(root, name), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	newCA := string(newTestServerCA([]string{"oberth"}))
+	var table bytes.Buffer
+	deps := Deps{
+		Output: &table,
+		RunCommand: func(_ context.Context, _ []byte, name string, args ...string) ([]byte, error) {
+			return []byte(newCA), nil
+		},
+	}
+	refreshPinnedServerCA(context.Background(), Config{}, deps, newTableWriter(&table, false))
+	got, err := os.ReadFile(filepath.Join(root, "ca.crt"))
+	if err != nil || string(got) != newCA {
+		t.Fatalf("ca.crt = %q, %v", got, err)
+	}
+	if !strings.Contains(table.String(), "refreshed") {
+		t.Fatalf("refresh not reported: %q", table.String())
+	}
+	info, _ := os.Stat(filepath.Join(root, "ca.crt"))
+	if info.Mode().Perm() != 0o600 {
+		t.Fatalf("ca.crt mode %v", info.Mode().Perm())
 	}
 }

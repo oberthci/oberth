@@ -138,11 +138,20 @@ tls:
   #
   # An address reached as an IP needs extraIPs: a DNS SAN never matches an IP.
   #
-  # The identity is created once in OpenBao. Changing names requires an
-  # explicit certificate rotation; upgrading preserves the existing identity.
+  # Without tls.pki the identity is a self-signed certificate created once in
+  # OpenBao, re-issued with the same key when names are added.
   # existingSecret is a rejected legacy setting.
   extraDNSNames: []
   extraIPs: []
+  # Short-lived server leaves from the installer-managed CA in OpenBao's PKI
+  # engine (oberth install --install-secretstore). The CA key never leaves
+  # OpenBao and is name-constrained to the server's DNS names and IPs; clients
+  # pin the CA and the server renews its leaf in place.
+  pki:
+    enabled: false
+    mount: oberth-pki
+    role: oberth-server
+    ttl: 720h
 
 # The SSH host key is the durable identity of this deployment: Git clients pin
 # it AND the external audit witness identity is derived from it. By default the

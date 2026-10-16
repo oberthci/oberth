@@ -1929,20 +1929,45 @@ func freshStoreResponses() map[string]fakeBaoResponse {
 		"policy write oberth-argo-ci-secrets -":                           {out: "Success!"},
 		"read -format=json auth/kubernetes/role/oberth-argo-ci-secrets":   {out: "No value found at auth/kubernetes/role/oberth-argo-ci-secrets", err: errors.New("exit status 2")},
 		"write auth/kubernetes/role/oberth-argo-ci-secrets -":             {out: "Success!"},
+		// Server PKI, first provisioning (production only).
+		"secrets enable -path=oberth-pki -max-lease-ttl=87600h pki": {out: "Success!"},
+		"read -format=json oberth-pki/issuer/default": {
+			out: "* no default issuer currently configured", err: errors.New("exit status 2"),
+		},
+		"write -format=json oberth-pki/root/generate/internal -": {out: `{"data":{"certificate":"-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----","issuer_id":"issuer-1"}}`},
+		"write oberth-pki/config/issuers -":                      {out: "Success!"},
+		"read -format=json oberth-pki/roles/oberth-server":       {out: "No value found at oberth-pki/roles/oberth-server", err: errors.New("exit status 2")},
+		"write oberth-pki/roles/oberth-server -":                 {out: "Success!"},
 	}
+}
+
+// configuredServerPKIResponses scripts a server PKI that already covers the
+// default names: a valid default issuer and a matching role, so a rerun
+// writes nothing.
+func configuredServerPKIResponses(responses map[string]fakeBaoResponse) {
+	dnsNames, _ := serverPKINames(Config{})
+	caPEM := newTestServerCA(dnsNames)
+	issuer, _ := json.Marshal(map[string]any{"data": map[string]any{"certificate": string(caPEM)}})
+	responses["read -format=json oberth-pki/issuer/default"] = fakeBaoResponse{out: string(issuer)}
+	role := serverPKIRole(dnsNames, nil)
+	role["ttl"], role["max_ttl"] = 2592000, 2592000
+	roleJSON, _ := json.Marshal(map[string]any{"data": role})
+	responses["read -format=json oberth-pki/roles/oberth-server"] = fakeBaoResponse{out: string(roleJSON)}
 }
 
 func configuredProductionStoreResponses() map[string]fakeBaoResponse {
 	responses := configuredStoreResponses()
 	responses["secrets list -format=json"] = fakeBaoResponse{out: `{
 "oberth/":{"type":"kv","options":{"version":"2"}},
-"oberth-transit/":{"type":"transit","options":{}}
+"oberth-transit/":{"type":"transit","options":{}},
+"oberth-pki/":{"type":"pki","options":{}}
 }`}
+	configuredServerPKIResponses(responses)
 	responses["read -format=json oberth-transit/keys/trusted-plan-artifacts"] = fakeBaoResponse{out: `{"data":{
 "type":"aes256-gcm96","derived":false,"exportable":false,"allow_plaintext_backup":false,
 "supports_encryption":true,"supports_decryption":true
 }}`}
-	responses["policy read oberth-ci"] = fakeBaoResponse{out: OberthProductionPolicy("oberth", "oberth-transit", "trusted-plan-artifacts")}
+	responses["policy read oberth-ci"] = fakeBaoResponse{out: OberthProductionPolicy("oberth", "oberth-transit", "trusted-plan-artifacts") + serverPKIPolicy()}
 	responses["policy read oberth-argo-credentialed"] = fakeBaoResponse{out: OberthCredentialedPolicy("oberth", nil)}
 	responses["read -format=json auth/kubernetes/role/oberth-argo-credentialed"] = fakeBaoResponse{out: `{"request_id":"3","data":{` +
 		`"bound_service_account_names":["oberth-argo-credentialed"],` +
@@ -3242,6 +3267,7 @@ func TestRunSkipsPromptWhenSecretStoreFlagSet(t *testing.T) {
 			Conditions: []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionTrue}},
 		},
 	}
+	clientRoot := t.TempDir()
 	client := fake.NewClientset(node, oberthPod, readyArgoControllerPod())
 	var buf bytes.Buffer
 	deps := Deps{
@@ -3249,6 +3275,9 @@ func TestRunSkipsPromptWhenSecretStoreFlagSet(t *testing.T) {
 		KubeClient:  client,
 		RestConfig:  &rest.Config{Host: "https://127.0.0.1:6443"},
 		ContextName: "test-ctx",
+		// Its fake terminal reaches the client-access offer; keep the files
+		// it writes out of the home directory the parallel tests share.
+		ClientConfigRoot: func() (string, error) { return clientRoot, nil },
 		RunHelm: func(_ context.Context, args []string) ([]byte, error) {
 			switch args[0] {
 			case "list":

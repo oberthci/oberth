@@ -309,6 +309,16 @@ spec:
               value: {{ .Values.secretstore.role | quote }}
             - name: OBERTH_TLS_NAMES
               value: {{ concat (.Values.tls.extraDNSNames | default list) (.Values.tls.extraIPs | default list) | join "," | quote }}
+            {{- with (.Values.tls.pki | default dict) }}
+            {{- if .enabled }}
+            - name: OBERTH_SERVER_PKI_MOUNT
+              value: {{ .mount | default "oberth-pki" | quote }}
+            - name: OBERTH_SERVER_PKI_ROLE
+              value: {{ .role | default "oberth-server" | quote }}
+            - name: OBERTH_SERVER_PKI_TTL
+              value: {{ .ttl | default "" | quote }}
+            {{- end }}
+            {{- end }}
             - name: OBERTH_SCHEMA_IDENTITY
               value: {{ $schemaIdentity | quote }}
             - name: OBERTH_AUDIT_DOMAIN

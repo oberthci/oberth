@@ -188,3 +188,34 @@ func TestPreflightReissuesLegacyLeafAsConstrainedAnchor(t *testing.T) {
 		t.Fatal("re-issued certificate is not a constrained anchor")
 	}
 }
+
+// With the server PKI the bundle's self-signed certificate is unused, so the
+// preflight neither re-issues it nor pins it for the tunnel.
+func TestPreflightStandsDownForServerPKI(t *testing.T) {
+	t.Setenv(baoTokenEnvVar, "test-root-token")
+	certPEM, keyPEM := testCertAndKeyShape(t, []string{"oberth"}, false)
+	liveValues := liveHelmValuesSubset{}
+	liveValues.WatchTunnel.Enabled = true
+	liveValues.WatchTunnel.OriginCACert = "stale"
+	liveValuesJSON, _ := json.Marshal(liveValues)
+	deps := Deps{
+		Output:     &bytes.Buffer{},
+		KubeClient: fake.NewClientset(currentDeployment(), runningOpenBaoPod()),
+		RunCommand: func(_ context.Context, _ []byte, _ string, args ...string) ([]byte, error) {
+			if slices.Contains(args, "deploy/oberth") {
+				return certPEM, nil
+			}
+			return []byte(baoIdentityJSON(1, map[string]string{
+				"tls.crt": string(certPEM), "tls.key": string(keyPEM), "ssh_host_key": "fake-ssh-key",
+			})), nil
+		},
+		RunHelm: func(context.Context, []string) ([]byte, error) { return liveValuesJSON, nil },
+	}
+	cfg := Config{InstallSecretStore: true, serverPKI: true, TLSExtraIPs: []string{"127.0.0.1"}}
+	if err := preflightServerIdentities(context.Background(), &cfg, deps, false); err != nil {
+		t.Fatalf("preflight: %v", err)
+	}
+	if cfg.pendingCertRotation != nil || cfg.watchTunnelOriginCACert != "" {
+		t.Fatal("the bundle certificate must be left alone when the server PKI issues the leaf")
+	}
+}

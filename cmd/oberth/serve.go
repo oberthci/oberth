@@ -129,11 +129,15 @@ type serveOptions struct {
 
 	// argoGoProxyListen is the listen address for the read-only Go module
 	// proxy. Empty disables the listener.
-	argoGoProxyListen    string
-	argoGoProxyCert      string
-	argoGoProxyKey       string
-	argoGoProxyCA        string
-	argoGoProxyURL       string
+	argoGoProxyListen string
+	argoGoProxyCert   string
+	argoGoProxyKey    string
+	argoGoProxyCA     string
+	argoGoProxyURL    string
+
+	// serverLeafRenewal is set when the HTTPS leaf was issued by OpenBao's
+	// PKI engine: serve renews it in place before it expires.
+	serverLeafRenewal    *serverLeafRenewal
 	argoGoProxyNamespace goproxy.NamespaceConfig
 
 	// VM capability switches. KVM device injection is a server-owned
@@ -903,9 +907,12 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 	if err != nil {
 		return err
 	}
-	tlsCertificate, err := tls.LoadX509KeyPair(options.tlsCert, options.tlsKey)
+	served, err := loadServedCertificate(options.tlsCert, options.tlsKey)
 	if err != nil {
 		return fmt.Errorf("load HTTPS identity: %w", err)
+	}
+	if renewal := options.serverLeafRenewal; renewal != nil {
+		go renewServerLeaf(ctx, renewal.pki, renewal.store, served, renewal.issued, logger)
 	}
 	httpsServer := &http.Server{
 		Handler: httpAPI.Handler(), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 90 * time.Second,
@@ -916,7 +923,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 		// begins, and the response phase is bounded by WriteTimeout instead.
 		ReadTimeout:  30 * time.Second,
 		WriteTimeout: 3 * time.Minute, MaxHeaderBytes: 1 << 20,
-		TLSConfig: &tls.Config{MinVersion: tls.VersionTLS13, Certificates: []tls.Certificate{tlsCertificate}},
+		TLSConfig: &tls.Config{MinVersion: tls.VersionTLS13, GetCertificate: served.getCertificate},
 	}
 	// Go module proxy (#662): a read-only GOPROXY-protocol HTTPS listener
 	// serving configured private modules from Oberth's own git cache. Pipeline pods
@@ -931,9 +938,14 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 		// Route directly: ServeMux cleans paths before invoking handlers, which
 		// could redirect a malformed private path out of its namespace. The
 		// handler enforces GET-only and classifies before parsing (#764).
-		goProxyCert, err := tls.LoadX509KeyPair(options.argoGoProxyCert, options.argoGoProxyKey)
-		if err != nil {
-			return fmt.Errorf("load Go module proxy TLS identity: %w", err)
+		// The proxy shares the server identity when it is the same files, so a
+		// renewed leaf reaches both listeners.
+		goProxyServed := served
+		if options.argoGoProxyCert != options.tlsCert || options.argoGoProxyKey != options.tlsKey {
+			goProxyServed, err = loadServedCertificate(options.argoGoProxyCert, options.argoGoProxyKey)
+			if err != nil {
+				return fmt.Errorf("load Go module proxy TLS identity: %w", err)
+			}
 		}
 		goProxyServer = &http.Server{
 			Handler:           proxyHandler,
@@ -943,8 +955,8 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 			WriteTimeout:      2 * time.Minute,
 			MaxHeaderBytes:    1 << 16,
 			TLSConfig: &tls.Config{
-				MinVersion:   tls.VersionTLS13,
-				Certificates: []tls.Certificate{goProxyCert},
+				MinVersion:     tls.VersionTLS13,
+				GetCertificate: goProxyServed.getCertificate,
 			},
 		}
 		logger.Printf("go module proxy: %s → %s (%d repo mappings)", options.argoGoProxyListen, options.argoGoProxyURL, len(repoMap))

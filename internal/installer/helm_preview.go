@@ -296,5 +296,8 @@ func plannedOpenBaoResult(ctx context.Context, cfg Config, deps Deps, ns string)
 	}
 	planned.CACertPEM = live.Secretstore.CACert
 	planned.TrustedTransitVerified = live.Secretstore.Transit.Enabled
+	if live.TLS.PKI.Enabled {
+		planned.ServerCACertPEM = live.WatchTunnel.OriginCACert
+	}
 	return planned, nil
 }

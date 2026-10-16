@@ -89,7 +89,7 @@ func (p *donePage) saveReport(state *WizardState) bool {
 	if p.fingerprint != "" {
 		fmt.Fprintf(&b, "TLS 30443: %s\n", p.fingerprint)
 	} else {
-		fmt.Fprintf(&b, "TLS 30443: kubectl exec -n %s deploy/oberth -c oberth -- cat /run/oberth-identities/server/tls.crt | openssl x509 -fingerprint -sha256 -noout\n", ns)
+		fmt.Fprintf(&b, "TLS 30443: %s\n", serverCAFingerprintCommand(ns))
 	}
 	if p.sshFingerprint != "" {
 		fmt.Fprintf(&b, "SSH 30022: %s\n", p.sshFingerprint)
@@ -145,7 +145,7 @@ func (p *donePage) view(state *WizardState, width, _ int) string {
 			sMuted.Render("(retrieve with the command below)") + "\n")
 	}
 
-	b.WriteString("      " + sInfo.Render("kubectl exec -n "+ns+" deploy/oberth -c oberth -- cat /run/oberth-identities/server/tls.crt | openssl x509 -fingerprint -sha256 -noout") + "\n")
+	b.WriteString("      " + sInfo.Render(serverCAFingerprintCommand(ns)) + "\n")
 
 	if p.sshFingerprint != "" {
 		b.WriteString("    " + sMuted.Render("ssh 30022") + "    " +
@@ -201,4 +201,11 @@ func (p *donePage) view(state *WizardState, width, _ int) string {
 		sInfo.Render("https://oberth.ci/docs") + "\n")
 
 	return b.String()
+}
+
+// serverCAFingerprintCommand prints the fingerprint clients should pin: the
+// server CA when the server issues short-lived leaves (a leaf fingerprint
+// changes at every renewal), otherwise the self-signed certificate.
+func serverCAFingerprintCommand(ns string) string {
+	return "kubectl exec -n " + ns + " deploy/oberth -c oberth -- sh -c 'cat /run/oberth-identities/server/ca.crt 2>/dev/null || cat /run/oberth-identities/server/tls.crt' | openssl x509 -fingerprint -sha256 -noout"
 }

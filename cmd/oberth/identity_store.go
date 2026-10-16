@@ -157,6 +157,21 @@ func bootstrapRuntimeIdentities(ctx context.Context, options *serveOptions) erro
 			clear(v)
 		}
 	}()
+	// With the server PKI configured, the HTTPS identity is a short-lived
+	// leaf from the installer-managed CA instead of the bundle's long-lived
+	// self-signed certificate; the bundle still supplies the SSH host key.
+	pki, pkiEnabled := serverPKIFromEnvironment(options.namespace)
+	if pkiEnabled {
+		files, issued, err := pki.issueServerLeaf(ctx, s)
+		if err != nil {
+			return err
+		}
+		for key, value := range files {
+			clear(data[key])
+			data[key] = value
+		}
+		options.serverLeafRenewal = &serverLeafRenewal{pki: pki, store: s, issued: issued}
+	}
 	if _, err := tls.X509KeyPair(data["tls.crt"], data["tls.key"]); err != nil {
 		return errors.New("stored server TLS identity is invalid")
 	}
@@ -190,6 +205,10 @@ func bootstrapRuntimeIdentities(ctx context.Context, options *serveOptions) erro
 		options.argoGoProxyCert = options.tlsCert
 		options.argoGoProxyKey = options.tlsKey
 		options.argoGoProxyCA = options.tlsCert
+		if pkiEnabled {
+			// Pipeline pods trust the stable CA, not the renewing leaf.
+			options.argoGoProxyCA = identityRoot + "/server/ca.crt"
+		}
 	}
 	return nil
 }
@@ -206,20 +225,10 @@ func generateRuntimeIdentity(namespace string, extra []string) (map[string][]byt
 	}
 	now := time.Now()
 	cert := &x509.Certificate{SerialNumber: serial, Subject: pkix.Name{CommonName: "oberth"}, NotBefore: now.Add(-time.Minute), NotAfter: now.AddDate(10, 0, 0), KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}, BasicConstraintsValid: true}
-	names := []string{
-		"oberth", "oberth." + namespace, "oberth." + namespace + ".svc", "oberth." + namespace + ".svc.cluster.local",
-		"oberth-goproxy", "oberth-goproxy." + namespace, "oberth-goproxy." + namespace + ".svc", "oberth-goproxy." + namespace + ".svc.cluster.local",
-	}
-	for _, name := range append(names, extra...) {
-		name = strings.TrimSpace(name)
-		if name == "" {
-			continue
-		}
-		if ip := net.ParseIP(name); ip != nil {
-			cert.IPAddresses = append(cert.IPAddresses, ip)
-		} else {
-			cert.DNSNames = append(cert.DNSNames, name)
-		}
+	dnsNames, ips := secretstore.ServerTLSNames(namespace, extra)
+	cert.DNSNames = dnsNames
+	for _, address := range ips {
+		cert.IPAddresses = append(cert.IPAddresses, net.ParseIP(address))
 	}
 	secretstore.ConstrainSelfSignedServerCertificate(cert)
 	der, err := x509.CreateCertificate(rand.Reader, cert, cert, pub, key)

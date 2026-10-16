@@ -254,6 +254,28 @@
           "items": {
             "type": "string"
           }
+        },
+        "pki": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Short-lived server certificates from the installer-managed, name-constrained CA in OpenBao's PKI engine. Clients pin the CA; the server renews its leaf in place. Set by oberth install --install-secretstore.",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "mount": {
+              "type": "string",
+              "pattern": "^[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?$"
+            },
+            "role": {
+              "type": "string",
+              "pattern": "^[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?$"
+            },
+            "ttl": {
+              "type": "string",
+              "pattern": "^$|^[0-9]+[smh]$"
+            }
+          }
         }
       }
     },
