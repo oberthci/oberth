@@ -892,3 +892,41 @@ func TestSwapScriptRollsBackOnFailure(t *testing.T) {
 		t.Fatalf("aside directory should be removed after rollback: %v", err)
 	}
 }
+
+// A failure while moving the previous files aside must keep every previous
+// file, the WAL included, rather than deleting what was not yet moved
+// (re-review finding).
+func TestSwapScriptKeepsPreviousWALOnEarlyFailure(t *testing.T) {
+	t.Parallel()
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("no sh")
+	}
+	data := filepath.Join(t.TempDir(), "data")
+	if err := os.MkdirAll(filepath.Join(data, ".oberth-restore"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for name, body := range map[string]string{"oberth.sqlite": "previous", "oberth.sqlite-wal": "previous-wal"} {
+		if err := os.WriteFile(filepath.Join(data, name), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	restored := []byte("restored")
+	if err := os.WriteFile(filepath.Join(data, ".oberth-restore", "oberth.sqlite"), restored, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(restored)
+	// Fail the move-aside loop right after the main file was moved.
+	script := strings.Replace(swapScript, "cd /data", "cd "+data, 1)
+	script = strings.Replace(script, `if [ -e "$f" ]; then mv "$f" "$aside/"; fi`,
+		`if [ -e "$f" ]; then mv "$f" "$aside/"; fi; [ "$f" != oberth.sqlite ] || false`, 1)
+	cmd := exec.Command("sh", "-c", script, "sh", "20261017T000001Z", hex.EncodeToString(sum[:]), "-")
+	if out, err := cmd.CombinedOutput(); err == nil {
+		t.Fatalf("expected the forced failure: %s", out)
+	}
+	for name, want := range map[string]string{"oberth.sqlite": "previous", "oberth.sqlite-wal": "previous-wal"} {
+		got, err := os.ReadFile(filepath.Join(data, name))
+		if err != nil || string(got) != want {
+			t.Fatalf("%s after rollback = %q, %v", name, got, err)
+		}
+	}
+}

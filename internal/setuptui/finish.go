@@ -301,7 +301,7 @@ func (f *finishScreen) update(w *wizard, msg tea.Msg) tea.Cmd {
 		case "enter":
 			switch f.focus.button() {
 			case finVerify:
-				if !f.verifying {
+				if !f.verifying && !w.opts.DryMode {
 					return f.runVerify(w, true)
 				}
 			case finReport:
@@ -451,7 +451,7 @@ func (f *finishScreen) frame(w *wizard) frameSpec {
 		focusLine: -1,
 		buttons:   []string{"Verify", "Save report", "Show log", "Exit"},
 		button:    f.focus.button(),
-		disabled:  map[int]bool{finVerify: f.verifying || w.state.Install.Status == installFailed},
+		disabled:  map[int]bool{finVerify: f.verifying || w.state.Install.Status == installFailed || w.opts.DryMode},
 		errMsg:    f.reportErr,
 		keys:      "←/→ buttons · enter select · ↑/↓ pgup/pgdn scroll · l log · esc menu",
 	}

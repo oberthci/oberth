@@ -285,8 +285,8 @@ func (p *plainRun) review() (bool, error) {
 	return false, nil
 }
 
-// install runs the installer with its normal terminal output; the
-// installer prints once-only credentials in its own box.
+// install runs the installer with its normal terminal output; once-only
+// credentials are printed here, once, through the credential sink.
 func (p *plainRun) install(input io.Reader) error {
 	p.say("\n  Step %d of %d — %s\n", int(stepInstall)+1, stepCount, stepInstall.name())
 	statuses := map[string]string{}

@@ -14,6 +14,7 @@ package installer
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/hex"
 	"encoding/json"
@@ -475,6 +476,7 @@ func applyRestore(ctx context.Context, cfg RestoreConfig, deps backupDeps, archi
 
 	_, _ = fmt.Fprintln(w, "Swapping the database on the volume...")
 	if err := swapDatabase(ctx, cfg, deps, archive, target); err != nil {
+		swapped = errors.Is(err, errRestoredDatabaseInPlace)
 		return stopped(err)
 	}
 	swapped = true
@@ -690,12 +692,15 @@ func swapDatabase(ctx context.Context, cfg RestoreConfig, deps backupDeps, archi
 	}
 	out, err := inPod(nil, swapScript, target.Timestamp, archive.Database.MainSHA256, walSHA)
 	if err != nil {
+		if bytes.Contains(out, []byte(swapCompleteMarker)) {
+			return fmt.Errorf("%w: %w%s", errRestoredDatabaseInPlace, err, commandOutputSuffix(out))
+		}
 		return fmt.Errorf("swap database files: %w%s", err, commandOutputSuffix(out))
 	}
 	want := fmt.Sprintf("%d:%d 600", *pod.Spec.SecurityContext.RunAsUser, *pod.Spec.SecurityContext.RunAsGroup)
 	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
 	if got := strings.TrimSpace(lines[len(lines)-1]); got != want {
-		return fmt.Errorf("restored database has owner and mode %q, want %q", got, want)
+		return fmt.Errorf("%w: restored database has owner and mode %q, want %q", errRestoredDatabaseInPlace, got, want)
 	}
 	return nil
 }
@@ -826,3 +831,7 @@ func printRestoreNextSteps(w io.Writer, cfg RestoreConfig, archive restoreArchiv
 		_, _ = fmt.Fprintln(w, "  6. Re-establish the watch tunnel if you use it (docs/watch-tunnel.md).")
 	}
 }
+
+// errRestoredDatabaseInPlace marks a swap failure that happened after the
+// restored database was already in place.
+var errRestoredDatabaseInPlace = errors.New("the restored database is in place but its final check failed")

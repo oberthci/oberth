@@ -37,7 +37,8 @@ put() {     # put <kv path>  (JSON object on stdin)
 
 # Server: TLS pair plus SSH host key, merged into one bundle. The halves go
 # through owner-only files in a private directory, never through arguments.
-work=$(umask 077 && mktemp -d)
+umask 077
+work=$(mktemp -d)
 secret oberth-tls          > "$work/tls.json"
 secret oberth-ssh-host-key > "$work/ssh.json"
 python3 - "$work" <<'EOF' | put "identities/$ns/server"
@@ -46,7 +47,7 @@ tls = json.load(open(sys.argv[1] + "/tls.json"))
 ssh = json.load(open(sys.argv[1] + "/ssh.json"))
 print(json.dumps({"tls.crt": tls["tls.crt"], "tls.key": tls["tls.key"], "ssh_host_key": next(iter(ssh.values()))}))
 EOF
-shred -u "$work"/*.json && rmdir "$work"
+rm -f "$work"/*.json && rmdir "$work"   # shred -u first where available (Linux)
 secret oberth-upstream-key | put "identities/$ns/oberth-upstream-key"
 secret oberth-known-hosts  | put "identities/$ns/oberth-known-hosts"
 ```

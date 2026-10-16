@@ -753,7 +753,7 @@ func TestFinishAfterFailedInstallReturnsError(t *testing.T) {
 	h.w.state.Install.Phase = "deploy oberth (digest-pinned)"
 	var out bytes.Buffer
 	err := h.w.finish(&out)
-	if !errors.Is(err, installer.ErrOnboardingPartial) || !strings.Contains(err.Error(), "deploy oberth") {
+	if err == nil || !strings.Contains(err.Error(), "install failed at \"deploy oberth") {
 		t.Fatalf("finish after a failed install = %v", err)
 	}
 }

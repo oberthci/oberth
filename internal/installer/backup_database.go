@@ -255,10 +255,13 @@ mkdir "$aside"
 # From here on a failure puts the previous database back, so the server is
 # never left without one (or started on an empty one) by a half-done swap.
 swapping=1
+placed=
 rollback() {
   rc=$?
   if [ "$rc" -ne 0 ] && [ -n "$swapping" ]; then
-    rm -f oberth.sqlite oberth.sqlite-wal oberth.sqlite-shm
+    # Until the restored file is placed, every name still in /data is a
+    # previous file: only remove what the restore itself put there.
+    if [ -n "$placed" ]; then rm -f oberth.sqlite oberth.sqlite-wal oberth.sqlite-shm; fi
     for f in oberth.sqlite oberth.sqlite-wal oberth.sqlite-shm; do
       if [ -e "$aside/$f" ]; then mv -f "$aside/$f" "$f"; fi
     done
@@ -271,11 +274,18 @@ for f in oberth.sqlite oberth.sqlite-wal oberth.sqlite-shm; do
   if [ -e "$f" ]; then mv "$f" "$aside/"; fi
 done
 chmod 0600 .oberth-restore/*
+placed=1
 mv .oberth-restore/oberth.sqlite oberth.sqlite
 if [ -e .oberth-restore/oberth.sqlite-wal ]; then mv .oberth-restore/oberth.sqlite-wal oberth.sqlite-wal; fi
 rmdir .oberth-restore
 swapping=
+echo "` + swapCompleteMarker + `" >&2
 stat -c '%u:%g %a' oberth.sqlite`
+
+// swapCompleteMarker is printed once the restored database is in place, so a
+// later failure (the ownership check) is reported as "restored database in
+// place" rather than "previous database in place".
+const swapCompleteMarker = "oberth-restore: database swapped"
 
 // restoredDatabase is the database pair extracted from a verified archive.
 type restoredDatabase struct {
