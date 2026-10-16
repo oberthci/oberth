@@ -168,7 +168,7 @@ func (p *donePage) view(state *WizardState, width, _ int) string {
 		b.WriteString("  " + sFail.Render("upstream authentication pending") + "    " +
 			sText.Render("register the public key with your forge account, then complete upstream registration") + "\n")
 		b.WriteString("    " + sInfo.Render("kubectl exec -n "+ns+" deploy/oberth -c oberth -- cat /run/oberth-identities/upstream/id_ed25519.pub") + "\n\n")
-		b.WriteString("    " + sInfo.Render("kubectl exec -n "+ns+" deploy/oberth -c oberth -- oberth upstream add "+state.ForgeType+" "+forgeUpstreamURL(state.ForgeType, state.ForgeOrg)) + "\n\n")
+		b.WriteString("    " + sInfo.Render("kubectl exec -n "+ns+" deploy/oberth -c oberth -- oberth upstream add --yes "+state.ForgeType+" ssh://git@"+forgeUpstreamURL(state.ForgeType, state.ForgeOrg)) + "\n\n")
 	}
 
 	// Next steps.
@@ -177,7 +177,12 @@ func (p *donePage) view(state *WizardState, width, _ int) string {
 	if state.ClusterInfo.nodeIP != "" {
 		gitTarget = state.ClusterInfo.nodeIP
 	}
-	b.WriteString("    " + sInfo.Render("git clone ssh://git@"+gitTarget+":30022/"+state.ForgeType+"/"+state.ForgeOrg+"/<repo>.git") + "\n")
+	clone := "git clone ssh://git@" + gitTarget + ":30022/" + state.ForgeType + "/" + state.ForgeOrg + "/<repo>.git"
+	if p.deployKeyPending {
+		// Cloning before the forge accepts the key fails (#003).
+		b.WriteString("    " + sMuted.Render("after upstream registration:") + "\n")
+	}
+	b.WriteString("    " + sInfo.Render(clone) + "\n")
 
 	mcpAddr := "https://localhost:30443/mcp"
 	if state.ClusterInfo.nodeIP != "" {

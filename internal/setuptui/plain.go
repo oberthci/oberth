@@ -245,7 +245,7 @@ func runPlain(ctx context.Context, opts Options, input io.Reader, output io.Writ
 	// Page 7: TLS — self-signed is the only implemented mode (no --tls-cert/
 	// --tls-key in the installer). Informational only, like the TUI page.
 	step(7, "heat shield")
-	wln("  TLS: self-signed certificate (ed25519) will be generated.")
+	wln("  TLS: " + tlsCertificateDescription(state) + ".")
 	wln("  Bring-your-own certificate support is coming soon.")
 	state.TLSMode = "self-signed"
 

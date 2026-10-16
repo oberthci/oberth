@@ -457,7 +457,7 @@ func SetupProductionSecretStore(ctx context.Context, cfg Config, deps Deps, open
 	case status.Sealed:
 		return SecretStoreResult{}, fmt.Errorf("OpenBao in namespace %s is initialized but sealed (the pod restarted). Unseal it with your saved unseal key:\n\n"+
 			"    kubectl exec -it -n %s %s -- bao operator unseal\n\nthen re-run oberth install. "+
-			"To unseal automatically on a single node, see deploy/systemd/README.md.",
+			"To unseal automatically on a single node, see deploy/systemd/README.md",
 			openbao.Namespace, openbao.Namespace, client.pod)
 	default:
 		_, _ = fmt.Fprintln(deps.Output, "OpenBao is already initialized and unsealed; skipping operator init (credentials were printed once at first initialization).")
@@ -540,7 +540,7 @@ func SetupProductionSecretStoreDeferred(ctx context.Context, cfg Config, interac
 	case status.Sealed:
 		return SecretStoreResult{}, nil, fmt.Errorf("OpenBao in namespace %s is initialized but sealed (the pod restarted). Unseal it with your saved unseal key:\n\n"+
 			"    kubectl exec -it -n %s %s -- bao operator unseal\n\nthen re-run oberth install. "+
-			"To unseal automatically on a single node, see deploy/systemd/README.md.",
+			"To unseal automatically on a single node, see deploy/systemd/README.md",
 			openbao.Namespace, openbao.Namespace, client.pod)
 	default:
 		_, _ = fmt.Fprintln(interactiveDeps.Output, "OpenBao is already initialized and unsealed; skipping operator init (credentials were printed once at first initialization).")

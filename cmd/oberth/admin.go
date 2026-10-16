@@ -1713,7 +1713,7 @@ func runUplinkRotate(ctx context.Context, arguments []string, input io.Reader, o
 		return err
 	}
 	// Stdin can be read once: buffer it for both the fingerprint and add.
-	var keyInput io.Reader = input
+	keyInput := input
 	if source == "-" {
 		body, err := io.ReadAll(io.LimitReader(input, 1<<20))
 		if err != nil {

@@ -1329,6 +1329,9 @@ func TestTLSPageHasNoProxyToggle(t *testing.T) {
 	state.ClusterInfo.nodeName = "playground"
 	p.init(state)
 	view := strings.ToLower(stripAnsi(p.view(state, 100, 30)))
+	// The certificate legitimately names the oberth-goproxy service; the
+	// banned word is the old "behind a proxy" toggle, not that name.
+	view = strings.ReplaceAll(view, "oberth-goproxy", "")
 	for _, banned := range []string{"proxy", "watch.oberth.ci", "nodeport"} {
 		if strings.Contains(view, banned) {
 			t.Errorf("tls page must not mention %q:\n%s", banned, view)
@@ -2255,5 +2258,50 @@ func TestApplyStepsFollowInstallerOrder(t *testing.T) {
 	}
 	if stepNameToIndex["upstream discovery"] != upstream || stepNameToIndex["mint uplink"] != uplink {
 		t.Fatal("stepNameToIndex disagrees with the row order")
+	}
+}
+
+// The TLS page describes the certificate the store will actually issue and
+// lists every name the server requests (#007).
+func TestTLSPageDescribesServerPKI(t *testing.T) {
+	p := newTLSPage()
+	state := &WizardState{StoreMode: "install-prod"}
+	state.ClusterInfo.nodeName = "tuxbox"
+	state.ClusterInfo.nodeIP = "192.168.86.193"
+	p.init(state)
+	view := stripAnsi(p.view(state, 200, 40))
+	for _, want := range []string{"ECDSA P-256", "oberth.oberth.svc.cluster.local", "oberth-goproxy", "tuxbox", "192.168.86.193"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("tls page missing %q:\n%s", want, view)
+		}
+	}
+	if strings.Contains(view, "ed25519") {
+		t.Errorf("production store must not be described as ed25519:\n%s", view)
+	}
+	state.StoreMode = "install-dev"
+	if !strings.Contains(stripAnsi(p.view(state, 200, 40)), "self-signed") {
+		t.Error("a dev store keeps the self-signed certificate")
+	}
+}
+
+// A partial result is a pending key only when the installer took its
+// key-pending path (#016).
+func TestDeployKeyPendingOnlyForKeyPendingPath(t *testing.T) {
+	ap := newApplyPage()
+	set := func(prefix, status string) {
+		for i := range ap.steps {
+			if strings.HasPrefix(ap.steps[i].name, prefix) {
+				ap.steps[i].status = status
+			}
+		}
+	}
+	set("upstream discovery", "pending")
+	set("mint uplink", "done")
+	if applyStepStatus(ap, "upstream discovery") != "pending" || applyStepStatus(ap, "mint uplink") != "done" {
+		t.Fatal("key-pending path not recognised")
+	}
+	set("mint uplink", "failed")
+	if applyStepStatus(ap, "mint uplink") == "done" {
+		t.Fatal("a failed uplink is not a pending key")
 	}
 }

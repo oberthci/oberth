@@ -235,7 +235,11 @@ func formatTLSSummary(state *WizardState) string {
 	if mode == "" {
 		mode = "self-signed"
 	}
-	names := len(state.Config.TLSExtraDNSNames) + len(state.Config.TLSExtraIPs)
+	if state.StoreMode == "install-prod" {
+		mode = "CA-issued (OpenBao PKI)"
+	}
+	dnsNames, ips := serverCertificateNames(state, nil)
+	names := len(dnsNames) + len(ips)
 	plural := "names"
 	if names == 1 {
 		plural = "name"
@@ -255,5 +259,11 @@ func formatForgeSummary(state *WizardState) string {
 		return "not configured"
 	}
 	auth := strings.ReplaceAll(state.ForgeAuth, "-", " ")
+	switch state.ForgeAuth {
+	case "deploy-key":
+		auth = "generated upstream key"
+	case "existing":
+		auth = "existing work key"
+	}
 	return state.ForgeType + " / " + state.ForgeOrg + " · " + auth
 }

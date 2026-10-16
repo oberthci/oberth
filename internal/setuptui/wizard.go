@@ -186,6 +186,14 @@ func Run(ctx context.Context, opts Options, input io.Reader, output io.Writer) e
 		return nil
 	}
 
+	// A partial setup (some steps not green or skipped) must not look like
+	// success to scripts: plain mode already returns this error (#003).
+	if isWizard {
+		if dp, ok := wiz.pages[pageDone].(*donePage); ok && dp.totalSteps > 0 &&
+			dp.greenCount+dp.skippedCount < dp.totalSteps {
+			return installer.ErrOnboardingPartial
+		}
+	}
 	return nil
 }
 
@@ -239,7 +247,8 @@ func newWizard(opts Options) *wizard {
 			TLSMode:   "self-signed",
 			StoreMode: "install-prod",
 			ForgeType: "codeberg",
-			ForgeAuth: "existing",
+			// A dedicated, generated upstream key by default (#017, 5cc9554).
+			ForgeAuth: "deploy-key",
 		},
 	}
 
@@ -417,10 +426,13 @@ func (w *wizard) advance() (*wizard, tea.Cmd) {
 						dp.skippedCount++
 					}
 				}
-				// The deploy key is pending when the install completed
-				// partially — some steps remain because the forge has not
-				// accepted the key yet and the server stays NotReady.
-				dp.deployKeyPending = dp.greenCount > 0 && dp.greenCount < dp.totalSteps
+				// The deploy key is pending exactly when the installer took its
+				// key-pending path: the uplink was minted but upstream
+				// discovery stayed pending because the forge has not accepted
+				// the key yet (onboard.go). Any other partial result is a
+				// different failure and must not be blamed on the key (#016).
+				dp.deployKeyPending = applyStepStatus(ap, "upstream discovery") == "pending" &&
+					applyStepStatus(ap, "mint uplink") == "done"
 			}
 		}
 	}
@@ -727,3 +739,14 @@ func BuildCommandLine(state *WizardState) string {
 }
 
 func shellQuote(value string) string { return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'" }
+
+// applyStepStatus returns the status of the apply step whose name starts
+// with prefix, or "" when there is none.
+func applyStepStatus(ap *applyPage, prefix string) string {
+	for _, step := range ap.steps {
+		if strings.HasPrefix(step.name, prefix) {
+			return step.status
+		}
+	}
+	return ""
+}

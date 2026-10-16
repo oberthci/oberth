@@ -1,6 +1,8 @@
 package setuptui
 
 import (
+	"github.com/oberthci/oberth/internal/secretstore"
+
 	"slices"
 	"strings"
 
@@ -71,12 +73,15 @@ func (p *tlsPage) view(state *WizardState, _, _ int) string {
 
 	b.WriteString("  " + sQuestion.Render(p.question()) + "\n\n")
 
-	// Every name and address the certificate will be valid for.
-	validFor := append(slices.Clone(p.sans), state.Config.TLSExtraIPs...)
+	// Every name and address the certificate will be valid for: the same
+	// list the server requests (secretstore.ServerTLSNames).
+	dnsNames, ips := serverCertificateNames(state, p.sans)
+	validFor := append(dnsNames, ips...)
 
 	b.WriteString("    " + lipgloss.NewStyle().Foreground(cPurple).Render("(*)") +
-		" " + sText.Render("generate a self-signed certificate (ed25519)") + "\n")
-	b.WriteString("          " + sMuted.Render("valid for: "+strings.Join(validFor, " · ")) + "\n\n")
+		" " + sText.Render(tlsCertificateDescription(state)) + "\n")
+	b.WriteString("          " + sMuted.Render("valid for: "+strings.Join(validFor, " · ")) + "\n")
+	b.WriteString("          " + sMuted.Render("plus the address the installer advertises to clients (localhost on a local cluster)") + "\n\n")
 
 	// Fingerprint note — the done page shows the retrieval commands.
 	b.WriteString("  " + sMuted.Render("after install, retrieve the fingerprint and verify it out of band") + "\n")
@@ -87,4 +92,28 @@ func (p *tlsPage) view(state *WizardState, _, _ int) string {
 	}
 
 	return b.String()
+}
+
+// tlsCertificateDescription says what certificate the server will serve: a
+// production secret store gets short-lived leaves from the server PKI, other
+// stores a self-signed certificate (#007).
+func tlsCertificateDescription(state *WizardState) string {
+	if state != nil && state.StoreMode == "install-prod" {
+		return "30-day ECDSA P-256 certificate from a local CA in OpenBao, renewed automatically"
+	}
+	return "self-signed certificate (ed25519)"
+}
+
+// serverCertificateNames is the name set the server certificate covers.
+func serverCertificateNames(state *WizardState, sans []string) (dnsNames, ips []string) {
+	ns := "oberth"
+	extra := slices.Clone(sans)
+	if state != nil {
+		if state.Config.Namespace != "" {
+			ns = state.Config.Namespace
+		}
+		extra = append(extra, state.Config.TLSExtraDNSNames...)
+		extra = append(extra, state.Config.TLSExtraIPs...)
+	}
+	return secretstore.ServerTLSNames(ns, extra)
 }

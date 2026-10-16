@@ -198,7 +198,7 @@ func (p *forgePage) update(msg tea.Msg, state *WizardState) (page, tea.Cmd) {
 				return p, nil
 			}
 			if forgeAuthOptions[p.authCursor].comingSoon {
-				p.errMsg = "forge token via openbao is coming soon — choose deploy key per repo for now"
+				p.errMsg = "forge token via openbao is coming soon — choose a generated or existing upstream SSH key"
 				return p, nil
 			}
 			state.ForgeType = p.forgeOptions[p.forgeCursor]

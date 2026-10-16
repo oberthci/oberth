@@ -38,8 +38,14 @@ func (p *gitPage) update(msg tea.Msg, _ *WizardState) (page, tea.Cmd) {
 }
 
 // gitCloneURL renders one ssh clone URL with the <repo> placeholder muted.
-func gitCloneURL(host string) string {
-	return sInfo.Render("ssh://git@"+host+":30022/") + sMuted.Render("<repo>") + sInfo.Render(".git")
+// Repositories are addressed as <upstream>/<org>/<repo>, the same path the
+// done page and plain mode print (#004).
+func gitCloneURL(host string, state *WizardState) string {
+	prefix := "ssh://git@" + host + ":30022/"
+	if state != nil && state.ForgeType != "" && state.ForgeOrg != "" {
+		prefix += state.ForgeType + "/" + state.ForgeOrg + "/"
+	}
+	return sInfo.Render(prefix) + sMuted.Render("<repo>") + sInfo.Render(".git")
 }
 
 func (p *gitPage) view(state *WizardState, _, _ int) string {
@@ -60,8 +66,8 @@ func (p *gitPage) view(state *WizardState, _, _ int) string {
 	}
 	const urlColumn = 46
 	b.WriteString("  " + sMuted.Render("Clone URLs") + "\n")
-	b.WriteString("    " + padTo(gitCloneURL("localhost"), urlColumn) + sMuted.Render("(from this machine)") + "\n")
-	b.WriteString("    " + padTo(gitCloneURL(nodeHost), urlColumn) + sMuted.Render("(from your network)") + "\n\n")
+	b.WriteString("    " + padTo(gitCloneURL("localhost", state), urlColumn) + sMuted.Render("(from this machine)") + "\n")
+	b.WriteString("    " + padTo(gitCloneURL(nodeHost, state), urlColumn) + sMuted.Render("(from your network)") + "\n\n")
 
 	b.WriteString("  " + sMuted.Render("What happens on push") + "\n")
 	b.WriteString("    " + sText.Render("push") + sMuted.Render(" → ") +
