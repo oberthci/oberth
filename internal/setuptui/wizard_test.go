@@ -757,3 +757,19 @@ func TestFinishAfterFailedInstallReturnsError(t *testing.T) {
 		t.Fatalf("finish after a failed install = %v", err)
 	}
 }
+
+// A resumed setup keeps what the cluster probe found, so the finish screen,
+// Verify and the equivalent command name the real cluster rather than
+// localhost, and keep --yes for a remote one (review finding).
+func TestResumeKeepsClusterIdentity(t *testing.T) {
+	var st WizardState
+	st.Config.ContextName = "prod"
+	st.ClusterInfo = clusterInfoMsg{context: "prod", server: "https://10.0.0.5:6443", isLocal: false, nodeName: "node-a", nodeIP: "10.0.0.5"}
+	saved := st.toSaved()
+	var resumed WizardState
+	resumed.fromSaved(saved)
+	got := resumed.ClusterInfo
+	if got.server != "https://10.0.0.5:6443" || got.isLocal || got.nodeIP != "10.0.0.5" || got.nodeName != "node-a" || got.context != "prod" {
+		t.Fatalf("resumed cluster info = %+v", got)
+	}
+}

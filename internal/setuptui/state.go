@@ -142,6 +142,12 @@ type savedSetup struct {
 	KubeconfigPath string `json:"kubeconfig,omitempty"`
 	ContextName    string `json:"context,omitempty"`
 	CreateKind     bool   `json:"createKind,omitempty"`
+	// What the cluster probe found, so a resumed finish screen, Verify and
+	// the equivalent command do not fall back to localhost (non-secret).
+	ClusterServer string `json:"clusterServer,omitempty"`
+	ClusterLocal  bool   `json:"clusterLocal,omitempty"`
+	NodeName      string `json:"nodeName,omitempty"`
+	NodeIP        string `json:"nodeIP,omitempty"`
 
 	Namespace        string `json:"namespace,omitempty"`
 	ArgoNamespace    string `json:"argoNamespace,omitempty"`
@@ -188,6 +194,10 @@ func (st *WizardState) toSaved() savedSetup {
 		KubeconfigPath:     c.KubeconfigPath,
 		ContextName:        c.ContextName,
 		CreateKind:         c.CreateKind,
+		ClusterServer:      st.ClusterInfo.server,
+		ClusterLocal:       st.ClusterInfo.isLocal,
+		NodeName:           st.ClusterInfo.nodeName,
+		NodeIP:             st.ClusterInfo.nodeIP,
 		Namespace:          c.Namespace,
 		ArgoNamespace:      c.ArgoNamespace,
 		OpenBaoNamespace:   c.OpenBaoNamespace,
@@ -221,6 +231,13 @@ func (st *WizardState) fromSaved(s savedSetup) {
 	c.KubeconfigPath = s.KubeconfigPath
 	c.ContextName = s.ContextName
 	c.CreateKind = s.CreateKind
+	if st.ClusterInfo.server == "" && s.ClusterServer != "" {
+		st.ClusterInfo.context = s.ContextName
+		st.ClusterInfo.server = s.ClusterServer
+		st.ClusterInfo.isLocal = s.ClusterLocal
+		st.ClusterInfo.nodeName = s.NodeName
+		st.ClusterInfo.nodeIP = s.NodeIP
+	}
 	if s.Namespace != "" {
 		c.Namespace = s.Namespace
 	}
