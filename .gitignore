@@ -13,6 +13,8 @@ website/.wrangler/
 oberth-*
 !cmd/oberth-node-bridge/
 !cmd/oberth-kvm-harness/
+# Host service files shipped from deploy/systemd (issue 056).
+!deploy/systemd/oberth-*
 *.tar.gz
 
 # Setup backlog lives outside the repository (~/work/oberth/issues).

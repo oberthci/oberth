@@ -1,0 +1,41 @@
+#!/bin/sh
+# oberth-openbao-unseal: keep an installer-managed production OpenBao unsealed.
+#
+# OpenBao seals whenever its pod restarts (node reboot, eviction, upgrade), and
+# Oberth cannot load its identities until it is unsealed again. This loop checks
+# the pod every OPENBAO_UNSEAL_INTERVAL seconds and submits the unseal key when
+# it finds the store initialized but sealed.
+#
+# Trade-off: the unseal key lives on the node. Use it only where that is an
+# accepted risk (a single-node lab or homelab), never where the node's disk is
+# less trusted than the store's contents.
+#
+# The key is read from the systemd credential "unseal-key" and reaches the pod
+# as JSON on stdin (`bao write sys/unseal -`), never in argv, so neither the
+# Kubernetes API audit log nor the process table records it.
+set -u
+
+ns=${OPENBAO_NAMESPACE:-openbao}
+pod=${OPENBAO_POD:-openbao-0}
+interval=${OPENBAO_UNSEAL_INTERVAL:-15}
+keyfile=${CREDENTIALS_DIRECTORY:?run under systemd with LoadCredential=unseal-key:...}/unseal-key
+
+[ -r "$keyfile" ] || { echo "unseal key credential is not readable: $keyfile" >&2; exit 1; }
+
+while :; do
+	# bao status exits 0 when unsealed, 2 when sealed, 1 on error.
+	status=$(kubectl exec -n "$ns" "$pod" -c openbao -- bao status -format=json 2>/dev/null)
+	rc=$?
+	if [ "$rc" -eq 2 ] && printf '%s' "$status" | grep -q '"initialized": *true'; then
+		# printf is a shell builtin: the key never appears in any argv.
+		if printf '{"key":"%s"}' "$(cat "$keyfile")" |
+			kubectl exec -i -n "$ns" "$pod" -c openbao -- bao write -format=json sys/unseal - >/dev/null 2>&1; then
+			echo "unsealed $ns/$pod"
+		else
+			echo "unseal of $ns/$pod failed; retrying in ${interval}s" >&2
+		fi
+	elif [ "$rc" -ne 0 ] && [ "$rc" -ne 2 ]; then
+		echo "openbao $ns/$pod not reachable yet (bao status exit $rc)" >&2
+	fi
+	sleep "$interval"
+done
