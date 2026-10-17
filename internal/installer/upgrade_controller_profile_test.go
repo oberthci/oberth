@@ -57,7 +57,7 @@ func TestUpgradeControllerProfileDryRunAndOverrides(t *testing.T) {
 		t.Fatalf("explicit same-version preview refused: %+v %v", result, err)
 	}
 	output := deps.Output.(*bytes.Buffer).String()
-	for _, wanted := range []string{"Controller transition:", argoworkflow.NonrootExecutorImage, "argo.controllerProfile=nonroot-static-v1", "No automatic rollback"} {
+	for _, wanted := range []string{"Controller transition:", argoworkflow.NonrootExecutorImage, "argo.controllerProfile=nonroot-static-v1", "No automatic rollback", "Reconcile the Argo controller profile at"} {
 		if !strings.Contains(output, wanted) {
 			t.Fatalf("preview omitted %s", wanted)
 		}
