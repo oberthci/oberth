@@ -286,7 +286,7 @@ func tokenCommandForHost() (read string, store string) {
 
 // tokenFileReadCommand is how the client files read the token from the
 // owner-only fallback file on a host without a secret store.
-const tokenFileReadCommand = `cat "${XDG_CONFIG_HOME:-$HOME/.config}/oberth/token"`
+const tokenFileReadCommand = `cat "${XDG_CONFIG_HOME:-$HOME/.config}/oberth/token"` //nolint:gosec // G101: a shell command that reads the token file, not a credential
 
 // TokenFileFallback reports whether the client files on this host read the
 // bearer token from the owner-only file (no keychain, secret-tool or pass).
