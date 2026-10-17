@@ -347,7 +347,8 @@ func printRestorePlan(w io.Writer, cfg RestoreConfig, deps backupDeps, archive r
 
 	plan := target.OpenBao
 	if plan.Known {
-		_, _ = fmt.Fprintf(w, "  OpenBao    write %d secrets (%d new, %d replacing current values)\n", len(archive.KV.Secrets), plan.SecretsNew, plan.SecretsReplaced)
+		_, _ = fmt.Fprintf(w, "  OpenBao    %d secrets (%d new, %d replacing current values, %d unchanged)\n",
+			len(archive.KV.Secrets), plan.SecretsNew, plan.SecretsReplaced, plan.SecretsUnchanged)
 		_, _ = fmt.Fprintf(w, "             %d policies (%d new, %d replaced, %d unchanged), %d roles (%d new, %d replaced, %d unchanged)\n",
 			len(archive.Policies), len(plan.PoliciesNew), len(plan.PoliciesReplaced), plan.PoliciesUnchanged,
 			len(archive.Roles.Roles), len(plan.RolesNew), len(plan.RolesReplaced), plan.RolesUnchanged)

@@ -299,19 +299,22 @@ func canonicalJSON(value any) string {
 // openBaoRestorePlan is what a restore will change in OpenBao.
 type openBaoRestorePlan struct {
 	SecretsNew, SecretsReplaced int
-	PoliciesNew                 []string
-	PoliciesReplaced            []string
-	PoliciesUnchanged           int
-	RolesNew                    []string
-	RolesReplaced               []string
-	RolesUnchanged              int
+	// SecretsUnchanged already hold the archived value; restore skips them,
+	// so it adds no KV version.
+	SecretsUnchanged  int
+	PoliciesNew       []string
+	PoliciesReplaced  []string
+	PoliciesUnchanged int
+	RolesNew          []string
+	RolesReplaced     []string
+	RolesUnchanged    int
 	// Known is false when no root token was available to read the target
 	// (dry run only); the counts are then the archive's own.
 	Known bool
 }
 
-// planOpenBaoRestore compares the archive with the target store, reading only
-// paths, policy texts and role fields — never secret values.
+// planOpenBaoRestore compares the archive with the target store. Secret
+// values are read only to compare them in memory; the plan carries counts.
 func planOpenBaoRestore(ctx context.Context, store openBaoExec, token string, kv kvExport, policies []policyExport, roles rolesExport) (openBaoRestorePlan, error) {
 	plan := openBaoRestorePlan{Known: true}
 	existing := map[string]bool{}
@@ -339,10 +342,18 @@ func planOpenBaoRestore(ctx context.Context, store openBaoExec, token string, kv
 		return plan, err
 	}
 	for _, secret := range kv.Secrets {
-		if existing[secret.Path] {
-			plan.SecretsReplaced++
-		} else {
+		if !existing[secret.Path] {
 			plan.SecretsNew++
+			continue
+		}
+		same, err := secretUnchanged(ctx, store, token, kv.Mount, secret)
+		if err != nil {
+			return plan, err
+		}
+		if same {
+			plan.SecretsUnchanged++
+		} else {
+			plan.SecretsReplaced++
 		}
 	}
 	for _, policy := range policies {
@@ -376,11 +387,30 @@ func planOpenBaoRestore(ctx context.Context, store openBaoExec, token string, kv
 	return plan, nil
 }
 
+// secretUnchanged reports whether the current version of secret already holds
+// the archived data. A deleted or destroyed latest version counts as changed.
+func secretUnchanged(ctx context.Context, store openBaoExec, token, mount string, secret kvSecretExport) (bool, error) {
+	envelope, err := store.readData(ctx, token, mount+"/data/"+secret.Path)
+	if err != nil || envelope == nil {
+		return false, err
+	}
+	have, _ := envelope["data"].(map[string]any)
+	return have != nil && canonicalJSON(have) == canonicalJSON(secret.Data), nil
+}
+
 // restoreOpenBao writes every archived secret, policy and role, then reads
-// each one back and compares it with the archive. Secrets are compared in
-// full; a mismatch is reported by path only.
+// each one back and compares it with the archive. A secret that already holds
+// the archived value is not written again. Secrets are compared in full; a
+// mismatch is reported by path only.
 func restoreOpenBao(ctx context.Context, store openBaoExec, token string, kv kvExport, policies []policyExport, roles rolesExport) error {
 	for _, secret := range kv.Secrets {
+		same, err := secretUnchanged(ctx, store, token, kv.Mount, secret)
+		if err != nil {
+			return err
+		}
+		if same {
+			continue
+		}
 		if err := store.writeJSON(ctx, token, kv.Mount+"/data/"+secret.Path, map[string]any{"data": secret.Data}); err != nil {
 			return err
 		}

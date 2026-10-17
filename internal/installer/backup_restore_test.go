@@ -724,8 +724,35 @@ func TestRestoreDryRunChangesNothing(t *testing.T) {
 		t.Fatalf("restore --dry-run: %v\n%s", err, out.String())
 	}
 	assertNoRestoreMutation(t, target)
-	assertSubstringsInOrder(t, out.String(), []string{"Archive verified", "write 3 secrets (2 new, 1 replacing", "1 replaced",
+	assertSubstringsInOrder(t, out.String(), []string{"Archive verified", "3 secrets (2 new, 1 replacing current values, 0 unchanged)", "1 replaced",
 		"scale deploy/oberth 1 -> 0", "pre-restore-20261017T093000Z", "set argo, compatibility", "oberth-oberth-orphan", "No changes were made"})
+}
+
+// A secret that already holds the archived value is counted as unchanged and
+// not written again, so a same-cluster restore adds no KV version for it.
+func TestRestoreSkipsUnchangedSecrets(t *testing.T) {
+	t.Parallel()
+	archive, runID, _ := backupFixtureArchive(t, false)
+	target := restoreTargetCluster(t, runID)
+	target.bao.kv["release/cosign-secret"] = map[string]any{"key": "cosign-canary", "password": "pw-canary"}
+	var out bytes.Buffer
+	cfg := RestoreConfig{Input: archive, Yes: true, Timeout: 10 * time.Second}
+	cfg.applyDefaults()
+	if err := runRestore(context.Background(), cfg, target.deps(&out)); err != nil {
+		t.Fatalf("restore: %v\n%s", err, out.String())
+	}
+	if !strings.Contains(out.String(), "3 secrets (1 new, 1 replacing current values, 1 unchanged)") {
+		t.Fatalf("plan does not report the unchanged secret:\n%s", out.String())
+	}
+	if strings.Contains(out.String(), "cosign-canary") {
+		t.Fatal("restore output prints a secret value")
+	}
+	if slices.Contains(target.bao.writes, "oberth/data/release/cosign-secret") {
+		t.Fatalf("unchanged secret was written again: %v", target.bao.writes)
+	}
+	if !slices.Contains(target.bao.writes, "oberth/data/identities/oberth/ssh-host") {
+		t.Fatalf("changed secret was not written: %v", target.bao.writes)
+	}
 }
 
 func TestRestoreWithoutConfirmationChangesNothing(t *testing.T) {
