@@ -579,6 +579,15 @@ func (service *API) Runs(ctx context.Context, _ api.Actor, filter api.RunFilter)
 	return service.history.ListRecentRuns(ctx, storeFilter)
 }
 
+// RunCounts is the dashboard's count of retained runs, in total and per
+// repository ID; the run list itself is paged.
+func (service *API) RunCounts(ctx context.Context, _ api.Actor) (any, error) {
+	if service.history == nil {
+		return nil, fmt.Errorf("%w: run history", ErrUnavailable)
+	}
+	return service.history.CountRuns(ctx)
+}
+
 // Grants is the read-only dashboard/API view of promotion grants, mirroring
 // the MCP promote_grant_list tool with query-string filters. No mutation
 // endpoints exist; mutations stay MCP-only, admin-only.

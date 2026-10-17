@@ -11,6 +11,7 @@ const slowPollMs = 10000;
 const livePollMs = 2000;
 const state = {
   repos: [], runs: [], repoRuns: [], status: null,
+  runCounts: null, runCursor: 0, runCursorHistory: [], runNext: 0,
   timer: null, routeSeq: 0,
   filter: localStorage.getItem("oberth-filter") || "all",
   repo: localStorage.getItem("oberth-repo") || "all",
@@ -273,15 +274,33 @@ function setAuto(ms) {
 
 /* ---------- data loading ---------- */
 async function loadRepos() { state.repos = await api("/api/repos") || []; }
-async function loadRuns() { state.runs = await api("/api/runs?limit=100") || []; }
+const runPageSize = 100;
+async function loadRuns() { state.runs = await api(`/api/runs?limit=${runPageSize}`) || []; }
+/* The list pages with ?before (#050). state.runs stays the newest page, for
+   the stats; state.repoRuns is the page shown when it is not that one. */
 async function loadRepoRuns() {
-  if (state.repo === "all") { state.repoRuns = []; return; }
+  if (state.repo === "all" && !state.runCursor) { state.repoRuns = []; return; }
+  const query = new URLSearchParams({ limit: String(runPageSize) });
+  if (state.repo !== "all") query.set("repo", state.repo);
+  if (state.runCursor) query.set("before", String(state.runCursor));
   try {
-    state.repoRuns = await api(`/api/runs?limit=100&repo=${enc(state.repo)}`) || [];
+    state.repoRuns = await api("/api/runs?" + query.toString()) || [];
   } catch (err) {
-    if (err.status === 404) { state.repo = "all"; localStorage.setItem("oberth-repo", "all"); state.repoRuns = []; return; }
+    if (err.status === 404) { changeRunRepo("all"); localStorage.setItem("oberth-repo", "all"); state.repoRuns = []; return; }
     throw err;
   }
+}
+/* Older servers have no counts route; the sidebar then counts the page. */
+async function loadRunCounts() {
+  try { state.runCounts = await api("/api/runs/counts"); } catch (err) {
+    if (err.message === "stale request" || err.name === "AbortError") throw err;
+    state.runCounts = null;
+  }
+}
+function changeRunRepo(repo) {
+  state.repo = repo;
+  state.runCursor = 0;
+  state.runCursorHistory = [];
 }
 async function loadStatus() {
   state.status = await api("/api/status");
@@ -308,13 +327,18 @@ function runsTable(runs) {
 }
 async function renderRuns(seq) {
   setChrome("runs", "/ runs");
-  await Promise.all([loadRepos(), loadRuns(), loadRepoRuns()]);
+  await Promise.all([loadRepos(), loadRuns(), loadRepoRuns(), loadRunCounts()]);
   if (!currentRoute(seq)) return;
   localStorage.setItem("oberth-filter", state.filter);
   localStorage.setItem("oberth-repo", state.repo);
-  const runs = state.runs, source = state.repo !== "all" ? state.repoRuns : runs;
+  const runs = state.runs, source = state.repo !== "all" || state.runCursor ? state.repoRuns : runs;
   const visible = source.filter(runMatches), counts = repoCounts(runs);
-  if (state.repo !== "all") counts.set(state.repo, state.repoRuns.length);
+  if (state.runCounts) {
+    counts.set("all", state.runCounts.Total || 0);
+    for (const repo of state.repos) counts.set(repo.Name, state.runCounts.ByRepo?.[repo.ID] || 0);
+  } else if (state.repo !== "all" && !state.runCursor) counts.set(state.repo, state.repoRuns.length);
+  state.runNext = source.length === runPageSize ? source[source.length - 1].QueueSequence : 0;
+  const page = state.runCursorHistory.length + 1;
   const running = runs.filter(run => run.Status === "running").length;
   const queued = runs.filter(run => run.Status === "queued").length;
   const failed = runs.filter(run => run.Status === "failed").length;
@@ -323,7 +347,7 @@ async function renderRuns(seq) {
   <section class="screen">
     <div class="bar">
       <h1>Runs</h1>
-      <div class="stats"><span><b>${runs.length}</b> retained</span><span><b>${running}</b> running</span><span><b>${queued}</b> queued</span><span><b>${failed}</b> failed</span><span><b>${releases}</b> release</span></div>
+      <div class="stats"><span><b>${esc(counts.get("all") || 0)}</b> retained</span><span><b>${running}</b> running</span><span><b>${queued}</b> queued</span><span><b>${failed}</b> failed</span><span><b>${releases}</b> release</span></div>
     </div>
     <div class="runs-layout">
       <aside class="repo-side">
@@ -333,9 +357,13 @@ async function renderRuns(seq) {
       <section>
         <div class="toolbar">
           ${runFilters.map(f => `<button class="chip ${state.filter === f ? "on" : ""}" data-status-filter="${esc(f)}">${esc(f)}</button>`).join("")}
-          <span class="count">${visible.length} shown</span>
+          <span class="count">${visible.length} shown${page > 1 ? ` · page ${page}` : ""}</span>
         </div>
         ${visible.length ? runsTable(visible) : `<div class="empty">No runs match the current filters.</div>`}
+        ${page > 1 || state.runNext ? `<div class="issue-pager">
+          <button type="button" data-action="runs-newer" ${page > 1 ? "" : "disabled"}>‹ newer</button>
+          <button type="button" data-action="runs-older" ${state.runNext ? "" : "disabled"}>older ›</button>
+        </div>` : ""}
       </section>
     </div>
   </section>`);
@@ -843,6 +871,14 @@ document.addEventListener("click", event => {
       if (next) { state.issueCursorHistory.push(state.issueCursor); state.issueCursor = next; route(); }
       break;
     }
+    case "runs-older": {
+      if (state.runNext) { state.runCursorHistory.push(state.runCursor); state.runCursor = state.runNext; route(); }
+      break;
+    }
+    case "runs-newer": {
+      if (state.runCursorHistory.length) { state.runCursor = state.runCursorHistory.pop(); route(); }
+      break;
+    }
     case "issue-newer": {
       if (state.issueCursorHistory.length) { state.issueCursor = state.issueCursorHistory.pop(); route(); }
       break;
@@ -871,8 +907,8 @@ app.addEventListener("click", event => {
      the order would swallow the click and navigate to the filtered list instead
      of the run detail page. */
   if ((target = event.target.closest("[data-run-id]"))) { go(`/runs/${enc(target.dataset.runId)}`); return; }
-  if ((target = event.target.closest("[data-repo-runs]"))) { state.repo = target.dataset.repoRuns; go("/runs"); return; }
-  if ((target = event.target.closest("[data-repo-filter]"))) { state.repo = target.dataset.repoFilter; route(); return; }
+  if ((target = event.target.closest("[data-repo-runs]"))) { changeRunRepo(target.dataset.repoRuns); go("/runs"); return; }
+  if ((target = event.target.closest("[data-repo-filter]"))) { changeRunRepo(target.dataset.repoFilter); route(); return; }
   if ((target = event.target.closest("[data-status-filter]"))) { state.filter = target.dataset.statusFilter; route(); return; }
   if ((target = event.target.closest("[data-issue-kind]"))) { changeIssueFilter({ issueKind: target.dataset.issueKind }); return; }
   if ((target = event.target.closest("[data-issue-state]"))) { changeIssueFilter({ issueState: target.dataset.issueState }); return; }

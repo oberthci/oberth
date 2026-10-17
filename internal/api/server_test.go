@@ -75,6 +75,9 @@ func (backend *fakeBackend) Runs(_ context.Context, _ Actor, filter RunFilter) (
 	}
 	return map[string]any{"runs": []any{}}, nil
 }
+func (backend *fakeBackend) RunCounts(context.Context, Actor) (any, error) {
+	return map[string]any{"Total": 3, "ByRepo": map[string]int{"1": 2, "2": 1}}, nil
+}
 func (backend *fakeBackend) Run(_ context.Context, _ Actor, id string) (any, error) {
 	backend.runID = id
 	return map[string]any{"Run": map[string]any{"ID": id}, "Steps": []any{}}, nil
@@ -930,6 +933,23 @@ func TestGrantsAPIRejectsMutation(t *testing.T) {
 	// for a known path with a wrong method.
 	if response.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("POST /api/grants status = %d, want 405", response.Code)
+	}
+}
+
+// /api/runs/counts is its own route, not a run named "counts".
+func TestRunCountsRoute(t *testing.T) {
+	server, backend := testServer(t)
+	request := httptest.NewRequest(http.MethodGet, "/api/runs/counts", nil)
+	request.Header.Set("Authorization", "Bearer valid-token")
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusOK || backend.runID != "" || !strings.Contains(response.Body.String(), `"Total":3`) {
+		t.Fatalf("status=%d runID=%q body=%s", response.Code, backend.runID, response.Body.String())
+	}
+	unauthenticated := httptest.NewRecorder()
+	server.Handler().ServeHTTP(unauthenticated, httptest.NewRequest(http.MethodGet, "/api/runs/counts", nil))
+	if unauthenticated.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated status = %d", unauthenticated.Code)
 	}
 }
 

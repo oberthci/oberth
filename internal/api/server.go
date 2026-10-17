@@ -62,6 +62,7 @@ type ViewService interface {
 	RunArtifacts(context.Context, Actor, string) (any, error)
 	RunArtifact(context.Context, Actor, string, string, runlog.Filter) (any, error)
 	Runs(context.Context, Actor, RunFilter) (any, error)
+	RunCounts(context.Context, Actor) (any, error)
 	Run(context.Context, Actor, string) (any, error)
 	RunLog(context.Context, Actor, string, string, string) (any, error)
 	RunLogFiltered(context.Context, Actor, string, string, string, runlog.Filter) (any, error)
@@ -162,6 +163,7 @@ func (server *Server) routes() {
 	})
 	server.mux.Handle("POST /mcp", server.requireAuth(http.HandlerFunc(server.handleMCP)))
 	server.mux.Handle("GET /api/runs", server.requireAuth(http.HandlerFunc(server.handleRuns)))
+	server.mux.Handle("GET /api/runs/counts", server.requireAuth(http.HandlerFunc(server.handleRunCounts)))
 	server.mux.Handle("GET /api/runs/{run}", server.requireAuth(http.HandlerFunc(server.handleRunDetail)))
 	server.mux.Handle("GET /api/runs/{run}/logs", server.requireAuth(http.HandlerFunc(server.handleRunLog)))
 	server.mux.Handle("GET /api/runs/{run}/livelog", server.requireAuth(http.HandlerFunc(server.handleRunLogLive)))
@@ -237,6 +239,11 @@ func (server *Server) handleRuns(writer http.ResponseWriter, request *http.Reque
 	if runs, ok := value.([]model.Run); ok && err == nil && len(runs) > 0 && len(runs) == filter.Limit {
 		writer.Header().Set("X-Oberth-Next-Before", strconv.FormatInt(runs[len(runs)-1].QueueSequence, 10))
 	}
+	server.writeView(writer, value, err)
+}
+
+func (server *Server) handleRunCounts(writer http.ResponseWriter, request *http.Request) {
+	value, err := server.views.RunCounts(request.Context(), actorFrom(request.Context()))
 	server.writeView(writer, value, err)
 }
 

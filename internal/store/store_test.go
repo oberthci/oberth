@@ -1772,6 +1772,12 @@ func TestListLatestRunsPerRepoReturnsQuietReposOutsideGlobalWindow(t *testing.T)
 		t.Fatal("precondition: global top-100 should not contain quiet repo runs")
 	}
 
+	// CountRuns sees every run, beyond any page (#050).
+	counts, err := s.CountRuns(ctx)
+	if err != nil || counts.Total != 107 || counts.ByRepo[repoA.ID] != 105 || counts.ByRepo[repoB.ID] != 2 {
+		t.Fatalf("CountRuns = %+v, %v", counts, err)
+	}
+
 	// ListLatestRunsPerRepo must return runs for both repos.
 	perRepoRuns, err := s.ListLatestRunsPerRepo(ctx, 12)
 	if err != nil {

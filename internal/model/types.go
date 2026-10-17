@@ -178,6 +178,12 @@ type RunListFilter struct {
 	Before int64
 }
 
+// RunCounts is the number of retained runs, in total and per repository ID.
+type RunCounts struct {
+	Total  int
+	ByRepo map[int64]int
+}
+
 type RunCancellation struct {
 	RunID        string
 	JobName      string

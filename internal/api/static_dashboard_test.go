@@ -69,8 +69,15 @@ func TestRunsServerSideRepoFilter(t *testing.T) {
 	source := string(script.body)
 
 	// Fix 1: /runs filtered view uses the server-side repo query parameter.
-	if !strings.Contains(source, `/api/runs?limit=100&repo=`) {
+	if !strings.Contains(source, `query.set("repo", state.repo)`) {
 		t.Fatal("app.js does not use the server-side repo filter endpoint")
+	}
+	// The run list pages with ?before and the sidebar counts every retained
+	// run, not just the loaded page (#050).
+	for _, want := range []string{`query.set("before", String(state.runCursor))`, `"/api/runs/counts"`, `data-action="runs-older"`, `state.runCounts.ByRepo?.[repo.ID]`} {
+		if !strings.Contains(source, want) {
+			t.Fatalf("app.js run paging is missing %s", want)
+		}
 	}
 
 	// Fix 2: historyStrip emits data-run-id on .hist buttons (not bare <i>).

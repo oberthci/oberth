@@ -799,6 +799,30 @@ ORDER BY queue_sequence DESC LIMIT ?`,
 	return runs, nil
 }
 
+// CountRuns counts the retained runs, in total and per repository, so a
+// paged list can show how many runs exist beyond the page it holds.
+func (s *Store) CountRuns(ctx context.Context) (model.RunCounts, error) {
+	counts := model.RunCounts{ByRepo: map[int64]int{}}
+	rows, err := s.db.QueryContext(ctx, `SELECT repo_id, COUNT(*) FROM runs GROUP BY repo_id`)
+	if err != nil {
+		return counts, fmt.Errorf("count runs: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var repoID int64
+		var n int
+		if err := rows.Scan(&repoID, &n); err != nil {
+			return counts, fmt.Errorf("scan run count: %w", err)
+		}
+		counts.ByRepo[repoID] = n
+		counts.Total += n
+	}
+	if err := rows.Err(); err != nil {
+		return counts, fmt.Errorf("count runs: %w", err)
+	}
+	return counts, nil
+}
+
 // ListLatestRunsPerRepo returns the most recent N runs for every repository
 // using a SQL window function. The result is bounded by repos x perRepo rows
 // (e.g. 20 repos x 12 = 240) and is always correct regardless of total run
