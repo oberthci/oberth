@@ -114,8 +114,8 @@ func TestNextStepsNameEveryUpstreamAndHowToAddMore(t *testing.T) {
 			t.Errorf("next steps miss %q:\n%s", want, text)
 		}
 	}
-	if strings.Contains(text, "codeberg/cloudtaser/<repo>") {
-		t.Errorf("a pending upstream must not be offered for cloning:\n%s", text)
+	if !strings.Contains(text, "(once codeberg.org accepts the upstream key)") {
+		t.Errorf("a pending upstream must say when its clone works:\n%s", text)
 	}
 	if strings.Contains(text, "works on this machine only") {
 		t.Errorf("a non-localhost host needs no localhost note:\n%s", text)

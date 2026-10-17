@@ -5,6 +5,7 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/pem"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -128,6 +129,9 @@ func newTestHost(t *testing.T) *testHost {
 
 	stubKindTools(t, false)
 	stubClusterProbe(t, nil)
+	previousDial := dialPort
+	dialPort = func(context.Context, string) error { return nil }
+	t.Cleanup(func() { dialPort = previousDial })
 	return &testHost{home: home, kubeconfig: kubeconfig, pubKey: pubKey}
 }
 
@@ -232,9 +236,9 @@ func stubKubectl(t *testing.T, k *fakeKubectl) *fakeKubectl {
 		switch {
 		case strings.Contains(line, "upstream list"):
 			if k.registered {
-				return []byte("NAME\tURL\ngithub\tssh://git@github.com/acme\n"), nil
+				return []byte(upstreamCheckTable("github", "ssh://git@github.com/acme", "ok")), nil
 			}
-			return []byte("NAME\tURL\n"), nil
+			return []byte(upstreamCheckTable()), nil
 		case strings.Contains(line, "upstream add"):
 			if k.acceptAdd {
 				k.registered, k.ready = true, true
@@ -253,6 +257,19 @@ func stubKubectl(t *testing.T, k *fakeKubectl) *fakeKubectl {
 	}
 	t.Cleanup(func() { runKubectl = previous })
 	return k
+}
+
+// upstreamCheckTable renders `oberth upstream list --check` output, aligned
+// like the server's tabwriter: name, URL and AUTH triples.
+func upstreamCheckTable(rows ...string) string {
+	line := func(name, kind, url, keyName, fp, auth string) string {
+		return fmt.Sprintf("%-10s %-6s %-36s %-10s %-20s %s\n", name, kind, url, keyName, fp, auth)
+	}
+	out := line("NAME", "KIND", "URL", "KEY NAME", "KEY FINGERPRINT", "AUTH")
+	for i := 0; i+2 < len(rows); i += 3 {
+		out += line(rows[i], "ssh", rows[i+1], "-", "SHA256:x", rows[i+2])
+	}
+	return out
 }
 
 func testPublicKey(t *testing.T) string {
@@ -318,12 +335,16 @@ func (h *harness) answerAllSteps() {
 	h.enter()
 	h.expectQuestion("tls.names")
 	h.enter()
+	h.expectQuestion("tls.client")
+	h.enter()
 	h.expectQuestion("forge.type")
 	h.enter()
 	h.expectQuestion("forge.org")
 	h.typeText("acme")
 	h.enter()
 	h.expectQuestion("forge.key")
+	h.enter()
+	h.expectQuestion("forge.more")
 	h.enter()
 	h.expectQuestion("uplink.identity")
 	h.enter()

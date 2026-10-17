@@ -24,6 +24,9 @@ type NextStepsInput struct {
 	// SSHAlias is set when ~/.ssh/config on this machine has the "oberth"
 	// Host block, so the short clone form works here.
 	SSHAlias bool
+	// OmitPendingHelp drops the "Finish <upstream>" commands, for a caller
+	// that already explains the pending forge authorization above.
+	OmitPendingHelp bool
 }
 
 // NextSteps is what to do after an install, as plain text lines: clone from
@@ -60,19 +63,18 @@ func NextSteps(in NextStepsInput) []string {
 	firstRepo := ""
 	add("Clone a repository through Oberth (the first clone registers it):")
 	for _, u := range in.Upstreams {
+		repo := u.Name + "/" + orgFromBaseURL(u.BaseURL) + "/<repo>"
+		add("   git clone ssh://git@" + host + ":" + sshNodePort + "/" + repo + ".git")
 		if !u.Connected {
 			pending = append(pending, u)
+			add("     (once " + hostnameFromURL(u.BaseURL) + " accepts the upstream key)")
 			continue
 		}
-		repo := u.Name + "/" + orgFromBaseURL(u.BaseURL) + "/<repo>"
 		if firstRepo == "" {
 			firstRepo = repo
 		}
-		add("   git clone ssh://git@" + host + ":" + sshNodePort + "/" + repo + ".git")
 	}
-	if firstRepo == "" {
-		add("   (once an organization below is connected)")
-	} else if in.SSHAlias {
+	if firstRepo != "" && in.SSHAlias {
 		add("   on this machine also:  git clone git@oberth:" + firstRepo + ".git")
 	}
 
@@ -80,6 +82,9 @@ func NextSteps(in NextStepsInput) []string {
 		"   cd <repo> && oberth init && git push origin HEAD:my-branch",
 		"   oberth runs --ref my-branch   ·   https://"+host+":"+httpsNodePort+"/runs")
 
+	if in.OmitPendingHelp {
+		pending = nil
+	}
 	for _, u := range pending {
 		add("", "Finish "+u.Name+" ("+hostnameFromURL(u.BaseURL)+"/"+orgFromBaseURL(u.BaseURL)+"): add the upstream public key to that account, then:",
 			"   "+exec(false, "upstream", "add", "--yes", "--no-wait", u.Name, u.BaseURL))
@@ -131,3 +136,27 @@ func printReadyWithNextSteps(w io.Writer, cfg Config, deps Deps, upstreams []Nex
 	}
 	_, _ = fmt.Fprintln(w)
 }
+
+// PlanAlsoUpstreams names the --also-upstream organizations the way
+// onboarding will register them, for a summary written before (or without)
+// asking the server. Duplicates of an earlier organization are dropped.
+func PlanAlsoUpstreams(firstName, firstURL string, also []string) []NextStepsUpstream {
+	used := map[string]bool{firstName: true}
+	orgs := map[string]bool{orgFromBaseURL(firstURL): true}
+	var planned []NextStepsUpstream
+	for _, baseURL := range also {
+		org := orgFromBaseURL(baseURL)
+		if orgs[org] {
+			continue
+		}
+		orgs[org] = true
+		name := alsoUpstreamName(baseURL, used, orgs)
+		used[name] = true
+		planned = append(planned, NextStepsUpstream{Name: name, BaseURL: baseURL})
+	}
+	return planned
+}
+
+// SSHAliasConfigured reports whether ~/.ssh/config has the "oberth" Host
+// block onboarding writes, so the short clone form works on this machine.
+func SSHAliasConfigured() bool { return sshHostBlockExists() }

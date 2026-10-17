@@ -5,6 +5,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -123,6 +125,11 @@ type installScreen struct {
 
 	cancel context.CancelFunc
 	msgCh  chan tea.Msg
+
+	// logPath is the file every masked log line is also written to, so the
+	// whole log survives the session and can be read in any pager (#059).
+	logPath string
+	logFile *os.File
 }
 
 func newInstallScreen() *installScreen {
@@ -157,8 +164,9 @@ func (s *installScreen) start(w *wizard) tea.Cmd {
 	s.focus = focusRing{buttons: 1}
 	s.attempts++
 	s.msgCh = make(chan tea.Msg, 64)
+	s.openLogFile()
 	if s.attempts > 1 {
-		s.logLines = append(s.logLines, fmt.Sprintf("──── attempt %d · %s ────", s.attempts, time.Now().Format(time.TimeOnly)))
+		s.appendLog(fmt.Sprintf("──── attempt %d · %s ────", s.attempts, time.Now().Format(time.TimeOnly)))
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	s.cancel = cancel
@@ -234,9 +242,7 @@ func (s *installScreen) consume(w *wizard, msg tea.Msg) tea.Cmd {
 			s.steps[msg.step].status = msg.status
 		}
 	case applyLogMsg:
-		if len(s.logLines) < 5000 {
-			s.logLines = append(s.logLines, msg.line)
-		}
+		s.appendLog(msg.line)
 	case ceremonyTokenMsg:
 		// The masker copies; the ceremony copies and zeros the delivery
 		// buffer (S2: no stray copy survives on the message value).
@@ -255,8 +261,57 @@ func (s *installScreen) consume(w *wizard, msg tea.Msg) tea.Cmd {
 	return next
 }
 
+// openLogFile creates setup-log-<timestamp>.txt beside setup.json for the
+// first attempt and reopens it for later ones. A log that cannot be written
+// is not a reason to stop an install: the in-memory log still works.
+func (s *installScreen) openLogFile() {
+	if s.logFile != nil {
+		return
+	}
+	if s.logPath != "" {
+		file, err := os.OpenFile(s.logPath, os.O_WRONLY|os.O_APPEND, 0o600) //nolint:gosec // G304: the wizard's own log
+		if err == nil {
+			s.logFile = file
+		}
+		return
+	}
+	statePath, err := setupStatePath()
+	if err != nil {
+		return
+	}
+	dir := filepath.Dir(statePath)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return
+	}
+	path := filepath.Join(dir, "setup-log-"+time.Now().Format("20060102-150405")+".txt")
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600) //nolint:gosec // G304: a name the wizard builds
+	if err != nil {
+		return
+	}
+	s.logPath, s.logFile = path, file
+}
+
+// appendLog keeps one masked line in memory (bounded) and in the log file
+// (complete).
+func (s *installScreen) appendLog(line string) {
+	if len(s.logLines) < 5000 {
+		s.logLines = append(s.logLines, line)
+	}
+	if s.logFile != nil {
+		_, _ = s.logFile.WriteString(line + "\n")
+	}
+}
+
+func (s *installScreen) closeLogFile() {
+	if s.logFile != nil {
+		_ = s.logFile.Close()
+		s.logFile = nil
+	}
+}
+
 // finishRun records the outcome and picks the next view.
 func (s *installScreen) finishRun(w *wizard) tea.Cmd {
+	s.closeLogFile()
 	rec := &w.state.Install
 	rec.At = time.Now()
 	rec.Phase, rec.Error = "", ""

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -295,6 +296,94 @@ func scanSSHPublicKeys() []sshKey {
 		keys = append(keys, sshKey{path: path, algorithm: strings.TrimPrefix(pk.Type(), "ssh-"), fingerprint: ssh.FingerprintSHA256(pk)})
 	}
 	return keys
+}
+
+// sshKeyPair is a private key in ~/.ssh found through its public half.
+type sshKeyPair struct {
+	sshKey
+	private string
+	comment string
+}
+
+// scanSSHKeyPairs lists the private keys in ~/.ssh that have a parseable
+// .pub beside them (#057). Only the public halves are read; the private key
+// is checked when it is chosen.
+func scanSSHKeyPairs() []sshKeyPair {
+	var pairs []sshKeyPair
+	for _, k := range scanSSHPublicKeys() {
+		private := strings.TrimSuffix(k.path, ".pub")
+		if info, err := os.Stat(private); err != nil || !info.Mode().IsRegular() {
+			continue
+		}
+		comment := ""
+		if data, err := os.ReadFile(k.path); err == nil { //nolint:gosec // G304: a public key listed above
+			if _, c, _, _, perr := ssh.ParseAuthorizedKey(data); perr == nil {
+				comment = c
+			}
+		}
+		pairs = append(pairs, sshKeyPair{sshKey: k, private: private, comment: comment})
+	}
+	return pairs
+}
+
+// errRescan asks a choice screen to list its options again, after the
+// operator created a key in another terminal.
+var errRescan = errors.New("rescan")
+
+// normalizeAlsoUpstream turns "codeberg.org/acme" or an ssh:// URL into the
+// ssh://git@host/org form the installer registers.
+func normalizeAlsoUpstream(raw string) (string, error) {
+	base := strings.TrimSpace(raw)
+	if !strings.Contains(base, "://") {
+		base = "ssh://git@" + base
+	}
+	u, err := url.Parse(base)
+	if err != nil || u.Scheme != "ssh" || u.Hostname() == "" {
+		return "", fmt.Errorf("%q: write host/organization, e.g. codeberg.org/your-org", raw)
+	}
+	org := strings.Trim(u.Path, "/")
+	if err := validateForgeOrg(org); err != nil {
+		return "", fmt.Errorf("%q: %w", raw, err)
+	}
+	if u.User == nil || u.User.Username() == "" {
+		u.User = url.User("git")
+	}
+	return "ssh://" + u.User.Username() + "@" + u.Host + "/" + org, nil
+}
+
+// displayUpstream drops the ssh://git@ prefix for display.
+func displayUpstream(baseURL string) string {
+	return strings.TrimPrefix(baseURL, "ssh://git@")
+}
+
+// clientHostOptions are the addresses a client could be told to use: the
+// node's address and name and every extra certificate name, then localhost.
+// A kind cluster publishes on 127.0.0.1 only, so it offers localhost alone.
+func clientHostOptions(st *WizardState) []option {
+	local := option{value: "localhost", label: "localhost", detail: "this machine only"}
+	if st.Config.CreateKind || st.ClusterInfo.engine == "kind" {
+		local.detail = "kind publishes Oberth on 127.0.0.1 only"
+		return []option{local}
+	}
+	var opts []option
+	seen := map[string]bool{"localhost": true, "127.0.0.1": true}
+	addOpt := func(value, detail string) {
+		value = strings.ToLower(value)
+		if value == "" || seen[value] {
+			return
+		}
+		seen[value] = true
+		opts = append(opts, option{value: value, label: value, detail: detail})
+	}
+	addOpt(st.ClusterInfo.nodeIP, "the node's address · machines that can reach this host, such as a VM's host or your LAN")
+	addOpt(st.ClusterInfo.nodeName, "the node's name · other machines need it in DNS or /etc/hosts")
+	for _, name := range st.Config.TLSExtraIPs {
+		addOpt(name, "an address on the certificate")
+	}
+	for _, name := range st.Config.TLSExtraDNSNames {
+		addOpt(name, "a name on the certificate")
+	}
+	return append(opts, local)
 }
 
 // tlsCertificateDescription says what certificate the server will serve: a
@@ -649,6 +738,31 @@ func buildQuestions() []*question {
 			},
 		},
 		{
+			id: "tls.client", step: stepTLS, heading: "Which address do clients use?",
+			explain: func(st *WizardState) string {
+				if st.Config.CreateKind || st.ClusterInfo.engine == "kind" {
+					return "kind publishes ports 30022 and 30443 on 127.0.0.1 only, so clients on this machine use localhost."
+				}
+				return "Clone URLs, the CLI and MCP settings and the dashboard link name this address, and the certificate covers it. On k3s and most clusters, ports 30022 and 30443 already listen on every address of the node, so pick the one your other machines (a laptop, the VM's host) reach this server by. localhost works on this machine only."
+			},
+			options: clientHostOptions,
+			selected: func(st *WizardState) string {
+				if st.Config.ClientHost != "" {
+					return st.Config.ClientHost
+				}
+				return clientHost(st)
+			},
+			save: func(st *WizardState, answer []string) error {
+				for _, o := range clientHostOptions(st) {
+					if o.value == answer[0] {
+						st.Config.ClientHost = answer[0]
+						return nil
+					}
+				}
+				return fmt.Errorf("%s is not one of this server's addresses any more; choose again", answer[0])
+			},
+		},
+		{
 			id: "forge.type", step: stepForge, heading: "Where does green code go?",
 			explain: func(*WizardState) string {
 				return "Oberth publishes green branches to an upstream forge and mirrors its repositories."
@@ -693,8 +807,8 @@ func buildQuestions() []*question {
 			},
 			options: func(*WizardState) []option {
 				return []option{
-					{value: forgeAuthGenerate, label: "Generate a new upstream SSH key", detail: "register its public key with your forge account after the install"},
-					{value: forgeAuthExisting, label: "Use an existing work SSH key", detail: "already registered with the forge · a dedicated key without a passphrase"},
+					{value: forgeAuthGenerate, label: "Generate a new upstream SSH key", detail: "kept in OpenBao only · after the install, add its public key to your forge account (every repository you can reach, private ones too) or as a deploy key (one repository)"},
+					{value: forgeAuthExisting, label: "Use an existing SSH key from this machine", detail: "already added to your forge account · no passphrase · imported into OpenBao"},
 				}
 			},
 			selected: func(st *WizardState) string { return st.ForgeAuth },
@@ -702,6 +816,7 @@ func buildQuestions() []*question {
 				switch answer[0] {
 				case forgeAuthGenerate:
 					st.Config.UpstreamPrivateKeyPath = ""
+					st.UpstreamKeyPick = ""
 				case forgeAuthExisting:
 				default:
 					return errors.New("choose how Oberth authenticates")
@@ -711,12 +826,62 @@ func buildQuestions() []*question {
 			},
 		},
 		{
-			id: "forge.keyfile", step: stepForge, heading: "Which private key?",
-			explain: func(*WizardState) string {
-				return "The private key file of your work SSH identity. It is imported into OpenBao, so it must not have a passphrase; setup checks it now."
+			id: "forge.keypick", step: stepForge, heading: "Which private key?",
+			explain: func(st *WizardState) string {
+				text := "Your work SSH identity: Oberth → " + st.ForgeType + ". The private key is imported into OpenBao, so it must have no passphrase; setup checks the one you choose. Listed: keys in ~/.ssh with a matching .pub."
+				if len(scanSSHKeyPairs()) == 0 {
+					text += " No key pair was found in ~/.ssh. In another terminal run  ssh-keygen -t ed25519 -N '' -f ~/.ssh/oberth_upstream  and add ~/.ssh/oberth_upstream.pub at " +
+						forgeKeyDestination(st.ForgeType, st.ForgeOrg) + ", then choose Scan again. Or go back and let Oberth generate the key."
+				}
+				return text
 			},
 			applies: func(st *WizardState) bool { return st.ForgeAuth == forgeAuthExisting },
-			fields:  []string{"Private key"}, placeholders: []string{"~/.ssh/id_ed25519_work"},
+			options: func(*WizardState) []option {
+				var opts []option
+				for _, k := range scanSSHKeyPairs() {
+					detail := k.algorithm + " · " + k.fingerprint
+					if k.comment != "" {
+						detail += " · " + k.comment
+					}
+					opts = append(opts, option{value: k.private, label: displayHome(k.private), detail: detail})
+				}
+				return append(opts,
+					option{value: upstreamKeyRescan, label: "Scan ~/.ssh again", detail: "after creating a key in another terminal"},
+					option{value: upstreamKeyOther, label: "Another file…", detail: "name a private key file"})
+			},
+			selected: func(st *WizardState) string {
+				if st.UpstreamKeyPick != "" {
+					return st.UpstreamKeyPick
+				}
+				return st.Config.UpstreamPrivateKeyPath
+			},
+			save: func(st *WizardState, answer []string) error {
+				switch answer[0] {
+				case upstreamKeyRescan:
+					return errRescan
+				case upstreamKeyOther:
+					st.UpstreamKeyPick = upstreamKeyOther
+					return nil
+				case "":
+					return errors.New("choose a private key")
+				}
+				if err := installer.CheckUpstreamPrivateKey(answer[0]); err != nil {
+					return err
+				}
+				st.UpstreamKeyPick = answer[0]
+				st.Config.UpstreamPrivateKeyPath = answer[0]
+				return nil
+			},
+		},
+		{
+			id: "forge.keyfile", step: stepForge, heading: "Which private key file?",
+			explain: func(*WizardState) string {
+				return "The path of the private key (not the .pub). It is imported into OpenBao, so it must not have a passphrase; setup checks it now."
+			},
+			applies: func(st *WizardState) bool {
+				return st.ForgeAuth == forgeAuthExisting && st.UpstreamKeyPick == upstreamKeyOther
+			},
+			fields: []string{"Private key"}, placeholders: []string{"~/.ssh/<private key file>"},
 			values: func(st *WizardState) []string { return []string{displayHome(st.Config.UpstreamPrivateKeyPath)} },
 			save: func(st *WizardState, answer []string) error {
 				path, err := expandedPath(answer[0])
@@ -731,6 +896,38 @@ func buildQuestions() []*question {
 					return err
 				}
 				st.Config.UpstreamPrivateKeyPath = path
+				return nil
+			},
+		},
+		{
+			id: "forge.more", step: stepForge, heading: "Connect more organizations?",
+			explain: func(st *WizardState) string {
+				return "Optional. Each is connected with the same upstream key, so that key must also be registered with those accounts (a key on GitHub does not open Codeberg). Separate several with commas; leave empty to skip. More can be added after the install."
+			},
+			fields: []string{"Also connect"}, placeholders: []string{"codeberg.org/your-org, github.com/another-org"},
+			values: func(st *WizardState) []string {
+				shown := make([]string, 0, len(st.Config.AlsoUpstreams))
+				for _, u := range st.Config.AlsoUpstreams {
+					shown = append(shown, displayUpstream(u))
+				}
+				return []string{strings.Join(shown, ", ")}
+			},
+			save: func(st *WizardState, answer []string) error {
+				primary := "ssh://git@" + forgeUpstreamURL(st.ForgeType, st.ForgeOrg)
+				var also []string
+				for _, raw := range splitNames(answer[0]) {
+					u, err := normalizeAlsoUpstream(raw)
+					if err != nil {
+						return err
+					}
+					if u == primary {
+						return fmt.Errorf("%s is the organization chosen above", displayUpstream(u))
+					}
+					if !slices.Contains(also, u) {
+						also = append(also, u)
+					}
+				}
+				st.Config.AlsoUpstreams = also
 				return nil
 			},
 		},
@@ -764,10 +961,14 @@ func buildQuestions() []*question {
 				}
 				return text
 			},
-			options: func(*WizardState) []option {
+			options: func(st *WizardState) []option {
 				var opts []option
 				for _, k := range scanSSHPublicKeys() {
-					opts = append(opts, option{value: k.path, label: filepath.Base(k.path), detail: k.algorithm + " · " + k.fingerprint})
+					detail := k.algorithm + " · " + k.fingerprint
+					if strings.TrimSuffix(k.path, ".pub") == st.Config.UpstreamPrivateKeyPath {
+						detail += " · also your upstream key (Oberth → forge)"
+					}
+					opts = append(opts, option{value: k.path, label: filepath.Base(k.path), detail: detail})
 				}
 				return append(opts, option{value: uplinkKeyOther, label: "Another public key file…", detail: "name a *.pub file"})
 			},

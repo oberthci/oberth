@@ -234,6 +234,8 @@ func TestRevisitedStepReturnsToReview(t *testing.T) {
 	h.clear()
 	h.typeText("oberth.example.com, 10.0.0.5")
 	h.enter()
+	h.expectQuestion("tls.client")
+	h.enter()
 	if _, ok := h.w.screen.(*reviewScreen); !ok {
 		t.Fatalf("finishing a revisited step must return to the review, got %T", h.w.screen)
 	}

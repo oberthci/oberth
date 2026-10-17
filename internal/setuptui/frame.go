@@ -49,6 +49,40 @@ func wrapText(s string, width int) []string {
 	return out
 }
 
+// wrapWords wraps plain text at spaces only. ansi.Wrap also breaks after a
+// hyphen, which splits a command's flags ("--" | "yes") and a shell default
+// (":-" | "$HOME") across lines; a word wider than the line is cut as a last
+// resort.
+func wrapWords(s string, width int) []string {
+	width = max(10, width)
+	var lines []string
+	line := ""
+	for _, word := range strings.Fields(s) {
+		for ansi.StringWidth(word) > width {
+			if line != "" {
+				lines = append(lines, line)
+				line = ""
+			}
+			r := []rune(word)
+			lines = append(lines, string(r[:width]))
+			word = string(r[width:])
+		}
+		switch {
+		case line == "":
+			line = word
+		case ansi.StringWidth(line)+1+ansi.StringWidth(word) <= width:
+			line += " " + word
+		default:
+			lines = append(lines, line)
+			line = word
+		}
+	}
+	if line != "" {
+		lines = append(lines, line)
+	}
+	return lines
+}
+
 // wrapCommand wraps a command so every piece stays copyable: continuation
 // lines are indented and nothing is truncated.
 func wrapCommand(cmd string, width int, style lipgloss.Style) []string {
@@ -337,8 +371,15 @@ func (in *lineInput) handleKey(msg tea.KeyPressMsg) (handled, changed bool) {
 func (in *lineInput) view(width int, focused bool, placeholder string) string {
 	width = max(8, width)
 	box := lipgloss.NewStyle().Background(cLine).Foreground(cFg)
-	if len(in.runes) == 0 && !focused {
-		return box.Foreground(cComment).Render(padTo(truncateRunes(placeholder, width), width))
+	// A placeholder is an example, never a value (#057): it reads "e.g. …",
+	// stays dim, and shows behind the cursor while the field is focused too,
+	// so moving focus away does not make it look as if it had been typed.
+	if len(in.runes) == 0 && placeholder != "" {
+		hint := truncateRunes("e.g. "+placeholder, max(0, width-1))
+		if focused {
+			return sCursor.Render(" ") + box.Foreground(cComment).Render(padTo(hint, width-1))
+		}
+		return box.Foreground(cComment).Render(padTo(hint, width))
 	}
 	start := 0
 	if in.pos >= width {

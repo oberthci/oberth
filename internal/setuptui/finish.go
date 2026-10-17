@@ -85,6 +85,7 @@ type fileCheck struct {
 type verifyResult struct {
 	at          time.Time
 	upstream    bool
+	upstreams   []upstreamCheck
 	ready       bool
 	readyText   string
 	image       string
@@ -92,6 +93,102 @@ type verifyResult struct {
 	fingerprint string
 	register    string // output of a failed re-registration, trimmed
 	err         string
+	// ports reports whether SSH and HTTPS answer on the client address;
+	// portsText says where, or what failed.
+	portsChecked bool
+	portsOK      bool
+	portsText    string
+	// token reports whether the owner-only token file the client files read
+	// holds a token; tokenChecked is false when a secret store keeps it.
+	tokenChecked bool
+	tokenOK      bool
+	tokenText    string
+}
+
+// upstreamCheck is one row of `oberth upstream list --check`.
+type upstreamCheck struct {
+	name, url, auth string
+}
+
+func (u upstreamCheck) ok() bool { return u.auth == "ok" }
+
+// checks counts what Verify checked and how much of it passed.
+func (v *verifyResult) checks() (passed, total int) {
+	count := func(ok bool) {
+		total++
+		if ok {
+			passed++
+		}
+	}
+	count(v.ready)
+	if len(v.upstreams) == 0 {
+		count(v.upstream)
+	}
+	for _, u := range v.upstreams {
+		count(u.ok() || u.auth == "")
+	}
+	if v.portsChecked {
+		count(v.portsOK)
+	}
+	if v.tokenChecked {
+		count(v.tokenOK)
+	}
+	return passed, total
+}
+
+// summary is the one line Verify leaves on screen until the next action
+// (#058).
+func (v *verifyResult) summary() string {
+	passed, total := v.checks()
+	if passed == total {
+		return fmt.Sprintf("Verified at %s: all %d checks passed", v.at.Format(time.TimeOnly), total)
+	}
+	return fmt.Sprintf("Verified at %s: %d of %d checks failed (details above)", v.at.Format(time.TimeOnly), total-passed, total)
+}
+
+// dialPort opens and closes one TCP connection; tests replace it.
+var dialPort = func(ctx context.Context, address string) error {
+	conn, err := (&net.Dialer{Timeout: 3 * time.Second}).DialContext(ctx, "tcp", address)
+	if err != nil {
+		return err
+	}
+	return conn.Close()
+}
+
+// parseUpstreamCheck reads `oberth upstream list --check`: an aligned table
+// whose header names the columns ("KEY NAME" and "KEY FINGERPRINT" are two
+// words each), then one row per upstream. AUTH is the last column and may
+// hold an error with spaces, so it is read from the header's offset; it is
+// empty when the server did not check.
+func parseUpstreamCheck(out []byte) []upstreamCheck {
+	authAt := -1
+	header := false
+	var rows []upstreamCheck
+	for _, line := range strings.Split(string(out), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) == 0 {
+			continue
+		}
+		if !header {
+			if fields[0] == "NAME" {
+				header = true
+				authAt = strings.Index(line, "AUTH")
+			}
+			continue
+		}
+		row := upstreamCheck{name: fields[0]}
+		for _, f := range fields[1:] {
+			if strings.Contains(f, "://") {
+				row.url = f
+				break
+			}
+		}
+		if authAt >= 0 && len(line) > authAt {
+			row.auth = strings.TrimSpace(line[authAt:])
+		}
+		rows = append(rows, row)
+	}
+	return rows
 }
 
 type verifyDoneMsg struct {
@@ -137,11 +234,12 @@ func verifyInstall(ctx context.Context, st WizardState, reRegister bool) verifyR
 	defer cancel()
 	res := verifyResult{at: time.Now()}
 	list := func() error {
-		out, err := runKubectl(ctx, podExec(&st, "oberth", "upstream", "list")...)
+		out, err := runKubectl(ctx, podExec(&st, "oberth", "upstream", "list", "--check")...)
 		if err != nil {
 			return fmt.Errorf("list upstreams: %s", lastLine(out, err))
 		}
 		res.upstream = upstreamListHasRows(out)
+		res.upstreams = parseUpstreamCheck(out)
 		return nil
 	}
 	if err := list(); err != nil {
@@ -164,6 +262,7 @@ func verifyInstall(ctx context.Context, st WizardState, reRegister bool) verifyR
 			}
 		}
 	}
+	checkClientSide(ctx, &st, &res)
 	args := append(kubectlTarget(&st), "get", "deployment", "oberth", "-n", st.namespace(),
 		"-o", `jsonpath={.status.readyReplicas}/{.spec.replicas} {.spec.template.spec.containers[0].image}`)
 	out, err := runKubectl(ctx, args...)
@@ -186,6 +285,47 @@ func verifyInstall(ctx context.Context, st WizardState, reRegister bool) verifyR
 		res.image = fields[1]
 	}
 	return res
+}
+
+// checkClientSide checks what a client on another machine meets: SSH and
+// HTTPS answering on the advertised address, and, when the client files read
+// the owner-only token file, a token in it (#058).
+func checkClientSide(ctx context.Context, st *WizardState, res *verifyResult) {
+	host := clientHost(st)
+	var failed []string
+	for _, port := range []string{"30022", "30443"} {
+		if err := dialPort(ctx, net.JoinHostPort(host, port)); err != nil {
+			failed = append(failed, port+": "+err.Error())
+		}
+	}
+	res.portsChecked = true
+	res.portsOK = len(failed) == 0
+	if res.portsOK {
+		res.portsText = "SSH 30022 and HTTPS 30443 answer on " + host
+	} else {
+		res.portsText = "not reachable on " + host + ": " + strings.Join(failed, "; ")
+	}
+
+	if st.ClientAccess == "none" {
+		return
+	}
+	read, _ := installer.TokenCommands()
+	if !strings.HasPrefix(read, "cat ") {
+		return // a keychain, secret-tool or pass holds it; reading it may prompt
+	}
+	dir, err := installer.ClientConfigDir()
+	if err != nil {
+		return
+	}
+	path := filepath.Join(dir, "token")
+	res.tokenChecked = true
+	data, err := os.ReadFile(path) //nolint:gosec // G304: the client config directory
+	res.tokenOK = err == nil && strings.TrimSpace(string(data)) != ""
+	if res.tokenOK {
+		res.tokenText = "token stored in " + displayHome(path)
+	} else {
+		res.tokenText = "no token in " + displayHome(path) + " yet: the CLI and MCP cannot sign in"
+	}
 }
 
 // clientFiles lists the client files the chosen access should have written.
@@ -215,6 +355,9 @@ func clientFiles(st *WizardState) []fileCheck {
 // clientHost is the address a workstation client uses, mirroring the
 // installer: localhost for kind and loopback API servers, else the API host.
 func clientHost(st *WizardState) string {
+	if st.Config.ClientHost != "" {
+		return st.Config.ClientHost
+	}
 	if st.Config.CreateKind || st.ClusterInfo.server == "" {
 		return "localhost"
 	}
@@ -281,6 +424,7 @@ func (f *finishScreen) update(w *wizard, msg tea.Msg) tea.Cmd {
 	switch msg := msg.(type) {
 	case verifyDoneMsg:
 		f.verifying = false
+		f.report = ""
 		f.verify = &msg.result
 		w.lastVerify = &msg.result
 		if msg.result.ready && msg.result.upstream && w.state.Install.Status != installComplete {
@@ -362,7 +506,8 @@ func finishLines(w *wizard, v *verifyResult) []string {
 	var lines []string
 	add := func(s ...string) { lines = append(lines, s...) }
 
-	if st.Install.Status == installPendingForge || (v != nil && !v.upstream && st.Install.Status == installPartial) {
+	pendingForge := st.Install.Status == installPendingForge || (v != nil && !v.upstream && st.Install.Status == installPartial)
+	if pendingForge {
 		add("", "Finish the forge authorization (the upstream key: Oberth → "+st.ForgeType+"):")
 		if v != nil && v.publicKey != "" {
 			add("   upstream public key ("+v.fingerprint+"):", "   "+v.publicKey)
@@ -374,16 +519,13 @@ func finishLines(w *wizard, v *verifyResult) []string {
 	}
 
 	if v != nil {
-		add("", "Last verification ("+v.at.Format(time.TimeOnly)+"):")
+		passed, total := v.checks()
+		add("", fmt.Sprintf("Last verification (%s): %d of %d checks passed", v.at.Format(time.TimeOnly), passed, total))
 		mark := func(ok bool) string {
 			if ok {
 				return "✓"
 			}
 			return "✗"
-		}
-		add("   " + mark(v.upstream) + " upstream registered")
-		if v.register != "" {
-			add("     registration: " + v.register)
 		}
 		ready := "server Ready"
 		if v.readyText != "" {
@@ -392,6 +534,30 @@ func finishLines(w *wizard, v *verifyResult) []string {
 		add("   " + mark(v.ready) + " " + ready)
 		if v.image != "" {
 			add("     image " + v.image)
+		}
+		if len(v.upstreams) == 0 {
+			add("   " + mark(v.upstream) + " upstream registered")
+		}
+		for _, u := range v.upstreams {
+			where := u.name + " (" + displayUpstream(u.url) + ")"
+			switch {
+			case u.ok():
+				add("   ✓ upstream " + where + ": the forge accepts the key")
+			case u.auth == "":
+				add("   ✓ upstream " + where + " registered")
+			default:
+				add("   ✗ upstream "+where+": "+u.auth,
+					"     add the upstream public key to that account, then Verify again")
+			}
+		}
+		if v.register != "" {
+			add("     registration: " + v.register)
+		}
+		if v.portsChecked {
+			add("   " + mark(v.portsOK) + " " + v.portsText)
+		}
+		if v.tokenChecked {
+			add("   " + mark(v.tokenOK) + " " + v.tokenText)
 		}
 		if v.err != "" {
 			add("     " + v.err)
@@ -408,8 +574,10 @@ func finishLines(w *wizard, v *verifyResult) []string {
 			}
 		}
 		read, store := installer.TokenCommands()
-		add("   Store the bearer token from the credentials screen with:  "+store,
-			"   The files read it back with:  "+read)
+		if v == nil || !v.tokenChecked || !v.tokenOK {
+			add("   Store the bearer token from the credentials screen with:  "+store,
+				"   The files read it back with:  "+read)
+		}
 		for _, c := range checks {
 			if filepath.Base(c.path) == "env" {
 				add("   Then:  . " + displayHome(c.path))
@@ -420,18 +588,43 @@ func finishLines(w *wizard, v *verifyResult) []string {
 	}
 
 	if st.ForgeOrg != "" {
-		clone := "git clone ssh://git@" + host + ":30022/" + st.ForgeType + "/" + st.ForgeOrg + "/<repo>.git"
 		if v == nil || !v.ready {
-			add("", "Once the server is Ready, clone with:", "   "+clone)
-		} else {
-			add("", "Clone with:", "   "+clone)
+			add("", "Once the server is Ready:")
 		}
+		add("")
+		add(installer.NextSteps(installer.NextStepsInput{
+			Host:      host,
+			Context:   st.contextForCommands(),
+			Namespace: st.namespace(),
+			Upstreams: nextStepsUpstreams(st, v),
+			SSHAlias:  installer.SSHAliasConfigured(),
+			// The pending forge authorization is explained above.
+			OmitPendingHelp: pendingForge,
+		})...)
+	}
+	if w.install.logPath != "" {
+		add("", "Full install log (secrets masked): "+displayHome(w.install.logPath))
 	}
 	add("", "Verify the server out of band on every workstation:",
 		"   TLS 30443:  "+serverCAFingerprintCommand(st),
 		"   SSH 30022:  ssh-keyscan -p 30022 "+host,
 		"", "Dashboard https://"+host+":30443/runs · docs https://oberth.ci/docs")
 	return lines
+}
+
+// nextStepsUpstreams are the organizations to offer: what the last Verify
+// listed (with whether the forge accepts the key), else the answers.
+func nextStepsUpstreams(st *WizardState, v *verifyResult) []installer.NextStepsUpstream {
+	if v != nil && len(v.upstreams) > 0 {
+		var ups []installer.NextStepsUpstream
+		for _, u := range v.upstreams {
+			ups = append(ups, installer.NextStepsUpstream{Name: u.name, BaseURL: u.url, Connected: u.ok() || u.auth == ""})
+		}
+		return ups
+	}
+	ready := v != nil && v.upstream
+	ups := []installer.NextStepsUpstream{{Name: st.ForgeType, BaseURL: "ssh://git@" + forgeUpstreamURL(st.ForgeType, st.ForgeOrg), Connected: ready}}
+	return append(ups, installer.PlanAlsoUpstreams(st.ForgeType, ups[0].BaseURL, st.Config.AlsoUpstreams)...)
 }
 
 // serverCAFingerprintCommand prints the fingerprint clients should pin: the
@@ -477,7 +670,7 @@ func (f *finishScreen) frame(w *wizard) frameSpec {
 			continue
 		}
 		indent := len(line) - len(strings.TrimLeft(line, " "))
-		for i, l := range wrapText(trimmed, inner-indent-2) {
+		for i, l := range wrapWords(trimmed, inner-indent-2) {
 			pad := strings.Repeat(" ", indent)
 			if i > 0 {
 				pad += "  "
@@ -490,6 +683,8 @@ func (f *finishScreen) frame(w *wizard) frameSpec {
 		spec.status = "Verifying…"
 	case f.report != "":
 		spec.status = "Report saved to " + displayHome(f.report)
+	case f.verify != nil:
+		spec.status = f.verify.summary()
 	}
 	return spec
 }

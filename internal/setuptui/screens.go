@@ -181,13 +181,17 @@ func stepSummary(st *WizardState, step stepID) string {
 		if len(extra) > 0 {
 			s += " incl. " + strings.Join(extra, ", ")
 		}
-		return s
+		return s + " · clients use " + clientHost(st)
 	case stepForge:
 		key := "generated upstream key"
 		if st.ForgeAuth == forgeAuthExisting {
 			key = "existing key " + displayHome(c.UpstreamPrivateKeyPath)
 		}
-		return st.ForgeType + "/" + st.ForgeOrg + " · " + key
+		summary := st.ForgeType + "/" + st.ForgeOrg + " · " + key
+		for _, u := range c.AlsoUpstreams {
+			summary += " · also " + displayUpstream(u)
+		}
+		return summary
 	case stepUplink:
 		return st.UplinkIdentity + " · " + displayHome(st.SSHKeyPath)
 	case stepClient:

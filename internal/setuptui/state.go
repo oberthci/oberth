@@ -58,6 +58,8 @@ const (
 	clusterChoiceFile     = "@file"
 	clusterChoiceKind     = "@kind"
 	uplinkKeyOther        = "@other"
+	upstreamKeyOther      = "@other"
+	upstreamKeyRescan     = "@rescan"
 	forgeAuthGenerate     = "deploy-key"
 	forgeAuthExisting     = "existing"
 	storeInstallProd      = "install-prod"
@@ -90,9 +92,12 @@ type WizardState struct {
 	ForgeType      string
 	ForgeOrg       string
 	ForgeAuth      string
-	StoreMode      string
-	StoreAddress   string
-	ClientAccess   string
+	// UpstreamKeyPick is the private key chosen from ~/.ssh, or
+	// upstreamKeyOther when a path is typed (#057).
+	UpstreamKeyPick string
+	StoreMode       string
+	StoreAddress    string
+	ClientAccess    string
 
 	done    [stepCount]bool
 	Install installRecord
@@ -161,10 +166,13 @@ type savedSetup struct {
 	TLSExtraDNSNames []string `json:"tlsExtraDNSNames,omitempty"`
 	TLSExtraIPs      []string `json:"tlsExtraIPs,omitempty"`
 
-	ForgeType          string `json:"forge,omitempty"`
-	ForgeOrg           string `json:"organization,omitempty"`
-	ForgeAuth          string `json:"upstreamKey,omitempty"`
-	UpstreamPrivateKey string `json:"upstreamKeyFile,omitempty"`
+	ForgeType          string   `json:"forge,omitempty"`
+	ForgeOrg           string   `json:"organization,omitempty"`
+	ForgeAuth          string   `json:"upstreamKey,omitempty"`
+	UpstreamPrivateKey string   `json:"upstreamKeyFile,omitempty"`
+	UpstreamKeyPick    string   `json:"upstreamKeyPick,omitempty"`
+	AlsoUpstreams      []string `json:"alsoUpstreams,omitempty"`
+	ClientHost         string   `json:"clientHost,omitempty"`
 
 	UplinkIdentity string `json:"uplinkIdentity,omitempty"`
 	UplinkKey      string `json:"uplinkKey,omitempty"`
@@ -211,6 +219,9 @@ func (st *WizardState) toSaved() savedSetup {
 		ForgeOrg:           st.ForgeOrg,
 		ForgeAuth:          st.ForgeAuth,
 		UpstreamPrivateKey: c.UpstreamPrivateKeyPath,
+		UpstreamKeyPick:    st.UpstreamKeyPick,
+		AlsoUpstreams:      c.AlsoUpstreams,
+		ClientHost:         c.ClientHost,
 		UplinkIdentity:     st.UplinkIdentity,
 		UplinkKey:          st.UplinkKey,
 		SSHKeyPath:         st.SSHKeyPath,
@@ -264,7 +275,10 @@ func (st *WizardState) fromSaved(s savedSetup) {
 	}
 	if st.ForgeAuth == forgeAuthExisting {
 		c.UpstreamPrivateKeyPath = s.UpstreamPrivateKey
+		st.UpstreamKeyPick = s.UpstreamKeyPick
 	}
+	c.AlsoUpstreams = s.AlsoUpstreams
+	c.ClientHost = s.ClientHost
 	st.UplinkIdentity = s.UplinkIdentity
 	st.UplinkKey = s.UplinkKey
 	st.SSHKeyPath = s.SSHKeyPath

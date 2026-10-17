@@ -182,6 +182,11 @@ func (p *plainRun) askQuestion(q *question) error {
 			continue
 		}
 		if err := q.save(p.st, answer); err != nil {
+			if errors.Is(err, errRescan) {
+				p.say("  Scanned ~/.ssh again.\n")
+				attempt--
+				continue
+			}
 			p.say("  ERROR: %v\n", err)
 			continue
 		}

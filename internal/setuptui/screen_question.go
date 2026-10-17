@@ -1,7 +1,9 @@
 package setuptui
 
 import (
+	"errors"
 	"fmt"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -26,6 +28,7 @@ type questionScreen struct {
 	inputs []*lineInput
 	focus  focusRing
 	errMsg string
+	notice string
 	busy   bool
 }
 
@@ -69,6 +72,13 @@ func (s *questionScreen) answer() []string {
 
 func (s *questionScreen) submit(w *wizard) tea.Cmd {
 	if err := s.q.save(&w.state, s.answer()); err != nil {
+		if errors.Is(err, errRescan) {
+			s.opts = s.q.options(&w.state)
+			s.cursor = 0
+			s.errMsg = ""
+			s.notice = "Scanned ~/.ssh again at " + time.Now().Format(time.TimeOnly)
+			return nil
+		}
 		s.errMsg = err.Error()
 		return nil
 	}
@@ -171,8 +181,11 @@ func (s *questionScreen) frame(w *wizard) frameSpec {
 		buttons:   []string{"Go Back", "Continue"},
 		button:    s.focus.button(),
 	}
-	if s.busy {
+	switch {
+	case s.busy:
 		spec.status = "Checking…"
+	case s.notice != "":
+		spec.status = s.notice
 	}
 	if s.q.isChoice() {
 		focused := s.focus.button() < 0

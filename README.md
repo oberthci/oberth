@@ -87,6 +87,14 @@ curl -fsSL https://oberth.ci/install.sh | sh
 oberth install --install-secretstore
 ```
 
+`oberth setup` walks through the same install step by step. It lists the
+SSH key pairs in `~/.ssh`, can connect further organizations with the same
+upstream key (`--also-upstream codeberg.org/acme`), and asks which address
+clients use: for a VM or remote host choose the node's address
+(`--client-host 192.168.64.5`; NodePorts 30022/30443 listen on every node
+address). It ends with the exact commands to clone from each organization,
+connect another one, and give another machine an uplink.
+
 The installer guides upstream and uplink registration. To manage the chart
 separately after configuring your cluster and secret store, use the dedicated
 Oberth repository:

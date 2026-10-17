@@ -28,9 +28,11 @@ func TestPlainModeListsContextsAndKind(t *testing.T) {
 		"",     // store
 		"",     // anchoring
 		"",     // tls names
+		"",     // client address
 		"",     // forge
 		"acme", // organization
 		"",     // upstream key
+		"",     // more organizations
 		"",     // identity
 		"",     // uplink key
 		"",     // client access
@@ -54,9 +56,9 @@ func TestPlainModeRejectsAndReasks(t *testing.T) {
 	answers := strings.Join([]string{
 		"9", "1", // an out-of-range choice, then a valid one
 		"same", "same", "x", "", "", "", // duplicate namespaces, then defaults
-		"", "", "", "", "",
+		"", "", "", "", "", "",
 		"acme/repo", "acme", // an invalid organization, then a valid one
-		"", "", "", "",
+		"", "", "", "", "",
 	}, "\n") + "\n"
 	var out bytes.Buffer
 	if err := Run(context.Background(), Options{Plain: true, DryMode: true}, strings.NewReader(answers), &out); err != nil {
@@ -76,7 +78,7 @@ func TestPlainModeInstallAndVerify(t *testing.T) {
 	newTestHost(t)
 	stubInstaller(t, keyPendingInstall)
 	kubectl := stubKubectl(t, &fakeKubectl{pubKey: testPublicKey(t)})
-	answers := strings.Repeat("\n", 9) + "acme\n" + strings.Repeat("\n", 4) + "yes\n"
+	answers := strings.Repeat("\n", 10) + "acme\n" + strings.Repeat("\n", 5) + "yes\n"
 	var out bytes.Buffer
 	err := Run(context.Background(), Options{Plain: true}, strings.NewReader(answers), &out)
 	if !errors.Is(err, installer.ErrOnboardingPartial) || !strings.Contains(out.String(), "oberth upstream add --yes --no-wait github") {

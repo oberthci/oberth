@@ -110,7 +110,10 @@ type wizard struct {
 	height    int
 	scroll    int
 	logScroll int
-	showLog   bool
+	// logShift is how many columns the log view is scrolled sideways: log
+	// lines are tables and commands, which wrapping would break (#059).
+	logShift int
+	showLog  bool
 
 	confirmQuit bool
 	exit        exitReason
@@ -311,6 +314,7 @@ func (w *wizard) render() string {
 func (w *wizard) openLog() {
 	w.showLog = true
 	w.logScroll = 1 << 30 // start at the end; renderFrame clamps
+	w.logShift = 0
 }
 
 func (w *wizard) updateLog(key string) {
@@ -326,8 +330,13 @@ func (w *wizard) updateLog(key string) {
 		w.logScroll -= page
 	case "pgdown", "space":
 		w.logScroll += page
+	case "left", "h":
+		w.logShift = max(0, w.logShift-8)
+	case "right":
+		w.logShift += 8
 	case "home", "g":
 		w.logScroll = 0
+		w.logShift = 0
 	case "end", "G":
 		w.logScroll = 1 << 30
 	}
@@ -335,24 +344,40 @@ func (w *wizard) updateLog(key string) {
 
 func (w *wizard) logFrame() frameSpec {
 	inner := max(20, w.width-4)
+	widest := 0
+	for _, line := range w.install.logLines {
+		widest = max(widest, len([]rune(line)))
+	}
+	w.logShift = min(w.logShift, max(0, widest-inner))
 	var body []string
 	for _, line := range w.install.logLines {
-		for _, l := range wrapText(line, inner) {
-			body = append(body, sMuted.Render(l))
+		runes := []rune(line)
+		shown := ""
+		if w.logShift < len(runes) {
+			shown = string(runes[w.logShift:])
 		}
+		body = append(body, sMuted.Render(truncateRunes(shown, inner)))
 	}
 	if len(body) == 0 {
 		body = []string{sMuted.Render("(nothing logged yet)")}
 	}
+	explain := "Everything the installer printed, secrets masked. Earlier attempts are kept above the latest one."
+	if w.install.logPath != "" {
+		explain += " The whole log is also in " + displayHome(w.install.logPath) + "."
+	}
+	keys := "↑/↓ pgup/pgdn home/end scroll · enter or esc close"
+	if widest > inner {
+		keys = "↑/↓ pgup/pgdn scroll · ←/→ sideways · home/end · enter or esc close"
+	}
 	return frameSpec{
 		title:     stepInstall.title() + " — log",
 		heading:   "Install log",
-		explain:   "Everything the installer printed, secrets masked. Earlier attempts are kept above the latest one.",
+		explain:   explain,
 		body:      body,
 		focusLine: -1,
 		buttons:   []string{"Close"},
 		button:    0,
-		keys:      "↑/↓ pgup/pgdn home/end scroll · enter or esc close",
+		keys:      keys,
 	}
 }
 
@@ -462,6 +487,9 @@ func BuildCommandLine(state *WizardState) string {
 	for _, ip := range c.TLSExtraIPs {
 		args = append(args, "--tls-extra-ip="+ip)
 	}
+	if c.ClientHost != "" {
+		args = append(args, "--client-host="+shellQuote(c.ClientHost))
+	}
 	// --yes suppresses the installer's own remote-cluster consent gate.
 	// Recommend it ONLY when a probe positively identified a remote
 	// cluster — never because detection failed or was skipped.
@@ -477,6 +505,9 @@ func BuildCommandLine(state *WizardState) string {
 	if state.ForgeOrg != "" {
 		args = append(args, "--forge="+shellQuote(state.ForgeType), "--organization="+shellQuote(state.ForgeOrg),
 			"--upstream-url="+shellQuote(forgeUpstreamURL(state.ForgeType, state.ForgeOrg)))
+	}
+	for _, u := range c.AlsoUpstreams {
+		args = append(args, "--also-upstream="+shellQuote(displayUpstream(u)))
 	}
 	if state.UplinkIdentity != "" {
 		args = append(args, "--uplink-identity="+shellQuote(state.UplinkIdentity))
