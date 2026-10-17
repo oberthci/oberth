@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -236,6 +237,81 @@ func TestRunUpgradeRetriesFailedSameVersionWithPinnedImage(t *testing.T) {
 		!strings.Contains(upgrade, "image.ref="+targetImage) ||
 		!strings.Contains(upgrade, "--wait") {
 		t.Fatalf("retry lost version/image pin: show=%q upgrade=%q", show, upgrade)
+	}
+}
+
+// Explicit --values/--set at the running version are applied, not skipped as
+// "Already running": that was the only way to fix a stale value (#055).
+func TestRunUpgradeReappliesValuesAtSameVersion(t *testing.T) {
+	t.Parallel()
+	const targetVersion = "0.16.6"
+	const targetImage = "europe-west4-docker.pkg.dev/skipopsmain/oberth/oberth@sha256:abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
+	replicas := int32(1)
+	deployment := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "oberth", Namespace: "oberth", Generation: 2,
+			Labels: map[string]string{"app.kubernetes.io/instance": "oberth"},
+		},
+		Spec: appsv1.DeploymentSpec{
+			Replicas: &replicas,
+			Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{
+				Containers: []corev1.Container{{Name: "oberth", Image: targetImage}},
+			}},
+		},
+		Status: appsv1.DeploymentStatus{
+			ObservedGeneration: 2, UpdatedReplicas: 1, AvailableReplicas: 1,
+		},
+	}
+	var output bytes.Buffer
+	var calls [][]string
+	deps := Deps{
+		Output: &output,
+		RunHelm: func(_ context.Context, args []string) ([]byte, error) {
+			calls = append(calls, append([]string(nil), args...))
+			switch args[0] {
+			case "list":
+				return []byte(`[{"name":"oberth","namespace":"oberth","status":"deployed","chart":"oberth-0.16.6"}]`), nil
+			case "repo":
+				return nil, nil
+			case "show":
+				return []byte("image:\n  ref: " + targetImage + "\n"), nil
+			case "upgrade":
+				return nil, nil
+			default:
+				return nil, fmt.Errorf("unexpected helm call: %v", args)
+			}
+		},
+		RunCommand: func(_ context.Context, _ []byte, _ string, _ ...string) ([]byte, error) {
+			return []byte("oberth v0.16.6 commit=abc123 date=2026-09-28T00:00:00Z\n"), nil
+		},
+		KubeClient: fake.NewClientset(deployment),
+		RestConfig: &rest.Config{Host: "https://127.0.0.1:6443"},
+	}
+	valuesFile := filepath.Join(t.TempDir(), "watch.yaml")
+	if err := os.WriteFile(valuesFile, []byte("watchTunnel:\n  enabled: true\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	result, err := RunUpgrade(context.Background(), UpgradeConfig{
+		BinaryVersion: targetVersion, Namespace: "oberth", Timeout: 10 * time.Second, UserValues: []string{valuesFile},
+	}, deps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Upgraded || result.AlreadyUpToDate || !strings.Contains(output.String(), "re-applying the given --values/--set") {
+		t.Fatalf("same-version values result=%+v, output=%q", result, output.String())
+	}
+	if len(calls) != 5 || calls[0][0] != "list" ||
+		strings.Join(calls[1], " ") != "repo add --force-update oberth-charts https://charts.oberth.ci" ||
+		strings.Join(calls[2], " ") != "repo update oberth-charts" || calls[3][0] != "show" || calls[4][0] != "upgrade" {
+		t.Fatalf("unexpected Helm flow: %v", calls)
+	}
+	show := strings.Join(calls[3], " ")
+	upgrade := strings.Join(calls[4], " ")
+	if !strings.Contains(show, "--version "+targetVersion) ||
+		!strings.Contains(upgrade, "--version "+targetVersion) ||
+		!strings.Contains(upgrade, "image.ref="+targetImage) ||
+		!strings.Contains(upgrade, "--wait") || !strings.Contains(upgrade, "--values "+valuesFile) || !strings.Contains(upgrade, "--reuse-values") {
+		t.Fatalf("re-apply lost version/image pin or values: show=%q upgrade=%q", show, upgrade)
 	}
 }
 

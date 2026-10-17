@@ -308,6 +308,10 @@ func RunUpgrade(ctx context.Context, cfg UpgradeConfig, deps Deps) (UpgradeResul
 		switch {
 		case status == "deployed" && cfg.ArgoControllerProfile != "":
 		// Explicit supported profile reconciliation is not a same-version no-op.
+		case status == "deployed" && (len(cfg.UserValues) > 0 || len(cfg.UserSet) > 0):
+			// Explicit --values/--set are a request to change the release, so
+			// re-apply them through the same pinned upgrade path (#055).
+			_, _ = fmt.Fprintf(w, "\nAlready running %s; re-applying the given --values/--set\n", displayVersion(targetVersion))
 		case status == "deployed":
 			result.AlreadyUpToDate = true
 			_, _ = fmt.Fprintf(w, "\nAlready running %s\n", displayVersion(targetVersion))
