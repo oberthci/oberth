@@ -169,9 +169,42 @@ function runMessage(run) {
   if (run.Reason) return run.Reason;
   return "";
 }
+/* Repository names repeat across upstreams (a "terraform" under github,
+   codeberg and skipops), and a bare name is then an ambiguous selector the
+   API refuses. The dashboard keys a repository by upstream/org/name — the
+   qualified selector the API resolves — and shows that qualifier only when
+   the bare name is shared. */
+function upstreamOf(repo) {
+  return (state.status?.upstream_info || []).find(upstream => upstream.id === repo.UpstreamID);
+}
+function orgOfURL(baseURL) {
+  const trimmed = String(baseURL || "").replace(/\/+$/, "");
+  return trimmed.slice(trimmed.lastIndexOf("/") + 1);
+}
+function repoKey(repo) {
+  const upstream = upstreamOf(repo);
+  return upstream ? `${upstream.name}/${orgOfURL(upstream.base_url)}/${repo.Name}` : repo.Name;
+}
+function repoLabel(repo) {
+  return state.repos.filter(other => other.Name === repo.Name).length > 1 ? repoKey(repo) : repo.Name;
+}
+function repoKeyOf(repoID) {
+  const repo = state.repos.find(r => r.ID === repoID);
+  return repo ? repoKey(repo) : "";
+}
 function repoName(repoID) {
   const repo = state.repos.find(r => r.ID === repoID);
-  return repo ? repo.Name : (repoID ? "repo#" + repoID : "workspace");
+  return repo ? repoLabel(repo) : (repoID ? "repo#" + repoID : "workspace");
+}
+/* A filter saved before repositories were keyed (a bare name) maps to the one
+   repository of that name, or back to everything when the name is shared. */
+function normalizeRepoSelector(value, everything) {
+  if (!value || value === everything || state.repos.some(repo => repoKey(repo) === value)) return value;
+  const named = state.repos.filter(repo => repo.Name === value);
+  return named.length === 1 ? repoKey(named[0]) : everything;
+}
+async function loadRepoContext() {
+  await Promise.all([loadRepos(), state.status ? Promise.resolve() : loadStatus().catch(() => { })]);
 }
 
 /* ---------- chrome ---------- */
@@ -286,7 +319,7 @@ async function loadRepoRuns() {
   try {
     state.repoRuns = await api("/api/runs?" + query.toString()) || [];
   } catch (err) {
-    if (err.status === 404) { changeRunRepo("all"); localStorage.setItem("oberth-repo", "all"); state.repoRuns = []; return; }
+    if (err.status === 404 || err.status === 400 || err.status === 409) { changeRunRepo("all"); localStorage.setItem("oberth-repo", "all"); state.repoRuns = []; return; }
     throw err;
   }
 }
@@ -309,7 +342,7 @@ async function loadStatus() {
 
 /* ---------- runs list ---------- */
 function runMatches(run) {
-  if (state.repo !== "all" && repoName(run.RepoID) !== state.repo) return false;
+  if (state.repo !== "all" && repoKeyOf(run.RepoID) !== state.repo) return false;
   if (state.filter === "release") return !!run.Release;
   if (state.filter !== "all") return String(run.Status) === state.filter;
   return true;
@@ -317,8 +350,8 @@ function runMatches(run) {
 function repoCounts(runs) {
   const counts = new Map([["all", runs.length]]);
   for (const run of runs) {
-    const name = repoName(run.RepoID);
-    counts.set(name, (counts.get(name) || 0) + 1);
+    const key = repoKeyOf(run.RepoID);
+    counts.set(key, (counts.get(key) || 0) + 1);
   }
   return counts;
 }
@@ -327,7 +360,9 @@ function runsTable(runs) {
 }
 async function renderRuns(seq) {
   setChrome("runs", "/ runs");
-  await Promise.all([loadRepos(), loadRuns(), loadRepoRuns(), loadRunCounts()]);
+  await loadRepoContext();
+  state.repo = normalizeRepoSelector(state.repo, "all");
+  await Promise.all([loadRuns(), loadRepoRuns(), loadRunCounts()]);
   if (!currentRoute(seq)) return;
   localStorage.setItem("oberth-filter", state.filter);
   localStorage.setItem("oberth-repo", state.repo);
@@ -335,7 +370,7 @@ async function renderRuns(seq) {
   const visible = source.filter(runMatches), counts = repoCounts(runs);
   if (state.runCounts) {
     counts.set("all", state.runCounts.Total || 0);
-    for (const repo of state.repos) counts.set(repo.Name, state.runCounts.ByRepo?.[repo.ID] || 0);
+    for (const repo of state.repos) counts.set(repoKey(repo), state.runCounts.ByRepo?.[repo.ID] || 0);
   } else if (state.repo !== "all" && !state.runCursor) counts.set(state.repo, state.repoRuns.length);
   state.runNext = source.length === runPageSize ? source[source.length - 1].QueueSequence : 0;
   const page = state.runCursorHistory.length + 1;
@@ -352,7 +387,7 @@ async function renderRuns(seq) {
     <div class="runs-layout">
       <aside class="repo-side">
         <div class="repo-filter-row"><button class="repo-filter ${state.repo === "all" ? "on" : ""}" data-repo-filter="all"><span class="name">All repos</span><span class="count">${esc(counts.get("all") || 0)}</span></button></div>
-        ${state.repos.map(repo => `<div class="repo-filter-row"><button class="repo-filter ${state.repo === repo.Name ? "on" : ""}" data-repo-filter="${esc(repo.Name)}"><span class="name">${esc(repo.Name)}</span><span class="count">${esc(counts.get(repo.Name) || 0)}</span></button></div>`).join("")}
+        ${state.repos.map(repo => `<div class="repo-filter-row"><button class="repo-filter ${state.repo === repoKey(repo) ? "on" : ""}" data-repo-filter="${esc(repoKey(repo))}" title="${esc(repoKey(repo))}"><span class="name">${esc(repoLabel(repo))}</span><span class="count">${esc(counts.get(repoKey(repo)) || 0)}</span></button></div>`).join("")}
       </aside>
       <section>
         <div class="toolbar">
@@ -586,7 +621,7 @@ async function liveLogContent(run, activeBurn, activeStep) {
 }
 async function renderRunDetail(runID, seq, background) {
   if (!background) setChrome("runs", "/ run");
-  if (!state.repos.length) { try { await loadRepos(); } catch { /* repo names fall back to IDs */ } }
+  if (!state.repos.length || !state.status) { try { await loadRepoContext(); } catch { /* repo names fall back to IDs */ } }
   let detail;
   try {
     detail = await api(`/api/runs/${enc(runID)}`);
@@ -600,7 +635,7 @@ async function renderRunDetail(runID, seq, background) {
 }
 async function renderRunDetailView(detail, seq) {
   const run = detail.Run || {}, steps = detail.Steps || [];
-  const repository = detail.Repository && detail.Repository.Name ? detail.Repository.Name : repoName(run.RepoID);
+  const repository = state.repos.some(repo => repo.ID === run.RepoID) ? repoName(run.RepoID) : (detail.Repository?.Name || repoName(run.RepoID));
   if (state.stepRunID !== run.ID) { state.step = ""; state.stepRunID = run.ID; }
   const keys = steps.map(stepKey);
   if (state.step && !keys.includes(state.step)) state.step = "";
@@ -691,7 +726,7 @@ async function renderRepos(seq) {
     <div class="bar"><h1>Repositories</h1><span class="meta">${rows.length} configured</span></div>
     <div class="table repo-table">
       <div class="trow head"><div>repository</div><div>status</div><div>default branch</div><div>latest run</div><div>history</div><div>upstream</div></div>
-      ${rows.map(({ repo, runs, latest }) => `<div class="trow" data-repo-runs="${esc(repo.Name)}"><div class="primary"><div class="repo-name">${esc(repo.Name)}</div></div><div>${latest ? pill(statusLabel(latest.Status), statusKind(latest.Status)) : '<span class="meta">no runs</span>'}</div><div class="branch">${esc(repo.DefaultBranch || "--")}</div><div>${latest ? `<div class="branch">${esc(latest.Ref)}</div><span class="meta">${esc(ago(runWhen(latest)))}</span>` : '<span class="meta">--</span>'}</div><div>${historyStrip(runs)}</div><div class="clip">${esc(upstreamName(repo.UpstreamID))}</div></div>`).join("") || '<div class="empty static">No repositories registered. Register an upstream and repository in-pod with oberth admin.</div>'}
+      ${rows.map(({ repo, runs, latest }) => `<div class="trow" data-repo-runs="${esc(repoKey(repo))}"><div class="primary"><div class="repo-name">${esc(repoLabel(repo))}</div></div><div>${latest ? pill(statusLabel(latest.Status), statusKind(latest.Status)) : '<span class="meta">no runs</span>'}</div><div class="branch">${esc(repo.DefaultBranch || "--")}</div><div>${latest ? `<div class="branch">${esc(latest.Ref)}</div><span class="meta">${esc(ago(runWhen(latest)))}</span>` : '<span class="meta">--</span>'}</div><div>${historyStrip(runs)}</div><div class="clip">${esc(upstreamName(repo.UpstreamID))}</div></div>`).join("") || '<div class="empty static">No repositories registered. Register an upstream and repository in-pod with oberth admin.</div>'}
     </div>
   </section>`);
   setAuto(slowPollMs);
@@ -711,7 +746,8 @@ function issueRow(issue) {
 }
 async function renderIssues(seq) {
   setChrome("issues", "/ issues");
-  if (!state.repos.length) { try { await loadRepos(); } catch { /* names fall back */ } }
+  if (!state.repos.length || !state.status) { try { await loadRepoContext(); } catch { /* names fall back */ } }
+  state.issueRepo = normalizeRepoSelector(state.issueRepo, "");
   let page;
   try {
     page = await api(issueListURL());
@@ -732,7 +768,7 @@ async function renderIssues(seq) {
       ${kinds.map(([value, label]) => `<button class="chip ${state.issueKind === value ? "on" : ""}" data-issue-kind="${esc(value)}">${esc(label)}</button>`).join("")}
       <span class="status-divider"></span>
       ${states.map(([value, label]) => `<button class="chip ${state.issueState === value ? "on" : ""}" data-issue-state="${esc(value)}">${esc(label)}</button>`).join("")}
-      <label>repo <select data-action="issue-repo"><option value="">all</option>${state.repos.map(repo => `<option value="${esc(repo.Name)}" ${state.issueRepo === repo.Name ? "selected" : ""}>${esc(repo.Name)}</option>`).join("")}</select></label>
+      <label>repo <select data-action="issue-repo"><option value="">all</option>${state.repos.map(repo => `<option value="${esc(repoKey(repo))}" ${state.issueRepo === repoKey(repo) ? "selected" : ""}>${esc(repoLabel(repo))}</option>`).join("")}</select></label>
       <span class="count">${issues.length} shown${state.issueCursorHistory.length ? ` · page ${state.issueCursorHistory.length + 1}` : ""}</span>
     </div>
     ${issues.length ? `<div class="table issues-table"><div class="issue-row head static"><span>id</span><span>kind</span><span>state</span><span>repo</span><span>branch</span><span>title</span><span>seen</span><span>updated</span></div>${issues.map(issueRow).join("")}</div>` : '<div class="empty">No internal issues match these filters.</div>'}

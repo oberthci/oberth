@@ -109,3 +109,36 @@ func TestRunsServerSideRepoFilter(t *testing.T) {
 		t.Fatal("data-run-id click handler must appear before data-repo-runs — history buttons nest inside repo rows")
 	}
 }
+
+// A repository name shared by several upstreams ("terraform" under github,
+// codeberg and skipops) is an ambiguous selector the API refuses with 409, so
+// the dashboard filters runs and issues by upstream/org/name and labels a
+// shared name with that qualifier.
+func TestDashboardQualifiesSharedRepositoryNames(t *testing.T) {
+	t.Parallel()
+	script, ok := staticAssets["app.js"]
+	if !ok {
+		t.Fatal("app.js is not embedded")
+	}
+	source := string(script.body)
+	for _, want := range []string{
+		"function repoKey(repo)",
+		"`${upstream.name}/${orgOfURL(upstream.base_url)}/${repo.Name}`",
+		`data-repo-filter="${esc(repoKey(repo))}"`,
+		`data-repo-runs="${esc(repoKey(repo))}"`,
+		`<option value="${esc(repoKey(repo))}"`,
+		`repoKeyOf(run.RepoID) !== state.repo`,
+		`counts.set(repoKey(repo), state.runCounts.ByRepo?.[repo.ID] || 0)`,
+		`state.repo = normalizeRepoSelector(state.repo, "all")`,
+		`err.status === 409`,
+	} {
+		if !strings.Contains(source, want) {
+			t.Errorf("app.js is missing %s", want)
+		}
+	}
+	for _, bare := range []string{`data-repo-filter="${esc(repo.Name)}"`, `data-repo-runs="${esc(repo.Name)}"`, `<option value="${esc(repo.Name)}"`} {
+		if strings.Contains(source, bare) {
+			t.Errorf("app.js still selects a repository by its bare name: %s", bare)
+		}
+	}
+}
