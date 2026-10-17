@@ -15,7 +15,7 @@ import (
 )
 
 // secretsExportFormat names the document written by ExportSecrets.
-const secretsExportFormat = "oberth.secrets/v1"
+const secretsExportFormat = "oberth.secrets/v1" //nolint:gosec // G101: a format name, not a credential
 
 // SecretsExport is the universal secrets document: KV v2 paths under Mount
 // with their current key/value data.
@@ -75,7 +75,7 @@ func writeSecretsExport(out io.Writer, archive restoreArchive) error {
 		Secrets: make([]SecretsExportElement, 0, len(archive.KV.Secrets)),
 	}
 	for _, secret := range archive.KV.Secrets {
-		doc.Secrets = append(doc.Secrets, SecretsExportElement{Path: secret.Path, Data: secret.Data})
+		doc.Secrets = append(doc.Secrets, SecretsExportElement(secret))
 	}
 	encoder := json.NewEncoder(out)
 	encoder.SetIndent("", "  ")

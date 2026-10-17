@@ -194,7 +194,8 @@ Import into a KV v2 mount with the bao (or vault) CLI:
 	if err != nil {
 		return err
 	}
-	archive, err := resolveArchive(positional, output)
+	// Status lines go to stderr: stdout carries the JSON document.
+	archive, err := resolveArchive(positional, os.Stderr)
 	if err != nil {
 		return err
 	}

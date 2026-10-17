@@ -843,7 +843,7 @@ func TestRestoreDryRunChangesNothing(t *testing.T) {
 		t.Fatalf("restore --dry-run: %v\n%s", err, out.String())
 	}
 	assertNoRestoreMutation(t, target)
-	assertSubstringsInOrder(t, out.String(), []string{"Archive verified", "History    1 run, ", "Secrets    3 KV secrets",
+	assertSubstringsInOrder(t, out.String(), []string{"Verified: all", "History    1 run, ", "Secrets    3 KV secrets",
 		"What changes on this install:", "History    replaced, not merged: runs 0 -> 1", "Secrets    2 new, 1 replaced, 0 unchanged", "replaced: identities/oberth/ssh-host",
 		"policies 1 new, 1 replaced", "Settings   compatibility (the restored database needs it)", "argo.releaseWIF: not set -> the archive's",
 		"grants (ConfigMap oberth-secret-access): 0 -> 1",
