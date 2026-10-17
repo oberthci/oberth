@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/pem"
 	"errors"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"golang.org/x/crypto/ssh"
 
 	"github.com/oberthci/oberth/internal/installer"
+	"github.com/oberthci/oberth/internal/mdnsdial"
 )
 
 func questionByID(t *testing.T, id string) *question {
@@ -325,5 +327,30 @@ func TestCeremonySaveTokenToFile(t *testing.T) {
 	c2.act(cerFile)
 	if c2.entries[0].saved {
 		t.Error("with a secret store the token stays the operator's to store")
+	}
+}
+
+// #066: a client address that does not resolve is reported as a name
+// problem, with the mDNS hint for a .local name, not as closed ports.
+func TestVerifyReportsUnresolvedClientHost(t *testing.T) {
+	newTestHost(t)
+	stubKubectl(t, &fakeKubectl{registered: true, ready: true})
+	previousDial := dialPort
+	t.Cleanup(func() { dialPort = previousDial })
+	for host, want := range map[string]string{
+		"tuxbox.local":   "cannot resolve tuxbox.local (" + mdnsdial.Hint + ")",
+		"ci.example.lan": "cannot resolve ci.example.lan: no such host; clients need it in DNS or /etc/hosts",
+	} {
+		dialPort = func(_ context.Context, address string) error {
+			name, _, _ := net.SplitHostPort(address)
+			return &net.OpError{Op: "dial", Net: "tcp", Err: &net.DNSError{Err: "no such host", Name: name, IsNotFound: true}}
+		}
+		st := newWizardState(Options{})
+		st.ForgeType, st.ForgeOrg = "github", "acme"
+		st.Config.ClientHost = host
+		res := verifyInstall(context.Background(), *st, false)
+		if res.portsOK || res.portsText != want {
+			t.Errorf("%s: ports %v %q, want %q", host, res.portsOK, res.portsText, want)
+		}
 	}
 }

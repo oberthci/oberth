@@ -16,6 +16,7 @@ import (
 	"golang.org/x/crypto/ssh"
 
 	"github.com/oberthci/oberth/internal/installer"
+	"github.com/oberthci/oberth/internal/mdnsdial"
 )
 
 // ---------- verification against the installed server (#002) ----------
@@ -156,9 +157,10 @@ func (v *verifyResult) summary() string {
 	return fmt.Sprintf("Verified at %s: %d of %d checks failed (details above)", v.at.Format(time.TimeOnly), total-passed, total)
 }
 
-// dialPort opens and closes one TCP connection; tests replace it.
+// dialPort opens and closes one TCP connection, resolving a .local host the
+// way the CLI does (#066); tests replace it.
 var dialPort = func(ctx context.Context, address string) error {
-	conn, err := (&net.Dialer{Timeout: 3 * time.Second}).DialContext(ctx, "tcp", address)
+	conn, err := mdnsdial.Dialer{Base: &net.Dialer{Timeout: 3 * time.Second}}.DialContext(ctx, "tcp", address)
 	if err != nil {
 		return err
 	}
@@ -307,16 +309,32 @@ func verifyInstall(ctx context.Context, st WizardState, reRegister bool) verifyR
 func checkClientSide(ctx context.Context, st *WizardState, res *verifyResult) {
 	host := clientHost(st)
 	var failed []string
+	var unresolved *net.DNSError
 	for _, port := range []string{"30022", "30443"} {
-		if err := dialPort(ctx, net.JoinHostPort(host, port)); err != nil {
+		err := dialPort(ctx, net.JoinHostPort(host, port))
+		var dnsErr *net.DNSError
+		switch {
+		case err == nil:
+		case errors.As(err, &dnsErr):
+			unresolved = dnsErr
+		default:
 			failed = append(failed, port+": "+err.Error())
 		}
 	}
 	res.portsChecked = true
-	res.portsOK = len(failed) == 0
-	if res.portsOK {
+	res.portsOK = unresolved == nil && len(failed) == 0
+	switch {
+	case res.portsOK:
 		res.portsText = "SSH 30022 and HTTPS 30443 answer on " + host
-	} else {
+	case unresolved != nil:
+		// The name never reached a port, so "not reachable" would mislead.
+		res.portsText = "cannot resolve " + host
+		if mdnsdial.IsLocalName(host) {
+			res.portsText += " (" + mdnsdial.Hint + ")"
+		} else {
+			res.portsText += ": " + unresolved.Err + "; clients need it in DNS or /etc/hosts"
+		}
+	default:
 		res.portsText = "not reachable on " + host + ": " + strings.Join(failed, "; ")
 	}
 
