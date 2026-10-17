@@ -278,3 +278,52 @@ func TestResumeTypedUpstreamKeyPath(t *testing.T) {
 		t.Fatalf("pick %q", st.UpstreamKeyPick)
 	}
 }
+
+// #062: Save to file writes the bearer token only when pressed, only for the
+// bearer token, to the file the client files read, and discards it here.
+func TestCeremonySaveTokenToFile(t *testing.T) {
+	host := newTestHost(t)
+	previous := tokenFileFallback
+	tokenFileFallback = func() bool { return true }
+	t.Cleanup(func() { tokenFileFallback = previous })
+
+	c := newCeremony()
+	c.add("Root token", []byte("s.root"))
+	c.add("Bearer token", []byte("oberth_abc"))
+	path := filepath.Join(host.home, ".config", "oberth", "token")
+	if _, err := os.Stat(path); err == nil {
+		t.Fatal("nothing may be written before the operator asks")
+	}
+
+	c.cursor = 0
+	c.act(cerFile)
+	if c.errMsg == "" || c.entries[0].saved {
+		t.Fatal("the root token must never be filed")
+	}
+	c.cursor = 1
+	bearer := c.entries[1]
+	c.act(cerFile)
+	data, err := os.ReadFile(path)
+	if err != nil || string(data) != "oberth_abc\n" {
+		t.Fatalf("token file %q: %v", data, err)
+	}
+	if info, _ := os.Stat(path); info.Mode().Perm() != 0o600 {
+		t.Errorf("mode %v", info.Mode().Perm())
+	}
+	if !bearer.saved || bearer.value != nil || bearer.filedAt != path {
+		t.Errorf("entry after filing: %+v", bearer)
+	}
+	w := newWizard(Options{}, newWizardState(Options{}))
+	w.width, w.height = 100, 30
+	if view := ansiStrip(strings.Join(c.frame(w).body, "\n")); !strings.Contains(view, "saved to ~/.config/oberth/token (0600)") {
+		t.Errorf("frame:\n%s", view)
+	}
+
+	tokenFileFallback = func() bool { return false }
+	c2 := newCeremony()
+	c2.add("Bearer token", []byte("oberth_def"))
+	c2.act(cerFile)
+	if c2.entries[0].saved {
+		t.Error("with a secret store the token stays the operator's to store")
+	}
+}

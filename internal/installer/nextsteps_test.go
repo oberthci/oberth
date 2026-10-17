@@ -3,6 +3,8 @@ package installer
 import (
 	"bytes"
 	"context"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -216,5 +218,36 @@ func TestFinishInstallNamesAlsoUpstreamsWhenOnboardingCannotRun(t *testing.T) {
 	_ = finishInstallTest(context.Background(), cfg, deps, &buf)
 	if !strings.Contains(buf.String(), "upstream add --yes codeberg ssh://git@codeberg.org/cloudtaser") {
 		t.Fatalf("output:\n%s", buf.String())
+	}
+}
+
+func TestSaveTokenFileKeepsADifferentToken(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	if _, err := SaveTokenFile([]byte("  \n")); err == nil {
+		t.Fatal("an empty token must be refused")
+	}
+	path, err := SaveTokenFile([]byte("oberth_one"))
+	if err != nil || path != filepath.Join(dir, "oberth", "token") {
+		t.Fatalf("%q %v", path, err)
+	}
+	if _, err := SaveTokenFile([]byte("oberth_one\n")); err != nil {
+		t.Fatal(err)
+	}
+	if backups, _ := filepath.Glob(path + ".bak-*"); len(backups) != 0 {
+		t.Fatalf("the same token must not create a backup: %v", backups)
+	}
+	if _, err := SaveTokenFile([]byte("oberth_two")); err != nil {
+		t.Fatal(err)
+	}
+	backups, _ := filepath.Glob(path + ".bak-*")
+	if len(backups) != 1 {
+		t.Fatalf("backups %v", backups)
+	}
+	if old, _ := os.ReadFile(backups[0]); string(old) != "oberth_one\n" {
+		t.Errorf("backup holds %q", old)
+	}
+	if cur, _ := os.ReadFile(path); string(cur) != "oberth_two\n" {
+		t.Errorf("token file holds %q", cur)
 	}
 }

@@ -16,6 +16,7 @@ import (
 	"runtime"
 	"slices"
 	"strings"
+	"time"
 )
 
 // Client access is offered here, immediately after the uplink is registered,
@@ -278,9 +279,54 @@ func tokenCommandForHost() (read string, store string) {
 		// A headless server often has neither. A command that cannot run
 		// leaves every client failing to authenticate, so fall back to an
 		// owner-only file, which at least works and says what it is.
-		return `cat "${XDG_CONFIG_HOME:-$HOME/.config}/oberth/token"`,
+		return tokenFileReadCommand,
 			`(umask 077 && cat > "${XDG_CONFIG_HOME:-$HOME/.config}/oberth/token")`
 	}
+}
+
+// tokenFileReadCommand is how the client files read the token from the
+// owner-only fallback file on a host without a secret store.
+const tokenFileReadCommand = `cat "${XDG_CONFIG_HOME:-$HOME/.config}/oberth/token"`
+
+// TokenFileFallback reports whether the client files on this host read the
+// bearer token from the owner-only file (no keychain, secret-tool or pass).
+func TokenFileFallback() bool {
+	read, _ := tokenCommandForHost()
+	return read == tokenFileReadCommand
+}
+
+// SaveTokenFile writes the bearer token to the owner-only file the client
+// files read when no secret store is installed (mode 0600), and returns its
+// path. A different token already there is kept as token.bak-<UTC time>.
+//
+// Oberth never writes a token on its own (docs/remote-cli.md): this runs only
+// when the operator asks for it, on setup's credentials screen (#062).
+func SaveTokenFile(token []byte) (string, error) {
+	root, err := clientConfigRoot()
+	if err != nil {
+		return "", err
+	}
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		return "", err
+	}
+	path := filepath.Join(root, "token")
+	value := bytes.TrimSpace(token)
+	if len(value) == 0 {
+		return "", errors.New("no token to save")
+	}
+	if old, err := os.ReadFile(path); err == nil { //nolint:gosec // G304: the client config directory
+		same := bytes.Equal(bytes.TrimSpace(old), value)
+		clear(old)
+		if same {
+			return path, nil
+		}
+		if err := os.Rename(path, path+".bak-"+time.Now().UTC().Format("20060102T150405Z")); err != nil {
+			return "", err
+		}
+	}
+	body := append(append(make([]byte, 0, len(value)+1), value...), '\n')
+	defer clear(body)
+	return path, atomicWriteFile(path, body, 0o600)
 }
 
 func (deps Deps) clientConfigRoot() (string, error) {

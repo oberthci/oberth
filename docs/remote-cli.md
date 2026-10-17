@@ -31,6 +31,13 @@ password manager or the system keychain without ever landing in a file:
 export OBERTH_TOKEN_COMMAND='op read "op://vault/oberth/credential"'
 ```
 
+The one exception is an explicit choice. On a host with no keychain,
+`secret-tool` or `pass`, the client files `oberth install` writes read the
+token from `~/.config/oberth/token`, and the credentials screen of
+`oberth setup` offers **Save to file**: pressing it writes the bearer token
+to exactly that file (mode 0600; a different token already there is kept as
+`token.bak-<time>`). Nothing writes it unless you press it.
+
 ## Commands
 
 ```
