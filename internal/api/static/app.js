@@ -24,6 +24,7 @@ const state = {
   lastList: "/runs",
   authGen: 0, // incremented on sign-out and token replacement
   pendingController: null, // AbortController for in-flight API requests
+  statusPending: null, statusFailedAt: 0, // the background /api/status fetch (ensureStatus)
 };
 const runFilters = ["all", "running", "queued", "passed", "failed", "interrupted", "release"];
 
@@ -221,8 +222,11 @@ function ensureStatus() {
   if (state.status) return Promise.resolve();
   if (state.statusPending) return state.statusPending;
   if (Date.now() - (state.statusFailedAt || 0) < 30000) return Promise.resolve();
-  state.statusPending = loadStatus()
-    .catch(() => { state.statusFailedAt = Date.now(); })
+  state.statusPending = loadStatus({ detached: true })
+    .catch(err => {
+      // A changed token is not a failure of the status endpoint.
+      if (err?.name !== "AbortError" && err?.message !== "stale request") state.statusFailedAt = Date.now();
+    })
     .finally(() => { state.statusPending = null; });
   return state.statusPending;
 }
@@ -241,7 +245,7 @@ async function loadRepoContext() {
    shared across upstreams gain their org/ qualifier. */
 function rerenderWhenStatus(pending, seq) {
   if (state.status || !pending) return;
-  pending.then(() => { if (state.status && currentRoute(seq)) route(); });
+  pending.then(() => { if (state.status && currentRoute(seq)) route(true); });
 }
 
 /* ---------- chrome ---------- */
@@ -299,11 +303,15 @@ function clearToken() {
   setToken(null); setConn(false, "signed out"); showTokenPrompt();
 }
 
-async function api(url) {
+/* api fetches for the current route: a response that lands after the route
+   moved on is discarded ("stale request"), and navigation aborts it. A
+   detached request (opts.detached) belongs to no route — the background
+   /api/status fetch — so only a change of token discards it. */
+async function api(url, opts = {}) {
   const gen = state.authGen;
   const seq = state.routeSeq;
   const controller = new AbortController();
-  state.pendingController = controller;
+  if (!opts.detached) state.pendingController = controller;
   let response;
   try {
     response = await fetch(url, { cache: "no-store", headers: authHeaders(), signal: controller.signal });
@@ -313,7 +321,7 @@ async function api(url) {
     throw new Error("Oberth API is unreachable");
   }
   // Discard the response if auth changed or route changed while we waited.
-  if (state.authGen !== gen || state.routeSeq !== seq) throw new Error("stale request");
+  if (state.authGen !== gen || (!opts.detached && state.routeSeq !== seq)) throw new Error("stale request");
   if (response.status === 401) {
     // Only show the prompt if auth generation has not changed since we sent.
     if (state.authGen === gen) showTokenPrompt(hasToken() ? "Token rejected — enter a current uplink token." : "");
@@ -372,8 +380,8 @@ function changeRunRepo(repo) {
   state.runCursor = 0;
   state.runCursorHistory = [];
 }
-async function loadStatus() {
-  state.status = await api("/api/status");
+async function loadStatus(opts) {
+  state.status = await api("/api/status", opts);
   setVersion(true, state.status?.version);
 }
 
@@ -715,7 +723,8 @@ async function liveLogContent(run, activeBurn, activeStep) {
 }
 async function renderRunDetail(runID, seq, background) {
   if (!background) setChrome("runs", "/ run");
-  try { await loadRepoContext(); } catch { /* repo names fall back to IDs; the next poll has status */ }
+  let pending = null;
+  try { ({ pending } = await loadRepoContext()); } catch { /* repo names fall back to IDs */ }
   let detail;
   try {
     detail = await api(`/api/runs/${enc(runID)}`);
@@ -726,6 +735,7 @@ async function renderRunDetail(runID, seq, background) {
   }
   if (!currentRoute(seq)) return;
   await renderRunDetailView(detail, seq);
+  rerenderWhenStatus(pending, seq);
 }
 async function renderRunDetailView(detail, seq) {
   const run = detail.Run || {}, steps = detail.Steps || [];
