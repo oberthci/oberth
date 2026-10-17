@@ -290,11 +290,24 @@ func TestDashboardExecutorNoiseMatchesRunlog(t *testing.T) {
 		`time=2026-10-17T16:29:39.819Z level=WARN msg="cannot save parameter, does not exist" argo=true`,
 		`time=2026-10-17T16:29:39.819Z level=ERROR msg="failed to write exit code" argo=true`,
 		`echo argo=true`,
+		`time=2026-10-17T16:29:39.819Z level=INFO msg=x argo=true error=<nil> err="boom"`,
 	} {
 		body := strings.TrimSpace(stepPrefix.ReplaceAllString(line, ""))
-		dashboard := re.MatchString(body) && classify(t, line) == ""
+		dashboard := re.MatchString(body) && classify(t, line) == "" && allErrorFieldsNil(body)
 		if want := runlog.IsExecutorNoise(line); dashboard != want {
 			t.Errorf("%q: dashboard folds=%v, runlog.IsExecutorNoise=%v", line, dashboard, want)
 		}
 	}
+}
+
+// allErrorFieldsNil mirrors isExecutorNoise's loop over every error= field.
+func allErrorFieldsNil(body string) bool {
+	for _, field := range regexp.MustCompile(`(?i)(^|[\s,;])(err|errs|error|errors)=("[^"]*"|'[^']*'|\S*)`).FindAllStringSubmatch(body, -1) {
+		switch strings.ToLower(field[3]) {
+		case "", `""`, "''", "<nil>", "nil", "null", "none", "<none>", "-":
+		default:
+			return false
+		}
+	}
+	return true
 }

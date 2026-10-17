@@ -123,12 +123,14 @@ func TestDashboardQualifiesSharedRepositoryNames(t *testing.T) {
 	source := string(script.body)
 	for _, want := range []string{
 		"function repoKey(repo)",
-		"`${orgOfURL(upstream.base_url)}/${repo.Name}`",
-		"`${upstream.name}/${orgOfURL(upstream.base_url)}/${repo.Name}`",
+		"`${upstream.name}/${repoOrg(upstream)}/${repo.Name}`",
+		"`${repoOrg(upstream)}/${repo.Name}`",
+		"if (!state.status) return value;",
+		`[400, 404, 409].includes(err.status)`,
+		`return { pending: ensureStatus() };`,
 		`data-repo-filter="${esc(repoKey(repo))}"`,
 		`data-repo-runs="${esc(repoKey(repo))}"`,
 		`<option value="${esc(repoKey(repo))}"`,
-		`repoKeyOf(run.RepoID) !== state.repo`,
 		`counts.set(repoKey(repo), state.runCounts.ByRepo?.[repo.ID] || 0)`,
 		`state.repo = normalizeRepoSelector(state.repo, "all")`,
 		`err.status === 409`,

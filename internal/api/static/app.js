@@ -181,16 +181,19 @@ function orgOfURL(baseURL) {
   const trimmed = String(baseURL || "").replace(/\/+$/, "");
   return trimmed.slice(trimmed.lastIndexOf("/") + 1);
 }
+function repoOrg(upstream) {
+  return orgOfURL(upstream.base_url) || upstream.name;
+}
 function repoKey(repo) {
   const upstream = upstreamOf(repo);
-  return upstream ? `${upstream.name}/${orgOfURL(upstream.base_url)}/${repo.Name}` : repo.Name;
+  return upstream ? `${upstream.name}/${repoOrg(upstream)}/${repo.Name}` : repo.Name;
 }
 /* A shared name is shown as org/repo: two upstreams never share an
    organization (the store refuses it), so that is always unique. */
 function repoLabel(repo) {
   if (state.repos.filter(other => other.Name === repo.Name).length < 2) return repo.Name;
   const upstream = upstreamOf(repo);
-  return upstream ? `${orgOfURL(upstream.base_url)}/${repo.Name}` : repo.Name;
+  return upstream ? `${repoOrg(upstream)}/${repo.Name}` : repo.Name;
 }
 function repoKeyOf(repoID) {
   const repo = state.repos.find(r => r.ID === repoID);
@@ -201,14 +204,44 @@ function repoName(repoID) {
   return repo ? repoLabel(repo) : (repoID ? "repo#" + repoID : "workspace");
 }
 /* A filter saved before repositories were keyed (a bare name) maps to the one
-   repository of that name, or back to everything when the name is shared. */
+   repository of that name, or back to everything when the name is shared.
+   Without /api/status the keys cannot be built, so nothing is changed: a
+   status blip must not erase a saved filter. */
 function normalizeRepoSelector(value, everything) {
+  if (!state.status) return value;
   if (!value || value === everything || state.repos.some(repo => repoKey(repo) === value)) return value;
   const named = state.repos.filter(repo => repo.Name === value);
   return named.length === 1 ? repoKey(named[0]) : everything;
 }
+/* ensureStatus fetches /api/status once in the background. It probes every
+   upstream, so pages render without waiting for it and re-render when it
+   arrives; a failure is not retried for 30 seconds, so a live view polling
+   every two seconds does not hammer it. */
+function ensureStatus() {
+  if (state.status) return Promise.resolve();
+  if (state.statusPending) return state.statusPending;
+  if (Date.now() - (state.statusFailedAt || 0) < 30000) return Promise.resolve();
+  state.statusPending = loadStatus()
+    .catch(() => { state.statusFailedAt = Date.now(); })
+    .finally(() => { state.statusPending = null; });
+  return state.statusPending;
+}
+/* A legacy bare selector needs the keys before it can be resolved. */
+function isQualifiedSelector(value) {
+  return String(value || "").split("/").length >= 3;
+}
+/* loadRepoContext loads the repositories and starts /api/status without
+   waiting for it: the pending promise is returned in an object, because an
+   async function returning a promise would adopt (and wait for) it. */
 async function loadRepoContext() {
-  await Promise.all([loadRepos(), state.status ? Promise.resolve() : loadStatus().catch(() => { })]);
+  if (!state.repos.length) await loadRepos();
+  return { pending: ensureStatus() };
+}
+/* rerenderWhenStatus re-renders a page once /api/status arrives, so names
+   shared across upstreams gain their org/ qualifier. */
+function rerenderWhenStatus(pending, seq) {
+  if (state.status || !pending) return;
+  pending.then(() => { if (state.status && currentRoute(seq)) route(); });
 }
 
 /* ---------- chrome ---------- */
@@ -345,8 +378,9 @@ async function loadStatus() {
 }
 
 /* ---------- runs list ---------- */
+/* A repository filter is applied by the server (loadRepoRuns), so only the
+   status filter is applied here. */
 function runMatches(run) {
-  if (state.repo !== "all" && repoKeyOf(run.RepoID) !== state.repo) return false;
   if (state.filter === "release") return !!run.Release;
   if (state.filter !== "all") return String(run.Status) === state.filter;
   return true;
@@ -364,10 +398,13 @@ function runsTable(runs) {
 }
 async function renderRuns(seq) {
   setChrome("runs", "/ runs");
-  await loadRepoContext();
+  await loadRepos();
+  const pending = ensureStatus();
+  if (state.repo !== "all" && !isQualifiedSelector(state.repo)) await pending;
   state.repo = normalizeRepoSelector(state.repo, "all");
   await Promise.all([loadRuns(), loadRepoRuns(), loadRunCounts()]);
   if (!currentRoute(seq)) return;
+  rerenderWhenStatus(pending, seq);
   localStorage.setItem("oberth-filter", state.filter);
   localStorage.setItem("oberth-repo", state.repo);
   const runs = state.runs, source = state.repo !== "all" || state.runCursor ? state.repoRuns : runs;
@@ -525,7 +562,11 @@ function logLineClass(line) {
    log and the API keep every line. runlog.IsExecutorNoise is the Go twin. */
 function isExecutorNoise(line) {
   const body = String(line || "").replace(LOG_RE.stepPrefix, "").trim();
-  return LOG_RE.execNoise.test(body) && logLineClass(line) === "";
+  if (!LOG_RE.execNoise.test(body) || logLineClass(line) !== "") return false;
+  for (const field of body.matchAll(LOG_ERR_FIELD_ALL)) {
+    if (!LOG_NIL_VALUES.has(String(field[3] || "").toLowerCase())) return false;
+  }
+  return true;
 }
 function readShowExec() {
   try { return localStorage.getItem("oberth-show-exec") === "1"; } catch { return false; }
@@ -564,7 +605,7 @@ function renderLogLines(lines, opts = {}) {
   const flushNoise = () => {
     if (!noise.length) return;
     const n = noise.length;
-    out += `<div class="log-line log-fold" data-action="toggle-exec" title="Argo executor lifecycle lines; warnings, errors and exit statuses are never hidden"><span class="log-no"></span><span class="log-txt"><span class="fold-show">▸ ${n} Argo executor line${n === 1 ? "" : "s"}</span><span class="fold-hide">▾ hide Argo executor lines</span></span></div>` + noise.join("");
+    out += `<button type="button" class="log-line log-fold" data-action="toggle-exec" title="Argo executor lifecycle lines; warnings, errors and exit statuses are never hidden"><span class="log-no"></span><span class="log-txt"><span class="fold-show">▸ ${n} Argo executor line${n === 1 ? "" : "s"}</span><span class="fold-hide">▾ hide Argo executor lines</span></span></button>` + noise.join("");
     noise = [];
   };
   if (truncated) {
@@ -674,7 +715,7 @@ async function liveLogContent(run, activeBurn, activeStep) {
 }
 async function renderRunDetail(runID, seq, background) {
   if (!background) setChrome("runs", "/ run");
-  if (!state.repos.length || !state.status) { try { await loadRepoContext(); } catch { /* repo names fall back to IDs */ } }
+  try { await loadRepoContext(); } catch { /* repo names fall back to IDs; the next poll has status */ }
   let detail;
   try {
     detail = await api(`/api/runs/${enc(runID)}`);
@@ -799,17 +840,24 @@ function issueRow(issue) {
 }
 async function renderIssues(seq) {
   setChrome("issues", "/ issues");
-  if (!state.repos.length || !state.status) { try { await loadRepoContext(); } catch { /* names fall back */ } }
+  let pending = null;
+  try {
+    if (!state.repos.length) await loadRepos();
+    pending = ensureStatus();
+    if (state.issueRepo && !isQualifiedSelector(state.issueRepo)) await pending;
+  } catch { /* names fall back */ }
   state.issueRepo = normalizeRepoSelector(state.issueRepo, "");
   let page;
   try {
     page = await api(issueListURL());
   } catch (err) {
     if (!currentRoute(seq)) return;
+    if (state.issueRepo && [400, 404, 409].includes(err.status)) { changeIssueFilter({ issueRepo: "" }); return; }
     replaceApp(`<section class="screen"><h1>Issues</h1><div class="error">${esc(err.message || err)}<br><button type="button" class="retry" data-action="issue-retry">Retry</button></div></section>`);
     return;
   }
   if (!currentRoute(seq)) return;
+  rerenderWhenStatus(pending, seq);
   state.issuePage = page;
   const issues = page.Issues || [];
   const kinds = [["", "all"], ["ci", "ci"], ["manual", "manual"]];

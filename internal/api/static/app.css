@@ -179,7 +179,7 @@ input,select{height:32px;border:1px solid var(--line);background:var(--panel);co
 .log-no{color:var(--tdim);text-align:right;padding-right:12px;user-select:none}
 .log-txt{min-width:0}
 .log-line.exec{display:none}.term-body.show-exec .log-line.exec{display:grid}.log-line.exec .log-txt{color:var(--tdim)}
-.log-fold{color:var(--tdim);cursor:pointer}.log-fold:hover{color:var(--tfg)}.log-fold .fold-hide{display:none}.term-body.show-exec .log-fold .fold-show{display:none}.term-body.show-exec .log-fold .fold-hide{display:inline}
+.log-fold{color:var(--tdim);cursor:pointer;width:100%;background:none;border:0;font:inherit;text-align:left;line-height:inherit}.log-fold:focus-visible{outline:1px solid var(--tdim)}.log-fold:hover{color:var(--tfg)}.log-fold .fold-hide{display:none}.term-body.show-exec .log-fold .fold-show{display:none}.term-body.show-exec .log-fold .fold-hide{display:inline}
 .log-hdr{color:var(--tdim);padding-top:6px}
 .term-body .muted{color:var(--tdim)}.term-body .ok{color:#50fa7b}.term-body .bad{color:#ff5555}.term-body .warn{color:#ffb86c}.term-body .info{color:#8be9fd}
 /* issues (Oberth internal ledger) */

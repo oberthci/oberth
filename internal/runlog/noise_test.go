@@ -20,6 +20,8 @@ func TestIsExecutorNoise(t *testing.T) {
 		{`echo argo=true`, false},
 		{`msg="waiting for signals" argo=true`, false},
 		{`time=2026-10-17T16:29:39.819Z level=INFO msg="sub-process exited" argo=trueish`, false},
+		{`[x] time=2026-10-17T16:29:39.819Z level=INFO msg="waiting for signals" argo=true`, false},
+		{`time=2026-10-17T16:29:39.819Z level=INFO msg=x argo=true error=<nil> err="boom"`, false},
 		{``, false},
 	} {
 		if got := IsExecutorNoise(tc.line); got != tc.want {

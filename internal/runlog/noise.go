@@ -13,6 +13,9 @@ import (
 var (
 	executorLineRegexp = regexp.MustCompile(`(?i)^time=\S+ level=(info|debug) (.*\s)?argo=true(\s|$)`)
 	executorErrRegexp  = regexp.MustCompile(`(?i)(^|[\s,;])(err|errs|error|errors)=("[^"]*"|'[^']*'|\S*)`)
+	// executorStepPrefix is the dashboard's LOG_RULES.stepPrefix: a
+	// [burn/step] marker, so both sides strip exactly the same prefix.
+	executorStepPrefix = regexp.MustCompile(`^\[[^\]]*/[^\]]*\] `)
 )
 
 // executorNilErrors are the error= values that mean "no error".
@@ -25,7 +28,7 @@ var executorNilErrors = map[string]bool{"": true, `""`: true, "''": true, "<nil>
 // error="exit status 1" is the only exit record in the log — are never
 // noise. Presentation only: stored logs and the API keep every line.
 func IsExecutorNoise(line string) bool {
-	body := strings.TrimSpace(stepContent(line))
+	body := strings.TrimSpace(executorStepPrefix.ReplaceAllString(line, ""))
 	if !executorLineRegexp.MatchString(body) {
 		return false
 	}
