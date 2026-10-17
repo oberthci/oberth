@@ -142,7 +142,7 @@ func runClientAccessOffer(ctx context.Context, cfg Config, deps Deps, tw *tableW
 		return nil
 	}
 
-	baseURL := "https://" + clientReachableHost(deps) + ":" + httpsNodePort
+	baseURL := "https://" + URLHost(clientReachableHost(deps)) + ":" + httpsNodePort
 	tokenCommand, tokenHint := tokenCommandForHost()
 
 	if choice == clientAccessBoth || choice == clientAccessCLI {
@@ -173,7 +173,6 @@ func runClientAccessOffer(ctx context.Context, cfg Config, deps Deps, tw *tableW
 		}
 	}
 
-	tw.WriteFooter()
 	tw.WriteFooter()
 	printClientAccessNotes(w, root, choice, tokenHint, freshToken)
 	return nil

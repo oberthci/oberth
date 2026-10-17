@@ -39,6 +39,8 @@ func NextSteps(in NextStepsInput) []string {
 	if host == "" {
 		host = "localhost"
 	}
+	local := host == "localhost"
+	host = URLHost(host)
 	ns := in.Namespace
 	if ns == "" {
 		ns = DefaultNamespace
@@ -106,7 +108,7 @@ func NextSteps(in NextStepsInput) []string {
 		"   2. here:   "+exec(true, "uplink", "add", "-", "you@laptop")+" < you@laptop.pub",
 		"   3. there:  export OBERTH_BASE_URL=https://"+host+":"+httpsNodePort+" OBERTH_CA_CERT=<a copy of ~/.config/oberth/ca.crt>",
 		"              and store the token step 2 printed once (docs/remote-cli.md, docs/mcp-setup.md)")
-	if host == "localhost" {
+	if local {
 		add("", "localhost works on this machine only. For other machines, rerun oberth setup and pick this host's address on the TLS step (oberth install --client-host <address>).")
 	}
 	return lines
@@ -114,7 +116,7 @@ func NextSteps(in NextStepsInput) []string {
 
 // readyURL is the dashboard address clients are told to open.
 func readyURL(deps Deps) string {
-	return "https://" + clientReachableHost(deps) + ":" + httpsNodePort + "/runs"
+	return "https://" + URLHost(clientReachableHost(deps)) + ":" + httpsNodePort + "/runs"
 }
 
 // printReadyWithNextSteps prints the Ready banner followed by NextSteps.
@@ -141,8 +143,11 @@ func printReadyWithNextSteps(w io.Writer, cfg Config, deps Deps, upstreams []Nex
 // onboarding will register them, for a summary written before (or without)
 // asking the server. Duplicates of an earlier organization are dropped.
 func PlanAlsoUpstreams(firstName, firstURL string, also []string) []NextStepsUpstream {
-	used := map[string]bool{firstName: true}
-	orgs := map[string]bool{orgFromBaseURL(firstURL): true}
+	used, orgs := map[string]bool{}, map[string]bool{}
+	if firstName != "" {
+		used[firstName] = true
+		orgs[orgFromBaseURL(firstURL)] = true
+	}
 	var planned []NextStepsUpstream
 	for _, baseURL := range also {
 		org := orgFromBaseURL(baseURL)

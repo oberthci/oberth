@@ -363,6 +363,15 @@ func NormalizeClientHost(raw string) (string, error) {
 	return host, nil
 }
 
+// URLHost is host as it goes in a URL authority: an IPv6 literal in
+// brackets, anything else unchanged.
+func URLHost(host string) string {
+	if strings.Contains(host, ":") && !strings.HasPrefix(host, "[") {
+		return "[" + host + "]"
+	}
+	return host
+}
+
 // isLoopbackHost reports whether a client host names this machine only.
 func isLoopbackHost(host string) bool {
 	if host == "localhost" {

@@ -306,30 +306,36 @@ func wrapCell(text string, width int) []string {
 	if width < 1 || textWidth(text) <= width {
 		return []string{text}
 	}
-	var pieces []string
+	type piece struct {
+		text string
+		glue bool // continues the previous piece of the same split path
+	}
+	var pieces []piece
 	for _, word := range strings.Fields(text) {
 		if textWidth(word) <= width {
-			pieces = append(pieces, word)
+			pieces = append(pieces, piece{text: word})
 			continue
 		}
 		if !strings.ContainsAny(word[:1], "/~.") {
 			return []string{text}
 		}
-		pieces = append(pieces, splitPath(word, width)...)
+		for i, part := range splitPath(word, width) {
+			pieces = append(pieces, piece{text: part, glue: i > 0})
+		}
 	}
 	var lines []string
 	line := ""
-	for _, piece := range pieces {
+	for _, p := range pieces {
 		switch {
 		case line == "":
-			line = piece
-		case textWidth(line)+1+textWidth(piece) <= width:
-			line += " " + piece
-		case strings.HasSuffix(line, "/") && textWidth(line)+textWidth(piece) <= width:
-			line += piece
+			line = p.text
+		case p.glue && textWidth(line)+textWidth(p.text) <= width:
+			line += p.text
+		case !p.glue && textWidth(line)+1+textWidth(p.text) <= width:
+			line += " " + p.text
 		default:
 			lines = append(lines, line)
-			line = piece
+			line = p.text
 		}
 	}
 	return append(lines, line)

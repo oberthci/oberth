@@ -133,7 +133,7 @@ func TestConnectAlsoUpstreamsRegistersEachWithTheSameKey(t *testing.T) {
 	deps := onboardingDeps(t, host, &buf, strings.NewReader(""), false)
 	cfg := Config{AlsoUpstreams: []string{"ssh://git@codeberg.org/cloudtaser", "ssh://git@github.com/oberthci", "ssh://git@codeberg.org/skipops"}}
 	tw := newTableWriter(&buf, false)
-	got := connectAlsoUpstreams(context.Background(), cfg, deps, tw, "github", "ssh://git@github.com/oberthci")
+	got := connectAlsoUpstreams(context.Background(), cfg, deps, tw, []NextStepsUpstream{{Name: "github", BaseURL: "ssh://git@github.com/oberthci"}})
 	tw.WriteFooter()
 
 	if len(got) != 2 || got[0].Name != "codeberg" || got[1].Name != "codeberg-skipops" {
@@ -149,5 +149,69 @@ func TestConnectAlsoUpstreamsRegistersEachWithTheSameKey(t *testing.T) {
 	}
 	if !strings.Contains(buf.String(), "duplicate") {
 		t.Errorf("the duplicate organization is not reported:\n%s", buf.String())
+	}
+}
+
+// Review fix: an IPv6 client host is bracketed in every URL.
+func TestNextStepsBracketIPv6(t *testing.T) {
+	t.Parallel()
+	text := strings.Join(NextSteps(NextStepsInput{Host: "fd00::5", Upstreams: []NextStepsUpstream{{Name: "github", BaseURL: "ssh://git@github.com/x", Connected: true}}}), "\n")
+	for _, want := range []string{"ssh://git@[fd00::5]:30022/github/x/<repo>.git", "https://[fd00::5]:30443/runs", "OBERTH_BASE_URL=https://[fd00::5]:30443"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("missing %q:\n%s", want, text)
+		}
+	}
+	if got := readyURL(Deps{ClientHost: "::1"}); got != "https://[::1]:30443/runs" {
+		t.Errorf("readyURL = %q", got)
+	}
+	if URLHost("192.168.1.2") != "192.168.1.2" || URLHost("lab") != "lab" {
+		t.Error("only IPv6 literals are bracketed")
+	}
+}
+
+// Review fix: a generated name always passes the server's upstream-name rule.
+func TestAlsoUpstreamNameIsAValidUpstreamName(t *testing.T) {
+	t.Parallel()
+	name := alsoUpstreamName("ssh://git@codeberg.org/My_Org.Team", map[string]bool{"codeberg": true}, map[string]bool{})
+	if name != "codeberg-my-org-team" {
+		t.Fatalf("name = %q", name)
+	}
+	long := alsoUpstreamName("ssh://git@codeberg.org/"+strings.Repeat("x", 80), map[string]bool{"codeberg": true}, map[string]bool{})
+	if len(long) > 53 || strings.HasSuffix(long, "-") {
+		t.Fatalf("long name %q", long)
+	}
+}
+
+// Review fix: --also-upstream on a deployment that already has an upstream
+// connects the organizations instead of dropping them.
+func TestFinishInstallConnectsAlsoUpstreamsOnAConfiguredDeployment(t *testing.T) {
+	t.Parallel()
+	host := &fakeOberthHost{t: t, upstreamRows: []string{"github   ssh   ssh://git@github.com/oberthci   SHA256:x"}}
+	var buf bytes.Buffer
+	deps := onboardingDeps(t, host, &buf, strings.NewReader(""), false)
+	cfg := Config{AlsoUpstreams: []string{"codeberg.org/cloudtaser"}}
+	if err := cfg.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if err := finishInstallTest(context.Background(), cfg, deps, &buf); err != nil {
+		t.Fatal(err)
+	}
+	if len(host.addArgv) != 1 || !slices.Contains(host.addArgv[0], "codeberg") || !slices.Contains(host.addArgv[0], "ssh://git@codeberg.org/cloudtaser") {
+		t.Fatalf("upstream add argv %q\n%s", host.addArgv, buf.String())
+	}
+}
+
+// Review fix: when onboarding cannot run, the further organizations are
+// named with the command that connects them.
+func TestFinishInstallNamesAlsoUpstreamsWhenOnboardingCannotRun(t *testing.T) {
+	t.Parallel()
+	host := &fakeOberthHost{t: t}
+	var buf bytes.Buffer
+	deps := onboardingDeps(t, host, &buf, strings.NewReader(""), false)
+	cfg := Config{AlsoUpstreams: []string{"codeberg.org/cloudtaser"}}
+	_ = cfg.Validate()
+	_ = finishInstallTest(context.Background(), cfg, deps, &buf)
+	if !strings.Contains(buf.String(), "upstream add --yes codeberg ssh://git@codeberg.org/cloudtaser") {
+		t.Fatalf("output:\n%s", buf.String())
 	}
 }

@@ -61,7 +61,8 @@ func FinishInstall(ctx context.Context, cfg Config, deps Deps, tw *tableWriter, 
 		deps.StepProgressSink("rollout ready", "done")
 	}
 
-	configured, err := upstreamConfigured(ctx, cfg, deps)
+	existing, err := listUpstreams(ctx, cfg, deps)
+	configured := len(existing) > 0
 	if err != nil {
 		_, _ = fmt.Fprintf(deps.Output, "Could not determine the upstream state (%v); finish the setup manually:\n", err)
 		_ = PrintNextSteps(cfg, deps.Output)
@@ -72,6 +73,12 @@ func FinishInstall(ctx context.Context, cfg Config, deps Deps, tw *tableWriter, 
 		// client offer still belongs here: it is about this machine, not about
 		// the deployment, and a second machine reaches a server that is already
 		// set up.
+		// --also-upstream on a deployment that already has upstreams connects
+		// them with its key now (#060).
+		if len(cfg.AlsoUpstreams) > 0 {
+			connectAlsoUpstreams(ctx, cfg, deps, tw, existing)
+			tw.WriteFooter()
+		}
 		if err := offerClientAccessToConfiguredDeployment(ctx, cfg, deps, tw); err != nil {
 			return err
 		}
@@ -81,6 +88,7 @@ func FinishInstall(ctx context.Context, cfg Config, deps Deps, tw *tableWriter, 
 	if !isInteractive(deps) && !cfg.hasOnboardingConfig() {
 		_, _ = fmt.Fprintln(deps.Output, "The pod stays NotReady until an upstream is registered. Finish the setup manually:")
 		_ = PrintNextSteps(cfg, deps.Output)
+		printAlsoUpstreamCommands(deps.Output, cfg, deps, nil)
 		return ErrOnboardingPartial
 	}
 	return runOnboarding(ctx, cfg, deps, tw, creds)
@@ -134,6 +142,12 @@ func kubectlOberthArgs(cfg Config, deps Deps, stdinAttached bool, command ...str
 // and the admin database may need a moment, so transient failures are
 // retried briefly.
 func upstreamConfigured(ctx context.Context, cfg Config, deps Deps) (bool, error) {
+	rows, err := listUpstreams(ctx, cfg, deps)
+	return len(rows) > 0, err
+}
+
+// listUpstreams lists the registered upstreams in-pod (name and base URL).
+func listUpstreams(ctx context.Context, cfg Config, deps Deps) ([]NextStepsUpstream, error) {
 	run := deps.RunCommand
 	if run == nil {
 		run = DefaultRunCommand
@@ -144,16 +158,45 @@ func upstreamConfigured(ctx context.Context, cfg Config, deps Deps) (bool, error
 		if attempt > 0 {
 			select {
 			case <-ctx.Done():
-				return false, ctx.Err()
+				return nil, ctx.Err()
 			case <-time.After(pollInterval(deps)):
 			}
 		}
 		out, err = run(ctx, nil, "kubectl", kubectlOberthArgs(cfg, deps, false, "upstream", "list")...)
 		if err == nil {
-			return upstreamListHasRows(out), nil
+			return upstreamListRows(out), nil
 		}
 	}
-	return false, fmt.Errorf("list upstreams in pod: %w%s", err, commandOutputSuffix(out))
+	return nil, fmt.Errorf("list upstreams in pod: %w%s", err, commandOutputSuffix(out))
+}
+
+// upstreamListRows reads the rows upstreamListHasRows counts: the first
+// column is the name, the field holding "://" the base URL.
+func upstreamListRows(out []byte) []NextStepsUpstream {
+	if !upstreamListHasRows(out) {
+		return nil
+	}
+	var rows []NextStepsUpstream
+	headerSeen := false
+	for _, line := range strings.Split(string(out), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) == 0 {
+			continue
+		}
+		if !headerSeen {
+			headerSeen = fields[0] == "NAME"
+			continue
+		}
+		row := NextStepsUpstream{Name: fields[0], Connected: true}
+		for _, f := range fields[1:] {
+			if strings.Contains(f, "://") {
+				row.BaseURL = f
+				break
+			}
+		}
+		rows = append(rows, row)
+	}
+	return rows
 }
 
 // upstreamListHasRows parses `oberth upstream list` output: a tab-separated
@@ -272,14 +315,15 @@ func runOnboarding(ctx context.Context, cfg Config, deps Deps, tw *tableWriter, 
 					_, _ = fmt.Fprintf(w, "Last verification error: %s\n", terseInstallError(lastAttemptErr))
 				}
 				_ = PrintNextSteps(cfg, w)
+				printAlsoUpstreamCommands(w, cfg, deps, []NextStepsUpstream{{Name: name, BaseURL: baseURL}})
 				return ErrOnboardingPartial
 			}
 		}
 	}
 
 	// --- More organizations, same upstream key (#060) ---
-	upstreams := append([]NextStepsUpstream{{Name: name, BaseURL: baseURL, Connected: registered}},
-		connectAlsoUpstreams(ctx, cfg, deps, tw, name, baseURL)...)
+	first := []NextStepsUpstream{{Name: name, BaseURL: baseURL, Connected: registered}}
+	upstreams := append(first, connectAlsoUpstreams(ctx, cfg, deps, tw, first)...)
 
 	// --- Uplink ---
 	pubKeyPath, identity, token, uplinkOutput, uplinkErr := onboardUplink(ctx, cfg, deps, tw)
@@ -362,9 +406,12 @@ func runOnboarding(ctx context.Context, cfg Config, deps Deps, tw *tableWriter, 
 // key the first upstream uses (#060). A forge that does not accept the key yet
 // is reported pending, not fatal: the first upstream already works, and the
 // next steps name the command that finishes it.
-func connectAlsoUpstreams(ctx context.Context, cfg Config, deps Deps, tw *tableWriter, firstName, firstURL string) []NextStepsUpstream {
-	used := map[string]bool{firstName: true}
-	orgs := map[string]bool{orgFromBaseURL(firstURL): true}
+func connectAlsoUpstreams(ctx context.Context, cfg Config, deps Deps, tw *tableWriter, existing []NextStepsUpstream) []NextStepsUpstream {
+	used, orgs := map[string]bool{}, map[string]bool{}
+	for _, u := range existing {
+		used[u.Name] = true
+		orgs[orgFromBaseURL(u.BaseURL)] = true
+	}
 	var connected []NextStepsUpstream
 	for _, baseURL := range cfg.AlsoUpstreams {
 		org := orgFromBaseURL(baseURL)
@@ -389,22 +436,65 @@ func connectAlsoUpstreams(ctx context.Context, cfg Config, deps Deps, tw *tableW
 	return connected
 }
 
+// printAlsoUpstreamCommands names the command that connects each
+// --also-upstream organization when onboarding stopped before it could.
+func printAlsoUpstreamCommands(w io.Writer, cfg Config, deps Deps, existing []NextStepsUpstream) {
+	if len(cfg.AlsoUpstreams) == 0 {
+		return
+	}
+	firstName, firstURL := "", ""
+	if len(existing) > 0 {
+		firstName, firstURL = existing[0].Name, existing[0].BaseURL
+	}
+	_, _ = fmt.Fprintln(w, "\nThe further organizations (--also-upstream) were not connected. Once the first upstream works, connect each with:")
+	for _, u := range PlanAlsoUpstreams(firstName, firstURL, cfg.AlsoUpstreams) {
+		args := append([]string{"kubectl"}, kubectlOberthArgs(cfg, deps, false, "upstream", "add", "--yes", u.Name, u.BaseURL)...)
+		_, _ = fmt.Fprintln(w, "    "+strings.Join(args, " "))
+	}
+}
+
 // alsoUpstreamName names a further upstream after its forge (codeberg,
 // github), or forge-org when that name is taken, never an organization name:
 // the store refuses a name that equals any upstream's organization, because
-// two-segment paths would become ambiguous.
+// two-segment paths would become ambiguous. Candidates are reduced to what
+// the server accepts (lowercase letters, digits and inner hyphens, at most
+// 53 characters).
 func alsoUpstreamName(baseURL string, used, orgs map[string]bool) string {
 	forge, _, _ := strings.Cut(hostnameFromURL(baseURL), ".")
-	for _, candidate := range []string{forge, forge + "-" + orgFromBaseURL(baseURL)} {
-		if !used[candidate] && !orgs[candidate] {
-			return candidate
-		}
+	forge = upstreamNameLabel(forge)
+	if forge == "" {
+		forge = "upstream"
+	}
+	free := func(name string) bool { return name != "" && !used[name] && !orgs[name] }
+	if free(forge) {
+		return forge
+	}
+	if candidate := upstreamNameLabel(forge + "-" + orgFromBaseURL(baseURL)); free(candidate) {
+		return candidate
 	}
 	for i := 2; ; i++ {
-		if candidate := fmt.Sprintf("%s-%d", forge, i); !used[candidate] && !orgs[candidate] {
+		if candidate := fmt.Sprintf("%s-%d", forge, i); free(candidate) {
 			return candidate
 		}
 	}
+}
+
+// upstreamNameLabel lowercases s, turns every other character into a hyphen,
+// and trims it to a valid upstream name.
+func upstreamNameLabel(s string) string {
+	var b strings.Builder
+	for _, r := range strings.ToLower(s) {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+		} else if !strings.HasSuffix(b.String(), "-") {
+			b.WriteByte('-')
+		}
+	}
+	name := strings.Trim(b.String(), "-")
+	if len(name) > 48 {
+		name = strings.TrimRight(name[:48], "-")
+	}
+	return name
 }
 
 // promptUpstream asks for the upstream forge URL. An empty answer skips

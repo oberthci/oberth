@@ -276,6 +276,10 @@ func (st *WizardState) fromSaved(s savedSetup) {
 	if st.ForgeAuth == forgeAuthExisting {
 		c.UpstreamPrivateKeyPath = s.UpstreamPrivateKey
 		st.UpstreamKeyPick = s.UpstreamKeyPick
+		if st.UpstreamKeyPick == "" && s.UpstreamPrivateKey != "" {
+			// Written before the key list existed: the path was typed.
+			st.UpstreamKeyPick = upstreamKeyOther
+		}
 	}
 	c.AlsoUpstreams = s.AlsoUpstreams
 	c.ClientHost = s.ClientHost

@@ -112,6 +112,16 @@ type upstreamCheck struct {
 
 func (u upstreamCheck) ok() bool { return u.auth == "ok" }
 
+// unchecked is a row the server did not authenticate: no AUTH column (an
+// older server) or "-" (a kind of upstream without a key check).
+func (u upstreamCheck) unchecked() bool { return u.auth == "" || u.auth == "-" }
+
+// orgOf is the organization (last path segment) of an upstream URL.
+func orgOf(baseURL string) string {
+	trimmed := strings.TrimRight(baseURL, "/")
+	return trimmed[strings.LastIndex(trimmed, "/")+1:]
+}
+
 // checks counts what Verify checked and how much of it passed.
 func (v *verifyResult) checks() (passed, total int) {
 	count := func(ok bool) {
@@ -125,7 +135,7 @@ func (v *verifyResult) checks() (passed, total int) {
 		count(v.upstream)
 	}
 	for _, u := range v.upstreams {
-		count(u.ok() || u.auth == "")
+		count(u.ok() || u.unchecked())
 	}
 	if v.portsChecked {
 		count(v.portsOK)
@@ -235,6 +245,10 @@ func verifyInstall(ctx context.Context, st WizardState, reRegister bool) verifyR
 	res := verifyResult{at: time.Now()}
 	list := func() error {
 		out, err := runKubectl(ctx, podExec(&st, "oberth", "upstream", "list", "--check")...)
+		if err != nil && strings.Contains(string(out), "flag provided but not defined") {
+			// A server older than --check: list without authenticating.
+			out, err = runKubectl(ctx, podExec(&st, "oberth", "upstream", "list")...)
+		}
 		if err != nil {
 			return fmt.Errorf("list upstreams: %s", lastLine(out, err))
 		}
@@ -543,7 +557,7 @@ func finishLines(w *wizard, v *verifyResult) []string {
 			switch {
 			case u.ok():
 				add("   ✓ upstream " + where + ": the forge accepts the key")
-			case u.auth == "":
+			case u.unchecked():
 				add("   ✓ upstream " + where + " registered")
 			default:
 				add("   ✗ upstream "+where+": "+u.auth,
@@ -617,8 +631,17 @@ func finishLines(w *wizard, v *verifyResult) []string {
 func nextStepsUpstreams(st *WizardState, v *verifyResult) []installer.NextStepsUpstream {
 	if v != nil && len(v.upstreams) > 0 {
 		var ups []installer.NextStepsUpstream
+		listed := map[string]bool{}
 		for _, u := range v.upstreams {
-			ups = append(ups, installer.NextStepsUpstream{Name: u.name, BaseURL: u.url, Connected: u.ok() || u.auth == ""})
+			ups = append(ups, installer.NextStepsUpstream{Name: u.name, BaseURL: u.url, Connected: u.ok() || u.unchecked()})
+			listed[orgOf(u.url)] = true
+		}
+		// A further organization whose key the forge has not accepted yet was
+		// never registered, so the listing omits it; keep it as pending.
+		for _, planned := range installer.PlanAlsoUpstreams(ups[0].Name, ups[0].BaseURL, st.Config.AlsoUpstreams) {
+			if !listed[orgOf(planned.BaseURL)] {
+				ups = append(ups, planned)
+			}
 		}
 		return ups
 	}

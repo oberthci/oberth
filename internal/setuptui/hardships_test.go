@@ -252,3 +252,29 @@ func TestParseUpstreamCheckServerOutput(t *testing.T) {
 		t.Fatalf("parsed %+v", rows)
 	}
 }
+
+// Review fix: a further organization the forge has not accepted yet is not
+// in the server's listing, but stays on the finish screen as pending.
+func TestNextStepsKeepPendingAlsoUpstreams(t *testing.T) {
+	st := newWizardState(Options{})
+	st.ForgeType, st.ForgeOrg = "github", "oberthci"
+	st.Config.AlsoUpstreams = []string{"ssh://git@codeberg.org/cloudtaser"}
+	v := &verifyResult{upstream: true, upstreams: []upstreamCheck{{name: "github", url: "ssh://git@github.com/oberthci", auth: "ok"}}}
+	ups := nextStepsUpstreams(st, v)
+	if len(ups) != 2 || ups[1].Name != "codeberg" || ups[1].Connected {
+		t.Fatalf("upstreams %+v", ups)
+	}
+	if !(upstreamCheck{auth: "-"}).unchecked() {
+		t.Error("AUTH \"-\" is not a failure")
+	}
+}
+
+// Review fix: answers saved before the key list existed resume on the typed
+// path screen.
+func TestResumeTypedUpstreamKeyPath(t *testing.T) {
+	st := newWizardState(Options{})
+	st.fromSaved(savedSetup{Version: setupStateFileVersion, ForgeAuth: forgeAuthExisting, UpstreamPrivateKey: "/home/x/.ssh/work"})
+	if st.UpstreamKeyPick != upstreamKeyOther || !questionByID(t, "forge.keyfile").appliesTo(st) {
+		t.Fatalf("pick %q", st.UpstreamKeyPick)
+	}
+}

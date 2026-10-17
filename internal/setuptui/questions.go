@@ -375,6 +375,9 @@ func clientHostOptions(st *WizardState) []option {
 		seen[value] = true
 		opts = append(opts, option{value: value, label: value, detail: detail})
 	}
+	if api := apiServerHost(st); api != "" {
+		addOpt(api, "the Kubernetes API server's host")
+	}
 	addOpt(st.ClusterInfo.nodeIP, "the node's address · machines that can reach this host, such as a VM's host or your LAN")
 	addOpt(st.ClusterInfo.nodeName, "the node's name · other machines need it in DNS or /etc/hosts")
 	for _, name := range st.Config.TLSExtraIPs {
@@ -384,6 +387,19 @@ func clientHostOptions(st *WizardState) []option {
 		addOpt(name, "a name on the certificate")
 	}
 	return append(opts, local)
+}
+
+// apiServerHost is the kubeconfig server's host when it is not a loopback
+// address: what the installer advertises by default for a remote cluster.
+func apiServerHost(st *WizardState) string {
+	u, err := url.Parse(st.ClusterInfo.server)
+	if err != nil || u.Hostname() == "" || u.Hostname() == "localhost" {
+		return ""
+	}
+	if ip := net.ParseIP(u.Hostname()); ip != nil && ip.IsLoopback() {
+		return ""
+	}
+	return u.Hostname()
 }
 
 // tlsCertificateDescription says what certificate the server will serve: a

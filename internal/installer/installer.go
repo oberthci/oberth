@@ -696,6 +696,7 @@ func Run(ctx context.Context, cfg Config, deps Deps) error {
 	if deps.ClientHost != "" && cluster.Engine == "kind" && !isLoopbackHost(deps.ClientHost) {
 		_, _ = fmt.Fprintf(deps.Output, "NOTE: kind publishes Oberth on 127.0.0.1 only; clients are told to use localhost, not %s.\n", deps.ClientHost)
 		deps.ClientHost = "localhost"
+		cfg.ClientHost = "localhost"
 	}
 
 	if !cluster.IsLocal && !cfg.Yes {
@@ -1673,7 +1674,7 @@ func OberthHelmArgs(cfg Config, openbao OpenBaoResult, rekor RekorResult) []stri
 		bannerHost = pushBannerHost(cfg.TLSExtraIPs, cfg.TLSExtraDNSNames)
 	}
 	if bannerHost != "" {
-		args = append(args, "--set-string", "pushBannerURL=https://"+bannerHost+":"+httpsNodePort+"/runs")
+		args = append(args, "--set-string", "pushBannerURL=https://"+URLHost(bannerHost)+":"+httpsNodePort+"/runs")
 	}
 	args = append(args, argoOberthHelmValues(cfg, openbao)...)
 	args = append(args,

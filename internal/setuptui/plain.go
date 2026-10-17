@@ -240,6 +240,9 @@ func (p *plainRun) answer(q *question) ([]string, error) {
 	}
 	if def == "" && len(opts) > 0 {
 		def = "1"
+		if opts[0].value == upstreamKeyRescan && len(opts) > 1 {
+			def = "2" // no key pair yet: "Another file…", not an endless rescan
+		}
 	}
 	v, err := p.ask("Choice", def)
 	if err != nil {
