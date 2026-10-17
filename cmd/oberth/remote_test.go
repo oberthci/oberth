@@ -162,6 +162,34 @@ func TestLogStripsTheStepPrefixUnlessAskedNotTo(t *testing.T) {
 	}
 }
 
+func TestLogHidesExecutorLinesUnlessRaw(t *testing.T) {
+	payload := `{"run_id":"r","burn":"setup","step":"verify","output":"` +
+		`[setup/verify] time=2026-10-17T16:30:04.983Z level=INFO msg=\"waiting for signals\" argo=true signalPath=/var/run/argo/ctr/main/signal\n` +
+		`[setup/verify] /tmp/shellcheck.tar.xz: OK\n` +
+		`[setup/verify] time=2026-10-17T16:30:05.984Z level=INFO msg=\"sub-process exited\" argo=true error=\"exit status 1\"\n",` +
+		`"total_lines":3,"matched_lines":3,"returned_lines":3}`
+	configure(t, remoteServer(t, payload))
+
+	var out bytes.Buffer
+	if err := runRemoteLog(context.Background(), []string{"--burn", "setup", "--step", "verify", "run-abc"}, &out); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out.String(), "waiting for signals") {
+		t.Fatalf("executor chatter was not hidden:\n%s", out.String())
+	}
+	if !strings.Contains(out.String(), "shellcheck.tar.xz: OK") || !strings.Contains(out.String(), "exit status 1") {
+		t.Fatalf("step output or a failed exit was hidden:\n%s", out.String())
+	}
+
+	var raw bytes.Buffer
+	if err := runRemoteLog(context.Background(), []string{"--burn", "setup", "--step", "verify", "--raw", "run-abc"}, &raw); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(raw.String(), "waiting for signals") {
+		t.Fatalf("--raw must keep executor lines:\n%s", raw.String())
+	}
+}
+
 func TestLogRequiresBurnAndStep(t *testing.T) {
 	configure(t, remoteServer(t, `{}`))
 	var out bytes.Buffer

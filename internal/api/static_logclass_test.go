@@ -5,6 +5,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/oberthci/oberth/internal/runlog"
 )
 
 /*
@@ -264,5 +266,35 @@ func TestLogLineClassifiesRealRunOutput(t *testing.T) {
 				t.Errorf("classified as %q, want %q\n  line: %s", got, testCase.class, testCase.line)
 			}
 		})
+	}
+}
+
+// The dashboard folds Argo executor lines with isExecutorNoise (execNoise ∧
+// no colour from logLineClass); the CLI drops them with
+// runlog.IsExecutorNoise. Both must agree, and neither may fold a warning,
+// an error or a failed exit.
+func TestDashboardExecutorNoiseMatchesRunlog(t *testing.T) {
+	t.Parallel()
+	rule, ok := logRuleSources(t)["execNoise"]
+	if !ok {
+		t.Fatal("LOG_RULES has no execNoise rule")
+	}
+	re := regexp.MustCompile("(?i)" + rule)
+	stepPrefix := regexp.MustCompile("(?i)" + logRuleSources(t)["stepPrefix"])
+	for _, line := range []string{
+		`[setup/install-helm] time=2026-10-17T16:29:39.819Z level=INFO msg="sub-process exited" argo=true error=<nil>`,
+		`[setup/install-helm] time=2026-10-17T16:29:39.819Z level=INFO msg="file signal handler exiting due to context cancellation" argo=true`,
+		`[setup/fetch-shellcheck] time=2026-10-17T16:29:54.886Z level=INFO msg="waiting for signals" argo=true signalPath=/var/run/argo/ctr/main/signal`,
+		`[setup/verify-shellcheck] /tmp/oberth-tools/shellcheck-v0.10.0.linux.x86_64.tar.xz: OK`,
+		`time=2026-10-17T16:29:39.819Z level=INFO msg="sub-process exited" argo=true error="exit status 1"`,
+		`time=2026-10-17T16:29:39.819Z level=WARN msg="cannot save parameter, does not exist" argo=true`,
+		`time=2026-10-17T16:29:39.819Z level=ERROR msg="failed to write exit code" argo=true`,
+		`echo argo=true`,
+	} {
+		body := strings.TrimSpace(stepPrefix.ReplaceAllString(line, ""))
+		dashboard := re.MatchString(body) && classify(t, line) == ""
+		if want := runlog.IsExecutorNoise(line); dashboard != want {
+			t.Errorf("%q: dashboard folds=%v, runlog.IsExecutorNoise=%v", line, dashboard, want)
+		}
 	}
 }

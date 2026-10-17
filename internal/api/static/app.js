@@ -18,6 +18,7 @@ const state = {
   step: "", stepRunID: "",
   logCache: new Map(),
   live: null, // assigned per-run by liveLogContent
+  showExec: readShowExec(),
   issueKind: "", issueState: "open", issueRepo: "", issueCursor: 0, issueCursorHistory: [],
   issuePage: null, issueOpener: null,
   lastList: "/runs",
@@ -172,8 +173,7 @@ function runMessage(run) {
 /* Repository names repeat across upstreams (a "terraform" under github,
    codeberg and skipops), and a bare name is then an ambiguous selector the
    API refuses. The dashboard keys a repository by upstream/org/name — the
-   qualified selector the API resolves — and shows that qualifier only when
-   the bare name is shared. */
+   qualified selector the API resolves — and labels a shared name org/name. */
 function upstreamOf(repo) {
   return (state.status?.upstream_info || []).find(upstream => upstream.id === repo.UpstreamID);
 }
@@ -185,8 +185,12 @@ function repoKey(repo) {
   const upstream = upstreamOf(repo);
   return upstream ? `${upstream.name}/${orgOfURL(upstream.base_url)}/${repo.Name}` : repo.Name;
 }
+/* A shared name is shown as org/repo: two upstreams never share an
+   organization (the store refuses it), so that is always unique. */
 function repoLabel(repo) {
-  return state.repos.filter(other => other.Name === repo.Name).length > 1 ? repoKey(repo) : repo.Name;
+  if (state.repos.filter(other => other.Name === repo.Name).length < 2) return repo.Name;
+  const upstream = upstreamOf(repo);
+  return upstream ? `${orgOfURL(upstream.base_url)}/${repo.Name}` : repo.Name;
 }
 function repoKeyOf(repoID) {
   const repo = state.repos.find(r => r.ID === repoID);
@@ -468,6 +472,7 @@ const LOG_RULES = {
   wordOk: "(^|[^A-Za-z0-9._/-])(success|succeeded|passed)([^A-Za-z0-9._/-]|$)",
   wordWarn: "(^|[^A-Za-z0-9._/-])(pending|waiting|queued|skipped|warn|warning)([^A-Za-z0-9._/-]|$)",
   info: "^([$] |run |step:)",
+  execNoise: "^time=\\S+ level=(info|debug) (.*\\s)?argo=true(\\s|$)",
 };
 const LOG_RE = Object.fromEntries(Object.entries(LOG_RULES).map(([name, source]) => [name, new RegExp(source, "i")]));
 const LOG_ERR_FIELD_ALL = new RegExp(LOG_RULES.errField, "gi");
@@ -512,6 +517,24 @@ function logLineClass(line) {
   if (LOG_RE.info.test(body)) return "info";
   return "";
 }
+/* Argo's executor (argoexec emissary) runs as PID 1 of every step's main
+   container and logs its own lifecycle into the step's stream: "waiting for
+   signals", "sub-process exited" error=<nil>. Those INFO lines are folded
+   behind a toggle. A WARN/ERROR line or a non-nil error — the exit status of
+   a failed step — is never folded (logLineClass judges it), and the stored
+   log and the API keep every line. runlog.IsExecutorNoise is the Go twin. */
+function isExecutorNoise(line) {
+  const body = String(line || "").replace(LOG_RE.stepPrefix, "").trim();
+  return LOG_RE.execNoise.test(body) && logLineClass(line) === "";
+}
+function readShowExec() {
+  try { return localStorage.getItem("oberth-show-exec") === "1"; } catch { return false; }
+}
+function toggleExecutorLines() {
+  state.showExec = !state.showExec;
+  try { localStorage.setItem("oberth-show-exec", state.showExec ? "1" : "0"); } catch { /* preference only */ }
+  document.getElementById("termBody")?.classList.toggle("show-exec", state.showExec);
+}
 function splitLogText(raw) {
   const clean = String(raw || "").replaceAll("\r\n", "\n").replaceAll("\r", "\n");
   if (!clean) return [];
@@ -529,17 +552,46 @@ function stripStepPrefix(lines, burn, step) {
   return lines.map(line => line.startsWith(prefix) ? line.slice(prefix.length) : line);
 }
 const maxRenderedLogLines = 5000;
-function renderLogLines(lines) {
+const LOG_STEP_MARK = /^\[([^\]/]+)\/([^\]]+)\] /;
+/* renderLogLines numbers lines by their position in the log, so a number
+   still matches oberth log and the API. With groupSteps (the combined live
+   view) the repeated [burn/step] prefix becomes one header row per step. */
+function renderLogLines(lines, opts = {}) {
   const total = lines.length;
   const truncated = total > maxRenderedLogLines;
   const start = truncated ? total - maxRenderedLogLines : 0;
-  let out = "";
+  let out = "", current = "", noise = [];
+  const flushNoise = () => {
+    if (!noise.length) return;
+    const n = noise.length;
+    out += `<div class="log-line log-fold" data-action="toggle-exec" title="Argo executor lifecycle lines; warnings, errors and exit statuses are never hidden"><span class="log-no"></span><span class="log-txt"><span class="fold-show">▸ ${n} Argo executor line${n === 1 ? "" : "s"}</span><span class="fold-hide">▾ hide Argo executor lines</span></span></div>` + noise.join("");
+    noise = [];
+  };
   if (truncated) {
     out += `<div class="log-line"><span class="log-no">--</span><span class="log-txt warn">[truncated] showing last ${maxRenderedLogLines} of ${total} lines</span></div>`;
   }
   for (let i = start; i < total; i++) {
-    out += `<div class="log-line"><span class="log-no">${i + 1}</span><span class="log-txt ${logLineClass(lines[i])}">${esc(lines[i]) || "&nbsp;"}</span></div>`;
+    let line = lines[i];
+    if (opts.groupSteps) {
+      const mark = LOG_STEP_MARK.exec(line);
+      if (mark) {
+        const key = mark[1] + " / " + mark[2];
+        if (key !== current) {
+          flushNoise();
+          current = key;
+          out += `<div class="log-line log-hdr"><span class="log-no"></span><span class="log-txt">── ${esc(key)} ──</span></div>`;
+        }
+        line = line.slice(mark[0].length);
+      }
+    }
+    if (isExecutorNoise(line)) {
+      noise.push(`<div class="log-line exec"><span class="log-no">${i + 1}</span><span class="log-txt">${esc(line)}</span></div>`);
+      continue;
+    }
+    flushNoise();
+    out += `<div class="log-line"><span class="log-no">${i + 1}</span><span class="log-txt ${logLineClass(line)}">${esc(line) || "&nbsp;"}</span></div>`;
   }
+  flushNoise();
   return out;
 }
 function summaryLines(detail) {
@@ -615,9 +667,10 @@ async function liveLogContent(run, activeBurn, activeStep) {
     } finally { liveState.busy = false; }
   }
   let lines = splitLogText(liveState.text);
-  if (activeBurn && activeStep) lines = stripStepPrefix(lines, activeBurn, activeStep);
+  const scoped = activeBurn && activeStep;
+  if (scoped) lines = stripStepPrefix(lines, activeBurn, activeStep);
   return renderLogLines([`$ oberth live · ${repoName(run.RepoID)}/${run.Ref} · phase ${run.Phase || "ci"}`, ""].concat(
-    lines.length ? lines : ["waiting for runner output…"]));
+    lines.length ? lines : ["waiting for runner output…"]), { groupSteps: !scoped });
 }
 async function renderRunDetail(runID, seq, background) {
   if (!background) setChrome("runs", "/ run");
@@ -692,7 +745,7 @@ async function renderRunDetailView(detail, seq) {
       </div>
       <div class="logp">
         <div class="log-h" id="logHead">${selected ? `${statusIcon(selected.Status)}<span class="nm">${esc(stepKey(selected))}</span><span class="v4b ${statusKind(selected.Status) === "pass" ? "pass" : statusKind(selected.Status) === "fail" ? "fail" : statusKind(selected.Status) === "run" ? "run" : "dim"}">${esc(statusLabel(selected.Status).toUpperCase())}</span>` : `<span class="ic ${kind === "pass" ? "g" : kind === "fail" ? "r" : kind === "run" ? "o" : "d"}">≡</span><span class="nm">Run summary</span><span class="v4b ${kind === "pass" ? "pass" : kind === "fail" ? "fail" : kind === "run" ? "run" : "dim"}">${esc(phaseLabel)} · ${esc(fmtDur(seconds))}</span>`}</div>
-        <div class="terminal"><div class="term-bar"><span class="lamp red"></span><span class="lamp yellow"></span><span class="lamp green"></span><span class="term-title">${esc(repository)} / ${esc(run.Ref)} — ${live ? "live output" : selected ? esc(stepKey(selected)) : "summary"}</span>${live ? '<span class="term-live"><span class="dot live"></span>LIVE</span>' : ""}</div><div id="termBody" class="term-body">${terminal}</div></div>
+        <div class="terminal"><div class="term-bar"><span class="lamp red"></span><span class="lamp yellow"></span><span class="lamp green"></span><span class="term-title">${esc(repository)} / ${esc(run.Ref)} — ${live ? "live output" : selected ? esc(stepKey(selected)) : "summary"}</span>${live ? '<span class="term-live"><span class="dot live"></span>LIVE</span>' : ""}</div><div id="termBody" class="term-body${state.showExec ? " show-exec" : ""}">${terminal}</div></div>
       </div>
     </div>
   </section>`);
@@ -898,6 +951,7 @@ document.addEventListener("click", event => {
   switch (target.dataset.action) {
     case "toggle-theme": toggleTheme(); break;
     case "refresh": state.logCache.clear(); route(); break;
+    case "toggle-exec": toggleExecutorLines(); break;
     case "clear-token": clearToken(); break;
     case "submit-token": submitToken(); break;
     case "close-issue": closeIssue(); break;

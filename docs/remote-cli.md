@@ -64,7 +64,12 @@ oberth log run-abc --burn ci --step test --pattern 'FAIL|Error' --context 3
 ```
 
 The `[burn/step] ` prefix is stripped from each line, since the step is already
-named in the command. `--raw` keeps it.
+named in the command. Argo executor lifecycle lines (`time=… level=INFO …
+argo=true`, such as "waiting for signals" or "sub-process exited"
+error=<nil>) are hidden and counted on stderr; a warning, an error or a
+non-nil exit status is always shown. `--raw` keeps the prefix and every
+executor line, and `--json` returns the server's payload unchanged. The
+dashboard folds the same lines behind a "▸ N Argo executor lines" toggle.
 
 ## Local or remote
 

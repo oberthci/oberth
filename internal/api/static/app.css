@@ -178,6 +178,9 @@ input,select{height:32px;border:1px solid var(--line);background:var(--panel);co
 .log-line{display:grid;grid-template-columns:54px minmax(0,1fr);padding:0 14px 0 0}
 .log-no{color:var(--tdim);text-align:right;padding-right:12px;user-select:none}
 .log-txt{min-width:0}
+.log-line.exec{display:none}.term-body.show-exec .log-line.exec{display:grid}.log-line.exec .log-txt{color:var(--tdim)}
+.log-fold{color:var(--tdim);cursor:pointer}.log-fold:hover{color:var(--tfg)}.log-fold .fold-hide{display:none}.term-body.show-exec .log-fold .fold-show{display:none}.term-body.show-exec .log-fold .fold-hide{display:inline}
+.log-hdr{color:var(--tdim);padding-top:6px}
 .term-body .muted{color:var(--tdim)}.term-body .ok{color:#50fa7b}.term-body .bad{color:#ff5555}.term-body .warn{color:#ffb86c}.term-body .info{color:#8be9fd}
 /* issues (Oberth internal ledger) */
 .issues-table .issue-row{width:100%;min-width:980px;display:grid;grid-template-columns:64px 74px 90px minmax(130px,.7fr) minmax(150px,.8fr) minmax(240px,1.6fr) 74px 110px;gap:12px;align-items:center;padding:10px 12px;border-bottom:1px solid var(--line);text-align:left;color:var(--fg);font-family:inherit;background:transparent;border-top:0;border-left:0;border-right:0}

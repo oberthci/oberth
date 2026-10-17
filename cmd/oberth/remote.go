@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/oberthci/oberth/internal/client"
+	"github.com/oberthci/oberth/internal/runlog"
 )
 
 type remoteRun struct {
@@ -357,7 +358,7 @@ func runRemoteLog(ctx context.Context, arguments []string, output io.Writer) err
 	offset := flags.Int("offset", 0, "skip this many")
 	limit := flags.Int("limit", 0, "return at most this many")
 	tail := flags.Bool("tail", false, "read from the end")
-	raw := flags.Bool("raw", false, "keep the [burn/step] prefix on each line")
+	raw := flags.Bool("raw", false, "keep the [burn/step] prefix on each line and the Argo executor lines")
 	asJSON := flags.Bool("json", false, "emit the server's payload unchanged")
 	if err := flags.Parse(permuteFlagsFirst(arguments)); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -399,9 +400,10 @@ func runRemoteLog(ctx context.Context, arguments []string, output io.Writer) err
 	if err := api.Get(ctx, path, query, &log); err != nil {
 		return err
 	}
-	body := log.Output
+	body, hidden := log.Output, 0
 	if !*raw {
 		body = stripStepPrefix(body, log.Burn, log.Step)
+		body, hidden = dropExecutorLines(body)
 	}
 	if _, err := io.WriteString(output, body); err != nil {
 		return err
@@ -411,9 +413,32 @@ func runRemoteLog(ctx context.Context, arguments []string, output io.Writer) err
 			return err
 		}
 	}
-	_, err = fmt.Fprintf(os.Stderr, "%d of %d lines returned, %d matched, %d bytes in the step%s\n",
-		log.ReturnedLines, log.TotalLines, log.MatchedLines, log.Bytes, truncatedNote(log.Truncated))
+	_, err = fmt.Fprintf(os.Stderr, "%d of %d lines returned, %d matched, %d bytes in the step%s%s\n",
+		log.ReturnedLines, log.TotalLines, log.MatchedLines, log.Bytes, hiddenNote(hidden), truncatedNote(log.Truncated))
 	return err
+}
+
+// dropExecutorLines removes Argo executor chatter (runlog.IsExecutorNoise)
+// from what a person reads, and counts it. The server's line counts still
+// include those lines; --raw and --json show them.
+func dropExecutorLines(body string) (string, int) {
+	lines := strings.Split(body, "\n")
+	kept, hidden := lines[:0], 0
+	for _, line := range lines {
+		if runlog.IsExecutorNoise(line) {
+			hidden++
+			continue
+		}
+		kept = append(kept, line)
+	}
+	return strings.Join(kept, "\n"), hidden
+}
+
+func hiddenNote(hidden int) string {
+	if hidden == 0 {
+		return ""
+	}
+	return fmt.Sprintf("; %d Argo executor line%s hidden (--raw shows them)", hidden, map[bool]string{true: "", false: "s"}[hidden == 1])
 }
 
 func truncatedNote(truncated bool) string {

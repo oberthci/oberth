@@ -113,7 +113,7 @@ func TestRunsServerSideRepoFilter(t *testing.T) {
 // A repository name shared by several upstreams ("terraform" under github,
 // codeberg and skipops) is an ambiguous selector the API refuses with 409, so
 // the dashboard filters runs and issues by upstream/org/name and labels a
-// shared name with that qualifier.
+// shared name org/name.
 func TestDashboardQualifiesSharedRepositoryNames(t *testing.T) {
 	t.Parallel()
 	script, ok := staticAssets["app.js"]
@@ -123,6 +123,7 @@ func TestDashboardQualifiesSharedRepositoryNames(t *testing.T) {
 	source := string(script.body)
 	for _, want := range []string{
 		"function repoKey(repo)",
+		"`${orgOfURL(upstream.base_url)}/${repo.Name}`",
 		"`${upstream.name}/${orgOfURL(upstream.base_url)}/${repo.Name}`",
 		`data-repo-filter="${esc(repoKey(repo))}"`,
 		`data-repo-runs="${esc(repoKey(repo))}"`,
@@ -140,5 +141,28 @@ func TestDashboardQualifiesSharedRepositoryNames(t *testing.T) {
 		if strings.Contains(source, bare) {
 			t.Errorf("app.js still selects a repository by its bare name: %s", bare)
 		}
+	}
+}
+
+// Argo executor lines are folded behind a toggle, and the combined live view
+// prints one header per step instead of the [burn/step] prefix on every line.
+func TestDashboardFoldsExecutorLines(t *testing.T) {
+	t.Parallel()
+	source := string(staticAssets["app.js"].body)
+	for _, want := range []string{
+		`data-action="toggle-exec"`,
+		`case "toggle-exec": toggleExecutorLines(); break;`,
+		`class="log-line exec"`,
+		`class="log-line log-hdr"`,
+		`{ groupSteps: !scoped }`,
+		`state.showExec ? " show-exec" : ""`,
+	} {
+		if !strings.Contains(source, want) {
+			t.Errorf("app.js is missing %s", want)
+		}
+	}
+	css := string(staticAssets["app.css"].body)
+	if !strings.Contains(css, ".log-line.exec{display:none}") || !strings.Contains(css, ".term-body.show-exec .log-line.exec{display:grid}") {
+		t.Error("app.css does not hide executor lines unless shown")
 	}
 }
