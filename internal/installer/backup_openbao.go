@@ -299,6 +299,8 @@ func canonicalJSON(value any) string {
 // openBaoRestorePlan is what a restore will change in OpenBao.
 type openBaoRestorePlan struct {
 	SecretsNew, SecretsReplaced int
+	// NewPaths and ReplacedPaths name the secrets (never their values).
+	NewPaths, ReplacedPaths []string
 	// SecretsUnchanged already hold the archived value; restore skips them,
 	// so it adds no KV version.
 	SecretsUnchanged  int
@@ -344,6 +346,7 @@ func planOpenBaoRestore(ctx context.Context, store openBaoExec, token string, kv
 	for _, secret := range kv.Secrets {
 		if !existing[secret.Path] {
 			plan.SecretsNew++
+			plan.NewPaths = append(plan.NewPaths, secret.Path)
 			continue
 		}
 		same, err := secretUnchanged(ctx, store, token, kv.Mount, secret)
@@ -354,6 +357,7 @@ func planOpenBaoRestore(ctx context.Context, store openBaoExec, token string, kv
 			plan.SecretsUnchanged++
 		} else {
 			plan.SecretsReplaced++
+			plan.ReplacedPaths = append(plan.ReplacedPaths, secret.Path)
 		}
 	}
 	for _, policy := range policies {

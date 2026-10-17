@@ -23,7 +23,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -51,9 +51,20 @@ type RestoreConfig struct {
 	// set on the release; empty selects the published chart at the version
 	// the release already runs.
 	ChartPath string
-	DryRun    bool
-	Yes       bool
-	Timeout   time.Duration
+	// NoLogs skips restoring the archived step logs.
+	NoLogs bool
+	// RestoreForgeKey restores the archived forge (upstream) key even when
+	// the target already holds a different one (#068).
+	RestoreForgeKey bool
+	// Only limits the restore to these parts (RestorePartHistory,
+	// RestorePartSecrets, RestorePartSettings); empty restores everything
+	// the archive holds.
+	Only []string
+	// Inspect prints what the archive holds and stops; no cluster is used.
+	Inspect bool
+	DryRun  bool
+	Yes     bool
+	Timeout time.Duration
 }
 
 func (cfg *RestoreConfig) applyDefaults() {
@@ -86,15 +97,39 @@ func ExecuteRestore(ctx context.Context, cfg RestoreConfig, host InstallDeps) er
 	if err := validateBackupPrivateKey(cfg.PrivateKey); err != nil {
 		return err
 	}
+	if cfg.Inspect {
+		host = host.withDefaults()
+		openssl, err := host.LookPath("openssl")
+		if err != nil {
+			return errors.New("openssl not found in PATH; backup archives use OpenSSL 3 `cms` (AES-256-GCM), install it and rerun")
+		}
+		deps := backupDeps{Deps: Deps{Output: host.Output}, openssl: openssl, now: time.Now}
+		deps.cipher = opensslCMS{binary: openssl, privateKey: cfg.PrivateKey}
+		return inspectArchive(ctx, cfg, deps)
+	}
 	deps, err := prepareOperatorDeps(host, cfg.KubeconfigPath, cfg.ContextName, !cfg.DryRun)
 	if err != nil {
 		return err
 	}
 	deps.cipher = opensslCMS{binary: deps.openssl, privateKey: cfg.PrivateKey}
-	if deps.rootToken == "" && !cfg.DryRun {
-		return missingRootTokenError("restore")
-	}
 	return runRestore(ctx, cfg, deps)
+}
+
+// inspectArchive decrypts and verifies an archive and prints what it holds.
+func inspectArchive(ctx context.Context, cfg RestoreConfig, deps backupDeps) (resultErr error) {
+	work, err := os.MkdirTemp("", "oberth-restore-")
+	if err != nil {
+		return fmt.Errorf("create private working directory: %w", err)
+	}
+	defer func() { resultErr = errors.Join(resultErr, os.RemoveAll(work)) }()
+	_, _ = fmt.Fprintf(deps.Output, "Decrypting and verifying %s...\n", displayLocalPath(cfg.Input))
+	archive, err := loadRestoreArchive(ctx, cfg, deps, work)
+	if err != nil {
+		return err
+	}
+	printArchiveContents(deps.Output, archive, cfg.Input, true)
+	_, _ = fmt.Fprintf(deps.Output, "\nNothing was changed (--inspect). To see what a restore would change on this cluster: oberth restore %s --dry-run\n", displayLocalPath(cfg.Input))
+	return nil
 }
 
 // restoreArchive is a decrypted, verified archive ready to apply.
@@ -110,6 +145,11 @@ type restoreArchive struct {
 	Database  restoredDatabase
 	// LocalDatabase is the verified pair written for local inspection.
 	LocalDatabase string
+	// Logs is the validated step logs tar, nil when the archive has none.
+	Logs       []byte
+	LogsSHA256 string
+	// Contents counts what the archived database holds.
+	Contents store.ContentSummary
 }
 
 // loadRestoreArchive decrypts the archive, checks every member hash, and
@@ -124,19 +164,26 @@ func loadRestoreArchive(ctx context.Context, cfg RestoreConfig, deps backupDeps,
 	if archive.Manifest, err = openBackupArchive(ctx, cfg.Input, deps.cipher, work); err != nil {
 		return archive, err
 	}
-	for _, member := range []struct {
-		name  string
-		value any
-	}{
-		{backupMemberKV, &archive.KV},
-		{backupMemberPolicies, &archive.Policies},
-		{backupMemberRoles, &archive.Roles},
-		{backupMemberSecretAccess, &archive.Grants},
-		{backupMemberHelmValues, &archive.Values},
-	} {
-		if err := readBackupJSON(work, member.name, member.value); err != nil {
-			return archive, err
+	if archive.Manifest.Scope == BackupScopeHistory {
+		archive.KV, archive.Roles, archive.Values = kvExport{Mount: defaultKVPrefix}, rolesExport{Mount: defaultAuthMount}, map[string]any{}
+	} else {
+		for _, member := range []struct {
+			name  string
+			value any
+		}{
+			{backupMemberKV, &archive.KV},
+			{backupMemberPolicies, &archive.Policies},
+			{backupMemberRoles, &archive.Roles},
+			{backupMemberSecretAccess, &archive.Grants},
+			{backupMemberHelmValues, &archive.Values},
+		} {
+			if err := readBackupJSON(work, member.name, member.value); err != nil {
+				return archive, err
+			}
 		}
+	}
+	if archive.Values == nil {
+		archive.Values = map[string]any{}
 	}
 	if archive.KV.Mount != defaultKVPrefix || archive.Roles.Mount != defaultAuthMount {
 		return archive, fmt.Errorf("archive covers KV mount %q and auth mount %q; this release restores only %q and %q",
@@ -170,9 +217,25 @@ func loadRestoreArchive(ctx context.Context, cfg RestoreConfig, deps backupDeps,
 	if archive.LocalDatabase, err = writeRestoredDatabase(work, archive.Database); err != nil {
 		return archive, err
 	}
-	_, _ = fmt.Fprintf(deps.Output, "Archive verified: %d members match the manifest; database schema %d, audit head %d, integrity, foreign keys,\n"+
-		"  schema identity %s and the audit chain under domain %s all check out offline.\n",
-		len(archive.Manifest.Members), archive.Report.Schema, archive.Report.AuditHead.ID, compat.SchemaIdentity, compat.AuditDomain)
+	if archive.Contents, err = summarizeDatabase(ctx, archive.LocalDatabase, protocol); err != nil {
+		return archive, err
+	}
+	if archive.Manifest.Logs != nil {
+		logsPath := filepath.Join(work, filepath.FromSlash(backupMemberLogs))
+		if archive.Logs, err = os.ReadFile(logsPath); err != nil { // #nosec G304 -- fixed member name inside the private working directory.
+			return archive, fmt.Errorf("read step logs member: %w", err)
+		}
+		if _, err := validateLogsTar(archive.Logs); err != nil {
+			return archive, fmt.Errorf("archive step logs: %w", err)
+		}
+		for _, member := range archive.Manifest.Members {
+			if member.Name == backupMemberLogs {
+				archive.LogsSHA256 = member.SHA256
+			}
+		}
+	}
+	_, _ = fmt.Fprintf(deps.Output, "Verified: all %d parts match the manifest; the database (schema %d) passes integrity, foreign-key and audit-chain checks offline.\n",
+		len(archive.Manifest.Members), archive.Report.Schema)
 	return archive, nil
 }
 
@@ -190,6 +253,20 @@ type restoreTarget struct {
 	Notes     []string
 	Orphans   []runWorkflow
 	Timestamp string
+	// Cluster identifies the target cluster and its service-account keys.
+	Cluster clusterIdentity
+	// Identity is what happens to the forge key and SSH host key; KV is the
+	// archive's KV export minus a forge key the target keeps.
+	Identity identityRestorePlan
+	KV       kvExport
+	// ServerCA is the target server PKI CA certificate, "" when unknown.
+	ServerCA string
+	// Contents is the target's own history, nil when it could not be read
+	// (ContentsNote says why).
+	Contents     *store.ContentSummary
+	ContentsNote string
+	// Grants counts the target's current grants.
+	Grants int
 }
 
 func runRestore(ctx context.Context, cfg RestoreConfig, deps backupDeps) (resultErr error) {
@@ -200,17 +277,31 @@ func runRestore(ctx context.Context, cfg RestoreConfig, deps backupDeps) (result
 	}
 	defer func() { resultErr = errors.Join(resultErr, os.RemoveAll(work)) }()
 
-	_, _ = fmt.Fprintf(w, "Decrypting and verifying %s...\n", cfg.Input)
+	_, _ = fmt.Fprintf(w, "Decrypting and verifying %s...\n", displayLocalPath(cfg.Input))
 	archive, err := loadRestoreArchive(ctx, cfg, deps, work)
 	if err != nil {
 		return err
 	}
-
-	target, bao, err := inspectRestoreTarget(ctx, cfg, deps, archive)
+	parts, err := resolveRestoreParts(cfg.Only, archive.Manifest.Scope)
 	if err != nil {
 		return err
 	}
-	printRestorePlan(w, cfg, deps, archive, target)
+	printArchiveContents(w, archive, cfg.Input, false)
+	// Only restoring secrets needs OpenBao's root token.
+	if parts.Secrets && deps.rootToken == "" {
+		if deps.rootToken, err = takeRootToken(deps.Deps); err != nil {
+			return err
+		}
+		if deps.rootToken == "" && !cfg.DryRun {
+			return fmt.Errorf("%w\n(or restore without secrets: oberth restore %s --only history)", missingRootTokenError("restore"), displayLocalPath(cfg.Input))
+		}
+	}
+
+	target, bao, err := inspectRestoreTarget(ctx, cfg, deps, archive, parts, work)
+	if err != nil {
+		return err
+	}
+	printRestorePlan(w, cfg, deps, archive, target, parts)
 	if cfg.DryRun {
 		_, _ = fmt.Fprintln(w, "\nNo changes were made (--dry-run).")
 		return nil
@@ -218,11 +309,11 @@ func runRestore(ctx context.Context, cfg RestoreConfig, deps backupDeps) (result
 	if err := confirmRestore(cfg, deps); err != nil {
 		return err
 	}
-	return applyRestore(ctx, cfg, deps, archive, target, bao, work)
+	return applyRestore(ctx, cfg, deps, archive, target, bao, parts, work)
 }
 
 // inspectRestoreTarget reads (never writes) the target installation.
-func inspectRestoreTarget(ctx context.Context, cfg RestoreConfig, deps backupDeps, archive restoreArchive) (restoreTarget, openBaoExec, error) {
+func inspectRestoreTarget(ctx context.Context, cfg RestoreConfig, deps backupDeps, archive restoreArchive, parts restoreParts, work string) (restoreTarget, openBaoExec, error) {
 	target := restoreTarget{Timestamp: deps.now().UTC().Format("20060102T150405Z")}
 	var err error
 	if target.Server, err = inspectServerDeployment(ctx, deps.Deps, cfg.Namespace); err != nil {
@@ -248,31 +339,78 @@ func inspectRestoreTarget(ctx context.Context, cfg RestoreConfig, deps backupDep
 		if target.Schema, err = podSchemaVersion(ctx, deps.RunCommand, deps.ContextName, cfg.Namespace, target.Pod, serverContainerName); err != nil {
 			return target, openBaoExec{}, err
 		}
-		if target.Schema < backupSchema {
+		if parts.History && target.Schema < backupSchema {
 			return target, openBaoExec{}, fmt.Errorf("the target server writes schema %d but the backup holds schema %d; upgrade the target to a release at least as new as %s first",
 				target.Schema, backupSchema, displayOr(archive.Manifest.Source.ServerVersion, "the source"))
 		}
 	}
-
-	bao, err := connectOpenBao(ctx, deps.Deps, cfg.OpenBaoNamespace)
-	if err != nil {
-		return target, openBaoExec{}, err
+	if parts.History {
+		readTargetContents(ctx, cfg, deps, &target, work)
 	}
-	if deps.rootToken != "" {
-		if target.OpenBao, err = planOpenBaoRestore(ctx, bao, deps.rootToken, archive.KV, archive.Policies, archive.Roles); err != nil {
-			return target, openBaoExec{}, err
+	if parts.Settings {
+		if grants, err := readSecretAccess(ctx, deps.Deps, cfg.Namespace); err == nil {
+			target.Grants = countGrants(grants)
 		}
 	}
 
-	target.Overlay, target.Notes = restoreValuesOverlay(archive, target, cfg.ArgoNamespace)
+	target.KV = archive.KV
+	var bao openBaoExec
+	if parts.Secrets {
+		if bao, err = connectOpenBao(ctx, deps.Deps, cfg.OpenBaoNamespace); err != nil {
+			return target, openBaoExec{}, err
+		}
+	}
+	if parts.Secrets && deps.rootToken != "" {
+		if target.Identity, target.KV, err = planIdentityRestore(ctx, bao, deps.rootToken, cfg.Namespace, archive.KV, cfg.RestoreForgeKey); err != nil {
+			return target, openBaoExec{}, err
+		}
+		if target.OpenBao, err = planOpenBaoRestore(ctx, bao, deps.rootToken, target.KV, archive.Policies, archive.Roles); err != nil {
+			return target, openBaoExec{}, err
+		}
+		target.ServerCA = readServerCA(ctx, bao, deps.rootToken, serverPKIMount(target.Values))
+	}
+	target.Cluster = readClusterIdentity(ctx, deps, cfg.Namespace)
 
-	workflows, listErr := listRunWorkflows(ctx, deps, cfg.ArgoNamespace)
-	if listErr != nil {
-		target.Notes = append(target.Notes, fmt.Sprintf("could not list Argo Workflows in %s (%v); orphaned workflows are not cleaned up", cfg.ArgoNamespace, listErr))
-	} else if target.Orphans, err = orphanedWorkflows(ctx, workflows, archive); err != nil {
-		return target, openBaoExec{}, err
+	target.Overlay, target.Notes = restoreValuesOverlay(archive, target, parts, cfg.ArgoNamespace)
+	if note := serviceAccountKeyNote(archive.Manifest.Source, target.Cluster, parts.Settings && hasReleaseWIF(archive.Values)); note != "" {
+		target.Notes = append(target.Notes, note)
+	}
+
+	if parts.History {
+		workflows, listErr := listRunWorkflows(ctx, deps, cfg.ArgoNamespace)
+		if listErr != nil {
+			target.Notes = append(target.Notes, fmt.Sprintf("could not list Argo Workflows in %s (%v); orphaned workflows are not cleaned up", cfg.ArgoNamespace, listErr))
+		} else if target.Orphans, err = orphanedWorkflows(ctx, workflows, archive); err != nil {
+			return target, openBaoExec{}, err
+		}
 	}
 	return target, bao, nil
+}
+
+// readTargetContents counts the history the restore replaces, from a
+// verified snapshot the target's running server takes of its own database.
+func readTargetContents(ctx context.Context, cfg RestoreConfig, deps backupDeps, target *restoreTarget, work string) {
+	if target.Pod == "" {
+		target.ContentsNote = "the server is not running"
+		return
+	}
+	protocol := store.ProtocolConfig{SchemaIdentity: target.Server.Compatibility.SchemaIdentity, AuditDomain: target.Server.Compatibility.AuditDomain}
+	dir, err := os.MkdirTemp(work, "target-db-")
+	if err != nil {
+		target.ContentsNote = err.Error()
+		return
+	}
+	snapshot := filepath.Join(dir, "oberth-database.tar")
+	if _, err := snapshotServerDatabase(ctx, deps, cfg.Namespace, target.Pod, target.Schema, protocol, dir, snapshot); err != nil {
+		target.ContentsNote = err.Error()
+		return
+	}
+	summary, err := summarizeDatabaseArchive(ctx, snapshot, dir, protocol)
+	if err != nil {
+		target.ContentsNote = err.Error()
+		return
+	}
+	target.Contents = &summary
 }
 
 func displayOr(value, fallback string) string {
@@ -282,20 +420,72 @@ func displayOr(value, fallback string) string {
 	return value
 }
 
+// hasReleaseWIF reports whether Helm values configure argo.releaseWIF.
+func hasReleaseWIF(values map[string]any) bool {
+	argo, _ := values["argo"].(map[string]any)
+	wif, _ := argo["releaseWIF"].(map[string]any)
+	return len(wif) > 0
+}
+
+// serverPKIMount is the release's server PKI mount (tls.pki.mount).
+func serverPKIMount(values map[string]any) string {
+	tls, _ := values["tls"].(map[string]any)
+	pki, _ := tls["pki"].(map[string]any)
+	if mount, _ := pki["mount"].(string); mount != "" {
+		return mount
+	}
+	return "oberth-pki"
+}
+
+// stringList reads a Helm values list of strings.
+func stringList(value any) []string {
+	items, _ := value.([]any)
+	out := make([]string, 0, len(items))
+	for _, item := range items {
+		if text, ok := item.(string); ok && text != "" {
+			out = append(out, text)
+		}
+	}
+	return out
+}
+
+// valueStrings reads a []string or a Helm values list of strings.
+func valueStrings(value any) []string {
+	if list, ok := value.([]string); ok {
+		return list
+	}
+	return stringList(value)
+}
+
+// unionStrings appends the items of extra missing from base, keeping order.
+func unionStrings(base, extra []string) []string {
+	out := append([]string(nil), base...)
+	for _, item := range extra {
+		if !slices.Contains(out, item) {
+			out = append(out, item)
+		}
+	}
+	return out
+}
+
 // restoreValuesOverlay returns the Helm values a restore sets on the target
 // release — the compatibility values the restored database must be opened
-// under and, when recorded, argo.releaseWIF — plus notes about recorded
-// values that are deliberately not reapplied.
-func restoreValuesOverlay(archive restoreArchive, target restoreTarget, argoNamespace string) (map[string]any, []string) {
+// under, argo.releaseWIF when recorded, the watch tunnel pinned to the
+// target's server CA, and the source certificate's extra names (#068) — plus
+// notes about recorded values that are deliberately not reapplied.
+func restoreValuesOverlay(archive restoreArchive, target restoreTarget, parts restoreParts, argoNamespace string) (map[string]any, []string) {
 	overlay := map[string]any{}
 	var notes []string
 	want := archive.Manifest.Compatibility
-	if target.Server.Compatibility != want {
+	if parts.History && target.Server.Compatibility != want {
 		overlay["compatibility"] = map[string]any{
 			"schemaIdentity": want.SchemaIdentity,
 			"auditDomain":    want.AuditDomain,
 			"witnessKeyInfo": want.WitnessKeyInfo,
 		}
+	}
+	if !parts.Settings {
+		return overlay, notes
 	}
 	argo, _ := archive.Values["argo"].(map[string]any)
 	if wif, ok := argo["releaseWIF"].(map[string]any); ok && len(wif) > 0 {
@@ -312,93 +502,33 @@ func restoreValuesOverlay(archive restoreArchive, target restoreTarget, argoName
 			overlay["argo"] = map[string]any{"releaseWIF": wif}
 		}
 	}
+	// The tunnel's token is restored with the KV secrets; only its origin
+	// pin is cluster-specific, and the target's server CA replaces it.
 	if tunnel, ok := archive.Values["watchTunnel"].(map[string]any); ok && tunnel["enabled"] == true {
-		notes = append(notes, "watchTunnel was enabled on the source; it pins the old server CA and needs the tunnel adoption flow, so it is not reapplied (see docs/watch-tunnel.md)")
+		current, _ := target.Values["watchTunnel"].(map[string]any)
+		switch {
+		case !parts.Secrets:
+			notes = append(notes, "watchTunnel was enabled on the source; its token is a secret, so it is re-enabled only when secrets are restored too")
+		case target.ServerCA == "":
+			notes = append(notes, "watchTunnel was enabled on the source but this install's server CA could not be read, so it is not re-enabled; "+
+				"set watchTunnel.enabled=true and watchTunnel.originCACert to ~/.config/oberth/ca.crt with oberth upgrade -f (docs/watch-tunnel.md)")
+		case current["enabled"] != true || strings.TrimSpace(fmt.Sprint(current["originCACert"])) != target.ServerCA:
+			overlay["watchTunnel"] = map[string]any{"enabled": true, "originCACert": target.ServerCA + "\n"}
+		}
 	}
-	if tls, ok := archive.Values["tls"].(map[string]any); ok {
-		var names []string
-		for _, key := range []string{"extraDNSNames", "extraIPs"} {
-			if list, ok := tls[key].([]any); ok {
-				for _, item := range list {
-					names = append(names, fmt.Sprint(item))
-				}
-			}
+	sourceTLS, _ := archive.Values["tls"].(map[string]any)
+	targetTLS, _ := target.Values["tls"].(map[string]any)
+	tlsOverlay := map[string]any{}
+	for _, key := range []string{"extraDNSNames", "extraIPs"} {
+		have := stringList(targetTLS[key])
+		if want := unionStrings(have, stringList(sourceTLS[key])); len(want) != len(have) {
+			tlsOverlay[key] = want
 		}
-		if len(names) > 0 {
-			notes = append(notes, "the source certificate also covered "+strings.Join(names, ", ")+"; pass the same --tls-extra-dns-name/--tls-extra-ip on your next oberth install")
-		}
+	}
+	if len(tlsOverlay) > 0 {
+		overlay["tls"] = tlsOverlay
 	}
 	return overlay, notes
-}
-
-func printRestorePlan(w io.Writer, cfg RestoreConfig, deps backupDeps, archive restoreArchive, target restoreTarget) {
-	m := archive.Manifest
-	_, _ = fmt.Fprintf(w, "\nRestore plan for context %s (namespace %s, OpenBao %s, Argo %s):\n", deps.ContextName, cfg.Namespace, cfg.OpenBaoNamespace, cfg.ArgoNamespace)
-	_, _ = fmt.Fprintf(w, "  Archive    %s\n             sha256 %s, created %s from context %s (%s)\n",
-		cfg.Input, archive.CipherSHA, m.CreatedAt, displayOr(m.Source.Context, "?"), displayOr(m.Source.ServerVersion, "unknown server version"))
-	// Same cluster means a rollback: every run created after the backup
-	// disappears and its workflows are deleted below (review finding).
-	switch {
-	case m.Source.APIServer != "" && m.Source.APIServer == deps.apiServer:
-		_, _ = fmt.Fprintf(w, "  Cluster    SAME cluster the backup was taken from (%s): this rolls Oberth back to %s; runs created since are dropped\n",
-			deps.apiServer, m.CreatedAt)
-	case m.Source.APIServer != "" && deps.apiServer != "":
-		_, _ = fmt.Fprintf(w, "  Cluster    different cluster: backup from %s, restoring onto %s\n", m.Source.APIServer, deps.apiServer)
-	}
-
-	plan := target.OpenBao
-	if plan.Known {
-		_, _ = fmt.Fprintf(w, "  OpenBao    %d secrets (%d new, %d replacing current values, %d unchanged)\n",
-			len(archive.KV.Secrets), plan.SecretsNew, plan.SecretsReplaced, plan.SecretsUnchanged)
-		_, _ = fmt.Fprintf(w, "             %d policies (%d new, %d replaced, %d unchanged), %d roles (%d new, %d replaced, %d unchanged)\n",
-			len(archive.Policies), len(plan.PoliciesNew), len(plan.PoliciesReplaced), plan.PoliciesUnchanged,
-			len(archive.Roles.Roles), len(plan.RolesNew), len(plan.RolesReplaced), plan.RolesUnchanged)
-		if len(plan.RolesReplaced) > 0 {
-			_, _ = fmt.Fprintf(w, "             replaced roles: %s\n", strings.Join(plan.RolesReplaced, ", "))
-		}
-	} else {
-		_, _ = fmt.Fprintf(w, "  OpenBao    write %d secrets, %d policies, %d roles (no root token: target not compared)\n",
-			len(archive.KV.Secrets), len(archive.Policies), len(archive.Roles.Roles))
-	}
-	_, _ = fmt.Fprintln(w, "             each verified by read-back; Transit key, PKI CA and auth config are not restored")
-	_, _ = fmt.Fprintf(w, "  Server     scale deploy/oberth %d -> 0, restore, then back to %d\n", target.Server.Replicas, max(target.Server.Replicas, 1))
-	_, _ = fmt.Fprintf(w, "  Database   replace %s on PVC %s; current files kept in /data/pre-restore-%s/\n", serverDatabasePath, target.Server.ClaimName, target.Timestamp)
-	_, _ = fmt.Fprintf(w, "             schema %d, audit head %d:%s\n", archive.Report.Schema, archive.Report.AuditHead.ID, m.Database.AuditHeadSHA256)
-	if target.Pod == "" {
-		_, _ = fmt.Fprintln(w, "             (no server pod is running: the target schema is checked in the restore pod before the swap)")
-	}
-	if archive.Grants.Present {
-		_, _ = fmt.Fprintf(w, "  Grants     replace ConfigMap %s/%s (%d grants)\n", cfg.Namespace, secretAccessConfigMapName, countGrants(archive.Grants))
-	} else {
-		_, _ = fmt.Fprintf(w, "  Grants     the source had no %s ConfigMap; the target's is left as it is\n", secretAccessConfigMapName)
-	}
-	if len(target.Overlay) == 0 {
-		_, _ = fmt.Fprintln(w, "  Helm       compatibility values already match; release oberth is not changed")
-	} else {
-		keys := make([]string, 0, len(target.Overlay))
-		for key := range target.Overlay {
-			keys = append(keys, key)
-		}
-		sort.Strings(keys)
-		_, _ = fmt.Fprintf(w, "  Helm       set %s on release oberth (--reuse-values)\n", strings.Join(keys, ", "))
-		if _, ok := target.Overlay["compatibility"]; ok {
-			have, want := target.Server.Compatibility, m.Compatibility
-			_, _ = fmt.Fprintf(w, "             schemaIdentity %s -> %s, auditDomain %s -> %s, witnessKeyInfo %s -> %s\n",
-				have.SchemaIdentity, want.SchemaIdentity, have.AuditDomain, want.AuditDomain, have.WitnessKeyInfo, want.WitnessKeyInfo)
-		}
-	}
-	if len(target.Orphans) > 0 {
-		names := make([]string, 0, len(target.Orphans))
-		for _, wf := range target.Orphans {
-			names = append(names, wf.Name)
-		}
-		_, _ = fmt.Fprintf(w, "  Workflows  delete %d whose runs the restored database does not know: %s\n", len(names), strings.Join(names, ", "))
-	} else {
-		_, _ = fmt.Fprintln(w, "  Workflows  none orphaned")
-	}
-	for _, note := range target.Notes {
-		_, _ = fmt.Fprintf(w, "  Note       %s\n", note)
-	}
 }
 
 func countGrants(grants secretAccessExport) int {
@@ -418,28 +548,43 @@ func confirmRestore(cfg RestoreConfig, deps backupDeps) error {
 	if deps.IsTerminal == nil || !deps.IsTerminal() || deps.Input == nil {
 		return errors.New("restore replaces live OpenBao state and the server database; review the plan above and rerun with --yes")
 	}
-	_, _ = fmt.Fprintf(deps.Output, "\nType the target context name (%s) to proceed: ", deps.ContextName)
-	line, err := bufio.NewReader(deps.Input).ReadString('\n')
-	if err != nil && strings.TrimSpace(line) == "" {
-		return errors.New("restore cancelled")
+	// The prompt quotes the name: "(default)" read as a default to accept
+	// with Enter, and one mistyped answer cancelled the restore (#065).
+	reader := bufio.NewReader(deps.Input)
+	for attempt := 1; ; attempt++ {
+		_, _ = fmt.Fprintf(deps.Output, "\nTo restore onto context %q, type %s and press Enter (Ctrl-C cancels): ", deps.ContextName, deps.ContextName)
+		line, err := reader.ReadString('\n')
+		answer := strings.TrimSpace(line)
+		if answer == deps.ContextName {
+			return nil
+		}
+		if err != nil {
+			return errors.New("restore cancelled")
+		}
+		if attempt == 3 {
+			return fmt.Errorf("restore cancelled: typed %q three times, expected %q", answer, deps.ContextName)
+		}
+		_, _ = fmt.Fprintf(deps.Output, "  %q is not %q; nothing was changed.", answer, deps.ContextName)
 	}
-	if strings.TrimSpace(line) != deps.ContextName {
-		return errors.New("restore cancelled: the context name did not match")
-	}
-	return nil
 }
 
 // applyRestore performs the confirmed plan. Once the server has been scaled
 // to zero, every failure says how to get back to a running server.
-func applyRestore(ctx context.Context, cfg RestoreConfig, deps backupDeps, archive restoreArchive, target restoreTarget, bao openBaoExec, work string) error {
+func applyRestore(ctx context.Context, cfg RestoreConfig, deps backupDeps, archive restoreArchive, target restoreTarget, bao openBaoExec, parts restoreParts, work string) error {
 	w := deps.Output
-	_, _ = fmt.Fprintln(w, "\nRestoring OpenBao...")
-	written, err := restoreOpenBao(ctx, bao, deps.rootToken, archive.KV, archive.Policies, archive.Roles)
-	if err != nil {
-		return err
+	_, _ = fmt.Fprintln(w)
+	if parts.Secrets {
+		_, _ = fmt.Fprintln(w, "Restoring OpenBao...")
+		written, err := restoreOpenBao(ctx, bao, deps.rootToken, target.KV, archive.Policies, archive.Roles)
+		if err != nil {
+			return err
+		}
+		_, _ = fmt.Fprintf(w, "  ✓ %d secrets (%d written, %d already current), %d policies, %d roles verified by read-back\n",
+			len(target.KV.Secrets), written, len(target.KV.Secrets)-written, len(archive.Policies), len(archive.Roles.Roles))
+		if target.Identity.ForgeKeyKept {
+			_, _ = fmt.Fprintf(w, "  ✓ kept this install's forge key %s\n", target.Identity.ForgeKeyHave)
+		}
 	}
-	_, _ = fmt.Fprintf(w, "  ✓ %d secrets (%d written, %d already current), %d policies, %d roles verified by read-back\n",
-		len(archive.KV.Secrets), written, len(archive.KV.Secrets)-written, len(archive.Policies), len(archive.Roles.Roles))
 
 	// Resolve the chart before stopping anything, so a missing chart cannot
 	// leave the server scaled down.
@@ -477,15 +622,26 @@ func applyRestore(ctx context.Context, cfg RestoreConfig, deps backupDeps, archi
 		return stopped(err)
 	}
 
-	_, _ = fmt.Fprintln(w, "Swapping the database on the volume...")
-	if err := swapDatabase(ctx, cfg, deps, archive, target); err != nil {
-		swapped = errors.Is(err, errRestoredDatabaseInPlace)
-		return stopped(err)
+	if parts.History {
+		_, _ = fmt.Fprintln(w, "Swapping the database on the volume...")
+		if err := swapDatabase(ctx, cfg, deps, archive, target); err != nil {
+			swapped = errors.Is(err, errRestoredDatabaseInPlace)
+			return stopped(err)
+		}
+		swapped = true
+		_, _ = fmt.Fprintf(w, "  ✓ restored database in place; the previous files are in /data/pre-restore-%s/ on PVC %s\n", target.Timestamp, target.Server.ClaimName)
 	}
-	swapped = true
-	_, _ = fmt.Fprintf(w, "  ✓ restored database in place; the previous files are in /data/pre-restore-%s/ on PVC %s\n", target.Timestamp, target.Server.ClaimName)
+	if parts.History && archive.Logs != nil && !cfg.NoLogs {
+		// Step logs are history, not state: a failure here is reported and
+		// the restore goes on.
+		if files, err := restoreLogs(ctx, cfg, deps, archive, target); err != nil {
+			_, _ = fmt.Fprintf(w, "  ⚠ step logs not restored: %v\n", err)
+		} else {
+			_, _ = fmt.Fprintf(w, "  ✓ step logs restored (%d files in /data/logs)\n", files)
+		}
+	}
 
-	if archive.Grants.Present {
+	if parts.Settings && archive.Grants.Present {
 		if err := writeSecretAccess(ctx, deps.Deps, cfg.Namespace, archive.Grants); err != nil {
 			return stopped(err)
 		}
@@ -493,7 +649,7 @@ func applyRestore(ctx context.Context, cfg RestoreConfig, deps backupDeps, archi
 	}
 
 	// List again now that no server can submit new workflows.
-	if workflows, err := listRunWorkflows(ctx, deps, cfg.ArgoNamespace); err == nil {
+	if workflows, err := listRunWorkflows(ctx, deps, cfg.ArgoNamespace); parts.History && err == nil {
 		orphans, err := orphanedWorkflows(ctx, workflows, archive)
 		if err != nil {
 			return stopped(err)
@@ -508,9 +664,9 @@ func applyRestore(ctx context.Context, cfg RestoreConfig, deps backupDeps, archi
 
 	if len(helmArgs) > 0 {
 		if _, err := deps.RunHelm(ctx, helmArgs); err != nil {
-			return stopped(fmt.Errorf("set compatibility values on release oberth: %w", err))
+			return stopped(fmt.Errorf("set the restored values on release oberth: %w", err))
 		}
-		_, _ = fmt.Fprintln(w, "  ✓ release oberth updated with the restored compatibility values")
+		_, _ = fmt.Fprintln(w, "  ✓ release oberth updated with the restored values")
 	}
 
 	_, _ = fmt.Fprintln(w, "Starting the server...")
@@ -520,9 +676,9 @@ func applyRestore(ctx context.Context, cfg RestoreConfig, deps backupDeps, archi
 	if err := waitForPodReady(ctx, deps.Deps, cfg.Namespace, target.Server.Selector, cfg.Timeout); err != nil {
 		_, _ = fmt.Fprintf(w, "  ⚠ the server is not ready yet (%v); check: kubectl -n %s logs deploy/oberth\n", err, cfg.Namespace)
 	} else {
-		_, _ = fmt.Fprintln(w, "  ✓ server ready on the restored database")
+		_, _ = fmt.Fprintln(w, "  ✓ server ready")
 	}
-	printRestoreNextSteps(w, cfg, archive)
+	printRestoreNextSteps(w, cfg, archive, target, parts)
 	return nil
 }
 
@@ -563,9 +719,12 @@ func restoreHelmArgs(ctx context.Context, cfg RestoreConfig, deps backupDeps, ta
 	return append(args, "-n", cfg.Namespace, "--reuse-values", "-f", valuesFile), nil
 }
 
+// scaleServer scales through the scale subresource. A merge patch of the
+// Deployment made "oberth" the owner of .spec.replicas, and Helm 4's
+// server-side apply then refused the next upgrade with a field conflict (#067).
 func scaleServer(ctx context.Context, deps Deps, namespace string, replicas int32) error {
 	patch := fmt.Sprintf(`{"spec":{"replicas":%d}}`, replicas)
-	if _, err := deps.KubeClient.AppsV1().Deployments(namespace).Patch(ctx, "oberth", types.MergePatchType, []byte(patch), metav1.PatchOptions{}); err != nil {
+	if _, err := deps.KubeClient.AppsV1().Deployments(namespace).Patch(ctx, "oberth", types.MergePatchType, []byte(patch), metav1.PatchOptions{}, "scale"); err != nil {
 		return fmt.Errorf("scale deploy/oberth to %d: %w", replicas, err)
 	}
 	return nil
@@ -715,6 +874,50 @@ func swapDatabase(ctx context.Context, cfg RestoreConfig, deps backupDeps, archi
 	return nil
 }
 
+// restoreLogs extracts the archived step logs into /data/logs through a
+// second helper pod, after the database swap. It returns how many log files
+// the volume then holds.
+func restoreLogs(ctx context.Context, cfg RestoreConfig, deps backupDeps, archive restoreArchive, target restoreTarget) (files int, resultErr error) {
+	name := "oberth-restore-logs-" + strings.ToLower(target.Timestamp)
+	label := target.Timestamp + "-logs"
+	pod := restoreHelperPod(name, cfg.Namespace, label, target.Server)
+	pods := deps.KubeClient.CoreV1().Pods(cfg.Namespace)
+	if _, err := pods.Create(ctx, pod, metav1.CreateOptions{}); err != nil {
+		return 0, fmt.Errorf("create restore pod: %w", err)
+	}
+	defer func() {
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		grace := int64(0)
+		if err := pods.Delete(cleanupCtx, name, metav1.DeleteOptions{GracePeriodSeconds: &grace}); err != nil && !apierrors.IsNotFound(err) {
+			resultErr = errors.Join(resultErr, fmt.Errorf("delete restore pod %s: %w", name, err))
+		}
+	}()
+	if err := waitForPodRunning(ctx, deps.Deps, cfg.Namespace, "oberth.ci/restore="+label, cfg.Timeout); err != nil {
+		return 0, fmt.Errorf("wait for restore pod: %w", err)
+	}
+	inPod := func(stdin []byte, script string, args ...string) ([]byte, error) {
+		command := append([]string{"sh", "-c", script, "sh"}, args...)
+		return deps.RunCommand(ctx, stdin, "kubectl", kubectlExecArgs(deps.ContextName, cfg.Namespace, name, restoreHelperContainer, stdin != nil, command...)...)
+	}
+	if out, err := inPod(nil, stageResetScript); err != nil {
+		return 0, fmt.Errorf("clear staging directory %s: %w%s", restoreStageDir, err, commandOutputSuffix(out))
+	}
+	out, err := inPod(archive.Logs, stageUploadScript, "logs.tar")
+	if err != nil {
+		return 0, fmt.Errorf("upload logs.tar: %w%s", err, commandOutputSuffix(out))
+	}
+	if err := checkUploadedSize("logs.tar", out, len(archive.Logs)); err != nil {
+		return 0, err
+	}
+	if out, err = inPod(nil, logsRestoreScript, archive.LogsSHA256); err != nil {
+		return 0, fmt.Errorf("extract step logs: %w%s", err, commandOutputSuffix(out))
+	}
+	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	files, _ = strconv.Atoi(strings.TrimSpace(lines[len(lines)-1]))
+	return files, nil
+}
+
 // checkUploadedSize compares the size stageUploadScript reports with what
 // was sent, so a truncated upload stops before the swap (#067).
 func checkUploadedSize(member string, out []byte, want int) error {
@@ -839,20 +1042,30 @@ func kubectlContextArgs(contextName string, args ...string) []string {
 	return append([]string{"--context", contextName}, args...)
 }
 
-func printRestoreNextSteps(w io.Writer, cfg RestoreConfig, archive restoreArchive) {
+func printRestoreNextSteps(w io.Writer, cfg RestoreConfig, archive restoreArchive, target restoreTarget, parts restoreParts) {
 	_, _ = fmt.Fprintln(w, "\nRestore complete. Next steps:")
-	_, _ = fmt.Fprintln(w, "  1. Reconcile per-repo identities and policies from the restored grants (keep your usual install flags):")
-	_, _ = fmt.Fprintln(w, "         read -rs BAO_TOKEN && export BAO_TOKEN")
-	_, _ = fmt.Fprintln(w, "         oberth install --install-secretstore --upgrade")
-	_, _ = fmt.Fprintln(w, "     It also refreshes this machine's pinned server CA.")
-	_, _ = fmt.Fprintln(w, "  2. The server CA is new: every other CLI/MCP client must re-pin it (rerun oberth install there, or copy the new ca.crt).")
-	_, _ = fmt.Fprintf(w, "  3. Uplinks are restored with the database; re-register any workstation whose key changed:\n"+
-		"         kubectl exec -i -n %s deploy/oberth -- oberth uplink add - you@host < ~/.ssh/id_ed25519.pub\n", cfg.Namespace)
-	_, _ = fmt.Fprintln(w, "  4. Trusted-plan envelopes sealed under the old Transit key cannot be decrypted; re-run the affected plans.")
-	_, _ = fmt.Fprintln(w, "  5. Git caches on the volume were not replaced: a re-push of a branch the cache already holds is \"up to date\";")
-	_, _ = fmt.Fprintln(w, "     push a new commit to trigger CI on the restored state.")
-	if _, ok := archive.Values["watchTunnel"]; ok {
-		_, _ = fmt.Fprintln(w, "  6. Re-establish the watch tunnel if you use it (docs/watch-tunnel.md).")
+	step := 0
+	next := func(format string, args ...any) {
+		step++
+		_, _ = fmt.Fprintf(w, "  %d. "+format+"\n", append([]any{step}, args...)...)
+	}
+	next("Reconcile per-repo identities and policies from the restored grants (keep your usual install flags):\n" +
+		"         read -rs BAO_TOKEN && export BAO_TOKEN\n" +
+		"         oberth install --install-secretstore --upgrade\n" +
+		"     It also refreshes this machine's pinned server CA.")
+	next("The server CA is this install's: every other CLI/MCP client must re-pin it (rerun oberth install there, or copy ~/.config/oberth/ca.crt).")
+	if target.Identity.HostKeyArchived != "" && target.Identity.HostKeyHave != "" && target.Identity.HostKeyArchived != target.Identity.HostKeyHave {
+		next("The server's SSH host key is the archive's again (%s). Where ssh reports a changed host key for this install, drop the stale entry: ssh-keygen -R '[<host>]:30022'",
+			target.Identity.HostKeyArchived)
+	}
+	next("Uplinks are restored with the database; re-register any workstation whose key changed:\n"+
+		"         kubectl exec -i -n %s deploy/oberth -- oberth uplink add - you@host < ~/.ssh/id_ed25519.pub", cfg.Namespace)
+	next("Trusted-plan envelopes sealed under the old Transit key cannot be decrypted; re-run the affected plans.")
+	next("If this node keeps OpenBao unsealed with deploy/systemd/oberth-openbao-unseal, give it this install's unseal key:\n" +
+		"         sudo install -m 0400 -o root -g root <unseal-key-file> /etc/oberth/openbao-unseal-key\n" +
+		"         sudo systemctl restart oberth-openbao-unseal")
+	if hasReleaseWIF(archive.Values) {
+		next("Release Workload Identity Federation trusts the source cluster's service-account key; check the note in the plan above if it differs.")
 	}
 }
 

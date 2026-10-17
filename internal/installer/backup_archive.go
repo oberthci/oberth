@@ -15,7 +15,9 @@ package installer
 
 import (
 	"archive/tar"
+	"bufio"
 	"bytes"
+	"compress/gzip"
 	"context"
 	"crypto/rsa"
 	"crypto/sha256"
@@ -30,12 +32,17 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 )
 
 const (
-	backupFormat       = "oberth.backup/v1"
+	// backupFormat is what this release writes. v2 adds the optional step
+	// logs member and the source cluster's identity; v1 archives (no logs,
+	// no cluster identity) are still read.
+	backupFormat       = "oberth.backup/v2"
+	backupFormatV1     = "oberth.backup/v1"
 	backupManifestName = "manifest.json"
 
 	backupMemberKV           = "openbao/kv.json"
@@ -45,6 +52,7 @@ const (
 	backupMemberDatabase     = "database/oberth-database.tar"
 	backupMemberHelmValues   = "kubernetes/helm-values.json"
 	backupMemberSecretAccess = "kubernetes/secret-access.json" // #nosec G101 -- archive member NAME, not credential material.
+	backupMemberLogs         = "server/logs.tar"
 
 	// The database member is bounded by the store's own 128 MiB snapshot cap
 	// plus tar framing; JSON members are far smaller in practice.
@@ -71,17 +79,46 @@ var backupMemberOrder = []string{
 	backupMemberSecretAccess,
 }
 
+// Archive scopes: a full archive holds everything below; a history archive
+// only the database and step logs, needs no OpenBao root token to write or
+// restore, and leaves the target's secrets and settings alone.
+const (
+	BackupScopeFull    = "full"
+	BackupScopeHistory = "history"
+)
+
+// requiredBackupMembers is the closed inventory of a scope, in archive order.
+func requiredBackupMembers(scope string) []string {
+	if scope == BackupScopeHistory {
+		return []string{backupMemberDatabase}
+	}
+	return backupMemberOrder
+}
+
+// backupOptionalMembers may follow the closed inventory, in this order: the
+// server's step logs (#068), left out by `oberth backup --no-logs`.
+var backupOptionalMembers = []string{
+	backupMemberLogs,
+}
+
 // backupManifest is the archive's self-description. It carries no secret
 // material: counts, public protocol identifiers, versions and member hashes.
 type backupManifest struct {
-	Format        string                `json:"format"`
-	CreatedAt     string                `json:"created_at"`
+	Format    string `json:"format"`
+	CreatedAt string `json:"created_at"`
+	// Scope is BackupScopeFull (also when empty: v1 archives) or
+	// BackupScopeHistory.
+	Scope         string                `json:"scope,omitempty"`
 	ToolVersion   string                `json:"tool_version"`
 	Source        backupSource          `json:"source"`
 	Compatibility backupCompatibility   `json:"compatibility"`
 	Database      backupDatabaseSummary `json:"database"`
 	OpenBao       backupOpenBaoSummary  `json:"openbao"`
-	Members       []backupMemberDigest  `json:"members"`
+	// Logs summarises the step logs member; nil when the archive has none.
+	Logs *backupLogsSummary `json:"logs,omitempty"`
+	// Contents counts what the database holds.
+	Contents *backupContents      `json:"contents,omitempty"`
+	Members  []backupMemberDigest `json:"members"`
 	// NotRestored lists state that is recorded for reference only, with the
 	// reason a restore cannot carry it over.
 	NotRestored []string `json:"not_restored"`
@@ -96,6 +133,32 @@ type backupSource struct {
 	ServerImage      string `json:"server_image"`
 	ServerVersion    string `json:"server_version"`
 	ChartVersion     string `json:"chart_version"`
+	// ClusterUID is the source's kube-system namespace UID: unlike the API
+	// server URL (https://127.0.0.1:6443 on every k3s), it tells a rollback
+	// of the same cluster from a restore onto a reinstalled one (#068).
+	ClusterUID string `json:"cluster_uid,omitempty"`
+	// ServiceAccountKeyIDs are the key IDs of the source's service-account
+	// JWKS and SigningKeyID the one its tokens were signed with: release
+	// Workload Identity Federation trusts exactly those keys (#068).
+	ServiceAccountKeyIDs []string `json:"service_account_key_ids,omitempty"`
+	SigningKeyID         string   `json:"service_account_signing_key_id,omitempty"`
+}
+
+// backupContents counts what the archived database holds.
+type backupContents struct {
+	Runs         int    `json:"runs"`
+	LastRunAt    string `json:"last_run_at,omitempty"`
+	Issues       int    `json:"issues"`
+	OpenIssues   int    `json:"open_issues"`
+	Promotions   int    `json:"promotions"`
+	Repositories int    `json:"repositories"`
+	Uplinks      int    `json:"uplinks"`
+}
+
+// backupLogsSummary describes the step logs member.
+type backupLogsSummary struct {
+	Files int   `json:"files"`
+	Bytes int64 `json:"bytes"`
 }
 
 // backupCompatibility holds the administrator-owned protocol identifiers a
@@ -139,7 +202,7 @@ var backupNotRestored = []string{
 	"The server PKI CA key never leaves OpenBao: only the CA certificate is recorded. The installer issues a new CA on the target, so every client must re-pin the new server CA.",
 	"The Kubernetes auth method configuration is cluster-specific (API server CA and issuer): it is recorded for reference and never restored.",
 	"KV secrets are captured at their current version only; version history and per-secret metadata are not preserved.",
-	"Git caches, workspaces, logs and artifacts on the server volume are not part of the backup.",
+	"Git caches, workspaces and artifacts on the server volume are not part of the backup: the server clones every repository afresh. Step logs are included unless the backup ran with --no-logs.",
 }
 
 // archiveCipher seals and opens the plaintext archive stream.
@@ -295,7 +358,13 @@ func requireAuthEnvelopedData(path string) error {
 func writeBackupArchive(ctx context.Context, dir string, manifest *backupManifest, cipher archiveCipher, output string) (resultErr error) {
 	manifest.Members = manifest.Members[:0]
 	var total int64
-	for _, name := range backupMemberOrder {
+	names := slices.Clone(requiredBackupMembers(manifest.Scope))
+	for _, name := range backupOptionalMembers {
+		if _, err := os.Stat(filepath.Join(dir, filepath.FromSlash(name))); err == nil {
+			names = append(names, name)
+		}
+	}
+	for _, name := range names {
 		digest, err := digestBackupMember(filepath.Join(dir, filepath.FromSlash(name)))
 		if err != nil {
 			return fmt.Errorf("backup member %s: %w", name, err)
@@ -351,8 +420,12 @@ func writeBackupArchive(ctx context.Context, dir string, manifest *backupManifes
 	return nil
 }
 
-func writeBackupTar(w io.Writer, dir string, manifest []byte, members []backupMemberDigest) error {
-	archive := tar.NewWriter(w)
+// writeBackupTar writes the gzip-compressed plaintext tar (v2; step logs
+// compress well). v1 archives were uncompressed; openBackupArchive reads both.
+func writeBackupTar(w io.Writer, dir string, manifest []byte, members []backupMemberDigest) (resultErr error) {
+	compressed := gzip.NewWriter(w)
+	defer func() { resultErr = errors.Join(resultErr, compressed.Close()) }()
+	archive := tar.NewWriter(compressed)
 	if err := archive.WriteHeader(&tar.Header{Name: backupManifestName, Mode: 0o600, Size: int64(len(manifest)), Typeflag: tar.TypeReg, Format: tar.FormatPAX}); err != nil {
 		return err
 	}
@@ -412,10 +485,22 @@ func openBackupArchive(ctx context.Context, input string, cipher archiveCipher, 
 		return backupManifest{}, fmt.Errorf("open decrypted archive: %w", err)
 	}
 	defer func() { _ = f.Close() }()
-	reader := tar.NewReader(io.LimitReader(f, maxBackupPlaintextBytes+(1<<20)))
+	// The bound applies to the decompressed stream, so a small compressed
+	// archive cannot expand without limit.
+	buffered := bufio.NewReader(f)
+	var plain io.Reader = buffered
+	if magic, err := buffered.Peek(2); err == nil && magic[0] == 0x1f && magic[1] == 0x8b {
+		unzipped, err := gzip.NewReader(buffered)
+		if err != nil {
+			return backupManifest{}, fmt.Errorf("read decrypted archive: %w", err)
+		}
+		defer func() { _ = unzipped.Close() }()
+		plain = unzipped
+	}
+	reader := tar.NewReader(io.LimitReader(plain, maxBackupPlaintextBytes+(1<<20)))
 
-	allowed := make(map[string]bool, len(backupMemberOrder))
-	for _, name := range backupMemberOrder {
+	allowed := make(map[string]bool, len(backupMemberOrder)+len(backupOptionalMembers))
+	for _, name := range append(slices.Clone(backupMemberOrder), backupOptionalMembers...) {
 		allowed[name] = true
 	}
 	var manifestBytes []byte
@@ -463,16 +548,32 @@ func openBackupArchive(ctx context.Context, input string, cipher archiveCipher, 
 	if err := decoder.Decode(&manifest); err != nil {
 		return backupManifest{}, fmt.Errorf("parse archive manifest: %w", err)
 	}
-	if manifest.Format != backupFormat {
+	if manifest.Format != backupFormat && manifest.Format != backupFormatV1 {
 		return backupManifest{}, fmt.Errorf("archive format %q is not %q; use the oberth release that wrote it", manifest.Format, backupFormat)
 	}
-	if len(manifest.Members) != len(backupMemberOrder) || len(extracted) != len(backupMemberOrder) {
+	if manifest.Format == backupFormatV1 && manifest.Scope != "" || manifest.Scope != "" && manifest.Scope != BackupScopeFull && manifest.Scope != BackupScopeHistory {
+		return backupManifest{}, fmt.Errorf("archive scope %q is not one this release reads", manifest.Scope)
+	}
+	// The closed inventory in order, then the optional members present —
+	// none in a v1 archive — in their fixed order.
+	want := slices.Clone(requiredBackupMembers(manifest.Scope))
+	if manifest.Format == backupFormat {
+		for _, name := range backupOptionalMembers {
+			if len(want) < len(extracted) && extracted[len(want)].Name == name {
+				want = append(want, name)
+			}
+		}
+	}
+	if len(manifest.Members) != len(want) || len(extracted) != len(want) {
 		return backupManifest{}, errors.New("archive member inventory is incomplete")
 	}
-	for i, name := range backupMemberOrder {
+	for i, name := range want {
 		if manifest.Members[i].Name != name || extracted[i] != manifest.Members[i] {
 			return backupManifest{}, fmt.Errorf("archive member %s does not match its manifest size/SHA-256", name)
 		}
+	}
+	if (manifest.Logs != nil) != slices.Contains(want, backupMemberLogs) {
+		return backupManifest{}, errors.New("archive manifest and step logs member disagree")
 	}
 	return manifest, nil
 }

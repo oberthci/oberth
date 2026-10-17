@@ -4,9 +4,13 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"flag"
+	"io"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
@@ -28,25 +32,152 @@ func TestHelpListsBackupAndRestore(t *testing.T) {
 	}
 }
 
-func TestBackupAndRestoreRequireTheirFiles(t *testing.T) {
-	t.Parallel()
-	for _, tc := range []struct {
-		args []string
-		want string
-	}{
-		{[]string{"backup", "--recipient", "cert.pem"}, "--output is required"},
-		{[]string{"backup", "--output", "state.cms"}, "--recipient is required"},
-		{[]string{"restore", "--private-key", "key.pem"}, "--input is required"},
-		{[]string{"restore", "--input", "state.cms"}, "--private-key is required"},
-	} {
-		err := runCLI(context.Background(), tc.args, strings.NewReader(""), &bytes.Buffer{})
-		if err == nil || !strings.Contains(err.Error(), tc.want) {
-			t.Fatalf("%v: error = %v, want %q", tc.args, err, tc.want)
+// isolatedHome points HOME, XDG_CONFIG_HOME and KUBECONFIG at a fresh
+// directory, so default key and archive paths never resolve to the
+// operator's own and no test can reach a real cluster.
+func isolatedHome(t *testing.T) string {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("KUBECONFIG", filepath.Join(home, "no-kubeconfig"))
+	t.Setenv("BAO_TOKEN", "")
+	return home
+}
+
+// The first backup on a machine creates the key itself (#065): no keygen
+// step, no --recipient.
+func TestFirstBackupCreatesTheKey(t *testing.T) {
+	home := isolatedHome(t)
+	var out bytes.Buffer
+	err := runCLI(context.Background(), []string{"backup"}, strings.NewReader(""), &out)
+	if err == nil || !strings.Contains(err.Error(), "kubeconfig") {
+		t.Fatalf("backup without a cluster = %v, want a kubeconfig error", err)
+	}
+	key := filepath.Join(home, ".config", "oberth", "backup", "recipient.key")
+	if info, statErr := os.Stat(key); statErr != nil || info.Mode().Perm() != 0o600 {
+		t.Fatalf("first backup did not create %s (0600): %v", key, statErr)
+	}
+	if !strings.Contains(out.String(), "Created the backup key") || !strings.Contains(out.String(), "OFF this machine") {
+		t.Fatalf("output does not announce the new key:\n%s", out.String())
+	}
+	// A dry run on a machine without a key says it would create one.
+	other := isolatedHome(t)
+	out.Reset()
+	_ = runCLI(context.Background(), []string{"backup", "--dry-run"}, strings.NewReader(""), &out)
+	if _, statErr := os.Stat(filepath.Join(other, ".config", "oberth", "backup", "recipient.key")); statErr == nil {
+		t.Fatal("a dry run created the key")
+	}
+	if !strings.Contains(out.String(), "a real backup creates") {
+		t.Fatalf("dry run output = %s", out.String())
+	}
+}
+
+func TestRestoreFindsTheBackupAndKey(t *testing.T) {
+	home := isolatedHome(t)
+	err := runCLI(context.Background(), []string{"restore"}, strings.NewReader(""), &bytes.Buffer{})
+	if !errors.Is(err, errUsage) || !strings.Contains(err.Error(), "no oberth backup") {
+		t.Fatalf("restore with no backup around = %v", err)
+	}
+	dir := filepath.Join(home, "carried")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	older, newer := filepath.Join(dir, "oberth-backup-1.tar.gz.enc"), filepath.Join(dir, "oberth-backup-2.tar.gz.enc")
+	for i, path := range []string{older, newer} {
+		if err := os.WriteFile(path, []byte("not a real archive"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		stamp := time.Now().Add(time.Duration(i-2) * time.Hour)
+		if err := os.Chtimes(path, stamp, stamp); err != nil {
+			t.Fatal(err)
 		}
 	}
-	err := runCLI(context.Background(), []string{"backup", "extra"}, strings.NewReader(""), &bytes.Buffer{})
+	var out bytes.Buffer
+	err = runCLI(context.Background(), []string{"restore", dir, "--inspect"}, strings.NewReader(""), &out)
+	if !strings.Contains(out.String(), "Using oberth-backup-2.tar.gz.enc, the newest backup in") {
+		t.Fatalf("directory not resolved to its newest backup:\n%s", out.String())
+	}
+	if err == nil || !strings.Contains(err.Error(), "no backup key") {
+		t.Fatalf("restore without a key = %v, want the key guidance", err)
+	}
+	// A key carried next to the backup is used.
+	if err := os.WriteFile(filepath.Join(dir, "recipient.key"), []byte("key"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	err = runCLI(context.Background(), []string{"restore", "--inspect", newer}, strings.NewReader(""), &bytes.Buffer{})
+	if err == nil || strings.Contains(err.Error(), "no backup key") || !strings.Contains(err.Error(), "AuthEnvelopedData") {
+		t.Fatalf("restore with the key beside the backup = %v, want it to reach the archive check", err)
+	}
+}
+
+func TestParseOperatorFlagsTakesFlagsAfterArguments(t *testing.T) {
+	t.Parallel()
+	flags := flag.NewFlagSet("restore", flag.ContinueOnError)
+	flags.SetOutput(io.Discard)
+	dryRun := flags.Bool("dry-run", false, "")
+	only := flags.String("only", "", "")
+	positional, help, err := parseOperatorFlags(flags, []string{"backup.tar.gz.enc", "--dry-run", "--only", "history"})
+	if err != nil || help || !*dryRun || *only != "history" || len(positional) != 1 || positional[0] != "backup.tar.gz.enc" {
+		t.Fatalf("positional %v help %v err %v dry-run %v only %q", positional, help, err, *dryRun, *only)
+	}
+}
+
+// The transcript of #065: --help after a flag that takes a value showed a
+// --recipient error, and errors spelled flags with one dash.
+func TestBackupFlagsBehaveForOperators(t *testing.T) {
+	isolatedHome(t)
+	var out bytes.Buffer
+	if err := runCLI(context.Background(), []string{"backup", "--output", "--help"}, strings.NewReader(""), &out); err != nil {
+		t.Fatalf("--output --help: %v", err)
+	}
+	if !strings.Contains(out.String(), "Usage: oberth backup") || strings.Contains(out.String(), "  -output") {
+		t.Fatalf("help = %s", out.String())
+	}
+	err := runCLI(context.Background(), []string{"backup", "--output"}, strings.NewReader(""), &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "--output") || strings.Contains(err.Error(), " -output") {
+		t.Fatalf("missing value error = %v", err)
+	}
+	err = runCLI(context.Background(), []string{"backup", "--output", "--history-only"}, strings.NewReader(""), &bytes.Buffer{})
+	if !errors.Is(err, errUsage) || !strings.Contains(err.Error(), `--output needs a value, but got "--history-only"`) {
+		t.Fatalf("flag-as-value error = %v", err)
+	}
+	err = runCLI(context.Background(), []string{"backup", "extra"}, strings.NewReader(""), &bytes.Buffer{})
 	if !errors.Is(err, errUsage) {
 		t.Fatalf("positional argument error = %v, want usage error", err)
+	}
+}
+
+func TestBackupKeygenCreatesAUsableRecipientOnce(t *testing.T) {
+	home := isolatedHome(t)
+	var out bytes.Buffer
+	if err := runCLI(context.Background(), []string{"backup", "keygen"}, strings.NewReader(""), &out); err != nil {
+		t.Fatal(err)
+	}
+	key := filepath.Join(home, ".config", "oberth", "backup", "recipient.key")
+	info, err := os.Stat(key)
+	if err != nil || info.Mode().Perm() != 0o600 {
+		t.Fatalf("private key %v mode %v", err, info)
+	}
+	if !strings.Contains(out.String(), "OFF this machine") {
+		t.Fatalf("keygen does not say to copy the key away:\n%s", out.String())
+	}
+	if err := runCLI(context.Background(), []string{"backup", "keygen"}, strings.NewReader(""), &bytes.Buffer{}); err == nil || !strings.Contains(err.Error(), "never replaced") {
+		t.Fatalf("second keygen = %v, want a refusal", err)
+	}
+}
+
+func TestDoubleDashFlags(t *testing.T) {
+	t.Parallel()
+	for in, want := range map[string]string{
+		"flag needs an argument: -output":                         "flag needs an argument: --output",
+		"flag provided but not defined: -limit":                   "flag provided but not defined: --limit",
+		`invalid value "x" for flag -timeout: parse error`:        `invalid value "x" for flag --timeout: parse error`,
+		"already --double and a-hyphenated-word stay as they are": "already --double and a-hyphenated-word stay as they are",
+	} {
+		if got := doubleDashFlags(in); got != want {
+			t.Errorf("doubleDashFlags(%q) = %q, want %q", in, got, want)
+		}
 	}
 }
 

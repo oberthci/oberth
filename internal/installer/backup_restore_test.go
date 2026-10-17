@@ -1,9 +1,11 @@
 package installer
 
 import (
+	"archive/tar"
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -20,10 +22,12 @@ import (
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
+	authenticationv1 "k8s.io/api/authentication/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/fake"
 	k8stesting "k8s.io/client-go/testing"
 
@@ -214,7 +218,13 @@ type fakeBackupCluster struct {
 	oldServer     bool              // server predates `oberth backup database`
 	workflows     []runWorkflow
 
-	uploadShort bool // the restore pod reports a truncated upload (#067)
+	uploadShort  bool     // the restore pod reports a truncated upload (#067)
+	logsTar      []byte   // what the server pod's step logs tar holds
+	clusterUID   string   // kube-system namespace UID
+	jwksKeyIDs   []string // /openid/v1/jwks key IDs
+	signingKeyID string   // kid of tokens the API server issues
+	logsRestored string   // SHA-256 the logs restore script was given
+	scaleSubres  []string // subresource of every deployment patch
 
 	argvs       [][]string
 	uploads     map[string][]byte
@@ -278,6 +288,20 @@ func newFakeBackupCluster(t *testing.T, compat backupCompatibility, objects ...r
 		uploads: map[string][]byte{},
 	}
 	pods := schema.GroupVersionResource{Version: "v1", Resource: "pods"}
+	deployments := schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "deployments"}
+	c.client.PrependReactor("get", "namespaces", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		if action.(k8stesting.GetAction).GetName() != "kube-system" || c.clusterUID == "" {
+			return false, nil, nil
+		}
+		return true, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "kube-system", UID: types.UID(c.clusterUID)}}, nil
+	})
+	c.client.PrependReactor("create", "serviceaccounts", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		if action.GetSubresource() != "token" || c.signingKeyID == "" {
+			return false, nil, nil
+		}
+		header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"RS256","kid":"` + c.signingKeyID + `"}`))
+		return true, &authenticationv1.TokenRequest{Status: authenticationv1.TokenRequestStatus{Token: header + ".payload.signature"}}, nil
+	})
 	// Scaling the deployment stops or starts its pod, as the controller would.
 	c.client.PrependReactor("patch", "deployments", func(action k8stesting.Action) (bool, runtime.Object, error) {
 		var patch struct {
@@ -290,13 +314,20 @@ func newFakeBackupCluster(t *testing.T, compat backupCompatibility, objects ...r
 		}
 		c.mu.Lock()
 		c.scales = append(c.scales, patch.Spec.Replicas)
+		c.scaleSubres = append(c.scaleSubres, action.GetSubresource())
 		c.mu.Unlock()
 		if patch.Spec.Replicas == 0 {
 			_ = c.client.Tracker().Delete(pods, DefaultNamespace, "oberth-1")
 		} else {
 			_ = c.client.Tracker().Add(serverPodFixture("oberth-2"))
 		}
-		return false, nil, nil
+		object, err := c.client.Tracker().Get(deployments, DefaultNamespace, "oberth")
+		if err != nil {
+			return true, nil, err
+		}
+		deployment := object.(*appsv1.Deployment).DeepCopy()
+		deployment.Spec.Replicas = &patch.Spec.Replicas
+		return true, deployment, c.client.Tracker().Update(deployments, deployment, DefaultNamespace)
 	})
 	// The helper pod starts immediately.
 	c.client.PrependReactor("create", "pods", func(action k8stesting.Action) (bool, runtime.Object, error) {
@@ -343,6 +374,13 @@ func (c *fakeBackupCluster) run(_ context.Context, input []byte, name string, ar
 	}
 	switch args[0] {
 	case "get":
+		if slices.Contains(args, "--raw") {
+			keys := []map[string]string{}
+			for _, kid := range c.jwksKeyIDs {
+				keys = append(keys, map[string]string{"kid": kid})
+			}
+			return json.Marshal(map[string]any{"keys": keys})
+		}
 		items := []map[string]any{}
 		for _, wf := range c.workflows {
 			items = append(items, map[string]any{"metadata": map[string]any{"name": wf.Name, "labels": map[string]string{"oberth.ci/run": wf.RunID}}, "status": map[string]any{"phase": wf.Phase}})
@@ -388,6 +426,11 @@ func (c *fakeBackupCluster) run(_ context.Context, input []byte, name string, ar
 		return []byte(strings.Join(lines, "\n") + "\n"), nil
 	case command[0] == "cat":
 		return c.rawFiles[command[1]], nil
+	case len(command) > 2 && command[2] == serverLogsScript:
+		return c.logsTar, nil
+	case container == restoreHelperContainer && command[2] == logsRestoreScript:
+		c.logsRestored = command[4]
+		return []byte("1\n"), nil
 	case container == restoreHelperContainer && command[2] == stageResetScript:
 		return nil, nil
 	case container == restoreHelperContainer && command[2] == stageUploadScript:
@@ -480,6 +523,30 @@ func sourceDatabase(t *testing.T) ([]byte, map[string][]byte, string) {
 	return archive.Bytes(), raw, run.ID
 }
 
+// freshInstallDatabase is a fresh install's database under the default
+// protocol: no runs, one upstream.
+func freshInstallDatabase(t *testing.T) []byte {
+	t.Helper()
+	ctx := context.Background()
+	opts := store.Options{Protocol: store.ProtocolConfig{SchemaIdentity: defaultCompat.SchemaIdentity, AuditDomain: defaultCompat.AuditDomain}}
+	path := filepath.Join(t.TempDir(), "oberth.sqlite")
+	database, err := store.CreateGenesis(ctx, path, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.CreateUpstream(ctx, model.UpstreamSpec{Name: "github", Kind: "github", BaseURL: "https://github.com"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+	var archive bytes.Buffer
+	if _, err := store.WriteVerifiedBackup(ctx, path, store.LatestMigrationVersion(), opts, &archive); err != nil {
+		t.Fatal(err)
+	}
+	return archive.Bytes()
+}
+
 func seedSourceOpenBao(bao *fakeOpenBao) {
 	bao.kv["upstream/codeberg/org/ssh-key"] = map[string]any{"private_key": testSecretValue}
 	bao.kv["release/cosign-secret"] = map[string]any{"key": "cosign-canary", "password": "pw-canary"}
@@ -516,6 +583,8 @@ func backupFixtureArchive(t *testing.T, oldServer bool) (string, string, *fakeBa
 	archiveBytes, raw, runID := sourceDatabase(t)
 	source := newFakeBackupCluster(t, sourceCompat, grantsConfigMap(testGrants))
 	source.database, source.rawFiles, source.oldServer = archiveBytes, raw, oldServer
+	source.logsTar = logsTarFixture(t, map[string]string{"logs/" + runID + ".log": "step output\n"})
+	source.clusterUID, source.jwksKeyIDs, source.signingKeyID = "source-cluster", []string{"source-kid"}, "source-kid"
 	source.values["argo"] = map[string]any{"namespace": DefaultArgoNamespace, "releaseWIF": map[string]any{
 		"namespace": DefaultArgoNamespace, "roles": map[string]any{}, "repositories": map[string]any{},
 	}}
@@ -633,6 +702,7 @@ func TestBackupDryRunReadsNoSecrets(t *testing.T) {
 // the restored database knows, one only the fresh database knew.
 func restoreTargetCluster(t *testing.T, knownRunID string) *fakeBackupCluster {
 	target := newFakeBackupCluster(t, defaultCompat)
+	target.database = freshInstallDatabase(t)
 	target.bao.policies["oberth-ci"] = "# installer default"
 	target.bao.kv["identities/oberth/ssh-host"] = map[string]any{"ed25519": "fresh-host-key"}
 	target.workflows = []runWorkflow{
@@ -715,7 +785,7 @@ func TestRestoreAppliesTheArchive(t *testing.T) {
 	if argo, _ := target.helmValues["argo"].(map[string]any); argo["releaseWIF"] == nil {
 		t.Fatalf("releaseWIF not reapplied: %v", target.helmValues)
 	}
-	assertSubstringsInOrder(t, text, []string{"Restore plan", "Restoring OpenBao", "Stopping the server", "Swapping the database",
+	assertSubstringsInOrder(t, text, []string{"What changes on this install:", "Restoring OpenBao", "Stopping the server", "Swapping the database",
 		"oberth install --install-secretstore"})
 }
 
@@ -773,8 +843,11 @@ func TestRestoreDryRunChangesNothing(t *testing.T) {
 		t.Fatalf("restore --dry-run: %v\n%s", err, out.String())
 	}
 	assertNoRestoreMutation(t, target)
-	assertSubstringsInOrder(t, out.String(), []string{"Archive verified", "3 secrets (2 new, 1 replacing current values, 0 unchanged)", "1 replaced",
-		"scale deploy/oberth 1 -> 0", "pre-restore-20261017T093000Z", "set argo, compatibility", "oberth-oberth-orphan", "No changes were made"})
+	assertSubstringsInOrder(t, out.String(), []string{"Archive verified", "History    1 run, ", "Secrets    3 KV secrets",
+		"What changes on this install:", "History    replaced, not merged: runs 0 -> 1", "Secrets    2 new, 1 replaced, 0 unchanged", "replaced: identities/oberth/ssh-host",
+		"policies 1 new, 1 replaced", "Settings   compatibility (the restored database needs it)", "argo.releaseWIF: not set -> the archive's",
+		"grants (ConfigMap oberth-secret-access): 0 -> 1",
+		"deploy/oberth stopped (1 -> 0)", "pre-restore-20261017T093000Z", "oberth-oberth-orphan", "No changes were made"})
 }
 
 // A secret that already holds the archived value is counted as unchanged and
@@ -790,7 +863,7 @@ func TestRestoreSkipsUnchangedSecrets(t *testing.T) {
 	if err := runRestore(context.Background(), cfg, target.deps(&out)); err != nil {
 		t.Fatalf("restore: %v\n%s", err, out.String())
 	}
-	if !strings.Contains(out.String(), "3 secrets (1 new, 1 replacing current values, 1 unchanged)") {
+	if !strings.Contains(out.String(), "Secrets    1 new, 1 replaced, 1 unchanged") {
 		t.Fatalf("plan does not report the unchanged secret:\n%s", out.String())
 	}
 	if !strings.Contains(out.String(), "3 secrets (2 written, 1 already current)") {
@@ -1034,4 +1107,31 @@ func TestSwapScriptKeepsPreviousWALOnEarlyFailure(t *testing.T) {
 			t.Fatalf("%s after rollback = %q, %v", name, got, err)
 		}
 	}
+}
+
+// logsTarFixture builds a step logs tar as the server pod's tar would.
+func logsTarFixture(t *testing.T, files map[string]string) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	archive := tar.NewWriter(&buf)
+	if err := archive.WriteHeader(&tar.Header{Name: "logs/", Typeflag: tar.TypeDir, Mode: 0o750}); err != nil {
+		t.Fatal(err)
+	}
+	names := make([]string, 0, len(files))
+	for name := range files {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		if err := archive.WriteHeader(&tar.Header{Name: name, Typeflag: tar.TypeReg, Mode: 0o640, Size: int64(len(files[name]))}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := archive.Write([]byte(files[name])); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := archive.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
 }

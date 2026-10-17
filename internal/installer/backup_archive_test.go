@@ -3,6 +3,7 @@ package installer
 import (
 	"archive/tar"
 	"bytes"
+	"compress/gzip"
 	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
@@ -109,7 +110,15 @@ func TestBackupArchiveRoundTripChecksEveryMember(t *testing.T) {
 	}
 
 	// Flip one byte of a member body: its hash no longer matches the manifest.
-	body, err := os.ReadFile(output)
+	sealed, err := os.ReadFile(output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	unzipped, err := gzip.NewReader(bytes.NewReader(bytes.TrimPrefix(sealed, fakeEnvelopeHeader())))
+	if err != nil {
+		t.Fatalf("archive plaintext is not gzip: %v", err)
+	}
+	body, err := io.ReadAll(unzipped)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,8 +127,12 @@ func TestBackupArchiveRoundTripChecksEveryMember(t *testing.T) {
 		t.Fatal("member body not found in fake envelope")
 	}
 	body[index+2] ^= 0x20
+	var rezipped bytes.Buffer
+	zipper := gzip.NewWriter(&rezipped)
+	_, _ = zipper.Write(body)
+	_ = zipper.Close()
 	tampered := filepath.Join(t.TempDir(), "tampered.cms")
-	if err := os.WriteFile(tampered, body, 0o600); err != nil {
+	if err := os.WriteFile(tampered, append(fakeEnvelopeHeader(), rezipped.Bytes()...), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	_, err = openBackupArchive(context.Background(), tampered, fakeEnvelopeCipher{}, t.TempDir())
