@@ -15,6 +15,8 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+
+	"github.com/oberthci/oberth/internal/mdnsdial"
 )
 
 const (
@@ -144,6 +146,9 @@ func newTransport(caCert string) (http.RoundTripper, error) {
 		return nil, errors.New("client: http.DefaultTransport is not *http.Transport; cannot configure TLS")
 	}
 	cloned := transport.Clone()
+	// A .local server name resolves through the system resolver when Go's
+	// own cannot (#066).
+	cloned.DialContext = mdnsdial.Dialer{Base: &net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}}.DialContext
 	if cloned.TLSClientConfig == nil {
 		cloned.TLSClientConfig = &tls.Config{}
 	}
@@ -276,6 +281,9 @@ func classifyTransport(path string, err error) error {
 	// every non-TLS failure to "cannot reach the server."
 	var dnsErr *net.DNSError
 	if errors.As(err, &dnsErr) {
+		if mdnsdial.IsLocalName(dnsErr.Name) {
+			return fmt.Errorf("client: cannot resolve %q for %s (%s)", dnsErr.Name, path, mdnsdial.Hint)
+		}
 		return fmt.Errorf("client: cannot resolve %q for %s: %s", dnsErr.Name, path, dnsErr.Err)
 	}
 	if errors.Is(err, context.DeadlineExceeded) {

@@ -22,6 +22,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/oberthci/oberth/internal/mdnsdial"
 )
 
 const secret = "tok-DO-NOT-LEAK-9f3a"
@@ -733,5 +735,55 @@ func TestARedirectWithinHTTPSIsStillFollowed(t *testing.T) {
 	}
 	if out.ID != "run-1" || atomic.LoadInt32(&served) != 1 {
 		t.Fatalf("redirect target not served exactly once (ID=%q served=%d)", out.ID, served)
+	}
+}
+
+func TestClassifyTransportExplainsUnresolvedLocalNames(t *testing.T) {
+	dnsErr := &net.DNSError{Err: "no such host", Name: "tuxbox.local", IsNotFound: true}
+	got := classifyTransport("/api/runs", &net.OpError{Op: "dial", Net: "tcp", Err: dnsErr})
+	if !strings.Contains(got.Error(), `cannot resolve "tuxbox.local"`) || !strings.Contains(got.Error(), mdnsdial.Hint) {
+		t.Fatalf("a .local resolution failure is not explained: %v", got)
+	}
+}
+
+// A .local server name the Go resolver cannot answer is dialled at the
+// address the system resolver returns (#066); reaching the TLS handshake
+// proves it.
+func TestALocalServerNameFallsBackToTheSystemResolver(t *testing.T) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"ID":"run-1"}`))
+	}))
+	defer server.Close()
+	_, port, _ := net.SplitHostPort(server.Listener.Addr().String())
+
+	restore := mdnsdial.Lookup
+	t.Cleanup(func() { mdnsdial.Lookup = restore })
+	var asked string
+	mdnsdial.Lookup = func(_ context.Context, name string) ([]net.IP, error) {
+		asked = name
+		return []net.IP{net.ParseIP("127.0.0.1")}, nil
+	}
+
+	anchor := filepath.Join(t.TempDir(), "ca.pem")
+	if err := os.WriteFile(anchor, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: server.Certificate().Raw}), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	clearEnv(t)
+	t.Setenv("OBERTH_BASE_URL", "https://oberth-client-test.local:"+port)
+	t.Setenv("OBERTH_TOKEN", secret)
+	t.Setenv("OBERTH_CA_CERT", anchor)
+	client, err := New(t.Context(), FromEnv())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out struct{ ID string }
+	err = client.Get(context.Background(), "/api/runs/run-1", nil, &out)
+	if asked != "oberth-client-test.local" {
+		t.Fatalf("the system resolver was not asked (err %v)", err)
+	}
+	// httptest's certificate covers 127.0.0.1 and example.com, not the
+	// .local name: the request got as far as the handshake.
+	if err == nil || !strings.Contains(err.Error(), "does not cover") {
+		t.Fatalf("err = %v, want the certificate hostname error", err)
 	}
 }

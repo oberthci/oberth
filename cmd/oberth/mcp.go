@@ -15,6 +15,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"github.com/oberthci/oberth/internal/mdnsdial"
 )
 
 const (
@@ -431,6 +433,9 @@ func mcpHTTPClient(caFile string) (*http.Client, error) {
 		return nil, errors.New("http.DefaultTransport is not *http.Transport")
 	}
 	cloned := transport.Clone()
+	// A .local server name resolves through the system resolver when Go's
+	// own cannot (#066).
+	cloned.DialContext = mdnsdial.Dialer{Base: &net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}}.DialContext
 	if cloned.TLSClientConfig == nil {
 		cloned.TLSClientConfig = &tls.Config{}
 	}
@@ -466,6 +471,9 @@ func classifyMCPTransport(err error) error {
 	}
 	var dnsErr *net.DNSError
 	if errors.As(err, &dnsErr) {
+		if mdnsdial.IsLocalName(dnsErr.Name) {
+			return fmt.Errorf("DNS: cannot resolve %q (%s)", dnsErr.Name, mdnsdial.Hint)
+		}
 		return fmt.Errorf("DNS: cannot resolve %q", dnsErr.Name)
 	}
 	if errors.Is(err, context.DeadlineExceeded) {

@@ -5,12 +5,15 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/oberthci/oberth/internal/mdnsdial"
 )
 
 // newMCPTestServer returns an httptest TLS server that speaks a minimal MCP
@@ -387,5 +390,16 @@ func TestMCPToolsEndToEnd(t *testing.T) {
 	}
 	if !strings.Contains(output, "status") {
 		t.Errorf("expected status in output, got: %s", output)
+	}
+}
+
+func TestClassifyMCPTransportExplainsUnresolvedLocalNames(t *testing.T) {
+	err := classifyMCPTransport(&net.OpError{Op: "dial", Net: "tcp", Err: &net.DNSError{Err: "no such host", Name: "tuxbox.local", IsNotFound: true}})
+	if !strings.Contains(err.Error(), `cannot resolve "tuxbox.local"`) || !strings.Contains(err.Error(), mdnsdial.Hint) {
+		t.Fatalf("a .local resolution failure is not explained: %v", err)
+	}
+	err = classifyMCPTransport(&net.OpError{Op: "dial", Net: "tcp", Err: &net.DNSError{Err: "no such host", Name: "example.invalid", IsNotFound: true}})
+	if strings.Contains(err.Error(), mdnsdial.Hint) {
+		t.Fatalf("the mDNS hint is shown for a non-.local name: %v", err)
 	}
 }
