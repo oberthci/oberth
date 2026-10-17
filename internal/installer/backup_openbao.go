@@ -401,28 +401,30 @@ func secretUnchanged(ctx context.Context, store openBaoExec, token, mount string
 // restoreOpenBao writes every archived secret, policy and role, then reads
 // each one back and compares it with the archive. A secret that already holds
 // the archived value is not written again. Secrets are compared in full; a
-// mismatch is reported by path only.
-func restoreOpenBao(ctx context.Context, store openBaoExec, token string, kv kvExport, policies []policyExport, roles rolesExport) error {
+// mismatch is reported by path only. It returns how many secrets it wrote.
+func restoreOpenBao(ctx context.Context, store openBaoExec, token string, kv kvExport, policies []policyExport, roles rolesExport) (int, error) {
+	written := 0
 	for _, secret := range kv.Secrets {
 		same, err := secretUnchanged(ctx, store, token, kv.Mount, secret)
 		if err != nil {
-			return err
+			return written, err
 		}
 		if same {
 			continue
 		}
 		if err := store.writeJSON(ctx, token, kv.Mount+"/data/"+secret.Path, map[string]any{"data": secret.Data}); err != nil {
-			return err
+			return written, err
 		}
+		written++
 	}
 	for _, policy := range policies {
 		if err := store.policyWrite(ctx, token, policy.Name, policy.Rules); err != nil {
-			return err
+			return written, err
 		}
 	}
 	for _, role := range roles.Roles {
 		if err := store.writeJSON(ctx, token, "auth/"+roles.Mount+"/role/"+role.Name, roleWritePayload(role.Fields)); err != nil {
-			return err
+			return written, err
 		}
 	}
 
@@ -430,7 +432,7 @@ func restoreOpenBao(ctx context.Context, store openBaoExec, token string, kv kvE
 	for _, secret := range kv.Secrets {
 		envelope, err := store.readData(ctx, token, kv.Mount+"/data/"+secret.Path)
 		if err != nil {
-			return err
+			return written, err
 		}
 		have, _ := envelope["data"].(map[string]any)
 		if canonicalJSON(have) != canonicalJSON(secret.Data) {
@@ -440,7 +442,7 @@ func restoreOpenBao(ctx context.Context, store openBaoExec, token string, kv kvE
 	for _, policy := range policies {
 		have, exists, err := store.policyRead(ctx, token, policy.Name)
 		if err != nil {
-			return err
+			return written, err
 		}
 		if !exists || strings.TrimSpace(have) != strings.TrimSpace(policy.Rules) {
 			mismatches = append(mismatches, "policy "+policy.Name)
@@ -449,7 +451,7 @@ func restoreOpenBao(ctx context.Context, store openBaoExec, token string, kv kvE
 	for _, role := range roles.Roles {
 		have, err := store.readData(ctx, token, "auth/"+roles.Mount+"/role/"+role.Name)
 		if err != nil {
-			return err
+			return written, err
 		}
 		if have == nil {
 			mismatches = append(mismatches, "role "+role.Name+" (absent)")
@@ -460,7 +462,7 @@ func restoreOpenBao(ctx context.Context, store openBaoExec, token string, kv kvE
 		}
 	}
 	if len(mismatches) > 0 {
-		return errors.New("OpenBao read-back differs from the archive for: " + strings.Join(mismatches, "; "))
+		return written, errors.New("OpenBao read-back differs from the archive for: " + strings.Join(mismatches, "; "))
 	}
-	return nil
+	return written, nil
 }

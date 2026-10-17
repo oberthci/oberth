@@ -744,6 +744,9 @@ func TestRestoreSkipsUnchangedSecrets(t *testing.T) {
 	if !strings.Contains(out.String(), "3 secrets (1 new, 1 replacing current values, 1 unchanged)") {
 		t.Fatalf("plan does not report the unchanged secret:\n%s", out.String())
 	}
+	if !strings.Contains(out.String(), "3 secrets (2 written, 1 already current)") {
+		t.Fatalf("apply summary does not report the skipped secret:\n%s", out.String())
+	}
 	if strings.Contains(out.String(), "cosign-canary") {
 		t.Fatal("restore output prints a secret value")
 	}
@@ -752,6 +755,32 @@ func TestRestoreSkipsUnchangedSecrets(t *testing.T) {
 	}
 	if !slices.Contains(target.bao.writes, "oberth/data/identities/oberth/ssh-host") {
 		t.Fatalf("changed secret was not written: %v", target.bao.writes)
+	}
+}
+
+// secretUnchanged treats a deleted or destroyed latest version as changed,
+// and compares archived json.Number values with live float64 values by value.
+func TestSecretUnchangedHandlesDeletedVersionsAndNumbers(t *testing.T) {
+	t.Parallel()
+	archived := kvSecretExport{Path: "release/cosign-secret", Data: map[string]any{"key": "k", "n": json.Number("3")}}
+	for _, tc := range []struct {
+		name  string
+		reply string
+		err   error
+		want  bool
+	}{
+		{"same value", `{"data":{"data":{"key":"k","n":3},"metadata":{"version":2}}}`, nil, true},
+		{"different value", `{"data":{"data":{"key":"other","n":3},"metadata":{"version":2}}}`, nil, false},
+		{"deleted latest version", `{"data":{"data":null,"metadata":{"deletion_time":"2026-10-17T09:30:00Z","version":3}}}`, nil, false},
+		{"missing path", "No value found at oberth/data/release/cosign-secret", errors.New("exit status 2"), false},
+	} {
+		store := openBaoExec{run: func(_ context.Context, _ []byte, _ string, _ ...string) ([]byte, error) {
+			return []byte(tc.reply), tc.err
+		}, namespace: "openbao", pod: "openbao-0"}
+		got, err := secretUnchanged(context.Background(), store, testBackupToken, "oberth", archived)
+		if err != nil || got != tc.want {
+			t.Errorf("%s: secretUnchanged = %v, %v; want %v", tc.name, got, err, tc.want)
+		}
 	}
 }
 

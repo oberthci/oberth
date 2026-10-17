@@ -433,11 +433,12 @@ func confirmRestore(cfg RestoreConfig, deps backupDeps) error {
 func applyRestore(ctx context.Context, cfg RestoreConfig, deps backupDeps, archive restoreArchive, target restoreTarget, bao openBaoExec, work string) error {
 	w := deps.Output
 	_, _ = fmt.Fprintln(w, "\nRestoring OpenBao...")
-	if err := restoreOpenBao(ctx, bao, deps.rootToken, archive.KV, archive.Policies, archive.Roles); err != nil {
+	written, err := restoreOpenBao(ctx, bao, deps.rootToken, archive.KV, archive.Policies, archive.Roles)
+	if err != nil {
 		return err
 	}
-	_, _ = fmt.Fprintf(w, "  ✓ %d secrets, %d policies, %d roles written and verified by read-back\n",
-		len(archive.KV.Secrets), len(archive.Policies), len(archive.Roles.Roles))
+	_, _ = fmt.Fprintf(w, "  ✓ %d secrets (%d written, %d already current), %d policies, %d roles verified by read-back\n",
+		len(archive.KV.Secrets), written, len(archive.KV.Secrets)-written, len(archive.Policies), len(archive.Roles.Roles))
 
 	// Resolve the chart before stopping anything, so a missing chart cannot
 	// leave the server scaled down.
