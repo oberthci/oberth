@@ -388,7 +388,7 @@ func TestDashboardAssetsAreVersionedForCaches(t *testing.T) {
 		{"/assets/app.js?v=" + version, "public, max-age=31536000, immutable"},
 		{"/assets/app.js", "no-cache"},
 		{"/assets/app.js?v=0000000000000000", "no-cache"},
-		{"/assets/fonts/IBMPlexMono-Regular.woff2", "no-cache"},
+		{"/assets/fonts/IBMPlexMono-Regular.woff2", "public, max-age=3600"},
 	} {
 		response := httptest.NewRecorder()
 		server.Handler().ServeHTTP(response, httptest.NewRequest(http.MethodGet, tc.path, nil))
@@ -397,12 +397,33 @@ func TestDashboardAssetsAreVersionedForCaches(t *testing.T) {
 				response.Header().Get("Cache-Control"), response.Header().Get("ETag"), tc.cache)
 		}
 	}
-	revalidate := httptest.NewRequest(http.MethodGet, "/assets/app.js", nil)
-	revalidate.Header.Set("If-None-Match", `"`+version+`"`)
-	response := httptest.NewRecorder()
-	server.Handler().ServeHTTP(response, revalidate)
-	if response.Code != http.StatusNotModified || response.Body.Len() != 0 {
-		t.Fatalf("current ETag revalidation = %d with %d bytes, want 304 and no body", response.Code, response.Body.Len())
+	if cache := page.Header().Get("Cache-Control"); cache != "no-cache" {
+		t.Fatalf("shell Cache-Control = %q, want no-cache", cache)
+	}
+	for _, tc := range []struct {
+		header string
+		want   int
+	}{
+		{`"` + version + `"`, http.StatusNotModified},
+		{`W/"` + version + `"`, http.StatusNotModified},
+		{`"0000000000000000", W/"` + version + `"`, http.StatusNotModified},
+		{`*`, http.StatusNotModified},
+		{`"0000000000000000"`, http.StatusOK},
+	} {
+		revalidate := httptest.NewRequest(http.MethodGet, "/assets/app.js", nil)
+		revalidate.Header.Set("If-None-Match", tc.header)
+		response := httptest.NewRecorder()
+		server.Handler().ServeHTTP(response, revalidate)
+		if response.Code != tc.want || (tc.want == http.StatusNotModified) != (response.Body.Len() == 0) ||
+			response.Header().Get("ETag") != `"`+version+`"` || response.Header().Get("Cache-Control") != "no-cache" {
+			t.Fatalf("If-None-Match %s = %d with %d bytes, ETag %q, Cache-Control %q; want %d",
+				tc.header, response.Code, response.Body.Len(), response.Header().Get("ETag"), response.Header().Get("Cache-Control"), tc.want)
+		}
+	}
+	head := httptest.NewRecorder()
+	server.Handler().ServeHTTP(head, httptest.NewRequest(http.MethodHead, "/assets/app.js?v="+version, nil))
+	if head.Code != http.StatusOK || head.Header().Get("Cache-Control") != "public, max-age=31536000, immutable" {
+		t.Fatalf("HEAD versioned asset = %d, Cache-Control %q", head.Code, head.Header().Get("Cache-Control"))
 	}
 }
 

@@ -446,8 +446,22 @@ func writeJSON(writer http.ResponseWriter, status int, value any) {
 // browser-held bearer token, so this shell exposes no repository or run data.
 func (server *Server) servePage(writer http.ResponseWriter, view string) {
 	writer.Header().Set("Content-Type", "text/html; charset=utf-8")
+	// The shell names the current asset versions, so no cache may keep it.
+	writer.Header().Set("Cache-Control", "no-cache")
 	writer.Header().Set("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; font-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'")
 	_, _ = io.WriteString(writer, `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Oberth Dashboard</title><link rel="stylesheet" href="`+versionedAssetURL("app.css")+`"></head><body data-version="`+html.EscapeString(server.version)+`"><div class="app"><header class="top"><button class="brand" data-route="/runs"><span class="mark">[▲]</span><span>oberth</span><span id="brandSub" class="sub">/ dashboard</span></button><nav class="tabs"><button id="tabRuns" class="tab" data-route="/runs">runs</button><button id="tabRepos" class="tab" data-route="/repos">repos</button><button id="tabIssues" class="tab" data-route="/issues">issues</button><button id="tabStatus" class="tab" data-route="/status">status</button></nav><div class="top-right"><div class="top-status" aria-label="System status"><span class="status-segment backend" title="loading" aria-label="loading"><span id="connLed" class="led" aria-hidden="true"></span><span id="connText">api</span></span><span class="status-divider" aria-hidden="true"></span><span id="versionStatus" class="status-segment version-mode unknown" role="status" aria-live="polite"><span>oberth</span> <span id="verLabel" class="ver">...</span></span></div><button class="iconbtn" data-action="toggle-theme" title="Theme">T</button><button class="iconbtn" data-action="refresh" title="Refresh">R</button><button class="iconbtn" data-action="clear-token" title="Sign out">L</button></div></header><main id="app" class="main" data-view="`+view+`"><noscript><p>The Oberth dashboard requires JavaScript. The JSON views remain available at /api/runs, /api/repos, /api/issues, /api/grants, and /api/status with a bearer token.</p></noscript></main></div><dialog id="issueDialog" class="dlg" aria-labelledby="issueDialogTitle"><div class="dlg-shell"><header class="dlg-head"><h2 id="issueDialogTitle">Issue</h2><span id="issueDialogMeta" class="meta"></span><button class="dlg-close" data-action="close-issue" aria-label="Close issue details">×</button></header><div id="issueDialogContent" class="dlg-body"></div></div></dialog><script src="`+versionedAssetURL("app.js")+`" defer></script></body></html>`)
+}
+
+// etagMatches is the weak comparison If-None-Match requires (RFC 9110
+// 13.1.2): a CDN may hand back W/"…", or a list of tags.
+func etagMatches(header, etag string) bool {
+	for _, candidate := range strings.Split(header, ",") {
+		candidate = strings.TrimPrefix(strings.TrimSpace(candidate), "W/")
+		if candidate == "*" || candidate == etag {
+			return true
+		}
+	}
+	return false
 }
 
 // serveAsset serves the embedded dashboard assets with explicit content types
@@ -465,12 +479,17 @@ func serveAsset(writer http.ResponseWriter, request *http.Request) {
 	etag := `"` + asset.version + `"`
 	writer.Header().Set("Content-Type", asset.contentType)
 	writer.Header().Set("ETag", etag)
-	if request.URL.Query().Get("v") == asset.version {
+	switch {
+	case request.URL.Query().Get("v") == asset.version:
 		writer.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
-	} else {
+	case asset.contentType == "font/woff2":
+		// Fonts are linked by fixed names from app.css and never change
+		// under a name; keep the previous hour of caching for them.
+		writer.Header().Set("Cache-Control", "public, max-age=3600")
+	default:
 		writer.Header().Set("Cache-Control", "no-cache")
 	}
-	if request.Header.Get("If-None-Match") == etag {
+	if etagMatches(request.Header.Get("If-None-Match"), etag) {
 		writer.WriteHeader(http.StatusNotModified)
 		return
 	}

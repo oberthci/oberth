@@ -705,9 +705,12 @@ func printUpgradeDryRun(w io.Writer, cfg UpgradeConfig, result UpgradeResult, re
 		step++
 	}
 
-	if retryFailed {
+	switch {
+	case retryFailed:
 		_, _ = fmt.Fprintf(w, "  %d. Retry FAILED Helm release at %s (same-version forward repair)\n", step, displayVersion(result.TargetVersion))
-	} else {
+	case result.PreviousVersion != "" && canonicalChartVersion(result.PreviousVersion) == canonicalChartVersion(result.TargetVersion):
+		_, _ = fmt.Fprintf(w, "  %d. Re-apply --values/--set at %s\n", step, displayVersion(result.TargetVersion))
+	default:
 		_, _ = fmt.Fprintf(w, "  %d. Upgrade Oberth from %s to %s\n", step, displayVersion(result.PreviousVersion), displayVersion(result.TargetVersion))
 	}
 	// Render from the same args builder the real path uses so the dry-run

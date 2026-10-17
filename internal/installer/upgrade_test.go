@@ -103,6 +103,36 @@ func TestRunUpgradeAlreadyUpToDate(t *testing.T) {
 	}
 }
 
+// A same-version dry run with --values plans a re-apply, not an upgrade
+// from a version to itself (#055).
+func TestRunUpgradeSameVersionValuesDryRunPlansReapply(t *testing.T) {
+	t.Parallel()
+	valuesFile := filepath.Join(t.TempDir(), "watch.yaml")
+	if err := os.WriteFile(valuesFile, []byte("watchTunnel:\n  enabled: true\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+	deps := Deps{
+		Output: &output,
+		RunHelm: func(_ context.Context, args []string) ([]byte, error) {
+			if len(args) >= 2 && args[0] == "list" {
+				return []byte(`[{"name":"oberth","namespace":"oberth","status":"deployed","chart":"oberth-0.12.35"}]`), nil
+			}
+			return nil, fmt.Errorf("unexpected Helm call in dry-run: %v", args)
+		},
+		KubeClient: fake.NewClientset(),
+		RestConfig: &rest.Config{Host: "https://127.0.0.1:6443"},
+	}
+	result, err := RunUpgrade(context.Background(), UpgradeConfig{
+		BinaryVersion: "0.12.35", Namespace: "oberth", DryRun: true, UserValues: []string{valuesFile},
+	}, deps)
+	text := output.String()
+	if err != nil || result.AlreadyUpToDate || !strings.Contains(text, "Re-apply --values/--set at v0.12.35") ||
+		strings.Contains(text, "from v0.12.35 to v0.12.35") || !strings.Contains(text, "--values "+valuesFile) {
+		t.Fatalf("same-version values dry run: result=%+v err=%v output=%q", result, err, text)
+	}
+}
+
 func TestRunUpgradeFailedSameVersionDryRunPlansRepair(t *testing.T) {
 	t.Parallel()
 	var output bytes.Buffer
