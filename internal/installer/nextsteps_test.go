@@ -251,3 +251,14 @@ func TestSaveTokenFileKeepsADifferentToken(t *testing.T) {
 		t.Errorf("token file holds %q", cur)
 	}
 }
+
+func TestLocalNameWarning(t *testing.T) {
+	if w := LocalNameWarning("tuxbox.local"); !strings.Contains(w, "mDNS") || !strings.Contains(w, "LAN IP") {
+		t.Errorf("warning %q", w)
+	}
+	for _, host := range []string{"", "localhost", "192.168.86.193", "tuxbox", "ci.example"} {
+		if w := LocalNameWarning(host); w != "" {
+			t.Errorf("%q warned: %q", host, w)
+		}
+	}
+}

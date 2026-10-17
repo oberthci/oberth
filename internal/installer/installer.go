@@ -698,6 +698,9 @@ func Run(ctx context.Context, cfg Config, deps Deps) error {
 		deps.ClientHost = "localhost"
 		cfg.ClientHost = "localhost"
 	}
+	if warning := LocalNameWarning(deps.ClientHost); warning != "" {
+		_, _ = fmt.Fprintf(deps.Output, "NOTE: %s\n", warning)
+	}
 
 	if !cluster.IsLocal && !cfg.Yes {
 		return fmt.Errorf("context %q does not appear to be a local cluster (server: %s); "+

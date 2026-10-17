@@ -17,6 +17,7 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 
 	"github.com/oberthci/oberth/internal/installer"
+	"github.com/oberthci/oberth/internal/mdnsdial"
 	"github.com/oberthci/oberth/internal/secretstore"
 )
 
@@ -386,7 +387,35 @@ func clientHostOptions(st *WizardState) []option {
 	for _, name := range st.Config.TLSExtraDNSNames {
 		addOpt(name, "a name on the certificate")
 	}
-	return append(opts, local)
+	// A .local name goes after the addresses that need no mDNS (#066).
+	var mdns []option
+	opts = slices.DeleteFunc(opts, func(o option) bool {
+		if !mdnsdial.IsLocalName(o.value) {
+			return false
+		}
+		o.detail += " · mDNS: avahi may also advertise the k3s bridge (10.42.x); the LAN IP is safer"
+		mdns = append(mdns, o)
+		return true
+	})
+	return append(append(opts, mdns...), local)
+}
+
+// defaultClientHost is the preselected client address: the stored answer,
+// else what the installer would advertise, except that a .local name gives
+// way to the node's address when that is offered (#066).
+func defaultClientHost(st *WizardState) string {
+	if st.Config.ClientHost != "" {
+		return st.Config.ClientHost
+	}
+	host := clientHost(st)
+	if mdnsdial.IsLocalName(host) && st.ClusterInfo.nodeIP != "" {
+		for _, o := range clientHostOptions(st) {
+			if o.value == strings.ToLower(st.ClusterInfo.nodeIP) {
+				return o.value
+			}
+		}
+	}
+	return host
 }
 
 // apiServerHost is the kubeconfig server's host when it is not a loopback
@@ -759,15 +788,14 @@ func buildQuestions() []*question {
 				if st.Config.CreateKind || st.ClusterInfo.engine == "kind" {
 					return "kind publishes ports 30022 and 30443 on 127.0.0.1 only, so clients on this machine use localhost."
 				}
-				return "Clone URLs, the CLI and MCP settings and the dashboard link name this address, and the certificate covers it. On k3s and most clusters, ports 30022 and 30443 already listen on every address of the node, so pick the one your other machines (a laptop, the VM's host) reach this server by. localhost works on this machine only."
-			},
-			options: clientHostOptions,
-			selected: func(st *WizardState) string {
-				if st.Config.ClientHost != "" {
-					return st.Config.ClientHost
+				text := "Clone URLs, the CLI and MCP settings and the dashboard link name this address, and the certificate covers it. On k3s and most clusters, ports 30022 and 30443 already listen on every address of the node, so pick the one your other machines (a laptop, the VM's host) reach this server by. localhost works on this machine only."
+				if warning := installer.LocalNameWarning(defaultClientHost(st)); warning != "" {
+					text += " " + warning
 				}
-				return clientHost(st)
+				return text
 			},
+			options:  clientHostOptions,
+			selected: defaultClientHost,
 			save: func(st *WizardState, answer []string) error {
 				for _, o := range clientHostOptions(st) {
 					if o.value == answer[0] {

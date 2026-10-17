@@ -354,3 +354,35 @@ func TestVerifyReportsUnresolvedClientHost(t *testing.T) {
 		}
 	}
 }
+
+// #066: a .local name is offered after the node's address with a warning,
+// and never preselected over it.
+func TestClientHostLocalNameGivesWayToTheNodeAddress(t *testing.T) {
+	newTestHost(t)
+	st := newWizardState(Options{})
+	st.ClusterInfo = clusterInfoMsg{engine: "k3s", server: "https://tuxbox.local:6443", nodeName: "tuxbox", nodeIP: "192.168.86.193"}
+	st.Config.TLSExtraDNSNames = []string{"tuxbox.local", "ci.example"}
+	q := questionByID(t, "tls.client")
+	var values []string
+	for _, o := range q.options(st) {
+		values = append(values, o.value)
+		if strings.HasSuffix(o.value, ".local") != strings.Contains(o.detail, "mDNS") {
+			t.Errorf("option %q detail %q", o.value, o.detail)
+		}
+	}
+	if strings.Join(values, ",") != "192.168.86.193,tuxbox,ci.example,tuxbox.local,localhost" {
+		t.Fatalf("options %v", values)
+	}
+	if got := q.selected(st); got != "192.168.86.193" {
+		t.Errorf("a .local API host must not be preselected over the node address, got %q", got)
+	}
+	if strings.Contains(q.explain(st), "mDNS") {
+		t.Errorf("no warning while the node address is selected: %q", q.explain(st))
+	}
+	if err := q.save(st, []string{"tuxbox.local"}); err != nil {
+		t.Fatal(err)
+	}
+	if q.selected(st) != "tuxbox.local" || !strings.Contains(q.explain(st), "cni0") {
+		t.Errorf("an explicit .local answer stays and is warned about: %q %q", q.selected(st), q.explain(st))
+	}
+}

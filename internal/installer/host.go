@@ -23,6 +23,8 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	"sigs.k8s.io/yaml"
+
+	"github.com/oberthci/oberth/internal/mdnsdial"
 )
 
 const (
@@ -361,6 +363,17 @@ func NormalizeClientHost(raw string) (string, error) {
 		return "", fmt.Errorf("%q is neither an IP address nor a DNS name (no scheme, port or path)", raw)
 	}
 	return host, nil
+}
+
+// LocalNameWarning says what a .local client host costs (#066), or "" for
+// any other host: other machines resolve it over mDNS, and avahi also
+// advertises container bridges such as k3s's cni0 (10.42.x), which no other
+// machine reaches.
+func LocalNameWarning(host string) string {
+	if !mdnsdial.IsLocalName(host) {
+		return ""
+	}
+	return host + " is an mDNS name: other machines resolve it through avahi, which may also advertise this node's container bridge address (k3s cni0, 10.42.x) that they cannot reach. The node's LAN IP avoids both."
 }
 
 // URLHost is host as it goes in a URL authority: an IPv6 literal in
