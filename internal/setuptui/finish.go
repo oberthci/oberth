@@ -622,7 +622,7 @@ func finishLines(w *wizard, v *verifyResult) []string {
 	add("", "Verify the server out of band on every workstation:",
 		"   TLS 30443:  "+serverCAFingerprintCommand(st),
 		"   SSH 30022:  ssh-keyscan -p 30022 "+host,
-		"", "Dashboard https://"+host+":30443/runs · docs https://oberth.ci/docs")
+		"", "Dashboard https://"+installer.URLHost(host)+":30443/runs · docs https://oberth.ci/docs")
 	return lines
 }
 
@@ -778,7 +778,7 @@ func reportText(w *wizard) string {
 		p("  %d. %s: %s", int(i)+1, i.name(), valueOr(stepSummary(st, i), "not answered"))
 	}
 	p("  context: %s", valueOr(st.contextForCommands(), "(current)"))
-	p("  endpoints: https://%s:30443 · ssh://git@%s:30022", clientHost(st), clientHost(st))
+	p("  endpoints: https://%s:30443 · ssh://git@%s:30022", installer.URLHost(clientHost(st)), installer.URLHost(clientHost(st)))
 	p("")
 	p("Install phases (attempt %d)", w.install.attempts)
 	for _, step := range w.install.steps {

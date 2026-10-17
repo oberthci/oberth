@@ -147,7 +147,7 @@ func TestConnectAlsoUpstreamsRegistersEachWithTheSameKey(t *testing.T) {
 			t.Errorf("a further organization must reuse the upstream key: %q", argv)
 		}
 	}
-	if !strings.Contains(buf.String(), "duplicate") {
+	if !strings.Contains(buf.String(), "already there") {
 		t.Errorf("the duplicate organization is not reported:\n%s", buf.String())
 	}
 }
@@ -175,6 +175,9 @@ func TestAlsoUpstreamNameIsAValidUpstreamName(t *testing.T) {
 	name := alsoUpstreamName("ssh://git@codeberg.org/My_Org.Team", map[string]bool{"codeberg": true}, map[string]bool{})
 	if name != "codeberg-my-org-team" {
 		t.Fatalf("name = %q", name)
+	}
+	if got := alsoUpstreamName("ssh://git@sys.example/acme", map[string]bool{}, map[string]bool{}); got != "forge-sys" {
+		t.Fatalf("reserved forge label gave %q", got)
 	}
 	long := alsoUpstreamName("ssh://git@codeberg.org/"+strings.Repeat("x", 80), map[string]bool{"codeberg": true}, map[string]bool{})
 	if len(long) > 53 || strings.HasSuffix(long, "-") {

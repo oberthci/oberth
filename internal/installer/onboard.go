@@ -24,6 +24,8 @@ import (
 	"time"
 
 	"golang.org/x/crypto/ssh"
+
+	"github.com/oberthci/oberth/internal/gitcache"
 )
 
 // ErrInterrupted is returned when the user presses Ctrl+C (sends ETX / 0x03)
@@ -416,7 +418,7 @@ func connectAlsoUpstreams(ctx context.Context, cfg Config, deps Deps, tw *tableW
 	for _, baseURL := range cfg.AlsoUpstreams {
 		org := orgFromBaseURL(baseURL)
 		if orgs[org] {
-			tw.AppendRow("Upstream", hostnameFromURL(baseURL)+"/"+org, "⚠ duplicate", false)
+			tw.AppendRow("Upstream", hostnameFromURL(baseURL)+"/"+org, "already there", false)
 			continue
 		}
 		orgs[org] = true
@@ -462,10 +464,13 @@ func printAlsoUpstreamCommands(w io.Writer, cfg Config, deps Deps, existing []Ne
 func alsoUpstreamName(baseURL string, used, orgs map[string]bool) string {
 	forge, _, _ := strings.Cut(hostnameFromURL(baseURL), ".")
 	forge = upstreamNameLabel(forge)
-	if forge == "" {
-		forge = "upstream"
+	if forge == "" || gitcache.ReservedUpstreamNames[forge] {
+		forge = "forge-" + forge
+		forge = strings.TrimSuffix(forge, "-")
 	}
-	free := func(name string) bool { return name != "" && !used[name] && !orgs[name] }
+	free := func(name string) bool {
+		return name != "" && !used[name] && !orgs[name] && !gitcache.ReservedUpstreamNames[name]
+	}
 	if free(forge) {
 		return forge
 	}
