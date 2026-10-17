@@ -447,20 +447,32 @@ func writeJSON(writer http.ResponseWriter, status int, value any) {
 func (server *Server) servePage(writer http.ResponseWriter, view string) {
 	writer.Header().Set("Content-Type", "text/html; charset=utf-8")
 	writer.Header().Set("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; font-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'")
-	_, _ = io.WriteString(writer, `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Oberth Dashboard</title><link rel="stylesheet" href="/assets/app.css"></head><body data-version="`+html.EscapeString(server.version)+`"><div class="app"><header class="top"><button class="brand" data-route="/runs"><span class="mark">[▲]</span><span>oberth</span><span id="brandSub" class="sub">/ dashboard</span></button><nav class="tabs"><button id="tabRuns" class="tab" data-route="/runs">runs</button><button id="tabRepos" class="tab" data-route="/repos">repos</button><button id="tabIssues" class="tab" data-route="/issues">issues</button><button id="tabStatus" class="tab" data-route="/status">status</button></nav><div class="top-right"><div class="top-status" aria-label="System status"><span class="status-segment backend" title="loading" aria-label="loading"><span id="connLed" class="led" aria-hidden="true"></span><span id="connText">api</span></span><span class="status-divider" aria-hidden="true"></span><span id="versionStatus" class="status-segment version-mode unknown" role="status" aria-live="polite"><span>oberth</span> <span id="verLabel" class="ver">...</span></span></div><button class="iconbtn" data-action="toggle-theme" title="Theme">T</button><button class="iconbtn" data-action="refresh" title="Refresh">R</button><button class="iconbtn" data-action="clear-token" title="Sign out">L</button></div></header><main id="app" class="main" data-view="`+view+`"><noscript><p>The Oberth dashboard requires JavaScript. The JSON views remain available at /api/runs, /api/repos, /api/issues, /api/grants, and /api/status with a bearer token.</p></noscript></main></div><dialog id="issueDialog" class="dlg" aria-labelledby="issueDialogTitle"><div class="dlg-shell"><header class="dlg-head"><h2 id="issueDialogTitle">Issue</h2><span id="issueDialogMeta" class="meta"></span><button class="dlg-close" data-action="close-issue" aria-label="Close issue details">×</button></header><div id="issueDialogContent" class="dlg-body"></div></div></dialog><script src="/assets/app.js" defer></script></body></html>`)
+	_, _ = io.WriteString(writer, `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Oberth Dashboard</title><link rel="stylesheet" href="`+versionedAssetURL("app.css")+`"></head><body data-version="`+html.EscapeString(server.version)+`"><div class="app"><header class="top"><button class="brand" data-route="/runs"><span class="mark">[▲]</span><span>oberth</span><span id="brandSub" class="sub">/ dashboard</span></button><nav class="tabs"><button id="tabRuns" class="tab" data-route="/runs">runs</button><button id="tabRepos" class="tab" data-route="/repos">repos</button><button id="tabIssues" class="tab" data-route="/issues">issues</button><button id="tabStatus" class="tab" data-route="/status">status</button></nav><div class="top-right"><div class="top-status" aria-label="System status"><span class="status-segment backend" title="loading" aria-label="loading"><span id="connLed" class="led" aria-hidden="true"></span><span id="connText">api</span></span><span class="status-divider" aria-hidden="true"></span><span id="versionStatus" class="status-segment version-mode unknown" role="status" aria-live="polite"><span>oberth</span> <span id="verLabel" class="ver">...</span></span></div><button class="iconbtn" data-action="toggle-theme" title="Theme">T</button><button class="iconbtn" data-action="refresh" title="Refresh">R</button><button class="iconbtn" data-action="clear-token" title="Sign out">L</button></div></header><main id="app" class="main" data-view="`+view+`"><noscript><p>The Oberth dashboard requires JavaScript. The JSON views remain available at /api/runs, /api/repos, /api/issues, /api/grants, and /api/status with a bearer token.</p></noscript></main></div><dialog id="issueDialog" class="dlg" aria-labelledby="issueDialogTitle"><div class="dlg-shell"><header class="dlg-head"><h2 id="issueDialogTitle">Issue</h2><span id="issueDialogMeta" class="meta"></span><button class="dlg-close" data-action="close-issue" aria-label="Close issue details">×</button></header><div id="issueDialogContent" class="dlg-body"></div></div></dialog><script src="`+versionedAssetURL("app.js")+`" defer></script></body></html>`)
 }
 
 // serveAsset serves the embedded dashboard assets with explicit content types
 // so nosniff never blocks them. The request name is only a key into the fixed
 // startup-materialized asset map: unknown names are 404s and no request value
-// ever reaches a filesystem read.
+// ever reaches a filesystem read. A URL carrying the asset's current version
+// is immutable; any other URL (unversioned, such as the fonts app.css names,
+// or an old version) must be revalidated, which the ETag keeps cheap (#054).
 func serveAsset(writer http.ResponseWriter, request *http.Request) {
 	asset, ok := staticAssets[request.PathValue("asset")]
 	if !ok {
 		http.NotFound(writer, request)
 		return
 	}
+	etag := `"` + asset.version + `"`
 	writer.Header().Set("Content-Type", asset.contentType)
-	writer.Header().Set("Cache-Control", "public, max-age=3600")
+	writer.Header().Set("ETag", etag)
+	if request.URL.Query().Get("v") == asset.version {
+		writer.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+	} else {
+		writer.Header().Set("Cache-Control", "no-cache")
+	}
+	if request.Header.Get("If-None-Match") == etag {
+		writer.WriteHeader(http.StatusNotModified)
+		return
+	}
 	_, _ = writer.Write(asset.body)
 }

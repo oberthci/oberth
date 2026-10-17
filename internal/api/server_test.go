@@ -366,6 +366,46 @@ func TestDashboardShellCoversRunDetailDeepLinks(t *testing.T) {
 	}
 }
 
+// The shell links app.css and app.js by content version, so a release is a
+// new URL that no browser or CDN cache can answer with the old script; any
+// other asset URL must be revalidated (#054).
+func TestDashboardAssetsAreVersionedForCaches(t *testing.T) {
+	t.Parallel()
+	server, _ := testServer(t)
+	page := httptest.NewRecorder()
+	server.Handler().ServeHTTP(page, httptest.NewRequest(http.MethodGet, "/runs", nil))
+	for _, name := range []string{"app.css", "app.js"} {
+		version := staticAssets[name].version
+		if len(version) != 16 || !strings.Contains(page.Body.String(), "/assets/"+name+"?v="+version) {
+			t.Fatalf("shell does not link %s by its content version %q", name, version)
+		}
+	}
+	if staticAssets["app.css"].version == staticAssets["app.js"].version {
+		t.Fatal("asset versions are not content-derived")
+	}
+	version := staticAssets["app.js"].version
+	for _, tc := range []struct{ path, cache string }{
+		{"/assets/app.js?v=" + version, "public, max-age=31536000, immutable"},
+		{"/assets/app.js", "no-cache"},
+		{"/assets/app.js?v=0000000000000000", "no-cache"},
+		{"/assets/fonts/IBMPlexMono-Regular.woff2", "no-cache"},
+	} {
+		response := httptest.NewRecorder()
+		server.Handler().ServeHTTP(response, httptest.NewRequest(http.MethodGet, tc.path, nil))
+		if response.Code != http.StatusOK || response.Header().Get("Cache-Control") != tc.cache || response.Header().Get("ETag") == "" {
+			t.Fatalf("%s: status %d, Cache-Control %q, ETag %q; want %q", tc.path, response.Code,
+				response.Header().Get("Cache-Control"), response.Header().Get("ETag"), tc.cache)
+		}
+	}
+	revalidate := httptest.NewRequest(http.MethodGet, "/assets/app.js", nil)
+	revalidate.Header.Set("If-None-Match", `"`+version+`"`)
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, revalidate)
+	if response.Code != http.StatusNotModified || response.Body.Len() != 0 {
+		t.Fatalf("current ETag revalidation = %d with %d bytes, want 304 and no body", response.Code, response.Body.Len())
+	}
+}
+
 func TestDashboardAssetsServeWithExplicitTypes(t *testing.T) {
 	t.Parallel()
 	server, _ := testServer(t)

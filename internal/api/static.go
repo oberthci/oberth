@@ -1,7 +1,9 @@
 package api
 
 import (
+	"crypto/sha256"
 	"embed"
+	"encoding/hex"
 	"io/fs"
 	"strings"
 )
@@ -18,6 +20,15 @@ var staticFiles embed.FS
 type staticAsset struct {
 	contentType string
 	body        []byte
+	// version is a short content hash. The page links app.css and app.js
+	// with ?v=<version>, so a release changes the URL and no cache (browser
+	// or CDN) can serve the previous release's script (#054).
+	version string
+}
+
+// versionedAssetURL is the cache-busting URL the page links an asset by.
+func versionedAssetURL(name string) string {
+	return "/assets/" + name + "?v=" + staticAssets[name].version
 }
 
 // staticAssets is materialized once at startup from the embedded read-only
@@ -46,7 +57,8 @@ func loadStaticAssets() map[string]staticAsset {
 		if readErr != nil {
 			return readErr
 		}
-		assets[strings.TrimPrefix(name, "static/")] = staticAsset{contentType: kind, body: body}
+		sum := sha256.Sum256(body)
+		assets[strings.TrimPrefix(name, "static/")] = staticAsset{contentType: kind, body: body, version: hex.EncodeToString(sum[:8])}
 		return nil
 	})
 	return assets
