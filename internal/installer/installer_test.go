@@ -3913,7 +3913,7 @@ func TestFinishInstallInteractiveOnboarding(t *testing.T) {
 		"Key registration",
 		"accepted",
 		"Uplink key",
-		keyPath,
+		filepath.Base(keyPath), // long paths wrap inside the Detail column (#059)
 		"Uplink",
 		"tester@box",
 		"registered",

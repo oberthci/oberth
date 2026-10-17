@@ -266,6 +266,7 @@ func runOnboarding(ctx context.Context, cfg Config, deps Deps, tw *tableWriter, 
 			}
 			if attempt >= 2 {
 				tw.AppendRow("Key registration", forgeHost, "✗ failed", false)
+				tw.WriteFooter()
 				_, _ = fmt.Fprintln(w, "Upstream key not accepted after 3 attempts. Finish the setup manually:")
 				if lastAttemptErr != nil {
 					_, _ = fmt.Fprintf(w, "Last verification error: %s\n", terseInstallError(lastAttemptErr))
@@ -279,6 +280,7 @@ func runOnboarding(ctx context.Context, cfg Config, deps Deps, tw *tableWriter, 
 	// --- Uplink ---
 	pubKeyPath, identity, token, uplinkOutput, uplinkErr := onboardUplink(ctx, cfg, deps, tw)
 	if uplinkErr != nil {
+		tw.WriteFooter()
 		ns := cfg.Namespace
 		if ns == "" {
 			ns = DefaultNamespace
@@ -318,6 +320,7 @@ func runOnboarding(ctx context.Context, cfg Config, deps Deps, tw *tableWriter, 
 
 	// Release credentials after the table is fully closed — through the
 	// structured sink when one is wired (TUI), else the boxed flush.
+	tw.WriteFooter()
 	emitCredentials(creds, deps, w, color)
 
 	// When the deploy key is pending (non-interactive: the forge has not
@@ -443,7 +446,7 @@ func promptDeployKey(ctx context.Context, cfg Config, deps Deps, tw *tableWriter
 		if err := applyProvidedDeployKey(ctx, cfg, deps, key); err != nil {
 			return false, err
 		}
-		tw.AppendRow("Upstream identity", path, "stored in OpenBao", false)
+		tw.AppendRow("Upstream identity", displayPath(path), "✓ in OpenBao", false)
 		return true, nil
 	}
 	// Non-interactive setup generates only when that option was selected.
@@ -885,7 +888,7 @@ func onboardUplink(ctx context.Context, cfg Config, deps Deps, tw *tableWriter) 
 	}
 	// Erase the key-path prompt (no-op when non-interactive / no color).
 	erasePromptLines(w, color, 1)
-	tw.AppendRow("Uplink key", pubKeyPath, "✓ read", false)
+	tw.AppendRow("Uplink key", displayPath(pubKeyPath), "✓ read", false)
 
 	// --- Identity ---
 	if cfg.UplinkIdentity != "" {

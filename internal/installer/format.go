@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"unicode/utf8"
 )
 
 const (
@@ -185,10 +186,10 @@ func componentTable(w io.Writer, rows []tableRow, color bool) {
 
 	// Expand to fit content.
 	for _, row := range rows {
-		if w := len(row.Name) + 2; w > cW {
+		if w := textWidth(row.Name) + 2; w > cW {
 			cW = w
 		}
-		if w := len(row.Detail) + 2; w > dW {
+		if w := textWidth(row.Detail) + 2; w > dW {
 			dW = w
 		}
 		if w := plainStatusLen(row.Status) + 2; w > sW {
@@ -224,12 +225,12 @@ func componentTable(w io.Writer, rows []tableRow, color bool) {
 		name := row.Name
 		nameDisplay := name
 
-		namePad := cW - 2 - len(name)
+		namePad := cW - 2 - textWidth(name)
 		if namePad < 0 {
 			namePad = 0
 		}
 
-		detailPad := dW - 2 - len(row.Detail)
+		detailPad := dW - 2 - textWidth(row.Detail)
 		if detailPad < 0 {
 			detailPad = 0
 		}
@@ -286,12 +287,71 @@ func formatStatusText(status string, color bool) string {
 // plainStatusLen returns the display-column count of a status string,
 // accounting for multi-byte Unicode symbols that are each 1 display column.
 func plainStatusLen(status string) int {
-	n := 0
-	for _, r := range status {
-		n++
-		_ = r
+	return textWidth(status)
+}
+
+// textWidth is the display-column count of table text. Every character the
+// installer puts in a table (letters, ·, →, ✓, ⚠, ✗) is one column wide, so
+// counting runes is exact where len() counted "·" as two columns (#059).
+func textWidth(s string) int {
+	return utf8.RuneCountInString(s)
+}
+
+// wrapCell splits text into lines of at most width columns at spaces, and
+// splits a path (a word starting with /, ~ or .) after a "/" (#059). Any
+// other word wider than the column — a fingerprint, a key, a token — must stay
+// whole to be compared or copied, so text holding one is returned unwrapped
+// and overflows its column as before. Text that fits is one line.
+func wrapCell(text string, width int) []string {
+	if width < 1 || textWidth(text) <= width {
+		return []string{text}
 	}
-	return n
+	var pieces []string
+	for _, word := range strings.Fields(text) {
+		if textWidth(word) <= width {
+			pieces = append(pieces, word)
+			continue
+		}
+		if !strings.ContainsAny(word[:1], "/~.") {
+			return []string{text}
+		}
+		pieces = append(pieces, splitPath(word, width)...)
+	}
+	var lines []string
+	line := ""
+	for _, piece := range pieces {
+		switch {
+		case line == "":
+			line = piece
+		case textWidth(line)+1+textWidth(piece) <= width:
+			line += " " + piece
+		case strings.HasSuffix(line, "/") && textWidth(line)+textWidth(piece) <= width:
+			line += piece
+		default:
+			lines = append(lines, line)
+			line = piece
+		}
+	}
+	return append(lines, line)
+}
+
+// splitPath cuts a path after "/" separators into pieces no wider than width,
+// cutting inside a segment only when the segment alone is wider.
+func splitPath(path string, width int) []string {
+	var pieces []string
+	runes := []rune(path)
+	for len(runes) > width {
+		cut := width
+		for i := width; i > 0; i-- {
+			if runes[i-1] == '/' {
+				cut = i
+				break
+			}
+		}
+		pieces = append(pieces, string(runes[:cut]))
+		runes = runes[cut:]
+	}
+	return append(pieces, string(runes))
 }
 
 func colorizeStatus(s string) string {
@@ -442,10 +502,10 @@ func newTableWriter(w io.Writer, color bool) *tableWriter {
 // for every row whose content is known before WriteHeader so the header
 // and all subsequent rows share consistent column widths.
 func (tw *tableWriter) RegisterContent(component, detail, status string) {
-	if w := len(component) + 2; w > tw.cW {
+	if w := textWidth(component) + 2; w > tw.cW {
 		tw.cW = w
 	}
-	if w := len(detail) + 2; w > tw.dW {
+	if w := textWidth(detail) + 2; w > tw.dW {
 		tw.dW = w
 	}
 	if w := plainStatusLen(status) + 2; w > tw.sW {
@@ -489,7 +549,7 @@ func (tw *tableWriter) WriteSensitiveRow(component, detail, status string) {
 func (tw *tableWriter) WriteSpanRow(content string) {
 	// Inner width = cW + 1(│) + dW + 1(│) + sW = total between outer │s.
 	innerWidth := tw.cW + 1 + tw.dW + 1 + tw.sW
-	pad := innerWidth - 2 - len(content) // leading and trailing space
+	pad := innerWidth - 2 - textWidth(content) // leading and trailing space
 	if pad < 0 {
 		pad = 0
 	}
@@ -503,7 +563,7 @@ func (tw *tableWriter) WriteSpanRow(content string) {
 // newline. The caller reads user input, then calls CompleteRow to overwrite
 // the partial line with the final completed row.
 func (tw *tableWriter) StartPromptRow(component, promptText string) {
-	namePad := tw.cW - 2 - len(component)
+	namePad := tw.cW - 2 - textWidth(component)
 	if namePad < 0 {
 		namePad = 0
 	}
@@ -537,6 +597,15 @@ func (tw *tableWriter) WriteFooter() {
 	tw.writeBottomBorder()
 }
 
+// writeTopBorder writes the ┌───┬───┬───┐ line that reopens a table whose
+// bottom border was already printed.
+func (tw *tableWriter) writeTopBorder() {
+	hC := strings.Repeat("─", tw.cW)
+	hD := strings.Repeat("─", tw.dW)
+	hS := strings.Repeat("─", tw.sW)
+	_, _ = fmt.Fprintf(tw.w, "%s┌%s┬%s┬%s┐%s\n", tw.dim, hC, hD, hS, tw.reset)
+}
+
 // writeBottomBorder unconditionally writes the └───┴───┴───┘ line.
 func (tw *tableWriter) writeBottomBorder() {
 	hC := strings.Repeat("─", tw.cW)
@@ -557,8 +626,9 @@ func (tw *tableWriter) eraseLineAbove() {
 // AppendRow adds a row to a table that already has its bottom border drawn.
 // When color is on, the bottom border is erased, the new data row is written,
 // and the border is redrawn — the table appears to grow in place. When color
-// is off (pipes/CI), the row is simply printed with no cursor tricks; a final
-// WriteFooter at the end is needed.
+// is off (pipes/CI, the setup log), the printed border cannot be taken back:
+// the rows open a new bordered section under it, and the next WriteFooter
+// closes that section (#059).
 func (tw *tableWriter) AppendRow(component, detail, status string, sensitive bool) {
 	if tw.color {
 		tw.eraseLineAbove()
@@ -568,7 +638,17 @@ func (tw *tableWriter) AppendRow(component, detail, status string, sensitive boo
 		tw.writeBottomBorder()
 		tw.closed = true
 	} else {
+		tw.reopen()
 		tw.writeDataRow(component, detail, status, sensitive)
+	}
+}
+
+// reopen starts a new bordered section under an already closed table when
+// color is off.
+func (tw *tableWriter) reopen() {
+	if tw.closed {
+		tw.writeTopBorder()
+		tw.closed = false
 	}
 }
 
@@ -583,17 +663,42 @@ func (tw *tableWriter) AppendSpanRow(content string) {
 		tw.writeBottomBorder()
 		tw.closed = true
 	} else {
+		tw.reopen()
 		tw.WriteSpanRow(content)
 	}
 }
 
 // writeDataRow is the shared implementation for WriteRow and WriteSensitiveRow.
+// A component or detail wider than its column wraps onto continuation lines
+// inside the column, so the borders stay aligned however long a path is
+// (#059). Sensitive rows are never wrapped: a value split across lines is
+// one an operator copies wrong.
 func (tw *tableWriter) writeDataRow(component, detail, status string, sensitive bool) {
-	namePad := tw.cW - 2 - len(component)
+	components, details := []string{component}, []string{detail}
+	if !sensitive {
+		components, details = wrapCell(component, tw.cW-2), wrapCell(detail, tw.dW-2)
+	}
+	for i := 0; i < max(len(components), len(details)); i++ {
+		c, d, st := "", "", ""
+		if i < len(components) {
+			c = components[i]
+		}
+		if i < len(details) {
+			d = details[i]
+		}
+		if i == 0 {
+			st = status
+		}
+		tw.writeDataLine(c, d, st, sensitive)
+	}
+}
+
+func (tw *tableWriter) writeDataLine(component, detail, status string, sensitive bool) {
+	namePad := tw.cW - 2 - textWidth(component)
 	if namePad < 0 {
 		namePad = 0
 	}
-	detailPad := tw.dW - 2 - len(detail)
+	detailPad := tw.dW - 2 - textWidth(detail)
 	if detailPad < 0 {
 		detailPad = 0
 	}

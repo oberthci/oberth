@@ -1017,3 +1017,61 @@ func TestEmitCredentialsWithoutSinkFlushesBox(t *testing.T) {
 		t.Fatal("without a sink the boxed flush must still print the credential")
 	}
 }
+
+// TestTableWriterKeepsBordersAligned pins #059: rows with multi-byte text,
+// long paths and rows appended after the footer (the setup log, pipes) keep
+// every border line the same width, and the appended section is closed.
+func TestTableWriterKeepsBordersAligned(t *testing.T) {
+	t.Parallel()
+	var buf bytes.Buffer
+	tw := newTableWriter(&buf, false)
+	tw.WriteHeader()
+	tw.WriteRow("server CA · leaf role", "secret store", "✓ ready")
+	tw.WriteFooter()
+	tw.AppendRow("Upstream identity", "/home/someone/.ssh/a-rather-long-directory/id_ed25519_for_the_forge", "✓ in OpenBao", false)
+	fingerprint := "reused SHA256:ym/tfKLRstMDEfhbuzTN4YcOsFkzSAPJoMXVHCZFm/U"
+	tw.AppendRow("Deploy key", fingerprint, "✓ in OpenBao", false)
+	tw.WriteFooter()
+
+	out := buf.String()
+	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
+	width := textWidth(lines[0])
+	for _, line := range lines {
+		if strings.Contains(line, "SHA256:") {
+			continue // a fingerprint is never split, so its row may overflow
+		}
+		if got := textWidth(line); got != width {
+			t.Errorf("line %q is %d columns, want %d:\n%s", line, got, width, out)
+		}
+	}
+	if !strings.Contains(out, fingerprint) {
+		t.Errorf("fingerprint was split:\n%s", out)
+	}
+	if strings.Count(out, "┌") != 2 || strings.Count(out, "└") != 2 {
+		t.Errorf("appended rows must open and close their own section:\n%s", out)
+	}
+	if !strings.HasSuffix(strings.TrimRight(out, "\n"), "┘") {
+		t.Errorf("table does not end with a bottom border:\n%s", out)
+	}
+	if !strings.Contains(out, "id_ed25519_for_the_forge") {
+		t.Errorf("wrapped path lost its last segment:\n%s", out)
+	}
+}
+
+func TestWrapCell(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		text  string
+		width int
+		want  []string
+	}{
+		{"short", 10, []string{"short"}},
+		{"two words here", 9, []string{"two words", "here"}},
+		{"~/a/b/c/d/e", 6, []string{"~/a/b/", "c/d/e"}},
+		{"key SHA256:abcdefghijklmnop", 10, []string{"key SHA256:abcdefghijklmnop"}},
+	} {
+		if got := wrapCell(tc.text, tc.width); strings.Join(got, "|") != strings.Join(tc.want, "|") {
+			t.Errorf("wrapCell(%q, %d) = %q, want %q", tc.text, tc.width, got, tc.want)
+		}
+	}
+}
