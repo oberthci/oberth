@@ -149,7 +149,12 @@ func TestMCPWaitObservationWriteFailuresAndPanic(t *testing.T) {
 				}, nil
 			}}
 			server := streamTestServer(t, backend)
-			server.mcpHeartbeatInterval = time.Millisecond
+			// Only the heartbeat case may see a heartbeat: in the others a fast
+			// ticker can race the immediate result and fail its write first.
+			server.mcpHeartbeatInterval = time.Hour
+			if tc.block {
+				server.mcpHeartbeatInterval = time.Millisecond
+			}
 			events := &waitEvents{}
 			server.mcpWaitLog = events.record
 			writer := &streamFailureWriter{ResponseRecorder: httptest.NewRecorder(), failAt: tc.failAt}
