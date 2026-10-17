@@ -104,9 +104,9 @@ func waitAndAnnounceReady(ctx context.Context, cfg Config, deps Deps) error {
 	}
 	color := isColor(deps)
 	if color {
-		_, _ = fmt.Fprintf(deps.Output, "\n\033[1;32mReady\033[0m — %s\n", oberthWebUIURL)
+		_, _ = fmt.Fprintf(deps.Output, "\n\033[1;32mReady\033[0m — %s\n", readyURL(deps))
 	} else {
-		_, _ = fmt.Fprintf(deps.Output, "\nReady — %s\n", oberthWebUIURL)
+		_, _ = fmt.Fprintf(deps.Output, "\nReady — %s\n", readyURL(deps))
 	}
 	return nil
 }
@@ -277,6 +277,10 @@ func runOnboarding(ctx context.Context, cfg Config, deps Deps, tw *tableWriter, 
 		}
 	}
 
+	// --- More organizations, same upstream key (#060) ---
+	upstreams := append([]NextStepsUpstream{{Name: name, BaseURL: baseURL, Connected: registered}},
+		connectAlsoUpstreams(ctx, cfg, deps, tw, name, baseURL)...)
+
 	// --- Uplink ---
 	pubKeyPath, identity, token, uplinkOutput, uplinkErr := onboardUplink(ctx, cfg, deps, tw)
 	if uplinkErr != nil {
@@ -350,8 +354,57 @@ func runOnboarding(ctx context.Context, cfg Config, deps Deps, tw *tableWriter, 
 	if deps.StepProgressSink != nil {
 		deps.StepProgressSink("audit genesis", "done")
 	}
-	printReadyWithNextSteps(w, name, baseURL, sshConfigured, color)
+	printReadyWithNextSteps(w, cfg, deps, upstreams, sshConfigured, color)
 	return nil
+}
+
+// connectAlsoUpstreams registers every --also-upstream organization with the
+// key the first upstream uses (#060). A forge that does not accept the key yet
+// is reported pending, not fatal: the first upstream already works, and the
+// next steps name the command that finishes it.
+func connectAlsoUpstreams(ctx context.Context, cfg Config, deps Deps, tw *tableWriter, firstName, firstURL string) []NextStepsUpstream {
+	used := map[string]bool{firstName: true}
+	orgs := map[string]bool{orgFromBaseURL(firstURL): true}
+	var connected []NextStepsUpstream
+	for _, baseURL := range cfg.AlsoUpstreams {
+		org := orgFromBaseURL(baseURL)
+		if orgs[org] {
+			tw.AppendRow("Upstream", hostnameFromURL(baseURL)+"/"+org, "⚠ duplicate", false)
+			continue
+		}
+		orgs[org] = true
+		name := alsoUpstreamName(baseURL, used, orgs)
+		used[name] = true
+		ok, _, err := registerUpstreamQuiet(ctx, cfg, deps, name, baseURL)
+		status := "✓ connected"
+		switch {
+		case err != nil:
+			status = "⚠ " + terseInstallError(err)
+		case !ok:
+			status = "pending"
+		}
+		tw.AppendRow("Upstream", name+" · "+hostnameFromURL(baseURL)+"/"+org, status, false)
+		connected = append(connected, NextStepsUpstream{Name: name, BaseURL: baseURL, Connected: ok && err == nil})
+	}
+	return connected
+}
+
+// alsoUpstreamName names a further upstream after its forge (codeberg,
+// github), or forge-org when that name is taken, never an organization name:
+// the store refuses a name that equals any upstream's organization, because
+// two-segment paths would become ambiguous.
+func alsoUpstreamName(baseURL string, used, orgs map[string]bool) string {
+	forge, _, _ := strings.Cut(hostnameFromURL(baseURL), ".")
+	for _, candidate := range []string{forge, forge + "-" + orgFromBaseURL(baseURL)} {
+		if !used[candidate] && !orgs[candidate] {
+			return candidate
+		}
+	}
+	for i := 2; ; i++ {
+		if candidate := fmt.Sprintf("%s-%d", forge, i); !used[candidate] && !orgs[candidate] {
+			return candidate
+		}
+	}
 }
 
 // promptUpstream asks for the upstream forge URL. An empty answer skips
@@ -1462,6 +1515,9 @@ func sshHostFromServer(deps Deps) string {
 	if deps.KindClusterName != "" {
 		return "localhost"
 	}
+	if deps.ClientHost != "" {
+		return deps.ClientHost
+	}
 	if deps.RestConfig == nil || deps.RestConfig.Host == "" {
 		return "localhost"
 	}
@@ -1618,36 +1674,6 @@ func sshHostBlockExists() bool {
 		return false
 	}
 	return hasSSHHostBlock(data, "oberth")
-}
-
-// printReadyWithNextSteps prints the Ready banner followed by a table of
-// next-step commands using the operator's configured SSH alias.
-func printReadyWithNextSteps(w io.Writer, upstream, baseURL string, sshConfigured, color bool) {
-	if color {
-		_, _ = fmt.Fprintf(w, "\n\033[1;32mReady\033[0m — %s\n", oberthWebUIURL)
-	} else {
-		_, _ = fmt.Fprintf(w, "\nReady — %s\n", oberthWebUIURL)
-	}
-
-	org := orgFromBaseURL(baseURL)
-	repoRef := upstream + "/<org>/<repo>"
-	if org != "" {
-		repoRef = upstream + "/" + org + "/<repo>"
-	}
-
-	var cloneCmd string
-	if sshConfigured {
-		cloneCmd = fmt.Sprintf("git clone git@oberth:%s.git", repoRef)
-	} else {
-		cloneCmd = fmt.Sprintf("git clone ssh://git@localhost:%s/%s.git", sshNodePort, repoRef)
-	}
-
-	_, _ = fmt.Fprintf(w, "\n  %-46s %s\n", "Command", "Description")
-	_, _ = fmt.Fprintf(w, "  %-46s %s\n", "──────────────────────────────────────────────", "───────────────────────────────")
-	_, _ = fmt.Fprintf(w, "  %-46s %s\n", cloneCmd, "Clone any repo through Oberth")
-	_, _ = fmt.Fprintf(w, "  %-46s %s\n", "cd <repo> && oberth init", "Generate a pipeline")
-	_, _ = fmt.Fprintf(w, "  %-46s %s\n", "git push -u origin my-branch", "Push triggers CI")
-	_, _ = fmt.Fprintln(w)
 }
 
 // orgFromBaseURL extracts the organization (last path segment) from an

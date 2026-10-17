@@ -174,6 +174,7 @@ func runClientAccessOffer(ctx context.Context, cfg Config, deps Deps, tw *tableW
 	}
 
 	tw.WriteFooter()
+	tw.WriteFooter()
 	printClientAccessNotes(w, root, choice, tokenHint, freshToken)
 	return nil
 }

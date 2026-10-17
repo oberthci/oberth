@@ -258,6 +258,16 @@ type Config struct {
 	// screen and runs the installer without a terminal, where the offer could
 	// otherwise only be skipped. Empty keeps the interactive prompt.
 	ClientAccess string
+	// ClientHost is the address clients use to reach this server
+	// (--client-host): a DNS name or IP. The client files, the SSH config,
+	// the push banner and every printed URL name it, and the server
+	// certificate always covers it. Empty keeps the default: the Kubernetes
+	// API host, or localhost when that is a loopback address (#061).
+	ClientHost string
+	// AlsoUpstreams are further organizations onboarding connects with the
+	// same upstream key (--also-upstream, host/organization or an ssh:// URL),
+	// after the first one (#060).
+	AlsoUpstreams []string
 }
 
 // wantsSecretStore reports whether either secret-store mode was requested.
@@ -390,9 +400,12 @@ type Deps struct {
 	// LookPath resolves a host binary, so a step that adapts to what is
 	// installed can be tested without depending on the test machine's PATH.
 	// Nil selects exec.LookPath.
-	LookPath        func(string) (string, error)
-	KubeClient      kubernetes.Interface
-	RestConfig      *rest.Config
+	LookPath   func(string) (string, error)
+	KubeClient kubernetes.Interface
+	RestConfig *rest.Config
+	// ClientHost is Config.ClientHost, copied by Run so every step that
+	// advertises an address (client files, SSH config, next steps) uses it.
+	ClientHost      string
 	ContextName     string
 	KindClusterName string
 	// PollInterval overrides the retry cadence of in-cluster status polls
@@ -518,6 +531,23 @@ type RekorResult struct {
 func (cfg *Config) Validate() error {
 	if err := ValidClientAccess(cfg.ClientAccess); err != nil {
 		return fmt.Errorf("--client-access: %w", err)
+	}
+	if cfg.ClientHost != "" {
+		host, err := NormalizeClientHost(cfg.ClientHost)
+		if err != nil {
+			return fmt.Errorf("--client-host: %w", err)
+		}
+		if cfg.CreateKind && !isLoopbackHost(host) {
+			return fmt.Errorf("--client-host %s: a kind cluster publishes ports 30022 and 30443 on 127.0.0.1 only, so other machines cannot reach it; use localhost, or install on a k3s or other cluster whose NodePorts listen on the node's addresses", host)
+		}
+		cfg.ClientHost = host
+	}
+	for i, raw := range cfg.AlsoUpstreams {
+		_, baseURL, err := upstreamFromInput(strings.TrimSpace(raw))
+		if err != nil {
+			return fmt.Errorf("--also-upstream: %w", err)
+		}
+		cfg.AlsoUpstreams[i] = baseURL
 	}
 	if cfg.ForgeURL == "" && (cfg.ForgeType != "" || cfg.ForgeOrg != "") {
 		hosts := map[string]string{"github": "github.com", "codeberg": "codeberg.org", "gitlab": "gitlab.com"}
@@ -662,6 +692,11 @@ func Run(ctx context.Context, cfg Config, deps Deps) error {
 	}
 	// Cluster info line omitted — the kind/k3s creation messages already
 	// communicate the cluster identity; repeating it adds noise.
+	deps.ClientHost = cfg.ClientHost
+	if deps.ClientHost != "" && cluster.Engine == "kind" && !isLoopbackHost(deps.ClientHost) {
+		_, _ = fmt.Fprintf(deps.Output, "NOTE: kind publishes Oberth on 127.0.0.1 only; clients are told to use localhost, not %s.\n", deps.ClientHost)
+		deps.ClientHost = "localhost"
+	}
 
 	if !cluster.IsLocal && !cfg.Yes {
 		return fmt.Errorf("context %q does not appear to be a local cluster (server: %s); "+
@@ -1633,7 +1668,11 @@ func OberthHelmArgs(cfg Config, openbao OpenBaoResult, rekor RekorResult) []stri
 	// Derive pushBannerURL from the node address already known at TLS SAN
 	// time so git-push feedback includes a clickable watch link (UX-21).
 	// Prefer IPs (they are direct), fall back to DNS names.
-	if bannerHost := pushBannerHost(cfg.TLSExtraIPs, cfg.TLSExtraDNSNames); bannerHost != "" {
+	bannerHost := cfg.ClientHost
+	if bannerHost == "" {
+		bannerHost = pushBannerHost(cfg.TLSExtraIPs, cfg.TLSExtraDNSNames)
+	}
+	if bannerHost != "" {
 		args = append(args, "--set-string", "pushBannerURL=https://"+bannerHost+":"+httpsNodePort+"/runs")
 	}
 	args = append(args, argoOberthHelmValues(cfg, openbao)...)

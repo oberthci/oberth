@@ -672,7 +672,7 @@ func TestRotateCertificatePreservesKeyAndAddsNames(t *testing.T) {
 func TestReadyCloneInstructionsIncludeQualifiedPath(t *testing.T) {
 	for _, alias := range []bool{false, true} {
 		var out strings.Builder
-		printReadyWithNextSteps(&out, "github", "ssh://git@github.com/oberthci", alias, false)
+		printReadyWithNextSteps(&out, Config{}, Deps{}, []NextStepsUpstream{{Name: "github", BaseURL: "ssh://git@github.com/oberthci", Connected: true}}, alias, false)
 		if !strings.Contains(out.String(), "github/oberthci/<repo>.git") {
 			t.Fatal(out.String())
 		}

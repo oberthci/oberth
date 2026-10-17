@@ -26,6 +26,13 @@ func runInstall(ctx context.Context, arguments []string, input io.Reader, output
 	flags.StringVar(&cfg.UpstreamPrivateKeyPath, "upstream-key-file", "", "existing work SSH private key to import into OpenBao")
 	flags.StringVar(&cfg.ClientAccess, "client-access", "",
 		"write this machine's client files without asking: both, cli, mcp, or none")
+	flags.StringVar(&cfg.ClientHost, "client-host", "",
+		"address clients use to reach this server, a DNS name or IP (default: the Kubernetes API host, or localhost); "+
+			"client files, SSH config and printed URLs use it and the certificate covers it")
+	var alsoUpstreams stringList
+	flags.Var(&alsoUpstreams, "also-upstream",
+		"another organization to connect with the same upstream key, host/organization or ssh:// URL (repeatable), "+
+			"e.g. codeberg.org/acme")
 	flags.BoolVar(&cfg.Dev, "dev", false, "install in dev/evaluation mode (default)")
 	flags.BoolVar(&cfg.Production, "production", false, "install in production mode (not implemented)")
 	flags.BoolVar(&cfg.DryRun, "dry-run", false, "print plan without making changes")
@@ -118,6 +125,7 @@ func runInstall(ctx context.Context, arguments []string, input io.Reader, output
 	cfg.CredentialedSecretPaths = credentialedSecretPaths
 	cfg.TLSExtraDNSNames = tlsExtraDNSNames
 	cfg.TLSExtraIPs = tlsExtraIPs
+	cfg.AlsoUpstreams = alsoUpstreams
 	cfg.ValuesFiles = valuesFiles
 
 	return installer.Execute(ctx, cfg, installer.InstallDeps{

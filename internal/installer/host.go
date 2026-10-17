@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 
@@ -337,6 +338,38 @@ func certificateNamesForClientHost(host string, dnsNames, ips []string) ([]strin
 	default:
 		return appendMissing(dnsNames, host), ips
 	}
+}
+
+// clientHostNameRegexp is a DNS name a client can connect to and a
+// certificate can carry.
+var clientHostNameRegexp = regexp.MustCompile(`^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$`)
+
+// NormalizeClientHost checks an address clients are told to use (#061) and
+// returns its canonical form: a lower-case DNS name or a normalized IP. An
+// unspecified address (0.0.0.0, ::) is refused with the reason: it is where a
+// server listens, not where a client connects, and NodePorts already listen
+// on every address of the node.
+func NormalizeClientHost(raw string) (string, error) {
+	host := strings.ToLower(strings.TrimSuffix(strings.TrimSpace(raw), "."))
+	if ip := net.ParseIP(strings.Trim(host, "[]")); ip != nil {
+		if ip.IsUnspecified() {
+			return "", fmt.Errorf("%s is a listen address, not one a client can connect to; NodePorts 30022 and 30443 already listen on every address of the node, so name the node's IP or DNS name", raw)
+		}
+		return ip.String(), nil
+	}
+	if len(host) > 253 || !clientHostNameRegexp.MatchString(host) {
+		return "", fmt.Errorf("%q is neither an IP address nor a DNS name (no scheme, port or path)", raw)
+	}
+	return host, nil
+}
+
+// isLoopbackHost reports whether a client host names this machine only.
+func isLoopbackHost(host string) bool {
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 func appendMissing(values []string, want string) []string {
