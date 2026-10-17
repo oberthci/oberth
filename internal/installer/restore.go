@@ -24,6 +24,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -682,14 +683,21 @@ func swapDatabase(ctx context.Context, cfg RestoreConfig, deps backupDeps, archi
 	if out, err := inPod(nil, stageResetScript); err != nil {
 		return fmt.Errorf("clear staging directory %s: %w%s", restoreStageDir, err, commandOutputSuffix(out))
 	}
-	if out, err := inPod(archive.Database.Main, stageUploadScript, "oberth.sqlite"); err != nil {
-		return fmt.Errorf("upload database: %w%s", err, commandOutputSuffix(out))
+	upload := func(data []byte, member string) error {
+		out, err := inPod(data, stageUploadScript, member)
+		if err != nil {
+			return fmt.Errorf("upload %s: %w%s", member, err, commandOutputSuffix(out))
+		}
+		return checkUploadedSize(member, out, len(data))
+	}
+	if err := upload(archive.Database.Main, "oberth.sqlite"); err != nil {
+		return err
 	}
 	walSHA := "-"
 	if archive.Database.WAL != nil {
 		walSHA = archive.Database.WALSHA256
-		if out, err := inPod(archive.Database.WAL, stageUploadScript, "oberth.sqlite-wal"); err != nil {
-			return fmt.Errorf("upload database WAL: %w%s", err, commandOutputSuffix(out))
+		if err := upload(archive.Database.WAL, "oberth.sqlite-wal"); err != nil {
+			return err
 		}
 	}
 	out, err := inPod(nil, swapScript, target.Timestamp, archive.Database.MainSHA256, walSHA)
@@ -703,6 +711,20 @@ func swapDatabase(ctx context.Context, cfg RestoreConfig, deps backupDeps, archi
 	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
 	if got := strings.TrimSpace(lines[len(lines)-1]); got != want {
 		return fmt.Errorf("%w: restored database has owner and mode %q, want %q", errRestoredDatabaseInPlace, got, want)
+	}
+	return nil
+}
+
+// checkUploadedSize compares the size stageUploadScript reports with what
+// was sent, so a truncated upload stops before the swap (#067).
+func checkUploadedSize(member string, out []byte, want int) error {
+	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	got, err := strconv.Atoi(strings.TrimSpace(lines[len(lines)-1]))
+	if err != nil {
+		return fmt.Errorf("upload %s: the restore pod did not report the received size%s", member, commandOutputSuffix(out))
+	}
+	if got != want {
+		return fmt.Errorf("upload %s: the restore pod received %d of %d bytes; nothing was swapped, rerun oberth restore", member, got, want)
 	}
 	return nil
 }

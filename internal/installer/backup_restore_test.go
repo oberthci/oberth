@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -213,6 +214,8 @@ type fakeBackupCluster struct {
 	oldServer     bool              // server predates `oberth backup database`
 	workflows     []runWorkflow
 
+	uploadShort bool // the restore pod reports a truncated upload (#067)
+
 	argvs       [][]string
 	uploads     map[string][]byte
 	swapArgs    []string
@@ -389,7 +392,10 @@ func (c *fakeBackupCluster) run(_ context.Context, input []byte, name string, ar
 		return nil, nil
 	case container == restoreHelperContainer && command[2] == stageUploadScript:
 		c.uploads[command[4]] = append([]byte(nil), input...)
-		return nil, nil
+		if c.uploadShort {
+			return []byte(strconv.Itoa(len(input)/2) + "\n"), nil
+		}
+		return []byte(strconv.Itoa(len(input)) + "\n"), nil
 	case container == restoreHelperContainer && command[2] == swapScript:
 		c.swapArgs = command[4:]
 		return []byte("65534:65534 600\n"), nil
@@ -711,6 +717,49 @@ func TestRestoreAppliesTheArchive(t *testing.T) {
 	}
 	assertSubstringsInOrder(t, text, []string{"Restore plan", "Restoring OpenBao", "Stopping the server", "Swapping the database",
 		"oberth install --install-secretstore"})
+}
+
+// A truncated upload (kubectl exec exits 0 with part of stdin delivered) stops
+// the restore before the swap, with the previous database still in place (#067).
+func TestRestoreStopsOnATruncatedUpload(t *testing.T) {
+	t.Parallel()
+	archive, runID, _ := backupFixtureArchive(t, false)
+	target := restoreTargetCluster(t, runID)
+	target.uploadShort = true
+	var out bytes.Buffer
+	cfg := RestoreConfig{Input: archive, Yes: true, Timeout: 10 * time.Second}
+	cfg.applyDefaults()
+	err := runRestore(context.Background(), cfg, target.deps(&out))
+	if err == nil || !strings.Contains(err.Error(), "the restore pod received") {
+		t.Fatalf("restore error = %v, want a truncated-upload refusal", err)
+	}
+	if target.swapArgs != nil {
+		t.Fatalf("swap ran after a truncated upload: %v", target.swapArgs)
+	}
+}
+
+// The upload script prints the size it stored, and does not end with cat
+// (the shell would exec it and the stream could close early, #067).
+func TestStageUploadScriptReportsTheReceivedSize(t *testing.T) {
+	t.Parallel()
+	data := t.TempDir()
+	script := strings.ReplaceAll(stageUploadScript, "/data", data)
+	if lines := strings.Split(strings.TrimSpace(stageUploadScript), "\n"); strings.HasPrefix(lines[len(lines)-1], "cat ") {
+		t.Fatal("stageUploadScript ends with cat")
+	}
+	payload := bytes.Repeat([]byte("oberth"), 100000)
+	command := exec.Command("sh", "-c", script, "sh", "oberth.sqlite")
+	command.Stdin = bytes.NewReader(payload)
+	out, err := command.Output()
+	if err != nil {
+		t.Fatalf("upload script: %v", err)
+	}
+	if err := checkUploadedSize("oberth.sqlite", out, len(payload)); err != nil {
+		t.Fatal(err)
+	}
+	if err := checkUploadedSize("oberth.sqlite", out, len(payload)+1); err == nil {
+		t.Fatal("a size mismatch was accepted")
+	}
 }
 
 func TestRestoreDryRunChangesNothing(t *testing.T) {
