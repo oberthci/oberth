@@ -87,3 +87,25 @@ func TestVMIResourceAdmission(t *testing.T) {
 		})
 	}
 }
+
+func TestVMIResourceRequiresPolicyAndLocalTemplate(t *testing.T) {
+	deadline := int64(3600)
+	workflow := &wfv1.Workflow{Spec: wfv1.WorkflowSpec{
+		Entrypoint: "vm", ActiveDeadlineSeconds: &deadline,
+		Templates: []wfv1.Template{{Name: "vm", Resource: &wfv1.ResourceTemplate{
+			Action: "create", SetOwnerReference: true, Manifest: admittedVMIManifest,
+		}}},
+	}}
+	if err := Admit(workflow, Policy{}); err == nil || !strings.Contains(err.Error(), "not admitted") {
+		t.Fatalf("ungranted VMI template was not refused: %v", err)
+	}
+	policy := Policy{KubeVirt: true, ContainerDiskPrefixes: []string{"quay.io/example/"}}
+	if err := Admit(workflow, policy); err != nil {
+		t.Fatalf("granted VMI template refused: %v", err)
+	}
+	workflow.Spec.Templates[0].Name = "frag-deadbeef-vm"
+	workflow.Spec.Entrypoint = "frag-deadbeef-vm"
+	if err := Admit(workflow, policy); err == nil || !strings.Contains(err.Error(), "consuming repository") {
+		t.Fatalf("fragment VMI template was not refused: %v", err)
+	}
+}
