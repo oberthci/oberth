@@ -47,10 +47,11 @@ func (service *API) scheduling(ctx context.Context, run model.Run, steps []model
 	if service.admission != nil {
 		result.Admission = service.admission.AdmissionSnapshot(run.QueueSequence)
 		if result.Admission != nil && service.scope != nil {
-			// The position and the capacity in use count every run, in or
-			// out of a scoped actor's scope (#073).
+			// The position, the capacity and its use, and the disk floor
+			// describe every run, in or out of a scoped actor's scope; a full
+			// pool of invisible work must not show (#073).
 			admission := *result.Admission
-			admission.Position, admission.Used = 0, 0
+			admission.Position, admission.Used, admission.Capacity, admission.DiskFloor = 0, 0, 0, nil
 			result.Admission = &admission
 		}
 		if result.Admission != nil {
@@ -61,6 +62,11 @@ func (service *API) scheduling(ctx context.Context, run model.Run, steps []model
 				return result
 			case "waiting":
 				result.Message = waitingAdmissionMessage(result.Admission)
+				if service.scope != nil && result.Admission.GroupHolder == "" && result.Admission.GroupAhead == "" {
+					// The group waits name runs of the same repository; any
+					// other wait says only that capacity is short.
+					result.Message = "Waiting for capacity."
+				}
 				return result
 			case "admitted":
 				result.Message = "Resource admission granted; execution progress has not been recorded."

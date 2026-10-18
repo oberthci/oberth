@@ -37,7 +37,10 @@ func (service *API) PrepareLongPoll(ctx context.Context, actor api.Actor, name s
 		if err != nil {
 			return nil, err
 		}
-		return func(ctx context.Context) (any, error) { return prepared(ctx) }, nil
+		return func(ctx context.Context) (any, error) {
+			response, err := prepared(ctx)
+			return service.redact(response), err
+		}, nil
 	case "promote_status":
 		var arguments struct {
 			ID      string `json:"id"`
@@ -50,7 +53,10 @@ func (service *API) PrepareLongPoll(ctx context.Context, actor api.Actor, name s
 		if err != nil {
 			return nil, err
 		}
-		return func(ctx context.Context) (any, error) { return prepared(ctx) }, nil
+		return func(ctx context.Context) (any, error) {
+			response, err := prepared(ctx)
+			return service.redact(response), err
+		}, nil
 	default:
 		return nil, fmt.Errorf("%w: tool is not an observation long poll", ErrInvalidInput)
 	}

@@ -85,10 +85,12 @@ type Config struct {
 	// PushBannerURL, when non-empty, is echoed after every accepted push as
 	// "remote: watch: <url>" so the pusher can follow the queued run.
 	PushBannerURL string
-	// UpstreamOf names the upstream a repository path resolves to, by the
-	// rules fetch and push use, so a scoped key reaches only its upstreams
-	// (#073). Without it a scoped key reaches no repository.
-	UpstreamOf               func(input string) (string, error)
+	// QualifyInScope resolves a repository path among the given upstreams
+	// only, by the rules fetch and push use, to its canonical
+	// upstream/org/repo path, so a scoped key reaches only its upstreams and
+	// a short name means the one repository of that name in scope (#073).
+	// Without it a scoped key reaches no repository.
+	QualifyInScope           func(input string, scope []string) (string, error)
 	Logger                   Logger
 	MutationGate             func(context.Context) error
 	HandshakeTimeout         time.Duration
@@ -105,7 +107,7 @@ type Server struct {
 	onUpdate                 UpdateHandler
 	sessionHandler           func(notify func(format string, args ...any)) UpdateHandler
 	pushBannerURL            string
-	upstreamOf               func(string) (string, error)
+	qualifyInScope           func(string, []string) (string, error)
 	logger                   Logger
 	mutationGate             func(context.Context) error
 	handshakeTimeout         time.Duration
@@ -202,7 +204,7 @@ func New(config Config) (*Server, error) {
 		config: serverConfig, git: config.Git, onUpdate: config.OnUpdate, logger: logger, mutationGate: mutationGate,
 		sessionHandler:           config.SessionHandler,
 		pushBannerURL:            config.PushBannerURL,
-		upstreamOf:               config.UpstreamOf,
+		qualifyInScope:           config.QualifyInScope,
 		handshakeTimeout:         config.HandshakeTimeout,
 		requestTimeout:           config.RequestTimeout,
 		sessionTimeout:           config.SessionTimeout,
@@ -425,8 +427,8 @@ func minimumDeadline(left, right time.Time) time.Time {
 }
 
 func (s *Server) runGit(ctx context.Context, actor sessionActor, protocol string, command gitCommand, channel ssh.Channel) error {
-	repoInput := command.input()
-	if err := s.authorizeScope(actor, repoInput); err != nil {
+	repoInput, err := s.authorizeScope(actor, command.input())
+	if err != nil {
 		return err
 	}
 
@@ -483,16 +485,21 @@ func (s *Server) runGit(ctx context.Context, actor sessionActor, protocol string
 // a new repository, elsewhere. Every refusal reads the same, whether the
 // repository exists, lies outside the scope or cannot be resolved, so it
 // names nothing outside the scope.
-func (s *Server) authorizeScope(actor sessionActor, repoInput string) error {
+//
+// It returns the path Git serves: unchanged for an unscoped key, the
+// canonical in-scope path for a scoped one.
+func (s *Server) authorizeScope(actor sessionActor, repoInput string) (string, error) {
 	if len(actor.scope) == 0 {
-		return nil
+		return repoInput, nil
 	}
-	if s.upstreamOf != nil {
-		if upstream, err := s.upstreamOf(repoInput); err == nil && slices.Contains(actor.scope, upstream) {
-			return nil
+	if s.qualifyInScope != nil {
+		if qualified, err := s.qualifyInScope(repoInput, actor.scope); err == nil {
+			if upstream, _, found := strings.Cut(qualified, "/"); found && slices.Contains(actor.scope, upstream) {
+				return qualified, nil
+			}
 		}
 	}
-	return fmt.Errorf("repository %q not found; a scoped uplink reaches only its upstreams (use upstream/org/repo)", repoInput)
+	return "", fmt.Errorf("repository %q not found; a scoped uplink reaches only its upstreams (use upstream/org/repo)", repoInput)
 }
 
 // ReplayPending delivers durable receive events left by an interrupted process

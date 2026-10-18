@@ -20,7 +20,8 @@ import (
 type remoteRun struct {
 	ID string
 	// QueueSequence orders runs; the oldest one on a page is the cursor for
-	// the next, older page.
+	// the next, older page. A scoped uplink gets none and pages by run ID
+	// instead (#073).
 	QueueSequence int64
 	RepoID        int64
 	Ref           string
@@ -155,7 +156,7 @@ func runRuns(ctx context.Context, arguments []string, output io.Writer) error {
 	repo := flags.String("repo", "", "only this repository")
 	ref := flags.String("ref", "", "only this branch or tag")
 	limit := flags.Int("limit", 20, "runs per page (at most 100)")
-	before := flags.Int64("before", 0, "only runs older than this sequence (the cursor printed after a full page)")
+	before := flags.String("before", "", "only runs older than this cursor (printed after a full page)")
 	all := flags.Bool("all", false, "follow pages to the oldest run")
 	asJSON := flags.Bool("json", false, "emit the server's payload unchanged")
 	if err := flags.Parse(arguments); err != nil {
@@ -177,12 +178,12 @@ func runRuns(ctx context.Context, arguments []string, output io.Writer) error {
 	if *limit <= 0 || *limit > 100 {
 		return fmt.Errorf("%w: --limit must be between 1 and 100", errUsage)
 	}
-	if *before < 0 {
-		return fmt.Errorf("%w: --before must be a positive run sequence", errUsage)
+	if sequence, err := strconv.ParseInt(*before, 10, 64); *before != "" && err == nil && sequence < 1 {
+		return fmt.Errorf("%w: --before must be a positive run sequence or a run ID", errUsage)
 	}
 	query := map[string]string{"repo": *repo, "ref": *ref, "limit": fmt.Sprint(*limit)}
-	if *before > 0 {
-		query["before"] = fmt.Sprint(*before)
+	if *before != "" {
+		query["before"] = *before
 	}
 	if *asJSON {
 		return emitJSON(ctx, api, "/api/runs", query, output)
@@ -190,7 +191,7 @@ func runRuns(ctx context.Context, arguments []string, output io.Writer) error {
 	// The server returns at most one bounded page; --all walks the cursor
 	// to the oldest run instead of stopping at the newest page (#050).
 	var runs []remoteRun
-	next := int64(0)
+	next := ""
 	for {
 		var page []remoteRun
 		if err := api.Get(ctx, "/api/runs", query, &page); err != nil {
@@ -198,22 +199,22 @@ func runRuns(ctx context.Context, arguments []string, output io.Writer) error {
 		}
 		runs = append(runs, page...)
 		previous := next
-		next = 0
+		next = ""
 		if len(page) == *limit {
-			next = page[len(page)-1].QueueSequence
+			next = runCursor(page[len(page)-1])
 		}
 		// A server older than paging ignores ?before and returns the newest
 		// page again: a cursor that does not move backwards ends the walk
 		// instead of looping forever.
-		if previous > 0 && next >= previous {
+		if previous != "" && !cursorMovedBack(previous, next) {
 			runs = runs[:len(runs)-len(page)]
-			next = 0
+			next = ""
 			break
 		}
-		if !*all || next == 0 {
+		if !*all || next == "" {
 			break
 		}
-		query["before"] = fmt.Sprint(next)
+		query["before"] = next
 	}
 	if len(runs) == 0 {
 		_, err := fmt.Fprintln(output, "no runs")
@@ -228,11 +229,34 @@ func runRuns(ctx context.Context, arguments []string, output io.Writer) error {
 			return err
 		}
 	}
-	if next > 0 {
-		_, err := fmt.Fprintf(output, "more: oberth runs --before %d (or --all)\n", next)
+	if next != "" {
+		_, err := fmt.Fprintf(output, "more: oberth runs --before %s (or --all)\n", next)
 		return err
 	}
 	return nil
+}
+
+// runCursor is the before value for the page after run: its sequence, or its
+// ID when the server withholds sequences from a scoped uplink (#073).
+func runCursor(run remoteRun) string {
+	if run.QueueSequence > 0 {
+		return strconv.FormatInt(run.QueueSequence, 10)
+	}
+	return run.ID
+}
+
+// cursorMovedBack reports whether next pages further back than previous: a
+// smaller sequence, or a different run ID (IDs carry no order).
+func cursorMovedBack(previous, next string) bool {
+	if next == "" {
+		return true
+	}
+	before, previousErr := strconv.ParseInt(previous, 10, 64)
+	after, nextErr := strconv.ParseInt(next, 10, 64)
+	if previousErr == nil && nextErr == nil {
+		return after < before
+	}
+	return next != previous
 }
 
 // resolveRemoteRunID expands the abbreviation the push banner prints into the
@@ -252,22 +276,22 @@ func resolveRemoteRunID(ctx context.Context, api *client.Client, given string) (
 		if err := api.Get(ctx, "/api/runs", query, &runs); err != nil {
 			return "", err
 		}
-		cursor := int64(0)
+		cursor := ""
 		if len(runs) > 0 {
-			cursor = runs[len(runs)-1].QueueSequence
+			cursor = runCursor(runs[len(runs)-1])
 		}
 		// An older server ignores ?before and repeats the newest page; stop
 		// before counting the same runs twice (each would then "match" twice).
-		if previous, _ := strconv.ParseInt(query["before"], 10, 64); previous > 0 && cursor >= previous {
+		if previous := query["before"]; previous != "" && !cursorMovedBack(previous, cursor) {
 			break
 		}
 		for _, run := range runs {
 			known = append(known, run.ID)
 		}
-		if len(runs) < 100 || cursor <= 0 {
+		if len(runs) < 100 || cursor == "" {
 			break
 		}
-		query["before"] = fmt.Sprint(cursor)
+		query["before"] = cursor
 	}
 	return resolveRunIDPrefix(given, known)
 }

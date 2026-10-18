@@ -557,8 +557,15 @@ func (s *Store) RegisterUplink(ctx context.Context, actor string, spec model.Upl
 	}
 	defer func() { _ = tx.Rollback() }()
 	var displacedCredentialID string
-	_ = tx.QueryRowContext(ctx, `SELECT token_credential_id FROM uplinks WHERE fingerprint = ?`,
-		spec.Fingerprint).Scan(&displacedCredentialID)
+	var existingID int64
+	_ = tx.QueryRowContext(ctx, `SELECT id, token_credential_id FROM uplinks WHERE fingerprint = ?`,
+		spec.Fingerprint).Scan(&existingID, &displacedCredentialID)
+	var previous []string
+	if existingID != 0 {
+		if previous, err = loadUplinkScopes(ctx, tx, existingID); err != nil {
+			return model.Uplink{}, err
+		}
+	}
 	row := tx.QueryRowContext(ctx, `
 INSERT INTO uplinks(fingerprint, identity, token_credential_id, auth_actor, admin, created_at, updated_at)
 VALUES(?, ?, ?, ?, ?, ?, ?)
@@ -577,8 +584,12 @@ RETURNING id, fingerprint, identity, token_credential_id, auth_actor, admin, cre
 		return model.Uplink{}, fmt.Errorf("register uplink: %w", err)
 	}
 	value.Admin = scannedAdmin != 0
-	// A re-registered key takes exactly the scope it is registered with.
-	if err := replaceUplinkScopes(ctx, tx, value.ID, scopes); err != nil {
+	// Re-registering a key without a scope keeps the one it has: a re-add or
+	// onboarding must never widen a scoped uplink (#073). Only uplink scope
+	// --clear widens it.
+	if len(scopes) == 0 {
+		scopes = previous
+	} else if err := replaceUplinkScopes(ctx, tx, value.ID, scopes); err != nil {
 		return model.Uplink{}, err
 	}
 	if len(scopes) > 0 {
@@ -591,12 +602,11 @@ UPDATE token_credentials SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL`
 		}
 	}
 	auditDetails := map[string]any{
-		"fingerprint": spec.Fingerprint,
-		"identity":    spec.Identity,
-		"admin":       spec.Admin,
-	}
-	if len(scopes) > 0 {
-		auditDetails["scope"] = scopes
+		"fingerprint":    spec.Fingerprint,
+		"identity":       spec.Identity,
+		"admin":          spec.Admin,
+		"scope":          scopeAuditValue(scopes),
+		"previous_scope": scopeAuditValue(previous),
 	}
 	if displacedCredentialID != "" && displacedCredentialID != spec.TokenCredentialID {
 		auditDetails["displaced_credential"] = displacedCredentialID

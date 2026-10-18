@@ -63,6 +63,9 @@ type PromotionListItem struct {
 type PromotionListResponse struct {
 	Promotions []PromotionListItem `json:"promotions"`
 	NextBefore int64               `json:"next_before,omitempty"`
+	// NextCursor replaces NextBefore for a scoped uplink: the oldest
+	// promotion's ID, never a global sequence (#073).
+	NextCursor string `json:"next_cursor,omitempty"`
 }
 
 // PublishRetryResponse reports the outcome of retrying a failed upstream
@@ -178,6 +181,9 @@ type RunListResponse struct {
 	// NextBefore is set when the page is full: pass it as before for the
 	// next, older page (#050).
 	NextBefore int64 `json:"next_before,omitempty"`
+	// NextCursor replaces NextBefore for a scoped uplink: the oldest run's
+	// ID, never a global sequence (#073).
+	NextCursor string `json:"next_cursor,omitempty"`
 }
 
 // RepoListResponse wraps repo_list results as a JSON object (#794).
@@ -361,11 +367,11 @@ func toolDefinitions() []map[string]any {
 		tool("wait", "Long-poll until a SHA reaches a terminal state; timeout returns still-running cleanly. When trigger is set, waits for a run with that trigger (e.g. 'release' for a tag-push run).", object(map[string]any{"repo": stringProperty("Repository name when the SHA is ambiguous"), "sha": stringProperty("Full or short SHA"), "trigger": stringProperty("Filter by trigger type (e.g. 'release' for tag runs, 'branch' for branch runs; 'ci' is accepted as an alias for 'branch')"), "timeout": timeoutProperty()}, "sha")),
 		tool("sync", "Park the exact SHA's WIP branch upstream without a green gate; this is not completion or promotion evidence. Rejects promotion, release, plan, and apply runs. When the SHA has branch-trigger runs on multiple distinct branches, the explicit branch argument is required.", object(map[string]any{"repo": stringProperty("Repository name when the SHA is ambiguous"), "sha": stringProperty("Full SHA"), "branch": stringProperty("Explicit branch name; required when the SHA has runs on multiple branches, optional otherwise")}, "sha")),
 		tool("promote", "Green-gate and publish a SHA without force.", object(map[string]any{"repo": stringProperty("Repository name when the SHA is ambiguous"), "sha": stringProperty("Full SHA"), "branch": stringProperty("Target branch")}, "sha", "branch")),
-		tool("promotion_list", "Recover durable promotion IDs by exact repository/source SHA/status. Read-only, newest admission first; pass next_before as before for older records. A record is not publication evidence.", object(map[string]any{
+		tool("promotion_list", "Recover durable promotion IDs by exact repository/source SHA/status. Read-only, newest admission first; pass next_before (or next_cursor for a scoped uplink) as before for older records. A record is not publication evidence.", object(map[string]any{
 			"repo":       stringProperty("Filter by exact repository name"),
 			"source_sha": stringProperty("Filter by full source commit SHA; no ref or prefix resolution"),
 			"status":     map[string]any{"type": "string", "enum": []string{"pending", "passed", "failed", "interrupted"}, "description": "Filter by current promotion status"},
-			"before":     map[string]any{"type": "integer", "minimum": 1, "description": "Exclusive admission sequence cursor returned as next_before"},
+			"before":     map[string]any{"type": []string{"integer", "string"}, "description": "Exclusive cursor: next_before (an admission sequence) or next_cursor (a promotion ID) from the previous page"},
 			"limit":      map[string]any{"type": "integer", "minimum": 1, "maximum": 200, "description": "Page size (default 50, maximum 200)"},
 		})),
 		tool("promote_status", "Wait for an append-only promotion record to become terminal.", object(map[string]any{"id": stringProperty("Promotion ID"), "timeout": timeoutProperty()}, "id")),
@@ -390,11 +396,11 @@ func toolDefinitions() []map[string]any {
 		tool("access_revoke", "Revoke a step's access to a secret path. Requires admin uplink.", object(map[string]any{"repo": stringProperty("Repository name"), "step": stringProperty("Step/template name"), "secret": stringProperty("Exact secret path from the pipeline declaration or access_list (e.g. oberth/data/release/cosign-secret). Copied verbatim; no prefix expansion or path normalization.")}, "repo", "step", "secret")),
 		tool("repo_list", "List registered repositories with their upstream and probe state.", object(map[string]any{})),
 		tool("repo_remove", "Remove a repository mapping and its Git cache. Requires admin uplink. Refuses if runs are in-flight or promotions are pending.", object(map[string]any{"repo": stringProperty("Repository name")}, "repo")),
-		tool("run_list", "List runs newest first with optional repository and ref filters, in bounded pages. A full page returns next_before; pass it as before with the same filters for older runs until it is absent.", object(map[string]any{
+		tool("run_list", "List runs newest first with optional repository and ref filters, in bounded pages. A full page returns next_before (or next_cursor for a scoped uplink); pass it as before with the same filters for older runs until it is absent.", object(map[string]any{
 			"repo":   stringProperty("Filter by repository name"),
 			"ref":    stringProperty("Filter by branch or tag ref"),
 			"limit":  integerProperty("Maximum runs to return (default 50, max 100)"),
-			"before": map[string]any{"type": "integer", "minimum": 1, "description": "Exclusive run sequence cursor returned as next_before"},
+			"before": map[string]any{"type": []string{"integer", "string"}, "description": "Exclusive cursor: next_before (a run sequence) or next_cursor (a run ID) from the previous page"},
 		})),
 		tool("system_status", "Return system health: database, upstreams, cluster, audit, and version.", object(map[string]any{})),
 		tool("publish_retry", "Retry the upstream publication for a run or promotion whose burns all passed but whose upstream push failed. Input is exactly one durable run ID or promotion ID. Refuses when the run is not in a publishing-failed state, or when the cached Git object no longer matches the record.", object(map[string]any{

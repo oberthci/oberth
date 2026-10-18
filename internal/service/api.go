@@ -171,6 +171,11 @@ func (service *API) CallTool(ctx context.Context, actor api.Actor, name string, 
 	if err != nil {
 		return nil, err
 	}
+	value, err := service.callTool(ctx, actor, name, raw)
+	return service.redact(value), err
+}
+
+func (service *API) callTool(ctx context.Context, actor api.Actor, name string, raw json.RawMessage) (any, error) {
 	if mutatingTool(name) {
 		if err := service.requireMutation(ctx); err != nil {
 			return nil, err
@@ -524,16 +529,13 @@ func (service *API) CallTool(ctx context.Context, actor api.Actor, name string, 
 		return service.repoRemove(ctx, actor, arguments.Repo)
 	case "run_list":
 		var arguments struct {
-			Repo   string `json:"repo"`
-			Ref    string `json:"ref"`
-			Limit  int    `json:"limit"`
-			Before int64  `json:"before"`
+			Repo   string     `json:"repo"`
+			Ref    string     `json:"ref"`
+			Limit  int        `json:"limit"`
+			Before pageCursor `json:"before"`
 		}
 		if err := decodeTool(raw, &arguments); err != nil {
 			return nil, err
-		}
-		if arguments.Before < 0 {
-			return nil, fmt.Errorf("%w: before must be a positive run sequence", ErrInvalidInput)
 		}
 		limit := arguments.Limit
 		if limit <= 0 {
@@ -544,13 +546,20 @@ func (service *API) CallTool(ctx context.Context, actor api.Actor, name string, 
 		if limit > 100 {
 			limit = 100
 		}
-		runs, err := service.Runs(ctx, actor, api.RunFilter{Repository: arguments.Repo, Ref: arguments.Ref, Limit: limit, Before: arguments.Before})
+		runs, err := service.Runs(ctx, actor, api.RunFilter{Repository: arguments.Repo, Ref: arguments.Ref, Limit: limit,
+			Before: arguments.Before.Sequence, BeforeRun: arguments.Before.ID})
 		if err != nil {
 			return nil, err
 		}
 		response := api.RunListResponse{Runs: runs}
 		if page, ok := runs.([]model.Run); ok && len(page) == limit {
-			response.NextBefore = page[len(page)-1].QueueSequence
+			// A scoped uplink pages by run ID: a global sequence would
+			// count every run on the installation (#073).
+			if service.scope != nil {
+				response.NextCursor = page[len(page)-1].ID
+			} else {
+				response.NextBefore = page[len(page)-1].QueueSequence
+			}
 		}
 		return response, nil
 	case "publish_retry":
@@ -585,7 +594,17 @@ func (service *API) Runs(ctx context.Context, actor api.Actor, filter api.RunFil
 	if service.history == nil {
 		return nil, fmt.Errorf("%w: run history", ErrUnavailable)
 	}
+	if filter.Before < 0 || service.scope != nil && filter.Before > 0 {
+		return nil, fmt.Errorf("%w: before must be a positive run sequence, or a run ID for a scoped uplink", ErrInvalidInput)
+	}
 	storeFilter := model.RunListFilter{Ref: filter.Ref, Limit: filter.Limit, Before: filter.Before}
+	if strings.TrimSpace(filter.BeforeRun) != "" {
+		cursor, err := service.resolveReadRunID(ctx, filter.BeforeRun)
+		if err != nil {
+			return nil, err
+		}
+		storeFilter.Before = cursor.QueueSequence
+	}
 	if strings.TrimSpace(filter.Repository) != "" {
 		repository, err := service.runs.RepositoryByName(ctx, filter.Repository)
 		if err != nil {
@@ -593,7 +612,11 @@ func (service *API) Runs(ctx context.Context, actor api.Actor, filter api.RunFil
 		}
 		storeFilter.RepoID = repository.ID
 	}
-	return service.history.ListRecentRuns(ctx, storeFilter)
+	runs, err := service.history.ListRecentRuns(ctx, storeFilter)
+	if err != nil {
+		return nil, err
+	}
+	return service.redact(runs), nil
 }
 
 // RunCounts is the dashboard's count of retained runs, in total and per
@@ -696,7 +719,7 @@ func (service *API) Run(ctx context.Context, actor api.Actor, id string) (any, e
 			response.Repository = repository
 		}
 	}
-	return response, nil
+	return service.redact(response), nil
 }
 
 // RunLog is the read-only dashboard view of one known step's bounded redacted
@@ -824,7 +847,7 @@ func (service *API) Repositories(ctx context.Context, actor api.Actor) (any, err
 	for i, repo := range repos {
 		views[i] = RepoView{Repository: repo, LatestRuns: runsByRepo[repo.ID]}
 	}
-	return views, nil
+	return service.redact(views), nil
 }
 
 func (service *API) Issues(ctx context.Context, actor api.Actor, filter api.IssueFilter) (any, error) {

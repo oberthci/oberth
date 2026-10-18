@@ -65,3 +65,50 @@ func TestSSHIdentitiesReturnsTheScope(t *testing.T) {
 		t.Fatalf("resolve = %q, %v, %v, %v", identity, scope, found, err)
 	}
 }
+
+// A short SSH path that is ambiguous across the installation but unique in a
+// key's scope resolves within the scope (#073); refusals name nothing else.
+func TestQualifyInScopeResolvesShortNamesWithinTheScope(t *testing.T) {
+	t.Parallel()
+	catalog := fakeUpstreamCatalog{
+		repositories: map[string]model.Repository{
+			"github/oberthci/terraform":     {Name: "terraform", UpstreamID: 1},
+			"codeberg/cloudtaser/terraform": {Name: "terraform", UpstreamID: 2},
+			"codeberg/cloudtaser/secret":    {Name: "secret", UpstreamID: 2},
+			"secret":                        {Name: "secret", UpstreamID: 2},
+		},
+		ambiguous: map[string]bool{"terraform": true},
+		upstreams: []model.Upstream{
+			{ID: 1, Name: "github", BaseURL: "ssh://git@github.com/oberthci"},
+			{ID: 2, Name: "codeberg", BaseURL: "ssh://git@codeberg.org/cloudtaser"},
+			{ID: 3, Name: "skipops", BaseURL: "ssh://git@codeberg.org/skipops"},
+		},
+	}
+	resolver := Upstreams{Catalog: catalog}
+	for input, want := range map[string]string{
+		"terraform":                 "github/oberthci/terraform",
+		"oberthci/terraform":        "github/oberthci/terraform",
+		"github/oberthci/terraform": "github/oberthci/terraform",
+		"new-repo":                  "github/oberthci/new-repo",
+		// Registered only outside the scope: a short name still means the
+		// scope, exactly as for a name registered nowhere.
+		"secret": "github/oberthci/secret",
+	} {
+		if got, err := resolver.QualifyInScope(input, []string{"github"}); err != nil || got != want {
+			t.Errorf("QualifyInScope(%q) = %q, %v; want %q", input, got, err, want)
+		}
+	}
+	for _, input := range []string{"cloudtaser/secret", "codeberg/cloudtaser/terraform"} {
+		if got, err := resolver.QualifyInScope(input, []string{"github"}); err == nil || strings.Contains(err.Error(), "codeberg") && !strings.Contains(input, "codeberg") {
+			t.Errorf("QualifyInScope(%q) = %q, %v; want a refusal naming nothing outside the scope", input, got, err)
+		}
+	}
+	// Two in-scope upstreams: a registered repository decides; a new name
+	// that either could hold is refused rather than guessed.
+	if got, err := resolver.QualifyInScope("terraform", []string{"github", "skipops"}); err != nil || got != "github/oberthci/terraform" {
+		t.Errorf("registered short name across two scopes = %q, %v", got, err)
+	}
+	if got, err := resolver.QualifyInScope("brand-new", []string{"github", "skipops"}); err == nil {
+		t.Errorf("unregistered short name across two scopes = %q, want refused", got)
+	}
+}

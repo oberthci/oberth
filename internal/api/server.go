@@ -52,6 +52,9 @@ type RunFilter struct {
 	Limit      int
 	// Before pages to runs older than this QueueSequence (exclusive).
 	Before int64
+	// BeforeRun pages to runs older than this run, by ID: the cursor a
+	// scoped uplink gets instead of a global sequence (#073).
+	BeforeRun string
 }
 
 type IssueFilter struct {
@@ -238,17 +241,27 @@ func (server *Server) handleRuns(writer http.ResponseWriter, request *http.Reque
 	}
 	if raw := query.Get("before"); raw != "" {
 		before, parseErr := strconv.ParseInt(raw, 10, 64)
-		if parseErr != nil || before < 1 {
-			writeJSON(writer, http.StatusBadRequest, map[string]string{"error": "before must be a positive run sequence"})
+		switch {
+		case parseErr == nil && before >= 1:
+			filter.Before = before
+		case parseErr != nil && validRunSelector(raw):
+			filter.BeforeRun = raw
+		default:
+			writeJSON(writer, http.StatusBadRequest, map[string]string{"error": "before must be a positive run sequence or a run ID"})
 			return
 		}
-		filter.Before = before
 	}
 	value, err := server.views.Runs(request.Context(), actorFrom(request.Context()), filter)
 	// The body stays a plain array for existing clients; a full page names
-	// the cursor for the next, older page (#050).
+	// the cursor for the next, older page (#050): the oldest run's sequence,
+	// or its ID where the sequence is withheld from a scoped uplink (#073).
 	if runs, ok := value.([]model.Run); ok && err == nil && len(runs) > 0 && len(runs) == filter.Limit {
-		writer.Header().Set("X-Oberth-Next-Before", strconv.FormatInt(runs[len(runs)-1].QueueSequence, 10))
+		last := runs[len(runs)-1]
+		cursor := last.ID
+		if last.QueueSequence > 0 {
+			cursor = strconv.FormatInt(last.QueueSequence, 10)
+		}
+		writer.Header().Set("X-Oberth-Next-Before", cursor)
 	}
 	server.writeView(writer, value, err)
 }

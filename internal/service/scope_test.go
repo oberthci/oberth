@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -21,6 +22,8 @@ import (
 // Upstream-scoped uplinks (#073): a work laptop scoped to github must get only
 // github content and github counts, and nothing it receives, errors
 // included, may name or count what lies on codeberg.
+
+var globalSequence = regexp.MustCompile(`"(QueueSequence|Sequence|sequence)":[1-9]`)
 
 const (
 	hiddenRepoName  = "cloudtaser-secret"
@@ -191,6 +194,10 @@ func (fixture *scopeFixture) assertNoLeak(t *testing.T, what string, value any, 
 		t.Fatalf("%s: marshal: %v", what, marshalErr)
 	}
 	text := string(encoded)
+	// Global sequences count every run and promotion on the installation.
+	if sequence := globalSequence.FindString(text); sequence != "" {
+		t.Errorf("%s exposes a global sequence %s", what, sequence)
+	}
 	if err != nil {
 		text += " " + err.Error()
 	}
@@ -222,9 +229,29 @@ func TestScopedUplinkSeesOnlyItsUpstream(t *testing.T) {
 	if list := value.(api.RunListResponse); len(list.Runs.([]model.Run)) != len(visibleRuns) || list.NextBefore != 0 {
 		t.Fatalf("run_list = %d runs, next %d", len(list.Runs.([]model.Run)), list.NextBefore)
 	}
+	// A scoped uplink pages by run ID; a sequence cursor, which would let
+	// it probe the global run count, is refused.
 	value, err = fixture.call(scopedActor, "run_list", map[string]any{"limit": 1})
-	if list := value.(api.RunListResponse); err != nil || len(list.Runs.([]model.Run)) != 1 || list.NextBefore == 0 {
+	fixture.assertNoLeak(t, "paged run_list", value, err)
+	first := value.(api.RunListResponse)
+	if err != nil || len(first.Runs.([]model.Run)) != 1 || first.NextBefore != 0 || first.NextCursor == "" {
 		t.Fatalf("paged run_list = %#v, %v", value, err)
+	}
+	value, err = fixture.call(scopedActor, "run_list", map[string]any{"limit": 1, "before": first.NextCursor})
+	if second := value.(api.RunListResponse); err != nil || len(second.Runs.([]model.Run)) != 1 ||
+		second.Runs.([]model.Run)[0].ID == first.Runs.([]model.Run)[0].ID {
+		t.Fatalf("second page = %#v, %v", value, err)
+	}
+	for _, before := range []any{3, "3"} {
+		if _, err := fixture.call(scopedActor, "run_list", map[string]any{"before": before}); !errors.Is(err, ErrInvalidInput) {
+			t.Fatalf("scoped sequence cursor %v = %v, want invalid", before, err)
+		}
+	}
+	if _, err := fixture.service.Runs(ctx, scopedActor, api.RunFilter{Limit: 10, Before: 3}); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("scoped /api/runs sequence cursor = %v", err)
+	}
+	if unscoped := mustCall(t, fixture, unscopedActor, "run_list", map[string]any{"limit": 1}).(api.RunListResponse); unscoped.NextBefore == 0 || unscoped.NextCursor != "" {
+		t.Fatalf("unscoped run_list cursor = %#v", unscoped)
 	}
 
 	// Run counts cover github only.
@@ -280,6 +307,12 @@ func TestScopedUplinkSeesOnlyItsUpstream(t *testing.T) {
 	if list := value.(api.PromotionListResponse); len(list.Promotions) != 1 || list.Promotions[0].ID != fixture.promoted["github"].ID {
 		t.Fatalf("promotion_list = %#v", list)
 	}
+	if _, err := fixture.call(scopedActor, "promotion_list", map[string]any{"before": 5}); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("scoped promotion sequence cursor = %v", err)
+	}
+	if _, err := fixture.call(scopedActor, "promotion_list", map[string]any{"before": fixture.promoted["codeberg"].ID}); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("hidden promotion as cursor = %v", err)
+	}
 	value, err = fixture.call(scopedActor, "promote_grant_list", map[string]any{})
 	fixture.assertNoLeak(t, "promote_grant_list", value, err)
 	grants, err := fixture.service.Grants(ctx, scopedActor, api.GrantFilter{})
@@ -299,10 +332,11 @@ func TestScopedUplinkSeesOnlyItsUpstream(t *testing.T) {
 
 	// Per-run and per-SHA reads of github work succeed.
 	for tool, arguments := range map[string]map[string]any{
-		"run_get":   {"id": visibleRuns[0].ID},
-		"status":    {"ref": visibleRuns[0].SHA},
-		"wait":      {"sha": visibleRuns[0].SHA},
-		"artifacts": {"id": visibleRuns[0].ID},
+		"run_get":        {"id": visibleRuns[0].ID},
+		"status":         {"ref": visibleRuns[0].SHA},
+		"wait":           {"sha": visibleRuns[0].SHA},
+		"artifacts":      {"id": visibleRuns[0].ID},
+		"promote_status": {"id": fixture.promoted["github"].ID},
 	} {
 		value, err := fixture.call(scopedActor, tool, arguments)
 		if err != nil {
@@ -543,6 +577,10 @@ var toolScopeBehaviour = map[string]string{
 	"secretstore_verify": "refused", "secretstore_plan": "refused", "secretstore_sync_receipt": "refused",
 }
 
+// A new tool must be classified here AND covered by the behaviour tests:
+// a lookup or mutation gets a hidden/missing pair in
+// TestScopedUplinkCannotTellHiddenFromMissing, a filtered list a count and
+// leak check in TestScopedUplinkSeesOnlyItsUpstream.
 func TestEveryToolIsClassifiedForScopedUplinks(t *testing.T) {
 	names := api.ToolNames()
 	for _, name := range names {
@@ -554,5 +592,29 @@ func TestEveryToolIsClassifiedForScopedUplinks(t *testing.T) {
 		if !slices.Contains(names, name) {
 			t.Errorf("toolScopeBehaviour names %q, which is no longer an MCP tool", name)
 		}
+	}
+}
+
+type busyAdmission struct{}
+
+func (busyAdmission) AdmissionSnapshot(int64) *model.AdmissionObservation {
+	return &model.AdmissionObservation{State: "waiting", Position: 3, Size: "M", Weight: 2, Used: 7, Capacity: 8,
+		DiskFloor: &model.DiskFloorObservation{BelowFloor: true, FreeBytes: 1, FloorBytes: 2}}
+}
+
+// A scoped actor's waiting run says only that capacity is short: the queue
+// position, the capacity in use and the disk floor describe invisible work
+// too (#073).
+func TestScopedSchedulingHidesInstallationLoad(t *testing.T) {
+	scoped := &API{admission: busyAdmission{}, scope: &repoScope{}}
+	unscoped := &API{admission: busyAdmission{}}
+	run := model.Run{ID: "run", Status: model.RunRunning, QueueSequence: 5}
+	got := scoped.scheduling(context.Background(), run, nil)
+	if got.Admission.Position != 0 || got.Admission.Used != 0 || got.Admission.Capacity != 0 || got.Admission.DiskFloor != nil ||
+		got.Message != "Waiting for capacity." || got.Admission.Size != "M" {
+		t.Fatalf("scoped scheduling = %#v %#v", got, got.Admission)
+	}
+	if full := unscoped.scheduling(context.Background(), run, nil); full.Admission.Used != 7 || !strings.Contains(full.Message, "disk space") {
+		t.Fatalf("unscoped scheduling = %#v %#v", full, full.Admission)
 	}
 }

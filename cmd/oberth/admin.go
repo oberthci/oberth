@@ -1826,6 +1826,7 @@ func runUplinkRotate(ctx context.Context, arguments []string, input io.Reader, o
 	var old []string
 	admin := false
 	var scope []string
+	seen := false
 	for _, status := range statuses {
 		if status.Identity != identity {
 			continue
@@ -1833,10 +1834,10 @@ func runUplinkRotate(ctx context.Context, arguments []string, input io.Reader, o
 		admin = admin || status.Admin
 		// Rotation keeps the scope (#073). Keys of one identity with
 		// different scopes are refused: the new key's scope would be a guess.
-		if len(old) > 0 && !slices.Equal(scope, status.Scope) {
+		if seen && !slices.Equal(scope, status.Scope) {
 			return fmt.Errorf("uplink %s has keys with different scopes; set one with uplink scope --fingerprint first", identity)
 		}
-		scope = status.Scope
+		scope, seen = status.Scope, true
 		if status.Fingerprint != newFingerprint {
 			old = append(old, status.Fingerprint)
 		}

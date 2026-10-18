@@ -901,12 +901,9 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 	sshService, err := sshserver.New(sshserver.Config{
 		HostSigner: hostSigner, Resolver: app.SSHIdentities{Uplinks: database}, Git: git,
 		OnUpdate: receiveHandler, SessionHandler: receiveHandler.WithNotices,
-		PushBannerURL: options.pushBannerURL,
-		UpstreamOf: func(input string) (string, error) {
-			qualification, err := upstreams.QualifyInput(input)
-			return qualification.UpstreamName, err
-		},
-		Logger: logger, MutationGate: anchors.AllowMutation,
+		PushBannerURL:  options.pushBannerURL,
+		QualifyInScope: upstreams.QualifyInScope,
+		Logger:         logger, MutationGate: anchors.AllowMutation,
 	})
 	if err != nil {
 		return err

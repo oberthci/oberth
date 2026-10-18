@@ -1138,7 +1138,10 @@ continuity checks; it must never be used to reset or bypass those checks.
   out-of-scope runs, issues, promotions, grants and repositories answer
   exactly like missing ones, lists, counts and pages cover the scope only
   (manual issues count only when filed under an in-scope upstream), queue
-  positions and capacity in use are withheld, `system_status` reports only
+  positions, capacity and its use are withheld, run and promotion sequence
+  numbers are zeroed and `run_list`/`promotion_list`/`/api/runs` page with a
+  record-ID cursor (`next_cursor`, `X-Oberth-Next-Before`; numeric cursors are
+  refused), re-adding a key keeps its scope, `system_status` reports only
   in-scope upstreams, and the `secretstore_*` tools are refused even to an
   admin. SSH fetch and push resolve the path's upstream first and refuse
   anything else with one fixed message. A scope that cannot be read fails

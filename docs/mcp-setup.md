@@ -61,7 +61,11 @@ kubectl exec -n oberth deploy/oberth -- oberth uplink scope --clear laptop@work
 ```
 
 `oberth uplink list` shows each uplink's scope (`all` when unscoped), and
-`uplink rotate` keeps it.
+`uplink rotate` and adding the same key again keep it. Scopes name upstreams:
+renaming or removing an upstream narrows every uplink scoped to it, which then
+reaches nothing there until its scope is set again. A scoped uplink pages
+`run_list` and `promotion_list` with `next_cursor`, a record ID, instead of a
+sequence number.
 
 ## 2. Configure Claude Code
 

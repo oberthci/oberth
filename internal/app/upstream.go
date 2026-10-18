@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/url"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -283,4 +284,54 @@ func (upstreams Upstreams) QualifyInput(input string) (gitcache.RepoQualificatio
 		qualifiedOrg = upstream.Name
 	}
 	return gitcache.RepoQualification{UpstreamName: upstream.Name, Org: qualifiedOrg}, nil
+}
+
+// QualifyInScope resolves input among the named upstreams only, to its
+// canonical "upstream/org/repo" path, for an upstream-scoped SSH key (#073).
+// A path that resolves into scope keeps that resolution. A short path (bare
+// or org/repo) that is ambiguous or lands outside the scope is tried under
+// each in-scope upstream instead: a registered repository there wins, and an
+// unregistered name resolves only when one in-scope upstream can hold it.
+// Errors never name anything outside the scope.
+func (upstreams Upstreams) QualifyInScope(input string, scope []string) (string, error) {
+	upstreamName, org, repositoryName, err := gitcache.ParseRepoPath(input)
+	if err != nil {
+		return "", err
+	}
+	if qualification, err := upstreams.QualifyInput(input); err == nil && slices.Contains(scope, qualification.UpstreamName) {
+		return qualification.UpstreamName + "/" + qualification.Org + "/" + repositoryName, nil
+	}
+	refused := fmt.Errorf("app: repository %q is not in this uplink's scope: %w", input, gitcache.ErrUpstreamRefused)
+	if upstreamName != "" || upstreams.Catalog == nil {
+		return "", refused
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), upstreams.timeout())
+	defer cancel()
+	values, err := upstreams.Catalog.ListUpstreams(ctx)
+	if err != nil {
+		return "", refused
+	}
+	var registered, candidates []string
+	for _, upstream := range values {
+		if !slices.Contains(scope, upstream.Name) || org != "" && !upstreamMatchesOrg(upstream, org) {
+			continue
+		}
+		qualifiedOrg := upstream.Org()
+		if qualifiedOrg == "" {
+			qualifiedOrg = upstream.Name
+		}
+		candidate := upstream.Name + "/" + qualifiedOrg + "/" + repositoryName
+		candidates = append(candidates, candidate)
+		if _, err := upstreams.Catalog.RepositoryByName(ctx, candidate); err == nil {
+			registered = append(registered, candidate)
+		}
+	}
+	switch {
+	case len(registered) == 1:
+		return registered[0], nil
+	case len(registered) == 0 && len(candidates) == 1:
+		return candidates[0], nil
+	default:
+		return "", refused
+	}
 }

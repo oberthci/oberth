@@ -1037,3 +1037,20 @@ func TestRunsPagesWithBeforeCursor(t *testing.T) {
 		t.Fatalf("negative cursor status = %d", response.Code)
 	}
 }
+
+// A scoped uplink's runs carry no sequence (#073): the header names the
+// oldest run's ID, and ?before accepts that ID back.
+func TestRunsPagesByRunIDWhenSequencesAreWithheld(t *testing.T) {
+	server, backend := testServer(t)
+	backend.runPage = []model.Run{{ID: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, {ID: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}}
+	request := httptest.NewRequest(http.MethodGet, "/api/runs?limit=2&before=cccccccccccccccccccccccccccccccc", nil)
+	request.Header.Set("Authorization", "Bearer valid-token")
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusOK || backend.runFilter.Before != 0 || backend.runFilter.BeforeRun != "cccccccccccccccccccccccccccccccc" {
+		t.Fatalf("status=%d filter=%+v", response.Code, backend.runFilter)
+	}
+	if got := response.Header().Get("X-Oberth-Next-Before"); got != "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" {
+		t.Fatalf("next cursor = %q", got)
+	}
+}

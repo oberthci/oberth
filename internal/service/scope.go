@@ -2,9 +2,11 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/oberthci/oberth/internal/api"
@@ -684,4 +686,88 @@ func (remover scopedRemover) RemoveRepository(ctx context.Context, actor, name s
 	}
 	// Remove exactly the in-scope repository, by its qualified name.
 	return remover.inner.RemoveRepository(ctx, actor, remover.scope.qualified(repository))
+}
+
+// redact strips global sequence numbers from what a scoped actor receives
+// (#073): a run's QueueSequence and a promotion's Sequence count every run
+// and promotion on the installation, so they would reveal out-of-scope
+// volume. The values stay intact inside the call; only the response loses
+// them. An unscoped call's value passes through unchanged.
+func (service *API) redact(value any) any {
+	if service.scope == nil {
+		return value
+	}
+	switch typed := value.(type) {
+	case model.Run:
+		typed.QueueSequence = 0
+		return typed
+	case []model.Run:
+		runs := make([]model.Run, len(typed))
+		for index, run := range typed {
+			run.QueueSequence = 0
+			runs[index] = run
+		}
+		return runs
+	case RunDetailResponse:
+		typed.Run.QueueSequence = 0
+		return typed
+	case StatusResponse:
+		typed.Run.QueueSequence = 0
+		return typed
+	case WaitResponse:
+		typed.Run.QueueSequence = 0
+		return typed
+	case []RepoView:
+		views := make([]RepoView, len(typed))
+		for index, view := range typed {
+			view.LatestRuns = service.redact(view.LatestRuns).([]model.Run)
+			views[index] = view
+		}
+		return views
+	case api.RunListResponse:
+		typed.Runs = service.redact(typed.Runs)
+		typed.NextBefore = 0
+		return typed
+	case model.Promotion:
+		typed.Sequence = 0
+		return typed
+	case PromotionWaitResponse:
+		typed.Promotion.Sequence = 0
+		return typed
+	case api.PromotionListResponse:
+		items := make([]api.PromotionListItem, len(typed.Promotions))
+		for index, item := range typed.Promotions {
+			item.Sequence = 0
+			items[index] = item
+		}
+		typed.Promotions = items
+		typed.NextBefore = 0
+		return typed
+	}
+	return value
+}
+
+// pageCursor is a list tool's before argument: a sequence number, as
+// next_before returns, or a record ID, as next_cursor returns to a scoped
+// uplink (#073).
+type pageCursor struct {
+	Sequence int64
+	ID       string
+}
+
+func (cursor *pageCursor) UnmarshalJSON(raw []byte) error {
+	var text string
+	if err := json.Unmarshal(raw, &text); err == nil {
+		text = strings.TrimSpace(text)
+		if sequence, parseErr := strconv.ParseInt(text, 10, 64); parseErr == nil {
+			text, cursor.Sequence = "", sequence
+		}
+		cursor.ID = text
+	} else if err := json.Unmarshal(raw, &cursor.Sequence); err != nil {
+		return fmt.Errorf("before must be a sequence number or an ID: %w", err)
+	}
+	if cursor.Sequence < 0 {
+		return errors.New("before must not be negative")
+	}
+	return nil
 }

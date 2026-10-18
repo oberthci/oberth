@@ -75,8 +75,29 @@ func TestUplinkScopeTravelsWithTheUplink(t *testing.T) {
 	if err != nil || len(listed) != 1 || !slices.Equal(listed[0].Scope, []string{"github"}) {
 		t.Fatalf("listed = %#v, %v", listed, err)
 	}
-	if action, err := s.LatestAuditActionByType(ctx, "uplink.register", "uplink"); err != nil || !strings.Contains(action.Details, `"scope":["github"]`) {
+	if action, err := s.LatestAuditActionByType(ctx, "uplink.register", "uplink"); err != nil ||
+		!strings.Contains(action.Details, `"scope":["github"]`) || !strings.Contains(action.Details, `"previous_scope":[]`) {
 		t.Fatalf("registration audit = %#v, %v", action, err)
+	}
+
+	// Re-registering the key without a scope (onboarding, a manual re-add)
+	// keeps the scope; only SetUplinkScope widens it.
+	digest2 := make([]byte, 32)
+	digest2[0] = 8
+	second, err := s.CreateTokenCredential(ctx, model.TokenCredentialSpec{Name: "laptop", Digest: digest2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	readded, err := s.RegisterUplink(ctx, "admin", model.UplinkSpec{Fingerprint: "SHA256:laptop", Identity: "laptop@work", TokenCredentialID: second.ID})
+	if err != nil || !slices.Equal(readded.Scope, []string{"github"}) {
+		t.Fatalf("re-registered = %#v, %v", readded, err)
+	}
+	if again, _ := s.UplinkByFingerprint(ctx, "SHA256:laptop"); !slices.Equal(again.Scope, []string{"github"}) {
+		t.Fatalf("re-registration widened the scope to %v", again.Scope)
+	}
+	if action, err := s.LatestAuditActionByType(ctx, "uplink.register", "uplink"); err != nil ||
+		!strings.Contains(action.Details, `"scope":["github"]`) || !strings.Contains(action.Details, `"previous_scope":["github"]`) {
+		t.Fatalf("re-registration audit = %#v, %v", action, err)
 	}
 
 	// Widen, then clear; each change is audited with the previous scope.

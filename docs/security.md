@@ -30,6 +30,9 @@
   missing; lists, counts and pages cover only the scope; installation-wide
   tools are refused. A scope that cannot be read never authenticates as
   unscoped, and a removed upstream narrows a scope rather than widening it.
+  Global run and promotion sequences are withheld (paging uses record IDs).
+  Issue IDs remain one global counter: accepted, they only hint at the total
+  number of issues.
 - Receive reservations bind that identity before Git mutates a public ref and
   replay under the same identity after a callback failure or restart. Public
   ref grammar is enforced both for SSH receives and upstream materialization;
