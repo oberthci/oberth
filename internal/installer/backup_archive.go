@@ -202,7 +202,7 @@ var backupNotRestored = []string{
 	"The server PKI CA key never leaves OpenBao: only the CA certificate is recorded. The installer issues a new CA on the target, so every client must re-pin the new server CA.",
 	"The Kubernetes auth method configuration is cluster-specific (API server CA and issuer): it is recorded for reference and never restored.",
 	"KV secrets are captured at their current version only; version history and per-secret metadata are not preserved.",
-	"Git caches, workspaces and artifacts on the server volume are not part of the backup: the server clones every repository afresh. Step logs are included unless the backup ran with --no-logs.",
+	"Git caches, workspaces and artifacts on the server volume are not part of the backup: the server clones every repository afresh. Step logs are included when there are any (up to 160 MiB), unless the backup ran with --no-logs.",
 }
 
 // archiveCipher seals and opens the plaintext archive stream.
@@ -541,6 +541,17 @@ func openBackupArchive(ctx context.Context, input string, cipher archiveCipher, 
 	}
 	if manifestBytes == nil {
 		return backupManifest{}, errors.New("archive has no manifest")
+	}
+	// Read the format leniently first: a newer archive must say which
+	// release wrote it, not fail on the first field this one does not know.
+	var header struct {
+		Format string `json:"format"`
+	}
+	if err := json.Unmarshal(manifestBytes, &header); err != nil {
+		return backupManifest{}, fmt.Errorf("parse archive manifest: %w", err)
+	}
+	if header.Format != backupFormat && header.Format != backupFormatV1 {
+		return backupManifest{}, fmt.Errorf("archive format %q is not %q; use the oberth release that wrote it", header.Format, backupFormat)
 	}
 	var manifest backupManifest
 	decoder := json.NewDecoder(bytes.NewReader(manifestBytes))

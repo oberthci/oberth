@@ -51,8 +51,10 @@ func TestFirstBackupCreatesTheKey(t *testing.T) {
 	home := isolatedHome(t)
 	var out bytes.Buffer
 	err := runCLI(context.Background(), []string{"backup"}, strings.NewReader(""), &out)
-	if err == nil || !strings.Contains(err.Error(), "kubeconfig") {
-		t.Fatalf("backup without a cluster = %v, want a kubeconfig error", err)
+	// No cluster here (and on CI no kubectl either): the backup itself
+	// fails, after creating the key.
+	if err == nil {
+		t.Fatal("backup without a cluster succeeded")
 	}
 	key := filepath.Join(home, ".config", "oberth", "backup", "recipient.key")
 	if info, statErr := os.Stat(key); statErr != nil || info.Mode().Perm() != 0o600 {
@@ -210,5 +212,27 @@ func TestBackupDatabaseWritesAVerifiedArchive(t *testing.T) {
 	}
 	if report.AuditHead.ID != 1 || !report.Integrity || !report.ForeignKeys {
 		t.Fatalf("report = %+v", report)
+	}
+}
+
+func TestBackupRefusesACertificateWithoutItsKey(t *testing.T) {
+	home := isolatedHome(t)
+	if err := runCLI(context.Background(), []string{"backup", "keygen"}, strings.NewReader(""), &bytes.Buffer{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(home, ".config", "oberth", "backup", "recipient.key")); err != nil {
+		t.Fatal(err)
+	}
+	err := runCLI(context.Background(), []string{"backup"}, strings.NewReader(""), &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "could never be restored") {
+		t.Fatalf("backup to a key-less certificate = %v", err)
+	}
+}
+
+func TestRestoreYesNeedsAnExplicitBackup(t *testing.T) {
+	isolatedHome(t)
+	err := runCLI(context.Background(), []string{"restore", "--yes"}, strings.NewReader(""), &bytes.Buffer{})
+	if !errors.Is(err, errUsage) || !strings.Contains(err.Error(), "name the backup") {
+		t.Fatalf("restore --yes without a file = %v", err)
 	}
 }

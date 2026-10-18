@@ -67,6 +67,9 @@ type backupDeps struct {
 	openssl   string
 	now       func() time.Time
 	rootToken string
+	// envToken is BAO_TOKEN as read (and cleared) at startup, so no child
+	// process inherits it even when the operation never needs it.
+	envToken  string
 	apiServer string
 }
 
@@ -115,7 +118,7 @@ func ExecuteBackup(ctx context.Context, cfg BackupConfig, host InstallDeps) erro
 	// token prompt is the way to a history-only backup.
 	if cfg.Scope == BackupScopeFull && !cfg.DryRun {
 		prompt := "OpenBao root token (not echoed; press Enter alone for a history-only backup without secrets): "
-		if deps.rootToken, err = takeRootTokenPrompt(deps.Deps, prompt); err != nil {
+		if deps.rootToken, err = deps.takeRootToken(prompt); err != nil {
 			return err
 		}
 		switch {
@@ -195,24 +198,18 @@ func prepareOperatorDeps(host InstallDeps, kubeconfigPath, contextName string, l
 	if restConfig != nil {
 		deps.apiServer = restConfig.Host
 	}
+	deps.envToken = strings.TrimSpace(os.Getenv(baoTokenEnvVar))
+	_ = os.Unsetenv(baoTokenEnvVar)
+	_ = os.Unsetenv("VAULT_TOKEN")
 	return deps, nil
 }
 
-// takeRootToken reads BAO_TOKEN (then clears it from the environment) or,
-// on a terminal, prompts for it with echo disabled. BAO_TOKEN is removed from
-// this process's environment once read, so no child process (kubectl, helm,
-// openssl) inherits it; the token reaches OpenBao only as the first stdin
-// line.
-func takeRootToken(deps Deps) (string, error) {
-	return takeRootTokenPrompt(deps, "OpenBao root token (echo disabled): ")
-}
-
-func takeRootTokenPrompt(deps Deps, prompt string) (string, error) {
-	token := strings.TrimSpace(os.Getenv(baoTokenEnvVar))
-	_ = os.Unsetenv(baoTokenEnvVar)
-	_ = os.Unsetenv("VAULT_TOKEN")
-	if token != "" || deps.ReadPassword == nil {
-		return token, nil
+// takeRootToken returns BAO_TOKEN as read at startup or, on a terminal,
+// prompts for it with echo disabled. The token reaches OpenBao only as the
+// first stdin line of each kubectl exec.
+func (deps backupDeps) takeRootToken(prompt string) (string, error) {
+	if deps.envToken != "" || deps.ReadPassword == nil {
+		return deps.envToken, nil
 	}
 	_, _ = fmt.Fprint(deps.Output, prompt)
 	raw, err := deps.ReadPassword()
@@ -220,7 +217,7 @@ func takeRootTokenPrompt(deps Deps, prompt string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("read root token: %w", err)
 	}
-	token = strings.TrimSpace(string(raw))
+	token := strings.TrimSpace(string(raw))
 	clear(raw)
 	return token, nil
 }

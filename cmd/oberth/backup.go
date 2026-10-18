@@ -77,7 +77,15 @@ func runBackup(ctx context.Context, arguments []string, input io.Reader, output 
 		if err != nil {
 			return err
 		}
-		if _, statErr := os.Stat(certPath); statErr != nil {
+		_, certErr := os.Stat(certPath)
+		_, keyErr := os.Stat(keyPath)
+		if certErr == nil && keyErr != nil {
+			// Encrypting to a certificate whose private key is gone would
+			// write backups nobody can restore.
+			return fmt.Errorf("%s exists but its private key %s does not: backups encrypted to it could never be restored. "+
+				"Put the key back, or move %s aside so the next backup creates a new pair", displayHomePath(certPath), displayHomePath(keyPath), displayHomePath(certPath))
+		}
+		if certErr != nil {
 			if cfg.DryRun {
 				_, _ = fmt.Fprintf(output, "No backup key yet: a real backup creates %s first.\n", displayHomePath(keyPath))
 			} else {
@@ -284,6 +292,9 @@ func runRestore(ctx context.Context, arguments []string, input io.Reader, output
 	}
 	if len(positional) > 1 {
 		return fmt.Errorf("%w: restore takes one backup file or directory, got %d", errUsage, len(positional))
+	}
+	if cfg.Yes && len(positional) == 0 {
+		return fmt.Errorf("%w: --yes restores without asking, so name the backup: oberth restore FILE --yes", errUsage)
 	}
 	if cfg.Input, err = resolveArchive(positional, output); err != nil {
 		return err

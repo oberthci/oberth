@@ -225,6 +225,8 @@ type fakeBackupCluster struct {
 	signingKeyID string   // kid of tokens the API server issues
 	logsRestored string   // SHA-256 the logs restore script was given
 	scaleSubres  []string // subresource of every deployment patch
+	// helmConflictOnce fails the next helm upgrade with an SSA conflict.
+	helmConflictOnce bool
 
 	argvs       [][]string
 	uploads     map[string][]byte
@@ -465,6 +467,10 @@ func (c *fakeBackupCluster) helm(_ context.Context, args []string) ([]byte, erro
 		return []byte("name: oberth\n"), nil
 	case args[0] == "upgrade":
 		c.helmUpgrade = args
+		if c.helmConflictOnce {
+			c.helmConflictOnce = false
+			return nil, errors.New(`helm: exit status 1: Error: UPGRADE FAILED: conflict occurred while applying object oberth/oberth apps/v1, Kind=Deployment: Apply failed with 1 conflict: conflict with "oberth" with subresource "scale" using apps/v1: .spec.replicas`)
+		}
 		file := args[slices.Index(args, "-f")+1]
 		body, err := os.ReadFile(file)
 		if err != nil {

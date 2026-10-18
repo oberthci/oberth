@@ -262,8 +262,76 @@ func TestConfirmRestoreQuotesTheNameAndRetries(t *testing.T) {
 func TestRestoreValuesOverlayWithoutServerCA(t *testing.T) {
 	t.Parallel()
 	archive := restoreArchive{Values: map[string]any{"watchTunnel": map[string]any{"enabled": true}}}
-	overlay, notes := restoreValuesOverlay(archive, restoreTarget{Values: map[string]any{}}, restoreParts{History: true, Secrets: true, Settings: true}, DefaultArgoNamespace)
+	all := restoreParts{History: true, Secrets: true, Settings: true}
+	compared := restoreTarget{Values: map[string]any{}, OpenBao: openBaoRestorePlan{Known: true}}
+	overlay, notes := restoreValuesOverlay(archive, compared, all, DefaultArgoNamespace)
 	if _, ok := overlay["watchTunnel"]; ok || len(notes) != 1 || !strings.Contains(notes[0], "could not be read") {
 		t.Fatalf("overlay %v notes %v", overlay, notes)
+	}
+	// A dry run without the token says why the tunnel is not shown.
+	overlay, notes = restoreValuesOverlay(archive, restoreTarget{Values: map[string]any{}}, all, DefaultArgoNamespace)
+	if _, ok := overlay["watchTunnel"]; ok || len(notes) != 1 || !strings.Contains(notes[0], "without the root token") {
+		t.Fatalf("overlay %v notes %v", overlay, notes)
+	}
+}
+
+// In-flight temp files and anything outside logs/ are dropped, not fatal.
+func TestRepackLogsTarKeepsOnlyLogFiles(t *testing.T) {
+	t.Parallel()
+	body, summary, err := repackLogsTar(logsTarFixture(t, map[string]string{
+		"logs/run.log": "x", "logs/run.index.json": "{}", "logs/.index-123.tmp": "partial", "logs/sub/a.log": "y",
+	}))
+	if err != nil || summary.Files != 2 {
+		t.Fatalf("repack: %+v %v", summary, err)
+	}
+	if _, err := validateLogsTar(body); err != nil {
+		t.Fatalf("repacked tar does not validate: %v", err)
+	}
+}
+
+func TestBackupGoesOnWhenLogsCannotBeRead(t *testing.T) {
+	t.Parallel()
+	_, _, source := backupFixtureArchive(t, false)
+	source.logsTar = []byte("not a tar")
+	output := filepath.Join(t.TempDir(), "state.cms")
+	var out bytes.Buffer
+	cfg := BackupConfig{Output: output, Recipient: "recipient.pem"}
+	cfg.applyDefaults()
+	if err := runBackup(context.Background(), cfg, source.deps(&out)); err != nil {
+		t.Fatalf("backup failed over unreadable logs: %v", err)
+	}
+	if !strings.Contains(out.String(), "no step logs (could not read them") {
+		t.Fatalf("output does not explain the missing logs:\n%s", out.String())
+	}
+}
+
+// Should Helm still report a .spec.replicas conflict, the restore retries
+// once with --force-conflicts instead of stopping with the server down.
+func TestRestoreRetriesAHelmReplicasConflict(t *testing.T) {
+	t.Parallel()
+	archive, _, _, target := reinstallFixture(t)
+	target.helmConflictOnce = true
+	out := runFixtureRestore(t, archive, target, RestoreConfig{})
+	if !slices.Contains(target.helmUpgrade, "--force-conflicts") || !strings.Contains(out, "retrying with --force-conflicts") {
+		t.Fatalf("no retry: %v\n%s", target.helmUpgrade, out)
+	}
+}
+
+func TestNewerArchiveFormatNamesTheRelease(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	for _, name := range backupMemberOrder {
+		if err := writeBackupFile(dir, name, []byte(`{}`)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	manifest := backupManifest{Format: "oberth.backup/v9"}
+	output := filepath.Join(t.TempDir(), "v9.cms")
+	if err := writeBackupArchive(context.Background(), dir, &manifest, fakeEnvelopeCipher{}, output); err != nil {
+		t.Fatal(err)
+	}
+	_, err := openBackupArchive(context.Background(), output, fakeEnvelopeCipher{}, t.TempDir())
+	if err == nil || !strings.Contains(err.Error(), "use the oberth release that wrote it") {
+		t.Fatalf("newer format error = %v", err)
 	}
 }

@@ -73,7 +73,11 @@ gets a stable copy instead: both files are streamed out and must hash
 identically before and after, and the same verified snapshot is then built on
 the workstation. A snapshot that races a write is retried up to three times.
 Step logs are read as a tar of `/data/logs` through the server pod; logs above
-160 MiB are left out with a note.
+160 MiB are left out with a note. Only regular files directly in `logs/` are kept
+(the server's in-flight `.index-*.tmp` files are dropped), and logs that cannot
+be read leave the backup without logs rather than failing it.
+If `recipient.pem` exists without its `recipient.key`, the backup refuses:
+everything encrypted to it would be unrecoverable.
 
 To learn which key signs the cluster's service-account tokens, backup
 requests a short-lived token for the namespace's `default` service account and
@@ -239,7 +243,7 @@ Flags:
 - `--dry-run`: print the contents and what would change on this install, then
   stop.
 - `--only PARTS`: restore only these parts, comma-separated (below).
-- `--yes`: skip the confirmation (for scripts).
+- `--yes`: skip the confirmation (for scripts); it needs the backup named explicitly (`oberth restore FILE --yes`).
 
 Advanced: `--key KEY` (alias `--private-key`), `--input FILE` (alias `-i`,
 same as the argument), `--no-logs` (do not restore the step logs),

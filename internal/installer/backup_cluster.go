@@ -16,6 +16,7 @@ import (
 	"io"
 	"path"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -119,40 +120,96 @@ func serviceAccountKeyNote(source backupSource, target clusterIdentity, releaseW
 // --- Step logs ---
 
 // serverLogsScript streams the server's step logs directory as a tar on
-// stdout, or nothing when there is none. tar is not the last command, for the
-// same reason as stageUploadScript (#067).
+// stdout, or nothing when there is none. It refuses, before streaming, a
+// directory larger than $1 KiB, so an oversized one never reaches this
+// machine's memory. tar is not the last command, for the same reason as
+// stageUploadScript (#067).
 const serverLogsScript = `set -eu
 cd /data
-if [ -d logs ]; then tar -cf - logs; fi
+[ -d logs ] || exit 0
+size=$(du -sk logs | cut -f1)
+if [ "$size" -gt "$1" ]; then echo "step logs are $size KiB, above the $1 KiB bound" >&2; exit 3; fi
+tar -cf - logs
 true`
 
-// maxBackupLogsBytes bounds the logs member; larger logs are left out of the
-// archive with a note rather than failing the backup.
+// maxBackupLogsBytes bounds the logs member.
 const maxBackupLogsBytes = maxBackupMemberBytes
 
-// exportServerLogs reads the step logs through the running server pod.
-// It returns nil when there are none or they exceed the bound.
+// exportServerLogs reads the step logs through the running server pod and
+// re-packs them, keeping only the files a restore admits. Logs are history:
+// when they cannot be read (too large, or a file vanished mid-read as a run
+// finished), the backup goes on without them and says why.
 func exportServerLogs(ctx context.Context, deps backupDeps, namespace, pod string) ([]byte, *backupLogsSummary, string, error) {
-	out, err := deps.runStdout(ctx, nil, "kubectl", kubectlExecArgs(deps.ContextName, namespace, pod, serverContainerName, false, "sh", "-c", serverLogsScript)...)
+	limitKiB := strconv.Itoa(maxBackupLogsBytes >> 10)
+	out, err := deps.runStdout(ctx, nil, "kubectl", kubectlExecArgs(deps.ContextName, namespace, pod, serverContainerName, false, "sh", "-c", serverLogsScript, "sh", limitKiB)...)
 	if err != nil {
-		return nil, nil, "", fmt.Errorf("read step logs: %w", err)
+		return nil, nil, "could not read them: " + oneLine(err.Error()), nil
 	}
 	if len(out) == 0 {
-		return nil, nil, "the server has no step logs yet", nil
+		return nil, nil, "the server has none yet", nil
 	}
-	if len(out) > maxBackupLogsBytes {
-		return nil, nil, fmt.Sprintf("step logs are %d MiB, above the %d MiB bound; they are not in this archive", len(out)>>20, maxBackupLogsBytes>>20), nil
-	}
-	summary, err := validateLogsTar(out)
+	body, summary, err := repackLogsTar(out)
 	if err != nil {
-		return nil, nil, "", fmt.Errorf("step logs: %w", err)
+		return nil, nil, "could not read them: " + oneLine(err.Error()), nil
 	}
-	return out, &summary, "", nil
+	if summary.Files == 0 {
+		return nil, nil, "the server has none yet", nil
+	}
+	return body, &summary, "", nil
 }
 
-// validateLogsTar admits only the logs directory and regular files directly
-// in it — the server writes <run>.log and <run>.index.json there — so a
-// restore never extracts anything outside /data/logs.
+func oneLine(text string) string {
+	line, _, _ := strings.Cut(strings.TrimSpace(text), "\n")
+	return line
+}
+
+// admittedLogName reports whether a tar entry is a log file a restore may
+// write: a regular file directly in logs/, not hidden (the server's
+// .index-*.tmp files are in-flight renames).
+func admittedLogName(name string) bool {
+	return path.Clean(name) == name && path.Dir(name) == "logs" && !strings.HasPrefix(path.Base(name), ".")
+}
+
+// repackLogsTar rewrites the pod's tar with only the admitted log files, as
+// plain ustar entries, so the restore pod extracts exactly what Go checked.
+func repackLogsTar(body []byte) ([]byte, backupLogsSummary, error) {
+	var summary backupLogsSummary
+	var out bytes.Buffer
+	writer := tar.NewWriter(&out)
+	if err := writer.WriteHeader(&tar.Header{Name: "logs/", Typeflag: tar.TypeDir, Mode: 0o750, Format: tar.FormatUSTAR}); err != nil {
+		return nil, summary, err
+	}
+	reader := tar.NewReader(bytes.NewReader(body))
+	for {
+		header, err := reader.Next()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return nil, summary, fmt.Errorf("read logs tar: %w", err)
+		}
+		if header.Typeflag != tar.TypeReg || !admittedLogName(header.Name) {
+			continue
+		}
+		if err := writer.WriteHeader(&tar.Header{Name: header.Name, Typeflag: tar.TypeReg, Mode: 0o640, Size: header.Size,
+			ModTime: header.ModTime, Format: tar.FormatUSTAR}); err != nil {
+			continue // a name ustar cannot hold is not one the server writes
+		}
+		if _, err := io.CopyN(writer, reader, header.Size); err != nil {
+			return nil, summary, fmt.Errorf("read logs tar: %w", err)
+		}
+		summary.Files++
+		summary.Bytes += header.Size
+	}
+	if err := writer.Close(); err != nil {
+		return nil, summary, err
+	}
+	return out.Bytes(), summary, nil
+}
+
+// validateLogsTar admits only the logs directory and log files directly in
+// it — exactly what repackLogsTar writes — so a restore never extracts
+// anything outside /data/logs.
 func validateLogsTar(body []byte) (backupLogsSummary, error) {
 	var summary backupLogsSummary
 	reader := tar.NewReader(bytes.NewReader(body))
@@ -167,9 +224,7 @@ func validateLogsTar(body []byte) (backupLogsSummary, error) {
 		name := strings.TrimSuffix(header.Name, "/")
 		switch {
 		case name == "logs" && header.Typeflag == tar.TypeDir:
-			continue
-		case header.Typeflag == tar.TypeReg && path.Clean(name) == name && path.Dir(name) == "logs" &&
-			!strings.HasPrefix(path.Base(name), "."):
+		case header.Typeflag == tar.TypeReg && admittedLogName(name):
 			summary.Files++
 			summary.Bytes += header.Size
 		default:

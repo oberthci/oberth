@@ -289,7 +289,7 @@ func runRestore(ctx context.Context, cfg RestoreConfig, deps backupDeps) (result
 	printArchiveContents(w, archive, cfg.Input, false)
 	// Only restoring secrets needs OpenBao's root token.
 	if parts.Secrets && deps.rootToken == "" {
-		if deps.rootToken, err = takeRootToken(deps.Deps); err != nil {
+		if deps.rootToken, err = deps.takeRootToken("OpenBao root token of this install (echo disabled): "); err != nil {
 			return err
 		}
 		if deps.rootToken == "" && !cfg.DryRun {
@@ -509,6 +509,9 @@ func restoreValuesOverlay(archive restoreArchive, target restoreTarget, parts re
 		switch {
 		case !parts.Secrets:
 			notes = append(notes, "watchTunnel was enabled on the source; its token is a secret, so it is re-enabled only when secrets are restored too")
+		case target.ServerCA == "" && !target.OpenBao.Known:
+			notes = append(notes, "watchTunnel was enabled on the source; without the root token this plan cannot read this install's server CA, "+
+				"so it does not show the tunnel; a restore with the token re-enables it pinned to that CA")
 		case target.ServerCA == "":
 			notes = append(notes, "watchTunnel was enabled on the source but this install's server CA could not be read, so it is not re-enabled; "+
 				"set watchTunnel.enabled=true and watchTunnel.originCACert to ~/.config/oberth/ca.crt with oberth upgrade -f (docs/watch-tunnel.md)")
@@ -573,6 +576,15 @@ func confirmRestore(cfg RestoreConfig, deps backupDeps) error {
 func applyRestore(ctx context.Context, cfg RestoreConfig, deps backupDeps, archive restoreArchive, target restoreTarget, bao openBaoExec, parts restoreParts, work string) error {
 	w := deps.Output
 	_, _ = fmt.Fprintln(w)
+	// Resolve the chart before changing anything, so a missing chart cannot
+	// leave secrets replaced or the server scaled down.
+	var helmArgs []string
+	if len(target.Overlay) > 0 {
+		var err error
+		if helmArgs, err = restoreHelmArgs(ctx, cfg, deps, target, work); err != nil {
+			return err
+		}
+	}
 	if parts.Secrets {
 		_, _ = fmt.Fprintln(w, "Restoring OpenBao...")
 		written, err := restoreOpenBao(ctx, bao, deps.rootToken, target.KV, archive.Policies, archive.Roles)
@@ -583,16 +595,6 @@ func applyRestore(ctx context.Context, cfg RestoreConfig, deps backupDeps, archi
 			len(target.KV.Secrets), written, len(target.KV.Secrets)-written, len(archive.Policies), len(archive.Roles.Roles))
 		if target.Identity.ForgeKeyKept {
 			_, _ = fmt.Fprintf(w, "  ✓ kept this install's forge key %s\n", target.Identity.ForgeKeyHave)
-		}
-	}
-
-	// Resolve the chart before stopping anything, so a missing chart cannot
-	// leave the server scaled down.
-	var helmArgs []string
-	if len(target.Overlay) > 0 {
-		var err error
-		if helmArgs, err = restoreHelmArgs(ctx, cfg, deps, target, work); err != nil {
-			return err
 		}
 	}
 
@@ -663,7 +665,14 @@ func applyRestore(ctx context.Context, cfg RestoreConfig, deps backupDeps, archi
 	}
 
 	if len(helmArgs) > 0 {
-		if _, err := deps.RunHelm(ctx, helmArgs); err != nil {
+		_, err := deps.RunHelm(ctx, helmArgs)
+		if err != nil && strings.Contains(err.Error(), "conflict") && strings.Contains(err.Error(), ".spec.replicas") {
+			// Helm 4 applies server-side; should the restore's own scaling
+			// ever own .spec.replicas, take it back for Helm (#067).
+			_, _ = fmt.Fprintln(w, "  Helm reported a field conflict on .spec.replicas from the restore's scaling; retrying with --force-conflicts")
+			_, err = deps.RunHelm(ctx, append(slices.Clone(helmArgs), "--force-conflicts"))
+		}
+		if err != nil {
 			return stopped(fmt.Errorf("set the restored values on release oberth: %w", err))
 		}
 		_, _ = fmt.Fprintln(w, "  ✓ release oberth updated with the restored values")
