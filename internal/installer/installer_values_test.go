@@ -29,7 +29,7 @@ func TestInstallerManagedValuesCoverEverySet(t *testing.T) {
 			}
 		}
 	}
-	setFlag := regexp.MustCompile(`"--set(?:-string)?",\s*(?:fmt\.Sprintf\()?"([A-Za-z][A-Za-z0-9.]*)`)
+	setFlag := regexp.MustCompile("\"--set(?:-string)?\",\\s*(?:fmt\\.Sprintf\\()?[`\"]([A-Za-z][A-Za-z0-9.\\\\/-]*)")
 	sources, err := filepath.Glob("*.go")
 	if err != nil {
 		t.Fatal(err)
@@ -44,7 +44,7 @@ func TestInstallerManagedValuesCoverEverySet(t *testing.T) {
 			t.Fatal(err)
 		}
 		for _, match := range setFlag.FindAllStringSubmatch(string(body), -1) {
-			key := match[1]
+			key := strings.ReplaceAll(match[1], `\.`, ".") // escaped dots in a --set key
 			if top, _, _ := strings.Cut(key, "."); !topLevel[top] {
 				continue // another chart's value (OpenBao, Argo Workflows)
 			}

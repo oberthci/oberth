@@ -148,10 +148,9 @@ func TestRestoreOnlySettings(t *testing.T) {
 	if target.helmValues["tls"] == nil || target.helmValues["argo"] == nil || target.helmValues["compatibility"] != nil {
 		t.Fatalf("settings overlay = %v", target.helmValues)
 	}
-	if target.helmValues["watchTunnel"] != nil {
-		t.Fatalf("a deployment-specific value was applied: %v", target.helmValues)
+	if target.helmValues["watchTunnel"] != nil || !strings.Contains(out, "which a restore does not apply") {
+		t.Fatalf("a deployment-specific value was applied, or not named: %v\n%s", target.helmValues, out)
 	}
-	_ = out
 }
 
 func TestRestorePartsValidation(t *testing.T) {

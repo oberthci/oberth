@@ -135,7 +135,7 @@ uncompressed tar, no step logs, no cluster identity) are still read.
 ### Your own Helm values
 
 A restore brings back what Oberth needs to run; deployment-specific
-settings from your values files (an extra integration, a network policy, a
+settings from your values files (an extra integration, resource limits, a
 replica count) are yours to re-apply with `oberth upgrade -f FILE`. Secrets
 those settings rely on are ordinary OpenBao secrets and come back with the
 `secrets` part. When the values files themselves are lost:
@@ -369,7 +369,7 @@ three times. Without a terminal it needs `--yes`.
    the installer sets (image, OpenBao address and CA, PKI, service type,
    certificate pins) belong to the new install, and the rest are your own
    deployment settings. The plan names those that differ from this install's,
-   to re-apply from your values files (see below).
+   to re-apply from your values files (see [Your own Helm values](#your-own-helm-values)).
 9. Scales the server back up and waits for it to become ready. With the PKI
    enabled, the server issues itself a new leaf with every name at startup.
 
