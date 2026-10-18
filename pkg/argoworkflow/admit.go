@@ -46,6 +46,12 @@ type Policy struct {
 	// applies to a declared RunnerImage. Empty selects the built-in
 	// periapsis.DefaultRunnerImagePrefixes.
 	RunnerImagePrefixes []string
+	// KubeVirt permits the narrowly validated VMI resource template shape.
+	// The server sets this only after checking the repository's VM grant.
+	KubeVirt bool
+	// ContainerDiskPrefixes is the administrator's registry allowlist for VMI
+	// containerDisks. An empty list never admits a containerDisk image.
+	ContainerDiskPrefixes []string
 }
 
 // Admit refuses every construct through which a repository-authored document
@@ -332,7 +338,13 @@ func admitTemplate(location string, template wfv1.Template, policy Policy, depth
 	// workflow's own ServiceAccount. On the release tier that is a direct
 	// privilege escalation out of the pipeline.
 	if template.Resource != nil {
-		problems = append(problems, fmt.Errorf("argoworkflow: %s.resource creates arbitrary Kubernetes objects and is not admitted", location))
+		if !policy.KubeVirt {
+			problems = append(problems, fmt.Errorf("argoworkflow: %s.resource creates arbitrary Kubernetes objects and is not admitted", location))
+		} else if strings.HasPrefix(template.Name, "frag-") || strings.Contains(location, ".inline") || location == "spec.templateDefaults" {
+			problems = append(problems, fmt.Errorf("argoworkflow: %s.resource must be a named template in the consuming repository", location))
+		} else if err := admitVMIResource(location+".resource", template.Resource, policy.ContainerDiskPrefixes); err != nil {
+			problems = append(problems, err)
+		}
 	}
 	// Plugin and HTTP templates execute in the Argo agent pod, which runs
 	// under an identity Oberth does not assign here.
