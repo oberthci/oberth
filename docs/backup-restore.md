@@ -1,10 +1,20 @@
 # Backup and restore
 
-`oberth backup` writes one encrypted file with an installation's history,
-secrets and settings; `oberth restore` puts that state onto an installed
-(typically fresh) Oberth. Both run on an operator workstation, like
-`oberth install`: they need `kubectl`, `helm` and OpenSSL 3, and reach the
-cluster only through the Kubernetes API and `kubectl exec`.
+A backup holds only what a fresh install cannot recreate:
+
+- **the history**: the server database, with runs, issues, promotions,
+  repositories, uplinks and their tokens, and the audit chain;
+- **the secrets pipelines use**: the OpenBao KV secrets you put in, the ACL
+  policies, the `auth/kubernetes` roles, and the grants (the
+  `oberth-secret-access` ConfigMap).
+
+Everything else belongs to the install and is made again by `oberth setup` /
+`oberth install`: see [What is not backed up](#what-is-not-backed-up).
+
+`oberth backup` writes this into one encrypted file; `oberth restore` puts it
+onto an installed (typically fresh) Oberth. Both run on an operator
+workstation, like `oberth install`: they need `kubectl`, `helm` and OpenSSL 3,
+and reach the cluster only through the Kubernetes API and `kubectl exec`.
 
 ## Quick start
 
@@ -32,12 +42,12 @@ install without changing it.
 ## Backup
 
 ```sh
-oberth backup                   # history, secrets and settings
+oberth backup                   # history and secrets
 oberth backup --history-only    # history only: no secrets, no token
 oberth backup --dry-run         # what would be backed up; reads no secrets, writes nothing
 ```
 
-A full backup asks for the OpenBao root token. It takes `BAO_TOKEN` from the
+A full backup needs the OpenBao root token. It takes `BAO_TOKEN` from the
 environment if set (`read -rs BAO_TOKEN && export BAO_TOKEN`), otherwise it
 prompts with echo off. Pressing Enter alone at the prompt makes a
 history-only backup instead. Without a terminal and without `BAO_TOKEN` a
@@ -48,8 +58,7 @@ Flags:
 - `--output FILE` / `-o FILE`: write here instead of
   `./oberth-backup-<date-time>.tar.gz.enc`. The file must not exist; it is
   created with mode 0600.
-- `--history-only`: runs, issues, promotions, uplinks and step logs only.
-- `--no-logs`: leave the step logs out.
+- `--history-only`: the database only. OpenBao is not read.
 - `--dry-run`: print what would be collected; reads nothing from OpenBao and
   writes no file.
 
@@ -59,9 +68,9 @@ Advanced: `--recipient CERT` encrypts to another PEM certificate instead of
 `--openbao-namespace` (default `openbao`), `--argo-namespace` (default
 `oberth-argo`).
 
-When it finishes, `oberth backup` prints the file, its size, the history it
-holds, the secret counts and settings, the verified database schema and audit
-head, which key restores it, and the file's SHA-256.
+When it finishes, `oberth backup` prints the file and its size, the history
+it holds, the secret, policy, role and grant counts, the verified database
+schema and audit head, which key restores it, and the file's SHA-256.
 
 Backup changes nothing in the cluster. The database snapshot is taken by the
 running server binary itself (`oberth backup database`, run through
@@ -72,81 +81,61 @@ streaming the result out. A server released before that subcommand existed
 gets a stable copy instead: both files are streamed out and must hash
 identically before and after, and the same verified snapshot is then built on
 the workstation. A snapshot that races a write is retried up to three times.
-Step logs are read as a tar of `/data/logs` through the server pod; logs above
-160 MiB are left out with a note. Only regular files directly in `logs/` are kept
-(the server's in-flight `.index-*.tmp` files are dropped), and logs that cannot
-be read leave the backup without logs rather than failing it.
+
+The backup also records the deployment's live compatibility values
+(`OBERTH_SCHEMA_IDENTITY`, `OBERTH_AUDIT_DOMAIN`, `OBERTH_WITNESS_KEY_INFO`).
+The database is verified under them before the file is written, so a restore
+never has to guess them.
+
 If `recipient.pem` exists without its `recipient.key`, the backup refuses:
 everything encrypted to it would be unrecoverable.
-
-To learn which key signs the cluster's service-account tokens, backup
-requests a short-lived token for the namespace's `default` service account and
-reads only its header; TokenRequest stores nothing.
-
-The compatibility values recorded are the deployment's live
-`OBERTH_SCHEMA_IDENTITY`, `OBERTH_AUDIT_DOMAIN` and `OBERTH_WITNESS_KEY_INFO`.
-The database is verified under them before the file is written, so a restore
-never has to guess the audit domain.
 
 ### What a backup holds
 
 | Member | Full | History only | Contents |
 | --- | --- | --- | --- |
-| `manifest.json` | yes | yes | format, scope, times, versions, source cluster, counts, member hashes (below) |
-| `openbao/kv.json` | yes | – | every KV v2 secret under the `oberth` mount, current version |
+| `manifest.json` | yes | yes | format, scope, versions, source cluster, counts, member hashes (below) |
+| `openbao/kv.json` | yes | – | every KV v2 secret under the `oberth` mount except `identities/`, current version |
 | `openbao/policies.json` | yes | – | every ACL policy except `root` and `default` |
-| `openbao/roles.json` | yes | – | every `auth/kubernetes` role with **every** field OpenBao returns |
-| `openbao/reference.json` | yes | – | Kubernetes auth config, mount list, Transit key metadata, PKI CA certificate; reference only, never restored |
-| `database/oberth-database.tar` | yes | yes | verified server database snapshot (`oberth.database-backup/v1`): runs, issues, promotions, repositories, uplinks and their tokens, the audit chain |
-| `kubernetes/helm-values.json` | yes | – | the `oberth` release's user-supplied Helm values |
+| `openbao/roles.json` | yes | – | every `auth/kubernetes` role with every field OpenBao returns |
+| `openbao/reference.json` | yes | – | Kubernetes auth config, mount list, Transit key metadata, PKI CA certificate; for reference, never restored |
+| `database/oberth-database.tar` | yes | yes | verified database snapshot (`oberth.database-backup/v1`) |
 | `kubernetes/secret-access.json` | yes | – | the `oberth-secret-access` ConfigMap (the grants) |
-| `server/logs.tar` | optional | optional | the server's step logs (`/data/logs`); absent with `--no-logs`, when there are none, or above 160 MiB |
 
-`manifest.json` comes first and records the format (`oberth.backup/v2`), the
+`manifest.json` comes first and records the format (`oberth.backup/v3`), the
 scope (`full` or `history`), the creation time, the CLI, server and chart
 versions, the source context, API server, namespaces and server image, the
-source cluster UID (the `kube-system` namespace UID) and service-account key
-IDs, the database schema, audit head and snapshot method, the compatibility
-values, the history and OpenBao counts, and the size and SHA-256 of every
-member. It holds no secret material. A restore refuses any file whose members
-do not match it exactly. `oberth.backup/v1` files written by v0.17.31 (an
-uncompressed tar, no step logs, no cluster identity) are still read.
+source cluster UID (the `kube-system` namespace UID), the database schema,
+audit head and snapshot method, the compatibility values, the history and
+OpenBao counts, and the size and SHA-256 of every member. It holds no secret
+material. A restore refuses any file whose members do not match it exactly.
+
+Older `oberth.backup/v1` and `v2` files still restore. The Helm values and
+step logs they carry are ignored, and the install identities they carry
+(under `identities/`) are left out; `--inspect` says how many.
 
 ### What is not backed up
 
-- **Git caches, workspaces and artifacts** on the server volume. The server
-  clones each repository from its forge again on first use; a restore onto an
-  existing volume leaves them in place.
-- **Transit keys** are created non-exportable. Only their metadata is recorded.
-  The installer creates a new key on the target, so trusted-plan envelopes
-  sealed under the old key cannot be decrypted after a restore.
-- **The server PKI CA** key is generated inside OpenBao and never leaves it.
-  Only the CA certificate is recorded. The new install has its own CA; every
-  CLI and MCP client must re-pin it.
+- **Server files**: git caches, workspaces, artifacts and step logs on the
+  server volume. The server clones each repository from its forge again on
+  first use.
+- **Helm values.** Re-apply your own values files after a restore; see
+  [After a restore](#after-a-restore).
+- **The install's identities** under `identities/` in OpenBao: the forge
+  (upstream) key, the server TLS and SSH host keys, and the forge
+  `known_hosts`. Every install makes its own; the target keeps them.
+- **The Transit key** is created non-exportable; only its metadata is
+  recorded. The target has its own key, so trusted-plan envelopes sealed
+  under the old one cannot be opened after a restore.
+- **The server PKI CA** key never leaves OpenBao; only the CA certificate is
+  recorded. The target has its own CA, which clients must re-pin.
 - **The Kubernetes auth configuration** names the source cluster's API CA and
-  issuer. It is recorded for reference and never restored; the installer
-  writes the target's.
+  issuer. It is recorded for reference only; the installer writes the
+  target's.
 - **KV history**: secrets are captured at their current version only.
 - **The cluster's service-account signing key** (on k3s,
   `/var/lib/rancher/k3s/server/tls/service.key`) lives on the Kubernetes
-  control plane, out of reach of the API. Release Workload Identity Federation
-  trusts it; see [Keep the service-account key](#keep-the-service-account-key).
-
-### Your own Helm values
-
-A restore brings back what Oberth needs to run; deployment-specific
-settings from your values files (an extra integration, resource limits, a
-replica count) are yours to re-apply with `oberth upgrade -f FILE`. Secrets
-those settings rely on are ordinary OpenBao secrets and come back with the
-`secrets` part. When the values files themselves are lost:
-
-```sh
-oberth backup export-values > values.yaml     # the newest backup here
-```
-
-prints the Helm values the backup recorded. Values the installer sets itself
-describe the source install: keep only your own settings before
-`oberth upgrade -f values.yaml`.
+  control plane; see [Keep the service-account key](#keep-the-service-account-key).
 
 ### Export the secrets as plain JSON
 
@@ -237,14 +226,14 @@ directory with the backup:
 oberth restore --inspect         # what the backup holds; no cluster needed
 oberth restore --dry-run         # what would change on this install; changes nothing
 oberth restore                   # restore it
-oberth restore --only history    # runs, issues, step logs only; keeps this install's secrets and settings
+oberth restore --only history    # runs, issues, uplinks only; keeps this install's secrets
 ```
 
 Without an argument, restore takes the newest backup (`*.tar.gz.enc`, or a
 `*.cms` file from an older release) in the current directory, then in
-`~/oberth-backups` (where v0.17.31 wrote them), looking one subdirectory level
-down as well. An argument may be a file, or a directory meaning the newest
-backup in it. It says which file it picked.
+`~/oberth-backups`, looking one subdirectory level down as well. An argument
+may be a file, or a directory meaning the newest backup in it. It says which
+file it picked.
 
 Restoring secrets needs the **new** install's OpenBao root token: `BAO_TOKEN`
 or an echo-off prompt. `--only history` needs none. `--dry-run` does not
@@ -258,69 +247,62 @@ Flags:
   cluster.
 - `--dry-run`: print the contents and what would change on this install, then
   stop.
-- `--only PARTS`: restore only these parts, comma-separated (below).
-- `--yes`: skip the confirmation (for scripts); it needs the backup named explicitly (`oberth restore FILE --yes`).
+- `--only PART`: restore only `history` or `secrets` (below).
+- `--yes`: skip the confirmation (for scripts); it needs the backup named
+  explicitly (`oberth restore FILE --yes`).
 
 Advanced: `--key KEY` (alias `--private-key`), `--input FILE` (alias `-i`,
-same as the argument), `--no-logs` (do not restore the step logs),
-`--restore-forge-key` (see [below](#the-forge-key-and-the-ssh-host-key)),
-`--chart CHART` (a local chart for the Helm upgrade; default the published
-chart at the version the release runs), `--timeout` (wait for pods), and the
-cluster flags `--context`, `--kubeconfig`, `--namespace`,
-`--openbao-namespace`, `--argo-namespace`.
+same as the argument), `--chart CHART` (a local chart for the Helm upgrade;
+default the published chart at the version the release runs), `--timeout`
+(wait for pods), and the cluster flags `--context`, `--kubeconfig`,
+`--namespace`, `--openbao-namespace`, `--argo-namespace`.
 
 ### The parts
 
-By default a restore applies every part the backup holds: all three for a
-full backup, `history` for a history-only one. `--only` picks some of them;
-naming `secrets` or `settings` for a history-only backup is refused.
+By default a restore applies every part the backup holds: both for a full
+backup, `history` for a history-only one (where `--only secrets` is refused).
 
 | Part | What it restores |
 | --- | --- |
-| `history` | the database (runs, issues, promotions, repositories, uplinks and their tokens, the audit chain), replacing this install's rather than merging; the step logs; the compatibility values the restored database must be opened under; and deletion of Argo Workflows whose runs the restored database does not know |
-| `secrets` | OpenBao KV secrets, ACL policies and `auth/kubernetes` roles, each verified by read-back; this install's forge key is kept unless `--restore-forge-key` |
-| `settings` | the grants (`oberth-secret-access` ConfigMap), `argo.releaseWIF`, and the certificate names `tls.extraDNSNames`/`tls.extraIPs` |
+| `history` | the database, replacing this install's rather than merging; the compatibility values the restored database must be opened under; and deletion of Argo Workflows whose runs the restored database does not know |
+| `secrets` | the OpenBao KV secrets (never `identities/`), ACL policies and `auth/kubernetes` roles, each verified by read-back; and the grants (`oberth-secret-access` ConfigMap) |
 
-Parts not restored are left as they are and listed as `Unchanged` in the
-plan. Whatever the parts, the server is stopped while restoring and started
-again.
+The compatibility values (`compatibility.schemaIdentity`, `auditDomain`,
+`witnessKeyInfo`) are the only Helm values a restore sets. Whatever the
+parts, the server is stopped while restoring and started again.
 
 ### What you see before anything changes
 
 Restore first decrypts the backup, checks every member against the manifest,
-and validates the database offline with the store package: SQLite integrity,
-foreign keys, the exact schema version, the schema identity, and the full
-audit hash chain under the recorded audit domain, with the audit head checked
-against the manifest. It then prints what the backup holds: when and where it
-was taken, its SHA-256, the history counts, repositories, uplinks and step
-logs, the secret names, and the settings.
+and validates the database offline: SQLite integrity, foreign keys, the exact
+schema version, the schema identity, and the full audit hash chain under the
+recorded audit domain, with the audit head checked against the manifest. It
+then prints what the backup holds: when and where it was taken, its SHA-256,
+the history counts, repositories and uplinks, and the secret names.
 
-Next it reads, without writing, what the chosen parts need from the target: the `oberth` Deployment and its
-volume claim, the Helm release and its values, the running server's schema
-version (it must be at least the backup's), the server's own history (from a
-verified snapshot its running server takes), the current grants, OpenBao
-(which must be unsealed) with its current secrets, policies and roles, the
-forge key and SSH host key, the server CA, the cluster UID and
-service-account keys, and the Argo Workflows.
+Next it reads, without writing, what the chosen parts need from the target:
+the `oberth` Deployment and its volume claim, the Helm release, the running
+server's schema version (it must be at least the backup's), the server's own
+history (from a verified snapshot its running server takes), the cluster UID,
+the Argo Workflows, the current grants, and OpenBao (which must be unsealed)
+with its current secrets, policies and roles.
 
 Then it prints **What changes on this install**:
 
 - **History**: replaced, not merged, as before -> after counts of runs,
   issues, promotions and repositories; uplinks removed (their tokens,
   including the one this install printed, stop working) and uplinks restored
-  (their previous tokens work again); how many step log files go into
-  `/data/logs`.
-- **Secrets**: how many are new, replaced and unchanged, with the replaced
-  and new paths by name; new and replaced policies and roles; what happens to
-  the forge key and SSH host key.
-- **Settings**: each one from its current value to the restored one:
-  compatibility values, `argo.releaseWIF`, `tls.extraDNSNames`,
-  `tls.extraIPs`, and the grant count.
+  (their previous tokens work again).
+- **Secrets**: how many are new, replaced and unchanged, with the new and
+  replaced paths by name; new and replaced policies and roles; the grant
+  count before -> after.
+- **Unchanged**: the parts not restored, and always this install's
+  identities, CA and Helm values.
 
 followed by **How**: the server stopped and started, the database file
 replaced with this install's kept in `/data/pre-restore-<time>/`, the
-workflows to delete, the Helm upgrade, and notes (a service-account key that
-differs, settings deliberately not reapplied).
+compatibility values set on the release if they differ, the workflows to
+delete, and the read-back of OpenBao.
 
 `--dry-run` stops here. Otherwise restore asks you to type the target
 context's name (for k3s, `default`); a mistyped answer is asked again, up to
@@ -328,50 +310,36 @@ three times. Without a terminal it needs `--yes`.
 
 ### What the restore does
 
-1. With `secrets`: writes every KV secret that differs from the target's
-   (JSON on stdin), every policy and role, and reads each one back: secrets
-   and policies must match exactly, roles field-for-field (deprecated aliases
-   such as `policies` that mirror their `token_*` successor are not written
-   twice, which OpenBao rejects). Any difference stops the restore before the
-   server is touched.
-2. When settings must change on the release, resolves the chart
-   (`helm show chart`) before stopping anything, so a missing chart cannot
+1. If the compatibility values differ, resolves the chart
+   (`helm show chart`) before changing anything, so a missing chart cannot
    leave the server scaled down.
+2. With `secrets`: writes every KV secret that differs from the target's
+   (JSON on stdin), every policy and role, and reads each one back: secrets
+   and policies must match exactly, roles field-for-field. Any difference
+   stops the restore before the server is touched.
 3. Scales `deploy/oberth` to 0 through the scale subresource (so Helm's
    server-side apply keeps owning `.spec.replicas`) and waits for its pods to
    exit.
 4. With `history`: starts a short-lived pod with the server's image, identity
-   and placement that mounts the server's PersistentVolumeClaim — no host
-   paths, so any storage class works — uploads the database over stdin,
+   and placement that mounts the server's PersistentVolumeClaim (no host
+   paths, so any storage class works), uploads the database over stdin,
    checks the size the pod received and re-checks the SHA-256 on the volume,
    moves `oberth.sqlite`, `-wal` and `-shm` into
    `/data/pre-restore-<UTC timestamp>/`, moves the restored files into place,
    and checks they are owned by the server user with mode 0600. A swap that
    fails midway puts the previous files back.
-5. With `history`, unless `--no-logs`: uploads the step logs the same way and
-   extracts them into `/data/logs` (only regular files directly in `logs/`
-   are admitted; files of the same name are replaced). A failure here is
-   reported and the restore continues: logs are history, not state.
-6. With `settings`: restores the `oberth-secret-access` ConfigMap. The server
+5. With `secrets`: writes the `oberth-secret-access` ConfigMap. The server
    reconciles grants from it at startup, so it must be in place before the
    server starts.
-7. With `history`: lists the Argo Workflows again, now that no server can
+6. With `history`: lists the Argo Workflows again, now that no server can
    submit new ones, and deletes those whose `oberth.ci/run` label names a run
-   the restored database does not know — they belong to the replaced database
+   the restored database does not know: they belong to the replaced database
    and would otherwise keep running and hold pipeline slots.
-8. Sets on the release, with `helm upgrade --reuse-values` (published chart at
-   the release's current version, or `--chart`), whatever differs of:
-   `compatibility.{schemaIdentity,auditDomain,witnessKeyInfo}` (with
-   `history`); `argo.releaseWIF`, unless the backup's was recorded for another
-   pipeline namespace; and `tls.extraDNSNames`/`tls.extraIPs` as the union of
-   the target's and the backup's names, so clients that used them keep
-   working. Nothing else from the backup's Helm values is applied: the values
-   the installer sets (image, OpenBao address and CA, PKI, service type,
-   certificate pins) belong to the new install, and the rest are your own
-   deployment settings. The plan names those that differ from this install's,
-   to re-apply from your values files (see [Your own Helm values](#your-own-helm-values)).
-9. Scales the server back up and waits for it to become ready. With the PKI
-   enabled, the server issues itself a new leaf with every name at startup.
+7. With `history`, if they differ: sets the compatibility values with
+   `helm upgrade --reuse-values` (published chart at the release's current
+   version, or `--chart`). If Helm reports a field conflict on
+   `.spec.replicas`, it retries once with `--force-conflicts`.
+8. Scales the server back up and waits for it to become ready.
 
 If a step after the scale-down fails, the error says whether the previous or
 the restored database is in place and how to get back to a running server;
@@ -385,32 +353,49 @@ Every k3s serves its API at `https://127.0.0.1:6443`, so the API URL cannot
 tell a rollback from a restore onto a reinstalled cluster. The plan compares
 the `kube-system` namespace UID recorded in the backup with the target's: the
 same UID means a rollback (runs created since the backup are dropped);
-another UID means a reinstalled or new cluster. For v1 backups, which record
-no UID, the plan says only whether the API URL matches.
+another UID means a reinstalled or new cluster. For backups that record no
+UID, the plan says only whether the API URL matches.
 
-### The forge key and the SSH host key
+### After a restore
 
-The forge (upstream) key is the SSH key Oberth uses to fetch from GitHub,
-Codeberg and other forges (`identities/<namespace>/oberth-upstream-key`). The
-install on the target registered its key with the forges and verified it, while
-the backed-up key may have been removed from them since. So when the target
-already holds a **different** forge key, the restore keeps the target's and
-says so in the plan; `--restore-forge-key` restores the backed-up one instead.
+The restore prints these steps when it finishes.
 
-The server's SSH host key (`identities/<namespace>/server`) **is** restored,
-so workstations that knew the old server keep trusting it. A workstation that
-connected to the fresh install before the restore sees "REMOTE HOST
-IDENTIFICATION HAS CHANGED"; the plan names both fingerprints, and
-`ssh-keygen -R '[<host>]:30022'` removes the stale entry.
+1. With `secrets`: recreate the per-repository identities pipelines read
+   secrets with, from the restored grants, with your usual install flags
+   (for example `--tls-extra-dns-name` / `--tls-extra-ip`):
 
-### Keep the service-account key
+   ```sh
+   read -rs BAO_TOKEN && export BAO_TOKEN
+   oberth install --install-secretstore --upgrade
+   ```
 
+2. Re-apply your own Helm values files, if you use any:
+   `oberth upgrade -f FILE`.
+3. With `history`: uplinks and their tokens are the backup's again. The token
+   the fresh install printed no longer works; the previous ones do.
+4. This install keeps its own server CA and SSH host key: other machines
+   re-pin `~/.config/oberth/ca.crt` and drop a stale `known_hosts` entry
+   (`ssh-keygen -R '[<host>]:30022'`).
+5. If the node runs the opt-in `deploy/systemd/oberth-openbao-unseal`
+   watcher, give it this install's unseal key:
+
+   ```sh
+   sudo install -m 0400 -o root -g root <unseal-key-file> /etc/oberth/openbao-unseal-key
+   sudo systemctl restart oberth-openbao-unseal
+   ```
+
+External audit witnesses (Rekor) may be ahead of the restored audit head; the
+server then refuses to start rather than rewrite history. Never delete witness
+records to make a restore pass; see [database-backup.md](database-backup.md).
+
+## Keep the service-account key
+
+This is a general Kubernetes note, not something backup or restore handles.
 Release Workload Identity Federation (`argo.releaseWIF`) has the cloud
 provider trust the cluster's service-account JWKS. A reinstalled cluster signs
 with a new key, so releases cannot authenticate until either the provider
 trusts the new JWKS (`kubectl get --raw /openid/v1/jwks`) or the cluster signs
-with the old key again. The plan compares the backup's key IDs with the
-target's and says when they differ.
+with the old key again. `argo.releaseWIF` itself is one of your Helm values.
 
 On k3s, keep the old key across a reinstall by saving
 `/var/lib/rancher/k3s/server/tls/service.key` (and `service.current.key`)
@@ -437,33 +422,3 @@ sudo rm -rf "$P"
 `--force` is needed because the copied CA bundles are single self-signed
 certificates; they are the current ones, so nothing but the service-account
 key changes.
-
-### After a restore
-
-The restore prints these steps when it finishes.
-
-1. Reconcile per-repo identities and policies from the restored grants, with
-   your usual install flags:
-
-   ```sh
-   read -rs BAO_TOKEN && export BAO_TOKEN
-   oberth install --install-secretstore --upgrade
-   ```
-
-   This also refreshes the pinned server CA on this machine.
-2. Re-pin the new server CA on every other CLI and MCP client (rerun
-   `oberth install` there, or copy `~/.config/oberth/ca.crt`).
-3. Uplinks and their tokens come back with the database: the token the fresh
-   install printed stops working, and the previous ones work again.
-   Re-register any workstation whose key changed: `kubectl exec -i -n oberth deploy/oberth -- oberth uplink add - you@host < ~/.ssh/id_ed25519.pub`.
-4. Re-run any trusted plan whose envelope was sealed under the old Transit key.
-5. If the node runs the opt-in `deploy/systemd/oberth-openbao-unseal` watcher,
-   give it the new install's unseal key: `sudo install -m 0400 -o root -g root
-   <unseal-key-file> /etc/oberth/openbao-unseal-key && sudo systemctl restart
-   oberth-openbao-unseal`.
-6. If the plan noted a different service-account key, see
-   [Keep the service-account key](#keep-the-service-account-key).
-7. External audit witnesses (Rekor) may be ahead of the restored audit head;
-   the server then refuses to start rather than rewrite history. Never delete
-   witness records to make a restore pass; see
-   [database-backup.md](database-backup.md).
