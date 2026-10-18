@@ -132,6 +132,22 @@ uncompressed tar, no step logs, no cluster identity) are still read.
   control plane, out of reach of the API. Release Workload Identity Federation
   trusts it; see [Keep the service-account key](#keep-the-service-account-key).
 
+### Your own Helm values
+
+A restore brings back what Oberth needs to run; deployment-specific
+settings from your values files (an extra integration, a network policy, a
+replica count) are yours to re-apply with `oberth upgrade -f FILE`. Secrets
+those settings rely on are ordinary OpenBao secrets and come back with the
+`secrets` part. When the values files themselves are lost:
+
+```sh
+oberth backup export-values > values.yaml     # the newest backup here
+```
+
+prints the Helm values the backup recorded. Values the installer sets itself
+describe the source install: keep only your own settings before
+`oberth upgrade -f values.yaml`.
+
 ### Export the secrets as plain JSON
 
 ```sh
@@ -263,7 +279,7 @@ naming `secrets` or `settings` for a history-only backup is refused.
 | --- | --- |
 | `history` | the database (runs, issues, promotions, repositories, uplinks and their tokens, the audit chain), replacing this install's rather than merging; the step logs; the compatibility values the restored database must be opened under; and deletion of Argo Workflows whose runs the restored database does not know |
 | `secrets` | OpenBao KV secrets, ACL policies and `auth/kubernetes` roles, each verified by read-back; this install's forge key is kept unless `--restore-forge-key` |
-| `settings` | the grants (`oberth-secret-access` ConfigMap), `argo.releaseWIF`, `watchTunnel` (only together with `secrets`), and the certificate names `tls.extraDNSNames`/`tls.extraIPs` |
+| `settings` | the grants (`oberth-secret-access` ConfigMap), `argo.releaseWIF`, and the certificate names `tls.extraDNSNames`/`tls.extraIPs` |
 
 Parts not restored are left as they are and listed as `Unchanged` in the
 plan. Whatever the parts, the server is stopped while restoring and started
@@ -298,7 +314,7 @@ Then it prints **What changes on this install**:
   and new paths by name; new and replaced policies and roles; what happens to
   the forge key and SSH host key.
 - **Settings**: each one from its current value to the restored one:
-  compatibility values, `argo.releaseWIF`, `watchTunnel`, `tls.extraDNSNames`,
+  compatibility values, `argo.releaseWIF`, `tls.extraDNSNames`,
   `tls.extraIPs`, and the grant count.
 
 followed by **How**: the server stopped and started, the database file
@@ -347,11 +363,13 @@ three times. Without a terminal it needs `--yes`.
    the release's current version, or `--chart`), whatever differs of:
    `compatibility.{schemaIdentity,auditDomain,witnessKeyInfo}` (with
    `history`); `argo.releaseWIF`, unless the backup's was recorded for another
-   pipeline namespace; `watchTunnel.enabled` with `watchTunnel.originCACert`
-   pinned to the target's server CA, only when secrets are restored too (the
-   tunnel token itself is a KV secret); and `tls.extraDNSNames`/`tls.extraIPs`
-   as the union of the target's and the backup's names, so clients that used
-   them keep working.
+   pipeline namespace; and `tls.extraDNSNames`/`tls.extraIPs` as the union of
+   the target's and the backup's names, so clients that used them keep
+   working. Nothing else from the backup's Helm values is applied: the values
+   the installer sets (image, OpenBao address and CA, PKI, service type,
+   certificate pins) belong to the new install, and the rest are your own
+   deployment settings. The plan names those that differ from this install's,
+   to re-apply from your values files (see below).
 9. Scales the server back up and waits for it to become ready. With the PKI
    enabled, the server issues itself a new leaf with every name at startup.
 

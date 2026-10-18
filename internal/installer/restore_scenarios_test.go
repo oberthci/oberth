@@ -148,10 +148,10 @@ func TestRestoreOnlySettings(t *testing.T) {
 	if target.helmValues["tls"] == nil || target.helmValues["argo"] == nil || target.helmValues["compatibility"] != nil {
 		t.Fatalf("settings overlay = %v", target.helmValues)
 	}
-	// The tunnel token is a secret: without secrets the tunnel stays off.
-	if target.helmValues["watchTunnel"] != nil || !strings.Contains(out, "re-enabled only when secrets are restored too") {
-		t.Fatalf("tunnel handled without its token:\n%s", out)
+	if target.helmValues["watchTunnel"] != nil {
+		t.Fatalf("a deployment-specific value was applied: %v", target.helmValues)
 	}
+	_ = out
 }
 
 func TestRestorePartsValidation(t *testing.T) {
@@ -218,8 +218,9 @@ func TestInspectShowsContentsWithoutValues(t *testing.T) {
 	}
 	text := out.String()
 	assertSubstringsInOrder(t, text, []string{"holds history, secrets and settings", "History    1 run,", "step logs: 2 files",
-		"Secrets    5 KV secrets", "identities/oberth/oberth-upstream-key", "Settings   compatibility", "watch tunnel enabled",
-		"certificate names tuxbox, localhost, 192.168.86.193, 127.0.0.1", "Nothing was changed (--inspect)"})
+		"Secrets    5 KV secrets", "identities/oberth/oberth-upstream-key", "Settings   compatibility",
+		"certificate names tuxbox, localhost, 192.168.86.193, 127.0.0.1",
+		"your other Helm values (not restored; oberth backup export-values): watchTunnel.enabled", "Nothing was changed (--inspect)"})
 	for _, value := range []string{"forge-private-canary", testSecretValue, "cosign-canary"} {
 		if strings.Contains(text, value) {
 			t.Fatalf("inspect printed a secret value %q", value)
@@ -261,3 +262,21 @@ func TestStoreSummaryCountsHistory(t *testing.T) {
 func metav1GetOptions() metav1.GetOptions { return metav1.GetOptions{} }
 
 func writeFileForTest(path string, body []byte) error { return os.WriteFile(path, body, 0o600) }
+
+func TestExportValuesWritesTheRecordedValues(t *testing.T) {
+	t.Parallel()
+	archivePath, _, _, _ := reinstallFixture(t)
+	deps := backupDeps{Deps: Deps{Output: &bytes.Buffer{}}, cipher: fakeEnvelopeCipher{}, now: time.Now}
+	archive, err := loadRestoreArchive(context.Background(), RestoreConfig{Input: archivePath}, deps, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	if err := writeValuesExport(&out, archive); err != nil {
+		t.Fatal(err)
+	}
+	body := out.String()
+	if !strings.Contains(body, "watchTunnel:") || !strings.Contains(body, "extraDNSNames:") || !strings.HasPrefix(body, "# Helm values of release oberth") {
+		t.Fatalf("export-values =\n%s", body)
+	}
+}

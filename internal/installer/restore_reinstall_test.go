@@ -180,11 +180,10 @@ func TestRestoreOntoAReinstalledCluster(t *testing.T) {
 	if !strings.Contains(out, "host key returns to the archive's") || !strings.Contains(out, "ssh-keygen -R") {
 		t.Fatalf("host key change not explained:\n%s", out)
 	}
-	// The tunnel is re-enabled against this install's CA, and the source
-	// certificate names are added to the target's.
-	tunnel, _ := target.helmValues["watchTunnel"].(map[string]any)
-	if tunnel["enabled"] != true || !strings.Contains(tunnel["originCACert"].(string), "old-ca") {
-		t.Fatalf("watchTunnel overlay = %v", target.helmValues["watchTunnel"])
+	// Deployment-specific values (here the operator's watchTunnel.enabled)
+	// are named, not applied; the source certificate names are added.
+	if target.helmValues["watchTunnel"] != nil || !strings.Contains(out, "the backup's Helm values also set watchTunnel.enabled, which a restore does not apply") {
+		t.Fatalf("operator value handled specially: %v\n%s", target.helmValues["watchTunnel"], out)
 	}
 	tls, _ := target.helmValues["tls"].(map[string]any)
 	if !slices.Equal(anyStrings(tls["extraDNSNames"]), []string{"tuxbox", "tuxbox.local", "localhost"}) ||
@@ -258,20 +257,22 @@ func TestConfirmRestoreQuotesTheNameAndRetries(t *testing.T) {
 	}
 }
 
-// The overlay leaves a tunnel alone when the target's CA cannot be read.
-func TestRestoreValuesOverlayWithoutServerCA(t *testing.T) {
+// Only the operator's own values are named: installer-set and restored
+// paths are not, nor values this install already has.
+func TestUnappliedValuesNamesOnlyOperatorSettings(t *testing.T) {
 	t.Parallel()
-	archive := restoreArchive{Values: map[string]any{"watchTunnel": map[string]any{"enabled": true}}}
-	all := restoreParts{History: true, Secrets: true, Settings: true}
-	compared := restoreTarget{Values: map[string]any{}, OpenBao: openBaoRestorePlan{Known: true}}
-	overlay, notes := restoreValuesOverlay(archive, compared, all, DefaultArgoNamespace)
-	if _, ok := overlay["watchTunnel"]; ok || len(notes) != 1 || !strings.Contains(notes[0], "could not be read") {
-		t.Fatalf("overlay %v notes %v", overlay, notes)
+	archived := map[string]any{
+		"image":         map[string]any{"ref": "old@sha256:1"},
+		"secretstore":   map[string]any{"address": "https://old"},
+		"compatibility": map[string]any{"auditDomain": "a"},
+		"tls":           map[string]any{"extraDNSNames": []any{"x"}, "pki": map[string]any{"enabled": true}},
+		"watchTunnel":   map[string]any{"enabled": true, "originCACert": "old-ca"},
+		"networkPolicy": map[string]any{"enabled": true},
+		"replicaCount":  float64(2),
 	}
-	// A dry run without the token says why the tunnel is not shown.
-	overlay, notes = restoreValuesOverlay(archive, restoreTarget{Values: map[string]any{}}, all, DefaultArgoNamespace)
-	if _, ok := overlay["watchTunnel"]; ok || len(notes) != 1 || !strings.Contains(notes[0], "without the root token") {
-		t.Fatalf("overlay %v notes %v", overlay, notes)
+	target := map[string]any{"networkPolicy": map[string]any{"enabled": true}}
+	if got := unappliedValues(archived, target); !slices.Equal(got, []string{"replicaCount", "watchTunnel.enabled"}) {
+		t.Fatalf("unappliedValues = %v", got)
 	}
 }
 

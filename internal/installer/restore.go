@@ -259,8 +259,6 @@ type restoreTarget struct {
 	// archive's KV export minus a forge key the target keeps.
 	Identity identityRestorePlan
 	KV       kvExport
-	// ServerCA is the target server PKI CA certificate, "" when unknown.
-	ServerCA string
 	// Contents is the target's own history, nil when it could not be read
 	// (ContentsNote says why).
 	Contents     *store.ContentSummary
@@ -367,7 +365,6 @@ func inspectRestoreTarget(ctx context.Context, cfg RestoreConfig, deps backupDep
 		if target.OpenBao, err = planOpenBaoRestore(ctx, bao, deps.rootToken, target.KV, archive.Policies, archive.Roles); err != nil {
 			return target, openBaoExec{}, err
 		}
-		target.ServerCA = readServerCA(ctx, bao, deps.rootToken, serverPKIMount(target.Values))
 	}
 	target.Cluster = readClusterIdentity(ctx, deps, cfg.Namespace)
 
@@ -427,16 +424,6 @@ func hasReleaseWIF(values map[string]any) bool {
 	return len(wif) > 0
 }
 
-// serverPKIMount is the release's server PKI mount (tls.pki.mount).
-func serverPKIMount(values map[string]any) string {
-	tls, _ := values["tls"].(map[string]any)
-	pki, _ := tls["pki"].(map[string]any)
-	if mount, _ := pki["mount"].(string); mount != "" {
-		return mount
-	}
-	return "oberth-pki"
-}
-
 // stringList reads a Helm values list of strings.
 func stringList(value any) []string {
 	items, _ := value.([]any)
@@ -470,9 +457,8 @@ func unionStrings(base, extra []string) []string {
 
 // restoreValuesOverlay returns the Helm values a restore sets on the target
 // release — the compatibility values the restored database must be opened
-// under, argo.releaseWIF when recorded, the watch tunnel pinned to the
-// target's server CA, and the source certificate's extra names (#068) — plus
-// notes about recorded values that are deliberately not reapplied.
+// under, argo.releaseWIF when recorded, and the source certificate's extra
+// names (#068) — plus notes about recorded values it does not apply.
 func restoreValuesOverlay(archive restoreArchive, target restoreTarget, parts restoreParts, argoNamespace string) (map[string]any, []string) {
 	overlay := map[string]any{}
 	var notes []string
@@ -502,23 +488,6 @@ func restoreValuesOverlay(archive restoreArchive, target restoreTarget, parts re
 			overlay["argo"] = map[string]any{"releaseWIF": wif}
 		}
 	}
-	// The tunnel's token is restored with the KV secrets; only its origin
-	// pin is cluster-specific, and the target's server CA replaces it.
-	if tunnel, ok := archive.Values["watchTunnel"].(map[string]any); ok && tunnel["enabled"] == true {
-		current, _ := target.Values["watchTunnel"].(map[string]any)
-		switch {
-		case !parts.Secrets:
-			notes = append(notes, "watchTunnel was enabled on the source; its token is a secret, so it is re-enabled only when secrets are restored too")
-		case target.ServerCA == "" && !target.OpenBao.Known:
-			notes = append(notes, "watchTunnel was enabled on the source; without the root token this plan cannot read this install's server CA, "+
-				"so it does not show the tunnel; a restore with the token re-enables it pinned to that CA")
-		case target.ServerCA == "":
-			notes = append(notes, "watchTunnel was enabled on the source but this install's server CA could not be read, so it is not re-enabled; "+
-				"set watchTunnel.enabled=true and watchTunnel.originCACert to ~/.config/oberth/ca.crt with oberth upgrade -f (docs/watch-tunnel.md)")
-		case current["enabled"] != true || strings.TrimSpace(fmt.Sprint(current["originCACert"])) != target.ServerCA:
-			overlay["watchTunnel"] = map[string]any{"enabled": true, "originCACert": target.ServerCA + "\n"}
-		}
-	}
 	sourceTLS, _ := archive.Values["tls"].(map[string]any)
 	targetTLS, _ := target.Values["tls"].(map[string]any)
 	tlsOverlay := map[string]any{}
@@ -531,7 +500,58 @@ func restoreValuesOverlay(archive restoreArchive, target restoreTarget, parts re
 	if len(tlsOverlay) > 0 {
 		overlay["tls"] = tlsOverlay
 	}
+	// Every other value the backup recorded is the operator's own
+	// deployment choice (their values files); name what differs here rather
+	// than apply it.
+	if paths := unappliedValues(archive.Values, target.Values); len(paths) > 0 {
+		notes = append(notes, "the backup's Helm values also set "+listSome(paths, 12)+
+			", which a restore does not apply; re-apply your own values files (oberth upgrade -f FILE), "+
+			"or recover them from the backup with: oberth backup export-values")
+	}
 	return overlay, notes
+}
+
+// restoreAppliedValues are the value paths a restore sets itself.
+var restoreAppliedValues = []string{"compatibility", "argo.releaseWIF", "tls.extraDNSNames", "tls.extraIPs"}
+
+// unappliedValues lists the leaf value paths the archive records, neither
+// installer-managed nor applied by the restore, whose value differs from
+// the target's.
+func unappliedValues(archived, target map[string]any) []string {
+	want, have := flattenValues("", archived), flattenValues("", target)
+	var paths []string
+	for path, value := range want {
+		if installerManagedValue(path) || slices.ContainsFunc(restoreAppliedValues, func(applied string) bool {
+			return path == applied || strings.HasPrefix(path, applied+".")
+		}) {
+			continue
+		}
+		if current, ok := have[path]; !ok || canonicalJSON(current) != canonicalJSON(value) {
+			paths = append(paths, path)
+		}
+	}
+	slices.Sort(paths)
+	return paths
+}
+
+// flattenValues maps nested Helm values to dotted leaf paths; lists are
+// leaves.
+func flattenValues(prefix string, values map[string]any) map[string]any {
+	out := map[string]any{}
+	for key, value := range values {
+		path := key
+		if prefix != "" {
+			path = prefix + "." + key
+		}
+		if nested, ok := value.(map[string]any); ok && len(nested) > 0 {
+			for leaf, leafValue := range flattenValues(path, nested) {
+				out[leaf] = leafValue
+			}
+			continue
+		}
+		out[path] = value
+	}
+	return out
 }
 
 func countGrants(grants secretAccessExport) int {

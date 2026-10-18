@@ -47,6 +47,8 @@ func runBackup(ctx context.Context, arguments []string, input io.Reader, output 
 			return runBackupKeygen(arguments[1:], output)
 		case "export-secrets":
 			return runExportSecrets(ctx, arguments[1:], output)
+		case "export-values":
+			return runExportValues(ctx, arguments[1:], output)
 		}
 	}
 	flags := flag.NewFlagSet("backup", flag.ContinueOnError)
@@ -114,7 +116,7 @@ func printBackupUsage(flags *flag.FlagSet, output io.Writer) error {
 Back up this Oberth into one file in the current directory,
 `+archivePrefix+`<date-time>`+archiveSuffix+`: the history (runs, issues,
 promotions, uplinks, step logs), the OpenBao secrets, policies and roles, and
-the settings a restore needs. Nothing in the cluster changes.
+the settings Oberth needs. Nothing in the cluster changes.
 
     oberth backup                    # asks for the OpenBao root token; Enter alone = history only
     oberth backup --history-only     # no secrets, no token
@@ -126,6 +128,7 @@ restored without it.
 
 Also:
     oberth backup export-secrets [FILE]   the secrets as plain JSON any OpenBao/Vault can import
+    oberth backup export-values [FILE]    the release's Helm values as a values file
     oberth backup keygen [--dir DIR]      create the key pair ahead of time
 
 `)
@@ -260,6 +263,40 @@ func runBackupDatabase(ctx context.Context, arguments []string, output io.Writer
 		return fmt.Errorf("database snapshot: %w", err)
 	}
 	return nil
+}
+
+func runExportValues(ctx context.Context, arguments []string, output io.Writer) error {
+	flags := flag.NewFlagSet("backup export-values", flag.ContinueOnError)
+	flags.SetOutput(io.Discard)
+	key := flags.String("key", "", "the backup's private `KEY` instead of ~/.config/oberth/backup/recipient.key")
+	positional, help, err := parseOperatorFlags(flags, arguments)
+	if help {
+		_, _ = fmt.Fprint(output, `Usage: oberth backup export-values [FILE] > values.yaml
+
+Print the Helm values of release oberth that a backup recorded, as YAML.
+A restore applies only what Oberth needs (compatibility values, release WIF,
+certificate names); your other settings live in your own values files, and
+this recovers them when those files are gone. Values the installer sets
+itself (image, secretstore, tls.pki, certificate pins) describe the source
+install: keep only your own settings before oberth upgrade -f values.yaml.
+FILE defaults to the newest backup in the current directory.
+
+`)
+		printOperatorFlags(flags, output)
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	archive, err := resolveArchive(positional, os.Stderr)
+	if err != nil {
+		return err
+	}
+	keyPath, err := resolveBackupKey(*key, archive)
+	if err != nil {
+		return err
+	}
+	return installer.ExportValues(ctx, installer.ExportSecretsConfig{Input: archive, PrivateKey: keyPath}, installer.InstallDeps{Output: output}, output)
 }
 
 func runRestore(ctx context.Context, arguments []string, input io.Reader, output io.Writer) error {

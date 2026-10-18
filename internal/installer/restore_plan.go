@@ -23,8 +23,8 @@ const (
 // restoreParts are the parts a restore applies. History is the database
 // (runs, issues, promotions, uplinks, the audit chain), the step logs and the
 // compatibility values the database needs; secrets are OpenBao KV secrets,
-// policies and roles; settings are the grants table, release WIF, the watch
-// tunnel and the certificate names.
+// policies and roles; settings are the grants table, release WIF and the
+// certificate names.
 type restoreParts struct {
 	History, Secrets, Settings bool
 }
@@ -168,9 +168,6 @@ func settingsSummary(archive restoreArchive) []string {
 	if hasReleaseWIF(archive.Values) {
 		lines = append(lines, "release WIF configured")
 	}
-	if tunnel, _ := archive.Values["watchTunnel"].(map[string]any); tunnel["enabled"] == true {
-		lines = append(lines, "watch tunnel enabled")
-	}
 	tls, _ := archive.Values["tls"].(map[string]any)
 	if names := append(stringList(tls["extraDNSNames"]), stringList(tls["extraIPs"])...); len(names) > 0 {
 		lines = append(lines, "certificate names "+strings.Join(names, ", "))
@@ -178,7 +175,17 @@ func settingsSummary(archive restoreArchive) []string {
 	if archive.Grants.Present {
 		lines = append(lines, fmt.Sprintf("%d grants", countGrants(archive.Grants)))
 	}
+	if own := operatorValues(archive.Values); len(own) > 0 {
+		lines = append(lines, "your other Helm values (not restored; oberth backup export-values): "+listSome(own, 12))
+	}
 	return lines
+}
+
+// operatorValues lists the leaf value paths an archive records that are
+// neither installer-managed nor applied by a restore: the operator's own
+// values-file settings.
+func operatorValues(values map[string]any) []string {
+	return unappliedValues(values, nil)
 }
 
 // --- The plan: what changes on this install ---
@@ -221,7 +228,7 @@ func printRestorePlan(w io.Writer, cfg RestoreConfig, deps backupDeps, archive r
 		untouched = append(untouched, "OpenBao secrets, policies and roles")
 	}
 	if !parts.Settings {
-		untouched = append(untouched, "settings (grants, release WIF, watch tunnel, certificate names)")
+		untouched = append(untouched, "settings (grants, release WIF, certificate names)")
 	}
 	if len(untouched) > 0 {
 		_, _ = fmt.Fprintf(w, "  Unchanged  %s\n", joinWords(untouched))
@@ -326,14 +333,6 @@ func printSettingChanges(w io.Writer, archive restoreArchive, target restoreTarg
 		} else {
 			lines = append(lines, "argo.releaseWIF: not set -> the archive's")
 		}
-	}
-	if _, ok := target.Overlay["watchTunnel"]; ok {
-		current, _ := target.Values["watchTunnel"].(map[string]any)
-		from := "disabled"
-		if current["enabled"] == true {
-			from = "enabled with another origin pin"
-		}
-		lines = append(lines, "watchTunnel: "+from+" -> enabled, origin pinned to this install's server CA")
 	}
 	if tls, ok := target.Overlay["tls"].(map[string]any); ok {
 		targetTLS, _ := target.Values["tls"].(map[string]any)

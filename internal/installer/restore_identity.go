@@ -118,14 +118,3 @@ func sshPrivateFingerprint(pemKey string) string {
 	}
 	return fingerprint
 }
-
-// readServerCA returns the PEM certificate of the target's server PKI CA,
-// which every leaf the server issues chains to, or "" when it cannot be read.
-func readServerCA(ctx context.Context, bao openBaoExec, token, mount string) string {
-	ca, err := bao.readData(ctx, token, mount+"/cert/ca")
-	if err != nil {
-		return ""
-	}
-	certificate, _ := ca["certificate"].(string)
-	return strings.TrimSpace(certificate)
-}
