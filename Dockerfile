@@ -49,15 +49,15 @@ RUN apk add --no-cache \
     # fixed and available for x86_64 and aarch64. Pin the fixed APK revision
     # so substrate builds fail loudly if the repository supersedes it.
     pcre2=10.49-r0 \
-    # CVE-2026-93990 (HIGH): libexpat arrives as git's transitive dependency;
-    # the alpine:3.23 base digest above still resolves 2.8.4-r0 while the
-    # fixed 2.8.5-r0 exists only in the apk repository (verified present for
-    # x86_64 and aarch64). Exact-pinned like libcrypto3 above: when the repo
-    # supersedes 2.8.5-r0 this line fails the build loudly — re-pin
-    # deliberately, never drift silently.
-    libexpat=2.8.5-r0 \
+    # CVE-2026-93990, CVE-2026-77214 (HIGH): libexpat arrives as git's
+    # transitive dependency; the alpine:3.23 base digest above still resolves
+    # 2.8.4-r0 while the fixed 2.9.0-r0 exists only in the apk repository
+    # (verified present for x86_64 and aarch64). Exact-pinned like libcrypto3
+    # above: when the repo supersedes 2.9.0-r0 this line fails the build
+    # loudly — re-pin deliberately, never drift silently.
+    libexpat=2.9.0-r0 \
     openssh-client-default=10.2_p1-r0 \
-    tzdata=2026d-r0 \
+    tzdata=2026e-r0 \
     && rm -f /var/log/apk.log
 COPY --from=build /out/oberth /usr/local/bin/oberth
 ENV HOME=/tmp
