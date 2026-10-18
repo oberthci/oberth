@@ -44,11 +44,7 @@ func keyPendingInstall(_ int, deps installer.InstallDeps) error {
 
 func acknowledgeAll(h *harness) {
 	h.t.Helper()
-	c := h.w.install.ceremony
-	for range c.entries {
-		h.letter("r")
-		h.letter("s")
-	}
+	h.enter() // Continue: the warning
 	h.enter() // Continue
 }
 
@@ -321,10 +317,10 @@ func TestResponsibleStep(t *testing.T) {
 	}
 }
 
-// The ceremony acknowledges each credential on its own; copying one no
-// longer discards all of them, copy does not reveal, and only the bearer
-// token is described as kept as a digest (#010).
-func TestCeremonyPerEntry(t *testing.T) {
+// The ceremony shows every value in full; there is no per-value reveal or
+// saved mark (#071). Continue warns once, then discards every value, and
+// only the bearer token is described as kept as a digest (#010).
+func TestCeremonyShowsAllAndWarnsOnce(t *testing.T) {
 	c := newCeremony()
 	root, unseal, bearer := []byte(fakeRoot), []byte(fakeUnseal), []byte(fakeBearer)
 	c.add("Root token", root)
@@ -333,42 +329,45 @@ func TestCeremonyPerEntry(t *testing.T) {
 	if !bytes.Equal(root, make([]byte, len(root))) {
 		t.Fatal("add must zero the delivery buffer (S2)")
 	}
-	c.cursor = 0
+	w := &wizard{width: 100, height: 40}
+	view := ansiStrip(strings.Join(c.frame(w).body, "\n"))
+	for _, value := range []string{fakeRoot, fakeUnseal, fakeBearer} {
+		if !strings.Contains(view, value) {
+			t.Fatalf("every value must be shown without a key press:\n%s", view)
+		}
+	}
+	for _, letter := range []string{"r", "s", "c"} {
+		if cmd, leave := c.update(tea.KeyPressMsg(tea.Key{Code: rune(letter[0]), Text: letter})); cmd != nil || leave {
+			t.Fatalf("%q must do nothing", letter)
+		}
+	}
+	if keys := c.frame(w).keys; strings.Contains(keys, "reveal") || strings.Contains(keys, "copy") {
+		t.Fatalf("key line still offers reveal or copy: %q", keys)
+	}
 
-	cmd, _ := c.update(tea.KeyPressMsg(tea.Key{Code: 'c', Text: "c"}))
-	if cmd == nil || !c.entries[0].copied || c.entries[0].revealed {
-		t.Fatal("c copies the selected entry without revealing it")
+	enter := tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter})
+	if _, leave := c.update(enter); leave || !strings.Contains(c.errMsg, "not shown again") || c.entries[0].value == nil {
+		t.Fatalf("the first Enter only warns: %q", c.errMsg)
 	}
-	if _, leave := c.act(cerContinue); leave {
-		t.Fatal("one copied entry must not let the ceremony end")
+	if _, leave := c.update(enter); !leave || c.pending() {
+		t.Fatal("the second Enter continues")
 	}
-	c.act(cerSaved)
-	if !c.entries[0].saved || c.entries[0].value != nil || c.entries[1].saved {
-		t.Fatal("saving one entry must zero that entry only")
+	for _, e := range c.entries {
+		if e.value != nil {
+			t.Fatalf("%s kept after continuing", e.label)
+		}
 	}
-	c.cursor = 1
-	c.act(cerSaved)
-	if c.entries[1].saved || c.errMsg == "" {
-		t.Fatal("an entry must be revealed or copied before it can be marked saved")
-	}
-	c.act(cerReveal)
-	c.act(cerSaved)
-	c.cursor = 2
-	c.act(cerReveal)
-	c.act(cerSaved)
-	if _, leave := c.act(cerContinue); !leave || c.pending() {
-		t.Fatal("with every entry saved the ceremony continues")
+
+	// A credential that arrives later is shown, and warned about, anew.
+	c.add("Bearer token 2", []byte(fakeBearer))
+	if _, leave := c.update(enter); leave {
+		t.Fatal("a new value needs its own warning")
 	}
 
 	if !strings.Contains(credentialPurpose("Bearer token"), "digest") ||
 		strings.Contains(credentialPurpose("Root token"), "digest") ||
 		strings.Contains(credentialPurpose("Unseal key"), "digest") {
 		t.Fatal("only the bearer token is kept as a digest")
-	}
-	w := &wizard{width: 80, height: 24}
-	spec := c.frame(w)
-	if !strings.Contains(spec.keys, "↑/↓") {
-		t.Fatalf("the key line must teach selection: %q", spec.keys)
 	}
 }
 

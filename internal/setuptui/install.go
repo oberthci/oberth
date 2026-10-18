@@ -420,6 +420,7 @@ func (s *installScreen) update(w *wizard, msg tea.Msg) tea.Cmd {
 		if leave {
 			return tea.Batch(cmd, s.afterCeremony(w))
 		}
+		s.scrollKey(w, key.String())
 		return cmd
 	case installFailedView:
 		k := key.String()

@@ -12,22 +12,17 @@ import (
 // ceremonyEntry is one once-only credential: the OpenBao root token, an
 // unseal key, or the uplink bearer token. The value lives in one []byte
 // owned by the ceremony — never in WizardState, never logged — and is
-// zeroed as soon as the operator marks that entry saved.
+// zeroed as soon as the operator continues past it.
 type ceremonyEntry struct {
-	label    string
-	value    []byte
-	revealed bool
-	copied   bool
-	saved    bool
+	label string
+	value []byte
+	saved bool
 	// filedAt is where Save to file put the value (#062).
 	filedAt string
 }
 
 const (
-	cerReveal = iota
-	cerCopy
-	cerFile
-	cerSaved
+	cerFile = iota
 	cerContinue
 	cerButtons
 )
@@ -43,21 +38,24 @@ var tokenFileFallback = installer.TokenFileFallback
 // fileable reports whether Save to file applies to an entry: only the bearer
 // token, only where the client files read it from the owner-only file.
 func fileable(e *ceremonyEntry) bool {
-	return e != nil && !e.saved && strings.HasPrefix(e.label, "Bearer token") && tokenFileFallback()
+	return e != nil && !e.saved && e.filedAt == "" && strings.HasPrefix(e.label, "Bearer token") && tokenFileFallback()
 }
 
-// ceremony shows each credential once. Every entry is revealed or copied
-// and acknowledged on its own; copying one entry no longer acknowledges —
-// and discards — all of them (#010).
+// ceremony shows every credential in full on one screen. There is nothing
+// to reveal, copy or tick off per value (#071): the operator selects the
+// text in the terminal, and Continue asks once more before it discards them.
 type ceremony struct {
 	entries []*ceremonyEntry
-	cursor  int
 	focus   focusRing
 	errMsg  string
+	// confirming is set by the first Continue; the second one leaves.
+	confirming bool
 }
 
 func newCeremony() *ceremony {
-	return &ceremony{focus: focusRing{targets: 1, buttons: cerButtons}}
+	c := &ceremony{focus: focusRing{buttons: cerButtons}}
+	c.focus.focusButton(cerContinue)
+	return c
 }
 
 // add takes ownership of one credential: it copies the bytes and ZEROS THE
@@ -69,18 +67,24 @@ func (c *ceremony) add(label string, value []byte) {
 		value[i] = 0
 	}
 	c.entries = append(c.entries, &ceremonyEntry{label: label, value: cp})
-	c.cursor = len(c.entries) - 1
-	c.focus = focusRing{targets: 1, buttons: cerButtons}
+	c.confirming, c.errMsg = false, ""
+	c.focus.focusButton(cerContinue)
 }
 
-// pending reports whether any credential still waits for acknowledgement.
+// pending reports whether any credential has not been shown and continued
+// past yet.
 func (c *ceremony) pending() bool {
+	return len(c.unsaved()) > 0
+}
+
+func (c *ceremony) unsaved() []*ceremonyEntry {
+	var out []*ceremonyEntry
 	for _, e := range c.entries {
 		if !e.saved {
-			return true
+			out = append(out, e)
 		}
 	}
-	return false
+	return out
 }
 
 func zero(b []byte) {
@@ -97,36 +101,25 @@ func (c *ceremony) zeroAll() {
 	}
 }
 
-func (c *ceremony) selected() *ceremonyEntry {
-	if c.cursor < 0 || c.cursor >= len(c.entries) {
-		return nil
+// bearer is the unsaved bearer token Save to file applies to, if any.
+func (c *ceremony) bearer() *ceremonyEntry {
+	for _, e := range c.unsaved() {
+		if fileable(e) {
+			return e
+		}
 	}
-	return c.entries[c.cursor]
+	return nil
 }
 
-// act applies one of the ceremony's actions to the selected entry.
+// act applies one of the ceremony's actions.
 func (c *ceremony) act(action int) (tea.Cmd, bool) {
-	e := c.selected()
-	c.errMsg = ""
 	switch action {
-	case cerReveal:
-		if e != nil && !e.saved {
-			e.revealed = !e.revealed
-		}
-	case cerCopy:
-		if e != nil && !e.saved && len(e.value) > 0 {
-			// OSC 52 copy of the SELECTED credential only; it does not
-			// reveal it (S8: opt-in, and the terminal may not support it).
-			e.copied = true
-			return tea.SetClipboard(string(e.value)), false
-		}
 	case cerFile:
 		// Oberth writes a token to disk only here, when the operator asks
 		// (docs/remote-cli.md, #062).
-		if !fileable(e) {
-			if e != nil && !e.saved {
-				c.errMsg = "Save to file is for the bearer token on a host whose client files read ~/.config/oberth/token."
-			}
+		e := c.bearer()
+		if e == nil {
+			c.errMsg = "Save to file is for the bearer token on a host whose client files read ~/.config/oberth/token."
 			return nil, false
 		}
 		path, err := saveTokenFile(e.value)
@@ -134,72 +127,43 @@ func (c *ceremony) act(action int) (tea.Cmd, bool) {
 			c.errMsg = "Not saved: " + err.Error()
 			return nil, false
 		}
-		e.filedAt = path
-		c.markSaved(e)
-	case cerSaved:
-		if e == nil || e.saved {
-			return nil, false
-		}
-		if !e.revealed && !e.copied {
-			c.errMsg = "Reveal or copy " + e.label + " before marking it saved."
-			return nil, false
-		}
-		c.markSaved(e)
+		e.filedAt, c.errMsg = path, ""
+		c.focus.focusButton(cerContinue)
 	case cerContinue:
-		if c.pending() {
-			c.errMsg = "Mark every credential saved first — each is shown only on this screen."
+		if !c.pending() {
+			return nil, true
+		}
+		if !c.confirming {
+			c.confirming = true
+			c.errMsg = "These values are not shown again once you continue. Store every one of them, then press Enter again."
 			return nil, false
 		}
+		for _, e := range c.unsaved() {
+			e.saved = true
+			zero(e.value)
+			e.value = nil
+		}
+		c.confirming, c.errMsg = false, ""
 		return nil, true
 	}
 	return nil, false
 }
 
-// markSaved discards an entry's value and moves to the next unsaved one.
-func (c *ceremony) markSaved(e *ceremonyEntry) {
-	e.saved = true
-	e.revealed = false
-	zero(e.value)
-	e.value = nil
-	for i, other := range c.entries {
-		if !other.saved {
-			c.cursor = i
-			break
-		}
-	}
-	if !c.pending() {
-		c.focus.focusButton(cerContinue)
-	}
-}
-
-// update handles a key; leave reports that every entry is acknowledged and
-// the operator continued. There is no Go Back: the values cannot come back.
+// update handles a key; leave reports that the operator continued past
+// every value. There is no Go Back: the values cannot come back. The arrow
+// keys scroll the screen (installScreen.update).
 func (c *ceremony) update(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 	key := msg.String()
 	switch key {
-	case "r":
-		return c.act(cerReveal)
-	case "c":
-		return c.act(cerCopy)
 	case "f":
 		return c.act(cerFile)
-	case "s":
-		return c.act(cerSaved)
 	case "enter":
 		if b := c.focus.button(); b >= 0 {
 			return c.act(b)
 		}
-		return c.act(cerSaved)
+		return c.act(cerContinue)
 	}
-	if c.focus.handle(key) || c.focus.button() >= 0 {
-		return nil, false
-	}
-	switch key {
-	case "up", "k":
-		c.cursor = max(0, c.cursor-1)
-	case "down", "j":
-		c.cursor = min(len(c.entries)-1, c.cursor+1)
-	}
+	c.focus.handle(key)
 	return nil, false
 }
 
@@ -215,7 +179,7 @@ func credentialPurpose(label string) string {
 		_, store := installer.TokenCommands()
 		text := "Uplink bearer token: the CLI and MCP clients authenticate with it. Oberth keeps only a digest, so this is the only copy. Store it where the client files read it: " + store
 		if tokenFileFallback() {
-			text += " — or press Save to file, which writes exactly that file (mode 0600)."
+			text += " — or press Save to file (f), which writes exactly that file (mode 0600)."
 		}
 		return text
 	}
@@ -227,43 +191,28 @@ func (c *ceremony) frame(w *wizard) frameSpec {
 	spec := frameSpec{
 		title:     stepInstall.title(),
 		heading:   "Store the credentials",
-		explain:   "Each value exists only on this screen. Reveal or copy one, store it, then mark it saved — that discards it here. Continue unlocks once every value is saved. Copy uses the terminal clipboard (OSC 52), which is outside Oberth's control.",
+		explain:   "These values exist only on this screen. Select each one with the mouse and store it now, e.g. in a password manager. Continue discards them here, after one more warning.",
 		focusLine: -1,
 		errMsg:    c.errMsg,
-		buttons:   []string{"Reveal", "Copy", "Save to file", "Saved", "Continue"},
+		buttons:   []string{"Save to file", "Continue"},
 		button:    c.focus.button(),
-		disabled:  map[int]bool{cerContinue: c.pending(), cerFile: !fileable(c.selected())},
-		keys:      "↑/↓ select · r reveal · c copy · f save to file · s saved · tab buttons",
+		disabled:  map[int]bool{cerFile: c.bearer() == nil},
+		keys:      "↑/↓ pgup/pgdn scroll · f save token to file · ←/→ buttons · enter continue",
 	}
-	for i, e := range c.entries {
-		marker := "  "
-		label := sText.Render(e.label)
-		if i == c.cursor {
-			marker = lipgloss.NewStyle().Foreground(cPurple).Render("❯ ")
-			label = sSelected.Render(e.label)
-			// Keep the value line in view, not just the label.
-			spec.focusLine = len(spec.body) + 1
-		}
+	for _, e := range c.entries {
+		label := sSelected.Render(e.label)
 		var state string
 		switch {
-		case e.saved && e.filedAt != "":
-			state = sGo.Render("✓ saved to " + displayHome(e.filedAt) + " (0600) — discarded here")
 		case e.saved:
-			state = sGo.Render("✓ saved — discarded here")
-		case e.copied:
-			state = sHold.Render("copied · not marked saved")
-		default:
-			state = sHold.Render("not saved yet")
+			state = sGo.Render("✓ shown earlier — discarded here")
+		case e.filedAt != "":
+			state = sGo.Render("✓ saved to " + displayHome(e.filedAt) + " (0600)")
 		}
-		spec.body = append(spec.body, marker+label+"  "+state)
-		switch {
-		case e.saved:
-		case e.revealed:
+		spec.body = append(spec.body, lipgloss.NewStyle().Foreground(cPurple).Render("• ")+label+"  "+state)
+		if !e.saved {
 			for _, l := range wrapText(string(e.value), inner-4) {
 				spec.body = append(spec.body, "    "+sReveal.Render(l))
 			}
-		default:
-			spec.body = append(spec.body, "    "+sHighlight.Render(strings.Repeat("█", min(40, inner-4))))
 		}
 		for _, l := range wrapText(credentialPurpose(e.label), inner-4) {
 			spec.body = append(spec.body, "    "+sMuted.Render(l))

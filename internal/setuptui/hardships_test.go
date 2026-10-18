@@ -297,12 +297,7 @@ func TestCeremonySaveTokenToFile(t *testing.T) {
 		t.Fatal("nothing may be written before the operator asks")
 	}
 
-	c.cursor = 0
-	c.act(cerFile)
-	if c.errMsg == "" || c.entries[0].saved {
-		t.Fatal("the root token must never be filed")
-	}
-	c.cursor = 1
+	// Save to file picks the bearer token; the root token is never filed.
 	bearer := c.entries[1]
 	c.act(cerFile)
 	data, err := os.ReadFile(path)
@@ -312,7 +307,7 @@ func TestCeremonySaveTokenToFile(t *testing.T) {
 	if info, _ := os.Stat(path); info.Mode().Perm() != 0o600 {
 		t.Errorf("mode %v", info.Mode().Perm())
 	}
-	if !bearer.saved || bearer.value != nil || bearer.filedAt != path {
+	if bearer.filedAt != path {
 		t.Errorf("entry after filing: %+v", bearer)
 	}
 	w := newWizard(Options{}, newWizardState(Options{}))
@@ -325,7 +320,7 @@ func TestCeremonySaveTokenToFile(t *testing.T) {
 	c2 := newCeremony()
 	c2.add("Bearer token", []byte("oberth_def"))
 	c2.act(cerFile)
-	if c2.entries[0].saved {
+	if c2.entries[0].filedAt != "" {
 		t.Error("with a secret store the token stays the operator's to store")
 	}
 }
