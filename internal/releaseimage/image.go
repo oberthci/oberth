@@ -40,15 +40,18 @@ const (
 	// There is no runner image: Jobs run repository-declared standard golang
 	// images executing `go -C .oberth run .`.
 	//
-	// Substrate 2026-10-02 (tag substrate-pcre2-1049-be6edf8d65de): rebuilt
-	// from cleanup source be6edf8d65de3a93877231dad6568fd8ebf2b8c7 with
-	// pcre2 10.49-r0 and libcrypto3/libssl3
-	// 3.5.9-r0 exact-pinned for the reviewed Alpine 3.23 repository. The
+	// Substrate 2026-10-18 (tag substrate-expat-290-0d56008635aa): rebuilt
+	// from source 0d56008635aa1400107a95f878e87ebc31312699 with libexpat
+	// 2.9.0-r0 (CVE-2026-77214) and tzdata 2026e-r0 exact-pinned for the
+	// reviewed Alpine 3.23 repository; the other pins are unchanged. The
 	// package inventory remains 36 packages on both linux/amd64 and
-	// linux/arm64, with no packages added or removed; /usr/local/bin/oberth
-	// is present. This is an OCI index with exactly two platform children and
-	// no attestation manifests.
-	ServerSubstrate = ServerRepository + "@sha256:0122f7889678299dd953ae13f63ca9ab6b02f803475bf75ec6e3ada43ec5bec6"
+	// linux/arm64 and every checked ELF (busybox, git, ssh, libexpat, oberth)
+	// matches its platform; /usr/local/bin/oberth is present. Each platform
+	// was built separately: a multi-platform podman build resolved the alpine
+	// index digest to the cached amd64 image for arm64, so the arm64 build
+	// named the index's own arm64 child (sha256:d858bb54…). This is an OCI
+	// index with exactly two platform children and no attestation manifests.
+	ServerSubstrate = ServerRepository + "@sha256:bfaaa3cc0b1cc7a4e4fefeb97780e46b217f5552db1a4d0bdfef031ef2c8c13f"
 )
 
 // Kind selects a release image contract. Only the server image remains.
