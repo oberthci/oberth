@@ -4,8 +4,9 @@ import "strings"
 
 // installerManagedValues are the oberth chart value paths `oberth install`
 // and `oberth upgrade` set themselves (see helmUpgradeArgs and the Argo
-// values): each install derives them from its own cluster, image and
-// OpenBao. A restore leaves them to the target install, and never tells the
+// values): each install derives them from its own cluster, image, OpenBao
+// and grants. TestInstallerManagedValuesCoverEverySet keeps this list in
+// step with the installer's --set flags. A restore leaves them to the target install, and never tells the
 // operator to re-apply them from a backup.
 var installerManagedValues = []string{
 	"image",
@@ -22,6 +23,11 @@ var installerManagedValues = []string{
 	"argo.vault",
 	"argo.ciSecrets",
 	"argo.goProxy",
+	"argo.perRepoIdentities",
+	"argo.perRepoCIIdentities",
+	"argo.perStepIdentities",
+	"auditAnchor",
+	"networkPolicy.enabled",
 	"promotion.grantMaxLifetime",
 }
 
