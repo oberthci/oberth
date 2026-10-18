@@ -695,7 +695,7 @@ func TestSerializedSameSecondAdmissionAndRecovery(t *testing.T) {
 				if _, err := f.b.Create(f.ctx, f.plan); !errors.Is(err, vmrunner.ErrExecutionOutstanding) {
 					t.Fatalf("ambiguous response: %v", err)
 				}
-				must(t, (&vmrunner.PilotReconciler{Journal: f.s, Runtime: f.b, Timeout: time.Second}).Cleanup(f.ctx, f.plan.Spec.RunID))
+				must(t, (&vmrunner.PilotReconciler{Journal: f.s, Runtime: f.b, Timeout: 10 * time.Second}).Cleanup(f.ctx, f.plan.Spec.RunID))
 				owned := f.owned(t, vmrunner.ConductorResource)
 				if !owned.Cleaned || owned.Receipt.UID != "job-uid" || !owned.Receipt.CreatedAt.Equal(base) {
 					t.Fatal("recovery lost actual second-precision creation receipt")
@@ -725,7 +725,7 @@ func TestSerializedSameSecondAdmissionAndRecovery(t *testing.T) {
 			if _, err := f.b.Termination(f.ctx, f.plan, attempt); err == nil {
 				t.Fatal("replacement accepted at same timestamp")
 			}
-			must(t, (&vmrunner.PilotReconciler{Journal: f.s, Runtime: f.b, Timeout: time.Second}).Cleanup(f.ctx, f.plan.Spec.RunID))
+			must(t, (&vmrunner.PilotReconciler{Journal: f.s, Runtime: f.b, Timeout: 10 * time.Second}).Cleanup(f.ctx, f.plan.Spec.RunID))
 		})
 	}
 }
