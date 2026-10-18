@@ -1937,13 +1937,16 @@ spec:
         readOnly: true
       - name: bootstrap-test-tools
         mountPath: /test-tools
+      # Six copies of the trusted tools go through the page cache; under
+      # heavy node I/O, dirty pages outrun writeback and a 512Mi limit
+      # OOM-killed this step (v0.17.38 release run ef637d76).
       resources:
         requests:
           cpu: '1'
-          memory: 512Mi
+          memory: 2Gi
         limits:
           cpu: '1'
-          memory: 512Mi
+          memory: 2Gi
   - name: fetch-apko
     automountServiceAccountToken: false
     metadata:
