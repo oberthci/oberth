@@ -311,6 +311,17 @@ func knownTool(name string) bool {
 	return false
 }
 
+// ToolNames lists every MCP tool the server offers, so the service can prove
+// each one is classified for scoped uplinks (#073).
+func ToolNames() []string {
+	definitions := toolDefinitions()
+	names := make([]string, 0, len(definitions))
+	for _, definition := range definitions {
+		names = append(names, definition["name"].(string))
+	}
+	return names
+}
+
 func toolDefinitions() []map[string]any {
 	stringProperty := func(description string) map[string]any {
 		return map[string]any{"type": "string", "description": description}
@@ -358,7 +369,7 @@ func toolDefinitions() []map[string]any {
 			"limit":      map[string]any{"type": "integer", "minimum": 1, "maximum": 200, "description": "Page size (default 50, maximum 200)"},
 		})),
 		tool("promote_status", "Wait for an append-only promotion record to become terminal.", object(map[string]any{"id": stringProperty("Promotion ID"), "timeout": timeoutProperty()}, "id")),
-		tool("issue_create", "Create a global manual issue.", object(map[string]any{"title": stringProperty("Issue title"), "body": stringProperty("Issue body")}, "title", "body")),
+		tool("issue_create", "Create a manual issue, workspace-global or filed under one upstream. Uplinks scoped to that upstream see it; an uplink scoped to one upstream files there by default.", object(map[string]any{"title": stringProperty("Issue title"), "body": stringProperty("Issue body"), "upstream": stringProperty("Upstream name to file the issue under (required for an uplink scoped to several upstreams)")}, "title", "body")),
 		tool("issue_get", "Get an issue by ID.", object(map[string]any{"id": integerProperty("Issue ID")}, "id")),
 		tool("issue_get_many", "Get complete issue records for 1..50 unique positive IDs in request order. Each result contains issue or error (not_found or response_limit). Structured JSON is bounded to 256 KiB; use issue_get for response_limit IDs. Bodies are never truncated. Read-only; does not renew locks.", object(map[string]any{"ids": map[string]any{"type": "array", "minItems": 1, "maxItems": 50, "uniqueItems": true, "items": map[string]any{"type": "integer", "minimum": 1}}}, "ids")),
 		tool("issue_update", "Update an issue title and body. When expected_body_sha256 is set, the server rejects the update if the SHA-256 of the existing body does not match, preventing silently truncated payloads from overwriting a longer body.", object(map[string]any{"id": integerProperty("Issue ID"), "title": stringProperty("Issue title"), "body": stringProperty("Issue body"), "expected_body_sha256": stringProperty("Hex-encoded SHA-256 of the existing body; the server rejects the update on mismatch")}, "id", "title", "body")),

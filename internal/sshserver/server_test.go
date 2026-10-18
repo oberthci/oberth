@@ -578,7 +578,7 @@ func TestSessionCapacityIsReleasedBeforeTerminalStatus(t *testing.T) {
 		Payload: ssh.Marshal(struct{ Command string }{Command: "git-upload-pack '/example.git'"}),
 	}
 	close(requests)
-	server.handleSession(context.Background(), "agent@host", channel, requests, func() error { return nil }, complete)
+	server.handleSession(context.Background(), sessionActor{identity: "agent@host"}, channel, requests, func() error { return nil }, complete)
 	if !channel.sawExitStatus {
 		t.Fatal("session did not send terminal status")
 	}

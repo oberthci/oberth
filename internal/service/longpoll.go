@@ -18,6 +18,10 @@ func (service *API) PrepareLongPoll(ctx context.Context, actor api.Actor, name s
 	if strings.TrimSpace(actor.Identity) == "" {
 		return nil, errors.New("service: acting uplink identity is required")
 	}
+	service, err := service.forActor(ctx, actor)
+	if err != nil {
+		return nil, err
+	}
 	switch name {
 	case "wait":
 		var arguments struct {

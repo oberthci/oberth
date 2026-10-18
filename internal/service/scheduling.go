@@ -46,6 +46,13 @@ func (service *API) scheduling(ctx context.Context, run model.Run, steps []model
 	}
 	if service.admission != nil {
 		result.Admission = service.admission.AdmissionSnapshot(run.QueueSequence)
+		if result.Admission != nil && service.scope != nil {
+			// The position and the capacity in use count every run, in or
+			// out of a scoped actor's scope (#073).
+			admission := *result.Admission
+			admission.Position, admission.Used = 0, 0
+			result.Admission = &admission
+		}
 		if result.Admission != nil {
 			result.State = result.Admission.State
 			switch result.Admission.State {

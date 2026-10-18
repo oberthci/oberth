@@ -18,15 +18,17 @@ func (s *Store) ListPromotions(ctx context.Context, filter model.PromotionListFi
 	if limit == 0 {
 		limit = 50
 	}
+	restriction, restrictionArgs := repoRestriction("repo_id", filter.RepoIDs)
+	args := append([]any{filter.RepoID, filter.RepoID,
+		filter.SourceSHA, filter.SourceSHA, filter.Status, filter.Status,
+		filter.Before, filter.Before}, restrictionArgs...)
 	rows, err := s.db.QueryContext(ctx, `
 SELECT sequence, id, repo_id, source_branch, source_sha, target_ref, previous_sha,
        result_sha, actor, status, run_id, grant_id, error, created_at, updated_at
 FROM promotions
 WHERE (? = 0 OR repo_id = ?) AND (? = '' OR source_sha = ?)
-  AND (? = '' OR status = ?) AND (? = 0 OR sequence < ?)
-ORDER BY sequence DESC LIMIT ?`, filter.RepoID, filter.RepoID,
-		filter.SourceSHA, filter.SourceSHA, filter.Status, filter.Status,
-		filter.Before, filter.Before, limit+1)
+  AND (? = '' OR status = ?) AND (? = 0 OR sequence < ?)`+restriction+`
+ORDER BY sequence DESC LIMIT ?`, append(args, limit+1)...) // #nosec G202 -- the restriction is a fixed column and ? placeholders from repoRestriction.
 	if err != nil {
 		return model.PromotionPage{}, fmt.Errorf("list promotions: %w", err)
 	}

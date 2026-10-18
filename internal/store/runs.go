@@ -336,14 +336,23 @@ func (s *Store) RunIDsExist(ctx context.Context, ids []string) (map[string]bool,
 // hexadecimal prefix of at least 12 characters, as printed by push feedback.
 // Keep Run exact-only: mutation and scheduler identity lookups never abbreviate.
 func (s *Store) ResolveRunID(ctx context.Context, id string) (model.Run, error) {
+	return s.ResolveRunIDIn(ctx, id, nil)
+}
+
+// ResolveRunIDIn resolves like ResolveRunID among runs of repoIDs only (nil:
+// every repository), so a prefix is unique, or ambiguous, within that set
+// alone (#073).
+func (s *Store) ResolveRunIDIn(ctx context.Context, id string, repoIDs []int64) (model.Run, error) {
 	id = strings.ToLower(strings.TrimSpace(id))
 	if len(id) < 12 || len(id) > 32 || !isHexPrefix(id) {
 		return model.Run{}, fmt.Errorf("%w: run ID must be 12 to 32 hexadecimal characters", ErrInvalid)
 	}
-	if len(id) == 32 {
+	if len(id) == 32 && repoIDs == nil {
 		return s.Run(ctx, id)
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT `+runColumns+` FROM runs WHERE id LIKE ? LIMIT 2`, id+"%")
+	restriction, restrictionArgs := repoRestriction("repo_id", repoIDs)
+	rows, err := s.db.QueryContext(ctx, `SELECT `+runColumns+` FROM runs WHERE id LIKE ?`+restriction+` LIMIT 2`, // #nosec G202 -- the restriction is a fixed column and ? placeholders from repoRestriction.
+		append([]any{id + "%"}, restrictionArgs...)...)
 	if err != nil {
 		return model.Run{}, fmt.Errorf("resolve run ID prefix: %w", err)
 	}
@@ -361,6 +370,9 @@ func (s *Store) ResolveRunID(ctx context.Context, id string) (model.Run, error) 
 	}
 	switch len(matches) {
 	case 0:
+		if len(id) == 32 {
+			return model.Run{}, fmt.Errorf("%w: run", ErrNotFound)
+		}
 		return model.Run{}, fmt.Errorf("%w: run ID %q", ErrNotFound, id)
 	case 1:
 		return matches[0], nil
@@ -776,11 +788,12 @@ RETURNING `+runColumns,
 }
 
 func (s *Store) ListRecentRuns(ctx context.Context, filter model.RunListFilter) ([]model.Run, error) {
+	restriction, restrictionArgs := repoRestriction("repo_id", filter.RepoIDs)
+	args := append([]any{filter.RepoID, filter.RepoID, filter.Ref, filter.Ref, filter.Before, filter.Before}, restrictionArgs...)
 	rows, err := s.db.QueryContext(ctx, `
 SELECT `+runColumns+` FROM runs
-WHERE (? = 0 OR repo_id = ?) AND (? = '' OR ref = ?) AND (? <= 0 OR queue_sequence < ?)
-ORDER BY queue_sequence DESC LIMIT ?`,
-		filter.RepoID, filter.RepoID, filter.Ref, filter.Ref, filter.Before, filter.Before, pageLimit(filter.Limit))
+WHERE (? = 0 OR repo_id = ?) AND (? = '' OR ref = ?) AND (? <= 0 OR queue_sequence < ?)`+restriction+`
+ORDER BY queue_sequence DESC LIMIT ?`, append(args, pageLimit(filter.Limit))...) // #nosec G202 -- the restriction is a fixed column and ? placeholders from repoRestriction.
 	if err != nil {
 		return nil, fmt.Errorf("list recent runs: %w", err)
 	}

@@ -13,7 +13,7 @@ type migration struct {
 func LatestMigrationVersion() int { return latestMigrationVersion }
 
 const (
-	latestMigrationVersion = 21
+	latestMigrationVersion = 22
 	// oberthSchemaIdentity is the fresh-deployment default. Existing deployments
 	// supply their original immutable identity through ProtocolConfig; bootstrap
 	// SQL and legacy schema validation use that exact configured operand.
@@ -1056,4 +1056,20 @@ BEGIN
 END;`,
 	},
 	{version: 21, sql: `ALTER TABLE step_results ADD COLUMN termination_json TEXT CHECK(termination_json IS NULL OR length(termination_json) <= 4096);`},
+	{
+		// v22: upstream-scoped uplinks (#073). An uplink with scope rows sees
+		// and touches only repositories of those upstreams, named as the
+		// upstream is ("github"). No rows keeps an uplink unscoped. A name,
+		// not a foreign key: removing an upstream must never drop the last
+		// row and so widen a scoped uplink to everything. A manual issue may
+		// be filed under one upstream so scoped uplinks see it; the store
+		// checks the upstream exists, and upstream IDs are never reused.
+		version: 22,
+		sql: `CREATE TABLE uplink_scopes (
+    uplink_id INTEGER NOT NULL REFERENCES uplinks(id) ON DELETE CASCADE,
+    scope TEXT NOT NULL CHECK (length(scope) BETWEEN 1 AND 128),
+    PRIMARY KEY (uplink_id, scope)
+) WITHOUT ROWID;
+ALTER TABLE issues ADD COLUMN scope_upstream_id INTEGER;`,
+	},
 }

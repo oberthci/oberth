@@ -646,9 +646,11 @@ continuity checks; it must never be used to reset or bypass those checks.
   precedence, explicit tag selectors and repository/ref ambiguity remain
   unchanged; unknown selectors keep not-found. This read-only selection does
   not fetch upstream or alter sync, promotion or trigger-filtered wait rules.
-  This is the complete tool surface. `issue_create` takes only a `title` and a
-  `body` and creates a workspace-global manual issue. Run selectors are resolved across
-  repositories without a repository input. `issue_list` accepts optional `repo`,
+  This is the complete tool surface. `issue_create` takes a `title`, a `body`
+  and an optional `upstream`; without one it creates a workspace-global manual
+  issue, except for an uplink scoped to exactly one upstream, which files
+  there (#073). Run selectors are resolved across the repositories the uplink
+  may see without a repository input. `issue_list` accepts optional `repo`,
   `kind` (`manual` or `ci`), `state` (`open`, `closed`, or `all`), `limit`
   (1..50, default 50), and exclusive `before` issue-ID cursor. Omitted filters
   retain the all-issues default. Filters apply before pagination; records are
@@ -1129,6 +1131,18 @@ continuity checks; it must never be used to reset or bypass those checks.
   (fail-closed). Only admin uplinks may call `access_allow`,
   `access_revoke`, and `secretstore_verify`; non-admin callers receive a clear `ErrForbidden` error
   before any state read or write.
+- `uplink add --scope UPSTREAM[,UPSTREAM]` and `uplink scope --set|--clear`
+  limit an uplink to the repositories of named upstreams (#073; schema v22).
+  The scope travels with bearer-token and SSH authentication. For a scoped
+  Actor every MCP tool and `/api/*` view runs on scope-wrapped dependencies:
+  out-of-scope runs, issues, promotions, grants and repositories answer
+  exactly like missing ones, lists, counts and pages cover the scope only
+  (manual issues count only when filed under an in-scope upstream), queue
+  positions and capacity in use are withheld, `system_status` reports only
+  in-scope upstreams, and the `secretstore_*` tools are refused even to an
+  admin. SSH fetch and push resolve the path's upstream first and refuse
+  anything else with one fixed message. A scope that cannot be read fails
+  authentication instead of degrading to unscoped.
 - Secret-access grants are ConfigMap-driven: the `oberth-secret-access`
   ConfigMap in the server namespace is the declarative source of truth for
   the approval table. The server reconciles it into sqlite at startup and
@@ -1624,6 +1638,7 @@ version that is recorded on live databases must never be rewritten.
 | v19 | -- | Promotion grants (#826): promotion_grants table with append-only guards; promotions gains grant_id column; replaces promotions_guard_update trigger to guard grant_id immutability | Database restore |
 | v20 | Unreleased (#278) | vm_executions: execution kind, immutable KVM preflight intent/Workflow UID/receipt; preserve legacy VM lifecycle checks and shared capacity | Database restore |
 | v21 | Unreleased (#894) | Nullable bounded step termination diagnostics; old rows remain explicitly unavailable, with no inferred OOM or backfill | Database restore |
+| v22 | Unreleased (#073) | Upstream-scoped uplinks: uplink_scopes table (one upstream name per row; none = unscoped); issues gain nullable scope_upstream_id for manual issues | Database restore |
 
 **Contract test:** `TestEveryMigrationDocumentedInAgentContract` asserts that
 every migration version in `internal/store/schema.go` has a corresponding

@@ -107,6 +107,8 @@ type API struct {
 	removeGitCache            func(string) error
 	promotionGrants           PromotionGrantStore
 	promotionGrantMaxLifetime time.Duration
+	// scope is set on the per-call copy serving a scoped actor (#073).
+	scope *repoScope
 }
 
 func NewAPI(config APIConfig) (*API, error) {
@@ -165,18 +167,28 @@ func (service *API) CallTool(ctx context.Context, actor api.Actor, name string, 
 	if strings.TrimSpace(actor.Identity) == "" {
 		return nil, errors.New("service: acting uplink identity is required")
 	}
+	service, err := service.forActor(ctx, actor)
+	if err != nil {
+		return nil, err
+	}
 	if mutatingTool(name) {
 		if err := service.requireMutation(ctx); err != nil {
 			return nil, err
 		}
 	}
 	switch name {
-	case "secretstore_verify":
-		return service.verifySecretStore(ctx, actor, raw)
-	case "secretstore_plan":
-		return service.secretStorePlan(ctx, actor, raw)
-	case "secretstore_sync_receipt":
-		return service.secretStoreSyncReceipt(ctx, actor, raw)
+	case "secretstore_verify", "secretstore_plan", "secretstore_sync_receipt":
+		if err := requireUnscoped(actor, name); err != nil {
+			return nil, err
+		}
+		switch name {
+		case "secretstore_verify":
+			return service.verifySecretStore(ctx, actor, raw)
+		case "secretstore_plan":
+			return service.secretStorePlan(ctx, actor, raw)
+		default:
+			return service.secretStoreSyncReceipt(ctx, actor, raw)
+		}
 	case "status":
 		var arguments struct {
 			Repo string `json:"repo"`
@@ -319,8 +331,9 @@ func (service *API) CallTool(ctx context.Context, actor api.Actor, name string, 
 		return service.promotionList(ctx, arguments)
 	case "issue_create":
 		var arguments struct {
-			Title string  `json:"title"`
-			Body  *string `json:"body"`
+			Title    string  `json:"title"`
+			Body     *string `json:"body"`
+			Upstream string  `json:"upstream"`
 		}
 		if err := decodeTool(raw, &arguments); err != nil {
 			return nil, err
@@ -328,7 +341,7 @@ func (service *API) CallTool(ctx context.Context, actor api.Actor, name string, 
 		if arguments.Body == nil {
 			return nil, fmt.Errorf("%w: issue body is required", ErrInvalidInput)
 		}
-		issue, err := service.issueCreate(ctx, actor, arguments.Title, *arguments.Body)
+		issue, err := service.issueCreate(ctx, actor, arguments.Title, *arguments.Body, arguments.Upstream)
 		if err != nil {
 			return nil, err
 		}
@@ -564,7 +577,11 @@ func (service *API) CallTool(ctx context.Context, actor api.Actor, name string, 
 	}
 }
 
-func (service *API) Runs(ctx context.Context, _ api.Actor, filter api.RunFilter) (any, error) {
+func (service *API) Runs(ctx context.Context, actor api.Actor, filter api.RunFilter) (any, error) {
+	service, err := service.forActor(ctx, actor)
+	if err != nil {
+		return nil, err
+	}
 	if service.history == nil {
 		return nil, fmt.Errorf("%w: run history", ErrUnavailable)
 	}
@@ -581,7 +598,11 @@ func (service *API) Runs(ctx context.Context, _ api.Actor, filter api.RunFilter)
 
 // RunCounts is the dashboard's count of retained runs, in total and per
 // repository ID; the run list itself is paged.
-func (service *API) RunCounts(ctx context.Context, _ api.Actor) (any, error) {
+func (service *API) RunCounts(ctx context.Context, actor api.Actor) (any, error) {
+	service, err := service.forActor(ctx, actor)
+	if err != nil {
+		return nil, err
+	}
 	if service.history == nil {
 		return nil, fmt.Errorf("%w: run history", ErrUnavailable)
 	}
@@ -591,7 +612,11 @@ func (service *API) RunCounts(ctx context.Context, _ api.Actor) (any, error) {
 // Grants is the read-only dashboard/API view of promotion grants, mirroring
 // the MCP promote_grant_list tool with query-string filters. No mutation
 // endpoints exist; mutations stay MCP-only, admin-only.
-func (service *API) Grants(ctx context.Context, _ api.Actor, filter api.GrantFilter) (any, error) {
+func (service *API) Grants(ctx context.Context, actor api.Actor, filter api.GrantFilter) (any, error) {
+	service, err := service.forActor(ctx, actor)
+	if err != nil {
+		return nil, err
+	}
 	if service.promotionGrants == nil || service.runs == nil {
 		return nil, fmt.Errorf("%w: promotion grants", ErrUnavailable)
 	}
@@ -642,7 +667,11 @@ func (service *API) resolveReadRunID(ctx context.Context, id string) (model.Run,
 // its recorded step results, and the owning repository. Unlike the MCP status
 // tool it resolves by run ID, never renews an issue lock, and has no other
 // side effects, so an idle dashboard cannot hold agent coordination state.
-func (service *API) Run(ctx context.Context, _ api.Actor, id string) (any, error) {
+func (service *API) Run(ctx context.Context, actor api.Actor, id string) (any, error) {
+	service, err := service.forActor(ctx, actor)
+	if err != nil {
+		return nil, err
+	}
 	if service.history == nil {
 		return nil, fmt.Errorf("%w: run history", ErrUnavailable)
 	}
@@ -678,7 +707,11 @@ func (service *API) RunLog(ctx context.Context, actor api.Actor, id, burn, step 
 	return service.RunLogFiltered(ctx, actor, id, burn, step, runlog.Filter{})
 }
 
-func (service *API) RunLogFiltered(ctx context.Context, _ api.Actor, id, burn, step string, filter runlog.Filter) (any, error) {
+func (service *API) RunLogFiltered(ctx context.Context, actor api.Actor, id, burn, step string, filter runlog.Filter) (any, error) {
+	service, err := service.forActor(ctx, actor)
+	if err != nil {
+		return nil, err
+	}
 	if service.logs == nil || service.history == nil {
 		return nil, fmt.Errorf("%w: logs", ErrUnavailable)
 	}
@@ -723,7 +756,11 @@ const maxLiveLogChunk = 256 << 10
 // only the secret-masked stream (masking happens in the Job controller before
 // any byte reaches the log writer), so this view exposes exactly what the
 // retained per-step view exposes — earlier.
-func (service *API) RunLogLive(ctx context.Context, _ api.Actor, id string, offset int64) (any, error) {
+func (service *API) RunLogLive(ctx context.Context, actor api.Actor, id string, offset int64) (any, error) {
+	service, err := service.forActor(ctx, actor)
+	if err != nil {
+		return nil, err
+	}
 	if service.logs == nil || service.history == nil {
 		return nil, fmt.Errorf("%w: logs", ErrUnavailable)
 	}
@@ -757,9 +794,12 @@ func (service *API) RunLogLive(ctx context.Context, _ api.Actor, id string, offs
 	return response, nil
 }
 
-func (service *API) Repositories(ctx context.Context, _ api.Actor) (any, error) {
+func (service *API) Repositories(ctx context.Context, actor api.Actor) (any, error) {
+	service, err := service.forActor(ctx, actor)
+	if err != nil {
+		return nil, err
+	}
 	var repos []model.Repository
-	var err error
 	if service.repositories != nil {
 		repos, err = service.repositories.ListRepositories(ctx)
 	} else {
@@ -787,13 +827,26 @@ func (service *API) Repositories(ctx context.Context, _ api.Actor) (any, error) 
 	return views, nil
 }
 
-func (service *API) Issues(ctx context.Context, _ api.Actor, filter api.IssueFilter) (any, error) {
+func (service *API) Issues(ctx context.Context, actor api.Actor, filter api.IssueFilter) (any, error) {
+	service, err := service.forActor(ctx, actor)
+	if err != nil {
+		return nil, err
+	}
 	return service.issueList(ctx, filter.Repository, filter.Kind, filter.State, int64(filter.BeforeID), filter.Limit)
 }
 
-func (service *API) Status(ctx context.Context, _ api.Actor) (any, error) {
+func (service *API) Status(ctx context.Context, actor api.Actor) (any, error) {
 	if service.health == nil {
 		return nil, fmt.Errorf("%w: status", ErrUnavailable)
+	}
+	if actor.Scoped() {
+		// Installation-wide status counts every upstream and repository;
+		// a scoped actor gets the scoped view or nothing (#073).
+		scoped, ok := service.health.(ScopedHealth)
+		if !ok {
+			return nil, fmt.Errorf("%w: scoped status", ErrUnavailable)
+		}
+		return scoped.ScopedStatus(ctx, actor)
 	}
 	return service.health.Status(ctx)
 }
@@ -1628,11 +1681,54 @@ func (service *API) prepareWaitPromotion(ctx context.Context, id string, request
 	}, nil
 }
 
-func (service *API) issueCreate(ctx context.Context, actor api.Actor, title, body string) (model.Issue, error) {
+func (service *API) issueCreate(ctx context.Context, actor api.Actor, title, body, upstream string) (model.Issue, error) {
 	if service.issues == nil || strings.TrimSpace(title) == "" {
 		return model.Issue{}, fmt.Errorf("%w: issue title is required", ErrInvalidInput)
 	}
-	return service.issues.CreateManualIssue(ctx, actor.Identity, model.ManualIssueSpec{Title: title, Body: body})
+	spec := model.ManualIssueSpec{Title: title, Body: body}
+	// An issue filed under an upstream is visible to uplinks scoped to it. A
+	// scoped actor's issue defaults to its one upstream and must otherwise
+	// name one in scope (#073).
+	upstream = strings.TrimSpace(upstream)
+	switch {
+	case upstream != "":
+		id, err := service.upstreamID(ctx, upstream)
+		if err != nil {
+			return model.Issue{}, err
+		}
+		spec.ScopeUpstreamID = id
+	case service.scope != nil && len(service.scope.upIDs) == 1:
+		spec.ScopeUpstreamID = service.scope.upIDs[0]
+	case service.scope != nil:
+		return model.Issue{}, fmt.Errorf("%w: upstream is required: name the upstream the issue belongs to", ErrInvalidInput)
+	}
+	return service.issues.CreateManualIssue(ctx, actor.Identity, spec)
+}
+
+// upstreamID resolves an upstream name the caller may see.
+func (service *API) upstreamID(ctx context.Context, name string) (int64, error) {
+	if service.scope != nil {
+		for id, upstream := range service.scope.upstreams {
+			if upstream.Name == name {
+				return id, nil
+			}
+		}
+		return 0, fmt.Errorf("%w: upstream %q", store.ErrNotFound, name)
+	}
+	source, ok := service.runs.(ScopeSource)
+	if !ok {
+		return 0, fmt.Errorf("%w: upstream lookup", ErrUnavailable)
+	}
+	upstreams, err := source.ListUpstreams(ctx)
+	if err != nil {
+		return 0, err
+	}
+	for _, upstream := range upstreams {
+		if upstream.Name == name {
+			return upstream.ID, nil
+		}
+	}
+	return 0, fmt.Errorf("%w: upstream %q", store.ErrNotFound, name)
 }
 
 func (service *API) issueGet(ctx context.Context, _ api.Actor, id int64) (model.Issue, error) {
@@ -1961,6 +2057,9 @@ func (service *API) accessAllow(ctx context.Context, actor api.Actor, repo, step
 		return api.AccessGrantResponse{}, err
 	}
 	repo = canonical
+	if service.scope != nil && !service.scope.seesAccessKey(repo) {
+		return api.AccessGrantResponse{}, hiddenRepository(repo)
+	}
 	// Validate the entry before touching the ConfigMap. Without this check a
 	// malformed entry (glob characters in repo/secret, or a non-wildcard step)
 	// would be written to the ConfigMap, and the next reconciliation would
@@ -2013,6 +2112,9 @@ func (service *API) accessRevoke(ctx context.Context, actor api.Actor, repo, ste
 		return api.AccessGrantResponse{}, err
 	}
 	repo = canonical
+	if service.scope != nil && !service.scope.seesAccessKey(repo) {
+		return api.AccessGrantResponse{}, hiddenRepository(repo)
+	}
 	if service.secretAccessReconciler != nil {
 		// Read the grant before removal so we can return it.
 		grants, err := service.secretAccess.SecretAccessList(ctx, repo, false)

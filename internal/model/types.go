@@ -176,6 +176,9 @@ type RunListFilter struct {
 	// Before is an exclusive QueueSequence cursor: zero starts at the newest
 	// run, a page's last QueueSequence fetches the next older page.
 	Before int64
+	// RepoIDs, when non-nil, keeps only runs of these repositories; an empty
+	// slice matches none. Nil lists every repository (#073).
+	RepoIDs []int64
 }
 
 // RunCounts is the number of retained runs, in total and per repository ID.
@@ -342,6 +345,9 @@ type PromotionListFilter struct {
 	Status    PromotionStatus
 	Before    int64
 	Limit     int
+	// RepoIDs, when non-nil, keeps only promotions of these repositories;
+	// an empty slice matches none (#073).
+	RepoIDs []int64
 }
 
 type PromotionPage struct {
@@ -624,14 +630,20 @@ type Issue struct {
 	CIOrigin       string
 	CIWorkSequence int64
 	CIWorkID       string
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
-	ClosedAt       *time.Time
+	// ScopeUpstreamID is the upstream a manual issue is filed under, or
+	// zero (#073). CI issues belong to RepoID's upstream.
+	ScopeUpstreamID int64
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+	ClosedAt        *time.Time
 }
 
 type ManualIssueSpec struct {
 	Title string
 	Body  string
+	// ScopeUpstreamID files the issue under one upstream, so uplinks scoped
+	// to it see it (#073). Zero keeps the issue workspace-global.
+	ScopeUpstreamID int64
 }
 
 type IssuePatch struct {
@@ -646,6 +658,11 @@ type IssueListFilter struct {
 	State    IssueState
 	BeforeID int64
 	Limit    int
+	// UpstreamIDs, when non-nil, keeps only issues of these upstreams: CI
+	// issues by their repository, manual issues by the upstream they are
+	// filed under. An empty slice matches none, and workspace-global manual
+	// issues never match (#073).
+	UpstreamIDs []int64
 }
 
 type IssuePage struct {
@@ -667,8 +684,11 @@ type Uplink struct {
 	TokenCredentialID string
 	AuthActor         string
 	Admin             bool
-	CreatedAt         time.Time
-	UpdatedAt         time.Time
+	// Scope limits the uplink to the repositories of these upstreams, by
+	// name. Empty means every repository (#073).
+	Scope     []string
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }
 
 type UplinkSpec struct {
@@ -677,6 +697,7 @@ type UplinkSpec struct {
 	TokenCredentialID string
 	AuthActor         string
 	Admin             bool
+	Scope             []string
 }
 
 type AuditAction struct {

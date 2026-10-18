@@ -240,7 +240,7 @@ metadata:
 | `sync` | Park a WIP branch upstream without a green gate (not completion evidence) |
 | `promote` | Green-gate a SHA, merge with target branch, push without force |
 | `promote_status` | Wait for a promotion record to become terminal |
-| `issue_create` | Create a manual issue |
+| `issue_create` | Create a manual issue, optionally under one upstream |
 | `issue_get` | Get an issue by ID |
 | `issue_update` | Update an issue title and body |
 | `issue_close` | Close an issue (history is kept) |

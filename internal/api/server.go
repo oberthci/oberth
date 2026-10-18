@@ -25,6 +25,17 @@ type Actor struct {
 	Identity    string `json:"identity"`
 	Fingerprint string `json:"fingerprint"`
 	Admin       bool   `json:"admin"`
+	// Scope limits the uplink to the repositories of these upstreams, by
+	// name. Empty sees every repository (#073).
+	Scope []string `json:"scope,omitempty"`
+}
+
+// Scoped reports whether the actor is limited to some upstreams.
+func (actor Actor) Scoped() bool { return len(actor.Scope) > 0 }
+
+// SeesUpstream reports whether the actor may see repositories of upstream.
+func (actor Actor) SeesUpstream(upstream string) bool {
+	return model.ScopeCovers(actor.Scope, upstream)
 }
 
 type Authenticator interface {

@@ -29,5 +29,6 @@ func (authenticator *Authenticator) Authenticate(ctx context.Context, token stri
 	if identity == "" || fingerprint == "" {
 		return api.Actor{}, errors.New("service: authenticated token has no unique uplink binding")
 	}
-	return api.Actor{Identity: identity, Fingerprint: fingerprint, Admin: authenticated.Admin}, nil
+	return api.Actor{Identity: identity, Fingerprint: fingerprint, Admin: authenticated.Admin,
+		Scope: append([]string(nil), authenticated.Scope...)}, nil
 }

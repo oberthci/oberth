@@ -1755,8 +1755,17 @@ func (s *Store) UpsertUplink(ctx context.Context, spec model.UplinkSpec) (model.
 	if spec.Admin {
 		adminInt = 1
 	}
+	scopes, err := normalizeUplinkScopes(spec.Scope)
+	if err != nil {
+		return model.Uplink{}, err
+	}
 	now := unixNano(s.now())
-	row := s.db.QueryRowContext(ctx, `
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return model.Uplink{}, fmt.Errorf("begin upsert uplink: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	row := tx.QueryRowContext(ctx, `
 INSERT INTO uplinks(fingerprint, identity, token_credential_id, auth_actor, admin, created_at, updated_at)
 VALUES(?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(fingerprint) DO UPDATE SET
@@ -1774,6 +1783,15 @@ RETURNING id, fingerprint, identity, token_credential_id, auth_actor, admin, cre
 		return model.Uplink{}, fmt.Errorf("upsert uplink: %w", err)
 	}
 	value.Admin = scannedAdmin != 0
+	if err := replaceUplinkScopes(ctx, tx, value.ID, scopes); err != nil {
+		return model.Uplink{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return model.Uplink{}, fmt.Errorf("commit upsert uplink: %w", err)
+	}
+	if len(scopes) > 0 {
+		value.Scope = scopes
+	}
 	value.CreatedAt, value.UpdatedAt = fromUnixNano(created), fromUnixNano(updated)
 	return value, nil
 }
@@ -1790,6 +1808,11 @@ FROM uplinks WHERE fingerprint = ?`, fingerprint)
 	}
 	value.Admin = admin != 0
 	value.CreatedAt, value.UpdatedAt = fromUnixNano(created), fromUnixNano(updated)
+	scopes, err := loadUplinkScopes(ctx, s.db, value.ID)
+	if err != nil {
+		return model.Uplink{}, err
+	}
+	value.Scope = scopes
 	return value, nil
 }
 
@@ -1905,6 +1928,12 @@ WHERE t.digest = ? AND t.activated_at IS NOT NULL AND t.revoked_at IS NULL`, dig
 	); err != nil {
 		return model.AuthenticatedUplink{}, translateNotFound("authenticated uplink", err)
 	}
+	// A scope that cannot be read must not authenticate as unscoped (#073).
+	scopes, err := loadUplinkScopes(ctx, s.db, value.ID)
+	if err != nil {
+		return model.AuthenticatedUplink{}, err
+	}
+	value.Scope = scopes
 	value.Admin = admin != 0
 	value.CreatedAt, value.UpdatedAt = fromUnixNano(uplinkCreated), fromUnixNano(uplinkUpdated)
 	value.TokenCredential.CreatedAt = fromUnixNano(tokenCreated)

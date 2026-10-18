@@ -23,6 +23,9 @@ The rest of this section is what that file contains and why.
 | `OBERTH_TOKEN_COMMAND` | A command whose standard output is the token, used when `OBERTH_TOKEN` is unset |
 | `OBERTH_CA_CERT` | PEM of the authority that signed the server's certificate |
 
+A token of an upstream-scoped uplink reads only its upstreams' runs, issues
+and repositories; see [Limit an uplink to some upstreams](mcp-setup.md#limit-an-uplink-to-some-upstreams).
+
 Oberth never writes a token to disk. There is no config file and no
 `oberth login`. `OBERTH_TOKEN_COMMAND` exists so the token can come from a
 password manager or the system keychain without ever landing in a file:

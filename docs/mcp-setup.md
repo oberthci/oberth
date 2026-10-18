@@ -28,6 +28,41 @@ oberth_xxxxxxxxxxxxxxxx
 
 The token is never stored or recoverable. If lost, create a new uplink.
 
+### Limit an uplink to some upstreams
+
+An uplink normally sees every repository. `--scope` limits it to the
+repositories of named upstreams, for example a work laptop that may see the
+`github` upstream and nothing else:
+
+```bash
+kubectl exec -i -n oberth deploy/oberth -- \
+  oberth uplink add --scope github - laptop@work < laptop.pub
+```
+
+A scope is an upstream name as `oberth upstream list` shows it; repeat
+`--scope` or separate names with commas for several. A scoped uplink:
+
+- sees runs, logs, artifacts, issues, promotions, grants and repositories of
+  its upstreams only. Lists, counts, pages and `system_status` cover only
+  those; anything else answers exactly like something that does not exist;
+- clones, fetches and pushes over SSH only repositories of its upstreams, and
+  cannot register a new repository elsewhere;
+- files manual issues under its upstream (`issue_create` takes `upstream`,
+  required when the scope names several). Issues filed under no upstream are
+  not shown to it;
+- cannot use the `secretstore_*` tools, even with `--admin`. Its other admin
+  tools act inside the scope only.
+
+Change or remove the limit later; the token and key stay valid:
+
+```bash
+kubectl exec -n oberth deploy/oberth -- oberth uplink scope --set github,skipops laptop@work
+kubectl exec -n oberth deploy/oberth -- oberth uplink scope --clear laptop@work
+```
+
+`oberth uplink list` shows each uplink's scope (`all` when unscoped), and
+`uplink rotate` keeps it.
+
 ## 2. Configure Claude Code
 
 `oberth install` offers to write this for you on an interactive install, right
@@ -166,7 +201,7 @@ call the proxy hostname directly.
 | `promotion_list` | Recover durable promotion IDs by exact repo/full source SHA/status; bounded pages with an admission-sequence cursor |
 | `promote_status` | Wait for a promotion record to become terminal |
 | `publish_retry` | Retry upstream publication for a run/promotion whose burns passed but whose upstream push failed |
-| `issue_create` | Create a workspace-global manual issue |
+| `issue_create` | Create a manual issue, workspace-global or filed under one `upstream` |
 | `issue_get` | Get an issue by ID |
 | `issue_get_many` | Get 1..50 complete issues in request order, with explicit missing/size-limit results |
 | `issue_update` | Update an issue title and body; optional `expected_body_sha256` rejects the update on mismatch |

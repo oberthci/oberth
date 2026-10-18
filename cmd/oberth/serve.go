@@ -902,7 +902,11 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 		HostSigner: hostSigner, Resolver: app.SSHIdentities{Uplinks: database}, Git: git,
 		OnUpdate: receiveHandler, SessionHandler: receiveHandler.WithNotices,
 		PushBannerURL: options.pushBannerURL,
-		Logger:        logger, MutationGate: anchors.AllowMutation,
+		UpstreamOf: func(input string) (string, error) {
+			qualification, err := upstreams.QualifyInput(input)
+			return qualification.UpstreamName, err
+		},
+		Logger: logger, MutationGate: anchors.AllowMutation,
 	})
 	if err != nil {
 		return err
@@ -1930,3 +1934,7 @@ func repoCacheQualifications(ctx context.Context, database *store.Store) (map[st
 	}
 	return qualifications, nil
 }
+
+// The SSH server serves a key unscoped unless its resolver reports scopes;
+// the production resolver must (#073).
+var _ sshserver.ScopedIdentityResolver = app.SSHIdentities{}

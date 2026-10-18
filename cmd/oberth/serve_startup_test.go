@@ -618,6 +618,8 @@ BEGIN IMMEDIATE;
 DROP TABLE IF EXISTS trusted_applies;
 DROP TABLE IF EXISTS trusted_plans;
 DROP TABLE IF EXISTS secret_access;
+DROP TABLE IF EXISTS uplink_scopes;
+ALTER TABLE issues DROP COLUMN scope_upstream_id;
 ALTER TABLE step_results DROP COLUMN system_cpu_ns;
 ALTER TABLE step_results DROP COLUMN user_cpu_ns;
 ALTER TABLE step_results DROP COLUMN max_rss_bytes;
@@ -814,6 +816,8 @@ DROP TABLE IF EXISTS audit_migration_bootstrap;
 DROP TABLE IF EXISTS trusted_applies;
 DROP TABLE IF EXISTS trusted_plans;
 DROP TABLE IF EXISTS secret_access;
+DROP TABLE IF EXISTS uplink_scopes;
+ALTER TABLE issues DROP COLUMN scope_upstream_id;
 ALTER TABLE upstreams DROP COLUMN key_name;
 CREATE TABLE uplinks_v1 (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

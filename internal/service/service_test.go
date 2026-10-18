@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -34,7 +35,7 @@ func TestAuthenticatorAdapterReturnsBoundUplinkActor(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if actor != (api.Actor{Identity: "agent@tuxbox", Fingerprint: "SHA256:bound"}) {
+	if !reflect.DeepEqual(actor, api.Actor{Identity: "agent@tuxbox", Fingerprint: "SHA256:bound"}) {
 		t.Fatalf("actor = %#v", actor)
 	}
 }

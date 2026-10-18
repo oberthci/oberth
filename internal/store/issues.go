@@ -14,7 +14,7 @@ import (
 
 const issueColumns = `
 id, repo_id, kind, branch, title, body, state, occurrences,
-ci_origin, ci_work_sequence, ci_work_id, created_at, updated_at, closed_at`
+ci_origin, ci_work_sequence, ci_work_id, created_at, updated_at, closed_at, scope_upstream_id`
 
 // UpsertCIIssue creates or updates a CI issue for a red branch. Production
 // callers go through the issue projection system; this method is retained for
@@ -99,8 +99,12 @@ RETURNING `+issueColumns, now, now, resolution, resolution, issueID))
 }
 
 func (s *Store) CreateManualIssue(ctx context.Context, actor string, spec model.ManualIssueSpec) (model.Issue, error) {
-	if strings.TrimSpace(actor) == "" || strings.TrimSpace(spec.Title) == "" {
+	if strings.TrimSpace(actor) == "" || strings.TrimSpace(spec.Title) == "" || spec.ScopeUpstreamID < 0 {
 		return model.Issue{}, fmt.Errorf("%w: manual issue fields are invalid", ErrInvalid)
+	}
+	var scopeUpstreamID any
+	if spec.ScopeUpstreamID > 0 {
+		scopeUpstreamID = spec.ScopeUpstreamID
 	}
 	updatedAt := s.now().UTC()
 	now := unixNano(updatedAt)
@@ -109,14 +113,27 @@ func (s *Store) CreateManualIssue(ctx context.Context, actor string, spec model.
 		return model.Issue{}, fmt.Errorf("begin create manual issue: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	if spec.ScopeUpstreamID > 0 {
+		var found int
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM upstreams WHERE id = ?`, spec.ScopeUpstreamID).Scan(&found); err != nil {
+			return model.Issue{}, fmt.Errorf("check issue upstream: %w", err)
+		}
+		if found == 0 {
+			return model.Issue{}, fmt.Errorf("%w: upstream %d", ErrNotFound, spec.ScopeUpstreamID)
+		}
+	}
 	value, err := scanIssue(tx.QueryRowContext(ctx, `
-INSERT INTO issues(repo_id, kind, title, body, state, occurrences, created_at, updated_at)
-VALUES(NULL, 'manual', ?, ?, 'open', 1, ?, ?)
-RETURNING `+issueColumns, spec.Title, spec.Body, now, now))
+INSERT INTO issues(repo_id, kind, title, body, state, occurrences, created_at, updated_at, scope_upstream_id)
+VALUES(NULL, 'manual', ?, ?, 'open', 1, ?, ?, ?)
+RETURNING `+issueColumns, spec.Title, spec.Body, now, now, scopeUpstreamID))
 	if err != nil {
 		return model.Issue{}, fmt.Errorf("create manual issue: %w", err)
 	}
-	if err := s.appendIssueAudit(ctx, tx, actor, "issue.create", value.ID, map[string]any{"kind": value.Kind}, now); err != nil {
+	details := map[string]any{"kind": value.Kind}
+	if value.ScopeUpstreamID > 0 {
+		details["scope_upstream_id"] = value.ScopeUpstreamID
+	}
+	if err := s.appendIssueAudit(ctx, tx, actor, "issue.create", value.ID, details, now); err != nil {
 		return model.Issue{}, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -299,15 +316,21 @@ func (s *Store) ListIssues(ctx context.Context, filter model.IssueListFilter) (m
 		return model.IssuePage{}, fmt.Errorf("%w: issue state is invalid", ErrInvalid)
 	}
 	limit := issuePageLimit(filter.Limit)
-	rows, err := s.db.QueryContext(ctx, `
-SELECT `+issueColumns+` FROM issues
+	query := `
+SELECT ` + issueColumns + ` FROM issues
 WHERE (? = 0 OR repo_id = ?)
   AND (? = '' OR kind = ?)
   AND (? = '' OR state = ?)
-  AND (? = 0 OR id < ?)
-ORDER BY id DESC LIMIT ?`,
-		filter.RepoID, filter.RepoID, filter.Kind, filter.Kind, filter.State, filter.State,
-		filter.BeforeID, filter.BeforeID, limit+1)
+  AND (? = 0 OR id < ?)`
+	args := []any{filter.RepoID, filter.RepoID, filter.Kind, filter.Kind, filter.State, filter.State,
+		filter.BeforeID, filter.BeforeID}
+	// A CI issue belongs to its repository's upstream, a manual one to the
+	// upstream it is filed under (#073).
+	restriction, restrictionArgs := repoRestriction(
+		"COALESCE((SELECT upstream_id FROM repositories WHERE id = issues.repo_id), scope_upstream_id)", filter.UpstreamIDs)
+	query += restriction + ` ORDER BY id DESC LIMIT ?` // #nosec G202 -- the restriction is a fixed column and ? placeholders from repoRestriction.
+	args = append(append(args, restrictionArgs...), limit+1)
+	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return model.IssuePage{}, fmt.Errorf("list issues: %w", err)
 	}
@@ -486,14 +509,15 @@ func scanIssue(row rowScanner) (model.Issue, error) {
 	var value model.Issue
 	var repoID sql.NullInt64
 	var created, updated int64
-	var closed sql.NullInt64
+	var closed, scopeUpstreamID sql.NullInt64
 	if err := row.Scan(&value.ID, &repoID, &value.Kind, &value.Branch,
 		&value.Title, &value.Body, &value.State, &value.Occurrences,
 		&value.CIOrigin, &value.CIWorkSequence, &value.CIWorkID,
-		&created, &updated, &closed); err != nil {
+		&created, &updated, &closed, &scopeUpstreamID); err != nil {
 		return model.Issue{}, err
 	}
 	value.RepoID = repoID.Int64
+	value.ScopeUpstreamID = scopeUpstreamID.Int64
 	value.CreatedAt, value.UpdatedAt = fromUnixNano(created), fromUnixNano(updated)
 	value.ClosedAt = nullableTime(closed)
 	return value, nil

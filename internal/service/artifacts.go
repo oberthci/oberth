@@ -38,7 +38,11 @@ func (response ArtifactResponse) ArtifactBytes() []byte { return []byte(response
 
 func (response ArtifactResponse) ArtifactName() string { return response.Name }
 
-func (service *API) RunArtifacts(ctx context.Context, _ api.Actor, id string) (any, error) {
+func (service *API) RunArtifacts(ctx context.Context, actor api.Actor, id string) (any, error) {
+	service, err := service.forActor(ctx, actor)
+	if err != nil {
+		return nil, err
+	}
 	run, err := service.artifactRun(ctx, id)
 	if err != nil {
 		return nil, err
@@ -53,7 +57,11 @@ func (service *API) RunArtifacts(ctx context.Context, _ api.Actor, id string) (a
 	return ArtifactListResponse{RunID: run, Artifacts: entries}, nil
 }
 
-func (service *API) RunArtifact(ctx context.Context, _ api.Actor, id, name string, filter runlog.Filter) (any, error) {
+func (service *API) RunArtifact(ctx context.Context, actor api.Actor, id, name string, filter runlog.Filter) (any, error) {
+	service, err := service.forActor(ctx, actor)
+	if err != nil {
+		return nil, err
+	}
 	run, err := service.artifactRun(ctx, id)
 	if err != nil {
 		return nil, err

@@ -471,6 +471,13 @@ ORDER BY u.identity, u.fingerprint`)
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("list uplinks: %w", err)
 	}
+	scopes, err := loadAllUplinkScopes(ctx, s.db)
+	if err != nil {
+		return nil, err
+	}
+	for index := range values {
+		values[index].Scope = scopes[values[index].ID]
+	}
 	return values, nil
 }
 
@@ -539,6 +546,10 @@ func (s *Store) RegisterUplink(ctx context.Context, actor string, spec model.Upl
 	if spec.Admin {
 		adminInt = 1
 	}
+	scopes, err := normalizeUplinkScopes(spec.Scope)
+	if err != nil {
+		return model.Uplink{}, err
+	}
 	now := unixNano(s.now())
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -566,6 +577,13 @@ RETURNING id, fingerprint, identity, token_credential_id, auth_actor, admin, cre
 		return model.Uplink{}, fmt.Errorf("register uplink: %w", err)
 	}
 	value.Admin = scannedAdmin != 0
+	// A re-registered key takes exactly the scope it is registered with.
+	if err := replaceUplinkScopes(ctx, tx, value.ID, scopes); err != nil {
+		return model.Uplink{}, err
+	}
+	if len(scopes) > 0 {
+		value.Scope = scopes
+	}
 	if displacedCredentialID != "" && displacedCredentialID != spec.TokenCredentialID {
 		if _, err := tx.ExecContext(ctx, `
 UPDATE token_credentials SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL`, now, displacedCredentialID); err != nil {
@@ -576,6 +594,9 @@ UPDATE token_credentials SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL`
 		"fingerprint": spec.Fingerprint,
 		"identity":    spec.Identity,
 		"admin":       spec.Admin,
+	}
+	if len(scopes) > 0 {
+		auditDetails["scope"] = scopes
 	}
 	if displacedCredentialID != "" && displacedCredentialID != spec.TokenCredentialID {
 		auditDetails["displaced_credential"] = displacedCredentialID

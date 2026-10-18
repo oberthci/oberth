@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/model"
 )
 
@@ -217,6 +218,62 @@ func (health Health) Status(ctx context.Context) (any, error) {
 			storeCopy.Sealed = true
 		}
 		status.SecretStore = &storeCopy
+	}
+	return status, nil
+}
+
+// ScopedStatus is the status an upstream-scoped uplink sees (#073): only its
+// upstreams and their repositories are counted and shown. The audit chain
+// and the secret store describe the whole installation, so they are left out.
+func (health Health) ScopedStatus(ctx context.Context, actor api.Actor) (any, error) {
+	status := HealthStatus{Database: "unavailable", SchemaVersion: health.SchemaVersion, VCS: "unavailable", Cluster: "unavailable", Audit: "unavailable", AuditMode: health.AuditMode, Version: health.Version}
+	if health.Store == nil {
+		return status, nil
+	}
+	upstreams, upstreamErr := health.Store.ListUpstreams(ctx)
+	repositories, repositoryErr := health.Store.ListRepositories(ctx)
+	if upstreamErr == nil && repositoryErr == nil {
+		status.Database = "ready"
+		visible := map[int64]bool{}
+		for _, upstream := range upstreams {
+			if actor.SeesUpstream(upstream.Name) {
+				visible[upstream.ID] = true
+			}
+		}
+		status.Upstreams = len(visible)
+		for _, repository := range repositories {
+			if visible[repository.UpstreamID] {
+				status.Repositories++
+			}
+		}
+		if len(visible) > 0 && health.VCS != nil {
+			// Probe the full list: the probe cache is shared with unscoped
+			// viewers and must not hold a partial result.
+			ready := true
+			for _, upstream := range health.probeVCS(ctx, upstreams) {
+				if !visible[upstream.ID] {
+					continue
+				}
+				status.UpstreamInfo = append(status.UpstreamInfo, upstream)
+				if upstream.Probe != "ready" {
+					ready = false
+				}
+			}
+			if ready {
+				status.VCS = "ready"
+			}
+		}
+	}
+	if health.Cluster != nil && health.Cluster(ctx) == nil {
+		status.Cluster = "ready"
+	}
+	if health.Audit != nil && health.Audit(ctx) == nil {
+		status.Audit = "ready"
+	}
+	if health.Identity != nil {
+		if fingerprint, err := health.Identity(ctx); err == nil {
+			status.SSHIdentity = fingerprint
+		}
 	}
 	return status, nil
 }

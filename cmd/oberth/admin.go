@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -946,7 +947,7 @@ func runUplinkList(ctx context.Context, arguments []string, output io.Writer) er
 		return err
 	}
 	writer := tabwriter.NewWriter(output, 0, 0, 3, ' ', 0)
-	if _, err := fmt.Fprintln(writer, "IDENTITY\tFINGERPRINT\tADMIN\tCREATED\tLAST SEEN"); err != nil {
+	if _, err := fmt.Fprintln(writer, "IDENTITY\tFINGERPRINT\tADMIN\tSCOPE\tCREATED\tLAST SEEN"); err != nil {
 		return err
 	}
 	for _, uplink := range uplinks {
@@ -958,12 +959,85 @@ func runUplinkList(ctx context.Context, arguments []string, output io.Writer) er
 		if uplink.Admin {
 			adminLabel = "yes"
 		}
-		if _, err := fmt.Fprintf(writer, "%s\t%s\t%s\t%s\t%s\n",
-			uplink.Identity, uplink.Fingerprint, adminLabel, uplink.CreatedAt.UTC().Format("2006-01-02 15:04"), lastSeen); err != nil {
+		if _, err := fmt.Fprintf(writer, "%s\t%s\t%s\t%s\t%s\t%s\n",
+			uplink.Identity, uplink.Fingerprint, adminLabel, scopeLabel(uplink.Scope), uplink.CreatedAt.UTC().Format("2006-01-02 15:04"), lastSeen); err != nil {
 			return err
 		}
 	}
 	return writer.Flush()
+}
+
+// scopeFlag collects --scope values, repeatable and comma-separated.
+type scopeFlag []string
+
+func (scope *scopeFlag) String() string { return strings.Join(*scope, ",") }
+
+func (scope *scopeFlag) Set(value string) error {
+	for _, part := range strings.Split(value, ",") {
+		if part = strings.TrimSpace(part); part != "" {
+			*scope = append(*scope, part)
+		}
+	}
+	return nil
+}
+
+// scopeLabel is the SCOPE column: the upstreams, or "all" when unscoped.
+func scopeLabel(scope []string) string {
+	if len(scope) == 0 {
+		return "all"
+	}
+	return strings.Join(scope, ",")
+}
+
+// runUplinkScope changes which upstreams an existing uplink may reach (#073).
+// Its bearer token and SSH key stay valid; the new scope applies to the next
+// request.
+func runUplinkScope(ctx context.Context, arguments []string, output io.Writer, mutationGate func(context.Context, string, string) error) error {
+	flags := flag.NewFlagSet("uplink scope", flag.ContinueOnError)
+	flags.SetOutput(io.Discard)
+	databasePath := flags.String("database", "/data/oberth.sqlite", "SQLite database path (in-pod; requires the live admin daemon)")
+	fingerprint := flags.String("fingerprint", "", "disambiguating SSH public-key fingerprint when one identity has several uplinks")
+	var set scopeFlag
+	flags.Var(&set, "set", "limit the uplink to these upstreams (repeatable or comma-separated)")
+	clearScope := flags.Bool("clear", false, "remove the limit: the uplink reaches every repository again")
+	if err := flags.Parse(arguments); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			flags.SetOutput(output)
+			flags.Usage()
+			return nil
+		}
+		return fmt.Errorf("%w: %w", errUsage, err)
+	}
+	if flags.NArg() != 1 || (len(set) > 0) == *clearScope {
+		return fmt.Errorf("%w: uplink scope [--fingerprint SHA256:...] (--set UPSTREAM[,UPSTREAM] | --clear) <identity@host>", errUsage)
+	}
+	identity := flags.Arg(0)
+	if mutationGate == nil {
+		return errors.New("admin audit mutation gate is unavailable")
+	}
+	if err := mutationGate(ctx, "uplink.database.open", *databasePath); err != nil {
+		return err
+	}
+	database, err := store.OpenAdminClient(ctx, *databasePath, configuredStoreOptions(ctx))
+	if err != nil {
+		return err
+	}
+	defer func() { _ = database.Close() }()
+	var scopes []string
+	if len(set) > 0 {
+		if scopes, err = database.ResolveUplinkScopes(ctx, set); err != nil {
+			return err
+		}
+	}
+	if err := mutationGate(ctx, "uplink.scope", *databasePath); err != nil {
+		return err
+	}
+	value, err := database.SetUplinkScope(ctx, administrativeActor, identity, *fingerprint, scopes)
+	if err != nil {
+		return err
+	}
+	_, err = fmt.Fprintf(output, "uplink %s (%s) now reaches: %s\n", value.Identity, value.Fingerprint, scopeLabel(value.Scope))
+	return err
 }
 
 // runUplinkRemove deletes one uplink and revokes its bearer token immediately.
@@ -1290,7 +1364,7 @@ func runUplink(ctx context.Context, arguments []string, input io.Reader, output 
 
 func runUplinkWithDependencies(ctx context.Context, arguments []string, input io.Reader, output io.Writer, dependencies uplinkDependencies) error {
 	if len(arguments) == 0 {
-		return fmt.Errorf("%w: uplink add|list|remove", errUsage)
+		return fmt.Errorf("%w: uplink add|list|remove|rotate|scope", errUsage)
 	}
 	switch arguments[0] {
 	case "add":
@@ -1300,8 +1374,10 @@ func runUplinkWithDependencies(ctx context.Context, arguments []string, input io
 		return runUplinkRemove(ctx, arguments[1:], output, dependencies.mutationGate)
 	case "rotate":
 		return runUplinkRotate(ctx, arguments[1:], input, output, dependencies)
+	case "scope":
+		return runUplinkScope(ctx, arguments[1:], output, dependencies.mutationGate)
 	default:
-		return fmt.Errorf("%w: uplink add [--admin] [--database PATH] [--tls-cert PATH] <public-key-file|raw-key|-> <identity@host> | uplink list | uplink remove <identity> | uplink rotate <public-key-file|raw-key|-> <identity@host>", errUsage)
+		return fmt.Errorf("%w: uplink add [--admin] [--scope UPSTREAM[,UPSTREAM]] [--database PATH] [--tls-cert PATH] <public-key-file|raw-key|-> <identity@host> | uplink list | uplink remove <identity> | uplink rotate <public-key-file|raw-key|-> <identity@host> | uplink scope [--fingerprint SHA256:...] (--set UPSTREAM[,UPSTREAM] | --clear) <identity@host>", errUsage)
 	}
 	flags := flag.NewFlagSet("uplink add", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
@@ -1312,6 +1388,8 @@ func runUplinkWithDependencies(ctx context.Context, arguments []string, input io
 	}
 	certificatePath := flags.String("tls-cert", defaultCertificate, "HTTPS certificate path (in-pod; requires the live admin daemon)")
 	isAdmin := flags.Bool("admin", false, "Grant admin privileges (required for access_allow/access_revoke)")
+	var scope scopeFlag
+	flags.Var(&scope, "scope", "limit the uplink to these upstreams' repositories (repeatable or comma-separated; default: every repository)")
 	if err := flags.Parse(arguments[1:]); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			flags.SetOutput(output)
@@ -1352,6 +1430,13 @@ func runUplinkWithDependencies(ctx context.Context, arguments []string, input io
 		return err
 	}
 	defer func() { _ = database.Close() }()
+	// Resolve the scope before any token exists, so a typo fails cleanly.
+	var scopes []string
+	if len(scope) > 0 {
+		if scopes, err = database.ResolveUplinkScopes(ctx, scope); err != nil {
+			return err
+		}
+	}
 	tokens := gatedAdminTokens{Store: database, Gate: gate}
 	issuer := auth.Issuer{
 		Tokens: tokens,
@@ -1361,7 +1446,7 @@ func runUplinkWithDependencies(ctx context.Context, arguments []string, input io
 			}
 			_, err := database.RegisterUplink(ctx, administrativeActor, model.UplinkSpec{
 				Fingerprint: fingerprint, Identity: identity, TokenCredentialID: pending.ID,
-				Admin: *isAdmin,
+				Admin: *isAdmin, Scope: scopes,
 			})
 			return err
 		},
@@ -1369,6 +1454,9 @@ func runUplinkWithDependencies(ctx context.Context, arguments []string, input io
 	adminLabel := ""
 	if *isAdmin {
 		adminLabel = " (admin)"
+	}
+	if len(scopes) > 0 {
+		adminLabel += " (scope: " + strings.Join(scopes, ", ") + ")"
 	}
 	if _, err := fmt.Fprintf(output, "Uplink token for %s%s (shown once):\n", identity, adminLabel); err != nil {
 		return err
@@ -1737,11 +1825,18 @@ func runUplinkRotate(ctx context.Context, arguments []string, input io.Reader, o
 	}
 	var old []string
 	admin := false
+	var scope []string
 	for _, status := range statuses {
 		if status.Identity != identity {
 			continue
 		}
 		admin = admin || status.Admin
+		// Rotation keeps the scope (#073). Keys of one identity with
+		// different scopes are refused: the new key's scope would be a guess.
+		if len(old) > 0 && !slices.Equal(scope, status.Scope) {
+			return fmt.Errorf("uplink %s has keys with different scopes; set one with uplink scope --fingerprint first", identity)
+		}
+		scope = status.Scope
 		if status.Fingerprint != newFingerprint {
 			old = append(old, status.Fingerprint)
 		}
@@ -1755,6 +1850,9 @@ func runUplinkRotate(ctx context.Context, arguments []string, input io.Reader, o
 	}
 	if admin {
 		addArguments = append(addArguments, "--admin")
+	}
+	if len(scope) > 0 {
+		addArguments = append(addArguments, "--scope", strings.Join(scope, ","))
 	}
 	addArguments = append(addArguments, source, identity)
 	if err := runUplinkWithDependencies(ctx, addArguments, input, output, dependencies); err != nil {

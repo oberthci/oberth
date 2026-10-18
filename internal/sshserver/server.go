@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -16,7 +17,12 @@ import (
 	"github.com/oberthci/oberth/internal/gitcache"
 )
 
-const identityExtension = "oberth.identity"
+const (
+	identityExtension = "oberth.identity"
+	// scopeExtension carries an upstream-scoped key's upstream names,
+	// newline-separated (#073). Absent for an unscoped key.
+	scopeExtension = "oberth.scope"
+)
 
 const (
 	defaultHandshakeTimeout         = 10 * time.Second
@@ -37,6 +43,19 @@ type IdentityResolverFunc func(string) (string, bool, error)
 
 func (f IdentityResolverFunc) ResolveFingerprint(fingerprint string) (string, bool, error) {
 	return f(fingerprint)
+}
+
+// ScopedIdentityResolver also returns the upstreams a scoped key is limited
+// to (#073). The server prefers it over ResolveFingerprint; a resolver
+// without it serves every key unscoped.
+type ScopedIdentityResolver interface {
+	ResolveFingerprintScope(fingerprint string) (identity string, scope []string, found bool, err error)
+}
+
+// sessionActor is the authenticated uplink a session acts as.
+type sessionActor struct {
+	identity string
+	scope    []string
 }
 
 // UpdateHandler consumes durable, actor-bound receive events. Event IDs remain
@@ -65,7 +84,11 @@ type Config struct {
 	SessionHandler func(notify func(format string, args ...any)) UpdateHandler
 	// PushBannerURL, when non-empty, is echoed after every accepted push as
 	// "remote: watch: <url>" so the pusher can follow the queued run.
-	PushBannerURL            string
+	PushBannerURL string
+	// UpstreamOf names the upstream a repository path resolves to, by the
+	// rules fetch and push use, so a scoped key reaches only its upstreams
+	// (#073). Without it a scoped key reaches no repository.
+	UpstreamOf               func(input string) (string, error)
 	Logger                   Logger
 	MutationGate             func(context.Context) error
 	HandshakeTimeout         time.Duration
@@ -82,6 +105,7 @@ type Server struct {
 	onUpdate                 UpdateHandler
 	sessionHandler           func(notify func(format string, args ...any)) UpdateHandler
 	pushBannerURL            string
+	upstreamOf               func(string) (string, error)
 	logger                   Logger
 	mutationGate             func(context.Context) error
 	handshakeTimeout         time.Duration
@@ -145,7 +169,15 @@ func New(config Config) (*Server, error) {
 		},
 		PublicKeyCallback: func(_ ssh.ConnMetadata, key ssh.PublicKey) (*ssh.Permissions, error) {
 			fingerprint := ssh.FingerprintSHA256(key)
-			identity, found, err := config.Resolver.ResolveFingerprint(fingerprint)
+			var identity string
+			var scope []string
+			var found bool
+			var err error
+			if scoped, ok := config.Resolver.(ScopedIdentityResolver); ok {
+				identity, scope, found, err = scoped.ResolveFingerprintScope(fingerprint)
+			} else {
+				identity, found, err = config.Resolver.ResolveFingerprint(fingerprint)
+			}
 			if err != nil {
 				return nil, fmt.Errorf("resolve public key: %w", err)
 			}
@@ -153,7 +185,16 @@ func New(config Config) (*Server, error) {
 			if !found || identity == "" {
 				return nil, errors.New("public key is not registered")
 			}
-			return &ssh.Permissions{Extensions: map[string]string{identityExtension: identity}}, nil
+			extensions := map[string]string{identityExtension: identity}
+			if len(scope) > 0 {
+				for _, upstream := range scope {
+					if upstream == "" || strings.ContainsAny(upstream, "\n\r") {
+						return nil, errors.New("public key has an invalid scope")
+					}
+				}
+				extensions[scopeExtension] = strings.Join(scope, "\n")
+			}
+			return &ssh.Permissions{Extensions: extensions}, nil
 		},
 	}
 	serverConfig.AddHostKey(config.HostSigner)
@@ -161,6 +202,7 @@ func New(config Config) (*Server, error) {
 		config: serverConfig, git: config.Git, onUpdate: config.OnUpdate, logger: logger, mutationGate: mutationGate,
 		sessionHandler:           config.SessionHandler,
 		pushBannerURL:            config.PushBannerURL,
+		upstreamOf:               config.UpstreamOf,
 		handshakeTimeout:         config.HandshakeTimeout,
 		requestTimeout:           config.RequestTimeout,
 		sessionTimeout:           config.SessionTimeout,
@@ -251,7 +293,10 @@ func (s *Server) handleConn(ctx context.Context, connection net.Conn) error {
 		return fmt.Errorf("set authenticated SSH request deadline: %w", err)
 	}
 	defer func() { _ = serverConn.Close() }()
-	actor := serverConn.Permissions.Extensions[identityExtension]
+	actor := sessionActor{identity: serverConn.Permissions.Extensions[identityExtension]}
+	if scope := serverConn.Permissions.Extensions[scopeExtension]; scope != "" {
+		actor.scope = strings.Split(scope, "\n")
+	}
 	connectionCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	go rejectGlobalRequests(requests)
@@ -317,7 +362,7 @@ func rejectGlobalRequests(requests <-chan *ssh.Request) {
 
 func (s *Server) handleSession(
 	ctx context.Context,
-	actor string,
+	actor sessionActor,
 	channel ssh.Channel,
 	requests <-chan *ssh.Request,
 	beginExec func() error,
@@ -379,8 +424,11 @@ func minimumDeadline(left, right time.Time) time.Time {
 	return right
 }
 
-func (s *Server) runGit(ctx context.Context, actor, protocol string, command gitCommand, channel ssh.Channel) error {
+func (s *Server) runGit(ctx context.Context, actor sessionActor, protocol string, command gitCommand, channel ssh.Channel) error {
 	repoInput := command.input()
+	if err := s.authorizeScope(actor, repoInput); err != nil {
+		return err
+	}
 
 	if command.service == gitcache.ReceivePack {
 		if err := s.mutationGate(ctx); err != nil {
@@ -394,7 +442,7 @@ func (s *Server) runGit(ctx context.Context, actor, protocol string, command git
 		notify := func(format string, args ...any) {
 			_, _ = fmt.Fprintf(stderr, "remote: "+format+"\n", args...)
 		}
-		notify("[oberth] uplink %s", actor)
+		notify("[oberth] uplink %s", actor.identity)
 		handler := s.onUpdate
 		if s.sessionHandler != nil {
 			handler = s.sessionHandler(notify)
@@ -408,7 +456,7 @@ func (s *Server) runGit(ctx context.Context, actor, protocol string, command git
 		// Receive owns preparation under the same repository lock as durable
 		// replay, reservation, ref publication, and callbacks. Refreshing here
 		// could move refs before a crashed reservation is recovered.
-		if err := s.git.Receive(ctx, repoInput, actor, protocol, channel, channel, stderr, guardedHandler); err != nil {
+		if err := s.git.Receive(ctx, repoInput, actor.identity, protocol, channel, channel, stderr, guardedHandler); err != nil {
 			return err
 		}
 		if s.pushBannerURL != "" {
@@ -428,6 +476,23 @@ func (s *Server) runGit(ctx context.Context, actor, protocol string, command git
 		_, _ = io.WriteString(channel.Stderr(), "remote: oberth: upstream unavailable; serving cached repository\n")
 	}
 	return s.git.Serve(ctx, repoInput, command.service, protocol, channel, channel, channel.Stderr())
+}
+
+// authorizeScope lets a scoped key reach only repositories of its upstreams
+// (#073), registered or not, so it can neither fetch nor push, nor register
+// a new repository, elsewhere. Every refusal reads the same, whether the
+// repository exists, lies outside the scope or cannot be resolved, so it
+// names nothing outside the scope.
+func (s *Server) authorizeScope(actor sessionActor, repoInput string) error {
+	if len(actor.scope) == 0 {
+		return nil
+	}
+	if s.upstreamOf != nil {
+		if upstream, err := s.upstreamOf(repoInput); err == nil && slices.Contains(actor.scope, upstream) {
+			return nil
+		}
+	}
+	return fmt.Errorf("repository %q not found; a scoped uplink reaches only its upstreams (use upstream/org/repo)", repoInput)
 }
 
 // ReplayPending delivers durable receive events left by an interrupted process

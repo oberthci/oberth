@@ -25,6 +25,11 @@
 - HTTPS uses TLS 1.3 or newer. API and MCP routes require one bearer token whose
   plaintext is never persisted.
 - Every push, sync, promotion, and issue mutation records the uplink identity.
+- An upstream-scoped uplink (`uplink add --scope`) reaches only its upstreams'
+  repositories over SSH, MCP and the JSON API. Out-of-scope records answer as
+  missing; lists, counts and pages cover only the scope; installation-wide
+  tools are refused. A scope that cannot be read never authenticates as
+  unscoped, and a removed upstream narrows a scope rather than widening it.
 - Receive reservations bind that identity before Git mutates a public ref and
   replay under the same identity after a callback failure or restart. Public
   ref grammar is enforced both for SSH receives and upstream materialization;
