@@ -352,10 +352,10 @@ spec:
       resources:
         requests:
           cpu: '1'
-          memory: 512Mi
+          memory: 2Gi
         limits:
           cpu: '1'
-          memory: 512Mi
+          memory: 2Gi
   - name: link-go
     automountServiceAccountToken: false
     metadata:
@@ -918,10 +918,10 @@ spec:
       resources:
         requests:
           cpu: '1'
-          memory: 512Mi
+          memory: 1Gi
         limits:
           cpu: '1'
-          memory: 512Mi
+          memory: 1Gi
   - name: verify-node
     automountServiceAccountToken: false
     metadata:
@@ -968,10 +968,10 @@ spec:
       resources:
         requests:
           cpu: '1'
-          memory: 512Mi
+          memory: 1Gi
         limits:
           cpu: '1'
-          memory: 512Mi
+          memory: 1Gi
   - name: stage-website-packages
     automountServiceAccountToken: false
     metadata:
@@ -2010,10 +2010,10 @@ spec:
       resources:
         requests:
           cpu: '1'
-          memory: 512Mi
+          memory: 1Gi
         limits:
           cpu: '1'
-          memory: 512Mi
+          memory: 1Gi
   - name: verify-apko
     automountServiceAccountToken: false
     metadata:
@@ -2062,10 +2062,10 @@ spec:
       resources:
         requests:
           cpu: '1'
-          memory: 512Mi
+          memory: 2Gi
         limits:
           cpu: '1'
-          memory: 512Mi
+          memory: 2Gi
   - name: install-apko
     automountServiceAccountToken: false
     metadata:
@@ -2112,10 +2112,10 @@ spec:
       resources:
         requests:
           cpu: '1'
-          memory: 512Mi
+          memory: 2Gi
         limits:
           cpu: '1'
-          memory: 512Mi
+          memory: 2Gi
   - name: release-publish-kvm-harness
     metadata:
       annotations:
