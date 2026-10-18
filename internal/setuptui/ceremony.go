@@ -116,7 +116,9 @@ func (c *ceremony) act(action int) (tea.Cmd, bool) {
 	switch action {
 	case cerFile:
 		// Oberth writes a token to disk only here, when the operator asks
-		// (docs/remote-cli.md, #062).
+		// (docs/remote-cli.md, #062). It replaces the warning, so Continue
+		// warns again.
+		c.confirming = false
 		e := c.bearer()
 		if e == nil {
 			c.errMsg = "Save to file is for the bearer token on a host whose client files read ~/.config/oberth/token."
@@ -135,7 +137,14 @@ func (c *ceremony) act(action int) (tea.Cmd, bool) {
 		}
 		if !c.confirming {
 			c.confirming = true
-			c.errMsg = "These values are not shown again once you continue. Store every one of them, then press Enter again."
+			labels := make([]string, 0, len(c.unsaved()))
+			for _, e := range c.unsaved() {
+				labels = append(labels, e.label)
+			}
+			// Name every value: on a small terminal some are scrolled out
+			// of view.
+			c.errMsg = "Not shown again once you continue: " + strings.Join(labels, ", ") +
+				". Scroll (↑/↓) to see each one, store them all, then press Enter again."
 			return nil, false
 		}
 		for _, e := range c.unsaved() {

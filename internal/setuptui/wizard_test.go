@@ -321,6 +321,9 @@ func TestResponsibleStep(t *testing.T) {
 // saved mark (#071). Continue warns once, then discards every value, and
 // only the bearer token is described as kept as a digest (#010).
 func TestCeremonyShowsAllAndWarnsOnce(t *testing.T) {
+	previous := tokenFileFallback
+	tokenFileFallback = func() bool { return false } // Save to file must not write here
+	t.Cleanup(func() { tokenFileFallback = previous })
 	c := newCeremony()
 	root, unseal, bearer := []byte(fakeRoot), []byte(fakeUnseal), []byte(fakeBearer)
 	c.add("Root token", root)
@@ -346,8 +349,16 @@ func TestCeremonyShowsAllAndWarnsOnce(t *testing.T) {
 	}
 
 	enter := tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter})
-	if _, leave := c.update(enter); leave || !strings.Contains(c.errMsg, "not shown again") || c.entries[0].value == nil {
+	if _, leave := c.update(enter); leave || !strings.Contains(c.errMsg, "Not shown again") || c.entries[0].value == nil {
 		t.Fatalf("the first Enter only warns: %q", c.errMsg)
+	}
+	if !strings.Contains(c.errMsg, "Root token, Unseal key, Bearer token") {
+		t.Fatalf("the warning must name every value, some may be scrolled away: %q", c.errMsg)
+	}
+	// Save to file replaces the warning, so Continue warns again.
+	c.act(cerFile)
+	if _, leave := c.update(enter); leave {
+		t.Fatal("Continue after Save to file must warn again")
 	}
 	if _, leave := c.update(enter); !leave || c.pending() {
 		t.Fatal("the second Enter continues")
@@ -368,6 +379,28 @@ func TestCeremonyShowsAllAndWarnsOnce(t *testing.T) {
 		strings.Contains(credentialPurpose("Root token"), "digest") ||
 		strings.Contains(credentialPurpose("Unseal key"), "digest") {
 		t.Fatal("only the bearer token is kept as a digest")
+	}
+}
+
+// On a default 80x24 terminal not every value fits: the one that just
+// arrived is scrolled into view, and the others stay reachable (review of
+// #071).
+func TestCeremonyScrollsArrivingValueIntoView(t *testing.T) {
+	newTestHost(t)
+	h := newHarness(t, Options{})
+	h.w.setScreen(h.w.install)
+	// No install runs: a closed channel ends the listener each message re-arms.
+	h.w.install.msgCh = make(chan tea.Msg)
+	close(h.w.install.msgCh)
+	h.send(ceremonyTokenMsg{label: "Root token", token: []byte(fakeRoot)})
+	h.send(ceremonyTokenMsg{label: "Unseal key", token: []byte(fakeUnseal)})
+	h.send(ceremonyTokenMsg{label: "Bearer token", token: []byte(fakeBearer)})
+	if v := h.view(); !strings.Contains(v, fakeBearer) {
+		t.Fatalf("the newest value must be in view:\n%s", v)
+	}
+	h.key(tea.Key{Code: tea.KeyPgUp})
+	if v := h.view(); !strings.Contains(v, fakeRoot) {
+		t.Fatalf("pgup must reach the first value:\n%s", v)
 	}
 }
 

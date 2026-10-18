@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -253,6 +254,9 @@ func (s *installScreen) consume(w *wizard, msg tea.Msg) tea.Cmd {
 		}
 		s.ceremony.add(label, msg.token)
 		s.view = installCeremony
+		// Bring the value that just arrived into view; renderFrame clamps
+		// the offset. On a small terminal it is otherwise below the fold.
+		w.scroll = math.MaxInt32
 	case applyDoneMsg:
 		s.done = true
 		s.err = msg.err

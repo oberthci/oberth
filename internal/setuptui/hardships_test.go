@@ -282,7 +282,7 @@ func TestResumeTypedUpstreamKeyPath(t *testing.T) {
 }
 
 // #062: Save to file writes the bearer token only when pressed, only for the
-// bearer token, to the file the client files read, and discards it here.
+// bearer token, to the file the client files read.
 func TestCeremonySaveTokenToFile(t *testing.T) {
 	host := newTestHost(t)
 	previous := tokenFileFallback
