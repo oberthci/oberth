@@ -5,12 +5,15 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"regexp"
 	"strings"
 
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"sigs.k8s.io/yaml"
+
+	"github.com/oberthci/oberth/pkg/periapsis"
 )
 
 // The manifest is deliberately decoded into this small shape, rather than a
@@ -68,13 +71,18 @@ type vmiManifest struct {
 }
 
 var vmiNamePattern = regexp.MustCompile(`^\{\{workflow\.name\}\}-[a-z0-9]([a-z0-9-]{0,14}[a-z0-9])?$`)
-var imageDigestPattern = regexp.MustCompile(`@sha256:[a-f0-9]{64}$`)
+var vmiDNSLabelPattern = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
+var yamlDocumentMarker = regexp.MustCompile(`(?m)^(?:---|\.\.\.)(?:[ \t]|$)`)
 
 const (
-	maxVMIManifestBytes = 128 << 10
-	maxVMICores         = 4
-	maxVMIMemory        = "8Gi"
-	maxVMIEmptyDisk     = "16Gi"
+	maxVMIManifestBytes   = 128 << 10
+	maxVMICores           = 4
+	maxVMIMemory          = "8Gi"
+	maxVMIEmptyDisk       = "16Gi"
+	maxVMITemplates       = 6
+	maxVMICreateTemplates = 2
+	maxVMIRunCores        = 6
+	maxVMIRunMemory       = "12Gi"
 )
 
 func admitVMIResource(where string, tmpl *wfv1.ResourceTemplate, prefixes []string) error {
@@ -93,6 +101,15 @@ func admitVMIResource(where string, tmpl *wfv1.ResourceTemplate, prefixes []stri
 	}
 	if len(tmpl.Manifest) == 0 || len(tmpl.Manifest) > maxVMIManifestBytes {
 		return fmt.Errorf("argoworkflow: %s.manifest must be inline and at most %d bytes", where, maxVMIManifestBytes)
+	}
+	// Argo substitutes parameters after this admission check. Only the exact
+	// workflow name in metadata.name and the run label is permitted to vary.
+	if strings.Contains(tmpl.Manifest, "{{=") || strings.Count(tmpl.Manifest, "{{workflow.name}}") != 2 ||
+		strings.Contains(strings.ReplaceAll(tmpl.Manifest, "{{workflow.name}}", ""), "{{") {
+		return fmt.Errorf("argoworkflow: %s.manifest permits only two {{workflow.name}} substitutions in metadata.name and the run label", where)
+	}
+	if yamlDocumentMarker.MatchString(tmpl.Manifest) {
+		return fmt.Errorf("argoworkflow: %s.manifest must contain one YAML document", where)
 	}
 	converted, err := yaml.YAMLToJSONStrict([]byte(tmpl.Manifest))
 	if err != nil {
@@ -114,14 +131,16 @@ func admitVMIResource(where string, tmpl *wfv1.ResourceTemplate, prefixes []stri
 		return fmt.Errorf("argoworkflow: %s.manifest.metadata.labels must contain only oberth.ci/workflow: {{workflow.name}}", where)
 	}
 	if tmpl.Action != "create" {
-		if len(manifest.Spec.Volumes) != 0 || len(manifest.Spec.Networks) != 0 || manifest.Spec.Architecture != "" ||
-			manifest.Spec.Domain.CPU.Cores != 0 || manifest.Spec.Domain.Resources.Requests.Memory != "" {
+		if !reflect.DeepEqual(manifest.Spec, (vmiManifest{}).Spec) {
 			return fmt.Errorf("argoworkflow: %s.manifest.spec must be absent for %s", where, tmpl.Action)
 		}
 		return nil
 	}
 	if len(prefixes) == 0 {
 		return fmt.Errorf("argoworkflow: %s has no administrator containerDisk registry allowlist", where)
+	}
+	if err := validateContainerDiskPrefixes(prefixes); err != nil {
+		return fmt.Errorf("argoworkflow: %s: %w", where, err)
 	}
 	if manifest.Spec.Architecture != "amd64" && manifest.Spec.Architecture != "arm64" {
 		return fmt.Errorf("argoworkflow: %s.manifest.spec.architecture must be amd64 or arm64", where)
@@ -142,10 +161,11 @@ func admitVMIResource(where string, tmpl *wfv1.ResourceTemplate, prefixes []stri
 	}
 	volumeNames := map[string]bool{}
 	containerDisks := 0
+	totalEmptyDisk := resource.MustParse("0")
 	for i, volume := range manifest.Spec.Volumes {
 		path := fmt.Sprintf("%s.manifest.spec.volumes[%d]", where, i)
-		if volume.Name == "" || volumeNames[volume.Name] {
-			return fmt.Errorf("argoworkflow: %s.name must be unique and nonempty", path)
+		if !vmiDNSLabelPattern.MatchString(volume.Name) || volumeNames[volume.Name] {
+			return fmt.Errorf("argoworkflow: %s.name must be a unique DNS label", path)
 		}
 		volumeNames[volume.Name] = true
 		kinds := 0
@@ -153,14 +173,11 @@ func admitVMIResource(where string, tmpl *wfv1.ResourceTemplate, prefixes []stri
 			kinds++
 			containerDisks++
 			image := volume.ContainerDisk.Image
-			allowed := false
-			for _, prefix := range prefixes {
-				if prefix != "" && strings.HasPrefix(image, prefix) {
-					allowed = true
-				}
+			if err := periapsis.ValidateRunnerImage(image); err != nil {
+				return fmt.Errorf("argoworkflow: %s.containerDisk.image: %w", path, err)
 			}
-			if !allowed || !imageDigestPattern.MatchString(image) {
-				return fmt.Errorf("argoworkflow: %s.containerDisk.image must have an allowlisted prefix and sha256 digest", path)
+			if !periapsis.RunnerImageAllowed(image, prefixes) {
+				return fmt.Errorf("argoworkflow: %s.containerDisk.image must have an allowlisted prefix", path)
 			}
 		}
 		if volume.CloudInitNoCloud != nil {
@@ -176,6 +193,10 @@ func admitVMIResource(where string, tmpl *wfv1.ResourceTemplate, prefixes []stri
 			if err != nil || capacity.Sign() <= 0 || capacity.Cmp(resource.MustParse(maxVMIEmptyDisk)) > 0 {
 				return fmt.Errorf("argoworkflow: %s.emptyDisk.capacity must be positive and at most %s", path, maxVMIEmptyDisk)
 			}
+			totalEmptyDisk.Add(capacity)
+			if totalEmptyDisk.Cmp(resource.MustParse(maxVMIEmptyDisk)) > 0 {
+				return fmt.Errorf("argoworkflow: %s.manifest.spec.volumes total emptyDisk capacity must be at most %s", where, maxVMIEmptyDisk)
+			}
 		}
 		if kinds != 1 {
 			return fmt.Errorf("argoworkflow: %s must use exactly one of containerDisk, cloudInitNoCloud, or emptyDisk", path)
@@ -189,17 +210,59 @@ func admitVMIResource(where string, tmpl *wfv1.ResourceTemplate, prefixes []stri
 	}
 	seenDisks := map[string]bool{}
 	for i, disk := range manifest.Spec.Domain.Devices.Disks {
+		if !vmiDNSLabelPattern.MatchString(disk.Name) {
+			return fmt.Errorf("argoworkflow: %s.manifest.spec.domain.devices.disks[%d].name must be a DNS label", where, i)
+		}
 		if !volumeNames[disk.Name] || seenDisks[disk.Name] || disk.Disk.Bus != "virtio" {
 			return fmt.Errorf("argoworkflow: %s.manifest.spec.domain.devices.disks[%d] must name a unique volume with virtio bus", where, i)
 		}
 		seenDisks[disk.Name] = true
 	}
-	if len(manifest.Spec.Networks) != 1 || len(manifest.Spec.Domain.Devices.Interfaces) != 1 ||
-		manifest.Spec.Networks[0].Name == "" || manifest.Spec.Networks[0].Name != manifest.Spec.Domain.Devices.Interfaces[0].Name {
+	if len(manifest.Spec.Networks) != 1 || len(manifest.Spec.Domain.Devices.Interfaces) != 1 {
+		return fmt.Errorf("argoworkflow: %s.manifest.spec.networks and domain.devices.interfaces must define one matching pod/masquerade network", where)
+	}
+	if !vmiDNSLabelPattern.MatchString(manifest.Spec.Networks[0].Name) ||
+		!vmiDNSLabelPattern.MatchString(manifest.Spec.Domain.Devices.Interfaces[0].Name) {
+		return fmt.Errorf("argoworkflow: %s.manifest.spec.networks and domain.devices.interfaces names must be DNS labels", where)
+	}
+	if manifest.Spec.Networks[0].Name != manifest.Spec.Domain.Devices.Interfaces[0].Name {
 		return fmt.Errorf("argoworkflow: %s.manifest.spec.networks and domain.devices.interfaces must define one matching pod/masquerade network", where)
 	}
 	if manifest.Spec.Networks[0].Pod == nil || manifest.Spec.Domain.Devices.Interfaces[0].Masquerade == nil {
 		return fmt.Errorf("argoworkflow: %s.manifest.spec.networks and domain.devices.interfaces require pod and masquerade", where)
 	}
 	return nil
+}
+
+func validateContainerDiskPrefixes(prefixes []string) error {
+	if err := periapsis.ValidateRunnerImagePrefixes(prefixes); err != nil {
+		return fmt.Errorf("containerDisk prefixes: %w", err)
+	}
+	for _, prefix := range prefixes {
+		if !strings.HasSuffix(prefix, "/") || !strings.Contains(prefix, "/") || strings.HasPrefix(prefix, "/") {
+			return fmt.Errorf("containerDisk prefix %q must end at a repository path boundary (/)", prefix)
+		}
+	}
+	return nil
+}
+
+type vmiUsage struct {
+	cores  int
+	memory resource.Quantity
+}
+
+func vmiCreateUsage(raw string) (vmiUsage, error) {
+	converted, err := yaml.YAMLToJSONStrict([]byte(raw))
+	if err != nil {
+		return vmiUsage{}, err
+	}
+	var manifest vmiManifest
+	if err := json.Unmarshal(converted, &manifest); err != nil {
+		return vmiUsage{}, err
+	}
+	memory, err := resource.ParseQuantity(manifest.Spec.Domain.Resources.Requests.Memory)
+	if err != nil {
+		return vmiUsage{}, err
+	}
+	return vmiUsage{cores: manifest.Spec.Domain.CPU.Cores, memory: memory}, nil
 }
