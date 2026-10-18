@@ -1,10 +1,11 @@
 package installer
 
-// `oberth backup`: one encrypted archive of an Oberth installation's state —
-// OpenBao KV secrets, ACL policies and Kubernetes auth roles, a verified
-// snapshot of the server database with the protocol identifiers needed to
-// open it, the release's Helm values and the secret-access table — so that
-// `oberth restore` can rebuild it on a fresh install (issues 038 and 048).
+// `oberth backup`: one encrypted archive of what a fresh install cannot
+// recreate — a verified snapshot of the server database with the protocol
+// identifiers needed to open it, and the secrets pipelines use: the
+// operator's OpenBao KV secrets, ACL policies and Kubernetes auth roles, and
+// the secret-access table — so that `oberth restore` can bring them back on
+// a fresh install (issues 038, 048 and 068).
 //
 // Like `oberth install`, it runs on an operator workstation with kubectl,
 // helm, openssl and BAO_TOKEN; every in-cluster operation is a kubectl exec or
@@ -463,10 +464,12 @@ func runBackup(ctx context.Context, cfg BackupConfig, deps backupDeps) (resultEr
 		if err != nil {
 			return err
 		}
+		policies = operatorPolicies(policies)
 		roles, err := exportRoles(ctx, bao, deps.rootToken, defaultAuthMount)
 		if err != nil {
 			return err
 		}
+		roles = operatorRoles(roles)
 		reference = exportOpenBaoReference(ctx, bao, deps.rootToken)
 		for _, member := range []struct {
 			name  string

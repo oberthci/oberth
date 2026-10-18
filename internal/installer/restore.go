@@ -179,6 +179,7 @@ func loadRestoreArchive(ctx context.Context, cfg RestoreConfig, deps backupDeps,
 	kept := operatorSecrets(archive.KV.Secrets)
 	archive.SkippedIdentities = len(archive.KV.Secrets) - len(kept)
 	archive.KV.Secrets = kept
+	archive.Policies, archive.Roles = operatorPolicies(archive.Policies), operatorRoles(archive.Roles)
 	if archive.KV.Mount != defaultKVPrefix || archive.Roles.Mount != defaultAuthMount {
 		return archive, fmt.Errorf("archive covers KV mount %q and auth mount %q; this release restores only %q and %q",
 			archive.KV.Mount, archive.Roles.Mount, defaultKVPrefix, defaultAuthMount)
@@ -324,6 +325,14 @@ func inspectRestoreTarget(ctx context.Context, cfg RestoreConfig, deps backupDep
 	}
 	var bao openBaoExec
 	if parts.Secrets {
+		// Per-repository roles bind the source's namespaces: restoring them
+		// elsewhere would grant nothing, or the wrong service accounts.
+		src := archive.Manifest.Source
+		if src.Namespace != "" && (src.Namespace != cfg.Namespace || src.ArgoNamespace != cfg.ArgoNamespace) {
+			return target, openBaoExec{}, fmt.Errorf("the backup's roles bind namespaces %s/%s, but this install uses %s/%s: "+
+				"restore into the same namespaces, or restore only the history with --only history",
+				src.Namespace, src.ArgoNamespace, cfg.Namespace, cfg.ArgoNamespace)
+		}
 		if grants, err := readSecretAccess(ctx, deps.Deps, cfg.Namespace); err == nil {
 			target.Grants = countGrants(grants)
 		}

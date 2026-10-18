@@ -11,7 +11,7 @@ import (
 // the saved cluster; known is false when the cluster could not be asked.
 // Tests replace it.
 var releasePresent = func(ctx context.Context, kubeconfig, kubeContext, namespace string) (present, known bool) {
-	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 8*time.Second)
 	defer cancel()
 	args := []string{"status", "oberth", "-n", namespace}
 	if kubeconfig != "" {
@@ -36,7 +36,9 @@ var releasePresent = func(ctx context.Context, kubeconfig, kubeContext, namespac
 // answers stay, the Review and Install steps open again (#069). It returns
 // the notice to show, or "".
 func forgetVanishedInstall(ctx context.Context, st *WizardState) string {
-	if st.Install.Status == installNone {
+	// Without a saved context, helm would ask whatever cluster is current
+	// now, which may not be the one the record describes.
+	if st.Install.Status == installNone || st.Config.ContextName == "" {
 		return ""
 	}
 	present, known := releasePresent(ctx, st.Config.KubeconfigPath, st.Config.ContextName, st.namespace())

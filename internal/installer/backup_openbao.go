@@ -43,6 +43,38 @@ func operatorSecrets(secrets []kvSecretExport) []kvSecretExport {
 	return kept
 }
 
+// installOwnedAccess are the policies and auth roles every install writes
+// for its own server and pipelines, bound to its namespaces; `oberth install`
+// rewrites them. A restore keeps the target's, so an older or other-namespace
+// copy can never lock the server out (v0.17.34 review).
+var installOwnedAccess = map[string]bool{
+	defaultPolicy:             true, // also defaultRole
+	defaultCredentialedPolicy: true,
+	defaultCISecretsPolicy:    true,
+}
+
+// operatorPolicies drops the install-owned policies.
+func operatorPolicies(policies []policyExport) []policyExport {
+	kept := make([]policyExport, 0, len(policies))
+	for _, policy := range policies {
+		if !installOwnedAccess[policy.Name] {
+			kept = append(kept, policy)
+		}
+	}
+	return kept
+}
+
+// operatorRoles drops the install-owned auth roles.
+func operatorRoles(roles rolesExport) rolesExport {
+	kept := rolesExport{Mount: roles.Mount, Roles: make([]roleExport, 0, len(roles.Roles))}
+	for _, role := range roles.Roles {
+		if !installOwnedAccess[role.Name] {
+			kept.Roles = append(kept.Roles, role)
+		}
+	}
+	return kept
+}
+
 type kvExport struct {
 	Mount   string           `json:"mount"`
 	Secrets []kvSecretExport `json:"secrets"`

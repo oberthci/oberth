@@ -428,8 +428,8 @@ func writeBackupArchive(ctx context.Context, dir string, manifest *backupManifes
 	return nil
 }
 
-// writeBackupTar writes the gzip-compressed plaintext tar (v2; step logs
-// compress well). v1 archives were uncompressed; openBackupArchive reads both.
+// writeBackupTar writes the gzip-compressed plaintext tar (since v2). v1
+// archives were uncompressed; openBackupArchive reads both.
 func writeBackupTar(w io.Writer, dir string, manifest []byte, members []backupMemberDigest) (resultErr error) {
 	compressed := gzip.NewWriter(w)
 	defer func() { resultErr = errors.Join(resultErr, compressed.Close()) }()

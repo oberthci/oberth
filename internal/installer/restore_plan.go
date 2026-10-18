@@ -242,6 +242,9 @@ func printHistoryChanges(w io.Writer, archive restoreArchive, target restoreTarg
 func printSecretChanges(w io.Writer, archive restoreArchive, target restoreTarget) {
 	plan := target.OpenBao
 	grants := fmt.Sprintf("grants (ConfigMap %s) %d -> %d", secretAccessConfigMapName, target.Grants, countGrants(archive.Grants))
+	if !archive.Grants.Present {
+		grants = fmt.Sprintf("grants kept (%d; the backup has none)", target.Grants)
+	}
 	if !plan.Known {
 		_, _ = fmt.Fprintf(w, "  Secrets    write %d secrets, %d policies, %d roles (no root token: this install was not compared); %s\n",
 			len(archive.KV.Secrets), len(archive.Policies), len(archive.Roles.Roles), grants)

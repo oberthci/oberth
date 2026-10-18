@@ -96,7 +96,7 @@ everything encrypted to it would be unrecoverable.
 | --- | --- | --- | --- |
 | `manifest.json` | yes | yes | format, scope, versions, source cluster, counts, member hashes (below) |
 | `openbao/kv.json` | yes | – | every KV v2 secret under the `oberth` mount except `identities/`, current version |
-| `openbao/policies.json` | yes | – | every ACL policy except `root` and `default` |
+| `openbao/policies.json` | yes | – | every ACL policy except `root`, `default` and the install's own (`oberth-ci`, `oberth-argo-credentialed`, `oberth-argo-ci-secrets`, also left out of `roles.json`), which every install writes for its own namespaces |
 | `openbao/roles.json` | yes | – | every `auth/kubernetes` role with every field OpenBao returns |
 | `openbao/reference.json` | yes | – | Kubernetes auth config, mount list, Transit key metadata, PKI CA certificate; for reference, never restored |
 | `database/oberth-database.tar` | yes | yes | verified database snapshot (`oberth.database-backup/v1`) |
@@ -265,7 +265,7 @@ backup, `history` for a history-only one (where `--only secrets` is refused).
 | Part | What it restores |
 | --- | --- |
 | `history` | the database, replacing this install's rather than merging; the compatibility values the restored database must be opened under; and deletion of Argo Workflows whose runs the restored database does not know |
-| `secrets` | the OpenBao KV secrets (never `identities/`), ACL policies and `auth/kubernetes` roles, each verified by read-back; and the grants (`oberth-secret-access` ConfigMap) |
+| `secrets` | the OpenBao KV secrets (never `identities/`), ACL policies and `auth/kubernetes` roles, each verified by read-back; and the grants (`oberth-secret-access` ConfigMap). The per-repository roles bind the backup's namespaces, so this part restores only into the same namespaces; otherwise use `--only history` |
 
 The compatibility values (`compatibility.schemaIdentity`, `auditDomain`,
 `witnessKeyInfo`) are the only Helm values a restore sets. Whatever the

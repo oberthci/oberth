@@ -599,7 +599,8 @@ func TestBackupCapturesOpenBaoDatabaseAndValues(t *testing.T) {
 		t.Fatalf("database summary = %+v", manifest.Database)
 	}
 	// identities/oberth/ssh-host is the install's own: never backed up.
-	if manifest.OpenBao.Secrets != 2 || manifest.OpenBao.Policies != 2 || manifest.OpenBao.Roles != 1 {
+	// oberth-ci is the install's own policy: never backed up either.
+	if manifest.OpenBao.Secrets != 2 || manifest.OpenBao.Policies != 1 || manifest.OpenBao.Roles != 1 {
 		t.Fatalf("openbao summary = %+v", manifest.OpenBao)
 	}
 	var roles rolesExport
@@ -720,6 +721,13 @@ func TestRestoreAppliesTheArchive(t *testing.T) {
 		}
 	}
 	for name, rules := range source.bao.policies {
+		if installOwnedAccess[name] {
+			// The install's own policy stays the target's.
+			if target.bao.policies[name] != "# installer default" {
+				t.Fatalf("install-owned policy %s was replaced: %q", name, target.bao.policies[name])
+			}
+			continue
+		}
 		if strings.TrimSpace(target.bao.policies[name]) != rules {
 			t.Fatalf("policy %s = %q, want %q", name, target.bao.policies[name], rules)
 		}
@@ -829,10 +837,10 @@ func TestRestoreDryRunChangesNothing(t *testing.T) {
 		t.Fatalf("restore --dry-run: %v\n%s", err, out.String())
 	}
 	assertNoRestoreMutation(t, target)
-	assertSubstringsInOrder(t, out.String(), []string{"Verified: all", "History    1 run, ", "Secrets    2 KV secrets, 2 policies, 1 roles, 1 grants",
+	assertSubstringsInOrder(t, out.String(), []string{"Verified: all", "History    1 run, ", "Secrets    2 KV secrets, 1 policies, 1 roles, 1 grants",
 		"What changes on this install:", "History    replaced, not merged: runs 0 -> 1", "Secrets    2 new, 0 replaced, 0 unchanged",
 		"new: release/cosign-secret, upstream/codeberg/org/ssh-key",
-		"policies 1 new, 1 replaced; roles 1 new, 0 replaced; grants (ConfigMap oberth-secret-access) 0 -> 1",
+		"policies 1 new, 0 replaced; roles 1 new, 0 replaced; grants (ConfigMap oberth-secret-access) 0 -> 1",
 		"Unchanged  this install's identities, CA and Helm values",
 		"deploy/oberth stopped (1 -> 0)", "pre-restore-20261017T093000Z", "Helm       compatibility values the database needs",
 		"oberth-oberth-orphan", "No changes were made"})

@@ -207,7 +207,7 @@ func TestInspectShowsContentsWithoutValues(t *testing.T) {
 	}
 	text := out.String()
 	assertSubstringsInOrder(t, text, []string{"holds history and secrets", "History    1 run,", "opened under acme-oberth-schema-v1",
-		"Secrets    2 KV secrets, 2 policies, 1 roles, 1 grants", "release/cosign-secret", "Nothing was changed (--inspect)"})
+		"Secrets    2 KV secrets, 1 policies, 1 roles, 1 grants", "release/cosign-secret", "Nothing was changed (--inspect)"})
 	if strings.Contains(text, "identities/") {
 		t.Fatalf("inspect lists install identities:\n%s", text)
 	}
@@ -252,3 +252,21 @@ func TestStoreSummaryCountsHistory(t *testing.T) {
 func metav1GetOptions() metav1.GetOptions { return metav1.GetOptions{} }
 
 func writeFileForTest(path string, body []byte) error { return os.WriteFile(path, body, 0o600) }
+
+// Secrets restore only into the namespaces their roles bind.
+func TestRestoreRefusesSecretsIntoOtherNamespaces(t *testing.T) {
+	t.Parallel()
+	archive, _, _, target := reinstallFixture(t)
+	var out bytes.Buffer
+	cfg := RestoreConfig{Input: archive, Yes: true, Timeout: 10 * time.Second, ArgoNamespace: "other-argo"}
+	cfg.applyDefaults()
+	err := runRestore(context.Background(), cfg, target.deps(&out))
+	if err == nil || !strings.Contains(err.Error(), "restore into the same namespaces") || len(target.bao.writes) != 0 {
+		t.Fatalf("restore into other namespaces = %v, writes %v", err, target.bao.writes)
+	}
+	cfg.Only = []string{RestorePartHistory}
+	out.Reset()
+	if err := runRestore(context.Background(), cfg, target.deps(&out)); err != nil {
+		t.Fatalf("--only history into other namespaces: %v\n%s", err, out.String())
+	}
+}

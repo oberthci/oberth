@@ -270,7 +270,7 @@ func runRestore(ctx context.Context, arguments []string, input io.Reader, output
 	var cfg installer.RestoreConfig
 	flags.BoolVar(&cfg.DryRun, "dry-run", false, "show what would change on this install, then stop")
 	flags.BoolVar(&cfg.Inspect, "inspect", false, "show what the backup holds and stop; needs no cluster")
-	only := flags.String("only", "", "restore only one part: `PART` history or secrets")
+	only := flags.String("only", "", "restore only these `PARTS`: history, secrets (comma-separated)")
 	flags.BoolVar(&cfg.Yes, "yes", false, "skip the confirmation (for scripts)")
 	flags.StringVar(&cfg.Input, "input", "", "the backup `FILE` (same as the argument)")
 	flags.StringVar(&cfg.Input, "i", "", "shorthand for --input `FILE`")
