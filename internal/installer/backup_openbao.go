@@ -105,7 +105,10 @@ type openBaoReference struct {
 	SecretMounts map[string]baoMount       `json:"secret_mounts"`
 	TransitKeys  map[string]map[string]any `json:"transit_keys"`
 	PKICACerts   map[string]string         `json:"pki_ca_certificates"`
-	Warnings     []string                  `json:"warnings"`
+	// ServerCertificate is the install's own server certificate (public),
+	// so a restore can name secrets that still pin it (#074).
+	ServerCertificate string   `json:"server_certificate,omitempty"`
+	Warnings          []string `json:"warnings"`
 }
 
 // builtinPolicies are owned by OpenBao itself and never exported.

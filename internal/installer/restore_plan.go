@@ -120,6 +120,13 @@ func printArchiveContents(w io.Writer, archive restoreArchive, input string, all
 	_, _ = fmt.Fprintf(w, "  Taken      %s from context %s (%s); holds %s\n",
 		m.CreatedAt, displayOr(m.Source.Context, "?"), displayOr(m.Source.ServerVersion, "unknown server version"), scope)
 	_, _ = fmt.Fprintf(w, "  SHA-256    %s\n", archive.CipherSHA)
+	if recipients, err := ArchiveRecipients(input); err == nil {
+		names := make([]string, 0, len(recipients))
+		for _, recipient := range recipients {
+			names = append(names, recipient.String())
+		}
+		_, _ = fmt.Fprintf(w, "  Key        encrypted to %s\n", strings.Join(names, "; "))
+	}
 	c := archive.Contents
 	_, _ = fmt.Fprintf(w, "  History    %s\n", describeContents(c))
 	if len(c.Repositories) > 0 {
@@ -265,6 +272,36 @@ func printSecretChanges(w io.Writer, archive restoreArchive, target restoreTarge
 	if len(plan.RolesReplaced) > 0 {
 		_, _ = fmt.Fprintf(w, "             replaced roles: %s\n", listSome(plan.RolesReplaced, 8))
 	}
+	printPinChanges(w, target.Pins)
+}
+
+// printPinChanges says which restored secrets pin the backup's server
+// (#074): names and line counts only, never values.
+func printPinChanges(w io.Writer, pins serverPins) {
+	if len(pins.Rewritten) > 0 {
+		_, _ = fmt.Fprintf(w, "             known_hosts pins of this server updated to its SSH host key: %s\n", describePinRewrites(pins.Rewritten))
+	}
+	if len(pins.Mixed) > 0 {
+		_, _ = fmt.Fprintf(w, "             known_hosts lines naming this server among other hosts, left as they are: %s\n", listSome(pins.Mixed, 8))
+	}
+	if len(pins.OldCA) > 0 {
+		_, _ = fmt.Fprintf(w, "             still hold the backup's server CA (update them by hand): %s\n", listSome(pins.OldCA, 8))
+	}
+	if pins.Note != "" && len(pins.Rewritten) == 0 {
+		_, _ = fmt.Fprintf(w, "             known_hosts pins of this server: %s\n", pins.Note)
+	}
+}
+
+func describePinRewrites(rewrites []pinRewrite) string {
+	parts := make([]string, 0, len(rewrites))
+	for _, rewrite := range rewrites {
+		part := fmt.Sprintf("%s (%s", rewrite.Path, plural(rewrite.Lines, "line"))
+		if rewrite.Dropped > 0 {
+			part += fmt.Sprintf(", %d duplicate dropped", rewrite.Dropped)
+		}
+		parts = append(parts, part+")")
+	}
+	return listSome(parts, 8)
 }
 
 // diffNames returns the names only in have and only in want.

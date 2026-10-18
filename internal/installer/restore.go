@@ -134,6 +134,9 @@ type restoreArchive struct {
 	Policies  []policyExport
 	Roles     rolesExport
 	Grants    secretAccessExport
+	// Reference is the archive's reference-only record (#074 reads the
+	// server CA it names); zero when the archive has none.
+	Reference openBaoReference
 	Report    store.BackupReport
 	Database  restoredDatabase
 	// LocalDatabase is the verified pair written for local inspection.
@@ -172,6 +175,11 @@ func loadRestoreArchive(ctx context.Context, cfg RestoreConfig, deps backupDeps,
 			if err := readBackupJSON(work, member.name, member.value); err != nil {
 				return archive, err
 			}
+		}
+		// Reference-only: read leniently, since older releases recorded
+		// other fields, and a restore never applies it.
+		if body, err := os.ReadFile(filepath.Join(work, filepath.FromSlash(backupMemberReference))); err == nil { // #nosec G304 -- fixed member name inside the private working directory.
+			_ = json.Unmarshal(body, &archive.Reference)
 		}
 	}
 	// Archives from v0.17.33 and earlier also carried the install's own
@@ -241,6 +249,10 @@ type restoreTarget struct {
 	ContentsNote string
 	// Grants counts the target's current grants.
 	Grants int
+	// KV is the archive's secrets as they will be written: known_hosts pins
+	// of this server updated (#074).
+	KV   kvExport
+	Pins serverPins
 }
 
 func runRestore(ctx context.Context, cfg RestoreConfig, deps backupDeps) (resultErr error) {
@@ -339,8 +351,11 @@ func inspectRestoreTarget(ctx context.Context, cfg RestoreConfig, deps backupDep
 		if bao, err = connectOpenBao(ctx, deps.Deps, cfg.OpenBaoNamespace); err != nil {
 			return target, openBaoExec{}, err
 		}
+		target.KV = archive.KV
+		target.Pins.Note = "not checked without the root token"
 		if deps.rootToken != "" {
-			if target.OpenBao, err = planOpenBaoRestore(ctx, bao, deps.rootToken, archive.KV, archive.Policies, archive.Roles); err != nil {
+			target.KV, target.Pins = checkServerPins(ctx, deps.Deps, cfg.Namespace, target.Server, bao, deps.rootToken, archive)
+			if target.OpenBao, err = planOpenBaoRestore(ctx, bao, deps.rootToken, target.KV, archive.Policies, archive.Roles); err != nil {
 				return target, openBaoExec{}, err
 			}
 		}
@@ -449,12 +464,15 @@ func applyRestore(ctx context.Context, cfg RestoreConfig, deps backupDeps, archi
 	}
 	if parts.Secrets {
 		_, _ = fmt.Fprintln(w, "Restoring OpenBao...")
-		written, err := restoreOpenBao(ctx, bao, deps.rootToken, archive.KV, archive.Policies, archive.Roles)
+		written, err := restoreOpenBao(ctx, bao, deps.rootToken, target.KV, archive.Policies, archive.Roles)
 		if err != nil {
 			return err
 		}
 		_, _ = fmt.Fprintf(w, "  ✓ %d secrets (%d written, %d already current), %d policies, %d roles verified by read-back\n",
-			len(archive.KV.Secrets), written, len(archive.KV.Secrets)-written, len(archive.Policies), len(archive.Roles.Roles))
+			len(target.KV.Secrets), written, len(target.KV.Secrets)-written, len(archive.Policies), len(archive.Roles.Roles))
+		if len(target.Pins.Rewritten) > 0 {
+			_, _ = fmt.Fprintf(w, "  ✓ known_hosts pins of this server updated to its SSH host key in %s\n", describePinRewrites(target.Pins.Rewritten))
+		}
 	}
 
 	replicas := max(target.Server.Replicas, 1)
@@ -876,6 +894,14 @@ func printRestoreNextSteps(w io.Writer, cfg RestoreConfig, archive restoreArchiv
 	}
 	next("This install keeps its own server CA and SSH host key: other machines re-pin ~/.config/oberth/ca.crt and\n" +
 		"     drop a stale known_hosts entry (ssh-keygen -R '[<host>]:30022').")
+	if parts.Secrets && len(target.Pins.OldCA) > 0 {
+		next("These restored secrets still hold the backup's server CA, which this install replaced; put this install's CA\n"+
+			"     (~/.config/oberth/ca.crt after oberth install) in them: %s", strings.Join(target.Pins.OldCA, ", "))
+	}
+	if parts.Secrets && len(target.Pins.Mixed) > 0 {
+		next("These restored secrets list this server's SSH host among other hosts on one known_hosts line, left as they were;\n"+
+			"     update the key for this server by hand: %s", strings.Join(target.Pins.Mixed, ", "))
+	}
 	next("If this node keeps OpenBao unsealed with deploy/systemd/oberth-openbao-unseal, give it this install's unseal key:\n" +
 		"         sudo install -m 0400 -o root -g root <unseal-key-file> /etc/oberth/openbao-unseal-key\n" +
 		"         sudo systemctl restart oberth-openbao-unseal")

@@ -471,6 +471,11 @@ func runBackup(ctx context.Context, cfg BackupConfig, deps backupDeps) (resultEr
 		}
 		roles = operatorRoles(roles)
 		reference = exportOpenBaoReference(ctx, bao, deps.rootToken)
+		// The server certificate is public; record it whether or not the
+		// host key parses (#074).
+		if _, cert, _ := serverIdentityPublic(ctx, bao, deps.rootToken, cfg.Namespace); len(cert) > 0 {
+			reference.ServerCertificate = string(cert)
+		}
 		for _, member := range []struct {
 			name  string
 			value any
@@ -580,7 +585,12 @@ func runBackup(ctx context.Context, cfg BackupConfig, deps backupDeps) (resultEr
 	if strings.HasSuffix(cfg.Recipient, backupRecipientCertName) {
 		keyNote = displayLocalPath(strings.TrimSuffix(cfg.Recipient, backupRecipientCertName) + backupRecipientKeyName)
 	}
-	_, _ = fmt.Fprintf(w, "  Encrypted  restoring needs %s: keep a copy of it OFF this machine\n", keyNote)
+	// Name the key by identity too, as restore names it (#072): a path alone
+	// did not say which of several recipient.key files a backup needs.
+	if recipient, err := BackupRecipientOf(cfg.Recipient); err == nil {
+		_, _ = fmt.Fprintf(w, "  Encrypted  to %s\n", recipient)
+	}
+	_, _ = fmt.Fprintf(w, "  Key        restoring needs %s: keep a copy of it OFF this machine (oberth backup key --print)\n", keyNote)
 	_, _ = fmt.Fprintf(w, "  SHA-256    %s\n", cipherSHA)
 	if len(reference.Warnings) > 0 {
 		_, _ = fmt.Fprintf(w, "  Note       %d reference-only reads failed and are recorded in the archive\n", len(reference.Warnings))

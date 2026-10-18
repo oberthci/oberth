@@ -4,6 +4,7 @@ package main
 // directory, safe defaults, and flags only for the unusual case.
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"flag"
@@ -45,6 +46,8 @@ func runBackup(ctx context.Context, arguments []string, input io.Reader, output 
 			return runBackupDatabase(ctx, arguments[1:], output)
 		case "keygen":
 			return runBackupKeygen(arguments[1:], output)
+		case "key":
+			return runBackupKey(arguments[1:], output)
 		case "export-secrets":
 			return runExportSecrets(ctx, arguments[1:], output)
 		}
@@ -84,6 +87,7 @@ func runBackup(ctx context.Context, arguments []string, input io.Reader, output 
 			return fmt.Errorf("%s exists but its private key %s does not: backups encrypted to it could never be restored. "+
 				"Put the key back, or move %s aside so the next backup creates a new pair", displayHomePath(certPath), displayHomePath(keyPath), displayHomePath(certPath))
 		}
+		created := false
 		if certErr != nil {
 			if cfg.DryRun {
 				_, _ = fmt.Fprintf(output, "No backup key yet: a real backup creates %s first.\n", displayHomePath(keyPath))
@@ -91,8 +95,16 @@ func runBackup(ctx context.Context, arguments []string, input io.Reader, output 
 				if _, _, err := installer.GenerateBackupRecipient(filepath.Dir(keyPath)); err != nil {
 					return err
 				}
+				created = true
 				_, _ = fmt.Fprintf(output, "Created the backup key %s (first backup on this machine).\n"+
 					"  Every backup is encrypted to it and cannot be restored without it: keep a copy OFF this machine.\n\n", displayHomePath(keyPath))
+			}
+		}
+		// Ask before the first archive, not after it, while nothing is read
+		// yet (#072): the key once went with a wiped ~/.config/oberth.
+		if !cfg.DryRun && !installer.BackupKeyStored(certPath) {
+			if err := confirmBackupKeyStored(keyPath, certPath, created, input, output); err != nil {
+				return err
 			}
 		}
 		cfg.Recipient = certPath
@@ -127,12 +139,124 @@ the first backup. Keep a copy of that key OFF this machine: no backup can be
 restored without it.
 
 Also:
+    oberth backup key [--print]           where the backup key is; --print shows it to store in a password manager
     oberth backup export-secrets [FILE]   the secrets as plain JSON any OpenBao/Vault can import
     oberth backup keygen [--dir DIR]      create the key pair ahead of time
 
 `)
 	printOperatorFlags(flags, output)
 	_, _ = fmt.Fprintf(output, "\nGuide: %s\n", backupDocsURL())
+	return nil
+}
+
+// backupStderr carries the backup-key warning when no terminal can confirm
+// it; tests replace it.
+var backupStderr io.Writer = os.Stderr
+
+// backupInputIsTerminal reports whether the operator can answer a prompt.
+var backupInputIsTerminal = func(input io.Reader) bool {
+	file, ok := input.(*os.File)
+	return ok && term.IsTerminal(int(file.Fd()))
+}
+
+// confirmBackupKeyStored makes the backup key impossible to miss (#072): on a
+// terminal the operator types "stored" once a copy is off the machine, and is
+// not asked again for that key. Without a terminal the warning goes to stderr
+// and the backup proceeds.
+func confirmBackupKeyStored(keyPath, certPath string, created bool, input io.Reader, output io.Writer) error {
+	state := "is the key every backup made on this machine is encrypted to"
+	if created {
+		state = "was just created: every backup made on this machine is encrypted to it"
+	}
+	warning := fmt.Sprintf(`
+!! Backup key  %s
+   This file %s.
+   Without it no backup can ever be restored, and deleting %s deletes it.
+   Copy it OFF this machine now, for example into a password manager:
+       oberth backup key --print
+`, displayHomePath(keyPath), state, displayHomePath(filepath.Dir(filepath.Dir(keyPath))))
+	if !backupInputIsTerminal(input) {
+		_, _ = fmt.Fprint(backupStderr, warning+"   (Not confirmed: there is no terminal to answer on. Run oberth backup once on a terminal to confirm.)\n\n")
+		return nil
+	}
+	_, _ = fmt.Fprint(output, warning)
+	reader := bufio.NewReader(input)
+	for attempt := 1; attempt <= 3; attempt++ {
+		_, _ = fmt.Fprint(output, "\nType stored once a copy is off this machine (Ctrl-C cancels): ")
+		line, err := reader.ReadString('\n')
+		if strings.TrimSpace(line) == "stored" {
+			if err := installer.MarkBackupKeyStored(certPath); err != nil {
+				return err
+			}
+			_, _ = fmt.Fprintln(output, "  Noted; oberth backup will not ask again for this key.")
+			_, _ = fmt.Fprintln(output)
+			return nil
+		}
+		if err != nil {
+			break
+		}
+	}
+	return fmt.Errorf("backup cancelled before anything was read: copy %s off this machine, then run oberth backup again", displayHomePath(keyPath))
+}
+
+// runBackupKey shows where the backup key is and, with --print, the key
+// itself for a password manager (#072).
+func runBackupKey(arguments []string, output io.Writer) error {
+	flags := flag.NewFlagSet("backup key", flag.ContinueOnError)
+	flags.SetOutput(io.Discard)
+	show := flags.Bool("print", false, "print the private key (PEM) to store it in a password manager; refuses anything but a terminal")
+	positional, help, err := parseOperatorFlags(flags, arguments)
+	if help {
+		_, _ = fmt.Fprint(output, `Usage: oberth backup key [--print]
+
+Show the key every backup on this machine is encrypted to, which certificate
+it belongs to (what oberth restore --inspect names), and whether you
+confirmed a copy exists off this machine. --print shows the private key so
+you can paste it into a password manager; it prints only to a terminal.
+Restoring needs that file back as ~/.config/oberth/backup/recipient.key, or
+next to the backup, or passed with --key.
+
+`)
+		printOperatorFlags(flags, output)
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if len(positional) != 0 {
+		return fmt.Errorf("%w: backup key accepts only --print", errUsage)
+	}
+	keyPath, certPath, err := installer.BackupRecipientPaths()
+	if err != nil {
+		return err
+	}
+	if _, err := os.Stat(keyPath); err != nil {
+		return fmt.Errorf("%w: no backup key at %s yet; the first oberth backup creates it (or: oberth backup keygen)", errUsage, displayHomePath(keyPath))
+	}
+	if *show {
+		if file, ok := output.(*os.File); !ok || !term.IsTerminal(int(file.Fd())) {
+			return fmt.Errorf("%w: --print shows the private key only on a terminal, never into a file or pipe; copy the file itself instead: %s", errUsage, displayHomePath(keyPath))
+		}
+		raw, err := os.ReadFile(keyPath) // #nosec G304 -- the operator's own backup key.
+		if err != nil {
+			return err
+		}
+		defer clear(raw)
+		_, _ = fmt.Fprintf(output, "Private key %s (store all of it, including the BEGIN and END lines):\n\n", displayHomePath(keyPath))
+		_, _ = output.Write(raw)
+		_, _ = fmt.Fprintln(output, "\nClear the terminal scrollback once it is stored.")
+		return nil
+	}
+	_, _ = fmt.Fprintf(output, "Backup key   %s\n", displayHomePath(keyPath))
+	if recipient, err := installer.BackupRecipientOf(certPath); err == nil {
+		_, _ = fmt.Fprintf(output, "Certificate  %s (%s)\n", displayHomePath(certPath), recipient)
+	}
+	if installer.BackupKeyStored(certPath) {
+		_, _ = fmt.Fprintln(output, "Copy         you confirmed a copy exists off this machine")
+	} else {
+		_, _ = fmt.Fprintln(output, "Copy         not confirmed yet: the next oberth backup on a terminal asks")
+	}
+	_, _ = fmt.Fprintln(output, "\nEvery backup made here needs this file to be restored. Store it off this machine:\n    oberth backup key --print")
 	return nil
 }
 
@@ -394,24 +518,52 @@ func newestArchive(dir string) string {
 
 // resolveBackupKey picks the private key: the flag, else the default
 // ~/.config/oberth/backup/recipient.key, else a recipient.key next to the
-// backup (for a backup and key carried to a new machine together).
+// backup (for a backup and key carried to a new machine together). Each
+// candidate is tested against the archive's recipient first (#072), so a
+// key from another machine is named as the wrong key instead of failing
+// inside OpenSSL; a key that cannot be tested here is left to OpenSSL.
 func resolveBackupKey(flagValue, archive string) (string, error) {
-	if flagValue != "" {
-		return flagValue, nil
-	}
 	keyPath, _, err := installer.BackupRecipientPaths()
 	if err != nil {
 		return "", err
 	}
-	if _, err := os.Stat(keyPath); err == nil {
-		return keyPath, nil
+	candidates := []string{flagValue}
+	if flagValue == "" {
+		candidates = []string{keyPath, filepath.Join(filepath.Dir(archive), "recipient.key")}
 	}
-	beside := filepath.Join(filepath.Dir(archive), "recipient.key")
-	if _, err := os.Stat(beside); err == nil {
-		return beside, nil
+	var looked []string
+	untested := ""
+	for _, candidate := range candidates {
+		if _, err := os.Stat(candidate); err != nil {
+			looked = append(looked, displayHomePath(candidate)+" (absent)")
+			continue
+		}
+		opens, err := installer.BackupKeyOpens(archive, candidate)
+		switch {
+		case opens:
+			return candidate, nil
+		case err == nil:
+			looked = append(looked, displayHomePath(candidate)+" (a different key)")
+		case untested == "":
+			untested = candidate
+		}
 	}
-	return "", fmt.Errorf("%w: no backup key: copy the recipient.key the backup was made with to %s (or next to the backup), or pass --key FILE",
-		errUsage, displayHomePath(keyPath))
+	if untested != "" {
+		return untested, nil
+	}
+	encryptedTo := ""
+	if recipients, err := installer.ArchiveRecipients(archive); err == nil {
+		names := make([]string, 0, len(recipients))
+		for _, recipient := range recipients {
+			names = append(names, recipient.String())
+		}
+		encryptedTo = " It is encrypted to " + strings.Join(names, "; ") + ": the recipient.key made with that certificate."
+	}
+	if flagValue != "" && len(looked) == 1 && strings.HasSuffix(looked[0], "(a different key)") {
+		return "", fmt.Errorf("%w: %s does not open %s.%s", errUsage, displayHomePath(flagValue), displayHomePath(archive), encryptedTo)
+	}
+	return "", fmt.Errorf("%w: no backup key opens %s.%s Looked at: %s. Copy that recipient.key to %s (or next to the backup), or pass --key FILE",
+		errUsage, displayHomePath(archive), encryptedTo, strings.Join(looked, ", "), displayHomePath(keyPath))
 }
 
 // --- Operator-friendly flag handling for backup and restore (#065) ---

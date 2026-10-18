@@ -7,14 +7,17 @@ package installer
 import (
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/sha256"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/hex"
 	"encoding/pem"
 	"errors"
 	"fmt"
 	"math/big"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -81,6 +84,44 @@ func GenerateBackupRecipient(dir string) (keyPath, certPath string, err error) {
 		return "", "", errors.Join(err, os.Remove(keyPath))
 	}
 	return keyPath, certPath, nil
+}
+
+// backupKeyStoredName records that the operator confirmed a copy of the key
+// exists off the machine (#072). It holds the SHA-256 of the certificate, so
+// a new key pair needs a new confirmation.
+const backupKeyStoredName = "recipient.stored"
+
+func certificateDigest(certPath string) (string, error) {
+	raw, err := os.ReadFile(certPath) // #nosec G304 -- the operator's recipient certificate.
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(raw)
+	return hex.EncodeToString(sum[:]), nil
+}
+
+// BackupKeyStored reports whether the operator confirmed storing a copy of
+// the private key that belongs to certPath.
+func BackupKeyStored(certPath string) bool {
+	want, err := certificateDigest(certPath)
+	if err != nil {
+		return false
+	}
+	have, err := os.ReadFile(filepath.Join(filepath.Dir(certPath), backupKeyStoredName)) // #nosec G304 -- fixed name beside the certificate.
+	return err == nil && strings.TrimSpace(string(have)) == want
+}
+
+// MarkBackupKeyStored records the confirmation for certPath.
+func MarkBackupKeyStored(certPath string) error {
+	digest, err := certificateDigest(certPath)
+	if err != nil {
+		return err
+	}
+	path := filepath.Join(filepath.Dir(certPath), backupKeyStoredName)
+	if err := os.WriteFile(path, []byte(digest+"\n"), 0o600); err != nil { // #nosec G306 -- public digest, owner-only like its directory.
+		return fmt.Errorf("write %s: %w", path, err)
+	}
+	return nil
 }
 
 func writeNewFile(path string, body []byte, mode os.FileMode) error {

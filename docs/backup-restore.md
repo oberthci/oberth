@@ -26,8 +26,11 @@ oberth backup        # asks for the OpenBao root token; Enter alone = history on
 
 This writes `./oberth-backup-<YYYYMMDD-HHMMSS>.tar.gz.enc` (UTC time) in the
 current directory. The first backup on a machine also creates the key it is
-encrypted to, `~/.config/oberth/backup/recipient.key`: keep a copy of that
-key **off the machine**, because no backup can be restored without it.
+encrypted to, `~/.config/oberth/backup/recipient.key`, and before writing
+anything asks you to type `stored` once a copy of that key is **off the
+machine**: no backup can be restored without it. `oberth backup key --print`
+shows it for a password manager. Never delete `~/.config/oberth` (or its
+`backup/` directory) before a reinstall: the key goes with it.
 
 After reinstalling, from the directory that holds the backup:
 
@@ -187,7 +190,21 @@ encrypted to the same certificate. Existing files are never replaced: backups
 already encrypted to a key need it.
 
 Keep an independently protected copy of `recipient.key` **off the machine**
-(a password manager or another host). Without it no backup can be restored.
+(a password manager or another host). Without it no backup can be restored,
+and deleting `~/.config/oberth` deletes it. Until you confirm a copy exists,
+every `oberth backup` on a terminal shows the key's path and asks you to type
+`stored` before it reads anything; the confirmation is recorded per key
+(`recipient.stored`, the certificate's SHA-256), so a new key asks again.
+Without a terminal the warning goes to stderr and the backup proceeds.
+
+```sh
+oberth backup key            # where the key is, which certificate, whether a copy is confirmed
+oberth backup key --print    # the private key, to paste into a password manager (terminal only)
+```
+
+Every backup summary names the certificate it is encrypted to (issuer and
+serial), and so does `oberth restore --inspect`: that is how to tell which of
+several `recipient.key` files a backup needs.
 
 `oberth backup keygen` creates the pair ahead of time and is optional;
 `--dir DIR` writes it elsewhere, and backups then need
@@ -203,7 +220,11 @@ openssl req -x509 -newkey rsa:4096 -nodes -days 3650 \
 `oberth restore` and `export-secrets` use `--key KEY` if given, else
 `~/.config/oberth/backup/recipient.key`, else a `recipient.key` in the same
 directory as the backup (for a backup and key carried to a new machine
-together). They refuse a key readable by group or others.
+together). Each candidate is first tested against the backup's recipient
+(the archive names it in the clear), so the key that opens it wins, and
+when none does the error names the certificate the backup is encrypted to
+and every place it looked, marking each as absent or a different key. They
+refuse a key readable by group or others.
 
 ### Handling of secrets
 
@@ -295,7 +316,8 @@ Then it prints **What changes on this install**:
   (their previous tokens work again).
 - **Secrets**: how many are new, replaced and unchanged, with the new and
   replaced paths by name; new and replaced policies and roles; the grant
-  count before -> after.
+  count before -> after; and the secrets that pin the backup's server (see
+  [Secrets that pin the old server](#secrets-that-pin-the-old-server)).
 - **Unchanged**: the parts not restored, and always this install's
   identities, CA and Helm values.
 
@@ -347,6 +369,33 @@ fix the cause and rerun the restore (every step is idempotent), or scale the
 Deployment back up. The previous database stays in its `pre-restore-*`
 directory until you remove it.
 
+### Secrets that pin the old server
+
+A restore keeps this install's SSH host key and server CA, so a pipeline
+secret that pinned the backup's server would stop working: a `known_hosts`
+for cloning through Oberth fails with a host key mismatch, and a bundled CA
+fails TLS.
+
+- **SSH host key pins are updated.** Restore reads this install's SSH host
+  public key (from its own identity in OpenBao) and the names its SSH
+  endpoint answers to: the Service DNS names (`oberth`, `oberth.<ns>`,
+  `oberth.<ns>.svc`, `oberth.<ns>.svc.cluster.local`) at the Service's SSH
+  port, and the server certificate names and addresses (`OBERTH_TLS_NAMES`)
+  at the node port. In every restored secret value, a `known_hosts` line
+  that names only those hosts (plain or hashed `|1|` entries) and holds
+  another key gets this install's key; a second line that would repeat it
+  is dropped; every other line stays byte-identical. The plan shows it as
+  `known_hosts pins of this server updated to its SSH host key:
+  <path> (<n> lines)`, by path and count only. A line that lists this
+  server together with other hosts is left as it is and named for you to
+  update. Restoring onto the same server changes nothing.
+- **Old CA pins are named.** A secret holding a PEM certificate equal to the
+  backup's server CA (its PKI CA, or its server certificate, both recorded
+  in the backup's reference) that this install does not also use is listed
+  in the plan and in the next steps, for you to replace with this install's
+  CA. CA bundles are never rewritten. Backups made before v0.17.37 record
+  only the PKI CA.
+
 ### Same cluster or another one
 
 Every k3s serves its API at `https://127.0.0.1:6443`, so the API URL cannot
@@ -375,7 +424,10 @@ The restore prints these steps when it finishes.
    the fresh install printed no longer works; the previous ones do.
 4. This install keeps its own server CA and SSH host key: other machines
    re-pin `~/.config/oberth/ca.crt` and drop a stale `known_hosts` entry
-   (`ssh-keygen -R '[<host>]:30022'`).
+   (`ssh-keygen -R '[<host>]:30022'`). Restored secrets that pinned the old
+   SSH host key were already updated; any that hold the old CA, or list this
+   server among other hosts on one `known_hosts` line, are named here for
+   you to update.
 5. If the node runs the opt-in `deploy/systemd/oberth-openbao-unseal`
    watcher, give it this install's unseal key:
 

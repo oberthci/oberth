@@ -59,7 +59,9 @@ type fakeOpenBao struct {
 	roles    map[string]map[string]any
 	// dropOnRoleWrite simulates a lossy writer that loses one field.
 	dropOnRoleWrite string
-	writes          []string
+	// pkiCA is what oberth-pki/cert/ca returns ("" = a placeholder).
+	pkiCA  string
+	writes []string
 }
 
 func newFakeOpenBao(t *testing.T) *fakeOpenBao {
@@ -144,6 +146,9 @@ func (f *fakeOpenBao) handle(command []string, input []byte) ([]byte, error) {
 		case path == "oberth-transit/keys/trusted-plan-artifacts":
 			return reply(map[string]any{"data": map[string]any{"type": "aes256-gcm96", "exportable": false}})
 		case path == "oberth-pki/cert/ca":
+			if f.pkiCA != "" {
+				return reply(map[string]any{"data": map[string]any{"certificate": f.pkiCA}})
+			}
 			return reply(map[string]any{"data": map[string]any{"certificate": "-----BEGIN CERTIFICATE-----\nold-ca\n-----END CERTIFICATE-----"}})
 		}
 		return notFound(path)

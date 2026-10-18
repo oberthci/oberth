@@ -49,6 +49,9 @@ func isolatedHome(t *testing.T) string {
 // step, no --recipient.
 func TestFirstBackupCreatesTheKey(t *testing.T) {
 	home := isolatedHome(t)
+	previous := backupStderr
+	backupStderr = &bytes.Buffer{}
+	t.Cleanup(func() { backupStderr = previous })
 	var out bytes.Buffer
 	err := runCLI(context.Background(), []string{"backup"}, strings.NewReader(""), &out)
 	// No cluster here (and on CI no kubectl either): the backup itself
