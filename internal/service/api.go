@@ -594,16 +594,21 @@ func (service *API) Runs(ctx context.Context, actor api.Actor, filter api.RunFil
 	if service.history == nil {
 		return nil, fmt.Errorf("%w: run history", ErrUnavailable)
 	}
-	if filter.Before < 0 || service.scope != nil && filter.Before > 0 {
+	if filter.Before < 0 || service.scope != nil && filter.Before > 0 && filter.BeforeRun == "" {
 		return nil, fmt.Errorf("%w: before must be a positive run sequence, or a run ID for a scoped uplink", ErrInvalidInput)
 	}
 	storeFilter := model.RunListFilter{Ref: filter.Ref, Limit: filter.Limit, Before: filter.Before}
 	if strings.TrimSpace(filter.BeforeRun) != "" {
+		// A cursor that is both a sequence and a run-ID spelling is a run
+		// first; an unscoped caller falls back to the sequence (#073).
 		cursor, err := service.resolveReadRunID(ctx, filter.BeforeRun)
-		if err != nil {
+		switch {
+		case err == nil:
+			storeFilter.Before = cursor.QueueSequence
+		case service.scope == nil && filter.Before > 0 && (errors.Is(err, store.ErrNotFound) || errors.Is(err, ErrInvalidInput)):
+		default:
 			return nil, err
 		}
-		storeFilter.Before = cursor.QueueSequence
 	}
 	if strings.TrimSpace(filter.Repository) != "" {
 		repository, err := service.runs.RepositoryByName(ctx, filter.Repository)
@@ -855,7 +860,11 @@ func (service *API) Issues(ctx context.Context, actor api.Actor, filter api.Issu
 	if err != nil {
 		return nil, err
 	}
-	return service.issueList(ctx, filter.Repository, filter.Kind, filter.State, int64(filter.BeforeID), filter.Limit)
+	page, err := service.issueList(ctx, filter.Repository, filter.Kind, filter.State, int64(filter.BeforeID), filter.Limit)
+	if err != nil {
+		return nil, err
+	}
+	return service.redact(page), nil
 }
 
 func (service *API) Status(ctx context.Context, actor api.Actor) (any, error) {

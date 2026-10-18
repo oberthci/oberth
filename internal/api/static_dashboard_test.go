@@ -74,7 +74,10 @@ func TestRunsServerSideRepoFilter(t *testing.T) {
 	}
 	// The run list pages with ?before and the sidebar counts every retained
 	// run, not just the loaded page (#050).
-	for _, want := range []string{`query.set("before", String(state.runCursor))`, `"/api/runs/counts"`, `data-action="runs-older"`, `state.runCounts.ByRepo?.[repo.ID]`} {
+	for _, want := range []string{`query.set("before", String(state.runCursor))`, `"/api/runs/counts"`, `data-action="runs-older"`, `state.runCounts.ByRepo?.[repo.ID]`,
+		// The older-page cursor is the one the server names (#073): a run ID
+		// for a scoped uplink, which sees no sequences.
+		`response.headers.get("X-Oberth-Next-Before")`, `{ withNext: true }`} {
 		if !strings.Contains(source, want) {
 			t.Fatalf("app.js run paging is missing %s", want)
 		}

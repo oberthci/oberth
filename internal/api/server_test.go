@@ -1053,4 +1053,14 @@ func TestRunsPagesByRunIDWhenSequencesAreWithheld(t *testing.T) {
 	if got := response.Header().Get("X-Oberth-Next-Before"); got != "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" {
 		t.Fatalf("next cursor = %q", got)
 	}
+	// An all-digit cursor of run-ID length is offered as both; a short one
+	// is only a sequence.
+	for raw, wantRun := range map[string]string{"123456789012": "123456789012", "10": ""} {
+		request := httptest.NewRequest(http.MethodGet, "/api/runs?before="+raw, nil)
+		request.Header.Set("Authorization", "Bearer valid-token")
+		server.Handler().ServeHTTP(httptest.NewRecorder(), request)
+		if backend.runFilter.BeforeRun != wantRun || backend.runFilter.Before == 0 {
+			t.Fatalf("before=%s filter = %+v", raw, backend.runFilter)
+		}
+	}
 }

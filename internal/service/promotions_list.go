@@ -2,12 +2,14 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/gitoid"
 	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/store"
 )
 
 type promotionListArguments struct {
@@ -22,7 +24,7 @@ func (service *API) promotionList(ctx context.Context, args promotionListArgumen
 	// A scoped uplink pages by promotion ID: a sequence cursor would let it
 	// probe the global admission count (#073).
 	if args.Limit < 0 || args.Limit > 200 || (args.SourceSHA != "" && !gitoid.Valid(args.SourceSHA)) || (args.Status != "" && !args.Status.Valid()) ||
-		service.scope != nil && args.Before.Sequence > 0 {
+		service.scope != nil && args.Before.Sequence > 0 && args.Before.ID == "" {
 		return api.PromotionListResponse{}, fmt.Errorf("%w: promotion list requires a full source SHA, known status and bounded positive cursor/limit", ErrInvalidInput)
 	}
 	if service.promotions == nil {
@@ -31,10 +33,13 @@ func (service *API) promotionList(ctx context.Context, args promotionListArgumen
 	filter := model.PromotionListFilter{SourceSHA: args.SourceSHA, Status: args.Status, Before: args.Before.Sequence, Limit: args.Limit}
 	if args.Before.ID != "" {
 		cursor, err := service.promotions.Promotion(ctx, args.Before.ID)
-		if err != nil {
+		switch {
+		case err == nil:
+			filter.Before = cursor.Sequence
+		case service.scope == nil && args.Before.Sequence > 0 && errors.Is(err, store.ErrNotFound):
+		default:
 			return api.PromotionListResponse{}, err
 		}
-		filter.Before = cursor.Sequence
 	}
 	if args.Repo != "" {
 		repository, err := service.runs.RepositoryByName(ctx, args.Repo)

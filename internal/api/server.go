@@ -244,6 +244,12 @@ func (server *Server) handleRuns(writer http.ResponseWriter, request *http.Reque
 		switch {
 		case parseErr == nil && before >= 1:
 			filter.Before = before
+			// A run ID (or its 12+ character prefix) can be all digits; the
+			// service tries it as a run first and falls back to the
+			// sequence only for an unscoped caller (#073).
+			if len(raw) >= 12 {
+				filter.BeforeRun = raw
+			}
 		case parseErr != nil && validRunSelector(raw):
 			filter.BeforeRun = raw
 		default:

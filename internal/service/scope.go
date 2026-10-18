@@ -689,9 +689,9 @@ func (remover scopedRemover) RemoveRepository(ctx context.Context, actor, name s
 }
 
 // redact strips global sequence numbers from what a scoped actor receives
-// (#073): a run's QueueSequence and a promotion's Sequence count every run
-// and promotion on the installation, so they would reveal out-of-scope
-// volume. The values stay intact inside the call; only the response loses
+// (#073): a run's QueueSequence, a promotion's Sequence and a CI issue's
+// CIWorkSequence count every run, promotion and CI work item on the
+// installation, so they would reveal out-of-scope volume. The values stay intact inside the call; only the response loses
 // them. An unscoped call's value passes through unchanged.
 func (service *API) redact(value any) any {
 	if service.scope == nil {
@@ -731,6 +731,17 @@ func (service *API) redact(value any) any {
 	case model.Promotion:
 		typed.Sequence = 0
 		return typed
+	case model.Issue:
+		typed.CIWorkSequence = 0
+		return typed
+	case model.IssuePage:
+		issues := make([]model.Issue, len(typed.Issues))
+		for index, issue := range typed.Issues {
+			issue.CIWorkSequence = 0
+			issues[index] = issue
+		}
+		typed.Issues = issues
+		return typed
 	case PromotionWaitResponse:
 		typed.Promotion.Sequence = 0
 		return typed
@@ -760,7 +771,12 @@ func (cursor *pageCursor) UnmarshalJSON(raw []byte) error {
 	if err := json.Unmarshal(raw, &text); err == nil {
 		text = strings.TrimSpace(text)
 		if sequence, parseErr := strconv.ParseInt(text, 10, 64); parseErr == nil {
-			text, cursor.Sequence = "", sequence
+			cursor.Sequence = sequence
+			// A 12+ digit string may also be a record ID; the list tries it
+			// as one first.
+			if len(text) < 12 {
+				text = ""
+			}
 		}
 		cursor.ID = text
 	} else if err := json.Unmarshal(raw, &cursor.Sequence); err != nil {

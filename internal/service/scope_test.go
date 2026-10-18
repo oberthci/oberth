@@ -23,7 +23,7 @@ import (
 // github content and github counts, and nothing it receives, errors
 // included, may name or count what lies on codeberg.
 
-var globalSequence = regexp.MustCompile(`"(QueueSequence|Sequence|sequence)":[1-9]`)
+var globalSequence = regexp.MustCompile(`"[A-Za-z_]*[Ss]equence":[1-9]`)
 
 const (
 	hiddenRepoName  = "cloudtaser-secret"
@@ -145,6 +145,12 @@ func newScopeFixture(t *testing.T) *scopeFixture {
 			t.Fatal(err)
 		}
 	}
+	// A red github run projects a CI issue with a CI work sequence, a global
+	// counter that must not reach scoped actors.
+	red := fixture.runs["github"][0]
+	if _, err := database.FinishRun(ctx, red.ID, model.RunResult{Status: model.RunFailed, Phase: "test", FailedBurn: "test", FailedStep: "unit", Error: "red"}); err != nil {
+		t.Fatal(err)
+	}
 	// The secret upstream's manual issue body names the confidential project.
 	if _, err := database.CreateManualIssue(ctx, "owner@tuxbox", model.ManualIssueSpec{
 		Title: hiddenIssueText, Body: hiddenIssueText, ScopeUpstreamID: fixture.codeberg.ID}); err != nil {
@@ -252,6 +258,14 @@ func TestScopedUplinkSeesOnlyItsUpstream(t *testing.T) {
 	}
 	if unscoped := mustCall(t, fixture, unscopedActor, "run_list", map[string]any{"limit": 1}).(api.RunListResponse); unscoped.NextBefore == 0 || unscoped.NextCursor != "" {
 		t.Fatalf("unscoped run_list cursor = %#v", unscoped)
+	}
+	// A long all-digit cursor is tried as a run ID first: the unscoped caller
+	// falls back to the sequence, the scoped one gets no sequence fallback.
+	if all := mustCall(t, fixture, unscopedActor, "run_list", map[string]any{"before": "999999999999"}).(api.RunListResponse); len(all.Runs.([]model.Run)) != len(visibleRuns)+len(hiddenRuns) {
+		t.Fatalf("unscoped long numeric cursor = %#v", all)
+	}
+	if _, err := fixture.call(scopedActor, "run_list", map[string]any{"before": "999999999999"}); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("scoped long numeric cursor = %v, want not found", err)
 	}
 
 	// Run counts cover github only.

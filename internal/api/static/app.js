@@ -11,7 +11,7 @@ const slowPollMs = 10000;
 const livePollMs = 2000;
 const state = {
   repos: [], runs: [], repoRuns: [], status: null,
-  runCounts: null, runCursor: 0, runCursorHistory: [], runNext: 0,
+  runCounts: null, runCursor: 0, runCursorHistory: [], runNext: 0, runsNext: "", repoRunsNext: "",
   timer: null, routeSeq: 0,
   filter: localStorage.getItem("oberth-filter") || "all",
   repo: localStorage.getItem("oberth-repo") || "all",
@@ -335,6 +335,8 @@ async function api(url, opts = {}) {
     throw error;
   }
   setConn(true, "connected");
+  /* opts.withNext also returns the next-page cursor the server names. */
+  if (opts.withNext) return { body: await response.json(), next: response.headers.get("X-Oberth-Next-Before") || "" };
   return response.json();
 }
 
@@ -353,18 +355,24 @@ function setAuto(ms) {
 /* ---------- data loading ---------- */
 async function loadRepos() { state.repos = await api("/api/repos") || []; }
 const runPageSize = 100;
-async function loadRuns() { state.runs = await api(`/api/runs?limit=${runPageSize}`) || []; }
+async function loadRuns() {
+  const page = await api(`/api/runs?limit=${runPageSize}`, { withNext: true });
+  state.runs = page.body || [];
+  state.runsNext = page.next;
+}
 /* The list pages with ?before (#050). state.runs stays the newest page, for
    the stats; state.repoRuns is the page shown when it is not that one. */
 async function loadRepoRuns() {
-  if (state.repo === "all" && !state.runCursor) { state.repoRuns = []; return; }
+  if (state.repo === "all" && !state.runCursor) { state.repoRuns = []; state.repoRunsNext = ""; return; }
   const query = new URLSearchParams({ limit: String(runPageSize) });
   if (state.repo !== "all") query.set("repo", state.repo);
   if (state.runCursor) query.set("before", String(state.runCursor));
   try {
-    state.repoRuns = await api("/api/runs?" + query.toString()) || [];
+    const page = await api("/api/runs?" + query.toString(), { withNext: true });
+    state.repoRuns = page.body || [];
+    state.repoRunsNext = page.next;
   } catch (err) {
-    if (err.status === 404 || err.status === 400 || err.status === 409) { changeRunRepo("all"); localStorage.setItem("oberth-repo", "all"); state.repoRuns = []; return; }
+    if (err.status === 404 || err.status === 400 || err.status === 409) { changeRunRepo("all"); localStorage.setItem("oberth-repo", "all"); state.repoRuns = []; state.repoRunsNext = ""; return; }
     throw err;
   }
 }
@@ -421,7 +429,11 @@ async function renderRuns(seq) {
     counts.set("all", state.runCounts.Total || 0);
     for (const repo of state.repos) counts.set(repoKey(repo), state.runCounts.ByRepo?.[repo.ID] || 0);
   } else if (state.repo !== "all" && !state.runCursor) counts.set(state.repo, state.repoRuns.length);
-  state.runNext = source.length === runPageSize ? source[source.length - 1].QueueSequence : 0;
+  /* The server names the older page's cursor: a run sequence, or a run ID
+     for an uplink scoped to some upstreams, which sees no sequences (#073).
+     A server without the header pages by the oldest run's sequence. */
+  const named = source === runs ? state.runsNext : state.repoRunsNext;
+  state.runNext = source.length === runPageSize ? (named || source[source.length - 1].QueueSequence || 0) : 0;
   const page = state.runCursorHistory.length + 1;
   const running = runs.filter(run => run.Status === "running").length;
   const queued = runs.filter(run => run.Status === "queued").length;
