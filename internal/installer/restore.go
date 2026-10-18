@@ -470,8 +470,15 @@ func applyRestore(ctx context.Context, cfg RestoreConfig, deps backupDeps, archi
 		}
 		_, _ = fmt.Fprintf(w, "  ✓ %d secrets (%d written, %d already current), %d policies, %d roles verified by read-back\n",
 			len(target.KV.Secrets), written, len(target.KV.Secrets)-written, len(archive.Policies), len(archive.Roles.Roles))
-		if len(target.Pins.Rewritten) > 0 {
-			_, _ = fmt.Fprintf(w, "  ✓ known_hosts pins of this server updated to its SSH host key in %s\n", describePinRewrites(target.Pins.Rewritten))
+		// Only what this run wrote is "updated"; a secret already holding
+		// the rewritten value was left alone (#074 review).
+		if updated, current := splitPinRewrites(target.Pins.Rewritten, target.OpenBao); len(updated) > 0 || len(current) > 0 {
+			if len(updated) > 0 {
+				_, _ = fmt.Fprintf(w, "  ✓ known_hosts pins of this server updated to its SSH host key in %s\n", describePinRewrites(updated))
+			}
+			if len(current) > 0 {
+				_, _ = fmt.Fprintf(w, "  ✓ known_hosts pins of this server already current in %s\n", describePinRewrites(current))
+			}
 		}
 	}
 
@@ -898,9 +905,20 @@ func printRestoreNextSteps(w io.Writer, cfg RestoreConfig, archive restoreArchiv
 		next("These restored secrets still hold the backup's server CA, which this install replaced; put this install's CA\n"+
 			"     (~/.config/oberth/ca.crt after oberth install) in them: %s", strings.Join(target.Pins.OldCA, ", "))
 	}
-	if parts.Secrets && len(target.Pins.Mixed) > 0 {
-		next("These restored secrets list this server's SSH host among other hosts on one known_hosts line, left as they were;\n"+
-			"     update the key for this server by hand: %s", strings.Join(target.Pins.Mixed, ", "))
+	if parts.Secrets {
+		for _, left := range []struct {
+			findings []pinFinding
+			why      string
+		}{
+			{target.Pins.Mixed, "list this server's SSH host among other hosts on one known_hosts line"},
+			{target.Pins.Loopback, "pin a loopback name of this server, which a pipeline resolves to another machine"},
+			{target.Pins.OldKey, "pin the backup's SSH host key under names this restore cannot attribute to this server"},
+		} {
+			if len(left.findings) > 0 {
+				next("These restored secrets %s; they were left as they were,\n"+
+					"     check them and update the key by hand where it means this server: %s", left.why, describePinFindings(left.findings))
+			}
+		}
 	}
 	next("If this node keeps OpenBao unsealed with deploy/systemd/oberth-openbao-unseal, give it this install's unseal key:\n" +
 		"         sudo install -m 0400 -o root -g root <unseal-key-file> /etc/oberth/openbao-unseal-key\n" +

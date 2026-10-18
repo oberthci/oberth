@@ -192,10 +192,14 @@ already encrypted to a key need it.
 Keep an independently protected copy of `recipient.key` **off the machine**
 (a password manager or another host). Without it no backup can be restored,
 and deleting `~/.config/oberth` deletes it. Until you confirm a copy exists,
-every `oberth backup` on a terminal shows the key's path and asks you to type
-`stored` before it reads anything; the confirmation is recorded per key
-(`recipient.stored`, the certificate's SHA-256), so a new key asks again.
-Without a terminal the warning goes to stderr and the backup proceeds.
+every `oberth backup` that uses the default key shows the key's path and, on
+a terminal, asks you to type `stored` before it reads anything; the
+confirmation is recorded per key (`recipient.stored`, the certificate's
+SHA-256), so a new key asks again. A backup without a terminal (a script or
+cron) prints the same warning to stderr and proceeds, every time, until the
+key has been confirmed once on a terminal; `oberth backup key` says whether it
+has. Backups with `--recipient CERT` are encrypted to a key you manage
+yourself and do not ask.
 
 ```sh
 oberth backup key            # where the key is, which certificate, whether a copy is confirmed
@@ -384,17 +388,29 @@ fails TLS.
   at the node port. In every restored secret value, a `known_hosts` line
   that names only those hosts (plain or hashed `|1|` entries) and holds
   another key gets this install's key; a second line that would repeat it
-  is dropped; every other line stays byte-identical. The plan shows it as
+  is dropped; every other line (comments, `@cert-authority` and `@revoked`
+  lines included) stays byte-identical. The plan shows it as
   `known_hosts pins of this server updated to its SSH host key:
-  <path> (<n> lines)`, by path and count only. A line that lists this
-  server together with other hosts is left as it is and named for you to
-  update. Restoring onto the same server changes nothing.
+  <path> (<n> lines: <host specs>)`, by path, count and the public host
+  names only; when this install already holds the updated secret it says
+  `already current`. Restoring onto the same server changes nothing.
+- **Left for you, and named:** a line that lists this server together with
+  other hosts; a line for a loopback name (`localhost`, `127.0.0.1`, `::1`
+  and other loopback addresses), which a pipeline resolves to whatever
+  machine it runs on, not necessarily this server; and, for backups that
+  record the server's SSH host public key (v0.17.37 and later), a line that
+  pins that old key under names the restore cannot attribute to this
+  server (a DNS alias, say). They appear in the plan and the next steps.
 - **Old CA pins are named.** A secret holding a PEM certificate equal to the
   backup's server CA (its PKI CA, or its server certificate, both recorded
   in the backup's reference) that this install does not also use is listed
   in the plan and in the next steps, for you to replace with this install's
   CA. CA bundles are never rewritten. Backups made before v0.17.37 record
   only the PKI CA.
+
+A backup records only public parts of the server's identity for this: its
+certificate and its SSH host public key, read from the key file's public
+section without parsing the private key.
 
 ### Same cluster or another one
 

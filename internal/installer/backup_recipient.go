@@ -22,13 +22,18 @@ import (
 	"strings"
 )
 
-// BackupRecipient identifies the certificate an archive is encrypted to.
+// BackupRecipient identifies the certificate an archive is encrypted to:
+// by issuer and serial, or by subject key identifier.
 type BackupRecipient struct {
-	Issuer string
-	Serial string
+	Issuer       string
+	Serial       string
+	SubjectKeyID string
 }
 
 func (r BackupRecipient) String() string {
+	if r.SubjectKeyID != "" {
+		return "subject key identifier " + r.SubjectKeyID
+	}
 	return r.Issuer + ", serial " + r.Serial
 }
 
@@ -67,6 +72,9 @@ func readTLV(data []byte) (tag byte, content, rest []byte, err error) {
 			length = length<<8 | int(b)
 		}
 		offset += n
+	}
+	if length < 0 || int64(length) > maxBackupCipherBytes {
+		return 0, nil, nil, errors.New("implausible length")
 	}
 	if len(data)-offset < length {
 		// The content runs past what was read; return what there is.
@@ -155,7 +163,7 @@ func archiveRecipients(path string) ([]archiveRecipient, error) {
 				}
 			}
 		} else {
-			recipient.ID = BackupRecipient{Issuer: "subject key identifier", Serial: fmt.Sprintf("%X", ktri.RID.Bytes)}
+			recipient.ID = BackupRecipient{SubjectKeyID: fmt.Sprintf("%X", ktri.RID.Bytes)}
 		}
 		recipient.oaepSHA256 = ktri.Algorithm.Algorithm.Equal(oidRSAESOAEP) && bytes.Contains(ktri.Algorithm.Parameters.FullBytes, mustMarshalOID(oidSHA256))
 		recipients = append(recipients, recipient)

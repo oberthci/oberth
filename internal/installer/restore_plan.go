@@ -272,17 +272,30 @@ func printSecretChanges(w io.Writer, archive restoreArchive, target restoreTarge
 	if len(plan.RolesReplaced) > 0 {
 		_, _ = fmt.Fprintf(w, "             replaced roles: %s\n", listSome(plan.RolesReplaced, 8))
 	}
-	printPinChanges(w, target.Pins)
+	printPinChanges(w, target.Pins, plan)
 }
 
 // printPinChanges says which restored secrets pin the backup's server
-// (#074): names and line counts only, never values.
-func printPinChanges(w io.Writer, pins serverPins) {
-	if len(pins.Rewritten) > 0 {
-		_, _ = fmt.Fprintf(w, "             known_hosts pins of this server updated to its SSH host key: %s\n", describePinRewrites(pins.Rewritten))
+// (#074): paths, line counts and host names only, never values.
+func printPinChanges(w io.Writer, pins serverPins, plan openBaoRestorePlan) {
+	updated, current := splitPinRewrites(pins.Rewritten, plan)
+	if len(updated) > 0 {
+		_, _ = fmt.Fprintf(w, "             known_hosts pins of this server updated to its SSH host key: %s\n", describePinRewrites(updated))
 	}
-	if len(pins.Mixed) > 0 {
-		_, _ = fmt.Fprintf(w, "             known_hosts lines naming this server among other hosts, left as they are: %s\n", listSome(pins.Mixed, 8))
+	if len(current) > 0 {
+		_, _ = fmt.Fprintf(w, "             known_hosts pins of this server already current here: %s\n", describePinRewrites(current))
+	}
+	for _, left := range []struct {
+		findings []pinFinding
+		what     string
+	}{
+		{pins.Mixed, "known_hosts lines naming this server among other hosts, left as they are"},
+		{pins.Loopback, "known_hosts lines for loopback names of this server, left as they are"},
+		{pins.OldKey, "known_hosts lines pinning the backup's SSH host key under other names, left as they are"},
+	} {
+		if len(left.findings) > 0 {
+			_, _ = fmt.Fprintf(w, "             %s: %s\n", left.what, describePinFindings(left.findings))
+		}
 	}
 	if len(pins.OldCA) > 0 {
 		_, _ = fmt.Fprintf(w, "             still hold the backup's server CA (update them by hand): %s\n", listSome(pins.OldCA, 8))
@@ -296,12 +309,36 @@ func describePinRewrites(rewrites []pinRewrite) string {
 	parts := make([]string, 0, len(rewrites))
 	for _, rewrite := range rewrites {
 		part := fmt.Sprintf("%s (%s", rewrite.Path, plural(rewrite.Lines, "line"))
+		if len(rewrite.Hosts) > 0 {
+			part += ": " + strings.Join(rewrite.Hosts, ", ")
+		}
 		if rewrite.Dropped > 0 {
-			part += fmt.Sprintf(", %d duplicate dropped", rewrite.Dropped)
+			part += fmt.Sprintf("; %d duplicate dropped", rewrite.Dropped)
 		}
 		parts = append(parts, part+")")
 	}
 	return listSome(parts, 8)
+}
+
+func describePinFindings(findings []pinFinding) string {
+	parts := make([]string, 0, len(findings))
+	for _, finding := range findings {
+		parts = append(parts, finding.String())
+	}
+	return listSome(parts, 8)
+}
+
+// splitPinRewrites separates the rewritten secrets this restore writes from
+// those this install already holds as rewritten.
+func splitPinRewrites(rewrites []pinRewrite, plan openBaoRestorePlan) (updated, current []pinRewrite) {
+	for _, rewrite := range rewrites {
+		if plan.Known && !slices.Contains(plan.NewPaths, rewrite.Path) && !slices.Contains(plan.ReplacedPaths, rewrite.Path) {
+			current = append(current, rewrite)
+		} else {
+			updated = append(updated, rewrite)
+		}
+	}
+	return updated, current
 }
 
 // diffNames returns the names only in have and only in want.

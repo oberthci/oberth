@@ -471,11 +471,7 @@ func runBackup(ctx context.Context, cfg BackupConfig, deps backupDeps) (resultEr
 		}
 		roles = operatorRoles(roles)
 		reference = exportOpenBaoReference(ctx, bao, deps.rootToken)
-		// The server certificate is public; record it whether or not the
-		// host key parses (#074).
-		if _, cert, _ := serverIdentityPublic(ctx, bao, deps.rootToken, cfg.Namespace); len(cert) > 0 {
-			reference.ServerCertificate = string(cert)
-		}
+		recordServerIdentity(ctx, bao, deps.rootToken, cfg.Namespace, &reference)
 		for _, member := range []struct {
 			name  string
 			value any

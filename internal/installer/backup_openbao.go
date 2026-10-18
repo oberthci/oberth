@@ -107,7 +107,9 @@ type openBaoReference struct {
 	PKICACerts   map[string]string         `json:"pki_ca_certificates"`
 	// ServerCertificate is the install's own server certificate (public),
 	// so a restore can name secrets that still pin it (#074).
-	ServerCertificate string   `json:"server_certificate,omitempty"`
+	ServerCertificate string `json:"server_certificate,omitempty"`
+	// ServerSSHHostKeys are its SSH host public keys (authorized_keys form).
+	ServerSSHHostKeys []string `json:"server_ssh_host_keys,omitempty"`
 	Warnings          []string `json:"warnings"`
 }
 
