@@ -494,10 +494,40 @@ func (s *installScreen) frame(w *wizard) frameSpec {
 		keys:      "enter or l show log · ctrl+c twice abort",
 	}
 	spec.body = s.phaseLines()
-	if n := len(s.logLines); n > 0 {
-		spec.status = truncateRunes(s.logLines[n-1], max(20, w.width-6))
+	if line := activityLine(s.logLines); line != "" {
+		spec.status = truncateRunes(line, max(20, w.width-6))
 	}
 	return spec
+}
+
+// activityLine is the status line under the phase list: the newest
+// meaningful installer message. Table borders and blank lines are skipped
+// and a table row reads "Upstream identity: ~/.ssh/id_ed25519 · ✓ in OpenBao",
+// so the line changes with progress instead of flashing raw table bytes (#070).
+func activityLine(lines []string) string {
+	for i := len(lines) - 1; i >= 0; i-- {
+		line := strings.TrimSpace(lines[i])
+		if line == "" || strings.Trim(line, "─━┌┐└┘├┤┬┴┼│╭╮╰╯ ") == "" {
+			continue
+		}
+		if !strings.HasPrefix(line, "│") {
+			return line
+		}
+		var cells []string
+		for _, cell := range strings.Split(strings.Trim(line, "│"), "│") {
+			if cell = strings.TrimSpace(cell); cell != "" {
+				cells = append(cells, cell)
+			}
+		}
+		switch len(cells) {
+		case 0:
+			continue
+		case 1:
+			return cells[0]
+		}
+		return cells[0] + ": " + strings.Join(cells[1:], " · ")
+	}
+	return ""
 }
 
 func (s *installScreen) phaseLines() []string {

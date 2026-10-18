@@ -14,7 +14,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -49,10 +48,8 @@ type BackupConfig struct {
 	// encrypted to. Only the holder of its private key can restore.
 	Recipient string
 	// Scope is BackupScopeFull (default) or BackupScopeHistory: the
-	// database and step logs only, with no OpenBao root token needed.
-	Scope string
-	// NoLogs leaves the server's step logs out of the archive.
-	NoLogs      bool
+	// database only, with no OpenBao root token needed.
+	Scope       string
 	DryRun      bool
 	ToolVersion string
 }
@@ -125,7 +122,7 @@ func ExecuteBackup(ctx context.Context, cfg BackupConfig, host InstallDeps) erro
 		case deps.rootToken != "":
 		case deps.ReadPassword != nil:
 			cfg.Scope = BackupScopeHistory
-			_, _ = fmt.Fprintln(deps.Output, "No token given: backing up history only (runs, issues, promotions, uplinks, step logs), without secrets or settings.")
+			_, _ = fmt.Fprintln(deps.Output, "No token given: backing up history only (runs, issues, promotions, uplinks), without secrets.")
 		default:
 			return fmt.Errorf("%w\n(or back up history only, without secrets: oberth backup --history-only)", missingRootTokenError("backup"))
 		}
@@ -384,31 +381,15 @@ func readSecretAccess(ctx context.Context, deps Deps, namespace string) (secretA
 	return secretAccessExport{Present: true, Data: data}, nil
 }
 
-// releaseValues returns the oberth release's user-supplied values as JSON.
-func releaseValues(ctx context.Context, deps Deps, namespace string) (json.RawMessage, error) {
-	out, err := deps.RunHelm(ctx, []string{"get", "values", "oberth", "-n", namespace, "-o", "json"})
-	if err != nil {
-		return nil, fmt.Errorf("helm get values oberth: %w", err)
-	}
-	trimmed := bytes.TrimSpace(out)
-	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
-		trimmed = []byte("{}")
-	}
-	if !json.Valid(trimmed) {
-		return nil, errors.New("helm get values oberth returned invalid JSON")
-	}
-	return json.RawMessage(trimmed), nil
-}
-
 // --- Backup flow ---
 
 func runBackup(ctx context.Context, cfg BackupConfig, deps backupDeps) (resultErr error) {
 	w := deps.Output
 	full := cfg.Scope != BackupScopeHistory
 	if full {
-		_, _ = fmt.Fprintf(w, "Backing up Oberth from context %s (namespace %s, OpenBao %s): history, secrets and settings.\n", deps.ContextName, cfg.Namespace, cfg.OpenBaoNamespace)
+		_, _ = fmt.Fprintf(w, "Backing up Oberth from context %s (namespace %s, OpenBao %s): history and secrets.\n", deps.ContextName, cfg.Namespace, cfg.OpenBaoNamespace)
 	} else {
-		_, _ = fmt.Fprintf(w, "Backing up Oberth's history from context %s (namespace %s): runs, issues, promotions, uplinks and step logs; no secrets.\n", deps.ContextName, cfg.Namespace)
+		_, _ = fmt.Fprintf(w, "Backing up Oberth's history from context %s (namespace %s): runs, issues, promotions and uplinks; no secrets.\n", deps.ContextName, cfg.Namespace)
 	}
 
 	server, err := inspectServerDeployment(ctx, deps.Deps, cfg.Namespace)
@@ -443,13 +424,7 @@ func runBackup(ctx context.Context, cfg BackupConfig, deps backupDeps) (resultEr
 		_, _ = fmt.Fprintf(w, "            schema identity %s, audit domain %s, witness key info %s\n",
 			server.Compatibility.SchemaIdentity, server.Compatibility.AuditDomain, server.Compatibility.WitnessKeyInfo)
 		if full {
-			_, _ = fmt.Fprintf(w, "  Helm      values of release oberth (%s)\n", release.Chart)
 			_, _ = fmt.Fprintf(w, "  Grants    ConfigMap %s/%s\n", cfg.Namespace, secretAccessConfigMapName)
-		}
-		if cfg.NoLogs {
-			_, _ = fmt.Fprintln(w, "  Logs      left out (--no-logs)")
-		} else {
-			_, _ = fmt.Fprintf(w, "  Logs      step logs under /data/logs through pod %s\n", pod)
 		}
 		_, _ = fmt.Fprintf(w, "  Output    %s, encrypted to %s\n", cfg.Output, cfg.Recipient)
 		_, _ = fmt.Fprintln(w, "Nothing was read from OpenBao or written to disk (--dry-run).")
@@ -483,6 +458,7 @@ func runBackup(ctx context.Context, cfg BackupConfig, deps backupDeps) (resultEr
 		if err != nil {
 			return err
 		}
+		kv.Secrets = operatorSecrets(kv.Secrets)
 		policies, err := exportPolicies(ctx, bao, deps.rootToken)
 		if err != nil {
 			return err
@@ -528,38 +504,15 @@ func runBackup(ctx context.Context, cfg BackupConfig, deps backupDeps) (resultEr
 		return err
 	}
 
-	var settings restoreArchive
+	var grants secretAccessExport
 	if full {
-		values, err := releaseValues(ctx, deps.Deps, cfg.Namespace)
-		if err != nil {
+		if grants, err = readSecretAccess(ctx, deps.Deps, cfg.Namespace); err != nil {
 			return err
 		}
-		if err := writeBackupFile(work, backupMemberHelmValues, values); err != nil {
+		if err := writeBackupJSON(work, backupMemberSecretAccess, grants); err != nil {
 			return err
-		}
-		if settings.Grants, err = readSecretAccess(ctx, deps.Deps, cfg.Namespace); err != nil {
-			return err
-		}
-		if err := writeBackupJSON(work, backupMemberSecretAccess, settings.Grants); err != nil {
-			return err
-		}
-		_ = json.Unmarshal(values, &settings.Values)
-	}
-	var logs *backupLogsSummary
-	var logsNote string
-	if !cfg.NoLogs {
-		_, _ = fmt.Fprintln(w, "Reading the step logs...")
-		var body []byte
-		if body, logs, logsNote, err = exportServerLogs(ctx, deps, cfg.Namespace, pod); err != nil {
-			return err
-		}
-		if logs != nil {
-			if err := writeBackupFile(work, backupMemberLogs, body); err != nil {
-				return err
-			}
 		}
 	}
-	cluster := readClusterIdentity(ctx, deps, cfg.Namespace)
 
 	serverVersion := ""
 	if out, err := deps.RunCommand(ctx, nil, "kubectl", kubectlExecArgs(deps.ContextName, cfg.Namespace, pod, serverContainerName, false, "oberth", "version")...); err == nil {
@@ -571,19 +524,16 @@ func runBackup(ctx context.Context, cfg BackupConfig, deps backupDeps) (resultEr
 		Scope:       cfg.Scope,
 		ToolVersion: cfg.ToolVersion,
 		Source: backupSource{
-			Context:              deps.ContextName,
-			APIServer:            deps.apiServer,
-			Namespace:            cfg.Namespace,
-			OpenBaoNamespace:     cfg.OpenBaoNamespace,
-			ArgoNamespace:        cfg.ArgoNamespace,
-			ServerImage:          server.Image,
-			ServerVersion:        serverVersion,
-			ChartVersion:         chartVersionFromRelease(release.Chart, "oberth"),
-			ClusterUID:           cluster.UID,
-			ServiceAccountKeyIDs: cluster.KeyIDs,
-			SigningKeyID:         cluster.SigningKeyID,
+			Context:          deps.ContextName,
+			APIServer:        deps.apiServer,
+			Namespace:        cfg.Namespace,
+			OpenBaoNamespace: cfg.OpenBaoNamespace,
+			ArgoNamespace:    cfg.ArgoNamespace,
+			ServerImage:      server.Image,
+			ServerVersion:    serverVersion,
+			ChartVersion:     chartVersionFromRelease(release.Chart, "oberth"),
+			ClusterUID:       clusterUID(ctx, deps),
 		},
-		Logs:          logs,
 		Contents:      backupContentsOf(contents),
 		Compatibility: server.Compatibility,
 		Database: backupDatabaseSummary{
@@ -614,22 +564,12 @@ func runBackup(ctx context.Context, cfg BackupConfig, deps backupDeps) (resultEr
 		size = info.Size()
 	}
 	_, _ = fmt.Fprintf(w, "\nBacked up to %s (%.1f MiB)\n", displayLocalPath(cfg.Output), float64(size)/(1<<20))
-	history := describeContents(contents)
-	switch {
-	case logs != nil:
-		history += fmt.Sprintf("; %d step logs", logs.Files)
-	case cfg.NoLogs:
-		history += "; step logs left out (--no-logs)"
-	default:
-		history += "; no step logs (" + logsNote + ")"
-	}
-	_, _ = fmt.Fprintf(w, "  History    %s\n", history)
+	_, _ = fmt.Fprintf(w, "  History    %s\n", describeContents(contents))
 	if full {
-		_, _ = fmt.Fprintf(w, "  Secrets    %d OpenBao secrets, %d policies, %d roles\n", manifest.OpenBao.Secrets, manifest.OpenBao.Policies, manifest.OpenBao.Roles)
-		settings.Manifest.Compatibility = manifest.Compatibility
-		_, _ = fmt.Fprintf(w, "  Settings   %s\n", strings.Join(settingsSummary(settings), "; "))
+		_, _ = fmt.Fprintf(w, "  Secrets    %d OpenBao secrets, %d policies, %d roles, %d grants\n",
+			manifest.OpenBao.Secrets, manifest.OpenBao.Policies, manifest.OpenBao.Roles, countGrants(grants))
 	} else {
-		_, _ = fmt.Fprintln(w, "  Secrets    none: history only (restoring it keeps the target's secrets and settings)")
+		_, _ = fmt.Fprintln(w, "  Secrets    none: history only (restoring it keeps the target's secrets)")
 	}
 	_, _ = fmt.Fprintf(w, "  Verified   database schema %d, integrity, foreign keys and the audit chain to entry %d (%s snapshot)\n",
 		report.Schema, report.AuditHead.ID, snapshotMode)
@@ -643,7 +583,8 @@ func runBackup(ctx context.Context, cfg BackupConfig, deps backupDeps) (resultEr
 		_, _ = fmt.Fprintf(w, "  Note       %d reference-only reads failed and are recorded in the archive\n", len(reference.Warnings))
 	}
 	if full {
-		_, _ = fmt.Fprintln(w, "\nNot in the backup: git caches (repositories are cloned again), OpenBao's Transit key and server CA (the new install has its own).")
+		_, _ = fmt.Fprintln(w, "\nNot in the backup: server files (git caches, step logs; repositories are cloned again), Helm values (re-apply your own),\n"+
+			"and what every install makes for itself: its identities, Transit key and server CA.")
 	}
 	_, _ = fmt.Fprintf(w, "Look inside without a cluster: oberth restore --inspect %s\n", displayLocalPath(cfg.Output))
 	_, _ = fmt.Fprintf(w, "Restore it on a fresh install: oberth restore %s\n", displayLocalPath(cfg.Output))

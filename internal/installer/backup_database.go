@@ -226,8 +226,8 @@ func verifyDatabaseArchive(ctx context.Context, path string, schema int, protoco
 const restoreStageDir = "/data/.oberth-restore"
 
 // stageUploadScript receives one file on stdin into the staging directory and
-// prints the size it received. The member name ($1) is one of three fixed
-// names: oberth.sqlite, oberth.sqlite-wal and logs.tar. cat must not be the script's last command: the shell then
+// prints the size it received. The member name ($1) is one of two fixed
+// names: oberth.sqlite and oberth.sqlite-wal. cat must not be the script's last command: the shell then
 // execs it, and the exec stream can close before stdin is fully delivered,
 // truncating the file while kubectl still exits 0 (#067).
 const stageUploadScript = `set -eu

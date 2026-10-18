@@ -1,72 +1,44 @@
 package installer
 
-// Restore onto a reinstalled cluster (#065, #067, #068).
+// Restore onto a reinstalled cluster (#065, #067, #068): only history and
+// the operator's secrets come back; the new install keeps its own
+// identities, CA and Helm values.
 
 import (
 	"bytes"
 	"context"
-	"crypto/ed25519"
-	"crypto/rand"
-	"encoding/pem"
+	"encoding/json"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 	"time"
-
-	"golang.org/x/crypto/ssh"
 )
 
-// testSSHKey returns an authorized_keys line and an OpenSSH private key PEM.
-func testSSHKey(t *testing.T) (string, string) {
-	t.Helper()
-	public, private, err := ed25519.GenerateKey(rand.Reader)
-	if err != nil {
-		t.Fatal(err)
-	}
-	sshPublic, err := ssh.NewPublicKey(public)
-	if err != nil {
-		t.Fatal(err)
-	}
-	block, err := ssh.MarshalPrivateKey(private, "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	return strings.TrimSpace(string(ssh.MarshalAuthorizedKey(sshPublic))), string(pem.EncodeToMemory(block))
-}
-
-// reinstallFixture backs up a source whose forge key, host key, tunnel and
-// certificate names a reinstalled target does not share.
+// reinstallFixture backs up a source whose identities and Helm values a
+// reinstalled target does not share.
 func reinstallFixture(t *testing.T) (string, string, *fakeBackupCluster, *fakeBackupCluster) {
 	t.Helper()
-	sourceForge, _ := testSSHKey(t)
-	_, sourceHost := testSSHKey(t)
 	archiveBytes, raw, runID := sourceDatabase(t)
 	source := newFakeBackupCluster(t, sourceCompat, grantsConfigMap(testGrants))
 	source.database, source.rawFiles = archiveBytes, raw
-	source.logsTar = logsTarFixture(t, map[string]string{"logs/" + runID + ".log": "step output\n", "logs/" + runID + ".index.json": "{}"})
-	source.clusterUID, source.jwksKeyIDs, source.signingKeyID = "source-cluster", []string{"old-kid"}, "old-kid"
-	source.values["argo"] = map[string]any{"namespace": DefaultArgoNamespace, "releaseWIF": map[string]any{"namespace": DefaultArgoNamespace}}
-	source.values["watchTunnel"] = map[string]any{"enabled": true, "originCACert": "-----BEGIN CERTIFICATE-----\nold-ca\n-----END CERTIFICATE-----\n"}
-	source.values["tls"] = map[string]any{"extraDNSNames": []any{"tuxbox", "localhost"}, "extraIPs": []any{"192.168.86.193", "127.0.0.1"}}
+	source.clusterUID = "source-cluster"
+	source.values["watchTunnel"] = map[string]any{"enabled": true}
+	source.values["tls"] = map[string]any{"extraDNSNames": []any{"tuxbox", "localhost"}, "extraIPs": []any{"127.0.0.1"}}
 	seedSourceOpenBao(source.bao)
-	source.bao.kv[forgeKeyKVPath(DefaultNamespace)] = map[string]any{"id_ed25519.pub": sourceForge, "id_ed25519": "forge-private-canary"}
-	source.bao.kv[serverIdentityKVPath(DefaultNamespace)] = map[string]any{"ssh_host_key": sourceHost}
+	source.bao.kv["identities/oberth/oberth-upstream-key"] = map[string]any{"id_ed25519": "source-forge-private-canary"}
+	source.bao.kv["identities/oberth/server"] = map[string]any{"ssh_host_key": "source-host-key-canary"}
 	output := filepath.Join(t.TempDir(), "state.cms")
 	var out bytes.Buffer
-	cfg := BackupConfig{Output: output, Recipient: "recipient.pem", ToolVersion: "v0.17.32"}
+	cfg := BackupConfig{Output: output, Recipient: "recipient.pem", ToolVersion: "v0.17.34"}
 	cfg.applyDefaults()
 	if err := runBackup(context.Background(), cfg, source.deps(&out)); err != nil {
 		t.Fatalf("backup: %v\n%s", err, out.String())
 	}
 
-	targetForge, _ := testSSHKey(t)
-	_, targetHost := testSSHKey(t)
 	target := restoreTargetCluster(t, runID)
-	target.clusterUID, target.jwksKeyIDs, target.signingKeyID = "target-cluster", []string{"new-kid"}, "new-kid"
-	target.values["tls"] = map[string]any{"extraDNSNames": []any{"tuxbox", "tuxbox.local"}, "extraIPs": []any{"192.168.86.193"}}
-	target.bao.kv[forgeKeyKVPath(DefaultNamespace)] = map[string]any{"id_ed25519.pub": targetForge, "id_ed25519": "fresh-forge-private"}
-	target.bao.kv[serverIdentityKVPath(DefaultNamespace)] = map[string]any{"ssh_host_key": targetHost}
+	target.clusterUID = "target-cluster"
+	target.bao.kv["identities/oberth/oberth-upstream-key"] = map[string]any{"id_ed25519": "fresh-forge-private"}
 	return output, runID, source, target
 }
 
@@ -84,74 +56,83 @@ func runFixtureRestore(t *testing.T, archive string, target *fakeBackupCluster, 
 	return out.String()
 }
 
-func TestBackupRecordsStepLogsAndClusterIdentity(t *testing.T) {
+// A backup holds the operator's secrets, not the install's own identities,
+// and no Helm values.
+func TestBackupLeavesOutIdentitiesAndHelmValues(t *testing.T) {
 	t.Parallel()
 	archive, _, _, _ := reinstallFixture(t)
-	manifest, err := openBackupArchive(context.Background(), archive, fakeEnvelopeCipher{}, t.TempDir())
+	work := t.TempDir()
+	manifest, err := openBackupArchive(context.Background(), archive, fakeEnvelopeCipher{}, work)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if manifest.Format != backupFormat || manifest.Logs == nil || manifest.Logs.Files != 2 {
-		t.Fatalf("format %q logs %+v, want %s with 2 log files", manifest.Format, manifest.Logs, backupFormat)
+	names := make([]string, 0, len(manifest.Members))
+	for _, member := range manifest.Members {
+		names = append(names, member.Name)
 	}
-	if last := manifest.Members[len(manifest.Members)-1]; last.Name != backupMemberLogs {
-		t.Fatalf("last member = %s, want %s", last.Name, backupMemberLogs)
+	if manifest.Format != backupFormat || !slices.Equal(names, backupMemberOrder) {
+		t.Fatalf("format %q members %v", manifest.Format, names)
 	}
-	if manifest.Source.ClusterUID != "source-cluster" || manifest.Source.SigningKeyID != "old-kid" || !slices.Equal(manifest.Source.ServiceAccountKeyIDs, []string{"old-kid"}) {
-		t.Fatalf("source identity = %+v", manifest.Source)
+	if manifest.Source.ClusterUID != "source-cluster" {
+		t.Fatalf("cluster UID = %q", manifest.Source.ClusterUID)
 	}
-}
-
-func TestBackupWithoutLogs(t *testing.T) {
-	t.Parallel()
-	_, _, source := backupFixtureArchive(t, false)
-	output := filepath.Join(t.TempDir(), "state.cms")
-	var out bytes.Buffer
-	cfg := BackupConfig{Output: output, Recipient: "recipient.pem", NoLogs: true}
-	cfg.applyDefaults()
-	if err := runBackup(context.Background(), cfg, source.deps(&out)); err != nil {
+	var kv kvExport
+	if err := readBackupJSON(work, backupMemberKV, &kv); err != nil {
 		t.Fatal(err)
 	}
-	manifest, err := openBackupArchive(context.Background(), output, fakeEnvelopeCipher{}, t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if manifest.Logs != nil || len(manifest.Members) != len(backupMemberOrder) {
-		t.Fatalf("--no-logs archive has logs: %+v", manifest.Members)
-	}
-	if !strings.Contains(out.String(), "left out (--no-logs)") {
-		t.Fatalf("output does not say logs were left out:\n%s", out.String())
-	}
-}
-
-// A v1 archive (no optional members) written by v0.17.31 still opens.
-func TestOpenBackupArchiveReadsV1(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-	for _, name := range backupMemberOrder {
-		if err := writeBackupFile(dir, name, []byte(`{}`)); err != nil {
-			t.Fatal(err)
+	for _, secret := range kv.Secrets {
+		if strings.HasPrefix(secret.Path, installIdentityPrefix) {
+			t.Fatalf("backup carries install identity %s", secret.Path)
 		}
 	}
-	manifest := backupManifest{Format: backupFormatV1}
-	output := filepath.Join(t.TempDir(), "v1.cms")
-	if err := writeBackupArchive(context.Background(), dir, &manifest, fakeEnvelopeCipher{}, output); err != nil {
-		t.Fatal(err)
-	}
-	opened, err := openBackupArchive(context.Background(), output, fakeEnvelopeCipher{}, t.TempDir())
-	if err != nil || opened.Format != backupFormatV1 {
-		t.Fatalf("open v1 archive: %+v, %v", opened.Format, err)
-	}
 }
 
-func TestValidateLogsTarAdmitsOnlyLogFiles(t *testing.T) {
-	t.Parallel()
-	if _, err := validateLogsTar(logsTarFixture(t, map[string]string{"logs/run.log": "x"})); err != nil {
-		t.Fatalf("plain logs refused: %v", err)
+// writeLegacyArchive writes an archive with an explicit member list, as
+// older releases did.
+func writeLegacyArchive(t *testing.T, dir string, manifest *backupManifest, members []string, output string) error {
+	t.Helper()
+	for _, name := range members {
+		digest, err := digestBackupMember(filepath.Join(dir, filepath.FromSlash(name)))
+		if err != nil {
+			return err
+		}
+		digest.Name = name
+		manifest.Members = append(manifest.Members, digest)
 	}
-	for _, name := range []string{"logs/../oberth.sqlite", "oberth.sqlite", "logs/sub/run.log", "logs/.hidden", "/logs/run.log"} {
-		if _, err := validateLogsTar(logsTarFixture(t, map[string]string{name: "x"})); err == nil {
-			t.Errorf("entry %q was admitted", name)
+	body, err := json.MarshalIndent(manifest, "", "  ")
+	if err != nil {
+		return err
+	}
+	var plain bytes.Buffer
+	if err := writeBackupTar(&plain, dir, body, manifest.Members); err != nil {
+		return err
+	}
+	return writeFileForTest(output, append(fakeEnvelopeHeader(), plain.Bytes()...))
+}
+
+// v1 and v2 archives (Helm values, maybe step logs) still open; their extra
+// members are verified and ignored.
+func TestOpenBackupArchiveReadsOlderFormats(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		format string
+		extra  []string
+	}{{backupFormatV1, nil}, {backupFormatV2, nil}, {backupFormatV2, []string{backupMemberLogs}}} {
+		dir := t.TempDir()
+		members := append(slices.Clone(legacyMemberOrder), tc.extra...)
+		for _, name := range members {
+			if err := writeBackupFile(dir, name, []byte(`{}`)); err != nil {
+				t.Fatal(err)
+			}
+		}
+		manifest := backupManifest{Format: tc.format}
+		output := filepath.Join(t.TempDir(), "old.cms")
+		if err := writeLegacyArchive(t, dir, &manifest, members, output); err != nil {
+			t.Fatal(err)
+		}
+		opened, err := openBackupArchive(context.Background(), output, fakeEnvelopeCipher{}, t.TempDir())
+		if err != nil || opened.Format != tc.format {
+			t.Fatalf("open %s %v: %+v, %v", tc.format, tc.extra, opened.Format, err)
 		}
 	}
 }
@@ -159,44 +140,30 @@ func TestValidateLogsTarAdmitsOnlyLogFiles(t *testing.T) {
 func TestRestoreOntoAReinstalledCluster(t *testing.T) {
 	t.Parallel()
 	archive, _, source, target := reinstallFixture(t)
-	freshForge := target.bao.kv[forgeKeyKVPath(DefaultNamespace)]["id_ed25519.pub"]
 	out := runFixtureRestore(t, archive, target, RestoreConfig{})
 
 	// Not mistaken for a rollback: both clusters serve the same API URL.
 	if strings.Contains(out, "SAME cluster") || !strings.Contains(out, "a different cluster than the backup's") {
 		t.Fatalf("cluster misidentified:\n%s", out)
 	}
-	// The forge key the fresh install registered is kept.
-	if got := target.bao.kv[forgeKeyKVPath(DefaultNamespace)]["id_ed25519.pub"]; got != freshForge {
-		t.Fatal("restore replaced the target's forge key")
+	// The install's own identities are untouched.
+	if got := target.bao.kv["identities/oberth/oberth-upstream-key"]["id_ed25519"]; got != "fresh-forge-private" {
+		t.Fatalf("restore replaced the install's forge key: %v", got)
 	}
-	if !strings.Contains(out, "keeping this install's key") {
-		t.Fatalf("plan does not explain the kept forge key:\n%s", out)
+	if _, ok := target.bao.kv["identities/oberth/server"]; ok {
+		t.Fatal("restore wrote the source's server identity")
 	}
-	// The host key returns to the archive's, and the plan says so.
-	if canonicalJSON(target.bao.kv[serverIdentityKVPath(DefaultNamespace)]) != canonicalJSON(source.bao.kv[serverIdentityKVPath(DefaultNamespace)]) {
-		t.Fatal("server identity not restored")
+	// The operator's secrets are back.
+	if canonicalJSON(target.bao.kv["release/cosign-secret"]) != canonicalJSON(source.bao.kv["release/cosign-secret"]) {
+		t.Fatal("operator secret not restored")
 	}
-	if !strings.Contains(out, "host key returns to the archive's") || !strings.Contains(out, "ssh-keygen -R") {
-		t.Fatalf("host key change not explained:\n%s", out)
+	// Only the compatibility values go onto the release.
+	keys := make([]string, 0, len(target.helmValues))
+	for key := range target.helmValues {
+		keys = append(keys, key)
 	}
-	// Deployment-specific values (here the operator's watchTunnel.enabled)
-	// are named, not applied; the source certificate names are added.
-	if target.helmValues["watchTunnel"] != nil || !strings.Contains(out, "the backup's Helm values also set watchTunnel.enabled, which a restore does not apply") {
-		t.Fatalf("operator value handled specially: %v\n%s", target.helmValues["watchTunnel"], out)
-	}
-	tls, _ := target.helmValues["tls"].(map[string]any)
-	if !slices.Equal(anyStrings(tls["extraDNSNames"]), []string{"tuxbox", "tuxbox.local", "localhost"}) ||
-		!slices.Equal(anyStrings(tls["extraIPs"]), []string{"192.168.86.193", "127.0.0.1"}) {
-		t.Fatalf("tls overlay = %v", target.helmValues["tls"])
-	}
-	// Step logs went back through the helper pod, hash-checked on the volume.
-	if target.logsRestored == "" || len(target.uploads["logs.tar"]) == 0 || !strings.Contains(out, "step logs restored") {
-		t.Fatalf("step logs not restored (sha %q):\n%s", target.logsRestored, out)
-	}
-	// The new service-account key is called out for release WIF.
-	if !strings.Contains(out, "trusts the source cluster's service-account key old-kid, but this cluster signs with new-kid") {
-		t.Fatalf("service-account key change not noted:\n%s", out)
+	if !slices.Equal(keys, []string{"compatibility"}) {
+		t.Fatalf("restore set Helm values %v, want only compatibility", keys)
 	}
 	// Scaling goes through the scale subresource (#067).
 	for _, sub := range target.scaleSubres {
@@ -204,30 +171,13 @@ func TestRestoreOntoAReinstalledCluster(t *testing.T) {
 			t.Fatalf("deployment patched without the scale subresource: %v", target.scaleSubres)
 		}
 	}
-	if strings.Contains(out, "forge-private-canary") || strings.Contains(out, "fresh-forge-private") {
-		t.Fatal("restore output prints a private key")
+	for _, canary := range []string{"source-forge-private-canary", "source-host-key-canary", "fresh-forge-private", testSecretValue} {
+		if strings.Contains(out, canary) {
+			t.Fatalf("restore output prints secret material %q", canary)
+		}
 	}
-}
-
-func TestRestoreForgeKeyFlagRestoresTheArchivedKey(t *testing.T) {
-	t.Parallel()
-	archive, _, source, target := reinstallFixture(t)
-	out := runFixtureRestore(t, archive, target, RestoreConfig{RestoreForgeKey: true})
-	if canonicalJSON(target.bao.kv[forgeKeyKVPath(DefaultNamespace)]) != canonicalJSON(source.bao.kv[forgeKeyKVPath(DefaultNamespace)]) {
-		t.Fatal("--restore-forge-key did not restore the archived forge key")
-	}
-	if !strings.Contains(out, "every forge must still accept it") {
-		t.Fatalf("plan does not warn about the replaced forge key:\n%s", out)
-	}
-}
-
-func TestRestoreNoLogsSkipsTheLogs(t *testing.T) {
-	t.Parallel()
-	archive, _, _, target := reinstallFixture(t)
-	out := runFixtureRestore(t, archive, target, RestoreConfig{NoLogs: true})
-	if target.logsRestored != "" || !strings.Contains(out, "not restored (--no-logs)") {
-		t.Fatalf("--no-logs restored logs:\n%s", out)
-	}
+	assertSubstringsInOrder(t, out, []string{"Unchanged  this install's identities, CA and Helm values", "Restore complete",
+		"oberth install --install-secretstore --upgrade", "Re-apply your own Helm values files"})
 }
 
 func TestRestoreRecognisesTheSameCluster(t *testing.T) {
@@ -257,55 +207,6 @@ func TestConfirmRestoreQuotesTheNameAndRetries(t *testing.T) {
 	}
 }
 
-// Only the operator's own values are named: installer-set and restored
-// paths are not, nor values this install already has.
-func TestUnappliedValuesNamesOnlyOperatorSettings(t *testing.T) {
-	t.Parallel()
-	archived := map[string]any{
-		"image":         map[string]any{"ref": "old@sha256:1"},
-		"secretstore":   map[string]any{"address": "https://old"},
-		"compatibility": map[string]any{"auditDomain": "a"},
-		"tls":           map[string]any{"extraDNSNames": []any{"x"}, "pki": map[string]any{"enabled": true}},
-		"watchTunnel":   map[string]any{"enabled": true, "originCACert": "old-ca"},
-		"networkPolicy": map[string]any{"enabled": true},
-		"replicaCount":  float64(2),
-	}
-	target := map[string]any{"networkPolicy": map[string]any{"enabled": true}}
-	if got := unappliedValues(archived, target); !slices.Equal(got, []string{"replicaCount", "watchTunnel.enabled"}) {
-		t.Fatalf("unappliedValues = %v", got)
-	}
-}
-
-// In-flight temp files and anything outside logs/ are dropped, not fatal.
-func TestRepackLogsTarKeepsOnlyLogFiles(t *testing.T) {
-	t.Parallel()
-	body, summary, err := repackLogsTar(logsTarFixture(t, map[string]string{
-		"logs/run.log": "x", "logs/run.index.json": "{}", "logs/.index-123.tmp": "partial", "logs/sub/a.log": "y",
-	}))
-	if err != nil || summary.Files != 2 {
-		t.Fatalf("repack: %+v %v", summary, err)
-	}
-	if _, err := validateLogsTar(body); err != nil {
-		t.Fatalf("repacked tar does not validate: %v", err)
-	}
-}
-
-func TestBackupGoesOnWhenLogsCannotBeRead(t *testing.T) {
-	t.Parallel()
-	_, _, source := backupFixtureArchive(t, false)
-	source.logsTar = []byte("not a tar")
-	output := filepath.Join(t.TempDir(), "state.cms")
-	var out bytes.Buffer
-	cfg := BackupConfig{Output: output, Recipient: "recipient.pem"}
-	cfg.applyDefaults()
-	if err := runBackup(context.Background(), cfg, source.deps(&out)); err != nil {
-		t.Fatalf("backup failed over unreadable logs: %v", err)
-	}
-	if !strings.Contains(out.String(), "no step logs (could not read them") {
-		t.Fatalf("output does not explain the missing logs:\n%s", out.String())
-	}
-}
-
 // Should Helm still report a .spec.replicas conflict, the restore retries
 // once with --force-conflicts instead of stopping with the server down.
 func TestRestoreRetriesAHelmReplicasConflict(t *testing.T) {
@@ -328,7 +229,7 @@ func TestNewerArchiveFormatNamesTheRelease(t *testing.T) {
 	}
 	manifest := backupManifest{Format: "oberth.backup/v9"}
 	output := filepath.Join(t.TempDir(), "v9.cms")
-	if err := writeBackupArchive(context.Background(), dir, &manifest, fakeEnvelopeCipher{}, output); err != nil {
+	if err := writeLegacyArchive(t, dir, &manifest, backupMemberOrder, output); err != nil {
 		t.Fatal(err)
 	}
 	_, err := openBackupArchive(context.Background(), output, fakeEnvelopeCipher{}, t.TempDir())

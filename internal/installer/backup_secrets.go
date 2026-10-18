@@ -1,9 +1,8 @@
 package installer
 
-// `oberth backup export-secrets` and `export-values`: an archive's OpenBao KV
-// secrets as one plain JSON document that any KV v2 store (OpenBao, Vault)
-// can import with its own CLI, independent of Oberth and of the store's raft
-// state; and the release's user-supplied Helm values as a values file.
+// `oberth backup export-secrets`: an archive's OpenBao KV secrets as one
+// plain JSON document that any KV v2 store (OpenBao, Vault) can import with
+// its own CLI, independent of Oberth and of the store's raft state.
 
 import (
 	"context"
@@ -13,8 +12,6 @@ import (
 	"io"
 	"os"
 	"time"
-
-	"sigs.k8s.io/yaml"
 )
 
 // secretsExportFormat names the document written by ExportSecrets.
@@ -47,29 +44,6 @@ type ExportSecretsConfig struct {
 // out as a SecretsExport. It needs no cluster.
 func ExportSecrets(ctx context.Context, cfg ExportSecretsConfig, host InstallDeps, out io.Writer) error {
 	return exportFromArchive(ctx, cfg, host, func(archive restoreArchive) error { return writeSecretsExport(out, archive) })
-}
-
-// ExportValues writes the release's user-supplied Helm values an archive
-// recorded, as YAML. Values the installer sets itself are included too: they
-// describe the source install, so review them before passing the file to
-// oberth upgrade -f.
-func ExportValues(ctx context.Context, cfg ExportSecretsConfig, host InstallDeps, out io.Writer) error {
-	return exportFromArchive(ctx, cfg, host, func(archive restoreArchive) error { return writeValuesExport(out, archive) })
-}
-
-func writeValuesExport(out io.Writer, archive restoreArchive) error {
-	if archive.Manifest.Scope == BackupScopeHistory {
-		return errors.New("this archive holds history only (oberth backup --history-only): it has no Helm values")
-	}
-	body, err := yaml.Marshal(archive.Values)
-	if err != nil {
-		return err
-	}
-	_, err = fmt.Fprintf(out, "# Helm values of release oberth recorded by oberth backup on %s (context %s).\n"+
-		"# image, secretstore, tls.pki, certificate pins and other installer-set values describe the SOURCE install:\n"+
-		"# keep only your own settings before using this with oberth upgrade -f.\n%s",
-		archive.Manifest.CreatedAt, archive.Manifest.Source.Context, body)
-	return err
 }
 
 func exportFromArchive(ctx context.Context, cfg ExportSecretsConfig, host InstallDeps, write func(restoreArchive) error) (resultErr error) {

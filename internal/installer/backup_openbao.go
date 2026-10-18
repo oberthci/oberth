@@ -27,6 +27,22 @@ type kvSecretExport struct {
 	Data map[string]any `json:"data"`
 }
 
+// installIdentityPrefix holds the runtime identities every install makes for
+// itself (forge key, server TLS and SSH host keys, forge host keys). They are
+// never backed up or restored: a restored install keeps its own.
+const installIdentityPrefix = "identities/"
+
+// operatorSecrets drops the install's own identities from a KV export.
+func operatorSecrets(secrets []kvSecretExport) []kvSecretExport {
+	kept := make([]kvSecretExport, 0, len(secrets))
+	for _, secret := range secrets {
+		if !strings.HasPrefix(secret.Path, installIdentityPrefix) {
+			kept = append(kept, secret)
+		}
+	}
+	return kept
+}
+
 type kvExport struct {
 	Mount   string           `json:"mount"`
 	Secrets []kvSecretExport `json:"secrets"`

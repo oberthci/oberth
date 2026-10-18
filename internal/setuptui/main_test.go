@@ -23,6 +23,8 @@ func TestMain(m *testing.M) {
 	executeInstaller = func(context.Context, installer.Config, installer.InstallDeps) error {
 		return errors.New("test ran the real installer")
 	}
+	// A saved install is assumed present unless a test says otherwise.
+	releasePresent = func(context.Context, string, string, string) (bool, bool) { return true, true }
 	dir, err := os.MkdirTemp("", "setuptui-test-")
 	if err != nil {
 		panic(err)

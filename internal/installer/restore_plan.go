@@ -2,8 +2,7 @@ package installer
 
 // What an archive holds and what a restore changes on the target, said
 // before anything changes (#068): the parts restored, every count that goes
-// from the target's value to the archive's, the secrets by name, and each
-// setting from its current value to the restored one.
+// from the target's value to the archive's, and the secrets by name.
 
 import (
 	"errors"
@@ -15,18 +14,17 @@ import (
 
 // The parts of an archive a restore can apply (oberth restore --only).
 const (
-	RestorePartHistory  = "history"
-	RestorePartSecrets  = "secrets"
-	RestorePartSettings = "settings"
+	RestorePartHistory = "history"
+	RestorePartSecrets = "secrets"
 )
 
 // restoreParts are the parts a restore applies. History is the database
-// (runs, issues, promotions, uplinks, the audit chain), the step logs and the
-// compatibility values the database needs; secrets are OpenBao KV secrets,
-// policies and roles; settings are the grants table, release WIF and the
-// certificate names.
+// (runs, issues, promotions, uplinks, the audit chain) with the
+// compatibility values it needs; secrets are the OpenBao KV secrets an
+// operator put in, the policies and roles, and the grants that let pipeline
+// steps read them.
 type restoreParts struct {
-	History, Secrets, Settings bool
+	History, Secrets bool
 }
 
 // resolveRestoreParts applies --only to what the archive holds: everything
@@ -34,42 +32,36 @@ type restoreParts struct {
 func resolveRestoreParts(only []string, scope string) (restoreParts, error) {
 	full := scope != BackupScopeHistory
 	if len(only) == 0 {
-		return restoreParts{History: true, Secrets: full, Settings: full}, nil
+		return restoreParts{History: true, Secrets: full}, nil
 	}
 	var parts restoreParts
 	for _, name := range only {
 		switch strings.TrimSpace(name) {
 		case RestorePartHistory:
 			parts.History = true
-		case RestorePartSecrets, RestorePartSettings:
+		case RestorePartSecrets:
 			if !full {
-				return parts, fmt.Errorf("--only %s: this archive holds history only (it was written by oberth backup --history-only)", name)
+				return parts, errors.New("--only secrets: this archive holds history only (it was written by oberth backup --history-only)")
 			}
-			if name == RestorePartSecrets {
-				parts.Secrets = true
-			} else {
-				parts.Settings = true
-			}
+			parts.Secrets = true
 		case "":
 		default:
-			return parts, fmt.Errorf("--only %q: name history, secrets or settings (comma-separated)", name)
+			return parts, fmt.Errorf("--only %q: name history or secrets (comma-separated)", name)
 		}
 	}
 	if parts == (restoreParts{}) {
-		return parts, errors.New("--only names no part to restore: use history, secrets or settings")
+		return parts, errors.New("--only names no part to restore: use history or secrets")
 	}
 	return parts, nil
 }
 
 func (parts restoreParts) names() []string {
 	var names []string
-	for _, part := range []struct {
-		on   bool
-		name string
-	}{{parts.History, RestorePartHistory}, {parts.Secrets, RestorePartSecrets}, {parts.Settings, RestorePartSettings}} {
-		if part.on {
-			names = append(names, part.name)
-		}
+	if parts.History {
+		names = append(names, RestorePartHistory)
+	}
+	if parts.Secrets {
+		names = append(names, RestorePartSecrets)
 	}
 	return names
 }
@@ -120,9 +112,9 @@ func printArchiveContents(w io.Writer, archive restoreArchive, input string, all
 	if all {
 		limit = 1 << 20
 	}
-	scope := "history, secrets and settings"
+	scope := "history and secrets"
 	if m.Scope == BackupScopeHistory {
-		scope = "history only (no secrets or settings)"
+		scope = "history only (no secrets)"
 	}
 	_, _ = fmt.Fprintf(w, "\nBackup %s\n", displayLocalPath(input))
 	_, _ = fmt.Fprintf(w, "  Taken      %s from context %s (%s); holds %s\n",
@@ -136,11 +128,8 @@ func printArchiveContents(w io.Writer, archive restoreArchive, input string, all
 	if len(c.Uplinks) > 0 {
 		_, _ = fmt.Fprintf(w, "             uplinks:\n             %s\n", listSome(c.Uplinks, limit))
 	}
-	if m.Logs != nil {
-		_, _ = fmt.Fprintf(w, "             step logs: %d files, %d KiB\n", m.Logs.Files, m.Logs.Bytes>>10)
-	} else {
-		_, _ = fmt.Fprintln(w, "             step logs: none")
-	}
+	compat := m.Compatibility
+	_, _ = fmt.Fprintf(w, "             opened under %s / %s / %s\n", compat.SchemaIdentity, compat.AuditDomain, compat.WitnessKeyInfo)
 	if m.Scope == BackupScopeHistory {
 		return
 	}
@@ -148,44 +137,14 @@ func printArchiveContents(w io.Writer, archive restoreArchive, input string, all
 	for _, secret := range archive.KV.Secrets {
 		paths = append(paths, secret.Path)
 	}
-	_, _ = fmt.Fprintf(w, "  Secrets    %d KV secrets, %d policies, %d roles (names only, never values)\n", len(paths), len(archive.Policies), len(archive.Roles.Roles))
+	_, _ = fmt.Fprintf(w, "  Secrets    %d KV secrets, %d policies, %d roles, %d grants (names only, never values)\n",
+		len(paths), len(archive.Policies), len(archive.Roles.Roles), countGrants(archive.Grants))
 	if len(paths) > 0 {
 		_, _ = fmt.Fprintf(w, "             %s\n", listSome(paths, limit))
 	}
-	for i, line := range settingsSummary(archive) {
-		label := "             "
-		if i == 0 {
-			label = "  Settings   "
-		}
-		_, _ = fmt.Fprintf(w, "%s%s\n", label, line)
+	if archive.SkippedIdentities > 0 {
+		_, _ = fmt.Fprintf(w, "             (%d install identities in this older backup are left out: every install keeps its own)\n", archive.SkippedIdentities)
 	}
-}
-
-// settingsSummary describes the settings an archive records.
-func settingsSummary(archive restoreArchive) []string {
-	compat := archive.Manifest.Compatibility
-	lines := []string{fmt.Sprintf("compatibility %s / %s / %s", compat.SchemaIdentity, compat.AuditDomain, compat.WitnessKeyInfo)}
-	if hasReleaseWIF(archive.Values) {
-		lines = append(lines, "release WIF configured")
-	}
-	tls, _ := archive.Values["tls"].(map[string]any)
-	if names := append(stringList(tls["extraDNSNames"]), stringList(tls["extraIPs"])...); len(names) > 0 {
-		lines = append(lines, "certificate names "+strings.Join(names, ", "))
-	}
-	if archive.Grants.Present {
-		lines = append(lines, fmt.Sprintf("%d grants", countGrants(archive.Grants)))
-	}
-	if own := operatorValues(archive.Values); len(own) > 0 {
-		lines = append(lines, "your other Helm values (not restored; oberth backup export-values): "+listSome(own, 12))
-	}
-	return lines
-}
-
-// operatorValues lists the leaf value paths an archive records that are
-// neither installer-managed nor applied by a restore: the operator's own
-// values-file settings.
-func operatorValues(values map[string]any) []string {
-	return unappliedValues(values, nil)
 }
 
 // --- The plan: what changes on this install ---
@@ -199,9 +158,9 @@ func printRestorePlan(w io.Writer, cfg RestoreConfig, deps backupDeps, archive r
 	// alone cannot tell (every k3s serves https://127.0.0.1:6443); the
 	// kube-system namespace UID can (#068).
 	switch {
-	case m.Source.ClusterUID != "" && target.Cluster.UID != "" && m.Source.ClusterUID == target.Cluster.UID:
+	case m.Source.ClusterUID != "" && target.ClusterUID != "" && m.Source.ClusterUID == target.ClusterUID:
 		_, _ = fmt.Fprintf(w, "  Cluster    SAME cluster the backup was taken from: this rolls Oberth back to %s; runs created since are dropped\n", m.CreatedAt)
-	case m.Source.ClusterUID != "" && target.Cluster.UID != "":
+	case m.Source.ClusterUID != "" && target.ClusterUID != "":
 		_, _ = fmt.Fprintln(w, "  Cluster    a different cluster than the backup's (reinstalled or new)")
 	case m.Source.APIServer != "" && m.Source.APIServer == deps.apiServer:
 		_, _ = fmt.Fprintf(w, "  Cluster    same API server URL as the backup (%s), possibly the same cluster: if so this rolls Oberth back to %s and runs created since are dropped\n",
@@ -212,27 +171,20 @@ func printRestorePlan(w io.Writer, cfg RestoreConfig, deps backupDeps, archive r
 
 	_, _ = fmt.Fprintln(w, "\nWhat changes on this install:")
 	if parts.History {
-		printHistoryChanges(w, cfg, archive, target)
+		printHistoryChanges(w, archive, target)
 	}
 	if parts.Secrets {
-		printSecretChanges(w, cfg, archive, target)
-	}
-	if parts.Settings || len(target.Overlay) > 0 {
-		printSettingChanges(w, archive, target, parts)
+		printSecretChanges(w, archive, target)
 	}
 	var untouched []string
 	if !parts.History {
-		untouched = append(untouched, "history (runs, issues, uplinks, step logs)")
+		untouched = append(untouched, "history (runs, issues, uplinks)")
 	}
 	if !parts.Secrets {
-		untouched = append(untouched, "OpenBao secrets, policies and roles")
+		untouched = append(untouched, "OpenBao secrets, policies, roles and grants")
 	}
-	if !parts.Settings {
-		untouched = append(untouched, "settings (grants, release WIF, certificate names)")
-	}
-	if len(untouched) > 0 {
-		_, _ = fmt.Fprintf(w, "  Unchanged  %s\n", joinWords(untouched))
-	}
+	untouched = append(untouched, "this install's identities, CA and Helm values")
+	_, _ = fmt.Fprintf(w, "  Unchanged  %s\n", joinWords(untouched))
 
 	_, _ = fmt.Fprintln(w, "\nHow:")
 	_, _ = fmt.Fprintf(w, "  Server     deploy/oberth stopped (%d -> 0) while restoring, then started again\n", target.Server.Replicas)
@@ -242,6 +194,11 @@ func printRestorePlan(w io.Writer, cfg RestoreConfig, deps backupDeps, archive r
 		if target.Pod == "" {
 			_, _ = fmt.Fprintln(w, "             (no server pod is running: the target schema is checked in the restore pod before the swap)")
 		}
+		if len(target.Overlay) > 0 {
+			have, want := target.Server.Compatibility, m.Compatibility
+			_, _ = fmt.Fprintf(w, "  Helm       compatibility values the database needs: schemaIdentity %s -> %s, auditDomain %s -> %s, witnessKeyInfo %s -> %s\n",
+				have.SchemaIdentity, want.SchemaIdentity, have.AuditDomain, want.AuditDomain, have.WitnessKeyInfo, want.WitnessKeyInfo)
+		}
 		if len(target.Orphans) > 0 {
 			names := make([]string, 0, len(target.Orphans))
 			for _, wf := range target.Orphans {
@@ -250,54 +207,44 @@ func printRestorePlan(w io.Writer, cfg RestoreConfig, deps backupDeps, archive r
 			_, _ = fmt.Fprintf(w, "  Workflows  delete %d whose runs the restored database does not know: %s\n", len(names), strings.Join(names, ", "))
 		}
 	}
-	if len(target.Overlay) > 0 {
-		_, _ = fmt.Fprintln(w, "  Helm       helm upgrade --reuse-values of release oberth with the settings above")
-	}
 	if parts.Secrets {
-		_, _ = fmt.Fprintln(w, "  OpenBao    each secret, policy and role verified by read-back; Transit key, PKI CA and auth config are not restored")
+		_, _ = fmt.Fprintln(w, "  OpenBao    each secret, policy and role verified by read-back")
 	}
 	for _, note := range target.Notes {
 		_, _ = fmt.Fprintf(w, "  Note       %s\n", note)
 	}
 }
 
-func printHistoryChanges(w io.Writer, cfg RestoreConfig, archive restoreArchive, target restoreTarget) {
+func printHistoryChanges(w io.Writer, archive restoreArchive, target restoreTarget) {
 	want := archive.Contents
-	if have := target.Contents; have != nil {
-		_, _ = fmt.Fprintf(w, "  History    replaced, not merged: runs %d -> %d, issues %d -> %d (%d open), promotions %d -> %d, repositories %d -> %d\n",
-			have.Runs, want.Runs, have.Issues, want.Issues, want.OpenIssues, have.Promotions, want.Promotions, len(have.Repositories), len(want.Repositories))
-		gone, added := diffNames(have.Uplinks, want.Uplinks)
-		switch {
-		case len(gone) == 0 && len(added) == 0:
-			_, _ = fmt.Fprintf(w, "             uplinks unchanged: %s\n", listSome(want.Uplinks, 8))
-		default:
-			if len(gone) > 0 {
-				_, _ = fmt.Fprintf(w, "             uplinks removed: %s — their tokens, including the one this install printed, stop working\n", strings.Join(gone, ", "))
-			}
-			if len(added) > 0 {
-				_, _ = fmt.Fprintf(w, "             uplinks restored: %s — their previous tokens work again\n", listSome(added, 8))
-			}
-		}
-	} else {
-		_, _ = fmt.Fprintf(w, "  History    replaced with the archive's: %s\n", describeContents(want))
+	have := target.Contents
+	if have == nil {
+		_, _ = fmt.Fprintf(w, "  History    replaced with the backup's: %s\n", describeContents(want))
 		_, _ = fmt.Fprintf(w, "             (this install's history could not be read: %s)\n", displayOr(target.ContentsNote, "the server is not running"))
-		_, _ = fmt.Fprintln(w, "             uplinks and tokens become the archive's: a token this install printed stops working")
+		_, _ = fmt.Fprintln(w, "             uplinks and tokens become the backup's: a token this install printed stops working")
+		return
 	}
-	switch {
-	case archive.Logs == nil:
-		_, _ = fmt.Fprintln(w, "             step logs: none in the archive")
-	case cfg.NoLogs:
-		_, _ = fmt.Fprintln(w, "             step logs: not restored (--no-logs)")
-	default:
-		_, _ = fmt.Fprintf(w, "             step logs: %d files into /data/logs (same names replaced)\n", archive.Manifest.Logs.Files)
+	_, _ = fmt.Fprintf(w, "  History    replaced, not merged: runs %d -> %d, issues %d -> %d (%d open), promotions %d -> %d, repositories %d -> %d\n",
+		have.Runs, want.Runs, have.Issues, want.Issues, want.OpenIssues, have.Promotions, want.Promotions, len(have.Repositories), len(want.Repositories))
+	gone, added := diffNames(have.Uplinks, want.Uplinks)
+	if len(gone) == 0 && len(added) == 0 {
+		_, _ = fmt.Fprintf(w, "             uplinks unchanged: %s\n", listSome(want.Uplinks, 8))
+		return
+	}
+	if len(gone) > 0 {
+		_, _ = fmt.Fprintf(w, "             uplinks removed: %s — their tokens, including the one this install printed, stop working\n", strings.Join(gone, ", "))
+	}
+	if len(added) > 0 {
+		_, _ = fmt.Fprintf(w, "             uplinks restored: %s — their previous tokens work again\n", listSome(added, 8))
 	}
 }
 
-func printSecretChanges(w io.Writer, cfg RestoreConfig, archive restoreArchive, target restoreTarget) {
+func printSecretChanges(w io.Writer, archive restoreArchive, target restoreTarget) {
 	plan := target.OpenBao
+	grants := fmt.Sprintf("grants (ConfigMap %s) %d -> %d", secretAccessConfigMapName, target.Grants, countGrants(archive.Grants))
 	if !plan.Known {
-		_, _ = fmt.Fprintf(w, "  Secrets    write %d secrets, %d policies, %d roles (no root token: this install was not compared)\n",
-			len(target.KV.Secrets), len(archive.Policies), len(archive.Roles.Roles))
+		_, _ = fmt.Fprintf(w, "  Secrets    write %d secrets, %d policies, %d roles (no root token: this install was not compared); %s\n",
+			len(archive.KV.Secrets), len(archive.Policies), len(archive.Roles.Roles), grants)
 		return
 	}
 	_, _ = fmt.Fprintf(w, "  Secrets    %d new, %d replaced, %d unchanged\n", plan.SecretsNew, plan.SecretsReplaced, plan.SecretsUnchanged)
@@ -307,53 +254,13 @@ func printSecretChanges(w io.Writer, cfg RestoreConfig, archive restoreArchive, 
 	if len(plan.NewPaths) > 0 {
 		_, _ = fmt.Fprintf(w, "             new: %s\n", listSome(plan.NewPaths, 8))
 	}
-	_, _ = fmt.Fprintf(w, "             policies %d new, %d replaced; roles %d new, %d replaced\n",
-		len(plan.PoliciesNew), len(plan.PoliciesReplaced), len(plan.RolesNew), len(plan.RolesReplaced))
+	_, _ = fmt.Fprintf(w, "             policies %d new, %d replaced; roles %d new, %d replaced; %s\n",
+		len(plan.PoliciesNew), len(plan.PoliciesReplaced), len(plan.RolesNew), len(plan.RolesReplaced), grants)
 	if len(plan.PoliciesReplaced) > 0 {
 		_, _ = fmt.Fprintf(w, "             replaced policies: %s\n", listSome(plan.PoliciesReplaced, 8))
 	}
 	if len(plan.RolesReplaced) > 0 {
 		_, _ = fmt.Fprintf(w, "             replaced roles: %s\n", listSome(plan.RolesReplaced, 8))
-	}
-	for _, line := range identityPlanLines(target.Identity, cfg.Namespace) {
-		_, _ = fmt.Fprintf(w, "  %s\n", line)
-	}
-}
-
-func printSettingChanges(w io.Writer, archive restoreArchive, target restoreTarget, parts restoreParts) {
-	var lines []string
-	if _, ok := target.Overlay["compatibility"]; ok {
-		have, want := target.Server.Compatibility, archive.Manifest.Compatibility
-		lines = append(lines, fmt.Sprintf("compatibility (the restored database needs it): schemaIdentity %s -> %s, auditDomain %s -> %s, witnessKeyInfo %s -> %s",
-			have.SchemaIdentity, want.SchemaIdentity, have.AuditDomain, want.AuditDomain, have.WitnessKeyInfo, want.WitnessKeyInfo))
-	}
-	if argo, ok := target.Overlay["argo"].(map[string]any); ok && argo["releaseWIF"] != nil {
-		if hasReleaseWIF(target.Values) {
-			lines = append(lines, "argo.releaseWIF: replaced with the archive's")
-		} else {
-			lines = append(lines, "argo.releaseWIF: not set -> the archive's")
-		}
-	}
-	if tls, ok := target.Overlay["tls"].(map[string]any); ok {
-		targetTLS, _ := target.Values["tls"].(map[string]any)
-		for _, key := range []string{"extraDNSNames", "extraIPs"} {
-			if want, ok := tls[key]; ok {
-				lines = append(lines, fmt.Sprintf("tls.%s: [%s] -> [%s]", key, strings.Join(stringList(targetTLS[key]), ", "), strings.Join(valueStrings(want), ", ")))
-			}
-		}
-	}
-	if parts.Settings && archive.Grants.Present {
-		lines = append(lines, fmt.Sprintf("grants (ConfigMap %s): %d -> %d", secretAccessConfigMapName, target.Grants, countGrants(archive.Grants)))
-	}
-	if len(lines) == 0 {
-		lines = []string{"already match this install's"}
-	}
-	for i, line := range lines {
-		label := "             "
-		if i == 0 {
-			label = "  Settings   "
-		}
-		_, _ = fmt.Fprintf(w, "%s%s\n", label, line)
 	}
 }
 

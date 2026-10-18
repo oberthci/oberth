@@ -48,14 +48,21 @@ func Run(ctx context.Context, opts Options, input io.Reader, output io.Writer) e
 	if !opts.Fresh {
 		resumed, loadErr = loadSetupState(st)
 	}
+	var vanished string
+	if resumed && !opts.DryMode {
+		vanished = forgetVanishedInstall(ctx, st)
+	}
 	if opts.Plain || opts.Accessible {
-		return runPlain(ctx, opts, st, resumed, loadErr, input, output)
+		return runPlain(ctx, opts, st, resumed, loadErr, vanished, input, output)
 	}
 
 	w := newWizard(opts, st)
-	if loadErr != nil {
+	switch {
+	case loadErr != nil:
 		w.notice = "Previous answers were not loaded: " + loadErr.Error()
-	} else if resumed {
+	case vanished != "":
+		w.notice = vanished
+	case resumed:
 		w.notice = "Resumed the answers saved by your previous run."
 	}
 	p := tea.NewProgram(w, tea.WithContext(ctx), tea.WithOutput(output))

@@ -47,8 +47,6 @@ func runBackup(ctx context.Context, arguments []string, input io.Reader, output 
 			return runBackupKeygen(arguments[1:], output)
 		case "export-secrets":
 			return runExportSecrets(ctx, arguments[1:], output)
-		case "export-values":
-			return runExportValues(ctx, arguments[1:], output)
 		}
 	}
 	flags := flag.NewFlagSet("backup", flag.ContinueOnError)
@@ -56,10 +54,9 @@ func runBackup(ctx context.Context, arguments []string, input io.Reader, output 
 	var cfg installer.BackupConfig
 	flags.StringVar(&cfg.Output, "output", "", "write the backup to `FILE` instead of ./"+archivePrefix+"<date-time>"+archiveSuffix)
 	flags.StringVar(&cfg.Output, "o", "", "shorthand for --output `FILE`")
-	historyOnly := flags.Bool("history-only", false, "back up runs, issues, promotions, uplinks and step logs only: no secrets or settings, no OpenBao root token needed")
+	historyOnly := flags.Bool("history-only", false, "back up runs, issues, promotions and uplinks only: no secrets, no OpenBao root token needed")
 	flags.BoolVar(&cfg.DryRun, "dry-run", false, "show what would be backed up; reads no secrets and writes nothing")
 	flags.StringVar(&cfg.Recipient, "recipient", "", "encrypt to this PEM `CERT` instead of ~/.config/oberth/backup/recipient.pem")
-	flags.BoolVar(&cfg.NoLogs, "no-logs", false, "leave the step logs out")
 	addClusterFlags(flags, &cfg.KubeconfigPath, &cfg.ContextName, &cfg.Namespace, &cfg.OpenBaoNamespace, &cfg.ArgoNamespace)
 	positional, help, err := parseOperatorFlags(flags, arguments)
 	if help {
@@ -114,9 +111,12 @@ func printBackupUsage(flags *flag.FlagSet, output io.Writer) error {
 	_, _ = fmt.Fprint(output, `Usage: oberth backup [flags]
 
 Back up this Oberth into one file in the current directory,
-`+archivePrefix+`<date-time>`+archiveSuffix+`: the history (runs, issues,
-promotions, uplinks, step logs), the OpenBao secrets, policies and roles, and
-the settings Oberth needs. Nothing in the cluster changes.
+`+archivePrefix+`<date-time>`+archiveSuffix+`: what a fresh install cannot
+recreate. That is the history (runs, issues, promotions, uplinks) and the
+secrets pipelines use (the OpenBao secrets you put in, policies, roles and the
+grants). Server files (git caches, step logs), Helm values and what every
+install makes for itself (its identities, CA) are not part of it. Nothing in
+the cluster changes.
 
     oberth backup                    # asks for the OpenBao root token; Enter alone = history only
     oberth backup --history-only     # no secrets, no token
@@ -128,7 +128,6 @@ restored without it.
 
 Also:
     oberth backup export-secrets [FILE]   the secrets as plain JSON any OpenBao/Vault can import
-    oberth backup export-values [FILE]    the release's Helm values as a values file
     oberth backup keygen [--dir DIR]      create the key pair ahead of time
 
 `)
@@ -265,55 +264,18 @@ func runBackupDatabase(ctx context.Context, arguments []string, output io.Writer
 	return nil
 }
 
-func runExportValues(ctx context.Context, arguments []string, output io.Writer) error {
-	flags := flag.NewFlagSet("backup export-values", flag.ContinueOnError)
-	flags.SetOutput(io.Discard)
-	key := flags.String("key", "", "the backup's private `KEY` instead of ~/.config/oberth/backup/recipient.key")
-	positional, help, err := parseOperatorFlags(flags, arguments)
-	if help {
-		_, _ = fmt.Fprint(output, `Usage: oberth backup export-values [FILE] > values.yaml
-
-Print the Helm values of release oberth that a backup recorded, as YAML.
-A restore applies only what Oberth needs (compatibility values, release WIF,
-certificate names); your other settings live in your own values files, and
-this recovers them when those files are gone. Values the installer sets
-itself (image, secretstore, tls.pki, certificate pins) describe the source
-install: keep only your own settings before oberth upgrade -f values.yaml.
-FILE defaults to the newest backup in the current directory.
-
-`)
-		printOperatorFlags(flags, output)
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	archive, err := resolveArchive(positional, os.Stderr)
-	if err != nil {
-		return err
-	}
-	keyPath, err := resolveBackupKey(*key, archive)
-	if err != nil {
-		return err
-	}
-	return installer.ExportValues(ctx, installer.ExportSecretsConfig{Input: archive, PrivateKey: keyPath}, installer.InstallDeps{Output: output}, output)
-}
-
 func runRestore(ctx context.Context, arguments []string, input io.Reader, output io.Writer) error {
 	flags := flag.NewFlagSet("restore", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	var cfg installer.RestoreConfig
 	flags.BoolVar(&cfg.DryRun, "dry-run", false, "show what would change on this install, then stop")
 	flags.BoolVar(&cfg.Inspect, "inspect", false, "show what the backup holds and stop; needs no cluster")
-	only := flags.String("only", "", "restore only these parts: `PARTS` from history, secrets, settings (comma-separated)")
+	only := flags.String("only", "", "restore only one part: `PART` history or secrets")
 	flags.BoolVar(&cfg.Yes, "yes", false, "skip the confirmation (for scripts)")
 	flags.StringVar(&cfg.Input, "input", "", "the backup `FILE` (same as the argument)")
 	flags.StringVar(&cfg.Input, "i", "", "shorthand for --input `FILE`")
 	flags.StringVar(&cfg.PrivateKey, "key", "", "the backup's private `KEY` instead of ~/.config/oberth/backup/recipient.key")
 	flags.StringVar(&cfg.PrivateKey, "private-key", "", "same as --key `KEY`")
-	flags.BoolVar(&cfg.NoLogs, "no-logs", false, "do not restore the step logs")
-	flags.BoolVar(&cfg.RestoreForgeKey, "restore-forge-key", false,
-		"restore the backup's forge (upstream) SSH key even though this install has its own, which its forges accept")
 	flags.StringVar(&cfg.ChartPath, "chart", "", "local Oberth `CHART` for the Helm upgrade (default: the published chart at the running version)")
 	addClusterFlags(flags, &cfg.KubeconfigPath, &cfg.ContextName, &cfg.Namespace, &cfg.OpenBaoNamespace, &cfg.ArgoNamespace)
 	timeout := flags.Duration("timeout", installer.DefaultTimeout, "wait timeout for pods")
@@ -351,16 +313,17 @@ func printRestoreUsage(flags *flag.FlagSet, output io.Writer) error {
 
 Restore an oberth backup onto this Oberth, typically a fresh install. Without
 an argument it takes the newest `+archivePrefix+`*`+archiveSuffix+` in the current
-directory; a directory means the newest backup in it. It first shows what the
-backup holds and exactly what would change here (history replaced, secrets
-new or replaced by name, each setting from its current value), then asks you
-to type the cluster's context name. This install's database is kept on its
-volume in /data/pre-restore-<time>/.
+directory; a directory means the newest backup in it. It brings back the
+history and the secrets pipelines use, and nothing else: this install keeps
+its own identities, CA and Helm values. It first shows what the backup holds
+and exactly what would change here (history counts before and after, secrets
+new or replaced by name), then asks you to type the cluster's context name.
+This install's database is kept on its volume in /data/pre-restore-<time>/.
 
     oberth restore --inspect         # what the newest backup here holds; no cluster needed
     oberth restore --dry-run         # what would change on this install; changes nothing
     oberth restore                   # restore it (asks for the OpenBao root token and a confirmation)
-    oberth restore --only history    # runs, issues, step logs only; keeps this install's secrets and settings
+    oberth restore --only history    # runs, issues, uplinks only; keeps this install's secrets
 
 `)
 	printOperatorFlags(flags, output)

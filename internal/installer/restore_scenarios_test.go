@@ -1,7 +1,7 @@
 package installer
 
 // Every backup/restore scenario an operator meets (#068): full and
-// history-only backups, restoring all of an archive or only some parts, the
+// history-only backups, restoring all of an archive or one part, the
 // universal secrets export, and what the plan says will change.
 
 import (
@@ -56,7 +56,7 @@ func TestHistoryOnlyBackupHoldsNoSecrets(t *testing.T) {
 	for _, member := range manifest.Members {
 		names = append(names, member.Name)
 	}
-	if manifest.Scope != BackupScopeHistory || !slices.Equal(names, []string{backupMemberDatabase, backupMemberLogs}) {
+	if manifest.Scope != BackupScopeHistory || !slices.Equal(names, []string{backupMemberDatabase}) {
 		t.Fatalf("scope %q members %v", manifest.Scope, names)
 	}
 	if manifest.Contents == nil || manifest.Contents.Runs != 1 {
@@ -84,15 +84,15 @@ func TestRestoreHistoryOnlyArchiveNeedsNoToken(t *testing.T) {
 			t.Fatalf("history restore talked to OpenBao: %v", argv)
 		}
 	}
-	if len(target.swapArgs) != 3 || target.logsRestored == "" {
-		t.Fatalf("database or logs not restored: swap %v logs %q", target.swapArgs, target.logsRestored)
+	if len(target.swapArgs) != 3 {
+		t.Fatalf("database not restored: swap %v", target.swapArgs)
 	}
 	compat, _ := target.helmValues["compatibility"].(map[string]any)
-	if compat["auditDomain"] != sourceCompat.AuditDomain || target.helmValues["watchTunnel"] != nil || target.helmValues["tls"] != nil {
+	if compat["auditDomain"] != sourceCompat.AuditDomain || len(target.helmValues) != 1 {
 		t.Fatalf("history restore set %v, want only compatibility", target.helmValues)
 	}
 	assertSubstringsInOrder(t, out.String(), []string{"holds history only", "What changes on this install:", "History    replaced, not merged",
-		"Unchanged  OpenBao secrets, policies and roles and settings"})
+		"Unchanged  OpenBao secrets, policies, roles and grants"})
 }
 
 func TestRestoreOnlyHistoryFromAFullArchive(t *testing.T) {
@@ -108,10 +108,10 @@ func TestRestoreOnlyHistoryFromAFullArchive(t *testing.T) {
 	if _, err := target.client.CoreV1().ConfigMaps(DefaultNamespace).Get(context.Background(), secretAccessConfigMapName, metav1GetOptions()); err == nil {
 		t.Fatal("--only history wrote the grants table")
 	}
-	if target.helmValues["tls"] != nil || target.helmValues["watchTunnel"] != nil || target.helmValues["argo"] != nil {
-		t.Fatalf("--only history set settings: %v", target.helmValues)
+	if len(target.helmValues) != 1 {
+		t.Fatalf("--only history set more than the compatibility values: %v", target.helmValues)
 	}
-	if !strings.Contains(out, "Unchanged  OpenBao secrets, policies and roles and settings") {
+	if !strings.Contains(out, "Unchanged  OpenBao secrets, policies, roles and grants") {
 		t.Fatalf("plan does not say what stays:\n%s", out)
 	}
 }
@@ -120,8 +120,11 @@ func TestRestoreOnlySecrets(t *testing.T) {
 	t.Parallel()
 	archive, _, source, target := reinstallFixture(t)
 	out := runFixtureRestore(t, archive, target, RestoreConfig{Only: []string{RestorePartSecrets}})
-	if target.swapArgs != nil || target.logsRestored != "" {
-		t.Fatal("--only secrets touched the database or logs")
+	if target.swapArgs != nil {
+		t.Fatal("--only secrets touched the database")
+	}
+	if cm, err := target.client.CoreV1().ConfigMaps(DefaultNamespace).Get(context.Background(), secretAccessConfigMapName, metav1GetOptions()); err != nil || cm.Data[secretAccessConfigMapKey] != testGrants {
+		t.Fatalf("--only secrets did not restore the grants: %v %v", cm, err)
 	}
 	if canonicalJSON(target.bao.kv["release/cosign-secret"]) != canonicalJSON(source.bao.kv["release/cosign-secret"]) {
 		t.Fatal("--only secrets did not restore the secrets")
@@ -129,27 +132,8 @@ func TestRestoreOnlySecrets(t *testing.T) {
 	if target.helmUpgrade != nil {
 		t.Fatalf("--only secrets ran a Helm upgrade: %v", target.helmUpgrade)
 	}
-	if !strings.Contains(out, "Unchanged  history (runs, issues, uplinks, step logs) and settings") {
+	if !strings.Contains(out, "Unchanged  history (runs, issues, uplinks)") {
 		t.Fatalf("plan does not say what stays:\n%s", out)
-	}
-}
-
-func TestRestoreOnlySettings(t *testing.T) {
-	t.Parallel()
-	archive, _, _, target := reinstallFixture(t)
-	out := runFixtureRestore(t, archive, target, RestoreConfig{Only: []string{RestorePartSettings}})
-	if target.swapArgs != nil || len(target.bao.writes) != 0 {
-		t.Fatalf("--only settings touched the database (%v) or OpenBao (%v)", target.swapArgs, target.bao.writes)
-	}
-	cm, err := target.client.CoreV1().ConfigMaps(DefaultNamespace).Get(context.Background(), secretAccessConfigMapName, metav1GetOptions())
-	if err != nil || cm.Data[secretAccessConfigMapKey] != testGrants {
-		t.Fatalf("grants not restored: %v %v", cm, err)
-	}
-	if target.helmValues["tls"] == nil || target.helmValues["argo"] == nil || target.helmValues["compatibility"] != nil {
-		t.Fatalf("settings overlay = %v", target.helmValues)
-	}
-	if target.helmValues["watchTunnel"] != nil || !strings.Contains(out, "which a restore does not apply") {
-		t.Fatalf("a deployment-specific value was applied, or not named: %v\n%s", target.helmValues, out)
 	}
 }
 
@@ -158,7 +142,7 @@ func TestRestorePartsValidation(t *testing.T) {
 	if _, err := resolveRestoreParts([]string{"secrets"}, BackupScopeHistory); err == nil || !strings.Contains(err.Error(), "history only") {
 		t.Fatalf("secrets from a history archive: %v", err)
 	}
-	if _, err := resolveRestoreParts([]string{"history", "logs"}, BackupScopeFull); err == nil || !strings.Contains(err.Error(), `"logs"`) {
+	if _, err := resolveRestoreParts([]string{"history", "settings"}, BackupScopeFull); err == nil || !strings.Contains(err.Error(), `"settings"`) {
 		t.Fatalf("unknown part: %v", err)
 	}
 	parts, err := resolveRestoreParts(nil, BackupScopeHistory)
@@ -166,7 +150,7 @@ func TestRestorePartsValidation(t *testing.T) {
 		t.Fatalf("default parts of a history archive = %+v, %v", parts, err)
 	}
 	parts, err = resolveRestoreParts(nil, "")
-	if err != nil || parts != (restoreParts{History: true, Secrets: true, Settings: true}) {
+	if err != nil || parts != (restoreParts{History: true, Secrets: true}) {
 		t.Fatalf("default parts of a v1 archive = %+v, %v", parts, err)
 	}
 }
@@ -188,7 +172,13 @@ func TestExportSecretsIsUniversalJSON(t *testing.T) {
 	if err := json.Unmarshal(out.Bytes(), &doc); err != nil {
 		t.Fatal(err)
 	}
-	if doc.Format != secretsExportFormat || doc.KVVersion != 2 || doc.Mount != "oberth" || len(doc.Secrets) != len(source.bao.kv) {
+	operator := 0
+	for path := range source.bao.kv {
+		if !strings.HasPrefix(path, installIdentityPrefix) {
+			operator++
+		}
+	}
+	if doc.Format != secretsExportFormat || doc.KVVersion != 2 || doc.Mount != "oberth" || len(doc.Secrets) != operator {
 		t.Fatalf("export header %+v with %d secrets", doc, len(doc.Secrets))
 	}
 	for _, secret := range doc.Secrets {
@@ -216,10 +206,11 @@ func TestInspectShowsContentsWithoutValues(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := out.String()
-	assertSubstringsInOrder(t, text, []string{"holds history, secrets and settings", "History    1 run,", "step logs: 2 files",
-		"Secrets    5 KV secrets", "identities/oberth/oberth-upstream-key", "Settings   compatibility",
-		"certificate names tuxbox, localhost, 192.168.86.193, 127.0.0.1",
-		"your other Helm values (not restored; oberth backup export-values): watchTunnel.enabled", "Nothing was changed (--inspect)"})
+	assertSubstringsInOrder(t, text, []string{"holds history and secrets", "History    1 run,", "opened under acme-oberth-schema-v1",
+		"Secrets    2 KV secrets, 2 policies, 1 roles, 1 grants", "release/cosign-secret", "Nothing was changed (--inspect)"})
+	if strings.Contains(text, "identities/") {
+		t.Fatalf("inspect lists install identities:\n%s", text)
+	}
 	for _, value := range []string{"forge-private-canary", testSecretValue, "cosign-canary"} {
 		if strings.Contains(text, value) {
 			t.Fatalf("inspect printed a secret value %q", value)
@@ -232,7 +223,7 @@ func TestHistoryChangesNameUplinksAndTokens(t *testing.T) {
 	var out bytes.Buffer
 	archive := restoreArchive{Contents: store.ContentSummary{Runs: 2347, Issues: 905, OpenIssues: 6, Uplinks: []string{"admin@tuxbox (admin)", "yellowmegaman@tuxbox"}}}
 	target := restoreTarget{Contents: &store.ContentSummary{Runs: 3, Issues: 1, Uplinks: []string{"yellowmegaman@lab-4a05"}}}
-	printHistoryChanges(&out, RestoreConfig{}, archive, target)
+	printHistoryChanges(&out, archive, target)
 	assertSubstringsInOrder(t, out.String(), []string{"runs 3 -> 2347, issues 1 -> 905 (6 open)",
 		"uplinks removed: yellowmegaman@lab-4a05 — their tokens, including the one this install printed, stop working",
 		"uplinks restored: admin@tuxbox (admin), yellowmegaman@tuxbox — their previous tokens work again"})
@@ -261,21 +252,3 @@ func TestStoreSummaryCountsHistory(t *testing.T) {
 func metav1GetOptions() metav1.GetOptions { return metav1.GetOptions{} }
 
 func writeFileForTest(path string, body []byte) error { return os.WriteFile(path, body, 0o600) }
-
-func TestExportValuesWritesTheRecordedValues(t *testing.T) {
-	t.Parallel()
-	archivePath, _, _, _ := reinstallFixture(t)
-	deps := backupDeps{Deps: Deps{Output: &bytes.Buffer{}}, cipher: fakeEnvelopeCipher{}, now: time.Now}
-	archive, err := loadRestoreArchive(context.Background(), RestoreConfig{Input: archivePath}, deps, t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	var out bytes.Buffer
-	if err := writeValuesExport(&out, archive); err != nil {
-		t.Fatal(err)
-	}
-	body := out.String()
-	if !strings.Contains(body, "watchTunnel:") || !strings.Contains(body, "extraDNSNames:") || !strings.HasPrefix(body, "# Helm values of release oberth") {
-		t.Fatalf("export-values =\n%s", body)
-	}
-}

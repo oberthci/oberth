@@ -16,9 +16,9 @@ import (
 // validation as the TUI, asked as sequential prompts — no color, no cursor
 // addressing (#047, #011). It is reached only through --plain/--accessible
 // or a non-interactive terminal, never by a key press inside the TUI.
-func runPlain(ctx context.Context, opts Options, st *WizardState, resumed bool, loadErr error, input io.Reader, output io.Writer) error {
+func runPlain(ctx context.Context, opts Options, st *WizardState, resumed bool, loadErr error, vanished string, input io.Reader, output io.Writer) error {
 	p := &plainRun{ctx: ctx, opts: opts, st: st, reader: bufio.NewReader(input), out: output, questions: buildQuestions()}
-	return p.run(resumed, loadErr, input)
+	return p.run(resumed, loadErr, vanished, input)
 }
 
 type plainRun struct {
@@ -69,7 +69,7 @@ func (p *plainRun) ask(label, def string) (string, error) {
 	return answer, nil
 }
 
-func (p *plainRun) run(resumed bool, loadErr error, input io.Reader) error {
+func (p *plainRun) run(resumed bool, loadErr error, vanished string, input io.Reader) error {
 	statePath, _ := setupStatePath()
 	p.say("\n  OBERTH SETUP\n\n")
 	p.say("  Steps: ")
@@ -83,6 +83,8 @@ func (p *plainRun) run(resumed bool, loadErr error, input io.Reader) error {
 	switch {
 	case loadErr != nil:
 		p.say("  Previous answers were not loaded: %v\n", loadErr)
+	case vanished != "":
+		p.say("  %s\n", vanished)
 	case resumed:
 		p.say("  Resuming the answers saved in %s.\n", displayHome(statePath))
 	}
