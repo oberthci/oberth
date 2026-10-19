@@ -384,7 +384,7 @@ func TestAdminMutationGateUsesLiveDaemonSocket(t *testing.T) {
 	server := newAdminGateServer(func(context.Context) error {
 		called <- struct{}{}
 		return nil
-	}, "/data/oberth.sqlite")
+	}, "/data/oberth.sqlite", nil)
 	listener, err := listenAdminSocket(context.Background(), socket)
 	if err != nil {
 		t.Fatal(err)

@@ -534,7 +534,7 @@ func TestRunAccessHelpPaths(t *testing.T) {
 func TestAdminGateServerRejectsNilGate(t *testing.T) {
 	t.Parallel()
 	socket := filepath.Join("/tmp", "oberth-nilgate-"+filepath.Base(t.TempDir())+".sock")
-	server := newAdminGateServer(nil, "/data/oberth.sqlite")
+	server := newAdminGateServer(nil, "/data/oberth.sqlite", nil)
 	listener, err := listenAdminSocket(context.Background(), socket)
 	if err != nil {
 		t.Fatal(err)
@@ -556,7 +556,7 @@ func TestAdminGateServerRejectsGateError(t *testing.T) {
 	socket := filepath.Join("/tmp", "oberth-gatefail-"+filepath.Base(t.TempDir())+".sock")
 	server := newAdminGateServer(func(context.Context) error {
 		return errors.New("audit integrity not verified")
-	}, "/data/oberth.sqlite")
+	}, "/data/oberth.sqlite", nil)
 	listener, err := listenAdminSocket(context.Background(), socket)
 	if err != nil {
 		t.Fatal(err)

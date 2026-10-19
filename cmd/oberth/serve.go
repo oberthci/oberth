@@ -995,7 +995,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 	if err != nil {
 		return err
 	}
-	return runComponents(ctx, options, scheduler, anchors, git, sshService, httpsServer, goProxyServer, newAdminGateServer(anchors.AllowMutation, options.database), activateScheduler, accessReconciler, schedules, ciIssues, logger)
+	return runComponents(ctx, options, scheduler, anchors, git, sshService, httpsServer, goProxyServer, newAdminGateServer(anchors.AllowMutation, options.database, scheduler.NotifyQueue), activateScheduler, accessReconciler, schedules, ciIssues, logger)
 }
 
 type startupContinuity interface {

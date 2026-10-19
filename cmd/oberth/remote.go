@@ -35,6 +35,7 @@ type remoteRun struct {
 	// thing the reader already knows.
 	Phase      string
 	Error      string
+	Reason     string
 	FailedBurn string
 	FailedStep string
 	QueuedAt   time.Time
@@ -153,6 +154,9 @@ func emitJSON(ctx context.Context, api *client.Client, path string, query map[st
 }
 
 func runRuns(ctx context.Context, arguments []string, output io.Writer) error {
+	if len(arguments) > 0 && arguments[0] == "cancel" {
+		return runRunsCancel(ctx, arguments[1:], output)
+	}
 	flags := flag.NewFlagSet("runs", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	repo := flags.String("repo", "", "only this repository")
@@ -242,7 +246,7 @@ func runRuns(ctx context.Context, arguments []string, output io.Writer) error {
 	}
 	for _, run := range runs {
 		if _, err := fmt.Fprintf(output, "%-34s %-9s %-9s %-8s %s\n",
-			run.ID, run.Status, run.Trigger, shortSHA(run.SHA), run.Ref); err != nil {
+			run.ID, displayRunStatus(run), run.Trigger, shortSHA(run.SHA), run.Ref); err != nil {
 			return err
 		}
 	}
@@ -296,6 +300,15 @@ func renderActiveRuns(output io.Writer, runs []remoteActiveRun, now time.Time) e
 		}
 	}
 	return nil
+}
+
+// displayRunStatus shows an explicitly cancelled run as cancelled. The wire
+// status stays interrupted; phase cancelled marks the cancel.
+func displayRunStatus(run remoteRun) string {
+	if run.Status == string(model.RunInterrupted) && run.Phase == model.PhaseCancelled {
+		return model.PhaseCancelled
+	}
+	return run.Status
 }
 
 // runCursor is the before value for the page after run: its sequence, or its
@@ -362,6 +375,9 @@ func runRunDetail(ctx context.Context, arguments []string, output io.Writer) err
 	if len(arguments) > 0 && arguments[0] == "retry" {
 		return runRunRetry(ctx, arguments[1:], output)
 	}
+	if len(arguments) > 0 && arguments[0] == "cancel" {
+		return runRunCancel(ctx, arguments[1:], output)
+	}
 	flags, asJSON, err := remoteFlags("run", arguments, output)
 	if err != nil || flags == nil {
 		return err
@@ -387,7 +403,7 @@ func runRunDetail(ctx context.Context, arguments []string, output io.Writer) err
 		return err
 	}
 	if _, err := fmt.Fprintf(output, "%s  %s  %s  %s\n",
-		detail.Run.ID, detail.Run.Status, shortSHA(detail.Run.SHA), detail.Run.Ref); err != nil {
+		detail.Run.ID, displayRunStatus(detail.Run), shortSHA(detail.Run.SHA), detail.Run.Ref); err != nil {
 		return err
 	}
 	if detail.Repository.Name != "" {
@@ -409,7 +425,11 @@ func runRunDetail(ctx context.Context, arguments []string, output io.Writer) err
 	// The reason first, before the step list: a failed run is read to find out
 	// what went wrong, and burying it under timings makes the reader scroll
 	// past the answer.
-	if reason := strings.TrimSpace(detail.Run.Error); reason != "" {
+	if detail.Run.Status == string(model.RunInterrupted) && detail.Run.Phase == model.PhaseCancelled {
+		if _, err := fmt.Fprintln(output, detail.Run.Reason); err != nil {
+			return err
+		}
+	} else if reason := strings.TrimSpace(detail.Run.Error); reason != "" {
 		phase := detail.Run.Phase
 		if phase == "" {
 			phase = "unknown"

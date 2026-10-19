@@ -16,8 +16,30 @@ import (
 const defaultAdminSocket = "/tmp/oberth-admin.sock"
 const maximumAdminGateError = 4 << 10
 
-func newAdminGateServer(gate func(context.Context) error, databasePath string) *http.Server {
+// newAdminGateServer serves the live daemon's private admin socket. Besides
+// the audit mutation gate, it accepts one body-less wake: an in-pod run
+// cancel committed its obligation directly to the database and asks the
+// scheduler to run its cancellation pass now (withdraw the run's admission
+// reservation, delete its Workflow) instead of on the next queue event. The
+// wake carries no input and performs no mutation of its own.
+func newAdminGateServer(gate func(context.Context) error, databasePath string, wake func()) *http.Server {
 	mux := http.NewServeMux()
+	mux.HandleFunc("POST /v1/cancellation-pass", func(output http.ResponseWriter, request *http.Request) {
+		if wake == nil {
+			http.Error(output, "scheduler wake is unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		if request.ContentLength > 0 {
+			http.Error(output, "request body is not accepted", http.StatusBadRequest)
+			return
+		}
+		if request.Header.Get("X-Oberth-Admin-Database") != databasePath {
+			http.Error(output, "requested database is not the live daemon database", http.StatusConflict)
+			return
+		}
+		wake()
+		output.WriteHeader(http.StatusNoContent)
+	})
 	mux.HandleFunc("POST /v1/mutation-gate", func(output http.ResponseWriter, request *http.Request) {
 		if gate == nil {
 			http.Error(output, "audit mutation gate is unavailable", http.StatusServiceUnavailable)
@@ -85,6 +107,41 @@ func requestAdminMutationGate(ctx context.Context, socket, operation, databasePa
 		reason = response.Status
 	}
 	return fmt.Errorf("daemon audit mutation gate rejected %s: %s", operation, reason)
+}
+
+// requestAdminSchedulerWake asks the live daemon to run its cancellation pass.
+func requestAdminSchedulerWake(ctx context.Context, socket, databasePath string) error {
+	if err := validateAdminSocket(socket); err != nil {
+		return err
+	}
+	dialer := net.Dialer{Timeout: 5 * time.Second}
+	transport := &http.Transport{
+		DisableKeepAlives: true,
+		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+			return dialer.DialContext(ctx, "unix", socket)
+		},
+	}
+	defer transport.CloseIdleConnections()
+	client := &http.Client{Transport: transport, Timeout: 10 * time.Second}
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://oberth.local/v1/cancellation-pass", nil)
+	if err != nil {
+		return fmt.Errorf("build scheduler wake request: %w", err)
+	}
+	request.Header.Set("X-Oberth-Admin-Database", databasePath)
+	response, err := client.Do(request)
+	if err != nil {
+		return fmt.Errorf("wake daemon scheduler: %w", err)
+	}
+	defer func() { _ = response.Body.Close() }()
+	if response.StatusCode == http.StatusNoContent {
+		return nil
+	}
+	body, _ := io.ReadAll(io.LimitReader(response.Body, maximumAdminGateError))
+	reason := strings.TrimSpace(string(body))
+	if reason == "" {
+		reason = response.Status
+	}
+	return fmt.Errorf("daemon refused the scheduler wake: %s", reason)
 }
 
 func requestLiveAdminMutationGate(ctx context.Context, operation, databasePath string) error {

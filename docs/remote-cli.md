@@ -47,6 +47,8 @@ to exactly that file (mode 0600; a different token already there is kept as
 oberth runs [--repo NAME] [--ref REF] [--limit N]
 oberth run <run-id>
 oberth run retry <run-id> [--json]
+oberth run cancel <run-id> [--reason TEXT] [--force] [--json]
+oberth runs cancel --repo NAME --ref BRANCH [--reason TEXT] [--force] [--json]
 oberth log <run-id> --burn B --step S [--pattern P] [--context N] [--offset N] [--limit N] [--tail]
 oberth artifacts <run-id> [name]
 oberth repos
@@ -60,7 +62,24 @@ for an interrupted or infrastructure-failed branch run and records the caller
 as actor. Workflow-level failures without a failed step are eligible. The
 source must still be the newest run for its branch; test failures, older runs,
 and release runs cannot be retried this way.
-Publishing and cancelling stay in the dashboard and MCP.
+
+`oberth run cancel` calls the `run_cancel` MCP tool with the same uplink
+token. It cancels one queued, waiting or running run: the run becomes
+`interrupted` with phase `cancelled` (shown as `cancelled` by `oberth runs`
+and `oberth run`) and a reason naming the caller; a claimed run's Workflow is
+deleted and its admission capacity released immediately; it is never re-fired
+and opens no CI issue. A non-admin uplink may cancel only branch-push runs
+outside a concurrency group in repositories it can see. An admin may cancel
+any run, but a tag/release or apply run needs `--force`, because anything its
+Workflow already published stays published. Cancelling promotion CI fails the
+promotion without merging. A terminal run is refused. `oberth runs cancel`
+cancels every active run of one ref the same way, reporting each refusal.
+
+Inside the server pod, pass `--database /data/oberth.sqlite` instead of the
+MCP flags: the command then passes the live daemon's audit mutation gate,
+records the same audited cancel as the administrative actor, and wakes the
+daemon's cancellation pass over its private admin socket.
+Publishing stays in the dashboard and MCP.
 
 `--json` on any of them emits the server's own payload unchanged, so a script
 never parses a rendered table.

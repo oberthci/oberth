@@ -70,8 +70,8 @@ Commands:
   schedules     List and manage scheduled runs
   fragments     Manage pipeline fragments
   artifacts     List and download build artifacts
-  runs          List recent CI/CD runs
-  run           Show a run or retry an interrupted/infrastructure-failed run
+  runs          List recent CI/CD runs, or cancel a ref's active runs
+  run           Show a run, retry an interrupted/infrastructure-failed run, or cancel one
   log           Show step logs for a run
   repos         List registered repositories
   issues        List and manage issues
