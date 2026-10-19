@@ -53,6 +53,7 @@ type APIConfig struct {
 	Admission                 AdmissionObserver
 	Runs                      RunResolver
 	History                   RunHistory
+	RunRetries                RunRetryStore
 	Repositories              RepositoryReader
 	Issues                    IssueRepository
 	Promotions                PromotionRepository
@@ -84,6 +85,7 @@ type API struct {
 	admission                 AdmissionObserver
 	runs                      RunResolver
 	history                   RunHistory
+	runRetries                RunRetryStore
 	repositories              RepositoryReader
 	issues                    IssueRepository
 	promotions                PromotionRepository
@@ -151,7 +153,7 @@ func NewAPI(config APIConfig) (*API, error) {
 	return &API{
 		kvmPreflights:      config.KVMPreflights,
 		schedulingObserver: config.SchedulingObserver, admission: config.Admission,
-		runs: config.Runs, history: config.History, repositories: config.Repositories,
+		runs: config.Runs, history: config.History, runRetries: config.RunRetries, repositories: config.Repositories,
 		issues: config.Issues, promotions: config.Promotions, promotionRuns: config.PromotionRuns,
 		enqueues: config.Enqueues, git: config.Git, refs: config.Refs, logs: config.Logs, artifacts: config.Artifacts, auditor: config.Auditor,
 		health: config.Health, signals: signals, maximumWait: maximumWait, mutationGate: mutationGate,
@@ -247,6 +249,14 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 			return nil, fmt.Errorf("%w: run ID is required", ErrInvalidInput)
 		}
 		return service.Run(ctx, actor, arguments.ID)
+	case "run_retry":
+		var arguments struct {
+			ID string `json:"id"`
+		}
+		if err := decodeTool(raw, &arguments); err != nil {
+			return nil, err
+		}
+		return service.retryRun(ctx, actor, arguments.ID)
 	case "run_logs":
 		var arguments struct {
 			ID      string `json:"id"`
@@ -1919,7 +1929,7 @@ func wireIssueLock(lock model.IssueLock) api.IssueLockResponse {
 
 func mutatingTool(name string) bool {
 	switch name {
-	case "sync", "promote", "publish_retry", "issue_create", "issue_update", "issue_append", "issue_close", "issue_reopen", "issue_delete", "issue_lock",
+	case "sync", "promote", "publish_retry", "run_retry", "issue_create", "issue_update", "issue_append", "issue_close", "issue_reopen", "issue_delete", "issue_lock",
 		"access_allow", "access_revoke",
 		"repo_remove",
 		"secretstore_sync_receipt",

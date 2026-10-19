@@ -76,6 +76,10 @@ type RunHistory interface {
 	StepResults(context.Context, string) ([]model.StepResult, error)
 }
 
+type RunRetryStore interface {
+	RetryRun(context.Context, string, string) (model.EnqueueRunResult, error)
+}
+
 type RunQueueStore interface {
 	EnqueueReceiveEvent(context.Context, model.ReceiveEventSpec, model.RunSpec) (model.EnqueueRunResult, error)
 	ClaimNextRun(context.Context) (model.Run, error)

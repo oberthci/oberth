@@ -583,7 +583,7 @@ var toolScopeBehaviour = map[string]string{
 	"run_list": "filtered", "promotion_list": "filtered", "issue_list": "filtered",
 	"access_list": "filtered", "repo_list": "filtered", "promote_grant_list": "filtered",
 	"system_status": "filtered",
-	"sync":          "mutation", "promote": "mutation", "publish_retry": "mutation",
+	"sync":          "mutation", "promote": "mutation", "publish_retry": "mutation", "run_retry": "mutation",
 	"issue_create": "mutation", "issue_update": "mutation", "issue_append": "mutation",
 	"issue_close": "mutation", "issue_reopen": "mutation", "issue_delete": "mutation",
 	"issue_lock": "mutation", "access_allow": "mutation", "access_revoke": "mutation",

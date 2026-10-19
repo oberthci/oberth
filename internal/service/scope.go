@@ -112,6 +112,9 @@ func (service *API) forActor(ctx context.Context, actor api.Actor) (*API, error)
 	if service.history != nil {
 		scoped.history = scopedHistory{inner: service.history, scope: scope}
 	}
+	if service.runRetries != nil {
+		scoped.runRetries = scopedRunRetries{inner: service.runRetries, history: scoped.history}
+	}
 	if service.repositories != nil {
 		scoped.repositories = scopedRepositories{inner: service.repositories, scope: scope}
 	}
@@ -134,6 +137,21 @@ func (service *API) forActor(ctx context.Context, actor api.Actor) (*API, error)
 	// them to a scoped actor, and this copy could not reach them anyway.
 	scoped.secretStoreVerifier = nil
 	return &scoped, nil
+}
+
+type scopedRunRetries struct {
+	inner   RunRetryStore
+	history RunHistory
+}
+
+func (retry scopedRunRetries) RetryRun(ctx context.Context, id, actor string) (model.EnqueueRunResult, error) {
+	if retry.history == nil {
+		return model.EnqueueRunResult{}, fmt.Errorf("%w: run retry history", ErrUnavailable)
+	}
+	if _, err := retry.history.ResolveRunID(ctx, id); err != nil {
+		return model.EnqueueRunResult{}, err
+	}
+	return retry.inner.RetryRun(ctx, id, actor)
 }
 
 // requireUnscoped refuses installation-wide operations to a scoped actor.

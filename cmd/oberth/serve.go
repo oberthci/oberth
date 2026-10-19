@@ -856,7 +856,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 	controlAPI, err := service.NewAPI(service.APIConfig{
 		KVMPreflights:      database,
 		SchedulingObserver: argoJobs, Admission: scheduler,
-		Runs: database, History: database, Repositories: database, Issues: database,
+		Runs: database, History: database, RunRetries: database, Repositories: database, Issues: database,
 		Promotions: database, PromotionRuns: database, Enqueues: scheduler, Git: git,
 		Refs: git, Logs: logs, Artifacts: artifactStore, Auditor: database, Health: health, Signals: signals,
 		MutationGate:              anchors.AllowMutation,

@@ -71,7 +71,7 @@ Commands:
   fragments     Manage pipeline fragments
   artifacts     List and download build artifacts
   runs          List recent CI/CD runs
-  run           Show details for a single run
+  run           Show a run or retry an interrupted/infrastructure-failed run
   log           Show step logs for a run
   repos         List registered repositories
   issues        List and manage issues

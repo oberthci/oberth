@@ -196,6 +196,7 @@ call the proxy hostname directly.
 | `logs` | One named step's log output for a SHA, optionally filtered |
 | `run_kvm_preflight` | Bounded historical KVM intent, receipt/refusal and cleanup by exact run ID or unique 12+ character prefix |
 | `run_get` | One durable run and its steps by full run ID or unique 12+ character prefix |
+| `run_retry` | Requeue the newest interrupted or infrastructure-failed branch run using its same repo/ref/SHA; workflow-level failures without a failed step qualify, while test failures and older runs are refused |
 | `run_logs` | One exact burn/step log by full run ID or unique 12+ character prefix, optionally filtered |
 | `artifacts` | The files a run kept, with size and modification time |
 | `artifact_get` | One artifact's contents by run ID and name, optionally filtered |
