@@ -46,6 +46,12 @@ type Policy struct {
 	// applies to a declared RunnerImage. Empty selects the built-in
 	// periapsis.DefaultRunnerImagePrefixes.
 	RunnerImagePrefixes []string
+	// KubeVirt permits the narrowly validated VMI resource template shape.
+	// The server sets this only after checking the repository's VM grant.
+	KubeVirt bool
+	// ContainerDiskPrefixes is the administrator's registry allowlist for VMI
+	// containerDisks. An empty list never admits a containerDisk image.
+	ContainerDiskPrefixes []string
 }
 
 // Admit refuses every construct through which a repository-authored document
@@ -67,6 +73,11 @@ func Admit(workflow *wfv1.Workflow, policy Policy) error {
 	var problems []error
 	problems = append(problems, admitMetadata(workflow)...)
 	problems = append(problems, admitSpec(&workflow.Spec)...)
+	if policy.KubeVirt && len(policy.ContainerDiskPrefixes) != 0 {
+		if err := validateContainerDiskPrefixes(policy.ContainerDiskPrefixes); err != nil {
+			problems = append(problems, fmt.Errorf("argoworkflow: %w", err))
+		}
+	}
 	problems = append(problems, admitTemplates(workflow, policy)...)
 	if _, err := DeclaredNonrootTemplates(workflow); err != nil {
 		problems = append(problems, err)
@@ -215,6 +226,8 @@ func admitSpec(spec *wfv1.WorkflowSpec) []error {
 
 func admitTemplates(workflow *wfv1.Workflow, policy Policy) []error {
 	var problems []error
+	vmiTemplates, vmiCreates, vmiCores := 0, 0, 0
+	vmiMemory := resource.MustParse("0")
 	if len(workflow.Spec.Templates) == 0 {
 		problems = append(problems, errors.New("argoworkflow: spec.templates is required"))
 	}
@@ -244,6 +257,25 @@ func admitTemplates(workflow *wfv1.Workflow, policy Policy) []error {
 			entrypointFound = true
 		}
 		problems = append(problems, admitTemplate(location, template, policy, 0)...)
+		if policy.KubeVirt && template.Resource != nil && !strings.HasPrefix(template.Name, "frag-") {
+			vmiTemplates++
+			if template.Resource.Action == "create" {
+				// The individual manifest is validated above. A malformed one
+				// already fails admission and contributes no trusted budget data.
+				if usage, err := vmiCreateUsage(template.Resource.Manifest); err == nil {
+					vmiCreates++
+					vmiCores += usage.cores
+					vmiMemory.Add(usage.memory)
+				}
+			}
+		}
+	}
+	if vmiTemplates > maxVMITemplates {
+		problems = append(problems, fmt.Errorf("argoworkflow: spec.templates declares %d VMI resource templates, maximum is %d", vmiTemplates, maxVMITemplates))
+	}
+	if vmiCreates > maxVMICreateTemplates || vmiCores > maxVMIRunCores || vmiMemory.Cmp(resource.MustParse(maxVMIRunMemory)) > 0 {
+		problems = append(problems, fmt.Errorf("argoworkflow: VMI run budget exceeded: %d create templates (maximum %d), %d cores (maximum %d), %s memory (maximum %s)",
+			vmiCreates, maxVMICreateTemplates, vmiCores, maxVMIRunCores, vmiMemory.String(), maxVMIRunMemory))
 	}
 	if workflow.Spec.Entrypoint != "" && !entrypointFound {
 		problems = append(problems, fmt.Errorf("argoworkflow: spec.entrypoint %q names no template", workflow.Spec.Entrypoint))
@@ -332,7 +364,13 @@ func admitTemplate(location string, template wfv1.Template, policy Policy, depth
 	// workflow's own ServiceAccount. On the release tier that is a direct
 	// privilege escalation out of the pipeline.
 	if template.Resource != nil {
-		problems = append(problems, fmt.Errorf("argoworkflow: %s.resource creates arbitrary Kubernetes objects and is not admitted", location))
+		if !policy.KubeVirt {
+			problems = append(problems, fmt.Errorf("argoworkflow: %s.resource creates arbitrary Kubernetes objects and is not admitted", location))
+		} else if strings.HasPrefix(template.Name, "frag-") || strings.Contains(location, ".inline") || location == "spec.templateDefaults" {
+			problems = append(problems, fmt.Errorf("argoworkflow: %s.resource must be a named template in the consuming repository", location))
+		} else if err := admitVMIResource(location+".resource", template.Resource, policy.ContainerDiskPrefixes); err != nil {
+			problems = append(problems, err)
+		}
 	}
 	// Plugin and HTTP templates execute in the Argo agent pod, which runs
 	// under an identity Oberth does not assign here.
