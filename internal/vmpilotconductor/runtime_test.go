@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	batchv1 "k8s.io/api/batch/v1"
@@ -38,6 +39,16 @@ func must(t *testing.T, err error) {
 	if err != nil {
 		t.Fatal(err)
 	}
+}
+
+// runCleanupInFakeTime keeps a real cleanup deadline in the reconciler while
+// preventing a busy CI host from spending that budget between fake API and
+// journal calls. The timer advances only when the bubble is durably blocked.
+func runCleanupInFakeTime(t *testing.T, reconciler *vmrunner.PilotReconciler, ctx context.Context, runID string) error {
+	t.Helper()
+	var err error
+	synctest.Test(t, func(*testing.T) { err = reconciler.Cleanup(ctx, runID) })
+	return err
 }
 
 func newFixture(t *testing.T) *fixture {
@@ -486,7 +497,7 @@ func TestCleanupDeadlineRetainsOwnedResources(t *testing.T) {
 	pod := f.pod(t, "survivor")
 	journal := &deadlinePilotJournal{PilotJournal: f.s}
 	beforeDeletes := countActions(f.client, "delete")
-	err := (&vmrunner.PilotReconciler{Journal: journal, Runtime: f.b, Timeout: time.Millisecond}).Cleanup(f.ctx, f.plan.Spec.RunID)
+	err := runCleanupInFakeTime(t, &vmrunner.PilotReconciler{Journal: journal, Runtime: f.b, Timeout: time.Millisecond}, f.ctx, f.plan.Spec.RunID)
 	if !journal.reached || !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("cleanup did not propagate its own expired budget: %v", err)
 	}
@@ -678,54 +689,56 @@ func TestCleanupDetachesCancellationAndPreservesReplacementPod(t *testing.T) {
 }
 
 func TestSerializedSameSecondAdmissionAndRecovery(t *testing.T) {
-	base := time.Now().UTC().Add(-time.Minute).Truncate(time.Second)
 	for _, mode := range []string{"lifecycle", "create-response-lost"} {
 		t.Run(mode, func(t *testing.T) {
-			f := newFixtureAt(t, base.Add(250*time.Millisecond))
-			f.now = base.Add(500 * time.Millisecond)
-			if mode == "create-response-lost" {
-				create := f.client.ReactionChain[0]
-				f.client.PrependReactor("create", "jobs", func(action ktesting.Action) (bool, runtime.Object, error) {
-					_, _, err := create.React(action)
-					if err != nil {
-						return true, nil, err
+			synctest.Test(t, func(t *testing.T) {
+				base := time.Now().UTC().Add(-time.Minute).Truncate(time.Second)
+				f := newFixtureAt(t, base.Add(250*time.Millisecond))
+				f.now = base.Add(500 * time.Millisecond)
+				if mode == "create-response-lost" {
+					create := f.client.ReactionChain[0]
+					f.client.PrependReactor("create", "jobs", func(action ktesting.Action) (bool, runtime.Object, error) {
+						_, _, err := create.React(action)
+						if err != nil {
+							return true, nil, err
+						}
+						return true, nil, apierrors.NewTimeoutError("response lost after create", 1)
+					})
+					if _, err := f.b.Create(f.ctx, f.plan); !errors.Is(err, vmrunner.ErrExecutionOutstanding) {
+						t.Fatalf("ambiguous response: %v", err)
 					}
-					return true, nil, apierrors.NewTimeoutError("response lost after create", 1)
-				})
-				if _, err := f.b.Create(f.ctx, f.plan); !errors.Is(err, vmrunner.ErrExecutionOutstanding) {
-					t.Fatalf("ambiguous response: %v", err)
+					must(t, (&vmrunner.PilotReconciler{Journal: f.s, Runtime: f.b, Timeout: time.Second}).Cleanup(f.ctx, f.plan.Spec.RunID))
+					owned := f.owned(t, vmrunner.ConductorResource)
+					if !owned.Cleaned || owned.Receipt.UID != "job-uid" || !owned.Receipt.CreatedAt.Equal(base) {
+						t.Fatal("recovery lost actual second-precision creation receipt")
+					}
+					return
+				}
+				job := f.create(t)
+				if !job.Receipt.CreatedAt.Equal(base) {
+					t.Fatal("fake API did not serialize Job timestamp at whole-second precision")
+				}
+				// pod() advances its supplied host clock by one second. Both actual Pod
+				// creation/start are .750s in the admission second, serialized to .000s.
+				f.now = base.Add(-250 * time.Millisecond)
+				pod := f.pod(t, "same-second")
+				attempt, err := f.b.BindAttempt(f.ctx, f.plan)
+				must(t, err)
+				if !attempt.StartedAt.Equal(base) || attempt.StartedAt.Nanosecond() != 0 {
+					t.Fatal("observed process timestamp was fabricated or rounded up")
+				}
+				f.terminated(t, pod, 0)
+				_, err = f.b.Termination(f.ctx, f.plan, attempt)
+				must(t, err)
+				// Same-name process replacement remains forbidden after the precision fix.
+				pod.Status.ContainerStatuses[0].ContainerID = "containerd://replacement"
+				pod.Status.ContainerStatuses[0].State.Terminated.ContainerID = "containerd://replacement"
+				f.savePod(t, pod)
+				if _, err := f.b.Termination(f.ctx, f.plan, attempt); err == nil {
+					t.Fatal("replacement accepted at same timestamp")
 				}
 				must(t, (&vmrunner.PilotReconciler{Journal: f.s, Runtime: f.b, Timeout: time.Second}).Cleanup(f.ctx, f.plan.Spec.RunID))
-				owned := f.owned(t, vmrunner.ConductorResource)
-				if !owned.Cleaned || owned.Receipt.UID != "job-uid" || !owned.Receipt.CreatedAt.Equal(base) {
-					t.Fatal("recovery lost actual second-precision creation receipt")
-				}
-				return
-			}
-			job := f.create(t)
-			if !job.Receipt.CreatedAt.Equal(base) {
-				t.Fatal("fake API did not serialize Job timestamp at whole-second precision")
-			}
-			// pod() advances its supplied host clock by one second. Both actual Pod
-			// creation/start are .750s in the admission second, serialized to .000s.
-			f.now = base.Add(-250 * time.Millisecond)
-			pod := f.pod(t, "same-second")
-			attempt, err := f.b.BindAttempt(f.ctx, f.plan)
-			must(t, err)
-			if !attempt.StartedAt.Equal(base) || attempt.StartedAt.Nanosecond() != 0 {
-				t.Fatal("observed process timestamp was fabricated or rounded up")
-			}
-			f.terminated(t, pod, 0)
-			_, err = f.b.Termination(f.ctx, f.plan, attempt)
-			must(t, err)
-			// Same-name process replacement remains forbidden after the precision fix.
-			pod.Status.ContainerStatuses[0].ContainerID = "containerd://replacement"
-			pod.Status.ContainerStatuses[0].State.Terminated.ContainerID = "containerd://replacement"
-			f.savePod(t, pod)
-			if _, err := f.b.Termination(f.ctx, f.plan, attempt); err == nil {
-				t.Fatal("replacement accepted at same timestamp")
-			}
-			must(t, (&vmrunner.PilotReconciler{Journal: f.s, Runtime: f.b, Timeout: time.Second}).Cleanup(f.ctx, f.plan.Spec.RunID))
+			})
 		})
 	}
 }
