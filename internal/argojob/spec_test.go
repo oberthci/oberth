@@ -1759,6 +1759,61 @@ func TestPerStepGrantNilStepGrantsBackwardCompatible(t *testing.T) {
 
 // --- Per-step identity admission tests (issue #623 vault identity) ---
 
+// A per-step Vault policy can contain both upstream and release grants for a
+// step. A branch run that declares only its upstream path must never select
+// that identity, because its token could then read the undeclared release path.
+func TestCINamedStepGrantKeepsCISecretsIdentity(t *testing.T) {
+	const upstreamPath = "oberth/upstream/skipops/oberth/test-secret"
+	const document = `
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  annotations:
+    oberth.ci/secret-paths: oberth/upstream/skipops/oberth/test-secret
+    oberth.ci/size: L
+spec:
+  entrypoint: publish
+  activeDeadlineSeconds: 600
+  templates:
+    - name: publish
+      container:
+        image: golang:1.26-alpine@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+        command: [/run/oberth/bin/oberth]
+        args:
+          - secretstore
+          - exec
+          - --dir=/run/oberth-secrets
+          - --path=oberth/upstream/skipops/oberth/test-secret
+          - --
+          - publish.sh
+`
+	config := testConfig()
+	config.PerStepIdentities = map[string]PerRepoIdentityConfig{
+		"oberth/publish": {ServiceAccountName: "oberth-step-release-publish"},
+	}
+	request := testRequest(periapsis.TriggerCI, document)
+	request.ApprovedSecrets = map[string]bool{upstreamPath: true}
+	request.StepGrants = map[string]map[string]bool{upstreamPath: {"publish": true}}
+
+	workflow, err := Build(config, request)
+	if err != nil {
+		t.Fatalf("build branch CI: %v", err)
+	}
+	for _, template := range workflow.Spec.Templates {
+		if template.Name != "publish" {
+			continue
+		}
+		if template.ServiceAccountName != testCISecretsAcct {
+			t.Fatalf("branch publish ServiceAccount = %q, want CI-secrets identity %q", template.ServiceAccountName, testCISecretsAcct)
+		}
+		if role := environmentOf(t, workflow, "publish")["OBERTH_VAULT_ROLE"]; role != testVaultCISecretsRole {
+			t.Fatalf("branch publish Vault role = %q, want %q", role, testVaultCISecretsRole)
+		}
+		return
+	}
+	t.Fatal("publish template missing")
+}
+
 // TestPerStepIdentityAssignedToTemplate proves that when a per-step identity
 // exists, Build assigns the per-step ServiceAccountName and OBERTH_VAULT_ROLE
 // to the template that consumes the named-step-granted path. Issue #623.

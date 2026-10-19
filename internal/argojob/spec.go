@@ -729,7 +729,7 @@ func Build(config Config, request Request) (*wfv1.Workflow, error) {
 	injectServerVolumes(workflow, config, request, credentialed)
 	injectWorkspaceEnvironment(workflow)
 	injectRunEnvironment(workflow, config, request, credentialed)
-	// Per-step identity override (issue #623): for templates consuming
+	// Per-step identity override (issue #623): for release templates consuming
 	// named-step-granted paths, override the ServiceAccountName and
 	// OBERTH_VAULT_ROLE with the per-step identity. This runs AFTER
 	// ForceIdentity (which set the per-repo SA on all templates) and AFTER
@@ -738,7 +738,10 @@ func Build(config Config, request Request) (*wfv1.Workflow, error) {
 	//
 	// Fail-closed (finding 2): if a template has named grants but its per-step
 	// identity is not materialized, admission is denied with a clear message.
-	if credentialed {
+	// Until grants have ref scopes, the same per-step policy can include
+	// release paths and upstream paths. A branch run must keep its CI-secrets
+	// identity even when it uses a named-step upstream grant.
+	if credentialed && request.Trigger == periapsis.TriggerRelease {
 		if err := applyPerStepIdentities(workflow, config, request); err != nil {
 			return nil, err
 		}
