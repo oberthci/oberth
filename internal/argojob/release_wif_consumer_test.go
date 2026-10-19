@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -48,7 +49,33 @@ func TestReleaseWIFConsumerRoleAndCleanEnvironment(t *testing.T) {
 }
 
 func TestAcceptedReleaseWIFExchangeFixtures(t *testing.T) {
-	cmd := exec.Command("/usr/bin/python3", "-I", "-B", filepath.Join(repositoryRoot(t), "hack/test-release-wif.py"))
+	root := repositoryRoot(t)
+	toolsDir := os.Getenv("OBERTH_TOOLS_DIR")
+	if toolsDir == "" {
+		toolsDir = t.TempDir()
+		install := exec.Command("/bin/sh", filepath.Join(root, "hack/install-test-pyyaml.sh"))
+		install.Env = append(os.Environ(), "OBERTH_TOOLS_DIR="+toolsDir)
+		// Apple's system curl lacks the TLS 1.3 option required by the pinned
+		// installer. Prefer a Homebrew curl when one is installed.
+		if runtime.GOOS == "darwin" {
+			if prefix, err := exec.Command("brew", "--prefix", "curl").Output(); err == nil {
+				install.Env = append(install.Env, "PATH="+filepath.Join(strings.TrimSpace(string(prefix)), "bin")+":"+os.Getenv("PATH"))
+			}
+		}
+		if out, err := install.CombinedOutput(); err != nil {
+			t.Fatalf("install pinned PyYAML for WIF fixtures: %v\n%s", err, out)
+		}
+	}
+	python := "/usr/bin/python3"
+	if runtime.GOOS == "darwin" {
+		// Apple's Python links LibreSSL without TLS 1.3 support. The WIF
+		// transport fixture needs the same TLS floor as production.
+		if prefix, err := exec.Command("brew", "--prefix", "python").Output(); err == nil {
+			python = filepath.Join(strings.TrimSpace(string(prefix)), "bin", "python3")
+		}
+	}
+	cmd := exec.Command(python, "-I", "-B", filepath.Join(root, "hack/test-release-wif.py"))
+	cmd.Env = append(os.Environ(), "OBERTH_TOOLS_DIR="+toolsDir)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("accepted helper exchange fixtures: %v\n%s", err, out)
 	}
