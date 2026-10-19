@@ -78,6 +78,22 @@ func TestRunDetailMarksTheFailingStep(t *testing.T) {
 	}
 }
 
+func TestRunDetailShowsCapacityWait(t *testing.T) {
+	payload := `{"Run":{"ID":"run-abc","Status":"waiting","Ref":"main","SHA":"0123456789abcdef"},` +
+		`"Scheduling":{"state":"waiting","message":"Waiting in the weighted resource admission queue.",` +
+		`"admission":{"state":"waiting","weight":2,"used":5,"capacity":6,"position":1}}}`
+	configure(t, remoteServer(t, payload))
+	var out bytes.Buffer
+	if err := runRunDetail(context.Background(), []string{"run-abc"}, &out); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"waiting", "weighted resource admission queue", "need 2 weight", "5/6 used", "queue position 1"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("waiting detail missing %q: %s", want, out.String())
+		}
+	}
+}
+
 func TestReposLists(t *testing.T) {
 	configure(t, remoteServer(t, `[{"ID":1,"Name":"alpha","DefaultBranch":"main"}]`))
 	var out bytes.Buffer

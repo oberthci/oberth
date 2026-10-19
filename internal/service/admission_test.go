@@ -54,8 +54,9 @@ func TestWeightedAdmissionEnforcesCapacityForLargeRuns(t *testing.T) {
 // The regression this file exists for: a run-count ceiling passed straight
 // into a weight-denominated budget capped the whole server at one concurrent
 // run, because the default M size weighs 2 and the budget was 3. A run claimed
-// past that gate sits durably "running" with no Workflow object at all, since
-// the gate is acquired before the engine is asked to create one.
+// past that gate used to appear started with no Workflow object at all, since
+// the gate is acquired before the engine is asked to create one. It now reads
+// as waiting until submission.
 func TestWeightedAdmissionForJobsAdmitsConfiguredConcurrencyAtDefaultSize(t *testing.T) {
 	const maxConcurrentJobs = 3
 	gate := newWeightedAdmissionForJobs(maxConcurrentJobs)

@@ -66,12 +66,25 @@ func (service *API) scheduling(ctx context.Context, run model.Run, steps []model
 					// The group waits name runs of the same repository; any
 					// other wait says only that capacity is short.
 					result.Message = "Waiting for capacity."
+				} else if service.scope == nil && result.Admission.Weight > 0 {
+					result.Message += fmt.Sprintf(" Need %d weight; %d/%d used; queue position %d.",
+						result.Admission.Weight, result.Admission.Used, result.Admission.Capacity, result.Admission.Position)
 				}
 				return result
 			case "admitted":
+				if run.StartedAt == nil {
+					result.State = "waiting"
+					result.Message = "Resource admission granted; waiting for workflow submission."
+					return result
+				}
 				result.Message = "Resource admission granted; execution progress has not been recorded."
 			}
 		}
+	}
+	if run.StartedAt == nil {
+		result.State = "waiting"
+		result.Message = "Waiting for workflow submission."
+		return result
 	}
 	if service.schedulingObserver == nil {
 		return result

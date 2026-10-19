@@ -14,7 +14,10 @@ import (
 type RunStatus string
 
 const (
-	RunQueued      RunStatus = "queued"
+	RunQueued RunStatus = "queued"
+	// RunWaiting is a read-side projection for a claimed run whose Workflow
+	// has not been submitted. The durable store keeps its claimed state running.
+	RunWaiting     RunStatus = "waiting"
 	RunRunning     RunStatus = "running"
 	RunPassed      RunStatus = "passed"
 	RunFailed      RunStatus = "failed"
@@ -23,14 +26,14 @@ const (
 
 func (s RunStatus) Valid() bool {
 	switch s {
-	case RunQueued, RunRunning, RunPassed, RunFailed, RunInterrupted:
+	case RunQueued, RunWaiting, RunRunning, RunPassed, RunFailed, RunInterrupted:
 		return true
 	default:
 		return false
 	}
 }
 
-func (s RunStatus) Active() bool { return s == RunQueued || s == RunRunning }
+func (s RunStatus) Active() bool { return s == RunQueued || s == RunWaiting || s == RunRunning }
 
 func (s RunStatus) Terminal() bool { return s.Valid() && !s.Active() }
 

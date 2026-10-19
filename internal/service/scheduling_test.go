@@ -55,6 +55,39 @@ func TestSchedulingAdmissionSnapshotsFollowLifecycle(t *testing.T) {
 	}
 }
 
+func TestClaimedRunShowsCapacityWaitUntilSubmission(t *testing.T) {
+	gate := newWeightedAdmission(3)
+	scheduler := &Scheduler{admission: gate}
+	first := gate.reserve(1)
+	releaseFirst, err := first.acquire(t.Context(), periapsis.L)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer releaseFirst()
+	second := gate.reserve(2)
+	acquired := make(chan func(), 1)
+	go acquireForTest(second, periapsis.M, acquired)
+	assertNotAcquired(t, acquired)
+	service := &API{admission: scheduler, schedulingObserver: schedulingObserverFunc(func(context.Context, model.Run) (*model.ExecutionObservation, error) {
+		t.Fatal("unsubmitted run reached workflow observation")
+		return nil, nil
+	})}
+	run := model.Run{Status: model.RunRunning, QueueSequence: 2, JobName: "reserved-workflow"}
+	observation := service.scheduling(t.Context(), run, nil)
+	if observation.State != "waiting" || observation.Admission == nil || observation.Admission.Weight != 2 ||
+		observation.Admission.Used != 3 || observation.Admission.Capacity != 3 || observation.Admission.Position != 1 ||
+		!strings.Contains(observation.Message, "Need 2 weight; 3/3 used; queue position 1") {
+		t.Fatalf("capacity wait was not visible: %#v", observation)
+	}
+	releaseFirst()
+	releaseSecond := awaitAcquired(t, acquired)
+	defer releaseSecond()
+	observation = service.scheduling(t.Context(), run, nil)
+	if observation.State != "waiting" || !strings.Contains(observation.Message, "waiting for workflow submission") {
+		t.Fatalf("admission alone started run: %#v", observation)
+	}
+}
+
 func TestSchedulingProjectionSkipsTerminalAndProgressedRuns(t *testing.T) {
 	service := &API{schedulingObserver: schedulingObserverFunc(func(context.Context, model.Run) (*model.ExecutionObservation, error) {
 		t.Fatal("unexpected live observation")
@@ -74,7 +107,8 @@ func TestSchedulingProjectionSkipsTerminalAndProgressedRuns(t *testing.T) {
 
 func TestSchedulingProjectionStartupUnavailableAndContext(t *testing.T) {
 	service := &API{}
-	run := model.Run{Status: model.RunRunning}
+	started := time.Now().UTC()
+	run := model.Run{Status: model.RunRunning, StartedAt: &started}
 	if result := service.scheduling(t.Context(), run, nil); result.State != "unavailable" {
 		t.Fatalf("nil observer=%#v", result)
 	}
@@ -131,6 +165,25 @@ func TestSchedulingAvailableInMCPStatusRunGetAndAPIRun(t *testing.T) {
 	running, err = fixture.store.SetRunJobName(t.Context(), running.ID, "wf")
 	if err != nil {
 		t.Fatal(err)
+	}
+	if running.StartedAt != nil {
+		t.Fatal("claim and intent recording started an unsubmitted run")
+	}
+	waitingStatus, err := service.status(t.Context(), fixture.repo.Name, run.SHA, "")
+	if err != nil || waitingStatus.Status != "waiting" || waitingStatus.Run.Status != model.RunWaiting || waitingStatus.Scheduling.State != "waiting" {
+		t.Fatalf("unsubmitted run did not remain waiting: %#v, %v", waitingStatus, err)
+	}
+	listValue, err := service.Runs(t.Context(), api.Actor{Identity: "agent@host"}, api.RunFilter{Limit: 10})
+	if err != nil || listValue.([]model.Run)[0].Status != model.RunWaiting {
+		t.Fatalf("run list omitted waiting state: %#v, %v", listValue, err)
+	}
+	waitingDetail, err := service.Run(t.Context(), api.Actor{Identity: "agent@host"}, run.ID)
+	if err != nil || waitingDetail.(RunDetailResponse).Run.Status != model.RunWaiting || waitingDetail.(RunDetailResponse).Run.StartedAt != nil {
+		t.Fatalf("run detail started before submission: %#v, %v", waitingDetail, err)
+	}
+	running, err = fixture.store.MarkRunSubmitted(t.Context(), running.ID)
+	if err != nil || running.StartedAt == nil {
+		t.Fatalf("submitted run did not get a start time: %#v, %v", running, err)
 	}
 	service.schedulingObserver = schedulingObserverFunc(func(_ context.Context, got model.Run) (*model.ExecutionObservation, error) {
 		if got.ID != run.ID {

@@ -1001,17 +1001,17 @@ func (*createCancellationRaceJobs) TerminalResult(context.Context, string) (JobR
 	return JobResult{}, ErrJobNotTerminal
 }
 
-type runReadFailStore struct {
+type runSubmissionFailStore struct {
 	*store.Store
-	failNextRun bool
+	failNextSubmission bool
 }
 
-func (value *runReadFailStore) Run(ctx context.Context, id string) (model.Run, error) {
-	if value.failNextRun {
-		value.failNextRun = false
-		return model.Run{}, errors.New("injected post-create Run read failure")
+func (value *runSubmissionFailStore) MarkRunSubmitted(ctx context.Context, id string) (model.Run, error) {
+	if value.failNextSubmission {
+		value.failNextSubmission = false
+		return model.Run{}, errors.New("injected post-create submission recording failure")
 	}
-	return value.Store.Run(ctx, id)
+	return value.Store.MarkRunSubmitted(ctx, id)
 }
 
 type flakyDeleteJobs struct {
@@ -2129,7 +2129,7 @@ func TestSupersessionDeleteFailureRetainsCancellationUntilRetry(t *testing.T) {
 
 func TestPostCreateReadAndDeleteFailureRecoversExactJobOnRestart(t *testing.T) {
 	fixture := newControlFixture(t)
-	wrappedStore := &runReadFailStore{Store: fixture.store, failNextRun: true}
+	wrappedStore := &runSubmissionFailStore{Store: fixture.store, failNextSubmission: true}
 	jobs := &flakyDeleteJobs{fakeJobs: &fakeJobs{}, deleteFailures: 1}
 	scheduler, err := NewScheduler(SchedulerConfig{
 		Store: wrappedStore, Git: fixture.git, Logs: fixture.logs, Jobs: jobs, ReleaseJobs: jobs,

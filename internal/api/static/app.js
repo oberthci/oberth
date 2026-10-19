@@ -26,7 +26,7 @@ const state = {
   pendingController: null, // AbortController for in-flight API requests
   statusPending: null, statusFailedAt: 0, // the background /api/status fetch (ensureStatus)
 };
-const runFilters = ["all", "running", "queued", "passed", "failed", "interrupted", "release"];
+const runFilters = ["all", "running", "waiting", "queued", "passed", "failed", "interrupted", "release"];
 
 /* ---------- tiny utilities (unchanged from the old dashboard) ---------- */
 function esc(v) { return String(v ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
@@ -125,7 +125,7 @@ function statusKind(status) {
        is the pipeline declares this and execution has not reached it. Both
        read as not-yet-started to the eye, so they share a kind and a glyph —
        the label keeps them apart wherever the difference matters. */
-    case "queued": case "pending": return "pending";
+    case "queued": case "waiting": case "pending": return "pending";
     case "interrupted": case "skipped": return "cancel";
     default: return "unknown";
   }
@@ -169,6 +169,7 @@ function runMessage(run) {
   if (run.FailedStep) return `failed at ${run.FailedBurn ? run.FailedBurn + " / " : ""}${run.FailedStep}`;
   if (run.SupersededBy) return `superseded by ${run.SupersededBy}`;
   if (run.Reason) return run.Reason;
+  if (run.Status === "waiting") return "waiting for capacity or workflow submission";
   return "";
 }
 /* Repository names repeat across upstreams (a "terraform" under github,
@@ -436,6 +437,7 @@ async function renderRuns(seq) {
   state.runNext = source.length === runPageSize ? (named || source[source.length - 1].QueueSequence || 0) : 0;
   const page = state.runCursorHistory.length + 1;
   const running = runs.filter(run => run.Status === "running").length;
+  const waiting = runs.filter(run => run.Status === "waiting").length;
   const queued = runs.filter(run => run.Status === "queued").length;
   const failed = runs.filter(run => run.Status === "failed").length;
   const releases = runs.filter(run => run.Release).length;
@@ -443,7 +445,7 @@ async function renderRuns(seq) {
   <section class="screen">
     <div class="bar">
       <h1>Runs</h1>
-      <div class="stats"><span><b>${esc(counts.get("all") || 0)}</b> retained</span><span><b>${running}</b> running</span><span><b>${queued}</b> queued</span><span><b>${failed}</b> failed</span><span><b>${releases}</b> release</span></div>
+      <div class="stats"><span><b>${esc(counts.get("all") || 0)}</b> retained</span><span><b>${running}</b> running</span><span><b>${waiting}</b> waiting</span><span><b>${queued}</b> queued</span><span><b>${failed}</b> failed</span><span><b>${releases}</b> release</span></div>
     </div>
     <div class="runs-layout">
       <aside class="repo-side">
@@ -675,6 +677,11 @@ function summaryLines(detail) {
   if (kind === "pass") lines.push(`[pass] ${passed} step${passed === 1 ? "" : "s"} passed across ${burns} burn${burns === 1 ? "" : "s"}`);
   else if (kind === "fail") lines.push(`[fail] failed at ${run.FailedBurn ? run.FailedBurn + " / " : ""}${run.FailedStep || "unknown step"} — ${passed} step${passed === 1 ? "" : "s"} passed`);
   else if (kind === "run") lines.push(`[pending] running in phase ${run.Phase || "ci"} — ${reached} of ${steps.length} step${steps.length === 1 ? "" : "s"} started, ${passed} passed`);
+  else if (run.Status === "waiting") {
+    const scheduling = detail.Scheduling || {}, admission = scheduling.admission || {};
+    lines.push(`[waiting] ${scheduling.message || "Waiting for workflow submission."}`);
+    if (admission.weight) lines.push(`capacity: need ${admission.weight} weight · ${admission.used}/${admission.capacity} used${admission.position ? ` · queue position ${admission.position}` : ""}`);
+  }
   else if (kind === "cancel") lines.push(`[interrupted] ${run.Reason || "run was interrupted"}`);
   else lines.push(`[pending] queued behind earlier work for this repository`);
   if (unreached) lines.push(`${unreached} declared step${unreached === 1 ? "" : "s"} not reached`);
@@ -817,7 +824,7 @@ async function renderRunDetailView(detail, seq) {
   const stepList = document.getElementById("stepList");
   if (stepList) stepList.scrollTop = previousStepScroll;
   if (run.Status === "running") setAuto(livePollMs);
-  else if (run.Status === "queued") setAuto(listPollMs);
+  else if (run.Status === "queued" || run.Status === "waiting") setAuto(listPollMs);
   else clearInterval(state.timer);
 }
 

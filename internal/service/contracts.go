@@ -79,6 +79,7 @@ type RunHistory interface {
 type RunQueueStore interface {
 	EnqueueReceiveEvent(context.Context, model.ReceiveEventSpec, model.RunSpec) (model.EnqueueRunResult, error)
 	ClaimNextRun(context.Context) (model.Run, error)
+	MarkRunSubmitted(context.Context, string) (model.Run, error)
 	Run(context.Context, string) (model.Run, error)
 	SetRunJobName(context.Context, string, string) (model.Run, error)
 	SetRunCredentialed(context.Context, string) error

@@ -255,7 +255,7 @@ func (s *Store) ClaimNextRun(ctx context.Context) (model.Run, error) {
 	now := unixNano(s.now())
 	value, err := scanRun(s.db.QueryRowContext(ctx, `
 UPDATE runs
-SET status = 'running', phase = 'running', started_at = ?, updated_at = ?
+SET status = 'running', phase = 'waiting', updated_at = ?
 WHERE queue_sequence = (
     SELECT candidate.queue_sequence
     FROM runs AS candidate
@@ -271,9 +271,37 @@ WHERE queue_sequence = (
     ORDER BY candidate.queue_sequence
     LIMIT 1
 )
-RETURNING `+runColumns, now, now))
+RETURNING `+runColumns, now))
 	if err != nil {
 		return model.Run{}, err
+	}
+	return value, nil
+}
+
+// MarkRunSubmitted records the start only after the execution object was
+// created. A claimed run waiting on checkout or weighted admission has no
+// start time. Superseded runs cannot acquire one after cancellation wins.
+func (s *Store) MarkRunSubmitted(ctx context.Context, id string) (model.Run, error) {
+	if strings.TrimSpace(id) == "" {
+		return model.Run{}, fmt.Errorf("%w: run ID is required", ErrInvalid)
+	}
+	now := unixNano(s.now())
+	value, err := scanRun(s.db.QueryRowContext(ctx, `
+UPDATE runs SET phase = 'running', started_at = ?, updated_at = ?
+WHERE id = ? AND status = 'running' AND started_at IS NULL AND job_name != ''
+RETURNING `+runColumns, now, now, id))
+	if errors.Is(err, sql.ErrNoRows) {
+		current, lookupErr := s.Run(ctx, id)
+		if lookupErr != nil {
+			return model.Run{}, lookupErr
+		}
+		if current.Status == model.RunInterrupted && current.SupersededBy != "" {
+			return current, nil
+		}
+		return model.Run{}, fmt.Errorf("%w: run is not awaiting submission", ErrInvalidState)
+	}
+	if err != nil {
+		return model.Run{}, fmt.Errorf("mark run submitted: %w", err)
 	}
 	return value, nil
 }
