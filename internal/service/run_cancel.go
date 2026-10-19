@@ -119,12 +119,19 @@ func (service *API) cancelRun(ctx context.Context, actor api.Actor, id, reason s
 		}
 		return api.RunCancelResponse{}, fmt.Errorf("%w: run %s is already %s; nothing to cancel", store.ErrRunNotActive, run.ID, state)
 	}
-	warning, err := RunCancelPolicy(run, actor.Admin, force)
-	if err != nil {
+	if _, err := RunCancelPolicy(run, actor.Admin, force); err != nil {
 		return api.RunCancelResponse{}, err
 	}
+	// The store repeats the decision on the run as it is inside the cancel
+	// transaction: a claim may have recorded its concurrency group since.
+	var warning string
 	result, err := service.runCancels.CancelRun(ctx, model.RunCancelRequest{
-		RunID: run.ID, Actor: actor.Identity, Reason: reason, Force: force, Warning: warning,
+		RunID: run.ID, Actor: actor.Identity, Reason: reason, Force: force,
+		Authorize: func(current model.Run) (string, error) {
+			decided, err := RunCancelPolicy(current, actor.Admin, force)
+			warning = decided
+			return decided, err
+		},
 	})
 	if err != nil {
 		return api.RunCancelResponse{}, err

@@ -898,7 +898,13 @@ continuity checks; it must never be used to reset or bypass those checks.
   non-admin uplink may cancel only `branch`-trigger runs outside any
   concurrency group in repositories its scope can see; release, tag, plan,
   apply, promotion and scheduled runs and group members are refused with
-  `ErrForbidden`.
+  `ErrForbidden`. The decision is re-made on the run as it is inside the
+  cancel transaction; a run's group is known once the scheduler has read its
+  document after claim, so a still-queued member is an ordinary branch run.
+  Because a cancellation pass can settle an obligation before the owner
+  creates the Workflow, the owner re-reads the run right before creation and,
+  if it must delete a Workflow it created for a preempted run and fails,
+  re-arms the obligation so the next pass or restart deletes it.
 - A server stop or restart re-fires stranded ordinary branch runs through
   the same supersede mechanism (issue #270), on all three termination paths:
   graceful-shutdown compensation in the stopping process, owner startup

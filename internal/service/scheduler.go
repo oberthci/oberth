@@ -653,6 +653,20 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 		_ = logFile.Close()
 		return nil
 	}
+	// A run granted without waiting was last read before admission. Re-read
+	// it so a supersede or cancel that landed since stops here, before any
+	// Workflow exists, instead of after MarkRunSubmitted.
+	if fresh, err := scheduler.store.Run(ctx, run.ID); err != nil {
+		_ = logFile.Close()
+		return scheduler.finishInfrastructureFailure(ctx, run, repository, fmt.Errorf("verify run before Job creation: %w", err))
+	} else if fresh.Preempted() {
+		_ = logFile.Close()
+		if err := scheduler.completePendingCancellationsWithGate(ctx, require); err != nil {
+			return err
+		}
+		scheduler.signals.NotifyRun(run.ID)
+		return nil
+	}
 
 	switch {
 	case run.Release:
@@ -688,9 +702,18 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 		_ = logFile.Close()
 		cleanupCtx, cancelCleanup := boundedWorkspaceCleanupContext(ctx)
 		if err := scheduler.jobs.Delete(cleanupCtx, jobName, run.ID); err != nil {
+			// A cancellation pass may already have settled the obligation
+			// before this Workflow existed; make it pending again so the next
+			// pass or restart deletes it rather than orphaning it.
+			var rearmErr error
+			if rearm, ok := scheduler.store.(interface {
+				RearmRunCancellation(context.Context, string, string) error
+			}); ok {
+				rearmErr = rearm.RearmRunCancellation(context.WithoutCancel(ctx), run.ID, jobName)
+			}
 			cancelCleanup()
 			reservation.retain()
-			return fmt.Errorf("delete superseded Job %s: %w", jobName, err)
+			return errors.Join(fmt.Errorf("delete superseded Job %s: %w", jobName, err), rearmErr)
 		}
 		completeErr := scheduler.store.CompleteRunCancellation(cleanupCtx, run.ID, jobName)
 		cancelCleanup()

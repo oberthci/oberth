@@ -306,3 +306,69 @@ func TestCancelRefusesARunOwnedByAPendingPublication(t *testing.T) {
 		t.Fatalf("refused cancel changed the run: %#v, %v", current, err)
 	}
 }
+
+// The authorization callback sees the run as it is inside the cancel
+// transaction: a concurrency group recorded after the caller's read refuses a
+// non-admin cancel without any change.
+func TestCancelRunAuthorizesTheCurrentRecord(t *testing.T) {
+	now := time.Date(2026, 10, 20, 0, 0, 0, 0, time.UTC)
+	s := testStore(t, &now)
+	ctx := context.Background()
+	repo := createRepo(t, s)
+	run := cancelTestRun(t, s, repo, "feature/grouped", "a")
+	if _, err := s.ClaimNextRun(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetRunConcurrencyGroup(ctx, run.ID, "terraform-state"); err != nil {
+		t.Fatal(err)
+	}
+	refused := errors.New("refused")
+	var seen model.Run
+	_, err := s.CancelRun(ctx, model.RunCancelRequest{RunID: run.ID, Actor: "agent@host",
+		Authorize: func(current model.Run) (string, error) { seen = current; return "", refused }})
+	if !errors.Is(err, refused) || seen.ConcurrencyGroup != "terraform-state" {
+		t.Fatalf("authorize saw %#v, err %v", seen, err)
+	}
+	if current, err := s.Run(ctx, run.ID); err != nil || current.Status != model.RunRunning {
+		t.Fatalf("refused cancel changed the run: %#v, %v", current, err)
+	}
+	result, err := s.CancelRun(ctx, model.RunCancelRequest{RunID: run.ID, Actor: "dima@host",
+		Authorize: func(model.Run) (string, error) { return "group warning", nil }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	audit, err := s.LatestAuditActionByType(ctx, "run.cancel", "run")
+	if err != nil || !strings.Contains(audit.Details, "group warning") || result.Run.ID != run.ID {
+		t.Fatalf("authorized cancel audit = %#v, %v", audit, err)
+	}
+}
+
+// An owner whose deletion failed after a pass settled the obligation re-arms
+// it, so the next pass deletes the Workflow; an active run is never armed.
+func TestRearmRunCancellationReopensOnlyPreemptedRuns(t *testing.T) {
+	now := time.Date(2026, 10, 20, 0, 0, 0, 0, time.UTC)
+	s := testStore(t, &now)
+	ctx := context.Background()
+	repo := createRepo(t, s)
+	run := cancelTestRun(t, s, repo, "feature/rearm", "a")
+	active := cancelTestRun(t, s, repo, "feature/active", "b")
+	if _, err := s.ClaimNextRun(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CancelRun(ctx, model.RunCancelRequest{RunID: run.ID, Actor: "dima@host"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CompleteSupersededRunCancellationWithoutJob(ctx, run.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RearmRunCancellation(ctx, run.ID, "oberth-late-workflow"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RearmRunCancellation(ctx, active.ID, "oberth-active"); err != nil {
+		t.Fatal(err)
+	}
+	pending, err := s.PendingRunCancellations(ctx)
+	if err != nil || len(pending) != 1 || pending[0].RunID != run.ID || pending[0].JobName != "oberth-late-workflow" {
+		t.Fatalf("re-armed obligations = %#v, %v", pending, err)
+	}
+}

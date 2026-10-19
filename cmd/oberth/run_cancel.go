@@ -287,8 +287,9 @@ func (remote remoteRunCanceller) activeRuns(ctx context.Context, repo, ref strin
 	}
 	var page struct {
 		Runs []struct {
-			ID     string
-			Status string
+			ID      string
+			RefKind string
+			Status  string
 		} `json:"runs"`
 	}
 	if err := json.Unmarshal(raw, &page); err != nil {
@@ -296,7 +297,8 @@ func (remote remoteRunCanceller) activeRuns(ctx context.Context, repo, ref strin
 	}
 	ids := make([]string, 0, len(page.Runs))
 	for _, run := range page.Runs {
-		if model.RunStatus(run.Status).Active() {
+		// A tag of the same name is not the branch's work.
+		if model.RunStatus(run.Status).Active() && model.RefKind(run.RefKind) == model.RefBranch {
 			ids = append(ids, run.ID)
 		}
 	}
@@ -323,12 +325,14 @@ func (pod *podRunCanceller) cancel(ctx context.Context, id, reason string, force
 	if !run.Status.Active() {
 		return api.RunCancelResponse{}, nil, fmt.Errorf("%w: run %s is already %s; nothing to cancel", store.ErrRunNotActive, run.ID, run.Status)
 	}
-	warning, err := service.RunCancelPolicy(run, true, force)
-	if err != nil {
-		return api.RunCancelResponse{}, nil, err
-	}
+	var warning string
 	result, err := pod.database.CancelRun(ctx, model.RunCancelRequest{
-		RunID: run.ID, Actor: administrativeActor, Reason: reason, Force: force, Warning: warning,
+		RunID: run.ID, Actor: administrativeActor, Reason: reason, Force: force,
+		Authorize: func(current model.Run) (string, error) {
+			decided, err := service.RunCancelPolicy(current, true, force)
+			warning = decided
+			return decided, err
+		},
 	})
 	if err != nil {
 		return api.RunCancelResponse{}, nil, err
@@ -366,7 +370,7 @@ func (pod *podRunCanceller) activeRuns(ctx context.Context, repo, ref string) ([
 	}
 	ids := make([]string, 0, len(runs))
 	for _, run := range runs {
-		if run.Status.Active() {
+		if run.Status.Active() && run.RefKind == model.RefBranch {
 			ids = append(ids, run.ID)
 		}
 	}

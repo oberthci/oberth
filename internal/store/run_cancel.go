@@ -57,6 +57,13 @@ func (s *Store) CancelRun(ctx context.Context, request model.RunCancelRequest) (
 		}
 		return model.RunCancelResult{}, fmt.Errorf("%w: run %s is already %s; nothing to cancel", ErrRunNotActive, current.ID, state)
 	}
+	if request.Authorize != nil {
+		warning, err := request.Authorize(current)
+		if err != nil {
+			return model.RunCancelResult{}, err
+		}
+		request.Warning = warning
+	}
 	var pendingPublications int
 	if err := tx.QueryRowContext(ctx, `
 SELECT COUNT(*) FROM publications WHERE run_id = ? AND status = 'pending'`, current.ID).Scan(&pendingPublications); err != nil {
@@ -129,6 +136,27 @@ ON CONFLICT(run_id) DO UPDATE SET
 		return model.RunCancelResult{}, fmt.Errorf("commit run cancel: %w", err)
 	}
 	return result, nil
+}
+
+// RearmRunCancellation makes the deletion obligation for a preempted run's
+// Workflow pending again. The run's owner calls it when it created the
+// Workflow after a cancellation pass had already settled the obligation and
+// its own deletion failed: the next pass (or restart) then retries it instead
+// of leaving the Workflow orphaned.
+func (s *Store) RearmRunCancellation(ctx context.Context, runID, jobName string) error {
+	if strings.TrimSpace(runID) == "" || strings.TrimSpace(jobName) == "" {
+		return fmt.Errorf("%w: run ID and job name are required", ErrInvalid)
+	}
+	if _, err := s.db.ExecContext(ctx, `
+INSERT INTO run_cancellations(run_id, job_name, superseded_by, reason, created_at)
+SELECT id, ?, superseded_by, 'superseded', ?
+FROM runs
+WHERE id = ? AND status = 'interrupted' AND (superseded_by != '' OR phase = 'cancelled')
+ON CONFLICT(run_id) DO UPDATE SET job_name = excluded.job_name, completed_at = NULL`,
+		jobName, unixNano(s.now()), runID); err != nil {
+		return fmt.Errorf("re-arm run cancellation: %w", err)
+	}
+	return nil
 }
 
 // ValidateCancelReason bounds the free-text reason recorded with a cancel:

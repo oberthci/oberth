@@ -87,8 +87,9 @@ func TestRunsCancelCLICancelsOnlyTheRefsActiveRuns(t *testing.T) {
 			listed = arguments
 			mu.Unlock()
 			reply(map[string]any{"runs": []map[string]any{
-				{"ID": "aaaa", "Status": "queued"}, {"ID": "bbbb", "Status": "waiting"},
-				{"ID": "cccc", "Status": "running"}, {"ID": "dddd", "Status": "passed"},
+				{"ID": "aaaa", "RefKind": "branch", "Status": "queued"}, {"ID": "bbbb", "RefKind": "branch", "Status": "waiting"},
+				{"ID": "cccc", "RefKind": "branch", "Status": "running"}, {"ID": "dddd", "RefKind": "branch", "Status": "passed"},
+				{"ID": "eeee", "RefKind": "tag", "Status": "queued"},
 			}}, false)
 		case "run_cancel":
 			runID, _ := arguments["id"].(string)

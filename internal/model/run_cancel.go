@@ -34,6 +34,10 @@ type RunCancelRequest struct {
 	Force bool
 	// Warning, when set, is recorded in the audit details with the cancel.
 	Warning string
+	// Authorize, when set, is called inside the cancel transaction with the
+	// run as it is now, so the decision cannot act on a stale read. Its
+	// warning replaces Warning; an error aborts the cancel unchanged.
+	Authorize func(Run) (string, error)
 }
 
 // RunCancelResult is the terminalized run, the visible state it was cancelled
