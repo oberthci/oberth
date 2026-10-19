@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/oberthci/oberth/internal/client"
+	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/runlog"
 )
 
@@ -59,6 +60,7 @@ type remoteRunDetail struct {
 	Run        remoteRun
 	Steps      []remoteStep
 	Repository remoteRepository
+	Scheduling *model.RunScheduling
 }
 
 func remoteClient(ctx context.Context) (*client.Client, error) {
@@ -328,6 +330,17 @@ func runRunDetail(ctx context.Context, arguments []string, output io.Writer) err
 	if detail.Repository.Name != "" {
 		if _, err := fmt.Fprintf(output, "repository: %s\n", detail.Repository.Name); err != nil {
 			return err
+		}
+	}
+	if detail.Run.Status == "waiting" && detail.Scheduling != nil {
+		if _, err := fmt.Fprintln(output, detail.Scheduling.Message); err != nil {
+			return err
+		}
+		if admission := detail.Scheduling.Admission; admission != nil && admission.Weight > 0 {
+			if _, err := fmt.Fprintf(output, "capacity: need %d weight, %d/%d used, queue position %d\n",
+				admission.Weight, admission.Used, admission.Capacity, admission.Position); err != nil {
+				return err
+			}
 		}
 	}
 	// The reason first, before the step list: a failed run is read to find out

@@ -621,6 +621,9 @@ func (service *API) Runs(ctx context.Context, actor api.Actor, filter api.RunFil
 	if err != nil {
 		return nil, err
 	}
+	for i := range runs {
+		runs[i] = visibleRun(runs[i])
+	}
 	return service.redact(runs), nil
 }
 
@@ -714,7 +717,7 @@ func (service *API) Run(ctx context.Context, actor api.Actor, id string) (any, e
 	if err != nil {
 		return nil, fmt.Errorf("load run steps: %w", err)
 	}
-	response := RunDetailResponse{Run: run, Steps: steps, Scheduling: service.scheduling(ctx, run, steps)}
+	response := RunDetailResponse{Run: visibleRun(run), Steps: steps, Scheduling: service.scheduling(ctx, run, steps)}
 	if service.repositories != nil {
 		repository, repositoryErr := service.repositories.Repository(ctx, run.RepoID)
 		if repositoryErr != nil && !errors.Is(repositoryErr, store.ErrNotFound) {
@@ -844,7 +847,7 @@ func (service *API) Repositories(ctx context.Context, actor api.Actor) (any, err
 		if historyErr == nil {
 			runsByRepo = make(map[int64][]model.Run, len(repos))
 			for _, run := range runs {
-				runsByRepo[run.RepoID] = append(runsByRepo[run.RepoID], run)
+				runsByRepo[run.RepoID] = append(runsByRepo[run.RepoID], visibleRun(run))
 			}
 		}
 	}
@@ -919,7 +922,7 @@ func (service *API) status(ctx context.Context, repositoryName, selector, actor 
 func (service *API) statusForRun(ctx context.Context, repository model.Repository, run model.Run) (StatusResponse, error) {
 	response := StatusResponse{
 		Repository: repository, Run: run, Repo: repository.Name, Ref: run.Ref,
-		SHA: run.SHA, RunID: run.ID, Status: wireRunStatus(run.Status), Burns: map[string]string{},
+		SHA: run.SHA, RunID: run.ID, Status: wireRunStatus(visibleRun(run).Status), Burns: map[string]string{},
 		ConcurrencyGroup: run.ConcurrencyGroup,
 	}
 	if service.history != nil {
@@ -931,6 +934,7 @@ func (service *API) statusForRun(ctx context.Context, repository model.Repositor
 		response.Burns, response.ExitCode = wireBurns(response.Steps, run)
 	}
 	response.Scheduling = service.scheduling(ctx, run, response.Steps)
+	response.Run = visibleRun(run)
 	response.FailedStep = run.FailedStep
 	if service.issues != nil && run.RefKind == model.RefBranch {
 		issue, issueErr := service.issues.OpenCIIssue(ctx, repository.ID, run.Ref)
@@ -1030,7 +1034,7 @@ func (service *API) statusForBranchRef(ctx context.Context, repositoryName, sele
 func (service *API) statusFromRun(ctx context.Context, repository model.Repository, run model.Run, ref, actor string) (StatusResponse, error) {
 	response := StatusResponse{
 		Repository: repository, Run: run, Repo: repository.Name, Ref: ref,
-		SHA: run.SHA, RunID: run.ID, Status: wireRunStatus(run.Status), Burns: map[string]string{},
+		SHA: run.SHA, RunID: run.ID, Status: wireRunStatus(visibleRun(run).Status), Burns: map[string]string{},
 	}
 	if service.history != nil {
 		var err error
@@ -1041,6 +1045,7 @@ func (service *API) statusFromRun(ctx context.Context, repository model.Reposito
 		response.Burns, response.ExitCode = wireBurns(response.Steps, run)
 	}
 	response.Scheduling = service.scheduling(ctx, run, response.Steps)
+	response.Run = visibleRun(run)
 	response.FailedStep = run.FailedStep
 	if service.issues != nil && run.RefKind == model.RefBranch {
 		issue, issueErr := service.issues.OpenCIIssue(ctx, repository.ID, run.Ref)
@@ -1060,6 +1065,13 @@ func wireRunStatus(status model.RunStatus) string {
 		return "delivered"
 	}
 	return string(status)
+}
+
+func visibleRun(run model.Run) model.Run {
+	if run.Status == model.RunRunning && run.StartedAt == nil {
+		run.Status = model.RunWaiting
+	}
+	return run
 }
 
 // burnPrecedence resolves a burn to one word from the states of its steps.

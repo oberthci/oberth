@@ -627,7 +627,7 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 		_ = logFile.Close()
 		return scheduler.finishInfrastructureFailure(ctx, run, repository, fmt.Errorf("create Job: %w", err))
 	}
-	current, err = scheduler.store.Run(ctx, run.ID)
+	current, err = scheduler.store.MarkRunSubmitted(ctx, run.ID)
 	if err != nil {
 		failure := errors.Join(fmt.Errorf("verify run after Job creation: %w", err), logFile.Close())
 		cleanupCtx, cancelCleanup := boundedWorkspaceCleanupContext(ctx)
