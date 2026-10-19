@@ -33,13 +33,13 @@ func TestRetryRunKeepsSourceAndAuditsActor(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if retried.Run.ID == source.ID || retried.Run.RepoID != repo.ID || retried.Run.Ref != source.Ref ||
-				retried.Run.SHA != sha || retried.Run.TestedSHA != sha || retried.Run.Actor != "reviewer@host" ||
-				retried.Run.Status != model.RunQueued || retried.Run.Trigger != "branch" || retried.Run.Credentialed {
+			if retried.ID == source.ID || retried.RepoID != repo.ID || retried.Ref != source.Ref ||
+				retried.SHA != sha || retried.TestedSHA != sha || retried.Actor != "reviewer@host" ||
+				retried.Status != model.RunQueued || retried.Trigger != "branch" || retried.Credentialed {
 				t.Fatalf("retry changed run identity or admission: %#v", retried.Run)
 			}
 			audit, err := s.LatestAuditActionByType(ctx, "run.retry", "run")
-			if err != nil || audit.Actor != "reviewer@host" || audit.ResourceID != retried.Run.ID ||
+			if err != nil || audit.Actor != "reviewer@host" || audit.ResourceID != retried.ID ||
 				!strings.Contains(audit.Details, source.ID) {
 				t.Fatalf("retry audit = %#v, %v", audit, err)
 			}

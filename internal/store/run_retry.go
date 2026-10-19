@@ -65,7 +65,7 @@ func (s *Store) RetryRun(ctx context.Context, runID, actor string) (model.Enqueu
 		return model.EnqueueRunResult{}, err
 	}
 	if _, err := s.appendAuditAction(ctx, tx, model.AuditActionSpec{Actor: actor, Action: "run.retry",
-		ResourceType: "run", ResourceID: enqueued.Run.ID, Details: string(details)}, now); err != nil {
+		ResourceType: "run", ResourceID: enqueued.ID, Details: string(details)}, now); err != nil {
 		return model.EnqueueRunResult{}, fmt.Errorf("audit run retry: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
