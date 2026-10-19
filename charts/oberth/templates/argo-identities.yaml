@@ -22,7 +22,7 @@ render instead.
 {{- range $i, $a := $allSAs }}
 {{- range $j, $b := $allSAs }}
 {{- if and (ne $i $j) (eq $a $b) }}
-{{- fail "argo.pipelineServiceAccount, argo.credentialedServiceAccount, argo.ciSecrets.serviceAccount, and argo.executorServiceAccount must all differ: a shared identity defeats the secret access boundary" }}
+{{- fail "argo.pipelineServiceAccount, argo.credentialedServiceAccount, argo.ciSecrets.serviceAccount, argo.executorServiceAccount, and argo.vmLauncherServiceAccount must all differ: a shared identity defeats the secret access boundary" }}
 {{- end }}
 {{- end }}
 {{- end }}

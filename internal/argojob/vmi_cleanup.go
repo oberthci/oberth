@@ -22,6 +22,7 @@ func (controller *Controller) CleanupVMIs(ctx context.Context, workflowName, run
 		return fmt.Errorf("argojob: Workflow name and run ID are required for VMI cleanup")
 	}
 	workflow, err := controller.workflows.Get(ctx, workflowName, metav1.GetOptions{})
+	missingWorkflow := apierrors.IsNotFound(err)
 	if err == nil {
 		if err := controller.verifyOwnership(workflow, runID); err != nil {
 			return err
@@ -29,7 +30,7 @@ func (controller *Controller) CleanupVMIs(ctx context.Context, workflowName, run
 		if !hasVMIResources(workflow) {
 			return nil
 		}
-	} else if !apierrors.IsNotFound(err) {
+	} else if !missingWorkflow {
 		return fmt.Errorf("argojob: read Workflow before VMI cleanup: %w", err)
 	}
 	selector := "oberth.ci/workflow=" + workflowName
@@ -38,6 +39,11 @@ func (controller *Controller) CleanupVMIs(ctx context.Context, workflowName, run
 	if apierrors.IsNotFound(err) {
 		return nil
 	} // KubeVirt CRD is absent.
+	if missingWorkflow && apierrors.IsForbidden(err) {
+		// An ordinary cancelled run may never have had VMI access. Its
+		// missing Workflow cannot distinguish that case, so do not block it.
+		return nil
+	}
 	if err != nil {
 		return fmt.Errorf("argojob: list run VMIs: %w", err)
 	}

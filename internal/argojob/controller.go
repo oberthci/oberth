@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"reflect"
 	"sync"
 	"time"
@@ -59,19 +60,32 @@ var errRunLogBudget = errors.New("argojob: aggregate run log budget exceeded")
 
 // Controller submits Workflows and supervises them to a terminal result.
 type Controller struct {
-	workflows WorkflowClient
-	kube      kubernetes.Interface
-	logs      PodLogReader
-	seeder    *SourceSeeder
-	config    Config
-	vmi       dynamic.Interface
-	interval  time.Duration
+	workflows         WorkflowClient
+	kube              kubernetes.Interface
+	logs              PodLogReader
+	seeder            *SourceSeeder
+	config            Config
+	vmi               dynamic.Interface
+	vmiCleanupFailure func(context.Context, string, error)
+	interval          time.Duration
 }
 
 // WithVMIClient enables the run cleanup backstop for admitted VM resources.
 func (controller *Controller) WithVMIClient(client dynamic.Interface) *Controller {
 	controller.vmi = client
 	return controller
+}
+
+// WithVMICleanupFailure records failures of the optional cleanup backstop.
+func (controller *Controller) WithVMICleanupFailure(observe func(context.Context, string, error)) {
+	controller.vmiCleanupFailure = observe
+}
+
+func (controller *Controller) reportVMICleanupFailure(ctx context.Context, runID string, err error) {
+	log.Printf("WARN: VMI cleanup backstop failed for run %s: %v", runID, err)
+	if controller.vmiCleanupFailure != nil {
+		controller.vmiCleanupFailure(ctx, runID, err)
+	}
 }
 
 // NewController builds the engine. client may be nil when logs are supplied
@@ -544,7 +558,7 @@ func (controller *Controller) TerminalState(ctx context.Context, name string) (*
 	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 	defer cancel()
 	if err := controller.CleanupVMIs(cleanupCtx, name, runID); err != nil {
-		return nil, err
+		controller.reportVMICleanupFailure(cleanupCtx, runID, err)
 	}
 	completion := completionFor(workflow)
 	controller.collectStepDiagnostics(ctx, workflow, &completion)
@@ -572,7 +586,8 @@ func (controller *Controller) Owns(ctx context.Context, name string) (bool, erro
 func (controller *Controller) Cancel(ctx context.Context, name, runID string) error {
 	workflow, err := controller.workflows.Get(ctx, name, metav1.GetOptions{})
 	if apierrors.IsNotFound(err) {
-		return controller.CleanupVMIs(ctx, name, runID)
+		controller.cleanupVMIsBestEffort(ctx, name, runID)
+		return nil
 	}
 	if err != nil {
 		return fmt.Errorf("argojob: read Workflow %s before cancelling: %w", name, err)
@@ -590,7 +605,16 @@ func (controller *Controller) Cancel(ctx context.Context, name, runID string) er
 	if err != nil && !apierrors.IsNotFound(err) && !apierrors.IsConflict(err) {
 		return fmt.Errorf("argojob: delete Workflow %s: %w", name, err)
 	}
-	return controller.CleanupVMIs(ctx, name, runID)
+	controller.cleanupVMIsBestEffort(ctx, name, runID)
+	return nil
+}
+
+func (controller *Controller) cleanupVMIsBestEffort(ctx context.Context, name, runID string) {
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	defer cancel()
+	if err := controller.CleanupVMIs(cleanupCtx, name, runID); err != nil {
+		controller.reportVMICleanupFailure(cleanupCtx, runID, err)
+	}
 }
 
 // progressReporter turns repeated status observations into the monotonic

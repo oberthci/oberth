@@ -1343,9 +1343,12 @@ continuity checks; it must never be used to reset or bypass those checks.
   returns and multiple YAML documents. Credentialed workflows cannot use VMIs.
   `ForceIdentity` assigns a dedicated VM-launcher executor ServiceAccount to
   these templates; ordinary templates retain the shared executor identity.
+  Oberth resolves each resource Pod to its Workflow node and VMI template,
+  then delivers a Pod-bound launcher token to the pinned Argo executor image.
   The VM-launcher Role has only VMI create/get/list/watch/delete in the CI
-  namespace, and Oberth deletes run-labelled survivors after workflow
-  completion or cancellation. The grant is stored by repository ID and audited;
+  namespace, and Oberth best-effort deletes run-labelled survivors after
+  workflow completion or cancellation; cleanup failures are logged and audited
+  without blocking terminalization. The grant is stored by repository ID and audited;
   `kubevirt_grant` / `kubevirt_revoke` (MCP) or `oberth kubevirt grant|revoke`
   (in-pod CLI) control it. The administrator must configure a containerDisk
   registry-prefix allowlist; an empty list refuses VMI creation.

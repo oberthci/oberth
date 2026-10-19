@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"strings"
 	"sync"
@@ -148,7 +149,13 @@ func NewArgoJobs(controller argoControl, config argojob.Config, auditor service.
 	if err := config.Validate(); err != nil {
 		return nil, err
 	}
-	return &ArgoJobs{controller: controller, auditor: auditor, config: config, secretAccess: secretAccess, fragments: fragments, intents: map[string]argoIntent{}}, nil
+	jobs := &ArgoJobs{controller: controller, auditor: auditor, config: config, secretAccess: secretAccess, fragments: fragments, intents: map[string]argoIntent{}}
+	if observable, ok := controller.(interface {
+		WithVMICleanupFailure(func(context.Context, string, error))
+	}); ok {
+		observable.WithVMICleanupFailure(jobs.auditVMICleanupFailure)
+	}
+	return jobs, nil
 }
 
 // SetDeclarationRecorder wires the grant declaration recorder after
@@ -580,7 +587,8 @@ func (jobs *ArgoJobs) Wait(ctx context.Context, name string, destination io.Writ
 		return service.JobResult{}, err
 	}
 	if err := jobs.cleanupVMIs(ctx, name, intent.runID); err != nil {
-		return service.JobResult{}, err
+		log.Printf("WARN: VMI cleanup backstop failed for run %s: %v", intent.runID, err)
+		jobs.auditVMICleanupFailure(ctx, intent.runID, err)
 	}
 	if reason := jobs.collectArtifacts(context.WithoutCancel(ctx), name, intent.runID, intent.trigger); reason != "" {
 		jobs.recordArtifactFailure(context.WithoutCancel(ctx), intent.runID, reason)
@@ -655,6 +663,20 @@ func (jobs *ArgoJobs) cleanupVMIs(ctx context.Context, name, runID string) error
 	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 	defer cancel()
 	return cleaner.CleanupVMIs(cleanupCtx, name, runID)
+}
+
+func (jobs *ArgoJobs) auditVMICleanupFailure(ctx context.Context, runID string, cleanupErr error) {
+	details, err := json.Marshal(map[string]string{"error": cleanupErr.Error()})
+	if err != nil {
+		return
+	}
+	auditCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
+	if _, err := jobs.auditor.AppendAuditAction(auditCtx, model.AuditActionSpec{
+		Actor: "oberth", Action: "ci.argo.vmi.cleanup-failed", ResourceType: "run", ResourceID: runID, Details: string(details),
+	}); err != nil {
+		log.Printf("WARN: audit VMI cleanup failure for run %s: %v", runID, err)
+	}
 }
 
 // Owns reports whether this engine created the named object. The dispatcher

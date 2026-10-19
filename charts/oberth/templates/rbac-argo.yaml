@@ -110,7 +110,7 @@ metadata:
 rules:
   - apiGroups: [""]
     resources: ["serviceaccounts/token"]
-    resourceNames: [{{ .Values.argo.executorServiceAccount | quote }}]
+    resourceNames: [{{ .Values.argo.executorServiceAccount | quote }}, {{ .Values.argo.vmLauncherServiceAccount | default "oberth-argo-vm-launcher" | quote }}]
     verbs: ["create"]
   - apiGroups: [""]
     resources: ["configmaps"]

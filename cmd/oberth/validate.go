@@ -25,6 +25,9 @@ func runValidate(_ context.Context, arguments []string, output io.Writer) error 
 	_ = flags.Duration("timeout", validateDefaultTimeout, "reserved for future use")
 	_ = flags.Bool("static", false, "reserved for future use")
 	var imagePrefixes string
+	var containerDiskPrefixes string
+	kubeVirt := flags.Bool("kubevirt", false, "validate KubeVirt VMI templates (server grant still required)")
+	flags.StringVar(&containerDiskPrefixes, "container-disk-prefixes", "", "comma-separated containerDisk image prefixes for KubeVirt validation")
 	allowUnresolved := flags.Bool("allow-unresolved-fragments", false,
 		"report fragment references without failing; their contents are still unchecked")
 	flags.StringVar(&imagePrefixes, "runner-image-prefixes", strings.Join(periapsis.DefaultRunnerImagePrefixes, ","), "comma-separated allowlist of permitted runner image prefixes")
@@ -44,6 +47,8 @@ func runValidate(_ context.Context, arguments []string, output io.Writer) error 
 		return err
 	}
 	target.imagePrefixes = splitRunnerImagePrefixes(imagePrefixes)
+	target.kubeVirt = *kubeVirt
+	target.containerDiskPrefixes = splitRunnerImagePrefixes(containerDiskPrefixes)
 	target.allowUnresolvedFragments = *allowUnresolved
 	return executeValidate(target, output)
 }
@@ -53,6 +58,8 @@ type validateTarget struct {
 	allowUnresolvedFragments bool
 	repoRoot                 string   // the repository root
 	imagePrefixes            []string // administrator-allowed runner image prefixes
+	kubeVirt                 bool
+	containerDiskPrefixes    []string
 }
 
 // resolveValidateTarget accepts the same spellings a developer reaches for:
@@ -154,7 +161,7 @@ func executeValidate(target validateTarget, output io.Writer) error {
 			continue
 		}
 
-		if err := argoworkflow.Admit(workflow, argoworkflow.Policy{RunnerImagePrefixes: target.imagePrefixes}); err != nil {
+		if err := argoworkflow.Admit(workflow, argoworkflow.Policy{RunnerImagePrefixes: target.imagePrefixes, KubeVirt: target.kubeVirt, ContainerDiskPrefixes: target.containerDiskPrefixes}); err != nil {
 			report.problem("admission %s: %v", entry.file, err)
 			continue
 		}

@@ -117,7 +117,7 @@ func TestChartArgoExecutorRulesLiveInTheirOwnRole(t *testing.T) {
 	docs := renderArgoRBAC(t)
 	role := findChartRBACDoc(t, docs, "Role", "oberth-argo-executor-tokens")
 	want := []map[string]any{
-		{"apiGroups": []any{""}, "resources": []any{"serviceaccounts/token"}, "resourceNames": []any{"oberth-argo-executor"}, "verbs": []any{"create"}},
+		{"apiGroups": []any{""}, "resources": []any{"serviceaccounts/token"}, "resourceNames": []any{"oberth-argo-executor", "oberth-argo-vm-launcher"}, "verbs": []any{"create"}},
 		{"apiGroups": []any{""}, "resources": []any{"configmaps"}, "resourceNames": []any{"kube-root-ca.crt"}, "verbs": []any{"get"}},
 	}
 	if got, wantCanonical := canonicalRules(t, role.Rules), canonicalRules(t, want); got != wantCanonical {

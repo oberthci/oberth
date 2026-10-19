@@ -2,9 +2,12 @@ package argojob
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"testing"
 
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -70,5 +73,59 @@ func TestCleanupVMIsDeletesOnlyRunLabelAndNameWithUID(t *testing.T) {
 	}
 	if len(client.Actions()) != before {
 		t.Fatal("ordinary workflow queried the VMI API")
+	}
+}
+
+func TestTerminalStateSurvivesVMICleanupFailure(t *testing.T) {
+	workflow := &wfv1.Workflow{ObjectMeta: metav1.ObjectMeta{Name: "run-workflow", Namespace: testNamespace, UID: "wf-id", Annotations: map[string]string{runIDAnnotation: "run-abc"}}, Spec: wfv1.WorkflowSpec{Templates: []wfv1.Template{{Name: "vm", Resource: &wfv1.ResourceTemplate{Action: "create"}}}}, Status: wfv1.WorkflowStatus{Phase: wfv1.WorkflowSucceeded}}
+	controller, err := NewController(&staticWorkflowClient{workflow: workflow}, nil, testConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := fake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), map[schema.GroupVersionResource]string{vmiResource: "VirtualMachineInstanceList"})
+	client.PrependReactor("list", "virtualmachineinstances", func(ktesting.Action) (bool, runtime.Object, error) {
+		return true, nil, apierrors.NewServiceUnavailable("virt-api unavailable")
+	})
+	controller.WithVMIClient(client)
+	var observed error
+	controller.WithVMICleanupFailure(func(_ context.Context, runID string, cleanupErr error) {
+		if runID != "run-abc" {
+			t.Fatalf("wrong audit run ID: %s", runID)
+		}
+		observed = cleanupErr
+	})
+	result, err := controller.TerminalState(t.Context(), workflow.Name)
+	if err != nil || result == nil || !result.Succeeded {
+		t.Fatalf("terminal workflow blocked by cleanup: %+v, %v", result, err)
+	}
+	if observed == nil || !strings.Contains(observed.Error(), "virt-api unavailable") {
+		t.Fatal("cleanup failure not observed")
+	}
+}
+
+type missingWorkflowClient struct{}
+
+func (missingWorkflowClient) Create(context.Context, *wfv1.Workflow, metav1.CreateOptions) (*wfv1.Workflow, error) {
+	return nil, errors.New("unexpected create")
+}
+func (missingWorkflowClient) Get(_ context.Context, name string, _ metav1.GetOptions) (*wfv1.Workflow, error) {
+	return nil, apierrors.NewNotFound(schema.GroupResource{Group: "argoproj.io", Resource: "workflows"}, name)
+}
+func (missingWorkflowClient) Delete(context.Context, string, metav1.DeleteOptions) error {
+	return errors.New("unexpected delete")
+}
+
+func TestCancelMissingWorkflowToleratesVMIAccessForbidden(t *testing.T) {
+	controller, err := NewController(missingWorkflowClient{}, nil, testConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := fake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), map[schema.GroupVersionResource]string{vmiResource: "VirtualMachineInstanceList"})
+	client.PrependReactor("list", "virtualmachineinstances", func(ktesting.Action) (bool, runtime.Object, error) {
+		return true, nil, apierrors.NewForbidden(vmiResource.GroupResource(), "", errors.New("not granted"))
+	})
+	controller.WithVMIClient(client)
+	if err := controller.Cancel(t.Context(), "ordinary-run", "run-abc"); err != nil {
+		t.Fatalf("ordinary run cancellation gated by VMI list: %v", err)
 	}
 }
