@@ -26,7 +26,7 @@ type CIIssueReconcileStore interface {
 }
 
 type CIIssueReconcileGit interface {
-	Ensure(context.Context, string) (gitcache.Repository, error)
+	EnsureForFetch(context.Context, string) (gitcache.Repository, error)
 	RemoteRef(context.Context, string, string) (string, bool, error)
 	RefSHA(context.Context, string, string) (string, error)
 	ReleaseReachable(context.Context, string, string, string) (bool, error)
@@ -92,6 +92,9 @@ func (r *CIIssueReconciler) Tick(ctx context.Context) error {
 
 func (r *CIIssueReconciler) reconcileIssue(ctx context.Context, issue model.Issue) error {
 	repo, err := r.store.Repository(ctx, issue.RepoID)
+	if errors.Is(err, store.ErrNotFound) {
+		return nil
+	}
 	if err != nil {
 		return err
 	}
@@ -104,7 +107,7 @@ func (r *CIIssueReconciler) reconcileIssue(ctx context.Context, issue model.Issu
 		return err
 	}
 	qualified := upstream.QualifiedRepo(repo.Name)
-	if _, err := r.git.Ensure(ctx, qualified); err != nil {
+	if _, err := r.git.EnsureForFetch(ctx, qualified); err != nil {
 		return fmt.Errorf("refresh upstream: %w", err)
 	}
 	_, exists, err := r.git.RemoteRef(ctx, qualified, "refs/heads/"+issue.Branch)
@@ -112,6 +115,11 @@ func (r *CIIssueReconciler) reconcileIssue(ctx context.Context, issue model.Issu
 		return fmt.Errorf("read issue branch: %w", err)
 	}
 	if !exists {
+		// A published upstream branch can have a newer, red head in the
+		// Oberth cache. Upstream deletion must not hide its live CI issue.
+		if _, err := r.git.RefSHA(ctx, qualified, issue.Branch); err == nil {
+			return nil
+		}
 		known, err := r.store.CIBranchWasPublishedOrDeleted(ctx, repo.ID, issue.Branch)
 		if err != nil {
 			return err

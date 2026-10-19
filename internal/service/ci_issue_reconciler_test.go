@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log"
 	"strings"
@@ -51,17 +52,26 @@ type ciIssueSweepGit struct {
 	ancestor    bool
 	checks      int
 	checkedHead string
+	fetches     int
 }
 
 func (g *ciIssueSweepGit) Ensure(context.Context, string) (gitcache.Repository, error) {
-	return gitcache.Repository{DefaultBranch: "main"}, nil
+	panic("CI issue reconciliation must respect pending receive reservations")
+}
+func (g *ciIssueSweepGit) EnsureForFetch(context.Context, string) (gitcache.Repository, error) {
+	g.fetches++
+	return gitcache.Repository{DefaultBranch: "main", Stale: true}, nil
 }
 func (g *ciIssueSweepGit) RemoteRef(_ context.Context, _ string, ref string) (string, bool, error) {
 	sha, ok := g.refs[ref]
 	return sha, ok, nil
 }
 func (g *ciIssueSweepGit) RefSHA(_ context.Context, _ string, branch string) (string, error) {
-	return g.public[branch], nil
+	sha, ok := g.public[branch]
+	if !ok {
+		return "", errors.New("branch not found in local cache")
+	}
+	return sha, nil
 }
 func (g *ciIssueSweepGit) ReleaseReachable(_ context.Context, _, older, _ string) (bool, error) {
 	g.checks++
@@ -73,19 +83,20 @@ func TestCIIssueReconcilerClosesMergedAndDeletedBranches(t *testing.T) {
 	const branchSHA = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	const mainSHA = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 	for _, tc := range []struct {
-		name, branch                            string
-		branchExists, mainExists, merged, known bool
-		publicHead                              string
-		mainStatus                              model.RunStatus
-		wantReason                              string
-		wantChecks                              int
+		name, branch                                         string
+		branchExists, localExists, mainExists, merged, known bool
+		publicHead                                           string
+		mainStatus                                           model.RunStatus
+		wantReason                                           string
+		wantChecks                                           int
 	}{
-		{name: "merged with green main", branch: "feature/red", branchExists: true, mainExists: true, merged: true, publicHead: branchSHA, mainStatus: model.RunPassed, wantReason: "branch merged into main", wantChecks: 1},
+		{name: "merged with green main", branch: "feature/red", branchExists: true, localExists: true, mainExists: true, merged: true, publicHead: branchSHA, mainStatus: model.RunPassed, wantReason: "branch merged into main", wantChecks: 1},
 		{name: "deleted upstream", branch: "feature/red", known: true, mainStatus: model.RunFailed, wantReason: "branch deleted upstream"},
-		{name: "still diverged", branch: "feature/red", branchExists: true, mainExists: true, publicHead: branchSHA, mainStatus: model.RunPassed, wantChecks: 1},
-		{name: "upstream head merged but accepted red head diverged", branch: "feature/red", branchExists: true, mainExists: true, publicHead: strings.Repeat("c", 40), mainStatus: model.RunPassed, wantChecks: 1},
-		{name: "main is red", branch: "feature/red", branchExists: true, mainExists: true, merged: true, publicHead: branchSHA, mainStatus: model.RunFailed},
-		{name: "unpublished red branch", branch: "feature/red", mainStatus: model.RunPassed},
+		{name: "published upstream but live red head", branch: "feature/red", localExists: true, known: true, publicHead: branchSHA, mainStatus: model.RunFailed},
+		{name: "still diverged", branch: "feature/red", branchExists: true, localExists: true, mainExists: true, publicHead: branchSHA, mainStatus: model.RunPassed, wantChecks: 1},
+		{name: "upstream head merged but accepted red head diverged", branch: "feature/red", branchExists: true, localExists: true, mainExists: true, publicHead: strings.Repeat("c", 40), mainStatus: model.RunPassed, wantChecks: 1},
+		{name: "main is red", branch: "feature/red", branchExists: true, localExists: true, mainExists: true, merged: true, publicHead: branchSHA, mainStatus: model.RunFailed},
+		{name: "unpublished red branch", branch: "feature/red", localExists: true, publicHead: branchSHA, mainStatus: model.RunPassed},
 		{name: "default branch never auto-closes", branch: "main", known: true, mainStatus: model.RunPassed},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -96,7 +107,10 @@ func TestCIIssueReconcilerClosesMergedAndDeletedBranches(t *testing.T) {
 				mainRun:  model.Run{ID: "green-main-run", Status: tc.mainStatus},
 				known:    tc.known,
 			}
-			git := &ciIssueSweepGit{refs: map[string]string{}, public: map[string]string{tc.branch: tc.publicHead}, ancestor: tc.merged}
+			git := &ciIssueSweepGit{refs: map[string]string{}, public: map[string]string{}, ancestor: tc.merged}
+			if tc.localExists {
+				git.public[tc.branch] = tc.publicHead
+			}
 			if tc.branchExists {
 				git.refs["refs/heads/"+tc.branch] = branchSHA
 			}
@@ -116,6 +130,9 @@ func TestCIIssueReconcilerClosesMergedAndDeletedBranches(t *testing.T) {
 			}
 			if git.checks != tc.wantChecks {
 				t.Fatalf("ancestry checks = %d, want %d", git.checks, tc.wantChecks)
+			}
+			if tc.branch != "main" && git.fetches != 1 {
+				t.Fatalf("reservation-safe fetch calls = %d, want 1", git.fetches)
 			}
 			if tc.wantChecks != 0 && git.checkedHead != tc.publicHead {
 				t.Fatalf("checked branch head = %q, want accepted head %q", git.checkedHead, tc.publicHead)
