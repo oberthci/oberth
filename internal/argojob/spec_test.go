@@ -1998,7 +1998,6 @@ func TestSpecIdentityIgnoresSourceVolumeFields(t *testing.T) {
 			VolumeSource: corev1.VolumeSource{
 				PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
 					ClaimName: "claim-aaaa",
-					ReadOnly:  true,
 				},
 			},
 		},

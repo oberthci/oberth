@@ -1,8 +1,8 @@
-PASS /var/tmp/cttv-pretest-20260927/oberth-controller/dedicated-tools-submitted.json
-PASS /var/tmp/cttv-pretest-20260927/oberth-controller/none-submitted.json
-PASS /var/tmp/cttv-pretest-20260927/oberth-controller/container-submitted.json
-PASS /var/tmp/cttv-pretest-20260927/oberth-controller/script-submitted.json
-PASS /var/tmp/cttv-pretest-20260927/oberth-controller/containerset-submitted.json
-PASS /var/tmp/cttv-pretest-20260927/oberth-controller/sidecars-submitted.json
-PASS /var/tmp/cttv-pretest-20260927/oberth-controller/inline-dag-submitted.json
-PASS /var/tmp/cttv-pretest-20260927/oberth-controller/inline-steps-submitted.json
+PASS /var/tmp/oberth-962-proof/isolation/container-submitted.json
+PASS /var/tmp/oberth-962-proof/isolation/containerset-submitted.json
+PASS /var/tmp/oberth-962-proof/isolation/dedicated-tools-submitted.json
+PASS /var/tmp/oberth-962-proof/isolation/inline-dag-submitted.json
+PASS /var/tmp/oberth-962-proof/isolation/inline-steps-submitted.json
+PASS /var/tmp/oberth-962-proof/isolation/none-submitted.json
+PASS /var/tmp/oberth-962-proof/isolation/script-submitted.json
+PASS /var/tmp/oberth-962-proof/isolation/sidecars-submitted.json

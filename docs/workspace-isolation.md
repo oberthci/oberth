@@ -53,6 +53,11 @@ a claim that the Pod has no shared storage. Source remains read-only at
 `/work/src`; bounded per-Pod `/tmp` remains writable. Declare private cache
 locations when automatic caches are absent or read-only.
 
+The run's source and artifacts paths use separate Pod volume names on one PVC.
+Both PVC references leave claim-level `readOnly` unset so kubelet mounts that
+claim consistently. Every source `volumeMount` is read-only; the artifacts
+subpath has its own writable mount.
+
 An explicit `readOnly: true` on any declared volume, including a dedicated
 tools PVC, also survives server replacement at the same mount path. Oberth protects overlapping subpaths,
 parent mounts, and aliases in sibling containers. A dynamic `subPathExpr`

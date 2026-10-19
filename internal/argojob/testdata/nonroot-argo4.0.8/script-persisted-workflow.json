@@ -5,6 +5,7 @@
     "name": "oberth-oberth-run-abc1-aabbccddeeff",
     "namespace": "oberth-argo",
     "uid": "nonroot-fixture",
+    "creationTimestamp": null,
     "labels": {
       "app.kubernetes.io/name": "oberth-run",
       "oberth.ci/engine": "argo",
@@ -20,7 +21,7 @@
       "oberth.ci/nonroot-templates": "test",
       "oberth.ci/ref": "refs/heads/main",
       "oberth.ci/run-id": "run-abc123",
-      "oberth.ci/spec-identity": "ef759180214ecaa8b689408b527c5ec3703d4c8e14caf68384422a4f20e4f0b4",
+      "oberth.ci/spec-identity": "06a925f198ef359c3cd44ffdd381d4e07369e879590a998210d517df679d8c64",
       "oberth.ci/verified-controller-profile": "nonroot-static-v1:958ebb5671694b6ec353653a5d104fb1d666ff46322afdd76d44840192e21609",
       "workflows.argoproj.io/pod-name-format": "v2"
     }
@@ -230,7 +231,7 @@
         },
         "serviceAccountName": "oberth-argo-pipeline",
         "automountServiceAccountToken": false,
-        "podSpecPatch": "{\"$setElementOrder/initContainers\":[{\"name\":\"oberth-executor-token\"},{\"name\":\"init\"}],\"initContainers\":[{\"name\":\"oberth-executor-token\",\"image\":\"busybox:1.37@sha256:ab33eacc8251e3807b85bb6dba570e4698c3998eca6f0fc2ccb60575a563ea74\",\"command\":[\"sh\",\"-c\",\"until test -f /var/run/secrets/kubernetes.io/serviceaccount/token; do sleep 1; done\"],\"resources\":{},\"volumeMounts\":[{\"name\":\"exec-sa-token\",\"mountPath\":\"/var/run/secrets/kubernetes.io/serviceaccount\"}],\"securityContext\":{\"capabilities\":{\"drop\":[\"ALL\"]},\"runAsUser\":0,\"runAsGroup\":0,\"runAsNonRoot\":false,\"readOnlyRootFilesystem\":true,\"allowPrivilegeEscalation\":false,\"seccompProfile\":{\"type\":\"RuntimeDefault\"}}},{\"name\":\"init\"}],\"volumes\":[{\"emptyDir\":{\"medium\":\"Memory\",\"sizeLimit\":\"1Mi\"},\"name\":\"exec-sa-token\",\"secret\":null}]}"
+        "podSpecPatch": "{\"$setElementOrder/initContainers\":[{\"name\":\"oberth-executor-token\"},{\"name\":\"init\"}],\"containers\":[{\"name\":\"wait\",\"volumeMounts\":[{\"mountPath\":\"/mainctrfs/work/src\",\"name\":\"oberth-source\",\"readOnly\":true,\"subPath\":\"src\"}]}],\"initContainers\":[{\"name\":\"oberth-executor-token\",\"image\":\"busybox:1.37@sha256:ab33eacc8251e3807b85bb6dba570e4698c3998eca6f0fc2ccb60575a563ea74\",\"command\":[\"sh\",\"-c\",\"until test -f /var/run/secrets/kubernetes.io/serviceaccount/token; do sleep 1; done\"],\"resources\":{},\"volumeMounts\":[{\"name\":\"exec-sa-token\",\"mountPath\":\"/var/run/secrets/kubernetes.io/serviceaccount\"}],\"securityContext\":{\"capabilities\":{\"drop\":[\"ALL\"]},\"runAsUser\":0,\"runAsGroup\":0,\"runAsNonRoot\":false,\"readOnlyRootFilesystem\":true,\"allowPrivilegeEscalation\":false,\"seccompProfile\":{\"type\":\"RuntimeDefault\"}}},{\"name\":\"init\"}],\"volumes\":[{\"emptyDir\":{\"medium\":\"Memory\",\"sizeLimit\":\"1Mi\"},\"name\":\"exec-sa-token\",\"secret\":null}]}"
       }
     ],
     "entrypoint": "test",
@@ -257,8 +258,7 @@
       {
         "name": "oberth-source",
         "persistentVolumeClaim": {
-          "claimName": "run-source",
-          "readOnly": true
+          "claimName": "run-source"
         }
       },
       {
@@ -296,7 +296,7 @@
   },
   "status": {
     "phase": "Running",
-    "startedAt": "2026-10-04T15:03:57Z",
+    "startedAt": "2026-10-19T08:41:02Z",
     "finishedAt": null,
     "estimatedDuration": 1,
     "progress": "0/1",
@@ -309,7 +309,7 @@
         "templateName": "test",
         "templateScope": "local/oberth-oberth-run-abc1-aabbccddeeff",
         "phase": "Pending",
-        "startedAt": "2026-10-04T15:03:57Z",
+        "startedAt": "2026-10-19T08:41:02Z",
         "finishedAt": null,
         "estimatedDuration": 1,
         "progress": "0/1",

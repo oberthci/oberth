@@ -169,8 +169,7 @@
       {
         "name": "oberth-source",
         "persistentVolumeClaim": {
-          "claimName": "wif-proof-source",
-          "readOnly": true
+          "claimName": "wif-proof-source"
         }
       }
     ],
