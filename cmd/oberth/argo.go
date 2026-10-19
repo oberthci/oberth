@@ -12,6 +12,7 @@ import (
 
 	wfclientset "github.com/argoproj/argo-workflows/v4/pkg/client/clientset/versioned"
 	"k8s.io/apimachinery/pkg/util/httpstream"
+	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/remotecommand"
@@ -73,6 +74,8 @@ func buildArgoEngine(
 		CredentialedServiceAccount: options.argoCredentialedAccount,
 		CISecretsServiceAccount:    options.argoCISecretsAccount,
 		ExecutorServiceAccount:     options.argoExecutorAccount,
+		VMLauncherServiceAccount:   options.argoVMLauncherAccount,
+		ContainerDiskPrefixes:      splitRunnerImagePrefixes(options.argoContainerDiskPrefixes),
 		RunnerImagePrefixes:        splitRunnerImagePrefixes(options.runnerImagePrefixes),
 		VaultAddress:               options.argoVaultAddress,
 		VaultCredentialedRole:      options.argoVaultCredentialedRole,
@@ -104,6 +107,11 @@ func buildArgoEngine(
 	if err != nil {
 		return nil, err
 	}
+	vmiClient, err := dynamic.NewForConfig(restConfig)
+	if err != nil {
+		return nil, fmt.Errorf("configure KubeVirt cleanup client: %w", err)
+	}
+	controller.WithVMIClient(vmiClient)
 	seeder := argojob.NewSourceSeeder(kube, newArgoExecStreamer(restConfig, kube), config)
 	if seeder == nil {
 		return nil, errors.New("configure Argo source seeding: the in-cluster Kubernetes client is required")
@@ -206,6 +214,8 @@ func validateArgoServeOptions(options serveOptions) error {
 		CredentialedServiceAccount: options.argoCredentialedAccount,
 		CISecretsServiceAccount:    options.argoCISecretsAccount,
 		ExecutorServiceAccount:     options.argoExecutorAccount,
+		VMLauncherServiceAccount:   options.argoVMLauncherAccount,
+		ContainerDiskPrefixes:      splitRunnerImagePrefixes(options.argoContainerDiskPrefixes),
 		RunnerImagePrefixes:        splitRunnerImagePrefixes(options.runnerImagePrefixes),
 		VaultAddress:               options.argoVaultAddress,
 		VaultCredentialedRole:      options.argoVaultCredentialedRole,

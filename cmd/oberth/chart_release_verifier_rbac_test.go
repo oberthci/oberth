@@ -102,7 +102,7 @@ func TestChartReleaseVerifierTokenRequestRBAC(t *testing.T) {
 						case tc.serverAccount + "-argo":
 							wantNames = tc.wantShared
 						case tc.serverAccount + "-argo-executor-tokens":
-							wantNames = []string{"oberth-argo-executor"}
+							wantNames = []string{"oberth-argo-executor", "oberth-argo-vm-launcher"}
 						case tc.serverAccount + "-argo-release-tokens":
 							wantNames = tc.wantPerRepo
 						default:

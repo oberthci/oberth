@@ -210,6 +210,11 @@ type SecretAccessStore interface {
 	PendingGrantDeclarations(ctx context.Context, repo string) ([]store.PendingGrantDeclaration, error)
 }
 
+type KubeVirtGrantStore interface {
+	KubeVirtGrant(context.Context, int64) (store.KubeVirtGrant, error)
+	SetKubeVirtGrant(context.Context, int64, string, bool) (store.KubeVirtGrant, error)
+}
+
 // PromotionGrantStore is the narrow contract for promotion grant operations.
 // Non-admin uplinks must present a matching grant to promote; admin uplinks
 // retain direct authority.

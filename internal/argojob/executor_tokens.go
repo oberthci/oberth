@@ -123,8 +123,21 @@ func (controller *Controller) deliverExecutorTokens(ctx context.Context, wf *wfv
 		if !running {
 			continue
 		}
-		if err := validateExecutorTokenTarget(pod, controller.config.SourceSeedImage); err != nil {
+		// Argo can create the Pod before the node status is persisted. Wait
+		// for the controller-owned mapping instead of misclassifying an early
+		// resource Pod as an ordinary pipeline Pod.
+		if nodeID := pod.Annotations["workflows.argoproj.io/node-id"]; nodeID != "" {
+			if _, ok := wf.Status.Nodes[nodeID]; !ok {
+				continue
+			}
+		}
+		launcher := resourcePodTemplate(wf, pod, controller.config.VMLauncherServiceAccount)
+		if err := validateExecutorTokenTarget(pod, controller.config.SourceSeedImage, launcher); err != nil {
 			return err
+		}
+		serviceAccount := controller.config.ExecutorServiceAccount
+		if launcher {
+			serviceAccount = controller.config.VMLauncherServiceAccount
 		}
 		// Bound tokens die with the workflow-owned identity Pod. The deadline covers the workflow,
 		// including queue/startup slack, without needing a long-lived token Secret.
@@ -135,11 +148,11 @@ func (controller *Controller) deliverExecutorTokens(ctx context.Context, wf *wfv
 		if seconds < 600 {
 			seconds = 600
 		}
-		holder, err := controller.executorIdentityPod(ctx, wf)
+		holder, err := controller.executorIdentityPod(ctx, wf, serviceAccount)
 		if err != nil {
 			return err
 		}
-		token, err := controller.kube.CoreV1().ServiceAccounts(wf.Namespace).CreateToken(ctx, controller.config.ExecutorServiceAccount, &authenticationv1.TokenRequest{Spec: authenticationv1.TokenRequestSpec{ExpirationSeconds: &seconds, BoundObjectRef: &authenticationv1.BoundObjectReference{Kind: "Pod", APIVersion: "v1", Name: holder.Name, UID: holder.UID}}}, metav1.CreateOptions{})
+		token, err := controller.kube.CoreV1().ServiceAccounts(wf.Namespace).CreateToken(ctx, serviceAccount, &authenticationv1.TokenRequest{Spec: authenticationv1.TokenRequestSpec{ExpirationSeconds: &seconds, BoundObjectRef: &authenticationv1.BoundObjectReference{Kind: "Pod", APIVersion: "v1", Name: holder.Name, UID: holder.UID}}}, metav1.CreateOptions{})
 		if err != nil {
 			return fmt.Errorf("request executor identity: %w", err)
 		}
@@ -171,7 +184,26 @@ func (controller *Controller) deliverExecutorTokens(ctx context.Context, wf *wfv
 	return nil
 }
 
-func validateExecutorTokenTarget(pod *corev1.Pod, image string) error {
+// A controller-owned Pod node resolves to a named, admitted resource template.
+// A Pod annotation alone cannot select the launcher identity.
+func resourcePodTemplate(wf *wfv1.Workflow, pod *corev1.Pod, launcherSA string) bool {
+	if launcherSA == "" {
+		return false
+	}
+	node, ok := wf.Status.Nodes[pod.Annotations["workflows.argoproj.io/node-id"]]
+	if !ok || node.TemplateName == "" {
+		return false
+	}
+	for i := range wf.Spec.Templates {
+		t := &wf.Spec.Templates[i]
+		if t.Name == node.TemplateName && t.Resource != nil && t.Executor != nil && t.Executor.ServiceAccountName == launcherSA {
+			return true
+		}
+	}
+	return false
+}
+
+func validateExecutorTokenTarget(pod *corev1.Pod, image string, resourcePod bool) error {
 	validVolume := false
 	for _, v := range pod.Spec.Volumes {
 		if v.Name == executorTokenVolume {
@@ -197,9 +229,13 @@ func validateExecutorTokenTarget(pod *corev1.Pod, image string) error {
 			found = true
 		}
 		for _, mount := range container.VolumeMounts {
-			if mount.Name == executorTokenVolume && container.Name != executorTokenWaiter && container.Name != "init" && container.Name != "wait" {
-				return errors.New("pipeline container can access executor identity")
+			if mount.Name != executorTokenVolume || container.Name == executorTokenWaiter || container.Name == "init" || container.Name == "wait" {
+				continue
 			}
+			if resourcePod && container.Name == "main" && container.Image == argoworkflow.NonrootExecutorImage {
+				continue
+			}
+			return errors.New("pipeline container can access executor identity")
 		}
 	}
 	if !found {
@@ -212,11 +248,11 @@ func validateExecutorTokenTarget(pod *corev1.Pod, image string) error {
 // workflow-owned Pod preserves executor/pipeline separation. Its scheduling
 // gate is never removed: it represents credential lifetime and runs no code.
 // Deleting the workflow garbage-collects this Pod and invalidates its tokens.
-func (controller *Controller) executorIdentityPod(ctx context.Context, wf *wfv1.Workflow) (*corev1.Pod, error) {
-	name := executorIdentityPodName(wf.UID)
+func (controller *Controller) executorIdentityPod(ctx context.Context, wf *wfv1.Workflow, serviceAccount string) (*corev1.Pod, error) {
+	name := controller.identityPodName(wf.UID, serviceAccount)
 	desired := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: wf.Namespace, Labels: map[string]string{"oberth.ci/role": "executor-identity"}, OwnerReferences: []metav1.OwnerReference{{APIVersion: "argoproj.io/v1alpha1", Kind: "Workflow", Name: wf.Name, UID: wf.UID, Controller: ptr.To(true)}}},
-		Spec:       corev1.PodSpec{ServiceAccountName: controller.config.ExecutorServiceAccount, AutomountServiceAccountToken: ptr.To(false), RestartPolicy: corev1.RestartPolicyNever, SchedulingGates: []corev1.PodSchedulingGate{{Name: "oberth.ci/executor-identity"}}, Containers: []corev1.Container{{Name: "identity", Image: controller.config.SourceSeedImage, Command: []string{"/bin/false"}, SecurityContext: nonrootContainerSecurity(65534), Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("1m"), corev1.ResourceMemory: resource.MustParse("1Mi")}, Limits: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("10m"), corev1.ResourceMemory: resource.MustParse("8Mi")}}}}},
+		Spec:       corev1.PodSpec{ServiceAccountName: serviceAccount, AutomountServiceAccountToken: ptr.To(false), RestartPolicy: corev1.RestartPolicyNever, SchedulingGates: []corev1.PodSchedulingGate{{Name: "oberth.ci/executor-identity"}}, Containers: []corev1.Container{{Name: "identity", Image: controller.config.SourceSeedImage, Command: []string{"/bin/false"}, SecurityContext: nonrootContainerSecurity(65534), Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("1m"), corev1.ResourceMemory: resource.MustParse("1Mi")}, Limits: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("10m"), corev1.ResourceMemory: resource.MustParse("8Mi")}}}}},
 	}
 	pods := controller.kube.CoreV1().Pods(wf.Namespace)
 	pod, err := pods.Get(ctx, name, metav1.GetOptions{})
@@ -229,7 +265,7 @@ func (controller *Controller) executorIdentityPod(ctx context.Context, wf *wfv1.
 	if err != nil {
 		return nil, fmt.Errorf("create executor identity lifetime: %w", err)
 	}
-	if pod.DeletionTimestamp != nil || pod.UID == "" || pod.Spec.ServiceAccountName != controller.config.ExecutorServiceAccount || pod.Spec.AutomountServiceAccountToken == nil || *pod.Spec.AutomountServiceAccountToken || len(pod.Spec.SchedulingGates) != 1 || pod.Spec.SchedulingGates[0].Name != "oberth.ci/executor-identity" || len(pod.Spec.Volumes) != 0 || len(pod.Spec.InitContainers) != 0 || len(pod.Spec.EphemeralContainers) != 0 || len(pod.Spec.Containers) != 1 || pod.Spec.Containers[0].Name != "identity" || pod.Spec.Containers[0].Image != controller.config.SourceSeedImage || len(pod.Spec.Containers[0].Command) != 1 || pod.Spec.Containers[0].Command[0] != "/bin/false" || len(pod.OwnerReferences) != 1 || pod.OwnerReferences[0].UID != wf.UID || pod.OwnerReferences[0].Kind != "Workflow" || pod.OwnerReferences[0].Controller == nil || !*pod.OwnerReferences[0].Controller {
+	if pod.DeletionTimestamp != nil || pod.UID == "" || pod.Spec.ServiceAccountName != serviceAccount || pod.Spec.AutomountServiceAccountToken == nil || *pod.Spec.AutomountServiceAccountToken || len(pod.Spec.SchedulingGates) != 1 || pod.Spec.SchedulingGates[0].Name != "oberth.ci/executor-identity" || len(pod.Spec.Volumes) != 0 || len(pod.Spec.InitContainers) != 0 || len(pod.Spec.EphemeralContainers) != 0 || len(pod.Spec.Containers) != 1 || pod.Spec.Containers[0].Name != "identity" || pod.Spec.Containers[0].Image != controller.config.SourceSeedImage || len(pod.Spec.Containers[0].Command) != 1 || pod.Spec.Containers[0].Command[0] != "/bin/false" || len(pod.OwnerReferences) != 1 || pod.OwnerReferences[0].UID != wf.UID || pod.OwnerReferences[0].Kind != "Workflow" || pod.OwnerReferences[0].Controller == nil || !*pod.OwnerReferences[0].Controller {
 		return nil, errors.New("executor identity lifetime Pod has unexpected ownership or configuration")
 	}
 	return pod, nil
@@ -240,12 +276,32 @@ func executorIdentityPodName(uid types.UID) string {
 	return fmt.Sprintf("oberth-executor-%x", digest[:12])
 }
 
+func (controller *Controller) identityPodName(uid types.UID, serviceAccount string) string {
+	if serviceAccount == controller.config.ExecutorServiceAccount {
+		return executorIdentityPodName(uid)
+	}
+	digest := sha256.Sum256([]byte(string(uid) + "/" + serviceAccount))
+	return fmt.Sprintf("oberth-executor-%x", digest[:12])
+}
+
 func (controller *Controller) retireExecutorIdentity(ctx context.Context, wf *wfv1.Workflow) error {
 	if controller.kube == nil || wf.UID == "" {
 		return nil
 	}
+	for _, account := range []string{controller.config.ExecutorServiceAccount, controller.config.VMLauncherServiceAccount} {
+		if account == "" {
+			continue
+		}
+		if err := controller.retireIdentityPod(ctx, wf, account); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (controller *Controller) retireIdentityPod(ctx context.Context, wf *wfv1.Workflow, serviceAccount string) error {
 	pods := controller.kube.CoreV1().Pods(wf.Namespace)
-	pod, err := pods.Get(ctx, executorIdentityPodName(wf.UID), metav1.GetOptions{})
+	pod, err := pods.Get(ctx, controller.identityPodName(wf.UID, serviceAccount), metav1.GetOptions{})
 	if apierrors.IsNotFound(err) {
 		return nil
 	}

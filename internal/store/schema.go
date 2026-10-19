@@ -13,7 +13,7 @@ type migration struct {
 func LatestMigrationVersion() int { return latestMigrationVersion }
 
 const (
-	latestMigrationVersion = 22
+	latestMigrationVersion = 23
 	// oberthSchemaIdentity is the fresh-deployment default. Existing deployments
 	// supply their original immutable identity through ProtocolConfig; bootstrap
 	// SQL and legacy schema validation use that exact configured operand.
@@ -1072,4 +1072,12 @@ END;`,
 ) WITHOUT ROWID;
 ALTER TABLE issues ADD COLUMN scope_upstream_id INTEGER;`,
 	},
+	{version: 23, sql: `CREATE TABLE kubevirt_grants (
+    repo_id INTEGER PRIMARY KEY REFERENCES repositories(id) ON DELETE CASCADE,
+    granted_by TEXT NOT NULL,
+    granted_at INTEGER NOT NULL,
+    revoked_by TEXT NOT NULL DEFAULT '',
+    revoked_at INTEGER,
+    CHECK ((revoked_at IS NULL AND revoked_by = '') OR (revoked_at IS NOT NULL AND revoked_by != ''))
+);`},
 }

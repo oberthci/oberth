@@ -231,6 +231,10 @@ argo:
   # executorServiceAccount runs Argo's own init and wait containers. Argo
   # mounts its token into the executor container only.
   executorServiceAccount: "oberth-argo-executor"
+  # Only admitted VMI resource templates receive this executor identity.
+  vmLauncherServiceAccount: "oberth-argo-vm-launcher"
+  # Empty refuses containerDisk images even for repositories with a VM grant.
+  containerDiskPrefixes: []
 
   # Per-repo Vault identities. Each entry creates a ServiceAccount in
   # argo.namespace whose name doubles as the Vault role and policy name.

@@ -17,11 +17,12 @@ render instead.
 {{- $credentialed := .Values.argo.credentialedServiceAccount | default "oberth-argo-credentialed" }}
 {{- $ciSecrets := (.Values.argo.ciSecrets).serviceAccount | default "oberth-argo-ci-secrets" }}
 {{- $executor := .Values.argo.executorServiceAccount }}
-{{- $allSAs := list $pipeline $credentialed $ciSecrets $executor }}
+{{- $vmLauncher := .Values.argo.vmLauncherServiceAccount | default "oberth-argo-vm-launcher" }}
+{{- $allSAs := list $pipeline $credentialed $ciSecrets $executor $vmLauncher }}
 {{- range $i, $a := $allSAs }}
 {{- range $j, $b := $allSAs }}
 {{- if and (ne $i $j) (eq $a $b) }}
-{{- fail "argo.pipelineServiceAccount, argo.credentialedServiceAccount, argo.ciSecrets.serviceAccount, and argo.executorServiceAccount must all differ: a shared identity defeats the secret access boundary" }}
+{{- fail "argo.pipelineServiceAccount, argo.credentialedServiceAccount, argo.ciSecrets.serviceAccount, argo.executorServiceAccount, and argo.vmLauncherServiceAccount must all differ: a shared identity defeats the secret access boundary" }}
 {{- end }}
 {{- end }}
 {{- end }}
@@ -143,6 +144,64 @@ metadata:
 subjects:
   - kind: ServiceAccount
     name: {{ $executor }}
+    namespace: {{ $namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $executor }}
+---
+# VM resource execution alone receives this token. The shared executor never
+# receives VMI permissions. Argo's resource template runs in its main container
+# with the template executor token, while ordinary steps retain the shared one.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $vmLauncher }}
+  namespace: {{ $namespace }}
+  labels:
+    {{- include "oberth.labels" . | nindent 4 }}
+automountServiceAccountToken: false
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $vmLauncher }}
+  namespace: {{ $namespace }}
+  labels:
+    {{- include "oberth.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["kubevirt.io"]
+    resources: ["virtualmachineinstances"]
+    verbs: ["create", "get", "list", "watch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $vmLauncher }}
+  namespace: {{ $namespace }}
+  labels:
+    {{- include "oberth.labels" . | nindent 4 }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $vmLauncher }}
+    namespace: {{ $namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $vmLauncher }}
+---
+# Argo still needs to report task results for resource pods. This binding
+# reuses the narrow existing task-result Role without adding VMI verbs to it.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $vmLauncher }}-taskresults
+  namespace: {{ $namespace }}
+  labels:
+    {{- include "oberth.labels" . | nindent 4 }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $vmLauncher }}
     namespace: {{ $namespace }}
 roleRef:
   apiGroup: rbac.authorization.k8s.io

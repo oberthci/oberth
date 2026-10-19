@@ -115,6 +115,8 @@ type serveOptions struct {
 	argoCredentialedAccount   string
 	argoCISecretsAccount      string
 	argoExecutorAccount       string
+	argoVMLauncherAccount     string
+	argoContainerDiskPrefixes string
 	argoVaultAddress          string
 	argoVaultCredentialedRole string
 	argoVaultCISecretsRole    string
@@ -221,6 +223,8 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 	flags.StringVar(&options.argoCredentialedAccount, "argo-credentialed-serviceaccount", "oberth-argo-credentialed", "ServiceAccount for release templates with approved secrets; carries a projected token for OpenBao Kubernetes auth")
 	flags.StringVar(&options.argoCISecretsAccount, "argo-ci-secrets-serviceaccount", "oberth-argo-ci-secrets", "ServiceAccount for CI templates with approved upstream-scoped secrets; its Vault role never carries release grants")
 	flags.StringVar(&options.argoExecutorAccount, "argo-executor-serviceaccount", "oberth-argo-executor", "ServiceAccount for Argo's own executor containers; must differ from all pipeline identities")
+	flags.StringVar(&options.argoVMLauncherAccount, "argo-vm-launcher-serviceaccount", "oberth-argo-vm-launcher", "ServiceAccount used only by admitted VMI resource templates")
+	flags.StringVar(&options.argoContainerDiskPrefixes, "argo-container-disk-prefixes", "", "comma-separated administrator allowlist of VMI containerDisk repository prefixes")
 	flags.StringVar(&options.argoVaultAddress, "argo-vault-address", "", "OpenBao API base URL injected into credentialed Argo containers as VAULT_ADDR (HTTPS)")
 	flags.StringVar(&options.argoVaultCredentialedRole, "argo-vault-credentialed-role", "", "OpenBao Kubernetes auth role for credentialed release pipelines; bound to the credentialed ServiceAccount and namespace")
 	flags.StringVar(&options.argoVaultCISecretsRole, "argo-vault-ci-secrets-role", "", "OpenBao Kubernetes auth role for CI pipelines with approved upstream-scoped secrets; bound to the CI-secrets ServiceAccount and namespace (empty refuses CI credentialed pipelines at admission)")
@@ -648,6 +652,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 	if err != nil {
 		return err
 	}
+	argoJobs.SetKubeVirtGrantLoader(database)
 	logger.Printf("argo execution engine: namespace=%s pipeline-sa=%s credentialed-sa=%s ci-secrets-sa=%s executor-sa=%s",
 		options.argoNamespace, options.argoPipelineAccount, options.argoCredentialedAccount,
 		options.argoCISecretsAccount, options.argoExecutorAccount)
@@ -862,6 +867,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 		MutationGate:              anchors.AllowMutation,
 		PromotionWorkspaceRoot:    filepath.Join(options.dataRoot, "work"),
 		SecretAccess:              database,
+		KubeVirtGrants:            database,
 		SecretStoreVerifier:       buildSecretStoreVerifier(options, kube),
 		SecretAccessReconciler:    accessReconciler,
 		RepositoryRemover:         database,

@@ -117,7 +117,7 @@ func TestChartArgoExecutorRulesLiveInTheirOwnRole(t *testing.T) {
 	docs := renderArgoRBAC(t)
 	role := findChartRBACDoc(t, docs, "Role", "oberth-argo-executor-tokens")
 	want := []map[string]any{
-		{"apiGroups": []any{""}, "resources": []any{"serviceaccounts/token"}, "resourceNames": []any{"oberth-argo-executor"}, "verbs": []any{"create"}},
+		{"apiGroups": []any{""}, "resources": []any{"serviceaccounts/token"}, "resourceNames": []any{"oberth-argo-executor", "oberth-argo-vm-launcher"}, "verbs": []any{"create"}},
 		{"apiGroups": []any{""}, "resources": []any{"configmaps"}, "resourceNames": []any{"kube-root-ca.crt"}, "verbs": []any{"get"}},
 	}
 	if got, wantCanonical := canonicalRules(t, role.Rules), canonicalRules(t, want); got != wantCanonical {
@@ -145,6 +145,45 @@ func TestChartArgoExecutorRulesLiveInTheirOwnRole(t *testing.T) {
 				t.Fatalf("frozen Role oberth-argo carries an executor rule: %v", rule)
 			}
 		}
+	}
+}
+
+func TestChartVMLauncherHasOnlyVMIAndTaskResultRoles(t *testing.T) {
+	out, err := exec.Command("helm", "template", "oberth", "../../charts/oberth", "--set", "image.ref=example.invalid/oberth@"+testImageDigest, "-s", "templates/argo-identities.yaml").Output()
+	if err != nil {
+		t.Fatalf("render VM launcher identity: %v", err)
+	}
+	decoder := yaml.NewYAMLOrJSONDecoder(bytes.NewReader(out), 4096)
+	var docs []chartRBACDoc
+	for {
+		var doc chartRBACDoc
+		err := decoder.Decode(&doc)
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		if doc.Kind != "" {
+			docs = append(docs, doc)
+		}
+	}
+	role := findChartRBACDoc(t, docs, "Role", "oberth-argo-vm-launcher")
+	want := []map[string]any{{"apiGroups": []any{"kubevirt.io"}, "resources": []any{"virtualmachineinstances"}, "verbs": []any{"create", "get", "list", "watch", "delete"}}}
+	if got := canonicalRules(t, role.Rules); got != canonicalRules(t, want) {
+		t.Fatalf("VM launcher Role rules = %s", got)
+	}
+	shared := findChartRBACDoc(t, docs, "Role", "oberth-argo-executor")
+	for _, rule := range shared.Rules {
+		for _, resource := range toStrings(rule["resources"]) {
+			if resource == "virtualmachineinstances" {
+				t.Fatalf("shared executor received VMI permission: %v", rule)
+			}
+		}
+	}
+	binding := findChartRBACDoc(t, docs, "RoleBinding", "oberth-argo-vm-launcher-taskresults")
+	if binding.RoleRef["name"] != "oberth-argo-executor" {
+		t.Fatalf("task result binding = %v", binding.RoleRef)
 	}
 }
 

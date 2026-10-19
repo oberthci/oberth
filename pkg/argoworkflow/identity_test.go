@@ -248,7 +248,9 @@ func TestForceIdentityLeavesNoUnnormalizedIdentity(t *testing.T) {
 	}
 	t.Logf("populated %d identity fields with a poison value", populated)
 
-	if err := ForceIdentity(workflow, testBranchIdentity()); err != nil {
+	identity := testBranchIdentity()
+	identity.VMLauncherServiceAccountName = "oberth-argo-vm-launcher"
+	if err := ForceIdentity(workflow, identity); err != nil {
 		t.Fatalf("force: %v", err)
 	}
 	for _, found := range collectIdentityValues(t, reflect.ValueOf(workflow).Elem(), "workflow") {
