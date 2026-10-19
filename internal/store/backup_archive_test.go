@@ -24,7 +24,7 @@ func backupFixture(t *testing.T) (string, *Store) {
 		t.Fatal(e)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	if _, e := db.db.Exec("DROP TABLE kubevirt_grants; DROP TABLE uplink_scopes; ALTER TABLE issues DROP COLUMN scope_upstream_id; ALTER TABLE step_results DROP COLUMN termination_json; DELETE FROM schema_migrations WHERE version>=21; PRAGMA wal_autocheckpoint=0"); e != nil {
+	if _, e := db.db.Exec("DROP TABLE maintenance_windows; DROP TABLE kubevirt_grants; DROP TABLE uplink_scopes; ALTER TABLE issues DROP COLUMN scope_upstream_id; ALTER TABLE step_results DROP COLUMN termination_json; DELETE FROM schema_migrations WHERE version>=21; PRAGMA wal_autocheckpoint=0"); e != nil {
 		t.Fatal(e)
 	}
 	if _, e := db.AppendAuditAction(context.Background(), model.AuditActionSpec{Actor: "fixture", Action: "backup-test", ResourceType: "backup", ResourceID: "private-canary"}); e != nil {

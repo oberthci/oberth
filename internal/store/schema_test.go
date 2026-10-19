@@ -26,8 +26,8 @@ func (e sqliteResultError) Code() int { return int(e) }
 func TestSchemaMigrationsAreContiguous(t *testing.T) {
 	t.Parallel()
 
-	if latestMigrationVersion != 24 {
-		t.Fatalf("latest migration version = %d, want 24", latestMigrationVersion)
+	if latestMigrationVersion != 25 {
+		t.Fatalf("latest migration version = %d, want 25", latestMigrationVersion)
 	}
 	if len(migrations) != latestMigrationVersion {
 		t.Fatalf("migration count = %d, want %d", len(migrations), latestMigrationVersion)
@@ -602,7 +602,7 @@ DROP TABLE vm_suite_resources;
 DROP TABLE vm_suite_executions;
 DROP TABLE vm_capacity_slots;
 DROP TABLE vm_executions;
-DROP TABLE kubevirt_grants;
+DROP TABLE maintenance_windows; DROP TABLE kubevirt_grants;
 ALTER TABLE step_results DROP COLUMN termination_json;
 DELETE FROM schema_migrations WHERE version > 1;`); err != nil {
 		_ = raw.Close()
@@ -937,6 +937,7 @@ func TestFreshSchemaIsCompleteAndIdempotent(t *testing.T) {
 		"issue_locks",
 		"issues",
 		"kubevirt_grants",
+		"maintenance_windows",
 		"pending_token_credentials",
 		"promotion_grants",
 		"promotions",
@@ -970,6 +971,8 @@ func TestFreshSchemaIsCompleteAndIdempotent(t *testing.T) {
 		"ci_issue_work_run_idx",
 		"issue_locks_expiry_idx",
 		"issues_page_idx",
+		"maintenance_windows_created_idx",
+		"maintenance_windows_open_idx",
 		"manual_issues_page_idx",
 		"one_open_ci_issue_idx",
 		"promotion_grants_match_idx",
@@ -1006,6 +1009,8 @@ func TestFreshSchemaIsCompleteAndIdempotent(t *testing.T) {
 		"ci_issue_projection_monotonic",
 		"ci_issue_work_no_delete",
 		"ci_issue_work_no_update",
+		"maintenance_windows_no_delete",
+		"maintenance_windows_terminal_immutable",
 		"promotion_grants_guard_update",
 		"promotion_grants_no_delete",
 		"promotions_guard_update",

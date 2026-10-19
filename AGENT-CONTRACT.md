@@ -1682,6 +1682,9 @@ version that is recorded on live databases must never be rewritten.
 | v22 | Unreleased (#073) | Upstream-scoped uplinks: uplink_scopes table (one upstream name per row; none = unscoped); issues gain nullable scope_upstream_id for manual issues | Database restore |
 | v23 | Unreleased (#917) | Audited repository-scoped KubeVirt grants keyed by durable repo ID | Database restore |
 | v24 | Unreleased (#954) | Partial index for passed runs by repository and tested SHA, used to validate SHA-pinned fragments | Database restore |
+| v25 | v0.17.41 (#1007) | maintenance_windows: booked maintenance windows (state machine booked→draining→active→ended/aborted), single open window, immutable terminal rows | Database restore |
+
+The five maintenance state names and v25 columns are frozen. Later migrations may add nullable columns; they must not rename, remove, or reinterpret a state. An N+1 server must read a window booked by N, and the state constraint rejects unknown values.
 
 **Contract test:** `TestEveryMigrationDocumentedInAgentContract` asserts that
 every migration version in `internal/store/schema.go` has a corresponding

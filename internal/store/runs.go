@@ -248,7 +248,15 @@ ON CONFLICT(run_id) DO UPDATE SET
 			}
 		}
 	}
-	return model.EnqueueRunResult{Run: value, Cancellations: cancellations}, nil
+	result := model.EnqueueRunResult{Run: value, Cancellations: cancellations}
+	window, err := currentMaintenanceTx(ctx, tx)
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		return model.EnqueueRunResult{}, err
+	}
+	if err == nil && window.State.Holds() {
+		result.Maintenance = maintenanceHold(window)
+	}
+	return result, nil
 }
 
 func (s *Store) ClaimNextRun(ctx context.Context) (model.Run, error) {
@@ -260,6 +268,10 @@ WHERE queue_sequence = (
     SELECT candidate.queue_sequence
     FROM runs AS candidate
     WHERE candidate.status = 'queued'
+	  AND NOT EXISTS (
+	      SELECT 1 FROM maintenance_windows
+	      WHERE open_singleton = 1 AND state IN ('draining', 'active')
+	  )
       AND NOT EXISTS (
           SELECT 1
           FROM publications AS publication
@@ -783,13 +795,15 @@ UPDATE runs
 SET status = ?, phase = ?,
     tested_sha = CASE WHEN ? = '' THEN tested_sha ELSE ? END,
     base_sha = CASE WHEN ? = '' THEN base_sha ELSE ? END,
-    failed_burn = ?, failed_step = ?, error = ?, finished_at = ?, updated_at = ?
+    failed_burn = ?, failed_step = ?, error = ?,
+    reason = CASE WHEN ? = '' THEN reason ELSE ? END,
+    finished_at = ?, updated_at = ?
 WHERE id = ? AND status IN ('queued', 'running')
 RETURNING `+runColumns,
 		result.Status, phase,
 		result.TestedSHA, result.TestedSHA,
 		result.BaseSHA, result.BaseSHA,
-		result.FailedBurn, result.FailedStep, result.Error, now, now, id))
+		result.FailedBurn, result.FailedStep, result.Error, result.Reason, result.Reason, now, now, id))
 	if errors.Is(err, sql.ErrNoRows) {
 		var exists int
 		if lookupErr := tx.QueryRowContext(ctx, `SELECT count(*) FROM runs WHERE id = ?`, id).Scan(&exists); lookupErr != nil {

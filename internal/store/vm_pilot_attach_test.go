@@ -66,7 +66,7 @@ WHEN NOT (
     )
 )
 BEGIN SELECT RAISE(ABORT, 'promotion transition is immutable'); END;
-DROP TABLE kubevirt_grants; DROP TABLE uplink_scopes; ALTER TABLE issues DROP COLUMN scope_upstream_id;
+DROP TABLE maintenance_windows; DROP TABLE kubevirt_grants; DROP TABLE uplink_scopes; ALTER TABLE issues DROP COLUMN scope_upstream_id;
 ALTER TABLE step_results DROP COLUMN termination_json;
 DELETE FROM schema_migrations WHERE version>=15`)
 	mustPilot(t, err)

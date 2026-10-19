@@ -13,7 +13,7 @@ type migration struct {
 func LatestMigrationVersion() int { return latestMigrationVersion }
 
 const (
-	latestMigrationVersion = 24
+	latestMigrationVersion = 25
 	// oberthSchemaIdentity is the fresh-deployment default. Existing deployments
 	// supply their original immutable identity through ProtocolConfig; bootstrap
 	// SQL and legacy schema validation use that exact configured operand.
@@ -1084,5 +1084,41 @@ ALTER TABLE issues ADD COLUMN scope_upstream_id INTEGER;`,
 		version: 24,
 		sql: `CREATE INDEX IF NOT EXISTS runs_passed_tested_sha_idx
     ON runs(repo_id, tested_sha) WHERE status = 'passed';`,
+	},
+	{
+		version: 25,
+		sql: `CREATE TABLE maintenance_windows (
+    id TEXT NOT NULL PRIMARY KEY,
+    state TEXT NOT NULL CHECK (state IN ('booked','draining','active','ended','aborted')),
+    open_singleton INTEGER CHECK (open_singleton IS NULL OR open_singleton = 1),
+    booked_by TEXT NOT NULL,
+    reason TEXT NOT NULL DEFAULT '' CHECK (length(reason) <= 512),
+    not_before INTEGER NOT NULL,
+    drain_timeout_ns INTEGER NOT NULL CHECK (drain_timeout_ns > 0),
+    auto_end_ns INTEGER NOT NULL DEFAULT 0 CHECK (auto_end_ns >= 0),
+    booked_version TEXT NOT NULL DEFAULT '',
+    drain_started_at INTEGER,
+    forced_at INTEGER,
+    forced_by TEXT NOT NULL DEFAULT '',
+    started_at INTEGER,
+    resumed_at INTEGER,
+    resumed_version TEXT NOT NULL DEFAULT '',
+    ended_at INTEGER,
+    ended_by TEXT NOT NULL DEFAULT '',
+    end_reason TEXT NOT NULL DEFAULT '' CHECK (end_reason IN ('', 'ended', 'auto_end', 'canceled', 'drain_timeout')),
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    CHECK ((state IN ('ended','aborted')) = (ended_at IS NOT NULL)),
+    CHECK ((state IN ('booked','draining','active')) = (open_singleton IS NOT NULL))
+);
+CREATE UNIQUE INDEX maintenance_windows_open_idx ON maintenance_windows(open_singleton);
+CREATE INDEX maintenance_windows_created_idx ON maintenance_windows(created_at DESC);
+CREATE TRIGGER maintenance_windows_terminal_immutable
+BEFORE UPDATE ON maintenance_windows
+WHEN OLD.state IN ('ended','aborted')
+BEGIN SELECT RAISE(ABORT, 'terminal maintenance windows are immutable'); END;
+CREATE TRIGGER maintenance_windows_no_delete
+BEFORE DELETE ON maintenance_windows
+BEGIN SELECT RAISE(ABORT, 'maintenance windows are append-only'); END;`,
 	},
 }

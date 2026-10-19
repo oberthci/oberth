@@ -163,6 +163,7 @@ type RunSpec struct {
 
 type RunResult struct {
 	Status     RunStatus
+	Reason     string
 	Phase      string
 	TestedSHA  string
 	BaseSHA    string
@@ -208,6 +209,7 @@ type EnqueueRunResult struct {
 	Run
 	Cancellations []RunCancellation
 	Duplicate     bool
+	Maintenance   *MaintenanceHold
 }
 
 type ReceiveEvent struct {
