@@ -1334,6 +1334,20 @@ continuity checks; it must never be used to reset or bypass those checks.
   pod, same deadline, kubelet exit code. It is not Lane B (trusted-suite
   verdict). The consumer asserts `-accel kvm` only when `OBERTH_KVM=1` is
   present; no TCG fallback is permitted with the env set.
+- Argo `resource:` templates are admitted only for an administrator-granted
+  repository, and only as top-level named `kubevirt.io/v1`
+  `VirtualMachineInstance` create/get/delete templates. The server validates
+  the complete inline manifest before Argo substitution, permits only the two
+  `{{workflow.name}}` slots for the VMI name and run label, and refuses carriage
+  returns and multiple YAML documents. Credentialed workflows cannot use VMIs.
+  `ForceIdentity` assigns a dedicated VM-launcher executor ServiceAccount to
+  these templates; ordinary templates retain the shared executor identity.
+  The VM-launcher Role has only VMI create/get/list/watch/delete in the CI
+  namespace, and Oberth deletes run-labelled survivors after workflow
+  completion or cancellation. The grant is stored by repository ID and audited;
+  `kubevirt_grant` / `kubevirt_revoke` (MCP) or `oberth kubevirt grant|revoke`
+  (in-pod CLI) control it. The administrator must configure a containerDisk
+  registry-prefix allowlist; an empty list refuses VMI creation.
 - Security-backported runner tools are rebuilt from immutable upstream release
   source, identify themselves as Oberth derivatives, and are bound to their
   patched module versions and exact binary digests by the image contract.
@@ -1642,6 +1656,7 @@ version that is recorded on live databases must never be rewritten.
 | v20 | Unreleased (#278) | vm_executions: execution kind, immutable KVM preflight intent/Workflow UID/receipt; preserve legacy VM lifecycle checks and shared capacity | Database restore |
 | v21 | Unreleased (#894) | Nullable bounded step termination diagnostics; old rows remain explicitly unavailable, with no inferred OOM or backfill | Database restore |
 | v22 | Unreleased (#073) | Upstream-scoped uplinks: uplink_scopes table (one upstream name per row; none = unscoped); issues gain nullable scope_upstream_id for manual issues | Database restore |
+| v23 | Unreleased (#917) | Audited repository-scoped KubeVirt grants keyed by durable repo ID | Database restore |
 
 **Contract test:** `TestEveryMigrationDocumentedInAgentContract` asserts that
 every migration version in `internal/store/schema.go` has a corresponding

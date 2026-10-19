@@ -102,6 +102,9 @@ func admitVMIResource(where string, tmpl *wfv1.ResourceTemplate, prefixes []stri
 	if len(tmpl.Manifest) == 0 || len(tmpl.Manifest) > maxVMIManifestBytes {
 		return fmt.Errorf("argoworkflow: %s.manifest must be inline and at most %d bytes", where, maxVMIManifestBytes)
 	}
+	if strings.Contains(tmpl.Manifest, "\r") {
+		return fmt.Errorf("argoworkflow: %s.manifest must not contain carriage returns", where)
+	}
 	// Argo substitutes parameters after this admission check. Only the exact
 	// workflow name in metadata.name and the run label is permitted to vary.
 	if strings.Contains(tmpl.Manifest, "{{=") || strings.Count(tmpl.Manifest, "{{workflow.name}}") != 2 ||
@@ -244,6 +247,11 @@ func validateContainerDiskPrefixes(prefixes []string) error {
 		}
 	}
 	return nil
+}
+
+// ValidateContainerDiskPrefixes checks the administrator's image allowlist.
+func ValidateContainerDiskPrefixes(prefixes []string) error {
+	return validateContainerDiskPrefixes(prefixes)
 }
 
 type vmiUsage struct {

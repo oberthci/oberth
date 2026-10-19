@@ -71,6 +71,7 @@ type APIConfig struct {
 	PromotionWorkspaceRoot    string
 	RemoveWorkspace           func(string) error
 	SecretAccess              SecretAccessStore
+	KubeVirtGrants            KubeVirtGrantStore
 	SecretStoreVerifier       SecretStoreVerifier
 	SecretAccessReconciler    *AccessReconciler
 	RepositoryRemover         RepositoryRemover
@@ -103,6 +104,7 @@ type API struct {
 	promotionWorkspaceRoot    string
 	workspaces                *workspaceLifecycle
 	secretAccess              SecretAccessStore
+	kubeVirtGrants            KubeVirtGrantStore
 	secretStoreVerifier       SecretStoreVerifier
 	secretAccessReconciler    *AccessReconciler
 	repositoryRemover         RepositoryRemover
@@ -159,6 +161,7 @@ func NewAPI(config APIConfig) (*API, error) {
 		health: config.Health, signals: signals, maximumWait: maximumWait, mutationGate: mutationGate,
 		promotionWorkspaceRoot: promotionWorkspaceRoot, workspaces: workspaces,
 		secretAccess: config.SecretAccess, secretAccessReconciler: config.SecretAccessReconciler,
+		kubeVirtGrants:      config.KubeVirtGrants,
 		secretStoreVerifier: config.SecretStoreVerifier,
 		repositoryRemover:   config.RepositoryRemover, removeGitCache: config.RemoveGitCache,
 		promotionGrants: config.PromotionGrants, promotionGrantMaxLifetime: promotionGrantMaxLifetime,
@@ -503,6 +506,14 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 			return service.accessListPending(ctx, arguments.Repo)
 		}
 		return service.accessList(ctx, arguments.Repo, arguments.Revoked)
+	case "kubevirt_grant", "kubevirt_revoke", "kubevirt_grant_get":
+		var arguments struct {
+			Repo string `json:"repo"`
+		}
+		if err := decodeTool(raw, &arguments); err != nil {
+			return nil, err
+		}
+		return service.kubeVirtGrantTool(ctx, actor, name, arguments.Repo)
 	case "access_allow":
 		var arguments struct {
 			Repo   string `json:"repo"`
@@ -1931,6 +1942,7 @@ func mutatingTool(name string) bool {
 	switch name {
 	case "sync", "promote", "publish_retry", "run_retry", "issue_create", "issue_update", "issue_append", "issue_close", "issue_reopen", "issue_delete", "issue_lock",
 		"access_allow", "access_revoke",
+		"kubevirt_grant", "kubevirt_revoke",
 		"repo_remove",
 		"secretstore_sync_receipt",
 		"promote_grant", "promote_grant_revoke":

@@ -39,6 +39,10 @@ type SecretAccessLoader interface {
 	ActiveSecretGrants(ctx context.Context, repoID int64) (map[string]map[string]bool, error)
 }
 
+type KubeVirtGrantLoader interface {
+	ActiveKubeVirtGrant(context.Context, int64) (bool, error)
+}
+
 // ReconcilerHealthChecker reports whether the access reconciler has completed
 // at least one successful reconciliation. Credentialed admission must not
 // proceed before the initial reconcile succeeds, because a transient initial
@@ -63,6 +67,7 @@ type ArgoJobs struct {
 	auditor           service.Auditor
 	config            argojob.Config
 	secretAccess      SecretAccessLoader
+	kubeVirtGrants    KubeVirtGrantLoader
 	declarations      DeclarationRecorder
 	fragments         FragmentLoader
 	collector         ArtifactCollector
@@ -153,6 +158,11 @@ func (jobs *ArgoJobs) SetDeclarationRecorder(recorder DeclarationRecorder) {
 	jobs.mu.Lock()
 	defer jobs.mu.Unlock()
 	jobs.declarations = recorder
+}
+
+// SetKubeVirtGrantLoader enables live, repository-scoped VM admission checks.
+func (jobs *ArgoJobs) SetKubeVirtGrantLoader(loader KubeVirtGrantLoader) {
+	jobs.kubeVirtGrants = loader
 }
 
 // SetIdentityStore wires the live identity store after construction.
@@ -350,6 +360,13 @@ func (jobs *ArgoJobs) create(ctx context.Context, request service.JobRequest, tr
 		SourceDir: request.SourceDir, ApprovedSecrets: approvedSecrets,
 		StepGrants: stepGrants,
 		Fragments:  fragments,
+	}
+	if jobs.kubeVirtGrants != nil {
+		granted, loadErr := jobs.kubeVirtGrants.ActiveKubeVirtGrant(ctx, request.Repository.ID)
+		if loadErr != nil {
+			return fmt.Errorf("app: load KubeVirt grant for %s: %w", request.Repository.Name, loadErr)
+		}
+		submission.KubeVirtGranted = granted
 	}
 	// Snapshot the identity store once for both Builds of this admission
 	// (audit and controller), so the audit record and the pod spec agree
@@ -562,6 +579,9 @@ func (jobs *ArgoJobs) Wait(ctx context.Context, name string, destination io.Writ
 	if err != nil {
 		return service.JobResult{}, err
 	}
+	if err := jobs.cleanupVMIs(ctx, name, intent.runID); err != nil {
+		return service.JobResult{}, err
+	}
 	if reason := jobs.collectArtifacts(context.WithoutCancel(ctx), name, intent.runID, intent.trigger); reason != "" {
 		jobs.recordArtifactFailure(context.WithoutCancel(ctx), intent.runID, reason)
 	}
@@ -623,6 +643,18 @@ func (jobs *ArgoJobs) TerminalResult(ctx context.Context, name string) (service.
 		return service.JobResult{}, service.ErrJobNotTerminal
 	}
 	return jobs.result(*completion), nil
+}
+
+func (jobs *ArgoJobs) cleanupVMIs(ctx context.Context, name, runID string) error {
+	cleaner, ok := jobs.controller.(interface {
+		CleanupVMIs(context.Context, string, string) error
+	})
+	if !ok {
+		return nil
+	}
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	defer cancel()
+	return cleaner.CleanupVMIs(cleanupCtx, name, runID)
 }
 
 // Owns reports whether this engine created the named object. The dispatcher

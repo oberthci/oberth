@@ -169,3 +169,33 @@ roleRef:
   kind: Role
   name: {{ include "oberth.fullname" $ }}-argo-release-tokens
 {{- end }}
+---
+# The server deletes only run-labelled VMIs after a Workflow is terminal or
+# cancelled. Keep this backstop separate from the frozen Argo Role.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "oberth.fullname" . }}-argo-vmi-cleanup
+  namespace: {{ .Values.argo.namespace }}
+  labels:
+    {{- include "oberth.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["kubevirt.io"]
+    resources: ["virtualmachineinstances"]
+    verbs: ["list", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "oberth.fullname" . }}-argo-vmi-cleanup
+  namespace: {{ .Values.argo.namespace }}
+  labels:
+    {{- include "oberth.labels" . | nindent 4 }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "oberth.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "oberth.fullname" . }}-argo-vmi-cleanup

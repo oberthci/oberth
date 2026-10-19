@@ -40,7 +40,7 @@ func main() {
 	}
 }
 
-const usageCommands = "audit, init, validate, install, setup, upgrade, backup, restore, serve, upstream, repo, schedules, fragments, artifacts, runs, run, log, repos, issues, status, uplink, access, secretstore, mcp, preflight, or version"
+const usageCommands = "audit, init, validate, install, setup, upgrade, backup, restore, serve, upstream, repo, schedules, fragments, artifacts, runs, run, log, repos, issues, status, uplink, access, kubevirt, secretstore, mcp, preflight, or version"
 
 func runCLI(ctx context.Context, arguments []string, input io.Reader, output io.Writer) error {
 	var err error
@@ -78,6 +78,7 @@ Commands:
   status        Show CI status for a ref
   uplink        Manage uplink identities
   access        Manage secret access grants
+  kubevirt      Manage repository VMI grants
   secretstore   Verify and inspect the secret store
   mcp           Call Oberth MCP tools
   preflight     Release pre-flight checks
@@ -118,6 +119,8 @@ Commands:
 		return runUplink(ctx, arguments[1:], input, output)
 	case "access":
 		return runAccess(ctx, arguments[1:], output)
+	case "kubevirt":
+		return runKubeVirtGrant(ctx, arguments[1:], output)
 	case "secretstore":
 		return runSecretStore(ctx, arguments[1:], output)
 	case "mcp":

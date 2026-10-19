@@ -249,6 +249,8 @@ spec:
             - --argo-credentialed-serviceaccount={{ .Values.argo.credentialedServiceAccount | default "oberth-argo-credentialed" }}
             - --argo-ci-secrets-serviceaccount={{ (.Values.argo.ciSecrets).serviceAccount | default "oberth-argo-ci-secrets" }}
             - --argo-executor-serviceaccount={{ .Values.argo.executorServiceAccount }}
+            - --argo-vm-launcher-serviceaccount={{ .Values.argo.vmLauncherServiceAccount | default "oberth-argo-vm-launcher" }}
+            - "--argo-container-disk-prefixes={{ join "," (.Values.argo.containerDiskPrefixes | default list) }}"
             - --argo-workflow-timeout={{ .Values.argo.workflowTimeout }}
             - --argo-workflow-ttl={{ .Values.argo.workflowTTL }}
             {{- if .Values.argo.sourceStorageClass }}

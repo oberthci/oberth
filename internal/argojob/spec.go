@@ -110,7 +110,9 @@ type Config struct {
 	// Argo requires it whenever a step container's token is withheld, and it
 	// mounts this identity's token into the executor container only. That is
 	// what lets a branch-tier step container run with no token at all.
-	ExecutorServiceAccount string
+	ExecutorServiceAccount   string
+	VMLauncherServiceAccount string
+	ContainerDiskPrefixes    []string
 
 	// RunnerImagePrefixes is the same administrator allowlist the Go path
 	// applies to a declared RunnerImage.
@@ -308,6 +310,9 @@ func (config Config) Validate() error {
 		"ci-secrets ServiceAccount":   config.CISecretsServiceAccount,
 		"executor ServiceAccount":     config.ExecutorServiceAccount,
 	}
+	if config.VMLauncherServiceAccount != "" {
+		accounts["VM-launcher ServiceAccount"] = config.VMLauncherServiceAccount
+	}
 	for name, account := range accounts {
 		if messages := k8svalidation.IsDNS1123Subdomain(account); len(messages) != 0 {
 			problems = append(problems, fmt.Errorf("argojob: %s %q is invalid: %s",
@@ -332,6 +337,11 @@ func (config Config) Validate() error {
 	}
 	if err := periapsis.ValidateRunnerImagePrefixes(config.RunnerImagePrefixes); err != nil {
 		problems = append(problems, fmt.Errorf("argojob: %w", err))
+	}
+	if len(config.ContainerDiskPrefixes) > 0 {
+		if err := argoworkflow.ValidateContainerDiskPrefixes(config.ContainerDiskPrefixes); err != nil {
+			problems = append(problems, fmt.Errorf("argojob: %w", err))
+		}
 	}
 	if config.VaultAddress != "" && !strings.HasPrefix(config.VaultAddress, "https://") {
 		// The pod authenticates to Vault with its ServiceAccount token and
@@ -513,7 +523,8 @@ func vaultAddressRequiresPinnedAnchor(address string) bool {
 
 // Request is one run's submission intent.
 type Request struct {
-	nonrootProof *nonrootProof
+	KubeVirtGranted bool
+	nonrootProof    *nonrootProof
 	// TrustedKVM is a server-created, journaled preflight admission.
 	TrustedKVM *vmrunner.KVMIntent
 	RunID      string
@@ -635,6 +646,9 @@ func Build(config Config, request Request) (*wfv1.Workflow, error) {
 	// independently approved WIF leaf can select the per-repository identity
 	// and its own audience-scoped projection without any Vault wiring.
 	credentialed := len(declaredPaths) > 0
+	if (credentialed || len(wifLeaves) > 0) && hasVMIResources(workflow) {
+		return nil, errors.New("argojob: VMI resource templates are refused in credentialed workflows")
+	}
 
 	// Refuse a credentialed run the deployment cannot possibly credential, at
 	// admission, rather than letting the whole build run and die on the first
@@ -661,7 +675,7 @@ func Build(config Config, request Request) (*wfv1.Workflow, error) {
 	// Prepare admits and binds in one call so the order cannot be got wrong.
 	if err := argoworkflow.Prepare(
 		workflow,
-		argoworkflow.Policy{RunnerImagePrefixes: config.RunnerImagePrefixes},
+		argoworkflow.Policy{RunnerImagePrefixes: config.RunnerImagePrefixes, KubeVirt: request.KubeVirtGranted, ContainerDiskPrefixes: config.ContainerDiskPrefixes},
 		identity,
 	); err != nil {
 		return nil, err
@@ -944,6 +958,7 @@ func (config Config) identityFor(trigger periapsis.Trigger, hasSecretPaths bool)
 			Namespace:                    config.Namespace,
 			ServiceAccountName:           config.PipelineServiceAccount,
 			ExecutorServiceAccountName:   config.ExecutorServiceAccount,
+			VMLauncherServiceAccountName: config.VMLauncherServiceAccount,
 			AutomountServiceAccountToken: false,
 		}, nil
 	}
@@ -973,6 +988,15 @@ func (config Config) identityFor(trigger periapsis.Trigger, hasSecretPaths bool)
 	default:
 		return argoworkflow.Identity{}, fmt.Errorf("argojob: no credentialed identity exists for trigger %q", trigger)
 	}
+}
+
+func hasVMIResources(workflow *wfv1.Workflow) bool {
+	for _, template := range workflow.Spec.Templates {
+		if template.Resource != nil {
+			return true
+		}
+	}
+	return false
 }
 
 // vaultRoleFor selects the OpenBao Kubernetes-auth role a credentialed run's

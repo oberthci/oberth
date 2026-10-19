@@ -29,7 +29,7 @@ func TestStepDiagnosticMigrationAndDurableRoundTrip(t *testing.T) {
 	if _, err = s.PutStepResult(ctx, step); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = s.db.Exec(`DROP TABLE uplink_scopes; ALTER TABLE issues DROP COLUMN scope_upstream_id; ALTER TABLE step_results DROP COLUMN termination_json; DELETE FROM schema_migrations WHERE version>=21;`); err != nil {
+	if _, err = s.db.Exec(`DROP TABLE kubevirt_grants; DROP TABLE uplink_scopes; ALTER TABLE issues DROP COLUMN scope_upstream_id; ALTER TABLE step_results DROP COLUMN termination_json; DELETE FROM schema_migrations WHERE version>=21;`); err != nil {
 		t.Fatal(err)
 	}
 	if err = s.Close(); err != nil {

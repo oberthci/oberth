@@ -590,6 +590,8 @@
           "type": "string",
           "description": "Identity for Argo's own executor containers. Must differ from all pipeline identities."
         },
+		"vmLauncherServiceAccount": {"type": "string"},
+		"containerDiskPrefixes": {"type": "array", "items": {"type": "string"}},
         "workflowTimeout": {
           "type": "string"
         },

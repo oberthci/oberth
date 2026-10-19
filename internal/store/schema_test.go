@@ -26,8 +26,8 @@ func (e sqliteResultError) Code() int { return int(e) }
 func TestSchemaMigrationsAreContiguous(t *testing.T) {
 	t.Parallel()
 
-	if latestMigrationVersion != 22 {
-		t.Fatalf("latest migration version = %d, want 22", latestMigrationVersion)
+	if latestMigrationVersion != 23 {
+		t.Fatalf("latest migration version = %d, want 23", latestMigrationVersion)
 	}
 	if len(migrations) != latestMigrationVersion {
 		t.Fatalf("migration count = %d, want %d", len(migrations), latestMigrationVersion)
@@ -602,6 +602,7 @@ DROP TABLE vm_suite_resources;
 DROP TABLE vm_suite_executions;
 DROP TABLE vm_capacity_slots;
 DROP TABLE vm_executions;
+DROP TABLE kubevirt_grants;
 ALTER TABLE step_results DROP COLUMN termination_json;
 DELETE FROM schema_migrations WHERE version > 1;`); err != nil {
 		_ = raw.Close()
@@ -935,6 +936,7 @@ func TestFreshSchemaIsCompleteAndIdempotent(t *testing.T) {
 		"grant_declarations",
 		"issue_locks",
 		"issues",
+		"kubevirt_grants",
 		"pending_token_credentials",
 		"promotion_grants",
 		"promotions",

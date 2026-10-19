@@ -170,7 +170,7 @@ func newScopeFixture(t *testing.T) *scopeFixture {
 	fixture.service, err = NewAPI(APIConfig{
 		Runs: database, History: database, Repositories: database, Issues: database,
 		Promotions: database, Logs: logs, Artifacts: kept, Auditor: database,
-		SecretAccess: database, PromotionGrants: database, RepositoryRemover: database,
+		SecretAccess: database, KubeVirtGrants: database, PromotionGrants: database, RepositoryRemover: database,
 		KVMPreflights: database, Health: fixture.health, Signals: NewSignals(),
 		MaximumWait: 50 * time.Millisecond, PromotionWorkspaceRoot: filepath.Join(root, "promotion-work"),
 		SecretStoreVerifier: func(context.Context, api.SecretStoreVerifyRequest) (api.SecretStoreVerifyResponse, error) {
@@ -420,6 +420,7 @@ func TestScopedUplinkCannotTellHiddenFromMissing(t *testing.T) {
 		{"promotion_list", map[string]any{"repo": hiddenRepo}, map[string]any{"repo": missingRepo}},
 		{"promote_grant_list", map[string]any{"repo": hiddenRepo}, map[string]any{"repo": missingRepo}},
 		{"access_list", map[string]any{"repo": hiddenRepo}, map[string]any{"repo": missingRepo}},
+		{"kubevirt_grant_get", map[string]any{"repo": hiddenRepo}, map[string]any{"repo": missingRepo}},
 		{"access_list", map[string]any{"repo": hiddenRepo, "pending": true}, map[string]any{"repo": missingRepo, "pending": true}},
 	}
 	for _, pair := range pairs {
@@ -474,6 +475,8 @@ func TestScopedAdminCannotActOutsideItsUpstream(t *testing.T) {
 	for tool, arguments := range map[string]map[string]any{
 		"access_allow":         {"repo": hiddenRepo, "step": "deploy", "secret": "oberth/data/x"},
 		"access_revoke":        {"repo": hiddenRepo, "step": "release", "secret": "oberth/data/codeberg/token"},
+		"kubevirt_grant":       {"repo": hiddenRepo},
+		"kubevirt_revoke":      {"repo": hiddenRepo},
 		"repo_remove":          {"repo": hiddenRepo},
 		"promote_grant":        {"repo": hiddenRepo, "sha": fixture.runs["codeberg"][0].SHA, "branch": "main", "expires": "1h"},
 		"promote_grant_revoke": {"id": fixture.grants["codeberg"].ID},
@@ -500,6 +503,9 @@ func TestScopedAdminCannotActOutsideItsUpstream(t *testing.T) {
 	// Inside the scope the admin still acts.
 	if _, err := fixture.call(scopedAdmin, "access_allow", map[string]any{"repo": "github/oberthci/oberth", "step": "deploy", "secret": "oberth/data/github/deploy"}); err != nil {
 		t.Fatalf("in-scope access_allow: %v", err)
+	}
+	if _, err := fixture.call(scopedAdmin, "kubevirt_grant", map[string]any{"repo": "github/oberthci/oberth"}); err != nil {
+		t.Fatalf("in-scope kubevirt_grant: %v", err)
 	}
 }
 
@@ -582,11 +588,13 @@ var toolScopeBehaviour = map[string]string{
 	"promote_status": "lookup", "issue_get": "lookup", "issue_get_many": "lookup",
 	"run_list": "filtered", "promotion_list": "filtered", "issue_list": "filtered",
 	"access_list": "filtered", "repo_list": "filtered", "promote_grant_list": "filtered",
-	"system_status": "filtered",
-	"sync":          "mutation", "promote": "mutation", "publish_retry": "mutation", "run_retry": "mutation",
+	"kubevirt_grant_get": "lookup",
+	"system_status":      "filtered",
+	"sync":               "mutation", "promote": "mutation", "publish_retry": "mutation", "run_retry": "mutation",
 	"issue_create": "mutation", "issue_update": "mutation", "issue_append": "mutation",
 	"issue_close": "mutation", "issue_reopen": "mutation", "issue_delete": "mutation",
 	"issue_lock": "mutation", "access_allow": "mutation", "access_revoke": "mutation",
+	"kubevirt_grant": "mutation", "kubevirt_revoke": "mutation",
 	"repo_remove": "mutation", "promote_grant": "mutation", "promote_grant_revoke": "mutation",
 	"secretstore_verify": "refused", "secretstore_plan": "refused", "secretstore_sync_receipt": "refused",
 }

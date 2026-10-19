@@ -17,6 +17,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 
 	"github.com/oberthci/oberth/internal/runprogress"
@@ -63,7 +64,14 @@ type Controller struct {
 	logs      PodLogReader
 	seeder    *SourceSeeder
 	config    Config
+	vmi       dynamic.Interface
 	interval  time.Duration
+}
+
+// WithVMIClient enables the run cleanup backstop for admitted VM resources.
+func (controller *Controller) WithVMIClient(client dynamic.Interface) *Controller {
+	controller.vmi = client
+	return controller
 }
 
 // NewController builds the engine. client may be nil when logs are supplied
@@ -526,11 +534,17 @@ func (controller *Controller) TerminalState(ctx context.Context, name string) (*
 	if err != nil {
 		return nil, fmt.Errorf("argojob: read Workflow %s: %w", name, err)
 	}
-	if _, _, ok := WorkflowMeta(workflow); !ok {
+	runID, _, ok := WorkflowMeta(workflow)
+	if !ok {
 		return nil, ErrNotTerminal
 	}
 	if !workflow.Status.Phase.Completed() {
 		return nil, ErrNotTerminal
+	}
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	defer cancel()
+	if err := controller.CleanupVMIs(cleanupCtx, name, runID); err != nil {
+		return nil, err
 	}
 	completion := completionFor(workflow)
 	controller.collectStepDiagnostics(ctx, workflow, &completion)
@@ -558,7 +572,7 @@ func (controller *Controller) Owns(ctx context.Context, name string) (bool, erro
 func (controller *Controller) Cancel(ctx context.Context, name, runID string) error {
 	workflow, err := controller.workflows.Get(ctx, name, metav1.GetOptions{})
 	if apierrors.IsNotFound(err) {
-		return nil
+		return controller.CleanupVMIs(ctx, name, runID)
 	}
 	if err != nil {
 		return fmt.Errorf("argojob: read Workflow %s before cancelling: %w", name, err)
@@ -576,7 +590,7 @@ func (controller *Controller) Cancel(ctx context.Context, name, runID string) er
 	if err != nil && !apierrors.IsNotFound(err) && !apierrors.IsConflict(err) {
 		return fmt.Errorf("argojob: delete Workflow %s: %w", name, err)
 	}
-	return nil
+	return controller.CleanupVMIs(ctx, name, runID)
 }
 
 // progressReporter turns repeated status observations into the monotonic

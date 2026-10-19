@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
+	corev1 "k8s.io/api/core/v1"
 )
 
 const admittedVMIManifest = `apiVersion: kubevirt.io/v1
@@ -74,6 +75,7 @@ func TestVMIResourceAdmission(t *testing.T) {
 		{name: "cloud init secret ref", old: "cloudInitNoCloud:\n", replacement: "cloudInitNoCloud:\n        secretRef:\n          name: stolen\n", want: "secretRef"},
 		{name: "old API", old: "kubevirt.io/v1", replacement: "kubevirt.io/v1alpha3", want: "kubevirt.io/v1 VirtualMachineInstance"},
 		{name: "second YAML document", change: func(r *wfv1.ResourceTemplate) { r.Manifest += "---\napiVersion: v1\nkind: Secret\n" }, want: "one YAML document"},
+		{name: "CRLF document marker", change: func(r *wfv1.ResourceTemplate) { r.Manifest += "---\r\napiVersion: v1\r\nkind: Secret\r\n" }, want: "carriage returns"},
 		{name: "metadata name substitution", old: "{{workflow.name}}-amd64", replacement: substitution, want: "substitutions"},
 		{name: "run label substitution", old: "oberth.ci/workflow: \"{{workflow.name}}\"", replacement: "oberth.ci/workflow: \"" + substitution + "\"", want: "substitutions"},
 		{name: "volume name substitution", old: "- name: root\n      containerDisk:", replacement: "- name: \"" + substitution + "\"\n      containerDisk:", want: "substitutions"},
@@ -105,6 +107,36 @@ func TestVMIResourceAdmission(t *testing.T) {
 				t.Fatalf("want rejection containing %q, got %v", tc.want, err)
 			}
 		})
+	}
+}
+
+func TestVMILauncherIdentityIsTemplateScoped(t *testing.T) {
+	deadline := int64(3600)
+	wf := &wfv1.Workflow{Spec: wfv1.WorkflowSpec{
+		Entrypoint: "vm", ActiveDeadlineSeconds: &deadline,
+		Templates: []wfv1.Template{
+			{Name: "vm", Resource: &wfv1.ResourceTemplate{Action: "create", SetOwnerReference: true, Manifest: admittedVMIManifest}, Executor: &wfv1.ExecutorConfig{ServiceAccountName: "attacker"}},
+			{Name: "driver", Container: &corev1.Container{Image: "busybox:1.37@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, Executor: &wfv1.ExecutorConfig{ServiceAccountName: "attacker"}},
+		},
+	}}
+	identity := testBranchIdentity()
+	identity.VMLauncherServiceAccountName = "oberth-argo-vm-launcher"
+	policy := Policy{KubeVirt: true, RunnerImagePrefixes: []string{"busybox:"}, ContainerDiskPrefixes: []string{"quay.io/example/"}}
+	if err := Prepare(wf, policy, identity); err != nil {
+		t.Fatal(err)
+	}
+	if got := wf.Spec.Templates[0].Executor.ServiceAccountName; got != identity.VMLauncherServiceAccountName {
+		t.Fatalf("VM executor = %q", got)
+	}
+	if got := wf.Spec.Templates[1].Executor.ServiceAccountName; got != identity.ExecutorServiceAccountName {
+		t.Fatalf("driver executor = %q", got)
+	}
+	if got := wf.Spec.Executor.ServiceAccountName; got != identity.ExecutorServiceAccountName {
+		t.Fatalf("workflow executor = %q", got)
+	}
+	identity.VMLauncherServiceAccountName = ""
+	if err := ForceIdentity(wf, identity); err == nil || !strings.Contains(err.Error(), "requires a server-assigned VM-launcher") {
+		t.Fatalf("missing launcher identity: %v", err)
 	}
 }
 
