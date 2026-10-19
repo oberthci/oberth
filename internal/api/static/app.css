@@ -105,6 +105,16 @@ input,select{height:32px;border:1px solid var(--line);background:var(--panel);co
 .history .hist.pending{background:color-mix(in srgb,var(--s-pending) 70%,var(--line))}
 .history .hist.cancel{background:color-mix(in srgb,var(--s-cancel) 70%,var(--line))}
 .runs-table,.repo-table,.issues-table{overflow-x:auto}
+/* runs page: Active (running, then the queue in admission order) above History */
+.runs-section{margin-bottom:18px}
+.section-title{font-size:13px;font-weight:700;margin:0 0 8px;color:var(--fg);text-transform:uppercase;letter-spacing:.05em}
+.section-sub{display:flex;align-items:baseline;gap:6px;margin:10px 0 6px;color:var(--muted);font-size:12px;font-weight:700}
+.section-sub .count{color:var(--dim);font-weight:400}.section-sub .meta{color:var(--dim);font-weight:400}
+.active-table,.queue-table{margin-bottom:6px}
+.queue-pos{font-variant-numeric:tabular-nums;color:var(--muted)}
+.trow.blocking{background:color-mix(in srgb,var(--red) 8%,var(--panel));box-shadow:inset 3px 0 0 var(--red)}
+.trow.blocking .clip:last-child{color:var(--red)}
+.queue-blocked{border:1px solid color-mix(in srgb,var(--red) 45%,var(--line));border-radius:8px;background:color-mix(in srgb,var(--red) 7%,var(--panel));color:var(--red);padding:8px 12px;margin-bottom:6px;font-size:12px}
 .repo-table .trow{grid-template-columns:minmax(180px,1fr) 130px 140px minmax(150px,.9fr) 150px 120px}
 .empty,.error{border:1px dashed var(--line);border-radius:8px;background:var(--panel);color:var(--dim);padding:28px;text-align:center}
 .error{color:var(--red);border-color:color-mix(in srgb,var(--red) 45%,var(--line))}

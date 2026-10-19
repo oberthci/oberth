@@ -55,6 +55,27 @@ type RunFilter struct {
 	// BeforeRun pages to runs older than this run, by ID: the cursor a
 	// scoped uplink gets instead of a global sequence (#073).
 	BeforeRun string
+	// View selects the list: "" or "all" is every run newest first (the
+	// default, unchanged); "history" keeps only terminal runs, paged the
+	// same way; "active" is every non-terminal run in scheduling order
+	// with its scheduling observation, unpaged and bounded.
+	View string
+}
+
+// Run list views accepted by RunFilter.View.
+const (
+	RunViewAll     = "all"
+	RunViewActive  = "active"
+	RunViewHistory = "history"
+)
+
+// ValidRunView reports whether view names a run list view; empty is "all".
+func ValidRunView(view string) bool {
+	switch view {
+	case "", RunViewAll, RunViewActive, RunViewHistory:
+		return true
+	}
+	return false
 }
 
 type IssueFilter struct {
@@ -238,6 +259,14 @@ func (server *Server) handleRuns(writer http.ResponseWriter, request *http.Reque
 		Repository: query.Get("repo"),
 		Ref:        query.Get("ref"),
 		Limit:      queryLimit(request, 100, 100),
+		View:       query.Get("view"),
+	}
+	// ?view=history is terminal runs only, paged like the default list;
+	// ?view=active is the unpaged non-terminal list in scheduling order.
+	// Without view the body and its paging are unchanged.
+	if !ValidRunView(filter.View) {
+		writeJSON(writer, http.StatusBadRequest, map[string]string{"error": "view must be all, active or history"})
+		return
 	}
 	if raw := query.Get("before"); raw != "" {
 		before, parseErr := strconv.ParseInt(raw, 10, 64)

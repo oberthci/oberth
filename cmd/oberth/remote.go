@@ -160,6 +160,7 @@ func runRuns(ctx context.Context, arguments []string, output io.Writer) error {
 	limit := flags.Int("limit", 20, "runs per page (at most 100)")
 	before := flags.String("before", "", "only runs older than this cursor (printed after a full page)")
 	all := flags.Bool("all", false, "follow pages to the oldest run")
+	active := flags.Bool("active", false, "only queued, waiting and running runs, in scheduling order, with queue position and wait reason")
 	asJSON := flags.Bool("json", false, "emit the server's payload unchanged")
 	if err := flags.Parse(arguments); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -182,6 +183,20 @@ func runRuns(ctx context.Context, arguments []string, output io.Writer) error {
 	}
 	if sequence, err := strconv.ParseInt(*before, 10, 64); *before != "" && err == nil && sequence < 1 {
 		return fmt.Errorf("%w: --before must be a positive run sequence or a run ID", errUsage)
+	}
+	if *active {
+		if *before != "" || *all {
+			return fmt.Errorf("%w: --active is one unpaged list; it takes no --before or --all", errUsage)
+		}
+		query := map[string]string{"repo": *repo, "ref": *ref, "view": "active"}
+		if *asJSON {
+			return emitJSON(ctx, api, "/api/runs", query, output)
+		}
+		var runs []remoteActiveRun
+		if err := api.Get(ctx, "/api/runs", query, &runs); err != nil {
+			return err
+		}
+		return renderActiveRuns(output, runs, time.Now())
 	}
 	query := map[string]string{"repo": *repo, "ref": *ref, "limit": fmt.Sprint(*limit)}
 	if *before != "" {
@@ -234,6 +249,51 @@ func runRuns(ctx context.Context, arguments []string, output io.Writer) error {
 	if next != "" {
 		_, err := fmt.Fprintf(output, "more: oberth runs --before %s (or --all)\n", next)
 		return err
+	}
+	return nil
+}
+
+// remoteActiveRun is one /api/runs?view=active entry: the run, plus the
+// scheduling observation of a run that has not started.
+type remoteActiveRun struct {
+	remoteRun
+	Scheduling *model.RunScheduling
+}
+
+// renderActiveRuns prints the active list in the server's order: started
+// runs with their elapsed time, then the queue with each run's position,
+// size and weight, and why it waits.
+func renderActiveRuns(output io.Writer, runs []remoteActiveRun, now time.Time) error {
+	if len(runs) == 0 {
+		_, err := fmt.Fprintln(output, "no active runs")
+		return err
+	}
+	if _, err := fmt.Fprintf(output, "%-4s %-34s %-9s %-8s %-8s %-30s %s\n", "#", "RUN", "STATUS", "SIZE", "ELAPSED", "REF", "REASON"); err != nil {
+		return err
+	}
+	for _, run := range runs {
+		position, size, elapsed, reason := "-", "-", "-", ""
+		if run.StartedAt != nil {
+			elapsed = now.Sub(*run.StartedAt).Truncate(time.Second).String()
+		}
+		if scheduling := run.Scheduling; scheduling != nil {
+			reason = scheduling.Message
+			if scheduling.QueuePosition > 0 {
+				position = "q" + strconv.FormatInt(scheduling.QueuePosition, 10)
+			}
+			if admission := scheduling.Admission; admission != nil {
+				if admission.Position > 0 {
+					position = strconv.Itoa(admission.Position)
+				}
+				if admission.Size != "" {
+					size = fmt.Sprintf("%s/%d", admission.Size, admission.Weight)
+				}
+			}
+		}
+		if _, err := fmt.Fprintf(output, "%-4s %-34s %-9s %-8s %-8s %-30s %s\n",
+			position, run.ID, run.Status, size, elapsed, run.Ref, reason); err != nil {
+			return err
+		}
 	}
 	return nil
 }

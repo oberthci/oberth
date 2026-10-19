@@ -325,13 +325,31 @@ Observation is read-only, capped at two seconds, and omitted after recorded
 step execution or a terminal run. No cluster mutation or extra permissions are
 required.
 
+## Run list views
+
+`run_list` and `/api/runs` take an optional `view`. Omitted or `all`, the
+answer is unchanged: every run newest first, in bounded pages.
+
+- `history` keeps only terminal runs (passed, failed, interrupted), paged the
+  same way with `before`/`next_before`/`next_cursor`.
+- `active` returns every queued, waiting and running run in one unpaged list
+  (at most 500), in scheduling order: started runs (oldest start first), then
+  claimed runs in admission order (the weighted gate's FIFO), then unclaimed
+  queued runs in accepted order. Each run that has not started carries
+  `Scheduling` with its state, message, queue or admission position, size,
+  weight, used/capacity and concurrency group, so a run blocking the head of
+  the queue, or one waiting on its group or VM capacity, says so.
+
+`oberth runs --active` prints the active list, and the dashboard shows it
+above a history of finished runs.
+
 ## JSON API
 
 Authenticated `GET` endpoints serve the same state as a web dashboard:
 
 | Endpoint | Content |
 |----------|---------|
-| `/api/runs` | All CI runs |
+| `/api/runs` | All CI runs; `?view=history` for terminal runs, `?view=active` for the ordered active list |
 | `/api/repos` | Registered repositories |
 | `/api/issues` | All issues |
 | `/api/status` | System health summary |

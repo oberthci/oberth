@@ -70,6 +70,7 @@ type RunLookup interface {
 type RunHistory interface {
 	ResolveRunID(context.Context, string) (model.Run, error)
 	ListRecentRuns(context.Context, model.RunListFilter) ([]model.Run, error)
+	ListActiveRuns(context.Context, model.RunListFilter) ([]model.Run, error)
 	ListLatestRunsPerRepo(context.Context, int) ([]model.Run, error)
 	CountRuns(context.Context) (model.RunCounts, error)
 	Run(context.Context, string) (model.Run, error)

@@ -543,3 +543,38 @@ func TestRunPagingStopsWhenServerIgnoresCursor(t *testing.T) {
 		t.Fatalf("short-ID resolution made %d requests against an old server", requests)
 	}
 }
+
+// --active asks for the active view and prints the server's order with the
+// queue position, size/weight and wait reason of each queued run.
+func TestRunsActivePrintsTheQueue(t *testing.T) {
+	var query string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		query = r.URL.RawQuery
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`[{"ID":"run-started","Ref":"main","Status":"running","StartedAt":"2026-10-20T11:59:00Z"},` +
+			`{"ID":"run-head","Ref":"feature/xl","Status":"waiting","Scheduling":{"state":"waiting","message":"Waiting in the weighted resource admission queue. Need 12 weight; 3/20 used; queue position 1.","admission":{"state":"waiting","position":1,"size":"XL","weight":12,"used":3,"capacity":20}}},` +
+			`{"ID":"run-queued","Ref":"feature/q","Status":"queued","Scheduling":{"state":"queued","message":"Awaiting scheduler claim.","queue_position":1}}]`))
+	}))
+	defer server.Close()
+	configure(t, server)
+	var out bytes.Buffer
+	if err := runRuns(context.Background(), []string{"--active", "--repo", "oberth"}, &out); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(query, "view=active") || !strings.Contains(query, "repo=oberth") || strings.Contains(query, "limit=") {
+		t.Fatalf("query = %s", query)
+	}
+	body := out.String()
+	started, head, queued := strings.Index(body, "run-started"), strings.Index(body, "run-head"), strings.Index(body, "run-queued")
+	if started < 0 || head < started || queued < head {
+		t.Fatalf("order not preserved:\n%s", body)
+	}
+	for _, want := range []string{"XL/12", "Need 12 weight; 3/20 used", "q1"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("output missing %q:\n%s", want, body)
+		}
+	}
+	if err := runRuns(context.Background(), []string{"--active", "--all"}, &out); err == nil {
+		t.Fatal("--active --all accepted")
+	}
+}

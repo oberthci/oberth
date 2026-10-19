@@ -837,10 +837,11 @@ RETURNING `+runColumns,
 
 func (s *Store) ListRecentRuns(ctx context.Context, filter model.RunListFilter) ([]model.Run, error) {
 	restriction, restrictionArgs := repoRestriction("repo_id", filter.RepoIDs)
-	args := append([]any{filter.RepoID, filter.RepoID, filter.Ref, filter.Ref, filter.Before, filter.Before}, restrictionArgs...)
+	args := append([]any{filter.RepoID, filter.RepoID, filter.Ref, filter.Ref, filter.Before, filter.Before, filter.Terminal}, restrictionArgs...)
 	rows, err := s.db.QueryContext(ctx, `
 SELECT `+runColumns+` FROM runs
-WHERE (? = 0 OR repo_id = ?) AND (? = '' OR ref = ?) AND (? <= 0 OR queue_sequence < ?)`+restriction+`
+WHERE (? = 0 OR repo_id = ?) AND (? = '' OR ref = ?) AND (? <= 0 OR queue_sequence < ?)
+  AND (? = 0 OR status NOT IN ('queued', 'running'))`+restriction+`
 ORDER BY queue_sequence DESC LIMIT ?`, append(args, pageLimit(filter.Limit))...) // #nosec G202 -- the restriction is a fixed column and ? placeholders from repoRestriction.
 	if err != nil {
 		return nil, fmt.Errorf("list recent runs: %w", err)

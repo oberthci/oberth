@@ -351,6 +351,14 @@ func (history scopedHistory) ListRecentRuns(ctx context.Context, filter model.Ru
 	return history.inner.ListRecentRuns(ctx, filter)
 }
 
+func (history scopedHistory) ListActiveRuns(ctx context.Context, filter model.RunListFilter) ([]model.Run, error) {
+	if filter.RepoID != 0 && !history.scope.seesRepo(filter.RepoID) {
+		return []model.Run{}, nil
+	}
+	filter.RepoIDs = history.scope.repoIDs
+	return history.inner.ListActiveRuns(ctx, filter)
+}
+
 func (history scopedHistory) ListLatestRunsPerRepo(ctx context.Context, perRepo int) ([]model.Run, error) {
 	runs, err := history.inner.ListLatestRunsPerRepo(ctx, perRepo)
 	if err != nil {

@@ -405,6 +405,8 @@ func toolDefinitions() []map[string]any {
 			"ref":    stringProperty("Filter by branch or tag ref"),
 			"limit":  integerProperty("Maximum runs to return (default 50, max 100)"),
 			"before": map[string]any{"type": []string{"integer", "string"}, "description": "Exclusive cursor: next_before (a run sequence) or next_cursor (a run ID) from the previous page"},
+			"view": map[string]any{"type": "string", "enum": []string{"all", "active", "history"}, "default": "all",
+				"description": "all: every run newest first (default). history: terminal runs only, paged the same way. active: every queued, waiting or running run in scheduling order (started first, then admission order, then queue order), unpaged and capped at 500, each not-yet-started run with its Scheduling observation (state, message, queue/admission position, size, weight, used/capacity, group)"},
 		})),
 		tool("system_status", "Return system health: database, upstreams, cluster, audit, and version.", object(map[string]any{})),
 		tool("publish_retry", "Retry the upstream publication for a run or promotion whose burns all passed but whose upstream push failed. Input is exactly one durable run ID or promotion ID. Refuses when the run is not in a publishing-failed state, or when the cached Git object no longer matches the record.", object(map[string]any{

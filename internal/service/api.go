@@ -554,9 +554,19 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 			Ref    string     `json:"ref"`
 			Limit  int        `json:"limit"`
 			Before pageCursor `json:"before"`
+			View   string     `json:"view"`
 		}
 		if err := decodeTool(raw, &arguments); err != nil {
 			return nil, err
+		}
+		if arguments.View == api.RunViewActive {
+			// One bounded, unpaged list: no limit or cursor applies.
+			runs, err := service.Runs(ctx, actor, api.RunFilter{Repository: arguments.Repo, Ref: arguments.Ref, View: arguments.View,
+				Before: arguments.Before.Sequence, BeforeRun: arguments.Before.ID})
+			if err != nil {
+				return nil, err
+			}
+			return api.RunListResponse{Runs: runs}, nil
 		}
 		limit := arguments.Limit
 		if limit <= 0 {
@@ -568,7 +578,7 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 			limit = 100
 		}
 		runs, err := service.Runs(ctx, actor, api.RunFilter{Repository: arguments.Repo, Ref: arguments.Ref, Limit: limit,
-			Before: arguments.Before.Sequence, BeforeRun: arguments.Before.ID})
+			Before: arguments.Before.Sequence, BeforeRun: arguments.Before.ID, View: arguments.View})
 		if err != nil {
 			return nil, err
 		}
@@ -615,10 +625,16 @@ func (service *API) Runs(ctx context.Context, actor api.Actor, filter api.RunFil
 	if service.history == nil {
 		return nil, fmt.Errorf("%w: run history", ErrUnavailable)
 	}
+	if !api.ValidRunView(filter.View) {
+		return nil, fmt.Errorf("%w: view must be all, active or history", ErrInvalidInput)
+	}
+	if filter.View == api.RunViewActive {
+		return service.activeRuns(ctx, filter)
+	}
 	if filter.Before < 0 || service.scope != nil && filter.Before > 0 && filter.BeforeRun == "" {
 		return nil, fmt.Errorf("%w: before must be a positive run sequence, or a run ID for a scoped uplink", ErrInvalidInput)
 	}
-	storeFilter := model.RunListFilter{Ref: filter.Ref, Limit: filter.Limit, Before: filter.Before}
+	storeFilter := model.RunListFilter{Ref: filter.Ref, Limit: filter.Limit, Before: filter.Before, Terminal: filter.View == api.RunViewHistory}
 	if strings.TrimSpace(filter.BeforeRun) != "" {
 		// A cursor that is both a sequence and a run-ID spelling is a run
 		// first; an unscoped caller falls back to the sequence (#073).

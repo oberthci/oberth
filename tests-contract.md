@@ -8,6 +8,17 @@ proves audit/Git/gate remain unchanged; unknown repositories, invalid selectors
 and extra input fields fail. Tool-surface/count expectations add the documented
 read-only tool while preserving every previously registered tool.
 
+Run list views: `TestListActiveRunsOrdersByStartThenAdmissionThenQueue` puts
+an older claimed waiting run after newer started runs and ahead of the queue,
+never in history, and applies ref and uplink repository restrictions;
+`TestListRecentRunsTerminalPagination` pages history past interleaved active
+runs. `TestActiveRunsOrderAndWaitReasons` drives the real admission gate with
+a VM-parked run, a group waiter and a head that does not fit, and checks each
+reason, weight and position; `TestScopedActiveRunsStayInScope` withholds
+sequences and positions; `TestRunListDefaultViewUnchanged` compares the
+default `run_list` encoding byte for byte. `TestRunsPageSplitsActiveFromHistory`
+pins the dashboard's Active/History split and head-of-line marker.
+
 Watch ownership #671: adoption tests exercise complete preflight before any
 mutation, metadata-only JSONPatch UID/RV tests, replacement between read/patch,
 foreign/partial owner and scope/spec/target/expiry/duplicate-input negatives,

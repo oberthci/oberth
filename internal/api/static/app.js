@@ -10,7 +10,7 @@ const listPollMs = 4000;
 const slowPollMs = 10000;
 const livePollMs = 2000;
 const state = {
-  repos: [], runs: [], repoRuns: [], status: null,
+  repos: [], runs: [], repoRuns: [], active: [], status: null,
   runCounts: null, runCursor: 0, runCursorHistory: [], runNext: 0, runsNext: "", repoRunsNext: "",
   timer: null, routeSeq: 0,
   filter: localStorage.getItem("oberth-filter") || "all",
@@ -356,16 +356,26 @@ function setAuto(ms) {
 /* ---------- data loading ---------- */
 async function loadRepos() { state.repos = await api("/api/repos") || []; }
 const runPageSize = 100;
+/* History is terminal runs only (?view=history), paged by ?before; every
+   queued, waiting and running run is in the active list instead, so none
+   appears in both. */
 async function loadRuns() {
-  const page = await api(`/api/runs?limit=${runPageSize}`, { withNext: true });
+  const page = await api(`/api/runs?view=history&limit=${runPageSize}`, { withNext: true });
   state.runs = page.body || [];
   state.runsNext = page.next;
+}
+/* The active view is one bounded list in scheduling order: started runs,
+   then claimed runs in admission order, then the unclaimed queue. It is
+   loaded unfiltered, so the stats count every active run, and narrowed to
+   the selected repository here. */
+async function loadActiveRuns() {
+  state.active = await api("/api/runs?view=active") || [];
 }
 /* The list pages with ?before (#050). state.runs stays the newest page, for
    the stats; state.repoRuns is the page shown when it is not that one. */
 async function loadRepoRuns() {
   if (state.repo === "all" && !state.runCursor) { state.repoRuns = []; state.repoRunsNext = ""; return; }
-  const query = new URLSearchParams({ limit: String(runPageSize) });
+  const query = new URLSearchParams({ view: "history", limit: String(runPageSize) });
   if (state.repo !== "all") query.set("repo", state.repo);
   if (state.runCursor) query.set("before", String(state.runCursor));
   try {
@@ -410,6 +420,56 @@ function repoCounts(runs) {
   }
   return counts;
 }
+/* ---------- active runs: running, then the queue in admission order ---------- */
+function admissionOf(run) { return run.Scheduling?.admission || null; }
+/* The weighted gate admits in claim order and a sized run that does not fit
+   stops the pass, so the first such waiter holds every run behind it. A
+   group waiter, a VM-parked run and a disk-floor hold are passed over or
+   explained by their own message, and never block the head. */
+function queueBlocker(queue) {
+  return queue.find(run => {
+    const admission = admissionOf(run);
+    return admission && admission.state === "waiting" && !admission.vm_capacity && !admission.group_holder && !admission.group_ahead &&
+      admission.capacity > 0 && admission.weight > admission.capacity - admission.used;
+  }) || null;
+}
+function queuePosition(run) {
+  const admission = admissionOf(run);
+  if (admission?.position) return `#${admission.position}`;
+  if (run.Scheduling?.queue_position) return `q#${run.Scheduling.queue_position}`;
+  return "--";
+}
+function queueSize(run) {
+  const admission = admissionOf(run);
+  if (!admission?.size) return "--";
+  return `${admission.size} · ${admission.weight}w`;
+}
+function queueReason(run, blocker) {
+  const admission = admissionOf(run), message = run.Scheduling?.message || runMessage(run) || "waiting";
+  if (run !== blocker) return message;
+  return `blocks queue head: need ${admission.weight} weight; ${admission.used}/${admission.capacity} used`;
+}
+function runningTable(runs) {
+  return `<div class="table runs-table active-table"><div class="trow head"><div>status</div><div>run</div><div>sha</div><div>actor</div><div>elapsed</div><div>message</div></div>${runs.map(run => `<div class="trow" data-run-id="${esc(run.ID)}"><div class="status-cell run-status">${runStatusCell(run)}</div><div class="primary"><div class="repo-name">${esc(repoName(run.RepoID))} ${releaseBadge(run)}${credentialedBadge(run)}</div><div class="branch">${esc(run.RefKind === "tag" ? "tag " : "")}${esc(run.Ref)}</div></div><div class="sha">${esc(shortSha(run.SHA))}</div><div class="clip" title="${esc(run.Actor)}">${esc(run.Actor || "--")}</div><div class="nowrap" title="started ${esc(fmtTime(run.StartedAt))}">${esc(fmtDur(spanSeconds(run.StartedAt, null, true)))}</div><div class="clip" title="${esc(runMessage(run))}">${esc(runMessage(run))}</div></div>`).join("")}</div>`;
+}
+function queueTable(runs, blocker) {
+  return `<div class="table runs-table queue-table"><div class="trow head"><div>position</div><div>run</div><div>size</div><div>status</div><div>waiting</div><div>reason</div></div>${runs.map(run => {
+    const reason = queueReason(run, blocker), group = admissionOf(run)?.group || run.ConcurrencyGroup;
+    return `<div class="trow${run === blocker ? " blocking" : ""}" data-run-id="${esc(run.ID)}"><div class="nowrap queue-pos">${esc(queuePosition(run))}${run === blocker ? ' <span class="v4b fail">head</span>' : ""}</div><div class="primary"><div class="repo-name">${esc(repoName(run.RepoID))} ${releaseBadge(run)}${group ? ` <span class="v4b dim" title="concurrency group">${esc(group)}</span>` : ""}</div><div class="branch">${esc(run.RefKind === "tag" ? "tag " : "")}${esc(run.Ref)}</div></div><div class="nowrap">${esc(queueSize(run))}</div><div class="status-cell run-status">${runStatusCell(run)}</div><div class="nowrap" title="queued ${esc(fmtTime(run.QueuedAt))}">${esc(fmtDur(spanSeconds(run.QueuedAt, null, true)))}</div><div class="clip" title="${esc(reason)}">${esc(reason)}</div></div>`;
+  }).join("")}</div>`;
+}
+/* The blocker is found in the whole queue (every repository), so a
+   repository-filtered view still says which run holds the head. */
+function activeSection(active, all) {
+  const running = active.filter(run => run.StartedAt), queue = active.filter(run => !run.StartedAt);
+  if (!running.length && !queue.length) return "";
+  const blocker = queueBlocker(all.filter(run => !run.StartedAt)), admission = admissionOf(blocker || {});
+  const head = blocker ? `<div class="queue-blocked">Queue head blocked by ${esc(repoName(blocker.RepoID))} / ${esc(blocker.Ref)} (${esc(admission.size || "?")}): need ${esc(admission.weight)} weight; ${esc(admission.used)}/${esc(admission.capacity)} used. Runs behind it wait until it fits.</div>` : "";
+  return `<div class="runs-section"><h2 class="section-title">Active</h2>
+    ${running.length ? `<div class="section-sub">Running <span class="count">${running.length}</span></div>${runningTable(running)}` : ""}
+    ${queue.length ? `<div class="section-sub">Queue <span class="count">${queue.length}</span><span class="meta"> · admission order</span></div>${head}${queueTable(queue, blocker)}` : ""}
+  </div>`;
+}
 function runsTable(runs) {
   return `<div class="table runs-table"><div class="trow head"><div>status</div><div>run</div><div>sha</div><div>actor</div><div>when</div><div>message</div></div>${runs.map(run => `<div class="trow" data-run-id="${esc(run.ID)}"><div class="status-cell run-status">${runStatusCell(run)}</div><div class="primary"><div class="repo-name">${esc(repoName(run.RepoID))} ${releaseBadge(run)}${credentialedBadge(run)} ${supersededBadge(run)}</div><div class="branch">${esc(run.RefKind === "tag" ? "tag " : "")}${esc(run.Ref)}</div></div><div class="sha">${esc(shortSha(run.SHA))}</div><div class="clip" title="${esc(run.Actor)}">${esc(run.Actor || "--")}</div><div class="nowrap" title="${esc(fmtTime(runWhen(run)))}">${esc(ago(runWhen(run)))}<br><span class="meta">${esc(fmtDur(runDuration(run)))}</span></div><div class="clip" title="${esc(runMessage(run))}">${esc(runMessage(run))}</div></div>`).join("")}</div>`;
 }
@@ -419,7 +479,7 @@ async function renderRuns(seq) {
   const pending = ensureStatus();
   if (state.repo !== "all" && !isQualifiedSelector(state.repo)) await pending;
   state.repo = normalizeRepoSelector(state.repo, "all");
-  await Promise.all([loadRuns(), loadRepoRuns(), loadRunCounts()]);
+  await Promise.all([loadRuns(), loadRepoRuns(), loadActiveRuns(), loadRunCounts()]);
   if (!currentRoute(seq)) return;
   rerenderWhenStatus(pending, seq);
   localStorage.setItem("oberth-filter", state.filter);
@@ -436,9 +496,10 @@ async function renderRuns(seq) {
   const named = source === runs ? state.runsNext : state.repoRunsNext;
   state.runNext = source.length === runPageSize ? (named || source[source.length - 1].QueueSequence || 0) : 0;
   const page = state.runCursorHistory.length + 1;
-  const running = runs.filter(run => run.Status === "running").length;
-  const waiting = runs.filter(run => run.Status === "waiting").length;
-  const queued = runs.filter(run => run.Status === "queued").length;
+  const active = state.active.filter(run => state.repo === "all" || repoKeyOf(run.RepoID) === state.repo).filter(runMatches);
+  const running = state.active.filter(run => run.Status === "running").length;
+  const waiting = state.active.filter(run => run.Status === "waiting").length;
+  const queued = state.active.filter(run => run.Status === "queued").length;
   const failed = runs.filter(run => run.Status === "failed").length;
   const releases = runs.filter(run => run.Release).length;
   replaceApp(`
@@ -457,7 +518,10 @@ async function renderRuns(seq) {
           ${runFilters.map(f => `<button class="chip ${state.filter === f ? "on" : ""}" data-status-filter="${esc(f)}">${esc(f)}</button>`).join("")}
           <span class="count">${visible.length} shown${page > 1 ? ` · page ${page}` : ""}</span>
         </div>
-        ${visible.length ? runsTable(visible) : `<div class="empty">No runs match the current filters.</div>`}
+        ${page === 1 ? activeSection(active, state.active) : ""}
+        <div class="runs-section"><h2 class="section-title">History</h2>
+        ${visible.length ? runsTable(visible) : `<div class="empty">No finished runs match the current filters.</div>`}
+        </div>
         ${page > 1 || state.runNext ? `<div class="issue-pager">
           <button type="button" data-action="runs-newer" ${page > 1 ? "" : "disabled"}>‹ newer</button>
           <button type="button" data-action="runs-older" ${state.runNext ? "" : "disabled"}>older ›</button>

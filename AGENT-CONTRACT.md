@@ -786,6 +786,21 @@ continuity checks; it must never be used to reset or bypass those checks.
   also names either `group_holder` (the run of the same repository holding
   the group) or `group_ahead` (the earlier member queued ahead of it), both
   server run IDs, and the scheduling message names the group and that run.
+- Run list views: `/api/runs` and MCP `run_list` keep their default body,
+  order (`queue_sequence` descending) and paging byte for byte when no view
+  is given or the view is `all`. `view=history` (`?view=history`) keeps only
+  terminal runs with the same cursor paging, so it never repeats an active
+  run. `view=active` returns every `queued`, `waiting` and `running` run,
+  unpaged and capped at 500, ordered as the scheduler works: started runs by
+  `started_at` ascending, then claimed runs admitted and awaiting submission,
+  then the other claimed runs in admission order (`queue_sequence` ascending,
+  the weighted gate's FIFO), then unclaimed queued runs in accepted order.
+  Each not-yet-started entry adds `Scheduling` (the `run_get` observation,
+  admission only: no Workflow or Pod reads); a `before` cursor is refused.
+  The view honours repository/ref filters and uplink scope, with sequences,
+  positions and capacity withheld from a scoped uplink. Group waiters and
+  VM-parked runs can legitimately be overtaken by newer work, and their
+  `Scheduling` message says why; a superseded run is terminal and leaves it.
 - Execution scheduling observation has a two-second request budget, one exact
   Workflow read bound to run ID and effective tested SHA, and one namespaced
   Pod list (limit 16) whose entries must have the exact Workflow controller UID.

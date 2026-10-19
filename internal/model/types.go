@@ -184,6 +184,9 @@ type RunListFilter struct {
 	// RepoIDs, when non-nil, keeps only runs of these repositories; an empty
 	// slice matches none. Nil lists every repository (#073).
 	RepoIDs []int64
+	// Terminal keeps only finished runs (passed, failed, interrupted): the
+	// history view, which never repeats an active run.
+	Terminal bool
 }
 
 // RunCounts is the number of retained runs, in total and per repository ID.
