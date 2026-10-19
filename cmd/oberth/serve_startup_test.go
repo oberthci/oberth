@@ -767,6 +767,7 @@ func seedLegacyV1Database(t *testing.T, path string, actionCount int) {
 	if _, err := raw.Exec(`
 PRAGMA foreign_keys = OFF;
 BEGIN IMMEDIATE;
+DROP INDEX runs_passed_tested_sha_idx;
 CREATE TABLE step_results_v1 (
     run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
     burn TEXT NOT NULL,
