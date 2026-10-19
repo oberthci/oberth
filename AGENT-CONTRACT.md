@@ -599,11 +599,12 @@ continuity checks; it must never be used to reset or bypass those checks.
   each write/flush has a five-second bound. Heartbeat writes and the final
   response never overlap. Disconnect/write failure cancels only observation,
   never durable work, and joins the heartbeat writer before returning.
-- MCP exposes 37 tools: `status`, bounded named-step `logs`, exact-run
+- MCP exposes 40 tools: `status`, bounded named-step `logs`, exact-run
   `run_get`/`run_logs`, `run_retry`, `run_kvm_preflight`, `artifacts`/`artifact_get`, `wait`, `sync`, `promote`,
   `promotion_list`, `promote_status`, `publish_retry`, issue
   create/get/get_many/update/append/close/reopen/delete/list/lock,
-  secret-access list/allow/revoke, `repo_list`, `repo_remove`, `run_list`,
+  secret-access list/allow/revoke, admin-only `kubevirt_grant` and
+  `kubevirt_revoke`, read-only `kubevirt_grant_get`, `repo_list`, `repo_remove`, `run_list`,
   `system_status`, admin-only `secretstore_plan` (#611),
   `secretstore_sync_receipt` (#712), `secretstore_verify`, and
   admin-only `promote_grant`, `promote_grant_revoke`, plus read-only
