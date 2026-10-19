@@ -41,14 +41,10 @@ func must(t *testing.T, err error) {
 	}
 }
 
-// runCleanupInFakeTime keeps a real cleanup deadline in the reconciler while
-// preventing a busy CI host from spending that budget between fake API and
-// journal calls. The timer advances only when the bubble is durably blocked.
-func runCleanupInFakeTime(t *testing.T, reconciler *vmrunner.PilotReconciler, ctx context.Context, runID string) error {
-	t.Helper()
-	var err error
-	synctest.Test(t, func(*testing.T) { err = reconciler.Cleanup(ctx, runID) })
-	return err
+// runCleanupInFakeTime is called from a synctest bubble that includes fixture
+// creation. The cleanup deadline advances only when the bubble is blocked.
+func runCleanupInFakeTime(ctx context.Context, reconciler *vmrunner.PilotReconciler, runID string) error {
+	return reconciler.Cleanup(ctx, runID)
 }
 
 func newFixture(t *testing.T) *fixture {
@@ -231,44 +227,46 @@ func TestCleanupWinningSubmitPreventsCreate(t *testing.T) {
 }
 
 func TestAmbiguousCreateNeverRetriesAndCanBindLate(t *testing.T) {
-	f := newFixture(t)
-	f.client.PrependReactor("create", "jobs", func(action ktesting.Action) (bool, runtime.Object, error) {
-		return true, nil, apierrors.NewTimeoutError("ambiguous", 1)
+	synctest.Test(t, func(t *testing.T) {
+		f := newFixture(t)
+		f.client.PrependReactor("create", "jobs", func(action ktesting.Action) (bool, runtime.Object, error) {
+			return true, nil, apierrors.NewTimeoutError("ambiguous", 1)
+		})
+		if _, err := f.b.Create(f.ctx, f.plan); !errors.Is(err, vmrunner.ErrExecutionOutstanding) {
+			t.Fatalf("timeout: %v", err)
+		}
+		if _, err := f.b.Create(f.ctx, f.plan); !errors.Is(err, vmrunner.ErrExecutionOutstanding) {
+			t.Fatalf("retry: %v", err)
+		}
+		if countActions(f.client, "create") != 1 {
+			t.Fatal("ambiguous create repeated")
+		}
+		owned := f.owned(t, vmrunner.ConductorResource)
+		if !owned.Submitted || owned.Rejected || owned.Receipt.UID != "" {
+			t.Fatal("ambiguous obligation lost")
+		}
+		reconciler := vmrunner.PilotReconciler{Journal: f.s, Runtime: f.b, Timeout: time.Second}
+		if err := runCleanupInFakeTime(f.ctx, &reconciler, f.plan.Spec.RunID); !errors.Is(err, vmrunner.ErrExecutionOutstanding) {
+			t.Fatalf("unbound absence released: %v", err)
+		}
+		state, err := f.s.PilotExecution(f.ctx, f.plan.Spec.RunID)
+		must(t, err)
+		if state.Cleaned {
+			t.Fatal("ambiguous notfound discharged obligation")
+		}
+		// Simulate the original timed-out create becoming visible during cleanup.
+		job, _, err := f.b.job(f.plan)
+		must(t, err)
+		job.UID = "late-uid"
+		job.CreationTimestamp = metav1.NewTime(f.now)
+		job.Spec.Selector = &metav1.LabelSelector{MatchLabels: map[string]string{"batch.kubernetes.io/controller-uid": "late-uid"}}
+		job.Spec.Template.Labels = map[string]string{identityLabel: job.Labels[identityLabel], "batch.kubernetes.io/controller-uid": "late-uid", "batch.kubernetes.io/job-name": job.Name}
+		must(t, f.client.Tracker().Create(jobs, toObject(t, job), job.Namespace))
+		must(t, runCleanupInFakeTime(f.ctx, &reconciler, f.plan.Spec.RunID))
+		if f.owned(t, vmrunner.ConductorResource).Receipt.UID != "late-uid" {
+			t.Fatal("late UID not durably bound")
+		}
 	})
-	if _, err := f.b.Create(f.ctx, f.plan); !errors.Is(err, vmrunner.ErrExecutionOutstanding) {
-		t.Fatalf("timeout: %v", err)
-	}
-	if _, err := f.b.Create(f.ctx, f.plan); !errors.Is(err, vmrunner.ErrExecutionOutstanding) {
-		t.Fatalf("retry: %v", err)
-	}
-	if countActions(f.client, "create") != 1 {
-		t.Fatal("ambiguous create repeated")
-	}
-	owned := f.owned(t, vmrunner.ConductorResource)
-	if !owned.Submitted || owned.Rejected || owned.Receipt.UID != "" {
-		t.Fatal("ambiguous obligation lost")
-	}
-	reconciler := vmrunner.PilotReconciler{Journal: f.s, Runtime: f.b, Timeout: time.Second}
-	if err := reconciler.Cleanup(f.ctx, f.plan.Spec.RunID); !errors.Is(err, vmrunner.ErrExecutionOutstanding) {
-		t.Fatalf("unbound absence released: %v", err)
-	}
-	state, err := f.s.PilotExecution(f.ctx, f.plan.Spec.RunID)
-	must(t, err)
-	if state.Cleaned {
-		t.Fatal("ambiguous notfound discharged obligation")
-	}
-	// Simulate the original timed-out create becoming visible during cleanup.
-	job, _, err := f.b.job(f.plan)
-	must(t, err)
-	job.UID = "late-uid"
-	job.CreationTimestamp = metav1.NewTime(f.now)
-	job.Spec.Selector = &metav1.LabelSelector{MatchLabels: map[string]string{"batch.kubernetes.io/controller-uid": "late-uid"}}
-	job.Spec.Template.Labels = map[string]string{identityLabel: job.Labels[identityLabel], "batch.kubernetes.io/controller-uid": "late-uid", "batch.kubernetes.io/job-name": job.Name}
-	must(t, f.client.Tracker().Create(jobs, toObject(t, job), job.Namespace))
-	must(t, reconciler.Cleanup(f.ctx, f.plan.Spec.RunID))
-	if f.owned(t, vmrunner.ConductorResource).Receipt.UID != "late-uid" {
-		t.Fatal("late UID not durably bound")
-	}
 }
 
 func TestActualPodAuthorityMutationsRefusedAndRetained(t *testing.T) {
@@ -402,58 +400,60 @@ func TestReplacementPodAndContainerCannotRebind(t *testing.T) {
 }
 
 func TestCleanupAcknowledgementAndUIDPreconditions(t *testing.T) {
-	f := newFixture(t)
-	f.create(t)
-	f.pod(t, "first")
-	_, err := f.b.BindAttempt(f.ctx, f.plan)
-	must(t, err)
-	ackOnly := true
-	f.client.PrependReactor("delete", "*", func(action ktesting.Action) (bool, runtime.Object, error) {
-		opts := action.(ktesting.DeleteAction).GetDeleteOptions()
-		if opts.Preconditions == nil || opts.Preconditions.UID == nil || *opts.Preconditions.UID == "" || opts.PropagationPolicy == nil || *opts.PropagationPolicy != metav1.DeletePropagationForeground {
-			t.Fatal("delete lacked UID scope")
-		}
-		if ackOnly {
-			// The API acknowledges foreground deletion by marking the object;
-			// this is still present, and recovery must continue after this state.
-			object, err := f.client.Tracker().Get(action.GetResource(), action.GetNamespace(), action.(ktesting.DeleteAction).GetName())
-			must(t, err)
-			marked := object.(*unstructured.Unstructured).DeepCopy()
-			marked.SetDeletionTimestamp(ptr(metav1.NewTime(f.now)))
-			finalizers := marked.GetFinalizers()
-			found := false
-			for _, value := range finalizers {
-				if value == metav1.FinalizerDeleteDependents {
-					found = true
+	synctest.Test(t, func(t *testing.T) {
+		f := newFixture(t)
+		f.create(t)
+		f.pod(t, "first")
+		_, err := f.b.BindAttempt(f.ctx, f.plan)
+		must(t, err)
+		ackOnly := true
+		f.client.PrependReactor("delete", "*", func(action ktesting.Action) (bool, runtime.Object, error) {
+			opts := action.(ktesting.DeleteAction).GetDeleteOptions()
+			if opts.Preconditions == nil || opts.Preconditions.UID == nil || *opts.Preconditions.UID == "" || opts.PropagationPolicy == nil || *opts.PropagationPolicy != metav1.DeletePropagationForeground {
+				t.Fatal("delete lacked UID scope")
+			}
+			if ackOnly {
+				// The API acknowledges foreground deletion by marking the object;
+				// this is still present, and recovery must continue after this state.
+				object, err := f.client.Tracker().Get(action.GetResource(), action.GetNamespace(), action.(ktesting.DeleteAction).GetName())
+				must(t, err)
+				marked := object.(*unstructured.Unstructured).DeepCopy()
+				marked.SetDeletionTimestamp(ptr(metav1.NewTime(f.now)))
+				finalizers := marked.GetFinalizers()
+				found := false
+				for _, value := range finalizers {
+					if value == metav1.FinalizerDeleteDependents {
+						found = true
+					}
 				}
+				if !found {
+					marked.SetFinalizers(append(finalizers, metav1.FinalizerDeleteDependents))
+				}
+				must(t, f.client.Tracker().Update(action.GetResource(), marked, action.GetNamespace()))
+				return true, nil, nil
 			}
-			if !found {
-				marked.SetFinalizers(append(finalizers, metav1.FinalizerDeleteDependents))
-			}
-			must(t, f.client.Tracker().Update(action.GetResource(), marked, action.GetNamespace()))
-			return true, nil, nil
+			return false, nil, nil
+		})
+		r := vmrunner.PilotReconciler{Journal: f.s, Runtime: f.b, Timeout: time.Second}
+		if err := runCleanupInFakeTime(f.ctx, &r, f.plan.Spec.RunID); !errors.Is(err, vmrunner.ErrExecutionOutstanding) {
+			t.Fatalf("ack accepted as absence: %v", err)
 		}
-		return false, nil, nil
+		state, err := f.s.PilotExecution(f.ctx, f.plan.Spec.RunID)
+		must(t, err)
+		if state.Cleaned {
+			t.Fatal("ack released reservation")
+		}
+		ackOnly = false
+		must(t, runCleanupInFakeTime(f.ctx, &r, f.plan.Spec.RunID))
+		state, err = f.s.PilotExecution(f.ctx, f.plan.Spec.RunID)
+		must(t, err)
+		if !state.Cleaned {
+			t.Fatal("actual absence did not settle")
+		}
+		if _, err := f.s.CompletedPilotReceipt(f.ctx, f.plan.Spec.RunID); err == nil {
+			t.Fatal("cleanup became suite success")
+		}
 	})
-	r := vmrunner.PilotReconciler{Journal: f.s, Runtime: f.b, Timeout: time.Second}
-	if err := r.Cleanup(f.ctx, f.plan.Spec.RunID); !errors.Is(err, vmrunner.ErrExecutionOutstanding) {
-		t.Fatalf("ack accepted as absence: %v", err)
-	}
-	state, err := f.s.PilotExecution(f.ctx, f.plan.Spec.RunID)
-	must(t, err)
-	if state.Cleaned {
-		t.Fatal("ack released reservation")
-	}
-	ackOnly = false
-	must(t, r.Cleanup(f.ctx, f.plan.Spec.RunID))
-	state, err = f.s.PilotExecution(f.ctx, f.plan.Spec.RunID)
-	must(t, err)
-	if !state.Cleaned {
-		t.Fatal("actual absence did not settle")
-	}
-	if _, err := f.s.CompletedPilotReceipt(f.ctx, f.plan.Spec.RunID); err == nil {
-		t.Fatal("cleanup became suite success")
-	}
 }
 
 func TestAbsentJobStillFindsRelabelledOwnedPod(t *testing.T) {
@@ -492,62 +492,72 @@ func (journal *deadlinePilotJournal) PilotExecution(ctx context.Context, _ strin
 }
 
 func TestCleanupDeadlineRetainsOwnedResources(t *testing.T) {
-	f := newFixture(t)
-	owned := f.create(t)
-	pod := f.pod(t, "survivor")
-	journal := &deadlinePilotJournal{PilotJournal: f.s}
-	beforeDeletes := countActions(f.client, "delete")
-	err := runCleanupInFakeTime(t, &vmrunner.PilotReconciler{Journal: journal, Runtime: f.b, Timeout: time.Millisecond}, f.ctx, f.plan.Spec.RunID)
-	if !journal.reached || !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("cleanup did not propagate its own expired budget: %v", err)
-	}
-	state, err := f.s.PilotExecution(f.ctx, f.plan.Spec.RunID)
-	must(t, err)
-	if state.Cleaned || countActions(f.client, "delete") != beforeDeletes {
-		t.Fatal("expired cleanup discharged ownership or deleted a resource")
-	}
-	retained := f.owned(t, vmrunner.ConductorResource)
-	if retained.Cleaned || retained.Receipt != owned.Receipt {
-		t.Fatal("deadline changed the durable UID obligation")
-	}
-	actual, err := f.client.Resource(pods).Namespace(pod.Namespace).Get(f.ctx, pod.Name, metav1.GetOptions{})
-	must(t, err)
-	if actual.GetUID() != pod.UID {
-		t.Fatal("deadline replaced or removed the owned Pod")
-	}
-	if _, err := f.s.CompletedPilotReceipt(f.ctx, f.plan.Spec.RunID); err == nil {
-		t.Fatal("deadline became successful suite evidence")
-	}
+	synctest.Test(t, func(t *testing.T) {
+		f := newFixture(t)
+		owned := f.create(t)
+		pod := f.pod(t, "survivor")
+		journal := &deadlinePilotJournal{PilotJournal: f.s}
+		beforeDeletes := countActions(f.client, "delete")
+		err := runCleanupInFakeTime(f.ctx, &vmrunner.PilotReconciler{Journal: journal, Runtime: f.b, Timeout: time.Millisecond}, f.plan.Spec.RunID)
+		if !journal.reached || !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("cleanup did not propagate its own expired budget: %v", err)
+		}
+		state, err := f.s.PilotExecution(f.ctx, f.plan.Spec.RunID)
+		must(t, err)
+		if state.Cleaned || countActions(f.client, "delete") != beforeDeletes {
+			t.Fatal("expired cleanup discharged ownership or deleted a resource")
+		}
+		retained := f.owned(t, vmrunner.ConductorResource)
+		if retained.Cleaned || retained.Receipt != owned.Receipt {
+			t.Fatal("deadline changed the durable UID obligation")
+		}
+		actual, err := f.client.Resource(pods).Namespace(pod.Namespace).Get(f.ctx, pod.Name, metav1.GetOptions{})
+		must(t, err)
+		if actual.GetUID() != pod.UID {
+			t.Fatal("deadline replaced or removed the owned Pod")
+		}
+		if _, err := f.s.CompletedPilotReceipt(f.ctx, f.plan.Spec.RunID); err == nil {
+			t.Fatal("deadline became successful suite evidence")
+		}
+	})
 }
 
 func TestCleanupReplacementAndAPIFailuresRetainObligation(t *testing.T) {
 	for _, mode := range []string{"replacement", "get-failure", "list-failure", "incomplete-list"} {
 		t.Run(mode, func(t *testing.T) {
-			f := newFixture(t)
-			job := f.create(t)
-			switch mode {
-			case "replacement":
-				object, err := f.client.Resource(jobs).Namespace(job.Intent.Namespace).Get(f.ctx, job.Intent.Name, metav1.GetOptions{})
+			synctest.Test(t, func(t *testing.T) {
+				f := newFixture(t)
+				job := f.create(t)
+				switch mode {
+				case "replacement":
+					object, err := f.client.Resource(jobs).Namespace(job.Intent.Namespace).Get(f.ctx, job.Intent.Name, metav1.GetOptions{})
+					must(t, err)
+					object.SetUID("foreign-uid")
+					must(t, f.client.Tracker().Update(jobs, object, job.Intent.Namespace))
+				case "get-failure":
+					f.client.PrependReactor("get", "jobs", func(ktesting.Action) (bool, runtime.Object, error) { return true, nil, errors.New("API unavailable") })
+				case "list-failure":
+					f.client.PrependReactor("list", "pods", func(ktesting.Action) (bool, runtime.Object, error) { return true, nil, errors.New("API unavailable") })
+				case "incomplete-list":
+					f.client.PrependReactor("list", "pods", func(ktesting.Action) (bool, runtime.Object, error) {
+						return true, &unstructured.UnstructuredList{Object: map[string]any{"apiVersion": "v1", "kind": "PodList", "metadata": map[string]any{"continue": "more"}}}, nil
+					})
+				}
+				want := map[string]string{
+					"replacement":     "cleanup UID",
+					"get-failure":     "API unavailable",
+					"list-failure":    "API unavailable",
+					"incomplete-list": "incomplete or oversized Pod inventory",
+				}[mode]
+				if err := runCleanupInFakeTime(f.ctx, &vmrunner.PilotReconciler{Journal: f.s, Runtime: f.b, Timeout: time.Second}, f.plan.Spec.RunID); !errors.Is(err, vmrunner.ErrExecutionOutstanding) || !strings.Contains(err.Error(), want) {
+					t.Fatalf("incomplete/foreign observation: %v; want %q", err, want)
+				}
+				state, err := f.s.PilotExecution(f.ctx, f.plan.Spec.RunID)
 				must(t, err)
-				object.SetUID("foreign-uid")
-				must(t, f.client.Tracker().Update(jobs, object, job.Intent.Namespace))
-			case "get-failure":
-				f.client.PrependReactor("get", "jobs", func(ktesting.Action) (bool, runtime.Object, error) { return true, nil, errors.New("API unavailable") })
-			case "list-failure":
-				f.client.PrependReactor("list", "pods", func(ktesting.Action) (bool, runtime.Object, error) { return true, nil, errors.New("API unavailable") })
-			case "incomplete-list":
-				f.client.PrependReactor("list", "pods", func(ktesting.Action) (bool, runtime.Object, error) {
-					return true, &unstructured.UnstructuredList{Object: map[string]any{"apiVersion": "v1", "kind": "PodList", "metadata": map[string]any{"continue": "more"}}}, nil
-				})
-			}
-			if err := (&vmrunner.PilotReconciler{Journal: f.s, Runtime: f.b, Timeout: time.Second}).Cleanup(f.ctx, f.plan.Spec.RunID); err == nil {
-				t.Fatal("incomplete/foreign observation accepted")
-			}
-			state, err := f.s.PilotExecution(f.ctx, f.plan.Spec.RunID)
-			must(t, err)
-			if state.Cleaned || countActions(f.client, "delete") != 0 {
-				t.Fatal("failure discharged ownership or deleted foreign UID")
-			}
+				if state.Cleaned || countActions(f.client, "delete") != 0 {
+					t.Fatal("failure discharged ownership or deleted foreign UID")
+				}
+			})
 		})
 	}
 }
@@ -555,57 +565,59 @@ func TestCleanupReplacementAndAPIFailuresRetainObligation(t *testing.T) {
 func TestActualJobSpecCannotUseClaimedIdentity(t *testing.T) {
 	for _, mode := range []string{"token", "retry", "command", "image", "extra-field", "annotation", "old-creation", "unknown-finalizer", "premature-foreground-finalizer"} {
 		t.Run(mode, func(t *testing.T) {
-			f := newFixture(t)
-			create := f.client.ReactionChain[0]
-			f.client.PrependReactor("create", "jobs", func(action ktesting.Action) (bool, runtime.Object, error) {
-				handled, value, err := create.React(action)
-				if err != nil {
-					return handled, value, err
-				}
-				object := value.(*unstructured.Unstructured).DeepCopy()
-				switch mode {
-				case "token":
-					must(t, unstructured.SetNestedField(object.Object, true, "spec", "template", "spec", "automountServiceAccountToken"))
-				case "retry":
-					must(t, unstructured.SetNestedField(object.Object, int64(1), "spec", "backoffLimit"))
-				case "command", "image":
-					containers, _, err := unstructured.NestedSlice(object.Object, "spec", "template", "spec", "containers")
-					must(t, err)
-					container := containers[0].(map[string]any)
-					if mode == "command" {
-						container["command"] = []any{"/bin/sh"}
-					} else {
-						container["image"] = "registry.example/conductor:latest"
+			synctest.Test(t, func(t *testing.T) {
+				f := newFixture(t)
+				create := f.client.ReactionChain[0]
+				f.client.PrependReactor("create", "jobs", func(action ktesting.Action) (bool, runtime.Object, error) {
+					handled, value, err := create.React(action)
+					if err != nil {
+						return handled, value, err
 					}
-					must(t, unstructured.SetNestedSlice(object.Object, containers, "spec", "template", "spec", "containers"))
-				case "extra-field":
-					must(t, unstructured.SetNestedField(object.Object, true, "spec", "template", "spec", "futureAuthority"))
-				case "annotation":
-					object.SetAnnotations(map[string]string{"oberth.ci/spec-identity": f.owned(t, vmrunner.ConductorResource).Intent.SpecIdentity})
-				case "old-creation":
-					object.SetCreationTimestamp(metav1.NewTime(f.now.Add(-time.Hour)))
-				case "unknown-finalizer":
-					object.SetDeletionTimestamp(ptr(metav1.NewTime(f.now)))
-					object.SetFinalizers([]string{"unreviewed.example/finalizer"})
-				case "premature-foreground-finalizer":
-					object.SetFinalizers([]string{metav1.FinalizerDeleteDependents})
+					object := value.(*unstructured.Unstructured).DeepCopy()
+					switch mode {
+					case "token":
+						must(t, unstructured.SetNestedField(object.Object, true, "spec", "template", "spec", "automountServiceAccountToken"))
+					case "retry":
+						must(t, unstructured.SetNestedField(object.Object, int64(1), "spec", "backoffLimit"))
+					case "command", "image":
+						containers, _, err := unstructured.NestedSlice(object.Object, "spec", "template", "spec", "containers")
+						must(t, err)
+						container := containers[0].(map[string]any)
+						if mode == "command" {
+							container["command"] = []any{"/bin/sh"}
+						} else {
+							container["image"] = "registry.example/conductor:latest"
+						}
+						must(t, unstructured.SetNestedSlice(object.Object, containers, "spec", "template", "spec", "containers"))
+					case "extra-field":
+						must(t, unstructured.SetNestedField(object.Object, true, "spec", "template", "spec", "futureAuthority"))
+					case "annotation":
+						object.SetAnnotations(map[string]string{"oberth.ci/spec-identity": f.owned(t, vmrunner.ConductorResource).Intent.SpecIdentity})
+					case "old-creation":
+						object.SetCreationTimestamp(metav1.NewTime(f.now.Add(-time.Hour)))
+					case "unknown-finalizer":
+						object.SetDeletionTimestamp(ptr(metav1.NewTime(f.now)))
+						object.SetFinalizers([]string{"unreviewed.example/finalizer"})
+					case "premature-foreground-finalizer":
+						object.SetFinalizers([]string{metav1.FinalizerDeleteDependents})
+					}
+					must(t, f.client.Tracker().Update(jobs, object, object.GetNamespace()))
+					return true, object, nil
+				})
+				if _, err := f.b.Create(f.ctx, f.plan); err == nil {
+					t.Fatal("mutated actual Job accepted")
 				}
-				must(t, f.client.Tracker().Update(jobs, object, object.GetNamespace()))
-				return true, object, nil
+				resource := f.owned(t, vmrunner.ConductorResource)
+				if !resource.Submitted || resource.Rejected || resource.Receipt.UID != "" {
+					t.Fatal("mutation lost ambiguous ownership obligation")
+				}
+				if err := runCleanupInFakeTime(f.ctx, &vmrunner.PilotReconciler{Journal: f.s, Runtime: f.b, Timeout: time.Second}, f.plan.Spec.RunID); !errors.Is(err, vmrunner.ErrExecutionOutstanding) || !strings.Contains(err.Error(), "conductor: observed") {
+					t.Fatalf("invalid Job released cleanup capacity: %v", err)
+				}
+				if countActions(f.client, "delete") != 0 {
+					t.Fatal("unbound actual Job deleted")
+				}
 			})
-			if _, err := f.b.Create(f.ctx, f.plan); err == nil {
-				t.Fatal("mutated actual Job accepted")
-			}
-			resource := f.owned(t, vmrunner.ConductorResource)
-			if !resource.Submitted || resource.Rejected || resource.Receipt.UID != "" {
-				t.Fatal("mutation lost ambiguous ownership obligation")
-			}
-			if err := (&vmrunner.PilotReconciler{Journal: f.s, Runtime: f.b, Timeout: time.Second}).Cleanup(f.ctx, f.plan.Spec.RunID); err == nil {
-				t.Fatal("invalid Job released cleanup capacity")
-			}
-			if countActions(f.client, "delete") != 0 {
-				t.Fatal("unbound actual Job deleted")
-			}
 		})
 	}
 }
@@ -653,37 +665,39 @@ func TestPendingPodCanScheduleBeforeBinding(t *testing.T) {
 func TestCleanupDetachesCancellationAndPreservesReplacementPod(t *testing.T) {
 	for _, replacement := range []bool{false, true} {
 		t.Run(map[bool]string{false: "canceled", true: "replacement"}[replacement], func(t *testing.T) {
-			f := newFixture(t)
-			f.create(t)
-			pod := f.pod(t, "first")
-			_, err := f.b.BindAttempt(f.ctx, f.plan)
-			must(t, err)
-			if replacement {
-				pod.UID = "other-pod-uid"
-				pod.OwnerReferences[0].UID = "foreign-job-uid"
-				f.savePod(t, pod)
-			}
-			ctx, cancel := context.WithCancel(f.ctx)
-			cancel()
-			err = (&vmrunner.PilotReconciler{Journal: f.s, Runtime: f.b, Timeout: time.Second}).Cleanup(ctx, f.plan.Spec.RunID)
-			if replacement && err == nil {
-				t.Fatal("replacement Pod discharged original UID")
-			}
-			if !replacement {
+			synctest.Test(t, func(t *testing.T) {
+				f := newFixture(t)
+				f.create(t)
+				pod := f.pod(t, "first")
+				_, err := f.b.BindAttempt(f.ctx, f.plan)
 				must(t, err)
-			}
-			state, readErr := f.s.PilotExecution(f.ctx, f.plan.Spec.RunID)
-			must(t, readErr)
-			if state.Failure == "" || state.Cleaned == replacement {
-				t.Fatal("cancellation/ownership cleanup state incorrect")
-			}
-			if replacement {
-				for _, action := range f.client.Actions() {
-					if action.GetVerb() == "delete" && action.GetResource() == pods {
-						t.Fatal("replacement Pod deleted")
+				if replacement {
+					pod.UID = "other-pod-uid"
+					pod.OwnerReferences[0].UID = "foreign-job-uid"
+					f.savePod(t, pod)
+				}
+				ctx, cancel := context.WithCancel(f.ctx)
+				cancel()
+				err = runCleanupInFakeTime(ctx, &vmrunner.PilotReconciler{Journal: f.s, Runtime: f.b, Timeout: time.Second}, f.plan.Spec.RunID)
+				if replacement && (!errors.Is(err, vmrunner.ErrExecutionOutstanding) || !strings.Contains(err.Error(), "cleanup UID")) {
+					t.Fatalf("replacement Pod discharged original UID: %v", err)
+				}
+				if !replacement {
+					must(t, err)
+				}
+				state, readErr := f.s.PilotExecution(f.ctx, f.plan.Spec.RunID)
+				must(t, readErr)
+				if state.Failure == "" || state.Cleaned == replacement {
+					t.Fatal("cancellation/ownership cleanup state incorrect")
+				}
+				if replacement {
+					for _, action := range f.client.Actions() {
+						if action.GetVerb() == "delete" && action.GetResource() == pods {
+							t.Fatal("replacement Pod deleted")
+						}
 					}
 				}
-			}
+			})
 		})
 	}
 }
@@ -744,30 +758,32 @@ func TestSerializedSameSecondAdmissionAndRecovery(t *testing.T) {
 }
 
 func TestSerializedEarlierSecondJobStillRejected(t *testing.T) {
-	base := time.Now().UTC().Add(-time.Minute).Truncate(time.Second)
-	f := newFixtureAt(t, base.Add(250*time.Millisecond))
-	create := f.client.ReactionChain[0]
-	f.client.PrependReactor("create", "jobs", func(action ktesting.Action) (bool, runtime.Object, error) {
-		_, value, err := create.React(action)
-		if err != nil {
-			return true, value, err
+	synctest.Test(t, func(t *testing.T) {
+		base := time.Now().UTC().Add(-time.Minute).Truncate(time.Second)
+		f := newFixtureAt(t, base.Add(250*time.Millisecond))
+		create := f.client.ReactionChain[0]
+		f.client.PrependReactor("create", "jobs", func(action ktesting.Action) (bool, runtime.Object, error) {
+			_, value, err := create.React(action)
+			if err != nil {
+				return true, value, err
+			}
+			object := value.(*unstructured.Unstructured).DeepCopy()
+			// The API's serialized value is one genuinely earlier second.
+			object.SetCreationTimestamp(metav1.NewTime(base.Add(-500 * time.Millisecond)))
+			var job batchv1.Job
+			must(t, runtime.DefaultUnstructuredConverter.FromUnstructured(object.Object, &job))
+			object = toObject(t, &job)
+			must(t, f.client.Tracker().Update(jobs, object, object.GetNamespace()))
+			return true, object, nil
+		})
+		if _, err := f.b.Create(f.ctx, f.plan); err == nil {
+			t.Fatal("earlier-second Job admitted")
 		}
-		object := value.(*unstructured.Unstructured).DeepCopy()
-		// The API's serialized value is one genuinely earlier second.
-		object.SetCreationTimestamp(metav1.NewTime(base.Add(-500 * time.Millisecond)))
-		var job batchv1.Job
-		must(t, runtime.DefaultUnstructuredConverter.FromUnstructured(object.Object, &job))
-		object = toObject(t, &job)
-		must(t, f.client.Tracker().Update(jobs, object, object.GetNamespace()))
-		return true, object, nil
+		if err := runCleanupInFakeTime(f.ctx, &vmrunner.PilotReconciler{Journal: f.s, Runtime: f.b, Timeout: time.Second}, f.plan.Spec.RunID); !errors.Is(err, vmrunner.ErrExecutionOutstanding) || !strings.Contains(err.Error(), "cleanup creation time") {
+			t.Fatalf("earlier-second Job bound by recovery: %v", err)
+		}
+		if countActions(f.client, "delete") != 0 {
+			t.Fatal("unowned older Job deleted")
+		}
 	})
-	if _, err := f.b.Create(f.ctx, f.plan); err == nil {
-		t.Fatal("earlier-second Job admitted")
-	}
-	if err := (&vmrunner.PilotReconciler{Journal: f.s, Runtime: f.b, Timeout: time.Second}).Cleanup(f.ctx, f.plan.Spec.RunID); err == nil {
-		t.Fatal("earlier-second Job bound by recovery")
-	}
-	if countActions(f.client, "delete") != 0 {
-		t.Fatal("unowned older Job deleted")
-	}
 }
