@@ -20,10 +20,15 @@ import (
 )
 
 const (
-	mcpDefaultURL          = "https://watch.oberth.ci/mcp"
-	mcpProtocolVersion     = "2025-06-18"
-	mcpRequestTimeout      = 60 * time.Second
-	mcpMaxResponseSize     = 8 << 20
+	mcpDefaultURL      = "https://watch.oberth.ci/mcp"
+	mcpProtocolVersion = "2025-06-18"
+	mcpRequestTimeout  = 60 * time.Second
+	// mcpMaxResponseSize bounds one JSON-RPC reply. The server's inline text
+	// views stop at 4 MiB, but a tool result carries that text twice (content
+	// and structuredContent), each JSON-escaped, so 8 MiB rejected ordinary
+	// full-size views as malformed JSON. A reply over this bound is reported
+	// as oversized, never parsed as a truncated document (#1011).
+	mcpMaxResponseSize     = 32 << 20
 	mcpMaxErrorBody        = 4 << 10
 	mcpJSONRPCVersion      = "2.0"
 	mcpMethodToolsList     = "tools/list"
@@ -123,6 +128,9 @@ Flags:
   --ca-file <path>     PEM CA certificate for TLS verification
   --args-file <path>   Read tool arguments JSON from a file (or "-" for stdin);
                        bypasses the shell argv length ceiling for large payloads
+  --output <path>      artifact_get only: stream the artifact's exact bytes to
+                       this file instead of an inline text view; the size and
+                       SHA-256 are verified and nothing is left on failure
 `)
 		return err
 	default:
@@ -200,6 +208,12 @@ func runMCPCall(ctx context.Context, arguments []string, output io.Writer) error
 		}
 		args = json.RawMessage(raw)
 	}
+	if cfg.output != "" {
+		if toolName != "artifact_get" {
+			return fmt.Errorf("%w: --output is only supported for artifact_get", errUsage)
+		}
+		return saveMCPArtifact(ctx, cfg, args, output)
+	}
 	params := toolsCallParams{
 		Name:      toolName,
 		Arguments: args,
@@ -233,6 +247,11 @@ func runMCPCall(ctx context.Context, arguments []string, output io.Writer) error
 	return nil
 }
 
+// errMCPResponseTooLarge reports a reply past mcpMaxResponseSize instead of
+// parsing its truncated prefix as malformed JSON.
+var errMCPResponseTooLarge = fmt.Errorf("MCP response exceeds %d bytes; narrow it with pattern/offset/limit, "+
+	"or save an artifact with artifact_get --output", mcpMaxResponseSize)
+
 // errMCPToolError is returned when the tool reports isError. The caller
 // maps this to exit code 2 (distinct from exit 1 for transport/auth errors).
 var errMCPToolError = errors.New("tool returned an error")
@@ -242,6 +261,7 @@ type mcpFlagResult struct {
 	mcpConfig
 	positional []string
 	argsFile   string // --args-file: path to a JSON file, or "-" for stdin
+	output     string // --output: artifact_get save-to-file destination
 }
 
 // parseMCPFlags parses the common MCP flags from arguments. wantPositional
@@ -274,6 +294,11 @@ func parseMCPFlags(name string, arguments []string, wantPositional int) (mcpFlag
 			result.argsFile = arguments[i]
 		case strings.HasPrefix(arg, "--args-file="):
 			result.argsFile = strings.TrimPrefix(arg, "--args-file=")
+		case (arg == "--output" || arg == "-o") && i+1 < len(arguments):
+			i++
+			result.output = arguments[i]
+		case strings.HasPrefix(arg, "--output="):
+			result.output = strings.TrimPrefix(arg, "--output=")
 		case arg == "--help" || arg == "-h":
 			return result, fmt.Errorf("%w: %s [--url <url>] [--token-file <path>] [--ca-file <path>]", errUsage, name)
 		case strings.HasPrefix(arg, "-"):
@@ -385,9 +410,12 @@ func mcpRequest(ctx context.Context, cfg mcpFlagResult, method string, params an
 
 // parseMCPJSONResponse reads a direct JSON-RPC response.
 func parseMCPJSONResponse(body io.Reader) (*jsonRPCResponse, error) {
-	data, err := io.ReadAll(io.LimitReader(body, mcpMaxResponseSize))
+	data, err := io.ReadAll(io.LimitReader(body, mcpMaxResponseSize+1))
 	if err != nil {
 		return nil, fmt.Errorf("read response: %w", err)
+	}
+	if len(data) > mcpMaxResponseSize {
+		return nil, errMCPResponseTooLarge
 	}
 	var response jsonRPCResponse
 	if err := json.Unmarshal(data, &response); err != nil {
@@ -400,7 +428,9 @@ func parseMCPJSONResponse(body io.Reader) (*jsonRPCResponse, error) {
 // Streamable HTTP spec sends the response as one or more SSE events; the
 // final event with event type "message" contains the JSON-RPC response.
 func parseMCPSSEResponse(body io.Reader) (*jsonRPCResponse, error) {
-	scanner := bufio.NewScanner(io.LimitReader(body, mcpMaxResponseSize))
+	limited := &io.LimitedReader{R: body, N: mcpMaxResponseSize + 1}
+	scanner := bufio.NewScanner(limited)
+	scanner.Buffer(make([]byte, 0, 64<<10), mcpMaxResponseSize)
 	var lastData string
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -409,7 +439,13 @@ func parseMCPSSEResponse(body io.Reader) (*jsonRPCResponse, error) {
 		}
 	}
 	if err := scanner.Err(); err != nil {
+		if errors.Is(err, bufio.ErrTooLong) {
+			return nil, errMCPResponseTooLarge
+		}
 		return nil, fmt.Errorf("read SSE stream: %w", err)
+	}
+	if limited.N <= 0 {
+		return nil, errMCPResponseTooLarge
 	}
 	if lastData == "" {
 		return nil, errors.New("SSE stream contained no data events")

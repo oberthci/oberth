@@ -23,15 +23,33 @@ Kubernetes Secret, and a repository-authored document must never reach one.
 ## Reading them
 
 ```
-oberth artifacts <run-id>            # what a run kept, with sizes
-oberth artifacts <run-id> <name>     # one artifact to stdout
+oberth artifacts <run-id>                        # what a run kept, with sizes
+oberth artifacts <run-id> <name>                 # one artifact to stdout
+oberth artifacts --output FILE <run-id> <name>   # one artifact to a file, verified
+oberth mcp call --output FILE artifact_get '{"id":"<run-id>","name":"<name>"}'
 ```
 
 Over HTTP, `GET /api/runs/{id}/artifacts` lists and
-`GET /api/runs/{id}/artifacts/{name}` downloads. Over MCP, `artifacts` lists and
-`artifact_get` returns contents, taking the same `pattern`, `context`, `offset`,
-`limit` and `tail` as `logs` and reporting the same counts. A 3000 line report
-with one failure in it is one filtered call, not 24,000 tokens.
+`GET /api/runs/{id}/artifacts/{name}` downloads. A download streams every
+stored byte with `Content-Length` and `X-Oberth-Artifact-SHA256`, the SHA-256 of
+exactly the bytes sent. It never applies a text-view bound: if the object
+cannot be sent whole, the connection is aborted short of `Content-Length`
+instead of ending as a clean, truncated success.
+
+`--output` hashes what it receives and renames the file into place only when
+the size and digest match the server's declaration. A mismatch, a short body,
+or a server that sends no digest fails with no file left behind. Writing to
+stdout verifies the same way and exits non-zero on a mismatch, but the bytes
+are already written, so prefer `--output` for anything you will execute.
+
+Over MCP, `artifacts` lists and `artifact_get` returns text contents, taking the
+same `pattern`, `context`, `offset`, `limit` and `tail` as `logs` and reporting
+the same counts plus the whole object's `sha256`. A 3000 line report with one
+failure in it is one filtered call, not 24,000 tokens. The inline view stays
+bounded at 4 MiB and says `truncated` when it stops. Binary content (a NUL byte
+or invalid UTF-8) cannot travel through a JSON text channel exactly, so
+`artifact_get` refuses it inline with its size and digest; `oberth mcp call
+--output` saves it through the raw download route with the same token instead.
 
 The dashboard shows what a run kept beneath its log.
 

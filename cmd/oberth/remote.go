@@ -669,6 +669,38 @@ func span(started, finished *time.Time) string {
 	return fmt.Sprintf("%dm %02ds", seconds/60, seconds%60)
 }
 
+// downloadRemoteArtifact streams a raw artifact and verifies its size and
+// digest (#1011). With outputPath it requires a server-declared digest and
+// renames the file into place only after verification. On stdout the bytes
+// are already written when a mismatch is found, so the command still fails
+// non-zero; a server without the digest header only earns a warning there.
+func downloadRemoteArtifact(ctx context.Context, api *client.Client, path, outputPath string, output io.Writer) error {
+	if outputPath != "" {
+		var receipt client.ArtifactReceipt
+		err := saveArtifactFile(outputPath, func(destination io.Writer) error {
+			var downloadErr error
+			receipt, downloadErr = api.DownloadArtifact(ctx, path, destination)
+			if downloadErr == nil && !receipt.Verified {
+				downloadErr = errUnverifiedArtifact
+			}
+			return downloadErr
+		})
+		if err != nil {
+			return err
+		}
+		reportSavedArtifact(outputPath, receipt)
+		return nil
+	}
+	receipt, err := api.DownloadArtifact(ctx, path, output)
+	if err != nil {
+		return err
+	}
+	if !receipt.Verified {
+		fmt.Fprintf(os.Stderr, "warning: %v\n", errUnverifiedArtifact)
+	}
+	return nil
+}
+
 type remoteArtifactEntry struct {
 	Name     string    `json:"name"`
 	Size     int64     `json:"size"`
@@ -680,7 +712,7 @@ type remoteArtifactList struct {
 	Artifacts []remoteArtifactEntry `json:"artifacts"`
 }
 
-func remoteArtifacts(ctx context.Context, config client.Config, rest []string, output io.Writer) error {
+func remoteArtifacts(ctx context.Context, config client.Config, rest []string, outputPath string, output io.Writer) error {
 	api, err := client.New(ctx, config)
 	if err != nil {
 		return err
@@ -691,7 +723,7 @@ func remoteArtifacts(ctx context.Context, config client.Config, rest []string, o
 		return err
 	}
 	if len(rest) == 2 {
-		return api.GetTo(ctx, "/api/runs/"+runID+"/artifacts/"+rest[1], nil, output)
+		return downloadRemoteArtifact(ctx, api, "/api/runs/"+runID+"/artifacts/"+rest[1], outputPath, output)
 	}
 	var listing remoteArtifactList
 	if err := api.Get(ctx, "/api/runs/"+runID+"/artifacts", nil, &listing); err != nil {

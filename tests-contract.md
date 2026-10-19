@@ -65,3 +65,13 @@ V5 source regressions additionally require one frozen API/Helm identity,
 impersonation/hook refusal, static public credential path-replacement binding,
 kernel executable-inode binding, observed fieldset ordering and complete
 metadata preservation. These remain UNRUN and confer no execution admission.
+
+Artifact downloads #1011: `TestBinaryArtifactsRoundTripByteIdenticalOverHTTPCLIAndMCP`
+serves 5 MiB and 64 MiB pseudo-random binaries (NULs, invalid UTF-8) from a real
+artifact store through the production service and handler, and requires exact
+size and SHA-256 over raw HTTP, `oberth artifacts` stdout and `--output`, and
+`oberth mcp call artifact_get --output`. `TestArtifactDownloadsFailOnDigestMismatchOrShortBody`
+proves a wrong, malformed or missing digest and a short body fail every save
+path with no file left. `TestOversizedArtifactCollectionStoresNothingToDownload`
+covers the per-run collection limit, and `TestArtifactDownloadAbortsInsteadOfEndingShort`
+proves the handler aborts rather than ending a short body cleanly.

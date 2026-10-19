@@ -2,9 +2,12 @@ package api
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -98,6 +101,18 @@ func (backend *fakeBackend) RunArtifact(_ context.Context, _ Actor, id, name str
 		return nil, backend.artifactErr
 	}
 	return fakeArtifact{name: name, body: backend.artifactBody}, nil
+}
+
+func (backend *fakeBackend) OpenRunArtifact(_ context.Context, _ Actor, id, name string) (ArtifactObject, error) {
+	backend.runID, backend.artifactName = id, name
+	if backend.artifactErr != nil {
+		return ArtifactObject{}, backend.artifactErr
+	}
+	sum := sha256.Sum256([]byte(backend.artifactBody))
+	return ArtifactObject{
+		Name: name, Size: int64(len(backend.artifactBody)), SHA256: hex.EncodeToString(sum[:]),
+		Content: io.NopCloser(strings.NewReader(backend.artifactBody)),
+	}, nil
 }
 
 type fakeArtifact struct {
