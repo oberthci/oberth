@@ -30,10 +30,18 @@ func (s *Store) RetryRun(ctx context.Context, runID, actor string) (model.Enqueu
 	if err != nil {
 		return model.EnqueueRunResult{}, fmt.Errorf("load retry source run: %w", err)
 	}
+	var newestID string
+	if err := tx.QueryRowContext(ctx, `SELECT id FROM runs WHERE repo_id = ? AND ref_kind = ? AND ref = ?
+		ORDER BY queue_sequence DESC LIMIT 1`, previous.RepoID, previous.RefKind, previous.Ref).Scan(&newestID); err != nil {
+		return model.EnqueueRunResult{}, fmt.Errorf("check latest branch run: %w", err)
+	}
+	if newestID != previous.ID {
+		return model.EnqueueRunResult{}, fmt.Errorf("%w: retry source is not the newest run for its branch", ErrInvalidState)
+	}
 	eligibleStatus := previous.Status == model.RunInterrupted ||
-		(previous.Status == model.RunFailed && previous.Phase == "infrastructure" && previous.FailedBurn == "" && previous.FailedStep == "")
+		(previous.Status == model.RunFailed && (previous.Phase == "infrastructure" || previous.Phase == "job") && previous.FailedStep == "")
 	if !eligibleStatus || previous.RefKind != model.RefBranch || previous.Release ||
-		previous.Trigger == "promotion" || previous.Trigger == "plan" || previous.Trigger == "apply" {
+		previous.Trigger == "promotion" {
 		return model.EnqueueRunResult{}, fmt.Errorf("%w: retry requires an interrupted or infrastructure-failed branch run", ErrInvalidState)
 	}
 	var active int

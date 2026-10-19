@@ -14,6 +14,7 @@ func TestRetryRunKeepsSourceAndAuditsActor(t *testing.T) {
 	for _, result := range []model.RunResult{
 		{Status: model.RunInterrupted, Phase: "interrupted"},
 		{Status: model.RunFailed, Phase: "infrastructure", Error: "checkout unavailable"},
+		{Status: model.RunFailed, Phase: "job", Error: "workflow deadline"},
 	} {
 		t.Run(string(result.Status), func(t *testing.T) {
 			now := time.Date(2026, 10, 19, 0, 0, 0, 0, time.UTC)
@@ -46,6 +47,12 @@ func TestRetryRunKeepsSourceAndAuditsActor(t *testing.T) {
 			if _, err := s.RetryRun(ctx, source.ID, "reviewer@host"); !errors.Is(err, ErrInvalidState) {
 				t.Fatalf("retry displaced active branch run: %v", err)
 			}
+			if _, err := s.FinishRun(ctx, retried.ID, model.RunResult{Status: model.RunPassed}); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := s.RetryRun(ctx, source.ID, "reviewer@host"); !errors.Is(err, ErrInvalidState) {
+				t.Fatalf("source retried again after newer run finished: %v", err)
+			}
 		})
 	}
 }
@@ -58,6 +65,7 @@ func TestRetryRunRefusesTestFailuresAndReleaseRuns(t *testing.T) {
 	}{
 		{name: "test failure", result: model.RunResult{Status: model.RunFailed, Phase: "test", FailedBurn: "test", FailedStep: "unit"}},
 		{name: "fake infrastructure phase", result: model.RunResult{Status: model.RunFailed, Phase: "infrastructure", FailedBurn: "test", FailedStep: "unit"}},
+		{name: "job phase with failed step", result: model.RunResult{Status: model.RunFailed, Phase: "job", FailedBurn: "test", FailedStep: "unit"}},
 		{name: "release", spec: model.RunSpec{RefKind: model.RefTag, Ref: "v1", Release: true, Trigger: "release"}, result: model.RunResult{Status: model.RunInterrupted}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -85,5 +93,73 @@ func TestRetryRunRefusesTestFailuresAndReleaseRuns(t *testing.T) {
 				t.Fatalf("ineligible retry enqueued a run: %#v, %v", counts, err)
 			}
 		})
+	}
+}
+
+func TestRetryRunRefusesOlderBranchRunAfterNewerRunFinishes(t *testing.T) {
+	for _, newerSHA := range []string{strings.Repeat("b", 40), strings.Repeat("a", 40)} {
+		t.Run(newerSHA[:1], func(t *testing.T) {
+			now := time.Date(2026, 10, 19, 0, 0, 0, 0, time.UTC)
+			s := testStore(t, &now)
+			ctx := context.Background()
+			repo := createRepo(t, s)
+			old, err := s.EnqueueRun(ctx, model.RunSpec{RepoID: repo.ID, RefKind: model.RefBranch,
+				Ref: "feature/retry", SHA: strings.Repeat("a", 40), Actor: "pusher", Trigger: "branch"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := s.FinishRun(ctx, old.ID, model.RunResult{Status: model.RunInterrupted}); err != nil {
+				t.Fatal(err)
+			}
+			newer, err := s.EnqueueRun(ctx, model.RunSpec{RepoID: repo.ID, RefKind: model.RefBranch,
+				Ref: old.Ref, SHA: newerSHA, Actor: "pusher", Trigger: "branch"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := s.FinishRun(ctx, newer.ID, model.RunResult{Status: model.RunPassed}); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := s.RetryRun(ctx, old.ID, "reviewer@host"); !errors.Is(err, ErrInvalidState) {
+				t.Fatalf("older run retry = %v", err)
+			}
+			latest, err := s.ResolveRunByRefKind(ctx, repo.ID, old.Ref, model.RefBranch)
+			if err != nil || latest.ID != newer.ID {
+				t.Fatalf("latest run changed after refused retry: %+v, %v", latest, err)
+			}
+			counts, err := s.CountRuns(ctx)
+			if err != nil || counts.Total != 2 {
+				t.Fatalf("refused retry enqueued a run: %+v, %v", counts, err)
+			}
+		})
+	}
+}
+
+func TestRetryRunRefusesSupersededSource(t *testing.T) {
+	now := time.Date(2026, 10, 19, 0, 0, 0, 0, time.UTC)
+	s := testStore(t, &now)
+	ctx := context.Background()
+	repo := createRepo(t, s)
+	source, err := s.EnqueueRun(ctx, model.RunSpec{RepoID: repo.ID, RefKind: model.RefBranch,
+		Ref: "feature/retry", SHA: strings.Repeat("a", 40), Actor: "pusher", Trigger: "branch"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ClaimNextRun(ctx); err != nil {
+		t.Fatal(err)
+	}
+	replacement, err := s.EnqueueRun(ctx, model.RunSpec{RepoID: repo.ID, RefKind: model.RefBranch,
+		Ref: source.Ref, SHA: strings.Repeat("b", 40), Actor: "pusher", Trigger: "branch"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	old, err := s.Run(ctx, source.ID)
+	if err != nil || old.Status != model.RunInterrupted || old.SupersededBy != replacement.ID {
+		t.Fatalf("superseded source = %+v, %v", old, err)
+	}
+	if _, err := s.FinishRun(ctx, replacement.ID, model.RunResult{Status: model.RunPassed}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.RetryRun(ctx, old.ID, "reviewer@host"); !errors.Is(err, ErrInvalidState) {
+		t.Fatalf("superseded source retried: %v", err)
 	}
 }

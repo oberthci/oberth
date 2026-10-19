@@ -20,4 +20,16 @@ func TestRunRetryCLIUsesMCPTool(t *testing.T) {
 	if !strings.Contains(output.String(), `tool=run_retry args={"id":"0123456789abcdef0123456789abcdef"}`) {
 		t.Fatalf("CLI request = %s", output.String())
 	}
+	for _, args := range [][]string{
+		{"retry", "--json", "0123456789abcdef0123456789abcdef"},
+		{"retry", "0123456789abcdef0123456789abcdef", "--json"},
+	} {
+		output.Reset()
+		if err := runRunDetail(context.Background(), args, &output); err != nil {
+			t.Fatalf("--json retry %v: %v", args, err)
+		}
+		if !strings.Contains(output.String(), `tool=run_retry args={"id":"0123456789abcdef0123456789abcdef"}`) {
+			t.Fatalf("--json CLI request = %s", output.String())
+		}
+	}
 }

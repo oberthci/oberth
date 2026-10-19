@@ -378,9 +378,18 @@ func runRunDetail(ctx context.Context, arguments []string, output io.Writer) err
 
 func runRunRetry(ctx context.Context, arguments []string, output io.Writer) error {
 	if len(arguments) == 1 && (arguments[0] == "--help" || arguments[0] == "-h") {
-		_, err := fmt.Fprintln(output, "Usage: oberth run retry <run-id> [--url <mcp-url>] [--token-file <path>] [--ca-file <path>]")
+		_, err := fmt.Fprintln(output, "Usage: oberth run retry <run-id> [--json] [--url <mcp-url>] [--token-file <path>] [--ca-file <path>]")
 		return err
 	}
+	forwarded := make([]string, 0, len(arguments))
+	for _, argument := range arguments {
+		// The MCP tool already returns the run as JSON. Consume the shared
+		// CLI flag here instead of forwarding it as an unknown transport flag.
+		if argument != "--json" && argument != "-json" {
+			forwarded = append(forwarded, argument)
+		}
+	}
+	arguments = forwarded
 	if len(arguments) == 0 || strings.HasPrefix(arguments[0], "-") {
 		return fmt.Errorf("%w: run retry <run-id>", errUsage)
 	}

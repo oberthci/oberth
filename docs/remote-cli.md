@@ -46,7 +46,7 @@ to exactly that file (mode 0600; a different token already there is kept as
 ```
 oberth runs [--repo NAME] [--ref REF] [--limit N]
 oberth run <run-id>
-oberth run retry <run-id>
+oberth run retry <run-id> [--json]
 oberth log <run-id> --burn B --step S [--pattern P] [--context N] [--offset N] [--limit N] [--tail]
 oberth artifacts <run-id> [name]
 oberth repos
@@ -57,7 +57,9 @@ oberth status
 The list and detail commands are read-only. `oberth run retry` calls the
 `run_retry` MCP tool using the same uplink token; it queues a fresh attempt
 for an interrupted or infrastructure-failed branch run and records the caller
-as actor. Test failures and release runs cannot be retried this way.
+as actor. Workflow-level failures without a failed step are eligible. The
+source must still be the newest run for its branch; test failures, older runs,
+and release runs cannot be retried this way.
 Publishing and cancelling stay in the dashboard and MCP.
 
 `--json` on any of them emits the server's own payload unchanged, so a script
