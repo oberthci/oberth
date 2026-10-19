@@ -155,6 +155,11 @@ published promotion can close it without creating a second issue. Each branch
 failure projection includes the caller-supplied bounded retained-log tail and a
 command hint for the complete failed-step log; the transient tail is not stored
 on the run record.
+An upstream reconciliation closes stale branch CI issues after a merge into a
+green default branch or a verified upstream deletion. It checks the accepted
+local branch head for ancestry, since a failed newer push may be ahead of the
+last published upstream ref. The close reason is retained in the issue and
+audit history; default-branch issues still require their own green run.
 Manual issues are workspace-global flat-list records; they are never attached to
 a repository or synchronized to the upstream forge.
 
