@@ -27,7 +27,7 @@ func (service *API) retryRun(ctx context.Context, actor api.Actor, id string) (m
 		return model.Run{}, err
 	}
 	service.signals.NotifyRun(previous.ID)
-	service.signals.NotifyRun(enqueued.Run.ID)
+	service.signals.NotifyRun(enqueued.ID)
 	if err := service.enqueues.AcceptEnqueue(ctx, enqueued); err != nil {
 		return enqueued.Run, err
 	}

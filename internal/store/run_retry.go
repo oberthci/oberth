@@ -59,7 +59,7 @@ func (s *Store) RetryRun(ctx context.Context, runID, actor string) (model.Enqueu
 	if err != nil {
 		return model.EnqueueRunResult{}, fmt.Errorf("enqueue retry: %w", err)
 	}
-	details, err := json.Marshal(map[string]any{"source_run_id": previous.ID, "run_id": enqueued.Run.ID,
+	details, err := json.Marshal(map[string]any{"source_run_id": previous.ID, "run_id": enqueued.ID,
 		"repo_id": previous.RepoID, "ref": previous.Ref, "sha": previous.SHA})
 	if err != nil {
 		return model.EnqueueRunResult{}, err

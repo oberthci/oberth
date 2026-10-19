@@ -15,7 +15,7 @@ import (
 type retryEnqueueObserver struct{ accepted string }
 
 func (observer *retryEnqueueObserver) AcceptEnqueue(_ context.Context, value model.EnqueueRunResult) error {
-	observer.accepted = value.Run.ID
+	observer.accepted = value.ID
 	return nil
 }
 func (*retryEnqueueObserver) NotifyQueue() {}
