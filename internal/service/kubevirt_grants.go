@@ -27,12 +27,16 @@ func (service *API) kubeVirtGrantTool(ctx context.Context, actor api.Actor, name
 	if name == "kubevirt_grant_get" {
 		grant, err := service.kubeVirtGrants.KubeVirtGrant(ctx, repository.ID)
 		if errors.Is(err, store.ErrNotFound) {
-			return map[string]any{"repo": repoName, "granted": false}, nil
+			return map[string]any{"repo": repoName, "granted": false, "state": "never_granted"}, nil
 		}
 		if err != nil {
 			return nil, err
 		}
-		return map[string]any{"repo": repoName, "granted": grant.RevokedAt == nil, "grant": grant}, nil
+		state := "granted"
+		if grant.RevokedAt != nil {
+			state = "revoked"
+		}
+		return map[string]any{"repo": repoName, "granted": grant.RevokedAt == nil, "state": state, "grant": grant}, nil
 	}
 	if !actor.Admin {
 		return nil, fmt.Errorf("%w: KubeVirt grants require an admin uplink", ErrForbidden)

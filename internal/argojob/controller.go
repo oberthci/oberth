@@ -445,6 +445,7 @@ func (controller *Controller) Wait(ctx context.Context, name, runID string, dest
 			if progressErr := reporter.failure(); progressErr != nil {
 				return completion, fmt.Errorf("argojob: run progress markers degraded: %w", progressErr)
 			}
+			controller.cleanupVMIsForObservedWorkflow(ctx, settled, runID)
 			return completion, nil
 		}
 		select {
@@ -555,11 +556,7 @@ func (controller *Controller) TerminalState(ctx context.Context, name string) (*
 	if !workflow.Status.Phase.Completed() {
 		return nil, ErrNotTerminal
 	}
-	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
-	defer cancel()
-	if err := controller.CleanupVMIs(cleanupCtx, name, runID); err != nil {
-		controller.reportVMICleanupFailure(cleanupCtx, runID, err)
-	}
+	controller.cleanupVMIsForObservedWorkflow(ctx, workflow, runID)
 	completion := completionFor(workflow)
 	controller.collectStepDiagnostics(ctx, workflow, &completion)
 	return &completion, nil
@@ -605,8 +602,16 @@ func (controller *Controller) Cancel(ctx context.Context, name, runID string) er
 	if err != nil && !apierrors.IsNotFound(err) && !apierrors.IsConflict(err) {
 		return fmt.Errorf("argojob: delete Workflow %s: %w", name, err)
 	}
-	controller.cleanupVMIsBestEffort(ctx, name, runID)
+	controller.cleanupVMIsForObservedWorkflow(ctx, workflow, runID)
 	return nil
+}
+
+func (controller *Controller) cleanupVMIsForObservedWorkflow(ctx context.Context, workflow *wfv1.Workflow, runID string) {
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	defer cancel()
+	if err := controller.cleanupVMIsForWorkflow(cleanupCtx, workflow, runID); err != nil {
+		controller.reportVMICleanupFailure(cleanupCtx, runID, err)
+	}
 }
 
 func (controller *Controller) cleanupVMIsBestEffort(ctx context.Context, name, runID string) {

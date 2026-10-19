@@ -586,10 +586,6 @@ func (jobs *ArgoJobs) Wait(ctx context.Context, name string, destination io.Writ
 	if err != nil {
 		return service.JobResult{}, err
 	}
-	if err := jobs.cleanupVMIs(ctx, name, intent.runID); err != nil {
-		log.Printf("WARN: VMI cleanup backstop failed for run %s: %v", intent.runID, err)
-		jobs.auditVMICleanupFailure(ctx, intent.runID, err)
-	}
 	if reason := jobs.collectArtifacts(context.WithoutCancel(ctx), name, intent.runID, intent.trigger); reason != "" {
 		jobs.recordArtifactFailure(context.WithoutCancel(ctx), intent.runID, reason)
 	}
@@ -651,18 +647,6 @@ func (jobs *ArgoJobs) TerminalResult(ctx context.Context, name string) (service.
 		return service.JobResult{}, service.ErrJobNotTerminal
 	}
 	return jobs.result(*completion), nil
-}
-
-func (jobs *ArgoJobs) cleanupVMIs(ctx context.Context, name, runID string) error {
-	cleaner, ok := jobs.controller.(interface {
-		CleanupVMIs(context.Context, string, string) error
-	})
-	if !ok {
-		return nil
-	}
-	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
-	defer cancel()
-	return cleaner.CleanupVMIs(cleanupCtx, name, runID)
 }
 
 func (jobs *ArgoJobs) auditVMICleanupFailure(ctx context.Context, runID string, cleanupErr error) {

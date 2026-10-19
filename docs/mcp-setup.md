@@ -221,7 +221,7 @@ call the proxy hostname directly.
 | `access_revoke` | Revoke a step's access to a secret path (admin-only) |
 | `kubevirt_grant` | Grant a repository permission to run KubeVirt VMI templates (admin-only, audited) |
 | `kubevirt_revoke` | Revoke a repository's KubeVirt permission (admin-only, audited) |
-| `kubevirt_grant_get` | Read a repository's current KubeVirt permission |
+| `kubevirt_grant_get` | Read a repository's KubeVirt permission: `never_granted`, `granted`, or `revoked`; granted and revoked responses include the audit record |
 
 For `access_allow` and `access_revoke`, `secret` is the exact path recorded in
 `access_list` or the pipeline declaration, including the mount and KV API prefix

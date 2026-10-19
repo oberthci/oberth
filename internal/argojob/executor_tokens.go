@@ -123,10 +123,10 @@ func (controller *Controller) deliverExecutorTokens(ctx context.Context, wf *wfv
 		if !running {
 			continue
 		}
-		// Argo can create the Pod before the node status is persisted. Wait
-		// for the controller-owned mapping instead of misclassifying an early
-		// resource Pod as an ordinary pipeline Pod.
-		if nodeID := pod.Annotations["workflows.argoproj.io/node-id"]; nodeID != "" {
+		// Only a resource Pod's main container can mount the executor token.
+		// Its node mapping must settle before selecting the launcher identity;
+		// ordinary steps can receive their executor token immediately.
+		if nodeID := pod.Annotations["workflows.argoproj.io/node-id"]; nodeID != "" && mainMountsExecutorToken(pod) {
 			if _, ok := wf.Status.Nodes[nodeID]; !ok {
 				continue
 			}
@@ -182,6 +182,19 @@ func (controller *Controller) deliverExecutorTokens(ctx context.Context, wf *wfv
 		delivered[pod.UID] = true
 	}
 	return nil
+}
+
+func mainMountsExecutorToken(pod *corev1.Pod) bool {
+	for _, container := range pod.Spec.Containers {
+		if container.Name == "main" {
+			for _, mount := range container.VolumeMounts {
+				if mount.Name == executorTokenVolume {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 // A controller-owned Pod node resolves to a named, admitted resource template.

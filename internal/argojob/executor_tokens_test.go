@@ -24,7 +24,7 @@ func TestExecutorIdentityDeliveryUsesSeparateBoundPodAndStdin(t *testing.T) {
 	config := testConfig()
 	config.applyDefaults()
 	wf := &wfv1.Workflow{ObjectMeta: metav1.ObjectMeta{Name: "run", Namespace: config.Namespace, UID: "workflow-id"}, Spec: wfv1.WorkflowSpec{ActiveDeadlineSeconds: ptr.To(int64(300))}}
-	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "step", Namespace: wf.Namespace, UID: "step-id", Labels: map[string]string{"workflows.argoproj.io/workflow": wf.Name}, OwnerReferences: []metav1.OwnerReference{{UID: wf.UID, Kind: "Workflow", Controller: ptr.To(true)}}}, Spec: corev1.PodSpec{
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "step", Namespace: wf.Namespace, UID: "step-id", Labels: map[string]string{"workflows.argoproj.io/workflow": wf.Name}, Annotations: map[string]string{"workflows.argoproj.io/node-id": "node-not-yet-persisted"}, OwnerReferences: []metav1.OwnerReference{{UID: wf.UID, Kind: "Workflow", Controller: ptr.To(true)}}}, Spec: corev1.PodSpec{
 		ServiceAccountName: config.PipelineServiceAccount,
 		Volumes:            []corev1.Volume{{Name: executorTokenVolume, VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{Medium: corev1.StorageMediumMemory}}}},
 		InitContainers:     []corev1.Container{{Name: executorTokenWaiter, Image: config.SourceSeedImage, Command: []string{"sh", "-c", executorTokenWaitCommand}, VolumeMounts: []corev1.VolumeMount{{Name: executorTokenVolume, MountPath: executorTokenDir}}}},

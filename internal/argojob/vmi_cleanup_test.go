@@ -3,6 +3,7 @@ package argojob
 import (
 	"context"
 	"errors"
+	"io"
 	"strings"
 	"testing"
 
@@ -16,6 +17,16 @@ import (
 	"k8s.io/client-go/dynamic/fake"
 	ktesting "k8s.io/client-go/testing"
 )
+
+type countingVMIWorkflowClient struct {
+	*staticWorkflowClient
+	gets int
+}
+
+func (client *countingVMIWorkflowClient) Get(ctx context.Context, name string, options metav1.GetOptions) (*wfv1.Workflow, error) {
+	client.gets++
+	return client.staticWorkflowClient.Get(ctx, name, options)
+}
 
 func TestCleanupVMIsDeletesOnlyRunLabelAndNameWithUID(t *testing.T) {
 	ctx := context.Background()
@@ -78,7 +89,8 @@ func TestCleanupVMIsDeletesOnlyRunLabelAndNameWithUID(t *testing.T) {
 
 func TestTerminalStateSurvivesVMICleanupFailure(t *testing.T) {
 	workflow := &wfv1.Workflow{ObjectMeta: metav1.ObjectMeta{Name: "run-workflow", Namespace: testNamespace, UID: "wf-id", Annotations: map[string]string{runIDAnnotation: "run-abc"}}, Spec: wfv1.WorkflowSpec{Templates: []wfv1.Template{{Name: "vm", Resource: &wfv1.ResourceTemplate{Action: "create"}}}}, Status: wfv1.WorkflowStatus{Phase: wfv1.WorkflowSucceeded}}
-	controller, err := NewController(&staticWorkflowClient{workflow: workflow}, nil, testConfig())
+	workflows := &countingVMIWorkflowClient{staticWorkflowClient: &staticWorkflowClient{workflow: workflow}}
+	controller, err := NewController(workflows, nil, testConfig())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -100,6 +112,37 @@ func TestTerminalStateSurvivesVMICleanupFailure(t *testing.T) {
 	}
 	if observed == nil || !strings.Contains(observed.Error(), "virt-api unavailable") {
 		t.Fatal("cleanup failure not observed")
+	}
+	if workflows.gets != 1 || len(client.Actions()) != 1 {
+		t.Fatalf("terminal cleanup made %d Workflow reads and %d VMI calls, want one each", workflows.gets, len(client.Actions()))
+	}
+}
+
+func TestWaitSurvivesOneVMICleanupFailure(t *testing.T) {
+	workflow := &wfv1.Workflow{ObjectMeta: metav1.ObjectMeta{Name: "run-workflow", Namespace: testNamespace, UID: "wf-id", Annotations: map[string]string{runIDAnnotation: "run-abc"}}, Spec: wfv1.WorkflowSpec{Templates: []wfv1.Template{{Name: "vm", Resource: &wfv1.ResourceTemplate{Action: "create"}}}}, Status: wfv1.WorkflowStatus{Phase: wfv1.WorkflowSucceeded}}
+	workflows := &countingVMIWorkflowClient{staticWorkflowClient: &staticWorkflowClient{workflow: workflow}}
+	controller, err := NewController(workflows, nil, testConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := fake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), map[schema.GroupVersionResource]string{vmiResource: "VirtualMachineInstanceList"})
+	client.PrependReactor("list", "virtualmachineinstances", func(ktesting.Action) (bool, runtime.Object, error) {
+		return true, nil, apierrors.NewServiceUnavailable("virt-api unavailable")
+	})
+	controller.WithVMIClient(client)
+	audits := 0
+	controller.WithVMICleanupFailure(func(_ context.Context, runID string, cleanupErr error) {
+		if runID != "run-abc" || !strings.Contains(cleanupErr.Error(), "virt-api unavailable") {
+			t.Fatalf("wrong cleanup failure for %s: %v", runID, cleanupErr)
+		}
+		audits++
+	})
+	result, err := controller.Wait(t.Context(), workflow.Name, "run-abc", io.Discard)
+	if err != nil || !result.Succeeded {
+		t.Fatalf("terminal workflow blocked by cleanup: %+v, %v", result, err)
+	}
+	if audits != 1 || len(client.Actions()) != 1 || workflows.gets != 2 {
+		t.Fatalf("cleanup audit=%d, VMI calls=%d, Workflow reads=%d; want 1, 1, 2", audits, len(client.Actions()), workflows.gets)
 	}
 }
 
