@@ -20,6 +20,9 @@ func TestRunStatusClassification(t *testing.T) {
 			t.Fatalf("unsupported run status %q reported valid", status)
 		}
 	}
+	if RunWaiting.Valid() || !RunWaiting.Active() || RunWaiting.Terminal() {
+		t.Fatal("waiting projection must stay active but cannot be persisted")
+	}
 }
 
 // TestStepStatusProgressOrdersTheLifecycle is what lets three records of the

@@ -24,9 +24,11 @@ const (
 	RunInterrupted RunStatus = "interrupted"
 )
 
+// Valid accepts only durable store statuses. Waiting is a read-side projection
+// and must never pass validation for a persisted run status.
 func (s RunStatus) Valid() bool {
 	switch s {
-	case RunQueued, RunWaiting, RunRunning, RunPassed, RunFailed, RunInterrupted:
+	case RunQueued, RunRunning, RunPassed, RunFailed, RunInterrupted:
 		return true
 	default:
 		return false

@@ -73,6 +73,11 @@ func (service *API) scheduling(ctx context.Context, run model.Run, steps []model
 				return result
 			case "admitted":
 				if run.StartedAt == nil {
+					if service.submittedKVMPreflight(ctx, run) {
+						result.State = "preflight"
+						result.Message = "Trusted KVM preflight submitted; awaiting its result and cleanup before workflow submission."
+						return result
+					}
 					result.State = "waiting"
 					result.Message = "Resource admission granted; waiting for workflow submission."
 					return result
@@ -82,6 +87,11 @@ func (service *API) scheduling(ctx context.Context, run model.Run, steps []model
 		}
 	}
 	if run.StartedAt == nil {
+		if service.submittedKVMPreflight(ctx, run) {
+			result.State = "preflight"
+			result.Message = "Trusted KVM preflight submitted; awaiting its result and cleanup before workflow submission."
+			return result
+		}
 		result.State = "waiting"
 		result.Message = "Waiting for workflow submission."
 		return result
@@ -103,6 +113,14 @@ func (service *API) scheduling(ctx context.Context, run model.Run, steps []model
 	result.State = execution.State
 	result.Message = execution.Message
 	return result
+}
+
+func (service *API) submittedKVMPreflight(ctx context.Context, run model.Run) bool {
+	if service.kvmPreflights == nil || run.JobName != "" {
+		return false
+	}
+	preflight, err := service.kvmPreflights.KVMPreflight(ctx, run.ID)
+	return err == nil && preflight.Submitted && !preflight.Rejected && !preflight.Cleaned
 }
 
 // waitingAdmissionMessage names the concurrency group and the exact run a

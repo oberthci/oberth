@@ -803,7 +803,7 @@ func (service *API) RunLogLive(ctx context.Context, actor api.Actor, id string, 
 		return nil, err
 	}
 	terminal := run.Status.Terminal()
-	response := LiveLogResponse{RunID: run.ID, Status: string(run.Status)}
+	response := LiveLogResponse{RunID: run.ID, Status: string(visibleRun(run).Status)}
 	chunk, next, size, err := service.logs.ReadFrom(run.ID, offset, maxLiveLogChunk)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
