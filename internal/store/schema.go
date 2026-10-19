@@ -13,7 +13,7 @@ type migration struct {
 func LatestMigrationVersion() int { return latestMigrationVersion }
 
 const (
-	latestMigrationVersion = 23
+	latestMigrationVersion = 24
 	// oberthSchemaIdentity is the fresh-deployment default. Existing deployments
 	// supply their original immutable identity through ProtocolConfig; bootstrap
 	// SQL and legacy schema validation use that exact configured operand.
@@ -1080,4 +1080,9 @@ ALTER TABLE issues ADD COLUMN scope_upstream_id INTEGER;`,
     revoked_at INTEGER,
     CHECK ((revoked_at IS NULL AND revoked_by = '') OR (revoked_at IS NOT NULL AND revoked_by != ''))
 );`},
+	{
+		version: 24,
+		sql: `CREATE INDEX IF NOT EXISTS runs_passed_tested_sha_idx
+    ON runs(repo_id, tested_sha) WHERE status = 'passed';`,
+	},
 }

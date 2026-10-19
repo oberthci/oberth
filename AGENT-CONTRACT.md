@@ -1661,6 +1661,7 @@ version that is recorded on live databases must never be rewritten.
 | v21 | Unreleased (#894) | Nullable bounded step termination diagnostics; old rows remain explicitly unavailable, with no inferred OOM or backfill | Database restore |
 | v22 | Unreleased (#073) | Upstream-scoped uplinks: uplink_scopes table (one upstream name per row; none = unscoped); issues gain nullable scope_upstream_id for manual issues | Database restore |
 | v23 | Unreleased (#917) | Audited repository-scoped KubeVirt grants keyed by durable repo ID | Database restore |
+| v24 | Unreleased (#954) | Partial index for passed runs by repository and tested SHA, used to validate SHA-pinned fragments | Database restore |
 
 **Contract test:** `TestEveryMigrationDocumentedInAgentContract` asserts that
 every migration version in `internal/store/schema.go` has a corresponding

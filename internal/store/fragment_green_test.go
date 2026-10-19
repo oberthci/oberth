@@ -56,3 +56,19 @@ func TestHasPassedRunForSHAIsScopedToFragmentRepository(t *testing.T) {
 		t.Fatalf("abbreviated SHA accepted: %v, %v", passed, err)
 	}
 }
+
+func TestPassedFragmentSHALookupUsesTestedSHAIndex(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 10, 19, 0, 0, 0, 0, time.UTC)
+	s := testStore(t, &now)
+	var id, parent, unused int
+	var detail string
+	err := s.db.QueryRowContext(t.Context(), `EXPLAIN QUERY PLAN
+SELECT 1 FROM runs WHERE repo_id = ? AND tested_sha = ? AND status = 'passed'`, 1, strings.Repeat("a", 40)).Scan(&id, &parent, &unused, &detail)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(detail, "runs_passed_tested_sha_idx") {
+		t.Fatalf("passed fragment lookup plan = %q, want tested SHA index", detail)
+	}
+}

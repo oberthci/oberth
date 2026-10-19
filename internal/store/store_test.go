@@ -231,7 +231,7 @@ func TestLegacyMigrationRefusesCurrentSchemaWithoutChangingIt(t *testing.T) {
 	if migrated != nil {
 		_ = migrated.Close()
 	}
-	if !errors.Is(err, ErrSchemaIncompatible) || !strings.Contains(err.Error(), "expected schema version 1, found 23") {
+	if !errors.Is(err, ErrSchemaIncompatible) || !strings.Contains(err.Error(), fmt.Sprintf("expected schema version 1, found %d", latestMigrationVersion)) {
 		t.Fatalf("current-schema legacy migration error = %v", err)
 	}
 	after := readAuthoritativeDatabaseFiles(t, path)

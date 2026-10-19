@@ -121,6 +121,9 @@ func TestFragmentLoaderSHARequiresBranchGreenRun(t *testing.T) {
 	if _, err := loader.Load(t.Context(), key, periapsis.TriggerCI, model.RefBranch, "promotion"); err == nil || !strings.Contains(err.Error(), "only plain branch-push CI") {
 		t.Fatalf("promotion CI accepted SHA fragment: %v", err)
 	}
+	if _, err := loader.Load(t.Context(), key, periapsis.TriggerCI, model.RefBranch, "schedule"); err == nil || !strings.Contains(err.Error(), "only plain branch-push CI") {
+		t.Fatalf("scheduled CI accepted SHA fragment: %v", err)
+	}
 	short := argoworkflow.FragmentKey{Repo: key.Repo, Version: sha[:12]}
 	if _, err := loader.Load(t.Context(), short, periapsis.TriggerCI, model.RefBranch, "branch"); err == nil || !strings.Contains(err.Error(), "tag not found") {
 		t.Fatalf("abbreviated SHA resolved: %v", err)
