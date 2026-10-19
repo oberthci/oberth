@@ -857,7 +857,12 @@ continuity checks; it must never be used to reset or bypass those checks.
 - Green branch runs force-sync that same branch to the upstream forge. Red runs
   create or update one open CI issue per repository and branch with the new SHA,
   a bounded (16 KiB) failure excerpt, and full burn-log command hint; green
-  closes it. When the run recorded a failed burn/step, the excerpt comes only
+  closes it. A periodic reconciliation also closes a stale red issue when its
+  accepted branch head is merged into the upstream default branch and that
+  branch's latest run passed, or when a previously published or explicitly
+  deleted branch is absent upstream. The closing reason is appended to the
+  issue and audit history. Default-branch CI issues close only through a green
+  run. When the run recorded a failed burn/step, the excerpt comes only
   from that step's own named log slice (what `logs <sha> <step>` returns): its
   tail, preceded by the newest earlier lines of the same slice matching
   `fatal error|panic|FAIL|Error:` when they scrolled out of the tail window.

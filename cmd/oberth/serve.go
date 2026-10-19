@@ -990,7 +990,11 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 		MinInterval:  options.scheduleMinInterval,
 		MaxEntries:   options.scheduleMaxEntries,
 	})
-	return runComponents(ctx, options, scheduler, anchors, git, sshService, httpsServer, goProxyServer, newAdminGateServer(anchors.AllowMutation, options.database), activateScheduler, accessReconciler, schedules, logger)
+	ciIssues, err := service.NewCIIssueReconciler(database, git, anchors.AllowMutation, logger)
+	if err != nil {
+		return err
+	}
+	return runComponents(ctx, options, scheduler, anchors, git, sshService, httpsServer, goProxyServer, newAdminGateServer(anchors.AllowMutation, options.database), activateScheduler, accessReconciler, schedules, ciIssues, logger)
 }
 
 type startupContinuity interface {
@@ -1392,6 +1396,7 @@ func runComponents(
 	activateScheduler func(context.Context) error,
 	accessReconciler *service.AccessReconciler,
 	schedules *app.Schedules,
+	ciIssues *service.CIIssueReconciler,
 	logger *log.Logger,
 ) error {
 	runCtx, cancel := context.WithCancel(ctx)
@@ -1449,12 +1454,14 @@ func runComponents(
 			}
 		}()
 	}
+	schedulerActivated := make(chan struct{})
 	start("scheduler", func() error {
 		if activateScheduler != nil {
 			if err := activateScheduler(runCtx); err != nil {
 				return err
 			}
 		}
+		close(schedulerActivated)
 		return scheduler.Run(runCtx)
 	})
 	start("audit anchor", func() error { return anchors.Run(runCtx) })
@@ -1497,6 +1504,20 @@ func runComponents(
 			logger.Printf("schedule ticker stopped: %v", err)
 		}
 	}()
+	if ciIssues != nil {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			select {
+			case <-schedulerActivated:
+			case <-runCtx.Done():
+				return
+			}
+			if err := ciIssues.Run(runCtx); err != nil && runCtx.Err() == nil {
+				logger.Printf("CI issue reconciler stopped: %v", err)
+			}
+		}()
+	}
 	if accessReconciler != nil {
 		workers.Add(1)
 		go func() {
