@@ -20,7 +20,7 @@ func TestRunStartsOnlyAfterSubmission(t *testing.T) {
 	}
 	now = now.Add(time.Minute)
 	claimed, err := s.ClaimNextRun(ctx)
-	if err != nil || claimed.ID != enqueued.Run.ID || claimed.StartedAt != nil || claimed.Phase != "waiting" {
+	if err != nil || claimed.ID != enqueued.ID || claimed.StartedAt != nil || claimed.Phase != "waiting" {
 		t.Fatalf("claim started run: %#v, %v", claimed, err)
 	}
 	if _, err := s.MarkRunSubmitted(ctx, claimed.ID); !errors.Is(err, ErrInvalidState) {
