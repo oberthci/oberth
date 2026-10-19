@@ -296,7 +296,10 @@ continuity checks; it must never be used to reset or bypass those checks.
   exceed `maxConcurrentJobs`, and claimed runs are bounded at twice that. A
   hold ends only when the member's Workflow is terminal or its deletion has
   been accepted (Pods of a deleted Workflow may still be inside their
-  termination grace period). Names are 1 to 63 characters of `[a-z0-9-]` and
+  termination grace period). A claimed run that is superseded, requeued or
+  cancelled before it is granted owns no Workflow: the cancellation pass
+  withdraws its reservation at once, so it stops heading the FIFO queue or
+  its group, and the same grant pass admits the runs it was blocking. Names are 1 to 63 characters of `[a-z0-9-]` and
   are never normalized; anything else fails `oberth validate` and server
   admission, and the scheduler fails that run (phase `infrastructure`) before
   a Workflow exists. Because the group spans trigger tiers by design (a
@@ -623,7 +626,14 @@ continuity checks; it must never be used to reset or bypass those checks.
   do not suppress otherwise valid historical receipts.
 - MCP `run_get` and `run_logs` accept the same full IDs and unique prefixes
   as the dashboard run views. ID prefix resolution is read-only; scheduler
-  and mutation lookups still require exact durable IDs. `run_logs` and `logs`
+  and mutation lookups still require exact durable IDs. `run_retry` and
+  `run_cancel` resolve a prefix read-only within the caller's scope first and
+  mutate only by the resolved exact ID. `run_cancel` takes `id`, optional
+  `reason` (printable, one line, at most 512 bytes) and `force`, and returns
+  `run_id`, `status`, `phase`, `previous_state` (`queued`, `waiting`,
+  `running`), `cancelled_by`, `reason`, `workflow` (`none`,
+  `not_submitted`, `deleted`, `pending`), and optional `promotion_id` and
+  `warning`. `run_logs` and `logs`
   authorize the named step against the plan/progress/results before reading
   the bounded redacted retained log. While a run is active, absent retained
   bytes yield the typed `ErrStepLogPending` error (HTTP 409; actionable MCP
@@ -854,7 +864,41 @@ continuity checks; it must never be used to reset or bypass those checks.
   FIFO CI run for the exact accepted commit. A newer push to the same repository
   and branch marks the older run `interrupted`, records which newer run
   superseded it, and creates a durable cancellation obligation for any in-flight
-  Kubernetes Job.
+  Kubernetes Job. Settling that obligation also withdraws the superseded run's
+  admission reservation when it was still preparing or waiting, without a
+  restart; a granted reservation is released only by its owner, once the
+  Workflow is terminal or its deletion was accepted.
+- An explicit run cancel (`run_cancel`, `oberth run cancel`, `oberth runs
+  cancel`) terminalizes one queued, waiting or running run through an audited
+  `CancelRun(actor, run, reason)`: the run becomes `interrupted` with phase
+  `cancelled` and reason `cancelled by <actor>[: <reason>]` (projected
+  unchanged by `run_get`, `run_list` and `/api/runs`), and a `run.cancel`
+  audit action carrying actor, reason, previous state, force and any warning is
+  appended in the same transaction. No run status is added: every consumer
+  already treats `interrupted` as terminal and non-green, and a new status
+  would need a `runs` CHECK-constraint table rebuild. A queued run simply
+  never gets claimed. A claimed run receives the existing supersede obligation
+  with no successor (`run_cancellations.reason = 'superseded'`, empty
+  `superseded_by`): its admission reservation, weight and group position are
+  withdrawn at once if ungranted, and its Workflow is deleted through the
+  normal Delete path (which also removes run-labelled VMIs); the owner then
+  settles without recording a result, releasing a granted reservation only
+  after the deletion was accepted. The record is terminal before the deletion
+  finishes, exactly as for a supersede; a failed deletion stays a pending
+  obligation for the cancellation pass, including after a restart. Cancelling
+  a terminal run is refused (HTTP 409 / `ErrInvalidState`) without any change.
+  A run owning a pending publication is refused: the publication owns it.
+  Cancelling promotion CI fails the promotion in the same transaction, so no
+  publication can begin and nothing is merged or pushed. A cancel projects no
+  CI issue. Authorization: an admin uplink may cancel any run it can see, but
+  tag/release and apply runs require an explicit `force` and record the
+  warning that their publication may be partial (anything the Workflow
+  already pushed stays published); a running concurrency-group member's
+  cancel warns that the external state its group guards may need recovery. A
+  non-admin uplink may cancel only `branch`-trigger runs outside any
+  concurrency group in repositories its scope can see; release, tag, plan,
+  apply, promotion and scheduled runs and group members are refused with
+  `ErrForbidden`.
 - A server stop or restart re-fires stranded ordinary branch runs through
   the same supersede mechanism (issue #270), on all three termination paths:
   graceful-shutdown compensation in the stopping process, owner startup
@@ -869,10 +913,13 @@ continuity checks; it must never be used to reset or bypass those checks.
   Promotion CI, tag/release, and publication-owning runs are never re-fired
   automatically; they terminalize conservatively exactly as before, and a
   branch that already has newer active work keeps only that newest run.
+  Explicitly cancelled runs are never re-fired either: they are terminal
+  before any restart pass looks at them, and only active runs are requeued.
 - Green branch runs force-sync that same branch to the upstream forge. Red runs
   create or update one open CI issue per repository and branch with the new SHA,
   a bounded (16 KiB) failure excerpt, and full burn-log command hint; green
-  closes it. A periodic reconciliation also closes a stale red issue when its
+  closes it. An explicitly cancelled run (or promotion) projects no CI issue
+  and leaves an existing one unchanged. A periodic reconciliation also closes a stale red issue when its
   accepted branch head is merged into the upstream default branch and that
   branch's latest run passed, or when a previously published or explicitly
   deleted branch is absent upstream. The closing reason is appended to the
@@ -1145,9 +1192,14 @@ continuity checks; it must never be used to reset or bypass those checks.
   `guardWitnessGenesisRetrofit` probes the head and refuses `--install-rekor`
   on an existing deployment without the explicit acknowledgment.
 - The in-pod administrative surface is `upstream add|list|remove`,
-  `repo add`, `uplink add|list|remove`, and `secretstore verify`. Every
+  `repo add`, `uplink add|list|remove`, `secretstore verify`, and `run
+  cancel` / `runs cancel` with `--database`. Every
   mutation passes the live audit mutation gate and appends an audit action;
-  listings are read-only. Push-time repository discovery auto-maps a new name
+  listings are read-only. An in-pod cancel acts as the administrative actor
+  (admin rules, `force` included) and then asks the daemon, through the
+  admin socket's body-less `POST /v1/cancellation-pass`, to run its
+  cancellation pass; the wake carries no input and mutates nothing itself,
+  and without it the obligation runs on the next queue event or restart. Push-time repository discovery auto-maps a new name
   only while exactly one upstream is configured — with several upstreams an
   unmapped push fails closed and `repo add <name> <upstream>` declares the
   mapping explicitly. `upstream remove` deletes only mapping state and fails

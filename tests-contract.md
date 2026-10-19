@@ -19,6 +19,25 @@ sequences and positions; `TestRunListDefaultViewUnchanged` compares the
 default `run_list` encoding byte for byte. `TestRunsPageSplitsActiveFromHistory`
 pins the dashboard's Active/History split and head-of-line marker.
 
+Run cancel and supersede admission release:
+`TestSupersedingAWaitingXLHeadReleasesItsReservationOnTheNextGrantPass` (real
+SQLite, fake engine) supersedes an XL group member waiting at the FIFO head
+behind an L holder and proves the group member and another repository's run
+are admitted on the next grant pass, with no restart; it failed before the fix.
+`TestWeightedAdmissionAbandonWithdrawsOnlyUngrantedReservations` pins the gate
+primitive. Store tests (`run_cancel_test.go`) cover queued/waiting/running/
+terminal cancels, the no-successor obligation and its Job name, no re-fire by
+owner restart recovery, no CI issue, promotion failure blocking publication,
+pending-publication refusal and reason bounds. Service tests
+(`run_cancel_test.go`) drive `run_cancel` end to end: queued runs are never
+claimed, a cancelled waiting XL head releases admission at once, a running
+run's Workflow is deleted and the owner never overwrites the cancel, the
+permission/force matrix, idempotent refusal, promotion cancel without merge or
+push, and no re-fire across a restart while an uncancelled stranded run is
+requeued. Scope tests treat `run_cancel` as a scope-checked mutation; CLI
+tests cover MCP forwarding, `runs cancel` selection and in-pod admin-socket
+wake.
+
 Watch ownership #671: adoption tests exercise complete preflight before any
 mutation, metadata-only JSONPatch UID/RV tests, replacement between read/patch,
 foreign/partial owner and scope/spec/target/expiry/duplicate-input negatives,
