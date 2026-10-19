@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -157,15 +158,17 @@ func (reader *blockedConductorStream) Close() error {
 }
 
 func TestConductorStreamCancellationClosesBlockedReader(t *testing.T) {
-	plan, attempt := testPilotPlan(), testConductorAttempt()
-	reader := &blockedConductorStream{done: make(chan struct{})}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
-	defer cancel()
-	_, err := ReadConductorStream(ctx, reader, new(conductorInput), plan, attempt, func(context.Context, PilotRestartRequest) (PilotRestartResponse, error) {
-		t.Fatal("canceled stream dispatched restart")
-		return PilotRestartResponse{}, nil
+	synctest.Test(t, func(t *testing.T) {
+		plan, attempt := testPilotPlan(), testConductorAttempt()
+		reader := &blockedConductorStream{done: make(chan struct{})}
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+		defer cancel()
+		_, err := ReadConductorStream(ctx, reader, new(conductorInput), plan, attempt, func(context.Context, PilotRestartRequest) (PilotRestartResponse, error) {
+			t.Fatal("canceled stream dispatched restart")
+			return PilotRestartResponse{}, nil
+		})
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("blocked reader ignored cancellation: %v", err)
+		}
 	})
-	if !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("blocked reader ignored cancellation: %v", err)
-	}
 }

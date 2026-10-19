@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -263,28 +264,30 @@ func TestController_Wait_TransitionsToSuccess(t *testing.T) {
 }
 
 func TestController_Wait_ContextCancellation(t *testing.T) {
-	backend := &fakeBackend{
-		getPhases: []string{"Pending", "Pending", "Pending"},
-	}
-	ctrl, _ := NewController(validConfig(), backend)
-	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
-	defer cancel()
-	spec := validSpec()
-	spec.Deadline = 200 * time.Millisecond
-	// The spec deadline is validated at admission; use the controller ceiling
-	// for the context-driven test. We override below.
-	spec.Deadline = MinDeadline
-	result, err := ctrl.Wait(ctx, mustCreate(t, ctrl, spec), spec)
-	if err == nil {
-		t.Fatal("expected timeout error")
-	}
-	if result.Phase != "Failed" {
-		t.Fatalf("expected Failed on timeout, got %s", result.Phase)
-	}
-	// Verify cleanup was attempted.
-	if backend.deleteCalls.Load() < 1 {
-		t.Fatal("expected VMI deletion on timeout")
-	}
+	synctest.Test(t, func(t *testing.T) {
+		backend := &fakeBackend{
+			getPhases: []string{"Pending", "Pending", "Pending"},
+		}
+		ctrl, _ := NewController(validConfig(), backend)
+		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+		defer cancel()
+		spec := validSpec()
+		spec.Deadline = 200 * time.Millisecond
+		// The spec deadline is validated at admission; use the controller ceiling
+		// for the context-driven test. We override below.
+		spec.Deadline = MinDeadline
+		result, err := ctrl.Wait(ctx, mustCreate(t, ctrl, spec), spec)
+		if err == nil {
+			t.Fatal("expected timeout error")
+		}
+		if result.Phase != "Failed" {
+			t.Fatalf("expected Failed on timeout, got %s", result.Phase)
+		}
+		// Verify cleanup was attempted.
+		if backend.deleteCalls.Load() < 1 {
+			t.Fatal("expected VMI deletion on timeout")
+		}
+	})
 }
 
 // --- Adversarial: evidence integrity ---

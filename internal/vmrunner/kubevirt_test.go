@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -171,14 +172,16 @@ func TestKubeVirtDeletionRefusesReplacementAndUsesUIDPrecondition(t *testing.T) 
 }
 
 func TestKubeVirtCleanupWaitsForAbsence(t *testing.T) {
-	backend, client := transportFixture(t)
-	instance := createTransportVMI(t, backend)
-	client.PrependReactor("delete", "virtualmachineinstances", func(ktesting.Action) (bool, runtime.Object, error) { return true, nil, nil })
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
-	defer cancel()
-	if err := backend.DeleteVMI(ctx, "pipeline", instance); !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("acknowledged delete counted as cleanup: %v", err)
-	}
+	synctest.Test(t, func(t *testing.T) {
+		backend, client := transportFixture(t)
+		instance := createTransportVMI(t, backend)
+		client.PrependReactor("delete", "virtualmachineinstances", func(ktesting.Action) (bool, runtime.Object, error) { return true, nil, nil })
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+		defer cancel()
+		if err := backend.DeleteVMI(ctx, "pipeline", instance); !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("acknowledged delete counted as cleanup: %v", err)
+		}
+	})
 }
 
 func TestKubeVirtCleanupFindsSurvivingOwnedLauncher(t *testing.T) {
