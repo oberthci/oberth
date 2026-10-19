@@ -299,6 +299,9 @@ func resolveRemoteRunID(ctx context.Context, api *client.Client, given string) (
 }
 
 func runRunDetail(ctx context.Context, arguments []string, output io.Writer) error {
+	if len(arguments) > 0 && arguments[0] == "retry" {
+		return runRunRetry(ctx, arguments[1:], output)
+	}
 	flags, asJSON, err := remoteFlags("run", arguments, output)
 	if err != nil || flags == nil {
 		return err
@@ -371,6 +374,22 @@ func runRunDetail(ctx context.Context, arguments []string, output io.Writer) err
 		}
 	}
 	return nil
+}
+
+func runRunRetry(ctx context.Context, arguments []string, output io.Writer) error {
+	if len(arguments) == 1 && (arguments[0] == "--help" || arguments[0] == "-h") {
+		_, err := fmt.Fprintln(output, "Usage: oberth run retry <run-id> [--url <mcp-url>] [--token-file <path>] [--ca-file <path>]")
+		return err
+	}
+	if len(arguments) == 0 || strings.HasPrefix(arguments[0], "-") {
+		return fmt.Errorf("%w: run retry <run-id>", errUsage)
+	}
+	encoded, err := json.Marshal(map[string]string{"id": arguments[0]})
+	if err != nil {
+		return err
+	}
+	toolArguments := append([]string{"run_retry", string(encoded)}, arguments[1:]...)
+	return runMCPCall(ctx, toolArguments, output)
 }
 
 type remoteLog struct {
