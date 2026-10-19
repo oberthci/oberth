@@ -1,6 +1,7 @@
 # Pipeline fragments
 
-One repository can execute a template defined in another, pinned to a tag.
+One repository can execute a template defined in another, pinned to a tag or,
+for branch CI, an exact commit SHA.
 
 ## Authoring
 
@@ -40,6 +41,9 @@ spec:
 
 The repository half is the same path used to push, `<upstream>/<repository>`.
 A reference with no `@version` is refused: a fragment is always pinned.
+Branch CI may use `repository@<40-hex-commit-SHA>` after that exact commit has
+a passed run in the fragment repository. Abbreviated SHAs are refused. Release
+runs remain tag-only.
 
 ## What the server does
 
@@ -82,8 +86,10 @@ publishing is not simply `git tag v3 && git push oberth`. Three things must hold
    that resolution reads, but Oberth reports it as not admitted for a release
    run.
 
-The practical consequence: a fragment is verified by its own CI before any
-consumer can pin it.
+For a branch CI SHA reference, the fragment's own passed run is the gate;
+upstream default-branch reachability is not required. Tags retain the
+reachability gate on every tier. The practical consequence is that a fragment
+is verified by its own CI before any consumer can pin it.
 
 ## Limits and refusals
 
@@ -92,6 +98,7 @@ consumer can pin it.
 | Fragments do not nest | A fragment containing its own `templateRef` is refused. This removes cycles, depth limits and expansion bombs as a class |
 | At most 16 fragments per document | Checked on the reference set before any fragment is read, so an oversized document causes no fetch |
 | Only registered repositories resolve | Optionally narrowed further by `--fragment-allowlist`; unset permits every registered repository |
+| SHA pins are branch CI only | Require an exact 40-hex SHA with a passed run on the fragment repository; release runs use tags |
 | A fragment is admitted like any pipeline | Inlined before the gate, so every construct `admit.go` refuses is refused inside a fragment too |
 | Inlined names may not collide | With the consuming document or with another fragment |
 | `spec.workflowTemplateRef` is never resolved | It names a whole spec rather than a template |
@@ -99,7 +106,7 @@ consumer can pin it.
 ## Audit
 
 Every submission records the fragments it used in the audit chain: repository,
-requested version, resolved commit SHA, and the SHA-256 of the fragment
+requested tag or SHA, resolved commit SHA, and the SHA-256 of the fragment
 document. Because the record is a commit rather than a tag, moving a tag
 produces a different record for the same consuming commit.
 

@@ -339,7 +339,7 @@ func (jobs *ArgoJobs) create(ctx context.Context, request service.JobRequest, tr
 			}
 		}
 	}
-	fragments, err := loadFragments(ctx, jobs.fragments, source)
+	fragments, err := loadFragments(ctx, jobs.fragments, source, trigger, request.Run.RefKind)
 	if err != nil {
 		return fmt.Errorf("app: resolve fragments for %s: %w", request.Repository.Name, err)
 	}

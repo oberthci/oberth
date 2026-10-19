@@ -4,13 +4,16 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/oberthci/oberth/internal/gitcache"
+	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
+	"github.com/oberthci/oberth/pkg/periapsis"
 )
 
 type FragmentLoader interface {
-	Load(ctx context.Context, key argoworkflow.FragmentKey) (argoworkflow.Fragment, error)
+	Load(ctx context.Context, key argoworkflow.FragmentKey, trigger periapsis.Trigger, refKind model.RefKind) (argoworkflow.Fragment, error)
 }
 
 type FragmentBlobs interface {
@@ -27,6 +30,7 @@ type FragmentBlobs interface {
 
 type FragmentRegistry interface {
 	RepositoryRegistered(ctx context.Context, name string) (bool, error)
+	HasPassedRunForSHA(ctx context.Context, name, sha string) (bool, error)
 }
 
 type GitFragmentLoader struct {
@@ -53,38 +57,52 @@ func NewGitFragmentLoader(blobs FragmentBlobs, registry FragmentRegistry, allowl
 	return loader, nil
 }
 
-func (loader *GitFragmentLoader) Load(ctx context.Context, key argoworkflow.FragmentKey) (argoworkflow.Fragment, error) {
+func (loader *GitFragmentLoader) Load(ctx context.Context, key argoworkflow.FragmentKey, trigger periapsis.Trigger, refKind model.RefKind) (argoworkflow.Fragment, error) {
 	if loader.allowlist != nil && !loader.allowlist[key.Repo] {
 		return argoworkflow.Fragment{}, fmt.Errorf("app: fragment %s is not in the fragment allowlist", key)
 	}
-	_, _, name, err := gitcache.ParseRepoPath(key.Repo)
+	_, _, _, err := gitcache.ParseRepoPath(key.Repo)
 	if err != nil {
 		return argoworkflow.Fragment{}, fmt.Errorf("app: fragment %s: %w", key, err)
 	}
-	registered, err := loader.registry.RepositoryRegistered(ctx, name)
+	registered, err := loader.registry.RepositoryRegistered(ctx, key.Repo)
 	if err != nil {
 		return argoworkflow.Fragment{}, fmt.Errorf("app: fragment %s: %w", key, err)
 	}
 	if !registered {
 		return argoworkflow.Fragment{}, fmt.Errorf("app: fragment %s names a repository this server does not host", key)
 	}
-	sha, err := loader.blobs.TagSHA(ctx, key.Repo, key.Version)
-	if err != nil {
-		return argoworkflow.Fragment{}, fmt.Errorf("app: fragment %s: %w", key, err)
-	}
-	// Reachability gate (#213). Enforced for every trigger tier: the read
-	// below serves template content into another repository's pipeline, so
-	// the source commit must meet the same bar release admission applies to
-	// the consumer's own code — reachable from the upstream default branch,
-	// meaning it went through green-and-publish on its own repository.
-	reachable, err := loader.blobs.ReachableFromUpstreamDefault(ctx, key.Repo, sha)
-	if err != nil {
-		return argoworkflow.Fragment{}, fmt.Errorf("app: fragment %s: %w", key, err)
-	}
-	if !reachable {
-		return argoworkflow.Fragment{}, fmt.Errorf(
-			"app: fragment %s resolves to commit %s, which is not reachable from its repository's upstream default branch; only published versions may be inlined",
-			key, sha)
+	var sha string
+	if allHexFragmentVersion(key.Version) {
+		if len(key.Version) != 40 {
+			return argoworkflow.Fragment{}, fmt.Errorf("app: fragment %s requires an exact 40-hex commit SHA", key)
+		}
+		if trigger != periapsis.TriggerCI || refKind != model.RefBranch {
+			return argoworkflow.Fragment{}, fmt.Errorf("app: fragment %s uses a commit SHA; only branch CI runs may use SHA-pinned fragments", key)
+		}
+		sha = strings.ToLower(key.Version)
+		passed, checkErr := loader.registry.HasPassedRunForSHA(ctx, key.Repo, sha)
+		if checkErr != nil {
+			return argoworkflow.Fragment{}, fmt.Errorf("app: fragment %s: check its green run: %w", key, checkErr)
+		}
+		if !passed {
+			return argoworkflow.Fragment{}, fmt.Errorf("app: fragment %s has no green run for commit %s in its own repository", key, sha)
+		}
+	} else {
+		sha, err = loader.blobs.TagSHA(ctx, key.Repo, key.Version)
+		if err != nil {
+			return argoworkflow.Fragment{}, fmt.Errorf("app: fragment %s: %w", key, err)
+		}
+		// Tagged fragments retain the main-reachability gate on every tier.
+		reachable, reachErr := loader.blobs.ReachableFromUpstreamDefault(ctx, key.Repo, sha)
+		if reachErr != nil {
+			return argoworkflow.Fragment{}, fmt.Errorf("app: fragment %s: %w", key, reachErr)
+		}
+		if !reachable {
+			return argoworkflow.Fragment{}, fmt.Errorf(
+				"app: fragment %s resolves to commit %s, which is not reachable from its repository's upstream default branch; only published versions may be inlined",
+				key, sha)
+		}
 	}
 	source, err := loader.blobs.ReadBlob(ctx, key.Repo, sha, argoworkflow.FragmentFile, argoworkflow.MaxSourceBytes)
 	if err != nil {
@@ -93,7 +111,19 @@ func (loader *GitFragmentLoader) Load(ctx context.Context, key argoworkflow.Frag
 	return argoworkflow.Fragment{Key: key, SHA: sha, Source: source}, nil
 }
 
-func loadFragments(ctx context.Context, loader FragmentLoader, source []byte) (map[argoworkflow.FragmentKey]argoworkflow.Fragment, error) {
+func allHexFragmentVersion(version string) bool {
+	if version == "" {
+		return false
+	}
+	for _, char := range version {
+		if (char < '0' || char > '9') && (char < 'a' || char > 'f') && (char < 'A' || char > 'F') {
+			return false
+		}
+	}
+	return true
+}
+
+func loadFragments(ctx context.Context, loader FragmentLoader, source []byte, trigger periapsis.Trigger, refKind model.RefKind) (map[argoworkflow.FragmentKey]argoworkflow.Fragment, error) {
 	workflow, err := argoworkflow.Decode(source)
 	if err != nil {
 		return nil, err
@@ -110,7 +140,7 @@ func loadFragments(ctx context.Context, loader FragmentLoader, source []byte) (m
 	}
 	fragments := make(map[argoworkflow.FragmentKey]argoworkflow.Fragment, len(keys))
 	for _, key := range keys {
-		fragment, err := loader.Load(ctx, key)
+		fragment, err := loader.Load(ctx, key, trigger, refKind)
 		if err != nil {
 			return nil, err
 		}

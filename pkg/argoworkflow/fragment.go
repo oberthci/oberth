@@ -59,7 +59,24 @@ func ParseFragmentRef(ref string) (FragmentKey, error) {
 	if strings.Contains(version, "/") || version == "." || version == ".." {
 		return FragmentKey{}, fmt.Errorf("argoworkflow: fragment version %q is not a tag name", version)
 	}
+	if allHex(version) && len(version) != 40 {
+		return FragmentKey{}, fmt.Errorf("argoworkflow: fragment SHA %q must be exactly 40 hexadecimal characters", version)
+	}
 	return FragmentKey{Repo: repo, Version: version}, nil
+}
+
+// A hex-only version denotes a commit, never an abbreviated object ID or a
+// tag. Git's normal ref abbreviation rules must not select fragment content.
+func allHex(value string) bool {
+	if value == "" {
+		return false
+	}
+	for _, char := range value {
+		if (char < '0' || char > '9') && (char < 'a' || char > 'f') && (char < 'A' || char > 'F') {
+			return false
+		}
+	}
+	return true
 }
 
 func validateFragmentRepo(repo string) error {

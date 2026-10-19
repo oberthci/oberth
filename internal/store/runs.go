@@ -429,6 +429,26 @@ WHERE repo_id = ? AND sha = ? ORDER BY queue_sequence DESC LIMIT 1`, repoID, sha
 	return value, nil
 }
 
+// HasPassedRunForSHA gates SHA-pinned fragments on a passed run that tested
+// that exact commit in the fragment's own registered repository.
+func (s *Store) HasPassedRunForSHA(ctx context.Context, name, sha string) (bool, error) {
+	if !validOID(sha) || len(sha) != 40 {
+		return false, fmt.Errorf("%w: fragment SHA must be 40 lowercase hexadecimal characters", ErrInvalid)
+	}
+	repo, err := s.RepositoryByName(ctx, name)
+	if err != nil {
+		return false, err
+	}
+	var passed bool
+	err = s.db.QueryRowContext(ctx, `SELECT EXISTS(
+SELECT 1 FROM runs WHERE repo_id = ? AND tested_sha = ? AND status = 'passed'
+)`, repo.ID, sha).Scan(&passed)
+	if err != nil {
+		return false, fmt.Errorf("check passed fragment run: %w", err)
+	}
+	return passed, nil
+}
+
 // ResolveRun follows Git-like precedence: an exact full object ID, a unique
 // abbreviated object ID, then a branch or tag name. When a bare name matches
 // runs on both branch and tag ref kinds, ErrAmbiguous is returned so the
