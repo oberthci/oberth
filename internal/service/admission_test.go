@@ -226,3 +226,58 @@ func awaitAcquired(t *testing.T, acquired <-chan func()) func() {
 		return nil
 	}
 }
+
+// abandon withdraws only an ungranted reservation. A waiting XL head that is
+// abandoned returns errAdmissionAbandoned to its owner, and the same call
+// admits the run queued behind it; a granted reservation stays with its owner
+// until the owner releases it, and a preparing one fails its later acquire.
+func TestWeightedAdmissionAbandonWithdrawsOnlyUngrantedReservations(t *testing.T) {
+	gate := newWeightedAdmission(6)
+	holder := gate.reserve(1)
+	releaseHolder, err := holder.acquire(context.Background(), periapsis.L)
+	if err != nil {
+		t.Fatal(err)
+	}
+	head := gate.reserve(2)
+	headErr := make(chan error, 1)
+	go func() {
+		_, err := head.acquire(context.Background(), periapsis.XL)
+		headErr <- err
+	}()
+	behind := gate.reserve(3)
+	acquired := make(chan func(), 1)
+	go acquireForTest(behind, periapsis.S, acquired)
+	assertNotAcquired(t, acquired)
+
+	if gate.abandon(1) {
+		t.Fatal("a granted reservation was abandoned")
+	}
+	if !gate.abandon(2) {
+		t.Fatal("the waiting XL head was not abandoned")
+	}
+	select {
+	case err := <-headErr:
+		if err != errAdmissionAbandoned {
+			t.Fatalf("abandoned waiter returned %v", err)
+		}
+	case <-time.After(admissionAcquireBudget):
+		t.Fatal("abandoned waiter never woke")
+	}
+	releaseBehind := awaitAcquired(t, acquired)
+	if gate.abandon(2) {
+		t.Fatal("an abandoned reservation was abandoned twice")
+	}
+
+	preparing := gate.reserve(4)
+	if !gate.abandon(4) {
+		t.Fatal("a preparing reservation was not abandoned")
+	}
+	if _, err := preparing.acquire(context.Background(), periapsis.S); err != errAdmissionAbandoned {
+		t.Fatalf("acquire after abandon = %v", err)
+	}
+	releaseBehind()
+	releaseHolder()
+	if gate.used != 0 || gate.runs != 0 || len(gate.waiters) != 0 || len(gate.reservations) != 0 {
+		t.Fatalf("gate leaked state: used=%d runs=%d waiters=%d reservations=%d", gate.used, gate.runs, len(gate.waiters), len(gate.reservations))
+	}
+}

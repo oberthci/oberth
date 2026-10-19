@@ -236,6 +236,12 @@ func (scheduler *Scheduler) completeCancellations(ctx context.Context, cancellat
 }
 
 func (scheduler *Scheduler) completeCancellationsWithGate(ctx context.Context, cancellations []model.RunCancellation, require mutationRequirement) error {
+	// A run that is cancelled while it is still preparing or waiting holds
+	// an admission reservation but owns no Workflow. Withdraw it first, and
+	// regardless of the audit gate: it is in-memory scheduling state only,
+	// and leaving it in place keeps the run at the head of the FIFO (or ahead
+	// of its group) until a restart.
+	scheduler.abandonAdmissions(ctx, cancellations)
 	if err := require(ctx); err != nil {
 		return err
 	}
@@ -257,6 +263,21 @@ func (scheduler *Scheduler) completeCancellationsWithGate(ctx context.Context, c
 		}
 	}
 	return nil
+}
+
+// abandonAdmissions withdraws the ungranted admission reservations of runs a
+// cancellation obligation has already terminalized. Only a terminal durable
+// record releases a reservation here; a granted one stays with its owner,
+// which releases it once the Workflow is terminal or its deletion was
+// accepted.
+func (scheduler *Scheduler) abandonAdmissions(ctx context.Context, cancellations []model.RunCancellation) {
+	for _, cancellation := range cancellations {
+		run, err := scheduler.store.Run(ctx, cancellation.RunID)
+		if err != nil || !run.Status.Terminal() {
+			continue
+		}
+		scheduler.admission.abandon(run.QueueSequence)
+	}
 }
 
 // Run owns oldest-eligible claims for one server process and fills at most
@@ -532,6 +553,16 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 	releaseAdmission, err := reservation.acquireRequest(ctx, admissionRequest{
 		RunID: run.ID, RepoID: run.RepoID, Size: size, Group: group,
 	})
+	if errors.Is(err, errAdmissionAbandoned) {
+		// Superseded or cancelled while waiting: the reservation is already
+		// gone, so settle the cancellation like the pre-admission check does.
+		_ = logFile.Close()
+		if err := scheduler.completePendingCancellationsWithGate(ctx, require); err != nil {
+			return err
+		}
+		scheduler.signals.NotifyRun(run.ID)
+		return nil
+	}
 	if err != nil {
 		_ = logFile.Close()
 		return err

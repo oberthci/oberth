@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strconv"
@@ -60,8 +61,17 @@ type admissionReservation struct {
 	retained bool
 	// vmParked owns no weight, group or dispatch slot while durable VM capacity is busy.
 	vmParked bool
-	ready    chan struct{}
+	// abandoned marks an ungranted reservation withdrawn because its run was
+	// terminalized by someone other than its owner (a newer push, a restart
+	// requeue or an operator cancel) while it was still preparing or waiting.
+	abandoned bool
+	ready     chan struct{}
 }
+
+// errAdmissionAbandoned tells the owner of a waiting run that its reservation
+// was withdrawn because the durable run is no longer active. It is not a
+// scheduler failure: the owner settles the run's cancellation and returns.
+var errAdmissionAbandoned = errors.New("service: admission abandoned: run is no longer active")
 
 // admissionRequest is what a claimed run knows once its immutable checkout has
 // been read: its declared size and, optionally, its repository-scoped group.
@@ -151,7 +161,11 @@ func (reservation *admissionReservation) acquireRequest(ctx context.Context, req
 	gate := reservation.gate
 	gate.mu.Lock()
 	if reservation.canceled || reservation.released {
+		abandoned := reservation.abandoned
 		gate.mu.Unlock()
+		if abandoned {
+			return nil, errAdmissionAbandoned
+		}
 		return nil, context.Canceled
 	}
 	reservation.vmParked = false
@@ -178,6 +192,12 @@ func (reservation *admissionReservation) acquireRequest(ctx context.Context, req
 
 	select {
 	case <-reservation.ready:
+		gate.mu.Lock()
+		abandoned := reservation.abandoned
+		gate.mu.Unlock()
+		if abandoned {
+			return nil, errAdmissionAbandoned
+		}
 		return reservation.release, nil
 	case <-ctx.Done():
 		gate.mu.Lock()
@@ -214,6 +234,29 @@ func (reservation *admissionReservation) cancel() {
 	reservation.canceled = true
 	gate.removeLocked(reservation)
 	gate.grantLocked()
+}
+
+// abandon withdraws the reservation of a run that was terminalized while it
+// had not been granted: still preparing, waiting for weight, parked on its
+// concurrency group, or parked on VM capacity. Such a run owns no Workflow,
+// so nothing has to be proved gone first. Its place at the head of the FIFO,
+// and its position ahead of later members of its group, end now rather than
+// when its owner happens to wake, so the same pass admits the runs it was
+// blocking. A granted reservation is never abandoned here: its owner releases
+// it only once the Workflow is terminal or its deletion was accepted.
+func (gate *weightedAdmission) abandon(sequence int64) bool {
+	gate.mu.Lock()
+	defer gate.mu.Unlock()
+	reservation := gate.reservations[sequence]
+	if reservation == nil || reservation.granted || reservation.released || reservation.canceled || reservation.retained {
+		return false
+	}
+	reservation.canceled = true
+	reservation.abandoned = true
+	gate.removeLocked(reservation)
+	close(reservation.ready)
+	gate.grantLocked()
+	return true
 }
 
 func (reservation *admissionReservation) release() {

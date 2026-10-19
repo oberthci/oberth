@@ -47,6 +47,9 @@ func (scheduler *Scheduler) executeTrustedWithCapacity(ctx context.Context, job 
 		}
 
 		_, err = reservation.acquireRequest(ctx, admissionRequest{RunID: job.Run.ID, RepoID: job.Repository.ID, Size: job.Size, Group: job.ConcurrencyGroup})
+		if errors.Is(err, errAdmissionAbandoned) {
+			return true, nil
+		}
 		if err != nil {
 			return false, err
 		}
