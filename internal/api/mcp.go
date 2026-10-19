@@ -79,6 +79,23 @@ type PublishRetryResponse struct {
 	Error         string `json:"error,omitempty"`
 }
 
+// RunCancelResponse is the response for run_cancel. Status stays the durable
+// terminal status (interrupted); Phase "cancelled" marks an explicit cancel.
+// Workflow is none (never claimed), not_submitted (claimed, no Workflow was
+// created), deleted (deletion accepted) or pending (the scheduler's
+// cancellation pass retries the deletion).
+type RunCancelResponse struct {
+	RunID         string `json:"run_id"`
+	Status        string `json:"status"`
+	Phase         string `json:"phase"`
+	PreviousState string `json:"previous_state"`
+	CancelledBy   string `json:"cancelled_by"`
+	Reason        string `json:"reason"`
+	Workflow      string `json:"workflow"`
+	PromotionID   string `json:"promotion_id,omitempty"`
+	Warning       string `json:"warning,omitempty"`
+}
+
 // IssueCreateResponse is the response for issue_create.
 type IssueCreateResponse struct {
 	ID int64 `json:"id"`
@@ -362,6 +379,11 @@ func toolDefinitions() []map[string]any {
 		tool("run_kvm_preflight", "Read bounded immutable KVM preflight evidence for one full run ID or unique hexadecimal prefix (at least 12 characters). Receipt validity and cleanup are historical evidence, not publication eligibility; parent status is separate. A known run without a preflight returns present=false.", object(map[string]any{"id": stringProperty("Full run ID or unique hexadecimal prefix (at least 12 characters)")}, "id")),
 		tool("run_get", "Return one run and its named step results by full durable run ID or unique hexadecimal prefix (at least 12 characters).", object(map[string]any{"id": stringProperty("Full run ID or unique hexadecimal prefix (at least 12 characters)")}, "id")),
 		tool("run_retry", "Queue a fresh attempt for the newest interrupted or infrastructure-failed branch run, retaining its repository, ref and SHA. Workflow-level failures without a failed step qualify; test failures, older runs, release runs, and branches with an active run are refused. The caller is recorded as actor.", object(map[string]any{"id": stringProperty("Full run ID or unique hexadecimal prefix (at least 12 characters)")}, "id")),
+		tool("run_cancel", "Cancel one queued, waiting or running run. The run becomes interrupted with phase cancelled and a reason naming the caller; a claimed run's Workflow is deleted and its admission released, and it is never re-fired. Cancelling a terminal run is refused. Non-admin uplinks may cancel only branch-push runs outside a concurrency group; admins may cancel any run but must set force for tag/release and apply runs, whose publication may be left partial. Cancelling promotion CI fails the promotion without merging. Audited.", object(map[string]any{
+			"id":     stringProperty("Full run ID or unique hexadecimal prefix (at least 12 characters)"),
+			"reason": stringProperty("Why the run is cancelled (printable text, at most 512 bytes)"),
+			"force":  map[string]any{"type": "boolean", "description": "Admin only: confirm cancelling a tag/release or apply run whose publication may be partial"},
+		}, "id")),
 		tool("artifacts", "List the files a run kept: test reports, coverage output, anything the pipeline copied to OBERTH_ARTIFACTS. Cheap; call this before artifact_get.", object(map[string]any{"id": stringProperty("Exact run ID")}, "id")),
 		tool("artifact_get", "Return one artifact's contents by run ID and name, optionally filtered server-side. Prefer a pattern over retrieving a whole file: the response reports total and matched line counts so a narrowed read is never mistaken for a complete one.", object(logFilterProperties(map[string]any{"id": stringProperty("Exact run ID"), "name": stringProperty("Artifact name as reported by artifacts")}), "id", "name")),
 		tool("run_logs", "Return one exact burn/step log by full run ID or unique hexadecimal prefix (at least 12 characters), optionally filtered server-side. Active steps without retained output return an actionable pending error; retry after the step completes. Prefer a pattern over retrieving a whole step: the response reports total and matched line counts so a narrowed read is never mistaken for a complete one.", object(logFilterProperties(map[string]any{"id": stringProperty("Full run ID or unique hexadecimal prefix (at least 12 characters)"), "burn": stringProperty("Burn name"), "step": stringProperty("Step name")}), "id", "burn", "step")),

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -257,7 +258,7 @@ func TestWeightedAdmissionAbandonWithdrawsOnlyUngrantedReservations(t *testing.T
 	}
 	select {
 	case err := <-headErr:
-		if err != errAdmissionAbandoned {
+		if !errors.Is(err, errAdmissionAbandoned) {
 			t.Fatalf("abandoned waiter returned %v", err)
 		}
 	case <-time.After(admissionAcquireBudget):
@@ -272,7 +273,7 @@ func TestWeightedAdmissionAbandonWithdrawsOnlyUngrantedReservations(t *testing.T
 	if !gate.abandon(4) {
 		t.Fatal("a preparing reservation was not abandoned")
 	}
-	if _, err := preparing.acquire(context.Background(), periapsis.S); err != errAdmissionAbandoned {
+	if _, err := preparing.acquire(context.Background(), periapsis.S); !errors.Is(err, errAdmissionAbandoned) {
 		t.Fatalf("acquire after abandon = %v", err)
 	}
 	releaseBehind()

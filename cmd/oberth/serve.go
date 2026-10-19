@@ -874,6 +874,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 		RemoveGitCache:            git.RemoveRepository,
 		PromotionGrants:           database,
 		PromotionGrantMaxLifetime: options.promotionGrantMaxLifetime,
+		RunCancels:                database,
 	})
 	if err != nil {
 		return err

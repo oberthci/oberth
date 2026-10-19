@@ -115,6 +115,9 @@ func (service *API) forActor(ctx context.Context, actor api.Actor) (*API, error)
 	if service.runRetries != nil {
 		scoped.runRetries = scopedRunRetries{inner: service.runRetries, history: scoped.history}
 	}
+	if service.runCancels != nil {
+		scoped.runCancels = scopedRunCancels{inner: service.runCancels, history: scoped.history}
+	}
 	if service.repositories != nil {
 		scoped.repositories = scopedRepositories{inner: service.repositories, scope: scope}
 	}
@@ -152,6 +155,23 @@ func (retry scopedRunRetries) RetryRun(ctx context.Context, id, actor string) (m
 		return model.EnqueueRunResult{}, err
 	}
 	return retry.inner.RetryRun(ctx, id, actor)
+}
+
+type scopedRunCancels struct {
+	inner   RunCancelStore
+	history RunHistory
+}
+
+// CancelRun repeats the actor-scoped resolution before the writer sees the
+// exact ID, so no caller can cancel a run outside the actor's scope.
+func (cancel scopedRunCancels) CancelRun(ctx context.Context, request model.RunCancelRequest) (model.RunCancelResult, error) {
+	if cancel.history == nil {
+		return model.RunCancelResult{}, fmt.Errorf("%w: run cancel history", ErrUnavailable)
+	}
+	if _, err := cancel.history.ResolveRunID(ctx, request.RunID); err != nil {
+		return model.RunCancelResult{}, err
+	}
+	return cancel.inner.CancelRun(ctx, request)
 }
 
 // requireUnscoped refuses installation-wide operations to a scoped actor.

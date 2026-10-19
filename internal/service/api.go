@@ -78,6 +78,8 @@ type APIConfig struct {
 	RemoveGitCache            func(string) error
 	PromotionGrants           PromotionGrantStore
 	PromotionGrantMaxLifetime time.Duration // Default 24h, hard ceiling 168h (7 days).
+	// RunCancels backs run_cancel; nil disables the tool.
+	RunCancels RunCancelStore
 }
 
 type API struct {
@@ -111,6 +113,7 @@ type API struct {
 	removeGitCache            func(string) error
 	promotionGrants           PromotionGrantStore
 	promotionGrantMaxLifetime time.Duration
+	runCancels                RunCancelStore
 	// scope is set on the per-call copy serving a scoped actor (#073).
 	scope *repoScope
 }
@@ -165,6 +168,7 @@ func NewAPI(config APIConfig) (*API, error) {
 		secretStoreVerifier: config.SecretStoreVerifier,
 		repositoryRemover:   config.RepositoryRemover, removeGitCache: config.RemoveGitCache,
 		promotionGrants: config.PromotionGrants, promotionGrantMaxLifetime: promotionGrantMaxLifetime,
+		runCancels: config.RunCancels,
 	}, nil
 }
 
@@ -260,6 +264,16 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 			return nil, err
 		}
 		return service.retryRun(ctx, actor, arguments.ID)
+	case "run_cancel":
+		var arguments struct {
+			ID     string `json:"id"`
+			Reason string `json:"reason"`
+			Force  bool   `json:"force"`
+		}
+		if err := decodeTool(raw, &arguments); err != nil {
+			return nil, err
+		}
+		return service.cancelRun(ctx, actor, arguments.ID, arguments.Reason, arguments.Force)
 	case "run_logs":
 		var arguments struct {
 			ID      string `json:"id"`
@@ -1956,7 +1970,7 @@ func wireIssueLock(lock model.IssueLock) api.IssueLockResponse {
 
 func mutatingTool(name string) bool {
 	switch name {
-	case "sync", "promote", "publish_retry", "run_retry", "issue_create", "issue_update", "issue_append", "issue_close", "issue_reopen", "issue_delete", "issue_lock",
+	case "sync", "promote", "publish_retry", "run_retry", "run_cancel", "issue_create", "issue_update", "issue_append", "issue_close", "issue_reopen", "issue_delete", "issue_lock",
 		"access_allow", "access_revoke",
 		"kubevirt_grant", "kubevirt_revoke",
 		"repo_remove",

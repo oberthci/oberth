@@ -192,6 +192,16 @@ func (scheduler *Scheduler) AcceptEnqueue(ctx context.Context, enqueued model.En
 	return nil
 }
 
+// AcceptCancellations executes the obligations an explicit run cancel
+// recorded: a waiting run's admission reservation is withdrawn at once and a
+// claimed run's Workflow is deleted (an absent one is fine). A failed deletion
+// stays pending for the cancellation pass, exactly as for a supersede.
+func (scheduler *Scheduler) AcceptCancellations(ctx context.Context, cancellations []model.RunCancellation) error {
+	err := scheduler.completeCancellations(ctx, cancellations)
+	scheduler.signalQueue()
+	return err
+}
+
 // NotifyQueue wakes a long-running scheduler after a state transition makes
 // previously gated work eligible without enqueuing a new run. Fast-forward
 // promotion publication is the primary caller.
@@ -504,7 +514,7 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 		_ = logFile.Close()
 		return scheduler.finishInfrastructureFailure(ctx, run, repository, fmt.Errorf("persist deterministic Job intent: %w", err))
 	}
-	if current.Status == model.RunInterrupted && current.SupersededBy != "" {
+	if current.Preempted() {
 		_ = logFile.Close()
 		if err := scheduler.completePendingCancellationsWithGate(ctx, require); err != nil {
 			return err
@@ -574,7 +584,7 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 			_ = logFile.Close()
 			return scheduler.finishInfrastructureFailure(ctx, run, repository, fmt.Errorf("verify run before weighted admission: %w", err))
 		}
-		if current.Status == model.RunInterrupted && current.SupersededBy != "" {
+		if current.Preempted() {
 			_ = logFile.Close()
 			if err := scheduler.completePendingCancellationsWithGate(ctx, require); err != nil {
 				return err
@@ -674,7 +684,7 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 		}
 		return scheduler.finishInfrastructureFailure(ctx, run, repository, failure)
 	}
-	if current.Status == model.RunInterrupted && current.SupersededBy != "" {
+	if current.Preempted() {
 		_ = logFile.Close()
 		cleanupCtx, cancelCleanup := boundedWorkspaceCleanupContext(ctx)
 		if err := scheduler.jobs.Delete(cleanupCtx, jobName, run.ID); err != nil {

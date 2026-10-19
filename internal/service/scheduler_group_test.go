@@ -42,6 +42,9 @@ type groupEngine struct {
 	probe func(operation, runID string)
 	// deleteErrs makes Delete fail for a run ID: the Workflow survives.
 	deleteErrs map[string]error
+	// deleted records every accepted Delete by Workflow name, including
+	// deletions of Workflows this engine never created.
+	deleted []string
 }
 
 type groupEngineJob struct {
@@ -158,6 +161,7 @@ func (engine *groupEngine) Delete(_ context.Context, name, _ string) error {
 	if job != nil && job.key != "" && engine.executing[job.key] == job.runID {
 		delete(engine.executing, job.key)
 	}
+	engine.deleted = append(engine.deleted, name)
 	engine.mu.Unlock()
 	if job != nil {
 		select {
@@ -234,6 +238,7 @@ type groupFixture struct {
 	engine    *groupEngine
 	scheduler *Scheduler
 	control   *API
+	git       *controlGit
 	stop      func()
 }
 
@@ -264,8 +269,9 @@ func newGroupFixture(t *testing.T, maxConcurrent int) *groupFixture {
 	}
 	engine := newGroupEngine()
 	signals := NewSignals()
+	git := &controlGit{}
 	scheduler, err := NewScheduler(SchedulerConfig{
-		Store: database, Git: &controlGit{}, Logs: logs, Jobs: engine, ReleaseJobs: engine,
+		Store: database, Git: git, Logs: logs, Jobs: engine, ReleaseJobs: engine,
 		Auditor: database, Signals: signals, WorkspaceRoot: filepath.Join(root, "work"), MaxConcurrent: maxConcurrent,
 	})
 	if err != nil {
@@ -275,12 +281,12 @@ func newGroupFixture(t *testing.T, maxConcurrent int) *groupFixture {
 		Runs: database, History: database, Repositories: database, Issues: database,
 		Promotions: database, PromotionRuns: database, Enqueues: scheduler, Logs: logs, Auditor: database,
 		Signals: signals, MaximumWait: 50 * time.Millisecond, Admission: scheduler,
-		PromotionWorkspaceRoot: filepath.Join(root, "promotion-work"),
+		PromotionWorkspaceRoot: filepath.Join(root, "promotion-work"), RunCancels: database,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &groupFixture{store: database, terraform: terraform, beacon: beacon, engine: engine, scheduler: scheduler, control: control}
+	return &groupFixture{store: database, terraform: terraform, beacon: beacon, engine: engine, scheduler: scheduler, control: control, git: git}
 }
 
 func (fixture *groupFixture) start(t *testing.T) {

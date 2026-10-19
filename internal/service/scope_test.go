@@ -171,7 +171,7 @@ func newScopeFixture(t *testing.T) *scopeFixture {
 		Runs: database, History: database, Repositories: database, Issues: database,
 		Promotions: database, Logs: logs, Artifacts: kept, Auditor: database,
 		SecretAccess: database, KubeVirtGrants: database, PromotionGrants: database, RepositoryRemover: database,
-		KVMPreflights: database, Health: fixture.health, Signals: NewSignals(),
+		KVMPreflights: database, Health: fixture.health, Signals: NewSignals(), RunCancels: database,
 		MaximumWait: 50 * time.Millisecond, PromotionWorkspaceRoot: filepath.Join(root, "promotion-work"),
 		SecretStoreVerifier: func(context.Context, api.SecretStoreVerifyRequest) (api.SecretStoreVerifyResponse, error) {
 			return api.SecretStoreVerifyResponse{}, nil
@@ -406,6 +406,8 @@ func TestScopedUplinkCannotTellHiddenFromMissing(t *testing.T) {
 		{"promote", map[string]any{"repo": hiddenRepo, "sha": hiddenRun.SHA, "branch": "main"}, map[string]any{"repo": missingRepo, "sha": hiddenRun.SHA, "branch": "main"}},
 		{"promote_status", map[string]any{"id": fixture.promoted["codeberg"].ID}, map[string]any{"id": "promotion-missing"}},
 		{"publish_retry", map[string]any{"id": hiddenRun.ID}, map[string]any{"id": missingRunID}},
+		{"run_cancel", map[string]any{"id": hiddenRun.ID, "reason": "x"}, map[string]any{"id": missingRunID, "reason": "x"}},
+		{"run_cancel", map[string]any{"id": hiddenRun.ID[:16]}, map[string]any{"id": missingRunID[:16]}},
 		{"publish_retry", map[string]any{"id": fixture.promoted["codeberg"].ID}, map[string]any{"id": "promotion-missing"}},
 		{"issue_get", map[string]any{"id": hiddenIssue}, map[string]any{"id": missingIssue}},
 		{"issue_get", map[string]any{"id": fixture.global.ID}, map[string]any{"id": missingIssue}},
@@ -442,6 +444,9 @@ func TestScopedUplinkCannotTellHiddenFromMissing(t *testing.T) {
 		t.Errorf("livelog: hidden %v, missing %v", hiddenErr, missingErr)
 	}
 
+	if run, err := fixture.store.Run(context.Background(), hiddenRun.ID); err != nil || !run.Status.Active() {
+		t.Fatalf("scoped run_cancel reached a hidden run: %#v, %v", run, err)
+	}
 	// The issue that is not hidden still works, and the hidden ones were
 	// left untouched.
 	if issue, err := fixture.store.Issue(context.Background(), hiddenIssue); err != nil || issue.State != model.IssueOpen {
@@ -591,6 +596,7 @@ var toolScopeBehaviour = map[string]string{
 	"kubevirt_grant_get": "lookup",
 	"system_status":      "filtered",
 	"sync":               "mutation", "promote": "mutation", "publish_retry": "mutation", "run_retry": "mutation",
+	"run_cancel":   "mutation",
 	"issue_create": "mutation", "issue_update": "mutation", "issue_append": "mutation",
 	"issue_close": "mutation", "issue_reopen": "mutation", "issue_delete": "mutation",
 	"issue_lock": "mutation", "access_allow": "mutation", "access_revoke": "mutation",
