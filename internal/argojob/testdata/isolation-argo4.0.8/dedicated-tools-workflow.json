@@ -231,8 +231,7 @@
       {
         "name": "oberth-source",
         "persistentVolumeClaim": {
-          "claimName": "source-claim",
-          "readOnly": true
+          "claimName": "source-claim"
         }
       },
       {

@@ -2,6 +2,7 @@
   "metadata": {
     "name": "oberth-oberth-run-abc1-aabbccddeeff",
     "namespace": "oberth-argo",
+    "creationTimestamp": null,
     "labels": {
       "oberth.ci/run": "run-abc123",
       "oberth.ci/tier": "ci",
@@ -44,8 +45,7 @@
       {
         "name": "oberth-source",
         "persistentVolumeClaim": {
-          "claimName": "run-source",
-          "readOnly": true
+          "claimName": "run-source"
         }
       },
       {
@@ -124,7 +124,7 @@
           },
           {
             "name": "ARGO_DEADLINE",
-            "value": "2026-10-04T15:13:56Z"
+            "value": "2026-10-19T08:51:01Z"
           },
           {
             "name": "ARGO_PROGRESS_FILE",
@@ -226,7 +226,7 @@
           },
           {
             "name": "ARGO_DEADLINE",
-            "value": "2026-10-04T15:13:56Z"
+            "value": "2026-10-19T08:51:01Z"
           },
           {
             "name": "ARGO_PROGRESS_FILE",
@@ -337,6 +337,34 @@
           {
             "name": "XDG_CACHE_HOME",
             "value": "/tmp/cache"
+          },
+          {
+            "name": "ARGO_CONTAINER_NAME",
+            "value": "main"
+          },
+          {
+            "name": "ARGO_NODE_ID",
+            "value": "oberth-oberth-run-abc1-aabbccddeeff"
+          },
+          {
+            "name": "ARGO_INCLUDE_SCRIPT_OUTPUT",
+            "value": "false"
+          },
+          {
+            "name": "ARGO_DEADLINE",
+            "value": "2026-10-19T08:51:01Z"
+          },
+          {
+            "name": "ARGO_PROGRESS_FILE",
+            "value": "/var/run/argo/progress"
+          },
+          {
+            "name": "ARGO_PROGRESS_PATCH_TICK_DURATION",
+            "value": "1m0s"
+          },
+          {
+            "name": "ARGO_PROGRESS_FILE_TICK_DURATION",
+            "value": "3s"
           }
         ],
         "resources": {},

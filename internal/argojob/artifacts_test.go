@@ -1,6 +1,7 @@
 package argojob
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -83,7 +84,7 @@ func TestTheArtifactsMountIsWritableAndTheSourceMountIsNot(t *testing.T) {
 		t.Fatal("the source mount must stay read-only")
 	}
 	if artifacts.Name == source.Name {
-		t.Fatal("artifacts and source share a volume entry, so both inherit the same readOnly claim reference")
+		t.Fatal("artifacts and source need distinct volume names for their independent mount permissions")
 	}
 }
 
@@ -108,11 +109,85 @@ func TestTheArtifactsVolumeReferencesTheRunClaimWritable(t *testing.T) {
 	if artifacts.PersistentVolumeClaim.ReadOnly {
 		t.Fatal("the artifacts volume source is read-only, which makes the mount read-only whatever the mount says")
 	}
-	if source == nil || source.PersistentVolumeClaim == nil || !source.PersistentVolumeClaim.ReadOnly {
-		t.Fatal("the source volume must stay a read-only claim reference")
+	if source == nil || source.PersistentVolumeClaim == nil || source.PersistentVolumeClaim.ReadOnly {
+		t.Fatal("the source claim reference must use the same writable mode as artifacts; source mounts enforce read-only")
 	}
 	if artifacts.PersistentVolumeClaim.ClaimName != source.PersistentVolumeClaim.ClaimName {
 		t.Fatal("artifacts should ride the run's existing claim, not a second one")
+	}
+}
+
+func TestPodPVCReferencesHaveConsistentReadOnlyMode(t *testing.T) {
+	for _, shape := range []string{"container", "containerset"} {
+		t.Run(shape, func(t *testing.T) {
+			request := seededRequest(t, greedyDocument)
+			if shape == "containerset" {
+				request = isolationControllerRequest(t, shape)
+				request.SourceVolume.ArtifactsSubPath = artifactsSubPath
+			}
+			workflow, err := Build(testConfig(), request)
+			if err != nil {
+				t.Fatalf("build: %v", err)
+			}
+			checked := 0
+			mirrors := 0
+			walkTemplates(workflow, func(template *wfv1.Template) {
+				if template.Container == nil && template.Script == nil && template.ContainerSet == nil {
+					return
+				}
+				templateContainers(template, func(container *corev1.Container) {
+					for _, mount := range container.VolumeMounts {
+						if mount.Name == SourceVolumeName && !mount.ReadOnly {
+							t.Errorf("template %q container %q has a writable source mount at %q", template.Name, container.Name, mount.MountPath)
+						}
+					}
+				})
+				var patch struct {
+					Volumes    []corev1.Volume `json:"volumes"`
+					Containers []struct {
+						Name         string               `json:"name"`
+						VolumeMounts []corev1.VolumeMount `json:"volumeMounts"`
+					} `json:"containers"`
+				}
+				if template.PodSpecPatch != "" {
+					if err := json.Unmarshal([]byte(template.PodSpecPatch), &patch); err != nil {
+						t.Fatalf("template %q Pod patch: %v", template.Name, err)
+					}
+				}
+				for _, container := range patch.Containers {
+					for _, mount := range container.VolumeMounts {
+						if mount.Name == SourceVolumeName {
+							mirrors++
+							if !mount.ReadOnly {
+								t.Errorf("template %q Pod patch leaves %q source mirror writable", template.Name, container.Name)
+							}
+						}
+					}
+				}
+				claimModes := map[string]bool{}
+				volumes := append(append(append([]corev1.Volume(nil), workflow.Spec.Volumes...), template.Volumes...), patch.Volumes...)
+				for _, volume := range volumes {
+					claim := volume.PersistentVolumeClaim
+					if claim == nil {
+						continue
+					}
+					if previous, seen := claimModes[claim.ClaimName]; seen {
+						checked++
+						if previous != claim.ReadOnly {
+							t.Errorf("template %q mounts PVC %q with both readOnly=%t and readOnly=%t", template.Name, claim.ClaimName, previous, claim.ReadOnly)
+						}
+					} else {
+						claimModes[claim.ClaimName] = claim.ReadOnly
+					}
+				}
+			})
+			if checked == 0 {
+				t.Fatal("test did not inspect a pod with duplicate PVC references")
+			}
+			if mirrors == 0 {
+				t.Fatal("Pod patch did not protect an executor source mirror")
+			}
+		})
 	}
 }
 

@@ -1,6 +1,6 @@
 # Release WIF: actual controller construction evidence
 
-Recaptured with Go 1.27.1 on 2026-10-04 from authenticated
+Recaptured with Go 1.27.2 on 2026-10-19 for #962 from authenticated
 `github.com/argoproj/argo-workflows/v4 v4.0.8`, origin commit
 `570c470582fc7fe41b1963d8703111679cc3d25a`.
 Seven exact Oberth Build inputs each ran with the pipeline ServiceAccount's
@@ -44,7 +44,7 @@ Reproduce in a new private scratch directory (not the shared module cache):
 5. Retain the seven generated workflows and 28 captured Pods without editing
    them. Regenerate provenance file hashes; run the normal regression test.
 
-Use GOTOOLCHAIN=local, GOENV=off, Go 1.27.1, GOMAXPROCS=2 and
+Use GOTOOLCHAIN=local, GOENV=off, Go 1.27.2, GOMAXPROCS=2 and
 GOFLAGS='-p=2 -mod=readonly'. Overlay files are ordinary Go
 `{"Replace": {"/absolute/virtual/file": "/absolute/retained/source"}}` maps.
 No Docker, namespace writes, token issuance or live provider activation occurs.
@@ -56,7 +56,7 @@ negative control. These receipts do not prove kubelet rotation, IAM conditions,
 STS exchange, cloud role/repository denial, or a successful keyless publisher.
 Those remain separate acceptance gates before enabling WIF or retiring keys.
 
-The 2026-10-04 recapture used a combined overlay containing the retained
+The 2026-10-19 recapture used a combined overlay containing the retained
 isolation, WIF and nonroot capture helpers. Immediately before the controller
 patch call, it invokes both `isolationCapture` and `oberthWIFCapture` when
 non-nil. Set `OBERTH_ISOLATION_PROOF_DIR`, `OBERTH_WIF_PROOF_DIR` and
@@ -64,7 +64,9 @@ non-nil. Set `OBERTH_ISOLATION_PROOF_DIR`, `OBERTH_WIF_PROOF_DIR` and
 Generate the isolation and WIF inputs first, then run
 `TestOberth(Isolation|WIF|Nonroot)ControllerCapture`. The nonroot helper shares
 the isolation capture hook and fixes the executor log level to zero.
-All 24 submitted Pods passed the retained Kubernetes validator. The final
+All 24 submitted Pods passed the retained Kubernetes validator. The source PVC
+references now share writable claim-level mode while source mounts remain
+read-only. The final
 Pods replace the legacy token volume with tmpfs and isolate it from pipeline
 containers. Runtime TokenRequest issuance and holder-Pod cleanup are covered
 separately by unit tests and a live kind workflow.

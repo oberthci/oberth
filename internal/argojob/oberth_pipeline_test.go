@@ -430,8 +430,8 @@ func TestOberthPipelinesMountTheServerProvidedSource(t *testing.T) {
 				continue
 			}
 			found = true
-			if volume.PersistentVolumeClaim == nil || !volume.PersistentVolumeClaim.ReadOnly {
-				t.Errorf("%s: the source volume is not a read-only claim", name)
+			if volume.PersistentVolumeClaim == nil || volume.PersistentVolumeClaim.ReadOnly {
+				t.Errorf("%s: the source claim reference must leave read-only enforcement to the mounts", name)
 			}
 		}
 		if !found {

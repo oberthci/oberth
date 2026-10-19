@@ -1446,12 +1446,15 @@ func injectServerVolumes(workflow *wfv1.Workflow, config Config, request Request
 		mounts = append(mounts, mount)
 	}
 	if claim := strings.TrimSpace(request.SourceVolume.ClaimName); claim != "" {
+		// Keep the claim reference writable in both Pod volumes. On local-path
+		// PVs kubelet can reuse one mount for both names; a claim-level RO
+		// source mount can then make the artifacts path RO too. The source
+		// subPaths are protected by their individual VolumeMounts below.
 		workflow.Spec.Volumes = append(workflow.Spec.Volumes, corev1.Volume{
 			Name: SourceVolumeName,
 			VolumeSource: corev1.VolumeSource{
 				PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
 					ClaimName: claim,
-					ReadOnly:  true,
 				},
 			},
 		})

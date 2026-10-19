@@ -40,7 +40,7 @@ the current server patch to the observed writable mirrors as a negative-control
 boundary test. A changed input requires fresh controller proof. This is not a
 test of custom cluster admission webhooks, image execution, or artifact fetches.
 
-The 2026-10-04 recapture used a combined overlay containing the retained
+The 2026-10-19 recapture for #962 used a combined overlay containing the retained
 isolation, WIF and nonroot capture helpers. Immediately before the controller
 patch call, it invokes both `isolationCapture` and `oberthWIFCapture` when
 non-nil. Set `OBERTH_ISOLATION_PROOF_DIR`, `OBERTH_WIF_PROOF_DIR` and
@@ -48,7 +48,9 @@ non-nil. Set `OBERTH_ISOLATION_PROOF_DIR`, `OBERTH_WIF_PROOF_DIR` and
 Generate the isolation and WIF inputs first, then run
 `TestOberth(Isolation|WIF|Nonroot)ControllerCapture`. The nonroot helper shares
 the isolation capture hook and fixes the executor log level to zero.
-All 24 submitted Pods passed the retained Kubernetes validator. The final
+All 24 submitted Pods passed the retained Kubernetes validator. The source PVC
+references now share writable claim-level mode while the source volume mounts
+remain read-only. The final
 Pods replace the legacy token volume with tmpfs and isolate it from pipeline
 containers. Runtime TokenRequest issuance and holder-Pod cleanup are covered
 separately by unit tests and a live kind workflow.

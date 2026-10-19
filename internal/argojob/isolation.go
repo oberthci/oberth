@@ -260,9 +260,9 @@ func validateTemplateIsolation(wf *wfv1.Workflow) error {
 
 // AI-INVARIANT: Argo 4.0.8 addOutputArtifactsVolumes mirrors every main mount
 // into wait, even when the leaf has no output artifacts. Remove the server's
-// credential mounts from wait and reassert readonly workspace protection after
-// that mutation with a server-only strategic Pod patch. Repositories cannot
-// supply patches.
+// credential mounts from wait and reassert readonly source and workspace
+// protection after that mutation with a server-only strategic Pod patch.
+// Repositories cannot supply patches.
 func protectExecutorWorkspaceMounts(wf *wfv1.Workflow) error {
 	var patchErr error
 	walkTemplates(wf, func(t *wfv1.Template) {
@@ -295,7 +295,10 @@ func protectExecutorWorkspaceMounts(wf *wfv1.Workflow) error {
 					mounts = append(mounts, map[string]any{"mountPath": mirrorPath, "$patch": "delete"})
 					continue
 				}
-				if protectReadOnly && m.ReadOnly {
+				// Source shares a claim with writable artifacts. Its claim-level
+				// readOnly flag stays unset, so every executor mirror must keep the
+				// source mount's own readOnly flag even without workspace controls.
+				if m.ReadOnly && (protectReadOnly || m.Name == SourceVolumeName) {
 					m.MountPath = mirrorPath
 					mounts = append(mounts, m)
 				}
