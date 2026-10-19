@@ -82,7 +82,7 @@ func (controller *Controller) WithVMICleanupFailure(observe func(context.Context
 }
 
 func (controller *Controller) reportVMICleanupFailure(ctx context.Context, runID string, err error) {
-	log.Printf("WARN: VMI cleanup backstop failed for run %s: %v", runID, err)
+	log.Print("WARN: VMI cleanup backstop failed; see run audit for details")
 	if controller.vmiCleanupFailure != nil {
 		controller.vmiCleanupFailure(ctx, runID, err)
 	}
