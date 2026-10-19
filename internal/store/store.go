@@ -1145,7 +1145,7 @@ func (s *Store) repositoryByOrgName(ctx context.Context, org, name string) (mode
 	}
 	var matchingUpstreamIDs []int64
 	for _, upstream := range upstreams {
-		if upstream.Org() == org {
+		if strings.EqualFold(upstream.Org(), org) {
 			matchingUpstreamIDs = append(matchingUpstreamIDs, upstream.ID)
 		}
 	}

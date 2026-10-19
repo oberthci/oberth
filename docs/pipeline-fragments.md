@@ -41,9 +41,12 @@ spec:
 
 The repository half is the same path used to push, `<upstream>/<repository>`.
 A reference with no `@version` is refused: a fragment is always pinned.
-Branch CI may use `repository@<40-hex-commit-SHA>` after that exact commit has
-a passed run in the fragment repository. Abbreviated SHAs are refused. Release
-runs remain tag-only.
+Plain branch-push CI may use `repository@<40-hex-commit-SHA>` after that exact
+commit has a passed run in the fragment repository. Promotion CI and release
+runs remain tag-only, so main's promotion gate uses published fragments.
+Exactly 40 hex characters select a SHA (case-insensitively); every other
+version resolves as a tag. Numeric tags such as `@1` and `@20241019` remain
+valid. An abbreviated SHA is refused unless it is an actual tag.
 
 ## What the server does
 
@@ -86,7 +89,7 @@ publishing is not simply `git tag v3 && git push oberth`. Three things must hold
    that resolution reads, but Oberth reports it as not admitted for a release
    run.
 
-For a branch CI SHA reference, the fragment's own passed run is the gate;
+For a plain branch-push CI SHA reference, the fragment's own passed run is the gate;
 upstream default-branch reachability is not required. Tags retain the
 reachability gate on every tier. The practical consequence is that a fragment
 is verified by its own CI before any consumer can pin it.
@@ -98,7 +101,7 @@ is verified by its own CI before any consumer can pin it.
 | Fragments do not nest | A fragment containing its own `templateRef` is refused. This removes cycles, depth limits and expansion bombs as a class |
 | At most 16 fragments per document | Checked on the reference set before any fragment is read, so an oversized document causes no fetch |
 | Only registered repositories resolve | Optionally narrowed further by `--fragment-allowlist`; unset permits every registered repository |
-| SHA pins are branch CI only | Require an exact 40-hex SHA with a passed run on the fragment repository; release runs use tags |
+| SHA pins are plain branch-push CI only | Require an exact 40-hex SHA with a passed run on the fragment repository; promotion and release runs use tags |
 | A fragment is admitted like any pipeline | Inlined before the gate, so every construct `admit.go` refuses is refused inside a fragment too |
 | Inlined names may not collide | With the consuming document or with another fragment |
 | `spec.workflowTemplateRef` is never resolved | It names a whole spec rather than a template |

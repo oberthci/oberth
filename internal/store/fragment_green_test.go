@@ -22,6 +22,9 @@ func TestHasPassedRunForSHAIsScopedToFragmentRepository(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if registered, err := s.RepositoryRegistered(ctx, "ACME/fragment"); err != nil || !registered {
+		t.Fatalf("case-insensitive fragment org lookup = %v, %v", registered, err)
+	}
 	other, err := s.CreateRepository(ctx, model.RepositorySpec{Name: "other", UpstreamID: upstream.ID, DefaultBranch: "main"})
 	if err != nil {
 		t.Fatal(err)
@@ -42,6 +45,11 @@ func TestHasPassedRunForSHAIsScopedToFragmentRepository(t *testing.T) {
 		passed, err = s.HasPassedRunForSHA(ctx, "acme/fragment", sha)
 		if err != nil || passed != (repoID == fragment.ID) {
 			t.Fatalf("fragment pass after repo %d = %v, %v", repoID, passed, err)
+		}
+		if repoID == fragment.ID {
+			if folded, lookupErr := s.HasPassedRunForSHA(ctx, "ACME/fragment", sha); lookupErr != nil || !folded {
+				t.Fatalf("case-insensitive green run lookup = %v, %v", folded, lookupErr)
+			}
 		}
 	}
 	if passed, err := s.HasPassedRunForSHA(ctx, "acme/fragment", sha[:12]); err == nil || passed {

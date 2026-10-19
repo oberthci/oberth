@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 
 	"github.com/oberthci/oberth/internal/gitcache"
 	"github.com/oberthci/oberth/internal/model"
@@ -13,7 +12,7 @@ import (
 )
 
 type FragmentLoader interface {
-	Load(ctx context.Context, key argoworkflow.FragmentKey, trigger periapsis.Trigger, refKind model.RefKind) (argoworkflow.Fragment, error)
+	Load(ctx context.Context, key argoworkflow.FragmentKey, trigger periapsis.Trigger, refKind model.RefKind, runTrigger string) (argoworkflow.Fragment, error)
 }
 
 type FragmentBlobs interface {
@@ -57,7 +56,7 @@ func NewGitFragmentLoader(blobs FragmentBlobs, registry FragmentRegistry, allowl
 	return loader, nil
 }
 
-func (loader *GitFragmentLoader) Load(ctx context.Context, key argoworkflow.FragmentKey, trigger periapsis.Trigger, refKind model.RefKind) (argoworkflow.Fragment, error) {
+func (loader *GitFragmentLoader) Load(ctx context.Context, key argoworkflow.FragmentKey, trigger periapsis.Trigger, refKind model.RefKind, runTrigger string) (argoworkflow.Fragment, error) {
 	if loader.allowlist != nil && !loader.allowlist[key.Repo] {
 		return argoworkflow.Fragment{}, fmt.Errorf("app: fragment %s is not in the fragment allowlist", key)
 	}
@@ -73,14 +72,11 @@ func (loader *GitFragmentLoader) Load(ctx context.Context, key argoworkflow.Frag
 		return argoworkflow.Fragment{}, fmt.Errorf("app: fragment %s names a repository this server does not host", key)
 	}
 	var sha string
-	if allHexFragmentVersion(key.Version) {
-		if len(key.Version) != 40 {
-			return argoworkflow.Fragment{}, fmt.Errorf("app: fragment %s requires an exact 40-hex commit SHA", key)
+	if argoworkflow.IsFullFragmentSHA(key.Version) {
+		if trigger != periapsis.TriggerCI || refKind != model.RefBranch || runTrigger != "branch" {
+			return argoworkflow.Fragment{}, fmt.Errorf("app: fragment %s uses a commit SHA; only plain branch-push CI runs may use SHA-pinned fragments", key)
 		}
-		if trigger != periapsis.TriggerCI || refKind != model.RefBranch {
-			return argoworkflow.Fragment{}, fmt.Errorf("app: fragment %s uses a commit SHA; only branch CI runs may use SHA-pinned fragments", key)
-		}
-		sha = strings.ToLower(key.Version)
+		sha = key.Version
 		passed, checkErr := loader.registry.HasPassedRunForSHA(ctx, key.Repo, sha)
 		if checkErr != nil {
 			return argoworkflow.Fragment{}, fmt.Errorf("app: fragment %s: check its green run: %w", key, checkErr)
@@ -111,19 +107,7 @@ func (loader *GitFragmentLoader) Load(ctx context.Context, key argoworkflow.Frag
 	return argoworkflow.Fragment{Key: key, SHA: sha, Source: source}, nil
 }
 
-func allHexFragmentVersion(version string) bool {
-	if version == "" {
-		return false
-	}
-	for _, char := range version {
-		if (char < '0' || char > '9') && (char < 'a' || char > 'f') && (char < 'A' || char > 'F') {
-			return false
-		}
-	}
-	return true
-}
-
-func loadFragments(ctx context.Context, loader FragmentLoader, source []byte, trigger periapsis.Trigger, refKind model.RefKind) (map[argoworkflow.FragmentKey]argoworkflow.Fragment, error) {
+func loadFragments(ctx context.Context, loader FragmentLoader, source []byte, trigger periapsis.Trigger, refKind model.RefKind, runTrigger string) (map[argoworkflow.FragmentKey]argoworkflow.Fragment, error) {
 	workflow, err := argoworkflow.Decode(source)
 	if err != nil {
 		return nil, err
@@ -140,7 +124,7 @@ func loadFragments(ctx context.Context, loader FragmentLoader, source []byte, tr
 	}
 	fragments := make(map[argoworkflow.FragmentKey]argoworkflow.Fragment, len(keys))
 	for _, key := range keys {
-		fragment, err := loader.Load(ctx, key, trigger, refKind)
+		fragment, err := loader.Load(ctx, key, trigger, refKind, runTrigger)
 		if err != nil {
 			return nil, err
 		}
