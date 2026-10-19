@@ -839,8 +839,8 @@ ON CONFLICT(run_id) DO UPDATE SET
     completed_at = NULL`, now); err != nil {
 		return fmt.Errorf("record orphan Job cancellations: %w", err)
 	}
-	// A supersede can win after ClaimNextRun but before the worker publishes its
-	// deterministic Job name. The live worker may still be checking out in that
+	// A supersede or cancel can win after ClaimNextRun but before the worker
+	// publishes its deterministic Job name. The live worker may still be checking out in that
 	// window, so ordinary startup recovery must leave the empty-name obligation
 	// pending. Owner startup proves that worker is gone and can terminalize the
 	// no-Job cancellation without issuing an unbound Kubernetes deletion.
@@ -851,7 +851,8 @@ WHERE completed_at IS NULL AND job_name = '' AND reason = 'superseded'
   AND EXISTS (
       SELECT 1 FROM runs
       WHERE runs.id = run_cancellations.run_id
-        AND runs.status = 'interrupted' AND runs.superseded_by != ''
+        AND runs.status = 'interrupted'
+        AND (runs.superseded_by != '' OR runs.phase = 'cancelled')
   )`, now); err != nil {
 		return fmt.Errorf("complete owner-restart no-Job cancellations: %w", err)
 	}

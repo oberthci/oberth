@@ -295,7 +295,7 @@ RETURNING `+runColumns, now, now, id))
 		if lookupErr != nil {
 			return model.Run{}, lookupErr
 		}
-		if current.Status == model.RunInterrupted && current.SupersededBy != "" {
+		if current.Preempted() {
 			return current, nil
 		}
 		return model.Run{}, fmt.Errorf("%w: run is not awaiting submission", ErrInvalidState)
@@ -641,7 +641,7 @@ func (s *Store) SetRunJobName(ctx context.Context, id, jobName string) (model.Ru
 UPDATE runs SET job_name = ?, updated_at = ?
 WHERE id = ? AND (
     status IN ('queued', 'running') OR
-    (status = 'interrupted' AND superseded_by != '')
+    (status = 'interrupted' AND (superseded_by != '' OR phase = 'cancelled'))
 )
 AND NOT EXISTS (SELECT 1 FROM vm_executions WHERE run_id=runs.id AND execution_kind='kvm-preflight' AND (cleaned=0 OR receipt_json='' OR refusal_json!=''))
 RETURNING `+runColumns, jobName, unixNano(s.now()), id))
@@ -658,7 +658,7 @@ RETURNING `+runColumns, jobName, unixNano(s.now()), id))
 	if err != nil {
 		return model.Run{}, fmt.Errorf("set run job name: %w", err)
 	}
-	if value.Status == model.RunInterrupted && value.SupersededBy != "" {
+	if value.Preempted() {
 		if _, err := tx.ExecContext(ctx, `
 INSERT INTO run_cancellations(run_id, job_name, superseded_by, reason, created_at)
 VALUES(?, ?, ?, 'superseded', ?)
@@ -728,8 +728,8 @@ SELECT completed_at FROM run_cancellations WHERE run_id = ? AND job_name = ?`, r
 }
 
 // CompleteSupersededRunCancellationWithoutJob closes the narrow race in which
-// a worker is superseded after claim but exits before publishing its
-// deterministic Job name. Callers invoke this only after that exact worker has
+// a worker is superseded or cancelled after claim but exits before publishing
+// its deterministic Job name. Callers invoke this only after that exact worker has
 // returned; the durable predicates make every earlier or unrelated call a
 // no-op.
 func (s *Store) CompleteSupersededRunCancellationWithoutJob(ctx context.Context, runID string) error {
@@ -743,7 +743,8 @@ WHERE run_id = ? AND job_name = '' AND completed_at IS NULL AND reason = 'supers
   AND EXISTS (
       SELECT 1 FROM runs
       WHERE runs.id = run_cancellations.run_id
-        AND runs.status = 'interrupted' AND runs.superseded_by != ''
+        AND runs.status = 'interrupted'
+        AND (runs.superseded_by != '' OR runs.phase = 'cancelled')
   )`, unixNano(s.now()), runID); err != nil {
 		return fmt.Errorf("complete superseded no-Job cancellation for run %s: %w", runID, err)
 	}
