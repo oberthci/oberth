@@ -212,7 +212,7 @@ argo:
   credentialedServiceAccount: "oberth-argo-credentialed"
   # A leaf may opt out with automountServiceAccountToken: false. The server
   # preserves false and omits its injected Vault environment/credential mounts.
-  # Template annotations oberth.ci/workspace-mounts: none|readonly and
+  # Template annotations oberth.ci/workspace-mounts: none|cache|readonly and
   # oberth.ci/workspace-env: none restrict shared mounts and environment.
   # These are pipeline fields, not chart values; see docs/workspace-isolation.md.
   # Workspace isolation requires Pod leaves without templateDefaults.

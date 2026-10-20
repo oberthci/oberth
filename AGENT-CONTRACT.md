@@ -241,10 +241,21 @@ continuity checks; it must never be used to reset or bypass those checks.
   CA/server-binary or credential-chain mounts; a recognized credential command
   in a tokenless leaf or its defaults is refused. Argo's separate executor token
   remains confined to its init/wait containers.
-- Template annotations `oberth.ci/workspace-mounts: none|readonly` and
+- Template annotations `oberth.ci/workspace-mounts: none|cache|readonly` and
   `oberth.ci/workspace-env: none` reduce automatic workspace access. `none`
   omits automatic work/cache/artifact mounts and their injected environment,
   preserving explicit non-reserved mounts and the read-only source checkout.
+  `cache` is `none` except that the per-repository, tier-scoped persistent
+  cache stays mounted at `/work/cache`; `GOMODCACHE`, `GOCACHE` and
+  `OBERTH_CACHE_DIR` are then set inside it even with `workspace-env: none`,
+  and are absent when the tier has no cache root. It is a subset of the
+  default mounts. CI-tier trust model: within one repository and tier any
+  pusher's branch run can plant `GOCACHE` objects that the next run links in
+  (pre-existing for default-mode leaves). So `cache` is refused on CI-tier
+  leaves that run a credential chain, and admitted on release leaves,
+  credentialed or not, because only tag runs write the release root. It is
+  also refused on KVM and nonroot leaves, which take no host cache mount. Any
+  other value is refused by admission and `oberth validate`.
   `readonly` covers shared aliases and Argo wait mirrors. Authored read-only
   requests survive mount-path replacement and protect overlapping subpaths
   across containers; dynamic subpaths are conservatively overlapping. Fixed
@@ -274,7 +285,8 @@ continuity checks; it must never be used to reset or bypass those checks.
   repository never share a cache directory. The YAML must not declare the cache
   volume, name its path, or set `GOMODCACHE`/`GOCACHE`: admission refuses a
   repository `hostPath` outright, and a repository value for either variable is
-  overridden unless workspace environment injection is opted out as above.
+  overridden unless workspace environment injection is opted out as above
+  (a `workspace-mounts: cache` leaf still receives the server values).
   Only these two caches are shared; tool binaries stay on the run's
   own ephemeral volume. When no root is configured for a tier the mount is
   absent and runs simply start cold.
@@ -1435,7 +1447,8 @@ continuity checks; it must never be used to reset or bypass those checks.
 - Argo-authored workflows may select named plain container/script leaves for
   server-injected KVM device access with the annotation
   `oberth.ci/kvm-templates: leaf-one,leaf-two`. Each named leaf must be a plain
-  container or script leaf with `oberth.ci/workspace-mounts: none`,
+  container or script leaf with `oberth.ci/workspace-mounts: none` (`cache`
+  is refused: no host cache mount on a KVM leaf),
   `oberth.ci/workspace-env: none`, `automountServiceAccountToken: false`, no
   `templateDefaults`, and must not be credentialed (no secret-paths, no release
   WIF role, not also in `oberth.ci/nonroot-templates`). Repository-declared
@@ -1529,18 +1542,22 @@ Maximum grant lifetime is a documented knob
 Admission refuses an Argo DAG with two Trivy leaves that are UNORDERED (no DAG
 path between them) and whose `--cache-dir` resolves to the SAME shared volume.
 The predicate keys on the resolved shared volume, not the string alone: a
-template with `oberth.ci/workspace-mounts: none` uses a per-Pod emptyDir, so
-two such templates sharing the same `--cache-dir` string are accepted.
+template with `oberth.ci/workspace-mounts: none` or `cache` uses a per-Pod
+emptyDir, so two such templates sharing the same `--cache-dir` string are
+accepted. A `--cache-dir` inside the persistent cache (`/work/cache`) is shared
+on every leaf that keeps that mount (`cache`, `readonly` or no annotation).
 
 Accepted shapes:
 - Single Trivy leaf (no pair).
 - Two Trivy leaves with an ordering edge (direct or transitive).
 - Two unordered Trivy leaves whose caches are private (`workspace-mounts: none`
-  and no VCT mount at the cache path).
+  or `cache`, no VCT mount at the cache path, and not inside `/work/cache`).
 
 Rejected shape: two unordered Trivy leaves where both have `--cache-dir` at a
-path backed by the workspace VCT (when `workspace-mounts != none` and a `work`
-VCT is declared), or by a repo-declared VCT mount at the same path.
+path backed by the workspace VCT (when `workspace-mounts` is absent or
+`readonly` and a `work` VCT is declared), by the persistent cache (`--cache-dir`
+inside `/work/cache` and `workspace-mounts != none`), or by a repo-declared VCT
+mount at the same path.
 
 ### Disk floor admission (#673)
 

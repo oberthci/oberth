@@ -781,8 +781,8 @@ func admitTemplateMetadata(location string, metadata wfv1.Metadata) []error {
 				problems = append(problems, fmt.Errorf("argoworkflow: %s.%s must name an exact release WIF role", location, name))
 			}
 		case WorkspaceMountsAnnotation:
-			if value != "none" && value != "readonly" {
-				problems = append(problems, fmt.Errorf("argoworkflow: %s.%s must be none or readonly", location, name))
+			if !ValidWorkspaceMounts(value) {
+				problems = append(problems, fmt.Errorf("argoworkflow: %s.%s must be none, cache or readonly", location, name))
 			}
 		case WorkspaceEnvAnnotation:
 			if value != "none" {

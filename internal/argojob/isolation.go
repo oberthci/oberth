@@ -11,6 +11,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 
 	"github.com/oberthci/oberth/pkg/argoworkflow"
+	"github.com/oberthci/oberth/pkg/periapsis"
 )
 
 func tokenDisabled(t *wfv1.Template) bool {
@@ -21,8 +22,49 @@ func workspaceMountMode(t *wfv1.Template) string {
 	return t.Metadata.Annotations[argoworkflow.WorkspaceMountsAnnotation]
 }
 
+// workspaceMountsOmitted reports whether the leaf opted out of the automatic
+// work-volume and collected-artifact mounts. Both "none" and "cache" do; only
+// "cache" keeps the persistent build cache (see workspaceMountKept).
+func workspaceMountsOmitted(t *wfv1.Template) bool {
+	mode := workspaceMountMode(t)
+	return mode == argoworkflow.WorkspaceMountsNone || mode == argoworkflow.WorkspaceMountsCache
+}
+
+// workspaceMountKept reports whether a server-injected mount survives the
+// leaf's workspace-mounts mode. Non-workspace mounts (source, CA, binary) are
+// never affected here.
+func workspaceMountKept(t *wfv1.Template, m corev1.VolumeMount) bool {
+	if !sharedWorkspaceMount(m) || !workspaceMountsOmitted(t) {
+		return true
+	}
+	return workspaceMountMode(t) == argoworkflow.WorkspaceMountsCache && m.Name == CacheVolumeName
+}
+
+// workspaceEnvDisabled reports whether the server's workspace-default
+// environment is withheld. "cache" implies it, because those defaults name
+// work-volume paths a cache leaf does not mount; the persistent-cache
+// variables are restored separately by persistentCacheVariable.
 func workspaceEnvDisabled(t *wfv1.Template) bool {
-	return t.Metadata.Annotations[argoworkflow.WorkspaceEnvAnnotation] == "none" || workspaceMountMode(t) == "none"
+	return t.Metadata.Annotations[argoworkflow.WorkspaceEnvAnnotation] == "none" || workspaceMountsOmitted(t)
+}
+
+// persistentCacheVariable reports whether env is one of the three variables
+// injectRunEnvironment sets for the tier's persistent cache, with the exact
+// value that names the server's mount. A "cache" leaf always receives these
+// when the tier has a cache, regardless of workspace-env: they describe the
+// one mount the leaf asked to keep. The per-run work-volume fallbacks for the
+// same names (no tier cache configured) never match, so a cache leaf is never
+// pointed at an unmounted path.
+func persistentCacheVariable(env corev1.EnvVar) bool {
+	switch env.Name {
+	case "GOMODCACHE":
+		return env.Value == ModuleCachePath
+	case "GOCACHE":
+		return env.Value == BuildCachePath
+	case "OBERTH_CACHE_DIR":
+		return env.Value == CacheMountPath
+	}
+	return false
 }
 
 func templateContainers(t *wfv1.Template, visit func(*corev1.Container)) {
@@ -198,7 +240,7 @@ func preserveWorkspaceReadOnly(t *wfv1.Template, protected []corev1.VolumeMount)
 	templateContainers(t, func(c *corev1.Container) {
 		for i := range c.VolumeMounts {
 			m := &c.VolumeMounts[i]
-			if workspaceMountMode(t) == "readonly" && sharedWorkspaceMount(*m) {
+			if workspaceMountMode(t) == argoworkflow.WorkspaceMountsReadonly && sharedWorkspaceMount(*m) {
 				m.ReadOnly = true
 			}
 			for _, p := range protected {
@@ -210,9 +252,19 @@ func preserveWorkspaceReadOnly(t *wfv1.Template, protected []corev1.VolumeMount)
 	})
 }
 
-func validateTemplateIsolation(wf *wfv1.Workflow) error {
+func validateTemplateIsolation(wf *wfv1.Workflow, trigger periapsis.Trigger) error {
 	var problems []error
 	walkTemplates(wf, func(t *wfv1.Template) {
+		// The CI cache root is written by every branch run of the repository,
+		// so any pusher can plant GOCACHE objects that a later run links in.
+		// A credentialed leaf that opts into isolation must not knowingly
+		// link them with its secrets in the environment. The release root
+		// is written only by tag runs, so release leaves keep cache. Any
+		// tier other than release fails closed.
+		if workspaceMountMode(t) == argoworkflow.WorkspaceMountsCache && trigger != periapsis.TriggerRelease && templateUsesCredentialChain(t) {
+			problems = append(problems, fmt.Errorf("argojob: template %q runs a credential chain and cannot use %s: cache on the CI tier; branch runs write that cache. Use none",
+				t.Name, argoworkflow.WorkspaceMountsAnnotation))
+		}
 		if tokenDisabled(t) && templateUsesCredentialChain(t) {
 			problems = append(problems, fmt.Errorf("argojob: template %q disables its service-account token but invokes a credential chain", t.Name))
 		}

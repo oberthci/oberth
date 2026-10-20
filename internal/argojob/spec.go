@@ -734,7 +734,7 @@ func Build(config Config, request Request) (*wfv1.Workflow, error) {
 		return nil, err
 	}
 	normalizeContainerSetMounts(workflow)
-	if err := validateTemplateIsolation(workflow); err != nil {
+	if err := validateTemplateIsolation(workflow, request.Trigger); err != nil {
 		return nil, err
 	}
 	if err := trivyGuard(workflow); err != nil {
@@ -1696,7 +1696,7 @@ func injectTemplateVolumeMounts(template *wfv1.Template, injected []corev1.Volum
 	protected := readonlyMounts(template)
 	localInjected := make([]corev1.VolumeMount, 0, len(injected))
 	for _, m := range injected {
-		if workspaceMountMode(template) == "none" && sharedWorkspaceMount(m) {
+		if !workspaceMountKept(template, m) {
 			continue
 		}
 		if tokenDisabled(template) && (m.MountPath == VaultCAMountPath || m.MountPath == OberthBinMountPath) {
@@ -2092,10 +2092,11 @@ func injectTemplateEnvironment(template *wfv1.Template, environment []corev1.Env
 		workspaceNames[env.Name] = true
 	}
 	for _, env := range environment {
-		if workspaceEnvDisabled(template) && workspaceNames[env.Name] {
+		if workspaceEnvDisabled(template) && workspaceNames[env.Name] &&
+			(workspaceMountMode(template) != argoworkflow.WorkspaceMountsCache || !persistentCacheVariable(env)) {
 			continue
 		}
-		if workspaceMountMode(template) == "none" && env.Name == "OBERTH_ARTIFACTS" {
+		if workspaceMountsOmitted(template) && env.Name == "OBERTH_ARTIFACTS" {
 			continue
 		}
 		if tokenDisabled(template) && (strings.HasPrefix(env.Name, "VAULT_") || env.Name == "OBERTH_VAULT_ROLE") {

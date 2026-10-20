@@ -3,6 +3,7 @@ package argojob
 import (
 	"errors"
 	"fmt"
+	"path"
 	"strings"
 
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
@@ -155,18 +156,33 @@ func extractTrivyCacheDir(template *wfv1.Template) string {
 // to a shared volume that is visible to multiple steps in the same workflow.
 //
 // A cache dir is shared when:
+//
 //   - The workflow has a "work" VCT AND the template does not opt out of
 //     workspace mounts (workspace-mounts != none) AND the cache dir is the
 //     server-injected trivy-cache mount path.
+//
 //   - The template has a repo-declared volume mount from a VCT at the cache
 //     dir path.
 //
-// A cache dir is private when workspace-mounts is "none" and the path lands
-// on the per-Pod emptyDir (/tmp), which is what repository-authored Trivy leaves
-// use.
+//   - The template keeps the persistent build cache (workspace-mounts absent,
+//     readonly or cache) AND the cache dir lies inside CacheMountPath. That
+//     directory is one hostPath per repository and tier, shared by every
+//     leaf of the run (and by concurrent runs). Admission does not know
+//     whether the tier has a cache root configured, so it assumes it does.
+//
+// A cache dir is private when workspace-mounts is "none" or "cache" and the
+// path lands on the per-Pod emptyDir (/tmp), which is what repository-authored
+// Trivy leaves use: neither mode injects the work-VCT trivy-cache mount.
 func trivyCacheIsShared(template *wfv1.Template, cacheDir string, hasWorkVCT bool, workflow *wfv1.Workflow) bool {
-	// Check if workspace mounts are disabled for this template.
-	if workspaceMountMode(template) == "none" {
+	workingDir := "/"
+	if main := templateMainContainer(template); main != nil && path.IsAbs(main.WorkingDir) {
+		workingDir = main.WorkingDir
+	}
+	if workspaceMountMode(template) != argoworkflow.WorkspaceMountsNone && pathWithin(workingDir, cacheDir, CacheMountPath) {
+		return true
+	}
+	// Check if the work-VCT mounts are disabled for this template.
+	if workspaceMountsOmitted(template) {
 		// Even with workspace mounts disabled, check for repo-declared shared
 		// volume mounts at the same path.
 		return templateHasSharedVolumeAt(template, cacheDir, workflow)
@@ -267,5 +283,12 @@ func parseEnhancedDepends(depends string) []string {
 	return names
 }
 
-// Reference the argoworkflow import to avoid an unused import warning.
-var _ = argoworkflow.WorkspaceMountsAnnotation
+// pathWithin reports whether candidate, resolved against workingDir when
+// relative, is root or lies below it after lexical cleaning.
+func pathWithin(workingDir, candidate, root string) bool {
+	c := path.Clean(candidate)
+	if !path.IsAbs(c) {
+		c = path.Join(workingDir, c)
+	}
+	return c == root || strings.HasPrefix(c, root+"/")
+}

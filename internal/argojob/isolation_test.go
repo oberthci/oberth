@@ -222,7 +222,7 @@ func TestBuildRefusesContradictoryOrUnprovenIsolation(t *testing.T) {
 		name, want string
 		mutate     func(*wfv1.Workflow)
 	}{
-		{"unknown-mount-mode", "must be none or readonly", func(w *wfv1.Workflow) {
+		{"unknown-mount-mode", "must be none, cache or readonly", func(w *wfv1.Workflow) {
 			w.Spec.Templates[0].Metadata.Annotations = map[string]string{"oberth.ci/workspace-mounts": "{{inputs.parameters.mode}}"}
 		}},
 		{"unknown-env-mode", "must be none", func(w *wfv1.Workflow) {

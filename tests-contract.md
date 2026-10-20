@@ -105,3 +105,22 @@ proves a wrong, malformed or missing digest and a short body fail every save
 path with no file left. `TestOversizedArtifactCollectionStoresNothingToDownload`
 covers the per-run collection limit, and `TestArtifactDownloadAbortsInsteadOfEndingShort`
 proves the handler aborts rather than ending a short body cleanly.
+
+Workspace cache mode #1093: `TestWorkspaceCacheMountsOnlyTheCache` builds a
+`work`-VCT pipeline with delivered artifacts and proves a
+`workspace-mounts: cache` leaf (with and without `workspace-env: none`) gets
+only the read-only source, per-Pod `/tmp` and the writable `/work/cache`, the
+three cache variables, no tool/Trivy/artifact defaults, while a sibling keeps
+every default. `TestWorkspaceCacheStaysOnItsTier` proves CI and release cache
+leaves mount only their own root and never reference the other, and a release
+tier without a root mounts nothing. `TestWorkspaceCacheWithoutTierRootKeepsAuthoredCaches`,
+`TestWorkspaceCacheOnCredentialedReleaseLeaf`, `TestWorkspaceCacheRefusedOnNonLeaf`
+and `TestWorkspaceCacheCoversEveryPodContainerShape` cover the cold fallback,
+credentialed release leaves, Pod-leaf placement and every container shape;
+`TestWorkspaceCacheRefusedOnCredentialedCILeaf` refuses `cache` on a CI-tier
+`secretstore exec` leaf, admits `none` there, and admits `cache` on the same
+leaf on the release tier.
+`TestAdmitWorkspaceMountsValues` refuses unknown values; `TestAdmitKVMRefusesWorkspaceCache`
+and `TestAdmitNonrootRefusesWorkspaceCache` refuse `cache` on leaves that take no
+host cache; `TestTrivyGuardWorkspaceCache` treats `/tmp` as private and
+`/work/cache` as shared for cache leaves.

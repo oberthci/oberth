@@ -25,7 +25,8 @@ const KVMTemplatesAnnotation = "oberth.ci/kvm-templates"
 
 // DeclaredKVMTemplates validates the annotation and returns the declared leaf
 // names. Each named leaf must be a plain container or script template with:
-//   - workspace-mounts: none AND workspace-env: none
+//   - workspace-mounts: none AND workspace-env: none (cache is refused: no
+//     host-backed cache mount on a KVM leaf)
 //   - automountServiceAccountToken: false
 //   - no templateDefaults on the workflow
 //   - not also named in oberth.ci/nonroot-templates
@@ -116,8 +117,14 @@ func DeclaredKVMTemplates(workflow *wfv1.Workflow) ([]string, error) {
 				name)
 		}
 
-		// Must have workspace-mounts: none AND workspace-env: none.
-		if tmpl.Metadata.Annotations[WorkspaceMountsAnnotation] != "none" {
+		// Must have workspace-mounts: none AND workspace-env: none. "cache"
+		// is refused too: a KVM leaf takes no writable host-backed mount, and
+		// the persistent build cache is a node hostPath shared with every
+		// other leaf of the repository's tier.
+		if mode := tmpl.Metadata.Annotations[WorkspaceMountsAnnotation]; mode == WorkspaceMountsCache {
+			return nil, fmt.Errorf("argoworkflow: KVM template %q cannot use %s: cache; KVM leaves take no host cache mount and require %s: none",
+				name, WorkspaceMountsAnnotation, WorkspaceMountsAnnotation)
+		} else if mode != WorkspaceMountsNone {
 			return nil, fmt.Errorf("argoworkflow: KVM template %q requires %s: none",
 				name, WorkspaceMountsAnnotation)
 		}
