@@ -5,6 +5,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -12,6 +13,7 @@ import (
 	"os/exec"
 	"strings"
 	"syscall"
+	"time"
 )
 
 type testConfig struct {
@@ -32,7 +34,7 @@ func run() error {
 		{"securityfs", "/sys/kernel/security", "securityfs"},
 		{"tracefs", "/sys/kernel/tracing", "tracefs"},
 	} {
-		if err := os.MkdirAll(m[1], 0755); err != nil {
+		if err := os.MkdirAll(m[1], 0750); err != nil {
 			return err
 		}
 		if err := syscall.Mount(m[0], m[1], m[2], 0, ""); err != nil {
@@ -50,13 +52,15 @@ func run() error {
 	if err := json.Unmarshal(data, &config); err != nil {
 		return err
 	}
-	cmd := exec.Command("/tests", config.Args...)
+	ctx, cancel := context.WithTimeout(context.Background(), 9*time.Minute)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "/tests", config.Args...)
 	cmd.Env = append([]string{"PATH=/bin", "HOME=/tmp", "TMPDIR=/tmp", "GOMAXPROCS=2"}, config.Env...)
 	reader, writer, err := os.Pipe()
 	if err != nil {
 		return err
 	}
-	defer reader.Close()
+	defer func() { _ = reader.Close() }()
 	cmd.Stdout, cmd.Stderr = writer, writer
 	if err := cmd.Start(); err != nil {
 		_ = writer.Close()
@@ -64,6 +68,9 @@ func run() error {
 	}
 	_ = writer.Close()
 	passed, skipped, scanErr := testOutput(reader, os.Stdout)
+	if scanErr != nil {
+		cancel()
+	}
 	err = cmd.Wait()
 	if scanErr != nil {
 		return scanErr
