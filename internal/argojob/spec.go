@@ -538,6 +538,11 @@ type Request struct {
 	Ref          string
 	SHA          string
 	Trigger      periapsis.Trigger
+	// RunTrigger is what started the durable run (branch, promotion,
+	// schedule, tag). Build writes it into the server-owned oberth-trigger
+	// workflow parameter. Empty derives it from Trigger (tag for release,
+	// branch for CI); production callers always set it from the run record.
+	RunTrigger argoworkflow.RunTrigger
 	// Source is the exact bytes of the repository's pipeline document for
 	// this trigger, read from the immutable run workspace.
 	Source []byte
@@ -780,6 +785,12 @@ func Build(config Config, request Request) (*wfv1.Workflow, error) {
 		if err := appendTrustedKVM(workflow, config, request); err != nil {
 			return nil, err
 		}
+	}
+	// Stamped after the trusted wrapper copied the document's own arguments
+	// into its candidate step, so the wrapper is unchanged by the parameter;
+	// the value is global and reaches the candidate DAG either way.
+	if err := argoworkflow.SetTriggerParameter(workflow, request.effectiveRunTrigger()); err != nil {
+		return nil, err
 	}
 	if err := projectExecutorTokens(workflow, config); err != nil {
 		return nil, err
@@ -2257,10 +2268,32 @@ func (request Request) validate() error {
 	if !request.Trigger.Valid() {
 		problems = append(problems, fmt.Errorf("argojob: trigger %q is invalid", request.Trigger))
 	}
+	if request.RunTrigger != "" {
+		switch {
+		case !request.RunTrigger.Valid():
+			problems = append(problems, fmt.Errorf("argojob: run trigger %q is invalid", request.RunTrigger))
+		case request.RunTrigger.Tier() != request.Trigger && (request.TrustedKVM == nil || request.RunTrigger != argoworkflow.RunTriggerTag):
+			// The one crossing is the trusted preflight: it runs build.yaml
+			// under the CI tier to gate a tag's release delivery.
+			problems = append(problems, fmt.Errorf("argojob: run trigger %q does not run under the %s tier", request.RunTrigger, request.Trigger))
+		}
+	}
 	if len(request.Source) == 0 {
 		problems = append(problems, errors.New("argojob: pipeline document is required"))
 	}
 	return errors.Join(problems...)
+}
+
+// effectiveRunTrigger is the run trigger Build stamps: the caller's, or the
+// one the trust tier implies when the caller left it empty.
+func (request Request) effectiveRunTrigger() argoworkflow.RunTrigger {
+	if request.RunTrigger != "" {
+		return request.RunTrigger
+	}
+	if request.Trigger == periapsis.TriggerRelease {
+		return argoworkflow.RunTriggerTag
+	}
+	return argoworkflow.RunTriggerBranch
 }
 
 func fullSHA(value string) bool {

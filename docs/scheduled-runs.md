@@ -25,6 +25,11 @@ entry runs that branch's `.oberth/build.yaml` at its current commit, through the
 same path a push uses: same admission gate, same fragments, same artifacts, same
 failure issue.
 
+A scheduled run is a `schedule` run for `oberth.ci/size-by-trigger` and the
+`oberth-trigger` workflow parameter, so a pipeline can keep a heavy gate for
+its nightly and promotion runs and leave it out of branch pushes (see the
+README's scheduler annotations).
+
 The file is read from the **default branch**, so changing a schedule is a
 commit and a review like any other change.
 

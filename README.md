@@ -221,6 +221,34 @@ running beside them, and each member keeps its declared size. Group names are
 `status` and `run_get` show the group and, while a run waits on it, which run
 holds it.
 
+`oberth.ci/size-by-trigger` sizes each kind of run separately, so a heavy
+gate (a kernel matrix, say) can hold the host only on promotion and nightly
+runs while branch pushes stay small. Triggers are `branch`, `promotion` and
+`schedule` in build.yaml and `tag` in release.yaml; an unnamed trigger falls
+back to `oberth.ci/size`. To skip the heavy work itself on a branch run, guard
+it with the server-set `oberth-trigger` workflow parameter. Declaring the
+parameter with a default keeps the document valid on servers that predate it
+(they never set it, so the default decides):
+
+```yaml
+metadata:
+  annotations:
+    oberth.ci/size: XL   # older servers: the only size they read
+    oberth.ci/size-by-trigger: "branch=M,promotion=XL,schedule=XL"
+spec:
+  arguments:
+    parameters:
+    - name: oberth-trigger
+      value: promotion   # replaced by the server with the run's trigger
+  templates:
+  - name: ci
+    dag:
+      tasks:
+      - name: kernel-matrix
+        template: kernel-matrix
+        when: "'{{workflow.parameters.oberth-trigger}}' != 'branch'"
+```
+
 ```yaml
 metadata:
   annotations:

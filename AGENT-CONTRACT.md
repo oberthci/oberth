@@ -285,6 +285,30 @@ continuity checks; it must never be used to reset or bypass those checks.
   runs, `release.yaml` for tags) before resource admission.
   `oberth.ci/size: S|M|L|XL` (absent selects `M`) is the admission weight
   (1, 2, 3 of a budget of 2 × `maxConcurrentJobs`; XL runs alone).
+  `oberth.ci/size-by-trigger: "branch=M,promotion=XL,schedule=XL"` sets the
+  weight per run trigger: comma-separated `trigger=size` pairs, triggers
+  `branch`, `promotion`, `schedule` (build.yaml) and `tag` (release.yaml),
+  sizes `S|M|L|XL`, surrounding whitespace ignored. A trigger it does not
+  name falls back to `oberth.ci/size`, then `M`. The trigger is the durable
+  run's own (`release` ⇒ `tag`; trigger column `promotion` or `schedule`;
+  every other branch run is `branch`), never the document's or a caller's.
+  An unknown trigger or size, a duplicate, a malformed entry, or a trigger
+  the document never runs for (`tag` in build.yaml, any other in
+  release.yaml) fails `oberth validate` and server admission (phase
+  `infrastructure`, before a Workflow exists). A trusted KVM preflight is
+  sized from build.yaml for the run's trigger (`promotion` for a tag run).
+  A server that predates the annotation ignores it and uses `oberth.ci/size`,
+  so a document keeps `oberth.ci/size` as its conservative fallback.
+- The server-owned workflow parameter `oberth-trigger`
+  (`branch|promotion|schedule|tag`, the same durable run trigger) is set on
+  every document that declares or mentions it, so `when:` guards can skip
+  work per trigger, e.g.
+  `when: "'{{workflow.parameters.oberth-trigger}}' != 'branch'"`. A
+  document may declare it in `spec.arguments.parameters` only as a plain
+  vocabulary `value` (the default an older server, which never sets it,
+  evaluates); this server replaces that value. `valueFrom`, `default`,
+  `enum`, a duplicate, or an out-of-vocabulary value is refused. A document
+  that never mentions the parameter is submitted byte-identical to before.
   `oberth.ci/concurrency-group: <name>` (#658) makes the run a member of a
   mutual-exclusion group scoped to the declaring repository: at most one run
   of a (repository, group) holds admission at a time, across branch,

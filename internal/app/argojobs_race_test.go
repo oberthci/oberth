@@ -12,6 +12,7 @@ import (
 	"github.com/oberthci/oberth/internal/argojob"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/service"
+	"github.com/oberthci/oberth/pkg/argoworkflow"
 	"github.com/oberthci/oberth/pkg/periapsis"
 )
 
@@ -24,6 +25,8 @@ type blockingController struct {
 	mu        sync.Mutex
 	cancelled []string // names passed to Cancel
 	created   []string // names returned from Create
+	// runTriggers records the run trigger each Create was asked to stamp.
+	runTriggers map[string]argoworkflow.RunTrigger
 
 	// Per-call channels, keyed by name. If a name has no entry, Create
 	// returns immediately.
@@ -57,6 +60,10 @@ func (c *blockingController) Create(_ context.Context, req argojob.Request) (str
 	}
 	c.mu.Lock()
 	c.created = append(c.created, req.Name)
+	if c.runTriggers == nil {
+		c.runTriggers = map[string]argoworkflow.RunTrigger{}
+	}
+	c.runTriggers[req.Name] = req.RunTrigger
 	c.mu.Unlock()
 	return req.Name, nil
 }

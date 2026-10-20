@@ -91,6 +91,17 @@ func Admit(workflow *wfv1.Workflow, policy Policy) error {
 	if _, err := DeclaredConcurrencyGroup(workflow); err != nil {
 		problems = append(problems, err)
 	}
+	// The same holds for both size declarations. Which triggers a document
+	// may name depends on whether it is build.yaml or release.yaml, which
+	// this document-agnostic gate cannot know; AdmitSizeDeclarations adds that
+	// check where the tier is known.
+	if _, err := DeclaredSize(workflow); err != nil {
+		problems = append(problems, err)
+	}
+	if _, err := DeclaredSizesByTrigger(workflow); err != nil {
+		problems = append(problems, err)
+	}
+	problems = append(problems, admitTriggerParameter(&workflow.Spec)...)
 	return errors.Join(problems...)
 }
 

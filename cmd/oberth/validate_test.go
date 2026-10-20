@@ -266,3 +266,52 @@ func TestValidateWithValidBuildYAML(t *testing.T) {
 		t.Fatalf("output missing PASS:\n%s", text)
 	}
 }
+
+func writeValidateRepo(t *testing.T, files map[string]string) string {
+	t.Helper()
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, ".oberth"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(root, ".oberth", name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return root
+}
+
+func TestValidatePrintsAndChecksPerTriggerSizes(t *testing.T) {
+	t.Parallel()
+	perTrigger := strings.Replace(buildYAMLDemo, "    oberth.ci/size: S\n",
+		"    oberth.ci/size: XL\n    oberth.ci/size-by-trigger: branch=M,promotion=XL\n", 1)
+	if perTrigger == buildYAMLDemo {
+		t.Fatal("demo document no longer declares oberth.ci/size: S")
+	}
+	var output bytes.Buffer
+	if err := runValidate(context.Background(), []string{writeValidateRepo(t, map[string]string{"build.yaml": perTrigger})}, &output); err != nil {
+		t.Fatalf("per-trigger build.yaml rejected: %v\n%s", err, output.String())
+	}
+	if !strings.Contains(output.String(), "ok  size branch=M promotion=XL schedule=XL") {
+		t.Fatalf("output does not show resolved sizes:\n%s", output.String())
+	}
+
+	for name, document := range map[string]string{
+		"tag in build.yaml": strings.Replace(perTrigger, "promotion=XL", "tag=XL", 1),
+		"unknown trigger":   strings.Replace(perTrigger, "promotion=XL", "pull-request=XL", 1),
+		"unknown size":      strings.Replace(perTrigger, "promotion=XL", "promotion=XXL", 1),
+	} {
+		output.Reset()
+		if err := runValidate(context.Background(), []string{writeValidateRepo(t, map[string]string{"build.yaml": document})}, &output); err == nil {
+			t.Fatalf("%s: validate passed:\n%s", name, output.String())
+		}
+	}
+
+	release := strings.Replace(buildYAMLDemo, "    oberth.ci/size: S\n", "    oberth.ci/size-by-trigger: promotion=L\n", 1)
+	output.Reset()
+	if err := runValidate(context.Background(), []string{writeValidateRepo(t, map[string]string{
+		"build.yaml": buildYAMLDemo, "release.yaml": release,
+	})}, &output); err == nil || !strings.Contains(output.String(), "names promotion") {
+		t.Fatalf("release.yaml naming promotion: %v\n%s", err, output.String())
+	}
+}
