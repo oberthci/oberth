@@ -69,9 +69,21 @@ func (service *API) planOrQueuePromotion(ctx context.Context, actor api.Actor, r
 		return service.failAdmittedPromotion(ctx, promotion, "check promotions queued ahead: "+err.Error(), "")
 	}
 	if predecessor != nil {
-		// Not tracked by service.background: the wait can last as long as
-		// the promotion ahead, which waitBackground must not wait for.
-		go service.planQueuedPromotion(context.WithoutCancel(ctx), actor, repository, candidate, target, promotion)
+		// The wait is tracked by service.background and bound to the API's
+		// lifetime, so Shutdown cancels it instead of waiting out the
+		// promotion ahead. Planning, once begun, outlives the request but
+		// not the process: it runs on planCtx, which shutdown does not cancel
+		// midway, so it ends with an ordinary plan or failure.
+		planCtx := context.WithoutCancel(ctx)
+		waitCtx, cancelWait := context.WithCancel(planCtx)
+		stopAfter := context.AfterFunc(service.lifetime, cancelWait)
+		service.background.Add(1)
+		go func(promotion model.Promotion) {
+			defer service.background.Done()
+			defer cancelWait()
+			defer stopAfter()
+			service.planQueuedPromotion(waitCtx, planCtx, actor, repository, candidate, target, promotion)
+		}(promotion)
 		promotion.Error = queuedPromotionMessage(*predecessor, target)
 		return promotion, nil
 	}
@@ -80,8 +92,11 @@ func (service *API) planOrQueuePromotion(ctx context.Context, actor api.Actor, r
 
 // planQueuedPromotion waits until no promotion admitted earlier to the same
 // target is pending, then prepares this one against the target as it then
-// stands. It runs detached from the promote call that admitted it.
-func (service *API) planQueuedPromotion(ctx context.Context, actor api.Actor, repository model.Repository, candidate model.Run,
+// stands. It runs detached from the promote call that admitted it. When ctx
+// (the wait) ends first, typically at shutdown, it returns and leaves the
+// promotion pending with no plan; owner-startup recovery interrupts it, the
+// same as any promotion that never recorded its plan.
+func (service *API) planQueuedPromotion(ctx, planCtx context.Context, actor api.Actor, repository model.Repository, candidate model.Run,
 	target string, promotion model.Promotion) {
 	deadline := time.Now().Add(promotionQueueMaxWait)
 	for {
@@ -91,8 +106,8 @@ func (service *API) planQueuedPromotion(ctx context.Context, actor api.Actor, re
 		ahead, err := service.pendingPromotionAhead(ctx, promotion)
 		if err == nil && ahead == nil {
 			err = service.requireMutation(ctx)
-			if err == nil {
-				_, _ = service.planAdmittedPromotion(ctx, actor, repository, candidate, target, promotion)
+			if err == nil && ctx.Err() == nil {
+				_, _ = service.planAdmittedPromotion(planCtx, actor, repository, candidate, target, promotion)
 				return
 			}
 		}
@@ -101,7 +116,7 @@ func (service *API) planQueuedPromotion(ctx context.Context, actor api.Actor, re
 			if err != nil {
 				reason += ": " + err.Error()
 			}
-			_, _ = service.failAdmittedPromotion(ctx, promotion, reason, "")
+			_, _ = service.failAdmittedPromotion(planCtx, promotion, reason, "")
 			return
 		}
 		timer := time.NewTimer(promotionQueuePoll)

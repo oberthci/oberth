@@ -1094,8 +1094,11 @@ continuity checks; it must never be used to reset or bypass those checks.
   pending stays pending with no plan or run, and once no earlier one is
   pending it is merged onto the target as that left it, so two promotions
   never race to "upstream moved". The wait is bounded (12 h, then the
-  promotion fails); a restart interrupts a waiting promotion like any
-  promotion that never recorded its plan.
+  promotion fails). Server shutdown cancels the wait (it does not wait it
+  out) and leaves the promotion pending with no plan, which owner-startup
+  recovery interrupts like any promotion that never recorded its plan;
+  nothing touches the store after the API's shutdown returns. promote,
+  promote_retry and the automatic moved-target retry (#1097) all queue.
   An unborn target (brand-new repository whose upstream lacks the branch —
   confirmed by a successful, empty ls-remote, never inferred from a failed
   fetch) is a fast-forward creation of the tested source; the promotion row

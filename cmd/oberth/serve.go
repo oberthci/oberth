@@ -1056,7 +1056,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 	if err != nil {
 		return err
 	}
-	return runComponents(ctx, options, scheduler, anchors, git, sshService, httpsServer, goProxyServer, newAdminGateServer(anchors.AllowMutation, options.database, scheduler.NotifyQueue), activateScheduler, accessReconciler, schedules, ciIssues, logger)
+	return runComponents(ctx, options, scheduler, anchors, git, sshService, httpsServer, goProxyServer, newAdminGateServer(anchors.AllowMutation, options.database, scheduler.NotifyQueue), activateScheduler, accessReconciler, schedules, ciIssues, logger, controlAPI.Shutdown)
 }
 
 type startupContinuity interface {
@@ -1460,6 +1460,7 @@ func runComponents(
 	schedules *app.Schedules,
 	ciIssues *service.CIIssueReconciler,
 	logger *log.Logger,
+	apiShutdown func(context.Context) error,
 ) error {
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -1614,6 +1615,13 @@ func runComponents(
 	adminShutdownErr := adminServer.Shutdown(shutdownCtx)
 	if adminShutdownErr != nil {
 		adminShutdownErr = errors.Join(adminShutdownErr, adminServer.Close())
+	}
+	// Cancel the API's background waits (promotions queued behind another)
+	// before the store closes, so none wakes against a closed database.
+	if apiShutdown != nil {
+		if apiErr := apiShutdown(shutdownCtx); apiErr != nil {
+			logger.Printf("shutdown: %v", apiErr)
+		}
 	}
 	var goProxyShutdownErr error
 	if goProxyServer != nil {

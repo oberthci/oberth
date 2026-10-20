@@ -3,6 +3,9 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -217,5 +220,124 @@ func TestRetriedPromotionQueuesBehindAPendingOne(t *testing.T) {
 			t.Fatalf("retry never planned: %#v", current)
 		}
 		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+// closingPromotions refuses (and counts) every promotion read once the
+// store is "closed", so a test can prove nothing touches it after Shutdown.
+type closingPromotions struct {
+	PromotionRepository
+	mu     sync.Mutex
+	closed bool
+	after  int
+}
+
+func (promotions *closingPromotions) touch() error {
+	promotions.mu.Lock()
+	defer promotions.mu.Unlock()
+	if promotions.closed {
+		promotions.after++
+		return errors.New("store is closed")
+	}
+	return nil
+}
+
+func (promotions *closingPromotions) ListPromotions(ctx context.Context, filter model.PromotionListFilter) (model.PromotionPage, error) {
+	if err := promotions.touch(); err != nil {
+		return model.PromotionPage{}, err
+	}
+	return promotions.PromotionRepository.ListPromotions(ctx, filter)
+}
+
+func (promotions *closingPromotions) Promotion(ctx context.Context, id string) (model.Promotion, error) {
+	if err := promotions.touch(); err != nil {
+		return model.Promotion{}, err
+	}
+	return promotions.PromotionRepository.Promotion(ctx, id)
+}
+
+// Shutdown with a promotion queued behind another returns promptly, nothing
+// touches the store afterwards, and the queued promotion is left pending with
+// no plan, which owner-startup recovery then interrupts.
+func TestShutdownCancelsAQueuedPromotionWait(t *testing.T) {
+	const (
+		firstSource  = "5555555555555555555555555555555555555555"
+		secondSource = "6666666666666666666666666666666666666666"
+		base         = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+		merged       = "cccccccccccccccccccccccccccccccccccccccc"
+	)
+	fixture := newControlFixture(t)
+	ctx := context.Background()
+	for branch, sha := range map[string]string{"feature/one": firstSource, "feature/two": secondSource} {
+		run, err := fixture.store.EnqueueRun(ctx, model.RunSpec{
+			RepoID: fixture.repo.ID, RefKind: model.RefBranch, Ref: branch,
+			SHA: sha, Actor: "agent@host", Trigger: "branch", TestedSHA: sha,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := fixture.store.ClaimNextRun(ctx); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := fixture.store.FinishRun(ctx, run.ID, model.RunResult{Status: model.RunPassed, TestedSHA: sha}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	promotions := &closingPromotions{PromotionRepository: fixture.store}
+	control, err := NewAPI(APIConfig{
+		Runs: fixture.store, History: fixture.store, Repositories: fixture.store,
+		Issues: fixture.store, Promotions: promotions, PromotionRuns: fixture.store,
+		Enqueues: fixture.scheduler, Git: fixture.git, Refs: fixture.refs,
+		Logs: fixture.logs, Auditor: fixture.store,
+		Signals: fixture.signals, MaximumWait: 50 * time.Millisecond,
+		PromotionWorkspaceRoot: filepath.Join(fixture.root, "promotion-work"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	admin := api.Actor{Identity: "agent@host", Admin: true}
+	fixture.git.plan = gitcache.MergeCandidate{BaseSHA: base, MergedSHA: merged}
+	for _, sha := range []string{firstSource, secondSource} {
+		if _, err := control.CallTool(ctx, admin, "promote", json.RawMessage(`{"sha":"`+sha+`","branch":"main"}`)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	page, err := fixture.store.ListPromotions(ctx, model.PromotionListFilter{RepoID: fixture.repo.ID, Limit: 10})
+	if err != nil || len(page.Promotions) != 2 {
+		t.Fatalf("promotions = %#v, %v", page.Promotions, err)
+	}
+	queued := page.Promotions[0] // newest first
+	if queued.RunID != "" || queued.Status != model.PromotionPending {
+		t.Fatalf("second promotion was not queued: %#v", queued)
+	}
+
+	shutdownCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	started := time.Now()
+	if err := control.Shutdown(shutdownCtx); err != nil {
+		t.Fatalf("shutdown with a queued promotion: %v (after %s)", err, time.Since(started))
+	}
+	promotions.mu.Lock()
+	promotions.closed = true
+	promotions.mu.Unlock()
+	time.Sleep(2 * promotionQueuePoll / 5)
+	fixture.signals.NotifyPromotion(queued.ID)
+	time.Sleep(100 * time.Millisecond)
+	promotions.mu.Lock()
+	after := promotions.after
+	promotions.mu.Unlock()
+	if after != 0 {
+		t.Fatalf("the queued planner touched the store %d time(s) after shutdown", after)
+	}
+
+	current, err := fixture.store.Promotion(ctx, queued.ID)
+	if err != nil || current.Status != model.PromotionPending || current.RunID != "" || current.PreviousSHA != "" {
+		t.Fatalf("queued promotion after shutdown = %#v, %v; want still pending and unplanned", current, err)
+	}
+	if err := fixture.store.RecoverOwnerState(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if current, err = fixture.store.Promotion(ctx, queued.ID); err != nil || current.Status != model.PromotionInterrupted {
+		t.Fatalf("queued promotion after recovery = %#v, %v; want interrupted", current, err)
 	}
 }

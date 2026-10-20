@@ -126,7 +126,12 @@ type API struct {
 	// background tracks automatic promotion retries (#1097); a pointer so
 	// the per-actor copies share it.
 	background *sync.WaitGroup
-	runReruns  RunRerunStore
+	// lifetime ends when Shutdown starts: background waits (a promotion
+	// queued behind another, #1021) select on it, so shutdown cancels them
+	// rather than waiting them out. Shared by the per-actor copies.
+	lifetime     context.Context
+	stopLifetime context.CancelFunc
+	runReruns    RunRerunStore
 	// scope is set on the per-call copy serving a scoped actor (#073).
 	scope *repoScope
 }
@@ -168,6 +173,7 @@ func NewAPI(config APIConfig) (*API, error) {
 	if promotionGrantMaxLifetime > promotionGrantHardCeiling {
 		promotionGrantMaxLifetime = promotionGrantHardCeiling
 	}
+	lifetime, stopLifetime := context.WithCancel(context.Background())
 	return &API{
 		kvmPreflights:      config.KVMPreflights,
 		schedulingObserver: config.SchedulingObserver, admission: config.Admission,
@@ -183,7 +189,27 @@ func NewAPI(config APIConfig) (*API, error) {
 		repositoryRemover:   config.RepositoryRemover, removeGitCache: config.RemoveGitCache,
 		promotionGrants: config.PromotionGrants, promotionGrantMaxLifetime: promotionGrantMaxLifetime,
 		runCancels: config.RunCancels, runReruns: config.RunReruns, uplinks: config.Uplinks, background: &sync.WaitGroup{},
+		lifetime: lifetime, stopLifetime: stopLifetime,
 	}, nil
+}
+
+// Shutdown cancels the API's background waits and waits, within ctx, for
+// every background goroutine to return, so none touches the store after the
+// caller closes it. A promotion whose queue wait is cancelled stays pending
+// with no plan; owner-startup recovery interrupts it.
+func (service *API) Shutdown(ctx context.Context) error {
+	service.stopLifetime()
+	done := make(chan struct{})
+	go func() {
+		service.background.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return fmt.Errorf("service: background work still running at shutdown: %w", ctx.Err())
+	}
 }
 
 func (service *API) CallTool(ctx context.Context, actor api.Actor, name string, raw json.RawMessage) (any, error) {
