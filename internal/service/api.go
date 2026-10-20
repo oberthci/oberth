@@ -562,14 +562,33 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 			return service.accessListPending(ctx, arguments.Repo)
 		}
 		return service.accessList(ctx, arguments.Repo, arguments.Revoked)
-	case "kubevirt_grant", "kubevirt_revoke", "kubevirt_grant_get":
+	case "kubevirt_grant":
+		var arguments struct {
+			Repo      string `json:"repo"`
+			MaxVMs    int    `json:"max_vms"`
+			MaxCores  int    `json:"max_cores"`
+			MaxMemory string `json:"max_memory"`
+		}
+		if err := decodeTool(raw, &arguments); err != nil {
+			return nil, err
+		}
+		budget := store.KubeVirtBudget{MaxVMs: arguments.MaxVMs, MaxCores: arguments.MaxCores}
+		if arguments.MaxMemory != "" {
+			bytes, err := store.ParseKubeVirtMemory(arguments.MaxMemory)
+			if err != nil {
+				return nil, fmt.Errorf("%w: %v", ErrInvalidInput, err)
+			}
+			budget.MaxMemoryBytes = bytes
+		}
+		return service.kubeVirtGrantTool(ctx, actor, name, arguments.Repo, budget)
+	case "kubevirt_revoke", "kubevirt_grant_get":
 		var arguments struct {
 			Repo string `json:"repo"`
 		}
 		if err := decodeTool(raw, &arguments); err != nil {
 			return nil, err
 		}
-		return service.kubeVirtGrantTool(ctx, actor, name, arguments.Repo)
+		return service.kubeVirtGrantTool(ctx, actor, name, arguments.Repo, store.KubeVirtBudget{})
 	case "access_allow":
 		var arguments struct {
 			Repo   string `json:"repo"`

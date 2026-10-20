@@ -1554,10 +1554,24 @@ continuity checks; it must never be used to reset or bypass those checks.
   then delivers a Pod-bound launcher token to the pinned Argo executor image.
   The VM-launcher Role has only VMI create/get/list/watch/delete in the CI
   namespace, and Oberth best-effort deletes run-labelled survivors after
-  workflow completion or cancellation; cleanup failures are logged and audited
-  without blocking terminalization. The grant is stored by repository ID and audited;
+  workflow completion, failure or cancellation; cleanup failures are logged and audited
+  without blocking terminalization. This backstop owns deletion: a workflow
+  needs no delete step, and a run that fails before its VMI exists cleans up
+  without error (an optional exit-handler delete is not-found tolerant through
+  Argo's own `--ignore-not-found`; resource `flags` stay refused). The grant is stored by repository ID and audited;
   `kubevirt_grant` / `kubevirt_revoke` (MCP) or `oberth kubevirt grant|revoke`
-  (in-pod CLI) control it. The administrator must configure a containerDisk
+  (in-pod CLI) control it. Each grant carries a per-run VMI budget (VMI
+  creates, summed cores, summed memory; default 2 / 6 / 12Gi, bounds 16 / 64 /
+  256Gi, schema v25), set with `--max-vms/--max-cores/--max-memory` or the MCP
+  `max_vms/max_cores/max_memory` fields and audited with the previous budget.
+  Admission enforces the field-wise minimum of the grant and the server's
+  cluster ceiling (`argo.kubevirtCeiling`, default 8 / 24 / 48Gi), at most
+  three VMI templates per budgeted VM, and a VMI CPU request no larger than its
+  cores. `spec.domain.firmware.kernelBoot` is admitted only with a container
+  image that is digest-pinned under the containerDisk prefixes, an absolute
+  clean `kernelPath` (and optional `initrdPath`), and `kernelArgs` of at most
+  512 bytes in `[A-Za-z0-9._,:=/+-]`; every other firmware field and
+  `imagePullSecret` are refused. The administrator must configure a containerDisk
   registry-prefix allowlist; an empty list refuses VMI creation.
 - Security-backported runner tools are rebuilt from immutable upstream release
   source, identify themselves as Oberth derivatives, and are bound to their
@@ -1895,6 +1909,7 @@ alone is never evidence that missing migrations ran.
 | v22 | Unreleased (#073) | Upstream-scoped uplinks: uplink_scopes table (one upstream name per row; none = unscoped); issues gain nullable scope_upstream_id for manual issues | Database restore |
 | v23 | Unreleased (#917) | Audited repository-scoped KubeVirt grants keyed by durable repo ID | Database restore |
 | v24 | Unreleased (#954) | Partial index for passed runs by repository and tested SHA, used to validate SHA-pinned fragments | Database restore |
+| v25 | Unreleased (#1017) | kubevirt_grants: add max_vms, max_cores, max_memory_bytes (per-grant VMI run budget; existing grants get 2 VMs, 6 cores, 12Gi) | Database restore |
 
 **Contract test:** `TestEveryMigrationDocumentedInAgentContract` asserts that
 every migration version in `internal/store/schema.go` has a corresponding

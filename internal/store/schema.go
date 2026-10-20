@@ -13,7 +13,7 @@ type migration struct {
 func LatestMigrationVersion() int { return latestMigrationVersion }
 
 const (
-	latestMigrationVersion = 24
+	latestMigrationVersion = 25
 	// oberthSchemaIdentity is the fresh-deployment default. Existing deployments
 	// supply their original immutable identity through ProtocolConfig; bootstrap
 	// SQL and legacy schema validation use that exact configured operand.
@@ -1084,5 +1084,15 @@ ALTER TABLE issues ADD COLUMN scope_upstream_id INTEGER;`,
 		version: 24,
 		sql: `CREATE INDEX IF NOT EXISTS runs_passed_tested_sha_idx
     ON runs(repo_id, tested_sha) WHERE status = 'passed';`,
+	},
+	{
+		// v25: per-grant KubeVirt run budget (#1017). Existing grants keep
+		// the budget every grant had before: 2 VMs, 6 cores, 12Gi. The
+		// bounds mirror argoworkflow.VMIBudgetLimit; the server ceiling
+		// still caps the effective budget at admission.
+		version: 25,
+		sql: `ALTER TABLE kubevirt_grants ADD COLUMN max_vms INTEGER NOT NULL DEFAULT 2 CHECK (max_vms BETWEEN 1 AND 16);
+ALTER TABLE kubevirt_grants ADD COLUMN max_cores INTEGER NOT NULL DEFAULT 6 CHECK (max_cores BETWEEN 1 AND 64);
+ALTER TABLE kubevirt_grants ADD COLUMN max_memory_bytes INTEGER NOT NULL DEFAULT 12884901888 CHECK (max_memory_bytes BETWEEN 1073741824 AND 274877906944);`,
 	},
 }

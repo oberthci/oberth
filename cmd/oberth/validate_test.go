@@ -315,3 +315,59 @@ func TestValidatePrintsAndChecksPerTriggerSizes(t *testing.T) {
 		t.Fatalf("release.yaml naming promotion: %v\n%s", err, output.String())
 	}
 }
+
+func TestValidateKubeVirtBudgetFlags(t *testing.T) {
+	t.Parallel()
+	vmi := func(suffix string) string {
+		return `    - name: vm-` + suffix + `
+      resource:
+        action: create
+        setOwnerReference: true
+        manifest: |
+          apiVersion: kubevirt.io/v1
+          kind: VirtualMachineInstance
+          metadata:
+            name: "{{workflow.name}}-` + suffix + `"
+            labels:
+              oberth.ci/workflow: "{{workflow.name}}"
+          spec:
+            architecture: amd64
+            domain:
+              cpu:
+                cores: 4
+              resources:
+                requests:
+                  cpu: "4"
+                  memory: 8Gi
+              devices:
+                disks:
+                  - name: root
+                    disk:
+                      bus: virtio
+                interfaces:
+                  - name: default
+                    masquerade: {}
+            networks:
+              - name: default
+                pod: {}
+            volumes:
+              - name: root
+                containerDisk:
+                  image: quay.io/example/disk@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+`
+	}
+	source := "apiVersion: argoproj.io/v1alpha1\nkind: Workflow\nspec:\n  entrypoint: vm-a\n  activeDeadlineSeconds: 3600\n  templates:\n" + vmi("a") + vmi("b") + vmi("c")
+	root := writeValidateRepo(t, map[string]string{"build.yaml": source})
+	base := []string{"--kubevirt", "--container-disk-prefixes=quay.io/example/"}
+	var output bytes.Buffer
+	if err := runValidate(context.Background(), append(base, root), &output); err == nil || !strings.Contains(output.String(), "3 create templates (maximum 2)") {
+		t.Fatalf("p2p-3 under the default budget = %v\n%s", err, output.String())
+	}
+	output.Reset()
+	if err := runValidate(context.Background(), append(base, "--kubevirt-max-vms=3", "--kubevirt-max-cores=12", "--kubevirt-max-memory=24Gi", root), &output); err != nil {
+		t.Fatalf("p2p-3 under a 3/12/24Gi budget: %v\n%s", err, output.String())
+	}
+	if err := runValidate(context.Background(), append(base, "--kubevirt-max-vms=17", root), &output); !errors.Is(err, errUsage) {
+		t.Fatalf("out-of-range budget = %v, want usage error", err)
+	}
+}

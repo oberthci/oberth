@@ -251,6 +251,9 @@ spec:
             - --argo-executor-serviceaccount={{ .Values.argo.executorServiceAccount }}
             - --argo-vm-launcher-serviceaccount={{ .Values.argo.vmLauncherServiceAccount | default "oberth-argo-vm-launcher" }}
             - "--argo-container-disk-prefixes={{ join "," (.Values.argo.containerDiskPrefixes | default list) }}"
+            - --argo-kubevirt-max-vms={{ (.Values.argo.kubevirtCeiling).maxVMs | default 8 }}
+            - --argo-kubevirt-max-cores={{ (.Values.argo.kubevirtCeiling).maxCores | default 24 }}
+            - --argo-kubevirt-max-memory={{ (.Values.argo.kubevirtCeiling).maxMemory | default "48Gi" }}
             - --argo-workflow-timeout={{ .Values.argo.workflowTimeout }}
             - --argo-workflow-ttl={{ .Values.argo.workflowTTL }}
             {{- if .Values.argo.sourceStorageClass }}
