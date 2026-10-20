@@ -37,6 +37,14 @@ func applyKVMLeaves(workflow *wfv1.Workflow, config Config) error {
 	for _, name := range names {
 		nameSet[name] = true
 	}
+	guests, err := argoworkflow.DeclaredGuestTestTemplates(workflow)
+	if err != nil {
+		return err
+	}
+	guestSet := make(map[string]bool, len(guests))
+	for _, name := range guests {
+		guestSet[name] = true
+	}
 
 	kvmQuantity := resource.MustParse("1")
 	kvmEnv := corev1.EnvVar{Name: "OBERTH_KVM", Value: "1"}
@@ -67,6 +75,9 @@ func applyKVMLeaves(workflow *wfv1.Workflow, config Config) error {
 		// Inject OBERTH_KVM=1 so the consumer can assert -accel kvm only
 		// (no TCG fallback when this env is present).
 		main.Env = overrideEnvironment(main.Env, []corev1.EnvVar{kvmEnv})
+		if guestSet[tmpl.Name] {
+			main.Env = overrideEnvironment(main.Env, []corev1.EnvVar{{Name: "OBERTH_GUEST_TEST", Value: "kvm-v1"}})
+		}
 	})
 
 	return applyErr

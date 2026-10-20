@@ -71,6 +71,7 @@ func TestBuildKVMLeaves(t *testing.T) {
 	config := testConfig()
 	config.KVMEnabled = true
 	request := testRequest(periapsis.TriggerCI, kvmTestDocument)
+	request.KubeVirtGranted = true
 	request.SourceVolume = SourceVolume{ClaimName: "run-source", SubPath: "src", ArtifactsSubPath: "artifacts"}
 
 	wf, err := Build(config, request)
@@ -162,6 +163,7 @@ func TestBuildKVMSwitchOff(t *testing.T) {
 	config := testConfig()
 	config.KVMEnabled = false
 	request := testRequest(periapsis.TriggerCI, kvmTestDocument)
+	request.KubeVirtGranted = true
 	request.SourceVolume = SourceVolume{ClaimName: "run-source", SubPath: "src", ArtifactsSubPath: "artifacts"}
 
 	_, err := Build(config, request)

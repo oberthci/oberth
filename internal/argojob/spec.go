@@ -662,6 +662,11 @@ func Build(config Config, request Request) (*wfv1.Workflow, error) {
 	// independently approved WIF leaf can select the per-repository identity
 	// and its own audience-scoped projection without any Vault wiring.
 	credentialed := len(declaredPaths) > 0
+	if names, err := argoworkflow.DeclaredKVMTemplates(workflow); err != nil {
+		return nil, err
+	} else if len(names) != 0 && (request.Trigger != periapsis.TriggerCI || credentialed || len(wifLeaves) > 0) {
+		return nil, errors.New("argojob: KVM leaves require a credential-free CI workflow")
+	}
 	if (credentialed || len(wifLeaves) > 0) && hasVMIResources(workflow) {
 		return nil, errors.New("argojob: VMI resource templates are refused in credentialed workflows")
 	}

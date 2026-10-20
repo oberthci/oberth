@@ -46,7 +46,7 @@ type Policy struct {
 	// applies to a declared RunnerImage. Empty selects the built-in
 	// periapsis.DefaultRunnerImagePrefixes.
 	RunnerImagePrefixes []string
-	// KubeVirt permits the narrowly validated VMI resource template shape.
+	// KubeVirt permits VM resources and KVM device leaves for an admin-granted repository.
 	// The server sets this only after checking the repository's VM grant.
 	KubeVirt bool
 	// ContainerDiskPrefixes is the administrator's registry allowlist for VMI
@@ -98,7 +98,12 @@ func Admit(workflow *wfv1.Workflow, policy Policy) error {
 	if _, err := DeclaredNonrootTemplates(workflow); err != nil {
 		problems = append(problems, err)
 	}
-	if _, err := DeclaredKVMTemplates(workflow); err != nil {
+	if names, err := DeclaredKVMTemplates(workflow); err != nil {
+		problems = append(problems, err)
+	} else if len(names) != 0 && !policy.KubeVirt {
+		problems = append(problems, errors.New("argoworkflow: KVM leaves require an active repository KubeVirt admin grant"))
+	}
+	if _, err := DeclaredGuestTestTemplates(workflow); err != nil {
 		problems = append(problems, err)
 	}
 	// The scheduler reads the same annotation before admission; refusing a
