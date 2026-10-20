@@ -76,6 +76,9 @@ type Scheduler struct {
 	// promotionRetrier re-promotes a promotion whose delivery found its
 	// target moved (#1097); nil leaves such a promotion failed.
 	promotionRetrier atomic.Pointer[promotionRetrierHook]
+	// onStartupRecovered, when set (tests only), is called once Run has
+	// finished startup recovery and is about to enter its dispatch loop.
+	onStartupRecovered func()
 }
 
 // PromotionRetrier re-promotes a promotion whose publication failed because
@@ -358,6 +361,9 @@ func (scheduler *Scheduler) Run(ctx context.Context) error {
 	}
 	if err := scheduler.recoverOwnedWorkspaces(workerCtx); err != nil {
 		return err
+	}
+	if scheduler.onStartupRecovered != nil {
+		scheduler.onStartupRecovered()
 	}
 	scheduler.signalQueue()
 	completed := make(chan error, 2*scheduler.maxConcurrent)

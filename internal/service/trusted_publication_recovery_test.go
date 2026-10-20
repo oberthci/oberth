@@ -139,16 +139,35 @@ func TestTrustedPreflightSchedulerStartupRecovery(t *testing.T) {
 			if mode == "missing executor" {
 				f.scheduler.trusted = nil
 			}
-			ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+			// Startup recovery runs to completion on its own: the run loop is
+			// stopped only after the scheduler reports recovery finished, so
+			// no wall-clock deadline can cut recovery short on a loaded node.
+			// The outer bound only keeps a hung scheduler from hanging the
+			// test.
+			recovered := make(chan struct{})
+			f.scheduler.onStartupRecovered = func() { close(recovered) }
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
-			err := f.scheduler.Run(ctx)
-			if mode == "missing executor" {
-				if err == nil {
+			result := make(chan error, 1)
+			go func() { result <- f.scheduler.Run(ctx) }()
+			var err error
+			select {
+			case <-recovered:
+				cancel()
+				err = <-result
+				if mode == "missing executor" {
 					t.Fatal("pending row without executor started")
 				}
-				return
-			}
-			if err != nil {
+				if err != nil && !errors.Is(err, context.Canceled) {
+					t.Fatalf("scheduler stopped with %v after startup recovery", err)
+				}
+			case err = <-result:
+				if mode == "missing executor" {
+					if err == nil {
+						t.Fatal("pending row without executor started")
+					}
+					return
+				}
 				t.Fatalf("individual recovery error stopped scheduler: %v", err)
 			}
 			got, err := f.store.Run(context.Background(), run.ID)
