@@ -54,6 +54,7 @@ func run() error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 9*time.Minute)
 	defer cancel()
+	// #nosec G204 -- The fixed candidate test binary and arguments run only inside the disposable guest.
 	cmd := exec.CommandContext(ctx, "/tests", config.Args...)
 	cmd.Env = append([]string{"PATH=/bin", "HOME=/tmp", "TMPDIR=/tmp", "GOMAXPROCS=2"}, config.Env...)
 	reader, writer, err := os.Pipe()
@@ -91,7 +92,9 @@ func testOutput(reader io.Reader, output io.Writer) (int, int, error) {
 	scanner.Buffer(make([]byte, 4096), 4<<20)
 	for scanner.Scan() {
 		line := scanner.Text()
-		fmt.Fprintln(output, line)
+		if _, err := fmt.Fprintln(output, line); err != nil {
+			return passed, skipped, err
+		}
 		line = strings.TrimSpace(line)
 		if strings.HasPrefix(line, "--- PASS:") {
 			passed++
