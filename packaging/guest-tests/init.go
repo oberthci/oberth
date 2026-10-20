@@ -6,9 +6,11 @@ package main
 import (
 	"bufio"
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"os/exec"
 	"strings"
@@ -50,6 +52,9 @@ func run() error {
 		if err := requireFuse("/dev/fuse"); err != nil {
 			return err
 		}
+		if err := enableLoopback(); err != nil {
+			return err
+		}
 	}
 	if err := syscall.Setrlimit(8 /* Linux RLIMIT_MEMLOCK */, &syscall.Rlimit{Cur: ^uint64(0), Max: ^uint64(0)}); err != nil {
 		return err
@@ -83,6 +88,56 @@ func requireFuse(path string) error {
 		return fmt.Errorf("required guest FUSE device is not a character device")
 	}
 	return nil
+}
+
+// Local HTTP fixtures need loopback, but QEMU still exposes no network adapter.
+func enableLoopback() error {
+	link, err := net.InterfaceByName("lo")
+	if err != nil {
+		return err
+	}
+	if link.Index <= 0 || link.Index > 1<<31-1 {
+		return fmt.Errorf("invalid loopback interface index")
+	}
+	fd, err := syscall.Socket(syscall.AF_NETLINK, syscall.SOCK_RAW|syscall.SOCK_CLOEXEC, syscall.NETLINK_ROUTE)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = syscall.Close(fd) }()
+	timeout := syscall.NsecToTimeval((5 * time.Second).Nanoseconds())
+	if err := syscall.SetsockoptTimeval(fd, syscall.SOL_SOCKET, syscall.SO_RCVTIMEO, &timeout); err != nil {
+		return err
+	}
+	message := make([]byte, syscall.NLMSG_HDRLEN+syscall.SizeofIfInfomsg)
+	binary.NativeEndian.PutUint32(message[0:4], uint32(syscall.NLMSG_HDRLEN+syscall.SizeofIfInfomsg))
+	binary.NativeEndian.PutUint16(message[4:6], syscall.RTM_NEWLINK)
+	binary.NativeEndian.PutUint16(message[6:8], syscall.NLM_F_REQUEST|syscall.NLM_F_ACK)
+	binary.NativeEndian.PutUint32(message[8:12], 1)
+	binary.NativeEndian.PutUint32(message[20:24], uint32(link.Index))
+	binary.NativeEndian.PutUint32(message[24:28], syscall.IFF_UP)
+	binary.NativeEndian.PutUint32(message[28:32], syscall.IFF_UP)
+	if err := syscall.Sendto(fd, message, 0, &syscall.SockaddrNetlink{Family: syscall.AF_NETLINK}); err != nil {
+		return err
+	}
+	reply := make([]byte, 4096)
+	n, _, err := syscall.Recvfrom(fd, reply, 0)
+	if err != nil {
+		return err
+	}
+	messages, err := syscall.ParseNetlinkMessage(reply[:n])
+	if err != nil {
+		return err
+	}
+	for _, response := range messages {
+		if response.Header.Seq == 1 && response.Header.Type == syscall.NLMSG_ERROR && len(response.Data) >= 4 {
+			status := binary.NativeEndian.Uint32(response.Data[:4])
+			if status != 0 {
+				return fmt.Errorf("guest loopback netlink error: 0x%08x", status)
+			}
+			return nil
+		}
+	}
+	return fmt.Errorf("guest loopback acknowledgement missing")
 }
 
 func runTests(config testConfig) error {
