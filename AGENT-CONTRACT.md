@@ -696,10 +696,10 @@ continuity checks; it must never be used to reset or bypass those checks.
   each write/flush has a five-second bound. Heartbeat writes and the final
   response never overlap. Disconnect/write failure cancels only observation,
   never durable work, and joins the heartbeat writer before returning.
-- MCP exposes 60 tools: `status`, bounded named-step `logs`, exact-run
+- MCP exposes 62 tools: `status`, bounded named-step `logs`, exact-run
   `run_get`/`run_logs`, `run_retry`, audited `run_rerun` (#1098), audited `run_cancel`/`run_purge`, `run_kvm_preflight`, `artifacts`/`artifact_get`, `wait`, `sync`, `promote`,
   `promotion_list`, `promote_status`, audited `promote_retry` (#1097), `publish_retry`, issue
-  create/get/get_many/update/append/close/reopen/delete/list/lock,
+  create/get/get_many/update/append/close/reopen/delete/list/lock/unlock/close_many,
   secret-access list/allow/revoke, unscoped-admin-only uplink list/revoke/rotate,
   `access_dismiss` and `kubevirt_grant_list`, admin-only `kubevirt_grant` and
   `kubevirt_revoke`, read-only `kubevirt_grant_get`, admin-only `size_grant`
@@ -2513,6 +2513,7 @@ later declaration can reappear. `kubevirt_grant_list` lists active grants for
 all repositories, unscoped-admin-only; repository views include optional active
 grant metadata and tolerate individual grant lookup failures. These additions
 require no schema or Kubernetes permission changes.
+
 ### Repository archive (#1102)
 
 `repo_archive` and `repo_unarchive` require an unscoped admin. Archive preserves
@@ -2535,3 +2536,24 @@ unchanged. Store transactions guard admission. Chart `archivedRepositories` cont
 fully qualified identities: releaseWIF entries for these names fail rendering.
 Keep that operator-owned list aligned with the live archive catalog; Helm cannot
 query the server database during offline rendering.
+
+## Issue lock and bulk lifecycle (#1103)
+
+CI projection never takes or renews issue locks (#1170). These lifecycle tools
+apply to explicitly acquired coordination locks, including retained legacy locks.
+
+Issue reads (`issue_get`, `issue_get_many`, list and HTTP) include `lock` with
+owner, acquisition and expiry times, or null when free/expired. Reads do not
+renew locks. Lock conflicts retain their error class and include the owner and
+expiry. Admin-only `issue_unlock` is scope checked and atomically deletes the
+lock with `issue.lock.break`, recording the previous owner. The former owner's
+explicit renewal fails with the existing not-owned error.
+
+Admin-only `issue_close_many` accepts 1..50 unique positive IDs and a nonempty
+reason (at most 4096 bytes). Validation precedes mutation. Results retain input
+order and report closed, not_found, or lock_held with lock metadata for each ID;
+hidden issues are missing. Closures append the reason to the body and commit
+one `issue.close` audit action each. Existing locks still apply, including for
+CI issues; admins must explicitly unlock first. Already closed retries are
+idempotent. These changes use existing tables and require no schema or RBAC
+migration. Existing single-issue mutation authorization is unchanged.

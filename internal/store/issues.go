@@ -457,7 +457,7 @@ SELECT issue_id, owner, acquired_at, expires_at FROM issue_locks WHERE issue_id 
 		return nil
 	}
 	if lock.Owner != actor {
-		return ErrLockHeld
+		return &IssueLockHeldError{Lock: lock}
 	}
 	if !renew {
 		return nil
@@ -493,7 +493,11 @@ WHERE issue_locks.expires_at <= ? OR issue_locks.owner = excluded.owner
 RETURNING issue_id, owner, acquired_at, expires_at`,
 		issueID, owner, unixNano(acquired), unixNano(expires), unixNano(acquired)))
 	if errors.Is(err, sql.ErrNoRows) {
-		return model.IssueLock{}, ErrLockHeld
+		held, readErr := scanIssueLock(tx.QueryRowContext(ctx, `SELECT issue_id,owner,acquired_at,expires_at FROM issue_locks WHERE issue_id=?`, issueID))
+		if readErr != nil {
+			return model.IssueLock{}, readErr
+		}
+		return model.IssueLock{}, &IssueLockHeldError{Lock: held}
 	}
 	if err != nil {
 		return model.IssueLock{}, fmt.Errorf("acquire issue lock: %w", err)

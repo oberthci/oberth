@@ -979,6 +979,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 	controlAPI, err := service.NewAPI(service.APIConfig{
 		ReleasePreflight: argoJobs,
 		UplinkLifecycle:  database, DeclarationDismissal: database,
+		IssueLifecycle:     database,
 		KVMPreflights:      database,
 		SchedulingObserver: argoJobs, Admission: scheduler,
 		Runs: database, History: database, RunRetries: database, Repositories: database, Issues: database,
@@ -2036,6 +2037,10 @@ func classifyViewError(err error) (int, string) {
 		errors.Is(err, service.ErrAmbiguousRepository):
 		return http.StatusConflict, err.Error()
 	case errors.Is(err, store.ErrLockHeld):
+		var held *store.IssueLockHeldError
+		if errors.As(err, &held) {
+			return http.StatusConflict, held.Error()
+		}
 		return http.StatusConflict, "issue lock held by another identity"
 	case errors.Is(err, store.ErrLockNotOwned):
 		return http.StatusConflict, "issue lock is expired or not owned by this identity"

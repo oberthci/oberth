@@ -675,6 +675,8 @@ const (
 func (s IssueState) Valid() bool { return s == IssueOpen || s == IssueClosed }
 
 type Issue struct {
+	// Lock is transient API observation, populated after visibility checks.
+	Lock           *IssueLock `json:"lock"`
 	ID             int64
 	RepoID         int64 // Zero identifies a workspace-global issue.
 	Kind           IssueKind
@@ -742,10 +744,10 @@ type IssueCounts struct {
 }
 
 type IssueLock struct {
-	IssueID    int64
-	Owner      string
-	AcquiredAt time.Time
-	ExpiresAt  time.Time
+	IssueID    int64     `json:"issue_id"`
+	Owner      string    `json:"owner"`
+	AcquiredAt time.Time `json:"acquired_at"`
+	ExpiresAt  time.Time `json:"expires_at"`
 }
 
 type Uplink struct {
