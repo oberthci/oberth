@@ -107,12 +107,14 @@ def main():
         initramfs.write_bytes(archive(files))
         with (Path(directory) / "console").open("w+") as console:
             process = subprocess.Popen(qemu_command(args, initramfs), stdin=subprocess.DEVNULL,
-                                       stdout=console, stderr=subprocess.STDOUT, start_new_session=True)
+                                       stdout=console, stderr=subprocess.STDOUT)
             try:
                 result = process.wait(timeout=args.timeout)
             finally:
                 if process.poll() is None:
-                    os.killpg(process.pid, signal.SIGKILL)
+                    # Stay in the caller's process group so load guards pause
+                    # the VM too. QEMU's sandbox forbids child processes.
+                    process.kill()
                     process.wait()
                 console.seek(0)
                 output = console.read()
