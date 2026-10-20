@@ -295,8 +295,17 @@ continuity checks; it must never be used to reset or bypass those checks.
 - Two Workflow-level annotations are scheduler declarations, read statically
   from the run's own immutable document (`build.yaml` for branch and promotion
   runs, `release.yaml` for tags) before resource admission.
-  `oberth.ci/size: S|M|L|XL` (absent selects `M`) is the admission weight
-  (1, 2, 3 of a budget of 2 × `maxConcurrentJobs`; XL runs alone).
+  `oberth.ci/size: S|M|L|XL` (absent selects `M`) selects the admission
+  weight. The operator sets the weights with `admission.sizeWeights` (server
+  flag `--admission-size-weights S=1,M=2,L=3,XL=0`, the default); the budget
+  is `maxConcurrentJobs` × the M weight. XL `0` means the whole budget: an XL
+  run is admitted only once nothing else holds weight and then runs alone. A
+  positive XL is an ordinary weight (clamped to the budget), so an XL run is
+  admitted beside whatever fits, still behind the XL size grant. Weights are
+  validated at chart render and server start: each at least 1 (0 only for
+  XL), S ≤ M ≤ L ≤ XL; sizes left unset keep their defaults. The queue-head
+  message names a finite XL by weight ("XL · 11w") and a whole-budget XL as
+  "needs a full drain". S packing uses the configured S and M weights.
   `oberth.ci/size-by-trigger: "branch=M,promotion=XL,schedule=XL"` sets the
   weight per run trigger: comma-separated `trigger=size` pairs, triggers
   `branch`, `promotion`, `schedule` (build.yaml) and `tag` (release.yaml),

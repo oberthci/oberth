@@ -211,8 +211,11 @@ slice. Oberth reads the YAML statically at submission -- it never executes
 repository code in the server process.
 
 Two workflow-level annotations steer the scheduler. `oberth.ci/size` (`S`,
-`M` -- the default --, `L`, `XL`) is the run's share of the host; `XL` takes
-the whole host and runs alone. `oberth.ci/concurrency-group: <name>`
+`M` -- the default --, `L`, `XL`) is the run's share of the host. By default
+the weights are S 1, M 2, L 3 of a budget of `maxConcurrentJobs` × 2, and `XL`
+takes the whole host and runs alone. The chart value `admission.sizeWeights`
+(server flag `--admission-size-weights`) changes them; a positive `XL` weight
+lets an XL run share the host with whatever fits beside it. `oberth.ci/concurrency-group: <name>`
 serializes a repository's own runs that must never overlap -- a Terraform
 state, say -- across branch, promotion, and tag runs without reserving the
 host: members run one at a time in queue order while other repositories keep

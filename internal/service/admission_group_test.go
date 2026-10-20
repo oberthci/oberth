@@ -149,8 +149,8 @@ func TestGroupAdmissionFreeGroupStillQueuesOnWeight(t *testing.T) {
 func TestGroupAdmissionPreservesDeclaredWeightAndXL(t *testing.T) {
 	gate := newWeightedAdmissionForJobs(6)
 	releaseLarge := acquireRequestWithinBudget(t, gate.reserve(1), groupRequest("plan", 1, periapsis.L, "terraform-state"))
-	if used, _ := gateUsage(gate); used != sizeWeight(periapsis.L) {
-		t.Fatalf("used = %d, want the declared L weight %d", used, sizeWeight(periapsis.L))
+	if used, _ := gateUsage(gate); used != DefaultSizeWeights.L {
+		t.Fatalf("used = %d, want the declared L weight %d", used, DefaultSizeWeights.L)
 	}
 	xl := gate.reserve(2)
 	xlAcquired := make(chan func(), 1)

@@ -45,6 +45,9 @@ type SchedulerConfig struct {
 	MaxConcurrent    int
 	MaxRunLogBytes   int64
 	MutationGate     func(context.Context) error
+	// SizeWeights is the operator's admission weight per size (#1021); the
+	// zero value selects DefaultSizeWeights.
+	SizeWeights SizeWeights
 	// AdmissionDiskFloorBytes is an opt-in disk-space admission floor (#673).
 	// When positive, admission is held until the filesystem containing
 	// WorkspaceRoot has at least this many free bytes. Default 0 = disabled.
@@ -112,6 +115,12 @@ func NewScheduler(config SchedulerConfig) (*Scheduler, error) {
 	if config.MaxConcurrent <= 0 {
 		config.MaxConcurrent = 3
 	}
+	if config.SizeWeights == (SizeWeights{}) {
+		config.SizeWeights = DefaultSizeWeights
+	}
+	if err := config.SizeWeights.Validate(); err != nil {
+		return nil, fmt.Errorf("service: admission size weights: %w", err)
+	}
 	if config.MaxRunLogBytes <= 0 {
 		config.MaxRunLogBytes = 64 << 20
 	}
@@ -138,7 +147,7 @@ func NewScheduler(config SchedulerConfig) (*Scheduler, error) {
 		releaseJobs: config.ReleaseJobs, trusted: config.TrustedPreflight,
 		auditor: config.Auditor, signals: signals,
 		workspaces: workspaces, workspaceRoot: workspaceRoot, maxConcurrent: config.MaxConcurrent,
-		admission:      newWeightedAdmissionForJobs(config.MaxConcurrent),
+		admission:      newWeightedAdmissionForJobsWeights(config.MaxConcurrent, config.SizeWeights),
 		maxRunLogBytes: config.MaxRunLogBytes, mutationGate: mutationGate,
 		wake: make(chan struct{}, 1), publicationWake: make(chan struct{}, 1),
 		publicationSet: make(map[string]struct{}), deliveryPermit: deliveryPermit, capacityWait: waitTrustedCapacity,
@@ -590,7 +599,7 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 				_ = logFile.Close()
 				return scheduler.finishInfrastructureFailure(ctx, run, repository, sizeErr)
 			}
-			if sizeWeight(preflightSize) > sizeWeight(size) {
+			if sizeRank(preflightSize) > sizeRank(size) {
 				size = preflightSize
 			}
 		}
@@ -1411,7 +1420,7 @@ func (scheduler *Scheduler) authorizeRunSize(ctx context.Context, run model.Run,
 	if err != nil {
 		return fmt.Errorf("read repository size grant: %w", err)
 	}
-	if sizeWeight(size) <= sizeWeight(maximum) {
+	if sizeRank(size) <= sizeRank(maximum) {
 		return nil
 	}
 	return fmt.Errorf("pipeline declares size %s for this %s run, but repository %s may run at most %s; "+

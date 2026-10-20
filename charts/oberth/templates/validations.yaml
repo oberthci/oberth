@@ -90,6 +90,14 @@ An explicit value exceeding the ceiling or an invalid string fails here.
 {{- if lt (int ($admission.diskFloorBytes | default 0)) 0 -}}
 {{- fail "admission.diskFloorBytes must be zero (disabled) or a positive byte count" -}}
 {{- end -}}
+{{- with merge (deepCopy ($admission.sizeWeights | default dict)) (dict "S" 1 "M" 2 "L" 3 "XL" 0) -}}
+{{- if or (lt (int .S) 1) (lt (int .M) 1) (lt (int .L) 1) (lt (int .XL) 0) -}}
+{{- fail "admission.sizeWeights: S, M and L must be at least 1; XL must be 0 (the whole budget) or at least 1" -}}
+{{- end -}}
+{{- if or (gt (int .S) (int .M)) (gt (int .M) (int .L)) (and (gt (int .XL) 0) (lt (int .XL) (int .L))) -}}
+{{- fail "admission.sizeWeights must satisfy S <= M <= L <= XL (XL 0 = the whole budget)" -}}
+{{- end -}}
+{{- end -}}
 {{- /*
 An empty argo.vault.caCert is documented to mean the store presents a publicly
 trusted certificate. For a cluster-internal name that reading is impossible,

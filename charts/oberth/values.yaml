@@ -35,6 +35,20 @@ promotion:
 # Default 0 = disabled. The proposal from #602/#673 is 160000000000 (160 GB).
 admission:
   diskFloorBytes: 0
+  # Admission weight per declared size (#1021). The weighted budget is
+  # maxConcurrentJobs x M. XL: 0 means "the whole budget": an XL run waits for
+  # a full drain and runs alone (the long-standing behaviour). A positive XL
+  # is an ordinary weight, so an XL run shares the host with whatever fits
+  # beside it (for example XL: 11 of a 16 budget leaves room for an L and an
+  # M). Every weight is at least 1 (0 only for XL) and S <= M <= L <= XL. An
+  # XL above the budget is not refused: it is clamped to the budget (so an XL
+  # run again runs alone) and the server only logs a line at startup. XL still
+  # needs a size grant.
+  sizeWeights:
+    S: 1
+    M: 2
+    L: 3
+    XL: 0
 
 # Optional public dashboard URL echoed to every accepted git push as a
 # "remote: watch: <url>" line. Display-only; must be HTTPS when set.

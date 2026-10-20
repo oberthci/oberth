@@ -17,7 +17,9 @@ import (
 type weightedAdmission struct {
 	mu       sync.Mutex
 	capacity int
-	used     int
+	// weights is the operator's weight per size (#1021).
+	weights SizeWeights
+	used    int
 	// maxRuns, when positive, caps how many runs hold a grant at once. The
 	// scheduler mirrors its dispatch ceiling here: runs parked on their own
 	// concurrency group stop counting against the dispatch loop, so the loop
@@ -104,6 +106,7 @@ func newWeightedAdmission(capacity int) *weightedAdmission {
 	}
 	return &weightedAdmission{
 		capacity:     capacity,
+		weights:      DefaultSizeWeights,
 		reservations: make(map[int64]*admissionReservation),
 		groups:       make(map[string]*admissionReservation),
 	}
@@ -121,10 +124,18 @@ func newWeightedAdmission(capacity int) *weightedAdmission {
 // A pipeline that declares a heavier size then trades concurrency for
 // per-run resources proportionally, instead of collapsing the server to one.
 func newWeightedAdmissionForJobs(maxConcurrentJobs int) *weightedAdmission {
+	return newWeightedAdmissionForJobsWeights(maxConcurrentJobs, DefaultSizeWeights)
+}
+
+// newWeightedAdmissionForJobsWeights is newWeightedAdmissionForJobs with the
+// operator's size weights: the budget is maxConcurrentJobs M runs.
+func newWeightedAdmissionForJobsWeights(maxConcurrentJobs int, weights SizeWeights) *weightedAdmission {
 	if maxConcurrentJobs < 1 {
 		maxConcurrentJobs = 1
 	}
-	return newWeightedAdmission(maxConcurrentJobs * sizeWeight(periapsis.M))
+	gate := newWeightedAdmission(maxConcurrentJobs * weights.M)
+	gate.weights = weights
+	return gate
 }
 
 // concurrencyGroupKey scopes a declared group to its repository, so a document
@@ -203,7 +214,7 @@ func (reservation *admissionReservation) acquireRequest(ctx context.Context, req
 		reservation.preparedAt = time.Now().UTC()
 	}
 	reservation.size = size
-	reservation.weight = min(sizeWeight(size), gate.capacity)
+	reservation.weight = gate.weights.of(size, gate.capacity)
 	if request.Group != "" {
 		reservation.group = concurrencyGroupKey(request.RepoID, request.Group)
 		reservation.groupName = request.Group
@@ -383,7 +394,8 @@ func (gate *weightedAdmission) spareWeightForClaim(unparked int) bool {
 	if gate.diskFloor != nil && !gate.diskFloor.freeAboveFloor() {
 		return false
 	}
-	return gate.used < gate.capacity
+	// Room for at least one S run, at the configured S weight.
+	return gate.used+gate.weights.S <= gate.capacity
 }
 
 // canGrantLocked admits on the weight budget alone, with one exception: XL
@@ -406,7 +418,7 @@ func (gate *weightedAdmission) canGrantLocked(reservation *admissionReservation)
 	if gate.diskFloor != nil && !gate.diskFloor.freeAboveFloor() {
 		return false
 	}
-	if reservation.size == periapsis.XL {
+	if gate.weights.wholeBudget(reservation.size) {
 		return gate.used == 0
 	}
 	return gate.used+reservation.weight <= gate.capacity
@@ -533,7 +545,7 @@ func (gate *weightedAdmission) blockerLocked(reservation *admissionReservation) 
 	switch {
 	case gate.diskFloor != nil && !gate.diskFloor.freeAboveFloor():
 		blocker.DiskFloor = true
-	case reservation.size == periapsis.XL:
+	case gate.weights.wholeBudget(reservation.size):
 		blocker.FullDrain = true
 	case gate.maxRuns > 0 && gate.runs >= gate.maxRuns:
 		blocker.RunCeiling = true
@@ -552,21 +564,6 @@ func (scheduler *Scheduler) AdmissionBlocker() *model.AdmissionBlocker {
 		return nil
 	}
 	return gate.blockerLocked(head)
-}
-
-func sizeWeight(size periapsis.Size) int {
-	switch size.Effective() {
-	case periapsis.S:
-		return 1
-	case periapsis.M:
-		return 2
-	case periapsis.L:
-		return 3
-	case periapsis.XL:
-		return int(^uint(0) >> 1)
-	default:
-		return 0
-	}
 }
 
 // AdmissionSnapshot reports only this run's reservation and aggregate capacity.

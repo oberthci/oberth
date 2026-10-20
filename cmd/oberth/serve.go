@@ -128,6 +128,8 @@ type serveOptions struct {
 	artifactsBudgetBytes    int64
 	maxConcurrent           int
 	admissionDiskFloorBytes int64
+	admissionSizeWeights    string
+	sizeWeights             service.SizeWeights
 	ciCacheRoot             string
 	releaseCacheRoot        string
 	secretStoreAddress      string
@@ -241,6 +243,7 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 	flags.Int64Var(&options.artifactsLimitBytes, "artifacts-limit-bytes", defaultArtifactsLimitBytes, "maximum total bytes of artifacts kept per run")
 	flags.Int64Var(&options.artifactsBudgetBytes, "artifacts-budget-bytes", defaultArtifactsBudgetBytes, "total artifact storage before the oldest runs are evicted")
 	flags.IntVar(&options.maxConcurrent, "max-concurrent-jobs", 3, "maximum concurrent Jobs")
+	flags.StringVar(&options.admissionSizeWeights, "admission-size-weights", service.DefaultSizeWeights.String(), "admission weight per size as S=..,M=..,L=..,XL=..; XL=0 is the whole budget (an XL run runs alone), a positive XL lets XL share the host; the budget is --max-concurrent-jobs M runs (#1021)")
 	flags.Int64Var(&options.admissionDiskFloorBytes, "admission-disk-floor-bytes", 0, "opt-in disk-space admission floor in bytes (0 = disabled); when enabled and free bytes on /data are below this floor, admission is held until disk frees up (#673)")
 	flags.StringVar(&options.ciCacheRoot, "ci-cache-root", "/var/cache/oberth/ci", "CI host cache root")
 	flags.StringVar(&options.releaseCacheRoot, "release-cache-root", "/var/cache/oberth/release", "release host cache root")
@@ -319,6 +322,11 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 	if err := validateServeOptions(options); err != nil {
 		return serveOptions{}, err
 	}
+	weights, err := service.ParseSizeWeights(options.admissionSizeWeights)
+	if err != nil {
+		return serveOptions{}, fmt.Errorf("serve: --admission-size-weights: %w", err)
+	}
+	options.sizeWeights = weights
 	return options, nil
 }
 
@@ -717,9 +725,14 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 		TrustedPreflight: trusted, Signals: signals, WorkspaceRoot: filepath.Join(options.dataRoot, "work"), MaxConcurrent: options.maxConcurrent,
 		MutationGate:            anchors.AllowMutation,
 		AdmissionDiskFloorBytes: options.admissionDiskFloorBytes,
+		SizeWeights:             options.sizeWeights,
 	})
 	if err != nil {
 		return err
+	}
+	if budget := options.maxConcurrent * options.sizeWeights.M; options.sizeWeights.XL > budget {
+		logger.Printf("admission: XL weight %d exceeds the budget %d (%d jobs x M weight %d); XL runs are admitted at %d, alone",
+			options.sizeWeights.XL, budget, options.maxConcurrent, options.sizeWeights.M, budget)
 	}
 	health := app.Health{Store: database, Audit: anchors.Ready, VCSCache: &app.VCSSnapshot{}, Configured: func(ctx context.Context) error {
 		if err := ctx.Err(); err != nil {

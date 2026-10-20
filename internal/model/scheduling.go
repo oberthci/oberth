@@ -77,6 +77,11 @@ func (blocker AdmissionBlocker) Reason() string {
 		return blocker.Size + ", needs a full drain"
 	case blocker.RunCeiling:
 		return blocker.Size + ", waiting for a run slot"
+	case blocker.Size == "XL" && blocker.Capacity == 0:
+		// An XL with an operator-configured finite weight shares the host.
+		return fmt.Sprintf("XL · %dw", blocker.Weight)
+	case blocker.Size == "XL":
+		return fmt.Sprintf("XL · %dw, needs %d weight; %d/%d used", blocker.Weight, blocker.Weight, blocker.Used, blocker.Capacity)
 	case blocker.Capacity == 0:
 		// A scoped view omits the shared budget's use.
 		return fmt.Sprintf("%s, needs %d weight", blocker.Size, blocker.Weight)

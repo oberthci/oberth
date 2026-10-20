@@ -51,6 +51,17 @@
           "type": "integer",
           "minimum": 0,
           "description": "Opt-in disk-space admission floor in bytes. 0 = disabled."
+        },
+        "sizeWeights": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Admission weight per size. XL 0 = the whole budget (runs alone).",
+          "properties": {
+            "S": {"type": "integer", "minimum": 1},
+            "M": {"type": "integer", "minimum": 1},
+            "L": {"type": "integer", "minimum": 1},
+            "XL": {"type": "integer", "minimum": 0}
+          }
         }
       }
     },
