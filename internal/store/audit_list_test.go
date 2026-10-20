@@ -21,8 +21,16 @@ func TestListAuditActionsFiltersPagesAndLinks(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	now = now.Add(time.Hour)
+	if _, err := database.AppendAuditAction(ctx, model.AuditActionSpec{Actor: "a@host", Action: "secret_access.grant", ResourceType: "secret_access", ResourceID: "9", Details: `{"repo":"github/org/repo"}`}); err != nil {
+		t.Fatal(err)
+	}
+	byRepo, _, err := database.ListAuditActions(ctx, model.AuditListFilter{RepoName: "github/org/repo"})
+	if err != nil || len(byRepo) != 1 || byRepo[0].Action != "secret_access.grant" {
+		t.Fatalf("repo filter = %+v err %v", byRepo, err)
+	}
 	all, head, err := database.ListAuditActions(ctx, model.AuditListFilter{})
-	if err != nil || head != 4 || len(all) != 4 || all[0].ID != 4 || all[3].ID != 1 {
+	if err != nil || head != 5 || len(all) != 5 || all[0].ID != 5 || all[4].ID != 1 {
 		t.Fatalf("all = %+v head %d err %v", all, head, err)
 	}
 	for i := 0; i+1 < len(all); i++ {
@@ -34,7 +42,7 @@ func TestListAuditActionsFiltersPagesAndLinks(t *testing.T) {
 	if err != nil || len(got) != 2 || got[0].Action != "alpha.three" || got[1].Action != "alpha.one" {
 		t.Fatalf("prefix+actor = %+v err %v", got, err)
 	}
-	got, _, err = database.ListAuditActions(ctx, model.AuditListFilter{Since: now.Add(-90 * time.Minute), Until: now.Add(-30 * time.Minute)})
+	got, _, err = database.ListAuditActions(ctx, model.AuditListFilter{Since: now.Add(-150 * time.Minute), Until: now.Add(-90 * time.Minute)})
 	if err != nil || len(got) != 1 || got[0].Action != "beta.one" {
 		t.Fatalf("time range = %+v err %v", got, err)
 	}
