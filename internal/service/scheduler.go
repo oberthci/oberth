@@ -387,7 +387,7 @@ func (scheduler *Scheduler) Run(ctx context.Context) error {
 				}
 				return fmt.Errorf("claim FIFO run: %w", err)
 			}
-			reservation := scheduler.admission.reserve(run.QueueSequence)
+			reservation := scheduler.admission.reserveRun(run)
 			active++
 			workers.Add(1)
 			go func(run model.Run, reservation *admissionReservation) {
@@ -474,7 +474,7 @@ func (scheduler *Scheduler) executeAndCleanup(ctx context.Context, run model.Run
 }
 
 func (scheduler *Scheduler) executeAndCleanupWithGate(ctx context.Context, run model.Run, require mutationRequirement) error {
-	reservation := scheduler.admission.reserve(run.QueueSequence)
+	reservation := scheduler.admission.reserveRun(run)
 	return scheduler.executeAndCleanupReservedWithGate(ctx, run, require, reservation)
 }
 
