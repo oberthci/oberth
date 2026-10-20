@@ -118,10 +118,16 @@ func (c *protectedControllerFixture) TrustedKVMReceipt(_ context.Context, r argo
 	return vmrunner.KVMReceipt{IntentDigest: d, WorkflowUID: uid, Binding: vmrunner.KVMTerminationBinding{Namespace: intent.Namespace, WorkflowName: intent.WorkflowName, WorkflowUID: uid, PodName: "pod", PodUID: "pod-uid", ContainerID: "containerd://id", HarnessImageRef: intent.Recipe.HarnessImage, AdmittedAt: intent.AdmittedAt, Deadline: intent.Deadline}, Report: vmrunner.KVMReport{Version: 1, IntentDigest: d, InventoryDigest: intent.InventoryDigest, CaseCount: intent.CaseCount, ArtifactSetDigest: strings.Repeat("f", 64)}, Termination: vmrunner.KVMTerminationRecord{ImageID: "sha256:" + strings.Repeat("c", 64), ContainerID: "containerd://id", PodUID: "pod-uid", WorkflowUID: uid, StartedAt: intent.AdmittedAt, FinishedAt: now}, FinishedAt: now}, nil
 }
 func TestTrustedPreflightAdapterLifecycle(t *testing.T) {
-	for _, scenario := range []string{"pass", "workflow failed", "infrastructure failed", "definite create refusal", "uncertain create", "recover absent", "unapproved"} {
+	for _, scenario := range []string{"pass", "workflow failed", "infrastructure failed", "definite create refusal", "uncertain create", "recover absent", "unapproved", "guest granted", "guest revoked"} {
 		t.Run(scenario, func(t *testing.T) {
 			ctx := context.Background()
 			fixture := newRaceFixture(t)
+			if strings.HasPrefix(scenario, "guest ") {
+				if err := os.WriteFile(filepath.Join(fixture.sourceDir, ".oberth", "build.yaml"), []byte(guestTestDocument), 0644); err != nil {
+					t.Fatal(err)
+				}
+				fixture.jobs.SetKubeVirtGrantLoader(&guestGrantLoader{allowed: scenario == "guest granted"})
+			}
 			controller := &protectedControllerFixture{blockingController: newBlockingController(), failed: scenario == "workflow failed" || scenario == "infrastructure failed"}
 			if scenario == "infrastructure failed" {
 				controller.infrastructureReason = `Evicted: Usage of EmptyDir volume "var-run-argo" exceeds the limit "1Gi".`
@@ -191,11 +197,23 @@ func TestTrustedPreflightAdapterLifecycle(t *testing.T) {
 				}
 				return
 			}
+			if scenario == "guest revoked" {
+				if err == nil || !strings.Contains(err.Error(), "admin grant") {
+					t.Fatalf("revoked preflight: %v", err)
+				}
+				if _, getErr := database.KVMPreflight(ctx, run.ID); !errors.Is(getErr, store.ErrNotFound) {
+					t.Fatalf("revoked guest preflight reserved capacity: %v", getErr)
+				}
+				return
+			}
+			if scenario == "guest granted" && !controller.request.KubeVirtGranted {
+				t.Fatal("preflight lost the live VM grant")
+			}
 			state, getErr := database.KVMPreflight(ctx, run.ID)
 			if getErr != nil {
 				t.Fatalf("preflight did not journal: execute=%v journal=%v", err, getErr)
 			}
-			if scenario == "pass" {
+			if scenario == "pass" || scenario == "guest granted" {
 				if err != nil || state.Receipt == nil || state.Refusal != nil || !state.Cleaned || controller.waitRunID != run.ID {
 					t.Fatalf("success binding: %v %#v waitID=%q", err, state, controller.waitRunID)
 				}

@@ -67,7 +67,7 @@ func TestAdmitKVMLeaves(t *testing.T) {
 		if len(names) != 1 || names[0] != "kernel-test" {
 			t.Fatalf("script=%v: names=%v", script, names)
 		}
-		if err := Admit(wf, Policy{}); err != nil {
+		if err := Admit(wf, Policy{KubeVirt: true}); err != nil {
 			t.Fatalf("script=%v admit: %v", script, err)
 		}
 	}

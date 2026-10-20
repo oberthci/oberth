@@ -13,7 +13,12 @@ with `oberth.ci/workspace-mounts: none`, `oberth.ci/workspace-env: none`,
 credentialed (no secret-paths, no release WIF, not in nonroot-templates).
 `inputs.parameters` are allowed.
 
-When the server switch `vm.kvm.enabled` is true (chart default: false), the
+An active repository KubeVirt admin grant is required for every KVM leaf.
+Repository annotations cannot grant access; removing the guest-test annotation
+does not bypass this check. Existing KVM consumers need administrator rollout
+review and grants. See [guest test lanes](guest-test-lanes.md).
+
+When the grant is active and `vm.kvm.enabled` is true (chart default: false), the
 server injects `devices.kubevirt.io/kvm: "1"` (request == limit) and
 `OBERTH_KVM=1` on each declared leaf's main container. When the switch is off,
 a workflow declaring KVM leaves fails at admission with an infrastructure-class

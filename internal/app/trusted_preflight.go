@@ -134,6 +134,12 @@ func (p *TrustedPreflights) Execute(ctx context.Context, job service.JobRequest,
 	if err != nil {
 		return err
 	}
+	if p.jobs.kubeVirtGrants != nil {
+		submission.KubeVirtGranted, err = p.jobs.kubeVirtGrants.ActiveKubeVirtGrant(ctx, job.Repository.ID)
+		if err != nil {
+			return fmt.Errorf("preflight load VM grant: %w", err)
+		}
+	}
 	if preparer, ok := p.jobs.controller.(interface {
 		PrepareNonroot(context.Context, argojob.Request) (argojob.Request, error)
 	}); ok {
@@ -147,6 +153,15 @@ func (p *TrustedPreflights) Execute(ctx context.Context, job service.JobRequest,
 	// intent and subsequently seeded to a fresh branch-tier claim.
 	if _, err = argojob.Build(p.jobs.config, submission); err != nil {
 		return err
+	}
+	workflow, err := argoworkflow.Decode(source)
+	if err != nil {
+		return err
+	}
+	if _, declared := workflow.Annotations[argoworkflow.KVMTemplatesAnnotation]; declared {
+		if err := p.jobs.auditSubmission(ctx, job, submission); err != nil {
+			return err
+		}
 	}
 	if err = p.requireMutation(ctx); err != nil {
 		return err
@@ -352,6 +367,11 @@ func (p *TrustedPreflights) recoverOne(ctx context.Context, execution vmrunner.K
 			if err != nil {
 				return err
 			}
+			// Reconstruct the already submitted spec for observation and cleanup
+			// only. A revoked grant must not strand its VM capacity obligation.
+			// This path never creates a workflow; the observer requires an exact
+			// match of the journal-bound intent and full emitted specification.
+			request.KubeVirtGranted = true
 			uid, err = p.controller.TrustedKVMWorkflowUID(ctx, request)
 			if err != nil {
 				return fmt.Errorf("uncertain trusted create still requires reconciliation: %w", err)

@@ -496,6 +496,13 @@ func (jobs *ArgoJobs) auditSubmission(ctx context.Context, request service.JobRe
 		details["controller_profile"] = binding
 		details["nonroot_templates"] = workflow.Annotations[argoworkflow.NonrootTemplatesAnnotation]
 	}
+	if leaves := workflow.Annotations[argoworkflow.KVMTemplatesAnnotation]; leaves != "" {
+		details["kvm_templates"] = leaves
+		details["guest_test_templates"] = workflow.Annotations[argoworkflow.GuestTestTemplatesAnnotation]
+		details["kubevirt_granted"] = submission.KubeVirtGranted
+		details["repo_id"] = request.Repository.ID
+		details["run_trigger"] = string(submission.RunTrigger)
+	}
 	if policy := workflow.Annotations["oberth.ci/release-wif-policy-sha256"]; policy != "" {
 		details["release_wif_policy_sha256"] = policy
 		details["workflow_spec_sha256"] = workflow.Annotations["oberth.ci/spec-identity"]
