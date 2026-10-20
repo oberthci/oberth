@@ -130,19 +130,20 @@ type IssueCreateResponse struct {
 // IssueResponse is the complete issue record exposed to MCP clients. Internal
 // projection sequence and storage ownership fields stay behind the service.
 type IssueResponse struct {
-	ID          int64  `json:"id"`
-	Upstream    string `json:"upstream"`
-	Kind        string `json:"kind"`
-	Title       string `json:"title"`
-	Body        string `json:"body"`
-	State       string `json:"state"`
-	RepoID      int64  `json:"repo_id,omitempty"`
-	Branch      string `json:"branch,omitempty"`
-	Occurrences int    `json:"occurrences,omitempty"`
-	CIOrigin    string `json:"ci_origin,omitempty"`
-	CIWorkID    string `json:"ci_work_id,omitempty"`
-	CreatedAt   string `json:"created_at,omitempty"`
-	UpdatedAt   string `json:"updated_at,omitempty"`
+	Lock        *model.IssueLock `json:"lock"`
+	ID          int64            `json:"id"`
+	Upstream    string           `json:"upstream"`
+	Kind        string           `json:"kind"`
+	Title       string           `json:"title"`
+	Body        string           `json:"body"`
+	State       string           `json:"state"`
+	RepoID      int64            `json:"repo_id,omitempty"`
+	Branch      string           `json:"branch,omitempty"`
+	Occurrences int              `json:"occurrences,omitempty"`
+	CIOrigin    string           `json:"ci_origin,omitempty"`
+	CIWorkID    string           `json:"ci_work_id,omitempty"`
+	CreatedAt   string           `json:"created_at,omitempty"`
+	UpdatedAt   string           `json:"updated_at,omitempty"`
 }
 
 // IssueGetManyMaximumBytes bounds encoded structured content, including all
@@ -160,18 +161,19 @@ type IssueGetManyResponse struct {
 }
 
 type IssueListItem struct {
-	ID          int64  `json:"id"`
-	Upstream    string `json:"upstream"`
-	State       string `json:"state"`
-	Kind        string `json:"kind,omitempty"`
-	Title       string `json:"title,omitempty"`
-	RepoID      int64  `json:"repo_id,omitempty"`
-	Branch      string `json:"branch,omitempty"`
-	Occurrences int    `json:"occurrences,omitempty"`
-	CIOrigin    string `json:"ci_origin,omitempty"`
-	CIWorkID    string `json:"ci_work_id,omitempty"`
-	CreatedAt   string `json:"created_at,omitempty"`
-	UpdatedAt   string `json:"updated_at,omitempty"`
+	Lock        *model.IssueLock `json:"lock"`
+	ID          int64            `json:"id"`
+	Upstream    string           `json:"upstream"`
+	State       string           `json:"state"`
+	Kind        string           `json:"kind,omitempty"`
+	Title       string           `json:"title,omitempty"`
+	RepoID      int64            `json:"repo_id,omitempty"`
+	Branch      string           `json:"branch,omitempty"`
+	Occurrences int              `json:"occurrences,omitempty"`
+	CIOrigin    string           `json:"ci_origin,omitempty"`
+	CIWorkID    string           `json:"ci_work_id,omitempty"`
+	CreatedAt   string           `json:"created_at,omitempty"`
+	UpdatedAt   string           `json:"updated_at,omitempty"`
 }
 
 type IssueListResponse struct {
@@ -450,6 +452,9 @@ func toolDefinitions() []map[string]any {
 			"before": map[string]any{"type": "integer", "minimum": 0, "description": "Exclusive issue ID cursor; zero starts the first page"},
 			"limit":  map[string]any{"type": "integer", "minimum": 1, "maximum": 50, "description": "Page size (default 50)"},
 		})),
+		// Issue lifecycle administration (#1103).
+		tool("issue_unlock", "Break an issue lock, recording its previous owner. Admin only; visibility and audit gate enforced.", object(map[string]any{"id": integerProperty("Issue ID")}, "id")),
+		tool("issue_close_many", "Close 1..50 unique issues with a reason and per-ID results. Admin only; active locks remain enforced, one audit action per closure.", object(map[string]any{"ids": map[string]any{"type": "array", "items": map[string]any{"type": "integer", "minimum": 1}, "minItems": 1, "maxItems": 50, "uniqueItems": true}, "reason": stringProperty("Nonempty closure reason, at most 4096 bytes")}, "ids", "reason")),
 		tool("issue_lock", "Acquire or renew the caller-owned five-minute issue lock.", object(map[string]any{"id": integerProperty("Issue ID")}, "id")),
 		tool("access_list", "List secret access grants for a repository.", object(map[string]any{"repo": stringProperty("Repository name (empty lists all)"), "revoked": map[string]any{"type": "boolean", "description": "Include revoked grants"}, "pending": map[string]any{"type": "boolean", "description": "Return declared-but-not-granted paths observed at Workflow admission (issue #623)"}})),
 		tool("access_allow", "Grant a step access to a secret path. Requires admin uplink.", object(map[string]any{"repo": stringProperty("Repository name"), "step": stringProperty("Step/template name"), "secret": stringProperty("Exact secret path from the pipeline declaration or access_list (e.g. oberth/data/release/cosign-secret). Copied verbatim; no prefix expansion or path normalization.")}, "repo", "step", "secret")),

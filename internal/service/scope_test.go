@@ -666,6 +666,7 @@ func (bareRunResolver) ResolveWaitRun(context.Context, int64, string, string) (m
 // refused outside the scope; "refused": installation-wide, never for a
 // scoped uplink.
 var toolScopeBehaviour = map[string]string{
+	"issue_unlock": "mutation", "issue_close_many": "mutation",
 	"status": "lookup", "logs": "lookup", "run_kvm_preflight": "lookup", "run_get": "lookup",
 	"artifacts": "lookup", "artifact_get": "lookup", "run_logs": "lookup", "wait": "lookup",
 	"promote_status": "lookup", "issue_get": "lookup", "issue_get_many": "lookup",

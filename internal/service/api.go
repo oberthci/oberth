@@ -49,6 +49,7 @@ const grantPolicySyncAdvisory = "Grant recorded; the identity map refreshes auto
 	"Until then, access fails closed."
 
 type APIConfig struct {
+	IssueLifecycle            IssueLifecycle
 	KVMPreflights             KVMPreflightReader
 	SchedulingObserver        SchedulingObserver
 	Admission                 AdmissionObserver
@@ -90,6 +91,7 @@ type APIConfig struct {
 }
 
 type API struct {
+	issueLifecycle            IssueLifecycle
 	kvmPreflights             KVMPreflightReader
 	schedulingObserver        SchedulingObserver
 	admission                 AdmissionObserver
@@ -179,6 +181,7 @@ func NewAPI(config APIConfig) (*API, error) {
 	}
 	lifetime, stopLifetime := context.WithCancel(context.Background())
 	return &API{
+		issueLifecycle:     config.IssueLifecycle,
 		kvmPreflights:      config.KVMPreflights,
 		schedulingObserver: config.SchedulingObserver, admission: config.Admission,
 		runs: config.Runs, history: config.History, runRetries: config.RunRetries, repositories: config.Repositories,
@@ -268,6 +271,9 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 		}
 	}
 	switch name {
+	// Issue lifecycle administration (#1103).
+	case "issue_unlock", "issue_close_many":
+		return service.issueLifecycleTool(ctx, actor, name, raw)
 	case "secretstore_verify", "secretstore_plan", "secretstore_sync_receipt":
 		if err := requireUnscoped(actor, name); err != nil {
 			return nil, err
@@ -2148,7 +2154,7 @@ func (service *API) issueGet(ctx context.Context, _ api.Actor, id int64) (model.
 	if err := service.labelIssueScopes(ctx, issues); err != nil {
 		return model.Issue{}, err
 	}
-	return issues[0], nil
+	return service.withIssueLock(ctx, issues[0])
 }
 
 func (service *API) issueUpdate(ctx context.Context, actor api.Actor, id int64, title, body, upstream *string, expectedBodySHA256 string) (model.Issue, error) {
@@ -2270,6 +2276,12 @@ func (service *API) issueList(ctx context.Context, repositoryName, kind, state, 
 	if err := service.labelIssueScopes(ctx, page.Issues); err != nil {
 		return model.IssuePage{}, err
 	}
+	for i := range page.Issues {
+		page.Issues[i], err = service.withIssueLock(ctx, page.Issues[i])
+		if err != nil {
+			return model.IssuePage{}, err
+		}
+	}
 	return page, nil
 }
 
@@ -2314,7 +2326,8 @@ func (service *API) labelIssueScopes(ctx context.Context, issues []model.Issue) 
 
 func wireIssue(issue model.Issue) api.IssueResponse {
 	return api.IssueResponse{
-		ID: issue.ID, Kind: string(issue.Kind), Title: issue.Title,
+		Lock: issue.Lock,
+		ID:   issue.ID, Kind: string(issue.Kind), Title: issue.Title,
 		Body: issue.Body, State: string(issue.State),
 		Upstream: issue.Upstream,
 		RepoID:   issue.RepoID, Branch: issue.Branch,
@@ -2329,6 +2342,7 @@ func wireIssueList(page model.IssuePage) api.IssueListResponse {
 	issues := make([]api.IssueListItem, len(page.Issues))
 	for index, issue := range page.Issues {
 		item := api.IssueListItem{
+			Lock:        issue.Lock,
 			ID:          issue.ID,
 			State:       string(issue.State),
 			Kind:        string(issue.Kind),
@@ -2357,6 +2371,8 @@ func wireIssueLock(lock model.IssueLock) api.IssueLockResponse {
 
 func mutatingTool(name string) bool {
 	switch name {
+	case "issue_unlock", "issue_close_many":
+		return true
 	case "sync", "promote", "promote_retry", "publish_retry", "run_retry", "run_rerun", "run_cancel", "issue_create", "issue_update", "issue_append", "issue_close", "issue_reopen", "issue_delete", "issue_lock",
 		"access_allow", "access_revoke",
 		"kubevirt_grant", "kubevirt_revoke",

@@ -218,6 +218,8 @@ call the proxy hostname directly.
 | `issue_reopen` | Reopen a manual issue by ID; an already-open issue is unchanged, CI issues are rejected |
 | `issue_delete` | Delete an accidentally created manual issue |
 | `issue_list` | List issue metadata with repo/kind/state/query filters, total and faceted counts, and 1..50 records per page |
+| `issue_unlock` | Admin-only audited lock break, scoped to visible issues |
+| `issue_close_many` | Admin-only closure of 1..50 unique IDs with a reason and per-ID results; honors locks |
 | `issue_lock` | Acquire or renew a five-minute caller-owned issue lock |
 | `access_list` | List secret access grants for a repository |
 | `access_allow` | Grant a step access to a secret path (admin-only) |
