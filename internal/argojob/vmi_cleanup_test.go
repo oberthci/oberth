@@ -172,3 +172,95 @@ func TestCancelMissingWorkflowToleratesVMIAccessForbidden(t *testing.T) {
 		t.Fatalf("ordinary run cancellation gated by VMI list: %v", err)
 	}
 }
+
+// failedVMIWorkflow is a run whose create step failed before KubeVirt
+// accepted the VMI. It declares no delete step: the cleanup backstop owns
+// deletion (#1017), so workflows need no exit-handler delete.
+func failedVMIWorkflow() *wfv1.Workflow {
+	return &wfv1.Workflow{
+		ObjectMeta: metav1.ObjectMeta{Name: "run-workflow", Namespace: testNamespace, UID: "wf-id", Annotations: map[string]string{runIDAnnotation: "run-abc"}},
+		Spec: wfv1.WorkflowSpec{Templates: []wfv1.Template{
+			{Name: "vm-create", Resource: &wfv1.ResourceTemplate{Action: "create"}},
+			{Name: "vm-get", Resource: &wfv1.ResourceTemplate{Action: "get"}},
+		}},
+		Status: wfv1.WorkflowStatus{Phase: wfv1.WorkflowFailed, Message: "child 'vm-create' failed"},
+	}
+}
+
+func newVMIClient(t *testing.T, names ...string) *fake.FakeDynamicClient {
+	t.Helper()
+	client := fake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), map[schema.GroupVersionResource]string{vmiResource: "VirtualMachineInstanceList"})
+	for _, name := range names {
+		object := &unstructured.Unstructured{Object: map[string]any{"apiVersion": "kubevirt.io/v1", "kind": "VirtualMachineInstance"}}
+		object.SetName(name)
+		object.SetNamespace(testNamespace)
+		object.SetUID(types.UID(name + "-uid"))
+		object.SetLabels(map[string]string{"oberth.ci/workflow": "run-workflow"})
+		if _, err := client.Resource(vmiResource).Namespace(testNamespace).Create(t.Context(), object, metav1.CreateOptions{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	client.ClearActions()
+	return client
+}
+
+func TestWaitRunFailedBeforeVMICreateCleansUpCleanly(t *testing.T) {
+	workflow := failedVMIWorkflow()
+	controller, err := NewController(&staticWorkflowClient{workflow: workflow}, nil, testConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := newVMIClient(t)
+	controller.WithVMIClient(client)
+	controller.WithVMICleanupFailure(func(_ context.Context, runID string, cleanupErr error) {
+		t.Fatalf("cleanup of a run with no VMI reported a failure for %s: %v", runID, cleanupErr)
+	})
+	result, err := controller.Wait(t.Context(), workflow.Name, "run-abc", io.Discard)
+	if err != nil || result.Succeeded {
+		t.Fatalf("failed run = %+v, %v; want a failed completion without a cleanup error", result, err)
+	}
+	var verbs []string
+	for _, action := range client.Actions() {
+		verbs = append(verbs, action.GetVerb())
+	}
+	if strings.Join(verbs, ",") != "list" {
+		t.Fatalf("VMI calls = %v, want one list and no delete", verbs)
+	}
+}
+
+func TestWaitBackstopDeletesVMIsWithoutDeleteStep(t *testing.T) {
+	workflow := failedVMIWorkflow()
+	workflow.Status.Message = "child 'driver' failed"
+	controller, err := NewController(&staticWorkflowClient{workflow: workflow}, nil, testConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := newVMIClient(t, "run-workflow-p2p0", "run-workflow-p2p1")
+	// One VMI disappears between the list and its delete (the owner
+	// reference or an exit-handler delete won the race): not an error.
+	client.PrependReactor("delete", "virtualmachineinstances", func(action ktesting.Action) (bool, runtime.Object, error) {
+		if action.(ktesting.DeleteAction).GetName() == "run-workflow-p2p1" {
+			return true, nil, apierrors.NewNotFound(vmiResource.GroupResource(), "run-workflow-p2p1")
+		}
+		return false, nil, nil
+	})
+	controller.WithVMIClient(client)
+	controller.WithVMICleanupFailure(func(_ context.Context, runID string, cleanupErr error) {
+		t.Fatalf("backstop reported a failure for %s: %v", runID, cleanupErr)
+	})
+	if _, err := controller.Wait(t.Context(), workflow.Name, "run-abc", io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.Resource(vmiResource).Namespace(testNamespace).Get(t.Context(), "run-workflow-p2p0", metav1.GetOptions{}); !apierrors.IsNotFound(err) {
+		t.Fatalf("leftover VMI survived the backstop: %v", err)
+	}
+	deletes := 0
+	for _, action := range client.Actions() {
+		if action.GetVerb() == "delete" {
+			deletes++
+		}
+	}
+	if deletes != 2 {
+		t.Fatalf("backstop deletes = %d, want one per listed VMI", deletes)
+	}
+}

@@ -41,8 +41,10 @@ import (
 	"github.com/oberthci/oberth/internal/service"
 	"github.com/oberthci/oberth/internal/sshserver"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/pkg/argoworkflow"
 	"github.com/oberthci/oberth/pkg/periapsis"
 
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -51,6 +53,39 @@ import (
 type stringList []string
 
 var witnessChainResetUUIDPattern = regexp.MustCompile(`^(?:[0-9a-f]{64}|[0-9a-f]{80})$`)
+
+// The cluster ceiling caps every repository grant's per-run VMI budget. A
+// grant still defaults to 2 VMs, 6 cores and 12Gi; the ceiling only bounds
+// what an administrator may raise a grant to on this cluster.
+const (
+	defaultKubeVirtCeilingVMs    = 8
+	defaultKubeVirtCeilingCores  = 24
+	defaultKubeVirtCeilingMemory = "48Gi"
+)
+
+// kubeVirtCeiling parses and validates the cluster ceiling flags. An unset
+// field (options built without flag parsing) takes the flag default.
+func kubeVirtCeiling(options serveOptions) (argoworkflow.VMIBudget, error) {
+	vms, cores, memoryValue := options.argoKubeVirtMaxVMs, options.argoKubeVirtMaxCores, strings.TrimSpace(options.argoKubeVirtMaxMemory)
+	if vms == 0 {
+		vms = defaultKubeVirtCeilingVMs
+	}
+	if cores == 0 {
+		cores = defaultKubeVirtCeilingCores
+	}
+	if memoryValue == "" {
+		memoryValue = defaultKubeVirtCeilingMemory
+	}
+	memory, err := resource.ParseQuantity(memoryValue)
+	if err != nil {
+		return argoworkflow.VMIBudget{}, fmt.Errorf("serve: --argo-kubevirt-max-memory: %w", err)
+	}
+	ceiling := argoworkflow.VMIBudget{MaxVMs: vms, MaxCores: cores, MaxMemory: memory}
+	if err := ceiling.Validate(); err != nil {
+		return argoworkflow.VMIBudget{}, fmt.Errorf("serve: KubeVirt ceiling: %w", err)
+	}
+	return ceiling, nil
+}
 
 // splitRunnerImagePrefixes parses the comma-separated allowlist flag; empty
 // items are dropped so a trailing comma cannot silently allow everything.
@@ -117,6 +152,9 @@ type serveOptions struct {
 	argoExecutorAccount       string
 	argoVMLauncherAccount     string
 	argoContainerDiskPrefixes string
+	argoKubeVirtMaxVMs        int
+	argoKubeVirtMaxCores      int
+	argoKubeVirtMaxMemory     string
 	argoVaultAddress          string
 	argoVaultCredentialedRole string
 	argoVaultCISecretsRole    string
@@ -225,6 +263,9 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 	flags.StringVar(&options.argoExecutorAccount, "argo-executor-serviceaccount", "oberth-argo-executor", "ServiceAccount for Argo's own executor containers; must differ from all pipeline identities")
 	flags.StringVar(&options.argoVMLauncherAccount, "argo-vm-launcher-serviceaccount", "oberth-argo-vm-launcher", "ServiceAccount used only by admitted VMI resource templates")
 	flags.StringVar(&options.argoContainerDiskPrefixes, "argo-container-disk-prefixes", "", "comma-separated administrator allowlist of VMI containerDisk repository prefixes")
+	flags.IntVar(&options.argoKubeVirtMaxVMs, "argo-kubevirt-max-vms", defaultKubeVirtCeilingVMs, "cluster-wide ceiling on any KubeVirt grant's VMI creates per run (1..16)")
+	flags.IntVar(&options.argoKubeVirtMaxCores, "argo-kubevirt-max-cores", defaultKubeVirtCeilingCores, "cluster-wide ceiling on any KubeVirt grant's summed VMI cores per run (1..64)")
+	flags.StringVar(&options.argoKubeVirtMaxMemory, "argo-kubevirt-max-memory", defaultKubeVirtCeilingMemory, "cluster-wide ceiling on any KubeVirt grant's summed VMI memory per run (1Gi..256Gi)")
 	flags.StringVar(&options.argoVaultAddress, "argo-vault-address", "", "OpenBao API base URL injected into credentialed Argo containers as VAULT_ADDR (HTTPS)")
 	flags.StringVar(&options.argoVaultCredentialedRole, "argo-vault-credentialed-role", "", "OpenBao Kubernetes auth role for credentialed release pipelines; bound to the credentialed ServiceAccount and namespace")
 	flags.StringVar(&options.argoVaultCISecretsRole, "argo-vault-ci-secrets-role", "", "OpenBao Kubernetes auth role for CI pipelines with approved upstream-scoped secrets; bound to the CI-secrets ServiceAccount and namespace (empty refuses CI credentialed pipelines at admission)")

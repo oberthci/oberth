@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"reflect"
 	"regexp"
+	"slices"
 	"strings"
 
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
@@ -32,6 +33,11 @@ type vmiManifest struct {
 			CPU struct {
 				Cores int `json:"cores"`
 			} `json:"cpu"`
+			// Firmware admits only kernelBoot from an allowlisted, digest-pinned
+			// container. Bootloader, serial, UUID and ACPI fields stay refused.
+			Firmware *struct {
+				KernelBoot *vmiKernelBoot `json:"kernelBoot"`
+			} `json:"firmware"`
 			Resources struct {
 				Requests struct {
 					CPU    string `json:"cpu"`
@@ -70,20 +76,105 @@ type vmiManifest struct {
 	} `json:"spec"`
 }
 
+// vmiKernelBoot is KubeVirt's spec.domain.firmware.kernelBoot. Only the image
+// and in-image paths are admitted: imagePullSecret would name a Secret.
+type vmiKernelBoot struct {
+	KernelArgs string `json:"kernelArgs"`
+	Container  *struct {
+		Image      string `json:"image"`
+		KernelPath string `json:"kernelPath"`
+		InitrdPath string `json:"initrdPath"`
+	} `json:"container"`
+}
+
 var vmiNamePattern = regexp.MustCompile(`^\{\{workflow\.name\}\}-[a-z0-9]([a-z0-9-]{0,14}[a-z0-9])?$`)
 var vmiDNSLabelPattern = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
 var yamlDocumentMarker = regexp.MustCompile(`(?m)^(?:---|\.\.\.)(?:[ \t]|$)`)
 
+// kernelArgsPattern bounds the guest kernel command line to plain
+// space-separated key[=value] words. It excludes quotes, braces, shell and
+// YAML metacharacters, so it cannot carry an Argo tag or a second document.
+var kernelArgsPattern = regexp.MustCompile(`^[A-Za-z0-9._,:=/+-]+( [A-Za-z0-9._,:=/+-]+)*$`)
+var kernelBootPathPattern = regexp.MustCompile(`^(/[A-Za-z0-9._-]+)+$`)
+
 const (
-	maxVMIManifestBytes   = 128 << 10
-	maxVMICores           = 4
-	maxVMIMemory          = "8Gi"
-	maxVMIEmptyDisk       = "16Gi"
-	maxVMITemplates       = 6
-	maxVMICreateTemplates = 2
-	maxVMIRunCores        = 6
-	maxVMIRunMemory       = "12Gi"
+	maxVMIManifestBytes = 128 << 10
+	maxVMICores         = 4
+	maxVMIMemory        = "8Gi"
+	maxVMIEmptyDisk     = "16Gi"
+	// Each admitted VM may need its own create, get and delete template.
+	vmiTemplatesPerVM  = 3
+	maxKernelArgsBytes = 512
+	maxKernelPathBytes = 256
 )
+
+// VMIBudget bounds what one run's VMI create templates may request together:
+// the number of VMs, their summed cores and their summed memory requests. A
+// repository's KubeVirt grant carries one; the server's ceiling caps it.
+type VMIBudget struct {
+	MaxVMs    int
+	MaxCores  int
+	MaxMemory resource.Quantity
+}
+
+// DefaultVMIBudget is the budget of a grant that names no explicit values.
+func DefaultVMIBudget() VMIBudget {
+	return VMIBudget{MaxVMs: 2, MaxCores: 6, MaxMemory: resource.MustParse("12Gi")}
+}
+
+// VMIBudgetLimit is the largest budget a grant or ceiling may name. It keeps
+// a typo from becoming an unbounded per-run allowance.
+func VMIBudgetLimit() VMIBudget {
+	return VMIBudget{MaxVMs: 16, MaxCores: 64, MaxMemory: resource.MustParse("256Gi")}
+}
+
+// IsZero reports a budget with no field set, which selects the default.
+func (budget VMIBudget) IsZero() bool {
+	return budget.MaxVMs == 0 && budget.MaxCores == 0 && budget.MaxMemory.IsZero()
+}
+
+// Validate requires every field to be positive and within VMIBudgetLimit.
+func (budget VMIBudget) Validate() error {
+	limit := VMIBudgetLimit()
+	if budget.MaxVMs < 1 || budget.MaxVMs > limit.MaxVMs {
+		return fmt.Errorf("VMI budget max VMs must be 1..%d", limit.MaxVMs)
+	}
+	if budget.MaxCores < 1 || budget.MaxCores > limit.MaxCores {
+		return fmt.Errorf("VMI budget max cores must be 1..%d", limit.MaxCores)
+	}
+	if budget.MaxMemory.Cmp(resource.MustParse("1Gi")) < 0 || budget.MaxMemory.Cmp(limit.MaxMemory) > 0 {
+		return fmt.Errorf("VMI budget max memory must be 1Gi..%s", limit.MaxMemory.String())
+	}
+	return nil
+}
+
+// Within returns the field-wise minimum of budget and ceiling.
+func (budget VMIBudget) Within(ceiling VMIBudget) VMIBudget {
+	effective := budget
+	effective.MaxVMs = min(budget.MaxVMs, ceiling.MaxVMs)
+	effective.MaxCores = min(budget.MaxCores, ceiling.MaxCores)
+	if ceiling.MaxMemory.Cmp(budget.MaxMemory) < 0 {
+		effective.MaxMemory = ceiling.MaxMemory
+	}
+	return effective
+}
+
+func (budget VMIBudget) String() string {
+	return fmt.Sprintf("%d VMs, %d cores, %s memory", budget.MaxVMs, budget.MaxCores, budget.MaxMemory.String())
+}
+
+// effectiveVMIBudget applies the defaults for unset policy fields and the
+// ceiling. Admit has validated both before calling it.
+func (policy Policy) effectiveVMIBudget() (grant, ceiling, effective VMIBudget) {
+	grant, ceiling = policy.VMIBudget, policy.VMICeiling
+	if grant.IsZero() {
+		grant = DefaultVMIBudget()
+	}
+	if ceiling.IsZero() {
+		ceiling = VMIBudgetLimit()
+	}
+	return grant, ceiling, grant.Within(ceiling)
+}
 
 func admitVMIResource(where string, tmpl *wfv1.ResourceTemplate, prefixes []string) error {
 	if tmpl == nil {
@@ -159,6 +250,16 @@ func admitVMIResource(where string, tmpl *wfv1.ResourceTemplate, prefixes []stri
 	if err != nil || memory.Sign() <= 0 || memory.Cmp(resource.MustParse(maxVMIMemory)) > 0 {
 		return fmt.Errorf("argoworkflow: %s.manifest.spec.domain.resources.requests.memory must be positive and at most %s", where, maxVMIMemory)
 	}
+	// The run budget counts cores; a CPU request above the vCPU count would
+	// reserve node capacity the budget never sees.
+	if cpu.Cmp(*resource.NewQuantity(int64(manifest.Spec.Domain.CPU.Cores), resource.DecimalSI)) > 0 {
+		return fmt.Errorf("argoworkflow: %s.manifest.spec.domain.resources.requests.cpu must not exceed spec.domain.cpu.cores", where)
+	}
+	if manifest.Spec.Domain.Firmware != nil {
+		if err := admitKernelBoot(where+".manifest.spec.domain.firmware", manifest.Spec.Domain.Firmware.KernelBoot, prefixes); err != nil {
+			return err
+		}
+	}
 	if len(manifest.Spec.Volumes) == 0 || len(manifest.Spec.Volumes) > 8 {
 		return fmt.Errorf("argoworkflow: %s.manifest.spec.volumes must contain 1..8 volumes", where)
 	}
@@ -233,6 +334,45 @@ func admitVMIResource(where string, tmpl *wfv1.ResourceTemplate, prefixes []stri
 	}
 	if manifest.Spec.Networks[0].Pod == nil || manifest.Spec.Domain.Devices.Interfaces[0].Masquerade == nil {
 		return fmt.Errorf("argoworkflow: %s.manifest.spec.networks and domain.devices.interfaces require pod and masquerade", where)
+	}
+	return nil
+}
+
+// admitKernelBoot admits KubeVirt's direct kernel boot from a container that
+// holds only the kernel and initrd. The image obeys the containerDisk rules:
+// digest-pinned and under an administrator prefix. The paths are absolute and
+// clean inside that image; the command line is bounded and inert to Argo.
+func admitKernelBoot(path string, kernelBoot *vmiKernelBoot, prefixes []string) error {
+	if kernelBoot == nil {
+		return fmt.Errorf("argoworkflow: %s admits only kernelBoot", path)
+	}
+	path += ".kernelBoot"
+	if kernelBoot.Container == nil {
+		return fmt.Errorf("argoworkflow: %s.container is required", path)
+	}
+	container := kernelBoot.Container
+	if err := periapsis.ValidateRunnerImage(container.Image); err != nil {
+		return fmt.Errorf("argoworkflow: %s.container.image: %w", path, err)
+	}
+	if !periapsis.RunnerImageAllowed(container.Image, prefixes) {
+		return fmt.Errorf("argoworkflow: %s.container.image must have an allowlisted containerDisk prefix", path)
+	}
+	if container.KernelPath == "" {
+		return fmt.Errorf("argoworkflow: %s.container.kernelPath is required", path)
+	}
+	for _, field := range []struct{ name, value string }{{"kernelPath", container.KernelPath}, {"initrdPath", container.InitrdPath}} {
+		if field.value == "" {
+			continue
+		}
+		segments := strings.Split(field.value, "/")
+		if len(field.value) > maxKernelPathBytes || !kernelBootPathPattern.MatchString(field.value) ||
+			slices.Contains(segments, "..") || slices.Contains(segments, ".") {
+			return fmt.Errorf("argoworkflow: %s.container.%s must be an absolute path of at most %d bytes using [A-Za-z0-9._-] segments, without . or ..", path, field.name, maxKernelPathBytes)
+		}
+	}
+	if kernelBoot.KernelArgs != "" &&
+		(len(kernelBoot.KernelArgs) > maxKernelArgsBytes || !kernelArgsPattern.MatchString(kernelBoot.KernelArgs)) {
+		return fmt.Errorf("argoworkflow: %s.kernelArgs must be at most %d bytes of single-space-separated [A-Za-z0-9._,:=/+-] words", path, maxKernelArgsBytes)
 	}
 	return nil
 }

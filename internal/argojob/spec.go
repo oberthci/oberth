@@ -113,6 +113,9 @@ type Config struct {
 	ExecutorServiceAccount   string
 	VMLauncherServiceAccount string
 	ContainerDiskPrefixes    []string
+	// KubeVirtCeiling is the administrator's cluster-wide cap on every
+	// repository grant's per-run VMI budget. Zero selects the hard limit.
+	KubeVirtCeiling argoworkflow.VMIBudget
 
 	// RunnerImagePrefixes is the same administrator allowlist the Go path
 	// applies to a declared RunnerImage.
@@ -343,6 +346,11 @@ func (config Config) Validate() error {
 			problems = append(problems, fmt.Errorf("argojob: %w", err))
 		}
 	}
+	if !config.KubeVirtCeiling.IsZero() {
+		if err := config.KubeVirtCeiling.Validate(); err != nil {
+			problems = append(problems, fmt.Errorf("argojob: KubeVirt ceiling: %w", err))
+		}
+	}
 	if config.VaultAddress != "" && !strings.HasPrefix(config.VaultAddress, "https://") {
 		// The pod authenticates to Vault with its ServiceAccount token and
 		// receives secret material back. Plain HTTP would put both on the wire.
@@ -524,7 +532,10 @@ func vaultAddressRequiresPinnedAnchor(address string) bool {
 // Request is one run's submission intent.
 type Request struct {
 	KubeVirtGranted bool
-	nonrootProof    *nonrootProof
+	// KubeVirtBudget is the repository grant's per-run VMI budget; zero
+	// selects the default. Config.KubeVirtCeiling caps it.
+	KubeVirtBudget argoworkflow.VMIBudget
+	nonrootProof   *nonrootProof
 	// TrustedKVM is a server-created, journaled preflight admission.
 	TrustedKVM *vmrunner.KVMIntent
 	RunID      string
@@ -675,7 +686,10 @@ func Build(config Config, request Request) (*wfv1.Workflow, error) {
 	// Prepare admits and binds in one call so the order cannot be got wrong.
 	if err := argoworkflow.Prepare(
 		workflow,
-		argoworkflow.Policy{RunnerImagePrefixes: config.RunnerImagePrefixes, KubeVirt: request.KubeVirtGranted, ContainerDiskPrefixes: config.ContainerDiskPrefixes},
+		argoworkflow.Policy{
+			RunnerImagePrefixes: config.RunnerImagePrefixes, KubeVirt: request.KubeVirtGranted, ContainerDiskPrefixes: config.ContainerDiskPrefixes,
+			VMIBudget: request.KubeVirtBudget, VMICeiling: config.KubeVirtCeiling,
+		},
 		identity,
 	); err != nil {
 		return nil, err
