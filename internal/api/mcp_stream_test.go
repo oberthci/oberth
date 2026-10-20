@@ -320,8 +320,20 @@ func TestMCPStreamSurvivesProxyIdleDeadline(t *testing.T) {
 	t.Parallel()
 	for _, mode := range []string{"silent JSON", "initial SSE only", "heartbeat SSE"} {
 		t.Run(mode, func(t *testing.T) {
+			// End the successful long poll only after the proxy has actually
+			// received periodic frames. Wall time cannot prove that happened:
+			// a loaded runner may pause either side past a short deadline.
+			heartbeatsSeen := make(chan struct{})
 			backend := &streamingBackend{fakeBackend: &fakeBackend{}, prepare: func(context.Context, Actor, string, json.RawMessage) (PreparedLongPoll, error) {
 				return func(ctx context.Context) (any, error) {
+					if mode == "heartbeat SSE" {
+						select {
+						case <-heartbeatsSeen:
+							return map[string]bool{"still_running": true}, nil
+						case <-ctx.Done():
+							return nil, ctx.Err()
+						}
+					}
 					select {
 					case <-time.After(350 * time.Millisecond):
 						return map[string]bool{"still_running": true}, nil
@@ -354,7 +366,13 @@ func TestMCPStreamSurvivesProxyIdleDeadline(t *testing.T) {
 				if err != nil {
 					return nil, err
 				}
-				return idleReadConn{Conn: conn, idle: 100 * time.Millisecond}, nil
+				idle := 100 * time.Millisecond
+				if mode == "heartbeat SSE" {
+					// The frame handshake supplies the success condition. This
+					// remains a deadline, but is only a failure backstop under load.
+					idle = 5 * time.Second
+				}
+				return idleReadConn{Conn: conn, idle: idle}, nil
 			}
 			proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				upstream := r.Clone(r.Context())
@@ -370,9 +388,18 @@ func TestMCPStreamSurvivesProxyIdleDeadline(t *testing.T) {
 				w.Header().Set("Content-Type", response.Header.Get("Content-Type"))
 				w.WriteHeader(response.StatusCode)
 				buffer := make([]byte, 4096)
+				var heartbeatBytes string
+				heartbeatCount := 0
 				for {
 					n, err := response.Body.Read(buffer)
 					if n > 0 {
+						if mode == "heartbeat SSE" && heartbeatCount < 3 {
+							heartbeatBytes += string(buffer[:n])
+							heartbeatCount = strings.Count(heartbeatBytes, ": keepalive\n\n")
+							if heartbeatCount >= 3 {
+								close(heartbeatsSeen)
+							}
+						}
 						if _, writeErr := w.Write(buffer[:n]); writeErr != nil {
 							return
 						}
@@ -387,6 +414,11 @@ func TestMCPStreamSurvivesProxyIdleDeadline(t *testing.T) {
 			}))
 			defer proxy.Close()
 			req, _ := http.NewRequest(http.MethodPost, proxy.URL+"/mcp", strings.NewReader(waitRPC))
+			if mode == "heartbeat SSE" {
+				ctx, cancel := context.WithTimeout(req.Context(), 10*time.Second)
+				defer cancel()
+				req = req.WithContext(ctx)
+			}
 			req.Header.Set("Authorization", "Bearer valid-token")
 			req.Header.Set("Accept", "text/event-stream")
 			response, err := proxy.Client().Do(req)
