@@ -78,6 +78,7 @@ def main():
     for name in ("kernel", "qemu", "firmware", "init", "test", "pattern"):
         parser.add_argument("--" + name, required=True)
     parser.add_argument("--env", action="append", default=[])
+    parser.add_argument("--profile", choices=("bpf", "fuse"), default="bpf")
     parser.add_argument("--object")
     parser.add_argument("--fixture")
     parser.add_argument("--timeout", type=int, default=600)
@@ -99,7 +100,7 @@ def main():
         add_file(files, "bpf.o", args.object)
     if args.fixture:
         add_file(files, "runtime-bootstrap", args.fixture, True)
-    config = {"Args": ["-test.v", "-test.count=1", "-test.timeout=8m", "-test.run=" + args.pattern], "Env": args.env}
+    config = {"Profile": args.profile, "Args": ["-test.v", "-test.count=1", "-test.timeout=8m", "-test.run=" + args.pattern], "Env": args.env}
     files["test-config.json"] = (0o644, json.dumps(config).encode())
     print("guest kernel sha256:" + hashlib.sha256(Path(args.kernel).read_bytes()).hexdigest(), flush=True)
     with tempfile.TemporaryDirectory(prefix="oberth-guest-") as directory:

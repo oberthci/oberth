@@ -50,3 +50,14 @@ No guest privilege is added to the host pod, even if candidate code ignores the
 reference runner. Deploy the admission change and provision reviewed repository
 grants before expecting consumer runs to pass. No recipe, grant or deployment
 is enabled by adding these sources.
+
+## FUSE guests
+
+Use `--profile=fuse` with a kernel that has FUSE built in. Guest init mounts its
+own devtmpfs, procfs, sysfs and private temporary filesystem, requires a real
+`/dev/fuse` character device, then runs the test binary. It does not require
+BPF, tracing or cgroup support for this profile. Missing FUSE is a hard failure
+before test execution; consumers should also set their own require-FUSE test
+flag so a later mount error cannot become a skipped test. No FUSE device or
+SYS_ADMIN capability is added to the pod. The same admin VM grant, audit,
+credential-free admission and networkless QEMU boundary apply.

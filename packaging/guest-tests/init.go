@@ -17,32 +17,14 @@ import (
 )
 
 type testConfig struct {
-	Args []string
-	Env  []string
+	Profile string
+	Args    []string
+	Env     []string
 }
 
 func run() error {
 	if os.Getpid() != 1 {
 		return fmt.Errorf("guest init must be PID 1")
-	}
-	for _, m := range [][3]string{
-		{"devtmpfs", "/dev", "devtmpfs"},
-		{"proc", "/proc", "proc"},
-		{"sysfs", "/sys", "sysfs"},
-		{"tmpfs", "/tmp", "tmpfs"},
-		{"cgroup2", "/sys/fs/cgroup", "cgroup2"},
-		{"securityfs", "/sys/kernel/security", "securityfs"},
-		{"tracefs", "/sys/kernel/tracing", "tracefs"},
-	} {
-		if err := os.MkdirAll(m[1], 0750); err != nil {
-			return err
-		}
-		if err := syscall.Mount(m[0], m[1], m[2], 0, ""); err != nil {
-			return fmt.Errorf("mount %s: %w", m[1], err)
-		}
-	}
-	if err := syscall.Setrlimit(8 /* Linux RLIMIT_MEMLOCK */, &syscall.Rlimit{Cur: ^uint64(0), Max: ^uint64(0)}); err != nil {
-		return err
 	}
 	data, err := os.ReadFile("/test-config.json")
 	if err != nil {
@@ -52,6 +34,58 @@ func run() error {
 	if err := json.Unmarshal(data, &config); err != nil {
 		return err
 	}
+	mounts, err := guestMounts(config.Profile)
+	if err != nil {
+		return err
+	}
+	for _, m := range mounts {
+		if err := os.MkdirAll(m[1], 0750); err != nil {
+			return err
+		}
+		if err := syscall.Mount(m[0], m[1], m[2], 0, ""); err != nil {
+			return fmt.Errorf("mount %s: %w", m[1], err)
+		}
+	}
+	if config.Profile == "fuse" {
+		if err := requireFuse("/dev/fuse"); err != nil {
+			return err
+		}
+	}
+	if err := syscall.Setrlimit(8 /* Linux RLIMIT_MEMLOCK */, &syscall.Rlimit{Cur: ^uint64(0), Max: ^uint64(0)}); err != nil {
+		return err
+	}
+	return runTests(config)
+}
+
+func guestMounts(profile string) ([][3]string, error) {
+	mounts := [][3]string{
+		{"devtmpfs", "/dev", "devtmpfs"},
+		{"proc", "/proc", "proc"},
+		{"sysfs", "/sys", "sysfs"},
+		{"tmpfs", "/tmp", "tmpfs"},
+	}
+	switch profile {
+	case "", "bpf":
+		mounts = append(mounts, [3]string{"cgroup2", "/sys/fs/cgroup", "cgroup2"}, [3]string{"securityfs", "/sys/kernel/security", "securityfs"}, [3]string{"tracefs", "/sys/kernel/tracing", "tracefs"})
+	case "fuse":
+	default:
+		return nil, fmt.Errorf("unknown guest test profile %q", profile)
+	}
+	return mounts, nil
+}
+
+func requireFuse(path string) error {
+	info, err := os.Stat(path)
+	if err != nil {
+		return fmt.Errorf("required guest FUSE device: %w", err)
+	}
+	if info.Mode()&os.ModeCharDevice == 0 {
+		return fmt.Errorf("required guest FUSE device is not a character device")
+	}
+	return nil
+}
+
+func runTests(config testConfig) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 9*time.Minute)
 	defer cancel()
 	// #nosec G204 -- The fixed candidate test binary and arguments run only inside the disposable guest.
