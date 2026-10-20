@@ -1,6 +1,9 @@
 import argparse
 import importlib.util
+import os
 from pathlib import Path
+import subprocess
+import sys
 import unittest
 
 spec = importlib.util.spec_from_file_location("guest_run", Path(__file__).with_name("run.py"))
@@ -9,6 +12,15 @@ spec.loader.exec_module(guest)
 
 
 class GuestBoundaryTests(unittest.TestCase):
+    def test_old_server_cannot_silently_run_guest_lane(self):
+        command = [sys.executable, "-I", "-B", str(Path(__file__).with_name("run.py"))]
+        for flag in ("kernel", "qemu", "firmware", "init", "test", "pattern"):
+            command.append("--" + flag + "=/missing")
+        environment = {key: value for key, value in os.environ.items() if key not in ("OBERTH_GUEST_TEST", "OBERTH_KVM")}
+        result = subprocess.run(command, env=environment, text=True, capture_output=True, check=False)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("admin-granted Oberth guest-test KVM admission required", result.stderr)
+
     def test_vm_has_no_host_filesystem_or_network(self):
         args = argparse.Namespace(qemu="qemu", firmware="firmware", kernel="kernel")
         command = guest.qemu_command(args, "initramfs")
