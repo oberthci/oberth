@@ -561,6 +561,12 @@ func applyRestore(ctx context.Context, cfg RestoreConfig, deps backupDeps, archi
 		_, _ = fmt.Fprintf(w, "  ⚠ the server is not ready yet (%v); check: kubectl -n %s logs deploy/oberth\n", err, cfg.Namespace)
 	} else {
 		_, _ = fmt.Fprintln(w, "  ✓ server ready")
+		if pod, err := runningServerPod(ctx, deps.Deps, cfg.Namespace, target.Server.Selector); err == nil && pod != "" {
+			recordServerAudit(ctx, deps, cfg.Namespace, pod, "restore.completed", map[string]any{
+				"archive_sha256": archive.CipherSHA, "history": parts.History, "secrets": parts.Secrets,
+				"from_audit_head_id": archive.Manifest.Database.AuditHeadID, "from_audit_head_sha256": archive.Manifest.Database.AuditHeadSHA256,
+			})
+		}
 	}
 	printRestoreNextSteps(w, cfg, archive, target, parts)
 	return nil

@@ -292,6 +292,8 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 			return nil, err
 		}
 		return service.releaseAdmission(ctx, actor, arguments.RunID, arguments.Force)
+	case "audit_list":
+		return service.auditList(ctx, actor, raw)
 	case "status":
 		var arguments struct {
 			Repo string `json:"repo"`

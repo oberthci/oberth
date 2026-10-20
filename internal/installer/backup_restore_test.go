@@ -229,6 +229,7 @@ type fakeBackupCluster struct {
 	argvs       [][]string
 	uploads     map[string][]byte
 	swapArgs    []string
+	audited     []string // `oberth audit record` commands, in order
 	deleted     []string
 	helmUpgrade []string
 	helmValues  map[string]any
@@ -396,6 +397,9 @@ func (c *fakeBackupCluster) run(_ context.Context, input []byte, name string, ar
 		return []byte(fmt.Sprintf("%d\n", c.schema)), nil
 	case joined == "oberth version":
 		return []byte("oberth v0.17.28 commit=abc date=today\n"), nil
+	case strings.HasPrefix(joined, "oberth audit record "):
+		c.audited = append(c.audited, joined)
+		return nil, nil
 	case strings.HasPrefix(joined, "oberth backup database"):
 		if c.oldServer {
 			return nil, errors.New(`kubectl: exit status 2: oberth: usage error: unknown command "backup"`)
@@ -589,6 +593,10 @@ func backupFixtureArchive(t *testing.T, oldServer bool) (string, string, *fakeBa
 func TestBackupCapturesOpenBaoDatabaseAndValues(t *testing.T) {
 	t.Parallel()
 	output, _, source := backupFixtureArchive(t, false)
+	if len(source.audited) != 1 || !strings.HasPrefix(source.audited[0], "oberth audit record backup.completed --details ") ||
+		!strings.Contains(source.audited[0], "archive_sha256") {
+		t.Fatalf("backup audit records = %v", source.audited)
+	}
 	if len(source.bao.writes) != 0 {
 		t.Fatalf("backup wrote to OpenBao: %v", source.bao.writes)
 	}
@@ -711,6 +719,10 @@ func TestRestoreAppliesTheArchive(t *testing.T) {
 	text := out.String()
 	if strings.Contains(text, testSecretValue) {
 		t.Fatal("restore output prints a secret value")
+	}
+	if len(target.audited) != 1 || !strings.HasPrefix(target.audited[0], "oberth audit record restore.completed --details ") ||
+		!strings.Contains(target.audited[0], "archive_sha256") {
+		t.Fatalf("restore audit records = %v", target.audited)
 	}
 
 	// OpenBao now matches the source field-for-field.

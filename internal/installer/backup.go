@@ -567,6 +567,10 @@ func runBackup(ctx context.Context, cfg BackupConfig, deps backupDeps) (resultEr
 	if info, err := os.Stat(cfg.Output); err == nil {
 		size = info.Size()
 	}
+	recordServerAudit(ctx, deps, cfg.Namespace, pod, "backup.completed", map[string]any{
+		"archive_sha256": cipherSHA, "bytes": size, "scope": cfg.Scope,
+		"audit_head_id": report.AuditHead.ID, "audit_head_sha256": hex.EncodeToString(report.AuditHead.SHA256),
+	})
 	_, _ = fmt.Fprintf(w, "\nBacked up to %s (%.1f MiB)\n", displayLocalPath(cfg.Output), float64(size)/(1<<20))
 	_, _ = fmt.Fprintf(w, "  History    %s\n", describeContents(contents))
 	if full {
