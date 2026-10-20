@@ -114,7 +114,11 @@ func renderAdmission(output io.Writer, state *model.AdmissionState, now time.Tim
 		}
 	}
 	if state.Blocker != nil {
-		if _, err := fmt.Fprintf(output, "queue head: %s/%s (%s)\n", state.Blocker.Repo, state.Blocker.Ref, state.Blocker.Reason()); err != nil {
+		line := fmt.Sprintf("queue head: %s/%s (%s)", state.Blocker.Repo, state.Blocker.Ref, state.Blocker.Reason())
+		if backfill := state.Blocker.Backfill(); backfill != "" {
+			line += "; " + backfill
+		}
+		if _, err := fmt.Fprintln(output, line); err != nil {
 			return err
 		}
 	}
@@ -125,7 +129,11 @@ func renderAdmission(output io.Writer, state *model.AdmissionState, now time.Tim
 		if !reservation.Since.IsZero() {
 			age = now.Sub(reservation.Since).Truncate(time.Second).String()
 		}
-		_, _ = fmt.Fprintf(writer, "%s\t%s\t%s\t%d\t%s/%s\t%s\t%s\n", reservation.RunID, reservation.State,
+		label := reservation.State
+		if reservation.Backfilled {
+			label += " (backfill)"
+		}
+		_, _ = fmt.Fprintf(writer, "%s\t%s\t%s\t%d\t%s/%s\t%s\t%s\n", reservation.RunID, label,
 			dash(reservation.Size), reservation.Weight, reservation.Repo, reservation.Ref, dash(reservation.Group), age)
 	}
 	return writer.Flush()

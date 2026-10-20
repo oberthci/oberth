@@ -29,8 +29,8 @@ func TestSchemaMigrationsAreContiguous(t *testing.T) {
 	if err := validateMigrations(migrations, latestMigrationVersion); err != nil {
 		t.Fatal(err)
 	}
-	if latestMigrationVersion != 26 {
-		t.Fatalf("latest migration version = %d, want 26", latestMigrationVersion)
+	if latestMigrationVersion != 27 {
+		t.Fatalf("latest migration version = %d, want 27", latestMigrationVersion)
 	}
 	if len(migrations) != latestMigrationVersion {
 		t.Fatalf("migration count = %d, want %d", len(migrations), latestMigrationVersion)
@@ -932,6 +932,7 @@ func TestFreshSchemaIsCompleteAndIdempotent(t *testing.T) {
 
 	assertFreshSchemaLedger(t, store.db)
 	assertSchemaObjects(t, store.db, "table", []string{
+		"admission_head_waits",
 		"audit_actions",
 		"audit_anchors",
 		"ci_issue_projections",

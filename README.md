@@ -215,7 +215,10 @@ Two workflow-level annotations steer the scheduler. `oberth.ci/size` (`S`,
 the weights are S 1, M 2, L 3 of a budget of `maxConcurrentJobs` × 2, and `XL`
 takes the whole host and runs alone. The chart value `admission.sizeWeights`
 (server flag `--admission-size-weights`) changes them; a positive `XL` weight
-lets an XL run share the host with whatever fits beside it. `oberth.ci/concurrency-group: <name>`
+lets an XL run share the host with whatever fits beside it. While a run at the head of
+the admission queue waits for room, later runs that fit beside it are
+backfilled for up to `admission.maxHeadWait` (default 20m); after that the
+host drains for the head, so it never starves. `oberth.ci/concurrency-group: <name>`
 serializes a repository's own runs that must never overlap -- a Terraform
 state, say -- across branch, promotion, and tag runs without reserving the
 host: members run one at a time in queue order while other repositories keep

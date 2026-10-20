@@ -19,7 +19,16 @@ type weightedAdmission struct {
 	capacity int
 	// weights is the operator's weight per size (#1021).
 	weights SizeWeights
-	used    int
+	// maxHeadWait bounds bounded backfill (#1085): while the queue head has
+	// waited less than this, later runs that fit are admitted beside it.
+	// Zero disables backfill (strict FIFO).
+	maxHeadWait time.Duration
+	// now is the gate's clock; nil is time.Now.
+	now func() time.Time
+	// headEvents carries head-wait origins to persist and clear, so a
+	// restarted server keeps the head's wait origin. Sends never block.
+	headEvents chan headEvent
+	used       int
 	// maxRuns, when positive, caps how many runs hold a grant at once. The
 	// scheduler mirrors its dispatch ceiling here: runs parked on their own
 	// concurrency group stop counting against the dispatch loop, so the loop
@@ -60,8 +69,19 @@ type admissionReservation struct {
 	// admission view (#1099).
 	claimedAt time.Time
 	grantedAt time.Time
-	size      periapsis.Size
-	weight    int
+	// refKind and sha complete the durable key of the run's head-wait
+	// origin (#1085), which survives a restart's requeue under a new run ID.
+	refKind model.RefKind
+	sha     string
+	// headSince is when this run first waited at the queue head (or the
+	// durable origin recorded before a restart); zero while it never has.
+	headSince time.Time
+	// estimate is the run's predicted duration from history, zero if none.
+	estimate time.Duration
+	// backfilled marks a grant made beside a waiting head.
+	backfilled bool
+	size       periapsis.Size
+	weight     int
 	// group is the repository-scoped key of the run's concurrency group and
 	// groupName the name the repository declared; both empty when ungrouped.
 	group     string
@@ -99,6 +119,13 @@ type admissionRequest struct {
 	Ref    string
 	Size   periapsis.Size
 	Group  string
+	// RefKind and SHA key the durable head-wait origin; HeadSince is that
+	// origin when one was recorded before a restart; Estimate is the run's
+	// predicted duration from history (#1085).
+	RefKind   model.RefKind
+	SHA       string
+	HeadSince time.Time
+	Estimate  time.Duration
 }
 
 // newWeightedAdmission builds a gate whose capacity is denominated in size
@@ -172,6 +199,7 @@ func (gate *weightedAdmission) reserveRun(run model.Run) *admissionReservation {
 	gate.mu.Lock()
 	if reservation.runID == "" {
 		reservation.runID, reservation.repoID, reservation.ref = run.ID, run.RepoID, run.Ref
+		reservation.refKind, reservation.sha = run.RefKind, run.SHA
 	}
 	gate.mu.Unlock()
 	return reservation
@@ -214,6 +242,13 @@ func (reservation *admissionReservation) acquireRequest(ctx context.Context, req
 		reservation.runID = request.RunID
 	}
 	reservation.repoID, reservation.repo, reservation.ref = request.RepoID, request.Repo, request.Ref
+	if request.RefKind != "" {
+		reservation.refKind, reservation.sha = request.RefKind, request.SHA
+	}
+	reservation.estimate = request.Estimate
+	if !request.HeadSince.IsZero() && (reservation.headSince.IsZero() || request.HeadSince.Before(reservation.headSince)) {
+		reservation.headSince = request.HeadSince
+	}
 	if !reservation.prepared {
 		reservation.preparedAt = time.Now().UTC()
 	}
@@ -302,6 +337,11 @@ func (gate *weightedAdmission) abandon(sequence int64) bool {
 	reservation.abandoned = true
 	gate.removeLocked(reservation)
 	close(reservation.ready)
+	if !reservation.headSince.IsZero() {
+		// The run is over: its head-wait origin must not be inherited by a
+		// later run of the same commit.
+		gate.emitHeadLocked(headEvent{key: reservation.headKey(), clear: true})
+	}
 	gate.grantLocked()
 	return true
 }
@@ -329,9 +369,13 @@ func (reservation *admissionReservation) retain() {
 	}
 }
 
-// grantLocked admits waiters in claim order. An unsized claim holds its place,
-// and so does a sized run that does not fit: both stop the pass, which is what
-// keeps heavy runs (and XL, which needs the whole node) from starving.
+// grantLocked admits waiters in claim order. An unsized claim at the head
+// holds its place, and so does a sized head that does not fit, which is what
+// keeps heavy runs (and XL, which needs the whole node) from starving. Bounded
+// backfill (#1085) relaxes the second rule for a while: until the head has
+// waited maxHeadWait, later runs that fit the spare weight (and, when their
+// history predicts it, finish before the bound) are admitted beside it; after
+// the bound the pass ends at the head and the budget drains for it.
 //
 // A run parked on its concurrency group is the one exception. It is not
 // waiting for the node but for another run of its own repository, so it is
@@ -341,6 +385,12 @@ func (reservation *admissionReservation) retain() {
 // parked run regains its place in that order the moment its group is free.
 func (gate *weightedAdmission) grantLocked() {
 	var parked map[string]struct{}
+	// head is the first prepared, unparked waiter that does not fit. Before
+	// #1085 it ended the pass; now later waiters that fit may be backfilled
+	// beside it until it has waited maxHeadWait, after which the pass ends
+	// at the head again so the budget drains for it.
+	var head *admissionReservation
+	now := gate.clock()
 	for index := 0; index < len(gate.waiters); {
 		reservation := gate.waiters[index]
 		if reservation.vmParked {
@@ -348,7 +398,13 @@ func (gate *weightedAdmission) grantLocked() {
 			continue
 		}
 		if !reservation.prepared {
-			return
+			// A claim whose size is still unknown holds its place at the
+			// head. Behind a known head it is simply not a candidate yet.
+			if head == nil {
+				return
+			}
+			index++
+			continue
 		}
 		if reservation.group != "" {
 			_, held := gate.groups[reservation.group]
@@ -363,7 +419,23 @@ func (gate *weightedAdmission) grantLocked() {
 			}
 		}
 		if !gate.canGrantLocked(reservation) {
-			return
+			if head == nil {
+				head = reservation
+				gate.markHeadLocked(head, now)
+				if !gate.backfillOpenLocked(head, now) {
+					return
+				}
+			}
+			index++
+			continue
+		}
+		reservation.backfilled = false
+		if head != nil {
+			if !gate.backfillFitsLocked(head, reservation, now) {
+				index++
+				continue
+			}
+			reservation.backfilled = true
 		}
 		gate.waiters = append(gate.waiters[:index], gate.waiters[index+1:]...)
 		reservation.granted = true
@@ -372,6 +444,9 @@ func (gate *weightedAdmission) grantLocked() {
 		gate.runs++
 		if reservation.group != "" {
 			gate.groups[reservation.group] = reservation
+		}
+		if !reservation.headSince.IsZero() {
+			gate.emitHeadLocked(headEvent{key: reservation.headKey(), clear: true})
 		}
 		close(reservation.ready)
 		if gate.onGrant != nil {
@@ -389,8 +464,17 @@ func (gate *weightedAdmission) spareWeightForClaim(unparked int) bool {
 	gate.mu.Lock()
 	defer gate.mu.Unlock()
 	// Every unparked claimed run must already hold its grant: one still
-	// checking out or waiting for weight may need what is spare.
-	if len(gate.waiters)-gate.parkedLocked() > 0 || unparked > gate.runs || unparked >= gate.capacity {
+	// checking out or waiting for weight may need what is spare. The one
+	// exception is a head that does not fit while its backfill window is
+	// open (#1085): the spare weight is then exactly what backfill fills.
+	waiting := len(gate.waiters) - gate.parkedLocked()
+	extra := 0
+	if waiting > 0 && gate.backfillClaimsOpenLocked(waiting) {
+		// Every waiting claim is the head or a candidate already passed
+		// over, so one more claim may be the run that fits.
+		extra = waiting
+	}
+	if waiting-extra > 0 || unparked > gate.runs+extra || unparked >= gate.capacity {
 		return false
 	}
 	if gate.maxRuns > 0 && gate.runs >= gate.maxRuns {
@@ -555,6 +639,7 @@ func (gate *weightedAdmission) blockerLocked(reservation *admissionReservation) 
 	case gate.maxRuns > 0 && gate.runs >= gate.maxRuns:
 		blocker.RunCeiling = true
 	}
+	gate.backfillStateLocked(reservation, blocker)
 	return blocker
 }
 

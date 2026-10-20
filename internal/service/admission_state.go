@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/model"
@@ -38,7 +39,7 @@ func (gate *weightedAdmission) reservationViewLocked(reservation *admissionReser
 	view := model.AdmissionReservation{
 		RunID: reservation.runID, RepoID: reservation.repoID, Repo: reservation.repo, Ref: reservation.ref,
 		Size: string(reservation.size), Weight: reservation.weight, Group: reservation.groupName,
-		State: gate.reservationStateLocked(reservation),
+		State: gate.reservationStateLocked(reservation), Backfilled: reservation.granted && reservation.backfilled,
 	}
 	if reservation.repo != "" && reservation.runID != "" {
 		if name, err := deterministicJobName(reservation.repo, reservation.runID); err == nil {
@@ -70,7 +71,8 @@ func (scheduler *Scheduler) AdmissionState() *model.AdmissionState {
 	defer gate.mu.Unlock()
 	state := &model.AdmissionState{
 		Capacity: gate.capacity, Used: gate.used, Runs: gate.runs, MaxRuns: gate.maxRuns,
-		Reservations: []model.AdmissionReservation{}, Groups: []model.AdmissionGroup{},
+		MaxHeadWaitSeconds: int64(gate.maxHeadWait / time.Second),
+		Reservations:       []model.AdmissionReservation{}, Groups: []model.AdmissionGroup{},
 	}
 	sequences := make([]int64, 0, len(gate.reservations))
 	for sequence := range gate.reservations {

@@ -161,6 +161,12 @@ func waitingAdmissionMessage(admission *model.AdmissionObservation) string {
 	case admission.GroupAhead != "":
 		return fmt.Sprintf("Waiting for concurrency group %q behind run %s of the same repository, "+
 			"which is queued ahead in the group.", admission.Group, admission.GroupAhead)
+	case admission.HeadOfQueue && admission.BlockedBy != nil && admission.BlockedBy.Backfilling:
+		return fmt.Sprintf("At the head of the weighted resource admission queue (%s); %s smaller runs that fit beside it.",
+			admission.BlockedBy.Reason(), admission.BlockedBy.Backfill())
+	case admission.HeadOfQueue && admission.BlockedBy != nil && admission.BlockedBy.Draining:
+		return fmt.Sprintf("At the head of the weighted resource admission queue (%s); %s: no later run is admitted until it starts.",
+			admission.BlockedBy.Reason(), admission.BlockedBy.Backfill())
 	case admission.HeadOfQueue && admission.BlockedBy != nil:
 		return fmt.Sprintf("At the head of the weighted resource admission queue (%s); every later run waits behind it.",
 			admission.BlockedBy.Reason())
@@ -175,6 +181,9 @@ func waitingAdmissionMessage(admission *model.AdmissionObservation) string {
 // e.g. "blocked behind cloudtaser-ebpf/main (XL, needs a full drain)". The
 // repository is a registered name and the ref a validated Git ref.
 func blockedBehindMessage(blocker *model.AdmissionBlocker) string {
+	if backfill := blocker.Backfill(); backfill != "" {
+		return fmt.Sprintf("blocked behind %s/%s (%s; %s).", blocker.Repo, blocker.Ref, blocker.Reason(), backfill)
+	}
 	return fmt.Sprintf("blocked behind %s/%s (%s).", blocker.Repo, blocker.Ref, blocker.Reason())
 }
 

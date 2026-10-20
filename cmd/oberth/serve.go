@@ -129,6 +129,7 @@ type serveOptions struct {
 	maxConcurrent           int
 	admissionDiskFloorBytes int64
 	admissionSizeWeights    string
+	admissionMaxHeadWait    time.Duration
 	sizeWeights             service.SizeWeights
 	ciCacheRoot             string
 	releaseCacheRoot        string
@@ -244,6 +245,7 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 	flags.Int64Var(&options.artifactsBudgetBytes, "artifacts-budget-bytes", defaultArtifactsBudgetBytes, "total artifact storage before the oldest runs are evicted")
 	flags.IntVar(&options.maxConcurrent, "max-concurrent-jobs", 3, "maximum concurrent Jobs")
 	flags.StringVar(&options.admissionSizeWeights, "admission-size-weights", service.DefaultSizeWeights.String(), "admission weight per size as S=..,M=..,L=..,XL=..; XL=0 is the whole budget (an XL run runs alone), a positive XL lets XL share the host; the budget is --max-concurrent-jobs M runs (#1021)")
+	flags.DurationVar(&options.admissionMaxHeadWait, "admission-max-head-wait", service.DefaultMaxHeadWait, "bounded backfill (#1085): while the admission queue head does not fit, later runs that fit are admitted beside it until it has waited this long; then the budget drains for it (0 = strict FIFO)")
 	flags.Int64Var(&options.admissionDiskFloorBytes, "admission-disk-floor-bytes", 0, "opt-in disk-space admission floor in bytes (0 = disabled); when enabled and free bytes on /data are below this floor, admission is held until disk frees up (#673)")
 	flags.StringVar(&options.ciCacheRoot, "ci-cache-root", "/var/cache/oberth/ci", "CI host cache root")
 	flags.StringVar(&options.releaseCacheRoot, "release-cache-root", "/var/cache/oberth/release", "release host cache root")
@@ -327,6 +329,9 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 		return serveOptions{}, fmt.Errorf("serve: --admission-size-weights: %w", err)
 	}
 	options.sizeWeights = weights
+	if options.admissionMaxHeadWait < 0 {
+		return serveOptions{}, errors.New("serve: --admission-max-head-wait must be zero (strict FIFO) or positive")
+	}
 	return options, nil
 }
 
@@ -726,6 +731,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 		MutationGate:            anchors.AllowMutation,
 		AdmissionDiskFloorBytes: options.admissionDiskFloorBytes,
 		SizeWeights:             options.sizeWeights,
+		MaxHeadWait:             options.admissionMaxHeadWait,
 	})
 	if err != nil {
 		return err

@@ -306,6 +306,35 @@ continuity checks; it must never be used to reset or bypass those checks.
   XL), S ≤ M ≤ L ≤ XL; sizes left unset keep their defaults. The queue-head
   message names a finite XL by weight ("XL · 11w") and a whole-budget XL as
   "needs a full drain". S packing uses the configured S and M weights.
+- Bounded backfill (#1085): when the queue head (the first claimed,
+  prepared, unparked run) does not fit, later runs that fit the spare weight
+  are admitted beside it, marked `backfilled`, until the head has waited
+  `admission.maxHeadWait` (flag `--admission-max-head-wait`, default `20m`;
+  `0` is strict FIFO). A run whose repository's recent history (median of
+  the last 20 passed runs of the same class, at least 3; the classes are
+  release/tag, promotion, schedule and branch, so a release is never
+  estimated from branch CI) predicts it would end after that bound is not
+  backfilled; a run without history is backfilled only before the bound. The
+  median is advisory: it narrows which runs are backfilled, and a backfilled
+  run that overruns it still delays the head by its actual duration. Once the bound has passed nothing more is
+  backfilled and the budget drains for the head, so it starts within
+  `maxHeadWait` plus the longest admitted backfill, whatever stream of small
+  runs keeps arriving. While the head's window is open the dispatch loop may
+  claim past its ceiling into spare weight (room for at least one S run) as
+  long as every waiting claim is the head or a candidate already passed over
+  and none is still preparing, bounded by the budget's M-run count, the run
+  ceiling, the budget and the disk floor; backfill chooses among claimed
+  runs only. The head's wait origin is
+  recorded per commit (`admission_head_waits`, repository, ref kind, ref and
+  SHA) so a run requeued under a new ID after a restart keeps its clock; it
+  is cleared when the head is granted or its run is abandoned, and rows
+  older than 24 h are swept on read and hourly (a promotion or tag head that
+  dies without passing through the gate leaves one). Nothing is recorded
+  while backfill is disabled. The head reports `head_since`,
+  `head_wait_seconds`, `max_head_wait_seconds` and `backfilling` or
+  `draining`; messages say "head waiting 7m/20m, backfilling" or "draining for
+  head", and the `admission` view adds `max_head_wait_seconds` and each
+  reservation's `backfilled`.
   `oberth.ci/size-by-trigger: "branch=M,promotion=XL,schedule=XL"` sets the
   weight per run trigger: comma-separated `trigger=size` pairs, triggers
   `branch`, `promotion`, `schedule` (build.yaml) and `tag` (release.yaml),
@@ -1993,6 +2022,7 @@ alone is never evidence that missing migrations ran.
 | v24 | Unreleased (#954) | Partial index for passed runs by repository and tested SHA, used to validate SHA-pinned fragments | Database restore |
 | v25 | Unreleased (#1017) | kubevirt_grants: add max_vms, max_cores, max_memory_bytes (per-grant VMI run budget; existing grants get 2 VMs, 6 cores, 12Gi) | Database restore |
 | v26 | Unreleased (#1021) | size_grants: audited per-repository maximum admission size (L or XL; no active row means L); `CREATE TABLE IF NOT EXISTS` | Database restore |
+| v27 | Unreleased (#1085) | admission_head_waits: when a commit's run first waited at the admission queue head, so bounded backfill keeps its clock across a restart; `CREATE TABLE IF NOT EXISTS` | Database restore |
 
 **Contract test:** `TestEveryMigrationDocumentedInAgentContract` asserts that
 every migration version in `internal/store/schema.go` has a corresponding

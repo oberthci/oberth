@@ -174,6 +174,9 @@ spec:
             {{- if gt (int ($admission.diskFloorBytes | default 0)) 0 }}
             - --admission-disk-floor-bytes={{ $admission.diskFloorBytes }}
             {{- end }}
+            {{- if $admission.maxHeadWait }}
+            - --admission-max-head-wait={{ $admission.maxHeadWait }}
+            {{- end }}
             {{- /* Unset sizes keep their defaults, so an upgrade that sets only XL works with reused values. */}}
             {{- with merge (deepCopy ($admission.sizeWeights | default dict)) (dict "S" 1 "M" 2 "L" 3 "XL" 0) }}
             - --admission-size-weights=S={{ int .S }},M={{ int .M }},L={{ int .L }},XL={{ int .XL }}

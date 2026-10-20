@@ -65,6 +65,41 @@ type AdmissionBlocker struct {
 	Used         int       `json:"used"`
 	Capacity     int       `json:"capacity"`
 	WaitingSince time.Time `json:"waiting_since"`
+	// Bounded backfill (#1085): HeadSince is when this run started waiting
+	// at the head (it survives a restart), HeadWaitSeconds how long it has,
+	// and MaxHeadWaitSeconds the bound. Backfilling is set while later runs
+	// that fit are still admitted beside it, Draining once the bound passed
+	// and the budget drains for it. All zero when backfill is disabled.
+	HeadSince          time.Time `json:"head_since,omitzero"`
+	HeadWaitSeconds    int64     `json:"head_wait_seconds,omitempty"`
+	MaxHeadWaitSeconds int64     `json:"max_head_wait_seconds,omitempty"`
+	Backfilling        bool      `json:"backfilling,omitempty"`
+	Draining           bool      `json:"draining,omitempty"`
+}
+
+// Backfill describes the head's backfill window, e.g. "head waiting 7m/20m,
+// backfilling" or "draining for head"; empty when backfill is disabled.
+func (blocker AdmissionBlocker) Backfill() string {
+	switch {
+	case blocker.Backfilling:
+		return fmt.Sprintf("head waiting %s/%s, backfilling", waitText(blocker.HeadWaitSeconds), waitText(blocker.MaxHeadWaitSeconds))
+	case blocker.Draining:
+		return fmt.Sprintf("head waited %s of %s, draining for head", waitText(blocker.HeadWaitSeconds), waitText(blocker.MaxHeadWaitSeconds))
+	default:
+		return ""
+	}
+}
+
+// waitText renders whole minutes, or seconds below a minute; a negative wait
+// (a clock step backwards) reads as zero.
+func waitText(seconds int64) string {
+	if seconds < 0 {
+		seconds = 0
+	}
+	if seconds < 60 {
+		return fmt.Sprintf("%ds", seconds)
+	}
+	return fmt.Sprintf("%dm", seconds/60)
 }
 
 // Reason is the parenthesized why of a blocked admission, e.g.
@@ -119,13 +154,15 @@ type SchedulingReason struct {
 // budget, every reservation it holds, and every concurrency group in use. It
 // is an ephemeral observation of one server process, never durable evidence.
 type AdmissionState struct {
-	Capacity     int                    `json:"capacity"`
-	Used         int                    `json:"used"`
-	Runs         int                    `json:"runs"`
-	MaxRuns      int                    `json:"max_runs"`
-	Reservations []AdmissionReservation `json:"reservations"`
-	Groups       []AdmissionGroup       `json:"groups"`
-	Blocker      *AdmissionBlocker      `json:"blocker,omitempty"`
+	Capacity int `json:"capacity"`
+	Used     int `json:"used"`
+	Runs     int `json:"runs"`
+	MaxRuns  int `json:"max_runs"`
+	// MaxHeadWaitSeconds is the backfill bound (#1085); 0 is strict FIFO.
+	MaxHeadWaitSeconds int64                  `json:"max_head_wait_seconds"`
+	Reservations       []AdmissionReservation `json:"reservations"`
+	Groups             []AdmissionGroup       `json:"groups"`
+	Blocker            *AdmissionBlocker      `json:"blocker,omitempty"`
 }
 
 // AdmissionReservation is one claimed run's place in the gate. State is
@@ -145,6 +182,8 @@ type AdmissionReservation struct {
 	Group    string    `json:"group,omitempty"`
 	Position int       `json:"position,omitempty"`
 	Since    time.Time `json:"since"`
+	// Backfilled marks a grant made beside a waiting head (#1085).
+	Backfilled bool `json:"backfilled,omitempty"`
 }
 
 // AdmissionGroup is a repository-scoped concurrency group with a holder or

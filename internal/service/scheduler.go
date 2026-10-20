@@ -45,6 +45,11 @@ type SchedulerConfig struct {
 	MaxConcurrent    int
 	MaxRunLogBytes   int64
 	MutationGate     func(context.Context) error
+	// MaxHeadWait bounds bounded backfill (#1085): while the queue head that
+	// does not fit has waited less than this, later runs that fit are
+	// admitted beside it. Zero is strict FIFO; serve defaults it to
+	// DefaultMaxHeadWait.
+	MaxHeadWait time.Duration
 	// SizeWeights is the operator's admission weight per size (#1021); the
 	// zero value selects DefaultSizeWeights.
 	SizeWeights SizeWeights
@@ -161,6 +166,12 @@ func NewScheduler(config SchedulerConfig) (*Scheduler, error) {
 	scheduler.admission.maxRuns = scheduler.admission.capacity
 	scheduler.admission.onPark = scheduler.signalQueue
 	scheduler.admission.onGrant = scheduler.signalQueue
+	if config.MaxHeadWait > 0 {
+		scheduler.admission.maxHeadWait = config.MaxHeadWait
+	}
+	if _, ok := config.Store.(HeadWaitStore); ok {
+		scheduler.admission.headEvents = make(chan headEvent, 256)
+	}
 	// Opt-in disk floor (#673): when positive, admission holds until the
 	// filesystem has enough free bytes.
 	if config.AdmissionDiskFloorBytes > 0 {
@@ -379,6 +390,11 @@ func (scheduler *Scheduler) Run(ctx context.Context) error {
 		scheduler.onStartupRecovered()
 	}
 	scheduler.signalQueue()
+	workers.Add(1)
+	go func() {
+		defer workers.Done()
+		scheduler.runHeadEvents(workerCtx)
+	}()
 	completed := make(chan error, 2*scheduler.maxConcurrent)
 	active := 0
 	for {
@@ -626,8 +642,10 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 		jobRequest.ConcurrencyGroup = group
 	}
 
+	headSince, estimate := scheduler.admissionHistory(ctx, run)
 	releaseAdmission, err := reservation.acquireRequest(ctx, admissionRequest{
 		RunID: run.ID, RepoID: run.RepoID, Repo: repository.Name, Ref: run.Ref, Size: size, Group: group,
+		RefKind: run.RefKind, SHA: run.SHA, HeadSince: headSince, Estimate: estimate,
 	})
 	if errors.Is(err, errAdmissionAbandoned) {
 		// Superseded or cancelled while waiting: the reservation is already

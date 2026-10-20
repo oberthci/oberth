@@ -13,7 +13,7 @@ type migration struct {
 func LatestMigrationVersion() int { return latestMigrationVersion }
 
 const (
-	latestMigrationVersion = 26
+	latestMigrationVersion = 27
 	// oberthSchemaIdentity is the fresh-deployment default. Existing deployments
 	// supply their original immutable identity through ProtocolConfig; bootstrap
 	// SQL and legacy schema validation use that exact configured operand.
@@ -1106,5 +1106,16 @@ ALTER TABLE kubevirt_grants ADD COLUMN max_memory_bytes INTEGER NOT NULL DEFAULT
     revoked_by TEXT NOT NULL DEFAULT '',
     revoked_at INTEGER,
     CHECK ((revoked_at IS NULL AND revoked_by = '') OR (revoked_at IS NOT NULL AND revoked_by != ''))
+);`},
+	// Admission head-wait origins (#1085): when a run first waited at the
+	// head of the admission queue, keyed by its commit so a run requeued
+	// under a new ID after a restart keeps its bounded-backfill clock.
+	{version: 27, sql: `CREATE TABLE IF NOT EXISTS admission_head_waits (
+    repo_id INTEGER NOT NULL REFERENCES repositories(id) ON DELETE CASCADE,
+    ref_kind TEXT NOT NULL CHECK (ref_kind IN ('branch', 'tag')),
+    ref TEXT NOT NULL,
+    sha TEXT NOT NULL,
+    since INTEGER NOT NULL,
+    PRIMARY KEY (repo_id, ref_kind, ref, sha)
 );`},
 }

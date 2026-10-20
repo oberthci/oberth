@@ -52,6 +52,11 @@
           "minimum": 0,
           "description": "Opt-in disk-space admission floor in bytes. 0 = disabled."
         },
+        "maxHeadWait": {
+          "type": "string",
+          "pattern": "^(0|([0-9]+(\\.[0-9]+)?(ns|us|ms|s|m|h))+)$",
+          "description": "Bounded backfill bound as a Go duration (e.g. 20m); 0s is strict FIFO."
+        },
         "sizeWeights": {
           "type": "object",
           "additionalProperties": false,
