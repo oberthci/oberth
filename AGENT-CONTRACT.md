@@ -696,8 +696,8 @@ continuity checks; it must never be used to reset or bypass those checks.
   each write/flush has a five-second bound. Heartbeat writes and the final
   response never overlap. Disconnect/write failure cancels only observation,
   never durable work, and joins the heartbeat writer before returning.
-- MCP exposes 47 tools: `status`, bounded named-step `logs`, exact-run
-  `run_get`/`run_logs`, `run_retry`, audited `run_rerun` (#1098), audited `run_cancel`, `run_kvm_preflight`, `artifacts`/`artifact_get`, `wait`, `sync`, `promote`,
+- MCP exposes 48 tools: `status`, bounded named-step `logs`, exact-run
+  `run_get`/`run_logs`, `run_retry`, audited `run_rerun` (#1098), audited `run_cancel`/`run_purge`, `run_kvm_preflight`, `artifacts`/`artifact_get`, `wait`, `sync`, `promote`,
   `promotion_list`, `promote_status`, audited `promote_retry` (#1097), `publish_retry`, issue
   create/get/get_many/update/append/close/reopen/delete/list/lock,
   secret-access list/allow/revoke, admin-only `kubevirt_grant` and
@@ -1270,6 +1270,40 @@ continuity checks; it must never be used to reset or bypass those checks.
   (`internal/artifacts.DefaultScanPatterns`, PEM private-key headers) during
   the whole-archive judgment pass; one match refuses the entire collection
   fail-closed with the member named and no content echoed.
+- Run evidence retention (#1101) runs independently of artifact collection every
+  `--retention-sweep-interval` (default `10m`). `--log-retention` and
+  `--artifact-retention` are maximum ages since run completion (Go durations,
+  default `0s`, disabled). `--logs-budget-bytes` defaults to `0` (disabled);
+  `--artifacts-budget-bytes` preserves the existing 4 GiB budget, and
+  `--artifacts-limit-bytes` preserves the 256 MiB collection limit.
+  `--retention-keep-newest` keeps the newest terminal runs per repository,
+  ref kind and ref (default 1). The chart exposes these as `retention.interval`,
+  `retention.keepNewestPerRef`, `retention.logs.{maxAge,budgetBytes}` and
+  `retention.artifacts.{maxAge,budgetBytes,limitBytes}`. Explicit zero budgets
+  and keep counts remain zero on upgrade. Age expiration and exceeding a size
+  budget independently select oldest terminal evidence for removal.
+- `run_purge {id,what,reason}` / `oberth run purge <id> --what
+  logs|artifacts|both --reason <text>` requires an unscoped admin uplink.
+  A reason is required (printable, one line, at most 512 bytes). Manual purges
+  may override the newest-run policy, but neither manual nor automatic purges
+  remove active or release/tag/plan/apply evidence, unfinished cancellation or
+  publication evidence, runs bound to promotions or trusted plans/applies,
+  pending promotion source/result evidence, open CI issue branch evidence, or
+  evidence covered by an active promotion grant. Protected evidence may exceed
+  a budget; configure retention before relying on disk-floor recovery.
+- Purges retain immutable run/step rows and receipts. A committed
+  `run.purge.pending` audit intent precedes file removal; local scheduler
+  writers are excluded (including cancelled runs still closing their logs).
+  Protection checks repeat under a write transaction during removal, and
+  `run.purge` records bytes and outcome.
+  Audit records project durable per-run `Purges` markers in `run_get` and the
+  dashboard detail, avoiding a numbered schema migration. Reads of purged
+  evidence identify the actor and date (HTTP 410); unfinished/failed attempts
+  explicitly report unconfirmed completion and can be retried. Logs include
+  indexes, progress journals and plans. Installation status (`system_status`
+  and `/api/status`) includes retained log/artifact bytes, available bytes,
+  the admission floor, and last sweep/error under `storage`; scoped status
+  omits installation-wide storage information.
 - A raw artifact download (`GET /api/runs/{id}/artifacts/{name}`) streams the
   whole stored object, never the bounded MCP text view, with `Content-Length`
   and `X-Oberth-Artifact-SHA256` describing exactly the bytes sent; a body that

@@ -439,6 +439,8 @@ func TestServeOptionsWitnessGenesisValidation(t *testing.T) {
 
 func minimalValidServeOptions() serveOptions {
 	return serveOptions{
+		retentionInterval:       10 * time.Minute,
+		artifactsLimitBytes:     defaultArtifactsLimitBytes,
 		dataRoot:                "/data",
 		database:                "/data/oberth.sqlite",
 		sshListen:               ":2222",

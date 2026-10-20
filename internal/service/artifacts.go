@@ -180,5 +180,8 @@ func (service *API) artifactRun(ctx context.Context, id string) (string, error) 
 	if err != nil {
 		return "", err
 	}
+	if err := service.purgedEvidence(ctx, run, "artifacts"); err != nil {
+		return "", err
+	}
 	return run.ID, nil
 }

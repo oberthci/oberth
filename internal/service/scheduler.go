@@ -60,27 +60,29 @@ type SchedulerConfig struct {
 }
 
 type Scheduler struct {
-	store           SchedulerStore
-	git             WorkspaceGit
-	logs            LogStore
-	jobs            JobController
-	releaseJobs     ReleaseJobController
-	trusted         TrustedPreflight
-	auditor         Auditor
-	signals         *Signals
-	workspaces      *workspaceLifecycle
-	workspaceRoot   string
-	maxConcurrent   int
-	admission       *weightedAdmission
-	maxRunLogBytes  int64
-	mutationGate    func(context.Context) error
-	wake            chan struct{}
-	publicationWake chan struct{}
-	publicationMu   sync.Mutex
-	publicationIDs  []string
-	publicationSet  map[string]struct{}
-	deliveryPermit  chan struct{}
-	capacityWait    func(context.Context) error
+	store              SchedulerStore
+	git                WorkspaceGit
+	logs               LogStore
+	jobs               JobController
+	releaseJobs        ReleaseJobController
+	trusted            TrustedPreflight
+	auditor            Auditor
+	signals            *Signals
+	workspaces         *workspaceLifecycle
+	workspaceRoot      string
+	maxConcurrent      int
+	admission          *weightedAdmission
+	maxRunLogBytes     int64
+	mutationGate       func(context.Context) error
+	wake               chan struct{}
+	publicationWake    chan struct{}
+	evidenceMu         sync.Mutex
+	evidenceExecutions map[string]int
+	publicationMu      sync.Mutex
+	publicationIDs     []string
+	publicationSet     map[string]struct{}
+	deliveryPermit     chan struct{}
+	capacityWait       func(context.Context) error
 	// promotionRetrier re-promotes a promotion whose delivery found its
 	// target moved (#1097); nil leaves such a promotion failed.
 	promotionRetrier atomic.Pointer[promotionRetrierHook]
@@ -515,7 +517,14 @@ func (scheduler *Scheduler) executeAndCleanupReservedWithGate(
 	reservation *admissionReservation,
 ) error {
 	defer reservation.cancel()
-	executeErr := scheduler.execute(ctx, run, require, reservation)
+	finishEvidence := scheduler.beginEvidenceExecution(run.ID)
+	defer finishEvidence()
+	// A cancellation can terminalize a claim before its goroutine starts. Do
+	// not create logs after a purge that completed in that dispatch window.
+	current, executeErr := scheduler.store.Run(ctx, run.ID)
+	if executeErr == nil && current.Status.Active() {
+		executeErr = scheduler.execute(ctx, run, require, reservation)
+	}
 	if errors.Is(executeErr, errMutationBlocked) {
 		return executeErr
 	}

@@ -24,6 +24,19 @@ runnerImagePrefixes:
 replicaCount: 1
 maxConcurrentJobs: 3
 
+# Age retention and the log budget default off. The artifact budget preserves
+# the existing 4 GiB limit; protected evidence may exceed any budget.
+retention:
+  interval: "10m"
+  keepNewestPerRef: 1
+  logs:
+    maxAge: "0s"
+    budgetBytes: 0
+  artifacts:
+    maxAge: "0s"
+    limitBytes: 268435456
+    budgetBytes: 4294967296
+
 # Maximum lifetime for promotion grants issued via promote_grant. A Go
 # duration string (e.g. "24h", "168h"). Must be positive and at most 168h
 # (7 days). The server defaults to 24h when absent; the hard ceiling is 168h.

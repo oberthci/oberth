@@ -416,3 +416,30 @@ func TestExtractWithoutPatternsStillExtracts(t *testing.T) {
 		t.Fatalf("nil-pattern extract failed: %v", err)
 	}
 }
+
+func TestPurgeRemovesOneCollectionAndRefusesTraversal(t *testing.T) {
+	t.Parallel()
+	store, root := newStore(t)
+	for _, id := range []string{"run-1", "run-2"} {
+		if _, err := store.Extract(id, archiveOf(t, member{name: "report.txt", body: "retained"}), 1024, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	before, err := store.UsageByRun()
+	if err != nil {
+		t.Fatal(err)
+	}
+	removed, err := store.Purge("run-1")
+	if err != nil || removed != before["run-1"] {
+		t.Fatalf("removed=%d expected=%d err=%v", removed, before["run-1"], err)
+	}
+	if _, err := store.Purge("../run-2"); err == nil {
+		t.Fatal("purge accepted traversal")
+	}
+	if body, err := os.ReadFile(filepath.Join(root, "run-2", "report.txt")); err != nil || string(body) != "retained" {
+		t.Fatalf("other collection=%q %v", body, err)
+	}
+	if removed, err := store.Purge("run-1"); err != nil || removed != 0 {
+		t.Fatalf("repeat removal=%d %v", removed, err)
+	}
+}

@@ -170,6 +170,28 @@ spec:
             */}}
             - "--runner-image-prefixes={{ join "," .Values.runnerImagePrefixes }}"
             - --max-concurrent-jobs={{ .Values.maxConcurrentJobs }}
+            {{- $retention := .Values.retention | default dict }}
+            {{- $logRetention := $retention.logs | default dict }}
+            {{- $artifactRetention := $retention.artifacts | default dict }}
+            {{- $artifactBudget := int64 4294967296 }}
+            {{- if hasKey $artifactRetention "budgetBytes" }}
+            {{- $artifactBudget = int64 $artifactRetention.budgetBytes }}
+            {{- end }}
+            {{- $artifactLimit := int64 268435456 }}
+            {{- if hasKey $artifactRetention "limitBytes" }}
+            {{- $artifactLimit = int64 $artifactRetention.limitBytes }}
+            {{- end }}
+            {{- $keepNewest := 1 }}
+            {{- if hasKey $retention "keepNewestPerRef" }}
+            {{- $keepNewest = int $retention.keepNewestPerRef }}
+            {{- end }}
+            - {{ printf "--log-retention=%s" ($logRetention.maxAge | default "0s") | quote }}
+            - {{ printf "--artifact-retention=%s" ($artifactRetention.maxAge | default "0s") | quote }}
+            - --logs-budget-bytes={{ int64 ($logRetention.budgetBytes | default 0) }}
+            - --artifacts-limit-bytes={{ $artifactLimit }}
+            - --artifacts-budget-bytes={{ $artifactBudget }}
+            - {{ printf "--retention-sweep-interval=%s" ($retention.interval | default "10m") | quote }}
+            - --retention-keep-newest={{ $keepNewest }}
             {{- $admission := .Values.admission | default dict -}}
             {{- if gt (int ($admission.diskFloorBytes | default 0)) 0 }}
             - --admission-disk-floor-bytes={{ $admission.diskFloorBytes }}

@@ -21,13 +21,10 @@ func (f *fakeCollector) Collect(context.Context, string) ([]byte, error) {
 }
 
 type fakeArtifactStore struct {
-	stored  []byte
-	evicted []string
-	err     error
-	calls   int
+	stored []byte
+	err    error
+	calls  int
 }
-
-func (f *fakeArtifactStore) Evict(int64) ([]string, error) { return f.evicted, nil }
 
 func (f *fakeArtifactStore) Extract(_ string, stream io.Reader, _ int64) error {
 	f.calls++
@@ -40,7 +37,7 @@ func (f *fakeArtifactStore) Extract(_ string, stream io.Reader, _ int64) error {
 }
 
 func jobsWithArtifacts(collector ArtifactCollector, store ArtifactStore) *ArgoJobs {
-	return &ArgoJobs{collector: collector, artifacts: store, artifactLimit: 1 << 20, artifactBudget: 1 << 30}
+	return &ArgoJobs{collector: collector, artifacts: store, artifactLimit: 1 << 20}
 }
 
 func TestCollectArtifactsStoresWhatTheRunProduced(t *testing.T) {

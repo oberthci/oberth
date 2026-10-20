@@ -8,6 +8,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/model"
 )
 
@@ -572,5 +573,28 @@ func TestReadyIgnoresSecretStoreState(t *testing.T) {
 	// A sealed or failing secret store must not affect readiness.
 	if err := health.Ready(context.Background()); err != nil {
 		t.Fatalf("Ready() = %v; secret store state must not gate readiness", err)
+	}
+}
+
+func TestHealthStorageStatusIsInstallationWide(t *testing.T) {
+	t.Parallel()
+	called := 0
+	health := Health{Storage: func(context.Context) (any, error) {
+		called++
+		return map[string]int64{"logs_bytes": 100, "artifacts_bytes": 200}, nil
+	}}
+	value, err := health.Status(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if value.(HealthStatus).Storage == nil || called != 1 {
+		t.Fatalf("storage status=%#v calls=%d", value, called)
+	}
+	scoped, err := health.ScopedStatus(context.Background(), api.Actor{Identity: "scoped", Scope: []string{"github"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if scoped.(HealthStatus).Storage != nil || called != 1 {
+		t.Fatalf("scoped storage leak=%#v calls=%d", scoped, called)
 	}
 }

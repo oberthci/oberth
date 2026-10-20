@@ -199,6 +199,7 @@ call the proxy hostname directly.
 | `run_retry` | Requeue the newest interrupted or infrastructure-failed branch run using its same repo/ref/SHA; workflow-level failures without a failed step qualify, while test failures and older runs are refused |
 | `run_rerun` | Rerun a failed or interrupted run at the same SHA and ref (`id`, optional `reason`, admin-only `force`), linked by `rerun_of`: covers failed steps (flaky tests), non-newest runs and tag/release runs. Refused while the ref has an active run, once a branch moved past the SHA, for promotion/plan/apply runs, and for a tag that is already published or green or whose release failed only in publication (use `publish_retry` on that run). A publishing-only failure is re-pushed as `publish_retry` does instead of re-run. Non-admins: branch-push runs; tags need admin and `force`. Audited as `run.rerun` |
 | `run_cancel` | Cancel one queued, waiting or running run (audited; `id`, optional `reason`, admin-only `force`). The run becomes `interrupted` with phase `cancelled` and a reason naming the caller; a claimed run's Workflow is deleted and its admission released at once; it is never re-fired and opens no CI issue. Non-admins: branch-push runs outside a concurrency group only. Admins: any run, with `force` for tag/release and apply runs. Cancelling promotion CI fails the promotion without merging. Terminal runs are refused |
+| `run_purge` | Purge retained logs, artifacts or both for a terminal run; requires an unscoped admin uplink and `id`, `what`, `reason`. Active runs and protected release/promotion/issue/grant evidence are refused. Run/step history remains; audited purge markers identify the actor and date |
 | `run_logs` | One exact burn/step log by full run ID or unique 12+ character prefix, optionally filtered |
 | `artifacts` | The files a run kept, with size and modification time |
 | `artifact_get` | One artifact's contents by run ID and name, optionally filtered |
@@ -255,6 +256,45 @@ To wait for a release, pass `{"sha":"<commit-or-tag-object-sha>","trigger":"rele
 promotion names the same commit. Completed releases return
 `still_running: false`; a timeout before a matching release exists keeps
 `still_running: true`. Use `repo` if the SHA identifies runs in several repositories.
+
+### Purging retained evidence
+
+An unscoped admin can call `run_purge` with
+`{"id":"<run-id>","what":"both","reason":"remove retained output"}` or run:
+
+```sh
+oberth run purge <run-id> --what both --reason "remove retained output"
+```
+
+`what` is `logs`, `artifacts` or `both`. A printable, one-line reason is
+required (at most 512 bytes). Active executions, release/tag/plan/apply
+runs, and evidence needed by promotions, trusted plans/applies, open CI issues
+or active promotion grants are protected. There is no force override.
+
+The run and its step results remain visible. `run_get` includes durable
+`Purges` markers; reads of purged evidence report who purged it and when
+(HTTP 410). A pending or failed attempt reports unconfirmed completion and
+can be retried. The periodic retention sweeper uses the same protections;
+its policies and budgets are configured with the chart's `retention` values.
+
+| Chart value | Default | Server flag and behavior |
+|-------------|---------|--------------------------|
+| `retention.interval` | `10m` | `--retention-sweep-interval`: positive interval between sweeps, independent of artifact collection |
+| `retention.keepNewestPerRef` | `1` | `--retention-keep-newest`: newest terminal runs kept per repository/ref; `0` disables this extra protection |
+| `retention.logs.maxAge` | `0s` | `--log-retention`: age since run completion; `0s` disables age retention |
+| `retention.logs.budgetBytes` | `0` | `--logs-budget-bytes`: total log budget; `0` disables size retention |
+| `retention.artifacts.maxAge` | `0s` | `--artifact-retention`: age since run completion; `0s` disables age retention |
+| `retention.artifacts.limitBytes` | `268435456` (256 MiB) | `--artifacts-limit-bytes`: maximum collected artifact bytes per run |
+| `retention.artifacts.budgetBytes` | `4294967296` (4 GiB) | `--artifacts-budget-bytes`: total artifact budget; `0` disables size retention |
+
+Age values use Go durations, for example `720h` for 30 days. Sweeps delete
+oldest eligible evidence when either its age or the global storage budget is
+exceeded. Active runs, protected evidence, and the newest terminal runs per ref
+can keep storage above the budget. Manual purges keep the same evidence
+protections but may remove the newest terminal run. The separate
+`admission.diskFloorBytes` value controls the free-space admission floor.
+
+`system_status` reports storage usage, the disk floor and last sweep.
 
 ### Filtering log output
 

@@ -43,7 +43,6 @@ func buildArgoEngine(
 	fragments app.FragmentLoader,
 	artifactStore app.ArtifactStore,
 	artifactLimit int64,
-	artifactBudget int64,
 	perRepoIdentities map[string]argojob.PerRepoIdentityConfig,
 	identityStore *argojob.IdentityStore,
 ) (*app.ArgoJobs, error) {
@@ -126,7 +125,7 @@ func buildArgoEngine(
 		return nil, err
 	}
 	if artifactStore != nil {
-		jobs.SetArtifacts(seeder, artifactStore, artifactLimit, artifactBudget)
+		jobs.SetArtifacts(seeder, artifactStore, artifactLimit)
 	}
 	if identityStore != nil {
 		jobs.SetIdentityStore(identityStore)
@@ -305,10 +304,6 @@ type artifactStoreAdapter struct {
 func (adapter artifactStoreAdapter) Extract(runID string, stream io.Reader, limit int64) error {
 	_, err := adapter.store.Extract(runID, stream, limit, adapter.scanPatterns)
 	return err
-}
-
-func (adapter artifactStoreAdapter) Evict(budget int64) ([]string, error) {
-	return adapter.store.Evict(budget)
 }
 
 // perRepoStore is the narrow interface the per-repo identity producer needs.

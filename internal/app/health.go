@@ -21,6 +21,7 @@ type ClusterProbe func(context.Context) error
 type VCSProbe func(context.Context, model.Upstream) error
 
 type Health struct {
+	Storage    func(context.Context) (any, error)
 	Store      HealthStore
 	Configured ClusterProbe
 	Cluster    ClusterProbe
@@ -107,6 +108,7 @@ type AuditChainStatus struct {
 }
 
 type HealthStatus struct {
+	Storage       any                `json:"storage,omitempty"`
 	Database      string             `json:"database"`
 	SchemaVersion int                `json:"schema_version,omitempty"`
 	Upstreams     int                `json:"upstreams"`
@@ -175,6 +177,11 @@ func requiresSSHIdentity(upstreams []model.Upstream) bool {
 
 func (health Health) Status(ctx context.Context) (any, error) {
 	status := HealthStatus{Database: "unavailable", SchemaVersion: health.SchemaVersion, VCS: "unavailable", Cluster: "unavailable", Audit: "unavailable", AuditMode: health.AuditMode, Version: health.Version, SecretStore: health.SecretStore}
+	if health.Storage != nil {
+		if storage, err := health.Storage(ctx); err == nil {
+			status.Storage = storage
+		}
+	}
 	if health.Store == nil {
 		return status, nil
 	}

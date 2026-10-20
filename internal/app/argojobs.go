@@ -76,7 +76,6 @@ type ArgoJobs struct {
 	collector         ArtifactCollector
 	artifacts         ArtifactStore
 	artifactLimit     int64
-	artifactBudget    int64
 	artifactFailures  map[string]string
 	reconcilerHealthy ReconcilerHealthChecker
 

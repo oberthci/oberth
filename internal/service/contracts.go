@@ -518,7 +518,8 @@ type LiveLogResponse struct {
 // intentionally mirrors the raw /api/runs list encoding (Go field names) so
 // the dashboard reads one consistent shape.
 type RunDetailResponse struct {
-	Scheduling *model.RunScheduling `json:"Scheduling,omitempty"`
+	Purges     []model.EvidencePurge `json:"Purges,omitempty"`
+	Scheduling *model.RunScheduling  `json:"Scheduling,omitempty"`
 	Repository model.Repository
 	Run        model.Run
 	Steps      []model.StepResult

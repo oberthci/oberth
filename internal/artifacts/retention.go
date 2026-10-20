@@ -80,14 +80,20 @@ func (store *Store) usageByRun() ([]runUsage, error) {
 			continue
 		}
 		info, infoErr := entry.Info()
-		if infoErr != nil {
+		if os.IsNotExist(infoErr) {
 			continue
+		}
+		if infoErr != nil {
+			return nil, fmt.Errorf("artifacts: stat collection: %w", infoErr)
 		}
 		var bytes int64
 		root := filepath.Join(store.directory, entry.Name())
 		walkErr := filepath.Walk(root, func(_ string, file os.FileInfo, err error) error {
+			if os.IsNotExist(err) {
+				return nil
+			}
 			if err != nil {
-				return nil //nolint:nilerr
+				return err
 			}
 			if file.Mode().IsRegular() {
 				bytes += file.Size()
@@ -95,9 +101,41 @@ func (store *Store) usageByRun() ([]runUsage, error) {
 			return nil
 		})
 		if walkErr != nil {
-			continue
+			return nil, fmt.Errorf("artifacts: measure collection: %w", walkErr)
 		}
 		runs = append(runs, runUsage{runID: entry.Name(), bytes: bytes, modified: info.ModTime()})
 	}
 	return runs, nil
+}
+
+// UsageByRun is a snapshot for the independent, protected retention sweeper.
+func (store *Store) UsageByRun() (map[string]int64, error) {
+	runs, err := store.usageByRun()
+	if err != nil {
+		return nil, err
+	}
+	usage := make(map[string]int64, len(runs))
+	for _, run := range runs {
+		usage[run.runID] = run.bytes
+	}
+	return usage, nil
+}
+
+func (store *Store) Purge(runID string) (int64, error) {
+	path, err := store.runPath(runID)
+	if err != nil {
+		return 0, err
+	}
+	entries, err := store.List(runID)
+	if err != nil {
+		return 0, err
+	}
+	var bytes int64
+	for _, entry := range entries {
+		bytes += entry.Size
+	}
+	if err := os.RemoveAll(path); err != nil {
+		return 0, fmt.Errorf("artifacts: purge %s: %w", runID, err)
+	}
+	return bytes, nil
 }

@@ -395,6 +395,9 @@ func resolveRemoteRunID(ctx context.Context, api *client.Client, given string) (
 }
 
 func runRunDetail(ctx context.Context, arguments []string, output io.Writer) error {
+	if len(arguments) > 0 && arguments[0] == "purge" {
+		return runRunPurge(ctx, arguments[1:], output)
+	}
 	if len(arguments) > 0 && arguments[0] == "retry" {
 		return runRunRetry(ctx, arguments[1:], output)
 	}

@@ -87,6 +87,7 @@ type APIConfig struct {
 	Uplinks UplinkDirectory
 	// RunReruns backs run_rerun; nil disables the tool.
 	RunReruns RunRerunStore
+	Retention *Retention
 }
 
 type API struct {
@@ -136,6 +137,7 @@ type API struct {
 	// caller is about to close.
 	closing   *backgroundClosing
 	runReruns RunRerunStore
+	retention *Retention
 	// scope is set on the per-call copy serving a scoped actor (#073).
 	scope *repoScope
 }
@@ -192,7 +194,7 @@ func NewAPI(config APIConfig) (*API, error) {
 		secretStoreVerifier: config.SecretStoreVerifier,
 		repositoryRemover:   config.RepositoryRemover, removeGitCache: config.RemoveGitCache,
 		promotionGrants: config.PromotionGrants, promotionGrantMaxLifetime: promotionGrantMaxLifetime,
-		runCancels: config.RunCancels, runReruns: config.RunReruns, uplinks: config.Uplinks, background: &sync.WaitGroup{},
+		runCancels: config.RunCancels, retention: config.Retention, runReruns: config.RunReruns, uplinks: config.Uplinks, background: &sync.WaitGroup{},
 		lifetime: lifetime, stopLifetime: stopLifetime, closing: &backgroundClosing{},
 	}, nil
 }
@@ -373,6 +375,26 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 			return nil, err
 		}
 		return service.rerunRun(ctx, actor, arguments.ID, arguments.Reason, arguments.Force)
+	case "run_purge":
+		if !actor.Admin || actor.Scoped() {
+			return nil, fmt.Errorf("%w: run_purge requires an unscoped admin uplink", ErrForbidden)
+		}
+		var arguments struct {
+			ID     string `json:"id"`
+			What   string `json:"what"`
+			Reason string `json:"reason"`
+		}
+		if err := decodeTool(raw, &arguments); err != nil {
+			return nil, err
+		}
+		if service.retention == nil {
+			return nil, fmt.Errorf("%w: retention", ErrUnavailable)
+		}
+		value, err := service.retention.Purge(ctx, actor, arguments.ID, arguments.What, arguments.Reason)
+		if errors.Is(err, store.ErrInvalid) {
+			return nil, fmt.Errorf("%w: %w", ErrInvalidInput, err)
+		}
+		return value, err
 	case "run_logs":
 		var arguments struct {
 			ID      string `json:"id"`
@@ -926,6 +948,12 @@ func (service *API) Run(ctx context.Context, actor api.Actor, id string) (any, e
 	if response.Run.DisplayStatus == "queued" && response.Scheduling != nil {
 		response.Run.DisplayReason = response.Scheduling.Message
 	}
+	if service.retention != nil && run.Status.Terminal() {
+		response.Purges, err = service.retention.Database.RunEvidencePurges(ctx, run.ID)
+		if err != nil {
+			return nil, err
+		}
+	}
 	if service.repositories != nil {
 		repository, repositoryErr := service.repositories.Repository(ctx, run.RepoID)
 		if repositoryErr != nil && !errors.Is(repositoryErr, store.ErrNotFound) {
@@ -975,7 +1003,7 @@ func (service *API) RunLogFiltered(ctx context.Context, actor api.Actor, id, bur
 	if !recorded {
 		return nil, fmt.Errorf("no log range for burn %q step %q: %w", burn, step, store.ErrNotFound)
 	}
-	body, meta, err := service.readStepLogFiltered(run, burn, step, filter)
+	body, meta, err := service.readStepLogFiltered(ctx, run, burn, step, filter)
 	if err != nil {
 		return nil, fmt.Errorf("read bounded run log: %w", err)
 	}
@@ -1008,6 +1036,9 @@ func (service *API) RunLogLive(ctx context.Context, actor api.Actor, id string, 
 	}
 	run, err := service.resolveReadRunID(ctx, id)
 	if err != nil {
+		return nil, err
+	}
+	if err := service.purgedEvidence(ctx, run, "logs"); err != nil {
 		return nil, err
 	}
 	terminal := run.Status.Terminal()
@@ -1604,7 +1635,7 @@ func (service *API) logsFor(ctx context.Context, repositoryName, selector, wante
 	if err != nil {
 		return LogResponse{}, err
 	}
-	body, meta, err := service.readStepLogFiltered(run, burn, step, filter)
+	body, meta, err := service.readStepLogFiltered(ctx, run, burn, step, filter)
 	if err != nil {
 		return LogResponse{}, fmt.Errorf("read bounded run log: %w", err)
 	}
@@ -1619,7 +1650,10 @@ func newLogResponse(runID, burn, step string, body []byte, meta runlog.Meta) Log
 	}
 }
 
-func (service *API) readStepLogFiltered(run model.Run, burn, step string, filter runlog.Filter) ([]byte, runlog.Meta, error) {
+func (service *API) readStepLogFiltered(ctx context.Context, run model.Run, burn, step string, filter runlog.Filter) ([]byte, runlog.Meta, error) {
+	if err := service.purgedEvidence(ctx, run, "logs"); err != nil {
+		return nil, runlog.Meta{}, err
+	}
 	if run.Status.Active() {
 		body, meta, err := service.logs.ReadActiveFiltered(run.ID, burn, step, filter)
 		if errors.Is(err, os.ErrNotExist) {
@@ -2357,7 +2391,7 @@ func wireIssueLock(lock model.IssueLock) api.IssueLockResponse {
 
 func mutatingTool(name string) bool {
 	switch name {
-	case "sync", "promote", "promote_retry", "publish_retry", "run_retry", "run_rerun", "run_cancel", "issue_create", "issue_update", "issue_append", "issue_close", "issue_reopen", "issue_delete", "issue_lock",
+	case "sync", "promote", "promote_retry", "publish_retry", "run_retry", "run_rerun", "run_cancel", "run_purge", "issue_create", "issue_update", "issue_append", "issue_close", "issue_reopen", "issue_delete", "issue_lock",
 		"access_allow", "access_revoke",
 		"kubevirt_grant", "kubevirt_revoke",
 		"size_grant", "size_revoke",

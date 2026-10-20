@@ -69,8 +69,8 @@ reframed for the Argo execution engine where they still apply:
   easier to implement than under the single-Job model.
 - **Artifact storage** (from #690): checksummed, access-controlled store for
   build outputs and failure evidence, addressable by SHA and step. Argo
-  Artifacts provide the transport; Oberth-side retention policy is the
-  remaining work.
+  Artifacts provide the transport; protected periodic retention and audited
+  per-run purge are implemented by #1101.
 
 ## MCP and client surface
 

@@ -419,6 +419,11 @@ func toolDefinitions() []map[string]any {
 			"reason": stringProperty("Why the run is rerun (printable text, at most 512 bytes)"),
 			"force":  map[string]any{"type": "boolean", "description": "Admin only: confirm rerunning a tag/release run, whose Workflow re-executes release.yaml"},
 		}, "id")),
+		tool("run_purge", "Purge retained logs, artifacts, or both for one terminal run. Requires an unscoped admin uplink and a reason. Active runs, release evidence, promotion evidence, open-issue evidence and active grants are protected. Run and step history stays visible; every purge is audited.", object(map[string]any{
+			"id":     stringProperty("Full run ID or unique hexadecimal prefix (at least 12 characters)"),
+			"what":   map[string]any{"type": "string", "enum": []string{"logs", "artifacts", "both"}},
+			"reason": stringProperty("Why evidence is purged; required printable text, at most 512 bytes"),
+		}, "id", "what", "reason")),
 		tool("artifacts", "List the files a run kept: test reports, coverage output, anything the pipeline copied to OBERTH_ARTIFACTS. Cheap; call this before artifact_get.", object(map[string]any{"id": stringProperty("Exact run ID")}, "id")),
 		tool("artifact_get", "Return one artifact's contents by run ID and name, optionally filtered server-side. Prefer a pattern over retrieving a whole file: the response reports total and matched line counts so a narrowed read is never mistaken for a complete one.", object(logFilterProperties(map[string]any{"id": stringProperty("Exact run ID"), "name": stringProperty("Artifact name as reported by artifacts")}), "id", "name")),
 		tool("run_logs", "Return one exact burn/step log by full run ID or unique hexadecimal prefix (at least 12 characters), optionally filtered server-side. Active steps without retained output return an actionable pending error; retry after the step completes. Prefer a pattern over retrieving a whole step: the response reports total and matched line counts so a narrowed read is never mistaken for a complete one.", object(logFilterProperties(map[string]any{"id": stringProperty("Full run ID or unique hexadecimal prefix (at least 12 characters)"), "burn": stringProperty("Burn name"), "step": stringProperty("Step name")}), "id", "burn", "step")),

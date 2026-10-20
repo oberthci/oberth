@@ -966,6 +966,67 @@
           "description": "Actual operator-approved KVM device supplemental GID; positive when recipes are configured, zero when disabled."
         }
       }
+    },
+    "retention": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "interval",
+        "keepNewestPerRef",
+        "logs",
+        "artifacts"
+      ],
+      "properties": {
+        "interval": {
+          "type": "string",
+          "minLength": 1
+        },
+        "keepNewestPerRef": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "logs": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "maxAge",
+            "budgetBytes"
+          ],
+          "properties": {
+            "maxAge": {
+              "type": "string",
+              "minLength": 1
+            },
+            "budgetBytes": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        },
+        "artifacts": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "maxAge",
+            "budgetBytes",
+            "limitBytes"
+          ],
+          "properties": {
+            "maxAge": {
+              "type": "string",
+              "minLength": 1
+            },
+            "budgetBytes": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "limitBytes": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        }
+      }
     }
   },
   "definitions": {

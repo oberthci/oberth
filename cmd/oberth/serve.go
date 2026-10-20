@@ -126,6 +126,11 @@ type serveOptions struct {
 	fragmentAllowlist       string
 	artifactsLimitBytes     int64
 	artifactsBudgetBytes    int64
+	logRetention            time.Duration
+	artifactRetention       time.Duration
+	logsBudgetBytes         int64
+	retentionInterval       time.Duration
+	retentionKeepNewest     int
 	maxConcurrent           int
 	admissionDiskFloorBytes int64
 	admissionSizeWeights    string
@@ -243,6 +248,11 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 	flags.StringVar(&options.fragmentAllowlist, "fragment-allowlist", "", "comma-separated repositories usable as pipeline fragments; empty permits every registered repository")
 	flags.Int64Var(&options.artifactsLimitBytes, "artifacts-limit-bytes", defaultArtifactsLimitBytes, "maximum total bytes of artifacts kept per run")
 	flags.Int64Var(&options.artifactsBudgetBytes, "artifacts-budget-bytes", defaultArtifactsBudgetBytes, "total artifact storage before the oldest runs are evicted")
+	flags.DurationVar(&options.logRetention, "log-retention", 0, "maximum age of terminal run logs (0 disables age retention)")
+	flags.DurationVar(&options.artifactRetention, "artifact-retention", 0, "maximum age of terminal run artifacts (0 disables age retention)")
+	flags.Int64Var(&options.logsBudgetBytes, "logs-budget-bytes", 0, "total retained log budget (0 disables size retention)")
+	flags.DurationVar(&options.retentionInterval, "retention-sweep-interval", 10*time.Minute, "interval between protected evidence retention sweeps")
+	flags.IntVar(&options.retentionKeepNewest, "retention-keep-newest", 1, "terminal runs retained per repository/ref during automatic sweeps")
 	flags.IntVar(&options.maxConcurrent, "max-concurrent-jobs", 3, "maximum concurrent Jobs")
 	flags.StringVar(&options.admissionSizeWeights, "admission-size-weights", service.DefaultSizeWeights.String(), "admission weight per size as S=..,M=..,L=..,XL=..; XL=0 is the whole budget (an XL run runs alone), a positive XL lets XL share the host; the budget is --max-concurrent-jobs M runs (#1021)")
 	flags.DurationVar(&options.admissionMaxHeadWait, "admission-max-head-wait", service.DefaultMaxHeadWait, "bounded backfill (#1085): while the admission queue head does not fit, later runs that fit are admitted beside it until it has waited this long; then the budget drains for it (0 = strict FIFO)")
@@ -336,6 +346,9 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 }
 
 func validateServeOptions(options serveOptions) error {
+	if options.logRetention < 0 || options.artifactRetention < 0 || options.logsBudgetBytes < 0 || options.artifactsBudgetBytes < 0 || options.artifactsLimitBytes <= 0 || options.retentionInterval <= 0 || options.retentionKeepNewest < 0 {
+		return errors.New("serve: retention ages, budgets and keep count must be nonnegative; sweep interval and artifact collection limit must be positive")
+	}
 	root := filepath.Clean(options.dataRoot)
 	database := filepath.Clean(options.database)
 	if !filepath.IsAbs(root) || options.dataRoot != root || !pathWithin(root, database) {
@@ -685,6 +698,13 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 	if err != nil {
 		return err
 	}
+	retention := &service.Retention{
+		Database: database, Logs: logs, Artifacts: artifactStore,
+		LogPolicy:      service.RetentionPolicy{Age: options.logRetention, BudgetBytes: options.logsBudgetBytes},
+		ArtifactPolicy: service.RetentionPolicy{Age: options.artifactRetention, BudgetBytes: options.artifactsBudgetBytes},
+		KeepNewest:     options.retentionKeepNewest, DataRoot: options.dataRoot, DiskFloorBytes: options.admissionDiskFloorBytes,
+		MutationGate: anchors.AllowMutation,
+	}
 	perRepoIdentities, err := buildPerRepoIdentities(ctx, database)
 	if err != nil {
 		return fmt.Errorf("build per-repo identities: %w", err)
@@ -702,7 +722,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 	identityStore := argojob.NewIdentityStoreWithSteps(perRepoIdentities, buildPerRepoCIIdentities(perRepoIdentities), perStepIdentities)
 	argoJobs, err := buildArgoEngine(options, restConfig, kube, database, database, fragmentLoader,
 		artifactStoreAdapter{store: artifactStore, scanPatterns: artifacts.DefaultScanPatterns},
-		options.artifactsLimitBytes, options.artifactsBudgetBytes, perRepoIdentities, identityStore)
+		options.artifactsLimitBytes, perRepoIdentities, identityStore)
 	if err != nil {
 		return err
 	}
@@ -740,6 +760,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 		logger.Printf("admission: XL weight %d exceeds the budget %d (%d jobs x M weight %d); XL runs are admitted at %d, alone",
 			options.sizeWeights.XL, budget, options.maxConcurrent, options.sizeWeights.M, budget)
 	}
+	retention.AcquirePurge = scheduler.AcquireEvidencePurge
 	health := app.Health{Store: database, Audit: anchors.Ready, VCSCache: &app.VCSSnapshot{}, Configured: func(ctx context.Context) error {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -920,6 +941,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 	// Wire the declaration recorder so Workflow admission records (repo, step,
 	// path) declarations for `access_list --pending`. Issue #623, finding 4.
 	argoJobs.SetDeclarationRecorder(database)
+	health.Storage = retention.Status
 	controlAPI, err := service.NewAPI(service.APIConfig{
 		KVMPreflights:      database,
 		SchedulingObserver: argoJobs, Admission: scheduler,
@@ -940,6 +962,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 		RunCancels:                database,
 		Uplinks:                   database,
 		RunReruns:                 database,
+		Retention:                 retention,
 	})
 	if err != nil {
 		return err
@@ -1063,7 +1086,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 	if err != nil {
 		return err
 	}
-	return runComponents(ctx, options, scheduler, anchors, git, sshService, httpsServer, goProxyServer, newAdminGateServer(anchors.AllowMutation, options.database, scheduler.NotifyQueue), activateScheduler, accessReconciler, schedules, ciIssues, logger, controlAPI.Shutdown)
+	return runComponents(ctx, options, scheduler, anchors, git, sshService, httpsServer, goProxyServer, newAdminGateServer(anchors.AllowMutation, options.database, scheduler.NotifyQueue), activateScheduler, accessReconciler, schedules, ciIssues, retention, logger, controlAPI.Shutdown)
 }
 
 type startupContinuity interface {
@@ -1466,6 +1489,7 @@ func runComponents(
 	accessReconciler *service.AccessReconciler,
 	schedules *app.Schedules,
 	ciIssues *service.CIIssueReconciler,
+	retention *service.Retention,
 	logger *log.Logger,
 	apiShutdown func(context.Context) error,
 ) error {
@@ -1534,6 +1558,18 @@ func runComponents(
 		close(schedulerActivated)
 		return scheduler.Run(runCtx)
 	})
+	if retention != nil {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			select {
+			case <-schedulerActivated:
+			case <-runCtx.Done():
+				return
+			}
+			retention.Run(runCtx, options.retentionInterval, logger)
+		}()
+	}
 	start("audit anchor", func() error { return anchors.Run(runCtx) })
 	start("SSH", func() error { return sshService.Serve(runCtx, sshListener) })
 	start("HTTPS", func() error {
@@ -1970,6 +2006,10 @@ func classifyViewError(err error) (int, string) {
 		// State-based refusals (in-flight runs, immutable history, terminal
 		// records) are actionable answers, not server faults: keep the message
 		// instead of collapsing it into an opaque internal-error reference.
+		return http.StatusConflict, err.Error()
+	case errors.Is(err, service.ErrEvidencePurged):
+		return http.StatusGone, err.Error()
+	case errors.Is(err, store.ErrEvidenceProtected):
 		return http.StatusConflict, err.Error()
 	case errors.Is(err, service.ErrStepLogPending):
 		return http.StatusConflict, err.Error()
