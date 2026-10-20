@@ -147,24 +147,25 @@ type serveOptions struct {
 	// Argo execution engine. Leaving argoNamespace empty leaves the engine
 	// off entirely, which is the default: every repository then runs on the
 	// Kubernetes Job engine exactly as before.
-	argoNamespace             string
-	argoControllerProfile     string
-	argoPipelineAccount       string
-	argoCredentialedAccount   string
-	argoCISecretsAccount      string
-	argoExecutorAccount       string
-	argoVMLauncherAccount     string
-	argoContainerDiskPrefixes string
-	argoKubeVirtMaxVMs        int
-	argoKubeVirtMaxCores      int
-	argoKubeVirtMaxMemory     string
-	argoVaultAddress          string
-	argoVaultCredentialedRole string
-	argoVaultCISecretsRole    string
-	argoVaultCACert           string
-	argoReleaseWIFConfig      string
-	argoWorkflowTimeout       time.Duration
-	argoWorkflowTTL           int
+	argoNamespace                string
+	argoControllerProfile        string
+	argoExecutorScratchSizeLimit string
+	argoPipelineAccount          string
+	argoCredentialedAccount      string
+	argoCISecretsAccount         string
+	argoExecutorAccount          string
+	argoVMLauncherAccount        string
+	argoContainerDiskPrefixes    string
+	argoKubeVirtMaxVMs           int
+	argoKubeVirtMaxCores         int
+	argoKubeVirtMaxMemory        string
+	argoVaultAddress             string
+	argoVaultCredentialedRole    string
+	argoVaultCISecretsRole       string
+	argoVaultCACert              string
+	argoReleaseWIFConfig         string
+	argoWorkflowTimeout          time.Duration
+	argoWorkflowTTL              int
 	// argoSourceStorageClass names the class for the per-run source claim the
 	// server creates in the pipeline namespace. Empty selects the cluster
 	// default, which is what a single-node install wants.
@@ -260,6 +261,7 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 	flags.StringVar(&options.secretStoreTransitKey, "secretstore-transit-key", "", "OpenBao transit key for trusted Plan artifacts")
 	flags.BoolVar(&options.secretStoreInsecureHTTP, "secretstore-insecure-http", false, "DEVELOPMENT ONLY: allow a plain-HTTP OpenBao address")
 	flags.StringVar(&options.argoNamespace, "argo-namespace", "", "namespace for Argo Workflow pipelines (required)")
+	flags.StringVar(&options.argoExecutorScratchSizeLimit, "argo-executor-scratch-size-limit", "1Gi", "per-Pod Argo executor scratch size limit (Kubernetes quantity)")
 	flags.StringVar(&options.argoControllerProfile, "argo-controller-profile", "", "exact controller profile to verify before nonroot submission; empty disables nonroot")
 	flags.StringVar(&options.argoSourceStorageClass, "argo-source-storage-class", "", "storage class for per-run pipeline source volumes (empty: cluster default)")
 	flags.StringVar(&options.argoPipelineAccount, "argo-pipeline-serviceaccount", "oberth-argo-pipeline", "ServiceAccount for pipeline templates without approved secrets; no Vault role, no token")

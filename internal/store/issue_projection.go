@@ -81,6 +81,11 @@ func (s *Store) projectRunIssue(ctx context.Context, tx *sql.Tx, run model.Run, 
 	if run.Status == model.RunInterrupted {
 		return nil
 	}
+	// Infrastructure failures are actionable through run_retry, not repository
+	// CI-red issues. They also must not resolve an existing test failure issue.
+	if run.Status == model.RunFailed && run.Phase == "infrastructure" && run.FailedStep == "" {
+		return nil
+	}
 	work, err := runIssueWork(ctx, tx, run.ID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil
@@ -143,6 +148,18 @@ func runIssueBody(run model.Run, failureTail string) string {
 func (s *Store) projectPromotionIssue(ctx context.Context, tx *sql.Tx, promotion model.Promotion, now int64) error {
 	if promotion.Status == model.PromotionInterrupted {
 		return nil
+	}
+	if promotion.Status == model.PromotionFailed && promotion.RunID != "" {
+		var infrastructure bool
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM runs
+			WHERE id = ? AND repo_id = ? AND trigger = 'promotion'
+			AND status = 'failed' AND phase = 'infrastructure' AND failed_step = '')`,
+			promotion.RunID, promotion.RepoID).Scan(&infrastructure); err != nil {
+			return fmt.Errorf("load promotion run for issue projection: %w", err)
+		}
+		if infrastructure {
+			return nil
+		}
 	}
 	work, err := promotionIssueWork(ctx, tx, promotion.ID)
 	if errors.Is(err, sql.ErrNoRows) {

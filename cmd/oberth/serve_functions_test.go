@@ -595,6 +595,22 @@ func TestParseServeOptionsRejectsInvalidArgoWorkflowTimings(t *testing.T) {
 	}
 }
 
+func TestParseServeOptionsExecutorScratch(t *testing.T) {
+	for _, size := range []string{"1Gi", "4Gi", "0", "-1Gi", "invalid"} {
+		options, err := parseServeOptions([]string{
+			"--argo-namespace", "argo-pipelines",
+			"--argo-executor-scratch-size-limit", size,
+		}, io.Discard)
+		valid := size == "1Gi" || size == "4Gi"
+		if valid && (err != nil || options.argoExecutorScratchSizeLimit != size) {
+			t.Fatalf("scratch size %s: %#v, %v", size, options, err)
+		}
+		if !valid && (err == nil || !strings.Contains(err.Error(), "executor scratch size limit")) {
+			t.Fatalf("accepted invalid scratch size %s: %v", size, err)
+		}
+	}
+}
+
 func TestParseServeOptionsRejectsMissingArgoNamespace(t *testing.T) {
 	t.Parallel()
 	_, err := parseServeOptions(nil, io.Discard)

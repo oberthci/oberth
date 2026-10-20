@@ -706,6 +706,16 @@ func TestResultMapping(t *testing.T) {
 			wantPhase:  "passed",
 		},
 		{
+			name: "kubelet infrastructure with failed step",
+			completion: argojob.Completion{
+				Infrastructure: true, Reason: "Evicted: kubelet storage message",
+				FailedBurn: "test", FailedStep: "unit",
+			},
+			wantStatus: model.RunFailed,
+			wantPhase:  "infrastructure",
+			wantError:  "Evicted: kubelet storage message",
+		},
+		{
 			name:       "failed with reason",
 			completion: argojob.Completion{Succeeded: false, Reason: "OOMKilled"},
 			wantStatus: model.RunFailed,
@@ -757,6 +767,9 @@ func TestResultMapping(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			result := jobs.result(tc.completion)
+			if tc.completion.Infrastructure && (result.FailedBurn != "" || result.FailedStep != "") {
+				t.Fatal("infrastructure failure retained test-failure attribution")
+			}
 			if result.Status != tc.wantStatus {
 				t.Fatalf("status = %q, want %q", result.Status, tc.wantStatus)
 			}

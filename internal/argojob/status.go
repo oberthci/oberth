@@ -18,28 +18,30 @@ import (
 // StepResult is one executed pipeline step, in Oberth's vocabulary rather than
 // Argo's. The engine derives it from the Workflow's node tree.
 type StepResult struct {
-	NodeID           string
-	AttemptAmbiguous bool
-	Termination      *model.StepDiagnostic
-	Burn             string
-	Step             string
-	Ordinal          int
-	Status           runprogress.Status
-	ExitCode         int
-	PodName          string
-	StartedAt        *time.Time
-	FinishedAt       *time.Time
+	NodeID               string
+	AttemptAmbiguous     bool
+	Termination          *model.StepDiagnostic
+	InfrastructureReason string
+	Burn                 string
+	Step                 string
+	Ordinal              int
+	Status               runprogress.Status
+	ExitCode             int
+	PodName              string
+	StartedAt            *time.Time
+	FinishedAt           *time.Time
 }
 
 // Completion is the terminal outcome of one submitted Workflow.
 type Completion struct {
-	Name       string
-	Succeeded  bool
-	Phase      string
-	Reason     string
-	FailedBurn string
-	FailedStep string
-	Steps      []StepResult
+	Name           string
+	Succeeded      bool
+	Infrastructure bool
+	Phase          string
+	Reason         string
+	FailedBurn     string
+	FailedStep     string
+	Steps          []StepResult
 }
 
 // StepResults maps a Workflow's node tree onto Oberth's two-level burn/step
@@ -80,14 +82,15 @@ func StepResults(workflow *wfv1.Workflow) []StepResult {
 			podName = PodName(workflow, node)
 		}
 		results = append(results, StepResult{
-			NodeID:     node.ID,
-			Burn:       burn,
-			Step:       step,
-			Status:     stepStatus(node.Phase),
-			ExitCode:   exitCode(node),
-			PodName:    podName,
-			StartedAt:  optionalTime(node.StartedAt),
-			FinishedAt: optionalTime(node.FinishedAt),
+			InfrastructureReason: nodeInfrastructureReason(node),
+			NodeID:               node.ID,
+			Burn:                 burn,
+			Step:                 step,
+			Status:               stepStatus(node.Phase),
+			ExitCode:             exitCode(node),
+			PodName:              podName,
+			StartedAt:            optionalTime(node.StartedAt),
+			FinishedAt:           optionalTime(node.FinishedAt),
 		})
 	}
 	// Deterministic order: start time, then burn, then step. Parallel steps
@@ -439,5 +442,6 @@ func completionFor(workflow *wfv1.Workflow) Completion {
 	if !completion.Succeeded && completion.Reason == "" {
 		completion.Reason = "Workflow " + strings.ToLower(completion.Phase)
 	}
+	completion.classifyInfrastructure()
 	return completion
 }

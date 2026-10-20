@@ -555,6 +555,13 @@ if grep -Fq -- '--admission-disk-floor-bytes=' "$admission_legacy_manifest"; the
 fi
 rm -f "$admission_legacy_manifest"
 
+# Executor scratch keeps a safe default for reused values and accepts overrides.
+grep -q -- '--argo-executor-scratch-size-limit=1Gi' "$manifest"
+render --set argo.executorScratchSizeLimit=4Gi >"$argo_legacy_manifest"
+grep -q -- '--argo-executor-scratch-size-limit=4Gi' "$argo_legacy_manifest"
+render --set argo.executorScratchSizeLimit=null >"$argo_legacy_manifest"
+grep -q -- '--argo-executor-scratch-size-limit=1Gi' "$argo_legacy_manifest"
+
 # Ordinary nonroot capability must stay off unless the exact built-in profile
 # is selected. Selection grants one named public ConfigMap GET, not broad reads.
 if grep -q -- '--argo-controller-profile=' "$manifest"; then

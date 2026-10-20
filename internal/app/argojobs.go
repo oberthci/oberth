@@ -724,6 +724,10 @@ func (jobs *ArgoJobs) result(completion argojob.Completion) service.JobResult {
 		result.Phase = result.FailedBurn
 		result.Error = "successful Workflow reported a failed step"
 	}
+	if result.Status == model.RunFailed && completion.Infrastructure {
+		result.Phase = "infrastructure"
+		result.FailedBurn, result.FailedStep = "", ""
+	}
 	return result
 }
 

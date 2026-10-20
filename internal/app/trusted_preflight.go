@@ -266,6 +266,9 @@ func (p *TrustedPreflights) Execute(ctx context.Context, job service.JobRequest,
 		return err
 	}
 	if !completion.Succeeded {
+		if completion.Infrastructure {
+			return fmt.Errorf("trusted preflight infrastructure failure: %s", completion.Reason)
+		}
 		return errors.New("trusted preflight Workflow failed")
 	}
 	refusalCode = "observation_refused"

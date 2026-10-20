@@ -69,6 +69,10 @@ const (
 // Config is the administrator-owned half of the Argo engine. Every field that
 // decides trust is here, not in the repository document.
 type Config struct {
+	// ExecutorScratchSizeLimit bounds Argo emissary output and control files.
+	// Empty selects 1Gi; this is separate from the test container /tmp.
+	ExecutorScratchSizeLimit string
+
 	// NonrootProfile selects an exact built-in verification policy, not an
 	// unchecked capability. Empty disables selected nonroot leaves.
 	NonrootProfile string
@@ -290,6 +294,12 @@ func (config *Config) applyDefaults() {
 
 // Validate rejects a configuration that could not produce a safe submission.
 func (config Config) Validate() error {
+	if config.ExecutorScratchSizeLimit != "" {
+		quantity, err := resource.ParseQuantity(config.ExecutorScratchSizeLimit)
+		if err != nil || quantity.Sign() <= 0 || quantity.Cmp(resource.MustParse("1Pi")) > 0 {
+			return errors.New("argojob: executor scratch size limit must be a positive Kubernetes quantity no larger than 1Pi")
+		}
+	}
 	if config.TrustedKVMGroup < 0 || config.TrustedKVMGroup > 2147483647 {
 		return errors.New("argojob: trusted KVM group must be a positive supported GID, or zero when disabled")
 	}

@@ -171,6 +171,7 @@ func appendTrustedKVM(workflow *wfv1.Workflow, config Config, request Request) e
 		"seccompProfile": map[string]any{"type": string(corev1.SeccompProfileTypeRuntimeDefault), "localhostProfile": nil},
 	}
 	patch := map[string]any{
+		"volumes":        []corev1.Volume{{Name: "var-run-argo", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{SizeLimit: config.executorScratchLimit()}}}},
 		"initContainers": []any{map[string]any{"name": "init", "securityContext": helperSecurity}},
 		"containers":     []any{map[string]any{"name": "wait", "securityContext": helperSecurity, "volumeMounts": []any{map[string]any{"mountPath": "/mainctrfs/work/artifacts", "$patch": "delete"}, map[string]any{"mountPath": "/mainctrfs/trusted", "$patch": "delete"}}}},
 	}

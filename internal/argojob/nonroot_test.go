@@ -40,6 +40,11 @@ spec:
 
 func nonrootBuiltFixture(t *testing.T, script bool) *wfv1.Workflow {
 	t.Helper()
+	return nonrootBuiltWithScratch(t, script, "")
+}
+
+func nonrootBuiltWithScratch(t *testing.T, script bool, scratch string) *wfv1.Workflow {
+	t.Helper()
 	document := nonrootTestDocument
 	if script {
 		wf, err := argoworkflow.Decode([]byte(document))
@@ -57,6 +62,7 @@ func nonrootBuiltFixture(t *testing.T, script bool) *wfv1.Workflow {
 		document = string(encoded)
 	}
 	config := testConfig()
+	config.ExecutorScratchSizeLimit = scratch
 	config.NonrootProfile = argoworkflow.NonrootStaticProfile
 	config.CICacheRoot = "/server/cache/ci"
 	config.ReleaseCacheRoot = "/server/cache/release"
@@ -172,7 +178,7 @@ func TestNonrootPreparationMountsOnlyPrivateScratch(t *testing.T) {
 func TestNonrootPreparationRequiresPinnedImage(t *testing.T) {
 	wf := nonrootBuiltFixture(t, false)
 	for _, image := range []string{"", "busybox:latest", "busybox:1.37"} {
-		if _, err := nonrootPodPatch(&wf.Spec.Templates[0], image); err == nil {
+		if _, err := nonrootPodPatch(&wf.Spec.Templates[0], Config{SourceSeedImage: image}); err == nil {
 			t.Fatalf("accepted preparation image %q", image)
 		}
 	}
