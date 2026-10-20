@@ -576,7 +576,7 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 		if arguments.MaxMemory != "" {
 			bytes, err := store.ParseKubeVirtMemory(arguments.MaxMemory)
 			if err != nil {
-				return nil, fmt.Errorf("%w: %v", ErrInvalidInput, err)
+				return nil, fmt.Errorf("%w: %w", ErrInvalidInput, err)
 			}
 			budget.MaxMemoryBytes = bytes
 		}
