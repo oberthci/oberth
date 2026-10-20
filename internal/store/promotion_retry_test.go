@@ -263,3 +263,37 @@ func TestReleasedPromotionGrantStillHonoursRevocationAndExpiry(t *testing.T) {
 		t.Fatalf("retry under a revoked grant error = %v, want ErrInvalidState", err)
 	}
 }
+
+func TestUplinksByIdentityReportsCurrentAuthority(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)
+	s := testStore(t, &now)
+	register := func(fingerprint string, digestByte byte, admin bool, scope ...string) {
+		t.Helper()
+		digest := make([]byte, 32)
+		digest[0] = digestByte
+		credential, err := s.CreateTokenCredential(ctx, model.TokenCredentialSpec{Name: "agent@host", Digest: digest})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.RegisterUplink(ctx, "admin@host", model.UplinkSpec{Fingerprint: fingerprint, Identity: "agent@host",
+			TokenCredentialID: credential.ID, Admin: admin, Scope: scope}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if uplinks, err := s.UplinksByIdentity(ctx, "agent@host"); err != nil || len(uplinks) != 0 {
+		t.Fatalf("unknown identity = %#v, %v", uplinks, err)
+	}
+	register("SHA256:laptop", 1, true)
+	register("SHA256:desktop", 2, false, "github")
+	uplinks, err := s.UplinksByIdentity(ctx, "agent@host")
+	if err != nil || len(uplinks) != 2 {
+		t.Fatalf("uplinks = %#v, %v", uplinks, err)
+	}
+	if !uplinks[0].Admin || uplinks[1].Admin || len(uplinks[1].Scope) != 1 || uplinks[1].Scope[0] != "github" {
+		t.Fatalf("uplink authority = %#v", uplinks)
+	}
+	if _, err := s.UplinksByIdentity(ctx, " "); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("blank identity error = %v", err)
+	}
+}

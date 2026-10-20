@@ -248,3 +248,46 @@ func (s *Store) PromotionLineage(ctx context.Context, id string) (model.Promotio
 	}
 	return lineage, nil
 }
+
+// UplinksByIdentity returns every current uplink with identity, with its
+// admin flag and scope, so the server's own promotion retry can re-check the
+// original actor's authority as it is now (#1097). A removed uplink yields
+// none.
+func (s *Store) UplinksByIdentity(ctx context.Context, identity string) ([]model.Uplink, error) {
+	if strings.TrimSpace(identity) == "" {
+		return nil, fmt.Errorf("%w: uplink identity is required", ErrInvalid)
+	}
+	fingerprints, err := s.uplinkFingerprintsByIdentity(ctx, identity)
+	if err != nil {
+		return nil, err
+	}
+	uplinks := make([]model.Uplink, 0, len(fingerprints))
+	for _, fingerprint := range fingerprints {
+		uplink, err := s.UplinkByFingerprint(ctx, fingerprint)
+		if err != nil {
+			return nil, err
+		}
+		uplinks = append(uplinks, uplink)
+	}
+	return uplinks, nil
+}
+
+func (s *Store) uplinkFingerprintsByIdentity(ctx context.Context, identity string) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT fingerprint FROM uplinks WHERE identity = ? ORDER BY id`, identity)
+	if err != nil {
+		return nil, fmt.Errorf("list uplinks by identity: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var fingerprints []string
+	for rows.Next() {
+		var fingerprint string
+		if err := rows.Scan(&fingerprint); err != nil {
+			return nil, fmt.Errorf("scan uplink fingerprint: %w", err)
+		}
+		fingerprints = append(fingerprints, fingerprint)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list uplinks by identity: %w", err)
+	}
+	return fingerprints, nil
+}

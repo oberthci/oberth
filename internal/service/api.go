@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/oberthci/oberth/internal/api"
@@ -80,6 +81,9 @@ type APIConfig struct {
 	PromotionGrantMaxLifetime time.Duration // Default 24h, hard ceiling 168h (7 days).
 	// RunCancels backs run_cancel; nil disables the tool.
 	RunCancels RunCancelStore
+	// Uplinks re-resolves an uplink's current authority for the server's
+	// own promotion retry (#1097); nil disables that retry.
+	Uplinks UplinkDirectory
 }
 
 type API struct {
@@ -114,6 +118,10 @@ type API struct {
 	promotionGrants           PromotionGrantStore
 	promotionGrantMaxLifetime time.Duration
 	runCancels                RunCancelStore
+	uplinks                   UplinkDirectory
+	// background tracks automatic promotion retries (#1097); a pointer so
+	// the per-actor copies share it.
+	background *sync.WaitGroup
 	// scope is set on the per-call copy serving a scoped actor (#073).
 	scope *repoScope
 }
@@ -168,7 +176,7 @@ func NewAPI(config APIConfig) (*API, error) {
 		secretStoreVerifier: config.SecretStoreVerifier,
 		repositoryRemover:   config.RepositoryRemover, removeGitCache: config.RemoveGitCache,
 		promotionGrants: config.PromotionGrants, promotionGrantMaxLifetime: promotionGrantMaxLifetime,
-		runCancels: config.RunCancels,
+		runCancels: config.RunCancels, uplinks: config.Uplinks, background: &sync.WaitGroup{},
 	}, nil
 }
 
@@ -2440,12 +2448,12 @@ func promotionPublishRetryRefusal(promotion model.Promotion) error {
 	if promotion.Status == model.PromotionPassed {
 		return fmt.Errorf("%w: promotion %s already delivered %s", ErrInvalidInput, promotion.ID, promotion.TargetRef)
 	}
-	if head := movedTargetHead(promotion.Error); head != "" {
-		return fmt.Errorf("%w: promotion %s lost the race: %s moved to %s; promote_retry {\"id\":%q} merges onto the new head and re-tests",
-			ErrInvalidInput, promotion.ID, promotion.TargetRef, head, promotion.ID)
+	failure := ""
+	if text := strings.TrimSpace(promotion.Error); text != "" {
+		failure = " (it failed with: " + strings.ReplaceAll(text, "\n", "; ") + ")"
 	}
-	return fmt.Errorf("%w: promotion publications are not re-pushed; promote_retry {\"id\":%q} merges promotion %s onto the current %s head and re-tests",
-		ErrInvalidInput, promotion.ID, promotion.ID, promotion.TargetRef)
+	return fmt.Errorf("%w: promotion publications are not re-pushed; promote_retry {\"id\":%q} merges promotion %s onto the current %s head and re-tests%s",
+		ErrInvalidInput, promotion.ID, promotion.ID, promotion.TargetRef, failure)
 }
 
 func decodeTool(raw json.RawMessage, value any) error {

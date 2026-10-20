@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"slices"
 	"strings"
 	"time"
 
@@ -24,29 +25,6 @@ const maxAutoMovedPromotionRetries = 2
 // and, for a fast-forward, its delivery. It is detached from the request or
 // run whose delivery failed.
 const promotionAutoRetryTimeout = 10 * time.Minute
-
-// upstreamMovedMarker is part of every failure publicationConcurrencyError
-// produces; movedTargetHead parses the head the remote moved to.
-const upstreamMovedMarker = " moved: expected "
-
-// movedTargetHead returns the head a promotion publication found instead of
-// the base it was merged onto, or "" when the failure was not a moved target
-// (a deleted target is not retried automatically).
-func movedTargetHead(failure string) string {
-	index := strings.Index(failure, upstreamMovedMarker)
-	if index < 0 {
-		return ""
-	}
-	_, found, ok := strings.Cut(failure[index:], ", found ")
-	if !ok {
-		return ""
-	}
-	head := strings.ToLower(strings.TrimSpace(strings.SplitN(found, "\n", 2)[0]))
-	if !validOID(head) {
-		return ""
-	}
-	return head
-}
 
 // promoteRetry is MCP promote_retry: it re-runs a failed or interrupted
 // promotion as a new promotion of the same repository, source SHA and target,
@@ -91,26 +69,36 @@ func (service *API) promoteRetry(ctx context.Context, actor api.Actor, id string
 
 // retryPromotion admits and plans the retry of failed as actor.
 func (service *API) retryPromotion(ctx context.Context, actor api.Actor, failed model.Promotion, mode string) (model.Promotion, error) {
-	repository, err := service.repositoryByID(ctx, failed.RepoID)
+	repository, candidate, promotion, err := service.admitPromotionRetry(ctx, actor, failed, mode)
 	if err != nil {
 		return model.Promotion{}, err
 	}
+	return service.planAdmittedPromotion(ctx, actor, repository, candidate, failed.TargetRef, promotion)
+}
+
+// admitPromotionRetry durably admits the retry of failed as actor, with its
+// promotion.retry lineage, without preparing the merge.
+func (service *API) admitPromotionRetry(ctx context.Context, actor api.Actor, failed model.Promotion, mode string) (model.Repository, model.Run, model.Promotion, error) {
+	repository, err := service.repositoryByID(ctx, failed.RepoID)
+	if err != nil {
+		return model.Repository{}, model.Run{}, model.Promotion{}, err
+	}
 	candidate, err := service.runs.ResolveRun(ctx, repository.ID, failed.SourceSHA)
 	if err != nil {
-		return model.Promotion{}, fmt.Errorf("resolve promotion source %s: %w", failed.SourceSHA, err)
+		return model.Repository{}, model.Run{}, model.Promotion{}, fmt.Errorf("resolve promotion source %s: %w", failed.SourceSHA, err)
 	}
 	if !sameOID(candidate.SHA, failed.SourceSHA) || candidate.Status != model.RunPassed {
-		return model.Promotion{}, fmt.Errorf("%w: the newest run for %s is %s (%s), not green; rerun it before retrying promotion %s",
+		return model.Repository{}, model.Run{}, model.Promotion{}, fmt.Errorf("%w: the newest run for %s is %s (%s), not green; rerun it before retrying promotion %s",
 			ErrInvalidInput, failed.SourceSHA, candidate.ID, candidate.Status, failed.ID)
 	}
 	promotion, err := service.admitPromotion(ctx, actor, repository, candidate, failed.TargetRef, failed.ID, mode)
 	if err != nil {
 		if errors.Is(err, store.ErrInvalidState) {
-			return model.Promotion{}, fmt.Errorf("%w: %s", ErrInvalidInput, err.Error())
+			return model.Repository{}, model.Run{}, model.Promotion{}, fmt.Errorf("%w: %s", ErrInvalidInput, err.Error())
 		}
-		return model.Promotion{}, err
+		return model.Repository{}, model.Run{}, model.Promotion{}, err
 	}
-	return service.planAdmittedPromotion(ctx, actor, repository, candidate, failed.TargetRef, promotion)
+	return repository, candidate, promotion, nil
 }
 
 func (service *API) repositoryByID(ctx context.Context, id int64) (model.Repository, error) {
@@ -129,40 +117,106 @@ func (service *API) repositoryByID(ctx context.Context, id int64) (model.Reposit
 	return model.Repository{}, fmt.Errorf("%w: repository", store.ErrNotFound)
 }
 
+// UplinkDirectory reads current uplinks by identity, so the server's own
+// promotion retry re-checks the original actor's authority as it is now.
+type UplinkDirectory interface {
+	UplinksByIdentity(context.Context, string) ([]model.Uplink, error)
+}
+
+// currentPromotionAuthority re-resolves the authority of the uplink that
+// admitted failed, as it is now. The retry continues only while an uplink with
+// that identity exists. A direct (admin) promotion keeps direct authority only
+// while every uplink with that identity is still an admin; a granted one acts
+// as a non-admin and needs its grant, re-checked at admission. Uplinks that
+// share an identity but disagree on scope are refused rather than guessed.
+func (service *API) currentPromotionAuthority(ctx context.Context, failed model.Promotion) (api.Actor, error) {
+	if service.uplinks == nil {
+		return api.Actor{}, fmt.Errorf("%w: uplink directory", ErrUnavailable)
+	}
+	uplinks, err := service.uplinks.UplinksByIdentity(ctx, failed.Actor)
+	if err != nil {
+		return api.Actor{}, err
+	}
+	if len(uplinks) == 0 {
+		return api.Actor{}, fmt.Errorf("%w: uplink %s that admitted promotion %s no longer exists", ErrForbidden, failed.Actor, failed.ID)
+	}
+	actor := api.Actor{Identity: failed.Actor, Fingerprint: uplinks[0].Fingerprint, Admin: true,
+		Scope: append([]string(nil), uplinks[0].Scope...)}
+	for _, uplink := range uplinks {
+		actor.Admin = actor.Admin && uplink.Admin
+		if !slices.Equal(uplink.Scope, uplinks[0].Scope) {
+			return api.Actor{}, fmt.Errorf("%w: uplinks named %s disagree on scope", ErrForbidden, failed.Actor)
+		}
+	}
+	if failed.GrantID == "" && !actor.Admin {
+		return api.Actor{}, fmt.Errorf("%w: uplink %s promoted %s as an admin and is no longer one", ErrForbidden, failed.Actor, failed.ID)
+	}
+	if failed.GrantID != "" {
+		// A granted promotion never gains direct authority, even if its
+		// uplink has since become an admin: it stays bound to a grant.
+		actor.Admin = false
+	}
+	return actor, nil
+}
+
 // RetryMovedPromotion is the scheduler's hook after a promotion publication
 // failed because the target moved past the base it was merged onto (#1097):
 // another promotion or an outside push landed first. It re-promotes the same
 // tuple onto the new head, which re-tests the merged result, up to
-// maxAutoMovedPromotionRetries times in a row. The retry continues the
-// original authority: direct for a promotion an admin made, the same grant
-// (still unconsumed, since nothing was delivered) otherwise; a revoked or
-// expired grant stops it. It is recorded as promotion.retry with mode auto,
-// and promote_status on the failed promotion reports it as retried_as.
+// maxAutoMovedPromotionRetries times in a row. The original uplink's current
+// authority is re-resolved (currentPromotionAuthority): a removed uplink, a
+// revoked admin flag, a narrowed scope, or a revoked or expired grant stops
+// it. Admission is synchronous, so promote_status on the failed promotion
+// reports the retry as retried_as at once; merge preparation and any
+// fast-forward delivery run in the background, holding no admission
+// reservation or delivery permit of the run or request that failed.
 func (service *API) RetryMovedPromotion(ctx context.Context, failed model.Promotion) {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), promotionAutoRetryTimeout)
-	defer cancel()
 	if err := service.requireMutation(ctx); err != nil {
+		cancel()
 		log.Printf("oberth: automatic retry of moved promotion %s skipped: %v", failed.ID, err)
 		return
 	}
 	lineage, err := service.promotions.PromotionLineage(ctx, failed.ID)
 	if err != nil {
+		cancel()
 		log.Printf("oberth: automatic retry of moved promotion %s skipped: %v", failed.ID, err)
 		return
 	}
 	if lineage.Mode == model.PromotionRetryAuto && lineage.AutoAttempt >= maxAutoMovedPromotionRetries {
+		cancel()
 		log.Printf("oberth: promotion %s lost the moved-target race %d times in a row; not retrying again automatically (promote_retry retries it)",
 			failed.ID, lineage.AutoAttempt+1)
 		return
 	}
-	actor := api.Actor{Identity: failed.Actor, Admin: failed.GrantID == ""}
-	retried, err := service.retryPromotion(ctx, actor, failed, model.PromotionRetryAuto)
-	if err != nil {
-		log.Printf("oberth: automatic retry of moved promotion %s failed: %v", failed.ID, err)
-		return
+	actor, err := service.currentPromotionAuthority(ctx, failed)
+	if err == nil {
+		var scoped *API
+		if scoped, err = service.forActor(ctx, actor); err == nil {
+			var repository model.Repository
+			var candidate model.Run
+			var retried model.Promotion
+			repository, candidate, retried, err = scoped.admitPromotionRetry(ctx, actor, failed, model.PromotionRetryAuto)
+			if err == nil {
+				log.Printf("oberth: promotion %s found %s moved; retried as promotion %s", failed.ID, failed.TargetRef, retried.ID)
+				service.background.Add(1)
+				go func() {
+					defer service.background.Done()
+					defer cancel()
+					if _, planErr := scoped.planAdmittedPromotion(ctx, actor, repository, candidate, failed.TargetRef, retried); planErr != nil {
+						log.Printf("oberth: automatic retry %s of promotion %s: %v", retried.ID, failed.ID, planErr)
+					}
+				}()
+				return
+			}
+		}
 	}
-	log.Printf("oberth: promotion %s found %s moved; retried as promotion %s", failed.ID, failed.TargetRef, retried.ID)
+	cancel()
+	log.Printf("oberth: automatic retry of moved promotion %s failed: %v", failed.ID, err)
 }
+
+// waitBackground waits for automatic promotion retries started so far.
+func (service *API) waitBackground() { service.background.Wait() }
 
 // promotionRetriedAs names the promotion that retried a terminal, undelivered
 // promotion, or "" when there is none yet.

@@ -76,6 +76,25 @@ func (git *scriptedPromotionGit) PushPromotion(_ context.Context, _, target, sha
 	return nil
 }
 
+// stubUplinkDirectory serves current uplinks by identity; tests change it to
+// revoke or remove the uplink between admission and the automatic retry.
+type stubUplinkDirectory struct {
+	mu      sync.Mutex
+	uplinks map[string][]model.Uplink
+}
+
+func (directory *stubUplinkDirectory) UplinksByIdentity(_ context.Context, identity string) ([]model.Uplink, error) {
+	directory.mu.Lock()
+	defer directory.mu.Unlock()
+	return append([]model.Uplink(nil), directory.uplinks[identity]...), nil
+}
+
+func (directory *stubUplinkDirectory) set(identity string, uplinks ...model.Uplink) {
+	directory.mu.Lock()
+	defer directory.mu.Unlock()
+	directory.uplinks[identity] = uplinks
+}
+
 func (git *scriptedPromotionGit) counts() (prepared, pushed int) {
 	git.mu.Lock()
 	defer git.mu.Unlock()
@@ -87,7 +106,17 @@ func (git *scriptedPromotionGit) counts() (prepared, pushed int) {
 // way serve wires them.
 func newPromotionRetryHarness(t *testing.T, git *scriptedPromotionGit, results ...JobResult) (*controlFixture, *Scheduler, *API) {
 	t.Helper()
+	fixture, scheduler, service, _ := newPromotionRetryHarnessWithUplinks(t, git, results...)
+	return fixture, scheduler, service
+}
+
+func newPromotionRetryHarnessWithUplinks(t *testing.T, git *scriptedPromotionGit, results ...JobResult) (*controlFixture, *Scheduler, *API, *stubUplinkDirectory) {
+	t.Helper()
 	fixture := newControlFixture(t, results...)
+	uplinks := &stubUplinkDirectory{uplinks: map[string][]model.Uplink{
+		"agent@host": {{Identity: "agent@host", Fingerprint: "SHA256:agent", Admin: true}},
+		"admin@host": {{Identity: "admin@host", Fingerprint: "SHA256:admin", Admin: true}},
+	}}
 	git.controlGit = fixture.git
 	scheduler, err := NewScheduler(SchedulerConfig{
 		Store: fixture.store, Git: git, Logs: fixture.logs, Jobs: fixture.jobs, ReleaseJobs: fixture.jobs,
@@ -103,14 +132,15 @@ func newPromotionRetryHarness(t *testing.T, git *scriptedPromotionGit, results .
 		Enqueues: scheduler, Git: git, Logs: fixture.logs, Auditor: fixture.store,
 		Signals: fixture.signals, MaximumWait: 50 * time.Millisecond,
 		PromotionWorkspaceRoot: filepath.Join(fixture.root, "retry-promotion-work"),
-		PromotionGrants:        fixture.store,
+		PromotionGrants:        fixture.store, Uplinks: uplinks,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	scheduler.SetPromotionRetrier(service)
+	t.Cleanup(service.waitBackground)
 	seedGreenPromotionCandidate(t, fixture, retrySourceSHA)
-	return fixture, scheduler, service
+	return fixture, scheduler, service, uplinks
 }
 
 func promoteForRetry(t *testing.T, service *API, actor api.Actor) string {
@@ -165,10 +195,13 @@ func TestMovedTargetPromotionIsRetriedOntoNewHeadAndDelivered(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if original.Status != model.PromotionFailed || movedTargetHead(original.Error) != retryMovedSHA {
+	if original.Status != model.PromotionFailed || !strings.Contains(original.Error, "found "+retryMovedSHA) {
 		t.Fatalf("original promotion = %#v, want failed with main moved to %s", original, retryMovedSHA)
 	}
+	// Admission is synchronous, so the retry is visible at once; its merge
+	// preparation runs in the background.
 	status := promoteStatus(t, service, admin, originalID)
+	service.waitBackground()
 	if status.RetriedAs == "" || status.RetriedAs == originalID {
 		t.Fatalf("promote_status of the moved promotion = %#v, want retried_as", status)
 	}
@@ -218,6 +251,7 @@ func TestMovedTargetAutomaticRetryIsBounded(t *testing.T) {
 	fixture, _, service := newPromotionRetryHarness(t, git)
 	admin := api.Actor{Identity: "agent@host", Admin: true}
 	id := promoteForRetry(t, service, admin)
+	service.waitBackground()
 
 	chain := []string{id}
 	for {
@@ -375,15 +409,45 @@ func TestPublishRetryRefusesPromotionsAndPointsAtPromoteRetry(t *testing.T) {
 	}
 }
 
-func TestMovedTargetHeadParsesOnlyMovedRefs(t *testing.T) {
-	for failure, want := range map[string]string{
-		"upstream main moved: expected " + retryBaseSHA + ", found " + retryMovedSHA:                            retryMovedSHA,
-		"rejected\nupstream main moved: expected " + retryBaseSHA + ", found " + strings.ToUpper(retryMovedSHA): retryMovedSHA,
-		"upstream main moved: expected " + retryBaseSHA + ", found missing":                                     "",
-		"ssh: connection reset by peer": "",
+// The automatic retry re-resolves the original uplink's authority: an admin
+// that lost its admin flag, or an uplink that was removed, is not re-promoted
+// with the authority it no longer has.
+func TestMovedTargetRetryRefusesRevokedAuthority(t *testing.T) {
+	for name, revoke := range map[string]func(*stubUplinkDirectory){
+		"admin flag revoked": func(directory *stubUplinkDirectory) {
+			directory.set("agent@host", model.Uplink{Identity: "agent@host", Fingerprint: "SHA256:agent"})
+		},
+		"uplink removed": func(directory *stubUplinkDirectory) { directory.set("agent@host") },
+		"scope narrowed": func(directory *stubUplinkDirectory) {
+			directory.set("agent@host", model.Uplink{Identity: "agent@host", Fingerprint: "SHA256:agent", Admin: true, Scope: []string{"github"}})
+		},
 	} {
-		if got := movedTargetHead(failure); got != want {
-			t.Errorf("movedTargetHead(%q) = %q, want %q", failure, got, want)
-		}
+		t.Run(name, func(t *testing.T) {
+			git := &scriptedPromotionGit{
+				plans: []gitcache.MergeCandidate{
+					{BaseSHA: retryBaseSHA, MergedSHA: retryMergedSHA},
+					{BaseSHA: retryMovedSHA, MergedSHA: retryMerged2},
+				},
+				pushes: []scriptedPush{{err: errors.New("rejected"), moveTo: retryMovedSHA}},
+			}
+			fixture, scheduler, service, uplinks := newPromotionRetryHarnessWithUplinks(t, git, passedPromotionCI)
+			admin := api.Actor{Identity: "agent@host", Admin: true}
+			id := promoteForRetry(t, service, admin)
+			revoke(uplinks)
+			if err := scheduler.ProcessNext(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			service.waitBackground()
+			status := promoteStatus(t, service, admin, id)
+			if status.Promotion.Status != model.PromotionFailed || status.RetriedAs != "" {
+				t.Fatalf("moved promotion after its authority went = %#v, want failed and not retried", status)
+			}
+			if prepared, _ := git.counts(); prepared != 1 {
+				t.Fatalf("merge preparations = %d, want only the original", prepared)
+			}
+			if lineage, err := fixture.store.PromotionLineage(context.Background(), id); err != nil || lineage.RetriedAs != "" {
+				t.Fatalf("lineage = %#v, %v", lineage, err)
+			}
+		})
 	}
 }

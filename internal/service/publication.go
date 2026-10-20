@@ -69,7 +69,7 @@ func deliverPublication(
 	case remotePublicationResult:
 		return publications.FinalizePublication(ctx, publication.ID, model.PublicationDelivered, "")
 	case remotePublicationOther:
-		return publications.FinalizePublication(ctx, publication.ID, model.PublicationFailed,
+		return finalizeMovedPublication(ctx, publications, publication, remoteSHA, exists,
 			publicationConcurrencyError(publication, remoteSHA, exists).Error())
 	}
 	return attemptPublicationMutation(ctx, publications, git, auditor, repository, repositoryInput, publication, ref, false)
@@ -117,8 +117,21 @@ func attemptPublicationMutation(
 			return publications.FinalizePublication(ctx, publication.ID, model.PublicationFailed, mutationErr.Error())
 		}
 		failure := errors.Join(mutationErr, publicationConcurrencyError(publication, remoteSHA, exists))
-		return publications.FinalizePublication(ctx, publication.ID, model.PublicationFailed, failure.Error())
+		return finalizeMovedPublication(ctx, publications, publication, remoteSHA, exists, failure.Error())
 	}
+}
+
+// finalizeMovedPublication fails a publication whose remote ref held neither
+// its planned base nor its result. For a promotion whose target still exists,
+// the finalization carries the head it moved to, so the moved-target retry
+// (#1097) is decided on this typed signal and never on error text.
+func finalizeMovedPublication(ctx context.Context, publications PublicationStore, publication model.Publication,
+	remoteSHA string, exists bool, failure string) (model.PublicationFinalization, error) {
+	finalization, err := publications.FinalizePublication(ctx, publication.ID, model.PublicationFailed, failure)
+	if err == nil && exists && publication.PromotionID != "" && validOID(remoteSHA) {
+		finalization.TargetMovedTo = strings.ToLower(remoteSHA)
+	}
+	return finalization, err
 }
 
 func mutatePublication(ctx context.Context, git PublicationGit, repository string, publication model.Publication, forceBranch bool) error {

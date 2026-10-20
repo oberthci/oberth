@@ -503,6 +503,10 @@ type PublicationFinalization struct {
 	Publication Publication
 	Run         Run
 	Promotion   Promotion
+	// TargetMovedTo is set, only by the delivery that finalized it, when a
+	// promotion publication failed because the remote target held this
+	// head instead of the planned base (#1097). It is not persisted.
+	TargetMovedTo string
 }
 
 // TrustedPlanStatus is the append-oriented lifecycle of one explicitly

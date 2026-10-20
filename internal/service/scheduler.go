@@ -96,8 +96,7 @@ func (scheduler *Scheduler) retryMovedPromotion(ctx context.Context, finalizatio
 	hook := scheduler.promotionRetrier.Load()
 	if hook == nil || hook.retrier == nil || finalization.Promotion.ID == "" ||
 		finalization.Promotion.Status != model.PromotionFailed ||
-		finalization.Publication.Status != model.PublicationFailed ||
-		movedTargetHead(finalization.Publication.Error) == "" {
+		finalization.Publication.Status != model.PublicationFailed || finalization.TargetMovedTo == "" {
 		return
 	}
 	hook.retrier.RetryMovedPromotion(ctx, finalization.Promotion)

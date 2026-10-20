@@ -991,9 +991,19 @@ continuity checks; it must never be used to reset or bypass those checks.
   base) is retried by the server itself (#1097): after the delivery permit is
   released, a new promotion of the same repository, source SHA and target is
   admitted, merged onto the moved head and re-tested exactly like `promote`,
-  at most twice in a row (a deleted target is not retried). It continues the
-  original authority: direct for an admin's promotion, otherwise a grant that
-  is still active (a revoked or expired grant stops it). `promote_retry {id}`
+  at most twice in a row (a deleted target is not retried). The decision
+  reads a typed field the delivery sets on its finalization
+  (`TargetMovedTo`), never the stored error text. The original uplink's
+  authority is re-resolved as it is now: the retry needs an uplink with that
+  identity to still exist; a direct promotion keeps direct authority only
+  while every uplink with that identity is still an admin; a granted one acts
+  as a non-admin and needs a grant that is still active; its current scope
+  must still cover the repository, and uplinks sharing the identity but
+  disagreeing on scope stop it. Only admission (a store transaction) runs in
+  the failing run's worker or request, so `promote_status` reports the retry
+  at once; merge preparation and any fast-forward delivery run in the
+  background and hold no admission reservation or delivery permit of the
+  work that failed. `promote_retry {id}`
   (CLI `oberth promotion retry <id>`) does the same on request for any failed
   or interrupted promotion (push failure, CI or infrastructure failure,
   restart), with `promote`'s authorization. A retry is refused while a
