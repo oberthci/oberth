@@ -292,9 +292,44 @@ step: a single step can exceed a model's context window.
 | `repo_list` | List registered repositories with upstream and probe state |
 | `repo_remove` | Remove a repository mapping and its Git cache (admin-only) |
 | `run_list` | List recent runs with optional repo/ref filter (bounded page) |
+| `schedule_list` | Schedules declared in `.oberth/schedule.yaml`: cron, next run, last outcome, pause (scoped uplinks see their repositories) |
+| `schedule_pause` | Admin-only: pause one schedule entry (audited `schedule.pause`) |
+| `schedule_resume` | Admin-only: resume a paused entry (audited `schedule.resume`) |
+| `schedule_trigger` | Admin-only: run one entry now through normal CI admission (audited `schedule.trigger`) |
 | `system_status` | System health: database, upstreams, cluster, audit, version |
 | `secretstore_plan` | Admin-only read-only: compute per-repo policy/role diff from approved grants; never writes policies |
 | `secretstore_verify` | Admin-only real secret-store preflight using configured server or per-repo release/CI identity; paths/key counts only by default |
+
+## Schedules
+
+Schedules are declared in a repository's `.oberth/schedule.yaml` on its default
+branch; a commit changes them. The `schedule_*` tools (and `oberth schedules
+list|pause|resume|trigger`, which call them remotely) operate on what is
+declared without one:
+
+- `schedule_list {repo?}` lists each entry's `cron`, `next_at`, `last_fired_at`,
+  `last_outcome` (`fired`, `skipped`, `failed`, `refused` or `paused`) and, when
+  paused, who paused it, when and why. Entries the scheduler refuses are listed
+  with the reason. A scoped uplink sees its own repositories only.
+- `schedule_pause {repo, entry, reason}` holds an entry: each tick at which it
+  comes due records outcome `paused` instead of firing. `schedule_resume
+  {repo, entry}` lifts the hold; an entry that came due meanwhile fires at the
+  next tick, once. Both are admin-only, change nothing when the entry is
+  already in that state, and are audited (`schedule.pause`, `schedule.resume`
+  on resource `<upstream/org/repo>#<entry>`). The audit chain is the stored
+  state, so there is no separate table and no schema change.
+- `schedule_trigger {repo, entry, force?}` queues the entry's run now at its
+  branch head with `trigger=schedule`, through the same `EnqueueCI` admission
+  path as a cron fire or a push, attributed to the calling uplink. It is
+  admin-only and audited (`schedule.trigger`, written before the run is
+  queued, so a failed audit queues nothing). Like the cron path it is refused
+  while the repository has active runs, and while the entry is paused, unless
+  `force` is set; a forced run supersedes the branch's active runs as a push
+  would. A manual trigger does not count as the entry's last fire, so it never
+  moves the cron cadence.
+
+A scoped admin uplink can pause, resume and trigger only entries of its own
+upstreams; another upstream's repository answers as if it did not exist.
 
 ## Scheduling observations
 

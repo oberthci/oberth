@@ -11,6 +11,7 @@ import (
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/schedule"
 	"github.com/oberthci/oberth/internal/service"
+	"github.com/oberthci/oberth/internal/store"
 )
 
 const ScheduleActor = "oberth:scheduler"
@@ -39,6 +40,18 @@ type ScheduleRuns interface {
 type ScheduleState interface {
 	ScheduleFires(ctx context.Context, repo string) (map[string]time.Time, error)
 	RecordScheduleFire(ctx context.Context, repo, entry string, at time.Time, outcome string) error
+}
+
+// SchedulePauseReader is an optional ScheduleState capability: the paused
+// entries of one repository (#1106). A state without it never pauses.
+type SchedulePauseReader interface {
+	SchedulePauses(ctx context.Context, repo string) (map[string]model.SchedulePause, error)
+}
+
+// ScheduleOutcomeReader is an optional ScheduleState capability: the last
+// recorded outcome of every entry of one repository.
+type ScheduleOutcomeReader interface {
+	ScheduleOutcomes(ctx context.Context, repo string) ([]store.ScheduleOutcome, error)
 }
 
 // ScheduleUpstreamResolver provides upstream identity for schedule-fire
@@ -156,6 +169,10 @@ func (schedules *Schedules) tickRepository(ctx context.Context, repository model
 	if len(due) == 0 {
 		return
 	}
+	due = schedules.withoutPaused(ctx, qualifiedName, due, now)
+	if len(due) == 0 {
+		return
+	}
 	if schedules.busy(ctx, repository.ID) {
 		for _, entry := range due {
 			schedules.record(ctx, qualifiedName, entry.Name, now, "skipped")
@@ -170,32 +187,66 @@ func (schedules *Schedules) tickRepository(ctx context.Context, repository model
 func (schedules *Schedules) fire(
 	ctx context.Context, repository model.Repository, qualifiedName string, entry schedule.Entry, sha, defaultBranch string, now time.Time,
 ) {
-	branch := entry.Branch
-	if branch == "" {
-		branch = defaultBranch
+	branch, target, err := schedules.entryTarget(ctx, qualifiedName, entry, sha, defaultBranch)
+	if err == nil {
+		_, err = schedules.enqueue(ctx, repository, branch, target, ScheduleActor)
 	}
-	target := sha
-	if branch != defaultBranch {
-		resolved, err := schedules.config.Git.RefSHA(ctx, qualifiedName, branch)
-		if err != nil {
-			schedules.record(ctx, qualifiedName, entry.Name, now, "failed")
-			return
-		}
-		target = resolved
-	}
-	_, err := schedules.config.Enqueuer.EnqueueCI(ctx, service.CIRequest{
-		EventID:    scheduleEventID(),
-		Repository: repository,
-		Branch:     branch,
-		SHA:        target,
-		Actor:      ScheduleActor,
-		Trigger:    "schedule",
-	})
 	if err != nil {
 		schedules.record(ctx, qualifiedName, entry.Name, now, "failed")
 		return
 	}
 	schedules.record(ctx, qualifiedName, entry.Name, now, "fired")
+}
+
+// entryTarget is the branch an entry tests and that branch's head: the default
+// branch head already read for the tick, or the entry's own branch.
+func (schedules *Schedules) entryTarget(ctx context.Context, qualifiedName string, entry schedule.Entry, defaultHead, defaultBranch string) (branch, sha string, err error) {
+	branch = entry.Branch
+	if branch == "" {
+		branch = defaultBranch
+	}
+	if branch == defaultBranch {
+		return branch, defaultHead, nil
+	}
+	sha, err = schedules.config.Git.RefSHA(ctx, qualifiedName, branch)
+	return branch, sha, err
+}
+
+// enqueue is the single admission path of a scheduled run, shared by cron
+// fires and manual triggers: EnqueueCI with trigger "schedule".
+func (schedules *Schedules) enqueue(ctx context.Context, repository model.Repository, branch, sha, actor string) (model.EnqueueRunResult, error) {
+	return schedules.config.Enqueuer.EnqueueCI(ctx, service.CIRequest{
+		EventID:    scheduleEventID(),
+		Repository: repository,
+		Branch:     branch,
+		SHA:        sha,
+		Actor:      actor,
+		Trigger:    "schedule",
+	})
+}
+
+// withoutPaused drops the paused entries from a due list, recording outcome
+// "paused" for each, and returns the rest. A pause that cannot be read skips
+// the repository's tick (the next one retries) rather than firing what an
+// operator may have held.
+func (schedules *Schedules) withoutPaused(ctx context.Context, qualifiedName string, due []schedule.Entry, now time.Time) []schedule.Entry {
+	reader, ok := schedules.config.State.(SchedulePauseReader)
+	if !ok {
+		return due
+	}
+	pauses, err := reader.SchedulePauses(ctx, qualifiedName)
+	if err != nil {
+		return nil
+	}
+	var running []schedule.Entry
+	for _, entry := range due {
+		if _, paused := pauses[entry.Name]; paused {
+			schedules.record(ctx, qualifiedName, entry.Name, now, "paused")
+			continue
+		}
+		running = append(running, entry)
+	}
+	return running
 }
 
 func (schedules *Schedules) busy(ctx context.Context, repoID int64) bool {

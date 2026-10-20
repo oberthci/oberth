@@ -136,7 +136,7 @@ func permuteFlagsFirst(arguments []string) []string {
 func flagTakesValue(argument string) bool {
 	name := strings.TrimLeft(argument, "-")
 	switch name {
-	case "json", "tail", "raw":
+	case "json", "tail", "raw", "force":
 		return false
 	default:
 		return true
