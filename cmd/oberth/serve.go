@@ -921,6 +921,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 	// path) declarations for `access_list --pending`. Issue #623, finding 4.
 	argoJobs.SetDeclarationRecorder(database)
 	controlAPI, err := service.NewAPI(service.APIConfig{
+		UplinkLifecycle: database, DeclarationDismissal: database,
 		KVMPreflights:      database,
 		SchedulingObserver: argoJobs, Admission: scheduler,
 		Runs: database, History: database, RunRetries: database, Repositories: database, Issues: database,

@@ -348,3 +348,53 @@ func scanSecretAccess(row rowScanner) (SecretAccessGrant, error) {
 	grant.RevokedAt = nullableTime(revokedAt)
 	return grant, nil
 }
+
+// ReplaceGrantDeclarations replaces a complete two-pipeline snapshot. Callers
+// must read both CI and release documents at the same admitted commit first.
+func (s *Store) ReplaceGrantDeclarations(ctx context.Context, repo, sha string, declarations []GrantDeclaration) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx, `DELETE FROM grant_declarations WHERE repo=?`, repo); err != nil {
+		return err
+	}
+	// Older admission recorded bare names. Retire those observations only
+	// when the catalog cannot alias them to another repository's scope.
+	if parts := strings.Split(repo, "/"); len(parts) == 3 {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM grant_declarations WHERE repo=? AND (SELECT COUNT(*) FROM repositories WHERE name=?)=1`, parts[2], parts[2]); err != nil {
+			return err
+		}
+	}
+	now := unixNano(s.now())
+	for _, d := range declarations {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO grant_declarations(repo,step,path,last_seen_sha,last_seen_at) VALUES(?,?,?,?,?) ON CONFLICT(repo,step,path) DO NOTHING`, repo, d.Step, d.Path, sha, now); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+func (s *Store) DismissGrantDeclaration(ctx context.Context, actor, repo, step, path string) error {
+	if strings.TrimSpace(actor) == "" || repo == "" || step == "" || path == "" {
+		return fmt.Errorf("%w: actor, repo, step and secret required", ErrInvalid)
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	result, err := tx.ExecContext(ctx, `DELETE FROM grant_declarations WHERE repo=? AND step=? AND path=?`, repo, step, path)
+	if err != nil {
+		return err
+	}
+	if err := requireChanged("grant declaration", result); err != nil {
+		return err
+	}
+	details, _ := json.Marshal(map[string]string{"repo": repo, "step": step, "secret": path})
+	if _, err := s.appendAuditAction(ctx, tx, model.AuditActionSpec{Actor: actor, Action: "secret_access.dismiss", ResourceType: "repository", ResourceID: repo, Details: string(details)}, unixNano(s.now())); err != nil {
+		return err
+	}
+	return tx.Commit()
+}

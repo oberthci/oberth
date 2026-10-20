@@ -413,6 +413,7 @@ func (jobs *ArgoJobs) create(ctx context.Context, request service.JobRequest, tr
 	// Best-effort: failures are logged and never block admission.
 	// Issue #623, finding 4.
 	jobs.recordDeclarations(ctx, request, source, trigger)
+	jobs.recordCurrentDeclarations(ctx, request)
 
 	createdName, err := jobs.controller.Create(ctx, submission)
 	if err != nil {
@@ -584,7 +585,13 @@ func (jobs *ArgoJobs) recordDeclarations(ctx context.Context, request service.Jo
 		return
 	}
 	qualifiedRepo := request.Repository.Name
-	sha := request.Run.SHA
+	if request.UpstreamName != "" && request.UpstreamOrg != "" {
+		qualifiedRepo = request.UpstreamName + "/" + request.UpstreamOrg + "/" + qualifiedRepo
+	}
+	sha := request.Run.TestedSHA
+	if sha == "" {
+		sha = request.Run.SHA
+	}
 	// Best-effort: log and continue on error.
 	if err := jobs.declarations.RecordGrantDeclarations(ctx, qualifiedRepo, sha, declarations); err != nil {
 		_ = err // Logged and never blocks admission.

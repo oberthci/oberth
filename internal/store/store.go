@@ -1808,7 +1808,10 @@ RETURNING id, fingerprint, identity, token_credential_id, auth_actor, admin, cre
 func (s *Store) UplinkByFingerprint(ctx context.Context, fingerprint string) (model.Uplink, error) {
 	row := s.db.QueryRowContext(ctx, `
 SELECT id, fingerprint, identity, token_credential_id, auth_actor, admin, created_at, updated_at
-FROM uplinks WHERE fingerprint = ?`, fingerprint)
+FROM uplinks WHERE fingerprint = ? AND NOT EXISTS (
+ SELECT 1 FROM token_credentials t WHERE t.id=uplinks.token_credential_id AND t.revoked_at IS NOT NULL
+ AND NOT EXISTS (SELECT 1 FROM pending_token_credentials p WHERE p.token_credential_id=t.id)
+)`, fingerprint)
 	var value model.Uplink
 	var created, updated int64
 	var admin int

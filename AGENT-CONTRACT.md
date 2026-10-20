@@ -696,11 +696,12 @@ continuity checks; it must never be used to reset or bypass those checks.
   each write/flush has a five-second bound. Heartbeat writes and the final
   response never overlap. Disconnect/write failure cancels only observation,
   never durable work, and joins the heartbeat writer before returning.
-- MCP exposes 47 tools: `status`, bounded named-step `logs`, exact-run
+- MCP exposes 52 tools: `status`, bounded named-step `logs`, exact-run
   `run_get`/`run_logs`, `run_retry`, audited `run_rerun` (#1098), audited `run_cancel`, `run_kvm_preflight`, `artifacts`/`artifact_get`, `wait`, `sync`, `promote`,
   `promotion_list`, `promote_status`, audited `promote_retry` (#1097), `publish_retry`, issue
   create/get/get_many/update/append/close/reopen/delete/list/lock,
-  secret-access list/allow/revoke, admin-only `kubevirt_grant` and
+  secret-access list/allow/revoke, unscoped-admin-only uplink list/revoke/rotate,
+  `access_dismiss` and `kubevirt_grant_list`, admin-only `kubevirt_grant` and
   `kubevirt_revoke`, read-only `kubevirt_grant_get`, admin-only `size_grant`
   and `size_revoke`, read-only `size_grant_get` (#1021), admin-only
   unscoped `admission_release` (#1099), `repo_list`, `repo_remove`, `run_list`,
@@ -2385,3 +2386,22 @@ are inside the download phase. Race instrumentation, all
 required. Compilation uses fresh private caches and verified module downloads;
 this is not a network-free test. Direct execution retains the installer package
 working directory used by `go test`.
+
+## Remote credential and grant lifecycle (#1105)
+
+`uplink_list` returns public identity, fingerprint, admin flag, scope, creation,
+last-seen and revocation times. Only unscoped admins see all registrations;
+other actors see their exact authenticated fingerprint. `uplink_revoke` and
+`uplink_rotate` require an unscoped admin and the mutation gate, atomically revoke
+SSH/bearer authority and audit the action, retaining the public registration.
+The last active unscoped admin credential cannot be revoked. Rotation is a
+handoff to an already-issued, active, distinct replacement with the same
+identity, admin flag and scope; key/token issuance remains in-pod.
+
+Admission replaces pending declaration observations from both immutable pipeline
+documents at the tested commit, including an empty snapshot. Malformed or
+unreadable documents preserve previous observations. `access_dismiss` is an
+audited admin-only exact-tuple deletion limited to visible repositories; a
+later declaration can reappear. `kubevirt_grant_list` lists active grants for
+visible repositories, admin-only; repository views include optional grant
+metadata. These additions require no schema or Kubernetes permission changes.

@@ -549,5 +549,6 @@ type PromotionWaitResponse struct {
 // so the frontend never has to derive per-repo status from a global window.
 type RepoView struct {
 	model.Repository
-	LatestRuns []model.Run `json:"LatestRuns"`
+	LatestRuns    []model.Run          `json:"LatestRuns"`
+	KubeVirtGrant *store.KubeVirtGrant `json:"KubeVirtGrant,omitempty"`
 }
