@@ -50,7 +50,7 @@ A scope is an upstream name as `oberth upstream list` shows it; repeat
 - files manual issues under its upstream (`issue_create` takes `upstream`,
   required when the scope names several). Issues filed under no upstream are
   not shown to it;
-- cannot use the `secretstore_*` tools, even with `--admin`. Its other admin
+- cannot use the `secretstore_*` tools or `audit_list`, even with `--admin`. Its other admin
   tools act inside the scope only.
 
 Change or remove the limit later; the token and key stay valid:
@@ -342,9 +342,40 @@ step: a single step can exceed a model's context window.
 | `repo_list` | List registered repositories with upstream and probe state |
 | `repo_remove` | Remove a repository mapping and its Git cache (admin-only) |
 | `run_list` | List recent runs with optional repo/ref filter (bounded page) |
+| `audit_list` | Admin-only: verified audit-chain entries newest first, filtered by action prefix, actor, repo and time range (paged) |
 | `system_status` | System health: database, upstreams, cluster, audit, version |
 | `secretstore_plan` | Admin-only read-only: compute per-repo policy/role diff from approved grants; never writes policies |
 | `secretstore_verify` | Admin-only real secret-store preflight using configured server or per-repo release/CI identity; paths/key counts only by default |
+
+## Audit log
+
+`audit_list` (admin-only; `oberth audit` on the command line) reads the
+hash-chained audit log that every mutating tool writes to. Filters: `action`
+(prefix, for example `secret_access.`), `actor` (exact identity), `repo` (rows
+about the repository, its runs and its promotions), `since` and `until` (RFC
+3339 or a duration such as `24h` meaning that long ago), `limit` (default 50,
+maximum 200) and `before` (the previous page's `next_before`). Entries come
+newest first. Each carries its chain position (`id`, `sha256`,
+`previous_sha256`), and the server recomputes its hash before returning it; an
+entry that does not verify fails the call. `head_id` is the chain's current
+head.
+
+A scoped uplink gets no audit rows at all, even with `--admin`: audit rows span
+uplinks, upstreams and the secret store, and filtering them per scope would be
+guesswork.
+
+`oberth audit --tail` prints the newest entries oldest first, then follows new
+ones. `oberth audit head` and `oberth audit record` run in-pod.
+
+Lifecycle records. `oberth backup` records `backup.completed` (archive SHA-256,
+bytes, scope and the snapshot's audit head) and `oberth restore` records
+`restore.completed` (archive SHA-256, parts, the archive's audit head) by running
+`oberth audit record` in the server pod once the operation has succeeded. The
+server cannot observe these itself, so a failure to record (an older server, an
+unreachable admin daemon) is a printed warning, not a failed backup. Gaps:
+`restore.started` cannot exist, because the restore replaces the database that
+would hold it; `oberth upgrade` and `oberth install` run `helm upgrade` from
+the workstation and leave no server-side record.
 
 ## Scheduling observations
 

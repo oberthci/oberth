@@ -487,6 +487,15 @@ func toolDefinitions() []map[string]any {
 			"view": map[string]any{"type": "string", "enum": []string{"all", "active", "history"}, "default": "all",
 				"description": "all: queue first, then admitted/terminal runs by admission time (default). history: terminal runs only with legacy paging. active: deprecated compatibility view of non-terminal runs in scheduling order, unpaged and capped at 500"},
 		})),
+		tool("audit_list", "List verified audit-chain entries newest first. Admin uplink required; a scoped uplink gets no audit rows. Each entry carries its chain position (id, sha256, previous_sha256) and is recomputed against the chain's hash before it is returned. A full page returns next_before; pass it as before for older entries.", object(map[string]any{
+			"action": stringProperty("Action prefix, e.g. backup. or secret_access."),
+			"actor":  stringProperty("Exact actor identity"),
+			"repo":   stringProperty("Repository name: rows about it, its runs and its promotions"),
+			"since":  stringProperty("RFC 3339 time, or a duration such as 24h meaning that long ago"),
+			"until":  stringProperty("RFC 3339 time (exclusive), or a duration meaning that long ago"),
+			"before": map[string]any{"type": "integer", "minimum": 0, "description": "Exclusive audit ID cursor (next_before from the previous page)"},
+			"limit":  map[string]any{"type": "integer", "minimum": 1, "maximum": 200, "description": "Page size (default 50)"},
+		})),
 		tool("system_status", "Return system health: database, upstreams, cluster, audit, and version.", object(map[string]any{})),
 		tool("publish_retry", "Retry the upstream publication for a branch or tag run whose burns all passed but whose upstream push failed. Input is exactly one durable run ID. Refuses when the run is not in a publishing-failed state, or when the cached Git object no longer matches the record. A promotion (or its CI run) is retried with promote_retry instead, which merges onto the current target head and re-tests.", object(map[string]any{
 			"id": stringProperty("Durable run ID whose publication failed"),
