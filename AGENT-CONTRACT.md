@@ -863,17 +863,23 @@ continuity checks; it must never be used to reset or bypass those checks.
   its use, positions or the blocker. Admin-only, unscoped MCP
   `admission_release {run_id, force}` (CLI `oberth admission release`,
   remote only; `oberth admission` prints the view) releases a reservation no
-  owner will release: a `retained` one, or any reservation held for a run that
-  is already terminal. A reservation of an active owned run is refused (use
-  `run_cancel`), and so is one without a durable run unless `force`. Before a
-  granted reservation is released the run's Workflow is deleted through the
-  engine; an accepted deletion is the proof, and `force` releases without it.
-  The release is audited as `admission.release` (`run_id`, `state`, `weight`,
-  `group`, `workflow`, `verified`, `force`) before the weight and group are
-  freed, and the same grant pass admits the runs behind it. Every `retain()`
-  path returns the error that stops the scheduler, so a retained reservation
-  lasts only until that process exits; the release clears it sooner and
-  clears reservations leaked for terminal runs.
+  owner will release. The practical case is a granted reservation still held
+  for a run that is already terminal because its owner hung or was lost; an
+  ungranted reservation of a terminal run qualifies too. A `retained`
+  reservation is reachable only while a stopping scheduler drains: every
+  `retain()` path returns the error that stops the scheduler, so it lasts
+  only until that process exits. A reservation of an active owned run is
+  refused (use `run_cancel`), and so is one without a durable run unless
+  `force`. Before a granted reservation is released the run's recorded
+  Workflow is deleted through the engine and an accepted deletion is the
+  proof; a granted run with no recorded Workflow (a trusted KVM preflight
+  holds its grant before the name is recorded) cannot be proven gone, and
+  it, like a failed deletion, needs `force`, which releases unverified. The
+  outcome is audited as `admission.release` (`run_id`, `state`, `weight`,
+  `group`, `workflow`, `verified`, `force`) under the gate lock once the
+  reservation is known to be still held and before its weight and group are
+  freed; a reservation its owner released meanwhile is reported as not found
+  and not audited. The same grant pass admits the runs behind it.
 - Run list views: `/api/runs` and MCP `run_list` keep their default body,
   order (`queue_sequence` descending) and paging byte for byte when no view
   is given or the view is `all`. `view=history` (`?view=history`) keeps only

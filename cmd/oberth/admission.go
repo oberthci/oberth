@@ -60,7 +60,7 @@ func runAdmission(ctx context.Context, arguments []string, output io.Writer) err
 	if err != nil {
 		return err
 	}
-	remote := remoteRunCanceller{config: config}
+	remote := admissionCaller{config: config}
 	if release {
 		arguments := map[string]any{"run_id": positional[1]}
 		if force {
@@ -136,4 +136,36 @@ func dash(value string) string {
 		return "-"
 	}
 	return value
+}
+
+// admissionCaller calls one MCP tool for the admission commands and returns
+// its JSON text.
+type admissionCaller struct{ config mcpFlagResult }
+
+func (caller admissionCaller) call(ctx context.Context, tool string, arguments map[string]any) (json.RawMessage, error) {
+	encoded, err := json.Marshal(arguments)
+	if err != nil {
+		return nil, err
+	}
+	response, err := mcpRequest(ctx, caller.config, mcpMethodToolsCall, toolsCallParams{Name: tool, Arguments: encoded})
+	if err != nil {
+		return nil, err
+	}
+	if response.Error != nil {
+		return nil, fmt.Errorf("server error: %s (code %d)", response.Error.Message, response.Error.Code)
+	}
+	var result toolsCallResult
+	if err := json.Unmarshal(response.Result, &result); err != nil {
+		return nil, fmt.Errorf("invalid tools/call result: %w", err)
+	}
+	var text strings.Builder
+	for _, content := range result.Content {
+		if content.Type == "text" {
+			text.WriteString(content.Text)
+		}
+	}
+	if result.IsError {
+		return nil, fmt.Errorf("%w: %s", errMCPToolError, strings.TrimSpace(text.String()))
+	}
+	return json.RawMessage(text.String()), nil
 }
