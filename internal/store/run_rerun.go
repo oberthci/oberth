@@ -91,7 +91,7 @@ ORDER BY queue_sequence LIMIT 1`, source.RepoID, source.RefKind, source.Ref).Sca
 		return model.RunRerunResult{}, fmt.Errorf("generate rerun run ID: %w", err)
 	}
 	now := unixNano(s.now())
-	enqueued, err := s.enqueueRunTx(ctx, tx, spec, id, now)
+	enqueued, err := s.enqueueRunTx(ctx, tx, spec, id, now, 0)
 	if err != nil {
 		return model.RunRerunResult{}, fmt.Errorf("enqueue rerun: %w", err)
 	}
