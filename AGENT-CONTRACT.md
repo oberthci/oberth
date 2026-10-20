@@ -642,13 +642,14 @@ continuity checks; it must never be used to reset or bypass those checks.
   each write/flush has a five-second bound. Heartbeat writes and the final
   response never overlap. Disconnect/write failure cancels only observation,
   never durable work, and joins the heartbeat writer before returning.
-- MCP exposes 45 tools: `status`, bounded named-step `logs`, exact-run
+- MCP exposes 46 tools: `status`, bounded named-step `logs`, exact-run
   `run_get`/`run_logs`, `run_retry`, audited `run_cancel`, `run_kvm_preflight`, `artifacts`/`artifact_get`, `wait`, `sync`, `promote`,
   `promotion_list`, `promote_status`, audited `promote_retry` (#1097), `publish_retry`, issue
   create/get/get_many/update/append/close/reopen/delete/list/lock,
   secret-access list/allow/revoke, admin-only `kubevirt_grant` and
   `kubevirt_revoke`, read-only `kubevirt_grant_get`, admin-only `size_grant`
-  and `size_revoke`, read-only `size_grant_get` (#1021), `repo_list`, `repo_remove`, `run_list`,
+  and `size_revoke`, read-only `size_grant_get` (#1021), admin-only
+  unscoped `admission_release` (#1099), `repo_list`, `repo_remove`, `run_list`,
   `system_status`, admin-only `secretstore_plan` (#611),
   `secretstore_sync_receipt` (#712), `secretstore_verify`, and
   admin-only `promote_grant`, `promote_grant_revoke`, plus read-only
@@ -850,6 +851,27 @@ continuity checks; it must never be used to reset or bypass those checks.
   full drain)." The head itself sets `head_of_queue`. Unscoped `/api/status`
   reports the same as `admission_blocker` (#1021). A scoped actor sees the
   blocker only when its repository is in scope, without the budget's use.
+- `system_status` / `GET /api/status` carry `admission` (#1099): `capacity`,
+  `used`, `runs`, `max_runs`, `blocker`, `reservations[]` (`run_id`, `repo`,
+  `ref`, `workflow`, `size`, `weight`, `state`, `group`, `position`, `since`)
+  and `groups[]` (`name`, `repo`, `holder_run_id`, `waiting[]`). `state` is
+  one of `preparing`, `waiting`, `group`, `vm`, `granted`, `retained`. It is
+  the live process's in-memory gate, never durable evidence. A scoped uplink
+  sees only its repositories' reservations and groups, without the budget,
+  its use, positions or the blocker. Admin-only, unscoped MCP
+  `admission_release {run_id, force}` (CLI `oberth admission release`,
+  remote only; `oberth admission` prints the view) releases a reservation no
+  owner will release: a `retained` one, or any reservation held for a run that
+  is already terminal. A reservation of an active owned run is refused (use
+  `run_cancel`), and so is one without a durable run unless `force`. Before a
+  granted reservation is released the run's Workflow is deleted through the
+  engine; an accepted deletion is the proof, and `force` releases without it.
+  The release is audited as `admission.release` (`run_id`, `state`, `weight`,
+  `group`, `workflow`, `verified`, `force`) before the weight and group are
+  freed, and the same grant pass admits the runs behind it. Every `retain()`
+  path returns the error that stops the scheduler, so a retained reservation
+  lasts only until that process exits; the release clears it sooner and
+  clears reservations leaked for terminal runs.
 - Run list views: `/api/runs` and MCP `run_list` keep their default body,
   order (`queue_sequence` descending) and paging byte for byte when no view
   is given or the view is `all`. `view=history` (`?view=history`) keeps only

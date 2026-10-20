@@ -206,6 +206,18 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 		default:
 			return service.secretStoreSyncReceipt(ctx, actor, raw)
 		}
+	case "admission_release":
+		if err := requireUnscoped(actor, name); err != nil {
+			return nil, err
+		}
+		var arguments struct {
+			RunID string `json:"run_id"`
+			Force bool   `json:"force"`
+		}
+		if err := decodeTool(raw, &arguments); err != nil {
+			return nil, err
+		}
+		return service.releaseAdmission(ctx, actor, arguments.RunID, arguments.Force)
 	case "status":
 		var arguments struct {
 			Repo string `json:"repo"`
@@ -2038,6 +2050,7 @@ func mutatingTool(name string) bool {
 		"access_allow", "access_revoke",
 		"kubevirt_grant", "kubevirt_revoke",
 		"size_grant", "size_revoke",
+		"admission_release",
 		"repo_remove",
 		"secretstore_sync_receipt",
 		"promote_grant", "promote_grant_revoke":
