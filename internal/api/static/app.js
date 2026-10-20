@@ -929,7 +929,7 @@ function issueListURL() {
   return "/api/issues?" + query.toString();
 }
 function issueRow(issue) {
-  return `<button type="button" class="issue-row" data-open-issue="${esc(issue.ID)}" aria-label="Open internal issue ${esc(issue.ID)}: ${esc(issue.Title)}"><span class="sha">#${esc(issue.ID)}</span><span>${pill(issue.Kind, issue.Kind === "ci" ? "run" : "pending")}</span><span>${pill(issue.State, issue.State === "open" ? "fail" : "pass")}</span><span class="clip">${esc(issue.RepoID ? repoName(issue.RepoID) : "workspace")}</span><span class="branch clip">${esc(issue.Branch || "--")}</span><span class="issue-title" title="${esc(issue.Title)}">${esc(issue.Title)}</span><span title="occurrences">×${esc(issue.Occurrences || 1)}</span><span title="updated ${esc(fmtTime(issue.UpdatedAt))}">${esc(ago(issue.UpdatedAt))}</span></button>`;
+  return `<button type="button" class="issue-row" data-open-issue="${esc(issue.ID)}" aria-label="Open internal issue ${esc(issue.ID)}: ${esc(issue.Title)}"><span class="sha">#${esc(issue.ID)}</span><span>${pill(issue.Kind, issue.Kind === "ci" ? "run" : "pending")}</span><span>${pill(issue.State, issue.State === "open" ? "fail" : "pass")}</span><span class="clip">${esc(issue.RepoID ? repoName(issue.RepoID) : (issue.upstream || "workspace"))}</span><span class="branch clip">${esc(issue.Branch || "--")}</span><span class="issue-title" title="${esc(issue.Title)}">${esc(issue.Title)}</span><span title="occurrences">×${esc(issue.Occurrences || 1)}</span><span title="updated ${esc(fmtTime(issue.UpdatedAt))}">${esc(ago(issue.UpdatedAt))}</span></button>`;
 }
 async function renderIssues(seq) {
   setChrome("issues", "/ issues");
@@ -985,13 +985,14 @@ function openIssue(id, opener) {
   state.issueOpener = opener || document.activeElement;
   const dialog = document.getElementById("issueDialog");
   document.getElementById("issueDialogTitle").textContent = `Issue #${issue.ID}`;
-  document.getElementById("issueDialogMeta").textContent = `${issue.Kind} · ${issue.State}`;
+  document.getElementById("issueDialogMeta").textContent = `${issue.Kind} · ${issue.State} · ${issue.upstream || "workspace-global"}`;
   document.getElementById("issueDialogContent").innerHTML = `
     <h3>${esc(issue.Title || "Untitled issue")}</h3>
-    <p class="meta">${esc(issue.RepoID ? repoName(issue.RepoID) : "workspace-global")} ${issue.Branch ? "/ " + esc(issue.Branch) : ""} · Oberth internal ledger</p>
+    <p class="meta">${esc(issue.RepoID ? repoName(issue.RepoID) : (issue.upstream || "workspace-global"))} ${issue.Branch ? "/ " + esc(issue.Branch) : ""} · Oberth internal ledger</p>
     <dl class="kv-grid">
       <dt>kind</dt><dd>${esc(issue.Kind)}</dd>
       <dt>state</dt><dd>${esc(issue.State)}</dd>
+      <dt>upstream</dt><dd>${esc(issue.upstream || "workspace-global")}</dd>
       <dt>occurrences</dt><dd>${esc(issue.Occurrences || 1)}</dd>
       ${issue.CIOrigin ? `<dt>ci origin</dt><dd>${esc(issue.CIOrigin)}</dd>` : ""}
       ${issue.CIWorkID ? `<dt>ci work</dt><dd>${esc(issue.CIWorkID)}</dd>` : ""}

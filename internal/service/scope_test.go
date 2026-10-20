@@ -540,6 +540,78 @@ func TestScopedIssueCreateFilesUnderTheUpstream(t *testing.T) {
 	}
 }
 
+func TestIssueUpdateMovesScopeWithAuditAndPreservesIssue(t *testing.T) {
+	fixture := newScopeFixture(t)
+	ctx := context.Background()
+	global := fixture.global
+	if _, err := fixture.call(scopedActor, "issue_get", map[string]any{"id": global.ID}); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("global issue visible before move: %v", err)
+	}
+	moved := mustCall(t, fixture, unscopedActor, "issue_update", map[string]any{"id": global.ID, "upstream": "github"}).(api.IssueResponse)
+	if moved.ID != global.ID || moved.Upstream != "github" || moved.Title != global.Title || moved.Body != global.Body {
+		t.Fatalf("moved issue = %#v", moved)
+	}
+	audit, err := fixture.store.TailAuditAction(ctx)
+	if err != nil || audit.Actor != unscopedActor.Identity || audit.Action != "issue.update" || !strings.Contains(audit.Details, `"old_scope_upstream_id":0`) || !strings.Contains(audit.Details, fmt.Sprintf(`"new_scope_upstream_id":%d`, fixture.github.ID)) {
+		t.Fatalf("scope change audit = %#v, %v", audit, err)
+	}
+	visible := mustCall(t, fixture, scopedActor, "issue_get", map[string]any{"id": global.ID}).(api.IssueResponse)
+	if visible.Upstream != "github" || visible.ID != global.ID {
+		t.Fatalf("scoped issue after move = %#v", visible)
+	}
+	if _, err := fixture.call(scopedActor, "issue_update", map[string]any{"id": global.ID, "upstream": "github"}); err != nil {
+		t.Fatalf("scoped move within own scope: %v", err)
+	}
+	if _, err := fixture.call(scopedActor, "issue_append", map[string]any{"id": global.ID, "text": "follow-up"}); err != nil {
+		t.Fatalf("append after move: %v", err)
+	}
+	page := mustCall(t, fixture, scopedActor, "issue_list", map[string]any{"kind": "manual"}).(api.IssueListResponse)
+	found := false
+	for _, item := range page.Issues {
+		if item.ID == global.ID {
+			found = item.Upstream == "github"
+		}
+	}
+	if !found {
+		t.Fatalf("moved issue missing or unlabeled in issue_list: %#v", page)
+	}
+	view, err := fixture.service.Issues(ctx, scopedActor, api.IssueFilter{Kind: "manual"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	found = false
+	for _, item := range view.(model.IssuePage).Issues {
+		if item.ID == global.ID {
+			found = item.Upstream == "github" && strings.Contains(item.Body, "follow-up")
+		}
+	}
+	if !found {
+		t.Fatalf("moved issue missing or unlabeled in /api/issues: %#v", view)
+	}
+	if _, err := fixture.call(scopedActor, "issue_update", map[string]any{"id": global.ID, "upstream": "global"}); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("scoped global move = %v", err)
+	}
+	if _, err := fixture.call(scopedActor, "issue_update", map[string]any{"id": global.ID, "upstream": "codeberg"}); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("scoped cross-upstream move = %v", err)
+	}
+	if _, err := fixture.call(scopedActor, "issue_update", map[string]any{"id": fixture.issues["codeberg"][len(fixture.issues["codeberg"])-1].ID, "upstream": "github"}); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("scoped move of hidden issue = %v", err)
+	}
+	if _, err := fixture.call(unscopedActor, "issue_update", map[string]any{"id": fixture.issues["github"][0].ID, "upstream": "github"}); !errors.Is(err, store.ErrInvalid) {
+		t.Fatalf("CI issue scope move = %v", err)
+	}
+	back := mustCall(t, fixture, unscopedActor, "issue_update", map[string]any{"id": global.ID, "upstream": ""}).(api.IssueResponse)
+	if back.Upstream != "" || back.ID != global.ID {
+		t.Fatalf("global issue after move back = %#v", back)
+	}
+	if _, err := fixture.call(scopedActor, "issue_get", map[string]any{"id": global.ID}); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("global issue visible after move back: %v", err)
+	}
+	if movedByAdmin := mustCall(t, fixture, scopedAdmin, "issue_update", map[string]any{"id": global.ID, "upstream": "github"}).(api.IssueResponse); movedByAdmin.Upstream != "github" {
+		t.Fatalf("scoped admin cannot repair global scope: %#v", movedByAdmin)
+	}
+}
+
 func TestUnscopedUplinkSeesEverything(t *testing.T) {
 	fixture := newScopeFixture(t)
 	value := mustCall(t, fixture, unscopedActor, "run_list", map[string]any{})
