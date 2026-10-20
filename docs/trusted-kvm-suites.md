@@ -74,7 +74,7 @@ and host assertions; Oberth does not fabricate a passing generic guest.
 
 ## Execution, evidence and releases
 
-Oberth runs `.oberth/build.yaml` in a fresh credential-free preflight Workflow,
+Oberth runs producers from `.oberth/build.yaml` in a fresh credential-free preflight Workflow,
 then appends the server-owned pinned `trusted-tests` leaf. Candidate secret,
 WIF, hook, retry, daemon and template-default capabilities are refused there.
 The trusted leaf receives only a read-only artifacts mount and private scratch.
@@ -82,6 +82,55 @@ After producers complete, the harness copies admitted regular files into private
 bounded snapshots, hashing each path, size and byte content in contract order.
 Symlinks, escapes and special files are rejected. Candidate bytes never execute
 in the host harness.
+
+To avoid repeating the full CI matrix, build.yaml may select a local producer
+entrypoint for the preflight alone:
+
+```yaml
+metadata:
+  annotations:
+    oberth.ci/trusted-tests-entrypoint: suite-inputs
+spec:
+  entrypoint: ci
+  templates:
+  - name: suite-inputs
+    dag:
+      tasks:
+      - name: compile
+        template: compile-suite-inputs
+      - name: stage
+        template: stage-suite-inputs
+        dependencies: [compile]
+  # ci retains all normal checks, including the heavy matrix.
+  # compile-suite-inputs and stage-suite-inputs are ordinary local templates.
+```
+
+The selected DAG/steps must produce every tests.yaml artifact under
+`/work/artifacts`, including all dependencies needed to stage those files.
+Missing artifacts fail the trusted harness; a template name supplies no evidence.
+The complete blueprint is admitted under the same credential-free restrictions,
+including templates outside the selected path. Empty, missing, templated and
+server-reserved selections refuse. Without the annotation the preflight runs
+the original entrypoint, preserving existing repositories.
+
+The durable run's `{{workflow.parameters.oberth-trigger}}` is available to
+producer guards for branch, promotion, schedule and tag runs. A declared
+`oberth-trigger` input receives the stamped value rather than the document's
+older-server default. The preflight keeps build.yaml's size-by-trigger admission
+(and uses promotion sizing for a tag preflight), with at least M for the harness.
+A producer required by the suite must still run on branches; guards must not
+skip an artifact the retained suite contract requires.
+
+Selection is part of the original build.yaml digest in the immutable intent,
+bound to the same run, tested SHA and approved suite/guest/harness recipe. The
+existing artifact snapshot digest and attested receipt remain mandatory. No
+cross-run artifacts or mutable name-based cache are accepted. Repository adoption
+requires moving just the suite's producers into this entrypoint; the normal CI
+entrypoint keeps every check and runs its heavy matrix once per promotion.
+
+release.yaml needs no change: credentials and publication still follow receipt
+validation and cleanup. Its independently rebuilt outputs retain the existing
+provenance requirements and are not certified as the preflight's tested bytes.
 
 The host harness verifies complete suite/guest bytes, invokes every expected
 case, checks exact inventory, ends QEMU through private QMP and joins child

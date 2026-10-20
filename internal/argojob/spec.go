@@ -781,16 +781,15 @@ func Build(config Config, request Request) (*wfv1.Workflow, error) {
 		return nil, err
 	}
 
+	// Stamp before wrapping so producer inputs cannot inherit a stale
+	// document default instead of the durable run's trigger.
+	if err := argoworkflow.SetTriggerParameter(workflow, request.effectiveRunTrigger()); err != nil {
+		return nil, err
+	}
 	if request.TrustedKVM != nil {
 		if err := appendTrustedKVM(workflow, config, request); err != nil {
 			return nil, err
 		}
-	}
-	// Stamped after the trusted wrapper copied the document's own arguments
-	// into its candidate step, so the wrapper is unchanged by the parameter;
-	// the value is global and reaches the candidate DAG either way.
-	if err := argoworkflow.SetTriggerParameter(workflow, request.effectiveRunTrigger()); err != nil {
-		return nil, err
 	}
 	if err := projectExecutorTokens(workflow, config); err != nil {
 		return nil, err
