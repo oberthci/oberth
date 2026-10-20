@@ -196,6 +196,12 @@ func (scheduler *Scheduler) AcceptEnqueue(ctx context.Context, enqueued model.En
 // recorded: a waiting run's admission reservation is withdrawn at once and a
 // claimed run's Workflow is deleted (an absent one is fine). A failed deletion
 // stays pending for the cancellation pass, exactly as for a supersede.
+//
+// AI-CONTRACT: jobs.Delete runs synchronously on the caller's context, which
+// for run_cancel is the MCP request. A client disconnect or request timeout
+// cancels that context, so the deletion fails and the obligation stays
+// pending; the cancel itself is already committed, and the scheduler's next
+// cancellation pass (queue wake or restart) deletes the Workflow.
 func (scheduler *Scheduler) AcceptCancellations(ctx context.Context, cancellations []model.RunCancellation) error {
 	err := scheduler.completeCancellations(ctx, cancellations)
 	scheduler.signalQueue()
@@ -705,12 +711,7 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 			// A cancellation pass may already have settled the obligation
 			// before this Workflow existed; make it pending again so the next
 			// pass or restart deletes it rather than orphaning it.
-			var rearmErr error
-			if rearm, ok := scheduler.store.(interface {
-				RearmRunCancellation(context.Context, string, string) error
-			}); ok {
-				rearmErr = rearm.RearmRunCancellation(context.WithoutCancel(ctx), run.ID, jobName)
-			}
+			rearmErr := scheduler.store.RearmRunCancellation(context.WithoutCancel(ctx), run.ID, jobName)
 			cancelCleanup()
 			reservation.retain()
 			return errors.Join(fmt.Errorf("delete superseded Job %s: %w", jobName, err), rearmErr)

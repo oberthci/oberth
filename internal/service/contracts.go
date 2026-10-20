@@ -91,6 +91,7 @@ type RunQueueStore interface {
 	SetRunConcurrencyGroup(context.Context, string, string) error
 	PendingRunCancellations(context.Context) ([]model.RunCancellation, error)
 	CompleteRunCancellation(context.Context, string, string) error
+	RearmRunCancellation(context.Context, string, string) error
 	CompleteSupersededRunCancellationWithoutJob(context.Context, string) error
 	FinishRun(context.Context, string, model.RunResult) (model.Run, error)
 	PutStepResult(context.Context, model.StepResult) (model.StepResult, error)

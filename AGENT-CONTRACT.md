@@ -885,7 +885,11 @@ continuity checks; it must never be used to reset or bypass those checks.
   settles without recording a result, releasing a granted reservation only
   after the deletion was accepted. The record is terminal before the deletion
   finishes, exactly as for a supersede; a failed deletion stays a pending
-  obligation for the cancellation pass, including after a restart. Cancelling
+  obligation for the cancellation pass, including after a restart. The MCP
+  request performs the Workflow deletion synchronously on its own context
+  (`AcceptCancellations`): a client disconnect or timeout leaves the
+  committed cancel with a pending obligation (`workflow: pending`) that the
+  next cancellation pass completes. Cancelling
   a terminal run is refused (HTTP 409 / `ErrInvalidState`) without any change.
   A run owning a pending publication is refused: the publication owns it.
   Cancelling promotion CI fails the promotion in the same transaction, so no
