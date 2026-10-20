@@ -653,18 +653,12 @@ func (s *Store) verifyCurrentSchema(ctx context.Context) error {
 }
 
 func (s *Store) compatibleSchemaVersion(ctx context.Context) (int, error) {
-	var migrationCount, minimumVersion, databaseVersion int
-	if err := s.db.QueryRowContext(ctx, `
-SELECT count(*), COALESCE(MIN(version), 0), COALESCE(MAX(version), 0)
-FROM schema_migrations`).Scan(&migrationCount, &minimumVersion, &databaseVersion); err != nil {
-		return 0, fmt.Errorf("%w: read current database schema version: %w", ErrSchemaIncompatible, err)
+	applied, databaseVersion, err := readAppliedMigrations(ctx, s.db)
+	if err != nil {
+		return 0, err
 	}
-	if databaseVersion > latestMigrationVersion {
-		return 0, fmt.Errorf("%w: database=%d binary=%d", ErrSchemaTooNew, databaseVersion, latestMigrationVersion)
-	}
-	if migrationCount == 0 || minimumVersion != 1 || migrationCount != databaseVersion {
-		return 0, fmt.Errorf("%w: migration ledger has %d rows spanning versions %d..%d; expected a contiguous prefix from 1",
-			ErrSchemaIncompatible, migrationCount, minimumVersion, databaseVersion)
+	if len(applied) == 0 {
+		return 0, fmt.Errorf("%w: migration ledger is empty", ErrSchemaIncompatible)
 	}
 	if err := s.verifySchemaIdentity(ctx, s.db); err != nil {
 		return 0, err
@@ -682,18 +676,9 @@ func (s *Store) migrate(ctx context.Context, expectedLegacyHead *model.AuditHead
 	if _, err := tx.ExecContext(ctx, createMigrationLedger); err != nil {
 		return fmt.Errorf("create migration ledger: %w", err)
 	}
-	var migrationCount, minimumVersion, databaseVersion int
-	if err := tx.QueryRowContext(ctx, `
-SELECT count(*), COALESCE(MIN(version), 0), COALESCE(MAX(version), 0)
-FROM schema_migrations`).Scan(&migrationCount, &minimumVersion, &databaseVersion); err != nil {
-		return fmt.Errorf("read database schema version: %w", err)
-	}
-	if databaseVersion > latestMigrationVersion {
-		return fmt.Errorf("%w: database=%d binary=%d", ErrSchemaTooNew, databaseVersion, latestMigrationVersion)
-	}
-	if migrationCount != 0 && (minimumVersion != 1 || migrationCount != databaseVersion) {
-		return fmt.Errorf("%w: migration ledger has %d rows spanning versions %d..%d; expected a contiguous prefix from 1",
-			ErrSchemaIncompatible, migrationCount, minimumVersion, databaseVersion)
+	applied, databaseVersion, err := readAppliedMigrations(ctx, tx)
+	if err != nil {
+		return err
 	}
 	// v2 requires a backup-and-replace migration to v3 because the audit
 	// chain was restructured. v3+ migrations are additive (new tables, new
@@ -726,13 +711,13 @@ FROM schema_migrations`).Scan(&migrationCount, &minimumVersion, &databaseVersion
 		return fmt.Errorf("%w: legacy migration expected schema version %d, found %d",
 			ErrSchemaIncompatible, 1, databaseVersion)
 	}
-	if migrationCount > 0 {
+	if len(applied) > 0 {
 		if err := s.verifySchemaIdentity(ctx, tx); err != nil {
 			return err
 		}
 	}
 	for _, item := range migrations {
-		if item.version <= databaseVersion || item.version > targetVersion {
+		if applied[item.version] || item.version > targetVersion {
 			continue
 		}
 		if item.rawApply != nil {
@@ -750,7 +735,7 @@ FROM schema_migrations`).Scan(&migrationCount, &minimumVersion, &databaseVersion
 				item.version, unixNano(s.now())); err != nil {
 				return fmt.Errorf("record connection-level migration %d: %w", item.version, err)
 			}
-			databaseVersion = item.version
+			applied[item.version] = true
 			tx, err = s.db.BeginTx(ctx, nil)
 			if err != nil {
 				return fmt.Errorf("resume after connection-level migration %d: %w", item.version, err)
@@ -771,7 +756,7 @@ FROM schema_migrations`).Scan(&migrationCount, &minimumVersion, &databaseVersion
 		if err != nil {
 			return fmt.Errorf("apply migration %d: %w", item.version, err)
 		}
-		databaseVersion = item.version
+		applied[item.version] = true
 	}
 	if err := s.verifySchemaIdentity(ctx, tx); err != nil {
 		return err

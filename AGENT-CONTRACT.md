@@ -1766,6 +1766,16 @@ Each entry below is a shipped migration body recorded on every live database
 that has passed through it. Shipped migration bodies are append-only — a
 version that is recorded on live databases must never be rewritten.
 
+Migration numbers must be allocated in merge order: rebase on the latest main
+and renumber unshipped migrations before merging. Never reuse a shipped number.
+The binary contract test and startup validation reject duplicate, missing or
+unordered definitions. The runner uses the individual `schema_migrations` rows
+as its applied set; a missing lower version beneath an applied version refuses
+startup with the missing version named. Arbitrary migrations are not safe to
+reorder. Existing v1..v24 ledger rows (including legacy upgrade fixtures) are
+preserved without replay or a new numbered ledger migration. A high-water mark
+alone is never evidence that missing migrations ran.
+
 | Version | Introduced | What changes | Rollback |
 |---------|-----------|--------------|----------|
 | v1 | v0.1.0 | Initial schema: upstreams, repositories, runs, step_results, promotions, issues, issue_locks, audit_actions, token_credentials, uplinks, run_cancellations, receive_events, pending_token_credentials, publications, ci_issue_work, ci_issue_projections, plus immutability triggers | Fresh reinstall |
