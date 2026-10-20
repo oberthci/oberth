@@ -106,3 +106,21 @@ func TestBuildRefusesARunTriggerOutsideItsTier(t *testing.T) {
 		}
 	}
 }
+
+func TestTrustedCandidateReceivesOnlyItsDeclaredInputs(t *testing.T) {
+	workflow, err := argoworkflow.Decode([]byte(guardedDocument))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The guarded entrypoint declares no inputs: the stale document default
+	// for oberth-trigger must not be handed to it as a step argument.
+	if arguments := entrypointArguments(workflow); len(arguments.Parameters) != 0 {
+		t.Fatalf("candidate arguments = %+v, want none", arguments.Parameters)
+	}
+	workflow.Spec.Templates[0].Inputs.Parameters = []wfv1.Parameter{{Name: "oberth-trigger"}, {Name: "undeclared"}}
+	arguments := entrypointArguments(workflow)
+	if len(arguments.Parameters) != 1 || arguments.Parameters[0].Name != "oberth-trigger" ||
+		arguments.Parameters[0].Value.String() != "{{workflow.parameters.oberth-trigger}}" {
+		t.Fatalf("candidate arguments = %+v, want oberth-trigger bound to the stamped workflow parameter", arguments.Parameters)
+	}
+}

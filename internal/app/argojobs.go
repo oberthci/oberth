@@ -207,7 +207,11 @@ func (jobs *ArgoJobs) PipelineSize(_ context.Context, request service.JobRequest
 	if err != nil {
 		return "", fmt.Errorf("app: read repository resource contract: %w", err)
 	}
-	size, err := argoworkflow.DeclaredSizeFor(workflow, runKind(request.Run))
+	kind, err := runKind(request.Run)
+	if err != nil {
+		return "", err
+	}
+	size, err := argoworkflow.DeclaredSizeFor(workflow, kind)
 	if err != nil {
 		return "", fmt.Errorf("app: read repository resource contract: %w", err)
 	}
@@ -366,10 +370,14 @@ func (jobs *ArgoJobs) create(ctx context.Context, request service.JobRequest, tr
 	if err != nil {
 		return fmt.Errorf("app: resolve fragments for %s: %w", request.Repository.Name, err)
 	}
+	kind, err := runKind(request.Run)
+	if err != nil {
+		return err
+	}
 	submission := argojob.Request{
 		RunID: request.Run.ID, Name: request.JobName,
 		Repo: request.Repository.Name, UpstreamName: request.UpstreamName, UpstreamOrg: request.UpstreamOrg,
-		Ref: request.Run.Ref, SHA: testedSHA, Trigger: trigger, RunTrigger: runKind(request.Run), Source: source,
+		Ref: request.Run.Ref, SHA: testedSHA, Trigger: trigger, RunTrigger: kind, Source: source,
 		SourceDir: request.SourceDir, ApprovedSecrets: approvedSecrets,
 		StepGrants: stepGrants,
 		Fragments:  fragments,

@@ -181,7 +181,7 @@ func appendTrustedKVM(workflow *wfv1.Workflow, config Config, request Request) e
 	}
 	leaf.PodSpecPatch = string(body)
 	wrapper := wfv1.Template{Name: trustedKVMWrapper, Steps: []wfv1.ParallelSteps{
-		{Steps: []wfv1.WorkflowStep{{Name: "candidate", Template: workflow.Spec.Entrypoint, Arguments: workflow.Spec.Arguments}}},
+		{Steps: []wfv1.WorkflowStep{{Name: "candidate", Template: workflow.Spec.Entrypoint, Arguments: entrypointArguments(workflow)}}},
 		{Steps: []wfv1.WorkflowStep{{Name: "trusted-tests", Template: trustedKVMTemplate}}},
 	}}
 	workflow.Spec.Templates = append(workflow.Spec.Templates, leaf, wrapper)
@@ -211,4 +211,31 @@ func trustedKVMPodSecurity(kvmGroup int64) *corev1.PodSecurityContext {
 		SupplementalGroups: []int64{kvmGroup}, SupplementalGroupsPolicy: ptr.To(corev1.SupplementalGroupsPolicyStrict),
 		SeccompProfile: &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeRuntimeDefault},
 	}
+}
+
+// entrypointArguments passes the candidate entrypoint exactly the inputs it
+// declares, each bound to the workflow parameter of the same name, as Argo
+// does for a real entrypoint. Copying spec.arguments wholesale handed a
+// template without inputs stale document defaults, including the default the
+// server replaces for oberth-trigger.
+func entrypointArguments(workflow *wfv1.Workflow) wfv1.Arguments {
+	declared := map[string]bool{}
+	for _, parameter := range workflow.Spec.Arguments.Parameters {
+		declared[parameter.Name] = true
+	}
+	var arguments wfv1.Arguments
+	for index := range workflow.Spec.Templates {
+		template := &workflow.Spec.Templates[index]
+		if template.Name != workflow.Spec.Entrypoint {
+			continue
+		}
+		for _, input := range template.Inputs.Parameters {
+			if declared[input.Name] {
+				arguments.Parameters = append(arguments.Parameters, wfv1.Parameter{
+					Name: input.Name, Value: wfv1.AnyStringPtr("{{workflow.parameters." + input.Name + "}}"),
+				})
+			}
+		}
+	}
+	return arguments
 }

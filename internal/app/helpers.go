@@ -12,20 +12,23 @@ import (
 
 // runKind is the durable run's RunTrigger: what the size-by-trigger
 // annotation is keyed by and what the oberth-trigger workflow parameter
-// carries. It is read from the run record alone. A branch-ref run that is
-// neither a promotion nor a schedule is a branch run, which is how the store
-// has always classified the trigger column (it treats every non-promotion
-// branch trigger as a push).
-func runKind(run model.Run) argoworkflow.RunTrigger {
-	switch {
-	case run.Release:
-		return argoworkflow.RunTriggerTag
-	case run.Trigger == string(argoworkflow.RunTriggerPromotion):
-		return argoworkflow.RunTriggerPromotion
-	case run.Trigger == string(argoworkflow.RunTriggerSchedule):
-		return argoworkflow.RunTriggerSchedule
+// carries. It is read from the run record alone. "branch", the legacy "push"
+// spelling and an empty column are branch runs. Any other trigger, including
+// the Go-path "plan" and "apply" triggers that have no Argo-authored
+// document, is refused rather than silently sized and stamped as a branch.
+func runKind(run model.Run) (argoworkflow.RunTrigger, error) {
+	if run.Release {
+		return argoworkflow.RunTriggerTag, nil
+	}
+	switch run.Trigger {
+	case "", "push", string(argoworkflow.RunTriggerBranch):
+		return argoworkflow.RunTriggerBranch, nil
+	case string(argoworkflow.RunTriggerPromotion):
+		return argoworkflow.RunTriggerPromotion, nil
+	case string(argoworkflow.RunTriggerSchedule):
+		return argoworkflow.RunTriggerSchedule, nil
 	default:
-		return argoworkflow.RunTriggerBranch
+		return "", fmt.Errorf("app: run trigger %q has no Argo-authored pipeline (want branch, promotion, schedule, or a tag run)", run.Trigger)
 	}
 }
 

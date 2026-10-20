@@ -91,7 +91,11 @@ func (p *TrustedPreflights) request(job service.JobRequest, intent vmrunner.KVMI
 	if hex.EncodeToString(sum[:]) != intent.WorkflowSpecDigest {
 		return argojob.Request{}, errors.New("preflight build blueprint changed")
 	}
-	return argojob.Request{RunID: job.Run.ID, Name: intent.WorkflowName, Repo: job.Repository.Name, UpstreamName: job.UpstreamName, UpstreamOrg: job.UpstreamOrg, Ref: job.Run.Ref, SHA: intent.CandidateSHA, Trigger: periapsis.TriggerCI, RunTrigger: runKind(job.Run), Source: source, SourceDir: job.SourceDir, ApprovedSecrets: map[string]bool{}, StepGrants: map[string]map[string]bool{}, TrustedKVM: &intent}, nil
+	kind, err := runKind(job.Run)
+	if err != nil {
+		return argojob.Request{}, err
+	}
+	return argojob.Request{RunID: job.Run.ID, Name: intent.WorkflowName, Repo: job.Repository.Name, UpstreamName: job.UpstreamName, UpstreamOrg: job.UpstreamOrg, Ref: job.Run.Ref, SHA: intent.CandidateSHA, Trigger: periapsis.TriggerCI, RunTrigger: kind, Source: source, SourceDir: job.SourceDir, ApprovedSecrets: map[string]bool{}, StepGrants: map[string]map[string]bool{}, TrustedKVM: &intent}, nil
 }
 
 func (p *TrustedPreflights) Execute(ctx context.Context, job service.JobRequest, requirement vmrunner.Requirement, output io.Writer) (retErr error) {
@@ -380,7 +384,10 @@ func (p *TrustedPreflights) Size(_ context.Context, job service.JobRequest) (per
 	// The preflight runs build.yaml. For a tag run that document has no tag
 	// entry, and the preflight gates a release, so it is sized as the
 	// full-gate promotion run of the same document.
-	trigger := runKind(job.Run)
+	trigger, err := runKind(job.Run)
+	if err != nil {
+		return "", err
+	}
 	if trigger == argoworkflow.RunTriggerTag {
 		trigger = argoworkflow.RunTriggerPromotion
 	}
