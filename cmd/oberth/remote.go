@@ -62,6 +62,7 @@ type remoteRunDetail struct {
 	Steps      []remoteStep
 	Repository remoteRepository
 	Scheduling *model.RunScheduling
+	RerunOf    string
 }
 
 func remoteClient(ctx context.Context) (*client.Client, error) {
@@ -378,6 +379,9 @@ func runRunDetail(ctx context.Context, arguments []string, output io.Writer) err
 	if len(arguments) > 0 && arguments[0] == "cancel" {
 		return runRunCancel(ctx, arguments[1:], output)
 	}
+	if len(arguments) > 0 && arguments[0] == "rerun" {
+		return runRunRerun(ctx, arguments[1:], output)
+	}
 	flags, asJSON, err := remoteFlags("run", arguments, output)
 	if err != nil || flags == nil {
 		return err
@@ -408,6 +412,11 @@ func runRunDetail(ctx context.Context, arguments []string, output io.Writer) err
 	}
 	if detail.Repository.Name != "" {
 		if _, err := fmt.Fprintf(output, "repository: %s\n", detail.Repository.Name); err != nil {
+			return err
+		}
+	}
+	if detail.RerunOf != "" {
+		if _, err := fmt.Fprintf(output, "rerun of: %s\n", detail.RerunOf); err != nil {
 			return err
 		}
 	}

@@ -47,6 +47,7 @@ to exactly that file (mode 0600; a different token already there is kept as
 oberth runs [--repo NAME] [--ref REF] [--limit N]
 oberth run <run-id>
 oberth run retry <run-id> [--json]
+oberth run rerun <run-id> [--reason TEXT] [--force] [--json]
 oberth run cancel <run-id> [--reason TEXT] [--force] [--json]
 oberth promotion retry <promotion-id> [--json]
 oberth runs cancel --repo NAME --ref BRANCH [--reason TEXT] [--force] [--json]
@@ -63,6 +64,17 @@ for an interrupted or infrastructure-failed branch run and records the caller
 as actor. Workflow-level failures without a failed step are eligible. The
 source must still be the newest run for its branch; test failures, older runs,
 and release runs cannot be retried this way.
+
+`oberth run rerun` calls the `run_rerun` MCP tool with the same uplink
+token. It reruns a failed or interrupted run at the same SHA and ref without
+a push, for the cases `run retry` refuses: a failed test step, a run that is
+no longer the newest of its branch (as long as the branch head is still that
+SHA), and tag/release runs. The new run is linked to the original (`oberth
+run` prints `rerun of`), and `status`, `wait` and `promote` on the SHA follow
+it. A non-admin uplink may rerun branch-push runs; a tag/release rerun needs
+an admin and `--force`, and a tag that is already published or green is
+refused. When every step passed and only the upstream push failed, the push
+is retried instead of re-running the pipeline.
 
 `oberth promotion retry` calls the `promote_retry` MCP tool with the same
 uplink token. A failed or interrupted promotion (the push failed, the target

@@ -103,6 +103,23 @@ type RunCancelResponse struct {
 	Warning       string `json:"warning,omitempty"`
 }
 
+// RunRerunResponse is the response for run_rerun (#1098). Mode "rerun"
+// queued RunID at the same SHA and ref as RerunOf; mode "publish_retry" means
+// every step of RerunOf had passed and only its upstream publication failed,
+// so that publication was retried (PublicationID, Status, Error) without
+// re-running anything.
+type RunRerunResponse struct {
+	Mode          string `json:"mode"`
+	RunID         string `json:"run_id,omitempty"`
+	RerunOf       string `json:"rerun_of"`
+	Status        string `json:"status"`
+	Ref           string `json:"ref,omitempty"`
+	SHA           string `json:"sha,omitempty"`
+	PublicationID string `json:"publication_id,omitempty"`
+	Warning       string `json:"warning,omitempty"`
+	Error         string `json:"error,omitempty"`
+}
+
 // IssueCreateResponse is the response for issue_create.
 type IssueCreateResponse struct {
 	ID int64 `json:"id"`
@@ -390,6 +407,11 @@ func toolDefinitions() []map[string]any {
 			"id":     stringProperty("Full run ID or unique hexadecimal prefix (at least 12 characters)"),
 			"reason": stringProperty("Why the run is cancelled (printable text, at most 512 bytes)"),
 			"force":  map[string]any{"type": "boolean", "description": "Admin only: confirm cancelling a tag/release or apply run whose publication may be partial"},
+		}, "id")),
+		tool("run_rerun", "Rerun a failed or interrupted run at the same SHA and ref, linked to the original (rerun_of), for what run_retry refuses: a failed step such as a flaky test, a run that is no longer the newest of its ref, and tag/release runs. SHA-keyed status, wait and promote then follow the newest run for that SHA. Refused while the ref has an active run, when a branch has moved past the run's SHA, and for promotion (use promote_retry), plan and apply runs. A run that passed every step and failed only in upstream publication is not re-executed: its publication is retried as publish_retry does (mode publish_retry). Non-admin uplinks may rerun branch-push runs; tag/release runs need an admin and force, and a tag that is already published or green is refused, so it is never published twice. Audited as run.rerun.", object(map[string]any{
+			"id":     stringProperty("Full run ID or unique hexadecimal prefix (at least 12 characters)"),
+			"reason": stringProperty("Why the run is rerun (printable text, at most 512 bytes)"),
+			"force":  map[string]any{"type": "boolean", "description": "Admin only: confirm rerunning a tag/release run, whose Workflow re-executes release.yaml"},
 		}, "id")),
 		tool("artifacts", "List the files a run kept: test reports, coverage output, anything the pipeline copied to OBERTH_ARTIFACTS. Cheap; call this before artifact_get.", object(map[string]any{"id": stringProperty("Exact run ID")}, "id")),
 		tool("artifact_get", "Return one artifact's contents by run ID and name, optionally filtered server-side. Prefer a pattern over retrieving a whole file: the response reports total and matched line counts so a narrowed read is never mistaken for a complete one.", object(logFilterProperties(map[string]any{"id": stringProperty("Exact run ID"), "name": stringProperty("Artifact name as reported by artifacts")}), "id", "name")),

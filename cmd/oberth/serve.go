@@ -876,6 +876,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 		PromotionGrantMaxLifetime: options.promotionGrantMaxLifetime,
 		RunCancels:                database,
 		Uplinks:                   database,
+		RunReruns:                 database,
 	})
 	if err != nil {
 		return err

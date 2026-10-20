@@ -171,7 +171,7 @@ func newScopeFixture(t *testing.T) *scopeFixture {
 		Runs: database, History: database, Repositories: database, Issues: database,
 		Promotions: database, Logs: logs, Artifacts: kept, Auditor: database,
 		SecretAccess: database, KubeVirtGrants: database, PromotionGrants: database, RepositoryRemover: database,
-		KVMPreflights: database, Health: fixture.health, Signals: NewSignals(), RunCancels: database,
+		KVMPreflights: database, Health: fixture.health, Signals: NewSignals(), RunCancels: database, RunReruns: database,
 		MaximumWait: 50 * time.Millisecond, PromotionWorkspaceRoot: filepath.Join(root, "promotion-work"),
 		SecretStoreVerifier: func(context.Context, api.SecretStoreVerifyRequest) (api.SecretStoreVerifyResponse, error) {
 			return api.SecretStoreVerifyResponse{}, nil
@@ -408,6 +408,7 @@ func TestScopedUplinkCannotTellHiddenFromMissing(t *testing.T) {
 		{"publish_retry", map[string]any{"id": hiddenRun.ID}, map[string]any{"id": missingRunID}},
 		{"run_cancel", map[string]any{"id": hiddenRun.ID, "reason": "x"}, map[string]any{"id": missingRunID, "reason": "x"}},
 		{"run_cancel", map[string]any{"id": hiddenRun.ID[:16]}, map[string]any{"id": missingRunID[:16]}},
+		{"run_rerun", map[string]any{"id": hiddenRun.ID, "reason": "x"}, map[string]any{"id": missingRunID, "reason": "x"}},
 		{"publish_retry", map[string]any{"id": fixture.promoted["codeberg"].ID}, map[string]any{"id": "promotion-missing"}},
 		{"promote_retry", map[string]any{"id": fixture.promoted["codeberg"].ID}, map[string]any{"id": "promotion-missing"}},
 		{"issue_get", map[string]any{"id": hiddenIssue}, map[string]any{"id": missingIssue}},
@@ -596,7 +597,7 @@ var toolScopeBehaviour = map[string]string{
 	"access_list": "filtered", "repo_list": "filtered", "promote_grant_list": "filtered",
 	"kubevirt_grant_get": "lookup",
 	"system_status":      "filtered",
-	"sync":               "mutation", "promote": "mutation", "promote_retry": "mutation", "publish_retry": "mutation", "run_retry": "mutation",
+	"sync":               "mutation", "promote": "mutation", "promote_retry": "mutation", "publish_retry": "mutation", "run_retry": "mutation", "run_rerun": "mutation",
 	"run_cancel":   "mutation",
 	"issue_create": "mutation", "issue_update": "mutation", "issue_append": "mutation",
 	"issue_close": "mutation", "issue_reopen": "mutation", "issue_delete": "mutation",

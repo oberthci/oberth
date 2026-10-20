@@ -71,7 +71,7 @@ Commands:
   fragments     Manage pipeline fragments
   artifacts     List and download build artifacts
   runs          List recent CI/CD runs, or cancel a ref's active runs
-  run           Show a run, retry an interrupted/infrastructure-failed run, or cancel one
+  run           Show a run; retry, rerun at the same SHA, or cancel one
   promotion     Retry a failed or interrupted promotion onto the current target head
   log           Show step logs for a run
   repos         List registered repositories

@@ -84,6 +84,8 @@ type APIConfig struct {
 	// Uplinks re-resolves an uplink's current authority for the server's
 	// own promotion retry (#1097); nil disables that retry.
 	Uplinks UplinkDirectory
+	// RunReruns backs run_rerun; nil disables the tool.
+	RunReruns RunRerunStore
 }
 
 type API struct {
@@ -122,6 +124,7 @@ type API struct {
 	// background tracks automatic promotion retries (#1097); a pointer so
 	// the per-actor copies share it.
 	background *sync.WaitGroup
+	runReruns  RunRerunStore
 	// scope is set on the per-call copy serving a scoped actor (#073).
 	scope *repoScope
 }
@@ -176,7 +179,7 @@ func NewAPI(config APIConfig) (*API, error) {
 		secretStoreVerifier: config.SecretStoreVerifier,
 		repositoryRemover:   config.RepositoryRemover, removeGitCache: config.RemoveGitCache,
 		promotionGrants: config.PromotionGrants, promotionGrantMaxLifetime: promotionGrantMaxLifetime,
-		runCancels: config.RunCancels, uplinks: config.Uplinks, background: &sync.WaitGroup{},
+		runCancels: config.RunCancels, runReruns: config.RunReruns, uplinks: config.Uplinks, background: &sync.WaitGroup{},
 	}, nil
 }
 
@@ -282,6 +285,16 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 			return nil, err
 		}
 		return service.cancelRun(ctx, actor, arguments.ID, arguments.Reason, arguments.Force)
+	case "run_rerun":
+		var arguments struct {
+			ID     string `json:"id"`
+			Reason string `json:"reason"`
+			Force  bool   `json:"force"`
+		}
+		if err := decodeTool(raw, &arguments); err != nil {
+			return nil, err
+		}
+		return service.rerunRun(ctx, actor, arguments.ID, arguments.Reason, arguments.Force)
 	case "run_logs":
 		var arguments struct {
 			ID      string `json:"id"`
@@ -784,7 +797,8 @@ func (service *API) Run(ctx context.Context, actor api.Actor, id string) (any, e
 	if err != nil {
 		return nil, fmt.Errorf("load run steps: %w", err)
 	}
-	response := RunDetailResponse{Run: visibleRun(run), Steps: steps, Scheduling: service.scheduling(ctx, run, steps)}
+	response := RunDetailResponse{Run: visibleRun(run), Steps: steps, Scheduling: service.scheduling(ctx, run, steps),
+		RerunOf: service.runRerunOf(ctx, run.ID)}
 	if service.repositories != nil {
 		repository, repositoryErr := service.repositories.Repository(ctx, run.RepoID)
 		if repositoryErr != nil && !errors.Is(repositoryErr, store.ErrNotFound) {
@@ -2011,7 +2025,7 @@ func wireIssueLock(lock model.IssueLock) api.IssueLockResponse {
 
 func mutatingTool(name string) bool {
 	switch name {
-	case "sync", "promote", "promote_retry", "publish_retry", "run_retry", "run_cancel", "issue_create", "issue_update", "issue_append", "issue_close", "issue_reopen", "issue_delete", "issue_lock",
+	case "sync", "promote", "promote_retry", "publish_retry", "run_retry", "run_rerun", "run_cancel", "issue_create", "issue_update", "issue_append", "issue_close", "issue_reopen", "issue_delete", "issue_lock",
 		"access_allow", "access_revoke",
 		"kubevirt_grant", "kubevirt_revoke",
 		"repo_remove",

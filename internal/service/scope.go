@@ -118,6 +118,9 @@ func (service *API) forActor(ctx context.Context, actor api.Actor) (*API, error)
 	if service.runCancels != nil {
 		scoped.runCancels = scopedRunCancels{inner: service.runCancels, history: scoped.history}
 	}
+	if service.runReruns != nil {
+		scoped.runReruns = scopedRunReruns{inner: service.runReruns, history: scoped.history}
+	}
 	if service.repositories != nil {
 		scoped.repositories = scopedRepositories{inner: service.repositories, scope: scope}
 	}
@@ -172,6 +175,27 @@ func (cancel scopedRunCancels) CancelRun(ctx context.Context, request model.RunC
 		return model.RunCancelResult{}, err
 	}
 	return cancel.inner.CancelRun(ctx, request)
+}
+
+type scopedRunReruns struct {
+	inner   RunRerunStore
+	history RunHistory
+}
+
+// RerunRun repeats the actor-scoped resolution before the writer sees the
+// exact ID, so no caller can rerun a run outside the actor's scope.
+func (rerun scopedRunReruns) RerunRun(ctx context.Context, request model.RunRerunRequest) (model.RunRerunResult, error) {
+	if rerun.history == nil {
+		return model.RunRerunResult{}, fmt.Errorf("%w: run rerun history", ErrUnavailable)
+	}
+	if _, err := rerun.history.ResolveRunID(ctx, request.RunID); err != nil {
+		return model.RunRerunResult{}, err
+	}
+	return rerun.inner.RerunRun(ctx, request)
+}
+
+func (rerun scopedRunReruns) RunRerunOf(ctx context.Context, runID string) (string, error) {
+	return rerun.inner.RunRerunOf(ctx, runID)
 }
 
 // requireUnscoped refuses installation-wide operations to a scoped actor.

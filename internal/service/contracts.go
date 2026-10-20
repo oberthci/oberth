@@ -508,6 +508,8 @@ type RunDetailResponse struct {
 	Repository model.Repository
 	Run        model.Run
 	Steps      []model.StepResult
+	// RerunOf names the run this one re-ran with run_rerun (#1098).
+	RerunOf string `json:"RerunOf,omitempty"`
 }
 
 // MCPToolText keeps the MCP text block as the exact bounded log slice while

@@ -638,8 +638,8 @@ continuity checks; it must never be used to reset or bypass those checks.
   each write/flush has a five-second bound. Heartbeat writes and the final
   response never overlap. Disconnect/write failure cancels only observation,
   never durable work, and joins the heartbeat writer before returning.
-- MCP exposes 42 tools: `status`, bounded named-step `logs`, exact-run
-  `run_get`/`run_logs`, `run_retry`, audited `run_cancel`, `run_kvm_preflight`, `artifacts`/`artifact_get`, `wait`, `sync`, `promote`,
+- MCP exposes 43 tools: `status`, bounded named-step `logs`, exact-run
+  `run_get`/`run_logs`, `run_retry`, audited `run_rerun` (#1098), audited `run_cancel`, `run_kvm_preflight`, `artifacts`/`artifact_get`, `wait`, `sync`, `promote`,
   `promotion_list`, `promote_status`, audited `promote_retry` (#1097), `publish_retry`, issue
   create/get/get_many/update/append/close/reopen/delete/list/lock,
   secret-access list/allow/revoke, admin-only `kubevirt_grant` and
@@ -669,7 +669,8 @@ continuity checks; it must never be used to reset or bypass those checks.
   `run_id`, `status`, `phase`, `previous_state` (`queued`, `waiting`,
   `running`), `cancelled_by`, `reason`, `workflow` (`none`,
   `not_submitted`, `deleted`, `pending`), and optional `promotion_id` and
-  `warning`. `run_logs` and `logs`
+  `warning`. `run_rerun` resolves the same way and is described under
+  Behavioral guarantees. `run_logs` and `logs`
   authorize the named step against the plan/progress/results before reading
   the bounded redacted retained log. While a run is active, absent retained
   bytes yield the typed `ErrStepLogPending` error (HTTP 409; actionable MCP
@@ -950,6 +951,35 @@ continuity checks; it must never be used to reset or bypass those checks.
   creates the Workflow, the owner re-reads the run right before creation and,
   if it must delete a Workflow it created for a preempted run and fails,
   re-arms the obligation so the next pass or restart deletes it.
+- An explicit rerun (`run_rerun`, `oberth run rerun <id> [--reason]
+  [--force]`, #1098) queues a new run with the same repository, ref, SHA,
+  trigger, tested and base SHA as one failed or interrupted run, for what
+  `run_retry` refuses: a failed step (a flaky test), a run that is no longer
+  the newest of its ref, and tag/release runs. The checks, the enqueue and a
+  `run.rerun` audit action (`source_run_id`, actor, reason, force, warning)
+  commit in one transaction; the new run's lineage is that action, shown as
+  `RerunOf` by `run_get` and `/api/runs/{run}` and as `rerun of` by `oberth
+  run`. It is an ordinary new run: SHA-keyed `status`, `wait` and `promote`
+  select the newest run for the SHA, so they follow it. Refused without any
+  change: an active or passed source; promotion CI (`promote_retry`), plan
+  and apply runs; a ref that already has an active run; a branch whose
+  current Oberth head is no longer the run's SHA (a green branch run
+  force-syncs its SHA, so rerunning an older commit would roll the upstream
+  branch back); and a tag that already has a pending or delivered
+  publication or a passed run. A source that passed every step and failed
+  only in publication (`phase = "publishing"`) is not re-executed: its
+  publication is retried exactly as `publish_retry` does (response `mode:
+  "publish_retry"`), so a release's publishing work never repeats. A tag
+  rerun re-executes `release.yaml` with the original admission (the tag
+  object and peeled commit are immutable and were proven reachable when the
+  tag was admitted); its tag publication classifies the remote first, so the
+  tag object is pushed at most once, and the recorded warning says anything
+  the failed Workflow already published stays published. Authorization: a
+  non-admin uplink may rerun only `branch`-trigger branch runs in
+  repositories its scope can see; an admin may also rerun scheduled runs and,
+  with an explicit `force`, tag/release runs. The response carries `mode`
+  (`rerun` or `publish_retry`), `run_id`, `rerun_of`, `status`, `ref`, `sha`
+  and optional `publication_id`, `warning` and `error`.
 - A server stop or restart re-fires stranded ordinary branch runs through
   the same supersede mechanism (issue #270), on all three termination paths:
   graceful-shutdown compensation in the stopping process, owner startup
