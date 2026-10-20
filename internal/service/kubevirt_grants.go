@@ -43,7 +43,7 @@ func (service *API) kubeVirtGrantTool(ctx context.Context, actor api.Actor, name
 	}
 	grant, err := service.kubeVirtGrants.SetKubeVirtGrant(ctx, repository.ID, actor.Identity, name == "kubevirt_grant", budget)
 	if errors.Is(err, store.ErrInvalid) {
-		return nil, fmt.Errorf("%w: %v", ErrInvalidInput, err)
+		return nil, fmt.Errorf("%w: %w", ErrInvalidInput, err)
 	}
 	if err != nil {
 		return nil, err

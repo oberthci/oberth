@@ -196,7 +196,7 @@ func (s *Store) SetKubeVirtGrant(ctx context.Context, repoID int64, actor string
 func ParseKubeVirtMemory(value string) (int64, error) {
 	quantity, err := resource.ParseQuantity(strings.TrimSpace(value))
 	if err != nil {
-		return 0, fmt.Errorf("%w: KubeVirt max memory %q: %v", ErrInvalid, value, err)
+		return 0, fmt.Errorf("%w: KubeVirt max memory %q: %w", ErrInvalid, value, err)
 	}
 	bytes, exact := quantity.AsInt64()
 	if !exact || bytes <= 0 {

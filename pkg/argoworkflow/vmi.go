@@ -367,7 +367,7 @@ func admitKernelBoot(path string, kernelBoot *vmiKernelBoot, prefixes []string) 
 		segments := strings.Split(field.value, "/")
 		if len(field.value) > maxKernelPathBytes || !kernelBootPathPattern.MatchString(field.value) ||
 			slices.Contains(segments, "..") || slices.Contains(segments, ".") {
-			return fmt.Errorf("argoworkflow: %s.container.%s must be an absolute path of at most %d bytes using [A-Za-z0-9._-] segments, without . or ..", path, field.name, maxKernelPathBytes)
+			return fmt.Errorf("argoworkflow: %s.container.%s must be an absolute path of at most %d bytes using [A-Za-z0-9._-] segments and no . or .. segment", path, field.name, maxKernelPathBytes)
 		}
 	}
 	if kernelBoot.KernelArgs != "" &&
