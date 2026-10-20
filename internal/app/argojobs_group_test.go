@@ -137,3 +137,38 @@ func TestAuditSubmissionRecordsTheAdmittedConcurrencyGroup(t *testing.T) {
 		}
 	}
 }
+
+// A VMI-bearing workflow that declares no group runs in "kubevirt", so a
+// repository's concurrent runs cannot each take a full KubeVirt budget (#1017).
+func TestPipelineConcurrencyGroupSerializesVMIRuns(t *testing.T) {
+	vmiPipeline := func(annotations string) string {
+		return groupedPipeline(annotations) + `    - name: vm
+      resource:
+        action: get
+        setOwnerReference: true
+        manifest: |
+          apiVersion: kubevirt.io/v1
+          kind: VirtualMachineInstance
+          metadata:
+            name: "{{workflow.name}}-vm"
+            labels:
+              oberth.ci/workflow: "{{workflow.name}}"
+`
+	}
+	jobs := &ArgoJobs{intents: map[string]argoIntent{}}
+	for _, tc := range []struct{ annotations, want string }{
+		{"", "kubevirt"},
+		{"    oberth.ci/concurrency-group: kubevirt\n", "kubevirt"},
+		// Read as declared; admission refuses this combination.
+		{"    oberth.ci/concurrency-group: other\n", "other"},
+	} {
+		dir := t.TempDir()
+		writePipeline(t, dir, "build.yaml", vmiPipeline(tc.annotations))
+		group, err := jobs.PipelineConcurrencyGroup(context.Background(), service.JobRequest{
+			Run: model.Run{Ref: "main"}, Repository: model.Repository{Name: "cttv"}, SourceDir: dir,
+		})
+		if err != nil || group != tc.want {
+			t.Fatalf("VMI pipeline %q group = %q, %v; want %q", tc.annotations, group, err, tc.want)
+		}
+	}
+}

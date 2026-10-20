@@ -414,3 +414,37 @@ func vmiCreateUsage(raw string) (vmiUsage, error) {
 	}
 	return vmiUsage{cores: manifest.Spec.Domain.CPU.Cores, memory: memory}, nil
 }
+
+// KubeVirtConcurrencyGroup serializes a repository's VMI-bearing runs. Each
+// run's budget is per run, so without it N concurrent runs of one repository
+// could each create a full grant's worth of VMs.
+const KubeVirtConcurrencyGroup = "kubevirt"
+
+// DeclaresVMIResources reports whether a workflow has any resource template.
+// Admission admits resource templates only as VMI create/get/delete.
+func DeclaresVMIResources(workflow *wfv1.Workflow) bool {
+	if workflow == nil {
+		return false
+	}
+	for _, template := range workflow.Spec.Templates {
+		if template.Resource != nil {
+			return true
+		}
+	}
+	return false
+}
+
+// RunConcurrencyGroup is the group the scheduler serializes a run on: the
+// declared oberth.ci/concurrency-group, or KubeVirtConcurrencyGroup for a
+// VMI-bearing workflow that declares none. Admit refuses a VMI-bearing
+// workflow that declares any other group.
+func RunConcurrencyGroup(workflow *wfv1.Workflow) (string, error) {
+	group, err := DeclaredConcurrencyGroup(workflow)
+	if err != nil {
+		return "", err
+	}
+	if group == "" && DeclaresVMIResources(workflow) {
+		return KubeVirtConcurrencyGroup, nil
+	}
+	return group, nil
+}

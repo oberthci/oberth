@@ -370,3 +370,26 @@ func TestVMIKernelBootAdmission(t *testing.T) {
 		})
 	}
 }
+
+func TestVMIWorkflowConcurrencyGroup(t *testing.T) {
+	policy := Policy{KubeVirt: true, ContainerDiskPrefixes: []string{"quay.io/example/"}, VMIBudget: VMIBudget{MaxVMs: 3, MaxCores: 12, MaxMemory: resource.MustParse("24Gi")}}
+	workflow := p2pVMIWorkflow()
+	if group, err := RunConcurrencyGroup(workflow); err != nil || group != KubeVirtConcurrencyGroup {
+		t.Fatalf("undeclared VMI group = %q, %v", group, err)
+	}
+	if err := Admit(workflow, policy); err != nil {
+		t.Fatalf("VMI workflow without a declared group refused: %v", err)
+	}
+	workflow.Annotations = map[string]string{ConcurrencyGroupAnnotation: KubeVirtConcurrencyGroup}
+	if err := Admit(workflow, policy); err != nil {
+		t.Fatalf("VMI workflow in the kubevirt group refused: %v", err)
+	}
+	workflow.Annotations[ConcurrencyGroupAnnotation] = "terraform-state"
+	if err := Admit(workflow, policy); err == nil || !strings.Contains(err.Error(), `runs in concurrency group "kubevirt"`) {
+		t.Fatalf("VMI workflow in another group = %v", err)
+	}
+	plain := &wfv1.Workflow{Spec: wfv1.WorkflowSpec{Templates: []wfv1.Template{{Name: "main"}}}}
+	if group, err := RunConcurrencyGroup(plain); err != nil || group != "" {
+		t.Fatalf("ordinary workflow group = %q, %v", group, err)
+	}
+}

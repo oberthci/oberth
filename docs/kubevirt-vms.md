@@ -33,7 +33,15 @@ A run may also declare at most three VMI resource templates per VM in its
 budget, for each VM's create, get and delete. A VMI's CPU request may not
 exceed its cores, so the core budget also bounds what the VMIs reserve. The
 budget counts guest memory; each virt-launcher Pod adds KubeVirt's own
-overhead (a few hundred MiB) on top. Check a workflow locally against a
+overhead (a few hundred MiB) on top. The budget applies per run. So that it also bounds a repository's
+concurrent VMs, Oberth serializes a repository's VMI-bearing runs: a
+workflow with VMI resource templates runs in the repository-scoped
+concurrency group `kubevirt` when it declares no group, and admission
+refuses one that declares any other `oberth.ci/concurrency-group`. Declaring
+`oberth.ci/concurrency-group: kubevirt` explicitly, as cttv does, is
+equivalent. Runs of different repositories are not serialized against each
+other: each granted repository can hold its own budget at the same time, so
+size grants and the ceiling with that sum in mind. Check a workflow locally against a
 budget with `oberth validate --kubevirt --container-disk-prefixes=...
 --kubevirt-max-vms 3 --kubevirt-max-cores 12 --kubevirt-max-memory 24Gi`.
 
