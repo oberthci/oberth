@@ -800,9 +800,8 @@ func Build(config Config, request Request) (*wfv1.Workflow, error) {
 			return nil, err
 		}
 	}
-	// Stamped after the trusted wrapper copied the document's own arguments
-	// into its candidate step, so the wrapper is unchanged by the parameter;
-	// the value is global and reaches the candidate DAG either way.
+	// The value is a global workflow parameter, so it reaches the trusted
+	// wrapper's candidate DAG without being passed as a step argument.
 	if err := argoworkflow.SetTriggerParameter(workflow, request.effectiveRunTrigger()); err != nil {
 		return nil, err
 	}

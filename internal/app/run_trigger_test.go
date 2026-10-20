@@ -29,9 +29,21 @@ func TestRunKindReadsOnlyTheDurableRun(t *testing.T) {
 		{model.Run{Trigger: "push"}, argoworkflow.RunTriggerBranch},
 		{model.Run{}, argoworkflow.RunTriggerBranch},
 	} {
-		if got := runKind(testCase.run); got != testCase.want {
-			t.Fatalf("runKind(%+v) = %q, want %q", testCase.run, got, testCase.want)
+		if got, err := runKind(testCase.run); err != nil || got != testCase.want {
+			t.Fatalf("runKind(%+v) = %q, %v, want %q", testCase.run, got, err, testCase.want)
 		}
+	}
+	// Go-path and unknown triggers are refused, never sized as a branch.
+	for _, trigger := range []string{"plan", "apply", "nightly"} {
+		if got, err := runKind(model.Run{Trigger: trigger}); err == nil {
+			t.Fatalf("runKind(%q) = %q, want a refusal", trigger, got)
+		}
+	}
+	jobs := &ArgoJobs{intents: map[string]argoIntent{}}
+	if _, err := jobs.PipelineSize(context.Background(), service.JobRequest{
+		Run: model.Run{Trigger: "apply"}, Repository: model.Repository{Name: "infra"}, SourceDir: writeBuild(t, perTriggerBuild),
+	}); err == nil {
+		t.Fatal("PipelineSize sized an apply run")
 	}
 }
 
