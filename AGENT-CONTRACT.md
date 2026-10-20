@@ -954,6 +954,13 @@ continuity checks; it must never be used to reset or bypass those checks.
   (`internal/artifacts.DefaultScanPatterns`, PEM private-key headers) during
   the whole-archive judgment pass; one match refuses the entire collection
   fail-closed with the member named and no content echoed.
+- A raw artifact download (`GET /api/runs/{id}/artifacts/{name}`) streams the
+  whole stored object, never the bounded MCP text view, with `Content-Length`
+  and `X-Oberth-Artifact-SHA256` describing exactly the bytes sent; a body that
+  cannot be completed aborts the connection short of `Content-Length`. The CLI
+  and `mcp call --output` save paths verify size and digest and rename into
+  place only on a match. MCP `artifact_get` refuses binary content inline
+  rather than returning a lossy body (#1011).
 - Each run mounts one PersistentVolumeClaim: a per-run source claim the server
   creates in the pipeline namespace and fills with the exact pushed revision
   before submission, mounted read-only. A Pod may only mount claims in its own

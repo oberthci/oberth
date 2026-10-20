@@ -16,7 +16,10 @@ func runArtifacts(ctx context.Context, arguments []string, output io.Writer) err
 	flags := flag.NewFlagSet("artifacts", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	dataRoot := flags.String("data-root", "/data", "Oberth data root holding the artifact store")
-	if err := flags.Parse(arguments); err != nil {
+	var outputPath string
+	flags.StringVar(&outputPath, "output", "", "save the artifact to this file (written atomically, digest-verified)")
+	flags.StringVar(&outputPath, "o", "", "shorthand for --output")
+	if err := flags.Parse(permuteFlagsFirst(arguments)); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			flags.SetOutput(output)
 			flags.Usage()
@@ -26,7 +29,10 @@ func runArtifacts(ctx context.Context, arguments []string, output io.Writer) err
 	}
 	rest := flags.Args()
 	if len(rest) == 0 || len(rest) > 2 {
-		return fmt.Errorf("%w: artifacts <run-id> [name]", errUsage)
+		return fmt.Errorf("%w: artifacts [--output FILE] <run-id> [name]", errUsage)
+	}
+	if outputPath != "" && len(rest) != 2 {
+		return fmt.Errorf("%w: --output needs an artifact name", errUsage)
 	}
 	// An explicit --data-root forces local mode even when OBERTH_BASE_URL
 	// is set, so the flag is never silently ignored.
@@ -37,7 +43,7 @@ func runArtifacts(ctx context.Context, arguments []string, output io.Writer) err
 		}
 	})
 	if config := client.FromEnv(); config.Configured() && !localForced {
-		return remoteArtifacts(ctx, config, rest, output)
+		return remoteArtifacts(ctx, config, rest, outputPath, output)
 	}
 	if localForced && client.FromEnv().Configured() {
 		fmt.Fprintf(os.Stderr, "note: --data-root overrides OBERTH_BASE_URL; reading local store\n")
@@ -48,12 +54,19 @@ func runArtifacts(ctx context.Context, arguments []string, output io.Writer) err
 		return err
 	}
 	if len(rest) == 2 {
-		body, readErr := store.ReadAll(rest[0], rest[1])
-		if readErr != nil {
-			return readErr
+		copyLocal := func(destination io.Writer) error {
+			file, openErr := store.OpenArtifact(rest[0], rest[1])
+			if openErr != nil {
+				return openErr
+			}
+			defer func() { _ = file.Close() }()
+			_, copyErr := io.Copy(destination, file)
+			return copyErr
 		}
-		_, writeErr := output.Write(body)
-		return writeErr
+		if outputPath != "" {
+			return saveArtifactFile(outputPath, copyLocal)
+		}
+		return copyLocal(output)
 	}
 	entries, err := store.List(rest[0])
 	if err != nil {

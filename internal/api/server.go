@@ -125,6 +125,7 @@ type Server struct {
 	auth                  Authenticator
 	tools                 ToolService
 	views                 ViewService
+	downloads             ArtifactDownloads
 	version               string
 	classifyError         ErrorClassifier
 	maximumToolWait       time.Duration
@@ -139,10 +140,16 @@ func New(auth Authenticator, tools ToolService, views ViewService, version strin
 	if auth == nil || tools == nil || views == nil {
 		return nil, errors.New("authenticator, tool service, and view service are required")
 	}
+	// The raw download route must never fall back to the bounded text view;
+	// that fallback was the silent 4 MiB truncation (#1011).
+	downloads, ok := views.(ArtifactDownloads)
+	if !ok {
+		return nil, errors.New("view service must provide raw artifact downloads")
+	}
 	if version == "" {
 		version = "dev"
 	}
-	server := &Server{auth: auth, tools: tools, views: views, version: version, mux: http.NewServeMux()}
+	server := &Server{auth: auth, tools: tools, views: views, downloads: downloads, version: version, mux: http.NewServeMux()}
 	for _, option := range options {
 		option(server)
 	}
