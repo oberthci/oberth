@@ -7,6 +7,7 @@ import (
 
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 	"github.com/oberthci/oberth/pkg/periapsis"
@@ -129,5 +130,36 @@ func TestWIFLeafRefusesVMIWorkflow(t *testing.T) {
 	config.ContainerDiskPrefixes = []string{"quay.io/example/"}
 	if _, err := Build(config, request); err == nil || !strings.Contains(err.Error(), "refused in credentialed workflows") {
 		t.Fatalf("WIF VMI credentialed refusal = %v", err)
+	}
+}
+
+// The grant's budget reaches admission through the Request, and the
+// server's ceiling through Config (#1017).
+func TestBuildKubeVirtAppliesGrantBudgetUnderCeiling(t *testing.T) {
+	config := testConfig()
+	config.VMLauncherServiceAccount = "oberth-argo-vm-launcher"
+	config.ContainerDiskPrefixes = []string{"quay.io/example/"}
+	threeVMs := kubeVirtWorkflow
+	for _, suffix := range []string{"two", "three"} {
+		second := kubeVirtWorkflow[strings.Index(kubeVirtWorkflow, "    - name: vm\n"):]
+		second = strings.Replace(second, "    - name: vm\n", "    - name: vm-"+suffix+"\n", 1)
+		threeVMs += strings.Replace(second, "{{workflow.name}}-amd64", "{{workflow.name}}-"+suffix, 1)
+	}
+	request := testRequest(periapsis.TriggerCI, threeVMs)
+	request.KubeVirtGranted = true
+	if _, err := Build(config, request); err == nil || !strings.Contains(err.Error(), "3 create templates (maximum 2)") {
+		t.Fatalf("three VMIs under the default grant budget = %v", err)
+	}
+	request.KubeVirtBudget = argoworkflow.VMIBudget{MaxVMs: 3, MaxCores: 6, MaxMemory: resource.MustParse("6Gi")}
+	if _, err := Build(config, request); err != nil {
+		t.Fatalf("three VMIs under a three-VM grant: %v", err)
+	}
+	config.KubeVirtCeiling = argoworkflow.VMIBudget{MaxVMs: 2, MaxCores: 64, MaxMemory: resource.MustParse("256Gi")}
+	if _, err := Build(config, request); err == nil || !strings.Contains(err.Error(), "under a cluster ceiling of 2 VMs") {
+		t.Fatalf("three VMIs above the cluster ceiling = %v", err)
+	}
+	config.KubeVirtCeiling = argoworkflow.VMIBudget{MaxVMs: 99, MaxCores: 64, MaxMemory: resource.MustParse("256Gi")}
+	if err := config.Validate(); err == nil || !strings.Contains(err.Error(), "KubeVirt ceiling") {
+		t.Fatalf("invalid ceiling accepted: %v", err)
 	}
 }

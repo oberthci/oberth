@@ -12,6 +12,8 @@ import (
 	"sync"
 	"time"
 
+	"k8s.io/apimachinery/pkg/api/resource"
+
 	"github.com/oberthci/oberth/internal/argojob"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/runprogress"
@@ -41,7 +43,7 @@ type SecretAccessLoader interface {
 }
 
 type KubeVirtGrantLoader interface {
-	ActiveKubeVirtGrant(context.Context, int64) (bool, error)
+	ActiveKubeVirtGrant(context.Context, int64) (store.KubeVirtBudget, bool, error)
 }
 
 // ReconcilerHealthChecker reports whether the access reconciler has completed
@@ -370,11 +372,14 @@ func (jobs *ArgoJobs) create(ctx context.Context, request service.JobRequest, tr
 		Fragments:  fragments,
 	}
 	if jobs.kubeVirtGrants != nil {
-		granted, loadErr := jobs.kubeVirtGrants.ActiveKubeVirtGrant(ctx, request.Repository.ID)
+		budget, granted, loadErr := jobs.kubeVirtGrants.ActiveKubeVirtGrant(ctx, request.Repository.ID)
 		if loadErr != nil {
 			return fmt.Errorf("app: load KubeVirt grant for %s: %w", request.Repository.Name, loadErr)
 		}
 		submission.KubeVirtGranted = granted
+		if granted {
+			submission.KubeVirtBudget = kubeVirtBudget(budget)
+		}
 	}
 	// Snapshot the identity store once for both Builds of this admission
 	// (audit and controller), so the audit record and the pod spec agree
@@ -783,4 +788,15 @@ func (jobs *ArgoJobs) ObserveScheduling(ctx context.Context, run model.Run) (*mo
 		sha = run.SHA
 	}
 	return observer.ObserveScheduling(ctx, run.JobName, run.ID, sha)
+}
+
+// kubeVirtBudget converts a stored grant budget to the admission policy's
+// form. Unset stored fields take the grant defaults.
+func kubeVirtBudget(budget store.KubeVirtBudget) argoworkflow.VMIBudget {
+	budget = budget.WithDefaults()
+	return argoworkflow.VMIBudget{
+		MaxVMs:    budget.MaxVMs,
+		MaxCores:  budget.MaxCores,
+		MaxMemory: *resource.NewQuantity(budget.MaxMemoryBytes, resource.BinarySI),
+	}
 }

@@ -66,6 +66,10 @@ func buildArgoEngine(
 	if err != nil {
 		return nil, err
 	}
+	kubeVirtCeiling, err := kubeVirtCeiling(options)
+	if err != nil {
+		return nil, err
+	}
 	config := argojob.Config{
 		ReleaseWIF:                 wifConfig,
 		NonrootProfile:             options.argoControllerProfile,
@@ -76,6 +80,7 @@ func buildArgoEngine(
 		ExecutorServiceAccount:     options.argoExecutorAccount,
 		VMLauncherServiceAccount:   options.argoVMLauncherAccount,
 		ContainerDiskPrefixes:      splitRunnerImagePrefixes(options.argoContainerDiskPrefixes),
+		KubeVirtCeiling:            kubeVirtCeiling,
 		RunnerImagePrefixes:        splitRunnerImagePrefixes(options.runnerImagePrefixes),
 		VaultAddress:               options.argoVaultAddress,
 		VaultCredentialedRole:      options.argoVaultCredentialedRole,
@@ -206,6 +211,10 @@ func validateArgoServeOptions(options serveOptions) error {
 	if err != nil {
 		return err
 	}
+	kubeVirtCeiling, err := kubeVirtCeiling(options)
+	if err != nil {
+		return err
+	}
 	return argojob.Config{
 		ReleaseWIF:                 wifConfig,
 		NonrootProfile:             options.argoControllerProfile,
@@ -216,6 +225,7 @@ func validateArgoServeOptions(options serveOptions) error {
 		ExecutorServiceAccount:     options.argoExecutorAccount,
 		VMLauncherServiceAccount:   options.argoVMLauncherAccount,
 		ContainerDiskPrefixes:      splitRunnerImagePrefixes(options.argoContainerDiskPrefixes),
+		KubeVirtCeiling:            kubeVirtCeiling,
 		RunnerImagePrefixes:        splitRunnerImagePrefixes(options.runnerImagePrefixes),
 		VaultAddress:               options.argoVaultAddress,
 		VaultCredentialedRole:      options.argoVaultCredentialedRole,

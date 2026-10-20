@@ -10,7 +10,7 @@ import (
 	"github.com/oberthci/oberth/internal/store"
 )
 
-func (service *API) kubeVirtGrantTool(ctx context.Context, actor api.Actor, name, repoName string) (any, error) {
+func (service *API) kubeVirtGrantTool(ctx context.Context, actor api.Actor, name, repoName string, budget store.KubeVirtBudget) (any, error) {
 	if service.kubeVirtGrants == nil || service.repositories == nil {
 		return nil, fmt.Errorf("%w: KubeVirt grants", ErrUnavailable)
 	}
@@ -36,14 +36,17 @@ func (service *API) kubeVirtGrantTool(ctx context.Context, actor api.Actor, name
 		if grant.RevokedAt != nil {
 			state = "revoked"
 		}
-		return map[string]any{"repo": repoName, "granted": grant.RevokedAt == nil, "state": state, "grant": grant}, nil
+		return map[string]any{"repo": repoName, "granted": grant.RevokedAt == nil, "state": state, "grant": grant, "max_memory": grant.MaxMemory()}, nil
 	}
 	if !actor.Admin {
 		return nil, fmt.Errorf("%w: KubeVirt grants require an admin uplink", ErrForbidden)
 	}
-	grant, err := service.kubeVirtGrants.SetKubeVirtGrant(ctx, repository.ID, actor.Identity, name == "kubevirt_grant")
+	grant, err := service.kubeVirtGrants.SetKubeVirtGrant(ctx, repository.ID, actor.Identity, name == "kubevirt_grant", budget)
+	if errors.Is(err, store.ErrInvalid) {
+		return nil, fmt.Errorf("%w: %w", ErrInvalidInput, err)
+	}
 	if err != nil {
 		return nil, err
 	}
-	return map[string]any{"repo": repoName, "granted": grant.RevokedAt == nil, "grant": grant}, nil
+	return map[string]any{"repo": repoName, "granted": grant.RevokedAt == nil, "grant": grant, "max_memory": grant.MaxMemory()}, nil
 }

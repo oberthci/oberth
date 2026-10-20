@@ -592,6 +592,16 @@
         },
         "vmLauncherServiceAccount": {"type": "string"},
         "containerDiskPrefixes": {"type": "array", "items": {"type": "string"}},
+        "kubevirtCeiling": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Cluster-wide ceiling on every KubeVirt grant's per-run VMI budget.",
+          "properties": {
+            "maxVMs": {"type": "integer", "minimum": 1, "maximum": 16},
+            "maxCores": {"type": "integer", "minimum": 1, "maximum": 64},
+            "maxMemory": {"type": "string", "pattern": "^[1-9][0-9]*(Mi|Gi)$"}
+          }
+        },
         "workflowTimeout": {
           "type": "string"
         },

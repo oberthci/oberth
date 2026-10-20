@@ -7,6 +7,7 @@ import (
 
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 )
 
 const admittedVMIManifest = `apiVersion: kubevirt.io/v1
@@ -67,6 +68,9 @@ func TestVMIResourceAdmission(t *testing.T) {
 		{name: "untrusted image", old: "quay.io/example/", replacement: "quay.io/other/", want: "containerDisk.image"},
 		{name: "prefix boundary", old: "quay.io/example/", replacement: "quay.io/examples-evil/", want: "containerDisk.image"},
 		{name: "unbounded cpu", old: "cores: 2", replacement: "cores: 32", want: "cpu.cores"},
+		{name: "cpu request above cores", old: "cpu: \"2\"", replacement: "cpu: \"3\"", want: "must not exceed spec.domain.cpu.cores"},
+		{name: "firmware bootloader", old: "    devices:\n", replacement: "    firmware:\n      bootloader:\n        efi: {}\n    devices:\n", want: "bootloader"},
+		{name: "firmware without kernelBoot", old: "    devices:\n", replacement: "    firmware: {}\n    devices:\n", want: "admits only kernelBoot"},
 		{name: "cross run name", old: "{{workflow.name}}-amd64", replacement: "other-run-vmi", want: "substitutions"},
 		{name: "bad metadata name", old: "{{workflow.name}}-amd64", replacement: "{{workflow.name}}-Bad_Name", want: "metadata.name"},
 		{name: "bad label", old: "oberth.ci/workflow: \"{{workflow.name}}\"", replacement: "oberth.ci/workflow: stolen", want: "substitutions"},
@@ -196,6 +200,7 @@ func TestVMIPerRunBudget(t *testing.T) {
 	workflow.Spec.Templates = workflow.Spec.Templates[:2]
 	for i := range workflow.Spec.Templates {
 		workflow.Spec.Templates[i].Resource.Manifest = strings.Replace(workflow.Spec.Templates[i].Resource.Manifest, "cores: 4", "cores: 3", 1)
+		workflow.Spec.Templates[i].Resource.Manifest = strings.Replace(workflow.Spec.Templates[i].Resource.Manifest, "cpu: \"4\"", "cpu: \"3\"", 1)
 		workflow.Spec.Templates[i].Resource.Manifest = strings.Replace(workflow.Spec.Templates[i].Resource.Manifest, "memory: 8Gi", "memory: 6Gi", 1)
 	}
 	if err := Admit(workflow, policy); err != nil {
@@ -248,5 +253,120 @@ func TestVMIResourceRequiresPolicyAndLocalTemplate(t *testing.T) {
 	workflow.Spec.Entrypoint = "frag-deadbeef-vm"
 	if err := Admit(workflow, policy); err == nil || !strings.Contains(err.Error(), "consuming repository") {
 		t.Fatalf("fragment VMI template was not refused: %v", err)
+	}
+}
+
+// p2pVMIWorkflow is the #919 p2p-3 topology: three 4-core, 8Gi VMIs, each
+// with its create, get and delete template.
+func p2pVMIWorkflow() *wfv1.Workflow {
+	deadline := int64(3600)
+	workflow := &wfv1.Workflow{Spec: wfv1.WorkflowSpec{Entrypoint: "create-0", ActiveDeadlineSeconds: &deadline}}
+	for i := 0; i < 3; i++ {
+		manifest := strings.Replace(admittedVMIManifest, "{{workflow.name}}-amd64", fmt.Sprintf("{{workflow.name}}-p2p%d", i), 1)
+		manifest = strings.Replace(manifest, "cores: 2", "cores: 4", 1)
+		manifest = strings.Replace(manifest, "cpu: \"2\"", "cpu: \"4\"", 1)
+		manifest = strings.Replace(manifest, "memory: 2Gi", "memory: 8Gi", 1)
+		metadata := manifest[:strings.Index(manifest, "spec:\n")]
+		workflow.Spec.Templates = append(workflow.Spec.Templates,
+			wfv1.Template{Name: fmt.Sprintf("create-%d", i), Resource: &wfv1.ResourceTemplate{Action: "create", SetOwnerReference: true, Manifest: manifest}},
+			wfv1.Template{Name: fmt.Sprintf("get-%d", i), Resource: &wfv1.ResourceTemplate{Action: "get", SetOwnerReference: true, Manifest: metadata}},
+			wfv1.Template{Name: fmt.Sprintf("delete-%d", i), Resource: &wfv1.ResourceTemplate{Action: "delete", SetOwnerReference: true, Manifest: metadata}},
+		)
+	}
+	return workflow
+}
+
+func TestVMIGrantBudget(t *testing.T) {
+	prefixes := []string{"quay.io/example/"}
+	p2p := VMIBudget{MaxVMs: 3, MaxCores: 12, MaxMemory: resource.MustParse("24Gi")}
+
+	err := Admit(p2pVMIWorkflow(), Policy{KubeVirt: true, ContainerDiskPrefixes: prefixes})
+	if err == nil || !strings.Contains(err.Error(), "3 create templates (maximum 2), 12 cores (maximum 6), 24Gi memory (maximum 12Gi)") ||
+		!strings.Contains(err.Error(), "9 VMI resource templates, maximum is 6") {
+		t.Fatalf("p2p-3 under the default budget: want refusal, got %v", err)
+	}
+	if err := Admit(p2pVMIWorkflow(), Policy{KubeVirt: true, ContainerDiskPrefixes: prefixes, VMIBudget: p2p}); err != nil {
+		t.Fatalf("p2p-3 under a 3 VM / 12 core / 24Gi grant refused: %v", err)
+	}
+	if err := Admit(p2pVMIWorkflow(), Policy{KubeVirt: true, ContainerDiskPrefixes: prefixes, VMIBudget: p2p, VMICeiling: VMIBudgetLimit()}); err != nil {
+		t.Fatalf("p2p-3 under the grant and the largest ceiling refused: %v", err)
+	}
+
+	for _, tc := range []struct {
+		name           string
+		grant, ceiling VMIBudget
+		want           string
+	}{
+		{"grant cores", VMIBudget{MaxVMs: 3, MaxCores: 11, MaxMemory: resource.MustParse("24Gi")}, VMIBudget{}, "12 cores (maximum 11)"},
+		{"grant memory", VMIBudget{MaxVMs: 3, MaxCores: 12, MaxMemory: resource.MustParse("23Gi")}, VMIBudget{}, "24Gi memory (maximum 23Gi)"},
+		{"ceiling VMs", p2p, VMIBudget{MaxVMs: 2, MaxCores: 64, MaxMemory: resource.MustParse("256Gi")}, "3 create templates (maximum 2)"},
+		{"ceiling cores", p2p, VMIBudget{MaxVMs: 16, MaxCores: 8, MaxMemory: resource.MustParse("256Gi")}, "cluster ceiling of 16 VMs, 8 cores, 256Gi memory"},
+		{"invalid grant", VMIBudget{MaxVMs: 17, MaxCores: 12, MaxMemory: resource.MustParse("24Gi")}, VMIBudget{}, "KubeVirt grant: VMI budget max VMs must be 1..16"},
+		{"partial grant", VMIBudget{MaxVMs: 3}, VMIBudget{}, "max cores must be 1..64"},
+		{"invalid ceiling", p2p, VMIBudget{MaxVMs: 3, MaxCores: 12, MaxMemory: resource.MustParse("300Gi")}, "KubeVirt ceiling: VMI budget max memory must be 1Gi..256Gi"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := Admit(p2pVMIWorkflow(), Policy{KubeVirt: true, ContainerDiskPrefixes: prefixes, VMIBudget: tc.grant, VMICeiling: tc.ceiling})
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("want refusal containing %q, got %v", tc.want, err)
+			}
+		})
+	}
+}
+
+const kernelBootFirmware = `    firmware:
+      kernelBoot:
+        kernelArgs: console=ttyS0 root=/dev/vda1 ro lsm=landlock,lockdown,yama,integrity,apparmor,bpf
+        container:
+          image: quay.io/example/kernel-6.12@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+          kernelPath: /boot/vmlinuz
+          initrdPath: /boot/initrd.img
+`
+
+func TestVMIKernelBootAdmission(t *testing.T) {
+	prefixes := []string{"quay.io/example/"}
+	manifest := strings.Replace(admittedVMIManifest, "    devices:\n", kernelBootFirmware+"    devices:\n", 1)
+	base := &wfv1.ResourceTemplate{Action: "create", SetOwnerReference: true, Manifest: manifest}
+	if err := admitVMIResource("resource", base, prefixes); err != nil {
+		t.Fatalf("pinned allowlisted kernelBoot refused: %v", err)
+	}
+	withoutInitrd := strings.Replace(manifest, "          initrdPath: /boot/initrd.img\n", "", 1)
+	if err := admitVMIResource("resource", &wfv1.ResourceTemplate{Action: "create", SetOwnerReference: true, Manifest: withoutInitrd}, prefixes); err != nil {
+		t.Fatalf("kernelBoot without initrd refused: %v", err)
+	}
+	const image = "quay.io/example/kernel-6.12@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	for _, tc := range []struct{ name, old, replacement, want string }{
+		{"unpinned image", image, "quay.io/example/kernel-6.12:v1", "@sha256:<64 hex> digest"},
+		{"latest tag", image, "quay.io/example/kernel-6.12:latest", "digest"},
+		{"off-list prefix", image, "quay.io/other/kernel-6.12@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "allowlisted containerDisk prefix"},
+		{"prefix boundary", image, "quay.io/examples-evil/kernel@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "allowlisted containerDisk prefix"},
+		{"image substitution", "kernel-6.12@", "{{inputs.parameters.kernel}}@", "substitutions"},
+		{"pull secret", "          kernelPath:", "          imagePullSecret: stolen\n          kernelPath:", "imagePullSecret"},
+		{"pull policy", "          kernelPath:", "          imagePullPolicy: Always\n          kernelPath:", "imagePullPolicy"},
+		{"missing container", "        container:\n", "        other:\n", "other"},
+		{"missing kernel path", "          kernelPath: /boot/vmlinuz\n", "", "kernelPath is required"},
+		{"relative kernel path", "kernelPath: /boot/vmlinuz", "kernelPath: boot/vmlinuz", "kernelPath must be an absolute path"},
+		{"dotdot kernel path", "kernelPath: /boot/vmlinuz", "kernelPath: /boot/../etc/shadow", "kernelPath must be an absolute path"},
+		{"dot kernel path", "kernelPath: /boot/vmlinuz", "kernelPath: /boot/./vmlinuz", "kernelPath must be an absolute path"},
+		{"dotdot initrd path", "initrdPath: /boot/initrd.img", "initrdPath: /../initrd.img", "initrdPath must be an absolute path"},
+		{"double slash initrd", "initrdPath: /boot/initrd.img", "initrdPath: /boot//initrd.img", "initrdPath must be an absolute path"},
+		{"trailing slash", "kernelPath: /boot/vmlinuz", "kernelPath: /boot/", "kernelPath must be an absolute path"},
+		{"long path", "kernelPath: /boot/vmlinuz", "kernelPath: /" + strings.Repeat("a", 256), "at most 256 bytes"},
+		{"args quote", "console=ttyS0 ", "console=ttyS0 init=\"/bin/sh\" ", "kernelArgs must be"},
+		{"args brace", "console=ttyS0 ", "console=ttyS0 x={{workflow.name}} ", "substitutions"},
+		{"args semicolon", "console=ttyS0 ", "console=ttyS0;reboot ", "kernelArgs must be"},
+		{"args double space", "console=ttyS0 ", "console=ttyS0  ", "kernelArgs must be"},
+		{"args too long", "console=ttyS0 ", "console=ttyS0 " + strings.Repeat("a", 512) + " ", "at most 512 bytes"},
+		{"bootloader alongside", "      kernelBoot:\n", "      bootloader:\n        bios: {}\n      kernelBoot:\n", "bootloader"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if !strings.Contains(manifest, tc.old) {
+				t.Fatalf("fixture lacks %q", tc.old)
+			}
+			candidate := &wfv1.ResourceTemplate{Action: "create", SetOwnerReference: true, Manifest: strings.Replace(manifest, tc.old, tc.replacement, 1)}
+			if err := admitVMIResource("resource", candidate, prefixes); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("want refusal containing %q, got %v", tc.want, err)
+			}
+		})
 	}
 }

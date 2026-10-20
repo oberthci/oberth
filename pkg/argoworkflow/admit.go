@@ -52,6 +52,12 @@ type Policy struct {
 	// ContainerDiskPrefixes is the administrator's registry allowlist for VMI
 	// containerDisks. An empty list never admits a containerDisk image.
 	ContainerDiskPrefixes []string
+	// VMIBudget is the repository grant's per-run VMI budget. Zero selects
+	// DefaultVMIBudget.
+	VMIBudget VMIBudget
+	// VMICeiling is the administrator's cluster-wide cap on any grant's
+	// budget. Zero selects VMIBudgetLimit.
+	VMICeiling VMIBudget
 }
 
 // Admit refuses every construct through which a repository-authored document
@@ -76,6 +82,16 @@ func Admit(workflow *wfv1.Workflow, policy Policy) error {
 	if policy.KubeVirt && len(policy.ContainerDiskPrefixes) != 0 {
 		if err := validateContainerDiskPrefixes(policy.ContainerDiskPrefixes); err != nil {
 			problems = append(problems, fmt.Errorf("argoworkflow: %w", err))
+		}
+	}
+	for _, budget := range []struct {
+		name   string
+		budget VMIBudget
+	}{{"grant", policy.VMIBudget}, {"ceiling", policy.VMICeiling}} {
+		if !budget.budget.IsZero() {
+			if err := budget.budget.Validate(); err != nil {
+				return fmt.Errorf("argoworkflow: KubeVirt %s: %w", budget.name, err)
+			}
 		}
 	}
 	problems = append(problems, admitTemplates(workflow, policy)...)
@@ -281,12 +297,14 @@ func admitTemplates(workflow *wfv1.Workflow, policy Policy) []error {
 			}
 		}
 	}
-	if vmiTemplates > maxVMITemplates {
-		problems = append(problems, fmt.Errorf("argoworkflow: spec.templates declares %d VMI resource templates, maximum is %d", vmiTemplates, maxVMITemplates))
+	grant, ceiling, budget := policy.effectiveVMIBudget()
+	if maxTemplates := vmiTemplatesPerVM * budget.MaxVMs; vmiTemplates > maxTemplates {
+		problems = append(problems, fmt.Errorf("argoworkflow: spec.templates declares %d VMI resource templates, maximum is %d (%d per admitted VM)",
+			vmiTemplates, maxTemplates, vmiTemplatesPerVM))
 	}
-	if vmiCreates > maxVMICreateTemplates || vmiCores > maxVMIRunCores || vmiMemory.Cmp(resource.MustParse(maxVMIRunMemory)) > 0 {
-		problems = append(problems, fmt.Errorf("argoworkflow: VMI run budget exceeded: %d create templates (maximum %d), %d cores (maximum %d), %s memory (maximum %s)",
-			vmiCreates, maxVMICreateTemplates, vmiCores, maxVMIRunCores, vmiMemory.String(), maxVMIRunMemory))
+	if vmiCreates > budget.MaxVMs || vmiCores > budget.MaxCores || vmiMemory.Cmp(budget.MaxMemory) > 0 {
+		problems = append(problems, fmt.Errorf("argoworkflow: VMI run budget exceeded: %d create templates (maximum %d), %d cores (maximum %d), %s memory (maximum %s); the KubeVirt grant allows %s under a cluster ceiling of %s",
+			vmiCreates, budget.MaxVMs, vmiCores, budget.MaxCores, vmiMemory.String(), budget.MaxMemory.String(), grant, ceiling))
 	}
 	if workflow.Spec.Entrypoint != "" && !entrypointFound {
 		problems = append(problems, fmt.Errorf("argoworkflow: spec.entrypoint %q names no template", workflow.Spec.Entrypoint))

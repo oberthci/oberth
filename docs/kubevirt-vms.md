@@ -6,6 +6,37 @@ An administrator grants a registered repository the KubeVirt capability with
 is audited. The grant alone does not permit arbitrary Kubernetes resources:
 Oberth admits only bounded VMI manifests in named Argo `resource:` templates.
 
+## Per-run VMI budget
+
+Each grant carries a per-run budget: the number of VMI create templates, their
+summed `spec.domain.cpu.cores`, and their summed memory requests. A grant made
+without explicit values gets 2 VMs, 6 cores and 12Gi, which is also the budget
+of every grant made before schema v25. To raise it:
+
+```
+oberth kubevirt grant <repo> --max-vms 3 --max-cores 12 --max-memory 24Gi
+```
+
+or MCP `kubevirt_grant` with `max_vms`, `max_cores` and `max_memory` (a
+Kubernetes quantity). Unset fields take the defaults, not the previous values.
+Granting an active grant again with a different budget replaces the budget;
+the audit entry records both the new and the previous budget.
+`kubevirt_grant_get` and `oberth kubevirt get` show the budget.
+Bounds: 1..16 VMs, 1..64 cores, 1Gi..256Gi.
+
+The server applies a cluster-wide ceiling to every grant at admission:
+`argo.kubevirtCeiling.{maxVMs,maxCores,maxMemory}` (server flags
+`--argo-kubevirt-max-vms`, `--argo-kubevirt-max-cores`,
+`--argo-kubevirt-max-memory`), by default 8 VMs, 24 cores and 48Gi. The
+effective budget is the smaller of the grant and the ceiling, field by field.
+A run may also declare at most three VMI resource templates per VM in its
+budget, for each VM's create, get and delete. A VMI's CPU request may not
+exceed its cores, so the core budget also bounds what the VMIs reserve. The
+budget counts guest memory; each virt-launcher Pod adds KubeVirt's own
+overhead (a few hundred MiB) on top. Check a workflow locally against a
+budget with `oberth validate --kubevirt --container-disk-prefixes=...
+--kubevirt-max-vms 3 --kubevirt-max-cores 12 --kubevirt-max-memory 24Gi`.
+
 Set `argo.containerDiskPrefixes` to clean repository-path prefixes such as
 `quay.io/example/`. The corresponding server flag is
 `--argo-container-disk-prefixes`. Images must be digest-pinned and match a
@@ -30,15 +61,50 @@ The VMI manifest must use `kubevirt.io/v1`,
 required. Only those two substitutions are permitted. The manifest must be
 one YAML document with no carriage returns. Create manifests are limited to
 the admitted containerDisk, inline cloud-init, emptyDisk, pod networking,
-masquerade interface, CPU, memory and architecture fields. Get and delete
-manifests carry metadata only. The per-VM and per-run budgets are enforced at
+masquerade interface, CPU, memory, architecture and kernelBoot fields. Get
+and delete manifests carry metadata only. Each VMI is limited to 4 cores and
+8Gi; the per-run budget above bounds their sum. Both are enforced at
 admission. Credentialed workflows cannot contain VMI resource templates.
 
-The Workflow owner reference normally removes VMIs. After a run completes or
-is cancelled, Oberth also lists VMIs with the run's Workflow label and deletes
-survivors whose names have that Workflow prefix, using observed UID
-preconditions. The KubeVirt installation and cluster reachability policy are
-managed separately from this admission and identity increment. This cleanup is
-best effort: failures are logged and audited, while the finished run still
-becomes terminal. The Workflow owner reference remains the primary cleanup
-mechanism.
+## Direct kernel boot
+
+`spec.domain.firmware.kernelBoot` boots a kernel and initrd from a container
+image instead of the disk's bootloader:
+
+```yaml
+domain:
+  firmware:
+    kernelBoot:
+      kernelArgs: console=ttyS0 root=/dev/vda1 ro
+      container:
+        image: <allowlisted prefix>/kernel@sha256:<64 hex>
+        kernelPath: /boot/vmlinuz
+        initrdPath: /boot/initrd.img
+```
+
+The image follows the containerDisk rules: digest-pinned and under an
+`argo.containerDiskPrefixes` entry. `kernelPath` is required and `initrdPath`
+optional; both must be absolute paths of at most 256 bytes made of
+`[A-Za-z0-9._-]` segments, with no `.` or `..` segment. `kernelArgs` is
+optional, at most 512 bytes, and made of single-space-separated words in
+`[A-Za-z0-9._,:=/+-]`. `imagePullSecret`, `imagePullPolicy` and every other
+firmware field (bootloader, serial, UUID, ACPI) are refused. A containerDisk
+volume is still required for the root disk.
+
+## Cleanup
+
+Oberth's run cleanup owns VMI deletion; a workflow needs no explicit delete
+step. After a run completes, fails or is cancelled, Oberth lists VMIs with the
+run's Workflow label and deletes survivors whose names have that Workflow
+prefix, using observed UID preconditions. A VMI that is already gone, or was
+never created because the run failed first, is not an error, so a run that
+fails before its VM exists finishes with a clean cleanup. The Workflow owner
+reference removes VMIs too, when the Workflow itself is deleted.
+
+An exit-handler delete template remains admitted for releasing VMs before the
+run ends. It is safe when the VMI never existed: Argo's resource executor
+(v4.0.8) always runs `kubectl delete --ignore-not-found`, so Oberth still
+refuses resource `flags`. The KubeVirt installation and cluster reachability
+policy are managed separately from this admission and identity increment.
+Cleanup is best effort: failures are logged and audited, while the finished
+run still becomes terminal.

@@ -217,7 +217,7 @@ type SecretAccessStore interface {
 
 type KubeVirtGrantStore interface {
 	KubeVirtGrant(context.Context, int64) (store.KubeVirtGrant, error)
-	SetKubeVirtGrant(context.Context, int64, string, bool) (store.KubeVirtGrant, error)
+	SetKubeVirtGrant(context.Context, int64, string, bool, store.KubeVirtBudget) (store.KubeVirtGrant, error)
 }
 
 // PromotionGrantStore is the narrow contract for promotion grant operations.
