@@ -959,14 +959,22 @@ continuity checks; it must never be used to reset or bypass those checks.
   `run.rerun` audit action (`source_run_id`, actor, reason, force, warning)
   commit in one transaction; the new run's lineage is that action, shown as
   `RerunOf` by `run_get` and `/api/runs/{run}` and as `rerun of` by `oberth
-  run`. It is an ordinary new run: SHA-keyed `status`, `wait` and `promote`
+  run`. Because `audit_actions` has no index on `resource_id`, the store reads
+  every `run.rerun` link with one scan the first time a run view needs one
+  and keeps them in memory, adding each new link after its rerun commits, so
+  run views never scan the audit table per call. No schema change is made:
+  an index would be a migration numbered after the other in-flight ones (the
+  runner skips any version at or below the recorded one). It is an ordinary new run: SHA-keyed `status`, `wait` and `promote`
   select the newest run for the SHA, so they follow it. Refused without any
   change: an active or passed source; promotion CI (`promote_retry`), plan
   and apply runs; a ref that already has an active run; a branch whose
   current Oberth head is no longer the run's SHA (a green branch run
   force-syncs its SHA, so rerunning an older commit would roll the upstream
-  branch back); and a tag that already has a pending or delivered
-  publication or a passed run. A source that passed every step and failed
+  branch back); and a tag that already has a pending, delivered or failed
+  publication or a passed run. A failed tag publication, of this run or of an
+  earlier rerun of the tag, means every release step already passed once:
+  the refusal names that run and `publish_retry` for it, so `release.yaml` is
+  never executed again for a tag that only failed to publish. A source that passed every step and failed
   only in publication (`phase = "publishing"`) is not re-executed: its
   publication is retried exactly as `publish_retry` does (response `mode:
   "publish_retry"`), so a release's publishing work never repeats. A tag

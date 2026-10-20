@@ -90,3 +90,56 @@ func TestRerunRunRefusesWithoutQueueingAndRecordsLineage(t *testing.T) {
 		t.Fatalf("audit chain after reruns: %v", err)
 	}
 }
+
+// The lineage is loaded once and kept current: a rerun made after the first
+// lookup is visible at once, and a new Store reads every link back from the
+// audit chain.
+func TestRunRerunOfLineageCacheStaysCurrent(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)
+	path := t.TempDir() + "/oberth.db"
+	s, err := Open(ctx, path, Options{Now: func() time.Time { return now }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo := createRepo(t, s)
+	rerunOnce := func(ref, sha string) (string, string) {
+		t.Helper()
+		run, err := s.EnqueueRun(ctx, model.RunSpec{RepoID: repo.ID, RefKind: model.RefBranch, Ref: ref, SHA: sha, Actor: "agent@host", Trigger: "branch"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.ClaimNextRun(ctx); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.FinishRun(ctx, run.ID, model.RunResult{Status: model.RunFailed, Phase: "test", FailedStep: "unit"}); err != nil {
+			t.Fatal(err)
+		}
+		result, err := s.RerunRun(ctx, model.RunRerunRequest{RunID: run.ID, Actor: "agent@host"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return result.Enqueued.ID, run.ID
+	}
+	before, beforeSource := rerunOnce("feature/a", "abababababababababababababababababababab")
+	if source, err := s.RunRerunOf(ctx, before); err != nil || source != beforeSource {
+		t.Fatalf("lineage loaded after the rerun = %q, %v", source, err)
+	}
+	after, afterSource := rerunOnce("feature/b", "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd")
+	if source, err := s.RunRerunOf(ctx, after); err != nil || source != afterSource {
+		t.Fatalf("lineage of a rerun after the first load = %q, %v", source, err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := Open(ctx, path, Options{Now: func() time.Time { return now }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = reopened.Close() })
+	for run, want := range map[string]string{before: beforeSource, after: afterSource, beforeSource: ""} {
+		if source, err := reopened.RunRerunOf(ctx, run); err != nil || source != want {
+			t.Fatalf("reopened RunRerunOf(%s) = %q, %v; want %q", run, source, err, want)
+		}
+	}
+}

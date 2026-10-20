@@ -328,3 +328,35 @@ func TestRunRerunPolicy(t *testing.T) {
 		}
 	}
 }
+
+// A tag whose rerun passed every release step and failed only in publishing
+// is not executed a third time: rerunning the original is refused and points
+// at publish_retry of the rerun, which publishes the tag once.
+func TestTagRerunRefusesAThirdExecutionAfterAPublishingFailure(t *testing.T) {
+	harness := newRerunHarness(t, infraFailure, greenResult)
+	original := admitRerunTag(t, harness)
+	if original.Status != model.RunFailed || original.Phase == "publishing" {
+		t.Fatalf("original tag run = %#v, want an infrastructure failure", original)
+	}
+	harness.git.failTags = 1
+	second := harness.rerun(t, rerunAdmin, map[string]any{"id": original.ID, "force": true})
+	harness.process(t)
+	if run := harness.run(t, second.RunID); run.Status != model.RunFailed || run.Phase != "publishing" {
+		t.Fatalf("tag rerun = %#v, want failed/publishing", run)
+	}
+	_, err := harness.call(rerunAdmin, "run_rerun", map[string]any{"id": original.ID, "force": true})
+	if !errors.Is(err, store.ErrInvalidState) || !strings.Contains(err.Error(), "publish_retry") || !strings.Contains(err.Error(), second.RunID) {
+		t.Fatalf("third execution error = %v, want ErrInvalidState pointing at publish_retry of %s", err, second.RunID)
+	}
+	retried := harness.rerun(t, rerunAdmin, map[string]any{"id": second.RunID, "force": true})
+	if retried.Mode != "publish_retry" || retried.Status != string(model.PublicationDelivered) {
+		t.Fatalf("rerun of the publishing failure = %#v, want a delivered publication retry", retried)
+	}
+	harness.fixture.jobs.mu.Lock()
+	executions := len(harness.fixture.jobs.createdReleases)
+	harness.fixture.jobs.mu.Unlock()
+	if executions != 2 || len(harness.git.syncedTags) != 1 || harness.git.tagAttempts() != 2 {
+		t.Fatalf("release executions %d, tag publications %v after %d attempts; want 2 executions and one delivered tag",
+			executions, harness.git.syncedTags, harness.git.tagAttempts())
+	}
+}

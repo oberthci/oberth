@@ -64,6 +64,8 @@ type Store struct {
 	done     bool
 	readOnly bool
 	cleanup  func() error
+	// reruns caches run_rerun lineage (#1098); see RunRerunOf.
+	reruns rerunLineage
 }
 
 func Open(ctx context.Context, path string, opts Options) (*Store, error) {
