@@ -940,7 +940,8 @@ continuity checks; it must never be used to reset or bypass those checks.
   and not audited. The same grant pass admits the runs behind it.
 - Run list views (#1122): `/api/runs`, MCP `run_list`, `oberth runs` and the
   dashboard use one default order. The first page carries every not-yet-
-  admitted run, capped at 500, in queue position order; below it, admitted
+  admitted run, capped at 500, in admission order (`admission_sequence`,
+  then `queue_sequence`), preserving restart FIFO order; below it, admitted
   and terminal runs sort by `started_at` descending, breaking ties by ID.
   A terminal run that was never admitted sorts by `finished_at`. The dated
   portion pages by that fixed (time, ID) key, using the last run's sequence
@@ -1133,7 +1134,10 @@ continuity checks; it must never be used to reset or bypass those checks.
   Promotion CI, tag/release, and publication-owning runs are never re-fired
   automatically; they terminalize conservatively exactly as before (an
   interrupted promotion is re-run on request with `promote_retry`), and a
-  branch that already has newer active work keeps only that newest run.
+  branch that already has newer active work keeps only that newest run. The
+  replacement inherits the stranded run's `admission_sequence`, so it keeps
+  its FIFO position while retaining a fresh `queue_sequence` for identity and
+  unchanged history paging (#1092).
   Explicitly cancelled runs are never re-fired either: they are terminal
   before any restart pass looks at them, and only active runs are requeued.
 - Green branch runs force-sync that same branch to the upstream forge. Red
@@ -2063,6 +2067,7 @@ alone is never evidence that missing migrations ran.
 | v25 | Unreleased (#1017) | kubevirt_grants: add max_vms, max_cores, max_memory_bytes (per-grant VMI run budget; existing grants get 2 VMs, 6 cores, 12Gi) | Database restore |
 | v26 | Unreleased (#1021) | size_grants: audited per-repository maximum admission size (L or XL; no active row means L); `CREATE TABLE IF NOT EXISTS` | Database restore |
 | v27 | Unreleased (#1085) | admission_head_waits: when a commit's run first waited at the admission queue head, so bounded backfill keeps its clock across a restart; `CREATE TABLE IF NOT EXISTS` | Database restore |
+| v28 | Pending (#1092) | Backfilled run admission_sequence retains FIFO order across restart re-fires; queue_sequence remains the history cursor | Database restore |
 
 **Contract test:** `TestEveryMigrationDocumentedInAgentContract` asserts that
 every migration version in `internal/store/schema.go` has a corresponding

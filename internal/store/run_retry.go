@@ -63,7 +63,7 @@ func (s *Store) RetryRun(ctx context.Context, runID, actor string) (model.Enqueu
 		return model.EnqueueRunResult{}, fmt.Errorf("generate retry run ID: %w", err)
 	}
 	now := unixNano(s.now())
-	enqueued, err := s.enqueueRunTx(ctx, tx, spec, id, now)
+	enqueued, err := s.enqueueRunTx(ctx, tx, spec, id, now, 0)
 	if err != nil {
 		return model.EnqueueRunResult{}, fmt.Errorf("enqueue retry: %w", err)
 	}

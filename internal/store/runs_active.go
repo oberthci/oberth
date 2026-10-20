@@ -20,9 +20,9 @@ const MaxActiveRuns = 500
 //  1. runs whose Workflow has started, oldest start first;
 //  2. claimed runs not yet started (preparing, waiting for admission, or
 //     admitted and awaiting submission), in admission order: the weighted
-//     admission gate reserves and grants in ascending queue_sequence, the
+//     admission gate reserves and grants in ascending admission_sequence, the
 //     same order ClaimNextRun claims in;
-//  3. unclaimed queued runs, in ascending queue_sequence (accepted order).
+//  3. unclaimed queued runs, in ascending admission_sequence (accepted order).
 //
 // Before, Limit and Terminal are ignored: the view is one bounded list.
 func (s *Store) ListActiveRuns(ctx context.Context, filter model.RunListFilter) ([]model.Run, error) {
@@ -40,7 +40,7 @@ ORDER BY CASE
     WHEN status = 'running' AND started_at IS NOT NULL THEN 0
     WHEN status = 'running' THEN 1
     ELSE 2
-  END, started_at, queue_sequence
+  END, started_at, admission_sequence, queue_sequence
 LIMIT ?`, append(args, MaxActiveRuns)...) // #nosec G202 -- the restriction is a fixed column and ? placeholders from repoRestriction.
 	if err != nil {
 		return nil, fmt.Errorf("list active runs: %w", err)

@@ -1387,7 +1387,7 @@ func (s *Store) EnqueuePromotionRun(ctx context.Context, runSpec model.RunSpec, 
 		return model.EnqueueRunResult{}, model.Promotion{}, fmt.Errorf("begin promotion run enqueue: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	enqueued, err := s.enqueueRunTx(ctx, tx, validatedRun, runID, now)
+	enqueued, err := s.enqueueRunTx(ctx, tx, validatedRun, runID, now, 0)
 	if err != nil {
 		return model.EnqueueRunResult{}, model.Promotion{}, err
 	}
@@ -1493,7 +1493,7 @@ func (s *Store) EnqueueAdmittedPromotionRun(ctx context.Context, runSpec model.R
 		!strings.EqualFold(validatedRun.BaseSHA, promotion.PreviousSHA) {
 		return model.EnqueueRunResult{}, model.Promotion{}, fmt.Errorf("%w: admitted promotion run does not match promotion", ErrInvalidState)
 	}
-	enqueued, err := s.enqueueRunTx(ctx, tx, validatedRun, runID, now)
+	enqueued, err := s.enqueueRunTx(ctx, tx, validatedRun, runID, now, 0)
 	if err != nil {
 		return model.EnqueueRunResult{}, model.Promotion{}, err
 	}

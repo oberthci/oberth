@@ -30,7 +30,7 @@ func TestResolveRunIDUsesUniquePrefixesAcrossRepositories(t *testing.T) {
 		defer func() { _ = tx.Rollback() }()
 		// Choose IDs at insertion to exercise an actual collision without
 		// altering immutable history or disabling foreign-key checks.
-		if _, err := database.enqueueRunTx(ctx, tx, spec, id, unixNano(now)); err != nil {
+		if _, err := database.enqueueRunTx(ctx, tx, spec, id, unixNano(now), 0); err != nil {
 			t.Fatal(err)
 		}
 		if err := tx.Commit(); err != nil {

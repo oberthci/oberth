@@ -58,7 +58,9 @@ type weightedAdmission struct {
 type admissionReservation struct {
 	gate     *weightedAdmission
 	sequence int64
-	runID    string
+	// order retains restart FIFO position; sequence stays the unique run key.
+	order int64
+	runID string
 	// repoID, repo and ref identify the run when it blocks the queue head
 	// (#1021); preparedAt is when it started waiting for weight.
 	repoID     int64
@@ -179,13 +181,18 @@ func concurrencyGroupKey(repoID int64, group string) string {
 // reserve records FIFO claim order before exact-SHA checkout and static
 // parsing can finish out of order.
 func (gate *weightedAdmission) reserve(sequence int64) *admissionReservation {
-	reservation := &admissionReservation{gate: gate, sequence: sequence, ready: make(chan struct{}), claimedAt: time.Now().UTC()}
+	return gate.reserveInOrder(sequence, sequence)
+}
+
+func (gate *weightedAdmission) reserveInOrder(sequence, order int64) *admissionReservation {
+	if order <= 0 {
+		order = sequence
+	}
+	reservation := &admissionReservation{gate: gate, sequence: sequence, order: order, ready: make(chan struct{}), claimedAt: time.Now().UTC()}
 	gate.mu.Lock()
 	gate.reservations[sequence] = reservation
 	gate.waiters = append(gate.waiters, reservation)
-	sort.SliceStable(gate.waiters, func(i, j int) bool {
-		return gate.waiters[i].sequence < gate.waiters[j].sequence
-	})
+	sort.SliceStable(gate.waiters, func(i, j int) bool { return admissionBefore(gate.waiters[i], gate.waiters[j]) })
 	gate.grantLocked()
 	gate.mu.Unlock()
 	return reservation
@@ -195,7 +202,7 @@ func (gate *weightedAdmission) reserve(sequence int64) *admissionReservation {
 // identity from the claim on, so a run still preparing (checking out, reading
 // its document) is already addressable by its run ID.
 func (gate *weightedAdmission) reserveRun(run model.Run) *admissionReservation {
-	reservation := gate.reserve(run.QueueSequence)
+	reservation := gate.reserveInOrder(run.QueueSequence, run.AdmissionSequence)
 	gate.mu.Lock()
 	if reservation.runID == "" {
 		reservation.runID, reservation.repoID, reservation.ref = run.ID, run.RepoID, run.Ref
@@ -203,6 +210,13 @@ func (gate *weightedAdmission) reserveRun(run model.Run) *admissionReservation {
 	}
 	gate.mu.Unlock()
 	return reservation
+}
+
+func admissionBefore(a, b *admissionReservation) bool {
+	if a.order != b.order {
+		return a.order < b.order
+	}
+	return a.sequence < b.sequence
 }
 
 // acquire admits an ungrouped run of the given size.
@@ -689,7 +703,7 @@ func (scheduler *Scheduler) AdmissionSnapshot(sequence int64) *model.AdmissionOb
 		if head := gate.headBlockerLocked(); head == reservation {
 			result.HeadOfQueue = true
 			result.BlockedBy = gate.blockerLocked(head)
-		} else if head != nil && head.sequence < reservation.sequence {
+		} else if head != nil && admissionBefore(head, reservation) {
 			result.BlockedBy = gate.blockerLocked(head)
 		}
 	}
@@ -718,7 +732,7 @@ func (reservation *admissionReservation) parkVM() error {
 		delete(gate.groups, reservation.group)
 	}
 	gate.waiters = append(gate.waiters, reservation)
-	sort.SliceStable(gate.waiters, func(i, j int) bool { return gate.waiters[i].sequence < gate.waiters[j].sequence })
+	sort.SliceStable(gate.waiters, func(i, j int) bool { return admissionBefore(gate.waiters[i], gate.waiters[j]) })
 	gate.grantLocked()
 	if gate.onPark != nil {
 		gate.onPark()

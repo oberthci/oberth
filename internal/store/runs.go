@@ -16,7 +16,7 @@ type rowScanner interface {
 }
 
 const runColumns = `
-queue_sequence, id, repo_id, ref_kind, ref, sha, actor, release, credentialed, trigger,
+queue_sequence, COALESCE(admission_sequence, queue_sequence), id, repo_id, ref_kind, ref, sha, actor, release, credentialed, trigger,
 phase, job_name, tested_sha, base_sha, failed_burn, failed_step, error,
 status, reason, superseded_by, queued_at, started_at, finished_at, created_at, updated_at,
 concurrency_group`
@@ -72,7 +72,7 @@ func (s *Store) EnqueueRun(ctx context.Context, spec model.RunSpec) (model.Enque
 		return model.EnqueueRunResult{}, fmt.Errorf("begin enqueue run: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	result, err := s.enqueueRunTx(ctx, tx, spec, id, now)
+	result, err := s.enqueueRunTx(ctx, tx, spec, id, now, 0)
 	if err != nil {
 		return model.EnqueueRunResult{}, err
 	}
@@ -170,7 +170,7 @@ WHERE repo_id = ? AND ref_kind = 'branch' AND ref = ? AND id != ?
 	if err != nil {
 		return model.Run{}, fmt.Errorf("generate requeued run id: %w", err)
 	}
-	result, err := s.enqueueRunTx(ctx, tx, spec, id, now)
+	result, err := s.enqueueRunTx(ctx, tx, spec, id, now, run.AdmissionSequence)
 	if err != nil {
 		return model.Run{}, fmt.Errorf("requeue stranded run %s: %w", run.ID, err)
 	}
@@ -194,7 +194,7 @@ func validateRunSpec(spec model.RunSpec) (model.RunSpec, error) {
 	return spec, nil
 }
 
-func (s *Store) enqueueRunTx(ctx context.Context, tx *sql.Tx, spec model.RunSpec, id string, now int64) (model.EnqueueRunResult, error) {
+func (s *Store) enqueueRunTx(ctx context.Context, tx *sql.Tx, spec model.RunSpec, id string, now, inheritedAdmissionSequence int64) (model.EnqueueRunResult, error) {
 	var cancellations []model.RunCancellation
 	// Only ordinary branch-push runs supersede one another. Promotion CI uses a
 	// synthetic branch-shaped ref, but it is an independent immutable attempt
@@ -248,6 +248,14 @@ RETURNING `+runColumns,
 	if err != nil {
 		return model.EnqueueRunResult{}, fmt.Errorf("insert run: %w", err)
 	}
+	admissionSequence := value.QueueSequence
+	if inheritedAdmissionSequence > 0 {
+		admissionSequence = inheritedAdmissionSequence
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE runs SET admission_sequence = ? WHERE id = ?`, admissionSequence, id); err != nil {
+		return model.EnqueueRunResult{}, fmt.Errorf("set run admission sequence: %w", err)
+	}
+	value.AdmissionSequence = admissionSequence
 	if err := registerRunIssueWork(ctx, tx, value, now); err != nil {
 		return model.EnqueueRunResult{}, err
 	}
@@ -303,7 +311,7 @@ WHERE queue_sequence = (
             AND publication.ref_kind = candidate.ref_kind
             AND publication.ref = candidate.ref
       )
-    ORDER BY candidate.queue_sequence
+    ORDER BY candidate.admission_sequence, candidate.queue_sequence
     LIMIT 1
 )
 RETURNING `+runColumns, now))
@@ -974,12 +982,12 @@ func (s *Store) listFlatRuns(ctx context.Context, filter model.RunListFilter) ([
 			args := append([]any{filter.RepoID, filter.RepoID, filter.Ref, filter.Ref}, restrictionArgs...)
 			rows, err := tx.QueryContext(ctx, `
 WITH queue AS (
-  SELECT *, ROW_NUMBER() OVER (ORDER BY queue_sequence) AS queue_position FROM runs
+  SELECT *, ROW_NUMBER() OVER (ORDER BY admission_sequence, queue_sequence) AS queue_position FROM runs
   WHERE status = 'queued' OR (status = 'running' AND started_at IS NULL)
 )
 SELECT `+runColumns+`, queue_position FROM queue
 WHERE (? = 0 OR repo_id = ?) AND (? = '' OR ref = ?)`+restriction+`
-ORDER BY queue_sequence LIMIT ?`, append(args, MaxActiveRuns)...) // #nosec G202 -- fixed columns and parameterized restriction.
+ORDER BY admission_sequence, queue_sequence LIMIT ?`, append(args, MaxActiveRuns)...) // #nosec G202 -- fixed columns and parameterized restriction.
 			if err != nil {
 				return nil, fmt.Errorf("list queued runs: %w", err)
 			}
@@ -1202,7 +1210,7 @@ func scanRun(row rowScanner, extra ...any) (model.Run, error) {
 	var queued, created, updated int64
 	var started, finished sql.NullInt64
 	dest := []any{
-		&value.QueueSequence, &value.ID, &value.RepoID, &value.RefKind, &value.Ref,
+		&value.QueueSequence, &value.AdmissionSequence, &value.ID, &value.RepoID, &value.RefKind, &value.Ref,
 		&value.SHA, &value.Actor, &release, &credentialed, &value.Trigger, &value.Phase, &value.JobName,
 		&value.TestedSHA, &value.BaseSHA, &value.FailedBurn, &value.FailedStep, &value.Error,
 		&value.Status, &value.Reason, &value.SupersededBy, &queued, &started, &finished,

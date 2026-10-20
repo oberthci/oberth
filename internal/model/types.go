@@ -119,7 +119,9 @@ type RepositorySpec struct {
 type Run struct {
 	ID            string
 	QueueSequence int64
-	QueuePosition int64 `json:"QueuePosition,omitempty"`
+	// AdmissionSequence retains restart FIFO order; QueueSequence is the cursor.
+	AdmissionSequence int64 `json:"-"`
+	QueuePosition     int64 `json:"QueuePosition,omitempty"`
 	// Display fields are read-side projections; durable Status is unchanged.
 	DisplayStatus string         `json:"display_status,omitempty"`
 	DisplayReason string         `json:"display_reason"`
