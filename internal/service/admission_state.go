@@ -108,8 +108,9 @@ func (scheduler *Scheduler) AdmissionState() *model.AdmissionState {
 }
 
 // ReleaseAdmission is the operator's way to clear a reservation no owner
-// will release (#1099): one retained after its owner stopped, or one still
-// held for a run that is already terminal. A reservation whose run is still
+// will release (#1099): a granted reservation still held for a run that is
+// already terminal (a hung or lost owner), an ungranted one of a terminal
+// run, or, while the stopping scheduler drains, a retained one. A reservation whose run is still
 // active and owned is refused; run_cancel ends such a run. Before releasing a
 // granted reservation the run's Workflow is deleted through the engine (an
 // accepted deletion is the same proof the scheduler itself releases on);
@@ -160,34 +161,56 @@ func (scheduler *Scheduler) ReleaseAdmission(ctx context.Context, runID, actor s
 		}
 	}
 	result.Verified = true
-	if (view.State == "granted" || view.State == "retained") && run.JobName != "" {
-		if deleteErr := scheduler.jobs.Delete(ctx, run.JobName, runID); deleteErr != nil {
+	if view.State == "granted" || view.State == "retained" {
+		switch run.JobName {
+		case "":
+			// A granted run with no recorded Workflow name is either between
+			// its grant and the name being recorded, or in a trusted KVM
+			// preflight whose own Workflow is named elsewhere. Nothing here
+			// can prove that Workflow gone.
 			if !force {
-				return model.AdmissionRelease{}, fmt.Errorf("%w: could not delete Workflow %s to prove it gone (%w); retry, or release with force",
-					ErrAdmissionReleaseRefused, run.JobName, deleteErr)
+				return model.AdmissionRelease{}, fmt.Errorf("%w: run %s holds a grant but has no recorded Workflow (a trusted preflight may still be running); "+
+					"its Workflow cannot be proven gone, so release it only with force", ErrAdmissionReleaseRefused, runID)
 			}
 			result.Verified = false
-			result.Warning = "released without proof that Workflow " + run.JobName + " is gone: " + deleteErr.Error()
+			result.Warning = "released without proof: run " + runID + " has no recorded Workflow (a trusted preflight may still be running)"
+		default:
+			if deleteErr := scheduler.jobs.Delete(ctx, run.JobName, runID); deleteErr != nil {
+				if !force {
+					return model.AdmissionRelease{}, fmt.Errorf("%w: could not delete Workflow %s to prove it gone (%w); retry, or release with force",
+						ErrAdmissionReleaseRefused, run.JobName, deleteErr)
+				}
+				result.Verified = false
+				result.Warning = "released without proof that Workflow " + run.JobName + " is gone: " + deleteErr.Error()
+			}
 		}
+	}
+	// The audit records the outcome, so it is appended under the gate lock
+	// once the reservation is known to be still held, and before anything is
+	// freed: a failed append changes nothing, and an owner that released the
+	// reservation meanwhile leaves no false release in the chain.
+	gate.mu.Lock()
+	if reservation.released || (reservation.canceled && !reservation.granted) {
+		gate.mu.Unlock()
+		return model.AdmissionRelease{}, fmt.Errorf("%w: the reservation of run %s was released by its owner meanwhile", store.ErrNotFound, runID)
 	}
 	details, err := json.Marshal(map[string]any{
 		"run_id": runID, "state": view.State, "weight": view.Weight, "group": view.Group,
 		"workflow": run.JobName, "verified": result.Verified, "force": force,
 	})
-	if err != nil {
-		return model.AdmissionRelease{}, err
+	if err == nil {
+		_, err = scheduler.auditor.AppendAuditAction(ctx, model.AuditActionSpec{
+			Actor: actor, Action: "admission.release", ResourceType: "run", ResourceID: runID, Details: string(details),
+		})
 	}
-	if _, err := scheduler.auditor.AppendAuditAction(ctx, model.AuditActionSpec{
-		Actor: actor, Action: "admission.release", ResourceType: "run", ResourceID: runID, Details: string(details),
-	}); err != nil {
+	if err != nil {
+		gate.mu.Unlock()
 		return model.AdmissionRelease{}, fmt.Errorf("audit admission release: %w", err)
 	}
-	gate.mu.Lock()
-	switch {
-	case reservation.granted:
+	if reservation.granted {
 		reservation.retained = false
 		gate.releaseLocked(reservation)
-	case !reservation.canceled && !reservation.released:
+	} else {
 		reservation.canceled = true
 		reservation.abandoned = true
 		gate.removeLocked(reservation)

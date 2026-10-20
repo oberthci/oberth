@@ -135,3 +135,60 @@ func TestAdmissionReleaseRefusesLiveRunsAndNonAdmins(t *testing.T) {
 		t.Fatalf("state after refusals = %#v", state)
 	}
 }
+
+// TestReleaseOfAGrantWithoutAWorkflowNameNeedsForce covers a trusted KVM run
+// in preflight: it holds its grant before its Workflow name is recorded, and
+// its preflight Workflow may still be alive, so nothing proves it gone. A
+// release without force must not free its weight and claim verification.
+func TestReleaseOfAGrantWithoutAWorkflowNameNeedsForce(t *testing.T) {
+	fixture := newConcurrencyFixture(t, periapsis.M, 1)
+	scheduler := fixture.scheduler
+	auditor := &recordingAuditor{next: fixture.store}
+	scheduler.auditor = auditor
+	ctx := context.Background()
+	preflight, err := scheduler.EnqueueCI(ctx, CIRequest{EventID: "preflight", Repository: fixture.repo, Branch: "feature/kvm",
+		SHA: strings.Repeat("c", 40), Actor: "agent@host"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	claimed, err := fixture.store.ClaimNextRun(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fixture.store.FinishRun(ctx, preflight.ID, model.RunResult{Status: model.RunFailed, Phase: "infrastructure", Error: "lost"}); err != nil {
+		t.Fatal(err)
+	}
+	reservation := scheduler.admission.reserveRun(claimed)
+	acquireRequestWithinBudget(t, reservation, admissionRequest{RunID: preflight.ID, RepoID: fixture.repo.ID, Repo: fixture.repo.Name, Ref: "feature/kvm", Size: periapsis.M})
+
+	if _, err := scheduler.ReleaseAdmission(ctx, preflight.ID, "admin@host", false); !errors.Is(err, ErrAdmissionReleaseRefused) ||
+		!strings.Contains(err.Error(), "force") {
+		t.Fatalf("unforced release without a Workflow name = %v", err)
+	}
+	if state := scheduler.AdmissionState(); state.Used != 2 || len(auditor.actions) != 0 {
+		t.Fatalf("refused release changed state: used %d, audit %d", state.Used, len(auditor.actions))
+	}
+	released, err := scheduler.ReleaseAdmission(ctx, preflight.ID, "admin@host", true)
+	if err != nil || released.Verified || released.Warning == "" {
+		t.Fatalf("forced release = %#v, %v", released, err)
+	}
+	if state := scheduler.AdmissionState(); state.Used != 0 || len(state.Reservations) != 0 {
+		t.Fatalf("state after forced release = %#v", state)
+	}
+	if len(auditor.actions) != 1 || !strings.Contains(auditor.actions[0].Details, `"verified":false`) {
+		t.Fatalf("audit = %#v", auditor.actions)
+	}
+}
+
+// TestClaimedReservationIsAddressableWhilePreparing pins that a reservation
+// carries its run ID from the claim, before its checkout and static reads.
+func TestClaimedReservationIsAddressableWhilePreparing(t *testing.T) {
+	fixture := newConcurrencyFixture(t, periapsis.M, 1)
+	reservation := fixture.scheduler.admission.reserveRun(model.Run{ID: "claimed-run", QueueSequence: 7, RepoID: fixture.repo.ID, Ref: "feature/x"})
+	defer reservation.cancel()
+	state := fixture.scheduler.AdmissionState()
+	if len(state.Reservations) != 1 || state.Reservations[0].RunID != "claimed-run" || state.Reservations[0].State != "preparing" ||
+		state.Reservations[0].Ref != "feature/x" {
+		t.Fatalf("preparing reservation = %#v", state.Reservations)
+	}
+}

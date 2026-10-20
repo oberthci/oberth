@@ -835,7 +835,7 @@ func TestMCPToolSurfaceMatchesContract(t *testing.T) {
 		"issue_delete", "issue_list", "issue_lock",
 		"access_list", "access_allow", "access_revoke",
 		"kubevirt_grant", "kubevirt_revoke", "kubevirt_grant_get",
-		"size_grant", "size_revoke", "admission_release", "size_grant_get",
+		"size_grant", "size_revoke", "size_grant_get", "admission_release",
 		"repo_list", "repo_remove", "run_list", "system_status", "publish_retry", "secretstore_plan", "secretstore_sync_receipt", "secretstore_verify",
 		"promote_grant", "promote_grant_revoke", "promote_grant_list",
 	}

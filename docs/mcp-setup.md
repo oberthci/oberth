@@ -227,8 +227,8 @@ call the proxy hostname directly.
 | `kubevirt_grant_get` | Read a repository's KubeVirt permission: `never_granted`, `granted`, or `revoked`; granted and revoked responses include the audit record |
 | `size_grant` | Set a repository's maximum admission size, `L` or `XL` (admin-only, audited); without a grant the maximum is `L` |
 | `size_revoke` | Revoke a repository's size grant, returning it to `L` (admin-only, audited) |
-| `admission_release` | Release one admission reservation no owner will release (retained, or held for a terminal run); deletes the Workflow first unless `force` (admin-only, unscoped, audited) |
 | `size_grant_get` | Read a repository's maximum admission size (`max_size`) and grant state: `never_granted`, `granted`, or `revoked` |
+| `admission_release` | Release one admission reservation no owner will release, typically a granted one held for a terminal run whose owner hung; deletes the Workflow first as proof, `force` without it (admin-only, unscoped, audited) |
 
 For `access_allow` and `access_revoke`, `secret` is the exact path recorded in
 `access_list` or the pipeline declaration, including the mount and KV API prefix
