@@ -154,6 +154,9 @@ type PromotionRepository interface {
 	Promotion(context.Context, string) (model.Promotion, error)
 	PromotionByRun(context.Context, string) (model.Promotion, error)
 	FinishPromotion(context.Context, string, model.PromotionStatus, string, string) (model.Promotion, error)
+	// PromotionLineage reads a promotion's retry lineage (#1097) from the
+	// audit chain: the promotion it retries and the one that retried it.
+	PromotionLineage(context.Context, string) (model.PromotionLineage, error)
 }
 
 type PublicationStore interface {
@@ -224,7 +227,6 @@ type PromotionGrantStore interface {
 	AppendPromotionGrant(context.Context, model.PromotionGrantSpec) (model.PromotionGrant, error)
 	RevokePromotionGrant(ctx context.Context, id, actor string) (model.PromotionGrant, error)
 	MatchingPromotionGrant(ctx context.Context, repoID int64, sha, target string) (model.PromotionGrant, error)
-	ConsumePromotionGrant(ctx context.Context, grantID, promotionID, actor string) error
 	ListPromotionGrants(context.Context, model.PromotionGrantListFilter) ([]model.PromotionGrant, error)
 	PromotionGrant(context.Context, string) (model.PromotionGrant, error)
 }
@@ -520,6 +522,10 @@ type WaitResponse struct {
 type PromotionWaitResponse struct {
 	Promotion    model.Promotion `json:"promotion"`
 	StillRunning bool            `json:"still_running"`
+	// RetriedAs names the promotion that retries a failed or interrupted
+	// one (#1097): promote_retry, or the server's own retry after the target
+	// moved. Follow it with promote_status.
+	RetriedAs string `json:"retried_as,omitempty"`
 }
 
 // RepoView is the enriched repository response for the /api/repos dashboard

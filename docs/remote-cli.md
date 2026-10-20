@@ -48,6 +48,7 @@ oberth runs [--repo NAME] [--ref REF] [--limit N]
 oberth run <run-id>
 oberth run retry <run-id> [--json]
 oberth run cancel <run-id> [--reason TEXT] [--force] [--json]
+oberth promotion retry <promotion-id> [--json]
 oberth runs cancel --repo NAME --ref BRANCH [--reason TEXT] [--force] [--json]
 oberth log <run-id> --burn B --step S [--pattern P] [--context N] [--offset N] [--limit N] [--tail]
 oberth artifacts <run-id> [name]
@@ -62,6 +63,19 @@ for an interrupted or infrastructure-failed branch run and records the caller
 as actor. Workflow-level failures without a failed step are eligible. The
 source must still be the newest run for its branch; test failures, older runs,
 and release runs cannot be retried this way.
+
+`oberth promotion retry` calls the `promote_retry` MCP tool with the same
+uplink token. A failed or interrupted promotion (the push failed, the target
+moved, its CI hit an infrastructure failure, or a restart interrupted it) is
+re-run as a new promotion of the same repository, source SHA and target:
+merged onto the target's current head and re-tested, so nothing is ever
+pushed that was not tested against the head it lands on. It needs the same
+authority as `promote`; for a non-admin uplink the original promotion grant
+still counts, because a grant is consumed only when its promotion is
+delivered. Follow the new ID with `promote_status`. When delivery finds the
+target moved, the server already retries on its own (at most twice in a
+row), and `promote_status` on the failed promotion names the retry in
+`retried_as`.
 
 `oberth run cancel` calls the `run_cancel` MCP tool with the same uplink
 token. It cancels one queued, waiting or running run: the run becomes

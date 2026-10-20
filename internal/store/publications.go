@@ -264,6 +264,11 @@ RETURNING sequence, id, repo_id, source_branch, source_sha, target_ref, previous
 		if err != nil {
 			return model.PublicationFinalization{}, fmt.Errorf("finalize publication promotion: %w", err)
 		}
+		if status == model.PublicationDelivered {
+			if err := s.consumeDeliveredPromotionGrantTx(ctx, tx, finalization.Promotion, publication.ID, now); err != nil {
+				return model.PublicationFinalization{}, err
+			}
+		}
 	}
 	if finalization.Promotion.ID != "" {
 		if err := s.projectPromotionIssue(ctx, tx, finalization.Promotion, now); err != nil {
@@ -380,15 +385,19 @@ func safeAuditTime(publication model.Publication) int64 {
 	return publication.CreatedAt.UnixNano()
 }
 
-// RetryFailedPublication atomically transitions a publishing-failed run (or
-// promotion) back to running/publishing and resets the failed publication to
-// pending so the delivery path can re-attempt the upstream push. The actor is
-// the uplink identity requesting the retry.
+// RetryFailedPublication atomically transitions a publishing-failed run back
+// to running/publishing and resets the failed publication to pending so the
+// delivery path can re-attempt the upstream push. The actor is the uplink
+// identity requesting the retry.
 //
 // Preconditions:
-//   - A failed publication for the given run/promotion exists.
-//   - The owning run is status='failed', phase='publishing' (or the owning
-//     promotion is status='failed').
+//   - A failed publication for the given run exists.
+//   - The owning run is status='failed', phase='publishing'.
+//   - The publication belongs to no promotion. A promotion row is immutable
+//     once terminal, and its merge was made against a target head that may
+//     have moved: a failed promotion is retried as a new promotion of the
+//     same tuple (promote_retry, #1097), merged onto the current head and
+//     re-tested. Such a request is refused before any state changes.
 //
 // The publication's previous_sha is cleared (previous_known = 0) so the
 // delivery path re-reads the exact remote state before deciding whether a
@@ -425,8 +434,12 @@ func (s *Store) RetryFailedPublication(ctx context.Context, runID, promotionID, 
 	if err != nil {
 		return model.Publication{}, fmt.Errorf("load failed publication: %w", err)
 	}
+	if failed.PromotionID != "" {
+		return model.Publication{}, fmt.Errorf("%w: publication %s belongs to promotion %s; retry the promotion with promote_retry, which merges onto the current target head and re-tests",
+			ErrInvalidState, failed.ID, failed.PromotionID)
+	}
 
-	// Verify and transition the owning run/promotion back to the publishing state.
+	// Verify and transition the owning run back to the publishing state.
 	if failed.RunID != "" {
 		result, updateErr := tx.ExecContext(ctx, `
 UPDATE runs SET status = 'running', phase = 'publishing', error = '', finished_at = NULL, updated_at = ?
@@ -436,17 +449,6 @@ WHERE id = ? AND status = 'failed' AND phase = 'publishing'`, now, failed.RunID)
 		}
 		if err := requireChanged("publishing-failed run", result); err != nil {
 			return model.Publication{}, fmt.Errorf("%w: run is not in a retryable publishing-failed state", ErrInvalidState)
-		}
-	}
-	if failed.PromotionID != "" {
-		result, updateErr := tx.ExecContext(ctx, `
-UPDATE promotions SET status = 'pending', error = '', updated_at = ?
-WHERE id = ? AND status = 'failed'`, now, failed.PromotionID)
-		if updateErr != nil {
-			return model.Publication{}, fmt.Errorf("reactivate publishing-failed promotion: %w", updateErr)
-		}
-		if err := requireChanged("publishing-failed promotion", result); err != nil {
-			return model.Publication{}, fmt.Errorf("%w: promotion is not in a retryable failed state", ErrInvalidState)
 		}
 	}
 

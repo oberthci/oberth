@@ -40,7 +40,7 @@ func main() {
 	}
 }
 
-const usageCommands = "audit, init, validate, install, setup, upgrade, backup, restore, serve, upstream, repo, schedules, fragments, artifacts, runs, run, log, repos, issues, status, uplink, access, kubevirt, secretstore, mcp, preflight, or version"
+const usageCommands = "audit, init, validate, install, setup, upgrade, backup, restore, serve, upstream, repo, schedules, fragments, artifacts, runs, run, promotion, log, repos, issues, status, uplink, access, kubevirt, secretstore, mcp, preflight, or version"
 
 func runCLI(ctx context.Context, arguments []string, input io.Reader, output io.Writer) error {
 	var err error
@@ -72,6 +72,7 @@ Commands:
   artifacts     List and download build artifacts
   runs          List recent CI/CD runs, or cancel a ref's active runs
   run           Show a run, retry an interrupted/infrastructure-failed run, or cancel one
+  promotion     Retry a failed or interrupted promotion onto the current target head
   log           Show step logs for a run
   repos         List registered repositories
   issues        List and manage issues
@@ -107,6 +108,8 @@ Commands:
 		return runRuns(ctx, arguments[1:], output)
 	case "run":
 		return runRunDetail(ctx, arguments[1:], output)
+	case "promotion":
+		return runPromotion(ctx, arguments[1:], output)
 	case "repos":
 		return runRepos(ctx, arguments[1:], output)
 	case "issues":
