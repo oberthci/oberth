@@ -48,43 +48,45 @@ func (s *Store) ListAuditActions(ctx context.Context, filter model.AuditListFilt
 	if limit > maxAuditListLimit {
 		limit = maxAuditListLimit
 	}
-	var where []string
-	var args []any
-	if filter.Before > 0 {
-		where = append(where, "id < ?")
-		args = append(args, filter.Before)
-	}
-	if prefix := strings.TrimSpace(filter.ActionPrefix); prefix != "" {
-		where = append(where, `substr(action, 1, ?) = ?`)
-		args = append(args, len(prefix), prefix)
-	}
-	if actor := strings.TrimSpace(filter.Actor); actor != "" {
-		where = append(where, "actor = ?")
-		args = append(args, actor)
-	}
+	prefix := strings.TrimSpace(filter.ActionPrefix)
+	actor := strings.TrimSpace(filter.Actor)
+	var since, until int64
 	if !filter.Since.IsZero() {
-		where = append(where, "created_at >= ?")
-		args = append(args, unixNano(filter.Since))
+		since = unixNano(filter.Since)
 	}
 	if !filter.Until.IsZero() {
-		where = append(where, "created_at < ?")
-		args = append(args, unixNano(filter.Until))
+		until = unixNano(filter.Until)
 	}
-	if filter.RepoID > 0 || filter.RepoName != "" {
-		where = append(where, `(
- (resource_type = 'repository' AND resource_id = ?)
- OR json_extract(details, '$.repo') = ?
- OR json_extract(details, '$.repo_id') = ?
- OR (resource_type = 'run' AND resource_id IN (SELECT id FROM runs WHERE repo_id = ?))
- OR (resource_type = 'promotion' AND resource_id IN (SELECT id FROM promotions WHERE repo_id = ?)))`)
-		args = append(args, fmt.Sprint(filter.RepoID), filter.RepoName, filter.RepoID, filter.RepoID, filter.RepoID)
+	byRepo := filter.RepoID > 0 || filter.RepoName != ""
+	// One static statement: each filter is "unset OR matches", so no SQL is
+	// assembled from caller input.
+	const query = `
+SELECT id, actor, action, resource_type, resource_id, details, previous_sha256, sha256, created_at FROM audit_actions
+WHERE (? = 0 OR id < ?)
+  AND (? = '' OR substr(action, 1, ?) = ?)
+  AND (? = '' OR actor = ?)
+  AND (? = 0 OR created_at >= ?)
+  AND (? = 0 OR created_at < ?)
+  AND (? = 0 OR
+       (resource_type = 'repository' AND resource_id = ?)
+       OR json_extract(details, '$.repo') = ?
+       OR json_extract(details, '$.repo_id') = ?
+       OR (resource_type = 'run' AND resource_id IN (SELECT id FROM runs WHERE repo_id = ?))
+       OR (resource_type = 'promotion' AND resource_id IN (SELECT id FROM promotions WHERE repo_id = ?)))
+ORDER BY id DESC LIMIT ?`
+	repoFlag := 0
+	if byRepo {
+		repoFlag = 1
 	}
-	query := `SELECT id, actor, action, resource_type, resource_id, details, previous_sha256, sha256, created_at FROM audit_actions`
-	if len(where) > 0 {
-		query += " WHERE " + strings.Join(where, " AND ")
+	args := []any{
+		filter.Before, filter.Before,
+		prefix, len(prefix), prefix,
+		actor, actor,
+		since, since,
+		until, until,
+		repoFlag, fmt.Sprint(filter.RepoID), filter.RepoName, filter.RepoID, filter.RepoID, filter.RepoID,
+		limit,
 	}
-	query += " ORDER BY id DESC LIMIT ?"
-	args = append(args, limit)
 	// Read the head first: an action appended while the page is read is then
 	// reported by the next poll instead of falling between the two.
 	head, err := s.AuditHeadHint(ctx)
