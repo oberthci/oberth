@@ -6,8 +6,28 @@ import (
 	"os"
 
 	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/pkg/argoworkflow"
 	"github.com/oberthci/oberth/pkg/periapsis"
 )
+
+// runKind is the durable run's RunTrigger: what the size-by-trigger
+// annotation is keyed by and what the oberth-trigger workflow parameter
+// carries. It is read from the run record alone. A branch-ref run that is
+// neither a promotion nor a schedule is a branch run, which is how the store
+// has always classified the trigger column (it treats every non-promotion
+// branch trigger as a push).
+func runKind(run model.Run) argoworkflow.RunTrigger {
+	switch {
+	case run.Release:
+		return argoworkflow.RunTriggerTag
+	case run.Trigger == string(argoworkflow.RunTriggerPromotion):
+		return argoworkflow.RunTriggerPromotion
+	case run.Trigger == string(argoworkflow.RunTriggerSchedule):
+		return argoworkflow.RunTriggerSchedule
+	default:
+		return argoworkflow.RunTriggerBranch
+	}
+}
 
 func runTrigger(run model.Run) (periapsis.Trigger, error) {
 	if run.Release {

@@ -11,6 +11,8 @@ import (
 	"strings"
 	"time"
 
+	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
+
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 	"github.com/oberthci/oberth/pkg/periapsis"
 )
@@ -167,6 +169,12 @@ func executeValidate(target validateTarget, output io.Writer) error {
 		}
 		report.line("  ok  admission (%s trigger)", entry.trigger)
 
+		if err := argoworkflow.AdmitSizeDeclarations(workflow, entry.trigger); err != nil {
+			report.problem("size declaration %s: %v", entry.file, err)
+			continue
+		}
+		report.line("  ok  size %s", describeSizes(workflow, entry.trigger))
+
 		// The step inventory the server will seed for a run of this document,
 		// printed from the same enumeration, so what a push shows is knowable
 		// before the push.
@@ -244,4 +252,22 @@ func readConfinedPipelineFile(repoRoot, relative string) ([]byte, error) {
 		return nil, fmt.Errorf("%s exceeds the source-size limit", relative)
 	}
 	return source, nil
+}
+
+// describeSizes prints the admission weight each run trigger of this document
+// resolves to, so what a push, a promotion and a schedule will each reserve is
+// knowable before the push.
+func describeSizes(workflow *wfv1.Workflow, tier periapsis.Trigger) string {
+	var parts []string
+	for _, trigger := range argoworkflow.RunTriggers() {
+		if trigger.Tier() != tier {
+			continue
+		}
+		size, err := argoworkflow.DeclaredSizeFor(workflow, trigger)
+		if err != nil {
+			return err.Error()
+		}
+		parts = append(parts, string(trigger)+"="+string(size))
+	}
+	return strings.Join(parts, " ")
 }

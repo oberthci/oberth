@@ -190,7 +190,8 @@ func (jobs *ArgoJobs) CreateRelease(ctx context.Context, request service.JobRequ
 }
 
 // PipelineSize reads the run's declared scheduler weight from the checked-out
-// document without evaluating anything.
+// document without evaluating anything: the size-by-trigger entry for this
+// run's own trigger when the document names one, oberth.ci/size otherwise.
 func (jobs *ArgoJobs) PipelineSize(_ context.Context, request service.JobRequest) (periapsis.Size, error) {
 	trigger, err := runTrigger(request.Run)
 	if err != nil {
@@ -204,7 +205,7 @@ func (jobs *ArgoJobs) PipelineSize(_ context.Context, request service.JobRequest
 	if err != nil {
 		return "", fmt.Errorf("app: read repository resource contract: %w", err)
 	}
-	size, err := argoworkflow.DeclaredSize(workflow)
+	size, err := argoworkflow.DeclaredSizeFor(workflow, runKind(request.Run))
 	if err != nil {
 		return "", fmt.Errorf("app: read repository resource contract: %w", err)
 	}
@@ -363,7 +364,7 @@ func (jobs *ArgoJobs) create(ctx context.Context, request service.JobRequest, tr
 	submission := argojob.Request{
 		RunID: request.Run.ID, Name: request.JobName,
 		Repo: request.Repository.Name, UpstreamName: request.UpstreamName, UpstreamOrg: request.UpstreamOrg,
-		Ref: request.Run.Ref, SHA: testedSHA, Trigger: trigger, Source: source,
+		Ref: request.Run.Ref, SHA: testedSHA, Trigger: trigger, RunTrigger: runKind(request.Run), Source: source,
 		SourceDir: request.SourceDir, ApprovedSecrets: approvedSecrets,
 		StepGrants: stepGrants,
 		Fragments:  fragments,
