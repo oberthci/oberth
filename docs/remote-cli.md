@@ -90,6 +90,11 @@ delivered. Follow the new ID with `promote_status`. When delivery finds the
 target moved, the server already retries on its own (at most twice in a
 row), and `promote_status` on the failed promotion names the retry in
 `retried_as`.
+`oberth runs` and `oberth run` show one pre-start label, `queued`, with the
+scheduling reason in active and detail views. Superseded runs name their
+successor; explicit cancellations show `cancelled`; restart and infrastructure
+loss show `interrupted`. `--json` keeps the underlying `Status` field for
+existing clients and includes `display_status` in explicit presentation views.
 
 `oberth run cancel` calls the `run_cancel` MCP tool with the same uplink
 token. It cancels one queued, waiting or running run: the run becomes

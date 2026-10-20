@@ -810,6 +810,9 @@ func (service *API) Runs(ctx context.Context, actor api.Actor, filter api.RunFil
 	}
 	for i := range runs {
 		runs[i] = visibleRun(runs[i])
+		if filter.View == api.RunViewHistory {
+			runs[i].DisplayStatus = displayRunStatus(runs[i])
+		}
 	}
 	return service.redact(runs), nil
 }
@@ -904,7 +907,7 @@ func (service *API) Run(ctx context.Context, actor api.Actor, id string) (any, e
 	if err != nil {
 		return nil, fmt.Errorf("load run steps: %w", err)
 	}
-	response := RunDetailResponse{Run: visibleRun(run), Steps: steps, Scheduling: service.scheduling(ctx, run, steps),
+	response := RunDetailResponse{Run: presentationRun(run), Steps: steps, Scheduling: service.scheduling(ctx, run, steps),
 		RerunOf: service.runRerunOf(ctx, run.ID)}
 	if service.repositories != nil {
 		repository, repositoryErr := service.repositories.Repository(ctx, run.RepoID)
@@ -991,7 +994,7 @@ func (service *API) RunLogLive(ctx context.Context, actor api.Actor, id string, 
 		return nil, err
 	}
 	terminal := run.Status.Terminal()
-	response := LiveLogResponse{RunID: run.ID, Status: string(visibleRun(run).Status)}
+	response := LiveLogResponse{RunID: run.ID, Status: string(visibleRun(run).Status), DisplayStatus: displayRunStatus(run)}
 	chunk, next, size, err := service.logs.ReadFrom(run.ID, offset, maxLiveLogChunk)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -1111,6 +1114,7 @@ func (service *API) statusForRun(ctx context.Context, repository model.Repositor
 	response := StatusResponse{
 		Repository: repository, Run: run, Repo: repository.Name, Ref: run.Ref,
 		SHA: run.SHA, RunID: run.ID, Status: wireRunStatus(visibleRun(run).Status), Burns: map[string]string{},
+		DisplayStatus:    displayRunStatus(run),
 		ConcurrencyGroup: run.ConcurrencyGroup,
 	}
 	if service.history != nil {
@@ -1223,6 +1227,7 @@ func (service *API) statusFromRun(ctx context.Context, repository model.Reposito
 	response := StatusResponse{
 		Repository: repository, Run: run, Repo: repository.Name, Ref: ref,
 		SHA: run.SHA, RunID: run.ID, Status: wireRunStatus(visibleRun(run).Status), Burns: map[string]string{},
+		DisplayStatus: displayRunStatus(run),
 	}
 	if service.history != nil {
 		var err error
@@ -1260,6 +1265,27 @@ func visibleRun(run model.Run) model.Run {
 		run.Status = model.RunWaiting
 	}
 	return run
+}
+
+func displayRunStatus(run model.Run) string {
+	switch {
+	case run.Status == model.RunQueued, run.Status == model.RunWaiting:
+		return string(model.RunQueued)
+	case run.Status == model.RunRunning && run.StartedAt == nil:
+		return string(model.RunQueued)
+	case run.Status == model.RunInterrupted && run.SupersededBy != "":
+		return "superseded"
+	case run.Status == model.RunInterrupted && run.Phase == model.PhaseCancelled:
+		return model.PhaseCancelled
+	default:
+		return string(run.Status)
+	}
+}
+
+func presentationRun(run model.Run) model.Run {
+	visible := visibleRun(run)
+	visible.DisplayStatus = displayRunStatus(run)
+	return visible
 }
 
 // burnPrecedence resolves a burn to one word from the states of its steps.

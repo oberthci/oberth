@@ -87,9 +87,9 @@ func TestRunDetailShowsCapacityWait(t *testing.T) {
 	if err := runRunDetail(context.Background(), []string{"run-abc"}, &out); err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"waiting", "weighted resource admission queue", "need 2 weight", "5/6 used", "queue position 1"} {
+	for _, want := range []string{"queued", "weighted resource admission queue", "need 2 weight", "5/6 used", "queue position 1"} {
 		if !strings.Contains(out.String(), want) {
-			t.Fatalf("waiting detail missing %q: %s", want, out.String())
+			t.Fatalf("queued detail missing %q: %s", want, out.String())
 		}
 	}
 }

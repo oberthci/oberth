@@ -948,6 +948,13 @@ continuity checks; it must never be used to reset or bypass those checks.
   positions and capacity withheld from a scoped uplink. Group waiters and
   VM-parked runs can legitimately be overtaken by newer work, and their
   `Scheduling` message says why; a superseded run is terminal and leaves it.
+  `display_status` presents every run without `started_at` as `queued`, with
+  `Scheduling` naming the reason. Terminal interruptions display as
+  `superseded` when linked to a successor, `cancelled` when explicitly
+  cancelled, and `interrupted` for restart or infrastructure loss (#1090).
+  Durable statuses and the default `/api/runs` and MCP `run_list` encodings
+  remain unchanged; explicit active/history/detail views add the display
+  label. `RunStatus.Valid` stays store-only and refuses `waiting`.
 - Execution scheduling observation has a two-second request budget, one exact
   Workflow read bound to run ID and effective tested SHA, and one namespaced
   Pod list (limit 16) whose entries must have the exact Workflow controller UID.
