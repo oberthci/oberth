@@ -51,6 +51,9 @@ type Health struct {
 	// using the unauthenticated seal-status endpoint. Called only when the
 	// login probe fails, to distinguish a sealed store from other failures.
 	SecretStoreSealed func(context.Context) (bool, error)
+	// AdmissionBlocker optionally reports the run blocking the admission
+	// queue head (#1021).
+	AdmissionBlocker func() *model.AdmissionBlocker
 	// SchemaVersion is the database schema version the running binary last
 	// applied, reported on the status view and the version command so the
 	// upgrade path can detect pending forward-only migrations.
@@ -115,6 +118,10 @@ type HealthStatus struct {
 	SSHIdentity   string             `json:"ssh_identity,omitempty"`
 	SecretStore   *SecretStoreStatus `json:"secret_store,omitempty"`
 	AuditChain    *AuditChainStatus  `json:"audit_chain,omitempty"`
+	// AdmissionBlocker names the run at the head of the admission queue that
+	// every later run waits behind, e.g. an XL run waiting for a full drain
+	// (#1021). Unscoped status only.
+	AdmissionBlocker *model.AdmissionBlocker `json:"admission_blocker,omitempty"`
 }
 
 // Ready gates the readiness probe. Like a vault before initialization, a
@@ -218,6 +225,9 @@ func (health Health) Status(ctx context.Context) (any, error) {
 			storeCopy.Sealed = true
 		}
 		status.SecretStore = &storeCopy
+	}
+	if health.AdmissionBlocker != nil {
+		status.AdmissionBlocker = health.AdmissionBlocker()
 	}
 	return status, nil
 }

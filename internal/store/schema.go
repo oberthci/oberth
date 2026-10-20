@@ -13,7 +13,7 @@ type migration struct {
 func LatestMigrationVersion() int { return latestMigrationVersion }
 
 const (
-	latestMigrationVersion = 25
+	latestMigrationVersion = 26
 	// oberthSchemaIdentity is the fresh-deployment default. Existing deployments
 	// supply their original immutable identity through ProtocolConfig; bootstrap
 	// SQL and legacy schema validation use that exact configured operand.
@@ -1095,4 +1095,16 @@ ALTER TABLE issues ADD COLUMN scope_upstream_id INTEGER;`,
 ALTER TABLE kubevirt_grants ADD COLUMN max_cores INTEGER NOT NULL DEFAULT 6 CHECK (max_cores BETWEEN 1 AND 64);
 ALTER TABLE kubevirt_grants ADD COLUMN max_memory_bytes INTEGER NOT NULL DEFAULT 12884901888 CHECK (max_memory_bytes BETWEEN 1073741824 AND 274877906944);`,
 	},
+	// Size grants (#1021): the largest admission size a repository's branch,
+	// promotion and schedule runs may declare. No row (or a revoked one)
+	// means the default maximum, L.
+	{version: 26, sql: `CREATE TABLE IF NOT EXISTS size_grants (
+    repo_id INTEGER PRIMARY KEY REFERENCES repositories(id) ON DELETE CASCADE,
+    max_size TEXT NOT NULL CHECK (max_size IN ('L', 'XL')),
+    granted_by TEXT NOT NULL,
+    granted_at INTEGER NOT NULL,
+    revoked_by TEXT NOT NULL DEFAULT '',
+    revoked_at INTEGER,
+    CHECK ((revoked_at IS NULL AND revoked_by = '') OR (revoked_at IS NOT NULL AND revoked_by != ''))
+);`},
 }

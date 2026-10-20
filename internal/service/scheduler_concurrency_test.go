@@ -91,13 +91,14 @@ func TestSchedulerCreatesJobsConcurrentlyForOneRepository(t *testing.T) {
 	// Concurrency the operator's configured ceiling actually delivers per
 	// declared size. maxConcurrentJobs is the ceiling; a pipeline heavier than
 	// the default trades concurrency for per-run resources proportionally,
-	// and one lighter than the default is still capped by the ceiling.
+	// and one lighter than the default packs into the weight budget the
+	// ceiling implies (2 x maxConcurrentJobs, #1021).
 	sizes := []struct {
 		declared periapsis.Size
 		expected int
 	}{
 		{declared: "", expected: maxConcurrentJobs},
-		{declared: periapsis.S, expected: maxConcurrentJobs},
+		{declared: periapsis.S, expected: 2 * maxConcurrentJobs},
 		{declared: periapsis.M, expected: maxConcurrentJobs},
 		{declared: periapsis.L, expected: 2},
 		{declared: periapsis.XL, expected: 1},
@@ -105,6 +106,12 @@ func TestSchedulerCreatesJobsConcurrentlyForOneRepository(t *testing.T) {
 	for _, size := range sizes {
 		t.Run(fmt.Sprintf("size=%s", size.declared.Effective()), func(t *testing.T) {
 			fixture := newConcurrencyFixture(t, size.declared, maxConcurrentJobs)
+			if size.declared == periapsis.XL {
+				// XL takes an admin size grant (#1021).
+				if _, err := fixture.store.SetSizeGrant(context.Background(), fixture.repo.ID, "admin@host", periapsis.XL); err != nil {
+					t.Fatal(err)
+				}
+			}
 			// One more run than the size may admit, so the upper bound is
 			// observable rather than merely unexercised.
 			for index := range size.expected + 1 {

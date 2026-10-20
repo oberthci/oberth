@@ -224,6 +224,9 @@ call the proxy hostname directly.
 | `kubevirt_grant` | Grant a repository permission to run KubeVirt VMI templates (admin-only, audited) |
 | `kubevirt_revoke` | Revoke a repository's KubeVirt permission (admin-only, audited) |
 | `kubevirt_grant_get` | Read a repository's KubeVirt permission: `never_granted`, `granted`, or `revoked`; granted and revoked responses include the audit record |
+| `size_grant` | Set a repository's maximum admission size, `L` or `XL` (admin-only, audited); without a grant the maximum is `L` |
+| `size_revoke` | Revoke a repository's size grant, returning it to `L` (admin-only, audited) |
+| `size_grant_get` | Read a repository's maximum admission size (`max_size`) and grant state: `never_granted`, `granted`, or `revoked` |
 
 For `access_allow` and `access_revoke`, `secret` is the exact path recorded in
 `access_list` or the pipeline declaration, including the mount and KV API prefix

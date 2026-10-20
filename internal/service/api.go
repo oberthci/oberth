@@ -72,6 +72,7 @@ type APIConfig struct {
 	RemoveWorkspace           func(string) error
 	SecretAccess              SecretAccessStore
 	KubeVirtGrants            KubeVirtGrantStore
+	SizeGrants                SizeGrantStore
 	SecretStoreVerifier       SecretStoreVerifier
 	SecretAccessReconciler    *AccessReconciler
 	RepositoryRemover         RepositoryRemover
@@ -107,6 +108,7 @@ type API struct {
 	workspaces                *workspaceLifecycle
 	secretAccess              SecretAccessStore
 	kubeVirtGrants            KubeVirtGrantStore
+	sizeGrants                SizeGrantStore
 	secretStoreVerifier       SecretStoreVerifier
 	secretAccessReconciler    *AccessReconciler
 	repositoryRemover         RepositoryRemover
@@ -165,6 +167,7 @@ func NewAPI(config APIConfig) (*API, error) {
 		promotionWorkspaceRoot: promotionWorkspaceRoot, workspaces: workspaces,
 		secretAccess: config.SecretAccess, secretAccessReconciler: config.SecretAccessReconciler,
 		kubeVirtGrants:      config.KubeVirtGrants,
+		sizeGrants:          config.SizeGrants,
 		secretStoreVerifier: config.SecretStoreVerifier,
 		repositoryRemover:   config.RepositoryRemover, removeGitCache: config.RemoveGitCache,
 		promotionGrants: config.PromotionGrants, promotionGrantMaxLifetime: promotionGrantMaxLifetime,
@@ -555,6 +558,15 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 			return nil, err
 		}
 		return service.kubeVirtGrantTool(ctx, actor, name, arguments.Repo, store.KubeVirtBudget{})
+	case "size_grant", "size_revoke", "size_grant_get":
+		var arguments struct {
+			Repo string `json:"repo"`
+			Max  string `json:"max"`
+		}
+		if err := decodeTool(raw, &arguments); err != nil {
+			return nil, err
+		}
+		return service.sizeGrantTool(ctx, actor, name, arguments.Repo, arguments.Max)
 	case "access_allow":
 		var arguments struct {
 			Repo   string `json:"repo"`
@@ -1601,7 +1613,7 @@ func (service *API) promote(ctx context.Context, actor api.Actor, repositoryName
 	if err != nil {
 		return model.Promotion{}, err
 	}
-	return service.planAdmittedPromotion(ctx, actor, repository, candidate, target, promotion)
+	return service.planOrQueuePromotion(ctx, actor, repository, candidate, target, promotion)
 }
 
 // admitPromotion authorizes and durably admits one promotion of a green
@@ -2025,6 +2037,7 @@ func mutatingTool(name string) bool {
 	case "sync", "promote", "promote_retry", "publish_retry", "run_retry", "run_cancel", "issue_create", "issue_update", "issue_append", "issue_close", "issue_reopen", "issue_delete", "issue_lock",
 		"access_allow", "access_revoke",
 		"kubevirt_grant", "kubevirt_revoke",
+		"size_grant", "size_revoke",
 		"repo_remove",
 		"secretstore_sync_receipt",
 		"promote_grant", "promote_grant_revoke":

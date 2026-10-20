@@ -286,6 +286,13 @@ func newGroupFixture(t *testing.T, maxConcurrent int) *groupFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// These fixtures exercise admission mechanics with XL runs; XL takes a
+	// size grant since #1021.
+	for _, repository := range []model.Repository{terraform, beacon} {
+		if _, err := database.SetSizeGrant(ctx, repository.ID, "admin@host", periapsis.XL); err != nil {
+			t.Fatal(err)
+		}
+	}
 	return &groupFixture{store: database, terraform: terraform, beacon: beacon, engine: engine, scheduler: scheduler, control: control, git: git}
 }
 

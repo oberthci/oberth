@@ -355,8 +355,10 @@ func TestGroupAdmissionSnapshotNamesTheGroupAndItsHolder(t *testing.T) {
 	if message := waitingAdmissionMessage(behindSnapshot); !strings.Contains(message, "behind run cccccccccccccccccccccccccccccccc") {
 		t.Fatalf("queued-behind reason = %q", message)
 	}
-	if message := waitingAdmissionMessage(scheduler.AdmissionSnapshot(4)); message != "Waiting in the weighted resource admission queue." {
-		t.Fatalf("ungrouped wait reason changed: %q", message)
+	// The free group's head waits on weight behind nothing: it is the queue
+	// head itself (#1021), and the run behind it in the group names its group.
+	if message := waitingAdmissionMessage(scheduler.AdmissionSnapshot(4)); !strings.HasPrefix(message, "At the head of the weighted resource admission queue (M, needs 2 weight") {
+		t.Fatalf("queue-head wait reason = %q", message)
 	}
 	releaseBig()
 	releaseAhead := awaitAcquired(t, aheadAcquired)

@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strconv"
 	"sync"
+	"time"
 
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
@@ -33,6 +34,10 @@ type weightedAdmission struct {
 	// reservation is prepared while some prepared reservation is parked on its
 	// group, so the dispatch loop can claim past the parked run.
 	onPark func()
+	// onGrant, when set, is called under the lock (it must not block) after
+	// a grant, so the dispatch loop can claim into weight the grant left
+	// spare (#1021).
+	onGrant func()
 	// diskFloor is an opt-in disk-space admission hold (#673). When non-nil
 	// and below the configured floor, no new runs are admitted until disk
 	// frees up.
@@ -43,8 +48,14 @@ type admissionReservation struct {
 	gate     *weightedAdmission
 	sequence int64
 	runID    string
-	size     periapsis.Size
-	weight   int
+	// repoID, repo and ref identify the run when it blocks the queue head
+	// (#1021); preparedAt is when it started waiting for weight.
+	repoID     int64
+	repo       string
+	ref        string
+	preparedAt time.Time
+	size       periapsis.Size
+	weight     int
 	// group is the repository-scoped key of the run's concurrency group and
 	// groupName the name the repository declared; both empty when ungrouped.
 	group     string
@@ -78,6 +89,8 @@ var errAdmissionAbandoned = errors.New("service: admission abandoned: run is no 
 type admissionRequest struct {
 	RunID  string
 	RepoID int64
+	Repo   string
+	Ref    string
 	Size   periapsis.Size
 	Group  string
 }
@@ -170,6 +183,10 @@ func (reservation *admissionReservation) acquireRequest(ctx context.Context, req
 	}
 	reservation.vmParked = false
 	reservation.runID = request.RunID
+	reservation.repoID, reservation.repo, reservation.ref = request.RepoID, request.Repo, request.Ref
+	if !reservation.prepared {
+		reservation.preparedAt = time.Now().UTC()
+	}
 	reservation.size = size
 	reservation.weight = min(sizeWeight(size), gate.capacity)
 	if request.Group != "" {
@@ -326,7 +343,32 @@ func (gate *weightedAdmission) grantLocked() {
 			gate.groups[reservation.group] = reservation
 		}
 		close(reservation.ready)
+		if gate.onGrant != nil {
+			gate.onGrant()
+		}
 	}
+}
+
+// spareWeightForClaim reports whether the dispatch loop may claim one more
+// run past its MaxConcurrent ceiling: every claimed, unparked run holds its
+// grant, and the weight budget, the run ceiling and the disk floor all still
+// have room for at least an S run. unparked is the dispatch loop's count of
+// claimed runs not parked on a group or VM capacity.
+func (gate *weightedAdmission) spareWeightForClaim(unparked int) bool {
+	gate.mu.Lock()
+	defer gate.mu.Unlock()
+	// Every unparked claimed run must already hold its grant: one still
+	// checking out or waiting for weight may need what is spare.
+	if len(gate.waiters)-gate.parkedLocked() > 0 || unparked > gate.runs || unparked >= gate.capacity {
+		return false
+	}
+	if gate.maxRuns > 0 && gate.runs >= gate.maxRuns {
+		return false
+	}
+	if gate.diskFloor != nil && !gate.diskFloor.freeAboveFloor() {
+		return false
+	}
+	return gate.used < gate.capacity
 }
 
 // canGrantLocked admits on the weight budget alone, with one exception: XL
@@ -436,6 +478,67 @@ func (gate *weightedAdmission) groupBlockerLocked(reservation *admissionReservat
 	return "", ""
 }
 
+// headBlockerLocked returns the waiter that stops the grant pass: the first
+// claimed run in queue order that is prepared, not parked on its group or VM
+// capacity, and still not granted. grantLocked has already admitted every
+// waiter it could, so that run is waiting on weight, the run ceiling or the
+// disk floor, and every unparked run claimed after it waits behind it. Nil
+// while the head is still preparing (its size is unknown) or nothing waits.
+func (gate *weightedAdmission) headBlockerLocked() *admissionReservation {
+	var parked map[string]struct{}
+	for _, reservation := range gate.waiters {
+		if reservation.vmParked {
+			continue
+		}
+		if !reservation.prepared {
+			return nil
+		}
+		if reservation.group != "" {
+			_, held := gate.groups[reservation.group]
+			_, behind := parked[reservation.group]
+			if held || behind {
+				if parked == nil {
+					parked = make(map[string]struct{})
+				}
+				parked[reservation.group] = struct{}{}
+				continue
+			}
+		}
+		return reservation
+	}
+	return nil
+}
+
+func (gate *weightedAdmission) blockerLocked(reservation *admissionReservation) *model.AdmissionBlocker {
+	blocker := &model.AdmissionBlocker{
+		RunID: reservation.runID, RepoID: reservation.repoID, Repo: reservation.repo, Ref: reservation.ref,
+		Size: string(reservation.size), Weight: reservation.weight, Used: gate.used, Capacity: gate.capacity,
+		WaitingSince: reservation.preparedAt,
+	}
+	switch {
+	case gate.diskFloor != nil && !gate.diskFloor.freeAboveFloor():
+		blocker.DiskFloor = true
+	case reservation.size == periapsis.XL:
+		blocker.FullDrain = true
+	case gate.maxRuns > 0 && gate.runs >= gate.maxRuns:
+		blocker.RunCeiling = true
+	}
+	return blocker
+}
+
+// AdmissionBlocker reports the run at the head of the admission queue that
+// holds back every run claimed after it, or nil (#1021).
+func (scheduler *Scheduler) AdmissionBlocker() *model.AdmissionBlocker {
+	gate := scheduler.admission
+	gate.mu.Lock()
+	defer gate.mu.Unlock()
+	head := gate.headBlockerLocked()
+	if head == nil {
+		return nil
+	}
+	return gate.blockerLocked(head)
+}
+
 func sizeWeight(size periapsis.Size) int {
 	switch size.Effective() {
 	case periapsis.S:
@@ -480,6 +583,14 @@ func (scheduler *Scheduler) AdmissionSnapshot(sequence int64) *model.AdmissionOb
 		}
 	}
 	result.GroupHolder, result.GroupAhead = gate.groupBlockerLocked(reservation)
+	if reservation.prepared && !reservation.vmParked && result.GroupHolder == "" && result.GroupAhead == "" {
+		if head := gate.headBlockerLocked(); head == reservation {
+			result.HeadOfQueue = true
+			result.BlockedBy = gate.blockerLocked(head)
+		} else if head != nil && head.sequence < reservation.sequence {
+			result.BlockedBy = gate.blockerLocked(head)
+		}
+	}
 	if gate.diskFloor != nil {
 		result.DiskFloor = gate.diskFloor.observation()
 	}

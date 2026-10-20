@@ -110,7 +110,7 @@ func (service *API) retryPromotion(ctx context.Context, actor api.Actor, failed 
 		}
 		return model.Promotion{}, err
 	}
-	return service.planAdmittedPromotion(ctx, actor, repository, candidate, failed.TargetRef, promotion)
+	return service.planOrQueuePromotion(ctx, actor, repository, candidate, failed.TargetRef, promotion)
 }
 
 func (service *API) repositoryByID(ctx context.Context, id int64) (model.Repository, error) {
