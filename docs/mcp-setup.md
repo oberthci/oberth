@@ -220,6 +220,11 @@ call the proxy hostname directly.
 | `issue_delete` | Delete an accidentally created manual issue |
 | `issue_list` | List issue metadata with repo/kind/state/query filters, total and faceted counts, and 1..50 records per page |
 | `issue_lock` | Acquire or renew a five-minute caller-owned issue lock |
+| `uplink_list` | Public credential lifecycle metadata; unscoped admins see all, others see only themselves |
+| `uplink_revoke` | Unscoped admin-only audited SSH and bearer revocation; protects the last active admin |
+| `uplink_rotate` | Unscoped admin-only handoff to an already-issued matching replacement key, atomically revoking the old key |
+| `access_dismiss` | Admin-only exact pending-declaration dismissal in visible repositories |
+| `kubevirt_grant_list` | Admin-only listing of active grants in visible repositories |
 | `access_list` | List secret access grants for a repository |
 | `access_allow` | Grant a step access to a secret path (admin-only) |
 | `access_revoke` | Revoke a step's access to a secret path (admin-only) |

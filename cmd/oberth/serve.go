@@ -945,7 +945,8 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 	argoJobs.SetDeclarationRecorder(database)
 	health.Storage = retention.Status
 	controlAPI, err := service.NewAPI(service.APIConfig{
-		ReleasePreflight:   argoJobs,
+		ReleasePreflight: argoJobs,
+		UplinkLifecycle:  database, DeclarationDismissal: database,
 		KVMPreflights:      database,
 		SchedulingObserver: argoJobs, Admission: scheduler,
 		Runs: database, History: database, RunRetries: database, Repositories: database, Issues: database,

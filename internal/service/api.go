@@ -50,6 +50,8 @@ const grantPolicySyncAdvisory = "Grant recorded; the identity map refreshes auto
 
 type APIConfig struct {
 	ReleasePreflight          ReleasePreflighter
+	UplinkLifecycle           UplinkLifecycle
+	DeclarationDismissal      DeclarationDismissal
 	KVMPreflights             KVMPreflightReader
 	SchedulingObserver        SchedulingObserver
 	Admission                 AdmissionObserver
@@ -93,6 +95,8 @@ type APIConfig struct {
 
 type API struct {
 	releasePreflight          ReleasePreflighter
+	uplinkLifecycle           UplinkLifecycle
+	declarationDismissal      DeclarationDismissal
 	kvmPreflights             KVMPreflightReader
 	schedulingObserver        SchedulingObserver
 	admission                 AdmissionObserver
@@ -183,7 +187,8 @@ func NewAPI(config APIConfig) (*API, error) {
 	}
 	lifetime, stopLifetime := context.WithCancel(context.Background())
 	return &API{
-		releasePreflight:   config.ReleasePreflight,
+		releasePreflight: config.ReleasePreflight,
+		uplinkLifecycle:  config.UplinkLifecycle, declarationDismissal: config.DeclarationDismissal,
 		kvmPreflights:      config.KVMPreflights,
 		schedulingObserver: config.SchedulingObserver, admission: config.Admission,
 		runs: config.Runs, history: config.History, runRetries: config.RunRetries, repositories: config.Repositories,
@@ -273,6 +278,13 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 		}
 	}
 	switch name {
+	// Credential and grant lifecycle (#1105).
+	case "uplink_list", "uplink_revoke", "uplink_rotate":
+		return service.uplinkLifecycleTool(ctx, actor, name, raw)
+	case "access_dismiss":
+		return service.dismissAccess(ctx, actor, raw)
+	case "kubevirt_grant_list":
+		return service.listKubeVirtGrants(ctx, actor, raw)
 	case "secretstore_verify", "secretstore_plan", "secretstore_sync_receipt":
 		if err := requireUnscoped(actor, name); err != nil {
 			return nil, err
@@ -1105,6 +1117,15 @@ func (service *API) Repositories(ctx context.Context, actor api.Actor) (any, err
 	views := make([]RepoView, len(repos))
 	for i, repo := range repos {
 		views[i] = RepoView{Repository: repo, LatestRuns: runsByRepo[repo.ID]}
+		if service.kubeVirtGrants != nil {
+			grant, err := service.kubeVirtGrants.KubeVirtGrant(ctx, repo.ID)
+			if err != nil && !errors.Is(err, store.ErrNotFound) {
+				return nil, err
+			}
+			if err == nil {
+				views[i].KubeVirtGrant = &grant
+			}
+		}
 	}
 	return service.redact(views), nil
 }
@@ -2397,6 +2418,8 @@ func wireIssueLock(lock model.IssueLock) api.IssueLockResponse {
 
 func mutatingTool(name string) bool {
 	switch name {
+	case "uplink_revoke", "uplink_rotate", "access_dismiss":
+		return true
 	case "sync", "promote", "promote_retry", "publish_retry", "run_retry", "run_rerun", "run_cancel", "run_purge", "issue_create", "issue_update", "issue_append", "issue_close", "issue_reopen", "issue_delete", "issue_lock",
 		"access_allow", "access_revoke",
 		"kubevirt_grant", "kubevirt_revoke",
