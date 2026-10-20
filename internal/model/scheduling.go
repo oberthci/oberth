@@ -1,6 +1,9 @@
 package model
 
-import "time"
+import (
+	"fmt"
+	"time"
+)
 
 // RunScheduling is an ephemeral read-only observation, never execution evidence.
 // QueuePosition is accepted order among durable queued runs, not an ETA or
@@ -34,6 +37,52 @@ type AdmissionObservation struct {
 	// DiskFloor reports the opt-in disk-space admission hold (#673). When
 	// non-nil and BelowFloor is true, admission is held until disk frees up.
 	DiskFloor *DiskFloorObservation `json:"disk_floor,omitempty"`
+	// BlockedBy names the run at the head of the admission queue that every
+	// later run waits behind (#1021): the first claimed run that does not
+	// fit. HeadOfQueue marks the run that is itself that run; BlockedBy then
+	// describes it. Nil when the run is parked on its group or VM capacity
+	// or nothing blocks the queue.
+	BlockedBy   *AdmissionBlocker `json:"blocked_by,omitempty"`
+	HeadOfQueue bool              `json:"head_of_queue,omitempty"`
+}
+
+// AdmissionBlocker is the claimed run at the head of the weighted admission
+// queue that does not fit, which holds back every run claimed after it.
+type AdmissionBlocker struct {
+	RunID  string `json:"run_id"`
+	RepoID int64  `json:"-"`
+	Repo   string `json:"repo"`
+	Ref    string `json:"ref"`
+	Size   string `json:"size"`
+	Weight int    `json:"weight"`
+	// FullDrain is set for an XL run, which is admitted only once nothing
+	// else holds weight.
+	FullDrain bool `json:"full_drain,omitempty"`
+	// RunCeiling and DiskFloor name the other reasons a run that would fit
+	// the weight budget still waits.
+	RunCeiling   bool      `json:"run_ceiling,omitempty"`
+	DiskFloor    bool      `json:"disk_floor,omitempty"`
+	Used         int       `json:"used"`
+	Capacity     int       `json:"capacity"`
+	WaitingSince time.Time `json:"waiting_since"`
+}
+
+// Reason is the parenthesized why of a blocked admission, e.g.
+// "XL, needs a full drain".
+func (blocker AdmissionBlocker) Reason() string {
+	switch {
+	case blocker.DiskFloor:
+		return blocker.Size + ", held by the disk floor"
+	case blocker.FullDrain:
+		return blocker.Size + ", needs a full drain"
+	case blocker.RunCeiling:
+		return blocker.Size + ", waiting for a run slot"
+	case blocker.Capacity == 0:
+		// A scoped view omits the shared budget's use.
+		return fmt.Sprintf("%s, needs %d weight", blocker.Size, blocker.Weight)
+	default:
+		return fmt.Sprintf("%s, needs %d weight; %d/%d used", blocker.Size, blocker.Weight, blocker.Used, blocker.Capacity)
+	}
 }
 
 // DiskFloorObservation is the scheduling-visible state of the disk floor

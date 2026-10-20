@@ -189,7 +189,7 @@ metadata:
     #   S  -- lightweight (6 concurrent)
     #   M  -- standard (3 concurrent, default)
     #   L  -- heavy (2 concurrent)
-    #   XL -- exclusive (runs alone)
+    #   XL -- exclusive (runs alone; needs an admin size grant)
     # Does NOT set per-container CPU/memory — declare resources:
     # on each template. Max per-container: cpu 8, memory 16Gi.
     oberth.ci/size: S

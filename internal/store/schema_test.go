@@ -29,8 +29,8 @@ func TestSchemaMigrationsAreContiguous(t *testing.T) {
 	if err := validateMigrations(migrations, latestMigrationVersion); err != nil {
 		t.Fatal(err)
 	}
-	if latestMigrationVersion != 25 {
-		t.Fatalf("latest migration version = %d, want 25", latestMigrationVersion)
+	if latestMigrationVersion != 26 {
+		t.Fatalf("latest migration version = %d, want 26", latestMigrationVersion)
 	}
 	if len(migrations) != latestMigrationVersion {
 		t.Fatalf("migration count = %d, want %d", len(migrations), latestMigrationVersion)
@@ -952,6 +952,7 @@ func TestFreshSchemaIsCompleteAndIdempotent(t *testing.T) {
 		"schema_identity",
 		"schema_migrations",
 		"secret_access",
+		"size_grants",
 		"step_results",
 		"token_credentials",
 		"trusted_applies",

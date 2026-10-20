@@ -16,6 +16,12 @@ type AdmissionObserver interface {
 	AdmissionSnapshot(int64) *model.AdmissionObservation
 }
 
+// admissionBlockerObserver names the run at the head of the admission queue
+// that holds back every later run (#1021).
+type admissionBlockerObserver interface {
+	AdmissionBlocker() *model.AdmissionBlocker
+}
+
 type queuedRunObserver interface {
 	QueuedRunPosition(context.Context, string) (int64, error)
 }
@@ -42,6 +48,11 @@ func (service *API) scheduling(ctx context.Context, run model.Run, steps []model
 				result.QueuePosition = position
 			}
 		}
+		if observer, ok := service.admission.(admissionBlockerObserver); ok {
+			if blocker := service.visibleBlocker(observer.AdmissionBlocker()); blocker != nil {
+				result.Message += " " + blockedBehindMessage(blocker)
+			}
+		}
 		return result
 	}
 	if service.admission != nil {
@@ -52,6 +63,11 @@ func (service *API) scheduling(ctx context.Context, run model.Run, steps []model
 			// pool of invisible work must not show (#073).
 			admission := *result.Admission
 			admission.Position, admission.Used, admission.Capacity, admission.DiskFloor = 0, 0, 0, nil
+			if blocker := service.visibleBlocker(admission.BlockedBy); blocker != nil {
+				admission.BlockedBy = blocker
+			} else {
+				admission.BlockedBy = nil
+			}
 			result.Admission = &admission
 		}
 		if result.Admission != nil {
@@ -64,8 +80,12 @@ func (service *API) scheduling(ctx context.Context, run model.Run, steps []model
 				result.Message = waitingAdmissionMessage(result.Admission)
 				if service.scope != nil && result.Admission.GroupHolder == "" && result.Admission.GroupAhead == "" {
 					// The group waits name runs of the same repository; any
-					// other wait says only that capacity is short.
+					// other wait says only that capacity is short, unless
+					// the blocking run is itself in scope.
 					result.Message = "Waiting for capacity."
+					if result.Admission.BlockedBy != nil {
+						result.Message += " " + blockedBehindMessage(result.Admission.BlockedBy)
+					}
 				} else if service.scope == nil && result.Admission.Weight > 0 {
 					result.Message += fmt.Sprintf(" Need %d weight; %d/%d used; queue position %d.",
 						result.Admission.Weight, result.Admission.Used, result.Admission.Capacity, result.Admission.Position)
@@ -141,7 +161,36 @@ func waitingAdmissionMessage(admission *model.AdmissionObservation) string {
 	case admission.GroupAhead != "":
 		return fmt.Sprintf("Waiting for concurrency group %q behind run %s of the same repository, "+
 			"which is queued ahead in the group.", admission.Group, admission.GroupAhead)
+	case admission.HeadOfQueue && admission.BlockedBy != nil:
+		return fmt.Sprintf("At the head of the weighted resource admission queue (%s); every later run waits behind it.",
+			admission.BlockedBy.Reason())
+	case admission.BlockedBy != nil:
+		return "Waiting in the weighted resource admission queue, " + blockedBehindMessage(admission.BlockedBy)
 	default:
 		return "Waiting in the weighted resource admission queue."
 	}
+}
+
+// blockedBehindMessage names the queue-head run every later run waits behind,
+// e.g. "blocked behind cloudtaser-ebpf/main (XL, needs a full drain)". The
+// repository is a registered name and the ref a validated Git ref.
+func blockedBehindMessage(blocker *model.AdmissionBlocker) string {
+	return fmt.Sprintf("blocked behind %s/%s (%s).", blocker.Repo, blocker.Ref, blocker.Reason())
+}
+
+// visibleBlocker hides a blocker a scoped actor may not see (#073): it names
+// another repository's run and the shared budget's use.
+func (service *API) visibleBlocker(blocker *model.AdmissionBlocker) *model.AdmissionBlocker {
+	if blocker == nil {
+		return nil
+	}
+	if service.scope == nil {
+		return blocker
+	}
+	if !service.scope.seesRepo(blocker.RepoID) {
+		return nil
+	}
+	scoped := *blocker
+	scoped.Used, scoped.Capacity = 0, 0
+	return &scoped
 }

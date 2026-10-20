@@ -457,6 +457,9 @@ func toolDefinitions() []map[string]any {
 		}, "repo")),
 		tool("kubevirt_revoke", "Revoke a repository's KubeVirt VMI permission. Admin uplink required; audited.", object(map[string]any{"repo": stringProperty("Registered repository name")}, "repo")),
 		tool("kubevirt_grant_get", "Read a repository's KubeVirt VMI grant and its per-run VMI budget.", object(map[string]any{"repo": stringProperty("Registered repository name")}, "repo")),
+		tool("size_grant", "Raise (or set) the largest admission size a repository's branch, promotion and schedule runs may declare. The default without a grant is L; XL reserves the whole host and makes every other repository wait for a full drain. Admin uplink required; audited.", object(map[string]any{"repo": stringProperty("Registered repository name"), "max": map[string]any{"type": "string", "enum": []string{"L", "XL"}, "description": "Maximum size"}}, "repo", "max")),
+		tool("size_revoke", "Revoke a repository's size grant, returning it to the default maximum L. Admin uplink required; audited.", object(map[string]any{"repo": stringProperty("Registered repository name")}, "repo")),
+		tool("size_grant_get", "Read a repository's maximum admission size and its size grant record.", object(map[string]any{"repo": stringProperty("Registered repository name")}, "repo")),
 		tool("repo_list", "List registered repositories with their upstream and probe state.", object(map[string]any{})),
 		tool("repo_remove", "Remove a repository mapping and its Git cache. Requires admin uplink. Refuses if runs are in-flight or promotions are pending.", object(map[string]any{"repo": stringProperty("Repository name")}, "repo")),
 		tool("run_list", "List runs newest first with optional repository and ref filters, in bounded pages. A full page returns next_before (or next_cursor for a scoped uplink); pass it as before with the same filters for older runs until it is absent.", object(map[string]any{

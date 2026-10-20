@@ -303,7 +303,8 @@ continuity checks; it must never be used to reset or bypass those checks.
   sizes `S|M|L|XL`, surrounding whitespace ignored. A trigger it does not
   name falls back to `oberth.ci/size`, then `M`. The trigger is the durable
   run's own (`release` ⇒ `tag`; trigger column `promotion` or `schedule`;
-  every other branch run is `branch`), never the document's or a caller's.
+  `branch`, legacy `push` or empty ⇒ `branch`; any other trigger, such as
+  the Go-path `plan`/`apply`, is refused), never the document's or a caller's.
   An unknown trigger or size, a duplicate, a malformed entry, or a trigger
   the document never runs for (`tag` in build.yaml, any other in
   release.yaml) fails `oberth validate` and server admission (phase
@@ -311,6 +312,16 @@ continuity checks; it must never be used to reset or bypass those checks.
   sized from build.yaml for the run's trigger (`promotion` for a tag run).
   A server that predates the annotation ignores it and uses `oberth.ci/size`,
   so a document keeps `oberth.ci/size` as its conservative fallback.
+- XL takes an audited admin size grant (#1021). A branch, promotion or
+  schedule run whose resolved size (including its trusted preflight's)
+  exceeds its repository's maximum fails before it takes any weight (phase
+  `infrastructure`, before a Workflow exists), with the grant command in its
+  error; other repositories' runs are never held behind it. Without a grant
+  the maximum is `L`. `oberth size grant <repo> --max L|XL` / `size revoke` /
+  `size get` (in-pod CLI) and MCP `size_grant` / `size_revoke` /
+  `size_grant_get` manage it, stored by repository ID (`size_grants`, v26)
+  and audited as `size.grant` / `size.revoke`. Tag runs keep their reviewed
+  release.yaml size.
 - The server-owned workflow parameter `oberth-trigger`
   (`branch|promotion|schedule|tag`, the same durable run trigger) is set on
   every document that declares or mentions it, so `when:` guards can skip
@@ -331,7 +342,12 @@ continuity checks; it must never be used to reset or bypass those checks.
   exclusivity, and the same-branch supersede rule is unchanged. A member
   waiting on its group holds no weight and no dispatch slot, so other
   repositories' runs are admitted beside the group; admitted runs never
-  exceed `maxConcurrentJobs`, and claimed runs are bounded at twice that. A
+  exceed the weight budget (2 × `maxConcurrentJobs` weight, so
+  `maxConcurrentJobs` M runs or up to twice as many S runs, #1021). The
+  dispatch loop claims up to `maxConcurrentJobs` unparked runs, and past that
+  claims one more only while every claimed unparked run already holds its
+  grant and weight is spare; parked members add at most `maxConcurrentJobs`
+  more claims. A
   hold ends only when the member's Workflow is terminal or its deletion has
   been accepted (Pods of a deleted Workflow may still be inside their
   termination grace period). A claimed run that is superseded, requeued or
@@ -640,12 +656,13 @@ continuity checks; it must never be used to reset or bypass those checks.
   each write/flush has a five-second bound. Heartbeat writes and the final
   response never overlap. Disconnect/write failure cancels only observation,
   never durable work, and joins the heartbeat writer before returning.
-- MCP exposes 43 tools: `status`, bounded named-step `logs`, exact-run
+- MCP exposes 46 tools: `status`, bounded named-step `logs`, exact-run
   `run_get`/`run_logs`, `run_retry`, audited `run_rerun` (#1098), audited `run_cancel`, `run_kvm_preflight`, `artifacts`/`artifact_get`, `wait`, `sync`, `promote`,
   `promotion_list`, `promote_status`, audited `promote_retry` (#1097), `publish_retry`, issue
   create/get/get_many/update/append/close/reopen/delete/list/lock,
   secret-access list/allow/revoke, admin-only `kubevirt_grant` and
-  `kubevirt_revoke`, read-only `kubevirt_grant_get`, `repo_list`, `repo_remove`, `run_list`,
+  `kubevirt_revoke`, read-only `kubevirt_grant_get`, admin-only `size_grant`
+  and `size_revoke`, read-only `size_grant_get` (#1021), `repo_list`, `repo_remove`, `run_list`,
   `system_status`, admin-only `secretstore_plan` (#611),
   `secretstore_sync_receipt` (#712), `secretstore_verify`, and
   admin-only `promote_grant`, `promote_grant_revoke`, plus read-only
@@ -840,6 +857,14 @@ continuity checks; it must never be used to reset or bypass those checks.
   also names either `group_holder` (the run of the same repository holding
   the group) or `group_ahead` (the earlier member queued ahead of it), both
   server run IDs, and the scheduling message names the group and that run.
+  An unparked reservation behind the queue head (the first claimed,
+  prepared, unparked run that does not fit) carries `blocked_by` (`run_id`,
+  `repo`, `ref`, `size`, `weight`, `full_drain` for XL, `run_ceiling`,
+  `disk_floor`, `used`, `capacity`, `waiting_since`), and its message, like
+  every unclaimed queued run's, ends "blocked behind <repo>/<ref> (XL, needs a
+  full drain)." The head itself sets `head_of_queue`. Unscoped `/api/status`
+  reports the same as `admission_blocker` (#1021). A scoped actor sees the
+  blocker only when its repository is in scope, without the budget's use.
 - Run list views: `/api/runs` and MCP `run_list` keep their default body,
   order (`queue_sequence` descending) and paging byte for byte when no view
   is given or the view is `all`. `view=history` (`?view=history`) keeps only
@@ -1053,6 +1078,13 @@ continuity checks; it must never be used to reset or bypass those checks.
   (`retry_of`, `mode` `manual`|`auto`, `auto_attempt`) recorded on the new
   promotion in its admission transaction, and `promote_status` on the failed
   promotion reports the successor as `retried_as`.
+  Promotions to one target of one repository are prepared one at a time
+  (#1021): a promotion admitted while an earlier one to the same target is
+  pending stays pending with no plan or run, and once no earlier one is
+  pending it is merged onto the target as that left it, so two promotions
+  never race to "upstream moved". The wait is bounded (12 h, then the
+  promotion fails); a restart interrupts a waiting promotion like any
+  promotion that never recorded its plan.
   An unborn target (brand-new repository whose upstream lacks the branch —
   confirmed by a successful, empty ls-remote, never inferred from a failed
   fetch) is a fast-forward creation of the tested source; the promotion row
@@ -1914,6 +1946,7 @@ alone is never evidence that missing migrations ran.
 | v23 | Unreleased (#917) | Audited repository-scoped KubeVirt grants keyed by durable repo ID | Database restore |
 | v24 | Unreleased (#954) | Partial index for passed runs by repository and tested SHA, used to validate SHA-pinned fragments | Database restore |
 | v25 | Unreleased (#1017) | kubevirt_grants: add max_vms, max_cores, max_memory_bytes (per-grant VMI run budget; existing grants get 2 VMs, 6 cores, 12Gi) | Database restore |
+| v26 | Unreleased (#1021) | size_grants: audited per-repository maximum admission size (L or XL; no active row means L); `CREATE TABLE IF NOT EXISTS` | Database restore |
 
 **Contract test:** `TestEveryMigrationDocumentedInAgentContract` asserts that
 every migration version in `internal/store/schema.go` has a corresponding

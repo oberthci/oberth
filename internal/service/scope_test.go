@@ -425,6 +425,7 @@ func TestScopedUplinkCannotTellHiddenFromMissing(t *testing.T) {
 		{"promote_grant_list", map[string]any{"repo": hiddenRepo}, map[string]any{"repo": missingRepo}},
 		{"access_list", map[string]any{"repo": hiddenRepo}, map[string]any{"repo": missingRepo}},
 		{"kubevirt_grant_get", map[string]any{"repo": hiddenRepo}, map[string]any{"repo": missingRepo}},
+		{"size_grant_get", map[string]any{"repo": hiddenRepo}, map[string]any{"repo": missingRepo}},
 		{"access_list", map[string]any{"repo": hiddenRepo, "pending": true}, map[string]any{"repo": missingRepo, "pending": true}},
 	}
 	for _, pair := range pairs {
@@ -668,6 +669,7 @@ var toolScopeBehaviour = map[string]string{
 	"run_list": "filtered", "promotion_list": "filtered", "issue_list": "filtered",
 	"access_list": "filtered", "repo_list": "filtered", "promote_grant_list": "filtered",
 	"kubevirt_grant_get": "lookup",
+	"size_grant_get":     "lookup",
 	"system_status":      "filtered",
 	"sync":               "mutation", "promote": "mutation", "promote_retry": "mutation", "publish_retry": "mutation", "run_retry": "mutation", "run_rerun": "mutation",
 	"run_cancel":   "mutation",
@@ -675,6 +677,7 @@ var toolScopeBehaviour = map[string]string{
 	"issue_close": "mutation", "issue_reopen": "mutation", "issue_delete": "mutation",
 	"issue_lock": "mutation", "access_allow": "mutation", "access_revoke": "mutation",
 	"kubevirt_grant": "mutation", "kubevirt_revoke": "mutation",
+	"size_grant": "mutation", "size_revoke": "mutation",
 	"repo_remove": "mutation", "promote_grant": "mutation", "promote_grant_revoke": "mutation",
 	"secretstore_verify": "refused", "secretstore_plan": "refused", "secretstore_sync_receipt": "refused",
 }

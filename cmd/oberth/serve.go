@@ -796,6 +796,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 		return err
 	}}
 	health.Version = version
+	health.AdmissionBlocker = scheduler.AdmissionBlocker
 	health.SchemaVersion = store.LatestMigrationVersion()
 	health.Identity = func(ctx context.Context) (string, error) {
 		if err := ctx.Err(); err != nil {
@@ -909,6 +910,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 		PromotionWorkspaceRoot:    filepath.Join(options.dataRoot, "work"),
 		SecretAccess:              database,
 		KubeVirtGrants:            database,
+		SizeGrants:                database,
 		SecretStoreVerifier:       buildSecretStoreVerifier(options, kube),
 		SecretAccessReconciler:    accessReconciler,
 		RepositoryRemover:         database,

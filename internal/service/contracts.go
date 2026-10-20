@@ -215,6 +215,14 @@ type SecretAccessStore interface {
 	PendingGrantDeclarations(ctx context.Context, repo string) ([]store.PendingGrantDeclaration, error)
 }
 
+// SizeGrantStore reads and changes a repository's audited maximum admission
+// size (#1021).
+type SizeGrantStore interface {
+	SizeGrant(context.Context, int64) (store.SizeGrant, error)
+	MaxRunSize(context.Context, int64) (periapsis.Size, error)
+	SetSizeGrant(context.Context, int64, string, periapsis.Size) (store.SizeGrant, error)
+}
+
 type KubeVirtGrantStore interface {
 	KubeVirtGrant(context.Context, int64) (store.KubeVirtGrant, error)
 	SetKubeVirtGrant(context.Context, int64, string, bool, store.KubeVirtBudget) (store.KubeVirtGrant, error)

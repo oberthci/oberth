@@ -221,6 +221,13 @@ running beside them, and each member keeps its declared size. Group names are
 `status` and `run_get` show the group and, while a run waits on it, which run
 holds it.
 
+`XL` needs an admin size grant (`oberth size grant <repo> --max XL`, or MCP
+`size_grant`); without one a repository's branch, promotion and schedule runs
+may declare at most `L`, and an XL declaration fails at admission instead of
+making every other repository wait for a full drain. While a run waits at the
+head of the admission queue, the runs behind it say so: "blocked behind
+<repo>/<ref> (XL, needs a full drain)".
+
 `oberth.ci/size-by-trigger` sizes each kind of run separately, so a heavy
 gate (a kernel matrix, say) can hold the host only on promotion and nightly
 runs while branch pushes stay small. Triggers are `branch`, `promotion` and

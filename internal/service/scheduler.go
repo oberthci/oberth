@@ -144,10 +144,14 @@ func NewScheduler(config SchedulerConfig) (*Scheduler, error) {
 		publicationSet: make(map[string]struct{}), deliveryPermit: deliveryPermit, capacityWait: waitTrustedCapacity,
 	}
 	// Runs parked on their concurrency group (#658) do not hold a dispatch
-	// slot, so the dispatch ceiling is mirrored into the gate itself, and a
-	// newly parked run wakes the dispatch loop to claim past it.
-	scheduler.admission.maxRuns = config.MaxConcurrent
+	// slot, so the gate carries its own run ceiling, and a newly parked run
+	// wakes the dispatch loop to claim past it. The ceiling is the weight
+	// budget (#1021): M runs still fill it at maxConcurrentJobs, while S runs
+	// (weight 1) pack two per M slot. A grant wakes the loop too, so it can
+	// claim into weight a small run left spare.
+	scheduler.admission.maxRuns = scheduler.admission.capacity
 	scheduler.admission.onPark = scheduler.signalQueue
+	scheduler.admission.onGrant = scheduler.signalQueue
 	// Opt-in disk floor (#673): when positive, admission holds until the
 	// filesystem has enough free bytes.
 	if config.AdmissionDiskFloorBytes > 0 {
@@ -443,9 +447,18 @@ func (scheduler *Scheduler) Run(ctx context.Context) error {
 // their checkouts) at twice the ceiling. The gate mirrors MaxConcurrent as its
 // run ceiling, so admitted runs never exceed it when a parked run's group
 // frees up. Without parked runs this is exactly `active < MaxConcurrent`.
+//
+// Past that ceiling the loop claims only into spare weight (#1021): when every
+// claimed run already holds its grant and the budget still has room, one more
+// run is claimed, so S-sized runs fill the 2 x MaxConcurrent weight budget
+// instead of stopping at MaxConcurrent runs. At most one such claim waits at a
+// time, so this never piles up checkouts behind a full budget.
 func (scheduler *Scheduler) dispatchSlotAvailable(active int) bool {
 	parked := min(scheduler.admission.groupParked(), scheduler.maxConcurrent)
-	return active-parked < scheduler.maxConcurrent
+	if active-parked < scheduler.maxConcurrent {
+		return true
+	}
+	return scheduler.admission.spareWeightForClaim(active - parked)
 }
 
 // ProcessNext is a deterministic single-run entrypoint for recovery tools and
@@ -582,6 +595,10 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 			}
 		}
 	}
+	if err := scheduler.authorizeRunSize(ctx, run, repository, size); err != nil {
+		_ = logFile.Close()
+		return scheduler.finishInfrastructureFailure(ctx, run, repository, err)
+	}
 	jobRequest.Size = size
 	group, err := scheduler.pipelineConcurrencyGroup(ctx, jobRequest)
 	if err != nil {
@@ -601,7 +618,7 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 	}
 
 	releaseAdmission, err := reservation.acquireRequest(ctx, admissionRequest{
-		RunID: run.ID, RepoID: run.RepoID, Size: size, Group: group,
+		RunID: run.ID, RepoID: run.RepoID, Repo: repository.Name, Ref: run.Ref, Size: size, Group: group,
 	})
 	if errors.Is(err, errAdmissionAbandoned) {
 		// Superseded or cancelled while waiting: the reservation is already
@@ -1371,6 +1388,45 @@ func (scheduler *Scheduler) requireMutation(ctx context.Context) error {
 		return fmt.Errorf("%w: %w", errMutationBlocked, err)
 	}
 	return nil
+}
+
+// RunSizeLimiter reports the largest admission size a repository's runs may
+// be admitted at (#1021): L unless an administrator granted XL.
+type RunSizeLimiter interface {
+	MaxRunSize(context.Context, int64) (periapsis.Size, error)
+}
+
+// authorizeRunSize refuses a branch, promotion or schedule run whose resolved
+// size exceeds its repository's size grant, before it takes any weight: one
+// repository's document declaring XL would otherwise make every other
+// repository wait for a full drain. A tag run keeps its reviewed
+// release.yaml size. A store without the capability (test doubles) limits
+// nothing; the production store always has it.
+func (scheduler *Scheduler) authorizeRunSize(ctx context.Context, run model.Run, repository model.Repository, size periapsis.Size) error {
+	limiter, ok := scheduler.store.(RunSizeLimiter)
+	if run.Release || !ok {
+		return nil
+	}
+	maximum, err := limiter.MaxRunSize(ctx, run.RepoID)
+	if err != nil {
+		return fmt.Errorf("read repository size grant: %w", err)
+	}
+	if sizeWeight(size) <= sizeWeight(maximum) {
+		return nil
+	}
+	return fmt.Errorf("pipeline declares size %s for this %s run, but repository %s may run at most %s; "+
+		"an administrator raises the maximum with `oberth size grant %s --max %s` (MCP size_grant), "+
+		"or the pipeline declares a smaller size (oberth.ci/size-by-trigger can keep %s for promotion and schedule runs only)",
+		size.Effective(), runTriggerName(run), repository.Name, maximum, repository.Name, size.Effective(), size.Effective())
+}
+
+func runTriggerName(run model.Run) string {
+	switch run.Trigger {
+	case "promotion", "schedule":
+		return run.Trigger
+	default:
+		return "branch"
+	}
 }
 
 func (scheduler *Scheduler) pipelineSize(ctx context.Context, request JobRequest) (periapsis.Size, error) {
