@@ -836,6 +836,8 @@ spec:
   # discovered by go list ./.... The package-union contract covers new packages.
   # All groups keep the race detector and uncached execution. The explicit
   # twenty-minute timeout provides headroom; independent Pods bound contention.
+  # CI samples put store at 494-600s and service at 400-545s; other
+  # packages stay below 30s. Give each group a bounded two-CPU lane.
   - name: test-store
     automountServiceAccountToken: false
     container:
@@ -845,7 +847,7 @@ spec:
       args: ["-I", "-S", "-B", ".oberth/test-packages.py", "store"]
       env:
       - name: GOMAXPROCS
-        value: "4"
+        value: "2"
       - name: CGO_ENABLED
         value: "1"
       - name: PATH
@@ -890,11 +892,11 @@ spec:
         subPath: trivy-cache
       resources:
         requests:
-          cpu: "4"
-          memory: "8Gi"
+          cpu: "2"
+          memory: "4Gi"
         limits:
-          cpu: "4"
-          memory: "8Gi"
+          cpu: "2"
+          memory: "4Gi"
 
 
   - name: test-service
@@ -906,7 +908,7 @@ spec:
       args: ["-I", "-S", "-B", ".oberth/test-packages.py", "service"]
       env:
       - name: GOMAXPROCS
-        value: "4"
+        value: "2"
       - name: CGO_ENABLED
         value: "1"
       - name: PATH
@@ -951,11 +953,11 @@ spec:
         subPath: trivy-cache
       resources:
         requests:
-          cpu: "4"
-          memory: "8Gi"
+          cpu: "2"
+          memory: "4Gi"
         limits:
-          cpu: "4"
-          memory: "8Gi"
+          cpu: "2"
+          memory: "4Gi"
 
 
   - name: test-rest
@@ -967,7 +969,7 @@ spec:
       args: ["-I", "-S", "-B", ".oberth/test-packages.py", "rest"]
       env:
       - name: GOMAXPROCS
-        value: "4"
+        value: "2"
       - name: CGO_ENABLED
         value: "1"
       - name: PATH
@@ -1012,11 +1014,11 @@ spec:
         subPath: trivy-cache
       resources:
         requests:
-          cpu: "4"
-          memory: "8Gi"
+          cpu: "2"
+          memory: "4Gi"
         limits:
-          cpu: "4"
-          memory: "8Gi"
+          cpu: "2"
+          memory: "4Gi"
 
   # ---- security burn (single step) ----
   # Maps to: Test("security", repositorySteps(
