@@ -125,36 +125,12 @@ func authorizeReleaseWIF(wf *wfv1.Workflow, config Config, request Request) ([]*
 		top[&wf.Spec.Templates[i]] = true
 	}
 	walkTemplates(wf, func(t *wfv1.Template) {
-		role, declared := t.Metadata.Annotations[argoworkflow.ReleaseWIFRoleAnnotation]
+		_, declared := t.Metadata.Annotations[argoworkflow.ReleaseWIFRoleAnnotation]
 		if !declared || failure != nil {
 			return
 		}
-		if request.Trigger != periapsis.TriggerRelease || config.ReleaseWIF == nil || config.ReleaseWIF.Namespace != config.Namespace {
-			failure = errors.New("argojob: release WIF requires an enabled administrator capability and a release trigger")
-			return
-		}
-		key := canonicalRepoKey(request.UpstreamName, request.UpstreamOrg, request.Repo)
-		grant, ok := config.ReleaseWIF.Repositories[key]
-		identity, hasIdentity := config.identityForPerRepo(request.UpstreamName, request.UpstreamOrg, request.Repo)
-		if grant.ServiceAccountName == config.PipelineServiceAccount || grant.ServiceAccountName == config.CredentialedServiceAccount || grant.ServiceAccountName == config.CISecretsServiceAccount || grant.ServiceAccountName == config.ExecutorServiceAccount {
-			hasIdentity = false
-		}
-		for otherRepo, other := range config.PerRepoIdentities {
-			if otherRepo != key && other.ServiceAccountName == grant.ServiceAccountName {
-				hasIdentity = false
-			}
-		}
-		for _, other := range config.PerRepoCIIdentities {
-			if other.ServiceAccountName == grant.ServiceAccountName {
-				hasIdentity = false
-			}
-		}
-		if !ok || !hasIdentity || identity.ServiceAccountName != grant.ServiceAccountName || grant.Templates[t.Name] != role || !argoworkflow.ValidReleaseWIFRole(role) {
-			failure = fmt.Errorf("argojob: release WIF capability is not approved for %q template %q role %q", key, t.Name, role)
-			return
-		}
-		if !top[t] || (t.Container == nil && t.Script == nil) || t.ContainerSet != nil || wf.Spec.TemplateDefaults != nil || len(t.Inputs.Artifacts) > 0 || len(t.Outputs.Artifacts) > 0 || wf.Annotations[argoworkflow.NonrootTemplatesAnnotation] != "" {
-			failure = fmt.Errorf("argojob: release WIF template %q must be a named container/script leaf without defaults, artifact plugins, or nonroot mode", t.Name)
+		if err := authorizeReleaseWIFLeaf(wf, t, top[t], config, request); err != nil {
+			failure = err
 			return
 		}
 		leaves = append(leaves, t)
@@ -198,6 +174,36 @@ func authorizeReleaseWIF(wf *wfv1.Workflow, config Config, request Request) ([]*
 		})
 	})
 	return leaves, failure
+}
+
+func authorizeReleaseWIFLeaf(wf *wfv1.Workflow, t *wfv1.Template, topLevel bool, config Config, request Request) error {
+	role := t.Metadata.Annotations[argoworkflow.ReleaseWIFRoleAnnotation]
+	if request.Trigger != periapsis.TriggerRelease || config.ReleaseWIF == nil || config.ReleaseWIF.Namespace != config.Namespace {
+		return errors.New("argojob: release WIF requires an enabled administrator capability and a release trigger")
+	}
+	key := canonicalRepoKey(request.UpstreamName, request.UpstreamOrg, request.Repo)
+	grant, ok := config.ReleaseWIF.Repositories[key]
+	identity, hasIdentity := config.identityForPerRepo(request.UpstreamName, request.UpstreamOrg, request.Repo)
+	if grant.ServiceAccountName == config.PipelineServiceAccount || grant.ServiceAccountName == config.CredentialedServiceAccount || grant.ServiceAccountName == config.CISecretsServiceAccount || grant.ServiceAccountName == config.ExecutorServiceAccount {
+		hasIdentity = false
+	}
+	for otherRepo, other := range config.PerRepoIdentities {
+		if otherRepo != key && other.ServiceAccountName == grant.ServiceAccountName {
+			hasIdentity = false
+		}
+	}
+	for _, other := range config.PerRepoCIIdentities {
+		if other.ServiceAccountName == grant.ServiceAccountName {
+			hasIdentity = false
+		}
+	}
+	if !ok || !hasIdentity || identity.ServiceAccountName != grant.ServiceAccountName || grant.Templates[t.Name] != role || !argoworkflow.ValidReleaseWIFRole(role) {
+		return fmt.Errorf("argojob: release WIF capability is not approved for %q template %q role %q", key, t.Name, role)
+	}
+	if !topLevel || (t.Container == nil && t.Script == nil) || t.ContainerSet != nil || wf.Spec.TemplateDefaults != nil || len(t.Inputs.Artifacts) > 0 || len(t.Outputs.Artifacts) > 0 || wf.Annotations[argoworkflow.NonrootTemplatesAnnotation] != "" {
+		return fmt.Errorf("argojob: release WIF template %q must be a named container/script leaf without defaults, artifact plugins, or nonroot mode", t.Name)
+	}
+	return nil
 }
 
 func injectReleaseWIF(wf *wfv1.Workflow, leaves []*wfv1.Template, config *ReleaseWIFConfig) error {

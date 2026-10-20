@@ -73,6 +73,7 @@ rules:
   # resourceNames pin is possible because per-repo names carry a dynamic
   # hash suffix. Without this rule every credentialed CI and release run
   # fails closed at Job creation with a Forbidden error (issue #467).
+  # Release declaration preflight also uses this read-only check (#1139).
   - apiGroups: [""]
     resources: ["serviceaccounts"]
     verbs: ["get"]

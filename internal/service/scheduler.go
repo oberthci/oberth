@@ -712,6 +712,10 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 		jobRequest.UpstreamName = upstream.Name
 		jobRequest.UpstreamOrg = upstream.Org()
 	}
+	if err := scheduler.checkReleasePreflight(ctx, jobRequest, logFile); err != nil {
+		_ = logFile.Close()
+		return scheduler.finishInfrastructureFailure(ctx, run, repository, err)
+	}
 	if requirement.Contract != nil {
 		stopped, err := scheduler.executeTrustedWithCapacity(ctx, jobRequest, requirement, logFile, reservation, require)
 		if stopped {
