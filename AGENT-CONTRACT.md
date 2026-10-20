@@ -320,8 +320,10 @@ continuity checks; it must never be used to reset or bypass those checks.
   the maximum is `L`. `oberth size grant <repo> --max L|XL` / `size revoke` /
   `size get` (in-pod CLI) and MCP `size_grant` / `size_revoke` /
   `size_grant_get` manage it, stored by repository ID (`size_grants`, v26)
-  and audited as `size.grant` / `size.revoke`. Tag runs keep their reviewed
-  release.yaml size.
+  and audited as `size.grant` / `size.revoke`. The XL size grant applies to
+  branch, promotion and schedule runs; tag/release runs are the credentialed
+  tier and are not gated: they keep their reviewed release.yaml size, XL
+  included, without a grant.
 - The server-owned workflow parameter `oberth-trigger`
   (`branch|promotion|schedule|tag`, the same durable run trigger) is set on
   every document that declares or mentions it, so `when:` guards can skip

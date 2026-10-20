@@ -94,3 +94,25 @@ func TestUngrantedXLIsRefusedWithoutHoldingTheQueue(t *testing.T) {
 		t.Fatalf("ungranted promotion XL = %v", err)
 	}
 }
+
+// TestTagRunsAreNotSizeGated pins the deliberate exemption: the XL size grant
+// applies to branch, promotion and schedule runs only. A tag run is the
+// credentialed tier, sized by its reviewed release.yaml, and is admitted at XL
+// without any grant; every other trigger of the same repository is refused.
+func TestTagRunsAreNotSizeGated(t *testing.T) {
+	fixture := newConcurrencyFixture(t, periapsis.M, 3)
+	ctx := context.Background()
+	if size, err := fixture.store.MaxRunSize(ctx, fixture.repo.ID); err != nil || size != periapsis.L {
+		t.Fatalf("fixture repository maximum = %q, %v; want the default L", size, err)
+	}
+	tag := model.Run{RepoID: fixture.repo.ID, RefKind: model.RefTag, Ref: "v1.0.0", Trigger: "tag", Release: true}
+	if err := fixture.scheduler.authorizeRunSize(ctx, tag, fixture.repo, periapsis.XL); err != nil {
+		t.Fatalf("tag run at XL without a grant = %v", err)
+	}
+	for _, trigger := range []string{"branch", "promotion", "schedule"} {
+		run := model.Run{RepoID: fixture.repo.ID, RefKind: model.RefBranch, Ref: "main", Trigger: trigger}
+		if err := fixture.scheduler.authorizeRunSize(ctx, run, fixture.repo, periapsis.XL); err == nil {
+			t.Fatalf("%s run at XL without a grant was admitted", trigger)
+		}
+	}
+}

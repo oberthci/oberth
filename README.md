@@ -224,7 +224,9 @@ holds it.
 `XL` needs an admin size grant (`oberth size grant <repo> --max XL`, or MCP
 `size_grant`); without one a repository's branch, promotion and schedule runs
 may declare at most `L`, and an XL declaration fails at admission instead of
-making every other repository wait for a full drain. While a run waits at the
+making every other repository wait for a full drain. The grant applies to
+branch, promotion and schedule runs only: tag/release runs are the
+credentialed tier and are not gated, so a reviewed release.yaml keeps its size. While a run waits at the
 head of the admission queue, the runs behind it say so: "blocked behind
 <repo>/<ref> (XL, needs a full drain)".
 

@@ -149,6 +149,19 @@ func (gate *weightedAdmission) reserve(sequence int64) *admissionReservation {
 	return reservation
 }
 
+// reserveRun is reserve for a claimed run: the reservation carries the run's
+// identity from the claim on, so a run still preparing (checking out, reading
+// its document) is already addressable by its run ID.
+func (gate *weightedAdmission) reserveRun(run model.Run) *admissionReservation {
+	reservation := gate.reserve(run.QueueSequence)
+	gate.mu.Lock()
+	if reservation.runID == "" {
+		reservation.runID, reservation.repoID, reservation.ref = run.ID, run.RepoID, run.Ref
+	}
+	gate.mu.Unlock()
+	return reservation
+}
+
 // acquire admits an ungrouped run of the given size.
 func (reservation *admissionReservation) acquire(ctx context.Context, size periapsis.Size) (func(), error) {
 	return reservation.acquireRequest(ctx, admissionRequest{Size: size})
@@ -182,7 +195,9 @@ func (reservation *admissionReservation) acquireRequest(ctx context.Context, req
 		return nil, context.Canceled
 	}
 	reservation.vmParked = false
-	reservation.runID = request.RunID
+	if request.RunID != "" {
+		reservation.runID = request.RunID
+	}
 	reservation.repoID, reservation.repo, reservation.ref = request.RepoID, request.Repo, request.Ref
 	if !reservation.prepared {
 		reservation.preparedAt = time.Now().UTC()
