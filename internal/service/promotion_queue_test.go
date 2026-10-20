@@ -114,3 +114,108 @@ func TestSecondPromotionWaitsAndIsPreparedOnTheNewTarget(t *testing.T) {
 		t.Fatalf("promotion to another target was queued: %#v", other)
 	}
 }
+
+// A promote_retry of a failed promotion is queued behind a promotion to the
+// same target that is still pending, exactly like a fresh promote (#1021
+// with #1097), and is prepared only once that one is terminal.
+func TestRetriedPromotionQueuesBehindAPendingOne(t *testing.T) {
+	const (
+		retriedSource = "3333333333333333333333333333333333333333"
+		pendingSource = "4444444444444444444444444444444444444444"
+		base          = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+		firstMerged   = "cccccccccccccccccccccccccccccccccccccccc"
+		pendingMerged = "dddddddddddddddddddddddddddddddddddddddd"
+		retryMerged   = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+	)
+	fixture := newControlFixture(t)
+	ctx := context.Background()
+	for branch, sha := range map[string]string{"feature/retried": retriedSource, "feature/pending": pendingSource} {
+		run, err := fixture.store.EnqueueRun(ctx, model.RunSpec{
+			RepoID: fixture.repo.ID, RefKind: model.RefBranch, Ref: branch,
+			SHA: sha, Actor: "agent@host", Trigger: "branch", TestedSHA: sha,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := fixture.store.ClaimNextRun(ctx); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := fixture.store.FinishRun(ctx, run.ID, model.RunResult{Status: model.RunPassed, TestedSHA: sha}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	control := fixture.api(t)
+	admin := api.Actor{Identity: "agent@host", Admin: true}
+	setPlan := func(plan gitcache.MergeCandidate) {
+		fixture.git.mu.Lock()
+		fixture.git.plan = plan
+		fixture.git.mu.Unlock()
+	}
+	promote := func(sha string) model.Promotion {
+		t.Helper()
+		value, err := control.CallTool(ctx, admin, "promote", json.RawMessage(`{"sha":"`+sha+`","branch":"main"}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return requireToolPromotion(t, fixture, value)
+	}
+
+	// The promotion to be retried fails in its CI.
+	setPlan(gitcache.MergeCandidate{BaseSHA: base, MergedSHA: firstMerged})
+	failed := promote(retriedSource)
+	if _, err := fixture.store.FinishRun(ctx, failed.RunID, model.RunResult{Status: model.RunFailed, Phase: "job", Error: "flaky"}); err != nil {
+		t.Fatal(err)
+	}
+	// Another promotion to the same target is now pending.
+	setPlan(gitcache.MergeCandidate{BaseSHA: base, MergedSHA: pendingMerged})
+	pending := promote(pendingSource)
+	if pending.RunID == "" {
+		t.Fatalf("pending promotion = %#v", pending)
+	}
+	prepares := func() int {
+		fixture.git.mu.Lock()
+		defer fixture.git.mu.Unlock()
+		return len(fixture.git.preparedRepos)
+	}
+	before := prepares()
+
+	setPlan(gitcache.MergeCandidate{BaseSHA: pendingMerged, MergedSHA: retryMerged})
+	value, err := control.CallTool(ctx, admin, "promote_retry", json.RawMessage(`{"id":"`+failed.ID+`"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	response, ok := value.(api.PromoteRetryResponse)
+	if !ok || response.ID == "" {
+		t.Fatalf("promote_retry response = %#v", value)
+	}
+	retried, err := fixture.store.Promotion(ctx, response.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(200 * time.Millisecond)
+	if current, _ := fixture.store.Promotion(ctx, retried.ID); current.RunID != "" || prepares() != before {
+		t.Fatalf("the retry was prepared beside a pending promotion: %#v (%d prepares)", current, prepares()-before)
+	}
+
+	if _, err := fixture.store.FinishRun(ctx, pending.RunID, model.RunResult{Status: model.RunFailed, Phase: "job", Error: "unit failed"}); err != nil {
+		t.Fatal(err)
+	}
+	fixture.signals.NotifyPromotion(pending.ID)
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		current, err := fixture.store.Promotion(ctx, retried.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if current.RunID != "" {
+			if current.PreviousSHA != pendingMerged || current.ResultSHA != retryMerged {
+				t.Fatalf("retry after the pending promotion = %#v", current)
+			}
+			return
+		}
+		if current.Status.Terminal() || time.Now().After(deadline) {
+			t.Fatalf("retry never planned: %#v", current)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}

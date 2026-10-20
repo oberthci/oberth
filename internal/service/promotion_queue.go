@@ -69,11 +69,9 @@ func (service *API) planOrQueuePromotion(ctx context.Context, actor api.Actor, r
 		return service.failAdmittedPromotion(ctx, promotion, "check promotions queued ahead: "+err.Error(), "")
 	}
 	if predecessor != nil {
-		service.background.Add(1)
-		go func() {
-			defer service.background.Done()
-			service.planQueuedPromotion(context.WithoutCancel(ctx), actor, repository, candidate, target, promotion)
-		}()
+		// Not tracked by service.background: the wait can last as long as
+		// the promotion ahead, which waitBackground must not wait for.
+		go service.planQueuedPromotion(context.WithoutCancel(ctx), actor, repository, candidate, target, promotion)
 		promotion.Error = queuedPromotionMessage(*predecessor, target)
 		return promotion, nil
 	}
