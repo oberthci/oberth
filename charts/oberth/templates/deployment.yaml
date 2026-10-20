@@ -284,6 +284,7 @@ spec:
             - --argo-kubevirt-max-cores={{ (.Values.argo.kubevirtCeiling).maxCores | default 24 }}
             - --argo-kubevirt-max-memory={{ (.Values.argo.kubevirtCeiling).maxMemory | default "48Gi" }}
             - --argo-workflow-timeout={{ .Values.argo.workflowTimeout }}
+            - --argo-executor-scratch-size-limit={{ .Values.argo.executorScratchSizeLimit | default "1Gi" }}
             - --argo-workflow-ttl={{ .Values.argo.workflowTTL }}
             {{- if .Values.argo.sourceStorageClass }}
             - --argo-source-storage-class={{ .Values.argo.sourceStorageClass }}

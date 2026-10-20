@@ -61,6 +61,78 @@ func projectionRunWithTrigger(t *testing.T, database *Store, repoID int64, branc
 	return claimed
 }
 
+func TestInfrastructureRunRetriesWithoutProjectingCIRedIssue(t *testing.T) {
+	now := time.Date(2026, 10, 20, 0, 0, 0, 0, time.UTC)
+	database := testStore(t, &now)
+	repository := projectionRepository(t, database)
+	ctx := context.Background()
+	branch := "fix/executor-scratch"
+	run := projectionRun(t, database, repository.ID, branch, projectionSourceSHA)
+	result := model.RunResult{Status: model.RunFailed, Phase: "infrastructure", Error: `Evicted: Usage of EmptyDir volume "var-run-argo" exceeds the limit "128Mi".`}
+	if _, err := database.FinishRun(ctx, run.ID, result); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.OpenCIIssue(ctx, repository.ID, branch); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("infrastructure failure opened CI-red issue: %v", err)
+	}
+	retry, err := database.RetryRun(ctx, run.ID, "reviewer@host")
+	if err != nil || retry.SHA != run.SHA {
+		t.Fatalf("infrastructure retry = %#v, %v", retry, err)
+	}
+	// A real test failure still opens an issue. A later infrastructure failure
+	// neither updates its evidence nor resolves it.
+	if _, err := database.FinishRun(ctx, retry.ID, model.RunResult{Status: model.RunFailed, Phase: "test", FailedBurn: "test", FailedStep: "unit"}); err != nil {
+		t.Fatal(err)
+	}
+	issue, err := database.OpenCIIssue(ctx, repository.ID, branch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	next := projectionRun(t, database, repository.ID, branch, projectionResultSHA)
+	if _, err := database.FinishRun(ctx, next.ID, result); err != nil {
+		t.Fatal(err)
+	}
+	after, err := database.OpenCIIssue(ctx, repository.ID, branch)
+	if err != nil || after.ID != issue.ID || after.Body != issue.Body || after.Occurrences != issue.Occurrences {
+		t.Fatalf("infrastructure failure changed test issue: %#v, %v", after, err)
+	}
+}
+
+func TestInfrastructurePromotionRunDoesNotProjectCIRedIssue(t *testing.T) {
+	now := time.Date(2026, 10, 20, 0, 0, 0, 0, time.UTC)
+	database := testStore(t, &now)
+	repository := projectionRepository(t, database)
+	ctx := context.Background()
+	spec := retryPromotionSpec(repository.ID, "")
+	promotion, err := database.AppendPromotion(ctx, spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.PlanPromotion(ctx, promotion.ID, retryStoreBase, retryStoreMerged); err != nil {
+		t.Fatal(err)
+	}
+	run, _, err := database.EnqueueAdmittedPromotionRun(ctx, model.RunSpec{
+		RepoID: repository.ID, RefKind: model.RefBranch, Ref: "promotion/main/" + retryStoreMerged[:12],
+		SHA: retryStoreMerged, Actor: spec.Actor, Trigger: "promotion", TestedSHA: retryStoreMerged, BaseSHA: retryStoreBase,
+	}, promotion.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.ClaimNextRun(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.FinishRun(ctx, run.ID, model.RunResult{Status: model.RunFailed, Phase: "infrastructure", Error: "main: OOMKilled"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.OpenCIIssue(ctx, repository.ID, spec.SourceBranch); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("infrastructure promotion opened CI-red issue: %v", err)
+	}
+	finished, err := database.Promotion(ctx, promotion.ID)
+	if err != nil || finished.Status != model.PromotionFailed || finished.Error != "main: OOMKilled" {
+		t.Fatalf("promotion lost failure: %#v, %v", finished, err)
+	}
+}
+
 func TestRunAndIssueProjectionCommitAtomically(t *testing.T) {
 	now := time.Date(2026, 8, 4, 12, 0, 0, 0, time.UTC)
 	database := testStore(t, &now)

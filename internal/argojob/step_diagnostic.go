@@ -15,8 +15,9 @@ import (
 // collectStepDiagnostics runs before completion is handed to the scheduler and
 // before its cleanup. Source-owned Workflows retain Pods until Workflow TTL;
 // external GC/read failures are explicit unavailable observations. Diagnostics
-// never replace or modify the pipeline verdict. One total five-second budget
-// bounds all API reads, including large workflows and recovery.
+// keep their typed projection separate from infrastructure classification.
+// One total five-second budget bounds all API reads, including large workflows
+// and recovery.
 func (controller *Controller) collectStepDiagnostics(ctx context.Context, workflow *wfv1.Workflow, completion *Completion) {
 	readCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
@@ -59,29 +60,21 @@ func (controller *Controller) collectStepDiagnostics(ctx context.Context, workfl
 			continue
 		}
 		step.Termination = projectStepDiagnostic(workflow, node, pod, time.Now().UTC())
+		if reason := podInfrastructureReason(workflow, node, pod); reason != "" {
+			step.InfrastructureReason = reason
+		}
 	}
+	completion.classifyInfrastructure()
 }
 
 func projectStepDiagnostic(workflow *wfv1.Workflow, node wfv1.NodeStatus, pod *corev1.Pod, observed time.Time) *model.StepDiagnostic {
 	unavailable := func(reason string) *model.StepDiagnostic {
 		return &model.StepDiagnostic{Unavailable: reason, ObservedAt: &observed}
 	}
-	runID, _, ok := WorkflowMeta(workflow)
-	if !ok || workflow.UID == "" || pod == nil || pod.UID == "" || pod.Namespace != workflow.Namespace || pod.Name != PodName(workflow, node) || node.Type != wfv1.NodeTypePod || !node.Phase.Completed() || pod.Annotations["workflows.argoproj.io/node-id"] != node.ID || pod.Annotations["workflows.argoproj.io/node-name"] != node.Name {
+	if !stepPodBound(workflow, node, pod) {
 		return unavailable("binding-mismatch")
 	}
-	owners := 0
-	for _, owner := range pod.OwnerReferences {
-		if owner.Controller != nil && *owner.Controller {
-			owners++
-			if owner.APIVersion != "argoproj.io/v1alpha1" || owner.Kind != "Workflow" || owner.Name != workflow.Name || owner.UID != workflow.UID {
-				return unavailable("binding-mismatch")
-			}
-		}
-	}
-	if owners != 1 {
-		return unavailable("binding-mismatch")
-	}
+	runID, _, _ := WorkflowMeta(workflow)
 	var main *corev1.Container
 	seen := map[string]bool{}
 	for i := range pod.Spec.Containers {
@@ -171,4 +164,21 @@ func projectStepDiagnostic(workflow *wfv1.Workflow, node wfv1.NodeStatus, pod *c
 		return unavailable("invalid-termination")
 	}
 	return result
+}
+
+func stepPodBound(workflow *wfv1.Workflow, node wfv1.NodeStatus, pod *corev1.Pod) bool {
+	_, _, ok := WorkflowMeta(workflow)
+	if !ok || workflow.UID == "" || pod == nil || pod.UID == "" || pod.Namespace != workflow.Namespace || pod.Name != PodName(workflow, node) || node.Type != wfv1.NodeTypePod || !node.Phase.Completed() || pod.Annotations["workflows.argoproj.io/node-id"] != node.ID || pod.Annotations["workflows.argoproj.io/node-name"] != node.Name {
+		return false
+	}
+	owners := 0
+	for _, owner := range pod.OwnerReferences {
+		if owner.Controller != nil && *owner.Controller {
+			owners++
+			if owner.APIVersion != "argoproj.io/v1alpha1" || owner.Kind != "Workflow" || owner.Name != workflow.Name || owner.UID != workflow.UID {
+				return false
+			}
+		}
+	}
+	return owners == 1
 }

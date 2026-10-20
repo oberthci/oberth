@@ -84,7 +84,21 @@ Selected leaves read source and shared tool inputs without write access, includi
 Argo's mirrored input mounts. They have no persistent host cache mount.
 TMPDIR/GOTMPDIR are `/tmp`, GOCACHE is `/tmp/gobuild`, GOMODCACHE is `/tmp/gomod`,
 and HOME/XDG caches also use this per-Pod scratch. Its 8Gi bound and Argo's separate
-control/staging bounds prevent unbounded writable storage. Tools produced by
+control/staging bounds prevent unbounded writable storage. The Argo emissary
+`var-run-argo` EmptyDir retains stdout/stderr and control files until Pod cleanup;
+it defaults to 1Gi. Administrators can set `argo.executorScratchSizeLimit` in the
+chart (`serve --argo-executor-scratch-size-limit`, a positive Kubernetes quantity).
+This limit also applies to the protected trusted KVM leaf and is checked by its
+Pod attestation. It is separate from `/tmp` and CPU/memory step requests: reducing
+a test's resource requests does not reduce its retained log output. Server log
+collection limits do not cap emissary's on-disk copy. Size executor scratch for
+the step's output as well as its declared resource requests.
+
+Kubelet evictions (including emptyDir and ephemeral-storage pressure) and current
+`OOMKilled` terminations are infrastructure failures with the kubelet reason.
+They retain failed step rows, permit `run_retry` for eligible branch runs, and
+do not open or update repository CI-red issues. Exit 137/143 alone does not prove
+an infrastructure failure; an independent failed test still makes CI red. Tools produced by
 earlier ordinary steps are read-only inputs; only the existing separate
 OBERTH_ARTIFACTS mount remains available for explicit publishable output. Cache
 files are not collected as artifacts. Cold caches are the initial compatibility

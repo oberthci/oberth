@@ -2405,7 +2405,18 @@ and Pod deadline reason are separate observations; exit 137 alone means neither.
 
 `run_get` exposes this record through the existing typed step JSON. Old NULL
 records explicitly mean `not-recorded`; no historical cause is backfilled.
-Malformed optional evidence cannot replace the original step verdict. These
+Malformed optional evidence cannot replace the original step verdict. Separately,
+failed selected Pod nodes with kubelet eviction messages or `OOMKilled` reasons
+are classified as infrastructure (#1138); an owned failed Pod's live status can
+also establish the cause before main terminates. The bounded kubelet message is
+retained as the run error, separate from the typed termination JSON; application
+termination-log suffixes are excluded from OOM reasons. Only a run whose failed
+steps all have infrastructure causes is reclassified. It retains step rows,
+clears run-level test attribution, permits eligible branch `run_retry`, and does
+not open/update/resolve repository CI-red issues. Argo's server-injected executor
+scratch defaults to 1Gi for nonroot and trusted KVM leaves and is configurable
+through `argo.executorScratchSizeLimit` / `--argo-executor-scratch-size-limit`;
+the trusted observer enforces the configured bound. These
 records trust the Kubernetes API/kubelet and bind observation time separately
 from container event times; they are not independent execution attestations.
 

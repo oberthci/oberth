@@ -14,6 +14,7 @@ import (
 
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
+	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -280,11 +281,14 @@ func verifyTrustedKVMPod(workflow *wfv1.Workflow, leaf *wfv1.Template, pod *core
 	for _, name := range []string{"var-run-argo", "tmp-dir-argo"} {
 		allowed[name] = corev1.Volume{Name: name, VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}}
 	}
+	allowed["var-run-argo"] = corev1.Volume{Name: "var-run-argo", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{SizeLimit: config.executorScratchLimit()}}}
 	// Projected executor token is memory-only and never accessible to main.
 	allowed[executorTokenVolume] = corev1.Volume{Name: executorTokenVolume, VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{Medium: corev1.StorageMediumMemory, SizeLimit: ptr.To(resource.MustParse("1Mi"))}}}
 	for _, v := range pod.Spec.Volumes {
 		want, ok := allowed[v.Name]
-		if !ok || !reflect.DeepEqual(v, want) {
+		// Quantities may have different internal representations after API
+		// serialization; compare their values while keeping nil/empty strict.
+		if !ok || !apiequality.Semantic.DeepEqualWithNilDifferentFromEmpty(v, want) {
 			return invalid("volume sources")
 		}
 		delete(allowed, v.Name)

@@ -72,6 +72,7 @@ func buildArgoEngine(
 	config := argojob.Config{
 		ReleaseWIF:                 wifConfig,
 		NonrootProfile:             options.argoControllerProfile,
+		ExecutorScratchSizeLimit:   options.argoExecutorScratchSizeLimit,
 		Namespace:                  options.argoNamespace,
 		PipelineServiceAccount:     options.argoPipelineAccount,
 		CredentialedServiceAccount: options.argoCredentialedAccount,
@@ -217,6 +218,7 @@ func validateArgoServeOptions(options serveOptions) error {
 	return argojob.Config{
 		ReleaseWIF:                 wifConfig,
 		NonrootProfile:             options.argoControllerProfile,
+		ExecutorScratchSizeLimit:   options.argoExecutorScratchSizeLimit,
 		Namespace:                  options.argoNamespace,
 		PipelineServiceAccount:     options.argoPipelineAccount,
 		CredentialedServiceAccount: options.argoCredentialedAccount,

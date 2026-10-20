@@ -210,6 +210,9 @@ upstream:
 # accepts pushes and then executes nothing. Install the controller with
 # `oberth install`, or point argo.namespace at an existing one.
 argo:
+  # Emissary retains stdout/stderr and control files here until Pod cleanup.
+  # Separate from the test leaf /tmp; applies to nonroot and trusted KVM leaves.
+  executorScratchSizeLimit: 1Gi
   # Public administrator capabilities only; empty disables release federation.
   # Tokens/private keys must never be supplied here. See docs/release-wif.md.
   releaseWIF: {}

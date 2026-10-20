@@ -32,14 +32,15 @@ import (
 
 type protectedControllerFixture struct {
 	*blockingController
-	preparer   *argojob.Controller
-	request    argojob.Request
-	createErr  error
-	failed     bool
-	waitRunID  string
-	cleaned    bool
-	absent     bool
-	absenceErr error
+	preparer             *argojob.Controller
+	request              argojob.Request
+	createErr            error
+	failed               bool
+	infrastructureReason string
+	waitRunID            string
+	cleaned              bool
+	absent               bool
+	absenceErr           error
 }
 
 func (c *protectedControllerFixture) PrepareNonroot(ctx context.Context, r argojob.Request) (argojob.Request, error) {
@@ -98,7 +99,7 @@ func (c *protectedControllerFixture) Create(_ context.Context, r argojob.Request
 }
 func (c *protectedControllerFixture) Wait(_ context.Context, _ string, runID string, _ io.Writer) (argojob.Completion, error) {
 	c.waitRunID = runID
-	return argojob.Completion{Succeeded: !c.failed}, nil
+	return argojob.Completion{Succeeded: !c.failed, Infrastructure: c.infrastructureReason != "", Reason: c.infrastructureReason}, nil
 }
 func (c *protectedControllerFixture) TrustedKVMWorkflowUID(context.Context, argojob.Request) (string, error) {
 	if c.createErr != nil {
@@ -117,11 +118,14 @@ func (c *protectedControllerFixture) TrustedKVMReceipt(_ context.Context, r argo
 	return vmrunner.KVMReceipt{IntentDigest: d, WorkflowUID: uid, Binding: vmrunner.KVMTerminationBinding{Namespace: intent.Namespace, WorkflowName: intent.WorkflowName, WorkflowUID: uid, PodName: "pod", PodUID: "pod-uid", ContainerID: "containerd://id", HarnessImageRef: intent.Recipe.HarnessImage, AdmittedAt: intent.AdmittedAt, Deadline: intent.Deadline}, Report: vmrunner.KVMReport{Version: 1, IntentDigest: d, InventoryDigest: intent.InventoryDigest, CaseCount: intent.CaseCount, ArtifactSetDigest: strings.Repeat("f", 64)}, Termination: vmrunner.KVMTerminationRecord{ImageID: "sha256:" + strings.Repeat("c", 64), ContainerID: "containerd://id", PodUID: "pod-uid", WorkflowUID: uid, StartedAt: intent.AdmittedAt, FinishedAt: now}, FinishedAt: now}, nil
 }
 func TestTrustedPreflightAdapterLifecycle(t *testing.T) {
-	for _, scenario := range []string{"pass", "workflow failed", "definite create refusal", "uncertain create", "recover absent", "unapproved"} {
+	for _, scenario := range []string{"pass", "workflow failed", "infrastructure failed", "definite create refusal", "uncertain create", "recover absent", "unapproved"} {
 		t.Run(scenario, func(t *testing.T) {
 			ctx := context.Background()
 			fixture := newRaceFixture(t)
-			controller := &protectedControllerFixture{blockingController: newBlockingController(), failed: scenario == "workflow failed"}
+			controller := &protectedControllerFixture{blockingController: newBlockingController(), failed: scenario == "workflow failed" || scenario == "infrastructure failed"}
+			if scenario == "infrastructure failed" {
+				controller.infrastructureReason = `Evicted: Usage of EmptyDir volume "var-run-argo" exceeds the limit "1Gi".`
+			}
 			if scenario == "definite create refusal" {
 				controller.createErr = argojob.ErrTrustedKVMCreateRefused
 			}
@@ -198,6 +202,9 @@ func TestTrustedPreflightAdapterLifecycle(t *testing.T) {
 			} else {
 				if err == nil || state.Refusal == nil || state.Receipt != nil {
 					t.Fatalf("failure lost negative receipt: %v %#v", err, state)
+				}
+				if scenario == "infrastructure failed" && !strings.Contains(err.Error(), controller.infrastructureReason) {
+					t.Fatalf("trusted preflight hid kubelet message: %v", err)
 				}
 				if scenario == "uncertain create" || scenario == "recover absent" {
 					if state.Cleaned {

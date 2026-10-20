@@ -606,6 +606,11 @@
           "type": "string",
           "description": "Identity for Argo's own executor containers. Must differ from all pipeline identities."
         },
+        "executorScratchSizeLimit": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Positive Kubernetes quantity for per-Pod emissary scratch on nonroot and trusted KVM leaves. Defaults to 1Gi; the server validates the quantity at startup."
+        },
         "vmLauncherServiceAccount": {"type": "string"},
         "containerDiskPrefixes": {"type": "array", "items": {"type": "string"}},
         "kubevirtCeiling": {

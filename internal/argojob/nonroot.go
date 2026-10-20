@@ -84,7 +84,7 @@ func applyNonrootLeaves(workflow *wfv1.Workflow, config Config, request Request)
 			{Name: "OBERTH_CACHE_DIR", Value: "/tmp/cache"}, {Name: "HOME", Value: "/tmp"},
 			{Name: "XDG_CACHE_HOME", Value: "/tmp/cache"},
 		})
-		patch, err := nonrootPodPatch(tmpl, config.SourceSeedImage)
+		patch, err := nonrootPodPatch(tmpl, config)
 		if err != nil {
 			return err
 		}
@@ -105,7 +105,8 @@ func nonrootContainerSecurity(uid int64) *corev1.SecurityContext {
 	}
 }
 
-func nonrootPodPatch(tmpl *wfv1.Template, seedImage string) ([]byte, error) {
+func nonrootPodPatch(tmpl *wfv1.Template, config Config) ([]byte, error) {
+	seedImage := config.SourceSeedImage
 	if strings.TrimSpace(seedImage) == "" {
 		return nil, fmt.Errorf("argojob: nonroot preparation requires the server's pinned source seed image")
 	}
@@ -164,7 +165,7 @@ func nonrootPodPatch(tmpl *wfv1.Template, seedImage string) ([]byte, error) {
 		"seccompProfile": map[string]any{"type": string(corev1.SeccompProfileTypeRuntimeDefault), "localhostProfile": nil},
 	}
 	volumes := []map[string]any{
-		{"name": "var-run-argo", "emptyDir": map[string]string{"sizeLimit": "128Mi"}},
+		{"name": "var-run-argo", "emptyDir": map[string]string{"sizeLimit": config.executorScratchLimit().String()}},
 		{"name": "tmp-dir-argo", "emptyDir": map[string]string{"sizeLimit": "64Mi"}},
 	}
 	if tmpl.Script != nil {
@@ -191,4 +192,13 @@ func nonrootPodPatch(tmpl *wfv1.Template, seedImage string) ([]byte, error) {
 		return nil, fmt.Errorf("argojob: encode nonroot executor policy: %w", err)
 	}
 	return encoded, nil
+}
+
+// executorScratchLimit is shared by generation and protected Pod attestation.
+// Config.Validate runs before either path consumes an administrator quantity.
+func (config Config) executorScratchLimit() *resource.Quantity {
+	if config.ExecutorScratchSizeLimit == "" {
+		return ptr.To(resource.MustParse("1Gi"))
+	}
+	return ptr.To(resource.MustParse(config.ExecutorScratchSizeLimit))
 }
