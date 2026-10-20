@@ -56,8 +56,12 @@ type admissionReservation struct {
 	repo       string
 	ref        string
 	preparedAt time.Time
-	size       periapsis.Size
-	weight     int
+	// claimedAt and grantedAt date the reservation's other states for the
+	// admission view (#1099).
+	claimedAt time.Time
+	grantedAt time.Time
+	size      periapsis.Size
+	weight    int
 	// group is the repository-scoped key of the run's concurrency group and
 	// groupName the name the repository declared; both empty when ungrouped.
 	group     string
@@ -148,7 +152,7 @@ func concurrencyGroupKey(repoID int64, group string) string {
 // reserve records FIFO claim order before exact-SHA checkout and static
 // parsing can finish out of order.
 func (gate *weightedAdmission) reserve(sequence int64) *admissionReservation {
-	reservation := &admissionReservation{gate: gate, sequence: sequence, ready: make(chan struct{})}
+	reservation := &admissionReservation{gate: gate, sequence: sequence, ready: make(chan struct{}), claimedAt: time.Now().UTC()}
 	gate.mu.Lock()
 	gate.reservations[sequence] = reservation
 	gate.waiters = append(gate.waiters, reservation)
@@ -363,6 +367,7 @@ func (gate *weightedAdmission) grantLocked() {
 		}
 		gate.waiters = append(gate.waiters[:index], gate.waiters[index+1:]...)
 		reservation.granted = true
+		reservation.grantedAt = time.Now().UTC()
 		gate.used += reservation.weight
 		gate.runs++
 		if reservation.group != "" {

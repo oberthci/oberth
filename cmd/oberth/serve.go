@@ -810,6 +810,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 	}}
 	health.Version = version
 	health.AdmissionBlocker = scheduler.AdmissionBlocker
+	health.Admission = scheduler.AdmissionState
 	health.SchemaVersion = store.LatestMigrationVersion()
 	health.Identity = func(ctx context.Context) (string, error) {
 		if err := ctx.Err(); err != nil {

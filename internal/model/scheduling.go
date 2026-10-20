@@ -114,3 +114,57 @@ type SchedulingReason struct {
 	Reason  string `json:"reason,omitempty"`
 	Message string `json:"message,omitempty"`
 }
+
+// AdmissionState is the whole in-memory admission gate as data (#1099): its
+// budget, every reservation it holds, and every concurrency group in use. It
+// is an ephemeral observation of one server process, never durable evidence.
+type AdmissionState struct {
+	Capacity     int                    `json:"capacity"`
+	Used         int                    `json:"used"`
+	Runs         int                    `json:"runs"`
+	MaxRuns      int                    `json:"max_runs"`
+	Reservations []AdmissionReservation `json:"reservations"`
+	Groups       []AdmissionGroup       `json:"groups"`
+	Blocker      *AdmissionBlocker      `json:"blocker,omitempty"`
+}
+
+// AdmissionReservation is one claimed run's place in the gate. State is
+// preparing (checkout and static reads still running), waiting (for weight),
+// group (parked on its concurrency group), vm (parked on trusted VM
+// capacity), granted, or retained (granted, and kept held after its owner
+// stopped on an error that may have left its Workflow running).
+type AdmissionReservation struct {
+	RunID    string    `json:"run_id"`
+	RepoID   int64     `json:"-"`
+	Repo     string    `json:"repo,omitempty"`
+	Ref      string    `json:"ref,omitempty"`
+	Workflow string    `json:"workflow,omitempty"`
+	Size     string    `json:"size,omitempty"`
+	Weight   int       `json:"weight"`
+	State    string    `json:"state"`
+	Group    string    `json:"group,omitempty"`
+	Position int       `json:"position,omitempty"`
+	Since    time.Time `json:"since"`
+}
+
+// AdmissionGroup is a repository-scoped concurrency group with a holder or
+// waiting members.
+type AdmissionGroup struct {
+	Name    string   `json:"name"`
+	RepoID  int64    `json:"-"`
+	Repo    string   `json:"repo,omitempty"`
+	Holder  string   `json:"holder_run_id,omitempty"`
+	Waiting []string `json:"waiting,omitempty"`
+}
+
+// AdmissionRelease reports an operator release of one reservation (#1099).
+type AdmissionRelease struct {
+	RunID    string `json:"run_id"`
+	State    string `json:"state"`
+	Weight   int    `json:"weight"`
+	Group    string `json:"group,omitempty"`
+	Workflow string `json:"workflow,omitempty"`
+	Verified bool   `json:"verified"`
+	Forced   bool   `json:"forced,omitempty"`
+	Warning  string `json:"warning,omitempty"`
+}
