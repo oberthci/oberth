@@ -13,7 +13,7 @@ const state = {
   repos: [], runs: [], repoRuns: [], active: [], status: null,
   runCounts: null, runCursor: 0, runCursorHistory: [], runNext: 0, runsNext: "", repoRunsNext: "",
   timer: null, routeSeq: 0,
-  filter: localStorage.getItem("oberth-filter") || "all",
+  filter: localStorage.getItem("oberth-filter") === "waiting" ? "queued" : (localStorage.getItem("oberth-filter") || "all"),
   repo: localStorage.getItem("oberth-repo") || "all",
   step: "", stepRunID: "",
   logCache: new Map(),
@@ -26,7 +26,7 @@ const state = {
   pendingController: null, // AbortController for in-flight API requests
   statusPending: null, statusFailedAt: 0, // the background /api/status fetch (ensureStatus)
 };
-const runFilters = ["all", "running", "waiting", "queued", "passed", "failed", "interrupted", "release"];
+const runFilters = ["all", "running", "queued", "passed", "failed", "superseded", "cancelled", "interrupted", "release"];
 
 /* ---------- tiny utilities (unchanged from the old dashboard) ---------- */
 function esc(v) { return String(v ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
@@ -126,7 +126,7 @@ function statusKind(status) {
        read as not-yet-started to the eye, so they share a kind and a glyph —
        the label keeps them apart wherever the difference matters. */
     case "queued": case "waiting": case "pending": return "pending";
-    case "interrupted": case "skipped": return "cancel";
+    case "interrupted": case "superseded": case "cancelled": case "skipped": return "cancel";
     default: return "unknown";
   }
 }
@@ -151,8 +151,16 @@ function bigIcon(status) {
   const glyph = { pass: "✓", fail: "✗", cancel: "⊘", run: "◠", pending: "◌", unknown: "?" }[kind] || "?";
   return `<span class="ic ${cls}">${glyph}</span>`;
 }
+function displayRunStatus(run) {
+  if (run.display_status) return run.display_status;
+  if (run.Status === "interrupted" && run.SupersededBy) return "superseded";
+  if (run.Status === "interrupted" && run.Phase === "cancelled") return "cancelled";
+  if (run.Status === "waiting" || run.Status === "queued" || (run.Status === "running" && !run.StartedAt)) return "queued";
+  return run.Status;
+}
 function runStatusCell(run) {
-  return `${statusIcon(run.Status)}${pill(statusLabel(run.Status), statusKind(run.Status))}`;
+  const status = displayRunStatus(run);
+  return `${statusIcon(status)}${pill(statusLabel(status), statusKind(status))}`;
 }
 function releaseBadge(run) { return run.Release ? '<span class="v4b release">⏏ RELEASE</span>' : ""; }
 function credentialedBadge(run) { return !run.Release && run.Credentialed ? '<span class="v4b release" title="credentialed CI run with secret-store access">⚿ CREDENTIALED</span>' : ""; }
@@ -165,11 +173,11 @@ function runDuration(run) {
 }
 function runWhen(run) { return run.FinishedAt || run.StartedAt || run.QueuedAt || run.CreatedAt; }
 function runMessage(run) {
+  if (run.SupersededBy) return `superseded by ${run.SupersededBy}`;
   if (run.Error) return run.Error;
   if (run.FailedStep) return `failed at ${run.FailedBurn ? run.FailedBurn + " / " : ""}${run.FailedStep}`;
-  if (run.SupersededBy) return `superseded by ${run.SupersededBy}`;
   if (run.Reason) return run.Reason;
-  if (run.Status === "waiting") return "waiting for capacity or workflow submission";
+  if (displayRunStatus(run) === "queued") return run.Scheduling?.message || "awaiting scheduler";
   return "";
 }
 /* Repository names repeat across upstreams (a "terraform" under github,
@@ -409,7 +417,7 @@ async function loadStatus(opts) {
    status filter is applied here. */
 function runMatches(run) {
   if (state.filter === "release") return !!run.Release;
-  if (state.filter !== "all") return String(run.Status) === state.filter;
+  if (state.filter !== "all") return String(displayRunStatus(run)) === state.filter;
   return true;
 }
 function repoCounts(runs) {
@@ -497,16 +505,15 @@ async function renderRuns(seq) {
   state.runNext = source.length === runPageSize ? (named || source[source.length - 1].QueueSequence || 0) : 0;
   const page = state.runCursorHistory.length + 1;
   const active = state.active.filter(run => state.repo === "all" || repoKeyOf(run.RepoID) === state.repo).filter(runMatches);
-  const running = state.active.filter(run => run.Status === "running").length;
-  const waiting = state.active.filter(run => run.Status === "waiting").length;
-  const queued = state.active.filter(run => run.Status === "queued").length;
+  const running = state.active.filter(run => displayRunStatus(run) === "running").length;
+  const queued = state.active.filter(run => displayRunStatus(run) === "queued").length;
   const failed = runs.filter(run => run.Status === "failed").length;
   const releases = runs.filter(run => run.Release).length;
   replaceApp(`
   <section class="screen">
     <div class="bar">
       <h1>Runs</h1>
-      <div class="stats"><span><b>${esc(counts.get("all") || 0)}</b> retained</span><span><b>${running}</b> running</span><span><b>${waiting}</b> waiting</span><span><b>${queued}</b> queued</span><span><b>${failed}</b> failed</span><span><b>${releases}</b> release</span></div>
+      <div class="stats"><span><b>${esc(counts.get("all") || 0)}</b> retained</span><span><b>${running}</b> running</span><span><b>${queued}</b> queued</span><span><b>${failed}</b> failed</span><span><b>${releases}</b> release</span></div>
     </div>
     <div class="runs-layout">
       <aside class="repo-side">
@@ -725,7 +732,7 @@ function summaryLines(detail) {
   const run = detail.Run || {}, steps = detail.Steps || [];
   const lines = [
     `$ oberth run ${repoName(run.RepoID)}/${run.Ref}`,
-    `run ${run.ID} status=${statusLabel(run.Status)} sha=${shortSha(run.SHA)} trigger=${run.Trigger || "--"}`,
+    `run ${run.ID} status=${statusLabel(displayRunStatus(run))} sha=${shortSha(run.SHA)} trigger=${run.Trigger || "--"}`,
     "",
   ];
   const passed = steps.filter(step => step.Status === "passed").length;
@@ -737,16 +744,16 @@ function summaryLines(detail) {
   const reached = steps.length - unreached;
   if (run.Release) lines.push("[release] reachable-tag release run — release burns executed with release credentials");
   else if (run.Credentialed) lines.push("[credentialed] CI run with approved secret-store access — secrets are scoped per-repo, audit-attributed; in-step redaction via oberth-secret-materialize");
-  const kind = statusKind(run.Status);
+  const status = displayRunStatus(run), kind = statusKind(status);
   if (kind === "pass") lines.push(`[pass] ${passed} step${passed === 1 ? "" : "s"} passed across ${burns} burn${burns === 1 ? "" : "s"}`);
   else if (kind === "fail") lines.push(`[fail] failed at ${run.FailedBurn ? run.FailedBurn + " / " : ""}${run.FailedStep || "unknown step"} — ${passed} step${passed === 1 ? "" : "s"} passed`);
   else if (kind === "run") lines.push(`[pending] running in phase ${run.Phase || "ci"} — ${reached} of ${steps.length} step${steps.length === 1 ? "" : "s"} started, ${passed} passed`);
-  else if (run.Status === "waiting") {
+  else if (status === "queued") {
     const scheduling = detail.Scheduling || {}, admission = scheduling.admission || {};
-    lines.push(`[waiting] ${scheduling.message || "Waiting for workflow submission."}`);
+    lines.push(`[queued] ${scheduling.message || "Awaiting scheduler."}`);
     if (admission.weight) lines.push(`capacity: need ${admission.weight} weight · ${admission.used}/${admission.capacity} used${admission.position ? ` · queue position ${admission.position}` : ""}`);
   }
-  else if (kind === "cancel") lines.push(`[interrupted] ${run.Reason || "run was interrupted"}`);
+  else if (kind === "cancel") lines.push(`[${status}] ${run.Reason || "run was interrupted"}`);
   else lines.push(`[pending] queued behind earlier work for this repository`);
   if (unreached) lines.push(`${unreached} declared step${unreached === 1 ? "" : "s"} not reached`);
   if (run.SupersededBy) lines.push(`superseded by ${run.SupersededBy}`);
@@ -829,8 +836,8 @@ async function renderRunDetailView(detail, seq) {
   const selectedKey = state.step || defaultStep(detail);
   const selected = steps.find(step => stepKey(step) === selectedKey) || null;
   const burns = groupSteps(steps);
-  const kind = statusKind(run.Status);
-  const phaseLabel = statusLabel(run.Status).toUpperCase();
+  const status = displayRunStatus(run), kind = statusKind(status);
+  const phaseLabel = statusLabel(status).toUpperCase();
   const seconds = runDuration(run);
   const stepCount = steps.length;
   // A running run streams live output in the terminal: on the summary view and
@@ -851,7 +858,7 @@ async function renderRunDetailView(detail, seq) {
   <section class="screen wide">
     <div class="rh">
       <div class="rh1">
-        ${bigIcon(run.Status)}
+        ${bigIcon(status)}
         <span class="rh-name"><span class="rp">${esc(repository)} /</span> ${esc(run.Ref)}</span>
         <span class="v4b ${kind === "pass" ? "pass" : kind === "fail" ? "fail" : kind === "run" ? "run" : "dim"}">${esc(phaseLabel)}</span>
         ${releaseBadge(run)}${credentialedBadge(run)}
@@ -887,8 +894,8 @@ async function renderRunDetailView(detail, seq) {
   if (termBody && (live || selected)) termBody.scrollTop = stick ? termBody.scrollHeight : previousScroll;
   const stepList = document.getElementById("stepList");
   if (stepList) stepList.scrollTop = previousStepScroll;
-  if (run.Status === "running") setAuto(livePollMs);
-  else if (run.Status === "queued" || run.Status === "waiting") setAuto(listPollMs);
+  if (status === "running") setAuto(livePollMs);
+  else if (status === "queued") setAuto(listPollMs);
   else clearInterval(state.timer);
 }
 
@@ -898,7 +905,7 @@ function upstreamName(upstreamID) {
   return info ? info.name : (upstreamID ? "#" + upstreamID : "--");
 }
 function historyStrip(runs) {
-  return `<div class="history" aria-label="recent runs, oldest to newest">${runs.slice(0, 12).reverse().map(run => `<button type="button" class="hist ${statusKind(run.Status)}" data-run-id="${esc(run.ID)}" title="${esc(`${shortSha(run.SHA)} · ${run.RefKind === "tag" ? "tag" : "branch"} ${run.Ref} · ${statusLabel(run.Status)} · ${ago(runWhen(run))}`)}"></button>`).join("") || '<span class="meta">--</span>'}</div>`;
+  return `<div class="history" aria-label="recent runs, oldest to newest">${runs.slice(0, 12).reverse().map(run => `<button type="button" class="hist ${statusKind(displayRunStatus(run))}" data-run-id="${esc(run.ID)}" title="${esc(`${shortSha(run.SHA)} · ${run.RefKind === "tag" ? "tag" : "branch"} ${run.Ref} · ${statusLabel(displayRunStatus(run))} · ${ago(runWhen(run))}`)}"></button>`).join("") || '<span class="meta">--</span>'}</div>`;
 }
 async function renderRepos(seq) {
   setChrome("repos", "/ repos");

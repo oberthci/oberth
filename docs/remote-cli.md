@@ -63,6 +63,12 @@ as actor. Workflow-level failures without a failed step are eligible. The
 source must still be the newest run for its branch; test failures, older runs,
 and release runs cannot be retried this way.
 
+`oberth runs` and `oberth run` show one pre-start label, `queued`, with the
+scheduling reason in active and detail views. Superseded runs name their
+successor; explicit cancellations show `cancelled`; restart and infrastructure
+loss show `interrupted`. `--json` keeps the underlying `Status` field for
+existing clients and includes `display_status` in explicit presentation views.
+
 `oberth run cancel` calls the `run_cancel` MCP tool with the same uplink
 token. It cancels one queued, waiting or running run: the run becomes
 `interrupted` with phase `cancelled` (shown as `cancelled` by `oberth runs`

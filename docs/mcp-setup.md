@@ -341,6 +341,12 @@ answer is unchanged: every run newest first, in bounded pages.
   weight, used/capacity and concurrency group, so a run blocking the head of
   the queue, or one waiting on its group or VM capacity, says so.
 
+Explicit active and history views, run detail, and status include
+`display_status`: `queued` for every run before submission, then `running`,
+`passed`, `failed`, `superseded`, `cancelled`, or `interrupted` as appropriate.
+The default `run_list` payload and its `Status` values are unchanged. The
+`Scheduling` observation gives the reason behind `queued`.
+
 `oberth runs --active` prints the active list, and the dashboard shows it
 above a history of finished runs.
 

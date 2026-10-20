@@ -454,18 +454,19 @@ type PushResult struct {
 }
 
 type StatusResponse struct {
-	Scheduling *model.RunScheduling `json:"scheduling,omitempty"`
-	Repository model.Repository     `json:"-"`
-	Run        model.Run            `json:"-"`
-	Steps      []model.StepResult   `json:"-"`
-	Repo       string               `json:"repo"`
-	Ref        string               `json:"ref"`
-	SHA        string               `json:"sha"`
-	RunID      string               `json:"run"`
-	Status     string               `json:"status"`
-	FailedStep string               `json:"failed_step,omitempty"`
-	ExitCode   *int                 `json:"exit_code,omitempty"`
-	Issue      *int64               `json:"issue,omitempty"`
+	Scheduling    *model.RunScheduling `json:"scheduling,omitempty"`
+	DisplayStatus string               `json:"display_status,omitempty"`
+	Repository    model.Repository     `json:"-"`
+	Run           model.Run            `json:"-"`
+	Steps         []model.StepResult   `json:"-"`
+	Repo          string               `json:"repo"`
+	Ref           string               `json:"ref"`
+	SHA           string               `json:"sha"`
+	RunID         string               `json:"run"`
+	Status        string               `json:"status"`
+	FailedStep    string               `json:"failed_step,omitempty"`
+	ExitCode      *int                 `json:"exit_code,omitempty"`
+	Issue         *int64               `json:"issue,omitempty"`
 	// ConcurrencyGroup is the repository-declared concurrency group the run
 	// was admitted under (#658), once the scheduler has read it.
 	ConcurrencyGroup string            `json:"concurrency_group,omitempty"`
@@ -489,12 +490,13 @@ type LogResponse struct {
 // reached a terminal state (read before the chunk, so a terminal answer can
 // never precede unread bytes).
 type LiveLogResponse struct {
-	RunID  string `json:"run_id"`
-	Status string `json:"status"`
-	Chunk  string `json:"chunk"`
-	Offset int64  `json:"offset"`
-	Size   int64  `json:"size"`
-	Done   bool   `json:"done"`
+	RunID         string `json:"run_id"`
+	Status        string `json:"status"`
+	DisplayStatus string `json:"display_status,omitempty"`
+	Chunk         string `json:"chunk"`
+	Offset        int64  `json:"offset"`
+	Size          int64  `json:"size"`
+	Done          bool   `json:"done"`
 }
 
 // RunDetailResponse is the read-only dashboard view of one run: the durable

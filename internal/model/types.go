@@ -24,8 +24,9 @@ const (
 	RunInterrupted RunStatus = "interrupted"
 )
 
-// Valid accepts only durable store statuses. Waiting is a read-side projection
-// and must never pass validation for a persisted run status.
+// Valid accepts only durable store statuses. Waiting remains a legacy wire
+// projection for claimed runs before submission; display_status presents them
+// as queued. Waiting must never pass validation for a persisted run status.
 func (s RunStatus) Valid() bool {
 	switch s {
 	case RunQueued, RunRunning, RunPassed, RunFailed, RunInterrupted:
@@ -118,6 +119,9 @@ type RepositorySpec struct {
 type Run struct {
 	ID            string
 	QueueSequence int64
+	// DisplayStatus is a read-side label used by explicit presentation views.
+	// Durable Status and the default run-list JSON remain unchanged.
+	DisplayStatus string `json:"display_status,omitempty"`
 	RepoID        int64
 	RefKind       RefKind
 	Ref           string

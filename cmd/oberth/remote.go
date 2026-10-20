@@ -30,6 +30,8 @@ type remoteRun struct {
 	Actor         string
 	Trigger       string
 	Status        string
+	DisplayStatus string `json:"display_status"`
+	SupersededBy  string
 	// Phase and Error carry why a run failed. Without them the client decodes
 	// a failed run into a struct that says only "failed", which is the one
 	// thing the reader already knows.
@@ -295,18 +297,28 @@ func renderActiveRuns(output io.Writer, runs []remoteActiveRun, now time.Time) e
 			}
 		}
 		if _, err := fmt.Fprintf(output, "%-4s %-34s %-9s %-8s %-8s %-30s %s\n",
-			position, run.ID, run.Status, size, elapsed, run.Ref, reason); err != nil {
+			position, run.ID, displayRunStatus(run.remoteRun), size, elapsed, run.Ref, reason); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-// displayRunStatus shows an explicitly cancelled run as cancelled. The wire
-// status stays interrupted; phase cancelled marks the cancel.
+// displayRunStatus accepts the server's read-side label and derives it from
+// legacy fields when talking to an older server. The wire status is unchanged.
 func displayRunStatus(run remoteRun) string {
+	if run.DisplayStatus != "" {
+		return run.DisplayStatus
+	}
+	if run.Status == string(model.RunInterrupted) && run.SupersededBy != "" {
+		return "superseded"
+	}
 	if run.Status == string(model.RunInterrupted) && run.Phase == model.PhaseCancelled {
 		return model.PhaseCancelled
+	}
+	if run.Status == string(model.RunWaiting) || run.Status == string(model.RunQueued) ||
+		run.Status == string(model.RunRunning) && run.StartedAt == nil {
+		return string(model.RunQueued)
 	}
 	return run.Status
 }
@@ -411,7 +423,7 @@ func runRunDetail(ctx context.Context, arguments []string, output io.Writer) err
 			return err
 		}
 	}
-	if detail.Run.Status == "waiting" && detail.Scheduling != nil {
+	if displayRunStatus(detail.Run) == "queued" && detail.Scheduling != nil {
 		if _, err := fmt.Fprintln(output, detail.Scheduling.Message); err != nil {
 			return err
 		}
@@ -425,7 +437,11 @@ func runRunDetail(ctx context.Context, arguments []string, output io.Writer) err
 	// The reason first, before the step list: a failed run is read to find out
 	// what went wrong, and burying it under timings makes the reader scroll
 	// past the answer.
-	if detail.Run.Status == string(model.RunInterrupted) && detail.Run.Phase == model.PhaseCancelled {
+	if detail.Run.SupersededBy != "" {
+		if _, err := fmt.Fprintf(output, "superseded by %s (oberth run %s)\n", detail.Run.SupersededBy, detail.Run.SupersededBy); err != nil {
+			return err
+		}
+	} else if detail.Run.Status == string(model.RunInterrupted) && detail.Run.Phase == model.PhaseCancelled {
 		if _, err := fmt.Fprintln(output, detail.Run.Reason); err != nil {
 			return err
 		}
