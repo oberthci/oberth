@@ -114,8 +114,10 @@ RETURNING id, repo_id, source_sha, target_ref, issuer, issuer_fingerprint, note,
 }
 
 // MatchingPromotionGrant finds an active (unexpired, unrevoked, unconsumed)
-// grant for the exact (repo, sha, target) tuple. Returns ErrNotFound when
-// no matching active grant exists.
+// grant for the exact (repo, sha, target) tuple that no pending promotion
+// holds. A grant whose promotion failed before delivery is active again
+// (#1097). Returns ErrNotFound when no matching active grant exists, and
+// ErrInvalidState naming the holder when every matching grant is held.
 func (s *Store) MatchingPromotionGrant(ctx context.Context, repoID int64, sha, target string) (model.PromotionGrant, error) {
 	if repoID <= 0 || !validOID(sha) || strings.TrimSpace(target) == "" {
 		return model.PromotionGrant{}, fmt.Errorf("%w: matching grant fields are required", ErrInvalid)
@@ -127,8 +129,22 @@ SELECT id, repo_id, source_sha, target_ref, issuer, issuer_fingerprint, note,
 FROM promotion_grants
 WHERE repo_id = ? AND source_sha = ? AND target_ref = ?
   AND revoked_at IS NULL AND consumed_at IS NULL AND expires_at > ?
-LIMIT 1`, repoID, strings.ToLower(sha), target, now))
+  AND NOT EXISTS (
+      SELECT 1 FROM promotions
+      WHERE promotions.grant_id = promotion_grants.id AND promotions.status IN ('pending', 'passed')
+  )
+ORDER BY created_at LIMIT 1`, repoID, strings.ToLower(sha), target, now))
 	if errors.Is(err, sql.ErrNoRows) {
+		var holder string
+		holderErr := s.db.QueryRowContext(ctx, `
+SELECT promotions.id FROM promotion_grants
+JOIN promotions ON promotions.grant_id = promotion_grants.id AND promotions.status = 'pending'
+WHERE promotion_grants.repo_id = ? AND promotion_grants.source_sha = ? AND promotion_grants.target_ref = ?
+  AND promotion_grants.revoked_at IS NULL AND promotion_grants.consumed_at IS NULL AND promotion_grants.expires_at > ?
+LIMIT 1`, repoID, strings.ToLower(sha), target, now).Scan(&holder)
+		if holderErr == nil {
+			return model.PromotionGrant{}, fmt.Errorf("%w: the promotion grant for this repository/SHA/target is held by pending promotion %s", ErrInvalidState, holder)
+		}
 		return model.PromotionGrant{}, fmt.Errorf("%w: no active promotion grant for this repository/SHA/target", ErrNotFound)
 	}
 	if err != nil {

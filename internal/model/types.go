@@ -372,11 +372,39 @@ type PromotionSpec struct {
 	ResultSHA    string
 	Actor        string
 	GrantID      string
+	// RetryOf names the failed or interrupted promotion this one re-runs
+	// (#1097): the same repository, source SHA and target, merged afresh onto
+	// the target's current head and re-tested. Empty for a fresh promote.
+	RetryOf string
+	// RetryMode is PromotionRetryManual (promote_retry) or PromotionRetryAuto
+	// (the server's own retry after the target moved). Required with RetryOf.
+	RetryMode string
+}
+
+// Promotion retry modes recorded in the promotion.retry audit action.
+const (
+	PromotionRetryManual = "manual"
+	PromotionRetryAuto   = "auto"
+)
+
+// PromotionLineage is a promotion's retry lineage, recorded in the audit
+// chain (promotion.retry) because promotion rows are immutable. RetryOf is the
+// promotion it re-runs, RetriedAs the promotion that re-ran it, and
+// AutoAttempt counts consecutive automatic retries ending at this promotion.
+type PromotionLineage struct {
+	RetryOf     string
+	Mode        string
+	AutoAttempt int
+	RetriedAs   string
 }
 
 // PromotionGrant is an append-only, audited record that authorizes a non-admin
 // uplink to promote an exact (repository, SHA, target) tuple. Created by an
-// admin uplink; consumed atomically when its matching promotion succeeds.
+// admin uplink. A promotion admitted under it holds it while pending, and it
+// is consumed atomically with that promotion's delivered publication (#1097):
+// a promotion that fails or is interrupted before delivery releases it, so a
+// retry of the same tuple can use it again, but at most one promotion can hold
+// it at a time and it backs at most one delivery.
 type PromotionGrant struct {
 	ID                string
 	RepoID            int64

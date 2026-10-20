@@ -685,13 +685,6 @@ func (grants scopedPromotionGrants) MatchingPromotionGrant(ctx context.Context, 
 	return grants.inner.MatchingPromotionGrant(ctx, repoID, sha, target)
 }
 
-func (grants scopedPromotionGrants) ConsumePromotionGrant(ctx context.Context, grantID, promotionID, actor string) error {
-	if _, err := grants.PromotionGrant(ctx, grantID); err != nil {
-		return err
-	}
-	return grants.inner.ConsumePromotionGrant(ctx, grantID, promotionID, actor)
-}
-
 func (grants scopedPromotionGrants) ListPromotionGrants(ctx context.Context, filter model.PromotionGrantListFilter) ([]model.PromotionGrant, error) {
 	if filter.RepoID != 0 && !grants.scope.seesRepo(filter.RepoID) {
 		return []model.PromotionGrant{}, nil

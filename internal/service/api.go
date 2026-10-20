@@ -355,6 +355,14 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 			return nil, err
 		}
 		return api.PromoteResponse{ID: promotion.ID}, nil
+	case "promote_retry":
+		var arguments struct {
+			ID string `json:"id"`
+		}
+		if err := decodeTool(raw, &arguments); err != nil {
+			return nil, err
+		}
+		return service.promoteRetry(ctx, actor, arguments.ID)
 	case "promotion_list":
 		var arguments promotionListArguments
 		if err := decodeTool(raw, &arguments); err != nil {
@@ -1570,38 +1578,56 @@ func (service *API) promote(ctx context.Context, actor api.Actor, repositoryName
 	if err != nil {
 		return model.Promotion{}, err
 	}
+	promotion, err := service.admitPromotion(ctx, actor, repository, candidate, target, "", "")
+	if err != nil {
+		return model.Promotion{}, err
+	}
+	return service.planAdmittedPromotion(ctx, actor, repository, candidate, target, promotion)
+}
+
+// admitPromotion authorizes and durably admits one promotion of a green
+// candidate. Admin uplinks promote directly (the grant ID stays empty,
+// recorded as "direct" authority in the audit chain). Non-admin uplinks must
+// present a matching unexpired, unrevoked, unconsumed grant for the exact
+// (repository, SHA, target) that no pending promotion holds. The promotion
+// holds the grant until it terminalizes; the grant is consumed only with its
+// delivered publication (#1097), so a transient failure before delivery does
+// not spend it. retryOf and mode record a promote_retry lineage.
+func (service *API) admitPromotion(ctx context.Context, actor api.Actor, repository model.Repository, candidate model.Run,
+	target, retryOf, mode string) (model.Promotion, error) {
 	if candidate.RefKind != model.RefBranch || candidate.Status != model.RunPassed || !sameOID(candidate.TestedSHA, candidate.SHA) {
 		return model.Promotion{}, errors.New("service: promotion source must be the exactly tested green branch commit")
 	}
-
-	// Authorization: admin uplinks promote directly (grantID stays empty,
-	// recorded as "direct" authority in the audit chain). Non-admin uplinks
-	// must present a matching unexpired, unrevoked, unconsumed grant for the
-	// exact (repository, SHA, target). The grant ID is recorded on the
-	// promotion for audit linkage.
 	var grantID string
 	if !actor.Admin {
+		if service.promotionGrants == nil {
+			return model.Promotion{}, fmt.Errorf("%w: promote requires an admin uplink or a promotion grant", ErrForbidden)
+		}
 		grant, matchErr := service.promotionGrants.MatchingPromotionGrant(ctx, repository.ID, candidate.SHA, target)
+		if errors.Is(matchErr, store.ErrInvalidState) {
+			return model.Promotion{}, fmt.Errorf("%w: %s", ErrForbidden, matchErr.Error())
+		}
 		if matchErr != nil {
 			return model.Promotion{}, fmt.Errorf("%w: no matching promotion grant for repository %q, SHA %s, target %q; request one from an admin with promote_grant",
-				ErrForbidden, repositoryName, candidate.SHA, target)
+				ErrForbidden, repository.Name, candidate.SHA, target)
 		}
 		grantID = grant.ID
 	}
-
 	promotion, err := service.promotions.AppendPromotion(ctx, model.PromotionSpec{
 		RepoID: repository.ID, SourceBranch: candidate.Ref, SourceSHA: candidate.SHA,
 		TargetRef: target, Actor: actor.Identity, GrantID: grantID,
+		RetryOf: retryOf, RetryMode: mode,
 	})
 	if err != nil {
 		return model.Promotion{}, fmt.Errorf("admit promotion: %w", err)
 	}
-	// Consume the grant atomically with promotion creation: prevent reuse.
-	if grantID != "" && service.promotionGrants != nil {
-		if consumeErr := service.promotionGrants.ConsumePromotionGrant(ctx, grantID, promotion.ID, actor.Identity); consumeErr != nil {
-			return service.failAdmittedPromotion(ctx, promotion, "consume promotion grant: "+consumeErr.Error(), "")
-		}
-	}
+	return promotion, nil
+}
+
+// planAdmittedPromotion prepares an admitted promotion against the target's
+// current head, then publishes a fast-forward or enqueues the merged run.
+func (service *API) planAdmittedPromotion(ctx context.Context, actor api.Actor, repository model.Repository, candidate model.Run,
+	target string, promotion model.Promotion) (result model.Promotion, resultErr error) {
 	if err := os.MkdirAll(service.promotionWorkspaceRoot, 0o750); err != nil {
 		return service.failAdmittedPromotion(ctx, promotion, "create promotion workspace root: "+err.Error(), "")
 	}
@@ -1744,12 +1770,19 @@ func (service *API) prepareWaitPromotion(ctx context.Context, id string, request
 	if err != nil {
 		return nil, err
 	}
+	terminal := func(ctx context.Context, promotion model.Promotion) (PromotionWaitResponse, error) {
+		retriedAs, err := service.promotionRetriedAs(ctx, promotion)
+		if err != nil {
+			return PromotionWaitResponse{}, err
+		}
+		return PromotionWaitResponse{Promotion: promotion, RetriedAs: retriedAs}, nil
+	}
 	return func(ctx context.Context) (PromotionWaitResponse, error) {
 		timer := time.NewTimer(time.Until(deadline))
 		defer timer.Stop()
 		for {
 			if promotion.Status.Terminal() {
-				return PromotionWaitResponse{Promotion: promotion}, nil
+				return terminal(ctx, promotion)
 			}
 			changed := service.signals.Promotion(id)
 			promotion, err = service.promotions.Promotion(ctx, id)
@@ -1757,7 +1790,7 @@ func (service *API) prepareWaitPromotion(ctx context.Context, id string, request
 				return PromotionWaitResponse{}, err
 			}
 			if promotion.Status.Terminal() {
-				return PromotionWaitResponse{Promotion: promotion}, nil
+				return terminal(ctx, promotion)
 			}
 			select {
 			case <-ctx.Done():
@@ -1970,7 +2003,7 @@ func wireIssueLock(lock model.IssueLock) api.IssueLockResponse {
 
 func mutatingTool(name string) bool {
 	switch name {
-	case "sync", "promote", "publish_retry", "run_retry", "run_cancel", "issue_create", "issue_update", "issue_append", "issue_close", "issue_reopen", "issue_delete", "issue_lock",
+	case "sync", "promote", "promote_retry", "publish_retry", "run_retry", "run_cancel", "issue_create", "issue_update", "issue_append", "issue_close", "issue_reopen", "issue_delete", "issue_lock",
 		"access_allow", "access_revoke",
 		"kubevirt_grant", "kubevirt_revoke",
 		"repo_remove",
@@ -2305,9 +2338,9 @@ func wireAccessGrant(grant store.SecretAccessGrant) api.AccessGrantResponse {
 	return response
 }
 
-// publishRetry retries the upstream publication for a run or promotion whose
-// burns all passed but whose upstream push failed. The ID can be either a run
-// ID or a promotion ID.
+// publishRetry retries the upstream publication for a branch or tag run whose
+// burns all passed but whose upstream push failed. A promotion ID, or the ID
+// of a promotion's CI run, is refused with a pointer to promote_retry (#1097).
 //
 // Preconditions (all fail closed with ErrInvalidInput):
 //   - The run/promotion is terminal.
@@ -2326,12 +2359,19 @@ func (service *API) publishRetry(ctx context.Context, actor api.Actor, id string
 		return api.PublishRetryResponse{}, fmt.Errorf("%w: run or promotion ID is required", ErrInvalidInput)
 	}
 
-	// Try to resolve as a run ID first, then as a promotion ID.
-	var runID, promotionID string
+	// Resolve a run ID first; a promotion ID is recognized only to point the
+	// caller at promote_retry.
+	var runID string
 
 	if service.history != nil {
 		run, runErr := service.history.Run(ctx, id)
 		if runErr == nil {
+			if run.Trigger == "promotion" {
+				if promotion, promErr := service.promotions.PromotionByRun(ctx, run.ID); promErr == nil {
+					return api.PublishRetryResponse{}, promotionPublishRetryRefusal(promotion)
+				}
+				return api.PublishRetryResponse{}, fmt.Errorf("%w: run %s is promotion CI; retry its promotion with promote_retry", ErrInvalidInput, run.ID)
+			}
 			if run.Status != model.RunFailed || run.Phase != "publishing" {
 				return api.PublishRetryResponse{}, fmt.Errorf("%w: run %s is %s/%s, not publishing-failed; retry is only valid for runs that failed during upstream publication",
 					ErrInvalidInput, id, run.Status, run.Phase)
@@ -2344,14 +2384,7 @@ func (service *API) publishRetry(ctx context.Context, actor api.Actor, id string
 		if promErr != nil {
 			return api.PublishRetryResponse{}, fmt.Errorf("%w: %q is not a known run or promotion ID", ErrInvalidInput, id)
 		}
-		if promotion.Status != model.PromotionFailed {
-			return api.PublishRetryResponse{}, fmt.Errorf("%w: promotion %s is %s, not failed; retry is only valid for failed promotions",
-				ErrInvalidInput, id, promotion.Status)
-		}
-		promotionID = promotion.ID
-		if promotion.RunID != "" {
-			runID = promotion.RunID
-		}
+		return api.PublishRetryResponse{}, promotionPublishRetryRefusal(promotion)
 	}
 
 	// Verify the mutation gate before reactivating any state. A gate failure
@@ -2363,7 +2396,7 @@ func (service *API) publishRetry(ctx context.Context, actor api.Actor, id string
 
 	// Atomically transition the run/promotion back to publishing and create
 	// a new publication record.
-	publication, err := service.promotions.RetryFailedPublication(ctx, runID, promotionID, actor.Identity)
+	publication, err := service.promotions.RetryFailedPublication(ctx, runID, "", actor.Identity)
 	if err != nil {
 		return api.PublishRetryResponse{}, err
 	}
@@ -2375,7 +2408,6 @@ func (service *API) publishRetry(ctx context.Context, actor api.Actor, id string
 
 	response := api.PublishRetryResponse{
 		RunID:         runID,
-		PromotionID:   promotionID,
 		PublicationID: publication.ID,
 	}
 
@@ -2398,6 +2430,22 @@ func (service *API) publishRetry(ctx context.Context, actor api.Actor, id string
 	}
 	service.enqueues.NotifyQueue()
 	return response, nil
+}
+
+// promotionPublishRetryRefusal explains why publish_retry never re-pushes a
+// promotion (#1097): its merge was made against a target head that may have
+// moved, and the promotion row is immutable once terminal. promote_retry
+// re-merges onto the current head and re-tests instead.
+func promotionPublishRetryRefusal(promotion model.Promotion) error {
+	if promotion.Status == model.PromotionPassed {
+		return fmt.Errorf("%w: promotion %s already delivered %s", ErrInvalidInput, promotion.ID, promotion.TargetRef)
+	}
+	if head := movedTargetHead(promotion.Error); head != "" {
+		return fmt.Errorf("%w: promotion %s lost the race: %s moved to %s; promote_retry {\"id\":%q} merges onto the new head and re-tests",
+			ErrInvalidInput, promotion.ID, promotion.TargetRef, head, promotion.ID)
+	}
+	return fmt.Errorf("%w: promotion publications are not re-pushed; promote_retry {\"id\":%q} merges promotion %s onto the current %s head and re-tests",
+		ErrInvalidInput, promotion.ID, promotion.ID, promotion.TargetRef)
 }
 
 func decodeTool(raw json.RawMessage, value any) error {

@@ -45,6 +45,13 @@ type PromoteResponse struct {
 	ID string `json:"id"`
 }
 
+// PromoteRetryResponse identifies the new promotion that re-runs a failed or
+// interrupted one (#1097). Follow it with promote_status.
+type PromoteRetryResponse struct {
+	ID      string `json:"id"`
+	RetryOf string `json:"retry_of"`
+}
+
 // PromotionListResponse recovers durable admission IDs without exposing actor,
 // failure text or internal storage fields. Listing never starts a promotion.
 type PromotionListItem struct {
@@ -397,7 +404,8 @@ func toolDefinitions() []map[string]any {
 			"before":     map[string]any{"type": []string{"integer", "string"}, "description": "Exclusive cursor: next_before (an admission sequence) or next_cursor (a promotion ID) from the previous page"},
 			"limit":      map[string]any{"type": "integer", "minimum": 1, "maximum": 200, "description": "Page size (default 50, maximum 200)"},
 		})),
-		tool("promote_status", "Wait for an append-only promotion record to become terminal.", object(map[string]any{"id": stringProperty("Promotion ID"), "timeout": timeoutProperty()}, "id")),
+		tool("promote_status", "Wait for an append-only promotion record to become terminal. A failed or interrupted promotion that was retried names its successor in retried_as.", object(map[string]any{"id": stringProperty("Promotion ID"), "timeout": timeoutProperty()}, "id")),
+		tool("promote_retry", "Retry a failed or interrupted promotion: a new promotion of the same repository, source SHA and target, merged onto the target's current head and re-tested like promote, so a moved target or a transient push failure is recovered without a new commit. Same authorization as promote; a grant is consumed only by a delivered promotion, so the original grant authorizes the retry. Refused while a promotion of the same tuple is pending or delivered, or when the source SHA's newest run is not green. Audited as promotion.retry.", object(map[string]any{"id": stringProperty("Promotion ID of the failed or interrupted promotion")}, "id")),
 		tool("issue_create", "Create a manual issue, workspace-global or filed under one upstream. Uplinks scoped to that upstream see it; an uplink scoped to one upstream files there by default.", object(map[string]any{"title": stringProperty("Issue title"), "body": stringProperty("Issue body"), "upstream": stringProperty("Upstream name to file the issue under (required for an uplink scoped to several upstreams)")}, "title", "body")),
 		tool("issue_get", "Get an issue by ID.", object(map[string]any{"id": integerProperty("Issue ID")}, "id")),
 		tool("issue_get_many", "Get complete issue records for 1..50 unique positive IDs in request order. Each result contains issue or error (not_found or response_limit). Structured JSON is bounded to 256 KiB; use issue_get for response_limit IDs. Bodies are never truncated. Read-only; does not renew locks.", object(map[string]any{"ids": map[string]any{"type": "array", "minItems": 1, "maxItems": 50, "uniqueItems": true, "items": map[string]any{"type": "integer", "minimum": 1}}}, "ids")),
@@ -431,8 +439,8 @@ func toolDefinitions() []map[string]any {
 				"description": "all: every run newest first (default). history: terminal runs only, paged the same way. active: every queued, waiting or running run in scheduling order (started first, then admission order, then queue order), unpaged and capped at 500, each not-yet-started run with its Scheduling observation (state, message, queue/admission position, size, weight, used/capacity, group)"},
 		})),
 		tool("system_status", "Return system health: database, upstreams, cluster, audit, and version.", object(map[string]any{})),
-		tool("publish_retry", "Retry the upstream publication for a run or promotion whose burns all passed but whose upstream push failed. Input is exactly one durable run ID or promotion ID. Refuses when the run is not in a publishing-failed state, or when the cached Git object no longer matches the record.", object(map[string]any{
-			"id": stringProperty("Durable run ID or promotion ID whose publication failed"),
+		tool("publish_retry", "Retry the upstream publication for a branch or tag run whose burns all passed but whose upstream push failed. Input is exactly one durable run ID. Refuses when the run is not in a publishing-failed state, or when the cached Git object no longer matches the record. A promotion (or its CI run) is retried with promote_retry instead, which merges onto the current target head and re-tests.", object(map[string]any{
+			"id": stringProperty("Durable run ID whose publication failed"),
 		}, "id")),
 		tool("secretstore_plan", "Compute the policy/role diff that `oberth secretstore sync` would apply based on current approved grants. Admin uplink required. Read-only: the server never receives an admin Bao token. Returns per-repo policy names and paths; never secret values.", object(map[string]any{})),
 		tool("secretstore_sync_receipt", "Record a secretstore.sync materialization receipt in the audit chain. Admin uplink required. The server recomputes the plan digest and records status current or stale. Posted by `oberth secretstore sync` after a successful sync.", object(map[string]any{

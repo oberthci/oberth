@@ -197,15 +197,29 @@ func TestPromotionWithGrantIDPersists(t *testing.T) {
 	repo, _ := s.CreateRepository(ctx, model.RepositorySpec{Name: "oberth", UpstreamID: upstream.ID, DefaultBranch: "main"})
 
 	sha := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-	promotion, err := s.AppendPromotion(ctx, model.PromotionSpec{
+	// A promotion can only hold a grant that exists (#1097).
+	if _, err := s.AppendPromotion(ctx, model.PromotionSpec{
 		RepoID: repo.ID, SourceBranch: "feature/test", SourceSHA: sha,
 		TargetRef: "main", Actor: "agent@host", GrantID: "grant-1234",
+	}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("AppendPromotion with an unknown grant error = %v, want ErrNotFound", err)
+	}
+	grant, err := s.AppendPromotionGrant(ctx, model.PromotionGrantSpec{
+		RepoID: repo.ID, SourceSHA: sha, TargetRef: "main",
+		Issuer: "admin@host", IssuerFingerprint: "SHA256:admin", ExpiresAt: now.Add(time.Hour),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	promotion, err := s.AppendPromotion(ctx, model.PromotionSpec{
+		RepoID: repo.ID, SourceBranch: "feature/test", SourceSHA: sha,
+		TargetRef: "main", Actor: "agent@host", GrantID: grant.ID,
 	})
 	if err != nil {
 		t.Fatalf("AppendPromotion with GrantID error = %v", err)
 	}
-	if promotion.GrantID != "grant-1234" {
-		t.Fatalf("promotion.GrantID = %q, want %q", promotion.GrantID, "grant-1234")
+	if promotion.GrantID != grant.ID {
+		t.Fatalf("promotion.GrantID = %q, want %q", promotion.GrantID, grant.ID)
 	}
 
 	// Verify persisted.
@@ -213,7 +227,7 @@ func TestPromotionWithGrantIDPersists(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Promotion reload error = %v", err)
 	}
-	if reloaded.GrantID != "grant-1234" {
-		t.Fatalf("reloaded promotion.GrantID = %q, want %q", reloaded.GrantID, "grant-1234")
+	if reloaded.GrantID != grant.ID {
+		t.Fatalf("reloaded promotion.GrantID = %q, want %q", reloaded.GrantID, grant.ID)
 	}
 }

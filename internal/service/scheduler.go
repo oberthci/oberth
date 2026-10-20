@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"log"
@@ -72,6 +73,34 @@ type Scheduler struct {
 	publicationSet  map[string]struct{}
 	deliveryPermit  chan struct{}
 	capacityWait    func(context.Context) error
+	// promotionRetrier re-promotes a promotion whose delivery found its
+	// target moved (#1097); nil leaves such a promotion failed.
+	promotionRetrier atomic.Pointer[promotionRetrierHook]
+}
+
+// PromotionRetrier re-promotes a promotion whose publication failed because
+// its target moved past the base it was merged onto. The API implements it.
+type PromotionRetrier interface {
+	RetryMovedPromotion(context.Context, model.Promotion)
+}
+
+type promotionRetrierHook struct{ retrier PromotionRetrier }
+
+// SetPromotionRetrier registers the moved-target retry hook. It is called
+// after the delivery permit is released, so the retry may deliver itself.
+func (scheduler *Scheduler) SetPromotionRetrier(retrier PromotionRetrier) {
+	scheduler.promotionRetrier.Store(&promotionRetrierHook{retrier: retrier})
+}
+
+func (scheduler *Scheduler) retryMovedPromotion(ctx context.Context, finalization model.PublicationFinalization) {
+	hook := scheduler.promotionRetrier.Load()
+	if hook == nil || hook.retrier == nil || finalization.Promotion.ID == "" ||
+		finalization.Promotion.Status != model.PromotionFailed ||
+		finalization.Publication.Status != model.PublicationFailed ||
+		movedTargetHead(finalization.Publication.Error) == "" {
+		return
+	}
+	hook.retrier.RetryMovedPromotion(ctx, finalization.Promotion)
 }
 
 func NewScheduler(config SchedulerConfig) (*Scheduler, error) {
@@ -1059,7 +1088,15 @@ func (scheduler *Scheduler) deliverPublicationWithGate(
 	ctx context.Context,
 	publicationID string,
 	require mutationRequirement,
-) (model.PublicationFinalization, error) {
+) (finalization model.PublicationFinalization, err error) {
+	// Deferred before the permit is taken, so it runs after the permit is
+	// released: a moved promotion's retry may itself deliver.
+	finalizedHere := false
+	defer func() {
+		if err == nil && finalizedHere {
+			scheduler.retryMovedPromotion(ctx, finalization)
+		}
+	}()
 	if strings.TrimSpace(publicationID) == "" {
 		return model.PublicationFinalization{}, fmt.Errorf("%w: publication ID is required", ErrInvalidInput)
 	}
@@ -1101,10 +1138,11 @@ func (scheduler *Scheduler) deliverPublicationWithGate(
 	if upstream, upstreamErr := scheduler.store.Upstream(ctx, repository.UpstreamID); upstreamErr == nil {
 		publicationInput = upstream.QualifiedRepo(repository.Name)
 	}
-	finalization, err := deliverPublication(ctx, scheduler.store, scheduler.git, scheduler.auditor, repository, publicationInput, publication)
+	finalization, err = deliverPublication(ctx, scheduler.store, scheduler.git, scheduler.auditor, repository, publicationInput, publication)
 	if err != nil {
 		return model.PublicationFinalization{}, err
 	}
+	finalizedHere = true
 	if err := scheduler.finishPublication(ctx, repository, finalization); err != nil {
 		return model.PublicationFinalization{}, err
 	}
