@@ -151,3 +151,11 @@ newly listed package joins the remainder.
 `TestOberthSplitBurnsUseTheRaceGroupLauncher` checks the admitted Pod commands,
 CGO and processor limits; the existing graph and isolation contracts cover
 all three race burns and require each one before every cross-build.
+
+Protected harness QMP readiness #1143: `TestHarnessProtectedTransportIntegration`
+keeps the pass inventory, forged guest output, failure, timeout, changed-guest,
+process-join and sandbox assertions. Its native host-driver fixture waits for
+the QMP socket within the existing two-second readiness budget before exiting
+a successful case. The missing-QMP regression supplies a successful guest
+response but requires readiness failure, proving guest readiness alone cannot
+complete a case.

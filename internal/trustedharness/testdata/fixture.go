@@ -35,6 +35,18 @@ func main() {
 			}
 			time.Sleep(time.Millisecond)
 		}
+		// A guest response can arrive before the fixture has bound QMP. Do not
+		// finish the case until shutdown can reach the monitor socket.
+		for {
+			info, e := os.Stat(args[3])
+			if e == nil && info.Mode()&os.ModeSocket != 0 {
+				break
+			}
+			if time.Now().After(deadline) {
+				os.Exit(2)
+			}
+			time.Sleep(time.Millisecond)
+		}
 		// Guest-controlled result text is deliberately not interpreted as inventory.
 		return
 	}

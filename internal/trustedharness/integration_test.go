@@ -6,7 +6,10 @@ import (
 	"archive/tar"
 	"bytes"
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -117,4 +120,39 @@ func TestHarnessProtectedTransportIntegration(t *testing.T) {
 			}
 		})
 	}
+	t.Run("missing QMP reaches readiness deadline", func(t *testing.T) {
+		private, err := os.MkdirTemp("", "kh-")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer os.RemoveAll(private)
+		guest := filepath.Join(private, "guest.sock")
+		listener, err := net.Listen("unix", guest)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer listener.Close()
+		served := make(chan error, 1)
+		go func() {
+			conn, err := listener.Accept()
+			if err == nil {
+				err = json.NewEncoder(conn).Encode(map[string]string{"cases": "invented guest PASS"})
+				conn.Close()
+			}
+			served <- err
+		}()
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		cmd := exec.CommandContext(ctx, binary, "--case", "first", "--qmp", filepath.Join(private, "missing.sock"), "--guest-control", guest)
+		out, err := cmd.CombinedOutput()
+		listener.Close()
+		if serveErr := <-served; serveErr != nil {
+			t.Fatalf("guest response: %v", serveErr)
+		}
+		var exit *exec.ExitError
+		if ctx.Err() != nil || !errors.As(err, &exit) || exit.ExitCode() != 2 {
+			t.Fatalf("missing QMP must reach the fixture readiness deadline: %v: %s", err, out)
+		}
+	})
+
 }
