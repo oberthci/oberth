@@ -16,6 +16,12 @@ import (
 )
 
 func runSchedules(ctx context.Context, arguments []string, output io.Writer) error {
+	if len(arguments) > 0 {
+		switch arguments[0] {
+		case "list", "pause", "resume", "trigger":
+			return runRemoteSchedules(ctx, arguments[0], arguments[1:], output)
+		}
+	}
 	flags := flag.NewFlagSet("schedules", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	databasePath := flags.String("database", "/data/oberth.sqlite", "SQLite database path (in-pod)")

@@ -944,6 +944,16 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 	// path) declarations for `access_list --pending`. Issue #623, finding 4.
 	argoJobs.SetDeclarationRecorder(database)
 	health.Storage = retention.Status
+	schedules := app.NewSchedules(app.SchedulesConfig{
+		Repositories: database.ListRepositories,
+		Git:          git,
+		Runs:         database,
+		Enqueuer:     scheduler,
+		State:        database,
+		Upstreams:    database,
+		MinInterval:  options.scheduleMinInterval,
+		MaxEntries:   options.scheduleMaxEntries,
+	})
 	controlAPI, err := service.NewAPI(service.APIConfig{
 		ReleasePreflight: argoJobs,
 		UplinkLifecycle:  database, DeclarationDismissal: database,
@@ -967,6 +977,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 		Uplinks:                   database,
 		RunReruns:                 database,
 		Retention:                 retention,
+		Schedules:                 schedules,
 	})
 	if err != nil {
 		return err
@@ -1076,16 +1087,6 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 		}
 		return nil
 	}
-	schedules := app.NewSchedules(app.SchedulesConfig{
-		Repositories: database.ListRepositories,
-		Git:          git,
-		Runs:         database,
-		Enqueuer:     scheduler,
-		State:        database,
-		Upstreams:    database,
-		MinInterval:  options.scheduleMinInterval,
-		MaxEntries:   options.scheduleMaxEntries,
-	})
 	ciIssues, err := service.NewCIIssueReconciler(database, git, anchors.AllowMutation, logger)
 	if err != nil {
 		return err

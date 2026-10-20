@@ -91,6 +91,8 @@ type APIConfig struct {
 	// RunReruns backs run_rerun; nil disables the tool.
 	RunReruns RunRerunStore
 	Retention *Retention
+	// Schedules backs the schedule_* tools (#1106); nil disables them.
+	Schedules ScheduleControl
 }
 
 type API struct {
@@ -144,6 +146,7 @@ type API struct {
 	closing   *backgroundClosing
 	runReruns RunRerunStore
 	retention *Retention
+	schedules ScheduleControl
 	// scope is set on the per-call copy serving a scoped actor (#073).
 	scope *repoScope
 }
@@ -202,7 +205,7 @@ func NewAPI(config APIConfig) (*API, error) {
 		secretStoreVerifier: config.SecretStoreVerifier,
 		repositoryRemover:   config.RepositoryRemover, removeGitCache: config.RemoveGitCache,
 		promotionGrants: config.PromotionGrants, promotionGrantMaxLifetime: promotionGrantMaxLifetime,
-		runCancels: config.RunCancels, retention: config.Retention, runReruns: config.RunReruns, uplinks: config.Uplinks, background: &sync.WaitGroup{},
+		runCancels: config.RunCancels, retention: config.Retention, runReruns: config.RunReruns, schedules: config.Schedules, uplinks: config.Uplinks, background: &sync.WaitGroup{},
 		lifetime: lifetime, stopLifetime: stopLifetime, closing: &backgroundClosing{},
 	}, nil
 }
@@ -311,6 +314,12 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 		return service.releaseAdmission(ctx, actor, arguments.RunID, arguments.Force)
 	case "audit_list":
 		return service.auditList(ctx, actor, raw)
+	case "schedule_list":
+		return service.scheduleList(ctx, raw)
+	case "schedule_pause", "schedule_resume":
+		return service.schedulePauseResume(ctx, actor, name == "schedule_pause", raw)
+	case "schedule_trigger":
+		return service.scheduleTrigger(ctx, actor, raw)
 	case "status":
 		var arguments struct {
 			Repo string `json:"repo"`
@@ -2426,7 +2435,8 @@ func mutatingTool(name string) bool {
 		"admission_release",
 		"repo_remove",
 		"secretstore_sync_receipt",
-		"promote_grant", "promote_grant_revoke":
+		"promote_grant", "promote_grant_revoke",
+		"schedule_pause", "schedule_resume", "schedule_trigger":
 		return true
 	default:
 		return false
