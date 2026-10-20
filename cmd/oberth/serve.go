@@ -879,6 +879,9 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 	if err != nil {
 		return err
 	}
+	// A promotion whose delivery finds its target moved is re-promoted onto
+	// the new head and re-tested (#1097). Registered before the scheduler runs.
+	scheduler.SetPromotionRetrier(controlAPI)
 	authenticator, err := service.NewAuthenticator(auth.Authenticator{Tokens: database})
 	if err != nil {
 		return err

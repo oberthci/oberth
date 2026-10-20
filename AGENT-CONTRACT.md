@@ -626,9 +626,9 @@ continuity checks; it must never be used to reset or bypass those checks.
   each write/flush has a five-second bound. Heartbeat writes and the final
   response never overlap. Disconnect/write failure cancels only observation,
   never durable work, and joins the heartbeat writer before returning.
-- MCP exposes 41 tools: `status`, bounded named-step `logs`, exact-run
+- MCP exposes 42 tools: `status`, bounded named-step `logs`, exact-run
   `run_get`/`run_logs`, `run_retry`, audited `run_cancel`, `run_kvm_preflight`, `artifacts`/`artifact_get`, `wait`, `sync`, `promote`,
-  `promotion_list`, `promote_status`, `publish_retry`, issue
+  `promotion_list`, `promote_status`, audited `promote_retry` (#1097), `publish_retry`, issue
   create/get/get_many/update/append/close/reopen/delete/list/lock,
   secret-access list/allow/revoke, admin-only `kubevirt_grant` and
   `kubevirt_revoke`, read-only `kubevirt_grant_get`, `repo_list`, `repo_remove`, `run_list`,
@@ -704,17 +704,22 @@ continuity checks; it must never be used to reset or bypass those checks.
   Existing MCP encoding duplicates the JSON as text and structured content;
   the encoded tool result is bounded by three times this payload budget plus
   128 bytes of envelope overhead (excluding the JSON-RPC request ID).
-- `publish_retry` retries the upstream publication for a run or promotion whose
-  burns all passed but whose upstream push failed (#696). Input is exactly one
-  durable run ID or promotion ID — never a ref, SHA, or tag name.
-  Preconditions (all fail closed with `ErrInvalidInput`): the run/promotion is
+- `publish_retry` retries the upstream publication for a branch or tag run
+  whose burns all passed but whose upstream push failed (#696). Input is
+  exactly one durable run ID — never a ref, SHA, or tag name.
+  Preconditions (all fail closed with `ErrInvalidInput`): the run is
   terminal; every burn/step passed; the failure is recorded in the publishing
   phase (`run.phase = "publishing"`); the recorded SHA still resolves in
   Oberth's git cache (re-read, not trusted from the row alone). For tag runs
   the exact tag object SHA recorded at admission is what gets pushed; for
   branch runs the exact SHA (force-sync semantics identical to the original
-  publish); for promotions the exact result SHA to the exact target (never
-  force). Zero repository code executes. Idempotent: if upstream already has
+  publish). A promotion ID, or the ID of a promotion's CI run, is refused
+  with `ErrInvalidInput` naming `promote_retry` (and the head the target moved
+  to, when it moved) and changes nothing: a promotion row is immutable once
+  terminal and its merge was made against a head that may have moved, so a
+  promotion is re-run, never re-pushed (#1097). `Store.RetryFailedPublication`
+  refuses a promotion-owned publication the same way, before any state
+  change. Zero repository code executes. Idempotent: if upstream already has
   the object, succeeds without pushing. Rate-limited by the delivery permit (one
   concurrent publication delivery per scheduler). An audit-chain entry is
   recorded BEFORE the push attempt. On success the run transitions to
@@ -945,7 +950,8 @@ continuity checks; it must never be used to reset or bypass those checks.
   runs that mounted ci-secrets are re-fired like any other branch run — the
   copy starts uncredentialed and re-earns delivery through normal admission.
   Promotion CI, tag/release, and publication-owning runs are never re-fired
-  automatically; they terminalize conservatively exactly as before, and a
+  automatically; they terminalize conservatively exactly as before (an
+  interrupted promotion is re-run on request with `promote_retry`), and a
   branch that already has newer active work keeps only that newest run.
   Explicitly cancelled runs are never re-fired either: they are terminal
   before any restart pass looks at them, and only active runs are requeued.
@@ -969,6 +975,22 @@ continuity checks; it must never be used to reset or bypass those checks.
   fetched target fast-forwards to that exact candidate. Divergent merges and a
   fetched target that already contains the candidate receive target-tree CI.
   The chosen target is pushed without force; a moved target fails the promotion.
+  Such a failure (delivery found the target at a head other than the planned
+  base) is retried by the server itself (#1097): after the delivery permit is
+  released, a new promotion of the same repository, source SHA and target is
+  admitted, merged onto the moved head and re-tested exactly like `promote`,
+  at most twice in a row (a deleted target is not retried). It continues the
+  original authority: direct for an admin's promotion, otherwise a grant that
+  is still active (a revoked or expired grant stops it). `promote_retry {id}`
+  (CLI `oberth promotion retry <id>`) does the same on request for any failed
+  or interrupted promotion (push failure, CI or infrastructure failure,
+  restart), with `promote`'s authorization. A retry is refused while a
+  promotion of the same tuple is pending or delivered, when the promotion was
+  already retried, or when the source SHA's newest run is not green. Promotion
+  rows stay immutable: the lineage is the `promotion.retry` audit action
+  (`retry_of`, `mode` `manual`|`auto`, `auto_attempt`) recorded on the new
+  promotion in its admission transaction, and `promote_status` on the failed
+  promotion reports the successor as `retried_as`.
   An unborn target (brand-new repository whose upstream lacks the branch —
   confirmed by a successful, empty ls-remote, never inferred from a failed
   fetch) is a fast-forward creation of the tested source; the promotion row
@@ -1508,14 +1530,26 @@ continuity checks; it must never be used to reset or bypass those checks.
 ### Promotion grants (#826)
 
 Non-admin uplinks may promote only when a matching unexpired, unrevoked,
-unconsumed promotion grant exists for the exact (repository, SHA, target).
-Admin uplinks retain direct authority; their promotions record an empty
-`grant_id` (distinguishable as "direct" in the audit chain).
+unconsumed promotion grant exists for the exact (repository, SHA, target)
+that no pending promotion holds. Admin uplinks retain direct authority; their
+promotions record an empty `grant_id` (distinguishable as "direct" in the
+audit chain).
 
 The `promotion_grants` table is append-only (delete trigger refuses, update
 trigger permits only revocation and consumption transitions). Every creation,
-revocation, and consumption appends to the gap-free audit chain. Grants are
-single-use: consumed atomically with promotion creation.
+revocation, reservation and consumption appends to the gap-free audit chain.
+Grants are single-use against delivery (#1097): a promotion admitted under a
+grant holds it (its `grant_id`, audited `promotion_grant.reserve` in the
+admission transaction, which also refuses a grant that another pending or
+delivered promotion holds), and the grant is consumed (`consumed_by` = that
+promotion, audited `promotion_grant.consume`) in the same transaction as the
+promotion's delivered publication. A promotion that fails or is interrupted
+before delivery releases it, so `promote` or `promote_retry` of the same
+tuple can use it again while it is unexpired and unrevoked; at most one
+promotion holds it at a time and it backs at most one delivery. A grant held
+by a pending promotion may be revoked, which stops later retries; the pending
+promotion still completes. A grant an older server consumed at admission
+stays consumed.
 
 MCP tools: `promote_grant` (admin, creates a time-bounded grant),
 `promote_grant_revoke` (admin, revokes an active grant),
