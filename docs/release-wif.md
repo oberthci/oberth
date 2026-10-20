@@ -97,3 +97,19 @@ admission proves reachability against fresh upstream default-branch state before
 creating a release run. This feature neither changes that gate nor treats a
 repository annotation as reachability evidence. Other supported pipeline formats
 and the independently approved secretstore delivery path are unchanged.
+
+### Release declaration preflight
+
+Branch CI compares `.oberth/release.yaml` at the tested commit with the fresh
+upstream default. A changed document gets a non-credentialed
+`[release-preflight/check]` in the retained run log; warnings do not fail branch
+CI. Promotion compares its exact result with its fetched target base and refuses
+missing capabilities before publication, including when it reuses green CI.
+The check records release declarations for `access_list pending:true`, reports
+exact `access_allow` JSON arguments, checks the administrator's `argo.releaseWIF`
+map, and reads named-step ServiceAccounts to detect unmaterialized identities.
+It requests no tokens and creates no Kubernetes resources. A passing preflight
+is not proof of live Vault policy or provider IAM; normal release admission and
+credential verification still apply. After an admission refusal, an admin can
+use `run_rerun` with `force:true` and a reason after fixing grants (#1098), subject
+to its existing bounded tag-rerun policy.

@@ -49,6 +49,7 @@ const grantPolicySyncAdvisory = "Grant recorded; the identity map refreshes auto
 	"Until then, access fails closed."
 
 type APIConfig struct {
+	ReleasePreflight          ReleasePreflighter
 	KVMPreflights             KVMPreflightReader
 	SchedulingObserver        SchedulingObserver
 	Admission                 AdmissionObserver
@@ -90,6 +91,7 @@ type APIConfig struct {
 }
 
 type API struct {
+	releasePreflight          ReleasePreflighter
 	kvmPreflights             KVMPreflightReader
 	schedulingObserver        SchedulingObserver
 	admission                 AdmissionObserver
@@ -179,6 +181,7 @@ func NewAPI(config APIConfig) (*API, error) {
 	}
 	lifetime, stopLifetime := context.WithCancel(context.Background())
 	return &API{
+		releasePreflight:   config.ReleasePreflight,
 		kvmPreflights:      config.KVMPreflights,
 		schedulingObserver: config.SchedulingObserver, admission: config.Admission,
 		runs: config.Runs, history: config.History, runRetries: config.RunRetries, repositories: config.Repositories,
@@ -1938,6 +1941,9 @@ func (service *API) planAdmittedPromotion(ctx context.Context, actor api.Actor, 
 	planBase := plan.BaseSHA
 	if plan.TargetUnborn {
 		planBase = zeroOID
+	}
+	if err := service.checkPromotionRelease(ctx, repository, plan.MergedSHA, planBase); err != nil {
+		return service.failAdmittedPromotion(ctx, promotion, err.Error(), "")
 	}
 	planned, err := service.promotions.PlanPromotion(ctx, promotion.ID, planBase, plan.MergedSHA)
 	if err != nil {

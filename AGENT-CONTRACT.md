@@ -2385,3 +2385,17 @@ are inside the download phase. Race instrumentation, all
 required. Compilation uses fresh private caches and verified module downloads;
 this is not a network-free test. Direct execution retains the installer package
 working directory used by `go test`.
+
+## Release capability preflight (#1139)
+
+Changed `.oberth/release.yaml` documents are checked statically against live
+repository grants, named-step identities and the public releaseWIF capability
+map. Branch CI reports advisory `[release-preflight/check]` log entries;
+promotion planning refuses gaps before both fast-forward publication and merged
+CI enqueue. Comparison uses the fresh default for branches and the exact fetched
+target base for promotions. Declarations observed before authorization are
+recorded under the canonical repository and tested SHA for pending access lists.
+Only public source, grants and ServiceAccount GETs are used; no credentials,
+TokenRequests, Workflows or source claims are created. Existing chart RBAC
+already provides ServiceAccount GET; no additional permissions are required.
+Release admission remains authoritative and forced tag reruns recheck live grants.
