@@ -126,6 +126,8 @@ Flags:
   --url <url>          MCP server URL
   --token-file <path>  Path to a file containing the bearer token (0600)
   --ca-file <path>     PEM CA certificate for TLS verification
+  --timeout <duration> Client deadline override (e.g. 90s or 11m); by default
+                       at least 60s, or the tool timeout plus 30s for long polls
   --args-file <path>   Read tool arguments JSON from a file (or "-" for stdin);
                        bypasses the shell argv length ceiling for large payloads
   --output <path>      artifact_get only: stream the artifact's exact bytes to
@@ -260,8 +262,9 @@ var errMCPToolError = errors.New("tool returned an error")
 type mcpFlagResult struct {
 	mcpConfig
 	positional []string
-	argsFile   string // --args-file: path to a JSON file, or "-" for stdin
-	output     string // --output: artifact_get save-to-file destination
+	argsFile   string        // --args-file: path to a JSON file, or "-" for stdin
+	output     string        // --output: artifact_get save-to-file destination
+	timeout    time.Duration // --timeout: explicit client deadline; zero derives it
 }
 
 // parseMCPFlags parses the common MCP flags from arguments. wantPositional
@@ -269,6 +272,8 @@ type mcpFlagResult struct {
 func parseMCPFlags(name string, arguments []string, wantPositional int) (mcpFlagResult, error) {
 	var result mcpFlagResult
 	var tokenFile string
+	var timeoutFlag string
+	var timeoutSet bool
 	var positional []string
 
 	for i := 0; i < len(arguments); i++ {
@@ -289,6 +294,11 @@ func parseMCPFlags(name string, arguments []string, wantPositional int) (mcpFlag
 			result.CAFile = arguments[i]
 		case strings.HasPrefix(arg, "--ca-file="):
 			result.CAFile = strings.TrimPrefix(arg, "--ca-file=")
+		case arg == "--timeout" && i+1 < len(arguments):
+			i++
+			timeoutFlag, timeoutSet = arguments[i], true
+		case strings.HasPrefix(arg, "--timeout="):
+			timeoutFlag, timeoutSet = strings.TrimPrefix(arg, "--timeout="), true
 		case arg == "--args-file" && i+1 < len(arguments):
 			i++
 			result.argsFile = arguments[i]
@@ -300,7 +310,7 @@ func parseMCPFlags(name string, arguments []string, wantPositional int) (mcpFlag
 		case strings.HasPrefix(arg, "--output="):
 			result.output = strings.TrimPrefix(arg, "--output=")
 		case arg == "--help" || arg == "-h":
-			return result, fmt.Errorf("%w: %s [--url <url>] [--token-file <path>] [--ca-file <path>]", errUsage, name)
+			return result, fmt.Errorf("%w: %s [--url <url>] [--token-file <path>] [--ca-file <path>] [--timeout <duration>]", errUsage, name)
 		case strings.HasPrefix(arg, "-"):
 			return result, fmt.Errorf("%w: unknown flag %q", errUsage, arg)
 		default:
@@ -312,6 +322,13 @@ func parseMCPFlags(name string, arguments []string, wantPositional int) (mcpFlag
 		return result, fmt.Errorf("%w: %s expects %d positional arguments, got %d", errUsage, name, wantPositional, len(positional))
 	}
 	result.positional = positional
+	if timeoutSet {
+		parsed, err := time.ParseDuration(timeoutFlag)
+		if err != nil || parsed <= 0 {
+			return result, fmt.Errorf("%w: --timeout requires a positive duration (e.g. 90s or 11m)", errUsage)
+		}
+		result.timeout = parsed
+	}
 
 	// Resolve URL.
 	if result.URL == "" {
@@ -353,7 +370,7 @@ func parseMCPFlags(name string, arguments []string, wantPositional int) (mcpFlag
 // mcpRequest sends a JSON-RPC request to the MCP server and returns the
 // parsed response. It handles both direct JSON responses and SSE-framed
 // responses.
-func mcpRequest(ctx context.Context, cfg mcpFlagResult, method string, params any) (*jsonRPCResponse, error) {
+func mcpRequest(ctx context.Context, cfg mcpFlagResult, method string, params any) (_ *jsonRPCResponse, resultErr error) {
 	request := jsonRPCRequest{
 		JSONRPC: mcpJSONRPCVersion,
 		ID:      1,
@@ -365,8 +382,18 @@ func mcpRequest(ctx context.Context, cfg mcpFlagResult, method string, params an
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, mcpRequestTimeout)
+	limit, toolTimeout, err := mcpDeadline(cfg, params)
+	if err != nil {
+		return nil, err
+	}
+	parent := ctx
+	ctx, cancel := context.WithTimeout(ctx, limit)
 	defer cancel()
+	defer func() {
+		if resultErr != nil && errors.Is(ctx.Err(), context.DeadlineExceeded) && parent.Err() == nil {
+			resultErr = mcpDeadlineError(limit, toolTimeout, resultErr)
+		}
+	}()
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, cfg.URL, bytes.NewReader(body))
 	if err != nil {
@@ -383,7 +410,11 @@ func mcpRequest(ctx context.Context, cfg mcpFlagResult, method string, params an
 	if err != nil {
 		return nil, err
 	}
-	resp, err := httpClient.Do(httpReq)
+	// The request context owns the limit, including streamed response bodies.
+	// Copy the factory client so an old fixed HTTP timeout cannot cut it short.
+	requestClient := *httpClient
+	requestClient.Timeout = 0
+	resp, err := requestClient.Do(httpReq)
 	if err != nil {
 		return nil, classifyMCPTransport(err)
 	}
@@ -490,7 +521,6 @@ func mcpHTTPClient(caFile string) (*http.Client, error) {
 	}
 
 	return &http.Client{
-		Timeout:   mcpRequestTimeout,
 		Transport: cloned,
 	}, nil
 }
@@ -513,7 +543,7 @@ func classifyMCPTransport(err error) error {
 		return fmt.Errorf("DNS: cannot resolve %q", dnsErr.Name)
 	}
 	if errors.Is(err, context.DeadlineExceeded) {
-		return errors.New("request timed out")
+		return fmt.Errorf("request timed out: %w", context.DeadlineExceeded)
 	}
 	return fmt.Errorf("connection failed: %w", err)
 }
