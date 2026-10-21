@@ -443,3 +443,21 @@ func TestPurgeRemovesOneCollectionAndRefusesTraversal(t *testing.T) {
 		t.Fatalf("repeat removal=%d %v", removed, err)
 	}
 }
+
+func TestUsageByRunIgnoresNonRunDirectories(t *testing.T) {
+	t.Parallel()
+	store, root := newStore(t)
+	for _, id := range []string{"run-1", "lost+found", ".metadata"} {
+		path := filepath.Join(root, id)
+		if err := os.MkdirAll(path, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(path, "report.txt"), []byte("retained"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	usage, err := store.UsageByRun()
+	if err != nil || len(usage) != 1 || usage["run-1"] != int64(len("retained")) {
+		t.Fatalf("usage includes non-run directories: %#v %v", usage, err)
+	}
+}

@@ -76,7 +76,7 @@ func (store *Store) usageByRun() ([]runUsage, error) {
 	}
 	var runs []runUsage
 	for _, entry := range entries {
-		if !entry.IsDir() {
+		if !entry.IsDir() || !safeID(entry.Name()) {
 			continue
 		}
 		info, infoErr := entry.Info()

@@ -442,6 +442,11 @@ func TestRetentionReclaimsOrphansOnlyForEnabledEvidencePolicies(t *testing.T) {
 	ctx := context.Background()
 	f := newRetentionFixture(t)
 	orphan := strings.Repeat("f", 32)
+	// Mount-point housekeeping must not become an orphan purge candidate.
+	lostFound := filepath.Join(f.root, "artifacts", "lost+found")
+	if err := os.MkdirAll(lostFound, 0o700); err != nil {
+		t.Fatal(err)
+	}
 	file, err := f.retention.Logs.Create(orphan)
 	if err != nil {
 		t.Fatal(err)
@@ -478,6 +483,12 @@ func TestRetentionReclaimsOrphansOnlyForEnabledEvidencePolicies(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.retained(t, orphan, false)
+	if _, err := os.Stat(lostFound); err != nil {
+		t.Fatalf("sweep touched mount-point housekeeping: %v", err)
+	}
+	if markers, err := f.retention.Database.RunEvidencePurges(ctx, "lost+found"); err != nil || len(markers) != 0 {
+		t.Fatalf("invalid directory entered the purge audit: %#v %v", markers, err)
+	}
 	markers, err := f.retention.Database.RunEvidencePurges(ctx, orphan)
 	if err != nil || len(markers) != 2 {
 		t.Fatalf("orphan audit=%#v %v", markers, err)
