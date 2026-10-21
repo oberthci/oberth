@@ -525,7 +525,7 @@ func TestRunLifecycleListingAndFlexibleResolution(t *testing.T) {
 		t.Fatalf("ambiguous short SHA error = %v, want ErrAmbiguous", err)
 	}
 	runs, err := s.ListRecentRuns(ctx, model.RunListFilter{RepoID: repo.ID, Limit: 1})
-	if err != nil || len(runs) != 1 || runs[0].SHA != other.SHA {
+	if err != nil || len(runs) != 2 || runs[0].SHA != other.SHA || runs[1].ID != run.ID {
 		t.Fatalf("recent runs = %#v, %v", runs, err)
 	}
 	repositories, err := s.ListRepositories(ctx)
@@ -1756,8 +1756,9 @@ func TestListLatestRunsPerRepoReturnsQuietReposOutsideGlobalWindow(t *testing.T)
 		}
 	}
 
-	// Verify the global ListRecentRuns at limit 100 misses repo B entirely.
-	globalRuns, err := s.ListRecentRuns(ctx, model.RunListFilter{Limit: 100})
+	// The history view's global page misses the quiet repository; the flat
+	// default list deliberately keeps its queued head visible instead.
+	globalRuns, err := s.ListRecentRuns(ctx, model.RunListFilter{Limit: 100, Terminal: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1808,8 +1809,8 @@ func TestListLatestRunsPerRepoReturnsQuietReposOutsideGlobalWindow(t *testing.T)
 	}
 }
 
-// Runs page through a QueueSequence cursor, so history older than one page
-// stays reachable (#050).
+// Finished runs page through a stable time cursor, so history older than one
+// page stays reachable (#050, #1122).
 func TestListRecentRunsPagesWithBeforeCursor(t *testing.T) {
 	now := time.Date(2026, 10, 17, 0, 0, 0, 0, time.UTC)
 	s := testStore(t, &now)
@@ -1817,7 +1818,14 @@ func TestListRecentRunsPagesWithBeforeCursor(t *testing.T) {
 	ctx := context.Background()
 	for i := 0; i < 5; i++ {
 		now = now.Add(time.Second)
-		if _, err := s.EnqueueRun(ctx, testRunSpec(repo.ID, fmt.Sprintf("branch-%d", i), strings.Repeat(fmt.Sprint(i), 40))); err != nil {
+		run, err := s.EnqueueRun(ctx, testRunSpec(repo.ID, fmt.Sprintf("branch-%d", i), strings.Repeat(fmt.Sprint(i), 40)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.ClaimNextRun(ctx); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.FinishRun(ctx, run.ID, model.RunResult{Status: model.RunPassed, Phase: "passed"}); err != nil {
 			t.Fatal(err)
 		}
 	}

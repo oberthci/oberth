@@ -335,7 +335,10 @@ required.
 ## Run list views
 
 `run_list` and `/api/runs` take an optional `view`. Omitted or `all`, the
-answer is unchanged: every run newest first, in bounded pages.
+first page carries the whole bounded queue in position order, then admitted
+and terminal runs newest admission time first. Later pages continue the
+dated runs by a stable time-and-ID cursor. A run cancelled before admission
+sorts by its end time.
 
 - `history` keeps only terminal runs (passed, failed, interrupted), paged the
   same way with `before`/`next_before`/`next_cursor`.
@@ -347,14 +350,16 @@ answer is unchanged: every run newest first, in bounded pages.
   weight, used/capacity and concurrency group, so a run blocking the head of
   the queue, or one waiting on its group or VM capacity, says so.
 
-Explicit active and history views, run detail, and status include
-`display_status`: `queued` for every run before submission, then `running`,
-`passed`, `failed`, `superseded`, `cancelled`, or `interrupted` as appropriate.
-The default `run_list` payload and its `Status` values are unchanged. The
-`Scheduling` observation gives the reason behind `queued`.
+Every run response includes `display_status` and `display_reason`, while
+durable `Status` stays unchanged. Before weighted admission the display is
+`queued` with its scheduling reason. Admission records `started_at`, so a
+trusted preflight displays `running` with phase `preflight`. Terminal runs
+display `passed`, `failed`, `delivered` for a published release, or
+`cancelled` with the superseding SHA, cancelling actor or restart action.
+Retry and rerun eligibility continues to use the durable status and cause.
 
-`oberth runs --active` prints the active list, and the dashboard shows it
-above a history of finished runs.
+`oberth runs --active` remains available for compatibility. The dashboard
+uses the default flat list and filters it with status chips.
 
 ## JSON API
 

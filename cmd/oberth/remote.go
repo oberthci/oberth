@@ -31,6 +31,9 @@ type remoteRun struct {
 	Trigger       string
 	Status        string
 	DisplayStatus string `json:"display_status"`
+	DisplayReason string `json:"display_reason"`
+	Scheduling    *model.RunScheduling
+	Release       bool
 	SupersededBy  string
 	// Phase and Error carry why a run failed. Without them the client decodes
 	// a failed run into a struct that says only "failed", which is the one
@@ -224,7 +227,7 @@ func runRuns(ctx context.Context, arguments []string, output io.Writer) error {
 		runs = append(runs, page...)
 		previous := next
 		next = ""
-		if len(page) == *limit {
+		if len(page) > 0 && datedRunCount(page) == *limit {
 			next = runCursor(page[len(page)-1])
 		}
 		// A server older than paging ignores ?before and returns the newest
@@ -244,12 +247,12 @@ func runRuns(ctx context.Context, arguments []string, output io.Writer) error {
 		_, err := fmt.Fprintln(output, "no runs")
 		return err
 	}
-	if _, err := fmt.Fprintf(output, "%-34s %-9s %-9s %-8s %s\n", "RUN", "STATUS", "TRIGGER", "SHA", "REF"); err != nil {
+	if _, err := fmt.Fprintf(output, "%-34s %-10s %-9s %-8s %-30s %s\n", "RUN", "STATUS", "TRIGGER", "SHA", "REF", "REASON"); err != nil {
 		return err
 	}
 	for _, run := range runs {
-		if _, err := fmt.Fprintf(output, "%-34s %-9s %-9s %-8s %s\n",
-			run.ID, displayRunStatus(run), run.Trigger, shortSHA(run.SHA), run.Ref); err != nil {
+		if _, err := fmt.Fprintf(output, "%-34s %-10s %-9s %-8s %-30s %s\n",
+			run.ID, displayRunStatus(run), run.Trigger, shortSHA(run.SHA), run.Ref, displayRunReason(run)); err != nil {
 			return err
 		}
 	}
@@ -258,6 +261,26 @@ func runRuns(ctx context.Context, arguments []string, output io.Writer) error {
 		return err
 	}
 	return nil
+}
+
+func datedRunCount(runs []remoteRun) int {
+	count := 0
+	for _, run := range runs {
+		if run.StartedAt != nil || run.FinishedAt != nil || run.Status == "passed" || run.Status == "failed" || run.Status == "interrupted" {
+			count++
+		}
+	}
+	return count
+}
+
+func displayRunReason(run remoteRun) string {
+	if run.DisplayReason != "" {
+		return run.DisplayReason
+	}
+	if run.Scheduling != nil && displayRunStatus(run) == "queued" {
+		return run.Scheduling.Message
+	}
+	return run.Reason
 }
 
 // remoteActiveRun is one /api/runs?view=active entry: the run, plus the
@@ -278,20 +301,19 @@ func renderActiveRuns(output io.Writer, runs []remoteActiveRun, now time.Time) e
 	if _, err := fmt.Fprintf(output, "%-4s %-34s %-9s %-8s %-8s %-30s %s\n", "#", "RUN", "STATUS", "SIZE", "ELAPSED", "REF", "REASON"); err != nil {
 		return err
 	}
+	queuedPosition := 0
 	for _, run := range runs {
 		position, size, elapsed, reason := "-", "-", "-", ""
+		if displayRunStatus(run.remoteRun) == "queued" {
+			queuedPosition++
+			position = strconv.Itoa(queuedPosition)
+		}
 		if run.StartedAt != nil {
 			elapsed = now.Sub(*run.StartedAt).Truncate(time.Second).String()
 		}
 		if scheduling := run.Scheduling; scheduling != nil {
 			reason = scheduling.Message
-			if scheduling.QueuePosition > 0 {
-				position = "q" + strconv.FormatInt(scheduling.QueuePosition, 10)
-			}
 			if admission := scheduling.Admission; admission != nil {
-				if admission.Position > 0 {
-					position = strconv.Itoa(admission.Position)
-				}
 				if admission.Size != "" {
 					size = fmt.Sprintf("%s/%d", admission.Size, admission.Weight)
 				}
@@ -311,11 +333,11 @@ func displayRunStatus(run remoteRun) string {
 	if run.DisplayStatus != "" {
 		return run.DisplayStatus
 	}
-	if run.Status == string(model.RunInterrupted) && run.SupersededBy != "" {
-		return "superseded"
-	}
-	if run.Status == string(model.RunInterrupted) && run.Phase == model.PhaseCancelled {
+	if run.Status == string(model.RunInterrupted) {
 		return model.PhaseCancelled
+	}
+	if run.Status == string(model.RunPassed) && run.Release {
+		return "delivered"
 	}
 	if run.Status == string(model.RunWaiting) || run.Status == string(model.RunQueued) ||
 		run.Status == string(model.RunRunning) && run.StartedAt == nil {
@@ -333,17 +355,10 @@ func runCursor(run remoteRun) string {
 	return run.ID
 }
 
-// cursorMovedBack reports whether next pages further back than previous: a
-// smaller sequence, or a different run ID (IDs carry no order).
+// cursorMovedBack accepts a different cursor as progress. The default list
+// sorts by admission time, so its queue sequence can increase across older
+// pages; a repeated cursor still detects an older server without paging.
 func cursorMovedBack(previous, next string) bool {
-	if next == "" {
-		return true
-	}
-	before, previousErr := strconv.ParseInt(previous, 10, 64)
-	after, nextErr := strconv.ParseInt(next, 10, 64)
-	if previousErr == nil && nextErr == nil {
-		return after < before
-	}
 	return next != previous
 }
 
@@ -376,7 +391,7 @@ func resolveRemoteRunID(ctx context.Context, api *client.Client, given string) (
 		for _, run := range runs {
 			known = append(known, run.ID)
 		}
-		if len(runs) < 100 || cursor == "" {
+		if datedRunCount(runs) < 100 || cursor == "" {
 			break
 		}
 		query["before"] = cursor
@@ -446,8 +461,8 @@ func runRunDetail(ctx context.Context, arguments []string, output io.Writer) err
 	// The reason first, before the step list: a failed run is read to find out
 	// what went wrong, and burying it under timings makes the reader scroll
 	// past the answer.
-	if detail.Run.SupersededBy != "" {
-		if _, err := fmt.Fprintf(output, "superseded by %s (oberth run %s)\n", detail.Run.SupersededBy, detail.Run.SupersededBy); err != nil {
+	if detail.Run.DisplayReason != "" {
+		if _, err := fmt.Fprintln(output, detail.Run.DisplayReason); err != nil {
 			return err
 		}
 	} else if detail.Run.Status == string(model.RunInterrupted) && detail.Run.Phase == model.PhaseCancelled {

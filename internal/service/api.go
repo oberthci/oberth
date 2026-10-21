@@ -733,7 +733,7 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 			return nil, err
 		}
 		response := api.RunListResponse{Runs: runs}
-		if page, ok := runs.([]model.Run); ok && len(page) == limit {
+		if page, ok := runs.([]model.Run); ok && api.RunPageFull(page, api.RunFilter{Limit: limit, View: arguments.View}) {
 			// A scoped uplink pages by run ID: a global sequence would
 			// count every run on the installation (#073).
 			if service.scope != nil {
@@ -791,7 +791,11 @@ func (service *API) Runs(ctx context.Context, actor api.Actor, filter api.RunFil
 		cursor, err := service.resolveReadRunID(ctx, filter.BeforeRun)
 		switch {
 		case err == nil:
-			storeFilter.Before = cursor.QueueSequence
+			if filter.View == api.RunViewHistory {
+				storeFilter.Before = cursor.QueueSequence
+			} else {
+				storeFilter.Before, storeFilter.BeforeRun = 0, cursor.ID
+			}
 		case service.scope == nil && filter.Before > 0 && (errors.Is(err, store.ErrNotFound) || errors.Is(err, ErrInvalidInput)):
 		default:
 			return nil, err
@@ -808,10 +812,20 @@ func (service *API) Runs(ctx context.Context, actor api.Actor, filter api.RunFil
 	if err != nil {
 		return nil, err
 	}
+	queuePosition := int64(0)
 	for i := range runs {
-		runs[i] = visibleRun(runs[i])
-		if filter.View == api.RunViewHistory {
-			runs[i].DisplayStatus = displayRunStatus(runs[i])
+		runs[i] = service.presentationRun(ctx, runs[i])
+		if filter.View != api.RunViewHistory && runs[i].DisplayStatus == "queued" {
+			queuePosition++
+			runs[i].Scheduling = service.scheduling(ctx, runs[i], nil)
+			if runs[i].Scheduling == nil {
+				runs[i].Scheduling = &model.RunScheduling{State: "queued", Message: "Awaiting weighted admission."}
+			}
+			runs[i].Scheduling.QueuePosition = queuePosition
+			if runs[i].Scheduling.Admission != nil {
+				runs[i].Scheduling.Admission.Position = int(queuePosition)
+			}
+			runs[i].DisplayReason = runs[i].Scheduling.Message
 		}
 	}
 	return service.redact(runs), nil
@@ -907,8 +921,11 @@ func (service *API) Run(ctx context.Context, actor api.Actor, id string) (any, e
 	if err != nil {
 		return nil, fmt.Errorf("load run steps: %w", err)
 	}
-	response := RunDetailResponse{Run: presentationRun(run), Steps: steps, Scheduling: service.scheduling(ctx, run, steps),
+	response := RunDetailResponse{Run: service.presentationRun(ctx, run), Steps: steps, Scheduling: service.scheduling(ctx, run, steps),
 		RerunOf: service.runRerunOf(ctx, run.ID)}
+	if response.Run.DisplayStatus == "queued" && response.Scheduling != nil {
+		response.Run.DisplayReason = response.Scheduling.Message
+	}
 	if service.repositories != nil {
 		repository, repositoryErr := service.repositories.Repository(ctx, run.RepoID)
 		if repositoryErr != nil && !errors.Is(repositoryErr, store.ErrNotFound) {
@@ -994,7 +1011,13 @@ func (service *API) RunLogLive(ctx context.Context, actor api.Actor, id string, 
 		return nil, err
 	}
 	terminal := run.Status.Terminal()
-	response := LiveLogResponse{RunID: run.ID, Status: string(visibleRun(run).Status), DisplayStatus: displayRunStatus(run)}
+	presented := service.presentationRun(ctx, run)
+	if presented.DisplayStatus == "queued" {
+		if scheduling := service.scheduling(ctx, run, nil); scheduling != nil {
+			presented.DisplayReason = scheduling.Message
+		}
+	}
+	response := LiveLogResponse{RunID: run.ID, Status: string(visibleRun(run).Status), DisplayStatus: presented.DisplayStatus, DisplayReason: presented.DisplayReason}
 	chunk, next, size, err := service.logs.ReadFrom(run.ID, offset, maxLiveLogChunk)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -1038,7 +1061,7 @@ func (service *API) Repositories(ctx context.Context, actor api.Actor) (any, err
 		if historyErr == nil {
 			runsByRepo = make(map[int64][]model.Run, len(repos))
 			for _, run := range runs {
-				runsByRepo[run.RepoID] = append(runsByRepo[run.RepoID], visibleRun(run))
+				runsByRepo[run.RepoID] = append(runsByRepo[run.RepoID], service.presentationRun(ctx, run))
 			}
 		}
 	}
@@ -1111,10 +1134,12 @@ func (service *API) status(ctx context.Context, repositoryName, selector, actor 
 }
 
 func (service *API) statusForRun(ctx context.Context, repository model.Repository, run model.Run) (StatusResponse, error) {
+	presented := service.presentationRun(ctx, run)
 	response := StatusResponse{
 		Repository: repository, Run: run, Repo: repository.Name, Ref: run.Ref,
 		SHA: run.SHA, RunID: run.ID, Status: wireRunStatus(visibleRun(run).Status), Burns: map[string]string{},
-		DisplayStatus:    displayRunStatus(run),
+		DisplayStatus:    presented.DisplayStatus,
+		DisplayReason:    presented.DisplayReason,
 		ConcurrencyGroup: run.ConcurrencyGroup,
 	}
 	if service.history != nil {
@@ -1126,7 +1151,11 @@ func (service *API) statusForRun(ctx context.Context, repository model.Repositor
 		response.Burns, response.ExitCode = wireBurns(response.Steps, run)
 	}
 	response.Scheduling = service.scheduling(ctx, run, response.Steps)
-	response.Run = visibleRun(run)
+	response.Run = presented
+	if presented.DisplayStatus == "queued" && response.Scheduling != nil {
+		response.DisplayReason = response.Scheduling.Message
+		response.Run.DisplayReason = response.DisplayReason
+	}
 	response.FailedStep = run.FailedStep
 	if service.issues != nil && run.RefKind == model.RefBranch {
 		issue, issueErr := service.issues.OpenCIIssue(ctx, repository.ID, run.Ref)
@@ -1224,10 +1253,12 @@ func (service *API) statusForBranchRef(ctx context.Context, repositoryName, sele
 // selector (so "status main" shows ref "main" even when the run's own ref is
 // a promotion ref like "promotion/main/abcdef012345").
 func (service *API) statusFromRun(ctx context.Context, repository model.Repository, run model.Run, ref, actor string) (StatusResponse, error) {
+	presented := service.presentationRun(ctx, run)
 	response := StatusResponse{
 		Repository: repository, Run: run, Repo: repository.Name, Ref: ref,
 		SHA: run.SHA, RunID: run.ID, Status: wireRunStatus(visibleRun(run).Status), Burns: map[string]string{},
-		DisplayStatus: displayRunStatus(run),
+		DisplayStatus: presented.DisplayStatus,
+		DisplayReason: presented.DisplayReason,
 	}
 	if service.history != nil {
 		var err error
@@ -1238,7 +1269,11 @@ func (service *API) statusFromRun(ctx context.Context, repository model.Reposito
 		response.Burns, response.ExitCode = wireBurns(response.Steps, run)
 	}
 	response.Scheduling = service.scheduling(ctx, run, response.Steps)
-	response.Run = visibleRun(run)
+	response.Run = presented
+	if presented.DisplayStatus == "queued" && response.Scheduling != nil {
+		response.DisplayReason = response.Scheduling.Message
+		response.Run.DisplayReason = response.DisplayReason
+	}
 	response.FailedStep = run.FailedStep
 	if service.issues != nil && run.RefKind == model.RefBranch {
 		issue, issueErr := service.issues.OpenCIIssue(ctx, repository.ID, run.Ref)
@@ -1273,10 +1308,10 @@ func displayRunStatus(run model.Run) string {
 		return string(model.RunQueued)
 	case run.Status == model.RunRunning && run.StartedAt == nil:
 		return string(model.RunQueued)
-	case run.Status == model.RunInterrupted && run.SupersededBy != "":
-		return "superseded"
-	case run.Status == model.RunInterrupted && run.Phase == model.PhaseCancelled:
+	case run.Status == model.RunInterrupted:
 		return model.PhaseCancelled
+	case run.Status == model.RunPassed && run.Release:
+		return "delivered"
 	default:
 		return string(run.Status)
 	}
@@ -1285,6 +1320,47 @@ func displayRunStatus(run model.Run) string {
 func presentationRun(run model.Run) model.Run {
 	visible := visibleRun(run)
 	visible.DisplayStatus = displayRunStatus(run)
+	visible.DisplayReason = runDisplayReason(run)
+	return visible
+}
+
+func runDisplayReason(run model.Run) string {
+	if run.Status != model.RunInterrupted {
+		return ""
+	}
+	if run.SupersededBy != "" {
+		return "superseded by " + shortRunID(run.SupersededBy)
+	}
+	if run.Phase == model.PhaseCancelled {
+		return run.Reason
+	}
+	if strings.Contains(strings.ToLower(run.Reason), "restart") || strings.Contains(strings.ToLower(run.Reason), "restarted") {
+		return "server restart, retry needed"
+	}
+	return run.Reason
+}
+
+func (service *API) presentationRun(ctx context.Context, run model.Run) model.Run {
+	visible := presentationRun(run)
+	if run.Status == model.RunRunning && run.StartedAt != nil && service.submittedKVMPreflight(ctx, run) {
+		visible.Phase = "preflight"
+	}
+	if run.SupersededBy == "" || service.history == nil {
+		return visible
+	}
+	successor, err := service.history.Run(ctx, run.SupersededBy)
+	if err != nil {
+		return visible
+	}
+	if successor.SHA == run.SHA && successor.Ref == run.Ref {
+		visible.DisplayReason = "server restart, re-queued as " + shortRunID(successor.ID)
+	} else {
+		sha := successor.SHA
+		if len(sha) > 8 {
+			sha = sha[:8]
+		}
+		visible.DisplayReason = "superseded by " + sha
+	}
 	return visible
 }
 

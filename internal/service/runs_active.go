@@ -47,7 +47,7 @@ func (service *API) activeRuns(ctx context.Context, filter api.RunFilter) (any, 
 	admitted := make([]ActiveRun, 0)
 	pending := make([]ActiveRun, 0, len(runs))
 	for _, run := range runs {
-		entry := ActiveRun{Run: presentationRun(run)}
+		entry := ActiveRun{Run: service.presentationRun(ctx, run)}
 		if run.StartedAt != nil {
 			started = append(started, entry)
 			continue

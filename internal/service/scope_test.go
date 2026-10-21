@@ -229,7 +229,8 @@ func TestScopedUplinkSeesOnlyItsUpstream(t *testing.T) {
 	ctx := context.Background()
 	visibleRuns, hiddenRuns := fixture.runs["github"], fixture.runs["codeberg"]
 
-	// run_list: only github runs, newest first, and a cursor computed over them.
+	// run_list: only github runs, queue first, and a cursor computed over
+	// admitted or finished rows.
 	value, err := fixture.call(scopedActor, "run_list", map[string]any{})
 	fixture.assertNoLeak(t, "run_list", value, err)
 	if list := value.(api.RunListResponse); len(list.Runs.([]model.Run)) != len(visibleRuns) || list.NextBefore != 0 {
@@ -240,12 +241,11 @@ func TestScopedUplinkSeesOnlyItsUpstream(t *testing.T) {
 	value, err = fixture.call(scopedActor, "run_list", map[string]any{"limit": 1})
 	fixture.assertNoLeak(t, "paged run_list", value, err)
 	first := value.(api.RunListResponse)
-	if err != nil || len(first.Runs.([]model.Run)) != 1 || first.NextBefore != 0 || first.NextCursor == "" {
+	if err != nil || len(first.Runs.([]model.Run)) != len(visibleRuns) || first.NextBefore != 0 || first.NextCursor == "" {
 		t.Fatalf("paged run_list = %#v, %v", value, err)
 	}
 	value, err = fixture.call(scopedActor, "run_list", map[string]any{"limit": 1, "before": first.NextCursor})
-	if second := value.(api.RunListResponse); err != nil || len(second.Runs.([]model.Run)) != 1 ||
-		second.Runs.([]model.Run)[0].ID == first.Runs.([]model.Run)[0].ID {
+	if second := value.(api.RunListResponse); err != nil || len(second.Runs.([]model.Run)) != 0 {
 		t.Fatalf("second page = %#v, %v", value, err)
 	}
 	for _, before := range []any{3, "3"} {
@@ -261,7 +261,7 @@ func TestScopedUplinkSeesOnlyItsUpstream(t *testing.T) {
 	}
 	// A long all-digit cursor is tried as a run ID first: the unscoped caller
 	// falls back to the sequence, the scoped one gets no sequence fallback.
-	if all := mustCall(t, fixture, unscopedActor, "run_list", map[string]any{"before": "999999999999"}).(api.RunListResponse); len(all.Runs.([]model.Run)) != len(visibleRuns)+len(hiddenRuns) {
+	if all := mustCall(t, fixture, unscopedActor, "run_list", map[string]any{"before": "999999999999"}).(api.RunListResponse); len(all.Runs.([]model.Run)) != 0 {
 		t.Fatalf("unscoped long numeric cursor = %#v", all)
 	}
 	if _, err := fixture.call(scopedActor, "run_list", map[string]any{"before": "999999999999"}); !errors.Is(err, store.ErrNotFound) {

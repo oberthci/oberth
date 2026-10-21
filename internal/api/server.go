@@ -55,10 +55,9 @@ type RunFilter struct {
 	// BeforeRun pages to runs older than this run, by ID: the cursor a
 	// scoped uplink gets instead of a global sequence (#073).
 	BeforeRun string
-	// View selects the list: "" or "all" is every run newest first (the
-	// default, unchanged); "history" keeps only terminal runs, paged the
-	// same way; "active" is every non-terminal run in scheduling order
-	// with its scheduling observation, unpaged and bounded.
+	// View selects the list: "" or "all" puts the queue first, followed by
+	// dated runs; "history" keeps the old terminal-only paging; "active" is
+	// the unpaged compatibility view of non-terminal runs.
 	View string
 }
 
@@ -294,10 +293,10 @@ func (server *Server) handleRuns(writer http.ResponseWriter, request *http.Reque
 		}
 	}
 	value, err := server.views.Runs(request.Context(), actorFrom(request.Context()), filter)
-	// The body stays a plain array for existing clients; a full page names
-	// the cursor for the next, older page (#050): the oldest run's sequence,
-	// or its ID where the sequence is withheld from a scoped uplink (#073).
-	if runs, ok := value.([]model.Run); ok && err == nil && len(runs) > 0 && len(runs) == filter.Limit {
+	// The body remains a plain array. The default first page also carries
+	// the whole bounded queue, so only its admitted/finished portion counts
+	// against the page limit.
+	if runs, ok := value.([]model.Run); ok && err == nil && RunPageFull(runs, filter) {
 		last := runs[len(runs)-1]
 		cursor := last.ID
 		if last.QueueSequence > 0 {
@@ -306,6 +305,23 @@ func (server *Server) handleRuns(writer http.ResponseWriter, request *http.Reque
 		writer.Header().Set("X-Oberth-Next-Before", cursor)
 	}
 	server.writeView(writer, value, err)
+}
+
+// RunPageFull reports whether the time-ordered part of a run page is full.
+func RunPageFull(runs []model.Run, filter RunFilter) bool {
+	if len(runs) == 0 {
+		return false
+	}
+	if filter.View == RunViewHistory {
+		return len(runs) == filter.Limit
+	}
+	count := 0
+	for _, run := range runs {
+		if run.StartedAt != nil || run.FinishedAt != nil || run.Status.Terminal() {
+			count++
+		}
+	}
+	return count == filter.Limit
 }
 
 func (server *Server) handleRunCounts(writer http.ResponseWriter, request *http.Request) {

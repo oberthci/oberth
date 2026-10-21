@@ -1,0 +1,80 @@
+package store
+
+import (
+	"context"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/oberthci/oberth/internal/model"
+)
+
+func TestFlatRunsKeepQueueFirstAndPageByAdmissionTime(t *testing.T) {
+	now := time.Date(2026, 10, 21, 12, 0, 0, 0, time.UTC)
+	s := testStore(t, &now)
+	repo := createRepo(t, s)
+	ctx := context.Background()
+	enqueue := func(ref, sha string) model.Run {
+		t.Helper()
+		run, err := s.EnqueueRun(ctx, testRunSpec(repo.ID, ref, strings.Repeat(sha, 40)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return run.Run
+	}
+	finish := func(ref, sha string) model.Run {
+		t.Helper()
+		run := enqueue(ref, sha)
+		if claimed, err := s.ClaimNextRun(ctx); err != nil || claimed.ID != run.ID {
+			t.Fatalf("claim %s = %+v, %v", ref, claimed, err)
+		}
+		now = now.Add(time.Minute)
+		if _, err := s.MarkRunAdmitted(ctx, run.ID); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.SetRunJobName(ctx, run.ID, "wf-"+run.ID); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.MarkRunSubmitted(ctx, run.ID); err != nil {
+			t.Fatal(err)
+		}
+		now = now.Add(time.Minute)
+		if _, err := s.FinishRun(ctx, run.ID, model.RunResult{Status: model.RunPassed, Phase: "passed"}); err != nil {
+			t.Fatal(err)
+		}
+		return run
+	}
+	a := finish("a", "a")
+	b := finish("b", "b")
+	c := finish("c", "c")
+	firstQueued := enqueue("queued-1", "d")
+	secondQueued := enqueue("queued-2", "e")
+	first, err := s.ListRecentRuns(ctx, model.RunListFilter{Limit: 2})
+	if err != nil || strings.Join(runIDs(first), ",") != strings.Join([]string{firstQueued.ID, secondQueued.ID, c.ID, b.ID}, ",") {
+		t.Fatalf("flat first page = %v, %v", runIDs(first), err)
+	}
+	// Admission changes the first page but cannot duplicate the moved run on
+	// the older page, whose cursor is the admitted run B's fixed start time.
+	if claimed, err := s.ClaimNextRun(ctx); err != nil || claimed.ID != firstQueued.ID {
+		t.Fatalf("claim queued run = %+v, %v", claimed, err)
+	}
+	now = now.Add(time.Minute)
+	if _, err := s.MarkRunAdmitted(ctx, firstQueued.ID); err != nil {
+		t.Fatal(err)
+	}
+	older, err := s.ListRecentRuns(ctx, model.RunListFilter{Limit: 2, BeforeRun: b.ID})
+	if err != nil || strings.Join(runIDs(older), ",") != a.ID {
+		t.Fatalf("older page after admission = %v, %v", runIDs(older), err)
+	}
+	// A queued run cancelled before admission has no start time; its end
+	// time places it among dated rows, ahead of older admitted runs.
+	neverAdmitted := enqueue("cancelled", "f")
+	now = now.Add(time.Minute)
+	if _, err := s.CancelRun(ctx, model.RunCancelRequest{RunID: neverAdmitted.ID, Actor: "owner@host"}); err != nil {
+		t.Fatal(err)
+	}
+	current, err := s.ListRecentRuns(ctx, model.RunListFilter{Limit: 2})
+	if err != nil || strings.Join(runIDs(current), ",") != strings.Join([]string{secondQueued.ID, neverAdmitted.ID, firstQueued.ID}, ",") {
+		t.Fatalf("never-admitted terminal order = %v, %v", runIDs(current), err)
+	}
+}

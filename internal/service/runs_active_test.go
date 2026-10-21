@@ -122,14 +122,15 @@ func TestActiveRunsOrderAndWaitReasons(t *testing.T) {
 		t.Fatalf("queued run = %#v", queuedEntry.Scheduling)
 	}
 
-	// The history view holds the finished run only; the default list is
-	// every run, newest first, exactly as before.
+	// The history view holds the finished run only; the default has one
+	// queue-first list followed by admitted runs in admission-time order.
 	history, err := service.Runs(ctx, api.Actor{Identity: "agent@host"}, api.RunFilter{View: api.RunViewHistory, Limit: 50})
 	if err != nil || len(history.([]model.Run)) != 1 || history.([]model.Run)[0].ID != done.ID {
 		t.Fatalf("history = %#v, %v", history, err)
 	}
 	all, err := service.Runs(ctx, api.Actor{Identity: "agent@host"}, api.RunFilter{Limit: 50})
-	if err != nil || len(all.([]model.Run)) != 6 || all.([]model.Run)[0].ID != queued.ID {
+	if err != nil || len(all.([]model.Run)) != 6 || all.([]model.Run)[0].ID != vm.ID ||
+		all.([]model.Run)[3].ID != queued.ID || all.([]model.Run)[4].ID != done.ID {
 		t.Fatalf("default list = %#v, %v", all, err)
 	}
 
@@ -152,9 +153,9 @@ func TestActiveRunsOrderAndWaitReasons(t *testing.T) {
 	}
 }
 
-// run_list without view, and with view "all", answers byte for byte as it
-// did before views existed.
-func TestRunListDefaultViewUnchanged(t *testing.T) {
+// The default and explicit all views return the same queue-first list. A
+// bounded first page carries the whole queue even when it exceeds limit.
+func TestRunListDefaultViewCarriesWholeQueue(t *testing.T) {
 	fixture := newControlFixture(t)
 	ctx := context.Background()
 	for _, branch := range []string{"feature/one", "feature/two", "feature/three"} {
@@ -168,34 +169,28 @@ func TestRunListDefaultViewUnchanged(t *testing.T) {
 	}
 	service := fixture.api(t)
 	actor := api.Actor{Identity: "agent@host"}
-	encode := func(arguments string) []byte {
+	list := func(arguments string) api.RunListResponse {
 		t.Helper()
 		value, err := service.CallTool(ctx, actor, "run_list", json.RawMessage(arguments))
 		if err != nil {
 			t.Fatal(err)
 		}
-		encoded, err := json.Marshal(value)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return encoded
+		return value.(api.RunListResponse)
 	}
-	// The pre-view encoding: the runs array and next_before when full.
-	runs, err := fixture.store.ListRecentRuns(ctx, model.RunListFilter{Limit: 2})
-	if err != nil {
-		t.Fatal(err)
-	}
-	for index := range runs {
-		runs[index] = visibleRun(runs[index])
-	}
-	want, _ := json.Marshal(api.RunListResponse{Runs: runs, NextBefore: runs[1].QueueSequence})
 	for _, arguments := range []string{`{"limit":2}`, `{"limit":2,"view":"all"}`, `{"limit":2,"view":""}`} {
-		if got := encode(arguments); !bytes.Equal(got, want) {
-			t.Fatalf("run_list %s =\n%s\nwant\n%s", arguments, got, want)
+		page := list(arguments)
+		runs := page.Runs.([]model.Run)
+		if len(runs) != 3 || page.NextBefore != 0 || page.NextCursor != "" {
+			t.Fatalf("run_list %s = %+v", arguments, page)
+		}
+		for position, run := range runs {
+			if run.DisplayStatus != "queued" || run.Scheduling == nil || run.Scheduling.QueuePosition != int64(position+1) {
+				t.Fatalf("queue position %d: %+v", position+1, run)
+			}
 		}
 	}
-	if !bytes.Equal(encode(`{}`), encode(`{"view":"all"}`)) {
-		t.Fatal("view all differs from the default")
+	if got := list(`{}`).Runs.([]model.Run); len(got) != 3 || got[0].Ref != "feature/one" {
+		t.Fatalf("default list = %+v", got)
 	}
 }
 

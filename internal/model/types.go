@@ -119,9 +119,10 @@ type RepositorySpec struct {
 type Run struct {
 	ID            string
 	QueueSequence int64
-	// DisplayStatus is a read-side label used by explicit presentation views.
-	// Durable Status and the default run-list JSON remain unchanged.
-	DisplayStatus string `json:"display_status,omitempty"`
+	// Display fields are read-side projections; durable Status is unchanged.
+	DisplayStatus string         `json:"display_status,omitempty"`
+	DisplayReason string         `json:"display_reason"`
+	Scheduling    *RunScheduling `json:"Scheduling,omitempty"`
 	RepoID        int64
 	RefKind       RefKind
 	Ref           string
@@ -185,6 +186,8 @@ type RunListFilter struct {
 	// Before is an exclusive QueueSequence cursor: zero starts at the newest
 	// run, a page's last QueueSequence fetches the next older page.
 	Before int64
+	// BeforeRun is the resolved run ID for the default list's time cursor.
+	BeforeRun string
 	// RepoIDs, when non-nil, keeps only runs of these repositories; an empty
 	// slice matches none. Nil lists every repository (#073).
 	RepoIDs []int64

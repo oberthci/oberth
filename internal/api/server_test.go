@@ -1037,7 +1037,7 @@ func TestRunCountsRoute(t *testing.T) {
 // keeping the body a plain array for existing clients (#050).
 func TestRunsPagesWithBeforeCursor(t *testing.T) {
 	server, backend := testServer(t)
-	backend.runPage = []model.Run{{ID: "a", QueueSequence: 9}, {ID: "b", QueueSequence: 7}}
+	backend.runPage = []model.Run{{ID: "a", QueueSequence: 9, Status: model.RunPassed}, {ID: "b", QueueSequence: 7, Status: model.RunPassed}}
 	request := httptest.NewRequest(http.MethodGet, "/api/runs?limit=2&before=10", nil)
 	request.Header.Set("Authorization", "Bearer valid-token")
 	response := httptest.NewRecorder()
@@ -1061,7 +1061,7 @@ func TestRunsPagesWithBeforeCursor(t *testing.T) {
 // and an unknown view is refused before the service sees it.
 func TestRunsViewParameter(t *testing.T) {
 	server, backend := testServer(t)
-	backend.runPage = []model.Run{{ID: "a", QueueSequence: 9}, {ID: "b", QueueSequence: 7}}
+	backend.runPage = []model.Run{{ID: "a", QueueSequence: 9, Status: model.RunPassed}, {ID: "b", QueueSequence: 7, Status: model.RunPassed}}
 	for _, view := range []string{"", "all", "history", "active"} {
 		request := httptest.NewRequest(http.MethodGet, "/api/runs?limit=2&view="+view, nil)
 		request.Header.Set("Authorization", "Bearer valid-token")
@@ -1088,7 +1088,7 @@ func TestRunsViewParameter(t *testing.T) {
 // oldest run's ID, and ?before accepts that ID back.
 func TestRunsPagesByRunIDWhenSequencesAreWithheld(t *testing.T) {
 	server, backend := testServer(t)
-	backend.runPage = []model.Run{{ID: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, {ID: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}}
+	backend.runPage = []model.Run{{ID: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Status: model.RunPassed}, {ID: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", Status: model.RunPassed}}
 	request := httptest.NewRequest(http.MethodGet, "/api/runs?limit=2&before=cccccccccccccccccccccccccccccccc", nil)
 	request.Header.Set("Authorization", "Bearer valid-token")
 	response := httptest.NewRecorder()

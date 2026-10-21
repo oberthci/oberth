@@ -569,7 +569,7 @@ func TestRunsActivePrintsTheQueue(t *testing.T) {
 	if started < 0 || head < started || queued < head {
 		t.Fatalf("order not preserved:\n%s", body)
 	}
-	for _, want := range []string{"XL/12", "Need 12 weight; 3/20 used", "q1"} {
+	for _, want := range []string{"XL/12", "Need 12 weight; 3/20 used", "2    run-queued"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("output missing %q:\n%s", want, body)
 		}

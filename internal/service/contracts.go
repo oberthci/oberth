@@ -85,6 +85,7 @@ type RunQueueStore interface {
 	EnqueueReceiveEvent(context.Context, model.ReceiveEventSpec, model.RunSpec) (model.EnqueueRunResult, error)
 	ClaimNextRun(context.Context) (model.Run, error)
 	MarkRunSubmitted(context.Context, string) (model.Run, error)
+	MarkRunAdmitted(context.Context, string) (model.Run, error)
 	Run(context.Context, string) (model.Run, error)
 	SetRunJobName(context.Context, string, string) (model.Run, error)
 	SetRunCredentialed(context.Context, string) error
@@ -466,6 +467,7 @@ type PushResult struct {
 type StatusResponse struct {
 	Scheduling    *model.RunScheduling `json:"scheduling,omitempty"`
 	DisplayStatus string               `json:"display_status,omitempty"`
+	DisplayReason string               `json:"display_reason"`
 	Repository    model.Repository     `json:"-"`
 	Run           model.Run            `json:"-"`
 	Steps         []model.StepResult   `json:"-"`
@@ -503,6 +505,7 @@ type LiveLogResponse struct {
 	RunID         string `json:"run_id"`
 	Status        string `json:"status"`
 	DisplayStatus string `json:"display_status,omitempty"`
+	DisplayReason string `json:"display_reason"`
 	Chunk         string `json:"chunk"`
 	Offset        int64  `json:"offset"`
 	Size          int64  `json:"size"`

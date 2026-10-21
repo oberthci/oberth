@@ -116,6 +116,11 @@ func (service *API) scheduling(ctx context.Context, run model.Run, steps []model
 		result.Message = "Waiting for workflow submission."
 		return result
 	}
+	if service.submittedKVMPreflight(ctx, run) {
+		result.State = "preflight"
+		result.Message = "Trusted KVM preflight submitted; awaiting its result and cleanup before workflow submission."
+		return result
+	}
 	if service.schedulingObserver == nil {
 		return result
 	}

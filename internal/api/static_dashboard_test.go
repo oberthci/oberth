@@ -175,10 +175,9 @@ func TestDashboardFoldsExecutorLines(t *testing.T) {
 	}
 }
 
-// The runs page shows Active (running, then the queue in admission order,
-// with position, size/weight and wait reason) above a History of terminal
-// runs only, so a waiting run is never buried among newer finished ones.
-func TestRunsPageSplitsActiveFromHistory(t *testing.T) {
+// The dashboard renders the default flat list once. Queue rows carry their
+// place and the head badge in that table; there are no separate sections.
+func TestRunsPageIsOneFlatFilteredList(t *testing.T) {
 	t.Parallel()
 	script, ok := staticAssets["app.js"]
 	if !ok {
@@ -197,53 +196,43 @@ func TestRunsPageSplitsActiveFromHistory(t *testing.T) {
 		}
 		return source[from : from+to]
 	}
-	// History is terminal-only on every page; the active list is its own view.
-	for _, want := range []string{"`/api/runs?view=history&limit=${runPageSize}`", `new URLSearchParams({ view: "history", limit: String(runPageSize) })`, `api("/api/runs?view=active")`} {
+	for _, want := range []string{"`/api/runs?limit=${runPageSize}`", `new URLSearchParams({ limit: String(runPageSize) })`, `api("/api/runs?view=active")`} {
 		if !strings.Contains(source, want) {
 			t.Fatalf("app.js run loading is missing %s", want)
 		}
 	}
-	if strings.Contains(source, "`/api/runs?limit=") {
-		t.Fatal("the runs page still loads the mixed list, which repeats active runs in history")
-	}
 	render := section("async function renderRuns(seq)", "\n/* ---------- run detail")
-	for _, want := range []string{"loadActiveRuns()", "setAuto(listPollMs)", `${page === 1 ? activeSection(active, state.active) : ""}`, `<h2 class="section-title">History</h2>`} {
+	for _, want := range []string{"loadActiveRuns()", "setAuto(listPollMs)", "runsTable(visible)", "runFilters.map"} {
 		if !strings.Contains(render, want) {
 			t.Fatalf("renderRuns is missing %s", want)
 		}
 	}
-	if strings.Index(render, "activeSection(") > strings.Index(render, `section-title">History`) {
-		t.Fatal("the active section must render above history")
-	}
-	// Running before Queue; the queue shows position, size and the reason.
-	active := section("function activeSection(", "\nfunction runsTable(")
-	if running, queue := strings.Index(active, "Running <span"), strings.Index(active, "Queue <span"); running < 0 || queue < running {
-		t.Fatal("the active section must list running runs above the queue")
-	}
-	if !strings.Contains(active, "Queue head blocked by") || !strings.Contains(active, "queueBlocker(all.filter(run => !run.StartedAt))") {
-		t.Fatal("the active section does not name the run blocking the queue head across repositories")
+	for _, unwanted := range []string{"activeSection(", "queueTable(", "runningTable(", "Queue head blocked by", "section-title", "section-sub"} {
+		if strings.Contains(render, unwanted) || strings.Contains(source, "function "+unwanted) {
+			t.Fatalf("runs page still has separate section %q", unwanted)
+		}
 	}
 	blocker := section("function queueBlocker(", "\nfunction queuePosition(")
-	for _, want := range []string{"!admission.vm_capacity", "!admission.group_holder", "!admission.group_ahead", "admission.weight > admission.capacity - admission.used"} {
+	for _, want := range []string{"admissionOf(run)?.head_of_queue"} {
 		if !strings.Contains(blocker, want) {
-			t.Fatalf("queueBlocker is missing %s: group and VM waiters hold no place", want)
+			t.Fatalf("queueBlocker is missing the gate's head marker %s", want)
 		}
 	}
-	queue := section("function queueTable(", "\nfunction activeSection(")
-	for _, want := range []string{"<div>position</div>", "<div>size</div>", "<div>reason</div>", "queuePosition(run)", "queueSize(run)", `" blocking"`} {
-		if !strings.Contains(queue, want) {
-			t.Fatalf("queueTable is missing %s", want)
+	position := section("function queuePosition(", "\nfunction queueSize(")
+	if !strings.Contains(position, "String(run.Scheduling.queue_position)") || strings.Contains(position, "`#") || strings.Contains(position, "q#") {
+		t.Fatalf("queue position is not one plain 1..N numbering: %s", position)
+	}
+	table := section("function runsTable(", "\nasync function renderRuns(")
+	for _, want := range []string{"queuePosition(run)", "queueSize(run)", `" blocking"`, `>head</span>`, "runMessageCell(run, blocker)", "runTimeLabel(run)"} {
+		if !strings.Contains(table, want) {
+			t.Fatalf("flat runs table is missing %s", want)
 		}
 	}
-	if !strings.Contains(source, "blocks queue head: need ${admission.weight} weight; ${admission.used}/${admission.capacity} used") {
+	if !strings.Contains(source, "needs ${admission.weight} weight; ${admission.used}/${admission.capacity} used") {
 		t.Fatal("the blocking run does not say what it needs")
 	}
-	running := section("function runningTable(", "\nfunction queueTable(")
-	if !strings.Contains(running, "<div>elapsed</div>") || !strings.Contains(running, "spanSeconds(run.StartedAt, null, true)") {
-		t.Fatal("running runs do not show elapsed time")
-	}
 	css := string(staticAssets["app.css"].body)
-	for _, want := range []string{".trow.blocking", ".queue-blocked", ".section-title"} {
+	for _, want := range []string{".trow.blocking", ".queue-pos", ".run-successor"} {
 		if !strings.Contains(css, want) {
 			t.Fatalf("app.css is missing %s", want)
 		}

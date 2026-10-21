@@ -20,7 +20,7 @@ func (jobs *submissionInspectingJobs) CreateCI(ctx context.Context, request JobR
 	return jobs.fakeJobs.CreateCI(ctx, request)
 }
 
-func TestSchedulerStartsRunAfterWorkflowCreation(t *testing.T) {
+func TestSchedulerStartsRunAtWeightedAdmission(t *testing.T) {
 	fixture := newControlFixture(t, JobResult{Status: model.RunPassed, Phase: "passed"})
 	observed := false
 	fixture.scheduler.jobs = &submissionInspectingJobs{fakeJobs: fixture.jobs, inspect: func(ctx context.Context, request JobRequest) error {
@@ -29,8 +29,8 @@ func TestSchedulerStartsRunAfterWorkflowCreation(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		if run.StartedAt != nil || run.Phase != "waiting" {
-			t.Fatalf("run started before workflow creation: %#v", run)
+		if run.StartedAt == nil || run.Phase != "waiting" {
+			t.Fatalf("admitted run has no start time before workflow creation: %#v", run)
 		}
 		return nil
 	}}
@@ -47,6 +47,6 @@ func TestSchedulerStartsRunAfterWorkflowCreation(t *testing.T) {
 	}
 	run, err := fixture.store.Run(ctx, enqueued.ID)
 	if err != nil || !observed || run.StartedAt == nil || run.StartedAt.Before(run.QueuedAt) {
-		t.Fatalf("workflow submission did not start run: %#v, observed=%v, err=%v", run, observed, err)
+		t.Fatalf("weighted admission did not start run: %#v, observed=%v, err=%v", run, observed, err)
 	}
 }

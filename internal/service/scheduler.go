@@ -681,6 +681,19 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 		_ = logFile.Close()
 		return err
 	}
+	current, err = scheduler.store.MarkRunAdmitted(ctx, run.ID)
+	if err != nil {
+		_ = logFile.Close()
+		return scheduler.finishInfrastructureFailure(ctx, run, repository, fmt.Errorf("record weighted admission: %w", err))
+	}
+	if current.Preempted() {
+		_ = logFile.Close()
+		if err := scheduler.completePendingCancellationsWithGate(ctx, require); err != nil {
+			return err
+		}
+		scheduler.signals.NotifyRun(run.ID)
+		return nil
+	}
 	{
 		upstream, upstreamErr := scheduler.store.Upstream(ctx, repository.UpstreamID)
 		if upstreamErr != nil {

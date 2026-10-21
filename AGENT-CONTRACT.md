@@ -933,28 +933,35 @@ continuity checks; it must never be used to reset or bypass those checks.
   reservation is known to be still held and before its weight and group are
   freed; a reservation its owner released meanwhile is reported as not found
   and not audited. The same grant pass admits the runs behind it.
-- Run list views: `/api/runs` and MCP `run_list` keep their default body,
-  order (`queue_sequence` descending) and paging byte for byte when no view
-  is given or the view is `all`. `view=history` (`?view=history`) keeps only
-  terminal runs with the same cursor paging, so it never repeats an active
-  run. `view=active` returns every `queued`, `waiting` and `running` run,
-  unpaged and capped at 500, ordered as the scheduler works: started runs by
-  `started_at` ascending, then claimed runs admitted and awaiting submission,
-  then the other claimed runs in admission order (`queue_sequence` ascending,
-  the weighted gate's FIFO), then unclaimed queued runs in accepted order.
-  Each not-yet-started entry adds `Scheduling` (the `run_get` observation,
-  admission only: no Workflow or Pod reads); a `before` cursor is refused.
-  The view honours repository/ref filters and uplink scope, with sequences,
-  positions and capacity withheld from a scoped uplink. Group waiters and
-  VM-parked runs can legitimately be overtaken by newer work, and their
-  `Scheduling` message says why; a superseded run is terminal and leaves it.
-  `display_status` presents every run without `started_at` as `queued`, with
-  `Scheduling` naming the reason. Terminal interruptions display as
-  `superseded` when linked to a successor, `cancelled` when explicitly
-  cancelled, and `interrupted` for restart or infrastructure loss (#1090).
-  Durable statuses and the default `/api/runs` and MCP `run_list` encodings
-  remain unchanged; explicit active/history/detail views add the display
-  label. `RunStatus.Valid` stays store-only and refuses `waiting`.
+- Run list views (#1122): `/api/runs`, MCP `run_list`, `oberth runs` and the
+  dashboard use one default order. The first page carries every not-yet-
+  admitted run, capped at 500, in queue position order; below it, admitted
+  and terminal runs sort by `started_at` descending, breaking ties by ID.
+  A terminal run that was never admitted sorts by `finished_at`. The dated
+  portion pages by that fixed (time, ID) key, using the last run's sequence
+  or ID as the external cursor; an admission between page loads cannot move
+  an already-seen run onto the next page. The queue has one dense position
+  numbering, and each queued run carries its scheduling reason. `started_at`
+  is recorded when weighted admission is granted, including before a trusted
+  KVM preflight; Workflow submission preserves it. `view=history` retains its
+  terminal-only sequence paging; `view=active` remains an unpaged, bounded
+  compatibility view. Repository/ref filters and uplink scope apply to both.
+  Durable `Status` values are unchanged and `RunStatus.Valid` still refuses
+  the read-only `waiting` projection.
+
+  | Durable cause | `display_status` | `display_reason` |
+  | --- | --- | --- |
+  | queued or claimed before admission | `queued` | scheduling observation |
+  | admitted, including trusted preflight | `running` | empty (phase is `preflight` while its VM executes) |
+  | passed CI / published release | `passed` / `delivered` | empty |
+  | failed step or infrastructure | `failed` | empty; error and failed step remain separately available |
+  | superseded by a different SHA | `cancelled` | `superseded by <short SHA>`; successor run remains linked |
+  | restart re-fire at the same SHA | `cancelled` | `server restart, re-queued as <run>` |
+  | explicit cancel | `cancelled` | `cancelled by <actor>: <reason>` |
+  | restart requiring an operator retry | `cancelled` | `server restart, retry needed` |
+
+  The display pair is additive on default API, MCP and CLI responses; retry
+  and rerun eligibility still uses the durable cause.
 - Execution scheduling observation has a two-second request budget, one exact
   Workflow read bound to run ID and effective tested SHA, and one namespaced
   Pod list (limit 16) whose entries must have the exact Workflow controller UID.

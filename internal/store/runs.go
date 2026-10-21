@@ -278,17 +278,44 @@ RETURNING `+runColumns, now))
 	return value, nil
 }
 
-// MarkRunSubmitted records the start only after the execution object was
-// created. A claimed run waiting on checkout or weighted admission has no
-// start time. Superseded runs cannot acquire one after cancellation wins.
+// MarkRunAdmitted records when the weighted gate grants a run. The run is
+// visibly running from this point, including during a trusted VM preflight.
+// A cancellation that won before the grant cannot acquire a start time.
+func (s *Store) MarkRunAdmitted(ctx context.Context, id string) (model.Run, error) {
+	if strings.TrimSpace(id) == "" {
+		return model.Run{}, fmt.Errorf("%w: run ID is required", ErrInvalid)
+	}
+	now := unixNano(s.now())
+	value, err := scanRun(s.db.QueryRowContext(ctx, `
+UPDATE runs SET started_at = ?, updated_at = ?
+WHERE id = ? AND status = 'running' AND started_at IS NULL
+RETURNING `+runColumns, now, now, id))
+	if errors.Is(err, sql.ErrNoRows) {
+		current, lookupErr := s.Run(ctx, id)
+		if lookupErr != nil {
+			return model.Run{}, lookupErr
+		}
+		if current.Preempted() {
+			return current, nil
+		}
+		return model.Run{}, fmt.Errorf("%w: run is not awaiting admission", ErrInvalidState)
+	}
+	if err != nil {
+		return model.Run{}, fmt.Errorf("mark run admitted: %w", err)
+	}
+	return value, nil
+}
+
+// MarkRunSubmitted records that the execution object exists. Older callers
+// that submit without a separate grant still receive a start time here.
 func (s *Store) MarkRunSubmitted(ctx context.Context, id string) (model.Run, error) {
 	if strings.TrimSpace(id) == "" {
 		return model.Run{}, fmt.Errorf("%w: run ID is required", ErrInvalid)
 	}
 	now := unixNano(s.now())
 	value, err := scanRun(s.db.QueryRowContext(ctx, `
-UPDATE runs SET phase = 'running', started_at = ?, updated_at = ?
-WHERE id = ? AND status = 'running' AND started_at IS NULL AND job_name != ''
+UPDATE runs SET phase = 'running', started_at = COALESCE(started_at, ?), updated_at = ?
+WHERE id = ? AND status = 'running' AND phase = 'waiting' AND job_name != ''
 RETURNING `+runColumns, now, now, id))
 	if errors.Is(err, sql.ErrNoRows) {
 		current, lookupErr := s.Run(ctx, id)
@@ -837,6 +864,9 @@ RETURNING `+runColumns,
 }
 
 func (s *Store) ListRecentRuns(ctx context.Context, filter model.RunListFilter) ([]model.Run, error) {
+	if !filter.Terminal {
+		return s.listFlatRuns(ctx, filter)
+	}
 	restriction, restrictionArgs := repoRestriction("repo_id", filter.RepoIDs)
 	args := append([]any{filter.RepoID, filter.RepoID, filter.Ref, filter.Ref, filter.Before, filter.Before, filter.Terminal}, restrictionArgs...)
 	rows, err := s.db.QueryContext(ctx, `
@@ -860,6 +890,98 @@ ORDER BY queue_sequence DESC LIMIT ?`, append(args, pageLimit(filter.Limit))...)
 		return nil, fmt.Errorf("list recent runs: %w", err)
 	}
 	return runs, nil
+}
+
+// listFlatRuns puts the entire bounded queue on the first page. The remaining
+// page uses a fixed (admission/end time, ID) cursor: a run admitted between
+// page loads cannot move onto an older page and appear twice.
+func (s *Store) listFlatRuns(ctx context.Context, filter model.RunListFilter) ([]model.Run, error) {
+	restriction, restrictionArgs := repoRestriction("repo_id", filter.RepoIDs)
+	runs := make([]model.Run, 0)
+	if filter.Before == 0 && filter.BeforeRun == "" {
+		queued, err := func() ([]model.Run, error) {
+			args := append([]any{filter.RepoID, filter.RepoID, filter.Ref, filter.Ref}, restrictionArgs...)
+			rows, err := s.db.QueryContext(ctx, `
+SELECT `+runColumns+` FROM runs
+WHERE (status = 'queued' OR (status = 'running' AND started_at IS NULL))
+  AND (? = 0 OR repo_id = ?) AND (? = '' OR ref = ?)`+restriction+`
+ORDER BY queue_sequence LIMIT ?`, append(args, MaxActiveRuns)...) // #nosec G202 -- fixed columns and parameterized restriction.
+			if err != nil {
+				return nil, fmt.Errorf("list queued runs: %w", err)
+			}
+			defer func() { _ = rows.Close() }()
+			queued := make([]model.Run, 0)
+			for rows.Next() {
+				value, scanErr := scanRun(rows)
+				if scanErr != nil {
+					return nil, fmt.Errorf("scan queued run: %w", scanErr)
+				}
+				queued = append(queued, value)
+			}
+			if err := rows.Err(); err != nil {
+				return nil, fmt.Errorf("list queued runs: %w", err)
+			}
+			return queued, nil
+		}()
+		if err != nil {
+			return nil, err
+		}
+		runs = append(runs, queued...)
+	}
+	var beforeTime int64
+	var beforeID string
+	if filter.BeforeRun != "" || filter.Before > 0 {
+		var cursor model.Run
+		var err error
+		if filter.BeforeRun != "" {
+			cursor, err = scanRun(s.db.QueryRowContext(ctx, `SELECT `+runColumns+` FROM runs WHERE id = ?`, filter.BeforeRun))
+		} else {
+			cursor, err = scanRun(s.db.QueryRowContext(ctx, `SELECT `+runColumns+` FROM runs WHERE queue_sequence = ?`, filter.Before))
+		}
+		if errors.Is(err, sql.ErrNoRows) {
+			return runs, nil
+		}
+		if err != nil {
+			return nil, fmt.Errorf("read run list cursor: %w", err)
+		}
+		beforeID = cursor.ID
+		beforeTime = unixNano(runListTime(cursor))
+	}
+	args := append([]any{filter.RepoID, filter.RepoID, filter.Ref, filter.Ref,
+		beforeID, beforeTime, beforeTime, beforeID}, restrictionArgs...)
+	rows, err := s.db.QueryContext(ctx, `
+SELECT `+runColumns+` FROM runs
+WHERE NOT (status = 'queued' OR (status = 'running' AND started_at IS NULL))
+  AND (? = 0 OR repo_id = ?) AND (? = '' OR ref = ?)
+  AND (? = '' OR COALESCE(started_at, finished_at, queued_at) < ?
+       OR (COALESCE(started_at, finished_at, queued_at) = ? AND id < ?))`+restriction+`
+ORDER BY COALESCE(started_at, finished_at, queued_at) DESC, id DESC
+LIMIT ?`, append(args, pageLimit(filter.Limit))...) // #nosec G202 -- fixed columns and parameterized restriction.
+	if err != nil {
+		return nil, fmt.Errorf("list admitted runs: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		value, scanErr := scanRun(rows)
+		if scanErr != nil {
+			return nil, fmt.Errorf("scan admitted run: %w", scanErr)
+		}
+		runs = append(runs, value)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list admitted runs: %w", err)
+	}
+	return runs, nil
+}
+
+func runListTime(run model.Run) time.Time {
+	if run.StartedAt != nil {
+		return *run.StartedAt
+	}
+	if run.FinishedAt != nil {
+		return *run.FinishedAt
+	}
+	return run.QueuedAt
 }
 
 // CountRuns counts the retained runs, in total and per repository, so a

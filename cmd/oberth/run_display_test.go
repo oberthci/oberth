@@ -8,7 +8,7 @@ import (
 	"github.com/oberthci/oberth/internal/model"
 )
 
-func TestCLIDisplayRunStatusKeepsTerminalCausesDistinct(t *testing.T) {
+func TestCLIDisplayRunStatusCombinesCancelledCauses(t *testing.T) {
 	for _, tc := range []struct {
 		run  remoteRun
 		want string
@@ -16,9 +16,9 @@ func TestCLIDisplayRunStatusKeepsTerminalCausesDistinct(t *testing.T) {
 		{remoteRun{Status: "waiting"}, "queued"},
 		{remoteRun{Status: "running"}, "queued"},
 		{remoteRun{Status: "running", StartedAt: ptrTime(time.Now())}, "running"},
-		{remoteRun{Status: "interrupted", SupersededBy: "newer"}, "superseded"},
+		{remoteRun{Status: "interrupted", SupersededBy: "newer"}, "cancelled"},
 		{remoteRun{Status: "interrupted", Phase: model.PhaseCancelled}, "cancelled"},
-		{remoteRun{Status: "interrupted", Reason: "oberth restarted"}, "interrupted"},
+		{remoteRun{Status: "interrupted", Reason: "oberth restarted"}, "cancelled"},
 		{remoteRun{Status: "waiting", DisplayStatus: "queued"}, "queued"},
 	} {
 		if got := displayRunStatus(tc.run); got != tc.want {

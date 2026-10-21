@@ -24,7 +24,7 @@ func TestRunCursorFallsBackToTheRunID(t *testing.T) {
 	if runCursor(remoteRun{ID: "abc", QueueSequence: 7}) != "7" || runCursor(remoteRun{ID: "abc"}) != "abc" {
 		t.Fatal("run cursor")
 	}
-	if !cursorMovedBack("9", "7") || cursorMovedBack("7", "9") || cursorMovedBack("abc", "abc") || !cursorMovedBack("abc", "def") || !cursorMovedBack("abc", "") {
+	if !cursorMovedBack("9", "7") || !cursorMovedBack("7", "9") || cursorMovedBack("abc", "abc") || !cursorMovedBack("abc", "def") || !cursorMovedBack("abc", "") {
 		t.Fatal("cursor progress")
 	}
 }

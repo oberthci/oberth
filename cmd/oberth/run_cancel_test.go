@@ -233,7 +233,7 @@ func TestDisplayRunStatusShowsCancelled(t *testing.T) {
 	if got := displayRunStatus(remoteRun{Status: "interrupted", Phase: "cancelled"}); got != "cancelled" {
 		t.Fatalf("cancelled run displays %q", got)
 	}
-	if got := displayRunStatus(remoteRun{Status: "interrupted", Phase: "interrupted"}); got != "interrupted" {
+	if got := displayRunStatus(remoteRun{Status: "interrupted", Phase: "interrupted"}); got != "cancelled" {
 		t.Fatalf("interrupted run displays %q", got)
 	}
 }
