@@ -10,17 +10,19 @@ import (
 
 	"github.com/oberthci/oberth/internal/argojob"
 	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/store"
 )
 
 type guestGrantLoader struct {
+	budget  store.KubeVirtBudget
 	allowed bool
 	err     error
 	ids     []int64
 }
 
-func (loader *guestGrantLoader) ActiveKubeVirtGrant(_ context.Context, id int64) (bool, error) {
+func (loader *guestGrantLoader) ActiveKubeVirtGrant(_ context.Context, id int64) (store.KubeVirtBudget, bool, error) {
 	loader.ids = append(loader.ids, id)
-	return loader.allowed, loader.err
+	return loader.budget, loader.allowed, loader.err
 }
 
 const guestTestDocument = `apiVersion: argoproj.io/v1alpha1

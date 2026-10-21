@@ -135,9 +135,13 @@ func (p *TrustedPreflights) Execute(ctx context.Context, job service.JobRequest,
 		return err
 	}
 	if p.jobs.kubeVirtGrants != nil {
-		submission.KubeVirtGranted, err = p.jobs.kubeVirtGrants.ActiveKubeVirtGrant(ctx, job.Repository.ID)
-		if err != nil {
-			return fmt.Errorf("preflight load VM grant: %w", err)
+		budget, granted, loadErr := p.jobs.kubeVirtGrants.ActiveKubeVirtGrant(ctx, job.Repository.ID)
+		if loadErr != nil {
+			return fmt.Errorf("preflight load VM grant: %w", loadErr)
+		}
+		submission.KubeVirtGranted = granted
+		if granted {
+			submission.KubeVirtBudget = kubeVirtBudget(budget)
 		}
 	}
 	if preparer, ok := p.jobs.controller.(interface {
