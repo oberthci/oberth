@@ -130,3 +130,63 @@ func TestUnscopedAdminCanDismissOrphanedDeclaration(t *testing.T) {
 		t.Fatalf("pending=%+v %v", pending, err)
 	}
 }
+
+func TestUplinkListReportsPendingActivation(t *testing.T) {
+	fixture := newScopeFixture(t)
+	fixture.service.uplinkLifecycle = &lifecycleStub{statuses: []store.UplinkStatus{{Uplink: model.Uplink{Identity: "pending-worker"}, Pending: true}}}
+	value, err := fixture.call(unscopedActor, "uplink_list", map[string]any{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(value)
+	if err != nil || !strings.Contains(string(encoded), `"pending":true`) || !strings.Contains(string(encoded), `"revoked_at":null`) {
+		t.Fatalf("pending response=%s err=%v", encoded, err)
+	}
+}
+
+type failingRepoGrantLookup struct {
+	KubeVirtGrantStore
+	repoID int64
+}
+
+func (s failingRepoGrantLookup) KubeVirtGrant(ctx context.Context, repoID int64) (store.KubeVirtGrant, error) {
+	if repoID == s.repoID {
+		return store.KubeVirtGrant{}, errors.New("grant lookup failed")
+	}
+	return s.KubeVirtGrantStore.KubeVirtGrant(ctx, repoID)
+}
+
+func TestRepositoryGrantMetadataIsActiveAndBestEffort(t *testing.T) {
+	fixture := newScopeFixture(t)
+	ctx := context.Background()
+	fixture.service.kubeVirtGrants = fixture.store
+	for _, repo := range []model.Repository{fixture.visible, fixture.hidden} {
+		if _, err := fixture.store.SetKubeVirtGrant(ctx, repo.ID, "admin", true, store.KubeVirtBudget{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	check := func(wantVisible bool) {
+		t.Helper()
+		value, err := fixture.call(unscopedActor, "repo_list", map[string]any{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		views := value.(api.RepoListResponse).Repositories.([]RepoView)
+		if len(views) != 2 {
+			t.Fatalf("listing lost repositories: %+v", views)
+		}
+		for _, view := range views {
+			want := view.ID == fixture.hidden.ID || wantVisible
+			if (view.KubeVirtGrant != nil) != want {
+				t.Fatalf("unexpected grant metadata: %+v", view)
+			}
+		}
+	}
+	check(true)
+	if _, err := fixture.store.SetKubeVirtGrant(ctx, fixture.visible.ID, "admin", false, store.KubeVirtBudget{}); err != nil {
+		t.Fatal(err)
+	}
+	check(false)
+	fixture.service.kubeVirtGrants = failingRepoGrantLookup{KubeVirtGrantStore: fixture.store, repoID: fixture.visible.ID}
+	check(false)
+}

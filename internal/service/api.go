@@ -1119,10 +1119,7 @@ func (service *API) Repositories(ctx context.Context, actor api.Actor) (any, err
 		views[i] = RepoView{Repository: repo, LatestRuns: runsByRepo[repo.ID]}
 		if service.kubeVirtGrants != nil {
 			grant, err := service.kubeVirtGrants.KubeVirtGrant(ctx, repo.ID)
-			if err != nil && !errors.Is(err, store.ErrNotFound) {
-				return nil, err
-			}
-			if err == nil {
+			if err == nil && grant.RevokedAt == nil {
 				views[i].KubeVirtGrant = &grant
 			}
 		}

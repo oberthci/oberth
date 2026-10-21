@@ -2461,8 +2461,9 @@ Release admission remains authoritative and forced tag reruns recheck live grant
 ## Remote credential and grant lifecycle (#1105)
 
 `uplink_list` returns public identity, fingerprint, admin flag, scope, creation,
-last-seen and revocation times. All five new lifecycle tools require an
-unscoped admin; ordinary and scoped uplinks are refused. `uplink_revoke` and
+last-seen and revocation times, plus pending activation status. Pending
+credentials have no reported revocation time. All five new lifecycle tools
+require an unscoped admin; ordinary and scoped uplinks are refused. `uplink_revoke` and
 `uplink_rotate` require an unscoped admin and the mutation gate, atomically revoke
 SSH/bearer authority and audit the action, retaining the public registration.
 The last active unscoped admin credential cannot be revoked. Rotation is a
@@ -2474,5 +2475,6 @@ documents at the tested commit, including an empty snapshot. Malformed or
 unreadable documents preserve previous observations. `access_dismiss` is an
 audited unscoped-admin-only exact-tuple deletion; a
 later declaration can reappear. `kubevirt_grant_list` lists active grants for
-all repositories, unscoped-admin-only; repository views include optional grant
-metadata. These additions require no schema or Kubernetes permission changes.
+all repositories, unscoped-admin-only; repository views include optional active
+grant metadata and tolerate individual grant lookup failures. These additions
+require no schema or Kubernetes permission changes.
