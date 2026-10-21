@@ -2167,9 +2167,8 @@ alone is never evidence that missing migrations ran.
 | v26 | Unreleased (#1021) | size_grants: audited per-repository maximum admission size (L or XL; no active row means L); `CREATE TABLE IF NOT EXISTS` | Database restore |
 | v27 | Unreleased (#1085) | admission_head_waits: when a commit's run first waited at the admission queue head, so bounded backfill keeps its clock across a restart; `CREATE TABLE IF NOT EXISTS` | Database restore |
 | v28 | Unreleased (#1092) | Backfilled run admission_sequence retains FIFO order across restart re-fires; queue_sequence remains the history cursor | Database restore |
-
-| v29 | Reserved (#1102) | In-flight prerequisite; supplied by #1102 before v30 | Database restore |
-| v30 | Pending (#1128) | Versioned immutable run milestones, admission episodes, expanded task identity and bounded step timing | Database restore |
+| v29 | Unreleased (#1102) | Partial index on audit_actions (repository_archive_actions_idx) for the repository archive/unarchive projection | Database restore |
+| v30 | Unreleased (#1128) | Versioned immutable run milestones, admission episodes, expanded task identity and bounded step timing | Database restore |
 
 **Contract test:** `TestEveryMigrationDocumentedInAgentContract` asserts that
 every migration version in `internal/store/schema.go` has a corresponding
