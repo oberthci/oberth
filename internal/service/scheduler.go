@@ -560,7 +560,7 @@ func (scheduler *Scheduler) executeAndCleanupReservedWithGate(
 	}
 	cleanupCtx, cancelCleanup := boundedWorkspaceCleanupContext(ctx)
 	defer cancelCleanup()
-	if branchRunAdoptable(run) {
+	if workflowRunAdoptable(run) {
 		current, err := scheduler.store.Run(cleanupCtx, run.ID)
 		if err != nil {
 			return errors.Join(executeErr, err)
@@ -833,7 +833,7 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 		err = scheduler.jobs.CreateCI(ctx, jobRequest)
 	}
 	if err != nil {
-		if _, ok := scheduler.jobs.(JobAdopter); ok && branchRunAdoptable(run) && ctx.Err() != nil {
+		if _, ok := scheduler.jobs.(JobAdopter); ok && workflowRunAdoptable(run) && ctx.Err() != nil {
 			reservation.retain()
 			return logFile.Close()
 		}
@@ -843,7 +843,7 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 	reservation.markSubmitted()
 	current, err = scheduler.store.MarkRunSubmitted(ctx, run.ID)
 	if err != nil {
-		if _, ok := scheduler.jobs.(JobAdopter); ok && branchRunAdoptable(run) && ctx.Err() != nil {
+		if _, ok := scheduler.jobs.(JobAdopter); ok && workflowRunAdoptable(run) && ctx.Err() != nil {
 			reservation.retain()
 			return logFile.Close()
 		}
@@ -934,7 +934,7 @@ func (scheduler *Scheduler) observeRun(ctx context.Context, run model.Run, repos
 	if ctx.Err() != nil {
 		finalizeCtx, cancelFinalize = context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancelFinalize()
-		if _, ok := scheduler.jobs.(JobAdopter); ok && branchRunAdoptable(run) {
+		if _, ok := scheduler.jobs.(JobAdopter); ok && workflowRunAdoptable(run) {
 			if waitErr != nil || !jobResult.Status.Terminal() {
 				// The next owner resumes this exact Workflow. A terminal
 				// observation already returned by Wait can finalize here.
@@ -1390,7 +1390,7 @@ func (scheduler *Scheduler) finishInfrastructureFailure(ctx context.Context, run
 
 // reconcileStrandedRunsWithGate queries K8s for runs that were in-flight when
 // the previous scheduler process stopped. Runs whose Jobs completed get their
-// real durable result; eligible branch Workflows resume under the same run.
+// real durable result; eligible Workflows resume under the same run.
 // Absent Workflows and other run kinds keep their existing fallback. This
 // must run before completePendingCancellationsWithGate,
 // which would delete the K8s Jobs before their terminal state can be read.
@@ -1403,7 +1403,7 @@ func (scheduler *Scheduler) reconcileStrandedRunsWithGate(ctx context.Context, r
 		return fmt.Errorf("load stranded runs for reconciliation: %w", err)
 	}
 	for _, run := range runs {
-		if adopter, ok := scheduler.jobs.(JobAdopter); ok && branchRunAdoptable(run) {
+		if adopter, ok := scheduler.jobs.(JobAdopter); ok && workflowRunAdoptable(run) {
 			eligible, err := scheduler.withoutPendingPreflight(ctx, run)
 			if err != nil {
 				return err

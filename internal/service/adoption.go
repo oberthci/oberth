@@ -18,8 +18,12 @@ type adoptedRun struct {
 	reservation *admissionReservation
 }
 
-func branchRunAdoptable(run model.Run) bool {
-	return run.RefKind == model.RefBranch && !run.Release && run.Trigger != "promotion"
+// Workflow adoption keeps the durable run classification; the engine checks
+// the exact trigger, source and credential-bearing spec before resuming it.
+func workflowRunAdoptable(run model.Run) bool {
+	// Argo admits tag pipelines only through the durable release capability.
+	// Historical non-release tag Jobs keep the conservative legacy fallback.
+	return run.RefKind == model.RefBranch || (run.RefKind == model.RefTag && run.Release)
 }
 
 func (scheduler *Scheduler) withoutPendingPreflight(ctx context.Context, run model.Run) (bool, error) {
@@ -151,5 +155,14 @@ func (scheduler *Scheduler) resumeAdoptedRun(ctx context.Context, run model.Run,
 	if lookupErr != nil || !current.Status.Terminal() {
 		return errors.Join(err, lookupErr)
 	}
-	return errors.Join(err, scheduler.workspaces.cleanupRun(cleanupCtx, run.ID))
+	cleanupErr := scheduler.workspaces.cleanupRun(cleanupCtx, run.ID)
+	if run.Trigger == "promotion" {
+		promotion, promotionErr := scheduler.store.PromotionByRun(cleanupCtx, run.ID)
+		if promotionErr != nil {
+			cleanupErr = errors.Join(cleanupErr, promotionErr)
+		} else {
+			cleanupErr = errors.Join(cleanupErr, scheduler.workspaces.cleanupPromotion(cleanupCtx, promotion.ID))
+		}
+	}
+	return errors.Join(err, cleanupErr)
 }

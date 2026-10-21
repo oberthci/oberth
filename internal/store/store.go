@@ -816,10 +816,9 @@ INSERT INTO run_cancellations(run_id, job_name, superseded_by, reason, created_a
 SELECT id, job_name, '', 'owner_restart', ?
 FROM runs
 WHERE status = 'running' AND job_name != ''
-  AND (ref_kind != 'branch' OR release != 0 OR trigger = 'promotion'
-       OR EXISTS (SELECT 1 FROM vm_executions
-                  WHERE vm_executions.run_id = runs.id
-                    AND execution_kind = 'kvm-preflight' AND cleaned = 0))
+  AND EXISTS (SELECT 1 FROM vm_executions
+              WHERE vm_executions.run_id = runs.id
+                AND execution_kind = 'kvm-preflight' AND cleaned = 0)
   AND NOT EXISTS (
       SELECT 1 FROM publications
       WHERE publications.run_id = runs.id AND publications.status = 'pending'
@@ -831,7 +830,7 @@ ON CONFLICT(run_id) DO UPDATE SET
 		return fmt.Errorf("record orphan Job cancellations: %w", err)
 	}
 	// An earlier owner may have recorded the old unconditional restart
-	// deletion. A resumable branch is now owned by Workflow reconciliation;
+	// deletion. A resumable Workflow is now owned by reconciliation;
 	// only explicit supersede/cancel obligations still authorize its deletion.
 	if _, err := tx.ExecContext(ctx, `
 UPDATE run_cancellations SET completed_at = ?
@@ -839,14 +838,14 @@ WHERE reason = 'owner_restart' AND completed_at IS NULL
   AND EXISTS (
       SELECT 1 FROM runs
       WHERE runs.id = run_cancellations.run_id AND status = 'running'
-        AND job_name != '' AND ref_kind = 'branch' AND release = 0 AND trigger != 'promotion'
+        AND job_name != ''
         AND NOT EXISTS (
             SELECT 1 FROM vm_executions
             WHERE vm_executions.run_id = runs.id
               AND execution_kind = 'kvm-preflight' AND cleaned = 0
         )
   )`, now); err != nil {
-		return fmt.Errorf("retire legacy branch restart cancellations: %w", err)
+		return fmt.Errorf("retire legacy Workflow restart cancellations: %w", err)
 	}
 	// A supersede or cancel can win after ClaimNextRun but before the worker
 	// publishes its deterministic Job name. The live worker may still be checking out in that

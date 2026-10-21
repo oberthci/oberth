@@ -1125,7 +1125,8 @@ continuity checks; it must never be used to reset or bypass those checks.
   (`rerun` or `publish_retry`), `run_id`, `rerun_of`, `status`, `ref`, `sha`
   and optional `publication_id`, `warning` and `error`.
 - A server stop or restart adopts an existing Argo Workflow for an active
-  branch run without a pending trusted KVM preflight (#1172, slice 1). The
+  branch, promotion, tag or release run without a pending trusted KVM
+  preflight (#1172, slices 1 and 2). The
   Workflow's run ID, ref, tested SHA, trigger, persisted concurrency group and
   namespace must match the run and configured engine. Its spec identity must
   be present; its UID, identity and live spec remain pinned during observation.
@@ -1140,7 +1141,8 @@ continuity checks; it must never be used to reset or bypass those checks.
   exceed a reduced capacity; new work waits until it drains.
   Adoption keeps the same run row, `queue_sequence` and `admission_sequence`;
   it does not enqueue a replacement or allocate a new admission order.
-  Shutdown leaves a non-terminal branch Workflow and its run/workspace intact.
+  Shutdown leaves a non-terminal Workflow and its run/workspace intact,
+  including an active promotion workspace.
   The successor appends to the same run log, restores the progress journal,
   skips already-recorded step transitions/logs, and enforces the remaining
   aggregate log budget. Executor-token delivery resumes only for Pods still
@@ -1161,9 +1163,24 @@ continuity checks; it must never be used to reset or bypass those checks.
   through normal admission. A replacement inherits the stranded run's
   `admission_sequence`, retaining its FIFO place while receiving a fresh
   `queue_sequence` for identity and unchanged history paging (#1092).
-  Promotion CI, tag/release, pending trusted KVM
+  Argo tag pipelines require the durable release flag; a historical tag Job
+  without that capability keeps its conservative fallback and never gains
+  release/WIF authority from its ref name. A missing promotion/tag/release
+  Workflow, or one that never acquired a Job name, is interrupted without
+  automatic re-fire. Pending trusted KVM
   preflights and publication-owning runs keep their existing recovery paths;
-  they are not adopted by this slice. Explicit cancellation and newer-push
+  they are not adopted. Publication ownership is durable and takes precedence
+  over Workflow observation: recovery never submits or adopts that run again.
+  A passing adopted promotion uses its immutable target/base/result through
+  the same publication outbox as a new run. Delivery re-reads the target before
+  pushing, refuses a moved main, and recognizes an already-applied result after
+  a crash instead of pushing again. Tags publish the original tag object while
+  adoption binds the reviewed peeled commit. Tag/release adoption does not
+  re-run pod-side publication, rebuild credentials, or select new per-repo/WIF
+  policy; it observes the exact admitted Workflow spec. Credential-bearing
+  service accounts, projected WIF audiences and environment remain pinned by
+  that spec hash. Promotion workspaces are cleaned only after their durable
+  run/publication/promotion owners permit terminal cleanup. Explicit cancellation and newer-push
   supersession still delete the exact owned Workflow, and terminal runs are
   never adopted or automatically re-fired.
   Upgrade note: the first upgrade to a release with adoption is still

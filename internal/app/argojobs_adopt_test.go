@@ -107,3 +107,39 @@ func TestArgoJobsAdoptMarksRefusalButNotReadFailure(t *testing.T) {
 		}
 	}
 }
+
+func TestArgoJobsAdoptionKeepsPromotionAndReleaseTriggerBindings(t *testing.T) {
+	for _, kind := range []string{"promotion", "tag", "release"} {
+		t.Run(kind, func(t *testing.T) {
+			controller := &adoptingArgoControl{found: true, binding: argojob.Adoption{Size: periapsis.L, UID: "workflow-uid", Identity: "spec-identity", SpecSHA256: "exact-admitted-spec"}}
+			jobs := &ArgoJobs{controller: controller, intents: map[string]argoIntent{}}
+			run := model.Run{ID: "run-" + kind, JobName: "workflow-" + kind, RefKind: model.RefTag, Ref: "v1.2.3", SHA: "annotated-tag-object", TestedSHA: "peeled-reviewed-commit", ConcurrencyGroup: "publish", Trigger: kind, Release: true, Credentialed: true}
+			expectedTier := periapsis.TriggerRelease
+			expectedKind := argoworkflow.RunTriggerTag
+			if kind == "promotion" {
+				run.RefKind = model.RefBranch
+				run.Release = false
+				run.Ref = "promotion/main/merged"
+				expectedTier = periapsis.TriggerCI
+				expectedKind = argoworkflow.RunTriggerPromotion
+			}
+			size, found, err := jobs.Adopt(context.Background(), run)
+			if err != nil || !found || size != periapsis.L || controller.request.Trigger != expectedTier || controller.request.RunTrigger != expectedKind || controller.request.SHA != run.TestedSHA || controller.request.Ref != run.Ref || controller.request.Group != run.ConcurrencyGroup {
+				t.Fatalf("adoption binding changed: %+v %v", controller.request, err)
+			}
+			result, err := jobs.WaitResumed(context.Background(), run.JobName, io.Discard, nil, 0)
+			if err != nil || result.Status != model.RunPassed || !controller.resumed || len(jobs.intents) != 0 {
+				t.Fatalf("resumed intent: %+v %v", result, err)
+			}
+		})
+	}
+}
+
+func TestTagAdoptionDoesNotInferReleaseCapability(t *testing.T) {
+	controller := &adoptingArgoControl{found: true}
+	jobs := &ArgoJobs{controller: controller, intents: map[string]argoIntent{}}
+	run := model.Run{ID: "legacy-tag", JobName: "legacy-tag-job", RefKind: model.RefTag, Ref: "v1", Trigger: "tag"}
+	if _, _, err := jobs.Adopt(context.Background(), run); err == nil || len(jobs.intents) != 0 || controller.request.Name != "" {
+		t.Fatal("historical tag inferred release authority")
+	}
+}

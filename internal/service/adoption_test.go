@@ -23,13 +23,14 @@ import (
 
 type adoptingJobs struct {
 	recoveryJobs
-	mu       sync.Mutex
-	found    bool
-	adoptErr error
-	adopted  []string
-	created  int
-	resumed  []runprogress.Event
-	retained int64
+	mu             sync.Mutex
+	found          bool
+	adoptErr       error
+	adopted        []string
+	created        int
+	releaseCreated int
+	resumed        []runprogress.Event
+	retained       int64
 }
 
 func (jobs *adoptingJobs) Adopt(_ context.Context, run model.Run) (periapsis.Size, bool, error) {
@@ -47,6 +48,13 @@ func (jobs *adoptingJobs) CreateCI(context.Context, JobRequest) error {
 	jobs.mu.Lock()
 	defer jobs.mu.Unlock()
 	jobs.created++
+	return nil
+}
+
+func (jobs *adoptingJobs) CreateRelease(context.Context, JobRequest) error {
+	jobs.mu.Lock()
+	defer jobs.mu.Unlock()
+	jobs.releaseCreated++
 	return nil
 }
 
@@ -414,7 +422,7 @@ func TestNewBranchWorkflowSurvivesShutdown(t *testing.T) {
 	}
 }
 
-func TestAdoptionLeavesPromotionAndReleaseOnLegacyRecovery(t *testing.T) {
+func TestNonAdoptingEngineKeepsPromotionAndReleaseRecovery(t *testing.T) {
 	for _, release := range []bool{false, true} {
 		fixture := newRecoveryFixture(t)
 		spec := model.RunSpec{RepoID: fixture.repo.ID, RefKind: model.RefBranch, Ref: "feature/promotion", SHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Actor: "agent@host", Trigger: "promotion"}
@@ -444,7 +452,9 @@ func TestAdoptionLeavesPromotionAndReleaseOnLegacyRecovery(t *testing.T) {
 		}
 		fixture.setJobName(t, run.ID, "oberth-legacy")
 		jobs := &adoptingJobs{found: true, recoveryJobs: recoveryJobs{terminalErr: ErrJobNotTerminal}}
-		scheduler := fixture.scheduler(t, jobs)
+		// A legacy engine exposes no adoption capability. Preserve its
+		// conservative recovery and all original deletion/refire assertions.
+		scheduler := fixture.scheduler(t, struct{ JobController }{jobs})
 		if err := scheduler.reconcileStrandedRunsWithGate(context.Background(), scheduler.requireMutation, func(model.Run, periapsis.Size) error { return errors.New("out-of-scope adoption") }); err != nil {
 			t.Fatal(err)
 		}

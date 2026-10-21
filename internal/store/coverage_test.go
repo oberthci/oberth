@@ -3209,19 +3209,17 @@ func TestRestartRecoveryRunningPromotionWithJobName(t *testing.T) {
 	if recovered.Status != model.RunRunning {
 		t.Fatalf("promotion run with job name should stay running, got %q", recovered.Status)
 	}
-	// A cancellation record should exist for owner_restart.
+	// The live Workflow belongs to reconciliation, not a restart deletion.
 	cancellations, err := s.PendingRunCancellations(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	found := false
-	for _, c := range cancellations {
-		if c.RunID == enqueued.ID && c.Reason == "owner_restart" {
-			found = true
-		}
+	if len(cancellations) != 0 {
+		t.Fatalf("resumable promotion has cancellations: %#v", cancellations)
 	}
-	if !found {
-		t.Fatal("expected owner_restart cancellation for promotion run with job name")
+	promotion, err := s.PromotionByRun(ctx, enqueued.ID)
+	if err != nil || promotion.Status != model.PromotionPending || promotion.RunID != recovered.ID {
+		t.Fatalf("promotion lost its active owner: %#v %v", promotion, err)
 	}
 }
 

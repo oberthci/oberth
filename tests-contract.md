@@ -207,3 +207,27 @@ one completes. `TestKubeVirtAdoptionCountsOnceAndDrainsReducedCapacity` checks
 idempotence, conflicting-demand refusal and release under a reduced grant.
 Controller and adapter tests bind restored demand to the verified Workflow
 spec without requiring a current grant or repository checkout.
+
+
+Promotion/tag/release adoption #1172 slice 2: each trigger keeps the same run,
+queue/admission order and credential classification through two owner restarts.
+Tests cover live and finished-while-down Workflows, persisted steps, no new
+submission, retained active workspaces, and terminal run/promotion cleanup.
+A moved-main case changes the target after adoption but before completion and
+refuses the push. Post-push/pre-finalization crash tests exercise the real
+durable publication outbox: the next owner recovers the same ledger row without
+adopting, creating, deleting or pushing again, and preserves annotated tag object
+versus peeled commit identity. Missing Workflows still interrupt these triggers
+without re-fire. Historical non-release tag Jobs retain their interrupt path;
+app adoption refuses to infer release capability from a tag name. Newly
+created and adopted shutdown tails preserve their
+Workflows and promotion workspaces. A non-adopting engine retains all original
+conservative recovery assertions; only its capability fixture changes, because
+capable engines now adopt these triggers. Store tests retire old owner_restart
+obligations for all triggers but keep explicit cancellation obligations and
+immutable promotion ownership. App tests reconstruct exact trigger/size/group/
+tested-SHA bindings; actual server-built credentialed promotion and WIF release
+Workflows survive changed current identity/policy configuration unchanged, and
+resumed Wait refuses changed service accounts, WIF projections/environment,
+Workflow UIDs or spec identities. Existing resume/log-budget, executor-token,
+publication serialization, KVM recovery and migration assertions remain.
