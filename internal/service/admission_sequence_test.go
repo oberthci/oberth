@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"testing"
 
 	"github.com/oberthci/oberth/internal/model"
@@ -27,8 +28,14 @@ func TestAdmissionReservationUsesInheritedFIFOOrderAndUniqueRunKeys(t *testing.T
 
 func TestAdmissionSnapshotAndStateKeepRefiredHeadIdentity(t *testing.T) {
 	gate := newWeightedAdmissionForJobs(2)
-	behind := gate.reserveRun(model.Run{ID: "behind", RepoID: 1, Ref: "feature/b", QueueSequence: 2, AdmissionSequence: 2})
-	refired := gate.reserveRun(model.Run{ID: "refired", RepoID: 1, Ref: "feature/a", QueueSequence: 3, AdmissionSequence: 1})
+	held := gate.reserve(1)
+	release, err := held.acquire(context.Background(), periapsis.XL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	behind := gate.reserveRun(model.Run{ID: "behind", RepoID: 1, Ref: "feature/b", QueueSequence: 3, AdmissionSequence: 3})
+	refired := gate.reserveRun(model.Run{ID: "refired", RepoID: 1, Ref: "feature/a", QueueSequence: 4, AdmissionSequence: 2})
 	defer behind.cancel()
 	defer refired.cancel()
 	gate.mu.Lock()
@@ -37,16 +44,16 @@ func TestAdmissionSnapshotAndStateKeepRefiredHeadIdentity(t *testing.T) {
 	}
 	gate.mu.Unlock()
 	scheduler := &Scheduler{admission: gate}
-	head := scheduler.AdmissionSnapshot(3)
+	head := scheduler.AdmissionSnapshot(4)
 	if head == nil || !head.HeadOfQueue || head.Position != 1 || head.BlockedBy == nil || head.BlockedBy.RunID != "refired" {
 		t.Fatalf("re-fired head snapshot = %#v", head)
 	}
-	tail := scheduler.AdmissionSnapshot(2)
+	tail := scheduler.AdmissionSnapshot(3)
 	if tail == nil || tail.HeadOfQueue || tail.Position != 2 || tail.BlockedBy == nil || tail.BlockedBy.RunID != "refired" {
 		t.Fatalf("queued-behind snapshot = %#v", tail)
 	}
 	state := scheduler.AdmissionState()
-	if len(state.Reservations) != 2 || state.Reservations[0].RunID != "refired" || state.Reservations[1].RunID != "behind" || state.Blocker == nil || state.Blocker.RunID != "refired" {
+	if len(state.Reservations) != 3 || state.Reservations[1].RunID != "refired" || state.Reservations[2].RunID != "behind" || state.Blocker == nil || state.Blocker.RunID != "refired" {
 		t.Fatalf("inherited FIFO admission state = %#v", state)
 	}
 	if refired.claimedAt.IsZero() || refired.repoID != 1 || refired.ref != "feature/a" {
