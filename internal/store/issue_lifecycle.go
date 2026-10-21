@@ -87,6 +87,16 @@ func (s *Store) CloseIssueWithReason(ctx context.Context, actor string, id int64
 	if existing.State == model.IssueClosed {
 		return existing, nil
 	}
+	if existing.Kind == model.IssueCI {
+		value, err := s.closeCIIssue(ctx, tx, actor, id, reason, now)
+		if err != nil {
+			return model.Issue{}, err
+		}
+		if err := tx.Commit(); err != nil {
+			return model.Issue{}, err
+		}
+		return value, nil
+	}
 	value, err := scanIssue(tx.QueryRowContext(ctx, `UPDATE issues SET state='closed',closed_at=?,updated_at=?,body=CASE WHEN body='' THEN ? ELSE body||char(10)||char(10)||? END WHERE id=? RETURNING `+issueColumns, unixNano(now), unixNano(now), reason, reason, id))
 	if err != nil {
 		return model.Issue{}, err

@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -90,5 +91,51 @@ func TestIssueCloseReasonIsAtomicAndLockAware(t *testing.T) {
 	var count int
 	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM audit_actions WHERE action='issue.close' AND details LIKE '%obsolete%'`).Scan(&count); err != nil || count != 1 {
 		t.Fatalf("audit=%d %v", count, err)
+	}
+}
+
+func TestIssueCloseReasonUsesCICloseAudit(t *testing.T) {
+	ctx := context.Background()
+	now := time.Now()
+	s := testStore(t, &now)
+	repo := createRepo(t, s)
+	issue, err := s.UpsertCIIssue(ctx, "owner", repo.ID, "main", "CI failed", "failure")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CloseIssueWithReason(ctx, "admin", issue.ID, "resolved"); !errors.Is(err, ErrLockHeld) {
+		t.Fatalf("locked CI close = %v", err)
+	}
+	if err := s.BreakIssueLock(ctx, "admin", issue.ID); err != nil {
+		t.Fatal(err)
+	}
+	closed, err := s.CloseIssueWithReason(ctx, "admin", issue.ID, "resolved")
+	if err != nil || closed.Kind != model.IssueCI || closed.State != model.IssueClosed || closed.ClosedAt == nil || closed.Body != "failure\n\nresolved" {
+		t.Fatalf("closed CI issue = %+v, %v", closed, err)
+	}
+	if _, err := s.CloseIssueWithReason(ctx, "admin", issue.ID, "retry"); err != nil {
+		t.Fatal(err)
+	}
+	var action, raw string
+	var count int
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM audit_actions WHERE action IN ('issue.close','issue.ci.close')`).Scan(&count); err != nil || count != 1 {
+		t.Fatalf("close audit count = %d, %v", count, err)
+	}
+	if err := s.db.QueryRowContext(ctx, `SELECT action,details FROM audit_actions WHERE action IN ('issue.close','issue.ci.close')`).Scan(&action, &raw); err != nil {
+		t.Fatal(err)
+	}
+	var detail map[string]any
+	if err := json.Unmarshal([]byte(raw), &detail); err != nil {
+		t.Fatal(err)
+	}
+	if action != "issue.ci.close" || detail["branch"] != "main" || detail["resolution"] != "resolved" {
+		t.Fatalf("CI close audit = %s %s", action, raw)
+	}
+	if _, err := s.CloseCIIssue(ctx, "admin", issue.ID, "stale close"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("stale CI close = %v", err)
+	}
+	stored, err := s.Issue(ctx, issue.ID)
+	if err != nil || stored.Body != closed.Body {
+		t.Fatalf("retry changed CI body = %+v, %v", stored, err)
 	}
 }

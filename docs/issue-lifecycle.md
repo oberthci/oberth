@@ -16,7 +16,9 @@ explicit renewal fails; a later `issue_lock` call can acquire a new lock.
 `issue_close_many {"ids":[123,124],"reason":"Superseded by the completed work"}`
 closes up to 50 unique positive IDs per call. This tool is admin-only and
 requires a nonempty reason of at most 4096 bytes. Each successful closure saves
-the reason in the issue body and its own audit action. Results follow input
+the reason in the issue body and its own audit action. CI issues use the same
+guarded close path as `issue_close`, recording `issue.ci.close` with the branch
+and resolution; manual issues record `issue.close`. Results follow input
 order, with `closed:true`, `error:"not_found"`, or `error:"lock_held"` plus lock
 metadata. Hidden issues look missing. Existing active locks apply even to an
 admin: unlock deliberately before retrying. Already-closed items succeed

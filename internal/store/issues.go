@@ -69,12 +69,23 @@ func (s *Store) CloseCIIssue(ctx context.Context, actor string, issueID int64, r
 		return model.Issue{}, fmt.Errorf("%w: CI issue close fields are invalid", ErrInvalid)
 	}
 	closedAt := s.now().UTC()
-	now := unixNano(closedAt)
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return model.Issue{}, fmt.Errorf("begin close CI issue: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	value, err := s.closeCIIssue(ctx, tx, actor, issueID, resolution, closedAt)
+	if err != nil {
+		return model.Issue{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return model.Issue{}, fmt.Errorf("commit close CI issue: %w", err)
+	}
+	return value, nil
+}
+
+func (s *Store) closeCIIssue(ctx context.Context, tx *sql.Tx, actor string, issueID int64, resolution string, closedAt time.Time) (model.Issue, error) {
+	now := unixNano(closedAt)
 	if err := s.requireIssueMutationLock(ctx, tx, issueID, actor, closedAt, false); err != nil {
 		return model.Issue{}, err
 	}
@@ -91,9 +102,6 @@ RETURNING `+issueColumns, now, now, resolution, resolution, issueID))
 	}
 	if err := s.appendIssueAudit(ctx, tx, actor, "issue.ci.close", value.ID, map[string]any{"branch": value.Branch, "resolution": resolution}, now); err != nil {
 		return model.Issue{}, err
-	}
-	if err := tx.Commit(); err != nil {
-		return model.Issue{}, fmt.Errorf("commit close CI issue: %w", err)
 	}
 	return value, nil
 }
