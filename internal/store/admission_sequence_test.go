@@ -103,14 +103,6 @@ func TestRestartRefireKeepsOriginalAdmissionOrderAndHistoryCursor(t *testing.T) 
 			t.Fatalf("queue position %s = %d, %v; want %d", item.id, position, err, item.want)
 		}
 	}
-	history, err := s.ListRecentRuns(ctx, model.RunListFilter{Limit: 2})
-	if err != nil || len(history) != 2 || history[0].ID != copy.ID || history[1].ID != b.ID {
-		t.Fatalf("history page = %v, %v", runIDs(history), err)
-	}
-	older, err := s.ListRecentRuns(ctx, model.RunListFilter{Limit: 2, Before: history[1].QueueSequence})
-	if err != nil || len(older) != 1 || older[0].ID != a.ID {
-		t.Fatalf("older history page = %v, %v", runIDs(older), err)
-	}
 	if encoded, err := json.Marshal(copy); err != nil || strings.Contains(string(encoded), "AdmissionSequence") {
 		t.Fatalf("public run JSON exposed admission sequence: %s, %v", encoded, err)
 	}
@@ -129,5 +121,18 @@ func TestRestartRefireKeepsOriginalAdmissionOrderAndHistoryCursor(t *testing.T) 
 	superseded, err := s.Run(ctx, copy.ID)
 	if err != nil || superseded.Status != model.RunInterrupted || superseded.SupersededBy != newPush.ID {
 		t.Fatalf("new push did not supersede re-fired copy: %+v, %v", superseded, err)
+	}
+	if _, err := s.FinishRun(ctx, b.ID, model.RunResult{Status: model.RunPassed}); err != nil {
+		t.Fatal(err)
+	}
+	// History cursors stay on unique queue_sequence even when the default
+	// run list presents a queue block ordered by admission_sequence (#1122).
+	history, err := s.ListRecentRuns(ctx, model.RunListFilter{Limit: 2, Terminal: true})
+	if err != nil || len(history) != 2 || history[0].ID != copy.ID || history[1].ID != b.ID {
+		t.Fatalf("history page = %v, %v", runIDs(history), err)
+	}
+	older, err := s.ListRecentRuns(ctx, model.RunListFilter{Limit: 2, Terminal: true, Before: history[1].QueueSequence})
+	if err != nil || len(older) != 1 || older[0].ID != a.ID {
+		t.Fatalf("older history page = %v, %v", runIDs(older), err)
 	}
 }
