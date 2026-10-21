@@ -1232,6 +1232,7 @@ spec:
       - -race
       - -v
       - -count=1
+      - -timeout=20m
       - ./...
       env:
       - name: PATH

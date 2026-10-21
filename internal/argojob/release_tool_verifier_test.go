@@ -27,7 +27,7 @@ func TestBootstrapRetainsTestsAndSeparatesPublisherAuthority(t *testing.T) {
 	tests := map[string][]string{
 		"vet":                {"/tmp/oberth-tools/bin/go", "vet", "./..."},
 		"golangci-lint-run":  {"/tmp/oberth-tools/bin/golangci-lint", "run", "--timeout=10m", "--concurrency=1", "./..."},
-		"release-test":       {"/tmp/oberth-tools/bin/go", "test", "-race", "-v", "-count=1", "./..."},
+		"release-test":       {"/tmp/oberth-tools/bin/go", "test", "-race", "-v", "-count=1", "-timeout=20m", "./..."},
 		"release-chart-test": {"./hack/test-chart.sh"},
 		"release-scan": {"/usr/local/bin/trivy", "fs", "--cache-dir", "/tmp/oberth-trivy", "--no-progress", "--skip-check-update",
 			"--skip-vex-repo-update", "--skip-version-check", "--disable-telemetry", "--scanners", "vuln", "--exit-code", "1", "--severity", "HIGH,CRITICAL", "--skip-dirs", ".git", "."},

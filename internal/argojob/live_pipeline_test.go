@@ -129,7 +129,7 @@ func TestLiveRepositoryBuildPipelineExecutes(t *testing.T) {
 			t.Errorf("step %s/%s = %s (exit %d)", step.Burn, step.Step, step.Status, step.ExitCode)
 		}
 	}
-	for _, burn := range []string{"setup", "lint", "test", "security", "chart", "build-amd64", "build-arm64"} {
+	for _, burn := range []string{"setup", "lint", "test-store", "test-service", "test-rest", "security", "chart", "build-amd64", "build-arm64"} {
 		if len(burns[burn]) == 0 {
 			t.Errorf("burn %q ran no steps; observed %v", burn, burns)
 		}
@@ -145,7 +145,7 @@ func TestLiveRepositoryBuildPipelineExecutes(t *testing.T) {
 		t.Error("no step progress markers reached the run log")
 	}
 	// Real per-step log slices, not one undifferentiated stream.
-	for _, marker := range []string{"[setup/", "[lint/", "[test/"} {
+	for _, marker := range []string{"[setup/", "[lint/", "[test-store/", "[test-service/", "[test-rest/"} {
 		if !strings.Contains(body, marker) {
 			t.Errorf("no log lines attributed to %s", marker)
 		}
