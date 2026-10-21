@@ -15,9 +15,11 @@ never in history, and applies ref and uplink repository restrictions;
 runs. `TestActiveRunsOrderAndWaitReasons` drives the real admission gate with
 a VM-parked run, a group waiter and a head that does not fit, and checks each
 reason, weight and position; `TestScopedActiveRunsStayInScope` withholds
-sequences and positions; `TestRunListDefaultViewUnchanged` compares the
-default `run_list` encoding byte for byte. `TestRunsPageSplitsActiveFromHistory`
-pins the dashboard's Active/History split and head-of-line marker.
+sequences and positions. `TestRunListMCPMatchesHTTPOrderAndPassedAlias` compares
+the default MCP/HTTP ordering and preserves the passed-status wire alias.
+`TestRunsPageIsOneFlatFilteredList` pins the flat dashboard and head marker.
+`TestFlatRunsUseOneSnapshotAcrossAdmission` admits a queued run between the two
+list queries and proves that the response contains it only once.
 
 CI issue policy #1170: `TestRunIssueProjectionPolicy` covers default branches
 (including a configured non-main default), scheduled feature branches, and
@@ -25,9 +27,12 @@ excluded feature, promotion, plan/apply and tag runs.
 `TestPromotionDoesNotRegisterCIIssueWork` covers both promotion admission paths.
 `TestCIIssueProjectionTakesNoLock` verifies another actor can append immediately,
 projection never creates or takes over a lock, and green preserves existing
-locks. Atomic run/publication and legacy promotion projection tests retain
-rollback, ordering, deduplication and recovery coverage. Control-plane fixtures
-use the default branch for issue-bearing status and publication checks; promotion
+locks. Atomic run/publication tests retain rollback, ordering and deduplication
+coverage. Legacy promotion projection tests explicitly seed pre-policy issue
+work to cover rollback and proof-aware ordering;
+`TestRestartInterruptedPromotionDoesNotProjectIssue` seeds that same legacy
+work and proves interrupted restart recovery creates no CI issue. Control-plane
+fixtures use the default branch for issue-bearing status and publication checks; promotion
 failures retain durable results without filing issues. Legacy issue reconciliation
 remains covered without a schema migration.
 

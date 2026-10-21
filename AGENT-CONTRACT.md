@@ -951,7 +951,8 @@ continuity checks; it must never be used to reset or bypass those checks.
   scoped uplinks see no global position (#073). `started_at` is recorded when
   weighted admission is granted, including before a trusted KVM preflight;
   a VM capacity refusal parks the run and clears that time until reacquisition.
-  Elapsed time includes preflight and excludes time parked for VM capacity.
+  Elapsed time includes preflight and resets at re-admission after a VM-capacity
+  park.
   Workflow submission preserves the admission time. `view=history` retains its
   terminal-only sequence paging; `view=active` remains an unpaged, bounded
   deprecated compatibility view. Repository/ref filters and uplink scope apply

@@ -958,14 +958,21 @@ ORDER BY queue_sequence DESC LIMIT ?`, append(args, pageLimit(filter.Limit))...)
 
 // listFlatRuns puts the entire bounded queue on the first page. The remaining
 // page uses a fixed (admission/end time, ID) cursor: a run admitted between
-// page loads cannot move onto an older page and appear twice.
+// page loads cannot move onto an older page and appear twice. Both blocks
+// and the cursor are read from one snapshot so admission cannot duplicate a row.
 func (s *Store) listFlatRuns(ctx context.Context, filter model.RunListFilter) ([]model.Run, error) {
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return nil, fmt.Errorf("begin flat run list snapshot: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
 	restriction, restrictionArgs := repoRestriction("repo_id", filter.RepoIDs)
 	runs := make([]model.Run, 0)
 	if filter.Before == 0 && filter.BeforeRun == "" {
 		queued, err := func() ([]model.Run, error) {
 			args := append([]any{filter.RepoID, filter.RepoID, filter.Ref, filter.Ref}, restrictionArgs...)
-			rows, err := s.db.QueryContext(ctx, `
+			rows, err := tx.QueryContext(ctx, `
 WITH queue AS (
   SELECT *, ROW_NUMBER() OVER (ORDER BY queue_sequence) AS queue_position FROM runs
   WHERE status = 'queued' OR (status = 'running' AND started_at IS NULL)
@@ -1003,9 +1010,9 @@ ORDER BY queue_sequence LIMIT ?`, append(args, MaxActiveRuns)...) // #nosec G202
 		var cursor model.Run
 		var err error
 		if filter.BeforeRun != "" {
-			cursor, err = scanRun(s.db.QueryRowContext(ctx, `SELECT `+runColumns+` FROM runs WHERE id = ?`, filter.BeforeRun))
+			cursor, err = scanRun(tx.QueryRowContext(ctx, `SELECT `+runColumns+` FROM runs WHERE id = ?`, filter.BeforeRun))
 		} else {
-			cursor, err = scanRun(s.db.QueryRowContext(ctx, `SELECT `+runColumns+` FROM runs WHERE queue_sequence = ?`, filter.Before))
+			cursor, err = scanRun(tx.QueryRowContext(ctx, `SELECT `+runColumns+` FROM runs WHERE queue_sequence = ?`, filter.Before))
 		}
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrRunCursorNotFound
@@ -1018,7 +1025,7 @@ ORDER BY queue_sequence LIMIT ?`, append(args, MaxActiveRuns)...) // #nosec G202
 	}
 	args := append([]any{filter.RepoID, filter.RepoID, filter.Ref, filter.Ref,
 		beforeID, beforeTime, beforeTime, beforeID}, restrictionArgs...)
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := tx.QueryContext(ctx, `
 SELECT `+runColumns+` FROM runs
 WHERE NOT (status = 'queued' OR (status = 'running' AND started_at IS NULL))
   AND (? = 0 OR repo_id = ?) AND (? = '' OR ref = ?)
@@ -1039,6 +1046,12 @@ LIMIT ?`, append(args, pageLimit(filter.Limit))...) // #nosec G202 -- fixed colu
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("list admitted runs: %w", err)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, fmt.Errorf("close admitted runs: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit flat run list snapshot: %w", err)
 	}
 	return runs, nil
 }

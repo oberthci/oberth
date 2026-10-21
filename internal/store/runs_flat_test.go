@@ -178,7 +178,7 @@ func TestStrandedRequeueRecordsCauseAndDoesNotFileIssue(t *testing.T) {
 	now := time.Now()
 	s := testStore(t, &now)
 	repo := createRepo(t, s)
-	old := projectionRun(t, s, repo.ID, "restart", projectionSourceSHA)
+	old := projectionRun(t, s, repo.ID, "main", projectionSourceSHA)
 	copy, err := s.RequeueStrandedRun(t.Context(), old.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -187,7 +187,7 @@ func TestStrandedRequeueRecordsCauseAndDoesNotFileIssue(t *testing.T) {
 	if err != nil || old.Reason != "re-queued after restart" || old.SupersededBy != copy.ID {
 		t.Fatalf("restart %+v, %v", old, err)
 	}
-	if _, err = s.OpenCIIssue(t.Context(), repo.ID, "restart"); !errors.Is(err, ErrNotFound) {
+	if _, err = s.OpenCIIssue(t.Context(), repo.ID, "main"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("restart issue: %v", err)
 	}
 }
@@ -198,23 +198,23 @@ func TestInterruptedRunNeitherOpensNorResolvesIssue(t *testing.T) {
 	repo := createRepo(t, s)
 	finish := func(status model.RunStatus) {
 		t.Helper()
-		run := projectionRun(t, s, repo.ID, "interrupt", projectionSourceSHA)
+		run := projectionRun(t, s, repo.ID, "main", projectionSourceSHA)
 		if _, err := s.FinishRun(t.Context(), run.ID, model.RunResult{Status: status, Error: "scheduler stopped"}); err != nil {
 			t.Fatal(err)
 		}
 	}
 	finish(model.RunInterrupted)
-	if _, err := s.OpenCIIssue(t.Context(), repo.ID, "interrupt"); !errors.Is(err, ErrNotFound) {
+	if _, err := s.OpenCIIssue(t.Context(), repo.ID, "main"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("interrupted created issue: %v", err)
 	}
 	finish(model.RunFailed)
-	before, err := s.OpenCIIssue(t.Context(), repo.ID, "interrupt")
+	before, err := s.OpenCIIssue(t.Context(), repo.ID, "main")
 	if err != nil {
 		t.Fatal(err)
 	}
 	now = now.Add(time.Minute)
 	finish(model.RunInterrupted)
-	after, err := s.OpenCIIssue(t.Context(), repo.ID, "interrupt")
+	after, err := s.OpenCIIssue(t.Context(), repo.ID, "main")
 	if err != nil || before.ID != after.ID || before.Body != after.Body || before.Occurrences != after.Occurrences || !before.UpdatedAt.Equal(after.UpdatedAt) {
 		t.Fatalf("interrupted changed issue %+v -> %+v (%v)", before, after, err)
 	}

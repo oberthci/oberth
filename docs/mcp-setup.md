@@ -379,7 +379,7 @@ Authenticated `GET` endpoints serve the same state as a web dashboard:
 
 | Endpoint | Content |
 |----------|---------|
-| `/api/runs` | All CI runs; `?view=history` for terminal runs, `?view=active` for the ordered active list |
+| `/api/runs` | All CI runs; `?view=history` for terminal runs, `?view=active` for the deprecated ordered active list |
 | `/api/runs/counts` | Total retained, queued and running counts, also per repository |
 | `/api/repos` | Registered repositories |
 | `/api/issues` | Paged issues with `total` for the selected filters and `counts` by state and kind |
