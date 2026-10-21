@@ -94,17 +94,19 @@ func TestOberthBuildPipelineIsAdmissible(t *testing.T) {
 	assertBurnGraph(t, built, "ci", map[string]string{
 		"setup":                  "",
 		"lint":                   "setup",
-		"test":                   "lint",
+		"test-store":             "lint",
+		"test-service":           "lint",
+		"test-rest":              "lint",
 		"test-openbao":           "setup",
 		"security":               "setup",
 		"shellcheck":             "setup",
 		"chart":                  "lint",
 		"release-diagnostic":     "setup",
 		"verify-publisher-tools": "setup",
-		"build-amd64":            "test && chart",
-		"build-arm64":            "test && chart",
-		"build-darwin-amd64":     "test && chart",
-		"build-darwin-arm64":     "test && chart",
+		"build-amd64":            "test-store && test-service && test-rest && chart",
+		"build-arm64":            "test-store && test-service && test-rest && chart",
+		"build-darwin-amd64":     "test-store && test-service && test-rest && chart",
+		"build-darwin-arm64":     "test-store && test-service && test-rest && chart",
 	})
 }
 
