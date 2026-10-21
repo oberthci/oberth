@@ -18,7 +18,7 @@ func TestReleasePreflightRecordsDeniedCanonicalDeclarations(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(problems) == 0 || !recorder.called || recorder.repo != "forge/org/repo" || recorder.sha != "commit" || len(recorder.declarations) != 2 {
+	if len(problems.Problems) == 0 || !recorder.called || recorder.repo != "forge/org/repo" || recorder.sha != "commit" || len(recorder.declarations) != 2 {
 		t.Fatalf("problems=%v recorder=%+v", problems, recorder)
 	}
 }
@@ -38,12 +38,12 @@ func TestReleasePreflightReloadsGrantsAfterApproval(t *testing.T) {
 	jobs := &ArgoJobs{secretAccess: loader}
 	request := service.JobRequest{Repository: model.Repository{ID: 42, Name: "repo"}, UpstreamName: "forge", UpstreamOrg: "org"}
 	problems, err := jobs.PreflightRelease(context.Background(), request, []byte(declarationWorkflow))
-	if err != nil || len(problems) == 0 {
+	if err != nil || len(problems.Problems) == 0 {
 		t.Fatalf("missing grant: %v %v", problems, err)
 	}
 	loader.grants = map[string]map[string]bool{"*": {"oberth/data/release/r2-token": true, "oberth/data/release/cosign-key": true}}
 	problems, err = jobs.PreflightRelease(context.Background(), request, []byte(declarationWorkflow))
-	if err != nil || len(problems) != 0 || loader.calls != 2 {
+	if err != nil || len(problems.Problems) != 0 || loader.calls != 2 {
 		t.Fatalf("fresh grants: %v %v calls=%d", problems, err, loader.calls)
 	}
 }

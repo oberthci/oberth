@@ -14,13 +14,19 @@ import (
 
 // ReleasePreflighter observes declarations and public capabilities only.
 type ReleasePreflighter interface {
-	PreflightRelease(context.Context, JobRequest, []byte) ([]string, error)
+	PreflightRelease(context.Context, JobRequest, []byte) (ReleasePreflightResult, error)
+}
+
+// ReleasePreflightResult separates capability failures from public identity advice.
+type ReleasePreflightResult struct {
+	Problems []string
+	Checks   []string
 }
 
 const releasePreflightFile = ".oberth/release.yaml"
 const releasePreflightLimit = 1 << 20
 
-func releasePreflight(ctx context.Context, git vmrunner.PolicyGit, checker ReleasePreflighter, request JobRequest, base string, defaultBase bool) ([]string, error) {
+func releasePreflight(ctx context.Context, git vmrunner.PolicyGit, checker ReleasePreflighter, request JobRequest, base string, defaultBase bool) (ReleasePreflightResult, error) {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	repo := request.UpstreamName + "/" + request.UpstreamOrg + "/" + request.Repository.Name
@@ -30,7 +36,7 @@ func releasePreflight(ctx context.Context, git vmrunner.PolicyGit, checker Relea
 	}
 	source, exists, err := git.ReadOptionalBlob(ctx, repo, sha, releasePreflightFile, releasePreflightLimit)
 	if err != nil || !exists {
-		return nil, err
+		return ReleasePreflightResult{}, err
 	}
 	var previous []byte
 	if defaultBase {
@@ -39,10 +45,10 @@ func releasePreflight(ctx context.Context, git vmrunner.PolicyGit, checker Relea
 		previous, _, err = git.ReadOptionalBlob(ctx, repo, base, releasePreflightFile, releasePreflightLimit)
 	}
 	if err != nil {
-		return nil, err
+		return ReleasePreflightResult{}, err
 	}
 	if bytes.Equal(source, previous) {
-		return nil, nil
+		return ReleasePreflightResult{}, nil
 	}
 	return checker.PreflightRelease(ctx, request, source)
 }
@@ -52,21 +58,26 @@ func (scheduler *Scheduler) checkReleasePreflight(ctx context.Context, request J
 	if !ok || request.Run.Release {
 		return nil
 	}
-	problems, err := releasePreflight(ctx, scheduler.git, checker, request, request.Run.BaseSHA, request.Run.BaseSHA == "")
+	result, err := releasePreflight(ctx, scheduler.git, checker, request, request.Run.BaseSHA, request.Run.BaseSHA == "")
 	if err != nil {
-		problems = append(problems, err.Error())
+		result.Problems = append(result.Problems, err.Error())
 	}
-	if len(problems) == 0 {
+	for _, check := range result.Checks {
+		if _, err := fmt.Fprintf(output, "[release-preflight/check] %s\n", check); err != nil {
+			return err
+		}
+	}
+	if len(result.Problems) == 0 {
 		_, err = fmt.Fprintln(output, "[release-preflight/check] passed (or release.yaml unchanged)")
 		return err
 	}
-	for _, problem := range problems {
+	for _, problem := range result.Problems {
 		if _, err := fmt.Fprintf(output, "[release-preflight/check] warning: %s\n", problem); err != nil {
 			return err
 		}
 	}
 	if request.Run.Trigger == "promotion" {
-		return fmt.Errorf("release preflight: %s", strings.Join(problems, "; "))
+		return fmt.Errorf("release preflight: %s", strings.Join(result.Problems, "; "))
 	}
 	return nil
 }
@@ -88,12 +99,12 @@ func (service *API) checkPromotionRelease(ctx context.Context, repository model.
 		return err
 	}
 	request := JobRequest{Repository: repository, UpstreamName: upstream.Name, UpstreamOrg: upstream.Org(), Run: model.Run{SHA: sha, TestedSHA: sha, RefKind: model.RefBranch, Trigger: "promotion"}}
-	problems, err := releasePreflight(ctx, git, service.releasePreflight, request, base, false)
+	result, err := releasePreflight(ctx, git, service.releasePreflight, request, base, false)
 	if err != nil {
 		return err
 	}
-	if len(problems) > 0 {
-		return fmt.Errorf("release preflight: %s", strings.Join(problems, "; "))
+	if len(result.Problems) > 0 {
+		return fmt.Errorf("release preflight: %s", strings.Join(result.Problems, "; "))
 	}
 	return nil
 }

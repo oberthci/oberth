@@ -19,6 +19,7 @@ type ReleaseDeclaration struct{ Step, Path string }
 type ReleasePreflight struct {
 	Declarations []ReleaseDeclaration
 	Problems     []string
+	Checks       []string
 }
 
 // PreflightRelease checks public capabilities without building a credentialed
@@ -104,7 +105,28 @@ func PreflightRelease(config Config, request Request) (ReleasePreflight, error) 
 	if _, err := authorizeReleaseWIF(wf, config, request); err != nil {
 		add(err)
 	}
-	add(applyPerStepIdentities(wf, config, request))
+	// Discard authored identities just as admission does. Only the server's
+	// selected repository and per-step accounts may appear in this report.
+	walkTemplates(wf, func(t *wfv1.Template) { t.ServiceAccountName = "" })
+	if err := applyPerStepIdentities(wf, config, request); err != nil {
+		add(err)
+		return result, nil
+	}
+	identity, _ := config.identityForWithRepo(periapsis.TriggerRelease, true, request.UpstreamName, request.UpstreamOrg, request.Repo)
+	walkTemplates(wf, func(t *wfv1.Template) {
+		if t.Container == nil && t.Script == nil && t.ContainerSet == nil {
+			return
+		}
+		sa := identity.ServiceAccountName
+		if t.ServiceAccountName != "" {
+			sa = t.ServiceAccountName
+		}
+		role := t.Metadata.Annotations[argoworkflow.ReleaseWIFRoleAnnotation]
+		result.Checks = append(result.Checks, fmt.Sprintf("step %q: service_account=%q release_wif_role=%q subject=%q", t.Name, sa, role, "system:serviceaccount:"+config.Namespace+":"+sa))
+		if role != "" && t.ServiceAccountName != "" {
+			result.Checks = append(result.Checks, fmt.Sprintf("warning: step %q uses a step-scoped grant with release WIF role %q; cloud trust must include subject %q", t.Name, role, "system:serviceaccount:"+config.Namespace+":"+sa))
+		}
+	})
 	return result, nil
 }
 
@@ -125,6 +147,7 @@ func (controller *Controller) PreflightReleaseAccounts(ctx context.Context, requ
 		return err
 	}
 	var problems []error
+	walkTemplates(wf, func(t *wfv1.Template) { t.ServiceAccountName = "" })
 	problems = append(problems, applyPerStepIdentities(wf, config, request))
 	wf.Namespace = config.Namespace
 	checked := map[string]bool{}

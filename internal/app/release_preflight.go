@@ -10,19 +10,19 @@ import (
 	"github.com/oberthci/oberth/pkg/periapsis"
 )
 
-func (jobs *ArgoJobs) PreflightRelease(ctx context.Context, request service.JobRequest, source []byte) ([]string, error) {
+func (jobs *ArgoJobs) PreflightRelease(ctx context.Context, request service.JobRequest, source []byte) (service.ReleasePreflightResult, error) {
 	jobs.mu.Lock()
 	health, identities, recorder := jobs.reconcilerHealthy, jobs.identities, jobs.declarations
 	jobs.mu.Unlock()
 	if health != nil && !health.ReconcileHealthy() {
-		return nil, fmt.Errorf("secret access reconciliation is not healthy")
+		return service.ReleasePreflightResult{}, fmt.Errorf("secret access reconciliation is not healthy")
 	}
 	grants := map[string]map[string]bool{}
 	approved := map[string]bool{}
 	if jobs.secretAccess != nil {
 		loaded, err := jobs.secretAccess.ActiveSecretGrants(ctx, request.Repository.ID)
 		if err != nil {
-			return nil, err
+			return service.ReleasePreflightResult{}, err
 		}
 		for step, paths := range loaded {
 			for path := range paths {
@@ -36,7 +36,7 @@ func (jobs *ArgoJobs) PreflightRelease(ctx context.Context, request service.JobR
 	}
 	fragments, err := loadFragments(ctx, jobs.fragments, source, periapsis.TriggerRelease, request.Run.RefKind, "release")
 	if err != nil {
-		return nil, err
+		return service.ReleasePreflightResult{}, err
 	}
 	submission := argojob.Request{Repo: request.Repository.Name, UpstreamName: request.UpstreamName, UpstreamOrg: request.UpstreamOrg,
 		Source: source, Trigger: periapsis.TriggerRelease, ApprovedSecrets: approved, StepGrants: grants, Fragments: fragments}
@@ -45,7 +45,7 @@ func (jobs *ArgoJobs) PreflightRelease(ctx context.Context, request service.JobR
 	}
 	result, err := argojob.PreflightRelease(jobs.config, submission)
 	if err != nil {
-		return nil, err
+		return service.ReleasePreflightResult{}, err
 	}
 	if recorder != nil {
 		declarations := make([]store.GrantDeclaration, 0, len(result.Declarations))
@@ -58,7 +58,7 @@ func (jobs *ArgoJobs) PreflightRelease(ctx context.Context, request service.JobR
 			sha = request.Run.SHA
 		}
 		if err := recorder.RecordGrantDeclarations(ctx, repo, sha, declarations); err != nil {
-			return nil, fmt.Errorf("record release declarations: %w", err)
+			return service.ReleasePreflightResult{}, fmt.Errorf("record release declarations: %w", err)
 		}
 	}
 	if checker, ok := jobs.controller.(interface {
@@ -68,5 +68,5 @@ func (jobs *ArgoJobs) PreflightRelease(ctx context.Context, request service.JobR
 			result.Problems = append(result.Problems, err.Error())
 		}
 	}
-	return result.Problems, nil
+	return service.ReleasePreflightResult{Problems: result.Problems, Checks: result.Checks}, nil
 }
