@@ -401,7 +401,9 @@ declared without one:
 - `schedule_list {repo?}` lists each entry's `cron`, `next_at`, `last_fired_at`,
   `last_outcome` (`fired`, `skipped`, `failed`, `refused` or `paused`) and, when
   paused, who paused it, when and why. Entries the scheduler refuses are listed
-  with the reason. A scoped uplink sees its own repositories only.
+  with the reason. `GET /api/schedules?repo=<repo>` returns the same JSON; omit
+  `repo` to list all visible repositories. Both reads require authentication,
+  and a scoped uplink sees its own repositories only.
 - `schedule_pause {repo, entry, reason}` holds an entry: each tick at which it
   comes due records outcome `paused` instead of firing. `schedule_resume
   {repo, entry}` lifts the hold; an entry that came due meanwhile fires at the

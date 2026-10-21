@@ -215,6 +215,7 @@ func (server *Server) routes() {
 	server.mux.Handle("GET /api/issues", server.requireAuth(http.HandlerFunc(server.handleIssues)))
 	server.mux.Handle("GET /api/grants", server.requireAuth(http.HandlerFunc(server.handleGrants)))
 	server.mux.Handle("GET /api/audit", server.requireAuth(http.HandlerFunc(server.handleAudit)))
+	server.mux.Handle("GET /api/schedules", server.requireAuth(http.HandlerFunc(server.handleSchedules)))
 	server.mux.Handle("GET /api/status", server.requireAuth(http.HandlerFunc(server.handleStatus)))
 	server.mux.HandleFunc("GET /assets/{asset...}", serveAsset)
 	server.mux.HandleFunc("GET /{$}", func(writer http.ResponseWriter, request *http.Request) {
