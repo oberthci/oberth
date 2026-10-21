@@ -389,7 +389,9 @@ completion record. `restore.started` cannot survive replacing the database.
 backup record: `at` is its timestamp, `head` contains the archive snapshot's
 `id` and `sha256`, and `archive_sha256` identifies the archive. Later audit
 appends do not change the snapshot head. The field is omitted before any backup
-record and for scoped callers.
+record and for scoped callers. A latest backup record whose details cannot be
+read omits `last_backup` and reports `last_backup_warning` instead; `database`
+stays `ready`.
 
 ## Schedules
 
@@ -414,12 +416,12 @@ declared without one:
 - `schedule_trigger {repo, entry, force?}` queues the entry's run now at its
   branch head with `trigger=schedule`, through the same `EnqueueCI` admission
   path as a cron fire or a push, attributed to the calling uplink. It is
-  admin-only and audited (`schedule.trigger`, written before the run is
-  queued, so a failed audit queues nothing). Like the cron path it is refused
-  while the repository has active runs, and while the entry is paused, unless
-  `force` is set; a forced run supersedes the branch's active runs as a push
-  would. A manual trigger does not count as the entry's last fire, so it never
-  moves the cron cadence.
+  admin-only and audited (`schedule.trigger`, written once the run is queued
+  and naming it in `run_id`, so a refused or failed enqueue records nothing).
+  Like the cron path it is refused while the repository has active runs, and
+  while the entry is paused, unless `force` is set; a forced run supersedes the
+  branch's active runs as a push would. A manual trigger does not count as the
+  entry's last fire, so it never moves the cron cadence.
 
 A scoped admin uplink can pause, resume and trigger only entries of its own
 upstreams; another upstream's repository answers as if it did not exist.

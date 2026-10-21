@@ -55,7 +55,7 @@ func (s *Store) LastBackup(ctx context.Context) (*model.BackupStatus, error) {
 		AuditHeadSHA256 string `json:"audit_head_sha256"`
 	}
 	if err := json.Unmarshal([]byte(action.Details), &details); err != nil {
-		return nil, fmt.Errorf("read backup audit details: %w", err)
+		return nil, fmt.Errorf("%w: audit action %d: %w", model.ErrBackupRecordUnreadable, action.ID, err)
 	}
 	return &model.BackupStatus{
 		At:            action.CreatedAt.UTC().Format(time.RFC3339Nano),
@@ -99,6 +99,7 @@ WHERE (? = 0 OR id < ?)
   AND (? = 0 OR
        (resource_type = 'repository' AND resource_id = ?)
        OR json_extract(details, '$.repo') = ?
+       OR (? <> '' AND json_extract(details, '$.repo') = ?)
        OR json_extract(details, '$.repo_id') = ?
        OR (resource_type = 'run' AND resource_id IN (SELECT id FROM runs WHERE repo_id = ?))
        OR (resource_type = 'promotion' AND resource_id IN (SELECT id FROM promotions WHERE repo_id = ?)))
@@ -113,7 +114,7 @@ ORDER BY id DESC LIMIT ?`
 		actor, actor,
 		since, since,
 		until, until,
-		repoFlag, fmt.Sprint(filter.RepoID), filter.RepoName, filter.RepoID, filter.RepoID, filter.RepoID,
+		repoFlag, fmt.Sprint(filter.RepoID), filter.RepoName, filter.RepoQualifiedName, filter.RepoQualifiedName, filter.RepoID, filter.RepoID, filter.RepoID,
 		limit,
 	}
 	// Read the head first: an action appended while the page is read is then

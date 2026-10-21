@@ -123,6 +123,9 @@ type HealthStatus struct {
 	SecretStore   *SecretStoreStatus  `json:"secret_store,omitempty"`
 	AuditChain    *AuditChainStatus   `json:"audit_chain,omitempty"`
 	LastBackup    *model.BackupStatus `json:"last_backup,omitempty"`
+	// LastBackupWarning explains an omitted last_backup when the latest
+	// backup record exists but cannot be read.
+	LastBackupWarning string `json:"last_backup_warning,omitempty"`
 	// AdmissionBlocker names the run at the head of the admission queue that
 	// every later run waits behind, e.g. an XL run waiting for a full drain
 	// (#1021). Unscoped status only.
@@ -247,9 +250,12 @@ func (health Health) Status(ctx context.Context) (any, error) {
 		LastBackup(context.Context) (*model.BackupStatus, error)
 	}); ok {
 		backup, err := reader.LastBackup(ctx)
-		if err == nil {
+		switch {
+		case err == nil:
 			status.LastBackup = backup
-		} else {
+		case errors.Is(err, model.ErrBackupRecordUnreadable):
+			status.LastBackupWarning = boundedDetail(err.Error())
+		default:
 			status.Database = "unavailable"
 		}
 	}

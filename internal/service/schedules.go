@@ -222,7 +222,9 @@ func (service *API) schedulePauseResume(ctx context.Context, actor api.Actor, pa
 // scheduleTrigger serves schedule_trigger: it queues the entry's run now,
 // through the scheduler's own EnqueueCI path (the same one a cron fire and a
 // push use), with trigger "schedule" and the caller as actor. The audit action
-// is written first, so a failed audit queues nothing.
+// is written once the run is queued and names it, so a refused or failed
+// enqueue leaves no trigger row; a failed audit write is returned with the
+// queued run's ID.
 func (service *API) scheduleTrigger(ctx context.Context, actor api.Actor, raw json.RawMessage) (any, error) {
 	var arguments struct {
 		Repo  string `json:"repo"`
@@ -243,7 +245,14 @@ func (service *API) scheduleTrigger(ctx context.Context, actor api.Actor, raw js
 	if err != nil {
 		return nil, err
 	}
-	encoded, err := json.Marshal(map[string]any{"repo": view.Repo, "entry": entry.Name, "branch": plan.Branch, "sha": plan.SHA, "force": arguments.Force})
+	if service.auditor == nil {
+		return nil, fmt.Errorf("%w: audit", ErrUnavailable)
+	}
+	enqueued, err := service.schedules.EnqueueSchedule(ctx, plan, actor.Identity)
+	if err != nil {
+		return nil, err
+	}
+	encoded, err := json.Marshal(map[string]any{"repo": view.Repo, "entry": entry.Name, "branch": plan.Branch, "sha": plan.SHA, "force": arguments.Force, "run_id": enqueued.ID})
 	if err != nil {
 		return nil, err
 	}
@@ -251,11 +260,7 @@ func (service *API) scheduleTrigger(ctx context.Context, actor api.Actor, raw js
 		Actor: actor.Identity, Action: "schedule.trigger", ResourceType: "schedule",
 		ResourceID: store.ScheduleAuditResourceID(view.Repo, entry.Name), Details: string(encoded),
 	}); err != nil {
-		return nil, fmt.Errorf("audit schedule.trigger: %w", err)
-	}
-	enqueued, err := service.schedules.EnqueueSchedule(ctx, plan, actor.Identity)
-	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("audit schedule.trigger for queued run %s: %w", enqueued.ID, err)
 	}
 	return ScheduleTriggerResponse{
 		Repo: view.Repo, Entry: entry.Name, RunID: enqueued.ID, Branch: plan.Branch, SHA: plan.SHA, Status: string(enqueued.Status),

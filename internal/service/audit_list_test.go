@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/oberthci/oberth/internal/api"
+	"github.com/oberthci/oberth/internal/model"
 )
 
 func TestAuditListIsAdminOnlyAndReturnsChainPositions(t *testing.T) {
@@ -64,6 +65,42 @@ func TestAuditListIsAdminOnlyAndReturnsChainPositions(t *testing.T) {
 	}
 	if _, err := fixture.call(unscopedActor, "audit_list", map[string]any{"since": "yesterday"}); !errors.Is(err, ErrInvalidInput) {
 		t.Fatalf("bad since error = %v", err)
+	}
+}
+
+func TestAuditListRepoFilterMatchesBareAndQualifiedNames(t *testing.T) {
+	t.Parallel()
+	fixture := newScopeFixture(t)
+	ctx := context.Background()
+	record := func(repo string) int64 {
+		t.Helper()
+		details, err := json.Marshal(map[string]string{"repo": repo})
+		if err != nil {
+			t.Fatal(err)
+		}
+		action, err := fixture.store.AppendAuditAction(ctx, model.AuditActionSpec{
+			Actor: "owner@tuxbox", Action: "schedule.pause", ResourceType: "schedule", ResourceID: repo + "#nightly", Details: string(details),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return action.ID
+	}
+	bare := record("oberth")
+	qualified := record("github/oberthci/oberth")
+	record("codeberg/cloudtaser/" + hiddenRepoName)
+	record("gitlab/oberthci/oberth")
+
+	value, err := fixture.call(unscopedActor, "audit_list", map[string]any{"action": "schedule.", "repo": "oberth"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []int64
+	for _, entry := range value.(AuditListResponse).Entries {
+		got = append(got, entry.ID)
+	}
+	if want := []int64{qualified, bare}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("repo-filtered entries = %v, want bare and qualified oberth rows %v", got, want)
 	}
 }
 

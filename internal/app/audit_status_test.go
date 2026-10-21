@@ -7,6 +7,8 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"reflect"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -75,5 +77,38 @@ func TestBackupStatusMCPAndHTTPReadAuditRecord(t *testing.T) {
 	value, err := health.Status(ctx)
 	if err != nil || value.(HealthStatus).Database != "unavailable" {
 		t.Fatalf("unavailable database status=%+v err=%v", value, err)
+	}
+}
+
+func TestUnreadableBackupRecordIsABackupWarningNotADatabaseOutage(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	database, err := store.Open(ctx, filepath.Join(t.TempDir(), "status.sqlite"), store.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+	// Valid JSON, so the chain accepts it, but not a backup record.
+	action, err := database.RecordOperationAudit(ctx, "admin", "backup.completed", `{"archive_sha256":"archive","audit_head_id":"forty-two"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	value, err := Health{Store: database}.Status(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	status := value.(HealthStatus)
+	if status.Database != "ready" || status.LastBackup != nil {
+		t.Fatalf("database=%q last_backup=%+v; want a ready database and no last_backup", status.Database, status.LastBackup)
+	}
+	if !strings.Contains(status.LastBackupWarning, model.ErrBackupRecordUnreadable.Error()) || !strings.Contains(status.LastBackupWarning, strconv.FormatInt(action.ID, 10)) {
+		t.Fatalf("last_backup_warning = %q, want the unreadable record named", status.LastBackupWarning)
+	}
+	encoded, err := json.Marshal(status)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(encoded), `"last_backup_warning":`) || strings.Contains(string(encoded), `"last_backup":`) {
+		t.Fatalf("status JSON = %s", encoded)
 	}
 }

@@ -100,6 +100,15 @@ func (service *API) auditList(ctx context.Context, actor api.Actor, raw json.Raw
 			return nil, err
 		}
 		filter.RepoID, filter.RepoName = repository.ID, repository.Name
+		// Details name a repository bare or as upstream/org/repo (schedule
+		// rows, for one); match both spellings.
+		if resolver, ok := service.runs.(upstreamResolver); ok {
+			upstream, err := resolver.Upstream(ctx, repository.UpstreamID)
+			if err != nil {
+				return nil, err
+			}
+			filter.RepoQualifiedName = upstream.QualifiedRepo(repository.Name)
+		}
 	}
 	actions, head, err := lister.ListAuditActions(ctx, filter)
 	if err != nil {

@@ -25,6 +25,8 @@ type recordingScheduleControl struct {
 	plans    []SchedulePlan
 	enqueued []string
 	busy     bool
+	// enqueueErr makes EnqueueSchedule fail as EnqueueCI would.
+	enqueueErr error
 }
 
 func (control *recordingScheduleControl) InspectSchedule(ctx context.Context, repository model.Repository) (ScheduleRepoView, bool, error) {
@@ -49,6 +51,9 @@ func (control *recordingScheduleControl) PlanScheduleTrigger(_ context.Context, 
 }
 
 func (control *recordingScheduleControl) EnqueueSchedule(_ context.Context, plan SchedulePlan, actor string) (model.EnqueueRunResult, error) {
+	if control.enqueueErr != nil {
+		return model.EnqueueRunResult{}, control.enqueueErr
+	}
 	control.enqueued = append(control.enqueued, actor+"@"+plan.Branch)
 	return model.EnqueueRunResult{Run: model.Run{ID: "run-1", Status: model.RunQueued}}, nil
 }
@@ -123,8 +128,8 @@ func TestScheduleMutationsAreAdminOnlyAuditedAndScoped(t *testing.T) {
 		t.Fatalf("scoped schedule_list = %+v, want the visible repository's paused entry", schedules)
 	}
 
-	// A paused entry needs force; trigger is audited before it enqueues and
-	// attributes the run to the caller.
+	// A paused entry needs force; trigger is audited once its run is queued,
+	// names that run, and attributes it to the caller.
 	if _, err := fixture.call(unscopedActor, "schedule_trigger", repo); !errors.Is(err, ErrInvalidInput) {
 		t.Fatalf("trigger of a paused entry error = %v", err)
 	}
@@ -138,6 +143,15 @@ func TestScheduleMutationsAreAdminOnlyAuditedAndScoped(t *testing.T) {
 	if _, ok := latestScheduleAudit(t, fixture, "schedule.trigger"); ok || len(control.enqueued) != 0 {
 		t.Fatal("a refused trigger was audited or enqueued")
 	}
+	control.busy = false
+	control.enqueueErr = fmt.Errorf("%w: admission refused", store.ErrInvalidState)
+	if _, err := fixture.call(unscopedActor, "schedule_trigger", repo); !errors.Is(err, store.ErrInvalidState) {
+		t.Fatalf("trigger with a failing enqueue error = %v", err)
+	}
+	if _, ok := latestScheduleAudit(t, fixture, "schedule.trigger"); ok {
+		t.Fatal("a trigger whose enqueue failed was audited")
+	}
+	control.busy, control.enqueueErr = true, nil
 	value, err := fixture.call(unscopedActor, "schedule_trigger", map[string]any{"repo": "oberth", "entry": "nightly", "force": true})
 	if err != nil {
 		t.Fatal(err)
@@ -152,6 +166,13 @@ func TestScheduleMutationsAreAdminOnlyAuditedAndScoped(t *testing.T) {
 	_, resumed := latestScheduleAudit(t, fixture, "schedule.resume")
 	if !triggered || !resumed || trigger.Actor != unscopedActor.Identity || trigger.ResourceID != "oberth#nightly" {
 		t.Fatalf("trigger audit = %+v (resume recorded: %v)", trigger, resumed)
+	}
+	var details struct {
+		RunID string `json:"run_id"`
+		Force bool   `json:"force"`
+	}
+	if err := json.Unmarshal([]byte(trigger.Details), &details); err != nil || details.RunID != "run-1" || !details.Force {
+		t.Fatalf("trigger audit details = %s (%v), want run_id run-1 and force", trigger.Details, err)
 	}
 }
 
