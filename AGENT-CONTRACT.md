@@ -1345,9 +1345,14 @@ continuity checks; it must never be used to reset or bypass those checks.
   record-ID cursor (`next_cursor`, `X-Oberth-Next-Before`; numeric cursors are
   refused), re-adding a key keeps its scope, `system_status` reports only
   in-scope upstreams, and the `secretstore_*` tools are refused even to an
-  admin. SSH fetch and push resolve the path's upstream first and refuse
-  anything else with one fixed message. A scope that cannot be read fails
-  authentication instead of degrading to unscoped.
+  admin. One deliberate exception (#1094): an admin `issue_update` that
+  carries `upstream` runs unscoped, so a scoped admin can move any manual
+  issue between global and an upstream, including any title/body change in
+  the same call, and the response shows the full issue. A non-admin scoped
+  caller can still only move issues it can see, within its scope. SSH fetch
+  and push resolve the path's upstream first and refuse anything else with one
+  fixed message. A scope that cannot be read fails authentication instead of
+  degrading to unscoped.
 - Secret-access grants are ConfigMap-driven: the `oberth-secret-access`
   ConfigMap in the server namespace is the declarative source of truth for
   the approval table. The server reconciles it into sqlite at startup and
