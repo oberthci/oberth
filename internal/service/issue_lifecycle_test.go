@@ -37,7 +37,7 @@ func TestIssueLifecycleReadSurfacesAndScopedUnlock(t *testing.T) {
 			t.Fatal(err)
 		}
 		body, _ := json.Marshal(value)
-		if !strings.Contains(string(body), `"owner":"owner"`) || !strings.Contains(string(body), `"expires_at"`) {
+		if !strings.Contains(string(body), `"owner":"owner"`) || !strings.Contains(string(body), `"expires_at"`) || !strings.Contains(string(body), `"upstream":"github"`) {
 			t.Fatalf("%s=%s", tc.name, body)
 		}
 	}
@@ -126,5 +126,40 @@ func TestIssueLifecycleMutationsRequireAuditGate(t *testing.T) {
 		if _, err := fixture.call(unscopedActor, tool, map[string]any{}); !errors.Is(err, sentinel) {
 			t.Fatalf("%s bypassed audit gate: %v", tool, err)
 		}
+	}
+}
+
+func TestIssueLifecycleLeavesProjectedCIIssueUnlocked(t *testing.T) {
+	fixture := newControlFixture(t, JobResult{
+		Status: model.RunFailed, Phase: "test", FailedBurn: "test", FailedStep: "unit", Error: "red",
+		Steps: []model.StepResult{stepResult(model.StepFailed)},
+	})
+	ctx := context.Background()
+	if _, err := fixture.scheduler.EnqueueCI(ctx, CIRequest{
+		EventID: "lifecycle-default-red", Repository: fixture.repo, Branch: fixture.repo.DefaultBranch,
+		SHA: strings.Repeat("a", 40), Actor: "pusher@host",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.scheduler.ProcessNext(ctx); err != nil {
+		t.Fatal(err)
+	}
+	issue, err := fixture.store.OpenCIIssue(ctx, fixture.repo.ID, fixture.repo.DefaultBranch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := fixture.api(t)
+	service.issueLifecycle = fixture.store
+	value, err := service.CallTool(ctx, api.Actor{Identity: "monitor@host"}, "issue_get",
+		json.RawMessage(fmt.Sprintf(`{"id":%d}`, issue.ID)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := value.(api.IssueResponse); got.Lock != nil || got.Upstream != "codeberg" {
+		t.Fatalf("projected CI issue = %#v, want no lock and retained upstream", got)
+	}
+	if _, err := service.CallTool(ctx, api.Actor{Identity: "monitor@host"}, "issue_append",
+		json.RawMessage(fmt.Sprintf(`{"id":%d,"text":"investigating"}`, issue.ID))); err != nil {
+		t.Fatalf("another actor cannot append to projected CI issue: %v", err)
 	}
 }
