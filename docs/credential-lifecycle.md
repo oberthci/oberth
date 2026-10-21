@@ -2,8 +2,8 @@
 
 An unscoped administrator can use `uplink_list {}` to inspect identity,
 fingerprint, scope, admin status, creation time, last seen and revocation time.
-Other callers see only their own exact credential, even when an identity has
-several keys. Tokens and private keys are never included.
+All five new lifecycle tools require an unscoped admin; ordinary and scoped
+uplinks are refused. Tokens and private keys are never included.
 
 `uplink_revoke {"identity":"agent@host","fingerprint":"SHA256:..."}` revokes
 both SSH and bearer authentication for subsequent requests. Specify a fingerprint
@@ -29,12 +29,11 @@ observations, an admin can use `access_dismiss {"repo":"forge/org/repo",
 "step":"publish","secret":"oberth/data/old"}`. This removes the observation,
 not any grant; admission may observe it again. Copy the exact repository key
 from the pending list. Unscoped admins can also dismiss legacy bare-name or
-orphaned observations; scoped admins can dismiss only visible canonical rows.
+orphaned observations.
 Admission clears old bare-name observations only when the catalog name is
 unambiguous.
 
-`kubevirt_grant_list {}` returns active grants for all repositories visible to
-the admin. `repo_list` and `/api/repos` also include optional `KubeVirtGrant`
+`kubevirt_grant_list {}` returns active grants across all repositories. `repo_list` and `/api/repos` also include optional `KubeVirtGrant`
 metadata, including a revoked grant when present. Scoped admins cannot see or
 change other upstreams. No new cluster permissions or schema migrations are
 needed.
