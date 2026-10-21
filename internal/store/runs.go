@@ -871,6 +871,17 @@ func (s *Store) FinishRun(ctx context.Context, id string, result model.RunResult
 		return model.Run{}, fmt.Errorf("begin finish run: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	value, err := s.finishRunTx(ctx, tx, id, result, phase, now)
+	if err != nil {
+		return model.Run{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return model.Run{}, fmt.Errorf("commit finish run: %w", err)
+	}
+	return value, nil
+}
+
+func (s *Store) finishRunTx(ctx context.Context, tx *sql.Tx, id string, result model.RunResult, phase string, now int64) (model.Run, error) {
 	current, err := scanRun(tx.QueryRowContext(ctx, `SELECT `+runColumns+` FROM runs WHERE id = ?`, id))
 	if errors.Is(err, sql.ErrNoRows) {
 		return model.Run{}, fmt.Errorf("%w: run", ErrNotFound)
@@ -931,9 +942,6 @@ RETURNING `+runColumns,
 		}
 	} else if err := s.projectRunIssue(ctx, tx, value, result.FailureTail, now); err != nil {
 		return model.Run{}, err
-	}
-	if err := tx.Commit(); err != nil {
-		return model.Run{}, fmt.Errorf("commit finish run: %w", err)
 	}
 	return value, nil
 }

@@ -894,6 +894,16 @@ ORDER BY queue_sequence`)
 			// terminal state before deciding whether to interrupt.
 			continue
 		}
+		// A trusted preflight owns its empty-Job parent until identity-bound
+		// cleanup and durable recovery settle. Ordinary restart requeue would
+		// bypass that interlock and forget the one-retry budget.
+		var preflights int
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM vm_executions WHERE run_id=? AND execution_kind='kvm-preflight'`, active.ID).Scan(&preflights); err != nil {
+			return err
+		}
+		if preflights != 0 {
+			continue
+		}
 		if _, requeueErr := s.requeueStrandedRunTx(ctx, tx, active, now); requeueErr == nil {
 			// The enqueue's supersede interrupted this run with a link to
 			// its replacement and recorded a no-Job cancellation obligation.

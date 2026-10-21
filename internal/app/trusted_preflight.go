@@ -283,7 +283,8 @@ func (p *TrustedPreflights) Execute(ctx context.Context, job service.JobRequest,
 }
 
 // Recover never replays execution or grants publication. It cleans durable
-// obligations first; the scheduler then interrupts parents that have no Job.
+// obligations first; the scheduler then interrupts undelivered parents and
+// may durably queue one fresh attempt.
 func (p *TrustedPreflights) Recover(ctx context.Context) ([]string, error) {
 	pending, err := p.store.PendingKVMPreflights(ctx)
 	if err != nil {
@@ -292,7 +293,11 @@ func (p *TrustedPreflights) Recover(ctx context.Context) ([]string, error) {
 	var ids []string
 	var failures []error
 	for _, execution := range pending {
-		if err := p.recoverOne(ctx, execution); err != nil {
+		// A stuck deletion or ambiguous create cannot hold startup forever.
+		recoveryCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+		recoveryErr := p.recoverOne(recoveryCtx, execution)
+		cancel()
+		if err := recoveryErr; err != nil {
 			log.Printf("WARN: trusted preflight recovery pending for run %s: %v", execution.Intent.RunID, err)
 			failures = append(failures, err)
 			continue

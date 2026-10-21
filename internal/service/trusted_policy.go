@@ -143,16 +143,28 @@ func (scheduler *Scheduler) recoverTrustedPreflights(ctx context.Context) error 
 }
 
 func (scheduler *Scheduler) interruptRecoveredPreflight(ctx context.Context, id string) error {
-	run, err := scheduler.store.Run(ctx, id)
+	recoverer, ok := scheduler.store.(interface {
+		RecoverKVMPreflight(context.Context, string) (model.Run, error)
+	})
+	if !ok {
+		return fmt.Errorf("trusted preflight durable recovery is unavailable")
+	}
+	next, err := recoverer.RecoverKVMPreflight(ctx, id)
 	if err != nil {
 		return err
 	}
-	if run.Status != model.RunRunning {
-		return nil
+	scheduler.signals.NotifyRun(id)
+	if promotion, err := scheduler.store.PromotionByRun(ctx, id); err == nil {
+		scheduler.signals.NotifyPromotion(promotion.ID)
 	}
-	repo, err := scheduler.store.Repository(ctx, run.RepoID)
-	if err != nil {
-		return err
+	if next.Trigger == "promotion" {
+		if promotion, err := scheduler.store.PromotionByRun(ctx, next.ID); err == nil {
+			scheduler.signals.NotifyPromotion(promotion.ID)
+		}
 	}
-	return scheduler.finishInfrastructureFailure(ctx, run, repo, fmt.Errorf("trusted preflight interrupted before main delivery; retry required"))
+	if next.ID != "" {
+		scheduler.signals.NotifyRun(next.ID)
+		scheduler.signalQueue()
+	}
+	return nil
 }

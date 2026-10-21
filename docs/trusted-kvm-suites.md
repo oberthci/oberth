@@ -293,3 +293,11 @@ The executor image and runtime-hook attestation remains unchanged. Use the
 explicit supported upgrade profile transition described in
 [nonroot test leaves](nonroot-test-leaves.md) to prepare an existing managed
 controller; setting the server profile name alone is not qualification.
+
+## Owner restarts
+
+Reserved trusted preflights use [durable restart recovery](trusted-preflight-restart.md).
+After exact cleanup, the undelivered parent is interrupted and may receive one
+fresh attempt under its original admission order. No exec stream or old receipt
+is adopted, and uncertain cleanup retains capacity. This is separate from the
+capacity-wait loop above and never retries a known suite failure automatically.

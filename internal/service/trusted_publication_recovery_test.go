@@ -145,8 +145,8 @@ func TestTrustedPreflightSchedulerStartupRecovery(t *testing.T) {
 			// The outer bound only keeps a hung scheduler from hanging the
 			// test.
 			recovered := make(chan struct{})
-			f.scheduler.onStartupRecovered = func() { close(recovered) }
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			f.scheduler.onStartupRecovered = func() { close(recovered); <-ctx.Done() }
 			defer cancel()
 			result := make(chan error, 1)
 			go func() { result <- f.scheduler.Run(ctx) }()
@@ -175,9 +175,17 @@ func TestTrustedPreflightSchedulerStartupRecovery(t *testing.T) {
 				t.Fatal(err)
 			}
 			if cleaned {
-				if got.Status != model.RunFailed || !strings.Contains(got.Error, "preflight interrupted") {
+				if got.Status != model.RunInterrupted || !strings.Contains(got.Error, "preflight interrupted") || got.SupersededBy == "" {
 					t.Fatalf("undelivered parent not interrupted: %#v", got)
 				}
+				retry, err := f.store.Run(context.Background(), got.SupersededBy)
+				if err != nil || retry.Status != model.RunQueued || retry.JobName != "" || retry.AdmissionSequence != got.AdmissionSequence || retry.SHA != got.SHA {
+					t.Fatalf("fresh retry not durably gated: %+v %v", retry, err)
+				}
+				if _, err := f.store.KVMPreflight(context.Background(), retry.ID); !errors.Is(err, store.ErrNotFound) {
+					t.Fatal("old evidence reused for fresh retry")
+				}
+
 			} else if got.Status != model.RunRunning {
 				t.Fatalf("uncertain obligation lost: %#v", got)
 			}

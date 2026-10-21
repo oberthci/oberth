@@ -783,6 +783,11 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 				reservation.retain()
 				return errors.Join(err, stateErr)
 			}
+			// Owner shutdown loses the observer, not the durable recovery obligation.
+			// Keep the parent running so startup can clean and settle it atomically.
+			if ctx.Err() != nil {
+				return nil
+			}
 			return scheduler.finishInfrastructureFailure(ctx, run, repository, fmt.Errorf("trusted preflight: %w", err))
 		}
 		fresh, err := scheduler.trustedRequirement(ctx, repository, checkoutSHA)

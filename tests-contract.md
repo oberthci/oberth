@@ -277,3 +277,17 @@ windows, and dial timeouts as transient. `hack/test-chart.sh` checks the
 75-second termination grace default, also under reused values, and rejects
 one shorter than the drain. Idle-wait tests observe queued and running
 work, fail closed, and bind the upgrade check to the selected Deployment.
+
+# Trusted preflight owner restart (#1172 slice 3)
+
+Trusted conductor attachment remains one-use; restart recovery cannot infer a
+positive receipt or reattach its stream. `internal/app/trusted_restart_test.go`
+checks exact bound cleanup, negative evidence before cleanup, retention after
+cleanup failure and ambiguous-create refusal. Store restart tests cover owner
+recovery ordering, immutable receipts, durable one-retry limits across reopen
+and across a replacement's pre-reservation restart, cancellation/newer-work and
+publication guards, active promotion authority/grants, and rollback when audit
+persistence fails. `TestTrustedRestartInterruptsThenRunsFreshPreflightBeforeDelivery`
+loses an in-flight observer and verifies fresh evidence before exactly one main
+Workflow and delivery. `TestTrustedRestartPromotionStillChecksMainBeforePush`
+keeps the immutable promotion plan and proves a moved target prevents its push.
