@@ -501,3 +501,26 @@ contract. No automatic retries or durable-operation cancellation are added.
 The nonce is not authority; a client must actually expose the response header
 before a caller can claim client/server correlation. These diagnostics do not
 establish the cause of historical uncorrelated 502 or QUIC failures.
+
+## CLI long-poll timeouts
+
+`oberth mcp call` derives its client deadline from the tool's `timeout` argument
+plus 30 seconds, with a minimum of 60 seconds. `wait` and `promote_status`
+default to a 600-second tool timeout when omitted or zero, so their default
+client deadline is 630 seconds. The server rejects tool timeouts above 600
+seconds.
+
+```bash
+oberth mcp call --token-file ~/.config/oberth/token wait \
+  '{"sha":"<tested-sha>","timeout":600}'
+oberth mcp call --token-file ~/.config/oberth/token --timeout 11m wait \
+  '{"sha":"<tested-sha>","timeout":600}'
+```
+
+`--timeout` accepts a positive duration such as `90s` or `11m` and overrides
+the client deadline, including for tools without a timeout argument. A shorter
+override can end the observer before the server returns; the error names both
+limits. Caller cancellation and earlier caller deadlines still take precedence.
+Ending a long-poll request does not cancel the durable run or promotion.
+Artifact downloads with `artifact_get --output` retain their streaming default;
+an explicit `--timeout` bounds the download too.

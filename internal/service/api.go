@@ -2188,11 +2188,12 @@ func (service *API) waitDuration(seconds int) (time.Duration, error) {
 	if seconds == 0 {
 		return service.maximumWait, nil
 	}
-	requested := time.Duration(seconds) * time.Second
-	if requested > service.maximumWait {
+	// Compare before converting to Duration: a huge integer must not wrap and
+	// bypass the maximum with a negative or deceptively small duration.
+	if seconds > int(DefaultMaximumWait/time.Second) || time.Duration(seconds)*time.Second > service.maximumWait {
 		return 0, fmt.Errorf("%w: timeout exceeds maximum %s", ErrInvalidInput, service.maximumWait)
 	}
-	return requested, nil
+	return time.Duration(seconds) * time.Second, nil
 }
 
 // canonicalAccessRepo resolves any accepted repository spelling (bare,

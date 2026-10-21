@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -27,7 +28,18 @@ type mcpArtifactSaved struct {
 // a binary exactly, so the bytes come from the same server's raw artifact
 // route, authenticated with the same token and CA, and are verified against
 // the declared size and digest before the file is renamed into place (#1011).
-func saveMCPArtifact(ctx context.Context, cfg mcpFlagResult, args json.RawMessage, output io.Writer) error {
+func saveMCPArtifact(ctx context.Context, cfg mcpFlagResult, args json.RawMessage, output io.Writer) (resultErr error) {
+	if cfg.timeout > 0 {
+		parent := ctx
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, cfg.timeout)
+		defer cancel()
+		defer func() {
+			if resultErr != nil && errors.Is(ctx.Err(), context.DeadlineExceeded) && parent.Err() == nil {
+				resultErr = mcpDeadlineError(cfg.timeout, 0, resultErr)
+			}
+		}()
+	}
 	var arguments struct {
 		ID      string `json:"id"`
 		Name    string `json:"name"`

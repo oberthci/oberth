@@ -1,0 +1,197 @@
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync/atomic"
+	"testing"
+	"time"
+)
+
+func TestMCPDeadlineDerivesToolTimeoutAndHonorsOverride(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		tool     string
+		args     string
+		override time.Duration
+		want     time.Duration
+	}{
+		{"ordinary", "status", `{}`, 0, time.Minute},
+		{"short wait", "wait", `{"timeout":30}`, 0, time.Minute},
+		{"long wait", "wait", `{"timeout":600}`, 0, 630 * time.Second},
+		{"default wait", "wait", `{}`, 0, 630 * time.Second},
+		{"absent arguments", "wait", ``, 0, 630 * time.Second},
+		{"zero wait", "wait", `{"timeout":0}`, 0, 630 * time.Second},
+		{"default promotion", "promote_status", `{}`, 0, 630 * time.Second},
+		{"generic tool", "custom_poll", `{"timeout":120}`, 0, 150 * time.Second},
+		{"override shorter", "wait", `{"timeout":600}`, time.Second, time.Second},
+		{"override longer", "status", `{}`, 2 * time.Minute, 2 * time.Minute},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			limit, _, err := mcpDeadline(mcpFlagResult{timeout: test.override}, toolsCallParams{Name: test.tool, Arguments: json.RawMessage(test.args)})
+			if err != nil || limit != test.want {
+				t.Fatalf("deadline = %s, %v; want %s", limit, err, test.want)
+			}
+		})
+	}
+	if _, _, err := mcpDeadline(mcpFlagResult{}, toolsCallParams{Name: "wait", Arguments: json.RawMessage(`{"timeout":9223372036854775807}`)}); !errors.Is(err, errUsage) {
+		t.Fatalf("unrepresentable deadline accepted: %v", err)
+	}
+}
+
+func TestMCPTimeoutFlag(t *testing.T) {
+	t.Setenv("OBERTH_TOKEN", "deadline-test-token")
+	for _, args := range [][]string{{"--timeout", "90s"}, {"--timeout=90s"}} {
+		cfg, err := parseMCPFlags("mcp call", args, 0)
+		if err != nil || cfg.timeout != 90*time.Second {
+			t.Fatalf("timeout flag = %s, %v", cfg.timeout, err)
+		}
+	}
+	for _, value := range []string{"", "0", "-1s", "invalid", "99999999999999999h"} {
+		if _, err := parseMCPFlags("mcp call", []string{"--timeout=" + value}, 0); !errors.Is(err, errUsage) {
+			t.Fatalf("accepted timeout %q: %v", value, err)
+		}
+	}
+}
+
+// Exercise the actual CLI HTTP/SSE path beyond both former 60-second limits.
+// This intentionally takes over a minute, including in ordinary CI suites.
+func TestMCPCallStreamsHeartbeatsBeyondSixtySeconds(t *testing.T) {
+	var heartbeats atomic.Int64
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request jsonRPCRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Error(err)
+			return
+		}
+		w.Header().Set("Content-Type", mcpContentTypeSSE)
+		finished := time.NewTimer(61 * time.Second)
+		defer finished.Stop()
+		ticker := time.NewTicker(time.Second)
+		defer ticker.Stop()
+		for {
+			if _, err := fmt.Fprint(w, ": keepalive\n\n"); err != nil {
+				return
+			}
+			if err := http.NewResponseController(w).Flush(); err != nil {
+				t.Error(err)
+				return
+			}
+			heartbeats.Add(1)
+			select {
+			case <-r.Context().Done():
+				return
+			case <-ticker.C:
+				continue
+			case <-finished.C:
+				payload, err := json.Marshal(jsonRPCResponse{JSONRPC: mcpJSONRPCVersion, ID: &request.ID, Result: json.RawMessage(`{"content":[{"type":"text","text":"finished"}]}`)})
+				if err != nil {
+					t.Error(err)
+					return
+				}
+				_, _ = fmt.Fprintf(w, "event: message\ndata: %s\n\n", payload)
+				return
+			}
+		}
+	}))
+	defer server.Close()
+	original := mcpHTTPClientFunc
+	client := server.Client()
+	client.Timeout = mcpRequestTimeout
+	mcpHTTPClientFunc = func(string) (*http.Client, error) { return client, nil }
+	defer func() { mcpHTTPClientFunc = original }()
+	t.Setenv("OBERTH_TOKEN", "heartbeat-test-token")
+	var output strings.Builder
+	err := runMCPCall(t.Context(), []string{"custom_poll", `{"timeout":300}`, "--url", server.URL}, &output)
+	if err != nil || output.String() != "finished\n" {
+		t.Fatalf("streaming call = %q, %v", output.String(), err)
+	}
+	if heartbeats.Load() < 2 {
+		t.Fatal("long-running tool did not stream heartbeats")
+	}
+	if client.Timeout != mcpRequestTimeout {
+		t.Fatal("shared HTTP client was mutated")
+	}
+}
+
+func TestMCPCallDeadlineErrorNamesLimit(t *testing.T) {
+	for _, stream := range []bool{false, true} {
+		t.Run(fmt.Sprint(stream), func(t *testing.T) {
+			server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_, _ = io.Copy(io.Discard, r.Body)
+				if stream {
+					w.Header().Set("Content-Type", mcpContentTypeSSE)
+					_, _ = fmt.Fprint(w, ": keepalive\n\n")
+					_ = http.NewResponseController(w).Flush()
+				}
+				<-r.Context().Done()
+			}))
+			defer server.Close()
+			defer withTestMCPClient(t, server)()
+			t.Setenv("OBERTH_TOKEN", "deadline-test-token")
+			var output strings.Builder
+			err := runMCPCall(t.Context(), []string{"wait", `{"timeout":600}`, "--url", server.URL, "--timeout=30ms"}, &output)
+			if !errors.Is(err, context.DeadlineExceeded) || !strings.Contains(err.Error(), "client deadline 30ms") || !strings.Contains(err.Error(), "tool timeout 10m0s") {
+				t.Fatalf("deadline diagnostic = %v", err)
+			}
+			if output.Len() != 0 {
+				t.Fatalf("deadline printed partial output: %q", output.String())
+			}
+		})
+	}
+}
+
+func TestMCPRequestPreservesCallerCancellation(t *testing.T) {
+	server := newMCPTestServer(t, "cancel-test-token")
+	defer server.Close()
+	defer withTestMCPClient(t, server)()
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	_, err := mcpRequest(ctx, mcpFlagResult{mcpConfig: mcpConfig{URL: server.URL, Token: "cancel-test-token"}}, mcpMethodToolsCall, toolsCallParams{Name: "wait"})
+	if !errors.Is(err, context.Canceled) || strings.Contains(err.Error(), "client deadline") {
+		t.Fatalf("caller cancellation = %v", err)
+	}
+}
+
+func TestMCPRequestPreservesEarlierCallerDeadline(t *testing.T) {
+	server := newMCPTestServer(t, "caller-deadline-token")
+	defer server.Close()
+	defer withTestMCPClient(t, server)()
+	ctx, cancel := context.WithDeadline(t.Context(), time.Now().Add(-time.Second))
+	defer cancel()
+	_, err := mcpRequest(ctx, mcpFlagResult{mcpConfig: mcpConfig{URL: server.URL, Token: "caller-deadline-token"}}, mcpMethodToolsCall, toolsCallParams{Name: "wait"})
+	if !errors.Is(err, context.DeadlineExceeded) || strings.Contains(err.Error(), "client deadline") {
+		t.Fatalf("caller deadline = %v", err)
+	}
+}
+
+func TestMCPArtifactDownloadHonorsTimeout(t *testing.T) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) { <-r.Context().Done() }))
+	defer server.Close()
+	defer withTestMCPClient(t, server)()
+	t.Setenv("OBERTH_TOKEN", "artifact-deadline-token")
+	destination := filepath.Join(t.TempDir(), "artifact.bin")
+	err := runMCPCall(t.Context(), []string{"artifact_get", `{"id":"run1","name":"file"}`, "--url", server.URL + "/mcp", "--output", destination, "--timeout=30ms"}, io.Discard)
+	if !errors.Is(err, context.DeadlineExceeded) || !strings.Contains(err.Error(), "client deadline 30ms") {
+		t.Fatalf("artifact deadline = %v", err)
+	}
+	if _, err := os.Stat(destination); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("timed-out artifact retained: %v", err)
+	}
+}
+
+func TestMCPDeadlineTransportDoesNotExposeURL(t *testing.T) {
+	err := classifyMCPTransport(&url.Error{Op: "Post", URL: "https://example.org/mcp?credential=private-fixture", Err: context.DeadlineExceeded})
+	if !errors.Is(err, context.DeadlineExceeded) || strings.Contains(err.Error(), "private-fixture") {
+		t.Fatalf("timeout classification = %v", err)
+	}
+}
