@@ -121,11 +121,12 @@ func TestTrustedPreflightAdapterLifecycle(t *testing.T) {
 		t.Run(scenario, func(t *testing.T) {
 			ctx := context.Background()
 			fixture := newRaceFixture(t)
+			guestBudget := store.KubeVirtBudget{MaxVMs: 3, MaxCores: 4, MaxMemoryBytes: 8 << 30}
 			if strings.HasPrefix(scenario, "guest ") {
 				if err := os.WriteFile(filepath.Join(fixture.sourceDir, ".oberth", "build.yaml"), []byte(guestTestDocument), 0644); err != nil {
 					t.Fatal(err)
 				}
-				fixture.jobs.SetKubeVirtGrantLoader(&guestGrantLoader{allowed: scenario == "guest granted"})
+				fixture.jobs.SetKubeVirtGrantLoader(&guestGrantLoader{allowed: scenario == "guest granted", budget: guestBudget})
 			}
 			controller := &protectedControllerFixture{blockingController: newBlockingController(), failed: scenario == "workflow failed"}
 			if scenario == "definite create refusal" {
@@ -202,8 +203,11 @@ func TestTrustedPreflightAdapterLifecycle(t *testing.T) {
 				}
 				return
 			}
-			if scenario == "guest granted" && !controller.request.KubeVirtGranted {
-				t.Fatal("preflight lost the live VM grant")
+			if scenario == "guest granted" {
+				budget := controller.request.KubeVirtBudget
+				if !controller.request.KubeVirtGranted || budget.MaxVMs != guestBudget.MaxVMs || budget.MaxCores != guestBudget.MaxCores || budget.MaxMemory.Value() != guestBudget.MaxMemoryBytes {
+					t.Fatal("preflight lost the live VM grant or budget")
+				}
 			}
 			state, getErr := database.KVMPreflight(ctx, run.ID)
 			if getErr != nil {
