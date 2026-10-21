@@ -100,3 +100,56 @@ func TestEvidencePurgeProtectsActiveRunsAndNewestTerminal(t *testing.T) {
 		})
 	}
 }
+
+func TestEvidenceRemovalDoesNotBlockSchedulerWrites(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "evidence.sqlite")
+	s, err := Open(ctx, path, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = s.Close() }()
+	repo := createRepo(t, s)
+	old, err := s.EnqueueRun(ctx, testRunSpec(repo.ID, "feature/old", strings.Repeat("a", 40)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ClaimNextRun(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.FinishRun(ctx, old.ID, model.RunResult{Status: model.RunPassed}); err != nil {
+		t.Fatal(err)
+	}
+	queued, err := s.EnqueueRun(ctx, testRunSpec(repo.ID, "feature/new", strings.Repeat("b", 40)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	writer, err := OpenAdminClient(ctx, path, Options{BusyTimeout: 100 * time.Millisecond})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = writer.Close() }()
+	value, err := s.PurgeRunEvidence(ctx, "owner", old.ID, "both", "cleanup", 0, func() (int64, error) {
+		markers, err := writer.RunEvidencePurges(ctx, old.ID)
+		if err != nil || len(markers) != 1 || markers[0].State != "pending" {
+			t.Fatalf("removal is not fenced: %#v %v", markers, err)
+		}
+		// These writes must finish before removal returns. A write reservation
+		// held across the callback fails at the independent connection's timeout.
+		claimed, err := writer.ClaimNextRun(ctx)
+		if err != nil || claimed.ID != queued.ID {
+			t.Fatalf("claim during removal: %#v %v", claimed, err)
+		}
+		if _, err := writer.PutStepResult(ctx, model.StepResult{RunID: queued.ID, Burn: "test", Step: "unit", Status: model.StepPassed, DeclaredSize: "M"}); err != nil {
+			t.Fatalf("step result during removal: %v", err)
+		}
+		return 10, nil
+	})
+	if err != nil || value.State != "complete" {
+		t.Fatalf("purge=%#v err=%v", value, err)
+	}
+	if _, err := s.VerifyAuditChain(ctx); err != nil {
+		t.Fatal(err)
+	}
+}

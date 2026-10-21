@@ -49,8 +49,7 @@ type Retention struct {
 	Now            func() time.Time
 	mu             sync.Mutex
 	statusMu       sync.Mutex
-	lastSweep      time.Time
-	lastError      string
+	status         RetentionStatus
 }
 
 func (r *Retention) now() time.Time {
@@ -127,14 +126,21 @@ func (r *Retention) EvidenceError(ctx context.Context, id, what string) error {
 func (r *Retention) Sweep(ctx context.Context) (resultErr error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	r.statusMu.Lock()
+	status := r.status
+	r.statusMu.Unlock()
 	defer func() {
-		r.statusMu.Lock()
-		defer r.statusMu.Unlock()
-		r.lastSweep = r.now().UTC()
-		r.lastError = ""
+		status.LastSweep = r.now().UTC()
+		status.LastError = ""
 		if resultErr != nil {
-			r.lastError = resultErr.Error()
+			status.LastError = resultErr.Error()
 		}
+		status.DiskFloorBytes = r.DiskFloorBytes
+		status.FreeBytes = statfsFreeBytes(r.DataRoot)
+		status.BelowFloor = status.DiskFloorBytes > 0 && status.FreeBytes < status.DiskFloorBytes
+		r.statusMu.Lock()
+		r.status = status
+		r.statusMu.Unlock()
 	}()
 	logs, err := r.Logs.UsageByRun()
 	if err != nil {
@@ -144,48 +150,73 @@ func (r *Retention) Sweep(ctx context.Context) (resultErr error) {
 	if err != nil {
 		return err
 	}
+	status.LogsBytes, status.ArtifactsBytes = 0, 0
+	for _, bytes := range logs {
+		status.LogsBytes += bytes
+	}
+	for _, bytes := range artifacts {
+		status.ArtifactsBytes += bytes
+	}
+	if r.LogPolicy.Age <= 0 && r.LogPolicy.BudgetBytes <= 0 && r.ArtifactPolicy.Age <= 0 && r.ArtifactPolicy.BudgetBytes <= 0 {
+		return nil
+	}
+	// Take one read-only protection snapshot for both evidence classes. Only
+	// eligible candidates enter the audited purge's immediate write transaction.
+	known, err := r.Database.EvidenceRetentionRuns(ctx, r.KeepNewest)
+	if err != nil {
+		return err
+	}
 	for _, item := range []struct {
 		what   string
 		usage  map[string]int64
 		policy RetentionPolicy
+		total  *int64
 	}{
-		{"logs", logs, r.LogPolicy}, {"artifacts", artifacts, r.ArtifactPolicy},
+		{"logs", logs, r.LogPolicy, &status.LogsBytes},
+		{"artifacts", artifacts, r.ArtifactPolicy, &status.ArtifactsBytes},
 	} {
 		if item.policy.Age <= 0 && item.policy.BudgetBytes <= 0 {
 			continue
 		}
-		var total int64
-		var runs []model.Run
-		for id, bytes := range item.usage {
-			total += bytes
-			run, err := r.Database.Run(ctx, id)
-			if errors.Is(err, store.ErrNotFound) {
-				continue
-			}
-			if err != nil {
-				return err
-			}
-			if run.Status.Terminal() && run.FinishedAt != nil {
+		var runs []store.EvidenceRetentionRun
+		for id := range item.usage {
+			run, exists := known[id]
+			if !exists {
+				// Orphans have no retention timestamp or recoverable run history.
+				// Reclaim them whenever this evidence class has an enabled policy.
+				runs = append(runs, store.EvidenceRetentionRun{ID: id})
+			} else if !run.Protected && run.FinishedAt != nil {
 				runs = append(runs, run)
 			}
 		}
 		sort.Slice(runs, func(i, j int) bool {
+			if runs[i].FinishedAt == nil || runs[j].FinishedAt == nil {
+				if runs[i].FinishedAt == nil && runs[j].FinishedAt == nil {
+					return runs[i].ID < runs[j].ID
+				}
+				return runs[i].FinishedAt == nil
+			}
 			if runs[i].FinishedAt.Equal(*runs[j].FinishedAt) {
 				return runs[i].QueueSequence < runs[j].QueueSequence
 			}
 			return runs[i].FinishedAt.Before(*runs[j].FinishedAt)
 		})
 		for _, run := range runs {
-			expired := item.policy.Age > 0 && !run.FinishedAt.After(r.now().Add(-item.policy.Age))
-			overBudget := item.policy.BudgetBytes > 0 && total > item.policy.BudgetBytes
-			if !expired && !overBudget {
+			orphan := run.FinishedAt == nil
+			expired := !orphan && item.policy.Age > 0 && !run.FinishedAt.After(r.now().Add(-item.policy.Age))
+			overBudget := item.policy.BudgetBytes > 0 && *item.total > item.policy.BudgetBytes
+			if !orphan && !expired && !overBudget {
 				continue
 			}
-			value, err := r.purge(ctx, "oberth-retention", run.ID, item.what, "retention policy", r.KeepNewest)
+			reason := "retention policy"
+			if orphan {
+				reason = "orphaned evidence"
+			}
+			value, err := r.purge(ctx, "oberth-retention", run.ID, item.what, reason, r.KeepNewest)
 			if errors.Is(err, store.ErrEvidenceProtected) {
 				continue
 			}
-			total -= value.Bytes
+			*item.total -= value.Bytes
 			if err != nil {
 				return err
 			}
@@ -194,31 +225,14 @@ func (r *Retention) Sweep(ctx context.Context) (resultErr error) {
 	return nil
 }
 
+// Status returns the last sweep's measurements without walking evidence trees.
 func (r *Retention) Status(ctx context.Context) (any, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	logs, err := r.Logs.UsageByRun()
-	if err != nil {
-		return nil, err
-	}
-	artifacts, err := r.Artifacts.UsageByRun()
-	if err != nil {
-		return nil, err
-	}
-	value := RetentionStatus{DiskFloorBytes: r.DiskFloorBytes, FreeBytes: statfsFreeBytes(r.DataRoot)}
-	for _, bytes := range logs {
-		value.LogsBytes += bytes
-	}
-	for _, bytes := range artifacts {
-		value.ArtifactsBytes += bytes
-	}
-	value.BelowFloor = value.DiskFloorBytes > 0 && value.FreeBytes < value.DiskFloorBytes
 	r.statusMu.Lock()
-	value.LastSweep = r.lastSweep
-	value.LastError = r.lastError
-	r.statusMu.Unlock()
-	return value, nil
+	defer r.statusMu.Unlock()
+	return r.status, nil
 }
 
 func (r *Retention) Run(ctx context.Context, interval time.Duration, logger *log.Logger) {

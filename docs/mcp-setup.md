@@ -294,7 +294,12 @@ can keep storage above the budget. Manual purges keep the same evidence
 protections but may remove the newest terminal run. The separate
 `admission.diskFloorBytes` value controls the free-space admission floor.
 
-`system_status` reports storage usage, the disk floor and last sweep.
+When an evidence class has an enabled age or budget policy, sweeps also reclaim
+orphaned files with no run row, recording the removal in the audit trail.
+Disabled policies preserve orphaned files too.
+
+`system_status` reports storage usage and free space cached by the last sweep,
+the disk floor, and the last sweep time/error. It does not rescan evidence trees.
 
 ### Filtering log output
 

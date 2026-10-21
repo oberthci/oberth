@@ -397,3 +397,160 @@ func TestTerminalClaimCannotRecreatePurgedEvidence(t *testing.T) {
 		t.Fatalf("late dispatch recreated a log: %v", err)
 	}
 }
+
+func TestProtectedPurgeRetryResolvesCrashedIntent(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	f := newRetentionFixture(t)
+	run := f.run(t, "feature/crashed-purge", "branch", true)
+	// Interrupt the attempt after its pending commit, before its result commit.
+	interrupted, cancel := context.WithCancel(ctx)
+	defer cancel()
+	pending, err := f.retention.Database.PurgeRunEvidence(interrupted, "owner", run.ID, "both", "cleanup", 0, func() (int64, error) {
+		cancel()
+		return 0, context.Canceled
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatal(err)
+	}
+	if err := f.retention.EvidenceError(ctx, run.ID, "logs"); !errors.Is(err, ErrEvidencePurged) {
+		t.Fatalf("unresolved intent not fenced: %v", err)
+	}
+	if _, err := f.retention.Database.UpsertCIIssue(ctx, "owner", f.repo.ID, run.Ref, "keep evidence", "investigation"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.retention.Purge(ctx, api.Actor{Identity: "owner", Admin: true}, run.ID, "both", "retry cleanup"); !errors.Is(err, store.ErrEvidenceProtected) {
+		t.Fatalf("protected retry: %v", err)
+	}
+	markers, err := f.retention.Database.RunEvidencePurges(ctx, run.ID)
+	if err != nil || len(markers) != 1 || markers[0].ID != pending.ID || markers[0].State != "refused" {
+		t.Fatalf("stale intent was not resolved: %#v %v", markers, err)
+	}
+	for _, what := range []string{"logs", "artifacts"} {
+		if err := f.retention.EvidenceError(ctx, run.ID, what); err != nil {
+			t.Fatalf("refused retry still fences %s: %v", what, err)
+		}
+	}
+	f.retained(t, run.ID, true)
+	if _, err := f.retention.Database.VerifyAuditChain(ctx); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRetentionReclaimsOrphansOnlyForEnabledEvidencePolicies(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	f := newRetentionFixture(t)
+	orphan := strings.Repeat("f", 32)
+	file, err := f.retention.Logs.Create(orphan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := file.WriteString("orphan output\n"); err != nil {
+		t.Fatal(err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(f.root, "artifacts", orphan)
+	if err := os.MkdirAll(path, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(path, "report.txt"), []byte("orphan report"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.retention.Sweep(ctx); err != nil {
+		t.Fatal(err)
+	}
+	f.retained(t, orphan, true)
+	f.retention.LogPolicy.Age = time.Hour
+	if err := f.retention.Sweep(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(f.root, "logs", orphan+".log")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("orphan log survived: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(path, "report.txt")); err != nil {
+		t.Fatalf("disabled artifact policy removed evidence: %v", err)
+	}
+	f.retention.ArtifactPolicy.BudgetBytes = 1024 // Orphans are reclaimed even below budget.
+	if err := f.retention.Sweep(ctx); err != nil {
+		t.Fatal(err)
+	}
+	f.retained(t, orphan, false)
+	markers, err := f.retention.Database.RunEvidencePurges(ctx, orphan)
+	if err != nil || len(markers) != 2 {
+		t.Fatalf("orphan audit=%#v %v", markers, err)
+	}
+	for _, marker := range markers {
+		if marker.State != "complete" || marker.Bytes <= 0 || marker.Reason != "orphaned evidence" {
+			t.Fatalf("orphan audit=%#v", marker)
+		}
+	}
+	if _, err := f.retention.Database.Run(ctx, orphan); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("orphan purge created history: %v", err)
+	}
+	if _, err := f.retention.Database.VerifyAuditChain(ctx); err != nil {
+		t.Fatal(err)
+	}
+	status, err := f.retention.Status(ctx)
+	if err != nil || status.(RetentionStatus).LogsBytes != 0 || status.(RetentionStatus).ArtifactsBytes != 0 {
+		t.Fatalf("orphan totals=%#v %v", status, err)
+	}
+}
+
+func TestRetentionSweepPrefiltersProtectedRuns(t *testing.T) {
+	t.Parallel()
+	f := newRetentionFixture(t)
+	run := f.run(t, "v1", "release", true)
+	f.now = f.now.Add(24 * time.Hour)
+	f.retention.LogPolicy.Age = time.Hour
+	f.retention.ArtifactPolicy.BudgetBytes = 1
+	f.retention.MutationGate = func(context.Context) error {
+		t.Error("protected candidate entered the purge mutation path")
+		return errors.New("unexpected mutation")
+	}
+	if err := f.retention.Sweep(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	f.retained(t, run.ID, true)
+}
+
+func TestRetentionStatusUsesLastSweepTotals(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	f := newRetentionFixture(t)
+	f.run(t, "feature/cached-status", "branch", true)
+	if err := f.retention.Sweep(ctx); err != nil {
+		t.Fatal(err)
+	}
+	before, err := f.retention.Status(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if before.(RetentionStatus).LogsBytes <= 0 || before.(RetentionStatus).ArtifactsBytes <= 0 {
+		t.Fatalf("empty measurements: %#v", before)
+	}
+	// Make both trees unreadable as directories. system_status must remain a
+	// cached read, and a failed sweep must preserve the last measured totals.
+	for _, name := range []string{"logs", "artifacts"} {
+		path := filepath.Join(f.root, name)
+		if err := os.Rename(path, path+"-saved"); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("not a directory"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	after, err := f.retention.Status(ctx)
+	if err != nil || after != before {
+		t.Fatalf("status rescanned evidence: before=%#v after=%#v err=%v", before, after, err)
+	}
+	if err := f.retention.Sweep(ctx); err == nil {
+		t.Fatal("expected failed scan")
+	}
+	failed, err := f.retention.Status(ctx)
+	if err != nil || failed.(RetentionStatus).LastError == "" || failed.(RetentionStatus).LogsBytes != before.(RetentionStatus).LogsBytes {
+		t.Fatalf("failed sweep lost cached totals: %#v %v", failed, err)
+	}
+}
