@@ -1877,6 +1877,10 @@ Admin-only read-only MCP tool `secretstore_plan`: given the approved grants
 secretstore sync` would apply and report the exact diff (repo, path, policy
 name). Returns typed output without secret values. Denied for non-admin uplinks.
 The server never receives an admin Bao token and never writes policies.
+The plan also inspects each registered repository’s default-branch release
+document and reports every release leaf’s effective ServiceAccount, WIF role
+and subject, alongside capability gaps. This inspection does not record grant
+declarations or alter the policy digest; an unavailable planner is explicit.
 
 ### secretstore_sync_receipt MCP tool (#712)
 

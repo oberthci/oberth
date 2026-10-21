@@ -47,3 +47,14 @@ func TestReleasePreflightReloadsGrantsAfterApproval(t *testing.T) {
 		t.Fatalf("fresh grants: %v %v calls=%d", problems, err, loader.calls)
 	}
 }
+
+func TestReleasePlanDoesNotRecordDeclarations(t *testing.T) {
+	recorder := &fakeDeclarationRecorder{}
+	jobs := &ArgoJobs{declarations: recorder}
+	result, err := jobs.PlanRelease(context.Background(), service.JobRequest{
+		Repository: model.Repository{ID: 42, Name: "repo"}, UpstreamName: "forge", UpstreamOrg: "org",
+	}, []byte(declarationWorkflow))
+	if err != nil || len(result.Problems) == 0 || recorder.called {
+		t.Fatalf("result=%+v err=%v recorder=%+v", result, err, recorder)
+	}
+}

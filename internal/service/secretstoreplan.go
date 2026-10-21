@@ -19,6 +19,7 @@ import (
 // `oberth secretstore sync` would apply based on the approved grants.
 // Read-only: the server never receives an admin Bao token (#611).
 type SecretStorePlanResponse struct {
+	Releases         []SecretStoreReleasePlan         `json:"releases,omitempty"`
 	Repos            []SecretStorePlanRepo            `json:"repos"`
 	Digest           string                           `json:"digest"`
 	Text             string                           `json:"text"`
@@ -68,6 +69,7 @@ func (service *API) secretStorePlan(ctx context.Context, actor api.Actor, raw js
 		return SecretStorePlanResponse{}, err
 	}
 	response := computeSecretStorePlan(grants)
+	service.addReleasePlans(ctx, &response)
 
 	// Look up the latest secretstore.sync audit action to populate last_materialized.
 	// The "never" state is always rendered explicitly so an operator can
