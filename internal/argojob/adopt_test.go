@@ -181,3 +181,42 @@ func TestAdoptionAcceptsActualServerBuiltWorkflow(t *testing.T) {
 		t.Fatalf("built Workflow adoption = %#v %v %v", binding, found, err)
 	}
 }
+
+func TestAdoptionRestoresKubeVirtDemandFromBoundWorkflow(t *testing.T) {
+	wf, request := adoptionWorkflow()
+	wf.Spec.Templates = append(wf.Spec.Templates, wfv1.Template{Name: "vm", Resource: &wfv1.ResourceTemplate{
+		Action: "create", Manifest: `apiVersion: kubevirt.io/v1
+kind: VirtualMachineInstance
+spec:
+  domain:
+    cpu:
+      cores: 3
+    resources:
+      requests:
+        memory: 2Gi
+`,
+	}})
+	controller := &Controller{workflows: &staticWorkflowClient{workflow: wf}, config: Config{Namespace: wf.Namespace}}
+	binding, found, err := controller.Adopt(t.Context(), request)
+	want := argoworkflow.VMIDemand{VMs: 1, Cores: 3, MemoryBytes: 2 << 30}
+	if err != nil || !found || binding.KubeVirt != want {
+		t.Fatalf("adopted demand = %#v, %v, %v", binding.KubeVirt, found, err)
+	}
+	delete(wf.Annotations, argoworkflow.ConcurrencyGroupAnnotation)
+	request.Group = argoworkflow.KubeVirtConcurrencyGroup
+	if _, found, err := controller.Adopt(t.Context(), request); err != nil || !found {
+		t.Fatalf("legacy implicit group could not recover: %v, %v", found, err)
+	}
+	request.Group = "unrelated"
+	if _, _, err := controller.Adopt(t.Context(), request); err == nil {
+		t.Fatal("arbitrary undeclared recovery group accepted")
+	}
+	request.Group = ""
+	wf.Spec.Templates[len(wf.Spec.Templates)-1].Resource.Manifest = strings.ReplaceAll(wf.Spec.Templates[len(wf.Spec.Templates)-1].Resource.Manifest, "2Gi", "-1Gi")
+	if binding.matches(wf) {
+		t.Fatal("changed resource spec matched adoption binding")
+	}
+	if _, _, err := controller.Adopt(t.Context(), request); err == nil {
+		t.Fatal("invalid adopted resource demand accepted")
+	}
+}

@@ -1794,7 +1794,10 @@ continuity checks; it must never be used to reset or bypass those checks.
   excess runs remain queued with reason `KubeVirt capacity`, holding no weight
   or declared group and retaining FIFO order. Completion and accepted
   cancel/supersede deletion release capacity. A run exceeding the grant by
-  itself still fails admission. Different repositories' grants still add up.
+  itself still fails admission. Adopted branch Workflows restore their demand
+  from the verified live spec exactly once before new claims, even under a
+  reduced or revoked grant; existing usage drains before new work can fit.
+  Different repositories' grants still add up.
   `spec.domain.firmware.kernelBoot` is admitted only with a container
   image that is digest-pinned under the containerDisk prefixes, an absolute
   clean `kernelPath` (and optional `initrdPath`), and `kernelArgs` of at most

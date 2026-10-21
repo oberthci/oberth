@@ -385,7 +385,11 @@ func (scheduler *Scheduler) Run(ctx context.Context) error {
 		}
 	}()
 	if err := scheduler.reconcileStrandedRunsWithGate(workerCtx, scheduler.awaitMutation, func(run model.Run, size periapsis.Size) error {
-		reservation, err := scheduler.admission.adopt(run, size)
+		demand, err := scheduler.adoptedKubeVirtDemand(run)
+		if err != nil {
+			return err
+		}
+		reservation, err := scheduler.admission.adopt(run, size, demand)
 		if err != nil {
 			return err
 		}

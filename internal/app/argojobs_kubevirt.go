@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/service"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 )
@@ -55,3 +56,17 @@ func (jobs *ArgoJobs) PipelineKubeVirt(ctx context.Context, request service.JobR
 }
 
 var _ service.PipelineKubeVirtSizer = (*ArgoJobs)(nil)
+
+// AdoptedKubeVirtDemand comes from the verified live Workflow, including work
+// admitted under an older or revoked grant. Such work must remain accounted.
+func (jobs *ArgoJobs) AdoptedKubeVirtDemand(run model.Run) (argoworkflow.VMIDemand, error) {
+	jobs.mu.Lock()
+	defer jobs.mu.Unlock()
+	intent, ok := jobs.intents[run.JobName]
+	if !ok || intent.runID != run.ID || intent.cancelled || intent.adoption == nil {
+		return argoworkflow.VMIDemand{}, fmt.Errorf("app: no adopted resource binding for run %s", run.ID)
+	}
+	return intent.adoption.KubeVirt, nil
+}
+
+var _ service.AdoptedKubeVirtSizer = (*ArgoJobs)(nil)

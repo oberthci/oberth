@@ -57,9 +57,13 @@ func adoptionFailure(adopter JobAdopter, run model.Run, err error) error {
 
 // adopt restores grants for work already running, even if the new owner's
 // configured capacity is smaller. New admissions wait until it has drained.
-func (gate *weightedAdmission) adopt(run model.Run, size periapsis.Size) (*admissionReservation, error) {
+func (gate *weightedAdmission) adopt(run model.Run, size periapsis.Size, demand argoworkflow.VMIDemand) (*admissionReservation, error) {
 	if !size.Valid() || (run.ConcurrencyGroup != "" && !argoworkflow.ValidConcurrencyGroup(run.ConcurrencyGroup)) {
 		return nil, fmt.Errorf("%w: invalid adopted resource contract", ErrAdoptionRefused)
+	}
+	resources := KubeVirtResources{Demand: demand, Limit: argoworkflow.VMIBudgetLimit().DemandLimit()}
+	if err := resources.Validate(); err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrAdoptionRefused, err)
 	}
 	order := run.AdmissionSequence
 	if order <= 0 {
@@ -68,7 +72,7 @@ func (gate *weightedAdmission) adopt(run model.Run, size periapsis.Size) (*admis
 	gate.mu.Lock()
 	defer gate.mu.Unlock()
 	if previous, ok := gate.reservations[run.QueueSequence]; ok {
-		if previous.runID != run.ID || previous.order != order || !previous.granted || previous.size != size.Effective() || previous.groupName != run.ConcurrencyGroup {
+		if previous.runID != run.ID || previous.order != order || !previous.granted || previous.size != size.Effective() || previous.groupName != run.ConcurrencyGroup || previous.repoID != run.RepoID || previous.kubeVirt.Demand != demand {
 			return nil, fmt.Errorf("%w: conflicting adopted admission", ErrAdoptionRefused)
 		}
 		return previous, nil
@@ -85,7 +89,7 @@ func (gate *weightedAdmission) adopt(run model.Run, size periapsis.Size) (*admis
 		gate: gate, sequence: run.QueueSequence, order: order, runID: run.ID, repoID: run.RepoID,
 		ref: run.Ref, refKind: run.RefKind, sha: run.SHA,
 		size: size.Effective(), weight: gate.weights.of(size.Effective(), gate.capacity),
-		group: group, groupName: run.ConcurrencyGroup, prepared: true, granted: true,
+		group: group, groupName: run.ConcurrencyGroup, prepared: true, granted: true, submitted: true, kubeVirt: resources,
 		claimedAt: now, preparedAt: now, grantedAt: now, ready: make(chan struct{}),
 	}
 	close(reservation.ready)

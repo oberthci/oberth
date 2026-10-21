@@ -3,11 +3,15 @@ package service
 import (
 	"context"
 	"io"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/runprogress"
+	"github.com/oberthci/oberth/internal/store"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 	"github.com/oberthci/oberth/pkg/periapsis"
 )
@@ -231,5 +235,159 @@ func TestKubeVirtOversizedRunFailsBeforeAdmission(t *testing.T) {
 	finished := fixture.awaitTerminal(t, run.ID)
 	if finished.Status != model.RunFailed || finished.Phase != "infrastructure" || !strings.Contains(finished.Error, "VMI run budget exceeded") || fixture.engine.wasCreated(run.ID) {
 		t.Fatalf("oversized run = %#v", finished)
+	}
+}
+
+func TestKubeVirtAdoptionCountsOnceAndDrainsReducedCapacity(t *testing.T) {
+	gate := newWeightedAdmissionForJobs(6)
+	unit := argoworkflow.VMIDemand{VMs: 1, Cores: 2, MemoryBytes: 1 << 30}
+	runs := []model.Run{{ID: "first", QueueSequence: 1, RepoID: 7}, {ID: "second", QueueSequence: 2, RepoID: 7}}
+	for _, run := range runs {
+		first, err := gate.adopt(run, periapsis.M, unit)
+		if err != nil {
+			t.Fatal(err)
+		}
+		again, err := gate.adopt(run, periapsis.M, unit)
+		if err != nil || again != first || !again.submitted {
+			t.Fatalf("repeated adoption = %p, %v", again, err)
+		}
+		changed := unit
+		changed.Cores++
+		if _, err := gate.adopt(run, periapsis.M, changed); err == nil {
+			t.Fatal("changed demand accepted for the same reservation")
+		}
+	}
+	gate.mu.Lock()
+	used := gate.kubeVirtUsedLocked(7)
+	gate.mu.Unlock()
+	if used != (argoworkflow.VMIDemand{VMs: 2, Cores: 4, MemoryBytes: 2 << 30}) {
+		t.Fatalf("adoption counted incorrectly: %#v", used)
+	}
+	// The grant is now smaller than the already-running total. Adoption must
+	// retain both runs, and new work waits for enough of that demand to drain.
+	waiting := gate.reserve(3)
+	t.Cleanup(waiting.cancel)
+	acquired := make(chan func(), 1)
+	go acquireRequestForTest(waiting, kubeVirtRequest("third", 7, unit, unit), acquired)
+	awaitWaiting(t, waiting)
+	gate.releaseDeletedRun("first")
+	awaitWaiting(t, waiting)
+	gate.releaseDeletedRun("second")
+	release := awaitAcquired(t, acquired)
+	gate.releaseDeletedRun("second")
+	release()
+	gate.mu.Lock()
+	used = gate.kubeVirtUsedLocked(7)
+	gate.mu.Unlock()
+	if used != (argoworkflow.VMIDemand{}) {
+		t.Fatalf("adoption leaked capacity: %#v", used)
+	}
+}
+
+type adoptingKubeVirtEngine struct {
+	*kubeVirtEngine
+	adopted chan string
+}
+
+func (engine *adoptingKubeVirtEngine) JobNamespace() string { return "workflows" }
+
+func (engine *adoptingKubeVirtEngine) Adopt(_ context.Context, run model.Run) (periapsis.Size, bool, error) {
+	engine.mu.Lock()
+	defer engine.mu.Unlock()
+	job := engine.jobs[run.JobName]
+	return periapsis.M, job != nil && job.runID == run.ID, nil
+}
+
+func (engine *adoptingKubeVirtEngine) AdoptedKubeVirtDemand(run model.Run) (argoworkflow.VMIDemand, error) {
+	return engine.resources[run.Ref].Demand, nil
+}
+
+func (engine *adoptingKubeVirtEngine) WaitResumed(ctx context.Context, name string, output io.Writer, _ []runprogress.Event, _ int64) (JobResult, error) {
+	engine.adopted <- name
+	return engine.Wait(ctx, name, output)
+}
+
+func TestKubeVirtRestartRestoresTwoRunsBeforeAdmittingThird(t *testing.T) {
+	fixture := newRecoveryFixture(t)
+	unit := argoworkflow.VMIDemand{VMs: 1, Cores: 2, MemoryBytes: 1 << 30}
+	limit := argoworkflow.VMIDemand{VMs: 2, Cores: 4, MemoryBytes: 2 << 30}
+	engine := &adoptingKubeVirtEngine{kubeVirtEngine: &kubeVirtEngine{
+		groupEngine: newGroupEngine(), resources: map[string]KubeVirtResources{},
+	}, adopted: make(chan string, 2)}
+	var runs []model.Run
+	for i, ref := range []string{"first", "second"} {
+		engine.resources[ref] = KubeVirtResources{Demand: unit, Limit: limit}
+		run := fixture.enqueueAndClaim(t, ref, strings.Repeat(string(rune('a'+i)), 40))
+		run.JobName = "workflow-" + ref
+		fixture.setJobName(t, run.ID, run.JobName)
+		if _, err := fixture.store.MarkRunSubmitted(t.Context(), run.ID); err != nil {
+			t.Fatal(err)
+		}
+		if err := engine.CreateCI(t.Context(), JobRequest{Run: run, JobName: run.JobName}); err != nil {
+			t.Fatal(err)
+		}
+		<-engine.created
+		runs = append(runs, run)
+	}
+	// Reopen durable state as a new owner; no source checkout is required to
+	// rebuild the demand of the two Workflows that survived the old process.
+	if err := fixture.store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	var err error
+	fixture.store, err = store.Open(t.Context(), filepath.Join(fixture.root, "oberth.sqlite"), store.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = fixture.store.Close() })
+	scheduler := fixture.scheduler(t, engine)
+	scheduler.maxConcurrent = 6
+	scheduler.admission = newWeightedAdmissionForJobs(6)
+	group := &groupFixture{store: fixture.store, terraform: fixture.repo, engine: engine.groupEngine, scheduler: scheduler}
+	engine.resources["third"] = KubeVirtResources{Demand: unit, Limit: limit}
+	third := group.branch(t, fixture.repo, "third", "c")
+	group.start(t)
+	for range runs {
+		select {
+		case <-engine.adopted:
+		case <-time.After(60 * time.Second):
+			t.Fatal("adopted observer did not start")
+		}
+	}
+	group.awaitAdmission(t, third, "KubeVirt capacity", func(o *model.AdmissionObservation) bool { return o != nil && o.KubeVirtCapacity })
+	scheduler.admission.mu.Lock()
+	used := scheduler.admission.kubeVirtUsedLocked(fixture.repo.ID)
+	scheduler.admission.mu.Unlock()
+	if used != limit {
+		t.Fatalf("restored usage = %#v, want %#v", used, limit)
+	}
+	for _, run := range runs {
+		current := group.run(t, run.ID)
+		if current.Status != model.RunRunning || current.JobName != run.JobName || current.SupersededBy != "" {
+			t.Fatalf("restart replaced run: %#v", current)
+		}
+	}
+	engine.finish(t, runs[0].ID)
+	if created := group.awaitCreated(t, 1); !created[third.ID] {
+		t.Fatalf("wrong successor: %v", created)
+	}
+	engine.finish(t, runs[1].ID)
+	engine.finish(t, third.ID)
+	for _, run := range append(runs, third) {
+		if got := group.awaitTerminal(t, run.ID); got.Status != model.RunFailed || got.FailedStep != "unit" {
+			t.Fatalf("run did not preserve its actual test result: %#v", got)
+		}
+	}
+	// Acquiring the entire grant synchronizes with the observer's final release.
+	release := acquireRequestWithinBudget(t, scheduler.admission.reserve(1000), kubeVirtRequest("probe", fixture.repo.ID, limit, limit))
+	release()
+	scheduler.admission.mu.Lock()
+	used = scheduler.admission.kubeVirtUsedLocked(fixture.repo.ID)
+	scheduler.admission.mu.Unlock()
+	if used != (argoworkflow.VMIDemand{}) {
+		t.Fatalf("completion leaked restored capacity: %#v", used)
+	}
+	if counts, err := fixture.store.CountRuns(t.Context()); err != nil || counts.Total != 3 {
+		t.Fatalf("restart created extra runs: %#v, %v", counts, err)
 	}
 }

@@ -200,3 +200,10 @@ creation settles and verifies that a late observer cannot release its successor.
 The oversized-run test
 proves refusal before submission. Static demand tests cover trigger-specific
 documents, live grants, server ceilings and invalid quantities.
+
+`TestKubeVirtRestartRestoresTwoRunsBeforeAdmittingThird` reopens durable state,
+adopts two live Workflows under their original run IDs, and parks a third until
+one completes. `TestKubeVirtAdoptionCountsOnceAndDrainsReducedCapacity` checks
+idempotence, conflicting-demand refusal and release under a reduced grant.
+Controller and adapter tests bind restored demand to the verified Workflow
+spec without requiring a current grant or repository checkout.

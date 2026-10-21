@@ -13,6 +13,7 @@ import (
 	"github.com/oberthci/oberth/internal/service"
 	"github.com/oberthci/oberth/internal/store"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
+	"github.com/oberthci/oberth/pkg/periapsis"
 )
 
 type kubeVirtGrantFunc func(context.Context, int64) (store.KubeVirtBudget, bool, error)
@@ -81,5 +82,26 @@ func TestPipelineKubeVirtRefusesMissingGrantAndOversizedDemand(t *testing.T) {
 	jobs.kubeVirtGrants = nil
 	if resources, err := jobs.PipelineKubeVirt(t.Context(), request); err != nil || resources != (service.KubeVirtResources{}) {
 		t.Fatalf("ordinary pipeline = %#v, %v", resources, err)
+	}
+}
+
+func TestAdoptedKubeVirtDemandUsesVerifiedBindingWithoutGrant(t *testing.T) {
+	want := argoworkflow.VMIDemand{VMs: 2, Cores: 4, MemoryBytes: 8 << 30}
+	controller := &adoptingArgoControl{found: true, binding: argojob.Adoption{Size: periapsis.M, KubeVirt: want}}
+	jobs := &ArgoJobs{controller: controller, intents: map[string]argoIntent{}}
+	run := model.Run{ID: "run", JobName: "workflow", Trigger: "branch"}
+	if _, err := jobs.AdoptedKubeVirtDemand(run); err == nil {
+		t.Fatal("demand returned before Workflow verification")
+	}
+	if _, found, err := jobs.Adopt(t.Context(), run); err != nil || !found {
+		t.Fatalf("adopt = %v, %v", found, err)
+	}
+	if got, err := jobs.AdoptedKubeVirtDemand(run); err != nil || got != want {
+		t.Fatalf("demand without active grant = %#v, %v", got, err)
+	}
+	foreign := run
+	foreign.ID = "foreign"
+	if _, err := jobs.AdoptedKubeVirtDemand(foreign); err == nil {
+		t.Fatal("foreign run read adopted demand")
 	}
 }

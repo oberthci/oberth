@@ -20,6 +20,7 @@ import (
 // Adoption pins observation to the exact Workflow found during owner recovery.
 // Resource size comes from that submission, never from the current default branch.
 type Adoption struct {
+	KubeVirt   argoworkflow.VMIDemand
 	Size       periapsis.Size
 	UID        types.UID
 	Identity   string
@@ -65,10 +66,17 @@ func (controller *Controller) bindAdoption(workflow *wfv1.Workflow, request Adop
 		return Adoption{}, fmt.Errorf("argojob: Workflow %s adoption binding mismatch", request.Name)
 	}
 	group, err := argoworkflow.RunConcurrencyGroup(workflow)
-	if err != nil || group != request.Group {
+	// Pre-#1173 submissions persisted this implicit group without annotating
+	// the Workflow. Preserve that existing holder during recovery only.
+	legacyGroup := group == "" && request.Group == argoworkflow.KubeVirtConcurrencyGroup && argoworkflow.DeclaresVMIResources(workflow)
+	if err != nil || (group != request.Group && !legacyGroup) {
 		return Adoption{}, fmt.Errorf("argojob: Workflow %s adoption group mismatch", request.Name)
 	}
 	size, err := argoworkflow.DeclaredSizeFor(workflow, request.RunTrigger)
+	if err != nil {
+		return Adoption{}, err
+	}
+	demand, err := argoworkflow.DeclaredVMIDemand(workflow)
 	if err != nil {
 		return Adoption{}, err
 	}
@@ -76,7 +84,7 @@ func (controller *Controller) bindAdoption(workflow *wfv1.Workflow, request Adop
 	if err != nil {
 		return Adoption{}, err
 	}
-	return Adoption{Size: size, UID: workflow.UID, Identity: identity, SpecSHA256: specHash}, nil
+	return Adoption{KubeVirt: demand, Size: size, UID: workflow.UID, Identity: identity, SpecSHA256: specHash}, nil
 }
 
 // Argo's status and API metadata change while it runs. Its live spec must stay

@@ -40,7 +40,10 @@ A run that would exceed the remaining capacity stays queued with reason
 `KubeVirt capacity`, keeps its FIFO place, and holds no weight or concurrency
 group until capacity frees. A single run exceeding the grant still fails
 admission. Completion, cancellation and supersession release the reservation
-once execution is terminal or Workflow deletion is accepted.
+once execution is terminal or Workflow deletion is accepted. On restart, adopted
+branch Workflows retain their declared VM demand from the verified live spec.
+Each is counted exactly once before new work is admitted, even if its grant
+was reduced or revoked while it ran; new work waits for capacity to drain.
 
 VMI resources do not select a run type or an implicit `kubevirt` group. An
 ungrouped VMI workflow has no group badge. Any valid

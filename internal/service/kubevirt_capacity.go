@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 )
 
@@ -124,4 +125,20 @@ func (gate *weightedAdmission) releaseDeletedRun(runID string) {
 			return
 		}
 	}
+}
+
+// AdoptedKubeVirtSizer reads demand pinned by JobAdopter to the existing
+// Workflow. Recovery must not size already-running work from a fresh checkout.
+type AdoptedKubeVirtSizer interface {
+	AdoptedKubeVirtDemand(model.Run) (argoworkflow.VMIDemand, error)
+}
+
+func (scheduler *Scheduler) adoptedKubeVirtDemand(run model.Run) (argoworkflow.VMIDemand, error) {
+	if sizer, ok := scheduler.jobs.(AdoptedKubeVirtSizer); ok {
+		return sizer.AdoptedKubeVirtDemand(run)
+	}
+	if _, ok := scheduler.jobs.(PipelineKubeVirtSizer); ok {
+		return argoworkflow.VMIDemand{}, fmt.Errorf("service: VMI-capable engine cannot restore adopted demand")
+	}
+	return argoworkflow.VMIDemand{}, nil
 }
