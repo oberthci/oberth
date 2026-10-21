@@ -26,8 +26,8 @@ func (jobs *ArgoJobs) SetArtifacts(collector ArtifactCollector, store ArtifactSt
 	jobs.artifactLimit = limit
 }
 
-func (jobs *ArgoJobs) collectArtifacts(ctx context.Context, workflowName, runID string, trigger periapsis.Trigger) string {
-	if jobs.collector == nil || jobs.artifacts == nil {
+func (jobs *ArgoJobs) collectArtifacts(ctx context.Context, workflowName, runID string, trigger periapsis.Trigger, diagnostics ...[]byte) string {
+	if jobs.artifacts == nil {
 		return ""
 	}
 	// Tier gate (#208): only CI-trigger runs persist artifacts. Credentialed
@@ -38,10 +38,25 @@ func (jobs *ArgoJobs) collectArtifacts(ctx context.Context, workflowName, runID 
 	if !artifacts.TierGated(string(trigger)) {
 		return ""
 	}
-	archive, err := jobs.collector.Collect(ctx, workflowName)
-	if err != nil {
-		return fmt.Sprintf("collect: %v", err)
+	var archive []byte
+	var collectErr error
+	if jobs.collector != nil {
+		archive, collectErr = jobs.collector.Collect(ctx, workflowName)
 	}
+	if collectErr != nil {
+		archive = nil
+	}
+	if len(diagnostics) > 0 && len(diagnostics[0]) > 0 {
+		var err error
+		archive, err = appendVMIDiagnosticArtifact(archive, diagnostics[0], jobs.artifactLimit)
+		if err != nil {
+			return "store: VMI diagnostic archive unavailable"
+		}
+	}
+	if collectErr != nil && len(archive) == 0 {
+		return fmt.Sprintf("collect: %v", collectErr)
+	}
+
 	if len(archive) == 0 {
 		return ""
 	}
@@ -50,6 +65,9 @@ func (jobs *ArgoJobs) collectArtifacts(ctx context.Context, workflowName, runID 
 	}
 	details := map[string]any{"bytes": len(archive), "stored": true}
 	jobs.auditArtifacts(ctx, runID, details)
+	if collectErr != nil {
+		return fmt.Sprintf("collect: %v; VMI diagnostics retained", collectErr)
+	}
 	return ""
 }
 

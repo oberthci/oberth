@@ -617,6 +617,7 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 	if err := scheduler.git.Checkout(ctx, upstream.QualifiedRepo(repository.Name), checkoutSHA, sourceDir); err != nil {
 		return scheduler.finishInfrastructureFailure(ctx, run, repository, fmt.Errorf("checkout run workspace: %w", err))
 	}
+	scheduler.timingMilestone(ctx, run.ID, "checkout-ready")
 	requirement, err := scheduler.trustedRequirement(ctx, repository, checkoutSHA)
 	if err != nil {
 		return scheduler.finishInfrastructureFailure(ctx, run, repository, err)
@@ -695,6 +696,7 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 		_ = logFile.Close()
 		return scheduler.finishInfrastructureFailure(ctx, run, repository, fmt.Errorf("read pipeline KubeVirt demand: %w", err))
 	}
+	scheduler.admissionRequested(ctx, run.ID)
 	headSince, estimate := scheduler.admissionHistory(ctx, run)
 	releaseAdmission, err := reservation.acquireRequest(ctx, admissionRequest{
 		RunID: run.ID, RepoID: run.RepoID, Repo: repository.Name, Ref: run.Ref, Size: size, Group: group,

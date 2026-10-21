@@ -117,6 +117,9 @@ func buildArgoEngine(
 		return nil, fmt.Errorf("configure KubeVirt cleanup client: %w", err)
 	}
 	controller.WithVMIClient(vmiClient)
+	if recorder, ok := auditor.(argojob.TimingRecorder); ok {
+		controller.WithTimingRecorder(recorder)
+	}
 	seeder := argojob.NewSourceSeeder(kube, newArgoExecStreamer(restConfig, kube), config)
 	if seeder == nil {
 		return nil, errors.New("configure Argo source seeding: the in-cluster Kubernetes client is required")

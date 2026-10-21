@@ -29,7 +29,8 @@ func TestStepDiagnosticMigrationAndDurableRoundTrip(t *testing.T) {
 	if _, err = s.PutStepResult(ctx, step); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = s.db.Exec(`DROP INDEX runs_admission_idx; ALTER TABLE runs DROP COLUMN admission_sequence; DROP TABLE kubevirt_grants; DROP TABLE uplink_scopes; ALTER TABLE issues DROP COLUMN scope_upstream_id; ALTER TABLE step_results DROP COLUMN termination_json; DELETE FROM schema_migrations WHERE version>=21;`); err != nil {
+	if _, err = s.db.Exec(`DROP TRIGGER run_timing_claim; DROP TRIGGER run_timing_grant; DROP TRIGGER run_timing_park; DROP TRIGGER run_timing_terminal; DROP TABLE step_timings; DROP TABLE run_admission_timings; DROP TABLE run_timings;
+DROP INDEX runs_admission_idx; ALTER TABLE runs DROP COLUMN admission_sequence; DROP TABLE kubevirt_grants; DROP TABLE uplink_scopes; ALTER TABLE issues DROP COLUMN scope_upstream_id; ALTER TABLE step_results DROP COLUMN termination_json; DELETE FROM schema_migrations WHERE version>=21;`); err != nil {
 		t.Fatal(err)
 	}
 	if err = s.Close(); err != nil {

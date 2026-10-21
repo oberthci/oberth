@@ -221,8 +221,10 @@ func TestRepositoryArchiveMigrationPreservesV28HistoryAndLedger(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := raw.ExecContext(ctx, `DROP INDEX repository_archive_actions_idx;
-DELETE FROM schema_migrations WHERE version = ?`, repositoryArchiveMigrationVersion); err != nil {
+	// v30 (#1128) stacks after v29: a real v28 database has neither.
+	if _, err := raw.ExecContext(ctx, `DROP TRIGGER run_timing_claim; DROP TRIGGER run_timing_grant; DROP TRIGGER run_timing_park; DROP TRIGGER run_timing_terminal; DROP TABLE step_timings; DROP TABLE run_admission_timings; DROP TABLE run_timings;
+DROP INDEX repository_archive_actions_idx;
+DELETE FROM schema_migrations WHERE version >= ?`, repositoryArchiveMigrationVersion); err != nil {
 		t.Fatal(err)
 	}
 	if err := raw.Close(); err != nil {
@@ -235,9 +237,9 @@ DELETE FROM schema_migrations WHERE version = ?`, repositoryArchiveMigrationVers
 	}
 	t.Cleanup(func() { _ = db.Close() })
 	assertFreshSchemaLedger(t, db.db)
-	for version := 1; version <= repositoryArchiveMigrationVersion; version++ {
+	for version := 1; version <= latestMigrationVersion; version++ {
 		want := unixNano(original)
-		if version == repositoryArchiveMigrationVersion {
+		if version >= repositoryArchiveMigrationVersion {
 			want = unixNano(upgraded)
 		}
 		var appliedAt int64

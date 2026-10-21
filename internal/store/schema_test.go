@@ -29,8 +29,8 @@ func TestSchemaMigrationsAreContiguous(t *testing.T) {
 	if err := validateMigrations(migrations, latestMigrationVersion); err != nil {
 		t.Fatal(err)
 	}
-	if latestMigrationVersion != 29 {
-		t.Fatalf("latest migration version = %d, want 29", latestMigrationVersion)
+	if latestMigrationVersion != 30 {
+		t.Fatalf("latest migration version = %d, want 30", latestMigrationVersion)
 	}
 	if len(migrations) != latestMigrationVersion {
 		t.Fatalf("migration count = %d, want %d", len(migrations), latestMigrationVersion)
@@ -599,6 +599,7 @@ ALTER TABLE uplinks_v1 RENAME TO uplinks;
 CREATE UNIQUE INDEX uplinks_token_credential_idx ON uplinks(token_credential_id);
 ALTER TABLE upstreams DROP COLUMN key_name;
 ALTER TABLE runs DROP COLUMN credentialed;
+DROP TRIGGER run_timing_claim; DROP TRIGGER run_timing_grant; DROP TRIGGER run_timing_park; DROP TRIGGER run_timing_terminal; DROP TABLE step_timings; DROP TABLE run_admission_timings; DROP TABLE run_timings;
 DROP INDEX repository_archive_actions_idx;
 DROP INDEX runs_admission_idx; ALTER TABLE runs DROP COLUMN admission_sequence;
 ALTER TABLE runs DROP COLUMN concurrency_group;
@@ -949,7 +950,9 @@ func TestFreshSchemaIsCompleteAndIdempotent(t *testing.T) {
 		"publications",
 		"receive_events",
 		"repositories",
+		"run_admission_timings",
 		"run_cancellations",
+		"run_timings",
 		"runs",
 		"schedule_fires",
 		"schema_identity",
@@ -957,6 +960,7 @@ func TestFreshSchemaIsCompleteAndIdempotent(t *testing.T) {
 		"secret_access",
 		"size_grants",
 		"step_results",
+		"step_timings",
 		"token_credentials",
 		"trusted_applies",
 		"trusted_plans",
@@ -989,6 +993,7 @@ func TestFreshSchemaIsCompleteAndIdempotent(t *testing.T) {
 		"receive_events_repo_idx",
 		"receive_events_run_idx",
 		"repository_archive_actions_idx",
+		"run_admission_timing_open",
 		"run_cancellations_pending_idx",
 		"runs_admission_idx",
 		"runs_fifo_idx",
@@ -1008,6 +1013,7 @@ func TestFreshSchemaIsCompleteAndIdempotent(t *testing.T) {
 		"vm_suite_resource_uid",
 	})
 	assertSchemaObjects(t, store.db, "trigger", []string{
+		"admission_timing_immutable",
 		"audit_actions_no_delete",
 		"audit_actions_no_update",
 		"audit_anchors_no_delete",
@@ -1021,9 +1027,15 @@ func TestFreshSchemaIsCompleteAndIdempotent(t *testing.T) {
 		"promotions_no_delete",
 		"publications_guard_update",
 		"publications_no_delete",
+		"run_timing_claim",
+		"run_timing_grant",
+		"run_timing_immutable",
+		"run_timing_park",
+		"run_timing_terminal",
 		"schema_identity_no_delete",
 		"schema_identity_no_insert",
 		"schema_identity_no_update",
+		"step_timing_immutable",
 		"trusted_applies_guard_update",
 		"trusted_applies_no_delete",
 		"trusted_plans_guard_update",
@@ -1034,6 +1046,9 @@ func TestFreshSchemaIsCompleteAndIdempotent(t *testing.T) {
 	})
 
 	expectedColumns := map[string][]string{
+		"run_timings":               {"run_id", "version", "claimed_at", "checkout_ready_at", "source_seed_started_at", "source_ready_at", "workflow_created_at", "terminal_at", "workflow_json"},
+		"run_admission_timings":     {"run_id", "episode", "requested_at", "granted_at", "closed_at"},
+		"step_timings":              {"run_id", "node_id", "workflow_uid", "pod_uid", "available", "ordinal", "timing_json"},
 		"schema_identity":           {"singleton", "identity"},
 		"schema_migrations":         {"version", "applied_at"},
 		"upstreams":                 {"id", "name", "kind", "base_url", "created_at", "updated_at", "key_name"},

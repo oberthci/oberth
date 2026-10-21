@@ -60,7 +60,7 @@ func (d StepDiagnostic) Validate() error {
 			return fail
 		}
 		switch d.Unavailable {
-		case "not-recorded", "not-executed", "unsupported-shape", "ambiguous-attempt", "observation-unavailable", "binding-mismatch", "termination-unavailable", "invalid-termination":
+		case "not-recorded", "not-executed", "unsupported-shape", "ambiguous-attempt", "snapshot-incomplete", "observation-unavailable", "binding-mismatch", "termination-unavailable", "invalid-termination":
 		default:
 			return fail
 		}

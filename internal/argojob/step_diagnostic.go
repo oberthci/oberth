@@ -8,6 +8,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 
 	"github.com/oberthci/oberth/internal/model"
 )
@@ -21,50 +22,105 @@ import (
 func (controller *Controller) collectStepDiagnostics(ctx context.Context, workflow *wfv1.Workflow, completion *Completion) {
 	readCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
+	pods, snapshotReason := controller.timingPodSnapshot(readCtx, workflow)
 	for i := range completion.Steps {
 		step := &completion.Steps[i]
-		unavailable := func(reason string) {
-			at := time.Now().UTC()
-			step.Termination = &model.StepDiagnostic{Unavailable: reason, ObservedAt: &at}
-		}
-		if step.AttemptAmbiguous {
-			unavailable("ambiguous-attempt")
-			continue
-		}
 		node, ok := workflow.Status.Nodes[step.NodeID]
-		if !ok || node.ID != step.NodeID {
-			unavailable("binding-mismatch")
-			continue
-		}
-		duplicateID := false
-		for id, candidate := range workflow.Status.Nodes {
-			if candidate.ID == node.ID && id != node.ID {
-				duplicateID = true
+		var pod *corev1.Pod
+		reason := ""
+		switch {
+		case step.AttemptAmbiguous:
+			reason = "ambiguous-attempt"
+		case !ok || node.ID != step.NodeID:
+			reason = "binding-mismatch"
+		default:
+			for id, candidate := range workflow.Status.Nodes {
+				if candidate.ID == node.ID && id != node.ID {
+					reason = "ambiguous-attempt"
+					break
+				}
+			}
+			if reason == "" {
+				switch {
+				case node.Type != wfv1.NodeTypePod || step.PodName == "":
+					reason = "not-executed"
+				case snapshotReason != "":
+					reason = snapshotReason
+				default:
+					pod = pods[step.PodName]
+					if pod == nil {
+						reason = "observation-unavailable"
+					}
+				}
 			}
 		}
-		if duplicateID {
-			unavailable("ambiguous-attempt")
-			continue
+		at := time.Now().UTC()
+		if reason != "" {
+			step.Termination = &model.StepDiagnostic{Unavailable: reason, ObservedAt: &at}
+		} else {
+			step.Termination = projectStepDiagnostic(workflow, node, pod, at)
+			if reason := podInfrastructureReason(workflow, node, pod); reason != "" {
+				step.InfrastructureReason = reason
+			}
 		}
-		if node.Type != wfv1.NodeTypePod || step.PodName == "" {
-			unavailable("not-executed")
-			continue
-		}
-		if controller.kube == nil || readCtx.Err() != nil {
-			unavailable("observation-unavailable")
-			continue
-		}
-		pod, err := controller.kube.CoreV1().Pods(workflow.Namespace).Get(readCtx, step.PodName, metav1.GetOptions{})
-		if err != nil {
-			unavailable("observation-unavailable")
-			continue
-		}
-		step.Termination = projectStepDiagnostic(workflow, node, pod, time.Now().UTC())
-		if reason := podInfrastructureReason(workflow, node, pod); reason != "" {
-			step.InfrastructureReason = reason
-		}
+		step.Timing = projectStepTiming(workflow, node, pod, *step, step.Termination, at)
 	}
+	// A timed-out API read must still durably retain its explicit unknowns.
+	// Persistence gets its own bounded write context, not the expired read one.
+	writeCtx, writeCancel := context.WithTimeout(context.WithoutCancel(ctx), time.Second)
+	defer writeCancel()
+	controller.retainStepTimings(writeCtx, completion)
 	completion.classifyInfrastructure()
+}
+
+// Every page belongs to one consistent Kubernetes LIST snapshot. No partial
+// snapshot is authoritative: API errors, repeated cursors, duplicates and bounds
+// leave every executed step explicitly unavailable. Per-Pod identity checks
+// remain independent of the label selector, which only limits the read scope.
+func (controller *Controller) timingPodSnapshot(ctx context.Context, workflow *wfv1.Workflow) (map[string]*corev1.Pod, string) {
+	if controller.kube == nil {
+		return nil, "observation-unavailable"
+	}
+	const pageSize = 128
+	const maxPages = 16
+	pods := map[string]*corev1.Pod{}
+	cursors := map[string]bool{}
+	cursor, version := "", ""
+	for page := 0; page < maxPages; page++ {
+		list, err := controller.kube.CoreV1().Pods(workflow.Namespace).List(ctx, metav1.ListOptions{
+			LabelSelector: labels.Set{"workflows.argoproj.io/workflow": workflow.Name}.AsSelector().String(),
+			Limit:         pageSize, Continue: cursor,
+		})
+		if err != nil {
+			if page == 0 {
+				return nil, "observation-unavailable"
+			}
+			return nil, "snapshot-incomplete"
+		}
+		if page > 0 && version != list.ResourceVersion {
+			return nil, "snapshot-incomplete"
+		}
+		version = list.ResourceVersion
+		if len(list.Items) > model.MaxTimingTasks-len(pods) {
+			return nil, "snapshot-incomplete"
+		}
+		for i := range list.Items {
+			pod := &list.Items[i]
+			if _, duplicate := pods[pod.Name]; duplicate {
+				return nil, "snapshot-incomplete"
+			}
+			pods[pod.Name] = pod
+		}
+		if list.Continue == "" {
+			return pods, ""
+		}
+		if version == "" || cursors[list.Continue] {
+			return nil, "snapshot-incomplete"
+		}
+		cursors[list.Continue] = true
+		cursor = list.Continue
+	}
+	return nil, "snapshot-incomplete"
 }
 
 func projectStepDiagnostic(workflow *wfv1.Workflow, node wfv1.NodeStatus, pod *corev1.Pod, observed time.Time) *model.StepDiagnostic {

@@ -230,3 +230,29 @@ Workflows survive changed current identity/policy configuration unchanged, and
 resumed Wait refuses changed service accounts, WIF projections/environment,
 Workflow UIDs or spec identities. Existing resume/log-budget, executor-token,
 publication serialization, KVM recovery and migration assertions remain.
+
+Retained timing #1128: `TestTimingPaginatedLargeDAG` collects 65 leaves in two
+bounded LIST pages; the blocking transport test retains its five-second API
+ceiling, failed verdict and exit codes, and now proves an expired read context
+cannot suppress durable explicit unknowns. Snapshot tests refuse partial pages,
+API errors, continuation cycles, changed resource versions, duplicate Pods and
+page bounds. Cross-attempt tests retain exact owner, Workflow UID, Pod/name,
+node and namespace refusal. Init timing and logical readiness tests preserve
+mixed script / unobserved image-pull semantics and exclude scripts/expressions.
+Store tests cover atomic claim/grant/terminal timestamps, repeated requests,
+parked admission episodes, write-once facts, immutable Workflow/Pod/container
+attempt bindings, restart re-fire separation with inherited admission order,
+TTL-independent reopen, legacy StartedAt ambiguity and no-backfill migration
+replay. Native run_get returns the durable versioned observations without a
+cluster. Existing migration fixtures drop timing objects before reconstructing
+older schemas; exact schema, ledger, gap and preservation assertions remain.
+VMI failure tests check run/name/UID scoping, typed conditions and recent Events,
+unknown/API failure handling and exclusion of free-form messages. Artifact tests
+preserve user files, enforce bounds/collision/tier gates and retain diagnostics
+when user collection fails. Chart tests pin the separate Event LIST Role and
+binding while retaining frozen Role assertions.
+`TestAdoptedWaitRetainsTimingWithoutDuplicateAttempts` drives a pre-restart
+owner and a resumed adopted Wait against the real store: the Workflow binding
+and every node keep exactly one attempt record, pre-restart observation times
+survive, and a GC'd Pod cannot downgrade retained evidence. Migration v30
+stacks after v29; ledger, gap and v29-to-v30 replay assertions are unchanged.

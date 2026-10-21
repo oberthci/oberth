@@ -178,7 +178,7 @@ func TestMigration16AddsAnUngroupedConcurrencyGroupToExistingRuns(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := raw.ExecContext(ctx, `DROP INDEX runs_admission_idx; ALTER TABLE runs DROP COLUMN admission_sequence;
+	if _, err := raw.ExecContext(ctx, `DROP TRIGGER run_timing_claim; DROP TRIGGER run_timing_grant; DROP TRIGGER run_timing_park; DROP TRIGGER run_timing_terminal; DROP TABLE step_timings; DROP TABLE run_admission_timings; DROP TABLE run_timings; DROP INDEX runs_admission_idx; ALTER TABLE runs DROP COLUMN admission_sequence;
 ALTER TABLE runs DROP COLUMN concurrency_group;
 DROP TABLE IF EXISTS grant_declarations;
 DROP TRIGGER IF EXISTS promotions_guard_update;

@@ -990,6 +990,13 @@ func (service *API) Run(ctx context.Context, actor api.Actor, id string) (any, e
 	}
 	response := RunDetailResponse{Run: service.presentationRun(ctx, run), Steps: steps, Scheduling: service.scheduling(ctx, run, steps),
 		RerunOf: service.runRerunOf(ctx, run.ID)}
+	if reader, ok := service.history.(RunTimingReader); ok {
+		timing, timingErr := reader.RunTiming(ctx, run.ID)
+		if timingErr != nil {
+			return nil, fmt.Errorf("load run timing: %w", timingErr)
+		}
+		response.Timing = &timing
+	}
 	if response.Run.DisplayStatus == "queued" && response.Scheduling != nil {
 		response.Run.DisplayReason = response.Scheduling.Message
 	}

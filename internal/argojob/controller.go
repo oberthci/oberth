@@ -64,6 +64,7 @@ var errRunLogBudget = errors.New("argojob: aggregate run log budget exceeded")
 
 // Controller submits Workflows and supervises them to a terminal result.
 type Controller struct {
+	timings           TimingRecorder
 	workflows         WorkflowClient
 	kube              kubernetes.Interface
 	logs              PodLogReader
@@ -198,6 +199,7 @@ func (controller *Controller) Create(ctx context.Context, request Request) (name
 		// Same submission exists; repair claim ownership if needed.
 		claimName := sourceClaimName(request.Name)
 		controller.adoptClaimBestEffort(ctx, claimName, existing.Name, string(existing.UID))
+		controller.retainWorkflowTiming(ctx, existing)
 		return existing.Name, nil
 	}
 	if !apierrors.IsNotFound(getErr) {
@@ -211,10 +213,12 @@ func (controller *Controller) Create(ctx context.Context, request Request) (name
 	if err != nil {
 		return "", err
 	}
+	controller.timingMilestone(ctx, request.RunID, "source-seed-started")
 	volume, err := controller.seeder.Seed(ctx, request.Name, request.SourceDir, credentialed)
 	if err != nil {
 		return "", err
 	}
+	controller.timingMilestone(ctx, request.RunID, "source-ready")
 	request.SourceVolume = volume
 	request, err = controller.refreshNonroot(ctx, request)
 	if err != nil {
@@ -248,6 +252,7 @@ func (controller *Controller) Create(ctx context.Context, request Request) (name
 	created, createErr := controller.workflows.Create(ctx, intended, metav1.CreateOptions{})
 	if createErr == nil {
 		controller.adoptClaimBestEffort(ctx, volume.ClaimName, created.Name, string(created.UID))
+		controller.retainWorkflowTiming(ctx, created)
 		return created.Name, nil
 	}
 	if apierrors.IsAlreadyExists(createErr) {
@@ -263,6 +268,7 @@ func (controller *Controller) Create(ctx context.Context, request Request) (name
 			return "", subErr
 		}
 		controller.adoptClaimBestEffort(ctx, volume.ClaimName, existing.Name, string(existing.UID))
+		controller.retainWorkflowTiming(ctx, existing)
 		return existing.Name, nil
 	}
 	// Non-definitive Create error: GET to check state.
@@ -281,6 +287,7 @@ func (controller *Controller) Create(ctx context.Context, request Request) (name
 		return "", subErr
 	}
 	controller.adoptClaimBestEffort(ctx, volume.ClaimName, existing.Name, string(existing.UID))
+	controller.retainWorkflowTiming(ctx, existing)
 	return existing.Name, nil
 }
 
@@ -431,6 +438,8 @@ func (controller *Controller) wait(ctx context.Context, name, runID string, dest
 	var budgetBreachErr error
 	delivered := map[types.UID]bool{}
 	var readFailingSince time.Time
+	timed := map[string]bool{}
+	boundTiming := false
 	for {
 		workflow, err := controller.workflows.Get(ctx, name, metav1.GetOptions{})
 		if err != nil {
@@ -463,9 +472,6 @@ func (controller *Controller) wait(ctx context.Context, name, runID string, dest
 		if err := controller.deliverExecutorTokens(ctx, workflow, delivered); err != nil {
 			return Completion{}, err
 		}
-		if publishErr := controller.publish(ctx, workflow, reporter, budget); publishErr != nil && budgetBreachErr == nil {
-			budgetBreachErr = publishErr
-		}
 		if workflow.Status.Phase.Completed() {
 			// One final read after the controller marks completion: the last
 			// node transitions and the workflow phase are not written
@@ -475,12 +481,14 @@ func (controller *Controller) wait(ctx context.Context, name, runID string, dest
 			if binding.UID != "" && !binding.matches(settled) {
 				return Completion{}, errors.New("argojob: adopted Workflow identity changed at completion")
 			}
+			controller.retainWorkflowTiming(ctx, settled)
+			completion := completionFor(settled)
+			controller.collectStepDiagnostics(ctx, settled, &completion)
+			controller.collectVMIFailure(ctx, settled, &completion, budget)
 			if publishErr := controller.publish(ctx, settled, reporter, budget); publishErr != nil && budgetBreachErr == nil {
 				budgetBreachErr = publishErr
 			}
 			reporter.finish(budget)
-			completion := completionFor(settled)
-			controller.collectStepDiagnostics(ctx, settled, &completion)
 			if err := controller.retireExecutorIdentity(ctx, settled); err != nil {
 				return completion, fmt.Errorf("retire executor identity: %w", err)
 			}
@@ -493,6 +501,28 @@ func (controller *Controller) wait(ctx context.Context, name, runID string, dest
 			controller.cleanupVMIsForObservedWorkflow(ctx, settled, runID)
 			return completion, nil
 		}
+		if controller.timings != nil {
+			if !boundTiming {
+				controller.retainWorkflowTiming(ctx, workflow)
+				boundTiming = true
+			}
+			observation := Completion{}
+			for _, step := range StepResults(workflow) {
+				if terminal(step.Status) && !timed[step.NodeID] {
+					observation.Steps = append(observation.Steps, step)
+				}
+			}
+			if len(observation.Steps) > 0 {
+				controller.collectStepDiagnostics(ctx, workflow, &observation)
+				for _, step := range observation.Steps {
+					timed[step.NodeID] = true
+				}
+			}
+		}
+		if publishErr := controller.publish(ctx, workflow, reporter, budget); publishErr != nil && budgetBreachErr == nil {
+			budgetBreachErr = publishErr
+		}
+
 		select {
 		case <-ctx.Done():
 			return Completion{}, ctx.Err()
@@ -601,9 +631,11 @@ func (controller *Controller) TerminalState(ctx context.Context, name string) (*
 	if !workflow.Status.Phase.Completed() {
 		return nil, ErrNotTerminal
 	}
-	controller.cleanupVMIsForObservedWorkflow(ctx, workflow, runID)
 	completion := completionFor(workflow)
+	controller.retainWorkflowTiming(ctx, workflow)
+	controller.collectVMIFailure(ctx, workflow, &completion, nil)
 	controller.collectStepDiagnostics(ctx, workflow, &completion)
+	controller.cleanupVMIsForObservedWorkflow(ctx, workflow, runID)
 	return &completion, nil
 }
 

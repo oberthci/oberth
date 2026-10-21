@@ -2166,7 +2166,10 @@ alone is never evidence that missing migrations ran.
 | v25 | Unreleased (#1017) | kubevirt_grants: add max_vms, max_cores, max_memory_bytes (per-grant VMI run budget; existing grants get 2 VMs, 6 cores, 12Gi) | Database restore |
 | v26 | Unreleased (#1021) | size_grants: audited per-repository maximum admission size (L or XL; no active row means L); `CREATE TABLE IF NOT EXISTS` | Database restore |
 | v27 | Unreleased (#1085) | admission_head_waits: when a commit's run first waited at the admission queue head, so bounded backfill keeps its clock across a restart; `CREATE TABLE IF NOT EXISTS` | Database restore |
-| v28 | Pending (#1092) | Backfilled run admission_sequence retains FIFO order across restart re-fires; queue_sequence remains the history cursor | Database restore |
+| v28 | Unreleased (#1092) | Backfilled run admission_sequence retains FIFO order across restart re-fires; queue_sequence remains the history cursor | Database restore |
+
+| v29 | Reserved (#1102) | In-flight prerequisite; supplied by #1102 before v30 | Database restore |
+| v30 | Pending (#1128) | Versioned immutable run milestones, admission episodes, expanded task identity and bounded step timing | Database restore |
 
 **Contract test:** `TestEveryMigrationDocumentedInAgentContract` asserts that
 every migration version in `internal/store/schema.go` has a corresponding
@@ -2578,3 +2581,71 @@ one `issue.close` audit action each. Existing locks still apply, including for
 CI issues; admins must explicitly unlock first. Already closed retries are
 idempotent. These changes use existing tables and require no schema or RBAC
 migration. Existing single-issue mutation authorization is unchanged.
+
+## Retained run and step timing (#1128)
+
+`run_get` and the dashboard run detail expose `Timing`, version 1. These are
+observations, independent of the verdict and the older `Run.StartedAt` field.
+Missing timestamps are unknown; they never mean a zero duration. Legacy rows
+have `unavailable=not-recorded`; no timestamp is backfilled from `StartedAt`.
+
+A run ID identifies one execution attempt. An owner resume keeps it; a restart
+re-fire has a new run ID even when it inherits admission_sequence. Known facts
+are write-once. Admission parking closes an episode; another request/grant opens
+a new numbered episode, preserving previous waits and grants. Queue time is
+`queued_at` to `claimed_at`, not queued to the historically overloaded StartedAt.
+Checkout completion, admission request and grant, source seed start and readiness,
+Workflow creation, and durable terminalization have separate timestamps. Source
+seeding is once per Workflow, not once per step. Admission grants are recorded
+atomically with MarkRunAdmitted; submission alone cannot infer a grant.
+
+Before TTL, the server retains the admitted expanded task/template identities,
+simple dependency names, Workflow UID and spec identity. No commands, arguments,
+conditions, environment, token contents or object dumps are retained. Graphs are
+bounded to 2048 tasks / 256 KiB; unsupported graphs remain explicitly unavailable.
+Per node/Pod incarnation, timing contains Pod creation, PodScheduled transition,
+current init-container start/end (including executor identity initialization),
+current main start/end, and node completion. Dependency readiness is logical
+readiness: the latest successful simple DAG predecessor finish, or DAG start
+for a task without predecessors. Expressions, guards, loops, retry ambiguity,
+and unsupported shapes leave readiness unknown. This is not a measured Argo
+controller dispatch timestamp. Uninstrumented script execution remains `mixed`;
+image-pull timing is `not-observed`. Neither Pending nor Pod startup measures
+image download or proves a tool-cache hit. Verified pin-addressed tool caching
+remains separate work in the consolidated overhead backlog.
+
+Pod evidence uses a Workflow-scoped LIST with 128 objects per page, at most 16
+pages / 2048 objects, and one total five-second API deadline. A separate one-second bounded database
+write retains explicit unknowns even when that API deadline expires. Continuation loops,
+resource-version changes, duplicates, bounds or page failures refuse a partial
+snapshot (`snapshot-incomplete`; first-page failures are
+`observation-unavailable`). Every projected record retains the exact existing
+run, Workflow UID/owner, node, Pod and current-container checks. A missing Pod is
+unavailable, not evidence it never ran. Completed leaves are retained during
+Wait and final evidence is collected before replaying potentially large logs
+and before cleanup. Per-record projections are at most 16 KiB. Unknown evidence
+may be upgraded to a validated available observation of the same attempt; an
+available observation cannot be replaced by a different attempt or rewritten.
+The timing reader requires only the durable database, including after TTL or a
+server restart; normal run authorization and retention/purge rules apply.
+
+Failed VM workflows also retain a bounded VMI snapshot before cleanup in the
+failed step's log and CI artifact `oberth/vmi-diagnostics.json`. It contains
+run-labelled/name-prefixed VMI identities, phase, typed conditions and up to 16
+recent UID-bound Events per VMI, for at most eight VMIs under one five-second
+budget. Free-form messages, manifests, guest data and addresses are excluded;
+unknown types/reasons remain `other`, and API/bound failures remain explicit.
+Artifacts pass the existing tier and secret gates; credentialed tiers are never
+persisted. A separate namespace Role grants Event LIST without changing the
+frozen Argo Role. This supports address-wait and resource-delete failure
+inspection without any repository-specific convention.
+
+An adopted branch Workflow (#1172) is observed under its original run ID and
+Workflow UID, so resumed observation re-collects the same node/Pod attempts:
+identical observations are idempotent, unknowns may still be upgraded, and a
+different attempt for a retained node is refused. No milestone is re-recorded
+by adoption; an admission episode left open by the previous owner stays open.
+
+Migration v30 stacks after #1102's repository-archive migration v29. Shipped
+migration bodies and existing ledger rows remain unchanged; older backups
+replay v29 and v30 in order on restore.

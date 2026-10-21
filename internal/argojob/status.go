@@ -18,6 +18,7 @@ import (
 // StepResult is one executed pipeline step, in Oberth's vocabulary rather than
 // Argo's. The engine derives it from the Workflow's node tree.
 type StepResult struct {
+	Timing               *model.StepTiming
 	NodeID               string
 	AttemptAmbiguous     bool
 	Termination          *model.StepDiagnostic
@@ -34,6 +35,7 @@ type StepResult struct {
 
 // Completion is the terminal outcome of one submitted Workflow.
 type Completion struct {
+	VMIDiagnostics []byte
 	Name           string
 	Succeeded      bool
 	Infrastructure bool

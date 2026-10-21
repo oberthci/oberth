@@ -28,7 +28,7 @@ func diagnosticFixture() (*wfv1.Workflow, wfv1.NodeStatus, *corev1.Pod, time.Tim
 	wf.Status.Nodes = wfv1.Nodes{node.ID: node}
 	wf.Status.Phase = wfv1.WorkflowFailed
 	cid := "containerd://" + strings.Repeat("b", 64)
-	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: wf.Namespace, Name: PodName(wf, node), UID: "22222222-2222-4222-8222-222222222222", Annotations: map[string]string{"workflows.argoproj.io/node-id": node.ID, "workflows.argoproj.io/node-name": node.Name}, OwnerReferences: []metav1.OwnerReference{{APIVersion: "argoproj.io/v1alpha1", Kind: "Workflow", Name: wf.Name, UID: wf.UID, Controller: ptr.To(true)}}}, Spec: corev1.PodSpec{ActiveDeadlineSeconds: ptr.To(int64(300)), Containers: []corev1.Container{{Name: "main", Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("1"), corev1.ResourceMemory: resource.MustParse("512Mi")}, Limits: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("2"), corev1.ResourceMemory: resource.MustParse("1Gi")}}}, {Name: "wait"}}}, Status: corev1.PodStatus{ContainerStatuses: []corev1.ContainerStatus{{Name: "main", ContainerID: cid, State: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{ExitCode: 137, Reason: "OOMKilled", ContainerID: cid, StartedAt: node.StartedAt, FinishedAt: node.FinishedAt}}}, {Name: "wait", State: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{Reason: "Completed"}}}}}}
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: wf.Namespace, Name: PodName(wf, node), UID: "22222222-2222-4222-8222-222222222222", Labels: map[string]string{"workflows.argoproj.io/workflow": wf.Name}, Annotations: map[string]string{"workflows.argoproj.io/node-id": node.ID, "workflows.argoproj.io/node-name": node.Name}, OwnerReferences: []metav1.OwnerReference{{APIVersion: "argoproj.io/v1alpha1", Kind: "Workflow", Name: wf.Name, UID: wf.UID, Controller: ptr.To(true)}}}, Spec: corev1.PodSpec{ActiveDeadlineSeconds: ptr.To(int64(300)), Containers: []corev1.Container{{Name: "main", Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("1"), corev1.ResourceMemory: resource.MustParse("512Mi")}, Limits: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("2"), corev1.ResourceMemory: resource.MustParse("1Gi")}}}, {Name: "wait"}}}, Status: corev1.PodStatus{ContainerStatuses: []corev1.ContainerStatus{{Name: "main", ContainerID: cid, State: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{ExitCode: 137, Reason: "OOMKilled", ContainerID: cid, StartedAt: node.StartedAt, FinishedAt: node.FinishedAt}}}, {Name: "wait", State: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{Reason: "Completed"}}}}}}
 	return wf, node, pod, at
 }
 
@@ -160,7 +160,7 @@ func TestStepDiagnosticBlockingTransportUsesOneTotalBudget(t *testing.T) {
 	joined := make(chan struct{})
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
-		if r.Method != http.MethodGet || !strings.HasPrefix(r.URL.Path, "/api/v1/namespaces/pipelines/pods/") {
+		if r.Method != http.MethodGet || r.URL.Path != "/api/v1/namespaces/pipelines/pods" || r.URL.Query().Get("limit") != "128" || r.URL.Query().Get("labelSelector") != "workflows.argoproj.io/workflow="+wf.Name {
 			http.Error(w, "unexpected request", http.StatusBadRequest)
 			return
 		}
@@ -173,13 +173,17 @@ func TestStepDiagnosticBlockingTransportUsesOneTotalBudget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	controller := &Controller{kube: client}
+	recorder := &timingRecorderStub{}
+	controller := &Controller{kube: client, timings: recorder}
 	completion := completionFor(wf)
 	start := time.Now()
 	controller.collectStepDiagnostics(context.Background(), wf, &completion)
 	elapsed := time.Since(start)
 	if elapsed < 4900*time.Millisecond || elapsed > 8*time.Second || calls.Load() != 1 || completion.Succeeded {
 		t.Fatalf("budget/verdict: elapsed=%s requests=%d succeeded=%v", elapsed, calls.Load(), completion.Succeeded)
+	}
+	if recorder.writeErr != nil || len(recorder.steps) != 2 {
+		t.Fatal("read deadline suppressed durable unknown evidence", recorder.writeErr)
 	}
 	select {
 	case <-joined:
