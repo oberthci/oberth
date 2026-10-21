@@ -1,7 +1,9 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -43,6 +45,11 @@ func mcpDeadline(cfg mcpFlagResult, params any) (time.Duration, time.Duration, e
 }
 
 func mcpDeadlineError(limit, toolTimeout time.Duration, err error) error {
+	// A timed-out body can end with EOF or a parser error instead of returning
+	// the context error. Keep both the known deadline cause and that detail.
+	if !errors.Is(err, context.DeadlineExceeded) {
+		err = fmt.Errorf("%w: %w", context.DeadlineExceeded, err)
+	}
 	if toolTimeout > 0 {
 		return fmt.Errorf("client deadline %s exceeded (tool timeout %s): %w", limit, toolTimeout, err)
 	}

@@ -150,6 +150,20 @@ func TestMCPCallDeadlineErrorNamesLimit(t *testing.T) {
 	}
 }
 
+func TestMCPDeadlineErrorPreservesCauseAndReadError(t *testing.T) {
+	for _, readErr := range []error{io.EOF, errors.New("SSE stream contained no data events"), context.DeadlineExceeded} {
+		for _, toolTimeout := range []time.Duration{0, 10 * time.Minute} {
+			err := mcpDeadlineError(time.Minute, toolTimeout, readErr)
+			if !errors.Is(err, context.DeadlineExceeded) || !errors.Is(err, readErr) {
+				t.Fatalf("deadline lost cause or read error: %v", err)
+			}
+			if strings.Count(err.Error(), context.DeadlineExceeded.Error()) != 1 {
+				t.Fatalf("deadline cause repeated: %v", err)
+			}
+		}
+	}
+}
+
 func TestMCPRequestPreservesCallerCancellation(t *testing.T) {
 	server := newMCPTestServer(t, "cancel-test-token")
 	defer server.Close()
