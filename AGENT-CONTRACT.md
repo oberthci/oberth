@@ -1217,6 +1217,12 @@ continuity checks; it must never be used to reset or bypass those checks.
   digest. Uncertain creates/cleanup keep capacity; restart cleans and interrupts.
   Capacity refusal with no journal row parks without weighted/group/dispatch
   permits and retries after rechecking mutation, cancellation and fresh policy.
+  Build.yaml may declare `oberth.ci/trusted-tests-entrypoint` as a literal local
+  producer template for the protected preflight only. Normal CI retains every
+  check; absent selection preserves the full entrypoint. The original complete
+  blueprint (including selection) remains digest-bound to the same run/tested
+  SHA and approved recipe; artifact snapshot/receipt checks are unchanged.
+  Producers can read the durable `oberth-trigger`, including tag preflights.
   The receipt certifies preflight artifact bytes only: later release rebuilds
   are not compared and require their own signed provenance/byte-identity policy.
   Unbound startup submissions require 60 continuous seconds of exact Workflow,

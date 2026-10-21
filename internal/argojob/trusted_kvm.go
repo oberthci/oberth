@@ -17,6 +17,7 @@ import (
 	"k8s.io/utils/ptr"
 
 	"github.com/oberthci/oberth/internal/vmrunner"
+	"github.com/oberthci/oberth/pkg/argoworkflow"
 	"github.com/oberthci/oberth/pkg/periapsis"
 )
 
@@ -125,6 +126,13 @@ func admitTrustedKVMSource(workflow *wfv1.Workflow) error {
 }
 func appendTrustedKVM(workflow *wfv1.Workflow, config Config, request Request) error {
 	intent := request.TrustedKVM
+	entrypoint, err := argoworkflow.TrustedTestsEntrypoint(workflow)
+	if err != nil {
+		return err
+	}
+	// Selection happens after admission of the complete blueprint. The original
+	// source, including this selection, remains sealed in the journaled intent.
+	workflow.Spec.Entrypoint = entrypoint
 	if workflow.Spec.ServiceAccountName != config.PipelineServiceAccount || workflow.Spec.AutomountServiceAccountToken == nil || *workflow.Spec.AutomountServiceAccountToken {
 		return errors.New("argojob: trusted preflight requires the credential-free pipeline identity")
 	}

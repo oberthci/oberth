@@ -490,3 +490,86 @@ func TestTrustedKVMHelperSecurityWorksWhenOriginallyAbsent(t *testing.T) {
 		t.Fatalf("absent wait context was not fully installed: %#v", patched.Containers[0].SecurityContext)
 	}
 }
+
+func TestTrustedKVMSelectsOnlyDeclaredProducers(t *testing.T) {
+	for _, trigger := range []argoworkflow.RunTrigger{argoworkflow.RunTriggerBranch, argoworkflow.RunTriggerPromotion, argoworkflow.RunTriggerSchedule, argoworkflow.RunTriggerTag} {
+		t.Run(string(trigger), func(t *testing.T) {
+			config, request := trustedKVMRequest(t)
+			source := strings.Replace(guardedDocument, "    oberth.ci/size: XL", "    oberth.ci/trusted-tests-entrypoint: producers\n    oberth.ci/size: XL", 1)
+			source += `
+    - name: producers
+      inputs:
+        parameters:
+        - name: oberth-trigger
+      dag:
+        tasks:
+        - name: artifact
+          template: leaf
+          when: "'{{inputs.parameters.oberth-trigger}}' != 'branch'"
+`
+			request.Source = []byte(source)
+			request.RunTrigger = trigger
+			digest := sha256.Sum256(request.Source)
+			request.TrustedKVM.WorkflowSpecDigest = hex.EncodeToString(digest[:])
+			request = prepareTrustedTestRequest(t, config, request)
+			wf, err := Build(config, request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if values := triggerParameters(wf); len(values) != 1 || values[0] != string(trigger) {
+				t.Fatalf("trigger lost: %v", values)
+			}
+			var candidate wfv1.WorkflowStep
+			for _, template := range wf.Spec.Templates {
+				if template.Name == trustedKVMWrapper {
+					candidate = template.Steps[0].Steps[0]
+				}
+			}
+			if candidate.Template != "producers" {
+				t.Fatalf("repeated full matrix: %+v", candidate)
+			}
+			found := false
+			for _, parameter := range candidate.Arguments.Parameters {
+				if parameter.Name == "oberth-trigger" {
+					found = true
+					value := parameter.Value.String()
+					if value != string(trigger) && value != "{{workflow.parameters.oberth-trigger}}" {
+						t.Fatalf("stale producer trigger: %s", value)
+					}
+				}
+			}
+			if !found {
+				t.Fatal("producer trigger input missing")
+			}
+			// The normal run still executes the full matrix, with every check intact.
+			if trigger != argoworkflow.RunTriggerTag {
+				ordinary := request
+				ordinary.TrustedKVM = nil
+				ordinary.nonrootProof = nil
+				normal, err := Build(config, ordinary)
+				if err != nil || normal.Spec.Entrypoint != "main" {
+					t.Fatalf("normal checks changed: %v", err)
+				}
+			}
+			// A changed producer selection cannot reuse the journaled recipe/blueprint.
+			request.Source = []byte(strings.Replace(source, "trusted-tests-entrypoint: producers", "trusted-tests-entrypoint: main", 1))
+			if _, err := Build(config, request); err == nil {
+				t.Fatal("accepted producer blueprint substitution")
+			}
+		})
+	}
+}
+
+func TestTrustedKVMProducerSelectionStillAdmitsTheWholeBlueprint(t *testing.T) {
+	config, request := trustedKVMRequest(t)
+	source := strings.Replace(guardedDocument, "    oberth.ci/size: XL", "    oberth.ci/trusted-tests-entrypoint: leaf\n    oberth.ci/size: XL", 1)
+	// Even outside the selected producer path, background execution is forbidden.
+	source = strings.Replace(source, "    - name: main\n", "    - name: main\n      daemon: true\n", 1)
+	request.Source = []byte(source)
+	digest := sha256.Sum256(request.Source)
+	request.TrustedKVM.WorkflowSpecDigest = hex.EncodeToString(digest[:])
+	request = prepareTrustedTestRequest(t, config, request)
+	if _, err := Build(config, request); err == nil || !strings.Contains(err.Error(), "daemon") {
+		t.Fatalf("selected producers bypassed closed admission: %v", err)
+	}
+}
