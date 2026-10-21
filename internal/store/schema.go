@@ -1118,7 +1118,8 @@ ALTER TABLE kubevirt_grants ADD COLUMN max_memory_bytes INTEGER NOT NULL DEFAULT
     sha TEXT NOT NULL,
     since INTEGER NOT NULL,
     PRIMARY KEY (repo_id, ref_kind, ref, sha)
-);`}, {
+);`},
+	{
 		version: admissionSequenceMigrationVersion,
 		sql: `ALTER TABLE runs ADD COLUMN admission_sequence INTEGER;
 UPDATE runs SET admission_sequence = queue_sequence;

@@ -16,7 +16,8 @@ import (
 func TestAdmissionSequenceMigrationBackfillsLegacyRuns(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "legacy.sqlite")
-	s, err := Open(ctx, path, Options{})
+	original := time.Unix(100, 0)
+	s, err := Open(ctx, path, Options{Now: func() time.Time { return original }})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -40,11 +41,22 @@ DELETE FROM schema_migrations WHERE version = ?`, admissionSequenceMigrationVers
 	if err := raw.Close(); err != nil {
 		t.Fatal(err)
 	}
-	s, err = Open(ctx, path, Options{})
+	s, err = Open(ctx, path, Options{Now: func() time.Time { return original.Add(time.Hour) }})
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = s.Close() })
+	assertFreshSchemaLedger(t, s.db)
+	for version := 1; version < admissionSequenceMigrationVersion; version++ {
+		var appliedAt int64
+		if err := s.db.QueryRowContext(ctx, `SELECT applied_at FROM schema_migrations WHERE version = ?`, version).Scan(&appliedAt); err != nil || appliedAt != unixNano(original) {
+			t.Fatalf("migration %d replayed during v27 upgrade: applied_at=%d, error=%v", version, appliedAt, err)
+		}
+	}
+	var appliedAt int64
+	if err := s.db.QueryRowContext(ctx, `SELECT applied_at FROM schema_migrations WHERE version = 28`).Scan(&appliedAt); err != nil || appliedAt != unixNano(original.Add(time.Hour)) {
+		t.Fatalf("v28 migration application = %d, %v", appliedAt, err)
+	}
 	got, err := s.Run(ctx, run.ID)
 	if err != nil || got.AdmissionSequence != got.QueueSequence {
 		t.Fatalf("legacy admission sequence = %+v, %v", got, err)

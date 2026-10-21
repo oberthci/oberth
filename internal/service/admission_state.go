@@ -78,7 +78,9 @@ func (scheduler *Scheduler) AdmissionState() *model.AdmissionState {
 	for sequence := range gate.reservations {
 		sequences = append(sequences, sequence)
 	}
-	sort.Slice(sequences, func(i, j int) bool { return sequences[i] < sequences[j] })
+	sort.Slice(sequences, func(i, j int) bool {
+		return admissionBefore(gate.reservations[sequences[i]], gate.reservations[sequences[j]])
+	})
 	groups := map[string]*model.AdmissionGroup{}
 	var groupOrder []string
 	for _, sequence := range sequences {
