@@ -972,6 +972,10 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 			return err
 		}
 		warnArchivedReleaseWIF(logger, archiveWIF, qualified)
+		// Intentional on every boot: re-running the archive transition with a
+		// no-op catalog change retries cache removal that failed or was
+		// interrupted when the repository was archived. It is idempotent once
+		// the cache is gone, and a failure only warns; the catalog stays archived.
 		if err := git.ChangeRepositoryArchive(ctx, qualified, true, func() error { return nil }); err != nil {
 			logger.Printf("WARNING: archived repository cache cleanup failed for %s: %v", qualified, err)
 		}

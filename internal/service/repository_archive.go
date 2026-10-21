@@ -40,3 +40,13 @@ func (service *API) repoArchive(ctx context.Context, actor api.Actor, name strin
 	}
 	return changed, nil
 }
+
+// refuseArchivedGrant refuses new authority for an archived repository. Its
+// existing grants stay readable and revocable, but nothing can run there, so a
+// fresh grant would only be dormant authority waiting for an unarchive.
+func refuseArchivedGrant(repository model.Repository, tool, name string) error {
+	if repository.ArchivedAt == nil {
+		return nil
+	}
+	return fmt.Errorf("%w: %w: %s refused for %s; unarchive the repository first", store.ErrInvalidState, store.ErrRepositoryArchived, tool, name)
+}

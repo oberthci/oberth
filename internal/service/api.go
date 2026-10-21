@@ -2653,6 +2653,15 @@ func (service *API) accessAllow(ctx context.Context, actor api.Actor, repo, step
 	if service.scope != nil && !service.scope.seesAccessKey(repo) {
 		return api.AccessGrantResponse{}, hiddenRepository(repo)
 	}
+	// Unregistered spellings keep their verbatim form above; only a
+	// registered, archived repository is refused here.
+	if service.repositories != nil {
+		if resolved, err := service.repositories.RepositoryByName(ctx, repo); err == nil {
+			if err := refuseArchivedGrant(resolved, "access_allow", repo); err != nil {
+				return api.AccessGrantResponse{}, err
+			}
+		}
+	}
 	// Validate the entry before touching the ConfigMap. Without this check a
 	// malformed entry (glob characters in repo/secret, or a non-wildcard step)
 	// would be written to the ConfigMap, and the next reconciliation would

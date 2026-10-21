@@ -50,6 +50,9 @@ func (service *API) sizeGrantTool(ctx context.Context, actor api.Actor, name, re
 	}
 	var size periapsis.Size
 	if name == "size_grant" {
+		if err := refuseArchivedGrant(repository, name, repoName); err != nil {
+			return nil, err
+		}
 		size = periapsis.Size(strings.TrimSpace(maximum))
 		if !store.ValidSizeGrantMax(size) {
 			return nil, fmt.Errorf("%w: max must be %s or %s", ErrInvalidInput, periapsis.L, periapsis.XL)

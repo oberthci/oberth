@@ -2520,7 +2520,9 @@ require no schema or Kubernetes permission changes.
 repository identity, runs, logs, artifacts, receipts, grants, issues and audit
 history. It refuses queued/running work, pending promotions/publications,
 unfinished cancellation cleanup and pending Git receive recovery. New runs and
-promotions are refused with `repository archived`; schedules skip archived
+promotions are refused with `repository archived`, as are new `kubevirt_grant`,
+`size_grant`, `promote_grant` and `access_allow` grants; existing grants stay
+readable and revocable. Schedules skip archived
 repositories before reading Git. Git refreshes/probes fail closed, and the
 qualified cache is removed under receive/refresh locks. Retry archive if cache
 removal failed; the catalog stays archived. Unarchive allows lazy cache recreation.

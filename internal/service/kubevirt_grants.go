@@ -41,6 +41,11 @@ func (service *API) kubeVirtGrantTool(ctx context.Context, actor api.Actor, name
 	if !actor.Admin {
 		return nil, fmt.Errorf("%w: KubeVirt grants require an admin uplink", ErrForbidden)
 	}
+	if name == "kubevirt_grant" {
+		if err := refuseArchivedGrant(repository, name, repoName); err != nil {
+			return nil, err
+		}
+	}
 	grant, err := service.kubeVirtGrants.SetKubeVirtGrant(ctx, repository.ID, actor.Identity, name == "kubevirt_grant", budget)
 	if errors.Is(err, store.ErrInvalid) {
 		return nil, fmt.Errorf("%w: %w", ErrInvalidInput, err)

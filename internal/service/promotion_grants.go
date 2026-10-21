@@ -39,6 +39,9 @@ func (service *API) promoteGrant(ctx context.Context, actor api.Actor, raw json.
 	if err != nil {
 		return nil, err
 	}
+	if err := refuseArchivedGrant(repository, "promote_grant", arguments.Repo); err != nil {
+		return nil, err
+	}
 
 	expiresAt, err := parseExpiry(arguments.Expires, service.promotionGrantMaxLifetime)
 	if err != nil {
