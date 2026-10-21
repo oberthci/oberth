@@ -26,6 +26,9 @@ func (e sqliteResultError) Code() int { return int(e) }
 func TestSchemaMigrationsAreContiguous(t *testing.T) {
 	t.Parallel()
 
+	if err := validateMigrations(migrations, latestMigrationVersion); err != nil {
+		t.Fatal(err)
+	}
 	if latestMigrationVersion != 24 {
 		t.Fatalf("latest migration version = %d, want 24", latestMigrationVersion)
 	}
@@ -1256,7 +1259,7 @@ func TestOpenRejectsLegacyAndFutureSchemaVersions(t *testing.T) {
 		{
 			name: "legacy migration chain", version: 13,
 			wantError:  ErrSchemaIncompatible,
-			wantDetail: "migration ledger has 1 rows spanning versions 13..13; expected a contiguous prefix from 1",
+			wantDetail: "migration ledger missing version 1 below applied version 13",
 		},
 		{
 			name: "future schema", version: 99,

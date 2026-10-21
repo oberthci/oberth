@@ -692,9 +692,9 @@ CREATE UNIQUE INDEX secret_access_active
 	{
 		// v10 shipped in v0.13.25/v0.13.26 as a ledger-only no-op and is
 		// RECORDED on live databases. Its body must never be replaced: the
-		// migration runner skips any version <= the recorded database
-		// version, so a rewritten body silently never runs on exactly the
-		// databases that need it (reproduced against the live lineage in
+		// migration runner skips every recorded version, so a rewritten
+		// body silently never runs on the databases that need it (reproduced
+		// against the live lineage in
 		// TestMigrationLiveLineageAppliesRebuildAfterRecordedV10). New
 		// schema work appends new versions; it never edits shipped ones.
 		version: 10,

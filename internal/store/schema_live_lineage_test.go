@@ -16,7 +16,7 @@ import (
 // production upgrade lineage: v0.13.25/v0.13.26 shipped migration v10 as a
 // ledger-only `SELECT 1`, so every deployed database has version 10 RECORDED
 // with none of the canonical-persistence work applied. The migration runner
-// skips any version <= the recorded database version, which means the
+// skips each version already recorded in the ledger, which means the
 // canonical-persistence rebuild MUST live at a version those databases have
 // not recorded (v11/v12) — replacing v10's body would silently never run on
 // exactly the databases that need it, forking the live schema from every
@@ -143,6 +143,17 @@ PRAGMA foreign_keys = ON;`); err != nil {
 			t.Errorf("close store: %v", err)
 		}
 	}()
+
+	assertFreshSchemaLedger(t, s2.db)
+	for version := 1; version <= 10; version++ {
+		var appliedAt int64
+		if err := s2.db.QueryRowContext(ctx, `SELECT applied_at FROM schema_migrations WHERE version = ?`, version).Scan(&appliedAt); err != nil {
+			t.Fatal(err)
+		}
+		if appliedAt != unixNano(now) {
+			t.Fatalf("legacy migration %d record changed: %d", version, appliedAt)
+		}
+	}
 
 	// The rebuild must have replaced the single-column unique.
 	var createSQL string
