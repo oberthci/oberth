@@ -716,6 +716,15 @@ func TestResultMapping(t *testing.T) {
 			wantError:  "Evicted: kubelet storage message",
 		},
 		{
+			name: "container memory limit OOM",
+			completion: argojob.Completion{
+				Reason: "main: OOMKilled (exit code 137)", FailedBurn: "test", FailedStep: "unit",
+			},
+			wantStatus: model.RunFailed,
+			wantPhase:  "test",
+			wantError:  "main: OOMKilled (exit code 137)",
+		},
+		{
 			name:       "failed with reason",
 			completion: argojob.Completion{Succeeded: false, Reason: "OOMKilled"},
 			wantStatus: model.RunFailed,
@@ -769,6 +778,9 @@ func TestResultMapping(t *testing.T) {
 			result := jobs.result(tc.completion)
 			if tc.completion.Infrastructure && (result.FailedBurn != "" || result.FailedStep != "") {
 				t.Fatal("infrastructure failure retained test-failure attribution")
+			}
+			if !tc.completion.Infrastructure && result.FailedStep != tc.completion.FailedStep {
+				t.Fatal("test failure lost step attribution")
 			}
 			if result.Status != tc.wantStatus {
 				t.Fatalf("status = %q, want %q", result.Status, tc.wantStatus)

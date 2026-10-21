@@ -1147,7 +1147,13 @@ continuity checks; it must never be used to reset or bypass those checks.
   promotions, and tag/release runs do not register CI issue work. Projection
   never acquires, renews, or deletes issue locks; explicit coordination locks
   remain available. An explicitly cancelled run (or promotion) projects no CI
-  issue and leaves an existing one unchanged. A periodic reconciliation also
+  issue and leaves an existing one unchanged. Transient kubelet evictions,
+  including node memory/storage pressure and executor scratch eviction, also
+  leave CI issues unchanged. Scheduler-side infrastructure failures (checkout,
+  concurrency-group or size-grant refusal) still open/update default-branch and
+  scheduled-run issues. A container killed at its own memory limit remains a
+  test failure; `OOMKilled` alone does not establish node pressure. A periodic
+  reconciliation also
   closes a stale red issue when its accepted branch head is merged into the
   upstream default branch and that branch's latest run passed, or when a
   previously published or explicitly
@@ -2372,11 +2378,13 @@ and Pod deadline reason are separate observations; exit 137 alone means neither.
 `run_get` exposes this record through the existing typed step JSON. Old NULL
 records explicitly mean `not-recorded`; no historical cause is backfilled.
 Malformed optional evidence cannot replace the original step verdict. Separately,
-failed selected Pod nodes with kubelet eviction messages or `OOMKilled` reasons
+failed selected Pod nodes with kubelet eviction or node-pressure messages
 are classified as infrastructure (#1138); an owned failed Pod's live status can
 also establish the cause before main terminates. The bounded kubelet message is
-retained as the run error, separate from the typed termination JSON; application
-termination-log suffixes are excluded from OOM reasons. Only a run whose failed
+retained as the run error, separate from the typed termination JSON. A container
+`OOMKilled` without node-pressure evidence remains a test failure, including
+when it reaches its own declared memory limit. Application termination-log
+suffixes never establish node pressure. Only a run whose failed
 steps all have infrastructure causes is reclassified. It retains step rows,
 clears run-level test attribution, permits eligible branch `run_retry`, and does
 not open/update/resolve repository CI-red issues. Argo's server-injected executor

@@ -16,8 +16,6 @@ func TestCompletionKubeletMessagesSurvivePodGC(t *testing.T) {
 		`Usage of EmptyDir volume "var-run-argo" exceeds the limit "128Mi".`,
 		`The node was low on resource: ephemeral-storage. Threshold quantity: 1Gi, available: 123Ki.`,
 		`The node was low on resource: memory.`,
-		`main: OOMKilled (exit code 137)`,
-		`wait: OOMKilled (exit code 137): application-controlled termination log`,
 	} {
 		t.Run(message, func(t *testing.T) {
 			wf, node, _, _ := diagnosticFixture()
@@ -26,7 +24,7 @@ func TestCompletionKubeletMessagesSurvivePodGC(t *testing.T) {
 			completion := completionFor(wf)
 			controller := &Controller{kube: fake.NewClientset()}
 			controller.collectStepDiagnostics(context.Background(), wf, &completion)
-			if completion.Succeeded || !completion.Infrastructure || !strings.Contains(completion.Reason, strings.SplitN(message, ": application", 2)[0]) || strings.Contains(completion.Reason, "application-controlled") {
+			if completion.Succeeded || !completion.Infrastructure || !strings.Contains(completion.Reason, message) || strings.Contains(completion.Reason, "application-controlled") {
 				t.Fatalf("lost kubelet reason: %#v", completion)
 			}
 			if completion.Steps[0].Termination.Unavailable != "observation-unavailable" {
@@ -37,7 +35,7 @@ func TestCompletionKubeletMessagesSurvivePodGC(t *testing.T) {
 }
 
 func TestCompletionExitCodeAndApplicationMessagesAreNotInfrastructure(t *testing.T) {
-	for _, message := range []string{"", "main: Error (exit code 137)", "main: Error (exit code 143)", "main: Error (exit code 1): OOMKilled", "main: Error (exit code 1): The node was low on resource: memory."} {
+	for _, message := range []string{"", "main: OOMKilled (exit code 137)", "wait: OOMKilled (exit code 137): application-controlled termination log", "main: OOMKilled (exit code 137): The node was low on resource: memory.", "main: Error (exit code 137)", "main: Error (exit code 143)", "main: Error (exit code 1): OOMKilled", "main: Error (exit code 1): The node was low on resource: memory."} {
 		wf, node, _, _ := diagnosticFixture()
 		node.Message = message
 		wf.Status.Nodes[node.ID] = node
@@ -48,7 +46,7 @@ func TestCompletionExitCodeAndApplicationMessagesAreNotInfrastructure(t *testing
 }
 
 func TestCompletionOwnedPodEvictionAndOOM(t *testing.T) {
-	for _, reason := range []string{"Evicted", "OOMKilled"} {
+	for _, reason := range []string{"Evicted", "node memory pressure"} {
 		t.Run(reason, func(t *testing.T) {
 			wf, node, pod, _ := diagnosticFixture()
 			pod.Status.Phase = corev1.PodFailed
@@ -58,15 +56,16 @@ func TestCompletionOwnedPodEvictionAndOOM(t *testing.T) {
 				// Kubelet eviction can happen before a current termination exists.
 				pod.Status.ContainerStatuses = nil
 			} else {
+				pod.Status.Message = "The node was low on resource: memory. Threshold quantity: 100Mi, available: 50Mi."
 				pod.Status.ContainerStatuses[0].State.Terminated.Message = "application-controlled"
 			}
 			controller := &Controller{kube: fake.NewClientset(pod)}
 			completion := completionFor(wf)
 			controller.collectStepDiagnostics(context.Background(), wf, &completion)
-			if !completion.Infrastructure || !strings.Contains(completion.Reason, reason) || strings.Contains(completion.Reason, "application-controlled") {
+			if !completion.Infrastructure || !strings.Contains(completion.Reason, "Evicted") || strings.Contains(completion.Reason, "application-controlled") {
 				t.Fatalf("owned Pod not classified: %#v", completion)
 			}
-			if reason == "Evicted" && completion.Reason != "Evicted: "+pod.Status.Message {
+			if completion.Reason != "Evicted: "+pod.Status.Message {
 				t.Fatal("kubelet message lost")
 			}
 			pod.OwnerReferences[0].UID = "foreign"
@@ -77,7 +76,7 @@ func TestCompletionOwnedPodEvictionAndOOM(t *testing.T) {
 				t.Fatal("foreign Pod changed verdict")
 			}
 			// An independent test failure keeps normal CI-red attribution.
-			node.Message = "main: OOMKilled (exit code 137)"
+			node.Message = "The node was low on resource: memory."
 			wf.Status.Nodes[node.ID] = node
 			other := node
 			other.ID, other.Name, other.DisplayName, other.Message = "other", wf.Name+".unit", "unit", "main: Error (exit code 1)"
@@ -94,6 +93,24 @@ func TestCompletionOwnedPodEvictionAndOOM(t *testing.T) {
 				t.Fatal("old failure changed successful retry")
 			}
 		})
+	}
+}
+
+func TestCompletionContainerMemoryLimitOOMIsTestFailure(t *testing.T) {
+	wf, node, pod, _ := diagnosticFixture()
+	// The fixture has a 1Gi main limit and a current OOMKilled termination.
+	pod.Status.Phase = corev1.PodFailed
+	node.Message = "main: OOMKilled (exit code 137)"
+	wf.Status.Nodes[node.ID] = node
+	completion := completionFor(wf)
+	controller := &Controller{kube: fake.NewClientset(pod)}
+	controller.collectStepDiagnostics(t.Context(), wf, &completion)
+	if completion.Infrastructure || completion.Succeeded || completion.FailedStep != "test" {
+		t.Fatalf("step memory limit OOM lost test attribution: %#v", completion)
+	}
+	termination := completion.Steps[0].Termination
+	if !termination.Available || termination.Container.Reason != "OOMKilled" || *termination.Container.MemoryLimitBytes != 1<<30 {
+		t.Fatalf("OOM evidence lost: %#v", termination)
 	}
 }
 
