@@ -666,7 +666,7 @@ func (bareRunResolver) ResolveWaitRun(context.Context, int64, string, string) (m
 // refused outside the scope; "refused": installation-wide, never for a
 // scoped uplink.
 var toolScopeBehaviour = map[string]string{
-	"uplink_list": "filtered", "uplink_revoke": "refused", "uplink_rotate": "refused", "access_dismiss": "mutation", "kubevirt_grant_list": "filtered",
+	"uplink_list": "refused", "uplink_revoke": "refused", "uplink_rotate": "refused", "access_dismiss": "refused", "kubevirt_grant_list": "refused",
 	"status": "lookup", "logs": "lookup", "run_kvm_preflight": "lookup", "run_get": "lookup",
 	"artifacts": "lookup", "artifact_get": "lookup", "run_logs": "lookup", "wait": "lookup",
 	"promote_status": "lookup", "issue_get": "lookup", "issue_get_many": "lookup",

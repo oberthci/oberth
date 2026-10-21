@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -15,9 +16,11 @@ import (
 type lifecycleStub struct {
 	statuses  []store.UplinkStatus
 	mutations int
+	reads     int
 }
 
 func (s *lifecycleStub) ListUplinkStatuses(context.Context) ([]store.UplinkStatus, error) {
+	s.reads++
 	return s.statuses, nil
 }
 func (s *lifecycleStub) RevokeUplink(context.Context, string, string, string, string) (model.Uplink, error) {
@@ -25,63 +28,76 @@ func (s *lifecycleStub) RevokeUplink(context.Context, string, string, string, st
 	return model.Uplink{}, nil
 }
 
-func TestUplinkLifecycleScopeAndAdmin(t *testing.T) {
+func TestCredentialLifecycleRequiresUnscopedAdmin(t *testing.T) {
 	fixture := newScopeFixture(t)
-	stub := &lifecycleStub{statuses: []store.UplinkStatus{
-		{Uplink: model.Uplink{Identity: scopedActor.Identity, Fingerprint: scopedActor.Fingerprint, Scope: scopedActor.Scope}},
-		{Uplink: model.Uplink{Identity: scopedActor.Identity, Fingerprint: "SHA256:hidden", Scope: []string{"codeberg"}}},
-	}}
+	stub := &lifecycleStub{}
 	fixture.service.uplinkLifecycle = stub
-	for _, actor := range []api.Actor{scopedActor, scopedAdmin, unscopedActor} {
-		value, err := fixture.call(actor, "uplink_list", map[string]any{})
-		if err != nil {
-			t.Fatal(err)
-		}
-		encoded, _ := json.Marshal(value)
-		if actor.Scoped() && strings.Contains(string(encoded), "hidden") {
-			t.Fatal("scope leak", string(encoded))
-		}
+	fixture.service.declarationDismissal = fixture.store
+	fixture.service.kubeVirtGrants = fixture.store
+	ctx := context.Background()
+	if err := fixture.store.RecordGrantDeclarations(ctx, "removed-repo", "old", []store.GrantDeclaration{{Step: "old", Path: "oberth/data/old"}}); err != nil {
+		t.Fatal(err)
 	}
-	for _, tool := range []string{"uplink_revoke", "uplink_rotate"} {
+	calls := map[string]map[string]any{
+		"uplink_list":         {},
+		"uplink_revoke":       {"identity": "target"},
+		"uplink_rotate":       {"identity": "target", "fingerprint": "old", "replacement_fingerprint": "new"},
+		"access_dismiss":      {"repo": "removed-repo", "step": "old", "secret": "oberth/data/old"},
+		"kubevirt_grant_list": {},
+	}
+	for tool, args := range calls {
 		for _, actor := range []api.Actor{scopedActor, scopedAdmin, {Identity: "ordinary"}} {
-			if _, err := fixture.call(actor, tool, map[string]any{}); !errors.Is(err, ErrForbidden) {
-				t.Fatalf("%s %v", tool, err)
-			}
+			t.Run(tool+"/"+actor.Identity+"/"+fmt.Sprint(actor.Admin), func(t *testing.T) {
+				if _, err := fixture.call(actor, tool, args); !errors.Is(err, ErrForbidden) {
+					t.Fatalf("expected forbidden: %v", err)
+				}
+			})
 		}
 	}
-	if stub.mutations != 0 {
-		t.Fatal("unauthorized mutation")
+	if stub.mutations != 0 || stub.reads != 0 {
+		t.Fatalf("unauthorized backend access: %+v", stub)
+	}
+	pending, err := fixture.store.PendingGrantDeclarations(ctx, "removed-repo")
+	if err != nil || len(pending) != 1 {
+		t.Fatalf("unauthorized dismissal: %+v %v", pending, err)
 	}
 }
 
-func TestKubeVirtListAndDismissRespectScope(t *testing.T) {
+func TestUnscopedAdminListsAllUplinksAndKubeVirtGrants(t *testing.T) {
 	fixture := newScopeFixture(t)
-	fixture.service.declarationDismissal = fixture.store
+	fixture.service.uplinkLifecycle = &lifecycleStub{statuses: []store.UplinkStatus{
+		{Uplink: model.Uplink{Identity: "github-agent", Fingerprint: "SHA256:first", Scope: []string{"github"}}},
+		{Uplink: model.Uplink{Identity: "codeberg-agent", Fingerprint: "SHA256:second", Scope: []string{"codeberg"}}},
+	}}
+	value, err := fixture.call(unscopedActor, "uplink_list", map[string]any{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, _ := json.Marshal(value)
+	if !strings.Contains(string(encoded), "SHA256:first") || !strings.Contains(string(encoded), "SHA256:second") {
+		t.Fatalf("uplinks=%s", encoded)
+	}
 	fixture.service.kubeVirtGrants = fixture.store
 	repos, err := fixture.store.ListRepositories(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, repo := range repos {
-		if _, err := fixture.store.SetKubeVirtGrant(context.Background(), repo.ID, "admin", true); err != nil {
+		if _, err := fixture.store.SetKubeVirtGrant(context.Background(), repo.ID, "admin", true, store.KubeVirtBudget{}); err != nil {
 			t.Fatal(err)
 		}
 	}
-	value, err := fixture.call(scopedAdmin, "kubevirt_grant_list", map[string]any{})
+	value, err = fixture.call(unscopedActor, "kubevirt_grant_list", map[string]any{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	encoded, _ := json.Marshal(value)
-	if strings.Contains(string(encoded), "codeberg") || !strings.Contains(string(encoded), "github") {
+	grants := value.(map[string]any)["grants"].([]map[string]any)
+	if len(grants) != len(repos) {
+		t.Fatalf("grants=%+v repos=%+v", grants, repos)
+	}
+	encoded, _ = json.Marshal(value)
+	if !strings.Contains(string(encoded), "codeberg") || !strings.Contains(string(encoded), "github") {
 		t.Fatalf("grants=%s", encoded)
-	}
-	_, hidden := fixture.call(scopedAdmin, "access_dismiss", map[string]any{"repo": "codeberg/cloudtaser/" + fixture.hidden.Name, "step": "deploy", "secret": "oberth/data/old"})
-	_, missing := fixture.call(scopedAdmin, "access_dismiss", map[string]any{"repo": "missing", "step": "deploy", "secret": "oberth/data/old"})
-	if !errors.Is(hidden, store.ErrNotFound) || !errors.Is(missing, store.ErrNotFound) {
-		t.Fatalf("hidden=%v missing=%v", hidden, missing)
-	}
-	if _, err := fixture.call(scopedActor, "kubevirt_grant_list", map[string]any{}); !errors.Is(err, ErrForbidden) {
-		t.Fatal(err)
 	}
 }
 
@@ -103,7 +119,7 @@ func TestUnscopedAdminCanDismissOrphanedDeclaration(t *testing.T) {
 		t.Fatal(err)
 	}
 	args := map[string]any{"repo": "removed-repo", "step": "old", "secret": "oberth/data/old"}
-	if _, err := fixture.call(scopedAdmin, "access_dismiss", args); !errors.Is(err, store.ErrNotFound) {
+	if _, err := fixture.call(scopedAdmin, "access_dismiss", args); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("scoped orphan dismiss=%v", err)
 	}
 	if _, err := fixture.call(unscopedActor, "access_dismiss", args); err != nil {
