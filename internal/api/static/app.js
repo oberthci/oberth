@@ -10,6 +10,7 @@ const listPollMs = 4000;
 const slowPollMs = 10000;
 const livePollMs = 2000;
 const state = {
+  repoArchive: "active",
   repos: [], runs: [], repoRuns: [], status: null,
   runCounts: null, runCursor: 0, runCursorHistory: [], runStart: 1, runStartHistory: [], runSourceCount: 0,
   runNext: 0, runsNext: "", repoRunsNext: "",
@@ -509,8 +510,9 @@ async function renderRuns(seq) {
     </div>
     <div class="runs-layout">
       <aside class="repo-side">
+        <div class="repo-filter-row">${repoArchiveFilters()}</div>
         <div class="repo-filter-row"><button class="repo-filter ${state.repo === "all" ? "on" : ""}" data-repo-filter="all"><span class="name">All repos</span><span class="count">${esc(counts.get("all") || 0)}</span></button></div>
-        ${state.repos.map(repo => `<div class="repo-filter-row"><button class="repo-filter ${state.repo === repoKey(repo) ? "on" : ""}" data-repo-filter="${esc(repoKey(repo))}" title="${esc(repoKey(repo))}"><span class="name">${esc(repoLabel(repo))}</span><span class="count">${esc(counts.get(repoKey(repo)) || 0)}</span></button></div>`).join("")}
+        ${listedRepos().map(repo => `<div class="repo-filter-row"><button class="repo-filter ${state.repo === repoKey(repo) ? "on" : ""}" data-repo-filter="${esc(repoKey(repo))}" title="${esc(repoKey(repo))}"><span class="name">${esc(repoLabel(repo))}</span><span class="count">${esc(counts.get(repoKey(repo)) || 0)}</span></button></div>`).join("")}
       </aside>
       <section>
         <div class="toolbar">
@@ -901,20 +903,24 @@ function upstreamName(upstreamID) {
 function historyStrip(runs) {
   return `<div class="history" aria-label="recent runs, oldest to newest">${runs.slice(0, 12).reverse().map(run => `<button type="button" class="hist ${statusKind(displayRunStatus(run))}" data-run-id="${esc(run.ID)}" title="${esc(`${shortSha(run.SHA)} · ${run.RefKind === "tag" ? "tag" : "branch"} ${run.Ref} · ${statusLabel(displayRunStatus(run))} · ${ago(runWhen(run))}`)}"></button>`).join("") || '<span class="meta">--</span>'}</div>`;
 }
+function listedRepos() { return state.repos.filter(repo => Boolean(repo.ArchivedAt) === (state.repoArchive === "archived")); }
+function repoArchiveFilters() {
+  return ["active", "archived"].map(kind => `<button type="button" class="chip ${state.repoArchive === kind ? "on" : ""}" data-repo-archive="${kind}">${kind} (${state.repos.filter(repo => Boolean(repo.ArchivedAt) === (kind === "archived")).length})</button>`).join("");
+}
 async function renderRepos(seq) {
   setChrome("repos", "/ repos");
   await Promise.all([loadRepos(), loadStatus().catch(() => { })]);
   if (!currentRoute(seq)) return;
-  const rows = state.repos.map(repo => {
+  const rows = listedRepos().map(repo => {
     const runs = repo.LatestRuns || [];
     return { repo, runs, latest: runs[0] || null };
   });
   replaceApp(`
   <section class="screen">
-    <div class="bar"><h1>Repositories</h1><span class="meta">${rows.length} configured</span></div>
+    <div class="bar"><h1>Repositories</h1><span class="meta">${state.repos.length} configured</span>${repoArchiveFilters()}</div>
     <div class="table repo-table">
       <div class="trow head"><div>repository</div><div>status</div><div>default branch</div><div>latest run</div><div>history</div><div>upstream</div></div>
-      ${rows.map(({ repo, runs, latest }) => `<div class="trow" data-repo-runs="${esc(repoKey(repo))}"><div class="primary"><div class="repo-name">${esc(repoLabel(repo))}</div></div><div>${latest ? pill(statusLabel(latest.Status), statusKind(latest.Status)) : '<span class="meta">no runs</span>'}</div><div class="branch">${esc(repo.DefaultBranch || "--")}</div><div>${latest ? `<div class="branch">${esc(latest.Ref)}</div><span class="meta">${esc(ago(runWhen(latest)))}</span>` : '<span class="meta">--</span>'}</div><div>${historyStrip(runs)}</div><div class="clip">${esc(upstreamName(repo.UpstreamID))}</div></div>`).join("") || '<div class="empty static">No repositories registered. Register an upstream and repository in-pod with oberth admin.</div>'}
+      ${rows.map(({ repo, runs, latest }) => `<div class="trow" data-repo-runs="${esc(repoKey(repo))}"><div class="primary"><div class="repo-name">${esc(repoLabel(repo))}</div></div><div>${repo.ArchivedAt ? pill("archived", "cancel") : latest ? pill(statusLabel(latest.Status), statusKind(latest.Status)) : '<span class="meta">no runs</span>'}</div><div class="branch">${esc(repo.DefaultBranch || "--")}</div><div>${latest ? `<div class="branch">${esc(latest.Ref)}</div><span class="meta">${esc(ago(runWhen(latest)))}</span>` : '<span class="meta">--</span>'}</div><div>${historyStrip(runs)}</div><div class="clip">${esc(upstreamName(repo.UpstreamID))}</div></div>`).join("") || '<div class="empty static">No repositories match this filter.</div>'}
     </div>
   </section>`);
   setAuto(slowPollMs);
@@ -1148,6 +1154,7 @@ app.addEventListener("click", event => {
      of the run detail page. */
   if ((target = event.target.closest("[data-run-id]"))) { go(`/runs/${enc(target.dataset.runId)}`); return; }
   if ((target = event.target.closest("[data-repo-runs]"))) { changeRunRepo(target.dataset.repoRuns); go("/runs"); return; }
+  if ((target = event.target.closest("[data-repo-archive]"))) { state.repoArchive = target.dataset.repoArchive; route(); return; }
   if ((target = event.target.closest("[data-repo-filter]"))) { changeRunRepo(target.dataset.repoFilter); route(); return; }
   if ((target = event.target.closest("[data-kind-filter]"))) { state.releaseOnly = !state.releaseOnly; route(); return; }
   if ((target = event.target.closest("[data-status-filter]"))) { state.filter = target.dataset.statusFilter; route(); return; }

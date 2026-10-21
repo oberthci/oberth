@@ -657,6 +657,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 		Env:             map[string]string{"GIT_SSH_COMMAND": sshCommand, "GIT_SSH_VARIANT": "ssh"},
 		Logger:          logger,
 		RepoQualifier:   upstreams.QualifyInput,
+		RepositoryGate:  upstreams.RequireActive,
 		PreFinalizeGate: anchors.AllowMutation,
 	})
 	if err != nil {
@@ -920,19 +921,48 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 	// Wire the declaration recorder so Workflow admission records (repo, step,
 	// path) declarations for `access_list --pending`. Issue #623, finding 4.
 	argoJobs.SetDeclarationRecorder(database)
+	archiveWIF, err := readArgoReleaseWIFConfig(options.argoReleaseWIFConfig)
+	if err != nil {
+		return err
+	}
+	registeredRepositories, err := database.ListRepositories(ctx)
+	if err != nil {
+		return err
+	}
+	for _, repository := range registeredRepositories {
+		if repository.ArchivedAt == nil {
+			continue
+		}
+		qualified, err := database.QualifiedRepoName(ctx, repository.ID)
+		if err != nil {
+			return err
+		}
+		warnArchivedReleaseWIF(logger, archiveWIF, qualified)
+		if err := git.ChangeRepositoryArchive(ctx, qualified, true, func() error { return nil }); err != nil {
+			logger.Printf("WARNING: archived repository cache cleanup failed for %s: %v", qualified, err)
+		}
+	}
 	controlAPI, err := service.NewAPI(service.APIConfig{
 		KVMPreflights:      database,
 		SchedulingObserver: argoJobs, Admission: scheduler,
 		Runs: database, History: database, RunRetries: database, Repositories: database, Issues: database,
 		Promotions: database, PromotionRuns: database, Enqueues: scheduler, Git: git,
 		Refs: git, Logs: logs, Artifacts: artifactStore, Auditor: database, Health: health, Signals: signals,
-		MutationGate:              anchors.AllowMutation,
-		PromotionWorkspaceRoot:    filepath.Join(options.dataRoot, "work"),
-		SecretAccess:              database,
-		KubeVirtGrants:            database,
-		SizeGrants:                database,
-		SecretStoreVerifier:       buildSecretStoreVerifier(options, kube),
-		SecretAccessReconciler:    accessReconciler,
+		MutationGate:           anchors.AllowMutation,
+		PromotionWorkspaceRoot: filepath.Join(options.dataRoot, "work"),
+		SecretAccess:           database,
+		KubeVirtGrants:         database,
+		SizeGrants:             database,
+		SecretStoreVerifier:    buildSecretStoreVerifier(options, kube),
+		SecretAccessReconciler: accessReconciler,
+		RepositoryArchiver:     database,
+		ChangeRepositoryArchive: func(ctx context.Context, name string, archived bool, change func() error) error {
+			err := git.ChangeRepositoryArchive(ctx, name, archived, change)
+			if archived && err == nil {
+				warnArchivedReleaseWIF(logger, archiveWIF, name)
+			}
+			return err
+		},
 		RepositoryRemover:         database,
 		RemoveGitCache:            git.RemoveRepository,
 		PromotionGrants:           database,
@@ -1950,6 +1980,8 @@ func buildGoProxyRepoMap(ctx context.Context, db *store.Store, config goproxy.Na
 // service or store.
 func classifyViewError(err error) (int, string) {
 	switch {
+	case errors.Is(err, store.ErrRepositoryArchived):
+		return http.StatusConflict, "repository archived"
 	case errors.Is(err, service.ErrInvalidInput),
 		errors.Is(err, runlog.ErrInvalidPattern):
 		return http.StatusBadRequest, err.Error()

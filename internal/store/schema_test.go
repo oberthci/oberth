@@ -29,8 +29,8 @@ func TestSchemaMigrationsAreContiguous(t *testing.T) {
 	if err := validateMigrations(migrations, latestMigrationVersion); err != nil {
 		t.Fatal(err)
 	}
-	if latestMigrationVersion != 28 {
-		t.Fatalf("latest migration version = %d, want 28", latestMigrationVersion)
+	if latestMigrationVersion != 29 {
+		t.Fatalf("latest migration version = %d, want 29", latestMigrationVersion)
 	}
 	if len(migrations) != latestMigrationVersion {
 		t.Fatalf("migration count = %d, want %d", len(migrations), latestMigrationVersion)
@@ -599,6 +599,7 @@ ALTER TABLE uplinks_v1 RENAME TO uplinks;
 CREATE UNIQUE INDEX uplinks_token_credential_idx ON uplinks(token_credential_id);
 ALTER TABLE upstreams DROP COLUMN key_name;
 ALTER TABLE runs DROP COLUMN credentialed;
+DROP INDEX repository_archive_actions_idx;
 DROP INDEX runs_admission_idx; ALTER TABLE runs DROP COLUMN admission_sequence;
 ALTER TABLE runs DROP COLUMN concurrency_group;
 DROP TABLE schedule_fires;
@@ -987,6 +988,7 @@ func TestFreshSchemaIsCompleteAndIdempotent(t *testing.T) {
 		"publications_run_idx",
 		"receive_events_repo_idx",
 		"receive_events_run_idx",
+		"repository_archive_actions_idx",
 		"run_cancellations_pending_idx",
 		"runs_admission_idx",
 		"runs_fifo_idx",

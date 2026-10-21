@@ -102,6 +102,8 @@ type UpstreamSpec struct {
 }
 
 type Repository struct {
+	ArchivedAt    *time.Time `json:",omitempty"`
+	ArchivedBy    string     `json:",omitempty"`
 	ID            int64
 	Name          string
 	UpstreamID    int64

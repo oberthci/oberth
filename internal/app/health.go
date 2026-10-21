@@ -185,10 +185,10 @@ func (health Health) Status(ctx context.Context) (any, error) {
 		status.Upstreams = len(upstreams)
 		status.Repositories = len(repositories)
 		if len(upstreams) > 0 && health.VCS != nil {
-			status.UpstreamInfo = health.probeVCS(ctx, upstreams)
+			status.UpstreamInfo = health.probeVCSForRepositories(ctx, upstreams, repositories)
 			ready := true
 			for _, upstream := range status.UpstreamInfo {
-				if upstream.Probe != "ready" {
+				if upstream.Probe != "ready" && upstream.Probe != "archived" {
 					ready = false
 					break
 				}
@@ -269,12 +269,12 @@ func (health Health) ScopedStatus(ctx context.Context, actor api.Actor) (any, er
 			// Probe the full list: the probe cache is shared with unscoped
 			// viewers and must not hold a partial result.
 			ready := true
-			for _, upstream := range health.probeVCS(ctx, upstreams) {
+			for _, upstream := range health.probeVCSForRepositories(ctx, upstreams, repositories) {
 				if !visible[upstream.ID] {
 					continue
 				}
 				status.UpstreamInfo = append(status.UpstreamInfo, upstream)
-				if upstream.Probe != "ready" {
+				if upstream.Probe != "ready" && upstream.Probe != "archived" {
 					ready = false
 				}
 			}
@@ -349,6 +349,7 @@ const (
 // goroutine refreshes at a time. Create one per process and assign it to
 // Health.VCSCache; a nil cache probes every time (tests, single-call paths).
 type VCSSnapshot struct {
+	key      string
 	mu       sync.Mutex
 	results  []UpstreamStatus
 	age      time.Time
@@ -359,13 +360,17 @@ type VCSSnapshot struct {
 // triggers a concurrent refresh and waits for it. Concurrent viewers coalesce
 // into the same refresh, never duplicate SSH sessions.
 func (health Health) probeVCS(ctx context.Context, upstreams []model.Upstream) []UpstreamStatus {
+	key := ""
+	for _, upstream := range upstreams {
+		key += fmt.Sprint(upstream.ID) + ","
+	}
 	cache := health.VCSCache
 	if cache == nil {
 		// No shared cache (test or single-caller path): probe directly.
 		return health.probeVCSConcurrent(ctx, upstreams)
 	}
 	cache.mu.Lock()
-	if time.Since(cache.age) < vcsProbeTTL && cache.results != nil {
+	if time.Since(cache.age) < vcsProbeTTL && cache.results != nil && cache.key == key {
 		results := cache.results
 		cache.mu.Unlock()
 		return results
@@ -375,10 +380,7 @@ func (health Health) probeVCS(ctx context.Context, upstreams []model.Upstream) [
 		cache.mu.Unlock()
 		select {
 		case <-wait:
-			cache.mu.Lock()
-			results := cache.results
-			cache.mu.Unlock()
-			return results
+			return health.probeVCS(ctx, upstreams)
 		case <-ctx.Done():
 			cache.mu.Lock()
 			results := cache.results
@@ -394,6 +396,7 @@ func (health Health) probeVCS(ctx context.Context, upstreams []model.Upstream) [
 
 	cache.mu.Lock()
 	cache.results = results
+	cache.key = key
 	cache.age = time.Now()
 	cache.inflight = nil
 	cache.mu.Unlock()
@@ -594,4 +597,39 @@ func (o *SecretStoreObserver) Observe(result string) {
 		o.Log("secret store probe recovered at %s", o.Address)
 	}
 	o.previous = current
+}
+
+// An upstream with only archived repositories needs no live SSH probe. Empty
+// upstreams still probe, so enrollment diagnostics retain their meaning.
+func (health Health) probeVCSForRepositories(ctx context.Context, upstreams []model.Upstream, repositories []model.Repository) []UpstreamStatus {
+	seen, active := map[int64]bool{}, map[int64]bool{}
+	for _, repo := range repositories {
+		seen[repo.UpstreamID] = true
+		if repo.ArchivedAt == nil {
+			active[repo.UpstreamID] = true
+		}
+	}
+	var probe []model.Upstream
+	for _, upstream := range upstreams {
+		if !seen[upstream.ID] || active[upstream.ID] {
+			probe = append(probe, upstream)
+		}
+	}
+	results := health.probeVCS(ctx, probe)
+	byID := map[int64]UpstreamStatus{}
+	for _, result := range results {
+		byID[result.ID] = result
+	}
+	all := make([]UpstreamStatus, 0, len(upstreams))
+	for _, upstream := range upstreams {
+		state := "unavailable"
+		if seen[upstream.ID] && !active[upstream.ID] {
+			state = "archived"
+		} else if result, ok := byID[upstream.ID]; ok {
+			all = append(all, result)
+			continue
+		}
+		all = append(all, UpstreamStatus{ID: upstream.ID, Name: upstream.Name, Kind: upstream.Kind, BaseURL: upstream.BaseURL, Probe: state})
+	}
+	return all
 }

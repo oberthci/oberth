@@ -1058,7 +1058,7 @@ INSERT INTO repositories(name, upstream_id, default_branch, created_at, updated_
 
 func (s *Store) Repository(ctx context.Context, id int64) (model.Repository, error) {
 	return scanRepository(s.db.QueryRowContext(ctx, `
-SELECT id, name, upstream_id, default_branch, created_at, updated_at FROM repositories WHERE id = ?`, id))
+SELECT `+repositoryColumns+` FROM repositories r WHERE r.id = ?`, id))
 }
 
 // RepositoryByName resolves a repository by name in any of three forms:
@@ -1088,7 +1088,7 @@ func (s *Store) RepositoryByName(ctx context.Context, name string) (model.Reposi
 
 func (s *Store) repositoryByBareName(ctx context.Context, name string) (model.Repository, error) {
 	rows, err := s.db.QueryContext(ctx, `
-SELECT r.id, r.name, r.upstream_id, r.default_branch, r.created_at, r.updated_at,
+SELECT `+repositoryColumns+`,
        u.name
 FROM repositories r
 JOIN upstreams u ON u.id = r.upstream_id
@@ -1103,10 +1103,15 @@ WHERE r.name = ?`, name)
 		var repo model.Repository
 		var created, updated int64
 		var upstreamName string
-		if err := rows.Scan(&repo.ID, &repo.Name, &repo.UpstreamID, &repo.DefaultBranch, &created, &updated, &upstreamName); err != nil {
+		var archived sql.NullInt64
+		if err := rows.Scan(&repo.ID, &repo.Name, &repo.UpstreamID, &repo.DefaultBranch, &created, &updated, &archived, &repo.ArchivedBy, &upstreamName); err != nil {
 			return model.Repository{}, fmt.Errorf("scan repository %q: %w", name, err)
 		}
 		repo.CreatedAt, repo.UpdatedAt = fromUnixNano(created), fromUnixNano(updated)
+		if archived.Valid {
+			at := fromUnixNano(archived.Int64)
+			repo.ArchivedAt = &at
+		}
 		matched = append(matched, repo)
 		upstreamNames = append(upstreamNames, upstreamName)
 	}
@@ -1143,8 +1148,8 @@ func (s *Store) repositoryByOrgName(ctx context.Context, org, name string) (mode
 	// Query with each matching upstream.
 	for _, upstreamID := range matchingUpstreamIDs {
 		repo, err := scanRepository(s.db.QueryRowContext(ctx, `
-SELECT id, name, upstream_id, default_branch, created_at, updated_at
-FROM repositories WHERE name = ? AND upstream_id = ?`, name, upstreamID))
+SELECT `+repositoryColumns+`
+FROM repositories r WHERE r.name = ? AND r.upstream_id = ?`, name, upstreamID))
 		if err == nil {
 			return repo, nil
 		}
@@ -1165,8 +1170,8 @@ func (s *Store) repositoryByUpstreamOrgName(ctx context.Context, upstreamName, o
 			"%w: upstream %q has org %q, not %q", ErrInvalid, upstreamName, upstream.Org(), org)
 	}
 	return scanRepository(s.db.QueryRowContext(ctx, `
-SELECT id, name, upstream_id, default_branch, created_at, updated_at
-FROM repositories WHERE name = ? AND upstream_id = ?`, name, upstream.ID))
+SELECT `+repositoryColumns+`
+FROM repositories r WHERE r.name = ? AND r.upstream_id = ?`, name, upstream.ID))
 }
 
 // parseRepoSelector splits a repository selector into its components without
@@ -1228,8 +1233,8 @@ func (s *Store) SetRepositoryDefaultBranch(ctx context.Context, id int64, branch
 
 func (s *Store) ListRepositories(ctx context.Context) ([]model.Repository, error) {
 	rows, err := s.db.QueryContext(ctx, `
-SELECT id, name, upstream_id, default_branch, created_at, updated_at
-FROM repositories ORDER BY name`)
+SELECT `+repositoryColumns+`
+FROM repositories r ORDER BY r.name`)
 	if err != nil {
 		return nil, fmt.Errorf("list repositories: %w", err)
 	}
@@ -1237,12 +1242,10 @@ FROM repositories ORDER BY name`)
 
 	var repositories []model.Repository
 	for rows.Next() {
-		var value model.Repository
-		var created, updated int64
-		if err := rows.Scan(&value.ID, &value.Name, &value.UpstreamID, &value.DefaultBranch, &created, &updated); err != nil {
-			return nil, fmt.Errorf("scan repository: %w", err)
+		value, err := scanRepository(rows)
+		if err != nil {
+			return nil, err
 		}
-		value.CreatedAt, value.UpdatedAt = fromUnixNano(created), fromUnixNano(updated)
 		repositories = append(repositories, value)
 	}
 	if err := rows.Err(); err != nil {
@@ -1251,13 +1254,18 @@ FROM repositories ORDER BY name`)
 	return repositories, nil
 }
 
-func scanRepository(row *sql.Row) (model.Repository, error) {
+func scanRepository(row rowScanner) (model.Repository, error) {
 	var value model.Repository
 	var created, updated int64
-	if err := row.Scan(&value.ID, &value.Name, &value.UpstreamID, &value.DefaultBranch, &created, &updated); err != nil {
+	var archived sql.NullInt64
+	if err := row.Scan(&value.ID, &value.Name, &value.UpstreamID, &value.DefaultBranch, &created, &updated, &archived, &value.ArchivedBy); err != nil {
 		return model.Repository{}, translateNotFound("repository", err)
 	}
 	value.CreatedAt, value.UpdatedAt = fromUnixNano(created), fromUnixNano(updated)
+	if archived.Valid {
+		at := fromUnixNano(archived.Int64)
+		value.ArchivedAt = &at
+	}
 	return value, nil
 }
 
@@ -1516,6 +1524,9 @@ type promotionQueryer interface {
 }
 
 func insertPromotion(ctx context.Context, queryer promotionQueryer, spec model.PromotionSpec, id, runID, grantID string, now int64) (model.Promotion, error) {
+	if err := requireRepositoryActive(ctx, queryer, spec.RepoID); err != nil {
+		return model.Promotion{}, err
+	}
 	row := queryer.QueryRowContext(ctx, `
 INSERT INTO promotions(id, repo_id, source_branch, source_sha, target_ref, previous_sha, result_sha, actor, status, run_id, grant_id, created_at, updated_at)
 VALUES(?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?)

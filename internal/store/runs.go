@@ -195,6 +195,9 @@ func validateRunSpec(spec model.RunSpec) (model.RunSpec, error) {
 }
 
 func (s *Store) enqueueRunTx(ctx context.Context, tx *sql.Tx, spec model.RunSpec, id string, now, inheritedAdmissionSequence int64) (model.EnqueueRunResult, error) {
+	if err := requireRepositoryActive(ctx, tx, spec.RepoID); err != nil {
+		return model.EnqueueRunResult{}, err
+	}
 	var cancellations []model.RunCancellation
 	// Only ordinary branch-push runs supersede one another. Promotion CI uses a
 	// synthetic branch-shaped ref, but it is an independent immutable attempt

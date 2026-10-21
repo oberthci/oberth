@@ -434,6 +434,9 @@ func (s *Store) RetryFailedPublication(ctx context.Context, runID, promotionID, 
 	if err != nil {
 		return model.Publication{}, fmt.Errorf("load failed publication: %w", err)
 	}
+	if err := requireRepositoryActive(ctx, tx, failed.RepoID); err != nil {
+		return model.Publication{}, err
+	}
 	if failed.PromotionID != "" {
 		return model.Publication{}, fmt.Errorf("%w: publication %s belongs to promotion %s; retry the promotion with promote_retry, which merges onto the current target head and re-tests",
 			ErrInvalidState, failed.ID, failed.PromotionID)

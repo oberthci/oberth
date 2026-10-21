@@ -33,9 +33,10 @@ func TestAdmissionSequenceMigrationBackfillsLegacyRuns(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := raw.ExecContext(ctx, `DROP INDEX runs_admission_idx;
+	if _, err := raw.ExecContext(ctx, `DROP INDEX repository_archive_actions_idx;
+DROP INDEX runs_admission_idx;
 ALTER TABLE runs DROP COLUMN admission_sequence;
-DELETE FROM schema_migrations WHERE version = ?`, admissionSequenceMigrationVersion); err != nil {
+DELETE FROM schema_migrations WHERE version >= ?`, admissionSequenceMigrationVersion); err != nil {
 		t.Fatal(err)
 	}
 	if err := raw.Close(); err != nil {

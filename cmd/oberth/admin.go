@@ -1091,17 +1091,19 @@ func runRepo(ctx context.Context, arguments []string, output io.Writer) error {
 // runRepoWithDependencies dispatches repository administration subcommands.
 func runRepoWithDependencies(ctx context.Context, arguments []string, output io.Writer, dependencies repoDependencies) error {
 	if len(arguments) == 0 {
-		return fmt.Errorf("%w: repo add|remove|verify", errUsage)
+		return fmt.Errorf("%w: repo add|remove|archive|unarchive|verify", errUsage)
 	}
 	switch arguments[0] {
 	case "add":
 		return runRepoAdd(ctx, arguments[1:], output, dependencies)
+	case "archive", "unarchive":
+		return runRepoArchive(ctx, arguments[0], arguments[1:], output)
 	case "remove":
 		return runRepoRemove(ctx, arguments[1:], output, dependencies)
 	case "verify":
 		return runRepoVerify(ctx, arguments[1:], output)
 	default:
-		return fmt.Errorf("%w: repo add|remove|verify", errUsage)
+		return fmt.Errorf("%w: repo add|remove|archive|unarchive|verify", errUsage)
 	}
 }
 
@@ -1256,6 +1258,10 @@ func runRepoVerify(ctx context.Context, arguments []string, output io.Writer) er
 	}
 	var failures int
 	for _, repo := range repos {
+		if repo.ArchivedAt != nil {
+			_, _ = fmt.Fprintf(output, "SKIP  %s: repository archived\n", repo.Name)
+			continue
+		}
 		upstream, ok := upstreamMap[repo.UpstreamID]
 		if !ok {
 			_, _ = fmt.Fprintf(output, "FAIL  %s: upstream id %d not found\n", repo.Name, repo.UpstreamID)

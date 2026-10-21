@@ -696,14 +696,14 @@ continuity checks; it must never be used to reset or bypass those checks.
   each write/flush has a five-second bound. Heartbeat writes and the final
   response never overlap. Disconnect/write failure cancels only observation,
   never durable work, and joins the heartbeat writer before returning.
-- MCP exposes 47 tools: `status`, bounded named-step `logs`, exact-run
+- MCP exposes 49 tools: `status`, bounded named-step `logs`, exact-run
   `run_get`/`run_logs`, `run_retry`, audited `run_rerun` (#1098), audited `run_cancel`, `run_kvm_preflight`, `artifacts`/`artifact_get`, `wait`, `sync`, `promote`,
   `promotion_list`, `promote_status`, audited `promote_retry` (#1097), `publish_retry`, issue
   create/get/get_many/update/append/close/reopen/delete/list/lock,
   secret-access list/allow/revoke, admin-only `kubevirt_grant` and
   `kubevirt_revoke`, read-only `kubevirt_grant_get`, admin-only `size_grant`
   and `size_revoke`, read-only `size_grant_get` (#1021), admin-only
-  unscoped `admission_release` (#1099), `repo_list`, `repo_remove`, `run_list`,
+  unscoped `admission_release` (#1099), `repo_list`, `repo_remove`, `repo_archive`, `repo_unarchive`, `run_list`,
   `system_status`, admin-only `secretstore_plan` (#611),
   `secretstore_sync_receipt` (#712), `secretstore_verify`, and
   admin-only `promote_grant`, `promote_grant_revoke`, plus read-only
@@ -2385,3 +2385,26 @@ are inside the download phase. Race instrumentation, all
 required. Compilation uses fresh private caches and verified module downloads;
 this is not a network-free test. Direct execution retains the installer package
 working directory used by `go test`.
+
+### Repository archive (#1102)
+
+`repo_archive` and `repo_unarchive` require an unscoped admin. Archive preserves
+repository identity, runs, logs, artifacts, receipts, grants, issues and audit
+history. It refuses queued/running work, pending promotions/publications,
+unfinished cancellation cleanup and pending Git receive recovery. New runs and
+promotions are refused with `repository archived`; schedules skip archived
+repositories before reading Git. Git refreshes/probes fail closed, and the
+qualified cache is removed under receive/refresh locks. Retry archive if cache
+removal failed; the catalog stays archived. Unarchive allows lazy cache recreation.
+Dashboard repository lists default to active; the archived filter retains counts
+and historical links. `repo_list` includes archive metadata so operators can
+inspect the whole catalog. Upstream-level health probes remain shared by active
+repositories; an upstream used only by archived repositories is not contacted.
+
+Migration **v29** follows the admission-sequence migration v28 (#1092). It
+indexes immutable `repository.archive/unarchive` audit transitions, which are
+the archive state source; repository table shape and historical rows stay
+unchanged. Store transactions guard admission. Chart `archivedRepositories` contains
+fully qualified identities: releaseWIF entries for these names fail rendering.
+Keep that operator-owned list aligned with the live archive catalog; Helm cannot
+query the server database during offline rendering.

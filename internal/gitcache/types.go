@@ -151,6 +151,8 @@ type RepoQualification struct {
 }
 
 type Config struct {
+	// RepositoryGate refuses network/cache admission while a repository is archived.
+	RepositoryGate func(context.Context, string) error
 	Root           string
 	Upstream       func(repo string) (string, error)
 	GitBinary      string

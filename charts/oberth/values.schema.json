@@ -966,6 +966,15 @@
           "description": "Actual operator-approved KVM device supplemental GID; positive when recipes are configured, zero when disabled."
         }
       }
+    },
+    "archivedRepositories": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^[^/]+/[^/]+/[^/]+$"
+      },
+      "description": "Archived repository identities; releaseWIF entries for them are refused."
     }
   },
   "definitions": {

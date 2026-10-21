@@ -45,6 +45,9 @@ func (s *Store) RerunRun(ctx context.Context, request model.RunRerunRequest) (mo
 	if err != nil {
 		return model.RunRerunResult{}, fmt.Errorf("load rerun source run: %w", err)
 	}
+	if err := requireRepositoryActive(ctx, tx, source.RepoID); err != nil {
+		return model.RunRerunResult{}, err
+	}
 	switch {
 	case source.Status.Active():
 		return model.RunRerunResult{}, fmt.Errorf("%w: run %s is still %s; wait for it or cancel it first", ErrInvalidState, source.ID, source.Status)

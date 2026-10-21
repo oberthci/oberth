@@ -46,6 +46,9 @@ func (upstreams Upstreams) Remote(input string) (string, error) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), upstreams.timeout())
 	defer cancel()
+	if err := upstreams.RequireActive(ctx, input); err != nil {
+		return "", err
+	}
 	upstream, err := upstreams.selectUpstream(ctx, upstreamName, org, repositoryName)
 	if err != nil {
 		return "", err
@@ -334,4 +337,26 @@ func (upstreams Upstreams) QualifyInScope(input string, scope []string) (string,
 	default:
 		return "", refused
 	}
+}
+
+// RequireActive gates upstream contact without preventing identity resolution
+// needed to clean an archived repository's qualified cache directory.
+func (upstreams Upstreams) RequireActive(ctx context.Context, input string) error {
+	if upstreams.Catalog == nil {
+		return errors.New("app: upstream catalog is required")
+	}
+	repository, err := upstreams.Catalog.RepositoryByName(ctx, input)
+	if errors.Is(err, store.ErrNotFound) {
+		return nil
+	}
+	if errors.Is(err, store.ErrAmbiguous) {
+		return fmt.Errorf("app: %w: %w", err, gitcache.ErrUpstreamRefused)
+	}
+	if err != nil {
+		return err
+	}
+	if repository.ArchivedAt != nil {
+		return fmt.Errorf("%w: %w", gitcache.ErrUpstreamRefused, store.ErrRepositoryArchived)
+	}
+	return nil
 }
