@@ -102,6 +102,10 @@ spec:
     spec:
       serviceAccountName: {{ include "oberth.serviceAccountName" . }}
       automountServiceAccountToken: true
+      # SIGTERM drains HTTP/MCP (15s), lets scheduler observers finalize
+      # (30s) and then stops API background work (10s). The default leaves
+      # margin over that 55s worst case; --reuse-values drops new defaults.
+      terminationGracePeriodSeconds: {{ int64 (.Values.terminationGracePeriodSeconds | default 75) }}
       securityContext:
         runAsNonRoot: true
         runAsUser: 65534

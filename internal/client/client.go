@@ -217,7 +217,7 @@ func (client *Client) getOnce(ctx context.Context, path string, query map[string
 	if err != nil {
 		return classifyTransport(path, err), restartretry.Transient(err)
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	if response.StatusCode != http.StatusOK {
 		return statusError(path, response), restartretry.Status(response.StatusCode)
 	}

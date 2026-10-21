@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/oberthci/oberth/internal/service"
@@ -54,4 +55,32 @@ func mcpDeadlineError(limit, toolTimeout time.Duration, err error) error {
 		return fmt.Errorf("client deadline %s exceeded (tool timeout %s): %w", limit, toolTimeout, err)
 	}
 	return fmt.Errorf("client deadline %s exceeded: %w", limit, err)
+}
+
+// mcpRetryParams shrinks a reconnecting long poll's server-side timeout to
+// fit the remaining client budget, keeping a margin for the reply. Arguments
+// that already fit are sent unchanged.
+func mcpRetryParams(params any, toolTimeout, remaining time.Duration) any {
+	call, ok := params.(toolsCallParams)
+	if !ok || toolTimeout <= 0 || (call.Name != "wait" && call.Name != "promote_status") {
+		return params
+	}
+	seconds := int64((remaining - min(mcpDeadlineMargin, remaining/2)) / time.Second)
+	if seconds >= int64(toolTimeout/time.Second) {
+		return params
+	}
+	var arguments map[string]json.RawMessage
+	if len(call.Arguments) > 0 && json.Unmarshal(call.Arguments, &arguments) != nil {
+		return params
+	}
+	if arguments == nil {
+		arguments = map[string]json.RawMessage{}
+	}
+	arguments["timeout"] = json.RawMessage(strconv.FormatInt(max(seconds, 1), 10))
+	encoded, err := json.Marshal(arguments)
+	if err != nil {
+		return params
+	}
+	call.Arguments = encoded
+	return call
 }

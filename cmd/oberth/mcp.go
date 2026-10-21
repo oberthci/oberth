@@ -267,6 +267,9 @@ type mcpFlagResult struct {
 	argsFile   string        // --args-file: path to a JSON file, or "-" for stdin
 	output     string        // --output: artifact_get save-to-file destination
 	timeout    time.Duration // --timeout: explicit client deadline; zero derives it
+	// --reconnect-window: how long reads reconnect across a restart; zero
+	// uses restartretry.DefaultWindow.
+	reconnectWindow time.Duration
 }
 
 // parseMCPFlags parses the common MCP flags from arguments. wantPositional
@@ -276,6 +279,8 @@ func parseMCPFlags(name string, arguments []string, wantPositional int) (mcpFlag
 	var tokenFile string
 	var timeoutFlag string
 	var timeoutSet bool
+	var reconnectFlag string
+	var reconnectSet bool
 	var positional []string
 
 	for i := 0; i < len(arguments); i++ {
@@ -301,6 +306,11 @@ func parseMCPFlags(name string, arguments []string, wantPositional int) (mcpFlag
 			timeoutFlag, timeoutSet = arguments[i], true
 		case strings.HasPrefix(arg, "--timeout="):
 			timeoutFlag, timeoutSet = strings.TrimPrefix(arg, "--timeout="), true
+		case arg == "--reconnect-window" && i+1 < len(arguments):
+			i++
+			reconnectFlag, reconnectSet = arguments[i], true
+		case strings.HasPrefix(arg, "--reconnect-window="):
+			reconnectFlag, reconnectSet = strings.TrimPrefix(arg, "--reconnect-window="), true
 		case arg == "--args-file" && i+1 < len(arguments):
 			i++
 			result.argsFile = arguments[i]
@@ -312,7 +322,7 @@ func parseMCPFlags(name string, arguments []string, wantPositional int) (mcpFlag
 		case strings.HasPrefix(arg, "--output="):
 			result.output = strings.TrimPrefix(arg, "--output=")
 		case arg == "--help" || arg == "-h":
-			return result, fmt.Errorf("%w: %s [--url <url>] [--token-file <path>] [--ca-file <path>] [--timeout <duration>]", errUsage, name)
+			return result, fmt.Errorf("%w: %s [--url <url>] [--token-file <path>] [--ca-file <path>] [--timeout <duration>] [--reconnect-window <duration>]", errUsage, name)
 		case strings.HasPrefix(arg, "-"):
 			return result, fmt.Errorf("%w: unknown flag %q", errUsage, arg)
 		default:
@@ -330,6 +340,13 @@ func parseMCPFlags(name string, arguments []string, wantPositional int) (mcpFlag
 			return result, fmt.Errorf("%w: --timeout requires a positive duration (e.g. 90s or 11m)", errUsage)
 		}
 		result.timeout = parsed
+	}
+	if reconnectSet {
+		parsed, err := time.ParseDuration(reconnectFlag)
+		if err != nil || parsed <= 0 {
+			return result, fmt.Errorf("%w: --reconnect-window requires a positive duration (e.g. 120s or 5m)", errUsage)
+		}
+		result.reconnectWindow = parsed
 	}
 
 	// Resolve URL.
@@ -407,12 +424,15 @@ func mcpRequest(ctx context.Context, cfg mcpFlagResult, method string, params an
 	requestClient.Timeout = 0
 
 	safe := mcpReadRequest(method, params)
-	var budget restartretry.Budget
+	budget := restartretry.Budget{Window: cfg.reconnectWindow}
 	for {
 		response, err, retry := mcpRequestOnce(ctx, cfg, body, &requestClient)
 		if err == nil && response.Error != nil && response.Error.Code == api.RestartingRPCCode {
 			if safe {
 				if budget.Wait(ctx) {
+					if body, err = mcpRetryBody(ctx, request, toolTimeout); err != nil {
+						return nil, err
+					}
 					continue
 				}
 				if ctx.Err() != nil {
@@ -422,6 +442,9 @@ func mcpRequest(ctx context.Context, cfg mcpFlagResult, method string, params an
 		}
 		if err != nil && safe && retry {
 			if budget.Wait(ctx) {
+				if body, err = mcpRetryBody(ctx, request, toolTimeout); err != nil {
+					return nil, err
+				}
 				continue
 			}
 			if ctx.Err() != nil {
@@ -430,6 +453,33 @@ func mcpRequest(ctx context.Context, cfg mcpFlagResult, method string, params an
 		}
 		return response, err
 	}
+}
+
+// mcpRetryBody re-encodes a reconnect. A long poll's server-side timeout is
+// shrunk to the client deadline left, so the server still answers "still
+// running" before the client gives up (#1118); everything else is unchanged.
+func mcpRetryBody(ctx context.Context, request jsonRPCRequest, toolTimeout time.Duration) ([]byte, error) {
+	if deadline, ok := ctx.Deadline(); ok {
+		request.Params = mcpRetryParams(request.Params, toolTimeout, time.Until(deadline))
+	}
+	body, err := json.Marshal(request)
+	if err != nil {
+		return nil, fmt.Errorf("marshal request: %w", err)
+	}
+	return body, nil
+}
+
+// mcpReconnectableTools are pure reads: each is absent from the server's
+// mutation gate and changes no durable state, so a lost reply can be asked
+// again. Unknown tools fail closed.
+var mcpReconnectableTools = map[string]bool{
+	"wait": true, "status": true, "logs": true, "system_status": true,
+	"run_get": true, "run_logs": true, "run_list": true, "run_kvm_preflight": true,
+	"artifacts": true, "artifact_get": true,
+	"promote_status": true, "promotion_list": true, "promote_grant_list": true,
+	"repo_list": true, "issue_get": true, "issue_get_many": true, "issue_list": true,
+	"access_list": true, "kubevirt_grant_get": true, "kubevirt_grant_list": true, "size_grant_get": true,
+	"uplink_list": true, "audit_list": true, "schedule_list": true,
 }
 
 // Unknown tools fail closed: only these observation operations may reconnect.
@@ -444,11 +494,7 @@ func mcpReadRequest(method string, params any) bool {
 	if !ok {
 		return false
 	}
-	switch call.Name {
-	case "wait", "status", "logs", "run_get", "run_logs", "promote_status", "promotion_list", "system_status", "artifact_get":
-		return true
-	}
-	return false
+	return mcpReconnectableTools[call.Name]
 }
 
 func mcpRequestOnce(ctx context.Context, cfg mcpFlagResult, body []byte, requestClient *http.Client) (*jsonRPCResponse, error, bool) {
@@ -463,7 +509,7 @@ func mcpRequestOnce(ctx context.Context, cfg mcpFlagResult, body []byte, request
 	ua := "oberth-cli/" + cfg.Version
 	httpReq.Header.Set("User-Agent", ua)
 
-	resp, err := requestClient.Do(httpReq)
+	resp, err := requestClient.Do(httpReq) //nolint:gosec // G704: operator-configured MCP endpoint (--url or OBERTH_MCP_URL).
 	if err != nil {
 		return nil, classifyMCPTransport(err), restartretry.Transient(err)
 	}

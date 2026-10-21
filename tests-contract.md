@@ -267,6 +267,13 @@ at the HTTP drain deadline. Scheduler readiness becomes true only after recovery
 and false on exit; readiness snapshot tests forbid per-request probes and accept
 neither stale nor failed samples. MCP and JSON client tests exercise 503,
 connection loss and truncated bodies while preserving exact targets and original
-deadlines; mutation and unknown-tool requests stay single-attempt. Retry budget
-tests cover cancellation and expiry. Idle-wait tests observe queued and running
+deadlines; mutation and unknown-tool requests stay single-attempt.
+`TestMCPReconnectAllowlistIsReadOnly` cross-checks every reconnectable tool
+against the server's tool list and audit mutation gate, and
+`TestMCPReconnectShrinksLongPollTimeout` checks that a reconnected `wait`
+asks the server for less than the remaining client deadline. Retry budget
+tests cover cancellation, expiry, the 120-second default and configured
+windows, and dial timeouts as transient. `hack/test-chart.sh` checks the
+75-second termination grace default, also under reused values, and rejects
+one shorter than the drain. Idle-wait tests observe queued and running
 work, fail closed, and bind the upgrade check to the selected Deployment.

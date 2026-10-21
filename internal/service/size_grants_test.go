@@ -46,7 +46,7 @@ func TestSizeGrantToolRequiresAdminAndReportsTheMaximum(t *testing.T) {
 		t.Fatal(err)
 	}
 	lookup("revoked", periapsis.L)
-	if !mutatingTool("size_grant") || !mutatingTool("size_revoke") || mutatingTool("size_grant_get") {
+	if !MutatingTool("size_grant") || !MutatingTool("size_revoke") || MutatingTool("size_grant_get") {
 		t.Fatal("size grant mutations are not behind the mutation gate")
 	}
 }

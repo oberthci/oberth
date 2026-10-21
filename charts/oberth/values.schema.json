@@ -43,6 +43,11 @@
       "minimum": 1,
       "maximum": 64
     },
+    "terminationGracePeriodSeconds": {
+      "type": "integer",
+      "minimum": 60,
+      "maximum": 3600
+    },
     "admission": {
       "type": "object",
       "additionalProperties": false,

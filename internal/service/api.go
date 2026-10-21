@@ -283,7 +283,7 @@ func (service *API) CallTool(ctx context.Context, actor api.Actor, name string, 
 }
 
 func (service *API) callTool(ctx context.Context, actor api.Actor, name string, raw json.RawMessage) (any, error) {
-	if mutatingTool(name) {
+	if MutatingTool(name) {
 		if err := service.requireMutation(ctx); err != nil {
 			return nil, err
 		}
@@ -2464,7 +2464,9 @@ func wireIssueLock(lock model.IssueLock) api.IssueLockResponse {
 	}
 }
 
-func mutatingTool(name string) bool {
+// MutatingTool reports the MCP tools behind the audit mutation gate. Clients
+// use it to prove their automatic reconnect allowlist holds no mutation.
+func MutatingTool(name string) bool {
 	switch name {
 	case "uplink_revoke", "uplink_rotate", "access_dismiss":
 		return true

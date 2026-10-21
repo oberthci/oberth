@@ -696,6 +696,18 @@ continuity checks; it must never be used to reset or bypass those checks.
   each write/flush has a five-second bound. Heartbeat writes and the final
   response never overlap. Disconnect/write failure cancels only observation,
   never durable work, and joins the heartbeat writer before returning.
+- During a server restart (#1172) the draining server answers new HTTP/MCP
+  requests with HTTP 503 and `Retry-After: 1`, and ends in-flight `wait` and
+  `promote_status` long polls with JSON-RPC error `-32001` (`server
+  restarting`). Neither is a run or promotion result. Agents calling `/mcp`
+  directly may re-issue only idempotent reads (`wait`, `promote_status`,
+  `status`, `logs`, `run_get`, `run_logs`, `issue_get` and the other list/get
+  tools) with the same arguments, honouring `Retry-After` and their own
+  deadline; `oberth mcp call` does this itself (docs/restart-handover.md).
+  Mutations (`promote`, `sync`, `run_cancel`, `run_retry`, `issue_create`, …)
+  must never be re-issued on 503, `-32001` or a lost reply: the request may
+  already have committed. Inspect durable state instead (`run_get`,
+  `promote_status`, `issue_get`, `promotion_list`) and act on what it records.
 - MCP exposes 62 tools: `status`, bounded named-step `logs`, exact-run
   `run_get`/`run_logs`, `run_retry`, audited `run_rerun` (#1098), audited `run_cancel`/`run_purge`, `run_kvm_preflight`, `artifacts`/`artifact_get`, `wait`, `sync`, `promote`,
   `promotion_list`, `promote_status`, audited `promote_retry` (#1097), `publish_retry`, issue

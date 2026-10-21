@@ -337,6 +337,15 @@ if render --set secretstore.enabled=false >/dev/null 2>&1; then exit 1; fi
 if render --set replicaCount=2 >/dev/null 2>&1; then
   exit 1
 fi
+# The grace period covers the 55s worst-case drain (HTTP 15s, scheduler
+# finalization 30s, API background shutdown 10s), also under --reuse-values
+# where the new chart default is absent.
+grep -q '^      terminationGracePeriodSeconds: 75$' "$manifest"
+render --set terminationGracePeriodSeconds=null | grep -q '^      terminationGracePeriodSeconds: 75$'
+render --set terminationGracePeriodSeconds=120 | grep -q '^      terminationGracePeriodSeconds: 120$'
+if render --set terminationGracePeriodSeconds=30 >/dev/null 2>&1; then
+  exit 1
+fi
 if render --set cache.ciRoot=/var/cache/oberth --set cache.releaseRoot=/var/cache/oberth/release >/dev/null 2>&1; then
   exit 1
 fi

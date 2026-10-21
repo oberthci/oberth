@@ -50,7 +50,7 @@ func waitIdle(ctx context.Context, client *http.Client, target string, interval 
 		if err != nil {
 			return fmt.Errorf("read live daemon queue: %w", err)
 		}
-		response.Body.Close()
+		_ = response.Body.Close()
 		switch response.StatusCode {
 		case http.StatusNoContent:
 			return nil
