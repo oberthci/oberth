@@ -216,3 +216,33 @@ func TestMCPBothLogRoutesBoundActualFilteredTailLines(t *testing.T) {
 		}
 	}
 }
+
+func TestRunCursorHTTPErrorExplainsHowToResume(t *testing.T) {
+	ctx := t.Context()
+	database, err := store.Open(ctx, filepath.Join(t.TempDir(), "cursor.sqlite"), store.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := database.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	control, err := service.NewAPI(service.APIConfig{Runs: database, History: database, Repositories: database})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server, err := api.New(toolingAuthenticator{}, control, control, "test", api.WithErrorClassifier(classifyViewError))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, cursor := range []string{"123", strings.Repeat("a", 32)} {
+		request := httptest.NewRequest(http.MethodGet, "/api/runs?before="+cursor, nil)
+		request.Header.Set("Authorization", "Bearer token")
+		response := httptest.NewRecorder()
+		server.Handler().ServeHTTP(response, request)
+		if response.Code != http.StatusNotFound || !strings.Contains(response.Body.String(), "cursor run no longer retained; restart from the first page") || strings.Contains(response.Body.String(), cursor) {
+			t.Fatalf("cursor %s: %d %s", cursor, response.Code, response.Body)
+		}
+	}
+}

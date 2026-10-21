@@ -945,15 +945,17 @@ continuity checks; it must never be used to reset or bypass those checks.
   A terminal run that was never admitted sorts by `finished_at`. The dated
   portion pages by that fixed (time, ID) key, using the last run's sequence
   or ID as the external cursor; an admission between page loads cannot move
-  an already-seen run onto the next page. The unfiltered, unscoped queue has
-  one dense position numbering, and each queued run carries its scheduling
-  reason. Filtered lists keep only a global gate position where available;
+  an already-seen run onto the next page. The whole queue, including claimed
+  but unadmitted runs, has one numbering computed before repository/ref filters.
+  Each queued run carries its scheduling reason; filtered lists keep global positions;
   scoped uplinks see no global position (#073). `started_at` is recorded when
   weighted admission is granted, including before a trusted KVM preflight;
   a VM capacity refusal parks the run and clears that time until reacquisition.
+  Elapsed time includes preflight and excludes time parked for VM capacity.
   Workflow submission preserves the admission time. `view=history` retains its
   terminal-only sequence paging; `view=active` remains an unpaged, bounded
-  compatibility view. Repository/ref filters and uplink scope apply to both.
+  deprecated compatibility view. Repository/ref filters and uplink scope apply
+  to both.
   Durable `Status` values are unchanged and `RunStatus.Valid` still refuses
   the read-only `waiting` projection.
 
@@ -961,15 +963,26 @@ continuity checks; it must never be used to reset or bypass those checks.
   | --- | --- | --- |
   | queued or claimed before admission | `queued` | scheduling observation |
   | admitted, including trusted preflight | `running` | empty (phase is `preflight` while its VM executes) |
-  | passed CI / published release | `passed` / `delivered` | empty |
+  | passed CI / published release | `passed` | empty |
   | failed step or infrastructure | `failed` | empty; error and failed step remain separately available |
-  | superseded by a different SHA | `cancelled` | `superseded by <short SHA>`; successor run remains linked |
-  | restart re-fire at the same SHA | `cancelled` | `server restart, re-queued as <run>` |
+  | superseded (`reason='superseded by newer run'`) | `cancelled` | `superseded by <short SHA>`; successor run remains linked |
+  | restart re-fire (`reason='re-queued after restart'`) | `cancelled` | `server restart, re-queued as <run12>` |
   | explicit cancel | `cancelled` | `cancelled by <actor>: <reason>` |
   | restart requiring an operator retry | `cancelled` | `server restart, retry needed` |
 
   The display pair is additive on default API, MCP and CLI responses; retry
-  and rerun eligibility still uses the durable cause.
+  and rerun eligibility still uses the durable cause. The `status`/`wait`
+  tool's `status: "delivered"` remains the legacy alias of `passed` for every
+  passed run, including releases; `display_status` is always `passed`.
+  An interrupted result neither opens nor resolves a CI-red issue.
+
+  `/api/runs/counts` retains `Total` and `ByRepo`, and adds `Queued`, `Running`,
+  `QueuedByRepo` and `RunningByRepo`. Queued includes claimed/unadmitted runs;
+  running means admitted and non-terminal. Counts respect uplink scope. The
+  dashboard header uses these counts; its dated-page footer uses `Total - Queued`
+  (or the corresponding per-repository counts). Status chips and the independent
+  release toggle compose, so failed releases can be selected. A pruned cursor
+  returns 404 with an instruction to restart from the first page.
 - Execution scheduling observation has a two-second request budget, one exact
   Workflow read bound to run ID and effective tested SHA, and one namespaced
   Pod list (limit 16) whose entries must have the exact Workflow controller UID.

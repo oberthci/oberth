@@ -44,7 +44,7 @@ to exactly that file (mode 0600; a different token already there is kept as
 ## Commands
 
 ```
-oberth runs [--repo NAME] [--ref REF] [--limit N]
+oberth runs [--repo NAME] [--ref REF] [--limit N] [--before CURSOR] [--all]
 oberth run <run-id>
 oberth run retry <run-id> [--json]
 oberth run rerun <run-id> [--reason TEXT] [--force] [--json]
@@ -99,7 +99,19 @@ admitted and terminal runs by admission time, newest first. A trusted
 preflight is `running`. Supersession, explicit cancellation and restart all
 display as `cancelled`, with a reason naming the newer SHA, actor or retry
 action. `--json` keeps the underlying `Status` field and adds
-`display_status` and `display_reason`.
+`display_status` and `display_reason`. Successful releases display `passed`;
+`release` is a separate kind. The `status`/`wait` MCP tool's legacy
+`status: "delivered"` remains an alias of `passed`, alongside
+`display_status: "passed"`.
+
+The limit counts admitted/terminal rows; queued rows are additional on page 1.
+`--all` follows the server cursor through dated pages. If a cursor run was
+pruned, restart from the first page. Queue positions are global even when a
+repository or ref filter is used, and withheld for scoped uplinks. The deprecated
+`oberth runs --active` compatibility view stays unpaged and uses the same server
+queue positions. Elapsed time begins at the weighted grant, includes preflight,
+and resets after a VM-capacity park. Interrupted results neither open nor
+resolve CI-red issues.
 
 `oberth run cancel` calls the `run_cancel` MCP tool with the same uplink
 token. It cancels one queued, waiting or running run: the run becomes

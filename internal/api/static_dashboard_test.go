@@ -196,13 +196,13 @@ func TestRunsPageIsOneFlatFilteredList(t *testing.T) {
 		}
 		return source[from : from+to]
 	}
-	for _, want := range []string{"`/api/runs?limit=${runPageSize}`", `new URLSearchParams({ limit: String(runPageSize) })`, `api("/api/runs?view=active")`} {
+	for _, want := range []string{"`/api/runs?limit=${runPageSize}`", `new URLSearchParams({ limit: String(runPageSize) })`, `api("/api/runs/counts")`} {
 		if !strings.Contains(source, want) {
 			t.Fatalf("app.js run loading is missing %s", want)
 		}
 	}
 	render := section("async function renderRuns(seq)", "\n/* ---------- run detail")
-	for _, want := range []string{"loadActiveRuns()", "setAuto(listPollMs)", "runsTable(visible)", "runFilters.map"} {
+	for _, want := range []string{"loadRunCounts()", "setAuto(listPollMs)", "runsTable(visible)", "runFilters.map"} {
 		if !strings.Contains(render, want) {
 			t.Fatalf("renderRuns is missing %s", want)
 		}
@@ -244,7 +244,7 @@ func TestDashboardUsesTotalRangesAndIssueFacets(t *testing.T) {
 	source := string(staticAssets["app.js"].body)
 	for _, want := range []string{
 		"function pageRange(start, length, total)",
-		"pageRange(state.runStart, source.length, counts.get(state.repo) || 0)",
+		"pageRange(state.runStart, dated.length, datedTotal)",
 		"state.runStart += state.runSourceCount",
 		"pageRange(issueStart, issues.length, total)",
 		"const facets = page.counts || {}",
@@ -258,5 +258,36 @@ func TestDashboardUsesTotalRangesAndIssueFacets(t *testing.T) {
 	}
 	if strings.Contains(source, "${issues.length} shown") || strings.Contains(source, "${visible.length} shown") {
 		t.Fatal("dashboard still uses page-only shown counts")
+	}
+}
+
+func TestRunsFiltersCountsAndCancelledSuccessors(t *testing.T) {
+	t.Parallel()
+	source := string(staticAssets["app.js"].body)
+	for _, want := range []string{
+		`const runFilters = ["all", "queued", "running", "passed", "failed", "cancelled"]`,
+		`const statusOK = state.filter === "all" || displayRunStatus(run) === state.filter`,
+		`return statusOK && (!state.releaseOnly || run.Release)`,
+		`data-kind-filter="release"`, `state.releaseOnly = !state.releaseOnly`,
+		`localStorage.setItem("oberth-kind", state.releaseOnly ? "release" : "all")`,
+		`if (saved === "waiting") return "queued"`,
+		`if (saved === "interrupted" || saved === "superseded") return "cancelled"`,
+		`localStorage.getItem("oberth-filter") === "release"`,
+		`state.runCounts?.Running`, `state.runCounts?.RunningByRepo?.[selectedRepo?.ID]`,
+		`state.runCounts?.Queued`, `state.runCounts?.QueuedByRepo?.[selectedRepo?.ID]`,
+		`const datedTotal = Math.max(0, (counts.get(state.repo) || 0) - queued)`,
+		`state.runSourceCount = dated.length`,
+		`function shortSuccessor(s) { return String(s || "").slice(0, 12); }`,
+		`view successor ${esc(shortSuccessor(run.SupersededBy))}`,
+		`status === "cancelled" ?`, `esc(runMessage(run))`, `server restart, retry needed`, `retry-warning`,
+	} {
+		if !strings.Contains(source, want) {
+			t.Fatalf("dashboard missing %q", want)
+		}
+	}
+	for _, unwanted := range []string{`view=active`, `loadActiveRuns`, `SUPERSEDED`, `return "delivered"`, `[pending] running`, `[pending] queued`} {
+		if strings.Contains(source, unwanted) {
+			t.Fatalf("dashboard retains %q", unwanted)
+		}
 	}
 }

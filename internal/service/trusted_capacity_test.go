@@ -104,11 +104,13 @@ func TestTrustedCapacityRetryBoundaries(t *testing.T) {
 				if err != nil || parked.StartedAt != nil || displayRunStatus(parked) != "queued" {
 					t.Fatalf("parked run remains visible as admitted: %+v, %v", parked, err)
 				}
-				listed, err := f.api(t).Runs(ctx, api.Actor{Identity: "agent"}, api.RunFilter{})
+				reader := f.api(t)
+				reader.admission = f.scheduler
+				listed, err := reader.Runs(ctx, api.Actor{Identity: "agent"}, api.RunFilter{})
 				if err != nil {
 					t.Fatal(err)
 				}
-				if entries := listed.([]model.Run); len(entries) != 1 || entries[0].DisplayStatus != "queued" || entries[0].StartedAt != nil {
+				if entries := listed.([]model.Run); len(entries) != 1 || entries[0].DisplayStatus != "queued" || entries[0].StartedAt != nil || !strings.Contains(entries[0].DisplayReason, "trusted VM capacity") {
 					t.Fatalf("parked run list presentation = %+v", entries)
 				}
 				if used, runs := gateUsage(f.scheduler.admission); used != 0 || runs != 0 {

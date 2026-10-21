@@ -118,7 +118,7 @@ func TestActiveRunsOrderAndWaitReasons(t *testing.T) {
 		!strings.Contains(headEntry.Scheduling.Message, "Need 3 weight; 2/4 used") {
 		t.Fatalf("queue head lost its weight: %#v %#v", headEntry.Scheduling, admission)
 	}
-	if queuedEntry.ID != queued.ID || queuedEntry.Scheduling == nil || queuedEntry.Scheduling.State != "queued" || queuedEntry.Scheduling.QueuePosition != 1 {
+	if queuedEntry.ID != queued.ID || queuedEntry.Scheduling == nil || queuedEntry.Scheduling.State != "queued" || queuedEntry.Scheduling.QueuePosition != 4 {
 		t.Fatalf("queued run = %#v", queuedEntry.Scheduling)
 	}
 
@@ -228,14 +228,14 @@ func TestScopedDefaultRunsHideGlobalQueuePositions(t *testing.T) {
 		t.Fatal("no scoped runs")
 	}
 	for _, run := range runs {
-		if run.DisplayStatus == "queued" && (run.Scheduling == nil || run.Scheduling.QueuePosition != 0 || run.Scheduling.Admission != nil && run.Scheduling.Admission.Position != 0) {
+		if run.QueuePosition != 0 || run.DisplayStatus == "queued" && (run.Scheduling == nil || run.Scheduling.QueuePosition != 0 || run.Scheduling.Admission != nil && (run.Scheduling.Admission.Position != 0 || run.Scheduling.Admission.Used != 0 || run.Scheduling.Admission.Capacity != 0)) {
 			t.Fatalf("scoped queue position leaked: %+v", run)
 		}
 	}
 	unscoped := mustCall(t, fixture, unscopedActor, "run_list", map[string]any{"repo": fixture.visible.Name}).(api.RunListResponse).Runs.([]model.Run)
 	for _, run := range unscoped {
-		if run.DisplayStatus == "queued" && (run.Scheduling == nil || run.Scheduling.QueuePosition != 0) {
-			t.Fatalf("repository filter invented a global queue position: %+v", run)
+		if run.DisplayStatus == "queued" && (run.Scheduling == nil || run.Scheduling.QueuePosition != run.QueuePosition || run.QueuePosition == 0) {
+			t.Fatalf("repository filter lost its global queue position: %+v", run)
 		}
 	}
 }

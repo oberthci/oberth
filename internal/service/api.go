@@ -798,6 +798,8 @@ func (service *API) Runs(ctx context.Context, actor api.Actor, filter api.RunFil
 				storeFilter.Before, storeFilter.BeforeRun = 0, cursor.ID
 			}
 		case service.scope == nil && filter.Before > 0 && (errors.Is(err, store.ErrNotFound) || errors.Is(err, ErrInvalidInput)):
+		case filter.View != api.RunViewHistory && errors.Is(err, store.ErrNotFound):
+			return nil, store.ErrRunCursorNotFound
 		default:
 			return nil, err
 		}
@@ -817,28 +819,12 @@ func (service *API) Runs(ctx context.Context, actor api.Actor, filter api.RunFil
 	if err != nil {
 		return nil, err
 	}
-	renumberQueue := strings.TrimSpace(filter.Repository) == "" && strings.TrimSpace(filter.Ref) == "" && service.scope == nil
-	queuePosition := int64(0)
 	for i := range runs {
+		if service.scope != nil {
+			runs[i].QueuePosition = 0
+		}
 		if filter.View != api.RunViewHistory && runs[i].DisplayStatus == "queued" {
-			runs[i].Scheduling = service.scheduling(ctx, runs[i], nil)
-			if runs[i].Scheduling == nil {
-				runs[i].Scheduling = &model.RunScheduling{State: "queued", Message: "Awaiting weighted admission."}
-			}
-			if renumberQueue {
-				queuePosition++
-				runs[i].Scheduling.QueuePosition = queuePosition
-				if runs[i].Scheduling.Admission != nil {
-					runs[i].Scheduling.Admission.Position = int(queuePosition)
-				}
-			} else {
-				// A filtered page is not the global queue. Keep only the gate's
-				// unscoped position, when it has one; scoped callers see none.
-				runs[i].Scheduling.QueuePosition = 0
-				if service.scope == nil && runs[i].Scheduling.Admission != nil {
-					runs[i].Scheduling.QueuePosition = int64(runs[i].Scheduling.Admission.Position)
-				}
-			}
+			runs[i].Scheduling = service.observeScheduling(ctx, runs[i], nil, false)
 			runs[i].DisplayReason = runs[i].Scheduling.Message
 		}
 	}
@@ -1327,8 +1313,6 @@ func displayRunStatus(run model.Run) string {
 		return string(model.RunQueued)
 	case run.Status == model.RunInterrupted:
 		return model.PhaseCancelled
-	case run.Status == model.RunPassed && run.Release:
-		return "delivered"
 	default:
 		return string(run.Status)
 	}
@@ -1345,16 +1329,16 @@ func runDisplayReason(run model.Run) string {
 	if run.Status != model.RunInterrupted {
 		return ""
 	}
-	if run.SupersededBy != "" {
-		return "superseded by " + shortRunID(run.SupersededBy)
-	}
-	if run.Phase == model.PhaseCancelled {
+	switch {
+	case run.Phase == model.PhaseCancelled:
 		return run.Reason
-	}
-	if strings.Contains(strings.ToLower(run.Reason), "restart") || strings.Contains(strings.ToLower(run.Reason), "restarted") {
+	case run.SupersededBy != "" && run.Reason == "re-queued after restart":
+		return "server restart, re-queued as " + shortRunID(run.SupersededBy)
+	case run.SupersededBy != "" && run.Reason == "superseded by newer run":
+		return "superseded by newer run"
+	default:
 		return "server restart, retry needed"
 	}
-	return run.Reason
 }
 
 func (service *API) presentationRun(ctx context.Context, run model.Run) model.Run {
@@ -1408,11 +1392,15 @@ func (service *API) presentationRunWithSuccessor(ctx context.Context, run model.
 	}
 	successor, ok := successors[run.SupersededBy]
 	if !ok {
+		if service.scope != nil && run.SupersededBy != "" {
+			visible.SupersededBy = ""
+			if run.Reason == "re-queued after restart" {
+				visible.DisplayReason = "server restart, re-queued"
+			}
+		}
 		return visible
 	}
-	if successor.SHA == run.SHA && successor.Ref == run.Ref {
-		visible.DisplayReason = "server restart, re-queued as " + shortRunID(successor.ID)
-	} else {
+	if run.Status == model.RunInterrupted && run.Phase != model.PhaseCancelled && run.Reason == "superseded by newer run" {
 		sha := successor.SHA
 		if len(sha) > 8 {
 			sha = sha[:8]

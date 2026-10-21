@@ -27,6 +27,11 @@ type queuedRunObserver interface {
 }
 
 func (service *API) scheduling(ctx context.Context, run model.Run, steps []model.StepResult) *model.RunScheduling {
+	return service.observeScheduling(ctx, run, steps, true)
+}
+
+// List rows already carry a position computed over the complete durable queue.
+func (service *API) observeScheduling(ctx context.Context, run model.Run, steps []model.StepResult, lookupPosition bool) *model.RunScheduling {
 	if !run.Status.Active() {
 		return nil
 	}
@@ -40,14 +45,19 @@ func (service *API) scheduling(ctx context.Context, run model.Run, steps []model
 	defer func() { result.AgeSeconds = int64(time.Since(observed) / time.Second) }()
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
+	if run.StartedAt == nil && service.scope == nil {
+		result.QueuePosition = run.QueuePosition
+		if lookupPosition {
+			if queue, ok := service.runs.(queuedRunObserver); ok {
+				if position, err := queue.QueuedRunPosition(ctx, run.ID); err == nil {
+					result.QueuePosition = position
+				}
+			}
+		}
+	}
 	if run.Status == model.RunQueued {
 		result.State = "queued"
 		result.Message = "Awaiting scheduler claim; queue position is accepted order, not an execution estimate."
-		if queue, ok := service.runs.(queuedRunObserver); ok {
-			if position, err := queue.QueuedRunPosition(ctx, run.ID); err == nil {
-				result.QueuePosition = position
-			}
-		}
 		if observer, ok := service.admission.(admissionBlockerObserver); ok {
 			if blocker := service.visibleBlocker(observer.AdmissionBlocker()); blocker != nil {
 				result.Message += " " + blockedBehindMessage(blocker)
@@ -57,6 +67,11 @@ func (service *API) scheduling(ctx context.Context, run model.Run, steps []model
 	}
 	if service.admission != nil {
 		result.Admission = service.admission.AdmissionSnapshot(run.QueueSequence)
+		if result.Admission != nil {
+			admission := *result.Admission
+			admission.Position = int(result.QueuePosition)
+			result.Admission = &admission
+		}
 		if result.Admission != nil && service.scope != nil {
 			// The position, the capacity and its use, and the disk floor
 			// describe every run, in or out of a scoped actor's scope; a full
@@ -141,7 +156,7 @@ func (service *API) scheduling(ctx context.Context, run model.Run, steps []model
 }
 
 func (service *API) submittedKVMPreflight(ctx context.Context, run model.Run) bool {
-	if service.kvmPreflights == nil || run.JobName != "" {
+	if service.kvmPreflights == nil || run.JobName != "" || run.Status != model.RunRunning {
 		return false
 	}
 	preflight, err := service.kvmPreflights.KVMPreflight(ctx, run.ID)

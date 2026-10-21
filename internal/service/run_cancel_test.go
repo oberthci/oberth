@@ -158,7 +158,12 @@ func TestRunCancelWaitingRunReleasesItsAdmissionReservation(t *testing.T) {
 	if snapshot := fixture.scheduler.AdmissionSnapshot(head.QueueSequence); snapshot != nil {
 		t.Fatalf("cancelled head still holds a reservation: %#v", snapshot)
 	}
-	assertCancelled(t, fixture.awaitTerminal(t, head.ID), cancelAdmin.Identity, "wrong size")
+	cancelled := fixture.awaitTerminal(t, head.ID)
+	assertCancelled(t, cancelled, cancelAdmin.Identity, "wrong size")
+	shown := fixture.control.presentationRun(t.Context(), cancelled)
+	if shown.StartedAt != nil || shown.DisplayStatus != "cancelled" || shown.DisplayReason != "cancelled by "+cancelAdmin.Identity+": wrong size" {
+		t.Fatalf("cancel during admission: %+v", shown)
+	}
 	fixture.awaitNoPendingCancellations(t)
 	if fixture.engine.wasCreated(head.ID) {
 		t.Fatal("a cancelled waiting run created its Workflow")

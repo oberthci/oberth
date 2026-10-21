@@ -21,6 +21,9 @@ phase, job_name, tested_sha, base_sha, failed_burn, failed_step, error,
 status, reason, superseded_by, queued_at, started_at, finished_at, created_at, updated_at,
 concurrency_group`
 
+// ErrRunCursorNotFound lets clients restart paging without exposing a missing run ID.
+var ErrRunCursorNotFound = fmt.Errorf("%w: cursor run no longer retained; restart from the first page", ErrNotFound)
+
 // RunsByIDs resolves successor runs for list presentation in one query.
 func (s *Store) RunsByIDs(ctx context.Context, ids []string) (map[string]model.Run, error) {
 	result := make(map[string]model.Run, len(ids))
@@ -170,6 +173,9 @@ WHERE repo_id = ? AND ref_kind = 'branch' AND ref = ? AND id != ?
 	result, err := s.enqueueRunTx(ctx, tx, spec, id, now)
 	if err != nil {
 		return model.Run{}, fmt.Errorf("requeue stranded run %s: %w", run.ID, err)
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE runs SET reason = 're-queued after restart' WHERE id = ? AND superseded_by = ?`, run.ID, result.ID); err != nil {
+		return model.Run{}, fmt.Errorf("record restart requeue reason: %w", err)
 	}
 	return result.Run, nil
 }
@@ -960,9 +966,12 @@ func (s *Store) listFlatRuns(ctx context.Context, filter model.RunListFilter) ([
 		queued, err := func() ([]model.Run, error) {
 			args := append([]any{filter.RepoID, filter.RepoID, filter.Ref, filter.Ref}, restrictionArgs...)
 			rows, err := s.db.QueryContext(ctx, `
-SELECT `+runColumns+` FROM runs
-WHERE (status = 'queued' OR (status = 'running' AND started_at IS NULL))
-  AND (? = 0 OR repo_id = ?) AND (? = '' OR ref = ?)`+restriction+`
+WITH queue AS (
+  SELECT *, ROW_NUMBER() OVER (ORDER BY queue_sequence) AS queue_position FROM runs
+  WHERE status = 'queued' OR (status = 'running' AND started_at IS NULL)
+)
+SELECT `+runColumns+`, queue_position FROM queue
+WHERE (? = 0 OR repo_id = ?) AND (? = '' OR ref = ?)`+restriction+`
 ORDER BY queue_sequence LIMIT ?`, append(args, MaxActiveRuns)...) // #nosec G202 -- fixed columns and parameterized restriction.
 			if err != nil {
 				return nil, fmt.Errorf("list queued runs: %w", err)
@@ -970,7 +979,9 @@ ORDER BY queue_sequence LIMIT ?`, append(args, MaxActiveRuns)...) // #nosec G202
 			defer func() { _ = rows.Close() }()
 			queued := make([]model.Run, 0)
 			for rows.Next() {
-				value, scanErr := scanRun(rows)
+				var position int64
+				value, scanErr := scanRun(rows, &position)
+				value.QueuePosition = position
 				if scanErr != nil {
 					return nil, fmt.Errorf("scan queued run: %w", scanErr)
 				}
@@ -997,7 +1008,7 @@ ORDER BY queue_sequence LIMIT ?`, append(args, MaxActiveRuns)...) // #nosec G202
 			cursor, err = scanRun(s.db.QueryRowContext(ctx, `SELECT `+runColumns+` FROM runs WHERE queue_sequence = ?`, filter.Before))
 		}
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, fmt.Errorf("%w: run list cursor", ErrNotFound)
+			return nil, ErrRunCursorNotFound
 		}
 		if err != nil {
 			return nil, fmt.Errorf("read run list cursor: %w", err)
@@ -1011,9 +1022,9 @@ ORDER BY queue_sequence LIMIT ?`, append(args, MaxActiveRuns)...) // #nosec G202
 SELECT `+runColumns+` FROM runs
 WHERE NOT (status = 'queued' OR (status = 'running' AND started_at IS NULL))
   AND (? = 0 OR repo_id = ?) AND (? = '' OR ref = ?)
-  AND (? = '' OR COALESCE(started_at, finished_at, queued_at) < ?
-       OR (COALESCE(started_at, finished_at, queued_at) = ? AND id < ?))`+restriction+`
-ORDER BY COALESCE(started_at, finished_at, queued_at) DESC, id DESC
+  AND (? = '' OR COALESCE(started_at, finished_at) < ?
+       OR (COALESCE(started_at, finished_at) = ? AND id < ?))`+restriction+`
+ORDER BY COALESCE(started_at, finished_at) DESC, id DESC
 LIMIT ?`, append(args, pageLimit(filter.Limit))...) // #nosec G202 -- fixed columns and parameterized restriction.
 	if err != nil {
 		return nil, fmt.Errorf("list admitted runs: %w", err)
@@ -1045,20 +1056,26 @@ func runListTime(run model.Run) time.Time {
 // CountRuns counts the retained runs, in total and per repository, so a
 // paged list can show how many runs exist beyond the page it holds.
 func (s *Store) CountRuns(ctx context.Context) (model.RunCounts, error) {
-	counts := model.RunCounts{ByRepo: map[int64]int{}}
-	rows, err := s.db.QueryContext(ctx, `SELECT repo_id, COUNT(*) FROM runs GROUP BY repo_id`)
+	counts := model.RunCounts{ByRepo: map[int64]int{}, QueuedByRepo: map[int64]int{}, RunningByRepo: map[int64]int{}}
+	rows, err := s.db.QueryContext(ctx, `SELECT repo_id, COUNT(*),
+SUM(status = 'queued' OR (status = 'running' AND started_at IS NULL)),
+SUM(status = 'running' AND started_at IS NOT NULL)
+FROM runs GROUP BY repo_id`)
 	if err != nil {
 		return counts, fmt.Errorf("count runs: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
 	for rows.Next() {
 		var repoID int64
-		var n int
-		if err := rows.Scan(&repoID, &n); err != nil {
+		var n, queued, running int
+		if err := rows.Scan(&repoID, &n, &queued, &running); err != nil {
 			return counts, fmt.Errorf("scan run count: %w", err)
 		}
 		counts.ByRepo[repoID] = n
 		counts.Total += n
+		counts.QueuedByRepo[repoID], counts.RunningByRepo[repoID] = queued, running
+		counts.Queued += queued
+		counts.Running += running
 	}
 	if err := rows.Err(); err != nil {
 		return counts, fmt.Errorf("count runs: %w", err)
@@ -1166,18 +1183,19 @@ FROM step_results WHERE run_id = ? ORDER BY ordinal, burn, step`, runID)
 	return results, nil
 }
 
-func scanRun(row rowScanner) (model.Run, error) {
+func scanRun(row rowScanner, extra ...any) (model.Run, error) {
 	var value model.Run
 	var release, credentialed int64
 	var queued, created, updated int64
 	var started, finished sql.NullInt64
-	if err := row.Scan(
+	dest := []any{
 		&value.QueueSequence, &value.ID, &value.RepoID, &value.RefKind, &value.Ref,
 		&value.SHA, &value.Actor, &release, &credentialed, &value.Trigger, &value.Phase, &value.JobName,
 		&value.TestedSHA, &value.BaseSHA, &value.FailedBurn, &value.FailedStep, &value.Error,
 		&value.Status, &value.Reason, &value.SupersededBy, &queued, &started, &finished,
 		&created, &updated, &value.ConcurrencyGroup,
-	); err != nil {
+	}
+	if err := row.Scan(append(dest, extra...)...); err != nil {
 		return model.Run{}, err
 	}
 	value.Release = release != 0

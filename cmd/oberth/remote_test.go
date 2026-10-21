@@ -552,8 +552,8 @@ func TestRunsActivePrintsTheQueue(t *testing.T) {
 		query = r.URL.RawQuery
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`[{"ID":"run-started","Ref":"main","Status":"running","StartedAt":"2026-10-20T11:59:00Z"},` +
-			`{"ID":"run-head","Ref":"feature/xl","Status":"waiting","Scheduling":{"state":"waiting","message":"Waiting in the weighted resource admission queue. Need 12 weight; 3/20 used; queue position 1.","admission":{"state":"waiting","position":1,"size":"XL","weight":12,"used":3,"capacity":20}}},` +
-			`{"ID":"run-queued","Ref":"feature/q","Status":"queued","Scheduling":{"state":"queued","message":"Awaiting scheduler claim.","queue_position":1}}]`))
+			`{"ID":"run-head","Ref":"feature/xl","Status":"waiting","Scheduling":{"state":"waiting","queue_position":4,"message":"Waiting in the weighted resource admission queue. Need 12 weight; 3/20 used; queue position 4.","admission":{"state":"waiting","position":4,"size":"XL","weight":12,"used":3,"capacity":20}}},` +
+			`{"ID":"run-queued","Ref":"feature/q","Status":"queued","Scheduling":{"state":"queued","message":"Awaiting scheduler claim.","queue_position":7}},{"ID":"run-scoped","Status":"queued","Scheduling":{"state":"queued"}}]`))
 	}))
 	defer server.Close()
 	configure(t, server)
@@ -569,12 +569,38 @@ func TestRunsActivePrintsTheQueue(t *testing.T) {
 	if started < 0 || head < started || queued < head {
 		t.Fatalf("order not preserved:\n%s", body)
 	}
-	for _, want := range []string{"XL/12", "Need 12 weight; 3/20 used", "2    run-queued"} {
+	for _, want := range []string{"XL/12", "Need 12 weight; 3/20 used", "4    run-head", "7    run-queued", "-    run-scoped"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("output missing %q:\n%s", want, body)
 		}
 	}
 	if err := runRuns(context.Background(), []string{"--active", "--all"}, &out); err == nil {
 		t.Fatal("--active --all accepted")
+	}
+}
+
+func TestRunsAllCountsDatedRowsAndPrintsDisplayReason(t *testing.T) {
+	var befores []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		before := r.URL.Query().Get("before")
+		befores = append(befores, before)
+		w.Header().Set("Content-Type", "application/json")
+		switch before {
+		case "":
+			_, _ = w.Write([]byte(`[{"ID":"queued","Status":"queued","QueueSequence":9},{"ID":"claimed","Status":"running","QueueSequence":10},{"ID":"passed-release","Status":"passed","Release":true,"QueueSequence":1},{"ID":"cancelled","Status":"interrupted","display_status":"cancelled","display_reason":"cancelled by owner: obsolete","QueueSequence":2}]`))
+		case "2":
+			_, _ = w.Write([]byte(`[{"ID":"older","Status":"passed","QueueSequence":3}]`))
+		default:
+			t.Errorf("unexpected cursor %q", before)
+		}
+	}))
+	defer server.Close()
+	configure(t, server)
+	var out bytes.Buffer
+	if err := runRuns(context.Background(), []string{"--all", "--limit", "2"}, &out); err != nil {
+		t.Fatal(err)
+	}
+	if len(befores) != 2 || befores[1] != "2" || !strings.Contains(out.String(), "older") || !strings.Contains(out.String(), "cancelled by owner: obsolete") || strings.Contains(out.String(), "delivered") || strings.Contains(out.String(), "more:") {
+		t.Fatalf("cursors=%v output=%s", befores, out.String())
 	}
 }

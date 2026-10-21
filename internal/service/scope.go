@@ -416,11 +416,14 @@ func (history scopedHistory) CountRuns(ctx context.Context) (model.RunCounts, er
 	if err != nil {
 		return model.RunCounts{}, err
 	}
-	scoped := model.RunCounts{ByRepo: map[int64]int{}}
+	scoped := model.RunCounts{ByRepo: map[int64]int{}, QueuedByRepo: map[int64]int{}, RunningByRepo: map[int64]int{}}
 	for repoID, count := range counts.ByRepo {
 		if history.scope.seesRepo(repoID) {
 			scoped.ByRepo[repoID] = count
 			scoped.Total += count
+			scoped.QueuedByRepo[repoID], scoped.RunningByRepo[repoID] = counts.QueuedByRepo[repoID], counts.RunningByRepo[repoID]
+			scoped.Queued += counts.QueuedByRepo[repoID]
+			scoped.Running += counts.RunningByRepo[repoID]
 		}
 	}
 	return scoped, nil
@@ -792,23 +795,23 @@ func (service *API) redact(value any) any {
 	}
 	switch typed := value.(type) {
 	case model.Run:
-		typed.QueueSequence = 0
+		typed.QueueSequence, typed.QueuePosition = 0, 0
 		return typed
 	case []model.Run:
 		runs := make([]model.Run, len(typed))
 		for index, run := range typed {
-			run.QueueSequence = 0
+			run.QueueSequence, run.QueuePosition = 0, 0
 			runs[index] = run
 		}
 		return runs
 	case RunDetailResponse:
-		typed.Run.QueueSequence = 0
+		typed.Run.QueueSequence, typed.Run.QueuePosition = 0, 0
 		return typed
 	case StatusResponse:
-		typed.Run.QueueSequence = 0
+		typed.Run.QueueSequence, typed.Run.QueuePosition = 0, 0
 		return typed
 	case WaitResponse:
-		typed.Run.QueueSequence = 0
+		typed.Run.QueueSequence, typed.Run.QueuePosition = 0, 0
 		return typed
 	case []RepoView:
 		views := make([]RepoView, len(typed))

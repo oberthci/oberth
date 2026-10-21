@@ -307,12 +307,14 @@ when an observer is unavailable.
 - `observed_at` and `age_seconds` describe when the snapshot was read. `wait`
   retains that timestamp and updates its age before returning. Controller
   state may itself lag; this is diagnostic context, not execution evidence.
-- `queue_position` is accepted order across durable queued runs. Publication
+- `queue_position` is global accepted order across unclaimed and claimed but
+  unadmitted runs, computed before repository/ref filters. Publication
   gates can let later runs execute first; it is not an ETA.
 - `admission` reports the actual resource gate reservation: `preparing`,
-  `waiting`, or `admitted`, with separate FIFO `position`, size, weight and
-  aggregate used/capacity. This explains a durable `running` run that is still
-  waiting behind an exclusive XL build. A run whose pipeline declares
+  `waiting`, or `admitted`, with the same global queue `position`, size, weight and
+  aggregate used/capacity. Scoped uplinks see no global position, used or capacity.
+  This explains a durable `running` run that is still waiting behind an exclusive
+  XL build. A run whose pipeline declares
   `oberth.ci/concurrency-group` also reports `group`; while it waits on that
   group it names `group_holder` (the run of the same repository holding it)
   or `group_ahead` (the earlier member queued ahead of it), and the message
@@ -338,12 +340,13 @@ required.
 first page carries the whole bounded queue in position order, then admitted
 and terminal runs newest admission time first. Later pages continue the
 dated runs by a stable time-and-ID cursor. A run cancelled before admission
-sorts by its end time.
+sorts by its end time. The page limit counts only dated rows; the queue is
+additional. A pruned cursor returns 404: restart from the first page.
 
-- `history` keeps only terminal runs (passed, failed, interrupted), paged the
-  same way with `before`/`next_before`/`next_cursor`.
-- `active` returns every queued, waiting and running run in one unpaged list
-  (at most 500), in scheduling order: started runs (oldest start first), then
+- `history` keeps only terminal runs (passed, failed, interrupted), with legacy
+  sequence paging via `before`/`next_before`/`next_cursor`.
+- `active` is deprecated; it still returns every queued, waiting and running
+  run in one unpaged list (at most 500), in scheduling order: started runs (oldest start first), then
   claimed runs in admission order (the weighted gate's FIFO), then unclaimed
   queued runs in accepted order. Each run that has not started carries
   `Scheduling` with its state, message, queue or admission position, size,
@@ -354,13 +357,21 @@ Every run response includes `display_status` and `display_reason`, while
 durable `Status` stays unchanged. Before weighted admission the display is
 `queued` with its scheduling reason. Admission records `started_at`, so a
 trusted preflight displays `running` with phase `preflight`. Terminal runs
-display `passed`, `failed`, `delivered` for a published release, or
+display `passed` (including published releases), `failed`, or
 `cancelled` with the superseding SHA, cancelling actor or restart action.
-Retry and rerun eligibility continues to use the durable status and cause.
+Elapsed includes preflight; parking for VM capacity clears the admission time,
+which is set again when capacity is reacquired. Restart re-fires carry the durable
+reason `re-queued after restart`; this is distinct from supersession even when
+the successor has the same SHA. Interrupted results neither open nor resolve
+CI-red issues. Retry and rerun eligibility continues to use the durable status
+and cause. The `status`/`wait` tool's `status: "delivered"` remains the legacy
+alias of `passed` for all passed runs; its `display_status` is `passed`.
 
-`oberth runs --active` remains available for compatibility. The dashboard
-uses the default flat list and filters it with status chips. Its footer shows
-the loaded page range against the total retained runs from `/api/runs/counts`.
+`oberth runs --active` is deprecated and remains available for compatibility.
+The dashboard uses the default flat list, status chips, and an independent
+release toggle. `/api/runs/counts` supplies its running/queued header and dated
+page range: `Total - Queued`. The response retains `Total` and `ByRepo`, adding
+`Queued`, `Running`, `QueuedByRepo` and `RunningByRepo`; all respect uplink scope.
 
 ## JSON API
 
@@ -369,6 +380,7 @@ Authenticated `GET` endpoints serve the same state as a web dashboard:
 | Endpoint | Content |
 |----------|---------|
 | `/api/runs` | All CI runs; `?view=history` for terminal runs, `?view=active` for the ordered active list |
+| `/api/runs/counts` | Total retained, queued and running counts, also per repository |
 | `/api/repos` | Registered repositories |
 | `/api/issues` | Paged issues with `total` for the selected filters and `counts` by state and kind |
 | `/api/status` | System health summary |

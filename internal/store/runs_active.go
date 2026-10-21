@@ -29,7 +29,11 @@ func (s *Store) ListActiveRuns(ctx context.Context, filter model.RunListFilter) 
 	restriction, restrictionArgs := repoRestriction("repo_id", filter.RepoIDs)
 	args := append([]any{filter.RepoID, filter.RepoID, filter.Ref, filter.Ref}, restrictionArgs...)
 	rows, err := s.db.QueryContext(ctx, `
-SELECT `+runColumns+` FROM runs
+WITH queue AS (
+ SELECT id AS queued_id, ROW_NUMBER() OVER (ORDER BY queue_sequence) AS queue_position FROM runs
+ WHERE status = 'queued' OR (status = 'running' AND started_at IS NULL)
+)
+SELECT `+runColumns+`, COALESCE(queue_position, 0) FROM runs LEFT JOIN queue ON runs.id = queue.queued_id
 WHERE status IN ('queued', 'running')
   AND (? = 0 OR repo_id = ?) AND (? = '' OR ref = ?)`+restriction+`
 ORDER BY CASE
@@ -44,7 +48,9 @@ LIMIT ?`, append(args, MaxActiveRuns)...) // #nosec G202 -- the restriction is a
 	defer func() { _ = rows.Close() }()
 	runs := make([]model.Run, 0)
 	for rows.Next() {
-		value, err := scanRun(rows)
+		var position int64
+		value, err := scanRun(rows, &position)
+		value.QueuePosition = position
 		if err != nil {
 			return nil, fmt.Errorf("scan run: %w", err)
 		}

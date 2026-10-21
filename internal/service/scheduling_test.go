@@ -78,7 +78,7 @@ func TestClaimedRunShowsCapacityWaitUntilSubmission(t *testing.T) {
 		t.Fatal("unsubmitted run reached workflow observation")
 		return nil, nil
 	})}
-	run := model.Run{Status: model.RunRunning, QueueSequence: 2, JobName: "reserved-workflow"}
+	run := model.Run{Status: model.RunRunning, QueueSequence: 2, QueuePosition: 1, JobName: "reserved-workflow"}
 	observation := service.scheduling(t.Context(), run, nil)
 	if observation.State != "waiting" || observation.Admission == nil || observation.Admission.Weight != 2 ||
 		observation.Admission.Used != 3 || observation.Admission.Capacity != 3 || observation.Admission.Position != 1 ||

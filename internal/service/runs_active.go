@@ -53,7 +53,10 @@ func (service *API) activeRuns(ctx context.Context, filter api.RunFilter) (any, 
 			continue
 		}
 		// A run not yet started has no Workflow, so no step results.
-		entry.Scheduling = observer.scheduling(ctx, run, nil)
+		entry.Scheduling = observer.observeScheduling(ctx, run, nil, false)
+		if entry.DisplayStatus == "queued" && entry.Scheduling != nil {
+			entry.DisplayReason = entry.Scheduling.Message
+		}
 		if run.Status == model.RunRunning && entry.Scheduling != nil &&
 			entry.Scheduling.Admission != nil && entry.Scheduling.Admission.State == "admitted" {
 			admitted = append(admitted, entry)
@@ -65,6 +68,7 @@ func (service *API) activeRuns(ctx context.Context, filter api.RunFilter) (any, 
 	if service.scope != nil {
 		for index := range active {
 			active[index].QueueSequence = 0
+			active[index].QueuePosition = 0
 		}
 	}
 	return active, nil

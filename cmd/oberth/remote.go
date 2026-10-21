@@ -301,12 +301,10 @@ func renderActiveRuns(output io.Writer, runs []remoteActiveRun, now time.Time) e
 	if _, err := fmt.Fprintf(output, "%-4s %-34s %-9s %-8s %-8s %-30s %s\n", "#", "RUN", "STATUS", "SIZE", "ELAPSED", "REF", "REASON"); err != nil {
 		return err
 	}
-	queuedPosition := 0
 	for _, run := range runs {
 		position, size, elapsed, reason := "-", "-", "-", ""
-		if displayRunStatus(run.remoteRun) == "queued" {
-			queuedPosition++
-			position = strconv.Itoa(queuedPosition)
+		if displayRunStatus(run.remoteRun) == "queued" && run.Scheduling != nil && run.Scheduling.QueuePosition > 0 {
+			position = strconv.FormatInt(run.Scheduling.QueuePosition, 10)
 		}
 		if run.StartedAt != nil {
 			elapsed = now.Sub(*run.StartedAt).Truncate(time.Second).String()
@@ -335,9 +333,6 @@ func displayRunStatus(run remoteRun) string {
 	}
 	if run.Status == string(model.RunInterrupted) {
 		return model.PhaseCancelled
-	}
-	if run.Status == string(model.RunPassed) && run.Release {
-		return "delivered"
 	}
 	if run.Status == string(model.RunWaiting) || run.Status == string(model.RunQueued) ||
 		run.Status == string(model.RunRunning) && run.StartedAt == nil {

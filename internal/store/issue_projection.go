@@ -78,6 +78,9 @@ func scanCIIssueWork(row rowScanner) (ciIssueWork, error) {
 }
 
 func (s *Store) projectRunIssue(ctx context.Context, tx *sql.Tx, run model.Run, failureTail string, now int64) error {
+	if run.Status == model.RunInterrupted {
+		return nil
+	}
 	work, err := runIssueWork(ctx, tx, run.ID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil
@@ -97,10 +100,8 @@ func (s *Store) projectRunIssue(ctx context.Context, tx *sql.Tx, run model.Run, 
 		phase = "run"
 	}
 	var title string
-	switch {
-	case run.Status == model.RunInterrupted:
-		title = fmt.Sprintf("CI red: %s — interrupted", work.Branch)
-	case phase == "publishing":
+	switch phase {
+	case "publishing":
 		title = fmt.Sprintf("Publish red: %s — upstream publish failed", work.Branch)
 	default:
 		title = fmt.Sprintf("CI red: %s — %s failed", work.Branch, phase)
@@ -140,6 +141,9 @@ func runIssueBody(run model.Run, failureTail string) string {
 }
 
 func (s *Store) projectPromotionIssue(ctx context.Context, tx *sql.Tx, promotion model.Promotion, now int64) error {
+	if promotion.Status == model.PromotionInterrupted {
+		return nil
+	}
 	work, err := promotionIssueWork(ctx, tx, promotion.ID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil

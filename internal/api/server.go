@@ -310,7 +310,7 @@ func (server *Server) handleRuns(writer http.ResponseWriter, request *http.Reque
 
 // RunPageFull reports whether the time-ordered part of a run page is full.
 func RunPageFull(runs []model.Run, filter RunFilter) bool {
-	if len(runs) == 0 {
+	if len(runs) == 0 || filter.View == RunViewActive {
 		return false
 	}
 	if filter.View == RunViewHistory {

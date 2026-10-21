@@ -79,7 +79,7 @@ func (backend *fakeBackend) Runs(_ context.Context, _ Actor, filter RunFilter) (
 	return map[string]any{"runs": []any{}}, nil
 }
 func (backend *fakeBackend) RunCounts(context.Context, Actor) (any, error) {
-	return map[string]any{"Total": 3, "ByRepo": map[string]int{"1": 2, "2": 1}}, nil
+	return model.RunCounts{Total: 3, ByRepo: map[int64]int{1: 2, 2: 1}, Queued: 1, Running: 1, QueuedByRepo: map[int64]int{1: 1}, RunningByRepo: map[int64]int{2: 1}}, nil
 }
 func (backend *fakeBackend) Run(_ context.Context, _ Actor, id string) (any, error) {
 	backend.runID = id
@@ -1026,6 +1026,10 @@ func TestRunCountsRoute(t *testing.T) {
 	if response.Code != http.StatusOK || backend.runID != "" || !strings.Contains(response.Body.String(), `"Total":3`) {
 		t.Fatalf("status=%d runID=%q body=%s", response.Code, backend.runID, response.Body.String())
 	}
+	var counts model.RunCounts
+	if err := json.Unmarshal(response.Body.Bytes(), &counts); err != nil || counts.Queued != 1 || counts.Running != 1 || counts.QueuedByRepo[1] != 1 || counts.RunningByRepo[2] != 1 {
+		t.Fatalf("counts = %+v, %v", counts, err)
+	}
 	unauthenticated := httptest.NewRecorder()
 	server.Handler().ServeHTTP(unauthenticated, httptest.NewRequest(http.MethodGet, "/api/runs/counts", nil))
 	if unauthenticated.Code != http.StatusUnauthorized {
@@ -1070,7 +1074,11 @@ func TestRunsViewParameter(t *testing.T) {
 		if response.Code != http.StatusOK || backend.runFilter.View != view {
 			t.Fatalf("view=%q status=%d filter=%+v", view, response.Code, backend.runFilter)
 		}
-		if got := response.Header().Get("X-Oberth-Next-Before"); got != "7" {
+		want := "7"
+		if view == RunViewActive {
+			want = ""
+		}
+		if got := response.Header().Get("X-Oberth-Next-Before"); got != want {
 			t.Fatalf("view=%q next cursor = %q", view, got)
 		}
 	}
@@ -1107,6 +1115,28 @@ func TestRunsPagesByRunIDWhenSequencesAreWithheld(t *testing.T) {
 		server.Handler().ServeHTTP(httptest.NewRecorder(), request)
 		if backend.runFilter.BeforeRun != wantRun || backend.runFilter.Before == 0 {
 			t.Fatalf("before=%s filter = %+v", raw, backend.runFilter)
+		}
+	}
+}
+
+func TestRunsPageLimitCountsOnlyDatedRows(t *testing.T) {
+	for dated := 0; dated <= 2; dated++ {
+		server, backend := testServer(t)
+		backend.runPage = []model.Run{{ID: "queued", Status: model.RunQueued}, {ID: "claimed", Status: model.RunRunning}}
+		for i := 0; i < dated; i++ {
+			backend.runPage = append(backend.runPage, model.Run{ID: "finished", Status: model.RunPassed, QueueSequence: 7})
+		}
+		request := httptest.NewRequest(http.MethodGet, "/api/runs?limit=2", nil)
+		request.Header.Set("Authorization", "Bearer valid-token")
+		response := httptest.NewRecorder()
+		server.Handler().ServeHTTP(response, request)
+		want := ""
+		if dated == 2 {
+			want = "7"
+		}
+		var rows []model.Run
+		if err := json.Unmarshal(response.Body.Bytes(), &rows); err != nil || len(rows) != 2+dated || response.Code != http.StatusOK || response.Header().Get("X-Oberth-Next-Before") != want {
+			t.Fatalf("dated=%d status=%d header=%v body=%s error=%v", dated, response.Code, response.Header(), response.Body, err)
 		}
 	}
 }

@@ -10,11 +10,12 @@ const listPollMs = 4000;
 const slowPollMs = 10000;
 const livePollMs = 2000;
 const state = {
-  repos: [], runs: [], repoRuns: [], active: [], status: null,
+  repos: [], runs: [], repoRuns: [], status: null,
   runCounts: null, runCursor: 0, runCursorHistory: [], runStart: 1, runStartHistory: [], runSourceCount: 0,
   runNext: 0, runsNext: "", repoRunsNext: "",
   timer: null, routeSeq: 0,
-  filter: localStorage.getItem("oberth-filter") === "waiting" ? "queued" : (localStorage.getItem("oberth-filter") || "all"),
+  filter: readRunFilter(),
+  releaseOnly: localStorage.getItem("oberth-kind") === "release" || localStorage.getItem("oberth-filter") === "release",
   repo: localStorage.getItem("oberth-repo") || "all",
   step: "", stepRunID: "",
   logCache: new Map(),
@@ -27,7 +28,14 @@ const state = {
   pendingController: null, // AbortController for in-flight API requests
   statusPending: null, statusFailedAt: 0, // the background /api/status fetch (ensureStatus)
 };
-const runFilters = ["all", "queued", "running", "passed", "failed", "cancelled", "release"];
+const runFilters = ["all", "queued", "running", "passed", "failed", "cancelled"];
+
+function readRunFilter() {
+  const saved = localStorage.getItem("oberth-filter");
+  if (saved === "waiting") return "queued";
+  if (saved === "interrupted" || saved === "superseded") return "cancelled";
+  return ["queued", "running", "passed", "failed", "cancelled"].includes(saved) ? saved : "all";
+}
 
 /* ---------- tiny utilities (unchanged from the old dashboard) ---------- */
 function esc(v) { return String(v ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
@@ -35,6 +43,7 @@ function enc(v) { return encodeURIComponent(String(v ?? "")); }
 function replaceApp(html) { app.innerHTML = html; }
 function shortSha(s) { return s ? String(s).slice(0, 7) : "--"; }
 function shortId(s) { s = String(s || ""); return s.length > 13 ? s.slice(0, 13) + "…" : (s || "--"); }
+function shortSuccessor(s) { return String(s || "").slice(0, 12); }
 function ago(s) {
   if (!s) return "--";
   const d = new Date(s);
@@ -156,7 +165,6 @@ function bigIcon(status) {
 function displayRunStatus(run) {
   if (run.display_status) return run.display_status;
   if (run.Status === "interrupted") return "cancelled";
-  if (run.Status === "passed" && run.Release) return "delivered";
   if (run.Status === "waiting" || run.Status === "queued" || (run.Status === "running" && !run.StartedAt)) return "queued";
   return run.Status;
 }
@@ -369,13 +377,6 @@ async function loadRuns() {
   state.runs = page.body || [];
   state.runsNext = page.next;
 }
-/* The active view is one bounded list in scheduling order: started runs,
-   then claimed runs in admission order, then the unclaimed queue. It is
-   loaded unfiltered, so the stats count every active run, and narrowed to
-   the selected repository here. */
-async function loadActiveRuns() {
-  state.active = await api("/api/runs?view=active") || [];
-}
 /* The list pages with ?before (#050). state.runs stays the newest page, for
    the stats; state.repoRuns is the page shown when it is not that one. */
 async function loadRepoRuns() {
@@ -412,12 +413,11 @@ async function loadStatus(opts) {
 }
 
 /* ---------- runs list ---------- */
-/* A repository filter is applied by the server (loadRepoRuns), so only the
-   status filter is applied here. */
+/* A repository filter is applied by the server (loadRepoRuns); status and
+   release kind compose on the loaded page. */
 function runMatches(run) {
-  if (state.filter === "release") return !!run.Release;
-  if (state.filter !== "all") return String(displayRunStatus(run)) === state.filter;
-  return true;
+  const statusOK = state.filter === "all" || displayRunStatus(run) === state.filter;
+  return statusOK && (!state.releaseOnly || run.Release);
 }
 function repoCounts(runs) {
   const counts = new Map([["all", runs.length]]);
@@ -459,7 +459,7 @@ function runMessageCell(run, blocker) {
   if (run.SupersededBy) {
     return `<button type="button" class="run-successor" data-run-id="${esc(run.SupersededBy)}">${esc(message)}</button>`;
   }
-  return esc(message);
+  return run.display_reason === "server restart, retry needed" ? `<span class="retry-warning">${esc(message)}</span>` : esc(message);
 }
 function runsTable(runs) {
   const blocker = queueBlocker(runs.filter(run => displayRunStatus(run) === "queued"));
@@ -476,14 +476,14 @@ async function renderRuns(seq) {
   const pending = ensureStatus();
   if (state.repo !== "all" && !isQualifiedSelector(state.repo)) await pending;
   state.repo = normalizeRepoSelector(state.repo, "all");
-  await Promise.all([loadRuns(), loadRepoRuns(), loadActiveRuns(), loadRunCounts()]);
+  await Promise.all([loadRuns(), loadRepoRuns(), loadRunCounts()]);
   if (!currentRoute(seq)) return;
   rerenderWhenStatus(pending, seq);
   localStorage.setItem("oberth-filter", state.filter);
+  localStorage.setItem("oberth-kind", state.releaseOnly ? "release" : "all");
   localStorage.setItem("oberth-repo", state.repo);
   const runs = state.runs, source = state.repo !== "all" || state.runCursor ? state.repoRuns : runs;
   const visible = source.filter(runMatches), counts = repoCounts(runs);
-  state.runSourceCount = source.length;
   if (state.runCounts) {
     counts.set("all", state.runCounts.Total || 0);
     for (const repo of state.repos) counts.set(repoKey(repo), state.runCounts.ByRepo?.[repo.ID] || 0);
@@ -493,11 +493,14 @@ async function renderRuns(seq) {
      A server without the header pages by the oldest run's sequence. */
   const named = source === runs ? state.runsNext : state.repoRunsNext;
   const dated = source.filter(run => displayRunStatus(run) !== "queued");
+  state.runSourceCount = dated.length;
   state.runNext = dated.length === runPageSize ? (named || source[source.length - 1].QueueSequence || 0) : 0;
   const page = state.runCursorHistory.length + 1;
-  const active = state.active.filter(run => state.repo === "all" || repoKeyOf(run.RepoID) === state.repo);
-  const running = active.filter(run => displayRunStatus(run) === "running").length;
-  const queued = active.filter(run => displayRunStatus(run) === "queued").length;
+  const selectedRepo = state.repos.find(repo => repoKey(repo) === state.repo);
+  const current = runs.filter(run => state.repo === "all" || repoKeyOf(run.RepoID) === state.repo);
+  const running = (state.repo === "all" ? state.runCounts?.Running : state.runCounts?.RunningByRepo?.[selectedRepo?.ID]) ?? current.filter(run => displayRunStatus(run) === "running").length;
+  const queued = (state.repo === "all" ? state.runCounts?.Queued : state.runCounts?.QueuedByRepo?.[selectedRepo?.ID]) ?? current.filter(run => displayRunStatus(run) === "queued").length;
+  const datedTotal = Math.max(0, (counts.get(state.repo) || 0) - queued);
   replaceApp(`
   <section class="screen">
     <div class="bar">
@@ -512,7 +515,8 @@ async function renderRuns(seq) {
       <section>
         <div class="toolbar">
           ${runFilters.map(f => `<button class="chip ${state.filter === f ? "on" : ""}" data-status-filter="${esc(f)}">${esc(f)}</button>`).join("")}
-          <span class="count">${pageRange(state.runStart, source.length, counts.get(state.repo) || 0)}${state.filter === "all" ? "" : ` · ${visible.length} match this page`}</span>
+          <button class="chip ${state.releaseOnly ? "on" : ""}" data-kind-filter="release" aria-pressed="${state.releaseOnly}">release</button>
+          <span class="count">${pageRange(state.runStart, dated.length, datedTotal)}${state.filter === "all" && !state.releaseOnly ? "" : ` · ${visible.length} match this page`}</span>
         </div>
         ${visible.length ? runsTable(visible) : `<div class="empty">No runs match the current filters.</div>`}
         ${page > 1 || state.runNext ? `<div class="issue-pager">
@@ -738,16 +742,16 @@ function summaryLines(detail) {
   const status = displayRunStatus(run), kind = statusKind(status);
   if (kind === "pass") lines.push(`[pass] ${passed} step${passed === 1 ? "" : "s"} passed across ${burns} burn${burns === 1 ? "" : "s"}`);
   else if (kind === "fail") lines.push(`[fail] failed at ${run.FailedBurn ? run.FailedBurn + " / " : ""}${run.FailedStep || "unknown step"} — ${passed} step${passed === 1 ? "" : "s"} passed`);
-  else if (kind === "run") lines.push(`[pending] running in phase ${run.Phase || "ci"} — ${reached} of ${steps.length} step${steps.length === 1 ? "" : "s"} started, ${passed} passed`);
+  else if (kind === "run") lines.push(`[running] running in phase ${run.Phase || "ci"} — ${reached} of ${steps.length} step${steps.length === 1 ? "" : "s"} started, ${passed} passed`);
   else if (status === "queued") {
     const scheduling = detail.Scheduling || {}, admission = scheduling.admission || {};
     lines.push(`[queued] ${scheduling.message || "Awaiting scheduler."}`);
     if (admission.weight) lines.push(`capacity: need ${admission.weight} weight · ${admission.used}/${admission.capacity} used${admission.position ? ` · queue position ${admission.position}` : ""}`);
   }
-  else if (kind === "cancel") lines.push(`[${status}] ${run.Reason || "run was interrupted"}`);
-  else lines.push(`[pending] queued behind earlier work for this repository`);
+  else if (kind === "cancel") lines.push(`[${status}] ${runMessage(run)}`);
+  else lines.push(`[queued] queued behind earlier work for this repository`);
   if (unreached) lines.push(`${unreached} declared step${unreached === 1 ? "" : "s"} not reached`);
-  if (run.SupersededBy) lines.push({successor: run.SupersededBy, text: run.DisplayReason || `view successor ${shortId(run.SupersededBy)}`});
+  if (run.SupersededBy) lines.push({successor: run.SupersededBy, text: run.display_reason || `view successor ${shortSuccessor(run.SupersededBy)}`});
   if (run.Error) lines.push("", `error: ${run.Error}`);
   const timed = steps.map(step => ({ step, seconds: spanSeconds(step.StartedAt, step.FinishedAt, false) })).filter(item => item.seconds > 0).sort((a, b) => b.seconds - a.seconds);
   if (timed.length) lines.push("", `slowest: ${timed.slice(0, 2).map(item => `${stepKey(item.step)} ${fmtDur(item.seconds)}`).join(" · ")}`);
@@ -853,7 +857,6 @@ async function renderRunDetailView(detail, seq) {
         <span class="rh-name"><span class="rp">${esc(repository)} /</span> ${esc(run.Ref)}</span>
         <span class="v4b ${kind === "pass" ? "pass" : kind === "fail" ? "fail" : kind === "run" ? "run" : "dim"}">${esc(phaseLabel)}</span>
         ${releaseBadge(run)}${credentialedBadge(run)}
-        ${run.SupersededBy ? '<span class="v4b superseded">SUPERSEDED</span>' : ""}
         <div class="time"><span><b>${esc(fmtDur(seconds))}</b></span><span>${esc(ago(runWhen(run)))}</span><button class="v4back" data-action-back>‹ back</button></div>
       </div>
       <div class="rh2">
@@ -867,7 +870,7 @@ async function renderRunDetailView(detail, seq) {
       </div>
     </div>
     ${kind === "fail" ? `<div class="fbanner"><b>✗ ${esc(run.FailedStep ? (run.FailedBurn ? run.FailedBurn + " / " : "") + run.FailedStep : "run failed")}</b><span class="err" title="${esc(run.Error)}">${esc(run.Error || "")}</span></div>` : ""}
-    ${run.SupersededBy ? `<div class="sbanner"><b>superseded</b><span class="err">a newer push replaced this run</span><button class="chip" data-run-id="${esc(run.SupersededBy)}">view successor ${esc(shortId(run.SupersededBy))}</button></div>` : ""}
+    ${status === "cancelled" ? `<div class="sbanner${runMessage(run) === "server restart, retry needed" ? " retry-warning" : ""}"><span class="err">${esc(runMessage(run))}</span>${run.SupersededBy ? `<button class="chip" data-run-id="${esc(run.SupersededBy)}">view successor ${esc(shortSuccessor(run.SupersededBy))}</button>` : ""}</div>` : ""}
     <div class="v4-body">
       <div class="slist" id="stepList">
         <div class="sl-h"><span>STEPS · ${stepCount}${run.Release ? " · RELEASE" : run.Credentialed ? " · CREDENTIALED" : ""}</span></div>
@@ -1146,6 +1149,7 @@ app.addEventListener("click", event => {
   if ((target = event.target.closest("[data-run-id]"))) { go(`/runs/${enc(target.dataset.runId)}`); return; }
   if ((target = event.target.closest("[data-repo-runs]"))) { changeRunRepo(target.dataset.repoRuns); go("/runs"); return; }
   if ((target = event.target.closest("[data-repo-filter]"))) { changeRunRepo(target.dataset.repoFilter); route(); return; }
+  if ((target = event.target.closest("[data-kind-filter]"))) { state.releaseOnly = !state.releaseOnly; route(); return; }
   if ((target = event.target.closest("[data-status-filter]"))) { state.filter = target.dataset.statusFilter; route(); return; }
   if ((target = event.target.closest("[data-issue-kind]"))) { changeIssueFilter({ issueKind: target.dataset.issueKind }); return; }
   if ((target = event.target.closest("[data-issue-state]"))) { changeIssueFilter({ issueState: target.dataset.issueState }); return; }

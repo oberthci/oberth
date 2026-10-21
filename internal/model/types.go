@@ -119,6 +119,7 @@ type RepositorySpec struct {
 type Run struct {
 	ID            string
 	QueueSequence int64
+	QueuePosition int64 `json:"QueuePosition,omitempty"`
 	// Display fields are read-side projections; durable Status is unchanged.
 	DisplayStatus string         `json:"display_status,omitempty"`
 	DisplayReason string         `json:"display_reason"`
@@ -198,8 +199,12 @@ type RunListFilter struct {
 
 // RunCounts is the number of retained runs, in total and per repository ID.
 type RunCounts struct {
-	Total  int
-	ByRepo map[int64]int
+	Total         int
+	ByRepo        map[int64]int
+	Queued        int
+	Running       int
+	QueuedByRepo  map[int64]int
+	RunningByRepo map[int64]int
 }
 
 type RunCancellation struct {

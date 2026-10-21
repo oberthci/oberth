@@ -385,7 +385,7 @@ func TestLegacyPromotionIssueProjectionIsOrderedAndProofAware(t *testing.T) {
 	}
 }
 
-func TestRestartProjectsLegacyInterruptedPromotionAtomically(t *testing.T) {
+func TestRestartInterruptedPromotionDoesNotProjectIssue(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "oberth.sqlite")
 	database, err := OpenAdminClient(ctx, path, Options{})
@@ -416,8 +416,8 @@ func TestRestartProjectsLegacyInterruptedPromotionAtomically(t *testing.T) {
 		t.Fatalf("recovered promotion = %#v, %v", recovered, err)
 	}
 	issue, err := database.OpenCIIssue(ctx, repository.ID, "feature/restart")
-	if err != nil || !strings.Contains(issue.Body, promotion.ID) {
-		t.Fatalf("restart issue projection = %#v, %v", issue, err)
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("interrupted promotion created issue = %#v, %v", issue, err)
 	}
 }
 

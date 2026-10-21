@@ -474,7 +474,7 @@ func toolDefinitions() []map[string]any {
 			"limit":  integerProperty("Maximum dated runs per page (default 50, max 100); the first page also carries the whole bounded queue"),
 			"before": map[string]any{"type": []string{"integer", "string"}, "description": "Exclusive cursor: next_before (a run sequence) or next_cursor (a run ID) from the previous page"},
 			"view": map[string]any{"type": "string", "enum": []string{"all", "active", "history"}, "default": "all",
-				"description": "all: queue first, then admitted/terminal runs by admission time (default). history: terminal runs only with legacy paging. active: compatibility view of non-terminal runs in scheduling order, unpaged and capped at 500"},
+				"description": "all: queue first, then admitted/terminal runs by admission time (default). history: terminal runs only with legacy paging. active: deprecated compatibility view of non-terminal runs in scheduling order, unpaged and capped at 500"},
 		})),
 		tool("system_status", "Return system health: database, upstreams, cluster, audit, and version.", object(map[string]any{})),
 		tool("publish_retry", "Retry the upstream publication for a branch or tag run whose burns all passed but whose upstream push failed. Input is exactly one durable run ID. Refuses when the run is not in a publishing-failed state, or when the cached Git object no longer matches the record. A promotion (or its CI run) is retried with promote_retry instead, which merges onto the current target head and re-tests.", object(map[string]any{

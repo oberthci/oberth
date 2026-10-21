@@ -1955,6 +1955,8 @@ func classifyViewError(err error) (int, string) {
 		return http.StatusBadRequest, err.Error()
 	case errors.Is(err, service.ErrForbidden):
 		return http.StatusForbidden, "forbidden"
+	case errors.Is(err, store.ErrRunCursorNotFound):
+		return http.StatusNotFound, "cursor run no longer retained; restart from the first page"
 	case errors.Is(err, store.ErrNotFound):
 		return http.StatusNotFound, "not found"
 	case errors.Is(err, store.ErrAmbiguous),

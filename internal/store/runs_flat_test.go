@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -41,8 +42,9 @@ func TestParkedRunLosesAdmissionTimeUntilReacquired(t *testing.T) {
 	if err != nil || parked.StartedAt != nil {
 		t.Fatalf("parked: %+v, %v", parked, err)
 	}
+	now = now.Add(time.Minute)
 	readmitted, err := s.MarkRunAdmitted(t.Context(), run.ID)
-	if err != nil || readmitted.StartedAt == nil {
+	if err != nil || readmitted.StartedAt == nil || !readmitted.StartedAt.Equal(now) {
 		t.Fatalf("readmitted: %+v, %v", readmitted, err)
 	}
 	if _, err := s.SetRunJobName(t.Context(), run.ID, "workflow"); err != nil {
@@ -120,5 +122,145 @@ func TestFlatRunsKeepQueueFirstAndPageByAdmissionTime(t *testing.T) {
 	current, err := s.ListRecentRuns(ctx, model.RunListFilter{Limit: 2})
 	if err != nil || strings.Join(runIDs(current), ",") != strings.Join([]string{secondQueued.ID, neverAdmitted.ID, firstQueued.ID}, ",") {
 		t.Fatalf("never-admitted terminal order = %v, %v", runIDs(current), err)
+	}
+}
+
+func TestFlatRunsGlobalQueuePositionsAndCounts(t *testing.T) {
+	now := time.Now()
+	s := testStore(t, &now)
+	repo := createRepo(t, s)
+	other, err := s.CreateRepository(t.Context(), model.RepositorySpec{Name: "other", UpstreamID: repo.UpstreamID, DefaultBranch: "main"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var queued []model.Run
+	for i, id := range []int64{other.ID, repo.ID, other.ID, repo.ID} {
+		run, err := s.EnqueueRun(t.Context(), testRunSpec(id, fmt.Sprintf("queue-%d", i), strings.Repeat("a", 40)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		queued = append(queued, run.Run)
+	}
+	if _, err := s.ClaimNextRun(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := s.ListRecentRuns(t.Context(), model.RunListFilter{RepoID: repo.ID, Limit: 1})
+	if err != nil || len(rows) != 2 {
+		t.Fatalf("rows: %+v, %v", rows, err)
+	}
+	for i, want := range []int64{2, 4} {
+		if rows[i].QueuePosition != want {
+			t.Fatalf("position %+v, want %d", rows[i], want)
+		}
+		position, err := s.QueuedRunPosition(t.Context(), rows[i].ID)
+		if err != nil || position != want {
+			t.Fatalf("single position %d, %v", position, err)
+		}
+	}
+	counts, err := s.CountRuns(t.Context())
+	if err != nil || counts.Queued != 4 || counts.Running != 0 || counts.QueuedByRepo[repo.ID] != 2 {
+		t.Fatalf("counts %+v, %v", counts, err)
+	}
+	if _, err := s.MarkRunAdmitted(t.Context(), queued[0].ID); err != nil {
+		t.Fatal(err)
+	}
+	counts, err = s.CountRuns(t.Context())
+	if err != nil || counts.Total != 4 || counts.Queued != 3 || counts.Running != 1 || counts.RunningByRepo[other.ID] != 1 {
+		t.Fatalf("admitted counts %+v, %v", counts, err)
+	}
+	rows, err = s.ListRecentRuns(t.Context(), model.RunListFilter{RepoID: other.ID})
+	if err != nil || len(rows) != 2 || rows[0].ID != queued[2].ID || rows[0].QueuePosition != 2 {
+		t.Fatalf("claimed queue %+v, %v", rows, err)
+	}
+}
+
+func TestStrandedRequeueRecordsCauseAndDoesNotFileIssue(t *testing.T) {
+	now := time.Now()
+	s := testStore(t, &now)
+	repo := createRepo(t, s)
+	old := projectionRun(t, s, repo.ID, "restart", projectionSourceSHA)
+	copy, err := s.RequeueStrandedRun(t.Context(), old.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	old, err = s.Run(t.Context(), old.ID)
+	if err != nil || old.Reason != "re-queued after restart" || old.SupersededBy != copy.ID {
+		t.Fatalf("restart %+v, %v", old, err)
+	}
+	if _, err = s.OpenCIIssue(t.Context(), repo.ID, "restart"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("restart issue: %v", err)
+	}
+}
+
+func TestInterruptedRunNeitherOpensNorResolvesIssue(t *testing.T) {
+	now := time.Now()
+	s := testStore(t, &now)
+	repo := createRepo(t, s)
+	finish := func(status model.RunStatus) {
+		t.Helper()
+		run := projectionRun(t, s, repo.ID, "interrupt", projectionSourceSHA)
+		if _, err := s.FinishRun(t.Context(), run.ID, model.RunResult{Status: status, Error: "scheduler stopped"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	finish(model.RunInterrupted)
+	if _, err := s.OpenCIIssue(t.Context(), repo.ID, "interrupt"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("interrupted created issue: %v", err)
+	}
+	finish(model.RunFailed)
+	before, err := s.OpenCIIssue(t.Context(), repo.ID, "interrupt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	now = now.Add(time.Minute)
+	finish(model.RunInterrupted)
+	after, err := s.OpenCIIssue(t.Context(), repo.ID, "interrupt")
+	if err != nil || before.ID != after.ID || before.Body != after.Body || before.Occurrences != after.Occurrences || !before.UpdatedAt.Equal(after.UpdatedAt) {
+		t.Fatalf("interrupted changed issue %+v -> %+v (%v)", before, after, err)
+	}
+}
+
+func TestFlatRunsPrunedCursorIsNotFound(t *testing.T) {
+	now := time.Now()
+	s := testStore(t, &now)
+	repo := createRepo(t, s)
+	spec := testRunSpec(repo.ID, "pruned", strings.Repeat("a", 40))
+	spec.RefKind, spec.Release, spec.Trigger = model.RefTag, true, "tag"
+	run, err := s.EnqueueRun(t.Context(), spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.db.ExecContext(t.Context(), `DELETE FROM runs WHERE id = ?`, run.ID); err != nil {
+		t.Fatal(err)
+	}
+	for _, filter := range []model.RunListFilter{{Before: run.QueueSequence}, {BeforeRun: run.ID}} {
+		if _, err = s.ListRecentRuns(t.Context(), filter); !errors.Is(err, ErrNotFound) || !strings.Contains(err.Error(), "restart from the first page") {
+			t.Fatalf("pruned cursor: %v", err)
+		}
+	}
+}
+
+func TestFlatRunsFinishedRowsSortByAdmissionNotFinish(t *testing.T) {
+	now := time.Now()
+	s := testStore(t, &now)
+	repo := createRepo(t, s)
+	first := projectionRun(t, s, repo.ID, "first", projectionSourceSHA)
+	if _, err := s.MarkRunAdmitted(t.Context(), first.ID); err != nil {
+		t.Fatal(err)
+	}
+	now = now.Add(time.Minute)
+	second := projectionRun(t, s, repo.ID, "second", projectionSourceSHA)
+	if _, err := s.MarkRunAdmitted(t.Context(), second.ID); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{second.ID, first.ID} {
+		now = now.Add(time.Minute)
+		if _, err := s.FinishRun(t.Context(), id, model.RunResult{Status: model.RunPassed}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rows, err := s.ListRecentRuns(t.Context(), model.RunListFilter{})
+	if err != nil || len(rows) != 2 || rows[0].ID != second.ID || rows[1].ID != first.ID {
+		t.Fatalf("finish order displaced admission order: %+v, %v", rows, err)
 	}
 }
