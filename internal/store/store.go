@@ -1335,9 +1335,6 @@ func (s *Store) appendPromotion(ctx context.Context, spec model.PromotionSpec, r
 	if err != nil {
 		return model.Promotion{}, err
 	}
-	if err := registerPromotionIssueWork(ctx, tx, value, now); err != nil {
-		return model.Promotion{}, err
-	}
 	if err := s.appendPromotionAdmissionAudit(ctx, tx, value, now); err != nil {
 		return model.Promotion{}, err
 	}
@@ -1396,9 +1393,6 @@ func (s *Store) EnqueuePromotionRun(ctx context.Context, runSpec model.RunSpec, 
 	}
 	promotion, err := insertPromotion(ctx, tx, promotionSpec, promotionID, runID, promotionSpec.GrantID, now)
 	if err != nil {
-		return model.EnqueueRunResult{}, model.Promotion{}, err
-	}
-	if err := registerPromotionIssueWork(ctx, tx, promotion, now); err != nil {
 		return model.EnqueueRunResult{}, model.Promotion{}, err
 	}
 	if err := s.appendPromotionAdmissionAudit(ctx, tx, promotion, now); err != nil {

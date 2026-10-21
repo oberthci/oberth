@@ -1100,13 +1100,17 @@ continuity checks; it must never be used to reset or bypass those checks.
   branch that already has newer active work keeps only that newest run.
   Explicitly cancelled runs are never re-fired either: they are terminal
   before any restart pass looks at them, and only active runs are requeued.
-- Green branch runs force-sync that same branch to the upstream forge. Red runs
-  create or update one open CI issue per repository and branch with the new SHA,
-  a bounded (16 KiB) failure excerpt, and full burn-log command hint; green
-  closes it. An explicitly cancelled run (or promotion) projects no CI issue
-  and leaves an existing one unchanged. A periodic reconciliation also closes a stale red issue when its
-  accepted branch head is merged into the upstream default branch and that
-  branch's latest run passed, or when a previously published or explicitly
+- Green branch runs force-sync that same branch to the upstream forge. Red
+  default-branch and scheduled branch runs create or update one open CI issue
+  per repository and branch with the new SHA, a bounded (16 KiB) failure excerpt,
+  and full burn-log command hint; green closes it. Ordinary feature-branch runs,
+  promotions, and tag/release runs do not register CI issue work. Projection
+  never acquires, renews, or deletes issue locks; explicit coordination locks
+  remain available. An explicitly cancelled run (or promotion) projects no CI
+  issue and leaves an existing one unchanged. A periodic reconciliation also
+  closes a stale red issue when its accepted branch head is merged into the
+  upstream default branch and that branch's latest run passed, or when a
+  previously published or explicitly
   deleted branch is absent upstream. The closing reason is appended to the
   issue and audit history. Default-branch CI issues close only through a green
   run. When the run recorded a failed burn/step, the excerpt comes only

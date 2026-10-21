@@ -120,8 +120,11 @@ oberth schedules <repo>     # one repository, including why an entry was refused
 
 Scheduled runs are marked in the dashboard's run stream.
 
-A failing scheduled run opens the same CI issue a failing pushed run does, and
-closes it on recovery. Routing that somewhere is a separate concern.
+A failing scheduled branch run opens or updates one CI issue per repository and
+branch, even on a non-default branch, and green closes it on recovery. Projection
+does not lock the issue. Ordinary pushed runs file issues only on the default
+branch; promotions and tag/release runs file none. Routing that somewhere is a
+separate concern.
 
 ## Limits
 

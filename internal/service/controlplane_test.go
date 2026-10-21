@@ -1426,7 +1426,7 @@ func TestSchedulerUpdatesOneCIIssueAcrossRedRedGreen(t *testing.T) {
 	for index, sha := range shas {
 		if _, err := fixture.scheduler.EnqueueCI(ctx, CIRequest{
 			EventID: fmt.Sprintf("receive-%d", index), Repository: fixture.repo,
-			Branch: "feature/red-green", SHA: sha, Actor: "agent@host",
+			Branch: "main", SHA: sha, Actor: "agent@host",
 		}); err != nil {
 			t.Fatal(err)
 		}
@@ -1454,19 +1454,22 @@ func TestSchedulerUpdatesOneCIIssueAcrossRedRedGreen(t *testing.T) {
 				(index == 1 && strings.Contains(page.Issues[0].Body, shas[0])) {
 				t.Fatalf("red issue did not replace its SHA, bounded tail, and log hint: %#v", page.Issues[0])
 			}
-			if _, err := fixture.store.AcquireIssueLock(ctx, issueID, "monitor@host"); !errors.Is(err, store.ErrLockHeld) {
-				t.Fatalf("red issue lock error = %v, want ErrLockHeld", err)
+			if _, err := fixture.store.AcquireIssueLock(ctx, issueID, "monitor@host"); err != nil {
+				t.Fatalf("projected issue should be unlocked: %v", err)
+			}
+			if err := fixture.store.ReleaseIssueLock(ctx, issueID, "monitor@host"); err != nil {
+				t.Fatal(err)
 			}
 		}
 		if index == 2 && (page.Issues[0].State != model.IssueClosed || !strings.Contains(page.Issues[0].Body, "resolved by "+sha+" (run ")) {
 			t.Fatalf("green did not close issue: %#v", page.Issues[0])
 		}
-		value, err := fixture.api(t).CallTool(ctx, api.Actor{Identity: "agent@host"}, "status", json.RawMessage(`{"ref":"feature/red-green"}`))
+		value, err := fixture.api(t).CallTool(ctx, api.Actor{Identity: "agent@host"}, "status", json.RawMessage(`{"ref":"main"}`))
 		if err != nil {
 			t.Fatal(err)
 		}
 		status := value.(StatusResponse)
-		if status.Repo != "oberth" || status.Ref != "feature/red-green" || status.SHA != sha || status.RunID == "" || status.Burns["test"] == "" {
+		if status.Repo != "oberth" || status.Ref != "main" || status.SHA != sha || status.RunID == "" || status.Burns["test"] == "" {
 			t.Fatalf("wire status after run %d = %#v", index, status)
 		}
 		if index < 2 && (status.Status != "failed" || status.FailedStep != "unit" || status.ExitCode == nil || *status.ExitCode != 1 || status.Issue == nil || *status.Issue != issueID || status.Burns["test"] != "failed") {
@@ -1483,8 +1486,8 @@ func TestSchedulerUpdatesOneCIIssueAcrossRedRedGreen(t *testing.T) {
 			t.Fatalf("status leaked internal model: %s", encoded)
 		}
 	}
-	if len(fixture.git.syncedBranches) != 1 || fixture.git.syncedBranches[0] != "codeberg/acme/oberth:feature/red-green:"+shas[2] {
-		t.Fatalf("green branch syncs = %#v", fixture.git.syncedBranches)
+	if len(fixture.git.promotions) != 1 || fixture.git.promotions[0] != "codeberg/acme/oberth:main:"+shas[2] || len(fixture.git.syncedBranches) != 0 {
+		t.Fatalf("green default-branch publication = %#v, forced syncs = %#v", fixture.git.promotions, fixture.git.syncedBranches)
 	}
 }
 
@@ -1619,12 +1622,19 @@ func TestDashboardRunDetailAndLogViewsAreReadOnly(t *testing.T) {
 	ctx := context.Background()
 	enqueued, err := fixture.scheduler.EnqueueCI(ctx, CIRequest{
 		EventID: "receive-dashboard-detail", Repository: fixture.repo,
-		Branch: "feature/dashboard-detail", SHA: sha, Actor: "agent@host",
+		Branch: "main", SHA: sha, Actor: "agent@host",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := fixture.scheduler.ProcessNext(ctx); err != nil {
+		t.Fatal(err)
+	}
+	issue, err := fixture.store.OpenCIIssue(ctx, fixture.repo.ID, "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fixture.store.AcquireIssueLock(ctx, issue.ID, "agent@host"); err != nil {
 		t.Fatal(err)
 	}
 	control := fixture.api(t)
@@ -1640,13 +1650,8 @@ func TestDashboardRunDetailAndLogViewsAreReadOnly(t *testing.T) {
 	if len(detail.Steps) != 2 || detail.Steps[0].Burn != "lint" || detail.Steps[1].Step != "unit" || detail.Steps[1].Status != model.StepFailed {
 		t.Fatalf("run detail steps = %#v", detail.Steps)
 	}
-	// The red run's CI issue stays locked for the pushing actor exactly as the
-	// scheduler left it: the read-only view neither stole, released, nor
-	// renewed that lock, and the dashboard viewer identity owns nothing.
-	issue, err := fixture.store.OpenCIIssue(ctx, fixture.repo.ID, "feature/dashboard-detail")
-	if err != nil {
-		t.Fatal(err)
-	}
+	// The read-only view preserves the explicitly acquired issue lock; the
+	// dashboard viewer identity owns no coordination state.
 	if _, err := fixture.store.AcquireIssueLock(ctx, issue.ID, "another@agent"); !errors.Is(err, store.ErrLockHeld) {
 		t.Fatalf("pusher's CI issue lock was disturbed by the dashboard view: %v", err)
 	}
@@ -2986,8 +2991,8 @@ func TestAdmittedPromotionAlwaysReturnsDurableID(t *testing.T) {
 			t.Fatalf("planning-failed promotion = %#v", promotion)
 		}
 		issue, issueErr := fixture.store.OpenCIIssue(context.Background(), fixture.repo.ID, "feature/conflict")
-		if issueErr != nil || issue.CIOrigin != "promotion" || !strings.Contains(issue.Body, promotion.ID) {
-			t.Fatalf("planning failure issue = %#v, %v", issue, issueErr)
+		if !errors.Is(issueErr, store.ErrNotFound) {
+			t.Fatalf("planning failure created an issue = %#v, %v", issue, issueErr)
 		}
 	})
 
@@ -3034,8 +3039,8 @@ func TestAdmittedPromotionCompensationSurvivesRequestCancellation(t *testing.T) 
 			t.Fatalf("durable cancellation result = %#v, %v", durable, err)
 		}
 		issue, err := fixture.store.OpenCIIssue(context.Background(), fixture.repo.ID, branch)
-		if err != nil || issue.CIOrigin != "promotion" || !strings.Contains(issue.Body, promotion.ID) {
-			t.Fatalf("cancellation issue projection = %#v, %v", issue, err)
+		if !errors.Is(err, store.ErrNotFound) {
+			t.Fatalf("promotion cancellation created an issue = %#v, %v", issue, err)
 		}
 		if wantRun {
 			run, runErr := fixture.store.Run(context.Background(), promotion.RunID)
@@ -3135,7 +3140,7 @@ func TestStatusUsesDirectIssueLookupWithoutRenewal(t *testing.T) {
 	ctx := context.Background()
 	const sha = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	if _, err := fixture.scheduler.EnqueueCI(ctx, CIRequest{
-		EventID: "status-direct-issue", Repository: fixture.repo, Branch: "feature/direct",
+		EventID: "status-direct-issue", Repository: fixture.repo, Branch: "main",
 		SHA: sha, Actor: "agent@host",
 	}); err != nil {
 		t.Fatal(err)
@@ -3156,7 +3161,7 @@ func TestStatusUsesDirectIssueLookupWithoutRenewal(t *testing.T) {
 		t.Fatal(err)
 	}
 	value, err := service.CallTool(ctx, api.Actor{Identity: "agent@host"}, "status",
-		json.RawMessage(`{"ref":"feature/direct"}`))
+		json.RawMessage(`{"ref":"main"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3178,7 +3183,7 @@ func TestStatusUsesDirectIssueLookupWithoutRenewal(t *testing.T) {
 		t.Fatal(err)
 	}
 	value, err = service.CallTool(ctx, api.Actor{Identity: "agent@host"}, "status",
-		json.RawMessage(`{"ref":"feature/direct"}`))
+		json.RawMessage(`{"ref":"main"}`))
 	if err != nil {
 		t.Fatalf("status should succeed without renewal: %v", err)
 	}
@@ -4105,7 +4110,7 @@ func TestPublishIssueKindDistinguishesPublishFromCodeFailure(t *testing.T) {
 	})
 	enqueued, err := fixture.scheduler.EnqueueCI(context.Background(), CIRequest{
 		EventID: "receive-issue-kind", Repository: fixture.repo,
-		Branch: "feature/issue-kind", SHA: sha, Actor: "agent@host",
+		Branch: "main", SHA: sha, Actor: "agent@host",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -4120,7 +4125,7 @@ func TestPublishIssueKindDistinguishesPublishFromCodeFailure(t *testing.T) {
 		t.Fatalf("run = %s/%s, %v", run.Status, run.Phase, err)
 	}
 	// Check that the CI issue has the distinct publish title.
-	issue, err := fixture.store.OpenCIIssue(context.Background(), fixture.repo.ID, "feature/issue-kind")
+	issue, err := fixture.store.OpenCIIssue(context.Background(), fixture.repo.ID, "main")
 	if err != nil {
 		t.Fatalf("open CI issue: %v", err)
 	}
@@ -4141,7 +4146,7 @@ func TestPublishIssueKindDistinguishesPublishFromCodeFailure(t *testing.T) {
 		t.Fatalf("publish_retry status = %q", result.Status)
 	}
 	// The issue should be closed now.
-	_, closedErr := fixture.store.OpenCIIssue(context.Background(), fixture.repo.ID, "feature/issue-kind")
+	_, closedErr := fixture.store.OpenCIIssue(context.Background(), fixture.repo.ID, "main")
 	if !errors.Is(closedErr, store.ErrNotFound) {
 		t.Fatalf("issue after retry = %v, want ErrNotFound (closed)", closedErr)
 	}

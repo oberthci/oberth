@@ -136,7 +136,9 @@ MCP client (full walkthrough in [docs/mcp-setup.md](docs/mcp-setup.md)):
    timeout, and named log slice. The server sets metadata, forces the
    ServiceAccount identity, and injects the source checkout.
 3. **Record** — green publishes the exact branch SHA to the upstream forge;
-   red creates or updates the branch's single CI issue. Nothing lives only on
+   red on the default branch or a scheduled branch run creates or updates the
+   branch's single CI issue, without locking it. Other branch runs and promotions
+   file no CI issue; tag/release filing is not supported. Nothing lives only on
    the box.
 4. **Promote** — `promote <sha> <branch>` verifies the SHA is green, merges
    locally, proves the merged tree when the target diverged, and pushes

@@ -19,6 +19,18 @@ sequences and positions; `TestRunListDefaultViewUnchanged` compares the
 default `run_list` encoding byte for byte. `TestRunsPageSplitsActiveFromHistory`
 pins the dashboard's Active/History split and head-of-line marker.
 
+CI issue policy #1170: `TestRunIssueProjectionPolicy` covers default branches
+(including a configured non-main default), scheduled feature branches, and
+excluded feature, promotion, plan/apply and tag runs.
+`TestPromotionDoesNotRegisterCIIssueWork` covers both promotion admission paths.
+`TestCIIssueProjectionTakesNoLock` verifies another actor can append immediately,
+projection never creates or takes over a lock, and green preserves existing
+locks. Atomic run/publication and legacy promotion projection tests retain
+rollback, ordering, deduplication and recovery coverage. Control-plane fixtures
+use the default branch for issue-bearing status and publication checks; promotion
+failures retain durable results without filing issues. Legacy issue reconciliation
+remains covered without a schema migration.
+
 Run cancel and supersede admission release:
 `TestSupersedingAWaitingXLHeadReleasesItsReservationOnTheNextGrantPass` (real
 SQLite, fake engine) supersedes an XL group member waiting at the FIFO head

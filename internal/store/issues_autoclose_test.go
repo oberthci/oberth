@@ -16,7 +16,7 @@ func TestAutoCloseCIIssueRecordsReasonAndResolvesOldProjection(t *testing.T) {
 	s := testStore(t, &now)
 	repo := projectionRepository(t, s)
 	ctx := context.Background()
-	run := projectionRun(t, s, repo.ID, "feature/red", projectionSourceSHA)
+	run := projectionRunWithTrigger(t, s, repo.ID, "feature/red", projectionSourceSHA, "schedule")
 	if _, err := s.FinishRun(ctx, run.ID, model.RunResult{Status: model.RunFailed, Phase: "test", FailedStep: "unit"}); err != nil {
 		t.Fatal(err)
 	}
@@ -64,7 +64,7 @@ func TestAutoCloseCIIssueGuardsDefaultBranchAndNewerFailure(t *testing.T) {
 	if _, err := s.OpenCIIssue(ctx, repo.ID, "main"); err != nil {
 		t.Fatalf("default-branch issue was closed: %v", err)
 	}
-	first := projectionRun(t, s, repo.ID, "feature/red", projectionSourceSHA)
+	first := projectionRunWithTrigger(t, s, repo.ID, "feature/red", projectionSourceSHA, "schedule")
 	if _, err := s.FinishRun(ctx, first.ID, model.RunResult{Status: model.RunFailed, Phase: "test"}); err != nil {
 		t.Fatal(err)
 	}
@@ -72,7 +72,7 @@ func TestAutoCloseCIIssueGuardsDefaultBranchAndNewerFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	second := projectionRun(t, s, repo.ID, "feature/red", projectionResultSHA)
+	second := projectionRunWithTrigger(t, s, repo.ID, "feature/red", projectionResultSHA, "schedule")
 	if _, err := s.FinishRun(ctx, second.ID, model.RunResult{Status: model.RunFailed, Phase: "test"}); err != nil {
 		t.Fatal(err)
 	}

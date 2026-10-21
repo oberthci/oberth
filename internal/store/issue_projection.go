@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/oberthci/oberth/internal/model"
 )
@@ -39,21 +38,18 @@ func registerRunIssueWork(ctx context.Context, tx *sql.Tx, run model.Run, now in
 	if run.RefKind != model.RefBranch || run.Trigger == "promotion" || run.Trigger == "plan" || run.Trigger == "apply" {
 		return nil
 	}
+	var defaultBranch string
+	if err := tx.QueryRowContext(ctx, `SELECT default_branch FROM repositories WHERE id = ?`, run.RepoID).Scan(&defaultBranch); err != nil {
+		return fmt.Errorf("load issue work default branch: %w", err)
+	}
+	if run.Trigger != "schedule" && run.Ref != defaultBranch {
+		return nil
+	}
 	_, err := tx.ExecContext(ctx, `
 INSERT INTO ci_issue_work(repo_id, branch, origin, run_id, actor, created_at)
 VALUES(?, ?, 'branch', ?, ?, ?)`, run.RepoID, run.Ref, run.ID, run.Actor, now)
 	if err != nil {
 		return fmt.Errorf("register branch issue work: %w", err)
-	}
-	return nil
-}
-
-func registerPromotionIssueWork(ctx context.Context, tx *sql.Tx, promotion model.Promotion, now int64) error {
-	_, err := tx.ExecContext(ctx, `
-INSERT INTO ci_issue_work(repo_id, branch, origin, promotion_id, actor, created_at)
-VALUES(?, ?, 'promotion', ?, ?, ?)`, promotion.RepoID, promotion.SourceBranch, promotion.ID, promotion.Actor, now)
-	if err != nil {
-		return fmt.Errorf("register promotion issue work: %w", err)
 	}
 	return nil
 }
@@ -227,9 +223,6 @@ RETURNING `+issueColumns, now, now, resolution, resolution, open.ID))
 		if err != nil {
 			return fmt.Errorf("close projected CI issue: %w", err)
 		}
-		if _, err := tx.ExecContext(ctx, `DELETE FROM issue_locks WHERE issue_id = ?`, closed.ID); err != nil {
-			return fmt.Errorf("release resolved CI issue lock: %w", err)
-		}
 		if err := s.appendIssueAudit(ctx, tx, projection.Work.Actor, "issue.ci.close", closed.ID,
 			map[string]any{"branch": projection.Work.Branch, "resolution": resolution}, now); err != nil {
 			return err
@@ -265,9 +258,6 @@ WHERE id = ? AND state = 'open'
 RETURNING `+issueColumns, now, now, resolution, resolution, open.ID))
 			if closeErr != nil {
 				return fmt.Errorf("close superseded promotion CI issue: %w", closeErr)
-			}
-			if _, delErr := tx.ExecContext(ctx, `DELETE FROM issue_locks WHERE issue_id = ?`, closed.ID); delErr != nil {
-				return fmt.Errorf("release superseded CI issue lock: %w", delErr)
 			}
 			if auditErr := s.appendIssueAudit(ctx, tx, projection.Work.Actor, "issue.ci.close", closed.ID,
 				map[string]any{"branch": projection.Work.Branch, "resolution": resolution}, now); auditErr != nil {
@@ -317,7 +307,7 @@ RETURNING `+issueColumns,
 			return err
 		}
 	}
-	return s.lockProjectedCIIssue(ctx, tx, issue.ID, desired.Actor, now)
+	return nil
 }
 
 func ciIssueWorkID(work ciIssueWork) string {
@@ -340,25 +330,4 @@ func scanDesiredCIIssue(row rowScanner) (desiredCIIssue, error) {
 	var value desiredCIIssue
 	err := row.Scan(&value.Sequence, &value.WorkID, &value.Origin, &value.Title, &value.Body, &value.Actor)
 	return value, err
-}
-
-func (s *Store) lockProjectedCIIssue(ctx context.Context, tx *sql.Tx, issueID int64, actor string, now int64) error {
-	expires := fromUnixNano(now).Add(IssueLockTTL)
-	var owner string
-	err := tx.QueryRowContext(ctx, `
-INSERT INTO issue_locks(issue_id, owner, acquired_at, expires_at) VALUES(?, ?, ?, ?)
-ON CONFLICT(issue_id) DO UPDATE SET
-    owner = excluded.owner,
-    acquired_at = excluded.acquired_at,
-    expires_at = excluded.expires_at
-WHERE issue_locks.expires_at <= ? OR issue_locks.owner = excluded.owner
-RETURNING owner`, issueID, actor, now, unixNano(expires), now).Scan(&owner)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil
-	}
-	if err != nil {
-		return fmt.Errorf("lock projected CI issue: %w", err)
-	}
-	return s.appendIssueAudit(ctx, tx, actor, "issue.lock.acquire", issueID,
-		map[string]any{"expires_at": expires.Format(time.RFC3339Nano), "source": "ci_projection"}, now)
 }

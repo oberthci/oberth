@@ -147,14 +147,16 @@ API can synthesize a lightweight tag whose peel matches while its object identit
 conflicts. Any human-facing forge release therefore happens only after Oberth's
 tag publication, outside the in-band DAG.
 
-CI issue work receives a global admission sequence in the same transaction as
-its run or promotion. Per-branch and per-origin watermarks make projections
-monotonic: delayed older completions cannot overwrite newer failures, and an
-ordinary green run cannot close an unresolved promotion failure. A qualifying
-published promotion can close it without creating a second issue. Each branch
-failure projection includes the caller-supplied bounded retained-log tail and a
-command hint for the complete failed-step log; the transient tail is not stored
-on the run record.
+Only default-branch and scheduled branch runs register CI issue work, receiving
+a global admission sequence in the same transaction as the run. Ordinary
+feature-branch runs, promotions, and tag/release runs register none. Per-branch
+and per-origin watermarks keep projections monotonic: delayed older completions
+cannot overwrite newer failures. Existing branch and promotion projection
+records remain usable for recovery and reconciliation. Red creates or updates
+one open issue per repository and branch; green closes it. Projection never
+acquires, renews, or deletes issue locks. Each branch failure projection includes
+the caller-supplied bounded retained-log tail and a command hint for the complete
+failed-step log; the transient tail is not stored on the run record.
 An upstream reconciliation closes stale branch CI issues after a merge into a
 green default branch or a verified upstream deletion. It checks the accepted
 local branch head for ancestry, since a failed newer push may be ahead of the
