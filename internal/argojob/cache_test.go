@@ -37,7 +37,7 @@ spec:
   templates:
     - name: main
       container:
-        image: golang:1.26-trixie@sha256:f06b7122f888680048afb247c4e5f49c0069eb6c4c1ccae0f3f4834527a8d22c
+        image: golang:1.26-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd
         command: [/bin/true]
         env:
           - name: GOMODCACHE
@@ -333,7 +333,7 @@ spec:
           - name: nested
             inline:
               container:
-                image: golang:1.26-trixie@sha256:f06b7122f888680048afb247c4e5f49c0069eb6c4c1ccae0f3f4834527a8d22c
+                image: golang:1.26-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd
                 command: [/bin/true]
 `
 	workflow, err := Build(cachingConfig(), testRequest(periapsis.TriggerCI, inlineDocument))

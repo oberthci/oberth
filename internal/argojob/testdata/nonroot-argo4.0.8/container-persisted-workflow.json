@@ -21,8 +21,8 @@
       "oberth.ci/nonroot-templates": "test",
       "oberth.ci/ref": "refs/heads/main",
       "oberth.ci/run-id": "run-abc123",
-      "oberth.ci/spec-identity": "096ec00493e87aab06382a297bc5879c011feadc326d1108859dbb671ced1995",
-      "oberth.ci/verified-controller-profile": "nonroot-static-v1:ba7d414baae525c3957b24dc816baaa756926ab96dcb7a69d492cc9fcd3100ee",
+      "oberth.ci/spec-identity": "e690c0e2db909900c6e717552974efe6247245ac72b7819d86a5f70d756d2090",
+      "oberth.ci/verified-controller-profile": "nonroot-static-v1:9f3266af98f0e8b28f4098c906b2bff8d99fa1fdf36e6d396b5239ec2079a833",
       "workflows.argoproj.io/pod-name-format": "v2"
     }
   },
@@ -35,7 +35,7 @@
         "metadata": {},
         "container": {
           "name": "",
-          "image": "golang:1.26.9-trixie@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "image": "golang:1.26.10-trixie@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
           "command": [
             "/bin/true"
           ],
@@ -150,7 +150,7 @@
         "metadata": {},
         "container": {
           "name": "",
-          "image": "golang:1.26.9-trixie@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "image": "golang:1.26.10-trixie@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
           "command": [
             "/bin/true"
           ],
@@ -295,7 +295,7 @@
   },
   "status": {
     "phase": "Running",
-    "startedAt": "2026-10-19T08:41:01Z",
+    "startedAt": "2026-10-21T11:34:37Z",
     "finishedAt": null,
     "estimatedDuration": 1,
     "progress": "0/1",
@@ -308,7 +308,7 @@
         "templateName": "test",
         "templateScope": "local/oberth-oberth-run-abc1-aabbccddeeff",
         "phase": "Pending",
-        "startedAt": "2026-10-19T08:41:01Z",
+        "startedAt": "2026-10-21T11:34:37Z",
         "finishedAt": null,
         "estimatedDuration": 1,
         "progress": "0/1",

@@ -71,3 +71,12 @@ read-only. The final
 Pods replace the legacy token volume with tmpfs and isolate it from pipeline
 containers. Runtime TokenRequest issuance and holder-Pod cleanup are covered
 separately by unit tests and a live kind workflow.
+
+The 2026-10-21 Go 1.26.10 recapture regenerated both nonroot shapes with
+the retained nonroot and isolation capture helpers, authenticated Argo
+v4.0.8 module, and a capture-only isolation hook immediately before the
+patch boundary. All six observations came from actual fake-controller
+reconciliation; both submitted Pods passed the retained Kubernetes
+v1.35.7 validator. The module sums and original controller source digest
+remain unchanged; provenance records the new instrumented source digest
+and observed file hashes. No expected Pod was edited manually.

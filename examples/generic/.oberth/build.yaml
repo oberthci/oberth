@@ -66,7 +66,7 @@ spec:
 
   - name: tools-dir
     container:
-      image: "golang:1.26.9-trixie@sha256:f06b7122f888680048afb247c4e5f49c0069eb6c4c1ccae0f3f4834527a8d22c"
+      image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
       workingDir: /work/src
       command: ["/bin/mkdir"]
       args: ["-p", "/tmp/oberth-tools/bin", "/tmp/oberth-tools/downloads"]
@@ -90,7 +90,7 @@ spec:
   - name: fetch-shellcheck
     activeDeadlineSeconds: 120
     container:
-      image: "golang:1.26.9-trixie@sha256:f06b7122f888680048afb247c4e5f49c0069eb6c4c1ccae0f3f4834527a8d22c"
+      image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
       workingDir: /work/src
       command: ["/usr/bin/curl"]
       args:
@@ -113,7 +113,7 @@ spec:
 
   - name: verify-shellcheck
     container:
-      image: "golang:1.26.9-trixie@sha256:f06b7122f888680048afb247c4e5f49c0069eb6c4c1ccae0f3f4834527a8d22c"
+      image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
       workingDir: /work/src
       command: ["/usr/bin/sha256sum"]
       args: ["-c", ".oberth/pins/tools.sha256"]
@@ -123,7 +123,7 @@ spec:
 
   - name: unpack-shellcheck
     container:
-      image: "golang:1.26.9-trixie@sha256:f06b7122f888680048afb247c4e5f49c0069eb6c4c1ccae0f3f4834527a8d22c"
+      image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
       workingDir: /work/src
       command: ["/bin/tar"]
       args:
@@ -140,7 +140,7 @@ spec:
   # ---- lint ----
   - name: lint
     container:
-      image: "golang:1.26.9-trixie@sha256:f06b7122f888680048afb247c4e5f49c0069eb6c4c1ccae0f3f4834527a8d22c"
+      image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
       workingDir: /work/src
       command: ["/tmp/oberth-tools/bin/shellcheck"]
       args: ["--severity=warning", "--shell=bash", "scripts/deploy.sh", "scripts/test.sh"]
@@ -152,7 +152,7 @@ spec:
   - name: test
     activeDeadlineSeconds: 600
     container:
-      image: "golang:1.26.9-trixie@sha256:f06b7122f888680048afb247c4e5f49c0069eb6c4c1ccae0f3f4834527a8d22c"
+      image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
       workingDir: /work/src
       command: ["/usr/bin/make"]
       args: ["test"]
@@ -170,7 +170,7 @@ spec:
   - name: package
     activeDeadlineSeconds: 300
     container:
-      image: "golang:1.26.9-trixie@sha256:f06b7122f888680048afb247c4e5f49c0069eb6c4c1ccae0f3f4834527a8d22c"
+      image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
       workingDir: /work/src
       command: ["/bin/tar"]
       args:

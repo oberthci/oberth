@@ -39,7 +39,7 @@ promote a different release's bytes.
 
 ## Tool pins
 
-`pins/bootstrap-tools.sha256` pins Linux amd64 executables. Go 1.26.9 builds
+`pins/bootstrap-tools.sha256` pins Linux amd64 executables. Go 1.26.10 builds
 the two repository helpers and Helm v4.2.3 with `CGO_ENABLED=0`, `GOOS=linux`,
 `GOARCH=amd64`, `GOTOOLCHAIN=local`, `GOWORK=off`, `GOENV=off`, `-trimpath`,
 `-buildvcs=false`, and `-ldflags=-buildid=`. The helper builds use

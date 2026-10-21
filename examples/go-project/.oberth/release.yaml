@@ -78,7 +78,7 @@ spec:
 
   - name: tools-dir
     container:
-      image: "golang:1.26.9-trixie@sha256:f06b7122f888680048afb247c4e5f49c0069eb6c4c1ccae0f3f4834527a8d22c"
+      image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
       workingDir: /work/src
       command: ["/bin/mkdir"]
       args: ["-p", "/tmp/oberth-tools/bin", "/tmp/oberth-release/artifacts"]
@@ -122,7 +122,7 @@ spec:
 
   - name: link-go
     container:
-      image: "golang:1.26.9-trixie@sha256:f06b7122f888680048afb247c4e5f49c0069eb6c4c1ccae0f3f4834527a8d22c"
+      image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
       workingDir: /work/src
       command: ["/bin/ln"]
       args: ["-sf", "/usr/local/go/bin/go", "/usr/local/go/bin/gofmt", "/tmp/oberth-tools/bin"]
@@ -132,7 +132,7 @@ spec:
 
   - name: install-envconsul
     container:
-      image: "golang:1.26.9-trixie@sha256:f06b7122f888680048afb247c4e5f49c0069eb6c4c1ccae0f3f4834527a8d22c"
+      image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
       workingDir: /work/src
       command: ["/usr/local/go/bin/go"]
       args: ["install", "github.com/hashicorp/envconsul@v0.13.2"]
@@ -162,7 +162,7 @@ spec:
   # pattern in Oberth's own .oberth/release.yaml.
   - name: fetch-cosign
     container:
-      image: "golang:1.26.9-trixie@sha256:f06b7122f888680048afb247c4e5f49c0069eb6c4c1ccae0f3f4834527a8d22c"
+      image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
       workingDir: /work/src
       command: ["/usr/bin/curl"]
       args:
@@ -185,7 +185,7 @@ spec:
 
   - name: verify-cosign
     container:
-      image: "golang:1.26.9-trixie@sha256:f06b7122f888680048afb247c4e5f49c0069eb6c4c1ccae0f3f4834527a8d22c"
+      image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
       workingDir: /work/src
       command: ["/usr/bin/sha256sum"]
       args: ["-c", ".oberth/pins/cosign.sha256"]
@@ -195,7 +195,7 @@ spec:
 
   - name: install-cosign
     container:
-      image: "golang:1.26.9-trixie@sha256:f06b7122f888680048afb247c4e5f49c0069eb6c4c1ccae0f3f4834527a8d22c"
+      image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
       workingDir: /work/src
       command: ["/bin/chmod"]
       args: ["0755", "/tmp/oberth-tools/bin/cosign"]
@@ -205,7 +205,7 @@ spec:
 
   - name: release-test
     container:
-      image: "golang:1.26.9-trixie@sha256:f06b7122f888680048afb247c4e5f49c0069eb6c4c1ccae0f3f4834527a8d22c"
+      image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
       workingDir: /work/src
       command: ["/tmp/oberth-tools/bin/go"]
       args: ["test", "-race", "-v", "-count=1", "./..."]
@@ -241,7 +241,7 @@ spec:
   # so that sign and push tasks in separate pods can access it.
   - name: release-build
     container:
-      image: "golang:1.26.9-trixie@sha256:f06b7122f888680048afb247c4e5f49c0069eb6c4c1ccae0f3f4834527a8d22c"
+      image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
       workingDir: /work/src
       command: ["/tmp/oberth-tools/bin/go"]
       args: ["build", "-trimpath", "-ldflags=-s -w", "-o", "/tmp/oberth-release/artifacts/app-linux-amd64", "./cmd/app"]
@@ -280,7 +280,7 @@ spec:
   # separate key-fetch step required.
   - name: release-sign
     container:
-      image: "golang:1.26.9-trixie@sha256:f06b7122f888680048afb247c4e5f49c0069eb6c4c1ccae0f3f4834527a8d22c"
+      image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
       workingDir: /work/src
       command: ["/tmp/oberth-tools/bin/envconsul"]
       args:
@@ -317,7 +317,7 @@ spec:
   # per release, matching Oberth's own release layout.
   - name: release-publish
     container:
-      image: "golang:1.26.9-trixie@sha256:f06b7122f888680048afb247c4e5f49c0069eb6c4c1ccae0f3f4834527a8d22c"
+      image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
       workingDir: /work/src
       command: ["/tmp/oberth-tools/bin/envconsul"]
       args:
