@@ -131,7 +131,11 @@ type API struct {
 	// rather than waiting them out. Shared by the per-actor copies.
 	lifetime     context.Context
 	stopLifetime context.CancelFunc
-	runReruns    RunRerunStore
+	// closing refuses new background work once Shutdown began, so no
+	// WaitGroup Add races its Wait and nothing starts against a store the
+	// caller is about to close.
+	closing   *backgroundClosing
+	runReruns RunRerunStore
 	// scope is set on the per-call copy serving a scoped actor (#073).
 	scope *repoScope
 }
@@ -189,8 +193,26 @@ func NewAPI(config APIConfig) (*API, error) {
 		repositoryRemover:   config.RepositoryRemover, removeGitCache: config.RemoveGitCache,
 		promotionGrants: config.PromotionGrants, promotionGrantMaxLifetime: promotionGrantMaxLifetime,
 		runCancels: config.RunCancels, runReruns: config.RunReruns, uplinks: config.Uplinks, background: &sync.WaitGroup{},
-		lifetime: lifetime, stopLifetime: stopLifetime,
+		lifetime: lifetime, stopLifetime: stopLifetime, closing: &backgroundClosing{},
 	}, nil
+}
+
+// backgroundClosing guards the background WaitGroup against late Adds.
+type backgroundClosing struct {
+	mu     sync.Mutex
+	closed bool
+}
+
+// startBackground registers one background goroutine, or reports false once
+// Shutdown has begun; the caller then must not start it.
+func (service *API) startBackground() bool {
+	service.closing.mu.Lock()
+	defer service.closing.mu.Unlock()
+	if service.closing.closed {
+		return false
+	}
+	service.background.Add(1)
+	return true
 }
 
 // Shutdown cancels the API's background waits and waits, within ctx, for
@@ -198,6 +220,9 @@ func NewAPI(config APIConfig) (*API, error) {
 // caller closes it. A promotion whose queue wait is cancelled stays pending
 // with no plan; owner-startup recovery interrupts it.
 func (service *API) Shutdown(ctx context.Context) error {
+	service.closing.mu.Lock()
+	service.closing.closed = true
+	service.closing.mu.Unlock()
 	service.stopLifetime()
 	done := make(chan struct{})
 	go func() {

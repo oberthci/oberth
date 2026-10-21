@@ -1617,13 +1617,6 @@ func runComponents(
 	if adminShutdownErr != nil {
 		adminShutdownErr = errors.Join(adminShutdownErr, adminServer.Close())
 	}
-	// Cancel the API's background waits (promotions queued behind another)
-	// before the store closes, so none wakes against a closed database.
-	if apiShutdown != nil {
-		if apiErr := apiShutdown(shutdownCtx); apiErr != nil {
-			logger.Printf("shutdown: %v", apiErr)
-		}
-	}
 	var goProxyShutdownErr error
 	if goProxyServer != nil {
 		goProxyShutdownErr = goProxyServer.Shutdown(shutdownCtx)
@@ -1632,6 +1625,17 @@ func runComponents(
 		}
 	}
 	workers.Wait()
+	// The scheduler (a worker) can start API background work, an automatic
+	// moved-promotion retry, so the API shuts down after it has stopped.
+	// Shutdown refuses later background starts, cancels queued-promotion
+	// waits and waits, bounded, before the store closes.
+	if apiShutdown != nil {
+		apiCtx, apiCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		if apiErr := apiShutdown(apiCtx); apiErr != nil {
+			logger.Printf("shutdown: %v", apiErr)
+		}
+		apiCancel()
+	}
 	if ctx.Err() != nil {
 		componentErr = nil
 	}

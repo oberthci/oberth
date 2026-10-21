@@ -320,7 +320,7 @@ func TestShutdownCancelsAQueuedPromotionWait(t *testing.T) {
 	promotions.mu.Lock()
 	promotions.closed = true
 	promotions.mu.Unlock()
-	time.Sleep(2 * promotionQueuePoll / 5)
+	// The notify is the proof: a planner still waiting would wake on it.
 	fixture.signals.NotifyPromotion(queued.ID)
 	time.Sleep(100 * time.Millisecond)
 	promotions.mu.Lock()
@@ -339,5 +339,51 @@ func TestShutdownCancelsAQueuedPromotionWait(t *testing.T) {
 	}
 	if current, err = fixture.store.Promotion(ctx, queued.ID); err != nil || current.Status != model.PromotionInterrupted {
 		t.Fatalf("queued promotion after recovery = %#v, %v; want interrupted", current, err)
+	}
+}
+
+// After Shutdown no background work starts: a late automatic moved-promotion
+// retry (the scheduler can deliver one while it drains) and a promotion that
+// would queue are both refused cleanly, and racing starts against Shutdown
+// never panic the WaitGroup.
+func TestNoBackgroundWorkStartsAfterShutdown(t *testing.T) {
+	git := &scriptedPromotionGit{}
+	fixture, _, control := newPromotionRetryHarness(t, git)
+	ctx := context.Background()
+	var racers sync.WaitGroup
+	for range 32 {
+		racers.Add(1)
+		go func() {
+			defer racers.Done()
+			if control.startBackground() {
+				control.background.Done()
+			}
+		}()
+	}
+	if err := control.Shutdown(ctx); err != nil {
+		t.Fatal(err)
+	}
+	racers.Wait()
+	if control.startBackground() {
+		t.Fatal("background work was admitted after Shutdown")
+	}
+	before, err := fixture.store.ListPromotions(ctx, model.PromotionListFilter{RepoID: fixture.repo.ID, Limit: 50})
+	if err != nil {
+		t.Fatal(err)
+	}
+	control.RetryMovedPromotion(ctx, model.Promotion{ID: "late", RepoID: fixture.repo.ID, SourceSHA: retrySourceSHA, TargetRef: "main"})
+	after, err := fixture.store.ListPromotions(ctx, model.PromotionListFilter{RepoID: fixture.repo.ID, Limit: 50})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(after.Promotions) != len(before.Promotions) {
+		t.Fatal("a moved-promotion retry was admitted after Shutdown")
+	}
+	done := make(chan struct{})
+	go func() { control.waitBackground(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("background work outlived Shutdown")
 	}
 }

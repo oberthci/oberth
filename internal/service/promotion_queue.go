@@ -74,17 +74,21 @@ func (service *API) planOrQueuePromotion(ctx context.Context, actor api.Actor, r
 		// promotion ahead. Planning, once begun, outlives the request but
 		// not the process: it runs on planCtx, which shutdown does not cancel
 		// midway, so it ends with an ordinary plan or failure.
+		promotion.Error = queuedPromotionMessage(*predecessor, target)
+		if !service.startBackground() {
+			// Shutting down: leave it pending with no plan for owner-startup
+			// recovery, rather than start a wait nothing would cancel.
+			return promotion, nil
+		}
 		planCtx := context.WithoutCancel(ctx)
 		waitCtx, cancelWait := context.WithCancel(planCtx)
 		stopAfter := context.AfterFunc(service.lifetime, cancelWait)
-		service.background.Add(1)
 		go func(promotion model.Promotion) {
 			defer service.background.Done()
 			defer cancelWait()
 			defer stopAfter()
 			service.planQueuedPromotion(waitCtx, planCtx, actor, repository, candidate, target, promotion)
 		}(promotion)
-		promotion.Error = queuedPromotionMessage(*predecessor, target)
 		return promotion, nil
 	}
 	return service.planAdmittedPromotion(ctx, actor, repository, candidate, target, promotion)

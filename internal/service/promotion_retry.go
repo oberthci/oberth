@@ -171,6 +171,10 @@ func (service *API) currentPromotionAuthority(ctx context.Context, failed model.
 // fast-forward delivery run in the background, holding no admission
 // reservation or delivery permit of the run or request that failed.
 func (service *API) RetryMovedPromotion(ctx context.Context, failed model.Promotion) {
+	if service.lifetime.Err() != nil {
+		log.Printf("oberth: automatic retry of moved promotion %s skipped: server is shutting down", failed.ID)
+		return
+	}
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), promotionAutoRetryTimeout)
 	if err := service.requireMutation(ctx); err != nil {
 		cancel()
@@ -199,7 +203,13 @@ func (service *API) RetryMovedPromotion(ctx context.Context, failed model.Promot
 			repository, candidate, retried, err = scoped.admitPromotionRetry(ctx, actor, failed, model.PromotionRetryAuto)
 			if err == nil {
 				log.Printf("oberth: promotion %s found %s moved; retried as promotion %s", failed.ID, failed.TargetRef, retried.ID)
-				service.background.Add(1)
+				if !service.startBackground() {
+					// Shutting down: the retry stays pending with no plan,
+					// and owner-startup recovery interrupts it.
+					cancel()
+					log.Printf("oberth: automatic retry %s of promotion %s not planned: server is shutting down", retried.ID, failed.ID)
+					return
+				}
 				go func() {
 					defer service.background.Done()
 					defer cancel()
