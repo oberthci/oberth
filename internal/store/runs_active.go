@@ -30,7 +30,7 @@ func (s *Store) ListActiveRuns(ctx context.Context, filter model.RunListFilter) 
 	args := append([]any{filter.RepoID, filter.RepoID, filter.Ref, filter.Ref}, restrictionArgs...)
 	rows, err := s.db.QueryContext(ctx, `
 WITH queue AS (
- SELECT id AS queued_id, ROW_NUMBER() OVER (ORDER BY queue_sequence) AS queue_position FROM runs
+ SELECT id AS queued_id, ROW_NUMBER() OVER (ORDER BY admission_sequence, queue_sequence) AS queue_position FROM runs
  WHERE status = 'queued' OR (status = 'running' AND started_at IS NULL)
 )
 SELECT `+runColumns+`, COALESCE(queue_position, 0) FROM runs LEFT JOIN queue ON runs.id = queue.queued_id
