@@ -705,7 +705,8 @@ continuity checks; it must never be used to reset or bypass those checks.
   `kubevirt_revoke`, read-only `kubevirt_grant_get`, admin-only `size_grant`
   and `size_revoke`, read-only `size_grant_get` (#1021), admin-only
   unscoped `admission_release` (#1099), `repo_list`, `repo_remove`, `run_list`,
-  admin-only `audit_list` (#1104; verified entries, never available to a scoped uplink),
+  admin-only `audit_list` (#1104; verified entries, never available to a scoped uplink;
+  `GET /api/audit` shares its filters, response and restrictions),
   `system_status`, admin-only `secretstore_plan` (#611),
   `secretstore_sync_receipt` (#712), `secretstore_verify`, and
   admin-only `promote_grant`, `promote_grant_revoke`, plus read-only

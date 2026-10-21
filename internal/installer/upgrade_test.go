@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -78,6 +79,10 @@ func TestRunUpgradeAlreadyUpToDate(t *testing.T) {
 			helmCalls := 0
 			deps := Deps{
 				Output: &output,
+				RunCommand: func(context.Context, []byte, string, ...string) ([]byte, error) {
+					t.Fatal("no-op/dry-run must not write audit records")
+					return nil, nil
+				},
 				RunHelm: func(_ context.Context, args []string) ([]byte, error) {
 					helmCalls++
 					if len(args) >= 2 && args[0] == "list" {
@@ -465,6 +470,10 @@ func TestRunUpgradeDryRun(t *testing.T) {
 	var output bytes.Buffer
 	deps := Deps{
 		Output: &output,
+		RunCommand: func(context.Context, []byte, string, ...string) ([]byte, error) {
+			t.Fatal("no-op/dry-run must not write audit records")
+			return nil, nil
+		},
 		RunHelm: func(_ context.Context, args []string) ([]byte, error) {
 			if len(args) >= 2 && args[0] == "list" {
 				releases := []helmRelease{{
@@ -814,6 +823,15 @@ func TestResolveChartImageRefEmpty(t *testing.T) {
 
 func TestRunUpgradeFullFlow(t *testing.T) {
 	t.Parallel()
+	for _, auditFails := range []bool{false, true} {
+		t.Run(fmt.Sprintf("audit-fails=%t", auditFails), func(t *testing.T) {
+			testRunUpgradeFullFlow(t, auditFails)
+		})
+	}
+}
+
+func testRunUpgradeFullFlow(t *testing.T, auditFails bool) {
+	t.Parallel()
 	var output bytes.Buffer
 	targetImage := "europe-west4-docker.pkg.dev/skipopsmain/oberth/oberth:v0.12.35@sha256:abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
 	replicas := int32(1)
@@ -843,6 +861,7 @@ func TestRunUpgradeFullFlow(t *testing.T) {
 
 	kubeClient := fake.NewClientset(deployment)
 
+	verified, recorded := false, false
 	helmCallLog := make([]string, 0)
 	deps := Deps{
 		Output: &output,
@@ -868,7 +887,22 @@ func TestRunUpgradeFullFlow(t *testing.T) {
 				return nil, fmt.Errorf("unexpected helm call: %v", args)
 			}
 		},
-		RunCommand: func(_ context.Context, _ []byte, _ string, _ ...string) ([]byte, error) {
+		RunCommand: func(_ context.Context, _ []byte, name string, args ...string) ([]byte, error) {
+			if strings.Contains(strings.Join(args, " "), "audit record") {
+				if !verified || name != "kubectl" {
+					t.Fatalf("audit before verification: %s %v", name, args)
+				}
+				want := []string{"exec", "-c", "oberth", "-n", "oberth", "deploy/oberth", "--", "oberth", "audit", "record", "upgrade.completed", "--details", `{"from":"0.12.34","to":"0.12.35"}`}
+				if !reflect.DeepEqual(args, want) {
+					t.Fatalf("audit args=%v want=%v", args, want)
+				}
+				recorded = true
+				if auditFails {
+					return nil, errors.New("audit daemon unreachable")
+				}
+				return nil, nil
+			}
+			verified = true
 			return []byte("oberth v0.12.35 commit=abc123 date=2026-08-18T00:00:00Z\n"), nil
 		},
 		KubeClient: kubeClient,
@@ -882,6 +916,12 @@ func TestRunUpgradeFullFlow(t *testing.T) {
 	}, deps)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if !recorded {
+		t.Fatal("upgrade completion was not recorded")
+	}
+	if auditFails && !strings.Contains(output.String(), "could not record upgrade.completed") {
+		t.Fatalf("missing warning: %s", output.String())
 	}
 	if !result.Upgraded {
 		t.Fatal("expected Upgraded")
@@ -1247,7 +1287,10 @@ func TestRunUpgradeFailsWhenVersionUnverifiable(t *testing.T) {
 				return nil, fmt.Errorf("unexpected helm call: %v", args)
 			}
 		},
-		RunCommand: func(_ context.Context, _ []byte, _ string, _ ...string) ([]byte, error) {
+		RunCommand: func(_ context.Context, _ []byte, _ string, args ...string) ([]byte, error) {
+			if strings.Contains(strings.Join(args, " "), "audit record") {
+				t.Fatal("failed upgrade must not record completion")
+			}
 			execAttempts++
 			return nil, fmt.Errorf("error: unable to upgrade connection: container not found")
 		},
@@ -1330,7 +1373,10 @@ func TestRunUpgradeFailsOnVersionMismatchFullFlow(t *testing.T) {
 				return nil, fmt.Errorf("unexpected helm call: %v", args)
 			}
 		},
-		RunCommand: func(_ context.Context, _ []byte, _ string, _ ...string) ([]byte, error) {
+		RunCommand: func(_ context.Context, _ []byte, _ string, args ...string) ([]byte, error) {
+			if strings.Contains(strings.Join(args, " "), "audit record") {
+				t.Fatal("failed upgrade must not record completion")
+			}
 			execAttempts++
 			return []byte("oberth v0.12.20 commit=abc123 date=2026-08-18T00:00:00Z\n"), nil
 		},

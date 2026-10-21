@@ -108,20 +108,21 @@ type AuditChainStatus struct {
 }
 
 type HealthStatus struct {
-	Storage       any                `json:"storage,omitempty"`
-	Database      string             `json:"database"`
-	SchemaVersion int                `json:"schema_version,omitempty"`
-	Upstreams     int                `json:"upstreams"`
-	Repositories  int                `json:"repositories"`
-	VCS           string             `json:"vcs"`
-	Cluster       string             `json:"cluster"`
-	Audit         string             `json:"audit"`
-	AuditMode     string             `json:"audit_mode,omitempty"`
-	Version       string             `json:"version,omitempty"`
-	UpstreamInfo  []UpstreamStatus   `json:"upstream_info,omitempty"`
-	SSHIdentity   string             `json:"ssh_identity,omitempty"`
-	SecretStore   *SecretStoreStatus `json:"secret_store,omitempty"`
-	AuditChain    *AuditChainStatus  `json:"audit_chain,omitempty"`
+	Storage       any                 `json:"storage,omitempty"`
+	Database      string              `json:"database"`
+	SchemaVersion int                 `json:"schema_version,omitempty"`
+	Upstreams     int                 `json:"upstreams"`
+	Repositories  int                 `json:"repositories"`
+	VCS           string              `json:"vcs"`
+	Cluster       string              `json:"cluster"`
+	Audit         string              `json:"audit"`
+	AuditMode     string              `json:"audit_mode,omitempty"`
+	Version       string              `json:"version,omitempty"`
+	UpstreamInfo  []UpstreamStatus    `json:"upstream_info,omitempty"`
+	SSHIdentity   string              `json:"ssh_identity,omitempty"`
+	SecretStore   *SecretStoreStatus  `json:"secret_store,omitempty"`
+	AuditChain    *AuditChainStatus   `json:"audit_chain,omitempty"`
+	LastBackup    *model.BackupStatus `json:"last_backup,omitempty"`
 	// AdmissionBlocker names the run at the head of the admission queue that
 	// every later run waits behind, e.g. an XL run waiting for a full drain
 	// (#1021). Unscoped status only.
@@ -241,6 +242,16 @@ func (health Health) Status(ctx context.Context) (any, error) {
 	}
 	if health.AdmissionBlocker != nil {
 		status.AdmissionBlocker = health.AdmissionBlocker()
+	}
+	if reader, ok := health.Store.(interface {
+		LastBackup(context.Context) (*model.BackupStatus, error)
+	}); ok {
+		backup, err := reader.LastBackup(ctx)
+		if err == nil {
+			status.LastBackup = backup
+		} else {
+			status.Database = "unavailable"
+		}
 	}
 	if health.Admission != nil {
 		status.Admission = health.Admission()

@@ -159,3 +159,11 @@ newly listed package joins the remainder.
 `TestOberthSplitBurnsUseTheRaceGroupLauncher` checks the admitted Pod commands,
 CGO and processor limits; the existing graph and isolation contracts cover
 all three race burns and require each one before every cross-build.
+
+Audit read surfaces (#1104): HTTP and MCP must agree on filtered entries and
+paging, and refuse scoped and non-admin callers. Status reads the latest backup
+completion record's archive hash, timestamp and snapshot head, omitting it for
+scoped callers. Upgrade completion is recorded only after verification; audit
+record failures warn without failing a completed upgrade. CLI tail tests cover
+appends between head and page reads, bursts exceeding 200 matches, and appends
+during pagination that must remain eligible for the next poll.
