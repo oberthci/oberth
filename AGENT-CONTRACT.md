@@ -1799,7 +1799,10 @@ continuity checks; it must never be used to reset or bypass those checks.
   `templateDefaults`, and must not be credentialed (no secret-paths, no release
   WIF role, not also in `oberth.ci/nonroot-templates`). Repository-declared
   `devices.kubevirt.io/*` resources are refused. `inputs.parameters` are allowed
-  (unlike nonroot leaves). When `vm.kvm.enabled` is true on the server, each
+  (unlike nonroot leaves). All KVM leaves require an active administrator VM
+  grant, loaded by durable repository ID at submission, and a credential-free
+  CI workflow (branch, promotion or schedule; never release). Missing, revoked
+  or unreadable grants fail closed. When `vm.kvm.enabled` is true on the server, each
   declared leaf receives `devices.kubevirt.io/kvm: "1"` (request == limit) and
   `OBERTH_KVM=1` in its environment. When the switch is false, a workflow
   declaring KVM leaves fails at admission with an infrastructure-class error.
@@ -1807,6 +1810,14 @@ continuity checks; it must never be used to reset or bypass those checks.
   pod, same deadline, kubelet exit code. It is not Lane B (trusted-suite
   verdict). The consumer asserts `-accel kvm` only when `OBERTH_KVM=1` is
   present; no TCG fallback is permitted with the env set.
+- A workflow may additionally name a subset of its KVM leaves in
+  `oberth.ci/guest-test-templates`. These leaves receive the server-owned
+  `OBERTH_GUEST_TEST=kvm-v1` marker for disposable guest test runners. Removing
+  this annotation does not bypass the VM grant required by all KVM leaves.
+  Submission audits include the declared leaves and granted capability.
+  Guest root does not grant host capabilities, host namespaces or host mounts;
+  results remain ordinary CI evidence. See `docs/guest-test-lanes.md` for the
+  networkless reference runner and the admission/grant rollout requirement.
 - Argo `resource:` templates are admitted only for an administrator-granted
   repository, and only as top-level named `kubevirt.io/v1`
   `VirtualMachineInstance` create/get/delete templates. The server validates
