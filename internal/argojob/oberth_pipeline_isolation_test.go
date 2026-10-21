@@ -62,7 +62,8 @@ var (
 		"fetch-shellcheck": true, "verify-shellcheck": true, "decompress-shellcheck": true, "install-shellcheck": true,
 	}
 	oberthBuildCachedGoLeaves = map[string]bool{
-		"vet": true, "golangci-lint-run": true, "test": true,
+		"vet": true, "golangci-lint-run": true,
+		"test-store": true, "test-service": true, "test-rest": true,
 		"build-amd64": true, "build-arm64": true,
 		"build-darwin-amd64": true, "build-darwin-arm64": true,
 	}

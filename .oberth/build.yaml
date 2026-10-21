@@ -43,7 +43,7 @@
 # write, and a warm build cache makes reinstalling them a few seconds anyway.
 #
 # Tool custody (#567): the setup burn is the only writer of those tools. Every
-# later leaf sees /tmp/oberth-tools read-only. The Go leaves (vet, lint, test,
+# later leaf sees /tmp/oberth-tools read-only. The Go leaves (vet, lint, test-*,
 # build-*) do so through an explicit readOnly request on that mount, which the
 # server honours while keeping the persistent Go caches writable (the
 # `readonly` annotation would make those read-only too, and `none` would drop
@@ -56,7 +56,9 @@
 #
 # DAG structure:
 #
-#   setup --+--> lint --+--> test ----------+--> build-amd64
+#   setup --+--> lint --+--> test-store ----+--> build-amd64
+#           |           +--> test-service --+
+#           |           +--> test-rest -----+
 #           |           |                   |
 #           |           +--> chart ---------+--> build-arm64
 #           |                               |
@@ -99,8 +101,14 @@ spec:
       - name: lint
         template: lint
         depends: setup
-      - name: test
-        template: test
+      - name: test-store
+        template: test-store
+        depends: lint
+      - name: test-service
+        template: test-service
+        depends: lint
+      - name: test-rest
+        template: test-rest
         depends: lint
       - name: test-openbao
         template: test-openbao
@@ -122,16 +130,16 @@ spec:
         depends: setup
       - name: build-amd64
         template: build-amd64
-        depends: "test && chart"
+        depends: "test-store && test-service && test-rest && chart"
       - name: build-arm64
         template: build-arm64
-        depends: "test && chart"
+        depends: "test-store && test-service && test-rest && chart"
       - name: build-darwin-amd64
         template: build-darwin-amd64
-        depends: "test && chart"
+        depends: "test-store && test-service && test-rest && chart"
       - name: build-darwin-arm64
         template: build-darwin-arm64
-        depends: "test && chart"
+        depends: "test-store && test-service && test-rest && chart"
 
   # ---- setup burn (8 sequential steps) ----
   # Maps to: Test("setup", repositorySteps(inlineToolchainSteps()...)...)
@@ -823,20 +831,23 @@ spec:
           cpu: "4"
           memory: "8Gi"
 
-  # ---- test burn (single step) ----
-  # Maps to: Test("test", repositorySteps(
-  #   ctx.Go.TestRace("./...").Size(L))...).After("lint")
-  # Race-instrumented full suite links large test binaries and needs more
-  # than the M budget headroom. CGO_ENABLED=1 for the race detector; gcc
-  # from the golang:1.26.9-trixie image provides the C compiler.
-  - name: test
+  # ---- parallel race-test burns ----
+  # Each package runs once: dedicated store/service groups and the remainder
+  # discovered by go list ./.... The package-union contract covers new packages.
+  # All groups keep the race detector and uncached execution. The explicit
+  # twenty-minute timeout provides headroom; independent Pods bound contention.
+  # CI samples put store at 494-600s and service at 400-545s; other
+  # packages stay below 30s. Give each group a bounded two-CPU lane.
+  - name: test-store
     automountServiceAccountToken: false
     container:
       image: "golang:1.26.9-trixie@sha256:f06b7122f888680048afb247c4e5f49c0069eb6c4c1ccae0f3f4834527a8d22c"
       workingDir: /work/src
-      command: ["/tmp/oberth-tools/bin/go"]
-      args: ["test", "-race", "-v", "-count=1", "./..."]
+      command: ["/usr/bin/python3"]
+      args: ["-I", "-S", "-B", ".oberth/test-packages.py", "store"]
       env:
+      - name: GOMAXPROCS
+        value: "2"
       - name: CGO_ENABLED
         value: "1"
       - name: PATH
@@ -881,11 +892,133 @@ spec:
         subPath: trivy-cache
       resources:
         requests:
-          cpu: "4"
-          memory: "8Gi"
+          cpu: "2"
+          memory: "4Gi"
         limits:
-          cpu: "4"
-          memory: "8Gi"
+          cpu: "2"
+          memory: "4Gi"
+
+
+  - name: test-service
+    automountServiceAccountToken: false
+    container:
+      image: "golang:1.26.9-trixie@sha256:f06b7122f888680048afb247c4e5f49c0069eb6c4c1ccae0f3f4834527a8d22c"
+      workingDir: /work/src
+      command: ["/usr/bin/python3"]
+      args: ["-I", "-S", "-B", ".oberth/test-packages.py", "service"]
+      env:
+      - name: GOMAXPROCS
+        value: "2"
+      - name: CGO_ENABLED
+        value: "1"
+      - name: PATH
+        value: "/tmp/oberth-tools/bin:/usr/local/bin:/usr/bin:/bin"
+      - name: OBERTH_TOOLS_DIR
+        value: "/tmp/oberth-tools"
+      - name: HOME
+        value: "/tmp"
+      - name: GOPATH
+        value: "/tmp/oberth-tools/gopath"
+      - name: GOTOOLCHAIN
+        value: "local"
+      - name: GOWORK
+        value: "off"
+      - name: GOENV
+        value: "off"
+      - name: GOMODCACHE
+        value: "/cache/gomod"
+      - name: GOCACHE
+        value: "/cache/gobuild"
+      - name: GIT_TERMINAL_PROMPT
+        value: "0"
+      - name: KUBEBUILDER_ASSETS
+        value: ""
+      - name: TRIVY_CACHE_DIR
+        value: "/tmp/oberth-trivy"
+      - name: GOLANGCI_LINT_CACHE
+        value: "/tmp/oberth-tools/cache/golangci-lint"
+      volumeMounts:
+      - name: work
+        mountPath: /tmp/oberth-tools
+        subPath: tools
+        readOnly: true
+      - name: work
+        mountPath: /cache/gomod
+        subPath: gomod
+      - name: work
+        mountPath: /cache/gobuild
+        subPath: gobuild
+      - name: work
+        mountPath: /tmp/oberth-trivy
+        subPath: trivy-cache
+      resources:
+        requests:
+          cpu: "2"
+          memory: "4Gi"
+        limits:
+          cpu: "2"
+          memory: "4Gi"
+
+
+  - name: test-rest
+    automountServiceAccountToken: false
+    container:
+      image: "golang:1.26.9-trixie@sha256:f06b7122f888680048afb247c4e5f49c0069eb6c4c1ccae0f3f4834527a8d22c"
+      workingDir: /work/src
+      command: ["/usr/bin/python3"]
+      args: ["-I", "-S", "-B", ".oberth/test-packages.py", "rest"]
+      env:
+      - name: GOMAXPROCS
+        value: "2"
+      - name: CGO_ENABLED
+        value: "1"
+      - name: PATH
+        value: "/tmp/oberth-tools/bin:/usr/local/bin:/usr/bin:/bin"
+      - name: OBERTH_TOOLS_DIR
+        value: "/tmp/oberth-tools"
+      - name: HOME
+        value: "/tmp"
+      - name: GOPATH
+        value: "/tmp/oberth-tools/gopath"
+      - name: GOTOOLCHAIN
+        value: "local"
+      - name: GOWORK
+        value: "off"
+      - name: GOENV
+        value: "off"
+      - name: GOMODCACHE
+        value: "/cache/gomod"
+      - name: GOCACHE
+        value: "/cache/gobuild"
+      - name: GIT_TERMINAL_PROMPT
+        value: "0"
+      - name: KUBEBUILDER_ASSETS
+        value: ""
+      - name: TRIVY_CACHE_DIR
+        value: "/tmp/oberth-trivy"
+      - name: GOLANGCI_LINT_CACHE
+        value: "/tmp/oberth-tools/cache/golangci-lint"
+      volumeMounts:
+      - name: work
+        mountPath: /tmp/oberth-tools
+        subPath: tools
+        readOnly: true
+      - name: work
+        mountPath: /cache/gomod
+        subPath: gomod
+      - name: work
+        mountPath: /cache/gobuild
+        subPath: gobuild
+      - name: work
+        mountPath: /tmp/oberth-trivy
+        subPath: trivy-cache
+      resources:
+        requests:
+          cpu: "2"
+          memory: "4Gi"
+        limits:
+          cpu: "2"
+          memory: "4Gi"
 
   # ---- security burn (single step) ----
   # Maps to: Test("security", repositorySteps(
