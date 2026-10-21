@@ -624,7 +624,7 @@ func TestListRecentRunsFiltersByRef(t *testing.T) {
 	}
 }
 
-func TestRestartRecoveryInterruptsRunningRuns(t *testing.T) {
+func TestRestartRecoveryRetainsBranchWorkflows(t *testing.T) {
 	ctx := context.Background()
 	now := time.Date(2026, 8, 4, 12, 0, 0, 0, time.UTC)
 	path := filepath.Join(t.TempDir(), "oberth.db")
@@ -666,8 +666,8 @@ func TestRestartRecoveryInterruptsRunningRuns(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(cancellations) != 1 || cancellations[0].RunID != run.ID || cancellations[0].JobName != "job-before-restart" || cancellations[0].Reason != "owner_restart" {
-		t.Fatalf("restart cancellations = %#v", cancellations)
+	if len(cancellations) != 0 {
+		t.Fatalf("restart cancellations = %#v, want none for the resumable branch Workflow", cancellations)
 	}
 	// A claimed ordinary branch run without a job_name is requeued by store
 	// recovery (issue #270): the old attempt is interrupted with a link to a
@@ -705,14 +705,13 @@ func TestRestartRecoveryInterruptsRunningRuns(t *testing.T) {
 		requeued.Trigger != noJobRun.Trigger || requeued.Actor != noJobRun.Actor {
 		t.Fatalf("requeued run = %#v, want queued copy of %#v", requeued, noJobRun)
 	}
-	// The JobName-carrying run from the first phase still owns its pending
-	// owner_restart obligation; the requeued no-Job run must not add one.
+	// Neither the resumable Workflow nor the requeued no-Job run needs deletion.
 	cancellations, err = s.PendingRunCancellations(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(cancellations) != 1 || cancellations[0].RunID != run.ID {
-		t.Fatalf("pending cancellations after requeue = %#v, want only the Job-carrying run", cancellations)
+	if len(cancellations) != 0 {
+		t.Fatalf("pending cancellations after requeue = %#v, want none", cancellations)
 	}
 }
 
@@ -796,6 +795,10 @@ func TestRequeueStrandedRunReplacesOwnerRestartObligation(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = s.Close() })
 
+	// A prior binary may already have left this obligation behind.
+	if _, err := s.db.ExecContext(ctx, `INSERT INTO run_cancellations(run_id, job_name, superseded_by, reason, created_at) VALUES(?, ?, '', 'owner_restart', ?)`, run.ID, "job-stranded", unixNano(now)); err != nil {
+		t.Fatal(err)
+	}
 	requeued, err := s.RequeueStrandedRun(ctx, run.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -1899,5 +1902,34 @@ func TestListRecentRunsPagesWithBeforeCursor(t *testing.T) {
 	}
 	if len(seen) != 5 {
 		t.Fatalf("paging reached %d of 5 runs", len(seen))
+	}
+}
+
+func TestOwnerRecoveryRetiresLegacyBranchRestartCancellation(t *testing.T) {
+	now := time.Now().UTC()
+	s := testStore(t, &now)
+	repo := createRepo(t, s)
+	run, err := s.EnqueueRun(context.Background(), testRunSpec(repo.ID, "feature/legacy-restart", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ClaimNextRun(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.SetRunJobName(context.Background(), run.ID, "old-owner-workflow"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.Exec(`INSERT INTO run_cancellations(run_id,job_name,superseded_by,reason,created_at) VALUES(?,?,'','owner_restart',?)`, run.ID, "old-owner-workflow", unixNano(now)); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RecoverOwnerState(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if pending, err := s.PendingRunCancellations(context.Background()); err != nil || len(pending) != 0 {
+		t.Fatalf("legacy restart deletion retained: %#v %v", pending, err)
+	}
+	current, err := s.Run(context.Background(), run.ID)
+	if err != nil || current.Status != model.RunRunning || current.SupersededBy != "" {
+		t.Fatalf("legacy recovery = %#v %v", current, err)
 	}
 }

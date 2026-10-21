@@ -167,3 +167,15 @@ scoped callers. Upgrade completion is recorded only after verification; audit
 record failures warn without failing a completed upgrade. CLI tail tests cover
 appends between head and page reads, bursts exceeding 200 matches, and appends
 during pagination that must remain eligible for the next poll.
+
+Branch Workflow adoption #1172: startup restores each existing branch Workflow
+under its durable run ID, queue/admission sequences and admitted size/group,
+including Workflows completed
+while the owner was down. Missing Workflows still requeue; API and binding
+failures preserve ownership. Shutdown preserves new and adopted non-terminal
+branch Workflows and their workspaces. Explicit cancel and supersede still
+delete adopted Workflows. Resumed observation retains progress and log bytes,
+replays only unrecorded steps, enforces the remaining aggregate budget, and
+refuses Workflow UID/spec replacement. Executor identity delivery resumes for
+Pods in the token waiter and skips Pods past it. Idempotent adoption cannot
+double-count admission, and restored groups block new grants until release.

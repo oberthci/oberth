@@ -394,7 +394,7 @@ func TestStartupReconciliationFinishesRunWhoseJobCompleted(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := scheduler.reconcileStrandedRunsWithGate(ctx, scheduler.requireMutation); err != nil {
+	if err := scheduler.reconcileStrandedRunsWithGate(ctx, scheduler.requireMutation, nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -486,7 +486,7 @@ func TestStartupReconciliationRequeuesRunWithVanishedJob(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := scheduler.reconcileStrandedRunsWithGate(ctx, scheduler.requireMutation); err != nil {
+	if err := scheduler.reconcileStrandedRunsWithGate(ctx, scheduler.requireMutation, nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -596,7 +596,7 @@ func TestStartupReconciliationTerminalizesIneligibleStrandedRun(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := scheduler.reconcileStrandedRunsWithGate(ctx, scheduler.requireMutation); err != nil {
+	if err := scheduler.reconcileStrandedRunsWithGate(ctx, scheduler.requireMutation, nil); err != nil {
 		t.Fatal(err)
 	}
 

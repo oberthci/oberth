@@ -89,6 +89,29 @@ func (store *Store) Create(runID string) (*os.File, error) {
 	return file, nil
 }
 
+// Resume opens an existing run log for append and restores its progress journal.
+// A run can have a Workflow even if the owner stopped before its first log write.
+func (store *Store) Resume(runID string) (*os.File, []runprogress.Event, int64, error) {
+	path, err := store.logPath(runID)
+	if err != nil {
+		return nil, nil, 0, err
+	}
+	events, err := store.StepProgress(runID)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return nil, nil, 0, err
+	}
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o640) //nolint:gosec
+	if err != nil {
+		return nil, nil, 0, fmt.Errorf("resume run log: %w", err)
+	}
+	info, err := file.Stat()
+	if err != nil || !info.Mode().IsRegular() {
+		_ = file.Close()
+		return nil, nil, 0, errors.New("resumed run log must be a regular file")
+	}
+	return file, events, info.Size(), nil
+}
+
 func (store *Store) BuildIndex(runID string) (Index, error) {
 	path, err := store.logPath(runID)
 	if err != nil {

@@ -1124,26 +1124,37 @@ continuity checks; it must never be used to reset or bypass those checks.
   with an explicit `force`, tag/release runs. The response carries `mode`
   (`rerun` or `publish_retry`), `run_id`, `rerun_of`, `status`, `ref`, `sha`
   and optional `publication_id`, `warning` and `error`.
-- A server stop or restart re-fires stranded ordinary branch runs through
-  the same supersede mechanism (issue #270), on all three termination paths:
-  graceful-shutdown compensation in the stopping process, owner startup
-  recovery for claimed runs without a Job, and startup reconciliation for
-  Jobs that cannot report a terminal result. The stranded run is interrupted
-  with a link to a fresh queued copy of the same commit, and the stranded
-  Job's deletion obligation executes before the replacement can be claimed
-  (in the upgrade case, by the successor's startup cancellation pass). Jobs
-  that finished while the server was away keep their real result. Branch
-  runs that mounted ci-secrets are re-fired like any other branch run — the
-  copy starts uncredentialed and re-earns delivery through normal admission.
-  Promotion CI, tag/release, and publication-owning runs are never re-fired
-  automatically; they terminalize conservatively exactly as before (an
-  interrupted promotion is re-run on request with `promote_retry`), and a
-  branch that already has newer active work keeps only that newest run. The
-  replacement inherits the stranded run's `admission_sequence`, so it keeps
-  its FIFO position while retaining a fresh `queue_sequence` for identity and
-  unchanged history paging (#1092).
-  Explicitly cancelled runs are never re-fired either: they are terminal
-  before any restart pass looks at them, and only active runs are requeued.
+- A server stop or restart adopts an existing Argo Workflow for an active
+  branch run without a pending trusted KVM preflight (#1172, slice 1). The
+  Workflow's run ID, ref, tested SHA, trigger, persisted concurrency group and
+  namespace must match the run and configured engine. Its spec identity must
+  be present; its UID, identity and live spec remain pinned during observation.
+  A name collision or unreadable API stops recovery without deleting or
+  re-firing that work. Admission weight is
+  restored from the submitted Workflow's size declaration before new claims,
+  and its repository-scoped group remains held. Existing work may temporarily
+  exceed a reduced capacity; new work waits until it drains.
+  Adoption keeps the same run row, `queue_sequence` and `admission_sequence`;
+  it does not enqueue a replacement or allocate a new admission order.
+  Shutdown leaves a non-terminal branch Workflow and its run/workspace intact.
+  The successor appends to the same run log, restores the progress journal,
+  skips already-recorded step transitions/logs, and enforces the remaining
+  aggregate log budget. Executor-token delivery resumes only for Pods still
+  running the token waiter. A Workflow that finished while the owner was down
+  uses the same observation, artifact collection, step persistence and normal
+  publication/issue finalization as a newly submitted Workflow.
+  A missing branch Workflow, or a claimed branch run without a Job, retains
+  the requeue-with-supersede fallback (#270): the old run links to a queued
+  copy of the same commit and any deletion obligation completes before the
+  replacement is claimed. The copy starts uncredentialed and re-earns delivery
+  through normal admission. A replacement inherits the stranded run's
+  `admission_sequence`, retaining its FIFO place while receiving a fresh
+  `queue_sequence` for identity and unchanged history paging (#1092).
+  Promotion CI, tag/release, pending trusted KVM
+  preflights and publication-owning runs keep their existing recovery paths;
+  they are not adopted by this slice. Explicit cancellation and newer-push
+  supersession still delete the exact owned Workflow, and terminal runs are
+  never adopted or automatically re-fired.
 - Green branch runs force-sync that same branch to the upstream forge. Red
   default-branch and scheduled branch runs create or update one open CI issue
   per repository and branch with the new SHA, a bounded (16 KiB) failure excerpt,

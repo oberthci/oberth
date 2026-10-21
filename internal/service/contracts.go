@@ -325,6 +325,7 @@ type EnqueueObserver interface {
 }
 
 type LogStore interface {
+	Resume(string) (*os.File, []runprogress.Event, int64, error)
 	Create(string) (*os.File, error)
 	BuildIndex(string) (runlog.Index, error)
 	ReadFiltered(string, string, string, runlog.Filter) ([]byte, runlog.Meta, error)
@@ -390,6 +391,15 @@ type JobController interface {
 	// (_, ErrJobNotTerminal) when the Job is absent or still active; returns
 	// (_, err) on transient API failure.
 	TerminalResult(context.Context, string) (JobResult, error)
+}
+
+// JobAdopter restores observation of an existing Workflow without submitting it.
+// found=false means the Workflow is absent; ownership and API failures are errors.
+// WaitResumed uses the durable progress journal and the retained byte count.
+// On error it returns a nonzero result only if the exact Workflow was terminal.
+type JobAdopter interface {
+	Adopt(context.Context, model.Run) (periapsis.Size, bool, error)
+	WaitResumed(context.Context, string, io.Writer, []runprogress.Event, int64) (JobResult, error)
 }
 
 type ReleaseJobController interface {

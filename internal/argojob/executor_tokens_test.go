@@ -72,6 +72,24 @@ func TestExecutorIdentityDeliveryUsesSeparateBoundPodAndStdin(t *testing.T) {
 	if deliveries != 1 || requests != 1 {
 		t.Fatal("completed delivery repeated")
 	}
+	// A new owner starts with an empty delivered map. Pods still waiting
+	// receive their identity; Pods past the waiter must not receive it again.
+	if err := c.deliverExecutorTokens(context.Background(), wf, map[types.UID]bool{}); err != nil {
+		t.Fatal(err)
+	}
+	if deliveries != 2 || requests != 2 {
+		t.Fatal("new owner did not resume waiting executor delivery")
+	}
+	pod.Status.InitContainerStatuses[0].State = corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{}}
+	if _, err := kube.CoreV1().Pods(wf.Namespace).UpdateStatus(context.Background(), pod, metav1.UpdateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.deliverExecutorTokens(context.Background(), wf, map[types.UID]bool{}); err != nil {
+		t.Fatal(err)
+	}
+	if deliveries != 2 || requests != 2 {
+		t.Fatal("new owner redelivered to a Pod past the waiter")
+	}
 	for _, a := range kube.Actions() {
 		if a.GetResource().Resource == "secrets" {
 			t.Fatal("executor delivery accessed Kubernetes Secrets")

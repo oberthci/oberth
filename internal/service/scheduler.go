@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -376,7 +377,20 @@ func (scheduler *Scheduler) Run(ctx context.Context) error {
 	if err := scheduler.recoverTrustedPreflights(workerCtx); err != nil {
 		return err
 	}
-	if err := scheduler.reconcileStrandedRunsWithGate(workerCtx, scheduler.awaitMutation); err != nil {
+	var adopted []adoptedRun
+	defer func() {
+		for _, run := range adopted {
+			run.reservation.cancel()
+		}
+	}()
+	if err := scheduler.reconcileStrandedRunsWithGate(workerCtx, scheduler.awaitMutation, func(run model.Run, size periapsis.Size) error {
+		reservation, err := scheduler.admission.adopt(run, size)
+		if err != nil {
+			return err
+		}
+		adopted = append(adopted, adoptedRun{run: run, reservation: reservation})
+		return nil
+	}); err != nil {
 		return err
 	}
 	if err := scheduler.completePendingCancellationsWithGate(workerCtx, scheduler.awaitMutation); err != nil {
@@ -397,8 +411,19 @@ func (scheduler *Scheduler) Run(ctx context.Context) error {
 		defer workers.Done()
 		scheduler.runHeadEvents(workerCtx)
 	}()
-	completed := make(chan error, 2*scheduler.maxConcurrent)
-	active := 0
+	completed := make(chan error, max(2*scheduler.maxConcurrent, len(adopted)))
+	active := len(adopted)
+	for _, adopted := range adopted {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			err := scheduler.resumeAdoptedRun(workerCtx, adopted.run, scheduler.awaitMutation, adopted.reservation)
+			select {
+			case completed <- err:
+			case <-workerCtx.Done():
+			}
+		}()
+	}
 	for {
 		for scheduler.dispatchSlotAvailable(active) {
 			if err := scheduler.awaitMutation(workerCtx); err != nil {
@@ -530,6 +555,15 @@ func (scheduler *Scheduler) executeAndCleanupReservedWithGate(
 	}
 	cleanupCtx, cancelCleanup := boundedWorkspaceCleanupContext(ctx)
 	defer cancelCleanup()
+	if branchRunAdoptable(run) {
+		current, err := scheduler.store.Run(cleanupCtx, run.ID)
+		if err != nil {
+			return errors.Join(executeErr, err)
+		}
+		if current.Status == model.RunRunning && current.JobName != "" {
+			return executeErr
+		}
+	}
 	settleErr := scheduler.store.CompleteSupersededRunCancellationWithoutJob(cleanupCtx, run.ID)
 	cleanupErr := scheduler.workspaces.cleanupRun(cleanupCtx, run.ID)
 	if run.Trigger == "promotion" {
@@ -789,11 +823,19 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 		err = scheduler.jobs.CreateCI(ctx, jobRequest)
 	}
 	if err != nil {
+		if _, ok := scheduler.jobs.(JobAdopter); ok && branchRunAdoptable(run) && ctx.Err() != nil {
+			reservation.retain()
+			return logFile.Close()
+		}
 		_ = logFile.Close()
 		return scheduler.finishInfrastructureFailure(ctx, run, repository, fmt.Errorf("create Job: %w", err))
 	}
 	current, err = scheduler.store.MarkRunSubmitted(ctx, run.ID)
 	if err != nil {
+		if _, ok := scheduler.jobs.(JobAdopter); ok && branchRunAdoptable(run) && ctx.Err() != nil {
+			reservation.retain()
+			return logFile.Close()
+		}
 		failure := errors.Join(fmt.Errorf("verify run after Job creation: %w", err), logFile.Close())
 		cleanupCtx, cancelCleanup := boundedWorkspaceCleanupContext(ctx)
 		deleteErr := scheduler.jobs.Delete(cleanupCtx, jobName, run.ID)
@@ -826,21 +868,53 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 		return completeErr
 	}
 
+	return scheduler.observeRun(ctx, run, repository, require, reservation, runObservation{file: logFile, request: &jobRequest})
+}
+
+type runObservation struct {
+	file     *os.File
+	request  *JobRequest
+	events   []runprogress.Event
+	retained int64
+	adopted  bool
+}
+
+// observeRun shares step persistence, publication and issue projection between
+// newly submitted and adopted Workflows.
+func (scheduler *Scheduler) observeRun(ctx context.Context, run model.Run, repository model.Repository, require mutationRequirement, reservation *admissionReservation, observation runObservation) error {
+	logFile := observation.file
+	jobName := run.JobName
+	if observation.request != nil {
+		jobName = observation.request.JobName
+	}
+	checkoutSHA := run.TestedSHA
+	if checkoutSHA == "" {
+		checkoutSHA = run.SHA
+	}
+	releaseAdmission := reservation.release
 	progressLog := newStepProgressLogWriter(
-		newRunLogWriter(logFile, scheduler.maxRunLogBytes),
+		newRunLogWriter(logFile, scheduler.maxRunLogBytes-observation.retained),
 		func(event runprogress.Event) error { return scheduler.logs.AppendStepProgress(run.ID, event) },
 	)
 	// The plan is recorded here: after the pipeline object exists, so a run
 	// that never reached submission carries no claim about work it would have
 	// done, and before the engine's first observation, so the step list is
 	// complete from the first poll rather than growing one row per Pod.
-	if planErr := scheduler.recordStepPlan(ctx, jobRequest); planErr != nil {
-		// Plan visibility is an observability record, never a gate. A run
-		// whose plan cannot be enumerated still executes, and says so in its
-		// own log rather than failing a build over a display concern.
-		_, _ = fmt.Fprintf(progressLog, "oberth: step plan unavailable: %v\n", planErr)
+	if observation.request != nil {
+		if planErr := scheduler.recordStepPlan(ctx, *observation.request); planErr != nil {
+			// Plan visibility is an observability record, never a gate. A run
+			// whose plan cannot be enumerated still executes, and says so in its
+			// own log rather than failing a build over a display concern.
+			_, _ = fmt.Fprintf(progressLog, "oberth: step plan unavailable: %v\n", planErr)
+		}
 	}
-	jobResult, waitErr := scheduler.jobs.Wait(ctx, jobName, progressLog)
+	var jobResult JobResult
+	var waitErr error
+	if observation.adopted {
+		jobResult, waitErr = scheduler.jobs.(JobAdopter).WaitResumed(ctx, jobName, progressLog, observation.events, observation.retained)
+	} else {
+		jobResult, waitErr = scheduler.jobs.Wait(ctx, jobName, progressLog)
+	}
 	if progressErr := progressLog.Close(); progressErr != nil && waitErr == nil {
 		waitErr = progressErr
 	}
@@ -849,36 +923,45 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 	if ctx.Err() != nil {
 		finalizeCtx, cancelFinalize = context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancelFinalize()
-		// Check whether the Job already reached a terminal state before the
-		// scheduler stopped. A completed Job must record its real result, not
-		// a fabricated "interrupted."
-		if reconciled, termErr := scheduler.jobs.TerminalResult(finalizeCtx, jobName); termErr == nil {
-			jobResult = reconciled
-			waitErr = nil
-		} else {
-			// Job not terminal, absent, or state unreadable at shutdown.
-			// Requeue-with-supersede when eligible (issue #270): the durable
-			// obligation owns the Job deletion, and whichever process next
-			// runs a cancellation pass — the successor's startup in the
-			// upgrade case — executes it before the replacement is claimed.
-			if requeued, requeueErr := scheduler.store.RequeueStrandedRun(finalizeCtx, run.ID); requeueErr == nil {
-				_ = logFile.Close()
-				scheduler.signals.NotifyRun(run.ID)
-				scheduler.signals.NotifyRun(requeued.ID)
-				return nil
-			} else if !errors.Is(requeueErr, store.ErrRequeueIneligible) {
-				_ = logFile.Close()
-				return fmt.Errorf("requeue run %s during scheduler shutdown: %w", run.ID, requeueErr)
-			}
-			// Ineligible work keeps the conservative contract: delete, then
-			// terminalize as interrupted.
-			if deleteErr := scheduler.jobs.Delete(finalizeCtx, jobName, run.ID); deleteErr != nil {
-				_ = logFile.Close()
+		if _, ok := scheduler.jobs.(JobAdopter); ok && branchRunAdoptable(run) {
+			if waitErr != nil || !jobResult.Status.Terminal() {
+				// The next owner resumes this exact Workflow. A terminal
+				// observation already returned by Wait can finalize here.
 				reservation.retain()
-				return fmt.Errorf("cancel Job %s during scheduler shutdown: %w", jobName, deleteErr)
+				return logFile.Close()
 			}
-			jobResult = JobResult{Status: model.RunInterrupted, Phase: "interrupted", Error: "scheduler stopped"}
-			waitErr = nil
+		} else {
+			// Check whether the Job already reached a terminal state before the
+			// scheduler stopped. A completed Job must record its real result, not
+			// a fabricated "interrupted."
+			if reconciled, termErr := scheduler.jobs.TerminalResult(finalizeCtx, jobName); termErr == nil {
+				jobResult = reconciled
+				waitErr = nil
+			} else {
+				// Job not terminal, absent, or state unreadable at shutdown.
+				// Requeue-with-supersede when eligible (issue #270): the durable
+				// obligation owns the Job deletion, and whichever process next
+				// runs a cancellation pass — the successor's startup in the
+				// upgrade case — executes it before the replacement is claimed.
+				if requeued, requeueErr := scheduler.store.RequeueStrandedRun(finalizeCtx, run.ID); requeueErr == nil {
+					_ = logFile.Close()
+					scheduler.signals.NotifyRun(run.ID)
+					scheduler.signals.NotifyRun(requeued.ID)
+					return nil
+				} else if !errors.Is(requeueErr, store.ErrRequeueIneligible) {
+					_ = logFile.Close()
+					return fmt.Errorf("requeue run %s during scheduler shutdown: %w", run.ID, requeueErr)
+				}
+				// Ineligible work keeps the conservative contract: delete, then
+				// terminalize as interrupted.
+				if deleteErr := scheduler.jobs.Delete(finalizeCtx, jobName, run.ID); deleteErr != nil {
+					_ = logFile.Close()
+					reservation.retain()
+					return fmt.Errorf("cancel Job %s during scheduler shutdown: %w", jobName, deleteErr)
+				}
+				jobResult = JobResult{Status: model.RunInterrupted, Phase: "interrupted", Error: "scheduler stopped"}
+				waitErr = nil
+			}
 		}
 	}
 	closeErr := logFile.Close()
@@ -888,6 +971,23 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 	index, indexErr := scheduler.logs.BuildIndex(run.ID)
 	if indexErr != nil && waitErr == nil {
 		waitErr = indexErr
+	}
+	if observation.adopted && waitErr != nil {
+		current, lookupErr := scheduler.store.Run(finalizeCtx, run.ID)
+		if lookupErr == nil && current.Preempted() {
+			if err := scheduler.completePendingCancellationsWithGate(finalizeCtx, require); err != nil {
+				reservation.retain()
+				return err
+			}
+			scheduler.signals.NotifyRun(run.ID)
+			return nil
+		}
+		if lookupErr != nil || !jobResult.Status.Terminal() {
+			reservation.retain()
+			return errors.Join(waitErr, lookupErr)
+		}
+		jobResult.Status, jobResult.Phase, jobResult.Error = model.RunFailed, "collect", waitErr.Error()
+		waitErr = nil
 	}
 	if waitErr != nil {
 		// A transient Wait error (network blip, log reader failure) must not
@@ -972,7 +1072,7 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 			failureTail = string(tail)
 		}
 	}
-	_, err = scheduler.store.FinishRun(finalizeCtx, run.ID, model.RunResult{
+	_, err := scheduler.store.FinishRun(finalizeCtx, run.ID, model.RunResult{
 		Status: jobResult.Status, Phase: jobResult.Phase, TestedSHA: checkoutSHA, BaseSHA: jobResult.BaseSHA,
 		FailedBurn: jobResult.FailedBurn, FailedStep: jobResult.FailedStep, Error: jobResult.Error,
 		FailureTail: failureTail,
@@ -1278,10 +1378,11 @@ func (scheduler *Scheduler) finishInfrastructureFailure(ctx context.Context, run
 
 // reconcileStrandedRunsWithGate queries K8s for runs that were in-flight when
 // the previous scheduler process stopped. Runs whose Jobs completed get their
-// real durable result; runs whose Jobs are absent or still active are
-// interrupted. This must run before completePendingCancellationsWithGate,
+// real durable result; eligible branch Workflows resume under the same run.
+// Absent Workflows and other run kinds keep their existing fallback. This
+// must run before completePendingCancellationsWithGate,
 // which would delete the K8s Jobs before their terminal state can be read.
-func (scheduler *Scheduler) reconcileStrandedRunsWithGate(ctx context.Context, require mutationRequirement) error {
+func (scheduler *Scheduler) reconcileStrandedRunsWithGate(ctx context.Context, require mutationRequirement, adopt func(model.Run, periapsis.Size) error) error {
 	if err := require(ctx); err != nil {
 		return err
 	}
@@ -1290,6 +1391,27 @@ func (scheduler *Scheduler) reconcileStrandedRunsWithGate(ctx context.Context, r
 		return fmt.Errorf("load stranded runs for reconciliation: %w", err)
 	}
 	for _, run := range runs {
+		if adopter, ok := scheduler.jobs.(JobAdopter); ok && branchRunAdoptable(run) {
+			eligible, err := scheduler.withoutPendingPreflight(ctx, run)
+			if err != nil {
+				return err
+			}
+			if eligible {
+				size, found, err := adopter.Adopt(ctx, run)
+				if err != nil {
+					return fmt.Errorf("adopt run %s: %w", run.ID, err)
+				}
+				if found {
+					if adopt == nil {
+						return errors.New("service: adoption requires a worker dispatcher")
+					}
+					if err := adopt(run, size); err != nil {
+						return err
+					}
+					continue
+				}
+			}
+		}
 		reconciled, termErr := scheduler.jobs.TerminalResult(ctx, run.JobName)
 		if termErr == nil {
 			if err := scheduler.finalizeReconciledRun(ctx, run, reconciled, require); err != nil {

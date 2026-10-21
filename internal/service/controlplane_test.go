@@ -1977,6 +1977,9 @@ func TestSchedulerCompletesSupersedeAndRestartCancellationObligations(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
+	if err := recoveryScheduler.reconcileStrandedRunsWithGate(ctx, recoveryScheduler.requireMutation, nil); err != nil {
+		t.Fatal(err)
+	}
 	if err := recoveryScheduler.completePendingCancellations(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -2174,6 +2177,9 @@ func TestPostCreateReadAndDeleteFailureRecoversExactJobOnRestart(t *testing.T) {
 		WorkspaceRoot: filepath.Join(fixture.root, "post-create-delete-failure"), MaxConcurrent: 1,
 	})
 	if err != nil {
+		t.Fatal(err)
+	}
+	if err := recovery.reconcileStrandedRunsWithGate(ctx, recovery.requireMutation, nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := recovery.completePendingCancellations(ctx); err != nil {

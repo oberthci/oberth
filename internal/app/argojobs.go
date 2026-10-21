@@ -114,6 +114,7 @@ type ArgoJobs struct {
 // Delete has marked cancelled: Delete owns the intent's lifecycle once it
 // sets cancelled=true.
 type argoIntent struct {
+	adoption  *argojob.Adoption
 	runID     string
 	trigger   periapsis.Trigger
 	created   bool // true once controller.Create has returned successfully
@@ -594,7 +595,55 @@ func (jobs *ArgoJobs) recordDeclarations(ctx context.Context, request service.Jo
 	}
 }
 
+// Adopt rebuilds the intent from the durable run and the existing Workflow.
+// It never seeds sources, submits work, or re-evaluates repository commands.
+func (jobs *ArgoJobs) Adopt(ctx context.Context, run model.Run) (periapsis.Size, bool, error) {
+	controller, ok := jobs.controller.(interface {
+		Adopt(context.Context, argojob.AdoptionRequest) (argojob.Adoption, bool, error)
+	})
+	if !ok {
+		return "", false, errors.New("app: controller cannot adopt Workflows")
+	}
+	trigger, err := runTrigger(run)
+	if err != nil {
+		return "", false, err
+	}
+	kind, err := runKind(run)
+	if err != nil {
+		return "", false, err
+	}
+	sha := run.TestedSHA
+	if sha == "" {
+		sha = run.SHA
+	}
+	binding, found, err := controller.Adopt(ctx, argojob.AdoptionRequest{
+		Name: run.JobName, RunID: run.ID, Ref: run.Ref, SHA: sha,
+		Group: run.ConcurrencyGroup, Trigger: trigger, RunTrigger: kind,
+	})
+	if err != nil || !found {
+		return "", found, err
+	}
+	jobs.mu.Lock()
+	defer jobs.mu.Unlock()
+	if current, exists := jobs.intents[run.JobName]; exists {
+		if current.runID != run.ID || current.cancelled || current.adoption == nil || *current.adoption != binding {
+			return "", false, errors.New("app: conflicting Workflow adoption intent")
+		}
+		return binding.Size, true, nil
+	}
+	jobs.intents[run.JobName] = argoIntent{runID: run.ID, trigger: trigger, created: true, adoption: &binding}
+	return binding.Size, true, nil
+}
+
+func (jobs *ArgoJobs) WaitResumed(ctx context.Context, name string, destination io.Writer, events []runprogress.Event, retained int64) (service.JobResult, error) {
+	return jobs.wait(ctx, name, destination, events, retained)
+}
+
 func (jobs *ArgoJobs) Wait(ctx context.Context, name string, destination io.Writer) (service.JobResult, error) {
+	return jobs.wait(ctx, name, destination, nil, 0)
+}
+
+func (jobs *ArgoJobs) wait(ctx context.Context, name string, destination io.Writer, events []runprogress.Event, retained int64) (service.JobResult, error) {
 	jobs.mu.Lock()
 	intent, ok := jobs.intents[name]
 	jobs.mu.Unlock()
@@ -602,8 +651,23 @@ func (jobs *ArgoJobs) Wait(ctx context.Context, name string, destination io.Writ
 		return service.JobResult{}, fmt.Errorf("app: no in-process intent for Workflow %s", name)
 	}
 	defer jobs.forget(name, intent.runID)
-	completion, err := jobs.controller.Wait(ctx, name, intent.runID, destination)
+	var completion argojob.Completion
+	var err error
+	if intent.adoption != nil {
+		controller, ok := jobs.controller.(interface {
+			WaitResumed(context.Context, string, string, io.Writer, []runprogress.Event, int64, argojob.Adoption) (argojob.Completion, error)
+		})
+		if !ok {
+			return service.JobResult{}, errors.New("app: controller cannot resume adopted Workflow")
+		}
+		completion, err = controller.WaitResumed(ctx, name, intent.runID, destination, events, retained, *intent.adoption)
+	} else {
+		completion, err = jobs.controller.Wait(ctx, name, intent.runID, destination)
+	}
 	if err != nil {
+		if completion.Name != "" {
+			return jobs.result(completion), err
+		}
 		return service.JobResult{}, err
 	}
 	if reason := jobs.collectArtifacts(context.WithoutCancel(ctx), name, intent.runID, intent.trigger); reason != "" {
@@ -785,6 +849,7 @@ func (jobs *ArgoJobs) PipelineCredentialed(_ context.Context, request service.Jo
 
 var (
 	_ service.JobController              = (*ArgoJobs)(nil)
+	_ service.JobAdopter                 = (*ArgoJobs)(nil)
 	_ service.ReleaseJobController       = (*ArgoJobs)(nil)
 	_ service.PipelineSizer              = (*ArgoJobs)(nil)
 	_ service.PipelinePlanner            = (*ArgoJobs)(nil)

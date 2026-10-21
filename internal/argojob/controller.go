@@ -401,8 +401,26 @@ func sameSubmission(existing, intended *wfv1.Workflow) error {
 // events come from: the Go runner emits them from inside the Job, while here
 // the server derives them from the Workflow's node tree.
 func (controller *Controller) Wait(ctx context.Context, name, runID string, destination io.Writer) (Completion, error) {
-	budget := &runBudgetWriter{destination: destination, remaining: controller.config.MaxRunLogBytes}
+	return controller.wait(ctx, name, runID, destination, nil, 0, Adoption{})
+}
+
+// WaitResumed restores progress and the aggregate budget for an adopted Workflow.
+func (controller *Controller) WaitResumed(ctx context.Context, name, runID string, destination io.Writer, events []runprogress.Event, retained int64, binding Adoption) (Completion, error) {
+	return controller.wait(ctx, name, runID, destination, events, retained, binding)
+}
+
+func (controller *Controller) wait(ctx context.Context, name, runID string, destination io.Writer, events []runprogress.Event, retained int64, binding Adoption) (Completion, error) {
+	if retained < 0 {
+		return Completion{}, errors.New("argojob: invalid retained log size")
+	}
+	budget := &runBudgetWriter{destination: destination, remaining: controller.config.MaxRunLogBytes - retained}
 	reporter := newProgressReporter(budget)
+	for _, event := range events {
+		if err := event.Validate(); err != nil {
+			return Completion{}, err
+		}
+		reporter.reported[event.Burn+"/"+event.Step] = event.Status
+	}
 	ticker := time.NewTicker(controller.interval)
 	defer ticker.Stop()
 	var budgetBreachErr error
@@ -418,6 +436,9 @@ func (controller *Controller) Wait(ctx context.Context, name, runID string, dest
 		if err := controller.verifyOwnership(workflow, runID); err != nil {
 			return Completion{}, err
 		}
+		if binding.UID != "" && !binding.matches(workflow) {
+			return Completion{}, errors.New("argojob: adopted Workflow identity changed")
+		}
 		if err := controller.deliverExecutorTokens(ctx, workflow, delivered); err != nil {
 			return Completion{}, err
 		}
@@ -430,6 +451,9 @@ func (controller *Controller) Wait(ctx context.Context, name, runID string, dest
 			// atomically, so a status read that races the final update can
 			// miss a step's terminal event.
 			settled := controller.settle(ctx, name, runID, workflow)
+			if binding.UID != "" && !binding.matches(settled) {
+				return Completion{}, errors.New("argojob: adopted Workflow identity changed at completion")
+			}
 			if publishErr := controller.publish(ctx, settled, reporter, budget); publishErr != nil && budgetBreachErr == nil {
 				budgetBreachErr = publishErr
 			}

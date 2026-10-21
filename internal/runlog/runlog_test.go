@@ -329,3 +329,58 @@ func TestReadActiveReturnsOnlyCurrentStepWithoutWritingTerminalIndex(t *testing.
 		t.Fatalf("active read wrote terminal index: %v", err)
 	}
 }
+
+func TestResumeRetainsBytesAndProgress(t *testing.T) {
+	logs, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	file, err := logs.Create("resumed")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := file.WriteString("[test/unit] before\n"); err != nil {
+		t.Fatal(err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	event := runprogress.Event{Version: runprogress.Version, Burn: "test", Step: "unit", Status: runprogress.StepPassed, StartedAt: &now, FinishedAt: &now}
+	if err := logs.AppendStepProgress("resumed", event); err != nil {
+		t.Fatal(err)
+	}
+	file, events, size, err := logs.Resume("resumed")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 1 || !events[0].Terminal() || size != int64(len("[test/unit] before\n")) {
+		t.Fatalf("resume = %#v %d", events, size)
+	}
+	if _, err := file.WriteString("[test/unit] after\n"); err != nil {
+		t.Fatal(err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := logs.BuildIndex("resumed"); err != nil {
+		t.Fatal(err)
+	}
+	body, err := logs.Read("resumed", "test", "unit")
+	if err != nil || string(body) != "[test/unit] before\n[test/unit] after\n" {
+		t.Fatalf("resumed bytes = %q %v", body, err)
+	}
+	file, events, size, err = logs.Resume("not-yet-written")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 0 || size != 0 {
+		t.Fatalf("new resume = %v %d", events, size)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, err := logs.Resume("../escape"); err == nil {
+		t.Fatal("resume escaped log root")
+	}
+}
