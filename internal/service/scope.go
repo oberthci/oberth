@@ -507,12 +507,18 @@ func (issues scopedIssues) UpdateIssue(ctx context.Context, actor string, id int
 	if err := issues.require(ctx, id); err != nil {
 		return model.Issue{}, err
 	}
+	if patch.ScopeUpstreamID != nil && (*patch.ScopeUpstreamID == 0 || !issues.scope.seesUpstreamID(*patch.ScopeUpstreamID)) {
+		return model.Issue{}, fmt.Errorf("%w: upstream is outside the uplink scope", ErrInvalidInput)
+	}
 	return issues.inner.UpdateIssue(ctx, actor, id, patch)
 }
 
 func (issues scopedIssues) UpdateManualIssue(ctx context.Context, actor string, id int64, patch model.IssuePatch) (model.Issue, error) {
 	if err := issues.require(ctx, id); err != nil {
 		return model.Issue{}, err
+	}
+	if patch.ScopeUpstreamID != nil && (*patch.ScopeUpstreamID == 0 || !issues.scope.seesUpstreamID(*patch.ScopeUpstreamID)) {
+		return model.Issue{}, fmt.Errorf("%w: upstream is outside the uplink scope", ErrInvalidInput)
 	}
 	return issues.inner.UpdateManualIssue(ctx, actor, id, patch)
 }

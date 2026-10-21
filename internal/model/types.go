@@ -673,6 +673,7 @@ type Issue struct {
 	// ScopeUpstreamID is the upstream a manual issue is filed under, or
 	// zero (#073). CI issues belong to RepoID's upstream.
 	ScopeUpstreamID int64
+	Upstream        string `json:"upstream"` // Resolved for issue views; empty for workspace-global issues.
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
 	ClosedAt        *time.Time
@@ -690,6 +691,8 @@ type IssuePatch struct {
 	Title *string
 	Body  *string
 	State *IssueState
+	// ScopeUpstreamID moves a manual issue; zero means workspace-global.
+	ScopeUpstreamID *int64
 }
 
 type IssueListFilter struct {

@@ -171,13 +171,14 @@ func (s *Store) UpdateManualIssue(ctx context.Context, actor string, id int64, p
 
 // UpdateIssue applies the MCP-visible title/body patch to either issue kind
 // while preserving CI ownership and projection metadata. Deletion remains
-// manual-only, and CI closure continues through CloseCIIssue.
+// manual-only, CI closure continues through CloseCIIssue, and only manual
+// issues may change upstream scope.
 func (s *Store) UpdateIssue(ctx context.Context, actor string, id int64, patch model.IssuePatch) (model.Issue, error) {
 	return s.updateIssue(ctx, actor, id, patch, false)
 }
 
 func (s *Store) updateIssue(ctx context.Context, actor string, id int64, patch model.IssuePatch, manualOnly bool) (model.Issue, error) {
-	if strings.TrimSpace(actor) == "" || id <= 0 || (patch.Title == nil && patch.Body == nil && patch.State == nil) {
+	if strings.TrimSpace(actor) == "" || id <= 0 || (patch.Title == nil && patch.Body == nil && patch.State == nil && patch.ScopeUpstreamID == nil) {
 		return model.Issue{}, fmt.Errorf("%w: issue patch is empty", ErrInvalid)
 	}
 	if patch.Title != nil && strings.TrimSpace(*patch.Title) == "" {
@@ -185,6 +186,9 @@ func (s *Store) updateIssue(ctx context.Context, actor string, id int64, patch m
 	}
 	if patch.State != nil && !patch.State.Valid() {
 		return model.Issue{}, fmt.Errorf("%w: issue state is invalid", ErrInvalid)
+	}
+	if patch.ScopeUpstreamID != nil && *patch.ScopeUpstreamID < 0 {
+		return model.Issue{}, fmt.Errorf("%w: issue upstream is invalid", ErrInvalid)
 	}
 
 	updatedAt := s.now().UTC()
@@ -197,6 +201,25 @@ func (s *Store) updateIssue(ctx context.Context, actor string, id int64, patch m
 	closing := patch.State != nil && *patch.State == model.IssueClosed
 	if err := s.requireIssueMutationLock(ctx, tx, id, actor, updatedAt, !closing); err != nil {
 		return model.Issue{}, err
+	}
+	var oldScope int64
+	if patch.ScopeUpstreamID != nil {
+		var kind model.IssueKind
+		if err := tx.QueryRowContext(ctx, `SELECT kind, COALESCE(scope_upstream_id, 0) FROM issues WHERE id = ?`, id).Scan(&kind, &oldScope); err != nil {
+			return model.Issue{}, translateNotFound("issue", err)
+		}
+		if kind != model.IssueManual {
+			return model.Issue{}, fmt.Errorf("%w: CI issue scope is bound to its repository", ErrInvalid)
+		}
+		if *patch.ScopeUpstreamID > 0 {
+			var found int
+			if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM upstreams WHERE id = ?`, *patch.ScopeUpstreamID).Scan(&found); err != nil {
+				return model.Issue{}, fmt.Errorf("check issue upstream: %w", err)
+			}
+			if found == 0 {
+				return model.Issue{}, fmt.Errorf("%w: upstream %d", ErrNotFound, *patch.ScopeUpstreamID)
+			}
+		}
 	}
 	updates := []string{"updated_at = ?"}
 	args := []any{now}
@@ -211,6 +234,14 @@ func (s *Store) updateIssue(ctx context.Context, actor string, id int64, patch m
 	if patch.State != nil {
 		updates = append(updates, "state = ?", "closed_at = CASE WHEN ? = 'closed' THEN COALESCE(closed_at, ?) ELSE NULL END")
 		args = append(args, *patch.State, *patch.State, now)
+	}
+	if patch.ScopeUpstreamID != nil {
+		updates = append(updates, "scope_upstream_id = ?")
+		if *patch.ScopeUpstreamID == 0 {
+			args = append(args, nil)
+		} else {
+			args = append(args, *patch.ScopeUpstreamID)
+		}
 	}
 	args = append(args, id)
 	query := `UPDATE issues SET ` + strings.Join(updates, ", ") + ` WHERE id = ?`
@@ -227,7 +258,12 @@ func (s *Store) updateIssue(ctx context.Context, actor string, id int64, patch m
 			return model.Issue{}, fmt.Errorf("release closed manual issue lock: %w", err)
 		}
 	}
-	if err := s.appendIssueAudit(ctx, tx, actor, "issue.update", value.ID, map[string]any{"state": value.State}, now); err != nil {
+	details := map[string]any{"state": value.State}
+	if patch.ScopeUpstreamID != nil {
+		details["old_scope_upstream_id"] = oldScope
+		details["new_scope_upstream_id"] = value.ScopeUpstreamID
+	}
+	if err := s.appendIssueAudit(ctx, tx, actor, "issue.update", value.ID, details, now); err != nil {
 		return model.Issue{}, err
 	}
 	if err := tx.Commit(); err != nil {

@@ -187,7 +187,19 @@ func (service *API) CallTool(ctx context.Context, actor api.Actor, name string, 
 	if strings.TrimSpace(actor.Identity) == "" {
 		return nil, errors.New("service: acting uplink identity is required")
 	}
-	service, err := service.forActor(ctx, actor)
+	// An admin may repair an issue's scope even when its own uplink has a
+	// narrower read scope. An ordinary title/body edit keeps that scope.
+	adminScopeMove := false
+	if name == "issue_update" && actor.Admin {
+		var arguments struct {
+			Upstream *string `json:"upstream"`
+		}
+		adminScopeMove = json.Unmarshal(raw, &arguments) == nil && arguments.Upstream != nil
+	}
+	var err error
+	if !adminScopeMove {
+		service, err = service.forActor(ctx, actor)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -432,12 +444,13 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 			ID                 int64   `json:"id"`
 			Title              *string `json:"title"`
 			Body               *string `json:"body"`
+			Upstream           *string `json:"upstream"`
 			ExpectedBodySHA256 string  `json:"expected_body_sha256"`
 		}
 		if err := decodeTool(raw, &arguments); err != nil {
 			return nil, err
 		}
-		issue, err := service.issueUpdate(ctx, actor, arguments.ID, arguments.Title, arguments.Body, arguments.ExpectedBodySHA256)
+		issue, err := service.issueUpdate(ctx, actor, arguments.ID, arguments.Title, arguments.Body, arguments.Upstream, arguments.ExpectedBodySHA256)
 		if err != nil {
 			return nil, err
 		}
@@ -1885,12 +1898,37 @@ func (service *API) issueGet(ctx context.Context, _ api.Actor, id int64) (model.
 	if service.issues == nil || id <= 0 {
 		return model.Issue{}, fmt.Errorf("%w: issue ID is required", ErrInvalidInput)
 	}
-	return service.issues.Issue(ctx, id)
+	issue, err := service.issues.Issue(ctx, id)
+	if err != nil {
+		return model.Issue{}, err
+	}
+	issues := []model.Issue{issue}
+	if err := service.labelIssueScopes(ctx, issues); err != nil {
+		return model.Issue{}, err
+	}
+	return issues[0], nil
 }
 
-func (service *API) issueUpdate(ctx context.Context, actor api.Actor, id int64, title, body *string, expectedBodySHA256 string) (model.Issue, error) {
-	if service.issues == nil || id <= 0 || title == nil || body == nil {
-		return model.Issue{}, fmt.Errorf("%w: issue ID, title, and body are required", ErrInvalidInput)
+func (service *API) issueUpdate(ctx context.Context, actor api.Actor, id int64, title, body, upstream *string, expectedBodySHA256 string) (model.Issue, error) {
+	if service.issues == nil || id <= 0 || (title == nil && body == nil && upstream == nil) || (title == nil) != (body == nil) {
+		return model.Issue{}, fmt.Errorf("%w: issue ID and either upstream or both title and body are required", ErrInvalidInput)
+	}
+	patch := model.IssuePatch{Title: title, Body: body}
+	if upstream != nil {
+		name := strings.TrimSpace(*upstream)
+		var id int64
+		if name == "" || strings.EqualFold(name, "global") {
+			if !actor.Admin {
+				return model.Issue{}, fmt.Errorf("%w: only an admin may make an issue workspace-global", ErrInvalidInput)
+			}
+		} else {
+			var err error
+			id, err = service.upstreamID(ctx, name)
+			if err != nil {
+				return model.Issue{}, err
+			}
+		}
+		patch.ScopeUpstreamID = &id
 	}
 	// When the caller sends expected_body_sha256, verify that the current body
 	// matches before replacing it. This catches silently truncated payloads: if
@@ -1907,11 +1945,15 @@ func (service *API) issueUpdate(ctx context.Context, actor api.Actor, id int64, 
 			return model.Issue{}, fmt.Errorf("%w: expected_body_sha256 mismatch: the existing body has changed or the caller's hash is wrong (got %s)", ErrInvalidInput, actual)
 		}
 	}
-	issue, err := service.issues.UpdateIssue(ctx, actor.Identity, id, model.IssuePatch{Title: title, Body: body})
+	issue, err := service.issues.UpdateIssue(ctx, actor.Identity, id, patch)
 	if err != nil {
 		return model.Issue{}, err
 	}
-	return issue, nil
+	issues := []model.Issue{issue}
+	if err := service.labelIssueScopes(ctx, issues); err != nil {
+		return model.Issue{}, err
+	}
+	return issues[0], nil
 }
 
 func (service *API) issueAppend(ctx context.Context, actor api.Actor, id int64, text string) (model.Issue, error) {
@@ -1979,14 +2021,61 @@ func (service *API) issueList(ctx context.Context, repositoryName, kind, state s
 	if filter.Limit <= 0 || filter.Limit > maximumIssuePage {
 		filter.Limit = maximumIssuePage
 	}
-	return service.issues.ListIssues(ctx, filter)
+	page, err := service.issues.ListIssues(ctx, filter)
+	if err != nil {
+		return model.IssuePage{}, err
+	}
+	if err := service.labelIssueScopes(ctx, page.Issues); err != nil {
+		return model.IssuePage{}, err
+	}
+	return page, nil
+}
+
+func (service *API) labelIssueScopes(ctx context.Context, issues []model.Issue) error {
+	if len(issues) == 0 {
+		return nil
+	}
+	names := map[int64]string{}
+	repos := map[int64]int64{}
+	if service.scope != nil {
+		for id, upstream := range service.scope.upstreams {
+			names[id] = upstream.Name
+		}
+		for id, repo := range service.scope.repos {
+			repos[id] = repo.UpstreamID
+		}
+	} else if source, ok := service.runs.(ScopeSource); ok {
+		upstreams, err := source.ListUpstreams(ctx)
+		if err != nil {
+			return err
+		}
+		for _, upstream := range upstreams {
+			names[upstream.ID] = upstream.Name
+		}
+		all, err := source.ListRepositories(ctx)
+		if err != nil {
+			return err
+		}
+		for _, repo := range all {
+			repos[repo.ID] = repo.UpstreamID
+		}
+	}
+	for i := range issues {
+		id := issues[i].ScopeUpstreamID
+		if issues[i].RepoID != 0 {
+			id = repos[issues[i].RepoID]
+		}
+		issues[i].Upstream = names[id]
+	}
+	return nil
 }
 
 func wireIssue(issue model.Issue) api.IssueResponse {
 	return api.IssueResponse{
 		ID: issue.ID, Kind: string(issue.Kind), Title: issue.Title,
 		Body: issue.Body, State: string(issue.State),
-		RepoID: issue.RepoID, Branch: issue.Branch,
+		Upstream: issue.Upstream,
+		RepoID:   issue.RepoID, Branch: issue.Branch,
 		Occurrences: int(issue.Occurrences),
 		CIOrigin:    issue.CIOrigin, CIWorkID: issue.CIWorkID,
 		CreatedAt: issue.CreatedAt.UTC().Format(time.RFC3339),
@@ -2002,6 +2091,7 @@ func wireIssueList(page model.IssuePage) api.IssueListResponse {
 			State:       string(issue.State),
 			Kind:        string(issue.Kind),
 			Title:       issue.Title,
+			Upstream:    issue.Upstream,
 			RepoID:      issue.RepoID,
 			Branch:      issue.Branch,
 			Occurrences: int(issue.Occurrences),

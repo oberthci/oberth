@@ -129,6 +129,7 @@ type IssueCreateResponse struct {
 // projection sequence and storage ownership fields stay behind the service.
 type IssueResponse struct {
 	ID          int64  `json:"id"`
+	Upstream    string `json:"upstream"`
 	Kind        string `json:"kind"`
 	Title       string `json:"title"`
 	Body        string `json:"body"`
@@ -158,6 +159,7 @@ type IssueGetManyResponse struct {
 
 type IssueListItem struct {
 	ID          int64  `json:"id"`
+	Upstream    string `json:"upstream"`
 	State       string `json:"state"`
 	Kind        string `json:"kind,omitempty"`
 	Title       string `json:"title,omitempty"`
@@ -431,7 +433,7 @@ func toolDefinitions() []map[string]any {
 		tool("issue_create", "Create a manual issue, workspace-global or filed under one upstream. Uplinks scoped to that upstream see it; an uplink scoped to one upstream files there by default.", object(map[string]any{"title": stringProperty("Issue title"), "body": stringProperty("Issue body"), "upstream": stringProperty("Upstream name to file the issue under (required for an uplink scoped to several upstreams)")}, "title", "body")),
 		tool("issue_get", "Get an issue by ID.", object(map[string]any{"id": integerProperty("Issue ID")}, "id")),
 		tool("issue_get_many", "Get complete issue records for 1..50 unique positive IDs in request order. Each result contains issue or error (not_found or response_limit). Structured JSON is bounded to 256 KiB; use issue_get for response_limit IDs. Bodies are never truncated. Read-only; does not renew locks.", object(map[string]any{"ids": map[string]any{"type": "array", "minItems": 1, "maxItems": 50, "uniqueItems": true, "items": map[string]any{"type": "integer", "minimum": 1}}}, "ids")),
-		tool("issue_update", "Update an issue title and body. When expected_body_sha256 is set, the server rejects the update if the SHA-256 of the existing body does not match, preventing silently truncated payloads from overwriting a longer body.", object(map[string]any{"id": integerProperty("Issue ID"), "title": stringProperty("Issue title"), "body": stringProperty("Issue body"), "expected_body_sha256": stringProperty("Hex-encoded SHA-256 of the existing body; the server rejects the update on mismatch")}, "id", "title", "body")),
+		tool("issue_update", "Update an issue title and body, or move a manual issue to an upstream (empty or global means workspace-global, admin only). A non-admin can move only a visible issue to an upstream in scope. When expected_body_sha256 is set, the server rejects the update if the SHA-256 of the existing body does not match.", object(map[string]any{"id": integerProperty("Issue ID"), "title": stringProperty("Issue title (send with body)"), "body": stringProperty("Issue body (send with title)"), "upstream": stringProperty("New upstream name, or empty/global for workspace-global (admin only)"), "expected_body_sha256": stringProperty("Hex-encoded SHA-256 of the existing body; the server rejects the update on mismatch")}, "id")),
 		tool("issue_append", "Append text to an issue body with a dated separator, without replacing the existing content. Safer than issue_update for checkpoints on large issues: the caller never re-sends the existing body.", object(map[string]any{"id": integerProperty("Issue ID"), "text": stringProperty("Text to append")}, "id", "text")),
 		tool("issue_close", "Close an issue without deleting its history.", object(map[string]any{"id": integerProperty("Issue ID")}, "id")),
 		tool("issue_reopen", "Reopen a manual issue without changing its ID or history. Already-open manual issues are unchanged; CI issues cannot be reopened manually.", object(map[string]any{"id": integerProperty("Issue ID")}, "id")),

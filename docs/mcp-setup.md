@@ -212,7 +212,7 @@ call the proxy hostname directly.
 | `issue_create` | Create a manual issue, workspace-global or filed under one `upstream` |
 | `issue_get` | Get an issue by ID |
 | `issue_get_many` | Get 1..50 complete issues in request order, with explicit missing/size-limit results |
-| `issue_update` | Update an issue title and body; optional `expected_body_sha256` rejects the update on mismatch |
+| `issue_update` | Update an issue title and body or move a manual issue with `upstream`; optional `expected_body_sha256` rejects the update on mismatch |
 | `issue_append` | Append text to an issue body with a dated separator (no full-body re-send) |
 | `issue_close` | Close an issue |
 | `issue_reopen` | Reopen a manual issue by ID; an already-open issue is unchanged, CI issues are rejected |
@@ -447,7 +447,15 @@ mention that component.
 
 For the latest 5, 10, or 50 created issues, set `limit` accordingly (1..50).
 Ordering is descending issue ID, not most recently updated. Listing does not
-include bodies.
+include bodies. `issue_get`, `issue_list`, and `/api/issues` show `upstream`
+(empty for a workspace-global manual issue).
+
+To repair a mis-scoped manual issue without changing its ID, body, appends, or
+history, call `issue_update({"id":1094,"upstream":"github"})`. An admin may
+use an empty `upstream` or `"global"` to make it workspace-global. Other
+uplinks can only move visible issues to upstreams in their scope; CI issues
+cannot move. The CLI can call the same tool with
+`oberth mcp call issue_update '{"id":1094,"upstream":"github"}'`.
 
 Read selected bodies in one call: `issue_get_many({"ids":[787,743,426]})`.
 The `results` array preserves that order. Each result contains `id` and either
