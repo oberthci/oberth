@@ -208,7 +208,6 @@ idempotence, conflicting-demand refusal and release under a reduced grant.
 Controller and adapter tests bind restored demand to the verified Workflow
 spec without requiring a current grant or repository checkout.
 
-
 Promotion/tag/release adoption #1172 slice 2: each trigger keeps the same run,
 queue/admission order and credential classification through two owner restarts.
 Tests cover live and finished-while-down Workflows, persisted steps, no new

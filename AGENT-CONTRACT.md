@@ -1184,8 +1184,10 @@ continuity checks; it must never be used to reset or bypass those checks.
   supersession still delete the exact owned Workflow, and terminal runs are
   never adopted or automatically re-fired.
   Upgrade note: the first upgrade to a release with adoption is still
-  disruptive, because the old process re-queues its own running branch runs
-  when it receives SIGTERM. Adoption applies from the next restart onward.
+  disruptive, because the old process acts on its own SIGTERM: it re-queues
+  its running branch runs, and a process without promotion/tag/release
+  adoption deletes those Workflows and records them as interrupted
+  ("scheduler stopped"). Adoption applies from the next restart onward.
 - Green branch runs force-sync that same branch to the upstream forge. Red
   default-branch and scheduled branch runs create or update one open CI issue
   per repository and branch with the new SHA, a bounded (16 KiB) failure excerpt,
