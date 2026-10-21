@@ -214,6 +214,11 @@ func (ingestor *PushIngestor) Tag(ctx context.Context, push TagPush) (PushResult
 }
 
 func (ingestor *PushIngestor) ensureRepository(ctx context.Context, name string) (model.Repository, error) {
+	if repository, err := ingestor.repositories.RepositoryByName(ctx, name); err == nil && repository.ArchivedAt != nil {
+		return model.Repository{}, store.ErrRepositoryArchived
+	} else if err != nil && !errors.Is(err, store.ErrNotFound) {
+		return model.Repository{}, err
+	}
 	cache, err := ingestor.git.Ensure(ctx, name)
 	if err != nil {
 		return model.Repository{}, fmt.Errorf("ensure repository cache: %w", err)

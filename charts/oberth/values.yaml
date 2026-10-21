@@ -1,3 +1,7 @@
+# Fully qualified archived repository names. Keep aligned with repo_archive;
+# chart rendering refuses releaseWIF capabilities for these repositories.
+archivedRepositories: []
+
 image:
   # Server image digest. In source this is the bootstrap seed for the first
   # release; the release pipeline stamps the exact per-release digest here

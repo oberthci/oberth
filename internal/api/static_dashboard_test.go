@@ -291,3 +291,23 @@ func TestRunsFiltersCountsAndCancelledSuccessors(t *testing.T) {
 		}
 	}
 }
+
+func TestArchivedRepositoryFilterKeepsCatalogAndHistoryCounts(t *testing.T) {
+	t.Parallel()
+	source := string(staticAssets["app.js"].body)
+	for _, required := range []string{
+		`repoArchive: "active"`,
+		`function listedRepos()`,
+		`Boolean(repo.ArchivedAt) === (state.repoArchive === "archived")`,
+		`const rows = listedRepos().map`,
+		`${listedRepos().map(repo =>`,
+		`data-repo-archive=`,
+		`state.repoArchive = target.dataset.repoArchive; route();`,
+		`${state.repos.length} configured`,
+		`state.runCounts.ByRepo?.[repo.ID]`,
+	} {
+		if !strings.Contains(source, required) {
+			t.Fatalf("archive filter missing %q", required)
+		}
+	}
+}

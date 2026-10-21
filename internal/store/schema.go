@@ -14,7 +14,8 @@ func LatestMigrationVersion() int { return latestMigrationVersion }
 
 const (
 	admissionSequenceMigrationVersion = 28
-	latestMigrationVersion            = admissionSequenceMigrationVersion
+	repositoryArchiveMigrationVersion = 29
+	latestMigrationVersion            = repositoryArchiveMigrationVersion
 	// oberthSchemaIdentity is the fresh-deployment default. Existing deployments
 	// supply their original immutable identity through ProtocolConfig; bootstrap
 	// SQL and legacy schema validation use that exact configured operand.
@@ -1125,4 +1126,7 @@ ALTER TABLE kubevirt_grants ADD COLUMN max_memory_bytes INTEGER NOT NULL DEFAULT
 UPDATE runs SET admission_sequence = queue_sequence;
 CREATE INDEX runs_admission_idx ON runs(status, admission_sequence, queue_sequence);`,
 	},
+	{version: repositoryArchiveMigrationVersion, sql: `CREATE INDEX IF NOT EXISTS repository_archive_actions_idx
+    ON audit_actions(resource_id, id DESC)
+    WHERE resource_type = 'repository' AND action IN ('repository.archive', 'repository.unarchive');`},
 }

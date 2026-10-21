@@ -79,6 +79,8 @@ type APIConfig struct {
 	SizeGrants                SizeGrantStore
 	SecretStoreVerifier       SecretStoreVerifier
 	SecretAccessReconciler    *AccessReconciler
+	RepositoryArchiver        RepositoryArchiver
+	ChangeRepositoryArchive   func(context.Context, string, bool, func() error) error
 	RepositoryRemover         RepositoryRemover
 	RemoveGitCache            func(string) error
 	PromotionGrants           PromotionGrantStore
@@ -126,6 +128,8 @@ type API struct {
 	sizeGrants                SizeGrantStore
 	secretStoreVerifier       SecretStoreVerifier
 	secretAccessReconciler    *AccessReconciler
+	repositoryArchiver        RepositoryArchiver
+	changeRepositoryArchive   func(context.Context, string, bool, func() error) error
 	repositoryRemover         RepositoryRemover
 	removeGitCache            func(string) error
 	promotionGrants           PromotionGrantStore
@@ -203,7 +207,8 @@ func NewAPI(config APIConfig) (*API, error) {
 		kubeVirtGrants:      config.KubeVirtGrants,
 		sizeGrants:          config.SizeGrants,
 		secretStoreVerifier: config.SecretStoreVerifier,
-		repositoryRemover:   config.RepositoryRemover, removeGitCache: config.RemoveGitCache,
+		repositoryArchiver:  config.RepositoryArchiver, changeRepositoryArchive: config.ChangeRepositoryArchive,
+		repositoryRemover: config.RepositoryRemover, removeGitCache: config.RemoveGitCache,
 		promotionGrants: config.PromotionGrants, promotionGrantMaxLifetime: promotionGrantMaxLifetime,
 		runCancels: config.RunCancels, retention: config.Retention, runReruns: config.RunReruns, schedules: config.Schedules, uplinks: config.Uplinks, background: &sync.WaitGroup{},
 		lifetime: lifetime, stopLifetime: stopLifetime, closing: &backgroundClosing{},
@@ -739,6 +744,14 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 			return nil, err
 		}
 		return api.RepoListResponse{Repositories: repos}, nil
+	case "repo_archive", "repo_unarchive":
+		var arguments struct {
+			Repo string `json:"repo"`
+		}
+		if err := decodeTool(raw, &arguments); err != nil {
+			return nil, err
+		}
+		return service.repoArchive(ctx, actor, arguments.Repo, name == "repo_archive")
 	case "repo_remove":
 		var arguments struct {
 			Repo string `json:"repo"`
@@ -1183,7 +1196,7 @@ func (service *API) status(ctx context.Context, repositoryName, selector, actor 
 	// resolver. Branch status, however, belongs to the current cached HEAD,
 	// even when an older run was recorded under that branch's name.
 	selectsSHA := runErr == nil && len(selector) >= 7 && strings.HasPrefix(strings.ToLower(run.SHA), strings.ToLower(selector))
-	if service.refs != nil && !selectsSHA && !strings.HasPrefix(selector, "refs/tags/") &&
+	if repository.ArchivedAt == nil && service.refs != nil && !selectsSHA && !strings.HasPrefix(selector, "refs/tags/") &&
 		(runErr != nil || run.RefKind == model.RefBranch) {
 		response, refErr := service.statusForBranchRef(ctx, repositoryName, selector, actor)
 		if refErr == nil && runErr == nil && response.Repository.ID != repository.ID {
@@ -1838,6 +1851,9 @@ func (service *API) sync(ctx context.Context, actor api.Actor, repositoryName, s
 	if err != nil {
 		return model.Run{}, err
 	}
+	if repository.ArchivedAt != nil {
+		return model.Run{}, store.ErrRepositoryArchived
+	}
 	if run.RefKind != model.RefBranch {
 		return model.Run{}, fmt.Errorf("%w: sync only accepts branch runs", ErrInvalidInput)
 	}
@@ -1938,6 +1954,9 @@ func (service *API) promote(ctx context.Context, actor api.Actor, repositoryName
 // not spend it. retryOf and mode record a promote_retry lineage.
 func (service *API) admitPromotion(ctx context.Context, actor api.Actor, repository model.Repository, candidate model.Run,
 	target, retryOf, mode string) (model.Promotion, error) {
+	if repository.ArchivedAt != nil {
+		return model.Promotion{}, store.ErrRepositoryArchived
+	}
 	if candidate.RefKind != model.RefBranch || candidate.Status != model.RunPassed || !sameOID(candidate.TestedSHA, candidate.SHA) {
 		return model.Promotion{}, errors.New("service: promotion source must be the exactly tested green branch commit")
 	}
@@ -2433,7 +2452,7 @@ func mutatingTool(name string) bool {
 		"kubevirt_grant", "kubevirt_revoke",
 		"size_grant", "size_revoke",
 		"admission_release",
-		"repo_remove",
+		"repo_remove", "repo_archive", "repo_unarchive",
 		"secretstore_sync_receipt",
 		"promote_grant", "promote_grant_revoke",
 		"schedule_pause", "schedule_resume", "schedule_trigger":

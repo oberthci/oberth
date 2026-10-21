@@ -22,6 +22,9 @@ func (c *Cache) SyncBranch(ctx context.Context, input, branch, sha string) error
 	lock := c.repoLock(path)
 	lock.Lock()
 	defer lock.Unlock()
+	if err := c.checkRepositoryActive(ctx, input); err != nil {
+		return err
+	}
 	if err := c.assertCommit(ctx, path, sha); err != nil {
 		return err
 	}
@@ -48,6 +51,9 @@ func (c *Cache) SyncTag(ctx context.Context, input, tag, sha string) error {
 	lock := c.repoLock(path)
 	lock.Lock()
 	defer lock.Unlock()
+	if err := c.checkRepositoryActive(ctx, input); err != nil {
+		return err
+	}
 	if err := c.assertObject(ctx, path, sha); err != nil {
 		return err
 	}
@@ -72,6 +78,9 @@ func (c *Cache) DeleteBranch(ctx context.Context, input, branch string) error {
 	lock := c.repoLock(path)
 	lock.Lock()
 	defer lock.Unlock()
+	if err := c.checkRepositoryActive(ctx, input); err != nil {
+		return err
+	}
 	ref := "refs/heads/" + branch
 	// Check whether the branch exists upstream before pushing the deletion
 	// so a never-published branch completes silently.
@@ -188,6 +197,9 @@ func (c *Cache) PreparePromotion(ctx context.Context, input, sourceSHA, targetBr
 	lock := c.repoLock(path)
 	lock.Lock()
 	defer lock.Unlock()
+	if err := c.checkRepositoryActive(ctx, input); err != nil {
+		return MergeCandidate{}, err
+	}
 	if err := c.assertCommit(ctx, path, sourceSHA); err != nil {
 		return MergeCandidate{}, err
 	}
@@ -300,6 +312,9 @@ func (c *Cache) PushPromotion(ctx context.Context, input, targetBranch, mergedSH
 	lock := c.repoLock(path)
 	lock.Lock()
 	defer lock.Unlock()
+	if err := c.checkRepositoryActive(ctx, input); err != nil {
+		return err
+	}
 	if err := c.assertCommit(ctx, path, mergedSHA); err != nil {
 		return err
 	}
@@ -385,6 +400,16 @@ func (c *Cache) isAncestor(ctx context.Context, path, older, newer string) bool 
 // so the caller gets "Permission denied (publickey)" or "repository not
 // found" instead of a bare exit code.
 func (c *Cache) LsRemoteHeads(ctx context.Context, input string) (int, error) {
+	_, path, err := c.path(input)
+	if err != nil {
+		return 0, err
+	}
+	lock := c.repoLock(path)
+	lock.Lock()
+	defer lock.Unlock()
+	if err := c.checkRepositoryActive(ctx, input); err != nil {
+		return 0, err
+	}
 	remote, err := c.validatedUpstream(input)
 	if err != nil {
 		return 0, err

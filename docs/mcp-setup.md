@@ -340,6 +340,7 @@ A step above the 4 MiB response ceiling returns a truncated result with
 step: a single step can exceed a model's context window.
 
 | `repo_list` | List registered repositories with upstream and probe state |
+| `repo_archive` / `repo_unarchive` | Archive or restore a repository, preserving history (unscoped admin only) |
 | `repo_remove` | Remove a repository mapping and its Git cache (admin-only) |
 | `run_list` | List recent runs with optional repo/ref filter (bounded page) |
 | `audit_list` | Admin-only: verified audit-chain entries newest first, filtered by action prefix, actor, repo and time range (paged) |
@@ -691,3 +692,11 @@ limits. Caller cancellation and earlier caller deadlines still take precedence.
 Ending a long-poll request does not cancel the durable run or promotion.
 Artifact downloads with `artifact_get --output` retain their streaming default;
 an explicit `--timeout` bounds the download too.
+
+Archive a retired repository with `oberth repo archive upstream/org/repo`;
+restore it with `oberth repo unarchive upstream/org/repo`. Both use the remote
+admin MCP tools and accept `--url`, `--token-file` and `--ca-file`. Archive refuses
+in-flight work and pending promotions, keeps all evidence, drops the Git cache,
+and refuses pushes and new runs until restored. History remains readable.
+Remove its releaseWIF mapping and list it under chart `archivedRepositories` to
+make stale release capabilities fail chart validation.

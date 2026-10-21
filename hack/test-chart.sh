@@ -793,3 +793,14 @@ for flag in --log-retention=0s --artifact-retention=0s --logs-budget-bytes=0 \
   --retention-sweep-interval=10m --retention-keep-newest=1; do
   grep -Fq -- "$flag" "$manifest"
 done
+# Archived repositories retain evidence but must have no release WIF grants.
+archive_wif='{"namespace":"oberth-argo","roles":{"image-writer":{"provider":"projects/123/locations/global/workloadIdentityPools/images/providers/issuer","service_account":"publisher@example-project.iam.gserviceaccount.com"}},"repositories":{"github/org/retired":{"service_account_name":"retired-release","templates":{"publish":"image-writer"}}}}'
+render --set-json "argo.releaseWIF=$archive_wif" >"$manifest"
+if render --set-json 'archivedRepositories=["github/org/retired"]' --set-json "argo.releaseWIF=$archive_wif" >"$manifest" 2>&1; then
+  echo "archived repository retained a releaseWIF capability" >&2
+  exit 1
+fi
+grep -Fq 'releaseWIF entry for archived repository github/org/retired must be removed' "$manifest"
+render --set-json 'archivedRepositories=["github/org/other"]' --set-json "argo.releaseWIF=$archive_wif" >"$manifest"
+render --set-json 'archivedRepositories=["github/org/retired"]' >"$manifest"
+render --set archivedRepositories=null >"$manifest"

@@ -59,6 +59,9 @@ func (c *Cache) Receive(ctx context.Context, input, actor, protocol string, stdi
 	receiveLock.Lock()
 	defer receiveLock.Unlock()
 
+	if err := c.checkRepositoryActive(ctx, input); err != nil {
+		return err
+	}
 	// A previous reserved receive must be recovered before Ensure is allowed to
 	// refresh public refs from upstream; otherwise unrelated upstream movement
 	// could be misattributed to the prior actor's crash window.

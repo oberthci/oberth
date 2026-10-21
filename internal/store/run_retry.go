@@ -30,6 +30,9 @@ func (s *Store) RetryRun(ctx context.Context, runID, actor string) (model.Enqueu
 	if err != nil {
 		return model.EnqueueRunResult{}, fmt.Errorf("load retry source run: %w", err)
 	}
+	if err := requireRepositoryActive(ctx, tx, previous.RepoID); err != nil {
+		return model.EnqueueRunResult{}, err
+	}
 	var newestID string
 	if err := tx.QueryRowContext(ctx, `SELECT id FROM runs WHERE repo_id = ? AND ref_kind = ? AND ref = ?
 		ORDER BY queue_sequence DESC LIMIT 1`, previous.RepoID, previous.RefKind, previous.Ref).Scan(&newestID); err != nil {

@@ -127,6 +127,9 @@ func (schedules *Schedules) Tick(ctx context.Context, now time.Time) {
 }
 
 func (schedules *Schedules) tickRepository(ctx context.Context, repository model.Repository, now time.Time) {
+	if repository.ArchivedAt != nil {
+		return
+	}
 	ctx, cancel := context.WithTimeout(ctx, schedulePerRepoTimeout)
 	defer cancel()
 

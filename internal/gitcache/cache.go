@@ -230,6 +230,7 @@ type Cache struct {
 	env             map[string]string
 	redact          []string
 	logger          Logger
+	repositoryGate  func(context.Context, string) error
 	preFinalizeGate func(context.Context) error
 	locks           sync.Map
 	receiveLocks    sync.Map
@@ -283,6 +284,7 @@ func New(config Config) (*Cache, error) {
 		redact:          append([]string(nil), config.Redact...),
 		logger:          logger,
 		preFinalizeGate: config.PreFinalizeGate,
+		repositoryGate:  config.RepositoryGate,
 	}, nil
 }
 
@@ -318,6 +320,9 @@ func (c *Cache) EnsureForFetch(ctx context.Context, input string) (Repository, e
 	lock := c.repoLock(path)
 	lock.Lock()
 	defer lock.Unlock()
+	if err := c.checkRepositoryActive(ctx, input); err != nil {
+		return Repository{}, err
+	}
 	// A pending reservation means a crashed or gate-failed receive has not
 	// been recovered yet. Serve the cache without refreshing.
 	identity := c.reservationIdentity(repo, path)
@@ -357,6 +362,9 @@ func (c *Cache) ensureReceiveLocked(ctx context.Context, input, repo, path strin
 }
 
 func (c *Cache) ensureLockedMayRecover(ctx context.Context, input, repo, path string, detectRecovery bool) (Repository, error) {
+	if err := c.checkRepositoryActive(ctx, input); err != nil {
+		return Repository{}, err
+	}
 	if stat, err := os.Stat(path); err == nil {
 		if !stat.IsDir() || !c.isBare(ctx, path) {
 			return Repository{}, fmt.Errorf("cache path for %s is not a bare repository", repo)

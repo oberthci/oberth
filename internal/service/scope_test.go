@@ -686,6 +686,7 @@ var toolScopeBehaviour = map[string]string{
 	"admission_release": "refused",
 	"repo_remove":       "mutation", "promote_grant": "mutation", "promote_grant_revoke": "mutation",
 	"schedule_list": "filtered", "schedule_pause": "mutation", "schedule_resume": "mutation", "schedule_trigger": "mutation",
+	"repo_archive": "refused", "repo_unarchive": "refused",
 	"secretstore_verify": "refused", "secretstore_plan": "refused", "secretstore_sync_receipt": "refused",
 	"audit_list": "refused",
 }

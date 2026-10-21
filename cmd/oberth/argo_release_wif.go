@@ -97,3 +97,12 @@ func checkReleaseWIFJSON(d *json.Decoder, depth int) error {
 	_, err = d.Token()
 	return err
 }
+
+func warnArchivedReleaseWIF(logger interface{ Printf(string, ...any) }, config *argojob.ReleaseWIFConfig, repo string) {
+	if config == nil {
+		return
+	}
+	if _, exists := config.Repositories[repo]; exists {
+		logger.Printf("WARNING: releaseWIF entry for archived repository %s must be removed; add it to chart archivedRepositories", repo)
+	}
+}
