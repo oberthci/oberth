@@ -726,6 +726,7 @@ type remoteIssueSummary struct {
 type remoteIssuePage struct {
 	Issues     []remoteIssueSummary
 	NextBefore int64
+	Total      int64 `json:"total"`
 }
 
 func runIssues(ctx context.Context, arguments []string, output io.Writer) error {
@@ -749,7 +750,10 @@ func runIssues(ctx context.Context, arguments []string, output io.Writer) error 
 		return err
 	}
 	if len(page.Issues) == 0 {
-		_, err := fmt.Fprintln(output, "no issues")
+		if _, err := fmt.Fprintln(output, "no issues"); err != nil {
+			return err
+		}
+		_, err := fmt.Fprintf(output, "0 of %d\n", page.Total)
 		return err
 	}
 	if _, err := fmt.Fprintf(output, "%-6s %-8s %-8s %s\n", "ID", "STATE", "KIND", "TITLE"); err != nil {
@@ -761,7 +765,12 @@ func runIssues(ctx context.Context, arguments []string, output io.Writer) error 
 			return err
 		}
 	}
-	return nil
+	total := page.Total
+	if total == 0 { // A server before #1124 did not return total.
+		total = int64(len(page.Issues))
+	}
+	_, err = fmt.Fprintf(output, "1–%d of %d\n", len(page.Issues), total)
+	return err
 }
 
 func shortSHA(sha string) string {

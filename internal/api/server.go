@@ -81,6 +81,7 @@ type IssueFilter struct {
 	Repository string
 	Kind       string
 	State      string
+	Query      string
 	BeforeID   int
 	Limit      int
 }
@@ -433,7 +434,7 @@ func (server *Server) handleIssues(writer http.ResponseWriter, request *http.Req
 
 func issueFilter(request *http.Request) (IssueFilter, error) {
 	query := request.URL.Query()
-	filter := IssueFilter{Repository: query.Get("repo"), Kind: query.Get("kind"), State: query.Get("state"), Limit: 50}
+	filter := IssueFilter{Repository: query.Get("repo"), Kind: query.Get("kind"), State: query.Get("state"), Query: query.Get("query"), Limit: 50}
 	if filter.Kind != "" && filter.Kind != "manual" && filter.Kind != "ci" {
 		return IssueFilter{}, errors.New("invalid issue kind")
 	}

@@ -706,6 +706,7 @@ type IssueListFilter struct {
 	RepoID   int64
 	Kind     IssueKind
 	State    IssueState
+	Query    string
 	BeforeID int64
 	Limit    int
 	// UpstreamIDs, when non-nil, keeps only issues of these upstreams: CI
@@ -718,6 +719,17 @@ type IssueListFilter struct {
 type IssuePage struct {
 	Issues     []Issue
 	NextBefore int64
+	Total      int64       `json:"total"`
+	Counts     IssueCounts `json:"counts"`
+}
+
+// IssueCounts are facets of the same repository, upstream and text scope.
+// State counts retain the kind filter; kind counts retain the state filter.
+type IssueCounts struct {
+	Open   int64 `json:"open"`
+	Closed int64 `json:"closed"`
+	Manual int64 `json:"manual"`
+	CI     int64 `json:"ci"`
 }
 
 type IssueLock struct {

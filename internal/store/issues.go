@@ -352,18 +352,44 @@ func (s *Store) ListIssues(ctx context.Context, filter model.IssueListFilter) (m
 		return model.IssuePage{}, fmt.Errorf("%w: issue state is invalid", ErrInvalid)
 	}
 	limit := issuePageLimit(filter.Limit)
+	filter.Query = strings.TrimSpace(filter.Query)
+	// Counts omit the page cursor. Each facet retains the other selected
+	// facet, while repository, text and upstream scope constrain all counts.
+	restriction, restrictionArgs := repoRestriction(
+		"COALESCE((SELECT upstream_id FROM repositories WHERE id = issues.repo_id), scope_upstream_id)", filter.UpstreamIDs)
+	countArgs := []any{filter.Kind, filter.Kind, filter.State, filter.State,
+		filter.Kind, filter.Kind, filter.Kind, filter.Kind,
+		filter.State, filter.State, filter.State, filter.State,
+		filter.RepoID, filter.RepoID, filter.Query, filter.Query, filter.Query, filter.Query}
+	countArgs = append(countArgs, restrictionArgs...)
+	page := model.IssuePage{}
+	if err := s.db.QueryRowContext(ctx, `
+SELECT COUNT(CASE WHEN (? = '' OR kind = ?) AND (? = '' OR state = ?) THEN 1 END),
+       COUNT(CASE WHEN (? = '' OR kind = ?) AND state = 'open' THEN 1 END),
+       COUNT(CASE WHEN (? = '' OR kind = ?) AND state = 'closed' THEN 1 END),
+       COUNT(CASE WHEN (? = '' OR state = ?) AND kind = 'manual' THEN 1 END),
+       COUNT(CASE WHEN (? = '' OR state = ?) AND kind = 'ci' THEN 1 END)
+FROM issues
+WHERE (? = 0 OR repo_id = ?)
+  AND (? = '' OR instr(lower(title), lower(?)) > 0
+      OR instr(lower(body), lower(?)) > 0
+      OR instr(lower(branch), lower(?)) > 0)`+restriction, countArgs...).Scan(
+		&page.Total, &page.Counts.Open, &page.Counts.Closed, &page.Counts.Manual, &page.Counts.CI); err != nil { // #nosec G202 -- fixed scope predicate and parameterized values.
+		return model.IssuePage{}, fmt.Errorf("count issues: %w", err)
+	}
 	query := `
 SELECT ` + issueColumns + ` FROM issues
 WHERE (? = 0 OR repo_id = ?)
   AND (? = '' OR kind = ?)
   AND (? = '' OR state = ?)
+  AND (? = '' OR instr(lower(title), lower(?)) > 0
+      OR instr(lower(body), lower(?)) > 0
+      OR instr(lower(branch), lower(?)) > 0)
   AND (? = 0 OR id < ?)`
 	args := []any{filter.RepoID, filter.RepoID, filter.Kind, filter.Kind, filter.State, filter.State,
-		filter.BeforeID, filter.BeforeID}
+		filter.Query, filter.Query, filter.Query, filter.Query, filter.BeforeID, filter.BeforeID}
 	// A CI issue belongs to its repository's upstream, a manual one to the
 	// upstream it is filed under (#073).
-	restriction, restrictionArgs := repoRestriction(
-		"COALESCE((SELECT upstream_id FROM repositories WHERE id = issues.repo_id), scope_upstream_id)", filter.UpstreamIDs)
 	query += restriction + ` ORDER BY id DESC LIMIT ?` // #nosec G202 -- the restriction is a fixed column and ? placeholders from repoRestriction.
 	args = append(append(args, restrictionArgs...), limit+1)
 	rows, err := s.db.QueryContext(ctx, query, args...)
@@ -382,7 +408,7 @@ WHERE (? = 0 OR repo_id = ?)
 	if err := rows.Err(); err != nil {
 		return model.IssuePage{}, fmt.Errorf("list issues: %w", err)
 	}
-	page := model.IssuePage{Issues: issues}
+	page.Issues = issues
 	if len(page.Issues) > limit {
 		page.Issues = page.Issues[:limit]
 		page.NextBefore = page.Issues[len(page.Issues)-1].ID

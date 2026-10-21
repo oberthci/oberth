@@ -579,6 +579,7 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 			Repo   string `json:"repo"`
 			Kind   string `json:"kind"`
 			State  string `json:"state"`
+			Query  string `json:"query"`
 			Before int64  `json:"before"`
 			Limit  *int   `json:"limit"`
 		}
@@ -595,7 +596,7 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 		if arguments.State == "all" {
 			arguments.State = ""
 		}
-		page, err := service.issueList(ctx, arguments.Repo, arguments.Kind, arguments.State, arguments.Before, limit)
+		page, err := service.issueList(ctx, arguments.Repo, arguments.Kind, arguments.State, arguments.Query, arguments.Before, limit)
 		if err != nil {
 			return nil, err
 		}
@@ -1093,7 +1094,7 @@ func (service *API) Issues(ctx context.Context, actor api.Actor, filter api.Issu
 	if err != nil {
 		return nil, err
 	}
-	page, err := service.issueList(ctx, filter.Repository, filter.Kind, filter.State, int64(filter.BeforeID), filter.Limit)
+	page, err := service.issueList(ctx, filter.Repository, filter.Kind, filter.State, filter.Query, int64(filter.BeforeID), filter.Limit)
 	if err != nil {
 		return nil, err
 	}
@@ -2250,11 +2251,11 @@ func (service *API) issueDelete(ctx context.Context, actor api.Actor, id int64) 
 	return service.issues.DeleteManualIssue(ctx, actor.Identity, id)
 }
 
-func (service *API) issueList(ctx context.Context, repositoryName, kind, state string, before int64, limit int) (model.IssuePage, error) {
+func (service *API) issueList(ctx context.Context, repositoryName, kind, state, query string, before int64, limit int) (model.IssuePage, error) {
 	if service.issues == nil {
 		return model.IssuePage{}, fmt.Errorf("%w: issues", ErrUnavailable)
 	}
-	filter := model.IssueListFilter{Kind: model.IssueKind(kind), State: model.IssueState(state), BeforeID: before, Limit: limit}
+	filter := model.IssueListFilter{Kind: model.IssueKind(kind), State: model.IssueState(state), Query: query, BeforeID: before, Limit: limit}
 	if repositoryName != "" {
 		repository, err := service.runs.RepositoryByName(ctx, repositoryName)
 		if err != nil {
@@ -2355,7 +2356,7 @@ func wireIssueList(page model.IssuePage) api.IssueListResponse {
 		}
 		issues[index] = item
 	}
-	return api.IssueListResponse{Issues: issues, NextBefore: page.NextBefore}
+	return api.IssueListResponse{Issues: issues, NextBefore: page.NextBefore, Total: page.Total, Counts: page.Counts}
 }
 
 func wireIssueLock(lock model.IssueLock) api.IssueLockResponse {

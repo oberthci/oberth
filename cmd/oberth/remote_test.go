@@ -350,14 +350,14 @@ func TestStatusJSONEmitsRawPayload(t *testing.T) {
 }
 
 func TestIssuesRendersTableWithoutJSON(t *testing.T) {
-	payload := `{"Issues":[{"ID":42,"State":"open","Kind":"ci","Title":"lint failed"}],"NextBefore":0}`
+	payload := `{"Issues":[{"ID":42,"State":"open","Kind":"ci","Title":"lint failed"}],"NextBefore":41,"total":93}`
 	configure(t, remoteServer(t, payload))
 	var out bytes.Buffer
 	if err := runIssues(context.Background(), nil, &out); err != nil {
 		t.Fatal(err)
 	}
 	body := out.String()
-	for _, want := range []string{"42", "open", "ci", "lint failed", "ID"} {
+	for _, want := range []string{"42", "open", "ci", "lint failed", "ID", "1–1 of 93"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("output missing %q:\n%s", want, body)
 		}
@@ -373,7 +373,7 @@ func TestIssuesEmptyShowsNoIssues(t *testing.T) {
 	if err := runIssues(context.Background(), nil, &out); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out.String(), "no issues") {
+	if !strings.Contains(out.String(), "no issues") || !strings.Contains(out.String(), "0 of 0") {
 		t.Fatalf("empty issue list did not show a message:\n%s", out.String())
 	}
 }

@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+
+	"github.com/oberthci/oberth/internal/model"
 )
 
 const mcpProtocolVersion = "2025-03-26"
@@ -173,8 +175,10 @@ type IssueListItem struct {
 }
 
 type IssueListResponse struct {
-	Issues     []IssueListItem `json:"issues"`
-	NextBefore int64           `json:"next_before,omitempty"`
+	Issues     []IssueListItem   `json:"issues"`
+	NextBefore int64             `json:"next_before,omitempty"`
+	Total      int64             `json:"total"`
+	Counts     model.IssueCounts `json:"counts"`
 }
 
 type IssueLockResponse struct {
@@ -438,10 +442,11 @@ func toolDefinitions() []map[string]any {
 		tool("issue_close", "Close an issue without deleting its history.", object(map[string]any{"id": integerProperty("Issue ID")}, "id")),
 		tool("issue_reopen", "Reopen a manual issue without changing its ID or history. Already-open manual issues are unchanged; CI issues cannot be reopened manually.", object(map[string]any{"id": integerProperty("Issue ID")}, "id")),
 		tool("issue_delete", "Delete an accidentally created manual issue.", object(map[string]any{"id": integerProperty("Issue ID")}, "id")),
-		tool("issue_list", "List issue metadata, newest creation ID first (not latest updated). Filters apply before pagination. Defaults to all issues, 50 per page; pass next_before as before with the same filters until absent for a complete queue scan.", object(map[string]any{
+		tool("issue_list", "List issue metadata, newest creation ID first (not latest updated), with total and faceted state/kind counts. Filters apply before pagination; counts exclude the cursor. Defaults to all issues, 50 per page; pass next_before as before with the same filters until absent for a complete queue scan.", object(map[string]any{
 			"repo":   stringProperty("Exact repository name; global manual issues have no repository"),
 			"kind":   map[string]any{"type": "string", "enum": []string{"manual", "ci"}},
 			"state":  map[string]any{"type": "string", "enum": []string{"open", "closed", "all"}},
+			"query":  stringProperty("Case-insensitive substring in issue title, body or branch"),
 			"before": map[string]any{"type": "integer", "minimum": 0, "description": "Exclusive issue ID cursor; zero starts the first page"},
 			"limit":  map[string]any{"type": "integer", "minimum": 1, "maximum": 50, "description": "Page size (default 50)"},
 		})),

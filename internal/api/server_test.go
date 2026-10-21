@@ -576,14 +576,14 @@ func TestRunsViewCarriesRepoAndRefFilters(t *testing.T) {
 
 func TestIssueViewCarriesUnifiedFilters(t *testing.T) {
 	server, backend := testServer(t)
-	request := httptest.NewRequest(http.MethodGet, "/api/issues?repo=oberth&kind=ci&state=open&before=42&limit=500", nil)
+	request := httptest.NewRequest(http.MethodGet, "/api/issues?repo=oberth&kind=ci&state=open&query=red&before=42&limit=500", nil)
 	request.Header.Set("Authorization", "Bearer valid-token")
 	response := httptest.NewRecorder()
 	server.Handler().ServeHTTP(response, request)
 	if response.Code != http.StatusOK {
 		t.Fatalf("status = %d", response.Code)
 	}
-	want := IssueFilter{Repository: "oberth", Kind: "ci", State: "open", BeforeID: 42, Limit: 50}
+	want := IssueFilter{Repository: "oberth", Kind: "ci", State: "open", Query: "red", BeforeID: 42, Limit: 50}
 	if backend.issueFilter != want {
 		t.Fatalf("issue filter = %#v, want %#v", backend.issueFilter, want)
 	}
@@ -672,7 +672,7 @@ func TestMCPToolInputsMatchContract(t *testing.T) {
 		"wait":               {"repo", "sha", "timeout", "trigger"},
 		"sync":               {"branch", "repo", "sha"},
 		"promote":            {"branch", "repo", "sha"},
-		"issue_list":         {"before", "kind", "limit", "repo", "state"},
+		"issue_list":         {"before", "kind", "limit", "query", "repo", "state"},
 		"issue_get_many":     {"ids"},
 		"secretstore_verify": {"expect", "keys", "paths", "release_tier", "repo", "tier", "timeout"},
 	}
@@ -784,7 +784,7 @@ func TestMCPIssueResponsesUseMinimalWireShapes(t *testing.T) {
 	}
 	page := decode(t, IssueListResponse{Issues: []IssueListItem{{ID: 7, State: "open", Kind: "ci", Title: "red",
 		RepoID: 1, Branch: "main", Occurrences: 1, CreatedAt: "2026-08-15T12:00:00Z", UpdatedAt: "2026-08-15T12:01:00Z"}}, NextBefore: 7})
-	if got, want := keys(page), []string{"issues", "next_before"}; !slices.Equal(got, want) {
+	if got, want := keys(page), []string{"counts", "issues", "next_before", "total"}; !slices.Equal(got, want) {
 		t.Fatalf("issue list fields = %v, want %v", got, want)
 	}
 	items, ok := page["issues"].([]any)

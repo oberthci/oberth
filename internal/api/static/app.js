@@ -11,7 +11,8 @@ const slowPollMs = 10000;
 const livePollMs = 2000;
 const state = {
   repos: [], runs: [], repoRuns: [], active: [], status: null,
-  runCounts: null, runCursor: 0, runCursorHistory: [], runNext: 0, runsNext: "", repoRunsNext: "",
+  runCounts: null, runCursor: 0, runCursorHistory: [], runStart: 1, runStartHistory: [], runSourceCount: 0,
+  runNext: 0, runsNext: "", repoRunsNext: "",
   timer: null, routeSeq: 0,
   filter: localStorage.getItem("oberth-filter") === "waiting" ? "queued" : (localStorage.getItem("oberth-filter") || "all"),
   repo: localStorage.getItem("oberth-repo") || "all",
@@ -19,7 +20,7 @@ const state = {
   logCache: new Map(),
   live: null, // assigned per-run by liveLogContent
   showExec: readShowExec(),
-  issueKind: "", issueState: "open", issueRepo: "", issueCursor: 0, issueCursorHistory: [],
+  issueKind: "", issueState: "open", issueRepo: "", issueQuery: "", issueCursor: 0, issueCursorHistory: [],
   issuePage: null, issueOpener: null,
   lastList: "/runs",
   authGen: 0, // incremented on sign-out and token replacement
@@ -47,6 +48,7 @@ function ago(s) {
   return Math.round(hr / 24) + "d ago";
 }
 function fmtTime(s) { if (!s) return "--"; const d = new Date(s); return Number.isNaN(+d) ? "--" : d.toLocaleString(); }
+function pageRange(start, length, total) { return length ? `${start}–${start + length - 1} of ${total}` : `0 of ${total}`; }
 function fmtDur(sec) {
   sec = Math.max(0, Math.round(Number(sec) || 0));
   if (!sec) return "--";
@@ -401,6 +403,8 @@ function changeRunRepo(repo) {
   state.repo = repo;
   state.runCursor = 0;
   state.runCursorHistory = [];
+  state.runStart = 1;
+  state.runStartHistory = [];
 }
 async function loadStatus(opts) {
   state.status = await api("/api/status", opts);
@@ -479,6 +483,7 @@ async function renderRuns(seq) {
   localStorage.setItem("oberth-repo", state.repo);
   const runs = state.runs, source = state.repo !== "all" || state.runCursor ? state.repoRuns : runs;
   const visible = source.filter(runMatches), counts = repoCounts(runs);
+  state.runSourceCount = source.length;
   if (state.runCounts) {
     counts.set("all", state.runCounts.Total || 0);
     for (const repo of state.repos) counts.set(repoKey(repo), state.runCounts.ByRepo?.[repo.ID] || 0);
@@ -507,7 +512,7 @@ async function renderRuns(seq) {
       <section>
         <div class="toolbar">
           ${runFilters.map(f => `<button class="chip ${state.filter === f ? "on" : ""}" data-status-filter="${esc(f)}">${esc(f)}</button>`).join("")}
-          <span class="count">${visible.length} shown${page > 1 ? ` · page ${page}` : ""}</span>
+          <span class="count">${pageRange(state.runStart, source.length, counts.get(state.repo) || 0)}${state.filter === "all" ? "" : ` · ${visible.length} match this page`}</span>
         </div>
         ${visible.length ? runsTable(visible) : `<div class="empty">No runs match the current filters.</div>`}
         ${page > 1 || state.runNext ? `<div class="issue-pager">
@@ -918,6 +923,7 @@ function issueListURL() {
   if (state.issueRepo) query.set("repo", state.issueRepo);
   if (state.issueKind) query.set("kind", state.issueKind);
   if (state.issueState) query.set("state", state.issueState);
+  if (state.issueQuery) query.set("query", state.issueQuery);
   if (state.issueCursor) query.set("before", String(state.issueCursor));
   return "/api/issues?" + query.toString();
 }
@@ -946,17 +952,23 @@ async function renderIssues(seq) {
   rerenderWhenStatus(pending, seq);
   state.issuePage = page;
   const issues = page.Issues || [];
+  const facets = page.counts || {};
+  const total = page.total ?? issues.length;
+  const issueStart = state.issueCursorHistory.length * 50 + 1;
   const kinds = [["", "all"], ["ci", "ci"], ["manual", "manual"]];
   const states = [["open", "open"], ["closed", "closed"], ["", "all"]];
+  const kindCount = kind => kind === "" ? (facets.manual || 0) + (facets.ci || 0) : (facets[kind] || 0);
+  const stateCount = issueState => issueState === "" ? (facets.open || 0) + (facets.closed || 0) : (facets[issueState] || 0);
   replaceApp(`
   <section class="screen">
-    <div class="bar"><h1>Issues</h1><span class="meta">Oberth internal ledger — CI failures and agent-filed work items</span></div>
+    <div class="bar"><h1>Issues</h1><span class="meta">${facets.open || 0} open · ${facets.manual || 0} manual · ${facets.ci || 0} CI · ${facets.closed || 0} closed</span></div>
     <div class="toolbar">
-      ${kinds.map(([value, label]) => `<button class="chip ${state.issueKind === value ? "on" : ""}" data-issue-kind="${esc(value)}">${esc(label)}</button>`).join("")}
+      ${kinds.map(([value, label]) => `<button class="chip ${state.issueKind === value ? "on" : ""}" data-issue-kind="${esc(value)}">${esc(label)} <span class="chip-count">${kindCount(value)}</span></button>`).join("")}
       <span class="status-divider"></span>
-      ${states.map(([value, label]) => `<button class="chip ${state.issueState === value ? "on" : ""}" data-issue-state="${esc(value)}">${esc(label)}</button>`).join("")}
+      ${states.map(([value, label]) => `<button class="chip ${state.issueState === value ? "on" : ""}" data-issue-state="${esc(value)}">${esc(label)} <span class="chip-count">${stateCount(value)}</span></button>`).join("")}
       <label>repo <select data-action="issue-repo"><option value="">all</option>${state.repos.map(repo => `<option value="${esc(repoKey(repo))}" ${state.issueRepo === repoKey(repo) ? "selected" : ""}>${esc(repoLabel(repo))}</option>`).join("")}</select></label>
-      <span class="count">${issues.length} shown${state.issueCursorHistory.length ? ` · page ${state.issueCursorHistory.length + 1}` : ""}</span>
+      <label>search <input type="search" data-action="issue-query" value="${esc(state.issueQuery)}" aria-label="Search issue title, body or branch"></label>
+      <span class="count">${pageRange(issueStart, issues.length, total)}</span>
     </div>
     ${issues.length ? `<div class="table issues-table"><div class="issue-row head static"><span>id</span><span>kind</span><span>state</span><span>repo</span><span>branch</span><span>title</span><span>seen</span><span>updated</span></div>${issues.map(issueRow).join("")}</div>` : '<div class="empty">No internal issues match these filters.</div>'}
     <div class="issue-pager">
@@ -1097,11 +1109,11 @@ document.addEventListener("click", event => {
       break;
     }
     case "runs-older": {
-      if (state.runNext) { state.runCursorHistory.push(state.runCursor); state.runCursor = state.runNext; route(); }
+      if (state.runNext) { state.runCursorHistory.push(state.runCursor); state.runStartHistory.push(state.runStart); state.runStart += state.runSourceCount; state.runCursor = state.runNext; route(); }
       break;
     }
     case "runs-newer": {
-      if (state.runCursorHistory.length) { state.runCursor = state.runCursorHistory.pop(); route(); }
+      if (state.runCursorHistory.length) { state.runCursor = state.runCursorHistory.pop(); state.runStart = state.runStartHistory.pop(); route(); }
       break;
     }
     case "issue-newer": {
@@ -1112,8 +1124,8 @@ document.addEventListener("click", event => {
 });
 document.addEventListener("change", event => {
   const target = event.target;
-  if (!(target instanceof HTMLSelectElement)) return;
-  if (target.dataset.action === "issue-repo") changeIssueFilter({ issueRepo: target.value });
+  if (target instanceof HTMLSelectElement && target.dataset.action === "issue-repo") changeIssueFilter({ issueRepo: target.value });
+  if (target instanceof HTMLInputElement && target.dataset.action === "issue-query") changeIssueFilter({ issueQuery: target.value.trim() });
 });
 app.addEventListener("click", event => {
   if (!(event.target instanceof Element)) return;

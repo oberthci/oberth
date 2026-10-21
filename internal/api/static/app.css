@@ -75,6 +75,7 @@ input,select{height:32px;border:1px solid var(--line);background:var(--panel);co
 .chip{height:30px;border:1px solid var(--line);border-radius:999px;padding:0 11px;color:var(--muted);font-size:12px}
 .chip:hover{border-color:var(--line2);color:var(--fg)}
 .chip.on{border-color:var(--purple);color:var(--purple);background:color-mix(in srgb,var(--purple) 10%,transparent)}
+.chip-count{color:var(--dim);font-size:11px}
 .runs-layout{display:grid;grid-template-columns:208px minmax(0,1fr);gap:14px;align-items:start;align-content:start}
 .repo-side{border:1px solid var(--line);border-radius:8px;background:var(--panel);overflow:hidden;position:sticky;top:64px;margin-top:40px}
 .side-head{height:38px;display:flex;align-items:center;padding:0 12px;border-bottom:1px solid var(--line);font-size:12px;color:var(--dim);font-weight:700}

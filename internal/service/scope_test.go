@@ -290,15 +290,15 @@ func TestScopedUplinkSeesOnlyItsUpstream(t *testing.T) {
 	wantIssues := len(fixture.issues["github"])
 	value, err = fixture.call(scopedActor, "issue_list", map[string]any{})
 	fixture.assertNoLeak(t, "issue_list", value, err)
-	if page := value.(api.IssueListResponse); len(page.Issues) != wantIssues || page.NextBefore != 0 {
+	if page := value.(api.IssueListResponse); len(page.Issues) != wantIssues || page.NextBefore != 0 || page.Total != int64(wantIssues) || page.Counts.Manual+page.Counts.CI != int64(wantIssues) {
 		t.Fatalf("issue_list = %d issues (want %d), next %d", len(page.Issues), wantIssues, page.NextBefore)
 	}
 	value, err = fixture.call(scopedActor, "issue_list", map[string]any{"limit": wantIssues - 1})
-	if page := value.(api.IssueListResponse); err != nil || len(page.Issues) != wantIssues-1 || page.NextBefore == 0 {
+	if page := value.(api.IssueListResponse); err != nil || len(page.Issues) != wantIssues-1 || page.NextBefore == 0 || page.Total != int64(wantIssues) {
 		t.Fatalf("paged issue_list = %#v, %v", value, err)
 	} else {
 		value, err = fixture.call(scopedActor, "issue_list", map[string]any{"before": page.NextBefore})
-		if rest := value.(api.IssueListResponse); err != nil || len(rest.Issues) != 1 || rest.NextBefore != 0 {
+		if rest := value.(api.IssueListResponse); err != nil || len(rest.Issues) != 1 || rest.NextBefore != 0 || rest.Total != page.Total || rest.Counts != page.Counts {
 			t.Fatalf("last issue page = %#v, %v", value, err)
 		}
 	}
@@ -308,7 +308,7 @@ func TestScopedUplinkSeesOnlyItsUpstream(t *testing.T) {
 	}
 	issues, err := fixture.service.Issues(ctx, scopedActor, api.IssueFilter{})
 	fixture.assertNoLeak(t, "Issues view", issues, err)
-	if page := issues.(model.IssuePage); len(page.Issues) != wantIssues {
+	if page := issues.(model.IssuePage); len(page.Issues) != wantIssues || page.Total != int64(wantIssues) {
 		t.Fatalf("Issues view = %d", len(page.Issues))
 	}
 	if page, _ := fixture.service.Issues(ctx, unscopedActor, api.IssueFilter{}); len(page.(model.IssuePage).Issues) != wantIssues+len(fixture.issues["codeberg"])+2 {

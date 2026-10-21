@@ -184,7 +184,7 @@ func TestListsNarrowToScopedRepositoriesAndUpstreams(t *testing.T) {
 		t.Fatalf("scoped promotions = %#v, %v", promotions, err)
 	}
 	issues, err := s.ListIssues(ctx, model.IssueListFilter{UpstreamIDs: []int64{github.ID}})
-	if err != nil || len(issues.Issues) != 2 {
+	if err != nil || len(issues.Issues) != 2 || issues.Total != 2 || issues.Counts.Manual+issues.Counts.CI != 2 {
 		t.Fatalf("scoped issues = %#v, %v", issues, err)
 	}
 	for _, issue := range issues.Issues {
@@ -192,7 +192,7 @@ func TestListsNarrowToScopedRepositoriesAndUpstreams(t *testing.T) {
 			t.Fatalf("out-of-scope issue listed: %#v", issue)
 		}
 	}
-	if paged, _ := s.ListIssues(ctx, model.IssueListFilter{UpstreamIDs: []int64{github.ID}, Limit: 1}); len(paged.Issues) != 1 || paged.NextBefore == 0 {
+	if paged, _ := s.ListIssues(ctx, model.IssueListFilter{UpstreamIDs: []int64{github.ID}, Limit: 1}); len(paged.Issues) != 1 || paged.NextBefore == 0 || paged.Total != issues.Total || paged.Counts != issues.Counts {
 		t.Fatalf("scoped issue page = %#v", paged)
 	}
 	if all, _ := s.ListIssues(ctx, model.IssueListFilter{}); len(all.Issues) != 6 {

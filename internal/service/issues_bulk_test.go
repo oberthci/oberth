@@ -181,9 +181,12 @@ func TestIssueListFiltersBeforePaginationAndPreservesDefaults(t *testing.T) {
 	if !reflect.DeepEqual(original, all) || len(original.Issues) != 50 || original.NextBefore == 0 || original.Issues[0].ID != ci.ID {
 		t.Fatalf("defaults: %#v", original)
 	}
+	if original.Total != 82 || original.Counts != (model.IssueCounts{Open: 55, Closed: 27, Manual: 81, CI: 1}) {
+		t.Fatalf("unfiltered totals = %#v", original)
+	}
 	for _, limit := range []int{5, 10, 50} {
 		page := list(fmt.Sprintf(`{"limit":%d}`, limit))
-		if len(page.Issues) != limit || page.NextBefore != page.Issues[limit-1].ID {
+		if len(page.Issues) != limit || page.NextBefore != page.Issues[limit-1].ID || page.Total != original.Total || page.Counts != original.Counts {
 			t.Fatalf("limit %d: %#v", limit, page)
 		}
 	}
@@ -191,6 +194,9 @@ func TestIssueListFiltersBeforePaginationAndPreservesDefaults(t *testing.T) {
 	var before int64
 	for {
 		page := list(fmt.Sprintf(`{"state":"open","kind":"manual","limit":5,"before":%d}`, before))
+		if page.Total != int64(len(openIDs)) || page.Counts != (model.IssueCounts{Open: int64(len(openIDs)), Closed: 27, Manual: int64(len(openIDs)), CI: 1}) {
+			t.Fatalf("filtered facets changed across pages: %#v", page)
+		}
 		for _, issue := range page.Issues {
 			if issue.State != "open" || issue.Kind != "manual" {
 				t.Fatal("filter leakage")
@@ -209,12 +215,20 @@ func TestIssueListFiltersBeforePaginationAndPreservesDefaults(t *testing.T) {
 		t.Fatalf("filtered enumeration %v, want %v", gotIDs, openIDs)
 	}
 	repo := list(fmt.Sprintf(`{"repo":%q,"state":"open"}`, fixture.repo.Name))
-	if len(repo.Issues) != 1 || repo.Issues[0].ID != ci.ID {
+	if len(repo.Issues) != 1 || repo.Issues[0].ID != ci.ID || repo.Total != 1 || repo.Counts != (model.IssueCounts{Open: 1, CI: 1}) {
 		t.Fatalf("global manual entered repo filter: %#v", repo)
 	}
+	search := list(`{"query":"COMPONENT-2","state":"open"}`)
+	if search.Total != 8 || search.Counts != (model.IssueCounts{Open: 8, Closed: 3, Manual: 8}) {
+		t.Fatalf("text query totals = %#v", search)
+	}
 	closed := list(`{"state":"closed"}`)
-	if len(closed.Issues) != 27 || closed.NextBefore != 0 {
+	if len(closed.Issues) != 27 || closed.NextBefore != 0 || closed.Total != 27 || closed.Counts != (model.IssueCounts{Open: 55, Closed: 27, Manual: 27}) {
 		t.Fatalf("closed: %#v", closed)
+	}
+	red := list(`{"state":"open","kind":"ci"}`)
+	if red.Total != 1 || red.Counts != (model.IssueCounts{Open: 1, CI: 1, Manual: 54}) {
+		t.Fatalf("CI facets = %#v", red)
 	}
 	for _, raw := range []string{`{"limit":0}`, `{"limit":51}`, `{"limit":-1}`, `{"limit":1.5}`, `{"state":"pending"}`, `{"kind":"bug"}`, `{"before":-1}`, `{"unknown":1}`} {
 		if _, err := service.CallTool(ctx, actor, "issue_list", json.RawMessage(raw)); !errors.Is(err, ErrInvalidInput) {

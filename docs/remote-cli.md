@@ -67,6 +67,9 @@ as actor. Workflow-level failures without a failed step are eligible. The
 source must still be the newest run for its branch; test failures, older runs,
 and release runs cannot be retried this way.
 
+`oberth issues` prints the first page and its full matching count, such as
+`1–50 of 93`. The dashboard shows the same page range and state/kind counts.
+
 `oberth run rerun` calls the `run_rerun` MCP tool with the same uplink
 token. It reruns a failed or interrupted run at the same SHA and ref without
 a push, for the cases `run retry` refuses: a failed test step, a run that is

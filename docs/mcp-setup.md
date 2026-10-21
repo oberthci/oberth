@@ -217,7 +217,7 @@ call the proxy hostname directly.
 | `issue_close` | Close an issue |
 | `issue_reopen` | Reopen a manual issue by ID; an already-open issue is unchanged, CI issues are rejected |
 | `issue_delete` | Delete an accidentally created manual issue |
-| `issue_list` | List issue metadata with repo/kind/state filters and 1..50 records per page |
+| `issue_list` | List issue metadata with repo/kind/state/query filters, total and faceted counts, and 1..50 records per page |
 | `issue_lock` | Acquire or renew a five-minute caller-owned issue lock |
 | `access_list` | List secret access grants for a repository |
 | `access_allow` | Grant a step access to a secret path (admin-only) |
@@ -359,7 +359,8 @@ display `passed`, `failed`, `delivered` for a published release, or
 Retry and rerun eligibility continues to use the durable status and cause.
 
 `oberth runs --active` remains available for compatibility. The dashboard
-uses the default flat list and filters it with status chips.
+uses the default flat list and filters it with status chips. Its footer shows
+the loaded page range against the total retained runs from `/api/runs/counts`.
 
 ## JSON API
 
@@ -369,7 +370,7 @@ Authenticated `GET` endpoints serve the same state as a web dashboard:
 |----------|---------|
 | `/api/runs` | All CI runs; `?view=history` for terminal runs, `?view=active` for the ordered active list |
 | `/api/repos` | Registered repositories |
-| `/api/issues` | All issues |
+| `/api/issues` | Paged issues with `total` for the selected filters and `counts` by state and kind |
 | `/api/status` | System health summary |
 
 Unauthenticated: `/healthz` (liveness) and `/readyz` (dependency readiness).
@@ -458,7 +459,11 @@ until the cursor is absent. Filtering happens before pagination. Omitted
 arguments preserve the all-issues default. `state` accepts `open`, `closed`, or
 `all`; `kind` accepts `manual` or `ci`. The optional `repo` selects actual stored
 repository association: global manual issues are excluded even if their titles
-mention that component.
+mention that component. `query` matches title, body or branch without regard
+to case. Each page includes `total` for the current filters, independent of
+`before`, and `counts`: open/closed retain the selected kind, while manual/ci
+retain the selected state. Repository, query and uplink scope apply to every
+count.
 
 For the latest 5, 10, or 50 created issues, set `limit` accordingly (1..50).
 Ordering is descending issue ID, not most recently updated. Listing does not

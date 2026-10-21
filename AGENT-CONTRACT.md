@@ -759,13 +759,18 @@ continuity checks; it must never be used to reset or bypass those checks.
   issue, except for an uplink scoped to exactly one upstream, which files
   there (#073). Run selectors are resolved across the repositories the uplink
   may see without a repository input. `issue_list` accepts optional `repo`,
-  `kind` (`manual` or `ci`), `state` (`open`, `closed`, or `all`), `limit`
+  `kind` (`manual` or `ci`), `state` (`open`, `closed`, or `all`), `query`
+  (case-insensitive substring in title, body or branch), `limit`
   (1..50, default 50), and exclusive `before` issue-ID cursor. Omitted filters
   retain the all-issues default. Filters apply before pagination; records are
   ordered by descending creation ID, not update time. Follow `next_before`
   with the same filters until absent for a complete scan. Repository filtering
   uses stored association: global manual issues have no repository, regardless
-  of component names in their titles.
+  of component names in their titles. MCP `issue_list` and `/api/issues`
+  return `total` for all matching issues regardless of the page cursor, plus
+  `counts` for open/closed (retaining the kind filter) and manual/ci
+  (retaining the state filter). Repository, query and uplink scope constrain
+  every count; scoped uplinks never receive installation-wide totals (#1124).
 - `issue_get_many` accepts 1..50 unique positive `ids`, validated before reads.
   Its `results` preserve request order, each containing `id` and either a full
   `issue` (the existing `issue_get` wire record) or `error`: `not_found` or

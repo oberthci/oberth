@@ -238,3 +238,25 @@ func TestRunsPageIsOneFlatFilteredList(t *testing.T) {
 		}
 	}
 }
+
+func TestDashboardUsesTotalRangesAndIssueFacets(t *testing.T) {
+	t.Parallel()
+	source := string(staticAssets["app.js"].body)
+	for _, want := range []string{
+		"function pageRange(start, length, total)",
+		"pageRange(state.runStart, source.length, counts.get(state.repo) || 0)",
+		"state.runStart += state.runSourceCount",
+		"pageRange(issueStart, issues.length, total)",
+		"const facets = page.counts || {}",
+		"${facets.open || 0} open · ${facets.manual || 0} manual · ${facets.ci || 0} CI · ${facets.closed || 0} closed",
+		"kindCount(value)", "stateCount(value)",
+		`query.set("query", state.issueQuery)`,
+	} {
+		if !strings.Contains(source, want) {
+			t.Fatalf("dashboard is missing count or range logic %q", want)
+		}
+	}
+	if strings.Contains(source, "${issues.length} shown") || strings.Contains(source, "${visible.length} shown") {
+		t.Fatal("dashboard still uses page-only shown counts")
+	}
+}
