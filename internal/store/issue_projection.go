@@ -81,9 +81,9 @@ func (s *Store) projectRunIssue(ctx context.Context, tx *sql.Tx, run model.Run, 
 	if run.Status == model.RunInterrupted {
 		return nil
 	}
-	// Infrastructure failures are actionable through run_retry, not repository
-	// CI-red issues. They also must not resolve an existing test failure issue.
-	if run.Status == model.RunFailed && run.Phase == "infrastructure" && run.FailedStep == "" {
+	// Only kubelet eviction/pressure failures are transient node failures.
+	// Scheduler/admission failures remain actionable in the repository issue.
+	if transientNodeFailure(run) {
 		return nil
 	}
 	work, err := runIssueWork(ctx, tx, run.ID)
@@ -120,6 +120,17 @@ func (s *Store) projectRunIssue(ctx context.Context, tx *sql.Tx, run model.Run, 
 	return s.applyCIIssueProjection(ctx, tx, projection, outcome, now)
 }
 
+// The engine emits this prefix only from owned Pod eviction/pressure evidence.
+// Keep scheduler errors (checkout, resource/group grants, etc.) visible even
+// though they share the infrastructure phase and have no failed step.
+func transientNodeFailure(run model.Run) bool {
+	if run.Status != model.RunFailed || run.Phase != "infrastructure" || run.FailedStep != "" {
+		return false
+	}
+	message := strings.TrimPrefix(run.Error, "trusted preflight: trusted preflight infrastructure failure: ")
+	return message == "Evicted" || strings.HasPrefix(message, "Evicted: ")
+}
+
 func runIssueBody(run model.Run, failureTail string) string {
 	sha := strings.TrimSpace(run.TestedSHA)
 	if sha == "" {
@@ -150,14 +161,12 @@ func (s *Store) projectPromotionIssue(ctx context.Context, tx *sql.Tx, promotion
 		return nil
 	}
 	if promotion.Status == model.PromotionFailed && promotion.RunID != "" {
-		var infrastructure bool
-		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM runs
-			WHERE id = ? AND repo_id = ? AND trigger = 'promotion'
-			AND status = 'failed' AND phase = 'infrastructure' AND failed_step = '')`,
-			promotion.RunID, promotion.RepoID).Scan(&infrastructure); err != nil {
+		run, err := scanRun(tx.QueryRowContext(ctx, `SELECT `+runColumns+` FROM runs
+			WHERE id = ? AND repo_id = ? AND trigger = 'promotion'`, promotion.RunID, promotion.RepoID))
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return fmt.Errorf("load promotion run for issue projection: %w", err)
 		}
-		if infrastructure {
+		if err == nil && transientNodeFailure(run) {
 			return nil
 		}
 	}

@@ -122,15 +122,95 @@ func TestInfrastructurePromotionRunDoesNotProjectCIRedIssue(t *testing.T) {
 	if _, err := database.ClaimNextRun(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := database.FinishRun(ctx, run.ID, model.RunResult{Status: model.RunFailed, Phase: "infrastructure", Error: "main: OOMKilled"}); err != nil {
+	if _, err := database.FinishRun(ctx, run.ID, model.RunResult{Status: model.RunFailed, Phase: "infrastructure", Error: "Evicted: The node was low on resource: memory."}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := database.OpenCIIssue(ctx, repository.ID, spec.SourceBranch); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("infrastructure promotion opened CI-red issue: %v", err)
 	}
 	finished, err := database.Promotion(ctx, promotion.ID)
-	if err != nil || finished.Status != model.PromotionFailed || finished.Error != "main: OOMKilled" {
+	if err != nil || finished.Status != model.PromotionFailed || finished.Error != "Evicted: The node was low on resource: memory." {
 		t.Fatalf("promotion lost failure: %#v, %v", finished, err)
+	}
+}
+
+func TestInfrastructureIssueProjectionDistinguishesNodeAndSchedulerFailures(t *testing.T) {
+	for _, trigger := range []string{"branch", "schedule"} {
+		for _, tc := range []struct {
+			name, message string
+			transient     bool
+		}{
+			{"scratch eviction", `Evicted: Usage of EmptyDir volume "var-run-argo" exceeds the limit "128Mi".`, true},
+			{"storage pressure", "Evicted: The node was low on resource: ephemeral-storage.", true},
+			{"memory pressure", "Evicted: The node was low on resource: memory.", true},
+			{"trusted eviction", "trusted preflight: trusted preflight infrastructure failure: Evicted: The node was low on resource: memory.", true},
+			{"group", "read pipeline concurrency group: invalid concurrency group", false},
+			{"size grant", "resource size XL exceeds repository maximum L", false},
+			{"checkout", "checkout: repository unavailable", false},
+			{"container OOM", "main: OOMKilled", false},
+			{"unclassified", "", false},
+			{"wrapped checkout", "checkout: Evicted: remote error", false},
+		} {
+			t.Run(trigger+"/"+tc.name, func(t *testing.T) {
+				now := time.Date(2026, 10, 20, 0, 0, 0, 0, time.UTC)
+				database := testStore(t, &now)
+				repository := projectionRepository(t, database)
+				branch := repository.DefaultBranch
+				if trigger == "schedule" {
+					branch = "nightly"
+				}
+				result := model.RunResult{Status: model.RunFailed, Phase: "infrastructure", Error: tc.message}
+				run := projectionRunWithTrigger(t, database, repository.ID, branch, projectionSourceSHA, trigger)
+				if _, err := database.FinishRun(t.Context(), run.ID, result); err != nil {
+					t.Fatal(err)
+				}
+				issue, err := database.OpenCIIssue(t.Context(), repository.ID, branch)
+				if tc.transient {
+					if !errors.Is(err, ErrNotFound) {
+						t.Fatalf("node failure projected issue: %#v, %v", issue, err)
+					}
+					return
+				}
+				if err != nil || !strings.Contains(issue.Body, tc.message) {
+					t.Fatalf("scheduler failure missing from issue: %#v, %v", issue, err)
+				}
+				// Persistent failures update the same issue; a later green run closes it.
+				next := projectionRunWithTrigger(t, database, repository.ID, branch, projectionResultSHA, trigger)
+				if _, err := database.FinishRun(t.Context(), next.ID, result); err != nil {
+					t.Fatal(err)
+				}
+				after, err := database.OpenCIIssue(t.Context(), repository.ID, branch)
+				if err != nil || after.ID != issue.ID || after.Occurrences != issue.Occurrences+1 {
+					t.Fatalf("persistent failure not updated: %#v, %v", after, err)
+				}
+				green := projectionRunWithTrigger(t, database, repository.ID, branch, projectionBaseSHA, trigger)
+				if _, err := database.FinishRun(t.Context(), green.ID, model.RunResult{Status: model.RunPassed}); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := database.OpenCIIssue(t.Context(), repository.ID, branch); !errors.Is(err, ErrNotFound) {
+					t.Fatalf("green did not resolve issue: %v", err)
+				}
+			})
+		}
+	}
+}
+
+func TestContainerMemoryLimitOOMProjectsCIRedIssue(t *testing.T) {
+	now := time.Date(2026, 10, 20, 0, 0, 0, 0, time.UTC)
+	database := testStore(t, &now)
+	repository := projectionRepository(t, database)
+	run := projectionRun(t, database, repository.ID, repository.DefaultBranch, projectionSourceSHA)
+	if _, err := database.FinishRun(t.Context(), run.ID, model.RunResult{
+		Status: model.RunFailed, Phase: "test", FailedBurn: "test", FailedStep: "unit", Error: "main: OOMKilled (exit code 137)",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	issue, err := database.OpenCIIssue(t.Context(), repository.ID, repository.DefaultBranch)
+	if err != nil || !strings.Contains(issue.Body, "OOMKilled") {
+		t.Fatalf("container OOM missing from issue: %#v, %v", issue, err)
+	}
+	if _, err := database.RetryRun(t.Context(), run.ID, "reviewer@host"); !errors.Is(err, ErrInvalidState) {
+		t.Fatalf("container OOM became infrastructure-retryable: %v", err)
 	}
 }
 

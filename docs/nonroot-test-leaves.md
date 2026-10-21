@@ -89,16 +89,21 @@ control/staging bounds prevent unbounded writable storage. The Argo emissary
 it defaults to 1Gi. Administrators can set `argo.executorScratchSizeLimit` in the
 chart (`serve --argo-executor-scratch-size-limit`, a positive Kubernetes quantity).
 This limit also applies to the protected trusted KVM leaf and is checked by its
-Pod attestation. It is separate from `/tmp` and CPU/memory step requests: reducing
+Pod attestation. Trusted KVM Pods created before a sizeLimit change fail recovery
+attestation and must be re-run under the new limit. It is separate from `/tmp`
+and CPU/memory step requests: reducing
 a test's resource requests does not reduce its retained log output. Server log
 collection limits do not cap emissary's on-disk copy. Size executor scratch for
 the step's output as well as its declared resource requests.
 
-Kubelet evictions (including emptyDir and ephemeral-storage pressure) and current
-`OOMKilled` terminations are infrastructure failures with the kubelet reason.
+Kubelet evictions (including executor emptyDir limits and node memory or
+ephemeral-storage pressure) are infrastructure failures with the kubelet reason.
 They retain failed step rows, permit `run_retry` for eligible branch runs, and
-do not open or update repository CI-red issues. Exit 137/143 alone does not prove
-an infrastructure failure; an independent failed test still makes CI red. Tools produced by
+do not open, update, or resolve repository CI-red issues. A container killed at
+its own declared memory limit remains a test failure; `OOMKilled` or exit 137/143
+alone does not establish node pressure. Scheduler-side infrastructure failures
+remain visible as CI issues on default-branch and scheduled runs; an independent
+failed test still makes CI red. Tools produced by
 earlier ordinary steps are read-only inputs; only the existing separate
 OBERTH_ARTIFACTS mount remains available for explicit publishable output. Cache
 files are not collected as artifacts. Cold caches are the initial compatibility
