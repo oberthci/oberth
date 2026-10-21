@@ -34,11 +34,12 @@ func (g *releaseCheckGit) ReadDefaultBlob(context.Context, string, string, int) 
 type releaseChecker struct {
 	calls    int
 	problems []string
+	checks   []string
 }
 
-func (c *releaseChecker) PreflightRelease(context.Context, JobRequest, []byte) ([]string, error) {
+func (c *releaseChecker) PreflightRelease(context.Context, JobRequest, []byte) (ReleasePreflightResult, error) {
 	c.calls++
-	return c.problems, nil
+	return ReleasePreflightResult{Problems: c.problems, Checks: c.checks}, nil
 }
 
 type releaseCheckJobs struct {
@@ -119,5 +120,17 @@ func TestTagRerunAfterReleaseGrantAdmissionRefusal(t *testing.T) {
 	passed := harness.run(t, response.RunID)
 	if passed.Status != model.RunPassed || passed.SHA != failed.SHA || passed.TestedSHA != failed.TestedSHA || len(harness.git.syncedTags) != 1 {
 		t.Fatalf("rerun=%+v publications=%v", passed, harness.git.syncedTags)
+	}
+}
+
+func TestReleasePreflightIdentityAdviceIsVisibleWithoutBlocking(t *testing.T) {
+	checker := &releaseChecker{checks: []string{"warning: cloud trust must include subject system:serviceaccount:pipeline:step-publish"}}
+	scheduler := &Scheduler{git: &releaseCheckGit{source: []byte("new"), base: []byte("old")}, jobs: &releaseCheckJobs{releaseChecker: checker}}
+	var output bytes.Buffer
+	if err := scheduler.checkReleasePreflight(context.Background(), JobRequest{Run: model.Run{Trigger: "promotion"}}, &output); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), "[release-preflight/check] "+checker.checks[0]) {
+		t.Fatalf("missing identity advice: %s", output.String())
 	}
 }

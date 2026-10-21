@@ -113,3 +113,12 @@ is not proof of live Vault policy or provider IAM; normal release admission and
 credential verification still apply. After an admission refusal, an admin can
 use `run_rerun` with `force:true` and a reason after fixing grants (#1098), subject
 to its existing bounded tag-rerun policy.
+
+The release preflight also reports each leaf's effective Kubernetes ServiceAccount,
+WIF role and full `system:serviceaccount:<namespace>:<account>` subject. A leaf
+combining a named-step grant with WIF emits an advisory that cloud trust must
+include that per-step subject; the repository subject alone is insufficient.
+This advisory does not claim to verify cloud IAM or block a correctly trusted
+per-step identity. The access reconciler derives per-step identities from active
+grants and publishes them in its identity snapshot; preflight uses that snapshot
+and checks account existence rather than relying on a hand-maintained chart list.

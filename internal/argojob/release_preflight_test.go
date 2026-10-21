@@ -3,6 +3,7 @@ package argojob
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -10,6 +11,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
+	k8stesting "k8s.io/client-go/testing"
 
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 )
@@ -55,7 +57,7 @@ func TestReleasePreflightGrantAndMaterializationAreSeparate(t *testing.T) {
 	r.ApprovedSecrets["oberth/data/release/signing"] = true
 	r.StepGrants["oberth/data/release/signing"] = map[string]bool{"main": true, "publish-other": true}
 	result, err := PreflightRelease(config, r)
-	if err != nil || !strings.Contains(strings.Join(result.Problems, "\n"), "not materialized") {
+	if err != nil || !strings.Contains(strings.Join(result.Problems, "\n"), "not materialized") || len(result.Checks) != 0 {
 		t.Fatalf("%+v %v", result, err)
 	}
 	config.PerStepIdentities = map[string]PerRepoIdentityConfig{
@@ -85,6 +87,71 @@ func TestReleasePreflightGrantAndMaterializationAreSeparate(t *testing.T) {
 	for _, action := range kube.Actions() {
 		if action.GetVerb() != "get" || action.GetResource().Resource != "serviceaccounts" {
 			t.Fatalf("credential or mutation action: %v", action)
+		}
+	}
+}
+
+func TestReleasePreflightReportsEffectiveWIFSubject(t *testing.T) {
+	for _, named := range []bool{false, true} {
+		t.Run(fmt.Sprint(named), func(t *testing.T) {
+			r := preflightRequest(t)
+			config := wifTestConfig()
+			config.ReleaseWIF.Repositories["github/skipops/oberth"].Templates["publish-other"] = "image-writer"
+			r.ApprovedSecrets["oberth/data/release/signing"] = true
+			r.StepGrants["oberth/data/release/signing"] = map[string]bool{"*": true}
+			wantSA := "oberth-per-repo"
+			if named {
+				r.StepGrants["oberth/data/release/signing"]["main"] = true
+				config.PerStepIdentities = map[string]PerRepoIdentityConfig{
+					"github/skipops/oberth/main": {ServiceAccountName: "step-main"},
+				}
+				wantSA = "step-main"
+			}
+			wf, err := argoworkflow.Decode(r.Source)
+			if err != nil {
+				t.Fatal(err)
+			}
+			wf.Spec.Templates[0].ServiceAccountName = "untrusted-authored-account"
+			r.Source, err = json.Marshal(wf)
+			if err != nil {
+				t.Fatal(err)
+			}
+			result, err := PreflightRelease(config, r)
+			if err != nil || len(result.Problems) != 0 {
+				t.Fatalf("%+v %v", result, err)
+			}
+			checks := strings.Join(result.Checks, "\n")
+			want := fmt.Sprintf("step %q: service_account=%q release_wif_role=%q subject=%q", "main", wantSA, "image-writer", "system:serviceaccount:"+config.Namespace+":"+wantSA)
+			if !strings.Contains(checks, want) || strings.Contains(checks, "untrusted-authored-account") {
+				t.Fatalf("effective identity missing or authored identity trusted: %s", checks)
+			}
+			if strings.Contains(checks, "cloud trust must include") != named {
+				t.Fatalf("WIF warning mismatch: %s", checks)
+			}
+		})
+	}
+}
+
+func TestReleasePreflightAccountsIgnoresAuthoredIdentity(t *testing.T) {
+	r := preflightRequest(t)
+	wf, err := argoworkflow.Decode(r.Source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wf.Spec.Templates[0].ServiceAccountName = "untrusted-authored-account"
+	r.Source, err = json.Marshal(wf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	config := wifTestConfig()
+	kube := fake.NewClientset(&corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{Name: "oberth-per-repo", Namespace: config.Namespace}})
+	controller := &Controller{config: config, kube: kube}
+	if err := controller.PreflightReleaseAccounts(context.Background(), r); err != nil {
+		t.Fatal(err)
+	}
+	for _, action := range kube.Actions() {
+		if get, ok := action.(k8stesting.GetAction); !ok || get.GetName() != "oberth-per-repo" {
+			t.Fatalf("unexpected account lookup: %v", action)
 		}
 	}
 }
