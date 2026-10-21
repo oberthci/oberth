@@ -704,7 +704,7 @@ continuity checks; it must never be used to reset or bypass those checks.
   `kubevirt_revoke`, read-only `kubevirt_grant_get`, admin-only `size_grant`
   and `size_revoke`, read-only `size_grant_get` (#1021), admin-only
   unscoped `admission_release` (#1099), `repo_list`, `repo_remove`, `run_list`,
-  `schedule_list` plus admin-only audited `schedule_pause`, `schedule_resume` and `schedule_trigger` (#1106; pause state is the audit chain, trigger goes through `EnqueueCI`),
+  `schedule_list` (also `GET /api/schedules`, with the same repository scope) plus admin-only audited `schedule_pause`, `schedule_resume` and `schedule_trigger` (#1106; pause state is the audit chain, trigger goes through `EnqueueCI`),
   `system_status`, admin-only `secretstore_plan` (#611),
   `secretstore_sync_receipt` (#712), `secretstore_verify`, and
   admin-only `promote_grant`, `promote_grant_revoke`, plus read-only

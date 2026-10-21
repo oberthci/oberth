@@ -2,10 +2,17 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"reflect"
+	"strings"
 	"testing"
 
+	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
 )
@@ -145,5 +152,63 @@ func TestScheduleMutationsAreAdminOnlyAuditedAndScoped(t *testing.T) {
 	_, resumed := latestScheduleAudit(t, fixture, "schedule.resume")
 	if !triggered || !resumed || trigger.Actor != unscopedActor.Identity || trigger.ResourceID != "oberth#nightly" {
 		t.Fatalf("trigger audit = %+v (resume recorded: %v)", trigger, resumed)
+	}
+}
+
+type scheduleSurfaceAuth struct{ actor api.Actor }
+
+func (auth scheduleSurfaceAuth) Authenticate(context.Context, string) (api.Actor, error) {
+	return auth.actor, nil
+}
+
+func TestScheduleHTTPMatchesMCPAndHidesOutOfScopeRepositories(t *testing.T) {
+	t.Parallel()
+	fixture := newScopeFixture(t)
+	fixture.service.schedules = &recordingScheduleControl{store: fixture.store}
+	for _, actor := range []api.Actor{unscopedActor, scopedActor, scopedAdmin, {Identity: "reader"}} {
+		server, err := api.New(scheduleSurfaceAuth{actor}, fixture.service, fixture.service, "test", api.WithErrorClassifier(func(err error) (int, string) {
+			if errors.Is(err, store.ErrNotFound) {
+				return http.StatusNotFound, "not found"
+			}
+			return http.StatusInternalServerError, "internal error"
+		}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		request := httptest.NewRequest(http.MethodGet, "/api/schedules", nil)
+		response := httptest.NewRecorder()
+		server.Handler().ServeHTTP(response, request)
+		if response.Code != http.StatusUnauthorized {
+			t.Fatalf("unauthenticated schedule list: %d", response.Code)
+		}
+		for _, repo := range []string{"", "oberth", "codeberg/cloudtaser/" + hiddenRepoName, "codeberg/cloudtaser/does-not-exist"} {
+			request = httptest.NewRequest(http.MethodGet, "/api/schedules?repo="+url.QueryEscape(repo), nil)
+			request.Header.Set("Authorization", "Bearer test")
+			response = httptest.NewRecorder()
+			server.Handler().ServeHTTP(response, request)
+			value, err := fixture.call(actor, "schedule_list", map[string]any{"repo": repo})
+			if errors.Is(err, store.ErrNotFound) {
+				if response.Code != http.StatusNotFound || strings.Contains(response.Body.String(), hiddenRepoName) {
+					t.Fatalf("actor %s repo %s: %d %s", actor.Identity, repo, response.Code, response.Body)
+				}
+				continue
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			var page ScheduleListResponse
+			if err := json.Unmarshal(response.Body.Bytes(), &page); err != nil || response.Code != http.StatusOK {
+				t.Fatalf("HTTP %d %s: %v", response.Code, response.Body, err)
+			}
+			if !reflect.DeepEqual(page, value) {
+				t.Fatalf("HTTP=%+v MCP=%+v", page, value)
+			}
+			if actor.Scoped() && (len(page.Schedules) != 1 || page.Schedules[0].Repo != "oberth") {
+				t.Fatalf("scoped schedules: %+v", page)
+			}
+			if !actor.Scoped() && repo == "" && len(page.Schedules) != 2 {
+				t.Fatalf("unscoped schedules: %+v", page)
+			}
+		}
 	}
 }
