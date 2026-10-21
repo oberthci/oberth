@@ -437,6 +437,30 @@ func (history scopedHistory) Run(ctx context.Context, id string) (model.Run, err
 	return run, nil
 }
 
+func (history scopedHistory) RunsByIDs(ctx context.Context, ids []string) (map[string]model.Run, error) {
+	if batch, ok := history.inner.(interface {
+		RunsByIDs(context.Context, []string) (map[string]model.Run, error)
+	}); ok {
+		runs, err := batch.RunsByIDs(ctx, ids)
+		if err != nil {
+			return nil, err
+		}
+		for id, run := range runs {
+			if !history.scope.seesRepo(run.RepoID) {
+				delete(runs, id)
+			}
+		}
+		return runs, nil
+	}
+	runs := make(map[string]model.Run, len(ids))
+	for _, id := range ids {
+		if run, err := history.Run(ctx, id); err == nil {
+			runs[id] = run
+		}
+	}
+	return runs, nil
+}
+
 func (history scopedHistory) StepResults(ctx context.Context, runID string) ([]model.StepResult, error) {
 	if _, err := history.Run(ctx, runID); err != nil {
 		return nil, err

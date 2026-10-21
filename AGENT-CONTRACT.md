@@ -940,10 +940,13 @@ continuity checks; it must never be used to reset or bypass those checks.
   A terminal run that was never admitted sorts by `finished_at`. The dated
   portion pages by that fixed (time, ID) key, using the last run's sequence
   or ID as the external cursor; an admission between page loads cannot move
-  an already-seen run onto the next page. The queue has one dense position
-  numbering, and each queued run carries its scheduling reason. `started_at`
-  is recorded when weighted admission is granted, including before a trusted
-  KVM preflight; Workflow submission preserves it. `view=history` retains its
+  an already-seen run onto the next page. The unfiltered, unscoped queue has
+  one dense position numbering, and each queued run carries its scheduling
+  reason. Filtered lists keep only a global gate position where available;
+  scoped uplinks see no global position (#073). `started_at` is recorded when
+  weighted admission is granted, including before a trusted KVM preflight;
+  a VM capacity refusal parks the run and clears that time until reacquisition.
+  Workflow submission preserves the admission time. `view=history` retains its
   terminal-only sequence paging; `view=active` remains an unpaged, bounded
   compatibility view. Repository/ref filters and uplink scope apply to both.
   Durable `Status` values are unchanged and `RunStatus.Valid` still refuses

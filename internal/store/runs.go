@@ -21,6 +21,35 @@ phase, job_name, tested_sha, base_sha, failed_burn, failed_step, error,
 status, reason, superseded_by, queued_at, started_at, finished_at, created_at, updated_at,
 concurrency_group`
 
+// RunsByIDs resolves successor runs for list presentation in one query.
+func (s *Store) RunsByIDs(ctx context.Context, ids []string) (map[string]model.Run, error) {
+	result := make(map[string]model.Run, len(ids))
+	if len(ids) == 0 {
+		return result, nil
+	}
+	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")
+	args := make([]any, len(ids))
+	for i, id := range ids {
+		args[i] = id
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT `+runColumns+` FROM runs WHERE id IN (`+placeholders+`)`, args...) // #nosec G202 -- only placeholders are interpolated.
+	if err != nil {
+		return nil, fmt.Errorf("list runs by ID: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		run, err := scanRun(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan run by ID: %w", err)
+		}
+		result[run.ID] = run
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list runs by ID: %w", err)
+	}
+	return result, nil
+}
+
 // EnqueueRun creates a standalone run without a durable receive event
 // association. Production callers go through EnqueueReceiveEvent which binds
 // the receive idempotency key atomically; this wrapper is retained for test
@@ -306,8 +335,37 @@ RETURNING `+runColumns, now, now, id))
 	return value, nil
 }
 
-// MarkRunSubmitted records that the execution object exists. Older callers
-// that submit without a separate grant still receive a start time here.
+// MarkRunParked clears the admission time after a trusted VM reservation is
+// refused and the weighted gate releases the run's resources. A submitted
+// Workflow cannot be parked.
+func (s *Store) MarkRunParked(ctx context.Context, id string) (model.Run, error) {
+	if strings.TrimSpace(id) == "" {
+		return model.Run{}, fmt.Errorf("%w: run ID is required", ErrInvalid)
+	}
+	now := unixNano(s.now())
+	value, err := scanRun(s.db.QueryRowContext(ctx, `
+UPDATE runs SET started_at = NULL, updated_at = ?
+WHERE id = ? AND status = 'running' AND job_name = '' AND started_at IS NOT NULL
+RETURNING `+runColumns, now, id))
+	if errors.Is(err, sql.ErrNoRows) {
+		current, lookupErr := s.Run(ctx, id)
+		if lookupErr != nil {
+			return model.Run{}, lookupErr
+		}
+		if current.Preempted() {
+			return current, nil
+		}
+		return model.Run{}, fmt.Errorf("%w: run is not awaiting VM capacity", ErrInvalidState)
+	}
+	if err != nil {
+		return model.Run{}, fmt.Errorf("mark run parked: %w", err)
+	}
+	return value, nil
+}
+
+// MarkRunSubmitted records Workflow submission and advances the phase to
+// running. It preserves the start time granted at admission; older callers
+// that submit without a separate grant receive a start time here.
 func (s *Store) MarkRunSubmitted(ctx context.Context, id string) (model.Run, error) {
 	if strings.TrimSpace(id) == "" {
 		return model.Run{}, fmt.Errorf("%w: run ID is required", ErrInvalid)
@@ -939,7 +997,7 @@ ORDER BY queue_sequence LIMIT ?`, append(args, MaxActiveRuns)...) // #nosec G202
 			cursor, err = scanRun(s.db.QueryRowContext(ctx, `SELECT `+runColumns+` FROM runs WHERE queue_sequence = ?`, filter.Before))
 		}
 		if errors.Is(err, sql.ErrNoRows) {
-			return runs, nil
+			return nil, fmt.Errorf("%w: run list cursor", ErrNotFound)
 		}
 		if err != nil {
 			return nil, fmt.Errorf("read run list cursor: %w", err)

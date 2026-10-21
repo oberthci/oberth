@@ -31,6 +31,9 @@ func (scheduler *Scheduler) executeTrustedWithCapacity(ctx context.Context, job 
 		if err := reservation.parkVM(); err != nil {
 			return false, err
 		}
+		if _, err := scheduler.store.MarkRunParked(ctx, job.Run.ID); err != nil {
+			return false, err
+		}
 		if err := scheduler.capacityWait(ctx); err != nil {
 			return false, err
 		}
@@ -64,6 +67,13 @@ func (scheduler *Scheduler) executeTrustedWithCapacity(ctx context.Context, job 
 		}
 		if err := require(ctx); err != nil {
 			return false, err
+		}
+		readmitted, err := scheduler.store.MarkRunAdmitted(ctx, job.Run.ID)
+		if err != nil {
+			return false, err
+		}
+		if readmitted.Preempted() {
+			return true, nil
 		}
 		fresh, err := scheduler.trustedRequirement(ctx, job.Repository, requirement.CandidateSHA)
 		if err != nil {

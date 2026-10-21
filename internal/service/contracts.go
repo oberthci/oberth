@@ -86,6 +86,7 @@ type RunQueueStore interface {
 	ClaimNextRun(context.Context) (model.Run, error)
 	MarkRunSubmitted(context.Context, string) (model.Run, error)
 	MarkRunAdmitted(context.Context, string) (model.Run, error)
+	MarkRunParked(context.Context, string) (model.Run, error)
 	Run(context.Context, string) (model.Run, error)
 	SetRunJobName(context.Context, string, string) (model.Run, error)
 	SetRunCredentialed(context.Context, string) error

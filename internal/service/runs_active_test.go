@@ -218,3 +218,24 @@ func TestScopedActiveRunsStayInScope(t *testing.T) {
 		t.Fatalf("unscoped active = %d runs", len(all))
 	}
 }
+
+func TestScopedDefaultRunsHideGlobalQueuePositions(t *testing.T) {
+	fixture := newScopeFixture(t)
+	value, err := fixture.call(scopedActor, "run_list", map[string]any{})
+	fixture.assertNoLeak(t, "run_list default", value, err)
+	runs := value.(api.RunListResponse).Runs.([]model.Run)
+	if len(runs) == 0 {
+		t.Fatal("no scoped runs")
+	}
+	for _, run := range runs {
+		if run.DisplayStatus == "queued" && (run.Scheduling == nil || run.Scheduling.QueuePosition != 0 || run.Scheduling.Admission != nil && run.Scheduling.Admission.Position != 0) {
+			t.Fatalf("scoped queue position leaked: %+v", run)
+		}
+	}
+	unscoped := mustCall(t, fixture, unscopedActor, "run_list", map[string]any{"repo": fixture.visible.Name}).(api.RunListResponse).Runs.([]model.Run)
+	for _, run := range unscoped {
+		if run.DisplayStatus == "queued" && (run.Scheduling == nil || run.Scheduling.QueuePosition != 0) {
+			t.Fatalf("repository filter invented a global queue position: %+v", run)
+		}
+	}
+}

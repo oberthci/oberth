@@ -2,12 +2,56 @@ package store
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/oberthci/oberth/internal/model"
 )
+
+func TestFlatRunsMissingCursorIsNotFound(t *testing.T) {
+	now := time.Now()
+	s := testStore(t, &now)
+	for _, filter := range []model.RunListFilter{{Before: 12345}, {BeforeRun: "missing-run"}} {
+		if _, err := s.ListRecentRuns(t.Context(), filter); !errors.Is(err, ErrNotFound) {
+			t.Fatalf("cursor %+v: got %v, want not found", filter, err)
+		}
+	}
+}
+
+func TestParkedRunLosesAdmissionTimeUntilReacquired(t *testing.T) {
+	now := time.Now()
+	s := testStore(t, &now)
+	repo := createRepo(t, s)
+	run, err := s.EnqueueRun(t.Context(), testRunSpec(repo.ID, "parked", strings.Repeat("a", 40)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ClaimNextRun(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.MarkRunParked(t.Context(), run.ID); !errors.Is(err, ErrInvalidState) {
+		t.Fatalf("park without admission: %v", err)
+	}
+	if _, err := s.MarkRunAdmitted(t.Context(), run.ID); err != nil {
+		t.Fatal(err)
+	}
+	parked, err := s.MarkRunParked(t.Context(), run.ID)
+	if err != nil || parked.StartedAt != nil {
+		t.Fatalf("parked: %+v, %v", parked, err)
+	}
+	readmitted, err := s.MarkRunAdmitted(t.Context(), run.ID)
+	if err != nil || readmitted.StartedAt == nil {
+		t.Fatalf("readmitted: %+v, %v", readmitted, err)
+	}
+	if _, err := s.SetRunJobName(t.Context(), run.ID, "workflow"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.MarkRunParked(t.Context(), run.ID); !errors.Is(err, ErrInvalidState) {
+		t.Fatalf("park after job creation: %v", err)
+	}
+}
 
 func TestFlatRunsKeepQueueFirstAndPageByAdmissionTime(t *testing.T) {
 	now := time.Date(2026, 10, 21, 12, 0, 0, 0, time.UTC)

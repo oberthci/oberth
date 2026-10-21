@@ -812,18 +812,31 @@ func (service *API) Runs(ctx context.Context, actor api.Actor, filter api.RunFil
 	if err != nil {
 		return nil, err
 	}
+	runs, err = service.presentationRuns(ctx, runs)
+	if err != nil {
+		return nil, err
+	}
+	renumberQueue := strings.TrimSpace(filter.Repository) == "" && strings.TrimSpace(filter.Ref) == "" && service.scope == nil
 	queuePosition := int64(0)
 	for i := range runs {
-		runs[i] = service.presentationRun(ctx, runs[i])
 		if filter.View != api.RunViewHistory && runs[i].DisplayStatus == "queued" {
-			queuePosition++
 			runs[i].Scheduling = service.scheduling(ctx, runs[i], nil)
 			if runs[i].Scheduling == nil {
 				runs[i].Scheduling = &model.RunScheduling{State: "queued", Message: "Awaiting weighted admission."}
 			}
-			runs[i].Scheduling.QueuePosition = queuePosition
-			if runs[i].Scheduling.Admission != nil {
-				runs[i].Scheduling.Admission.Position = int(queuePosition)
+			if renumberQueue {
+				queuePosition++
+				runs[i].Scheduling.QueuePosition = queuePosition
+				if runs[i].Scheduling.Admission != nil {
+					runs[i].Scheduling.Admission.Position = int(queuePosition)
+				}
+			} else {
+				// A filtered page is not the global queue. Keep only the gate's
+				// unscoped position, when it has one; scoped callers see none.
+				runs[i].Scheduling.QueuePosition = 0
+				if service.scope == nil && runs[i].Scheduling.Admission != nil {
+					runs[i].Scheduling.QueuePosition = int64(runs[i].Scheduling.Admission.Position)
+				}
 			}
 			runs[i].DisplayReason = runs[i].Scheduling.Message
 		}
@@ -1059,9 +1072,12 @@ func (service *API) Repositories(ctx context.Context, actor api.Actor) (any, err
 	if service.history != nil {
 		runs, historyErr := service.history.ListLatestRunsPerRepo(ctx, 12)
 		if historyErr == nil {
+			runs, historyErr = service.presentationRuns(ctx, runs)
+		}
+		if historyErr == nil {
 			runsByRepo = make(map[int64][]model.Run, len(repos))
 			for _, run := range runs {
-				runsByRepo[run.RepoID] = append(runsByRepo[run.RepoID], service.presentationRun(ctx, run))
+				runsByRepo[run.RepoID] = append(runsByRepo[run.RepoID], run)
 			}
 		}
 	}
@@ -1341,15 +1357,56 @@ func runDisplayReason(run model.Run) string {
 }
 
 func (service *API) presentationRun(ctx context.Context, run model.Run) model.Run {
+	if run.SupersededBy == "" || service.history == nil {
+		return service.presentationRunWithSuccessor(ctx, run, nil)
+	}
+	successor, err := service.history.Run(ctx, run.SupersededBy)
+	if err != nil {
+		return service.presentationRunWithSuccessor(ctx, run, nil)
+	}
+	return service.presentationRunWithSuccessor(ctx, run, map[string]model.Run{successor.ID: successor})
+}
+
+// presentationRuns resolves every successor in one lookup for list views.
+func (service *API) presentationRuns(ctx context.Context, runs []model.Run) ([]model.Run, error) {
+	batch, ok := service.history.(interface {
+		RunsByIDs(context.Context, []string) (map[string]model.Run, error)
+	})
+	if !ok {
+		for i := range runs {
+			runs[i] = service.presentationRun(ctx, runs[i])
+		}
+		return runs, nil
+	}
+	ids := make([]string, 0)
+	seen := make(map[string]bool)
+	for _, run := range runs {
+		if run.SupersededBy != "" && !seen[run.SupersededBy] {
+			seen[run.SupersededBy] = true
+			ids = append(ids, run.SupersededBy)
+		}
+	}
+	successors := map[string]model.Run{}
+	if len(ids) > 0 {
+		var err error
+		successors, err = batch.RunsByIDs(ctx, ids)
+		if err != nil {
+			return nil, err
+		}
+	}
+	for i := range runs {
+		runs[i] = service.presentationRunWithSuccessor(ctx, runs[i], successors)
+	}
+	return runs, nil
+}
+
+func (service *API) presentationRunWithSuccessor(ctx context.Context, run model.Run, successors map[string]model.Run) model.Run {
 	visible := presentationRun(run)
 	if run.Status == model.RunRunning && run.StartedAt != nil && service.submittedKVMPreflight(ctx, run) {
 		visible.Phase = "preflight"
 	}
-	if run.SupersededBy == "" || service.history == nil {
-		return visible
-	}
-	successor, err := service.history.Run(ctx, run.SupersededBy)
-	if err != nil {
+	successor, ok := successors[run.SupersededBy]
+	if !ok {
 		return visible
 	}
 	if successor.SHA == run.SHA && successor.Ref == run.Ref {

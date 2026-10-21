@@ -174,7 +174,9 @@ func TestDefaultRunListNumbersClaimedAndUnclaimedTogether(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	value, err := fixture.api(t).Runs(ctx, api.Actor{Identity: "agent@host"}, api.RunFilter{Limit: 1})
+	service := fixture.api(t)
+	actor := api.Actor{Identity: "agent@host"}
+	value, err := service.Runs(ctx, actor, api.RunFilter{Limit: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -185,6 +187,63 @@ func TestDefaultRunListNumbersClaimedAndUnclaimedTogether(t *testing.T) {
 	for i, run := range runs {
 		if run.DisplayStatus != "queued" || run.Scheduling == nil || run.Scheduling.QueuePosition != int64(i+1) || run.DisplayReason == "" {
 			t.Fatalf("queue position %d = %+v", i+1, run)
+		}
+	}
+	filteredValue, err := service.Runs(ctx, actor, api.RunFilter{Ref: second.Ref})
+	if err != nil {
+		t.Fatal(err)
+	}
+	filtered := filteredValue.([]model.Run)
+	if len(filtered) != 1 || filtered[0].ID != second.ID || filtered[0].Scheduling == nil || filtered[0].Scheduling.QueuePosition != 0 {
+		t.Fatalf("filtered list invented a global queue head: %+v", filtered)
+	}
+}
+
+type countingSuccessorHistory struct {
+	RunHistory
+	batchCalls int
+	runCalls   int
+}
+
+func (history *countingSuccessorHistory) RunsByIDs(ctx context.Context, ids []string) (map[string]model.Run, error) {
+	history.batchCalls++
+	return history.RunHistory.(interface {
+		RunsByIDs(context.Context, []string) (map[string]model.Run, error)
+	}).RunsByIDs(ctx, ids)
+}
+
+func (history *countingSuccessorHistory) Run(ctx context.Context, id string) (model.Run, error) {
+	history.runCalls++
+	return history.RunHistory.Run(ctx, id)
+}
+
+func TestDefaultRunListBatchesSuccessorLookups(t *testing.T) {
+	fixture := newControlFixture(t)
+	ctx := t.Context()
+	for _, branch := range []string{"feature/one", "feature/two"} {
+		if _, err := fixture.scheduler.EnqueueCI(ctx, CIRequest{EventID: branch + "-old", Repository: fixture.repo,
+			Branch: branch, SHA: strings.Repeat("a", 40), Actor: "agent@host"}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := fixture.scheduler.EnqueueCI(ctx, CIRequest{EventID: branch + "-new", Repository: fixture.repo,
+			Branch: branch, SHA: strings.Repeat("b", 40), Actor: "agent@host"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	service := fixture.api(t)
+	history := &countingSuccessorHistory{RunHistory: service.history}
+	service.history = history
+	value, err := service.Runs(ctx, api.Actor{Identity: "agent@host"}, api.RunFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runs := value.([]model.Run)
+	if len(runs) != 4 || history.batchCalls != 1 || history.runCalls != 0 {
+		t.Fatalf("list did not batch successors: %d runs, %d batches, %d single lookups", len(runs), history.batchCalls, history.runCalls)
+	}
+	for _, run := range runs {
+		if run.SupersededBy != "" && run.DisplayReason != "superseded by bbbbbbbb" {
+			t.Fatalf("successor reason = %+v", run)
 		}
 	}
 }

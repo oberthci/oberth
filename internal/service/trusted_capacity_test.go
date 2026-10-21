@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
 	"github.com/oberthci/oberth/internal/vmrunner"
@@ -80,6 +81,9 @@ func TestTrustedCapacityRetryBoundaries(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			if _, err := f.store.MarkRunAdmitted(ctx, run.ID); err != nil {
+				t.Fatal(err)
+			}
 			requirement, err := f.scheduler.trustedRequirement(ctx, f.repo, run.TestedSHA)
 			if err != nil {
 				t.Fatal(err)
@@ -96,6 +100,17 @@ func TestTrustedCapacityRetryBoundaries(t *testing.T) {
 			waited := false
 			f.scheduler.capacityWait = func(context.Context) error {
 				waited = true
+				parked, err := f.store.Run(ctx, run.ID)
+				if err != nil || parked.StartedAt != nil || displayRunStatus(parked) != "queued" {
+					t.Fatalf("parked run remains visible as admitted: %+v, %v", parked, err)
+				}
+				listed, err := f.api(t).Runs(ctx, api.Actor{Identity: "agent"}, api.RunFilter{})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if entries := listed.([]model.Run); len(entries) != 1 || entries[0].DisplayStatus != "queued" || entries[0].StartedAt != nil {
+					t.Fatalf("parked run list presentation = %+v", entries)
+				}
 				if used, runs := gateUsage(f.scheduler.admission); used != 0 || runs != 0 {
 					t.Fatal("waiting with resources held")
 				}
@@ -131,6 +146,10 @@ func TestTrustedCapacityRetryBoundaries(t *testing.T) {
 			case "retry":
 				if err != nil || stopped || executor.calls != 2 {
 					t.Fatalf("retry: %v %v calls%d", stopped, err, executor.calls)
+				}
+				readmitted, lookupErr := f.store.Run(ctx, run.ID)
+				if lookupErr != nil || readmitted.StartedAt == nil || displayRunStatus(readmitted) != "running" {
+					t.Fatalf("reacquired run lacks admission time: %+v, %v", readmitted, lookupErr)
 				}
 				if len(git.reads) < 4 {
 					t.Fatal("retained policy not refreshed")

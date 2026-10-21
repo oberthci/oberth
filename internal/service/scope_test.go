@@ -261,8 +261,8 @@ func TestScopedUplinkSeesOnlyItsUpstream(t *testing.T) {
 	}
 	// A long all-digit cursor is tried as a run ID first: the unscoped caller
 	// falls back to the sequence, the scoped one gets no sequence fallback.
-	if all := mustCall(t, fixture, unscopedActor, "run_list", map[string]any{"before": "999999999999"}).(api.RunListResponse); len(all.Runs.([]model.Run)) != 0 {
-		t.Fatalf("unscoped long numeric cursor = %#v", all)
+	if _, err := fixture.call(unscopedActor, "run_list", map[string]any{"before": "999999999999"}); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("unscoped missing sequence cursor = %v, want not found", err)
 	}
 	if _, err := fixture.call(scopedActor, "run_list", map[string]any{"before": "999999999999"}); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("scoped long numeric cursor = %v, want not found", err)

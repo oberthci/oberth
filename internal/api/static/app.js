@@ -687,6 +687,11 @@ function renderLogLines(lines, opts = {}) {
   }
   for (let i = start; i < total; i++) {
     let line = lines[i];
+    if (line && typeof line === "object" && line.successor) {
+      flushNoise();
+      out += `<div class="log-line"><span class="log-no">${i + 1}</span><span class="log-txt"><button type="button" class="run-successor" data-run-id="${esc(line.successor)}">${esc(line.text)}</button></span></div>`;
+      continue;
+    }
     if (opts.groupSteps) {
       const mark = LOG_STEP_MARK.exec(line);
       if (mark) {
@@ -737,7 +742,7 @@ function summaryLines(detail) {
   else if (kind === "cancel") lines.push(`[${status}] ${run.Reason || "run was interrupted"}`);
   else lines.push(`[pending] queued behind earlier work for this repository`);
   if (unreached) lines.push(`${unreached} declared step${unreached === 1 ? "" : "s"} not reached`);
-  if (run.SupersededBy) lines.push(`superseded by ${run.SupersededBy}`);
+  if (run.SupersededBy) lines.push({successor: run.SupersededBy, text: run.DisplayReason || `view successor ${shortId(run.SupersededBy)}`});
   if (run.Error) lines.push("", `error: ${run.Error}`);
   const timed = steps.map(step => ({ step, seconds: spanSeconds(step.StartedAt, step.FinishedAt, false) })).filter(item => item.seconds > 0).sort((a, b) => b.seconds - a.seconds);
   if (timed.length) lines.push("", `slowest: ${timed.slice(0, 2).map(item => `${stepKey(item.step)} ${fmtDur(item.seconds)}`).join(" · ")}`);
