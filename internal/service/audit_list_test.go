@@ -1,8 +1,14 @@
 package service
 
 import (
+	"context"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
+	"reflect"
+	"strconv"
 	"testing"
 
 	"github.com/oberthci/oberth/internal/api"
@@ -58,5 +64,79 @@ func TestAuditListIsAdminOnlyAndReturnsChainPositions(t *testing.T) {
 	}
 	if _, err := fixture.call(unscopedActor, "audit_list", map[string]any{"since": "yesterday"}); !errors.Is(err, ErrInvalidInput) {
 		t.Fatalf("bad since error = %v", err)
+	}
+}
+
+type auditSurfaceAuth struct{ actor api.Actor }
+
+func (auth auditSurfaceAuth) Authenticate(context.Context, string) (api.Actor, error) {
+	return auth.actor, nil
+}
+
+func TestAuditHTTPMatchesMCPAndRefusesScopedOrNonAdmin(t *testing.T) {
+	t.Parallel()
+	fixture := newScopeFixture(t)
+	for _, actor := range []api.Actor{unscopedActor, scopedActor, scopedAdmin, {Identity: "reader"}} {
+		server, err := api.New(auditSurfaceAuth{actor}, fixture.service, fixture.service, "test", api.WithErrorClassifier(func(err error) (int, string) {
+			if errors.Is(err, ErrInvalidInput) {
+				return http.StatusBadRequest, err.Error()
+			}
+			return http.StatusInternalServerError, err.Error()
+		}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		request := httptest.NewRequest(http.MethodGet, "/api/audit?limit=2", nil)
+		response := httptest.NewRecorder()
+		server.Handler().ServeHTTP(response, request)
+		if response.Code != http.StatusUnauthorized {
+			t.Fatalf("unauthenticated audit: %d", response.Code)
+		}
+		request.Header.Set("Authorization", "Bearer test")
+		response = httptest.NewRecorder()
+		server.Handler().ServeHTTP(response, request)
+		if actor.Scoped() || !actor.Admin {
+			if response.Code != http.StatusForbidden {
+				t.Fatalf("actor %+v: %d %s", actor, response.Code, response.Body)
+			}
+			continue
+		}
+		for _, query := range []string{"limit=2", "limit=1&before=3", "action=repository.&actor=owner%40tuxbox&repo=oberth&since=2000-01-01T00:00:00Z&until=2100-01-01T00:00:00Z"} {
+			request = httptest.NewRequest(http.MethodGet, "/api/audit?"+query, nil)
+			request.Header.Set("Authorization", "Bearer test")
+			response = httptest.NewRecorder()
+			server.Handler().ServeHTTP(response, request)
+			var page AuditListResponse
+			if err := json.Unmarshal(response.Body.Bytes(), &page); err != nil || response.Code != http.StatusOK {
+				t.Fatalf("HTTP %d %s: %v", response.Code, response.Body, err)
+			}
+			args := map[string]any{}
+			for key, values := range request.URL.Query() {
+				if key == "limit" || key == "before" {
+					args[key], _ = strconv.Atoi(values[0])
+				} else {
+					args[key] = values[0]
+				}
+			}
+			value, err := fixture.call(actor, "audit_list", args)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(page, value) {
+				t.Fatalf("HTTP=%+v MCP=%+v", page, value)
+			}
+			if page.NextBefore > 0 && response.Header().Get("X-Oberth-Next-Before") != strconv.FormatInt(page.NextBefore, 10) {
+				t.Fatal("missing paging header")
+			}
+		}
+		for _, query := range []string{"limit=bad", "before=-1", "since=yesterday"} {
+			request = httptest.NewRequest(http.MethodGet, "/api/audit?"+query, nil)
+			request.Header.Set("Authorization", "Bearer test")
+			response = httptest.NewRecorder()
+			server.Handler().ServeHTTP(response, request)
+			if response.Code != http.StatusBadRequest {
+				t.Fatalf("%s: %d %s", query, response.Code, response.Body)
+			}
+		}
 	}
 }

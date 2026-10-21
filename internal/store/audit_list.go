@@ -4,8 +4,11 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/oberthci/oberth/internal/model"
 )
@@ -17,15 +20,16 @@ const (
 
 // recordableAuditActions are the actions an in-pod operator command may append
 // on behalf of a workstation operation the server cannot observe itself
-// (backup, restore). Anything else must be written by the code path
+// (backup, restore, upgrade). Anything else must be written by the code path
 // that owns it.
 var recordableAuditActions = map[string]bool{
 	"backup.completed":  true,
 	"restore.completed": true,
+	"upgrade.completed": true,
 }
 
 // RecordOperationAudit appends one operator-reported lifecycle action
-// (backup.completed, restore.completed) to the chain.
+// (backup.completed, restore.completed, upgrade.completed) to the chain.
 func (s *Store) RecordOperationAudit(ctx context.Context, actor, action, details string) (model.AuditAction, error) {
 	if !recordableAuditActions[action] {
 		return model.AuditAction{}, fmt.Errorf("%w: %q is not a recordable lifecycle action", ErrInvalid, action)
@@ -33,6 +37,31 @@ func (s *Store) RecordOperationAudit(ctx context.Context, actor, action, details
 	return s.AppendAuditAction(ctx, model.AuditActionSpec{
 		Actor: actor, Action: action, ResourceType: "system", ResourceID: "oberth", Details: details,
 	})
+}
+
+// LastBackup reads the latest completion record, not the current chain head:
+// the archive contains the snapshot's earlier head.
+func (s *Store) LastBackup(ctx context.Context) (*model.BackupStatus, error) {
+	action, err := s.LatestAuditActionByType(ctx, "backup.completed", "system")
+	if errors.Is(err, ErrNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var details struct {
+		ArchiveSHA256   string `json:"archive_sha256"`
+		AuditHeadID     int64  `json:"audit_head_id"`
+		AuditHeadSHA256 string `json:"audit_head_sha256"`
+	}
+	if err := json.Unmarshal([]byte(action.Details), &details); err != nil {
+		return nil, fmt.Errorf("read backup audit details: %w", err)
+	}
+	return &model.BackupStatus{
+		At:            action.CreatedAt.UTC().Format(time.RFC3339Nano),
+		Head:          model.BackupAuditHead{ID: details.AuditHeadID, SHA256: details.AuditHeadSHA256},
+		ArchiveSHA256: details.ArchiveSHA256,
+	}, nil
 }
 
 // ListAuditActions returns audit actions newest first, each recomputed from

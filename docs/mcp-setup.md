@@ -315,17 +315,27 @@ uplinks, upstreams and the secret store, and filtering them per scope would be
 guesswork.
 
 `oberth audit --tail` prints the newest entries oldest first, then follows new
-ones. `oberth audit head` and `oberth audit record` run in-pod.
+ones, paging through bursts larger than 200 matches without gaps or repeats.
+`GET /api/audit` accepts the same filters and returns the same JSON, with an
+`X-Oberth-Next-Before` header on full pages. It requires an unscoped admin.
+`oberth audit head` and `oberth audit record` run in-pod.
 
 Lifecycle records. `oberth backup` records `backup.completed` (archive SHA-256,
 bytes, scope and the snapshot's audit head) and `oberth restore` records
-`restore.completed` (archive SHA-256, parts, the archive's audit head) by running
-`oberth audit record` in the server pod once the operation has succeeded. The
-server cannot observe these itself, so a failure to record (an older server, an
-unreachable admin daemon) is a printed warning, not a failed backup. Gaps:
-`restore.started` cannot exist, because the restore replaces the database that
-would hold it; `oberth upgrade` and `oberth install` run `helm upgrade` from
-the workstation and leave no server-side record.
+`restore.completed` (archive SHA-256, parts, the archive's audit head).
+`oberth upgrade` records `upgrade.completed` (`from`, `to`) after rollout and
+version verification. These commands run `oberth audit record` in the server pod
+once the operation has succeeded. The server cannot observe these itself, so a
+failure to record (an older server, an
+unreachable admin daemon) is a printed warning; the completed operation stays
+successful. Dry runs, failed upgrades and already-current upgrades write no
+completion record. `restore.started` cannot survive replacing the database.
+
+`system_status` and `GET /api/status` include `last_backup` after a successful
+backup record: `at` is its timestamp, `head` contains the archive snapshot's
+`id` and `sha256`, and `archive_sha256` identifies the archive. Later audit
+appends do not change the snapshot head. The field is omitted before any backup
+record and for scoped callers.
 
 ## Scheduling observations
 

@@ -43,6 +43,8 @@ type AuditListResponse struct {
 	NextBefore int64            `json:"next_before,omitempty"`
 }
 
+func (response AuditListResponse) AuditNextBefore() int64 { return response.NextBefore }
+
 const auditListMaxLimit = 200
 
 // auditList serves audit_list. It is admin-only: audit rows span uplinks,

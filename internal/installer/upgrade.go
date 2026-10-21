@@ -419,6 +419,10 @@ func RunUpgrade(ctx context.Context, cfg UpgradeConfig, deps Deps) (UpgradeResul
 		}
 	}
 	result.Upgraded = true
+	deps.Output = w
+	recordServerAudit(ctx, deps, cfg.Namespace, "deploy/oberth", "upgrade.completed", map[string]any{
+		"from": currentVersion, "to": targetVersion,
+	})
 	_, _ = fmt.Fprintf(w, "\nReady — %s\n", oberthWebUIURL)
 	return result, nil
 }

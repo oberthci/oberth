@@ -68,3 +68,34 @@ func TestRecordOperationAuditAcceptsOnlyLifecycleActions(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestLastBackupUsesLatestCompletionSnapshotHead(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 10, 21, 12, 0, 0, 0, time.UTC)
+	database := testStore(t, &now)
+	ctx := t.Context()
+	if backup, err := database.LastBackup(ctx); err != nil || backup != nil {
+		t.Fatalf("empty backup=%+v err=%v", backup, err)
+	}
+	for _, details := range []string{`{"archive_sha256":"old","audit_head_id":0}`, `{"archive_sha256":"new","audit_head_id":1,"audit_head_sha256":"snapshot"}`} {
+		now = now.Add(time.Hour)
+		if _, err := database.RecordOperationAudit(ctx, "admin", "backup.completed", details); err != nil {
+			t.Fatal(err)
+		}
+	}
+	backupAt := now.Format(time.RFC3339Nano)
+	now = now.Add(time.Hour)
+	if _, err := database.RecordOperationAudit(ctx, "admin", "upgrade.completed", `{"from":"0.1.0","to":"0.2.0"}`); err != nil {
+		t.Fatal(err)
+	}
+	backup, err := database.LastBackup(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if backup == nil || backup.At != backupAt || backup.ArchiveSHA256 != "new" || backup.Head.ID != 1 || backup.Head.SHA256 != "snapshot" {
+		t.Fatalf("backup=%+v", backup)
+	}
+	if _, err := database.VerifyAuditChain(ctx); err != nil {
+		t.Fatal(err)
+	}
+}

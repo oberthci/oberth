@@ -9,6 +9,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"sort"
 	"strings"
 	"time"
 
@@ -37,6 +38,7 @@ func mcpTransportFlags(flags *flag.FlagSet) func() []string {
 				transport = append(transport, name+"="+value)
 			}
 		}
+		sort.Strings(transport)
 		return transport
 	}
 }
@@ -111,7 +113,11 @@ func runAuditList(ctx context.Context, arguments []string, output io.Writer) err
 	return err
 }
 
-func fetchAudit(ctx context.Context, remote remoteRunCanceller, arguments map[string]any) (service.AuditListResponse, error) {
+type auditCaller interface {
+	call(context.Context, string, any) (json.RawMessage, error)
+}
+
+func fetchAudit(ctx context.Context, remote auditCaller, arguments map[string]any) (service.AuditListResponse, error) {
 	raw, err := remote.call(ctx, "audit_list", arguments)
 	if err != nil {
 		return service.AuditListResponse{}, err
@@ -125,12 +131,12 @@ func fetchAudit(ctx context.Context, remote remoteRunCanceller, arguments map[st
 
 // tailAudit prints the newest entries oldest first, then polls for entries
 // past the highest ID seen until the context ends. Filters apply throughout.
-func tailAudit(ctx context.Context, remote remoteRunCanceller, arguments map[string]any, asJSON bool, output io.Writer) error {
+func tailAudit(ctx context.Context, remote auditCaller, arguments map[string]any, asJSON bool, output io.Writer) error {
 	response, err := fetchAudit(ctx, remote, arguments)
 	if err != nil {
 		return err
 	}
-	last := response.HeadID
+	last := auditHighWater(response)
 	emit := func(entries []service.AuditEntryView) error {
 		if asJSON {
 			for i := len(entries) - 1; i >= 0; i-- {
@@ -155,29 +161,65 @@ func tailAudit(ctx context.Context, remote remoteRunCanceller, arguments map[str
 			return nil
 		case <-time.After(auditTailInterval):
 		}
-		poll := map[string]any{}
-		for name, value := range arguments {
-			poll[name] = value
-		}
-		poll["limit"] = 200
-		page, err := fetchAudit(ctx, remote, poll)
+		fresh, highWater, err := pollAudit(ctx, remote, arguments, last)
 		if err != nil {
 			if ctx.Err() != nil {
 				return nil
 			}
 			return err
 		}
-		var fresh []service.AuditEntryView
+		if err := emit(fresh); err != nil {
+			return err
+		}
+		last = highWater
+	}
+}
+
+// The head is read before the entries, so the page may include newer rows.
+func auditHighWater(page service.AuditListResponse) int64 {
+	high := page.HeadID
+	for _, entry := range page.Entries {
+		high = max(high, entry.ID)
+	}
+	return high
+}
+
+func pollAudit(ctx context.Context, remote auditCaller, arguments map[string]any, last int64) ([]service.AuditEntryView, int64, error) {
+	poll := map[string]any{}
+	for name, value := range arguments {
+		poll[name] = value
+	}
+	delete(poll, "before")
+	poll["limit"] = 200
+	page, err := fetchAudit(ctx, remote, poll)
+	if err != nil {
+		return nil, last, err
+	}
+	// Later page heads can include appends outside this scan. Leave those
+	// for the next poll instead of advancing past entries we have not read.
+	highWater := max(last, auditHighWater(page))
+	var fresh []service.AuditEntryView
+	var before int64
+	for {
 		for _, entry := range page.Entries {
 			if entry.ID > last {
 				fresh = append(fresh, entry)
 			}
 		}
-		if err := emit(fresh); err != nil {
-			return err
+		if page.NextBefore <= last {
+			break
 		}
-		last = max(last, page.HeadID)
+		if before != 0 && page.NextBefore >= before {
+			return nil, last, fmt.Errorf("audit_list cursor did not advance")
+		}
+		before = page.NextBefore
+		poll["before"] = before
+		page, err = fetchAudit(ctx, remote, poll)
+		if err != nil {
+			return nil, last, err
+		}
 	}
+	return fresh, highWater, nil
 }
 
 func writeAuditEntries(output io.Writer, entries []service.AuditEntryView, newestFirst bool) error {

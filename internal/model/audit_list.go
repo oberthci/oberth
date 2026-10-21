@@ -2,6 +2,18 @@ package model
 
 import "time"
 
+// BackupStatus is the last completed backup recorded in the audit chain.
+type BackupStatus struct {
+	At            string          `json:"at"`
+	Head          BackupAuditHead `json:"head"`
+	ArchiveSHA256 string          `json:"archive_sha256"`
+}
+
+type BackupAuditHead struct {
+	ID     int64  `json:"id"`
+	SHA256 string `json:"sha256"`
+}
+
 // AuditListFilter selects audit actions for audit_list. Zero values mean no
 // constraint. Before is an exclusive audit-ID cursor; results are newest
 // first.
