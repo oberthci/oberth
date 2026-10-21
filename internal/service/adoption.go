@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/oberthci/oberth/internal/model"
@@ -38,11 +39,27 @@ func (scheduler *Scheduler) withoutPendingPreflight(ctx context.Context, run mod
 	return true, nil
 }
 
+// adoptionFailure names the exact Workflow startup could not adopt, so the
+// operator knows which object to delete. A refused Workflow keeps startup
+// stopped until it is deleted; recovery then takes the missing-Workflow
+// fallback and re-queues the run. A failed read names the same object but
+// asks for nothing: the next start retries it.
+func adoptionFailure(adopter JobAdopter, run model.Run, err error) error {
+	namespace := adopter.JobNamespace()
+	failure := fmt.Errorf("adopt run %s: Workflow %s/%s: %w", run.ID, namespace, run.JobName, err)
+	if errors.Is(err, ErrAdoptionRefused) {
+		failure = fmt.Errorf("%w; startup stops until it is deleted (kubectl -n %s delete workflow %s), after which the run is re-queued",
+			failure, namespace, run.JobName)
+	}
+	log.Printf("ERROR: %v", failure)
+	return failure
+}
+
 // adopt restores grants for work already running, even if the new owner's
 // configured capacity is smaller. New admissions wait until it has drained.
 func (gate *weightedAdmission) adopt(run model.Run, size periapsis.Size) (*admissionReservation, error) {
 	if !size.Valid() || (run.ConcurrencyGroup != "" && !argoworkflow.ValidConcurrencyGroup(run.ConcurrencyGroup)) {
-		return nil, errors.New("service: invalid adopted resource contract")
+		return nil, fmt.Errorf("%w: invalid adopted resource contract", ErrAdoptionRefused)
 	}
 	order := run.AdmissionSequence
 	if order <= 0 {
@@ -52,7 +69,7 @@ func (gate *weightedAdmission) adopt(run model.Run, size periapsis.Size) (*admis
 	defer gate.mu.Unlock()
 	if previous, ok := gate.reservations[run.QueueSequence]; ok {
 		if previous.runID != run.ID || previous.order != order || !previous.granted || previous.size != size.Effective() || previous.groupName != run.ConcurrencyGroup {
-			return nil, errors.New("service: conflicting adopted admission")
+			return nil, fmt.Errorf("%w: conflicting adopted admission", ErrAdoptionRefused)
 		}
 		return previous, nil
 	}
@@ -60,7 +77,7 @@ func (gate *weightedAdmission) adopt(run model.Run, size periapsis.Size) (*admis
 	if run.ConcurrencyGroup != "" {
 		group = concurrencyGroupKey(run.RepoID, run.ConcurrencyGroup)
 		if gate.groups[group] != nil {
-			return nil, errors.New("service: adopted concurrency group already held")
+			return nil, fmt.Errorf("%w: adopted concurrency group already held", ErrAdoptionRefused)
 		}
 	}
 	now := time.Now().UTC()

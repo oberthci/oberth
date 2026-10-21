@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
@@ -25,6 +26,11 @@ type Adoption struct {
 	SpecSHA256 string
 }
 
+// ErrAdoptionRefused marks a Workflow that exists but must not be observed as
+// the run's: it stays refused until the operator deletes it. A failed read is
+// not a refusal.
+var ErrAdoptionRefused = errors.New("argojob: Workflow refused for adoption")
+
 type AdoptionRequest struct {
 	Name, RunID, Ref, SHA, Group string
 	Trigger                      periapsis.Trigger
@@ -39,8 +45,16 @@ func (controller *Controller) Adopt(ctx context.Context, request AdoptionRequest
 	if err != nil {
 		return Adoption{}, false, fmt.Errorf("argojob: read Workflow for adoption: %w", err)
 	}
+	binding, err := controller.bindAdoption(workflow, request)
+	if err != nil {
+		return Adoption{}, false, fmt.Errorf("%w: %w", ErrAdoptionRefused, err)
+	}
+	return binding, true, nil
+}
+
+func (controller *Controller) bindAdoption(workflow *wfv1.Workflow, request AdoptionRequest) (Adoption, error) {
 	if err := controller.verifyOwnership(workflow, request.RunID); err != nil {
-		return Adoption{}, false, err
+		return Adoption{}, err
 	}
 	_, identity, _ := WorkflowMeta(workflow)
 	digest, digestErr := hex.DecodeString(identity)
@@ -48,21 +62,21 @@ func (controller *Controller) Adopt(ctx context.Context, request AdoptionRequest
 		workflow.UID == "" || workflow.DeletionTimestamp != nil || digestErr != nil || len(digest) != 32 ||
 		workflow.Annotations[refAnnotation] != request.Ref || workflow.Labels["oberth.ci/sha"] != labelValue(request.SHA) ||
 		workflow.Labels["oberth.ci/trigger"] != string(request.Trigger) {
-		return Adoption{}, false, fmt.Errorf("argojob: Workflow %s adoption binding mismatch", request.Name)
+		return Adoption{}, fmt.Errorf("argojob: Workflow %s adoption binding mismatch", request.Name)
 	}
 	group, err := argoworkflow.RunConcurrencyGroup(workflow)
 	if err != nil || group != request.Group {
-		return Adoption{}, false, fmt.Errorf("argojob: Workflow %s adoption group mismatch", request.Name)
+		return Adoption{}, fmt.Errorf("argojob: Workflow %s adoption group mismatch", request.Name)
 	}
 	size, err := argoworkflow.DeclaredSizeFor(workflow, request.RunTrigger)
 	if err != nil {
-		return Adoption{}, false, err
+		return Adoption{}, err
 	}
 	specHash, err := adoptionSpecHash(workflow)
 	if err != nil {
-		return Adoption{}, false, err
+		return Adoption{}, err
 	}
-	return Adoption{Size: size, UID: workflow.UID, Identity: identity, SpecSHA256: specHash}, true, nil
+	return Adoption{Size: size, UID: workflow.UID, Identity: identity, SpecSHA256: specHash}, nil
 }
 
 // Argo's status and API metadata change while it runs. Its live spec must stay

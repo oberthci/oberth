@@ -3,12 +3,16 @@ package argojob
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
 	"github.com/oberthci/oberth/internal/runprogress"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 	"github.com/oberthci/oberth/pkg/periapsis"
@@ -50,14 +54,59 @@ func TestAdoptionBindsDurableRunAndSubmittedResources(t *testing.T) {
 				if err != nil || !found || binding.Size != periapsis.L || binding.UID != wf.UID || binding.Identity != wf.Annotations[identityAnnotation] {
 					t.Fatalf("adoption = %#v, %v, %v", binding, found, err)
 				}
-			} else if err == nil {
-				t.Fatalf("invalid adoption accepted: %#v, %v", binding, found)
+			} else if err == nil || !errors.Is(err, ErrAdoptionRefused) {
+				t.Fatalf("invalid adoption not refused: %#v, %v, %v", binding, found, err)
 			}
 		})
 	}
 	controller := &Controller{workflows: missingWorkflowClient{}, config: Config{Namespace: wf.Namespace}}
 	if _, found, err := controller.Adopt(context.Background(), request); err != nil || found {
 		t.Fatalf("missing Workflow = %v, %v", found, err)
+	}
+	controller = &Controller{workflows: &flakyWorkflowClient{staticWorkflowClient: staticWorkflowClient{workflow: wf}, failures: 1}, config: Config{Namespace: wf.Namespace}}
+	if _, found, err := controller.Adopt(context.Background(), request); err == nil || found || errors.Is(err, ErrAdoptionRefused) {
+		t.Fatalf("read failure = %v, %v; want an unrefused error", found, err)
+	}
+}
+
+// flakyWorkflowClient fails the first reads the way an API server restart or
+// connection reset does, then serves the Workflow.
+type flakyWorkflowClient struct {
+	staticWorkflowClient
+	mu       sync.Mutex
+	failures int
+	reads    int
+}
+
+func (client *flakyWorkflowClient) Get(ctx context.Context, name string, options metav1.GetOptions) (*wfv1.Workflow, error) {
+	client.mu.Lock()
+	client.reads++
+	failing := client.failures < 0 || client.reads <= client.failures
+	client.mu.Unlock()
+	if failing {
+		return nil, errors.New("connection reset by peer")
+	}
+	return client.staticWorkflowClient.Get(ctx, name, options)
+}
+
+func TestAdoptedWaitRidesOutTransientReadFailures(t *testing.T) {
+	wf, request := adoptionWorkflow()
+	binding, found, err := (&Controller{workflows: &staticWorkflowClient{workflow: wf}, config: Config{Namespace: wf.Namespace}}).Adopt(context.Background(), request)
+	if err != nil || !found {
+		t.Fatalf("adopt: %v %v", found, err)
+	}
+	client := &flakyWorkflowClient{staticWorkflowClient: staticWorkflowClient{workflow: wf}, failures: 3}
+	controller := &Controller{workflows: client, config: Config{Namespace: wf.Namespace, MaxRunLogBytes: 4096}, interval: time.Millisecond, readGrace: time.Minute}
+	completion, err := controller.WaitResumed(context.Background(), wf.Name, request.RunID, io.Discard, nil, 0, binding)
+	if err != nil || !completion.Succeeded || client.reads <= 3 {
+		t.Fatalf("transient read failure ended adopted Wait: %#v %v reads=%d", completion, err, client.reads)
+	}
+
+	client = &flakyWorkflowClient{staticWorkflowClient: staticWorkflowClient{workflow: wf}, failures: -1}
+	controller = &Controller{workflows: client, config: Config{Namespace: wf.Namespace, MaxRunLogBytes: 4096}, interval: time.Millisecond, readGrace: 20 * time.Millisecond}
+	completion, err = controller.WaitResumed(context.Background(), wf.Name, request.RunID, io.Discard, nil, 0, binding)
+	if err == nil || completion.Name != "" || !strings.Contains(err.Error(), "connection reset") || client.reads < 2 {
+		t.Fatalf("persistent read failure = %#v %v reads=%d", completion, err, client.reads)
 	}
 }
 

@@ -972,7 +972,7 @@ continuity checks; it must never be used to reset or bypass those checks.
   | passed CI / published release | `passed` | empty |
   | failed step or infrastructure | `failed` | empty; error and failed step remain separately available |
   | superseded (`reason='superseded by newer run'`) | `cancelled` | `superseded by <short SHA>`; successor run remains linked |
-  | restart re-fire (`reason='re-queued after restart'`) | `cancelled` | `server restart, re-queued as <run12>` |
+  | restart re-fire (`reason='re-queued after restart'`; fallback when an adoptable branch Workflow is missing, #1172) | `cancelled` | `server restart, re-queued as <run12>` |
   | explicit cancel | `cancelled` | `cancelled by <actor>: <reason>` |
   | restart requiring an operator retry | `cancelled` | `server restart, retry needed` |
 
@@ -1130,7 +1130,11 @@ continuity checks; it must never be used to reset or bypass those checks.
   namespace must match the run and configured engine. Its spec identity must
   be present; its UID, identity and live spec remain pinned during observation.
   A name collision or unreadable API stops recovery without deleting or
-  re-firing that work. Admission weight is
+  re-firing that work. Startup logs and returns the run ID and the exact
+  `<namespace>/<name>` of a refused Workflow (binding mismatch, invalid size
+  declaration, conflicting concurrency group) with the `kubectl delete`
+  command for it; once it is deleted, the next start takes the
+  missing-Workflow fallback below. Admission weight is
   restored from the submitted Workflow's size declaration before new claims,
   and its repository-scoped group remains held. Existing work may temporarily
   exceed a reduced capacity; new work waits until it drains.
@@ -1143,6 +1147,13 @@ continuity checks; it must never be used to reset or bypass those checks.
   running the token waiter. A Workflow that finished while the owner was down
   uses the same observation, artifact collection, step persistence and normal
   publication/issue finalization as a newly submitted Workflow.
+  Observation retries failed Workflow reads for a bounded grace (2 minutes).
+  An adopted run whose observation still fails settles like a submitted one:
+  a terminal Workflow keeps its real result and artifacts (also after a log
+  budget breach or executor identity retirement error), and an unobservable
+  Workflow is deleted and only that run fails with phase `infrastructure`;
+  the scheduler keeps running. If that deletion also fails, the run stays
+  owned for the next restart, exactly as for a submitted run.
   A missing branch Workflow, or a claimed branch run without a Job, retains
   the requeue-with-supersede fallback (#270): the old run links to a queued
   copy of the same commit and any deletion obligation completes before the
@@ -1155,6 +1166,9 @@ continuity checks; it must never be used to reset or bypass those checks.
   they are not adopted by this slice. Explicit cancellation and newer-push
   supersession still delete the exact owned Workflow, and terminal runs are
   never adopted or automatically re-fired.
+  Upgrade note: the first upgrade to a release with adoption is still
+  disruptive, because the old process re-queues its own running branch runs
+  when it receives SIGTERM. Adoption applies from the next restart onward.
 - Green branch runs force-sync that same branch to the upstream forge. Red
   default-branch and scheduled branch runs create or update one open CI issue
   per repository and branch with the new SHA, a bounded (16 KiB) failure excerpt,

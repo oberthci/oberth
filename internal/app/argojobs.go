@@ -620,6 +620,9 @@ func (jobs *ArgoJobs) Adopt(ctx context.Context, run model.Run) (periapsis.Size,
 		Name: run.JobName, RunID: run.ID, Ref: run.Ref, SHA: sha,
 		Group: run.ConcurrencyGroup, Trigger: trigger, RunTrigger: kind,
 	})
+	if errors.Is(err, argojob.ErrAdoptionRefused) {
+		return "", false, fmt.Errorf("%w: %w", service.ErrAdoptionRefused, err)
+	}
 	if err != nil || !found {
 		return "", found, err
 	}
@@ -627,12 +630,17 @@ func (jobs *ArgoJobs) Adopt(ctx context.Context, run model.Run) (periapsis.Size,
 	defer jobs.mu.Unlock()
 	if current, exists := jobs.intents[run.JobName]; exists {
 		if current.runID != run.ID || current.cancelled || current.adoption == nil || *current.adoption != binding {
-			return "", false, errors.New("app: conflicting Workflow adoption intent")
+			return "", false, fmt.Errorf("%w: app: conflicting Workflow adoption intent", service.ErrAdoptionRefused)
 		}
 		return binding.Size, true, nil
 	}
 	jobs.intents[run.JobName] = argoIntent{runID: run.ID, trigger: trigger, created: true, adoption: &binding}
 	return binding.Size, true, nil
+}
+
+// JobNamespace names the namespace the engine's Workflows live in.
+func (jobs *ArgoJobs) JobNamespace() string {
+	return jobs.controller.Namespace()
 }
 
 func (jobs *ArgoJobs) WaitResumed(ctx context.Context, name string, destination io.Writer, events []runprogress.Event, retained int64) (service.JobResult, error) {
@@ -664,16 +672,16 @@ func (jobs *ArgoJobs) wait(ctx context.Context, name string, destination io.Writ
 	} else {
 		completion, err = jobs.controller.Wait(ctx, name, intent.runID, destination)
 	}
-	if err != nil {
-		if completion.Name != "" {
-			return jobs.result(completion), err
-		}
+	if err != nil && completion.Name == "" {
 		return service.JobResult{}, err
 	}
+	// A terminal Workflow keeps its outputs even when its observation ended in
+	// error (log budget breach, executor identity retirement): the scheduler
+	// then records the Workflow's real result, which includes its artifacts.
 	if reason := jobs.collectArtifacts(context.WithoutCancel(ctx), name, intent.runID, intent.trigger); reason != "" {
 		jobs.recordArtifactFailure(context.WithoutCancel(ctx), intent.runID, reason)
 	}
-	return jobs.result(completion), nil
+	return jobs.result(completion), err
 }
 
 func (jobs *ArgoJobs) Delete(ctx context.Context, name, runID string) error {

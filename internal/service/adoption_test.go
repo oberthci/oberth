@@ -1,11 +1,15 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
+	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -33,6 +37,10 @@ func (jobs *adoptingJobs) Adopt(_ context.Context, run model.Run) (periapsis.Siz
 	jobs.adopted = append(jobs.adopted, run.ID)
 	return periapsis.L, jobs.found, jobs.adoptErr
 }
+
+func (*adoptingJobs) JobNamespace() string { return "oberth-argo" }
+
+var _ JobAdopter = (*adoptingJobs)(nil)
 
 func (jobs *adoptingJobs) CreateCI(context.Context, JobRequest) error {
 	jobs.mu.Lock()
@@ -474,5 +482,129 @@ func TestAdoptionPreemptedBeforeWaitRetainsAdmissionOnDeleteFailure(t *testing.T
 	scheduler.admission.mu.Unlock()
 	if used == 0 || runs != 1 || held != reservation || !reservation.retained {
 		t.Fatalf("live Workflow lost admission: %d/%d held=%p", used, runs, held)
+	}
+}
+
+func TestAdoptedObservationFailureFailsOnlyThatRun(t *testing.T) {
+	fixture := newRecoveryFixture(t)
+	run := fixture.enqueueAndClaim(t, "feature/blip", "abababababababababababababababababababab")
+	fixture.setJobName(t, run.ID, "oberth-blip")
+	// Wait returns only after the controller's bounded read retry gave up.
+	jobs := &adoptingJobs{found: true, recoveryJobs: recoveryJobs{terminalErr: ErrJobNotTerminal, waitErr: errors.New("argojob: read Workflow oberth-blip: connection refused")}}
+	scheduler := fixture.scheduler(t, jobs)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- scheduler.Run(ctx) }()
+	current := waitAdoptedStatus(t, fixture.store, run.ID, model.RunFailed)
+	if current.Phase != "infrastructure" || !strings.Contains(current.Error, "observe adopted Workflow oberth-blip") || !strings.Contains(current.Error, "connection refused") {
+		t.Fatalf("adopted observation failure = %#v", current)
+	}
+	select {
+	case err := <-done:
+		t.Fatalf("one adopted run's observation failure stopped the scheduler: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+	// The scheduler keeps dispatching new work after the failed adoption.
+	next, err := fixture.store.EnqueueRun(context.Background(), model.RunSpec{RepoID: fixture.repo.ID, RefKind: model.RefBranch, Ref: "feature/next", SHA: "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd", Actor: "agent@host", Trigger: "branch"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	scheduler.signalQueue()
+	waitAdoptedStatus(t, fixture.store, next.ID, model.RunFailed)
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if len(jobs.deleted) != 2 || jobs.deleted[0] != "oberth-blip" {
+		t.Fatalf("unobservable Workflows were not deleted before failing: %v", jobs.deleted)
+	}
+	scheduler.admission.mu.Lock()
+	used, runs := scheduler.admission.used, scheduler.admission.runs
+	scheduler.admission.mu.Unlock()
+	if used != 0 || runs != 0 {
+		t.Fatalf("failed adoption retained admission: %d/%d", used, runs)
+	}
+}
+
+func TestAdoptedTerminalObservationErrorKeepsRealResult(t *testing.T) {
+	fixture := newRecoveryFixture(t)
+	run := fixture.enqueueAndClaim(t, "feature/budget", "efefefefefefefefefefefefefefefefefefefef")
+	fixture.setJobName(t, run.ID, "oberth-budget")
+	passed := JobResult{Status: model.RunPassed, Phase: "passed", Steps: []model.StepResult{stepResult(model.StepPassed)}}
+	jobs := &adoptingJobs{found: true, recoveryJobs: recoveryJobs{
+		terminalResult: passed, waitResult: passed,
+		waitErr: errors.New("step test/unit breached the aggregate run log budget"),
+	}}
+	scheduler := fixture.scheduler(t, jobs)
+	reservation, err := scheduler.admission.adopt(run, periapsis.M)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := scheduler.resumeAdoptedRun(context.Background(), run, scheduler.requireMutation, reservation); err != nil {
+		t.Fatal(err)
+	}
+	current, err := fixture.store.Run(context.Background(), run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if current.Status != model.RunPassed || len(jobs.deleted) != 0 {
+		t.Fatalf("terminal adopted Workflow lost its real result: %#v deleted=%v", current, jobs.deleted)
+	}
+	if steps, err := fixture.store.StepResults(context.Background(), run.ID); err != nil || len(steps) != 1 {
+		t.Fatalf("steps = %#v, %v", steps, err)
+	}
+}
+
+func TestAdoptionFailureNamesTheWorkflowToDelete(t *testing.T) {
+	var logged bytes.Buffer
+	log.SetOutput(&logged)
+	t.Cleanup(func() { log.SetOutput(os.Stderr) })
+	for _, test := range []struct {
+		name      string
+		adoptErr  error
+		holdOther bool
+		refused   bool
+	}{
+		{"binding-mismatch", fmt.Errorf("%w: argojob: Workflow oberth-refused adoption binding mismatch", ErrAdoptionRefused), false, true},
+		{"group-conflict", nil, true, true},
+		{"read-failure", errors.New("argojob: read Workflow for adoption: connection refused"), false, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			logged.Reset()
+			fixture := newRecoveryFixture(t)
+			run := fixture.enqueueAndClaim(t, "feature/refused", "abcdefabcdefabcdefabcdefabcdefabcdefabcd")
+			fixture.setJobName(t, run.ID, "oberth-refused")
+			if err := fixture.store.SetRunConcurrencyGroup(context.Background(), run.ID, "build"); err != nil {
+				t.Fatal(err)
+			}
+			jobs := &adoptingJobs{found: test.adoptErr == nil, adoptErr: test.adoptErr, recoveryJobs: recoveryJobs{terminalErr: ErrJobNotTerminal}}
+			scheduler := fixture.scheduler(t, jobs)
+			if test.holdOther {
+				if _, err := scheduler.admission.adopt(model.Run{ID: "holder", QueueSequence: run.QueueSequence + 100, RepoID: run.RepoID, ConcurrencyGroup: "build"}, periapsis.M); err != nil {
+					t.Fatal(err)
+				}
+			}
+			err := scheduler.reconcileStrandedRunsWithGate(context.Background(), scheduler.requireMutation, func(run model.Run, size periapsis.Size) error {
+				_, err := scheduler.admission.adopt(run, size)
+				return err
+			})
+			if err == nil || errors.Is(err, ErrAdoptionRefused) != test.refused {
+				t.Fatalf("adoption failure = %v", err)
+			}
+			deletion := "kubectl -n oberth-argo delete workflow oberth-refused"
+			for _, message := range []string{err.Error(), logged.String()} {
+				if !strings.Contains(message, "run "+run.ID) || !strings.Contains(message, "Workflow oberth-argo/oberth-refused") || strings.Contains(message, deletion) != test.refused {
+					t.Fatalf("operator message does not name the Workflow to delete: %q", message)
+				}
+			}
+			if !strings.Contains(logged.String(), "ERROR: ") {
+				t.Fatalf("adoption failure not logged prominently: %q", logged.String())
+			}
+			current, lookupErr := fixture.store.Run(context.Background(), run.ID)
+			if lookupErr != nil || current.Status != model.RunRunning || current.SupersededBy != "" || len(jobs.deleted) != 0 {
+				t.Fatalf("refused adoption mutated work: %#v %v deleted=%v", current, lookupErr, jobs.deleted)
+			}
+		})
 	}
 }

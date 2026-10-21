@@ -49,6 +49,10 @@ const (
 	// maxStepLogBytes bounds one step's replayed log so a runaway step cannot
 	// exhaust the run log budget on its own.
 	maxStepLogBytes = 32 << 20
+	// workflowReadGrace bounds how long Wait keeps polling through failed
+	// Workflow reads (API server restart, connection reset) before it gives
+	// up on observing the run.
+	workflowReadGrace = 2 * time.Minute
 )
 
 // ErrNotTerminal reports that a Workflow has not reached a terminal phase.
@@ -68,6 +72,7 @@ type Controller struct {
 	vmi               dynamic.Interface
 	vmiCleanupFailure func(context.Context, string, error)
 	interval          time.Duration
+	readGrace         time.Duration
 }
 
 // WithVMIClient enables the run cleanup backstop for admitted VM resources.
@@ -100,7 +105,7 @@ func NewController(workflows WorkflowClient, client kubernetes.Interface, config
 	if err := config.Validate(); err != nil {
 		return nil, err
 	}
-	controller := &Controller{workflows: workflows, kube: client, config: config, interval: pollInterval}
+	controller := &Controller{workflows: workflows, kube: client, config: config, interval: pollInterval, readGrace: workflowReadGrace}
 	if client != nil {
 		controller.logs = func(ctx context.Context, namespace, pod, container string) (io.ReadCloser, error) {
 			return client.CoreV1().Pods(namespace).
@@ -425,14 +430,30 @@ func (controller *Controller) wait(ctx context.Context, name, runID string, dest
 	defer ticker.Stop()
 	var budgetBreachErr error
 	delivered := map[types.UID]bool{}
+	var readFailingSince time.Time
 	for {
 		workflow, err := controller.workflows.Get(ctx, name, metav1.GetOptions{})
 		if err != nil {
 			if apierrors.IsNotFound(err) {
 				return Completion{}, fmt.Errorf("argojob: Workflow %s disappeared before completing", name)
 			}
-			return Completion{}, fmt.Errorf("argojob: read Workflow %s: %w", name, err)
+			// One failed read must not end a run whose Workflow is still
+			// progressing: keep polling for a bounded grace and report only
+			// a persistent outage.
+			if readFailingSince.IsZero() {
+				readFailingSince = time.Now()
+			}
+			if ctx.Err() != nil || time.Since(readFailingSince) >= controller.readGrace {
+				return Completion{}, fmt.Errorf("argojob: read Workflow %s: %w", name, err)
+			}
+			select {
+			case <-ctx.Done():
+				return Completion{}, ctx.Err()
+			case <-ticker.C:
+			}
+			continue
 		}
+		readFailingSince = time.Time{}
 		if err := controller.verifyOwnership(workflow, runID); err != nil {
 			return Completion{}, err
 		}

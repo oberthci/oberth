@@ -179,3 +179,9 @@ replays only unrecorded steps, enforces the remaining aggregate budget, and
 refuses Workflow UID/spec replacement. Executor identity delivery resumes for
 Pods in the token waiter and skips Pods past it. Idempotent adoption cannot
 double-count admission, and restored groups block new grants until release.
+Transient Workflow read failures are retried within a bounded grace; a
+persistent observation failure deletes the Workflow and fails only that
+adopted run while the scheduler keeps dispatching. A terminal Workflow whose
+observation errored keeps its real result and collects artifacts. Refused
+adoptions log and return the run and `<namespace>/<name>` to delete; read
+failures name it without a deletion instruction.

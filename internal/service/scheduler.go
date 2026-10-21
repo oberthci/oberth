@@ -972,9 +972,11 @@ func (scheduler *Scheduler) observeRun(ctx context.Context, run model.Run, repos
 	if indexErr != nil && waitErr == nil {
 		waitErr = indexErr
 	}
+	failurePhase := "job"
 	if observation.adopted && waitErr != nil {
-		current, lookupErr := scheduler.store.Run(finalizeCtx, run.ID)
-		if lookupErr == nil && current.Preempted() {
+		// Cancel and supersede delete the Workflow under the adopted Wait;
+		// their durable obligation, not this observation error, settles it.
+		if current, lookupErr := scheduler.store.Run(finalizeCtx, run.ID); lookupErr == nil && current.Preempted() {
 			if err := scheduler.completePendingCancellationsWithGate(finalizeCtx, require); err != nil {
 				reservation.retain()
 				return err
@@ -982,12 +984,11 @@ func (scheduler *Scheduler) observeRun(ctx context.Context, run model.Run, repos
 			scheduler.signals.NotifyRun(run.ID)
 			return nil
 		}
-		if lookupErr != nil || !jobResult.Status.Terminal() {
-			reservation.retain()
-			return errors.Join(waitErr, lookupErr)
-		}
-		jobResult.Status, jobResult.Phase, jobResult.Error = model.RunFailed, "collect", waitErr.Error()
-		waitErr = nil
+		// Otherwise it settles exactly like a submitted run: a terminal
+		// Workflow keeps its real result, and one that can no longer be
+		// observed is deleted and fails only this run, never the scheduler.
+		failurePhase = "infrastructure"
+		waitErr = fmt.Errorf("observe adopted Workflow %s: %w", jobName, waitErr)
 	}
 	if waitErr != nil {
 		// A transient Wait error (network blip, log reader failure) must not
@@ -1017,7 +1018,7 @@ func (scheduler *Scheduler) observeRun(ctx context.Context, run model.Run, repos
 				return fmt.Errorf("delete Workflow %s before terminalizing failed run %s: %w",
 					jobName, run.ID, deleteErr)
 			}
-			jobResult = JobResult{Status: model.RunFailed, Phase: "job", Error: waitErr.Error()}
+			jobResult = JobResult{Status: model.RunFailed, Phase: failurePhase, Error: waitErr.Error()}
 		}
 	}
 	// The Workflow is now terminal or its deletion has been accepted, so its
@@ -1399,14 +1400,14 @@ func (scheduler *Scheduler) reconcileStrandedRunsWithGate(ctx context.Context, r
 			if eligible {
 				size, found, err := adopter.Adopt(ctx, run)
 				if err != nil {
-					return fmt.Errorf("adopt run %s: %w", run.ID, err)
+					return adoptionFailure(adopter, run, err)
 				}
 				if found {
 					if adopt == nil {
 						return errors.New("service: adoption requires a worker dispatcher")
 					}
 					if err := adopt(run, size); err != nil {
-						return err
+						return adoptionFailure(adopter, run, err)
 					}
 					continue
 				}

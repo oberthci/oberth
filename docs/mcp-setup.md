@@ -490,10 +490,15 @@ trusted preflight displays `running` with phase `preflight`. Terminal runs
 display `passed` (including published releases), `failed`, or
 `cancelled` with the superseding SHA, cancelling actor or restart action.
 Elapsed includes preflight; parking for VM capacity clears the admission time,
-which is set again when capacity is reacquired. Restart re-fires carry the durable
-reason `re-queued after restart`; this is distinct from supersession even when
-the successor has the same SHA. Interrupted results neither open nor resolve
-CI-red issues. Retry and rerun eligibility continues to use the durable status
+which is set again when capacity is reacquired. After a server restart, a
+running branch run whose Argo Workflow still exists is adopted first: it keeps
+its run ID and continues to its real result (#1172). Re-queueing remains the
+fallback when that Workflow is missing; such restart re-fires carry the durable
+reason `re-queued after restart`, which is distinct from supersession even when
+the successor has the same SHA. The first upgrade to a release with adoption
+still re-queues running branch runs, because the old process does so on its own
+SIGTERM; adoption applies from the next restart. Interrupted results neither
+open nor resolve CI-red issues. Retry and rerun eligibility continues to use the durable status
 and cause. The `status`/`wait` tool's `status: "delivered"` remains the legacy
 alias of `passed` for all passed runs; its `display_status` is `passed`.
 

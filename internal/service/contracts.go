@@ -393,13 +393,21 @@ type JobController interface {
 	TerminalResult(context.Context, string) (JobResult, error)
 }
 
+// ErrAdoptionRefused marks an existing Workflow that startup must not adopt
+// (binding mismatch, invalid size declaration, conflicting group). Startup
+// stops until the operator deletes that Workflow; recovery then re-queues it.
+var ErrAdoptionRefused = errors.New("service: Workflow refused for adoption")
+
 // JobAdopter restores observation of an existing Workflow without submitting it.
-// found=false means the Workflow is absent; ownership and API failures are errors.
+// found=false means the Workflow is absent; ownership and API failures are errors,
+// and a Workflow that exists but must not be adopted wraps ErrAdoptionRefused.
 // WaitResumed uses the durable progress journal and the retained byte count.
 // On error it returns a nonzero result only if the exact Workflow was terminal.
+// JobNamespace names where the engine's Workflows live, for operator messages.
 type JobAdopter interface {
 	Adopt(context.Context, model.Run) (periapsis.Size, bool, error)
 	WaitResumed(context.Context, string, io.Writer, []runprogress.Event, int64) (JobResult, error)
+	JobNamespace() string
 }
 
 type ReleaseJobController interface {
