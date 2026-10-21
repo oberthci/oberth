@@ -246,7 +246,7 @@ func newGroupFixture(t *testing.T, maxConcurrent int) *groupFixture {
 	t.Helper()
 	ctx := context.Background()
 	root := t.TempDir()
-	database, err := store.Open(ctx, filepath.Join(root, "oberth.sqlite"), store.Options{})
+	database, err := openTestStore(t, ctx, filepath.Join(root, "oberth.sqlite"), store.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}

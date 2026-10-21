@@ -13,11 +13,26 @@ import (
 	"time"
 
 	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/testdb"
 )
+
+var storeTemplate testdb.Template
 
 func testStore(t *testing.T, now *time.Time) *Store {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "oberth.db")
+	storeTemplate.Copy(t, path, func(path string) error {
+		s, err := Open(context.Background(), path, Options{})
+		if err != nil {
+			return err
+		}
+		return s.Close()
+	})
+	return openTestStore(t, path, now)
+}
+
+func openTestStore(t *testing.T, path string, now *time.Time) *Store {
+	t.Helper()
 	s, err := Open(context.Background(), path, Options{Now: func() time.Time { return *now }})
 	if err != nil {
 		t.Fatal(err)
@@ -28,6 +43,37 @@ func testStore(t *testing.T, now *time.Time) *Store {
 		}
 	})
 	return s
+}
+
+func TestStoreFixtureCopiesAreIsolated(t *testing.T) {
+	for index := range 4 {
+		t.Run(fmt.Sprint(index), func(t *testing.T) {
+			t.Parallel()
+			now := time.Date(2026, 8, 4, 12, index, 0, 0, time.UTC)
+			s := testStore(t, &now)
+			repo := createRepo(t, s)
+			if !repo.CreatedAt.Equal(now) {
+				t.Fatalf("repository created at = %v, want %v", repo.CreatedAt, now)
+			}
+			var count int
+			if err := s.db.QueryRow(`SELECT count(*) FROM repositories`).Scan(&count); err != nil {
+				t.Fatal(err)
+			}
+			if count != 1 {
+				t.Fatalf("repository count = %d, want 1", count)
+			}
+			now = now.Add(time.Hour)
+			action, err := s.AppendAuditAction(context.Background(), model.AuditActionSpec{
+				Actor: "test", Action: "fixture", ResourceType: "test", ResourceID: "copy",
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if action.ID != 1 || !action.CreatedAt.Equal(now) {
+				t.Fatalf("fixture audit action = %#v, want ID 1 at %v", action, now)
+			}
+		})
+	}
 }
 
 func readAuthoritativeDatabaseFiles(t *testing.T, path string) map[string][]byte {
@@ -72,7 +118,7 @@ func testRunSpec(repoID int64, ref, sha string) model.RunSpec {
 
 func TestOpenAppliesMigrationsAndSQLitePragmas(t *testing.T) {
 	now := time.Date(2026, 8, 4, 12, 0, 0, 0, time.UTC)
-	s := testStore(t, &now)
+	s := openTestStore(t, filepath.Join(t.TempDir(), "oberth.db"), &now)
 
 	var version int
 	if err := s.db.QueryRowContext(context.Background(), `SELECT max(version) FROM schema_migrations`).Scan(&version); err != nil {

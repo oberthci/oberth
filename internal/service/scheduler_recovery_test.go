@@ -71,7 +71,7 @@ type recoveryFixture struct {
 func newRecoveryFixture(t *testing.T) *recoveryFixture {
 	t.Helper()
 	root := t.TempDir()
-	database, err := store.Open(context.Background(), filepath.Join(root, "oberth.sqlite"), store.Options{})
+	database, err := openTestStore(t, context.Background(), filepath.Join(root, "oberth.sqlite"), store.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -323,7 +323,7 @@ func TestStartupReconciliationFinishesRunWhoseJobCompleted(t *testing.T) {
 
 	// Phase 1: create a run with a job name, simulating a scheduler that
 	// crashed before observing the Job's completion.
-	database, err := store.Open(ctx, dbPath, store.Options{})
+	database, err := openTestStore(t, ctx, dbPath, store.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -422,7 +422,7 @@ func TestStartupReconciliationRequeuesRunWithVanishedJob(t *testing.T) {
 	dbPath := filepath.Join(root, "oberth.sqlite")
 
 	// Phase 1: create a run with a job name.
-	database, err := store.Open(ctx, dbPath, store.Options{})
+	database, err := openTestStore(t, ctx, dbPath, store.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -545,7 +545,7 @@ func TestStartupReconciliationTerminalizesIneligibleStrandedRun(t *testing.T) {
 	root := t.TempDir()
 	dbPath := filepath.Join(root, "oberth.sqlite")
 
-	database, err := store.Open(ctx, dbPath, store.Options{})
+	database, err := openTestStore(t, ctx, dbPath, store.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}

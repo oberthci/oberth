@@ -36,7 +36,7 @@ func testAccessReconciler(t *testing.T, cm *corev1.ConfigMap) (*AccessReconciler
 func testAccessStore(t *testing.T, now *time.Time) *store.Store {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "oberth.db")
-	database, err := store.Open(context.Background(), path, store.Options{
+	database, err := openTestStore(t, context.Background(), path, store.Options{
 		Now: func() time.Time { return *now },
 	})
 	if err != nil {
