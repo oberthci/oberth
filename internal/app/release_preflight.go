@@ -11,6 +11,15 @@ import (
 )
 
 func (jobs *ArgoJobs) PreflightRelease(ctx context.Context, request service.JobRequest, source []byte) (service.ReleasePreflightResult, error) {
+	return jobs.preflightRelease(ctx, request, source, true)
+}
+
+// PlanRelease inspects public release capabilities without recording declarations.
+func (jobs *ArgoJobs) PlanRelease(ctx context.Context, request service.JobRequest, source []byte) (service.ReleasePreflightResult, error) {
+	return jobs.preflightRelease(ctx, request, source, false)
+}
+
+func (jobs *ArgoJobs) preflightRelease(ctx context.Context, request service.JobRequest, source []byte, record bool) (service.ReleasePreflightResult, error) {
 	jobs.mu.Lock()
 	health, identities, recorder := jobs.reconcilerHealthy, jobs.identities, jobs.declarations
 	jobs.mu.Unlock()
@@ -47,7 +56,7 @@ func (jobs *ArgoJobs) PreflightRelease(ctx context.Context, request service.JobR
 	if err != nil {
 		return service.ReleasePreflightResult{}, err
 	}
-	if recorder != nil {
+	if record && recorder != nil {
 		declarations := make([]store.GrantDeclaration, 0, len(result.Declarations))
 		for _, d := range result.Declarations {
 			declarations = append(declarations, store.GrantDeclaration{Step: d.Step, Path: d.Path})

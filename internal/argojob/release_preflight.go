@@ -25,11 +25,14 @@ type ReleasePreflight struct {
 // PreflightRelease checks public capabilities without building a credentialed
 // Workflow, seeding source, requesting tokens, or contacting the secret store.
 func PreflightRelease(config Config, request Request) (ReleasePreflight, error) {
+	config.applyDefaults()
 	result := ReleasePreflight{}
 	if request.Identities != nil {
 		config.PerRepoIdentities = request.Identities.Release
 		config.PerRepoCIIdentities = request.Identities.CI
-		config.PerStepIdentities = request.Identities.Step
+		if request.Identities.Step != nil {
+			config.PerStepIdentities = request.Identities.Step
+		}
 	}
 	request.Trigger = periapsis.TriggerRelease
 	wf, err := argoworkflow.Decode(request.Source)
@@ -73,8 +76,10 @@ func PreflightRelease(config Config, request Request) (ReleasePreflight, error) 
 		if !top[t] || step == "" || strings.HasPrefix(step, "frag-") {
 			step = "*"
 		}
-		for _, path := range extractExecPaths(t) {
-			declare(step, path)
+		if templateUsesOberthSecretstore(t) {
+			for _, path := range extractExecPaths(t) {
+				declare(step, path)
+			}
 		}
 		if templateUsesEnvconsul(t) {
 			// The legacy chain uses the workflow identity, whose policy only carries
@@ -102,7 +107,8 @@ func PreflightRelease(config Config, request Request) (ReleasePreflight, error) 
 	add(authorizeWithApprovalTable(paths, request))
 	add(admitSecretstoreExecPaths(wf, paths, request.StepGrants))
 	// Workflow/default annotations are invalid even when no Pod leaf opted in.
-	if _, err := authorizeReleaseWIF(wf, config, request); err != nil {
+	wifLeaves, err := authorizeReleaseWIF(wf, config, request)
+	if err != nil {
 		add(err)
 	}
 	// Discard authored identities just as admission does. Only the server's
@@ -112,7 +118,11 @@ func PreflightRelease(config Config, request Request) (ReleasePreflight, error) 
 		add(err)
 		return result, nil
 	}
-	identity, _ := config.identityForWithRepo(periapsis.TriggerRelease, true, request.UpstreamName, request.UpstreamOrg, request.Repo)
+	identity, err := config.identityForWithRepo(periapsis.TriggerRelease, len(paths) > 0 || len(wifLeaves) > 0, request.UpstreamName, request.UpstreamOrg, request.Repo)
+	if err != nil {
+		add(err)
+		return result, nil
+	}
 	walkTemplates(wf, func(t *wfv1.Template) {
 		if t.Container == nil && t.Script == nil && t.ContainerSet == nil {
 			return
@@ -137,7 +147,9 @@ func (controller *Controller) PreflightReleaseAccounts(ctx context.Context, requ
 	if request.Identities != nil {
 		config.PerRepoIdentities = request.Identities.Release
 		config.PerRepoCIIdentities = request.Identities.CI
-		config.PerStepIdentities = request.Identities.Step
+		if request.Identities.Step != nil {
+			config.PerStepIdentities = request.Identities.Step
+		}
 	}
 	wf, err := argoworkflow.Decode(request.Source)
 	if err != nil {

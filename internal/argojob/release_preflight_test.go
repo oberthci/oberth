@@ -155,3 +155,55 @@ func TestReleasePreflightAccountsIgnoresAuthoredIdentity(t *testing.T) {
 		}
 	}
 }
+
+func TestReleasePreflightUncredentialedPathMatchesBuild(t *testing.T) {
+	r := wifTestRequest(t, func(wf *wfv1.Workflow) {
+		delete(wf.Spec.Templates[0].Metadata.Annotations, argoworkflow.ReleaseWIFRoleAnnotation)
+		wf.Spec.Templates[0].Container.Command = []string{"helm", "package", "--path=/src/chart"}
+	})
+	config := wifTestConfig()
+	wf, err := Build(config, r)
+	if err != nil {
+		t.Fatalf("admission: %v", err)
+	}
+	result, err := PreflightRelease(config, r)
+	if err != nil || len(result.Problems) != 0 || len(result.Declarations) != 0 {
+		t.Fatalf("preflight: %+v %v", result, err)
+	}
+	if wf.Spec.ServiceAccountName != config.PipelineServiceAccount || len(result.Checks) != 1 || !strings.Contains(result.Checks[0], fmt.Sprintf("service_account=%q release_wif_role=\"\"", wf.Spec.ServiceAccountName)) {
+		t.Fatalf("Build/preflight mismatch: SA=%s checks=%v", wf.Spec.ServiceAccountName, result.Checks)
+	}
+}
+
+func TestReleasePreflightSnapshotPreservesConfiguredSteps(t *testing.T) {
+	r := preflightRequest(t)
+	config := wifTestConfig()
+	config.ReleaseWIF.Repositories["github/skipops/oberth"].Templates["publish-other"] = "image-writer"
+	r.ApprovedSecrets["oberth/data/release/signing"] = true
+	r.StepGrants["oberth/data/release/signing"] = map[string]bool{"main": true, "*": true}
+	config.PerStepIdentities = map[string]PerRepoIdentityConfig{
+		"github/skipops/oberth/main": {ServiceAccountName: "step-main"},
+	}
+	r.Identities = &IdentitySnapshot{Release: config.PerRepoIdentities, CI: config.PerRepoCIIdentities}
+	result, err := PreflightRelease(config, r)
+	if err != nil || len(result.Problems) != 0 || !strings.Contains(strings.Join(result.Checks, "\n"), `service_account="step-main"`) {
+		t.Fatalf("preflight: %+v %v", result, err)
+	}
+	kube := fake.NewClientset(
+		&corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{Name: "oberth-per-repo", Namespace: config.Namespace}},
+		&corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{Name: "step-main", Namespace: config.Namespace}},
+	)
+	controller := &Controller{config: config, kube: kube}
+	if err := controller.PreflightReleaseAccounts(context.Background(), r); err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, action := range kube.Actions() {
+		if get, ok := action.(k8stesting.GetAction); ok && get.GetName() == "step-main" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("configured step account was not checked")
+	}
+}
