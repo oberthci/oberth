@@ -66,7 +66,7 @@ func TestInfrastructureRunRetriesWithoutProjectingCIRedIssue(t *testing.T) {
 	database := testStore(t, &now)
 	repository := projectionRepository(t, database)
 	ctx := context.Background()
-	branch := "fix/executor-scratch"
+	branch := repository.DefaultBranch
 	run := projectionRun(t, database, repository.ID, branch, projectionSourceSHA)
 	result := model.RunResult{Status: model.RunFailed, Phase: "infrastructure", Error: `Evicted: Usage of EmptyDir volume "var-run-argo" exceeds the limit "128Mi".`}
 	if _, err := database.FinishRun(ctx, run.ID, result); err != nil {
@@ -108,6 +108,7 @@ func TestInfrastructurePromotionRunDoesNotProjectCIRedIssue(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	seedLegacyPromotionIssueWork(t, database, promotion)
 	if _, err := database.PlanPromotion(ctx, promotion.ID, retryStoreBase, retryStoreMerged); err != nil {
 		t.Fatal(err)
 	}
