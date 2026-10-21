@@ -138,7 +138,9 @@ func TestMigration25GivesExistingKubeVirtGrantsTheDefaultBudget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := raw.ExecContext(ctx, `DROP TABLE kubevirt_grants;
+	if _, err := raw.ExecContext(ctx, `DROP INDEX runs_admission_idx;
+ALTER TABLE runs DROP COLUMN admission_sequence;
+DROP TABLE kubevirt_grants;
 CREATE TABLE kubevirt_grants (
     repo_id INTEGER PRIMARY KEY REFERENCES repositories(id) ON DELETE CASCADE,
     granted_by TEXT NOT NULL,
