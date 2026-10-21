@@ -584,10 +584,7 @@ func (jobs *ArgoJobs) recordDeclarations(ctx context.Context, request service.Jo
 	if len(declarations) == 0 {
 		return
 	}
-	qualifiedRepo := request.Repository.Name
-	if request.UpstreamName != "" && request.UpstreamOrg != "" {
-		qualifiedRepo = request.UpstreamName + "/" + request.UpstreamOrg + "/" + qualifiedRepo
-	}
+	qualifiedRepo := declarationRepo(request)
 	sha := request.Run.TestedSHA
 	if sha == "" {
 		sha = request.Run.SHA

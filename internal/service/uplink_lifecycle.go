@@ -25,6 +25,7 @@ type uplinkView struct {
 	CreatedAt   time.Time  `json:"created_at"`
 	LastSeen    *time.Time `json:"last_seen"`
 	RevokedAt   *time.Time `json:"revoked_at"`
+	Pending     bool       `json:"pending"`
 }
 
 func (service *API) uplinkLifecycleTool(ctx context.Context, actor api.Actor, name string, raw json.RawMessage) (any, error) {
@@ -54,7 +55,7 @@ func (service *API) uplinkLifecycleTool(ctx context.Context, actor api.Actor, na
 				at := status.LastUsedAt
 				seen = &at
 			}
-			views = append(views, uplinkView{Identity: status.Identity, Fingerprint: status.Fingerprint, Admin: status.Admin, Scope: scope, CreatedAt: status.CreatedAt, LastSeen: seen, RevokedAt: status.RevokedAt})
+			views = append(views, uplinkView{Identity: status.Identity, Fingerprint: status.Fingerprint, Admin: status.Admin, Scope: scope, CreatedAt: status.CreatedAt, LastSeen: seen, RevokedAt: status.RevokedAt, Pending: status.Pending})
 		}
 		return map[string]any{"uplinks": views}, nil
 	}

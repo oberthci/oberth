@@ -19,6 +19,7 @@ type UplinkStatus struct {
 	model.Uplink
 	LastUsedAt time.Time
 	RevokedAt  *time.Time
+	Pending    bool
 }
 
 // RegisterUpstream atomically creates operator configuration and its audit
@@ -446,7 +447,8 @@ func matchUplinksByIdentity(ctx context.Context, tx *sql.Tx, identity, fingerpri
 func (s *Store) ListUplinkStatuses(ctx context.Context) ([]UplinkStatus, error) {
 	rows, err := s.db.QueryContext(ctx, `
 SELECT u.id, u.fingerprint, u.identity, u.token_credential_id, u.auth_actor, u.admin, u.created_at, u.updated_at,
-       COALESCE(t.last_used_at, 0), t.revoked_at
+       COALESCE(t.last_used_at, 0), t.revoked_at,
+       EXISTS (SELECT 1 FROM pending_token_credentials p WHERE p.token_credential_id = t.id)
 FROM uplinks u LEFT JOIN token_credentials t ON t.id = u.token_credential_id
 ORDER BY u.identity, u.fingerprint`)
 	if err != nil {
@@ -460,10 +462,13 @@ ORDER BY u.identity, u.fingerprint`)
 		var revoked sql.NullInt64
 		var admin int
 		if err := rows.Scan(&value.ID, &value.Fingerprint, &value.Identity, &value.TokenCredentialID,
-			&value.AuthActor, &admin, &created, &updated, &lastUsed, &revoked); err != nil {
+			&value.AuthActor, &admin, &created, &updated, &lastUsed, &revoked, &value.Pending); err != nil {
 			return nil, fmt.Errorf("scan uplink: %w", err)
 		}
-		value.RevokedAt = nullableTime(revoked)
+		// Pending credentials are deliberately stored as revoked until activation.
+		if !value.Pending {
+			value.RevokedAt = nullableTime(revoked)
+		}
 		value.Admin = admin != 0
 		value.CreatedAt, value.UpdatedAt = fromUnixNano(created), fromUnixNano(updated)
 		if lastUsed > 0 {

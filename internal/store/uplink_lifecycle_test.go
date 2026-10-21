@@ -215,3 +215,37 @@ func TestRemoteUplinkCanRevokeInactiveAdmin(t *testing.T) {
 		t.Fatalf("revoked pending administrator activated: %v", err)
 	}
 }
+
+func TestUplinkStatusesDistinguishPendingActiveAndRevoked(t *testing.T) {
+	ctx := context.Background()
+	now := time.Now()
+	s := testStore(t, &now)
+	digest := sha256.Sum256([]byte("pending-status-fixture"))
+	credential, err := s.CreateTokenCredential(ctx, model.TokenCredentialSpec{Name: "worker", Digest: digest[:]})
+	if err != nil {
+		t.Fatal(err)
+	}
+	uplink, err := s.RegisterUplink(ctx, "operator", model.UplinkSpec{Identity: "worker", Fingerprint: "SHA256:pending-status", TokenCredentialID: credential.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	check := func(pending, revoked bool) {
+		t.Helper()
+		statuses, err := s.ListUplinkStatuses(ctx)
+		if err != nil || len(statuses) != 1 || statuses[0].Pending != pending || (statuses[0].RevokedAt != nil) != revoked {
+			t.Fatalf("pending=%v revoked=%v: statuses=%+v err=%v", pending, revoked, statuses, err)
+		}
+	}
+	check(true, false)
+	if _, err := s.AuthenticatedUplinkByDigest(ctx, digest[:]); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("pending token authenticated: %v", err)
+	}
+	if _, err := s.ActivateTokenCredential(ctx, credential.ID); err != nil {
+		t.Fatal(err)
+	}
+	check(false, false)
+	if _, err := s.RevokeUplink(ctx, "operator", uplink.Identity, uplink.Fingerprint, ""); err != nil {
+		t.Fatal(err)
+	}
+	check(false, true)
+}

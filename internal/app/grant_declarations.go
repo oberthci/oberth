@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"os"
 
 	"github.com/oberthci/oberth/internal/model"
@@ -32,9 +33,22 @@ func (jobs *ArgoJobs) recordCurrentDeclarations(ctx context.Context, request ser
 	if !ok {
 		return
 	}
+	repo := declarationRepo(request)
+	sha := request.Run.TestedSHA
+	if sha == "" {
+		sha = request.Run.SHA
+	}
+	stage := ""
+	defer func() {
+		if stage != "" {
+			// Do not log source-bearing parse errors or document contents.
+			slog.DebugContext(ctx, "grant declaration snapshot dropped", "repo", repo, "sha", sha, "stage", stage)
+		}
+	}()
 	snapshot := &declarationSnapshot{}
 	collector := &ArgoJobs{declarations: snapshot}
 	for _, trigger := range []periapsis.Trigger{periapsis.TriggerCI, periapsis.TriggerRelease} {
+		stage = "read"
 		source, err := readArgoSource(request.SourceDir, trigger)
 		if errors.Is(err, os.ErrNotExist) {
 			continue
@@ -42,6 +56,7 @@ func (jobs *ArgoJobs) recordCurrentDeclarations(ctx context.Context, request ser
 		if err != nil {
 			return
 		}
+		stage = "decode"
 		wf, err := argoworkflow.Decode(source)
 		if err != nil {
 			return
@@ -50,29 +65,41 @@ func (jobs *ArgoJobs) recordCurrentDeclarations(ctx context.Context, request ser
 		if trigger == periapsis.TriggerRelease {
 			refKind, runTrigger = model.RefTag, "release"
 		}
+		stage = "fragments"
 		fragments, err := loadFragments(ctx, jobs.fragments, source, trigger, refKind, runTrigger)
 		if err != nil {
 			return
 		}
+		stage = "resolve"
 		if _, err := argoworkflow.Resolve(wf, fragments); err != nil {
 			return
 		}
+		stage = "paths"
 		if _, err := argoworkflow.DeclaredSecretPaths(wf); err != nil {
 			return
 		}
+		stage = "marshal"
 		resolved, err := json.Marshal(wf)
 		if err != nil {
 			return
 		}
 		collector.recordDeclarations(ctx, request, resolved, trigger)
 	}
-	repo := request.Repository.Name
-	if request.UpstreamName != "" && request.UpstreamOrg != "" {
-		repo = request.UpstreamName + "/" + request.UpstreamOrg + "/" + repo
+	stage = "replace"
+	if err := recorder.ReplaceGrantDeclarations(ctx, repo, sha, snapshot.declarations); err != nil {
+		return
 	}
-	sha := request.Run.TestedSHA
-	if sha == "" {
-		sha = request.Run.SHA
+	stage = ""
+}
+
+// Match Upstream.QualifiedRepo even when the upstream has no organization.
+func declarationRepo(request service.JobRequest) string {
+	if request.UpstreamName == "" {
+		return request.Repository.Name
 	}
-	_ = recorder.ReplaceGrantDeclarations(ctx, repo, sha, snapshot.declarations)
+	org := request.UpstreamOrg
+	if org == "" {
+		org = request.UpstreamName
+	}
+	return request.UpstreamName + "/" + org + "/" + request.Repository.Name
 }

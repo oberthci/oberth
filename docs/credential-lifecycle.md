@@ -2,6 +2,7 @@
 
 An unscoped administrator can use `uplink_list {}` to inspect identity,
 fingerprint, scope, admin status, creation time, last seen and revocation time.
+Credentials awaiting activation have `pending: true` and no revocation time.
 All five new lifecycle tools require an unscoped admin; ordinary and scoped
 uplinks are refused. Tokens and private keys are never included.
 
@@ -22,6 +23,10 @@ scope. The server validates that condition and revokes the old credential in
 one audited transaction. A failed check leaves the old credential usable.
 MCP never issues or accepts a plaintext bearer or private key.
 
+Revocation retains the registration and reserves its fingerprint. In-pod
+`oberth uplink remove` deletes that registration and frees the fingerprint
+for reuse. Remove revoked registrations before using the in-pod rotate loop.
+
 `access_list {"pending":true}` tracks both pipeline files at the latest admitted
 commit. Removed paths disappear on the next successful admission snapshot;
 invalid or unreadable files preserve existing observations. For remaining old
@@ -33,7 +38,12 @@ orphaned observations.
 Admission clears old bare-name observations only when the catalog name is
 unambiguous.
 
-`kubevirt_grant_list {}` returns active grants across all repositories. `repo_list` and `/api/repos` also include optional `KubeVirtGrant`
-metadata, including a revoked grant when present. Scoped admins cannot see or
-change other upstreams. No new cluster permissions or schema migrations are
+`kubevirt_grant_list {}` returns active grants across all repositories.
+`repo_list` and `/api/repos` also include optional `KubeVirtGrant` metadata
+for active grants only. A per-repository grant lookup failure omits
+that optional metadata without failing the repository listing. Scoped admins
+cannot see or change other upstreams. No new cluster permissions or schema migrations are
 needed.
+
+These tools use existing database and audit authority only. They require no
+new chart values or Kubernetes RBAC.
