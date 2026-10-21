@@ -347,9 +347,20 @@ func TestShutdownCancelsAQueuedPromotionWait(t *testing.T) {
 // would queue are both refused cleanly, and racing starts against Shutdown
 // never panic the WaitGroup.
 func TestNoBackgroundWorkStartsAfterShutdown(t *testing.T) {
-	git := &scriptedPromotionGit{}
+	// A real failed promotion: its fast-forward delivery hits an SSH reset,
+	// so a late automatic retry would have something to admit.
+	git := &scriptedPromotionGit{
+		plans:  []gitcache.MergeCandidate{{BaseSHA: retryBaseSHA, MergedSHA: retrySourceSHA, FastForward: true}},
+		pushes: []scriptedPush{{err: errors.New("ssh reset")}},
+	}
 	fixture, _, control := newPromotionRetryHarness(t, git)
 	ctx := context.Background()
+	admin := api.Actor{Identity: "admin@host", Fingerprint: "SHA256:admin", Admin: true}
+	id := promoteForRetry(t, control, admin)
+	failed, err := fixture.store.Promotion(ctx, id)
+	if err != nil || failed.Status != model.PromotionFailed {
+		t.Fatalf("setup promotion = %#v, %v; want failed", failed, err)
+	}
 	var racers sync.WaitGroup
 	for range 32 {
 		racers.Add(1)
@@ -371,7 +382,7 @@ func TestNoBackgroundWorkStartsAfterShutdown(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	control.RetryMovedPromotion(ctx, model.Promotion{ID: "late", RepoID: fixture.repo.ID, SourceSHA: retrySourceSHA, TargetRef: "main"})
+	control.RetryMovedPromotion(ctx, failed)
 	after, err := fixture.store.ListPromotions(ctx, model.PromotionListFilter{RepoID: fixture.repo.ID, Limit: 50})
 	if err != nil {
 		t.Fatal(err)
