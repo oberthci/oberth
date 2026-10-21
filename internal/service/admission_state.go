@@ -24,7 +24,7 @@ func (gate *weightedAdmission) reservationStateLocked(reservation *admissionRese
 		return "retained"
 	case reservation.granted:
 		return "granted"
-	case reservation.vmParked:
+	case reservation.vmParked || gate.kubeVirtBlockedLocked(reservation):
 		return "vm"
 	case !reservation.prepared:
 		return "preparing"

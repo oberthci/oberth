@@ -329,6 +329,7 @@ func (scheduler *Scheduler) completeCancellationsWithGate(ctx context.Context, c
 		if err := scheduler.store.CompleteRunCancellation(ctx, cancellation.RunID, cancellation.JobName); err != nil {
 			return fmt.Errorf("complete cancellation for run %s: %w", cancellation.RunID, err)
 		}
+		scheduler.admission.releaseDeletedRun(cancellation.RunID)
 		cleanupCtx, cancelCleanup := boundedWorkspaceCleanupContext(ctx)
 		cleanupErr := scheduler.workspaces.cleanupRun(cleanupCtx, cancellation.RunID)
 		cancelCleanup()
@@ -685,10 +686,15 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 		jobRequest.ConcurrencyGroup = group
 	}
 
+	kubeVirt, err := scheduler.pipelineKubeVirt(ctx, jobRequest)
+	if err != nil {
+		_ = logFile.Close()
+		return scheduler.finishInfrastructureFailure(ctx, run, repository, fmt.Errorf("read pipeline KubeVirt demand: %w", err))
+	}
 	headSince, estimate := scheduler.admissionHistory(ctx, run)
 	releaseAdmission, err := reservation.acquireRequest(ctx, admissionRequest{
 		RunID: run.ID, RepoID: run.RepoID, Repo: repository.Name, Ref: run.Ref, Size: size, Group: group,
-		RefKind: run.RefKind, SHA: run.SHA, HeadSince: headSince, Estimate: estimate,
+		RefKind: run.RefKind, SHA: run.SHA, HeadSince: headSince, Estimate: estimate, KubeVirt: &kubeVirt,
 	})
 	if errors.Is(err, errAdmissionAbandoned) {
 		// Superseded or cancelled while waiting: the reservation is already
@@ -830,6 +836,7 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 		_ = logFile.Close()
 		return scheduler.finishInfrastructureFailure(ctx, run, repository, fmt.Errorf("create Job: %w", err))
 	}
+	reservation.markSubmitted()
 	current, err = scheduler.store.MarkRunSubmitted(ctx, run.ID)
 	if err != nil {
 		if _, ok := scheduler.jobs.(JobAdopter); ok && branchRunAdoptable(run) && ctx.Err() != nil {

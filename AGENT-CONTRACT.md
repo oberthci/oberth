@@ -376,9 +376,9 @@ continuity checks; it must never be used to reset or bypass those checks.
   mutual-exclusion group scoped to the declaring repository: at most one run
   of a (repository, group) holds admission at a time, across branch,
   promotion and tag triggers, and members are admitted in claim (FIFO) order.
-  A workflow with VMI resource templates that declares no group is a
-  member of `kubevirt`, and declaring any other group with VMI templates is
-  refused at admission (#1017). The group never changes a run's weight or identity, XL keeps its
+  VMI resource templates do not imply a concurrency group. Any valid declared
+  group is allowed, and an ungrouped VMI run shows no group badge (#1173).
+  The group never changes a run's weight or identity, XL keeps its
   exclusivity, and the same-branch supersede rule is unchanged. A member
   waiting on its group holds no weight and no dispatch slot, so other
   repositories' runs are admitted beside the group; admitted runs never
@@ -1782,16 +1782,20 @@ continuity checks; it must never be used to reset or bypass those checks.
   without error (an optional exit-handler delete is not-found tolerant through
   Argo's own `--ignore-not-found`; resource `flags` stay refused). The grant is stored by repository ID and audited;
   `kubevirt_grant` / `kubevirt_revoke` (MCP) or `oberth kubevirt grant|revoke`
-  (in-pod CLI) control it. Each grant carries a per-run VMI budget (VMI
+  (in-pod CLI) control it. Each grant carries a repository VMI budget (VMI
   creates, summed cores, summed memory; default 2 / 6 / 12Gi, bounds 16 / 64 /
   256Gi, schema v25), set with `--max-vms/--max-cores/--max-memory` or the MCP
   `max_vms/max_cores/max_memory` fields and audited with the previous budget.
   Admission enforces, per run, the field-wise minimum of the grant and the server's
   cluster ceiling (`argo.kubevirtCeiling`, default 8 / 24 / 48Gi), at most
   three VMI templates per budgeted VM, and a VMI CPU request no larger than its
-  cores. VMI-bearing runs of one repository are serialized in the
-  `kubevirt` concurrency group, so the budget is also the repository's
-  concurrent VMI footprint; different repositories' grants still add up. `spec.domain.firmware.kernelBoot` is admitted only with a container
+  cores. The scheduler also accounts declared VMI demand across all admitted
+  runs of the repository. Runs whose combined demand fits are concurrent;
+  excess runs remain queued with reason `KubeVirt capacity`, holding no weight
+  or declared group and retaining FIFO order. Completion and accepted
+  cancel/supersede deletion release capacity. A run exceeding the grant by
+  itself still fails admission. Different repositories' grants still add up.
+  `spec.domain.firmware.kernelBoot` is admitted only with a container
   image that is digest-pinned under the containerDisk prefixes, an absolute
   clean `kernelPath` (and optional `initrdPath`), and `kernelArgs` of at most
   512 bytes in `[A-Za-z0-9._,:=/+-]`; every other firmware field and

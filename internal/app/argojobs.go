@@ -221,7 +221,6 @@ func (jobs *ArgoJobs) PipelineSize(_ context.Context, request service.JobRequest
 // PipelineConcurrencyGroup reads the run's declared concurrency group (#658)
 // from the same checked-out document PipelineSize reads, without evaluating
 // anything. The group is scoped to the run's repository by the scheduler.
-// A workflow with VMI templates and no declared group runs in "kubevirt".
 func (jobs *ArgoJobs) PipelineConcurrencyGroup(_ context.Context, request service.JobRequest) (string, error) {
 	trigger, err := runTrigger(request.Run)
 	if err != nil {
@@ -235,8 +234,6 @@ func (jobs *ArgoJobs) PipelineConcurrencyGroup(_ context.Context, request servic
 	if err != nil {
 		return "", fmt.Errorf("app: read repository concurrency contract: %w", err)
 	}
-	// VMI-bearing runs default to the kubevirt group so a repository's
-	// concurrent runs cannot each take a full KubeVirt grant budget (#1017).
 	group, err := argoworkflow.RunConcurrencyGroup(workflow)
 	if err != nil {
 		return "", fmt.Errorf("app: read repository concurrency contract: %w", err)

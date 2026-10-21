@@ -82,6 +82,7 @@ type admissionReservation struct {
 	estimate time.Duration
 	// backfilled marks a grant made beside a waiting head.
 	backfilled bool
+	kubeVirt   KubeVirtResources
 	size       periapsis.Size
 	weight     int
 	// group is the repository-scoped key of the run's concurrency group and
@@ -90,6 +91,7 @@ type admissionReservation struct {
 	groupName string
 	prepared  bool
 	granted   bool
+	submitted bool
 	delayed   bool
 	released  bool
 	canceled  bool
@@ -115,12 +117,13 @@ var errAdmissionAbandoned = errors.New("service: admission abandoned: run is no 
 // admissionRequest is what a claimed run knows once its immutable checkout has
 // been read: its declared size and, optionally, its repository-scoped group.
 type admissionRequest struct {
-	RunID  string
-	RepoID int64
-	Repo   string
-	Ref    string
-	Size   periapsis.Size
-	Group  string
+	RunID    string
+	RepoID   int64
+	Repo     string
+	Ref      string
+	Size     periapsis.Size
+	Group    string
+	KubeVirt *KubeVirtResources
 	// RefKind and SHA key the durable head-wait origin; HeadSince is that
 	// origin when one was recorded before a restart; Estimate is the run's
 	// predicted duration from history (#1085).
@@ -240,6 +243,12 @@ func (reservation *admissionReservation) acquireRequest(ctx context.Context, req
 		reservation.cancel()
 		return nil, fmt.Errorf("service: invalid concurrency group %q", request.Group)
 	}
+	if request.KubeVirt != nil {
+		if err := request.KubeVirt.Validate(); err != nil {
+			reservation.cancel()
+			return nil, err
+		}
+	}
 	size := request.Size.Effective()
 	gate := reservation.gate
 	gate.mu.Lock()
@@ -252,6 +261,9 @@ func (reservation *admissionReservation) acquireRequest(ctx context.Context, req
 		return nil, context.Canceled
 	}
 	reservation.vmParked = false
+	if request.KubeVirt != nil {
+		reservation.kubeVirt = *request.KubeVirt
+	}
 	if request.RunID != "" {
 		reservation.runID = request.RunID
 	}
@@ -398,7 +410,6 @@ func (reservation *admissionReservation) retain() {
 // is passed over too, which keeps the group itself in claim order, and the
 // parked run regains its place in that order the moment its group is free.
 func (gate *weightedAdmission) grantLocked() {
-	var parked map[string]struct{}
 	// head is the first prepared, unparked waiter that does not fit. Before
 	// #1085 it ended the pass; now later waiters that fit may be backfilled
 	// beside it until it has waited maxHeadWait, after which the pass ends
@@ -407,7 +418,7 @@ func (gate *weightedAdmission) grantLocked() {
 	now := gate.clock()
 	for index := 0; index < len(gate.waiters); {
 		reservation := gate.waiters[index]
-		if reservation.vmParked {
+		if reservation.vmParked || gate.kubeVirtBlockedLocked(reservation) {
 			index++
 			continue
 		}
@@ -420,17 +431,9 @@ func (gate *weightedAdmission) grantLocked() {
 			index++
 			continue
 		}
-		if reservation.group != "" {
-			_, held := gate.groups[reservation.group]
-			_, behind := parked[reservation.group]
-			if held || behind {
-				if parked == nil {
-					parked = make(map[string]struct{})
-				}
-				parked[reservation.group] = struct{}{}
-				index++
-				continue
-			}
+		if holder, ahead := gate.groupBlockerLocked(reservation); holder != "" || ahead != "" {
+			index++
+			continue
 		}
 		if !gate.canGrantLocked(reservation) {
 			if head == nil {
@@ -557,24 +560,14 @@ func (gate *weightedAdmission) removeLocked(reservation *admissionReservation) {
 // same group is waiting ahead of them.
 func (gate *weightedAdmission) parkedLocked() int {
 	parked := 0
-	var ahead map[string]struct{}
 	for _, reservation := range gate.waiters {
-		if reservation.vmParked {
+		if reservation.vmParked || gate.kubeVirtBlockedLocked(reservation) {
 			parked++
 			continue
 		}
-		if !reservation.prepared || reservation.group == "" {
-			continue
-		}
-		_, held := gate.groups[reservation.group]
-		_, behind := ahead[reservation.group]
-		if held || behind {
+		if holder, ahead := gate.groupBlockerLocked(reservation); reservation.prepared && (holder != "" || ahead != "") {
 			parked++
 		}
-		if ahead == nil {
-			ahead = make(map[string]struct{})
-		}
-		ahead[reservation.group] = struct{}{}
 	}
 	return parked
 }
@@ -615,24 +608,15 @@ func (gate *weightedAdmission) groupBlockerLocked(reservation *admissionReservat
 // disk floor, and every unparked run claimed after it waits behind it. Nil
 // while the head is still preparing (its size is unknown) or nothing waits.
 func (gate *weightedAdmission) headBlockerLocked() *admissionReservation {
-	var parked map[string]struct{}
 	for _, reservation := range gate.waiters {
-		if reservation.vmParked {
+		if reservation.vmParked || gate.kubeVirtBlockedLocked(reservation) {
 			continue
 		}
 		if !reservation.prepared {
 			return nil
 		}
-		if reservation.group != "" {
-			_, held := gate.groups[reservation.group]
-			_, behind := parked[reservation.group]
-			if held || behind {
-				if parked == nil {
-					parked = make(map[string]struct{})
-				}
-				parked[reservation.group] = struct{}{}
-				continue
-			}
+		if holder, ahead := gate.groupBlockerLocked(reservation); holder != "" || ahead != "" {
+			continue
 		}
 		return reservation
 	}
@@ -684,6 +668,7 @@ func (scheduler *Scheduler) AdmissionSnapshot(sequence int64) *model.AdmissionOb
 	if reservation.prepared {
 		result.State = "waiting"
 		result.VMCapacity = reservation.vmParked
+		result.KubeVirtCapacity = gate.kubeVirtBlockedLocked(reservation)
 		result.Size = string(reservation.size)
 		result.Weight = reservation.weight
 		result.Group = reservation.groupName
@@ -699,7 +684,7 @@ func (scheduler *Scheduler) AdmissionSnapshot(sequence int64) *model.AdmissionOb
 		}
 	}
 	result.GroupHolder, result.GroupAhead = gate.groupBlockerLocked(reservation)
-	if reservation.prepared && !reservation.vmParked && result.GroupHolder == "" && result.GroupAhead == "" {
+	if reservation.prepared && !reservation.vmParked && !result.KubeVirtCapacity && result.GroupHolder == "" && result.GroupAhead == "" {
 		if head := gate.headBlockerLocked(); head == reservation {
 			result.HeadOfQueue = true
 			result.BlockedBy = gate.blockerLocked(head)

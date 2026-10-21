@@ -108,9 +108,9 @@ const (
 	maxKernelPathBytes = 256
 )
 
-// VMIBudget bounds what one run's VMI create templates may request together:
-// the number of VMs, their summed cores and their summed memory requests. A
-// repository's KubeVirt grant carries one; the server's ceiling caps it.
+// VMIBudget bounds VMI create templates: VM count, summed cores and memory.
+// Each run is checked against its repository grant capped by the server ceiling;
+// the scheduler also reserves this budget across the repository's admitted runs.
 type VMIBudget struct {
 	MaxVMs    int
 	MaxCores  int
@@ -123,7 +123,7 @@ func DefaultVMIBudget() VMIBudget {
 }
 
 // VMIBudgetLimit is the largest budget a grant or ceiling may name. It keeps
-// a typo from becoming an unbounded per-run allowance.
+// a typo from becoming an unbounded allowance.
 func VMIBudgetLimit() VMIBudget {
 	return VMIBudget{MaxVMs: 16, MaxCores: 64, MaxMemory: resource.MustParse("256Gi")}
 }
@@ -415,10 +415,60 @@ func vmiCreateUsage(raw string) (vmiUsage, error) {
 	return vmiUsage{cores: manifest.Spec.Domain.CPU.Cores, memory: memory}, nil
 }
 
-// KubeVirtConcurrencyGroup serializes a repository's VMI-bearing runs. Each
-// run's budget is per run, so without it N concurrent runs of one repository
-// could each create a full grant's worth of VMs.
+// KubeVirtConcurrencyGroup remains available as an ordinary declared group.
+// VMI workflows no longer acquire it implicitly.
 const KubeVirtConcurrencyGroup = "kubevirt"
+
+// VMIDemand is the sum of the declared VMI create templates. Admission reserves
+// it for the whole run, including time between VM steps and cleanup.
+type VMIDemand struct {
+	VMs         int
+	Cores       int
+	MemoryBytes int64
+}
+
+// Fits reports whether every requested dimension fits the available budget.
+func (demand VMIDemand) Fits(limit VMIDemand) bool {
+	return demand.VMs <= limit.VMs && demand.Cores <= limit.Cores && demand.MemoryBytes <= limit.MemoryBytes
+}
+
+// DemandLimit expresses a validated budget in the same units as VMIDemand.
+func (budget VMIBudget) DemandLimit() VMIDemand {
+	return VMIDemand{VMs: budget.MaxVMs, Cores: budget.MaxCores, MemoryBytes: budget.MaxMemory.Value()}
+}
+
+// DeclaredVMIDemand reads only static create manifests. Full policy validation
+// still happens before submission; malformed or unbounded quantities cannot
+// become scheduling credits while that validation is pending.
+func DeclaredVMIDemand(workflow *wfv1.Workflow) (VMIDemand, error) {
+	var demand VMIDemand
+	if workflow == nil {
+		return demand, errors.New("argoworkflow: no Workflow to size")
+	}
+	if len(workflow.Spec.Templates) > MaxTemplates {
+		return demand, errors.New("argoworkflow: too many templates to size")
+	}
+	ceiling := VMIBudgetLimit()
+	for _, template := range workflow.Spec.Templates {
+		if template.Resource == nil || template.Resource.Action != "create" {
+			continue
+		}
+		if len(template.Resource.Manifest) > maxVMIManifestBytes {
+			return VMIDemand{}, fmt.Errorf("argoworkflow: VMI manifest %q is too large", template.Name)
+		}
+		usage, err := vmiCreateUsage(template.Resource.Manifest)
+		if err != nil {
+			return VMIDemand{}, fmt.Errorf("argoworkflow: VMI demand %q: %w", template.Name, err)
+		}
+		if usage.cores <= 0 || usage.cores > ceiling.MaxCores || usage.memory.Sign() <= 0 || usage.memory.Cmp(ceiling.MaxMemory) > 0 {
+			return VMIDemand{}, fmt.Errorf("argoworkflow: invalid VMI demand in %q", template.Name)
+		}
+		demand.VMs++
+		demand.Cores += usage.cores
+		demand.MemoryBytes += usage.memory.Value()
+	}
+	return demand, nil
+}
 
 // DeclaresVMIResources reports whether a workflow has any resource template.
 // Admission admits resource templates only as VMI create/get/delete.
@@ -434,17 +484,8 @@ func DeclaresVMIResources(workflow *wfv1.Workflow) bool {
 	return false
 }
 
-// RunConcurrencyGroup is the group the scheduler serializes a run on: the
-// declared oberth.ci/concurrency-group, or KubeVirtConcurrencyGroup for a
-// VMI-bearing workflow that declares none. Admit refuses a VMI-bearing
-// workflow that declares any other group.
+// RunConcurrencyGroup is the repository's declared group, independent of the
+// resource types its steps use.
 func RunConcurrencyGroup(workflow *wfv1.Workflow) (string, error) {
-	group, err := DeclaredConcurrencyGroup(workflow)
-	if err != nil {
-		return "", err
-	}
-	if group == "" && DeclaresVMIResources(workflow) {
-		return KubeVirtConcurrencyGroup, nil
-	}
-	return group, nil
+	return DeclaredConcurrencyGroup(workflow)
 }

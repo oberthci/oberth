@@ -93,6 +93,11 @@ func (service *API) observeScheduling(ctx context.Context, run model.Run, steps 
 				return result
 			case "waiting":
 				result.Message = waitingAdmissionMessage(result.Admission)
+				if result.Admission.KubeVirtCapacity {
+					// This repository's grant is the blocker, independent of
+					// shared weight or other repositories' visibility.
+					return result
+				}
 				if service.scope != nil && result.Admission.GroupHolder == "" && result.Admission.GroupAhead == "" {
 					// The group waits name runs of the same repository; any
 					// other wait says only that capacity is short, unless
@@ -167,6 +172,9 @@ func (service *API) submittedKVMPreflight(ctx context.Context, run model.Run) bo
 // grouped run waits on (#658). The group is a validated [a-z0-9-] name and the
 // runs are server-issued IDs, so neither can carry arbitrary text.
 func waitingAdmissionMessage(admission *model.AdmissionObservation) string {
+	if admission.KubeVirtCapacity {
+		return "KubeVirt capacity"
+	}
 	if admission.VMCapacity {
 		return "Waiting for trusted VM capacity; no weighted resources or concurrency group held."
 	}

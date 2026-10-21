@@ -24,7 +24,7 @@ type KubeVirtGrant struct {
 	RevokedAt *time.Time `json:"revoked_at,omitempty"`
 }
 
-// KubeVirtBudget is a grant's per-run VMI budget (#1017). The zero value
+// KubeVirtBudget is a grant's VMI budget (#1017). The zero value
 // selects DefaultKubeVirtBudget. Admission applies the server ceiling.
 type KubeVirtBudget struct {
 	MaxVMs         int   `json:"max_vms"`
@@ -75,7 +75,7 @@ func (budget KubeVirtBudget) Validate() error {
 }
 
 // ActiveKubeVirtGrant reports whether the repository holds an active grant
-// and, if so, that grant's per-run VMI budget.
+// and, if so, that grant's VMI budget.
 func (s *Store) ActiveKubeVirtGrant(ctx context.Context, repoID int64) (KubeVirtBudget, bool, error) {
 	if repoID <= 0 {
 		return KubeVirtBudget{}, false, fmt.Errorf("%w: repository ID is required", ErrInvalid)

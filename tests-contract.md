@@ -185,3 +185,18 @@ adopted run while the scheduler keeps dispatching. A terminal Workflow whose
 observation errored keeps its real result and collects artifacts. Refused
 adoptions log and return the run and `<namespace>/<name>` to delete; read
 failures name it without a deletion instruction.
+
+KubeVirt admission #1173: `TestKubeVirtAdmissionAccountsEveryDimension` admits
+concurrent runs up to each VM/core/memory boundary, parks excess demand and
+releases it without blocking another repository.
+`TestKubeVirtCapacityKeepsFIFOAndDeclaredGroup` prevents smaller demands or
+ordinary members of a declared group from overtaking the capacity waiter.
+`TestKubeVirtSchedulerConcurrentRunsAndQueueReason` checks the actual scheduler
+and flat run list, including the exact queued reason and absence of an implicit
+group. `TestKubeVirtCancelAndSupersedeReleaseBeforeObserverReturns` holds the
+observer tail while accepted deletion frees admission.
+`TestKubeVirtDeletionDuringCreationKeepsCapacity` keeps capacity until in-flight
+creation settles and verifies that a late observer cannot release its successor.
+The oversized-run test
+proves refusal before submission. Static demand tests cover trigger-specific
+documents, live grants, server ceilings and invalid quantities.

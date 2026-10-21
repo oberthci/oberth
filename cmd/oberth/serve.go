@@ -54,7 +54,7 @@ type stringList []string
 
 var witnessChainResetUUIDPattern = regexp.MustCompile(`^(?:[0-9a-f]{64}|[0-9a-f]{80})$`)
 
-// The cluster ceiling caps every repository grant's per-run VMI budget. A
+// The cluster ceiling caps every repository grant's concurrent VMI budget. A
 // grant still defaults to 2 VMs, 6 cores and 12Gi; the ceiling only bounds
 // what an administrator may raise a grant to on this cluster.
 const (

@@ -118,7 +118,7 @@ type Config struct {
 	VMLauncherServiceAccount string
 	ContainerDiskPrefixes    []string
 	// KubeVirtCeiling is the administrator's cluster-wide cap on every
-	// repository grant's per-run VMI budget. Zero selects the hard limit.
+	// repository grant's VMI budget. Zero selects the hard limit.
 	KubeVirtCeiling argoworkflow.VMIBudget
 
 	// RunnerImagePrefixes is the same administrator allowlist the Go path
@@ -542,7 +542,7 @@ func vaultAddressRequiresPinnedAnchor(address string) bool {
 // Request is one run's submission intent.
 type Request struct {
 	KubeVirtGranted bool
-	// KubeVirtBudget is the repository grant's per-run VMI budget; zero
+	// KubeVirtBudget is the repository grant's VMI budget; zero
 	// selects the default. Config.KubeVirtCeiling caps it.
 	KubeVirtBudget argoworkflow.VMIBudget
 	nonrootProof   *nonrootProof

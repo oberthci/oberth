@@ -52,7 +52,7 @@ type Policy struct {
 	// ContainerDiskPrefixes is the administrator's registry allowlist for VMI
 	// containerDisks. An empty list never admits a containerDisk image.
 	ContainerDiskPrefixes []string
-	// VMIBudget is the repository grant's per-run VMI budget. Zero selects
+	// VMIBudget is the repository grant's VMI budget. Zero selects
 	// DefaultVMIBudget.
 	VMIBudget VMIBudget
 	// VMICeiling is the administrator's cluster-wide cap on any grant's
@@ -104,13 +104,8 @@ func Admit(workflow *wfv1.Workflow, policy Policy) error {
 	// The scheduler reads the same annotation before admission; refusing a
 	// malformed group here keeps `oberth validate` and server admission in
 	// agreement rather than letting a push discover it at claim time.
-	if group, err := DeclaredConcurrencyGroup(workflow); err != nil {
+	if _, err := DeclaredConcurrencyGroup(workflow); err != nil {
 		problems = append(problems, err)
-	} else if policy.KubeVirt && group != "" && group != KubeVirtConcurrencyGroup && DeclaresVMIResources(workflow) {
-		// The VMI budget is per run; one shared group per repository keeps
-		// concurrent runs from each taking a full budget.
-		problems = append(problems, fmt.Errorf("argoworkflow: a workflow with VMI resource templates runs in concurrency group %q; annotation %s declares %q",
-			KubeVirtConcurrencyGroup, ConcurrencyGroupAnnotation, group))
 	}
 	// The same holds for both size declarations. Which triggers a document
 	// may name depends on whether it is build.yaml or release.yaml, which

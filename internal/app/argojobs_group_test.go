@@ -138,9 +138,8 @@ func TestAuditSubmissionRecordsTheAdmittedConcurrencyGroup(t *testing.T) {
 	}
 }
 
-// A VMI-bearing workflow that declares no group runs in "kubevirt", so a
-// repository's concurrent runs cannot each take a full KubeVirt budget (#1017).
-func TestPipelineConcurrencyGroupSerializesVMIRuns(t *testing.T) {
+// VMI resources do not imply a concurrency group (#1173).
+func TestPipelineConcurrencyGroupOnlyUsesDeclaredVMIGroup(t *testing.T) {
 	vmiPipeline := func(annotations string) string {
 		return groupedPipeline(annotations) + `    - name: vm
       resource:
@@ -157,9 +156,9 @@ func TestPipelineConcurrencyGroupSerializesVMIRuns(t *testing.T) {
 	}
 	jobs := &ArgoJobs{intents: map[string]argoIntent{}}
 	for _, tc := range []struct{ annotations, want string }{
-		{"", "kubevirt"},
+		{"", ""},
 		{"    oberth.ci/concurrency-group: kubevirt\n", "kubevirt"},
-		// Read as declared; admission refuses this combination.
+		// Any valid declared group is allowed alongside VMI resources.
 		{"    oberth.ci/concurrency-group: other\n", "other"},
 	} {
 		dir := t.TempDir()

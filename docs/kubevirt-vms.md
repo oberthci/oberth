@@ -6,9 +6,9 @@ An administrator grants a registered repository the KubeVirt capability with
 is audited. The grant alone does not permit arbitrary Kubernetes resources:
 Oberth admits only bounded VMI manifests in named Argo `resource:` templates.
 
-## Per-run VMI budget
+## Repository VMI budget
 
-Each grant carries a per-run budget: the number of VMI create templates, their
+Each grant carries a budget across its admitted runs: the number of VMI create templates, their
 summed `spec.domain.cpu.cores`, and their summed memory requests. A grant made
 without explicit values gets 2 VMs, 6 cores and 12Gi, which is also the budget
 of every grant made before schema v25. To raise it:
@@ -33,15 +33,21 @@ A run may also declare at most three VMI resource templates per VM in its
 budget, for each VM's create, get and delete. A VMI's CPU request may not
 exceed its cores, so the core budget also bounds what the VMIs reserve. The
 budget counts guest memory; each virt-launcher Pod adds KubeVirt's own
-overhead (a few hundred MiB) on top. The budget applies per run. So that it also bounds a repository's
-concurrent VMs, Oberth serializes a repository's VMI-bearing runs: a
-workflow with VMI resource templates runs in the repository-scoped
-concurrency group `kubevirt` when it declares no group, and admission
-refuses one that declares any other `oberth.ci/concurrency-group`. Declaring
-`oberth.ci/concurrency-group: kubevirt` explicitly, as cttv does, is
-equivalent. Runs of different repositories are not serialized against each
-other: each granted repository can hold its own budget at the same time, so
-size grants and the ceiling with that sum in mind. Check a workflow locally against a
+overhead (a few hundred MiB) on top. The scheduler reserves each run's declared
+VM count, cores and memory together with its ordinary admission weight. Two or
+more runs proceed concurrently when their total fits the repository grant.
+A run that would exceed the remaining capacity stays queued with reason
+`KubeVirt capacity`, keeps its FIFO place, and holds no weight or concurrency
+group until capacity frees. A single run exceeding the grant still fails
+admission. Completion, cancellation and supersession release the reservation
+once execution is terminal or Workflow deletion is accepted.
+
+VMI resources do not select a run type or an implicit `kubevirt` group. An
+ungrouped VMI workflow has no group badge. Any valid
+`oberth.ci/concurrency-group` remains available to serialize work explicitly,
+including across branch, promotion and tag runs. Different repositories have
+independent grants, so size grants and the ceiling with their combined demand
+in mind. Check a workflow locally against a
 budget with `oberth validate --kubevirt --container-disk-prefixes=...
 --kubevirt-max-vms 3 --kubevirt-max-cores 12 --kubevirt-max-memory 24Gi`.
 
@@ -71,7 +77,7 @@ one YAML document with no carriage returns. Create manifests are limited to
 the admitted containerDisk, inline cloud-init, emptyDisk, pod networking,
 masquerade interface, CPU, memory, architecture and kernelBoot fields. Get
 and delete manifests carry metadata only. Each VMI is limited to 4 cores and
-8Gi; the per-run budget above bounds their sum. Both are enforced at
+8Gi; the repository budget above bounds their sum across admitted runs. Both are enforced at
 admission. Credentialed workflows cannot contain VMI resource templates.
 
 ## Direct kernel boot
