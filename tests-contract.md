@@ -256,3 +256,17 @@ owner and a resumed adopted Wait against the real store: the Workflow binding
 and every node keep exactly one attempt record, pre-restart observation times
 survive, and a GC'd Pod cannot downgrade retained evidence. Migration v30
 stacks after v29; ledger, gap and v29-to-v30 replay assertions are unchanged.
+
+# Restart handover (#1172 slice 4)
+
+`internal/api/handover_test.go` verifies immediate readiness refusal, including
+an in-flight readiness probe, rejection of new mutations, JSON/SSE reconnect
+responses and joined observers, and completion of accepted mutations during
+drain. `TestHTTPHandoverBoundsStalledRequests` verifies forced connection closure
+at the HTTP drain deadline. Scheduler readiness becomes true only after recovery
+and false on exit; readiness snapshot tests forbid per-request probes and accept
+neither stale nor failed samples. MCP and JSON client tests exercise 503,
+connection loss and truncated bodies while preserving exact targets and original
+deadlines; mutation and unknown-tool requests stay single-attempt. Retry budget
+tests cover cancellation and expiry. Idle-wait tests observe queued and running
+work, fail closed, and bind the upgrade check to the selected Deployment.

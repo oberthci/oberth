@@ -31,6 +31,7 @@ const watchTunnelOpenbaoImageDefault = "quay.io/openbao/openbao:2.6.1@sha256:5b2
 
 // UpgradeConfig holds options for the upgrade command.
 type UpgradeConfig struct {
+	WaitIdle              bool // optional advisory queue drain; ordinary upgrades adopt in-flight work
 	Namespace             string
 	DryRun                bool
 	Yes                   bool   // --yes: proceed without confirmation for non-local targets
@@ -383,6 +384,12 @@ func RunUpgrade(ctx context.Context, cfg UpgradeConfig, deps Deps) (UpgradeResul
 		return result, err
 	}
 
+	if cfg.WaitIdle {
+		if err := waitForUpgradeIdle(ctx, cfg, deps); err != nil {
+			return result, err
+		}
+	}
+
 	if profile != nil {
 		if err := profile.apply(ctx, cfg, deps); err != nil {
 			return result, fmt.Errorf("argo controller profile transition incomplete: %w", err)
@@ -698,6 +705,9 @@ func verifyRunningVersion(ctx context.Context, deps Deps, cfg UpgradeConfig, tar
 
 func printUpgradeDryRun(w io.Writer, cfg UpgradeConfig, result UpgradeResult, retryFailed bool) (UpgradeResult, error) {
 	_, _ = fmt.Fprintf(w, "\nDry-run plan (no cluster changes will be made):\n\n")
+	if cfg.WaitIdle {
+		_, _ = fmt.Fprintln(w, "  Wait for the selected live daemon queue to empty before applying the upgrade (--wait-idle).")
+	}
 	step := 1
 
 	chart := cfg.ChartOverride
@@ -735,4 +745,24 @@ func printUpgradeDryRun(w io.Writer, cfg UpgradeConfig, result UpgradeResult, re
 
 	_, _ = fmt.Fprintln(w, "No cluster changes were made (--dry-run).")
 	return result, nil
+}
+
+// waitForUpgradeIdle queries the live daemon through its private admin socket
+// in the selected Deployment. Remote/scoped API credentials cannot accidentally
+// report an unrelated cluster or only a subset of the queue as idle.
+func waitForUpgradeIdle(ctx context.Context, cfg UpgradeConfig, deps Deps) error {
+	ctx, cancel := context.WithTimeout(ctx, cfg.Timeout)
+	defer cancel()
+	run := deps.RunCommand
+	if run == nil {
+		run = DefaultRunCommand
+	}
+	args := []string{"exec", "-c", "oberth", "-n", cfg.Namespace, "deploy/oberth", "--", "oberth", "wait-idle", "--timeout=" + cfg.Timeout.String()}
+	if deps.ContextName != "" {
+		args = append([]string{"--context", deps.ContextName}, args...)
+	}
+	if _, err := run(ctx, nil, "kubectl", args...); err != nil {
+		return fmt.Errorf("wait for idle queue: %w", err)
+	}
+	return nil
 }

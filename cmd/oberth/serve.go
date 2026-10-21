@@ -835,9 +835,20 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		_, err := kube.Discovery().ServerVersion()
+		err := kube.Discovery().RESTClient().Get().AbsPath("/version").Do(ctx).Error()
 		return err
 	}}
+	health.ReadyGate = func(context.Context) error {
+		if !scheduler.Recovered() {
+			return errors.New("scheduler recovery is pending")
+		}
+		return nil
+	}
+	health.Readiness = &app.ReadinessSnapshot{}
+	readinessCtx, stopReadiness := context.WithCancel(ctx)
+	readinessDone := make(chan struct{})
+	go func(snapshot app.Health) { defer close(readinessDone); snapshot.WatchReadiness(readinessCtx) }(health)
+	defer func() { stopReadiness(); <-readinessDone }()
 	health.Version = version
 	health.AdmissionBlocker = scheduler.AdmissionBlocker
 	health.Admission = scheduler.AdmissionState
@@ -1126,7 +1137,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 	if err != nil {
 		return err
 	}
-	return runComponents(ctx, options, scheduler, anchors, git, sshService, httpsServer, goProxyServer, newAdminGateServer(anchors.AllowMutation, options.database, scheduler.NotifyQueue), activateScheduler, accessReconciler, schedules, ciIssues, retention, logger, controlAPI.Shutdown)
+	return runComponents(ctx, options, scheduler, anchors, git, sshService, httpsServer, goProxyServer, newAdminGateServer(anchors.AllowMutation, options.database, scheduler.NotifyQueue, database.CountRuns), activateScheduler, accessReconciler, schedules, ciIssues, retention, logger, controlAPI.Shutdown, httpAPI.BeginDrain)
 }
 
 type startupContinuity interface {
@@ -1532,8 +1543,13 @@ func runComponents(
 	retention *service.Retention,
 	logger *log.Logger,
 	apiShutdown func(context.Context) error,
+	beginDrain func(),
 ) error {
-	runCtx, cancel := context.WithCancel(ctx)
+	// Order shutdown explicitly: readiness must drop before scheduler cancellation.
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	runCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	defer cancel()
 	var listenerConfig net.ListenConfig
 	httpsRaw, err := listenerConfig.Listen(runCtx, "tcp", options.httpsListen)
@@ -1683,6 +1699,9 @@ func runComponents(
 			componentErr = fmt.Errorf("%s: %w", result.name, result.err)
 		}
 	}
+	if beginDrain != nil {
+		beginDrain()
+	}
 	cancel()
 	_ = sshListener.Close()
 	_ = adminListener.Close()
@@ -1691,20 +1710,11 @@ func runComponents(
 	}
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer shutdownCancel()
-	shutdownErr := httpsServer.Shutdown(shutdownCtx)
-	if shutdownErr != nil {
-		shutdownErr = errors.Join(shutdownErr, httpsServer.Close())
-	}
-	adminShutdownErr := adminServer.Shutdown(shutdownCtx)
-	if adminShutdownErr != nil {
-		adminShutdownErr = errors.Join(adminShutdownErr, adminServer.Close())
-	}
+	shutdownErr := shutdownHTTP(shutdownCtx, httpsServer)
+	adminShutdownErr := shutdownHTTP(shutdownCtx, adminServer)
 	var goProxyShutdownErr error
 	if goProxyServer != nil {
-		goProxyShutdownErr = goProxyServer.Shutdown(shutdownCtx)
-		if goProxyShutdownErr != nil {
-			goProxyShutdownErr = errors.Join(goProxyShutdownErr, goProxyServer.Close())
-		}
+		goProxyShutdownErr = shutdownHTTP(shutdownCtx, goProxyServer)
 	}
 	workers.Wait()
 	// The scheduler (a worker) can start API background work, an automatic
@@ -2131,3 +2141,12 @@ func repoCacheQualifications(ctx context.Context, database *store.Store) (map[st
 // The SSH server serves a key unscoped unless its resolver reports scopes;
 // the production resolver must (#073).
 var _ sshserver.ScopedIdentityResolver = app.SSHIdentities{}
+
+// shutdownHTTP lets accepted requests finish until the shared drain deadline,
+// then closes remaining connections so a stalled peer cannot hold the listener.
+func shutdownHTTP(ctx context.Context, server *http.Server) error {
+	if err := server.Shutdown(ctx); err != nil {
+		return errors.Join(err, server.Close())
+	}
+	return nil
+}

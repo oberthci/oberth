@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/oberthci/oberth/internal/model"
 )
 
 const defaultAdminSocket = "/tmp/oberth-admin.sock"
@@ -22,8 +24,24 @@ const maximumAdminGateError = 4 << 10
 // scheduler to run its cancellation pass now (withdraw the run's admission
 // reservation, delete its Workflow) instead of on the next queue event. The
 // wake carries no input and performs no mutation of its own.
-func newAdminGateServer(gate func(context.Context) error, databasePath string, wake func()) *http.Server {
+func newAdminGateServer(gate func(context.Context) error, databasePath string, wake func(), counts ...func(context.Context) (model.RunCounts, error)) *http.Server {
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /v1/idle", func(output http.ResponseWriter, request *http.Request) {
+		if len(counts) == 0 || counts[0] == nil {
+			http.Error(output, "queue state unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		state, err := counts[0](request.Context())
+		if err != nil {
+			http.Error(output, "queue state unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		if state.Queued != 0 || state.Running != 0 {
+			output.WriteHeader(http.StatusConflict)
+			return
+		}
+		output.WriteHeader(http.StatusNoContent)
+	})
 	mux.HandleFunc("POST /v1/cancellation-pass", func(output http.ResponseWriter, request *http.Request) {
 		if wake == nil {
 			http.Error(output, "scheduler wake is unavailable", http.StatusServiceUnavailable)

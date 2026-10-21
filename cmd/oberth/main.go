@@ -62,6 +62,7 @@ Commands:
   install       Install or upgrade Oberth on a cluster
   setup         Interactive setup wizard
   upgrade       Upgrade an existing Oberth deployment
+  wait-idle     Wait for the live daemon queue to empty (in-pod)
   backup        Write an encrypted backup of OpenBao state and the server database
   restore       Restore an oberth backup onto an installed Oberth
   serve         Start the Oberth server
@@ -140,6 +141,8 @@ Commands:
 		return runInstall(ctx, arguments[1:], input, output)
 	case "setup":
 		return runSetup(ctx, arguments[1:], input, output)
+	case "wait-idle":
+		return runWaitIdle(ctx, arguments[1:], output)
 	case "upgrade":
 		return runUpgrade(ctx, arguments[1:], output)
 	case "backup":

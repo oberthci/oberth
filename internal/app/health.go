@@ -21,6 +21,10 @@ type ClusterProbe func(context.Context) error
 type VCSProbe func(context.Context, model.Upstream) error
 
 type Health struct {
+	// ReadyGate checks process-local recovery state without network or store reads.
+	ReadyGate ClusterProbe
+	// Readiness is refreshed off the HTTP request path; nil retains direct probes.
+	Readiness  *ReadinessSnapshot
 	Storage    func(context.Context) (any, error)
 	Store      HealthStore
 	Configured ClusterProbe
@@ -144,6 +148,18 @@ type HealthStatus struct {
 // its durable SSH credentials (when any non-local upstream exists), a
 // responsive Kubernetes API, and externally anchored audit integrity.
 func (health Health) Ready(ctx context.Context) error {
+	if health.ReadyGate != nil {
+		if err := health.ReadyGate(ctx); err != nil {
+			return err
+		}
+	}
+	if health.Readiness != nil {
+		return health.Readiness.ready()
+	}
+	return health.probeReady(ctx)
+}
+
+func (health Health) probeReady(ctx context.Context) error {
 	if health.Store == nil || health.Configured == nil || health.Cluster == nil || health.Audit == nil || health.VCS == nil {
 		return errors.New("app: health dependencies are unavailable")
 	}

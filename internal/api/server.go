@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/oberthci/oberth/internal/model"
@@ -121,6 +122,9 @@ type ErrorClassifier func(error) (int, string)
 const writeDeadlineMargin = 1 * time.Minute
 
 type Server struct {
+	draining              atomic.Bool
+	drainContext          context.Context
+	stopObservers         context.CancelFunc
 	mcpWaitLog            func(mcpWaitEvent) // Private fixed-schema sink; nil uses the process logger.
 	auth                  Authenticator
 	tools                 ToolService
@@ -149,7 +153,8 @@ func New(auth Authenticator, tools ToolService, views ViewService, version strin
 	if version == "" {
 		version = "dev"
 	}
-	server := &Server{auth: auth, tools: tools, views: views, downloads: downloads, version: version, mux: http.NewServeMux()}
+	drainContext, stopObservers := context.WithCancel(context.Background())
+	server := &Server{drainContext: drainContext, stopObservers: stopObservers, auth: auth, tools: tools, views: views, downloads: downloads, version: version, mux: http.NewServeMux()}
 	for _, option := range options {
 		option(server)
 	}
@@ -182,12 +187,46 @@ func defaultClassifyError(error) (int, string) {
 	return http.StatusInternalServerError, "internal error"
 }
 
+// BeginDrain first removes readiness, then stops read-only long-poll observers.
+// Accepted mutations retain their request contexts and may finish during Shutdown.
+func (server *Server) BeginDrain() {
+	server.draining.Store(true)
+	server.stopObservers()
+}
+
+// RestartingRPCCode tells observers to reconnect without treating a shutdown as
+// a terminal run result. Mutating tools must never be retried on this signal.
+const RestartingRPCCode = -32001
+
+func restartingRPC() *rpcError {
+	return &rpcError{Code: RestartingRPCCode, Message: "server restarting; reconnect to observe durable work"}
+}
+
+func (server *Server) refuseDuringDrain(writer http.ResponseWriter) bool {
+	if !server.draining.Load() {
+		return false
+	}
+	writer.Header().Set("Retry-After", "1")
+	writeJSON(writer, http.StatusServiceUnavailable, map[string]string{"status": "server restarting"})
+	return true
+}
+
 func (server *Server) Handler() http.Handler {
 	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		writer.Header().Set("X-Content-Type-Options", "nosniff")
 		writer.Header().Set("Referrer-Policy", "no-referrer")
 		writer.Header().Set("Strict-Transport-Security", "max-age=31536000")
 		writer.Header().Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+		if request.URL.Path != "/healthz" && server.refuseDuringDrain(writer) {
+			return
+		}
+		if request.Method == http.MethodGet {
+			ctx, cancel := context.WithCancel(request.Context())
+			stop := context.AfterFunc(server.drainContext, cancel)
+			defer stop()
+			defer cancel()
+			request = request.WithContext(ctx)
+		}
 		server.mux.ServeHTTP(writer, request)
 	})
 }
@@ -197,7 +236,7 @@ func (server *Server) routes() {
 		writeJSON(writer, http.StatusOK, map[string]string{"status": "ok"})
 	})
 	server.mux.HandleFunc("GET /readyz", func(writer http.ResponseWriter, request *http.Request) {
-		if err := server.views.Ready(request.Context()); err != nil {
+		if err := server.views.Ready(request.Context()); err != nil || server.draining.Load() {
 			writeJSON(writer, http.StatusServiceUnavailable, map[string]string{"status": "not ready"})
 			return
 		}
@@ -237,6 +276,9 @@ func (server *Server) requireAuth(next http.Handler) http.Handler {
 			return
 		}
 		actor, err := server.auth.Authenticate(request.Context(), token)
+		if server.refuseDuringDrain(writer) {
+			return
+		}
 		if err != nil || strings.TrimSpace(actor.Identity) == "" {
 			writer.Header().Set("WWW-Authenticate", `Bearer realm="oberth", error="invalid_token"`)
 			writeJSON(writer, http.StatusUnauthorized, map[string]string{"error": "invalid bearer token"})
@@ -477,6 +519,9 @@ func (server *Server) handleStatus(writer http.ResponseWriter, request *http.Req
 }
 
 func (server *Server) writeView(writer http.ResponseWriter, value any, err error) {
+	if server.refuseDuringDrain(writer) {
+		return
+	}
 	if err != nil {
 		code, message := server.classifyError(err)
 		if code == http.StatusInternalServerError {

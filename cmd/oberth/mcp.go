@@ -16,7 +16,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/mdnsdial"
+	"github.com/oberthci/oberth/internal/restartretry"
 )
 
 const (
@@ -395,17 +397,6 @@ func mcpRequest(ctx context.Context, cfg mcpFlagResult, method string, params an
 		}
 	}()
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, cfg.URL, bytes.NewReader(body))
-	if err != nil {
-		return nil, fmt.Errorf("build request: %w", err)
-	}
-	httpReq.Header.Set("Content-Type", mcpContentTypeJSON)
-	httpReq.Header.Set("Accept", mcpAcceptStreamable)
-	httpReq.Header.Set("MCP-Protocol-Version", mcpProtocolVersion)
-	httpReq.Header.Set("Authorization", "Bearer "+cfg.Token)
-	ua := "oberth-cli/" + cfg.Version
-	httpReq.Header.Set("User-Agent", ua)
-
 	httpClient, err := mcpHTTPClientFunc(cfg.CAFile)
 	if err != nil {
 		return nil, err
@@ -414,9 +405,67 @@ func mcpRequest(ctx context.Context, cfg mcpFlagResult, method string, params an
 	// Copy the factory client so an old fixed HTTP timeout cannot cut it short.
 	requestClient := *httpClient
 	requestClient.Timeout = 0
+
+	safe := mcpReadRequest(method, params)
+	var budget restartretry.Budget
+	for {
+		response, err, retry := mcpRequestOnce(ctx, cfg, body, &requestClient)
+		if err == nil && response.Error != nil && response.Error.Code == api.RestartingRPCCode {
+			if safe {
+				if budget.Wait(ctx) {
+					continue
+				}
+				if ctx.Err() != nil {
+					return nil, ctx.Err()
+				}
+			}
+		}
+		if err != nil && safe && retry {
+			if budget.Wait(ctx) {
+				continue
+			}
+			if ctx.Err() != nil {
+				return nil, errors.Join(err, ctx.Err())
+			}
+		}
+		return response, err
+	}
+}
+
+// Unknown tools fail closed: only these observation operations may reconnect.
+func mcpReadRequest(method string, params any) bool {
+	if method == mcpMethodToolsList || method == "initialize" || method == "ping" {
+		return true
+	}
+	if method != mcpMethodToolsCall {
+		return false
+	}
+	call, ok := params.(toolsCallParams)
+	if !ok {
+		return false
+	}
+	switch call.Name {
+	case "wait", "status", "logs", "run_get", "run_logs", "promote_status", "promotion_list", "system_status", "artifact_get":
+		return true
+	}
+	return false
+}
+
+func mcpRequestOnce(ctx context.Context, cfg mcpFlagResult, body []byte, requestClient *http.Client) (*jsonRPCResponse, error, bool) {
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, cfg.URL, bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("build request: %w", err), false
+	}
+	httpReq.Header.Set("Content-Type", mcpContentTypeJSON)
+	httpReq.Header.Set("Accept", mcpAcceptStreamable)
+	httpReq.Header.Set("MCP-Protocol-Version", mcpProtocolVersion)
+	httpReq.Header.Set("Authorization", "Bearer "+cfg.Token)
+	ua := "oberth-cli/" + cfg.Version
+	httpReq.Header.Set("User-Agent", ua)
+
 	resp, err := requestClient.Do(httpReq)
 	if err != nil {
-		return nil, classifyMCPTransport(err)
+		return nil, classifyMCPTransport(err), restartretry.Transient(err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
@@ -424,19 +473,21 @@ func mcpRequest(ctx context.Context, cfg mcpFlagResult, method string, params an
 	case http.StatusOK:
 		// success, parse below
 	case http.StatusUnauthorized:
-		return nil, errors.New("authentication failed: check OBERTH_TOKEN or --token-file")
+		return nil, errors.New("authentication failed: check OBERTH_TOKEN or --token-file"), false
 	case http.StatusForbidden:
-		return nil, errors.New("access denied: the token does not have permission for this operation")
+		return nil, errors.New("access denied: the token does not have permission for this operation"), false
 	default:
 		errorBody, _ := io.ReadAll(io.LimitReader(resp.Body, mcpMaxErrorBody))
-		return nil, fmt.Errorf("server returned HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(errorBody)))
+		return nil, fmt.Errorf("server returned HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(errorBody))), restartretry.Status(resp.StatusCode)
 	}
 
 	contentType := resp.Header.Get("Content-Type")
 	if strings.HasPrefix(contentType, mcpContentTypeSSE) {
-		return parseMCPSSEResponse(resp.Body)
+		response, err := parseMCPSSEResponse(resp.Body)
+		return response, err, restartretry.Transient(err)
 	}
-	return parseMCPJSONResponse(resp.Body)
+	response, err := parseMCPJSONResponse(resp.Body)
+	return response, err, restartretry.Transient(err)
 }
 
 // parseMCPJSONResponse reads a direct JSON-RPC response.
@@ -479,7 +530,7 @@ func parseMCPSSEResponse(body io.Reader) (*jsonRPCResponse, error) {
 		return nil, errMCPResponseTooLarge
 	}
 	if lastData == "" {
-		return nil, errors.New("SSE stream contained no data events")
+		return nil, fmt.Errorf("SSE stream contained no data events: %w", io.ErrUnexpectedEOF)
 	}
 	var response jsonRPCResponse
 	if err := json.Unmarshal([]byte(lastData), &response); err != nil {

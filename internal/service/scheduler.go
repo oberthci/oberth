@@ -61,6 +61,7 @@ type SchedulerConfig struct {
 }
 
 type Scheduler struct {
+	startupRecovered   atomic.Bool
 	store              SchedulerStore
 	git                WorkspaceGit
 	logs               LogStore
@@ -355,6 +356,10 @@ func (scheduler *Scheduler) abandonAdmissions(ctx context.Context, cancellations
 	}
 }
 
+// Recovered reports that durable owner recovery and Workflow adoption have
+// completed. It is safe to use from readiness probes without store access.
+func (scheduler *Scheduler) Recovered() bool { return scheduler.startupRecovered.Load() }
+
 // Run owns oldest-eligible claims for one server process and fills at most
 // MaxConcurrent slots. A pending publication temporarily gates only its exact
 // repository/ref; queue changes and completions wake the scheduler through
@@ -407,6 +412,8 @@ func (scheduler *Scheduler) Run(ctx context.Context) error {
 	if err := scheduler.recoverOwnedWorkspaces(workerCtx); err != nil {
 		return err
 	}
+	scheduler.startupRecovered.Store(true)
+	defer scheduler.startupRecovered.Store(false)
 	if scheduler.onStartupRecovered != nil {
 		scheduler.onStartupRecovered()
 	}

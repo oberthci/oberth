@@ -285,6 +285,9 @@ func (server *Server) handleMCP(writer http.ResponseWriter, request *http.Reques
 		if len(call.Arguments) == 0 {
 			call.Arguments = json.RawMessage("{}")
 		}
+		if server.refuseDuringDrain(writer) {
+			return
+		}
 		if call.Name == "wait" || call.Name == "promote_status" {
 			server.handleMCPLongPoll(writer, request, response, call)
 			return

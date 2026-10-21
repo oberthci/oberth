@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/oberthci/oberth/internal/mdnsdial"
+	"github.com/oberthci/oberth/internal/restartretry"
 )
 
 const (
@@ -192,32 +193,48 @@ func (client *Client) newGetRequest(ctx context.Context, path string, query map[
 }
 
 func (client *Client) Get(ctx context.Context, path string, query map[string]string, into any) error {
+	ctx, cancel := context.WithTimeout(ctx, requestTimeout)
+	defer cancel()
+	var budget restartretry.Budget
+	for {
+		err, retry := client.getOnce(ctx, path, query, into)
+		if err == nil || !retry {
+			return err
+		}
+		if !budget.Wait(ctx) {
+			return errors.Join(err, ctx.Err())
+		}
+	}
+}
+
+func (client *Client) getOnce(ctx context.Context, path string, query map[string]string, into any) (error, bool) {
 	request, err := client.newGetRequest(ctx, path, query)
 	if err != nil {
-		return err
+		return err, false
 	}
 	request.Header.Set("Accept", "application/json")
-
 	response, err := client.http.Do(request)
 	if err != nil {
-		return classifyTransport(path, err)
+		return classifyTransport(path, err), restartretry.Transient(err)
 	}
-	defer func() { _ = response.Body.Close() }()
-
+	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
-		return statusError(path, response)
+		return statusError(path, response), restartretry.Status(response.StatusCode)
 	}
-	body, err := io.ReadAll(io.LimitReader(response.Body, maxResponseSize))
+	body, err := io.ReadAll(io.LimitReader(response.Body, maxResponseSize+1))
 	if err != nil {
-		return fmt.Errorf("client: read %s: %w", path, err)
+		return fmt.Errorf("client: read %s: %w", path, err), restartretry.Transient(err)
+	}
+	if len(body) > maxResponseSize {
+		return fmt.Errorf("client: %s response too large", path), false
 	}
 	if into == nil {
-		return nil
+		return nil, false
 	}
 	if err := json.Unmarshal(body, into); err != nil {
-		return fmt.Errorf("client: %s returned a body that is not the expected JSON", path)
+		return fmt.Errorf("client: %s returned a body that is not the expected JSON", path), false
 	}
-	return nil
+	return nil, false
 }
 
 func (client *Client) GetRaw(ctx context.Context, path string, query map[string]string) ([]byte, error) {

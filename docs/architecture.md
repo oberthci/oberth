@@ -227,6 +227,10 @@ anchors). What local-only mode gives up is exactly the external evidence: a
 whole-database rollback to another self-consistent chain is not detectable
 without a witness.
 
-Readiness covers the database, configured projected identity, and Kubernetes.
+Readiness covers completed startup recovery, the database, configured projected
+identity, Kubernetes and audit integrity. Dependency probes refresh a bounded
+background snapshot; the HTTP probe performs no network or store calls. Shutdown
+removes readiness before stopping admission and drains HTTP/SSE observers. See
+[restart handover](restart-handover.md) for client retries and upgrade behavior.
 Upstream availability is a bounded diagnostic in `/status`, not a readiness
 dependency, so an upstream outage cannot induce a control-plane restart loop.

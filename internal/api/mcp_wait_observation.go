@@ -119,6 +119,12 @@ func (server *Server) classifyWaitFailure(err error, trace *mcpWaitObservation) 
 }
 
 func (server *Server) handleMCPLongPoll(writer http.ResponseWriter, request *http.Request, response rpcResponse, call callParams) {
+	observerCtx, cancel := context.WithCancel(request.Context())
+	stop := context.AfterFunc(server.drainContext, cancel)
+	defer stop()
+	defer cancel()
+	request = request.WithContext(observerCtx)
+
 	deadline := time.Now().Add(server.maximumToolWait + writeDeadlineMargin)
 	deadlineErr := http.NewResponseController(writer).SetWriteDeadline(deadline)
 	preparer, canPrepare := server.tools.(LongPollPreparer)
@@ -131,6 +137,10 @@ func (server *Server) handleMCPLongPoll(writer http.ResponseWriter, request *htt
 		defer trace.finish()
 		if err != nil {
 			response.Result = server.classifyWaitFailure(err, trace)
+			if server.draining.Load() {
+				response.Result = nil
+				response.Error = restartingRPC()
+			}
 			trace.outcome("preparation-refused")
 			writeMCPWaitJSON(writer, response, trace, true)
 			return
@@ -145,6 +155,10 @@ func (server *Server) handleMCPLongPoll(writer http.ResponseWriter, request *htt
 		response.Result = server.classifyWaitFailure(err, trace)
 	} else {
 		response.Result = toolSuccess(result)
+	}
+	if server.draining.Load() {
+		response.Result = nil
+		response.Error = restartingRPC()
 	}
 	canceled := request.Context().Err() != nil
 	if canceled {

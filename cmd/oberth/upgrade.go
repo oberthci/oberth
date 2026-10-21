@@ -32,6 +32,7 @@ func runUpgrade(ctx context.Context, arguments []string, output io.Writer) error
 	flags.StringVar(&cfg.Namespace, "namespace", "", "Oberth namespace (default: oberth)")
 	flags.StringVar(&kubeContext, "context", "", "kubeconfig context to target (default: current-context)")
 	flags.StringVar(&cfg.ArgoControllerProfile, "argo-controller-profile", "", "explicitly reconcile the managed nonroot-static-v1 Argo profile and verify it before enabling server admission")
+	flags.BoolVar(&cfg.WaitIdle, "wait-idle", false, "wait for the selected server queue to empty before upgrading")
 	flags.BoolVar(&cfg.DryRun, "dry-run", false, "show what would change without doing it")
 	flags.BoolVar(&cfg.Yes, "yes", false, "proceed without confirmation for non-local targets")
 	flags.StringVar(&cfg.ChartOverride, "chart", "", "override the chart reference (for testing)")

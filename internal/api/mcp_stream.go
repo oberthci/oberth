@@ -147,6 +147,22 @@ func (server *Server) streamLongPollObserved(writer http.ResponseWriter, request
 	defer join() // Includes a panic in the observer: no writer outlives the request.
 	payload, callErr := prepared(ctx)
 	join()
+	if server.draining.Load() {
+		response.Result = nil
+		response.Error = restartingRPC()
+		encoded, err := json.Marshal(response)
+		if err != nil {
+			return err
+		}
+		err = writeMCPFrame(writer, "event: message\ndata: "+string(encoded)+"\n\n", deadline, writeTimeout)
+		if err != nil {
+			trace.outcome(mcpWaitWriteOutcome(err, "final"))
+			return err
+		}
+		trace.frame("final")
+		trace.outcome("server-restarting")
+		return nil
+	}
 	if heartbeatErr != nil || ctx.Err() != nil {
 		if trace != nil && trace.event.Outcome == "panic" {
 			if request.Context().Err() != nil {
