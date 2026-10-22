@@ -6,6 +6,16 @@ An administrator grants a registered repository the KubeVirt capability with
 is audited. The grant alone does not permit arbitrary Kubernetes resources:
 Oberth admits only bounded VMI manifests in named Argo `resource:` templates.
 
+The same grant also authorizes KVM device leaves: container or script leaves
+named in `oberth.ci/kvm-templates`, including the guest-test lanes of
+`oberth.ci/guest-test-templates` (see `docs/guest-test-lanes.md`). Without an
+active grant such a workflow fails closed at admission. A KVM leaf declares no
+VMI demand, so the VMI budget below neither counts nor throttles it; it is an
+ordinary weighted pod that receives `devices.kubevirt.io/kvm: 1`. Repositories
+that already declared `oberth.ci/kvm-templates` before KVM leaves required the
+grant need one before their next run. Check such a document locally with
+`oberth validate --kubevirt`; without the flag, KVM leaves are refused.
+
 ## Repository VMI budget
 
 Each grant carries a budget across its admitted runs: the number of VMI create templates, their

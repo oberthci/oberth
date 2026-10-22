@@ -41,6 +41,10 @@ type protectedControllerFixture struct {
 	cleaned              bool
 	absent               bool
 	absenceErr           error
+	// observeConfig makes TrustedKVMWorkflowUID rebuild the submission the way
+	// the real observer does before comparing it with the live Workflow.
+	observeConfig *argojob.Config
+	observed      argojob.Request
 }
 
 func (c *protectedControllerFixture) PrepareNonroot(ctx context.Context, r argojob.Request) (argojob.Request, error) {
@@ -101,9 +105,19 @@ func (c *protectedControllerFixture) Wait(_ context.Context, _ string, runID str
 	c.waitRunID = runID
 	return argojob.Completion{Succeeded: !c.failed, Infrastructure: c.infrastructureReason != "", Reason: c.infrastructureReason}, nil
 }
-func (c *protectedControllerFixture) TrustedKVMWorkflowUID(context.Context, argojob.Request) (string, error) {
+func (c *protectedControllerFixture) TrustedKVMWorkflowUID(ctx context.Context, r argojob.Request) (string, error) {
 	if c.createErr != nil {
 		return "", errors.New("not observed")
+	}
+	c.observed = r
+	if c.observeConfig != nil {
+		prepared, err := c.preparer.PrepareNonroot(ctx, r)
+		if err != nil {
+			return "", err
+		}
+		if _, err = argojob.Build(*c.observeConfig, prepared); err != nil {
+			return "", err
+		}
 	}
 	return "workflow-uid", nil
 }
@@ -118,16 +132,18 @@ func (c *protectedControllerFixture) TrustedKVMReceipt(_ context.Context, r argo
 	return vmrunner.KVMReceipt{IntentDigest: d, WorkflowUID: uid, Binding: vmrunner.KVMTerminationBinding{Namespace: intent.Namespace, WorkflowName: intent.WorkflowName, WorkflowUID: uid, PodName: "pod", PodUID: "pod-uid", ContainerID: "containerd://id", HarnessImageRef: intent.Recipe.HarnessImage, AdmittedAt: intent.AdmittedAt, Deadline: intent.Deadline}, Report: vmrunner.KVMReport{Version: 1, IntentDigest: d, InventoryDigest: intent.InventoryDigest, CaseCount: intent.CaseCount, ArtifactSetDigest: strings.Repeat("f", 64)}, Termination: vmrunner.KVMTerminationRecord{ImageID: "sha256:" + strings.Repeat("c", 64), ContainerID: "containerd://id", PodUID: "pod-uid", WorkflowUID: uid, StartedAt: intent.AdmittedAt, FinishedAt: now}, FinishedAt: now}, nil
 }
 func TestTrustedPreflightAdapterLifecycle(t *testing.T) {
-	for _, scenario := range []string{"pass", "workflow failed", "infrastructure failed", "definite create refusal", "uncertain create", "recover absent", "unapproved", "guest granted", "guest revoked"} {
+	for _, scenario := range []string{"pass", "workflow failed", "infrastructure failed", "definite create refusal", "uncertain create", "recover absent", "unapproved", "guest granted", "guest revoked", "guest recover"} {
 		t.Run(scenario, func(t *testing.T) {
 			ctx := context.Background()
 			fixture := newRaceFixture(t)
+			// The grant names more VMs than the default budget (two).
 			guestBudget := store.KubeVirtBudget{MaxVMs: 3, MaxCores: 4, MaxMemoryBytes: 8 << 30}
+			grants := &guestGrantLoader{allowed: scenario != "guest revoked", budget: guestBudget}
 			if strings.HasPrefix(scenario, "guest ") {
 				if err := os.WriteFile(filepath.Join(fixture.sourceDir, ".oberth", "build.yaml"), []byte(guestTestDocument), 0644); err != nil {
 					t.Fatal(err)
 				}
-				fixture.jobs.SetKubeVirtGrantLoader(&guestGrantLoader{allowed: scenario == "guest granted", budget: guestBudget})
+				fixture.jobs.SetKubeVirtGrantLoader(grants)
 			}
 			controller := &protectedControllerFixture{blockingController: newBlockingController(), failed: scenario == "workflow failed" || scenario == "infrastructure failed"}
 			if scenario == "infrastructure failed" {
@@ -136,7 +152,7 @@ func TestTrustedPreflightAdapterLifecycle(t *testing.T) {
 			if scenario == "definite create refusal" {
 				controller.createErr = argojob.ErrTrustedKVMCreateRefused
 			}
-			if scenario == "uncertain create" || scenario == "recover absent" {
+			if scenario == "uncertain create" || scenario == "recover absent" || scenario == "guest recover" {
 				controller.createErr = errors.New("transport uncertainty")
 			}
 			fixture.jobs.controller = controller
@@ -181,7 +197,8 @@ func TestTrustedPreflightAdapterLifecycle(t *testing.T) {
 			sum := sha256.Sum256(bundle.Bytes())
 			suite := hex.EncodeToString(sum[:])
 			recipe := vmrunner.KVMRecipe{SuiteSHA256: suite, GuestSHA256: guest, HarnessImage: "registry.example/harness@sha256:" + strings.Repeat("c", 64), SuiteURL: "https://example.org/suite", GuestURL: "https://example.org/guest"}
-			p, err := NewTrustedPreflights(fixture.jobs, database, []vmrunner.KVMRecipe{recipe}, t.TempDir(), func(context.Context) error { return nil })
+			workspace := t.TempDir()
+			p, err := NewTrustedPreflights(fixture.jobs, database, []vmrunner.KVMRecipe{recipe}, workspace, func(context.Context) error { return nil })
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -228,9 +245,34 @@ func TestTrustedPreflightAdapterLifecycle(t *testing.T) {
 				if scenario == "infrastructure failed" && !strings.Contains(err.Error(), controller.infrastructureReason) {
 					t.Fatalf("trusted preflight hid kubelet message: %v", err)
 				}
-				if scenario == "uncertain create" || scenario == "recover absent" {
+				if scenario == "uncertain create" || scenario == "recover absent" || scenario == "guest recover" {
 					if state.Cleaned {
 						t.Fatal("uncertain create released capacity")
+					}
+					if scenario == "guest recover" {
+						// The Workflow exists and the grant has since been revoked.
+						// Recovery rebuilds the exact spec for observation only and
+						// must admit it under any budget a grant could have named,
+						// never the default, so cleanup is not stranded.
+						grants.allowed = false
+						if e := os.CopyFS(filepath.Join(workspace, run.ID, "src"), os.DirFS(fixture.sourceDir)); e != nil {
+							t.Fatal(e)
+						}
+						controller.createErr = nil
+						observe := fixture.jobs.config
+						controller.observeConfig = &observe
+						ids, recoverErr := p.Recover(ctx)
+						if recoverErr != nil || len(ids) != 1 || ids[0] != run.ID {
+							t.Fatalf("recover granted guest preflight: %v %v", ids, recoverErr)
+						}
+						observed := controller.observed
+						if !observed.KubeVirtGranted || observed.KubeVirtBudget.String() != argoworkflow.VMIBudgetLimit().String() {
+							t.Fatalf("recovery observed with budget %v granted=%v", observed.KubeVirtBudget, observed.KubeVirtGranted)
+						}
+						state, recoverErr = database.KVMPreflight(ctx, run.ID)
+						if recoverErr != nil || !state.Cleaned || state.WorkflowUID != "workflow-uid" || !controller.cleaned {
+							t.Fatalf("granted guest preflight not reconciled: %#v %v", state, recoverErr)
+						}
 					}
 					if scenario == "recover absent" {
 						controller.absent = true

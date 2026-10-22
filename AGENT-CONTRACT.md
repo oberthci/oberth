@@ -1802,7 +1802,13 @@ continuity checks; it must never be used to reset or bypass those checks.
   (unlike nonroot leaves). All KVM leaves require an active administrator VM
   grant, loaded by durable repository ID at submission, and a credential-free
   CI workflow (branch, promotion or schedule; never release). Missing, revoked
-  or unreadable grants fail closed. When `vm.kvm.enabled` is true on the server, each
+  or unreadable grants fail closed. KVM leaves declare no VMI demand: the
+  grant's VMI budget and the scheduler's KubeVirt capacity accounting (#1173)
+  neither count nor throttle them, and they are admitted as ordinary weighted
+  pods. Rollout: repositories that already declare `oberth.ci/kvm-templates`
+  fail closed at admission until an administrator `kubevirt_grant` exists for
+  them, and `oberth validate` refuses KVM leaves unless run with `--kubevirt`.
+  When `vm.kvm.enabled` is true on the server, each
   declared leaf receives `devices.kubevirt.io/kvm: "1"` (request == limit) and
   `OBERTH_KVM=1` in its environment. When the switch is false, a workflow
   declaring KVM leaves fails at admission with an infrastructure-class error.

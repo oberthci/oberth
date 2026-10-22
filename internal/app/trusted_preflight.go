@@ -375,7 +375,12 @@ func (p *TrustedPreflights) recoverOne(ctx context.Context, execution vmrunner.K
 			// only. A revoked grant must not strand its VM capacity obligation.
 			// This path never creates a workflow; the observer requires an exact
 			// match of the journal-bound intent and full emitted specification.
+			// The emitted spec does not depend on the grant budget, so admission
+			// is checked against the largest budget any grant may name rather
+			// than the default: a live grant above the default (or one lowered
+			// or revoked since submission) must not strand reconciliation.
 			request.KubeVirtGranted = true
+			request.KubeVirtBudget = argoworkflow.VMIBudgetLimit()
 			uid, err = p.controller.TrustedKVMWorkflowUID(ctx, request)
 			if err != nil {
 				return fmt.Errorf("uncertain trusted create still requires reconciliation: %w", err)

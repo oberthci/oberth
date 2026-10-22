@@ -30,7 +30,7 @@ func runValidate(_ context.Context, arguments []string, output io.Writer) error 
 	_ = flags.Bool("static", false, "reserved for future use")
 	var imagePrefixes string
 	var containerDiskPrefixes string
-	kubeVirt := flags.Bool("kubevirt", false, "validate KubeVirt VM and guest-test templates (server grant still required)")
+	kubeVirt := flags.Bool("kubevirt", false, "validate KubeVirt VM templates and KVM device leaves, including guest-test leaves (server grant still required)")
 	flags.StringVar(&containerDiskPrefixes, "container-disk-prefixes", "", "comma-separated containerDisk image prefixes for KubeVirt validation")
 	maxVMs := flags.Int("kubevirt-max-vms", 0, "per-run VMI budget to validate against, as a KubeVirt grant would set it (default 2)")
 	maxCores := flags.Int("kubevirt-max-cores", 0, "per-run summed VMI cores to validate against (default 6)")
