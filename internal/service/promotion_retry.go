@@ -129,6 +129,8 @@ type UplinkDirectory interface {
 // while every uplink with that identity is still an admin; a granted one acts
 // as a non-admin and needs its grant, re-checked at admission. Uplinks that
 // share an identity but disagree on scope are refused rather than guessed.
+// Trusted preflight restart recovery uses the stricter
+// store.requireKVMRetryPromotionAuthority, where revoked credentials do not vote.
 func (service *API) currentPromotionAuthority(ctx context.Context, failed model.Promotion) (api.Actor, error) {
 	if service.uplinks == nil {
 		return api.Actor{}, fmt.Errorf("%w: uplink directory", ErrUnavailable)

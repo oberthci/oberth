@@ -1421,7 +1421,7 @@ func runDisplayReason(run model.Run) string {
 	switch {
 	case run.Phase == model.PhaseCancelled:
 		return run.Reason
-	case run.SupersededBy != "" && run.Reason == "re-queued after restart":
+	case run.SupersededBy != "" && (run.Reason == "re-queued after restart" || run.Reason == store.KVMRestartRetryReason):
 		return "server restart, re-queued as " + shortRunID(run.SupersededBy)
 	case run.SupersededBy != "" && run.Reason == "superseded by newer run":
 		return "superseded by newer run"
@@ -1483,7 +1483,7 @@ func (service *API) presentationRunWithSuccessor(ctx context.Context, run model.
 	if !ok {
 		if service.scope != nil && run.SupersededBy != "" {
 			visible.SupersededBy = ""
-			if run.Reason == "re-queued after restart" {
+			if run.Reason == "re-queued after restart" || run.Reason == store.KVMRestartRetryReason {
 				visible.DisplayReason = "server restart, re-queued"
 			}
 		}

@@ -12,6 +12,10 @@ import (
 
 const kvmRestartRetryAction = "kvm.restart-retry"
 
+// KVMRestartRetryReason marks a parent whose fresh attempt is linked through
+// superseded_by; presentation shows it as re-queued, not as needing a retry.
+const KVMRestartRetryReason = "retried once after trusted preflight owner restart"
+
 // RecoverKVMPreflight settles an undelivered, cleanup-qualified parent and at
 // most one fresh execution of its exact intent. Interruption, retry and audit
 // lineage commit together; neither a successful old receipt nor an exec stream
@@ -22,7 +26,7 @@ func (s *Store) RecoverKVMPreflight(ctx context.Context, runID string) (model.Ru
 	if err != nil {
 		return model.Run{}, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	run, err := scanRun(tx.QueryRowContext(ctx, `SELECT `+runColumns+` FROM runs WHERE id=?`, runID))
 	if err != nil {
 		return model.Run{}, err
@@ -69,7 +73,7 @@ func (s *Store) RecoverKVMPreflight(ctx context.Context, runID string) (model.Ru
 			if err != nil {
 				return model.Run{}, err
 			}
-			reason = "retried once after trusted preflight owner restart"
+			reason = KVMRestartRetryReason
 		} else if errors.Is(err, ErrInvalidState) || errors.Is(err, ErrInvalid) || errors.Is(err, ErrNotFound) {
 			reason = "automatic trusted preflight retry refused"
 		} else {
@@ -190,6 +194,13 @@ func (s *Store) enqueueKVMRetryTx(ctx context.Context, tx *sql.Tx, run model.Run
 // A promotion retry retains the exact original plan and grant. It must still
 // have a live, consistently scoped actor; direct authority cannot be recreated
 // from an old admin flag. Delivery retains its existing target-head CAS check.
+//
+// This deliberately diverges from service.currentPromotionAuthority (the
+// moved-target retry, #1097): there every uplink with the identity votes. Here
+// only uplinks with an activated, unrevoked token credential vote, at least one
+// must remain, and scope coverage is checked in this transaction. Recovery runs
+// without a request or any later admission check, so a dormant or revoked
+// credential must not keep an unattended trusted retry alive.
 func requireKVMRetryPromotionAuthority(ctx context.Context, tx *sql.Tx, promotion model.Promotion) error {
 	uplinks, err := matchUplinksByIdentity(ctx, tx, promotion.Actor, "")
 	if err != nil {

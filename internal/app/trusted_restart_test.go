@@ -48,6 +48,8 @@ type restartController struct {
 	journal                              *restartJournal
 	cleanupErr, absenceErr               error
 	cleanupCalls, receiptCalls, uidCalls int
+	cleanupDeadline                      time.Time
+	cleanupBounded                       bool
 }
 
 func (controller *restartController) ConfirmTrustedKVMAbsent(context.Context, string) error {
@@ -63,6 +65,7 @@ func (controller *restartController) TrustedKVMReceipt(context.Context, argojob.
 }
 func (controller *restartController) CleanupTrustedKVM(ctx context.Context, name, runID, uid string) error {
 	controller.cleanupCalls++
+	controller.cleanupDeadline, controller.cleanupBounded = ctx.Deadline()
 	state := controller.journal.state
 	if name != state.Intent.WorkflowName || runID != state.Intent.RunID || uid != state.WorkflowUID || state.Refusal == nil {
 		return errors.New("unbound cleanup or missing negative receipt")
@@ -137,5 +140,25 @@ func TestTrustedRestartCleanupHonorsCallerBound(t *testing.T) {
 	ids, err := preflight.Recover(ctx)
 	if !errors.Is(err, context.DeadlineExceeded) || len(ids) != 0 || journal.state.Cleaned || journal.state.Refusal == nil {
 		t.Fatalf("cleanup deadline settled uncertain parent: ids=%v err=%v", ids, err)
+	}
+}
+
+func TestTrustedRestartRecoveryHasOwnBoundWithoutCallerDeadline(t *testing.T) {
+	journal := &restartJournal{state: vmrunner.KVMExecution{Intent: vmrunner.KVMIntent{RunID: "old-run", WorkflowName: "trusted-old-run"}, WorkflowUID: "exact-workflow-uid", Submitted: true}}
+	controller := &restartController{journal: journal}
+	preflight := &TrustedPreflights{store: journal, controller: controller}
+	if _, ok := t.Context().Deadline(); ok {
+		t.Fatal("test context unexpectedly bounded")
+	}
+	before := time.Now()
+	ids, err := preflight.Recover(t.Context())
+	after := time.Now()
+	if err != nil || len(ids) != 1 || controller.cleanupCalls != 1 {
+		t.Fatalf("recovery=%v %v", ids, err)
+	}
+	// Startup has no deadline of its own; a stuck cleanup must still end within
+	// the two-minute per-execution bound rather than hold startup indefinitely.
+	if !controller.cleanupBounded || controller.cleanupDeadline.Before(before.Add(trustedRecoveryBound)) || controller.cleanupDeadline.After(after.Add(trustedRecoveryBound)) || trustedRecoveryBound != 2*time.Minute {
+		t.Fatalf("cleanup deadline=%v bounded=%v, want two minutes after start", controller.cleanupDeadline, controller.cleanupBounded)
 	}
 }

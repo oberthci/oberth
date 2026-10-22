@@ -282,6 +282,10 @@ func (p *TrustedPreflights) Execute(ctx context.Context, job service.JobRequest,
 	return p.store.RecordKVMReceipt(ctx, intent.RunID, receipt)
 }
 
+// trustedRecoveryBound caps one execution's whole startup recovery: the
+// absence observation, identity reconciliation, negative refusal and cleanup.
+const trustedRecoveryBound = 2 * time.Minute
+
 // Recover never replays execution or grants publication. It cleans durable
 // obligations first; the scheduler then interrupts undelivered parents and
 // may durably queue one fresh attempt.
@@ -294,7 +298,7 @@ func (p *TrustedPreflights) Recover(ctx context.Context) ([]string, error) {
 	var failures []error
 	for _, execution := range pending {
 		// A stuck deletion or ambiguous create cannot hold startup forever.
-		recoveryCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+		recoveryCtx, cancel := context.WithTimeout(ctx, trustedRecoveryBound)
 		recoveryErr := p.recoverOne(recoveryCtx, execution)
 		cancel()
 		if err := recoveryErr; err != nil {

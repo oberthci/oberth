@@ -985,8 +985,9 @@ continuity checks; it must never be used to reset or bypass those checks.
   | failed step or infrastructure | `failed` | empty; error and failed step remain separately available |
   | superseded (`reason='superseded by newer run'`) | `cancelled` | `superseded by <short SHA>`; successor run remains linked |
   | restart re-fire (`reason='re-queued after restart'`; fallback when an adoptable branch Workflow is missing, #1172) | `cancelled` | `server restart, re-queued as <run12>` |
+  | trusted preflight restart retry (`reason='retried once after trusted preflight owner restart'`, linked fresh attempt, #1172) | `cancelled` | `server restart, re-queued as <run12>` |
   | explicit cancel | `cancelled` | `cancelled by <actor>: <reason>` |
-  | restart requiring an operator retry | `cancelled` | `server restart, retry needed` |
+  | restart requiring an operator retry, including a trusted preflight whose automatic retry was spent or refused | `cancelled` | `server restart, retry needed` |
 
   The display pair is additive on default API, MCP and CLI responses; retry
   and rerun eligibility still uses the durable cause. The `status`/`wait`
@@ -1138,7 +1139,8 @@ continuity checks; it must never be used to reset or bypass those checks.
   and optional `publication_id`, `warning` and `error`.
 - A server stop or restart adopts an existing Argo Workflow for an active
   branch, promotion, tag or release run without a pending trusted KVM
-  preflight (#1172, slices 1 and 2). The
+  preflight (#1172, slices 1-4; trusted preflights recover separately, see
+  [trusted preflight restart recovery](docs/trusted-preflight-restart.md)). The
   Workflow's run ID, ref, tested SHA, trigger, persisted concurrency group and
   namespace must match the run and configured engine. Its spec identity must
   be present; its UID, identity and live spec remain pinned during observation.
@@ -1180,9 +1182,19 @@ continuity checks; it must never be used to reset or bypass those checks.
   release/WIF authority from its ref name. A missing promotion/tag/release
   Workflow, or one that never acquired a Job name, is interrupted without
   automatic re-fire. Pending trusted KVM
-  preflights and publication-owning runs keep their existing recovery paths;
-  they are not adopted. Publication ownership is durable and takes precedence
-  over Workflow observation: recovery never submits or adopts that run again.
+  preflights and publication-owning runs keep their own recovery paths;
+  they are not adopted. A trusted preflight is never reattached: once its exact
+  cleanup completes at startup, the undelivered parent is interrupted and may
+  receive one fresh attempt under its original admission sequence, linked by
+  `superseded_by`. For a promotion parent that retry re-checks the admitting
+  actor's authority more strictly than the moved-target retry (#1097): uplinks
+  whose token credential is revoked or not yet activated do not vote, at least
+  one live uplink must remain, and every live one must share a scope that
+  covers the repository (and be an admin for a direct promotion). A dormant or
+  revoked credential therefore cannot keep a trusted retry alive, while the
+  moved-target retry still counts every uplink with that identity.
+  Publication ownership is durable and takes precedence over Workflow
+  observation: recovery never submits or adopts that run again.
   A passing adopted promotion uses its immutable target/base/result through
   the same publication outbox as a new run. Delivery re-reads the target before
   pushing, refuses a moved main, and recognizes an already-applied result after

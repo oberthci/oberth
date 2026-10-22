@@ -16,9 +16,15 @@ leaves that parent recoverable. Recovery retains the exact journaled Workflow
 UID and uses the existing spec/ownership checks and observed-absence cleanup.
 An ambiguous create must still prove absence over the configured request horizon,
 or recover its exact admitted identity; a missing workspace or failed identity
-check cannot authorize cleanup of an unrelated object. Each cleanup observation
-has a two-minute bound, subject to the caller's earlier deadline. Uncertain
-cleanup keeps its journal, capacity reservation and parent pending.
+check cannot authorize cleanup of an unrelated object. Recovery of each pending
+execution is bounded as a whole to two minutes (or the caller's earlier
+deadline): the ambiguous-create absence window (60 seconds plus 30 seconds of
+observation slack), identity reconciliation, the negative refusal and the exact
+cleanup all share that budget. Uncertain or timed-out cleanup keeps its journal,
+capacity reservation and parent pending. Recovery runs once, at owner startup,
+before claims resume; there is no background retry. A parent whose cleanup times
+out therefore keeps its KVM slot, stays undelivered and cannot be retried until
+the next owner restart repeats recovery (fail-closed).
 
 An unreceipted execution receives the existing negative `canceled` refusal before
 cleanup. Existing positive and negative receipts are immutable. Even a Workflow

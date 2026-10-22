@@ -260,6 +260,7 @@ func TestDisplayReasonUsesDurableCauseNotSHAOrTextHeuristics(t *testing.T) {
 	for _, tc := range []struct{ reason, phase, want string }{
 		{"superseded by newer run", "interrupted", "superseded by aaaaaaaa"},
 		{"re-queued after restart", "interrupted", "server restart, re-queued as bbbbbbbbbbbb"},
+		{store.KVMRestartRetryReason, "interrupted", "server restart, re-queued as bbbbbbbbbbbb"},
 		{"cancelled by owner: restart later", "cancelled", "cancelled by owner: restart later"},
 		{"scheduler stopped", "interrupted", "server restart, retry needed"},
 		{"unrelated reason", "interrupted", "server restart, retry needed"},
@@ -285,11 +286,14 @@ func TestDisplayReasonUsesDurableCauseNotSHAOrTextHeuristics(t *testing.T) {
 
 func TestScopedDisplayDoesNotLinkHiddenSuccessor(t *testing.T) {
 	service := &API{scope: &repoScope{}}
-	for _, reason := range []string{"superseded by newer run", "re-queued after restart"} {
+	for _, reason := range []string{"superseded by newer run", "re-queued after restart", store.KVMRestartRetryReason} {
 		run := model.Run{Status: model.RunInterrupted, Reason: reason, SupersededBy: strings.Repeat("b", 32)}
 		got := service.presentationRunWithSuccessor(t.Context(), run, nil)
 		if got.SupersededBy != "" || strings.Contains(got.DisplayReason, "bbbb") || got.DisplayStatus != "cancelled" {
 			t.Fatalf("hidden successor leaked: %+v", got)
+		}
+		if reason == store.KVMRestartRetryReason && got.DisplayReason != "server restart, re-queued" {
+			t.Fatalf("hidden trusted retry reason = %q", got.DisplayReason)
 		}
 	}
 }

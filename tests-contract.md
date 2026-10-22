@@ -291,3 +291,8 @@ persistence fails. `TestTrustedRestartInterruptsThenRunsFreshPreflightBeforeDeli
 loses an in-flight observer and verifies fresh evidence before exactly one main
 Workflow and delivery. `TestTrustedRestartPromotionStillChecksMainBeforePush`
 keeps the immutable promotion plan and proves a moved target prevents its push.
+`TestTrustedShutdownAfterCleanupLeavesParentForRecovery` stops the owner after
+exact cleanup and requires the parent to stay running for startup recovery,
+which then shows it as `server restart, re-queued as <run12>`.
+`TestTrustedRestartRecoveryHasOwnBoundWithoutCallerDeadline` requires the
+two-minute per-execution recovery bound when startup has no deadline.

@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
 	"github.com/oberthci/oberth/internal/vmrunner"
@@ -26,6 +27,29 @@ func (p *shutdownPreflight) Execute(ctx context.Context, job JobRequest, require
 	}
 	close(p.started)
 	<-ctx.Done()
+	return ctx.Err()
+}
+
+// cleanedShutdownPreflight models an owner that records the negative refusal
+// and finishes exact cleanup while stopping, then reports only its lost context.
+type cleanedShutdownPreflight struct {
+	*protectedFixture
+	started chan struct{}
+}
+
+func (p *cleanedShutdownPreflight) Execute(ctx context.Context, job JobRequest, requirement vmrunner.Requirement, output io.Writer) error {
+	if err := p.protectedFixture.Execute(ctx, job, requirement, output); err == nil {
+		return errors.New("fixture unexpectedly completed")
+	}
+	close(p.started)
+	<-ctx.Done()
+	cleanup := context.WithoutCancel(ctx)
+	if err := p.store.RecordKVMRefusal(cleanup, job.Run.ID, vmrunner.KVMRefusal{Code: "canceled", ObservedAt: time.Now().UTC()}); err != nil {
+		return err
+	}
+	if err := p.store.CompleteKVMPreflightCleanup(cleanup, job.Run.ID, "workflow"); err != nil {
+		return err
+	}
 	return ctx.Err()
 }
 
@@ -188,5 +212,63 @@ func TestTrustedRestartPromotionStillChecksMainBeforePush(t *testing.T) {
 				t.Fatalf("exact authorized retry not delivered once: %+v pushes=%v", after, f.git.promotions)
 			}
 		})
+	}
+}
+
+func TestTrustedShutdownAfterCleanupLeavesParentForRecovery(t *testing.T) {
+	fixture := newControlFixture(t, JobResult{Status: model.RunPassed, Phase: "Succeeded"})
+	raw := []byte("version: 2\nprofile: kvm-suite-amd64-v1\nsuite_sha256: " + strings.Repeat("a", 64) + "\nguest_sha256: " + strings.Repeat("b", 64) + "\nartifacts: [build/program]\n")
+	fixture.scheduler.git = &policyTestGit{controlGit: fixture.git, candidate: raw, baseline: raw}
+	first := &cleanedShutdownPreflight{protectedFixture: &protectedFixture{store: fixture.store, omitReceipt: true, omitCleanup: true}, started: make(chan struct{})}
+	fixture.scheduler.trusted = first
+	queued, err := fixture.scheduler.EnqueueCI(t.Context(), CIRequest{EventID: "cleaned-shutdown", Repository: fixture.repo, Branch: "feature/cleaned", SHA: strings.Repeat("c", 40), Actor: "agent"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- fixture.scheduler.ProcessNext(ctx) }()
+	select {
+	case <-first.started:
+	case <-time.After(time.Second):
+		t.Fatal("preflight never started")
+	}
+	cancel()
+	// Cleanup already settled, so shutdown is not an infrastructure failure:
+	// the parent stays running for startup's atomic interruption and retry.
+	if err := <-done; err != nil {
+		t.Fatalf("cleaned shutdown reported failure: %v", err)
+	}
+	source, err := fixture.store.Run(t.Context(), queued.ID)
+	if err != nil || source.Status != model.RunRunning || source.JobName != "" {
+		t.Fatalf("cleaned shutdown settled parent: %+v %v", source, err)
+	}
+	state, err := fixture.store.KVMPreflight(t.Context(), queued.ID)
+	if err != nil || !state.Cleaned || state.Refusal == nil || state.Receipt != nil {
+		t.Fatalf("cleanup not durable: %+v %v", state, err)
+	}
+	if err := fixture.store.RecoverOwnerState(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	executor := &recoveringPreflight{protectedFixture: &protectedFixture{store: fixture.store}}
+	scheduler, err := NewScheduler(SchedulerConfig{Store: fixture.store, Git: fixture.scheduler.git, Logs: fixture.scheduler.logs, Jobs: fixture.jobs, ReleaseJobs: fixture.jobs, Auditor: fixture.store, TrustedPreflight: executor, WorkspaceRoot: fixture.scheduler.workspaceRoot})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = scheduler.recoverTrustedPreflights(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	source, err = fixture.store.Run(t.Context(), queued.ID)
+	if err != nil || source.Status != model.RunInterrupted || source.SupersededBy == "" || source.Reason != store.KVMRestartRetryReason {
+		t.Fatalf("recovery did not retry cleaned parent: %+v %v", source, err)
+	}
+	value, err := fixture.api(t).Run(t.Context(), api.Actor{Identity: "agent"}, source.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	shown := value.(RunDetailResponse).Run
+	if want := "server restart, re-queued as " + shortRunID(source.SupersededBy); shown.DisplayStatus != "cancelled" || shown.DisplayReason != want {
+		t.Fatalf("retried parent presentation = %q/%q, want cancelled/%q", shown.DisplayStatus, shown.DisplayReason, want)
 	}
 }
