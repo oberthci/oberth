@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -1514,6 +1515,21 @@ var burnPrecedence = map[string]int{"-": 0, "passed": 1, "pending": 2, "queued":
 func wireBurns(steps []model.StepResult, run model.Run) (map[string]string, *int) {
 	burns := make(map[string]string)
 	var exitCode *int
+	if canonical := runlog.LegacyRetryBurn(run.FailedBurn); canonical != run.FailedBurn {
+		// A legacy result may now resolve a declaration under its canonical
+		// name. Match that failure identity too, while preserving literal
+		// suffixed burns that still have their own row.
+		literal := false
+		for _, step := range steps {
+			if step.Burn == run.FailedBurn {
+				literal = true
+				break
+			}
+		}
+		if !literal {
+			run.FailedBurn = canonical
+		}
+	}
 	for _, step := range steps {
 		state := ""
 		switch step.Status {
@@ -1532,6 +1548,8 @@ func wireBurns(steps []model.StepResult, run model.Run) (map[string]string, *int
 		case model.StepPassed:
 			state = "passed"
 		case model.StepSkipped:
+			// On terminal runs this also includes declarations never reached
+			// before an engine error or cancellation, beyond Argo's guards.
 			state = "-"
 		default:
 			continue
@@ -1569,7 +1587,7 @@ func matchesFailedStep(step model.StepResult, run model.Run) bool {
 // ever runs from a completed Job's result -- so reading only the store gave it
 // an empty step list, discarding both the plan it was admitted with and the
 // progress it had visibly made. Its honest record is the plan, with the steps
-// that reached a state filled in.
+// that reached a state filled in and unreached declarations marked skipped.
 func (service *API) stepsForRun(ctx context.Context, run model.Run) ([]model.StepResult, error) {
 	steps, err := service.history.StepResults(ctx, run.ID)
 	if err != nil {
@@ -1600,24 +1618,55 @@ func (service *API) stepsForRun(ctx context.Context, run model.Run) ([]model.Ste
 	if len(planned) == 0 && len(events) == 0 {
 		return steps, nil
 	}
-	return mergeSteps(run.ID, planned, events, steps), nil
+	return mergeSteps(run, planned, events, steps), nil
 }
 
-// mergeSteps overlays the three records in increasing order of authority, and
-// only ever forward: a source may advance a step's state, never walk it back.
-// That is what lets a seeded plan entry be replaced by a live observation and
-// then by a durable result without any of them needing to know the others
-// exist, and what keeps the step count equal to the planned count for the
-// whole life of the run instead of however many steps happened to start.
-func mergeSteps(runID string, planned []runprogress.PlannedStep, events []runprogress.Event, persisted []model.StepResult) []model.StepResult {
+// mergeSteps overlays the plan, progress journal, and durable results in
+// increasing order of authority. A source advances a step's state; legacy
+// retry aliases first select the highest attempt, which may restart that
+// state. Declared rows retain their planned names and ordinals throughout.
+func mergeSteps(run model.Run, planned []runprogress.PlannedStep, events []runprogress.Event, persisted []model.StepResult) []model.StepResult {
 	order := make(map[string]int, len(planned))
 	for _, step := range planned {
 		order[step.Burn+"\x00"+step.Step] = step.Ordinal
 	}
+	canonicalObserved := make(map[string]bool)
+	for _, event := range events {
+		canonicalObserved[event.Burn+"\x00"+event.Step] = true
+	}
+	for _, result := range persisted {
+		canonicalObserved[result.Burn+"\x00"+result.Step] = true
+	}
 	merged := make([]model.StepResult, 0, len(planned)+len(events)+len(persisted))
 	position := make(map[string]int, cap(merged))
+	latestLegacy := make(map[string]int)
 	advance := func(candidate model.StepResult) {
 		key := candidate.Burn + "\x00" + candidate.Step
+		newAttempt := false
+		if _, isPlanned := order[key]; !isPlanned {
+			canonical := runlog.LegacyRetryBurn(candidate.Burn)
+			canonicalKey := canonical + "\x00" + candidate.Step
+			if _, planned := order[canonicalKey]; planned && canonical != candidate.Burn {
+				// A modern canonical observation supersedes the legacy alias,
+				// as it does when the journal is restored for adoption.
+				if canonicalObserved[canonicalKey] {
+					return
+				}
+				attempt, err := strconv.Atoi(candidate.Burn[len(canonical)+1 : len(candidate.Burn)-1])
+				if err == nil {
+					// Old durable results used the attempt as their burn. Select
+					// by attempt number, not result order or timestamps, and keep
+					// the declaration's ordinal and the attempt's other evidence.
+					previous, seen := latestLegacy[canonicalKey]
+					if seen && attempt < previous {
+						return
+					}
+					newAttempt = !seen || attempt > previous
+					latestLegacy[canonicalKey] = attempt
+					candidate.Burn, key = canonical, canonicalKey
+				}
+			}
+		}
 		if ordinal, isPlanned := order[key]; isPlanned {
 			candidate.Ordinal = ordinal
 		} else if len(order) != 0 {
@@ -1631,21 +1680,32 @@ func mergeSteps(runID string, planned []runprogress.PlannedStep, events []runpro
 			merged = append(merged, candidate)
 			return
 		}
-		if candidate.Status.Progress() >= merged[index].Status.Progress() {
+		if newAttempt || candidate.Status.Progress() >= merged[index].Status.Progress() {
 			merged[index] = candidate
 		}
 	}
 	for _, step := range planned {
 		advance(model.StepResult{
-			RunID: runID, Burn: step.Burn, Step: step.Step,
+			RunID: run.ID, Burn: step.Burn, Step: step.Step,
 			Ordinal: step.Ordinal, Status: model.StepPending,
 		})
 	}
 	for _, event := range events {
-		advance(progressStepResult(runID, event))
+		advance(progressStepResult(run.ID, event))
 	}
 	for _, result := range persisted {
 		advance(result)
+	}
+	if run.Status.Terminal() {
+		for index := range merged {
+			// Resolve only untouched plan rows, after applying real outcomes.
+			// A terminal run cannot reach these steps later (for example a
+			// false when-condition or an untaken DAG branch). Keep the plan's
+			// ordinal and leave execution timestamps and log ranges absent.
+			if merged[index].Status == model.StepPending {
+				merged[index].Status = model.StepSkipped
+			}
+		}
 	}
 	sort.SliceStable(merged, func(left, right int) bool {
 		if merged[left].Ordinal != merged[right].Ordinal {

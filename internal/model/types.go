@@ -260,11 +260,14 @@ const (
 	// run's durable plan over its results, and it is never a durable result --
 	// PutStepResult refuses it, and the step_results CHECK constraint does not
 	// admit it. A plan must never be able to record an outcome.
-	StepPending  StepStatus = "pending"
-	StepQueued   StepStatus = "queued"
-	StepRunning  StepStatus = "running"
-	StepPassed   StepStatus = "passed"
-	StepFailed   StepStatus = "failed"
+	StepPending StepStatus = "pending"
+	StepQueued  StepStatus = "queued"
+	StepRunning StepStatus = "running"
+	StepPassed  StepStatus = "passed"
+	StepFailed  StepStatus = "failed"
+	// StepSkipped includes a terminal run's declared steps that never executed,
+	// including those unreached after an engine error or cancellation. It is
+	// broader than Argo's when-condition Skipped phase.
 	StepSkipped  StepStatus = "skipped"
 	StepTimedOut StepStatus = "timed_out"
 )

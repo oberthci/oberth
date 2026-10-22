@@ -569,7 +569,7 @@ func (store *Store) StepProgress(runID string) ([]runprogress.Event, error) {
 	ordinals := make(map[int]string)
 	for _, event := range events {
 		key := event.Burn + "\x00" + event.Step
-		if canonical := legacyRetryBurn(event.Burn); canonical != event.Burn &&
+		if canonical := LegacyRetryBurn(event.Burn); canonical != event.Burn &&
 			!planned[key] && known[canonical+"\x00"+event.Step] {
 			continue
 		}
@@ -590,7 +590,11 @@ func (store *Store) StepProgress(runID string) ([]runprogress.Event, error) {
 	return result, nil
 }
 
-func legacyRetryBurn(burn string) string {
+// LegacyRetryBurn removes an exact numeric attempt suffix, task(N), from a
+// legacy burn name. Callers must also establish that the original key is
+// unplanned and the canonical key is known before treating it as an alias.
+// Hook names such as task(N).onExit do not have an attempt suffix.
+func LegacyRetryBurn(burn string) string {
 	if !strings.HasSuffix(burn, ")") {
 		return burn
 	}
