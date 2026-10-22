@@ -325,6 +325,10 @@ type StepResult struct {
 	StartedAt    *time.Time
 	FinishedAt   *time.Time
 	RecordedAt   time.Time
+	// Secrets marks a step whose template runs a credential chain and so
+	// received the secret store login token. It is a projection from the
+	// run's plan, never a durable result: the store does not record it.
+	Secrets bool
 }
 
 type PromotionStatus string

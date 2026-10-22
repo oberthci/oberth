@@ -173,7 +173,6 @@ function runStatusCell(run) {
   return `${statusIcon(status)}${pill(statusLabel(status), statusKind(status))}`;
 }
 function releaseBadge(run) { return run.Release ? '<span class="v4b release">⏏ RELEASE</span>' : ""; }
-function credentialedBadge(run) { return !run.Release && run.Credentialed ? '<span class="v4b release" title="credentialed CI run with secret-store access">⚿ CREDENTIALED</span>' : ""; }
 function runDuration(run) {
   return spanSeconds(run.StartedAt, run.FinishedAt, run.Status === "running");
 }
@@ -473,7 +472,7 @@ function runsTable(runs) {
     const queued = displayRunStatus(run) === "queued";
     const status = queuePhase(run);
     const group = admissionOf(run)?.group || run.ConcurrencyGroup;
-    return `<div class="trow" data-run-id="${esc(run.ID)}"><div class="status-cell run-status">${statusIcon(status)}${pill(statusLabel(status), statusKind(status))}</div><div class="primary"><div class="repo-name">${esc(repoName(run.RepoID))} ${releaseBadge(run)}${credentialedBadge(run)}${group ? ` <span class="v4b dim" title="concurrency group">${esc(group)}</span>` : ""}</div><div class="branch">${esc(run.RefKind === "tag" ? "tag " : "")}${esc(run.Ref)}</div></div><div class="sha">${esc(shortSha(run.SHA))}</div><div class="clip" title="${esc(run.Actor)}">${esc(run.Actor || "--")}</div><div class="nowrap" title="${esc(fmtTime(runWhen(run)))}">${esc(runTimeLabel(run))}<br><span class="meta"${queued ? ` title="${esc(queueSizeTitle(run))}"` : ""}>${queued ? esc(queueSize(run)) : esc(fmtDur(runDuration(run)))}</span></div><div class="clip" title="${esc(queueDetail(run))}">${runMessageCell(run)}</div></div>`;
+    return `<div class="trow" data-run-id="${esc(run.ID)}"><div class="status-cell run-status">${statusIcon(status)}${pill(statusLabel(status), statusKind(status))}</div><div class="primary"><div class="repo-name">${esc(repoName(run.RepoID))} ${releaseBadge(run)}${group ? ` <span class="v4b dim" title="concurrency group">${esc(group)}</span>` : ""}</div><div class="branch">${esc(run.RefKind === "tag" ? "tag " : "")}${esc(run.Ref)}</div></div><div class="sha">${esc(shortSha(run.SHA))}</div><div class="clip" title="${esc(run.Actor)}">${esc(run.Actor || "--")}</div><div class="nowrap" title="${esc(fmtTime(runWhen(run)))}">${esc(runTimeLabel(run))}<br><span class="meta"${queued ? ` title="${esc(queueSizeTitle(run))}"` : ""}>${queued ? esc(queueSize(run)) : esc(fmtDur(runDuration(run)))}</span></div><div class="clip" title="${esc(queueDetail(run))}">${runMessageCell(run)}</div></div>`;
   }).join("")}</div>`;
 }
 async function renderRuns(seq) {
@@ -536,22 +535,55 @@ async function renderRuns(seq) {
 
 /* ---------- run detail: burn/step breakdown + retained logs ---------- */
 function stepKey(step) { return step.Burn + " / " + step.Step; }
-function groupSteps(steps) {
-  const burns = [];
-  let current = null;
-  for (const step of steps || []) {
-    if (!current || current.name !== step.Burn) {
-      current = { name: step.Burn, steps: [] };
-      burns.push(current);
-    }
-    current.steps.push(step);
+/* Argo names the attempts of a retried template task(N). The server folds
+   such a row onto its planned declaration, but an attempt of a step the plan
+   never declared keeps the suffix on its burn (or, for a retried Pod, its
+   step). Read it back here so the row renders as the same logical step with a
+   retry marker -- and only when its first attempt is in the list, so a name
+   that merely ends in (N) is left alone. */
+function stepIdentity(step, keys) {
+  const strip = name => { const match = /^(.*[^\s(])\((\d+)\)$/.exec(name || ""); return match ? { name: match[1], attempt: Number(match[2]) } : { name: name || "", attempt: 0 }; };
+  const burn = strip(step.Burn), name = strip(step.Step);
+  const attempt = burn.attempt || name.attempt;
+  if (attempt && keys.has(`${burn.name}/${name.name}`)) return { burn: burn.name, step: name.name, attempt };
+  return { burn: step.Burn || "", step: step.Step || "", attempt: 0 };
+}
+function stepLabel(identity) { return identity.burn === identity.step ? identity.step : `${identity.burn}/${identity.step}`; }
+/* Execution order: rows that started, by start time (a retry attempt sits
+   right after the attempt it replaced), then rows that have not started yet in
+   plan order. Ordinals are the plan's order, not the run's -- a DAG starts a
+   task when its dependencies allow, and a step the plan could not name (a
+   fragment, a fan-out) carries an ordinal past every planned one. */
+function orderSteps(steps) {
+  const keys = new Set((steps || []).map(step => `${step.Burn}/${step.Step}`));
+  const rows = (steps || []).map((step, index) => {
+    const identity = stepIdentity(step, keys);
+    return { step, index, identity, label: stepLabel(identity), key: `${identity.burn}/${identity.step}`, started: Date.parse(step.StartedAt || "") };
+  });
+  const firstStart = new Map();
+  for (const row of rows) {
+    if (Number.isFinite(row.started) && !(firstStart.get(row.key) <= row.started)) firstStart.set(row.key, row.started);
   }
-  for (const burn of burns) {
-    const kinds = burn.steps.map(step => statusKind(step.Status));
-    burn.kind = kinds.includes("fail") ? "fail" : kinds.includes("run") ? "run" : kinds.includes("pending") ? "pending" : kinds.every(kind => kind === "cancel") ? "cancel" : "pass";
-    burn.seconds = burn.steps.reduce((sum, step) => sum + spanSeconds(step.StartedAt, step.FinishedAt, false), 0);
-  }
-  return burns;
+  rows.sort((a, b) => {
+    const aStart = firstStart.has(a.key) ? firstStart.get(a.key) : Infinity;
+    const bStart = firstStart.has(b.key) ? firstStart.get(b.key) : Infinity;
+    if (aStart !== bStart) return aStart - bStart;
+    if (a.key === b.key) return a.identity.attempt - b.identity.attempt || a.index - b.index;
+    return a.step.Ordinal - b.step.Ordinal || a.index - b.index;
+  });
+  return rows;
+}
+/* Every step is the same row: icon, name, duration. The only variation is
+   the status icon, the duration column (a state word until the step starts),
+   and the small retry / secret markers. */
+function stepRow(row, selectedKey) {
+  const { step, label, identity } = row;
+  const key = stepKey(step), sk = statusKind(step.Status);
+  const seconds = spanSeconds(step.StartedAt, step.FinishedAt, sk === "run");
+  // A row that ran shows its duration, never "--": a sub-second step is "<1s".
+  const timed = step.StartedAt && (step.FinishedAt || sk === "run");
+  const column = timed ? (seconds < 1 ? "<1s" : fmtDur(seconds)) : sk === "cancel" ? "skipped" : statusLabel(step.Status);
+  return `<button class="v4row${key === selectedKey ? " sel" : ""}${sk === "pending" ? " pend" : ""}" data-select-step="${esc(key)}"><span class="ic ${sk === "pass" ? "g" : sk === "fail" ? "r" : sk === "run" ? "o" : "d"}">${sk === "pass" ? "✓" : sk === "fail" ? "✗" : sk === "run" ? "◠" : sk === "cancel" ? "⊘" : "◌"}</span><span class="nm">${esc(label)}</span>${identity.attempt ? `<span class="tag">retry ${esc(identity.attempt)}</span>` : ""}${step.Secrets ? '<span class="tag">secret</span>' : ""}<span class="dur">${esc(column)}</span></button>`;
 }
 function defaultStep(detail) {
   const steps = detail.Steps || [];
@@ -835,7 +867,6 @@ async function renderRunDetailView(detail, seq) {
   if (state.step && !keys.includes(state.step)) state.step = "";
   const selectedKey = state.step || defaultStep(detail);
   const selected = steps.find(step => stepKey(step) === selectedKey) || null;
-  const burns = groupSteps(steps);
   const status = displayRunStatus(run), kind = statusKind(status);
   const phaseLabel = statusLabel(status).toUpperCase();
   const seconds = runDuration(run);
@@ -861,7 +892,7 @@ async function renderRunDetailView(detail, seq) {
         ${bigIcon(status)}
         <span class="rh-name"><span class="rp">${esc(repository)} /</span> ${esc(run.Ref)}</span>
         <span class="v4b ${kind === "pass" ? "pass" : kind === "fail" ? "fail" : kind === "run" ? "run" : "dim"}">${esc(phaseLabel)}</span>
-        ${releaseBadge(run)}${credentialedBadge(run)}
+        ${releaseBadge(run)}
         <div class="time"><span><b>${esc(fmtDur(seconds))}</b></span><span>${esc(ago(runWhen(run)))}</span><button class="v4back" data-action-back>‹ back</button></div>
       </div>
       <div class="rh2">
@@ -878,10 +909,10 @@ async function renderRunDetailView(detail, seq) {
     ${status === "cancelled" ? `<div class="sbanner${runMessage(run) === "server restart, retry needed" ? " retry-warning" : ""}"><span class="err">${esc(runMessage(run))}</span>${run.SupersededBy ? `<button class="chip" data-run-id="${esc(run.SupersededBy)}">view successor ${esc(shortSuccessor(run.SupersededBy))}</button>` : ""}</div>` : ""}
     <div class="v4-body">
       <div class="slist" id="stepList">
-        <div class="sl-h"><span>STEPS · ${stepCount}${run.Release ? " · RELEASE" : run.Credentialed ? " · CREDENTIALED" : ""}</span></div>
+        <div class="sl-h"><span>STEPS · ${stepCount}${run.Release ? " · RELEASE" : ""}</span></div>
         <button class="v4row summary${selected ? "" : " sel"}" data-select-step=""><span class="ic ${kind === "pass" ? "g" : kind === "fail" ? "r" : kind === "run" ? "o" : "d"}">≡</span><span class="nm">Run summary</span><span class="dur">${esc(fmtDur(seconds))}</span></button>
         <div class="sl-sep"></div>
-        ${burns.map(burn => { const solo = burn.steps.length === 1 && burn.steps[0].Step.toLowerCase() === burn.name.toLowerCase(); const header = solo ? "" : `<div class="burn-h">${statusIcon(burn.kind === "pass" ? "passed" : burn.kind === "fail" ? "failed" : burn.kind === "run" ? "running" : burn.kind === "pending" ? "queued" : "skipped")}<span>${esc(burn.name)}</span><span class="dur">${esc(fmtDur(burn.seconds))}</span></div>`; return header + burn.steps.map(step => { const key = stepKey(step), sk = statusKind(step.Status); return `<button class="v4row${key === selectedKey && selected ? " sel" : ""}${sk === "pending" ? " pend" : ""}" data-select-step="${esc(key)}"><span class="ic ${sk === "pass" ? "g" : sk === "fail" ? "r" : sk === "run" ? "o" : "d"}">${sk === "pass" ? "✓" : sk === "fail" ? "✗" : sk === "run" ? "◠" : sk === "cancel" ? "⊘" : "◌"}</span><span class="nm">${esc(step.Step)}</span><span class="dur">${sk === "cancel" ? "skipped" : sk === "pending" ? esc(statusLabel(step.Status)) : esc(fmtDur(spanSeconds(step.StartedAt, step.FinishedAt, sk === "run")))}</span></button>`; }).join(""); }).join("") || '<div class="empty">No step results recorded yet.</div>'}
+        ${orderSteps(steps).map(row => stepRow(row, selected ? selectedKey : "")).join("") || '<div class="empty">No step results recorded yet.</div>'}
       </div>
       <div class="logp">
         <div class="log-h" id="logHead">${selected ? `${statusIcon(selected.Status)}<span class="nm">${esc(stepKey(selected))}</span><span class="v4b ${statusKind(selected.Status) === "pass" ? "pass" : statusKind(selected.Status) === "fail" ? "fail" : statusKind(selected.Status) === "run" ? "run" : "dim"}">${esc(statusLabel(selected.Status).toUpperCase())}</span>` : `<span class="ic ${kind === "pass" ? "g" : kind === "fail" ? "r" : kind === "run" ? "o" : "d"}">≡</span><span class="nm">Run summary</span><span class="v4b ${kind === "pass" ? "pass" : kind === "fail" ? "fail" : kind === "run" ? "run" : "dim"}">${esc(phaseLabel)} · ${esc(fmtDur(seconds))}</span>`}</div>

@@ -52,11 +52,25 @@ func TestRunDetailKeepsQueuedBurnsPending(t *testing.T) {
 		t.Fatal("app.js is not embedded")
 	}
 	source := string(script.body)
-	if !strings.Contains(source, `kinds.includes("pending") ? "pending"`) {
-		t.Fatal("queued steps can repaint their burn as passed")
+	// A queued or declared-but-unreached step is its own row now; it must
+	// never repaint as passed, and its state word takes the duration column.
+	start := strings.Index(source, "function stepRow(row, selectedKey)")
+	end := strings.Index(source, "\nfunction defaultStep(")
+	if start < 0 || end <= start {
+		t.Fatal("app.js is missing the step row renderer")
 	}
-	if !strings.Contains(source, `burn.kind === "pending" ? "queued"`) {
-		t.Fatal("queued burn headers do not render the queued state")
+	row := source[start:end]
+	if !strings.Contains(row, `${sk === "pending" ? " pend" : ""}`) {
+		t.Fatal("queued steps do not render as pending rows")
+	}
+	if !strings.Contains(row, `sk === "cancel" ? "skipped" : statusLabel(step.Status)`) {
+		t.Fatal("queued rows do not render the queued state")
+	}
+	if !strings.Contains(row, `sk === "cancel" ? "⊘" : "◌"`) {
+		t.Fatal("queued rows can repaint with a finished glyph")
+	}
+	if !strings.Contains(source, `case "queued": case "waiting": case "pending": return "pending";`) {
+		t.Fatal("queued steps are not classed as pending")
 	}
 }
 
@@ -326,5 +340,93 @@ func TestArchivedRepositoriesListedLastWithoutToggle(t *testing.T) {
 		if strings.Contains(source, unwanted) {
 			t.Fatalf("archive toggle remains: %s", unwanted)
 		}
+	}
+}
+
+// TestRunDetailStepsAreUniformOrderedRows pins the step list of the run page:
+// one kind of row per executed step, in execution order, with the retry and
+// secret markers as the only decorations, and no run-level credentialed badge
+// anywhere in the dashboard.
+func TestRunDetailStepsAreUniformOrderedRows(t *testing.T) {
+	t.Parallel()
+	source := string(staticAssets["app.js"].body)
+	css := string(staticAssets["app.css"].body)
+	section := func(start, end string) string {
+		from := strings.Index(source, start)
+		if from < 0 {
+			t.Fatalf("app.js is missing %q", start)
+		}
+		to := strings.Index(source[from:], end)
+		if to < 0 {
+			t.Fatalf("app.js is missing %q after %q", end, start)
+		}
+		return source[from : from+to]
+	}
+	// The run-level badge is gone from the list, the detail header and the
+	// step-list heading; the release badge stays where it was.
+	for _, unwanted := range []string{"credentialedBadge", "CREDENTIALED"} {
+		if strings.Contains(source, unwanted) {
+			t.Fatalf("dashboard retains the credentialed badge: %q", unwanted)
+		}
+	}
+	table := section("function runsTable(", "\nasync function renderRuns(")
+	if !strings.Contains(table, "${releaseBadge(run)}") {
+		t.Fatal("runs table lost the release badge")
+	}
+	detail := section("async function renderRunDetailView(", "\n/* ---------- repositories")
+	if !strings.Contains(detail, `${releaseBadge(run)}`) || !strings.Contains(detail, `${run.Release ? " · RELEASE" : ""}`) {
+		t.Fatal("run detail lost the release badge")
+	}
+	// Every step renders through one row renderer, fed by the ordering
+	// function; the grouped burn header and its sub-rows are gone.
+	if !strings.Contains(detail, `${orderSteps(steps).map(row => stepRow(row, selected ? selectedKey : "")).join("")`) {
+		t.Fatal("run detail does not render ordered uniform step rows")
+	}
+	for _, unwanted := range []string{"burn-h", "groupSteps(steps)", "burn.steps", "burn.name"} {
+		if strings.Contains(detail, unwanted) {
+			t.Fatalf("run detail retains grouped burn markup %q", unwanted)
+		}
+	}
+	if strings.Contains(css, ".burn-h") {
+		t.Fatal("app.css retains burn header styling")
+	}
+	// Ordering: by start time for rows that started, retry attempts behind
+	// their first attempt, then plan order for rows that have not started.
+	order := section("function orderSteps(steps)", "\n/*")
+	for _, want := range []string{"Date.parse(step.StartedAt", "firstStart", "if (aStart !== bStart) return aStart - bStart;", "a.identity.attempt - b.identity.attempt", "a.step.Ordinal - b.step.Ordinal"} {
+		if !strings.Contains(order, want) {
+			t.Fatalf("orderSteps is missing %s", want)
+		}
+	}
+	// Naming: burn/step when they differ, the bare name when they are equal,
+	// and a legacy task(N) attempt resolved onto its logical step.
+	if !strings.Contains(source, "function stepLabel(identity) { return identity.burn === identity.step ? identity.step : `${identity.burn}/${identity.step}`; }") {
+		t.Fatal("stepLabel does not name rows burn/step")
+	}
+	identity := section("function stepIdentity(step, keys)", "\nfunction stepLabel(")
+	for _, want := range []string{`\((\d+)\)$`, "keys.has(`${burn.name}/${name.name}`)", "attempt: 0"} {
+		if !strings.Contains(identity, want) {
+			t.Fatalf("stepIdentity is missing %s", want)
+		}
+	}
+	// One row shape: icon, name, optional markers, duration or state.
+	row := section("function stepRow(row, selectedKey)", "\nfunction defaultStep(")
+	for _, want := range []string{
+		`<span class="nm">${esc(label)}</span>`,
+		"${identity.attempt ? `<span class=\"tag\">retry ${esc(identity.attempt)}</span>` : \"\"}",
+		`${step.Secrets ? '<span class="tag">secret</span>' : ""}`,
+		`<span class="dur">${esc(column)}</span>`,
+		`"<1s"`,
+		`sk === "cancel" ? "skipped" : statusLabel(step.Status)`,
+	} {
+		if !strings.Contains(row, want) {
+			t.Fatalf("stepRow is missing %s", want)
+		}
+	}
+	if strings.Count(row, "<button class=\"v4row") != 1 {
+		t.Fatal("stepRow renders more than one row shape")
+	}
+	if !strings.Contains(css, ".v4row .tag{") {
+		t.Fatal("app.css is missing the step marker styling")
 	}
 }

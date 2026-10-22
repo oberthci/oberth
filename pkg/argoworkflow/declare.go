@@ -154,6 +154,63 @@ func DeclaredSecretPaths(workflow *wfv1.Workflow) ([]string, error) {
 	return paths, nil
 }
 
+// UsesEnvconsul reports whether a template's main container command is the
+// envconsul binary, the legacy credential chain that needs the secret store
+// login token.
+func UsesEnvconsul(template *wfv1.Template) bool {
+	isEnvconsul := func(command []string) bool {
+		return len(command) > 0 &&
+			(strings.HasSuffix(command[0], "/envconsul") || command[0] == "envconsul")
+	}
+	if template.Container != nil && isEnvconsul(template.Container.Command) {
+		return true
+	}
+	if template.Script != nil && isEnvconsul(template.Script.Command) {
+		return true
+	}
+	return false
+}
+
+// UsesOberthSecretstore reports whether a template's main container command
+// is `oberth secretstore exec` or `oberth secretstore materialize`, the native
+// credential chain that handles the store fetch, file materialisation, env
+// stripping, and redaction in a single binary.
+func UsesOberthSecretstore(template *wfv1.Template) bool {
+	isOberthSecretstore := func(command, args []string) bool {
+		if len(command) == 0 {
+			return false
+		}
+		// command[0] is the binary path; args carries the subcommands and flags.
+		if !strings.HasSuffix(command[0], "/oberth") && command[0] != "oberth" {
+			return false
+		}
+		// The subcommand words may be in command[1:] or in args[0:].
+		rest := append(command[1:], args...)
+		if len(rest) < 2 {
+			return false
+		}
+		return rest[0] == "secretstore" && (rest[1] == "exec" || rest[1] == "materialize")
+	}
+	if template.Container != nil &&
+		isOberthSecretstore(template.Container.Command, template.Container.Args) {
+		return true
+	}
+	if template.Script != nil &&
+		isOberthSecretstore(template.Script.Command, template.Script.Args) {
+		return true
+	}
+	return false
+}
+
+// UsesSecrets reports whether a template runs any recognised credential
+// chain: envconsul (legacy) or oberth secretstore exec/materialize (native).
+// The server mounts the secret store login token into exactly these Pods and
+// no others, so this is also what marks a planned step as one that reads
+// secrets.
+func UsesSecrets(template *wfv1.Template) bool {
+	return UsesEnvconsul(template) || UsesOberthSecretstore(template)
+}
+
 // AuthorizeSecretPaths proves every declared path is one this repository may
 // reach for this trigger, reusing the Go path's hierarchical scoping rules so
 // both authoring formats answer to the same namespace policy.

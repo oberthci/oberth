@@ -160,10 +160,16 @@ const (
 // declared-and-not-reached, so a status field would be a place for a plan to
 // claim an outcome. A planned step becomes an outcome only when a real
 // observation or a durable result overwrites it.
+//
+// Secrets records that the declared step runs a credential chain and so
+// receives the secret store login token. It is a property of the reviewed
+// document, not an outcome, so the plan may carry it; plans written before it
+// existed decode with it false.
 type PlannedStep struct {
 	Burn    string `json:"burn"`
 	Step    string `json:"step"`
 	Ordinal int    `json:"ordinal"`
+	Secrets bool   `json:"secrets,omitempty"`
 }
 
 // Plan is the durable record of what a run intended to do, written before its

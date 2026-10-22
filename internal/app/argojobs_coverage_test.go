@@ -1144,3 +1144,63 @@ spec:
 		_ = runprogress.PlannedStep{Burn: step.Burn, Step: step.Step, Ordinal: step.Ordinal}
 	}
 }
+
+// TestPlannedSteps_MarksSecretSteps checks the per-step secret flag crosses
+// from the document enumeration into the durable plan record, on exactly the
+// template that runs a credential chain.
+func TestPlannedSteps_MarksSecretSteps(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	oberthDir := filepath.Join(dir, ".oberth")
+	if err := os.MkdirAll(oberthDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	workflow := `apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  annotations:
+    oberth.ci/size: S
+    oberth.ci/secret-paths: kv/ci/token
+spec:
+  entrypoint: main
+  templates:
+    - name: main
+      dag:
+        tasks:
+          - name: lint
+            template: lint-template
+          - name: publish
+            template: publish-template
+            dependencies: [lint]
+    - name: lint-template
+      container:
+        image: alpine:3.20
+        command: ["echo", "lint"]
+    - name: publish-template
+      container:
+        image: alpine:3.20
+        command: ["/run/oberth/bin/oberth"]
+        args: ["secretstore", "exec", "--path", "kv/ci/token", "--", "echo", "publish"]
+`
+	if err := os.WriteFile(filepath.Join(oberthDir, "build.yaml"), []byte(workflow), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	jobs := &ArgoJobs{intents: map[string]argoIntent{}}
+	steps, err := jobs.PlannedSteps(context.Background(), service.JobRequest{
+		Run:        model.Run{Ref: "refs/heads/main"},
+		Repository: model.Repository{Name: "test-repo"},
+		SourceDir:  dir,
+	})
+	if err != nil {
+		t.Fatalf("PlannedSteps: %v", err)
+	}
+	want := map[string]bool{"lint": false, "publish": true}
+	if len(steps) != len(want) {
+		t.Fatalf("planned %+v, want %d steps", steps, len(want))
+	}
+	for _, step := range steps {
+		if secrets, ok := want[step.Step]; !ok || step.Secrets != secrets {
+			t.Errorf("step %s secrets = %v, want %v (known %v)", step.Step, step.Secrets, secrets, ok)
+		}
+	}
+}

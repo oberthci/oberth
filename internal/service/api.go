@@ -1627,8 +1627,10 @@ func (service *API) stepsForRun(ctx context.Context, run model.Run) ([]model.Ste
 // state. Declared rows retain their planned names and ordinals throughout.
 func mergeSteps(run model.Run, planned []runprogress.PlannedStep, events []runprogress.Event, persisted []model.StepResult) []model.StepResult {
 	order := make(map[string]int, len(planned))
+	secrets := make(map[string]bool, len(planned))
 	for _, step := range planned {
 		order[step.Burn+"\x00"+step.Step] = step.Ordinal
+		secrets[step.Burn+"\x00"+step.Step] = step.Secrets
 	}
 	canonicalObserved := make(map[string]bool)
 	for _, event := range events {
@@ -1668,7 +1670,9 @@ func mergeSteps(run model.Run, planned []runprogress.PlannedStep, events []runpr
 			}
 		}
 		if ordinal, isPlanned := order[key]; isPlanned {
-			candidate.Ordinal = ordinal
+			// Only the plan knows whether the step runs a credential chain;
+			// observations and durable results never carry it.
+			candidate.Ordinal, candidate.Secrets = ordinal, secrets[key]
 		} else if len(order) != 0 {
 			// Observed but never planned. It sorts after every planned step
 			// rather than displacing one, keeping the plan's own order intact.
@@ -1687,7 +1691,7 @@ func mergeSteps(run model.Run, planned []runprogress.PlannedStep, events []runpr
 	for _, step := range planned {
 		advance(model.StepResult{
 			RunID: run.ID, Burn: step.Burn, Step: step.Step,
-			Ordinal: step.Ordinal, Status: model.StepPending,
+			Ordinal: step.Ordinal, Status: model.StepPending, Secrets: step.Secrets,
 		})
 	}
 	for _, event := range events {

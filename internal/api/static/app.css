@@ -155,16 +155,14 @@ input,select{height:32px;border:1px solid var(--line);background:var(--panel);co
    last row's hover highlight to the rounded corners. */
 .slist{background:var(--panel);border-right:1px solid var(--line);padding:6px 0 10px;overflow-y:auto;margin-bottom:0;border-radius:0 0 8px 8px}
 .sl-h{display:flex;justify-content:space-between;align-items:center;padding:7px 14px 8px;font-size:10px;letter-spacing:.12em;color:var(--dim);font-weight:700;text-transform:uppercase}
-.burn-h{display:flex;align-items:center;gap:7px;padding:7px 14px 4px;font-size:10px;letter-spacing:.08em;color:var(--yellow);font-weight:700;text-transform:uppercase}
-/* timings render lowercase (2s, 2m 12s) in a fixed right-aligned column shared
-   with .v4row .dur; text-transform:none stops the burn header uppercasing 3s
-   into 3S */
-.burn-h .dur{margin-left:auto;color:var(--dim);letter-spacing:0;text-transform:none;min-width:3.8em;text-align:right;white-space:nowrap}
 .v4row{display:flex;align-items:center;gap:7px;padding:5px 14px 5px 11px;font-size:12px;color:var(--muted);cursor:pointer;border-left:3px solid transparent;width:100%;text-align:left;font-family:inherit;background:transparent;border-top:0;border-right:0;border-bottom:0}
 .v4row:hover{background:var(--panel2)}.v4row.sel{background:var(--panel2);color:var(--fg);font-weight:600;border-left-color:var(--purple)}
 .v4row .ic{width:14px;height:14px;font-size:9px;flex:0 0 14px}
 .v4row .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
 .v4row .dur{margin-left:auto;font-size:10px;color:var(--dim);flex-shrink:0;white-space:nowrap;min-width:3.8em;text-align:right}
+/* small markers beside a step name (retry N, secret); every row keeps the same
+   font, case and indent, only the markers and the duration column differ */
+.v4row .tag{font-size:9px;line-height:14px;padding:0 5px;border-radius:4px;border:1px solid var(--line);color:var(--dim);flex-shrink:0;white-space:nowrap;letter-spacing:.04em}
 .v4row.pend{opacity:.45}
 .v4row.summary{margin-bottom:2px}.v4row.summary .nm{color:var(--dim)}.v4row.sel.summary .nm{color:var(--fg)}
 .sl-sep{height:1px;background:var(--line);margin:4px 14px 5px}

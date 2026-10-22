@@ -1792,17 +1792,7 @@ func injectTemplateVolumeMounts(template *wfv1.Template, injected []corev1.Volum
 // existing tests use (oberth_pipeline_test.go, TestOberthReleasePipeline
 // WrapsCredentialedStepsWithEnvconsul).
 func templateUsesEnvconsul(template *wfv1.Template) bool {
-	isEnvconsul := func(command []string) bool {
-		return len(command) > 0 &&
-			(strings.HasSuffix(command[0], "/envconsul") || command[0] == "envconsul")
-	}
-	if template.Container != nil && isEnvconsul(template.Container.Command) {
-		return true
-	}
-	if template.Script != nil && isEnvconsul(template.Script.Command) {
-		return true
-	}
-	return false
+	return argoworkflow.UsesEnvconsul(template)
 }
 
 // templateUsesOberthSecretstore reports whether a template's main container
@@ -1810,38 +1800,15 @@ func templateUsesEnvconsul(template *wfv1.Template) bool {
 // These are the native credential chain replacements that handle vault fetch,
 // file materialisation, env stripping, and redaction in a single binary.
 func templateUsesOberthSecretstore(template *wfv1.Template) bool {
-	isOberthSecretstore := func(command, args []string) bool {
-		if len(command) == 0 {
-			return false
-		}
-		// command[0] is the binary path; args carries the subcommands and flags.
-		if !strings.HasSuffix(command[0], "/oberth") && command[0] != "oberth" &&
-			command[0] != OberthBinPath {
-			return false
-		}
-		// The subcommand words may be in command[1:] or in args[0:].
-		rest := append(command[1:], args...)
-		if len(rest) < 2 {
-			return false
-		}
-		return rest[0] == "secretstore" && (rest[1] == "exec" || rest[1] == "materialize")
-	}
-	if template.Container != nil &&
-		isOberthSecretstore(template.Container.Command, template.Container.Args) {
-		return true
-	}
-	if template.Script != nil &&
-		isOberthSecretstore(template.Script.Command, template.Script.Args) {
-		return true
-	}
-	return false
+	return argoworkflow.UsesOberthSecretstore(template)
 }
 
 // templateUsesCredentialChain reports whether a template uses any recognised
 // credential chain: envconsul (legacy) or oberth secretstore exec/materialize
-// (native).
+// (native). The rule lives in argoworkflow so the static plan marks the same
+// steps the credential mount injection reaches.
 func templateUsesCredentialChain(template *wfv1.Template) bool {
-	return templateUsesEnvconsul(template) || templateUsesOberthSecretstore(template)
+	return argoworkflow.UsesSecrets(template)
 }
 
 // ExtractExecPaths returns the --path arguments from an `oberth secretstore exec`
