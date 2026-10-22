@@ -186,6 +186,19 @@ observation errored keeps its real result and collects artifacts. Refused
 adoptions log and return the run and `<namespace>/<name>` to delete; read
 failures name it without a deletion instruction.
 
+Retry verdicts #1176: `TestDAGRetryThenPassIsPassed` reproduces a retried
+DAG whose first attempt failed and second passed: the steps carry the planned
+names, the run is green, and the failed attempt stays observable as superseded.
+`TestDAGRetryEveryAttemptFailsIsFailed` and
+`TestPodRetryEveryAttemptFailsPointsAtLastAttempt` keep exhausted retries red
+with FailedStep and the row taken from the last attempt, even when it failed
+at an earlier step. `TestNoRetryStrategyIsUnchanged` pins pipelines without a
+Retry node. `TestNestedRetryInsideDAG` covers a retried pod inside a retried
+DAG inside a burn. `TestPublishReportsSupersededAttemptOnceThenFinalVerdict`
+reports and replays each attempt once, with no retry suffix in any key, and
+not again from a restored reporter; `TestWaitResumedRetriedDAGIsGreen` adopts
+such a Workflow after a restart and reports only the passing retry.
+
 KubeVirt admission #1173: `TestKubeVirtAdmissionAccountsEveryDimension` admits
 concurrent runs up to each VM/core/memory boundary, parks excess demand and
 releases it without blocking another repository.
