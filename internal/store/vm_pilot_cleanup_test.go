@@ -141,7 +141,8 @@ func TestPilotCleanupReconcilesLateUnknownCreateAndChild(t *testing.T) {
 	mustPilot(t, f.s.AddPilotResource(ctx, f.plan.Spec.RunID, intent))
 	mustPilot(t, f.s.SubmitPilotResource(ctx, f.plan.Spec.RunID, intent.Key))
 	runtime := fixturePilotRuntime(t, f)
-	reconciler := vmrunner.PilotReconciler{Journal: f.s, Runtime: runtime, Timeout: time.Second}
+	// Bound recovery without making journal writes compete with a one-second budget.
+	reconciler := vmrunner.PilotReconciler{Journal: f.s, Runtime: runtime, Timeout: time.Minute}
 	if err := reconciler.Recover(ctx); !errors.Is(err, vmrunner.ErrExecutionOutstanding) {
 		t.Fatalf("absence settled unknown create: %v", err)
 	}

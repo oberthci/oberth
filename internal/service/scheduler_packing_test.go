@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/pkg/periapsis"
 )
 
@@ -19,45 +20,82 @@ func (jobs sizedByBranch) PipelineSize(_ context.Context, request JobRequest) (p
 	return periapsis.Size(strings.ToUpper(prefix)), nil
 }
 
-func runPacking(t *testing.T, maxConcurrentJobs int, branches []string) (admitted int, stop func()) {
+func runPacking(t *testing.T, maxConcurrentJobs, expected int, branches []string) (admitted int) {
 	t.Helper()
 	fixture := newConcurrencyFixture(t, periapsis.M, maxConcurrentJobs)
 	jobs := newConcurrentJobs(periapsis.M, len(branches)+1)
 	fixture.scheduler.jobs = sizedByBranch{jobs}
 	fixture.scheduler.releaseJobs = sizedByBranch{jobs}
+	var waiting model.Run
 	for index, branch := range branches {
-		if _, err := fixture.scheduler.EnqueueCI(context.Background(), CIRequest{
+		enqueued, err := fixture.scheduler.EnqueueCI(context.Background(), CIRequest{
 			EventID: "pack-" + branch, Repository: fixture.repo, Branch: "pack/" + branch,
 			SHA: fmt.Sprintf("%040x", index+1), Actor: "agent@host",
-		}); err != nil {
+		})
+		if err != nil {
 			t.Fatal(err)
 		}
+		waiting = enqueued.Run
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	finished := make(chan error, 1)
-	go func() { finished <- fixture.scheduler.Run(ctx) }()
-	// Count Job creations until none arrives for a settle window.
-	deadline := time.After(20 * time.Second)
-	for {
-		select {
-		case <-jobs.admitted:
-			admitted++
-			continue
-		case err := <-finished:
-			t.Fatalf("scheduler stopped after %d admissions: %v", admitted, err)
-		case <-deadline:
-			t.Fatalf("admissions did not settle (%d so far)", admitted)
-		case <-time.After(750 * time.Millisecond):
-		}
-		break
-	}
-	return admitted, func() {
+	finished := make(chan struct{})
+	var schedulerErr error
+	go func() {
+		schedulerErr = fixture.scheduler.Run(ctx)
+		close(finished)
+	}()
+	t.Cleanup(func() {
 		close(jobs.release)
 		cancel()
 		select {
 		case <-finished:
 		case <-time.After(15 * time.Second):
 			t.Error("scheduler did not stop")
+		}
+	})
+	// Wait for every expected Job creation, not for a quiet interval that
+	// can expire before even the first admission on a busy host.
+	deadline := time.NewTimer(20 * time.Second)
+	defer deadline.Stop()
+	for admitted < expected {
+		select {
+		case <-jobs.admitted:
+			admitted++
+		case <-finished:
+			t.Fatalf("scheduler stopped after %d admissions: %v", admitted, schedulerErr)
+		case <-deadline.C:
+			t.Fatalf("admitted %d runs, want %d before the deadline", admitted, expected)
+		}
+	}
+	// All Jobs stay in Wait, so full weight cannot become available. The
+	// extra run must either remain queued behind a closed dispatch gate or
+	// have a prepared reservation waiting for weight. Neither needs silence.
+	poll := time.NewTicker(10 * time.Millisecond)
+	defer poll.Stop()
+	for {
+		state := fixture.scheduler.AdmissionState()
+		if state.Runs != expected || state.Used != state.Capacity {
+			t.Fatalf("packing did not fill exactly the budget: %+v", state)
+		}
+		run, err := fixture.store.Run(ctx, waiting.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		snapshot := fixture.scheduler.AdmissionSnapshot(waiting.QueueSequence)
+		if run.Status == model.RunQueued && !fixture.scheduler.dispatchSlotAvailable(expected) {
+			return admitted
+		}
+		if snapshot != nil && snapshot.State == "waiting" && snapshot.Used+snapshot.Weight > snapshot.Capacity {
+			return admitted
+		}
+		select {
+		case runID := <-jobs.admitted:
+			t.Fatalf("admitted extra run %s past the weight budget", runID)
+		case <-finished:
+			t.Fatalf("scheduler stopped before the extra run waited: %v", schedulerErr)
+		case <-deadline.C:
+			t.Fatalf("extra run never waited for weight: run=%+v admission=%+v", run, snapshot)
+		case <-poll.C:
 		}
 	}
 }
@@ -70,8 +108,7 @@ func TestSmallRunsPackIntoTheWeightBudget(t *testing.T) {
 	for index := range branches {
 		branches[index] = fmt.Sprintf("s-%d", index)
 	}
-	admitted, stop := runPacking(t, 10, branches)
-	defer stop()
+	admitted := runPacking(t, 10, 20, branches)
 	if admitted != 20 {
 		t.Fatalf("admitted %d S runs together, want 20 (the weight budget)", admitted)
 	}
@@ -82,8 +119,7 @@ func TestSmallRunsPackIntoTheWeightBudget(t *testing.T) {
 // the S queued behind them must wait.
 func TestMixedSizesRespectTheWeightBudget(t *testing.T) {
 	branches := []string{"l-0", "l-1", "l-2", "l-3", "m-0", "m-1", "m-2", "s-0", "s-1", "s-2"}
-	admitted, stop := runPacking(t, 10, branches)
-	defer stop()
+	admitted := runPacking(t, 10, 9, branches)
 	if admitted != 9 {
 		t.Fatalf("admitted %d runs, want 9 (weight 20 of 20, the tenth waits)", admitted)
 	}
