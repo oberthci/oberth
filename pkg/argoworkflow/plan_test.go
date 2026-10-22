@@ -3,6 +3,9 @@ package argoworkflow
 import (
 	"strings"
 	"testing"
+
+	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
+	corev1 "k8s.io/api/core/v1"
 )
 
 // planDocument is the idiomatic two-level shape: an entrypoint DAG whose tasks
@@ -274,5 +277,114 @@ spec:
 	}
 	if !strings.Contains(err.Error(), "duplicate step key") {
 		t.Fatalf("error should mention duplicate step key, got: %v", err)
+	}
+}
+
+// secretsDocument nests two credential-chain leaves under one burn beside
+// plain steps, including a template that merely invokes the oberth binary.
+const secretsDocument = `
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+spec:
+  entrypoint: ci
+  templates:
+  - name: ci
+    dag:
+      tasks:
+      - name: setup
+        template: shell
+      - name: publish
+        template: publish
+        depends: setup
+      - name: version
+        template: version
+  - name: publish
+    steps:
+    - - name: fetch
+        template: fetch
+    - - name: push
+        template: push
+  - name: shell
+    container:
+      image: "golang:1.26"
+      command: ["/bin/true"]
+  - name: fetch
+    container:
+      image: "golang:1.26"
+      command: ["/run/oberth/bin/oberth"]
+      args: ["secretstore", "exec", "--path", "kv/ci/token", "--", "/bin/true"]
+  - name: push
+    script:
+      image: "golang:1.26"
+      command: ["/usr/local/bin/envconsul", "-config", "/src/.oberth/envconsul.hcl"]
+      source: "true"
+  - name: version
+    container:
+      image: "golang:1.26"
+      command: ["oberth", "version"]
+`
+
+// TestPlannedStepsMarksTheStepsThatRunACredentialChain pins the per-step
+// secret flag to the one rule the credential mount injection applies: the
+// template's main command is a recognised credential chain. Nothing else in
+// the document -- not the workflow annotation, not a sibling step -- marks
+// a step.
+func TestPlannedStepsMarksTheStepsThatRunACredentialChain(t *testing.T) {
+	workflow, err := Decode([]byte(secretsDocument))
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	planned, err := PlannedSteps(workflow)
+	if err != nil {
+		t.Fatalf("PlannedSteps: %v", err)
+	}
+	got := make(map[string]bool, len(planned))
+	for _, step := range planned {
+		got[step.Burn+"/"+step.Step] = step.Secrets
+	}
+	want := map[string]bool{
+		"setup/setup":     false,
+		"publish/fetch":   true,
+		"publish/push":    true,
+		"version/version": false,
+	}
+	if len(got) != len(want) {
+		t.Fatalf("planned %v, want keys %v", got, want)
+	}
+	for key, secrets := range want {
+		if actual, ok := got[key]; !ok || actual != secrets {
+			t.Errorf("%s secrets = %v (present %v), want %v", key, actual, ok, secrets)
+		}
+	}
+}
+
+func TestUsesSecrets(t *testing.T) {
+	container := func(command []string, args ...string) *wfv1.Template {
+		return &wfv1.Template{Container: &corev1.Container{Command: command, Args: args}}
+	}
+	script := func(command []string, args ...string) *wfv1.Template {
+		return &wfv1.Template{Script: &wfv1.ScriptTemplate{Container: corev1.Container{Command: command, Args: args}}}
+	}
+	cases := []struct {
+		name     string
+		template *wfv1.Template
+		want     bool
+	}{
+		{"bare envconsul", container([]string{"envconsul", "-config", "x.hcl"}), true},
+		{"envconsul by path", script([]string{"/usr/local/bin/envconsul"}), true},
+		{"secretstore exec in args", container([]string{"/run/oberth/bin/oberth"}, "secretstore", "exec", "--path", "kv/a"), true},
+		{"secretstore materialize in command", script([]string{"oberth", "secretstore", "materialize"}), true},
+		{"oberth without secretstore", container([]string{"oberth", "version"}), false},
+		{"secretstore under another binary", container([]string{"sh"}, "secretstore", "exec"), false},
+		{"secretstore subcommand alone", container([]string{"oberth"}, "secretstore"), false},
+		{"plain shell", container([]string{"/bin/sh", "-c", "true"}), false},
+		{"no pod", &wfv1.Template{}, false},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			if got := UsesSecrets(testCase.template); got != testCase.want {
+				t.Fatalf("UsesSecrets = %v, want %v", got, testCase.want)
+			}
+		})
 	}
 }

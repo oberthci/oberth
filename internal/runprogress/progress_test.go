@@ -2,6 +2,7 @@ package runprogress
 
 import (
 	"bytes"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -290,4 +291,46 @@ func TestPlanValidate(t *testing.T) {
 			t.Fatal("accepted burn with NUL in plan")
 		}
 	})
+}
+
+// TestPlannedStepSecretsIsAdditive pins the wire shape of the per-step secret
+// flag: present only when set, so plans written before it existed and plans
+// without credentialed steps encode and decode exactly as they always did.
+func TestPlannedStepSecretsIsAdditive(t *testing.T) {
+	cases := []struct {
+		name     string
+		step     PlannedStep
+		wantJSON string
+	}{
+		{"plain", PlannedStep{Burn: "test", Step: "lint", Ordinal: 0}, `{"burn":"test","step":"lint","ordinal":0}`},
+		{"secrets", PlannedStep{Burn: "publish", Step: "push", Ordinal: 1, Secrets: true}, `{"burn":"publish","step":"push","ordinal":1,"secrets":true}`},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			body, err := json.Marshal(testCase.step)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(body) != testCase.wantJSON {
+				t.Fatalf("encoded %s, want %s", body, testCase.wantJSON)
+			}
+			var decoded PlannedStep
+			if err := json.Unmarshal(body, &decoded); err != nil {
+				t.Fatal(err)
+			}
+			if decoded != testCase.step {
+				t.Fatalf("round trip %+v, want %+v", decoded, testCase.step)
+			}
+		})
+	}
+	var legacy Plan
+	if err := json.Unmarshal([]byte(`{"version":1,"steps":[{"burn":"test","step":"lint","ordinal":0}]}`), &legacy); err != nil {
+		t.Fatal(err)
+	}
+	if err := legacy.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if len(legacy.Steps) != 1 || legacy.Steps[0].Secrets {
+		t.Fatalf("legacy plan decoded as %+v, want one step without secrets", legacy.Steps)
+	}
 }

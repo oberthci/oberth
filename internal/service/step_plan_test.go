@@ -430,3 +430,53 @@ func TestWireBurnsDoesNotDependOnStepOrder(t *testing.T) {
 		t.Errorf("a burn containing a failure = %q, want failed", burns["c"])
 	}
 }
+
+// TestMergeStepsCarriesPlannedSecrets checks that the per-step secret flag
+// survives every source that can advance a declared row, and never appears on
+// a row the plan did not mark: only the plan knows which steps run a
+// credential chain.
+func TestMergeStepsCarriesPlannedSecrets(t *testing.T) {
+	plan := []runprogress.PlannedStep{
+		{Burn: "setup", Step: "setup", Ordinal: 0},
+		{Burn: "publish", Step: "push", Ordinal: 1, Secrets: true},
+	}
+	at := time.Unix(1000, 0).UTC()
+	cases := []struct {
+		name      string
+		events    []runprogress.Event
+		persisted []model.StepResult
+		want      map[string]bool
+	}{
+		{"plan only", nil, nil, map[string]bool{"setup/setup": false, "publish/push": true}},
+		{"journal event", []runprogress.Event{
+			{Version: runprogress.Version, Burn: "publish", Step: "push", Ordinal: 1, Status: runprogress.StepRunning, StartedAt: &at},
+		}, nil, map[string]bool{"setup/setup": false, "publish/push": true}},
+		{"durable result", nil, []model.StepResult{
+			{Burn: "publish", Step: "push", Status: model.StepPassed, StartedAt: &at, FinishedAt: &at},
+			{Burn: "setup", Step: "setup", Status: model.StepPassed, StartedAt: &at, FinishedAt: &at},
+		}, map[string]bool{"setup/setup": false, "publish/push": true}},
+		{"legacy retry alias", nil, []model.StepResult{
+			{Burn: "publish(1)", Step: "push", Status: model.StepPassed, StartedAt: &at, FinishedAt: &at},
+		}, map[string]bool{"setup/setup": false, "publish/push": true}},
+		{"unplanned observation", nil, []model.StepResult{
+			{Burn: "extra", Step: "extra", Status: model.StepPassed, StartedAt: &at, FinishedAt: &at},
+		}, map[string]bool{"setup/setup": false, "publish/push": true, "extra/extra": false}},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			steps := mergeSteps(model.Run{ID: "secrets", Status: model.RunRunning}, plan, testCase.events, testCase.persisted)
+			got := make(map[string]bool, len(steps))
+			for _, step := range steps {
+				got[step.Burn+"/"+step.Step] = step.Secrets
+			}
+			if len(got) != len(testCase.want) {
+				t.Fatalf("steps %+v, want keys %v", steps, testCase.want)
+			}
+			for key, secrets := range testCase.want {
+				if actual, ok := got[key]; !ok || actual != secrets {
+					t.Errorf("%s secrets = %v (present %v), want %v", key, actual, ok, secrets)
+				}
+			}
+		})
+	}
+}

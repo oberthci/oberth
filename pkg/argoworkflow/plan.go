@@ -15,10 +15,16 @@ import (
 // tasks in dependency order and a repository is free to declare them in any
 // order it likes. The plan ordinal is the stable one, so a run's step list
 // reads the same before it starts, while it runs, and after it finishes.
+//
+// Secrets reports whether the step's template runs a recognised credential
+// chain (UsesSecrets), which is the same condition that mounts the secret
+// store login token into exactly that Pod. It is read from the document like
+// everything else here: a declared intent, not an observed read.
 type PlannedStep struct {
 	Burn    string
 	Step    string
 	Ordinal int
+	Secrets bool
 }
 
 // MaxPlannedSteps bounds the enumeration. A repository-authored document is
@@ -150,7 +156,7 @@ func (walk *planWalk) descend(template *wfv1.Template, enclosing string, depth i
 			if len(walk.steps) >= MaxPlannedSteps {
 				return fmt.Errorf("argoworkflow: pipeline declares more than %d steps", MaxPlannedSteps)
 			}
-			walk.steps = append(walk.steps, PlannedStep{Burn: burn, Step: step, Ordinal: len(walk.steps)})
+			walk.steps = append(walk.steps, PlannedStep{Burn: burn, Step: step, Ordinal: len(walk.steps), Secrets: UsesSecrets(target)})
 		}
 	}
 	return nil

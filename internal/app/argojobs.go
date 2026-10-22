@@ -271,7 +271,7 @@ func (jobs *ArgoJobs) PlannedSteps(_ context.Context, request service.JobRequest
 	}
 	steps := make([]runprogress.PlannedStep, 0, len(planned))
 	for _, step := range planned {
-		steps = append(steps, runprogress.PlannedStep{Burn: step.Burn, Step: step.Step, Ordinal: step.Ordinal})
+		steps = append(steps, runprogress.PlannedStep{Burn: step.Burn, Step: step.Step, Ordinal: step.Ordinal, Secrets: step.Secrets})
 	}
 	return steps, nil
 }
