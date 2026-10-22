@@ -25,15 +25,37 @@ a workflow declaring KVM leaves fails at admission with an infrastructure-class
 error rather than silently falling back to TCG.
 
 The consumer checks `OBERTH_KVM=1` and uses `-accel kvm` only when present.
-Residual: Lane B (trusted suites / tests.yaml v2), allocatable pre-check,
-`vm.maxConcurrentRuns`, and per-consumer annotation follow-up.
+Lane B trusted suites use the separate protected executor and operator recipes
+below. The Beacon transport types and journal described later remain inactive
+host-side foundations; they add no repository-selected command, image, URL,
+credential or execution option.
 
-Required-suite dispatch remains unavailable. `.oberth/tests.yaml` retains its
-closed version-1 offline eBPF profile; a requirement or unreadable policy fails
-before build creation and publication, including recovery and fast-forward
-promotion. The Beacon types and journal described here are inactive host-side
-foundations. They add no repository-selected command, image, URL, credential
-or execution option.
+## Lane B trusted-suite pin rotation
+
+The closed `.oberth/tests.yaml` v2 contract selects `kvm-suite-amd64-v1`,
+`suite_sha256`, `guest_sha256` and an ordered `artifacts` list. The legacy v1
+profile remains unavailable. Unreadable policy fails before build creation and
+publication, including recovery and fast-forward promotion.
+
+An operator first adds the reviewed new suite/guest pair and its complete
+harness/image/endpoints recipe to `trustedTests.recipes`. A candidate can then
+rotate **both hashes together**, leaving every other contract field identical
+to the upstream default branch. The pair must exactly match one configured
+recipe; combining hashes from different recipes, changing only one hash,
+removing the declaration, or changing profile, version or artifacts is refused.
+Candidates cannot add recipes or select execution commands, images or URLs.
+
+CI, publication recovery and fast-forward promotion reread upstream policy and
+check the current executor's recipe allowlist. Removing the new recipe after a
+green run prevents promotion; receipt verification also checks the complete
+journaled recipe. Keep the old recipe while old-pin runs still need it. Recipe
+configuration rollout and promotion remain operator actions.
+
+Each accepted rotation policy check writes `trusted.pin_rotation.authorized`
+to the durable audit chain, recording repository identity, candidate/default
+commit SHAs and old/new pin pairs. Checks may recur at scheduling/publication
+boundaries; these records authorize a rotation but do not assert publication.
+If the audit append fails, the rotation cannot proceed.
 
 ## Bound plan and artifact custody
 

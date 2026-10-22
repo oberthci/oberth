@@ -1437,9 +1437,18 @@ continuity checks; it must never be used to reset or bypass those checks.
   `suite_sha256`, `guest_sha256` (each 64 lowercase hexadecimal characters),
   and `artifacts` (1–32 unique canonical relative file paths). It accepts no
   commands, URLs, images, identities, resource overrides or version-1 fields.
-  Candidate/default-policy reconciliation preserves the complete published
-  contract, including both pins and the ordered artifact list. A candidate
-  cannot remove a requirement or replace its suite/guest pins.
+  Candidate/default-policy reconciliation preserves requirement presence and
+  every field, including the ordered artifact list, except an authorized paired
+  pin rotation: both `suite_sha256` and `guest_sha256` must change together and
+  their new pair must exactly match an operator-configured `trustedTests.recipes`
+  entry. Removal, half-pair changes, profile/version/artifact changes and
+  unapproved pairs fail closed. CI, publication recovery and fast-forward
+  promotion resolve the fresh upstream default contract and current executor
+  recipes; a prior green run cannot authorize a revoked pair. The full journaled
+  recipe is also rechecked before publication. Each successful rotation policy
+  check must append `trusted.pin_rotation.authorized` with the repository,
+  candidate/default SHAs and old/new pin pairs; audit failure refuses progress.
+  This records authorization, not a completed promotion.
 - Lane B suite bundle format v1 is a bounded, uncompressed USTAR archive
   (maximum 64 MiB and 1024 regular files). The verifier hashes the complete
   archive against `suite_sha256` **before** parsing. Paths must be unique,

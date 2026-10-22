@@ -18,14 +18,17 @@ type PolicyGit interface {
 }
 
 type Requirement struct {
+	// RotatedFrom is populated only after a paired pin rotation is authorized.
+	RotatedFrom  *Contract
 	CandidateSHA string
 	BaselineSHA  string
 	Contract     *Contract
 }
 
-// ResolveRequirement retains published requirements when the candidate removes
-// the declaration. Read failures are errors, never evidence of absence.
-func ResolveRequirement(ctx context.Context, git PolicyGit, repository, candidateSHA string) (Requirement, error) {
+// ResolveRequirement refuses removal or changes to published requirements,
+// except paired pins authorized against current operator recipes.
+// Read failures are errors, never evidence of absence.
+func ResolveRequirement(ctx context.Context, git PolicyGit, repository, candidateSHA string, authorizeRotation func(Contract) error) (Requirement, error) {
 	if git == nil || strings.TrimSpace(repository) == "" || !gitoid.Valid(candidateSHA) {
 		return Requirement{}, errors.New("trusted test policy requires Git, repository and exact candidate SHA")
 	}
@@ -50,11 +53,15 @@ func ResolveRequirement(ctx context.Context, git PolicyGit, repository, candidat
 	if err != nil {
 		return Requirement{}, fmt.Errorf("upstream trusted test policy: %w", err)
 	}
-	contract, err := RequiredContract(candidate, baseline)
+	contract, err := RequiredContract(candidate, baseline, authorizeRotation)
 	if err != nil {
 		return Requirement{}, err
 	}
-	return Requirement{CandidateSHA: candidateSHA, BaselineSHA: baselineSHA, Contract: contract}, nil
+	requirement := Requirement{CandidateSHA: candidateSHA, BaselineSHA: baselineSHA, Contract: contract}
+	if baseline != nil && candidate != nil && candidate.SuiteSHA256 != baseline.SuiteSHA256 {
+		requirement.RotatedFrom = baseline
+	}
+	return requirement, nil
 }
 
 func decodeOptionalContract(body []byte, exists bool) (*Contract, error) {

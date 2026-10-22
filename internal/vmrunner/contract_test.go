@@ -1,6 +1,7 @@
 package vmrunner
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -35,13 +36,13 @@ func TestContractRefusesCandidateAuthority(t *testing.T) {
 	}
 }
 
-func TestRequiredContractRetainsDeletedBaseline(t *testing.T) {
+func TestRequiredContractCopiesUnchangedBaseline(t *testing.T) {
 	t.Parallel()
 	baseline, err := DecodeContract([]byte(validContract))
 	if err != nil {
 		t.Fatal(err)
 	}
-	required, err := RequiredContract(nil, &baseline)
+	required, err := RequiredContract(&baseline, &baseline, nil)
 	if err != nil || required == nil || !reflect.DeepEqual(*required, baseline) {
 		t.Fatalf("required = %v, err = %v", required, err)
 	}
@@ -103,4 +104,58 @@ func FuzzDecodeContract(f *testing.F) {
 			t.Fatal("admitted contract escaped fixed vocabulary")
 		}
 	})
+}
+
+func TestRequiredContractAllowsOnlyApprovedPairedRotation(t *testing.T) {
+	baseline := kvmContractFixture()
+	rotated := baseline
+	rotated.SuiteSHA256, rotated.GuestSHA256 = strings.Repeat("c", 64), strings.Repeat("d", 64)
+	for _, mode := range []string{"approved", "unapproved", "no authority", "suite only", "guest only", "removed", "profile", "version", "artifacts", "artifact order"} {
+		t.Run(mode, func(t *testing.T) {
+			original, candidate := baseline, rotated
+			var selected = &candidate
+			calls := 0
+			approve := func(c Contract) error {
+				calls++
+				if mode == "unapproved" || c.SuiteSHA256 != rotated.SuiteSHA256 || c.GuestSHA256 != rotated.GuestSHA256 {
+					return errors.New("pair is not operator-approved")
+				}
+				return nil
+			}
+			switch mode {
+			case "no authority":
+				approve = nil
+			case "suite only":
+				candidate.GuestSHA256 = baseline.GuestSHA256
+			case "guest only":
+				candidate.SuiteSHA256 = baseline.SuiteSHA256
+			case "removed":
+				selected = nil
+			case "profile":
+				candidate.Profile = OfflineEBPFProfile
+			case "version":
+				candidate = Contract{Version: 1, Profile: OfflineEBPFProfile, Artifact: BPFArtifact}
+			case "artifacts":
+				candidate.Artifacts = []string{"different.o"}
+			case "artifact order":
+				original.Artifacts = []string{"one.o", "two.o"}
+				candidate.Artifacts = []string{"two.o", "one.o"}
+			}
+			got, err := RequiredContract(selected, &original, approve)
+			if mode == "approved" {
+				if err != nil || !reflect.DeepEqual(got, &candidate) || calls != 1 {
+					t.Fatalf("approved rotation = %#v, %v; approval calls=%d", got, err, calls)
+				}
+				got.Artifacts[0] = "changed"
+				if candidate.Artifacts[0] != BPFArtifact {
+					t.Fatal("rotation aliases candidate artifacts")
+				}
+			} else if err == nil || got != nil {
+				t.Fatalf("unsafe rotation admitted: %#v, %v", got, err)
+			}
+			if mode != "approved" && mode != "unapproved" && calls != 0 {
+				t.Fatal("invalid contract reached recipe approval")
+			}
+		})
+	}
 }

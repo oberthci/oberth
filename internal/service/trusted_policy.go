@@ -2,9 +2,11 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
+	"strconv"
 
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/vmrunner"
@@ -13,6 +15,7 @@ import (
 // TrustedPreflight is deliberately separate from release delivery. Execute
 // finishes credential-free testing AND cleanup before the main Job is recorded.
 type TrustedPreflight interface {
+	// Supports requires an exact suite/guest pair in the current operator recipes.
 	Supports(vmrunner.Contract) error
 	RecipeAllowed(vmrunner.KVMRecipe) error
 	Execute(context.Context, JobRequest, vmrunner.Requirement, io.Writer) error
@@ -24,7 +27,13 @@ func (scheduler *Scheduler) trustedRequirement(ctx context.Context, repository m
 	if err != nil {
 		return vmrunner.Requirement{}, fmt.Errorf("load trusted test policy upstream: %w", err)
 	}
-	requirement, err := vmrunner.ResolveRequirement(ctx, scheduler.git, upstream.QualifiedRepo(repository.Name), candidateSHA)
+	var authorizeRotation func(vmrunner.Contract) error
+	if scheduler.trusted != nil {
+		// Supports resolves the exact suite/guest pair against the executor's
+		// current operator-owned recipes, including at publication boundaries.
+		authorizeRotation = scheduler.trusted.Supports
+	}
+	requirement, err := vmrunner.ResolveRequirement(ctx, scheduler.git, upstream.QualifiedRepo(repository.Name), candidateSHA, authorizeRotation)
 	if err != nil {
 		return requirement, err
 	}
@@ -37,6 +46,22 @@ func (scheduler *Scheduler) trustedRequirement(ctx context.Context, repository m
 		}
 		if err = scheduler.trusted.Supports(*requirement.Contract); err != nil {
 			return requirement, err
+		}
+	}
+	if previous := requirement.RotatedFrom; previous != nil {
+		details, err := json.Marshal(map[string]string{
+			"candidate_sha": requirement.CandidateSHA, "baseline_sha": requirement.BaselineSHA,
+			"from_suite_sha256": previous.SuiteSHA256, "from_guest_sha256": previous.GuestSHA256,
+			"to_suite_sha256": requirement.Contract.SuiteSHA256, "to_guest_sha256": requirement.Contract.GuestSHA256,
+		})
+		if err == nil {
+			_, err = scheduler.auditor.AppendAuditAction(ctx, model.AuditActionSpec{
+				Actor: "scheduler", Action: "trusted.pin_rotation.authorized", ResourceType: "repository",
+				ResourceID: strconv.FormatInt(repository.ID, 10), Details: string(details),
+			})
+		}
+		if err != nil {
+			return requirement, fmt.Errorf("audit trusted test pin rotation: %w", err)
 		}
 	}
 	return requirement, nil

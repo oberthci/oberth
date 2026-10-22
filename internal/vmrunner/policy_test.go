@@ -22,7 +22,7 @@ func (reader policyReader) ReadDefaultBlob(context.Context, string, string, int)
 	return reader.baselineSHA, reader.baseline, reader.baselineExists, reader.err
 }
 
-func TestResolveRequirementRetainsPublishedSuiteAndRejectsUncertainPolicy(t *testing.T) {
+func TestResolveRequirementRejectsRemovalAndUncertainPolicy(t *testing.T) {
 	contract := []byte("version: 1\nprofile: ebpf-offline-amd64-v1\nartifact: ebpf/secret_monitor.o\n")
 	for _, test := range []struct {
 		name                    string
@@ -31,7 +31,7 @@ func TestResolveRequirementRetainsPublishedSuiteAndRejectsUncertainPolicy(t *tes
 	}{
 		{name: "unborn with no requirement"},
 		{name: "candidate declaration on unborn upstream", reader: policyReader{candidate: contract, candidateExists: true}, wantRequired: true},
-		{name: "deleted published requirement", reader: policyReader{baselineSHA: strings.Repeat("b", 40), baseline: contract, baselineExists: true}, wantRequired: true},
+		{name: "deleted published requirement", reader: policyReader{baselineSHA: strings.Repeat("b", 40), baseline: contract, baselineExists: true}, wantError: true},
 		{name: "missing baseline identity", reader: policyReader{baseline: contract, baselineExists: true}, wantError: true},
 		{name: "invalid baseline identity", reader: policyReader{baselineSHA: "main"}, wantError: true},
 		{name: "unavailable upstream", reader: policyReader{err: errors.New("offline")}, wantError: true},
@@ -40,7 +40,7 @@ func TestResolveRequirementRetainsPublishedSuiteAndRejectsUncertainPolicy(t *tes
 		{name: "empty existing declaration", reader: policyReader{candidateExists: true}, wantError: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			got, err := ResolveRequirement(context.Background(), test.reader, "upstream/org/repo", strings.Repeat("a", 40))
+			got, err := ResolveRequirement(context.Background(), test.reader, "upstream/org/repo", strings.Repeat("a", 40), nil)
 			if (err != nil) != test.wantError {
 				t.Fatalf("error = %v, want error %v", err, test.wantError)
 			}

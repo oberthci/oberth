@@ -79,9 +79,9 @@ func TestKVMContractClosedSchemaAndBaseline(t *testing.T) {
 			}
 		})
 	}
-	required, err := RequiredContract(nil, &contract)
+	required, err := RequiredContract(&contract, &contract, nil)
 	if err != nil || !reflect.DeepEqual(required, &contract) {
-		t.Fatalf("deleted baseline: %v, %v", required, err)
+		t.Fatalf("unchanged baseline: %v, %v", required, err)
 	}
 	required.Artifacts[0] = "modified"
 	if contract.Artifacts[0] != BPFArtifact {
@@ -89,12 +89,12 @@ func TestKVMContractClosedSchemaAndBaseline(t *testing.T) {
 	}
 	changed := contract
 	changed.GuestSHA256 = strings.Repeat("c", 64)
-	if _, err := RequiredContract(&changed, &contract); err == nil {
+	if _, err := RequiredContract(&changed, &contract, nil); err == nil {
 		t.Fatal("candidate replaced published guest pin")
 	}
 	changed = contract
 	changed.SuiteSHA256 = strings.Repeat("d", 64)
-	if _, err := RequiredContract(&changed, &contract); err == nil {
+	if _, err := RequiredContract(&changed, &contract, nil); err == nil {
 		t.Fatal("candidate replaced published suite pin")
 	}
 }

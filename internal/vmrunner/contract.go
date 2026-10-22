@@ -132,8 +132,9 @@ func ReadContract(sourceDir string) (*Contract, error) {
 }
 
 // RequiredContract prevents a branch from removing its published baseline.
-// An incompatible union, including changed v2 pins or artifacts, fails closed.
-func RequiredContract(candidate, baseline *Contract) (*Contract, error) {
+// Only a paired v2 pin rotation may differ, and it requires current operator
+// authorization. A nil authorizeRotation callback refuses all changes.
+func RequiredContract(candidate, baseline *Contract, authorizeRotation func(Contract) error) (*Contract, error) {
 	for _, contract := range []*Contract{candidate, baseline} {
 		if contract != nil {
 			if err := ValidateContract(*contract); err != nil {
@@ -141,8 +142,22 @@ func RequiredContract(candidate, baseline *Contract) (*Contract, error) {
 			}
 		}
 	}
+	if baseline != nil && candidate == nil {
+		return nil, errors.New("candidate removed the upstream trusted test requirement")
+	}
 	if candidate != nil && baseline != nil && !reflect.DeepEqual(candidate, baseline) {
-		return nil, errors.New("candidate trusted test contract conflicts with the upstream default requirement")
+		unchanged := *candidate
+		unchanged.SuiteSHA256, unchanged.GuestSHA256 = baseline.SuiteSHA256, baseline.GuestSHA256
+		if candidate.Version != 2 || !reflect.DeepEqual(&unchanged, baseline) ||
+			candidate.SuiteSHA256 == baseline.SuiteSHA256 || candidate.GuestSHA256 == baseline.GuestSHA256 {
+			return nil, errors.New("candidate trusted test contract conflicts with the upstream default requirement: only paired v2 pin rotation is permitted")
+		}
+		if authorizeRotation == nil {
+			return nil, errors.New("trusted test pin rotation requires an operator-approved recipe")
+		}
+		if err := authorizeRotation(*candidate); err != nil {
+			return nil, fmt.Errorf("authorize trusted test pin rotation: %w", err)
+		}
 	}
 	selected := candidate
 	if selected == nil {
