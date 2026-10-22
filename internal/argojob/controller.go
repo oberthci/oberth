@@ -570,13 +570,14 @@ func (controller *Controller) publish(ctx context.Context, workflow *wfv1.Workfl
 	// replaced them, and their failure and log are the evidence of why the
 	// step was retried. They are reported once and never decide a verdict.
 	// An attempt still non-terminal when superseded has nothing to report.
-	steps := make([]StepResult, 0)
-	for _, step := range stepAttempts(workflow) {
+	observed := stepAttempts(workflow)
+	steps := make([]StepResult, 0, len(observed))
+	for _, step := range observed {
 		if step.Superseded && terminal(step.Status) {
 			steps = append(steps, step)
 		}
 	}
-	steps = append(steps, StepResults(workflow)...)
+	steps = append(steps, finalStepResults(observed)...)
 	for _, step := range steps {
 		if !reporter.observe(destination, step) {
 			continue
@@ -756,9 +757,12 @@ func (reporter *progressReporter) observe(destination io.Writer, step StepResult
 		// Report it from the start, as a step seen for the first time.
 		seen = false
 	}
-	if seen && !step.Superseded && terminal(previous) && terminal(step.Status) && previous != step.Status {
+	if seen && !step.Superseded && terminal(previous) && terminal(step.Status) &&
+		(previous != step.Status || (step.Attempt != "" && reporter.node[key] == "")) {
 		// One node never changes its terminal state, so the step's current
 		// row ending differently from what was reported is a later attempt.
+		// For a retry with no restored node identity, replay the final attempt
+		// even if its status matches: the stored status may be an older attempt.
 		// This is what a reporter restored after a restart (#1172) sees:
 		// it knows the key's last status but not which node produced it.
 		seen = false

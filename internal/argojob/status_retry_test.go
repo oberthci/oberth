@@ -260,11 +260,16 @@ func TestPodRetryEveryAttemptFailsPointsAtLastAttempt(t *testing.T) {
 	}
 	workflow.Status = wfv1.WorkflowStatus{Phase: wfv1.WorkflowFailed, Nodes: nodes}
 
+	appendRetryHook(workflow, "retry")
 	results := StepResults(workflow)
-	if len(results) != 1 {
-		t.Fatalf("results = %+v, want one publish row", results)
+	if len(results) != 2 {
+		t.Fatalf("results = %+v, want publish and cleanup rows", results)
 	}
-	if got := results[0]; got.NodeID != "pub-2" || got.Status != runprogress.StepFailed || got.ExitCode != 3 || got.Attempt != "publish(2)" {
+	hook := stepByKey(t, results, "release/cleanup")
+	if hook.Attempt != "" || hook.Superseded {
+		t.Fatalf("hook treated as retry: %+v", hook)
+	}
+	if got := stepByKey(t, results, "release/publish"); got.NodeID != "pub-2" || got.Status != runprogress.StepFailed || got.ExitCode != 3 || got.Attempt != "publish(2)" {
 		t.Fatalf("publish = %+v, want the failed last attempt pub-2 exit 3", got)
 	}
 	completion := completionFor(workflow)
@@ -462,33 +467,31 @@ func TestPublishReportsSupersededAttemptOnceThenFinalVerdict(t *testing.T) {
 		t.Errorf("a retry suffix leaked into a step key:\n%s", output.String())
 	}
 
-	// A reporter restored from the run log after a restart (#1172) must not
-	// report either attempt again.
+	// Restored markers have no attempt identity. Replay the final attempt
+	// once even when its terminal status matches an earlier attempt's.
 	resumed := newProgressReporter(io.Discard)
-	for _, line := range splitLines(output.String()) {
-		event, found, err := runprogress.ParseMarker([]byte(line + "\n"))
-		if found && err == nil {
-			resumed.reported[event.Burn+"/"+event.Step] = event.Status
-		}
+	for _, key := range []string{"address/get", "address/check"} {
+		resumed.reported[key] = runprogress.StepPassed
 	}
 	var after bytes.Buffer
-	before := len(replayed)
-	total := 0
-	for _, count := range replayed {
-		total += count
+	for poll := 0; poll < 3; poll++ {
+		if err := controller.publish(context.Background(), final, resumed, &after); err != nil {
+			t.Fatalf("resumed publish: %v", err)
+		}
 	}
-	if err := controller.publish(context.Background(), final, resumed, &after); err != nil {
-		t.Fatalf("resumed publish: %v", err)
+	for _, key := range []string{"address/get", "address/check"} {
+		if got := joinStatuses(progressStatuses(after.String(), key)); got != "running,passed" {
+			t.Fatalf("resumed %s progress = %s, want only the final attempt", key, got)
+		}
 	}
-	if after.Len() != 0 {
-		t.Fatalf("resumed reporter re-reported finished attempts:\n%s", after.String())
-	}
-	afterTotal := 0
-	for _, count := range replayed {
-		afterTotal += count
-	}
-	if len(replayed) != before || afterTotal != total {
-		t.Fatalf("resumed reporter replayed logs again: %v", replayed)
+	for _, id := range []string{"address-0-check", "address-1-check", "address-0-get", "address-1-get"} {
+		want := 1
+		if strings.Contains(id, "address-1-") {
+			want = 2
+		}
+		if got := replayed[PodName(final, final.Status.Nodes[id])]; got != want {
+			t.Errorf("resumed log of %s replayed %d times, want %d total", id, got, want)
+		}
 	}
 }
 
@@ -518,5 +521,83 @@ func TestWaitResumedRetriedDAGIsGreen(t *testing.T) {
 	}
 	if got := joinStatuses(progressStatuses(output.String(), "address/check")); got != "running,passed" {
 		t.Fatalf("address/check progress after resume = %s, want only the passing retry", got)
+	}
+}
+
+func appendRetryHook(workflow *wfv1.Workflow, retryID string) string {
+	retry := workflow.Status.Nodes[retryID]
+	id := retryID + "-exit"
+	retry.Children = append(retry.Children, id)
+	workflow.Status.Nodes[retryID] = retry
+	workflow.Status.Nodes[id] = wfv1.NodeStatus{
+		ID: id, Name: retry.Name + ".onExit", DisplayName: "cleanup",
+		Type: wfv1.NodeTypePod, BoundaryID: retry.BoundaryID,
+		Phase: wfv1.NodeSucceeded, NodeFlag: &wfv1.NodeFlag{Hooked: true},
+	}
+	return id
+}
+
+func TestDAGRetryWithExitHook(t *testing.T) {
+	for _, final := range []wfv1.NodePhase{wfv1.NodeFailed, wfv1.NodeSucceeded} {
+		t.Run(string(final), func(t *testing.T) {
+			workflow := dagRetryWorkflow(wfv1.WorkflowSucceeded,
+				[2]wfv1.NodePhase{wfv1.NodeSucceeded, wfv1.NodeFailed},
+				[2]wfv1.NodePhase{wfv1.NodeSucceeded, final})
+			// Argo can call the outer workflow successful despite exhausted retries.
+			workflow.Spec.Templates[0].DAG.Tasks[1].ContinueOn = &wfv1.ContinueOn{Failed: true}
+			workflow.Spec.Templates[0].DAG.Tasks[1].Hooks = wfv1.LifecycleHooks{
+				wfv1.ExitLifecycleEvent: {Template: "cleanup"},
+			}
+			workflow.Spec.Templates = append(workflow.Spec.Templates,
+				wfv1.Template{Name: "cleanup", Container: &corev1.Container{Image: "alpine"}})
+			hookID := appendRetryHook(workflow, "address")
+			results := StepResults(workflow)
+			check := stepByKey(t, results, "address/check")
+			get := stepByKey(t, results, "address/get")
+			if check.NodeID != "address-1-check" || get.NodeID != "address-1-get" || check.Status != stepStatus(final) {
+				t.Fatalf("lost final retry rows: %+v", results)
+			}
+			hook := stepByKey(t, results, "cleanup/cleanup")
+			if hook.NodeID != hookID || hook.Attempt != "" || hook.Superseded {
+				t.Fatalf("hook treated as an attempt: %+v", hook)
+			}
+			completion := completionFor(workflow)
+			if completion.Succeeded != (final == wfv1.NodeSucceeded) {
+				t.Fatalf("completion success = %v, final attempt = %s", completion.Succeeded, final)
+			}
+			if final == wfv1.NodeFailed && (completion.FailedBurn != "address" || completion.FailedStep != "check") {
+				t.Fatalf("failure = %s/%s, want address/check", completion.FailedBurn, completion.FailedStep)
+			}
+		})
+	}
+}
+
+func TestRetryAttemptsRequireMatchingNameAndFlags(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		flag *wfv1.NodeFlag
+		want bool
+	}{
+		{"wf.task(2)", nil, true},
+		{"wf.task(2)", &wfv1.NodeFlag{Retried: true}, true},
+		{"wf.task(2)", &wfv1.NodeFlag{Hooked: true, Retried: true}, false},
+		{"wf.task(2)", &wfv1.NodeFlag{}, true},
+		{"wf.task.onExit", nil, false},
+		{"wf.task.onExit", &wfv1.NodeFlag{Retried: true}, false},
+		{"wf.other(99)", &wfv1.NodeFlag{Retried: true}, false},
+	} {
+		nodes := wfv1.Nodes{
+			"retry":     {Name: "wf.task", Type: wfv1.NodeTypeRetry, Children: []string{"first", "candidate", "missing"}},
+			"first":     {Name: "wf.task(1)"},
+			"candidate": {Name: test.name, NodeFlag: test.flag},
+		}
+		retries := retryAttemptsOf(nodes)
+		wantLatest := "first"
+		if test.want {
+			wantLatest = "candidate"
+		}
+		if retries.isAttempt("candidate") != test.want || retries.latest["retry"] != wantLatest || retries.isAttempt("missing") {
+			t.Errorf("name %q flags %+v: attempts = %+v, want latest %s", test.name, test.flag, retries, wantLatest)
+		}
 	}
 }

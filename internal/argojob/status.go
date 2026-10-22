@@ -67,7 +67,10 @@ type Completion struct {
 // Nothing here requires the repository to adopt an Oberth-specific naming
 // convention: the two-level shape falls out of the pipeline it already wrote.
 func StepResults(workflow *wfv1.Workflow) []StepResult {
-	observed := stepAttempts(workflow)
+	return finalStepResults(stepAttempts(workflow))
+}
+
+func finalStepResults(observed []StepResult) []StepResult {
 	if observed == nil {
 		return nil
 	}
@@ -324,8 +327,8 @@ type retryAttempts struct {
 
 // retryAttemptsOf collects every Retry node's attempts. The latest attempt is
 // the one with the highest Argo attempt index ("name(N)"); the order of the
-// Retry node's Children, which Argo appends to, breaks ties and covers a name
-// that carries no readable index.
+// Retry node's Children breaks ties. Hooks and children without the exact
+// retry attempt name are not attempts, regardless of their list position.
 func retryAttemptsOf(nodes wfv1.Nodes) retryAttempts {
 	retries := retryAttempts{parent: map[string]string{}, latest: map[string]string{}}
 	for id, node := range nodes {
@@ -333,17 +336,18 @@ func retryAttemptsOf(nodes wfv1.Nodes) retryAttempts {
 			continue
 		}
 		latest, latestIndex := "", -1
-		for position, child := range node.Children {
-			if child == "" {
+		for _, child := range node.Children {
+			attempt, ok := nodes[child]
+			if !ok || child == "" || (attempt.NodeFlag != nil && attempt.NodeFlag.Hooked) {
+				continue
+			}
+			// Argo flags attempts as Retried and hooks as Hooked. Older
+			// snapshots may lack flags, but must still have an attempt name.
+			index, ok := retryAttemptIndex(attempt.Name)
+			if !ok || stripRetrySuffix(attempt.Name) != node.Name {
 				continue
 			}
 			retries.parent[child] = id
-			index := position
-			if attempt, ok := nodes[child]; ok {
-				if parsed, ok := retryAttemptIndex(attempt.Name); ok {
-					index = parsed
-				}
-			}
 			if index >= latestIndex {
 				latest, latestIndex = child, index
 			}
