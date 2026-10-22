@@ -202,9 +202,14 @@ func TestRunsPageIsOneFlatFilteredList(t *testing.T) {
 		}
 	}
 	render := section("async function renderRuns(seq)", "\n/* ---------- run detail")
-	for _, want := range []string{"loadRunCounts()", "setAuto(listPollMs)", "runsTable(visible)", "runFilters.map"} {
+	for _, want := range []string{"loadRunCounts()", "setAuto(listPollMs)", "runsTable(visible)", "runFilters.map", `<h1 class="sr-only">Runs</h1>`} {
 		if !strings.Contains(render, want) {
 			t.Fatalf("renderRuns is missing %s", want)
+		}
+	}
+	for _, unwanted := range []string{`class="bar"`, `class="stats"`, "running · ", "const running ="} {
+		if strings.Contains(render, unwanted) {
+			t.Fatalf("runs page retains summary bar content %q", unwanted)
 		}
 	}
 	for _, unwanted := range []string{"activeSection(", "queueTable(", "runningTable(", "Queue head blocked by", "section-title", "section-sub"} {
@@ -234,6 +239,11 @@ func TestRunsPageIsOneFlatFilteredList(t *testing.T) {
 		}
 	}
 	css := string(staticAssets["app.css"].body)
+	// The page heading stays in the accessibility tree but takes no space,
+	// leaving the normal .screen padding above the filters and runs list.
+	if !strings.Contains(css, ".sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}") {
+		t.Fatal("app.css is missing visually hidden page heading styling")
+	}
 	for _, unwanted := range []string{".trow.blocking", ".queue-pos"} {
 		if strings.Contains(css, unwanted) {
 			t.Fatalf("app.css retains queue styling %s", unwanted)
@@ -278,7 +288,6 @@ func TestRunsFiltersCountsAndCancelledSuccessors(t *testing.T) {
 		`if (saved === "waiting") return "queued"`,
 		`if (saved === "interrupted" || saved === "superseded") return "cancelled"`,
 		`localStorage.getItem("oberth-filter") === "release"`,
-		`state.runCounts?.Running`, `state.runCounts?.RunningByRepo?.[selectedRepo?.ID]`,
 		`state.runCounts?.Queued`, `state.runCounts?.QueuedByRepo?.[selectedRepo?.ID]`,
 		`const datedTotal = Math.max(0, (counts.get(state.repo) || 0) - queued)`,
 		`state.runSourceCount = dated.length`,

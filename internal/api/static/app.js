@@ -504,15 +504,11 @@ async function renderRuns(seq) {
   const page = state.runCursorHistory.length + 1;
   const selectedRepo = state.repos.find(repo => repoKey(repo) === state.repo);
   const current = runs.filter(run => state.repo === "all" || repoKeyOf(run.RepoID) === state.repo);
-  const running = (state.repo === "all" ? state.runCounts?.Running : state.runCounts?.RunningByRepo?.[selectedRepo?.ID]) ?? current.filter(run => displayRunStatus(run) === "running").length;
   const queued = (state.repo === "all" ? state.runCounts?.Queued : state.runCounts?.QueuedByRepo?.[selectedRepo?.ID]) ?? current.filter(run => displayRunStatus(run) === "queued").length;
   const datedTotal = Math.max(0, (counts.get(state.repo) || 0) - queued);
   replaceApp(`
   <section class="screen">
-    <div class="bar">
-      <h1>Runs</h1>
-      <div class="stats"><span><b>${running}</b> running · <b>${queued}</b> queued</span></div>
-    </div>
+    <h1 class="sr-only">Runs</h1>
     <div class="runs-layout">
       <aside class="repo-side">
         <div class="repo-filter-row"><button class="repo-filter ${state.repo === "all" ? "on" : ""}" data-repo-filter="all"><span class="name">All repos</span><span class="count">${esc(counts.get("all") || 0)}</span></button></div>

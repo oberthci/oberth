@@ -47,6 +47,8 @@ input,select{height:32px;border:1px solid var(--line);background:var(--panel);co
 .iconbtn:hover{border-color:var(--line2);color:var(--fg)}
 .main{min-height:0;overflow:auto}
 .screen{max-width:1440px;margin:0 auto;padding:16px 18px 28px}
+/* Keep page headings accessible without reserving a band above the list. */
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
 /* The run detail is an editor-style frame: the section owns exactly the
    viewport below the top bar, the burn/step list and the log pane fill it and
    scroll internally, and the page itself never scrolls. Viewports shorter
