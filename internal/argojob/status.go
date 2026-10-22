@@ -89,9 +89,8 @@ func finalStepResults(observed []StepResult) []StepResult {
 	// order could not be read): keep the last-started one, so the durable
 	// step result still reflects the terminal outcome.
 	results = deduplicateRetries(results)
-	for index := range results {
-		results[index].Ordinal = index
-	}
+	// Filtering must not move a retried step behind a parallel sibling.
+	sort.SliceStable(results, func(i, j int) bool { return results[i].Ordinal < results[j].Ordinal })
 	return results
 }
 
@@ -158,8 +157,15 @@ func stepAttempts(workflow *wfv1.Workflow) []StepResult {
 		}
 		return results[left].NodeID < results[right].NodeID
 	})
+	ordinals := make(map[string]int)
 	for index := range results {
-		results[index].Ordinal = index
+		key := results[index].Burn + "\x00" + results[index].Step
+		ordinal, exists := ordinals[key]
+		if !exists {
+			ordinal = len(ordinals)
+			ordinals[key] = ordinal
+		}
+		results[index].Ordinal = ordinal
 	}
 	return results
 }

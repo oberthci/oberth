@@ -126,6 +126,16 @@ func TestStartupAdoptsBranchWorkflowAndFinalizesSameRun(t *testing.T) {
 			}
 			now := time.Now().UTC()
 			event := runprogress.Event{Version: runprogress.Version, Burn: "test", Step: "unit", Status: runprogress.StepPassed, StartedAt: &now, FinishedAt: &now}
+			// v0.17.44 retained DAG-attempt burns beside the planned key.
+			// A colliding orphan must not stop scheduler startup/adoption.
+			if err := scheduler.logs.WriteStepPlan(run.ID, []runprogress.PlannedStep{{Burn: "test", Step: "unit", Ordinal: 0}}); err != nil {
+				t.Fatal(err)
+			}
+			orphan := event
+			orphan.Burn = "test(0)"
+			if err := scheduler.logs.AppendStepProgress(run.ID, orphan); err != nil {
+				t.Fatal(err)
+			}
 			if err := scheduler.logs.AppendStepProgress(run.ID, event); err != nil {
 				t.Fatal(err)
 			}

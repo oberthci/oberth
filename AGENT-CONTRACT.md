@@ -1018,6 +1018,16 @@ continuity checks; it must never be used to reset or bypass those checks.
   less-informed source can never walk a step backwards. The step count is
   therefore the planned count for the whole life of the run, including a run
   that was interrupted before recording any result.
+- Argo retry attempts share the ordinal of their logical burn/step's first
+  attempt. Dropping superseded attempts cannot renumber the final rows or
+  move a retried step behind a parallel sibling. A resumed reporter retains
+  journaled key/ordinal assignments and assigns newly observed keys only
+  unused ordinals. Legacy DAG-attempt burns such as `address(0)/check` are
+  ignored by the journal projection only when `address/check` is known from
+  the plan or journal and the suffixed name is not explicitly planned.
+  Without a known canonical key, the historical row is retained and its
+  ordinal remains reserved on resume. Conflicting ordinals for genuine keys
+  still fail journal validation; historical log bytes are not rewritten.
 - Consequently a step status in an API projection may additionally be
   `pending` (declared, not reached) or the existing in-flight `queued` and
   `running`. `pending` is a projection state only; it is never persisted and

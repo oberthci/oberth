@@ -10,6 +10,7 @@ import (
 	"io"
 	"log"
 	"reflect"
+	"sort"
 	"sync"
 	"time"
 
@@ -432,6 +433,8 @@ func (controller *Controller) wait(ctx context.Context, name, runID string, dest
 			return Completion{}, err
 		}
 		reporter.reported[event.Burn+"/"+event.Step] = event.Status
+		reporter.ordinals[event.Burn+"/"+event.Step] = event.Ordinal
+		reporter.ordinalOwners[event.Ordinal] = event.Burn + "/" + event.Step
 	}
 	ticker := time.NewTicker(controller.interval)
 	defer ticker.Stop()
@@ -483,6 +486,7 @@ func (controller *Controller) wait(ctx context.Context, name, runID string, dest
 			}
 			controller.retainWorkflowTiming(ctx, settled)
 			completion := completionFor(settled)
+			completion.Steps = reporter.order(completion.Steps)
 			controller.collectStepDiagnostics(ctx, settled, &completion)
 			controller.collectVMIFailure(ctx, settled, &completion, budget)
 			if publishErr := controller.publish(ctx, settled, reporter, budget); publishErr != nil && budgetBreachErr == nil {
@@ -507,7 +511,7 @@ func (controller *Controller) wait(ctx context.Context, name, runID string, dest
 				boundTiming = true
 			}
 			observation := Completion{}
-			for _, step := range StepResults(workflow) {
+			for _, step := range reporter.order(StepResults(workflow)) {
 				if terminal(step.Status) && !timed[step.NodeID] {
 					observation.Steps = append(observation.Steps, step)
 				}
@@ -724,20 +728,61 @@ func (controller *Controller) cleanupVMIsBestEffort(ctx context.Context, name, r
 // run of the step even when it finished between two polls, and an earlier
 // attempt is never reported twice.
 type progressReporter struct {
-	mu       sync.Mutex
-	reported map[string]runprogress.Status
-	node     map[string]string
-	done     map[string]bool
-	failed   error
+	mu            sync.Mutex
+	reported      map[string]runprogress.Status
+	node          map[string]string
+	done          map[string]bool
+	ordinals      map[string]int
+	ordinalOwners map[int]string
+	failed        error
 }
 
 func newProgressReporter(destination io.Writer) *progressReporter {
 	_ = destination
 	return &progressReporter{
-		reported: map[string]runprogress.Status{},
-		node:     map[string]string{},
-		done:     map[string]bool{},
+		reported:      map[string]runprogress.Status{},
+		node:          map[string]string{},
+		done:          map[string]bool{},
+		ordinals:      map[string]int{},
+		ordinalOwners: map[int]string{},
 	}
+}
+
+// assignOrdinal requires reporter.mu. Journal assignments survive adoption;
+// newly named keys take an unused slot instead of displacing a sibling.
+func (reporter *progressReporter) assignOrdinal(step StepResult) StepResult {
+	key := step.Burn + "/" + step.Step
+	if ordinal, exists := reporter.ordinals[key]; exists {
+		step.Ordinal = ordinal
+	} else {
+		// Retain journal assignments across adoption, including old keys that
+		// no longer occur in the Workflow. A newly canonicalized retry key
+		// must never take a surviving sibling's durable ordinal.
+		if _, used := reporter.ordinalOwners[step.Ordinal]; used {
+			step.Ordinal = 0
+			for {
+				if _, used := reporter.ordinalOwners[step.Ordinal]; !used {
+					break
+				}
+				step.Ordinal++
+			}
+		}
+		reporter.ordinals[key] = step.Ordinal
+		reporter.ordinalOwners[step.Ordinal] = key
+	}
+	return step
+}
+
+// order applies the same assignments to durable results and timing evidence
+// as to progress markers, so completion cannot renumber an adopted run.
+func (reporter *progressReporter) order(steps []StepResult) []StepResult {
+	reporter.mu.Lock()
+	defer reporter.mu.Unlock()
+	for i := range steps {
+		steps[i] = reporter.assignOrdinal(steps[i])
+	}
+	sort.SliceStable(steps, func(i, j int) bool { return steps[i].Ordinal < steps[j].Ordinal })
+	return steps
 }
 
 // observe records a step's newly seen state and reports whether the caller
@@ -747,6 +792,7 @@ func (reporter *progressReporter) observe(destination io.Writer, step StepResult
 	reporter.mu.Lock()
 	defer reporter.mu.Unlock()
 	key := step.Burn + "/" + step.Step
+	step = reporter.assignOrdinal(step)
 	if step.NodeID != "" && reporter.done[step.NodeID] {
 		// This attempt's terminal state is already in the run log.
 		return false

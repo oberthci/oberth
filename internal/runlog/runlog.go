@@ -541,8 +541,12 @@ func (store *Store) StepProgress(runID string) ([]runprogress.Event, error) {
 	if lastNewline < 0 {
 		return []runprogress.Event{}, nil
 	}
-	latest := make(map[string]runprogress.Event)
-	ordinals := make(map[int]string)
+	// v0.17.44 could journal a retried DAG's attempt name as its burn.
+	// Only ignore such an orphan when the canonical key is known, and never
+	// discard an explicitly planned name. Decode before filtering so malformed
+	// records and conflicts between genuine keys still fail closed.
+	var events []runprogress.Event
+	known := make(map[string]bool)
 	for index, line := range bytes.Split(body[:lastNewline], []byte("\n")) {
 		if len(line) == 0 {
 			continue
@@ -551,7 +555,24 @@ func (store *Store) StepProgress(runID string) ([]runprogress.Event, error) {
 		if decodeErr != nil {
 			return nil, fmt.Errorf("decode step progress journal record %d: %w", index, decodeErr)
 		}
+		events = append(events, event)
+		known[event.Burn+"\x00"+event.Step] = true
+	}
+	planned := make(map[string]bool)
+	if plan, err := store.StepPlan(runID); err == nil {
+		for _, step := range plan {
+			key := step.Burn + "\x00" + step.Step
+			planned[key], known[key] = true, true
+		}
+	}
+	latest := make(map[string]runprogress.Event)
+	ordinals := make(map[int]string)
+	for _, event := range events {
 		key := event.Burn + "\x00" + event.Step
+		if canonical := legacyRetryBurn(event.Burn); canonical != event.Burn &&
+			!planned[key] && known[canonical+"\x00"+event.Step] {
+			continue
+		}
 		if previous, exists := latest[key]; exists && previous.Ordinal != event.Ordinal {
 			return nil, errors.New("step progress ordinal changed")
 		}
@@ -567,6 +588,22 @@ func (store *Store) StepProgress(runID string) ([]runprogress.Event, error) {
 	}
 	sort.Slice(result, func(left, right int) bool { return result[left].Ordinal < result[right].Ordinal })
 	return result, nil
+}
+
+func legacyRetryBurn(burn string) string {
+	if !strings.HasSuffix(burn, ")") {
+		return burn
+	}
+	open := strings.LastIndexByte(burn, '(')
+	if open < 1 || open == len(burn)-2 {
+		return burn
+	}
+	for _, digit := range burn[open+1 : len(burn)-1] {
+		if digit < '0' || digit > '9' {
+			return burn
+		}
+	}
+	return burn[:open]
 }
 
 func indexReader(runID string, reader io.Reader) (Index, error) {
