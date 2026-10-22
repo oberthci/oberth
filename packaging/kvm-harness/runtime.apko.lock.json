@@ -29,41 +29,41 @@
     "packages": [
       {
         "name": "ca-certificates-bundle",
-        "url": "https://dl-cdn.alpinelinux.org/alpine/v3.22/main/x86_64/ca-certificates-bundle-20260909-r0.apk",
-        "version": "20260909-r0",
+        "url": "https://dl-cdn.alpinelinux.org/alpine/v3.22/main/x86_64/ca-certificates-bundle-20261020-r0.apk",
+        "version": "20261020-r0",
         "architecture": "x86_64",
         "signature": {
-          "range": "bytes=0-720",
-          "checksum": "sha1-xCN3FzrTfHOKrMig96anlqAvYy0="
+          "range": "bytes=0-722",
+          "checksum": "sha1-l86PizcKfEcH3OOv1bWX/08rOBE="
         },
         "control": {
-          "range": "bytes=721-1319",
-          "checksum": "sha1-ZPSDTYT+LwK9rxFn+z8AgUgFyms="
+          "range": "bytes=723-1318",
+          "checksum": "sha1-S0j4S2Jt6I+Ch50QIEvbuYBnpXs="
         },
         "data": {
-          "range": "bytes=1320-108540",
-          "checksum": "sha256-ydgWJJkmppPXjHcKeGiZYWNXPd1F3ChRtl7pvGAqzdo="
+          "range": "bytes=1319-107115",
+          "checksum": "sha256-1orMjqHbmInoAII3OQn+5+zd5KtwTRyCXs3aGTusj6w="
         },
-        "checksum": "Q1ZPSDTYT+LwK9rxFn+z8AgUgFyms="
+        "checksum": "Q1S0j4S2Jt6I+Ch50QIEvbuYBnpXs="
       },
       {
         "name": "musl",
-        "url": "https://dl-cdn.alpinelinux.org/alpine/v3.22/main/x86_64/musl-1.2.5-r12.apk",
-        "version": "1.2.5-r12",
+        "url": "https://dl-cdn.alpinelinux.org/alpine/v3.22/main/x86_64/musl-1.2.5-r13.apk",
+        "version": "1.2.5-r13",
         "architecture": "x86_64",
         "signature": {
-          "range": "bytes=0-720",
-          "checksum": "sha1-9ScZWjF5Ls9EzwzvIdB5gg2OrTw="
+          "range": "bytes=0-723",
+          "checksum": "sha1-YQeIkLpAbaaCUWKUfFlbsWr9oak="
         },
         "control": {
-          "range": "bytes=721-1242",
-          "checksum": "sha1-88yFTG2t/rUxNtjQPwTR/5h2m/k="
+          "range": "bytes=724-1248",
+          "checksum": "sha1-Kd1D3m57UuRVKkGgKHd5yKqNj0s="
         },
         "data": {
-          "range": "bytes=1243-412251",
-          "checksum": "sha256-49NWLaNcl1V2QTfuCZbEHEyXar1KFnwX/bCaULCLpJI="
+          "range": "bytes=1249-412386",
+          "checksum": "sha256-meegZ1VhmLm72qXW+8+uEY0ongIGzCwL7ZkcXZqNvl4="
         },
-        "checksum": "Q188yFTG2t/rUxNtjQPwTR/5h2m/k="
+        "checksum": "Q1Kd1D3m57UuRVKkGgKHd5yKqNj0s="
       },
       {
         "name": "libcap-ng",
@@ -181,22 +181,22 @@
       },
       {
         "name": "pcre2",
-        "url": "https://dl-cdn.alpinelinux.org/alpine/v3.22/main/x86_64/pcre2-10.46-r0.apk",
-        "version": "10.46-r0",
+        "url": "https://dl-cdn.alpinelinux.org/alpine/v3.22/main/x86_64/pcre2-10.46-r1.apk",
+        "version": "10.46-r1",
         "architecture": "x86_64",
         "signature": {
-          "range": "bytes=0-720",
-          "checksum": "sha1-SqFpvLnHDnH5SNlLUIN7N01z6NY="
+          "range": "bytes=0-718",
+          "checksum": "sha1-JwrpKMOnq5j8kJLG6YXrDHBtMdA="
         },
         "control": {
-          "range": "bytes=721-1282",
-          "checksum": "sha1-gjdyS9xQxXwW5k6w1SLYWrxQDRA="
+          "range": "bytes=719-1283",
+          "checksum": "sha1-3dtTGs4+j+OsqlUpuIx/Stdxq80="
         },
         "data": {
-          "range": "bytes=1283-314266",
-          "checksum": "sha256-S6Fr+8UJ2vQoz34HqZjmjiZvdviyx4YprKorLnLa/iA="
+          "range": "bytes=1284-314616",
+          "checksum": "sha256-p3t8O3WbYj1e42ivOgLukXDSQPcHuqeiX/PX+Wjycw0="
         },
-        "checksum": "Q1gjdyS9xQxXwW5k6w1SLYWrxQDRA="
+        "checksum": "Q13dtTGs4+j+OsqlUpuIx/Stdxq80="
       },
       {
         "name": "zlib",
