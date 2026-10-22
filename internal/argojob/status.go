@@ -338,10 +338,11 @@ func retryAttemptsOf(nodes wfv1.Nodes) retryAttempts {
 		latest, latestIndex := "", -1
 		for _, child := range node.Children {
 			attempt, ok := nodes[child]
-			if !ok || child == "" || (attempt.NodeFlag != nil && attempt.NodeFlag.Hooked) {
+			if !ok || child == "" || (attempt.NodeFlag != nil && attempt.NodeFlag.Hooked && !attempt.NodeFlag.Retried) {
 				continue
 			}
-			// Argo flags attempts as Retried and hooks as Hooked. Older
+			// Argo flags attempts as Retried and hooks as Hooked; attempts of a
+			// hook template with its own retryStrategy carry both. Older
 			// snapshots may lack flags, but must still have an attempt name.
 			index, ok := retryAttemptIndex(attempt.Name)
 			if !ok || stripRetrySuffix(attempt.Name) != node.Name {

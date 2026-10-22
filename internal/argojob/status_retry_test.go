@@ -580,7 +580,8 @@ func TestRetryAttemptsRequireMatchingNameAndFlags(t *testing.T) {
 	}{
 		{"wf.task(2)", nil, true},
 		{"wf.task(2)", &wfv1.NodeFlag{Retried: true}, true},
-		{"wf.task(2)", &wfv1.NodeFlag{Hooked: true, Retried: true}, false},
+		{"wf.task(2)", &wfv1.NodeFlag{Hooked: true, Retried: true}, true},
+		{"wf.task(2)", &wfv1.NodeFlag{Hooked: true}, false},
 		{"wf.task(2)", &wfv1.NodeFlag{}, true},
 		{"wf.task.onExit", nil, false},
 		{"wf.task.onExit", &wfv1.NodeFlag{Retried: true}, false},
