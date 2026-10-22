@@ -31,6 +31,14 @@ type StepResult struct {
 	PodName              string
 	StartedAt            *time.Time
 	FinishedAt           *time.Time
+	// Attempt is the display name of the Argo retry attempt that produced
+	// this row (for example "check(1)" or "address(0)"), empty when no
+	// retryStrategy encloses the step.
+	Attempt string
+	// Superseded marks a row from a retry attempt that a later attempt of
+	// the same Retry node replaced. Such a row is evidence (its log and
+	// progress stay in the run log) but never a verdict.
+	Superseded bool
 }
 
 // Completion is the terminal outcome of one submitted Workflow.
@@ -59,6 +67,35 @@ type Completion struct {
 // Nothing here requires the repository to adopt an Oberth-specific naming
 // convention: the two-level shape falls out of the pipeline it already wrote.
 func StepResults(workflow *wfv1.Workflow) []StepResult {
+	observed := stepAttempts(workflow)
+	if observed == nil {
+		return nil
+	}
+	results := make([]StepResult, 0, len(observed))
+	for _, result := range observed {
+		// A superseded retry attempt is not the step's outcome: the Retry
+		// node's later attempt is. Dropping it here is what keeps a failed
+		// first attempt from failing a run whose retry passed, while the
+		// attempt's own progress and log remain in the run log.
+		if result.Superseded {
+			continue
+		}
+		results = append(results, result)
+	}
+	// Deduplicate any remaining same-named rows (a Retry node whose attempt
+	// order could not be read): keep the last-started one, so the durable
+	// step result still reflects the terminal outcome.
+	results = deduplicateRetries(results)
+	for index := range results {
+		results[index].Ordinal = index
+	}
+	return results
+}
+
+// stepAttempts maps every step node, including superseded retry attempts, in
+// start order. Retry suffixes are stripped from both the step and its burn, so
+// every attempt of one planned step carries that step's planned name.
+func stepAttempts(workflow *wfv1.Workflow) []StepResult {
 	if workflow == nil || len(workflow.Status.Nodes) == 0 {
 		return nil
 	}
@@ -69,13 +106,13 @@ func StepResults(workflow *wfv1.Workflow) []StepResult {
 			break
 		}
 	}
-	retryChildren := retryChildIDs(workflow.Status.Nodes)
+	retries := retryAttemptsOf(workflow.Status.Nodes)
 	results := make([]StepResult, 0, len(workflow.Status.Nodes))
 	for _, node := range workflow.Status.Nodes {
 		if !stepNode(workflow, node) {
 			continue
 		}
-		burn, step := burnAndStep(workflow.Status.Nodes, node, rootID, retryChildren[node.ID])
+		burn, step := burnAndStep(workflow.Status.Nodes, node, rootID, retries)
 		if burn == "" || step == "" {
 			continue
 		}
@@ -83,9 +120,12 @@ func StepResults(workflow *wfv1.Workflow) []StepResult {
 		if node.Type == wfv1.NodeTypePod {
 			podName = PodName(workflow, node)
 		}
+		attempt, superseded := retries.attempt(workflow.Status.Nodes, node, rootID)
 		results = append(results, StepResult{
 			InfrastructureReason: nodeInfrastructureReason(node),
 			NodeID:               node.ID,
+			Attempt:              attempt,
+			Superseded:           superseded,
 			Burn:                 burn,
 			Step:                 step,
 			Status:               stepStatus(node.Phase),
@@ -95,8 +135,8 @@ func StepResults(workflow *wfv1.Workflow) []StepResult {
 			FinishedAt:           optionalTime(node.FinishedAt),
 		})
 	}
-	// Deterministic order: start time, then burn, then step. Parallel steps
-	// that started in the same instant still order stably.
+	// Deterministic order: start time, then burn, then step, then node ID.
+	// Parallel steps that started in the same instant still order stably.
 	sort.Slice(results, func(left, right int) bool {
 		leftStart, rightStart := results[left].StartedAt, results[right].StartedAt
 		switch {
@@ -110,13 +150,11 @@ func StepResults(workflow *wfv1.Workflow) []StepResult {
 		if results[left].Burn != results[right].Burn {
 			return results[left].Burn < results[right].Burn
 		}
-		return results[left].Step < results[right].Step
+		if results[left].Step != results[right].Step {
+			return results[left].Step < results[right].Step
+		}
+		return results[left].NodeID < results[right].NodeID
 	})
-	// Deduplicate retry attempts: a retried step produces multiple rows
-	// with the same burn+step name (one per attempt, after suffix
-	// stripping). Keep only the final attempt -- the last in start-time
-	// order -- so the durable step result reflects the terminal outcome.
-	results = deduplicateRetries(results)
 	for index := range results {
 		results[index].Ordinal = index
 	}
@@ -215,16 +253,22 @@ func PodName(workflow *wfv1.Workflow, node wfv1.NodeStatus) string {
 // work done here is turning Argo's node tree into that rule's two inputs: the
 // nearest enclosing non-root boundary, and the node itself.
 //
-// retryChild signals that this pod is a child of a Retry wrapper: Argo names
-// such children "task(0)", "task(1)", etc., and the suffix must be stripped so
-// the step result resolves against the planned step name from the document.
-func burnAndStep(nodes wfv1.Nodes, node wfv1.NodeStatus, rootID string, retryChild bool) (string, string) {
+// Either input can be an attempt of a Retry node: Argo names the attempts of a
+// template with retryStrategy "task(0)", "task(1)", and so on. A retried pod
+// is such an attempt itself; a retried DAG or steps template makes the
+// attempt the boundary of every pod inside it. The suffix is stripped in both
+// cases so the result resolves against the planned name from the document,
+// which never carries one.
+func burnAndStep(nodes wfv1.Nodes, node wfv1.NodeStatus, rootID string, retries retryAttempts) (string, string) {
 	enclosing := ""
 	if boundary, ok := nodes[node.BoundaryID]; ok && node.BoundaryID != "" && node.BoundaryID != rootID {
 		enclosing = displayName(boundary)
+		if retries.isAttempt(boundary.ID) {
+			enclosing = stripRetrySuffix(enclosing)
+		}
 	}
 	name := displayName(node)
-	if retryChild {
+	if retries.isAttempt(node.ID) {
 		name = stripRetrySuffix(name)
 	}
 	return argoworkflow.BurnAndStep(enclosing, name)
@@ -271,24 +315,99 @@ func stripRetrySuffix(name string) string {
 	return name[:open]
 }
 
-// retryChildIDs collects the node IDs of every pod that a Retry wrapper
-// encloses. A pod in this set carries an Argo-assigned attempt suffix like
-// "(0)" that must be stripped before the step name is recorded so the result
-// resolves against the planned step name from the document.
-func retryChildIDs(nodes wfv1.Nodes) map[string]bool {
-	children := make(map[string]bool)
-	for _, node := range nodes {
-		if node.Type == wfv1.NodeTypeRetry {
-			for _, id := range node.Children {
-				children[id] = true
-			}
-		}
-	}
-	return children
+// retryAttempts indexes Argo's Retry nodes: which node is an attempt of which
+// Retry node, and which attempt is each Retry node's latest.
+type retryAttempts struct {
+	parent map[string]string
+	latest map[string]string
 }
 
-// deduplicateRetries collapses multiple retry attempt rows for the same
-// burn+step into a single row carrying the final attempt's data. The input
+// retryAttemptsOf collects every Retry node's attempts. The latest attempt is
+// the one with the highest Argo attempt index ("name(N)"); the order of the
+// Retry node's Children, which Argo appends to, breaks ties and covers a name
+// that carries no readable index.
+func retryAttemptsOf(nodes wfv1.Nodes) retryAttempts {
+	retries := retryAttempts{parent: map[string]string{}, latest: map[string]string{}}
+	for id, node := range nodes {
+		if node.Type != wfv1.NodeTypeRetry {
+			continue
+		}
+		latest, latestIndex := "", -1
+		for position, child := range node.Children {
+			if child == "" {
+				continue
+			}
+			retries.parent[child] = id
+			index := position
+			if attempt, ok := nodes[child]; ok {
+				if parsed, ok := retryAttemptIndex(attempt.Name); ok {
+					index = parsed
+				}
+			}
+			if index >= latestIndex {
+				latest, latestIndex = child, index
+			}
+		}
+		if latest != "" {
+			retries.latest[id] = latest
+		}
+	}
+	return retries
+}
+
+func (retries retryAttempts) isAttempt(id string) bool {
+	_, ok := retries.parent[id]
+	return ok
+}
+
+// attempt walks from a step node out through its enclosing boundaries to the
+// root. It reports the innermost retry attempt the step ran in, and whether
+// any enclosing Retry node has since started a later attempt -- which makes
+// this row a superseded attempt rather than the step's outcome. Nested
+// retries compose: a pod in the latest attempt of an inner Retry node is
+// still superseded when the outer retried DAG has moved on to a new attempt.
+func (retries retryAttempts) attempt(nodes wfv1.Nodes, node wfv1.NodeStatus, rootID string) (string, bool) {
+	attempt, superseded := "", false
+	current := node
+	for depth := 0; depth <= len(nodes); depth++ {
+		if retry, ok := retries.parent[current.ID]; ok {
+			if attempt == "" {
+				attempt = displayName(current)
+			}
+			if retries.latest[retry] != current.ID {
+				superseded = true
+			}
+		}
+		next, ok := nodes[current.BoundaryID]
+		if !ok || current.BoundaryID == "" || current.BoundaryID == rootID || next.ID == current.ID {
+			break
+		}
+		current = next
+	}
+	return attempt, superseded
+}
+
+// retryAttemptIndex parses the attempt index Argo appends to a Retry node's
+// child: "wf.task(3)" is attempt 3.
+func retryAttemptIndex(name string) (int, bool) {
+	stripped := stripRetrySuffix(name)
+	if stripped == name {
+		return 0, false
+	}
+	index := 0
+	for _, digit := range name[len(stripped)+1 : len(name)-1] {
+		index = index*10 + int(digit-'0')
+		if index > 1<<20 {
+			return 0, false
+		}
+	}
+	return index, true
+}
+
+// deduplicateRetries collapses multiple rows for the same burn+step into a
+// single row carrying the last-started one's data. Superseded retry attempts
+// are already gone by the time it runs; this is the fallback for a Retry node
+// whose attempts could not be told apart. The input
 // must be sorted by start time so that later attempts appear after earlier
 // ones; the deduplicated row keeps the chronological position of the first
 // attempt (the step's natural place in the pipeline) but uses the final
@@ -407,7 +526,11 @@ func optionalTime(value metav1.Time) *time.Time {
 //
 // Completion success requires BOTH a Succeeded Workflow AND zero failed or
 // errored configured step results. A step with retry attempts where the final
-// attempt succeeded is a pass (deduplicateRetries keeps only the final attempt).
+// attempt succeeded is a pass: StepResults drops superseded attempts, whether
+// the retryStrategy wraps the pod itself or a whole DAG or steps template, so
+// only the latest attempt of every Retry node is a verdict. Retries exhausted
+// leave that latest attempt failed, which keeps the run red and attributes
+// FailedBurn/FailedStep to it.
 // A terminally failed configured step — regardless of whether the DAG's depends
 // expressions handle it — makes the run red. Enhanced-depends cleanup or
 // verification tasks may still run after a failure but must not convert the

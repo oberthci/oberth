@@ -566,7 +566,18 @@ func (controller *Controller) publish(ctx context.Context, workflow *wfv1.Workfl
 	if workflow == nil {
 		return nil
 	}
-	for _, step := range StepResults(workflow) {
+	// Superseded retry attempts first: they ran before the attempt that
+	// replaced them, and their failure and log are the evidence of why the
+	// step was retried. They are reported once and never decide a verdict.
+	// An attempt still non-terminal when superseded has nothing to report.
+	steps := make([]StepResult, 0)
+	for _, step := range stepAttempts(workflow) {
+		if step.Superseded && terminal(step.Status) {
+			steps = append(steps, step)
+		}
+	}
+	steps = append(steps, StepResults(workflow)...)
+	for _, step := range steps {
 		if !reporter.observe(destination, step) {
 			continue
 		}
@@ -601,6 +612,9 @@ func (controller *Controller) replayStepLog(ctx context.Context, workflow *wfv1.
 		return nil
 	}
 	defer func() { _ = stream.Close() }()
+	if step.Attempt != "" {
+		writeLine(destination, step, "oberth: Argo retry attempt "+step.Attempt)
+	}
 	if err := copyPrefixed(destination, step, io.LimitReader(stream, maxStepLogBytes)); err != nil {
 		if errors.Is(err, errRunLogBudget) {
 			// Best-effort banner -- the budget is exhausted so this write
@@ -702,15 +716,27 @@ func (controller *Controller) cleanupVMIsBestEffort(ctx context.Context, name, r
 // progressReporter turns repeated status observations into the monotonic
 // event stream the run log expects: each step reports queued, then running,
 // then exactly one terminal event, never a repeat and never a regression.
+//
+// A retried step has one key but several Argo nodes, one per attempt. The
+// reporter remembers which node it last reported for each key and which nodes
+// it has already reported terminal, so a later attempt is reported as a new
+// run of the step even when it finished between two polls, and an earlier
+// attempt is never reported twice.
 type progressReporter struct {
 	mu       sync.Mutex
 	reported map[string]runprogress.Status
+	node     map[string]string
+	done     map[string]bool
 	failed   error
 }
 
 func newProgressReporter(destination io.Writer) *progressReporter {
 	_ = destination
-	return &progressReporter{reported: map[string]runprogress.Status{}}
+	return &progressReporter{
+		reported: map[string]runprogress.Status{},
+		node:     map[string]string{},
+		done:     map[string]bool{},
+	}
 }
 
 // observe records a step's newly seen state and reports whether the caller
@@ -720,7 +746,23 @@ func (reporter *progressReporter) observe(destination io.Writer, step StepResult
 	reporter.mu.Lock()
 	defer reporter.mu.Unlock()
 	key := step.Burn + "/" + step.Step
+	if step.NodeID != "" && reporter.done[step.NodeID] {
+		// This attempt's terminal state is already in the run log.
+		return false
+	}
 	previous, seen := reporter.reported[key]
+	if seen && step.NodeID != "" && reporter.node[key] != "" && reporter.node[key] != step.NodeID {
+		// Another Argo node under the same key: a different retry attempt.
+		// Report it from the start, as a step seen for the first time.
+		seen = false
+	}
+	if seen && !step.Superseded && terminal(previous) && terminal(step.Status) && previous != step.Status {
+		// One node never changes its terminal state, so the step's current
+		// row ending differently from what was reported is a later attempt.
+		// This is what a reporter restored after a restart (#1172) sees:
+		// it knows the key's last status but not which node produced it.
+		seen = false
+	}
 	if seen && !advances(previous, step.Status) {
 		// A retry attempt can restart a step that was previously terminal.
 		// When a previously terminal step reports a non-terminal status,
@@ -728,6 +770,11 @@ func (reporter *progressReporter) observe(destination io.Writer, step StepResult
 		if terminal(previous) && !terminal(step.Status) {
 			// New retry attempt — fall through to emit.
 		} else {
+			if terminal(step.Status) && step.NodeID != "" {
+				// Already reported, possibly before a restart restored
+				// the reporter: never report this attempt again.
+				reporter.done[step.NodeID] = true
+			}
 			return false
 		}
 	}
@@ -741,6 +788,12 @@ func (reporter *progressReporter) observe(destination io.Writer, step StepResult
 		})
 	}
 	reporter.reported[key] = step.Status
+	if step.NodeID != "" {
+		reporter.node[key] = step.NodeID
+		if terminal(step.Status) {
+			reporter.done[step.NodeID] = true
+		}
+	}
 	reporter.emit(destination, step)
 	return terminal(step.Status)
 }
