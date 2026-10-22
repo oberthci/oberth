@@ -329,3 +329,44 @@ func TestTrustedPreflightRecoveryContinuesAfterRowError(t *testing.T) {
 		t.Fatalf("partial recovery lost successful rows: %v %v", ids, err)
 	}
 }
+
+func TestTrustedPreflightRecipesRejectMixedPairs(t *testing.T) {
+	recipes := []vmrunner.KVMRecipe{
+		{SuiteSHA256: strings.Repeat("a", 64), GuestSHA256: strings.Repeat("b", 64), HarnessImage: "registry.example/harness@sha256:" + strings.Repeat("e", 64), SuiteURL: "https://example.org/suite-a", GuestURL: "https://example.org/guest-a"},
+		{SuiteSHA256: strings.Repeat("c", 64), GuestSHA256: strings.Repeat("d", 64), HarnessImage: "registry.example/harness@sha256:" + strings.Repeat("f", 64), SuiteURL: "https://example.org/suite-b", GuestURL: "https://example.org/guest-b"},
+	}
+	for _, recipe := range recipes {
+		if err := recipe.Validate(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	p := &TrustedPreflights{recipes: recipes}
+	for _, tc := range []struct {
+		name         string
+		suite, guest int
+		allowed      bool
+	}{
+		{"recipe A", 0, 0, true},
+		{"recipe B", 1, 1, true},
+		{"suite A guest B", 0, 1, false},
+		{"suite B guest A", 1, 0, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			contract := vmrunner.Contract{Version: 2, Profile: vmrunner.KVMSuiteAMD64Profile, SuiteSHA256: recipes[tc.suite].SuiteSHA256, GuestSHA256: recipes[tc.guest].GuestSHA256, Artifacts: []string{"program"}}
+			if err := vmrunner.ValidateContract(contract); err != nil {
+				t.Fatal(err)
+			}
+			got, err := p.recipe(contract)
+			if tc.allowed {
+				if err != nil || got != recipes[tc.suite] {
+					t.Fatalf("recipe = %+v, %v", got, err)
+				}
+			} else if err == nil || !strings.Contains(err.Error(), "not operator-approved") {
+				t.Fatalf("mixed recipe accepted: %+v, %v", got, err)
+			}
+			if err := p.Supports(contract); (err == nil) != tc.allowed {
+				t.Fatalf("Supports = %v, allowed=%v", err, tc.allowed)
+			}
+		})
+	}
+}

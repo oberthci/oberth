@@ -23,6 +23,33 @@ type TrustedPreflight interface {
 }
 
 func (scheduler *Scheduler) trustedRequirement(ctx context.Context, repository model.Repository, candidateSHA string) (vmrunner.Requirement, error) {
+	requirement, err := scheduler.resolveTrustedRequirement(ctx, repository, candidateSHA)
+	if err != nil {
+		return requirement, err
+	}
+	if previous := requirement.RotatedFrom; previous != nil {
+		details, err := json.Marshal(map[string]string{
+			"candidate_sha": requirement.CandidateSHA, "baseline_sha": requirement.BaselineSHA,
+			"from_suite_sha256": previous.SuiteSHA256, "from_guest_sha256": previous.GuestSHA256,
+			"to_suite_sha256": requirement.Contract.SuiteSHA256, "to_guest_sha256": requirement.Contract.GuestSHA256,
+		})
+		if err == nil {
+			_, err = scheduler.auditor.AppendAuditAction(ctx, model.AuditActionSpec{
+				Actor: "scheduler", Action: "trusted.pin_rotation.authorized", ResourceType: "repository",
+				ResourceID: strconv.FormatInt(repository.ID, 10), Details: string(details),
+			})
+		}
+		if err != nil {
+			return requirement, fmt.Errorf("audit trusted test pin rotation: %w", err)
+		}
+	}
+	return requirement, nil
+}
+
+// resolveTrustedRequirement refreshes and validates policy without auditing.
+// Capacity retries use it after the run's audited admission; progress through
+// admission and publication boundaries must use trustedRequirement instead.
+func (scheduler *Scheduler) resolveTrustedRequirement(ctx context.Context, repository model.Repository, candidateSHA string) (vmrunner.Requirement, error) {
 	upstream, err := scheduler.store.Upstream(ctx, repository.UpstreamID)
 	if err != nil {
 		return vmrunner.Requirement{}, fmt.Errorf("load trusted test policy upstream: %w", err)
@@ -46,22 +73,6 @@ func (scheduler *Scheduler) trustedRequirement(ctx context.Context, repository m
 		}
 		if err = scheduler.trusted.Supports(*requirement.Contract); err != nil {
 			return requirement, err
-		}
-	}
-	if previous := requirement.RotatedFrom; previous != nil {
-		details, err := json.Marshal(map[string]string{
-			"candidate_sha": requirement.CandidateSHA, "baseline_sha": requirement.BaselineSHA,
-			"from_suite_sha256": previous.SuiteSHA256, "from_guest_sha256": previous.GuestSHA256,
-			"to_suite_sha256": requirement.Contract.SuiteSHA256, "to_guest_sha256": requirement.Contract.GuestSHA256,
-		})
-		if err == nil {
-			_, err = scheduler.auditor.AppendAuditAction(ctx, model.AuditActionSpec{
-				Actor: "scheduler", Action: "trusted.pin_rotation.authorized", ResourceType: "repository",
-				ResourceID: strconv.FormatInt(repository.ID, 10), Details: string(details),
-			})
-		}
-		if err != nil {
-			return requirement, fmt.Errorf("audit trusted test pin rotation: %w", err)
 		}
 	}
 	return requirement, nil

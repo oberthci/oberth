@@ -76,7 +76,9 @@ func (scheduler *Scheduler) executeTrustedWithCapacity(ctx context.Context, job 
 		if readmitted.Preempted() {
 			return true, nil
 		}
-		fresh, err := scheduler.trustedRequirement(ctx, job.Repository, requirement.CandidateSHA)
+		// Recheck live policy without repeating the admission rotation audit
+		// on each capacity poll. Publication still requires its own audit.
+		fresh, err := scheduler.resolveTrustedRequirement(ctx, job.Repository, requirement.CandidateSHA)
 		if err != nil {
 			return false, err
 		}
