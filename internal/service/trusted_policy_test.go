@@ -264,12 +264,16 @@ func TestTrustedPinRotationRechecksPromotionAndRecovery(t *testing.T) {
 		t.Fatalf("approved rotation did not pass CI: %#v, %v", run, err)
 	}
 	_, publication := beginPendingPromotionPublication(t, fixture, "main", strings.Repeat("b", 40), sha)
+	before, _, err := fixture.store.ListAuditActions(ctx, model.AuditListFilter{ActionPrefix: "trusted.pin_rotation.authorized", RepoID: fixture.repo.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := fixture.scheduler.requirePublicationTestPolicy(ctx, fixture.repo, publication); err != nil {
 		t.Fatalf("approved green rotation cannot promote: %v", err)
 	}
 	actions, _, err := fixture.store.ListAuditActions(ctx, model.AuditListFilter{ActionPrefix: "trusted.pin_rotation.authorized", RepoID: fixture.repo.ID})
-	if err != nil || len(actions) == 0 {
-		t.Fatalf("missing rotation audit: %v, %v", actions, err)
+	if err != nil || len(actions) != len(before)+1 {
+		t.Fatalf("publication must append its own rotation audit: before=%d after=%d, %v", len(before), len(actions), err)
 	}
 	var details map[string]string
 	if err := json.Unmarshal([]byte(actions[0].Details), &details); err != nil {
@@ -280,10 +284,22 @@ func TestTrustedPinRotationRechecksPromotionAndRecovery(t *testing.T) {
 			t.Fatalf("audit %s = %q, want %q", key, details[key], want)
 		}
 	}
-	var events []string
-	fixture.scheduler.auditor = &orderedAuditor{events: &events, rejectNext: true}
-	if err := fixture.scheduler.requirePublicationTestPolicy(ctx, fixture.repo, publication); err == nil || !strings.Contains(err.Error(), "audit trusted test pin rotation") {
-		t.Fatalf("unaudited rotation admitted: %v", err)
+	for name, check := range map[string]func() error{
+		"admission": func() error {
+			_, err := fixture.scheduler.trustedRequirement(ctx, fixture.repo, sha)
+			return err
+		},
+		"publication": func() error {
+			return fixture.scheduler.requirePublicationTestPolicy(ctx, fixture.repo, publication)
+		},
+	} {
+		t.Run(name+" audit unavailable", func(t *testing.T) {
+			var events []string
+			fixture.scheduler.auditor = &orderedAuditor{events: &events, rejectNext: true}
+			if err := check(); err == nil || !strings.Contains(err.Error(), "audit trusted test pin rotation") {
+				t.Fatalf("unaudited rotation admitted: %v", err)
+			}
+		})
 	}
 	fixture.scheduler.auditor = fixture.store
 	// The same candidate and passing receipt lose authority when the new

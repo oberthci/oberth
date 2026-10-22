@@ -18,6 +18,7 @@ import (
 type capacityFixture struct {
 	*protectedFixture
 	calls        int
+	refusals     int
 	requirements []vmrunner.Requirement
 	complete     bool
 }
@@ -25,7 +26,7 @@ type capacityFixture struct {
 func (p *capacityFixture) Execute(ctx context.Context, job JobRequest, requirement vmrunner.Requirement, output io.Writer) error {
 	p.calls++
 	p.requirements = append(p.requirements, requirement)
-	if p.calls == 1 {
+	if p.calls <= max(1, p.refusals) {
 		return store.ErrVMCapacity
 	}
 	if p.complete {
@@ -201,5 +202,107 @@ func TestTrustedCapacityRetryDeliversReleaseOnlyAfterReceipt(t *testing.T) {
 	}
 	if used, runs := gateUsage(f.scheduler.admission); used != 0 || runs != 0 {
 		t.Fatal("reacquired grant leaked")
+	}
+}
+
+func TestTrustedCapacityRotationAuditsOnceAcrossRetries(t *testing.T) {
+	ctx := context.Background()
+	f := newControlFixture(t)
+	baseline := "version: 2\nprofile: kvm-suite-amd64-v1\nsuite_sha256: " + strings.Repeat("a", 64) + "\nguest_sha256: " + strings.Repeat("b", 64) + "\nartifacts: [build/program]\n"
+	candidate := strings.ReplaceAll(strings.ReplaceAll(baseline, strings.Repeat("a", 64), strings.Repeat("c", 64)), strings.Repeat("b", 64), strings.Repeat("d", 64))
+	git := &policyTestGit{controlGit: f.git, candidate: []byte(candidate), baseline: []byte(baseline)}
+	f.scheduler.git = git
+	executor := &capacityFixture{protectedFixture: &protectedFixture{store: f.store}, refusals: 3}
+	f.scheduler.trusted = executor
+	_, err := f.store.EnqueueRun(ctx, model.RunSpec{RepoID: f.repo.ID, RefKind: model.RefBranch, Ref: "feature/rotation", SHA: strings.Repeat("e", 40), TestedSHA: strings.Repeat("e", 40), Actor: "agent", Trigger: "branch"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := f.store.ClaimNextRun(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.store.MarkRunAdmitted(ctx, run.ID); err != nil {
+		t.Fatal(err)
+	}
+	requirement, err := f.scheduler.trustedRequirement(ctx, f.repo, run.TestedSHA)
+	if err != nil || requirement.RotatedFrom == nil {
+		t.Fatalf("rotation admission: %+v, %v", requirement, err)
+	}
+	assertOneAudit := func() {
+		t.Helper()
+		actions, _, err := f.store.ListAuditActions(ctx, model.AuditListFilter{ActionPrefix: "trusted.pin_rotation.authorized", RepoID: f.repo.ID})
+		if err != nil || len(actions) != 1 {
+			t.Fatalf("capacity-path rotation audits = %d, want 1: %v", len(actions), err)
+		}
+	}
+	waits := 0
+	f.scheduler.capacityWait = func(context.Context) error {
+		waits++
+		assertOneAudit()
+		return nil
+	}
+	job := JobRequest{Run: run, Repository: f.repo, Size: periapsis.M, ConcurrencyGroup: "group"}
+	reservation := f.scheduler.admission.reserve(1)
+	defer acquireRequestWithinBudget(t, reservation, groupRequest(run.ID, f.repo.ID, job.Size, job.ConcurrencyGroup))()
+	stopped, err := f.scheduler.executeTrustedWithCapacity(ctx, job, requirement, io.Discard, reservation, func(context.Context) error { return nil })
+	if err != nil || stopped || waits != 3 || executor.calls != 4 {
+		t.Fatalf("capacity retries: stopped=%v err=%v waits=%d calls=%d", stopped, err, waits, executor.calls)
+	}
+	assertOneAudit()
+	if len(git.reads) != 8 {
+		t.Fatalf("policy reads = %d, want admission plus three fresh candidate/default reads", len(git.reads))
+	}
+}
+
+func TestTrustedCapacityAuditsRotationThatAppearsWhileParked(t *testing.T) {
+	ctx := context.Background()
+	f := newControlFixture(t)
+	pins := "version: 2\nprofile: kvm-suite-amd64-v1\nsuite_sha256: " + strings.Repeat("c", 64) + "\nguest_sha256: " + strings.Repeat("d", 64) + "\nartifacts: [build/program]\n"
+	older := strings.ReplaceAll(strings.ReplaceAll(pins, strings.Repeat("c", 64), strings.Repeat("a", 64)), strings.Repeat("d", 64), strings.Repeat("b", 64))
+	git := &policyTestGit{controlGit: f.git, candidate: []byte(pins), baseline: []byte(pins)}
+	f.scheduler.git = git
+	executor := &capacityFixture{protectedFixture: &protectedFixture{store: f.store}, refusals: 2}
+	f.scheduler.trusted = executor
+	_, err := f.store.EnqueueRun(ctx, model.RunSpec{RepoID: f.repo.ID, RefKind: model.RefBranch, Ref: "feature/parked", SHA: strings.Repeat("e", 40), TestedSHA: strings.Repeat("e", 40), Actor: "agent", Trigger: "branch"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := f.store.ClaimNextRun(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.store.MarkRunAdmitted(ctx, run.ID); err != nil {
+		t.Fatal(err)
+	}
+	requirement, err := f.scheduler.trustedRequirement(ctx, f.repo, run.TestedSHA)
+	if err != nil || requirement.RotatedFrom != nil {
+		t.Fatalf("admission without rotation: %+v, %v", requirement, err)
+	}
+	audits := func() int {
+		t.Helper()
+		actions, _, err := f.store.ListAuditActions(ctx, model.AuditListFilter{ActionPrefix: "trusted.pin_rotation.authorized", RepoID: f.repo.ID})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return len(actions)
+	}
+	// The default branch moves to older pins while the run is parked, so the
+	// unchanged candidate becomes a rotation that must be audited before it runs.
+	waits := 0
+	f.scheduler.capacityWait = func(context.Context) error {
+		waits++
+		git.baseline = []byte(older)
+		return nil
+	}
+	job := JobRequest{Run: run, Repository: f.repo, Size: periapsis.M, ConcurrencyGroup: "group"}
+	reservation := f.scheduler.admission.reserve(1)
+	defer acquireRequestWithinBudget(t, reservation, groupRequest(run.ID, f.repo.ID, job.Size, job.ConcurrencyGroup))()
+	stopped, err := f.scheduler.executeTrustedWithCapacity(ctx, job, requirement, io.Discard, reservation, func(context.Context) error { return nil })
+	if err != nil || stopped || waits != 2 || executor.calls != 3 {
+		t.Fatalf("capacity retries: stopped=%v err=%v waits=%d calls=%d", stopped, err, waits, executor.calls)
+	}
+	if got := audits(); got != 1 {
+		t.Fatalf("rotation audits after it appeared while parked = %d, want 1", got)
 	}
 }

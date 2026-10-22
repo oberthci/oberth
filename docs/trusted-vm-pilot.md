@@ -48,14 +48,17 @@ Candidates cannot add recipes or select execution commands, images or URLs.
 CI, publication recovery and fast-forward promotion reread upstream policy and
 check the current executor's recipe allowlist. Removing the new recipe after a
 green run prevents promotion; receipt verification also checks the complete
-journaled recipe. Keep the old recipe while old-pin runs still need it. Recipe
-configuration rollout and promotion remain operator actions.
+journaled recipe. While an older recipe remains configured, a candidate may
+rotate back to that pair. The default branch changes only if such a candidate
+is promoted. Keep the old recipe while anything still needs it, then remove it.
+Recipe configuration rollout and promotion remain operator actions.
 
-Each accepted rotation policy check writes `trusted.pin_rotation.authorized`
-to the durable audit chain, recording repository identity, candidate/default
-commit SHAs and old/new pin pairs. Checks may recur at scheduling/publication
-boundaries; these records authorize a rotation but do not assert publication.
-If the audit append fails, the rotation cannot proceed.
+Each accepted rotation at an admission or publication/recovery boundary writes
+`trusted.pin_rotation.authorized` to the durable audit chain, recording repository
+identity, candidate/default commit SHAs and old/new pin pairs. Capacity-wait polls
+recheck policy without repeating the admission audit. Boundary records authorize
+a rotation but do not assert publication. If a boundary audit append fails, the
+rotation cannot proceed.
 
 ## Bound plan and artifact custody
 
