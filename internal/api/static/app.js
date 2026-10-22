@@ -10,7 +10,6 @@ const listPollMs = 4000;
 const slowPollMs = 10000;
 const livePollMs = 2000;
 const state = {
-  repoArchive: "active",
   repos: [], runs: [], repoRuns: [], status: null,
   runCounts: null, runCursor: 0, runCursorHistory: [], runStart: 1, runStartHistory: [], runSourceCount: 0,
   runNext: 0, runsNext: "", repoRunsNext: "",
@@ -430,45 +429,51 @@ function repoCounts(runs) {
 }
 /* ---------- one run list: the queue, then admission time ---------- */
 function admissionOf(run) { return run.Scheduling?.admission || null; }
-/* The gate identifies the blocking head. Its bounded backfill can admit a
-   later run that fits, so queue position alone cannot identify the head. */
-function queueBlocker(queue) {
-  return queue.find(run => admissionOf(run)?.head_of_queue) || null;
+function queuePhase(run) {
+  const status = displayRunStatus(run);
+  return status === "queued" && run.Scheduling?.state === "waiting" ? "waiting" : status;
 }
-function queuePosition(run) {
-  return run.Scheduling?.queue_position ? String(run.Scheduling.queue_position) : "";
-}
-function queueSize(run) {
+function queueSize(run) { return admissionOf(run)?.size || ""; }
+function queueSizeTitle(run) {
   const admission = admissionOf(run);
   if (!admission?.size) return "";
-  return `${admission.size} · ${admission.weight}w`;
+  return `declared size ${admission.size}${admission.capacity > 0 ? ` · admission weight ${admission.weight} of ${admission.capacity}` : ""}`;
 }
-function queueReason(run, blocker) {
-  const admission = admissionOf(run), message = run.Scheduling?.message || runMessage(run) || "awaiting scheduler";
-  if (run !== blocker) return message;
-  if (!admission.capacity) return message;
-  return `needs ${admission.weight} weight; ${admission.used}/${admission.capacity} used`;
+function queueReason(run) {
+  const a = admissionOf(run), s = run.Scheduling?.state, b = a?.blocked_by;
+  if (s === "preflight") return "KVM preflight running";
+  if (!a || s === "preparing") return "preparing to run";
+  if (a.kubevirt_capacity) return "waiting for KubeVirt capacity (repository VM grant)";
+  if (a.vm_capacity) return "waiting for trusted VM capacity";
+  if (a.disk_floor?.below_floor) return "waiting for disk space";
+  if (a.group_holder || a.group_ahead) return `waiting for group ${a.group}`;
+  if (a.head_of_queue && b) return `waiting for capacity (${b.size}${b.full_drain ? ", needs the whole host" : ""})`
+    + (b.backfilling ? " · smaller runs admitted meanwhile" : b.draining ? " · host draining for it" : "");
+  if (b) return `waiting behind ${b.repo}/${b.ref} (${b.size})`;
+  if (s === "waiting" && a.state === "waiting") return `waiting for capacity${a.size ? ` (${a.size})` : ""}`;
+  if (s === "waiting") return "admitted, submitting workflow";
+  return run.Scheduling?.message ? "awaiting scheduler" : runMessage(run) || "awaiting scheduler";
 }
+function queueDetail(run) { return run.Scheduling?.message || runMessage(run); }
 function runTimeLabel(run) {
   const status = displayRunStatus(run);
   if (status === "queued") return `queued ${ago(run.QueuedAt)}`;
   if (run.StartedAt) return `started ${ago(run.StartedAt)}`;
   return `ended ${ago(run.FinishedAt || run.QueuedAt)}`;
 }
-function runMessageCell(run, blocker) {
-  const message = displayRunStatus(run) === "queued" ? queueReason(run, blocker) : runMessage(run);
+function runMessageCell(run) {
+  const message = displayRunStatus(run) === "queued" ? queueReason(run) : runMessage(run);
   if (run.SupersededBy) {
     return `<button type="button" class="run-successor" data-run-id="${esc(run.SupersededBy)}">${esc(message)}</button>`;
   }
   return run.display_reason === "server restart, retry needed" ? `<span class="retry-warning">${esc(message)}</span>` : esc(message);
 }
 function runsTable(runs) {
-  const blocker = queueBlocker(runs.filter(run => displayRunStatus(run) === "queued"));
   return `<div class="table runs-table"><div class="trow head"><div>status</div><div>run</div><div>sha</div><div>actor</div><div>when</div><div>message</div></div>${runs.map(run => {
     const queued = displayRunStatus(run) === "queued";
-    const reason = queued ? queueReason(run, blocker) : runMessage(run);
+    const status = queuePhase(run);
     const group = admissionOf(run)?.group || run.ConcurrencyGroup;
-    return `<div class="trow${run === blocker ? " blocking" : ""}" data-run-id="${esc(run.ID)}"><div class="status-cell run-status">${queued ? `<span class="queue-pos">${esc(queuePosition(run))}</span> ` : ""}${runStatusCell(run)}${run === blocker ? ' <span class="v4b fail">head</span>' : ""}</div><div class="primary"><div class="repo-name">${esc(repoName(run.RepoID))} ${releaseBadge(run)}${credentialedBadge(run)}${group ? ` <span class="v4b dim" title="concurrency group">${esc(group)}</span>` : ""}</div><div class="branch">${esc(run.RefKind === "tag" ? "tag " : "")}${esc(run.Ref)}</div></div><div class="sha">${esc(shortSha(run.SHA))}</div><div class="clip" title="${esc(run.Actor)}">${esc(run.Actor || "--")}</div><div class="nowrap" title="${esc(fmtTime(runWhen(run)))}">${esc(runTimeLabel(run))}<br><span class="meta">${queued ? esc(queueSize(run)) : esc(fmtDur(runDuration(run)))}</span></div><div class="clip" title="${esc(reason)}">${runMessageCell(run, blocker)}</div></div>`;
+    return `<div class="trow" data-run-id="${esc(run.ID)}"><div class="status-cell run-status">${statusIcon(status)}${pill(statusLabel(status), statusKind(status))}</div><div class="primary"><div class="repo-name">${esc(repoName(run.RepoID))} ${releaseBadge(run)}${credentialedBadge(run)}${group ? ` <span class="v4b dim" title="concurrency group">${esc(group)}</span>` : ""}</div><div class="branch">${esc(run.RefKind === "tag" ? "tag " : "")}${esc(run.Ref)}</div></div><div class="sha">${esc(shortSha(run.SHA))}</div><div class="clip" title="${esc(run.Actor)}">${esc(run.Actor || "--")}</div><div class="nowrap" title="${esc(fmtTime(runWhen(run)))}">${esc(runTimeLabel(run))}<br><span class="meta"${queued ? ` title="${esc(queueSizeTitle(run))}"` : ""}>${queued ? esc(queueSize(run)) : esc(fmtDur(runDuration(run)))}</span></div><div class="clip" title="${esc(queueDetail(run))}">${runMessageCell(run)}</div></div>`;
   }).join("")}</div>`;
 }
 async function renderRuns(seq) {
@@ -510,9 +515,11 @@ async function renderRuns(seq) {
     </div>
     <div class="runs-layout">
       <aside class="repo-side">
-        <div class="repo-filter-row">${repoArchiveFilters()}</div>
         <div class="repo-filter-row"><button class="repo-filter ${state.repo === "all" ? "on" : ""}" data-repo-filter="all"><span class="name">All repos</span><span class="count">${esc(counts.get("all") || 0)}</span></button></div>
-        ${listedRepos().map(repo => `<div class="repo-filter-row"><button class="repo-filter ${state.repo === repoKey(repo) ? "on" : ""}" data-repo-filter="${esc(repoKey(repo))}" title="${esc(repoKey(repo))}"><span class="name">${esc(repoLabel(repo))}</span><span class="count">${esc(counts.get(repoKey(repo)) || 0)}</span></button></div>`).join("")}
+        ${orderedRepos().map((repo, index, repos) => {
+          const divider = repo.ArchivedAt && (index === 0 || !repos[index - 1].ArchivedAt) ? '<div class="repo-filter-row repo-archived-divider"><span class="meta">archived</span></div>' : "";
+          return `${divider}<div class="repo-filter-row"><button class="${repo.ArchivedAt ? "repo-filter archived" : "repo-filter"}${state.repo === repoKey(repo) ? " on" : ""}" data-repo-filter="${esc(repoKey(repo))}" title="${esc(repoKey(repo))}"><span class="name">${esc(repoLabel(repo))}</span><span class="count">${esc(counts.get(repoKey(repo)) || 0)}</span></button></div>`;
+        }).join("")}
       </aside>
       <section>
         <div class="toolbar">
@@ -903,21 +910,20 @@ function upstreamName(upstreamID) {
 function historyStrip(runs) {
   return `<div class="history" aria-label="recent runs, oldest to newest">${runs.slice(0, 12).reverse().map(run => `<button type="button" class="hist ${statusKind(displayRunStatus(run))}" data-run-id="${esc(run.ID)}" title="${esc(`${shortSha(run.SHA)} · ${run.RefKind === "tag" ? "tag" : "branch"} ${run.Ref} · ${statusLabel(displayRunStatus(run))} · ${ago(runWhen(run))}`)}"></button>`).join("") || '<span class="meta">--</span>'}</div>`;
 }
-function listedRepos() { return state.repos.filter(repo => Boolean(repo.ArchivedAt) === (state.repoArchive === "archived")); }
-function repoArchiveFilters() {
-  return ["active", "archived"].map(kind => `<button type="button" class="chip ${state.repoArchive === kind ? "on" : ""}" data-repo-archive="${kind}">${kind} (${state.repos.filter(repo => Boolean(repo.ArchivedAt) === (kind === "archived")).length})</button>`).join("");
+function orderedRepos() {
+  return [...state.repos.filter(repo => !repo.ArchivedAt), ...state.repos.filter(repo => repo.ArchivedAt)];
 }
 async function renderRepos(seq) {
   setChrome("repos", "/ repos");
   await Promise.all([loadRepos(), loadStatus().catch(() => { })]);
   if (!currentRoute(seq)) return;
-  const rows = listedRepos().map(repo => {
+  const rows = orderedRepos().map(repo => {
     const runs = repo.LatestRuns || [];
     return { repo, runs, latest: runs[0] || null };
   });
   replaceApp(`
   <section class="screen">
-    <div class="bar"><h1>Repositories</h1><span class="meta">${state.repos.length} configured</span>${repoArchiveFilters()}</div>
+    <div class="bar"><h1>Repositories</h1><span class="meta">${state.repos.length} configured</span></div>
     <div class="table repo-table">
       <div class="trow head"><div>repository</div><div>status</div><div>default branch</div><div>latest run</div><div>history</div><div>upstream</div></div>
       ${rows.map(({ repo, runs, latest }) => `<div class="trow" data-repo-runs="${esc(repoKey(repo))}"><div class="primary"><div class="repo-name">${esc(repoLabel(repo))}</div></div><div>${repo.ArchivedAt ? pill("archived", "cancel") : latest ? pill(statusLabel(latest.Status), statusKind(latest.Status)) : '<span class="meta">no runs</span>'}</div><div class="branch">${esc(repo.DefaultBranch || "--")}</div><div>${latest ? `<div class="branch">${esc(latest.Ref)}</div><span class="meta">${esc(ago(runWhen(latest)))}</span>` : '<span class="meta">--</span>'}</div><div>${historyStrip(runs)}</div><div class="clip">${esc(upstreamName(repo.UpstreamID))}</div></div>`).join("") || '<div class="empty static">No repositories match this filter.</div>'}
@@ -1154,7 +1160,6 @@ app.addEventListener("click", event => {
      of the run detail page. */
   if ((target = event.target.closest("[data-run-id]"))) { go(`/runs/${enc(target.dataset.runId)}`); return; }
   if ((target = event.target.closest("[data-repo-runs]"))) { changeRunRepo(target.dataset.repoRuns); go("/runs"); return; }
-  if ((target = event.target.closest("[data-repo-archive]"))) { state.repoArchive = target.dataset.repoArchive; route(); return; }
   if ((target = event.target.closest("[data-repo-filter]"))) { changeRunRepo(target.dataset.repoFilter); route(); return; }
   if ((target = event.target.closest("[data-kind-filter]"))) { state.releaseOnly = !state.releaseOnly; route(); return; }
   if ((target = event.target.closest("[data-status-filter]"))) { state.filter = target.dataset.statusFilter; route(); return; }

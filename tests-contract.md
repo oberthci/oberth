@@ -17,7 +17,7 @@ a VM-parked run, a group waiter and a head that does not fit, and checks each
 reason, weight and position; `TestScopedActiveRunsStayInScope` withholds
 sequences and positions. `TestRunListMCPMatchesHTTPOrderAndPassedAlias` compares
 the default MCP/HTTP ordering and preserves the passed-status wire alias.
-`TestRunsPageIsOneFlatFilteredList` pins the flat dashboard and head marker.
+`TestRunsPageIsOneFlatFilteredList` pins the flat dashboard: grey queued/waiting pills, plain-language wait reasons, no position number, head badge or red tint on queued rows.
 `TestFlatRunsUseOneSnapshotAcrossAdmission` admits a queued run between the two
 list queries and proves that the response contains it only once.
 

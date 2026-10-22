@@ -175,8 +175,8 @@ func TestDashboardFoldsExecutorLines(t *testing.T) {
 	}
 }
 
-// The dashboard renders the default flat list once. Queue rows carry their
-// place and the head badge in that table; there are no separate sections.
+// The dashboard renders one flat list with grey queued/waiting pills and
+// plain-language reasons; queue position and head styling stay out of the rows.
 func TestRunsPageIsOneFlatFilteredList(t *testing.T) {
 	t.Parallel()
 	script, ok := staticAssets["app.js"]
@@ -212,30 +212,35 @@ func TestRunsPageIsOneFlatFilteredList(t *testing.T) {
 			t.Fatalf("runs page still has separate section %q", unwanted)
 		}
 	}
-	blocker := section("function queueBlocker(", "\nfunction queuePosition(")
-	for _, want := range []string{"admissionOf(run)?.head_of_queue"} {
-		if !strings.Contains(blocker, want) {
-			t.Fatalf("queueBlocker is missing the gate's head marker %s", want)
-		}
-	}
-	position := section("function queuePosition(", "\nfunction queueSize(")
-	if !strings.Contains(position, "String(run.Scheduling.queue_position)") || strings.Contains(position, "`#") || strings.Contains(position, "q#") {
-		t.Fatalf("queue position is not one plain 1..N numbering: %s", position)
-	}
 	table := section("function runsTable(", "\nasync function renderRuns(")
-	for _, want := range []string{"queuePosition(run)", "queueSize(run)", `" blocking"`, `>head</span>`, "runMessageCell(run, blocker)", "runTimeLabel(run)"} {
+	for _, want := range []string{"queuePhase(run)", "queueSize(run)", "queueSizeTitle(run)", `title="${esc(queueDetail(run))}"`, "runMessageCell(run)", "runTimeLabel(run)"} {
 		if !strings.Contains(table, want) {
 			t.Fatalf("flat runs table is missing %s", want)
 		}
 	}
-	if !strings.Contains(source, "needs ${admission.weight} weight; ${admission.used}/${admission.capacity} used") {
-		t.Fatal("the blocking run does not say what it needs")
+	for _, want := range []string{"queueReason(run)", "waiting for capacity (${b.size}", "waiting behind ${b.repo}/${b.ref} (${b.size})", "waiting for group ${a.group}", "waiting for KubeVirt capacity (repository VM grant)"} {
+		if !strings.Contains(source, want) {
+			t.Fatalf("plain-language queue status is missing %s", want)
+		}
+	}
+	// The status page also labels the audit-chain head; only the runs table
+	// must lose its queue-head badge.
+	if strings.Contains(table, ">head</span>") {
+		t.Fatal("runs table retains its queue-head badge")
+	}
+	for _, unwanted := range []string{"queue-pos", `" blocking"`, "weight;"} {
+		if strings.Contains(source, unwanted) {
+			t.Fatalf("queued rows retain %q", unwanted)
+		}
 	}
 	css := string(staticAssets["app.css"].body)
-	for _, want := range []string{".trow.blocking", ".queue-pos", ".run-successor"} {
-		if !strings.Contains(css, want) {
-			t.Fatalf("app.css is missing %s", want)
+	for _, unwanted := range []string{".trow.blocking", ".queue-pos"} {
+		if strings.Contains(css, unwanted) {
+			t.Fatalf("app.css retains queue styling %s", unwanted)
 		}
+	}
+	if !strings.Contains(css, ".run-successor") {
+		t.Fatal("app.css lost successor link styling")
 	}
 }
 
@@ -292,22 +297,25 @@ func TestRunsFiltersCountsAndCancelledSuccessors(t *testing.T) {
 	}
 }
 
-func TestArchivedRepositoryFilterKeepsCatalogAndHistoryCounts(t *testing.T) {
+func TestArchivedRepositoriesListedLastWithoutToggle(t *testing.T) {
 	t.Parallel()
 	source := string(staticAssets["app.js"].body)
 	for _, required := range []string{
-		`repoArchive: "active"`,
-		`function listedRepos()`,
-		`Boolean(repo.ArchivedAt) === (state.repoArchive === "archived")`,
-		`const rows = listedRepos().map`,
-		`${listedRepos().map(repo =>`,
-		`data-repo-archive=`,
-		`state.repoArchive = target.dataset.repoArchive; route();`,
+		`function orderedRepos()`,
+		`repo-archived-divider`,
+		`repo-filter archived`,
+		`const rows = orderedRepos().map`,
 		`${state.repos.length} configured`,
 		`state.runCounts.ByRepo?.[repo.ID]`,
+		`pill("archived", "cancel")`,
 	} {
 		if !strings.Contains(source, required) {
-			t.Fatalf("archive filter missing %q", required)
+			t.Fatalf("archived repository listing missing %q", required)
+		}
+	}
+	for _, unwanted := range []string{"repoArchive", "data-repo-archive", "repoArchiveFilters"} {
+		if strings.Contains(source, unwanted) {
+			t.Fatalf("archive toggle remains: %s", unwanted)
 		}
 	}
 }
