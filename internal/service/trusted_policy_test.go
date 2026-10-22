@@ -265,28 +265,30 @@ func TestTrustedPinRotationRechecksPromotionAndRecovery(t *testing.T) {
 	}
 	_, publication := beginPendingPromotionPublication(t, fixture, "main", strings.Repeat("b", 40), sha)
 	before, _, err := fixture.store.ListAuditActions(ctx, model.AuditListFilter{ActionPrefix: "trusted.pin_rotation.authorized", RepoID: fixture.repo.ID})
-	if err != nil {
-		t.Fatal(err)
+	if err != nil || len(before) != 1 {
+		t.Fatalf("admission and post-preflight recheck must share one audit: %d, %v", len(before), err)
 	}
-	if err := fixture.scheduler.requirePublicationTestPolicy(ctx, fixture.repo, publication); err != nil {
-		t.Fatalf("approved green rotation cannot promote: %v", err)
+	for range 4 {
+		if err := fixture.scheduler.requirePublicationTestPolicy(ctx, fixture.repo, publication); err != nil {
+			t.Fatalf("approved green rotation cannot promote: %v", err)
+		}
 	}
 	actions, _, err := fixture.store.ListAuditActions(ctx, model.AuditListFilter{ActionPrefix: "trusted.pin_rotation.authorized", RepoID: fixture.repo.ID})
-	if err != nil || len(actions) != len(before)+1 {
-		t.Fatalf("publication must append its own rotation audit: before=%d after=%d, %v", len(before), len(actions), err)
+	if err != nil || len(actions) != 1 {
+		t.Fatalf("publication rechecks repeated rotation audit: before=%d after=%d, %v", len(before), len(actions), err)
 	}
 	var details map[string]string
 	if err := json.Unmarshal([]byte(actions[0].Details), &details); err != nil {
 		t.Fatal(err)
 	}
-	for key, want := range map[string]string{"candidate_sha": sha, "baseline_sha": strings.Repeat("b", 40), "from_suite_sha256": strings.Repeat("a", 64), "from_guest_sha256": strings.Repeat("b", 64), "to_suite_sha256": executor.suite, "to_guest_sha256": executor.guest} {
+	for key, want := range map[string]string{"run_id": run.ID, "candidate_sha": sha, "baseline_sha": strings.Repeat("b", 40), "from_suite_sha256": strings.Repeat("a", 64), "from_guest_sha256": strings.Repeat("b", 64), "to_suite_sha256": executor.suite, "to_guest_sha256": executor.guest} {
 		if details[key] != want {
 			t.Fatalf("audit %s = %q, want %q", key, details[key], want)
 		}
 	}
 	for name, check := range map[string]func() error{
 		"admission": func() error {
-			_, err := fixture.scheduler.trustedRequirement(ctx, fixture.repo, sha)
+			_, err := fixture.scheduler.trustedRequirement(ctx, fixture.repo, run.ID, sha)
 			return err
 		},
 		"publication": func() error {
@@ -314,5 +316,20 @@ func TestTrustedPinRotationRechecksPromotionAndRecovery(t *testing.T) {
 	got, err := fixture.store.Publication(ctx, publication.ID)
 	if err != nil || got.Status != model.PublicationFailed || len(fixture.git.promotions) != 0 || len(fixture.git.syncedBranches) != 1 {
 		t.Fatalf("recovery bypassed revoked rotation: %#v, %v", got, err)
+	}
+	refused, _, err := fixture.store.ListAuditActions(ctx, model.AuditListFilter{ActionPrefix: "trusted.pin_rotation.refused", RepoID: fixture.repo.ID})
+	if err != nil || len(refused) != 1 {
+		t.Fatalf("revocation and recovery must share one new refusal record: %d, %v", len(refused), err)
+	}
+	// Restoring the recipe changes the decision again and must be audited.
+	executor.suite, executor.guest = strings.Repeat("c", 64), strings.Repeat("d", 64)
+	for range 3 {
+		if _, err := fixture.scheduler.trustedRequirement(ctx, fixture.repo, run.ID, sha); err != nil {
+			t.Fatal(err)
+		}
+	}
+	actions, _, err = fixture.store.ListAuditActions(ctx, model.AuditListFilter{ActionPrefix: "trusted.pin_rotation.authorized", RepoID: fixture.repo.ID})
+	if err != nil || len(actions) != 2 {
+		t.Fatalf("restored recipe must append exactly one changed authorization: %d, %v", len(actions), err)
 	}
 }

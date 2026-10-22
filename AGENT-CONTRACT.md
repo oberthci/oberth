@@ -1455,11 +1455,14 @@ continuity checks; it must never be used to reset or bypass those checks.
   unapproved pairs fail closed. CI, publication recovery and fast-forward
   promotion resolve the fresh upstream default contract and current executor
   recipes; a prior green run cannot authorize a revoked pair. The full journaled
-  recipe is also rechecked before publication. Each successful rotation at an
-  admission or publication/recovery boundary must append
-  `trusted.pin_rotation.authorized` with the repository, candidate/default SHAs
-  and old/new pin pairs; audit failure refuses progress. Capacity-wait retries
-  refresh policy without repeating the admission audit. This records
+  recipe is also rechecked before publication. Keeping an old recipe in the
+  allowlist permits rotating back to that pair; remove it to forbid that rollback.
+  The first rotation decision for each run appends
+  `trusted.pin_rotation.authorized` or `trusted.pin_rotation.refused` with the
+  repository, run, candidate/default SHAs and old/new pin pairs. Capacity,
+  post-preflight and publication/recovery rechecks still verify live policy,
+  but append another record only when the decision or pair changes, including
+  a refusal after recipe removal. Audit failure refuses progress. This records
   authorization, not a completed promotion.
 - Lane B suite bundle format v1 is a bounded, uncompressed USTAR archive
   (maximum 64 MiB and 1024 regular files). The verifier hashes the complete

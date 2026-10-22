@@ -18,7 +18,8 @@ type PolicyGit interface {
 }
 
 type Requirement struct {
-	// RotatedFrom is populated only after a paired pin rotation is authorized.
+	// RotatedFrom identifies a candidate pin change, including a refused one.
+	// Callers must check ResolveRequirement's error before using the contract.
 	RotatedFrom  *Contract
 	CandidateSHA string
 	BaselineSHA  string
@@ -53,14 +54,15 @@ func ResolveRequirement(ctx context.Context, git PolicyGit, repository, candidat
 	if err != nil {
 		return Requirement{}, fmt.Errorf("upstream trusted test policy: %w", err)
 	}
-	contract, err := RequiredContract(candidate, baseline, authorizeRotation)
-	if err != nil {
-		return Requirement{}, err
-	}
-	requirement := Requirement{CandidateSHA: candidateSHA, BaselineSHA: baselineSHA, Contract: contract}
-	if baseline != nil && candidate != nil && candidate.SuiteSHA256 != baseline.SuiteSHA256 {
+	requirement := Requirement{CandidateSHA: candidateSHA, BaselineSHA: baselineSHA, Contract: candidate}
+	if baseline != nil && candidate != nil && (candidate.SuiteSHA256 != baseline.SuiteSHA256 || candidate.GuestSHA256 != baseline.GuestSHA256) {
 		requirement.RotatedFrom = baseline
 	}
+	contract, err := RequiredContract(candidate, baseline, authorizeRotation)
+	if err != nil {
+		return requirement, err
+	}
+	requirement.Contract = contract
 	return requirement, nil
 }
 

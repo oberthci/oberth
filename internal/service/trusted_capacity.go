@@ -76,33 +76,16 @@ func (scheduler *Scheduler) executeTrustedWithCapacity(ctx context.Context, job 
 		if readmitted.Preempted() {
 			return true, nil
 		}
-		// Recheck live policy without repeating the admission rotation audit
-		// on each capacity poll. Publication still requires its own audit.
-		fresh, err := scheduler.resolveTrustedRequirement(ctx, job.Repository, requirement.CandidateSHA)
+		// Reverify live policy and audit only a changed decision or pin pair.
+		fresh, err := scheduler.trustedRequirement(ctx, job.Repository, job.Run.ID, requirement.CandidateSHA)
 		if err != nil {
 			return false, err
 		}
 		if vmrunner.ContractDigest(fresh.Contract) != vmrunner.ContractDigest(requirement.Contract) {
 			return false, fmt.Errorf("trusted test policy changed while waiting for VM capacity")
 		}
-		// A default-branch pin change while parked turns this run into a
-		// different rotation (or into one); audit that before the VM runs.
-		if rotationSource(fresh) != rotationSource(requirement) {
-			if fresh, err = scheduler.trustedRequirement(ctx, job.Repository, requirement.CandidateSHA); err != nil {
-				return false, err
-			}
-		}
 		requirement = fresh
 	}
-}
-
-// rotationSource identifies the default-branch pair a requirement rotates
-// from; it is empty when the candidate keeps the default pins.
-func rotationSource(requirement vmrunner.Requirement) string {
-	if requirement.RotatedFrom == nil {
-		return ""
-	}
-	return vmrunner.ContractDigest(requirement.RotatedFrom)
 }
 
 func waitTrustedCapacity(ctx context.Context) error {

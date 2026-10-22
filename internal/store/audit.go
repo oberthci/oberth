@@ -93,6 +93,11 @@ func (s *Store) appendAuditAction(ctx context.Context, execer auditExecer, spec 
 	if !json.Valid([]byte(spec.Details)) {
 		return model.AuditAction{}, fmt.Errorf("%w: audit details must be JSON", ErrInvalid)
 	}
+	if previous, repeated, err := s.repeatedPinRotationDecision(ctx, execer, spec); err != nil {
+		return model.AuditAction{}, fmt.Errorf("read pin rotation audit decision: %w", err)
+	} else if repeated {
+		return previous, nil
+	}
 
 	id := int64(1)
 	previous := append([]byte(nil), auditGenesisSHA256...)

@@ -21,6 +21,14 @@ type capacityFixture struct {
 	refusals     int
 	requirements []vmrunner.Requirement
 	complete     bool
+	supportErr   error
+}
+
+func (p *capacityFixture) Supports(contract vmrunner.Contract) error {
+	if p.supportErr != nil {
+		return p.supportErr
+	}
+	return p.protectedFixture.Supports(contract)
 }
 
 func (p *capacityFixture) Execute(ctx context.Context, job JobRequest, requirement vmrunner.Requirement, output io.Writer) error {
@@ -85,7 +93,7 @@ func TestTrustedCapacityRetryBoundaries(t *testing.T) {
 			if _, err := f.store.MarkRunAdmitted(ctx, run.ID); err != nil {
 				t.Fatal(err)
 			}
-			requirement, err := f.scheduler.trustedRequirement(ctx, f.repo, run.TestedSHA)
+			requirement, err := f.scheduler.trustedRequirement(ctx, f.repo, run.ID, run.TestedSHA)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -225,7 +233,7 @@ func TestTrustedCapacityRotationAuditsOnceAcrossRetries(t *testing.T) {
 	if _, err := f.store.MarkRunAdmitted(ctx, run.ID); err != nil {
 		t.Fatal(err)
 	}
-	requirement, err := f.scheduler.trustedRequirement(ctx, f.repo, run.TestedSHA)
+	requirement, err := f.scheduler.trustedRequirement(ctx, f.repo, run.ID, run.TestedSHA)
 	if err != nil || requirement.RotatedFrom == nil {
 		t.Fatalf("rotation admission: %+v, %v", requirement, err)
 	}
@@ -253,6 +261,20 @@ func TestTrustedCapacityRotationAuditsOnceAcrossRetries(t *testing.T) {
 	if len(git.reads) != 8 {
 		t.Fatalf("policy reads = %d, want admission plus three fresh candidate/default reads", len(git.reads))
 	}
+	// Revocation during another wait is a new, audited refusal, not authority
+	// inherited from the successful checks above.
+	executor.calls, executor.refusals = 0, 1
+	f.scheduler.capacityWait = func(context.Context) error {
+		executor.supportErr = errors.New("recipe removed")
+		return nil
+	}
+	if _, err := f.scheduler.executeTrustedWithCapacity(ctx, job, requirement, io.Discard, reservation, func(context.Context) error { return nil }); err == nil || !strings.Contains(err.Error(), "recipe removed") || executor.calls != 1 {
+		t.Fatalf("capacity revocation was bypassed: calls=%d err=%v", executor.calls, err)
+	}
+	refused, _, err := f.store.ListAuditActions(ctx, model.AuditListFilter{ActionPrefix: "trusted.pin_rotation.refused", RepoID: f.repo.ID})
+	if err != nil || len(refused) != 1 {
+		t.Fatalf("capacity revocation audit count=%d err=%v", len(refused), err)
+	}
 }
 
 func TestTrustedCapacityAuditsRotationThatAppearsWhileParked(t *testing.T) {
@@ -275,7 +297,7 @@ func TestTrustedCapacityAuditsRotationThatAppearsWhileParked(t *testing.T) {
 	if _, err := f.store.MarkRunAdmitted(ctx, run.ID); err != nil {
 		t.Fatal(err)
 	}
-	requirement, err := f.scheduler.trustedRequirement(ctx, f.repo, run.TestedSHA)
+	requirement, err := f.scheduler.trustedRequirement(ctx, f.repo, run.ID, run.TestedSHA)
 	if err != nil || requirement.RotatedFrom != nil {
 		t.Fatalf("admission without rotation: %+v, %v", requirement, err)
 	}

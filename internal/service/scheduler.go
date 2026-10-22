@@ -625,7 +625,7 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 		return scheduler.finishInfrastructureFailure(ctx, run, repository, fmt.Errorf("checkout run workspace: %w", err))
 	}
 	scheduler.timingMilestone(ctx, run.ID, "checkout-ready")
-	requirement, err := scheduler.trustedRequirement(ctx, repository, checkoutSHA)
+	requirement, err := scheduler.trustedRequirement(ctx, repository, run.ID, checkoutSHA)
 	if err != nil {
 		return scheduler.finishInfrastructureFailure(ctx, run, repository, err)
 	}
@@ -790,7 +790,7 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 			}
 			return scheduler.finishInfrastructureFailure(ctx, run, repository, fmt.Errorf("trusted preflight: %w", err))
 		}
-		fresh, err := scheduler.trustedRequirement(ctx, repository, checkoutSHA)
+		fresh, err := scheduler.trustedRequirement(ctx, repository, run.ID, checkoutSHA)
 		if err == nil {
 			err = scheduler.trustedReceipt(ctx, repository, run, fresh)
 		}

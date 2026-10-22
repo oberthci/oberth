@@ -51,14 +51,17 @@ green run prevents promotion; receipt verification also checks the complete
 journaled recipe. While an older recipe remains configured, a candidate may
 rotate back to that pair. The default branch changes only if such a candidate
 is promoted. Keep the old recipe while anything still needs it, then remove it.
+Remove the old recipe from the allowlist to forbid rotating back to it.
 Recipe configuration rollout and promotion remain operator actions.
 
-Each accepted rotation at an admission or publication/recovery boundary writes
-`trusted.pin_rotation.authorized` to the durable audit chain, recording repository
-identity, candidate/default commit SHAs and old/new pin pairs. Capacity-wait polls
-recheck policy without repeating the admission audit. Boundary records authorize
-a rotation but do not assert publication. If a boundary audit append fails, the
-rotation cannot proceed.
+The first rotation decision for a run writes `trusted.pin_rotation.authorized`
+or `trusted.pin_rotation.refused` to the durable audit chain, recording repository
+and run identity, candidate/default commit SHAs and old/new pin pairs. Every
+capacity, post-preflight and publication/recovery recheck still verifies live
+policy. Unchanged decisions reuse the durable record, including after a restart;
+a changed pair or decision appends a new one. Removing a recipe therefore writes
+a new refusal even after earlier authorization. These records do not assert
+publication. If the audit operation fails, the rotation cannot proceed.
 
 ## Bound plan and artifact custody
 

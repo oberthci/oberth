@@ -367,6 +367,14 @@ func TestTrustedPreflightRecipesRejectMixedPairs(t *testing.T) {
 			if err := p.Supports(contract); (err == nil) != tc.allowed {
 				t.Fatalf("Supports = %v, allowed=%v", err, tc.allowed)
 			}
+			// Exercise candidate reconciliation too: both pins change from a
+			// third baseline, so a mixed A/B pair must reach and fail the live
+			// recipe check rather than merely the half-rotation guard.
+			baseline := contract
+			baseline.SuiteSHA256, baseline.GuestSHA256 = strings.Repeat("1", 64), strings.Repeat("2", 64)
+			if _, err := vmrunner.RequiredContract(&contract, &baseline, p.Supports); (err == nil) != tc.allowed {
+				t.Fatalf("candidate rotation = %v, allowed=%v", err, tc.allowed)
+			}
 		})
 	}
 }

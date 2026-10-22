@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -22,33 +23,39 @@ type TrustedPreflight interface {
 	Recover(context.Context) ([]string, error)
 }
 
-func (scheduler *Scheduler) trustedRequirement(ctx context.Context, repository model.Repository, candidateSHA string) (vmrunner.Requirement, error) {
-	requirement, err := scheduler.resolveTrustedRequirement(ctx, repository, candidateSHA)
-	if err != nil {
-		return requirement, err
-	}
+func (scheduler *Scheduler) trustedRequirement(ctx context.Context, repository model.Repository, runID, candidateSHA string) (vmrunner.Requirement, error) {
+	requirement, policyErr := scheduler.resolveTrustedRequirement(ctx, repository, candidateSHA)
 	if previous := requirement.RotatedFrom; previous != nil {
-		details, err := json.Marshal(map[string]string{
+		if runID == "" {
+			return requirement, errors.Join(policyErr, errors.New("audit trusted test pin rotation: run identity is required"))
+		}
+		action := "trusted.pin_rotation.authorized"
+		fields := map[string]string{
+			"run_id":        runID,
 			"candidate_sha": requirement.CandidateSHA, "baseline_sha": requirement.BaselineSHA,
 			"from_suite_sha256": previous.SuiteSHA256, "from_guest_sha256": previous.GuestSHA256,
 			"to_suite_sha256": requirement.Contract.SuiteSHA256, "to_guest_sha256": requirement.Contract.GuestSHA256,
-		})
+		}
+		if policyErr != nil {
+			action, fields["reason"] = "trusted.pin_rotation.refused", policyErr.Error()
+		}
+		details, err := json.Marshal(fields)
 		if err == nil {
 			_, err = scheduler.auditor.AppendAuditAction(ctx, model.AuditActionSpec{
-				Actor: "scheduler", Action: "trusted.pin_rotation.authorized", ResourceType: "repository",
+				Actor: "scheduler", Action: action, ResourceType: "repository",
 				ResourceID: strconv.FormatInt(repository.ID, 10), Details: string(details),
 			})
 		}
 		if err != nil {
-			return requirement, fmt.Errorf("audit trusted test pin rotation: %w", err)
+			return requirement, errors.Join(policyErr, fmt.Errorf("audit trusted test pin rotation: %w", err))
 		}
 	}
-	return requirement, nil
+	return requirement, policyErr
 }
 
 // resolveTrustedRequirement refreshes and validates policy without auditing.
-// Capacity retries use it after the run's audited admission; progress through
-// admission and publication boundaries must use trustedRequirement instead.
+// All progress boundaries, including capacity retries, use trustedRequirement
+// to durably record decision changes without caching any policy authority.
 func (scheduler *Scheduler) resolveTrustedRequirement(ctx context.Context, repository model.Repository, candidateSHA string) (vmrunner.Requirement, error) {
 	upstream, err := scheduler.store.Upstream(ctx, repository.UpstreamID)
 	if err != nil {
@@ -124,7 +131,18 @@ func (scheduler *Scheduler) requirePublicationTestPolicy(ctx context.Context, re
 			candidateSHA = run.SHA
 		}
 	}
-	requirement, err := scheduler.trustedRequirement(ctx, repository, candidateSHA)
+	var sourceErr error
+	if run.ID == "" {
+		lookup, ok := scheduler.store.(interface {
+			LatestRunForSHA(context.Context, int64, string) (model.Run, error)
+		})
+		if !ok {
+			sourceErr = fmt.Errorf("trusted fast-forward source run unavailable")
+		} else {
+			run, sourceErr = lookup.LatestRunForSHA(ctx, repository.ID, candidateSHA)
+		}
+	}
+	requirement, err := scheduler.trustedRequirement(ctx, repository, run.ID, candidateSHA)
 	if err != nil || requirement.Contract == nil {
 		return err
 	}
@@ -133,15 +151,8 @@ func (scheduler *Scheduler) requirePublicationTestPolicy(ctx context.Context, re
 	if publication.RunID != "" && ((run.Release && publication.ResultSHA != run.SHA) || (!run.Release && publication.ResultSHA != candidateSHA)) {
 		return fmt.Errorf("publication differs from trusted tested candidate")
 	}
-	if run.ID == "" {
-		lookup, ok := scheduler.store.(interface {
-			LatestRunForSHA(context.Context, int64, string) (model.Run, error)
-		})
-		if !ok {
-			return fmt.Errorf("trusted fast-forward source run unavailable")
-		}
-		run, err = lookup.LatestRunForSHA(ctx, repository.ID, candidateSHA)
-		if err != nil || run.Status != model.RunPassed || run.TestedSHA != candidateSHA {
+	if publication.RunID == "" {
+		if sourceErr != nil || run.Status != model.RunPassed || run.TestedSHA != candidateSHA {
 			return fmt.Errorf("trusted fast-forward requires a passed exact candidate run")
 		}
 	}
