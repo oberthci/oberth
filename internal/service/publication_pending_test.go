@@ -60,3 +60,48 @@ func TestPublishRetryReturnsPendingUntilDurableFinalization(t *testing.T) {
 		}
 	}
 }
+
+// lostPublicationAck delivers durably but loses the acknowledgement, forcing
+// publishRetry to resolve the outcome through its terminal read-back path.
+type lostPublicationAck struct {
+	EnqueueObserver
+}
+
+func (observer lostPublicationAck) DeliverPublication(ctx context.Context, id string) (model.PublicationFinalization, error) {
+	finalization, err := observer.EnqueueObserver.DeliverPublication(ctx, id)
+	if err != nil {
+		return finalization, err
+	}
+	return finalization, errors.New("publication acknowledgement lost")
+}
+
+func TestPublishRetryTerminalReadBackWakesRunWaiters(t *testing.T) {
+	ctx := context.Background()
+	f := newControlFixture(t, JobResult{Status: model.RunPassed, Phase: "passed", Steps: []model.StepResult{stepResult(model.StepPassed)}})
+	queued, err := f.scheduler.EnqueueCI(ctx, CIRequest{EventID: "lost-publication-ack", Repository: f.repo, Branch: "feature/lost-publication-ack", SHA: strings.Repeat("a", 40), Actor: "agent@host"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.git.remoteRefErr = errors.New("forge unavailable")
+	if err := f.scheduler.ProcessNext(ctx); err != nil {
+		t.Fatal(err)
+	}
+	f.git.remoteRefErr = nil
+	service := f.api(t)
+	service.enqueues = lostPublicationAck{service.enqueues}
+	// Isolate the API notification from the scheduler's own delivery signal.
+	service.signals = NewSignals()
+	wake := service.signals.Run(queued.ID)
+	response, err := service.publishRetry(ctx, api.Actor{Identity: "agent@host", Admin: true}, queued.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.Status != string(model.PublicationDelivered) || response.Error != "" {
+		t.Fatalf("terminal read-back not returned: %#v", response)
+	}
+	select {
+	case <-wake:
+	default:
+		t.Fatal("terminal read-back did not wake run waiters")
+	}
+}

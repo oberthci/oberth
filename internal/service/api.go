@@ -2969,6 +2969,7 @@ func (service *API) publishRetry(ctx context.Context, actor api.Actor, id string
 		cancelRead()
 		if readErr == nil && current.Status.Terminal() {
 			response.Status, response.Error = string(current.Status), current.Error
+			service.signals.NotifyRun(runID)
 		}
 		return response, nil
 	}

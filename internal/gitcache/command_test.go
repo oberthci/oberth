@@ -252,3 +252,48 @@ func TestGitFailureLogWithoutWorkingDirectory(t *testing.T) {
 		t.Fatalf("missing repository context: %s", logs.String())
 	}
 }
+
+func TestGitLogsRedactUnlistedCredentials(t *testing.T) {
+	t.Parallel()
+	for _, config := range [][]string{
+		{"-c", "http.extraHeader=Bearer unlisted-config-secret"},
+		{"-chttp.extraHeader=Bearer unlisted-config-secret"},
+	} {
+		t.Run(config[0], func(t *testing.T) {
+			bare := filepath.Join(t.TempDir(), "empty.git")
+			runGit(t, "", "init", "--quiet", "--bare", bare)
+			cache := newTestCache(t, "unused-upstream")
+			cache.redact = nil
+			var logs bytes.Buffer
+			cache.logger = testLogger{&logs}
+			_, err := cache.execute(t.Context(), commandSpec{
+				dir:        bare,
+				repository: "https://unlisted-user:unlisted-password@example.invalid/repo.git?unlisted-query#unlisted-fragment",
+				args:       append(config, "cat-file", "-p", "missing-object"),
+			}, true)
+			if err == nil {
+				t.Fatal("missing object unexpectedly resolved")
+			}
+			for _, secret := range []string{"unlisted-config-secret", "unlisted-user", "unlisted-password", "unlisted-query", "unlisted-fragment"} {
+				if strings.Contains(logs.String(), secret) {
+					t.Errorf("synthetic credential %q leaked to logs", secret)
+				}
+			}
+			for _, marker := range []string{`subcommand="cat-file"`, "example.invalid/repo.git"} {
+				if !strings.Contains(logs.String(), marker) {
+					t.Errorf("missing command context %q", marker)
+				}
+			}
+		})
+	}
+}
+
+func TestGitCommandTraceRedactsURLCredentialsWithoutConfiguredSecrets(t *testing.T) {
+	t.Parallel()
+	cache := newTestCache(t, "unused-upstream")
+	cache.redact = nil
+	got := cache.redactedCommand([]string{"fetch", "https://unlisted-user:unlisted-password@example.invalid/repo.git?unlisted-query#unlisted-fragment"})
+	if strings.Contains(got, "unlisted-") || !strings.Contains(got, "example.invalid/repo.git") {
+		t.Fatal("URL trace leaked credentials or lost repository context")
+	}
+}

@@ -173,7 +173,7 @@ func (c *Cache) execute(ctx context.Context, spec commandSpec, capture bool) (st
 			if repository == "" {
 				repository = spec.dir
 			}
-			c.logger.Printf("git command failed: subcommand=%q repository=%q: %v", c.redactOutput(gitSubcommand(spec.args)), c.redactOutput(repository), err)
+			c.logger.Printf("git command failed: subcommand=%q repository=%q: %v", c.redactOutput(gitSubcommand(spec.args)), c.redactOutput(redactURL(repository)), err)
 			if detail != "" {
 				return "", fmt.Errorf("git command failed: %w: %s", err, detail)
 			}
@@ -311,7 +311,15 @@ func (c *Cache) commandEnv(extra map[string]string) []string {
 func (c *Cache) redactedCommand(args []string) string {
 	clean := make([]string, len(args))
 	for index, arg := range args {
-		clean[index] = redactURL(arg)
+		switch {
+		case index > 0 && args[index-1] == "-c":
+			// Config keys can contain credential-bearing URLs too.
+			clean[index] = "***"
+		case strings.HasPrefix(arg, "-c") && arg != "-c":
+			clean[index] = "-c***"
+		default:
+			clean[index] = redactURL(arg)
+		}
 		for _, secret := range c.redact {
 			if secret != "" {
 				clean[index] = strings.ReplaceAll(clean[index], secret, "***")
