@@ -278,8 +278,9 @@ func readRangeTail(file *os.File, ranges []Range, maximum int64) ([]byte, error)
 // at offset, plus the next poll offset and the current log size. It serves the
 // dashboard's live view of a run in progress: the file grows while the Job
 // streams, so callers poll with the returned offset. A negative offset means
-// "start tailing": the read begins at most maximum bytes before the current
-// end so a late-joining viewer is never handed the entire log at once. When
+// "start tailing": the read begins near maximum bytes before the current
+// end, rounded back to the start of that record to preserve attribution. A
+// late-joining viewer still receives at most maximum bytes per call. When
 // more bytes remain past the returned chunk, the chunk is trimmed to the last
 // complete line so a multi-byte character split at the read boundary can never
 // be mangled by JSON re-encoding; a chunk without any newline is returned
@@ -306,6 +307,10 @@ func (store *Store) ReadFrom(runID string, offset, maximum int64) ([]byte, int64
 	start := offset
 	if start < 0 {
 		start = max(int64(0), size-maximum)
+		start, err = recordStart(file, start)
+		if err != nil {
+			return nil, 0, 0, err
+		}
 	}
 	if start > size {
 		start = size
@@ -326,6 +331,25 @@ func (store *Store) ReadFrom(runID string, offset, maximum int64) ([]byte, int64
 		}
 	}
 	return chunk, start + int64(len(chunk)), size, nil
+}
+
+// recordStart scans backward with fixed memory. A log record can exceed the
+// poll response size, so one look-behind chunk is not necessarily sufficient.
+// Only initial tail reads align; explicit continuation cursors stay exact.
+func recordStart(file *os.File, offset int64) (int64, error) {
+	var block [64 << 10]byte
+	for offset > 0 {
+		start := max(int64(0), offset-int64(len(block)))
+		n, err := file.ReadAt(block[:offset-start], start)
+		if err != nil {
+			return 0, err
+		}
+		if newline := bytes.LastIndexByte(block[:n], '\n'); newline >= 0 {
+			return start + int64(newline) + 1, nil
+		}
+		offset = start
+	}
+	return 0, nil
 }
 
 func (store *Store) Tail(runID string, maximum int64) ([]byte, error) {
