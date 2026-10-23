@@ -176,7 +176,7 @@ func TestDashboardFoldsExecutorLines(t *testing.T) {
 		`case "toggle-exec": toggleExecutorLines(); break;`,
 		`class="log-line exec"`,
 		`class="log-line log-hdr"`,
-		`{ groupSteps: !scoped }`,
+		`{groupSteps: !activeBurn, carry: view.carry}`,
 		`state.showExec ? " show-exec" : ""`,
 	} {
 		if !strings.Contains(source, want) {

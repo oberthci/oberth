@@ -11,6 +11,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
@@ -465,4 +466,88 @@ func TestRetryOrderUsesOuterAttemptBeforeInnerAttempt(t *testing.T) {
 	if strings.Join(got, ",") != "g0-push-0,g0-push-1,g1-push-0" {
 		t.Fatalf("nested retry execution order: %v", got)
 	}
+}
+
+// Virtual time verifies byte progress (even an unfinished record) extends
+// Follow beyond its original lease, while a truly idle reader is canceled.
+func TestLiveFollowIdleProgress(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		timer := time.AfterFunc(followLogIdleTimeout, cancel)
+		defer timer.Stop()
+		reader := &idleLogReader{Reader: strings.NewReader("partial"), timer: timer, idle: followLogIdleTimeout}
+		body := make([]byte, 1)
+		for range 4 {
+			time.Sleep(30 * time.Second)
+			if ctx.Err() != nil {
+				t.Fatal("progressing follow canceled")
+			}
+			if n, err := reader.Read(body); n != 1 || err != nil {
+				t.Fatal(n, err)
+			}
+		}
+		time.Sleep(followLogIdleTimeout - time.Second)
+		if ctx.Err() != nil {
+			t.Fatal("idle lease did not reset")
+		}
+		time.Sleep(2 * time.Second)
+		synctest.Wait()
+		if ctx.Err() == nil {
+			t.Fatal("idle follow was not canceled")
+		}
+	})
+}
+func TestLiveTerminalInterruptsFollow(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		worker := testLogWorker(io.Discard)
+		worker.done = make(chan struct{})
+		var follows, drains int
+		worker.owner.reader = func(ctx context.Context, _, _ string, options corev1.PodLogOptions) (io.ReadCloser, error) {
+			if options.Follow {
+				follows++
+				<-ctx.Done()
+				return nil, ctx.Err()
+			}
+			drains++
+			return io.NopCloser(strings.NewReader(stamped("final"))), nil
+		}
+		go worker.run()
+		synctest.Wait()
+		worker.markTerminal()
+		time.Sleep(time.Second)
+		synctest.Wait()
+		select {
+		case <-worker.done:
+		default:
+			t.Fatal("terminal observation did not interrupt follow")
+		}
+		if follows != 1 || drains != 1 {
+			t.Fatal(follows, drains)
+		}
+	})
+}
+func TestLiveFinalDrainHardDeadline(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		worker := testLogWorker(io.Discard)
+		worker.done = make(chan struct{})
+		worker.markTerminal()
+		calls := 0
+		worker.owner.reader = func(ctx context.Context, _, _ string, options corev1.PodLogOptions) (io.ReadCloser, error) {
+			if options.Follow {
+				t.Fatal("final read follows")
+			}
+			calls++
+			start := time.Now()
+			<-ctx.Done()
+			if time.Since(start) != 30*time.Second {
+				t.Fatal("final deadline changed")
+			}
+			return nil, ctx.Err()
+		}
+		worker.run()
+		if calls != 3 {
+			t.Fatal("final retry bound changed", calls)
+		}
+	})
 }
