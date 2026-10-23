@@ -3,6 +3,7 @@ package argojob
 import (
 	"fmt"
 	"hash/fnv"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -109,6 +110,7 @@ func stepAttempts(workflow *wfv1.Workflow) []StepResult {
 		}
 	}
 	retries := retryAttemptsOf(workflow.Status.Nodes)
+	retryOrder := make(map[string][]int)
 	results := make([]StepResult, 0, len(workflow.Status.Nodes))
 	for _, node := range workflow.Status.Nodes {
 		if !stepNode(workflow, node) {
@@ -123,6 +125,7 @@ func stepAttempts(workflow *wfv1.Workflow) []StepResult {
 			podName = PodName(workflow, node)
 		}
 		attempt, superseded := retries.attempt(workflow.Status.Nodes, node, rootID)
+		retryOrder[node.ID] = retries.order(workflow.Status.Nodes, node)
 		results = append(results, StepResult{
 			InfrastructureReason: nodeInfrastructureReason(node),
 			NodeID:               node.ID,
@@ -137,8 +140,9 @@ func stepAttempts(workflow *wfv1.Workflow) []StepResult {
 			FinishedAt:           optionalTime(node.FinishedAt),
 		})
 	}
-	// Deterministic order: start time, then burn, then step, then node ID.
-	// Parallel steps that started in the same instant still order stably.
+	// Deterministic order: start time, then burn, step, retry order and node ID.
+	// Argo timestamps have second resolution. Equal-time retry attempts must
+	// follow their numeric lineage, never their unrelated hashed node IDs.
 	sort.Slice(results, func(left, right int) bool {
 		leftStart, rightStart := results[left].StartedAt, results[right].StartedAt
 		switch {
@@ -154,6 +158,9 @@ func stepAttempts(workflow *wfv1.Workflow) []StepResult {
 		}
 		if results[left].Step != results[right].Step {
 			return results[left].Step < results[right].Step
+		}
+		if order := slices.Compare(retryOrder[results[left].NodeID], retryOrder[results[right].NodeID]); order != 0 {
+			return order < 0
 		}
 		return results[left].NodeID < results[right].NodeID
 	})
@@ -369,6 +376,25 @@ func retryAttemptsOf(nodes wfv1.Nodes) retryAttempts {
 func (retries retryAttempts) isAttempt(id string) bool {
 	_, ok := retries.parent[id]
 	return ok
+}
+
+// order returns attempt numbers from outermost to innermost retry, so a
+// retried DAG's later child sorts after every child of its earlier attempt.
+func (retries retryAttempts) order(nodes wfv1.Nodes, node wfv1.NodeStatus) []int {
+	var order []int
+	for depth := 0; depth <= len(nodes); depth++ {
+		if retries.isAttempt(node.ID) {
+			index, _ := retryAttemptIndex(node.Name)
+			order = append(order, index)
+		}
+		next, ok := nodes[node.BoundaryID]
+		if !ok || next.ID == node.ID {
+			break
+		}
+		node = next
+	}
+	slices.Reverse(order)
+	return order
 }
 
 // attempt walks from a step node out through its enclosing boundaries to the

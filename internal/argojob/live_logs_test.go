@@ -420,3 +420,49 @@ func TestLiveOversizedRecordIsBounded(t *testing.T) {
 		t.Fatalf("record ceiling: %v", err)
 	}
 }
+
+func TestLiveRetryOrderWithEqualStartTimes(t *testing.T) {
+	// Argo timestamps have second resolution; a fast retry can share its
+	// predecessor's StartedAt. Pod/node IDs are hashes, not attempt numbers.
+	wf := singleStepWorkflow()
+	prototype := wf.Status.Nodes["compile-pod"]
+	delete(wf.Status.Nodes, "compile-pod")
+	wf.Annotations[PodNameVersionAnnotation] = "v1"
+	wf.Status.Nodes["retry"] = wfv1.NodeStatus{ID: "retry", Name: "wf.build.compile", Type: wfv1.NodeTypeRetry, BoundaryID: "build-burn", Children: []string{"z-first", "m-second", "a-last"}}
+	for i, id := range []string{"z-first", "m-second", "a-last"} {
+		node := prototype
+		node.ID = id
+		// Include a multi-digit attempt to distinguish numeric/lexical order.
+		attempt := []int{0, 2, 10}[i]
+		node.Name = fmt.Sprintf("wf.build.compile(%d)", attempt)
+		node.DisplayName = fmt.Sprintf("compile(%d)", attempt)
+		wf.Status.Nodes[id] = node
+	}
+	var output bytes.Buffer
+	logs := newStepLogFollowers(context.Background(), func(_ context.Context, _, pod string, _ corev1.PodLogOptions) (io.ReadCloser, error) {
+		return io.NopCloser(strings.NewReader(stamped(pod))), nil
+	}, &runBudgetWriter{destination: &output, remaining: 1 << 20}, nil)
+	logs.drain(wf)
+	logs.close()
+	first, second, last := strings.Index(output.String(), "] z-first\n"), strings.Index(output.String(), "] m-second\n"), strings.Index(output.String(), "] a-last\n")
+	if first < 0 || second < first || last < second {
+		t.Fatalf("retry output out of execution order:\n%s", output.String())
+	}
+}
+
+func TestRetryOrderUsesOuterAttemptBeforeInnerAttempt(t *testing.T) {
+	wf := nestedRetryWorkflow(wfv1.WorkflowSucceeded, wfv1.NodeSucceeded)
+	for id, node := range wf.Status.Nodes {
+		node.StartedAt = metav1.NewTime(time.Unix(1000, 0))
+		wf.Status.Nodes[id] = node
+	}
+	var got []string
+	for _, step := range stepAttempts(wf) {
+		if step.Step == "push" {
+			got = append(got, step.NodeID)
+		}
+	}
+	if strings.Join(got, ",") != "g0-push-0,g0-push-1,g1-push-0" {
+		t.Fatalf("nested retry execution order: %v", got)
+	}
+}

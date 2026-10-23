@@ -549,10 +549,10 @@ function stepIdentity(step, keys) {
   return { burn: step.Burn || "", step: step.Step || "", attempt: 0 };
 }
 function stepLabel(identity) { return identity.burn === identity.step ? identity.step : `${identity.burn}/${identity.step}`; }
-/* Execution order: rows that started, by start time (a retry attempt sits
-   right after the attempt it replaced), then rows that have not started yet in
-   plan order. Ordinals are the plan's order, not the run's -- a DAG starts a
-   task when its dependencies allow, and a step the plan could not name (a
+/* Execution order: rows that started, by their own start time, then rows that
+   have not started yet in plan order. A legacy retry row keeps its actual
+   place among concurrent steps. Ordinals are the plan's order, not the run's:
+   a DAG starts a task when its dependencies allow, and a step the plan could not name (a
    fragment, a fan-out) carries an ordinal past every planned one. */
 function orderSteps(steps) {
   const keys = new Set((steps || []).map(step => `${step.Burn}/${step.Step}`));
@@ -560,13 +560,9 @@ function orderSteps(steps) {
     const identity = stepIdentity(step, keys);
     return { step, index, identity, label: stepLabel(identity), key: `${identity.burn}/${identity.step}`, started: Date.parse(step.StartedAt || "") };
   });
-  const firstStart = new Map();
-  for (const row of rows) {
-    if (Number.isFinite(row.started) && !(firstStart.get(row.key) <= row.started)) firstStart.set(row.key, row.started);
-  }
   rows.sort((a, b) => {
-    const aStart = firstStart.has(a.key) ? firstStart.get(a.key) : Infinity;
-    const bStart = firstStart.has(b.key) ? firstStart.get(b.key) : Infinity;
+    const aStart = Number.isFinite(a.started) ? a.started : Infinity;
+    const bStart = Number.isFinite(b.started) ? b.started : Infinity;
     if (aStart !== bStart) return aStart - bStart;
     if (a.key === b.key) return a.identity.attempt - b.identity.attempt || a.index - b.index;
     return a.step.Ordinal - b.step.Ordinal || a.index - b.index;
@@ -714,6 +710,18 @@ function stripStepPrefix(lines, burn, step) {
 }
 const maxRenderedLogLines = 5000;
 const LOG_STEP_MARK = /^\[([^\]/]+)\/([^\]]+)\] /;
+/* Attribution belongs to newline-delimited retained records. CR progress
+   updates within one record all belong to that record's step, even when the
+   command text happens to contain another bracketed step name. */
+function splitAttributedLogText(raw) {
+  const records = String(raw || "").split("\n");
+  if (records[records.length - 1] === "") records.pop();
+  return records.flatMap(record => {
+    const prefix = LOG_STEP_MARK.exec(record)?.[0] || "";
+    const body = record.slice(prefix.length).replace(/\r$/, "");
+    return splitLogText(body + "\n").map(line => prefix + line);
+  });
+}
 /* renderLogLines numbers lines by their position in the log, so a number
    still matches oberth log and the API. With groupSteps (the combined live
    view) the repeated [burn/step] prefix becomes one header row per step. */
@@ -803,7 +811,7 @@ async function stepLogContent(runID, step, active) {
   let html;
   try {
     const payload = await api(`/api/runs/${enc(runID)}/logs?burn=${enc(step.Burn)}&step=${enc(step.Step)}`);
-    const lines = stripStepPrefix(splitLogText(payload.output), step.Burn, step.Step);
+    const lines = stripStepPrefix(splitAttributedLogText(payload.output), step.Burn, step.Step);
     html = renderLogLines([`step: ${stepKey(step)} · ${statusLabel(step.Status)}${step.ExitCode ? ` · exit ${step.ExitCode}` : ""}`, ""].concat(lines.length ? lines : ["no retained step output"]));
   } catch (err) {
     html = renderLogLines([`step: ${stepKey(step)} · ${statusLabel(step.Status)}`, "", `step log unavailable: ${err.message || err}`]);
@@ -819,12 +827,26 @@ function selectedLiveLines(lines, burn, step) {
   const prefix = "[" + burn + "/" + step + "] ";
   return lines.filter(line => line.startsWith(prefix)).map(line => line.slice(prefix.length));
 }
-function ingestLiveChunk(live, chunk, now) {
+function ingestLiveChunk(live, chunk, now, done = false) {
+  // Keep the head of an oversized record, including its attribution, and
+  // discard its continuation until the real newline. A suffix is not a new
+  // record and must never be allowed to supply a different step prefix.
+  if (live.pendingTruncated) {
+    const newline = chunk.indexOf("\n");
+    if (newline < 0 && !done) return;
+    chunk = newline < 0 ? "" : chunk.slice(newline);
+  }
   const records = (live.pending + chunk).split("\n");
   live.pending = records.pop();
-  // Bound an unterminated line independently from the retained display tail.
-  if (live.pending.length > 400000) live.pending = live.pending.slice(-300000);
-  for (const line of records) {
+  if (records.length) live.pendingTruncated = false;
+  if (live.pending.length > 400000) {
+    live.pending = live.pending.slice(0, 300000) + " … [truncated]";
+    live.pendingTruncated = true;
+  }
+  // Once the server confirms EOF, a final line needs no trailing newline.
+  if (done && live.pending) { records.push(live.pending); live.pending = ""; live.pendingTruncated = false; }
+  for (const record of records) {
+    const line = record.length > 400000 ? record.slice(0, 300000) + " … [truncated]" : record;
     if (line.startsWith(deliveryPrefix)) {
       try {
         const delivery = JSON.parse(line.slice(deliveryPrefix.length));
@@ -855,7 +877,7 @@ function liveDeliverySummary(live, burn, step, now = Date.now()) {
 }
 async function liveLogContent(run, activeBurn, activeStep) {
   if (!state.live || state.live.runID !== run.ID) {
-    state.live = { runID: run.ID, offset: -1, text: "", pending: "", busy: false, startedAt: Date.now(), lastPoll: 0, lastOutput: new Map(), delivery: new Map(), error: "", done: false };
+    state.live = { runID: run.ID, offset: -1, text: "", pending: "", pendingTruncated: false, busy: false, startedAt: Date.now(), lastPoll: 0, lastOutput: new Map(), delivery: new Map(), error: "", done: false };
   }
   const liveState = state.live;
   if (!liveState.busy && !liveState.done) {
@@ -864,7 +886,7 @@ async function liveLogContent(run, activeBurn, activeStep) {
       const payload = await api(`/api/runs/${enc(run.ID)}/livelog?offset=${liveState.offset}`);
       if (state.live === liveState) {
         const now = Date.now();
-        ingestLiveChunk(liveState, payload.chunk || "", now);
+        ingestLiveChunk(liveState, payload.chunk || "", now, payload.done === true);
         if (typeof payload.offset === "number") liveState.offset = payload.offset;
         liveState.lastPoll = now;
         liveState.error = "";
@@ -874,8 +896,8 @@ async function liveLogContent(run, activeBurn, activeStep) {
       liveState.error = String(err.message || err);
     } finally { liveState.busy = false; }
   }
-  let lines = splitLogText(liveState.text);
   const scoped = activeBurn && activeStep;
+  let lines = splitAttributedLogText(liveState.text);
   if (scoped) lines = selectedLiveLines(lines, activeBurn, activeStep);
   return `<div class="log-delivery" role="status">${esc(liveDeliverySummary(liveState, activeBurn, activeStep))}</div>` + renderLogLines([`$ oberth live · ${repoName(run.RepoID)}/${run.Ref} · phase ${run.Phase || "ci"}`, ""].concat(
     lines.length ? lines : ["waiting for step output…"]), { groupSteps: !scoped });
