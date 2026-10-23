@@ -445,6 +445,13 @@ func (scheduler *Scheduler) Run(ctx context.Context) error {
 				}
 				return err
 			}
+			if err := scheduler.awaitAdmission(workerCtx); err != nil {
+				join()
+				if ctx.Err() != nil {
+					return nil
+				}
+				return err
+			}
 			run, err := scheduler.store.ClaimNextRun(workerCtx)
 			if queueEmpty(err) {
 				break
@@ -740,6 +747,10 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 		}
 	}
 	if err := require(ctx); err != nil {
+		_ = logFile.Close()
+		return err
+	}
+	if err := scheduler.awaitAdmission(ctx); err != nil {
 		_ = logFile.Close()
 		return err
 	}
@@ -1780,4 +1791,11 @@ func jobNameFragment(value string) string {
 		}
 	}
 	return strings.Trim(result.String(), "-")
+}
+
+func (scheduler *Scheduler) awaitAdmission(ctx context.Context) error {
+	if gate, ok := scheduler.jobs.(interface{ AwaitAdmission(context.Context) error }); ok {
+		return gate.AwaitAdmission(ctx)
+	}
+	return ctx.Err()
 }

@@ -21,6 +21,7 @@ type ClusterProbe func(context.Context) error
 type VCSProbe func(context.Context, model.Upstream) error
 
 type Health struct {
+	ControllerProfile func() *model.ControllerProfileStatus
 	// ReadyGate checks process-local recovery state without network or store reads.
 	ReadyGate ClusterProbe
 	// Readiness is refreshed off the HTTP request path; nil retains direct probes.
@@ -112,21 +113,22 @@ type AuditChainStatus struct {
 }
 
 type HealthStatus struct {
-	Storage       any                 `json:"storage,omitempty"`
-	Database      string              `json:"database"`
-	SchemaVersion int                 `json:"schema_version,omitempty"`
-	Upstreams     int                 `json:"upstreams"`
-	Repositories  int                 `json:"repositories"`
-	VCS           string              `json:"vcs"`
-	Cluster       string              `json:"cluster"`
-	Audit         string              `json:"audit"`
-	AuditMode     string              `json:"audit_mode,omitempty"`
-	Version       string              `json:"version,omitempty"`
-	UpstreamInfo  []UpstreamStatus    `json:"upstream_info,omitempty"`
-	SSHIdentity   string              `json:"ssh_identity,omitempty"`
-	SecretStore   *SecretStoreStatus  `json:"secret_store,omitempty"`
-	AuditChain    *AuditChainStatus   `json:"audit_chain,omitempty"`
-	LastBackup    *model.BackupStatus `json:"last_backup,omitempty"`
+	ControllerProfile *model.ControllerProfileStatus `json:"controller_profile,omitempty"`
+	Storage           any                            `json:"storage,omitempty"`
+	Database          string                         `json:"database"`
+	SchemaVersion     int                            `json:"schema_version,omitempty"`
+	Upstreams         int                            `json:"upstreams"`
+	Repositories      int                            `json:"repositories"`
+	VCS               string                         `json:"vcs"`
+	Cluster           string                         `json:"cluster"`
+	Audit             string                         `json:"audit"`
+	AuditMode         string                         `json:"audit_mode,omitempty"`
+	Version           string                         `json:"version,omitempty"`
+	UpstreamInfo      []UpstreamStatus               `json:"upstream_info,omitempty"`
+	SSHIdentity       string                         `json:"ssh_identity,omitempty"`
+	SecretStore       *SecretStoreStatus             `json:"secret_store,omitempty"`
+	AuditChain        *AuditChainStatus              `json:"audit_chain,omitempty"`
+	LastBackup        *model.BackupStatus            `json:"last_backup,omitempty"`
 	// LastBackupWarning explains an omitted last_backup when the latest
 	// backup record exists but cannot be read.
 	LastBackupWarning string `json:"last_backup_warning,omitempty"`
@@ -197,6 +199,9 @@ func requiresSSHIdentity(upstreams []model.Upstream) bool {
 
 func (health Health) Status(ctx context.Context) (any, error) {
 	status := HealthStatus{Database: "unavailable", SchemaVersion: health.SchemaVersion, VCS: "unavailable", Cluster: "unavailable", Audit: "unavailable", AuditMode: health.AuditMode, Version: health.Version, SecretStore: health.SecretStore}
+	if health.ControllerProfile != nil {
+		status.ControllerProfile = health.ControllerProfile()
+	}
 	if health.Storage != nil {
 		if storage, err := health.Storage(ctx); err == nil {
 			status.Storage = storage

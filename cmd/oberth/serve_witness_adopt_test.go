@@ -439,6 +439,8 @@ func TestServeOptionsWitnessGenesisValidation(t *testing.T) {
 
 func minimalValidServeOptions() serveOptions {
 	return serveOptions{
+		kubernetesQPS:           50,
+		kubernetesBurst:         100,
 		retentionInterval:       10 * time.Minute,
 		artifactsLimitBytes:     defaultArtifactsLimitBytes,
 		dataRoot:                "/data",

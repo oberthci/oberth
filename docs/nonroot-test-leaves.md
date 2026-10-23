@@ -198,3 +198,25 @@ upgrade. If an older CLI has stopped after applying Argo because it counted
 terminal history, preserve both releases and use a freshly reviewed supported
 forward transition with the corrected signed CLI; do not roll back or repeat
 the unchanged command.
+
+### Controller profile API availability
+
+A failed profile Pod/ConfigMap read pauses new admission while the server retries;
+it does not stop the scheduler or cancel existing runs. Each verification attempt
+has a five-second deadline. Retry delays grow from 250 ms to a ten-second cap and
+stop on caller cancellation. Every submission still obtains a fresh proof of the
+exact controller/profile identity; a read failure never permits an unverified
+submission. Invalid profile contents remain refused.
+
+Unscoped status includes `controller_profile.state` (`unverified`, `blocked`, or
+`verified`), a bounded error class, the public object identity, `retry_at`, and the
+process-local cumulative `read_failures_total` counter. Raw Kubernetes error bodies
+are omitted. Verification recovery clears the blocked state automatically.
+
+Server Kubernetes clients default to QPS 50 and burst 100, with headroom for eight
+concurrent jobs and trusted-preflight polling. Configure these with chart values
+`kubernetesClient.qps` / `kubernetesClient.burst`, or server flags
+`--kubernetes-client-qps` / `--kubernetes-client-burst`. QPS must be finite and
+positive; burst must be a positive integer. For a fractional QPS Helm override,
+use a values file or `--set-json` so the value remains numeric. The same settings
+apply to the Kubernetes, Argo Workflow, and KubeVirt clients.

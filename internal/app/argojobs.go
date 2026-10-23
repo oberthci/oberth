@@ -895,3 +895,20 @@ func kubeVirtBudget(budget store.KubeVirtBudget) argoworkflow.VMIBudget {
 		MaxMemory: *resource.NewQuantity(budget.MaxMemoryBytes, resource.BinarySI),
 	}
 }
+
+// AwaitAdmission shares the controller's profile outage gate with the scheduler.
+func (jobs *ArgoJobs) AwaitAdmission(ctx context.Context) error {
+	if gate, ok := jobs.controller.(interface{ AwaitAdmission(context.Context) error }); ok {
+		return gate.AwaitAdmission(ctx)
+	}
+	return ctx.Err()
+}
+
+func (jobs *ArgoJobs) ControllerProfileStatus() *model.ControllerProfileStatus {
+	if source, ok := jobs.controller.(interface {
+		ControllerProfileStatus() *model.ControllerProfileStatus
+	}); ok {
+		return source.ControllerProfileStatus()
+	}
+	return nil
+}

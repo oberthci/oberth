@@ -22,6 +22,7 @@ import (
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 
+	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/runprogress"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 	"github.com/oberthci/oberth/pkg/periapsis"
@@ -65,6 +66,10 @@ var errRunLogBudget = errors.New("argojob: aggregate run log budget exceeded")
 
 // Controller submits Workflows and supervises them to a terminal result.
 type Controller struct {
+	profileVerifyMu   sync.Mutex
+	profileMu         sync.Mutex
+	profileStatus     model.ControllerProfileStatus
+	profileBackoff    time.Duration
 	timings           TimingRecorder
 	workflows         WorkflowClient
 	kube              kubernetes.Interface

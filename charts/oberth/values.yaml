@@ -28,6 +28,12 @@ runnerImagePrefixes:
 replicaCount: 1
 maxConcurrentJobs: 3
 
+# Per-client API limits with headroom for eight concurrent jobs and trusted
+# preflight pod polling. Admission retries read failures without exiting.
+kubernetesClient:
+  qps: 50
+  burst: 100
+
 # Seconds Kubernetes waits after SIGTERM before killing the server. A graceful
 # handover needs up to 15s HTTP/MCP drain, 30s scheduler finalization and 10s
 # API background shutdown (55s); the default keeps margin over that.

@@ -78,9 +78,7 @@ func (controller *Controller) PrepareNonroot(ctx context.Context, request Reques
 	if controller.config.NonrootProfile != argoworkflow.NonrootStaticProfile || controller.kube == nil {
 		return Request{}, errors.New("argojob: nonroot controller support has not been established")
 	}
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	proof, err := verifyNonrootController(ctx, controller.kube, controller.config.Namespace, request)
+	proof, err := controller.verifyNonrootWithRetry(ctx, request, false)
 	if err != nil {
 		return Request{}, err
 	}
@@ -114,9 +112,12 @@ func (controller *Controller) nonrootExpectedSource(request Request) SourceVolum
 }
 
 func verifyNonrootController(ctx context.Context, client kubernetes.Interface, namespace string, request Request) (*nonrootProof, error) {
+	if client == nil {
+		return nil, errors.New("argojob: controller profile verification requires Kubernetes")
+	}
 	pods, err := client.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{LabelSelector: "app.kubernetes.io/name=argo-workflows-workflow-controller"})
 	if err != nil {
-		return nil, errors.New("argojob: cannot verify nonroot controller Pod identity")
+		return nil, &profileReadError{message: "argojob: cannot verify nonroot controller Pod identity", object: namespace + "/Pod/workflow-controller", cause: err}
 	}
 	pod, err := selectNonrootController(pods.Items, namespace)
 	if err != nil {
@@ -127,7 +128,7 @@ func verifyNonrootController(ctx context.Context, client kubernetes.Interface, n
 	}
 	cm, err := client.CoreV1().ConfigMaps(namespace).Get(ctx, argoworkflow.NonrootProfileConfigMap, metav1.GetOptions{})
 	if err != nil {
-		return nil, errors.New("argojob: cannot read the exact nonroot controller profile ConfigMap")
+		return nil, &profileReadError{message: "argojob: cannot read the exact nonroot controller profile ConfigMap", object: namespace + "/ConfigMap/" + argoworkflow.NonrootProfileConfigMap, cause: err}
 	}
 	if cm.Name != argoworkflow.NonrootProfileConfigMap || cm.Namespace != namespace || cm.UID == "" || cm.ResourceVersion == "" || cm.Immutable == nil || !*cm.Immutable || cm.DeletionTimestamp != nil ||
 		len(cm.Data) != 1 || cm.Data["config"] != argoworkflow.NonrootProfileConfig || len(cm.BinaryData) != 0 {

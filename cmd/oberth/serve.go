@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"net"
 	"net/http"
 	"net/url"
@@ -110,6 +111,8 @@ func (values *stringList) Set(value string) error {
 }
 
 type serveOptions struct {
+	kubernetesQPS           float64
+	kubernetesBurst         int
 	dataRoot                string
 	database                string
 	sshListen               string
@@ -254,6 +257,8 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 	flags.Int64Var(&options.logsBudgetBytes, "logs-budget-bytes", 0, "total retained log budget (0 disables size retention)")
 	flags.DurationVar(&options.retentionInterval, "retention-sweep-interval", 10*time.Minute, "interval between protected evidence retention sweeps")
 	flags.IntVar(&options.retentionKeepNewest, "retention-keep-newest", 1, "terminal runs retained per repository/ref during automatic sweeps")
+	flags.Float64Var(&options.kubernetesQPS, "kubernetes-client-qps", 50, "Kubernetes API requests per second per server client")
+	flags.IntVar(&options.kubernetesBurst, "kubernetes-client-burst", 100, "Kubernetes API burst allowance per server client")
 	flags.IntVar(&options.maxConcurrent, "max-concurrent-jobs", 3, "maximum concurrent Jobs")
 	flags.StringVar(&options.admissionSizeWeights, "admission-size-weights", service.DefaultSizeWeights.String(), "admission weight per size as S=..,M=..,L=..,XL=..; XL=0 is the whole budget (an XL run runs alone), a positive XL lets XL share the host; the budget is --max-concurrent-jobs M runs (#1021)")
 	flags.DurationVar(&options.admissionMaxHeadWait, "admission-max-head-wait", service.DefaultMaxHeadWait, "bounded backfill (#1085): while the admission queue head does not fit, later runs that fit are admitted beside it until it has waited this long; then the budget drains for it (0 = strict FIFO)")
@@ -348,6 +353,9 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 }
 
 func validateServeOptions(options serveOptions) error {
+	if math.IsNaN(options.kubernetesQPS) || math.IsInf(options.kubernetesQPS, 0) || options.kubernetesQPS <= 0 || options.kubernetesQPS > math.MaxFloat32 || options.kubernetesBurst <= 0 {
+		return errors.New("serve: Kubernetes client QPS must be finite and positive, and burst must be positive")
+	}
 	if options.logRetention < 0 || options.artifactRetention < 0 || options.logsBudgetBytes < 0 || options.artifactsBudgetBytes < 0 || options.artifactsLimitBytes <= 0 || options.retentionInterval <= 0 || options.retentionKeepNewest < 0 {
 		return errors.New("serve: retention ages, budgets and keep count must be nonnegative; sweep interval and artifact collection limit must be positive")
 	}
@@ -520,7 +528,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 	if err != nil {
 		return fmt.Errorf("load in-cluster Kubernetes config: %w", err)
 	}
-	restConfig.Timeout = 10 * time.Second
+	restConfig = serverKubernetesConfig(restConfig, options)
 	kube, err := kubernetes.NewForConfig(restConfig)
 	if err != nil {
 		return fmt.Errorf("create Kubernetes client: %w", err)
@@ -852,6 +860,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 	health.Version = version
 	health.AdmissionBlocker = scheduler.AdmissionBlocker
 	health.Admission = scheduler.AdmissionState
+	health.ControllerProfile = argoJobs.ControllerProfileStatus
 	health.SchemaVersion = store.LatestMigrationVersion()
 	health.Identity = func(ctx context.Context) (string, error) {
 		if err := ctx.Err(); err != nil {

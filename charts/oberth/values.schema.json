@@ -38,6 +38,15 @@
       "type": "integer",
       "const": 1
     },
+    "kubernetesClient": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["qps", "burst"],
+      "properties": {
+        "qps": {"type": "number", "exclusiveMinimum": 0, "maximum": 3.4028234663852886e38},
+        "burst": {"type": "integer", "minimum": 1}
+      }
+    },
     "maxConcurrentJobs": {
       "type": "integer",
       "minimum": 1,
