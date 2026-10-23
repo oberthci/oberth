@@ -28,7 +28,7 @@ FROM alpine:3.23@sha256:fd791d74b68913cbb027c6546007b3f0d3bc45125f797758156952bc
 # committed to image.go. Two dead release tags (v0.16.0, v0.16.1) resulted
 # from missing this indirection.
 RUN apk add --no-cache \
-    ca-certificates=20260909-r0 \
+    ca-certificates=20261020-r0 \
     git=2.52.0-r0 \
     # CVE-2026-14456 (HIGH): the alpine:3.23 base at the digest above still
     # ships libcrypto3/libssl3 3.5.7-r0. The fixed 3.5.9-r0 is available for

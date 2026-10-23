@@ -25,7 +25,7 @@ func TestServerImageUsesPinnedMinimalContract(t *testing.T) {
 		"ARG VERSION=dev",
 		`go build -trimpath -buildvcs=false -ldflags="-s -w -X main.version=${VERSION}" -o /out/oberth ./cmd/oberth`,
 		"FROM alpine:3.23@sha256:fd791d74b68913cbb027c6546007b3f0d3bc45125f797758156952bc2d6daf40",
-		"ca-certificates=20260909-r0",
+		"ca-certificates=20261020-r0",
 		"git=2.52.0-r0",
 		"libcrypto3=3.5.9-r0",
 		"libssl3=3.5.9-r0",
