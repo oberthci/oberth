@@ -518,7 +518,7 @@ func (server *Server) handleRunLogLiveStream(writer http.ResponseWriter, request
 		}
 		return controller.Flush()
 	}
-	defer controller.SetWriteDeadline(time.Time{})
+	defer func() { _ = controller.SetWriteDeadline(time.Time{}) }()
 	if err := write(": ping\n\n"); err != nil {
 		return
 	}
