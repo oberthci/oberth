@@ -299,6 +299,7 @@ function hasToken() { return !!localStorage.getItem("oberth-token"); }
 function setToken(t) { if (t) localStorage.setItem("oberth-token", t.trim()); else localStorage.removeItem("oberth-token"); }
 function authHeaders() { const token = localStorage.getItem("oberth-token"); return token ? { "Authorization": "Bearer " + token } : {}; }
 function showTokenPrompt(message) {
+  closeLiveLog();
   clearInterval(state.timer);
   replaceApp(`<section class="screen"><div class="table token-panel"><h1>Authentication required</h1><p class="meta">Enter the Oberth uplink bearer token. It is stored in this browser's localStorage so navigation and reloads never re-prompt.</p>${message ? `<p class="meta chain-bad">${esc(message)}</p>` : ""}<input id="tokenInput" type="password" placeholder="Bearer token" autocomplete="off"><div class="token-actions"><button class="chip on" data-action="submit-token">Connect</button></div></div></section>`);
   document.getElementById("tokenInput")?.focus();
@@ -306,12 +307,14 @@ function showTokenPrompt(message) {
 function submitToken() {
   const value = document.getElementById("tokenInput")?.value;
   if (!value) return;
+  closeLiveLog();
   state.authGen++;
   if (state.pendingController) { state.pendingController.abort(); state.pendingController = null; }
   setToken(value);
   route();
 }
 function clearToken() {
+  closeLiveLog();
   state.authGen++;
   if (state.pendingController) { state.pendingController.abort(); state.pendingController = null; }
   setToken(null); setConn(false, "signed out"); showTokenPrompt();
@@ -729,21 +732,23 @@ function renderLogLines(lines, opts = {}) {
   const total = lines.length;
   const truncated = total > maxRenderedLogLines;
   const start = truncated ? total - maxRenderedLogLines : 0;
-  let out = "", current = "", noise = [];
+  let out = "", current = opts.carry?.current || "", noise = [];
+  const base = opts.carry?.count || 0;
+  const recordAttr = opts.carry ? ' data-log-record=""' : "";
   const flushNoise = () => {
     if (!noise.length) return;
     const n = noise.length;
     out += `<button type="button" class="log-line log-fold" data-action="toggle-exec" title="Argo executor lifecycle lines; warnings, errors and exit statuses are never hidden"><span class="log-no"></span><span class="log-txt"><span class="fold-show">▸ ${n} Argo executor line${n === 1 ? "" : "s"}</span><span class="fold-hide">▾ hide Argo executor lines</span></span></button>` + noise.join("");
     noise = [];
   };
-  if (truncated) {
+  if (truncated && !opts.carry) {
     out += `<div class="log-line"><span class="log-no">--</span><span class="log-txt warn">[truncated] showing last ${maxRenderedLogLines} of ${total} lines</span></div>`;
   }
   for (let i = start; i < total; i++) {
     let line = lines[i];
     if (line && typeof line === "object" && line.successor) {
       flushNoise();
-      out += `<div class="log-line"><span class="log-no">${i + 1}</span><span class="log-txt"><button type="button" class="run-successor" data-run-id="${esc(line.successor)}">${esc(line.text)}</button></span></div>`;
+      out += `<div class="log-line"${recordAttr}><span class="log-no">${base + i + 1}</span><span class="log-txt"><button type="button" class="run-successor" data-run-id="${esc(line.successor)}">${esc(line.text)}</button></span></div>`;
       continue;
     }
     if (opts.groupSteps) {
@@ -759,13 +764,14 @@ function renderLogLines(lines, opts = {}) {
       }
     }
     if (isExecutorNoise(line)) {
-      noise.push(`<div class="log-line exec"><span class="log-no">${i + 1}</span><span class="log-txt">${esc(line)}</span></div>`);
+      noise.push(`<div class="log-line exec"${recordAttr}><span class="log-no">${base + i + 1}</span><span class="log-txt">${esc(line)}</span></div>`);
       continue;
     }
     flushNoise();
-    out += `<div class="log-line"><span class="log-no">${i + 1}</span><span class="log-txt ${logLineClass(line)}">${esc(line) || "&nbsp;"}</span></div>`;
+    out += `<div class="log-line"${recordAttr}><span class="log-no">${base + i + 1}</span><span class="log-txt ${logLineClass(line)}">${esc(line) || "&nbsp;"}</span></div>`;
   }
   flushNoise();
+  if (opts.carry) { opts.carry.count = base + total; opts.carry.current = current; }
   return out;
 }
 function summaryLines(detail) {
@@ -833,9 +839,10 @@ function ingestLiveChunk(live, chunk, now, done = false) {
   // record and must never be allowed to supply a different step prefix.
   if (live.pendingTruncated) {
     const newline = chunk.indexOf("\n");
-    if (newline < 0 && !done) return;
+    if (newline < 0 && !done) return [];
     chunk = newline < 0 ? "" : chunk.slice(newline);
   }
+  const output = [];
   const records = (live.pending + chunk).split("\n");
   live.pending = records.pop();
   if (records.length) live.pendingTruncated = false;
@@ -858,49 +865,178 @@ function ingestLiveChunk(live, chunk, now, done = false) {
     if (mark) live.lastOutput.set(mark[1] + "/" + mark[2], now);
     live.lastAnyOutput = now;
     live.text += line + "\n";
+    output.push(line);
   }
   if (live.text.length > 400000) {
     const cut = live.text.indexOf("\n", live.text.length - 300000);
     live.text = cut < 0 ? "" : live.text.slice(cut + 1);
   }
+  return output;
 }
 function liveDeliverySummary(live, burn, step, now = Date.now()) {
   const key = burn && step ? burn + "/" + step : "";
   const last = key ? live.lastOutput.get(key) : live.lastAnyOutput;
   const age = Math.max(0, (now - (last || live.startedAt)) / 1000);
-  const poll = live.error ? `reconnecting: ${live.error} · last successful poll ${live.lastPoll ? fmtDur((now - live.lastPoll) / 1000) + " ago" : "not yet"}` : live.lastPoll ? "polling connected" : "connecting";
+  const poll = live.error ? `reconnecting: ${live.error} · last successful poll ${live.lastPoll ? fmtDur((now - live.lastPoll) / 1000) + " ago" : "not yet"}` : live.connected && !live.fallback ? "stream connected" : live.lastPoll ? "polling connected" : "connecting";
   const deliveries = [...live.delivery.values()].filter(d => !key || (d.burn === burn && d.step === step));
   const deliveryStale = d => !d.at || ((now - Date.parse(d.at)) > 10000 && !["complete", "gapped", "truncated", "unavailable"].includes(d.state));
   const unhealthy = deliveries.filter(d => deliveryStale(d) || d.gap || ["reconnecting", "unavailable", "gap", "gapped", "truncated"].includes(d.state));
   const delivery = unhealthy.length ? unhealthy.map(d => `${d.burn}/${d.step}: ${deliveryStale(d) ? "delivery unconfirmed · last observed " : ""}${d.gap ? "continuity gap · " : ""}${d.state}${d.message ? " — " + d.message : ""}`).join("; ") : deliveries.length ? `pod delivery: ${[...new Set(deliveries.map(d => d.state))].join(", ")}` : "pod delivery not yet observed";
   return `${poll} · ${last ? "last output received " + fmtDur(age) + " ago" : "no output observed for " + fmtDur(age)}${age >= 30 ? " · quiet period" : ""} · ${delivery}`;
 }
-async function liveLogContent(run, activeBurn, activeStep) {
-  if (!state.live || state.live.runID !== run.ID) {
-    state.live = { runID: run.ID, offset: -1, text: "", pending: "", pendingTruncated: false, busy: false, startedAt: Date.now(), lastPoll: 0, lastOutput: new Map(), delivery: new Map(), error: "", done: false };
+/* EventSource framing over fetch preserves the dashboard's bearer header.
+   Native EventSource cannot attach Authorization; tokens never go in URLs. */
+class LiveLogEventSource {
+  constructor(url, onChunk, onError, onOpen) {
+    this.controller = new AbortController();
+    this.closed = false;
+    this.read(url, onChunk, onError, onOpen);
   }
-  const liveState = state.live;
-  if (!liveState.busy && !liveState.done) {
-    liveState.busy = true;
+  close() { this.closed = true; this.controller.abort(); }
+  async read(url, onChunk, onError, onOpen) {
+    let reader;
     try {
-      const payload = await api(`/api/runs/${enc(run.ID)}/livelog?offset=${liveState.offset}`);
-      if (state.live === liveState) {
-        const now = Date.now();
-        ingestLiveChunk(liveState, payload.chunk || "", now, payload.done === true);
-        if (typeof payload.offset === "number") liveState.offset = payload.offset;
-        liveState.lastPoll = now;
-        liveState.error = "";
-        liveState.done = payload.done === true;
+      const response = await fetch(url, {cache: "no-store", headers: {...authHeaders(), Accept: "text/event-stream"}, signal: this.controller.signal});
+      if (!response.ok || !response.headers.get("content-type")?.startsWith("text/event-stream") || !response.body) throw new Error("live stream unavailable");
+      if (this.closed) return;
+      onOpen();
+      reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let pending = "", event = "", data = [];
+      while (!this.closed) {
+        const {value, done} = await reader.read();
+        if (done) throw new Error("live stream ended");
+        pending += decoder.decode(value, {stream: true});
+        let newline;
+        while ((newline = pending.indexOf("\n")) >= 0 && !this.closed) {
+          const line = pending.slice(0, newline).replace(/\r$/, "");
+          pending = pending.slice(newline + 1);
+          if (!line) {
+            if (event === "chunk" && data.length) onChunk(JSON.parse(data.join("\n")));
+            event = ""; data = [];
+          } else if (line.startsWith("event:")) event = line.slice(6).trim();
+          else if (line.startsWith("data:")) data.push(line.slice(5).replace(/^ /, ""));
+        }
       }
     } catch (err) {
-      liveState.error = String(err.message || err);
-    } finally { liveState.busy = false; }
+      if (!this.closed) onError(err);
+    } finally {
+      if (reader) { await reader.cancel().catch(() => {}); reader.releaseLock(); }
+    }
   }
-  const scoped = activeBurn && activeStep;
-  let lines = splitAttributedLogText(liveState.text);
-  if (scoped) lines = selectedLiveLines(lines, activeBurn, activeStep);
-  return `<div class="log-delivery" role="status">${esc(liveDeliverySummary(liveState, activeBurn, activeStep))}</div>` + renderLogLines([`$ oberth live · ${repoName(run.RepoID)}/${run.Ref} · phase ${run.Phase || "ci"}`, ""].concat(
-    lines.length ? lines : ["waiting for step output…"]), { groupSteps: !scoped });
+}
+function stopLiveTransport(live) {
+  live.source?.close(); live.source = null;
+  clearInterval(live.pollTimer); live.pollTimer = null;
+}
+function closeLiveLog() {
+  const live = state.live;
+  if (!live) return;
+  live.closed = true;
+  stopLiveTransport(live);
+  if (live.frame != null) cancelAnimationFrame(live.frame);
+  state.live = null;
+}
+function liveViewLines(lines, view) {
+  return view.burn && view.step ? selectedLiveLines(lines, view.burn, view.step) : lines;
+}
+function receiveLiveChunk(live, payload) {
+  if (state.live !== live || live.closed) return;
+  const now = Date.now();
+  const records = ingestLiveChunk(live, payload.chunk || "", now, payload.done === true);
+  if (typeof payload.offset === "number") live.offset = payload.offset;
+  live.lastPoll = now; live.error = ""; live.done = payload.done === true;
+  if (live.view) {
+    live.view.pending = live.view.pending.concat(liveViewLines(splitAttributedLogText(records.length ? records.join("\n") + "\n" : ""), live.view));
+    // Bound queued work even when animation frames are paused in a hidden tab.
+    const excess = live.view.pending.length - maxRenderedLogLines;
+    if (excess > 0) {
+      live.view.pending.splice(0, excess);
+      live.view.carry.count += excess;
+      live.view.carry.current = "";
+    }
+  }
+  if (live.done) stopLiveTransport(live);
+  scheduleLiveFrame(live);
+}
+async function pollLiveLog(live) {
+  if (live.busy || live.done || live.closed || state.live !== live) return;
+  live.busy = true;
+  try {
+    const payload = await api(`/api/runs/${enc(live.runID)}/livelog?offset=${live.offset}`, {detached: true});
+    receiveLiveChunk(live, payload);
+  } catch (err) {
+    if (state.live === live) { live.error = String(err.message || err); scheduleLiveFrame(live); }
+  } finally { live.busy = false; }
+}
+function fallbackLiveLog(live, err) {
+  if (state.live !== live || live.closed || live.done) return;
+  stopLiveTransport(live);
+  live.fallback = true;
+  live.error = String(err?.message || "");
+  live.pollTimer = setInterval(() => { pollLiveLog(live); }, livePollMs);
+  return pollLiveLog(live);
+}
+function scheduleLiveFrame(live) {
+  if (live.frame != null || !live.view?.body || live.closed) return;
+  live.frame = requestAnimationFrame(() => {
+    live.frame = null;
+    if (state.live === live && !live.closed) appendLiveLines(live);
+  });
+}
+function appendLiveLines(live) {
+  const view = live.view, body = view?.body;
+  if (!body?.isConnected) return;
+  const stick = body.scrollHeight - body.scrollTop - body.clientHeight < 40;
+  const previousTop = body.scrollTop;
+  const lines = view.pending.splice(0);
+  if (lines.length) {
+    body.querySelector(".log-waiting")?.remove();
+    body.insertAdjacentHTML("beforeend", renderLogLines(lines, {groupSteps: !view.burn, carry: view.carry}));
+    // Remove old rows in place. Header/fold rows preceding the first retained
+    // record are kept only when they still describe that record.
+    const records = body.querySelectorAll("[data-log-record]");
+    if (records.length > maxRenderedLogLines) {
+      const first = records[records.length - maxRenderedLogLines];
+      let keep = first;
+      while (keep.previousElementSibling?.matches(".log-hdr, .log-fold")) keep = keep.previousElementSibling;
+      const oldHeight = body.scrollHeight;
+      // If the cap cuts through a step, retain its header for attribution.
+      if (!keep.matches(".log-hdr")) {
+        let header = keep.previousElementSibling;
+        while (header && !header.matches(".log-hdr")) header = header.previousElementSibling;
+        if (header) { body.insertBefore(header, keep); keep = header; }
+      }
+      while (body.firstElementChild !== keep) body.firstElementChild.remove();
+      if (!stick) body.scrollTop = Math.max(0, previousTop - (oldHeight - body.scrollHeight));
+    }
+    if (stick) body.scrollTop = body.scrollHeight;
+  }
+  const delivery = document.getElementById("liveDelivery");
+  if (delivery) delivery.textContent = liveDeliverySummary(live, view.burn, view.step);
+  const indicator = document.querySelector(".term-live");
+  if (indicator) indicator.textContent = live.error ? "RECONNECTING" : live.done ? "COMPLETE" : live.fallback ? "POLLING" : "LIVE";
+}
+async function liveLogContent(run, activeBurn, activeStep) {
+  if (!state.live || state.live.runID !== run.ID) {
+    closeLiveLog();
+    const live = state.live = {runID: run.ID, routePath: location.pathname, offset: -1, text: "", pending: "", pendingTruncated: false, busy: false, startedAt: Date.now(), lastPoll: 0, lastOutput: new Map(), delivery: new Map(), error: "", done: false, frame: null};
+    if (typeof ReadableStream !== "undefined" && typeof TextDecoder !== "undefined") {
+      live.source = new LiveLogEventSource(`/api/runs/${enc(run.ID)}/livelog/stream?offset=${live.offset}`,
+        payload => receiveLiveChunk(live, payload), err => fallbackLiveLog(live, err),
+        () => { if (state.live === live) { live.connected = true; scheduleLiveFrame(live); } });
+    } else await fallbackLiveLog(live);
+    if (state.live !== live) return "";
+  }
+  const live = state.live;
+  const key = JSON.stringify([activeBurn || "", activeStep || ""]);
+  if (live.view?.key === key && live.view.body?.isConnected) {
+    scheduleLiveFrame(live);
+    return "";
+  }
+  const view = live.view = {key, burn: activeBurn, step: activeStep, carry: {count: 0, current: ""}, pending: []};
+  const lines = liveViewLines(splitAttributedLogText(live.text), view);
+  return renderLogLines(lines, {groupSteps: !activeBurn, carry: view.carry}) || '<div class="log-waiting">waiting for step output…</div>';
 }
 async function renderRunDetail(runID, seq, background) {
   if (!background) setChrome("runs", "/ run");
@@ -934,7 +1070,7 @@ async function renderRunDetailView(detail, seq) {
   // on any still-running step. Completed steps keep their retained slice.
   const live = (kind === "run" && (!selected || ["running", "queued"].includes(selected.Status))) || state.step === "__summary__";
   const terminal = live ? await liveLogContent(run, selected?.Burn, selected?.Step) : selected ? await stepLogContent(run.ID, selected, kind === "run") : renderLogLines(summaryLines(detail));
-  if (!currentRoute(seq)) return;
+  if (!currentRoute(seq) || (live && !state.live)) return;
   // Preserve the reader's place across the poll re-render: stick to the
   // bottom while they are at the bottom, hold their position when they have
   // scrolled up to read.
@@ -944,8 +1080,8 @@ async function renderRunDetailView(detail, seq) {
   const previousStepList = document.getElementById("stepList");
   const previousStepScroll = previousStepList ? previousStepList.scrollTop : 0;
   setChrome("runs", `/ ${repository}`);
-  replaceApp(`
-  <section class="screen wide">
+  const detailHTML = `
+  <section class="screen wide" data-detail-run="${esc(run.ID)}">
     <div class="rh">
       <div class="rh1">
         ${bigIcon(status)}
@@ -964,9 +1100,9 @@ async function renderRunDetailView(detail, seq) {
         ${run.FinishedAt ? `<span>finished ${esc(fmtTime(run.FinishedAt))}</span>` : ""}
       </div>
     </div>
-    ${kind === "fail" ? `<div class="fbanner"><b>✗ ${esc(run.FailedStep ? (run.FailedBurn ? run.FailedBurn + " / " : "") + run.FailedStep : "run failed")}</b><span class="err" title="${esc(run.Error)}">${esc(run.Error || "")}</span></div>` : ""}
+    <div id="runBanners">${kind === "fail" ? `<div class="fbanner"><b>✗ ${esc(run.FailedStep ? (run.FailedBurn ? run.FailedBurn + " / " : "") + run.FailedStep : "run failed")}</b><span class="err" title="${esc(run.Error)}">${esc(run.Error || "")}</span></div>` : ""}
     ${status === "cancelled" ? `<div class="sbanner${runMessage(run) === "server restart, retry needed" ? " retry-warning" : ""}"><span class="err">${esc(runMessage(run))}</span>${run.SupersededBy ? `<button class="chip" data-run-id="${esc(run.SupersededBy)}">view successor ${esc(shortSuccessor(run.SupersededBy))}</button>` : ""}</div>` : ""}
-    <div class="v4-body">
+    </div><div class="v4-body">
       <div class="slist" id="stepList">
         <div class="sl-h"><span>STEPS · ${stepCount}${run.Release ? " · RELEASE" : ""}</span></div>
         <button class="v4row summary${selected ? "" : " sel"}" data-select-step=""><span class="ic ${kind === "pass" ? "g" : kind === "fail" ? "r" : kind === "run" ? "o" : "d"}">≡</span><span class="nm">Run summary</span><span class="dur">${esc(fmtDur(seconds))}</span></button>
@@ -975,15 +1111,29 @@ async function renderRunDetailView(detail, seq) {
       </div>
       <div class="logp">
         <div class="log-h" id="logHead">${selected ? `${statusIcon(selected.Status)}<span class="nm">${esc(stepKey(selected))}</span><span class="v4b ${statusKind(selected.Status) === "pass" ? "pass" : statusKind(selected.Status) === "fail" ? "fail" : statusKind(selected.Status) === "run" ? "run" : "dim"}">${esc(statusLabel(selected.Status).toUpperCase())}</span>` : `<span class="ic ${kind === "pass" ? "g" : kind === "fail" ? "r" : kind === "run" ? "o" : "d"}">≡</span><span class="nm">Run summary</span><span class="v4b ${kind === "pass" ? "pass" : kind === "fail" ? "fail" : kind === "run" ? "run" : "dim"}">${esc(phaseLabel)} · ${esc(fmtDur(seconds))}</span>`}</div>
-        <div class="terminal"><div class="term-bar"><span class="lamp red"></span><span class="lamp yellow"></span><span class="lamp green"></span><span class="term-title">${esc(repository)} / ${esc(run.Ref)} — ${live ? "live output" : selected ? esc(stepKey(selected)) : "summary"}</span>${live ? `<span class="term-live">${state.live?.error ? "RECONNECTING" : state.live?.done ? "COMPLETE" : "POLLING"}</span>` : ""}</div><div id="termBody" class="term-body${state.showExec ? " show-exec" : ""}">${terminal}</div></div>
+        <div class="terminal"><div class="term-bar"><span class="lamp red"></span><span class="lamp yellow"></span><span class="lamp green"></span><span class="term-title">${esc(repository)} / ${esc(run.Ref)} — ${live ? "live output" : selected ? esc(stepKey(selected)) : "summary"}</span>${live ? `<span class="term-live">${state.live?.error ? "RECONNECTING" : state.live?.done ? "COMPLETE" : state.live?.fallback ? "POLLING" : "LIVE"}</span>` : ""}</div>${live ? `<div id="liveDelivery" class="log-delivery" role="status">${esc(liveDeliverySummary(state.live, selected?.Burn, selected?.Step))}</div>` : ""}<div id="termBody" class="term-body${state.showExec ? " show-exec" : ""}">${terminal}</div></div>
       </div>
     </div>
-  </section>`);
+  </section>`;
+  const existing = app?.querySelector("[data-detail-run]");
+  if (existing?.dataset.detailRun === run.ID) {
+    const template = document.createElement("template");
+    template.innerHTML = detailHTML;
+    for (const selector of [".rh", "#runBanners", "#stepList", "#logHead", ".term-bar"]) {
+      existing.querySelector(selector).innerHTML = template.content.querySelector(selector).innerHTML;
+    }
+    const preserve = live && state.live?.view?.body === previousTerm;
+    if (!preserve) existing.querySelector(".terminal").replaceWith(template.content.querySelector(".terminal"));
+  } else replaceApp(detailHTML);
   const termBody = document.getElementById("termBody");
+  if (live && state.live?.view) {
+    state.live.view.body = termBody;
+    scheduleLiveFrame(state.live);
+  } else if (state.live?.view) state.live.view = null;
   if (termBody && (live || selected)) termBody.scrollTop = stick ? termBody.scrollHeight : previousScroll;
   const stepList = document.getElementById("stepList");
   if (stepList) stepList.scrollTop = previousStepScroll;
-  if (status === "running" || (live && !state.live?.done)) setAuto(livePollMs);
+  if (status === "running" || (live && !state.live?.done)) setAuto(listPollMs);
   else if (status === "queued") setAuto(listPollMs);
   else clearInterval(state.timer);
 }
@@ -1176,6 +1326,7 @@ async function route(background) {
   if (!background) window.scrollTo(0, 0);
   try {
     const path = location.pathname;
+    if (state.live && path !== state.live.routePath) closeLiveLog();
     if (path === "/" || path === "/runs") return await renderRuns(seq);
     if (path === "/repos") return await renderRepos(seq);
     if (path === "/issues") return await renderIssues(seq);

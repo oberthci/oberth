@@ -9,6 +9,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/gitcache"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/runlog"
@@ -525,16 +526,7 @@ type LogResponse struct {
 // Offset is the value to pass on the next poll; Done reports whether the run
 // reached a terminal state (read before the chunk, so a terminal answer can
 // never precede unread bytes).
-type LiveLogResponse struct {
-	RunID         string `json:"run_id"`
-	Status        string `json:"status"`
-	DisplayStatus string `json:"display_status,omitempty"`
-	DisplayReason string `json:"display_reason"`
-	Chunk         string `json:"chunk"`
-	Offset        int64  `json:"offset"`
-	Size          int64  `json:"size"`
-	Done          bool   `json:"done"`
-}
+type LiveLogResponse = api.LiveLogResponse
 
 // RunDetailResponse is the read-only dashboard view of one run: the durable
 // run record, its recorded burn/step results, and the owning repository. It

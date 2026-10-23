@@ -34,8 +34,9 @@ func (controller *Controller) WithPodLogFollower(reader PodLogFollower) *Control
 type podLogIdentityReader func(context.Context, string, string) (string, error)
 
 const (
-	maxLogFollowers   = 32
-	maxLogRecordBytes = 1 << 20
+	maxLogFollowers      = 32
+	maxLogRecordBytes    = 1 << 20
+	followLogIdleTimeout = 45 * time.Second
 )
 
 // Only complete attributed lines reach the shared, serialized budget writer.
@@ -59,6 +60,8 @@ type stepLogFollower struct {
 	step         StepResult
 	namespace    string
 	terminal     atomic.Bool
+	followMu     sync.Mutex
+	followCancel context.CancelFunc
 	done         chan struct{}
 	cursor       logCursor
 	bytes        int64
@@ -97,7 +100,7 @@ func (logs *stepLogFollowers) observe(workflow *wfv1.Workflow) {
 		key := step.NodeID + "/" + step.PodName
 		if worker := logs.workers[key]; worker != nil {
 			if terminal(step.Status) {
-				worker.terminal.Store(true)
+				worker.markTerminal()
 			}
 			continue
 		}
@@ -128,7 +131,7 @@ func (logs *stepLogFollowers) drain(workflow *wfv1.Workflow) {
 	for {
 		logs.observe(workflow)
 		for _, worker := range logs.workers {
-			worker.terminal.Store(true)
+			worker.markTerminal()
 			<-worker.done
 		}
 		before := len(logs.workers)
@@ -217,11 +220,20 @@ func (worker *stepLogFollower) run() {
 			since := metav1.NewTime(worker.cursor.at.Truncate(time.Second))
 			options.SinceTime = &since
 		}
-		lease := 3 * time.Second
+		ctx, cancel := context.WithCancel(worker.owner.ctx)
+		lease := followLogIdleTimeout
 		if final {
 			lease = 30 * time.Second
 		}
-		ctx, cancel := context.WithTimeout(worker.owner.ctx, lease)
+		timer := time.AfterFunc(lease, cancel)
+		if !final {
+			worker.followMu.Lock()
+			worker.followCancel = cancel
+			if worker.terminal.Load() {
+				cancel()
+			}
+			worker.followMu.Unlock()
+		}
 		stream, err := worker.open(ctx, options)
 		if err == nil {
 			if !final {
@@ -230,11 +242,19 @@ func (worker *stepLogFollower) run() {
 			// A reader must honor cancellation while opening; closing it here also
 			// releases Read implementations that only unblock when Close is called.
 			stop := context.AfterFunc(ctx, func() { _ = stream.Close() })
-			err = worker.consumeRecords(stream, final)
+			var reader io.Reader = stream
+			if !final {
+				reader = &idleLogReader{Reader: stream, timer: timer, idle: lease}
+			}
+			err = worker.consumeRecords(reader, final)
 			stop()
 			_ = stream.Close()
 		}
+		timer.Stop()
 		cancel()
+		worker.followMu.Lock()
+		worker.followCancel = nil
+		worker.followMu.Unlock()
 		if worker.owner.failure() != nil {
 			return
 		}
@@ -263,14 +283,41 @@ func (worker *stepLogFollower) run() {
 			return
 		}
 		worker.status("reconnecting", "pod stream ended; retrying from the last timestamp boundary")
-		timer := time.NewTimer(250 * time.Millisecond)
+		retryTimer := time.NewTimer(250 * time.Millisecond)
 		select {
 		case <-worker.owner.ctx.Done():
-			timer.Stop()
+			retryTimer.Stop()
 			return
-		case <-timer.C:
+		case <-retryTimer.C:
 		}
 	}
+}
+
+// A terminal observation interrupts Follow immediately so an active producer
+// cannot delay the bounded final snapshot indefinitely.
+func (worker *stepLogFollower) markTerminal() {
+	worker.terminal.Store(true)
+	worker.followMu.Lock()
+	defer worker.followMu.Unlock()
+	if worker.followCancel != nil {
+		worker.followCancel()
+	}
+}
+
+// Progress is measured in bytes, including partial records: a long line must
+// not lose its connection just because the scanner has not emitted it yet.
+type idleLogReader struct {
+	io.Reader
+	timer *time.Timer
+	idle  time.Duration
+}
+
+func (reader *idleLogReader) Read(body []byte) (int, error) {
+	n, err := reader.Reader.Read(body)
+	if n > 0 {
+		reader.timer.Reset(reader.idle)
+	}
+	return n, err
 }
 
 func (worker *stepLogFollower) open(ctx context.Context, options corev1.PodLogOptions) (io.ReadCloser, error) {

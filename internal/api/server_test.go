@@ -132,7 +132,7 @@ func (backend *fakeBackend) RunLogFiltered(_ context.Context, _ Actor, id, burn,
 func (backend *fakeBackend) RunLogLive(_ context.Context, _ Actor, id string, offset int64) (any, error) {
 	backend.runID, backend.liveOffset = id, offset
 	backend.liveCalls++
-	return map[string]any{"run_id": id, "status": "running", "chunk": "line\n", "offset": offset + 5, "size": offset + 5, "done": false}, nil
+	return LiveLogResponse{RunID: id, Status: "running", Chunk: "line\n", Offset: offset + 5, Size: offset + 5}, nil
 }
 func (backend *fakeBackend) Repositories(context.Context, Actor) (any, error) {
 	return map[string]any{"repositories": []any{}}, nil
