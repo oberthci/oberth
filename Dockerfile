@@ -56,6 +56,11 @@ RUN apk add --no-cache \
     # above: when the repo supersedes 2.9.0-r0 this line fails the build
     # loudly — re-pin deliberately, never drift silently.
     libexpat=2.9.0-r0 \
+    # CVE-2026-111497 (HIGH): brotli-libs arrives as libcurl's transitive
+    # dependency; the alpine:3.23 base digest above still resolves 1.2.0-r0
+    # while the fixed 1.2.1-r0 exists only in the apk repository (verified
+    # present for x86_64 and aarch64). Exact-pinned like libcrypto3 above.
+    brotli-libs=1.2.1-r0 \
     openssh-client-default=10.2_p1-r0 \
     tzdata=2026e-r0 \
     && rm -f /var/log/apk.log
