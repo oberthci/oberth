@@ -788,6 +788,10 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 			if ctx.Err() != nil {
 				return nil
 			}
+			var observed *TrustedPreflightFailure
+			if errors.As(err, &observed) {
+				return scheduler.finishTrustedPreflightFailure(ctx, run, observed.Result, err)
+			}
 			return scheduler.finishInfrastructureFailure(ctx, run, repository, fmt.Errorf("trusted preflight: %w", err))
 		}
 		fresh, err := scheduler.trustedRequirement(ctx, repository, run.ID, checkoutSHA)
@@ -1314,6 +1318,14 @@ func (scheduler *Scheduler) deliverPublicationWithGate(
 	if err != nil {
 		return model.PublicationFinalization{}, fmt.Errorf("load publication %s: %w", publicationID, err)
 	}
+	log.Printf("publication attempt run=%s publication=%s status=%s", publication.RunID, publication.ID, publication.Status)
+	defer func() {
+		outcome := "unconfirmed"
+		if err == nil {
+			outcome = string(finalization.Publication.Status)
+		}
+		log.Printf("publication outcome run=%s publication=%s status=%s", publication.RunID, publication.ID, outcome)
+	}()
 	if publication.Status.Terminal() {
 		return scheduler.loadPublicationFinalization(ctx, publication)
 	}

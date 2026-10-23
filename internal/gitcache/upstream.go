@@ -414,7 +414,7 @@ func (c *Cache) LsRemoteHeads(ctx context.Context, input string) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	output, err := c.execute(ctx, commandSpec{args: []string{"ls-remote", "--heads", remote}}, true)
+	output, err := c.execute(ctx, commandSpec{repository: input, args: []string{"ls-remote", "--heads", remote}}, true)
 	if err != nil {
 		return 0, fmt.Errorf("ls-remote probe for %s: %w", input, err)
 	}

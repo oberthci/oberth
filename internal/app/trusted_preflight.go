@@ -282,23 +282,39 @@ func (p *TrustedPreflights) Execute(ctx context.Context, job service.JobRequest,
 	}
 	completion, err := p.jobs.controller.Wait(ctx, intent.WorkflowName, intent.RunID, output)
 	if err != nil {
-		return err
+		return p.failure(completion, err)
 	}
 	if !completion.Succeeded {
-		if completion.Infrastructure {
-			return fmt.Errorf("trusted preflight infrastructure failure: %s", completion.Reason)
-		}
-		return errors.New("trusted preflight Workflow failed")
+		return p.failure(completion, errors.New(p.jobs.result(completion).Error))
 	}
 	refusalCode = "observation_refused"
 	receipt, err := p.controller.TrustedKVMReceipt(ctx, submission, uid)
 	if err != nil {
-		return err
+		return p.failure(completion, err)
 	}
 	if err = receipt.Validate(intent); err != nil {
-		return err
+		return p.failure(completion, err)
 	}
-	return p.store.RecordKVMReceipt(ctx, intent.RunID, receipt)
+	if err = p.store.RecordKVMReceipt(ctx, intent.RunID, receipt); err != nil {
+		return p.failure(completion, err)
+	}
+	return nil
+}
+
+func (p *TrustedPreflights) failure(completion argojob.Completion, cause error) error {
+	result := p.jobs.result(completion)
+	if result.Error != "" && result.Error != cause.Error() {
+		cause = fmt.Errorf("%s: %w", result.Error, cause)
+	}
+	// A command failure has an observed failed step. Missing terminal evidence,
+	// a failed Workflow/Pod, and receipt collection failures remain infrastructure.
+	if completion.Succeeded || completion.Infrastructure || result.FailedStep == "" {
+		result.Phase = "infrastructure"
+		result.FailedBurn, result.FailedStep = "", ""
+	}
+	result.Status = model.RunFailed
+	result.Error = cause.Error()
+	return &service.TrustedPreflightFailure{Result: result, Cause: fmt.Errorf("trusted preflight: %w", cause)}
 }
 
 // trustedRecoveryBound caps one execution's whole startup recovery: the

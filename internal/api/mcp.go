@@ -79,7 +79,8 @@ type PromotionListResponse struct {
 
 // PublishRetryResponse reports the outcome of retrying a failed upstream
 // publication. The publication ID is the new durable record created for the
-// retry; status and error describe the terminal outcome.
+// retry. A pending status means delivery/finalization is still being recovered;
+// poll run_get or wait using the returned run ID for its eventual outcome.
 type PublishRetryResponse struct {
 	RunID         string `json:"run_id,omitempty"`
 	PromotionID   string `json:"promotion_id,omitempty"`
@@ -511,7 +512,7 @@ func toolDefinitions() []map[string]any {
 		tool("schedule_resume", "Resume a paused schedule entry. It fires once at its next tick if it came due while paused. Requires admin uplink; audited as schedule.resume.", object(map[string]any{"repo": stringProperty("Repository name"), "entry": stringProperty("Schedule entry name")}, "repo", "entry")),
 		tool("schedule_trigger", "Run one schedule entry now: queues a trigger=schedule run at the entry's branch head through the normal CI admission path, as the caller. Refused while the repository has active runs, or the entry is paused, unless force is set (a forced run supersedes the branch's active runs exactly as a push would). Requires admin uplink; audited as schedule.trigger.", object(map[string]any{"repo": stringProperty("Repository name"), "entry": stringProperty("Schedule entry name"), "force": map[string]any{"type": "boolean", "description": "Run despite active runs in the repository or a paused entry"}}, "repo", "entry")),
 		tool("system_status", "Return system health: database, upstreams, cluster, audit, and version.", object(map[string]any{})),
-		tool("publish_retry", "Retry the upstream publication for a branch or tag run whose burns all passed but whose upstream push failed. Input is exactly one durable run ID. Refuses when the run is not in a publishing-failed state, or when the cached Git object no longer matches the record. A promotion (or its CI run) is retried with promote_retry instead, which merges onto the current target head and re-tests.", object(map[string]any{
+		tool("publish_retry", "Retry the upstream publication for a branch or tag run whose burns all passed but whose upstream push failed. Input is exactly one durable run ID. Refuses when the run is not in a publishing-failed state, or when the cached Git object no longer matches the record. A pending response names the publication and run IDs; poll run_get or wait for the run while finalization is recovered. A promotion (or its CI run) is retried with promote_retry instead, which merges onto the current target head and re-tests.", object(map[string]any{
 			"id": stringProperty("Durable run ID whose publication failed"),
 		}, "id")),
 		tool("secretstore_plan", "Compute the policy/role diff that `oberth secretstore sync` would apply based on current approved grants. Admin uplink required. Read-only: the server never receives an admin Bao token. Returns per-repo policy names and paths; never secret values.", object(map[string]any{})),

@@ -24,6 +24,7 @@ import (
 
 	"github.com/oberthci/oberth/internal/argojob"
 	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/runprogress"
 	"github.com/oberthci/oberth/internal/service"
 	"github.com/oberthci/oberth/internal/store"
 	"github.com/oberthci/oberth/internal/vmrunner"
@@ -36,6 +37,7 @@ type protectedControllerFixture struct {
 	request              argojob.Request
 	createErr            error
 	failed               bool
+	waitErr              error
 	infrastructureReason string
 	waitRunID            string
 	cleaned              bool
@@ -103,7 +105,13 @@ func (c *protectedControllerFixture) Create(_ context.Context, r argojob.Request
 }
 func (c *protectedControllerFixture) Wait(_ context.Context, _ string, runID string, _ io.Writer) (argojob.Completion, error) {
 	c.waitRunID = runID
-	return argojob.Completion{Succeeded: !c.failed, Infrastructure: c.infrastructureReason != "", Reason: c.infrastructureReason}, nil
+	completion := argojob.Completion{Succeeded: !c.failed, Infrastructure: c.infrastructureReason != "", Reason: c.infrastructureReason}
+	if c.failed {
+		completion.Name, completion.Phase = "trusted", "Failed"
+		completion.FailedBurn, completion.FailedStep = "test", "unit"
+		completion.Steps = []argojob.StepResult{{Burn: "test", Step: "unit", Status: runprogress.StepFailed, ExitCode: 1}}
+	}
+	return completion, c.waitErr
 }
 func (c *protectedControllerFixture) TrustedKVMWorkflowUID(ctx context.Context, r argojob.Request) (string, error) {
 	if c.createErr != nil {
@@ -132,7 +140,7 @@ func (c *protectedControllerFixture) TrustedKVMReceipt(_ context.Context, r argo
 	return vmrunner.KVMReceipt{IntentDigest: d, WorkflowUID: uid, Binding: vmrunner.KVMTerminationBinding{Namespace: intent.Namespace, WorkflowName: intent.WorkflowName, WorkflowUID: uid, PodName: "pod", PodUID: "pod-uid", ContainerID: "containerd://id", HarnessImageRef: intent.Recipe.HarnessImage, AdmittedAt: intent.AdmittedAt, Deadline: intent.Deadline}, Report: vmrunner.KVMReport{Version: 1, IntentDigest: d, InventoryDigest: intent.InventoryDigest, CaseCount: intent.CaseCount, ArtifactSetDigest: strings.Repeat("f", 64)}, Termination: vmrunner.KVMTerminationRecord{ImageID: "sha256:" + strings.Repeat("c", 64), ContainerID: "containerd://id", PodUID: "pod-uid", WorkflowUID: uid, StartedAt: intent.AdmittedAt, FinishedAt: now}, FinishedAt: now}, nil
 }
 func TestTrustedPreflightAdapterLifecycle(t *testing.T) {
-	for _, scenario := range []string{"pass", "workflow failed", "infrastructure failed", "definite create refusal", "uncertain create", "recover absent", "unapproved", "guest granted", "guest revoked", "guest recover"} {
+	for _, scenario := range []string{"pass", "workflow failed", "workflow observation failed", "infrastructure failed", "infrastructure observation failed", "definite create refusal", "uncertain create", "recover absent", "unapproved", "guest granted", "guest revoked", "guest recover"} {
 		t.Run(scenario, func(t *testing.T) {
 			ctx := context.Background()
 			fixture := newRaceFixture(t)
@@ -145,8 +153,11 @@ func TestTrustedPreflightAdapterLifecycle(t *testing.T) {
 				}
 				fixture.jobs.SetKubeVirtGrantLoader(grants)
 			}
-			controller := &protectedControllerFixture{blockingController: newBlockingController(), failed: scenario == "workflow failed" || scenario == "infrastructure failed"}
-			if scenario == "infrastructure failed" {
+			controller := &protectedControllerFixture{blockingController: newBlockingController(), failed: strings.HasPrefix(scenario, "workflow ") || strings.HasPrefix(scenario, "infrastructure ")}
+			if strings.Contains(scenario, "observation failed") {
+				controller.waitErr = errors.New("log read failed")
+			}
+			if strings.HasPrefix(scenario, "infrastructure ") {
 				controller.infrastructureReason = `Evicted: Usage of EmptyDir volume "var-run-argo" exceeds the limit "1Gi".`
 			}
 			if scenario == "definite create refusal" {
@@ -242,7 +253,20 @@ func TestTrustedPreflightAdapterLifecycle(t *testing.T) {
 				if err == nil || state.Refusal == nil || state.Receipt != nil {
 					t.Fatalf("failure lost negative receipt: %v %#v", err, state)
 				}
-				if scenario == "infrastructure failed" && !strings.Contains(err.Error(), controller.infrastructureReason) {
+				if strings.HasPrefix(scenario, "workflow ") || strings.HasPrefix(scenario, "infrastructure ") {
+					var failure *service.TrustedPreflightFailure
+					if !errors.As(err, &failure) || len(failure.Result.Steps) != 1 || failure.Result.Steps[0].ExitCode != 1 {
+						t.Fatalf("preflight discarded failed step evidence: %v", err)
+					}
+					if strings.HasPrefix(scenario, "infrastructure ") {
+						if failure.Result.Phase != "infrastructure" || failure.Result.FailedStep != "" {
+							t.Fatalf("infrastructure classified as command failure: %#v", failure.Result)
+						}
+					} else if failure.Result.Phase != "test" || failure.Result.FailedStep != "unit" {
+						t.Fatalf("command failure classified as infrastructure: %#v", failure.Result)
+					}
+				}
+				if strings.HasPrefix(scenario, "infrastructure ") && !strings.Contains(err.Error(), controller.infrastructureReason) {
 					t.Fatalf("trusted preflight hid kubelet message: %v", err)
 				}
 				if scenario == "uncertain create" || scenario == "recover absent" || scenario == "guest recover" {

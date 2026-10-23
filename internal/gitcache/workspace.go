@@ -38,7 +38,7 @@ func (c *Cache) checkoutLocked(ctx context.Context, source, sha, destination str
 	if err := os.MkdirAll(filepath.Dir(destination), 0o700); err != nil {
 		return fmt.Errorf("create workspace parent: %w", err)
 	}
-	if err := c.run(ctx, commandSpec{args: []string{"clone", "--quiet", "--no-checkout", "--no-hardlinks", source, destination}}); err != nil {
+	if err := c.run(ctx, commandSpec{repository: source, args: []string{"clone", "--quiet", "--no-checkout", "--no-hardlinks", source, destination}}); err != nil {
 		return fmt.Errorf("clone cache into workspace: %w", err)
 	}
 	clean := false

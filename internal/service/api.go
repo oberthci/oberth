@@ -2959,8 +2959,17 @@ func (service *API) publishRetry(ctx context.Context, actor api.Actor, id string
 
 	if deliveryErr != nil {
 		service.enqueues.NotifyPublicationRecovery(publication.ID)
-		response.Status = "failed"
+		// Delivery may have reached the forge before finalization timed out.
+		// Recovery still owns that intent; only a durable terminal row can
+		// justify reporting failed or delivered to this caller.
+		response.Status = string(model.PublicationPending)
 		response.Error = deliveryErr.Error()
+		readCtx, cancelRead := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+		current, readErr := service.promotions.Publication(readCtx, publication.ID)
+		cancelRead()
+		if readErr == nil && current.Status.Terminal() {
+			response.Status, response.Error = string(current.Status), current.Error
+		}
 		return response, nil
 	}
 

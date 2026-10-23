@@ -77,12 +77,13 @@ func writeManagedGitConfig(path string) error {
 }
 
 type commandSpec struct {
-	dir    string
-	args   []string
-	stdin  io.Reader
-	stdout io.Writer
-	stderr io.Writer
-	env    map[string]string
+	repository string
+	dir        string
+	args       []string
+	stdin      io.Reader
+	stdout     io.Writer
+	stderr     io.Writer
+	env        map[string]string
 }
 
 func (c *Cache) run(ctx context.Context, spec commandSpec) error {
@@ -168,7 +169,11 @@ func (c *Cache) execute(ctx context.Context, spec commandSpec, capture bool) (st
 				detail = output.String()
 			}
 			detail = c.redactOutput(detail)
-			c.logger.Printf("git command failed: %v", err)
+			repository := spec.repository
+			if repository == "" {
+				repository = spec.dir
+			}
+			c.logger.Printf("git command failed: subcommand=%q repository=%q: %v", c.redactOutput(gitSubcommand(spec.args)), c.redactOutput(repository), err)
 			if detail != "" {
 				return "", fmt.Errorf("git command failed: %w: %s", err, detail)
 			}
@@ -190,6 +195,28 @@ func (c *Cache) execute(ctx context.Context, spec commandSpec, capture bool) (st
 		}
 		return "", fmt.Errorf("git command stopped: %w", context.Cause(ctx))
 	}
+}
+
+// gitSubcommand skips the global options used by cache commands, including
+// protocol configuration. Configuration values and command arguments stay out
+// of the failure context.
+func gitSubcommand(args []string) string {
+	for len(args) > 0 {
+		switch args[0] {
+		case "-c", "-C", "--git-dir", "--work-tree":
+			if len(args) < 2 {
+				return ""
+			}
+			args = args[2:]
+		default:
+			if strings.HasPrefix(args[0], "-") {
+				args = args[1:]
+				continue
+			}
+			return args[0]
+		}
+	}
+	return ""
 }
 
 // interfaceEqual reports whether two writers are the same value, guarding the

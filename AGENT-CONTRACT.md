@@ -819,6 +819,10 @@ continuity checks; it must never be used to reset or bypass those checks.
   recorded BEFORE the push attempt. On success the run transitions to
   `passed`/`phase=passed` and the CI issue closes; on failure the error is
   stored verbatim (minus anything secret) and the run stays retryable.
+  If finalization is uncertain and recovery still owns the publication, the
+  response is `pending` with run/publication IDs; poll `run_get` or `wait` for
+  the run. Only a durable terminal publication row justifies a terminal
+  response. Delivery attempts and outcomes log both IDs (#1189).
   Publishing-phase failures get their own CI issue title
   (`Publish red: <branch> — upstream publish failed`) so automation and humans
   can distinguish code red from forge red.
@@ -1504,6 +1508,10 @@ continuity checks; it must never be used to reset or bypass those checks.
   the suite gate. Publication rereads policy, exact recipe and actual normalized
   kubelet evidence, including candidate/tag identity, inventory and artifact
   digest. Uncertain creates/cleanup keep capacity; restart cleans and interrupts.
+  A failed preflight retains observed step results and indexed logs for
+  `run_get`/`run_logs` after cleanup. Command failures name the failed step;
+  Workflow/Pod failures retain their infrastructure reason. Uncertain cleanup
+  still retains capacity and cannot authorize publication (#1189).
   Capacity refusal with no journal row parks without weighted/group/dispatch
   permits and retries after rechecking mutation, cancellation and fresh policy.
   Build.yaml may declare `oberth.ci/trusted-tests-entrypoint` as a literal local

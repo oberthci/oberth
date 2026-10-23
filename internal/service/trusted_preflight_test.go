@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"strings"
 	"testing"
@@ -20,6 +21,7 @@ type protectedFixture struct {
 	recoverIDs                             []string
 	recoverErr                             error
 	artifactDigest                         string
+	failure                                *TrustedPreflightFailure
 }
 
 func (p *protectedFixture) Supports(vmrunner.Contract) error { return nil }
@@ -32,7 +34,7 @@ func (p *protectedFixture) RecipeAllowed(vmrunner.KVMRecipe) error {
 func (p *protectedFixture) Recover(context.Context) ([]string, error) {
 	return p.recoverIDs, p.recoverErr
 }
-func (p *protectedFixture) Execute(ctx context.Context, job JobRequest, requirement vmrunner.Requirement, _ io.Writer) error {
+func (p *protectedFixture) Execute(ctx context.Context, job JobRequest, requirement vmrunner.Requirement, output io.Writer) error {
 	run, err := p.store.Run(ctx, job.Run.ID)
 	if err != nil {
 		return err
@@ -54,6 +56,18 @@ func (p *protectedFixture) Execute(ctx context.Context, job JobRequest, requirem
 	}
 	if err = p.store.BindKVMPreflight(ctx, run.ID, "workflow"); err != nil {
 		return err
+	}
+	if p.failure != nil {
+		if _, err := fmt.Fprintln(output, "[test/unit] trusted step diagnostic"); err != nil {
+			return err
+		}
+		if err := p.store.RecordKVMRefusal(ctx, run.ID, vmrunner.KVMRefusal{Code: "preflight_failed", ObservedAt: now}); err != nil {
+			return err
+		}
+		if err := p.store.CompleteKVMPreflightCleanup(ctx, run.ID, "workflow"); err != nil {
+			return err
+		}
+		return p.failure
 	}
 	artifactDigest := p.artifactDigest
 	if artifactDigest == "" {

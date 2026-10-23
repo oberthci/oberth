@@ -1,6 +1,7 @@
 package gitcache
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -211,5 +212,43 @@ func TestListRefsSurvivesOutputBeyondCaptureTailLimit(t *testing.T) {
 		if refs[name] != commit {
 			t.Fatalf("ref %s = %q, want %q", name, refs[name], commit)
 		}
+	}
+}
+
+func TestGitFailureLogNamesCommandAndRepository(t *testing.T) {
+	t.Parallel()
+	bare := filepath.Join(t.TempDir(), "private-value-repo.git")
+	runGit(t, "", "init", "--quiet", "--bare", bare)
+	cache := newTestCache(t, "unused-upstream")
+	var logs bytes.Buffer
+	cache.logger = testLogger{&logs}
+	cache.redact = append(cache.redact, "private-value")
+	_, err := cache.capture(t.Context(), bare, "-c", "core.useReplaceRefs=false", "cat-file", "-p", "private-value")
+	if err == nil {
+		t.Fatal("missing object unexpectedly resolved")
+	}
+	for _, line := range strings.Split(logs.String(), "\n") {
+		if strings.Contains(line, "git command failed:") {
+			if !strings.Contains(line, `subcommand="cat-file"`) || !strings.Contains(line, cache.redactOutput(bare)) || strings.Contains(line, "private-value") {
+				t.Fatalf("failure context missing or unredacted: %s", line)
+			}
+			return
+		}
+	}
+	t.Fatal("missing command failure log")
+}
+
+func TestGitFailureLogWithoutWorkingDirectory(t *testing.T) {
+	t.Parallel()
+	cache := newTestCache(t, "unused-upstream")
+	var logs bytes.Buffer
+	cache.logger = testLogger{&logs}
+	missing := filepath.Join(t.TempDir(), "missing.git")
+	_, err := cache.execute(t.Context(), commandSpec{repository: "forge/team/project", args: []string{"ls-remote", "--heads", missing}}, true)
+	if err == nil {
+		t.Fatal("missing repository unexpectedly resolved")
+	}
+	if !strings.Contains(logs.String(), `subcommand="ls-remote" repository="forge/team/project"`) {
+		t.Fatalf("missing repository context: %s", logs.String())
 	}
 }
