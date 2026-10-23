@@ -3,12 +3,19 @@ import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 import assert from 'node:assert/strict';
 const source = readFileSync(new URL('../internal/api/static/app.js', import.meta.url), 'utf8');
-const sandbox = vm.createContext({ console, URLSearchParams, Map, Set, Date, document: {getElementById(){return null;}}, localStorage:{getItem(){return null;}}, setInterval() {}, clearInterval() {} });
+const sandbox = vm.createContext({ console, URLSearchParams, Map, Set, Date, location:{pathname:'/runs/live-run'}, document: {getElementById(){return null;}}, localStorage:{getItem(){return null;}}, setInterval() {}, clearInterval() {}, requestAnimationFrame() {return 1;}, cancelAnimationFrame() {} });
 vm.runInContext(source.slice(0, source.indexOf('/* ---------- events ---------- */')), sandbox);
 const run = code => vm.runInContext(code, sandbox);
 run(`
   repoName = () => 'oberth';
   const fixtureRun = { ID: 'live-run', Ref: 'fix/live', Phase: 'test', Status: 'running' };
+  // Drive fallback ticks explicitly; metadata rendering no longer polls logs.
+  const realLiveLogContent = liveLogContent;
+  liveLogContent = async (...args) => {
+    if (state.live) await pollLiveLog(state.live);
+    const html = await realLiveLogContent(...args);
+    return html + liveDeliverySummary(state.live, args[1], args[2]);
+  };
   let polls = [];
   api = async () => { const next = polls.shift(); if (next instanceof Error) throw next; return next; };
 `);
