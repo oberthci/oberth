@@ -259,3 +259,5 @@ input,select{height:32px;border:1px solid var(--line);background:var(--panel);co
   .vcs-entry{grid-template-columns:16px minmax(0,1fr);grid-auto-rows:auto}
 }
 @media (max-width:680px){.dlg{width:100vw;max-width:none;height:100dvh;max-height:none;border:0;border-radius:0;margin:0}.dlg-shell{height:100dvh;min-height:0}.dlg-body{padding:12px}}
+
+.log-delivery { padding: 8px 12px; color: var(--muted, #aaa); border-bottom: 1px solid var(--line); font-size: 12px; white-space: normal; }

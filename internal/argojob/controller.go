@@ -69,6 +69,8 @@ type Controller struct {
 	workflows         WorkflowClient
 	kube              kubernetes.Interface
 	logs              PodLogReader
+	followLogs        PodLogFollower
+	logIdentity       podLogIdentityReader
 	seeder            *SourceSeeder
 	config            Config
 	vmi               dynamic.Interface
@@ -109,6 +111,21 @@ func NewController(workflows WorkflowClient, client kubernetes.Interface, config
 	}
 	controller := &Controller{workflows: workflows, kube: client, config: config, interval: pollInterval, readGrace: workflowReadGrace}
 	if client != nil {
+		controller.logIdentity = func(ctx context.Context, namespace, pod string) (string, error) {
+			object, err := client.CoreV1().Pods(namespace).Get(ctx, pod, metav1.GetOptions{})
+			if err != nil {
+				return "", err
+			}
+			for _, status := range object.Status.ContainerStatuses {
+				if status.Name == mainContainerName && status.ContainerID != "" {
+					return fmt.Sprintf("%s/%s/%d", object.UID, status.ContainerID, status.RestartCount), nil
+				}
+			}
+			return "", errors.New("main container identity is not available yet")
+		}
+		controller.followLogs = func(ctx context.Context, namespace, pod string, options corev1.PodLogOptions) (io.ReadCloser, error) {
+			return client.CoreV1().Pods(namespace).GetLogs(pod, &options).Stream(ctx)
+		}
 		controller.logs = func(ctx context.Context, namespace, pod, container string) (io.ReadCloser, error) {
 			return client.CoreV1().Pods(namespace).
 				GetLogs(pod, &corev1.PodLogOptions{Container: container}).Stream(ctx)
@@ -130,6 +147,7 @@ func (controller *Controller) WithSourceSeeder(seeder *SourceSeeder) *Controller
 // stream logs through an already-authenticated path.
 func (controller *Controller) WithPodLogReader(reader PodLogReader) *Controller {
 	controller.logs = reader
+	controller.followLogs = nil
 	return controller
 }
 
@@ -427,6 +445,12 @@ func (controller *Controller) wait(ctx context.Context, name, runID string, dest
 		return Completion{}, errors.New("argojob: invalid retained log size")
 	}
 	budget := &runBudgetWriter{destination: destination, remaining: controller.config.MaxRunLogBytes - retained}
+	var live *stepLogFollowers
+	if controller.followLogs != nil {
+		live = newStepLogFollowers(ctx, controller.followLogs, budget, events)
+		live.identity = controller.logIdentity
+		defer live.close()
+	}
 	reporter := newProgressReporter(budget)
 	for _, event := range events {
 		if err := event.Validate(); err != nil {
@@ -489,8 +513,14 @@ func (controller *Controller) wait(ctx context.Context, name, runID string, dest
 			completion.Steps = reporter.order(completion.Steps)
 			controller.collectStepDiagnostics(ctx, settled, &completion)
 			controller.collectVMIFailure(ctx, settled, &completion, budget)
-			if publishErr := controller.publish(ctx, settled, reporter, budget); publishErr != nil && budgetBreachErr == nil {
+			if publishErr := controller.publishLogs(ctx, settled, reporter, budget, live); publishErr != nil && budgetBreachErr == nil {
 				budgetBreachErr = publishErr
+			}
+			if live != nil {
+				live.drain(settled)
+				if err := live.failure(); err != nil && budgetBreachErr == nil {
+					budgetBreachErr = err
+				}
 			}
 			reporter.finish(budget)
 			if err := controller.retireExecutorIdentity(ctx, settled); err != nil {
@@ -523,7 +553,7 @@ func (controller *Controller) wait(ctx context.Context, name, runID string, dest
 				}
 			}
 		}
-		if publishErr := controller.publish(ctx, workflow, reporter, budget); publishErr != nil && budgetBreachErr == nil {
+		if publishErr := controller.publishLogs(ctx, workflow, reporter, budget, live); publishErr != nil && budgetBreachErr == nil {
 			budgetBreachErr = publishErr
 		}
 
@@ -567,6 +597,10 @@ func (controller *Controller) verifyOwnership(workflow *wfv1.Workflow, runID str
 // reveals that previous ones did not. It returns an error when the aggregate
 // run log budget is breached during step log replay, naming the offending step.
 func (controller *Controller) publish(ctx context.Context, workflow *wfv1.Workflow, reporter *progressReporter, destination io.Writer) error {
+	return controller.publishLogs(ctx, workflow, reporter, destination, nil)
+}
+
+func (controller *Controller) publishLogs(ctx context.Context, workflow *wfv1.Workflow, reporter *progressReporter, destination io.Writer, live *stepLogFollowers) error {
 	if workflow == nil {
 		return nil
 	}
@@ -586,11 +620,14 @@ func (controller *Controller) publish(ctx context.Context, workflow *wfv1.Workfl
 		if !reporter.observe(destination, step) {
 			continue
 		}
-		if terminal(step.Status) && step.PodName != "" {
+		if live == nil && terminal(step.Status) && step.PodName != "" {
 			if err := controller.replayStepLog(ctx, workflow, step, destination); err != nil {
 				return err
 			}
 		}
+	}
+	if live != nil {
+		live.observe(workflow)
 	}
 	return nil
 }
@@ -918,11 +955,14 @@ func (reporter *progressReporter) failure() error {
 // the same 64 MiB default, but this one lives inside the controller so it can
 // propagate the breach as a step-attributed error through Wait.
 type runBudgetWriter struct {
+	mu          sync.Mutex
 	destination io.Writer
 	remaining   int64
 }
 
 func (writer *runBudgetWriter) Write(body []byte) (int, error) {
+	writer.mu.Lock()
+	defer writer.mu.Unlock()
 	if writer.remaining <= 0 {
 		return 0, errRunLogBudget
 	}

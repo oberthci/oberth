@@ -614,6 +614,7 @@ func indexReader(runID string, reader io.Reader) (Index, error) {
 	buffered := bufio.NewReaderSize(reader, 64<<10)
 	var offset int64
 	index := Index{RunID: runID, Ranges: []Range{}}
+	activeRange := false
 	for {
 		lineStart := offset
 		lineLength := 0
@@ -635,15 +636,22 @@ func indexReader(runID string, reader io.Reader) (Index, error) {
 		if lineLength == 0 && errors.Is(readErr, io.EOF) {
 			break
 		}
+		if bytes.HasPrefix(prefix, []byte(runprogress.LogDeliveryPrefix)) {
+			if activeRange {
+				index.Ranges[len(index.Ranges)-1].End = lineStart
+			}
+			activeRange = false
+		}
 		burn, step, found := ParseMarker(prefix)
 		if found {
 			length := len(index.Ranges)
-			if length == 0 || index.Ranges[length-1].Burn != burn || index.Ranges[length-1].Step != step {
-				if length > 0 {
+			if !activeRange || index.Ranges[length-1].Burn != burn || index.Ranges[length-1].Step != step {
+				if activeRange {
 					index.Ranges[length-1].End = lineStart
 				}
 				index.Ranges = append(index.Ranges, Range{Burn: burn, Step: step, Start: lineStart})
 			}
+			activeRange = true
 		}
 		if readErr != nil {
 			if errors.Is(readErr, io.EOF) {
@@ -652,7 +660,7 @@ func indexReader(runID string, reader io.Reader) (Index, error) {
 			return Index{}, fmt.Errorf("scan run log: %w", readErr)
 		}
 	}
-	if length := len(index.Ranges); length > 0 {
+	if length := len(index.Ranges); activeRange {
 		index.Ranges[length-1].End = offset
 	}
 	index.Size = offset

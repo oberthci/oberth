@@ -55,6 +55,24 @@ message still decoded from runs of older SDK versions. Byte ranges for every
 after Kubernetes reaps the pod. A run fails if retained output exceeds the
 fixed 64 MiB ceiling.
 
+The Argo controller starts following pod nodes as soon as they are known,
+including Pending nodes whose containers can start before Argo publishes
+Running. It follows each main container with Kubernetes
+timestamps and serializes complete `[burn/step]` lines with progress records.
+There are at most 32 followers per run; excess pods remain eligible for the
+next observation and final drain. Retry attempts of one logical step drain in
+order. Each attempt has a 32 MiB output ceiling and each timestamped record has a
+1 MiB ceiling; all output and delivery
+metadata share the run ceiling. A final non-following read reconciles the
+inclusive timestamp boundary before delivery completes. Missing boundaries,
+changed pod/container identities, unavailable logs and adoption without a
+cursor produce explicit continuity diagnostics. Delivery failure alone leaves
+the command verdict intact; retained writer failures and aggregate budget
+breaches fail observation. `::oberth-log::` records carry delivery state separately
+from command output. Active step readers build a snapshot index over the same
+retained file, including interleaved ranges; browser disconnects have no effect
+on the controller's followers.
+
 Branch and tag triggers are distinct trust domains. Branch Jobs mount no Secret
 and use `/var/cache/oberth/ci`. Before Git publishes a tag ref, a server-owned
 receive hook rejects deletion, movement, upstream conflict, and any commit not

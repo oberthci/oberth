@@ -14,6 +14,9 @@ import (
 	"github.com/oberthci/oberth/pkg/periapsis"
 )
 
+// LogDeliveryPrefix identifies retained delivery observations outside command output.
+const LogDeliveryPrefix = "::oberth-log:: "
+
 const (
 	Version        = 1
 	MarkerPrefix   = "@@oberth-step-progress@@ "

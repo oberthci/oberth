@@ -1779,10 +1779,10 @@ func (service *API) readStepLogFiltered(ctx context.Context, run model.Run, burn
 	if run.Status.Active() {
 		body, meta, err := service.logs.ReadActiveFiltered(run.ID, burn, step, filter)
 		if errors.Is(err, os.ErrNotExist) {
-			// Argo journals progress before replaying a finished step's log.
+			// Argo may journal progress before the first pod output arrives.
 			// Only an already-authorized step reaches this retained-log read;
 			// a missing file or range while active is pending, not a fault.
-			return nil, runlog.Meta{}, fmt.Errorf("%w: run %s is %s; retained output for burn %q step %q is not available yet; retry after the step completes", ErrStepLogPending, run.ID, run.Status, burn, step)
+			return nil, runlog.Meta{}, fmt.Errorf("%w: run %s is %s; retained output for burn %q step %q is not available yet; retry while the step runs", ErrStepLogPending, run.ID, run.Status, burn, step)
 		}
 		return body, meta, err
 	}

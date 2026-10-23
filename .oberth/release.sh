@@ -232,15 +232,18 @@ build_artifacts() {
 		goos=${target%/*}
 		goarch=${target#*/}
 		output=oberth-${goos}-${goarch}
+		printf 'release-build: %s — first build\n' "$target"
 		GOOS=$goos GOARCH=$goarch "$go_tool" build \
 			-trimpath -buildvcs=false \
 			-ldflags="-s -w -buildid= -X main.version=${tag} -X main.commit=${short_sha} -X main.date=${created}" \
 			-o "$release_dir/$output" ./cmd/oberth
+		printf 'release-build: %s — reproducibility build\n' "$target"
 		GOOS=$goos GOARCH=$goarch "$go_tool" build \
 			-trimpath -buildvcs=false \
 			-ldflags="-s -w -buildid= -X main.version=${tag} -X main.commit=${short_sha} -X main.date=${created}" \
 			-o "$release_dir/$output.repro" ./cmd/oberth
 		cmp -s "$release_dir/$output" "$release_dir/$output.repro" || fail "$output is not reproducible"
+		printf 'release-build: %s — reproducibility verified\n' "$target"
 		rm -f -- "$release_dir/$output.repro"
 		"$go_tool" version -m "$release_dir/$output" | grep -Eq '^[[:space:]]*path[[:space:]]+github\.com/oberthci/oberth/cmd/oberth$' || \
 			fail "$output does not identify the Oberth command module"

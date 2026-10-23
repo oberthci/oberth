@@ -10,6 +10,15 @@ preflights keep their separate cleanup-and-interrupt recovery until conductor
 reattachment is available. Admission and audit checks still apply, and schema
 rollback still requires the documented restore procedure.
 
+Live Argo output is retained as each pod writes it. In-process reconnects use
+an inclusive Kubernetes timestamp plus the ordered records at that timestamp,
+so repeated identical lines remain distinct. Adoption currently has no durable
+pod cursor: retained bytes are preserved, historical output is skipped, and the
+step records a continuity-gap diagnostic. New output follows from the adoption
+time. Previously terminal steps also report that their historical completeness
+cannot be established. Browser polling and pod delivery have separate health
+indicators; a quiet command can have a healthy connection without new output.
+
 On SIGTERM the server marks `/readyz` unavailable before cancelling scheduler
 workers. New HTTP/MCP requests receive 503 with `Retry-After: 1`; `/healthz` stays
 healthy during drain. Scheduler observers stop and adoption-capable Workflows
