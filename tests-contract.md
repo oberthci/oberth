@@ -1,3 +1,8 @@
+Release chart digest #1181: `TestReleaseChartPackagesPublishedImageDigest`
+runs image publication and chart packaging with real Helm, then checks the
+archive's default `image.ref`, rendered digest and unchanged source values.
+`TestReleaseChartRejectsPackagedSeedDigest` substitutes an archive containing
+the source seed and requires packaging to fail before accepting that archive.
 
 Promotion recovery #752: `TestListPromotionsFindsPendingAdmissionBeyondRecentGlobalPage`
 proves exact filters precede pagination, cursor pages preserve oldest pending

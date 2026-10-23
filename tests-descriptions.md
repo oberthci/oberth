@@ -1,3 +1,7 @@
+Release chart digest #1181 tests execute the release script with real Helm
+(skipped when Helm is unavailable). They verify the published digest reaches
+the packaged defaults and render without editing source, and reject a stale
+archive even when the stamped source chart renders the new digest.
 
 Promotion recovery #752: `TestListPromotionsFindsPendingAdmissionBeyondRecentGlobalPage`
 proves exact filters precede pagination, cursor pages preserve oldest pending

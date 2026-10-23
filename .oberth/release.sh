@@ -747,6 +747,15 @@ prepare_chart() {
 	"$helm_tool" package "$chart_source" --version "$chart_version" --app-version "$tag" --destination "$release_dir/chart-b" >/dev/null
 	chart_name=oberth-${chart_version}.tgz
 	cmp -s "$release_dir/chart-a/$chart_name" "$release_dir/chart-b/$chart_name" || fail "Oberth chart package is not reproducible"
+	"$helm_tool" show values "$release_dir/chart-a/$chart_name" >"$release_dir/chart-packaged-values.yaml"
+	if ! awk -v server="$server_ref" '
+		/^image:$/ { section = "server"; next }
+		/^[^[:space:]]/ { section = "" }
+		section == "server" && $1 == "ref:" { servers++; if ($2 != server) exit 42 }
+		END { if (servers != 1) exit 42 }
+	' "$release_dir/chart-packaged-values.yaml"; then
+		fail "packaged chart does not contain the published server digest"
+	fi
 	cp "$release_dir/chart-a/$chart_name" "$release_dir/$chart_name"
 	chart_sha=$(sha256sum "$release_dir/$chart_name" | cut -d ' ' -f 1)
 	printf 'sha256:%s\n' "$chart_sha" >"$release_dir/chart-sha256.txt"
