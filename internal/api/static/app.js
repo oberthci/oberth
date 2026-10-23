@@ -552,23 +552,30 @@ function stepIdentity(step, keys) {
   return { burn: step.Burn || "", step: step.Step || "", attempt: 0 };
 }
 function stepLabel(identity) { return identity.burn === identity.step ? identity.step : `${identity.burn}/${identity.step}`; }
-/* Execution order: rows that started, by their own start time, then rows that
-   have not started yet in plan order. A legacy retry row keeps its actual
-   place among concurrent steps. Ordinals are the plan's order, not the run's:
-   a DAG starts a task when its dependencies allow, and a step the plan could not name (a
-   fragment, a fan-out) carries an ordinal past every planned one. */
+/* Keep each burn contiguous, ordered by its earliest start, then plan order.
+   Within a burn, started steps precede unstarted steps and retries stay with
+   their logical burn. Finishing a step cannot change the order. Ordinals are
+   the plan's order, never the timing observer's order. */
 function orderSteps(steps) {
   const keys = new Set((steps || []).map(step => `${step.Burn}/${step.Step}`));
+  const burns = new Map();
   const rows = (steps || []).map((step, index) => {
     const identity = stepIdentity(step, keys);
-    return { step, index, identity, label: stepLabel(identity), key: `${identity.burn}/${identity.step}`, started: Date.parse(step.StartedAt || "") };
+    const parsed = Date.parse(step.StartedAt || "");
+    const started = Number.isFinite(parsed) ? parsed : Infinity;
+    if (!burns.has(identity.burn)) burns.set(identity.burn, { burnStart: Infinity, burnOrdinal: Infinity, index });
+    const burn = burns.get(identity.burn);
+    burn.burnStart = Math.min(burn.burnStart, started);
+    burn.burnOrdinal = Math.min(burn.burnOrdinal, step.Ordinal);
+    return { step, index, identity, label: stepLabel(identity), key: `${identity.burn}/${identity.step}`, started, burn };
   });
   rows.sort((a, b) => {
-    const aStart = Number.isFinite(a.started) ? a.started : Infinity;
-    const bStart = Number.isFinite(b.started) ? b.started : Infinity;
-    if (aStart !== bStart) return aStart - bStart;
-    if (a.key === b.key) return a.identity.attempt - b.identity.attempt || a.index - b.index;
-    return a.step.Ordinal - b.step.Ordinal || a.index - b.index;
+    if (a.burn !== b.burn) {
+      if (a.burn.burnStart !== b.burn.burnStart) return a.burn.burnStart - b.burn.burnStart;
+      return a.burn.burnOrdinal - b.burn.burnOrdinal || a.burn.index - b.burn.index;
+    }
+    if (a.started !== b.started) return a.started - b.started;
+    return a.identity.attempt - b.identity.attempt || a.step.Ordinal - b.step.Ordinal || a.index - b.index;
   });
   return rows;
 }

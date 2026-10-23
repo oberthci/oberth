@@ -390,11 +390,10 @@ func TestRunDetailStepsAreUniformOrderedRows(t *testing.T) {
 	if strings.Contains(css, ".burn-h") {
 		t.Fatal("app.css retains burn header styling")
 	}
-	// Ordering: each row's own start time, including legacy retries, then
-	// plan order for rows that have not started. Behavior is exercised by the
-	// dashboard Node test, including retries interleaved with parallel steps.
+	// Burns stay contiguous in start/plan order, including pending siblings
+	// and legacy retries. The dashboard Node test exercises the live order.
 	order := section("function orderSteps(steps)", "\n/*")
-	for _, want := range []string{"Date.parse(step.StartedAt", "Number.isFinite(a.started)", "if (aStart !== bStart) return aStart - bStart;", "a.identity.attempt - b.identity.attempt", "a.step.Ordinal - b.step.Ordinal"} {
+	for _, want := range []string{"Date.parse(step.StartedAt", "Number.isFinite(parsed)", "burnStart", "burnOrdinal", "a.identity.attempt - b.identity.attempt", "a.step.Ordinal - b.step.Ordinal"} {
 		if !strings.Contains(order, want) {
 			t.Fatalf("orderSteps is missing %s", want)
 		}

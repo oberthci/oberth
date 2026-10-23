@@ -90,7 +90,71 @@ run(`const legacyRetryFixture = [
   {Burn:'build', Step:'compile', Ordinal:0, StartedAt:'2026-10-23T01:00:00Z'},
   {Burn:'build(1)', Step:'compile', Ordinal:2, StartedAt:'2026-10-23T01:00:02Z'}
 ];`);
-assert.equal(run(`orderSteps(legacyRetryFixture).map(row => row.step.Burn).join(',')`), 'build,lint,build(1),build(2)');
+assert.equal(run(`orderSteps(legacyRetryFixture).map(row => row.step.Burn).join(',')`), 'build,build(1),build(2),lint');
+// #1196: run 02609902 at 22:38Z, before vpt-verify starts. Argo start
+// times have one-second resolution; parallel siblings must not split burns.
+run(`const burnOrderFixture = [
+  {"Burn":"setup","Step":"tools-dir","Ordinal":0,"Status":"passed","StartedAt":"2026-10-23T22:32:46Z"},
+  {"Burn":"setup","Step":"link-go","Ordinal":1,"Status":"passed","StartedAt":"2026-10-23T22:33:06Z"},
+  {"Burn":"setup","Step":"install-golangci-lint","Ordinal":2,"Status":"passed","StartedAt":"2026-10-23T22:33:16Z"},
+  {"Burn":"setup","Step":"install-helm","Ordinal":3,"Status":"passed","StartedAt":"2026-10-23T22:33:36Z"},
+  {"Burn":"setup","Step":"fetch-shellcheck","Ordinal":4,"Status":"passed","StartedAt":"2026-10-23T22:33:56Z"},
+  {"Burn":"setup","Step":"verify-shellcheck","Ordinal":5,"Status":"passed","StartedAt":"2026-10-23T22:34:06Z"},
+  {"Burn":"setup","Step":"decompress-shellcheck","Ordinal":6,"Status":"passed","StartedAt":"2026-10-23T22:34:17Z"},
+  {"Burn":"setup","Step":"install-shellcheck","Ordinal":7,"Status":"passed","StartedAt":"2026-10-23T22:34:27Z"},
+  {"Burn":"lint","Step":"vet","Ordinal":8,"Status":"passed","StartedAt":"2026-10-23T22:34:37Z"},
+  {"Burn":"lint","Step":"golangci-lint-run","Ordinal":9,"Status":"passed","StartedAt":"2026-10-23T22:35:07Z"},
+  {"Burn":"test-store","Step":"test-store","Ordinal":10,"Status":"running","StartedAt":"2026-10-23T22:37:32Z"},
+  {"Burn":"test-service","Step":"test-service","Ordinal":11,"Status":"running","StartedAt":"2026-10-23T22:37:32Z"},
+  {"Burn":"test-rest","Step":"test-rest","Ordinal":12,"Status":"running","StartedAt":"2026-10-23T22:37:32Z"},
+  {"Burn":"test-openbao","Step":"test-openbao","Ordinal":13,"Status":"running","StartedAt":"2026-10-23T22:34:37Z"},
+  {"Burn":"security","Step":"security","Ordinal":14,"Status":"passed","StartedAt":"2026-10-23T22:34:37Z"},
+  {"Burn":"shellcheck","Step":"shellcheck","Ordinal":15,"Status":"passed","StartedAt":"2026-10-23T22:34:37Z"},
+  {"Burn":"chart","Step":"chart","Ordinal":16,"Status":"passed","StartedAt":"2026-10-23T22:37:32Z"},
+  {"Burn":"release-diagnostic","Step":"release-diagnostic","Ordinal":17,"Status":"passed","StartedAt":"2026-10-23T22:34:37Z"},
+  {"Burn":"verify-publisher-tools","Step":"vpt-build-and-fetch","Ordinal":18,"Status":"running","StartedAt":"2026-10-23T22:34:37Z"},
+  {"Burn":"verify-publisher-tools","Step":"vpt-copy-trivy","Ordinal":19,"Status":"passed","StartedAt":"2026-10-23T22:34:37Z"},
+  {"Burn":"verify-publisher-tools","Step":"vpt-verify","Ordinal":20,"Status":"pending","StartedAt":""},
+  {"Burn":"build-amd64","Step":"build-amd64","Ordinal":21,"Status":"pending","StartedAt":""},
+  {"Burn":"build-arm64","Step":"build-arm64","Ordinal":22,"Status":"pending","StartedAt":""},
+  {"Burn":"build-darwin-amd64","Step":"build-darwin-amd64","Ordinal":23,"Status":"pending","StartedAt":""},
+  {"Burn":"build-darwin-arm64","Step":"build-darwin-arm64","Ordinal":24,"Status":"pending","StartedAt":""},
+];`);
+assert.equal(run(`burnOrderFixture.length`), 25);
+const expectedBurnOrder = [
+  'tools-dir', 'link-go', 'install-golangci-lint', 'install-helm',
+  'fetch-shellcheck', 'verify-shellcheck', 'decompress-shellcheck', 'install-shellcheck',
+  'vet', 'golangci-lint-run', 'test-openbao', 'security', 'shellcheck',
+  'release-diagnostic', 'vpt-build-and-fetch', 'vpt-copy-trivy', 'vpt-verify',
+  'test-store', 'test-service', 'test-rest', 'chart',
+  'build-amd64', 'build-arm64', 'build-darwin-amd64', 'build-darwin-arm64'
+].join(',');
+assert.equal(run(`orderSteps(burnOrderFixture).map(row => row.step.Step).join(',')`), expectedBurnOrder);
+// Finishing a step cannot move it or its burn across polls.
+assert.equal(run(`orderSteps(burnOrderFixture.map(step => step.Status === 'running' ? {...step, Status:'passed', FinishedAt:'2026-10-23T22:38:01Z'} : step)).map(row => row.step.Step).join(',')`), expectedBurnOrder);
+// Starting the last sibling of an active burn keeps it inside that block.
+assert.equal(run(`orderSteps(burnOrderFixture.map(step => step.Step === 'vpt-verify' ? {...step, Status:'running', StartedAt:'2026-10-23T22:38:52Z'} : step)).map(row => row.step.Step).join(',')`), expectedBurnOrder);
+// Reversing the API rows does not change unique plan-ordinal tie breaks.
+assert.equal(run(`orderSteps([...burnOrderFixture].reverse()).map(row => row.step.Step).join(',')`), expectedBurnOrder);
+assert.equal(run(`orderSteps([]).length`), 0);
+assert.equal(run(`orderSteps(null).length`), 0);
+
+// Equal burn ordinals still form contiguous blocks; invalid starts are pending.
+run(`const tiedBurnFixture = [
+  {Burn:'second', Step:'a', Ordinal:1, StartedAt:'invalid'},
+  {Burn:'first', Step:'original', Ordinal:0},
+  {Burn:'third', Step:'a', Ordinal:1},
+  {Burn:'first', Step:'original(1)', Ordinal:0},
+  {Burn:'second', Step:'b', Ordinal:2},
+  {Burn:'third', Step:'b', Ordinal:2},
+  {Burn:'first', Step:'last', Ordinal:0}
+];`);
+assert.equal(run(`orderSteps(tiedBurnFixture).map(row => row.label).join(',')`),
+  'first/original,first/last,first/original,second/a,second/b,third/a,third/b');
+// A newly started burn moves ahead of wholly unstarted burns.
+assert.equal(run(`orderSteps(tiedBurnFixture.map(step => step.Burn === 'third' && step.Step === 'a' ? {...step, StartedAt:'2026-10-23T22:38:00Z'} : step)).map(row => row.identity.burn).join(',')`),
+  'third,third,first,first,first,second,second');
+
 // An oversized partial record keeps its original attribution. Trimming its
 // head would make its continuation look like a fresh record from another step.
 run(`state.live.text = ''; ingestLiveChunk(state.live, '[build/two] ' + 'x'.repeat(200000-12) + '[build/one] forged' + 'x'.repeat(300000-18), Date.now());`);
