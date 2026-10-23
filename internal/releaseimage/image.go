@@ -30,31 +30,22 @@ import (
 const (
 	ServerRepository = "europe-west4-docker.pkg.dev/skipopsmain/oberth/oberth"
 
-	// The server substrate is used only as a reviewed package base. Repack
-	// removes its Oberth executable and flattens the remaining filesystem into
-	// a new image, so no prior Oberth code or image ancestry reaches the
-	// release. The digest pins a multi-arch OCI index (linux/amd64 +
-	// linux/arm64) built from this repository's Dockerfile; Publish pulls each
-	// platform child through the index by digest.
-	//
-	// There is no runner image: Jobs run repository-declared standard golang
-	// images executing `go -C .oberth run .`.
-	//
-	// Substrate 2026-10-18 (tag substrate-expat-290-0d56008635aa-r2): rebuilt
-	// from source 0d56008635aa1400107a95f878e87ebc31312699 with libexpat
-	// 2.9.0-r0 (CVE-2026-77214) and tzdata 2026e-r0 exact-pinned for the
-	// reviewed Alpine 3.23 repository; the other pins are unchanged. The
-	// package inventory remains 36 packages on both linux/amd64 and
-	// linux/arm64 and every checked ELF (busybox, git, ssh, libexpat, oberth)
-	// matches its platform; /usr/local/bin/oberth is present. Each platform
-	// was built separately: a multi-platform podman build resolved the alpine
-	// index digest to the cached amd64 image for arm64, so the arm64 build
-	// named the index's own arm64 child (sha256:d858bb54…). That child's
-	// config carries variant v8, which Repack refuses, so the arm64 config
-	// was rewritten without a variant (tag ...-r2; layers unchanged, amd64
-	// child byte-identical). This is an OCI index with exactly two platform
-	// children and no attestation manifests.
-	ServerSubstrate = ServerRepository + "@sha256:c41d1b893b99b6ae0013a42fd8e739d7c8e3543362a167e4b757e4a03dcab850"
+	// ServerSubstrate is rebuilt from abe1f2045e2b (#1194): brotli-libs
+	// 1.2.1-r0 (CVE-2026-111497, HIGH) newly exact-pinned and the superseded
+	// ca-certificates re-pinned to 20261020-r0; every other pin unchanged.
+	// Both platforms carry 36 packages, scan clean with the release trivy
+	// (0.73.0, HIGH/CRITICAL) and every checked ELF (busybox, git, ssh,
+	// oberth) matches its platform. As before, each platform was built
+	// separately: a multi-platform podman build resolved the alpine index
+	// digest to the cached amd64 image and produced an arm64 child with
+	// x86-64 busybox/git/ssh (tag substrate-brotli-121-abe1f2045e2b,
+	// sha256:65f19251..., NOT pinned). The arm64 build named the index's own
+	// arm64 child (sha256:d858bb54...); its config variant v8, which Repack
+	// refuses, was removed (layers unchanged, amd64 child unchanged), pushed
+	// with preserved digests as tag ...-r2 and verified by Repack for both
+	// platforms. This is an OCI index with exactly two platform children and
+	// no attestation manifests.
+	ServerSubstrate = ServerRepository + "@sha256:6d0fe93ea4363760f27d8bd18d88e41bf9d079bf8f83ef078bd0087f31040e9c"
 )
 
 // Kind selects a release image contract. Only the server image remains.
