@@ -297,3 +297,35 @@ func TestGitCommandTraceRedactsURLCredentialsWithoutConfiguredSecrets(t *testing
 		t.Fatal("URL trace leaked credentials or lost repository context")
 	}
 }
+
+func TestGitSubcommandSkipsGlobalOptionValues(t *testing.T) {
+	for _, option := range []string{"-c", "-C", "--git-dir", "--work-tree", "--namespace", "--config-env", "--super-prefix", "--attr-source"} {
+		t.Run(option, func(t *testing.T) {
+			if got := gitSubcommand([]string{option, "private-value", "fetch", "origin"}); got != "fetch" {
+				t.Fatalf("got %q", got)
+			}
+			if got := gitSubcommand([]string{option}); got != "" {
+				t.Fatalf("missing value: %q", got)
+			}
+			if got := gitSubcommand([]string{option, "private-value"}); got != "" {
+				t.Fatalf("missing command: %q", got)
+			}
+			if got := gitSubcommand([]string{option + "=private-value", "fetch"}); got != "fetch" {
+				t.Fatalf("attached value: %q", got)
+			}
+		})
+	}
+	for _, args := range [][]string{
+		{"--no-pager", "--namespace", "private", "-c", "key=value", "--work-tree=/tmp/work", "--git-dir", "/tmp/repo", "push", "origin"},
+		{"-C/tmp/work", "-ckey=value", "push", "origin"},
+		{"--literal-pathspecs", "--namespace=private", "push", "origin"},
+		{"push", "--namespace", "argument"},
+	} {
+		if got := gitSubcommand(args); got != "push" {
+			t.Fatalf("%q: got %q", args, got)
+		}
+	}
+	if got := gitSubcommand(nil); got != "" {
+		t.Fatalf("empty command: %q", got)
+	}
+}

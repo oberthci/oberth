@@ -203,7 +203,7 @@ func (c *Cache) execute(ctx context.Context, spec commandSpec, capture bool) (st
 func gitSubcommand(args []string) string {
 	for len(args) > 0 {
 		switch args[0] {
-		case "-c", "-C", "--git-dir", "--work-tree":
+		case "-c", "-C", "--git-dir", "--work-tree", "--namespace", "--config-env", "--super-prefix", "--attr-source":
 			if len(args) < 2 {
 				return ""
 			}
