@@ -29,8 +29,8 @@ func TestSchemaMigrationsAreContiguous(t *testing.T) {
 	if err := validateMigrations(migrations, latestMigrationVersion); err != nil {
 		t.Fatal(err)
 	}
-	if latestMigrationVersion != 31 {
-		t.Fatalf("latest migration version = %d, want 31", latestMigrationVersion)
+	if latestMigrationVersion != 32 {
+		t.Fatalf("latest migration version = %d, want 32", latestMigrationVersion)
 	}
 	if len(migrations) != latestMigrationVersion {
 		t.Fatalf("migration count = %d, want %d", len(migrations), latestMigrationVersion)
@@ -599,7 +599,7 @@ ALTER TABLE uplinks_v1 RENAME TO uplinks;
 CREATE UNIQUE INDEX uplinks_token_credential_idx ON uplinks(token_credential_id);
 ALTER TABLE upstreams DROP COLUMN key_name;
 ALTER TABLE runs DROP COLUMN credentialed;
-DROP TRIGGER run_schedule_entry_immutable; ALTER TABLE runs DROP COLUMN schedule_entry; DELETE FROM schema_migrations WHERE version=31; DROP TRIGGER run_timing_claim; DROP TRIGGER run_timing_grant; DROP TRIGGER run_timing_park; DROP TRIGGER run_timing_terminal; DROP TABLE step_timings; DROP TABLE run_admission_timings; DROP TABLE run_timings;
+ALTER TABLE schedule_fires DROP COLUMN last_fired_at; DELETE FROM schema_migrations WHERE version=32; DROP TRIGGER run_schedule_entry_immutable; ALTER TABLE runs DROP COLUMN schedule_entry; DELETE FROM schema_migrations WHERE version=31; DROP TRIGGER run_timing_claim; DROP TRIGGER run_timing_grant; DROP TRIGGER run_timing_park; DROP TRIGGER run_timing_terminal; DROP TABLE step_timings; DROP TABLE run_admission_timings; DROP TABLE run_timings;
 DROP INDEX repository_archive_actions_idx;
 DROP INDEX runs_admission_idx; ALTER TABLE runs DROP COLUMN admission_sequence;
 ALTER TABLE runs DROP COLUMN concurrency_group;
@@ -1047,6 +1047,7 @@ func TestFreshSchemaIsCompleteAndIdempotent(t *testing.T) {
 	})
 
 	expectedColumns := map[string][]string{
+		"schedule_fires":            {"repo", "entry", "fired_at", "outcome", "last_fired_at"},
 		"run_timings":               {"run_id", "version", "claimed_at", "checkout_ready_at", "source_seed_started_at", "source_ready_at", "workflow_created_at", "terminal_at", "workflow_json"},
 		"run_admission_timings":     {"run_id", "episode", "requested_at", "granted_at", "closed_at"},
 		"step_timings":              {"run_id", "node_id", "workflow_uid", "pod_uid", "available", "ordinal", "timing_json"},

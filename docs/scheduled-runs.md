@@ -131,7 +131,12 @@ Friday, not only on Fridays that fall on the 1st.
 and the skip is recorded. A periodic health signal gains nothing by queueing
 behind another run, and on a single node one heavy build already saturates
 memory. A skip does not advance the schedule, so the entry fires on the next
-tick once the repository is idle.
+tick once the repository is idle, including after a server restart. The latest
+outcome and its time remain visible independently of the last successful fire.
+A known-due entry with no successful fire retains a pending cursor, so the first
+busy skip also survives restart. Migration v32 (provisional allocation, #1190)
+backfills surviving successful rows; an older skip whose fire history was
+already overwritten becomes pending rather than inventing a successful time.
 
 **After downtime each schedule runs once, then resumes.** Never once per missed
 fire: three days of downtime on an hourly schedule would otherwise mean 72 runs

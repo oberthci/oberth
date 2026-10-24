@@ -17,10 +17,22 @@ func (s *Store) RecordScheduleFire(ctx context.Context, repo, entry string, at t
 	if strings.TrimSpace(repo) == "" || strings.TrimSpace(outcome) == "" {
 		return fmt.Errorf("%w: repository and outcome are required", ErrInvalid)
 	}
+	var cursor any
+	if outcome == "fired" {
+		cursor = at.UTC().UnixNano()
+	} else if entry != "" && (outcome == "skipped" || outcome == "failed" || outcome == "paused") {
+		// Zero denotes a known-due entry with no surviving successful fire.
+		// It preserves first-fire catch-up across a restart, without inventing
+		// a successful timestamp or advancing the schedule to this attempt.
+		cursor = int64(0)
+	}
 	_, err := s.db.ExecContext(ctx, `
-INSERT INTO schedule_fires(repo, entry, fired_at, outcome) VALUES(?, ?, ?, ?)
-ON CONFLICT(repo, entry) DO UPDATE SET fired_at = excluded.fired_at, outcome = excluded.outcome`,
-		repo, entry, at.UTC().UnixNano(), outcome)
+INSERT INTO schedule_fires(repo, entry, fired_at, outcome, last_fired_at) VALUES(?, ?, ?, ?, ?)
+ON CONFLICT(repo, entry) DO UPDATE SET
+    fired_at = excluded.fired_at, outcome = excluded.outcome,
+    last_fired_at = CASE WHEN excluded.outcome = 'fired' THEN excluded.last_fired_at
+        ELSE COALESCE(schedule_fires.last_fired_at, excluded.last_fired_at) END`,
+		repo, entry, at.UTC().UnixNano(), outcome, cursor)
 	if err != nil {
 		return fmt.Errorf("record schedule fire: %w", err)
 	}
@@ -29,7 +41,7 @@ ON CONFLICT(repo, entry) DO UPDATE SET fired_at = excluded.fired_at, outcome = e
 
 func (s *Store) ScheduleFires(ctx context.Context, repo string) (map[string]time.Time, error) {
 	rows, err := s.db.QueryContext(ctx, `
-SELECT entry, fired_at FROM schedule_fires WHERE repo = ? AND outcome = 'fired'`, repo)
+SELECT entry, last_fired_at FROM schedule_fires WHERE repo = ? AND last_fired_at IS NOT NULL`, repo)
 	if err != nil {
 		return nil, fmt.Errorf("read schedule fires: %w", err)
 	}
@@ -41,7 +53,11 @@ SELECT entry, fired_at FROM schedule_fires WHERE repo = ? AND outcome = 'fired'`
 		if err := rows.Scan(&entry, &firedAt); err != nil {
 			return nil, fmt.Errorf("scan schedule fire: %w", err)
 		}
-		fires[entry] = time.Unix(0, firedAt).UTC()
+		if firedAt == 0 {
+			fires[entry] = time.Time{}
+		} else {
+			fires[entry] = time.Unix(0, firedAt).UTC()
+		}
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("read schedule fires: %w", err)

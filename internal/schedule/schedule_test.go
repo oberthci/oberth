@@ -173,6 +173,18 @@ func TestDueReturnsAnEntryWhoseTimeHasPassed(t *testing.T) {
 	}
 }
 
+func TestDueKeepsAPendingFirstFireAfterServerRestart(t *testing.T) {
+	t.Parallel()
+	file, err := Parse([]byte(twoGood), testLimits(), at(t, "2026-08-24T03:06:00Z"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	due := file.Due(map[string]time.Time{"nightly": {}}, at(t, "2026-08-24T03:07:00Z"))
+	if len(due) != 1 || due[0].Name != "nightly" {
+		t.Fatalf("pending first fire was postponed to the next day: %v", names(due))
+	}
+}
+
 func TestDueReturnsAtMostOneFirePerEntryHoweverLongTheOutage(t *testing.T) {
 	t.Parallel()
 	file, err := Parse([]byte(twoGood), testLimits(), at(t, "2026-08-01T00:00:00Z"))

@@ -321,7 +321,7 @@ func TestTheMemoryStateOnlyAdvancesOnAFiredOutcome(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(fires) != 0 {
-		t.Fatalf("a non-fired outcome advanced the clock: %+v", fires)
+	if cursor, seen := fires["nightly"]; !seen || !cursor.IsZero() {
+		t.Fatalf("an unfired due entry needs a pending cursor without advancing its clock: %+v", fires)
 	}
 }

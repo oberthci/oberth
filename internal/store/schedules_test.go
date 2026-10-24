@@ -43,8 +43,8 @@ func TestOnlyAFiredOutcomeAdvancesTheClock(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := fires["nightly"]; ok {
-		t.Fatal("a skipped or refused entry advanced its clock, so the fire it missed would never happen")
+	if cursor, seen := fires["nightly"]; !seen || !cursor.IsZero() {
+		t.Fatalf("an unfired due entry needs a pending cursor without advancing its clock: %+v", fires)
 	}
 }
 
@@ -71,6 +71,30 @@ func TestARecordedFireIsUpdatedNotDuplicated(t *testing.T) {
 	}
 	if !fires["nightly"].Equal(second) {
 		t.Fatalf("recorded %s, want the later fire %s", fires["nightly"], second)
+	}
+}
+
+func TestLatestOutcomeDoesNotEraseTheSuccessfulFire(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 8, 24, 3, 0, 0, 0, time.UTC)
+	store := testStore(t, &now)
+	ctx := context.Background()
+	if err := store.RecordScheduleFire(ctx, "alpha", "nightly", now, "fired"); err != nil {
+		t.Fatal(err)
+	}
+	for index, outcome := range []string{"skipped", "paused", "refused", "failed"} {
+		at := now.Add(time.Duration(index+1) * time.Hour)
+		if err := store.RecordScheduleFire(ctx, "alpha", "nightly", at, outcome); err != nil {
+			t.Fatal(err)
+		}
+		fires, err := store.ScheduleFires(ctx, "alpha")
+		if err != nil || !fires["nightly"].Equal(now) {
+			t.Fatalf("%s erased successful fire: %+v, %v", outcome, fires, err)
+		}
+		outcomes, err := store.ScheduleOutcomes(ctx, "alpha")
+		if err != nil || len(outcomes) != 1 || outcomes[0].Outcome != outcome || !outcomes[0].FiredAt.Equal(at) {
+			t.Fatalf("latest outcome was lost: %+v, %v", outcomes, err)
+		}
 	}
 }
 

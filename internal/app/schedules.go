@@ -38,6 +38,8 @@ type ScheduleRuns interface {
 }
 
 type ScheduleState interface {
+	// A present zero cursor means a known-due entry has not successfully fired.
+	// An absent cursor starts from this server's initial observation instead.
 	ScheduleFires(ctx context.Context, repo string) (map[string]time.Time, error)
 	RecordScheduleFire(ctx context.Context, repo, entry string, at time.Time, outcome string) error
 }
@@ -304,7 +306,7 @@ func (state *MemoryScheduleState) ScheduleFires(_ context.Context, repo string) 
 }
 
 func (state *MemoryScheduleState) RecordScheduleFire(_ context.Context, repo, entry string, at time.Time, outcome string) error {
-	if outcome != "fired" || entry == "" {
+	if entry == "" || (outcome != "fired" && outcome != "skipped" && outcome != "failed" && outcome != "paused") {
 		return nil
 	}
 	state.mu.Lock()
@@ -312,6 +314,10 @@ func (state *MemoryScheduleState) RecordScheduleFire(_ context.Context, repo, en
 	if state.fires[repo] == nil {
 		state.fires[repo] = map[string]time.Time{}
 	}
-	state.fires[repo][entry] = at.UTC()
+	if outcome == "fired" {
+		state.fires[repo][entry] = at.UTC()
+	} else if _, seen := state.fires[repo][entry]; !seen {
+		state.fires[repo][entry] = time.Time{}
+	}
 	return nil
 }
