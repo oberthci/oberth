@@ -143,3 +143,12 @@ func TestTagAdoptionDoesNotInferReleaseCapability(t *testing.T) {
 		t.Fatal("historical tag inferred release authority")
 	}
 }
+
+func TestScheduleEntryAdoptionUsesDurableRunIdentity(t *testing.T) {
+	controller := &adoptingArgoControl{found: true}
+	jobs := &ArgoJobs{controller: controller, intents: map[string]argoIntent{}}
+	run := model.Run{ID: "scheduled-run", JobName: "scheduled-workflow", RefKind: model.RefBranch, Ref: "main", SHA: "original-commit", Trigger: "schedule", ScheduleEntry: "nightly"}
+	if _, found, err := jobs.Adopt(context.Background(), run); err != nil || !found || controller.request.ScheduleEntry != "nightly" || controller.request.RunTrigger != argoworkflow.RunTriggerSchedule {
+		t.Fatalf("adoption lost durable identity: %+v %v", controller.request, err)
+	}
+}

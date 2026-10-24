@@ -206,7 +206,7 @@ func (scheduler *Scheduler) EnqueueCI(ctx context.Context, request CIRequest) (m
 		request.OldSHA, request.SHA, request.SHA, "queued")
 	enqueued, err := scheduler.store.EnqueueReceiveEvent(ctx, event, model.RunSpec{
 		RepoID: request.Repository.ID, RefKind: model.RefBranch, Ref: request.Branch,
-		SHA: request.SHA, Actor: request.Actor, Trigger: trigger, TestedSHA: testedSHA, BaseSHA: request.BaseSHA,
+		SHA: request.SHA, Actor: request.Actor, Trigger: trigger, ScheduleEntry: request.ScheduleEntry, TestedSHA: testedSHA, BaseSHA: request.BaseSHA,
 	})
 	if err != nil {
 		return model.EnqueueRunResult{}, err

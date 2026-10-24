@@ -68,8 +68,8 @@ func (s *Store) RerunRun(ctx context.Context, request model.RunRerunRequest) (mo
 	}
 	var activeID string
 	err = tx.QueryRowContext(ctx, `
-SELECT id FROM runs WHERE repo_id = ? AND ref_kind = ? AND ref = ? AND status IN ('queued', 'running')
-ORDER BY queue_sequence LIMIT 1`, source.RepoID, source.RefKind, source.Ref).Scan(&activeID)
+SELECT id FROM runs WHERE repo_id = ? AND ref_kind = ? AND ref = ? AND schedule_entry = ? AND status IN ('queued', 'running')
+ORDER BY queue_sequence LIMIT 1`, source.RepoID, source.RefKind, source.Ref, source.ScheduleEntry).Scan(&activeID)
 	if err == nil {
 		return model.RunRerunResult{}, fmt.Errorf("%w: %s %s already has active run %s", ErrInvalidState, source.RefKind, source.Ref, activeID)
 	}
@@ -83,7 +83,7 @@ ORDER BY queue_sequence LIMIT 1`, source.RepoID, source.RefKind, source.Ref).Sca
 	}
 	spec, err := validateRunSpec(model.RunSpec{
 		RepoID: source.RepoID, RefKind: source.RefKind, Ref: source.Ref, SHA: source.SHA, Actor: request.Actor,
-		Release: source.Release, Credentialed: source.Release && source.Credentialed, Trigger: source.Trigger,
+		Release: source.Release, Credentialed: source.Release && source.Credentialed, Trigger: source.Trigger, ScheduleEntry: source.ScheduleEntry,
 		TestedSHA: source.TestedSHA, BaseSHA: source.BaseSHA,
 	})
 	if err != nil {

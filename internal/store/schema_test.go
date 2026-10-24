@@ -29,8 +29,8 @@ func TestSchemaMigrationsAreContiguous(t *testing.T) {
 	if err := validateMigrations(migrations, latestMigrationVersion); err != nil {
 		t.Fatal(err)
 	}
-	if latestMigrationVersion != 30 {
-		t.Fatalf("latest migration version = %d, want 30", latestMigrationVersion)
+	if latestMigrationVersion != 31 {
+		t.Fatalf("latest migration version = %d, want 31", latestMigrationVersion)
 	}
 	if len(migrations) != latestMigrationVersion {
 		t.Fatalf("migration count = %d, want %d", len(migrations), latestMigrationVersion)
@@ -599,7 +599,7 @@ ALTER TABLE uplinks_v1 RENAME TO uplinks;
 CREATE UNIQUE INDEX uplinks_token_credential_idx ON uplinks(token_credential_id);
 ALTER TABLE upstreams DROP COLUMN key_name;
 ALTER TABLE runs DROP COLUMN credentialed;
-DROP TRIGGER run_timing_claim; DROP TRIGGER run_timing_grant; DROP TRIGGER run_timing_park; DROP TRIGGER run_timing_terminal; DROP TABLE step_timings; DROP TABLE run_admission_timings; DROP TABLE run_timings;
+DROP TRIGGER run_schedule_entry_immutable; ALTER TABLE runs DROP COLUMN schedule_entry; DELETE FROM schema_migrations WHERE version=31; DROP TRIGGER run_timing_claim; DROP TRIGGER run_timing_grant; DROP TRIGGER run_timing_park; DROP TRIGGER run_timing_terminal; DROP TABLE step_timings; DROP TABLE run_admission_timings; DROP TABLE run_timings;
 DROP INDEX repository_archive_actions_idx;
 DROP INDEX runs_admission_idx; ALTER TABLE runs DROP COLUMN admission_sequence;
 ALTER TABLE runs DROP COLUMN concurrency_group;
@@ -1027,6 +1027,7 @@ func TestFreshSchemaIsCompleteAndIdempotent(t *testing.T) {
 		"promotions_no_delete",
 		"publications_guard_update",
 		"publications_no_delete",
+		"run_schedule_entry_immutable",
 		"run_timing_claim",
 		"run_timing_grant",
 		"run_timing_immutable",
@@ -1053,7 +1054,7 @@ func TestFreshSchemaIsCompleteAndIdempotent(t *testing.T) {
 		"schema_migrations":         {"version", "applied_at"},
 		"upstreams":                 {"id", "name", "kind", "base_url", "created_at", "updated_at", "key_name"},
 		"repositories":              {"id", "name", "upstream_id", "default_branch", "created_at", "updated_at"},
-		"runs":                      {"queue_sequence", "id", "repo_id", "ref_kind", "ref", "sha", "actor", "release", "trigger", "phase", "job_name", "tested_sha", "base_sha", "failed_burn", "failed_step", "error", "status", "reason", "superseded_by", "queued_at", "started_at", "finished_at", "created_at", "updated_at", "credentialed", "concurrency_group", "admission_sequence"},
+		"runs":                      {"queue_sequence", "id", "repo_id", "ref_kind", "ref", "sha", "actor", "release", "trigger", "phase", "job_name", "tested_sha", "base_sha", "failed_burn", "failed_step", "error", "status", "reason", "superseded_by", "queued_at", "started_at", "finished_at", "created_at", "updated_at", "credentialed", "concurrency_group", "admission_sequence", "schedule_entry"},
 		"step_results":              {"run_id", "burn", "step", "ordinal", "status", "exit_code", "log_start", "log_end", "started_at", "finished_at", "recorded_at", "declared_size", "max_rss_bytes", "user_cpu_ns", "system_cpu_ns", "termination_json"},
 		"promotions":                {"sequence", "id", "repo_id", "source_branch", "source_sha", "target_ref", "previous_sha", "result_sha", "actor", "status", "run_id", "error", "created_at", "updated_at", "grant_id"},
 		"promotion_grants":          {"id", "repo_id", "source_sha", "target_ref", "issuer", "issuer_fingerprint", "note", "created_at", "expires_at", "revoked_by", "revoked_at", "consumed_by", "consumed_at"},

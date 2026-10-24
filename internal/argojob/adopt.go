@@ -36,6 +36,7 @@ type AdoptionRequest struct {
 	Name, RunID, Ref, SHA, Group string
 	Trigger                      periapsis.Trigger
 	RunTrigger                   argoworkflow.RunTrigger
+	ScheduleEntry                string
 }
 
 func (controller *Controller) Adopt(ctx context.Context, request AdoptionRequest) (Adoption, bool, error) {
@@ -64,6 +65,9 @@ func (controller *Controller) bindAdoption(workflow *wfv1.Workflow, request Adop
 		workflow.Annotations[refAnnotation] != request.Ref || workflow.Labels["oberth.ci/sha"] != labelValue(request.SHA) ||
 		workflow.Labels["oberth.ci/trigger"] != string(request.Trigger) {
 		return Adoption{}, fmt.Errorf("argojob: Workflow %s adoption binding mismatch", request.Name)
+	}
+	if !argoworkflow.ScheduleEntryMatches(workflow, request.RunTrigger, request.ScheduleEntry) {
+		return Adoption{}, fmt.Errorf("argojob: Workflow %s adoption schedule entry mismatch", request.Name)
 	}
 	group, err := argoworkflow.RunConcurrencyGroup(workflow)
 	// Pre-#1173 submissions persisted this implicit group without annotating

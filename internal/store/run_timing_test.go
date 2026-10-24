@@ -265,7 +265,7 @@ func TestRunTimingMigrationDoesNotBackfillLegacyStartedAt(t *testing.T) {
 	if _, err = s.FinishRun(ctx, run.ID, model.RunResult{Status: model.RunPassed}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = s.db.Exec(`DROP TRIGGER run_timing_claim; DROP TRIGGER run_timing_grant; DROP TRIGGER run_timing_park; DROP TRIGGER run_timing_terminal; DROP TABLE step_timings; DROP TABLE run_admission_timings; DROP TABLE run_timings; DELETE FROM schema_migrations WHERE version=?`, runTimingMigrationVersion); err != nil {
+	if _, err = s.db.Exec(`DROP TRIGGER run_schedule_entry_immutable; ALTER TABLE runs DROP COLUMN schedule_entry; DELETE FROM schema_migrations WHERE version=31; DROP TRIGGER run_timing_claim; DROP TRIGGER run_timing_grant; DROP TRIGGER run_timing_park; DROP TRIGGER run_timing_terminal; DROP TABLE step_timings; DROP TABLE run_admission_timings; DROP TABLE run_timings; DELETE FROM schema_migrations WHERE version=?`, runTimingMigrationVersion); err != nil {
 		t.Fatal(err)
 	}
 	if err = s.Close(); err != nil {

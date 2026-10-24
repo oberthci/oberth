@@ -291,15 +291,16 @@ type WorkspaceGit interface {
 }
 
 type CIRequest struct {
-	EventID    string
-	Repository model.Repository
-	Branch     string
-	OldSHA     string
-	SHA        string
-	Actor      string
-	Trigger    string
-	TestedSHA  string
-	BaseSHA    string
+	EventID       string
+	Repository    model.Repository
+	Branch        string
+	OldSHA        string
+	SHA           string
+	Actor         string
+	Trigger       string
+	ScheduleEntry string
+	TestedSHA     string
+	BaseSHA       string
 }
 
 type ReleaseRequest struct {
@@ -490,6 +491,7 @@ type PushResult struct {
 }
 
 type StatusResponse struct {
+	ScheduleEntry string               `json:"schedule_entry,omitempty"`
 	Scheduling    *model.RunScheduling `json:"scheduling,omitempty"`
 	DisplayStatus string               `json:"display_status,omitempty"`
 	DisplayReason string               `json:"display_reason"`

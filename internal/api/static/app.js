@@ -172,6 +172,7 @@ function runStatusCell(run) {
   const status = displayRunStatus(run);
   return `${statusIcon(status)}${pill(statusLabel(status), statusKind(status))}`;
 }
+function scheduleBadge(run) { return run.Trigger === "schedule" && run.ScheduleEntry ? `<span class="v4b dim" title="schedule entry">${esc(run.ScheduleEntry)}</span>` : ""; }
 function releaseBadge(run) { return run.Release ? '<span class="v4b release">⏏ RELEASE</span>' : ""; }
 function runDuration(run) {
   return spanSeconds(run.StartedAt, run.FinishedAt, run.Status === "running");
@@ -475,7 +476,7 @@ function runsTable(runs) {
     const queued = displayRunStatus(run) === "queued";
     const status = queuePhase(run);
     const group = admissionOf(run)?.group || run.ConcurrencyGroup;
-    return `<div class="trow" data-run-id="${esc(run.ID)}"><div class="status-cell run-status">${statusIcon(status)}${pill(statusLabel(status), statusKind(status))}</div><div class="primary"><div class="repo-name">${esc(repoName(run.RepoID))} ${releaseBadge(run)}${group ? ` <span class="v4b dim" title="concurrency group">${esc(group)}</span>` : ""}</div><div class="branch">${esc(run.RefKind === "tag" ? "tag " : "")}${esc(run.Ref)}</div></div><div class="sha">${esc(shortSha(run.SHA))}</div><div class="clip" title="${esc(run.Actor)}">${esc(run.Actor || "--")}</div><div class="nowrap" title="${esc(fmtTime(runWhen(run)))}">${esc(runTimeLabel(run))}<br><span class="meta"${queued ? ` title="${esc(queueSizeTitle(run))}"` : ""}>${queued ? esc(queueSize(run)) : esc(fmtDur(runDuration(run)))}</span></div><div class="clip" title="${esc(queueDetail(run))}">${runMessageCell(run)}</div></div>`;
+    return `<div class="trow" data-run-id="${esc(run.ID)}"><div class="status-cell run-status">${statusIcon(status)}${pill(statusLabel(status), statusKind(status))}</div><div class="primary"><div class="repo-name">${esc(repoName(run.RepoID))} ${releaseBadge(run)}${scheduleBadge(run)}${group ? ` <span class="v4b dim" title="concurrency group">${esc(group)}</span>` : ""}</div><div class="branch">${esc(run.RefKind === "tag" ? "tag " : "")}${esc(run.Ref)}</div></div><div class="sha">${esc(shortSha(run.SHA))}</div><div class="clip" title="${esc(run.Actor)}">${esc(run.Actor || "--")}</div><div class="nowrap" title="${esc(fmtTime(runWhen(run)))}">${esc(runTimeLabel(run))}<br><span class="meta"${queued ? ` title="${esc(queueSizeTitle(run))}"` : ""}>${queued ? esc(queueSize(run)) : esc(fmtDur(runDuration(run)))}</span></div><div class="clip" title="${esc(queueDetail(run))}">${runMessageCell(run)}</div></div>`;
   }).join("")}</div>`;
 }
 async function renderRuns(seq) {
@@ -785,7 +786,7 @@ function summaryLines(detail) {
   const run = detail.Run || {}, steps = detail.Steps || [];
   const lines = [
     `$ oberth run ${repoName(run.RepoID)}/${run.Ref}`,
-    `run ${run.ID} status=${statusLabel(displayRunStatus(run))} sha=${shortSha(run.SHA)} trigger=${run.Trigger || "--"}`,
+    `run ${run.ID} status=${statusLabel(displayRunStatus(run))} sha=${shortSha(run.SHA)} trigger=${run.Trigger || "--"}${run.Trigger === "schedule" && run.ScheduleEntry ? " schedule=" + run.ScheduleEntry : ""}`,
     "",
   ];
   const passed = steps.filter(step => step.Status === "passed").length;
@@ -1094,7 +1095,7 @@ async function renderRunDetailView(detail, seq) {
         ${bigIcon(status)}
         <span class="rh-name"><span class="rp">${esc(repository)} /</span> ${esc(run.Ref)}</span>
         <span class="v4b ${kind === "pass" ? "pass" : kind === "fail" ? "fail" : kind === "run" ? "run" : "dim"}">${esc(phaseLabel)}</span>
-        ${releaseBadge(run)}
+        ${releaseBadge(run)}${scheduleBadge(run)}
         <div class="time"><span><b>${esc(fmtDur(seconds))}</b></span><span>${esc(ago(runWhen(run)))}</span><button class="v4back" data-action-back>‹ back</button></div>
       </div>
       <div class="rh2">

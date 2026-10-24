@@ -33,6 +33,36 @@ README's scheduler annotations).
 The file is read from the **default branch**, so changing a schedule is a
 commit and a review like any other change.
 
+## Selecting work by entry
+
+`{{workflow.parameters.oberth-schedule}}` contains the resolved entry name
+(`nightly` or `weekly-deps` above). For example:
+
+```yaml
+when: "'{{workflow.parameters.oberth-schedule}}' == 'weekly-deps'"
+```
+
+This is a reserved, server-owned workflow parameter. Reference it directly;
+do not declare it in `spec.arguments.parameters`, including a default or
+`valueFrom`. Such declarations are rejected at admission. Cron fires and
+`schedule_trigger` both persist the resolved name before queueing. Retries,
+reruns and restart recovery retain that original identity and commit, even
+if the schedule file is edited or its entry removed. Ordinary branch, tag
+and promotion runs receive an empty value when they reference the parameter,
+and otherwise omit it. No caller parameter can turn them into a named
+schedule run.
+
+Named entries on the same repository/branch/SHA remain distinct queued runs.
+A newer attempt supersedes only the same entry on the same branch; ordinary
+branch pushes and other entries are independent. The existing repository-busy
+cron rule still applies before entries are enqueued, and resource admission
+and declared concurrency groups still bound their execution.
+
+Run list/detail APIs expose `ScheduleEntry`; `status` and `wait` expose
+`schedule_entry`. The dashboard shows the name in the run stream and detail.
+Historical runs created before this feature retain an empty/unknown identity;
+it is never guessed from the current file.
+
 ## Times are UTC
 
 There is no timezone field, and one is refused rather than ignored. `0 3 * * *`

@@ -98,7 +98,7 @@ func TestManualTriggerUsesTheNormalEnqueuePathAsTheCaller(t *testing.T) {
 		t.Fatalf("enqueued %d runs", len(enqueuer.requests))
 	}
 	request := enqueuer.requests[0]
-	if request.Trigger != "schedule" || request.Actor != "admin@host" || request.Branch != "main" ||
+	if request.Trigger != "schedule" || request.ScheduleEntry != "nightly" || request.Actor != "admin@host" || request.Branch != "main" ||
 		request.SHA != "0123456789abcdef0123456789abcdef01234567" || request.EventID == "" || request.Repository.ID != repository.ID {
 		t.Fatalf("request = %+v", request)
 	}

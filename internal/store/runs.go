@@ -19,7 +19,7 @@ const runColumns = `
 queue_sequence, COALESCE(admission_sequence, queue_sequence), id, repo_id, ref_kind, ref, sha, actor, release, credentialed, trigger,
 phase, job_name, tested_sha, base_sha, failed_burn, failed_step, error,
 status, reason, superseded_by, queued_at, started_at, finished_at, created_at, updated_at,
-concurrency_group`
+concurrency_group, schedule_entry`
 
 // ErrRunCursorNotFound lets clients restart paging without exposing a missing run ID.
 var ErrRunCursorNotFound = fmt.Errorf("%w: cursor run no longer retained; restart from the first page", ErrNotFound)
@@ -149,8 +149,8 @@ func (s *Store) requeueStrandedRunTx(ctx context.Context, tx *sql.Tx, run model.
 	var activeSiblings int
 	if err := tx.QueryRowContext(ctx, `
 SELECT COUNT(*) FROM runs
-WHERE repo_id = ? AND ref_kind = 'branch' AND ref = ? AND id != ?
-  AND status IN ('queued', 'running')`, run.RepoID, run.Ref, run.ID).Scan(&activeSiblings); err != nil {
+WHERE repo_id = ? AND ref_kind = 'branch' AND ref = ? AND id != ? AND schedule_entry = ?
+  AND status IN ('queued', 'running')`, run.RepoID, run.Ref, run.ID, run.ScheduleEntry).Scan(&activeSiblings); err != nil {
 		return model.Run{}, fmt.Errorf("check active branch siblings: %w", err)
 	}
 	if activeSiblings > 0 {
@@ -161,7 +161,7 @@ WHERE repo_id = ? AND ref_kind = 'branch' AND ref = ? AND id != ?
 	spec, err := validateRunSpec(model.RunSpec{
 		RepoID: run.RepoID, RefKind: run.RefKind, Ref: run.Ref, SHA: run.SHA,
 		Actor: run.Actor, Release: run.Release, Credentialed: false,
-		Trigger: run.Trigger, TestedSHA: run.TestedSHA, BaseSHA: run.BaseSHA,
+		Trigger: run.Trigger, ScheduleEntry: run.ScheduleEntry, TestedSHA: run.TestedSHA, BaseSHA: run.BaseSHA,
 	})
 	if err != nil {
 		return model.Run{}, err
@@ -185,6 +185,10 @@ func validateRunSpec(spec model.RunSpec) (model.RunSpec, error) {
 		!validOID(spec.SHA) || strings.TrimSpace(spec.Actor) == "" || strings.TrimSpace(spec.Trigger) == "" {
 		return model.RunSpec{}, fmt.Errorf("%w: run fields are invalid", ErrInvalid)
 	}
+	if len(spec.ScheduleEntry) > 64 || strings.TrimSpace(spec.ScheduleEntry) != spec.ScheduleEntry ||
+		(spec.ScheduleEntry != "" && (spec.Trigger != "schedule" || spec.RefKind != model.RefBranch || spec.Release)) {
+		return model.RunSpec{}, fmt.Errorf("%w: schedule entry requires a scheduled branch run and at most 64 bytes", ErrInvalid)
+	}
 	if spec.TestedSHA == "" {
 		spec.TestedSHA = spec.SHA
 	}
@@ -199,7 +203,9 @@ func (s *Store) enqueueRunTx(ctx context.Context, tx *sql.Tx, spec model.RunSpec
 		return model.EnqueueRunResult{}, err
 	}
 	var cancellations []model.RunCancellation
-	// Only ordinary branch-push runs supersede one another. Promotion CI uses a
+	// Supersession stays inside a branch and its schedule entry. Named
+	// schedules are independent of other entries and ordinary branch pushes.
+	// Promotion CI uses a
 	// synthetic branch-shaped ref, but it is an independent immutable attempt
 	// and must neither supersede nor be superseded by a client push. A pending
 	// publication also owns its run until the external mutation terminalizes;
@@ -207,14 +213,14 @@ func (s *Store) enqueueRunTx(ctx context.Context, tx *sql.Tx, spec model.RunSpec
 	if spec.RefKind == model.RefBranch && spec.Trigger != "promotion" {
 		rows, err := tx.QueryContext(ctx, `
 SELECT id, job_name FROM runs
-WHERE repo_id = ? AND ref_kind = 'branch' AND ref = ?
+WHERE repo_id = ? AND ref_kind = 'branch' AND ref = ? AND schedule_entry = ?
   AND trigger != 'promotion'
   AND NOT EXISTS (
       SELECT 1 FROM publications
       WHERE publications.run_id = runs.id AND publications.status = 'pending'
   )
   AND status IN ('queued', 'running') AND (status = 'running' OR job_name != '')
-ORDER BY queue_sequence`, spec.RepoID, spec.Ref)
+ORDER BY queue_sequence`, spec.RepoID, spec.Ref, spec.ScheduleEntry)
 		if err != nil {
 			return model.EnqueueRunResult{}, fmt.Errorf("find running superseded runs: %w", err)
 		}
@@ -241,12 +247,12 @@ ORDER BY queue_sequence`, spec.RepoID, spec.Ref)
 	row := tx.QueryRowContext(ctx, `
 INSERT INTO runs(
     id, repo_id, ref_kind, ref, sha, actor, release, credentialed, trigger, phase,
-    tested_sha, base_sha, status, queued_at, created_at, updated_at
+    tested_sha, base_sha, schedule_entry, status, queued_at, created_at, updated_at
 )
-VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?, 'queued', ?, ?, ?)
+VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, 'queued', ?, ?, ?)
 RETURNING `+runColumns,
 		id, spec.RepoID, spec.RefKind, spec.Ref, spec.SHA, spec.Actor, spec.Release,
-		spec.Credentialed, spec.Trigger, spec.TestedSHA, spec.BaseSHA, now, now, now)
+		spec.Credentialed, spec.Trigger, spec.TestedSHA, spec.BaseSHA, spec.ScheduleEntry, now, now, now)
 	value, err := scanRun(row)
 	if err != nil {
 		return model.EnqueueRunResult{}, fmt.Errorf("insert run: %w", err)
@@ -267,14 +273,14 @@ RETURNING `+runColumns,
 UPDATE runs
 SET status = 'interrupted', phase = 'interrupted', reason = ?, superseded_by = ?,
     finished_at = ?, updated_at = ?
-WHERE id != ? AND repo_id = ? AND ref_kind = 'branch' AND ref = ?
+WHERE id != ? AND repo_id = ? AND ref_kind = 'branch' AND ref = ? AND schedule_entry = ?
   AND trigger != 'promotion'
   AND NOT EXISTS (
       SELECT 1 FROM publications
       WHERE publications.run_id = runs.id AND publications.status = 'pending'
   )
   AND status IN ('queued', 'running')`,
-			"superseded by newer run", id, now, now, id, spec.RepoID, spec.Ref); err != nil {
+			"superseded by newer run", id, now, now, id, spec.RepoID, spec.Ref, spec.ScheduleEntry); err != nil {
 			return model.EnqueueRunResult{}, fmt.Errorf("supersede earlier runs: %w", err)
 		}
 		for _, cancellation := range cancellations {
@@ -1225,7 +1231,7 @@ func scanRun(row rowScanner, extra ...any) (model.Run, error) {
 		&value.SHA, &value.Actor, &release, &credentialed, &value.Trigger, &value.Phase, &value.JobName,
 		&value.TestedSHA, &value.BaseSHA, &value.FailedBurn, &value.FailedStep, &value.Error,
 		&value.Status, &value.Reason, &value.SupersededBy, &queued, &started, &finished,
-		&created, &updated, &value.ConcurrencyGroup,
+		&created, &updated, &value.ConcurrencyGroup, &value.ScheduleEntry,
 	}
 	if err := row.Scan(append(dest, extra...)...); err != nil {
 		return model.Run{}, err

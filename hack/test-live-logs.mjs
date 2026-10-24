@@ -205,4 +205,16 @@ run(`
 await run('awaitResult');
 assert.ok(run('renderedHTML').includes('fixture log'), 'a queued pod can emit before Argo publishes Running');
 
+// Schedule entries distinguish otherwise identical runs and remain escaped.
+run(`const scheduleRun = {ID:'scroll-run', RepoID:1, Status:'passed', Ref:'main', Trigger:'schedule', ScheduleEntry:'nightly<unsafe>'};`);
+html = run(`runsTable([scheduleRun, {...scheduleRun, ID:'weekly-run', ScheduleEntry:'weekly-sweep'}])`);
+assert.ok(html.includes('nightly&lt;unsafe&gt;') && html.includes('weekly-sweep'));
+assert.ok(!html.includes('nightly<unsafe>'));
+assert.equal(run(`scheduleBadge({...scheduleRun, Trigger:'branch'})`), '');
+assert.equal(run(`scheduleBadge({...scheduleRun, ScheduleEntry:''})`), '');
+run(`state.step='__summary__'; termReads=0; stepReads=0; awaitResult=renderRunDetailView({Run:scheduleRun,Steps:[]},0);`);
+await run('awaitResult');
+assert.ok(run('renderedHTML').includes('title="schedule entry">nightly&lt;unsafe&gt;'));
+assert.ok(run(`summaryLines({Run:scheduleRun,Steps:[]}).join(' ')`).includes('schedule=nightly<unsafe>'));
+
 console.log('live log dashboard checks passed');

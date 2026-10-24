@@ -34,8 +34,8 @@ func (s *Store) RetryRun(ctx context.Context, runID, actor string) (model.Enqueu
 		return model.EnqueueRunResult{}, err
 	}
 	var newestID string
-	if err := tx.QueryRowContext(ctx, `SELECT id FROM runs WHERE repo_id = ? AND ref_kind = ? AND ref = ?
-		ORDER BY queue_sequence DESC LIMIT 1`, previous.RepoID, previous.RefKind, previous.Ref).Scan(&newestID); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT id FROM runs WHERE repo_id = ? AND ref_kind = ? AND ref = ? AND schedule_entry = ?
+		ORDER BY queue_sequence DESC LIMIT 1`, previous.RepoID, previous.RefKind, previous.Ref, previous.ScheduleEntry).Scan(&newestID); err != nil {
 		return model.EnqueueRunResult{}, fmt.Errorf("check latest branch run: %w", err)
 	}
 	if newestID != previous.ID {
@@ -48,15 +48,15 @@ func (s *Store) RetryRun(ctx context.Context, runID, actor string) (model.Enqueu
 		return model.EnqueueRunResult{}, fmt.Errorf("%w: retry requires an interrupted or infrastructure-failed branch run", ErrInvalidState)
 	}
 	var active int
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM runs WHERE repo_id = ? AND ref_kind = 'branch' AND ref = ?
-		AND status IN ('queued', 'running')`, previous.RepoID, previous.Ref).Scan(&active); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM runs WHERE repo_id = ? AND ref_kind = 'branch' AND ref = ? AND schedule_entry = ?
+		AND status IN ('queued', 'running')`, previous.RepoID, previous.Ref, previous.ScheduleEntry).Scan(&active); err != nil {
 		return model.EnqueueRunResult{}, fmt.Errorf("check active branch runs: %w", err)
 	}
 	if active != 0 {
 		return model.EnqueueRunResult{}, fmt.Errorf("%w: branch already has an active run", ErrInvalidState)
 	}
 	spec, err := validateRunSpec(model.RunSpec{RepoID: previous.RepoID, RefKind: previous.RefKind,
-		Ref: previous.Ref, SHA: previous.SHA, Actor: actor, Trigger: previous.Trigger,
+		Ref: previous.Ref, SHA: previous.SHA, Actor: actor, Trigger: previous.Trigger, ScheduleEntry: previous.ScheduleEntry,
 		TestedSHA: previous.TestedSHA, BaseSHA: previous.BaseSHA})
 	if err != nil {
 		return model.EnqueueRunResult{}, err

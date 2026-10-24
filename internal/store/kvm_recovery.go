@@ -112,7 +112,7 @@ func (s *Store) kvmRetryAllowedTx(ctx context.Context, tx *sql.Tx, run model.Run
 	var siblings int
 	// A newer terminal push must not be replaced either. Operator-created manual
 	// attempts have their own admission order; automatic recovery keeps this one.
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM runs WHERE repo_id=? AND ref_kind=? AND ref=? AND id!=? AND (status IN ('queued','running') OR queue_sequence>?)`, run.RepoID, run.RefKind, run.Ref, run.ID, run.QueueSequence).Scan(&siblings); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM runs WHERE repo_id=? AND ref_kind=? AND ref=? AND id!=? AND schedule_entry=? AND (status IN ('queued','running') OR queue_sequence>?)`, run.RepoID, run.RefKind, run.Ref, run.ID, run.ScheduleEntry, run.QueueSequence).Scan(&siblings); err != nil {
 		return err
 	}
 	if siblings != 0 {
@@ -146,7 +146,7 @@ func preflightPromotionSpec(p model.Promotion) model.PromotionSpec {
 }
 
 func (s *Store) enqueueKVMRetryTx(ctx context.Context, tx *sql.Tx, run model.Run, now int64) (model.Run, error) {
-	spec, err := validateRunSpec(model.RunSpec{RepoID: run.RepoID, RefKind: run.RefKind, Ref: run.Ref, SHA: run.SHA, Actor: run.Actor, Release: run.Release, Credentialed: run.Release && run.Credentialed, Trigger: run.Trigger, TestedSHA: run.TestedSHA, BaseSHA: run.BaseSHA})
+	spec, err := validateRunSpec(model.RunSpec{RepoID: run.RepoID, RefKind: run.RefKind, Ref: run.Ref, SHA: run.SHA, Actor: run.Actor, Release: run.Release, Credentialed: run.Release && run.Credentialed, Trigger: run.Trigger, ScheduleEntry: run.ScheduleEntry, TestedSHA: run.TestedSHA, BaseSHA: run.BaseSHA})
 	if err != nil {
 		return model.Run{}, err
 	}

@@ -136,6 +136,7 @@ type Run struct {
 	Release       bool
 	Credentialed  bool
 	Trigger       string
+	ScheduleEntry string `json:",omitempty"`
 	Phase         string
 	JobName       string
 	TestedSHA     string
@@ -159,16 +160,17 @@ type Run struct {
 }
 
 type RunSpec struct {
-	RepoID       int64
-	RefKind      RefKind
-	Ref          string
-	SHA          string
-	Actor        string
-	Release      bool
-	Credentialed bool
-	Trigger      string
-	TestedSHA    string
-	BaseSHA      string
+	RepoID        int64
+	RefKind       RefKind
+	Ref           string
+	SHA           string
+	Actor         string
+	Release       bool
+	Credentialed  bool
+	Trigger       string
+	ScheduleEntry string
+	TestedSHA     string
+	BaseSHA       string
 }
 
 type RunResult struct {

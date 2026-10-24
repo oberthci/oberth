@@ -192,7 +192,7 @@ func (schedules *Schedules) fire(
 ) {
 	branch, target, err := schedules.entryTarget(ctx, qualifiedName, entry, sha, defaultBranch)
 	if err == nil {
-		_, err = schedules.enqueue(ctx, repository, branch, target, ScheduleActor)
+		_, err = schedules.enqueue(ctx, repository, branch, target, entry.Name, ScheduleActor)
 	}
 	if err != nil {
 		schedules.record(ctx, qualifiedName, entry.Name, now, "failed")
@@ -217,14 +217,15 @@ func (schedules *Schedules) entryTarget(ctx context.Context, qualifiedName strin
 
 // enqueue is the single admission path of a scheduled run, shared by cron
 // fires and manual triggers: EnqueueCI with trigger "schedule".
-func (schedules *Schedules) enqueue(ctx context.Context, repository model.Repository, branch, sha, actor string) (model.EnqueueRunResult, error) {
+func (schedules *Schedules) enqueue(ctx context.Context, repository model.Repository, branch, sha, entry, actor string) (model.EnqueueRunResult, error) {
 	return schedules.config.Enqueuer.EnqueueCI(ctx, service.CIRequest{
-		EventID:    scheduleEventID(),
-		Repository: repository,
-		Branch:     branch,
-		SHA:        sha,
-		Actor:      actor,
-		Trigger:    "schedule",
+		EventID:       scheduleEventID(),
+		Repository:    repository,
+		Branch:        branch,
+		SHA:           sha,
+		Actor:         actor,
+		Trigger:       "schedule",
+		ScheduleEntry: entry,
 	})
 }
 

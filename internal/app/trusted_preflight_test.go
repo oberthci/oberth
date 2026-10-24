@@ -185,7 +185,7 @@ func TestTrustedPreflightAdapterLifecycle(t *testing.T) {
 				t.Fatal(err)
 			}
 			sha := strings.Repeat("a", 40)
-			if _, err = database.EnqueueRun(ctx, model.RunSpec{RepoID: repo.ID, RefKind: model.RefBranch, Ref: "feature", SHA: sha, TestedSHA: sha, Actor: "agent", Trigger: "branch"}); err != nil {
+			if _, err = database.EnqueueRun(ctx, model.RunSpec{RepoID: repo.ID, RefKind: model.RefBranch, Ref: "feature", SHA: sha, TestedSHA: sha, Actor: "agent", Trigger: "schedule", ScheduleEntry: "nightly"}); err != nil {
 				t.Fatal(err)
 			}
 			run, err := database.ClaimNextRun(ctx)
@@ -234,6 +234,9 @@ func TestTrustedPreflightAdapterLifecycle(t *testing.T) {
 					t.Fatalf("revoked guest preflight reserved capacity: %v", getErr)
 				}
 				return
+			}
+			if controller.request.ScheduleEntry != "nightly" {
+				t.Fatalf("preflight lost durable entry: %+v", controller.request)
 			}
 			if scenario == "guest granted" {
 				budget := controller.request.KubeVirtBudget
@@ -290,7 +293,7 @@ func TestTrustedPreflightAdapterLifecycle(t *testing.T) {
 							t.Fatalf("recover granted guest preflight: %v %v", ids, recoverErr)
 						}
 						observed := controller.observed
-						if !observed.KubeVirtGranted || observed.KubeVirtBudget.String() != argoworkflow.VMIBudgetLimit().String() {
+						if observed.ScheduleEntry != "nightly" || !observed.KubeVirtGranted || observed.KubeVirtBudget.String() != argoworkflow.VMIBudgetLimit().String() {
 							t.Fatalf("recovery observed with budget %v granted=%v", observed.KubeVirtBudget, observed.KubeVirtGranted)
 						}
 						state, recoverErr = database.KVMPreflight(ctx, run.ID)

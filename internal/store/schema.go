@@ -15,7 +15,7 @@ func LatestMigrationVersion() int { return latestMigrationVersion }
 const (
 	admissionSequenceMigrationVersion = 28
 	repositoryArchiveMigrationVersion = 29
-	latestMigrationVersion            = runTimingMigrationVersion
+	latestMigrationVersion            = scheduleEntryMigrationVersion
 	// oberthSchemaIdentity is the fresh-deployment default. Existing deployments
 	// supply their original immutable identity through ProtocolConfig; bootstrap
 	// SQL and legacy schema validation use that exact configured operand.
@@ -1130,4 +1130,5 @@ CREATE INDEX runs_admission_idx ON runs(status, admission_sequence, queue_sequen
     ON audit_actions(resource_id, id DESC)
     WHERE resource_type = 'repository' AND action IN ('repository.archive', 'repository.unarchive');`},
 	{version: runTimingMigrationVersion, sql: runTimingSchema},
+	{version: scheduleEntryMigrationVersion, sql: scheduleEntrySchema},
 }

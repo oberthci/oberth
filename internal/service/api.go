@@ -1234,6 +1234,7 @@ func (service *API) statusForRun(ctx context.Context, repository model.Repositor
 		DisplayStatus:    presented.DisplayStatus,
 		DisplayReason:    presented.DisplayReason,
 		ConcurrencyGroup: run.ConcurrencyGroup,
+		ScheduleEntry:    run.ScheduleEntry,
 	}
 	if service.history != nil {
 		steps, err := service.stepsForRun(ctx, run)
@@ -1352,6 +1353,7 @@ func (service *API) statusFromRun(ctx context.Context, repository model.Reposito
 		SHA: run.SHA, RunID: run.ID, Status: wireRunStatus(visibleRun(run).Status), Burns: map[string]string{},
 		DisplayStatus: presented.DisplayStatus,
 		DisplayReason: presented.DisplayReason,
+		ScheduleEntry: run.ScheduleEntry,
 	}
 	if service.history != nil {
 		var err error

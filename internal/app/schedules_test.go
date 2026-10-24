@@ -120,7 +120,7 @@ func TestATickEnqueuesADueScheduleAsAServerActor(t *testing.T) {
 		t.Fatalf("enqueued %d runs, want 1", len(enqueuer.requests))
 	}
 	request := enqueuer.requests[0]
-	if request.Trigger != "schedule" {
+	if request.Trigger != "schedule" || request.ScheduleEntry != "nightly" {
 		t.Fatalf("trigger = %q, want schedule", request.Trigger)
 	}
 	if request.Actor == "" {

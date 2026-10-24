@@ -374,7 +374,7 @@ func (jobs *ArgoJobs) create(ctx context.Context, request service.JobRequest, tr
 	submission := argojob.Request{
 		RunID: request.Run.ID, Name: request.JobName,
 		Repo: request.Repository.Name, UpstreamName: request.UpstreamName, UpstreamOrg: request.UpstreamOrg,
-		Ref: request.Run.Ref, SHA: testedSHA, Trigger: trigger, RunTrigger: kind, Source: source,
+		Ref: request.Run.Ref, SHA: testedSHA, Trigger: trigger, RunTrigger: kind, ScheduleEntry: request.Run.ScheduleEntry, Source: source,
 		SourceDir: request.SourceDir, ApprovedSecrets: approvedSecrets,
 		StepGrants: stepGrants,
 		Fragments:  fragments,
@@ -622,7 +622,7 @@ func (jobs *ArgoJobs) Adopt(ctx context.Context, run model.Run) (periapsis.Size,
 	}
 	binding, found, err := controller.Adopt(ctx, argojob.AdoptionRequest{
 		Name: run.JobName, RunID: run.ID, Ref: run.Ref, SHA: sha,
-		Group: run.ConcurrencyGroup, Trigger: trigger, RunTrigger: kind,
+		Group: run.ConcurrencyGroup, Trigger: trigger, RunTrigger: kind, ScheduleEntry: run.ScheduleEntry,
 	})
 	if errors.Is(err, argojob.ErrAdoptionRefused) {
 		return "", false, fmt.Errorf("%w: %w", service.ErrAdoptionRefused, err)

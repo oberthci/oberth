@@ -123,6 +123,7 @@ func Admit(workflow *wfv1.Workflow, policy Policy) error {
 		problems = append(problems, err)
 	}
 	problems = append(problems, admitTriggerParameter(&workflow.Spec)...)
+	problems = append(problems, admitScheduleParameter(&workflow.Spec)...)
 	if _, err := TrustedTestsEntrypoint(workflow); err != nil {
 		problems = append(problems, err)
 	}

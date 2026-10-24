@@ -95,7 +95,7 @@ func (p *TrustedPreflights) request(job service.JobRequest, intent vmrunner.KVMI
 	if err != nil {
 		return argojob.Request{}, err
 	}
-	return argojob.Request{RunID: job.Run.ID, Name: intent.WorkflowName, Repo: job.Repository.Name, UpstreamName: job.UpstreamName, UpstreamOrg: job.UpstreamOrg, Ref: job.Run.Ref, SHA: intent.CandidateSHA, Trigger: periapsis.TriggerCI, RunTrigger: kind, Source: source, SourceDir: job.SourceDir, ApprovedSecrets: map[string]bool{}, StepGrants: map[string]map[string]bool{}, TrustedKVM: &intent}, nil
+	return argojob.Request{RunID: job.Run.ID, Name: intent.WorkflowName, Repo: job.Repository.Name, UpstreamName: job.UpstreamName, UpstreamOrg: job.UpstreamOrg, Ref: job.Run.Ref, SHA: intent.CandidateSHA, Trigger: periapsis.TriggerCI, RunTrigger: kind, ScheduleEntry: job.Run.ScheduleEntry, Source: source, SourceDir: job.SourceDir, ApprovedSecrets: map[string]bool{}, StepGrants: map[string]map[string]bool{}, TrustedKVM: &intent}, nil
 }
 
 func (p *TrustedPreflights) Execute(ctx context.Context, job service.JobRequest, requirement vmrunner.Requirement, output io.Writer) (retErr error) {

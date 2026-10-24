@@ -26,7 +26,8 @@ type blockingController struct {
 	cancelled []string // names passed to Cancel
 	created   []string // names returned from Create
 	// runTriggers records the run trigger each Create was asked to stamp.
-	runTriggers map[string]argoworkflow.RunTrigger
+	runTriggers     map[string]argoworkflow.RunTrigger
+	scheduleEntries map[string]string
 
 	// Per-call channels, keyed by name. If a name has no entry, Create
 	// returns immediately.
@@ -64,6 +65,10 @@ func (c *blockingController) Create(_ context.Context, req argojob.Request) (str
 		c.runTriggers = map[string]argoworkflow.RunTrigger{}
 	}
 	c.runTriggers[req.Name] = req.RunTrigger
+	if c.scheduleEntries == nil {
+		c.scheduleEntries = map[string]string{}
+	}
+	c.scheduleEntries[req.Name] = req.ScheduleEntry
 	c.mu.Unlock()
 	return req.Name, nil
 }

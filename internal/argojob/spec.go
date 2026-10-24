@@ -563,7 +563,8 @@ type Request struct {
 	// schedule, tag). Build writes it into the server-owned oberth-trigger
 	// workflow parameter. Empty derives it from Trigger (tag for release,
 	// branch for CI); production callers always set it from the run record.
-	RunTrigger argoworkflow.RunTrigger
+	RunTrigger    argoworkflow.RunTrigger
+	ScheduleEntry string
 	// Source is the exact bytes of the repository's pipeline document for
 	// this trigger, read from the immutable run workspace.
 	Source []byte
@@ -813,6 +814,9 @@ func Build(config Config, request Request) (*wfv1.Workflow, error) {
 	// Stamp before wrapping so producer inputs cannot inherit a stale
 	// document default instead of the durable run's trigger.
 	if err := argoworkflow.SetTriggerParameter(workflow, request.effectiveRunTrigger()); err != nil {
+		return nil, err
+	}
+	if err := argoworkflow.SetScheduleParameter(workflow, request.effectiveRunTrigger(), request.ScheduleEntry); err != nil {
 		return nil, err
 	}
 	if request.TrustedKVM != nil {
@@ -2246,6 +2250,9 @@ func overrideEnvironment(existing []corev1.EnvVar, injected []corev1.EnvVar) []c
 
 func (request Request) validate() error {
 	var problems []error
+	if err := argoworkflow.ValidateScheduleEntry(request.effectiveRunTrigger(), request.ScheduleEntry); err != nil {
+		problems = append(problems, err)
+	}
 	if strings.TrimSpace(request.RunID) == "" {
 		problems = append(problems, errors.New("argojob: run ID is required"))
 	}

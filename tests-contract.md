@@ -1,3 +1,13 @@
+Schedule entry identity: `TestScheduleEntryCronAndManualKeepTheSameResolvedIdentity`
+compares cron and manual enqueue on one SHA and preserves a plan after file edits.
+`TestScheduleEntriesAreIndependentAndSurviveRetryRecovery` uses SQLite to prove
+entry isolation, immutable identity, retry/rerun and stranded-run preservation;
+`TestScheduleEntryMigrationPreservesLegacyIdentityAcrossReopen` upgrades an old
+schema without inventing historical names. Schedule-entry service/API tests,
+CreateCI/adoption and trusted-preflight adapter tests cover durable forwarding.
+Workflow builder/admission tests reject repository defaults and non-schedule
+forgery, distinguish two entries, and refuse mismatched restart adoption.
+
 Release chart digest #1181: `TestReleaseChartPackagesPublishedImageDigest`
 runs image publication and chart packaging with real Helm, then checks the
 archive's default `image.ref`, rendered digest and unchanged source values.

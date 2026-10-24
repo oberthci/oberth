@@ -128,8 +128,14 @@ func TestCreateCIStampsTheRunsOwnTrigger(t *testing.T) {
 	for name, trigger := range map[string]string{"wf-branch": "branch", "wf-promotion": "promotion", "wf-schedule": "schedule"} {
 		request := fixture.request(name, "run-"+name)
 		request.Run.Trigger = trigger
+		if trigger == "schedule" {
+			request.Run.ScheduleEntry = "weekly-sweep"
+		}
 		if err := fixture.jobs.CreateCI(context.Background(), request); err != nil {
 			t.Fatalf("CreateCI %s: %v", trigger, err)
+		}
+		if got := fixture.controller.scheduleEntries[name]; got != request.Run.ScheduleEntry {
+			t.Fatalf("%s run submitted entry %q, want %q", trigger, got, request.Run.ScheduleEntry)
 		}
 		if got := fixture.controller.runTriggers[name]; string(got) != trigger {
 			t.Fatalf("%s run submitted RunTrigger %q", trigger, got)

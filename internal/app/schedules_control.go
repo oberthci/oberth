@@ -130,5 +130,5 @@ func (schedules *Schedules) EnqueueSchedule(ctx context.Context, plan service.Sc
 	if schedules.config.Enqueuer == nil {
 		return model.EnqueueRunResult{}, errors.New("schedule enqueue is unavailable")
 	}
-	return schedules.enqueue(ctx, plan.Repository, plan.Branch, plan.SHA, actor)
+	return schedules.enqueue(ctx, plan.Repository, plan.Branch, plan.SHA, plan.Entry, actor)
 }
