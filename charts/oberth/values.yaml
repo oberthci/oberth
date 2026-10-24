@@ -30,6 +30,7 @@ maxConcurrentJobs: 3
 
 # Per-client API limits with headroom for eight concurrent jobs and trusted
 # preflight pod polling. Admission retries read failures without exiting.
+# Either key may be set independently; omitted qps/burst default to 50/100.
 kubernetesClient:
   qps: 50
   burst: 100

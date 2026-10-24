@@ -813,3 +813,27 @@ grep -Fq 'releaseWIF entry for archived repository github/org/retired must be re
 render --set-json 'archivedRepositories=["github/org/other"]' --set-json "argo.releaseWIF=$archive_wif" >"$manifest"
 render --set-json 'archivedRepositories=["github/org/retired"]' >"$manifest"
 render --set archivedRepositories=null >"$manifest"
+
+# A reused pre-limit values file may have neither default. Validate partial
+# objects against the schema without Helm merging today's sibling defaults.
+partial_client_chart=$package_dir/partial-client-chart
+mkdir "$partial_client_chart"
+cp -R -- "$chart"/. "$partial_client_chart"
+chmod -R u+w -- "$partial_client_chart"
+awk '/^kubernetesClient:/ { skip=1; next } skip && /^[^ #]/ { skip=0 } !skip { print }' \
+  "$chart/values.yaml" >"$partial_client_chart/values.yaml"
+helm template oberth "$partial_client_chart" --set "image.ref=$server_image" \
+  --set kubernetesClient.qps=75 >"$manifest"
+grep -Fq -- '--kubernetes-client-qps=75' "$manifest"
+grep -Fq -- '--kubernetes-client-burst=100' "$manifest"
+helm template oberth "$partial_client_chart" --set "image.ref=$server_image" \
+  --set kubernetesClient.burst=125 >"$manifest"
+grep -Fq -- '--kubernetes-client-qps=50' "$manifest"
+grep -Fq -- '--kubernetes-client-burst=125' "$manifest"
+for invalid in kubernetesClient.qps=0 kubernetesClient.qps=-1 kubernetesClient.burst=0 kubernetesClient.burst=1.5 kubernetesClient.unknown=1; do
+  if helm template oberth "$partial_client_chart" --set "image.ref=$server_image" \
+    --set "$invalid" >"$manifest" 2>&1; then
+    echo "invalid Kubernetes client limit accepted: $invalid" >&2
+    exit 1
+  fi
+done
