@@ -1,6 +1,6 @@
 package store
 
-// Provisional next migration; allocate/renumber in merge order before release.
+// Migration v31: immutable runs.schedule_entry.
 const scheduleEntryMigrationVersion = 31
 const scheduleEntrySchema = `
 ALTER TABLE runs ADD COLUMN schedule_entry TEXT NOT NULL DEFAULT ''

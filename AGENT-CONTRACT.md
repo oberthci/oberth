@@ -351,7 +351,7 @@ continuity checks; it must never be used to reset or bypass those checks.
   A server that predates the annotation ignores it and uses `oberth.ci/size`,
   so a document keeps `oberth.ci/size` as its conservative fallback.
 - A named scheduled run durably records its resolved schedule entry in
-  `runs.schedule_entry` (v31, provisional merge allocation). Cron and manual
+  `runs.schedule_entry` (v31). Cron and manual
   schedule triggers share that identity. Retry, rerun, trusted-preflight
   replacement, stranded-run requeue and Workflow adoption retain it. Legacy
   rows stay empty; no current file is used to guess their entry. Non-schedule
@@ -2255,7 +2255,7 @@ alone is never evidence that missing migrations ran.
 | v28 | Unreleased (#1092) | Backfilled run admission_sequence retains FIFO order across restart re-fires; queue_sequence remains the history cursor | Database restore |
 | v29 | Unreleased (#1102) | Partial index on audit_actions (repository_archive_actions_idx) for the repository archive/unarchive projection | Database restore |
 | v30 | Unreleased (#1128) | Versioned immutable run milestones, admission episodes, expanded task identity and bounded step timing | Database restore |
-| v31 | Unreleased (schedule entry identity; provisional merge allocation) | runs: immutable schedule_entry, empty for legacy rows; named schedule queue isolation | Database restore |
+| v31 | Unreleased (schedule entry identity) | runs: immutable schedule_entry, empty for legacy rows; named schedule queue isolation | Database restore |
 
 **Contract test:** `TestEveryMigrationDocumentedInAgentContract` asserts that
 every migration version in `internal/store/schema.go` has a corresponding
