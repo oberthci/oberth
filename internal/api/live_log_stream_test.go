@@ -3,7 +3,9 @@ package api
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -313,4 +315,102 @@ func TestLiveLogStreamValidCredentialRemainsOpen(t *testing.T) {
 			t.Fatalf("auth=%d body=%s", calls, response.Body.String())
 		}
 	})
+}
+
+// Go-only CI counterpart to the browser suite's dropped-stream fallback and
+// terminal-tail cases. Exercise real authenticated HTTP, not a frame mock.
+func TestLiveLogStreamDroppedConnectionResumesExactCursor(t *testing.T) {
+	for _, transport := range []string{"poll", "stream"} {
+		t.Run(transport, func(t *testing.T) {
+			first, tail := "first 🚀\n", "unterminated final 🚀"
+			var resumed atomic.Bool
+			backend := &liveStreamBackend{read: func(_ context.Context, actor Actor, id string, offset int64) (any, error) {
+				if actor.Identity != "agent@host" || id != "run-1" {
+					return nil, errors.New("unexpected authorization or run")
+				}
+				switch {
+				case offset == -1:
+					return LiveLogResponse{RunID: id, Chunk: first, Offset: int64(len(first)), Size: int64(len(first))}, nil
+				case offset != int64(len(first)):
+					return nil, errors.New("unexpected continuation cursor")
+				case !resumed.Load():
+					return LiveLogResponse{RunID: id, Offset: offset, Size: offset}, nil
+				default:
+					return LiveLogResponse{RunID: id, Chunk: tail, Offset: offset + int64(len(tail)), Size: offset + int64(len(tail)), Done: true}, nil
+				}
+			}}
+			server, err := New(backend, backend, backend, "test")
+			if err != nil {
+				t.Fatal(err)
+			}
+			httpServer := httptest.NewServer(server.Handler())
+			defer httpServer.Close()
+			ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+			defer cancel()
+			streamCtx, drop := context.WithCancel(ctx)
+			defer drop()
+			get := func(ctx context.Context, path string) *http.Response {
+				t.Helper()
+				request, err := http.NewRequestWithContext(ctx, http.MethodGet, httpServer.URL+path, nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				request.Header.Set("Authorization", "Bearer valid-token")
+				response, err := http.DefaultClient.Do(request)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if response.StatusCode != http.StatusOK {
+					response.Body.Close()
+					t.Fatalf("HTTP %d", response.StatusCode)
+				}
+				return response
+			}
+			readChunk := func(reader io.Reader) LiveLogResponse {
+				t.Helper()
+				scanner := bufio.NewScanner(reader)
+				event := ""
+				for scanner.Scan() {
+					line := scanner.Text()
+					if strings.HasPrefix(line, "event: ") {
+						event = strings.TrimPrefix(line, "event: ")
+					}
+					if event == "chunk" && strings.HasPrefix(line, "data: ") {
+						var chunk LiveLogResponse
+						if err := json.Unmarshal([]byte(strings.TrimPrefix(line, "data: ")), &chunk); err != nil {
+							t.Fatal(err)
+						}
+						return chunk
+					}
+				}
+				t.Fatalf("missing chunk: %v", scanner.Err())
+				return LiveLogResponse{}
+			}
+			response := get(streamCtx, "/api/runs/run-1/livelog/stream")
+			initial := readChunk(response.Body)
+			drop()
+			response.Body.Close()
+			if initial.Chunk != first || initial.Done {
+				t.Fatalf("initial: %+v", initial)
+			}
+			resumed.Store(true)
+			path := fmt.Sprintf("/api/runs/run-1/livelog?offset=%d", initial.Offset)
+			if transport == "stream" {
+				path = fmt.Sprintf("/api/runs/run-1/livelog/stream?offset=%d", initial.Offset)
+			}
+			response = get(ctx, path)
+			defer response.Body.Close()
+			var final LiveLogResponse
+			if transport == "poll" {
+				if err := json.NewDecoder(response.Body).Decode(&final); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				final = readChunk(response.Body)
+			}
+			if final.Chunk != tail || !final.Done || final.Offset != int64(len(first)+len(tail)) || final.Offset != final.Size {
+				t.Fatalf("resumed: %+v", final)
+			}
+		})
+	}
 }

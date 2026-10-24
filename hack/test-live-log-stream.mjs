@@ -1,4 +1,4 @@
-// Optional browser regression: PLAYWRIGHT_MODULE=/path/to/playwright/index.mjs
+// Optional browser regression (CI fallback: docs/live-log-testing.md): PLAYWRIGHT_MODULE=/path/to/playwright/index.mjs
 // node hack/test-live-log-stream.mjs (uses the installed Chromium headless shell).
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
