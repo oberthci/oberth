@@ -11,6 +11,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -476,6 +477,8 @@ type LiveLogResponse struct {
 	Done          bool   `json:"done"`
 }
 
+const liveLogAuthInterval = 30 * time.Second
+
 func (server *Server) handleRunLogLiveStream(writer http.ResponseWriter, request *http.Request) {
 	id, offset, ok := liveLogCursor(writer, request)
 	if !ok {
@@ -496,6 +499,7 @@ func (server *Server) handleRunLogLiveStream(writer http.ResponseWriter, request
 	}
 	chunk, err := read()
 	lastRead := time.Now()
+	lastAuth := lastRead
 	if err != nil {
 		server.writeView(writer, nil, err)
 		return
@@ -549,6 +553,18 @@ func (server *Server) handleRunLogLiveStream(writer http.ResponseWriter, request
 				return
 			}
 		case <-tick.C:
+		}
+		if time.Since(lastAuth) >= liveLogAuthInterval {
+			token, ok := bearerToken(request.Header.Values("Authorization"))
+			authCtx, cancel := context.WithTimeout(request.Context(), 5*time.Second)
+			fresh, authErr := server.auth.Authenticate(authCtx, token)
+			cancel()
+			original := actorFrom(request.Context())
+			if !ok || authErr != nil || strings.TrimSpace(fresh.Identity) == "" || fresh.Identity != original.Identity || fresh.Fingerprint != original.Fingerprint || fresh.Admin != original.Admin || !slices.Equal(fresh.Scope, original.Scope) {
+				_ = write("event: auth_error\ndata: {\"error\":\"stream authorization changed or expired; reconnect with a current bearer token\"}\n\n")
+				return
+			}
+			lastAuth = time.Now()
 		}
 		if source, ok := server.views.(interface{ LiveLogSize(string) (int64, error) }); ok && time.Since(lastRead) < time.Second {
 			// The first view resolved any prefix and authorized this canonical ID.

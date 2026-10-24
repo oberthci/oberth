@@ -47,3 +47,9 @@ needed.
 
 These tools use existing database and audit authority only. They require no
 new chart values or Kubernetes RBAC.
+
+Open dashboard live-log streams revalidate the bearer credential every 30 seconds.
+A revoked or rotated credential, unavailable authentication, or changed identity,
+admin flag or scope closes the stream with an `auth_error` SSE event directing
+the client to reconnect with a current token. Authentication checks have a
+five-second deadline. Other HTTP requests authenticate on every request.

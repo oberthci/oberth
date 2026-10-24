@@ -232,3 +232,85 @@ func TestLiveLogStreamIdleStatsAndTerminalRefresh(t *testing.T) {
 		}
 	})
 }
+
+type streamAuthFunc func(context.Context, string) (Actor, error)
+
+func (f streamAuthFunc) Authenticate(ctx context.Context, token string) (Actor, error) {
+	return f(ctx, token)
+}
+
+func TestLiveLogStreamRevalidatesCredentialAndAuthority(t *testing.T) {
+	for _, outcome := range []string{"revoked", "rotated", "lookup failure", "empty identity", "scope changed", "admin changed", "fingerprint changed", "identity changed", "timeout"} {
+		t.Run(outcome, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				reads, authCalls := 0, 0
+				original := Actor{Identity: "agent@host", Fingerprint: "SHA256:key", Admin: true}
+				auth := streamAuthFunc(func(ctx context.Context, token string) (Actor, error) {
+					authCalls++
+					if token != "valid-token" {
+						t.Fatalf("wrong token: %q", token)
+					}
+					if authCalls == 1 {
+						return original, nil
+					}
+					fresh := original
+					switch outcome {
+					case "revoked", "rotated", "lookup failure":
+						return Actor{}, errors.New("private credential lookup detail")
+					case "empty identity":
+						fresh.Identity = ""
+					case "scope changed":
+						fresh.Scope = []string{"restricted"}
+					case "admin changed":
+						fresh.Admin = false
+					case "fingerprint changed":
+						fresh.Fingerprint = "SHA256:replacement"
+					case "identity changed":
+						fresh.Identity = "replacement"
+					case "timeout":
+						<-ctx.Done()
+						return Actor{}, ctx.Err()
+					}
+					return fresh, nil
+				})
+				backend := &liveStreamBackend{read: func(context.Context, Actor, string, int64) (any, error) { reads++; return LiveLogResponse{}, nil }}
+				server, err := New(auth, backend, backend, "test")
+				if err != nil {
+					t.Fatal(err)
+				}
+				response := httptest.NewRecorder()
+				start := time.Now()
+				server.Handler().ServeHTTP(response, liveStreamRequest(t.Context(), ""))
+				if elapsed := time.Since(start); elapsed < liveLogAuthInterval || elapsed > liveLogAuthInterval+5*time.Second+150*time.Millisecond {
+					t.Fatalf("credential check unbounded: %s", elapsed)
+				}
+				body := response.Body.String()
+				if authCalls != 2 || reads == 0 || strings.Count(body, "event: auth_error\n") != 1 || !strings.Contains(body, "reconnect with a current bearer token") || strings.Contains(body, "private credential") || strings.Contains(body, "event: chunk") {
+					t.Fatalf("auth=%d reads=%d body=%s", authCalls, reads, body)
+				}
+			})
+		})
+	}
+}
+
+func TestLiveLogStreamValidCredentialRemainsOpen(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		calls := 0
+		backend := &liveStreamBackend{read: func(context.Context, Actor, string, int64) (any, error) { return LiveLogResponse{}, nil }}
+		auth := streamAuthFunc(func(context.Context, string) (Actor, error) { calls++; return Actor{Identity: "agent@host"}, nil })
+		server, err := New(auth, backend, backend, "test")
+		if err != nil {
+			t.Fatal(err)
+		}
+		ctx, cancel := context.WithCancel(t.Context())
+		finished := make(chan struct{})
+		response := httptest.NewRecorder()
+		go func() { defer close(finished); server.Handler().ServeHTTP(response, liveStreamRequest(ctx, "")) }()
+		time.Sleep(61 * time.Second)
+		cancel()
+		<-finished
+		if calls != 3 || strings.Contains(response.Body.String(), "event: auth_error") {
+			t.Fatalf("auth=%d body=%s", calls, response.Body.String())
+		}
+	})
+}

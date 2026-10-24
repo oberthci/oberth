@@ -2740,3 +2740,10 @@ Controller profile verification failures keep all new admission paused. Unscoped
 status exposes the fixed verifier `controller_profile.reason` (never raw API
 errors); unchanged failure logs are limited to once per 30 seconds. Recovery
 clears the reason and resumes admission without changing existing workers.
+
+Live-log SSE streams revalidate their original bearer credential every 30 seconds
+with a five-second authentication deadline. Revocation, rotation, lookup failure
+or changed actor authority emits a fixed `auth_error` event and closes the
+stream. A new connection must authenticate normally. Idle streams stat the
+append-only log before full reads and refresh the authorized view roughly once
+per second to observe terminal state and purges.

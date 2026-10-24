@@ -1069,8 +1069,8 @@ func (service *API) RunLogFiltered(ctx context.Context, actor api.Actor, id, bur
 const maxLiveLogChunk = 256 << 10
 
 // LiveLogSize is an internal stream hint, used only after an authorized live
-// read. It confers no read authority; streams still refresh the full view at
-// least once a second for terminal state, scope and evidence retention checks.
+// read. It confers no read authority; streams still refresh the full view roughly
+// once a second for terminal state, scope and evidence retention checks.
 func (service *API) LiveLogSize(id string) (int64, error) {
 	if source, ok := service.logs.(interface{ LiveLogSize(string) (int64, error) }); ok {
 		return source.LiveLogSize(id)
