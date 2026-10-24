@@ -7,6 +7,7 @@ import "time"
 type ControllerProfileStatus struct {
 	State             string    `json:"state"`
 	Object            string    `json:"object,omitempty"`
+	Reason            string    `json:"reason,omitempty"`
 	ErrorClass        string    `json:"error_class,omitempty"`
 	ReadFailuresTotal uint64    `json:"read_failures_total"`
 	RetryAt           time.Time `json:"retry_at,omitzero"`

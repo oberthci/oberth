@@ -220,3 +220,9 @@ concurrent jobs and trusted-preflight polling. Configure these with chart values
 positive; burst must be a positive integer. For a fractional QPS Helm override,
 use a values file or `--set-json` so the value remains numeric. The same settings
 apply to the Kubernetes, Argo Workflow, and KubeVirt clients.
+
+An invalid controller profile also pauses all new admission, including ordinary
+workflows, until verification succeeds. `controller_profile.reason` identifies
+the fixed validation predicate that failed; API response bodies are never
+reported. The server logs the reason on change and at most once every 30 seconds
+while unchanged. Existing work retains cleanup and publication authority.

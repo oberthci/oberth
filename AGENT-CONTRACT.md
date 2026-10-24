@@ -2735,3 +2735,8 @@ by adoption; an admission episode left open by the previous owner stays open.
 Migration v30 stacks after #1102's repository-archive migration v29. Shipped
 migration bodies and existing ledger rows remain unchanged; older backups
 replay v29 and v30 in order on restore.
+
+Controller profile verification failures keep all new admission paused. Unscoped
+status exposes the fixed verifier `controller_profile.reason` (never raw API
+errors); unchanged failure logs are limited to once per 30 seconds. Recovery
+clears the reason and resumes admission without changing existing workers.

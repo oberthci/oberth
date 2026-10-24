@@ -70,6 +70,7 @@ type Controller struct {
 	profileMu         sync.Mutex
 	profileStatus     model.ControllerProfileStatus
 	profileBackoff    time.Duration
+	profileLogAt      time.Time
 	timings           TimingRecorder
 	workflows         WorkflowClient
 	kube              kubernetes.Interface

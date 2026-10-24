@@ -15,6 +15,7 @@ import (
 const profileReadTimeout = 5 * time.Second
 const profileRetryMinimum = 250 * time.Millisecond
 const profileRetryMaximum = 10 * time.Second
+const profileLogInterval = 30 * time.Second
 
 // Keep the underlying error for classification, never for serialization: API
 // errors can include response bodies unrelated to the public controller proof.
@@ -104,18 +105,26 @@ func (controller *Controller) verifyNonrootWithRetry(ctx context.Context, reques
 		var readErr *profileReadError
 		isReadError := errors.As(err, &readErr)
 		if err == nil {
-			status.State, status.Object, status.ErrorClass = "verified", "", ""
+			status.State, status.Object, status.ErrorClass, status.Reason = "verified", "", "", ""
+			controller.profileLogAt = time.Time{}
 			status.RetryAt = time.Time{}
 			controller.profileBackoff = 0
 		} else {
+			previousReason := status.Reason
 			status.State, status.Object, status.ErrorClass = "blocked", "controller-profile", "invalid_profile"
+			// Validation errors contain only fixed verifier predicates, never API bodies.
+			status.Reason = err.Error()
 			if isReadError {
+				status.Reason = readErr.message
 				status.ReadFailuresTotal++
 				status.Object, status.ErrorClass = readErr.object, profileReadClass(readErr.cause)
 			}
 			controller.profileBackoff = min(profileRetryMaximum, max(profileRetryMinimum, controller.profileBackoff*2))
 			status.RetryAt = time.Now().Add(controller.profileBackoff)
-			log.Printf("controller profile unverified: object=%q class=%s admission=paused retry_in=%s read_failures_total=%d", status.Object, status.ErrorClass, controller.profileBackoff, status.ReadFailuresTotal)
+			if previousReason != status.Reason || time.Since(controller.profileLogAt) >= profileLogInterval {
+				log.Printf("controller profile unverified: object=%q class=%s reason=%q admission=paused retry_in=%s read_failures_total=%d", status.Object, status.ErrorClass, status.Reason, controller.profileBackoff, status.ReadFailuresTotal)
+				controller.profileLogAt = time.Now()
+			}
 		}
 		controller.profileMu.Unlock()
 		controller.profileVerifyMu.Unlock()
