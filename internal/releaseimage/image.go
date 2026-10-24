@@ -32,8 +32,7 @@ const (
 
 	// ServerSubstrate is rebuilt from the Dockerfile at bfedd1d6474c (#1194):
 	// brotli-libs 1.2.1-r0 (CVE-2026-111497, HIGH) newly exact-pinned and the
-	// superseded
-	// ca-certificates re-pinned to 20261020-r0; every other pin unchanged.
+	// superseded ca-certificates re-pinned to 20261020-r0; every other pin unchanged.
 	// Both platforms carry 36 packages, scan clean with the release trivy
 	// (0.73.0, HIGH/CRITICAL) and every checked ELF (busybox, git, ssh,
 	// oberth) matches its platform. As before, each platform was built
