@@ -1068,6 +1068,16 @@ func (service *API) RunLogFiltered(ctx context.Context, actor api.Actor, id, bur
 // still draining bursts within a couple of poll cycles.
 const maxLiveLogChunk = 256 << 10
 
+// LiveLogSize is an internal stream hint, used only after an authorized live
+// read. It confers no read authority; streams still refresh the full view at
+// least once a second for terminal state, scope and evidence retention checks.
+func (service *API) LiveLogSize(id string) (int64, error) {
+	if source, ok := service.logs.(interface{ LiveLogSize(string) (int64, error) }); ok {
+		return source.LiveLogSize(id)
+	}
+	return 0, ErrUnavailable
+}
+
 // RunLogLive is the read-only polled live view of a run's redacted log
 // stream. The run's terminal state is resolved BEFORE the chunk is read, so
 // Done=true can never be reported while unread bytes remain: a run finishing
@@ -1102,6 +1112,14 @@ func (service *API) RunLogLive(ctx context.Context, actor api.Actor, id string, 
 		}
 	}
 	response := LiveLogResponse{RunID: run.ID, Status: string(visibleRun(run).Status), DisplayStatus: presented.DisplayStatus, DisplayReason: presented.DisplayReason}
+	// Status and purge checks above still run on idle refreshes, but an
+	// unchanged append-only log needs no open/read even when it just finished.
+	if offset >= 0 {
+		if size, err := service.LiveLogSize(run.ID); err == nil && size == offset {
+			response.Offset, response.Size, response.Done = size, size, terminal
+			return response, nil
+		}
+	}
 	chunk, next, size, err := service.logs.ReadFrom(run.ID, offset, maxLiveLogChunk)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {

@@ -384,3 +384,34 @@ func TestResumeRetainsBytesAndProgress(t *testing.T) {
 		t.Fatal("resume escaped log root")
 	}
 }
+
+func TestLiveLogSizeTracksAppendAndMissing(t *testing.T) {
+	store, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.LiveLogSize("missing"); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal(err)
+	}
+	file, err := store.Create("stat")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+	for _, body := range []string{"", "one\n", "two\n"} {
+		if _, err := file.WriteString(body); err != nil {
+			t.Fatal(err)
+		}
+		info, err := file.Stat()
+		if err != nil {
+			t.Fatal(err)
+		}
+		size, err := store.LiveLogSize("stat")
+		if err != nil || size != info.Size() {
+			t.Fatalf("size=%d info=%v error=%v", size, info, err)
+		}
+	}
+	if _, err := store.LiveLogSize("../escape"); err == nil {
+		t.Fatal("invalid ID accepted")
+	}
+}

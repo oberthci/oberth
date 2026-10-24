@@ -274,6 +274,19 @@ func readRangeTail(file *os.File, ranges []Range, maximum int64) ([]byte, error)
 	return body, nil
 }
 
+// LiveLogSize stats the append-only log without opening or reading its bytes.
+func (store *Store) LiveLogSize(runID string) (int64, error) {
+	path, err := store.logPath(runID)
+	if err != nil {
+		return 0, err
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return 0, err
+	}
+	return info.Size(), nil
+}
+
 // ReadFrom returns up to maximum bytes of the run's append-only log starting
 // at offset, plus the next poll offset and the current log size. It serves the
 // dashboard's live view of a run in progress: the file grows while the Job

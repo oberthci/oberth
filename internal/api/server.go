@@ -481,8 +481,8 @@ func (server *Server) handleRunLogLiveStream(writer http.ResponseWriter, request
 	if !ok {
 		return
 	}
-	// Use the poll view unchanged on every tick: authorization, purged
-	// evidence, missing files and terminal-tail ordering remain identical.
+	// Use the full authorized view initially, on log changes and roughly once
+	// a second so terminal state and evidence/scope changes remain visible.
 	read := func() (LiveLogResponse, error) {
 		value, err := server.views.RunLogLive(request.Context(), actorFrom(request.Context()), id, offset)
 		if err != nil {
@@ -495,6 +495,7 @@ func (server *Server) handleRunLogLiveStream(writer http.ResponseWriter, request
 		return chunk, nil
 	}
 	chunk, err := read()
+	lastRead := time.Now()
 	if err != nil {
 		server.writeView(writer, nil, err)
 		return
@@ -549,7 +550,16 @@ func (server *Server) handleRunLogLiveStream(writer http.ResponseWriter, request
 			}
 		case <-tick.C:
 		}
+		if source, ok := server.views.(interface{ LiveLogSize(string) (int64, error) }); ok && time.Since(lastRead) < time.Second {
+			// The first view resolved any prefix and authorized this canonical ID.
+			// Stat failures fall through to the normal view's error handling.
+			if size, err := source.LiveLogSize(chunk.RunID); err == nil && size == offset {
+				chunk.Chunk = ""
+				continue
+			}
+		}
 		chunk, err = read()
+		lastRead = time.Now()
 		if err != nil {
 			// Closing makes clients resume through the authenticated poll
 			// endpoint, which can report the normal structured view error.

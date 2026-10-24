@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -165,4 +166,69 @@ func TestLiveLogStreamFlushAndWriteDeadline(t *testing.T) {
 	if !strings.Contains(string(tail), `"done":true`) {
 		t.Fatal(string(tail))
 	}
+}
+
+type idleLiveStreamBackend struct {
+	liveStreamBackend
+	size  atomic.Int64
+	stats atomic.Int64
+}
+
+func (backend *idleLiveStreamBackend) LiveLogSize(id string) (int64, error) {
+	if id != "canonical-run" {
+		return 0, errors.New("unresolved log ID")
+	}
+	backend.stats.Add(1)
+	return backend.size.Load(), nil
+}
+
+func TestLiveLogStreamIdleStatsAndTerminalRefresh(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		backend := &idleLiveStreamBackend{}
+		var calls atomic.Int64
+		var done atomic.Bool
+		backend.read = func(_ context.Context, _ Actor, _ string, offset int64) (any, error) {
+			calls.Add(1)
+			chunk := ""
+			if offset < backend.size.Load() {
+				chunk = "appended"
+			}
+			return LiveLogResponse{RunID: "canonical-run", Offset: backend.size.Load(), Size: backend.size.Load(), Chunk: chunk, Done: done.Load()}, nil
+		}
+		server, err := New(backend, backend, backend, "test")
+		if err != nil {
+			t.Fatal(err)
+		}
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		finished := make(chan struct{})
+		response := httptest.NewRecorder()
+		go func() {
+			defer close(finished)
+			server.Handler().ServeHTTP(response, liveStreamRequest(ctx, "?offset=0"))
+		}()
+		synctest.Wait()
+		time.Sleep(750 * time.Millisecond)
+		synctest.Wait()
+		if calls.Load() != 1 || backend.stats.Load() != 5 {
+			t.Fatalf("idle reads=%d stats=%d", calls.Load(), backend.stats.Load())
+		}
+		backend.size.Store(8)
+		time.Sleep(150 * time.Millisecond)
+		synctest.Wait()
+		if calls.Load() != 2 {
+			t.Fatalf("append not read: %d", calls.Load())
+		}
+		done.Store(true)
+		time.Sleep(1100 * time.Millisecond)
+		synctest.Wait()
+		select {
+		case <-finished:
+		default:
+			t.Fatal("terminal state not refreshed")
+		}
+		if calls.Load() != 3 || !strings.Contains(response.Body.String(), `"done":true`) || strings.Count(response.Body.String(), `"chunk":"appended"`) != 1 {
+			t.Fatalf("reads=%d response=%s", calls.Load(), response.Body.String())
+		}
+	})
 }
