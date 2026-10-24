@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -24,7 +25,7 @@ const maximumAdminGateError = 4 << 10
 // scheduler to run its cancellation pass now (withdraw the run's admission
 // reservation, delete its Workflow) instead of on the next queue event. The
 // wake carries no input and performs no mutation of its own.
-func newAdminGateServer(gate func(context.Context) error, databasePath string, wake func(), counts ...func(context.Context) (model.RunCounts, error)) *http.Server {
+func newAdminGateServer(gate func(context.Context) error, databasePath string, wake func(), counts ...func(context.Context) (model.IdleQueueStatus, error)) *http.Server {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/idle", func(output http.ResponseWriter, request *http.Request) {
 		if len(counts) == 0 || counts[0] == nil {
@@ -36,8 +37,24 @@ func newAdminGateServer(gate func(context.Context) error, databasePath string, w
 			http.Error(output, "queue state unavailable", http.StatusServiceUnavailable)
 			return
 		}
-		if state.Queued != 0 || state.Running != 0 {
+		mode := request.URL.Query().Get("wait_for")
+		if mode != "" && mode != "all" && mode != "critical" {
+			http.Error(output, "invalid wait selection", http.StatusBadRequest)
+			return
+		}
+		if !state.Valid() {
+			http.Error(output, "queue state unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		output.Header().Set("X-Oberth-Idle-Version", "1")
+		busy := state.Queued+state.Running != 0
+		if mode == "critical" {
+			busy = state.Critical() != 0
+		}
+		if busy {
+			output.Header().Set("Content-Type", "application/json")
 			output.WriteHeader(http.StatusConflict)
+			_ = json.NewEncoder(output).Encode(state)
 			return
 		}
 		output.WriteHeader(http.StatusNoContent)

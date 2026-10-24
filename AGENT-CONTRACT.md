@@ -2747,3 +2747,23 @@ or changed actor authority emits a fixed `auth_error` event and closes the
 stream. A new connection must authenticate normally. Idle streams stat the
 append-only log before full reads and refresh the authorized view roughly once
 per second to observe terminal state and purges.
+
+## Upgrade queue observation (#1200)
+
+`upgrade --wait-idle` / `--wait-for=all` observe all nonterminal runs through the
+selected server's private admin socket; `--wait-for=critical` excludes ordinary
+branch/schedule CI and retains tag/release, promotion, plan, apply and unknown
+triggers. Classification is server-owned and installation-wide, from one read
+snapshot. The versioned private response preserves old all-run status codes;
+critical selection refuses unsupported observation. No schema, grants or RBAC
+changes are required. This is advisory, never an admission freeze or proof that
+all other operations have stopped.
+
+Positive `--wait-timeout` defaults to 2h and is independent of the existing
+Helm/rollout `--timeout`. Progress and elapsed heartbeats stream while waiting.
+The local wait child has that explicit context deadline and a bounded output-
+pipe join; cancellation, lookup errors and child failure refuse before upgrade
+mutation, preserving context causality. CLI failures and skipped upgrades are
+nonzero, including a same-version no-op; explicit dry-run/help remain successful.
+Existing Workflow adoption, preflight recovery and publication ownership rules
+are unchanged. See [restart handover](docs/restart-handover.md).

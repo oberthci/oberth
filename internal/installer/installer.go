@@ -387,12 +387,14 @@ type Deps struct {
 	// live (default ~/.config/oberth); tests point it at their own directory.
 	ClientConfigRoot func() (string, error)
 	// UserHomeDir isolates host configuration in tests. Nil uses os.UserHomeDir.
-	UserHomeDir    func() (string, error)
-	Output         io.Writer
-	Input          io.Reader
-	RunHelm        func(ctx context.Context, args []string) ([]byte, error)
-	RunCommand     CommandRunner
-	RunInteractive InteractiveRunner
+	UserHomeDir func() (string, error)
+	Output      io.Writer
+	Input       io.Reader
+	RunHelm     func(ctx context.Context, args []string) ([]byte, error)
+	RunCommand  CommandRunner
+	// RunCommandStream supplies live progress for the bounded upgrade idle wait.
+	RunCommandStream func(context.Context, io.Writer, string, ...string) error
+	RunInteractive   InteractiveRunner
 	// PodLogs returns one pod's bounded bootstrap output. When nil, the
 	// Kubernetes REST client is used directly.
 	PodLogs    func(ctx context.Context, namespace, pod string) ([]byte, error)

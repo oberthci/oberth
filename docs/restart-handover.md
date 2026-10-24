@@ -67,11 +67,64 @@ Mutations such as `promote`, `sync`, `run_cancel` and `admission_release`, and
 unknown tools, are never automatically retried, even after 503. If a mutation's
 reply is lost, inspect its durable result before deciding what to do next.
 
-For an optional quiet-queue check, use `oberth upgrade --wait-idle --timeout=5m`.
-It runs `oberth wait-idle` inside the selected context/namespace's Deployment,
-reading the live daemon's complete queue through its private admin socket. It
-does not depend on remote API credentials or a scoped repository view. A busy
-queue is polled once per second until empty or the timeout expires; unavailable
-state aborts the upgrade. Dry-run describes the check without waiting. This is
-an advisory observation, not a freeze on incoming pushes, and requires a server
-version supporting `wait-idle`.
+For an optional quiet-queue check, use:
+
+```sh
+oberth upgrade --yes --wait-idle --wait-timeout=2h --timeout=5m
+# Or wait only for critical work; ordinary branch/schedule CI may remain:
+oberth upgrade --yes --wait-for=critical --wait-timeout=2h
+```
+
+`--wait-idle` waits for all queued and running runs. `--wait-for=all` is equivalent;
+`--wait-for=critical` also enables waiting, but excludes ordinary branch/schedule
+CI. Tags/releases, promotions, plans, applies and unknown trigger kinds remain
+critical. This selection is a conservative operator preference, not a claim
+that every critical Workflow is lost on restart: current servers adopt eligible
+branch, promotion and tag/release Workflows as described above. Older servers,
+missing Workflows, applies and pending trusted preflights retain their distinct
+interruption/recovery rules.
+
+The queue wait has its own positive `--wait-timeout`, default two hours. The
+separate `--timeout` (default five minutes) applies to Helm/rollout and version
+verification. An earlier caller deadline or SIGINT/SIGTERM cancels observation.
+The local kubectl process is explicitly bounded by the queue-wait context;
+joining inherited output pipes has a separate five-second cleanup bound.
+Timeout, cancellation, unavailable queue state or a killed local child aborts
+before any Helm upgrade or controller-profile mutation. The error identifies
+local `kubectl exec`, elapsed time, the configured limit and that the upgrade
+was not attempted. There is no automatic retry or assumption that an unreadable
+queue is idle.
+
+The command reads the selected context/namespace's live daemon through its
+private admin socket, without opening the database from another process or
+using a scoped API token. A single database observation counts the complete
+nonterminal-run queue. Polling occurs once a second; queue size, branch/critical
+counts, selection and elapsed time are printed immediately and every 15 seconds
+while busy. Host progress is streamed as it arrives, with an elapsed heartbeat
+even when an older in-pod binary cannot report counts. Critical selection needs
+the new server's versioned queue snapshot and in-pod flag support; an older
+server fails closed rather than silently treating unknown classes as branch CI.
+Default all-run waiting retains compatibility with older `wait-idle` servers.
+
+Dry-run describes the selection and both timeouts without waiting or upgrading.
+Failed or skipped upgrades return nonzero, including an already-installed target
+when no values or controller-profile change was requested. Successful upgrades,
+help and explicit dry-runs return zero. To reapply values at the current version,
+supply those values as usual.
+
+This is an advisory observation, not a freeze on incoming pushes or a transaction
+with Helm: new work can arrive between the empty observation and rollout. It
+counts nonterminal runs, not every possible external operation. It requires a
+server version supporting `wait-idle`.
+
+When piping output, retain the upgrade's status:
+
+```sh
+set -o pipefail
+oberth upgrade --yes --wait-idle --wait-timeout=2h 2>&1 | tail -10
+```
+
+Without `pipefail`, a pipeline ending in `tail` usually reports `tail`'s success
+even when Oberth exited with an error. No process can handle SIGKILL or make
+itself immune to an external process-group kill; use a caller/session lifecycle
+that lasts for the chosen wait. Detaching a process is not a queue-safety gate.

@@ -17,6 +17,7 @@ import (
 	"regexp"
 	"runtime"
 	"strings"
+	"time"
 
 	"golang.org/x/term"
 	"k8s.io/client-go/kubernetes"
@@ -885,7 +886,11 @@ func DefaultRunCommand(ctx context.Context, input []byte, name string, args ...s
 	if len(input) > 0 {
 		command.Stdin = bytes.NewReader(input)
 	}
-	return command.CombinedOutput()
+	body, err := command.CombinedOutput()
+	if err != nil && ctx.Err() != nil {
+		err = errors.Join(err, ctx.Err())
+	}
+	return body, err
 }
 
 // DefaultRunInteractive runs a host command wired to the operator's own
@@ -906,4 +911,15 @@ func DefaultRunInteractive(ctx context.Context, name string, args ...string) err
 // piped and CI runs on the printed manual-steps path.
 func StdinIsTerminal() bool {
 	return term.IsTerminal(int(os.Stdin.Fd()))
+}
+
+// DefaultRunCommandStream streams wait progress without a shell or buffered
+// output. The explicit caller context owns termination; WaitDelay bounds joins
+// if an inherited pipe remains open after the local child exits.
+func DefaultRunCommandStream(ctx context.Context, output io.Writer, name string, args ...string) error {
+	// #nosec G204 -- fixed executable and structured arguments, as in DefaultRunCommand.
+	command := exec.CommandContext(ctx, name, args...)
+	command.Stdout, command.Stderr = output, output
+	command.WaitDelay = 5 * time.Second
+	return errors.Join(command.Run(), ctx.Err())
 }

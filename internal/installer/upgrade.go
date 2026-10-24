@@ -9,6 +9,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"golang.org/x/mod/semver"
@@ -29,9 +30,14 @@ const watchTunnelImageDefault = "docker.io/cloudflare/cloudflared:2026.9.3@sha25
 // the init container that fetches the connector token.
 const watchTunnelOpenbaoImageDefault = "quay.io/openbao/openbao:2.6.1@sha256:5b2486ab0fb90bbc788cc345b0a08616dfb375873ee8be5df3a2fd4d378a67e0"
 
+// DefaultUpgradeWaitTimeout bounds queue observation independently of rollout.
+const DefaultUpgradeWaitTimeout = 2 * time.Hour
+
 // UpgradeConfig holds options for the upgrade command.
 type UpgradeConfig struct {
-	WaitIdle              bool // optional advisory queue drain; ordinary upgrades adopt in-flight work
+	WaitTimeout           time.Duration // independent queue-observation limit
+	WaitFor               string        // all or critical; a nonempty selection enables waiting
+	WaitIdle              bool          // optional advisory queue drain; ordinary upgrades adopt in-flight work
 	Namespace             string
 	DryRun                bool
 	Yes                   bool   // --yes: proceed without confirmation for non-local targets
@@ -97,6 +103,18 @@ type UpgradeResult struct {
 func (cfg *UpgradeConfig) ValidateUpgrade() error {
 	if cfg.ArgoControllerProfile != "" && cfg.ArgoControllerProfile != "nonroot-static-v1" {
 		return errors.New("unsupported Argo controller profile")
+	}
+	if cfg.WaitFor != "" {
+		if cfg.WaitFor != "all" && cfg.WaitFor != "critical" {
+			return errors.New("--wait-for must be all or critical")
+		}
+		cfg.WaitIdle = true
+	}
+	if cfg.WaitTimeout < 0 {
+		return errors.New("--wait-timeout must be positive")
+	}
+	if cfg.WaitTimeout == 0 {
+		cfg.WaitTimeout = DefaultUpgradeWaitTimeout
 	}
 	if cfg.Namespace == "" {
 		cfg.Namespace = DefaultNamespace
@@ -706,7 +724,7 @@ func verifyRunningVersion(ctx context.Context, deps Deps, cfg UpgradeConfig, tar
 func printUpgradeDryRun(w io.Writer, cfg UpgradeConfig, result UpgradeResult, retryFailed bool) (UpgradeResult, error) {
 	_, _ = fmt.Fprintf(w, "\nDry-run plan (no cluster changes will be made):\n\n")
 	if cfg.WaitIdle {
-		_, _ = fmt.Fprintln(w, "  Wait for the selected live daemon queue to empty before applying the upgrade (--wait-idle).")
+		_, _ = fmt.Fprintf(w, "  Wait for %s runs in the selected live daemon queue (--wait-idle; --wait-timeout=%s).\n", upgradeWaitSelection(cfg), cfg.WaitTimeout)
 	}
 	step := 1
 
@@ -747,22 +765,96 @@ func printUpgradeDryRun(w io.Writer, cfg UpgradeConfig, result UpgradeResult, re
 	return result, nil
 }
 
-// waitForUpgradeIdle queries the live daemon through its private admin socket
-// in the selected Deployment. Remote/scoped API credentials cannot accidentally
-// report an unrelated cluster or only a subset of the queue as idle.
-func waitForUpgradeIdle(ctx context.Context, cfg UpgradeConfig, deps Deps) error {
-	ctx, cancel := context.WithTimeout(ctx, cfg.Timeout)
-	defer cancel()
-	run := deps.RunCommand
-	if run == nil {
-		run = DefaultRunCommand
+func upgradeWaitSelection(cfg UpgradeConfig) string {
+	if cfg.WaitFor == "critical" {
+		return "critical"
 	}
-	args := []string{"exec", "-c", "oberth", "-n", cfg.Namespace, "deploy/oberth", "--", "oberth", "wait-idle", "--timeout=" + cfg.Timeout.String()}
+	return "all"
+}
+
+// waitForUpgradeIdle observes the selected Deployment through its private admin
+// socket, preserving the full queue rather than a scoped remote API view.
+func waitForUpgradeIdle(ctx context.Context, cfg UpgradeConfig, deps Deps) error {
+	limit := cfg.WaitTimeout
+	if limit == 0 {
+		limit = DefaultUpgradeWaitTimeout
+	}
+	ctx, cancel := context.WithTimeout(ctx, limit)
+	defer cancel()
+	start := time.Now()
+	output := deps.Output
+	if output == nil {
+		output = io.Discard
+	}
+	// Only this wait owns these concurrent writes; join the heartbeat before
+	// returning so the following upgrade phase has exclusive output ownership.
+	writer := &upgradeWaitWriter{output: output}
+	if _, err := fmt.Fprintf(writer, "Waiting before upgrade: selection=%s wait-timeout=%s rollout-timeout=%s\n", upgradeWaitSelection(cfg), limit, cfg.Timeout); err != nil {
+		return err
+	}
+	stop, joined := make(chan struct{}), make(chan struct{})
+	go func() {
+		defer close(joined)
+		ticker := time.NewTicker(15 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-stop:
+				return
+			case <-ticker.C:
+				if _, err := fmt.Fprintf(writer, "Still waiting for %s runs; elapsed=%s limit=%s\n", upgradeWaitSelection(cfg), time.Since(start).Truncate(time.Second), limit); err != nil {
+					cancel()
+					return
+				}
+			}
+		}
+	}()
+	defer func() { close(stop); <-joined }()
+	args := []string{"exec", "-c", "oberth", "-n", cfg.Namespace, "deploy/oberth", "--", "oberth", "wait-idle", "--timeout=" + limit.String()}
+	if cfg.WaitFor == "critical" {
+		args = append(args, "--wait-for=critical")
+	}
 	if deps.ContextName != "" {
 		args = append([]string{"--context", deps.ContextName}, args...)
 	}
-	if _, err := run(ctx, nil, "kubectl", args...); err != nil {
-		return fmt.Errorf("wait for idle queue: %w", err)
+	var err error
+	if deps.RunCommandStream != nil {
+		err = deps.RunCommandStream(ctx, writer, "kubectl", args...)
+	} else if deps.RunCommand != nil {
+		var body []byte
+		body, err = deps.RunCommand(ctx, nil, "kubectl", args...)
+		if len(body) > 0 {
+			_, writeErr := writer.Write(body)
+			err = errors.Join(err, writeErr)
+		}
+	} else {
+		err = DefaultRunCommandStream(ctx, writer, "kubectl", args...)
+	}
+	if err != nil || ctx.Err() != nil || writer.err() != nil {
+		cause := err
+		if ctx.Err() != nil && !errors.Is(cause, ctx.Err()) {
+			cause = errors.Join(cause, ctx.Err())
+		}
+		cause = errors.Join(cause, writer.err())
+		return fmt.Errorf("wait for %s queue via local kubectl exec failed (elapsed=%s limit=%s); upgrade not attempted: %w", upgradeWaitSelection(cfg), time.Since(start).Truncate(time.Millisecond), limit, cause)
 	}
 	return nil
 }
+
+type upgradeWaitWriter struct {
+	mu      sync.Mutex
+	output  io.Writer
+	failure error
+}
+
+func (w *upgradeWaitWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	n, err := w.output.Write(p)
+	if err == nil && n != len(p) {
+		err = io.ErrShortWrite
+	}
+	w.failure = errors.Join(w.failure, err)
+	return n, err
+}
+func (w *upgradeWaitWriter) err() error { w.mu.Lock(); defer w.mu.Unlock(); return w.failure }
