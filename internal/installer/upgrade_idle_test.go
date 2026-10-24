@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 )
@@ -28,5 +29,30 @@ func TestUpgradeWaitIdleTargetsSelectedDeploymentAndStopsOnFailure(t *testing.T)
 	}
 	if calls != 1 {
 		t.Fatalf("blindly retried upgrade preparation: %d", calls)
+	}
+}
+
+func TestUpgradeWaitIdlePreservesContextCause(t *testing.T) {
+	for _, canceled := range []bool{false, true} {
+		t.Run(map[bool]string{false: "deadline", true: "canceled"}[canceled], func(t *testing.T) {
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			if canceled {
+				cancel()
+			}
+			childErr := errors.New("signal: killed")
+			deps := Deps{RunCommand: func(ctx context.Context, _ []byte, _ string, _ ...string) ([]byte, error) {
+				<-ctx.Done()
+				return nil, childErr
+			}}
+			err := waitForUpgradeIdle(ctx, UpgradeConfig{Timeout: time.Millisecond}, deps)
+			cause := context.DeadlineExceeded
+			if canceled {
+				cause = context.Canceled
+			}
+			if !errors.Is(err, cause) || !errors.Is(err, childErr) || !strings.Contains(err.Error(), "upgrade not attempted") {
+				t.Fatalf("lost wait failure cause: %v", err)
+			}
+		})
 	}
 }

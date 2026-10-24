@@ -75,3 +75,17 @@ queue is polled once per second until empty or the timeout expires; unavailable
 state aborts the upgrade. Dry-run describes the check without waiting. This is
 an advisory observation, not a freeze on incoming pushes, and requires a server
 version supporting `wait-idle`.
+
+`--timeout` bounds the idle wait separately from the rollout wait. A failed
+idle observation returns a non-zero CLI exit status before applying the
+controller profile or running `helm upgrade`. The error names the local
+`kubectl exec` process and the elapsed wait. A context deadline is reported
+explicitly; `signal: killed` without a context error means the local child
+was killed while its wait context was still active. It does not identify who
+sent the signal. The installer does not retry an unavailable observation or
+treat it as an empty queue.
+
+When capturing an upgrade with a Bash pipeline, enable `set -o pipefail`
+before the pipeline (or collect `${PIPESTATUS[0]}` immediately afterward).
+Otherwise `$?` reports the last pipeline command, such as `tee`, and can
+hide an upgrade failure.

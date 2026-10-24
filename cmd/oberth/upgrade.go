@@ -39,7 +39,7 @@ func runUpgrade(ctx context.Context, arguments []string, output io.Writer) error
 	flags.Var(&userValues, "values", "values file to pass to helm upgrade (repeatable)")
 	flags.Var(&userValues, "f", "alias for --values")
 	flags.Var(&userSet, "set", "one canonical dotted key=scalar per flag; escape literal commas (repeatable)")
-	timeout := flags.Duration("timeout", 5*time.Minute, "wait timeout for rollout completion")
+	timeout := flags.Duration("timeout", 5*time.Minute, "maximum wait for each idle-queue and rollout phase")
 
 	if err := flags.Parse(arguments); err != nil {
 		if errors.Is(err, flag.ErrHelp) {

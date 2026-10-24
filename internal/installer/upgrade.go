@@ -753,6 +753,7 @@ func printUpgradeDryRun(w io.Writer, cfg UpgradeConfig, result UpgradeResult, re
 func waitForUpgradeIdle(ctx context.Context, cfg UpgradeConfig, deps Deps) error {
 	ctx, cancel := context.WithTimeout(ctx, cfg.Timeout)
 	defer cancel()
+	started := time.Now()
 	run := deps.RunCommand
 	if run == nil {
 		run = DefaultRunCommand
@@ -762,7 +763,14 @@ func waitForUpgradeIdle(ctx context.Context, cfg UpgradeConfig, deps Deps) error
 		args = append([]string{"--context", deps.ContextName}, args...)
 	}
 	if _, err := run(ctx, nil, "kubectl", args...); err != nil {
-		return fmt.Errorf("wait for idle queue: %w", err)
+		// CommandContext reports a killed child when its context expires. Keep
+		// the context cause as well, so operators can distinguish that deadline
+		// from a kubectl process killed while the wait still had time left.
+		if ctx.Err() != nil {
+			err = errors.Join(ctx.Err(), err)
+		}
+		return fmt.Errorf("wait for idle queue: local kubectl exec failed after %s (limit %s); upgrade not attempted: %w",
+			time.Since(started).Round(time.Millisecond), cfg.Timeout, err)
 	}
 	return nil
 }
