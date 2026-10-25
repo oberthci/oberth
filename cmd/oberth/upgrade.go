@@ -111,11 +111,8 @@ func runUpgrade(ctx context.Context, arguments []string, output io.Writer) error
 }
 
 func upgradeCompletionError(dryRun bool, result installer.UpgradeResult) error {
-	if dryRun || result.Upgraded {
+	if dryRun || result.Upgraded || result.AlreadyUpToDate {
 		return nil
-	}
-	if result.AlreadyUpToDate {
-		return errors.New("upgrade not performed: target version is already installed (no values/profile change requested)")
 	}
 	return errors.New("upgrade not performed")
 }

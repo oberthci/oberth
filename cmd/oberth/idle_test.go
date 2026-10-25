@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -110,5 +111,23 @@ func TestWaitIdleCriticalRequiresSnapshotCapability(t *testing.T) {
 	})}
 	if err := waitIdle(t.Context(), client, "http://old/v1/idle", time.Second, idleWaitOptions{mode: "critical"}); err == nil || !strings.Contains(err.Error(), "does not support critical") {
 		t.Fatal(err)
+	}
+}
+
+func TestWaitIdleCriticalReportsStatusBeforeCapability(t *testing.T) {
+	for _, status := range []int{400, 503, 204, 409} {
+		t.Run(fmt.Sprint(status), func(t *testing.T) {
+			client := &http.Client{Transport: idleRoundTrip(func(*http.Request) (*http.Response, error) {
+				return &http.Response{StatusCode: status, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(""))}, nil
+			})}
+			err := waitIdle(t.Context(), client, "http://fixture/v1/idle", time.Second, idleWaitOptions{mode: "critical"})
+			want := "does not support critical queue observation"
+			if status == 400 || status == 503 {
+				want = fmt.Sprintf("live daemon queue unavailable (HTTP %d)", status)
+			}
+			if err == nil || !strings.Contains(err.Error(), want) {
+				t.Fatalf("status %d: %v; want %q", status, err, want)
+			}
+		})
 	}
 }

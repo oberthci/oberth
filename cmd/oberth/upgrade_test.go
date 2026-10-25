@@ -53,7 +53,7 @@ func TestRunUpgradeRejectsDevBuild(t *testing.T) {
 
 func TestUpgradeCompletionExitStatus(t *testing.T) {
 	for _, test := range []struct{ dry, upgraded, already, wantError bool }{
-		{false, true, false, false}, {false, false, false, true}, {false, false, true, true}, {true, false, false, false},
+		{false, true, false, false}, {false, false, false, true}, {false, false, true, false}, {true, false, false, false},
 	} {
 		err := upgradeCompletionError(test.dry, installer.UpgradeResult{Upgraded: test.upgraded, AlreadyUpToDate: test.already})
 		if (err != nil) != test.wantError {

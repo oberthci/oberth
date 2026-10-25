@@ -71,3 +71,47 @@ func TestUpgradeWaitCriticalAndStreamProgress(t *testing.T) {
 		t.Fatalf("%v %s", err, &output)
 	}
 }
+
+func TestUpgradeWaitOldBinaryDiagnostic(t *testing.T) {
+	for _, test := range []struct {
+		name, mode, diagnostic string
+		stream, failed, mapped bool
+	}{
+		{"buffered", "critical", "flag provided but not defined: -wait-for", false, true, true},
+		{"streamed in chunks", "critical", "flag provided but not defined: -wait-for", true, true, true},
+		{"all selection", "all", "flag provided but not defined: -wait-for", true, true, false},
+		{"other flag", "critical", "flag provided but not defined: -timeout", true, true, false},
+		{"successful child", "critical", "flag provided but not defined: -wait-for", true, false, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			wantErr := errors.New("child exit status 2")
+			if !test.failed {
+				wantErr = nil
+			}
+			deps := Deps{}
+			if test.stream {
+				deps.RunCommandStream = func(_ context.Context, output io.Writer, _ string, _ ...string) error {
+					// Model arbitrary stdout/stderr write boundaries.
+					for _, b := range []byte(test.diagnostic) {
+						if _, err := output.Write([]byte{b}); err != nil {
+							return err
+						}
+					}
+					return wantErr
+				}
+			} else {
+				deps.RunCommand = func(context.Context, []byte, string, ...string) ([]byte, error) {
+					return []byte(test.diagnostic), wantErr
+				}
+			}
+			err := waitForUpgradeIdle(t.Context(), UpgradeConfig{WaitFor: test.mode}, deps)
+			if test.failed && !errors.Is(err, wantErr) || !test.failed && err != nil {
+				t.Fatalf("child failure lost: %v", err)
+			}
+			mapped := err != nil && strings.Contains(err.Error(), "server too old for --wait-for=critical; use --wait-for=all")
+			if mapped != test.mapped {
+				t.Fatalf("mapped=%v want=%v: %v", mapped, test.mapped, err)
+			}
+		})
+	}
+}

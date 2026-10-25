@@ -101,7 +101,7 @@ func TestRunUpgradeAlreadyUpToDate(t *testing.T) {
 				t.Fatal(err)
 			}
 			if !result.AlreadyUpToDate || result.Upgraded || helmCalls != 1 ||
-				!strings.Contains(output.String(), "Already running v0.12.35") {
+				!strings.Contains(output.String(), "Already running v0.12.35; no upgrade performed") {
 				t.Fatalf("deployed same-version result=%+v, helmCalls=%d, output=%q", result, helmCalls, output.String())
 			}
 		})

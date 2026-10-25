@@ -77,13 +77,14 @@ func waitIdle(ctx context.Context, client *http.Client, target string, interval 
 		if readErr != nil || closeErr != nil {
 			return fmt.Errorf("read live daemon queue: %w", errors.Join(readErr, closeErr))
 		}
-		if opt.mode == "critical" && response.Header.Get("X-Oberth-Idle-Version") != "1" {
-			return errors.New("server does not support critical queue observation; upgrade its wait-idle support first or use --wait-for=all")
-		}
 		switch response.StatusCode {
-		case http.StatusNoContent:
-			return ctx.Err()
-		case http.StatusConflict:
+		case http.StatusNoContent, http.StatusConflict:
+			if opt.mode == "critical" && response.Header.Get("X-Oberth-Idle-Version") != "1" {
+				return errors.New("server does not support critical queue observation; upgrade its wait-idle support first or use --wait-for=all")
+			}
+			if response.StatusCode == http.StatusNoContent {
+				return ctx.Err()
+			}
 		default:
 			return fmt.Errorf("live daemon queue unavailable (HTTP %d)", response.StatusCode)
 		}

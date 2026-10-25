@@ -333,7 +333,7 @@ func RunUpgrade(ctx context.Context, cfg UpgradeConfig, deps Deps) (UpgradeResul
 			_, _ = fmt.Fprintf(w, "\nAlready running %s; re-applying the given --values/--set\n", displayVersion(targetVersion))
 		case status == "deployed":
 			result.AlreadyUpToDate = true
-			_, _ = fmt.Fprintf(w, "\nAlready running %s\n", displayVersion(targetVersion))
+			_, _ = fmt.Fprintf(w, "\nAlready running %s; no upgrade performed\n", displayVersion(targetVersion))
 			return result, nil
 		case status == "failed":
 			// A failed revision can carry the target chart version while a
@@ -817,18 +817,21 @@ func waitForUpgradeIdle(ctx context.Context, cfg UpgradeConfig, deps Deps) error
 	if deps.ContextName != "" {
 		args = append([]string{"--context", deps.ContextName}, args...)
 	}
+	// Keep child diagnostics separate from heartbeat writes so split messages
+	// remain recognizable without retaining unbounded subprocess output.
+	childOutput := &upgradeWaitWriter{output: writer}
 	var err error
 	if deps.RunCommandStream != nil {
-		err = deps.RunCommandStream(ctx, writer, "kubectl", args...)
+		err = deps.RunCommandStream(ctx, childOutput, "kubectl", args...)
 	} else if deps.RunCommand != nil {
 		var body []byte
 		body, err = deps.RunCommand(ctx, nil, "kubectl", args...)
 		if len(body) > 0 {
-			_, writeErr := writer.Write(body)
+			_, writeErr := childOutput.Write(body)
 			err = errors.Join(err, writeErr)
 		}
 	} else {
-		err = DefaultRunCommandStream(ctx, writer, "kubectl", args...)
+		err = DefaultRunCommandStream(ctx, childOutput, "kubectl", args...)
 	}
 	if err != nil || ctx.Err() != nil || writer.err() != nil {
 		cause := err
@@ -836,20 +839,32 @@ func waitForUpgradeIdle(ctx context.Context, cfg UpgradeConfig, deps Deps) error
 			cause = errors.Join(cause, ctx.Err())
 		}
 		cause = errors.Join(cause, writer.err())
+		if cfg.WaitFor == "critical" && childOutput.unsupportedFlag() {
+			cause = fmt.Errorf("server too old for --wait-for=critical; use --wait-for=all: %w", cause)
+		}
 		return fmt.Errorf("wait for %s queue via local kubectl exec failed (elapsed=%s limit=%s); upgrade not attempted: %w", upgradeWaitSelection(cfg), time.Since(start).Truncate(time.Millisecond), limit, cause)
 	}
 	return nil
 }
 
 type upgradeWaitWriter struct {
-	mu      sync.Mutex
-	output  io.Writer
-	failure error
+	mu                 sync.Mutex
+	output             io.Writer
+	failure            error
+	diagnosticTail     string
+	unsupportedWaitFor bool
 }
 
 func (w *upgradeWaitWriter) Write(p []byte) (int, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
+	const unknownFlag = "flag provided but not defined: -wait-for"
+	diagnostic := w.diagnosticTail + string(p)
+	w.unsupportedWaitFor = w.unsupportedWaitFor || strings.Contains(diagnostic, unknownFlag)
+	if len(diagnostic) >= len(unknownFlag) {
+		diagnostic = diagnostic[len(diagnostic)-len(unknownFlag)+1:]
+	}
+	w.diagnosticTail = strings.Clone(diagnostic)
 	n, err := w.output.Write(p)
 	if err == nil && n != len(p) {
 		err = io.ErrShortWrite
@@ -858,3 +873,9 @@ func (w *upgradeWaitWriter) Write(p []byte) (int, error) {
 	return n, err
 }
 func (w *upgradeWaitWriter) err() error { w.mu.Lock(); defer w.mu.Unlock(); return w.failure }
+
+func (w *upgradeWaitWriter) unsupportedFlag() bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.unsupportedWaitFor
+}

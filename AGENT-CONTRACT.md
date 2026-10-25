@@ -2763,7 +2763,8 @@ Positive `--wait-timeout` defaults to 2h and is independent of the existing
 Helm/rollout `--timeout`. Progress and elapsed heartbeats stream while waiting.
 The local wait child has that explicit context deadline and a bounded output-
 pipe join; cancellation, lookup errors and child failure refuse before upgrade
-mutation, preserving context causality. CLI failures and skipped upgrades are
-nonzero, including a same-version no-op; explicit dry-run/help remain successful.
+mutation, preserving context causality. CLI refusals and failures are nonzero.
+A same-version no-op exits zero with `Already running vX; no upgrade performed`;
+explicit dry-run/help also succeed.
 Existing Workflow adoption, preflight recovery and publication ownership rules
 are unchanged. See [restart handover](docs/restart-handover.md).

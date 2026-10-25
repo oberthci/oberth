@@ -28,6 +28,9 @@ func TestUpgradeWaitProcessHelper(t *testing.T) {
 	case "cli":
 		version = "0.17.52"
 		os.Args = []string{"oberth", "upgrade", "--yes", "--wait-idle", "--chart=/fixture", "--timeout=1m", "--wait-timeout=" + os.Getenv("OBERTH_TEST_WAIT_LIMIT")}
+		if os.Getenv("OBERTH_TEST_OLD_CRITICAL") == "yes" {
+			os.Args = append(os.Args, "--wait-for=critical")
+		}
 		main()
 		os.Exit(0)
 	case "waiter":
@@ -48,7 +51,14 @@ func TestUpgradeWaitProcessHelper(t *testing.T) {
 }
 
 func TestUpgradeWaitProcessGraph(t *testing.T) {
-	for _, mode := range []string{"shell-121s", "setsid-121s", "kill-child", "kill-group", "cancel", "deadline", "unavailable", "already-current"} {
+	// Default coverage exercises the same process graph with a short busy wait.
+	// Opt in to the original >2 minute reproduction when investigating callers:
+	// OBERTH_TEST_LONG_IDLE_WAIT=1 go test -run '^TestUpgradeWaitProcessGraph$' ./cmd/oberth
+	busyFor := 100 * time.Millisecond
+	if os.Getenv("OBERTH_TEST_LONG_IDLE_WAIT") == "1" {
+		busyFor = 121 * time.Second
+	}
+	for _, mode := range []string{"shell", "setsid", "kill-child", "kill-group", "cancel", "deadline", "unavailable", "already-current", "old-critical"} {
 		t.Run(mode, func(t *testing.T) {
 			t.Parallel()
 			root := t.TempDir()
@@ -63,7 +73,7 @@ func TestUpgradeWaitProcessGraph(t *testing.T) {
 					return model.IdleQueueStatus{}, errors.New("fixture unavailable")
 				}
 				firstProbe.CompareAndSwap(0, time.Now().UnixNano())
-				if strings.HasSuffix(mode, "121s") && time.Since(time.Unix(0, firstProbe.Load())) >= 121*time.Second {
+				if (mode == "shell" || mode == "setsid") && time.Since(time.Unix(0, firstProbe.Load())) >= busyFor {
 					return model.IdleQueueStatus{Version: 1}, nil
 				}
 				return model.IdleQueueStatus{Version: 1, Queued: 1, Branch: 1}, nil
@@ -82,7 +92,9 @@ esac
 `
 			kubectl := `#!/bin/sh
 case "$*" in
- *"wait-idle"*) OBERTH_TEST_WAIT_ROLE=waiter; export OBERTH_TEST_WAIT_ROLE; exec "$OBERTH_TEST_EXECUTABLE" -test.run '^TestUpgradeWaitProcessHelper$' ;;
+ *"wait-idle"*)
+   if [ "$OBERTH_TEST_OLD_CRITICAL" = yes ]; then echo 'flag provided but not defined: -wait-for' >&2; exit 2; fi
+   OBERTH_TEST_WAIT_ROLE=waiter; export OBERTH_TEST_WAIT_ROLE; exec "$OBERTH_TEST_EXECUTABLE" -test.run '^TestUpgradeWaitProcessHelper$' ;;
  *"version --schema"*) echo 31 ;;
  *) echo 'unexpected fixture kubectl command' >&2; exit 91 ;;
 esac
@@ -100,7 +112,7 @@ esac
 			defer cancel()
 			command := exec.CommandContext(ctx, "/bin/sh", "-c", `exec "$@"`, "fixture", executable, "-test.run", "^TestUpgradeWaitProcessHelper$")
 			command.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-			if mode == "setsid-121s" {
+			if mode == "setsid" {
 				setsid, err := exec.LookPath("setsid")
 				if err != nil {
 					t.Fatal("CI process test requires setsid:", err)
@@ -115,7 +127,11 @@ esac
 			if mode == "already-current" {
 				already = "yes"
 			}
-			command.Env = []string{"PATH=" + root + ":/usr/bin:/bin", "HOME=" + root, "KUBECONFIG=" + kubeconfig, "OBERTH_TEST_WAIT_ROLE=cli", "OBERTH_TEST_EXECUTABLE=" + executable, "OBERTH_TEST_WAIT_URL=" + server.URL + "/v1/idle", "OBERTH_TEST_WAIT_PID=" + pidPath, "OBERTH_TEST_WAIT_LIMIT=" + limit, "OBERTH_TEST_UPGRADE_MARKER=" + upgradePath, "OBERTH_TEST_ALREADY=" + already}
+			oldCritical := "no"
+			if mode == "old-critical" {
+				oldCritical = "yes"
+			}
+			command.Env = []string{"PATH=" + root + ":/usr/bin:/bin", "HOME=" + root, "KUBECONFIG=" + kubeconfig, "OBERTH_TEST_WAIT_ROLE=cli", "OBERTH_TEST_EXECUTABLE=" + executable, "OBERTH_TEST_WAIT_URL=" + server.URL + "/v1/idle", "OBERTH_TEST_WAIT_PID=" + pidPath, "OBERTH_TEST_WAIT_LIMIT=" + limit, "OBERTH_TEST_UPGRADE_MARKER=" + upgradePath, "OBERTH_TEST_ALREADY=" + already, "OBERTH_TEST_OLD_CRITICAL=" + oldCritical}
 			command.WaitDelay = 5 * time.Second
 			var output strings.Builder
 			command.Stdout, command.Stderr = &output, &output
@@ -143,9 +159,8 @@ esac
 					}
 				}
 				if mode == "kill-child" || mode == "kill-group" {
-					// Observe a genuinely busy child past two minutes before the external
-					// signal, so the reproduction also rules out a hidden 60-second kill.
-					timer := time.NewTimer(121 * time.Second)
+					// The opt-in long variant also rules out a hidden 60-second kill.
+					timer := time.NewTimer(busyFor)
 					select {
 					case err := <-finished:
 						timer.Stop()
@@ -171,13 +186,22 @@ esac
 			err = <-finished
 			text := output.String()
 			var exit *exec.ExitError
+			if mode == "already-current" {
+				if err != nil || !strings.Contains(text, "Already running v0.17.52; no upgrade performed") {
+					t.Fatalf("same-version no-op: %v: %s", err, text)
+				}
+				if _, statErr := os.Stat(upgradePath); !errors.Is(statErr, os.ErrNotExist) || firstProbe.Load() != 0 {
+					t.Fatalf("same-version no-op attempted wait/upgrade: marker=%v probe=%d", statErr, firstProbe.Load())
+				}
+				return
+			}
 			if !errors.As(err, &exit) {
 				t.Fatalf("expected nonzero CLI exit, got %v: %s", err, text)
 			}
 			_, markerErr := os.Stat(upgradePath)
 			attempted := markerErr == nil
-			if strings.HasSuffix(mode, "121s") {
-				if !attempted || time.Since(start) < 121*time.Second || exit.ExitCode() != 1 || !strings.Contains(text, "fixture Helm upgrade refusal") {
+			if mode == "shell" || mode == "setsid" {
+				if !attempted || time.Since(start) < busyFor || exit.ExitCode() != 1 || !strings.Contains(text, "fixture Helm upgrade refusal") {
 					t.Fatalf("elapsed=%s attempted=%v exit=%v: %s", time.Since(start), attempted, err, text)
 				}
 			} else {
@@ -205,9 +229,9 @@ esac
 					if exit.ExitCode() != 1 || !strings.Contains(text, "HTTP 503") {
 						t.Fatalf("unavailable: %v: %s", err, text)
 					}
-				case "already-current":
-					if exit.ExitCode() != 1 || !strings.Contains(text, "upgrade not performed") {
-						t.Fatalf("skipped: %v: %s", err, text)
+				case "old-critical":
+					if exit.ExitCode() != 1 || !strings.Contains(text, "server too old for --wait-for=critical; use --wait-for=all") {
+						t.Fatalf("old critical waiter: %v: %s", err, text)
 					}
 				}
 			}

@@ -104,12 +104,15 @@ while busy. Host progress is streamed as it arrives, with an elapsed heartbeat
 even when an older in-pod binary cannot report counts. Critical selection needs
 the new server's versioned queue snapshot and in-pod flag support; an older
 server fails closed rather than silently treating unknown classes as branch CI.
+An old in-pod binary that rejects `--wait-for` reports
+`server too old for --wait-for=critical; use --wait-for=all`.
 Default all-run waiting retains compatibility with older `wait-idle` servers.
 
 Dry-run describes the selection and both timeouts without waiting or upgrading.
-Failed or skipped upgrades return nonzero, including an already-installed target
-when no values or controller-profile change was requested. Successful upgrades,
-help and explicit dry-runs return zero. To reapply values at the current version,
+Refused or failed upgrades return nonzero. An already-installed target with no
+values or controller-profile change requested exits zero and prints
+`Already running vX; no upgrade performed`. Successful upgrades, help and
+explicit dry-runs also return zero. To reapply values at the current version,
 supply those values as usual.
 
 This is an advisory observation, not a freeze on incoming pushes or a transaction
