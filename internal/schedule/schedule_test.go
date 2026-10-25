@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/oberthci/oberth/internal/cron"
 )
 
 func testLimits() Limits {
@@ -235,4 +237,29 @@ func names(entries []Entry) map[string]bool {
 		found[entry.Name] = true
 	}
 	return found
+}
+
+func TestDuePendingCursorDoesNotDependOnNext(t *testing.T) {
+	t.Parallel()
+	// An impossible occurrence makes Next fail and proves that the persisted
+	// pending marker is sufficient; it must not depend on a year-1 cron search.
+	compiled, err := cron.Parse("0 0 31 2 *")
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry := Entry{Name: "pending", schedule: compiled}
+	if _, err := entry.Next(time.Time{}); err == nil {
+		t.Fatal("fixture must fail its next-occurrence search")
+	}
+	now := at(t, "2026-08-24T03:07:00Z")
+	file := File{Entries: []Entry{entry}, observed: now}
+	if due := file.Due(map[string]time.Time{"pending": {}}, now); len(due) != 1 || due[0].Name != "pending" {
+		t.Fatalf("pending occurrence was lost on Next error: %v", names(due))
+	}
+	if due := file.Due(nil, now); len(due) != 0 {
+		t.Fatalf("absent cursor invented a pending occurrence: %v", names(due))
+	}
+	if due := file.Due(map[string]time.Time{"pending": now}, now); len(due) != 0 {
+		t.Fatalf("successful cursor invented a pending occurrence: %v", names(due))
+	}
 }

@@ -138,6 +138,12 @@ func (file File) Due(last map[string]time.Time, now time.Time) []Entry {
 	var due []Entry
 	for _, entry := range file.Entries {
 		previous, seen := last[entry.Name]
+		if seen && previous.IsZero() {
+			// A persisted zero cursor is an already-due occurrence, not a date
+			// to search from. Catch it up even if cron.Next would fail.
+			due = append(due, entry)
+			continue
+		}
 		if !seen {
 			previous = file.observed
 		}

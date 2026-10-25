@@ -1,6 +1,6 @@
 package store
 
-// Provisional next migration; allocate/renumber in merge order before release.
+// Migration v32 follows the schedule-entry identity migration v31.
 const scheduleCursorMigrationVersion = 32
 const scheduleCursorSchema = `
 ALTER TABLE schedule_fires ADD COLUMN last_fired_at INTEGER;

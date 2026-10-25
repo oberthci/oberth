@@ -134,9 +134,14 @@ memory. A skip does not advance the schedule, so the entry fires on the next
 tick once the repository is idle, including after a server restart. The latest
 outcome and its time remain visible independently of the last successful fire.
 A known-due entry with no successful fire retains a pending cursor, so the first
-busy skip also survives restart. Migration v32 (provisional allocation, #1190)
-backfills surviving successful rows; an older skip whose fire history was
-already overwritten becomes pending rather than inventing a successful time.
+busy skip also survives restart. Migration v32 (#1190) backfills surviving
+successful rows. Entries whose latest row is skipped, failed or paused become
+due once immediately after upgrade because their successful-fire history is
+unavailable; they run on the next eligible tick once the repository is idle and
+scheduling is enabled, then resume their normal cadence.
+
+Enqueueing a run and recording its successful fire remain separate operations.
+A crash between them can still enqueue the same occurrence again after restart.
 
 **After downtime each schedule runs once, then resumes.** Never once per missed
 fire: three days of downtime on an hourly schedule would otherwise mean 72 runs
