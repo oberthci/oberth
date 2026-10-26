@@ -549,5 +549,5 @@ Next steps:
    needed beyond the pod's own identity):
 
      kubectl exec -n $NAMESPACE deploy/oberth -- \\
-       oberth secretstore verify oberth/upstream/<org>/<repo>/github-token
+       /usr/local/bin/oberth secretstore verify oberth/upstream/<org>/<repo>/github-token
 SUMMARY

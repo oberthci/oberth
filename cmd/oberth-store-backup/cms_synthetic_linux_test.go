@@ -70,7 +70,7 @@ func TestEncryptedBackupActualCMS(t *testing.T) {
 		t.Fatal(e)
 	}
 	defer func() { _ = raw.Close() }()
-	if _, e := raw.Exec("ALTER TABLE step_results DROP COLUMN termination_json; DELETE FROM schema_migrations WHERE version=21; PRAGMA wal_autocheckpoint=0"); e != nil {
+	if _, e := raw.Exec("ALTER TABLE schedule_fires DROP COLUMN last_fired_at; DELETE FROM schema_migrations WHERE version=32; DROP TRIGGER run_schedule_entry_immutable; ALTER TABLE runs DROP COLUMN schedule_entry; DELETE FROM schema_migrations WHERE version=31; DROP TRIGGER run_timing_claim; DROP TRIGGER run_timing_grant; DROP TRIGGER run_timing_park; DROP TRIGGER run_timing_terminal; DROP TABLE step_timings; DROP TABLE run_admission_timings; DROP TABLE run_timings; DROP INDEX runs_admission_idx; ALTER TABLE runs DROP COLUMN admission_sequence; DROP TABLE kubevirt_grants; DROP TABLE uplink_scopes; ALTER TABLE issues DROP COLUMN scope_upstream_id; ALTER TABLE step_results DROP COLUMN termination_json; DELETE FROM schema_migrations WHERE version>=21; PRAGMA wal_autocheckpoint=0"); e != nil {
 		t.Fatal(e)
 	}
 	if _, e := db.AppendAuditAction(ctx, model.AuditActionSpec{Actor: "synthetic", Action: "backup", ResourceType: "fixture", ResourceID: "DATABASE_SECRET_CANARY_NEVER_PUBLIC"}); e != nil {

@@ -109,6 +109,16 @@ func (b *goGitBackend) remoteAuth(ctx context.Context, remote string) (string, t
 		port = "22"
 	}
 	algorithms := database.HostKeyAlgorithms(net.JoinHostPort(parsed.Hostname(), port))
+	// A pinned CA may sign a host key of a different family. Offer modern
+	// certificate algorithms; the strict callback still verifies the CA,
+	// principal, validity and revocation for the actual host certificate.
+	for _, pin := range database.HostKeys(net.JoinHostPort(parsed.Hostname(), port)) {
+		if pin.Cert {
+			algorithms = append(algorithms, ssh.CertAlgoED25519v01, ssh.CertAlgoECDSA256v01, ssh.CertAlgoECDSA384v01, ssh.CertAlgoECDSA521v01, ssh.CertAlgoRSASHA256v01, ssh.CertAlgoRSASHA512v01)
+			break
+		}
+	}
+	algorithms = slices.DeleteFunc(algorithms, func(algorithm string) bool { return algorithm == ssh.KeyAlgoRSA || algorithm == ssh.CertAlgoRSAv01 })
 	if len(algorithms) == 0 {
 		return "", nil, errors.New("SSH endpoint has no pinned host key")
 	}

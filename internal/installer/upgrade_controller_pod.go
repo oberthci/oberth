@@ -37,7 +37,7 @@ func verifyControllerServer(ctx context.Context, cfg UpgradeConfig, deps Deps, d
 	if run == nil {
 		run = DefaultRunCommand
 	}
-	args := []string{"exec", "-c", "oberth", "-n", cfg.Namespace, pod.Name, "--", "oberth", "version"}
+	args := []string{"exec", "-c", "oberth", "-n", cfg.Namespace, pod.Name, "--", "/usr/local/bin/oberth", "version"}
 	if deps.ContextName != "" {
 		args = append([]string{"--context", deps.ContextName}, args...)
 	}

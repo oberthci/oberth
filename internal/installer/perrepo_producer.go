@@ -108,7 +108,7 @@ func produceFromAccessList(ctx context.Context, run CommandRunner, contextName, 
 	if contextName != "" {
 		baseArgs = append(baseArgs, "--context", contextName)
 	}
-	baseArgs = append(baseArgs, "-n", namespace, "deploy/oberth", "--", "oberth", "access", "list")
+	baseArgs = append(baseArgs, "-n", namespace, "deploy/oberth", "--", "/usr/local/bin/oberth", "access", "list")
 
 	// Try --json first (available since the version shipping this code).
 	jsonArgs := append(append([]string(nil), baseArgs...), "--json")
@@ -310,7 +310,7 @@ func ProducePerStepIdentities(ctx context.Context, run CommandRunner, contextNam
 	if contextName != "" {
 		baseArgs = append(baseArgs, "--context", contextName)
 	}
-	baseArgs = append(baseArgs, "-n", namespace, "deploy/oberth", "--", "oberth", "access", "list")
+	baseArgs = append(baseArgs, "-n", namespace, "deploy/oberth", "--", "/usr/local/bin/oberth", "access", "list")
 	jsonArgs := append(append([]string(nil), baseArgs...), "--json")
 	out, err := run(ctx, nil, "kubectl", jsonArgs...)
 	if err != nil {

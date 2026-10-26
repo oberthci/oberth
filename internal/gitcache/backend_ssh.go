@@ -132,14 +132,14 @@ func (s *strictSSHSession) ReceivePack(ctx context.Context, req *packp.Reference
 	if err := ctx.Err(); err != nil {
 		return nil, s.failure(err)
 	}
+	if !req.Capabilities.Supports(capability.ReportStatus) {
+		return nil, s.failure(errors.New("upstream must support report-status for attributable publication"))
+	}
 	if err := req.Encode(s.stdin); err != nil {
 		return nil, s.failure(err)
 	}
 	if err := s.stdin.Close(); err != nil {
 		return nil, s.failure(err)
-	}
-	if !req.Capabilities.Supports(capability.ReportStatus) {
-		return nil, s.failure(errors.New("upstream must support report-status for attributable publication"))
 	}
 	response := packp.NewReportStatus()
 	if err := response.Decode(s.stdout); err != nil {

@@ -240,8 +240,7 @@ func serverCACertificate(ctx context.Context, cfg Config, deps Deps) ([]byte, er
 	}
 	// The PKI CA (ca.crt) is what clients pin when the server issues its own
 	// short-lived leaf; older servers only have the self-signed tls.crt.
-	args = append(args, "exec", "-n", ns, "deploy/oberth", "-c", "oberth", "--", "sh", "-c",
-		"cat /run/oberth-identities/server/ca.crt 2>/dev/null || cat /run/oberth-identities/server/tls.crt")
+	args = append(args, "exec", "-n", ns, "deploy/oberth", "-c", "oberth", "--", "/usr/local/bin/oberth", "admin", "read-file", "/run/oberth-identities/server/ca.crt", "/run/oberth-identities/server/tls.crt")
 	certificate, err := deps.RunCommand(ctx, nil, "kubectl", args...)
 	if err != nil {
 		return nil, errors.New("could not retrieve server public certificate")

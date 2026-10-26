@@ -34,7 +34,7 @@ func clientAccessDeps(t *testing.T, input string) (Deps, *bytes.Buffer, string) 
 		// on. A test that wants that path stubs LookPath itself.
 		LookPath: func(string) (string, error) { return "", errors.New("not found in test") },
 		RunCommand: func(_ context.Context, _ []byte, name string, args ...string) ([]byte, error) {
-			if name == "kubectl" && len(args) > 0 && strings.Contains(args[len(args)-1], "/run/oberth-identities/server/ca.crt") {
+			if name == "kubectl" && len(args) > 0 && strings.Contains(strings.Join(args, " "), "/usr/local/bin/oberth admin read-file /run/oberth-identities/server/ca.crt") {
 				return []byte("-----BEGIN CERTIFICATE-----\ntest\n-----END CERTIFICATE-----\n"), nil
 			}
 			return nil, fmt.Errorf("test ran an unstubbed command: %s %s", name, strings.Join(args, " "))
@@ -163,7 +163,7 @@ func TestClientAccessRegistersWithClaudeCodeWhenItIsPresent(t *testing.T) {
 	var ran [][]string
 	deps.LookPath = func(name string) (string, error) { return "/usr/local/bin/" + name, nil }
 	deps.RunCommand = func(_ context.Context, _ []byte, name string, args ...string) ([]byte, error) {
-		if name == "kubectl" && len(args) > 0 && strings.Contains(args[len(args)-1], "/run/oberth-identities/server/ca.crt") {
+		if name == "kubectl" && len(args) > 0 && strings.Contains(strings.Join(args, " "), "/usr/local/bin/oberth admin read-file /run/oberth-identities/server/ca.crt") {
 			return []byte("-----BEGIN CERTIFICATE-----\ntest\n-----END CERTIFICATE-----\n"), nil
 		}
 		ran = append(ran, append([]string{name}, args...))

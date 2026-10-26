@@ -5,13 +5,17 @@ COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 DATE ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo unknown)
 GO_BUILD_FLAGS := -trimpath -buildvcs=false -ldflags="-s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.date=$(DATE)"
 
-.PHONY: build test lint images build-linux-amd64 build-linux-arm64 release-local helm-lint clean
+.PHONY: build test test-gitcache-backends lint images build-linux-amd64 build-linux-arm64 release-local helm-lint clean
 
 build:
 	$(GOENV) CGO_ENABLED=0 go build $(GO_BUILD_FLAGS) -o bin/$(BINARY) ./cmd/oberth
 
 test:
 	$(GOENV) go test -race -count=1 ./...
+	$(GOENV) ./hack/test-gitcache-backends.sh cli
+
+test-gitcache-backends:
+	$(GOENV) ./hack/test-gitcache-backends.sh
 
 lint:
 	$(GOENV) go vet ./...

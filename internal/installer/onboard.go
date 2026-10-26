@@ -135,7 +135,7 @@ func kubectlOberthArgs(cfg Config, deps Deps, stdinAttached bool, command ...str
 	if deps.ContextName != "" {
 		args = append(args, "--context", deps.ContextName)
 	}
-	args = append(args, "-c", "oberth", "-n", ns, "deploy/oberth", "--", "oberth")
+	args = append(args, "-c", "oberth", "-n", ns, "deploy/oberth", "--", "/usr/local/bin/oberth")
 	return append(args, command...)
 }
 
@@ -335,7 +335,7 @@ func runOnboarding(ctx context.Context, cfg Config, deps Deps, tw *tableWriter, 
 		if ns == "" {
 			ns = DefaultNamespace
 		}
-		_, _ = fmt.Fprintf(w, "Uplink setup did not complete (%v).\nAdd one later with:\n\n    kubectl exec -i -n %s deploy/oberth -- oberth uplink add - you@host < ~/.ssh/id_ed25519.pub\n\n", uplinkErr, ns)
+		_, _ = fmt.Fprintf(w, "Uplink setup did not complete (%v).\nAdd one later with:\n\n    kubectl exec -i -n %s deploy/oberth -- /usr/local/bin/oberth uplink add - you@host < ~/.ssh/id_ed25519.pub\n\n", uplinkErr, ns)
 		if deps.StepProgressSink != nil {
 			deps.StepProgressSink("mint uplink", "pending")
 		}
@@ -389,7 +389,7 @@ func runOnboarding(ctx context.Context, cfg Config, deps Deps, tw *tableWriter, 
 		} else {
 			_, _ = fmt.Fprintf(w, "Retrieve the upstream public key, register it with your forge account, then verify the connection:\n")
 		}
-		_, _ = fmt.Fprintf(w, "\n    kubectl exec -n %s deploy/oberth -- oberth upstream add --yes --no-wait %s %s\n", cfg.Namespace, name, baseURL)
+		_, _ = fmt.Fprintf(w, "\n    kubectl exec -n %s deploy/oberth -- /usr/local/bin/oberth upstream add --yes --no-wait %s %s\n", cfg.Namespace, name, baseURL)
 		return ErrOnboardingPartial
 	}
 

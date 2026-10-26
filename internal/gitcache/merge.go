@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"sort"
 	"strings"
 	"time"
@@ -147,24 +146,14 @@ func flattenMergeTree(ctx context.Context, r *git.Repository, hash plumbing.Hash
 	if err != nil {
 		return nil, err
 	}
-	walk := object.NewTreeWalker(tree, true, nil)
-	defer walk.Close()
 	entries := map[string]object.TreeEntry{}
-	for {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		name, entry, err := walk.Next()
-		if errors.Is(err, io.EOF) {
-			return entries, nil
-		}
-		if err != nil {
-			return nil, err
-		}
+	err = walkGoTree(ctx, r, tree, func(name string, entry object.TreeEntry) error {
 		if entry.Mode != filemode.Dir {
 			entries[name] = entry
 		}
-	}
+		return nil
+	})
+	return entries, err
 }
 
 type mergeTreeNode struct {

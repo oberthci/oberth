@@ -892,7 +892,7 @@ func testRunUpgradeFullFlow(t *testing.T, auditFails bool) {
 				if !verified || name != "kubectl" {
 					t.Fatalf("audit before verification: %s %v", name, args)
 				}
-				want := []string{"exec", "-c", "oberth", "-n", "oberth", "deploy/oberth", "--", "oberth", "audit", "record", "upgrade.completed", "--details", `{"from":"0.12.34","to":"0.12.35"}`}
+				want := []string{"exec", "-c", "oberth", "-n", "oberth", "deploy/oberth", "--", "/usr/local/bin/oberth", "audit", "record", "upgrade.completed", "--details", `{"from":"0.12.34","to":"0.12.35"}`}
 				if !reflect.DeepEqual(args, want) {
 					t.Fatalf("audit args=%v want=%v", args, want)
 				}

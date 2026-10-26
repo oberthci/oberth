@@ -46,6 +46,16 @@ resource/custody requirements are in [database-backup.md](docs/database-backup.m
   hands them to UID/GID `65534` before the server starts; no manual node
   preparation is required. The two roots must not be equal, nested, aliased, or
   located under a critical system directory.
+- The scratch server image runs only `/usr/local/bin/oberth`. The cache init
+  and restore file-tool container use the shared digest-pinned BusyBox utility
+  image. Restore probes the target server schema in a separate native init
+  command; it never runs a shell in the server image. Public certificate/key
+  reads and database hashes use local `oberth admin read-file` / `hash-db`
+  commands over authorized Kubernetes exec. A server predating native backup
+  support is copied through a temporary read-only utility PVC mount on its
+  existing node, preserving the before/after hash checks without shell exec
+  in the server. No maintenance helper mounts a live database into a pipeline.
+
 
 ### Deployment protocol identity
 

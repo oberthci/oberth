@@ -91,6 +91,10 @@ func TestConservativePromotionMerge(t *testing.T) {
 					if parents := runGit(t, ready.Path, "show", "-s", "--format=%P", candidate.MergedSHA); parents != base+" "+source {
 						t.Fatalf("merge parents=%s", parents)
 					}
+					wantTree := strings.TrimSpace(strings.SplitN(runGit(t, repository.work, "merge-tree", "--write-tree", base, source), "\n", 2)[0])
+					if got := runGit(t, ready.Path, "rev-parse", candidate.MergedSHA+"^{tree}"); got != wantTree {
+						t.Fatalf("merge tree=%s, git merge-tree=%s", got, wantTree)
+					}
 					if err := cache.PushPromotion(t.Context(), "example", "main", candidate.MergedSHA); err != nil {
 						t.Fatal(err)
 					}

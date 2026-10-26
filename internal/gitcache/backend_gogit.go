@@ -578,19 +578,7 @@ func goArchive(ctx context.Context, r *git.Repository, revision string, out io.W
 	}
 	archive := tar.NewWriter(out)
 	defer func() { result = errors.Join(result, archive.Close()) }()
-	walk := object.NewTreeWalker(tree, true, nil)
-	defer walk.Close()
-	for {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		name, entry, err := walk.Next()
-		if errors.Is(err, io.EOF) {
-			return nil
-		}
-		if err != nil {
-			return err
-		}
+	return walkGoTree(ctx, r, tree, func(name string, entry object.TreeEntry) error {
 		header := &tar.Header{Name: name, Mode: 0o664, ModTime: commit.Committer.When}
 		switch entry.Mode {
 		case filemode.Dir:
@@ -651,5 +639,6 @@ func goArchive(ctx context.Context, r *git.Repository, revision string, out io.W
 				return errors.Join(copyErr, closeErr)
 			}
 		}
-	}
+		return nil
+	})
 }

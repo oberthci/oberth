@@ -48,6 +48,11 @@ type gitSSHFixture struct {
 
 func startGitSSHFixture(t *testing.T, repo string, identity ssh.PublicKey) *gitSSHFixture {
 	t.Helper()
+	host, _ := testSSHSigner(t)
+	return startGitSSHFixtureWithHost(t, repo, identity, host)
+}
+func startGitSSHFixtureWithHost(t *testing.T, repo string, identity ssh.PublicKey, host ssh.Signer) *gitSSHFixture {
+	t.Helper()
 	gitBinary, err := exec.LookPath("git")
 	if err != nil {
 		t.Skip("git required for the upstream fixture")
@@ -56,7 +61,6 @@ func startGitSSHFixture(t *testing.T, repo string, identity ssh.PublicKey) *gitS
 	if err != nil {
 		t.Fatal(err)
 	}
-	host, _ := testSSHSigner(t)
 	fixture := &gitSSHFixture{url: "ssh://git@" + listener.Addr().String() + repo, hostKey: host.PublicKey()}
 	config := &ssh.ServerConfig{PublicKeyCallback: func(_ ssh.ConnMetadata, key ssh.PublicKey) (*ssh.Permissions, error) {
 		fixture.authCalls.Add(1)

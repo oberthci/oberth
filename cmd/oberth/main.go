@@ -66,6 +66,7 @@ Commands:
   wait-idle     Wait for the live daemon queue to empty (in-pod)
   backup        Write an encrypted backup of OpenBao state and the server database
   restore       Restore an oberth backup onto an installed Oberth
+  admin         Read local files or hash the database for maintenance
   serve         Start the Oberth server
   upstream      Manage upstream forge connections
   repo          Manage repository mappings
@@ -92,6 +93,8 @@ Commands:
 		return err
 	case "audit":
 		return runAudit(ctx, arguments[1:], output)
+	case "admin":
+		return runAdmin(ctx, arguments[1:], output)
 	case "init":
 		return runInit(ctx, arguments[1:], output)
 	case "validate":

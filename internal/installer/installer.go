@@ -2091,12 +2091,12 @@ Next steps:
   1. Register the upstream (interactive — generates and persists the deploy key):
 
        kubectl exec -it -n %[1]s deploy/oberth -- \
-         oberth upstream add <name> ssh://git@<forge>/<org>
+         /usr/local/bin/oberth upstream add <name> ssh://git@<forge>/<org>
 
   2. Add your first uplink (prints its bearer token and TLS fingerprint once):
 
        kubectl exec -i -n %[1]s deploy/oberth -- \
-         oberth uplink add - operator@host < ~/.ssh/id_ed25519.pub
+         /usr/local/bin/oberth uplink add - operator@host < ~/.ssh/id_ed25519.pub
 
   3. Clone an existing repository through Oberth:
 

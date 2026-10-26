@@ -169,7 +169,7 @@ func TestVerifyClearsPendingState(t *testing.T) {
 		t.Fatalf("verify must complete the install, status %q\n%s", h.w.state.Install.Status, h.viewAll())
 	}
 	ran := strings.Join(kubectl.commands, "\n")
-	if !strings.Contains(ran, "--context default exec -n oberth deploy/oberth -c oberth -- oberth upstream add --yes --no-wait github ssh://git@github.com/acme") {
+	if !strings.Contains(ran, "--context default exec -n oberth deploy/oberth -c oberth -- /usr/local/bin/oberth upstream add --yes --no-wait github ssh://git@github.com/acme") {
 		t.Fatalf("verify must re-run the registration against the chosen context:\n%s", ran)
 	}
 	if !strings.Contains(h.viewAll(), "installed and Ready") {

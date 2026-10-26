@@ -59,6 +59,7 @@
 #   setup --+--> lint --+--> test-store ----+--> build-amd64
 #           |           +--> test-service --+
 #           |           +--> test-rest -----+
+#           |           +--> test-gitcache-backends --+
 #           |           |                   |
 #           |           +--> chart ---------+--> build-arm64
 #           |                               |
@@ -110,6 +111,9 @@ spec:
       - name: test-rest
         template: test-rest
         depends: lint
+      - name: test-gitcache-backends
+        template: test-gitcache-backends
+        depends: lint
       - name: test-openbao
         template: test-openbao
         depends: setup
@@ -130,16 +134,16 @@ spec:
         depends: setup
       - name: build-amd64
         template: build-amd64
-        depends: "test-store && test-service && test-rest && chart"
+        depends: "test-store && test-service && test-rest && test-gitcache-backends && chart"
       - name: build-arm64
         template: build-arm64
-        depends: "test-store && test-service && test-rest && chart"
+        depends: "test-store && test-service && test-rest && test-gitcache-backends && chart"
       - name: build-darwin-amd64
         template: build-darwin-amd64
-        depends: "test-store && test-service && test-rest && chart"
+        depends: "test-store && test-service && test-rest && test-gitcache-backends && chart"
       - name: build-darwin-arm64
         template: build-darwin-arm64
-        depends: "test-store && test-service && test-rest && chart"
+        depends: "test-store && test-service && test-rest && test-gitcache-backends && chart"
 
   # ---- setup burn (8 sequential steps) ----
   # Maps to: Test("setup", repositorySteps(inlineToolchainSteps()...)...)
@@ -967,6 +971,68 @@ spec:
       workingDir: /work/src
       command: ["/usr/bin/python3"]
       args: ["-I", "-S", "-B", ".oberth/test-packages.py", "rest"]
+      env:
+      - name: GOMAXPROCS
+        value: "2"
+      - name: CGO_ENABLED
+        value: "1"
+      - name: PATH
+        value: "/tmp/oberth-tools/bin:/usr/local/bin:/usr/bin:/bin"
+      - name: OBERTH_TOOLS_DIR
+        value: "/tmp/oberth-tools"
+      - name: HOME
+        value: "/tmp"
+      - name: GOPATH
+        value: "/tmp/oberth-tools/gopath"
+      - name: GOTOOLCHAIN
+        value: "local"
+      - name: GOWORK
+        value: "off"
+      - name: GOENV
+        value: "off"
+      - name: GOMODCACHE
+        value: "/cache/gomod"
+      - name: GOCACHE
+        value: "/cache/gobuild"
+      - name: GIT_TERMINAL_PROMPT
+        value: "0"
+      - name: KUBEBUILDER_ASSETS
+        value: ""
+      - name: TRIVY_CACHE_DIR
+        value: "/tmp/oberth-trivy"
+      - name: GOLANGCI_LINT_CACHE
+        value: "/tmp/oberth-tools/cache/golangci-lint"
+      volumeMounts:
+      - name: work
+        mountPath: /tmp/oberth-tools
+        subPath: tools
+        readOnly: true
+      - name: work
+        mountPath: /cache/gomod
+        subPath: gomod
+      - name: work
+        mountPath: /cache/gobuild
+        subPath: gobuild
+      - name: work
+        mountPath: /tmp/oberth-trivy
+        subPath: trivy-cache
+      resources:
+        requests:
+          cpu: "2"
+          memory: "4Gi"
+        limits:
+          cpu: "2"
+          memory: "4Gi"
+
+  # Git cache parity is a binding source gate for both adapters during the
+  # one-release CLI transition. Ordinary package tests use the Go default.
+  - name: test-gitcache-backends
+    automountServiceAccountToken: false
+    container:
+      image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
+      workingDir: /work/src
+      command: ["/bin/sh"]
+      args: ["hack/test-gitcache-backends.sh"]
       env:
       - name: GOMAXPROCS
         value: "2"

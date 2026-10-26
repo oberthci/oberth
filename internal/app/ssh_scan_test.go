@@ -125,3 +125,57 @@ func TestScanSSHHostKeysCancellationClosesStalledHandshake(t *testing.T) {
 		t.Fatal("cancelled handshake retained its TCP connection")
 	}
 }
+
+func TestScanSSHHostKeysStalledFamilyDoesNotStarveOthers(t *testing.T) {
+	t.Parallel()
+	_, private, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	signer, err := ssh.NewSignerFromKey(private)
+	if err != nil {
+		t.Fatal(err)
+	}
+	config := &ssh.ServerConfig{NoClientAuth: true}
+	config.AddHostKey(signer)
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	var workers sync.WaitGroup
+	var accepts atomic.Int64
+	workers.Go(func() {
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			number := accepts.Add(1)
+			workers.Go(func() {
+				defer func() { _ = conn.Close() }()
+				stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
+				defer stop()
+				// ECDSA stalls after ED25519 has already succeeded. The RSA probe must
+				// still run rather than inheriting the exhausted aggregate deadline.
+				if number == 2 {
+					_, _ = io.Copy(io.Discard, conn)
+					return
+				}
+				client, _, _, err := ssh.NewServerConn(conn, config)
+				if err == nil {
+					_ = client.Close()
+				}
+			})
+		}
+	})
+	t.Cleanup(func() { cancel(); _ = listener.Close(); workers.Wait() })
+	host, port, _ := net.SplitHostPort(listener.Addr().String())
+	keys, err := scanSSHHostKeys(t.Context(), host, port, 100*time.Millisecond)
+	if err != nil || len(keys) != 1 {
+		t.Fatalf("probe lost successful family: keys=%d err=%v", len(keys), err)
+	}
+	if accepts.Load() != 3 {
+		t.Fatalf("later family starved: connections=%d", accepts.Load())
+	}
+}

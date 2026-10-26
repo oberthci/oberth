@@ -383,7 +383,7 @@ func runUpstreamAddFromHost(ctx context.Context, arguments []string, output io.W
 	} else {
 		execArgs = append(execArgs, "-i")
 	}
-	execArgs = append(execArgs, "-c", "oberth", "-n", *namespace, "deploy/oberth", "--", "oberth", "upstream", "add")
+	execArgs = append(execArgs, "-c", "oberth", "-n", *namespace, "deploy/oberth", "--", "/usr/local/bin/oberth", "upstream", "add")
 	if *autoYes || provided {
 		// --yes: auto-confirm generation or skip it (key already persisted).
 		execArgs = append(execArgs, "--yes")
@@ -486,7 +486,7 @@ func hostProvideDeployKey(ctx context.Context, deps hostUpstreamDeps, namespace,
 	// Stream the key into the pod via kubectl exec -i. The in-pod provide-key
 	// handler validates, checks overwrite, gates, and applies via SSA patch.
 	execArgs := []string{"exec", "-i", "-c", "oberth", "-n", namespace, "deploy/oberth", "--",
-		"oberth", "upstream", "provide-key",
+		"/usr/local/bin/oberth", "upstream", "provide-key",
 		"--namespace", namespace,
 		"--upstream-key-secret", secretName,
 	}
@@ -1438,7 +1438,7 @@ func runUplinkWithDependencies(ctx context.Context, arguments []string, input io
 	warnUplinkSharesUpstreamKey(output, fingerprint, upstreamKeyDirectory())
 	if _, err := app.TLSCertificateFingerprint(*certificatePath); err != nil {
 		if _, saErr := os.Stat("/var/run/secrets/kubernetes.io/serviceaccount"); saErr != nil {
-			return fmt.Errorf("this command runs inside the Oberth pod; use:\n  kubectl exec -i -n oberth deploy/oberth -- oberth uplink add - <identity@host> < ~/.ssh/id_ed25519.pub\n\npod error: %w", err)
+			return fmt.Errorf("this command runs inside the Oberth pod; use:\n  kubectl exec -i -n oberth deploy/oberth -- /usr/local/bin/oberth uplink add - <identity@host> < ~/.ssh/id_ed25519.pub\n\npod error: %w", err)
 		}
 		return err
 	}

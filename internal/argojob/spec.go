@@ -32,6 +32,7 @@ import (
 	k8scontent "k8s.io/apimachinery/pkg/api/validate/content"
 	k8svalidation "k8s.io/apimachinery/pkg/util/validation"
 
+	"github.com/oberthci/oberth/internal/containerimage"
 	"github.com/oberthci/oberth/internal/goproxy"
 	"github.com/oberthci/oberth/internal/vmrunner"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
@@ -63,7 +64,7 @@ const (
 	// defaultSourceSeedImage holds the run's claim open for the single exec
 	// that fills it. It needs a shell and tar; busybox is pinned by digest for
 	// the same reason every other image here is.
-	defaultSourceSeedImage = "busybox:1.37@sha256:ab33eacc8251e3807b85bb6dba570e4698c3998eca6f0fc2ccb60575a563ea74"
+	defaultSourceSeedImage = containerimage.Utility
 )
 
 // Config is the administrator-owned half of the Argo engine. Every field that

@@ -10,6 +10,7 @@ import (
 	git "github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/filemode"
+	"github.com/go-git/go-git/v5/plumbing/object"
 	"github.com/go-git/go-git/v5/plumbing/storer"
 )
 
@@ -146,6 +147,9 @@ func validateGoGraph(ctx context.Context, r *git.Repository, roots []plumbing.Ha
 		}
 		switch encoded.Type() {
 		case plumbing.CommitObject:
+			if err := validateGoHeaders(ctx, encoded); err != nil {
+				return err
+			}
 			commit, err := r.CommitObject(item.hash)
 			if err != nil {
 				return err
@@ -166,11 +170,24 @@ func validateGoGraph(ctx context.Context, r *git.Repository, roots []plumbing.Ha
 				return err
 			}
 			names := map[string]bool{}
-			for _, entry := range tree.Entries {
-				if names[entry.Name] || entry.Name == "" || entry.Name == "." || entry.Name == ".." || strings.EqualFold(entry.Name, ".git") || strings.ContainsAny(entry.Name, "/\x00") {
+			order := object.TreeEntrySorter(tree.Entries)
+			for index, entry := range tree.Entries {
+				if index > 0 && !order.Less(index-1, index) {
+					return errors.New("invalid Git tree sort order")
+				}
+
+				if names[entry.Name] || entry.Name == "" || entry.Name == "." || entry.Name == ".." || gitMetadataAlias(entry.Name) || strings.ContainsAny(entry.Name, "/\x00") {
 					return errors.New("invalid Git tree path")
 				}
 				names[entry.Name] = true
+				if isGitmodulesName(entry.Name) {
+					if entry.Mode != filemode.Regular && entry.Mode != filemode.Executable && entry.Mode != filemode.Deprecated {
+						return errors.New(".gitmodules must be a regular blob")
+					}
+					if err := validateGoGitmodules(ctx, r, entry); err != nil {
+						return err
+					}
+				}
 				kind := plumbing.BlobObject
 				switch entry.Mode {
 				case filemode.Dir:
@@ -184,6 +201,9 @@ func validateGoGraph(ctx context.Context, r *git.Repository, roots []plumbing.Ha
 				queue = append(queue, node{entry.Hash, kind})
 			}
 		case plumbing.TagObject:
+			if err := validateGoHeaders(ctx, encoded); err != nil {
+				return err
+			}
 			tag, err := r.TagObject(item.hash)
 			if err != nil {
 				return err

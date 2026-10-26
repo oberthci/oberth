@@ -380,6 +380,8 @@ func (c *fakeBackupCluster) run(_ context.Context, input []byte, name string, ar
 			}
 		}
 		return nil, nil
+	case "logs":
+		return []byte(fmt.Sprintf("%d\n", c.schema)), nil
 	case "exec":
 	default:
 		c.t.Fatalf("unexpected kubectl %v", args)
@@ -390,6 +392,13 @@ func (c *fakeBackupCluster) run(_ context.Context, input []byte, name string, ar
 	command := args[separator+1:]
 	if pod == "openbao-0" {
 		return c.bao.handle(command, input)
+	}
+	if container == serverContainerName && command[0] != "/usr/local/bin/oberth" {
+		c.t.Fatalf("non-native exec in scratch server: %v", command)
+	}
+	if command[0] == "/usr/local/bin/oberth" {
+		command = append([]string(nil), command...)
+		command[0] = "oberth"
 	}
 	joined := strings.Join(command, " ")
 	switch {
@@ -405,7 +414,7 @@ func (c *fakeBackupCluster) run(_ context.Context, input []byte, name string, ar
 			return nil, errors.New(`kubectl: exit status 2: oberth: usage error: unknown command "backup"`)
 		}
 		return c.database, nil
-	case len(command) > 2 && command[2] == podSQLiteHashesScript:
+	case (len(command) > 2 && command[2] == utilitySQLiteHashesScript) || strings.HasPrefix(joined, "oberth admin hash-db "):
 		var lines []string
 		for _, suffix := range []string{"", "-wal"} {
 			if body, ok := c.rawFiles[serverDatabasePath+suffix]; ok {
@@ -414,6 +423,8 @@ func (c *fakeBackupCluster) run(_ context.Context, input []byte, name string, ar
 			}
 		}
 		return []byte(strings.Join(lines, "\n") + "\n"), nil
+	case strings.HasPrefix(joined, "oberth admin read-file "):
+		return c.rawFiles[command[3]], nil
 	case command[0] == "cat":
 		return c.rawFiles[command[1]], nil
 	case container == restoreHelperContainer && command[2] == stageResetScript:

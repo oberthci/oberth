@@ -147,6 +147,17 @@ func (b *goGitBackend) receiveGoPack(ctx context.Context, r *git.Repository, req
 		report.UnpackStatus = knownErr.Error()
 		return report, knownErr
 	}
+	quarantine, err := newReceiveQuarantine(r)
+	if err != nil {
+		report.UnpackStatus = err.Error()
+		return report, err
+	}
+	defer func() {
+		if err := quarantine.close(); err != nil {
+			b.cache.logger.Printf("receive quarantine cleanup failed: %v", err)
+		}
+	}()
+	validation := quarantine.repository
 	needsPack := false
 	for _, command := range request.Commands {
 		if !command.New.IsZero() {
@@ -155,7 +166,7 @@ func (b *goGitBackend) receiveGoPack(ctx context.Context, r *git.Repository, req
 		}
 	}
 	if request.Packfile != nil && needsPack {
-		err := packfile.UpdateObjectStorage(r.Storer, contextReader{ctx, request.Packfile})
+		err := packfile.UpdateObjectStorage(validation.Storer, contextReader{ctx, request.Packfile})
 		closeErr := request.Packfile.Close()
 		if err != nil || closeErr != nil {
 			failure := errors.Join(err, closeErr)
@@ -171,7 +182,30 @@ func (b *goGitBackend) receiveGoPack(ctx context.Context, r *git.Repository, req
 		}
 	}
 	if failure == nil {
-		if err := validateGoGraph(ctx, r, roots, known); err != nil {
+		if err := quarantine.validate(ctx, roots, known); err != nil {
+			report.UnpackStatus = err.Error()
+			return report, err
+		}
+	}
+	// Decide every ref before moving any objects. Rejected-only requests
+	// discard their quarantine, including well-formed but untrusted objects.
+	decisions := make([]error, len(request.Commands))
+	accepted := false
+	for index, command := range request.Commands {
+		decision := failure
+		if decision == nil {
+			decision = b.receiveRefPolicy(ctx, validation, command)
+		}
+		if decision == nil {
+			decision = checkReceiveOld(r, command)
+		}
+		decisions[index] = decision
+		if decision == nil {
+			accepted = true
+		}
+	}
+	if accepted {
+		if err := quarantine.promote(ctx); err != nil {
 			report.UnpackStatus = err.Error()
 			return report, err
 		}
@@ -179,11 +213,8 @@ func (b *goGitBackend) receiveGoPack(ctx context.Context, r *git.Repository, req
 	// Global admission checks are evaluated before the first mutation. Invalid
 	// individual ref updates remain per-ref refusals, matching receive-pack.
 	var first error
-	for _, command := range request.Commands {
-		err := failure
-		if err == nil {
-			err = b.receiveRefPolicy(ctx, r, command)
-		}
+	for index, command := range request.Commands {
+		err := decisions[index]
 		if err == nil {
 			err = applyReceiveRef(r, command)
 		}
@@ -334,6 +365,23 @@ func (b *goGitBackend) receiveRefPolicy(ctx context.Context, r *git.Repository, 
 	}
 	if !yes {
 		return fmt.Errorf("tag commit is not reachable from the fresh upstream default branch — promote the commit to the default branch first (promote <sha> %s), then tag", defaultBranch)
+	}
+	return nil
+}
+
+func checkReceiveOld(r *git.Repository, command *packp.Command) error {
+	current, err := r.Reference(command.Name, false)
+	if errors.Is(err, plumbing.ErrReferenceNotFound) {
+		if command.Old.IsZero() {
+			return nil
+		}
+		return errors.New("reference changed (CAS)")
+	}
+	if err != nil {
+		return err
+	}
+	if current.Type() != plumbing.HashReference || current.Hash() != command.Old {
+		return errors.New("reference changed (CAS)")
 	}
 	return nil
 }

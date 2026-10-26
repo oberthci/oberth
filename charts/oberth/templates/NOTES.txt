@@ -3,12 +3,12 @@ Oberth {{ .Chart.AppVersion }} — {{ .Values.service.type }} Service, {{ if eq 
 1. Register the upstream (interactive — generates and persists the deploy key):
 
      kubectl exec -it -n {{ .Release.Namespace }} deploy/{{ include "oberth.fullname" . }} -- \
-       oberth upstream add {{ .Values.upstream.name }} {{ .Values.upstream.baseURL }}
+       /usr/local/bin/oberth upstream add {{ .Values.upstream.name }} {{ .Values.upstream.baseURL }}
 
 2. Add your first uplink (prints its bearer token and TLS fingerprint once):
 
      kubectl exec -i -n {{ .Release.Namespace }} deploy/{{ include "oberth.fullname" . }} -- \
-       oberth uplink add - operator@host < ~/.ssh/id_ed25519.pub
+       /usr/local/bin/oberth uplink add - operator@host < ~/.ssh/id_ed25519.pub
 
 Like a vault before initialization, the pod stays Running but not ready (0/1)
 until step 1 completes; kubectl exec works throughout.
@@ -16,7 +16,7 @@ until step 1 completes; kubectl exec works throughout.
 
 Secret store: {{ .Values.secretstore.address }}. If the store side is not set
 up yet, run scripts/setup-secretstore.sh next to your OpenBao/Vault, then:
-kubectl exec -n {{ .Release.Namespace }} deploy/{{ include "oberth.fullname" . }} -- oberth secretstore verify
+kubectl exec -n {{ .Release.Namespace }} deploy/{{ include "oberth.fullname" . }} -- /usr/local/bin/oberth secretstore verify
 Trusted-plan Transit is available when secretstore.transit.enabled is set and
 requires a verified HTTPS secret store address.
 {{- end }}
@@ -30,5 +30,5 @@ secrets: https://github.com/oberthci/oberth#documentation (docs/mcp-setup.md)
 
 Enabling the Rekor witness on an existing deployment? Read the current audit
 chain head first:
-kubectl exec -n {{ .Release.Namespace }} deploy/{{ include "oberth.fullname" . }} -- oberth audit head
+kubectl exec -n {{ .Release.Namespace }} deploy/{{ include "oberth.fullname" . }} -- /usr/local/bin/oberth audit head
 Then set auditAnchor.acceptWitnessGenesis to that exact value for one restart.

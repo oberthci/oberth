@@ -134,7 +134,7 @@ this binary deliberately has no code path that accepts a store admin token.
 
 4. Prove the trust chain end to end from inside this pod:
 
-     kubectl exec -n oberth deploy/oberth -- oberth secretstore verify
+     kubectl exec -n oberth deploy/oberth -- /usr/local/bin/oberth secretstore verify
 `, hex.EncodeToString(digest[:]))
 	return err
 }

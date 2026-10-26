@@ -120,7 +120,7 @@ spec:
         # step: it creates the isolated cache roots and hands them to the
         # unprivileged service and runner user before anything else starts.
         - name: prepare-caches
-          image: {{ .Values.image.ref | quote }}
+          image: "busybox:1.37@sha256:ab33eacc8251e3807b85bb6dba570e4698c3998eca6f0fc2ccb60575a563ea74"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           command: ["/bin/sh", "-c", "for dir; do if [ -L \"$dir\" ]; then echo \"prepare-caches: refusing symlink at $dir\" >&2; exit 1; fi; if [ -e \"$dir\" ] && ! [ -d \"$dir\" ]; then echo \"prepare-caches: $dir exists and is not a directory\" >&2; exit 1; fi; done; exec install -d -m 0750 -o 65534 -g 65534 \"$@\"", "prepare-caches"]
           args:
@@ -154,6 +154,7 @@ spec:
         - name: oberth
           image: {{ .Values.image.ref | quote }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["/usr/local/bin/oberth"]
           args:
             - serve
             - --git-backend={{ .Values.gitBackend | default "go-git" }}

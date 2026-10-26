@@ -632,7 +632,7 @@ func queryRunningSchemaVersion(ctx context.Context, deps Deps, cfg UpgradeConfig
 	if run == nil {
 		run = DefaultRunCommand
 	}
-	args := []string{"exec", "-c", "oberth", "-n", cfg.Namespace, "deploy/oberth", "--", "oberth", "version", "--schema"}
+	args := []string{"exec", "-c", "oberth", "-n", cfg.Namespace, "deploy/oberth", "--", "/usr/local/bin/oberth", "version", "--schema"}
 	if deps.ContextName != "" {
 		args = append(args[:1], append([]string{"--context", deps.ContextName}, args[1:]...)...)
 	}
@@ -675,7 +675,7 @@ func verifyRunningVersion(ctx context.Context, deps Deps, cfg UpgradeConfig, tar
 	if run == nil {
 		run = DefaultRunCommand
 	}
-	args := []string{"exec", "-c", "oberth", "-n", cfg.Namespace, "deploy/oberth", "--", "oberth", "version"}
+	args := []string{"exec", "-c", "oberth", "-n", cfg.Namespace, "deploy/oberth", "--", "/usr/local/bin/oberth", "version"}
 	if deps.ContextName != "" {
 		args = append(args[:1], append([]string{"--context", deps.ContextName}, args[1:]...)...)
 	}
@@ -718,7 +718,7 @@ func verifyRunningVersion(ctx context.Context, deps Deps, cfg UpgradeConfig, tar
 		return runningVersion, nil
 	}
 	return "", fmt.Errorf("upgrade applied but unverified — verify manually: "+
-		"kubectl exec -n %s deploy/oberth -- oberth version (%w)", cfg.Namespace, lastErr)
+		"kubectl exec -n %s deploy/oberth -- /usr/local/bin/oberth version (%w)", cfg.Namespace, lastErr)
 }
 
 func printUpgradeDryRun(w io.Writer, cfg UpgradeConfig, result UpgradeResult, retryFailed bool) (UpgradeResult, error) {
@@ -810,7 +810,7 @@ func waitForUpgradeIdle(ctx context.Context, cfg UpgradeConfig, deps Deps) error
 		}
 	}()
 	defer func() { close(stop); <-joined }()
-	args := []string{"exec", "-c", "oberth", "-n", cfg.Namespace, "deploy/oberth", "--", "oberth", "wait-idle", "--timeout=" + limit.String()}
+	args := []string{"exec", "-c", "oberth", "-n", cfg.Namespace, "deploy/oberth", "--", "/usr/local/bin/oberth", "wait-idle", "--timeout=" + limit.String()}
 	if cfg.WaitFor == "critical" {
 		args = append(args, "--wait-for=critical")
 	}

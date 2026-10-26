@@ -11,6 +11,9 @@ image (or an operator-provided Git/OpenSSH installation). It does not install
 tools into the scratch image. Configure both the compatibility image digest
 and `gitBackend: cli` when testing rollback.
 
+The fixture default is also `go-git`. CI has a binding
+`test-gitcache-backends` lane which runs both adapters before any binary build;
+`make test` runs the ordinary default-backend suite and the CLI cache suite.
 Run all existing fixtures against both with:
 
 ```sh
@@ -91,3 +94,12 @@ checking their static ELF architecture, scanning substrate and repacked
 images, and publishing the exact reviewed OCI index with preserved digests
 before updating/releasing its `ServerSubstrate` reference. The CLI target is
 never a release substrate.
+
+Receive-pack unpacks into a private object directory. Graph/header checks and
+all per-ref policy/CAS prechecks run before promotion into the live object
+store. The temporary alternate for thin-pack bases is read-only and never
+copied into the live store. Rejected-only receives discard their object files;
+accepted receives promote immutable objects before atomic ref publication.
+Validation checks canonical tree order, raw commit/tag headers, portable .git
+aliases and .gitmodules name/path/URL/update fields. Merge/archive traversal
+propagates every missing-subtree error instead of accepting a partial walk.

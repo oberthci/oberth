@@ -29,6 +29,10 @@ import (
 	"strings"
 	"time"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	"github.com/oberthci/oberth/internal/containerimage"
 	"github.com/oberthci/oberth/internal/store"
 )
 
@@ -47,6 +51,9 @@ const (
 
 // kubectlExecArgs builds a `kubectl exec` argv for one container.
 func kubectlExecArgs(contextName, namespace, pod, container string, stdin bool, command ...string) []string {
+	if container == serverContainerName {
+		command = containerimage.ServerCommand(command)
+	}
 	args := []string{"exec"}
 	if stdin {
 		args = append(args, "-i")
@@ -65,6 +72,9 @@ func podSchemaVersion(ctx context.Context, run CommandRunner, contextName, names
 	if err != nil {
 		return 0, fmt.Errorf("read server schema version: %w%s", err, commandOutputSuffix(out))
 	}
+	return parsePodSchema(out)
+}
+func parsePodSchema(out []byte) (int, error) {
 	fields := strings.Fields(string(out))
 	if len(fields) == 0 {
 		return 0, errors.New("read server schema version: empty output")
@@ -91,7 +101,7 @@ func snapshotServerDatabase(ctx context.Context, deps backupDeps, namespace, pod
 		}
 		if strings.Contains(err.Error(), `unknown command "backup"`) {
 			_, _ = fmt.Fprintln(deps.Output, "  The deployed server predates `oberth backup database`; taking a hash-checked stable copy instead.")
-			return snapshotStableCopy, stableCopyDatabase(ctx, deps, namespace, pod, schema, protocol, workDir, destination)
+			return snapshotStableCopy, legacyStableCopyDatabase(ctx, deps, namespace, pod, schema, protocol, workDir, destination)
 		}
 		lastErr = err
 		if attempt < databaseSnapshotAttempts {
@@ -108,10 +118,10 @@ func snapshotServerDatabase(ctx context.Context, deps backupDeps, namespace, pod
 // the copy only when the in-pod hashes before and after it agree with each
 // other and with the bytes received, then builds the verified store archive
 // locally from that private copy.
-func stableCopyDatabase(ctx context.Context, deps backupDeps, namespace, pod string, schema int, protocol store.ProtocolConfig, workDir, destination string) error {
+func stableCopyDatabase(ctx context.Context, deps backupDeps, namespace, pod, container string, schema int, protocol store.ProtocolConfig, workDir, destination string) error {
 	var lastErr error
 	for attempt := 1; attempt <= databaseSnapshotAttempts; attempt++ {
-		lastErr = stableCopyOnce(ctx, deps, namespace, pod, schema, protocol, workDir, destination)
+		lastErr = stableCopyOnce(ctx, deps, namespace, pod, container, schema, protocol, workDir, destination)
 		if lastErr == nil {
 			return nil
 		}
@@ -125,13 +135,12 @@ func stableCopyDatabase(ctx context.Context, deps backupDeps, namespace, pod str
 	return fmt.Errorf("copy server database: %w", lastErr)
 }
 
-// podSQLiteHashesScript prints `sha256sum` lines for the database and its WAL
-// (when present). The path arrives as a positional parameter.
-const podSQLiteHashesScript = `for f in "$1" "$1-wal"; do if [ -f "$f" ]; then sha256sum "$f"; fi; done`
-
-func podSQLiteHashes(ctx context.Context, deps backupDeps, namespace, pod string) (map[string]string, error) {
-	out, err := deps.RunCommand(ctx, nil, "kubectl", kubectlExecArgs(deps.ContextName, namespace, pod, serverContainerName, false,
-		"sh", "-c", podSQLiteHashesScript, "sh", serverDatabasePath)...)
+func podSQLiteHashes(ctx context.Context, deps backupDeps, namespace, pod, container string) (map[string]string, error) {
+	command := []string{"/usr/local/bin/oberth", "admin", "hash-db", "--database", serverDatabasePath}
+	if container == databaseCopyContainer {
+		command = []string{"sh", "-c", utilitySQLiteHashesScript, "sh", serverDatabasePath}
+	}
+	out, err := deps.RunCommand(ctx, nil, "kubectl", kubectlExecArgs(deps.ContextName, namespace, pod, container, false, command...)...)
 	if err != nil {
 		return nil, fmt.Errorf("hash server database: %w%s", err, commandOutputSuffix(out))
 	}
@@ -148,8 +157,8 @@ func podSQLiteHashes(ctx context.Context, deps backupDeps, namespace, pod string
 	return hashes, nil
 }
 
-func stableCopyOnce(ctx context.Context, deps backupDeps, namespace, pod string, schema int, protocol store.ProtocolConfig, workDir, destination string) (resultErr error) {
-	before, err := podSQLiteHashes(ctx, deps, namespace, pod)
+func stableCopyOnce(ctx context.Context, deps backupDeps, namespace, pod, container string, schema int, protocol store.ProtocolConfig, workDir, destination string) (resultErr error) {
+	before, err := podSQLiteHashes(ctx, deps, namespace, pod, container)
 	if err != nil {
 		return err
 	}
@@ -164,8 +173,11 @@ func stableCopyOnce(ctx context.Context, deps backupDeps, namespace, pod string,
 		if !present {
 			continue
 		}
-		body, err := deps.runStdout(ctx, nil, "kubectl", kubectlExecArgs(deps.ContextName, namespace, pod, serverContainerName, false,
-			"cat", serverDatabasePath+suffix)...)
+		command := []string{"/usr/local/bin/oberth", "admin", "read-file", serverDatabasePath + suffix}
+		if container == databaseCopyContainer {
+			command = []string{"cat", serverDatabasePath + suffix}
+		}
+		body, err := deps.runStdout(ctx, nil, "kubectl", kubectlExecArgs(deps.ContextName, namespace, pod, container, false, command...)...)
 		if err != nil {
 			return fmt.Errorf("stream %s%s: %w", serverDatabasePath, suffix, err)
 		}
@@ -177,7 +189,7 @@ func stableCopyOnce(ctx context.Context, deps backupDeps, namespace, pod string,
 			return err
 		}
 	}
-	after, err := podSQLiteHashes(ctx, deps, namespace, pod)
+	after, err := podSQLiteHashes(ctx, deps, namespace, pod, container)
 	if err != nil {
 		return err
 	}
@@ -379,4 +391,52 @@ func readStoreArchiveFiles(r io.Reader, visit func(name string, body []byte)) er
 		}
 		visit(header.Name, body)
 	}
+}
+
+const databaseCopyContainer = "database-copy"
+const utilitySQLiteHashesScript = `for f in "$1" "$1-wal"; do if [ -f "$f" ]; then sha256sum "$f"; fi; done`
+
+// Pre-backup-subcommand images also predate native admin file commands. Mount
+// their PVC read-only in a pinned utility pod on the server's existing node;
+// never fall back to executing a shell inside an old/new server image.
+func legacyStableCopyDatabase(ctx context.Context, deps backupDeps, namespace, pod string, schema int, protocol store.ProtocolConfig, workDir, destination string) (result error) {
+	server, err := inspectServerDeployment(ctx, deps.Deps, namespace)
+	if err != nil {
+		return err
+	}
+	original, err := deps.KubeClient.CoreV1().Pods(namespace).Get(ctx, pod, metav1.GetOptions{})
+	if err != nil {
+		return err
+	}
+	stamp := strconv.FormatInt(time.Now().UnixNano(), 10)
+	helper := restoreHelperPod("oberth-backup-copy-"+stamp, namespace, stamp, server)
+	helper.Labels = map[string]string{"oberth.ci/database-copy": stamp}
+	helper.Spec.InitContainers = nil
+	helper.Spec.NodeName = original.Spec.NodeName
+	helper.Spec.Containers[0].Name = databaseCopyContainer
+	for index := range helper.Spec.Containers[0].VolumeMounts {
+		helper.Spec.Containers[0].VolumeMounts[index].ReadOnly = true
+	}
+	for index := range helper.Spec.Volumes {
+		if claim := helper.Spec.Volumes[index].PersistentVolumeClaim; claim != nil {
+			claim.ReadOnly = true
+		}
+	}
+	pods := deps.KubeClient.CoreV1().Pods(namespace)
+	if _, err := pods.Create(ctx, helper, metav1.CreateOptions{}); err != nil {
+		return fmt.Errorf("create legacy backup utility pod: %w", err)
+	}
+	defer func() {
+		cleanup, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		grace := int64(0)
+		err := pods.Delete(cleanup, helper.Name, metav1.DeleteOptions{GracePeriodSeconds: &grace})
+		if err != nil && !apierrors.IsNotFound(err) {
+			result = errors.Join(result, err)
+		}
+	}()
+	if err := waitForPodRunning(ctx, deps.Deps, namespace, "oberth.ci/database-copy="+stamp, time.Minute); err != nil {
+		return err
+	}
+	return stableCopyDatabase(ctx, deps, namespace, helper.Name, databaseCopyContainer, schema, protocol, workDir, destination)
 }

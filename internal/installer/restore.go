@@ -35,6 +35,7 @@ import (
 	"sigs.k8s.io/yaml"
 
 	"github.com/oberthci/oberth/internal/auditanchor"
+	"github.com/oberthci/oberth/internal/containerimage"
 	"github.com/oberthci/oberth/internal/store"
 )
 
@@ -643,9 +644,9 @@ func waitServerPodsGone(ctx context.Context, deps Deps, namespace, selector stri
 
 const restoreHelperContainer = "restore"
 
-// restoreHelperPod mounts the server's claim with the server's own image,
-// identity and placement, so files it writes carry the server's owner and it
-// schedules wherever the volume can attach.
+// restoreHelperPod uses the pinned utility image with the server's identity
+// and placement. A separate scratch-compatible init command probes the server
+// image schema; no shell or file tool ever runs in the server image.
 func restoreHelperPod(name, namespace, timestamp string, server serverDeployment) *corev1.Pod {
 	nobody := int64(65534)
 	podSecurity := &corev1.PodSecurityContext{}
@@ -676,9 +677,10 @@ func restoreHelperPod(name, namespace, timestamp string, server serverDeployment
 			NodeSelector:                 server.PodSpec.NodeSelector,
 			Tolerations:                  server.PodSpec.Tolerations,
 			Affinity:                     server.PodSpec.Affinity,
+			InitContainers:               []corev1.Container{{Name: "server-schema", Image: server.Image, Command: []string{"/usr/local/bin/oberth"}, Args: []string{"version", "--schema"}, SecurityContext: &corev1.SecurityContext{AllowPrivilegeEscalation: &noEscalation, ReadOnlyRootFilesystem: &readOnly, Capabilities: &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}}}}},
 			Containers: []corev1.Container{{
 				Name:            restoreHelperContainer,
-				Image:           server.Image,
+				Image:           containerimage.Utility,
 				ImagePullPolicy: corev1.PullIfNotPresent,
 				Command:         []string{"sleep", "3600"},
 				SecurityContext: &corev1.SecurityContext{
@@ -716,7 +718,15 @@ func swapDatabase(ctx context.Context, cfg RestoreConfig, deps backupDeps, archi
 	}
 
 	if target.Schema == 0 {
-		schema, err := podSchemaVersion(ctx, deps.RunCommand, deps.ContextName, cfg.Namespace, name, restoreHelperContainer)
+		logArgs := []string{"logs", "-n", cfg.Namespace, name, "-c", "server-schema"}
+		if deps.ContextName != "" {
+			logArgs = append([]string{"--context", deps.ContextName}, logArgs...)
+		}
+		out, err := deps.RunCommand(ctx, nil, "kubectl", logArgs...)
+		if err != nil {
+			return fmt.Errorf("read restore schema init log: %w", err)
+		}
+		schema, err := parsePodSchema(out)
 		if err != nil {
 			return err
 		}

@@ -138,7 +138,7 @@ auditAnchor:
   # One-shot operator acknowledgment for enabling the Rekor witness on an
   # EXISTING deployment that already has local audit history. Set to the exact
   # current audit chain head as "<auditID>:<sha256hex>" (read it with:
-  # kubectl exec -n <ns> deploy/oberth -- oberth audit head). Startup records
+  # kubectl exec -n <ns> deploy/oberth -- /usr/local/bin/oberth audit head). Startup records
   # the acknowledgment permanently in the audit chain and starts external
   # witnessing at that point; history before it is trusted by this explicit
   # operator decision. Remove after the first successful startup. Leave empty

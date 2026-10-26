@@ -3890,7 +3890,7 @@ func TestFinishInstallInteractiveOnboarding(t *testing.T) {
 	}
 	assertSliceEqual(t, host.addArgv[0], []string{
 		"kubectl", "exec", "--context", "test-ctx", "-c", "oberth", "-n", "oberth", "deploy/oberth", "--",
-		"oberth", "upstream", "add", "--yes", "--no-wait", "codeberg", "ssh://git@codeberg.org/acme",
+		"/usr/local/bin/oberth", "upstream", "add", "--yes", "--no-wait", "codeberg", "ssh://git@codeberg.org/acme",
 	})
 	if host.uplinkStdin != pubKey {
 		t.Fatalf("uplink add must receive the public key on stdin, got %q", host.uplinkStdin)

@@ -595,7 +595,7 @@ func readPodServerCert(ctx context.Context, cfg Config, deps Deps) ([]byte, erro
 		if deps.ContextName != "" {
 			args = append(args, "--context", deps.ContextName)
 		}
-		args = append(args, "exec", "-n", ns, "deploy/oberth", "-c", "oberth", "--", "cat", path)
+		args = append(args, "exec", "-n", ns, "deploy/oberth", "-c", "oberth", "--", "/usr/local/bin/oberth", "admin", "read-file", path)
 		cert, err := deps.RunCommand(ctx, nil, "kubectl", args...)
 		if err == nil && len(cert) > 0 {
 			return cert, nil

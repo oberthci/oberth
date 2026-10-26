@@ -932,6 +932,9 @@ func (reader *confirmationReader) confirmShort(output io.Writer, prompt string) 
 // a channel. Discovery does not grant trust: the existing bootstrap flow must
 // confirm their fingerprints before persisting them to known_hosts.
 func ScanSSHHostKeys(ctx context.Context, host, port string) ([]ssh.PublicKey, error) {
+	return scanSSHHostKeys(ctx, host, port, defaultSSHProbeTimeout/3)
+}
+func scanSSHHostKeys(ctx context.Context, host, port string, familyTimeout time.Duration) ([]ssh.PublicKey, error) {
 	if host == "" || strings.HasPrefix(host, "-") || strings.ContainsAny(host, " \t\x00\r\n") {
 		return nil, errors.New("invalid SSH host")
 	}
@@ -950,7 +953,9 @@ func ScanSSHHostKeys(ctx context.Context, host, port string) ([]ssh.PublicKey, e
 	var keys []ssh.PublicKey
 	var failures []error
 	for _, algorithms := range families {
-		key, err := probeSSHHostKey(probeCtx, address, algorithms)
+		familyCtx, cancelFamily := context.WithTimeout(probeCtx, familyTimeout)
+		key, err := probeSSHHostKey(familyCtx, address, algorithms)
+		cancelFamily()
 		if probeCtx.Err() != nil {
 			return nil, context.Cause(probeCtx)
 		}

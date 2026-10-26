@@ -54,7 +54,7 @@ func NextSteps(in NextStepsInput) []string {
 		if stdin {
 			parts = append(parts, "-i")
 		}
-		parts = append(parts, "-n", ns, "deploy/oberth", "-c", "oberth", "--", "oberth")
+		parts = append(parts, "-n", ns, "deploy/oberth", "-c", "oberth", "--", "/usr/local/bin/oberth")
 		return strings.Join(append(parts, command...), " ")
 	}
 

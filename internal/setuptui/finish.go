@@ -15,6 +15,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"golang.org/x/crypto/ssh"
 
+	"github.com/oberthci/oberth/internal/containerimage"
 	"github.com/oberthci/oberth/internal/installer"
 	"github.com/oberthci/oberth/internal/mdnsdial"
 )
@@ -39,6 +40,7 @@ func kubectlTarget(st *WizardState) []string {
 }
 
 func podExec(st *WizardState, command ...string) []string {
+	command = containerimage.ServerCommand(command)
 	args := append(kubectlTarget(st), "exec", "-n", st.namespace(), "deploy/oberth", "-c", "oberth", "--")
 	return append(args, command...)
 }
@@ -68,7 +70,7 @@ func recoveryCommands(st *WizardState) []string {
 	var lines []string
 	if st.ForgeAuth != forgeAuthExisting {
 		lines = append(lines,
-			"1. Show the upstream public key:  "+kubectlLine(podExec(st, "cat", upstreamPublicKeyPath)),
+			"1. Show the upstream public key:  "+kubectlLine(podExec(st, "/usr/local/bin/oberth", "admin", "read-file", upstreamPublicKeyPath)),
 			"2. Add it at "+forgeKeyDestination(st.ForgeType, st.ForgeOrg))
 	} else {
 		lines = append(lines, "1. Make sure the work key "+displayHome(st.Config.UpstreamPrivateKeyPath)+" is registered at "+forgeKeyDestination(st.ForgeType, st.ForgeOrg),
@@ -271,7 +273,7 @@ func verifyInstall(ctx context.Context, st WizardState, reRegister bool) verifyR
 		}
 	}
 	if st.ForgeAuth != forgeAuthExisting {
-		if out, err := runKubectl(ctx, podExec(&st, "cat", upstreamPublicKeyPath)...); err == nil {
+		if out, err := runKubectl(ctx, podExec(&st, "/usr/local/bin/oberth", "admin", "read-file", upstreamPublicKeyPath)...); err == nil {
 			if key, _, _, _, perr := ssh.ParseAuthorizedKey(out); perr == nil {
 				res.publicKey = strings.TrimSpace(string(ssh.MarshalAuthorizedKey(key)))
 				res.fingerprint = ssh.FingerprintSHA256(key)
@@ -672,7 +674,7 @@ func nextStepsUpstreams(st *WizardState, v *verifyResult) []installer.NextStepsU
 // server CA when the server issues short-lived leaves, else the self-signed
 // certificate.
 func serverCAFingerprintCommand(st *WizardState) string {
-	return kubectlLine(podExec(st, "sh", "-c", "cat /run/oberth-identities/server/ca.crt 2>/dev/null || cat /run/oberth-identities/server/tls.crt")) +
+	return kubectlLine(podExec(st, "/usr/local/bin/oberth", "admin", "read-file", "/run/oberth-identities/server/ca.crt", "/run/oberth-identities/server/tls.crt")) +
 		" | openssl x509 -fingerprint -sha256 -noout"
 }
 

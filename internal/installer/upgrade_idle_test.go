@@ -18,7 +18,7 @@ func TestUpgradeWaitIdleTargetsSelectedDeploymentAndStopsOnFailure(t *testing.T)
 	calls := 0
 	deps := Deps{ContextName: "chosen-context", RunCommand: func(ctx context.Context, input []byte, name string, args ...string) ([]byte, error) {
 		calls++
-		want := []string{"--context", "chosen-context", "exec", "-c", "oberth", "-n", "chosen", "deploy/oberth", "--", "oberth", "wait-idle", "--timeout=2h0m0s"}
+		want := []string{"--context", "chosen-context", "exec", "-c", "oberth", "-n", "chosen", "deploy/oberth", "--", "/usr/local/bin/oberth", "wait-idle", "--timeout=2h0m0s"}
 		if name != "kubectl" || !reflect.DeepEqual(args, want) || len(input) != 0 {
 			t.Fatalf("unexpected command %s %v", name, args)
 		}
