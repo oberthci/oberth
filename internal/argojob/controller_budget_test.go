@@ -222,7 +222,7 @@ func TestPerStepBudgetUnchangedWithAggregateBudget(t *testing.T) {
 	// be the binding constraint.
 	var underlying bytes.Buffer
 	budget := &runBudgetWriter{destination: &underlying, remaining: maxStepLogBytes * 10}
-	err := copyPrefixed(budget, step, strings.NewReader(input))
+	err := copyPrefixed(budget, step, strings.NewReader(input), "")
 	if err == nil {
 		t.Fatal("expected per-step budget error")
 	}

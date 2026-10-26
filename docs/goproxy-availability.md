@@ -30,13 +30,20 @@ the pod and from the pipeline namespace using the configured CA, and inspect
 both ingress and egress policies where NetworkPolicy is enabled. A TCP refusal
 before accept cannot produce a proxy HTTP request log. Listener start/stop and
 TLS/HTTP server errors are prefixed with `goproxy`; handled request failures emit
-a fixed error class and status, method and bounded quoted path. Normal public
-404 misses are expected resolver fallthrough and are not logged as failures.
+a fixed error class and status, method and bounded quoted path. Each handler
+logs the first failure of each class immediately, then at most once per class
+per 30 seconds. The next emitted failure includes a `suppressed` count of
+intervening failures; a quiet class has no periodic summary. Limiter state uses
+fixed class windows, independent of request paths. Normal public 404 misses are
+expected resolver fallthrough and are not logged as failures.
 Queries and raw private-backend errors are not logged.
 
 Retained and live step logs add one attributed `oberth: Go module proxy
 unavailable (connection refused)` diagnostic when Go reports a refusal from the
-configured mirror. They preserve the original output and command verdict.
+configured mirror. The generated hint, attribution prefix and newline count
+toward the existing 32 MiB per-step transformed-output limit and the aggregate
+run-log limit in both live and replay paths. The hint can bring truncation
+forward by its encoded length; command verdicts retain their existing rules.
 
 There is no automatic replay of arbitrary build steps or stderr-based retry.
 A step can publish artifacts, perform other effects, or report both a refusal
@@ -48,9 +55,11 @@ remain terminal. A caller implementing its own dialer may bound retries with
 backoff for `ECONNREFUSED` before any TLS or request bytes are sent; this batch
 does not install a new dialer into the Go tool or change its retry policy.
 
-The default regression runs four real Go download processes with independent
-cold caches and a 64-module private graph through the TLS listener and canonical
-zip path, without external network access. Chart checks pin the proxy-only
-readiness exception and all probe timeouts. The #1204 report also records an
-isolated Kubernetes reproduction using four cold downloads of Oberth's actual
-140-module graph, including the before/after EndpointSlice and listener evidence.
+The default concurrency regression runs four real Go download processes with
+independent cold caches and a 64-module private graph through the TLS listener
+and canonical zip path, without external network access; it skips if the Go
+toolchain is absent. This test does not reproduce the Kubernetes readiness
+failure. Chart checks pin the proxy-only readiness exception and all probe
+timeouts. The #1204 report also records an isolated Kubernetes reproduction
+using four cold downloads of Oberth's actual 140-module graph, including the
+before/after EndpointSlice and listener evidence.

@@ -865,7 +865,7 @@ func splitLines(body string) []string {
 func TestCopyPrefixedAttributesEveryLine(t *testing.T) {
 	destination := &recordingWriter{}
 	if err := copyPrefixed(destination, StepResult{Burn: "setup", Step: "prepare"},
-		stringReader("first\r\nsecond\nthird without newline")); err != nil {
+		stringReader("first\r\nsecond\nthird without newline"), ""); err != nil {
 		t.Fatalf("copyPrefixed: %v", err)
 	}
 	want := "[setup/prepare] first\n[setup/prepare] second\n[setup/prepare] third without newline\n"

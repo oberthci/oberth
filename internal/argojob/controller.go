@@ -996,12 +996,8 @@ func (writer *runBudgetWriter) Write(body []byte) (int, error) {
 // line, which is the marker internal/runlog indexes on. It returns an error on
 // the first destination write failure or when the transformed output exceeds
 // the per-step budget, and stops reading immediately in either case.
-func copyPrefixed(destination io.Writer, step StepResult, body io.Reader, proxyURL ...string) error {
+func copyPrefixed(destination io.Writer, step StepResult, body io.Reader, proxyURL string) error {
 	var diagnostic goProxyDiagnostic
-	proxy := ""
-	if len(proxyURL) != 0 {
-		proxy = proxyURL[0]
-	}
 	prefix := []byte("[" + step.Burn + "/" + step.Step + "] ")
 	buffered := make([]byte, 0, 8192)
 	chunk := make([]byte, 4096)
@@ -1011,7 +1007,7 @@ func copyPrefixed(destination io.Writer, step StepResult, body io.Reader, proxyU
 		assembled = append(assembled, prefix...)
 		assembled = append(assembled, line...)
 		assembled = append(assembled, '\n')
-		if hint := diagnostic.observe(string(line), proxy); hint != "" {
+		if hint := diagnostic.observe(string(line), proxyURL); hint != "" {
 			assembled = append(assembled, prefix...)
 			assembled = append(assembled, hint...)
 			assembled = append(assembled, '\n')

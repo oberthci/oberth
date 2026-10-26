@@ -45,6 +45,8 @@ type GitCache interface {
 
 // Handler serves the GOPROXY protocol (/@v/list, .info, .mod, .zip) read-only.
 type Handler struct {
+	failureLogs failureLogLimiter
+
 	logger       *log.Logger
 	cache        GitCache
 	modulePrefix string
@@ -84,6 +86,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		class = "response_write_failed"
 	}
 	if class != "" {
+		suppressed, allowed := h.failureLogs.allow(class, time.Now())
+		if !allowed {
+			return
+		}
 		// Never log queries, credentials or raw cache/backend errors. Bound and
 		// quote the path so an invalid request cannot forge or flood log lines.
 		urlPath := r.URL.EscapedPath()
@@ -94,11 +100,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if len(method) > 32 {
 			method = method[:32]
 		}
-		h.logger.Printf("goproxy request failed: class=%s status=%d method=%q path=%q", class, observed.status, method, urlPath)
+		h.logger.Printf("goproxy request failed: class=%s status=%d method=%q path=%q suppressed=%d", class, observed.status, method, urlPath, suppressed)
 	}
 }
 
-// WithLogger enables failure diagnostics. Configure it before serving requests.
+// WithLogger enables rate-limited failure diagnostics. Configure it before serving requests.
 func (h *Handler) WithLogger(logger *log.Logger) *Handler {
 	h.logger = logger
 	return h

@@ -24,7 +24,7 @@ func TestCopyPrefixedStopsOnBudgetExceeded(t *testing.T) {
 	input := strings.Repeat(lineContent, int(lineCount))
 
 	var destination bytes.Buffer
-	err := copyPrefixed(&destination, step, strings.NewReader(input))
+	err := copyPrefixed(&destination, step, strings.NewReader(input), "")
 	if err == nil {
 		t.Fatal("expected an error when the budget is exceeded")
 	}
@@ -64,7 +64,7 @@ func TestCopyPrefixedStopsOnDestinationFailure(t *testing.T) {
 	input := strings.Repeat("some output line\n", 100000)
 	destination := &failWriter{limit: 100}
 
-	err := copyPrefixed(destination, step, strings.NewReader(input))
+	err := copyPrefixed(destination, step, strings.NewReader(input), "")
 	if err == nil {
 		t.Fatal("expected an error when the destination fails")
 	}
@@ -80,7 +80,7 @@ func TestCopyPrefixedPrefixesEveryLine(t *testing.T) {
 	step := StepResult{Burn: "setup", Step: "prepare"}
 	input := "line one\nline two\nline three"
 	var destination bytes.Buffer
-	if err := copyPrefixed(&destination, step, strings.NewReader(input)); err != nil {
+	if err := copyPrefixed(&destination, step, strings.NewReader(input), ""); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	lines := strings.Split(strings.TrimSuffix(destination.String(), "\n"), "\n")
@@ -104,7 +104,7 @@ func TestCopyPrefixedAssemblesOneWrite(t *testing.T) {
 
 	var writes []string
 	writer := writeCounter{record: &writes}
-	if err := copyPrefixed(writer, step, strings.NewReader(input)); err != nil {
+	if err := copyPrefixed(writer, step, strings.NewReader(input), ""); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	// Two content lines means two Write calls.
@@ -133,7 +133,7 @@ func TestCopyPrefixedHandlesEmptyInput(t *testing.T) {
 	t.Parallel()
 	step := StepResult{Burn: "a", Step: "b"}
 	var destination bytes.Buffer
-	if err := copyPrefixed(&destination, step, io.LimitReader(strings.NewReader(""), 0)); err != nil {
+	if err := copyPrefixed(&destination, step, io.LimitReader(strings.NewReader(""), 0), ""); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if destination.Len() != 0 {

@@ -59,10 +59,15 @@ func (cache *parallelCache) ArchiveTar(ctx context.Context, input, _ string, out
 	return writer.Close()
 }
 
-// Exercise the actual Go resolver, TLS accept loop and canonical private zip
-// handler with four independent cold caches and a 64-module dependency graph.
-// No public resolver or external network is used in the default regression.
+// Concurrency regression for the Go resolver, TLS accept loop and canonical
+// private zip handler with four cold caches and a 64-module dependency graph.
+// It uses no external network and does not reproduce #1204's Kubernetes
+// readiness/Service routing failure.
 func TestParallelGoModDownloads(t *testing.T) {
+	goBinary, err := exec.LookPath("go")
+	if err != nil {
+		t.Skipf("Go toolchain unavailable: %v", err)
+	}
 	const modules, clients = 64, 4
 	ca, _, certPEM, keyPEM := selfSignedCA(t)
 	cert, err := tls.X509KeyPair(certPEM, keyPEM)
@@ -92,10 +97,6 @@ func TestParallelGoModDownloads(t *testing.T) {
 	served := make(chan error, 1)
 	go func() { served <- server.Serve(tls.NewListener(listener, server.TLSConfig)) }()
 	t.Cleanup(func() { _ = server.Close(); <-served })
-	goBinary, err := exec.LookPath("go")
-	if err != nil {
-		t.Fatal(err)
-	}
 	ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
 	defer cancel()
 	var workers sync.WaitGroup

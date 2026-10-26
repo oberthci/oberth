@@ -2146,11 +2146,15 @@ pod addresses, so server dependency-readiness failures do not withdraw its sole
 healthy listener from running pipelines. API/SSH readiness and all mutation,
 namespace, TLS and network-policy gates remain unchanged. All server probes use
 explicit five-second timeouts, including TLS/scheduling time. Proxy HTTP failures
-carry a fixed `X-Oberth-GoProxy-Error` class and emit bounded, quoted diagnostics;
+carry a fixed `X-Oberth-GoProxy-Error` class and emit bounded, quoted diagnostics
+at most once per class per handler per 30 seconds, including the count suppressed
+since the preceding emission. Fixed class windows bound limiter memory;
 normal public 404 fallthrough remains quiet. Listener/TLS errors are attributed
 to goproxy. Live and retained step logs annotate refusals from the configured
-mirror without changing the command verdict. No whole-step replay, integrity
-retry or private fallback is introduced. See
+mirror. Generated hints count toward both the 32 MiB per-step transformed-output
+limit and the aggregate run-log limit; they can advance truncation by their
+encoded length. Command verdict rules are unchanged. No whole-step replay,
+integrity retry or private fallback is introduced. See
 [proxy availability](docs/goproxy-availability.md).
 
 **Deployment:** the chart exposes the same namespace/owner parameters under
