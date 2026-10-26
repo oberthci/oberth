@@ -14,7 +14,6 @@ import (
 	"net"
 	"net/url"
 	"os"
-	"os/exec"
 	"strconv"
 	"strings"
 	"time"
@@ -929,43 +928,74 @@ func (reader *confirmationReader) confirmShort(output io.Writer, prompt string) 
 	return answer == "yes" || answer == "y", err
 }
 
-// ScanSSHHostKeys uses the OpenSSH scanner shipped in the server image. It
-// returns public keys only; callers must display and explicitly confirm their
-// fingerprints before persisting them.
+// ScanSSHHostKeys discovers public host keys without authenticating or opening
+// a channel. Discovery does not grant trust: the existing bootstrap flow must
+// confirm their fingerprints before persisting them to known_hosts.
 func ScanSSHHostKeys(ctx context.Context, host, port string) ([]ssh.PublicKey, error) {
-	if host == "" || strings.HasPrefix(host, "-") || strings.ContainsAny(host, "\x00\r\n") {
+	if host == "" || strings.HasPrefix(host, "-") || strings.ContainsAny(host, " \t\x00\r\n") {
 		return nil, errors.New("invalid SSH host")
 	}
-	portNumber, err := strconv.Atoi(port)
-	if err != nil || portNumber < 1 || portNumber > 65535 {
+	number, err := strconv.Atoi(port)
+	if err != nil || number < 1 || number > 65535 {
 		return nil, errors.New("invalid SSH port")
 	}
-	// #nosec G204 -- host and numeric port are parsed from a validated ssh:// URL and passed without a shell.
-	command := exec.CommandContext(ctx, "ssh-keyscan", "-T", "10", "-p", port, "-t", "ed25519,ecdsa,rsa", host)
-	var stdout, stderr cappedBuffer
-	stdout.limit = maximumBootstrapMaterialBytes
-	stderr.limit = 8 << 10
-	command.Stdout = &stdout
-	command.Stderr = &stderr
-	runErr := command.Run()
-	if stdout.overflow {
-		return nil, errors.New("ssh-keyscan output exceeded 1 MiB")
+	probeCtx, cancel := context.WithTimeout(ctx, defaultSSHProbeTimeout)
+	defer cancel()
+	address := net.JoinHostPort(host, strconv.Itoa(number))
+	families := [][]string{
+		{ssh.KeyAlgoED25519},
+		{ssh.KeyAlgoECDSA256, ssh.KeyAlgoECDSA384, ssh.KeyAlgoECDSA521},
+		{ssh.KeyAlgoRSASHA512, ssh.KeyAlgoRSASHA256},
 	}
-	keys, parseErr := parseScannedHostKeys(stdout.Bytes())
-	if parseErr != nil {
-		return nil, parseErr
+	var keys []ssh.PublicKey
+	var failures []error
+	for _, algorithms := range families {
+		key, err := probeSSHHostKey(probeCtx, address, algorithms)
+		if probeCtx.Err() != nil {
+			return nil, context.Cause(probeCtx)
+		}
+		if err != nil {
+			failures = append(failures, err)
+			continue
+		}
+		keys = append(keys, key)
 	}
 	if len(keys) > 0 {
-		return keys, nil
+		return uniqueHostKeys(keys), nil
 	}
-	if runErr != nil {
-		detail := strings.TrimSpace(stderr.String())
-		if detail != "" {
-			return nil, fmt.Errorf("ssh-keyscan failed: %w (%s)", runErr, detail)
+	return nil, fmt.Errorf("probe SSH host keys: %w", errors.Join(failures...))
+}
+
+var errHostKeyDiscovered = errors.New("host key discovered; stop before authentication")
+
+func probeSSHHostKey(ctx context.Context, address string, algorithms []string) (ssh.PublicKey, error) {
+	connection, err := (&net.Dialer{}).DialContext(ctx, "tcp", address)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = connection.Close() }()
+	stop := context.AfterFunc(ctx, func() { _ = connection.Close() })
+	defer stop()
+	if deadline, ok := ctx.Deadline(); ok {
+		if err := connection.SetDeadline(deadline); err != nil {
+			return nil, err
 		}
-		return nil, fmt.Errorf("ssh-keyscan failed: %w", runErr)
 	}
-	return nil, errors.New("ssh-keyscan returned no supported host keys")
+	var discovered ssh.PublicKey
+	client, _, _, err := ssh.NewClientConn(connection, address, &ssh.ClientConfig{
+		User: "git", HostKeyAlgorithms: algorithms,
+		HostKeyCallback: func(_ string, _ net.Addr, key ssh.PublicKey) error { discovered = key; return errHostKeyDiscovered },
+	})
+	if client != nil {
+		_ = client.Close()
+	}
+	if discovered != nil && errors.Is(err, errHostKeyDiscovered) {
+		return discovered, nil
+	}
+	if err == nil {
+		return nil, errors.New("SSH probe completed without a host key")
+	}
+	return nil, err
 }
 
 // ProbeSSHAuthentication performs a bare SSH handshake to assert endpoint
