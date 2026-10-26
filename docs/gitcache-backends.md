@@ -3,6 +3,14 @@
 `go-git` performs transport and plumbing in-process; `cli` retains the Git/
 OpenSSH adapter for the one-release transition. Both use the same receive,
 release-admission, durable outbox and conservative promotion-merge policies.
+The default is `go-git` in `serve`, `repo verify`, and the Helm chart's
+`gitBackend` value. For one release, `--git-backend=cli` selects the legacy
+adapter. The normal scratch image contains no Git/OpenSSH executables; using
+that switch requires a separately built `Dockerfile --target cli-runtime`
+image (or an operator-provided Git/OpenSSH installation). It does not install
+tools into the scratch image. Configure both the compatibility image digest
+and `gitBackend: cli` when testing rollback.
+
 Run all existing fixtures against both with:
 
 ```sh
@@ -62,3 +70,24 @@ cache state still affect the numbers; these are single runs, not statistical
 latency guarantees. Synthetic random blobs reproduce byte/object scale, not
 the real mirrors' compression or blob-size distribution. Qualify both real
 mirrors on tuxbox before production cutover.
+
+## Scratch release substrate
+
+The final Dockerfile target is `runtime`, based on `scratch`. Its only files
+are the source-built static server and a CA bundle copied from the pinned
+build stage. Go embeds the timezone database with `time/tzdata`. The runtime
+uses numeric UID/GID 65534, `/data` as HOME/work directory and `/tmp` for
+temporary work. The chart supplies writable `/data` and `/tmp` mounts and a
+read-only root filesystem; standalone containers need the same writable
+mounts, with `/data` owned or group-writable by 65534.
+
+The release repacker retains the digest-pinned multi-platform substrate
+mechanism, replacing its bootstrap executable with the exact release build.
+Both assembly and readback enforce a positive path allowlist: the binary,
+CA bundle and their directories, plus the two mount directories. An Alpine
+substrate, OS package database, shell, Git, SSH or shared library is rejected.
+Changing runtime/CA inputs requires rebuilding both platform children,
+checking their static ELF architecture, scanning substrate and repacked
+images, and publishing the exact reviewed OCI index with preserved digests
+before updating/releasing its `ServerSubstrate` reference. The CLI target is
+never a release substrate.

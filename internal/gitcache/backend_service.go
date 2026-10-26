@@ -31,6 +31,12 @@ func (b *goGitBackend) serve(ctx context.Context, r *git.Repository, op string, 
 	if input == nil {
 		return errors.New("git service input required")
 	}
+	// An SSH channel can block inside Read/Write. Closing it at the command
+	// deadline interrupts those calls; checking ctx only before Read cannot.
+	if closer, ok := input.(io.Closer); ok {
+		stop := context.AfterFunc(ctx, func() { _ = closer.Close() })
+		defer stop()
+	}
 	if op == "receive-pack" {
 		return b.serveReceive(ctx, r, input, out, spec.stderr)
 	}
@@ -59,30 +65,7 @@ func (b *goGitBackend) serve(ctx context.Context, r *git.Repository, op string, 
 	if err := refs.Encode(out); err != nil {
 		return err
 	}
-	request := packp.NewUploadPackRequest()
-	if err := request.Decode(input); err != nil {
-		return err
-	}
-	// Do not let raw SHA wants retrieve server-private objects. A request may
-	// select an advertised tip or an object reachable from an advertised tip.
-	for _, want := range request.Wants {
-		allowed := false
-		for _, tip := range refs.References {
-			if want == tip {
-				allowed = true
-				break
-			}
-		}
-		if !allowed {
-			return errors.New("upload-pack requested an unadvertised object")
-		}
-	}
-	response, err := session.UploadPack(ctx, request)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = response.Close() }()
-	return response.Encode(out)
+	return serveGoUpload(ctx, r, input, out, refs)
 }
 func hiddenUploadRef(name string) bool {
 	return strings.HasPrefix(name, "refs/oberth/") || strings.HasPrefix(name, "refs/replace/")

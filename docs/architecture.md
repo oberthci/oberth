@@ -13,7 +13,7 @@ the accepted object without deadlocking or allowing a later receive to overtake
 the callback. The receive policy and upstream materializer enforce the same
 public branch/tag grammar, and remove invalid refs left by an older cache before
 snapshotting. Each reservation also binds the exact fresh upstream default-branch
-name and SHA used by the tag hook, so replay cannot silently switch ancestry
+name and SHA used by tag admission, so replay cannot silently switch ancestry
 authority after an upstream default-branch rename.
 Oberth records one durable run, marks any active run for the same branch
 `interrupted` with supersession metadata, retains the Kubernetes cancellation
@@ -75,9 +75,11 @@ on the controller's followers.
 
 Branch and tag triggers are distinct trust domains. Branch Jobs mount no Secret
 and use `/var/cache/oberth/ci`. Before Git publishes a tag ref, a server-owned
-receive hook rejects deletion, movement, upstream conflict, and any commit not
-reachable from the fresh upstream default-branch snapshot. The hook reads full
-symbolic `HEAD`, avoiding ambiguity when a tag shares the branch's short name.
+receive policy rejects deletion, movement, upstream conflict, and any commit not
+reachable from the fresh upstream default-branch snapshot. The Go backend
+checks these rules before CAS ref updates; the compatibility backend uses a
+server-owned hook. Admission resolves full symbolic `HEAD`, avoiding ambiguity
+when a tag shares the branch's short name.
 Release Jobs use
 `/var/cache/oberth/release` and only the configured Secret names. Every mounted
 Secret key is snapshotted at admission, freezing its bytes for the pod lifetime.
@@ -139,8 +141,12 @@ Oberth's own tag pipeline repeats its source gates before publication. It builds
 reproducible multi-platform server executables, creates a clean
 GAR image whose only application executable is that exact build,
 scans and signs their digest references, and performs complete registry
-read-back. A container platform is added only with a matching pinned userspace
-substrate; an amd64 substrate is never relabeled as arm64. Its packaged Helm
+read-back. The server runtime starts from scratch: a static Go executable,
+CA trust data, embedded timezone database, and numeric user 65534. Git
+transport/plumbing and host-key probing run in Go with explicitly pinned
+known_hosts; the legacy CLI adapter has a separate one-release compatibility
+image. Each platform has a matching pinned scratch substrate; an amd64
+executable is never relabeled as arm64. Its packaged Helm
 chart contains those exact image digests. Binaries and the chart use immutable,
 conditionally-created R2 objects; stable binary aliases, `latest/VERSION`, and
 the classic Helm index advance only after public R2 and GAR verification and use

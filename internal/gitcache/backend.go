@@ -23,11 +23,11 @@ type cliBackend struct{ cache *Cache }
 
 func (c *Cache) initBackend(selected Backend) error {
 	switch selected {
-	case "", BackendCLI:
+	case BackendCLI:
 		c.backend = &cliBackend{cache: c}
 		c.backendName = BackendCLI
 		return nil
-	case BackendGoGit:
+	case "", BackendGoGit:
 		c.backend = &goGitBackend{cache: c}
 		c.backendName = BackendGoGit
 		return nil

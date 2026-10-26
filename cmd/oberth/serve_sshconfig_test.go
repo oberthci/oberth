@@ -54,6 +54,14 @@ func TestBuildPerUpstreamSSHCommandUsesProjectedKeyFiles(t *testing.T) {
 		}
 	}
 	options := serveOptions{upstreamKey: sharedKey, knownHosts: knownHosts}
+	entries, err := perUpstreamSSHEntries(ctx, database, options, log.New(io.Discard, "", 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	settings := gitSSHSettings(entries, sharedKey, knownHosts)
+	if settings.PrivateKeyPath != sharedKey || settings.KnownHostsPath != knownHosts || len(settings.Identities) != 1 || settings.Identities[0].Host != "codeberg.org" || settings.Identities[0].PrivateKeyPath != dedicatedKey {
+		t.Fatalf("Go SSH settings lost exclusive dedicated identity: %#v", settings)
+	}
 	configPath := filepath.Join(directory, "ssh-config")
 	logger := log.New(io.Discard, "", 0)
 	command, err := buildPerUpstreamSSHCommand(ctx, database, options, configPath, logger)
@@ -123,5 +131,24 @@ func TestBuildPerUpstreamSSHCommandFallsBackToLegacySingleKey(t *testing.T) {
 	}
 	if _, err := os.Stat(configPath); !os.IsNotExist(err) {
 		t.Fatalf("config file must not exist for the legacy path: %v", err)
+	}
+}
+
+func TestParseServeOptionsGitBackend(t *testing.T) {
+	for _, backend := range []string{"go-git", "cli", "unknown"} {
+		options, err := parseServeOptions([]string{"--argo-namespace", "argo-pipelines", "--git-backend", backend}, io.Discard)
+		if backend == "unknown" {
+			if err == nil {
+				t.Fatal("unknown backend accepted")
+			}
+			continue
+		}
+		if err != nil || options.gitBackend != backend {
+			t.Fatalf("backend=%s: %q %v", backend, options.gitBackend, err)
+		}
+	}
+	options, err := parseServeOptions([]string{"--argo-namespace", "argo-pipelines"}, io.Discard)
+	if err != nil || options.gitBackend != "go-git" {
+		t.Fatalf("default=%q %v", options.gitBackend, err)
 	}
 }

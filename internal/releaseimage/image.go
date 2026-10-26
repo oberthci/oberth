@@ -30,16 +30,13 @@ import (
 const (
 	ServerRepository = "europe-west4-docker.pkg.dev/skipopsmain/oberth/oberth"
 
-	// ServerSubstrate is rebuilt on tuxbox from e309317c's Dockerfile with
-	// libcurl 8.23.0-r0 (CVE-2026-92392, HIGH). Both platforms carry 36 packages
-	// and 49 matching ELF files. Release Trivy 0.73.0 scans the substrates and
-	// both Repack outputs clean at HIGH/CRITICAL. Each platform uses the
-	// Alpine index's matching child, built separately with rootless Podman.
-	// This OCI index has only linux/amd64 and linux/arm64, empty config variants
-	// and no attestations. Laptop-built index 40ae2f60 is not used.
-	// Publication prerequisite: upload the reviewed tuxbox OCI archive with
-	// preserved digests and verify full registry readback before release.
-	ServerSubstrate = ServerRepository + "@sha256:a3f150cfc7fc63a85044c26986c69848f2a8b64c9da5835ce4e73a8f2da04410"
+	// ServerSubstrate is the reviewed scratch runtime OCI index from #1205.
+	// Its only regular files are the static matching-architecture bootstrap
+	// server and CA trust bundle; timezone data is embedded in Go. Exactly
+	// linux/amd64 and linux/arm64, with no attestations or config variants.
+	// Publication prerequisite: upload /tmp/oberth-round7-substrate.oci.tar
+	// with preserved digests and verify full registry readback before release.
+	ServerSubstrate = ServerRepository + "@sha256:41b895f6bcd4bc0996db86bdb04b5f2e57b11e73f866459b839ddaa9d52da2f1"
 )
 
 // Kind selects a release image contract. Only the server image remains.
@@ -86,11 +83,11 @@ func contract(kind Kind) (imageContract, error) {
 			imagePath:  "usr/local/bin/oberth",
 			platforms:  []string{"amd64", "arm64"},
 			required: []string{
-				"etc/ssl/certs/ca-certificates.crt", "usr/bin/git", "usr/bin/ssh",
+				"etc/ssl/certs/ca-certificates.crt",
 			},
 			config: v1.Config{
-				User: "65534:65534", Env: []string{"HOME=/tmp", "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"},
-				Entrypoint: []string{"/usr/local/bin/oberth"}, Cmd: []string{"serve"}, WorkingDir: "/tmp",
+				User: "65534:65534", Env: []string{"HOME=/data", "TMPDIR=/tmp", "PATH=/usr/local/bin"},
+				Entrypoint: []string{"/usr/local/bin/oberth"}, Cmd: []string{"serve"}, WorkingDir: "/data",
 			},
 		}, nil
 	default:
@@ -145,6 +142,9 @@ func Repack(base v1.Image, kind Kind, architecture string, binary []byte, create
 		if cleanName == definition.imagePath {
 			foundOldExecutable = true
 			continue
+		}
+		if err := validateScratchPath(cleanName, header.Typeflag); err != nil {
+			return nil, err
 		}
 		if forbiddenPath(cleanName, definition.forbidden) {
 			return nil, fmt.Errorf("%s substrate contains forbidden repository dependency %s", kind, cleanName)
@@ -445,6 +445,9 @@ func verifyImage(image v1.Image, definition imageContract, architecture string, 
 		if slices.Contains(definition.required, cleanName) {
 			foundRequired[cleanName] = true
 		}
+		if err := validateScratchPath(cleanName, header.Typeflag); err != nil {
+			return err
+		}
 		if forbiddenPath(cleanName, definition.forbidden) {
 			return fmt.Errorf("release image contains forbidden repository dependency %s", cleanName)
 		}
@@ -501,4 +504,23 @@ func (c PublishConfig) authenticator() authn.Authenticator {
 		return c.Authenticator
 	}
 	return garAuthenticator(c.AccessToken)
+}
+
+// A package-free runtime is an allowlist, not a list of known package paths.
+// This rejects accidental compatibility substrates, APK metadata, libraries,
+// extra executables and unknown future OS payloads at assembly AND readback.
+func validateScratchPath(name string, kind byte) error {
+	switch name {
+	case "usr/local/bin/oberth", "etc/ssl/certs/ca-certificates.crt":
+		if !regularTarType(kind) {
+			return fmt.Errorf("scratch runtime file %s is not regular", name)
+		}
+	case ".", "data", "tmp", "usr", "usr/local", "usr/local/bin", "etc", "etc/ssl", "etc/ssl/certs":
+		if kind != tar.TypeDir {
+			return fmt.Errorf("scratch runtime directory %s is not a directory", name)
+		}
+	default:
+		return fmt.Errorf("scratch runtime contains forbidden path %s", name)
+	}
+	return nil
 }

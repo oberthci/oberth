@@ -151,7 +151,8 @@ type RepoQualification struct {
 }
 
 type Config struct {
-	// Backend defaults to the CLI implementation during the transition.
+	// Backend defaults to go-git. An explicit GitBinary with no Backend
+	// retains the CLI implementation for the one-release transition.
 	Backend Backend
 	SSH     SSHConfig
 	// RepositoryGate refuses network/cache admission while a repository is archived.

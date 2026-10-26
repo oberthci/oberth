@@ -1197,6 +1197,9 @@ func runRepoVerify(ctx context.Context, arguments []string, output io.Writer) er
 	flags.SetOutput(io.Discard)
 	databasePath := flags.String("database", "/data/oberth.sqlite", "SQLite database path")
 	gitCacheRoot := flags.String("git-cache-root", "/data/git", "root directory for bare Git caches")
+	upstreamKey := flags.String("upstream-key", "/etc/oberth/upstream-key/id_ed25519", "upstream SSH private key")
+	knownHosts := flags.String("known-hosts", "/etc/oberth/known-hosts/known_hosts", "pinned upstream known_hosts")
+	backend := flags.String("git-backend", "go-git", "go-git or one-release cli compatibility backend")
 	all := flags.Bool("all", false, "verify every registered repository")
 	if err := flags.Parse(arguments); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -1248,7 +1251,24 @@ func runRepoVerify(ctx context.Context, arguments []string, output io.Writer) er
 	// Build a minimal git cache for ls-remote probing. The cache is read-only:
 	// it never modifies the actual cache directory.
 	resolver := app.Upstreams{Catalog: database}
+	sshOptions := serveOptions{upstreamKey: *upstreamKey, knownHosts: *knownHosts}
+	entries, settingsErr := perUpstreamSSHEntries(ctx, database, sshOptions, log.New(io.Discard, "", 0))
+	if settingsErr != nil {
+		return settingsErr
+	}
+	settings := gitSSHSettings(entries, *upstreamKey, *knownHosts)
+	configDirectory, settingsErr := os.MkdirTemp("", "oberth-verify-ssh-")
+	if settingsErr != nil {
+		return settingsErr
+	}
+	defer func() { _ = os.RemoveAll(configDirectory) }()
+	sshCommand, settingsErr := sshCommandFromEntries(entries, sshOptions, filepath.Join(configDirectory, "config"))
+	if settingsErr != nil {
+		return settingsErr
+	}
 	cache, cacheErr := gitcache.New(gitcache.Config{
+		Backend: gitcache.Backend(*backend), SSH: settings,
+		Env:           map[string]string{"GIT_SSH_COMMAND": sshCommand, "GIT_SSH_VARIANT": "ssh"},
 		Root:          *gitCacheRoot,
 		Upstream:      resolver.Remote,
 		RepoQualifier: resolver.QualifyInput,

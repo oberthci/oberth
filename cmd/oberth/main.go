@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	_ "time/tzdata"
 
 	"github.com/oberthci/oberth/internal/app"
 	"github.com/oberthci/oberth/internal/installer"

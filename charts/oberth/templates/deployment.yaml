@@ -156,6 +156,7 @@ spec:
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           args:
             - serve
+            - --git-backend={{ .Values.gitBackend | default "go-git" }}
             - --data=/data
             - --database=/data/oberth.sqlite
             - --ssh-listen=:2222

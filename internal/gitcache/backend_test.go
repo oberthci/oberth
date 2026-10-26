@@ -145,3 +145,28 @@ func TestBackendServiceProcess(t *testing.T) {
 	}
 	os.Exit(0)
 }
+
+func TestDefaultBackendAndExplicitLegacyExecutable(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		config Config
+		want   Backend
+	}{
+		{name: "default", want: BackendGoGit},
+		{name: "explicit CLI", config: Config{Backend: BackendCLI}, want: BackendCLI},
+		{name: "legacy executable", config: Config{GitBinary: "git"}, want: BackendCLI},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			config := test.config
+			config.Root = t.TempDir()
+			config.Upstream = func(string) (string, error) { return "unused", nil }
+			cache, err := New(config)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if cache.backendName != test.want {
+				t.Fatalf("backend=%s want %s", cache.backendName, test.want)
+			}
+		})
+	}
+}

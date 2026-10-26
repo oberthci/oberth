@@ -203,6 +203,7 @@ type serveOptions struct {
 	// Promotion grant maximum lifetime. Default 24h, hard ceiling 168h (7 days).
 	promotionGrantMaxLifetime time.Duration
 
+	gitBackend              string
 	gitCommandTimeout       time.Duration
 	gcInterval              time.Duration
 	pushBannerURL           string
@@ -308,6 +309,7 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 	flags.StringVar(&options.trustedRecipesFile, "trusted-tests-recipes", "", "public operator-approved trusted suite recipes JSON file (requires --vm-kvm-enabled)")
 	flags.Int64Var(&options.trustedKVMGroup, "trusted-tests-kvm-group", 0, "operator-approved positive /dev/kvm supplemental GID required for trusted suites; no default device group")
 	flags.DurationVar(&options.promotionGrantMaxLifetime, "promotion-grant-max-lifetime", 24*time.Hour, "maximum lifetime for promotion grants (default 24h, hard ceiling 168h)")
+	flags.StringVar(&options.gitBackend, "git-backend", "go-git", "Git backend: go-git or cli (one-release compatibility)")
 	flags.DurationVar(&options.gitCommandTimeout, "git-timeout", 10*time.Minute, "Git command timeout")
 	flags.DurationVar(&options.gcInterval, "git-gc-interval", 24*time.Hour, "periodic Git GC interval")
 	flags.StringVar(&options.pushBannerURL, "push-banner-url", "", "optional HTTPS dashboard URL echoed to every accepted git push")
@@ -372,6 +374,9 @@ func validateServeOptions(options serveOptions) error {
 	}
 	if err := validateArgoServeOptions(options); err != nil {
 		return err
+	}
+	if options.gitBackend != "" && options.gitBackend != "go-git" && options.gitBackend != "cli" {
+		return errors.New("serve: git-backend must be go-git or cli")
 	}
 	if options.maxConcurrent <= 0 || options.maxConcurrent > 64 || options.gitCommandTimeout <= 0 || options.gcInterval <= 0 {
 		return errors.New("serve: concurrency, timeout, and GC values must be positive")
@@ -669,13 +674,19 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 		logger.Printf("WARNING: background audit anchor cycle will restore readiness when Rekor becomes available")
 	}
 
-	sshCommand, err := buildPerUpstreamSSHCommand(ctx, database, options, "/tmp/oberth-ssh-config", logger)
+	sshEntries, err := perUpstreamSSHEntries(ctx, database, options, logger)
+	if err != nil {
+		return err
+	}
+	sshCommand, err := sshCommandFromEntries(sshEntries, options, "/tmp/oberth-ssh-config")
 	if err != nil {
 		return err
 	}
 	upstreams := app.Upstreams{Catalog: database}
+	sshSettings := gitSSHSettings(sshEntries, options.upstreamKey, options.knownHosts)
 	git, err := gitcache.New(gitcache.Config{
 		Root: filepath.Join(options.dataRoot, "git"), Upstream: upstreams.Remote,
+		Backend: gitcache.Backend(options.gitBackend), SSH: sshSettings,
 		CommandTimeout:  options.gitCommandTimeout,
 		Env:             map[string]string{"GIT_SSH_COMMAND": sshCommand, "GIT_SSH_VARIANT": "ssh"},
 		Logger:          logger,
@@ -1938,19 +1949,13 @@ func readBoundedFile(path string, maximum int64) ([]byte, error) {
 	return body, nil
 }
 
-// buildPerUpstreamSSHCommand loads all upstreams from the database and builds
-// an SSH config file mapping each upstream host with a dedicated key to its
-// projected identity file on the Secret volume mount, with a fallback block
-// (per-host names negated) using the shared --upstream-key for everything
-// else. Private key material is never read or copied here: identity files are
-// referenced in place on the kubelet-managed tmpfs mount, so no key bytes
-// ever reach the container's writable layer. The config file itself contains
-// only hostnames and paths. When no upstream has a dedicated key the result
-// is the legacy single-key command, byte-identical in behavior.
-func buildPerUpstreamSSHCommand(ctx context.Context, database *store.Store, options serveOptions, configPath string, logger *log.Logger) (string, error) {
+// perUpstreamSSHEntries references projected identity files in place. Private
+// key bytes stay on the Secret volume; malformed or unprojected key names use
+// the shared fallback. Both backends consume this same host/key mapping.
+func perUpstreamSSHEntries(ctx context.Context, database *store.Store, options serveOptions, logger *log.Logger) ([]app.SSHConfigEntry, error) {
 	registeredUpstreams, err := database.ListUpstreams(ctx)
 	if err != nil {
-		return "", fmt.Errorf("list upstreams for SSH config: %w", err)
+		return nil, fmt.Errorf("list upstreams for SSH config: %w", err)
 	}
 	keyDirectory := filepath.Dir(options.upstreamKey)
 	var entries []app.SSHConfigEntry
@@ -1981,6 +1986,26 @@ func buildPerUpstreamSSHCommand(ctx context.Context, database *store.Store, opti
 		})
 		logger.Printf("per-upstream SSH key: %s -> %s (data key %s)", upstream.Name, host, upstream.KeyName)
 	}
+	return entries, nil
+}
+
+func buildPerUpstreamSSHCommand(ctx context.Context, database *store.Store, options serveOptions, configPath string, logger *log.Logger) (string, error) {
+	entries, err := perUpstreamSSHEntries(ctx, database, options, logger)
+	if err != nil {
+		return "", err
+	}
+	return sshCommandFromEntries(entries, options, configPath)
+}
+
+func gitSSHSettings(entries []app.SSHConfigEntry, key, hosts string) gitcache.SSHConfig {
+	settings := gitcache.SSHConfig{PrivateKeyPath: key, KnownHostsPath: hosts}
+	for _, entry := range entries {
+		settings.Identities = append(settings.Identities, gitcache.SSHIdentity{Host: entry.Host, PrivateKeyPath: entry.IdentityFile})
+	}
+	return settings
+}
+
+func sshCommandFromEntries(entries []app.SSHConfigEntry, options serveOptions, configPath string) (string, error) {
 	if len(entries) == 0 {
 		return app.GitSSHCommandPaths(options.upstreamKey, options.knownHosts)
 	}

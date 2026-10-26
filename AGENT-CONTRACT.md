@@ -881,10 +881,15 @@ continuity checks; it must never be used to reset or bypass those checks.
   a single flattened layer binding the exact source-built executable for its
   platform. The published reference is always the index digest; the Helm
   chart pins the index digest, never a single-platform manifest.
-- The package substrate is a digest-pinned multi-arch index built from this
-  repository's Dockerfile; `releaseimage.Repack` removes the substrate's
-  executable and re-verifies the required/forbidden path contract per child at
-  publish and at verify.
+- The server substrate is a digest-pinned multi-arch index built from the
+  Dockerfile's final `FROM scratch` runtime target. Its only regular files
+  are the static server executable and CA trust bundle; timezone data is
+  embedded in Go. `releaseimage.Repack` replaces the bootstrap executable
+  and enforces the positive path allowlist at assembly and readback. OS
+  packages, shells, Git/OpenSSH and shared libraries are forbidden. The
+  numeric runtime user/group is 65534, with writable `/data` and `/tmp` mounts.
+  The optional `cli-runtime` target exists for one release of backend
+  compatibility and must never become the release substrate.
 - There is no runner image artifact: Job substrates are public standard
   golang images selected per repository under the administrator prefix
   allowlist.

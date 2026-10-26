@@ -5,6 +5,8 @@ FROM --platform=$BUILDPLATFORM golang:1.26.10-alpine3.23@sha256:a07f231c19b03e61
 ENV GOTOOLCHAIN=local GOWORK=off
 ARG BUILD_CACHE_NAMESPACE=default
 
+# The runtime copies only this trust-store data, never apk metadata or tools.
+RUN apk add --no-cache ca-certificates=20261020-r0
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN --mount=type=cache,id=oberth-server-${BUILD_CACHE_NAMESPACE}-gomod,target=/go/pkg/mod,sharing=locked go mod download
@@ -19,14 +21,12 @@ RUN --mount=type=cache,id=oberth-server-${BUILD_CACHE_NAMESPACE}-gomod,target=/g
     CGO_ENABLED=0 GOOS="$TARGETOS" GOARCH="$TARGETARCH" \
     go build -trimpath -buildvcs=false -ldflags="-s -w -X main.version=${VERSION}" -o /out/oberth ./cmd/oberth
 
-FROM alpine:3.23@sha256:fd791d74b68913cbb027c6546007b3f0d3bc45125f797758156952bc2d6daf40
-# SUBSTRATE REBUILD REQUIRED: the release image is NOT built from this
-# Dockerfile. It is assembled from a digest-pinned substrate in
-# internal/releaseimage/image.go (ServerSubstrate). Changing a package pin
-# below fixes the NEXT substrate build, not any current or future release,
-# until the substrate is rebuilt from this Dockerfile and its new digest is
-# committed to image.go. Two dead release tags (v0.16.0, v0.16.1) resulted
-# from missing this indirection.
+# One-release compatibility target for --git-backend=cli. It is never the
+# release substrate or the default/final image; build --target cli-runtime
+# explicitly when exercising the fallback.
+FROM alpine:3.23@sha256:fd791d74b68913cbb027c6546007b3f0d3bc45125f797758156952bc2d6daf40 AS cli-runtime
+# These exact pins apply only to the optional CLI compatibility image.
+# The normal release has no OS packages; never pin this target as its substrate.
 RUN apk add --no-cache \
     ca-certificates=20261020-r0 \
     git=2.52.0-r0 \
@@ -65,6 +65,20 @@ RUN apk add --no-cache \
     && rm -f /var/log/apk.log
 COPY --from=build /out/oberth /usr/local/bin/oberth
 ENV HOME=/tmp
+USER 65534:65534
+ENTRYPOINT ["/usr/local/bin/oberth"]
+CMD ["serve"]
+
+# SUBSTRATE REBUILD REQUIRED: release images repack ServerSubstrate in
+# internal/releaseimage/image.go. After changing this final stage or CA data,
+# build both architectures, check ELF architecture, zero OS packages, Repack
+# and Trivy; publish the exact index with preserved digests and commit its new
+# ServerSubstrate digest. Never pin the compatibility target above.
+FROM scratch AS runtime
+COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+COPY --from=build /out/oberth /usr/local/bin/oberth
+ENV HOME=/data TMPDIR=/tmp PATH=/usr/local/bin
+WORKDIR /data
 USER 65534:65534
 ENTRYPOINT ["/usr/local/bin/oberth"]
 CMD ["serve"]

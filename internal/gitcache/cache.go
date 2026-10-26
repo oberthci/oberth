@@ -291,6 +291,10 @@ func New(config Config) (*Cache, error) {
 		preFinalizeGate: config.PreFinalizeGate,
 		repositoryGate:  config.RepositoryGate,
 	}
+	// Preserve explicit legacy executable configuration for the transition.
+	if config.Backend == "" && config.GitBinary != "" {
+		config.Backend = BackendCLI
+	}
 	if err := cache.initBackend(config.Backend); err != nil {
 		return nil, err
 	}

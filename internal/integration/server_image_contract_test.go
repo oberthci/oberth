@@ -20,11 +20,11 @@ func TestServerImageUsesPinnedMinimalContract(t *testing.T) {
 		"type=cache,id=oberth-server-${BUILD_CACHE_NAMESPACE}-gomod,target=/go/pkg/mod,sharing=locked",
 		"type=cache,id=oberth-server-${BUILD_CACHE_NAMESPACE}-gobuild,target=/root/.cache/go-build,sharing=locked",
 		// The build line injects main.version from the VERSION build arg
-		// (default dev) so release images report the real tag; everything
-		// else in the minimal contract is unchanged.
+		// (default dev) so release images report the real tag.
 		"ARG VERSION=dev",
 		`go build -trimpath -buildvcs=false -ldflags="-s -w -X main.version=${VERSION}" -o /out/oberth ./cmd/oberth`,
-		"FROM alpine:3.23@sha256:fd791d74b68913cbb027c6546007b3f0d3bc45125f797758156952bc2d6daf40",
+		"FROM alpine:3.23@sha256:fd791d74b68913cbb027c6546007b3f0d3bc45125f797758156952bc2d6daf40 AS cli-runtime",
+		"FROM scratch AS runtime",
 		"ca-certificates=20261020-r0",
 		"git=2.52.0-r0",
 		"libcrypto3=3.5.9-r0",
@@ -61,28 +61,31 @@ func TestServerImageUsesPinnedMinimalContract(t *testing.T) {
 	instructions := serverImageDockerInstructions(dockerfile)
 	finalStageStart := -1
 	for index, instruction := range instructions {
-		if instruction == "FROM alpine:3.23@sha256:fd791d74b68913cbb027c6546007b3f0d3bc45125f797758156952bc2d6daf40" {
+		if instruction == "FROM scratch AS runtime" {
 			finalStageStart = index
 		}
 	}
 	if finalStageStart < 0 {
-		t.Fatal("server runtime stage is missing")
+		t.Fatal("scratch server runtime stage is missing")
 	}
-	packageInstall := ""
-	apkCommands := 0
-	for _, instruction := range instructions[finalStageStart+1:] {
-		if strings.HasPrefix(instruction, "FROM ") {
-			t.Fatal("server runtime stage must be the final stage")
-		}
-		apkCommands += serverImageAPKCommandCount(instruction)
-		if strings.HasPrefix(instruction, "RUN ") && strings.Contains(instruction, "apk add --no-cache") {
-			packageInstall = instruction
-		}
+	wantRuntime := []string{
+		"COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt",
+		"COPY --from=build /out/oberth /usr/local/bin/oberth",
+		"ENV HOME=/data TMPDIR=/tmp PATH=/usr/local/bin",
+		"WORKDIR /data",
+		"USER 65534:65534",
+		`ENTRYPOINT ["/usr/local/bin/oberth"]`,
+		`CMD ["serve"]`,
 	}
-	install := strings.Index(packageInstall, "apk add --no-cache")
-	cleanup := strings.Index(packageInstall, "rm -f /var/log/apk.log")
-	if apkCommands != 1 || install < 0 || cleanup <= install {
-		t.Fatal("server runtime stage must remove the APK log after its sole package install")
+	if got := strings.Join(instructions[finalStageStart+1:], "\n"); got != strings.Join(wantRuntime, "\n") {
+		t.Fatalf("scratch runtime has extra payload, commands or a later stage:\n%s", got)
+	}
+	main, err := os.ReadFile("../../cmd/oberth/main.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(main), `_ "time/tzdata"`) {
+		t.Fatal("scratch server must embed timezone data")
 	}
 
 	ignoreRaw, err := os.ReadFile("../../.dockerignore")
@@ -120,15 +123,4 @@ func serverImageDockerInstructions(dockerfile string) []string {
 		instructions = append(instructions, current.String())
 	}
 	return instructions
-}
-
-func serverImageAPKCommandCount(instruction string) int {
-	count := 0
-	for _, field := range strings.Fields(instruction) {
-		command := strings.Trim(field, `"'();&|`)
-		if command == "apk" || command == "/sbin/apk" {
-			count++
-		}
-	}
-	return count
 }
