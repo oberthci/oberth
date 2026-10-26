@@ -4,7 +4,7 @@
 # be supplied with the standard GOFLAGS environment variable.
 set -eu
 if [ "$#" -eq 0 ]; then
-  set -- cli
+  set -- cli go-git
 fi
 for backend in "$@"; do
   printf 'gitcache parity backend=%s\n' "$backend"

@@ -185,7 +185,11 @@ a repository or synchronized to the upstream forge.
 
 Promotion first green-gates the candidate. It reuses the already-tested commit
 only when the fetched target fast-forwards to that exact candidate. A divergent
-target is merged locally and receives a new CI run. When the fetched target
+target is merged locally and receives a new CI run. Both Git backends share a
+conservative tree merge: overlapping path changes require identical resulting
+objects and modes; otherwise promotion refuses with a `rebase onto <target>`
+hint. There is no content or rename inference; file/directory conflicts and
+ambiguous merge bases also require a rebase. When the fetched target
 already contains the candidate, that fetched target tree also receives a new CI
 run. The final upstream push is never forced, so target movement produces a
 terminal failed promotion rather than overwriting work.

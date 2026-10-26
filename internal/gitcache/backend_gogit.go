@@ -258,8 +258,6 @@ func (b *goGitBackend) dispatch(ctx context.Context, spec commandSpec, args []st
 		return b.maintain(ctx, r)
 	case "upload-pack", "receive-pack":
 		return b.serve(ctx, r, op, spec)
-	case "merge":
-		return errors.New("promotion requires a conservative tree merge; rebase onto the target branch")
 	default:
 		return fmt.Errorf("unsupported internal Go Git operation %q", op)
 	}

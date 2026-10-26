@@ -249,12 +249,12 @@ func (c *Cache) PreparePromotion(ctx context.Context, input, sourceSHA, targetBr
 			_ = os.RemoveAll(workspace)
 		}
 	}()
-	if err := c.run(ctx, commandSpec{dir: workspace, args: []string{
-		"-c", "user.name=Oberth",
-		"-c", "user.email=oberth@localhost",
-		"-c", "commit.gpgsign=false",
-		"merge", "--no-ff", "--no-edit", sourceSHA,
-	}}); err != nil {
+	// A source may be retained only by a private promotion/receive ref. Fetch
+	// it explicitly: the in-process workspace clone copies public refs only.
+	if err := c.run(ctx, commandSpec{dir: workspace, args: []string{"fetch", "--quiet", "--force", "origin", sourceSHA}}); err != nil {
+		return MergeCandidate{}, fmt.Errorf("fetch promotion source: %w", err)
+	}
+	if err := c.mergePromotionTrees(ctx, workspace, sourceSHA, targetBranch); err != nil {
 		return MergeCandidate{}, fmt.Errorf("merge promotion candidate: %w", err)
 	}
 	merged, err := c.capture(ctx, workspace, "rev-parse", "--verify", "HEAD^{commit}")

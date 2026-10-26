@@ -1268,6 +1268,12 @@ continuity checks; it must never be used to reset or bypass those checks.
 - Promotion green-gates the candidate. It reuses candidate CI only when the
   fetched target fast-forwards to that exact candidate. Divergent merges and a
   fetched target that already contains the candidate receive target-tree CI.
+  Both Git backends use a conservative tree merge: a path changed on both
+  sides is refused with a `rebase onto <target>` hint unless its resulting
+  object and mode are identical (including identical deletions). File/directory
+  conflicts and ambiguous merge bases are refused; there is no content-merge
+  or rename inference. A clean merge has the exact target/source parents and
+  its immutable object is pinned in the cache before CI.
   The chosen target is pushed without force; a moved target fails the promotion.
   Such a failure (delivery found the target at a head other than the planned
   base) is retried by the server itself (#1097): after the delivery permit is
