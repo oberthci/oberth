@@ -230,3 +230,27 @@ func TestGoGitSSHHandshakeHonorsDeadline(t *testing.T) {
 	}
 	workers.Wait()
 }
+
+func TestGoGitSSHFailureRetainsForgeReason(t *testing.T) {
+	identity, body := testSSHSigner(t)
+	missing := filepath.Join(t.TempDir(), "missing-repository.git")
+	fixture := startGitSSHFixture(t, missing, identity.PublicKey())
+	root := t.TempDir()
+	key := filepath.Join(root, "identity")
+	hosts := filepath.Join(root, "known_hosts")
+	if err := os.WriteFile(key, body, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	address := strings.TrimPrefix(strings.TrimSuffix(fixture.url, missing), "ssh://git@")
+	if err := os.WriteFile(hosts, []byte(knownhosts.Line([]string{address}, fixture.hostKey)+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cache, err := New(Config{Root: filepath.Join(root, "cache"), Backend: BackendGoGit, SSH: SSHConfig{PrivateKeyPath: key, KnownHostsPath: hosts}, Upstream: func(string) (string, error) { return fixture.url, nil }, CommandTimeout: 5 * time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = cache.LsRemoteHeads(t.Context(), "example")
+	if err == nil || !strings.Contains(err.Error(), "does not appear to be a git repository") {
+		t.Fatalf("lost upstream refusal reason: %v", err)
+	}
+}

@@ -25,6 +25,9 @@ type strictSSHSession struct {
 	stdout     io.Reader
 	stop       func() bool
 	once       sync.Once
+	waitOnce   sync.Once
+	waitError  error
+	errorTail  lockedTailBuffer
 }
 
 func newStrictSSHSession(ep *transport.Endpoint, auth transport.AuthMethod, service string) (result *strictSSHSession, err error) {
@@ -66,7 +69,8 @@ func newStrictSSHSession(ep *transport.Endpoint, auth transport.AuthMethod, serv
 	if err != nil {
 		return nil, err
 	}
-	session.session.Stderr = io.Discard
+	session.errorTail.tail.max = maxCapturedOutput
+	session.session.Stderr = &session.errorTail
 	path := "'" + strings.ReplaceAll(ep.Path, "'", "'\\''") + "'"
 	if err = session.session.Start(service + " " + path); err != nil {
 		return nil, err
@@ -83,6 +87,9 @@ func (s *strictSSHSession) Close() error {
 			_ = s.client.Close()
 		}
 		_ = s.connection.Close()
+		if s.session != nil {
+			_ = s.wait()
+		}
 	})
 	return nil
 }
@@ -91,58 +98,81 @@ func (s *strictSSHSession) AdvertisedReferences() (*packp.AdvRefs, error) {
 }
 func (s *strictSSHSession) AdvertisedReferencesContext(ctx context.Context) (*packp.AdvRefs, error) {
 	if err := ctx.Err(); err != nil {
-		return nil, err
+		return nil, s.failure(err)
 	}
 	refs := packp.NewAdvRefs()
-	if err := refs.Decode(s.stdout); err != nil {
-		return nil, err
+	if err := refs.Decode(io.LimitReader(s.stdout, maxRefsOutput+1)); err != nil {
+		return nil, s.failure(err)
 	}
 	return refs, nil
 }
 func (s *strictSSHSession) UploadPack(ctx context.Context, req *packp.UploadPackRequest) (*packp.UploadPackResponse, error) {
 	if err := ctx.Err(); err != nil {
-		return nil, err
+		return nil, s.failure(err)
 	}
 	if err := req.UploadRequest.Encode(s.stdin); err != nil {
-		return nil, err
+		return nil, s.failure(err)
 	}
 	if err := req.UploadHaves.Encode(s.stdin, true); err != nil {
-		return nil, err
+		return nil, s.failure(err)
 	}
 	if err := pktline.NewEncoder(s.stdin).EncodeString("done\n"); err != nil {
-		return nil, err
+		return nil, s.failure(err)
 	}
 	if err := s.stdin.Close(); err != nil {
-		return nil, err
+		return nil, s.failure(err)
 	}
 	response := packp.NewUploadPackResponse(req)
 	if err := response.Decode(io.NopCloser(s.stdout)); err != nil {
-		return nil, err
+		return nil, s.failure(err)
 	}
 	return response, nil
 }
 func (s *strictSSHSession) ReceivePack(ctx context.Context, req *packp.ReferenceUpdateRequest) (*packp.ReportStatus, error) {
 	if err := ctx.Err(); err != nil {
-		return nil, err
+		return nil, s.failure(err)
 	}
 	if err := req.Encode(s.stdin); err != nil {
-		return nil, err
+		return nil, s.failure(err)
 	}
 	if err := s.stdin.Close(); err != nil {
-		return nil, err
+		return nil, s.failure(err)
 	}
 	if !req.Capabilities.Supports(capability.ReportStatus) {
-		return nil, errors.New("upstream must support report-status for attributable publication")
+		return nil, s.failure(errors.New("upstream must support report-status for attributable publication"))
 	}
 	response := packp.NewReportStatus()
 	if err := response.Decode(s.stdout); err != nil {
-		return nil, err
+		return nil, s.failure(err)
 	}
 	if err := response.Error(); err != nil {
-		return response, err
+		return response, s.failure(err)
 	}
-	if err := s.session.Wait(); err != nil {
-		return response, fmt.Errorf("upstream receive-pack: %w", err)
+	if err := s.wait(); err != nil {
+		return response, s.failure(fmt.Errorf("upstream receive-pack: %w", err))
 	}
 	return response, nil
+}
+
+type lockedTailBuffer struct {
+	mu   sync.Mutex
+	tail tailBuffer
+}
+
+func (b *lockedTailBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.tail.Write(p)
+}
+func (b *lockedTailBuffer) String() string { b.mu.Lock(); defer b.mu.Unlock(); return b.tail.String() }
+func (s *strictSSHSession) wait() error {
+	s.waitOnce.Do(func() { s.waitError = s.session.Wait() })
+	return s.waitError
+}
+func (s *strictSSHSession) failure(err error) error {
+	_ = s.Close()
+	if detail := s.errorTail.String(); detail != "" {
+		return fmt.Errorf("%w: %s", err, detail)
+	}
+	return err
 }

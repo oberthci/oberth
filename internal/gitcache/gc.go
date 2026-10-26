@@ -10,9 +10,14 @@ import (
 	"time"
 )
 
-// GC asks Git to compact one repository only when its own heuristics say that
-// work is useful. It does not aggressively prune run objects.
-func (c *Cache) GC(ctx context.Context, input string) error {
+// Compact explicitly consolidates a cache, bypassing automatic thresholds and
+// attempt cooldown while retaining the same object-age safety window.
+func (c *Cache) Compact(ctx context.Context, input string) error { return c.gc(ctx, input, false) }
+
+// GC compacts only when the selected backend heuristics say work is useful,
+// retaining the normal grace window for unreachable run objects.
+func (c *Cache) GC(ctx context.Context, input string) error { return c.gc(ctx, input, true) }
+func (c *Cache) gc(ctx context.Context, input string, automatic bool) error {
 	_, path, err := c.path(input)
 	if err != nil {
 		return err
@@ -20,7 +25,11 @@ func (c *Cache) GC(ctx context.Context, input string) error {
 	lock := c.repoLock(path)
 	lock.Lock()
 	defer lock.Unlock()
-	return c.run(ctx, commandSpec{dir: path, args: []string{"gc", "--auto"}})
+	args := []string{"gc"}
+	if automatic {
+		args = append(args, "--auto")
+	}
+	return c.run(ctx, commandSpec{dir: path, args: args})
 }
 
 // GCAll compacts every validated bare cache under the root, scanning both the

@@ -175,7 +175,11 @@ func (b *goGitBackend) fetch(ctx context.Context, r *git.Repository, a []string)
 	r.Storer = staged
 	defer func() { r.Storer = originalStore }()
 	upstream := git.NewRemote(r.Storer, &config.RemoteConfig{Name: args[0], URLs: []string{remote}})
-	err = upstream.FetchContext(ctx, &git.FetchOptions{RemoteName: args[0], RemoteURL: remote, Auth: auth, RefSpecs: refs, Force: contains(a, "--force"), Prune: contains(a, "--prune"), Tags: git.NoTags})
+	if !strings.Contains(original, "://") {
+		err = fetchLocalObjects(ctx, r, original, refs, contains(a, "--prune"))
+	} else {
+		err = upstream.FetchContext(ctx, &git.FetchOptions{RemoteName: args[0], RemoteURL: remote, Auth: auth, RefSpecs: refs, Force: contains(a, "--force"), Prune: contains(a, "--prune"), Tags: git.NoTags})
+	}
 	if errors.Is(err, transport.ErrEmptyRemoteRepository) {
 		for _, ref := range refs {
 			if !ref.IsWildcard() {

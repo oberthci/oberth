@@ -8,8 +8,10 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/go-git/go-billy/v5/osfs"
 	git "github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
+	"github.com/go-git/go-git/v5/plumbing/cache"
 	"github.com/go-git/go-git/v5/storage"
 	"github.com/go-git/go-git/v5/storage/filesystem"
 )
@@ -24,7 +26,11 @@ type atomicReferenceStore struct {
 
 func wrapGoReferences(r *git.Repository, dir string) {
 	if _, ok := r.Storer.(*atomicReferenceStore); !ok {
-		r.Storer = &atomicReferenceStore{Storage: r.Storer.(*filesystem.Storage), dir: dir}
+		if closer, ok := r.Storer.(interface{ Close() error }); ok {
+			_ = closer.Close()
+		}
+		store := filesystem.NewStorageWithOptions(osfs.New(dir), cache.NewObjectLRU(32<<20), filesystem.Options{LargeObjectThreshold: 1})
+		r.Storer = &atomicReferenceStore{Storage: store, dir: dir}
 	}
 }
 func (s *atomicReferenceStore) SetReference(ref *plumbing.Reference) error {

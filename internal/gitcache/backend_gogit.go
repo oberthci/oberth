@@ -18,6 +18,7 @@ import (
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/filemode"
 	"github.com/go-git/go-git/v5/plumbing/object"
+	"github.com/go-git/go-git/v5/storage/filesystem"
 )
 
 const BackendGoGit Backend = "go-git"
@@ -96,10 +97,7 @@ func openGoRepository(path string) (*git.Repository, func(), error) {
 	if err != nil {
 		return nil, func() {}, err
 	}
-	dir := path
-	if _, err := r.Worktree(); err == nil {
-		dir = filepath.Join(path, ".git")
-	}
+	dir := r.Storer.(*filesystem.Storage).Filesystem().Root()
 	wrapGoReferences(r, dir)
 	closeStorage := func() {
 		if closer, ok := r.Storer.(io.Closer); ok {
@@ -255,7 +253,7 @@ func (b *goGitBackend) dispatch(ctx context.Context, spec commandSpec, args []st
 	case "archive":
 		return goArchive(ctx, r, a[len(a)-1], out)
 	case "gc":
-		return b.maintain(ctx, r)
+		return b.maintain(ctx, r, contains(a, "--auto"))
 	case "upload-pack", "receive-pack":
 		return b.serve(ctx, r, op, spec)
 	default:
@@ -654,13 +652,4 @@ func goArchive(ctx context.Context, r *git.Repository, revision string, out io.W
 			}
 		}
 	}
-}
-
-func (b *goGitBackend) maintain(ctx context.Context, r *git.Repository) error {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	// Auto maintenance is intentionally non-destructive. Packed-object pruning
-	// must not invalidate active readers or in-flight receive reservations.
-	return nil
 }
