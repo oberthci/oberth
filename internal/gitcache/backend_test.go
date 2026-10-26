@@ -16,7 +16,10 @@ import (
 // tests with an explicit executable continue to exercise the CLI adapter.
 func newBackendTestCache(t *testing.T, config Config) (*Cache, error) {
 	t.Helper()
-	selected := Backend(os.Getenv("OBERTH_TEST_GIT_BACKEND"))
+	selected := config.Backend
+	if selected == "" {
+		selected = Backend(os.Getenv("OBERTH_TEST_GIT_BACKEND"))
+	}
 	if selected == "" {
 		selected = BackendCLI
 	}

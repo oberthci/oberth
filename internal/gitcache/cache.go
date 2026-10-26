@@ -222,6 +222,7 @@ esac
 type Cache struct {
 	backend         gitBackend
 	backendName     Backend
+	ssh             SSHConfig
 	root            string
 	outboxRoot      string
 	globalConfig    string
@@ -274,8 +275,10 @@ func New(config Config) (*Cache, error) {
 			return nil, fmt.Errorf("invalid Git environment key %q", key)
 		}
 	}
+	config.SSH.Identities = append([]SSHIdentity(nil), config.SSH.Identities...)
 	cache := &Cache{
 		root:            root,
+		ssh:             config.SSH,
 		outboxRoot:      outboxRoot,
 		globalConfig:    globalConfig,
 		upstream:        config.Upstream,

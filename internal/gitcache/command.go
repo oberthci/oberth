@@ -363,7 +363,7 @@ func (b *tailBuffer) Write(value []byte) (int, error) {
 func (b *tailBuffer) String() string { return string(bytes.TrimSpace(b.data)) }
 
 func isExitCode(err error, code int) bool {
-	var exitErr *exec.ExitError
+	var exitErr interface{ ExitCode() int }
 	return errors.As(err, &exitErr) && exitErr.ExitCode() == code
 }
 

@@ -153,6 +153,7 @@ type RepoQualification struct {
 type Config struct {
 	// Backend defaults to the CLI implementation during the transition.
 	Backend Backend
+	SSH     SSHConfig
 	// RepositoryGate refuses network/cache admission while a repository is archived.
 	RepositoryGate func(context.Context, string) error
 	Root           string

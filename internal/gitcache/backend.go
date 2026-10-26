@@ -27,6 +27,10 @@ func (c *Cache) initBackend(selected Backend) error {
 		c.backend = &cliBackend{cache: c}
 		c.backendName = BackendCLI
 		return nil
+	case BackendGoGit:
+		c.backend = &goGitBackend{cache: c}
+		c.backendName = BackendGoGit
+		return nil
 	default:
 		return fmt.Errorf("unknown Git backend %q", selected)
 	}

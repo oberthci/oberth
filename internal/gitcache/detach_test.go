@@ -29,6 +29,7 @@ func TestGitCommandsNeverDetachBackgroundMaintenance(t *testing.T) {
 		CommandTimeout: 2 * time.Minute,
 		Upstream:       func(string) (string, error) { return "", errors.New("upstream unused") },
 		Env:            map[string]string{"GIT_TRACE": trace},
+		Backend:        BackendCLI,
 	})
 	if err != nil {
 		t.Fatal(err)
