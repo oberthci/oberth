@@ -212,8 +212,7 @@ func TestEnsureDiscoversAndAllowsNonMainDefaultBranch(t *testing.T) {
 		t.Fatalf("cache HEAD = %q", got)
 	}
 	featureSHA := repository.featureCommit(t, "feature/non-main", "feature\n")
-	receiveArgs := cache.serviceArgs(ReceivePack, ready.Path)
-	receivePack := strings.Join(append([]string{cache.gitBinary}, receiveArgs[:len(receiveArgs)-1]...), " ")
+	receivePack := backendServiceCommand(t, cache, ReceivePack)
 	if output, err := pushWithReceivePack(repository.work, ready.Path, receivePack, featureSHA+":refs/heads/trunk"); err != nil {
 		t.Fatalf("push trunk: %v\n%s", err, output)
 	}
@@ -366,7 +365,7 @@ func TestPreparePromotionCreatesUnbornTarget(t *testing.T) {
 	root := t.TempDir()
 	upstream := filepath.Join(root, "new-upstream.git")
 	runGit(t, "", "init", "--bare", "--initial-branch=main", upstream)
-	cache, err := New(Config{
+	cache, err := newBackendTestCache(t, Config{
 		Root:           filepath.Join(root, "cache"),
 		CommandTimeout: 10 * time.Second,
 		Upstream:       func(string) (string, error) { return upstream, nil },
@@ -499,8 +498,7 @@ func TestReleaseAncestryAndTagSync(t *testing.T) {
 	}
 	feature := repository.featureCommit(t, "feature/unmerged", "unmerged\n")
 	runGit(t, repository.work, "push", ready.Path, feature+":refs/heads/feature/unmerged")
-	receiveArgs := cache.serviceArgs(ReceivePack, ready.Path)
-	receivePack := strings.Join(append([]string{cache.gitBinary}, receiveArgs[:len(receiveArgs)-1]...), " ")
+	receivePack := backendServiceCommand(t, cache, ReceivePack)
 	if output, pushErr := pushWithReceivePack(repository.work, ready.Path, receivePack, feature+":refs/heads/main"); pushErr != nil {
 		t.Fatalf("default branch push = %v\n%s", pushErr, output)
 	}
@@ -564,7 +562,7 @@ func TestConcurrentEnsureUsesOneCache(t *testing.T) {
 func TestCommandLoggingRedactsURLCredentialsAndConfiguredValues(t *testing.T) {
 	t.Parallel()
 	var logs bytes.Buffer
-	cache, err := New(Config{
+	cache, err := newBackendTestCache(t, Config{
 		Root:     t.TempDir(),
 		Upstream: func(string) (string, error) { return "unused", nil },
 		Logger:   testLogger{&logs},
@@ -711,8 +709,7 @@ func TestMaterializePreservesClientModifiedRefs(t *testing.T) {
 
 	// Client pushes a different commit to main via receive-pack.
 	clientSHA := repository.featureCommit(t, "feature/client", "client content\n")
-	receiveArgs := cache.serviceArgs(ReceivePack, ready.Path)
-	receivePack := strings.Join(append([]string{cache.gitBinary}, receiveArgs[:len(receiveArgs)-1]...), " ")
+	receivePack := backendServiceCommand(t, cache, ReceivePack)
 	if output, pushErr := pushWithReceivePack(repository.work, ready.Path, receivePack, clientSHA+":refs/heads/main"); pushErr != nil {
 		t.Fatalf("client push: %v\n%s", pushErr, output)
 	}
@@ -1111,7 +1108,7 @@ func TestLsRemoteHeadsSucceedsForReachableUpstream(t *testing.T) {
 
 func TestLsRemoteHeadsFailsForUnreachableUpstream(t *testing.T) {
 	t.Parallel()
-	cache, err := New(Config{
+	cache, err := newBackendTestCache(t, Config{
 		Root:           t.TempDir(),
 		CommandTimeout: 5 * time.Second,
 		Upstream: func(repo string) (string, error) {
@@ -1237,7 +1234,7 @@ func (r *testRepository) checkout(t *testing.T, branch string) {
 
 func newTestCache(t *testing.T, upstream string) *Cache {
 	t.Helper()
-	cache, err := New(Config{
+	cache, err := newBackendTestCache(t, Config{
 		Root:           filepath.Join(t.TempDir(), "cache"),
 		CommandTimeout: 10 * time.Second,
 		Upstream: func(repo string) (string, error) {
@@ -1293,7 +1290,7 @@ func TestEnsureRefusedUpstreamDoesNotServeStaleCache(t *testing.T) {
 
 	// Build a cache whose upstream resolver accepts "example" and
 	// refuses "wrong-org/example" with ErrUpstreamRefused.
-	cache, err := New(Config{
+	cache, err := newBackendTestCache(t, Config{
 		Root:           filepath.Join(t.TempDir(), "cache"),
 		CommandTimeout: 10 * time.Second,
 		Upstream: func(input string) (string, error) {
@@ -1333,7 +1330,7 @@ func TestEnsureUnreachableUpstreamStillServesStaleCache(t *testing.T) {
 	repository := newTestRepository(t)
 	reachable := true
 
-	cache, err := New(Config{
+	cache, err := newBackendTestCache(t, Config{
 		Root:           filepath.Join(t.TempDir(), "cache"),
 		CommandTimeout: 10 * time.Second,
 		Upstream: func(input string) (string, error) {
@@ -1422,7 +1419,7 @@ func TestGCAllFindsQualifiedLayoutCaches(t *testing.T) {
 	}
 	runGit(t, "", "init", "--bare", "--initial-branch=main", qualifiedPath)
 
-	cache, err := New(Config{
+	cache, err := newBackendTestCache(t, Config{
 		Root:           root,
 		CommandTimeout: 10 * time.Second,
 		Upstream:       func(string) (string, error) { return "/dev/null", nil },

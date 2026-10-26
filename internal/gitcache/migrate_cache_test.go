@@ -24,7 +24,7 @@ func TestMigrateToQualifiedLayout(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cache, err := New(Config{
+	cache, err := newBackendTestCache(t, Config{
 		Root:     root,
 		Upstream: func(repo string) (string, error) { return "/dev/null", nil },
 	})
@@ -65,7 +65,7 @@ func TestMigrateToQualifiedLayoutIdempotent(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cache, err := New(Config{
+	cache, err := newBackendTestCache(t, Config{
 		Root:     root,
 		Upstream: func(repo string) (string, error) { return "/dev/null", nil },
 	})
@@ -92,7 +92,7 @@ func TestQualifiedCachePath(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 
-	cache, err := New(Config{
+	cache, err := newBackendTestCache(t, Config{
 		Root:     root,
 		Upstream: func(repo string) (string, error) { return "/dev/null", nil },
 	})
@@ -144,7 +144,7 @@ func TestQualifiedCachePathWithQualifier(t *testing.T) {
 		}
 		return RepoQualification{}, fmt.Errorf("repository %q exists under multiple upstreams; qualify the path", input)
 	}
-	cache, err := New(Config{
+	cache, err := newBackendTestCache(t, Config{
 		Root:          root,
 		Upstream:      func(repo string) (string, error) { return "/dev/null", nil },
 		RepoQualifier: qualify,
@@ -197,7 +197,7 @@ func TestListFlatCaches(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cache, err := New(Config{
+	cache, err := newBackendTestCache(t, Config{
 		Root:     root,
 		Upstream: func(repo string) (string, error) { return "/dev/null", nil },
 	})
@@ -222,7 +222,7 @@ func TestListFlatCaches(t *testing.T) {
 func TestReservationIdentityAndPathIsolation(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
-	cache, err := New(Config{
+	cache, err := newBackendTestCache(t, Config{
 		Root:     root,
 		Upstream: func(repo string) (string, error) { return "/dev/null", nil },
 	})
@@ -315,7 +315,7 @@ func TestDefaultBranchFromSymrefAndEmptyBootstrap(t *testing.T) {
 	root := t.TempDir()
 	upstream := filepath.Join(root, "empty-upstream.git")
 	runGit(t, "", "init", "--bare", "--initial-branch=main", upstream)
-	cache, err := New(Config{
+	cache, err := newBackendTestCache(t, Config{
 		Root:           filepath.Join(root, "cache"),
 		CommandTimeout: 10 * time.Second,
 		Upstream:       func(string) (string, error) { return upstream, nil },

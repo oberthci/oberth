@@ -95,9 +95,8 @@ func (c *Cache) capture(ctx context.Context, dir string, args ...string) (string
 	return c.execute(ctx, commandSpec{dir: dir, args: args}, true)
 }
 
-func (c *Cache) execute(ctx context.Context, spec commandSpec, capture bool) (string, error) {
-	ctx, cancel := context.WithTimeout(ctx, c.timeout)
-	defer cancel()
+func (b *cliBackend) execute(ctx context.Context, spec commandSpec, capture bool) (string, error) {
+	c := b.cache
 
 	// c.gitBinary is operator configuration and every argument is constructed
 	// by the validated Git layer; no shell is involved. Cancellation below

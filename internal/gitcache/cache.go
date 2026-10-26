@@ -220,6 +220,8 @@ esac
 
 // Cache owns bare repositories under one persistent root.
 type Cache struct {
+	backend         gitBackend
+	backendName     Backend
 	root            string
 	outboxRoot      string
 	globalConfig    string
@@ -272,7 +274,7 @@ func New(config Config) (*Cache, error) {
 			return nil, fmt.Errorf("invalid Git environment key %q", key)
 		}
 	}
-	return &Cache{
+	cache := &Cache{
 		root:            root,
 		outboxRoot:      outboxRoot,
 		globalConfig:    globalConfig,
@@ -285,7 +287,11 @@ func New(config Config) (*Cache, error) {
 		logger:          logger,
 		preFinalizeGate: config.PreFinalizeGate,
 		repositoryGate:  config.RepositoryGate,
-	}, nil
+	}
+	if err := cache.initBackend(config.Backend); err != nil {
+		return nil, err
+	}
+	return cache, nil
 }
 
 // Ensure creates or refreshes one cache. A refresh failure is non-fatal only

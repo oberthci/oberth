@@ -97,7 +97,7 @@ func TestRunFailureTeesStderrToCallerAndError(t *testing.T) {
 // that appears in output cannot leak into an error string, CI issue, or log.
 func TestGitFailureDetailRedactsConfiguredSecret(t *testing.T) {
 	t.Parallel()
-	cache, err := New(Config{
+	cache, err := newBackendTestCache(t, Config{
 		Root:           filepath.Join(t.TempDir(), "cache"),
 		CommandTimeout: 10 * time.Second,
 		Redact:         []string{"s3cr3t-token-value"},
@@ -130,7 +130,7 @@ func TestManagedGitConfigEnablesFsck(t *testing.T) {
 		}
 	}
 	// Verify the runtime environment carries the fsck overrides too.
-	cache, err := New(Config{
+	cache, err := newBackendTestCache(t, Config{
 		Root:           t.TempDir(),
 		CommandTimeout: 10 * time.Second,
 		Upstream:       func(string) (string, error) { return "unused", nil },

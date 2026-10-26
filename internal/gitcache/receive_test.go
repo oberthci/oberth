@@ -25,8 +25,7 @@ func TestReceivePackAllowsOnlyBranchesAndTags(t *testing.T) {
 		t.Fatal(err)
 	}
 	featureSHA := repository.featureCommit(t, "feature/ref-policy", "ref policy\n")
-	receiveArgs := cache.serviceArgs(ReceivePack, ready.Path)
-	receivePack := strings.Join(append([]string{cache.gitBinary}, receiveArgs[:len(receiveArgs)-1]...), " ")
+	receivePack := backendServiceCommand(t, cache, ReceivePack)
 
 	if output, err := pushWithReceivePack(repository.work, ready.Path, receivePack, featureSHA+":refs/heads/feature/ref-policy"); err != nil {
 		t.Fatalf("push branch: %v\n%s", err, output)
@@ -82,8 +81,7 @@ func TestReceivePackRejectsNonFastForwardDefaultBranch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	receiveArgs := cache.serviceArgs(ReceivePack, ready.Path)
-	receivePack := strings.Join(append([]string{cache.gitBinary}, receiveArgs[:len(receiveArgs)-1]...), " ")
+	receivePack := backendServiceCommand(t, cache, ReceivePack)
 
 	// A fast-forward push to main must succeed.
 	ffSHA := repository.featureCommit(t, "feature/ff-main", "ff update\n")
@@ -135,8 +133,7 @@ func TestReceivePackRejectsNonFastForwardCustomDefaultBranch(t *testing.T) {
 	if ready.DefaultBranch != "trunk" {
 		t.Fatalf("default branch = %q, want trunk", ready.DefaultBranch)
 	}
-	receiveArgs := cache.serviceArgs(ReceivePack, ready.Path)
-	receivePack := strings.Join(append([]string{cache.gitBinary}, receiveArgs[:len(receiveArgs)-1]...), " ")
+	receivePack := backendServiceCommand(t, cache, ReceivePack)
 
 	// Fast-forward push to trunk succeeds.
 	ffSHA := repository.featureCommit(t, "feature/ff-trunk", "ff trunk\n")
@@ -170,8 +167,7 @@ func TestReceivePackRejectsUnreachableMovedAndDeletedReleaseTagsBeforeRefMutatio
 	if err != nil {
 		t.Fatal(err)
 	}
-	receiveArgs := cache.serviceArgs(ReceivePack, ready.Path)
-	receivePack := strings.Join(append([]string{cache.gitBinary}, receiveArgs[:len(receiveArgs)-1]...), " ")
+	receivePack := backendServiceCommand(t, cache, ReceivePack)
 
 	// A tag can legally share the default branch's short name. Admission must
 	// derive the branch from full symbolic HEAD, not Git's ambiguous --short
@@ -766,7 +762,7 @@ func seedCacheObject(t *testing.T, work, cachePath, sha string) {
 func TestPreFinalizeGateBlocksRefPublication(t *testing.T) {
 	t.Parallel()
 	repository := newTestRepository(t)
-	cache, err := New(Config{
+	cache, err := newBackendTestCache(t, Config{
 		Root:           filepath.Join(t.TempDir(), "cache"),
 		CommandTimeout: 10 * time.Second,
 		Upstream: func(repo string) (string, error) {
@@ -849,7 +845,7 @@ func TestGateFailedReplayDeliversWithOriginalAttribution(t *testing.T) {
 		}
 		return repository.upstream, nil
 	}
-	cache, err := New(Config{
+	cache, err := newBackendTestCache(t, Config{
 		Root:           root,
 		CommandTimeout: 10 * time.Second,
 		Upstream:       upstreamFunc,
@@ -883,7 +879,7 @@ func TestGateFailedReplayDeliversWithOriginalAttribution(t *testing.T) {
 	}
 
 	// Restart with a healthy gate — simulates gate recovery (e.g. TSA reachable again).
-	restarted, err := New(Config{
+	restarted, err := newBackendTestCache(t, Config{
 		Root:           root,
 		CommandTimeout: 10 * time.Second,
 		Upstream:       upstreamFunc,
@@ -931,7 +927,7 @@ func TestGateFailedReplayRefusesWhileGateStillFails(t *testing.T) {
 		}
 		return repository.upstream, nil
 	}
-	cache, err := New(Config{
+	cache, err := newBackendTestCache(t, Config{
 		Root:           root,
 		CommandTimeout: 10 * time.Second,
 		Upstream:       upstreamFunc,
@@ -962,7 +958,7 @@ func TestGateFailedReplayRefusesWhileGateStillFails(t *testing.T) {
 	}
 
 	// Restart with still-failing gate.
-	restarted, err := New(Config{
+	restarted, err := newBackendTestCache(t, Config{
 		Root:           root,
 		CommandTimeout: 10 * time.Second,
 		Upstream:       upstreamFunc,
@@ -1012,7 +1008,7 @@ func TestGateFailedReservationRecoveredByLaterReceive(t *testing.T) {
 		}
 		return repository.upstream, nil
 	}
-	cache, err := New(Config{
+	cache, err := newBackendTestCache(t, Config{
 		Root:           root,
 		CommandTimeout: 10 * time.Second,
 		Upstream:       upstreamFunc,
@@ -1093,7 +1089,7 @@ func TestGateFailedPendingReceiveShowsGateFailedState(t *testing.T) {
 	t.Parallel()
 	repository := newTestRepository(t)
 	root := filepath.Join(t.TempDir(), "cache")
-	cache, err := New(Config{
+	cache, err := newBackendTestCache(t, Config{
 		Root:           root,
 		CommandTimeout: 10 * time.Second,
 		Upstream: func(repo string) (string, error) {
@@ -1194,7 +1190,7 @@ func TestReservedReplayRefusesWhileGateFails(t *testing.T) {
 	}
 
 	// Restart with a failing gate — replay must refuse finalization.
-	restarted, err := New(Config{
+	restarted, err := newBackendTestCache(t, Config{
 		Root:           root,
 		CommandTimeout: 10 * time.Second,
 		Upstream:       upstreamFunc,
@@ -1271,7 +1267,7 @@ func TestReservedReplayDeliversWithOriginalAttribution(t *testing.T) {
 	// Restart with a healthy gate — the gate must run and the replay must
 	// finalize with the original actor attribution.
 	var gateRan bool
-	restarted, err := New(Config{
+	restarted, err := newBackendTestCache(t, Config{
 		Root:           root,
 		CommandTimeout: 10 * time.Second,
 		Upstream:       upstreamFunc,
@@ -1314,7 +1310,7 @@ func TestReservedReplayDeliversWithOriginalAttribution(t *testing.T) {
 
 func newTestCacheAt(t *testing.T, root, upstream string) *Cache {
 	t.Helper()
-	cache, err := New(Config{
+	cache, err := newBackendTestCache(t, Config{
 		Root:           root,
 		CommandTimeout: 10 * time.Second,
 		Upstream: func(repo string) (string, error) {

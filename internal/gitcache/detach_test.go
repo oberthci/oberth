@@ -24,7 +24,7 @@ import (
 func TestGitCommandsNeverDetachBackgroundMaintenance(t *testing.T) {
 	root := t.TempDir()
 	trace := filepath.Join(root, "git-trace.log")
-	cache, err := New(Config{
+	cache, err := newBackendTestCache(t, Config{
 		Root:           filepath.Join(root, "cache"),
 		CommandTimeout: 2 * time.Minute,
 		Upstream:       func(string) (string, error) { return "", errors.New("upstream unused") },
@@ -91,7 +91,7 @@ func TestGitCommandsNeverDetachBackgroundMaintenance(t *testing.T) {
 func TestCommandEnvPinsManagedGlobalGitConfig(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
-	cache, err := New(Config{
+	cache, err := newBackendTestCache(t, Config{
 		Root:     root,
 		Upstream: func(string) (string, error) { return "", errors.New("upstream unused") },
 	})
@@ -148,7 +148,7 @@ func TestCaptureBoundsDescendantHoldingOutputPipe(t *testing.T) {
 	if _, err := os.Stat("/bin/sh"); err != nil {
 		t.Skip("/bin/sh is required to hold an inherited descriptor open")
 	}
-	cache, err := New(Config{
+	cache, err := newBackendTestCache(t, Config{
 		Root:      t.TempDir(),
 		GitBinary: "/bin/sh",
 		Upstream:  func(string) (string, error) { return "", errors.New("upstream unused") },
