@@ -30,7 +30,7 @@ func TestServerImageUsesPinnedMinimalContract(t *testing.T) {
 		"libcrypto3=3.5.9-r0",
 		"libssl3=3.5.9-r0",
 		"pcre2=10.49-r0",
-		"libcurl=8.22.0-r0",
+		"libcurl=8.23.0-r0",
 		"libexpat=2.9.0-r0",
 		"brotli-libs=1.2.1-r0",
 		"openssh-client-default=10.2_p1-r0",

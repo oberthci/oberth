@@ -30,16 +30,16 @@ import (
 const (
 	ServerRepository = "europe-west4-docker.pkg.dev/skipopsmain/oberth/oberth"
 
-	// ServerSubstrate is rebuilt from the Dockerfile's libcurl 8.23.0-r0
-	// pin (CVE-2026-92392, HIGH). Both platforms carry 36 packages and scan
-	// clean with release Trivy 0.73.0 (HIGH/CRITICAL); all 49 ELF files per
-	// platform match their architecture. Each platform was built separately
-	// from the Alpine index's matching child to avoid cross-platform cache
-	// reuse. This OCI index has exactly linux/amd64 and linux/arm64 children,
-	// empty config variants and no attestations; both pass Repack validation.
-	// Publication prerequisite: upload the reviewed round-6 OCI archive with
-	// preserved digests and verify registry readback before merging/releasing.
-	ServerSubstrate = ServerRepository + "@sha256:40ae2f6004bb321c6f108cb573c9f953646ef0093feab1b5e4293ac974baa55e"
+	// ServerSubstrate is rebuilt on tuxbox from e309317c's Dockerfile with
+	// libcurl 8.23.0-r0 (CVE-2026-92392, HIGH). Both platforms carry 36 packages
+	// and 49 matching ELF files. Release Trivy 0.73.0 scans the substrates and
+	// both Repack outputs clean at HIGH/CRITICAL. Each platform uses the
+	// Alpine index's matching child, built separately with rootless Podman.
+	// This OCI index has only linux/amd64 and linux/arm64, empty config variants
+	// and no attestations. Laptop-built index 40ae2f60 is not used.
+	// Publication prerequisite: upload the reviewed tuxbox OCI archive with
+	// preserved digests and verify full registry readback before release.
+	ServerSubstrate = ServerRepository + "@sha256:a3f150cfc7fc63a85044c26986c69848f2a8b64c9da5835ce4e73a8f2da04410"
 )
 
 // Kind selects a release image contract. Only the server image remains.
