@@ -9,6 +9,10 @@ metadata:
     {{- include "oberth.labels" . | nindent 4 }}
 spec:
   type: ClusterIP
+  # This read-only listener remains useful to already-running CI while the
+  # server's /readyz fails on scheduler recovery, Kubernetes or audit health.
+  # Keep only this Service routable; the API/SSH readiness gate is unchanged.
+  publishNotReadyAddresses: true
   selector:
     {{- include "oberth.selectorLabels" . | nindent 4 }}
   ports:

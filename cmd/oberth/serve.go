@@ -1103,7 +1103,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 		if err != nil {
 			return err
 		}
-		proxyHandler := goproxy.NewHandler(git, options.argoGoProxyNamespace.ModulePrefix, repoMap)
+		proxyHandler := goproxy.NewHandler(git, options.argoGoProxyNamespace.ModulePrefix, repoMap).WithLogger(logger)
 		// Route directly: ServeMux cleans paths before invoking handlers, which
 		// could redirect a malformed private path out of its namespace. The
 		// handler enforces GET-only and classifies before parsing (#764).
@@ -1117,6 +1117,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 			}
 		}
 		goProxyServer = &http.Server{
+			ErrorLog:          log.New(logger.Writer(), "goproxy http: ", logger.Flags()),
 			Handler:           proxyHandler,
 			ReadHeaderTimeout: 10 * time.Second,
 			IdleTimeout:       30 * time.Second,
@@ -1653,7 +1654,9 @@ func runComponents(
 	})
 	if goProxyServer != nil && goProxyListener != nil {
 		start("goproxy", func() error {
+			logger.Printf("goproxy listener serving: %s", goProxyListener.Addr())
 			err := goProxyServer.Serve(goProxyListener)
+			logger.Printf("goproxy listener stopped: %v", err)
 			if errors.Is(err, http.ErrServerClosed) {
 				return nil
 			}

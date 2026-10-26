@@ -2141,6 +2141,18 @@ the private root and all descendants. Public module sumdb checks are unaffected.
 This is the server-provided resolver configuration; repository code that
 explicitly replaces its own environment is not a network isolation boundary.
 
+**Availability (#1204):** only the read-only proxy Service publishes not-ready
+pod addresses, so server dependency-readiness failures do not withdraw its sole
+healthy listener from running pipelines. API/SSH readiness and all mutation,
+namespace, TLS and network-policy gates remain unchanged. All server probes use
+explicit five-second timeouts, including TLS/scheduling time. Proxy HTTP failures
+carry a fixed `X-Oberth-GoProxy-Error` class and emit bounded, quoted diagnostics;
+normal public 404 fallthrough remains quiet. Listener/TLS errors are attributed
+to goproxy. Live and retained step logs annotate refusals from the configured
+mirror without changing the command verdict. No whole-step replay, integrity
+retry or private fallback is introduced. See
+[proxy availability](docs/goproxy-availability.md).
+
 **Deployment:** the chart exposes the same namespace/owner parameters under
 `argo.goProxy`. A fresh independent install leaves the private mirror disabled
 until the administrator supplies its mapping. An enabled mirror with missing

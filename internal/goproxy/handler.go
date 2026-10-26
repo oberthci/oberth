@@ -16,6 +16,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"path"
@@ -44,6 +45,7 @@ type GitCache interface {
 
 // Handler serves the GOPROXY protocol (/@v/list, .info, .mod, .zip) read-only.
 type Handler struct {
+	logger       *log.Logger
 	cache        GitCache
 	modulePrefix string
 	// repoForModule maps a module suffix (e.g. "wire") to the git cache input
@@ -72,8 +74,39 @@ func NewHandler(cache GitCache, namespace string, repoMap map[string]string) *Ha
 // No private failure may return 404/410: Go interprets either as permission
 // to try the next proxy. The injected comma after this mirror is mandatory.
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	observed := &observedResponse{ResponseWriter: w}
+	h.serveHTTP(observed, r)
+	if h.logger == nil {
+		return
+	}
+	class := observed.Header().Get("X-Oberth-GoProxy-Error")
+	if observed.writeErr != nil {
+		class = "response_write_failed"
+	}
+	if class != "" {
+		// Never log queries, credentials or raw cache/backend errors. Bound and
+		// quote the path so an invalid request cannot forge or flood log lines.
+		urlPath := r.URL.EscapedPath()
+		if len(urlPath) > 256 {
+			urlPath = urlPath[:256]
+		}
+		method := r.Method
+		if len(method) > 32 {
+			method = method[:32]
+		}
+		h.logger.Printf("goproxy request failed: class=%s status=%d method=%q path=%q", class, observed.status, method, urlPath)
+	}
+}
+
+// WithLogger enables failure diagnostics. Configure it before serving requests.
+func (h *Handler) WithLogger(logger *log.Logger) *Handler {
+	h.logger = logger
+	return h
+}
+
+func (h *Handler) serveHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		proxyError(w, "method_not_allowed", "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 	if h.modulePrefix == "" {
@@ -131,7 +164,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// prevents a semver-shaped branch or missing tag from being served.
 	versions, err := h.versions(r.Context(), repoInput, modulePath)
 	if err != nil {
-		http.Error(w, "private repository unavailable", http.StatusBadGateway)
+		proxyError(w, "private_backend_unavailable", "private repository unavailable", http.StatusBadGateway)
 		return
 	}
 	if versionRequest == "list" {
@@ -169,7 +202,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func privateUnavailable(w http.ResponseWriter) {
-	http.Error(w, "private module or version unavailable", http.StatusForbidden)
+	proxyError(w, "private_unavailable", "private module or version unavailable", http.StatusForbidden)
 }
 
 func supportedVersion(modulePath, version string) bool {
@@ -194,7 +227,7 @@ func (h *Handler) versions(ctx context.Context, input, modulePath string) ([]str
 func (h *Handler) serveInfo(ctx context.Context, w http.ResponseWriter, input, version string) {
 	t, err := h.cache.TagTime(ctx, input, version)
 	if err != nil {
-		http.Error(w, "private repository unavailable", http.StatusBadGateway)
+		proxyError(w, "private_backend_unavailable", "private repository unavailable", http.StatusBadGateway)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -207,7 +240,7 @@ func (h *Handler) serveInfo(ctx context.Context, w http.ResponseWriter, input, v
 func (h *Handler) serveMod(ctx context.Context, w http.ResponseWriter, input, modulePath, version string) {
 	content, err := h.cache.ShowFile(ctx, input, version, "go.mod")
 	if err != nil {
-		http.Error(w, "private repository unavailable", http.StatusBadGateway)
+		proxyError(w, "private_backend_unavailable", "private repository unavailable", http.StatusBadGateway)
 		return
 	}
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
@@ -219,7 +252,7 @@ func (h *Handler) serveZip(ctx context.Context, w http.ResponseWriter, input, mo
 	// Read the tar archive from git.
 	var tarBuf bytes.Buffer
 	if err := h.cache.ArchiveTar(ctx, input, version, &tarBuf); err != nil {
-		http.Error(w, "private repository unavailable", http.StatusBadGateway)
+		proxyError(w, "private_backend_unavailable", "private repository unavailable", http.StatusBadGateway)
 		return
 	}
 
@@ -231,7 +264,7 @@ func (h *Handler) serveZip(ctx context.Context, w http.ResponseWriter, input, mo
 	// canonical library rather than hand-rolled filters (#726).
 	dir, err := os.MkdirTemp("", "goproxy-zip-*")
 	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		proxyError(w, "internal_error", "internal error", http.StatusInternalServerError)
 		return
 	}
 	defer func() { _ = os.RemoveAll(dir) }()
@@ -243,7 +276,7 @@ func (h *Handler) serveZip(ctx context.Context, w http.ResponseWriter, input, mo
 			break
 		}
 		if err != nil {
-			http.Error(w, "archive error", http.StatusInternalServerError)
+			proxyError(w, "archive_error", "archive error", http.StatusInternalServerError)
 			return
 		}
 		// Only extract regular files; symlinks and directories are excluded
@@ -265,22 +298,22 @@ func (h *Handler) serveZip(ctx context.Context, w http.ResponseWriter, input, mo
 		}
 		target := filepath.Join(dir, filepath.FromSlash(name))
 		if mkErr := os.MkdirAll(filepath.Dir(target), 0o750); mkErr != nil {
-			http.Error(w, "internal error", http.StatusInternalServerError)
+			proxyError(w, "internal_error", "internal error", http.StatusInternalServerError)
 			return
 		}
 		f, createErr := os.Create(target) // #nosec G304 -- path from git archive (trusted), traversal checked above
 		if createErr != nil {
-			http.Error(w, "internal error", http.StatusInternalServerError)
+			proxyError(w, "internal_error", "internal error", http.StatusInternalServerError)
 			return
 		}
 		// #nosec G110 -- tar stream from git archive; size bounded by tree.
 		if _, cpErr := io.Copy(f, tr); cpErr != nil {
 			_ = f.Close()
-			http.Error(w, "internal error", http.StatusInternalServerError)
+			proxyError(w, "internal_error", "internal error", http.StatusInternalServerError)
 			return
 		}
 		if err := f.Close(); err != nil {
-			http.Error(w, "internal error", http.StatusInternalServerError)
+			proxyError(w, "internal_error", "internal error", http.StatusInternalServerError)
 			return
 		}
 	}
@@ -292,7 +325,7 @@ func (h *Handler) serveZip(ctx context.Context, w http.ResponseWriter, input, mo
 	var zipBuf bytes.Buffer
 	mv := module.Version{Path: modulePath, Version: version}
 	if err := modzip.CreateFromDir(&zipBuf, mv, dir); err != nil {
-		http.Error(w, "zip creation error", http.StatusInternalServerError)
+		proxyError(w, "zip_creation_error", "zip creation error", http.StatusInternalServerError)
 		return
 	}
 
@@ -306,4 +339,38 @@ func (h *Handler) serveZip(ctx context.Context, w http.ResponseWriter, input, mo
 // caller must filter vendor paths before extraction.
 func isVendorPath(name string) bool {
 	return name == "vendor" || strings.HasPrefix(name, "vendor/")
+}
+
+// Public 404 misses deliberately have no error class: they are normal resolver
+// fallthrough, potentially hundreds of requests in a cold dependency graph.
+func proxyError(w http.ResponseWriter, class, message string, status int) {
+	w.Header().Set("X-Oberth-GoProxy-Error", class)
+	http.Error(w, "oberth: Go module proxy: "+message, status)
+}
+
+type observedResponse struct {
+	http.ResponseWriter
+	status   int
+	writeErr error
+}
+
+func (w *observedResponse) WriteHeader(status int) {
+	if w.status == 0 {
+		w.status = status
+	}
+	w.ResponseWriter.WriteHeader(status)
+}
+
+func (w *observedResponse) Write(body []byte) (int, error) {
+	if w.status == 0 {
+		w.WriteHeader(http.StatusOK)
+	}
+	n, err := w.ResponseWriter.Write(body)
+	if err == nil && n != len(body) {
+		err = io.ErrShortWrite
+	}
+	if w.writeErr == nil {
+		w.writeErr = err
+	}
+	return n, err
 }

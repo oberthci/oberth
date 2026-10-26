@@ -43,34 +43,36 @@ const (
 // No pod can interleave a partial line with another pod or a progress marker.
 // A bounded read lease also prevents a stalled connection blocking final drain.
 type stepLogFollowers struct {
-	ctx       context.Context
-	cancel    context.CancelFunc
-	reader    PodLogFollower
-	identity  podLogIdentityReader
-	output    io.Writer
-	workers   map[string]*stepLogFollower
-	resumed   map[string]runprogress.Status
-	resumedAt time.Time
-	mu        sync.Mutex
-	err       error
+	goProxyURL string
+	ctx        context.Context
+	cancel     context.CancelFunc
+	reader     PodLogFollower
+	identity   podLogIdentityReader
+	output     io.Writer
+	workers    map[string]*stepLogFollower
+	resumed    map[string]runprogress.Status
+	resumedAt  time.Time
+	mu         sync.Mutex
+	err        error
 }
 
 type stepLogFollower struct {
-	owner        *stepLogFollowers
-	step         StepResult
-	namespace    string
-	terminal     atomic.Bool
-	followMu     sync.Mutex
-	followCancel context.CancelFunc
-	done         chan struct{}
-	cursor       logCursor
-	bytes        int64
-	state        string
-	stateMessage string
-	lastGap      string
-	gap          bool
-	skipBoundary bool
-	identity     string
+	proxyDiagnostic goProxyDiagnostic
+	owner           *stepLogFollowers
+	step            StepResult
+	namespace       string
+	terminal        atomic.Bool
+	followMu        sync.Mutex
+	followCancel    context.CancelFunc
+	done            chan struct{}
+	cursor          logCursor
+	bytes           int64
+	state           string
+	stateMessage    string
+	lastGap         string
+	gap             bool
+	skipBoundary    bool
+	identity        string
 }
 
 func newStepLogFollowers(ctx context.Context, reader PodLogFollower, output io.Writer, events []runprogress.Event) *stepLogFollowers {
@@ -425,7 +427,11 @@ func (worker *stepLogFollower) consumeRecords(reader io.Reader, final bool) erro
 			worker.discontinuity("last timestamp boundary is missing; pod logs may have rotated")
 			checked = true
 		}
-		body := []byte("[" + worker.step.Burn + "/" + worker.step.Step + "] " + text + "\n")
+		prefix := "[" + worker.step.Burn + "/" + worker.step.Step + "] "
+		body := []byte(prefix + text + "\n")
+		if hint := worker.proxyDiagnostic.observe(text, worker.owner.goProxyURL); hint != "" {
+			body = append(body, []byte(prefix+hint+"\n")...)
+		}
 		if worker.bytes+int64(len(body)) > maxStepLogBytes {
 			return errStepLogLimit
 		}

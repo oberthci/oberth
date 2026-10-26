@@ -717,6 +717,24 @@ done
 render >"$manifest"
 if grep -q -- '--argo-goproxy-listen=' "$manifest"; then exit 1; fi
 
+# The read-only mirror survives the parent pod's dependency readiness flaps;
+# API/SSH routing must retain the ordinary readiness gate (#1204).
+render --set argo.goProxy.enabled=true \
+  --set argo.goProxy.modulePrefix=go.example.test \
+  --set argo.goProxy.upstream=forge \
+  --set argo.goProxy.organization=example \
+  --show-only templates/goproxy-service.yaml >"$manifest"
+grep -Fq 'publishNotReadyAddresses: true' "$manifest"
+render --show-only templates/service.yaml >"$manifest"
+if grep -Fq 'publishNotReadyAddresses: true' "$manifest"; then
+  echo "public API/SSH Service must retain readiness gating" >&2
+  exit 1
+fi
+render --show-only templates/deployment.yaml >"$manifest"
+for probe in readiness startup liveness; do
+  sed -n "/${probe}Probe:/,/periodSeconds:/p" "$manifest" | grep -Fq 'timeoutSeconds: 5'
+done
+
 # --- Promotion grant max lifetime (#826) -------------------------------------
 # Default renders the 24h lifetime flag.
 promotion_manifest=$(mktemp)

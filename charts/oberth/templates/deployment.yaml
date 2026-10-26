@@ -385,12 +385,16 @@ spec:
               path: /readyz
               port: https
             initialDelaySeconds: 2
+            # Include TLS handshake and CPU scheduling under CI load. The
+            # dependency snapshot itself remains off the HTTP request path.
+            timeoutSeconds: 5
             periodSeconds: 5
           startupProbe:
             httpGet:
               scheme: HTTPS
               path: /healthz
               port: https
+            timeoutSeconds: 5
             periodSeconds: 5
             failureThreshold: 60
           livenessProbe:
@@ -398,6 +402,7 @@ spec:
               scheme: HTTPS
               path: /healthz
               port: https
+            timeoutSeconds: 5
             periodSeconds: 10
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
