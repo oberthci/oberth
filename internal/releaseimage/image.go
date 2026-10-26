@@ -30,22 +30,16 @@ import (
 const (
 	ServerRepository = "europe-west4-docker.pkg.dev/skipopsmain/oberth/oberth"
 
-	// ServerSubstrate is rebuilt from the Dockerfile at bfedd1d6474c (#1194):
-	// brotli-libs 1.2.1-r0 (CVE-2026-111497, HIGH) newly exact-pinned and the
-	// superseded ca-certificates re-pinned to 20261020-r0; every other pin unchanged.
-	// Both platforms carry 36 packages, scan clean with the release trivy
-	// (0.73.0, HIGH/CRITICAL) and every checked ELF (busybox, git, ssh,
-	// oberth) matches its platform. As before, each platform was built
-	// separately: a multi-platform podman build resolved the alpine index
-	// digest to the cached amd64 image and produced an arm64 child with
-	// x86-64 busybox/git/ssh (discarded test index sha256:65f19251...,
-	// NOT pinned). The arm64 build named the index's own
-	// arm64 child (sha256:d858bb54...); its config variant v8, which Repack
-	// refuses, was removed (layers unchanged, amd64 child unchanged), pushed
-	// with preserved digests and verified by Repack for both
-	// platforms. This is an OCI index with exactly two platform children and
-	// no attestation manifests.
-	ServerSubstrate = ServerRepository + "@sha256:6d0fe93ea4363760f27d8bd18d88e41bf9d079bf8f83ef078bd0087f31040e9c"
+	// ServerSubstrate is rebuilt from the Dockerfile's libcurl 8.23.0-r0
+	// pin (CVE-2026-92392, HIGH). Both platforms carry 36 packages and scan
+	// clean with release Trivy 0.73.0 (HIGH/CRITICAL); all 49 ELF files per
+	// platform match their architecture. Each platform was built separately
+	// from the Alpine index's matching child to avoid cross-platform cache
+	// reuse. This OCI index has exactly linux/amd64 and linux/arm64 children,
+	// empty config variants and no attestations; both pass Repack validation.
+	// Publication prerequisite: upload the reviewed round-6 OCI archive with
+	// preserved digests and verify registry readback before merging/releasing.
+	ServerSubstrate = ServerRepository + "@sha256:40ae2f6004bb321c6f108cb573c9f953646ef0093feab1b5e4293ac974baa55e"
 )
 
 // Kind selects a release image contract. Only the server image remains.

@@ -37,13 +37,12 @@ RUN apk add --no-cache \
     # loudly and is deliberately reviewed — never silently drift.
     libcrypto3=3.5.9-r0 \
     libssl3=3.5.9-r0 \
-    # CVE-2026-11352/-11586/-12064/-80256/-8286/-8458/-8925/-8927/-9547 (all
-    # HIGH): libcurl arrives as git's transitive dependency; the alpine:3.23
-    # base digest above still resolves 8.20.0-r0 while the fixed 8.22.0-r0
-    # exists only in the apk repository. Exact-pinned like libcrypto3 above:
-    # when the repo supersedes 8.22.0-r0 this line fails the build loudly —
-    # re-pin deliberately, never drift silently.
-    libcurl=8.22.0-r0 \
+    # CVE-2026-92392 (HIGH): HTTP/2 upload use-after-free affects the prior
+    # libcurl 8.22.0-r0 pin. The fixed 8.23.0-r0 is available for x86_64 and
+    # aarch64 and retains the earlier libcurl security fixes. Exact-pinned
+    # like libcrypto3 above: when the repository supersedes this revision,
+    # fail the build loudly and re-pin deliberately — never drift silently.
+    libcurl=8.23.0-r0 \
     # CVE-2026-103111 (HIGH): pcre2 arrives as a runtime dependency; the
     # digest-pinned Alpine base still contains 10.48-r0 while 10.49-r0 is
     # fixed and available for x86_64 and aarch64. Pin the fixed APK revision
