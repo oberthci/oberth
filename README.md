@@ -105,6 +105,13 @@ helm repo update
 helm show values oberth/oberth
 ```
 
+`oberth upgrade` keeps stored release configuration and merges new chart defaults
+for keys that were absent, then applies `--values`/`--set` overrides. It uses
+Helm's `--reset-then-reuse-values` mode. The chart also supports direct
+`--reuse-values` upgrades from v0.17.53: missing `utilityImage` and `gitBackend`
+fall back to the pinned BusyBox helper and `go-git`. Custom utility-image mirrors
+and explicit backend selections are preserved.
+
 The SSH host key is generated once into OpenBao and reused across upgrades.
 With a production secret store the HTTPS certificate is a 30-day leaf the
 server requests from a name-constrained CA in OpenBao's PKI engine and renews

@@ -71,7 +71,7 @@ func (e *ErrSchemaValidation) Error() string {
 }
 
 // upgradePinnedKeys are the helm values protected by the upgrade path. The
-// enablement of an existing private module proxy is preserved by reuse-values;
+// enablement of an existing private module proxy is preserved from stored values;
 // callers cannot disable that existing routing boundary as an upgrade override.
 var upgradePinnedKeys = map[string]bool{
 	"image.ref":                true,
@@ -468,7 +468,7 @@ func helmRevisionLabel(raw json.RawMessage) string {
 
 // resolveChartImageRef reads the chart's default image.ref value so the
 // upgrade pins the exact image the chart was built against, rather than
-// relying on an implicit default that --reuse-values might override with a
+// relying on an implicit default that stored configuration might override with a
 // stale value. It also returns the raw values YAML for downstream schema
 // validation of user-supplied --set keys.
 func resolveChartImageRef(ctx context.Context, deps Deps, chart, targetVersion string, isLocalChart bool) (string, []byte, error) {
@@ -490,7 +490,7 @@ func resolveChartImageRef(ctx context.Context, deps Deps, chart, targetVersion s
 	}
 
 	// Validate the resolved ref is digest-pinned: <registry>/<repo>@sha256:<64hex>.
-	// A tag-only ref could be silently replaced by --reuse-values or a
+	// A tag-only ref could be silently replaced by stored configuration or a
 	// registry push, so the upgrade must pin an immutable digest.
 	repo, digest, isDigest := splitImageDigestRef(ref)
 	if !isDigest || !isSHA256Digest(digest) {
@@ -517,13 +517,15 @@ func upgradeHelmArgs(cfg UpgradeConfig, chart, imageRef string) []string {
 	args := []string{
 		"upgrade", "oberth", chart,
 		"-n", cfg.Namespace,
-		"--reuse-values",
+		// Merge new defaults below stored configuration and user overrides.
+		// --reuse-values replaces the new chart's defaults with the old ones.
+		"--reset-then-reuse-values",
 		"--set-string", "image.ref=" + imageRef,
 		// Keep the existing proxy enablement and mapping from reused values.
 		"--set", "argo.goProxy.port=8444",
-		// Pin promotion grant lifetime (#826): --reuse-values drops new defaults.
+		// Retain the explicit promotion grant lifetime safety pin (#826).
 		"--set", "promotion.grantMaxLifetime=24h",
-		// Preserve the administrator's enablement through --reuse-values.
+		// Preserve the administrator's enablement through reused configuration.
 		// An absent enabled key renders false; a present value remains subject
 		// to the chart's boolean schema. Only the reviewed image pins override
 		// stored connector configuration (#671).

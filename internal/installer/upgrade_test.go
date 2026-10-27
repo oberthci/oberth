@@ -345,7 +345,7 @@ func TestRunUpgradeReappliesValuesAtSameVersion(t *testing.T) {
 	if !strings.Contains(show, "--version "+targetVersion) ||
 		!strings.Contains(upgrade, "--version "+targetVersion) ||
 		!strings.Contains(upgrade, "image.ref="+targetImage) ||
-		!strings.Contains(upgrade, "--wait") || !strings.Contains(upgrade, "--values "+valuesFile) || !strings.Contains(upgrade, "--reuse-values") {
+		!strings.Contains(upgrade, "--wait") || !strings.Contains(upgrade, "--values "+valuesFile) || !strings.Contains(upgrade, "--reset-then-reuse-values") {
 		t.Fatalf("re-apply lost version/image pin or values: show=%q upgrade=%q", show, upgrade)
 	}
 }
@@ -526,8 +526,8 @@ func TestUpgradeHelmArgs(t *testing.T) {
 	if !strings.Contains(joined, "upgrade oberth oberth-charts/oberth") {
 		t.Fatalf("args = %q", joined)
 	}
-	if !strings.Contains(joined, "--reuse-values") {
-		t.Fatalf("missing --reuse-values: %q", joined)
+	if !strings.Contains(joined, "--reset-then-reuse-values") {
+		t.Fatalf("missing --reset-then-reuse-values: %q", joined)
 	}
 	if !strings.Contains(joined, "--set-string image.ref=") {
 		t.Fatalf("missing --set-string image.ref: %q", joined)
@@ -541,8 +541,7 @@ func TestUpgradeHelmArgs(t *testing.T) {
 	if !strings.Contains(joined, "--wait") {
 		t.Fatalf("missing --wait: %q", joined)
 	}
-	// Go module proxy pins: --reuse-values discards new chart defaults,
-	// so the upgrade path must pin them explicitly (#662).
+	// The reviewed proxy port stays pinned; enablement remains configurable (#662).
 	if strings.Contains(joined, "argo.goProxy.enabled=") {
 		t.Fatalf("upgrade overwrites the existing proxy enablement: %q", joined)
 	}
@@ -561,7 +560,7 @@ func TestUpgradeHelmArgsPinsGoProxyBeforeVersion(t *testing.T) {
 	args := upgradeHelmArgs(cfg, "oberth-charts/oberth", "europe-west4-docker.pkg.dev/skipopsmain/oberth/oberth@sha256:abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789")
 
 	// The goProxy pins must appear between --set-string image.ref and
-	// --version so --reuse-values processes them before the chart selection.
+	// --version in the shared dry-run/actual argument builder.
 	var imageIdx, portIdx, versionIdx int
 	for i, arg := range args {
 		switch {

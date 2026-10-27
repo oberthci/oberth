@@ -55,3 +55,9 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{ include "oberth.fullname" . }}-ssh-host-key
 {{- end -}}
 {{- end }}
+
+{{- /* --reuse-values may contain no utilityImage on pre-scratch releases.
+Keep this fallback in sync with values.yaml and containerimage.Utility. */ -}}
+{{- define "oberth.utilityImage" -}}
+{{- .Values.utilityImage | default "busybox:1.37@sha256:ab33eacc8251e3807b85bb6dba570e4698c3998eca6f0fc2ccb60575a563ea74" -}}
+{{- end -}}

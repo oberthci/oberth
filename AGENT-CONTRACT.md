@@ -2248,6 +2248,14 @@ time and fails closed on type mismatches or constraint violations.
 
 The `--dry-run` plan renders from the same `upgradeHelmArgs` builder the real
 path uses, so the rendered `helm upgrade` command is always truthful.
+`oberth upgrade` uses Helm's `--reset-then-reuse-values`: new chart defaults are
+merged below stored release configuration, then user values and pinned arguments
+apply. Explicit false, zero and empty configured values are not replaced merely
+because they are empty. Direct `--reuse-values` upgrades also need template
+fallbacks for newly introduced keys: `utilityImage` falls back to the shared
+utility pin and `gitBackend` to `go-git`. `hack/test-chart-upgrade.sh` renders the
+new chart against the unmodified v0.17.53 values shape, both with and without
+new defaults. It runs from branch and release chart gates before publication.
 
 ## Schema migrations
 
