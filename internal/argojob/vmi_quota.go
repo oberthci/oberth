@@ -422,6 +422,29 @@ func reconcileVMIClaims(ledger *vmiLedger, actual map[string]*unstructured.Unstr
 	return changed
 }
 
+// Only an exact live identity may use a template-declared fallback. Pending
+// claims are reconciled durably before accounting. A changed UID/hash/operation
+// or owner never borrows an old claim's smaller demand. Unknown objects still
+// consume their repository's full grant (or the legacy per-instance maximum).
+func liveVMIClaimFallback(object *unstructured.Unstructured, ledger vmiLedger, namespace string, limit argoworkflow.VMIDemand) argoworkflow.VMIDemand {
+	var declared argoworkflow.VMIDemand
+	for _, claim := range ledger.Claims {
+		if !claim.Closed && claim.UID == object.GetUID() && matchesVMIClaim(object, namespace, claim) {
+			declared.VMs = max(declared.VMs, claim.Demand.VMs)
+			declared.Cores = max(declared.Cores, claim.Demand.Cores)
+			declared.MemoryBytes = max(declared.MemoryBytes, claim.Demand.MemoryBytes)
+		}
+	}
+	if declared.VMs > 0 {
+		// A grant may have shrunk since the original claim was admitted.
+		return argoworkflow.VMIDemand{VMs: min(declared.VMs, limit.VMs), Cores: min(declared.Cores, limit.Cores), MemoryBytes: min(declared.MemoryBytes, limit.MemoryBytes)}
+	}
+	if object.GetLabels()[vmiRepositoryLabel] != "" {
+		return limit
+	}
+	return argoworkflow.VMIInstanceLimit()
+}
+
 // ResourceVersion CAS serializes pending claims across processes. No create
 // reaches the API until its demand is durably reserved. One malformed live
 // object or conflicting pending operation is charged conservatively to its
@@ -484,12 +507,18 @@ func (c *Controller) reserveVMIClaim(ctx context.Context, key string, want vmiCl
 			}
 			demand, parseErr := liveVMIDemand(object)
 			if parseErr != nil {
-				// Labeled objects can block only their own repository. An unattributed
-				// legacy object is charged the maximum individually admitted VMI.
-				demand = argoworkflow.VMIInstanceLimit()
-				if repo != "" {
-					demand = binding.Limit
+				// A matching server-owned claim retains the template's declared
+				// demand even when KubeVirt's live shape is unreadable. Identity
+				// mismatches and unclaimed objects keep the conservative fallback.
+				claims := ledger
+				if errors.Is(parseErr, errLiveVMIOverLimit) {
+					// A known oversized current value cannot borrow a smaller claim.
+					claims = vmiLedger{}
 				}
+				fallback := liveVMIClaimFallback(object, claims, c.config.Namespace, binding.Limit)
+				demand.VMs = max(demand.VMs, fallback.VMs)
+				demand.Cores = max(demand.Cores, fallback.Cores)
+				demand.MemoryBytes = max(demand.MemoryBytes, fallback.MemoryBytes)
 			}
 			repoUsed = addVMIDemand(repoUsed, demand)
 			for _, owner := range object.GetOwnerReferences() {

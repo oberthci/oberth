@@ -1,0 +1,50 @@
+{
+  "apiVersion": "kubevirt.io/v1",
+  "kind": "VirtualMachineInstance",
+  "metadata": {
+    "name": "generic-live-vmi",
+    "namespace": "ci"
+  },
+  "spec": {
+    "architecture": "amd64",
+    "domain": {
+      "cpu": {
+        "cores": 2,
+        "sockets": 1,
+        "threads": 1,
+        "maxSockets": 4,
+        "model": "host-model"
+      },
+      "memory": {
+        "guest": "6Gi",
+        "maxGuest": "24Gi"
+      },
+      "resources": {
+        "requests": {
+          "cpu": "2",
+          "memory": "6Gi"
+        }
+      },
+      "machine": {
+        "type": "q35"
+      },
+      "devices": {
+        "autoattachGraphicsDevice": false,
+        "autoattachSerialConsole": true
+      }
+    }
+  },
+  "status": {
+    "phase": "Running",
+    "currentCPUTopology": {
+      "cores": 2,
+      "sockets": 1,
+      "threads": 1
+    },
+    "memory": {
+      "guestAtBoot": "6Gi",
+      "guestCurrent": "6Gi",
+      "guestRequested": "6Gi"
+    }
+  }
+}

@@ -10,9 +10,14 @@ import (
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 )
 
+var errLiveVMIOverLimit = errors.New("argojob: live VMI current demand exceeds the accounting bound")
+
 // Live VMIs can include KubeVirt defaults and legacy/admin fields which are
-// deliberately forbidden in authored manifests. Account topology and hotplug
-// bounds too; never turn an unrecognized live object into free capacity.
+// deliberately forbidden in authored manifests. Count current guest resources,
+// not hotplug ceilings or launcher limits. Unreadable demand needs a trusted
+// claim fallback at the caller; it must never become free capacity. On an
+// ambiguous field, the error result retains other readable current dimensions
+// so a smaller claim cannot hide a known increase.
 func liveVMIDemand(object *unstructured.Unstructured) (argoworkflow.VMIDemand, error) {
 	fail := errors.New("argojob: cannot bound live VMI demand")
 	var live struct {
@@ -20,11 +25,14 @@ func liveVMIDemand(object *unstructured.Unstructured) (argoworkflow.VMIDemand, e
 		Kind       string `json:"kind"`
 		Spec       struct {
 			Domain struct {
-				CPU       struct{ Cores, Sockets, Threads, MaxSockets int }
-				Memory    struct{ Guest, MaxGuest string }
-				Resources struct{ Requests, Limits struct{ CPU, Memory string } }
+				CPU       struct{ Cores, Sockets, Threads *int }
+				Memory    struct{ Guest string }
+				Resources struct{ Requests struct{ Memory string } }
 			}
 		}
+	}
+	if object == nil {
+		return argoworkflow.VMIDemand{}, fail
 	}
 	raw, err := json.Marshal(object.Object)
 	if err != nil {
@@ -35,32 +43,41 @@ func liveVMIDemand(object *unstructured.Unstructured) (argoworkflow.VMIDemand, e
 	}
 	limit := argoworkflow.VMIBudgetLimit()
 	d := live.Spec.Domain
-	if d.CPU.Cores <= 0 || d.CPU.Cores > limit.MaxCores || d.CPU.Sockets < 0 || d.CPU.Sockets > limit.MaxCores || d.CPU.Threads < 0 || d.CPU.Threads > limit.MaxCores || d.CPU.MaxSockets < 0 || d.CPU.MaxSockets > limit.MaxCores {
-		return argoworkflow.VMIDemand{}, fail
-	}
-	cores := d.CPU.Cores * max(1, d.CPU.Sockets, d.CPU.MaxSockets) * max(1, d.CPU.Threads)
-	for _, value := range []string{d.Resources.Requests.CPU, d.Resources.Limits.CPU} {
-		if value == "" {
+	cores := 1
+	// KubeVirt defaults omitted sockets/threads to one. Missing cores is
+	// ambiguous (legacy request-only CPU shapes), so use the claim instead.
+	ambiguous := d.CPU.Cores == nil
+	for _, count := range []*int{d.CPU.Cores, d.CPU.Sockets, d.CPU.Threads} {
+		if count == nil {
 			continue
 		}
-		q, err := resource.ParseQuantity(value)
-		if err != nil || q.Sign() <= 0 || q.Cmp(*resource.NewQuantity(int64(limit.MaxCores), resource.DecimalSI)) > 0 {
-			return argoworkflow.VMIDemand{}, fail
-		}
-		cores = max(cores, int(q.Value()))
-	}
-	var memory int64
-	for _, value := range []string{d.Resources.Requests.Memory, d.Resources.Limits.Memory, d.Memory.Guest, d.Memory.MaxGuest} {
-		if value == "" {
+		if *count <= 0 {
+			ambiguous = true
 			continue
 		}
-		q, err := resource.ParseQuantity(value)
-		if err != nil || q.Sign() <= 0 || q.Cmp(limit.MaxMemory) > 0 {
-			return argoworkflow.VMIDemand{}, fail
+		if *count > limit.MaxCores || cores > limit.MaxCores / *count {
+			return argoworkflow.VMIDemand{}, errLiveVMIOverLimit
 		}
-		memory = max(memory, q.Value())
+		cores *= *count
 	}
-	demand := argoworkflow.VMIDemand{VMs: 1, Cores: cores, MemoryBytes: memory}
+	value := d.Memory.Guest
+	if value == "" {
+		value = d.Resources.Requests.Memory
+	}
+	memory, err := resource.ParseQuantity(value)
+	if err == nil && memory.Cmp(limit.MaxMemory) > 0 {
+		return argoworkflow.VMIDemand{}, errLiveVMIOverLimit
+	}
+	demand := argoworkflow.VMIDemand{VMs: 1}
+	if !ambiguous {
+		demand.Cores = cores
+	}
+	if err == nil && memory.Sign() > 0 {
+		demand.MemoryBytes = memory.Value()
+	}
+	if ambiguous || err != nil || memory.Sign() <= 0 {
+		return demand, fail
+	}
 	if !validVMIDemand(demand) {
 		return argoworkflow.VMIDemand{}, fail
 	}

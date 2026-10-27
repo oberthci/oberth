@@ -42,11 +42,16 @@ func guardedVMIFixture(t *testing.T, id int) (Config, *wfv1.Workflow, *corev1.Po
 
 func guardedVMIRepositoryFixture(t *testing.T, id int, repoID int64) (Config, *wfv1.Workflow, *corev1.Pod) {
 	t.Helper()
+	return guardedVMISourceFixture(t, id, repoID, kubeVirtWorkflow)
+}
+
+func guardedVMISourceFixture(t *testing.T, id int, repoID int64, source string) (Config, *wfv1.Workflow, *corev1.Pod) {
+	t.Helper()
 	config := testConfig()
 	config.applyDefaults()
 	config.VMLauncherServiceAccount = "vm-launcher"
 	config.ContainerDiskPrefixes = []string{"quay.io/example/"}
-	r := testRequest(periapsis.TriggerCI, kubeVirtWorkflow)
+	r := testRequest(periapsis.TriggerCI, source)
 	r.KubeVirtGranted = true
 	r.RepositoryID = repoID
 	r.Name = fmt.Sprintf("quota-%d", id)
@@ -578,8 +583,8 @@ func TestVMICreateLiveTopologyAndHotplugBounds(t *testing.T) {
 				t.Fatal(err)
 			}
 			_, next, np := guardedVMIFixture(t, 2)
-			if err = authorizeTestVMI(t, c, next, np); err == nil {
-				t.Fatalf("%s was treated as free capacity", kind)
+			if err = authorizeTestVMI(t, c, next, np); (err == nil) != (kind != "sockets") {
+				t.Fatalf("%s admission: %v", kind, err)
 			}
 		})
 	}
@@ -800,8 +805,8 @@ func TestVMIClaimMalformedOrMismatchedVMIIsolatedByRepository(t *testing.T) {
 				t.Fatalf("bad repo 7 blocked repo 8: %v", err)
 			}
 			_, mine, mp := guardedVMIFixture(t, 3)
-			if err = authorizeTestVMI(t, c, mine, mp); err == nil {
-				t.Fatal("uncertain demand became free capacity for its own repo")
+			if err = authorizeTestVMI(t, c, mine, mp); (err == nil) != (scenario == "unparseable") {
+				t.Fatalf("matching claim must retain declared demand; other uncertainty must refuse: %v", err)
 			}
 		})
 	}
