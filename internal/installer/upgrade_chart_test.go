@@ -31,7 +31,8 @@ func TestUpgradeChartFromV01753Values(t *testing.T) {
 }
 
 func TestUpgradeMergesNewChartDefaults(t *testing.T) {
-	args := upgradeHelmArgs(UpgradeConfig{Namespace: "oberth", BinaryVersion: "0.17.58"}, "oberth-charts/oberth", "example.invalid/server@sha256:fixture", testUpgradeCompatibility)
+	args, flags := upgradeHelmArgs(UpgradeConfig{Namespace: "oberth", BinaryVersion: "0.17.58"}, "oberth-charts/oberth", "example.invalid/server@sha256:fixture", testUpgradeCompatibility)
+	args = append(args, flags...)
 	if !slices.Contains(args, "--reset-then-reuse-values") || slices.Contains(args, "--reuse-values") || slices.Contains(args, "--reset-values") {
 		t.Fatalf("upgrade must merge new defaults below old configuration and overrides: %v", args)
 	}
@@ -132,7 +133,8 @@ func TestUpgradeActualHelmPreservesOldValuesAndAddsDefaults(t *testing.T) {
 	if compat != testUpgradeCompatibility {
 		t.Fatalf("identities from installed chart defaults lost: %+v", compat)
 	}
-	args := upgradeHelmArgs(cfg, chart, image, compat)
+	args, flags := upgradeHelmArgs(cfg, chart, image, compat)
+	args = append(args, flags...)
 	args = append(args, "--dry-run=client", "--output=json")
 	out, err := runHelm(t.Context(), args)
 	if err != nil {

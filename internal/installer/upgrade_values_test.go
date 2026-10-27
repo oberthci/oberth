@@ -47,6 +47,8 @@ func TestUpgradeCompatibilityNeverFallsBackToNewDefaults(t *testing.T) {
 		}}
 		if _, err := readUpgradeCompatibility(t.Context(), "chosen", deps); err == nil {
 			t.Fatalf("accepted %s", raw)
+		} else if raw == `{}` && (!strings.Contains(err.Error(), "older than v0.17.5") || !strings.Contains(err.Error(), "existing database and witness configuration")) {
+			t.Fatalf("missing legacy-release recovery hint: %v", err)
 		}
 	}
 	failure := errors.New("cannot read current release")

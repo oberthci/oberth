@@ -45,7 +45,7 @@ func readUpgradeCompatibility(ctx context.Context, namespace string, deps Deps) 
 	}
 	compat := backupCompatibility{SchemaIdentity: values.Compatibility.SchemaIdentity, AuditDomain: values.Compatibility.AuditDomain, WitnessKeyInfo: values.Compatibility.WitnessKeyInfo}
 	if (store.ProtocolConfig{SchemaIdentity: compat.SchemaIdentity, AuditDomain: compat.AuditDomain}).Validate() != nil || auditanchor.ValidateWitnessKeyInfo(compat.WitnessKeyInfo) != nil {
-		return backupCompatibility{}, fmt.Errorf("installed compatibility identities are missing or invalid; refusing to use target chart defaults")
+		return backupCompatibility{}, fmt.Errorf("installed compatibility identities are missing or invalid; refusing to use target chart defaults. Releases older than v0.17.5 lack compatibility values: first reconcile the installed release with explicit compatibility.* values verified against the existing database and witness configuration, then retry")
 	}
 	return compat, nil
 }
@@ -83,19 +83,19 @@ func prepareUpgradeValues(ctx context.Context, cfg UpgradeConfig, deps Deps, cha
 	if err := os.WriteFile(path, body, 0600); err != nil {
 		return compat, err
 	}
-	upgrade := upgradeHelmArgs(cfg, chart, imageRef, compat)
+	_, flags := upgradeHelmArgs(cfg, chart, imageRef, compat)
 	args := []string{"template", "oberth", chart, "-n", cfg.Namespace, "--is-upgrade", "--values", path}
 	// Use the exact upgrade pins and operator overrides, in the same order.
-	for i := 5; i < len(upgrade); i++ {
-		switch upgrade[i] {
+	for i := 0; i < len(flags); i++ {
+		switch flags[i] {
 		case "--reset-then-reuse-values", "--wait":
 		case "--timeout":
 			i++
 		case "--set", "--set-string", "--values", "--version":
-			args = append(args, upgrade[i], upgrade[i+1])
+			args = append(args, flags[i], flags[i+1])
 			i++
 		default:
-			return compat, fmt.Errorf("unexpected generated upgrade flag %q", upgrade[i])
+			return compat, fmt.Errorf("unexpected generated upgrade flag %q", flags[i])
 		}
 	}
 	if _, err := deps.RunHelm(ctx, args); err != nil {

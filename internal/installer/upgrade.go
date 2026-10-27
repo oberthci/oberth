@@ -428,7 +428,8 @@ func RunUpgrade(ctx context.Context, cfg UpgradeConfig, deps Deps) (UpgradeResul
 
 	// Build and execute the helm upgrade.
 	phase(w, "Chart", "updating", color)
-	args := upgradeHelmArgs(cfg, chart, imageRef, compatibility)
+	args, flags := upgradeHelmArgs(cfg, chart, imageRef, compatibility)
+	args = append(args, flags...)
 	if _, err := deps.RunHelm(ctx, args); err != nil {
 		printRecoveryGuidance(w, cfg.Namespace)
 		return result, fmt.Errorf("helm upgrade: %w", err)
@@ -519,16 +520,16 @@ func resolveChartImageRef(ctx context.Context, deps Deps, chart, targetVersion s
 	return ref, valuesYAML, nil
 }
 
-// upgradeHelmArgs returns the helm arguments for upgrading Oberth.
+// upgradeHelmArgs returns the command prefix and flags for upgrading Oberth.
+// The schema preflight reuses only flags, independent of the prefix length.
 //
 // DELIBERATE: --atomic is NOT used. Oberth's database migrations are
 // forward-only; an automatic rollback to a pre-migration schema would leave
 // the database in an inconsistent state (crashloop trap). On failure the
 // operator must fix forward with a new 'oberth upgrade'.
-func upgradeHelmArgs(cfg UpgradeConfig, chart, imageRef string, compatibility backupCompatibility) []string {
+func upgradeHelmArgs(cfg UpgradeConfig, chart, imageRef string, compatibility backupCompatibility) (prefix, flags []string) {
+	prefix = []string{"upgrade", "oberth", chart, "-n", cfg.Namespace}
 	args := []string{
-		"upgrade", "oberth", chart,
-		"-n", cfg.Namespace,
 		// Merge new defaults below stored configuration and user overrides.
 		// --reuse-values replaces the new chart's defaults with the old ones.
 		"--reset-then-reuse-values",
@@ -568,7 +569,7 @@ func upgradeHelmArgs(cfg UpgradeConfig, chart, imageRef string, compatibility ba
 		args = append(args, "--timeout", cfg.Timeout.String())
 	}
 	args = append(args, "--wait")
-	return args
+	return prefix, args
 }
 
 // waitForUpgradeRollout watches the deployment until all replicas are updated
@@ -770,7 +771,8 @@ func printUpgradeDryRun(w io.Writer, cfg UpgradeConfig, result UpgradeResult, re
 	// Render from the same args builder the real path uses so the dry-run
 	// plan is always truthful. The image ref is unknown at dry-run time
 	// (chart values haven't been fetched) so a placeholder is shown.
-	args := upgradeHelmArgs(cfg, chart, "<chart-default>", backupCompatibility{SchemaIdentity: "<installed-schema>", AuditDomain: "<installed-audit>", WitnessKeyInfo: "<installed-witness>"})
+	args, flags := upgradeHelmArgs(cfg, chart, "<chart-default>", backupCompatibility{SchemaIdentity: "<installed-schema>", AuditDomain: "<installed-audit>", WitnessKeyInfo: "<installed-witness>"})
+	args = append(args, flags...)
 	_, _ = fmt.Fprintf(w, "     helm %s\n\n", strings.Join(args, " "))
 	step++
 

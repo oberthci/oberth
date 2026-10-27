@@ -554,7 +554,8 @@ func TestUpgradeHelmArgs(t *testing.T) {
 		BinaryVersion: "0.12.35",
 		Timeout:       5 * time.Minute,
 	}
-	args := upgradeHelmArgs(cfg, "oberth-charts/oberth", "europe-west4-docker.pkg.dev/skipopsmain/oberth/oberth:v0.12.35@sha256:abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789", testUpgradeCompatibility)
+	args, flags := upgradeHelmArgs(cfg, "oberth-charts/oberth", "europe-west4-docker.pkg.dev/skipopsmain/oberth/oberth:v0.12.35@sha256:abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789", testUpgradeCompatibility)
+	args = append(args, flags...)
 	joined := strings.Join(args, " ")
 	if !strings.Contains(joined, "upgrade oberth oberth-charts/oberth") {
 		t.Fatalf("args = %q", joined)
@@ -590,7 +591,8 @@ func TestUpgradeHelmArgsPinsGoProxyBeforeVersion(t *testing.T) {
 		BinaryVersion: "0.16.20",
 		Timeout:       5 * time.Minute,
 	}
-	args := upgradeHelmArgs(cfg, "oberth-charts/oberth", "europe-west4-docker.pkg.dev/skipopsmain/oberth/oberth@sha256:abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789", testUpgradeCompatibility)
+	args, flags := upgradeHelmArgs(cfg, "oberth-charts/oberth", "europe-west4-docker.pkg.dev/skipopsmain/oberth/oberth@sha256:abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789", testUpgradeCompatibility)
+	args = append(args, flags...)
 
 	// The goProxy pins must appear between --set-string image.ref and
 	// --version in the shared dry-run/actual argument builder.
@@ -623,7 +625,8 @@ func TestUpgradeHelmArgsLocalChart(t *testing.T) {
 		BinaryVersion: "0.12.35",
 		ChartOverride: "/tmp/chart",
 	}
-	args := upgradeHelmArgs(cfg, "/tmp/chart", "oberth:dev", testUpgradeCompatibility)
+	args, flags := upgradeHelmArgs(cfg, "/tmp/chart", "oberth:dev", testUpgradeCompatibility)
+	args = append(args, flags...)
 	joined := strings.Join(args, " ")
 	if strings.Contains(joined, "--version") {
 		t.Fatalf("local chart should not have --version: %q", joined)
@@ -1153,7 +1156,8 @@ func TestUpgradeHelmArgsNoAtomic(t *testing.T) {
 		BinaryVersion: "0.12.35",
 		Timeout:       5 * time.Minute,
 	}
-	args := upgradeHelmArgs(cfg, "oberth-charts/oberth", "some-image@sha256:0000000000000000000000000000000000000000000000000000000000000000", testUpgradeCompatibility)
+	args, flags := upgradeHelmArgs(cfg, "oberth-charts/oberth", "some-image@sha256:0000000000000000000000000000000000000000000000000000000000000000", testUpgradeCompatibility)
+	args = append(args, flags...)
 	for _, arg := range args {
 		if arg == "--atomic" {
 			t.Fatal("--atomic must not be present in upgrade helm args: auto-rollback + forward-only migrations = crashloop trap")
@@ -1168,7 +1172,8 @@ func TestUpgradeHelmArgsPassesTimeout(t *testing.T) {
 		BinaryVersion: "0.12.35",
 		Timeout:       3 * time.Minute,
 	}
-	args := upgradeHelmArgs(cfg, "oberth-charts/oberth", "image@sha256:0000000000000000000000000000000000000000000000000000000000000000", testUpgradeCompatibility)
+	args, flags := upgradeHelmArgs(cfg, "oberth-charts/oberth", "image@sha256:0000000000000000000000000000000000000000000000000000000000000000", testUpgradeCompatibility)
+	args = append(args, flags...)
 	joined := strings.Join(args, " ")
 	if !strings.Contains(joined, "--timeout 3m0s") {
 		t.Fatalf("missing --timeout 3m0s: %q", joined)
@@ -1705,7 +1710,8 @@ func TestUpgradeHelmArgsIncludesUserValues(t *testing.T) {
 		UserValues:    []string{"/tmp/custom.yaml"},
 		UserSet:       []string{"maxConcurrentJobs=5"},
 	}
-	args := upgradeHelmArgs(cfg, "oberth-charts/oberth", "img@sha256:0000000000000000000000000000000000000000000000000000000000000000", testUpgradeCompatibility)
+	args, flags := upgradeHelmArgs(cfg, "oberth-charts/oberth", "img@sha256:0000000000000000000000000000000000000000000000000000000000000000", testUpgradeCompatibility)
+	args = append(args, flags...)
 	joined := strings.Join(args, " ")
 	if !strings.Contains(joined, "--values /tmp/custom.yaml") {
 		t.Fatalf("missing --values in args: %q", joined)
@@ -1724,7 +1730,8 @@ func TestUpgradeHelmArgsUserValuesAfterPins(t *testing.T) {
 		UserValues:    []string{"/tmp/custom.yaml"},
 		UserSet:       []string{"maxConcurrentJobs=5"},
 	}
-	args := upgradeHelmArgs(cfg, "oberth-charts/oberth", "img@sha256:0000000000000000000000000000000000000000000000000000000000000000", testUpgradeCompatibility)
+	args, flags := upgradeHelmArgs(cfg, "oberth-charts/oberth", "img@sha256:0000000000000000000000000000000000000000000000000000000000000000", testUpgradeCompatibility)
+	args = append(args, flags...)
 	var goProxyIdx, valuesIdx, userSetIdx int
 	for i, arg := range args {
 		switch {
@@ -1833,8 +1840,10 @@ func TestDryRunAndRealArgsAgree(t *testing.T) {
 		Timeout:       5 * time.Minute,
 		UserSet:       []string{"maxConcurrentJobs=5"},
 	}
-	realArgs := upgradeHelmArgs(cfg, "oberth-charts/oberth", "img@sha256:0000000000000000000000000000000000000000000000000000000000000000", testUpgradeCompatibility)
-	dryArgs := upgradeHelmArgs(cfg, "oberth-charts/oberth", "<chart-default>", testUpgradeCompatibility)
+	realArgs, flags := upgradeHelmArgs(cfg, "oberth-charts/oberth", "img@sha256:0000000000000000000000000000000000000000000000000000000000000000", testUpgradeCompatibility)
+	realArgs = append(realArgs, flags...)
+	dryArgs, dryFlags := upgradeHelmArgs(cfg, "oberth-charts/oberth", "<chart-default>", testUpgradeCompatibility)
+	dryArgs = append(dryArgs, dryFlags...)
 
 	if len(realArgs) != len(dryArgs) {
 		t.Fatalf("arg count mismatch: real=%d dry=%d\nreal=%v\ndry=%v", len(realArgs), len(dryArgs), realArgs, dryArgs)
