@@ -15,6 +15,7 @@ import (
 	"math/big"
 	"net"
 	"os"
+	"os/exec"
 	"slices"
 	"strings"
 	"time"
@@ -342,6 +343,12 @@ func preflightServerIdentities(ctx context.Context, cfg *Config, deps Deps, dryR
 	if certPEM == nil {
 		podCert, podErr := readPodServerCert(ctx, *cfg, deps)
 		if podErr != nil {
+			if !hasLegacySecrets && haveStore {
+				return fmt.Errorf("cannot check the existing server certificate; refusing upgrade: %w; "+
+					"restore the original server identity bundle (tls.crt, tls.key, ssh_host_key) "+
+					"from a trusted identity backup into OpenBao at %s/identities/%s/server, "+
+					"then retry the upgrade (see docs/identity-migration.md)", podErr, defaultKVPrefix, ns)
+			}
 			return fmt.Errorf("cannot check the existing server certificate; refusing upgrade: %w", podErr)
 		}
 		certPEM = podCert
@@ -640,7 +647,8 @@ func readServerPublicCertificate(ctx context.Context, cfg Config, deps Deps, ca 
 		cert, err := deps.RunCommand(ctx, nil, "kubectl", command...)
 		// Only pre-scratch releases lack admin. Never fall back on permission,
 		// I/O, or allowlist errors from a scratch-capable binary.
-		if err != nil && strings.Contains(string(cert)+err.Error(), `unknown command "admin"`) {
+		var exitError *exec.ExitError
+		if errors.As(err, &exitError) && strings.Contains(string(exitError.Stderr), `unknown command "admin"`) {
 			cert, err = deps.RunCommand(ctx, nil, "kubectl", append(args, "cat", path)...)
 		}
 		if err == nil && len(cert) > 0 {

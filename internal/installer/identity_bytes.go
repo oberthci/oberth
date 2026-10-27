@@ -12,8 +12,8 @@ package installer
 // bundle clears all of them in one call. Nothing in this path converts a
 // value to a string.
 //
-// Known residuals (documented, not fixed here): exec.Cmd.CombinedOutput
-// grows its buffer by reallocation, so earlier, smaller copies of the output
+// Known residuals (documented, not fixed here): command output buffers
+// grow by reallocation, so earlier, smaller copies of the output
 // may remain until reused; parsed private keys (*rsa.PrivateKey,
 // *ecdsa.PrivateKey, ssh.Signer) hold big.Int limbs that Go cannot clear.
 

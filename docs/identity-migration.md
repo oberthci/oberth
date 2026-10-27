@@ -66,3 +66,12 @@ deployment's `compatibility` chart values (`schemaIdentity`, `auditDomain`,
 `witnessKeyInfo`). Without them the server refuses the database
 (`database schema is incompatible with this binary`). Pass them in a values
 file on every install; `--reuse-values` keeps them afterwards.
+
+## Recovering a stopped runtime-identity deployment
+
+For a non-PKI deployment whose runtime identities lived in the pod's emptyDir,
+if OpenBao has no server certificate and the pod is unavailable, the upgrade
+refuses because it cannot verify the existing identity. Restore the original
+`tls.crt`, `tls.key` and `ssh_host_key` bundle from a trusted identity backup to
+OpenBao at `oberth/identities/<namespace>/server`, then retry the upgrade.
+Preserve the original private keys when recovering that bundle.

@@ -62,7 +62,8 @@ func adminReadPublicFiles(ctx context.Context, paths []string, output io.Writer,
 func openPublicAdminFile(path string) (*os.File, error) {
 	// Kubernetes projects public files through ..data symlinks. Resolve once,
 	// require the same public filename beneath its exact identity directory,
-	// then use a traversal-resistant root and refuse a changed final symlink.
+	// then check the resolved entry and opened file identity inside os.Root.
+	// O_NOFOLLOW alone does not prevent os.Root from following a final symlink.
 	directory := filepath.Dir(path)
 	resolved, err := filepath.EvalSymlinks(path)
 	if err != nil {
@@ -77,14 +78,30 @@ func openPublicAdminFile(path string) (*os.File, error) {
 		return nil, err
 	}
 	defer func() { _ = root.Close() }()
+	return openRegularPublicAdminFile(root, relative)
+}
+
+type adminFileRoot interface {
+	Lstat(string) (os.FileInfo, error)
+	OpenFile(string, int, os.FileMode) (*os.File, error)
+}
+
+func openRegularPublicAdminFile(root adminFileRoot, relative string) (*os.File, error) {
+	entry, err := root.Lstat(relative)
+	if err != nil {
+		return nil, err
+	}
+	if !entry.Mode().IsRegular() {
+		return nil, errors.New("admin public file must be a regular non-symlink entry")
+	}
 	file, err := root.OpenFile(relative, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
 	if err != nil {
 		return nil, err
 	}
 	info, err := file.Stat()
-	if err != nil || !info.Mode().IsRegular() {
+	if err != nil || !info.Mode().IsRegular() || !os.SameFile(entry, info) {
 		_ = file.Close()
-		return nil, errors.Join(err, errors.New("admin public file must be regular"))
+		return nil, errors.Join(err, errors.New("admin public file changed while opening or is not regular"))
 	}
 	return file, nil
 }

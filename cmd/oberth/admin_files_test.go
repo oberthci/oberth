@@ -101,3 +101,69 @@ func TestAdminPublicFileAllowlistAndProjection(t *testing.T) {
 		t.Fatal("unchecked fallback")
 	}
 }
+
+// The wrapper swaps an entry after Lstat and immediately before OpenFile. This
+// exercises the race deterministically without relying on O_NOFOLLOW behavior.
+type swappingAdminRoot struct {
+	*os.Root
+	beforeOpen func()
+	opened     *os.File
+}
+
+func (r *swappingAdminRoot) OpenFile(name string, flags int, mode os.FileMode) (*os.File, error) {
+	r.beforeOpen()
+	file, err := r.Root.OpenFile(name, flags, mode)
+	r.opened = file
+	return file, err
+}
+
+func TestAdminPublicFileSwapRefused(t *testing.T) {
+	t.Parallel()
+	for _, kind := range []string{"symlink before lstat", "symlink after lstat", "regular replacement after lstat"} {
+		t.Run(kind, func(t *testing.T) {
+			directory := t.TempDir()
+			certificate := filepath.Join(directory, "tls.crt")
+			key := filepath.Join(directory, "tls.key")
+			if err := os.WriteFile(certificate, []byte("public certificate"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(key, []byte("private key canary"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			root, err := os.OpenRoot(directory)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = root.Close() }()
+			swap := func() {
+				if err := os.Rename(certificate, filepath.Join(directory, "original.crt")); err != nil {
+					t.Fatal(err)
+				}
+				if kind == "regular replacement after lstat" {
+					if err := os.Rename(key, certificate); err != nil {
+						t.Fatal(err)
+					}
+				} else if err := os.Symlink("tls.key", certificate); err != nil {
+					t.Fatal(err)
+				}
+			}
+			checked := &swappingAdminRoot{Root: root, beforeOpen: swap}
+			if kind == "symlink before lstat" {
+				swap()
+				checked.beforeOpen = func() { t.Fatal("symlink entry reached open") }
+			}
+			file, err := openRegularPublicAdminFile(checked, "tls.crt")
+			if err == nil || file != nil {
+				if file != nil {
+					_ = file.Close()
+				}
+				t.Fatalf("swapped file accepted: %v", err)
+			}
+			if checked.opened != nil {
+				if _, err := checked.opened.Stat(); !errors.Is(err, os.ErrClosed) {
+					t.Fatalf("refused file descriptor was not closed: %v", err)
+				}
+			}
+		})
+	}
+}

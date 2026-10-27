@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"os/exec"
 	"slices"
 	"strings"
 	"testing"
@@ -42,7 +43,7 @@ func TestOldRuntimeCertificateFallbackIsVersionGated(t *testing.T) {
 				RunCommand: func(_ context.Context, _ []byte, _ string, args ...string) ([]byte, error) {
 					if slices.Contains(args, "admin") {
 						if old {
-							return nil, errors.New(`unknown command "admin"`)
+							return nil, &exec.ExitError{Stderr: []byte(`unknown command "admin"`)}
 						}
 						return nil, errors.New("permission denied")
 					}
@@ -109,5 +110,60 @@ func TestAbsentBaoCertificateStillChecksExistingRuntimeSANs(t *testing.T) {
 	err := preflightServerIdentities(t.Context(), &cfg, deps, false)
 	if err == nil || !strings.Contains(err.Error(), "does not cover the goproxy service names") {
 		t.Fatalf("missing OpenBao certificate was treated as fresh install: %v", err)
+	}
+}
+
+func TestRuntimeCertificateStdoutCannotEnableLegacyFallback(t *testing.T) {
+	t.Parallel()
+	for _, failure := range []error{
+		&exec.ExitError{Stderr: []byte("permission denied")},
+		errors.New(`wrapped diagnostic: unknown command "admin"`),
+	} {
+		calls := 0
+		deps := Deps{
+			KubeClient: fake.NewClientset(currentDeployment()),
+			RunCommand: func(_ context.Context, _ []byte, _ string, args ...string) ([]byte, error) {
+				if slices.Contains(args, "cat") {
+					calls++
+					return []byte("unexpected fallback"), nil
+				}
+				return []byte(`untrusted stdout: unknown command "admin"`), failure
+			},
+		}
+		_, err := serverCACertificate(t.Context(), Config{}, deps)
+		if err == nil || calls != 0 {
+			t.Fatalf("stdout/error text enabled legacy fallback: %v calls=%d", err, calls)
+		}
+	}
+}
+
+func TestStoppedRuntimeIdentityNamesRecoveryStep(t *testing.T) {
+	t.Setenv(baoTokenEnvVar, "test-root-token")
+	runner := &fakeBaoRunner{t: t, responses: map[string]fakeBaoResponse{
+		"read -format=json " + defaultKVPrefix + "/data/identities/oberth/server": {out: "No value found", err: errors.New("exit 2")},
+	}}
+	deps := Deps{
+		KubeClient: fake.NewClientset(currentDeployment(), runningOpenBaoPod()),
+		Output:     &bytes.Buffer{},
+		RunCommand: func(ctx context.Context, input []byte, name string, args ...string) ([]byte, error) {
+			if slices.Contains(args, "deploy/oberth") {
+				return nil, errors.New("no running server pod")
+			}
+			return runner.run(ctx, input, name, args...)
+		},
+		RunHelm: func(context.Context, []string) ([]byte, error) {
+			t.Fatal("unverifiable identity reached Helm")
+			return nil, nil
+		},
+	}
+	cfg := Config{InstallSecretStore: true}
+	err := preflightServerIdentities(t.Context(), &cfg, deps, false)
+	if err == nil {
+		t.Fatal("missing runtime identity accepted")
+	}
+	for _, text := range []string{"refusing upgrade", "restore the original server identity bundle", "trusted identity backup", "oberth/identities/oberth/server", "then retry the upgrade", "docs/identity-migration.md"} {
+		if !strings.Contains(err.Error(), text) {
+			t.Errorf("recovery refusal missing %q: %v", text, err)
+		}
 	}
 }

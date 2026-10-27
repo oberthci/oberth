@@ -17,6 +17,7 @@ import (
 	"regexp"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"golang.org/x/term"
@@ -40,6 +41,7 @@ const (
 
 // CommandRunner executes one host command. Input is connected to stdin when
 // non-empty; commands are always invoked directly, never through a shell.
+// Failed child commands expose captured stderr through exec.ExitError.Stderr.
 type CommandRunner func(ctx context.Context, input []byte, name string, args ...string) ([]byte, error)
 
 // InteractiveRunner connects one host command directly to the operator's
@@ -878,7 +880,8 @@ func commandOutputSuffix(output []byte) string {
 }
 
 // DefaultRunCommand runs a host command without a shell and returns its
-// combined output for actionable prerequisite and registry errors.
+// combined output for prerequisite and registry diagnostics. Failed child
+// commands retain stderr separately in exec.ExitError.
 func DefaultRunCommand(ctx context.Context, input []byte, name string, args ...string) ([]byte, error) {
 	// #nosec G204 -- callers select a fixed executable and pass structured
 	// arguments; no shell interpolation occurs.
@@ -886,11 +889,40 @@ func DefaultRunCommand(ctx context.Context, input []byte, name string, args ...s
 	if len(input) > 0 {
 		command.Stdin = bytes.NewReader(input)
 	}
-	body, err := command.CombinedOutput()
+	var capture commandCapture
+	command.Stdout = commandCaptureWriter{capture: &capture}
+	command.Stderr = commandCaptureWriter{capture: &capture, stderr: true}
+	err := command.Run()
+	var exitError *exec.ExitError
+	if errors.As(err, &exitError) {
+		exitError.Stderr = capture.stderr.Bytes()
+	}
 	if err != nil && ctx.Err() != nil {
 		err = errors.Join(err, ctx.Err())
 	}
-	return body, err
+	return capture.combined.Bytes(), err
+}
+
+// Capture both streams as their chunks arrive rather than appending all stderr
+// after stdout. Separate os/exec copy goroutines can write concurrently.
+type commandCapture struct {
+	mu       sync.Mutex
+	combined bytes.Buffer
+	stderr   bytes.Buffer
+}
+
+type commandCaptureWriter struct {
+	capture *commandCapture
+	stderr  bool
+}
+
+func (w commandCaptureWriter) Write(p []byte) (int, error) {
+	w.capture.mu.Lock()
+	defer w.capture.mu.Unlock()
+	if w.stderr {
+		_, _ = w.capture.stderr.Write(p) // bytes.Buffer.Write never returns an error.
+	}
+	return w.capture.combined.Write(p)
 }
 
 // DefaultRunInteractive runs a host command wired to the operator's own
