@@ -444,6 +444,8 @@ the exact annotated tag only after the run is green.
 - [docs/secretstore-verification.md](docs/secretstore-verification.md) — three-tier secret-store verification
 - [docs/helm-service-migration.md](docs/helm-service-migration.md) — two-stage ownership-safe Service migration
 - [docs/standalone-configuration.md](docs/standalone-configuration.md) — preserving deployment protocol identities and configuring an owned private module namespace
+- [v0.17.59 release notes](docs/releases/v0.17.59.md) — shadow observation, resource measurements and release policy
+- [v0.17.59 upgrade runbook](docs/upgrade-v0.17.59.md) — backup, optional values, verification and schema-safe rollback
 - [docs/upgrade-schema-v3.md](docs/upgrade-schema-v3.md) — upgrading across a backup-and-replace store schema boundary (v2 → v3)
 - [docs/backup-restore.md](docs/backup-restore.md) — `oberth backup` / `oberth restore`: one encrypted file with the history and the secrets pipelines use, restored onto a fresh install
 - [AGENT-CONTRACT.md](AGENT-CONTRACT.md) — the cross-component compatibility contract
