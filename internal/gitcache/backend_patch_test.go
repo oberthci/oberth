@@ -21,13 +21,15 @@ func TestGoGitPatchProvenance(t *testing.T) {
 // on-disk file is accounted for. An added source file must not evade the hash
 // loop simply because its author omitted it from the manifest. Pin the reviewed
 // manifest too, so adding a file and its hash cannot bypass review.
+// go.mod/go.sum record the documented security dependency update; other files
+// retain upstream hashes, reversing only the decoder patch below.
 func verifyGoGitPatchProvenance(root string) error {
 	manifest, err := os.ReadFile(filepath.Join(root, "UPSTREAM.sha256"))
 	if err != nil {
 		return err
 	}
 	manifestSum := sha256.Sum256(manifest)
-	if hex.EncodeToString(manifestSum[:]) != "16dd3183a775bdfdff01f7fd7e0c6cfbac2a370f4734055e28f38e50da85e6a4" {
+	if hex.EncodeToString(manifestSum[:]) != "81d9c9f3cb2bd193f84546a2c6ea55004cdc0704b2857ef55f65a2626cc05c16" {
 		return fmt.Errorf("unreviewed go-git upstream manifest")
 	}
 	listed := map[string]bool{}
