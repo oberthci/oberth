@@ -151,14 +151,14 @@ func TestUpgradeActualHelmPreservesOldValuesAndAddsDefaults(t *testing.T) {
 	if err := json.Unmarshal(out, &upgraded); err != nil {
 		t.Fatalf("decode actual upgrade: %v\n%s", err, out)
 	}
-	for _, want := range []string{containerimage.Utility, "--git-backend=go-git", "round17.example/stored", "--retention-keep-newest=0", image} {
+	for _, want := range []string{containerimage.Utility, "--git-backend=cli", "round17.example/stored", "--retention-keep-newest=0", image} {
 		if !strings.Contains(upgraded.Manifest, want) {
 			t.Errorf("upgrade render lost default/configuration %q", want)
 		}
 	}
 	// Template fallbacks can conceal a broken merge. The saved target chart
 	// must also retain its new defaults for this and subsequent upgrades.
-	if upgraded.Chart.Values["utilityImage"] != containerimage.Utility || upgraded.Chart.Values["gitBackend"] != "go-git" {
+	if upgraded.Chart.Values["utilityImage"] != containerimage.Utility || upgraded.Chart.Values["gitBackend"] != "cli" {
 		t.Fatalf("upgrade discarded new chart defaults: utilityImage=%v gitBackend=%v", upgraded.Chart.Values["utilityImage"], upgraded.Chart.Values["gitBackend"])
 	}
 	for _, want := range []string{compat.SchemaIdentity, compat.AuditDomain, compat.WitnessKeyInfo} {
@@ -206,7 +206,7 @@ func TestUpgradeActualHelmPreservesOldValuesAndAddsDefaults(t *testing.T) {
 			if err := json.Unmarshal(out, &result); err != nil {
 				t.Fatal(err)
 			}
-			for _, want := range []string{containerimage.Utility, "--git-backend=go-git", compat.SchemaIdentity, compat.AuditDomain, compat.WitnessKeyInfo} {
+			for _, want := range []string{containerimage.Utility, "--git-backend=cli", compat.SchemaIdentity, compat.AuditDomain, compat.WitnessKeyInfo} {
 				if !strings.Contains(result.Manifest, want) {
 					t.Errorf("%s raw-reuse render lacks %q", mode, want)
 				}

@@ -2259,7 +2259,7 @@ merged below stored release configuration, then user values and pinned arguments
 apply. Explicit false, zero and empty configured values are not replaced merely
 because they are empty. Direct `--reuse-values` upgrades also need template
 fallbacks for newly introduced keys: `utilityImage` falls back to the shared
-utility pin and `gitBackend` to `go-git`. `hack/test-chart-upgrade.sh` renders the
+utility pin and `gitBackend` to `cli`. `hack/test-chart-upgrade.sh` renders the
 new chart against the unmodified v0.17.53 values shape, both with and without
 new defaults. It runs from branch and release chart gates before publication.
 
