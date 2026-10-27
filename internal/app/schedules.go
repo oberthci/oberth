@@ -175,7 +175,18 @@ func (schedules *Schedules) tickRepository(ctx context.Context, repository model
 	last, err := schedules.config.State.ScheduleFires(ctx, qualifiedName)
 	if err != nil {
 		schedules.logFailure(qualifiedName, "", err)
+		var pauses map[string]model.SchedulePause
+		if reader, ok := schedules.config.State.(SchedulePauseReader); ok {
+			pauses, err = reader.SchedulePauses(ctx, qualifiedName)
+			if err != nil {
+				schedules.logFailure(qualifiedName, "", err)
+				return
+			}
+		}
 		for _, entry := range file.Entries {
+			if _, paused := pauses[entry.Name]; paused {
+				continue
+			}
 			// This is an observation failure, not proof the entry is due.
 			// Do not invent a pending cursor for a future occurrence.
 			schedules.record(ctx, qualifiedName, entry.Name, now, "failed_state")
@@ -205,15 +216,19 @@ func (schedules *Schedules) fire(
 	ctx context.Context, repository model.Repository, qualifiedName string, entry schedule.Entry, sha, defaultBranch string, fire model.ScheduleFireSpec,
 ) {
 	branch, target, err := schedules.entryTarget(ctx, qualifiedName, entry, sha, defaultBranch)
+	var result model.ScheduleEnqueueResult
 	if err == nil {
-		_, err = schedules.config.Enqueuer.EnqueueScheduledCI(ctx, service.CIRequest{
+		result, err = schedules.config.Enqueuer.EnqueueScheduledCI(ctx, service.CIRequest{
 			EventID: scheduleEventID(), Repository: repository, Branch: branch,
 			SHA: target, Actor: ScheduleActor, Trigger: "schedule", ScheduleEntry: entry.Name,
 		}, fire)
 	}
 	if err != nil {
 		schedules.logFailure(qualifiedName, entry.Name, err)
-		schedules.record(ctx, qualifiedName, entry.Name, fire.At, "failed")
+		// A post-commit acceptance error must not erase fired/coalesced.
+		if result.Enqueued.ID == "" {
+			schedules.record(ctx, qualifiedName, entry.Name, fire.At, "failed")
+		}
 	}
 	// The atomic enqueue owns fired/coalesced cursor writes. In particular,
 	// never overwrite its committed outcome with a separate successful write.

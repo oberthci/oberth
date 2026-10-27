@@ -57,7 +57,7 @@ func (s *Store) EnqueueScheduleOccurrence(ctx context.Context, event model.Recei
 	}
 
 	active, err := scanRun(tx.QueryRowContext(ctx, `SELECT `+runColumns+` FROM runs
-WHERE repo_id = ? AND ref_kind = 'branch' AND ref = ? AND trigger = 'schedule'
+WHERE repo_id = ? AND ref_kind = 'branch' AND ref = ?
   AND schedule_entry = ? AND status IN ('queued', 'running')
 ORDER BY queue_sequence LIMIT 1`, spec.RepoID, spec.Ref, spec.ScheduleEntry))
 	result := model.ScheduleEnqueueResult{Outcome: "coalesced", Enqueued: model.EnqueueRunResult{Run: active, Duplicate: true}}

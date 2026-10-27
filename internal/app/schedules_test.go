@@ -38,12 +38,13 @@ func (f *fakeScheduleGit) ReadBlob(_ context.Context, repo, _, _ string, _ int) 
 type fakeEnqueuer struct {
 	requests  []service.CIRequest
 	err       error
+	result    model.EnqueueRunResult
 	committed func(service.CIRequest, model.ScheduleFireSpec) error
 }
 
 func (f *fakeEnqueuer) EnqueueCI(_ context.Context, request service.CIRequest) (model.EnqueueRunResult, error) {
 	f.requests = append(f.requests, request)
-	return model.EnqueueRunResult{}, f.err
+	return f.result, f.err
 }
 
 func (f *fakeEnqueuer) EnqueueScheduledCI(ctx context.Context, request service.CIRequest, fire model.ScheduleFireSpec) (model.ScheduleEnqueueResult, error) {

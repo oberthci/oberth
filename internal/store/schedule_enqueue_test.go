@@ -235,3 +235,34 @@ func TestScheduleOccurrenceConcurrentTransactionsConsumeSnapshotOnce(t *testing.
 		t.Fatalf("snapshot consumed more than once: %v", outcomes)
 	}
 }
+
+func TestScheduleOccurrenceCoalescesRegardlessOfStoredTrigger(t *testing.T) {
+	now := time.Date(2026, 10, 27, 1, 30, 0, 0, time.UTC)
+	s := testStore(t, &now)
+	repo := createRepo(t, s)
+	event, spec, fire := scheduleTestRequest(t, s, repo, now)
+	active, err := s.EnqueueRun(t.Context(), spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The current CHECK requires a named entry to have trigger=schedule.
+	// Inject a legacy/future trigger in this disposable DB to prove dedupe
+	// protects any same-entry run that enqueueRunTx could supersede.
+	if _, err := s.db.Exec(`PRAGMA ignore_check_constraints=ON`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.Exec(`UPDATE runs SET trigger='push' WHERE id=?`, active.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.Exec(`PRAGMA ignore_check_constraints=OFF`); err != nil {
+		t.Fatal(err)
+	}
+	result, err := s.EnqueueScheduleOccurrence(t.Context(), event, spec, fire)
+	if err != nil || result.Outcome != "coalesced" || result.Enqueued.ID != active.ID {
+		t.Fatalf("same-entry run with another trigger was not coalesced: %+v, %v", result, err)
+	}
+	retained, err := s.Run(t.Context(), active.ID)
+	if err != nil || retained.Status != model.RunQueued || retained.SupersededBy != "" {
+		t.Fatalf("same-entry run was superseded: %+v, %v", retained, err)
+	}
+}

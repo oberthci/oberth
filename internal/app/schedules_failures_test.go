@@ -111,3 +111,52 @@ func TestScheduleCronDoesNotWriteCursorAfterAtomicEnqueue(t *testing.T) {
 		t.Fatalf("post-enqueue cursor write: requests=%d logs=%s", len(enqueuer.requests), &logs)
 	}
 }
+
+func (state *failingScheduleState) SchedulePauses(ctx context.Context, repo string) (map[string]model.SchedulePause, error) {
+	if reader, ok := state.ScheduleState.(SchedulePauseReader); ok {
+		return reader.SchedulePauses(ctx, repo)
+	}
+	return nil, nil
+}
+
+func TestScheduleStateFailurePreservesPausedOutcome(t *testing.T) {
+	schedules, enqueuer, _, state := pausedSchedules(t)
+	git := schedules.config.Git.(*fakeScheduleGit)
+	git.blob["alpha"] += "  - name: weekly\n    cron: \"0 4 * * 1\"\n"
+	state.pauses["nightly"] = model.SchedulePause{By: "admin@host"}
+	at := instant(t, "2026-08-24T03:05:00Z")
+	if err := state.RecordScheduleFire(t.Context(), "alpha", "nightly", at, "paused"); err != nil {
+		t.Fatal(err)
+	}
+	schedules.config.State = &failingScheduleState{ScheduleState: state, readErr: errors.New("cursor unavailable")}
+	schedules.Tick(t.Context(), at.Add(time.Minute))
+	if len(enqueuer.requests) != 0 || len(state.events) != 2 || state.events[0] != "alpha/nightly:paused" || state.events[1] != "alpha/weekly:failed_state" {
+		t.Fatalf("state failure overwrote pause or enqueued: events=%v requests=%v", state.events, enqueuer.requests)
+	}
+}
+
+func TestSchedulePostCommitErrorPreservesOutcome(t *testing.T) {
+	for _, outcome := range []string{"fired", "coalesced"} {
+		t.Run(outcome, func(t *testing.T) {
+			git := &fakeScheduleGit{sha: map[string]string{"alpha": strings.Repeat("a", 40)}, blob: map[string]string{"alpha": nightlyFile}}
+			schedules, enqueuer, _, state := testSchedules(t, git, oneRepo())
+			schedules.observed = instant(t, "2026-08-24T00:00:00Z")
+			var logs bytes.Buffer
+			schedules.config.Logger = log.New(&logs, "", 0)
+			enqueuer.result.ID = "committed-run"
+			enqueuer.committed = func(request service.CIRequest, fire model.ScheduleFireSpec) error {
+				if err := state.RecordScheduleFire(t.Context(), fire.Repo, request.ScheduleEntry, fire.At, outcome); err != nil {
+					return err
+				}
+				return errors.New("post-commit acceptance error")
+			}
+			schedules.Tick(t.Context(), instant(t, "2026-08-24T03:05:00Z"))
+			if len(state.events) != 1 || state.events[0] != "alpha/nightly:"+outcome {
+				t.Fatalf("committed outcome overwritten: %v", state.events)
+			}
+			if !strings.Contains(logs.String(), "post-commit acceptance error") {
+				t.Fatalf("acceptance error hidden: %s", &logs)
+			}
+		})
+	}
+}
