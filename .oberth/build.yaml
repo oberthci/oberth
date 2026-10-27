@@ -56,7 +56,8 @@
 #
 # After setup, security runs as a required parallel gate alongside lint and
 # independent checks. Serializing it ahead of branch tests can exhaust the
-# existing 3600-second budget. Workflow parallelism still bounds active Pods.
+# workflow budget. Allow 90 minutes for setup and builds on loaded hosts;
+# workflow parallelism still bounds active Pods.
 apiVersion: argoproj.io/v1alpha1
 kind: Workflow
 metadata:
@@ -66,7 +67,7 @@ spec:
   entrypoint: ci
   # Bound repository-local fan-out; keep node CPU available to other workflows.
   parallelism: 2
-  activeDeadlineSeconds: 3600
+  activeDeadlineSeconds: 5400
 
   volumeClaimTemplates:
   - metadata:
