@@ -35,10 +35,7 @@ func TestShadowFixtureProcess(t *testing.T) {
 	if len(args) != 4 {
 		os.Exit(2)
 	}
-	if err := gitcache.RunShadow(context.Background(), args[0], args[1], args[2], args[3], os.Stdout); err != nil {
-		os.Exit(1)
-	}
-	os.Exit(0)
+	os.Exit(gitcache.RunShadowHelper(context.Background(), args, os.Stdout))
 }
 
 func TestShadowRealCorruptionFixture(t *testing.T) {

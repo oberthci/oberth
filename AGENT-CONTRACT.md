@@ -52,25 +52,49 @@ resource/custody requirements are in [database-backup.md](docs/database-backup.m
   explicit opt-in. Its decoded object bytes are hashed against the requested
   Git ID on consumption, and failed checkouts are removed before seeding.
   Optional `OBERTH_GITCACHE_SHADOW=1` (chart `gitcache.shadow`, default false)
-  forces CLI authority and observes successful archive/checkout deliveries.
-  Archive observations pin Git's emitted PAX commit, never a later moving ref;
-  checkouts already name an immutable SHA. One isolated helper at a time reads
-  the local cache, with 16 pending jobs and the normal Git command timeout in
-  a separate budget. Full queues/unpinnable archives increment `shadow_skipped`;
-  helper failures/timeouts increment `shadow_errors`, never fail delivery.
+  forces CLI authority. Successful ArchiveTar and Checkout calls enqueue
+  archive comparisons at the immutable SHA. Archive observations pin Git's
+  emitted PAX commit, never a later moving ref. A Checkout hook compares fresh
+  archives; it does NOT read/compare the delivered checkout directory or seed.
+  One isolated helper at a time reads the local cache, with 16 pending jobs
+  and the normal Git command timeout in a separate budget. Full queues or
+  unpinnable archives increment `shadow_skipped`; shutdown cancellation does
+  not increment runs/errors/skips. The helper is started with `nice -n 10` before
+  its runtime threads exist. On Linux it writes its own `oom_score_adj=1000`;
+  inability to apply this preference skips work as `gogit_other`, never changes
+  server priority and requires no new capability or RBAC.
   The helper retains the 32 MiB object LRU and streaming decoder, streams tar
   data with a 32 KiB buffer, has a 128 MiB Go soft memory limit, and is killed
   on timeout/shutdown (one second to reap its Git child, then the entire process
-  group is killed). It cannot seed a workspace
-  or select returned bytes. Both archives are rebuilt at the pinned SHA;
-  SHA-256 compares every file byte and ordered entry name/mode/type/link/size,
-  excluding tar framing/global PAX/padding. The Git tree IDs are compared too.
-  Disagreements increment `oberth_gitcache_shadow_mismatch_total` and log only
-  structured repo/SHA/archive/tree hashes; helper stderr is discarded. Unscoped
-  `/api/status` exposes process-local `shadow_runs`, `shadow_mismatches`, errors
-  and skipped counters. `/metrics` exposes the mismatch counter to unscoped
-  authenticated admins; scoped status omits installation-wide shadow counts.
-  A soak must inspect errors/skips as well as mismatches to assess coverage.
+  group is killed). Its output is bounded to 4096 bytes through the actual
+  io.Copy path; overflow immediately kills/reaps the process group. It cannot
+  seed a workspace or select returned bytes. Both archives are rebuilt at the
+  pinned SHA; SHA-256 compares every file byte and ordered entry
+  name/mode/type/link/size, excluding tar framing/global PAX/padding. Git tree
+  IDs are compared too. Disagreements increment
+  `oberth_gitcache_shadow_mismatch_total` and log structured repo/SHA/hashes;
+  helper stderr is discarded. No error message or file contents enter metrics.
+  Fixed helper exit codes 20..25 map respectively to `cli_failed`,
+  `gogit_hash_guard`, `gogit_other`, `oversize`, `canceled`, `expected_attr_gap`.
+  A per-job timeout counts as `canceled`; process shutdown does not. Unknown
+  nonzero exits, crashes, spawn/protocol failures map to `gogit_other`.
+  `oberth_gitcache_shadow_errors_total{reason}` exports these six fixed labels;
+  `/api/status` retains process-local runs/mismatches/errors/skips. Unscoped
+  authenticated admins can read metrics; scoped status omits these counters.
+  `shadow_runs` counts completed attempts (including errors): errors/skips must
+  be checked before calling
+  any soak green.
+  Export attribute semantics are a known coverage gap, NOT a corruption
+  mismatch. goArchive now fails closed with `expected_attr_gap` for positive
+  `export-ignore`/`export-subst` rules in committed root/nested .gitattributes,
+  including macro definitions. Detection is deliberately conservative: unused
+  or overridden positive rules also exclude the sample. Repository-local
+  info/attributes and configured core.attributesFile are excluded too, as are
+  malformed/overlarge attribute files (1 MiB file / 64 KiB line bound). This
+  fold does not implement Git pattern precedence or pretty-format substitution;
+  it never silently returns a go-git archive that ignores a detected rule.
+  These samples increment errors with `reason=expected_attr_gap`, not mismatches
+  or clean comparison coverage. The authoritative CLI result is still served.
   The cache init
   and restore file-tool container use the shared digest-pinned BusyBox utility
   image, overridable with chart `utilityImage` / installer `--utility-image`

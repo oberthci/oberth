@@ -576,6 +576,9 @@ func goArchive(ctx context.Context, r *git.Repository, revision string, out io.W
 	if err != nil {
 		return err
 	}
+	if err := checkGoArchiveAttributes(ctx, r, tree); err != nil {
+		return err
+	}
 	archive := tar.NewWriter(out)
 	defer func() { result = errors.Join(result, archive.Close()) }()
 	return walkGoTree(ctx, r, tree, func(name string, entry object.TreeEntry) error {

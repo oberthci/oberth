@@ -20,7 +20,7 @@ import (
 // decoder; archives are hashed in a fixed-size streaming buffer, never retained.
 func RunShadow(ctx context.Context, repository, sha, gitBinary, globalConfig string, output io.Writer) error {
 	if err := ValidateSHA(sha); err != nil {
-		return err
+		return shadowStageError(ctx, shadowGoOther, err)
 	}
 	cli := func(args []string, out io.Writer) error {
 		// Inherit the helper's process group: the parent's timeout kills both
@@ -29,7 +29,7 @@ func RunShadow(ctx context.Context, repository, sha, gitBinary, globalConfig str
 		cmd.Dir = repository
 		cmd.Env = []string{"PATH=/usr/local/bin:/usr/bin:/bin", "HOME=/tmp", "LANG=C", "LC_ALL=C", "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_SYSTEM=/dev/null", "GIT_CONFIG_GLOBAL=" + globalConfig, "GIT_NO_REPLACE_OBJECTS=1", "GIT_TERMINAL_PROMPT=0", "GIT_OPTIONAL_LOCKS=0"}
 		cmd.Stdout, cmd.Stderr = out, io.Discard
-		return cmd.Run()
+		return shadowStageError(ctx, shadowCLIFailed, cmd.Run())
 	}
 	var tree shadowOutput
 	if err := cli([]string{"rev-parse", "--verify", sha + "^{tree}"}, &tree); err != nil {
@@ -61,7 +61,7 @@ func RunShadow(ctx context.Context, repository, sha, gitBinary, globalConfig str
 	if err != nil {
 		return err
 	}
-	return json.NewEncoder(output).Encode(result)
+	return shadowStageError(ctx, shadowGoOther, json.NewEncoder(output).Encode(result))
 }
 
 func shadowArchiveDigest(produce func(io.Writer) error) (string, error) {

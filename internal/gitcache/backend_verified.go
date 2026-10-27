@@ -1,11 +1,14 @@
 package gitcache
 
 import (
+	"errors"
 	"fmt"
 	"io"
 
 	"github.com/go-git/go-git/v5/plumbing"
 )
+
+var errGoObjectIntegrity = errors.New("git object integrity failure")
 
 // Verify decoded bytes, rather than trusting the pack index's claimed hash.
 // This covers both archive delivery and worktree checkout. A same-size decoder
@@ -50,7 +53,7 @@ func (r *verifiedObjectReader) Read(body []byte) (int, error) {
 	if err == io.EOF {
 		actual := r.hasher.Sum()
 		if r.read != r.size || actual != r.expected {
-			r.failure = fmt.Errorf("git object integrity failure: object=%s decoded=%s size=%d expected_size=%d", r.expected, actual, r.read, r.size)
+			r.failure = fmt.Errorf("%w: object=%s decoded=%s size=%d expected_size=%d", errGoObjectIntegrity, r.expected, actual, r.read, r.size)
 			return n, r.failure
 		}
 	}

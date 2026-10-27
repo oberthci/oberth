@@ -41,6 +41,7 @@ type shadowComparison struct {
 
 type shadowState struct {
 	runs, mismatches, failures, skipped atomic.Uint64
+	errorsByReason                      [shadowReasonCount]atomic.Uint64
 	ctx                                 context.Context
 	cancel                              context.CancelFunc
 	done                                chan struct{}
@@ -70,7 +71,10 @@ func (c *Cache) queueShadow(path, sha string) {
 	if s == nil {
 		return
 	}
-	if ValidateSHA(sha) != nil || s.ctx.Err() != nil {
+	if s.ctx.Err() != nil {
+		return
+	}
+	if ValidateSHA(sha) != nil {
 		s.skipped.Add(1)
 		return
 	}
@@ -131,6 +135,14 @@ func (c *Cache) ShadowStats() ShadowStats {
 
 func (c *Cache) WriteShadowMetrics(w io.Writer) {
 	_, _ = fmt.Fprintf(w, "# HELP oberth_gitcache_shadow_mismatch_total CLI/go-git archive or tree disagreements.\n# TYPE oberth_gitcache_shadow_mismatch_total counter\noberth_gitcache_shadow_mismatch_total %d\n", c.ShadowStats().Mismatches)
+	_, _ = fmt.Fprint(w, "# HELP oberth_gitcache_shadow_errors_total Incomplete shadow comparisons by fixed reason; shutdown cancellation excluded.\n# TYPE oberth_gitcache_shadow_errors_total counter\n")
+	for reason, name := range shadowReasonNames {
+		var count uint64
+		if c.shadow != nil {
+			count = c.shadow.errorsByReason[reason].Load()
+		}
+		_, _ = fmt.Fprintf(w, "oberth_gitcache_shadow_errors_total{reason=%q} %d\n", name, count)
+	}
 }
 
 func (s *shadowState) work() {
@@ -147,19 +159,20 @@ func (s *shadowState) work() {
 				close(job.barrier)
 				continue
 			}
-			s.runs.Add(1)
 			ctx, cancel := context.WithTimeout(s.ctx, s.cache.timeout)
 			comparison, err := s.compare(ctx, job)
 			cancel()
+
+			if s.ctx.Err() != nil {
+				return
+			} // Shutdown is not a failed soak observation.
+			s.runs.Add(1)
 			if err != nil {
+				reason := classifyShadowError(err)
 				s.failures.Add(1)
-				// Never print helper errors/stderr: these may contain source or
-				// repository config. Only a fixed failure class is safe.
-				reason := "helper_failed"
-				if errors.Is(err, context.DeadlineExceeded) {
-					reason = "timeout"
-				}
-				s.cache.logger.Printf("level=warning event=gitcache_shadow_error repo=%q sha=%q reason=%s", job.repo, job.sha, reason)
+				s.errorsByReason[reason].Add(1)
+				// Never print helper errors/stderr: fixed labels only.
+				s.cache.logger.Printf("level=warning event=gitcache_shadow_error repo=%q sha=%q reason=%s", job.repo, job.sha, shadowReasonNames[reason])
 				continue
 			}
 			if comparison.CLIArchive != comparison.GoArchive || comparison.CLITree != comparison.GoTree {
@@ -193,10 +206,16 @@ func (s *shadowState) compare(ctx context.Context, job shadowJob) (shadowCompari
 	}
 	args := append(append([]string(nil), s.command[1:]...), job.path, job.sha, gitBinary, s.cache.globalConfig)
 	// Trusted executable, fixed internal arguments; no shell or credentials.
-	cmd := exec.Command(s.command[0], args...) //nolint:gosec,noctx
+	nice, err := exec.LookPath("nice")
+	if err != nil {
+		return result, err
+	}
+	// nice execs the helper; every runtime thread and Git child inherits the
+	// lower priority, unlike Setpriority on just one already-running Go thread.
+	cmd := exec.Command(nice, append([]string{"-n", "10", s.command[0]}, args...)...) //nolint:gosec,noctx
 	cmd.Env = []string{"PATH=/usr/local/bin:/usr/bin:/bin", "HOME=/tmp", "GOMEMLIMIT=128MiB", "GOMAXPROCS=1", "GORACE=atexit_sleep_ms=0"}
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	var output shadowOutput
+	output := shadowOutput{overflow: make(chan struct{})}
 	cmd.Stdout = &output
 	cmd.Stderr = io.Discard
 	if err := cmd.Start(); err != nil {
@@ -205,10 +224,23 @@ func (s *shadowState) compare(ctx context.Context, job shadowJob) (shadowCompari
 	done := make(chan error, 1)
 	go func() { done <- cmd.Wait() }()
 	select {
+
 	case err := <-done:
+		if output.exceeded {
+			return result, errShadowOversize
+		}
 		if err != nil {
+			var exit *exec.ExitError
+			if errors.As(err, &exit) {
+				return result, &shadowFailure{shadowExitReason(exit.ExitCode()), err}
+			}
 			return result, err
 		}
+	case <-output.overflow:
+		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		_ = cmd.Process.Kill()
+		<-done
+		return result, errShadowOversize
 	case <-ctx.Done():
 		// Let the helper cancel and reap its Git child before killing the
 		// whole group. A stuck decoder still has a hard one-second grace.
@@ -224,6 +256,10 @@ func (s *shadowState) compare(ctx context.Context, job shadowJob) (shadowCompari
 			_ = cmd.Process.Kill()
 			<-done
 		}
+
+		if output.exceeded {
+			return result, errShadowOversize
+		}
 		return result, ctx.Err()
 	}
 	if err := json.Unmarshal(output.Bytes(), &result); err != nil {
@@ -235,13 +271,23 @@ func (s *shadowState) compare(ctx context.Context, job shadowJob) (shadowCompari
 	return result, nil
 }
 
-type shadowOutput struct{ bytes.Buffer }
+type shadowOutput struct {
+	buffer   bytes.Buffer
+	exceeded bool
+	overflow chan struct{}
+}
 
 func (w *shadowOutput) Write(body []byte) (int, error) {
-	if w.Len()+len(body) > 4096 {
-		return 0, errors.New("oversized shadow output")
+	if w.buffer.Len()+len(body) > 4096 {
+		if !w.exceeded {
+			w.exceeded = true
+			if w.overflow != nil {
+				close(w.overflow)
+			}
+		}
+		return 0, errShadowOversize
 	}
-	return w.Buffer.Write(body)
+	return w.buffer.Write(body)
 }
 
 // Git's leading global PAX comment pins the commit actually served, even when
@@ -267,3 +313,8 @@ func (p *archivePrefix) commit(ref string) string {
 	}
 	return ""
 }
+
+// Do not embed bytes.Buffer: its promoted ReadFrom bypasses Write's limit
+// when exec copies a pipe into the destination through io.Copy.
+func (w *shadowOutput) Bytes() []byte  { return w.buffer.Bytes() }
+func (w *shadowOutput) String() string { return w.buffer.String() }

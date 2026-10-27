@@ -27,6 +27,9 @@ var (
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+	if len(os.Args) > 1 && os.Args[1] == "internal-gitcache-shadow" {
+		os.Exit(gitcache.RunShadowHelper(ctx, os.Args[2:], os.Stdout))
+	}
 	if err := runCLI(ctx, os.Args[1:], os.Stdin, os.Stdout); err != nil {
 		// Ctrl+C during interactive prompts: exit silently with the Unix
 		// convention (128 + SIGINT signal number 2 = 130).
@@ -54,11 +57,6 @@ func runCLI(ctx context.Context, arguments []string, input io.Reader, output io.
 		return fmt.Errorf("%w: expected %s", errUsage, usageCommands)
 	}
 	switch arguments[0] {
-	case "internal-gitcache-shadow":
-		if len(arguments) != 5 {
-			return fmt.Errorf("%w: internal shadow arguments", errUsage)
-		}
-		return gitcache.RunShadow(ctx, arguments[1], arguments[2], arguments[3], arguments[4], output)
 	case "--help", "-h":
 		_, err := fmt.Fprint(output, `Usage: oberth <command> [flags]
 

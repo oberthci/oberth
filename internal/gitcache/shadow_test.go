@@ -5,15 +5,19 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/go-git/go-git/v5/plumbing"
 )
 
 func shadowTestCommand(t *testing.T, mode string) []string {
@@ -37,14 +41,21 @@ func TestShadowHelperProcess(t *testing.T) {
 		return
 	}
 	args := os.Args[marker+1:]
+
+	if len(args) > 0 && strings.HasPrefix(args[0], "ready-timeout:") {
+		connection, err := net.DialTimeout("tcp", strings.TrimPrefix(args[0], "ready-timeout:"), 5*time.Second)
+		if err != nil {
+			os.Exit(2)
+		}
+		_ = connection.Close()
+		<-time.After(time.Hour)
+	}
 	if len(args) != 5 {
 		os.Exit(2)
 	}
 	switch args[0] {
 	case "real":
-		if err := RunShadow(context.Background(), args[1], args[2], args[3], args[4], os.Stdout); err != nil {
-			os.Exit(1)
-		}
+		os.Exit(RunShadowHelper(context.Background(), args[1:], os.Stdout))
 	case "mismatch", "tree-mismatch":
 		result := shadowComparison{args[2], strings.Repeat("a", 64), strings.Repeat("b", 64), strings.Repeat("c", 40), strings.Repeat("c", 40)}
 		if args[0] == "tree-mismatch" {
@@ -53,6 +64,33 @@ func TestShadowHelperProcess(t *testing.T) {
 		_ = json.NewEncoder(os.Stdout).Encode(result)
 	case "timeout":
 		<-time.After(time.Hour) // Deliberately hung workload, killed by its parent.
+	case "nonzero":
+		os.Exit(17) // No panic or stderr; still an incomplete observation.
+	case "cli-failed":
+		os.Exit(shadowExitCLI)
+	case "oversize":
+		_, _ = io.WriteString(os.Stdout, strings.Repeat("private-source-contents credential=secret", 4096))
+		<-time.After(time.Hour) // Reaping must not wait for the normal timeout.
+	case "hash-guard":
+		blob := &plumbing.MemoryObject{}
+		blob.SetType(plumbing.BlobObject)
+		_, _ = blob.Write([]byte("corrupt! bytes"))
+		blob.SetSize(int64(len("expected bytes")))
+		checked := verifiedObject{EncodedObject: blob, expected: plumbing.ComputeHash(plumbing.BlobObject, []byte("expected bytes"))}
+		reader, err := checked.Reader()
+		if err == nil {
+			_, err = io.Copy(io.Discard, reader)
+			_ = reader.Close()
+		}
+		os.Exit(shadowExitCode(err))
+	case "priority":
+		if err := prepareShadowHelper(); err != nil || !shadowHelperPriorityOK() {
+			os.Exit(shadowExitGoOther)
+		}
+		_ = json.NewEncoder(os.Stdout).Encode(shadowComparison{args[2], strings.Repeat("a", 64), strings.Repeat("a", 64), strings.Repeat("b", 40), strings.Repeat("b", 40)})
+	case "canceled":
+		os.Exit(shadowExitCanceled)
+
 	case "crash":
 		panic("private-source-contents credential=secret")
 	default:
@@ -87,7 +125,7 @@ func waitTestShadow(t *testing.T, cache *Cache) {
 }
 
 func TestShadowNeverChangesCLIDelivery(t *testing.T) {
-	for _, mode := range []string{"real", "mismatch", "tree-mismatch", "timeout", "crash"} {
+	for _, mode := range []string{"real", "mismatch", "tree-mismatch", "timeout", "crash", "nonzero", "cli-failed", "oversize", "hash-guard", "canceled", "priority"} {
 		t.Run(mode, func(t *testing.T) {
 			repository := newTestRepository(t)
 			var logs shadowTestLog
@@ -102,7 +140,9 @@ func TestShadowNeverChangesCLIDelivery(t *testing.T) {
 			if _, err := cache.Ensure(t.Context(), "example"); err != nil {
 				t.Fatal(err)
 			}
-			cache.timeout = time.Second
+			if mode == "timeout" {
+				cache.timeout = time.Second
+			}
 			sha := runGit(t, repository.work, "rev-parse", "HEAD")
 			var expected bytes.Buffer
 			if err := cache.run(t.Context(), commandSpec{dir: filepath.Join(cache.root, "example.git"), args: []string{"archive", "--format=tar", sha}, stdout: &expected}); err != nil {
@@ -123,7 +163,7 @@ func TestShadowNeverChangesCLIDelivery(t *testing.T) {
 			waitTestShadow(t, cache)
 			stats := cache.ShadowStats()
 			if stats.Runs != 2 || stats.Skipped != 0 {
-				t.Fatalf("archive/checkout coverage: %+v", stats)
+				t.Fatalf("archive observations from archive/checkout hooks: %+v", stats)
 			}
 			if mode == "mismatch" || mode == "tree-mismatch" {
 				if stats.Mismatches != 2 || stats.Errors != 0 {
@@ -137,12 +177,19 @@ func TestShadowNeverChangesCLIDelivery(t *testing.T) {
 				if !strings.Contains(logs.String(), `"event":"gitcache_shadow_mismatch"`) || !strings.Contains(logs.String(), `"sha":"`+sha+`"`) || !strings.Contains(logs.String(), `"repo":"example"`) {
 					t.Fatal(logs.String())
 				}
-			} else if mode == "timeout" || mode == "crash" {
+			} else if mode != "real" && mode != "priority" {
 				if stats.Errors != 2 || stats.Mismatches != 0 {
 					t.Fatal(stats)
 				}
-				if mode == "timeout" && !strings.Contains(logs.String(), "reason=timeout") {
+
+				reason := map[string]string{"timeout": "canceled", "crash": "gogit_other", "nonzero": "gogit_other", "cli-failed": "cli_failed", "oversize": "oversize", "hash-guard": "gogit_hash_guard", "canceled": "canceled"}[mode]
+				if !strings.Contains(logs.String(), "reason="+reason) {
 					t.Fatal(logs.String())
+				}
+				var metrics bytes.Buffer
+				cache.WriteShadowMetrics(&metrics)
+				if !strings.Contains(metrics.String(), fmt.Sprintf("oberth_gitcache_shadow_errors_total{reason=%q} 2\n", reason)) {
+					t.Fatal(metrics.String())
 				}
 			} else if stats.Mismatches != 0 || stats.Errors != 0 {
 				t.Fatalf("real archive mismatch: %+v %s", stats, logs.String())
@@ -194,4 +241,96 @@ func shadowTinyTar(body string, mode int64) string {
 	_, _ = fmt.Fprint(w, body)
 	_ = w.Close()
 	return archive.String()
+}
+
+func TestNewShadowStateDefaultEntrypoint(t *testing.T) {
+	repository := newTestRepository(t)
+	cache, err := New(Config{Root: filepath.Join(t.TempDir(), "cache"), Shadow: true, ShadowContext: t.Context(), Upstream: func(string) (string, error) { return repository.upstream, nil }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(cache.CloseShadow)
+	if _, err := cache.Ensure(t.Context(), "example"); err != nil {
+		t.Fatal(err)
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cache.shadow.command) != 2 || cache.shadow.command[0] != exe || cache.shadow.command[1] != "internal-gitcache-shadow" {
+		t.Fatal(cache.shadow.command)
+	}
+	if err := cache.ArchiveTar(t.Context(), "example", "main", io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	waitTestShadow(t, cache)
+	if stats := cache.ShadowStats(); stats.Runs != 1 || stats.Errors != 0 || stats.Mismatches != 0 {
+		t.Fatal(stats)
+	}
+}
+
+func TestNewShadowStateShutdownDoesNotCountCancellation(t *testing.T) {
+	// A socket acceptance is the helper-ready handshake. No polling sleeps.
+	listener, err := net.ListenTCP("tcp", &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = listener.Close() }()
+	if err := listener.SetDeadline(time.Now().Add(10 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	repository := newTestRepository(t)
+	var logs shadowTestLog
+	cache, err := New(Config{Root: filepath.Join(t.TempDir(), "cache"), Upstream: func(string) (string, error) { return repository.upstream, nil }, Logger: log.New(&logs, "", 0)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := cache.Ensure(t.Context(), "example"); err != nil {
+		t.Fatal(err)
+	}
+	cache.shadow = newShadowState(cache, t.Context(), shadowTestCommand(t, "ready-timeout:"+listener.Addr().String()))
+	t.Cleanup(cache.CloseShadow)
+	sha := runGit(t, repository.work, "rev-parse", "HEAD")
+	cache.queueShadow(filepath.Join(cache.root, "example.git"), sha)
+	connection, err := listener.Accept()
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = connection.Close()
+	cache.CloseShadow()
+	cache.queueShadow(filepath.Join(cache.root, "example.git"), sha)
+	stats := cache.ShadowStats()
+	if stats.Runs != 0 || stats.Errors != 0 || stats.Mismatches != 0 || stats.Skipped != 0 || strings.Contains(logs.String(), "gitcache_shadow_error") {
+		t.Fatalf("shutdown counted: %+v %s", stats, logs.String())
+	}
+	var metrics bytes.Buffer
+	cache.WriteShadowMetrics(&metrics)
+	if strings.Contains(metrics.String(), "} 1\n") {
+		t.Fatal(metrics.String())
+	}
+}
+
+func TestShadowOutputBoundThroughIOCopy(t *testing.T) {
+	var output shadowOutput
+	_, err := io.Copy(&output, struct{ io.Reader }{strings.NewReader(strings.Repeat("x", 4097))})
+	if !errors.Is(err, errShadowOversize) || len(output.Bytes()) > 4096 {
+		t.Fatalf("output escaped bound: len=%d err=%v", len(output.Bytes()), err)
+	}
+}
+
+func TestNewShadowStateRealCLIError(t *testing.T) {
+	var logs shadowTestLog
+	cache, err := New(Config{Root: t.TempDir(), Shadow: true, ShadowContext: t.Context(), Upstream: func(string) (string, error) { return "", errors.New("must not fetch") }, Logger: log.New(&logs, "", 0)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(cache.CloseShadow)
+	cache.queueShadow(filepath.Join(cache.root, "missing.git"), strings.Repeat("a", 40))
+	waitTestShadow(t, cache)
+	if stats := cache.ShadowStats(); stats.Runs != 1 || stats.Errors != 1 || stats.Mismatches != 0 {
+		t.Fatal(stats)
+	}
+	if !strings.Contains(logs.String(), "reason=cli_failed") {
+		t.Fatal(logs.String())
+	}
 }
