@@ -140,6 +140,68 @@ func waitSlice2Cleanup(t *testing.T, paths []string) {
 	}
 }
 
+// slice2Owner joins every scheduler before its fixture store can close, even
+// when an assertion fails. The closed latch also exposes worker errors without
+// consuming a one-shot result needed by teardown.
+type slice2Owner struct {
+	cancel context.CancelFunc
+	done   chan struct{}
+	err    error
+}
+
+func startSlice2Owner(t *testing.T, scheduler *Scheduler) *slice2Owner {
+	t.Helper()
+	ctx, cancel := context.WithCancel(t.Context())
+	owner := &slice2Owner{cancel: cancel, done: make(chan struct{})}
+	go func() {
+		owner.err = scheduler.Run(ctx)
+		close(owner.done)
+	}()
+	t.Cleanup(func() { owner.stop(t) })
+	return owner
+}
+
+func (owner *slice2Owner) stop(t *testing.T) {
+	t.Helper()
+	owner.cancel()
+	<-owner.done
+	if owner.err != nil {
+		t.Errorf("scheduler stopped: %v", owner.err)
+	}
+}
+
+func (owner *slice2Owner) waitEntered(t *testing.T, entered <-chan struct{}) {
+	t.Helper()
+	select {
+	case <-entered:
+	case <-owner.done:
+		t.Fatalf("scheduler stopped before Wait: %v", owner.err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("adopted Wait not entered")
+	}
+}
+
+func (owner *slice2Owner) waitTerminal(t *testing.T, scheduler *Scheduler, database *store.Store, id string) model.Run {
+	t.Helper()
+	for {
+		// Subscribe before the durable read: finalization between these two
+		// operations must wake us, while an already terminal run needs no wait.
+		changed := scheduler.signals.Run(id)
+		run, err := database.Run(t.Context(), id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if run.Status.Terminal() {
+			return run
+		}
+		select {
+		case <-changed:
+		case <-owner.done:
+			t.Fatalf("scheduler stopped before terminal run %s: %v", id, owner.err)
+		}
+	}
+}
+
 func TestStartupAdoptsPromotionTagAndReleaseAcrossRepeatedRestarts(t *testing.T) {
 	for _, kind := range []string{"promotion", "tag", "release"} {
 		for _, finishedWhileDown := range []bool{false, true} {
@@ -153,18 +215,13 @@ func TestStartupAdoptsPromotionTagAndReleaseAcrossRepeatedRestarts(t *testing.T)
 				// owner either finds it live or observes completion during the outage.
 				reopenSlice2Owner(t, fixture)
 				scheduler := slice2Scheduler(t, fixture, jobs, git)
-				ctx, cancel := context.WithCancel(context.Background())
-				done := make(chan error, 1)
-				go func() { done <- scheduler.Run(ctx) }()
-				waitSlice2Worker(t, done, jobs.waitEntered)
+				owner := startSlice2Owner(t, scheduler)
+				owner.waitEntered(t, jobs.waitEntered)
 				active, err := fixture.store.Run(context.Background(), run.ID)
 				if err != nil || active.Status != model.RunRunning || active.Credentialed != run.Credentialed || active.Release != run.Release || active.SHA != run.SHA || active.TestedSHA != run.TestedSHA || active.AdmissionSequence != run.AdmissionSequence || active.SupersededBy != "" {
 					t.Fatalf("adoption changed durable attempt: %+v %v", active, err)
 				}
-				cancel()
-				if err := <-done; err != nil {
-					t.Fatal(err)
-				}
+				owner.stop(t)
 				for _, path := range paths {
 					if _, err := os.Stat(path); err != nil {
 						t.Fatal("active workspace removed", err)
@@ -182,19 +239,22 @@ func TestStartupAdoptsPromotionTagAndReleaseAcrossRepeatedRestarts(t *testing.T)
 					close(jobs.waitBlocks)
 				}
 				scheduler = slice2Scheduler(t, fixture, jobs, git)
-				ctx, cancel = context.WithCancel(context.Background())
-				defer cancel()
-				done = make(chan error, 1)
-				go func() { done <- scheduler.Run(ctx) }()
-				waitSlice2Worker(t, done, jobs.waitEntered)
+				owner = startSlice2Owner(t, scheduler)
+				owner.waitEntered(t, jobs.waitEntered)
 				if !finishedWhileDown {
 					close(jobs.waitBlocks)
 				}
-				final := waitAdoptedStatus(t, fixture.store, run.ID, model.RunPassed)
-				waitSlice2Cleanup(t, paths)
-				cancel()
-				if err := <-done; err != nil {
-					t.Fatal(err)
+				final := owner.waitTerminal(t, scheduler, fixture.store, run.ID)
+				owner.stop(t)
+				if final.Status != model.RunPassed {
+					t.Fatalf("run = %#v, want passed", final)
+				}
+				// Run joins adopted workers, including terminal workspace cleanup.
+				// Assert after that barrier instead of racing a filesystem poll.
+				for _, path := range paths {
+					if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+						t.Fatalf("terminal workspace %s retained: %v", path, err)
+					}
 				}
 				if final.ID != run.ID || final.QueueSequence != run.QueueSequence || final.AdmissionSequence != run.AdmissionSequence || final.SupersededBy != "" || final.Credentialed != run.Credentialed {
 					t.Fatalf("final attempt changed: %+v", final)
