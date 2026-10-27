@@ -573,3 +573,25 @@ func TestTrustedKVMProducerSelectionStillAdmitsTheWholeBlueprint(t *testing.T) {
 		t.Fatalf("selected producers bypassed closed admission: %v", err)
 	}
 }
+
+func TestTrustedKVMRequestCanonicalRepositoryKey(t *testing.T) {
+	for _, tc := range []struct{ org, want string }{
+		{"skipops", "codeberg/skipops/oberth"}, {"", "codeberg/codeberg/oberth"},
+	} {
+		t.Run(tc.want, func(t *testing.T) {
+			config, request := trustedKVMRequest(t)
+			request.UpstreamOrg = tc.org
+			request.TrustedKVM.Repository = tc.want
+			if err := prepareTrustedKVMRequest(config, &request); err != nil {
+				t.Fatal(err)
+			}
+			if request.TrustedKVM.Repository != tc.want {
+				t.Fatal("validation rewrote the journaled repository")
+			}
+			request.TrustedKVM.Repository = "codeberg/other/oberth"
+			if err := prepareTrustedKVMRequest(config, &request); err == nil || !strings.Contains(err.Error(), "differs from journaled admission") {
+				t.Fatalf("foreign repository accepted: %v", err)
+			}
+		})
+	}
+}

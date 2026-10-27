@@ -140,8 +140,12 @@ func (c *protectedControllerFixture) TrustedKVMReceipt(_ context.Context, r argo
 	return vmrunner.KVMReceipt{IntentDigest: d, WorkflowUID: uid, Binding: vmrunner.KVMTerminationBinding{Namespace: intent.Namespace, WorkflowName: intent.WorkflowName, WorkflowUID: uid, PodName: "pod", PodUID: "pod-uid", ContainerID: "containerd://id", HarnessImageRef: intent.Recipe.HarnessImage, AdmittedAt: intent.AdmittedAt, Deadline: intent.Deadline}, Report: vmrunner.KVMReport{Version: 1, IntentDigest: d, InventoryDigest: intent.InventoryDigest, CaseCount: intent.CaseCount, ArtifactSetDigest: strings.Repeat("f", 64)}, Termination: vmrunner.KVMTerminationRecord{ImageID: "sha256:" + strings.Repeat("c", 64), ContainerID: "containerd://id", PodUID: "pod-uid", WorkflowUID: uid, StartedAt: intent.AdmittedAt, FinishedAt: now}, FinishedAt: now}, nil
 }
 func TestTrustedPreflightAdapterLifecycle(t *testing.T) {
-	for _, scenario := range []string{"pass", "workflow failed", "workflow observation failed", "infrastructure failed", "infrastructure observation failed", "definite create refusal", "uncertain create", "recover absent", "unapproved", "guest granted", "guest revoked", "guest recover"} {
+	for _, scenario := range []string{"pass", "pass empty org", "workflow failed", "workflow observation failed", "infrastructure failed", "infrastructure observation failed", "definite create refusal", "uncertain create", "recover absent", "unapproved", "guest granted", "guest revoked", "guest recover"} {
 		t.Run(scenario, func(t *testing.T) {
+			org, wantRepo := "org", "upstream/org/repo"
+			if scenario == "pass empty org" {
+				org, wantRepo = "", "upstream/upstream/repo"
+			}
 			ctx := context.Background()
 			fixture := newRaceFixture(t)
 			// The grant names more VMs than the default budget (two).
@@ -176,7 +180,11 @@ func TestTrustedPreflightAdapterLifecycle(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer database.Close()
-			upstream, err := database.CreateUpstream(ctx, model.UpstreamSpec{Name: "upstream", Kind: "ssh", BaseURL: "ssh://example.org/org"})
+			baseURL := "ssh://example.org/org"
+			if org == "" {
+				baseURL = "/" // Root-based local upstream: no org component.
+			}
+			upstream, err := database.CreateUpstream(ctx, model.UpstreamSpec{Name: "upstream", Kind: "ssh", BaseURL: baseURL})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -219,7 +227,7 @@ func TestTrustedPreflightAdapterLifecycle(t *testing.T) {
 			if scenario == "unapproved" {
 				contract.SuiteSHA256 = strings.Repeat("e", 64)
 			}
-			err = p.Execute(ctx, service.JobRequest{JobName: "run-test", Run: run, Repository: repo, UpstreamName: "upstream", UpstreamOrg: "org", SourceDir: fixture.sourceDir}, vmrunner.Requirement{CandidateSHA: sha, BaselineSHA: strings.Repeat("d", 40), Contract: &contract}, io.Discard)
+			err = p.Execute(ctx, service.JobRequest{JobName: "run-test", Run: run, Repository: repo, UpstreamName: "upstream", UpstreamOrg: org, SourceDir: fixture.sourceDir}, vmrunner.Requirement{CandidateSHA: sha, BaselineSHA: strings.Repeat("d", 40), Contract: &contract}, io.Discard)
 			if scenario == "unapproved" {
 				if err == nil || fetches != 0 {
 					t.Fatal("unapproved content fetched")
@@ -248,7 +256,10 @@ func TestTrustedPreflightAdapterLifecycle(t *testing.T) {
 			if getErr != nil {
 				t.Fatalf("preflight did not journal: execute=%v journal=%v", err, getErr)
 			}
-			if scenario == "pass" || scenario == "guest granted" {
+			if state.Intent.Repository != wantRepo || controller.request.TrustedKVM.Repository != wantRepo {
+				t.Fatalf("journal/submission repository changed: journal=%q submitted=%q want=%q", state.Intent.Repository, controller.request.TrustedKVM.Repository, wantRepo)
+			}
+			if scenario == "pass" || scenario == "pass empty org" || scenario == "guest granted" {
 				if err != nil || state.Receipt == nil || state.Refusal != nil || !state.Cleaned || controller.waitRunID != run.ID {
 					t.Fatalf("success binding: %v %#v waitID=%q", err, state, controller.waitRunID)
 				}

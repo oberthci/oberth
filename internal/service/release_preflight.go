@@ -29,7 +29,7 @@ const releasePreflightLimit = 1 << 20
 func releasePreflight(ctx context.Context, git vmrunner.PolicyGit, checker ReleasePreflighter, request JobRequest, base string, defaultBase bool) (ReleasePreflightResult, error) {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	repo := request.UpstreamName + "/" + request.UpstreamOrg + "/" + request.Repository.Name
+	repo := model.CanonicalRepoKey(request.UpstreamName, request.UpstreamOrg, request.Repository.Name)
 	sha := request.Run.TestedSHA
 	if sha == "" {
 		sha = request.Run.SHA

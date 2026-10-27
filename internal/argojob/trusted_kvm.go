@@ -16,6 +16,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/utils/ptr"
 
+	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/vmrunner"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 	"github.com/oberthci/oberth/pkg/periapsis"
@@ -38,7 +39,7 @@ func prepareTrustedKVMRequest(config Config, request *Request) error {
 		return errors.New("argojob: trusted suites require an explicit positive KVM supplemental group")
 	}
 	digest := sha256.Sum256(request.Source)
-	if intent.Validate() != nil || request.Trigger != periapsis.TriggerCI || request.RunID != intent.RunID || request.Name != intent.WorkflowName || request.SHA != intent.CandidateSHA || config.Namespace != intent.Namespace || hex.EncodeToString(digest[:]) != intent.WorkflowSpecDigest || request.UpstreamName+"/"+request.UpstreamOrg+"/"+request.Repo != intent.Repository || len(request.Fragments) != 0 {
+	if intent.Validate() != nil || request.Trigger != periapsis.TriggerCI || request.RunID != intent.RunID || request.Name != intent.WorkflowName || request.SHA != intent.CandidateSHA || config.Namespace != intent.Namespace || hex.EncodeToString(digest[:]) != intent.WorkflowSpecDigest || model.CanonicalRepoKey(request.UpstreamName, request.UpstreamOrg, request.Repo) != intent.Repository || len(request.Fragments) != 0 {
 		return errors.New("argojob: trusted preflight request differs from journaled admission")
 	}
 	expected := SourceVolume{ClaimName: sourceClaimName(request.Name), SubPath: "src", ArtifactsSubPath: artifactsSubPath}

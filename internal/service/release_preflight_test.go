@@ -16,9 +16,11 @@ import (
 type releaseCheckGit struct {
 	*controlGit
 	source, base []byte
+	repositories []string
 }
 
-func (g *releaseCheckGit) ReadOptionalBlob(_ context.Context, _ string, sha, file string, _ int) ([]byte, bool, error) {
+func (g *releaseCheckGit) ReadOptionalBlob(_ context.Context, repo string, sha, file string, _ int) ([]byte, bool, error) {
+	g.repositories = append(g.repositories, repo)
 	if file != releasePreflightFile {
 		return nil, false, nil
 	}
@@ -27,7 +29,8 @@ func (g *releaseCheckGit) ReadOptionalBlob(_ context.Context, _ string, sha, fil
 	}
 	return g.source, g.source != nil, nil
 }
-func (g *releaseCheckGit) ReadDefaultBlob(context.Context, string, string, int) (string, []byte, bool, error) {
+func (g *releaseCheckGit) ReadDefaultBlob(_ context.Context, repo, _ string, _ int) (string, []byte, bool, error) {
+	g.repositories = append(g.repositories, repo)
 	return "", g.base, g.base != nil, nil
 }
 
@@ -132,5 +135,34 @@ func TestReleasePreflightIdentityAdviceIsVisibleWithoutBlocking(t *testing.T) {
 	}
 	if !strings.Contains(output.String(), "[release-preflight/check] "+checker.checks[0]) {
 		t.Fatalf("missing identity advice: %s", output.String())
+	}
+}
+
+func TestReleasePreflightCanonicalRepositoryKey(t *testing.T) {
+	for _, tc := range []struct{ org, want string }{
+		{"org", "upstream/org/repo"}, {"", "upstream/upstream/repo"},
+	} {
+		for _, defaultBase := range []bool{false, true} {
+			name := "explicit base"
+			if defaultBase {
+				name = "default base"
+			}
+			t.Run(tc.want+"/"+name, func(t *testing.T) {
+				git := &releaseCheckGit{source: []byte("new"), base: []byte("old")}
+				checker := &releaseChecker{}
+				request := JobRequest{UpstreamName: "upstream", UpstreamOrg: tc.org, Repository: model.Repository{Name: "repo"}, Run: model.Run{TestedSHA: strings.Repeat("a", 40)}}
+				if _, err := releasePreflight(t.Context(), git, checker, request, strings.Repeat("b", 40), defaultBase); err != nil {
+					t.Fatal(err)
+				}
+				if checker.calls != 1 || len(git.repositories) != 2 {
+					t.Fatalf("checks=%d reads=%v", checker.calls, git.repositories)
+				}
+				for _, got := range git.repositories {
+					if got != tc.want {
+						t.Fatalf("repository=%q want=%q", got, tc.want)
+					}
+				}
+			})
+		}
 	}
 }

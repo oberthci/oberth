@@ -9,7 +9,6 @@ import (
 	"io"
 	"log"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/oberthci/oberth/internal/argojob"
@@ -129,7 +128,7 @@ func (p *TrustedPreflights) Execute(ctx context.Context, job service.JobRequest,
 	if duration <= 0 || duration > vmrunner.MaxDeadline {
 		duration = vmrunner.MaxDeadline
 	}
-	intent := vmrunner.KVMIntent{RunID: job.Run.ID, RepoID: job.Repository.ID, Repository: strings.Join([]string{job.UpstreamName, job.UpstreamOrg, job.Repository.Name}, "/"), CandidateSHA: requirement.CandidateSHA, BaselineSHA: requirement.BaselineSHA, Contract: *requirement.Contract, Recipe: recipe, Namespace: p.jobs.controller.Namespace(), WorkflowName: job.JobName + "-trusted", WorkflowSpecDigest: hex.EncodeToString(sum[:]), InventoryDigest: inventory, CaseCount: count, AdmittedAt: now, Deadline: now.Add(duration)}
+	intent := vmrunner.KVMIntent{RunID: job.Run.ID, RepoID: job.Repository.ID, Repository: model.CanonicalRepoKey(job.UpstreamName, job.UpstreamOrg, job.Repository.Name), CandidateSHA: requirement.CandidateSHA, BaselineSHA: requirement.BaselineSHA, Contract: *requirement.Contract, Recipe: recipe, Namespace: p.jobs.controller.Namespace(), WorkflowName: job.JobName + "-trusted", WorkflowSpecDigest: hex.EncodeToString(sum[:]), InventoryDigest: inventory, CaseCount: count, AdmittedAt: now, Deadline: now.Add(duration)}
 	submission, err := p.request(job, intent)
 	if err != nil {
 		return err
