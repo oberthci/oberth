@@ -99,10 +99,13 @@ Admission and the server create guard both enforce the budget. Credentialed work
 ## Proven VM phases and the create guard
 
 A resource create task finishes while its VMI is still alive. A dependency on
-that create alone therefore earns no concurrency discount. Oberth counts each
-create invocation separately, including repeated use of one template or VM
-name. Two invocations are non-overlapping only if a matching explicit delete
-is a descendant of the earlier create **and an ancestor of the later create**.
+that create alone therefore earns no concurrency discount. The lifetime
+projection counts each create invocation separately, including repeated use of
+one template or VM name. Its count, cores and memory are each capped at the
+corresponding per-template sum: a create template has one fixed VMI name, so
+repeated invocations cannot have two live VMIs under that name. Two invocations
+are non-overlapping only if a matching explicit delete is a descendant of the
+earlier create **and an ancestor of the later create**.
 Exit-handler cleanup never proves a barrier. Deletes use Argo's normal waiting
 semantics; authored resource flags and success/failure conditions remain refused.
 
@@ -125,19 +128,34 @@ creates or deletes, unresolved references, dynamic fan-out, cycles, lifecycle
 hooks, unsupported dependency expressions and exit-handler creates keep the
 conservative sum. A dependency mixing top-level `&&` and `||` must put each
 OR group in parentheses; otherwise the projection falls back rather than
-assuming a delete is required under Argo's operator precedence. Work is bounded
-to 4,096 shared classification/expansion and scenario-proof checks, 256
+assuming a delete is required under Argo's operator precedence. Every DAG task
+name must be usable as an Argo expression identifier. The server applies Argo's
+bare/legacy expansion and hyphen normalization, then compiles each dependency
+against boolean task-result fields. A compile failure (including keyword names
+such as `in`, `not`, `true` or `if`) keeps the sum: Argo can mark a task Errored
+before its dependency gate succeeds. Compilation executes no expression or
+planner, and its result is reused for each invocation of the resolved template.
+Work is bounded to 4,096 shared classification/expansion and scenario-proof
+checks, 256
 projected nodes and at most 32 partition literals. A scenario with more than
 16 enabled create invocations also keeps the sum. Demand is computed once per
-immutable resolved source; repeated admission still checks the current policy. Successful
-completion of a composite template alone does not prove every child delete
-ran successfully.
+immutable resolved source; repeated admission still checks the current policy.
+Successful completion of a composite template alone does not prove every child
+delete ran successfully.
 
-Recognized `when` guards may compare the server-owned
-`{{workflow.parameters.oberth-trigger}}` with a literal `branch`, `promotion`,
-`schedule` or `tag`, using `==`, `!=`, `&&`, `||` and parentheses. YAML defaults,
-environment values and claimed trigger parameters never select the run trigger.
-The server retains **every authored `when` string byte-for-byte**.
+The supported `when` grammar consists of an empty whole guard, bare `true` or
+`false`, a trigger comparison, or a safe partition equality as described below.
+These boolean operands may be combined with `&&`, `||` and parentheses. A trigger
+comparison has `{{workflow.parameters.oberth-trigger}}` on the left and a literal
+`branch`, `promotion`, `schedule` or `tag` on the right, using `==` or `!=`;
+either side may be quoted. Every operand in the same authored guard must parse
+before any folding: `false && X` and `true || X` remain unsupported when `X` is
+unparsed. Ternary/coalesce operators, raw output interpolation, arbitrary
+indexing/calls, backslashes, commas and missing operands earn no proof. Brackets
+are supported only inside the exact safe partition expression tags below.
+
+YAML defaults, environment values and claimed trigger parameters never select
+the run trigger. The server retains **every authored `when` string byte-for-byte**.
 
 Schedule partitions earn mutual-exclusion credit only for guards already
 written as an entire safe expression tag with a quoted string literal:

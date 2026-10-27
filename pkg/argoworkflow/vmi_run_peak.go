@@ -23,14 +23,15 @@ type runVMIArc struct {
 	executed bool
 }
 type runVMIGraph struct {
-	templates  map[string]*wfv1.Template
-	pure       map[string]bool
-	classified map[string]bool
-	stack      map[string]bool
-	work       int
-	edges      [][]runVMIArc
-	events     []runVMIEvent
-	trigger    RunTrigger
+	templates    map[string]*wfv1.Template
+	pure         map[string]bool
+	classified   map[string]bool
+	dependencies map[string]map[string][]vmiDependency
+	stack        map[string]bool
+	work         int
+	edges        [][]runVMIArc
+	events       []runVMIEvent
+	trigger      RunTrigger
 }
 
 func (g *runVMIGraph) spend(n int) bool { g.work += n; return g.work <= maxVMIProjectionWork }
@@ -99,9 +100,11 @@ func (g *runVMIGraph) classify(name string) (bool, bool) {
 			}
 			pure = pure && child
 		}
-		if _, ok := runVMIDAGDependencies(t.DAG); !ok {
+		deps, ok := runVMIDAGDependencies(t.DAG)
+		if !ok {
 			return false, false
 		}
+		g.dependencies[name] = deps
 	}
 	for _, group := range t.Steps {
 		if len(group.Steps) == 0 {
@@ -179,6 +182,9 @@ func runVMIDAGDependencies(dag *wfv1.DAGTemplate) (map[string][]vmiDependency, b
 		if !visit(name) {
 			return nil, false
 		}
+	}
+	if !compileVMIArgoDependencies(dag) {
+		return nil, false
 	}
 	return deps, true
 }
@@ -270,7 +276,7 @@ func (g *runVMIGraph) expand(name, path string, inherited vmiCondition, inputs m
 		return 0, 0, false
 	}
 	if t.DAG != nil {
-		deps, ok := runVMIDAGDependencies(t.DAG)
+		deps, ok := g.dependencies[name]
 		if !ok {
 			return 0, 0, false
 		}
@@ -401,7 +407,7 @@ func runVMIPeak(wf *wfv1.Workflow, trigger RunTrigger) (VMIDemand, bool) {
 	if !trigger.Valid() || wf.Spec.TemplateDefaults != nil || wf.Spec.RetryStrategy != nil || len(wf.Spec.Hooks) > 0 {
 		return VMIDemand{}, false
 	}
-	g := runVMIGraph{templates: map[string]*wfv1.Template{}, pure: map[string]bool{}, classified: map[string]bool{}, stack: map[string]bool{}, trigger: trigger}
+	g := runVMIGraph{templates: map[string]*wfv1.Template{}, pure: map[string]bool{}, classified: map[string]bool{}, dependencies: map[string]map[string][]vmiDependency{}, stack: map[string]bool{}, trigger: trigger}
 	for i := range wf.Spec.Templates {
 		t := &wf.Spec.Templates[i]
 		if g.templates[t.Name] != nil {
@@ -491,7 +497,9 @@ func runVMIPeak(wf *wfv1.Workflow, trigger RunTrigger) (VMIDemand, bool) {
 	// need only require actual execution: a failed driver still inherits the
 	// successful delete barriers that were necessary before it could start.
 	// Five-state terminal groups can accept Omitted/Skipped and break that
-	// propagation. Never turn mere terminal ordering into proof of execution.
+	// propagation. All DAG depends expressions have first passed the pinned
+	// Argo compiler: an Errored successor must not arise from a syntax/type
+	// error before its depends gate. Terminal ordering alone proves no execution.
 	success := make([][]bool, n)
 	for i := range n {
 		success[i] = make([]bool, n)

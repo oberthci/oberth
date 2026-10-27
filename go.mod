@@ -5,11 +5,13 @@ go 1.26.0
 require (
 	charm.land/bubbletea/v2 v2.0.9
 	charm.land/lipgloss/v2 v2.0.6
+	github.com/Knetic/govaluate v3.0.1-0.20250325060307-7625b7f8c03d+incompatible
 	github.com/argoproj/argo-workflows/v4 v4.0.8
 	github.com/charmbracelet/x/ansi v0.11.8
 	github.com/cyberphone/json-canonicalization v0.0.0-20220623050100-57a0ce2678a7
 	github.com/digitorus/pkcs7 v0.0.0-20250730155240-ffadbf3f398c
 	github.com/digitorus/timestamp v0.0.0-20250524132541-c45532741eea
+	github.com/expr-lang/expr v1.17.7
 	github.com/go-git/go-billy/v5 v5.9.2
 	github.com/go-git/go-git/v5 v5.19.3
 	github.com/go-openapi/runtime v0.32.4
@@ -51,7 +53,6 @@ require (
 	github.com/doublerebel/bellows v0.0.0-20160303004610-f177d92a03d3 // indirect
 	github.com/emirpasic/gods v1.18.1 // indirect
 	github.com/evilmonkeyinc/jsonpath v0.8.1 // indirect
-	github.com/expr-lang/expr v1.17.7 // indirect
 	github.com/go-git/gcfg v1.5.1-0.20230307220236-3a3c6141e376 // indirect
 	github.com/golang/groupcache v0.0.0-20241129210726-2c02b8208cf8 // indirect
 	github.com/huandu/xstrings v1.5.0 // indirect

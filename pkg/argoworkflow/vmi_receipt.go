@@ -147,15 +147,22 @@ func (r *ResolvedRunSource) demand() (VMIDemand, error) {
 }
 
 func (r *ResolvedRunSource) computeDemand() (VMIDemand, error) {
-	if !r.identity.Binding.complete() {
-		return DeclaredVMIDemand(r.workflow)
-	}
 	sum, err := SummedVMIDemand(r.workflow)
 	if err != nil || sum.VMs == 0 {
 		return sum, err
 	}
-	if peak, ok := runVMIPeak(r.workflow, r.identity.Binding.Trigger); ok {
-		return peak, nil
+	var peak VMIDemand
+	var supported bool
+	if r.identity.Binding.complete() {
+		peak, supported = runVMIPeak(r.workflow, r.identity.Binding.Trigger)
+	} else {
+		// Keep legacy sizing without earning any run-trigger credits.
+		peak, supported = peakVMIDemand(r.workflow)
+	}
+	if supported {
+		// Each admitted create template has one fixed VMI name. Repeated
+		// invocations cannot exceed that template's summed live demand.
+		return VMIDemand{VMs: min(peak.VMs, sum.VMs), Cores: min(peak.Cores, sum.Cores), MemoryBytes: min(peak.MemoryBytes, sum.MemoryBytes)}, nil
 	}
 	return sum, nil
 }

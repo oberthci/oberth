@@ -83,6 +83,8 @@ func splitVMIExpression(s, operator string) ([]string, bool) {
 	return append(parts, strings.TrimSpace(s[start:])), true
 }
 
+// vmiCombine also joins independent complete guards (parent and child). For
+// pieces of one expression, the parser must reject unsafe operands FIRST.
 func vmiCombine(a, b vmiCondition, and bool) vmiCondition {
 	if and {
 		if a.truth == vmiFalse || b.truth == vmiFalse {
@@ -114,8 +116,14 @@ func vmiCombine(a, b vmiCondition, and bool) vmiCondition {
 }
 
 func parseVMICondition(s string, trigger RunTrigger, resolve func(string) (vmiScalar, bool), depth int) vmiCondition {
+	if len(s) > 4096 || depth > 16 {
+		return vmiCondition{unsafe: true}
+	}
 	s = strings.TrimSpace(s)
 	if s == "" {
+		if depth > 0 {
+			return vmiCondition{unsafe: true}
+		}
 		return vmiCondition{truth: vmiTrue}
 	}
 	if s == "true" {
@@ -145,9 +153,6 @@ func parseVMICondition(s string, trigger RunTrigger, resolve func(string) (vmiSc
 		}
 		return vmiCondition{scalar: scalar.id, literal: match[5]}
 	}
-	if len(s) > 4096 || depth > 16 {
-		return vmiCondition{unsafe: true}
-	}
 	if s[0] == '(' && s[len(s)-1] == ')' {
 		if _, ok := splitVMIExpression(s[1:len(s)-1], "||"); ok {
 			return parseVMICondition(s[1:len(s)-1], trigger, resolve, depth+1)
@@ -161,7 +166,14 @@ func parseVMICondition(s string, trigger RunTrigger, resolve func(string) (vmiSc
 		if len(parts) > 1 {
 			result := parseVMICondition(parts[0], trigger, resolve, depth+1)
 			for _, part := range parts[1:] {
-				result = vmiCombine(result, parseVMICondition(part, trigger, resolve, depth+1), operator == "&&")
+				operand := parseVMICondition(part, trigger, resolve, depth+1)
+				// These pieces belong to ONE authored expression. An unknown
+				// piece may contain a looser-precedence ternary/coalesce (or
+				// raw interpolation), so boolean folding cannot discard it.
+				if result.unsafe || operand.unsafe {
+					return vmiCondition{unsafe: true}
+				}
+				result = vmiCombine(result, operand, operator == "&&")
 			}
 			return result
 		}
