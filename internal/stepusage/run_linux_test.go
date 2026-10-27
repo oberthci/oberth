@@ -3,10 +3,11 @@
 package stepusage
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"errors"
-	"io"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -49,65 +50,128 @@ func TestRunPreservesStreamsExitAndWritesRealRSS(t *testing.T) {
 	}
 }
 
+func TestRunChildSignalAndTerminationMessage(t *testing.T) {
+	for _, tc := range []struct {
+		name, script, message string
+		code                  int
+	}{
+		{"segv", "ulimit -c 0; kill -SEGV $$", "", 139},
+		{"message", `printf 'step diagnostic' > "$1"; exit 23`, "step diagnostic", 23},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			summary := filepath.Join(root, "termination")
+			if err := os.WriteFile(summary, nil, 0600); err != nil {
+				t.Fatal(err)
+			}
+			var stdout, stderr bytes.Buffer
+			if code := run([]string{"--", "/bin/sh", "-c", tc.script, "step", summary}, nil, &stdout, &stderr, "testdata/v2", "missing", summary); code != tc.code {
+				t.Fatalf("code=%d stderr=%s", code, &stderr)
+			}
+			raw, err := os.ReadFile(summary)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.message != "" {
+				if string(raw) != tc.message {
+					t.Fatalf("message overwritten: %q", raw)
+				}
+				if u := Decode(string(raw)); u != (Usage{}) {
+					t.Fatalf("step message became usage: %+v", u)
+				}
+			} else if u := Decode(string(raw)); u.MaxRSSBytes == nil || *u.MaxRSSBytes <= 0 {
+				t.Fatalf("signaled child lost usage: %q", raw)
+			}
+		})
+	}
+}
+
 func TestUsageRunnerHelper(t *testing.T) {
 	if os.Getenv("OBERTH_USAGE_TEST_HELPER") != "1" {
 		return
 	}
-	os.Exit(run([]string{"--", "/bin/sh", "-c", "trap 'exit 42' TERM; printf ready; read line"}, os.Stdin, os.Stdout, os.Stderr, "testdata/v2", os.Getenv("OBERTH_USAGE_SELF"), os.Getenv("OBERTH_USAGE_TERMINATION")))
+	os.Exit(run([]string{"--", "/bin/sh", "-c", os.Getenv("OBERTH_USAGE_TEST_SCRIPT")}, os.Stdin, os.Stdout, os.Stderr, "testdata/v2", os.Getenv("OBERTH_USAGE_SELF"), os.Getenv("OBERTH_USAGE_TERMINATION")))
 }
 
-func TestRunForwardsTerminationAndPreservesTrapExit(t *testing.T) {
-	exe, err := os.Executable()
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
-	defer cancel()
-	root := t.TempDir()
-	self := filepath.Join(root, "self")
-	summary := filepath.Join(root, "termination")
-	for name, raw := range map[string]string{self: "0::/\n", summary: ""} {
-		if err := os.WriteFile(name, []byte(raw), 0600); err != nil {
-			t.Fatal(err)
-		}
-	}
-	input, hold, err := os.Pipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = input.Close(); _ = hold.Close() }()
-	cmd := exec.CommandContext(ctx, exe, "-test.run=^TestUsageRunnerHelper$")
-	cmd.Env = append(os.Environ(), "OBERTH_USAGE_TEST_HELPER=1", "OBERTH_USAGE_SELF="+self, "OBERTH_USAGE_TERMINATION="+summary)
-	cmd.Stdin = input
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	output, err := cmd.StdoutPipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := cmd.Start(); err != nil {
-		t.Fatal(err)
-	}
-	ready := make([]byte, 5)
-	if _, err := io.ReadFull(output, ready); err != nil {
-		t.Fatalf("no ready: %v %s", err, &stderr)
-	}
-	if string(ready) != "ready" {
-		t.Fatalf("unexpected output %q", ready)
-	}
-	if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
-		t.Fatal(err)
-	}
-	err = cmd.Wait()
-	var exit *exec.ExitError
-	if !errors.As(err, &exit) || exit.ExitCode() != 42 {
-		t.Fatalf("exit=%v stderr=%s", err, &stderr)
-	}
-	raw, err := os.ReadFile(summary)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := Decode(string(raw)); got.MaxRSSBytes == nil || *got.MaxRSSBytes <= 0 {
-		t.Fatalf("no usage after signal: %s", raw)
+func TestRunForwardsSignalsAndKilledWrapperLeavesUnknown(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		signal syscall.Signal
+	}{
+		{"TERM", syscall.SIGTERM}, {"INT", syscall.SIGINT}, {"HUP", syscall.SIGHUP},
+		{"QUIT", syscall.SIGQUIT}, {"USR1", syscall.SIGUSR1}, {"USR2", syscall.SIGUSR2},
+		{"WINCH", syscall.SIGWINCH}, {"KILL", syscall.SIGKILL},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			exe, err := os.Executable()
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
+			defer cancel()
+			root := t.TempDir()
+			self, summary := filepath.Join(root, "self"), filepath.Join(root, "termination")
+			for name, raw := range map[string]string{self: "0::/\n", summary: ""} {
+				if err := os.WriteFile(name, []byte(raw), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			input, hold, err := os.Pipe()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = input.Close(); _ = hold.Close() }()
+			cmd := exec.CommandContext(ctx, exe, "-test.run=^TestUsageRunnerHelper$")
+			script := `trap 'exit 42' ` + tc.name + `; printf '%s\n' "$$"; read line`
+			if tc.signal == syscall.SIGKILL {
+				script = `printf '%s\n' "$$"; read line`
+			}
+			cmd.Env = append(os.Environ(), "OBERTH_USAGE_TEST_HELPER=1", "OBERTH_USAGE_SELF="+self, "OBERTH_USAGE_TERMINATION="+summary, "OBERTH_USAGE_TEST_SCRIPT="+script)
+			cmd.Stdin = input
+			// A SIGKILLed wrapper leaves a child briefly alive. Use a file,
+			// not an exec copier pipe whose EOF would depend on that child.
+			stderr, err := os.CreateTemp(root, "stderr")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = stderr.Close() }()
+			cmd.Stderr = stderr
+			readStderr := func() string { raw, _ := os.ReadFile(stderr.Name()); return string(raw) }
+			output, err := cmd.StdoutPipe()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := cmd.Start(); err != nil {
+				t.Fatal(err)
+			}
+			// Readiness comes after installing the child's trap; no sleep races.
+			var pid int
+			if _, err := fmt.Fscanln(bufio.NewReader(output), &pid); err != nil || pid <= 0 {
+				_ = cmd.Process.Kill()
+				_ = cmd.Wait()
+				t.Fatalf("no ready child: %v %s", err, readStderr())
+			}
+			defer func() { _ = syscall.Kill(-pid, syscall.SIGKILL) }()
+			if err := cmd.Process.Signal(tc.signal); err != nil {
+				t.Fatal(err)
+			}
+			err = cmd.Wait()
+			var exit *exec.ExitError
+			if !errors.As(err, &exit) {
+				t.Fatalf("exit=%v stderr=%s", err, readStderr())
+			}
+			raw, err := os.ReadFile(summary)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.signal == syscall.SIGKILL {
+				status, ok := exit.Sys().(syscall.WaitStatus)
+				if !ok || !status.Signaled() || status.Signal() != syscall.SIGKILL || len(raw) != 0 || Decode(string(raw)) != (Usage{}) {
+					t.Fatalf("killed wrapper: status=%v summary=%q", exit, raw)
+				}
+			} else if exit.ExitCode() != 42 || Decode(string(raw)).MaxRSSBytes == nil {
+				t.Fatalf("signal not forwarded: exit=%v summary=%q stderr=%s", exit, raw, readStderr())
+			}
+		})
 	}
 }

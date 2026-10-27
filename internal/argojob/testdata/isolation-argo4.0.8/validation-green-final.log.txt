@@ -1,8 +1,8 @@
-PASS /tmp/oberth-round25-evidence/isolation/container-submitted.json
-PASS /tmp/oberth-round25-evidence/isolation/containerset-submitted.json
-PASS /tmp/oberth-round25-evidence/isolation/dedicated-tools-submitted.json
-PASS /tmp/oberth-round25-evidence/isolation/inline-dag-submitted.json
-PASS /tmp/oberth-round25-evidence/isolation/inline-steps-submitted.json
-PASS /tmp/oberth-round25-evidence/isolation/none-submitted.json
-PASS /tmp/oberth-round25-evidence/isolation/script-submitted.json
-PASS /tmp/oberth-round25-evidence/isolation/sidecars-submitted.json
+PASS /tmp/oberth-round25b-evidence/isolation/container-submitted.json
+PASS /tmp/oberth-round25b-evidence/isolation/containerset-submitted.json
+PASS /tmp/oberth-round25b-evidence/isolation/dedicated-tools-submitted.json
+PASS /tmp/oberth-round25b-evidence/isolation/inline-dag-submitted.json
+PASS /tmp/oberth-round25b-evidence/isolation/inline-steps-submitted.json
+PASS /tmp/oberth-round25b-evidence/isolation/none-submitted.json
+PASS /tmp/oberth-round25b-evidence/isolation/script-submitted.json
+PASS /tmp/oberth-round25b-evidence/isolation/sidecars-submitted.json

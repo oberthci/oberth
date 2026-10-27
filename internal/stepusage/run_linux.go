@@ -14,8 +14,12 @@ import (
 	"syscall"
 )
 
-// Run preserves the command's streams and exit code and forwards termination
-// signals to its process group. Measurement/write failures never change verdicts.
+// Run preserves the command's streams and exit code and forwards catchable
+// signals to its process group. Like emissary, it ignores SIGCHLD (wait handles
+// child exit) and SIGURG (Go runtime preemption). SIGKILL/SIGSTOP cannot be caught.
+// A start failure returns shell-style 127, not emissary's executor Error; a
+// signaled child returns 128+signal. Measurement/write failures never change
+// verdicts, and a step-written termination message takes priority over usage.
 func Run(args []string, input io.Reader, output, stderr io.Writer) int {
 	return run(args, input, output, stderr, "/sys/fs/cgroup", "/proc/self/cgroup", TerminationPath)
 }
@@ -25,11 +29,11 @@ func run(args []string, input io.Reader, output, stderr io.Writer, mount, selfPa
 		_, _ = fmt.Fprintln(stderr, "step-exec: expected -- command [args]")
 		return 126
 	}
-	cmd := exec.CommandContext(context.Background(), args[1], args[2:]...) // #nosec G204 -- the admitted pipeline command runs without new privileges.
+	cmd := exec.CommandContext(context.Background(), args[1], args[2:]...) // #nosec G204 G702 -- intentionally executes the admitted pipeline command without new privileges.
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = input, output, stderr
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	signals := make(chan os.Signal, 8)
-	signal.Notify(signals, syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP, syscall.SIGQUIT)
+	signal.Notify(signals)
 	defer signal.Stop(signals)
 	if err := cmd.Start(); err != nil {
 		_, _ = fmt.Fprintf(stderr, "step-exec: start: %v\n", err)
@@ -42,7 +46,7 @@ func run(args []string, input io.Reader, output, stderr io.Writer, mount, selfPa
 		for {
 			select {
 			case s := <-signals:
-				if s, ok := s.(syscall.Signal); ok {
+				if s, ok := s.(syscall.Signal); ok && s != syscall.SIGCHLD && s != syscall.SIGURG {
 					_ = syscall.Kill(-cmd.Process.Pid, s)
 				}
 			case <-done:
@@ -61,10 +65,14 @@ func run(args []string, input io.Reader, output, stderr io.Writer, mount, selfPa
 			usage.MaxRSSBytes = &rss
 		}
 	}
-	// O_TRUNC on kubelet's existing termination file; never create directories or
-	// require a writable root filesystem. A killed wrapper leaves unknown data.
-	if f, openErr := os.OpenFile(termination, os.O_WRONLY|os.O_TRUNC, 0); openErr == nil { // #nosec G304 G703 -- fixed kubelet termination bind file; tests inject a temporary file.
-		_, _ = io.WriteString(f, Encode(usage))
+	// Preserve any step-written termination message. Use the existing kubelet
+	// file without truncation or creation; only an empty, readable file accepts
+	// telemetry. A killed wrapper never writes a summary and leaves usage unknown.
+	if f, openErr := os.OpenFile(termination, os.O_RDWR, 0); openErr == nil { // #nosec G304 G703 -- fixed kubelet termination bind file; tests inject a temporary file.
+		var first [1]byte
+		if n, readErr := f.Read(first[:]); n == 0 && readErr == io.EOF {
+			_, _ = io.WriteString(f, Encode(usage))
+		}
 		_ = f.Close()
 	}
 	if err == nil {

@@ -61,3 +61,12 @@ now have the read-only measurement helper and wrapper; ContainerSets remain
 unchanged. All eight fresh submitted Pods passed the retained Kubernetes
 validator. This captures controller construction and mount isolation, not a
 live kubelet or production cluster.
+
+The round-25b architecture recapture used the same authenticated controller
+module and combined overlay. Every wrapped container/script Pod, including
+inline leaves, selects the server's arm64 architecture; unwrapped ContainerSets
+remain unchanged. All eight fresh submitted Pods passed the Kubernetes validator.
+The production selector uses runtime.GOARCH, not a hard-coded architecture.
+On other test architectures the equality check translates only the recorded
+server architecture to runtime.GOARCH. The original submitted Pods must retain
+the captured architecture, and independent wrapper tests assert runtime.GOARCH.

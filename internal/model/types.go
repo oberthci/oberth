@@ -321,7 +321,9 @@ type StepResult struct {
 	LogStart     int64
 	LogEnd       int64
 	DeclaredSize periapsis.Size
-	// Usage pointers distinguish unavailable telemetry from measured zero.
+	// Usage counters are self-reported by untrusted build code, never evidence
+	// for admission or size grants. Any aggregation must saturate on overflow.
+	// Pointers distinguish unavailable telemetry from measured zero.
 	// CPU durations are nanoseconds; MemoryPeakBytes includes cgroup page cache.
 	MaxRSSBytes     *int64
 	MemoryPeakBytes *int64

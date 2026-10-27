@@ -1163,7 +1163,18 @@ continuity checks; it must never be used to reset or bypass those checks.
   to the kubelet termination file. No new RBAC, hostPath, capabilities or
   writable root is required. The server reads it from the already-bound final
   Pod/main container status, never logs or LastTerminationState. This is advisory
-  build-owned telemetry, not trusted diagnostic or admission evidence.
+  self-reported by untrusted build code, never trusted diagnostic evidence and
+  never an input to admission or size grants. Any aggregation must saturate on
+  overflow; currently counters are stored/projected individually without sums.
+  Wrapped Pod templates are pinned to `kubernetes.io/arch=runtime.GOARCH`, since
+  the seed copies this server's single-architecture executable. Catchable signals
+  are forwarded to the child process group, except SIGCHLD and Go's SIGURG,
+  matching emissary; SIGKILL/SIGSTOP cannot be caught. A child killed by a signal
+  exits with 128+signal. A command that cannot start returns shell-style 127
+  (a failed step), rather than emissary's executor Error classification.
+  A step-written nonempty termination message is preserved verbatim instead of
+  writing telemetry; its usage is unknown. No message contents are copied into
+  the numeric usage fields. A wrapper killed before reporting leaves usage null.
   `MaxRSSBytes` is Linux wait4 maximum descendant RSS (not concurrent summed
   RSS); `MemoryPeakBytes` is this container's cgroup-v2 `memory.peak`, including
   cache. `UserCPU`/`SystemCPU` are cumulative container CPU from `cpu.stat`,

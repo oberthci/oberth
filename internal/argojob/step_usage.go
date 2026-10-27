@@ -1,6 +1,7 @@
 package argojob
 
 import (
+	"runtime"
 	"slices"
 
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
@@ -60,6 +61,12 @@ func wrapStepUsage(wf *wfv1.Workflow) {
 		if !mounted {
 			return
 		}
+		// The delivered helper is this server executable, not a multi-arch image.
+		// Apply on each Pod-producing template, including inline leaves.
+		if t.NodeSelector == nil {
+			t.NodeSelector = make(map[string]string)
+		}
+		t.NodeSelector[corev1.LabelArchStable] = runtime.GOARCH
 		if len(usageOriginalCommand(c.Command)) == len(c.Command) {
 			c.Command = append([]string{usageBinPath, usageCommand, "--"}, c.Command...)
 		}

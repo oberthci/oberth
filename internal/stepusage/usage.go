@@ -17,7 +17,9 @@ const Prefix = "oberth-step-usage-v1 "
 const MaxMessageBytes = 1024
 const TerminationPath = "/dev/termination-log"
 
-// Usage uses pointers so an unavailable measurement differs from measured zero.
+// Usage is self-reported by untrusted build code, never evidence for admission
+// or size grants. Any aggregation must saturate on overflow. Pointers distinguish
+// unavailable measurements from measured zero.
 // MaxRSSBytes is Linux wait4's maximum resident set of a waited-for descendant
 // (not the sum of concurrent processes). MemoryPeakBytes is cgroup-accounted
 // peak memory, including page cache; it must not be called RSS. CPU is cumulative

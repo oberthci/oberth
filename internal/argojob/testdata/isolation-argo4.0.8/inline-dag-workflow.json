@@ -19,7 +19,7 @@
       "oberth.ci/run-id": "run-abc123",
       "oberth.ci/secret-paths": "oberth/data/release/r2-upload-token",
       "oberth.ci/size": "L",
-      "oberth.ci/spec-identity": "017bb02310fbcbc777fc2a1a78bdb206011693982cab29a5695f5c581250b248",
+      "oberth.ci/spec-identity": "880e43e9551da99c01239e2bf82db895216cb3121abd0a99d0a0a7a0e9507966",
       "workflows.argoproj.io/pod-name-format": "v2"
     }
   },
@@ -38,6 +38,9 @@
                 "name": "inline",
                 "inputs": {},
                 "outputs": {},
+                "nodeSelector": {
+                  "kubernetes.io/arch": "arm64"
+                },
                 "metadata": {
                   "annotations": {
                     "oberth.ci/workspace-env": "none",

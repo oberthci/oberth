@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -30,6 +31,7 @@ func TestIsolationMatchesActualControllerObservation(t *testing.T) {
 	}
 	var provenance struct {
 		Path, Version, Sum, GoModSum string
+		ServerGOARCH                 string            `json:"server_goarch"`
 		Files                        map[string]string `json:"files"`
 	}
 	if err := json.Unmarshal(read("provenance.json"), &provenance); err != nil {
@@ -67,6 +69,25 @@ func TestIsolationMatchesActualControllerObservation(t *testing.T) {
 		t.Run(shape, func(t *testing.T) {
 			var input wfv1.Workflow
 			fixture(shape+"-workflow.json", &input)
+			capturedIdentity, err := specIdentity(&input)
+			if err != nil || input.Annotations[identityAnnotation] != capturedIdentity {
+				t.Fatal("captured workflow lost its spec identity")
+			}
+			// The captured controller ran on this recorded architecture. Translate
+			// only this intentional runtime parameter; keep all other bytes pinned.
+			walkTemplates(&input, func(tmpl *wfv1.Template) {
+				if c := usageContainer(tmpl); c != nil && len(usageOriginalCommand(c.Command)) != len(c.Command) {
+					if provenance.ServerGOARCH == "" || tmpl.NodeSelector[corev1.LabelArchStable] != provenance.ServerGOARCH {
+						t.Fatal("capture lost server architecture constraint")
+					}
+					tmpl.NodeSelector[corev1.LabelArchStable] = runtime.GOARCH
+				}
+			})
+			translatedIdentity, err := specIdentity(&input)
+			if err != nil {
+				t.Fatal(err)
+			}
+			input.Annotations[identityAnnotation] = translatedIdentity
 			current, err := Build(testConfig(), isolationControllerRequest(t, shape))
 			if err != nil {
 				t.Fatal(err)
@@ -77,6 +98,9 @@ func TestIsolationMatchesActualControllerObservation(t *testing.T) {
 			var before, submitted corev1.Pod
 			fixture(shape+"-before-patch.json", &before)
 			fixture(shape+"-submitted.json", &submitted)
+			if shape != "containerset" && submitted.Spec.NodeSelector[corev1.LabelArchStable] != provenance.ServerGOARCH {
+				t.Fatal("actual wrapped Pod lost architecture constraint")
+			}
 			if submitted.Spec.AutomountServiceAccountToken == nil || *submitted.Spec.AutomountServiceAccountToken {
 				t.Fatal("pipeline token automount was not disabled")
 			}
