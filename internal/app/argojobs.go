@@ -138,6 +138,7 @@ func (jobs *ArgoJobs) SetReconcilerHealth(checker ReconcilerHealthChecker) {
 
 func NewArgoJobs(controller argoControl, config argojob.Config, auditor service.Auditor, secretAccess SecretAccessLoader, fragments FragmentLoader) (*ArgoJobs, error) {
 	config.ReleaseWIF = config.ReleaseWIF.Clone()
+	config.ReleaseTagRoutes = config.ReleaseTagRoutes.Clone()
 	if controller == nil {
 		return nil, errors.New("app: Argo Workflow controller is required")
 	}
@@ -195,13 +196,9 @@ func (jobs *ArgoJobs) CreateRelease(ctx context.Context, request service.JobRequ
 // document without evaluating anything: the size-by-trigger entry for this
 // run's own trigger when the document names one, oberth.ci/size otherwise.
 func (jobs *ArgoJobs) PipelineSize(_ context.Context, request service.JobRequest) (periapsis.Size, error) {
-	trigger, err := runTrigger(request.Run)
+	source, err := jobs.readRunSource(request)
 	if err != nil {
-		return "", err
-	}
-	source, err := readArgoSource(request.SourceDir, trigger)
-	if err != nil {
-		return "", noPipelineError(err, trigger, request.Repository.Name)
+		return "", jobs.noRunPipelineError(err, request)
 	}
 	workflow, err := argoworkflow.Decode(source)
 	if err != nil {
@@ -222,13 +219,9 @@ func (jobs *ArgoJobs) PipelineSize(_ context.Context, request service.JobRequest
 // from the same checked-out document PipelineSize reads, without evaluating
 // anything. The group is scoped to the run's repository by the scheduler.
 func (jobs *ArgoJobs) PipelineConcurrencyGroup(_ context.Context, request service.JobRequest) (string, error) {
-	trigger, err := runTrigger(request.Run)
+	source, err := jobs.readRunSource(request)
 	if err != nil {
-		return "", err
-	}
-	source, err := readArgoSource(request.SourceDir, trigger)
-	if err != nil {
-		return "", noPipelineError(err, trigger, request.Repository.Name)
+		return "", jobs.noRunPipelineError(err, request)
 	}
 	workflow, err := argoworkflow.Decode(source)
 	if err != nil {
@@ -253,13 +246,9 @@ func (jobs *ArgoJobs) PipelineConcurrencyGroup(_ context.Context, request servic
 // omits it, and an agent reading `status` on a failed run sees a plausible
 // complete pipeline that is missing exactly the work that never ran.
 func (jobs *ArgoJobs) PlannedSteps(_ context.Context, request service.JobRequest) ([]runprogress.PlannedStep, error) {
-	trigger, err := runTrigger(request.Run)
+	source, err := jobs.readRunSource(request)
 	if err != nil {
-		return nil, err
-	}
-	source, err := readArgoSource(request.SourceDir, trigger)
-	if err != nil {
-		return nil, noPipelineError(err, trigger, request.Repository.Name)
+		return nil, jobs.noRunPipelineError(err, request)
 	}
 	workflow, err := argoworkflow.Decode(source)
 	if err != nil {
@@ -335,9 +324,9 @@ func (jobs *ArgoJobs) create(ctx context.Context, request service.JobRequest, tr
 	}
 	jobs.mu.Unlock()
 
-	source, err := readArgoSource(request.SourceDir, trigger)
+	source, err := jobs.readRunSource(request)
 	if err != nil {
-		return noPipelineError(err, trigger, request.Repository.Name)
+		return jobs.noRunPipelineError(err, request)
 	}
 	testedSHA := request.Run.TestedSHA
 	if testedSHA == "" {
@@ -461,6 +450,10 @@ func (jobs *ArgoJobs) auditSubmission(ctx context.Context, request service.JobRe
 	if err != nil {
 		return err
 	}
+	file, err := jobs.runSourceFile(request)
+	if err != nil {
+		return err
+	}
 	declared := ""
 	if workflow.Annotations != nil {
 		declared = workflow.Annotations["oberth.ci/declared-secret-paths"]
@@ -479,7 +472,7 @@ func (jobs *ArgoJobs) auditSubmission(ctx context.Context, request service.JobRe
 		// pushed OID is the tag object, not the commit.
 		"sha": submission.SHA, "object_sha": request.Run.SHA,
 		"trigger": string(submission.Trigger),
-		"engine":  "argo", "workflow": submission.Name,
+		"engine":  "argo", "workflow": submission.Name, "pipeline_file": file,
 		"namespace":       workflow.Namespace,
 		"service_account": workflow.Spec.ServiceAccountName,
 		"executor_service_account": func() string {
@@ -839,13 +832,9 @@ func noPipelineError(err error, trigger periapsis.Trigger, repoName string) erro
 // PipelineCredentialed reports whether the checked-out pipeline declares
 // secret-store paths by decoding the same document PipelineSize reads.
 func (jobs *ArgoJobs) PipelineCredentialed(_ context.Context, request service.JobRequest) (bool, error) {
-	trigger, err := runTrigger(request.Run)
+	source, err := jobs.readRunSource(request)
 	if err != nil {
-		return false, err
-	}
-	source, err := readArgoSource(request.SourceDir, trigger)
-	if err != nil {
-		return false, noPipelineError(err, trigger, request.Repository.Name)
+		return false, jobs.noRunPipelineError(err, request)
 	}
 	workflow, err := argoworkflow.Decode(source)
 	if err != nil {

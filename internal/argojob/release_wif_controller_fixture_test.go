@@ -85,6 +85,9 @@ func TestReleaseWIFMatchesActualControllerObservation(t *testing.T) {
 				decode(t, name+"-before-patch.json", &before)
 				decode(t, name+"-submitted.json", &submitted)
 				assertWIFPodIsolation(t, shape, submitted.Spec)
+				if shape == "wif-only-step" && submitted.Spec.ServiceAccountName != "release-step-main" {
+					t.Fatal("Argo lost pinned step identity")
+				}
 				if shape == "sibling" {
 					continue
 				}

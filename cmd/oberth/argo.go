@@ -61,6 +61,10 @@ func buildArgoEngine(
 	if err != nil {
 		return nil, fmt.Errorf("serve: read --argo-goproxy-ca: %w", err)
 	}
+	routes, err := readArgoReleaseTagRoutes(options.argoReleaseTagRoutesConfig)
+	if err != nil {
+		return nil, err
+	}
 	wifConfig, err := readArgoReleaseWIFConfig(options.argoReleaseWIFConfig)
 	if err != nil {
 		return nil, err
@@ -71,6 +75,7 @@ func buildArgoEngine(
 	}
 	config := argojob.Config{
 		ReleaseWIF:                 wifConfig,
+		ReleaseTagRoutes:           routes,
 		NonrootProfile:             options.argoControllerProfile,
 		ExecutorScratchSizeLimit:   options.argoExecutorScratchSizeLimit,
 		Namespace:                  options.argoNamespace,
@@ -210,6 +215,10 @@ func validateArgoServeOptions(options serveOptions) error {
 	// Note: goproxy CA is not read here — the file only exists on the pod, not
 	// on the host where parseServeOptions runs for the chart-contract test.
 	// buildArgoEngine reads it at runtime.
+	routes, err := readArgoReleaseTagRoutes(options.argoReleaseTagRoutesConfig)
+	if err != nil {
+		return err
+	}
 	wifConfig, err := readArgoReleaseWIFConfig(options.argoReleaseWIFConfig)
 	if err != nil {
 		return err
@@ -220,6 +229,7 @@ func validateArgoServeOptions(options serveOptions) error {
 	}
 	return argojob.Config{
 		ReleaseWIF:                 wifConfig,
+		ReleaseTagRoutes:           routes,
 		NonrootProfile:             options.argoControllerProfile,
 		ExecutorScratchSizeLimit:   options.argoExecutorScratchSizeLimit,
 		Namespace:                  options.argoNamespace,

@@ -87,7 +87,7 @@ func checkReleaseWIFJSON(d *json.Decoder, depth int) error {
 		if depth == 0 && key != "namespace" && key != "roles" && key != "repositories" {
 			return errors.New("unknown capability property")
 		}
-		if depth == 2 && key != "provider" && key != "service_account" && key != "service_account_name" && key != "templates" {
+		if depth == 2 && key != "provider" && key != "service_account" && key != "service_account_name" && key != "templates" && key != "step_service_accounts" {
 			return errors.New("unknown capability binding property")
 		}
 		if err := checkReleaseWIFJSON(d, depth+1); err != nil {

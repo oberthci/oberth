@@ -4,8 +4,8 @@
   "Sum": "h1:qa2GNFSihNtvI/v9/dgwq84E1mrfbVb8eTXB6YMxMlY=",
   "GoModSum": "h1:WLJnjr1uNM+6dhpVdnJArvSq90FJ3bdRgHEsHVR00wM=",
   "Files": {
-    "README.md": "1abe988d4ff67ce39d3eecf5bf99a74d5b59e899ee6698ee85035c997760253f",
-    "capture_test.go.txt": "14b9f1028d392a3671e255959eb353a5f8b3ca1f1a0cf475712e4666147ed56c",
+    "README.md": "22fb7f5a5fc37855d3d149024f082c15b4d415740c07b337df2fb82c11c5c9ca",
+    "capture_test.go.txt": "924cca9690d717e9ac8b308c3dc1ec48324e8451fdf6d7da243297090915f1cd",
     "chart-writer-sa-false-before-patch.json": "0a5718a30377b9a01d76b09f0e4ab35316c7c36c91d9ce3d1a4fd0637976d14a",
     "chart-writer-sa-false-submitted.json": "1ac2f5996f0fd3c9b4cc3303f7a5334f3f25fd7cad6c6a153e841aee331c702f",
     "chart-writer-sa-true-before-patch.json": "3fd9bba3d4e1825aa17dbea38c7ec441192d6fbc8d587e0534f227e15b443d46",
@@ -37,12 +37,18 @@
     "sibling-sa-true-before-patch.json": "e05564cd802aab91a0de44ba0d6743fa7c204d5bde3e28999c5d7d750f80cbb7",
     "sibling-sa-true-submitted.json": "edef52b87733e7f02e63da6770c3fdec42448fb913372f4e157b9a1a6e1a8c8a",
     "sibling-workflow.json": "f3d34bc66de85d5031df4af9abfd36aa84d35483c544025cea9db37f900799ee",
+    "validation-wif-only-step.log.txt": "a3b1e97bfcee4cbecbdf030248365785fba12e2c729e09a0ee83f67241704d33",
     "validation.log": "85d8f9279dfc8ae380fb557eeeee6953f601dc5adc39a2c9750615a82fb7a9ab",
     "vault-sa-false-before-patch.json": "67b870390259467cd11da8bd5117e900a5bf760b2afa9a17302c8727140889b2",
     "vault-sa-false-submitted.json": "a366360b7d2541b15faf3093646696485a1c1fc275f080f4173798ab8c3d08d5",
     "vault-sa-true-before-patch.json": "cb12c3297ec203f3e184f90ecb219bbb4ca809198555600fece8e1caf68a6004",
     "vault-sa-true-submitted.json": "e4cc891152e25044ace53368d43352d18ed9ab620d9e159306c04e22bcb8d863",
-    "vault-workflow.json": "2ea4328cd2498154b7d9abbc3eec547951258ef5065b29ec45f309a6c059b22c"
+    "vault-workflow.json": "2ea4328cd2498154b7d9abbc3eec547951258ef5065b29ec45f309a6c059b22c",
+    "wif-only-step-sa-false-before-patch.json": "ab99ecb4f3177a54bdb9b7059c4a2a58358b935925d82d401cb4bbd408b659c6",
+    "wif-only-step-sa-false-submitted.json": "b3a51175bab38ce173910db01077a84c3d5c52119bef7f46cb9eacb3409f5e47",
+    "wif-only-step-sa-true-before-patch.json": "d180cff9c585a73de09673b581fbe2b2e49962d43479681ad2b7a597088b92bf",
+    "wif-only-step-sa-true-submitted.json": "5bddf44b1608cf7fd280369b101f4cdabc548db5189ec0057ecf14941ed6b361",
+    "wif-only-step-workflow.json": "efe8032a3a23c6b4b7d254a1fb3587c5e54915fbeb08915c8ba6c2df44ad33be"
   },
   "instrumented_sha256": "e94c816c3116278d8b6c363568ab3922aed0a178e6afcd83d6fd0a3270b0e8d4"
 }

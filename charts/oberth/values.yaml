@@ -236,6 +236,11 @@ argo:
   # Public administrator capabilities only; empty disables release federation.
   # Tokens/private keys must never be supplied here. See docs/release-wif.md.
   releaseWIF: {}
+
+  # Administrator-only tag globs -> release workflow files, by canonical repo.
+  # Selected files retain their own size/resource declarations. Empty preserves
+  # .oberth/release.yaml for every tag. Overlapping matches refuse the run.
+  releaseTagRoutes: {}
   # Empty disables nonroot execution. The named profile still requires actual
   # immutable controller/configuration verification before each submission.
   controllerProfile: ""

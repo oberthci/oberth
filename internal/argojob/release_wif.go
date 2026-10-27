@@ -21,6 +21,7 @@ import (
 )
 
 const (
+	MaxReleaseWIFRoles      = 32
 	releaseWIFVolume        = "oberth-release-wif"
 	releaseWIFPath          = "/run/oberth-gar"
 	releaseWIFADCAnnotation = "oberth.ci/release-wif-adc"
@@ -46,6 +47,7 @@ func (config *ReleaseWIFConfig) Clone() *ReleaseWIFConfig {
 	copy.Repositories = maps.Clone(config.Repositories)
 	for repo, grant := range copy.Repositories {
 		grant.Templates = maps.Clone(grant.Templates)
+		grant.StepServiceAccounts = maps.Clone(grant.StepServiceAccounts)
 		copy.Repositories[repo] = grant
 	}
 	return &copy
@@ -57,8 +59,10 @@ type ReleaseWIFRole struct {
 }
 
 type ReleaseWIFRepository struct {
-	ServiceAccountName string            `json:"service_account_name"`
+	ServiceAccountName string            `json:"service_account_name,omitempty"`
 	Templates          map[string]string `json:"templates"`
+	// Optional dedicated identities for WIF-only leaves; never Vault grants.
+	StepServiceAccounts map[string]string `json:"step_service_accounts,omitempty"`
 }
 
 var wifProviderPattern = regexp.MustCompile(`^projects/[0-9]+/locations/global/workloadIdentityPools/[a-z][a-z0-9-]*/providers/[a-z][a-z0-9-]*$`)
@@ -70,6 +74,9 @@ func (config *ReleaseWIFConfig) Validate() error {
 	}
 	if (len(config.Roles) > 0 || len(config.Repositories) > 0) && len(k8svalidation.IsDNS1123Label(config.Namespace)) != 0 {
 		return errors.New("argojob: release WIF requires an exact pipeline namespace")
+	}
+	if len(config.Roles) > MaxReleaseWIFRoles {
+		return fmt.Errorf("argojob: release WIF accepts at most %d roles", MaxReleaseWIFRoles)
 	}
 	pools := map[string]bool{}
 	accounts := map[string]bool{}
@@ -90,14 +97,30 @@ func (config *ReleaseWIFConfig) Validate() error {
 	subjects := map[string]bool{}
 	for repo, grant := range config.Repositories {
 		upstream, org, name, err := gitcache.ParseRepoPath(repo)
-		if err != nil || upstream == "" || gitcache.ValidateUpstreamName(upstream) != nil || repo != upstream+"/"+org+"/"+name || len(k8svalidation.IsDNS1123Subdomain(grant.ServiceAccountName)) != 0 || subjects[grant.ServiceAccountName] {
+		if err != nil || upstream == "" || gitcache.ValidateUpstreamName(upstream) != nil || repo != upstream+"/"+org+"/"+name || (grant.ServiceAccountName != "" && (len(k8svalidation.IsDNS1123Subdomain(grant.ServiceAccountName)) != 0 || subjects[grant.ServiceAccountName])) {
 			return fmt.Errorf("argojob: release WIF requires an exact canonical repository and ServiceAccount: %q", repo)
 		}
-		subjects[grant.ServiceAccountName] = true
+		if grant.ServiceAccountName != "" {
+			subjects[grant.ServiceAccountName] = true
+		}
+		if grant.ServiceAccountName == "" && len(grant.Templates) == 0 {
+			return fmt.Errorf("argojob: release WIF repository %q has no identity mapping", repo)
+		}
 		for leaf, role := range grant.Templates {
+			if grant.ServiceAccountName == "" && grant.StepServiceAccounts[leaf] == "" {
+				return fmt.Errorf("argojob: release WIF template %q requires a repository or dedicated step identity", leaf)
+			}
 			if len(k8svalidation.IsDNS1123Label(leaf)) != 0 || config.Roles[role].Provider == "" {
 				return fmt.Errorf("argojob: invalid release WIF capability for %q template %q", repo, leaf)
 			}
+		}
+	}
+	for repo, grant := range config.Repositories {
+		for leaf, sa := range grant.StepServiceAccounts {
+			if len(k8svalidation.IsDNS1123Label(leaf)) != 0 || strings.HasPrefix(leaf, "frag-") || grant.Templates[leaf] == "" || len(k8svalidation.IsDNS1123Subdomain(sa)) != 0 || subjects[sa] {
+				return fmt.Errorf("argojob: release WIF requires a distinct dedicated ServiceAccount for %q template %q", repo, leaf)
+			}
+			subjects[sa] = true
 		}
 	}
 	return nil
@@ -178,6 +201,11 @@ func authorizeReleaseWIF(wf *wfv1.Workflow, config Config, request Request) ([]*
 
 func authorizeReleaseWIFLeaf(wf *wfv1.Workflow, t *wfv1.Template, topLevel bool, config Config, request Request) error {
 	role := t.Metadata.Annotations[argoworkflow.ReleaseWIFRoleAnnotation]
+	// Check authored opt-outs before ForceIdentity disables ambient tokens on
+	// ordinary pipeline identities. An approved WIF projection is independent.
+	if tokenDisabled(t) || (wf.Spec.AutomountServiceAccountToken != nil && !*wf.Spec.AutomountServiceAccountToken) {
+		return fmt.Errorf("argojob: release WIF template %q explicitly disables its service-account token", t.Name)
+	}
 	if request.Trigger != periapsis.TriggerRelease || config.ReleaseWIF == nil || config.ReleaseWIF.Namespace != config.Namespace {
 		return errors.New("argojob: release WIF requires an enabled administrator capability and a release trigger")
 	}
@@ -197,7 +225,11 @@ func authorizeReleaseWIFLeaf(wf *wfv1.Workflow, t *wfv1.Template, topLevel bool,
 			hasIdentity = false
 		}
 	}
-	if !ok || !hasIdentity || identity.ServiceAccountName != grant.ServiceAccountName || grant.Templates[t.Name] != role || !argoworkflow.ValidReleaseWIFRole(role) {
+	identityMatches := hasIdentity && identity.ServiceAccountName == grant.ServiceAccountName
+	if grant.StepServiceAccounts[t.Name] != "" {
+		identityMatches = true
+	} // Exact dedicated policy needs no secret-derived repository identity.
+	if !ok || !identityMatches || grant.Templates[t.Name] != role || !argoworkflow.ValidReleaseWIFRole(role) {
 		return fmt.Errorf("argojob: release WIF capability is not approved for %q template %q role %q", key, t.Name, role)
 	}
 	if !topLevel || (t.Container == nil && t.Script == nil) || t.ContainerSet != nil || wf.Spec.TemplateDefaults != nil || len(t.Inputs.Artifacts) > 0 || len(t.Outputs.Artifacts) > 0 || wf.Annotations[argoworkflow.NonrootTemplatesAnnotation] != "" {
@@ -208,9 +240,8 @@ func authorizeReleaseWIFLeaf(wf *wfv1.Workflow, t *wfv1.Template, topLevel bool,
 
 func injectReleaseWIF(wf *wfv1.Workflow, leaves []*wfv1.Template, config *ReleaseWIFConfig) error {
 	for _, t := range leaves {
-		if tokenDisabled(t) {
-			return fmt.Errorf("argojob: release WIF template %q explicitly disables its service-account token", t.Name)
-		}
+		// Authored token vetoes were checked before ForceIdentity; its server-
+		// assigned false is compatible with this approved explicit projection.
 		// This also runs when source/cache injection had no mounts and skipped
 		// its normal mirror normalization pass. Never leave Argo a late mirror
 		// instruction that could copy the new projection into a helper.

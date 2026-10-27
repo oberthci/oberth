@@ -118,7 +118,11 @@ func PreflightRelease(config Config, request Request) (ReleasePreflight, error) 
 		add(err)
 		return result, nil
 	}
-	identity, err := config.identityForWithRepo(periapsis.TriggerRelease, len(paths) > 0 || len(wifLeaves) > 0, request.UpstreamName, request.UpstreamOrg, request.Repo)
+	if err := applyReleaseWIFStepIdentities(wifLeaves, config, request); err != nil {
+		add(err)
+		return result, nil
+	}
+	identity, err := config.identityForWithRepo(periapsis.TriggerRelease, len(paths) > 0 || releaseWIFNeedsRepoIdentity(wifLeaves, config, request), request.UpstreamName, request.UpstreamOrg, request.Repo)
 	if err != nil {
 		add(err)
 		return result, nil
@@ -134,7 +138,11 @@ func PreflightRelease(config Config, request Request) (ReleasePreflight, error) 
 		role := t.Metadata.Annotations[argoworkflow.ReleaseWIFRoleAnnotation]
 		result.Checks = append(result.Checks, fmt.Sprintf("step %q: service_account=%q release_wif_role=%q subject=%q", t.Name, sa, role, "system:serviceaccount:"+config.Namespace+":"+sa))
 		if role != "" && t.ServiceAccountName != "" {
-			result.Checks = append(result.Checks, fmt.Sprintf("warning: step %q uses a step-scoped grant with release WIF role %q; cloud trust must include subject %q", t.Name, role, "system:serviceaccount:"+config.Namespace+":"+sa))
+			kind := "a step-scoped grant"
+			if config.ReleaseWIF != nil && config.ReleaseWIF.Repositories[canonicalRepoKey(request.UpstreamName, request.UpstreamOrg, request.Repo)].StepServiceAccounts[t.Name] != "" {
+				kind = "an administrator-pinned WIF-only identity"
+			}
+			result.Checks = append(result.Checks, fmt.Sprintf("warning: step %q uses %s with release WIF role %q; cloud trust must include subject %q", t.Name, kind, role, "system:serviceaccount:"+config.Namespace+":"+sa))
 		}
 	})
 	return result, nil
@@ -161,6 +169,10 @@ func (controller *Controller) PreflightReleaseAccounts(ctx context.Context, requ
 	var problems []error
 	walkTemplates(wf, func(t *wfv1.Template) { t.ServiceAccountName = "" })
 	problems = append(problems, applyPerStepIdentities(wf, config, request))
+	leaves, wifErr := authorizeReleaseWIF(wf, config, request)
+	if wifErr == nil {
+		problems = append(problems, applyReleaseWIFStepIdentities(leaves, config, request))
+	}
 	wf.Namespace = config.Namespace
 	checked := map[string]bool{}
 	for _, template := range wf.Spec.Templates {
@@ -176,13 +188,7 @@ func (controller *Controller) PreflightReleaseAccounts(ctx context.Context, requ
 	}
 	paths, pathErr := argoworkflow.DeclaredSecretPaths(wf)
 	problems = append(problems, pathErr)
-	wif := false
-	walkTemplates(wf, func(t *wfv1.Template) {
-		if _, ok := t.Metadata.Annotations[argoworkflow.ReleaseWIFRoleAnnotation]; ok {
-			wif = true
-		}
-	})
-	if len(paths) > 0 || wif {
+	if len(paths) > 0 || releaseWIFNeedsRepoIdentity(leaves, config, request) {
 		identity, err := config.identityForWithRepo(periapsis.TriggerRelease, true, request.UpstreamName, request.UpstreamOrg, request.Repo)
 		problems = append(problems, err)
 		if err == nil {

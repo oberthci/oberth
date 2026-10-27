@@ -1,0 +1,2 @@
+PASS /tmp/oberth-round26-evidence/wif/wif-only-step-sa-false-submitted.json
+PASS /tmp/oberth-round26-evidence/wif/wif-only-step-sa-true-submitted.json

@@ -70,3 +70,12 @@ read-only. The final
 Pods replace the legacy token volume with tmpfs and isolate it from pipeline
 containers. Runtime TokenRequest issuance and holder-Pod cleanup are covered
 separately by unit tests and a live kind workflow.
+
+Round 26 adds the wif-only-step case with an administrator-defined role and
+a dedicated step account. The input has no secret grants or secret-derived
+repository identity; ordinary workflow identity is the uncredentialed pipeline
+account. The actual Argo v4.0.8 controller selects release-step-main for the
+Pod, keeps automount false even when that account defaults true, and preserves
+the existing main-only WIF/executor isolation. Both new submitted Pods pass
+Kubernetes v1.35.7 validation. Legacy cases and their input/output captures are
+retained unchanged. This proves Pod construction, not external cloud IAM.

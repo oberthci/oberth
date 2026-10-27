@@ -12,13 +12,9 @@ import (
 // PipelineKubeVirt reads declared VMI demand before the scheduler grants any
 // resource. The full submission policy still validates the exact manifests.
 func (jobs *ArgoJobs) PipelineKubeVirt(ctx context.Context, request service.JobRequest) (service.KubeVirtResources, error) {
-	trigger, err := runTrigger(request.Run)
+	source, err := jobs.readRunSource(request)
 	if err != nil {
-		return service.KubeVirtResources{}, err
-	}
-	source, err := readArgoSource(request.SourceDir, trigger)
-	if err != nil {
-		return service.KubeVirtResources{}, noPipelineError(err, trigger, request.Repository.Name)
+		return service.KubeVirtResources{}, jobs.noRunPipelineError(err, request)
 	}
 	workflow, err := argoworkflow.Decode(source)
 	if err != nil {

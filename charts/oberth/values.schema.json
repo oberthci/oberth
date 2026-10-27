@@ -528,6 +528,25 @@
       "type": "object",
       "description": "Argo Workflows execution engine. Every pipeline runs as an Argo Workflow.",
       "properties": {
+        "releaseTagRoutes": {
+          "type": "object",
+          "maxProperties": 256,
+          "description": "Administrator-pinned canonical repository -> tag routes; selected documents retain their own size.",
+          "additionalProperties": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 32,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["pattern", "file"],
+              "properties": {
+                "pattern": {"type": "string", "minLength": 1, "maxLength": 256},
+                "file": {"type": "string", "pattern": "^\\.oberth/[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\\.yaml$"}
+              }
+            }
+          }
+        },
         "releaseWIF": {
           "type": "object",
           "additionalProperties": false,
@@ -542,11 +561,10 @@
             "roles": {
               "type": "object",
               "propertyNames": {
-                "enum": [
-                  "image-writer",
-                  "image-reader",
-                  "chart-writer"
-                ]
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 63,
+                "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$"
               },
               "additionalProperties": {
                 "type": "object",
@@ -565,7 +583,8 @@
                     "pattern": "^[a-z][a-z0-9-]*@[a-z][a-z0-9-]*\\.iam\\.gserviceaccount\\.com$"
                   }
                 }
-              }
+              },
+              "maxProperties": 32
             },
             "repositories": {
               "type": "object",
@@ -573,7 +592,6 @@
                 "type": "object",
                 "additionalProperties": false,
                 "required": [
-                  "service_account_name",
                   "templates"
                 ],
                 "properties": {
@@ -585,11 +603,32 @@
                   "templates": {
                     "type": "object",
                     "additionalProperties": {
-                      "enum": [
-                        "image-writer",
-                        "image-reader",
-                        "chart-writer"
-                      ]
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 63,
+                      "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$"
+                    },
+                    "propertyNames": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 63,
+                      "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$"
+                    }
+                  },
+                  "step_service_accounts": {
+                    "type": "object",
+                    "description": "Exact template -> dedicated WIF-only ServiceAccount, no secret grant or Vault role.",
+                    "propertyNames": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 63,
+                      "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$"
+                    },
+                    "additionalProperties": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 253,
+                      "pattern": "^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$"
                     }
                   }
                 }

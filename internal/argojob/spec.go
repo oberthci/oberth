@@ -261,6 +261,8 @@ type Config struct {
 	// ReleaseWIF is the administrator's startup-pinned capability allowlist.
 	// Nil disables federation; repository documents cannot supply this map.
 	ReleaseWIF *ReleaseWIFConfig
+	// ReleaseTagRoutes selects release-only files from an administrator snapshot.
+	ReleaseTagRoutes ReleaseTagRoutes
 
 	// KVMEnabled gates server-injected KVM device access for annotated leaves.
 	// When true, leaves declared in oberth.ci/kvm-templates receive
@@ -304,7 +306,13 @@ func (config Config) Validate() error {
 	if config.TrustedKVMGroup < 0 || config.TrustedKVMGroup > 2147483647 {
 		return errors.New("argojob: trusted KVM group must be a positive supported GID, or zero when disabled")
 	}
+	if err := config.ReleaseTagRoutes.Validate(); err != nil {
+		return err
+	}
 	if err := config.ReleaseWIF.Validate(); err != nil {
+		return err
+	}
+	if err := config.validateReleaseWIFStepAccounts(); err != nil {
 		return err
 	}
 	if config.ReleaseWIF != nil && (len(config.ReleaseWIF.Roles) > 0 || len(config.ReleaseWIF.Repositories) > 0) && config.ReleaseWIF.Namespace != config.Namespace {
@@ -701,7 +709,7 @@ func Build(config Config, request Request) (*wfv1.Workflow, error) {
 			request.Trigger, request.Repo, config.VaultAddress)
 	}
 
-	identity, err := config.identityForWithRepo(request.Trigger, credentialed || len(wifLeaves) > 0, request.UpstreamName, request.UpstreamOrg, request.Repo)
+	identity, err := config.identityForWithRepo(request.Trigger, credentialed || releaseWIFNeedsRepoIdentity(wifLeaves, config, request), request.UpstreamName, request.UpstreamOrg, request.Repo)
 	if err != nil {
 		return nil, err
 	}
@@ -795,6 +803,9 @@ func Build(config Config, request Request) (*wfv1.Workflow, error) {
 		if err := applyPerStepIdentities(workflow, config, request); err != nil {
 			return nil, err
 		}
+	}
+	if err := applyReleaseWIFStepIdentities(wifLeaves, config, request); err != nil {
+		return nil, err
 	}
 	if err := injectReleaseWIF(workflow, wifLeaves, config.ReleaseWIF); err != nil {
 		return nil, err

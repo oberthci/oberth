@@ -20,3 +20,39 @@ metadata:
 data:
   capabilities.json: {{ .Values.argo.releaseWIF | toJson | quote }}
 {{- end }}
+{{- /* Dedicated WIF-only accounts: no Vault policy/role and no RBAC grants. */}}
+{{- $used := dict }}
+{{- range $name := list (.Values.argo.pipelineServiceAccount | default "oberth-argo-pipeline") (.Values.argo.credentialedServiceAccount | default "oberth-argo-credentialed") ((.Values.argo.ciSecrets | default dict).serviceAccount | default "oberth-argo-ci-secrets") (.Values.argo.executorServiceAccount | default "oberth-argo-executor") (.Values.argo.vmLauncherServiceAccount | default "oberth-argo-vm-launcher") }}
+{{- $_ := set $used $name true }}
+{{- end }}
+{{- range $repo, $grant := (get $wif "repositories" | default dict) }}
+{{- if $grant.service_account_name }}
+{{- $_ := set $used $grant.service_account_name true }}
+{{- end }}
+{{- range $template, $role := $grant.templates }}
+{{- if not (hasKey ($wif.roles | default dict) $role) }}
+{{- fail (printf "release WIF role %s for %s/%s is not configured" $role $repo $template) }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- range $repo, $grant := (get $wif "repositories" | default dict) }}
+{{- range $template, $account := ($grant.step_service_accounts | default dict) }}
+{{- if or (hasKey $used $account) (has $account ($.Values.argo.perRepoIdentities | default list)) (has $account ($.Values.argo.perRepoCIIdentities | default list)) (has $account ($.Values.argo.perStepIdentities | default list)) }}
+{{- fail (printf "release WIF step %s/%s must use a distinct dedicated ServiceAccount" $repo $template) }}
+{{- end }}
+{{- if not (hasKey $grant.templates $template) }}
+{{- fail (printf "release WIF step %s/%s must have an explicit role mapping" $repo $template) }}
+{{- end }}
+{{- $_ := set $used $account true }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $account }}
+  namespace: {{ $.Values.argo.namespace }}
+  labels:
+    {{- include "oberth.labels" $ | nindent 4 }}
+    oberth.ci/identity-type: release-wif-step
+automountServiceAccountToken: false
+{{- end }}
+{{- end }}

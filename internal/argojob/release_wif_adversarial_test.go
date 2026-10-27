@@ -135,13 +135,21 @@ func TestReleaseWIFRejectsInlineAndCredentialAliases(t *testing.T) {
 	}
 }
 
-var wifControllerShapes = []string{"image-writer", "image-reader", "chart-writer", "script", "helpers", "vault", "sibling"}
+var wifControllerShapes = []string{"image-writer", "image-reader", "chart-writer", "script", "helpers", "vault", "sibling", "wif-only-step"}
 
 // Shared by the normal regression and the retained actual-controller generator.
 func wifControllerInput(t *testing.T, shape string) (Config, Request) {
 	t.Helper()
 	c := wifTestConfig()
 	role := "image-writer"
+	if shape == "wif-only-step" {
+		c = genericWIFConfig()
+		c.PerRepoIdentities = nil // This repository has no secret grants.
+		grant := c.ReleaseWIF.Repositories["github/skipops/oberth"]
+		grant.ServiceAccountName = ""
+		c.ReleaseWIF.Repositories["github/skipops/oberth"] = grant
+		role = "artifact-deployer"
+	}
 	if strings.HasPrefix(shape, "image-") || shape == "chart-writer" {
 		role = shape
 	}

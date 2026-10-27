@@ -12,51 +12,74 @@ key. Unknown fields, duplicate JSON properties, namespace mismatches and
 noncanonical repository spellings fail closed. The engine freezes nested maps
 at construction; configuration changes require an explicitly authorized rollout.
 
-This source interface is staged. It does not create cloud pools, change IAM,
-enable providers, install configuration, retire existing keys, or migrate
-publisher commands. Each of those requires its own reviewed rollout. Keep it
-separate from the first release that repairs publisher runtime isolation.
+Roles are administrator-defined DNS labels (1–63 lowercase letters/digits/hyphens,
+no leading/trailing hyphen), at most 32 per deployment. The existing `image-writer`,
+`image-reader` and `chart-writer` names remain valid with unchanged behavior.
+Defining a role does not grant it to any repository. Each use needs an explicit
+canonical repository + named template -> role mapping. Unknown, unmapped and
+invalid names refuse admission. Provider and target remain pinned public data;
+roles must use distinct workload identity pools and target service accounts.
+Changing ADC alone must not let a token impersonate another role's target.
 
-The public configuration has two maps:
+For example, the administrator's public JSON file can contain:
 
 ```json
 {
-  "namespace": "oberth-argo",
+  "namespace": "pipelines",
   "roles": {
-    "image-writer": {
-      "provider": "projects/138624361369/locations/global/workloadIdentityPools/oberth-release-images/providers/tuxbox",
-      "service_account": "image-publisher@example-project.iam.gserviceaccount.com"
+    "artifact-deployer": {
+      "provider": "projects/123/locations/global/workloadIdentityPools/deployers/providers/ci",
+      "service_account": "deployer@example-project.iam.gserviceaccount.com"
     }
   },
   "repositories": {
-    "github/oberthci/oberth": {
-      "service_account_name": "oberth-argo-github-oberthci-oberth-2b5c2901d41d",
-      "templates": {
-        "release-publish-images": "image-writer"
-      }
+    "github/example/project": {
+      "templates": {"publish": "artifact-deployer"},
+      "step_service_accounts": {"publish": "project-publish-wif"}
     }
   }
 }
 ```
 
-The other roles are `image-reader` and `chart-writer`. Each configured role must
-use a distinct workload identity pool and target service account. The staged
-Terraform contract uses pools `oberth-release-reader` and
-`oberth-release-charts`, each with provider `tuxbox`. Merely selecting another
-target in ADC does not restrict a token's authority: IAM must bind each target
-only to the exact subjects in that role's pool. Shared-pool subject aliases
-would defeat this boundary. See Google's [federation identity guidance](https://docs.cloud.google.com/iam/docs/best-practices-for-using-workload-identity-federation).
+Optional `step_service_accounts` pins a dedicated account for an approved
+WIF-only leaf. When every WIF leaf is pinned and there are no secret-store consumers, the
+workflow and ordinary siblings
+use the uncredentialed pipeline identity; the approved leaves alone get their
+step accounts. A repository with no secret grants needs no secret-derived
+repository identity. Legacy WIF leaves without a pinned account still require
+`service_account_name` matching the current server-selected repository release
+identity. That field may be omitted when every configured template is pinned. It needs **no dummy secret grant**, no Vault role and
+no Vault policy. The chart creates these accounts in the pipeline namespace with
+automount disabled and no RBAC bindings. Standalone administrators pre-create
+the same pinned accounts; preflight checks them using existing ServiceAccount GET
+permission. Missing accounts refuse submission with a configuration recovery hint.
+
+A pinned step account must differ from every repository/shared/CI identity and
+any other step's account, including the current grant-reconciler snapshot.
+Its template must be a stable top-level container/script leaf explicitly mapped
+to a configured WIF role and must not consume the Oberth secret store. Ordinary
+siblings do not inherit it. Branch, promotion and schedule runs cannot receive
+it, even if they use the same template name or author that ServiceAccount in YAML.
+Existing named-secret-grant per-step identities remain unchanged when the optional
+mapping is absent. The public policy and nested maps are frozen for the engine's
+lifetime; a Helm change requires a rollout.
+
+This interface does not create cloud pools, modify IAM, retire keys or migrate
+publisher commands. Cloud trust must explicitly bind each intended role to its
+exact `system:serviceaccount:<namespace>:<account>` subject. Review and test that
+external authorization before activating a new mapping.
 
 An approved named container or script leaf requests its capability:
 
 ```yaml
 metadata:
   annotations:
-    oberth.ci/release-wif-role: image-writer
+    oberth.ci/release-wif-role: artifact-deployer
 ```
 
 The request must match the administrator's exact pipeline namespace, canonical upstream/org/repo,
-template name, role, and currently selected per-repository ServiceAccount.
+template name, role, and currently selected per-repository ServiceAccount for legacy leaves, or the
+explicitly pinned WIF-only per-step account.
 Branch runs, unapproved leaves, shared identities, inherited template defaults,
 inline templates, DAG roots, container sets, artifacts, and nonroot mode are
 refused. Explicit workflow or leaf token opt-outs remain vetoes.
@@ -84,9 +107,7 @@ credential source or automatic fallback to a JSON private key.
 Before activation, verify the issuer/JWKS and exact subject inventory against
 the deployed cluster, review each pool's audience/subject conditions and target
 bindings, and prove successful intended exchanges plus rejected cross-role,
-cross-repository, and branch exchanges. The staged issuer is
-`https://kubernetes.default.svc.cluster.local`; use the current Terraform source
-for the exact inventory rather than a historical count. Offline Pod construction
+cross-repository, and branch exchanges. Use the deployed issuer and exact configured subject inventory. Offline Pod construction
 does not establish any of those cloud authorization outcomes. Keep existing
 keys until each migrated publisher class has completed its release acceptance.
 
@@ -100,8 +121,8 @@ and the independently approved secretstore delivery path are unchanged.
 
 ### Release declaration preflight
 
-Branch CI compares `.oberth/release.yaml` at the tested commit with the fresh
-upstream default. A changed document gets a non-credentialed
+Branch CI compares `.oberth/release.yaml` and every administrator-routed release
+workflow at the tested commit with the fresh upstream default. A changed document gets a non-credentialed
 `[release-preflight/check]` in the retained run log; warnings do not fail branch
 CI. Promotion compares its exact result with its fetched target base and refuses
 missing capabilities before publication, including when it reuses green CI.

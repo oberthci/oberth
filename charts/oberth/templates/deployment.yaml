@@ -77,6 +77,9 @@ spec:
         {{- toYaml . | nindent 8 }}
         {{- end }}
       annotations:
+        {{- if .Values.argo.releaseTagRoutes }}
+        checksum/release-tag-routes: {{ .Values.argo.releaseTagRoutes | toJson | sha256sum | quote }}
+        {{- end }}
         {{- if .Values.argo.releaseWIF }}
         checksum/release-wif: {{ .Values.argo.releaseWIF | toJson | sha256sum | quote }}
         {{- end }}
@@ -274,6 +277,9 @@ spec:
             {{- end }}
             {{- end }}
             - --argo-namespace={{ required "argo.namespace is required" .Values.argo.namespace }}
+            {{- if .Values.argo.releaseTagRoutes }}
+            - --argo-release-tag-routes-config=/etc/oberth/release-tag-routes/routes.json
+            {{- end }}
             {{- if .Values.argo.releaseWIF }}
             - --argo-release-wif-config=/etc/oberth/release-wif/capabilities.json
             {{- end }}
@@ -462,6 +468,11 @@ spec:
             {{- end }}
             - name: tmp
               mountPath: /tmp
+            {{- if .Values.argo.releaseTagRoutes }}
+            - name: release-tag-routes
+              mountPath: /etc/oberth/release-tag-routes
+              readOnly: true
+            {{- end }}
             {{- if .Values.argo.releaseWIF }}
             - name: release-wif
               mountPath: /etc/oberth/release-wif
@@ -472,6 +483,11 @@ spec:
         - name: trusted-test-recipes
           configMap:
             name: {{ include "oberth.fullname" . }}-trusted-tests
+        {{- end }}
+        {{- if .Values.argo.releaseTagRoutes }}
+        - name: release-tag-routes
+          configMap:
+            name: {{ include "oberth.fullname" . }}-release-tag-routes
         {{- end }}
         {{- if .Values.argo.releaseWIF }}
         - name: release-wif

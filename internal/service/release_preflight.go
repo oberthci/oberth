@@ -34,23 +34,57 @@ func releasePreflight(ctx context.Context, git vmrunner.PolicyGit, checker Relea
 	if sha == "" {
 		sha = request.Run.SHA
 	}
-	source, exists, err := git.ReadOptionalBlob(ctx, repo, sha, releasePreflightFile, releasePreflightLimit)
-	if err != nil || !exists {
-		return ReleasePreflightResult{}, err
-	}
-	var previous []byte
-	if defaultBase {
-		_, previous, _, err = git.ReadDefaultBlob(ctx, repo, releasePreflightFile, releasePreflightLimit)
-	} else if base != "" && base != zeroOID {
-		previous, _, err = git.ReadOptionalBlob(ctx, repo, base, releasePreflightFile, releasePreflightLimit)
-	}
+	files, err := releasePreflightFiles(ctx, checker, request)
 	if err != nil {
 		return ReleasePreflightResult{}, err
 	}
-	if bytes.Equal(source, previous) {
-		return ReleasePreflightResult{}, nil
+	combined := ReleasePreflightResult{}
+	defaultSHA := ""
+	for _, file := range files {
+		source, exists, err := git.ReadOptionalBlob(ctx, repo, sha, file, releasePreflightLimit)
+		if err != nil {
+			return combined, err
+		}
+		if !exists {
+			if file != releasePreflightFile {
+				combined.Problems = append(combined.Problems, fmt.Sprintf("configured release workflow %q is missing", file))
+			}
+			continue
+		}
+		var previous []byte
+		if defaultBase {
+			if defaultSHA == "" {
+				defaultSHA, previous, _, err = git.ReadDefaultBlob(ctx, repo, file, releasePreflightLimit)
+			} else {
+				previous, _, err = git.ReadOptionalBlob(ctx, repo, defaultSHA, file, releasePreflightLimit)
+			}
+		} else if base != "" && base != zeroOID {
+			previous, _, err = git.ReadOptionalBlob(ctx, repo, base, file, releasePreflightLimit)
+		}
+		if err != nil {
+			return combined, err
+		}
+		if bytes.Equal(source, previous) {
+			continue
+		}
+		result, err := checker.PreflightRelease(ctx, request, source)
+		if err != nil {
+			return combined, err
+		}
+		for _, problem := range result.Problems {
+			if file != releasePreflightFile {
+				problem = file + ": " + problem
+			}
+			combined.Problems = append(combined.Problems, problem)
+		}
+		for _, check := range result.Checks {
+			if file != releasePreflightFile {
+				check = file + ": " + check
+			}
+			combined.Checks = append(combined.Checks, check)
+		}
 	}
-	return checker.PreflightRelease(ctx, request, source)
+	return combined, nil
 }
 
 func (scheduler *Scheduler) checkReleasePreflight(ctx context.Context, request JobRequest, output io.Writer) error {
@@ -107,4 +141,15 @@ func (service *API) checkPromotionRelease(ctx context.Context, repository model.
 		return fmt.Errorf("release preflight: %s", strings.Join(result.Problems, "; "))
 	}
 	return nil
+}
+
+// An optional engine capability extends preflight to administrator-pinned tag
+// documents. Legacy engines keep exactly their default release file.
+func releasePreflightFiles(ctx context.Context, checker any, request JobRequest) ([]string, error) {
+	if lister, ok := checker.(interface {
+		ReleasePreflightFiles(context.Context, JobRequest) ([]string, error)
+	}); ok {
+		return lister.ReleasePreflightFiles(ctx, request)
+	}
+	return []string{releasePreflightFile}, nil
 }

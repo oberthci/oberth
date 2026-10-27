@@ -112,6 +112,7 @@ func NewController(workflows WorkflowClient, client kubernetes.Interface, config
 	}
 	config.applyDefaults()
 	config.ReleaseWIF = config.ReleaseWIF.Clone()
+	config.ReleaseTagRoutes = config.ReleaseTagRoutes.Clone()
 	if err := config.Validate(); err != nil {
 		return nil, err
 	}
@@ -378,6 +379,9 @@ func (controller *Controller) verifyPerStepServiceAccounts(ctx context.Context, 
 		_, err := controller.kube.CoreV1().ServiceAccounts(workflow.Namespace).Get(ctx, sa, metav1.GetOptions{})
 		if err != nil {
 			if apierrors.IsNotFound(err) {
+				if controller.isReleaseWIFStepServiceAccount(sa) {
+					return fmt.Errorf("argojob: WIF-only ServiceAccount %q does not exist in namespace %q; apply the administrator argo.releaseWIF configuration before retrying", sa, workflow.Namespace)
+				}
 				return fmt.Errorf("argojob: per-step ServiceAccount %q does not exist in namespace %q — "+
 					"run `oberth secretstore sync` and `oberth install --install-secretstore --upgrade` "+
 					"to materialize per-step identities for named grants",

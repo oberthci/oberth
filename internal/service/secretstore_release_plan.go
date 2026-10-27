@@ -49,23 +49,54 @@ func (service *API) addReleasePlans(ctx context.Context, response *SecretStorePl
 		upstream, err := resolver.Upstream(ctx, repo.UpstreamID)
 		if err == nil {
 			entry.Repo = upstream.QualifiedRepo(repo.Name)
-			var source []byte
-			var exists bool
-			entry.SHA, source, exists, err = git.ReadDefaultBlob(ctx, entry.Repo, releasePreflightFile, releasePreflightLimit)
-			if err == nil && !exists {
-				continue
+			org := upstream.Org()
+			if org == "" {
+				org = upstream.Name
 			}
-			if err == nil {
-				org := upstream.Org()
-				if org == "" {
-					org = upstream.Name
+			request := JobRequest{Repository: repo, UpstreamName: upstream.Name, UpstreamOrg: org, Run: model.Run{RefKind: model.RefBranch}}
+			var files []string
+			files, err = releasePreflightFiles(ctx, planner, request)
+			found := false
+			for _, file := range files {
+				if err != nil {
+					break
 				}
+				var source []byte
+				var exists bool
+				if entry.SHA == "" {
+					entry.SHA, source, exists, err = git.ReadDefaultBlob(ctx, entry.Repo, file, releasePreflightLimit)
+				} else {
+					source, exists, err = git.ReadOptionalBlob(ctx, entry.Repo, entry.SHA, file, releasePreflightLimit)
+				}
+				if err != nil {
+					break
+				}
+				if !exists {
+					if file != releasePreflightFile {
+						entry.Problems = append(entry.Problems, fmt.Sprintf("configured release workflow %q is missing", file))
+						found = true
+					}
+					continue
+				}
+				found = true
+				request.Run.SHA, request.Run.TestedSHA = entry.SHA, entry.SHA
 				var result ReleasePreflightResult
-				result, err = planner.PlanRelease(ctx, JobRequest{
-					Repository: repo, UpstreamName: upstream.Name, UpstreamOrg: org,
-					Run: model.Run{SHA: entry.SHA, TestedSHA: entry.SHA, RefKind: model.RefBranch},
-				}, source)
-				entry.Checks, entry.Problems = result.Checks, result.Problems
+				result, err = planner.PlanRelease(ctx, request, source)
+				for _, check := range result.Checks {
+					if file != releasePreflightFile {
+						check = file + ": " + check
+					}
+					entry.Checks = append(entry.Checks, check)
+				}
+				for _, problem := range result.Problems {
+					if file != releasePreflightFile {
+						problem = file + ": " + problem
+					}
+					entry.Problems = append(entry.Problems, problem)
+				}
+			}
+			if err == nil && !found {
+				continue
 			}
 		}
 		if err != nil {

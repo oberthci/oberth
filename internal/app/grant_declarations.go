@@ -47,9 +47,13 @@ func (jobs *ArgoJobs) recordCurrentDeclarations(ctx context.Context, request ser
 	}()
 	snapshot := &declarationSnapshot{}
 	collector := &ArgoJobs{declarations: snapshot}
-	for _, trigger := range []periapsis.Trigger{periapsis.TriggerCI, periapsis.TriggerRelease} {
+	for _, file := range append([]string{argoworkflow.BuildFile}, jobs.config.ReleaseTagRoutes.Files(repo)...) {
+		trigger := periapsis.TriggerRelease
+		if file == argoworkflow.BuildFile {
+			trigger = periapsis.TriggerCI
+		}
 		stage = "read"
-		source, err := readArgoSource(request.SourceDir, trigger)
+		source, err := readBoundedSourceFile(request.SourceDir, file)
 		if errors.Is(err, os.ErrNotExist) {
 			continue
 		}

@@ -148,7 +148,12 @@ continuity checks; it must never be used to reset or bypass those checks.
 - Optional release federation is disabled unless an administrator supplies
   `--argo-release-wif-config` (`argo.releaseWIF` in the chart). This public-only
   configuration binds exact namespace/canonical repository/per-repo release SA,
-  named container/script leaf and image-writer/image-reader/chart-writer role.
+  named container/script leaf and an administrator-defined DNS-label role (at
+  most 32). Existing image-writer/image-reader/chart-writer roles keep their
+  behavior; unknown/unmapped names refuse. Optional exact `step_service_accounts`
+  mappings select dedicated WIF-only accounts without secret grants or Vault
+  roles. They cannot alias shared/repository/CI/other-step identities, consume
+  the secret store, or apply to branch/promotion/schedule runs.
   Role pools and targets must differ; CI, shared identities, token opt-outs and
   unnamed/unsupported leaves are denied. A 600-second role-audience JWT and
   nonsecret external_account ADC are projected read-only only into main; helper
@@ -158,6 +163,15 @@ continuity checks; it must never be used to reset or bypass those checks.
   their public digest joins the immutable spec/audit binding. No provider, IAM,
   release-consumer cutover or key retirement is activated by shipping this
   feature. See [release WIF](docs/release-wif.md) for separate acceptance gates.
+- Administrator-only `argo.releaseTagRoutes` / `--argo-release-tag-routes-config`
+  maps canonical repository and tag globs to clean `.oberth/<DNS-label>.yaml`
+  release documents. Defaults remain release.yaml for tags and build.yaml for
+  branch/promotion/schedule. Ambiguous matches, invalid/reserved paths and missing
+  selected files refuse. The selected file supplies its own normal size and
+  resource contract consistently for sizing, planning, inspection and execution;
+  the audit binds its path and commit. Default-branch tag admission and all
+  identity gates still apply. Release preflight/identity plans/declarations
+  include routed files. See [release tag dispatch](docs/release-tag-dispatch.md).
 
 - The server reads a persistent SSH host private key and HTTPS certificate/key
   from the names configured in the Helm values. When no existing Secret is
