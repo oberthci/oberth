@@ -53,10 +53,12 @@ and otherwise omit it. No caller parameter can turn them into a named
 schedule run.
 
 Named entries on the same repository/branch/SHA remain distinct queued runs.
-A newer attempt supersedes only the same entry on the same branch; ordinary
-branch pushes and other entries are independent. Due cron entries are queued
-even when the repository has active runs. Resource admission and declared
-concurrency groups bound their execution.
+Ordinary branch pushes and other entries are independent. A due cron occurrence
+coalesces into a queued or running attempt of the same entry and branch instead
+of superseding it. Other active work does not stop cron from queueing. Explicit
+manual retries or forced triggers can still replace an attempt of the same
+entry and branch. Resource admission and declared concurrency groups bound
+execution.
 
 Run list/detail APIs expose `ScheduleEntry`; `status` and `wait` expose
 `schedule_entry`. The dashboard shows the name in the run stream and detail.
@@ -127,12 +129,21 @@ Friday, not only on Fridays that fall on the 1st.
 
 ## Overlap, downtime and attribution
 
-**A due fire is queued even when the repository is busy.** Weighted admission,
+**A due fire is queued even when other repository work is busy.** Weighted admission,
 KubeVirt capacity and declared concurrency groups decide when it executes. A
 stream of ordinary branch runs must not prevent a nightly from entering that
 queue. `fired` means the run was enqueued, not that it has started or passed.
 The current tick's branch head is pinned in the queued run; later pushes do not
 replace a named schedule with an ordinary branch run.
+
+If that entry already has a queued or running run on the target branch, the
+occurrence is recorded as `coalesced`, preserving that run's original commit and
+queue position. Coalescing advances the cursor to the tick time: that occurrence
+is consumed, and the next one is the first cron time after it. Completion does
+not trigger an extra catch-up run for consumed occurrences. This prevents a
+nightly whose capacity wait or runtime exceeds its interval from killing itself
+at every occurrence. The lookup covers all active runs, without a history-page
+limit; different entries and target branches remain independent.
 
 Older servers recorded `skipped` while any repository run was active. Those
 outcomes did not advance the successful-fire cursor: pending entries catch up
@@ -146,10 +157,18 @@ enabled and the entry is unpaused, then resume their normal cadence.
 
 Manual `schedule_trigger` still refuses active repository work unless `force`
 is set. That guard prevents an accidental extra manual run; cron occurrences
-are already bounded by their successful-fire cursor and minimum interval.
+are already bounded by their consumed-occurrence cursor and minimum interval.
 
-Enqueueing a run and recording its successful fire remain separate operations.
-A crash between them can still enqueue the same occurrence again after restart.
+Cron checks the cursor snapshot and the active entry in the same SQLite write
+transaction that records `fired` or `coalesced`. A new run, receive event, audit
+record and cursor commit together. A lost enqueue reply or concurrent stale tick
+cannot create a second run, including after the original run has finished.
+
+An unreadable cursor aborts the repository tick, logs the error, and attempts to
+record `failed_state` without inventing or advancing a cursor. An active-entry
+query or enqueue error logs the error and records `failed`, preserving a due
+cursor for retry. Outcome-write errors are logged too; an unreadable database
+cannot be expected to persist its own failure. No read failure blindly enqueues.
 
 **After downtime each schedule runs once, then resumes.** Never once per missed
 fire: three days of downtime on an hourly schedule would otherwise mean 72 runs

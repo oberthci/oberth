@@ -1306,8 +1306,14 @@ func scanRepository(row rowScanner) (model.Repository, error) {
 // the same bare name under different upstreams have different qualified
 // names and therefore cannot alias each other's grants or schedule state.
 func (s *Store) QualifiedRepoName(ctx context.Context, repoID int64) (string, error) {
+	return qualifiedRepoName(ctx, s.db, repoID)
+}
+
+func qualifiedRepoName(ctx context.Context, q interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}, repoID int64) (string, error) {
 	var repoName, upstreamName, baseURL string
-	if err := s.db.QueryRowContext(ctx, `
+	if err := q.QueryRowContext(ctx, `
 SELECT r.name, u.name, u.base_url
 FROM repositories r JOIN upstreams u ON u.id = r.upstream_id
 WHERE r.id = ?`, repoID).Scan(&repoName, &upstreamName, &baseURL); err != nil {

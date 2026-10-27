@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"strings"
 	"time"
@@ -17,8 +18,14 @@ func (s *Store) RecordScheduleFire(ctx context.Context, repo, entry string, at t
 	if strings.TrimSpace(repo) == "" || strings.TrimSpace(outcome) == "" {
 		return fmt.Errorf("%w: repository and outcome are required", ErrInvalid)
 	}
+	return recordScheduleFire(ctx, s.db, repo, entry, at, outcome)
+}
+
+func recordScheduleFire(ctx context.Context, q interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}, repo, entry string, at time.Time, outcome string) error {
 	var cursor any
-	if outcome == "fired" {
+	if outcome == "fired" || outcome == "coalesced" {
 		cursor = at.UTC().UnixNano()
 	} else if entry != "" && (outcome == "skipped" || outcome == "failed" || outcome == "paused") {
 		// Zero denotes a known-due entry with no surviving successful fire.
@@ -26,11 +33,11 @@ func (s *Store) RecordScheduleFire(ctx context.Context, repo, entry string, at t
 		// a successful timestamp or advancing the schedule to this attempt.
 		cursor = int64(0)
 	}
-	_, err := s.db.ExecContext(ctx, `
+	_, err := q.ExecContext(ctx, `
 INSERT INTO schedule_fires(repo, entry, fired_at, outcome, last_fired_at) VALUES(?, ?, ?, ?, ?)
 ON CONFLICT(repo, entry) DO UPDATE SET
     fired_at = excluded.fired_at, outcome = excluded.outcome,
-    last_fired_at = CASE WHEN excluded.outcome = 'fired' THEN excluded.last_fired_at
+    last_fired_at = CASE WHEN excluded.outcome IN ('fired', 'coalesced') THEN excluded.last_fired_at
         ELSE COALESCE(schedule_fires.last_fired_at, excluded.last_fired_at) END`,
 		repo, entry, at.UTC().UnixNano(), outcome, cursor)
 	if err != nil {

@@ -378,7 +378,12 @@ continuity checks; it must never be used to reset or bypass those checks.
   other runs receive empty only when their document references it, otherwise
   it is absent. Named entries have separate same-branch supersession domains.
   Due cron entries queue even when the repository has active runs; resource
-  admission and explicit groups bound execution. Manual schedule triggers
+  admission and explicit groups bound execution. Cron atomically checks the
+  consumed cursor and all active runs of that entry/branch before enqueue:
+  overlap records `coalesced` and advances the cursor without replacing the
+  live run; `fired` commits its run/receive/audit/cursor together. Read failures
+  fail closed and are logged; cursor-read failure reports `failed_state`
+  without advancing. Manual schedule triggers
   retain their busy-repository guard unless forced. Run list/detail expose
   `ScheduleEntry`; status/wait expose
   `schedule_entry`. See [scheduled runs](docs/scheduled-runs.md).

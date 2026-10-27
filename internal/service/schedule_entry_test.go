@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/model"
@@ -71,5 +72,29 @@ func TestScheduleEntryIsVisibleThroughHTTPAndMCP(t *testing.T) {
 	}
 	if err = json.Unmarshal(encoded, &status); err != nil || status.Entry != "nightly" {
 		t.Fatalf("MCP status lost entry: %s (%v)", encoded, err)
+	}
+}
+
+func TestScheduleCronUsesAtomicCursorAndCoalescesLiveEntry(t *testing.T) {
+	fixture := newRecoveryFixture(t)
+	scheduler := fixture.scheduler(t, &recoveryJobs{})
+	qualified, err := fixture.store.QualifiedRepoName(t.Context(), fixture.repo.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	at := time.Date(2026, 10, 27, 1, 30, 0, 0, time.UTC)
+	request := CIRequest{EventID: "cron-first", Repository: fixture.repo, Branch: "main", SHA: strings.Repeat("a", 40), Actor: "oberth:scheduler", Trigger: "schedule", ScheduleEntry: "nightly"}
+	first, err := scheduler.EnqueueScheduledCI(t.Context(), request, model.ScheduleFireSpec{Repo: qualified, At: at})
+	if err != nil || first.Outcome != "fired" {
+		t.Fatalf("first cron = %+v, %v", first, err)
+	}
+	request.EventID = "cron-next"
+	next, err := scheduler.EnqueueScheduledCI(t.Context(), request, model.ScheduleFireSpec{Repo: qualified, At: at.Add(15 * time.Minute), HasPrevious: true, Previous: at})
+	if err != nil || next.Outcome != "coalesced" || next.Enqueued.ID != first.Enqueued.ID {
+		t.Fatalf("next cron = %+v, %v", next, err)
+	}
+	retained, err := fixture.store.Run(t.Context(), first.Enqueued.ID)
+	if err != nil || retained.Status != model.RunQueued || retained.SupersededBy != "" {
+		t.Fatalf("cron superseded its own live entry: %+v, %v", retained, err)
 	}
 }

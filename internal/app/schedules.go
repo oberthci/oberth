@@ -4,6 +4,8 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
+	"log"
 	"strings"
 	"sync"
 	"time"
@@ -31,6 +33,7 @@ type ScheduleGit interface {
 
 type ScheduleEnqueuer interface {
 	EnqueueCI(ctx context.Context, request service.CIRequest) (model.EnqueueRunResult, error)
+	EnqueueScheduledCI(context.Context, service.CIRequest, model.ScheduleFireSpec) (model.ScheduleEnqueueResult, error)
 }
 
 type ScheduleRuns interface {
@@ -38,7 +41,7 @@ type ScheduleRuns interface {
 }
 
 type ScheduleState interface {
-	// A present zero cursor means a known-due entry has not successfully fired.
+	// A present zero cursor means a known-due entry has not been consumed by firing or coalescing.
 	// An absent cursor starts from this server's initial observation instead.
 	ScheduleFires(ctx context.Context, repo string) (map[string]time.Time, error)
 	RecordScheduleFire(ctx context.Context, repo, entry string, at time.Time, outcome string) error
@@ -72,6 +75,7 @@ type SchedulesConfig struct {
 	Upstreams    ScheduleUpstreamResolver
 	MinInterval  time.Duration
 	MaxEntries   int
+	Logger       *log.Logger
 }
 
 type Schedules struct {
@@ -164,11 +168,19 @@ func (schedules *Schedules) tickRepository(ctx context.Context, repository model
 		schedules.record(ctx, qualifiedName, refusal.Name, now, "refused")
 	}
 
-	last := map[string]time.Time{}
-	if schedules.config.State != nil {
-		if stored, stateErr := schedules.config.State.ScheduleFires(ctx, qualifiedName); stateErr == nil {
-			last = stored
+	if schedules.config.State == nil {
+		schedules.logFailure(qualifiedName, "", errors.New("schedule state is unavailable"))
+		return
+	}
+	last, err := schedules.config.State.ScheduleFires(ctx, qualifiedName)
+	if err != nil {
+		schedules.logFailure(qualifiedName, "", err)
+		for _, entry := range file.Entries {
+			// This is an observation failure, not proof the entry is due.
+			// Do not invent a pending cursor for a future occurrence.
+			schedules.record(ctx, qualifiedName, entry.Name, now, "failed_state")
 		}
+		return
 	}
 	due := file.Due(last, now)
 	if len(due) == 0 {
@@ -182,22 +194,29 @@ func (schedules *Schedules) tickRepository(ctx context.Context, repository model
 	// owns execution capacity; waiting for an idle repository here can starve
 	// a nightly behind a continuous stream of ordinary branch runs.
 	for _, entry := range due {
-		schedules.fire(ctx, repository, qualifiedName, entry, sha, branch, now)
+		previous, seen := last[entry.Name]
+		schedules.fire(ctx, repository, qualifiedName, entry, sha, branch, model.ScheduleFireSpec{
+			Repo: qualifiedName, At: now, Previous: previous, HasPrevious: seen,
+		})
 	}
 }
 
 func (schedules *Schedules) fire(
-	ctx context.Context, repository model.Repository, qualifiedName string, entry schedule.Entry, sha, defaultBranch string, now time.Time,
+	ctx context.Context, repository model.Repository, qualifiedName string, entry schedule.Entry, sha, defaultBranch string, fire model.ScheduleFireSpec,
 ) {
 	branch, target, err := schedules.entryTarget(ctx, qualifiedName, entry, sha, defaultBranch)
 	if err == nil {
-		_, err = schedules.enqueue(ctx, repository, branch, target, entry.Name, ScheduleActor)
+		_, err = schedules.config.Enqueuer.EnqueueScheduledCI(ctx, service.CIRequest{
+			EventID: scheduleEventID(), Repository: repository, Branch: branch,
+			SHA: target, Actor: ScheduleActor, Trigger: "schedule", ScheduleEntry: entry.Name,
+		}, fire)
 	}
 	if err != nil {
-		schedules.record(ctx, qualifiedName, entry.Name, now, "failed")
-		return
+		schedules.logFailure(qualifiedName, entry.Name, err)
+		schedules.record(ctx, qualifiedName, entry.Name, fire.At, "failed")
 	}
-	schedules.record(ctx, qualifiedName, entry.Name, now, "fired")
+	// The atomic enqueue owns fired/coalesced cursor writes. In particular,
+	// never overwrite its committed outcome with a separate successful write.
 }
 
 // entryTarget is the branch an entry tests and that branch's head: the default
@@ -214,8 +233,8 @@ func (schedules *Schedules) entryTarget(ctx context.Context, qualifiedName strin
 	return branch, sha, err
 }
 
-// enqueue is the single admission path of a scheduled run, shared by cron
-// fires and manual triggers: EnqueueCI with trigger "schedule".
+// enqueue is the manual schedule admission path: EnqueueCI with trigger
+// "schedule". Cron uses EnqueueScheduledCI for atomic cursor consumption.
 func (schedules *Schedules) enqueue(ctx context.Context, repository model.Repository, branch, sha, entry, actor string) (model.EnqueueRunResult, error) {
 	return schedules.config.Enqueuer.EnqueueCI(ctx, service.CIRequest{
 		EventID:       scheduleEventID(),
@@ -239,6 +258,7 @@ func (schedules *Schedules) withoutPaused(ctx context.Context, qualifiedName str
 	}
 	pauses, err := reader.SchedulePauses(ctx, qualifiedName)
 	if err != nil {
+		schedules.logFailure(qualifiedName, "", err)
 		return nil
 	}
 	var running []schedule.Entry
@@ -272,7 +292,17 @@ func (schedules *Schedules) record(ctx context.Context, repo, entry string, at t
 	if schedules.config.State == nil {
 		return
 	}
-	_ = schedules.config.State.RecordScheduleFire(ctx, repo, entry, at, outcome)
+	if err := schedules.config.State.RecordScheduleFire(ctx, repo, entry, at, outcome); err != nil {
+		schedules.logFailure(repo, entry, err)
+	}
+}
+
+func (schedules *Schedules) logFailure(repo, entry string, err error) {
+	logger := schedules.config.Logger
+	if logger == nil {
+		logger = log.Default()
+	}
+	logger.Printf("schedule tick failed repo=%q entry=%q: %v", repo, entry, err)
 }
 
 func scheduleEventID() string {
@@ -303,7 +333,7 @@ func (state *MemoryScheduleState) ScheduleFires(_ context.Context, repo string) 
 }
 
 func (state *MemoryScheduleState) RecordScheduleFire(_ context.Context, repo, entry string, at time.Time, outcome string) error {
-	if entry == "" || (outcome != "fired" && outcome != "skipped" && outcome != "failed" && outcome != "paused") {
+	if entry == "" || (outcome != "fired" && outcome != "coalesced" && outcome != "skipped" && outcome != "failed" && outcome != "paused") {
 		return nil
 	}
 	state.mu.Lock()
@@ -311,7 +341,7 @@ func (state *MemoryScheduleState) RecordScheduleFire(_ context.Context, repo, en
 	if state.fires[repo] == nil {
 		state.fires[repo] = map[string]time.Time{}
 	}
-	if outcome == "fired" {
+	if outcome == "fired" || outcome == "coalesced" {
 		state.fires[repo][entry] = at.UTC()
 	} else if _, seen := state.fires[repo][entry]; !seen {
 		state.fires[repo][entry] = time.Time{}

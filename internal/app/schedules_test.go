@@ -36,13 +36,22 @@ func (f *fakeScheduleGit) ReadBlob(_ context.Context, repo, _, _ string, _ int) 
 }
 
 type fakeEnqueuer struct {
-	requests []service.CIRequest
-	err      error
+	requests  []service.CIRequest
+	err       error
+	committed func(service.CIRequest, model.ScheduleFireSpec) error
 }
 
 func (f *fakeEnqueuer) EnqueueCI(_ context.Context, request service.CIRequest) (model.EnqueueRunResult, error) {
 	f.requests = append(f.requests, request)
 	return model.EnqueueRunResult{}, f.err
+}
+
+func (f *fakeEnqueuer) EnqueueScheduledCI(ctx context.Context, request service.CIRequest, fire model.ScheduleFireSpec) (model.ScheduleEnqueueResult, error) {
+	queued, err := f.EnqueueCI(ctx, request)
+	if err == nil && f.committed != nil {
+		err = f.committed(request, fire)
+	}
+	return model.ScheduleEnqueueResult{Enqueued: queued, Outcome: "fired"}, err
 }
 
 type fakeRunLister struct {
@@ -94,6 +103,9 @@ func testSchedules(t *testing.T, git *fakeScheduleGit, repos []model.Repository)
 		MinInterval:  15 * time.Minute,
 		MaxEntries:   4,
 	})
+	enqueuer.committed = func(request service.CIRequest, fire model.ScheduleFireSpec) error {
+		return schedules.config.State.RecordScheduleFire(context.Background(), fire.Repo, request.ScheduleEntry, fire.At, "fired")
+	}
 	return schedules, enqueuer, runs, state
 }
 
@@ -166,7 +178,7 @@ func TestATickFiresEvenWhenTheCommitHasNotChanged(t *testing.T) {
 	}
 }
 
-func TestATickQueuesBehindActiveRunsOrUnavailableRunHistory(t *testing.T) {
+func TestScheduleTickQueuesBehindActiveRunsOrUnavailableRunHistory(t *testing.T) {
 	for _, test := range []struct {
 		name   string
 		status model.RunStatus
@@ -324,7 +336,7 @@ func TestAFireIsNotRepeatedWithinTheSameMinute(t *testing.T) {
 	}
 }
 
-func TestTheMemoryStateOnlyAdvancesOnAFiredOutcome(t *testing.T) {
+func TestScheduleMemoryStateOnlyFiredOrCoalescedConsumesCursor(t *testing.T) {
 	t.Parallel()
 	state := NewMemoryScheduleState()
 	ctx := context.Background()
@@ -340,5 +352,12 @@ func TestTheMemoryStateOnlyAdvancesOnAFiredOutcome(t *testing.T) {
 	}
 	if cursor, seen := fires["nightly"]; !seen || !cursor.IsZero() {
 		t.Fatalf("an unfired due entry needs a pending cursor without advancing its clock: %+v", fires)
+	}
+	if err := state.RecordScheduleFire(ctx, "alpha", "nightly", when, "coalesced"); err != nil {
+		t.Fatal(err)
+	}
+	fires, err = state.ScheduleFires(ctx, "alpha")
+	if err != nil || !fires["nightly"].Equal(when) {
+		t.Fatalf("coalescing did not consume occurrence: %+v, %v", fires, err)
 	}
 }

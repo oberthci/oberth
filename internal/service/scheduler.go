@@ -187,12 +187,27 @@ func NewScheduler(config SchedulerConfig) (*Scheduler, error) {
 }
 
 func (scheduler *Scheduler) EnqueueCI(ctx context.Context, request CIRequest) (model.EnqueueRunResult, error) {
+	result, err := scheduler.enqueueCI(ctx, request, nil)
+	return result.Enqueued, err
+}
+
+// EnqueueScheduledCI is the cron-only path: cursor consumption, active-entry
+// dedupe, receive attribution and queue insertion commit atomically.
+func (scheduler *Scheduler) EnqueueScheduledCI(ctx context.Context, request CIRequest, fire model.ScheduleFireSpec) (model.ScheduleEnqueueResult, error) {
+	return scheduler.enqueueCI(ctx, request, &fire)
+}
+
+type scheduleOccurrenceStore interface {
+	EnqueueScheduleOccurrence(context.Context, model.ReceiveEventSpec, model.RunSpec, model.ScheduleFireSpec) (model.ScheduleEnqueueResult, error)
+}
+
+func (scheduler *Scheduler) enqueueCI(ctx context.Context, request CIRequest, fire *model.ScheduleFireSpec) (model.ScheduleEnqueueResult, error) {
 	if err := scheduler.requireMutation(ctx); err != nil {
-		return model.EnqueueRunResult{}, err
+		return model.ScheduleEnqueueResult{}, err
 	}
 	if strings.TrimSpace(request.EventID) == "" || request.Repository.ID <= 0 || strings.TrimSpace(request.Branch) == "" ||
 		!validOID(request.SHA) || strings.TrimSpace(request.Actor) == "" {
-		return model.EnqueueRunResult{}, fmt.Errorf("%w: CI request is invalid", ErrInvalidInput)
+		return model.ScheduleEnqueueResult{}, fmt.Errorf("%w: CI request is invalid", ErrInvalidInput)
 	}
 	testedSHA := request.TestedSHA
 	if testedSHA == "" {
@@ -204,17 +219,25 @@ func (scheduler *Scheduler) EnqueueCI(ctx context.Context, request CIRequest) (m
 	}
 	event := receiveSpec(request.EventID, request.Actor, request.Repository.ID, model.RefBranch, request.Branch,
 		request.OldSHA, request.SHA, request.SHA, "queued")
-	enqueued, err := scheduler.store.EnqueueReceiveEvent(ctx, event, model.RunSpec{
+	spec := model.RunSpec{
 		RepoID: request.Repository.ID, RefKind: model.RefBranch, Ref: request.Branch,
 		SHA: request.SHA, Actor: request.Actor, Trigger: trigger, ScheduleEntry: request.ScheduleEntry, TestedSHA: testedSHA, BaseSHA: request.BaseSHA,
-	})
-	if err != nil {
-		return model.EnqueueRunResult{}, err
 	}
-	if err := scheduler.AcceptEnqueue(ctx, enqueued); err != nil {
-		return enqueued, err
+	var result model.ScheduleEnqueueResult
+	var err error
+	if fire != nil {
+		state, ok := scheduler.store.(scheduleOccurrenceStore)
+		if !ok {
+			return result, errors.New("service: atomic schedule enqueue is unavailable")
+		}
+		result, err = state.EnqueueScheduleOccurrence(ctx, event, spec, *fire)
+	} else {
+		result.Enqueued, err = scheduler.store.EnqueueReceiveEvent(ctx, event, spec)
 	}
-	return enqueued, nil
+	if err == nil && result.Enqueued.ID != "" {
+		err = scheduler.AcceptEnqueue(ctx, result.Enqueued)
+	}
+	return result, err
 }
 
 func (scheduler *Scheduler) AdmitRelease(ctx context.Context, request ReleaseRequest) (model.EnqueueRunResult, error) {

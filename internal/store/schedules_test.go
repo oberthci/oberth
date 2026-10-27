@@ -147,3 +147,35 @@ func TestRecordScheduleFireRefusesEmptyIdentifiers(t *testing.T) {
 		t.Fatal("a fire with no repository was recorded")
 	}
 }
+
+func TestScheduleStateFailureOutcomeDoesNotInventOrAdvanceCursor(t *testing.T) {
+	now := time.Date(2026, 10, 27, 1, 30, 0, 0, time.UTC)
+	s := testStore(t, &now)
+	for _, entry := range []string{"absent", "pending", "fired"} {
+		if entry != "absent" {
+			outcome := "failed"
+			if entry == "fired" {
+				outcome = "fired"
+			}
+			if err := s.RecordScheduleFire(t.Context(), "alpha", entry, now, outcome); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := s.RecordScheduleFire(t.Context(), "alpha", entry, now.Add(time.Minute), "failed_state"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	fires, err := s.ScheduleFires(t.Context(), "alpha")
+	if err != nil || len(fires) != 2 || !fires["pending"].IsZero() || !fires["fired"].Equal(now) {
+		t.Fatalf("state failure changed due state: %+v, %v", fires, err)
+	}
+	outcomes, err := s.ScheduleOutcomes(t.Context(), "alpha")
+	if err != nil || len(outcomes) != 3 {
+		t.Fatalf("state failure invisible: %+v, %v", outcomes, err)
+	}
+	for _, outcome := range outcomes {
+		if outcome.Outcome != "failed_state" {
+			t.Fatalf("state failure outcome = %+v", outcome)
+		}
+	}
+}

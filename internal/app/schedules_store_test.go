@@ -9,7 +9,7 @@ import (
 	"github.com/oberthci/oberth/internal/store"
 )
 
-func TestLegacyBusySkipQueuesAfterRestartWhileRepositoryRemainsBusy(t *testing.T) {
+func TestScheduleLegacyBusySkipQueuesAfterRestartWhileRepositoryRemainsBusy(t *testing.T) {
 	for _, previousFire := range []bool{false, true} {
 		name := "first-fire"
 		if previousFire {
@@ -55,6 +55,7 @@ func TestLegacyBusySkipQueuesAfterRestartWhileRepositoryRemainsBusy(t *testing.T
 			}
 			config := schedules.config
 			config.State = state
+			schedules.config.State = state
 			restarted := NewSchedules(config)
 			restarted.observed = skipped.Add(time.Minute)
 			caughtUp := skipped.Add(time.Minute)
@@ -74,6 +75,7 @@ func TestLegacyBusySkipQueuesAfterRestartWhileRepositoryRemainsBusy(t *testing.T
 				t.Fatal(err)
 			}
 			config.State = state
+			schedules.config.State = state
 			restarted = NewSchedules(config)
 			restarted.observed = caughtUp.Add(time.Minute)
 			restarted.Tick(ctx, caughtUp.Add(time.Minute))

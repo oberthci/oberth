@@ -62,6 +62,17 @@ func (s *Store) EnqueueReceiveEvent(ctx context.Context, event model.ReceiveEven
 		return model.EnqueueRunResult{}, fmt.Errorf("begin receive enqueue: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	enqueued, err := s.enqueueReceiveEventTx(ctx, tx, event, validatedRun)
+	if err != nil {
+		return model.EnqueueRunResult{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return model.EnqueueRunResult{}, fmt.Errorf("commit receive enqueue: %w", err)
+	}
+	return enqueued, nil
+}
+
+func (s *Store) enqueueReceiveEventTx(ctx context.Context, tx *sql.Tx, event model.ReceiveEventSpec, validatedRun model.RunSpec) (model.EnqueueRunResult, error) {
 	if duplicate, duplicateErr := receiveDuplicate(ctx, tx, event, true); duplicate || duplicateErr != nil {
 		if duplicateErr != nil {
 			return model.EnqueueRunResult{}, duplicateErr
@@ -90,9 +101,6 @@ func (s *Store) EnqueueReceiveEvent(ctx context.Context, event model.ReceiveEven
 	}
 	if err := s.appendReceiveAudit(ctx, tx, event, enqueued.ID, now); err != nil {
 		return model.EnqueueRunResult{}, err
-	}
-	if err := tx.Commit(); err != nil {
-		return model.EnqueueRunResult{}, fmt.Errorf("commit receive enqueue: %w", err)
 	}
 	return enqueued, nil
 }

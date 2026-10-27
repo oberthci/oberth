@@ -985,6 +985,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 		Upstreams:    database,
 		MinInterval:  options.scheduleMinInterval,
 		MaxEntries:   options.scheduleMaxEntries,
+		Logger:       logger,
 	})
 	archiveWIF, err := readArgoReleaseWIFConfig(options.argoReleaseWIFConfig)
 	if err != nil {
