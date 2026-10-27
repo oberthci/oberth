@@ -30,13 +30,13 @@ import (
 const (
 	ServerRepository = "europe-west4-docker.pkg.dev/skipopsmain/oberth/oberth"
 
-	// ServerSubstrate is the reviewed scratch runtime OCI index from #1205.
+	// ServerSubstrate is the scratch runtime OCI index built on tuxbox for #1205.
 	// Its only regular files are the static matching-architecture bootstrap
 	// server and CA trust bundle; timezone data is embedded in Go. Exactly
 	// linux/amd64 and linux/arm64, with no attestations or config variants.
-	// Publication prerequisite: upload /tmp/oberth-round7-substrate.oci.tar
-	// with preserved digests and verify full registry readback before release.
-	ServerSubstrate = ServerRepository + "@sha256:41b895f6bcd4bc0996db86bdb04b5f2e57b11e73f866459b839ddaa9d52da2f1"
+	// Publication prerequisite: use the 1205-substrate-pane30 handoff archive
+	// and verify full registry readback before release. Laptop bytes are not used.
+	ServerSubstrate = ServerRepository + "@sha256:c4332828f984c2033d72f72e632513d70917e40af0fd391e926b7a46d68a3ba3"
 )
 
 // Kind selects a release image contract. Only the server image remains.
