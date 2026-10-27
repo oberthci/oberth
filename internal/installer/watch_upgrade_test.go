@@ -12,7 +12,7 @@ func TestUpgradePreservesWatchEnablementAndAllowsExplicitChoice(t *testing.T) {
 			t.Fatalf("explicit boolean connector choice rejected: %v", err)
 		}
 	}
-	args := strings.Join(upgradeHelmArgs(UpgradeConfig{}, "chart", "image"), " ")
+	args := strings.Join(upgradeHelmArgs(UpgradeConfig{}, "chart", "image", testUpgradeCompatibility), " ")
 	if strings.Contains(args, "watchTunnel.enabled=") {
 		t.Fatal("upgrade overwrites reused connector enablement instead of preserving administrator choice")
 	}

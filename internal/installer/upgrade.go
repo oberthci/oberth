@@ -74,11 +74,14 @@ func (e *ErrSchemaValidation) Error() string {
 // enablement of an existing private module proxy is preserved from stored values;
 // callers cannot disable that existing routing boundary as an upgrade override.
 var upgradePinnedKeys = map[string]bool{
-	"image.ref":                true,
-	"argo.goProxy.enabled":     true,
-	"argo.goProxy.port":        true,
-	"watchTunnel.image":        true,
-	"watchTunnel.openbaoImage": true,
+	"image.ref":                    true,
+	"argo.goProxy.enabled":         true,
+	"argo.goProxy.port":            true,
+	"watchTunnel.image":            true,
+	"watchTunnel.openbaoImage":     true,
+	"compatibility.schemaIdentity": true,
+	"compatibility.auditDomain":    true,
+	"compatibility.witnessKeyInfo": true,
 }
 
 // UpgradePinnedKeys returns the set of pinned keys for tests.
@@ -382,6 +385,10 @@ func RunUpgrade(ctx context.Context, cfg UpgradeConfig, deps Deps) (UpgradeResul
 		return printUpgradeDryRun(w, cfg, result, retryFailed)
 	}
 
+	if err := requireUpgradeHelmVersion(ctx, deps); err != nil {
+		return result, err
+	}
+
 	// Resolve the chart reference. Use the existing Helm repo if no override.
 	chart := cfg.ChartOverride
 	if chart == "" {
@@ -402,6 +409,11 @@ func RunUpgrade(ctx context.Context, cfg UpgradeConfig, deps Deps) (UpgradeResul
 		return result, err
 	}
 
+	compatibility, err := prepareUpgradeValues(ctx, cfg, deps, chart, imageRef)
+	if err != nil {
+		return result, err
+	}
+
 	if cfg.WaitIdle {
 		if err := waitForUpgradeIdle(ctx, cfg, deps); err != nil {
 			return result, err
@@ -416,7 +428,7 @@ func RunUpgrade(ctx context.Context, cfg UpgradeConfig, deps Deps) (UpgradeResul
 
 	// Build and execute the helm upgrade.
 	phase(w, "Chart", "updating", color)
-	args := upgradeHelmArgs(cfg, chart, imageRef)
+	args := upgradeHelmArgs(cfg, chart, imageRef, compatibility)
 	if _, err := deps.RunHelm(ctx, args); err != nil {
 		printRecoveryGuidance(w, cfg.Namespace)
 		return result, fmt.Errorf("helm upgrade: %w", err)
@@ -513,7 +525,7 @@ func resolveChartImageRef(ctx context.Context, deps Deps, chart, targetVersion s
 // forward-only; an automatic rollback to a pre-migration schema would leave
 // the database in an inconsistent state (crashloop trap). On failure the
 // operator must fix forward with a new 'oberth upgrade'.
-func upgradeHelmArgs(cfg UpgradeConfig, chart, imageRef string) []string {
+func upgradeHelmArgs(cfg UpgradeConfig, chart, imageRef string, compatibility backupCompatibility) []string {
 	args := []string{
 		"upgrade", "oberth", chart,
 		"-n", cfg.Namespace,
@@ -521,6 +533,9 @@ func upgradeHelmArgs(cfg UpgradeConfig, chart, imageRef string) []string {
 		// --reuse-values replaces the new chart's defaults with the old ones.
 		"--reset-then-reuse-values",
 		"--set-string", "image.ref=" + imageRef,
+		"--set-string", "compatibility.schemaIdentity=" + compatibility.SchemaIdentity,
+		"--set-string", "compatibility.auditDomain=" + compatibility.AuditDomain,
+		"--set-string", "compatibility.witnessKeyInfo=" + compatibility.WitnessKeyInfo,
 		// Keep the existing proxy enablement and mapping from reused values.
 		"--set", "argo.goProxy.port=8444",
 		// Retain the explicit promotion grant lifetime safety pin (#826).
@@ -728,6 +743,7 @@ func printUpgradeDryRun(w io.Writer, cfg UpgradeConfig, result UpgradeResult, re
 	if cfg.WaitIdle {
 		_, _ = fmt.Fprintf(w, "  Wait for %s runs in the selected live daemon queue (--wait-idle; --wait-timeout=%s).\n", upgradeWaitSelection(cfg), cfg.WaitTimeout)
 	}
+	_, _ = fmt.Fprintln(w, "  Verify Helm >= 3.14, read installed values (including defaults), pin compatibility identities, and validate stored values against the target chart schema before applying changes.")
 	step := 1
 
 	chart := cfg.ChartOverride
@@ -754,7 +770,7 @@ func printUpgradeDryRun(w io.Writer, cfg UpgradeConfig, result UpgradeResult, re
 	// Render from the same args builder the real path uses so the dry-run
 	// plan is always truthful. The image ref is unknown at dry-run time
 	// (chart values haven't been fetched) so a placeholder is shown.
-	args := upgradeHelmArgs(cfg, chart, "<chart-default>")
+	args := upgradeHelmArgs(cfg, chart, "<chart-default>", backupCompatibility{SchemaIdentity: "<installed-schema>", AuditDomain: "<installed-audit>", WitnessKeyInfo: "<installed-witness>"})
 	_, _ = fmt.Fprintf(w, "     helm %s\n\n", strings.Join(args, " "))
 	step++
 

@@ -82,6 +82,10 @@ func TestUpgradeWaitProcessGraph(t *testing.T) {
 			t.Cleanup(server.Close)
 			helm := `#!/bin/sh
 case "$*" in
+ *"version --template "*) printf 'v4.2.3\n' ;;
+ *"get values oberth "*"--all"*) printf '{"compatibility":{"schemaIdentity":"legacy-schema-v1","auditDomain":"legacy-audit-v1","witnessKeyInfo":"legacy-witness-v1"}}\n' ;;
+ *"get values oberth "*) printf '{}\n' ;;
+ *"template oberth "*) exit 0 ;;
  *"list "*)
    if [ "$OBERTH_TEST_ALREADY" = yes ]; then chart=oberth-0.17.52; else chart=oberth-0.17.51; fi
    printf '[{"name":"oberth","chart":"%s","status":"deployed"}]\n' "$chart" ;;

@@ -59,6 +59,9 @@ func TestChartConsumersRefreshHelmRepo(t *testing.T) {
 					Output: io.Discard, KubeClient: fake.NewClientset(),
 					RestConfig: &rest.Config{Host: "https://127.0.0.1:6443"},
 					RunHelm: func(_ context.Context, args []string) ([]byte, error) {
+						if out, ok := testUpgradeValuePreflight(args); ok {
+							return out, nil
+						}
 						switch args[0] {
 						case "list":
 							return []byte(`[{"name":"oberth","namespace":"oberth","status":"deployed","chart":"oberth-0.17.15"}]`), nil

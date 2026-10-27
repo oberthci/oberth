@@ -30,6 +30,10 @@ func controllerUpgradeFixture(t *testing.T) (UpgradeConfig, Deps, *[][]string) {
 	deps.RunHelm = func(_ context.Context, args []string) ([]byte, error) {
 		calls = append(calls, slices.Clone(args))
 		switch args[0] {
+		case "version":
+			return []byte("v4.2.3"), nil
+		case "template":
+			return nil, nil
 		case "list":
 			if slices.Contains(args, "oberth") {
 				return []byte(`[{"name":"oberth","chart":"oberth-0.17.23","status":"deployed","revision":82}]`), nil
@@ -37,7 +41,7 @@ func controllerUpgradeFixture(t *testing.T) (UpgradeConfig, Deps, *[][]string) {
 			return []byte(`[{"name":"argo-workflows","chart":"argo-workflows-1.0.24","status":"deployed","revision":18}]`), nil
 		case "get":
 			if args[2] == "oberth" {
-				return []byte(`{"argo":{"namespace":"oberth-argo","controllerProfile":"nonroot-static-v1"}}`), nil
+				return []byte(`{"compatibility":{"schemaIdentity":"legacy-schema-v1","auditDomain":"legacy-audit-v1","witnessKeyInfo":"legacy-witness-v1"},"argo":{"namespace":"oberth-argo","controllerProfile":"nonroot-static-v1"}}`), nil
 			}
 			return []byte(`{"singleNamespace":true,"server":{"enabled":false}}`), nil
 		case "pull":
@@ -313,5 +317,38 @@ func TestUpgradeControllerProfileBothReadbacksAndForwardRepair(t *testing.T) {
 	next.chartDigest = profile.chartDigest
 	if err := next.apply(t.Context(), cfg, deps); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestUpgradeValuePreflightRefusesBeforeControllerMutation(t *testing.T) {
+	for _, mode := range []string{"schema", "missing-identity", "helm-too-old"} {
+		t.Run(mode, func(t *testing.T) {
+			cfg, deps, calls := controllerUpgradeFixture(t)
+			base := deps.RunHelm
+			deps.RunHelm = func(ctx context.Context, args []string) ([]byte, error) {
+				if mode == "helm-too-old" && args[0] == "version" {
+					return []byte("v3.13.3"), nil
+				}
+				if args[0] == "show" {
+					return []byte("image:\n  ref: " + controllerServerTestImage + "\n"), nil
+				}
+				if mode == "missing-identity" && args[0] == "get" && args[2] == "oberth" {
+					return []byte(`{"argo":{"namespace":"oberth-argo"}}`), nil
+				}
+				if mode == "schema" && args[0] == "template" {
+					return nil, errors.New("additional properties removedKey not allowed")
+				}
+				return base(ctx, args)
+			}
+			result, err := RunUpgrade(t.Context(), cfg, deps)
+			if err == nil || result.Upgraded {
+				t.Fatalf("preflight failure accepted: %+v %v", result, err)
+			}
+			for _, call := range *calls {
+				if call[0] == "upgrade" || call[0] == "pull" {
+					t.Fatalf("controller changed before preflight completed: %v", call)
+				}
+			}
+		})
 	}
 }

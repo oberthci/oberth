@@ -84,6 +84,9 @@ func TestRunUpgradeAlreadyUpToDate(t *testing.T) {
 					return nil, nil
 				},
 				RunHelm: func(_ context.Context, args []string) ([]byte, error) {
+					if out, ok := testUpgradeValuePreflight(args); ok {
+						return out, nil
+					}
 					helmCalls++
 					if len(args) >= 2 && args[0] == "list" {
 						return []byte(`[{"name":"oberth","namespace":"oberth","status":"deployed","chart":"oberth-0.12.35"}]`), nil
@@ -120,6 +123,9 @@ func TestRunUpgradeSameVersionValuesDryRunPlansReapply(t *testing.T) {
 	deps := Deps{
 		Output: &output,
 		RunHelm: func(_ context.Context, args []string) ([]byte, error) {
+			if out, ok := testUpgradeValuePreflight(args); ok {
+				return out, nil
+			}
 			if len(args) >= 2 && args[0] == "list" {
 				return []byte(`[{"name":"oberth","namespace":"oberth","status":"deployed","chart":"oberth-0.12.35"}]`), nil
 			}
@@ -145,6 +151,9 @@ func TestRunUpgradeFailedSameVersionDryRunPlansRepair(t *testing.T) {
 	deps := Deps{
 		Output: &output,
 		RunHelm: func(_ context.Context, args []string) ([]byte, error) {
+			if out, ok := testUpgradeValuePreflight(args); ok {
+				return out, nil
+			}
 			helmCalls++
 			if len(args) >= 2 && args[0] == "list" {
 				return []byte(`[{"name":"oberth","namespace":"oberth","revision":"57","status":"failed","chart":"oberth-0.16.6"}]`), nil
@@ -182,6 +191,9 @@ func TestRunUpgradeSameVersionRefusesPendingAndUnknownStates(t *testing.T) {
 				deps := Deps{
 					Output: &output,
 					RunHelm: func(_ context.Context, args []string) ([]byte, error) {
+						if out, ok := testUpgradeValuePreflight(args); ok {
+							return out, nil
+						}
 						helmCalls++
 						if len(args) >= 2 && args[0] == "list" {
 							data, _ := json.Marshal([]helmRelease{{Name: "oberth", Namespace: "oberth", Status: status, Chart: "oberth-0.16.6"}})
@@ -231,6 +243,9 @@ func TestRunUpgradeRetriesFailedSameVersionWithPinnedImage(t *testing.T) {
 	deps := Deps{
 		Output: &output,
 		RunHelm: func(_ context.Context, args []string) ([]byte, error) {
+			if out, ok := testUpgradeValuePreflight(args); ok {
+				return out, nil
+			}
 			calls = append(calls, append([]string(nil), args...))
 			switch args[0] {
 			case "list":
@@ -302,6 +317,9 @@ func TestRunUpgradeReappliesValuesAtSameVersion(t *testing.T) {
 	deps := Deps{
 		Output: &output,
 		RunHelm: func(_ context.Context, args []string) ([]byte, error) {
+			if out, ok := testUpgradeValuePreflight(args); ok {
+				return out, nil
+			}
 			calls = append(calls, append([]string(nil), args...))
 			switch args[0] {
 			case "list":
@@ -356,6 +374,9 @@ func TestRunUpgradeFailedSameVersionRejectsTagOnlyImage(t *testing.T) {
 	deps := Deps{
 		Output: io.Discard,
 		RunHelm: func(_ context.Context, args []string) ([]byte, error) {
+			if out, ok := testUpgradeValuePreflight(args); ok {
+				return out, nil
+			}
 			switch args[0] {
 			case "list":
 				return []byte(`[{"name":"oberth","namespace":"oberth","status":"failed","chart":"oberth-0.16.6"}]`), nil
@@ -386,6 +407,9 @@ func TestRunUpgradeNoRelease(t *testing.T) {
 	deps := Deps{
 		Output: io.Discard,
 		RunHelm: func(_ context.Context, args []string) ([]byte, error) {
+			if out, ok := testUpgradeValuePreflight(args); ok {
+				return out, nil
+			}
 			if len(args) >= 2 && args[0] == "list" {
 				return []byte("[]"), nil
 			}
@@ -413,6 +437,9 @@ func TestRunUpgradeRejectsDowngrade(t *testing.T) {
 			deps := Deps{
 				Output: io.Discard,
 				RunHelm: func(_ context.Context, args []string) ([]byte, error) {
+					if out, ok := testUpgradeValuePreflight(args); ok {
+						return out, nil
+					}
 					helmCalls++
 					if len(args) >= 2 && args[0] == "list" {
 						data, _ := json.Marshal([]helmRelease{{
@@ -440,6 +467,9 @@ func TestRunUpgradeRejectsUnparseableInstalledVersion(t *testing.T) {
 	deps := Deps{
 		Output: io.Discard,
 		RunHelm: func(_ context.Context, args []string) ([]byte, error) {
+			if out, ok := testUpgradeValuePreflight(args); ok {
+				return out, nil
+			}
 			if len(args) >= 2 && args[0] == "list" {
 				releases := []helmRelease{{
 					Name:      "oberth",
@@ -475,6 +505,9 @@ func TestRunUpgradeDryRun(t *testing.T) {
 			return nil, nil
 		},
 		RunHelm: func(_ context.Context, args []string) ([]byte, error) {
+			if out, ok := testUpgradeValuePreflight(args); ok {
+				return out, nil
+			}
 			if len(args) >= 2 && args[0] == "list" {
 				releases := []helmRelease{{
 					Name:      "oberth",
@@ -521,7 +554,7 @@ func TestUpgradeHelmArgs(t *testing.T) {
 		BinaryVersion: "0.12.35",
 		Timeout:       5 * time.Minute,
 	}
-	args := upgradeHelmArgs(cfg, "oberth-charts/oberth", "europe-west4-docker.pkg.dev/skipopsmain/oberth/oberth:v0.12.35@sha256:abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789")
+	args := upgradeHelmArgs(cfg, "oberth-charts/oberth", "europe-west4-docker.pkg.dev/skipopsmain/oberth/oberth:v0.12.35@sha256:abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789", testUpgradeCompatibility)
 	joined := strings.Join(args, " ")
 	if !strings.Contains(joined, "upgrade oberth oberth-charts/oberth") {
 		t.Fatalf("args = %q", joined)
@@ -557,7 +590,7 @@ func TestUpgradeHelmArgsPinsGoProxyBeforeVersion(t *testing.T) {
 		BinaryVersion: "0.16.20",
 		Timeout:       5 * time.Minute,
 	}
-	args := upgradeHelmArgs(cfg, "oberth-charts/oberth", "europe-west4-docker.pkg.dev/skipopsmain/oberth/oberth@sha256:abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789")
+	args := upgradeHelmArgs(cfg, "oberth-charts/oberth", "europe-west4-docker.pkg.dev/skipopsmain/oberth/oberth@sha256:abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789", testUpgradeCompatibility)
 
 	// The goProxy pins must appear between --set-string image.ref and
 	// --version in the shared dry-run/actual argument builder.
@@ -590,7 +623,7 @@ func TestUpgradeHelmArgsLocalChart(t *testing.T) {
 		BinaryVersion: "0.12.35",
 		ChartOverride: "/tmp/chart",
 	}
-	args := upgradeHelmArgs(cfg, "/tmp/chart", "oberth:dev")
+	args := upgradeHelmArgs(cfg, "/tmp/chart", "oberth:dev", testUpgradeCompatibility)
 	joined := strings.Join(args, " ")
 	if strings.Contains(joined, "--version") {
 		t.Fatalf("local chart should not have --version: %q", joined)
@@ -788,6 +821,9 @@ func TestResolveChartImageRef(t *testing.T) {
 	deps := Deps{
 		Output: io.Discard,
 		RunHelm: func(_ context.Context, args []string) ([]byte, error) {
+			if out, ok := testUpgradeValuePreflight(args); ok {
+				return out, nil
+			}
 			if len(args) >= 2 && args[0] == "show" && args[1] == "values" {
 				return []byte("image:\n  ref: europe-west4-docker.pkg.dev/skipopsmain/oberth/oberth:v0.12.35@sha256:abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789\n"), nil
 			}
@@ -808,6 +844,9 @@ func TestResolveChartImageRefEmpty(t *testing.T) {
 	deps := Deps{
 		Output: io.Discard,
 		RunHelm: func(_ context.Context, args []string) ([]byte, error) {
+			if out, ok := testUpgradeValuePreflight(args); ok {
+				return out, nil
+			}
 			if len(args) >= 2 && args[0] == "show" && args[1] == "values" {
 				return []byte("image:\n  ref: \"\"\n"), nil
 			}
@@ -865,6 +904,9 @@ func testRunUpgradeFullFlow(t *testing.T, auditFails bool) {
 	deps := Deps{
 		Output: &output,
 		RunHelm: func(_ context.Context, args []string) ([]byte, error) {
+			if out, ok := testUpgradeValuePreflight(args); ok {
+				return out, nil
+			}
 			helmCallLog = append(helmCallLog, args[0])
 			switch {
 			case args[0] == "list":
@@ -947,6 +989,9 @@ func TestResolveChartImageRefRejectsTagOnly(t *testing.T) {
 	deps := Deps{
 		Output: io.Discard,
 		RunHelm: func(_ context.Context, args []string) ([]byte, error) {
+			if out, ok := testUpgradeValuePreflight(args); ok {
+				return out, nil
+			}
 			if args[0] == "show" && args[1] == "values" {
 				return []byte("image:\n  ref: europe-west4-docker.pkg.dev/skipopsmain/oberth/oberth:v0.12.35\n"), nil
 			}
@@ -964,6 +1009,9 @@ func TestResolveChartImageRefRejectsShortDigest(t *testing.T) {
 	deps := Deps{
 		Output: io.Discard,
 		RunHelm: func(_ context.Context, args []string) ([]byte, error) {
+			if out, ok := testUpgradeValuePreflight(args); ok {
+				return out, nil
+			}
 			if args[0] == "show" && args[1] == "values" {
 				return []byte("image:\n  ref: europe-west4-docker.pkg.dev/skipopsmain/oberth/oberth@sha256:abc123\n"), nil
 			}
@@ -982,6 +1030,9 @@ func TestResolveChartImageRefRejectsNonGARRegistry(t *testing.T) {
 	deps := Deps{
 		Output: io.Discard,
 		RunHelm: func(_ context.Context, args []string) ([]byte, error) {
+			if out, ok := testUpgradeValuePreflight(args); ok {
+				return out, nil
+			}
 			if args[0] == "show" && args[1] == "values" {
 				return []byte(fmt.Sprintf("image:\n  ref: other-registry.example.com/repo/oberth@%s\n", validDigest)), nil
 			}
@@ -1000,6 +1051,9 @@ func TestResolveChartImageRefLocalChartSkipsRegistryCheck(t *testing.T) {
 	deps := Deps{
 		Output: io.Discard,
 		RunHelm: func(_ context.Context, args []string) ([]byte, error) {
+			if out, ok := testUpgradeValuePreflight(args); ok {
+				return out, nil
+			}
 			if args[0] == "show" && args[1] == "values" {
 				return []byte(fmt.Sprintf("image:\n  ref: my-local-registry.dev/oberth@%s\n", validDigest)), nil
 			}
@@ -1020,6 +1074,9 @@ func TestResolveChartImageRefLocalChartStillRequiresDigest(t *testing.T) {
 	deps := Deps{
 		Output: io.Discard,
 		RunHelm: func(_ context.Context, args []string) ([]byte, error) {
+			if out, ok := testUpgradeValuePreflight(args); ok {
+				return out, nil
+			}
 			if args[0] == "show" && args[1] == "values" {
 				return []byte("image:\n  ref: my-local-registry.dev/oberth:latest\n"), nil
 			}
@@ -1063,6 +1120,9 @@ func TestRunUpgradeAllowsNonLocalWithYes(t *testing.T) {
 		ContextName: "prod-cluster",
 		RestConfig:  &rest.Config{Host: "https://example.com:6443"},
 		RunHelm: func(_ context.Context, args []string) ([]byte, error) {
+			if out, ok := testUpgradeValuePreflight(args); ok {
+				return out, nil
+			}
 			if args[0] == "list" {
 				return []byte("[]"), nil // no releases — proves we passed the guard
 			}
@@ -1093,7 +1153,7 @@ func TestUpgradeHelmArgsNoAtomic(t *testing.T) {
 		BinaryVersion: "0.12.35",
 		Timeout:       5 * time.Minute,
 	}
-	args := upgradeHelmArgs(cfg, "oberth-charts/oberth", "some-image@sha256:0000000000000000000000000000000000000000000000000000000000000000")
+	args := upgradeHelmArgs(cfg, "oberth-charts/oberth", "some-image@sha256:0000000000000000000000000000000000000000000000000000000000000000", testUpgradeCompatibility)
 	for _, arg := range args {
 		if arg == "--atomic" {
 			t.Fatal("--atomic must not be present in upgrade helm args: auto-rollback + forward-only migrations = crashloop trap")
@@ -1108,7 +1168,7 @@ func TestUpgradeHelmArgsPassesTimeout(t *testing.T) {
 		BinaryVersion: "0.12.35",
 		Timeout:       3 * time.Minute,
 	}
-	args := upgradeHelmArgs(cfg, "oberth-charts/oberth", "image@sha256:0000000000000000000000000000000000000000000000000000000000000000")
+	args := upgradeHelmArgs(cfg, "oberth-charts/oberth", "image@sha256:0000000000000000000000000000000000000000000000000000000000000000", testUpgradeCompatibility)
 	joined := strings.Join(args, " ")
 	if !strings.Contains(joined, "--timeout 3m0s") {
 		t.Fatalf("missing --timeout 3m0s: %q", joined)
@@ -1120,6 +1180,9 @@ func TestRunUpgradeRejectsEmptyInstalledVersion(t *testing.T) {
 	deps := Deps{
 		Output: io.Discard,
 		RunHelm: func(_ context.Context, args []string) ([]byte, error) {
+			if out, ok := testUpgradeValuePreflight(args); ok {
+				return out, nil
+			}
 			if len(args) >= 2 && args[0] == "list" {
 				releases := []helmRelease{{
 					Name:      "oberth",
@@ -1187,6 +1250,9 @@ func TestRunUpgradeRetriesTransientVerifyExecFailure(t *testing.T) {
 		Output:       &output,
 		PollInterval: time.Millisecond,
 		RunHelm: func(_ context.Context, args []string) ([]byte, error) {
+			if out, ok := testUpgradeValuePreflight(args); ok {
+				return out, nil
+			}
 			switch {
 			case args[0] == "list":
 				releases := []helmRelease{{
@@ -1268,6 +1334,9 @@ func TestRunUpgradeFailsWhenVersionUnverifiable(t *testing.T) {
 		Output:       &output,
 		PollInterval: time.Millisecond,
 		RunHelm: func(_ context.Context, args []string) ([]byte, error) {
+			if out, ok := testUpgradeValuePreflight(args); ok {
+				return out, nil
+			}
 			switch {
 			case args[0] == "list":
 				releases := []helmRelease{{
@@ -1354,6 +1423,9 @@ func TestRunUpgradeFailsOnVersionMismatchFullFlow(t *testing.T) {
 		Output:       &output,
 		PollInterval: time.Millisecond,
 		RunHelm: func(_ context.Context, args []string) ([]byte, error) {
+			if out, ok := testUpgradeValuePreflight(args); ok {
+				return out, nil
+			}
 			switch {
 			case args[0] == "list":
 				releases := []helmRelease{{
@@ -1408,6 +1480,9 @@ func TestRunUpgradeRecoveryGuidanceOnHelmFailure(t *testing.T) {
 	deps := Deps{
 		Output: &output,
 		RunHelm: func(_ context.Context, args []string) ([]byte, error) {
+			if out, ok := testUpgradeValuePreflight(args); ok {
+				return out, nil
+			}
 			switch args[0] {
 			case "list":
 				releases := []helmRelease{{
@@ -1491,6 +1566,9 @@ func TestRunUpgradeRecoveryGuidanceOnRolloutFailure(t *testing.T) {
 	deps := Deps{
 		Output: &output,
 		RunHelm: func(_ context.Context, args []string) ([]byte, error) {
+			if out, ok := testUpgradeValuePreflight(args); ok {
+				return out, nil
+			}
 			switch {
 			case args[0] == "list":
 				releases := []helmRelease{{
@@ -1627,7 +1705,7 @@ func TestUpgradeHelmArgsIncludesUserValues(t *testing.T) {
 		UserValues:    []string{"/tmp/custom.yaml"},
 		UserSet:       []string{"maxConcurrentJobs=5"},
 	}
-	args := upgradeHelmArgs(cfg, "oberth-charts/oberth", "img@sha256:0000000000000000000000000000000000000000000000000000000000000000")
+	args := upgradeHelmArgs(cfg, "oberth-charts/oberth", "img@sha256:0000000000000000000000000000000000000000000000000000000000000000", testUpgradeCompatibility)
 	joined := strings.Join(args, " ")
 	if !strings.Contains(joined, "--values /tmp/custom.yaml") {
 		t.Fatalf("missing --values in args: %q", joined)
@@ -1646,7 +1724,7 @@ func TestUpgradeHelmArgsUserValuesAfterPins(t *testing.T) {
 		UserValues:    []string{"/tmp/custom.yaml"},
 		UserSet:       []string{"maxConcurrentJobs=5"},
 	}
-	args := upgradeHelmArgs(cfg, "oberth-charts/oberth", "img@sha256:0000000000000000000000000000000000000000000000000000000000000000")
+	args := upgradeHelmArgs(cfg, "oberth-charts/oberth", "img@sha256:0000000000000000000000000000000000000000000000000000000000000000", testUpgradeCompatibility)
 	var goProxyIdx, valuesIdx, userSetIdx int
 	for i, arg := range args {
 		switch {
@@ -1675,6 +1753,9 @@ func TestDryRunRendersGoProxyPins(t *testing.T) {
 	deps := Deps{
 		Output: &output,
 		RunHelm: func(_ context.Context, args []string) ([]byte, error) {
+			if out, ok := testUpgradeValuePreflight(args); ok {
+				return out, nil
+			}
 			if len(args) >= 2 && args[0] == "list" {
 				releases := []helmRelease{{
 					Name: "oberth", Namespace: "oberth",
@@ -1712,6 +1793,9 @@ func TestDryRunIncludesUserValues(t *testing.T) {
 	deps := Deps{
 		Output: &output,
 		RunHelm: func(_ context.Context, args []string) ([]byte, error) {
+			if out, ok := testUpgradeValuePreflight(args); ok {
+				return out, nil
+			}
 			if len(args) >= 2 && args[0] == "list" {
 				releases := []helmRelease{{
 					Name: "oberth", Namespace: "oberth",
@@ -1749,8 +1833,8 @@ func TestDryRunAndRealArgsAgree(t *testing.T) {
 		Timeout:       5 * time.Minute,
 		UserSet:       []string{"maxConcurrentJobs=5"},
 	}
-	realArgs := upgradeHelmArgs(cfg, "oberth-charts/oberth", "img@sha256:0000000000000000000000000000000000000000000000000000000000000000")
-	dryArgs := upgradeHelmArgs(cfg, "oberth-charts/oberth", "<chart-default>")
+	realArgs := upgradeHelmArgs(cfg, "oberth-charts/oberth", "img@sha256:0000000000000000000000000000000000000000000000000000000000000000", testUpgradeCompatibility)
+	dryArgs := upgradeHelmArgs(cfg, "oberth-charts/oberth", "<chart-default>", testUpgradeCompatibility)
 
 	if len(realArgs) != len(dryArgs) {
 		t.Fatalf("arg count mismatch: real=%d dry=%d\nreal=%v\ndry=%v", len(realArgs), len(dryArgs), realArgs, dryArgs)
@@ -1813,6 +1897,9 @@ func TestUpgradeAnnouncesSchemaWhenMigrationPending(t *testing.T) {
 	deps := Deps{
 		Output: &output,
 		RunHelm: func(_ context.Context, args []string) ([]byte, error) {
+			if out, ok := testUpgradeValuePreflight(args); ok {
+				return out, nil
+			}
 			if len(args) >= 2 && args[0] == "list" {
 				releases := []helmRelease{{
 					Name: "oberth", Namespace: "oberth",
@@ -1856,6 +1943,9 @@ func TestUpgradeRequiresYesForNonLocalSchemaChange(t *testing.T) {
 		ContextName: "prod-cluster",
 		RestConfig:  &rest.Config{Host: "https://example.com:6443"},
 		RunHelm: func(_ context.Context, args []string) ([]byte, error) {
+			if out, ok := testUpgradeValuePreflight(args); ok {
+				return out, nil
+			}
 			if args[0] == "list" {
 				releases := []helmRelease{{
 					Name: "oberth", Namespace: "oberth",
@@ -1892,6 +1982,9 @@ func TestUpgradeSilentWhenSchemaUnchanged(t *testing.T) {
 	deps := Deps{
 		Output: &output,
 		RunHelm: func(_ context.Context, args []string) ([]byte, error) {
+			if out, ok := testUpgradeValuePreflight(args); ok {
+				return out, nil
+			}
 			if len(args) >= 2 && args[0] == "list" {
 				releases := []helmRelease{{
 					Name: "oberth", Namespace: "oberth",

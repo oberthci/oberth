@@ -112,6 +112,29 @@ Helm's `--reset-then-reuse-values` mode. The chart also supports direct
 fall back to the pinned BusyBox helper and `go-git`. Custom utility-image mirrors
 and explicit backend selections are preserved.
 
+Upgrades require Helm 3.14 or newer. Before applying changes, the CLI reads
+`helm get values --all` and pins the installed `compatibility.schemaIdentity`,
+`compatibility.auditDomain` and `compatibility.witnessKeyInfo`, even when they
+came only from the old chart defaults. Upgrade overrides cannot change those
+identities. Stored user values and requested overrides are checked against the
+target chart's schema before the Oberth or Argo controller upgrade begins;
+unknown keys are reported and refused rather than silently removed.
+
+When a target chart removes a configured key, export the installed values,
+remove or migrate the unsupported keys in an explicit values file, and reconcile
+with `helm upgrade ... --reset-values --values cleaned.yaml` before retrying.
+Keep the deployment's existing compatibility identities in that file. A manual
+downgrade also needs an explicit values file matching the older schema, without
+the newer chart's keys; reusing newer values directly will be rejected. Database
+migrations remain forward-only: an older binary may require restoring its
+matching database backup before it can run.
+
+Re-running `oberth install` and restoring a backup intentionally retain
+`--reuse-values`: these paths preserve installed chart defaults, while restore
+sets only the database identities it needs. Every newly introduced value must
+therefore have a template fallback. The v0.17.53 raw-values render and actual
+Helm install/restore tests cover both new keys, `utilityImage` and `gitBackend`.
+
 The SSH host key is generated once into OpenBao and reused across upgrades.
 With a production secret store the HTTPS certificate is a 30-day leaf the
 server requests from a name-constrained CA in OpenBao's PKI engine and renews

@@ -577,7 +577,10 @@ func applyRestore(ctx context.Context, cfg RestoreConfig, deps backupDeps, archi
 
 // restoreHelmArgs builds the `helm upgrade --reuse-values` that sets the
 // overlay, with the overlay in a values file inside the private working
-// directory (removed when the restore returns).
+// directory (removed when the restore returns). Retain the installed chart
+// defaults deliberately; restore sets only database compatibility identities.
+// Newly introduced chart keys require template fallbacks, covered by the
+// v0.17.53 raw-values render and actual Helm restore tests.
 func restoreHelmArgs(ctx context.Context, cfg RestoreConfig, deps backupDeps, target restoreTarget, work string) ([]string, error) {
 	body, err := json.Marshal(target.Overlay)
 	if err != nil {

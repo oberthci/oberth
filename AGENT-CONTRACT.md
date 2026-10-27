@@ -2234,10 +2234,11 @@ the relevant tests, and the operator-facing documentation in the same change.
 
 `oberth upgrade` accepts `--values`/`-f` (repeatable values file) and `--set`
 (repeatable `key=value`) flags, forwarded to `helm upgrade` after the
-installer's own pinned arguments. Three keys are pinned and cannot be
-overridden via `--set` or `--values`: `image.ref`, `argo.goProxy.enabled`,
-`argo.goProxy.port`. Setting a pinned key (or a parent path like `image`)
-returns `ErrPinnedKeyOverride` before any cluster mutation. Values files are
+installer's own pinned arguments. Protected keys are `image.ref`,
+`argo.goProxy.enabled`, `argo.goProxy.port`, `watchTunnel.image`,
+`watchTunnel.openbaoImage`, and the three `compatibility.*` identity tokens.
+They cannot be overridden via `--set` or `--values`. Setting a pinned key
+(or a parent path like `image`) returns `ErrPinnedKeyOverride` before any cluster mutation. Values files are
 parsed and their leaf keys checked for the same conflicts.
 
 `--set` key paths are validated against the chart's default values hierarchy
@@ -2256,6 +2257,25 @@ fallbacks for newly introduced keys: `utilityImage` falls back to the shared
 utility pin and `gitBackend` to `go-git`. `hack/test-chart-upgrade.sh` renders the
 new chart against the unmodified v0.17.53 values shape, both with and without
 new defaults. It runs from branch and release chart gates before publication.
+
+Helm >= 3.14 is checked before a real upgrade. The three compatibility identity
+values are read from the installed release with `helm get values --all`,
+validated as protocol tokens and pinned explicitly with `--set-string`;
+new chart defaults and upgrade overrides must never redefine them. Missing or
+unreadable identities refuse the upgrade. Preflight renders the target chart
+with stored user values (not the old defaults), the same pins and requested
+overrides, so target schema errors and unknown keys refuse before either the
+Argo controller or Oberth mutation. Temporary stored-value files are private
+and removed on all exits; rendered manifests are not printed by this preflight.
+Unknown user keys are reported, not automatically pruned. Manual reconciliation
+and downgrades require `--reset-values` with a cleaned explicit values file
+matching the target schema and preserving existing compatibility identities;
+forward-only database migration constraints still apply.
+
+Install re-runs and restore deliberately retain `--reuse-values`, preserving
+old chart defaults. Restore overrides only its database compatibility values.
+Every newly added chart key must have a template fallback, exercised by the
+historical raw-values gate and actual Helm install/restore upgrade tests.
 
 ## Schema migrations
 

@@ -48,6 +48,7 @@ func TestUpgradeOverrideGrammarAndPins(t *testing.T) {
 
 // This uses the same Helm binary installed by native CI, not a model of strvals.
 func TestUpgradeOverrideActualHelmSemantics(t *testing.T) {
+	requireHelmForUpgradeTest(t)
 	dir := t.TempDir()
 	if err := os.Mkdir(filepath.Join(dir, "templates"), 0o700); err != nil {
 		t.Fatal(err)
