@@ -26,7 +26,7 @@ fi
 [ ! -e "$results" ] || { printf 'results directory must not exist: %s\n' "$results" >&2; exit 2; }
 mkdir -p "$results"
 results=$(cd "$results" && pwd -P)
-repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)
+repo_root=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd -P)
 if $synthetic; then
   python3 "$repo_root/hack/gitcache-bench/generate.py" "$results/source.git" > "$results/generate.log" 2>&1
   source_path=$results/source.git
@@ -34,7 +34,7 @@ fi
 git -C "$source_path" rev-parse HEAD > "$results/source-head.txt"
 git -C "$source_path" count-objects -v > "$results/source-objects.txt"
 export GOTOOLCHAIN=go1.26.10
-export GOMAXPROCS=${BENCH_CPUS:-4}
+export GOMAXPROCS="${BENCH_CPUS:-4}"
 if $use_docker; then
   architecture=$(docker info --format '{{.Architecture}}')
   case "$architecture" in arm64|aarch64) architecture=arm64 ;; amd64|x86_64) architecture=amd64 ;; *) printf 'unsupported architecture: %s\n' "$architecture" >&2; exit 2 ;; esac

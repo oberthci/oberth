@@ -89,7 +89,8 @@ printf '\n  Oberth %s (%s/%s)\n\n' "$VERSION" "$OS" "$ARCH"
 
 # ---- download ----
 
-WORK=$(mktemp -d) && trap 'rm -rf "$WORK"' EXIT || fail "could not create temporary directory"
+WORK=$(mktemp -d) || fail "could not create temporary directory"
+trap 'rm -rf "$WORK"' EXIT || fail "could not install temporary-directory cleanup"
 
 printf '  Downloading %s...' "$BINARY"
 curl --proto '=https' --tlsv1.2 -fsSL "${RELEASES}/${VERSION}/${BINARY}" -o "${WORK}/${BINARY}" ||
