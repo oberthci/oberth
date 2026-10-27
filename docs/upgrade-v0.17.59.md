@@ -112,6 +112,10 @@ argo:
           demo-publish: artifact-deployer
         step_service_accounts:
           demo-publish: project-demo-publish-wif
+        step_routes:
+          demo-publish:
+            pattern: demo-deploy-*
+            file: .oberth/demo-deploy.yaml
   releaseTagRoutes:
     github/example/project:
       - pattern: demo-deploy-*
@@ -124,6 +128,11 @@ there are no wildcard identity grants. A pinned account must be distinct from
 repository, shared, CI and all other step accounts. The chart creates it in the
 pipeline namespace with automount off and no RBAC bindings. No dummy secret
 grant is needed. WIF-only leaves cannot consume the Oberth secret store.
+Each dedicated account requires a matching `step_routes.<template>` pin to an
+existing `releaseTagRoutes` entry for that repository, exactly matching its
+file **and** configured pattern. There is no implicit grant for the unmatched
+default release file. A dedicated identity for release.yaml needs an explicit
+route for that file and its allowed tag pattern.
 
 `service_account_name` may be omitted as above when **every** configured WIF
 template has a dedicated step account. Legacy unpinned WIF templates still need
@@ -165,13 +174,18 @@ Patterns match the whole tag name without `refs/tags/`, using path globs;
 `*` does not cross `/`. Backslash escapes, whitespace and `refs/` prefixes are
 refused. Multiple matching routes refuse the tag. Use at most 32 routes per
 repository, 256 repositories and 256 characters per pattern. Files must be clean
-single-level `.oberth/<DNS-label>.yaml`, excluding build/fragment/schedule files.
+single-level `.oberth/<DNS-label>.yaml`, excluding build/fragment/schedule/tests
+contract files.
 A missing or invalid selected file fails without fallback. Unmatched tags still
 use release.yaml; non-tag runs still use build.yaml. No route bypasses fresh
 default-branch reachability, credential checks or normal size admission.
 
-Role/step identity maps are **not file-specific**: use distinct template names
-for distinct capabilities across release documents. Preflight checks the default
+Dedicated step identities are scoped to the exact route as well as repository
+and template: another file, the unmatched default, or another pattern selecting
+the same file cannot reuse them by copying a template name. Legacy repository
+role maps retain their scope; use distinct names for distinct capabilities.
+Preflight and read-only identity plans preserve each inspected file's provenance;
+a planned identity does not authorize a tag. Preflight checks the default
 release file and every routed file; local `oberth validate` alone does not load
 admin routes. Changes apply after a server rollout to future/unsubmitted work
 and explicit reruns; submitted Workflows retain their immutable spec.
@@ -242,7 +256,8 @@ Before resuming normal submissions:
 3. If new release policy is enabled, check the pinned step accounts, exact
    cloud trust subjects, branch/sibling refusal and successful intended tag
    exchange. Confirm a matching tag audits the routed `pipeline_file` and uses
-   its document size; an unmatched tag still uses release.yaml. Do not issue a
+   its document size; an unmatched tag still uses release.yaml. A copied template
+   there (or in another route) must not acquire the routed step identity. Do not issue a
    publishing/apply tag just to test routing without its normal authorization.
 
 Resume external triggers and schedules only after these checks. Take a new
