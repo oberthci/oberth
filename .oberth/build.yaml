@@ -54,25 +54,10 @@
 # declares automountServiceAccountToken: false.
 # internal/argojob/oberth_pipeline_test.go checks the admitted Pods.
 #
-# DAG structure:
-#
-#   setup --+--> lint --+--> test-store ----+--> build-amd64
-#           |           +--> test-service --+
-#           |           +--> test-rest -----+
-#           |           +--> test-gitcache-backends --+
-#           |           |                   |
-#           |           +--> chart ---------+--> build-arm64
-#           |                               |
-#           |                               +--> build-darwin-amd64
-#           |                               |
-#           |                               +--> build-darwin-arm64
-#           |
-#           +--> test-openbao  (real OpenBao policy isolation, #803)
-#           |
-#           +--> security  (aquasec/trivy image, no install step needed)
-#           |
-#           +--> shellcheck
-#
+# After setup, security gates lint, OpenBao tests, diagnostics and publisher
+# verification. Shellcheck can run alongside security. Lint gates the remaining
+# tests and chart checks; those gate every build target. Workflow parallelism
+# bounds active Pods without changing any leaf's execution or resource budget.
 apiVersion: argoproj.io/v1alpha1
 kind: Workflow
 metadata:
@@ -80,6 +65,8 @@ metadata:
     oberth.ci/size: L
 spec:
   entrypoint: ci
+  # Bound repository-local fan-out; keep node CPU available to other workflows.
+  parallelism: 2
   activeDeadlineSeconds: 3600
 
   volumeClaimTemplates:
@@ -101,7 +88,7 @@ spec:
         template: setup
       - name: lint
         template: lint
-        depends: setup
+        depends: setup && security
       - name: test-store
         template: test-store
         depends: lint
@@ -119,7 +106,7 @@ spec:
         depends: lint
       - name: test-openbao
         template: test-openbao
-        depends: setup
+        depends: setup && security
       - name: security
         template: security
         depends: setup
@@ -131,10 +118,10 @@ spec:
         depends: lint
       - name: release-diagnostic
         template: release-diagnostic
-        depends: setup
+        depends: setup && security
       - name: verify-publisher-tools
         template: verify-publisher-tools
-        depends: setup
+        depends: setup && security
       - name: build-amd64
         template: build-amd64
         depends: "test-store && test-service && test-rest && test-gitcache-backends && test-archive-history && chart"

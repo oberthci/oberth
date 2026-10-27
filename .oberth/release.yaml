@@ -66,6 +66,8 @@ metadata:
     oberth.ci/secret-paths: oberth/data/release/cosign-secret,oberth/data/release/homebrew-tap-key,oberth/data/release/cloudflare-oberth-workers-token
 spec:
   entrypoint: release
+  # Bound repository-local fan-out; keep node CPU available to other workflows.
+  parallelism: 2
   activeDeadlineSeconds: 14400
   volumeClaimTemplates:
   - metadata:
@@ -116,7 +118,7 @@ spec:
         template: release-setup
       - name: release-lint
         template: release-lint
-        depends: release-setup
+        depends: release-setup && release-scan
       - name: release-scan
         template: release-scan
         depends: release-setup
@@ -125,13 +127,13 @@ spec:
         depends: release-lint && release-scan
       - name: release-chart-test
         template: release-chart-test
-        depends: release-setup
+        depends: release-setup && release-scan
       - name: release-build
         template: release-build
         depends: release-test && release-chart-test && release-verify-publisher-tools
       - name: release-verify-publisher-tools
         template: verify-publisher-tools
-        depends: release-setup
+        depends: release-setup && release-scan
       - name: release-sign-binaries
         template: release-sign-binaries
         depends: release-build
