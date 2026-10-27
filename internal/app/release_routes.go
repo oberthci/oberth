@@ -20,12 +20,12 @@ func (jobs *ArgoJobs) runSourceFile(request service.JobRequest) (string, error) 
 		return argoworkflow.TriggerFile(trigger)
 	}
 	// Preserve legacy behavior for unconfigured repositories, including older
-	// trusted callers without full tag refs. Configured routing requires a tag.
+	// trusted callers without durable tag kinds. Configured routing requires a tag.
 	repo := declarationRepo(request)
 	if len(jobs.config.ReleaseTagRoutes[repo]) == 0 {
 		return argoworkflow.ReleaseFile, nil
 	}
-	return jobs.config.ReleaseTagRoutes.Resolve(repo, request.Run.Ref)
+	return jobs.config.ReleaseTagRoutes.Resolve(repo, request.Run.RefKind, request.Run.Ref)
 }
 
 func (jobs *ArgoJobs) readRunSource(request service.JobRequest) ([]byte, error) {

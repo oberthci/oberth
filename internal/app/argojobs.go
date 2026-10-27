@@ -360,8 +360,13 @@ func (jobs *ArgoJobs) create(ctx context.Context, request service.JobRequest, tr
 	if err != nil {
 		return err
 	}
+	pipelineFile, err := jobs.runSourceFile(request)
+	if err != nil {
+		return err
+	}
 	submission := argojob.Request{
-		RunID: request.Run.ID, Name: request.JobName,
+		PipelineFile: pipelineFile,
+		RunID:        request.Run.ID, Name: request.JobName,
 		Repo: request.Repository.Name, UpstreamName: request.UpstreamName, UpstreamOrg: request.UpstreamOrg,
 		Ref: request.Run.Ref, SHA: testedSHA, Trigger: trigger, RunTrigger: kind, ScheduleEntry: request.Run.ScheduleEntry, Source: source,
 		SourceDir: request.SourceDir, ApprovedSecrets: approvedSecrets,

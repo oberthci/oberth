@@ -23,13 +23,14 @@ The file is bounded to 1 MiB, 256 repositories, 32 routes per repository and
 256 characters per pattern.
 
 Patterns use Go path glob syntax (`*`, `?`, character classes), matched against
-the whole tag name after `refs/tags/`, never a branch ref. `*` does not cross `/`.
+the durable bare tag name, guarded by `Run.RefKind == tag`, never a branch
+with the same spelling. Receive handling strips `refs/tags/` before admission. `*` does not cross `/`.
 Backslash escapes, spaces, tabs, CR/LF and `refs/` prefixes are disallowed. A tag matching
 more than one entry is refused; list order never decides authority. An unmatched
 tag uses the usual release file. Repository keys include upstream, organization
 and repository; another upstream or sibling repository cannot inherit a route.
 
-Files must be clean `.oberth/<DNS-label>.yaml` paths. Build, fragment and schedule
+Files must be clean `.oberth/<DNS-label>.yaml` paths. Build, fragment, schedule and tests contract
 files, nested paths, traversal and absolute paths are refused. The existing
 bounded source-root reader reads the selected file at the tag's immutable tested
 commit. A missing, unreadable or invalid selected file fails the run, with no
@@ -70,9 +71,11 @@ it does not load the server's administrator route configuration.
 
 Routes select files, not identities. A leaf requesting WIF still needs the
 administrator's exact repository/template/role mapping, and a WIF-only per-step
-account still needs its separate exact mapping. These maps are not file-specific;
-use distinct template names when different release documents need distinct
-capabilities. See [release WIF](release-wif.md). No branch run can acquire an
+account also needs `step_routes.<template>` pinning the exact configured route
+file and pattern. Another route (even one selecting the same file) and the
+unmatched default release file cannot reuse that identity by copying its
+template name. Legacy repository role maps retain their existing scope; use
+distinct template names for distinct capabilities. See [release WIF](release-wif.md). No branch run can acquire an
 identity by matching a release tag pattern.
 
 A rollout changes the policy for future/unsubmitted work and explicit reruns.

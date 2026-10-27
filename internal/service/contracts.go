@@ -366,8 +366,10 @@ type JobRequest struct {
 	// oberth/upstream/ secret paths against it; the value derives from
 	// administrator-owned registration state, never from the pushed source.
 	UpstreamOrg string
-	SourceDir   string
-	Size        periapsis.Size
+	// PipelineFile identifies the document under read-only release preflight.
+	PipelineFile string
+	SourceDir    string
+	Size         periapsis.Size
 	// ConcurrencyGroup is the repository-declared group the scheduler admitted
 	// this run under (#658), empty for none. Engines record it with the
 	// submission; it never selects identity or resources.

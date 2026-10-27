@@ -48,7 +48,7 @@ func (jobs *ArgoJobs) preflightRelease(ctx context.Context, request service.JobR
 		return service.ReleasePreflightResult{}, err
 	}
 	submission := argojob.Request{Repo: request.Repository.Name, UpstreamName: request.UpstreamName, UpstreamOrg: request.UpstreamOrg,
-		Source: source, Trigger: periapsis.TriggerRelease, ApprovedSecrets: approved, StepGrants: grants, Fragments: fragments}
+		Source: source, PipelineFile: request.PipelineFile, Trigger: periapsis.TriggerRelease, ApprovedSecrets: approved, StepGrants: grants, Fragments: fragments}
 	if identities != nil {
 		submission.Identities = identities.Snapshot()
 	}

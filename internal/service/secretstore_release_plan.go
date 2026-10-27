@@ -81,6 +81,7 @@ func (service *API) addReleasePlans(ctx context.Context, response *SecretStorePl
 				found = true
 				request.Run.SHA, request.Run.TestedSHA = entry.SHA, entry.SHA
 				var result ReleasePreflightResult
+				request.PipelineFile = file
 				result, err = planner.PlanRelease(ctx, request, source)
 				for _, check := range result.Checks {
 					if file != releasePreflightFile {

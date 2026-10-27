@@ -48,6 +48,7 @@ func (config *ReleaseWIFConfig) Clone() *ReleaseWIFConfig {
 	for repo, grant := range copy.Repositories {
 		grant.Templates = maps.Clone(grant.Templates)
 		grant.StepServiceAccounts = maps.Clone(grant.StepServiceAccounts)
+		grant.StepRoutes = maps.Clone(grant.StepRoutes)
 		copy.Repositories[repo] = grant
 	}
 	return &copy
@@ -63,6 +64,8 @@ type ReleaseWIFRepository struct {
 	Templates          map[string]string `json:"templates"`
 	// Optional dedicated identities for WIF-only leaves; never Vault grants.
 	StepServiceAccounts map[string]string `json:"step_service_accounts,omitempty"`
+	// Every dedicated account is bound to one exact administrator route.
+	StepRoutes map[string]ReleaseTagRoute `json:"step_routes,omitempty"`
 }
 
 var wifProviderPattern = regexp.MustCompile(`^projects/[0-9]+/locations/global/workloadIdentityPools/[a-z][a-z0-9-]*/providers/[a-z][a-z0-9-]*$`)
@@ -120,7 +123,16 @@ func (config *ReleaseWIFConfig) Validate() error {
 			if len(k8svalidation.IsDNS1123Label(leaf)) != 0 || strings.HasPrefix(leaf, "frag-") || grant.Templates[leaf] == "" || len(k8svalidation.IsDNS1123Subdomain(sa)) != 0 || subjects[sa] {
 				return fmt.Errorf("argojob: release WIF requires a distinct dedicated ServiceAccount for %q template %q", repo, leaf)
 			}
+			route, ok := grant.StepRoutes[leaf]
+			if !ok || (ReleaseTagRoutes{repo: {route}}).Validate() != nil {
+				return fmt.Errorf("argojob: release WIF step %q requires an exact route file and pattern", leaf)
+			}
 			subjects[sa] = true
+		}
+		for leaf := range grant.StepRoutes {
+			if grant.StepServiceAccounts[leaf] == "" {
+				return fmt.Errorf("argojob: release WIF route for unmapped step %q", leaf)
+			}
 		}
 	}
 	return nil
@@ -227,7 +239,7 @@ func authorizeReleaseWIFLeaf(wf *wfv1.Workflow, t *wfv1.Template, topLevel bool,
 	}
 	identityMatches := hasIdentity && identity.ServiceAccountName == grant.ServiceAccountName
 	if grant.StepServiceAccounts[t.Name] != "" {
-		identityMatches = true
+		identityMatches = config.releaseWIFStepRouteMatches(key, t.Name, request)
 	} // Exact dedicated policy needs no secret-derived repository identity.
 	if !ok || !identityMatches || grant.Templates[t.Name] != role || !argoworkflow.ValidReleaseWIFRole(role) {
 		return fmt.Errorf("argojob: release WIF capability is not approved for %q template %q role %q", key, t.Name, role)

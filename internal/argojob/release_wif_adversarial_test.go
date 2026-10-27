@@ -182,6 +182,9 @@ func wifControllerInput(t *testing.T, shape string) (Config, Request) {
 		}
 	})
 	r.Ref = "refs/tags/v1.0.0"
+	if shape == "wif-only-step" {
+		r.Ref = "v1.0.0"
+	}
 	r.SourceVolume = SourceVolume{ClaimName: "wif-proof-source", SubPath: "src"}
 	if shape == "vault" {
 		r.ApprovedSecrets["oberth/data/release/r2-upload-token"] = true

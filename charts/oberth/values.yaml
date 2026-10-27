@@ -235,6 +235,8 @@ argo:
   executorScratchSizeLimit: 1Gi
   # Public administrator capabilities only; empty disables release federation.
   # Tokens/private keys must never be supplied here. See docs/release-wif.md.
+  # Dedicated step_service_accounts additionally require step_routes pins to
+  # exact configured releaseTagRoutes entries (both file and pattern).
   releaseWIF: {}
 
   # Administrator-only tag globs -> release workflow files, by canonical repo.

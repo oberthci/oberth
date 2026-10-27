@@ -4,7 +4,7 @@
   "Sum": "h1:qa2GNFSihNtvI/v9/dgwq84E1mrfbVb8eTXB6YMxMlY=",
   "GoModSum": "h1:WLJnjr1uNM+6dhpVdnJArvSq90FJ3bdRgHEsHVR00wM=",
   "Files": {
-    "README.md": "22fb7f5a5fc37855d3d149024f082c15b4d415740c07b337df2fb82c11c5c9ca",
+    "README.md": "68e0a6ca811779f906391dbfa3cd9ea724af3c5876fa1f7d93ab27a575eeaad8",
     "capture_test.go.txt": "924cca9690d717e9ac8b308c3dc1ec48324e8451fdf6d7da243297090915f1cd",
     "chart-writer-sa-false-before-patch.json": "0a5718a30377b9a01d76b09f0e4ab35316c7c36c91d9ce3d1a4fd0637976d14a",
     "chart-writer-sa-false-submitted.json": "1ac2f5996f0fd3c9b4cc3303f7a5334f3f25fd7cad6c6a153e841aee331c702f",
@@ -38,17 +38,17 @@
     "sibling-sa-true-submitted.json": "edef52b87733e7f02e63da6770c3fdec42448fb913372f4e157b9a1a6e1a8c8a",
     "sibling-workflow.json": "f3d34bc66de85d5031df4af9abfd36aa84d35483c544025cea9db37f900799ee",
     "validation-wif-only-step.log.txt": "a3b1e97bfcee4cbecbdf030248365785fba12e2c729e09a0ee83f67241704d33",
-    "validation.log": "85d8f9279dfc8ae380fb557eeeee6953f601dc5adc39a2c9750615a82fb7a9ab",
+    "validation.log": "0082a3e80b1bb320a73001394b70268932270e15fc9ee8208d5cae169629fa9c",
     "vault-sa-false-before-patch.json": "67b870390259467cd11da8bd5117e900a5bf760b2afa9a17302c8727140889b2",
     "vault-sa-false-submitted.json": "a366360b7d2541b15faf3093646696485a1c1fc275f080f4173798ab8c3d08d5",
     "vault-sa-true-before-patch.json": "cb12c3297ec203f3e184f90ecb219bbb4ca809198555600fece8e1caf68a6004",
     "vault-sa-true-submitted.json": "e4cc891152e25044ace53368d43352d18ed9ab620d9e159306c04e22bcb8d863",
     "vault-workflow.json": "2ea4328cd2498154b7d9abbc3eec547951258ef5065b29ec45f309a6c059b22c",
-    "wif-only-step-sa-false-before-patch.json": "ab99ecb4f3177a54bdb9b7059c4a2a58358b935925d82d401cb4bbd408b659c6",
-    "wif-only-step-sa-false-submitted.json": "b3a51175bab38ce173910db01077a84c3d5c52119bef7f46cb9eacb3409f5e47",
-    "wif-only-step-sa-true-before-patch.json": "d180cff9c585a73de09673b581fbe2b2e49962d43479681ad2b7a597088b92bf",
-    "wif-only-step-sa-true-submitted.json": "5bddf44b1608cf7fd280369b101f4cdabc548db5189ec0057ecf14941ed6b361",
-    "wif-only-step-workflow.json": "efe8032a3a23c6b4b7d254a1fb3587c5e54915fbeb08915c8ba6c2df44ad33be"
+    "wif-only-step-sa-false-before-patch.json": "40c2ffc0bbee9213f815e0e6389538319e19cbad4b9ff5b1cb43d635f6d512d6",
+    "wif-only-step-sa-false-submitted.json": "155c50be22843e1ad96ca208b9f74f308afab9a05b63ac7ae38d9cf2c7d1e663",
+    "wif-only-step-sa-true-before-patch.json": "7e66c16c272b4e16b30b6f5960c32ec37bd14b6bb4fb317c2f6e133709618b81",
+    "wif-only-step-sa-true-submitted.json": "0f14227a2030ff92c1098506152148c3876f037c5fb3394ebbb0dd56bc9202bd",
+    "wif-only-step-workflow.json": "ef0882772918ee0b55a657190e5baa287bd2a95ac1dea4b21cd8a84a16c11935"
   },
   "instrumented_sha256": "e94c816c3116278d8b6c363568ab3922aed0a178e6afcd83d6fd0a3270b0e8d4"
 }

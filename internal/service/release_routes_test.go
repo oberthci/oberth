@@ -25,7 +25,13 @@ func (g *routedReleaseCheckGit) ReadDefaultBlob(ctx context.Context, repo, file 
 
 type routedReleaseChecker struct {
 	releaseChecker
-	files []string
+	files    []string
+	requests []JobRequest
+}
+
+func (c *routedReleaseChecker) PreflightRelease(ctx context.Context, request JobRequest, source []byte) (ReleasePreflightResult, error) {
+	c.requests = append(c.requests, request)
+	return c.releaseChecker.PreflightRelease(ctx, request, source)
 }
 
 func (c *routedReleaseChecker) ReleasePreflightFiles(context.Context, JobRequest) ([]string, error) {
@@ -39,6 +45,9 @@ func TestReleasePreflightIncludesAdminRoutedFiles(t *testing.T) {
 	result, err := releasePreflight(t.Context(), git, checker, request, "", true)
 	if err != nil || checker.calls != 1 || len(result.Problems) != 1 || !strings.Contains(result.Problems[0], ".oberth/deploy.yaml: unapproved role") {
 		t.Fatalf("routed declaration bypassed preflight: %+v err=%v calls=%d", result, err, checker.calls)
+	}
+	if len(checker.requests) != 1 || checker.requests[0].PipelineFile != ".oberth/deploy.yaml" {
+		t.Fatalf("preflight lost source-file provenance: %+v", checker.requests)
 	}
 	git.source = nil
 	result, err = releasePreflight(t.Context(), git, checker, request, "", true)
@@ -71,4 +80,25 @@ func TestRoutedPreflightPinsOneDefaultCommit(t *testing.T) {
 	if err != nil || git.defaults != 1 || len(git.files) != 1 || git.files[0] != ".oberth/deploy.yaml" || checker.calls != 2 {
 		t.Fatalf("mixed default revisions: defaults=%d files=%v calls=%d err=%v", git.defaults, git.files, checker.calls, err)
 	}
+}
+
+func TestRoutedIdentityPlanCarriesFileProvenance(t *testing.T) {
+	service := testService(t)
+	checker := &routedReleasePlanner{releasePlanChecker: releasePlanChecker{}, files: []string{releasePreflightFile, ".oberth/deploy.yaml"}}
+	service.releasePreflight = checker
+	service.git = &pinnedReleaseFilesGit{releaseCheckGit: &releaseCheckGit{}}
+	response := computeSecretStorePlan(nil)
+	service.addReleasePlans(t.Context(), &response)
+	if len(checker.requests) != 2 || checker.requests[0].PipelineFile != releasePreflightFile || checker.requests[1].PipelineFile != ".oberth/deploy.yaml" {
+		t.Fatalf("identity plan lost file provenance: %+v", checker.requests)
+	}
+}
+
+type routedReleasePlanner struct {
+	releasePlanChecker
+	files []string
+}
+
+func (c *routedReleasePlanner) ReleasePreflightFiles(context.Context, JobRequest) ([]string, error) {
+	return c.files, nil
 }

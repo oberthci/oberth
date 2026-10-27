@@ -35,11 +35,23 @@ For example, the administrator's public JSON file can contain:
   "repositories": {
     "github/example/project": {
       "templates": {"publish": "artifact-deployer"},
-      "step_service_accounts": {"publish": "project-publish-wif"}
+      "step_service_accounts": {"publish": "project-publish-wif"},
+      "step_routes": {"publish": {"pattern": "deploy-*", "file": ".oberth/deploy.yaml"}}
     }
   }
 }
 ```
+
+Every dedicated account also requires `step_routes.<template>` with the exact
+`file` and `pattern` of an existing `argo.releaseTagRoutes` entry for that repo.
+For the example above configure `deploy-* -> .oberth/deploy.yaml` separately.
+Both the selected route pattern and workflow file must match at admission;
+copying `publish` into release.yaml or another route cannot reuse the identity.
+Two patterns selecting the same file remain distinct capabilities. To bind a
+dedicated identity to release.yaml, configure an explicit route for that file
+and its allowed tag pattern; the unmatched default is not an implicit grant.
+Read-only preflight checks the file's planned binding without inventing a tag,
+and does not authorize delivery. Legacy repository WIF mappings remain unchanged.
 
 Optional `step_service_accounts` pins a dedicated account for an approved
 WIF-only leaf. When every WIF leaf is pinned and there are no secret-store consumers, the

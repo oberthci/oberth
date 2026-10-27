@@ -67,6 +67,7 @@ func releasePreflight(ctx context.Context, git vmrunner.PolicyGit, checker Relea
 		if bytes.Equal(source, previous) {
 			continue
 		}
+		request.PipelineFile = file
 		result, err := checker.PreflightRelease(ctx, request, source)
 		if err != nil {
 			return combined, err

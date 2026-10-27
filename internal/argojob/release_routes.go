@@ -10,6 +10,9 @@ import (
 	k8svalidation "k8s.io/apimachinery/pkg/util/validation"
 
 	"github.com/oberthci/oberth/internal/gitcache"
+	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/schedule"
+	"github.com/oberthci/oberth/internal/vmrunner"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 )
 
@@ -38,7 +41,7 @@ func validReleaseRouteFile(file string) bool {
 		return false
 	}
 	name := strings.TrimSuffix(strings.TrimPrefix(file, ".oberth/"), ".yaml")
-	return len(k8svalidation.IsDNS1123Label(name)) == 0 && file != argoworkflow.BuildFile && file != argoworkflow.FragmentFile && file != ".oberth/schedule.yaml"
+	return len(k8svalidation.IsDNS1123Label(name)) == 0 && !slices.Contains([]string{argoworkflow.BuildFile, argoworkflow.FragmentFile, schedule.FileName, vmrunner.ContractFile}, file)
 }
 
 func (routes ReleaseTagRoutes) Validate() error {
@@ -65,27 +68,30 @@ func (routes ReleaseTagRoutes) Validate() error {
 	return nil
 }
 
-// Resolve requires an admitted tag's full ref, not a branch name that happens
-// to match. Multiple matches are refused, never resolved by list order.
-func (routes ReleaseTagRoutes) Resolve(repo, ref string) (string, error) {
-	if !strings.HasPrefix(ref, "refs/tags/") || len(ref) == len("refs/tags/") {
-		return "", errors.New("argojob: release tag dispatch requires refs/tags/<tag>")
+// Resolve requires the durable run kind and bare tag name written by AdmitRelease.
+// A branch with the same spelling is never a release route.
+func (routes ReleaseTagRoutes) Resolve(repo string, kind model.RefKind, ref string) (string, error) {
+	route, err := routes.resolveRoute(repo, kind, ref)
+	return route.File, err
+}
+
+// Preserve the exact selected pattern as well as its file for identity binding.
+func (routes ReleaseTagRoutes) resolveRoute(repo string, kind model.RefKind, ref string) (ReleaseTagRoute, error) {
+	if kind != model.RefTag || ref == "" || strings.HasPrefix(ref, "refs/") {
+		return ReleaseTagRoute{}, errors.New("argojob: release tag dispatch requires a tag run and bare tag name")
 	}
-	selected := ""
+	selected := ReleaseTagRoute{File: argoworkflow.ReleaseFile}
 	for _, entry := range routes[repo] {
-		matched, err := path.Match(entry.Pattern, strings.TrimPrefix(ref, "refs/tags/"))
+		matched, err := path.Match(entry.Pattern, ref)
 		if err != nil {
-			return "", err
+			return ReleaseTagRoute{}, err
 		}
 		if matched {
-			if selected != "" {
-				return "", fmt.Errorf("argojob: ambiguous release tag routes for %q ref %q", repo, ref)
+			if selected.Pattern != "" {
+				return ReleaseTagRoute{}, fmt.Errorf("argojob: ambiguous release tag routes for %q ref %q", repo, ref)
 			}
-			selected = entry.File
+			selected = entry
 		}
-	}
-	if selected == "" {
-		selected = argoworkflow.ReleaseFile
 	}
 	return selected, nil
 }

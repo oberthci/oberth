@@ -79,3 +79,10 @@ Pod, keeps automount false even when that account defaults true, and preserves
 the existing main-only WIF/executor isolation. Both new submitted Pods pass
 Kubernetes v1.35.7 validation. Legacy cases and their input/output captures are
 retained unchanged. This proves Pod construction, not external cloud IAM.
+
+Round 26b recaptures only the five wif-only-step workflow/Pod files. That input
+now uses AdmitRelease's bare tag spelling and an exact administrator file/pattern
+identity pin. The policy digest includes that pin. The other seven inputs and
+retained captures are unchanged. All sixteen newly constructed submitted Pods
+were checked with the same Kubernetes v1.35.7 validator. Cloud IAM remains a
+separate acceptance gate.

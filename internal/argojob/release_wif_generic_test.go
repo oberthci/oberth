@@ -19,18 +19,22 @@ func genericWIFConfig() Config {
 	grant := c.ReleaseWIF.Repositories["github/skipops/oberth"]
 	grant.Templates["main"] = "artifact-deployer"
 	grant.StepServiceAccounts = map[string]string{"main": "release-step-main"}
+	grant.StepRoutes = map[string]ReleaseTagRoute{"main": {Pattern: "v*", File: argoworkflow.ReleaseFile}}
+	c.ReleaseTagRoutes = ReleaseTagRoutes{"github/skipops/oberth": {grant.StepRoutes["main"]}}
 	c.ReleaseWIF.Repositories["github/skipops/oberth"] = grant
 	return c
 }
 
 func genericWIFRequest(t *testing.T, mutate func(*wfv1.Workflow)) Request {
 	t.Helper()
-	return wifTestRequest(t, func(wf *wfv1.Workflow) {
+	r := wifTestRequest(t, func(wf *wfv1.Workflow) {
 		wf.Spec.Templates[0].Metadata.Annotations[argoworkflow.ReleaseWIFRoleAnnotation] = "artifact-deployer"
 		if mutate != nil {
 			mutate(wf)
 		}
 	})
+	r.Ref = "v1"
+	return r
 }
 
 func TestGenericWIFOnlyIdentityWithoutSecretGrant(t *testing.T) {
@@ -183,5 +187,61 @@ func TestGenericWIFRepositoryWithoutAnySecretDerivedIdentity(t *testing.T) {
 	result, err := PreflightRelease(c, r)
 	if err != nil || len(result.Problems) != 0 {
 		t.Fatal(result, err)
+	}
+}
+
+func TestWIFStepIdentityIsBoundToExactRoute(t *testing.T) {
+	for _, kind := range []string{"default-file", "other-file", "other-pattern-same-file", "unmatched-tag", "full-ref", "missing-route", "wrong-kind", "missing-binding", "orphan-binding"} {
+		t.Run(kind, func(t *testing.T) {
+			c := genericWIFConfig()
+			r := genericWIFRequest(t, nil)
+			grant := c.ReleaseWIF.Repositories["github/skipops/oberth"]
+			pin := ReleaseTagRoute{Pattern: "demo-*", File: ".oberth/demo.yaml"}
+			grant.StepRoutes["main"] = pin
+			c.ReleaseTagRoutes["github/skipops/oberth"] = []ReleaseTagRoute{pin, {Pattern: "other-*", File: pin.File}}
+			r.Ref, r.PipelineFile = "demo-1", pin.File
+			switch kind {
+			case "default-file":
+				r.Ref, r.PipelineFile = "v1", argoworkflow.ReleaseFile
+			case "other-file":
+				r.PipelineFile = ".oberth/other.yaml"
+			case "other-pattern-same-file":
+				r.Ref = "other-1"
+			case "unmatched-tag":
+				r.Ref = "v1"
+			case "full-ref":
+				r.Ref = "refs/tags/demo-1"
+			case "missing-route":
+				c.ReleaseTagRoutes = nil
+			case "wrong-kind":
+				r.RunTrigger = argoworkflow.RunTriggerBranch
+			case "missing-binding":
+				delete(grant.StepRoutes, "main")
+			case "orphan-binding":
+				grant.StepRoutes["other"] = pin
+			}
+			c.ReleaseWIF.Repositories["github/skipops/oberth"] = grant
+			if _, err := Build(c, r); err == nil {
+				t.Fatal("dedicated identity escaped its exact file/pattern binding")
+			}
+		})
+	}
+	c := genericWIFConfig()
+	r := genericWIFRequest(t, nil)
+	preflight := r
+	preflight.Ref = ""
+	result, err := PreflightRelease(c, preflight)
+	if err != nil || len(result.Problems) > 0 {
+		t.Fatalf("read-only file preflight: %+v %v", result, err)
+	}
+	// The preflight bypass is local, private and cannot mutate a caller into an
+	// admission-capable request without its own real tag binding.
+	if _, err := Build(c, preflight); err == nil {
+		t.Fatal("preflight authorized delivery without a tag")
+	}
+	snapshot := c.ReleaseWIF.Clone()
+	c.ReleaseWIF.Repositories["github/skipops/oberth"].StepRoutes["main"] = ReleaseTagRoute{Pattern: "*", File: ".oberth/other.yaml"}
+	if snapshot.Repositories["github/skipops/oberth"].StepRoutes["main"].File != argoworkflow.ReleaseFile {
+		t.Fatal("route bindings alias caller")
 	}
 }

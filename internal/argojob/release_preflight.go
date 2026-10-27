@@ -26,6 +26,7 @@ type ReleasePreflight struct {
 // Workflow, seeding source, requesting tokens, or contacting the secret store.
 func PreflightRelease(config Config, request Request) (ReleasePreflight, error) {
 	config.applyDefaults()
+	request.releasePreflight = true
 	result := ReleasePreflight{}
 	if request.Identities != nil {
 		config.PerRepoIdentities = request.Identities.Release
@@ -152,6 +153,7 @@ func PreflightRelease(config Config, request Request) (ReleasePreflight, error) 
 // created. Missing named-step identities are already reported by the static check.
 func (controller *Controller) PreflightReleaseAccounts(ctx context.Context, request Request) error {
 	config := controller.config
+	request.releasePreflight = true
 	if request.Identities != nil {
 		config.PerRepoIdentities = request.Identities.Release
 		config.PerRepoCIIdentities = request.Identities.CI

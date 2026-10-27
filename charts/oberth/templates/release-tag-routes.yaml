@@ -6,7 +6,7 @@
 {{- end }}
 {{- range $repo, $routes := .Values.argo.releaseTagRoutes }}
 {{- range $route := $routes }}
-{{- if has $route.file (list ".oberth/build.yaml" ".oberth/fragment.yaml" ".oberth/schedule.yaml") }}
+{{- if has $route.file (list ".oberth/build.yaml" ".oberth/fragment.yaml" ".oberth/schedule.yaml" ".oberth/tests.yaml") }}
 {{- fail (printf "release tag route for %s must select a release-only workflow file" $repo) }}
 {{- end }}
 {{- end }}

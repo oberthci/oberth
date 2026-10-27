@@ -171,7 +171,12 @@ continuity checks; it must never be used to reset or bypass those checks.
   resource contract consistently for sizing, planning, inspection and execution;
   the audit binds its path and commit. Default-branch tag admission and all
   identity gates still apply. Release preflight/identity plans/declarations
-  include routed files. See [release tag dispatch](docs/release-tag-dispatch.md).
+  include routed files with their source-file provenance. Dispatch requires
+  `Run.RefKind == tag` and the stored bare name. Reserved build/fragment/schedule/
+  tests contracts cannot be route targets. Dedicated WIF-only step accounts also
+  require `step_routes.<template>` pinning an existing exact route file and pattern;
+  copying a template into the default file or another pattern cannot reuse it.
+  Preflight inspects file bindings without granting execution. See [release tag dispatch](docs/release-tag-dispatch.md).
 
 - The server reads a persistent SSH host private key and HTTPS certificate/key
   from the names configured in the Helm values. When no existing Secret is

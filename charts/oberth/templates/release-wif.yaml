@@ -43,6 +43,16 @@ data:
 {{- if not (hasKey $grant.templates $template) }}
 {{- fail (printf "release WIF step %s/%s must have an explicit role mapping" $repo $template) }}
 {{- end }}
+{{- $route := get ($grant.step_routes | default dict) $template | default dict }}
+{{- $matched := false }}
+{{- range $configured := (get ($.Values.argo.releaseTagRoutes | default dict) $repo | default list) }}
+{{- if and (eq ($route.file | default "") $configured.file) (eq ($route.pattern | default "") $configured.pattern) }}
+{{- $matched = true }}
+{{- end }}
+{{- end }}
+{{- if not $matched }}
+{{- fail (printf "release WIF step %s/%s must bind an existing exact release tag route" $repo $template) }}
+{{- end }}
 {{- $_ := set $used $account true }}
 ---
 apiVersion: v1

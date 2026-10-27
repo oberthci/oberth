@@ -577,6 +577,9 @@ type Request struct {
 	// Source is the exact bytes of the repository's pipeline document for
 	// this trigger, read from the immutable run workspace.
 	Source []byte
+	// PipelineFile is selected by the server from administrator routes, never YAML.
+	PipelineFile     string
+	releasePreflight bool
 	// SourceDir is the server-side checkout of this exact revision, on the
 	// server's own volume. It is the bytes the seeder copies.
 	SourceDir string

@@ -14,11 +14,11 @@
       "oberth.ci/trigger": "release"
     },
     "annotations": {
-      "oberth.ci/ref": "refs/tags/v1.0.0",
-      "oberth.ci/release-wif-policy-sha256": "f597b3ee7672fe2fb307bbd24b6565d65d9380af0c832905e958113b3603f84a",
+      "oberth.ci/ref": "v1.0.0",
+      "oberth.ci/release-wif-policy-sha256": "780be93926c681cc4b9819ad1c0785bbea6adf0cebe5ef9fd38dd49e6fe47a64",
       "oberth.ci/run-id": "run-abc123",
       "oberth.ci/size": "L",
-      "oberth.ci/spec-identity": "45ddce6ef95825481b9ca06ef300603968ed203c6de95b04062c00059da1cfc3",
+      "oberth.ci/spec-identity": "c1436cc07db0f015c243c00648c8fb3b8ca598bc9ba03b8d53a47de75a0eecab",
       "workflows.argoproj.io/pod-name-format": "v2"
     }
   },
@@ -53,7 +53,7 @@
             },
             {
               "name": "OBERTH_REF",
-              "value": "refs/tags/v1.0.0"
+              "value": "v1.0.0"
             },
             {
               "name": "OBERTH_SHA",
@@ -69,7 +69,7 @@
             },
             {
               "name": "OBERTH_RELEASE_TAG",
-              "value": "refs/tags/v1.0.0"
+              "value": "v1.0.0"
             },
             {
               "name": "OBERTH_RELEASE_SHA",

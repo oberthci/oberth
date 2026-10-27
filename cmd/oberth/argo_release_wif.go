@@ -58,9 +58,9 @@ func readArgoReleaseWIFConfig(name string) (*argojob.ReleaseWIFConfig, error) {
 
 // Encoding/json otherwise accepts duplicate properties and case-folded struct
 // fields. Neither is an unambiguous administrator authorization document.
-// This closed schema has only objects and strings, at four object depths.
+// This closed schema has only objects and strings, at five object depths.
 func checkReleaseWIFJSON(d *json.Decoder, depth int) error {
-	if depth > 4 {
+	if depth > 5 {
 		return errors.New("capability document is too deeply nested")
 	}
 	token, err := d.Token()
@@ -87,8 +87,11 @@ func checkReleaseWIFJSON(d *json.Decoder, depth int) error {
 		if depth == 0 && key != "namespace" && key != "roles" && key != "repositories" {
 			return errors.New("unknown capability property")
 		}
-		if depth == 2 && key != "provider" && key != "service_account" && key != "service_account_name" && key != "templates" && key != "step_service_accounts" {
+		if depth == 2 && key != "provider" && key != "service_account" && key != "service_account_name" && key != "templates" && key != "step_service_accounts" && key != "step_routes" {
 			return errors.New("unknown capability binding property")
+		}
+		if depth == 4 && key != "pattern" && key != "file" {
+			return errors.New("unknown capability route property")
 		}
 		if err := checkReleaseWIFJSON(d, depth+1); err != nil {
 			return err

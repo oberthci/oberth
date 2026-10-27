@@ -2,11 +2,13 @@ package argojob
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
 
+	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 	"github.com/oberthci/oberth/pkg/periapsis"
 )
@@ -19,6 +21,9 @@ func (config Config) validateReleaseWIFStepAccounts() error {
 	}
 	for repo, grant := range config.ReleaseWIF.Repositories {
 		for leaf, sa := range grant.StepServiceAccounts {
+			if !slices.Contains(config.ReleaseTagRoutes[repo], grant.StepRoutes[leaf]) {
+				return fmt.Errorf("argojob: release WIF step %q must bind an existing exact release tag route", leaf)
+			}
 			if sa == config.PipelineServiceAccount || sa == config.CredentialedServiceAccount || sa == config.CISecretsServiceAccount || sa == config.ExecutorServiceAccount || sa == config.VMLauncherServiceAccount {
 				return fmt.Errorf("argojob: release WIF step %q cannot use shared ServiceAccount %q", leaf, sa)
 			}
@@ -60,6 +65,9 @@ func applyReleaseWIFStepIdentities(leaves []*wfv1.Template, config Config, reque
 		if !mapped {
 			continue
 		} // Existing repository/named-grant identities unchanged.
+		if !config.releaseWIFStepRouteMatches(canonicalRepoKey(request.UpstreamName, request.UpstreamOrg, request.Repo), leaf.Name, request) {
+			return fmt.Errorf("argojob: WIF-only identity for template %q is not approved for this route", leaf.Name)
+		}
 		if templateUsesOberthSecretstore(leaf) || templateUsesEnvconsul(leaf) {
 			return fmt.Errorf("argojob: pinned WIF-only identity for template %q cannot consume the secret store", leaf.Name)
 		}
@@ -103,4 +111,30 @@ func releaseWIFNeedsRepoIdentity(leaves []*wfv1.Template, config Config, request
 		}
 	}
 	return false
+}
+
+// Preflight may inspect a file's planned identity without inventing a tag. This
+// private mode never reaches Build; actual delivery must resolve the exact
+// configured pattern AND file from the admitted tag, and read that same file.
+func (config Config) releaseWIFStepRouteMatches(repo, leaf string, request Request) bool {
+	grant := config.ReleaseWIF.Repositories[repo]
+	pinned, ok := grant.StepRoutes[leaf]
+	if !ok || !slices.Contains(config.ReleaseTagRoutes[repo], pinned) {
+		return false
+	}
+	file := request.PipelineFile
+	if file == "" {
+		file = argoworkflow.ReleaseFile
+	}
+	if file != pinned.File {
+		return false
+	}
+	if request.releasePreflight {
+		return true
+	}
+	if request.effectiveRunTrigger() != argoworkflow.RunTriggerTag {
+		return false
+	}
+	selected, err := config.ReleaseTagRoutes.resolveRoute(repo, model.RefTag, request.Ref)
+	return err == nil && selected == pinned
 }
