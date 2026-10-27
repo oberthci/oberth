@@ -26,6 +26,7 @@ func TestReleaseStackPreservesVMIQuotaAndStepUsage(t *testing.T) {
 	config.VMLauncherServiceAccount = "vm-launcher"
 	config.ContainerDiskPrefixes = []string{"quay.io/example/"}
 	config.RunnerImagePrefixes = []string{"busybox:"}
+	config.applyDefaults()
 	request := testRequest(periapsis.TriggerCI, string(source))
 	request.KubeVirtGranted = true
 	request.SourceVolume = SourceVolume{ClaimName: sourceClaimName(request.Name), SubPath: "src", ArtifactsSubPath: artifactsSubPath, BinarySubPath: binarySubPath}
@@ -41,29 +42,55 @@ func TestReleaseStackPreservesVMIQuotaAndStepUsage(t *testing.T) {
 	if binding.RepositoryID != request.RepositoryID || binding.Peak != want || !binding.Peak.Fits(binding.Limit) {
 		t.Fatalf("quota binding lost: %+v", binding)
 	}
-	creates, measured := 0, 0
+	creates, deletes, measured := 0, 0, 0
 	walkTemplates(wf, func(template *wfv1.Template) {
 		// Simulate the Pod selector resolved from administrator workflowDefaults;
 		// repositories cannot author spec.nodeSelector themselves.
 		inherited := corev1.PodSpec{NodeSelector: map[string]string{"pool": "ci"}}
-		if template.Resource != nil && template.Resource.Action == "create" {
-			inherited.Containers = []corev1.Container{{Name: "main", Command: []string{"argoexec", "resource", "create"}}}
+		if template.Resource != nil {
+			inherited.Containers = []corev1.Container{{Name: "main", Command: []string{"argoexec", "resource", template.Resource.Action}}}
 			patched := applyCredentialWaitPatch(t, inherited, template.PodSpecPatch)
-			if len(patched.Containers) == 0 || !guardedVMIGetCommand(patched.Containers[0].Command, patched.Containers[0].Args) {
-				t.Fatalf("VMI guard lost: %+v", patched.Containers)
+			if usageContainer(template) != nil || len(template.NodeSelector) != 0 || len(patched.NodeSelector) != 1 || patched.NodeSelector["pool"] != "ci" {
+				t.Fatalf("resource %q was wrapped or gained a selector: template=%+v pod=%+v", template.Name, template.NodeSelector, patched.NodeSelector)
 			}
-			creates++
+			main := patched.Containers[0]
+			if slices.Contains(main.Command, usageBinPath) || slices.ContainsFunc(main.VolumeMounts, func(m corev1.VolumeMount) bool { return m.MountPath == usageBinMountPath }) {
+				t.Fatalf("resource %q gained the usage wrapper: %+v", template.Name, main)
+			}
+			switch template.Resource.Action {
+			case "create":
+				if !guardedVMIGetCommand(main.Command, main.Args) {
+					t.Fatalf("VMI guard lost: %+v", main)
+				}
+				creates++
+			case "delete":
+				if !slices.Equal(main.Command, []string{"argoexec", "resource", "delete"}) || len(main.Args) != 0 {
+					t.Fatalf("VMI delete command changed: %+v", main)
+				}
+				deletes++
+			default:
+				t.Fatalf("unexpected resource action %q", template.Resource.Action)
+			}
 		}
 		if c := usageContainer(template); c != nil && len(c.Command) >= 3 && slices.Equal(c.Command[:3], []string{usageBinPath, usageCommand, "--"}) {
 			patched := applyCredentialWaitPatch(t, inherited, template.PodSpecPatch)
 			if patched.NodeSelector["pool"] != "ci" || patched.NodeSelector[corev1.LabelArchStable] != runtime.GOARCH || len(template.NodeSelector) != 0 {
 				t.Fatalf("measured step scheduling escaped: %+v", patched.NodeSelector)
 			}
+			waiter := slices.IndexFunc(patched.InitContainers, func(c corev1.Container) bool { return c.Name == executorTokenWaiter })
+			init := slices.IndexFunc(patched.InitContainers, func(c corev1.Container) bool { return c.Name == argoInitName })
+			if waiter < 0 || init <= waiter {
+				t.Fatalf("measured driver lost the executor-token barrier before init: %+v", patched.InitContainers)
+			}
+			barrier := patched.InitContainers[waiter]
+			if barrier.Image != config.SourceSeedImage || !slices.Equal(barrier.Command, []string{"sh", "-c", executorTokenWaitCommand}) || !slices.Contains(barrier.VolumeMounts, corev1.VolumeMount{Name: executorTokenVolume, MountPath: executorTokenDir}) {
+				t.Fatalf("measured driver's executor-token barrier changed: %+v", barrier)
+			}
 			measured++
 		}
 	})
-	if creates != 4 || measured != 1 {
-		t.Fatalf("creates=%d measured templates=%d", creates, measured)
+	if creates != 4 || deletes != 4 || measured != 1 {
+		t.Fatalf("creates=%d deletes=%d measured templates=%d", creates, deletes, measured)
 	}
 	identity, err := specIdentity(wf)
 	if err != nil || wf.Annotations[identityAnnotation] != identity {

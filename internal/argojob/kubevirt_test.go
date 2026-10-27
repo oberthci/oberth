@@ -89,6 +89,55 @@ func TestBuildKubeVirtRequiresGrantAndRefusesCredentialed(t *testing.T) {
 	}
 }
 
+// VMI quota binding, create guarding and executor identity resolution all rely
+// on resource templates being top-level and named. Inline containers are legal,
+// but an inline VMI create must never reach those post-admission projections.
+func TestBuildRefusesInlineVMICreate(t *testing.T) {
+	config := testConfig()
+	config.VMLauncherServiceAccount = "oberth-argo-vm-launcher"
+	config.ContainerDiskPrefixes = []string{"quay.io/example/"}
+	request := testRequest(periapsis.TriggerCI, kubeVirtWorkflow)
+	request.KubeVirtGranted = true
+	if _, err := Build(config, request); err != nil {
+		t.Fatalf("top-level named VMI control refused: %v", err)
+	}
+	for _, kind := range []string{"dag", "steps", "nested"} {
+		for _, name := range []string{"", "inline-vm"} {
+			t.Run(kind+"/name="+name, func(t *testing.T) {
+				wf, err := argoworkflow.Decode([]byte(kubeVirtWorkflow))
+				if err != nil {
+					t.Fatal(err)
+				}
+				inline := wf.Spec.Templates[0].DeepCopy()
+				inline.Name = name
+				main := wfv1.Template{Name: "main"}
+				switch kind {
+				case "dag":
+					main.DAG = &wfv1.DAGTemplate{Tasks: []wfv1.DAGTask{{Name: "vm", Inline: inline}}}
+				case "steps":
+					main.Steps = []wfv1.ParallelSteps{{Steps: []wfv1.WorkflowStep{{Name: "vm", Inline: inline}}}}
+				case "nested":
+					main.DAG = &wfv1.DAGTemplate{Tasks: []wfv1.DAGTask{{Name: "phase", Inline: &wfv1.Template{
+						Steps: []wfv1.ParallelSteps{{Steps: []wfv1.WorkflowStep{{Name: "vm", Inline: inline}}}},
+					}}}}
+				}
+				wf.Spec.Entrypoint = main.Name
+				wf.Spec.Templates = []wfv1.Template{main}
+				source, err := json.Marshal(wf)
+				if err != nil {
+					t.Fatal(err)
+				}
+				r := request
+				r.Source = source
+				built, err := Build(config, r)
+				if built != nil || err == nil || !strings.Contains(err.Error(), ".inline.resource must be a named template in the consuming repository") {
+					t.Fatalf("inline VMI create reached projections: workflow=%v error=%v", built, err)
+				}
+			})
+		}
+	}
+}
+
 func TestFragmentSourcedVMIRefusesCredentialedWorkflow(t *testing.T) {
 	vm, err := argoworkflow.Decode([]byte(kubeVirtWorkflow))
 	if err != nil {
