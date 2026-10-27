@@ -3,71 +3,101 @@ package main
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
 	"errors"
-	"fmt"
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
-func TestAdminReadFileAndDatabaseHashes(t *testing.T) {
+func TestAdminReadPublicFile(t *testing.T) {
 	t.Parallel()
-	directory := t.TempDir()
-	database := filepath.Join(directory, "oberth.sqlite")
-	main := []byte("database\x00binary\n")
-	wal := []byte("WAL\n")
-	for path, body := range map[string][]byte{database: main, database + "-wal": wal} {
-		if err := os.WriteFile(path, body, 0o600); err != nil {
-			t.Fatal(err)
-		}
+	directory, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
 	}
+	certificate := filepath.Join(directory, "tls.crt")
+	body := []byte("public certificate\n")
+	if err := os.WriteFile(certificate, body, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	missing := filepath.Join(directory, "ca.crt")
+	allowed := map[string]bool{certificate: true, missing: true}
 	var output bytes.Buffer
-	if err := runAdmin(t.Context(), []string{"read-file", filepath.Join(directory, "missing"), database}, &output); err != nil {
+	if err := adminReadPublicFiles(t.Context(), []string{missing, certificate}, &output, allowed); err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Equal(output.Bytes(), main) {
-		t.Fatal("file bytes were changed")
+	if !bytes.Equal(output.Bytes(), body) {
+		t.Fatal("certificate bytes were changed")
 	}
-	output.Reset()
-	if err := runAdmin(t.Context(), []string{"hash-db", "--database", database}, &output); err != nil {
-		t.Fatal(err)
-	}
-	want := fmt.Sprintf("%x  %s\n%x  %s-wal\n", sha256.Sum256(main), database, sha256.Sum256(wal), database)
-	if output.String() != want {
-		t.Fatalf("hash output=%q want %q", output.String(), want)
-	}
-	if err := os.Remove(database + "-wal"); err != nil {
-		t.Fatal(err)
-	}
-	output.Reset()
-	if err := runAdmin(t.Context(), []string{"hash-db", "--database", database}, &output); err != nil {
-		t.Fatal(err)
-	}
-	if strings.Count(output.String(), "\n") != 1 {
-		t.Fatal("absent WAL was not optional")
-	}
-	for _, args := range [][]string{{"read-file", directory}, {"read-file", "relative"}, {"read-file", filepath.Join(directory, "missing")}, {"hash-db", "--database", filepath.Join(directory, "missing")}} {
+	for _, args := range [][]string{{"read-file", directory}, {"read-file", "relative"}, {"read-file", missing}, {"hash-db", "--database", "/proc/1/environ"}} {
 		if err := runAdmin(t.Context(), args, io.Discard); err == nil {
 			t.Fatalf("invalid file invocation accepted: %v", args)
 		}
 	}
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
-	if err := runAdmin(ctx, []string{"read-file", database}, io.Discard); !errors.Is(err, context.Canceled) {
+	if err := adminReadPublicFiles(ctx, []string{certificate}, io.Discard, allowed); !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancellation=%v", err)
 	}
 	sentinel := errors.New("output closed")
-	if err := runAdmin(t.Context(), []string{"read-file", database}, adminFailWriter{sentinel}); !errors.Is(err, sentinel) {
+	if err := adminReadPublicFiles(t.Context(), []string{certificate}, adminFailWriter{sentinel}, allowed); !errors.Is(err, sentinel) {
 		t.Fatalf("copy write error lost: %v", err)
-	}
-	if err := runAdmin(t.Context(), []string{"hash-db", "--database", database}, adminFailWriter{sentinel}); !errors.Is(err, sentinel) {
-		t.Fatalf("hash write error lost: %v", err)
 	}
 }
 
 type adminFailWriter struct{ err error }
 
 func (w adminFailWriter) Write([]byte) (int, error) { return 0, w.err }
+
+func TestAdminPublicFileAllowlistAndProjection(t *testing.T) {
+	t.Parallel()
+	for _, path := range []string{"/etc/oberth/tls/tls.key", "/run/oberth-identities/server/ssh_host_key", "/run/oberth-identities/upstream/id_ed25519", "/var/run/secrets/kubernetes.io/serviceaccount/token", "/proc/1/environ", "/etc/oberth/tls/../tls/tls.crt"} {
+		if err := runAdmin(t.Context(), []string{"read-file", path}, io.Discard); err == nil {
+			t.Fatalf("private/nonexact path accepted: %s", path)
+		}
+	}
+	directory, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	projected := filepath.Join(directory, "..2026")
+	if err := os.Mkdir(projected, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	certificate := filepath.Join(projected, "tls.crt")
+	if err := os.WriteFile(certificate, []byte("public certificate"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("..2026", filepath.Join(directory, "..data")); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(directory, "tls.crt")
+	if err := os.Symlink("..data/tls.crt", path); err != nil {
+		t.Fatal(err)
+	}
+	allowed := map[string]bool{path: true}
+	var output bytes.Buffer
+	if err := adminReadPublicFiles(t.Context(), []string{path}, &output, allowed); err != nil || output.String() != "public certificate" {
+		t.Fatalf("projected certificate: %q %v", output.String(), err)
+	}
+	for _, target := range []string{filepath.Join(t.TempDir(), "tls.crt"), filepath.Join(projected, "tls.key")} {
+		if err := os.WriteFile(target, []byte("private"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Remove(path); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(target, path); err != nil {
+			t.Fatal(err)
+		}
+		output.Reset()
+		if err := adminReadPublicFiles(t.Context(), []string{path}, &output, allowed); err == nil || output.Len() != 0 {
+			t.Fatalf("symlink escaped public allowlist: %v", err)
+		}
+	}
+	// An untrusted fallback must be checked even if the first file exists.
+	if err := adminReadPublicFiles(t.Context(), []string{certificate, "/proc/1/environ"}, io.Discard, map[string]bool{certificate: true}); err == nil {
+		t.Fatal("unchecked fallback")
+	}
+}

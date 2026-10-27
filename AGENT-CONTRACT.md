@@ -48,10 +48,17 @@ resource/custody requirements are in [database-backup.md](docs/database-backup.m
   located under a critical system directory.
 - The scratch server image runs only `/usr/local/bin/oberth`. The cache init
   and restore file-tool container use the shared digest-pinned BusyBox utility
-  image. Restore probes the target server schema in a separate native init
-  command; it never runs a shell in the server image. Public certificate/key
-  reads and database hashes use local `oberth admin read-file` / `hash-db`
-  commands over authorized Kubernetes exec. A server predating native backup
+  image, overridable with chart `utilityImage` / installer `--utility-image`
+  for air-gapped mirrors; backup/restore inherit the installed utility image
+  and accept `--utility-image` for older deployments without that value.
+  Restore probes the target server schema in a separate native init command;
+  it never runs a shell in the server image. Legacy TLS certificates are read
+  from the mounted Kubernetes Secret. Runtime public certificate/key reads
+  use `oberth admin read-file` over authorized Kubernetes exec, restricted to
+  the exact public identity paths and their in-directory projected-Secret
+  targets. Pre-scratch releases lacking `admin` use a version-gated public
+  `cat` read. Failed upgrade identity checks refuse the upgrade.
+  A server predating native backup
   support is copied through a temporary read-only utility PVC mount on its
   existing node, preserving the before/after hash checks without shell exec
   in the server. No maintenance helper mounts a live database into a pipeline.

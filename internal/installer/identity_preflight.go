@@ -292,8 +292,7 @@ func preflightServerIdentities(ctx context.Context, cfg *Config, deps Deps, dryR
 							"(OpenBao cert %s, pod cert %s)", baoFP, podFP)
 					}
 				} else {
-					_, _ = fmt.Fprintf(w, "WARNING: could not read the server certificate from the running pod; "+
-						"cross-check skipped (%v)\n", podErr)
+					return fmt.Errorf("cannot cross-check the running server identity; refusing upgrade: %w", podErr)
 				}
 			}
 
@@ -321,13 +320,17 @@ func preflightServerIdentities(ctx context.Context, cfg *Config, deps Deps, dryR
 	if server == nil && haveStore {
 		path := defaultKVPrefix + "/data/identities/" + ns + "/server"
 		raw, readErr := store.readRaw(ctx, token, path)
-		if readErr == nil && raw != nil {
+		if readErr != nil {
+			return fmt.Errorf("read existing server identity: %w", readErr)
+		}
+		if raw != nil {
 			decoded, decodeErr := decodeIdentityBundle(raw)
 			clear(raw)
-			if decodeErr == nil {
-				server = decoded
-				serverVersion = decoded.version
+			if decodeErr != nil {
+				return fmt.Errorf("decode existing server identity: %w", decodeErr)
 			}
+			server = decoded
+			serverVersion = decoded.version
 		}
 	}
 
@@ -338,21 +341,19 @@ func preflightServerIdentities(ctx context.Context, cfg *Config, deps Deps, dryR
 	}
 	if certPEM == nil {
 		podCert, podErr := readPodServerCert(ctx, *cfg, deps)
-		if podErr == nil {
-			certPEM = podCert
+		if podErr != nil {
+			return fmt.Errorf("cannot check the existing server certificate; refusing upgrade: %w", podErr)
 		}
-	}
-	if certPEM == nil {
-		return nil // no cert to check — fresh install
+		certPEM = podCert
 	}
 
 	block, _ := pem.Decode(certPEM)
 	if block == nil {
-		return nil
+		return errors.New("existing server certificate has no PEM block; refusing upgrade")
 	}
 	cert, parseErr := x509.ParseCertificate(block.Bytes)
 	if parseErr != nil {
-		return nil
+		return fmt.Errorf("parse existing server certificate: %w", parseErr)
 	}
 
 	oldFingerprint := certSHA256Fingerprint(cert.Raw)
@@ -579,29 +580,75 @@ func idempotentOriginPin(cfg *Config, liveValues liveHelmValuesSubset, serverCer
 		"(same key, fingerprint %s → %s)\n", originFP, serverFP)
 }
 
-// readPodServerCert retrieves the server certificate from the running pod.
-// Tries the legacy path (/etc/oberth/tls/tls.crt) first, then the OpenBao
-// identity path (/run/oberth-identities/server/tls.crt).
+// readPodServerCert reads the legacy Kubernetes certificate without exec. Newer
+// deployments generate identities in an emptyDir and require a public-file read.
 func readPodServerCert(ctx context.Context, cfg Config, deps Deps) ([]byte, error) {
-	if deps.RunCommand == nil {
-		return nil, errors.New("no cluster command runner")
-	}
+	return readServerPublicCertificate(ctx, cfg, deps, false)
+}
+
+func readServerPublicCertificate(ctx context.Context, cfg Config, deps Deps, ca bool) ([]byte, error) {
 	ns := cfg.Namespace
 	if ns == "" {
 		ns = DefaultNamespace
 	}
-	for _, path := range []string{"/etc/oberth/tls/tls.crt", "/run/oberth-identities/server/tls.crt"} {
+	if deps.KubeClient != nil {
+		// Ignore retained legacy Secrets once the deployment uses runtime
+		// identities: they are no longer the certificate being served.
+		useSecret := true
+		deployment, err := deps.KubeClient.AppsV1().Deployments(ns).Get(ctx, "oberth", metav1.GetOptions{})
+		if err == nil {
+			useSecret = false
+			for _, volume := range deployment.Spec.Template.Spec.Volumes {
+				if volume.Secret != nil && volume.Secret.SecretName == "oberth-tls" {
+					useSecret = true
+				}
+			}
+		} else if !apierrors.IsNotFound(err) {
+			return nil, fmt.Errorf("locate server certificate source: %w", err)
+		}
+		if useSecret {
+			secret, err := deps.KubeClient.CoreV1().Secrets(ns).Get(ctx, "oberth-tls", metav1.GetOptions{})
+			if err == nil {
+				if ca && len(secret.Data["ca.crt"]) > 0 {
+					return secret.Data["ca.crt"], nil
+				}
+				if len(secret.Data["tls.crt"]) == 0 {
+					return nil, errors.New("oberth-tls has no public certificate")
+				}
+				return secret.Data["tls.crt"], nil
+			}
+			if !apierrors.IsNotFound(err) {
+				return nil, fmt.Errorf("read server certificate Secret: %w", err)
+			}
+		}
+	}
+	if deps.RunCommand == nil {
+		return nil, errors.New("no cluster command runner for runtime identity")
+	}
+	paths := []string{"/etc/oberth/tls/tls.crt", "/run/oberth-identities/server/tls.crt"}
+	if ca {
+		paths = []string{"/run/oberth-identities/server/ca.crt", "/run/oberth-identities/server/tls.crt", "/etc/oberth/tls/tls.crt"}
+	}
+	var last error
+	for _, path := range paths {
 		args := []string{}
 		if deps.ContextName != "" {
 			args = append(args, "--context", deps.ContextName)
 		}
-		args = append(args, "exec", "-n", ns, "deploy/oberth", "-c", "oberth", "--", "/usr/local/bin/oberth", "admin", "read-file", path)
-		cert, err := deps.RunCommand(ctx, nil, "kubectl", args...)
+		args = append(args, "exec", "-n", ns, "deploy/oberth", "-c", "oberth", "--")
+		command := append(append([]string{}, args...), "/usr/local/bin/oberth", "admin", "read-file", path)
+		cert, err := deps.RunCommand(ctx, nil, "kubectl", command...)
+		// Only pre-scratch releases lack admin. Never fall back on permission,
+		// I/O, or allowlist errors from a scratch-capable binary.
+		if err != nil && strings.Contains(string(cert)+err.Error(), `unknown command "admin"`) {
+			cert, err = deps.RunCommand(ctx, nil, "kubectl", append(args, "cat", path)...)
+		}
 		if err == nil && len(cert) > 0 {
 			return cert, nil
 		}
+		last = errors.Join(last, err)
 	}
-	return nil, errors.New("could not retrieve server certificate from the running pod")
+	return nil, fmt.Errorf("could not retrieve server public certificate: %w", errors.Join(last, errors.New("no certificate returned")))
 }
 
 // certSHA256Fingerprint returns the colon-separated SHA-256 fingerprint of

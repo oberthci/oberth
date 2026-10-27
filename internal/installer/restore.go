@@ -46,8 +46,10 @@ type RestoreConfig struct {
 	Namespace        string
 	OpenBaoNamespace string
 	ArgoNamespace    string
-	Input            string
-	PrivateKey       string
+	// UtilityImage overrides the installed file-tool image for database restore.
+	UtilityImage string
+	Input        string
+	PrivateKey   string
 	// ChartPath is the local chart used when compatibility values must be
 	// set on the release; empty selects the published chart at the version
 	// the release already runs.
@@ -648,6 +650,10 @@ const restoreHelperContainer = "restore"
 // and placement. A separate scratch-compatible init command probes the server
 // image schema; no shell or file tool ever runs in the server image.
 func restoreHelperPod(name, namespace, timestamp string, server serverDeployment) *corev1.Pod {
+	utilityImage := server.UtilityImage
+	if utilityImage == "" {
+		utilityImage = containerimage.Utility
+	}
 	nobody := int64(65534)
 	podSecurity := &corev1.PodSecurityContext{}
 	if server.PodSpec.SecurityContext != nil {
@@ -680,7 +686,7 @@ func restoreHelperPod(name, namespace, timestamp string, server serverDeployment
 			InitContainers:               []corev1.Container{{Name: "server-schema", Image: server.Image, Command: []string{"/usr/local/bin/oberth"}, Args: []string{"version", "--schema"}, SecurityContext: &corev1.SecurityContext{AllowPrivilegeEscalation: &noEscalation, ReadOnlyRootFilesystem: &readOnly, Capabilities: &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}}}}},
 			Containers: []corev1.Container{{
 				Name:            restoreHelperContainer,
-				Image:           containerimage.Utility,
+				Image:           utilityImage,
 				ImagePullPolicy: corev1.PullIfNotPresent,
 				Command:         []string{"sleep", "3600"},
 				SecurityContext: &corev1.SecurityContext{
@@ -700,7 +706,11 @@ func restoreHelperPod(name, namespace, timestamp string, server serverDeployment
 
 func swapDatabase(ctx context.Context, cfg RestoreConfig, deps backupDeps, archive restoreArchive, target restoreTarget) (resultErr error) {
 	name := "oberth-restore-" + strings.ToLower(target.Timestamp)
-	pod := restoreHelperPod(name, cfg.Namespace, target.Timestamp, target.Server)
+	server := target.Server
+	if cfg.UtilityImage != "" {
+		server.UtilityImage = cfg.UtilityImage
+	}
+	pod := restoreHelperPod(name, cfg.Namespace, target.Timestamp, server)
 	pods := deps.KubeClient.CoreV1().Pods(cfg.Namespace)
 	if _, err := pods.Create(ctx, pod, metav1.CreateOptions{}); err != nil {
 		return fmt.Errorf("create restore pod: %w", err)

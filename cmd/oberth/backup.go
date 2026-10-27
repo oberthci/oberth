@@ -60,6 +60,7 @@ func runBackup(ctx context.Context, arguments []string, input io.Reader, output 
 	historyOnly := flags.Bool("history-only", false, "back up runs, issues, promotions and uplinks only: no secrets, no OpenBao root token needed")
 	flags.BoolVar(&cfg.DryRun, "dry-run", false, "show what would be backed up; reads no secrets and writes nothing")
 	flags.StringVar(&cfg.Recipient, "recipient", "", "encrypt to this PEM `CERT` instead of ~/.config/oberth/backup/recipient.pem")
+	flags.StringVar(&cfg.UtilityImage, "utility-image", "", "file-tool image for database helpers (default: installed utility image)")
 	addClusterFlags(flags, &cfg.KubeconfigPath, &cfg.ContextName, &cfg.Namespace, &cfg.OpenBaoNamespace, &cfg.ArgoNamespace)
 	positional, help, err := parseOperatorFlags(flags, arguments)
 	if help {
@@ -401,6 +402,7 @@ func runRestore(ctx context.Context, arguments []string, input io.Reader, output
 	flags.StringVar(&cfg.PrivateKey, "key", "", "the backup's private `KEY` instead of ~/.config/oberth/backup/recipient.key")
 	flags.StringVar(&cfg.PrivateKey, "private-key", "", "same as --key `KEY`")
 	flags.StringVar(&cfg.ChartPath, "chart", "", "local Oberth `CHART` for the Helm upgrade (default: the published chart at the running version)")
+	flags.StringVar(&cfg.UtilityImage, "utility-image", "", "file-tool image for database helpers (default: installed utility image)")
 	addClusterFlags(flags, &cfg.KubeconfigPath, &cfg.ContextName, &cfg.Namespace, &cfg.OpenBaoNamespace, &cfg.ArgoNamespace)
 	timeout := flags.Duration("timeout", installer.DefaultTimeout, "wait timeout for pods")
 	positional, help, err := parseOperatorFlags(flags, arguments)

@@ -37,6 +37,10 @@ func validateGoHeaders(ctx context.Context, encoded plumbing.EncodedObject) (res
 		if total > maxGitMetadataBytes {
 			return errors.New("git object headers exceed limit")
 		}
+		// Git accepts a header-only object when the final header ends in LF.
+		if errors.Is(err, io.EOF) && line == "" {
+			break
+		}
 		if err != nil {
 			return fmt.Errorf("unterminated Git object headers: %w", err)
 		}
@@ -87,7 +91,9 @@ func validateGoHeaders(ctx context.Context, encoded plumbing.EncodedObject) (res
 		if err != nil || kind < plumbing.CommitObject || kind > plumbing.TagObject {
 			return errors.New("invalid tag type header")
 		}
-		if !strings.HasPrefix(headers[2], "tag ") || plumbing.ReferenceName("refs/tags/"+strings.TrimPrefix(headers[2], "tag ")).Validate() != nil {
+		// Git's badTagName is informational, not a transfer fsck refusal.
+		// Ref names themselves are validated separately at publication.
+		if !strings.HasPrefix(headers[2], "tag ") {
 			return errors.New("invalid tag name header")
 		}
 		i := 3

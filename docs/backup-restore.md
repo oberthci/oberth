@@ -16,6 +16,11 @@ onto an installed (typically fresh) Oberth. Both run on an operator
 workstation, like `oberth install`: they need `kubectl`, `helm` and OpenSSL 3,
 and reach the cluster only through the Kubernetes API and `kubectl exec`.
 
+For an air-gapped cluster, set the chart's `utilityImage` (or installer
+`--utility-image`) to the mirrored file-tool image. Database helpers inherit
+that installed image. Against an older deployment without this chart value,
+pass `--utility-image <mirrored-image>` to `oberth backup` or `oberth restore`.
+
 ## Quick start
 
 On a machine with kubectl access to the cluster:

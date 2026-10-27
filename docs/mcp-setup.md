@@ -148,8 +148,8 @@ Fetch the CA (an interactive install writes it to `~/.config/oberth/ca.crt`
 and later installs keep that file current):
 
 ```bash
-kubectl exec -n oberth deploy/oberth -c oberth -- sh -c \
-  'cat /run/oberth-identities/server/ca.crt 2>/dev/null || cat /run/oberth-identities/server/tls.crt' \
+kubectl exec -n oberth deploy/oberth -c oberth -- /usr/local/bin/oberth admin read-file \
+  /run/oberth-identities/server/ca.crt /run/oberth-identities/server/tls.crt \
   > ~/.config/oberth/ca.crt
 openssl x509 -in ~/.config/oberth/ca.crt -noout -fingerprint -sha256
 ```

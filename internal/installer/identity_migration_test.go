@@ -324,7 +324,7 @@ func TestPreflightCertLacksGoProxySANsRotates(t *testing.T) {
 	}
 }
 
-func TestPreflightDeploymentWithoutSecretVolumesSkipsBundleCheck(t *testing.T) {
+func TestPreflightExistingDeploymentWithoutCertificateRefuses(t *testing.T) {
 	t.Setenv(baoTokenEnvVar, "")
 
 	var buf bytes.Buffer
@@ -338,8 +338,8 @@ func TestPreflightDeploymentWithoutSecretVolumesSkipsBundleCheck(t *testing.T) {
 
 	cfg := Config{}
 	err := preflightServerIdentities(context.Background(), &cfg, deps, false)
-	if err != nil {
-		t.Fatal(err)
+	if err == nil || !strings.Contains(err.Error(), "refusing upgrade") {
+		t.Fatalf("expected failed identity check to refuse upgrade: %v", err)
 	}
 }
 
@@ -380,9 +380,14 @@ func TestPreflightOpenBaoCertMismatchRefuses(t *testing.T) {
 
 	var buf bytes.Buffer
 	deps := Deps{
-		Output:      &buf,
-		KubeClient:  fake.NewClientset(legacyDeployment(), runningOpenBaoPod()),
-		RunCommand:  pr.run,
+		Output:     &buf,
+		KubeClient: fake.NewClientset(legacyDeployment(), runningOpenBaoPod(), &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "oberth-tls", Namespace: "oberth"}, Data: map[string][]byte{"tls.crt": podCertPEM}}),
+		RunCommand: func(ctx context.Context, input []byte, name string, args ...string) ([]byte, error) {
+			if slices.Contains(args, "deploy/oberth") {
+				return nil, fmt.Errorf(`unknown command "admin"`)
+			}
+			return pr.run(ctx, input, name, args...)
+		},
 		ContextName: "test-ctx",
 	}
 

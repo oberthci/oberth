@@ -136,10 +136,7 @@ func stableCopyDatabase(ctx context.Context, deps backupDeps, namespace, pod, co
 }
 
 func podSQLiteHashes(ctx context.Context, deps backupDeps, namespace, pod, container string) (map[string]string, error) {
-	command := []string{"/usr/local/bin/oberth", "admin", "hash-db", "--database", serverDatabasePath}
-	if container == databaseCopyContainer {
-		command = []string{"sh", "-c", utilitySQLiteHashesScript, "sh", serverDatabasePath}
-	}
+	command := []string{"sh", "-c", utilitySQLiteHashesScript, "sh", serverDatabasePath}
 	out, err := deps.RunCommand(ctx, nil, "kubectl", kubectlExecArgs(deps.ContextName, namespace, pod, container, false, command...)...)
 	if err != nil {
 		return nil, fmt.Errorf("hash server database: %w%s", err, commandOutputSuffix(out))
@@ -173,10 +170,7 @@ func stableCopyOnce(ctx context.Context, deps backupDeps, namespace, pod, contai
 		if !present {
 			continue
 		}
-		command := []string{"/usr/local/bin/oberth", "admin", "read-file", serverDatabasePath + suffix}
-		if container == databaseCopyContainer {
-			command = []string{"cat", serverDatabasePath + suffix}
-		}
+		command := []string{"cat", serverDatabasePath + suffix}
 		body, err := deps.runStdout(ctx, nil, "kubectl", kubectlExecArgs(deps.ContextName, namespace, pod, container, false, command...)...)
 		if err != nil {
 			return fmt.Errorf("stream %s%s: %w", serverDatabasePath, suffix, err)
@@ -409,6 +403,9 @@ func legacyStableCopyDatabase(ctx context.Context, deps backupDeps, namespace, p
 		return err
 	}
 	stamp := strconv.FormatInt(time.Now().UnixNano(), 10)
+	if deps.utilityImage != "" {
+		server.UtilityImage = deps.utilityImage
+	}
 	helper := restoreHelperPod("oberth-backup-copy-"+stamp, namespace, stamp, server)
 	helper.Labels = map[string]string{"oberth.ci/database-copy": stamp}
 	helper.Spec.InitContainers = nil

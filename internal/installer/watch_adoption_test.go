@@ -396,7 +396,7 @@ func TestInstallOberthAdoptsReviewedConnectorBeforeHelmAndRetainsOnHelmFailure(t
 }
 
 func TestWatchAdoptionRejectsAuthorityOverrides(t *testing.T) {
-	for _, change := range []string{"chart", "image", "policy", "version", "image-value", "policy-value", "unrelated-value", "duplicate-value", "scalar-value"} {
+	for _, change := range []string{"chart", "image", "utility-image", "policy", "version", "image-value", "policy-value", "unrelated-value", "duplicate-value", "scalar-value"} {
 		t.Run(change, func(t *testing.T) {
 			cfg, _, _, _, _ := watchFixture(t)
 			var value string
@@ -405,6 +405,8 @@ func TestWatchAdoptionRejectsAuthorityOverrides(t *testing.T) {
 				cfg.ChartPath = "arbitrary"
 			case "image":
 				cfg.ImageRef = "arbitrary"
+			case "utility-image":
+				cfg.UtilityImage = "arbitrary"
 			case "policy":
 				cfg.NetworkPolicy = "false"
 			case "version":

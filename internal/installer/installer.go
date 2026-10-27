@@ -227,7 +227,9 @@ type Config struct {
 	// ImageRef overrides the server image the chart deploys (--image), for the
 	// same loop. A tag that exists only in the node's image store is the normal
 	// case here, so the chart's IfNotPresent pull policy is what makes it work.
-	ImageRef      string
+	ImageRef string
+	// UtilityImage overrides the chart file-tool image; empty preserves values files and chart defaults.
+	UtilityImage  string
 	Timeout       time.Duration
 	BinaryVersion string
 
@@ -578,8 +580,8 @@ func (cfg *Config) Validate() error {
 	}
 	if cfg.WatchAdoptionPlan != "" {
 		cfg.SecretStoreUndecided = false
-		if cfg.ChartPath != "" || cfg.ImageRef != "" {
-			return errors.New("watch adoption requires the published chart and its image; --chart and --image overrides are forbidden")
+		if cfg.ChartPath != "" || cfg.ImageRef != "" || cfg.UtilityImage != "" {
+			return errors.New("watch adoption requires the published chart and its images; --chart, --image and --utility-image overrides are forbidden")
 		}
 		if cfg.NetworkPolicy != "" && cfg.NetworkPolicy != "auto" {
 			return errors.New("watch adoption must preserve the installed network policy")
@@ -1661,6 +1663,9 @@ func OberthHelmArgs(cfg Config, openbao OpenBaoResult, rekor RekorResult) []stri
 	}
 	if image := strings.TrimSpace(cfg.ImageRef); image != "" {
 		args = append(args, "--set-string", "image.ref="+image)
+	}
+	if cfg.UtilityImage != "" {
+		args = append(args, "--set-string", "utilityImage="+cfg.UtilityImage)
 	}
 	// Indexed --set-string rather than --set name={a,b}: brace list syntax
 	// splits on commas inside the value, and a name is not worth losing to

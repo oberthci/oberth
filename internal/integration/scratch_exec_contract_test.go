@@ -18,12 +18,25 @@ import (
 )
 
 func TestServerImageContainerAndExecContract(t *testing.T) {
+	testServerImageContainerAndExecContract(t, "")
+}
+
+func testServerImageContainerAndExecContract(t *testing.T, override string) {
+	t.Helper()
 	helm, err := exec.LookPath("helm")
 	if err != nil {
 		t.Skip("helm is required to render the chart")
 	}
+	utility := containerimage.Utility
+	if override != "" {
+		utility = override
+	}
 	server := "example.invalid/oberth@sha256:" + strings.Repeat("a", 64)
-	output, err := exec.Command(helm, "template", "oberth", "../../charts/oberth", "--set", "image.ref="+server).CombinedOutput()
+	args := []string{"template", "oberth", "../../charts/oberth", "--set", "image.ref=" + server}
+	if override != "" {
+		args = append(args, "--set-string", "utilityImage="+utility)
+	}
+	output, err := exec.Command(helm, args...).CombinedOutput()
 	if err != nil {
 		t.Fatalf("render chart: %v %s", err, output)
 	}
@@ -39,7 +52,7 @@ func TestServerImageContainerAndExecContract(t *testing.T) {
 					t.Errorf("server-image container has non-native argv: %v", value)
 				}
 			}
-			if value["name"] == "prepare-caches" && value["image"] != containerimage.Utility {
+			if value["name"] == "prepare-caches" && value["image"] != utility {
 				t.Errorf("cache init must use shared pinned utility image: %v", value["image"])
 			}
 			for _, child := range value {
@@ -170,4 +183,8 @@ func TestBothGitBackendsGateCIBuilds(t *testing.T) {
 	if !lane || !gate {
 		t.Fatalf("backend CI lane=%v gate=%v", lane, gate)
 	}
+}
+
+func TestServerImageContainerAndExecContractWithMirror(t *testing.T) {
+	testServerImageContainerAndExecContract(t, "registry.internal/busybox@sha256:"+strings.Repeat("b", 64))
 }

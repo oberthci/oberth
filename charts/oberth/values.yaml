@@ -9,6 +9,10 @@ image:
   ref: europe-west4-docker.pkg.dev/skipopsmain/oberth/oberth@sha256:093c6f6ed22f5e4bbb34994e545a7180b1d091a7935110ed0129f6bd6a798686
   pullPolicy: IfNotPresent
 
+# File-tool image for cache preparation and database maintenance helpers.
+# Override with a mirrored image for air-gapped clusters.
+utilityImage: busybox:1.37@sha256:ab33eacc8251e3807b85bb6dba570e4698c3998eca6f0fc2ccb60575a563ea74
+
 # Public protocol identifiers, fixed for the lifetime of an existing database
 # and witness key. Existing installations must supply their original values
 # explicitly when upgrading to this chart; never reset them to these defaults.

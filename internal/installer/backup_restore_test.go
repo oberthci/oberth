@@ -414,7 +414,7 @@ func (c *fakeBackupCluster) run(_ context.Context, input []byte, name string, ar
 			return nil, errors.New(`kubectl: exit status 2: oberth: usage error: unknown command "backup"`)
 		}
 		return c.database, nil
-	case (len(command) > 2 && command[2] == utilitySQLiteHashesScript) || strings.HasPrefix(joined, "oberth admin hash-db "):
+	case len(command) > 2 && command[2] == utilitySQLiteHashesScript:
 		var lines []string
 		for _, suffix := range []string{"", "-wal"} {
 			if body, ok := c.rawFiles[serverDatabasePath+suffix]; ok {
@@ -423,8 +423,6 @@ func (c *fakeBackupCluster) run(_ context.Context, input []byte, name string, ar
 			}
 		}
 		return []byte(strings.Join(lines, "\n") + "\n"), nil
-	case strings.HasPrefix(joined, "oberth admin read-file "):
-		return c.rawFiles[command[3]], nil
 	case command[0] == "cat":
 		return c.rawFiles[command[1]], nil
 	case container == restoreHelperContainer && command[2] == stageResetScript:
@@ -591,6 +589,9 @@ func backupFixtureArchive(t *testing.T, oldServer bool) (string, string, *fakeBa
 	output := filepath.Join(t.TempDir(), "state.cms")
 	var out bytes.Buffer
 	cfg := BackupConfig{Output: output, Recipient: "recipient.pem", ToolVersion: "v0.17.28"}
+	if oldServer {
+		cfg.UtilityImage = "registry.internal/busybox@sha256:fixture"
+	}
 	cfg.applyDefaults()
 	if err := runBackup(context.Background(), cfg, source.deps(&out)); err != nil {
 		t.Fatalf("backup: %v\n%s", err, out.String())
@@ -666,7 +667,8 @@ func TestBackupCapturesOpenBaoDatabaseAndValues(t *testing.T) {
 
 func TestBackupFallsBackToStableCopyOnOlderServers(t *testing.T) {
 	t.Parallel()
-	output, _, _ := backupFixtureArchive(t, true)
+	output, _, source := backupFixtureArchive(t, true)
+	assertUtilityHelperImage(t, source, "registry.internal/busybox@sha256:fixture")
 	work := t.TempDir()
 	manifest, err := openBackupArchive(context.Background(), output, fakeEnvelopeCipher{}, work)
 	if err != nil {
@@ -722,11 +724,12 @@ func TestRestoreAppliesTheArchive(t *testing.T) {
 	archive, runID, source := backupFixtureArchive(t, false)
 	target := restoreTargetCluster(t, runID)
 	var out bytes.Buffer
-	cfg := RestoreConfig{Input: archive, Yes: true, Timeout: 10 * time.Second}
+	cfg := RestoreConfig{Input: archive, Yes: true, Timeout: 10 * time.Second, UtilityImage: "registry.internal/busybox@sha256:fixture"}
 	cfg.applyDefaults()
 	if err := runRestore(context.Background(), cfg, target.deps(&out)); err != nil {
 		t.Fatalf("restore: %v\n%s", err, out.String())
 	}
+	assertUtilityHelperImage(t, target, "registry.internal/busybox@sha256:fixture")
 	text := out.String()
 	if strings.Contains(text, testSecretValue) {
 		t.Fatal("restore output prints a secret value")
@@ -1130,5 +1133,27 @@ func TestSwapScriptKeepsPreviousWALOnEarlyFailure(t *testing.T) {
 		if err != nil || string(got) != want {
 			t.Fatalf("%s after rollback = %q, %v", name, got, err)
 		}
+	}
+}
+
+func assertUtilityHelperImage(t *testing.T, cluster *fakeBackupCluster, image string) {
+	t.Helper()
+	found := false
+	for _, action := range cluster.client.Actions() {
+		create, ok := action.(k8stesting.CreateAction)
+		if !ok || action.GetResource().Resource != "pods" {
+			continue
+		}
+		pod := create.GetObject().(*corev1.Pod)
+		if !strings.HasPrefix(pod.Name, "oberth-backup-copy-") && !strings.HasPrefix(pod.Name, "oberth-restore-") {
+			continue
+		}
+		found = true
+		if len(pod.Spec.Containers) != 1 || pod.Spec.Containers[0].Image != image {
+			t.Fatalf("utility override lost: %+v", pod.Spec.Containers)
+		}
+	}
+	if !found {
+		t.Fatal("no maintenance helper pod created")
 	}
 }

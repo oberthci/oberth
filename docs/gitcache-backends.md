@@ -103,3 +103,8 @@ accepted receives promote immutable objects before atomic ref publication.
 Validation checks canonical tree order, raw commit/tag headers, portable .git
 aliases and .gitmodules name/path/URL/update fields. Merge/archive traversal
 propagates every missing-subtree error instead of accepting a partial walk.
+
+Interrupted receive quarantines (`objects/oberth-incoming-*`) are swept on
+Ensure after 30 minutes. A kernel lock held for the whole receive protects
+active directories regardless of age, including across server processes;
+crash exit releases the lock. Recent directories and symlinks are not swept.

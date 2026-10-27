@@ -225,30 +225,9 @@ func renderMCPConfig(baseURL, tokenCommand string) ([]byte, error) {
 	return append(body, '\n'), nil
 }
 
-// serverCACertificate retrieves only the public certificate over authenticated exec.
+// serverCACertificate reads the public CA, or a legacy self-signed leaf.
 func serverCACertificate(ctx context.Context, cfg Config, deps Deps) ([]byte, error) {
-	if deps.RunCommand == nil {
-		return nil, errors.New("no cluster command runner")
-	}
-	ns := cfg.Namespace
-	if ns == "" {
-		ns = DefaultNamespace
-	}
-	args := []string{}
-	if deps.ContextName != "" {
-		args = append(args, "--context", deps.ContextName)
-	}
-	// The PKI CA (ca.crt) is what clients pin when the server issues its own
-	// short-lived leaf; older servers only have the self-signed tls.crt.
-	args = append(args, "exec", "-n", ns, "deploy/oberth", "-c", "oberth", "--", "/usr/local/bin/oberth", "admin", "read-file", "/run/oberth-identities/server/ca.crt", "/run/oberth-identities/server/tls.crt")
-	certificate, err := deps.RunCommand(ctx, nil, "kubectl", args...)
-	if err != nil {
-		return nil, errors.New("could not retrieve server public certificate")
-	}
-	if len(certificate) == 0 {
-		return nil, errors.New("server public certificate is empty")
-	}
-	return certificate, nil
+	return readServerPublicCertificate(ctx, cfg, deps, true)
 }
 
 // clientReachableHost names the address a host-side client should use. It has

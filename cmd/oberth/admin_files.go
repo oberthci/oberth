@@ -2,95 +2,89 @@ package main
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
-	"flag"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
+	"syscall"
 )
 
 // These local, read-only commands replace file tools in the scratch server.
-// Kubernetes exec authorization and the process UID govern access, as before.
+// Kubernetes exec authorization, a public-path allowlist and the process UID govern access.
 func runAdmin(ctx context.Context, arguments []string, output io.Writer) error {
 	if len(arguments) == 0 {
-		return fmt.Errorf("%w: admin read-file <path>... | hash-db [--database path]", errUsage)
+		return fmt.Errorf("%w: admin read-file <public-identity-path> [fallback-path]", errUsage)
 	}
 	switch arguments[0] {
 	case "read-file":
 		if len(arguments) < 2 {
 			return fmt.Errorf("%w: admin read-file requires at least one absolute path", errUsage)
 		}
-		var last error
-		for _, path := range arguments[1:] {
-			file, err := openAdminFile(path)
-			if errors.Is(err, os.ErrNotExist) {
-				last = err
-				continue
-			}
-			if err != nil {
-				return err
-			}
-			_, err = io.Copy(output, adminContextReader{ctx, file})
-			return errors.Join(err, file.Close())
-		}
-		return last
-	case "hash-db":
-		flags := flag.NewFlagSet("admin hash-db", flag.ContinueOnError)
-		flags.SetOutput(io.Discard)
-		database := flags.String("database", "/data/oberth.sqlite", "SQLite main file (and optional WAL)")
-		if err := flags.Parse(arguments[1:]); err != nil {
-			return err
-		}
-		if flags.NArg() != 0 {
-			return fmt.Errorf("%w: admin hash-db accepts no positional arguments", errUsage)
-		}
-		for _, suffix := range []string{"", "-wal"} {
-			path := *database + suffix
-			file, err := openAdminFile(path)
-			if suffix != "" && errors.Is(err, os.ErrNotExist) {
-				continue
-			}
-			if err != nil {
-				return err
-			}
-			hash := sha256.New()
-			_, err = io.Copy(hash, adminContextReader{ctx, file})
-			if failure := errors.Join(err, file.Close()); failure != nil {
-				return failure
-			}
-			if _, err = fmt.Fprintf(output, "%s  %s\n", hex.EncodeToString(hash.Sum(nil)), path); err != nil {
-				return err
-			}
-		}
-		return nil
+		return adminReadPublicFiles(ctx, arguments[1:], output, adminPublicFiles)
 	default:
 		return fmt.Errorf("%w: unknown admin command %q", errUsage, arguments[0])
 	}
 }
-func openAdminFile(path string) (*os.File, error) {
-	if !filepath.IsAbs(path) || strings.ContainsAny(path, "\x00\r\n") {
-		return nil, errors.New("admin file path must be absolute and contain no line breaks")
+
+// Only public identity material is exposed through read-file. Test fixtures pass
+// their own private roots to adminReadPublicFiles; the command always uses this list.
+var adminPublicFiles = map[string]bool{
+	"/etc/oberth/tls/tls.crt":                        true,
+	"/run/oberth-identities/server/ca.crt":           true,
+	"/run/oberth-identities/server/tls.crt":          true,
+	"/run/oberth-identities/upstream/id_ed25519.pub": true,
+}
+
+func adminReadPublicFiles(ctx context.Context, paths []string, output io.Writer, allowed map[string]bool) error {
+	// Check every argument before touching the filesystem, including fallbacks.
+	for _, path := range paths {
+		if !allowed[path] {
+			return errors.New("admin read-file permits only public identity files")
+		}
 	}
-	// Projected Secret paths may be symlinks; follow them just as cat did.
-	info, err := os.Stat(path) // #nosec G703 -- Local read-only admin command intentionally accepts operator-selected absolute paths; the process UID governs access.
+	var last error
+	for _, path := range paths {
+		file, err := openPublicAdminFile(path)
+		if errors.Is(err, os.ErrNotExist) {
+			last = err
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		_, err = io.Copy(output, adminContextReader{ctx, file})
+		return errors.Join(err, file.Close())
+	}
+	return last
+}
+
+func openPublicAdminFile(path string) (*os.File, error) {
+	// Kubernetes projects public files through ..data symlinks. Resolve once,
+	// require the same public filename beneath its exact identity directory,
+	// then use a traversal-resistant root and refuse a changed final symlink.
+	directory := filepath.Dir(path)
+	resolved, err := filepath.EvalSymlinks(path)
 	if err != nil {
 		return nil, err
 	}
-	if !info.Mode().IsRegular() {
-		return nil, errors.New("admin file must be regular")
+	relative, err := filepath.Rel(directory, resolved)
+	if err != nil || !filepath.IsLocal(relative) || filepath.Base(resolved) != filepath.Base(path) {
+		return nil, errors.New("admin public file resolves outside its allowed public identity path")
 	}
-	file, err := os.Open(path) // #nosec G304 G703 -- Same administrator-selected read-only path; no service endpoint or write operation.
+	root, err := os.OpenRoot(directory)
 	if err != nil {
 		return nil, err
 	}
-	current, err := file.Stat()
-	if err != nil || !current.Mode().IsRegular() {
+	defer func() { _ = root.Close() }()
+	file, err := root.OpenFile(relative, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
+	if err != nil {
+		return nil, err
+	}
+	info, err := file.Stat()
+	if err != nil || !info.Mode().IsRegular() {
 		_ = file.Close()
-		return nil, errors.Join(err, errors.New("admin file must remain regular"))
+		return nil, errors.Join(err, errors.New("admin public file must be regular"))
 	}
 	return file, nil
 }

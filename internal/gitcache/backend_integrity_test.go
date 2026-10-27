@@ -46,7 +46,7 @@ func testCommitBody(tree plumbing.Hash) string {
 }
 
 func TestGoGraphRejectsMalformedMetadata(t *testing.T) {
-	for _, name := range []string{"valid", "tree order", "directory tree order", "missing author", "bad parent hash", "bad tree hash", "bad identity", "bad timestamp", "duplicate author", "unterminated headers", "bad tag type", "bad tag hash", "bad tag name", "bad tagger", "tag type mismatch", "gitmodules syntax", "gitmodules URL", "gitmodules duplicate URL", "gitmodules path", "gitmodules traversal", "gitmodules alias path", "gitmodules name", "gitmodules update", "gitmodules symlink", "valid modules", ".git", "GIT~1", ".git.", ".git ", ".git::$INDEX_ALLOCATION", "x\\.git", ".g\u200cit", "\ufeff.git"} {
+	for _, name := range []string{"valid", "LF-only headers", "LF-only tag headers", "tree order", "directory tree order", "missing author", "bad parent hash", "bad tree hash", "bad identity", "bad timestamp", "duplicate author", "unterminated headers", "bad tag type", "bad tag hash", "bad tag name", "bad tagger", "tag type mismatch", "gitmodules syntax", "gitmodules URL", "gitmodules duplicate URL", "gitmodules path", "gitmodules traversal", "gitmodules alias path", "gitmodules name", "gitmodules update", "gitmodules symlink", "valid modules", ".git", "GIT~1", ".git.", ".git ", ".git::$INDEX_ALLOCATION", "x\\.git", ".g\u200cit", "\ufeff.git"} {
 		t.Run(name, func(t *testing.T) {
 			r, err := git.Init(memory.NewStorage(), nil)
 			if err != nil {
@@ -107,6 +107,8 @@ func TestGoGraphRejectsMalformedMetadata(t *testing.T) {
 				body = strings.Replace(body, "1600000000", "not-a-timestamp", 1)
 			case "duplicate author":
 				body = strings.Replace(body, "\n\nfixture", "\nauthor Fixture <a@b> 1600000000 +0000\n\nfixture", 1)
+			case "LF-only headers":
+				body = strings.Split(body, "\n\n")[0] + "\n"
 			case "unterminated headers":
 				body = strings.Split(body, "\n\n")[0]
 			}
@@ -117,6 +119,8 @@ func TestGoGraphRejectsMalformedMetadata(t *testing.T) {
 			if strings.Contains(name, "tag") && !strings.HasPrefix(name, "gitmodules") {
 				tag := "object " + blob.String() + "\ntype blob\ntag fixture\ntagger Fixture <a@b> 1600000000 +0000\n\nmessage\n"
 				switch name {
+				case "LF-only tag headers":
+					tag = strings.Split(tag, "\n\n")[0] + "\n"
 				case "bad tag type":
 					tag = strings.Replace(tag, "type blob", "type nonsense", 1)
 				case "bad tag hash":
@@ -131,7 +135,7 @@ func TestGoGraphRejectsMalformedMetadata(t *testing.T) {
 				root = rawGoObject(t, r, plumbing.TagObject, []byte(tag))
 			}
 			err = validateGoGraph(t.Context(), r, []plumbing.Hash{root}, nil)
-			valid := name == "valid" || name == "valid modules"
+			valid := name == "valid" || name == "valid modules" || name == "bad tag name" || name == "LF-only headers" || name == "LF-only tag headers"
 			if valid && err != nil {
 				t.Fatal(err)
 			}
@@ -260,5 +264,38 @@ func TestReceiveQuarantineRejectsObjectsBeforePublication(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// Git treats badTagName as informational and accepts LF-terminated header-only
+// objects. Verify the same objects through Git's transfer fsck and our fetch.
+func TestFetchAcceptsGitCompatibleHeaderOnlyObjects(t *testing.T) {
+	repository := newTestRepository(t)
+	r, closeStorage, err := openGoRepository(repository.upstream)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closeStorage()
+	initial, err := r.CommitObject(plumbing.NewHash(repository.initialSHA))
+	if err != nil {
+		t.Fatal(err)
+	}
+	commit := rawGoObject(t, r, plumbing.CommitObject, []byte(strings.Split(testCommitBody(initial.TreeHash), "\n\n")[0]+"\n"))
+	tag := rawGoObject(t, r, plumbing.TagObject, []byte("object "+commit.String()+"\ntype commit\ntag bad..name\ntagger Fixture <a@b> 1600000000 +0000\n"))
+	runGit(t, repository.upstream, "update-ref", "refs/heads/main", commit.String())
+	runGit(t, repository.upstream, "update-ref", "refs/tags/fixture", tag.String())
+	destination := filepath.Join(t.TempDir(), "oracle.git")
+	runGit(t, "", "init", "--bare", destination)
+	runGit(t, destination, "-c", "transfer.fsckObjects=true", "fetch", repository.upstream, "+refs/heads/*:refs/heads/*", "+refs/tags/*:refs/tags/*")
+	cache := newTestCache(t, repository.upstream)
+	ready, err := cache.Ensure(t.Context(), "example")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := runGit(t, ready.Path, "rev-parse", "refs/heads/main"); got != commit.String() {
+		t.Fatalf("header-only commit not fetched: %s", got)
+	}
+	if got := runGit(t, ready.Path, "rev-parse", "refs/tags/fixture"); got != tag.String() {
+		t.Fatalf("tag not fetched: %s", got)
 	}
 }

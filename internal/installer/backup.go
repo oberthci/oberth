@@ -43,6 +43,8 @@ type BackupConfig struct {
 	Namespace        string
 	OpenBaoNamespace string
 	ArgoNamespace    string
+	// UtilityImage overrides the installed file-tool image for a legacy database copy.
+	UtilityImage string
 	// Output is the archive to create; it must not exist.
 	Output string
 	// Recipient is the PEM certificate (RSA >= 3072 bits) the archive is
@@ -67,8 +69,9 @@ type backupDeps struct {
 	rootToken string
 	// envToken is BAO_TOKEN as read (and cleared) at startup, so no child
 	// process inherits it even when the operation never needs it.
-	envToken  string
-	apiServer string
+	envToken     string
+	apiServer    string
+	utilityImage string
 }
 
 func (cfg *BackupConfig) applyDefaults() {
@@ -269,6 +272,7 @@ func displayLocalPath(path string) string {
 // serverDeployment is what backup and restore need from deploy/oberth.
 type serverDeployment struct {
 	Image         string
+	UtilityImage  string
 	Replicas      int32
 	Selector      string
 	ClaimName     string
@@ -294,6 +298,14 @@ func inspectServerDeployment(ctx context.Context, deps Deps, namespace string) (
 			info.ClaimName = volume.PersistentVolumeClaim.ClaimName
 		}
 	}
+	// Read the installed utility image, including a chart/installer mirror override.
+	// Legacy charts used the server image for prepare-caches; those still need
+	// the dedicated utility default rather than the old server substrate.
+	for _, init := range deployment.Spec.Template.Spec.InitContainers {
+		if init.Name == "prepare-caches" && len(init.Image) > 0 {
+			info.UtilityImage = init.Image
+		}
+	}
 	defaults := store.DefaultProtocolConfig()
 	info.Compatibility = backupCompatibility{
 		SchemaIdentity: defaults.SchemaIdentity,
@@ -317,6 +329,9 @@ func inspectServerDeployment(ctx context.Context, deps Deps, namespace string) (
 				info.Compatibility.WitnessKeyInfo = env.Value
 			}
 		}
+	}
+	if info.UtilityImage == info.Image {
+		info.UtilityImage = ""
 	}
 	if !found {
 		return serverDeployment{}, fmt.Errorf("deployment %s/oberth has no %q container", namespace, serverContainerName)
@@ -385,6 +400,7 @@ func readSecretAccess(ctx context.Context, deps Deps, namespace string) (secretA
 // --- Backup flow ---
 
 func runBackup(ctx context.Context, cfg BackupConfig, deps backupDeps) (resultErr error) {
+	deps.utilityImage = cfg.UtilityImage
 	w := deps.Output
 	full := cfg.Scope != BackupScopeHistory
 	if full {

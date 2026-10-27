@@ -350,6 +350,10 @@ func (c *Cache) EnsureForFetch(ctx context.Context, input string) (Repository, e
 // pending receive reservation exists and the caller cannot replay it
 // (e.g. a clone/fetch with no receive handler).
 func (c *Cache) ensureCachedOnlyLocked(ctx context.Context, repo, path string) (Repository, error) {
+	if err := sweepReceiveQuarantines(path, time.Now()); err != nil {
+		c.logger.Printf("git receive quarantine cleanup failed: repository=%q error=%v", path, err)
+	}
+
 	if stat, err := os.Stat(path); err != nil || !stat.IsDir() || !c.isBare(ctx, path) {
 		return Repository{}, fmt.Errorf("repository %s is not cached and cannot refresh while a receive reservation is pending", repo)
 	}
@@ -375,6 +379,10 @@ func (c *Cache) ensureReceiveLocked(ctx context.Context, input, repo, path strin
 }
 
 func (c *Cache) ensureLockedMayRecover(ctx context.Context, input, repo, path string, detectRecovery bool) (Repository, error) {
+	if err := sweepReceiveQuarantines(path, time.Now()); err != nil {
+		c.logger.Printf("git receive quarantine cleanup failed: repository=%q error=%v", path, err)
+	}
+
 	if err := c.checkRepositoryActive(ctx, input); err != nil {
 		return Repository{}, err
 	}
