@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -144,9 +145,10 @@ func waitSlice2Cleanup(t *testing.T, paths []string) {
 // when an assertion fails. The closed latch also exposes worker errors without
 // consuming a one-shot result needed by teardown.
 type slice2Owner struct {
-	cancel context.CancelFunc
-	done   chan struct{}
-	err    error
+	cancel   context.CancelFunc
+	done     chan struct{}
+	err      error
+	stopOnce sync.Once
 }
 
 func startSlice2Owner(t *testing.T, scheduler *Scheduler) *slice2Owner {
@@ -163,11 +165,13 @@ func startSlice2Owner(t *testing.T, scheduler *Scheduler) *slice2Owner {
 
 func (owner *slice2Owner) stop(t *testing.T) {
 	t.Helper()
-	owner.cancel()
-	<-owner.done
-	if owner.err != nil {
-		t.Errorf("scheduler stopped: %v", owner.err)
-	}
+	owner.stopOnce.Do(func() {
+		owner.cancel()
+		<-owner.done
+		if owner.err != nil {
+			t.Errorf("scheduler stopped: %v", owner.err)
+		}
+	})
 }
 
 func (owner *slice2Owner) waitEntered(t *testing.T, entered <-chan struct{}) {
@@ -183,21 +187,27 @@ func (owner *slice2Owner) waitEntered(t *testing.T, entered <-chan struct{}) {
 
 func (owner *slice2Owner) waitTerminal(t *testing.T, scheduler *Scheduler, database *store.Store, id string) model.Run {
 	t.Helper()
+	ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
+	defer cancel()
+	last := model.Run{ID: id}
 	for {
 		// Subscribe before the durable read: finalization between these two
 		// operations must wake us, while an already terminal run needs no wait.
 		changed := scheduler.signals.Run(id)
-		run, err := database.Run(t.Context(), id)
+		run, err := database.Run(ctx, id)
 		if err != nil {
-			t.Fatal(err)
+			t.Fatalf("read terminal run %s: %v; last observed run = %#v", id, err, last)
 		}
+		last = run
 		if run.Status.Terminal() {
 			return run
 		}
 		select {
 		case <-changed:
 		case <-owner.done:
-			t.Fatalf("scheduler stopped before terminal run %s: %v", id, owner.err)
+			t.Fatalf("scheduler stopped before terminal run %s: %v; last observed run = %#v", id, owner.err, last)
+		case <-ctx.Done():
+			t.Fatalf("waiting for terminal run %s: %v; last observed run = %#v", id, ctx.Err(), last)
 		}
 	}
 }
