@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/oberthci/oberth/internal/api"
+	"github.com/oberthci/oberth/internal/gitcache"
 	"github.com/oberthci/oberth/internal/model"
 )
 
@@ -21,6 +22,7 @@ type ClusterProbe func(context.Context) error
 type VCSProbe func(context.Context, model.Upstream) error
 
 type Health struct {
+	GitcacheShadow    func() gitcache.ShadowStats
 	ControllerProfile func() *model.ControllerProfileStatus
 	// ReadyGate checks process-local recovery state without network or store reads.
 	ReadyGate ClusterProbe
@@ -113,6 +115,7 @@ type AuditChainStatus struct {
 }
 
 type HealthStatus struct {
+	*gitcache.ShadowStats
 	ControllerProfile *model.ControllerProfileStatus `json:"controller_profile,omitempty"`
 	Storage           any                            `json:"storage,omitempty"`
 	Database          string                         `json:"database"`
@@ -199,6 +202,10 @@ func requiresSSHIdentity(upstreams []model.Upstream) bool {
 
 func (health Health) Status(ctx context.Context) (any, error) {
 	status := HealthStatus{Database: "unavailable", SchemaVersion: health.SchemaVersion, VCS: "unavailable", Cluster: "unavailable", Audit: "unavailable", AuditMode: health.AuditMode, Version: health.Version, SecretStore: health.SecretStore}
+	if health.GitcacheShadow != nil {
+		stats := health.GitcacheShadow()
+		status.ShadowStats = &stats
+	}
 	if health.ControllerProfile != nil {
 		status.ControllerProfile = health.ControllerProfile()
 	}

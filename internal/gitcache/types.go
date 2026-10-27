@@ -155,6 +155,12 @@ type Config struct {
 	// requires explicit selection; GitBinary configures the CLI executable.
 	Backend Backend
 	SSH     SSHConfig
+	// Shadow compares immutable CLI deliveries asynchronously. It forces CLI
+	// authority even if BackendGoGit was selected. ShadowCommand is a trusted
+	// helper executable prefix; nil uses this executable's internal command.
+	Shadow        bool
+	ShadowContext context.Context
+	ShadowCommand []string
 	// RepositoryGate refuses network/cache admission while a repository is archived.
 	RepositoryGate func(context.Context, string) error
 	Root           string

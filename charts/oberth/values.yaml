@@ -540,3 +540,8 @@ trustedTests:
 # Backend switch. The release runtime includes Git/OpenSSH for the CLI.
 # Go-git requires explicit opt-in while source delivery is being requalified.
 gitBackend: cli
+
+# Compare CLI source delivery with a bounded, isolated go-git observer.
+# Observations never select the bytes served to builds.
+gitcache:
+  shadow: false

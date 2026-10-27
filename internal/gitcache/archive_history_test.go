@@ -4,6 +4,7 @@ import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -13,10 +14,70 @@ import (
 
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/oberthci/oberth/internal/archivecheck"
 	"github.com/oberthci/oberth/internal/gitcache"
 )
+
+func TestShadowFixtureProcess(t *testing.T) {
+	marker := -1
+	for i, arg := range os.Args {
+		if arg == "shadow-fixture" {
+			marker = i
+			break
+		}
+	}
+	if marker < 0 {
+		return
+	}
+	args := os.Args[marker+1:]
+	if len(args) != 4 {
+		os.Exit(2)
+	}
+	if err := gitcache.RunShadow(context.Background(), args[0], args[1], args[2], args[3], os.Stdout); err != nil {
+		os.Exit(1)
+	}
+	os.Exit(0)
+}
+
+func TestShadowRealCorruptionFixture(t *testing.T) {
+	repository := extractHistoryFixture(t)
+	root := t.TempDir()
+	// Preserve the exact incident-triggering pack/delta layout, not a repack.
+	if err := os.Symlink(repository, filepath.Join(root, "mirror.git")); err != nil {
+		t.Fatal(err)
+	}
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cache, err := gitcache.New(gitcache.Config{Root: root, Backend: gitcache.BackendGoGit, Shadow: true, ShadowContext: t.Context(), ShadowCommand: []string{executable, "-test.run=^TestShadowFixtureProcess$", "--", "shadow-fixture"}, Upstream: func(string) (string, error) { return "", errors.New("shadow must not fetch") }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(cache.CloseShadow)
+	const commit = "483edb0165750b273a453b5d5de61183091fda14"
+	var actual bytes.Buffer
+	if err := cache.ArchiveTar(t.Context(), "mirror", commit, &actual); err != nil {
+		t.Fatal(err)
+	}
+	expected, err := archivecheck.Git(t.Context(), repository, "archive", "--format=tar", commit)
+	if err != nil || !bytes.Equal(actual.Bytes(), expected) {
+		t.Fatalf("shadow changed CLI bytes: %v", err)
+	}
+	if err := cache.Checkout(t.Context(), "mirror", commit, filepath.Join(t.TempDir(), "work")); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+	if err := cache.WaitShadow(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if stats := cache.ShadowStats(); stats.Runs != 2 || stats.Errors != 0 || stats.Mismatches != 0 || stats.Skipped != 0 {
+		t.Fatalf("incident fixture parity: %+v", stats)
+	}
+}
 
 func TestArchiveRealHistory(t *testing.T) {
 	repository := os.Getenv("OBERTH_ARCHIVE_PARITY_REPO")

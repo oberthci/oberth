@@ -51,6 +51,26 @@ resource/custody requirements are in [database-backup.md](docs/database-backup.m
   uses the reviewed v0.17.56 Alpine substrate with Git/OpenSSH; go-git is an
   explicit opt-in. Its decoded object bytes are hashed against the requested
   Git ID on consumption, and failed checkouts are removed before seeding.
+  Optional `OBERTH_GITCACHE_SHADOW=1` (chart `gitcache.shadow`, default false)
+  forces CLI authority and observes successful archive/checkout deliveries.
+  Archive observations pin Git's emitted PAX commit, never a later moving ref;
+  checkouts already name an immutable SHA. One isolated helper at a time reads
+  the local cache, with 16 pending jobs and the normal Git command timeout in
+  a separate budget. Full queues/unpinnable archives increment `shadow_skipped`;
+  helper failures/timeouts increment `shadow_errors`, never fail delivery.
+  The helper retains the 32 MiB object LRU and streaming decoder, streams tar
+  data with a 32 KiB buffer, has a 128 MiB Go soft memory limit, and is killed
+  on timeout/shutdown (one second to reap its Git child, then the entire process
+  group is killed). It cannot seed a workspace
+  or select returned bytes. Both archives are rebuilt at the pinned SHA;
+  SHA-256 compares every file byte and ordered entry name/mode/type/link/size,
+  excluding tar framing/global PAX/padding. The Git tree IDs are compared too.
+  Disagreements increment `oberth_gitcache_shadow_mismatch_total` and log only
+  structured repo/SHA/archive/tree hashes; helper stderr is discarded. Unscoped
+  `/api/status` exposes process-local `shadow_runs`, `shadow_mismatches`, errors
+  and skipped counters. `/metrics` exposes the mismatch counter to unscoped
+  authenticated admins; scoped status omits installation-wide shadow counts.
+  A soak must inspect errors/skips as well as mismatches to assess coverage.
   The cache init
   and restore file-tool container use the shared digest-pinned BusyBox utility
   image, overridable with chart `utilityImage` / installer `--utility-image`

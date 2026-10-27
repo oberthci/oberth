@@ -30,6 +30,7 @@ check_default() {
     exit 1
   fi
   grep -Fq -- '--git-backend=cli' "$work/rendered.yaml"
+  grep -A1 -F 'name: OBERTH_GITCACHE_SHADOW' "$work/rendered.yaml" | grep -Fq 'value: "0"'
   if grep -Eq '^[[:space:]]+image:[[:space:]]*(""|null)?[[:space:]]*$' "$work/rendered.yaml"; then
     echo 'upgrade rendered an empty container image' >&2
     exit 1
@@ -64,3 +65,20 @@ for source in "$legacy_chart" "$chart"; do
   grep -Fq -- "image: \"$mirror\"" "$work/rendered.yaml"
   grep -Fq -- '--git-backend=go-git' "$work/rendered.yaml"
 done
+
+# The shadow setting also works when a reused release has no gitcache map.
+for source in "$legacy_chart" "$chart"; do
+  for shadow in true false; do
+    expected=0
+    if [ "$shadow" = true ]; then expected=1; fi
+    "$helm_tool" template oberth "$source" --is-upgrade --namespace oberth \
+      --values "$fixture" --set-string "image.ref=$server_image" \
+      --set "gitcache.shadow=$shadow" >"$work/rendered.yaml"
+    grep -A1 -F 'name: OBERTH_GITCACHE_SHADOW' "$work/rendered.yaml" | grep -Fq "value: \"$expected\""
+  done
+done
+if "$helm_tool" template oberth "$chart" --set-string "image.ref=$server_image" \
+  --set-string gitcache.shadow=true >"$work/rendered.yaml" 2>/dev/null; then
+  echo 'gitcache.shadow must reject a string boolean' >&2
+  exit 1
+fi

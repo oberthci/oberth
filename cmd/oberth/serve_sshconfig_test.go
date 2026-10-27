@@ -152,3 +152,18 @@ func TestParseServeOptionsGitBackend(t *testing.T) {
 		t.Fatalf("default=%q %v", options.gitBackend, err)
 	}
 }
+
+func TestParseServeOptionsGitcacheShadow(t *testing.T) {
+	for _, value := range []string{"", "0", "1", "true"} {
+		t.Setenv("OBERTH_GITCACHE_SHADOW", value)
+		options, err := parseServeOptions([]string{"--argo-namespace", "argo-pipelines"}, io.Discard)
+		if err != nil || options.gitcacheShadow != (value == "1") || options.gitBackend != "cli" {
+			t.Fatalf("env=%q: shadow=%v backend=%s err=%v", value, options.gitcacheShadow, options.gitBackend, err)
+		}
+	}
+	t.Setenv("OBERTH_GITCACHE_SHADOW", "1")
+	options, err := parseServeOptions([]string{"--argo-namespace", "argo-pipelines", "--gitcache-shadow=false"}, io.Discard)
+	if err != nil || options.gitcacheShadow {
+		t.Fatalf("explicit disable: %+v %v", options, err)
+	}
+}

@@ -123,6 +123,7 @@ type ErrorClassifier func(error) (int, string)
 const writeDeadlineMargin = 1 * time.Minute
 
 type Server struct {
+	metrics               func(io.Writer)
 	draining              atomic.Bool
 	drainContext          context.Context
 	stopObservers         context.CancelFunc
@@ -173,6 +174,11 @@ func New(auth Authenticator, tools ToolService, views ViewService, version strin
 // classifier for the dashboard view endpoints.
 func WithErrorClassifier(classifier ErrorClassifier) func(*Server) {
 	return func(server *Server) { server.classifyError = classifier }
+}
+
+// WithMetrics publishes fixed process counters to unscoped administrators.
+func WithMetrics(write func(io.Writer)) func(*Server) {
+	return func(server *Server) { server.metrics = write }
 }
 
 // WithMaximumToolWait sets the service-layer wait ceiling so the HTTP
@@ -258,6 +264,7 @@ func (server *Server) routes() {
 	server.mux.Handle("GET /api/audit", server.requireAuth(http.HandlerFunc(server.handleAudit)))
 	server.mux.Handle("GET /api/schedules", server.requireAuth(http.HandlerFunc(server.handleSchedules)))
 	server.mux.Handle("GET /api/status", server.requireAuth(http.HandlerFunc(server.handleStatus)))
+	server.mux.Handle("GET /metrics", server.requireAuth(http.HandlerFunc(server.handleMetrics)))
 	server.mux.HandleFunc("GET /assets/{asset...}", serveAsset)
 	server.mux.HandleFunc("GET /{$}", func(writer http.ResponseWriter, request *http.Request) {
 		http.Redirect(writer, request, "/runs", http.StatusTemporaryRedirect)
@@ -646,6 +653,20 @@ func (server *Server) handleGrants(writer http.ResponseWriter, request *http.Req
 func (server *Server) handleStatus(writer http.ResponseWriter, request *http.Request) {
 	value, err := server.views.Status(request.Context(), actorFrom(request.Context()))
 	server.writeView(writer, value, err)
+}
+
+func (server *Server) handleMetrics(writer http.ResponseWriter, request *http.Request) {
+	actor := actorFrom(request.Context())
+	if !actor.Admin || actor.Scoped() {
+		writeJSON(writer, http.StatusForbidden, map[string]string{"error": "unscoped admin required"})
+		return
+	}
+	if server.metrics == nil {
+		http.NotFound(writer, request)
+		return
+	}
+	writer.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+	server.metrics(writer)
 }
 
 func (server *Server) writeView(writer http.ResponseWriter, value any, err error) {

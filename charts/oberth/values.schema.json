@@ -1061,6 +1061,11 @@
       },
       "description": "Archived repository identities; releaseWIF entries for them are refused."
     },
+    "gitcache": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {"shadow": {"type": "boolean"}}
+    },
     "gitBackend": {
       "type": "string",
       "enum": ["go-git", "cli"],

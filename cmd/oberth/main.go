@@ -11,6 +11,7 @@ import (
 	_ "time/tzdata"
 
 	"github.com/oberthci/oberth/internal/app"
+	"github.com/oberthci/oberth/internal/gitcache"
 	"github.com/oberthci/oberth/internal/installer"
 	"github.com/oberthci/oberth/internal/store"
 )
@@ -53,6 +54,11 @@ func runCLI(ctx context.Context, arguments []string, input io.Reader, output io.
 		return fmt.Errorf("%w: expected %s", errUsage, usageCommands)
 	}
 	switch arguments[0] {
+	case "internal-gitcache-shadow":
+		if len(arguments) != 5 {
+			return fmt.Errorf("%w: internal shadow arguments", errUsage)
+		}
+		return gitcache.RunShadow(ctx, arguments[1], arguments[2], arguments[3], arguments[4], output)
 	case "--help", "-h":
 		_, err := fmt.Fprint(output, `Usage: oberth <command> [flags]
 

@@ -220,6 +220,7 @@ esac
 
 // Cache owns bare repositories under one persistent root.
 type Cache struct {
+	shadow          *shadowState
 	backend         gitBackend
 	backendName     Backend
 	ssh             SSHConfig
@@ -297,6 +298,10 @@ func New(config Config) (*Cache, error) {
 	}
 	if err := cache.initBackend(config.Backend); err != nil {
 		return nil, err
+	}
+	if config.Shadow {
+		cache.backend, cache.backendName = &cliBackend{cache: cache}, BackendCLI
+		cache.shadow = newShadowState(cache, config.ShadowContext, config.ShadowCommand)
 	}
 	return cache, nil
 }
@@ -1385,9 +1390,18 @@ func (c *Cache) ArchiveTar(ctx context.Context, input, ref string, w io.Writer) 
 	if !c.isBare(ctx, repoPath) {
 		return fmt.Errorf("repository is not cached")
 	}
-	return c.run(ctx, commandSpec{
+	var prefix archivePrefix
+	output := w
+	if c.shadow != nil {
+		output = io.MultiWriter(w, &prefix)
+	}
+	err = c.run(ctx, commandSpec{
 		dir:    repoPath,
 		args:   []string{"archive", "--format=tar", ref},
-		stdout: w,
+		stdout: output,
 	})
+	if err == nil && c.shadow != nil {
+		c.queueShadow(repoPath, prefix.commit(ref))
+	}
+	return err
 }
