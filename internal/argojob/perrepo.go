@@ -10,6 +10,7 @@ package argojob
 import (
 	"fmt"
 
+	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 	"github.com/oberthci/oberth/pkg/periapsis"
 )
@@ -26,10 +27,7 @@ type PerRepoIdentityConfig struct {
 // the upstream name, org, and bare repo name. This is the same canonical
 // "upstream/org/repo" form used for grant storage (#245 BLOCKER B).
 func canonicalRepoKey(upstreamName, org, repo string) string {
-	if upstreamName == "" || org == "" {
-		return repo
-	}
-	return upstreamName + "/" + org + "/" + repo
+	return model.CanonicalRepoKey(upstreamName, org, repo)
 }
 
 // identityForPerRepo selects the per-repo identity for a credentialed run.

@@ -129,3 +129,23 @@ func TestUpstreamOrg(t *testing.T) {
 		}
 	}
 }
+
+func TestCanonicalRepoKey(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct{ upstream, org, repo, want string }{
+		{"forge", "org", "repo", "forge/org/repo"},
+		{"forge", "", "repo", "forge/forge/repo"},
+		{"other", "", "repo", "other/other/repo"},
+		{"", "org", "repo", "repo"},
+		{"", "", "repo", "repo"},
+	} {
+		if got := CanonicalRepoKey(tc.upstream, tc.org, tc.repo); got != tc.want {
+			t.Errorf("CanonicalRepoKey(%q,%q,%q)=%q want %q", tc.upstream, tc.org, tc.repo, got, tc.want)
+		}
+	}
+	for _, upstream := range []Upstream{{Name: "forge", BaseURL: "ssh://forge.example/org"}, {Name: "forge"}, {}} {
+		if got, want := upstream.QualifiedRepo("repo"), CanonicalRepoKey(upstream.Name, upstream.Org(), "repo"); got != want {
+			t.Fatalf("QualifiedRepo=%q canonical=%q", got, want)
+		}
+	}
+}

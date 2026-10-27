@@ -87,11 +87,20 @@ func (upstream Upstream) Org() string {
 // A missing org identity falls back to the upstream name, matching the
 // schedule engine's historical dedup-key composition.
 func (upstream Upstream) QualifiedRepo(name string) string {
-	org := upstream.Org()
-	if org == "" {
-		org = upstream.Name
+	return CanonicalRepoKey(upstream.Name, upstream.Org(), name)
+}
+
+// CanonicalRepoKey is shared by repository routes, grant declarations and
+// identity selection. An upstream without an org uses its own name as the org;
+// callers without any upstream identity retain the legacy bare spelling.
+func CanonicalRepoKey(upstream, org, repo string) string {
+	if upstream == "" {
+		return repo
 	}
-	return upstream.Name + "/" + org + "/" + name
+	if org == "" {
+		org = upstream
+	}
+	return upstream + "/" + org + "/" + repo
 }
 
 type UpstreamSpec struct {

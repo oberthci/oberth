@@ -98,12 +98,5 @@ func (jobs *ArgoJobs) recordCurrentDeclarations(ctx context.Context, request ser
 
 // Match Upstream.QualifiedRepo even when the upstream has no organization.
 func declarationRepo(request service.JobRequest) string {
-	if request.UpstreamName == "" {
-		return request.Repository.Name
-	}
-	org := request.UpstreamOrg
-	if org == "" {
-		org = request.UpstreamName
-	}
-	return request.UpstreamName + "/" + org + "/" + request.Repository.Name
+	return model.CanonicalRepoKey(request.UpstreamName, request.UpstreamOrg, request.Repository.Name)
 }
