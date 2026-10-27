@@ -98,16 +98,17 @@ func TestOberthBuildPipelineIsAdmissible(t *testing.T) {
 		"test-service":           "lint",
 		"test-rest":              "lint",
 		"test-gitcache-backends": "lint",
+		"test-archive-history":   "lint",
 		"test-openbao":           "setup",
 		"security":               "setup",
 		"shellcheck":             "setup",
 		"chart":                  "lint",
 		"release-diagnostic":     "setup",
 		"verify-publisher-tools": "setup",
-		"build-amd64":            "test-store && test-service && test-rest && test-gitcache-backends && chart",
-		"build-arm64":            "test-store && test-service && test-rest && test-gitcache-backends && chart",
-		"build-darwin-amd64":     "test-store && test-service && test-rest && test-gitcache-backends && chart",
-		"build-darwin-arm64":     "test-store && test-service && test-rest && test-gitcache-backends && chart",
+		"build-amd64":            "test-store && test-service && test-rest && test-gitcache-backends && test-archive-history && chart",
+		"build-arm64":            "test-store && test-service && test-rest && test-gitcache-backends && test-archive-history && chart",
+		"build-darwin-amd64":     "test-store && test-service && test-rest && test-gitcache-backends && test-archive-history && chart",
+		"build-darwin-arm64":     "test-store && test-service && test-rest && test-gitcache-backends && test-archive-history && chart",
 	})
 }
 

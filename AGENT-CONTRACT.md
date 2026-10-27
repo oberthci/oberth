@@ -46,7 +46,12 @@ resource/custody requirements are in [database-backup.md](docs/database-backup.m
   hands them to UID/GID `65534` before the server starts; no manual node
   preparation is required. The two roots must not be equal, nested, aliased, or
   located under a critical system directory.
-- The scratch server image runs only `/usr/local/bin/oberth`. The cache init
+- The server defaults to the Git CLI while the go-git backend is requalified
+  after a streaming-delta source corruption incident. The release runtime
+  uses the reviewed v0.17.56 Alpine substrate with Git/OpenSSH; go-git is an
+  explicit opt-in. Its decoded object bytes are hashed against the requested
+  Git ID on consumption, and failed checkouts are removed before seeding.
+  The cache init
   and restore file-tool container use the shared digest-pinned BusyBox utility
   image, overridable with chart `utilityImage` / installer `--utility-image`
   for air-gapped mirrors; backup/restore inherit the installed utility image
@@ -905,15 +910,15 @@ continuity checks; it must never be used to reset or bypass those checks.
   a single flattened layer binding the exact source-built executable for its
   platform. The published reference is always the index digest; the Helm
   chart pins the index digest, never a single-platform manifest.
-- The server substrate is a digest-pinned multi-arch index built from the
-  Dockerfile's final `FROM scratch` runtime target. Its only regular files
-  are the static server executable and CA trust bundle; timezone data is
-  embedded in Go. `releaseimage.Repack` replaces the bootstrap executable
-  and enforces the positive path allowlist at assembly and readback. OS
-  packages, shells, Git/OpenSSH and shared libraries are forbidden. The
-  numeric runtime user/group is 65534, with writable `/data` and `/tmp` mounts.
-  The optional `cli-runtime` target exists for one release of backend
-  compatibility and must never become the release substrate.
+- The server substrate is the already released v0.17.56 digest-pinned Alpine
+  index, with Git/OpenSSH and the fixed exact runtime package pins. Repack
+  replaces only the bootstrap server binary and requires Git, SSH and CA data
+  at assembly and readback. Dockerfile's final runtime target includes those
+  tools. The package-free scratch-runtime target is experimental and explicitly
+  selects go-git; it is not the release substrate while CLI is the default.
+  Requalification requires the offline real multi-pack all-commit archive gate,
+  checkout parity and both-backend race suites. Passing them does not switch
+  the default automatically; that requires a separate reviewed decision.
 - There is no runner image artifact: Job substrates are public standard
   golang images selected per repository under the administrator prefix
   allowlist.

@@ -537,6 +537,6 @@ trustedTests:
   # Zero disables trusted suite execution; no host-specific group is assumed.
   kvmSupplementalGroup: 0
 
-# One-release backend switch. cli needs an explicitly built cli-runtime image;
-# the normal scratch release uses go-git and contains no Git/OpenSSH tools.
-gitBackend: go-git
+# Backend switch. The release runtime includes Git/OpenSSH for the CLI.
+# Go-git requires explicit opt-in while source delivery is being requalified.
+gitBackend: cli

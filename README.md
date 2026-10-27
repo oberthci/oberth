@@ -451,3 +451,30 @@ the exact annotated tag only after the run is green.
 ## License
 
 Apache License 2.0 — see [LICENSE](LICENSE).
+
+Source delivery currently defaults to the Git CLI (`--git-backend=cli`, chart
+`gitBackend: cli`). The go-git backend remains an explicit opt-in while it is
+requalified after the v0.17.57 streaming-delta corruption incident. Releases
+use the reviewed v0.17.56 CLI-capable runtime substrate. An installation that
+retained `gitBackend: go-git` from v0.17.57 should explicitly set
+`--set gitBackend=cli` during upgrade; retained settings are not overwritten.
+
+To diagnose a quiescent bare mirror without modifying its packs or refs, run
+`hack/repro-archive.sh -repo /path/to/mirror.git -commit FULL_SHA`. It streams
+through the server's Cache.ArchiveTar path and compares every entry and file
+byte with `git archive`. A failure reports the first path/offset, blob ID and
+pack offsets/delta bases. `--original-decoder` (before the flags) builds an
+overlay reproducing v0.17.57's decoder and lack of decoded-object verification;
+it never edits the checkout. `-all` checks every reachable commit, and
+`-inspect path` prints that file's object chain even on success. Use a snapshot
+or stop external writers first; the diagnostic's lock is process-local. The
+checker requires Go and Git (plus Python 3 for the original-decoder overlay),
+performs no network access and never executes source from the input mirror.
+It can also be built once with `go build -o archive-parity ./hack/archive-parity`.
+
+`hack/test-archive-history.sh` is the offline race-enabled gate over every
+file at all 878 commits in a real three-pack Kubernetes gengo fixture. Branch
+builds depend on its dedicated lane; the release test also runs the complete
+fixture before building or publishing. See internal/gitcache/testdata/README.md
+for provenance and third_party/go-git/OBERTH-PATCH.md for the narrow upstream
+correction retained pending a fixed upstream release.

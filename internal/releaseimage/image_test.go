@@ -22,6 +22,8 @@ func TestRepackRemovesPriorOberthAndAddsOnlyExactNewExecutable(t *testing.T) {
 	created := time.Date(2026, 8, 6, 10, 0, 0, 0, time.UTC)
 	base := testBaseImage(t, created, map[string]testEntry{
 		"usr/local/bin/oberth":              {body: "old executable", mode: 0o755},
+		"usr/bin/git":                       {body: "git", mode: 0o755},
+		"usr/bin/ssh":                       {body: "ssh", mode: 0o755},
 		"etc/ssl/certs/ca-certificates.crt": {body: "roots", mode: 0o644},
 	})
 	newBinary := []byte("new exact executable")
@@ -48,6 +50,8 @@ func TestRepackRemovesPriorOberthAndAddsOnlyExactNewExecutable(t *testing.T) {
 func TestRepackRejectsSubstrateWithoutExpectedExecutable(t *testing.T) {
 	created := time.Date(2026, 8, 6, 10, 0, 0, 0, time.UTC)
 	base := testBaseImage(t, created, map[string]testEntry{
+		"usr/bin/git":                       {body: "git", mode: 0o755},
+		"usr/bin/ssh":                       {body: "ssh", mode: 0o755},
 		"etc/ssl/certs/ca-certificates.crt": {body: "roots", mode: 0o644},
 	})
 	if _, err := Repack(base, Server, "amd64", []byte("new"), created, "v1.2.3", "abc"); err == nil {
@@ -59,6 +63,8 @@ func TestVerifyImageBindsLayerConfigAndExactExecutable(t *testing.T) {
 	created := time.Date(2026, 8, 6, 10, 0, 0, 0, time.UTC)
 	base := testBaseImage(t, created, map[string]testEntry{
 		"usr/local/bin/oberth":              {body: "prior server", mode: 0o755},
+		"usr/bin/git":                       {body: "git", mode: 0o755},
+		"usr/bin/ssh":                       {body: "ssh", mode: 0o755},
 		"etc/ssl/certs/ca-certificates.crt": {body: "roots", mode: 0o644},
 	})
 	binary := []byte("new server")
@@ -91,6 +97,8 @@ func TestRepackAcceptsArm64SubstrateForArm64Release(t *testing.T) {
 	created := time.Date(2026, 8, 6, 10, 0, 0, 0, time.UTC)
 	base := testBaseImage(t, created, map[string]testEntry{
 		"usr/local/bin/oberth":              {body: "prior server", mode: 0o755},
+		"usr/bin/git":                       {body: "git", mode: 0o755},
+		"usr/bin/ssh":                       {body: "ssh", mode: 0o755},
 		"etc/ssl/certs/ca-certificates.crt": {body: "roots", mode: 0o644},
 	})
 	config, err := base.ConfigFile()
@@ -139,6 +147,8 @@ func TestRepackRejectsArchitectureWithoutMatchingSubstrate(t *testing.T) {
 	created := time.Date(2026, 8, 6, 10, 0, 0, 0, time.UTC)
 	base := testBaseImage(t, created, map[string]testEntry{
 		"usr/local/bin/oberth":              {body: "prior server", mode: 0o755},
+		"usr/bin/git":                       {body: "git", mode: 0o755},
+		"usr/bin/ssh":                       {body: "ssh", mode: 0o755},
 		"etc/ssl/certs/ca-certificates.crt": {body: "roots", mode: 0o644},
 	})
 	if _, err := Repack(base, Server, "arm64", []byte("arm64 server"), created, "v1.2.3", "0123456789abcdef"); err == nil {
@@ -150,6 +160,8 @@ func TestRepackRejectsSubstrateWhoseConfigDoesNotMatchRequestedPlatform(t *testi
 	created := time.Date(2026, 8, 6, 10, 0, 0, 0, time.UTC)
 	base := testBaseImage(t, created, map[string]testEntry{
 		"usr/local/bin/oberth":              {body: "prior server", mode: 0o755},
+		"usr/bin/git":                       {body: "git", mode: 0o755},
+		"usr/bin/ssh":                       {body: "ssh", mode: 0o755},
 		"etc/ssl/certs/ca-certificates.crt": {body: "roots", mode: 0o644},
 	})
 	config, err := base.ConfigFile()
@@ -385,6 +397,8 @@ func TestRepackRejectsEmptyBinary(t *testing.T) {
 	created := time.Date(2026, 8, 6, 10, 0, 0, 0, time.UTC)
 	base := testBaseImage(t, created, map[string]testEntry{
 		"usr/local/bin/oberth":              {body: "old executable", mode: 0o755},
+		"usr/bin/git":                       {body: "git", mode: 0o755},
+		"usr/bin/ssh":                       {body: "ssh", mode: 0o755},
 		"etc/ssl/certs/ca-certificates.crt": {body: "roots", mode: 0o644},
 	})
 	if _, err := Repack(base, Server, "amd64", nil, created, "v1.2.3", "abc"); err == nil {
@@ -398,6 +412,8 @@ func TestRepackRejectsEmptyBinary(t *testing.T) {
 func TestRepackRejectsZeroCreatedTime(t *testing.T) {
 	base := testBaseImage(t, time.Now(), map[string]testEntry{
 		"usr/local/bin/oberth":              {body: "old executable", mode: 0o755},
+		"usr/bin/git":                       {body: "git", mode: 0o755},
+		"usr/bin/ssh":                       {body: "ssh", mode: 0o755},
 		"etc/ssl/certs/ca-certificates.crt": {body: "roots", mode: 0o644},
 	})
 	if _, err := Repack(base, Server, "amd64", []byte("binary"), time.Time{}, "v1.2.3", "abc"); err == nil {
@@ -419,7 +435,8 @@ func TestRepackRejectsSubstrateMissingRequiredPath(t *testing.T) {
 	created := time.Date(2026, 8, 6, 10, 0, 0, 0, time.UTC)
 	base := testBaseImage(t, created, map[string]testEntry{
 		"usr/local/bin/oberth": {body: "old executable", mode: 0o755},
-		// Missing: etc/ssl/certs/ca-certificates.crt
+		"usr/bin/git":          {body: "git", mode: 0o755},
+		// Missing: usr/bin/ssh and etc/ssl/certs/ca-certificates.crt
 	})
 	if _, err := Repack(base, Server, "amd64", []byte("binary"), created, "v1.2.3", "abc"); err == nil {
 		t.Fatal("accepted substrate missing required paths")
@@ -445,6 +462,8 @@ func TestRepackRejectsUnsupportedArchitecture(t *testing.T) {
 	created := time.Date(2026, 8, 6, 10, 0, 0, 0, time.UTC)
 	base := testBaseImage(t, created, map[string]testEntry{
 		"usr/local/bin/oberth":              {body: "old executable", mode: 0o755},
+		"usr/bin/git":                       {body: "git", mode: 0o755},
+		"usr/bin/ssh":                       {body: "ssh", mode: 0o755},
 		"etc/ssl/certs/ca-certificates.crt": {body: "roots", mode: 0o644},
 	})
 	// riscv64 is not in the server platform list
@@ -456,7 +475,9 @@ func TestRepackRejectsUnsupportedArchitecture(t *testing.T) {
 func TestVerifyImageRejectsMultiLayerImage(t *testing.T) {
 	created := time.Date(2026, 8, 6, 10, 0, 0, 0, time.UTC)
 	// Build a two-layer image manually
-	layer1 := testTarLayer(t, map[string]testEntry{})
+	layer1 := testTarLayer(t, map[string]testEntry{
+		"usr/bin/git": {body: "git", mode: 0o755},
+	})
 	layer2 := testTarLayer(t, map[string]testEntry{
 		"usr/local/bin/oberth": {body: "server", mode: 0o755},
 	})
@@ -484,6 +505,8 @@ func TestVerifyImageRejectsMissingExecutable(t *testing.T) {
 	created := time.Date(2026, 8, 6, 10, 0, 0, 0, time.UTC)
 	// Build a single-layer image without the expected executable
 	layer := testTarLayer(t, map[string]testEntry{
+		"usr/bin/git":                       {body: "git", mode: 0o755},
+		"usr/bin/ssh":                       {body: "ssh", mode: 0o755},
 		"etc/ssl/certs/ca-certificates.crt": {body: "roots", mode: 0o644},
 	})
 	image, err := mutate.AppendLayers(empty.Image, layer)
@@ -523,6 +546,8 @@ func TestVerifyImageRejectsNonExecutablePermissions(t *testing.T) {
 	// Build image with the executable at mode 0644 (not executable)
 	layer := testTarLayer(t, map[string]testEntry{
 		"usr/local/bin/oberth":              {body: "server", mode: 0o644}, // Not executable
+		"usr/bin/git":                       {body: "git", mode: 0o755},
+		"usr/bin/ssh":                       {body: "ssh", mode: 0o755},
 		"etc/ssl/certs/ca-certificates.crt": {body: "roots", mode: 0o644},
 	})
 	image, err := mutate.AppendLayers(empty.Image, layer)
@@ -562,7 +587,7 @@ func TestVerifyImageRejectsMissingRequiredBootstrapPath(t *testing.T) {
 	// Build image with executable but missing required bootstrap paths
 	layer := testTarLayer(t, map[string]testEntry{
 		"usr/local/bin/oberth": {body: "server", mode: 0o755},
-		// Missing: etc/ssl/certs/ca-certificates.crt
+		// Missing: usr/bin/git, usr/bin/ssh, etc/ssl/certs/ca-certificates.crt
 	})
 	image, err := mutate.AppendLayers(empty.Image, layer)
 	if err != nil {
@@ -624,43 +649,14 @@ func testTarLayer(t *testing.T, files map[string]testEntry) v1.Layer {
 	return layer
 }
 
-func TestScratchContractRejectsOSPayloadAtAssemblyAndReadback(t *testing.T) {
-	created := time.Date(2026, 10, 26, 0, 0, 0, 0, time.UTC)
-	binary := []byte("source-built executable")
-	definition, err := contract(Server)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, path := range []string{"usr/bin/git", "usr/bin/ssh", "bin/sh", "lib/libcurl.so.4", "lib/apk/db/installed", "etc/os-release", "sneaky/runtime.so"} {
-		t.Run(path, func(t *testing.T) {
-			base := testBaseImage(t, created, map[string]testEntry{"usr/local/bin/oberth": {body: "prior", mode: 0o755}, "etc/ssl/certs/ca-certificates.crt": {body: "roots", mode: 0o644}, path: {body: "OS payload", mode: 0o755}})
-			if _, err := Repack(base, Server, "amd64", binary, created, "test", "revision"); err == nil {
-				t.Fatal("OS-bearing substrate accepted")
-			}
-			clean := testBaseImage(t, created, map[string]testEntry{"usr/local/bin/oberth": {body: "prior", mode: 0o755}, "etc/ssl/certs/ca-certificates.crt": {body: "roots", mode: 0o644}})
-			image, err := Repack(clean, Server, "amd64", binary, created, "test", "revision")
-			if err != nil {
-				t.Fatal(err)
-			}
-			// Preserve the canonical one-layer/config contract while injecting a file.
-			files := extractedFiles(t, image)
-			entries := map[string]testEntry{}
-			for name, body := range files {
-				entries[name] = testEntry{body: string(body), mode: 0o644}
-			}
-			entries["usr/local/bin/oberth"] = testEntry{body: string(binary), mode: 0o755}
-			entries[path] = testEntry{body: "OS payload", mode: 0o755}
-			injected := testBaseImage(t, created, entries)
-			config, err := image.ConfigFile()
-			if err != nil {
-				t.Fatal(err)
-			}
-			injected, err = mutate.ConfigFile(injected, config)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err := verifyImage(injected, definition, "amd64", binary, created, "test", "revision"); err == nil {
-				t.Fatal("OS-bearing registry readback accepted")
+func TestCLIRuntimeRejectsMissingGitAndSSH(t *testing.T) {
+	created := time.Date(2026, 10, 27, 0, 0, 0, 0, time.UTC)
+	for _, missing := range []string{"usr/bin/git", "usr/bin/ssh"} {
+		t.Run(missing, func(t *testing.T) {
+			files := map[string]testEntry{"usr/local/bin/oberth": {body: "old", mode: 0755}, "etc/ssl/certs/ca-certificates.crt": {body: "CA", mode: 0644}, "usr/bin/git": {body: "git", mode: 0755}, "usr/bin/ssh": {body: "ssh", mode: 0755}}
+			delete(files, missing)
+			if _, err := Repack(testBaseImage(t, created, files), Server, "amd64", []byte("new"), created, "test", "sha"); err == nil {
+				t.Fatalf("substrate missing %s accepted", missing)
 			}
 		})
 	}

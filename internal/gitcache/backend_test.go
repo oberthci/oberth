@@ -21,7 +21,7 @@ func newBackendTestCache(t *testing.T, config Config) (*Cache, error) {
 		selected = Backend(os.Getenv("OBERTH_TEST_GIT_BACKEND"))
 	}
 	if selected == "" {
-		selected = BackendGoGit
+		selected = BackendCLI
 	}
 	if config.GitBinary != "" {
 		selected = BackendCLI
@@ -152,7 +152,8 @@ func TestDefaultBackendAndExplicitLegacyExecutable(t *testing.T) {
 		config Config
 		want   Backend
 	}{
-		{name: "default", want: BackendGoGit},
+		{name: "default", want: BackendCLI},
+		{name: "explicit Go", config: Config{Backend: BackendGoGit}, want: BackendGoGit},
 		{name: "explicit CLI", config: Config{Backend: BackendCLI}, want: BackendCLI},
 		{name: "legacy executable", config: Config{GitBinary: "git"}, want: BackendCLI},
 	} {
@@ -177,7 +178,7 @@ func TestFixtureDefaultsToProductionBackend(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cache.backendName != BackendGoGit {
-		t.Fatalf("fixture backend=%s, production default must be Go", cache.backendName)
+	if cache.backendName != BackendCLI {
+		t.Fatalf("fixture backend=%s, production default must be CLI", cache.backendName)
 	}
 }

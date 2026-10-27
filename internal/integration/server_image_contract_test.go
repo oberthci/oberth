@@ -24,7 +24,9 @@ func TestServerImageUsesPinnedMinimalContract(t *testing.T) {
 		"ARG VERSION=dev",
 		`go build -trimpath -buildvcs=false -ldflags="-s -w -X main.version=${VERSION}" -o /out/oberth ./cmd/oberth`,
 		"FROM alpine:3.23@sha256:fd791d74b68913cbb027c6546007b3f0d3bc45125f797758156952bc2d6daf40 AS cli-runtime",
-		"FROM scratch AS runtime",
+		"FROM scratch AS scratch-runtime",
+		"FROM cli-runtime AS runtime",
+		"COPY third_party/go-git ./third_party/go-git",
 		"ca-certificates=20261020-r0",
 		"git=2.52.0-r0",
 		"libcrypto3=3.5.9-r0",
@@ -59,33 +61,28 @@ func TestServerImageUsesPinnedMinimalContract(t *testing.T) {
 		}
 	}
 	instructions := serverImageDockerInstructions(dockerfile)
-	finalStageStart := -1
-	for index, instruction := range instructions {
-		if instruction == "FROM scratch AS runtime" {
-			finalStageStart = index
+	if instructions[len(instructions)-1] != "FROM cli-runtime AS runtime" {
+		t.Fatal("release default must retain the CLI-capable runtime")
+	}
+	cliStart, scratchStart := -1, -1
+	for i, instruction := range instructions {
+		if strings.HasPrefix(instruction, "FROM alpine:") {
+			cliStart = i
+		}
+		if instruction == "FROM scratch AS scratch-runtime" {
+			scratchStart = i
 		}
 	}
-	if finalStageStart < 0 {
-		t.Fatal("scratch server runtime stage is missing")
+	if cliStart < 0 || scratchStart <= cliStart {
+		t.Fatal("missing CLI runtime before experimental scratch target")
 	}
-	wantRuntime := []string{
-		"COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt",
-		"COPY --from=build /out/oberth /usr/local/bin/oberth",
-		"ENV HOME=/data TMPDIR=/tmp PATH=/usr/local/bin",
-		"WORKDIR /data",
-		"USER 65534:65534",
-		`ENTRYPOINT ["/usr/local/bin/oberth"]`,
-		`CMD ["serve"]`,
+	cli := strings.Join(instructions[cliStart+1:scratchStart], "\n")
+	if strings.Count(cli, "apk add --no-cache") != 1 || !strings.Contains(cli, "rm -f /var/log/apk.log") || !strings.Contains(cli, "COPY --from=build /out/oberth /usr/local/bin/oberth") {
+		t.Fatal("CLI runtime must install reviewed tools, clean APK log and copy the server")
 	}
-	if got := strings.Join(instructions[finalStageStart+1:], "\n"); got != strings.Join(wantRuntime, "\n") {
-		t.Fatalf("scratch runtime has extra payload, commands or a later stage:\n%s", got)
-	}
-	main, err := os.ReadFile("../../cmd/oberth/main.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(main), `_ "time/tzdata"`) {
-		t.Fatal("scratch server must embed timezone data")
+	scratch := strings.Join(instructions[scratchStart+1:len(instructions)-1], "\n")
+	if !strings.Contains(scratch, `CMD ["serve", "--git-backend=go-git"]`) {
+		t.Fatal("experimental scratch target must explicitly opt into go-git")
 	}
 
 	ignoreRaw, err := os.ReadFile("../../.dockerignore")

@@ -157,7 +157,7 @@ spec:
           command: ["/usr/local/bin/oberth"]
           args:
             - serve
-            - --git-backend={{ .Values.gitBackend | default "go-git" }}
+            - --git-backend={{ .Values.gitBackend | default "cli" }}
             - --data=/data
             - --database=/data/oberth.sqlite
             - --ssh-listen=:2222

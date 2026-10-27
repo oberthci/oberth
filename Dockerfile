@@ -9,6 +9,7 @@ ARG BUILD_CACHE_NAMESPACE=default
 RUN apk add --no-cache ca-certificates=20261020-r0
 WORKDIR /src
 COPY go.mod go.sum ./
+COPY third_party/go-git ./third_party/go-git
 RUN --mount=type=cache,id=oberth-server-${BUILD_CACHE_NAMESPACE}-gomod,target=/go/pkg/mod,sharing=locked go mod download
 COPY . .
 ARG TARGETOS=linux
@@ -21,12 +22,9 @@ RUN --mount=type=cache,id=oberth-server-${BUILD_CACHE_NAMESPACE}-gomod,target=/g
     CGO_ENABLED=0 GOOS="$TARGETOS" GOARCH="$TARGETARCH" \
     go build -trimpath -buildvcs=false -ldflags="-s -w -X main.version=${VERSION}" -o /out/oberth ./cmd/oberth
 
-# One-release compatibility target for --git-backend=cli. It is never the
-# release substrate or the default/final image; build --target cli-runtime
-# explicitly when exercising the fallback.
+# CLI-capable release runtime, restored while go-git is requalified.
 FROM alpine:3.23@sha256:fd791d74b68913cbb027c6546007b3f0d3bc45125f797758156952bc2d6daf40 AS cli-runtime
-# These exact pins apply only to the optional CLI compatibility image.
-# The normal release has no OS packages; never pin this target as its substrate.
+# These exact pins match the reviewed v0.17.56 release substrate.
 RUN apk add --no-cache \
     ca-certificates=20261020-r0 \
     git=2.52.0-r0 \
@@ -69,16 +67,18 @@ USER 65534:65534
 ENTRYPOINT ["/usr/local/bin/oberth"]
 CMD ["serve"]
 
-# SUBSTRATE REBUILD REQUIRED: release images repack ServerSubstrate in
-# internal/releaseimage/image.go. After changing this final stage or CA data,
-# build both architectures, check ELF architecture, zero OS packages, Repack
-# and Trivy; publish the exact index with preserved digests and commit its new
-# ServerSubstrate digest. Never pin the compatibility target above.
-FROM scratch AS runtime
+# Explicit experimental target only: the release default below includes Git/SSH.
+FROM scratch AS scratch-runtime
 COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 COPY --from=build /out/oberth /usr/local/bin/oberth
 ENV HOME=/data TMPDIR=/tmp PATH=/usr/local/bin
 WORKDIR /data
 USER 65534:65534
 ENTRYPOINT ["/usr/local/bin/oberth"]
-CMD ["serve"]
+CMD ["serve", "--git-backend=go-git"]
+
+# SUBSTRATE REBUILD REQUIRED when changing runtime packages/configuration:
+# build both architectures, verify ELF architecture, Repack and Trivy, publish
+# the exact index preserving digests and update ServerSubstrate in image.go.
+# This incident restores the already published, reviewed v0.17.56 substrate.
+FROM cli-runtime AS runtime

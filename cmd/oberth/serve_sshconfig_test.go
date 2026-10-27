@@ -148,7 +148,7 @@ func TestParseServeOptionsGitBackend(t *testing.T) {
 		}
 	}
 	options, err := parseServeOptions([]string{"--argo-namespace", "argo-pipelines"}, io.Discard)
-	if err != nil || options.gitBackend != "go-git" {
+	if err != nil || options.gitBackend != "cli" {
 		t.Fatalf("default=%q %v", options.gitBackend, err)
 	}
 }

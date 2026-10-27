@@ -120,7 +120,7 @@ func TestPinnedRSAAlgorithmsExcludeSHA1(t *testing.T) {
 			if err := os.WriteFile(hosts, []byte(marker+knownhosts.Line([]string{"rsa.example"}, signer.PublicKey())+"\n"), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			cache, err := New(Config{Root: filepath.Join(root, "cache"), SSH: SSHConfig{PrivateKeyPath: key, KnownHostsPath: hosts}, Upstream: func(string) (string, error) { return "unused", nil }})
+			cache, err := New(Config{Root: filepath.Join(root, "cache"), Backend: BackendGoGit, SSH: SSHConfig{PrivateKeyPath: key, KnownHostsPath: hosts}, Upstream: func(string) (string, error) { return "unused", nil }})
 			if err != nil {
 				t.Fatal(err)
 			}

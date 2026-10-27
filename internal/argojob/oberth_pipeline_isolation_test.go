@@ -65,6 +65,7 @@ var (
 		"vet": true, "golangci-lint-run": true,
 		"test-store": true, "test-service": true, "test-rest": true,
 		"test-gitcache-backends": true,
+		"test-archive-history":   true,
 		"build-amd64":            true, "build-arm64": true,
 		"build-darwin-amd64": true, "build-darwin-arm64": true,
 	}

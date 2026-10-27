@@ -1225,6 +1225,7 @@ spec:
           OBERTH_RELEASE_SHA="$OBERTH_RELEASE_SHA" \
           OBERTH_RELEASE_TAG="$OBERTH_RELEASE_TAG" \
           GOBIN=/tmp/oberth-tools/bin \
+          OBERTH_ARCHIVE_PARITY_REPO=fixture \
           CGO_ENABLED=1 "$@"
       - bootstrap-clean
       - /tmp/oberth-tools/bin/go

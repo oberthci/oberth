@@ -309,7 +309,7 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 	flags.StringVar(&options.trustedRecipesFile, "trusted-tests-recipes", "", "public operator-approved trusted suite recipes JSON file (requires --vm-kvm-enabled)")
 	flags.Int64Var(&options.trustedKVMGroup, "trusted-tests-kvm-group", 0, "operator-approved positive /dev/kvm supplemental GID required for trusted suites; no default device group")
 	flags.DurationVar(&options.promotionGrantMaxLifetime, "promotion-grant-max-lifetime", 24*time.Hour, "maximum lifetime for promotion grants (default 24h, hard ceiling 168h)")
-	flags.StringVar(&options.gitBackend, "git-backend", "go-git", "Git backend: go-git or cli (one-release compatibility)")
+	flags.StringVar(&options.gitBackend, "git-backend", "cli", "Git backend: cli (default) or go-git (explicit opt-in)")
 	flags.DurationVar(&options.gitCommandTimeout, "git-timeout", 10*time.Minute, "Git command timeout")
 	flags.DurationVar(&options.gcInterval, "git-gc-interval", 24*time.Hour, "periodic Git GC interval")
 	flags.StringVar(&options.pushBannerURL, "push-banner-url", "", "optional HTTPS dashboard URL echoed to every accepted git push")
