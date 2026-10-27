@@ -18,9 +18,9 @@ import (
 var errArchiveAttrGap = errors.New("archive export attributes are not supported")
 
 // Fail closed on export rules until Git's complete pattern/macro/pretty-format
-// semantics have parity coverage. A gap is NOT a completed clean comparison or
-// a decoder mismatch. Detection is conservative (overridden/unused rules can
-// also exclude a sample), so an attribute-bearing repo cannot imply a green soak.
+// semantics have parity coverage. Detection is conservative (overridden/unused
+// rules also fire). Shadow must still walk all blobs and compare tree IDs; only
+// an archive disagreement can be attributed to a detected gap.
 func checkGoArchiveAttributes(ctx context.Context, r *git.Repository, tree *object.Tree) error {
 	if store, ok := r.Storer.(*atomicReferenceStore); ok {
 		if _, err := os.Lstat(filepath.Join(store.dir, "info", "attributes")); err == nil {
@@ -43,7 +43,7 @@ func checkGoArchiveAttributes(ctx context.Context, r *git.Repository, tree *obje
 		}
 	}
 	return walkGoTree(ctx, r, tree, func(name string, entry object.TreeEntry) error {
-		if path.Base(name) != ".gitattributes" || (entry.Mode != filemode.Regular && entry.Mode != filemode.Executable && entry.Mode != filemode.Deprecated) {
+		if path.Base(name) != ".gitattributes" || (entry.Mode != filemode.Regular && entry.Mode != filemode.Executable && entry.Mode != filemode.Deprecated && entry.Mode != filemode.Symlink) {
 			return nil
 		}
 		blob, err := r.BlobObject(entry.Hash)
@@ -84,7 +84,7 @@ func scanArchiveExportRules(input io.Reader) (bool, error) {
 	scanner := bufio.NewScanner(input)
 	found := false
 	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
+		line := strings.Trim(scanner.Text(), " \t\r\n")
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
@@ -106,13 +106,13 @@ func scanArchiveExportRules(input io.Reader) (bool, error) {
 			line = line[end+1:]
 		} else {
 			// Keep only tokens after the first unquoted pattern token.
-			fields := strings.Fields(scanner.Text())
+			fields := attributeFields(scanner.Text())
 			if len(fields) < 2 {
 				continue
 			}
 			line = strings.Join(fields[1:], " ")
 		}
-		for _, attr := range strings.Fields(line) {
+		for _, attr := range attributeFields(line) {
 			name, _, _ := strings.Cut(attr, "=")
 			if name == "export-ignore" || name == "export-subst" {
 				found = true
@@ -120,4 +120,10 @@ func scanArchiveExportRules(input io.Reader) (bool, error) {
 		}
 	}
 	return found, scanner.Err()
+}
+
+// Git's attribute lexer splits only these four ASCII characters. In particular,
+// vertical tabs, form feeds and Unicode spaces are part of patterns/attributes.
+func attributeFields(line string) []string {
+	return strings.FieldsFunc(line, func(r rune) bool { return r == ' ' || r == '\t' || r == '\r' || r == '\n' })
 }

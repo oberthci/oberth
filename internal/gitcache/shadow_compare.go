@@ -25,9 +25,9 @@ func RunShadow(ctx context.Context, repository, sha, gitBinary, globalConfig str
 	cli := func(args []string, out io.Writer) error {
 		// Inherit the helper's process group: the parent's timeout kills both
 		// the helper and its Git child, including while a reader is blocked.
-		cmd := exec.CommandContext(ctx, gitBinary, args...) //nolint:gosec
+		cmd := exec.CommandContext(ctx, gitBinary, append([]string{"-c", "core.attributesFile=/dev/null"}, args...)...) //nolint:gosec
 		cmd.Dir = repository
-		cmd.Env = []string{"PATH=/usr/local/bin:/usr/bin:/bin", "HOME=/tmp", "LANG=C", "LC_ALL=C", "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_SYSTEM=/dev/null", "GIT_CONFIG_GLOBAL=" + globalConfig, "GIT_NO_REPLACE_OBJECTS=1", "GIT_TERMINAL_PROMPT=0", "GIT_OPTIONAL_LOCKS=0"}
+		cmd.Env = []string{"PATH=/usr/local/bin:/usr/bin:/bin", "HOME=/dev/null", "XDG_CONFIG_HOME=/dev/null", "GIT_ATTR_NOSYSTEM=1", "LANG=C", "LC_ALL=C", "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_SYSTEM=/dev/null", "GIT_CONFIG_GLOBAL=" + globalConfig, "GIT_NO_REPLACE_OBJECTS=1", "GIT_TERMINAL_PROMPT=0", "GIT_OPTIONAL_LOCKS=0"}
 		cmd.Stdout, cmd.Stderr = out, io.Discard
 		return shadowStageError(ctx, shadowCLIFailed, cmd.Run())
 	}
@@ -57,10 +57,21 @@ func RunShadow(ctx context.Context, repository, sha, gitBinary, globalConfig str
 		return err
 	}
 	result.GoTree = commit.TreeHash.String()
-	result.GoArchive, err = shadowArchiveDigest(func(w io.Writer) error { return goArchive(ctx, r, sha, w) })
+	treeObject, err := commit.Tree()
 	if err != nil {
 		return err
 	}
+	attrErr := checkGoArchiveAttributes(ctx, r, treeObject)
+	if attrErr != nil && !errors.Is(attrErr, errArchiveAttrGap) {
+		return attrErr
+	}
+	// Do not let an export rule hide decoder corruption or a tree disagreement.
+	// Normal goArchive stays fail-closed; this raw walk is only a shadow probe.
+	result.GoArchive, err = shadowArchiveDigest(func(w io.Writer) error { return goArchiveTree(ctx, r, commit, treeObject, w) })
+	if err != nil {
+		return err
+	}
+	result.ExpectedAttrGap = attrErr != nil && result.CLIArchive != result.GoArchive
 	return shadowStageError(ctx, shadowGoOther, json.NewEncoder(output).Encode(result))
 }
 

@@ -15,10 +15,12 @@ const (
 	shadowOversize
 	shadowCanceled
 	shadowAttrGap
+	shadowTimeout
+	shadowNiceUnavailable
 	shadowReasonCount
 )
 
-var shadowReasonNames = [...]string{"cli_failed", "gogit_hash_guard", "gogit_other", "oversize", "canceled", "expected_attr_gap"}
+var shadowReasonNames = [...]string{"cli_failed", "gogit_hash_guard", "gogit_other", "oversize", "canceled", "expected_attr_gap", "timeout", "nice_unavailable"}
 
 // Fixed helper exit codes are a protocol, not an interpretation of stderr.
 const (
@@ -28,6 +30,7 @@ const (
 	shadowExitOversize  = 23
 	shadowExitCanceled  = 24
 	shadowExitAttrGap   = 25
+	shadowExitTimeout   = 26
 )
 
 var errShadowOversize = errors.New("oversized shadow output")
@@ -42,7 +45,9 @@ func (e *shadowFailure) Unwrap() error { return e.cause }
 
 func classifyShadowError(err error) shadowReason {
 	switch {
-	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+	case errors.Is(err, context.DeadlineExceeded):
+		return shadowTimeout
+	case errors.Is(err, context.Canceled):
 		return shadowCanceled
 	case errors.Is(err, errGoObjectIntegrity):
 		return shadowHashGuard
@@ -81,6 +86,8 @@ func shadowExitCode(err error) int {
 		return shadowExitCanceled
 	case shadowAttrGap:
 		return shadowExitAttrGap
+	case shadowTimeout:
+		return shadowExitTimeout
 	default:
 		return shadowExitGoOther
 	}
@@ -97,6 +104,8 @@ func shadowExitReason(code int) shadowReason {
 		return shadowCanceled
 	case shadowExitAttrGap:
 		return shadowAttrGap
+	case shadowExitTimeout:
+		return shadowTimeout
 	default:
 		return shadowGoOther
 	}

@@ -4,6 +4,7 @@ import (
 	"archive/tar"
 	"bytes"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"os"
@@ -13,10 +14,13 @@ import (
 )
 
 func TestShadowExportAttributeGapsAreNotMismatches(t *testing.T) {
-	for _, kind := range []string{"export-ignore", "export-subst", "nested", "info", "configured"} {
+	for _, kind := range []string{"export-ignore", "export-subst", "nested", "info", "configured", "unused", "symlink"} {
 		t.Run(kind, func(t *testing.T) {
 			repository := newTestRepository(t)
-			target, body := ".gitattributes", "README.md "+kind+"\n"
+			target, body := ".gitattributes", "file.txt "+kind+"\n"
+			if kind == "unused" {
+				body = "nonexistent export-ignore\n"
+			}
 			if kind == "nested" {
 				if err := os.Mkdir(filepath.Join(repository.work, "nested"), 0700); err != nil {
 					t.Fatal(err)
@@ -27,16 +31,27 @@ func TestShadowExportAttributeGapsAreNotMismatches(t *testing.T) {
 				}
 			}
 			if kind == "export-subst" {
+				body = "README.md export-subst\n"
 				if err := os.WriteFile(filepath.Join(repository.work, "README.md"), []byte("$Format:%H$\n"), 0600); err != nil {
 					t.Fatal(err)
 				}
 			}
-			if kind != "info" && kind != "configured" {
+			if kind != "info" && kind != "configured" && kind != "symlink" {
 				if err := os.WriteFile(filepath.Join(repository.work, filepath.FromSlash(target)), []byte(body), 0600); err != nil {
 					t.Fatal(err)
 				}
 				runGit(t, repository.work, "add", ".")
 				runGit(t, repository.work, "commit", "-m", "export attributes")
+				runGit(t, repository.work, "push", "origin", "HEAD:refs/heads/main")
+			}
+			if kind == "symlink" {
+				// git archive reads the committed symlink blob as attribute text,
+				// not its target in the checkout (unlike working-tree attr lookup).
+				if err := os.Symlink("file.txt export-ignore", filepath.Join(repository.work, ".gitattributes")); err != nil {
+					t.Fatal(err)
+				}
+				runGit(t, repository.work, "add", ".gitattributes")
+				runGit(t, repository.work, "commit", "-m", "symlink attributes")
 				runGit(t, repository.work, "push", "origin", "HEAD:refs/heads/main")
 			}
 			var logs shadowTestLog
@@ -50,13 +65,13 @@ func TestShadowExportAttributeGapsAreNotMismatches(t *testing.T) {
 			}
 			repo := filepath.Join(cache.root, "example.git")
 			if kind == "info" {
-				if err := os.WriteFile(filepath.Join(repo, "info", "attributes"), []byte("README.md export-ignore\n"), 0600); err != nil {
+				if err := os.WriteFile(filepath.Join(repo, "info", "attributes"), []byte("file.txt export-ignore\n"), 0600); err != nil {
 					t.Fatal(err)
 				}
 			}
 			if kind == "configured" {
 				attr := filepath.Join(t.TempDir(), "attributes")
-				if err := os.WriteFile(attr, []byte("README.md export-ignore\n"), 0600); err != nil {
+				if err := os.WriteFile(attr, []byte("file.txt export-ignore\n"), 0600); err != nil {
 					t.Fatal(err)
 				}
 				runGit(t, repo, "config", "core.attributesFile", attr)
@@ -96,12 +111,16 @@ func TestShadowExportAttributeGapsAreNotMismatches(t *testing.T) {
 				}
 			}
 			waitTestShadow(t, cache)
-			if stats := cache.ShadowStats(); stats.Runs != 1 || stats.Errors != 1 || stats.Mismatches != 0 {
+			wantErrors := uint64(1)
+			if kind == "unused" || kind == "configured" {
+				wantErrors = 0
+			}
+			if stats := cache.ShadowStats(); stats.Runs != 1 || stats.Errors != wantErrors || stats.Mismatches != 0 {
 				t.Fatalf("gap counted as parity: %+v %s", stats, logs.String())
 			}
 			var metrics bytes.Buffer
 			cache.WriteShadowMetrics(&metrics)
-			if !strings.Contains(metrics.String(), `oberth_gitcache_shadow_errors_total{reason="expected_attr_gap"} 1`) {
+			if !strings.Contains(metrics.String(), fmt.Sprintf(`oberth_gitcache_shadow_errors_total{reason="expected_attr_gap"} %d`, wantErrors)) {
 				t.Fatal(metrics.String())
 			}
 			// Direct go-git opt-in must also fail closed instead of returning a wrong archive.
@@ -128,6 +147,9 @@ func TestArchiveExportRuleDetection(t *testing.T) {
 		{`"path with spaces" export-subst` + "\n", true},
 		{`"escaped\\\"pattern" export-ignore` + "\n", true},
 		{`""` + "\n", false},
+		{"file\vexport-ignore\n", false}, {"file\fexport-subst\n", false},
+		{"file\u00a0export-ignore\n", false}, {"file export-ignore\u00a0text\n", false},
+		{"file\rexport-ignore\n", true},
 	} {
 		got, err := scanArchiveExportRules(strings.NewReader(test.body))
 		if err != nil || got != test.gap {

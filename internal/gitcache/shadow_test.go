@@ -11,6 +11,7 @@ import (
 	"log"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -56,11 +57,15 @@ func TestShadowHelperProcess(t *testing.T) {
 	switch args[0] {
 	case "real":
 		os.Exit(RunShadowHelper(context.Background(), args[1:], os.Stdout))
-	case "mismatch", "tree-mismatch":
-		result := shadowComparison{args[2], strings.Repeat("a", 64), strings.Repeat("b", 64), strings.Repeat("c", 40), strings.Repeat("c", 40)}
+	case "mismatch", "tree-mismatch", "tree-mismatch-attr":
+		result := shadowComparison{SHA: args[2], CLIArchive: strings.Repeat("a", 64), GoArchive: strings.Repeat("b", 64), CLITree: strings.Repeat("c", 40), GoTree: strings.Repeat("c", 40)}
 		if args[0] == "tree-mismatch" {
-			result.GoArchive, result.GoTree = result.CLIArchive, strings.Repeat("d", 40)
+			result.GoArchive = result.CLIArchive
 		}
+		if args[0] == "tree-mismatch" || args[0] == "tree-mismatch-attr" {
+			result.GoTree = strings.Repeat("d", 40)
+		}
+		result.ExpectedAttrGap = args[0] == "tree-mismatch-attr"
 		_ = json.NewEncoder(os.Stdout).Encode(result)
 	case "timeout":
 		<-time.After(time.Hour) // Deliberately hung workload, killed by its parent.
@@ -87,7 +92,7 @@ func TestShadowHelperProcess(t *testing.T) {
 		if err := prepareShadowHelper(); err != nil || !shadowHelperPriorityOK() {
 			os.Exit(shadowExitGoOther)
 		}
-		_ = json.NewEncoder(os.Stdout).Encode(shadowComparison{args[2], strings.Repeat("a", 64), strings.Repeat("a", 64), strings.Repeat("b", 40), strings.Repeat("b", 40)})
+		_ = json.NewEncoder(os.Stdout).Encode(shadowComparison{SHA: args[2], CLIArchive: strings.Repeat("a", 64), GoArchive: strings.Repeat("a", 64), CLITree: strings.Repeat("b", 40), GoTree: strings.Repeat("b", 40)})
 	case "canceled":
 		os.Exit(shadowExitCanceled)
 
@@ -125,7 +130,7 @@ func waitTestShadow(t *testing.T, cache *Cache) {
 }
 
 func TestShadowNeverChangesCLIDelivery(t *testing.T) {
-	for _, mode := range []string{"real", "mismatch", "tree-mismatch", "timeout", "crash", "nonzero", "cli-failed", "oversize", "hash-guard", "canceled", "priority"} {
+	for _, mode := range []string{"real", "mismatch", "tree-mismatch", "tree-mismatch-attr", "timeout", "crash", "nonzero", "cli-failed", "oversize", "hash-guard", "canceled", "priority"} {
 		t.Run(mode, func(t *testing.T) {
 			repository := newTestRepository(t)
 			var logs shadowTestLog
@@ -165,7 +170,7 @@ func TestShadowNeverChangesCLIDelivery(t *testing.T) {
 			if stats.Runs != 2 || stats.Skipped != 0 {
 				t.Fatalf("archive observations from archive/checkout hooks: %+v", stats)
 			}
-			if mode == "mismatch" || mode == "tree-mismatch" {
+			if mode == "mismatch" || mode == "tree-mismatch" || mode == "tree-mismatch-attr" {
 				if stats.Mismatches != 2 || stats.Errors != 0 {
 					t.Fatal(stats)
 				}
@@ -182,7 +187,7 @@ func TestShadowNeverChangesCLIDelivery(t *testing.T) {
 					t.Fatal(stats)
 				}
 
-				reason := map[string]string{"timeout": "canceled", "crash": "gogit_other", "nonzero": "gogit_other", "cli-failed": "cli_failed", "oversize": "oversize", "hash-guard": "gogit_hash_guard", "canceled": "canceled"}[mode]
+				reason := map[string]string{"timeout": "timeout", "crash": "gogit_other", "nonzero": "gogit_other", "cli-failed": "cli_failed", "oversize": "oversize", "hash-guard": "gogit_hash_guard", "canceled": "canceled"}[mode]
 				if !strings.Contains(logs.String(), "reason="+reason) {
 					t.Fatal(logs.String())
 				}
@@ -332,5 +337,23 @@ func TestNewShadowStateRealCLIError(t *testing.T) {
 	}
 	if !strings.Contains(logs.String(), "reason=cli_failed") {
 		t.Fatal(logs.String())
+	}
+}
+
+func TestShadowMissingNiceIsCategorized(t *testing.T) {
+	// Do not launch an observer at server priority if nice is unavailable.
+	git, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatal(err)
+	}
+	git, err = filepath.Abs(git)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", t.TempDir())
+	s := &shadowState{command: []string{"unused"}, cache: &Cache{gitBinary: git}}
+	_, err = s.compare(t.Context(), shadowJob{})
+	if classifyShadowError(err) != shadowNiceUnavailable {
+		t.Fatalf("missing nice: %v", err)
 	}
 }

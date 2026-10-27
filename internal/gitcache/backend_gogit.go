@@ -579,6 +579,12 @@ func goArchive(ctx context.Context, r *git.Repository, revision string, out io.W
 	if err := checkGoArchiveAttributes(ctx, r, tree); err != nil {
 		return err
 	}
+	return goArchiveTree(ctx, r, commit, tree, out)
+}
+
+// Shadow alone may walk without export transformations, but must still consume
+// every blob through verified storage, including blobs Git export-ignore omits.
+func goArchiveTree(ctx context.Context, r *git.Repository, commit *object.Commit, tree *object.Tree, out io.Writer) (result error) {
 	archive := tar.NewWriter(out)
 	defer func() { result = errors.Join(result, archive.Close()) }()
 	return walkGoTree(ctx, r, tree, func(name string, entry object.TreeEntry) error {
@@ -627,7 +633,7 @@ func goArchive(ctx context.Context, r *git.Repository, revision string, out io.W
 		if err := archive.WriteHeader(header); err != nil {
 			return err
 		}
-		if header.Size > 0 {
+		if entry.Mode == filemode.Regular || entry.Mode == filemode.Executable || entry.Mode == filemode.Deprecated {
 			blob, err := r.BlobObject(entry.Hash)
 			if err != nil {
 				return err

@@ -1,17 +1,21 @@
 # Git cache backends and qualification
 
-`go-git` performs transport and plumbing in-process; `cli` retains the Git/
-OpenSSH adapter for the one-release transition. Both use the same receive,
-release-admission, durable outbox and conservative promotion-merge policies.
-The default is `go-git` in `serve`, `repo verify`, and the Helm chart's
-`gitBackend` value. For one release, `--git-backend=cli` selects the legacy
-adapter. The normal scratch image contains no Git/OpenSSH executables; using
-that switch requires a separately built `Dockerfile --target cli-runtime`
-image (or an operator-provided Git/OpenSSH installation). It does not install
-tools into the scratch image. Configure both the compatibility image digest
-and `gitBackend: cli` when testing rollback.
+Release note (unreleased qualification): the default remains the Git CLI in the
+server and chart. go-git is an explicit opt-in and now **fails closed** instead
+of silently ignoring detected `export-ignore` / `export-subst` rules (including
+macros, nested and symlinked `.gitattributes`, repository info/attributes, and
+configured attributes files). Use the CLI backend for these repositories.
 
-The fixture default is also `go-git`. CI has a binding
+With `OBERTH_GITCACHE_SHADOW=1` (`gitcache.shadow: true`), CLI output is always
+served. The observer still walks all go-git blobs, checks object integrity and
+compares tree IDs when export rules exist. Only archive differences with a
+detected rule and equal trees are `expected_attr_gap`; unused rules can yield a
+clean sample. Deadlines are `timeout`; a missing `nice` is `nice_unavailable`
+and skips the observer rather than running it at server priority. Shutdown
+cancellation is excluded from all soak counters. Errors and expected attribute
+gaps are not clean archive-parity coverage. No file contents enter warnings.
+
+The fixture default is also `cli`. CI has a binding
 `test-gitcache-backends` lane which runs both adapters before any binary build;
 `make test` runs the ordinary default-backend suite and the CLI cache suite.
 Run all existing fixtures against both with:
@@ -74,26 +78,15 @@ latency guarantees. Synthetic random blobs reproduce byte/object scale, not
 the real mirrors' compression or blob-size distribution. Qualify both real
 mirrors on tuxbox before production cutover.
 
-## Scratch release substrate
+## Release substrate
 
-The final Dockerfile target is `runtime`, based on `scratch`. Its only files
-are the source-built static server and a CA bundle copied from the pinned
-build stage. Go embeds the timezone database with `time/tzdata`. The runtime
-uses numeric UID/GID 65534, `/data` as HOME/work directory and `/tmp` for
-temporary work. The chart supplies writable `/data` and `/tmp` mounts and a
-read-only root filesystem; standalone containers need the same writable
-mounts, with `/data` owned or group-writable by 65534.
-
-The release repacker retains the digest-pinned multi-platform substrate
-mechanism, replacing its bootstrap executable with the exact release build.
-Both assembly and readback enforce a positive path allowlist: the binary,
-CA bundle and their directories, plus the two mount directories. An Alpine
-substrate, OS package database, shell, Git, SSH or shared library is rejected.
-Changing runtime/CA inputs requires rebuilding both platform children,
-checking their static ELF architecture, scanning substrate and repacked
-images, and publishing the exact reviewed OCI index with preserved digests
-before updating/releasing its `ServerSubstrate` reference. The CLI target is
-never a release substrate.
+The runtime is the reviewed digest-pinned v0.17.56 Alpine substrate with Git
+and OpenSSH, restored while go-git is requalified. The server remains static,
+embeds timezone data, and runs as numeric UID/GID 65534. The chart supplies
+writable data/tmp mounts and a read-only root filesystem. Go-git is an explicit
+backend opt-in, not a scratch-image rollout. Changes to runtime package inputs
+still require the Dockerfile SUBSTRATE REBUILD procedure and a reviewed index
+pin in internal/releaseimage/image.go before release.
 
 Receive-pack unpacks into a private object directory. Graph/header checks and
 all per-ref policy/CAS prechecks run before promotion into the live object

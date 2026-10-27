@@ -32,11 +32,12 @@ type shadowJob struct {
 	barrier         chan struct{}
 }
 type shadowComparison struct {
-	SHA        string `json:"sha"`
-	CLIArchive string `json:"cli_archive_sha256"`
-	GoArchive  string `json:"go_archive_sha256"`
-	CLITree    string `json:"cli_tree"`
-	GoTree     string `json:"go_tree"`
+	ExpectedAttrGap bool   `json:"expected_attr_gap,omitempty"`
+	SHA             string `json:"sha"`
+	CLIArchive      string `json:"cli_archive_sha256"`
+	GoArchive       string `json:"go_archive_sha256"`
+	CLITree         string `json:"cli_tree"`
+	GoTree          string `json:"go_tree"`
 }
 
 type shadowState struct {
@@ -167,6 +168,9 @@ func (s *shadowState) work() {
 				return
 			} // Shutdown is not a failed soak observation.
 			s.runs.Add(1)
+			if err == nil && comparison.ExpectedAttrGap && comparison.CLIArchive != comparison.GoArchive && comparison.CLITree == comparison.GoTree {
+				err = errArchiveAttrGap
+			}
 			if err != nil {
 				reason := classifyShadowError(err)
 				s.failures.Add(1)
@@ -208,7 +212,7 @@ func (s *shadowState) compare(ctx context.Context, job shadowJob) (shadowCompari
 	// Trusted executable, fixed internal arguments; no shell or credentials.
 	nice, err := exec.LookPath("nice")
 	if err != nil {
-		return result, err
+		return result, &shadowFailure{shadowNiceUnavailable, err}
 	}
 	// nice execs the helper; every runtime thread and Git child inherits the
 	// lower priority, unlike Setpriority on just one already-running Go thread.
@@ -228,6 +232,9 @@ func (s *shadowState) compare(ctx context.Context, job shadowJob) (shadowCompari
 	case err := <-done:
 		if output.exceeded {
 			return result, errShadowOversize
+		}
+		if ctx.Err() != nil {
+			return result, ctx.Err()
 		}
 		if err != nil {
 			var exit *exec.ExitError

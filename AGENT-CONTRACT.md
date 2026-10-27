@@ -61,8 +61,9 @@ resource/custody requirements are in [database-backup.md](docs/database-backup.m
   unpinnable archives increment `shadow_skipped`; shutdown cancellation does
   not increment runs/errors/skips. The helper is started with `nice -n 10` before
   its runtime threads exist. On Linux it writes its own `oom_score_adj=1000`;
-  inability to apply this preference skips work as `gogit_other`, never changes
-  server priority and requires no new capability or RBAC.
+  inability to apply this preference skips work as `gogit_other`; a missing
+  `nice` skips work as `nice_unavailable`. Neither runs at server priority or
+  requires a new capability or RBAC.
   The helper retains the 32 MiB object LRU and streaming decoder, streams tar
   data with a 32 KiB buffer, has a 128 MiB Go soft memory limit, and is killed
   on timeout/shutdown (one second to reap its Git child, then the entire process
@@ -74,27 +75,29 @@ resource/custody requirements are in [database-backup.md](docs/database-backup.m
   IDs are compared too. Disagreements increment
   `oberth_gitcache_shadow_mismatch_total` and log structured repo/SHA/hashes;
   helper stderr is discarded. No error message or file contents enter metrics.
-  Fixed helper exit codes 20..25 map respectively to `cli_failed`,
-  `gogit_hash_guard`, `gogit_other`, `oversize`, `canceled`, `expected_attr_gap`.
-  A per-job timeout counts as `canceled`; process shutdown does not. Unknown
-  nonzero exits, crashes, spawn/protocol failures map to `gogit_other`.
-  `oberth_gitcache_shadow_errors_total{reason}` exports these six fixed labels;
-  `/api/status` retains process-local runs/mismatches/errors/skips. Unscoped
-  authenticated admins can read metrics; scoped status omits these counters.
+  Fixed helper exit codes 20..26 map respectively to `cli_failed`,
+  `gogit_hash_guard`, `gogit_other`, `oversize`, `canceled`, `expected_attr_gap`,
+  `timeout`. Process shutdown does not count; per-job deadlines count as `timeout`.
+  Unknown nonzero exits, crashes, spawn/protocol failures map to `gogit_other`.
+  `oberth_gitcache_shadow_errors_total{reason}` exports those seven labels plus
+  `nice_unavailable`; `/api/status` retains process-local runs/mismatches/errors/skips.
+  Unscoped authenticated admins can read metrics; scoped status omits these counters.
   `shadow_runs` counts completed attempts (including errors): errors/skips must
-  be checked before calling
-  any soak green.
-  Export attribute semantics are a known coverage gap, NOT a corruption
-  mismatch. goArchive now fails closed with `expected_attr_gap` for positive
-  `export-ignore`/`export-subst` rules in committed root/nested .gitattributes,
-  including macro definitions. Detection is deliberately conservative: unused
-  or overridden positive rules also exclude the sample. Repository-local
-  info/attributes and configured core.attributesFile are excluded too, as are
-  malformed/overlarge attribute files (1 MiB file / 64 KiB line bound). This
-  fold does not implement Git pattern precedence or pretty-format substitution;
-  it never silently returns a go-git archive that ignores a detected rule.
-  These samples increment errors with `reason=expected_attr_gap`, not mismatches
-  or clean comparison coverage. The authoritative CLI result is still served.
+  be checked before calling any soak green.
+  Normal goArchive fails closed on detected export attributes, including
+  committed root/nested/symlink .gitattributes, macro definitions, info/attributes,
+  configured core.attributesFile, and malformed/overlarge attribute files (1 MiB
+  file / 64 KiB line bound). The detector splits only on space/tab/CR/LF, like Git.
+  Shadow always walks every blob through verified storage and compares tree IDs,
+  even if the detector fires. Only differing archive digests with a detected gap
+  and equal tree IDs count as `expected_attr_gap`; an unused rule with identical
+  archives is clean, and a tree disagreement is always a mismatch. Integrity
+  failures always count as `gogit_hash_guard`. The isolated Git child disables
+  system attributes, uses neutral HOME/XDG, and overrides core.attributesFile
+  with /dev/null so ambient attributes cannot affect the comparison. Committed
+  attributes and repository info/attributes still apply. Git pattern precedence
+  and pretty-format substitution remain unimplemented in goArchive. Expected
+  attribute gaps do not count as clean archive parity. The CLI result is served.
   The cache init
   and restore file-tool container use the shared digest-pinned BusyBox utility
   image, overridable with chart `utilityImage` / installer `--utility-image`
