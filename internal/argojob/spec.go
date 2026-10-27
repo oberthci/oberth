@@ -850,7 +850,9 @@ func Build(config Config, request Request) (*wfv1.Workflow, error) {
 	if err := projectVMICreateGuard(workflow, config, request); err != nil {
 		return nil, err
 	}
-	wrapStepUsage(workflow)
+	if err := wrapStepUsage(workflow); err != nil {
+		return nil, err
+	}
 	digest, err := specIdentity(workflow)
 	if err != nil {
 		return nil, err

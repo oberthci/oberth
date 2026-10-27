@@ -30,6 +30,7 @@ func TestOberthIsolationControllerCapture(t *testing.T) {
    ctx := logging.TestContext(t.Context())
    cancel, controller := newController(ctx, &wf, sa, executor)
    defer cancel()
+   controller.Config.WorkflowDefaults = &wfv1.Workflow{Spec:wfv1.WorkflowSpec{NodeSelector:map[string]string{"pool":"ci"}}}
    write := func(name string, value any) { t.Helper(); b,e:=json.MarshalIndent(value,"","  ");require.NoError(t,e);require.NoError(t,os.WriteFile(filepath.Join(dir,shape+"-"+name+".json"),b,0600)) }
    captured := 0
    isolationCapture = func(pod *corev1.Pod) { captured++; write("before-patch",pod) }
@@ -41,6 +42,7 @@ func TestOberthIsolationControllerCapture(t *testing.T) {
    require.Equal(t,1,captured)
    pod:=&pods.Items[0]
    write("submitted",pod)
+   require.Equal(t,"ci",pod.Spec.NodeSelector["pool"],"wrapped leaf escaped administrator pool")
    require.NotNil(t,pod.Spec.AutomountServiceAccountToken)
    require.False(t,*pod.Spec.AutomountServiceAccountToken)
    for _,c:=range append(pod.Spec.Containers,pod.Spec.InitContainers...) {

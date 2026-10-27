@@ -1,6 +1,7 @@
 package argojob
 
 import (
+	"encoding/json"
 	"runtime"
 	"slices"
 
@@ -49,10 +50,11 @@ func injectStepUsageMounts(wf *wfv1.Workflow, request Request) {
 
 // Wrap last: credential-chain and executor-token admission inspect the original
 // command. This transformation adds no credentials and changes no security context.
-func wrapStepUsage(wf *wfv1.Workflow) {
+func wrapStepUsage(wf *wfv1.Workflow) error {
+	var failure error
 	walkTemplates(wf, func(t *wfv1.Template) {
 		c := usageContainer(t)
-		if c == nil || len(c.Command) == 0 || (c.TerminationMessagePath != "" && c.TerminationMessagePath != stepusage.TerminationPath) {
+		if failure != nil || c == nil || len(c.Command) == 0 || (c.TerminationMessagePath != "" && c.TerminationMessagePath != stepusage.TerminationPath) {
 			return
 		}
 		mounted := slices.ContainsFunc(c.VolumeMounts, func(m corev1.VolumeMount) bool {
@@ -61,16 +63,32 @@ func wrapStepUsage(wf *wfv1.Workflow) {
 		if !mounted {
 			return
 		}
-		// The delivered helper is this server executable, not a multi-arch image.
-		// Apply on each Pod-producing template, including inline leaves.
-		if t.NodeSelector == nil {
-			t.NodeSelector = make(map[string]string)
+		// Patch the constructed Pod after Argo resolves scheduling inheritance.
+		// A template NodeSelector would replace workflow/parent selectors.
+		patch := map[string]any{}
+		if t.PodSpecPatch != "" {
+			if err := json.Unmarshal([]byte(t.PodSpecPatch), &patch); err != nil {
+				failure = err
+				return
+			}
 		}
-		t.NodeSelector[corev1.LabelArchStable] = runtime.GOARCH
+		selectors, _ := patch["nodeSelector"].(map[string]any)
+		if selectors == nil {
+			selectors = make(map[string]any)
+		}
+		selectors[corev1.LabelArchStable] = runtime.GOARCH
+		patch["nodeSelector"] = selectors
+		encoded, err := json.Marshal(patch)
+		if err != nil {
+			failure = err
+			return
+		}
+		t.PodSpecPatch = string(encoded)
 		if len(usageOriginalCommand(c.Command)) == len(c.Command) {
 			c.Command = append([]string{usageBinPath, usageCommand, "--"}, c.Command...)
 		}
 	})
+	return failure
 }
 
 func projectStepUsage(workflow *wfv1.Workflow, node wfv1.NodeStatus, pod *corev1.Pod) stepusage.Usage {

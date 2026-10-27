@@ -7,7 +7,8 @@ currently performed. CPU durations are nanoseconds (divide by 1e9 for seconds).
 
 The server's single-architecture executable is streamed and SHA-256 verified
 once into each ordinary source PVC. Wrapped container/script Pod templates
-select `kubernetes.io/arch` matching the server's `runtime.GOARCH`. Protected
+add `kubernetes.io/arch` matching the server's `runtime.GOARCH` through
+`podSpecPatch` strategic merge, preserving administrator workflow/parent selectors. Protected
 KVM workflows and unsupported leaves remain unwrapped. This adds no hostPath,
 capabilities, ServiceAccount token or RBAC.
 

@@ -44,8 +44,9 @@ func TestStepUsageWrapsExplicitCommandsAfterCredentialAdmission(t *testing.T) {
 		if slices.ContainsFunc(c.VolumeMounts, func(m corev1.VolumeMount) bool { return m.MountPath == SecretsMountPath }) {
 			t.Fatal("measurement gained credentials")
 		}
-		if tmpl.NodeSelector[corev1.LabelArchStable] != runtime.GOARCH {
-			t.Fatalf("helper architecture missing: %v", tmpl.NodeSelector)
+		var patch corev1.PodSpec
+		if err := json.Unmarshal([]byte(tmpl.PodSpecPatch), &patch); err != nil || patch.NodeSelector[corev1.LabelArchStable] != runtime.GOARCH || len(tmpl.NodeSelector) != 0 {
+			t.Fatalf("helper architecture must be a Pod patch: %s err=%v", tmpl.PodSpecPatch, err)
 		}
 		measured++
 	})
@@ -60,8 +61,10 @@ func TestStepUsageWrapsExplicitCommandsAfterCredentialAdmission(t *testing.T) {
 	script := &wfv1.Workflow{Spec: wfv1.WorkflowSpec{Templates: []wfv1.Template{{Name: "script", Script: &wfv1.ScriptTemplate{Container: corev1.Container{Command: []string{"sh"}, Args: []string{"-e"}}, Source: "echo yes"}}, {Name: "opaque", Container: &corev1.Container{Image: "busybox"}}}}}
 	injectStepUsageMounts(script, request)
 	script.Spec.Templates[0].NodeSelector = map[string]string{corev1.LabelArchStable: "other", "pool": "build"}
-	wrapStepUsage(script)
-	if got := script.Spec.Templates[0].NodeSelector; got[corev1.LabelArchStable] != runtime.GOARCH || got["pool"] != "build" || len(script.Spec.Templates[1].NodeSelector) != 0 {
+	if err := wrapStepUsage(script); err != nil {
+		t.Fatal(err)
+	}
+	if got := script.Spec.Templates[0].NodeSelector; got[corev1.LabelArchStable] != "other" || got["pool"] != "build" || len(script.Spec.Templates[1].NodeSelector) != 0 {
 		t.Fatalf("architecture constraint: %+v", script.Spec.Templates)
 	}
 	if !slices.Equal(script.Spec.Templates[0].Script.Command, []string{usageBinPath, usageCommand, "--", "sh"}) || !slices.Equal(script.Spec.Templates[0].Script.Args, []string{"-e"}) || len(script.Spec.Templates[1].Container.Command) != 0 {
@@ -130,6 +133,24 @@ func TestStepUsageCreateRecoversLegacyAndMeasuredWithoutReseeding(t *testing.T) 
 		}
 		if execs != 0 || workflows.creates != 0 {
 			t.Fatal("recovery rewrote the source/workflow")
+		}
+	}
+}
+
+func TestStepUsageArchPatchPreservesSchedulingInheritance(t *testing.T) {
+	for _, inherited := range []map[string]string{{"pool": "ci"}, {"pool": "parent", "zone": "west"}, {"pool": "ci", corev1.LabelArchStable: "other"}} {
+		wf := &wfv1.Workflow{Spec: wfv1.WorkflowSpec{NodeSelector: inherited, Templates: []wfv1.Template{{Name: "leaf", Container: &corev1.Container{Command: []string{"sh"}, VolumeMounts: []corev1.VolumeMount{{Name: SourceVolumeName, MountPath: usageBinMountPath, ReadOnly: true}}}, PodSpecPatch: `{"nodeSelector":{"disk":"ssd"},"terminationGracePeriodSeconds":7}`}}}}
+		if err := wrapStepUsage(wf); err != nil {
+			t.Fatal(err)
+		}
+		leaf := &wf.Spec.Templates[0]
+		if len(leaf.NodeSelector) != 0 {
+			t.Fatalf("template overrides inherited pool: %v", leaf.NodeSelector)
+		}
+		before := corev1.PodSpec{NodeSelector: inherited}
+		got := applyCredentialWaitPatch(t, before, leaf.PodSpecPatch)
+		if got.NodeSelector["pool"] != inherited["pool"] || got.NodeSelector["zone"] != inherited["zone"] || got.NodeSelector["disk"] != "ssd" || got.NodeSelector[corev1.LabelArchStable] != runtime.GOARCH || got.TerminationGracePeriodSeconds == nil || *got.TerminationGracePeriodSeconds != 7 {
+			t.Fatalf("scheduling constraints lost: %+v", got)
 		}
 	}
 }

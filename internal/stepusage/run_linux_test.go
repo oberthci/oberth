@@ -152,6 +152,12 @@ func TestRunForwardsSignalsAndKilledWrapperLeavesUnknown(t *testing.T) {
 				t.Fatalf("no ready child: %v %s", err, readStderr())
 			}
 			defer func() { _ = syscall.Kill(-pid, syscall.SIGKILL) }()
+			if tc.signal == syscall.SIGTERM {
+				for range 256 {
+					_ = cmd.Process.Signal(syscall.SIGURG)
+					_ = cmd.Process.Signal(syscall.SIGCHLD)
+				}
+			}
 			if err := cmd.Process.Signal(tc.signal); err != nil {
 				t.Fatal(err)
 			}

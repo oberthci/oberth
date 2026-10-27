@@ -154,7 +154,7 @@
           },
           {
             "name": "ARGO_DEADLINE",
-            "value": "2026-10-27T15:25:40Z"
+            "value": "2026-10-27T15:57:25Z"
           },
           {
             "name": "ARGO_PROGRESS_FILE",
@@ -241,7 +241,7 @@
           },
           {
             "name": "ARGO_DEADLINE",
-            "value": "2026-10-27T15:25:40Z"
+            "value": "2026-10-27T15:57:25Z"
           },
           {
             "name": "ARGO_PROGRESS_FILE",
@@ -399,7 +399,7 @@
           },
           {
             "name": "ARGO_DEADLINE",
-            "value": "2026-10-27T15:25:40Z"
+            "value": "2026-10-27T15:57:25Z"
           },
           {
             "name": "ARGO_PROGRESS_FILE",
@@ -556,7 +556,7 @@
           },
           {
             "name": "ARGO_DEADLINE",
-            "value": "2026-10-27T15:25:40Z"
+            "value": "2026-10-27T15:57:25Z"
           },
           {
             "name": "ARGO_PROGRESS_FILE",
@@ -642,6 +642,9 @@
     ],
     "restartPolicy": "Never",
     "activeDeadlineSeconds": 7199,
+    "nodeSelector": {
+      "pool": "ci"
+    },
     "serviceAccountName": "oberth-argo-credentialed",
     "automountServiceAccountToken": false,
     "securityContext": {

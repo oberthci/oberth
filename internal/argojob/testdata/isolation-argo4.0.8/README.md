@@ -70,3 +70,11 @@ The production selector uses runtime.GOARCH, not a hard-coded architecture.
 On other test architectures the equality check translates only the recorded
 server architecture to runtime.GOARCH. The original submitted Pods must retain
 the captured architecture, and independent wrapper tests assert runtime.GOARCH.
+
+Round 25c recaptured these eight cases with controller workflowDefaults
+nodeSelector pool=ci. The architecture now enters only through the server's
+strategic podSpecPatch, after Argo resolves workflow/parent scheduling selectors.
+Both before-patch and submitted Pods retain pool=ci; wrapped submitted Pods
+also get the server architecture. Replaying the round-25b inputs against this
+controller control fails on all seven wrapped shapes, proving the regression.
+All eight corrected submitted Pods pass the retained Kubernetes validator.

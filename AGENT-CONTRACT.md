@@ -1166,7 +1166,8 @@ continuity checks; it must never be used to reset or bypass those checks.
   self-reported by untrusted build code, never trusted diagnostic evidence and
   never an input to admission or size grants. Any aggregation must saturate on
   overflow; currently counters are stored/projected individually without sums.
-  Wrapped Pod templates are pinned to `kubernetes.io/arch=runtime.GOARCH`, since
+  Wrapped Pods add `kubernetes.io/arch=runtime.GOARCH` through strategic
+  podSpecPatch merge, preserving workflow/parent scheduling selectors, since
   the seed copies this server's single-architecture executable. Catchable signals
   are forwarded to the child process group, except SIGCHLD and Go's SIGURG,
   matching emissary; SIGKILL/SIGSTOP cannot be caught. A child killed by a signal

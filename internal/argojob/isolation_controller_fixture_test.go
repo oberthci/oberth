@@ -77,10 +77,20 @@ func TestIsolationMatchesActualControllerObservation(t *testing.T) {
 			// only this intentional runtime parameter; keep all other bytes pinned.
 			walkTemplates(&input, func(tmpl *wfv1.Template) {
 				if c := usageContainer(tmpl); c != nil && len(usageOriginalCommand(c.Command)) != len(c.Command) {
-					if provenance.ServerGOARCH == "" || tmpl.NodeSelector[corev1.LabelArchStable] != provenance.ServerGOARCH {
-						t.Fatal("capture lost server architecture constraint")
+					var patch map[string]any
+					if err := json.Unmarshal([]byte(tmpl.PodSpecPatch), &patch); err != nil {
+						t.Fatal(err)
 					}
-					tmpl.NodeSelector[corev1.LabelArchStable] = runtime.GOARCH
+					selectors, ok := patch["nodeSelector"].(map[string]any)
+					if !ok || provenance.ServerGOARCH == "" || selectors[corev1.LabelArchStable] != provenance.ServerGOARCH || len(tmpl.NodeSelector) != 0 {
+						t.Fatal("capture lost architecture patch or overrides inherited selectors")
+					}
+					selectors[corev1.LabelArchStable] = runtime.GOARCH
+					encoded, err := json.Marshal(patch)
+					if err != nil {
+						t.Fatal(err)
+					}
+					tmpl.PodSpecPatch = string(encoded)
 				}
 			})
 			translatedIdentity, err := specIdentity(&input)
@@ -98,6 +108,9 @@ func TestIsolationMatchesActualControllerObservation(t *testing.T) {
 			var before, submitted corev1.Pod
 			fixture(shape+"-before-patch.json", &before)
 			fixture(shape+"-submitted.json", &submitted)
+			if before.Spec.NodeSelector["pool"] != "ci" || submitted.Spec.NodeSelector["pool"] != "ci" {
+				t.Fatal("Argo workflowDefaults nodeSelector was replaced")
+			}
 			if shape != "containerset" && submitted.Spec.NodeSelector[corev1.LabelArchStable] != provenance.ServerGOARCH {
 				t.Fatal("actual wrapped Pod lost architecture constraint")
 			}

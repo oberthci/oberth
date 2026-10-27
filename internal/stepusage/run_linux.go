@@ -32,8 +32,8 @@ func run(args []string, input io.Reader, output, stderr io.Writer, mount, selfPa
 	cmd := exec.CommandContext(context.Background(), args[1], args[2:]...) // #nosec G204 G702 -- intentionally executes the admitted pipeline command without new privileges.
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = input, output, stderr
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	signals := make(chan os.Signal, 8)
-	signal.Notify(signals)
+	signals := make(chan os.Signal, 64)
+	signal.Notify(signals, forwardableSignals()...)
 	defer signal.Stop(signals)
 	if err := cmd.Start(); err != nil {
 		_, _ = fmt.Fprintf(stderr, "step-exec: start: %v\n", err)
@@ -86,4 +86,17 @@ func run(args []string, input io.Reader, output, stderr io.Writer, mount, selfPa
 		return exit.ExitCode()
 	}
 	return 1
+}
+
+// Subscribe only to application-forwardable Linux signals, excluding child exit
+// and Go preemption at the source so their bursts cannot fill the Notify queue.
+// SIGKILL/SIGSTOP are uncatchable; 32/33 are reserved by the Linux threading ABI.
+func forwardableSignals() []os.Signal {
+	signals := make([]os.Signal, 0, 64)
+	for s := syscall.Signal(1); s <= 64; s++ {
+		if s != syscall.SIGKILL && s != syscall.SIGSTOP && s != syscall.SIGCHLD && s != syscall.SIGURG && s != 32 && s != 33 {
+			signals = append(signals, s)
+		}
+	}
+	return signals
 }
