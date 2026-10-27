@@ -556,8 +556,9 @@ type Request struct {
 	KubeVirtBudget argoworkflow.VMIBudget
 	nonrootProof   *nonrootProof
 	// TrustedKVM is a server-created, journaled preflight admission.
-	TrustedKVM *vmrunner.KVMIntent
-	RunID      string
+	TrustedKVM   *vmrunner.KVMIntent
+	RunID        string
+	RepositoryID int64
 	// Name is the durable, deterministic object name the scheduler already
 	// persisted for this run. Both engines use it, so recovery can find the
 	// object without knowing which engine created it.
@@ -840,6 +841,10 @@ func Build(config Config, request Request) (*wfv1.Workflow, error) {
 		}
 	}
 	if err := projectExecutorTokens(workflow, config); err != nil {
+		return nil, err
+	}
+
+	if err := projectVMICreateGuard(workflow, config, request); err != nil {
 		return nil, err
 	}
 

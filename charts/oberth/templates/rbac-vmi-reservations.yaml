@@ -1,0 +1,39 @@
+# Runtime VMI creation is server-mediated. Keep new permissions separate from
+# the frozen Argo Role. The launcher cannot create VMIs directly.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "oberth.fullname" . }}-vmi-reservations
+  namespace: {{ .Values.argo.namespace }}
+  labels:
+    {{- include "oberth.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["kubevirt.io"]
+    resources: ["virtualmachineinstances"]
+    verbs: ["create", "get"]
+  # Kubernetes cannot restrict create by resourceNames. The implementation uses
+  # only this fixed public ledger; update/get are explicitly name-scoped. No
+  # audit-anchor ConfigMap receives update permission.
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["create"]
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    resourceNames: ["oberth-vmi-reservations"]
+    verbs: ["get", "update"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "oberth.fullname" . }}-vmi-reservations
+  namespace: {{ .Values.argo.namespace }}
+  labels:
+    {{- include "oberth.labels" . | nindent 4 }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "oberth.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "oberth.fullname" . }}-vmi-reservations

@@ -281,7 +281,7 @@ func TestVMIGrantBudget(t *testing.T) {
 	p2p := VMIBudget{MaxVMs: 3, MaxCores: 12, MaxMemory: resource.MustParse("24Gi")}
 
 	err := Admit(p2pVMIWorkflow(), Policy{KubeVirt: true, ContainerDiskPrefixes: prefixes})
-	if err == nil || !strings.Contains(err.Error(), "3 create templates (maximum 2), 12 cores (maximum 6), 24Gi memory (maximum 12Gi)") ||
+	if err == nil || !strings.Contains(err.Error(), "3 concurrent VMs (maximum 2), 12 cores (maximum 6), 24Gi memory (maximum 12Gi)") ||
 		!strings.Contains(err.Error(), "9 VMI resource templates, maximum is 6") {
 		t.Fatalf("p2p-3 under the default budget: want refusal, got %v", err)
 	}
@@ -299,7 +299,7 @@ func TestVMIGrantBudget(t *testing.T) {
 	}{
 		{"grant cores", VMIBudget{MaxVMs: 3, MaxCores: 11, MaxMemory: resource.MustParse("24Gi")}, VMIBudget{}, "12 cores (maximum 11)"},
 		{"grant memory", VMIBudget{MaxVMs: 3, MaxCores: 12, MaxMemory: resource.MustParse("23Gi")}, VMIBudget{}, "24Gi memory (maximum 23Gi)"},
-		{"ceiling VMs", p2p, VMIBudget{MaxVMs: 2, MaxCores: 64, MaxMemory: resource.MustParse("256Gi")}, "3 create templates (maximum 2)"},
+		{"ceiling VMs", p2p, VMIBudget{MaxVMs: 2, MaxCores: 64, MaxMemory: resource.MustParse("256Gi")}, "3 concurrent VMs (maximum 2)"},
 		{"ceiling cores", p2p, VMIBudget{MaxVMs: 16, MaxCores: 8, MaxMemory: resource.MustParse("256Gi")}, "cluster ceiling of 16 VMs, 8 cores, 256Gi memory"},
 		{"invalid grant", VMIBudget{MaxVMs: 17, MaxCores: 12, MaxMemory: resource.MustParse("24Gi")}, VMIBudget{}, "KubeVirt grant: VMI budget max VMs must be 1..16"},
 		{"partial grant", VMIBudget{MaxVMs: 3}, VMIBudget{}, "max cores must be 1..64"},

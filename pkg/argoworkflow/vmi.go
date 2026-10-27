@@ -108,7 +108,8 @@ const (
 	maxKernelPathBytes = 256
 )
 
-// VMIBudget bounds VMI create templates: VM count, summed cores and memory.
+// VMIBudget bounds concurrent VM count, cores and memory. Unknown lifetime
+// graphs retain summed create-template demand.
 // Each run is checked against its repository grant capped by the server ceiling;
 // the scheduler also reserves this budget across the repository's admitted runs.
 type VMIBudget struct {
@@ -419,8 +420,8 @@ func vmiCreateUsage(raw string) (vmiUsage, error) {
 // VMI workflows no longer acquire it implicitly.
 const KubeVirtConcurrencyGroup = "kubevirt"
 
-// VMIDemand is the sum of the declared VMI create templates. Admission reserves
-// it for the whole run, including time between VM steps and cleanup.
+// VMIDemand is a conservative concurrent VM reservation. Unknown graphs use
+// the declared sum; proven delete barriers can reduce it to the lifetime peak.
 type VMIDemand struct {
 	VMs         int
 	Cores       int
@@ -441,6 +442,21 @@ func (budget VMIBudget) DemandLimit() VMIDemand {
 // still happens before submission; malformed or unbounded quantities cannot
 // become scheduling credits while that validation is pending.
 func DeclaredVMIDemand(workflow *wfv1.Workflow) (VMIDemand, error) {
+	sum, err := SummedVMIDemand(workflow)
+	if err != nil {
+		return VMIDemand{}, err
+	}
+	if sum.VMs == 0 {
+		return sum, nil
+	}
+	if peak, ok := peakVMIDemand(workflow); ok {
+		return peak, nil
+	}
+	return sum, nil
+}
+
+// SummedVMIDemand preserves the conservative pre-phase-aware accounting.
+func SummedVMIDemand(workflow *wfv1.Workflow) (VMIDemand, error) {
 	var demand VMIDemand
 	if workflow == nil {
 		return demand, errors.New("argoworkflow: no Workflow to size")
@@ -488,4 +504,44 @@ func DeclaresVMIResources(workflow *wfv1.Workflow) bool {
 // resource types its steps use.
 func RunConcurrencyGroup(workflow *wfv1.Workflow) (string, error) {
 	return DeclaredConcurrencyGroup(workflow)
+}
+
+// VMIResourceOperation is static, already policy-validated VM lifecycle intent.
+type VMIResourceOperation struct {
+	Name, Action string
+	Demand       VMIDemand
+}
+
+func VMIOperation(t *wfv1.ResourceTemplate) (VMIResourceOperation, error) {
+	var m vmiManifest
+	if t == nil || len(t.Manifest) > maxVMIManifestBytes {
+		return VMIResourceOperation{}, errors.New("invalid VMI operation")
+	}
+	converted, err := yaml.YAMLToJSONStrict([]byte(t.Manifest))
+	if err != nil {
+		return VMIResourceOperation{}, err
+	}
+	if err = json.Unmarshal(converted, &m); err != nil {
+		return VMIResourceOperation{}, err
+	}
+	if m.APIVersion != "kubevirt.io/v1" || m.Kind != "VirtualMachineInstance" || m.Metadata.Name == "" {
+		return VMIResourceOperation{}, errors.New("invalid VMI operation identity")
+	}
+	out := VMIResourceOperation{Name: m.Metadata.Name, Action: t.Action}
+	if t.Action == "create" {
+		usage, err := vmiCreateUsage(t.Manifest)
+		if err != nil {
+			return out, err
+		}
+		if usage.cores <= 0 || usage.memory.Sign() <= 0 {
+			return out, errors.New("invalid VMI operation demand")
+		}
+		out.Demand = VMIDemand{VMs: 1, Cores: usage.cores, MemoryBytes: usage.memory.Value()}
+	}
+	return out, nil
+}
+
+// ValidateVMIResource rechecks a resource operation at its execution boundary.
+func ValidateVMIResource(t *wfv1.ResourceTemplate, prefixes []string) error {
+	return admitVMIResource("VMI create", t, prefixes)
 }

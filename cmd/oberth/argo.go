@@ -122,6 +122,11 @@ func buildArgoEngine(
 		return nil, fmt.Errorf("configure KubeVirt cleanup client: %w", err)
 	}
 	controller.WithVMIClient(vmiClient)
+	vmiCreateClient, err := rest.UnversionedRESTClientFor(dynamic.ConfigFor(restConfig))
+	if err != nil {
+		return nil, fmt.Errorf("configure guarded VMI create client: %w", err)
+	}
+	controller.WithVMICreateClient(vmiCreateClient)
 	if recorder, ok := auditor.(argojob.TimingRecorder); ok {
 		controller.WithTimingRecorder(recorder)
 	}

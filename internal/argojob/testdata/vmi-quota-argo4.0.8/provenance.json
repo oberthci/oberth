@@ -1,0 +1,19 @@
+{
+  "module": "github.com/argoproj/argo-workflows/v4@v4.0.8",
+  "commit": "570c470582fc7fe41b1963d8703111679cc3d25a",
+  "go": "go1.27.2",
+  "kubernetes_validator": "v1.35.7 ValidatePodCreate (defaulted, v1 to internal conversion)",
+  "controller_source_sha256": "97d059a8ffed7854760fa8c109f657a4d6be0e2496ed193ee1dd541118b8f763",
+  "files_sha256": {
+    "generate_test.go.txt": "bd66cdf049500723e210de8ebec46f21dd32a031a0fbd07aff377a318a0aaf73",
+    "vmi-before-patch.json": "77bf6ee2ddd944e8e2c678dd5522b7783adbacc88c36ccf14360e14034eb0d8f",
+    "vmi-workflow.json": "bc01798a6260c71df858b3e0cee9d495301ac29cf1b21774378098baaa26acb4",
+    "capture_test.go.txt": "6befd88419c6208165b4449feee1c5bba4b6144c243d0b1e2155cb8a9b676065",
+    "vmi-submitted.json": "b6a08550e0e0b931d8ad991347df5cf263caf4ff7e7f7fb6bd7ef4f031a2b075"
+  },
+  "Path": "github.com/argoproj/argo-workflows/v4",
+  "Version": "v4.0.8",
+  "Sum": "h1:qa2GNFSihNtvI/v9/dgwq84E1mrfbVb8eTXB6YMxMlY=",
+  "GoModSum": "h1:WLJnjr1uNM+6dhpVdnJArvSq90FJ3bdRgHEsHVR00wM=",
+  "instrumented_sha256": "e94c816c3116278d8b6c363568ab3922aed0a178e6afcd83d6fd0a3270b0e8d4"
+}

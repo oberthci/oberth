@@ -299,7 +299,7 @@ argo:
   # Empty refuses containerDisk images even for repositories with a VM grant.
   containerDiskPrefixes: []
   # Cluster-wide ceiling on every repository KubeVirt grant's per-run VMI
-  # budget (VMI creates, summed cores, summed memory). A grant defaults to
+  # budget (concurrent VMIs, cores, memory). A grant defaults to
   # 2 VMs, 6 cores and 12Gi; `oberth kubevirt grant <repo> --max-vms ...`
   # raises it, never above these values. Lower them to fit your nodes.
   kubevirtCeiling:

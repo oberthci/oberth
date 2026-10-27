@@ -33,8 +33,8 @@ func runValidate(_ context.Context, arguments []string, output io.Writer) error 
 	kubeVirt := flags.Bool("kubevirt", false, "validate KubeVirt VM templates and KVM device leaves, including guest-test leaves (server grant still required)")
 	flags.StringVar(&containerDiskPrefixes, "container-disk-prefixes", "", "comma-separated containerDisk image prefixes for KubeVirt validation")
 	maxVMs := flags.Int("kubevirt-max-vms", 0, "per-run VMI budget to validate against, as a KubeVirt grant would set it (default 2)")
-	maxCores := flags.Int("kubevirt-max-cores", 0, "per-run summed VMI cores to validate against (default 6)")
-	maxMemory := flags.String("kubevirt-max-memory", "", "per-run summed VMI memory to validate against (default 12Gi)")
+	maxCores := flags.Int("kubevirt-max-cores", 0, "per-run peak VMI cores to validate against (default 6)")
+	maxMemory := flags.String("kubevirt-max-memory", "", "per-run peak VMI memory to validate against (default 12Gi)")
 	allowUnresolved := flags.Bool("allow-unresolved-fragments", false,
 		"report fragment references without failing; their contents are still unchecked")
 	flags.StringVar(&imagePrefixes, "runner-image-prefixes", strings.Join(periapsis.DefaultRunnerImagePrefixes, ","), "comma-separated allowlist of permitted runner image prefixes")

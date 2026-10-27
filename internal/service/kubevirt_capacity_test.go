@@ -438,3 +438,23 @@ func TestKubeVirtRestartRestoresTwoRunsBeforeAdmittingThird(t *testing.T) {
 		t.Fatalf("restart created extra runs: %#v, %v", counts, err)
 	}
 }
+
+func TestKubeVirtPhasePeakLetsTwoRunsShareExistingGrant(t *testing.T) {
+	grant := argoworkflow.VMIDemand{VMs: 4, Cores: 12, MemoryBytes: 24 << 30}
+	peak := argoworkflow.VMIDemand{VMs: 2, Cores: 4, MemoryBytes: 12 << 30}
+	gate := newWeightedAdmissionForJobs(8)
+	first := acquireRequestWithinBudget(t, gate.reserve(1), kubeVirtRequest("first", 7, peak, grant))
+	defer first()
+	second := acquireRequestWithinBudget(t, gate.reserve(2), kubeVirtRequest("second", 7, peak, grant))
+	defer second()
+	gate.mu.Lock()
+	used := gate.kubeVirtUsedLocked(7)
+	gate.mu.Unlock()
+	if used != (argoworkflow.VMIDemand{VMs: 4, Cores: 8, MemoryBytes: 24 << 30}) {
+		t.Fatalf("two phase-aware runs did not share the existing grant: %+v", used)
+	}
+	oldSum := argoworkflow.VMIDemand{VMs: 4, Cores: 8, MemoryBytes: 24 << 30}
+	if (argoworkflow.VMIDemand{VMs: oldSum.VMs * 2, Cores: oldSum.Cores * 2, MemoryBytes: oldSum.MemoryBytes * 2}).Fits(grant) {
+		t.Fatal("old sum unexpectedly admitted two runs")
+	}
+}

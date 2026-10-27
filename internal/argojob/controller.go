@@ -18,6 +18,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
@@ -66,6 +67,7 @@ var errRunLogBudget = errors.New("argojob: aggregate run log budget exceeded")
 
 // Controller submits Workflows and supervises them to a terminal result.
 type Controller struct {
+	vmiQuotaMu        sync.Mutex
 	profileVerifyMu   sync.Mutex
 	profileMu         sync.Mutex
 	profileStatus     model.ControllerProfileStatus
@@ -80,6 +82,7 @@ type Controller struct {
 	seeder            *SourceSeeder
 	config            Config
 	vmi               dynamic.Interface
+	vmiCreate         func(context.Context, string, *unstructured.Unstructured) (*unstructured.Unstructured, error)
 	vmiCleanupFailure func(context.Context, string, error)
 	interval          time.Duration
 	readGrace         time.Duration

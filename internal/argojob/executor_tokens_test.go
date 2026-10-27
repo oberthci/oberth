@@ -116,7 +116,7 @@ func TestResourcePodReceivesLauncherBoundToken(t *testing.T) {
 	config := testConfig()
 	config.VMLauncherServiceAccount = "oberth-argo-vm-launcher"
 	config.applyDefaults()
-	wf := &wfv1.Workflow{ObjectMeta: metav1.ObjectMeta{Name: "run", Namespace: config.Namespace, UID: "workflow-id"}, Spec: wfv1.WorkflowSpec{ActiveDeadlineSeconds: ptr.To(int64(300)), Templates: []wfv1.Template{{Name: "vm", Resource: &wfv1.ResourceTemplate{Action: "create"}, Executor: &wfv1.ExecutorConfig{ServiceAccountName: config.VMLauncherServiceAccount}}}}, Status: wfv1.WorkflowStatus{Nodes: map[string]wfv1.NodeStatus{"node-id": {TemplateName: "vm"}}}}
+	wf := &wfv1.Workflow{ObjectMeta: metav1.ObjectMeta{Name: "run", Namespace: config.Namespace, UID: "workflow-id"}, Spec: wfv1.WorkflowSpec{ActiveDeadlineSeconds: ptr.To(int64(300)), Templates: []wfv1.Template{{Name: "vm", Resource: &wfv1.ResourceTemplate{Action: "get"}, Executor: &wfv1.ExecutorConfig{ServiceAccountName: config.VMLauncherServiceAccount}}}}, Status: wfv1.WorkflowStatus{Nodes: map[string]wfv1.NodeStatus{"node-id": {TemplateName: "vm"}}}}
 	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "vm-step", Namespace: wf.Namespace, UID: "vm-step-id", Labels: map[string]string{"workflows.argoproj.io/workflow": wf.Name}, Annotations: map[string]string{"workflows.argoproj.io/node-id": "node-id"}, OwnerReferences: []metav1.OwnerReference{{UID: wf.UID, Kind: "Workflow", Controller: ptr.To(true)}}}, Spec: corev1.PodSpec{
 		ServiceAccountName: config.PipelineServiceAccount,
 		Volumes:            []corev1.Volume{{Name: executorTokenVolume, VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{Medium: corev1.StorageMediumMemory}}}},

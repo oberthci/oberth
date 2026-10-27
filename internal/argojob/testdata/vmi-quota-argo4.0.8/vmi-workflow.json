@@ -1,0 +1,94 @@
+{
+  "kind": "Workflow",
+  "apiVersion": "argoproj.io/v1alpha1",
+  "metadata": {
+    "name": "quota-1",
+    "namespace": "oberth-argo",
+    "uid": "workflow-1",
+    "labels": {
+      "app.kubernetes.io/name": "oberth-run",
+      "oberth.ci/engine": "argo",
+      "oberth.ci/repo": "oberth",
+      "oberth.ci/run": "run-abc123",
+      "oberth.ci/sha": "0123456789abcdef0123456789abcdef01234567",
+      "oberth.ci/tier": "ci",
+      "oberth.ci/trigger": "ci"
+    },
+    "annotations": {
+      "oberth.ci/ref": "refs/heads/main",
+      "oberth.ci/run-id": "run-abc123",
+      "oberth.ci/spec-identity": "7cd66748c374cbee30eb2ea68e9718f033bd1c44ffcd761a758f90019c69992a",
+      "oberth.ci/vmi-quota": "{\"repository_id\":7,\"limit\":{\"VMs\":2,\"Cores\":6,\"MemoryBytes\":12884901888},\"peak\":{\"VMs\":1,\"Cores\":2,\"MemoryBytes\":2147483648}}",
+      "workflows.argoproj.io/pod-name-format": "v2"
+    }
+  },
+  "spec": {
+    "templates": [
+      {
+        "name": "vm",
+        "inputs": {},
+        "outputs": {},
+        "metadata": {},
+        "resource": {
+          "action": "create",
+          "manifest": "apiVersion: kubevirt.io/v1\nkind: VirtualMachineInstance\nmetadata:\n  name: \"{{workflow.name}}-amd64\"\n  labels:\n    oberth.ci/workflow: \"{{workflow.name}}\"\nspec:\n  architecture: amd64\n  domain:\n    cpu:\n      cores: 2\n    resources:\n      requests:\n        cpu: \"2\"\n        memory: 2Gi\n    devices:\n      disks:\n        - name: root\n          disk:\n            bus: virtio\n        - name: init\n          disk:\n            bus: virtio\n      interfaces:\n        - name: default\n          masquerade: {}\n  networks:\n    - name: default\n      pod: {}\n  volumes:\n    - name: root\n      containerDisk:\n        image: quay.io/example/disk@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n    - name: init\n      cloudInitNoCloud:\n        userData: \"#cloud-config\"\n",
+          "setOwnerReference": true
+        },
+        "serviceAccountName": "oberth-argo-pipeline",
+        "automountServiceAccountToken": false,
+        "executor": {
+          "serviceAccountName": "vm-launcher"
+        },
+        "podSpecPatch": "{\"$setElementOrder/initContainers\":[{\"name\":\"oberth-executor-token\"},{\"name\":\"init\"}],\"containers\":[{\"args\":[],\"command\":[\"argoexec\",\"resource\",\"get\"],\"name\":\"main\"}],\"initContainers\":[{\"command\":[\"sh\",\"-c\",\"until test -f /var/run/secrets/kubernetes.io/serviceaccount/token; do sleep 1; done\"],\"image\":\"busybox:1.37@sha256:ab33eacc8251e3807b85bb6dba570e4698c3998eca6f0fc2ccb60575a563ea74\",\"name\":\"oberth-executor-token\",\"resources\":{},\"securityContext\":{\"allowPrivilegeEscalation\":false,\"capabilities\":{\"drop\":[\"ALL\"]},\"readOnlyRootFilesystem\":true,\"runAsGroup\":0,\"runAsNonRoot\":false,\"runAsUser\":0,\"seccompProfile\":{\"type\":\"RuntimeDefault\"}},\"volumeMounts\":[{\"mountPath\":\"/var/run/secrets/kubernetes.io/serviceaccount\",\"name\":\"exec-sa-token\"}]},{\"name\":\"init\"}],\"volumes\":[{\"emptyDir\":{\"medium\":\"Memory\",\"sizeLimit\":\"1Mi\"},\"name\":\"exec-sa-token\",\"secret\":null}]}"
+      }
+    ],
+    "entrypoint": "vm",
+    "arguments": {},
+    "serviceAccountName": "oberth-argo-pipeline",
+    "automountServiceAccountToken": false,
+    "executor": {
+      "serviceAccountName": "oberth-argo-executor"
+    },
+    "volumes": [
+      {
+        "name": "oberth-tmp",
+        "emptyDir": {
+          "sizeLimit": "8Gi"
+        }
+      }
+    ],
+    "ttlStrategy": {
+      "secondsAfterCompletion": 3600
+    },
+    "activeDeadlineSeconds": 3600,
+    "securityContext": {
+      "runAsUser": 0,
+      "runAsGroup": 0,
+      "runAsNonRoot": false,
+      "seccompProfile": {
+        "type": "RuntimeDefault"
+      }
+    },
+    "podMetadata": {
+      "labels": {
+        "oberth.ci/run": "run-abc123",
+        "oberth.ci/tier": "ci",
+        "oberth.ci/trigger": "ci"
+      }
+    }
+  },
+  "status": {
+    "startedAt": null,
+    "finishedAt": null,
+    "nodes": {
+      "node": {
+        "id": "node",
+        "name": "",
+        "type": "",
+        "templateName": "vm",
+        "startedAt": null,
+        "finishedAt": null
+      }
+    }
+  }
+}

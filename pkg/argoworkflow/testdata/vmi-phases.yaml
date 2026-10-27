@@ -1,0 +1,291 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+spec:
+  entrypoint: main
+  onExit: cleanup
+  activeDeadlineSeconds: 3600
+  templates:
+    - name: main
+      dag:
+        tasks:
+          - name: setup
+            template: driver
+          - name: a
+            template: create-a
+            dependencies: [setup]
+          - name: b
+            template: create-b
+            dependencies: [setup]
+          - name: driver-a
+            template: driver
+            dependencies: [a]
+          - name: driver-b
+            template: driver
+            dependencies: [b]
+          - name: delete-a
+            template: delete-a
+            dependencies: [driver-a]
+          - name: delete-b
+            template: delete-b
+            dependencies: [driver-b]
+          - name: c
+            template: create-c
+            dependencies: [delete-a, delete-b]
+          - name: qualify-1
+            template: driver
+            dependencies: [c]
+          - name: delete-c
+            template: delete-c
+            dependencies: [qualify-1]
+          - name: c-fresh
+            template: create-c
+            dependencies: [delete-c]
+          - name: qualify-2
+            template: driver
+            dependencies: [c-fresh]
+          - name: delete-c-fresh
+            template: delete-c
+            dependencies: [qualify-2]
+          - name: k
+            template: create-k
+            dependencies: [delete-c-fresh]
+          - name: qualify-k
+            template: driver
+            dependencies: [k]
+          - name: delete-k
+            template: delete-k
+            dependencies: [qualify-k]
+    - name: driver
+      container:
+        image: busybox:1.37@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+        command: ["true"]
+    - name: create-a
+      resource:
+        action: create
+        setOwnerReference: true
+        manifest: |
+          apiVersion: kubevirt.io/v1
+          kind: VirtualMachineInstance
+          metadata:
+            name: "{{workflow.name}}-a"
+            labels:
+              oberth.ci/workflow: "{{workflow.name}}"
+          spec:
+            architecture: amd64
+            domain:
+              cpu:
+                cores: 2
+              resources:
+                requests:
+                  cpu: "2"
+                  memory: 6Gi
+              devices:
+                disks:
+                  - name: root
+                    disk:
+                      bus: virtio
+                  - name: init
+                    disk:
+                      bus: virtio
+                interfaces:
+                  - name: default
+                    masquerade: {}
+            networks:
+              - name: default
+                pod: {}
+            volumes:
+              - name: root
+                containerDisk:
+                  image: quay.io/example/disk@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+              - name: init
+                cloudInitNoCloud:
+                  userData: |
+                    #cloud-config
+                    runcmd:
+                      - echo ready
+    - name: delete-a
+      resource:
+        action: delete
+        setOwnerReference: true
+        manifest: |
+          apiVersion: kubevirt.io/v1
+          kind: VirtualMachineInstance
+          metadata:
+            name: "{{workflow.name}}-a"
+            labels:
+              oberth.ci/workflow: "{{workflow.name}}"
+    - name: create-b
+      resource:
+        action: create
+        setOwnerReference: true
+        manifest: |
+          apiVersion: kubevirt.io/v1
+          kind: VirtualMachineInstance
+          metadata:
+            name: "{{workflow.name}}-b"
+            labels:
+              oberth.ci/workflow: "{{workflow.name}}"
+          spec:
+            architecture: amd64
+            domain:
+              cpu:
+                cores: 2
+              resources:
+                requests:
+                  cpu: "2"
+                  memory: 6Gi
+              devices:
+                disks:
+                  - name: root
+                    disk:
+                      bus: virtio
+                  - name: init
+                    disk:
+                      bus: virtio
+                interfaces:
+                  - name: default
+                    masquerade: {}
+            networks:
+              - name: default
+                pod: {}
+            volumes:
+              - name: root
+                containerDisk:
+                  image: quay.io/example/disk@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+              - name: init
+                cloudInitNoCloud:
+                  userData: |
+                    #cloud-config
+                    runcmd:
+                      - echo ready
+    - name: delete-b
+      resource:
+        action: delete
+        setOwnerReference: true
+        manifest: |
+          apiVersion: kubevirt.io/v1
+          kind: VirtualMachineInstance
+          metadata:
+            name: "{{workflow.name}}-b"
+            labels:
+              oberth.ci/workflow: "{{workflow.name}}"
+    - name: create-c
+      resource:
+        action: create
+        setOwnerReference: true
+        manifest: |
+          apiVersion: kubevirt.io/v1
+          kind: VirtualMachineInstance
+          metadata:
+            name: "{{workflow.name}}-c"
+            labels:
+              oberth.ci/workflow: "{{workflow.name}}"
+          spec:
+            architecture: amd64
+            domain:
+              cpu:
+                cores: 2
+              resources:
+                requests:
+                  cpu: "2"
+                  memory: 6Gi
+              devices:
+                disks:
+                  - name: root
+                    disk:
+                      bus: virtio
+                  - name: init
+                    disk:
+                      bus: virtio
+                interfaces:
+                  - name: default
+                    masquerade: {}
+            networks:
+              - name: default
+                pod: {}
+            volumes:
+              - name: root
+                containerDisk:
+                  image: quay.io/example/disk@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+              - name: init
+                cloudInitNoCloud:
+                  userData: |
+                    #cloud-config
+                    runcmd:
+                      - echo ready
+    - name: delete-c
+      resource:
+        action: delete
+        setOwnerReference: true
+        manifest: |
+          apiVersion: kubevirt.io/v1
+          kind: VirtualMachineInstance
+          metadata:
+            name: "{{workflow.name}}-c"
+            labels:
+              oberth.ci/workflow: "{{workflow.name}}"
+    - name: create-k
+      resource:
+        action: create
+        setOwnerReference: true
+        manifest: |
+          apiVersion: kubevirt.io/v1
+          kind: VirtualMachineInstance
+          metadata:
+            name: "{{workflow.name}}-k"
+            labels:
+              oberth.ci/workflow: "{{workflow.name}}"
+          spec:
+            architecture: amd64
+            domain:
+              cpu:
+                cores: 2
+              resources:
+                requests:
+                  cpu: "2"
+                  memory: 6Gi
+              devices:
+                disks:
+                  - name: root
+                    disk:
+                      bus: virtio
+                  - name: init
+                    disk:
+                      bus: virtio
+                interfaces:
+                  - name: default
+                    masquerade: {}
+            networks:
+              - name: default
+                pod: {}
+            volumes:
+              - name: root
+                containerDisk:
+                  image: quay.io/example/disk@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+              - name: init
+                cloudInitNoCloud:
+                  userData: |
+                    #cloud-config
+                    runcmd:
+                      - echo ready
+    - name: delete-k
+      resource:
+        action: delete
+        setOwnerReference: true
+        manifest: |
+          apiVersion: kubevirt.io/v1
+          kind: VirtualMachineInstance
+          metadata:
+            name: "{{workflow.name}}-k"
+            labels:
+              oberth.ci/workflow: "{{workflow.name}}"
+    - name: cleanup
+      steps:
+      - - name: cleanup-a
+          template: delete-a
+        - name: cleanup-b
+          template: delete-b
+        - name: cleanup-c
+          template: delete-c
+        - name: cleanup-k
+          template: delete-k

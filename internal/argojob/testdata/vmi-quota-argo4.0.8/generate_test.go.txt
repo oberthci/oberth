@@ -1,0 +1,8 @@
+package argojob
+import ("encoding/json"; "os"; "path/filepath"; "testing")
+func TestExportVMIQuotaControllerInput(t *testing.T) {
+ _,wf,_:=guardedVMIFixture(t,1)
+ dir:=os.Getenv("OBERTH_VMI_PROOF_DIR");if dir=="" {t.Fatal("proof directory required")}
+ body,err:=json.MarshalIndent(wf,"","  ");if err!=nil {t.Fatal(err)}
+ if err=os.WriteFile(filepath.Join(dir,"vmi-workflow.json"),body,0600);err!=nil {t.Fatal(err)}
+}

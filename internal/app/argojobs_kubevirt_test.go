@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"testing"
 
@@ -103,5 +104,21 @@ func TestAdoptedKubeVirtDemandUsesVerifiedBindingWithoutGrant(t *testing.T) {
 	foreign.ID = "foreign"
 	if _, err := jobs.AdoptedKubeVirtDemand(foreign); err == nil {
 		t.Fatal("foreign run read adopted demand")
+	}
+}
+
+func TestPipelineKubeVirtReservesRepresentativeLifetimePeak(t *testing.T) {
+	source, err := os.ReadFile("../../pkg/argoworkflow/testdata/vmi-phases.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	writePipeline(t, dir, "build.yaml", string(source))
+	jobs := &ArgoJobs{kubeVirtGrants: kubeVirtGrantFunc(func(context.Context, int64) (store.KubeVirtBudget, bool, error) {
+		return store.KubeVirtBudget{MaxVMs: 4, MaxCores: 12, MaxMemoryBytes: 24 << 30}, true, nil
+	})}
+	resources, err := jobs.PipelineKubeVirt(t.Context(), service.JobRequest{Run: model.Run{Trigger: "branch"}, Repository: model.Repository{ID: 7, Name: "repo"}, SourceDir: dir})
+	if err != nil || resources.Demand != (argoworkflow.VMIDemand{VMs: 2, Cores: 4, MemoryBytes: 12 << 30}) || resources.Limit != (argoworkflow.VMIDemand{VMs: 4, Cores: 12, MemoryBytes: 24 << 30}) {
+		t.Fatalf("peak resources=%+v err=%v", resources, err)
 	}
 }

@@ -147,7 +147,7 @@ func TestBuildKubeVirtAppliesGrantBudgetUnderCeiling(t *testing.T) {
 	}
 	request := testRequest(periapsis.TriggerCI, threeVMs)
 	request.KubeVirtGranted = true
-	if _, err := Build(config, request); err == nil || !strings.Contains(err.Error(), "3 create templates (maximum 2)") {
+	if _, err := Build(config, request); err == nil || !strings.Contains(err.Error(), "3 concurrent VMs (maximum 2)") {
 		t.Fatalf("three VMIs under the default grant budget = %v", err)
 	}
 	request.KubeVirtBudget = argoworkflow.VMIBudget{MaxVMs: 3, MaxCores: 6, MaxMemory: resource.MustParse("6Gi")}

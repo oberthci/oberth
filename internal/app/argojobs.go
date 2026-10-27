@@ -366,7 +366,7 @@ func (jobs *ArgoJobs) create(ctx context.Context, request service.JobRequest, tr
 	}
 	submission := argojob.Request{
 		PipelineFile: pipelineFile,
-		RunID:        request.Run.ID, Name: request.JobName,
+		RunID:        request.Run.ID, RepositoryID: request.Repository.ID, Name: request.JobName,
 		Repo: request.Repository.Name, UpstreamName: request.UpstreamName, UpstreamOrg: request.UpstreamOrg,
 		Ref: request.Run.Ref, SHA: testedSHA, Trigger: trigger, RunTrigger: kind, ScheduleEntry: request.Run.ScheduleEntry, Source: source,
 		SourceDir: request.SourceDir, ApprovedSecrets: approvedSecrets,

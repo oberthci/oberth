@@ -78,7 +78,7 @@ spec:
 
 func testRequest(trigger periapsis.Trigger, source string) Request {
 	return Request{
-		RunID: "run-abc123", Name: "oberth-oberth-run-abc1-aabbccddeeff",
+		RunID: "run-abc123", RepositoryID: 1, Name: "oberth-oberth-run-abc1-aabbccddeeff",
 		Repo: "oberth", UpstreamOrg: "skipops",
 		Ref: "refs/heads/main", SHA: testSHA,
 		Trigger: trigger, Source: []byte(source),

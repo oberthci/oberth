@@ -137,6 +137,9 @@ func (controller *Controller) deliverExecutorTokens(ctx context.Context, wf *wfv
 		}
 		serviceAccount := controller.config.ExecutorServiceAccount
 		if launcher {
+			if err := controller.ensureVMIForResourcePod(ctx, wf, pod); err != nil {
+				return err
+			}
 			serviceAccount = controller.config.VMLauncherServiceAccount
 		}
 		// Bound tokens die with the workflow-owned identity Pod. The deadline covers the workflow,

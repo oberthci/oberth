@@ -81,6 +81,9 @@ func (controller *Controller) bindAdoption(workflow *wfv1.Workflow, request Adop
 		return Adoption{}, err
 	}
 	demand, err := argoworkflow.DeclaredVMIDemand(workflow)
+	if workflow.Annotations[vmiQuotaAnnotation] == "" {
+		demand, err = argoworkflow.SummedVMIDemand(workflow)
+	}
 	if err != nil {
 		return Adoption{}, err
 	}
@@ -94,7 +97,10 @@ func (controller *Controller) bindAdoption(workflow *wfv1.Workflow, request Adop
 // Argo's status and API metadata change while it runs. Its live spec must stay
 // fixed, even if a replacement keeps the original identity annotation.
 func adoptionSpecHash(workflow *wfv1.Workflow) (string, error) {
-	body, err := json.Marshal(workflow.Spec)
+	body, err := json.Marshal(struct {
+		Spec     wfv1.WorkflowSpec `json:"spec"`
+		VMIQuota string            `json:"vmi_quota,omitempty"`
+	}{workflow.Spec, workflow.Annotations[vmiQuotaAnnotation]})
 	if err != nil {
 		return "", fmt.Errorf("argojob: encode adopted Workflow spec: %w", err)
 	}

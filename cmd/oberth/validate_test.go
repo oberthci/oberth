@@ -360,7 +360,7 @@ func TestValidateKubeVirtBudgetFlags(t *testing.T) {
 	root := writeValidateRepo(t, map[string]string{"build.yaml": source})
 	base := []string{"--kubevirt", "--container-disk-prefixes=quay.io/example/"}
 	var output bytes.Buffer
-	if err := runValidate(context.Background(), append(base, root), &output); err == nil || !strings.Contains(output.String(), "3 create templates (maximum 2)") {
+	if err := runValidate(context.Background(), append(base, root), &output); err == nil || !strings.Contains(output.String(), "3 concurrent VMs (maximum 2)") {
 		t.Fatalf("p2p-3 under the default budget = %v\n%s", err, output.String())
 	}
 	output.Reset()

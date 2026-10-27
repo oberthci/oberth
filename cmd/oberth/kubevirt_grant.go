@@ -29,9 +29,9 @@ func runKubeVirtGrant(ctx context.Context, arguments []string, output io.Writer)
 	var maxVMs, maxCores *int
 	var maxMemory *string
 	if action == "grant" {
-		maxVMs = flags.Int("max-vms", 0, "maximum VMI create templates per run, 1..16 (default 2)")
-		maxCores = flags.Int("max-cores", 0, "maximum summed VMI cores per run, 1..64 (default 6)")
-		maxMemory = flags.String("max-memory", "", "maximum summed VMI memory per run, a Kubernetes quantity 1Gi..256Gi (default 12Gi)")
+		maxVMs = flags.Int("max-vms", 0, "maximum concurrent VMIs across admitted runs, 1..16 (default 2)")
+		maxCores = flags.Int("max-cores", 0, "maximum concurrent VMI cores across admitted runs, 1..64 (default 6)")
+		maxMemory = flags.String("max-memory", "", "maximum concurrent VMI memory across admitted runs, a Kubernetes quantity 1Gi..256Gi (default 12Gi)")
 	}
 	parse := func(values []string) error {
 		if err := flags.Parse(values); err != nil {

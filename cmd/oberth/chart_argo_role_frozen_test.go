@@ -169,7 +169,7 @@ func TestChartVMLauncherHasOnlyVMIAndTaskResultRoles(t *testing.T) {
 		}
 	}
 	role := findChartRBACDoc(t, docs, "Role", "oberth-argo-vm-launcher")
-	want := []map[string]any{{"apiGroups": []any{"kubevirt.io"}, "resources": []any{"virtualmachineinstances"}, "verbs": []any{"create", "get", "list", "watch", "delete"}}}
+	want := []map[string]any{{"apiGroups": []any{"kubevirt.io"}, "resources": []any{"virtualmachineinstances"}, "verbs": []any{"get", "list", "watch", "delete"}}}
 	if got := canonicalRules(t, role.Rules); got != canonicalRules(t, want) {
 		t.Fatalf("VM launcher Role rules = %s", got)
 	}
@@ -196,4 +196,43 @@ func toStrings(value any) []string {
 		}
 	}
 	return out
+}
+
+func TestChartVMICreateGuardPermissionsAreSeparateAndBounded(t *testing.T) {
+	out, err := exec.Command("helm", "template", "oberth", "../../charts/oberth", "--set", "image.ref=example.invalid/oberth@"+testImageDigest, "-s", "templates/rbac-vmi-reservations.yaml").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoder := yaml.NewYAMLOrJSONDecoder(bytes.NewReader(out), 4096)
+	var docs []chartRBACDoc
+	for {
+		var doc chartRBACDoc
+		err = decoder.Decode(&doc)
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		if doc.Kind != "" {
+			docs = append(docs, doc)
+		}
+	}
+	role := findChartRBACDoc(t, docs, "Role", "oberth-vmi-reservations")
+	want := []map[string]any{
+		{"apiGroups": []any{"kubevirt.io"}, "resources": []any{"virtualmachineinstances"}, "verbs": []any{"create", "get"}},
+		{"apiGroups": []any{""}, "resources": []any{"configmaps"}, "verbs": []any{"create"}},
+		{"apiGroups": []any{""}, "resources": []any{"configmaps"}, "resourceNames": []any{"oberth-vmi-reservations"}, "verbs": []any{"get", "update"}},
+	}
+	if role.Metadata.Namespace != "oberth-argo" || canonicalRules(t, role.Rules) != canonicalRules(t, want) {
+		t.Fatalf("quota Role: %+v", role)
+	}
+	binding := findChartRBACDoc(t, docs, "RoleBinding", "oberth-vmi-reservations")
+	if binding.RoleRef["name"] != "oberth-vmi-reservations" || binding.RoleRef["kind"] != "Role" {
+		t.Fatalf("quota binding: %+v", binding)
+	}
+	frozen := findChartRBACDoc(t, renderArgoRBAC(t), "RoleBinding", "oberth-argo")
+	if canonicalRules(t, binding.Subjects) != canonicalRules(t, frozen.Subjects) {
+		t.Fatal("quota authority was granted to another identity")
+	}
 }

@@ -476,9 +476,9 @@ func toolDefinitions() []map[string]any {
 		tool("access_revoke", "Revoke a step's access to a secret path. Requires admin uplink.", object(map[string]any{"repo": stringProperty("Repository name"), "step": stringProperty("Step/template name"), "secret": stringProperty("Exact secret path from the pipeline declaration or access_list (e.g. oberth/data/release/cosign-secret). Copied verbatim; no prefix expansion or path normalization.")}, "repo", "step", "secret")),
 		tool("kubevirt_grant", "Grant a registered repository permission to submit narrowly admitted KubeVirt VMI templates and KVM device leaves (oberth.ci/kvm-templates, including guest-test lanes), with a VMI budget shared across its admitted runs. The budget bounds VMI creates only; KVM leaves declare no VMI demand. Unset budget fields default to 2 VMs, 6 cores, 12Gi; the server's cluster ceiling still caps the budget at admission. Granting an active grant again with a different budget replaces it. Admin uplink required; audited.", object(map[string]any{
 			"repo":       stringProperty("Registered repository name"),
-			"max_vms":    integerProperty("Maximum VMI create templates per run, 1..16 (default 2)"),
-			"max_cores":  integerProperty("Maximum summed VMI cores per run, 1..64 (default 6)"),
-			"max_memory": stringProperty("Maximum summed VMI memory requests per run as a Kubernetes quantity, 1Gi..256Gi (default 12Gi)"),
+			"max_vms":    integerProperty("Maximum concurrent VMIs across admitted runs, 1..16 (default 2)"),
+			"max_cores":  integerProperty("Maximum concurrent VMI cores across admitted runs, 1..64 (default 6)"),
+			"max_memory": stringProperty("Maximum concurrent VMI memory requests across admitted runs as a Kubernetes quantity, 1Gi..256Gi (default 12Gi)"),
 		}, "repo")),
 		tool("kubevirt_revoke", "Revoke a repository's KubeVirt permission for VMI templates and KVM device leaves. New submissions fail closed; running workflows continue. Admin uplink required; audited.", object(map[string]any{"repo": stringProperty("Registered repository name")}, "repo")),
 		tool("kubevirt_grant_get", "Read a repository's KubeVirt grant, which authorizes both VMI templates and KVM device leaves (oberth.ci/kvm-templates), and its VMI budget shared across admitted runs.", object(map[string]any{"repo": stringProperty("Registered repository name")}, "repo")),

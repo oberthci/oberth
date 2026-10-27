@@ -1985,7 +1985,7 @@ continuity checks; it must never be used to reset or bypass those checks.
   these templates; ordinary templates retain the shared executor identity.
   Oberth resolves each resource Pod to its Workflow node and VMI template,
   then delivers a Pod-bound launcher token to the pinned Argo executor image.
-  The VM-launcher Role has only VMI create/get/list/watch/delete in the CI
+  The VM-launcher Role has only VMI get/list/watch/delete in the CI
   namespace, and Oberth best-effort deletes run-labelled survivors after
   workflow completion, failure or cancellation; cleanup failures are logged and audited
   without blocking terminalization. This backstop owns deletion: a workflow
@@ -1994,12 +1994,13 @@ continuity checks; it must never be used to reset or bypass those checks.
   Argo's own `--ignore-not-found`; resource `flags` stay refused). The grant is stored by repository ID and audited;
   `kubevirt_grant` / `kubevirt_revoke` (MCP) or `oberth kubevirt grant|revoke`
   (in-pod CLI) control it. Each grant carries a repository VMI budget (VMI
-  creates, summed cores, summed memory; default 2 / 6 / 12Gi, bounds 16 / 64 /
+  concurrency, cores, memory; default 2 / 6 / 12Gi, bounds 16 / 64 /
   256Gi, schema v25), set with `--max-vms/--max-cores/--max-memory` or the MCP
   `max_vms/max_cores/max_memory` fields and audited with the previous budget.
   Admission enforces, per run, the field-wise minimum of the grant and the server's
   cluster ceiling (`argo.kubevirtCeiling`, default 8 / 24 / 48Gi), at most
-  three VMI templates per budgeted VM, and a VMI CPU request no larger than its
+  three VMI templates per budgeted VM (or per declared create when proven
+  phase separation reduces the peak), and a VMI CPU request no larger than its
   cores. The scheduler also accounts declared VMI demand across all admitted
   runs of the repository. Runs whose combined demand fits are concurrent;
   excess runs remain queued with reason `KubeVirt capacity`, holding no weight
@@ -2009,6 +2010,23 @@ continuity checks; it must never be used to reset or bypass those checks.
   from the verified live spec exactly once before new claims, even under a
   reduced or revoked grant; existing usage drains before new work can fit.
   Different repositories' grants still add up.
+  Reservation is the independent maximum of concurrent VMI count, cores and
+  memory. Only an explicit matching delete between create invocations proves
+  non-overlap; create-task completion and onExit cleanup are not barriers.
+  Unknown, conditional, retrying, unbounded or unsupported graphs retain summed
+  demand. Repeated creates count separately. The peak remains reserved for the
+  entire workflow; this does not enable early scheduler-slot release.
+  Oberth mediates repository resource creates before token delivery; submitted
+  resource Pods run get and their launcher account cannot create. A separate
+  server Role grants VMI create/get and fixed-name public quota-ledger get/update
+  (ConfigMap create cannot be name-scoped). ResourceVersion CAS, actual VMI
+  inspection and durable pending claims enforce the admitted repository grant
+  and workflow peak across concurrent controllers/restarts. One claim permits
+  one POST, without retries. Ambiguous POST failures retain capacity until an
+  observed matching UID resolves them or an administrator verifies recovery;
+  timeout/NotFound alone never refunds a pending claim. No DB migration is
+  needed; drain legacy VMI resource workflows before upgrading. See
+  `docs/kubevirt-vms.md` for limits, RBAC and recovery.
   `spec.domain.firmware.kernelBoot` is admitted only with a container
   image that is digest-pinned under the containerDisk prefixes, an absolute
   clean `kernelPath` (and optional `initrdPath`), and `kernelArgs` of at most

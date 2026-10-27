@@ -307,12 +307,20 @@ func admitTemplates(workflow *wfv1.Workflow, policy Policy) []error {
 		}
 	}
 	grant, ceiling, budget := policy.effectiveVMIBudget()
-	if maxTemplates := vmiTemplatesPerVM * budget.MaxVMs; vmiTemplates > maxTemplates {
-		problems = append(problems, fmt.Errorf("argoworkflow: spec.templates declares %d VMI resource templates, maximum is %d (%d per admitted VM)",
-			vmiTemplates, maxTemplates, vmiTemplatesPerVM))
+	declaredCreates := vmiCreates
+	if demand, err := DeclaredVMIDemand(workflow); err == nil {
+		vmiCreates, vmiCores = demand.VMs, demand.Cores
+		vmiMemory = *resource.NewQuantity(demand.MemoryBytes, resource.BinarySI)
+	}
+	templateVMs := budget.MaxVMs
+	if vmiCreates < declaredCreates {
+		templateVMs = max(templateVMs, declaredCreates)
+	}
+	if maxTemplates := vmiTemplatesPerVM * templateVMs; vmiTemplates > maxTemplates {
+		problems = append(problems, fmt.Errorf("argoworkflow: spec.templates declares %d VMI resource templates, maximum is %d (%d per admitted VM)", vmiTemplates, maxTemplates, vmiTemplatesPerVM))
 	}
 	if vmiCreates > budget.MaxVMs || vmiCores > budget.MaxCores || vmiMemory.Cmp(budget.MaxMemory) > 0 {
-		problems = append(problems, fmt.Errorf("argoworkflow: VMI run budget exceeded: %d create templates (maximum %d), %d cores (maximum %d), %s memory (maximum %s); the KubeVirt grant allows %s under a cluster ceiling of %s",
+		problems = append(problems, fmt.Errorf("argoworkflow: VMI run budget exceeded: %d concurrent VMs (maximum %d), %d cores (maximum %d), %s memory (maximum %s); the KubeVirt grant allows %s under a cluster ceiling of %s",
 			vmiCreates, budget.MaxVMs, vmiCores, budget.MaxCores, vmiMemory.String(), budget.MaxMemory.String(), grant, ceiling))
 	}
 	if workflow.Spec.Entrypoint != "" && !entrypointFound {
