@@ -19,11 +19,16 @@ func TestGoGitPatchProvenance(t *testing.T) {
 
 // Check both directions: every manifest file has its reviewed bytes, and every
 // on-disk file is accounted for. An added source file must not evade the hash
-// loop simply because its author omitted it from the manifest.
+// loop simply because its author omitted it from the manifest. Pin the reviewed
+// manifest too, so adding a file and its hash cannot bypass review.
 func verifyGoGitPatchProvenance(root string) error {
 	manifest, err := os.ReadFile(filepath.Join(root, "UPSTREAM.sha256"))
 	if err != nil {
 		return err
+	}
+	manifestSum := sha256.Sum256(manifest)
+	if hex.EncodeToString(manifestSum[:]) != "16dd3183a775bdfdff01f7fd7e0c6cfbac2a370f4734055e28f38e50da85e6a4" {
+		return fmt.Errorf("unreviewed go-git upstream manifest")
 	}
 	listed := map[string]bool{}
 	for line := range strings.SplitSeq(strings.TrimSpace(string(manifest)), "\n") {
@@ -96,5 +101,28 @@ func TestGoGitPatchProvenanceRejectsExtraFiles(t *testing.T) {
 				t.Fatalf("extra file escaped provenance check: %v", err)
 			}
 		})
+	}
+}
+
+func TestGoGitPatchProvenanceRejectsManifestEdits(t *testing.T) {
+	root := t.TempDir()
+	if err := os.CopyFS(root, os.DirFS(filepath.Join("..", "..", "third_party", "go-git"))); err != nil {
+		t.Fatal(err)
+	}
+	body := []byte("package git\n")
+	if err := os.WriteFile(filepath.Join(root, "extra.go"), body, 0600); err != nil {
+		t.Fatal(err)
+	}
+	manifestPath := filepath.Join(root, "UPSTREAM.sha256")
+	manifest, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest = fmt.Appendf(manifest, "%x  extra.go\n", sha256.Sum256(body))
+	if err := os.WriteFile(manifestPath, manifest, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := verifyGoGitPatchProvenance(root); err == nil || !strings.Contains(err.Error(), "unreviewed go-git upstream manifest") {
+		t.Fatalf("new file and matching manifest entry escaped provenance check: %v", err)
 	}
 }

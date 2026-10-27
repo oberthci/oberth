@@ -28,6 +28,7 @@ TestStreamingDeltaBackwardCopiesReopenFailure makes the second base Reader call
 return an error and checks the error/reader lifecycle without a server panic.
 TestGoGitPatchProvenance checks original bytes after reversing only the reviewed
 patches and refuses every unlisted file, except this document and UPSTREAM.sha256;
+the manifest's own SHA-256 is pinned in that test so its file set is reviewed too.
 TestArchiveRealHistory uses Cache.ArchiveTar on every commit of the committed
 real Kubernetes gengo multi-pack fixture. The diagnostic script's
 --original-decoder option reverts the position correction in a build overlay
