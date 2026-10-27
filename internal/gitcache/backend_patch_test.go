@@ -3,6 +3,8 @@ package gitcache
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,26 +12,36 @@ import (
 )
 
 func TestGoGitPatchProvenance(t *testing.T) {
-	root := filepath.Join("..", "..", "third_party", "go-git")
-	manifest, err := os.ReadFile(filepath.Join(root, "UPSTREAM.sha256"))
-	if err != nil {
+	if err := verifyGoGitPatchProvenance(filepath.Join("..", "..", "third_party", "go-git")); err != nil {
 		t.Fatal(err)
 	}
-	files := 0
+}
+
+// Check both directions: every manifest file has its reviewed bytes, and every
+// on-disk file is accounted for. An added source file must not evade the hash
+// loop simply because its author omitted it from the manifest.
+func verifyGoGitPatchProvenance(root string) error {
+	manifest, err := os.ReadFile(filepath.Join(root, "UPSTREAM.sha256"))
+	if err != nil {
+		return err
+	}
+	listed := map[string]bool{}
 	for line := range strings.SplitSeq(strings.TrimSpace(string(manifest)), "\n") {
 		expected, path, ok := strings.Cut(line, "  ")
-		if !ok {
-			t.Fatalf("malformed upstream manifest: %q", line)
+		if !ok || !filepath.IsLocal(filepath.FromSlash(path)) || listed[path] {
+			return fmt.Errorf("malformed or duplicate upstream manifest entry: %q", line)
 		}
+		listed[path] = true
 		body, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(path)))
 		if err != nil {
-			t.Fatal(err)
+			return err
 		}
 		if path == "plumbing/format/packfile/patch_delta.go" {
 			source := string(body)
-			for _, patch := range [][2]string{{"\t\t\t\t\tbasePos = 0\n", ""}, {"defer func() { _ = baseRd.Close() }()", "defer baseRd.Close()"}} {
+			closePatch := "defer func() {\n\t\t\tif baseRd != nil {\n\t\t\t\t_ = baseRd.Close()\n\t\t\t}\n\t\t}()"
+			for _, patch := range [][2]string{{"\t\t\t\t\tbasePos = 0\n", ""}, {closePatch, "defer baseRd.Close()"}} {
 				if strings.Count(source, patch[0]) != 1 {
-					t.Fatalf("reviewed delta patch changed: %q", patch[0])
+					return fmt.Errorf("reviewed delta patch changed: %q", patch[0])
 				}
 				source = strings.Replace(source, patch[0], patch[1], 1)
 			}
@@ -37,11 +49,52 @@ func TestGoGitPatchProvenance(t *testing.T) {
 		}
 		sum := sha256.Sum256(body)
 		if hex.EncodeToString(sum[:]) != expected {
-			t.Fatalf("unreviewed go-git change in %s", path)
+			return fmt.Errorf("unreviewed go-git change in %s", path)
 		}
-		files++
 	}
-	if files < 250 {
-		t.Fatalf("incomplete upstream source manifest: %d", files)
+	if len(listed) < 250 {
+		return fmt.Errorf("incomplete upstream source manifest: %d", len(listed))
+	}
+	return filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		relative, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		relative = filepath.ToSlash(relative)
+		if !entry.Type().IsRegular() {
+			return fmt.Errorf("non-regular go-git file: %s", relative)
+		}
+		if !listed[relative] && relative != "OBERTH-PATCH.md" && relative != "UPSTREAM.sha256" {
+			return fmt.Errorf("unlisted go-git file: %s", relative)
+		}
+		return nil
+	})
+}
+
+func TestGoGitPatchProvenanceRejectsExtraFiles(t *testing.T) {
+	original := filepath.Join("..", "..", "third_party", "go-git")
+	for _, extra := range []string{"unlisted.go", "plumbing/unlisted.asset", ".unlisted"} {
+		t.Run(extra, func(t *testing.T) {
+			root := t.TempDir()
+			if err := os.CopyFS(root, os.DirFS(original)); err != nil {
+				t.Fatal(err)
+			}
+			if err := verifyGoGitPatchProvenance(root); err != nil {
+				t.Fatal(err)
+			}
+			path := filepath.Join(root, filepath.FromSlash(extra))
+			if err := os.WriteFile(path, []byte("unlisted fixture"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if err := verifyGoGitPatchProvenance(root); err == nil || !strings.Contains(err.Error(), "unlisted go-git file: "+extra) {
+				t.Fatalf("extra file escaped provenance check: %v", err)
+			}
+		})
 	}
 }

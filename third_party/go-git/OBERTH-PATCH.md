@@ -13,13 +13,21 @@ The only production difference is in plumbing/format/packfile/patch_delta.go:
   number of bytes. Output can have the correct length and wrong content.
 - Its deferred close must close the current reopened base reader, rather
   than capturing the initial reader and leaking the replacement on return.
+  A failed reopen can leave that reader nil; the deferred close checks for nil
+  so a read failure returns an error rather than panicking in the goroutine.
 
 Oberth uses LargeObjectThreshold=1 to bound mirror memory, making the lazy
 streaming decoder reachable even for ordinary source files. Switching this
 threshold off would hide the bug by loading unbounded blobs into memory.
 
-Regression coverage lives in the parent module's internal/gitcache tests:
+The vendored module has no tests. Decoder and provenance coverage lives in the
+parent module's internal/gitcache tests; run it from the Oberth repository root
+with `go test -race ./internal/gitcache` or `hack/test-archive-history.sh`:
 TestStreamingDeltaBackwardCopies compares the streaming and eager decoders;
+TestStreamingDeltaBackwardCopiesReopenFailure makes the second base Reader call
+return an error and checks the error/reader lifecycle without a server panic.
+TestGoGitPatchProvenance checks original bytes after reversing only the reviewed
+patches and refuses every unlisted file, except this document and UPSTREAM.sha256;
 TestArchiveRealHistory uses Cache.ArchiveTar on every commit of the committed
 real Kubernetes gengo multi-pack fixture. The diagnostic script's
 --original-decoder option reverts the position correction in a build overlay

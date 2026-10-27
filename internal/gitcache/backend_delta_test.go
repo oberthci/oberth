@@ -2,8 +2,10 @@ package gitcache
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/go-git/go-git/v5/plumbing"
@@ -58,3 +60,50 @@ func TestDecodedObjectIntegrity(t *testing.T) {
 		})
 	}
 }
+
+// This used to panic in ReaderFromDelta's goroutine: the failed reopen
+// assigned nil to baseRd, then its deferred closure dereferenced that nil.
+func TestStreamingDeltaBackwardCopiesReopenFailure(t *testing.T) {
+	base := &failingReopenObject{MemoryObject: &plumbing.MemoryObject{}}
+	base.SetType(plumbing.BlobObject)
+	_, _ = base.Write([]byte("0123456789abcdefghijklmnopqrstuv"))
+	delta := []byte{32, 8, 0x91, 8, 4, 0x90, 4}
+	reader, err := packfile.ReaderFromDelta(base, bytes.NewReader(delta))
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := io.ReadAll(reader)
+	if closeErr := reader.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if !errors.Is(err, packfile.ErrInvalidDelta) || string(body) != "89ab" {
+		t.Fatalf("reopen failure: body=%q err=%v", body, err)
+	}
+	if base.opens.Load() != 2 || base.closes.Load() != 1 {
+		t.Fatalf("reader lifecycle: opens=%d closes=%d", base.opens.Load(), base.closes.Load())
+	}
+}
+
+type failingReopenObject struct {
+	*plumbing.MemoryObject
+	opens  atomic.Int32
+	closes atomic.Int32
+}
+
+func (o *failingReopenObject) Reader() (io.ReadCloser, error) {
+	if o.opens.Add(1) == 2 {
+		return nil, errors.New("fixture base cannot be reopened")
+	}
+	reader, err := o.MemoryObject.Reader()
+	if err != nil {
+		return nil, err
+	}
+	return &countedDeltaBaseReader{ReadCloser: reader, closes: &o.closes}, nil
+}
+
+type countedDeltaBaseReader struct {
+	io.ReadCloser
+	closes *atomic.Int32
+}
+
+func (r *countedDeltaBaseReader) Close() error { r.closes.Add(1); return r.ReadCloser.Close() }
