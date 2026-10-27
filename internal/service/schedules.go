@@ -72,8 +72,8 @@ type ScheduleTriggerResponse struct {
 }
 
 // ScheduleControl is the scheduler's read and trigger surface (#1106). The
-// scheduler owns the schedule file, its parse limits and the busy-repository
-// rule, so the tools ask it instead of reading Git themselves.
+// scheduler owns the schedule file, its parse limits and the manual trigger's
+// busy-repository guard, so the tools ask it instead of reading Git themselves.
 type ScheduleControl interface {
 	// InspectSchedule reports the repository's schedule; ok is false when it
 	// has none.

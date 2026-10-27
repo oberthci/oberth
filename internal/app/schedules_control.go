@@ -94,7 +94,7 @@ func (schedules *Schedules) InspectSchedule(ctx context.Context, repository mode
 }
 
 // PlanScheduleTrigger resolves one entry to the branch head a manual run would
-// test, applying the cron path's busy-repository rule unless force is set.
+// test, applying the manual trigger's busy-repository guard unless force is set.
 func (schedules *Schedules) PlanScheduleTrigger(ctx context.Context, repository model.Repository, name string, force bool) (service.SchedulePlan, error) {
 	qualified, head, file, found, parseErr, err := schedules.readSchedule(ctx, repository, time.Now().UTC())
 	if err != nil {

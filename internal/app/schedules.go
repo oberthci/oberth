@@ -178,12 +178,9 @@ func (schedules *Schedules) tickRepository(ctx context.Context, repository model
 	if len(due) == 0 {
 		return
 	}
-	if schedules.busy(ctx, repository.ID) {
-		for _, entry := range due {
-			schedules.record(ctx, qualifiedName, entry.Name, now, "skipped")
-		}
-		return
-	}
+	// Queue due work even while this repository is busy. Resource admission
+	// owns execution capacity; waiting for an idle repository here can starve
+	// a nightly behind a continuous stream of ordinary branch runs.
 	for _, entry := range due {
 		schedules.fire(ctx, repository, qualifiedName, entry, sha, branch, now)
 	}

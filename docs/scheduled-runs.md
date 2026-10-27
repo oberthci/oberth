@@ -54,9 +54,9 @@ schedule run.
 
 Named entries on the same repository/branch/SHA remain distinct queued runs.
 A newer attempt supersedes only the same entry on the same branch; ordinary
-branch pushes and other entries are independent. The existing repository-busy
-cron rule still applies before entries are enqueued, and resource admission
-and declared concurrency groups still bound their execution.
+branch pushes and other entries are independent. Due cron entries are queued
+even when the repository has active runs. Resource admission and declared
+concurrency groups bound their execution.
 
 Run list/detail APIs expose `ScheduleEntry`; `status` and `wait` expose
 `schedule_entry`. The dashboard shows the name in the run stream and detail.
@@ -127,18 +127,26 @@ Friday, not only on Fridays that fall on the 1st.
 
 ## Overlap, downtime and attribution
 
-**A fire is skipped when the repository already has a run queued or running**,
-and the skip is recorded. A periodic health signal gains nothing by queueing
-behind another run, and on a single node one heavy build already saturates
-memory. A skip does not advance the schedule, so the entry fires on the next
-tick once the repository is idle, including after a server restart. The latest
-outcome and its time remain visible independently of the last successful fire.
-A known-due entry with no successful fire retains a pending cursor, so the first
-busy skip also survives restart. Migration v32 (#1190) backfills surviving
-successful rows. Entries whose latest row is skipped, failed or paused become
-due once immediately after upgrade because their successful-fire history is
-unavailable; they run on the next eligible tick once the repository is idle and
-scheduling is enabled, then resume their normal cadence.
+**A due fire is queued even when the repository is busy.** Weighted admission,
+KubeVirt capacity and declared concurrency groups decide when it executes. A
+stream of ordinary branch runs must not prevent a nightly from entering that
+queue. `fired` means the run was enqueued, not that it has started or passed.
+The current tick's branch head is pinned in the queued run; later pushes do not
+replace a named schedule with an ordinary branch run.
+
+Older servers recorded `skipped` while any repository run was active. Those
+outcomes did not advance the successful-fire cursor: pending entries catch up
+on the next eligible tick, including after restart, even if the repository is
+still busy. Failed enqueues and paused entries also retain that cursor. The
+latest outcome and its time remain visible independently of the last successful
+fire. Migration v32 (#1190) backfills surviving successful rows; entries whose
+latest row was skipped, failed or paused have a pending cursor when their
+successful-fire history is unavailable. They queue once when scheduling is
+enabled and the entry is unpaused, then resume their normal cadence.
+
+Manual `schedule_trigger` still refuses active repository work unless `force`
+is set. That guard prevents an accidental extra manual run; cron occurrences
+are already bounded by their successful-fire cursor and minimum interval.
 
 Enqueueing a run and recording its successful fire remain separate operations.
 A crash between them can still enqueue the same occurrence again after restart.

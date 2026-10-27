@@ -377,8 +377,10 @@ continuity checks; it must never be used to reset or bypass those checks.
   `spec.arguments.parameters` is refused. Named schedules always receive it;
   other runs receive empty only when their document references it, otherwise
   it is absent. Named entries have separate same-branch supersession domains.
-  Resource admission, explicit groups and the repository-busy cron rule still
-  apply. Run list/detail expose `ScheduleEntry`; status/wait expose
+  Due cron entries queue even when the repository has active runs; resource
+  admission and explicit groups bound execution. Manual schedule triggers
+  retain their busy-repository guard unless forced. Run list/detail expose
+  `ScheduleEntry`; status/wait expose
   `schedule_entry`. See [scheduled runs](docs/scheduled-runs.md).
 - XL takes an audited admin size grant (#1021). A branch, promotion or
   schedule run whose resolved size (including its trusted preflight's)

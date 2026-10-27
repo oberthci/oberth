@@ -9,7 +9,7 @@ import (
 	"github.com/oberthci/oberth/internal/store"
 )
 
-func TestDurableBusySkipCatchesUpAfterRestart(t *testing.T) {
+func TestLegacyBusySkipQueuesAfterRestartWhileRepositoryRemainsBusy(t *testing.T) {
 	for _, previousFire := range []bool{false, true} {
 		name := "first-fire"
 		if previousFire {
@@ -38,13 +38,13 @@ func TestDurableBusySkipCatchesUpAfterRestart(t *testing.T) {
 			schedules.observed = instant(t, "2026-08-24T00:00:00Z")
 			runs.active[1] = true
 			skipped := instant(t, "2026-08-24T03:05:00Z")
-			schedules.Tick(ctx, skipped)
+			// Emulate the old cron busy gate's durable state at upgrade.
+			if err := state.RecordScheduleFire(ctx, "alpha", "nightly", skipped, "skipped"); err != nil {
+				t.Fatal(err)
+			}
 			outcomes, err := state.ScheduleOutcomes(ctx, "alpha")
 			if err != nil || len(outcomes) != 1 || outcomes[0].Outcome != "skipped" || !outcomes[0].FiredAt.Equal(skipped) {
 				t.Fatalf("latest skip is not reportable: %+v, %v", outcomes, err)
-			}
-			if len(enqueuer.requests) != 0 {
-				t.Fatal("busy repository enqueued a run")
 			}
 			if err := state.Close(); err != nil {
 				t.Fatal(err)
@@ -57,13 +57,25 @@ func TestDurableBusySkipCatchesUpAfterRestart(t *testing.T) {
 			config.State = state
 			restarted := NewSchedules(config)
 			restarted.observed = skipped.Add(time.Minute)
-			restarted.Tick(ctx, skipped.Add(time.Minute)) // Still busy after restart.
-			runs.active[1] = false
-			caughtUp := skipped.Add(2 * time.Minute)
+			caughtUp := skipped.Add(time.Minute)
 			restarted.Tick(ctx, caughtUp)
 			if len(enqueuer.requests) != 1 || enqueuer.requests[0].ScheduleEntry != "nightly" {
-				t.Fatalf("idle tick did not catch up after restart: %+v", enqueuer.requests)
+				t.Fatalf("busy tick did not queue the legacy pending occurrence after restart: %+v", enqueuer.requests)
 			}
+			outcomes, err = state.ScheduleOutcomes(ctx, "alpha")
+			if err != nil || len(outcomes) != 1 || outcomes[0].Outcome != "fired" || !outcomes[0].FiredAt.Equal(caughtUp) {
+				t.Fatalf("queued occurrence is not reportable: %+v, %v", outcomes, err)
+			}
+			if err := state.Close(); err != nil {
+				t.Fatal(err)
+			}
+			state, err = store.Open(ctx, path, store.Options{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			config.State = state
+			restarted = NewSchedules(config)
+			restarted.observed = caughtUp.Add(time.Minute)
 			restarted.Tick(ctx, caughtUp.Add(time.Minute))
 			if len(enqueuer.requests) != 1 {
 				t.Fatal("catch-up fire repeated")

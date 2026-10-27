@@ -196,6 +196,53 @@ func TestKubeVirtSchedulerConcurrentRunsAndQueueReason(t *testing.T) {
 	fixture.awaitTerminal(t, third.ID)
 }
 
+// Cron queueing is covered by app's schedule tests. Once enqueued, a nightly
+// must retain its identity and queue place while ordinary branch runs saturate
+// the repository's VMI budget; it must not bypass resource admission.
+func TestKubeVirtScheduledRunQueuesBehindBusyBranches(t *testing.T) {
+	fixture, _ := kubeVirtFixture(t, "first", "second", "third", "main")
+	first := fixture.branch(t, fixture.terraform, "first", "a")
+	second := fixture.branch(t, fixture.terraform, "second", "b")
+	third := fixture.branch(t, fixture.terraform, "third", "c")
+	fixture.start(t)
+	fixture.awaitCreated(t, 2)
+	fixture.awaitAdmission(t, third, "KubeVirt capacity", func(o *model.AdmissionObservation) bool { return o != nil && o.KubeVirtCapacity })
+
+	queued, err := fixture.scheduler.EnqueueCI(t.Context(), CIRequest{
+		EventID: "nightly-while-busy", Repository: fixture.terraform,
+		Branch: "main", SHA: strings.Repeat("d", 40), Actor: "oberth:scheduler",
+		Trigger: "schedule", ScheduleEntry: "kubevirt-nightly",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	nightly := fixture.run(t, queued.ID)
+	fixture.awaitAdmission(t, nightly, "KubeVirt capacity", func(o *model.AdmissionObservation) bool { return o != nil && o.KubeVirtCapacity })
+	nightly = fixture.run(t, nightly.ID)
+	if !nightly.Status.Active() || nightly.StartedAt != nil || nightly.Trigger != "schedule" || nightly.ScheduleEntry != "kubevirt-nightly" || fixture.engine.wasCreated(nightly.ID) {
+		t.Fatalf("nightly lost or bypassed capacity: %#v", nightly)
+	}
+	if !fixture.run(t, third.ID).Status.Active() {
+		t.Fatal("nightly superseded an ordinary branch run")
+	}
+
+	fixture.engine.finish(t, first.ID)
+	if created := fixture.awaitCreated(t, 1); !created[third.ID] {
+		t.Fatalf("nightly overtook the earlier branch waiter: %v", created)
+	}
+	fixture.engine.finish(t, second.ID)
+	if created := fixture.awaitCreated(t, 1); !created[nightly.ID] {
+		t.Fatalf("nightly did not start after capacity was released: %v", created)
+	}
+	fixture.engine.finish(t, third.ID)
+	fixture.engine.finish(t, nightly.ID)
+	// This engine finishes jobs as failed to avoid forge publication; admission
+	// and retained identity are the properties under test.
+	if finished := fixture.awaitTerminal(t, nightly.ID); finished.Status != model.RunFailed || finished.ScheduleEntry != "kubevirt-nightly" {
+		t.Fatalf("nightly completion = %#v", finished)
+	}
+}
+
 func TestKubeVirtCancelAndSupersedeReleaseBeforeObserverReturns(t *testing.T) {
 	for _, cancel := range []bool{true, false} {
 		t.Run(map[bool]string{true: "cancel", false: "supersede"}[cancel], func(t *testing.T) {

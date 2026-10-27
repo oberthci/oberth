@@ -47,9 +47,14 @@ func (f *fakeEnqueuer) EnqueueCI(_ context.Context, request service.CIRequest) (
 
 type fakeRunLister struct {
 	active map[int64]bool
+	runs   []model.Run
+	err    error
 }
 
 func (f *fakeRunLister) ListRecentRuns(_ context.Context, filter model.RunListFilter) ([]model.Run, error) {
+	if f.err != nil || f.runs != nil {
+		return f.runs, f.err
+	}
 	if f.active[filter.RepoID] {
 		return []model.Run{{Status: model.RunRunning}}, nil
 	}
@@ -161,26 +166,38 @@ func TestATickFiresEvenWhenTheCommitHasNotChanged(t *testing.T) {
 	}
 }
 
-func TestATickSkipsARepositoryThatIsAlreadyBusyAndRecordsWhy(t *testing.T) {
-	t.Parallel()
-	git := &fakeScheduleGit{
-		sha:  map[string]string{"alpha": "0123456789abcdef0123456789abcdef01234567"},
-		blob: map[string]string{"alpha": nightlyFile},
-	}
-	schedules, enqueuer, runs, state := testSchedules(t, git, oneRepo())
-	schedules.observed = instant(t, "2026-08-24T00:00:00Z")
-	runs.active[1] = true
+func TestATickQueuesBehindActiveRunsOrUnavailableRunHistory(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		status model.RunStatus
+		err    error
+	}{
+		{name: "queued", status: model.RunQueued},
+		{name: "waiting", status: model.RunWaiting},
+		{name: "running", status: model.RunRunning},
+		{name: "history-unavailable", err: errors.New("run history unavailable")},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			git := &fakeScheduleGit{
+				sha:  map[string]string{"alpha": "0123456789abcdef0123456789abcdef01234567"},
+				blob: map[string]string{"alpha": nightlyFile},
+			}
+			schedules, enqueuer, runs, state := testSchedules(t, git, oneRepo())
+			schedules.observed = instant(t, "2026-08-24T00:00:00Z")
+			// An ordinary push on the nightly's own branch must not suppress it.
+			runs.runs = []model.Run{{RepoID: 1, Ref: "main", Trigger: "branch", Status: test.status}}
+			runs.err = test.err
 
-	schedules.Tick(context.Background(), instant(t, "2026-08-24T03:05:00Z"))
+			schedules.Tick(t.Context(), instant(t, "2026-08-24T03:05:00Z"))
 
-	if len(enqueuer.requests) != 0 {
-		t.Fatal("a fire was queued behind a run that was already going")
-	}
-	if len(state.events) == 0 {
-		t.Fatal("the skip was silent")
-	}
-	if state.events[0] != "alpha/nightly:skipped" {
-		t.Fatalf("recorded %q, want a skip naming the entry", state.events[0])
+			if len(enqueuer.requests) != 1 || enqueuer.requests[0].ScheduleEntry != "nightly" {
+				t.Fatalf("due nightly was not queued: %+v (outcomes %v)", enqueuer.requests, state.events)
+			}
+			if len(state.events) != 1 || state.events[0] != "alpha/nightly:fired" {
+				t.Fatalf("enqueue outcome = %v, want fired", state.events)
+			}
+		})
 	}
 }
 
