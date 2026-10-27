@@ -11,12 +11,16 @@ import (
 // KubeVirtResources binds one run's declared demand to its repository grant,
 // capped by the server ceiling. It is an admission resource, not a run type.
 type KubeVirtResources struct {
-	Demand argoworkflow.VMIDemand
-	Limit  argoworkflow.VMIDemand
+	Demand  argoworkflow.VMIDemand
+	Limit   argoworkflow.VMIDemand
+	Receipt *argoworkflow.VMIDemandReceipt
 }
 
 func (resources KubeVirtResources) Validate() error {
 	demand, limit := resources.Demand, resources.Limit
+	if resources.Receipt != nil && resources.Receipt.Summary().Demand != demand {
+		return fmt.Errorf("service: KubeVirt reservation disagrees with demand receipt")
+	}
 	if demand.VMs < 0 || demand.Cores < 0 || demand.MemoryBytes < 0 ||
 		limit.VMs < 0 || limit.Cores < 0 || limit.MemoryBytes < 0 ||
 		(demand.VMs == 0 && (demand.Cores != 0 || demand.MemoryBytes != 0)) ||

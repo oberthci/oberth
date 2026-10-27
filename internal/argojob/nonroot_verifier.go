@@ -40,13 +40,20 @@ func nonrootRequestIdentity(request Request) string {
 	if request.TrustedKVM != nil {
 		trustedIntent = vmrunner.KVMIntentDigest(*request.TrustedKVM)
 	}
+	var vmiReceipt *argoworkflow.VMIDemandSummary
+	if request.VMIDemandReceipt != nil && request.VMIDemandReceipt.Summary().Demand.VMs > 0 {
+		summary := request.VMIDemandReceipt.Summary()
+		vmiReceipt = &summary
+	}
 	identity := struct {
 		Principal       []string
 		Source          []byte
 		ApprovedSecrets map[string]bool
 		Fragments       map[string][]string
-		TrustedIntent   string `json:",omitempty"`
-	}{[]string{request.RunID, request.Name, request.Repo, request.UpstreamName, request.UpstreamOrg, request.Ref, request.SHA, string(request.Trigger), request.SourceDir}, request.Source, request.ApprovedSecrets, fragments, trustedIntent}
+		TrustedIntent   string                         `json:",omitempty"`
+		VMIReceipt      *argoworkflow.VMIDemandSummary `json:",omitempty"`
+	}{[]string{request.RunID, request.Name, request.Repo, request.UpstreamName, request.UpstreamOrg, request.Ref, request.SHA, string(request.Trigger), request.SourceDir}, request.Source, request.ApprovedSecrets, fragments, trustedIntent,
+		vmiReceipt}
 	encoded, _ := json.Marshal(identity) // Only primitive serializable types.
 	digest := sha256.Sum256(encoded)
 	return hex.EncodeToString(digest[:])

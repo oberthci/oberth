@@ -352,9 +352,14 @@ func (jobs *ArgoJobs) create(ctx context.Context, request service.JobRequest, tr
 			}
 		}
 	}
-	fragments, err := loadFragments(ctx, jobs.fragments, source, trigger, request.Run.RefKind, request.Run.Trigger)
-	if err != nil {
-		return fmt.Errorf("app: resolve fragments for %s: %w", request.Repository.Name, err)
+	var fragments map[argoworkflow.FragmentKey]argoworkflow.Fragment
+	if request.VMIDemandReceipt != nil {
+		fragments = request.VMIDemandReceipt.Fragments()
+	} else {
+		fragments, err = loadFragments(ctx, jobs.fragments, source, trigger, request.Run.RefKind, request.Run.Trigger)
+		if err != nil {
+			return fmt.Errorf("app: resolve fragments for %s: %w", request.Repository.Name, err)
+		}
 	}
 	kind, err := runKind(request.Run)
 	if err != nil {
@@ -365,8 +370,9 @@ func (jobs *ArgoJobs) create(ctx context.Context, request service.JobRequest, tr
 		return err
 	}
 	submission := argojob.Request{
-		PipelineFile: pipelineFile,
-		RunID:        request.Run.ID, RepositoryID: request.Repository.ID, Name: request.JobName,
+		VMIDemandReceipt: request.VMIDemandReceipt,
+		PipelineFile:     pipelineFile,
+		RunID:            request.Run.ID, RepositoryID: request.Repository.ID, Name: request.JobName,
 		Repo: request.Repository.Name, UpstreamName: request.UpstreamName, UpstreamOrg: request.UpstreamOrg,
 		Ref: request.Run.Ref, SHA: testedSHA, Trigger: trigger, RunTrigger: kind, ScheduleEntry: request.Run.ScheduleEntry, Source: source,
 		SourceDir: request.SourceDir, ApprovedSecrets: approvedSecrets,
@@ -489,6 +495,9 @@ func (jobs *ArgoJobs) auditSubmission(ctx context.Context, request service.JobRe
 		"automount_service_account_token": automount,
 		"declared_secret_paths":           declared,
 		"fragments":                       fragments,
+	}
+	if submission.VMIDemandReceipt != nil {
+		details["vmi_demand_receipt"] = submission.VMIDemandReceipt.Summary()
 	}
 	if binding := workflow.Annotations["oberth.ci/verified-controller-profile"]; binding != "" {
 		details["controller_profile"] = binding

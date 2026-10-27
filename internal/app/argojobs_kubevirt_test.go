@@ -2,11 +2,13 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
 	"testing"
 
+	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
 	"k8s.io/apimachinery/pkg/api/resource"
 
 	"github.com/oberthci/oberth/internal/argojob"
@@ -23,29 +25,40 @@ func (load kubeVirtGrantFunc) ActiveKubeVirtGrant(ctx context.Context, id int64)
 	return load(ctx, id)
 }
 
-func demandPipeline(cores int, memory string) string {
-	return groupedPipeline("") + fmt.Sprintf(`    - name: vm
-      resource:
-        action: create
-        manifest: |
-          apiVersion: kubevirt.io/v1
-          kind: VirtualMachineInstance
-          spec:
-            domain:
-              cpu:
-                cores: %d
-              resources:
-                requests:
-                  memory: %s
-`, cores, memory)
+func demandPipeline(t *testing.T, cores int, memory string) string {
+	t.Helper()
+	source, err := os.ReadFile("../../pkg/argoworkflow/testdata/vmi-phases.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wf, err := argoworkflow.Decode(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, template := range wf.Spec.Templates {
+		if template.Name == "create-a" {
+			template.Resource.Manifest = strings.ReplaceAll(template.Resource.Manifest, "cores: 2", fmt.Sprintf("cores: %d", cores))
+			template.Resource.Manifest = strings.ReplaceAll(template.Resource.Manifest, `cpu: "2"`, fmt.Sprintf(`cpu: "%d"`, cores))
+			template.Resource.Manifest = strings.ReplaceAll(template.Resource.Manifest, "memory: 6Gi", "memory: "+memory)
+			wf.Spec.Entrypoint = template.Name
+			wf.Spec.OnExit = ""
+			wf.Spec.Templates = []wfv1.Template{template}
+			break
+		}
+	}
+	encoded, err := json.Marshal(wf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(encoded)
 }
 
 func TestPipelineKubeVirtUsesOwnDocumentAndCappedGrant(t *testing.T) {
 	dir := t.TempDir()
-	writePipeline(t, dir, "build.yaml", demandPipeline(2, "1Gi"))
-	writePipeline(t, dir, "release.yaml", demandPipeline(3, "2Gi"))
+	writePipeline(t, dir, "build.yaml", demandPipeline(t, 2, "1Gi"))
+	writePipeline(t, dir, "release.yaml", demandPipeline(t, 3, "2Gi"))
 	jobs := &ArgoJobs{
-		config: argojob.Config{KubeVirtCeiling: argoworkflow.VMIBudget{MaxVMs: 3, MaxCores: 8, MaxMemory: resource.MustParse("8Gi")}},
+		config: argojob.Config{ContainerDiskPrefixes: []string{"quay.io/example/"}, KubeVirtCeiling: argoworkflow.VMIBudget{MaxVMs: 3, MaxCores: 8, MaxMemory: resource.MustParse("8Gi")}},
 		kubeVirtGrants: kubeVirtGrantFunc(func(_ context.Context, repoID int64) (store.KubeVirtBudget, bool, error) {
 			if repoID != 7 {
 				t.Fatalf("grant read for repo %d", repoID)
@@ -67,9 +80,9 @@ func TestPipelineKubeVirtUsesOwnDocumentAndCappedGrant(t *testing.T) {
 
 func TestPipelineKubeVirtRefusesMissingGrantAndOversizedDemand(t *testing.T) {
 	dir := t.TempDir()
-	writePipeline(t, dir, "build.yaml", demandPipeline(7, "1Gi"))
+	writePipeline(t, dir, "build.yaml", demandPipeline(t, 7, "1Gi"))
 	request := service.JobRequest{Run: model.Run{Ref: "main"}, Repository: model.Repository{ID: 1, Name: "vm-repo"}, SourceDir: dir}
-	jobs := &ArgoJobs{}
+	jobs := &ArgoJobs{config: argojob.Config{ContainerDiskPrefixes: []string{"quay.io/example/"}}}
 	if _, err := jobs.PipelineKubeVirt(t.Context(), request); err == nil || !strings.Contains(err.Error(), "no KubeVirt grant") {
 		t.Fatalf("missing grant = %v", err)
 	}
@@ -114,7 +127,7 @@ func TestPipelineKubeVirtReservesRepresentativeLifetimePeak(t *testing.T) {
 	}
 	dir := t.TempDir()
 	writePipeline(t, dir, "build.yaml", string(source))
-	jobs := &ArgoJobs{kubeVirtGrants: kubeVirtGrantFunc(func(context.Context, int64) (store.KubeVirtBudget, bool, error) {
+	jobs := &ArgoJobs{config: argojob.Config{ContainerDiskPrefixes: []string{"quay.io/example/"}, RunnerImagePrefixes: []string{"busybox:"}}, kubeVirtGrants: kubeVirtGrantFunc(func(context.Context, int64) (store.KubeVirtBudget, bool, error) {
 		return store.KubeVirtBudget{MaxVMs: 4, MaxCores: 12, MaxMemoryBytes: 24 << 30}, true, nil
 	})}
 	resources, err := jobs.PipelineKubeVirt(t.Context(), service.JobRequest{Run: model.Run{Trigger: "branch"}, Repository: model.Repository{ID: 7, Name: "repo"}, SourceDir: dir})

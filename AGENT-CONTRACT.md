@@ -2037,9 +2037,27 @@ continuity checks; it must never be used to reset or bypass those checks.
   Reservation is the independent maximum of concurrent VMI count, cores and
   memory. Only an explicit matching delete between create invocations proves
   non-overlap; create-task completion and onExit cleanup are not barriers.
-  Unknown, conditional, retrying, unbounded or unsupported graphs retain summed
-  demand. Repeated creates count separately. The peak remains reserved for the
-  entire workflow; this does not enable early scheduler-slot release.
+  The context-free sizing API remains conservative. Run-aware sizing and final
+  submission share a durable run-trigger binding and exact policy-admitted
+  fragment resolution, pinned in a source/graph demand receipt. Unknown or
+  unsupported graphs retain summed demand. Resolved lifetime-neutral graphs
+  (including bounded get-only retries) may collapse; create/delete retries and
+  dynamic fan-out earn no credits. Terminal-state OR dependencies establish
+  ordering only: a later create must require a matching delete's Succeeded
+  status before it receives lifetime credit. Failure, omission, skip, uncertain
+  or unproven conditional deletion and onExit never imply release. A
+  non-transitive lifetime relation falls back to the sum; its transitive closure
+  must never be used to invent deletion credits across omitted phases.
+  Partition exclusivity is limited to one immutable invocation scalar and safe
+  expression-tag string equalities, e.g.
+  `{{=inputs.parameters['partition'] == '0'}}`, whose binding is explicit and
+  whose resolved producer precedes that invocation. Raw output substitution,
+  YAML defaults, independent selectors and arbitrary output expressions earn
+  no exclusivity credits. Every authored `when` string is submitted unchanged;
+  repositories must adopt the safe form themselves. The analyzer executes no
+  planner and is bounded to 4,096 scan/expansion visits, 256 projected nodes and
+  32 partition literals. Repeated creates count separately. The peak remains
+  reserved for the entire workflow; this does not enable early slot release.
   Oberth mediates repository resource creates before token delivery; submitted
   resource Pods run get and their launcher account cannot create. A separate
   server Role grants VMI create/get and fixed-name public quota-ledger get/update

@@ -16,12 +16,45 @@ func (jobs *ArgoJobs) PipelineKubeVirt(ctx context.Context, request service.JobR
 	if err != nil {
 		return service.KubeVirtResources{}, jobs.noRunPipelineError(err, request)
 	}
-	workflow, err := argoworkflow.Decode(source)
+	kind, err := runKind(request.Run)
 	if err != nil {
 		return service.KubeVirtResources{}, err
 	}
-	if !argoworkflow.DeclaresVMIResources(workflow) {
-		return service.KubeVirtResources{}, nil
+	tier, err := runTrigger(request.Run)
+	if err != nil {
+		return service.KubeVirtResources{}, err
+	}
+	fragments, err := loadFragments(ctx, jobs.fragments, source, tier, request.Run.RefKind, request.Run.Trigger)
+	if err != nil {
+		return service.KubeVirtResources{}, err
+	}
+	file, err := jobs.runSourceFile(request)
+	if err != nil {
+		return service.KubeVirtResources{}, err
+	}
+	sha := request.Run.TestedSHA
+	if sha == "" {
+		sha = request.Run.SHA
+	}
+	resolved, err := argoworkflow.ResolveRunSource(source, fragments, argoworkflow.RunSourceBinding{RunID: request.Run.ID, RepositoryID: request.Repository.ID, SHA: sha, File: file, Trigger: kind, ScheduleEntry: request.Run.ScheduleEntry})
+	if err != nil {
+		return service.KubeVirtResources{}, err
+	}
+	policy := argoworkflow.Policy{RunnerImagePrefixes: jobs.config.RunnerImagePrefixes, ContainerDiskPrefixes: jobs.config.ContainerDiskPrefixes}
+	workflow := resolved.Workflow()
+	kvm, err := argoworkflow.DeclaredKVMTemplates(workflow)
+	if err != nil {
+		return service.KubeVirtResources{}, err
+	}
+	if !argoworkflow.DeclaresVMIResources(workflow) && len(kvm) == 0 {
+		// Even a zero-VM reservation must reject source changes introducing VMs
+		// between sizing and submission. Legacy callers without a durable binding
+		// keep their context-free behavior and cannot obtain run-aware credits.
+		if request.Run.ID == "" || sha == "" {
+			return service.KubeVirtResources{}, nil
+		}
+		receipt, err := resolved.Receipt(policy)
+		return service.KubeVirtResources{Receipt: receipt}, err
 	}
 	if jobs.kubeVirtGrants == nil {
 		return service.KubeVirtResources{}, fmt.Errorf("app: repository %s has no KubeVirt grant", request.Repository.Name)
@@ -43,11 +76,12 @@ func (jobs *ArgoJobs) PipelineKubeVirt(ctx context.Context, request service.JobR
 	if err := ceiling.Validate(); err != nil {
 		return service.KubeVirtResources{}, err
 	}
-	demand, err := argoworkflow.DeclaredVMIDemand(workflow)
+	policy.KubeVirt, policy.VMIBudget, policy.VMICeiling = true, grant, ceiling
+	receipt, err := resolved.Receipt(policy)
 	if err != nil {
 		return service.KubeVirtResources{}, err
 	}
-	resources := service.KubeVirtResources{Demand: demand, Limit: grant.Within(ceiling).DemandLimit()}
+	resources := service.KubeVirtResources{Demand: receipt.Summary().Demand, Limit: grant.Within(ceiling).DemandLimit(), Receipt: receipt}
 	return resources, resources.Validate()
 }
 

@@ -41,9 +41,10 @@ const (
 // Existing grants/defaults are unchanged; a running workflow retains its
 // admitted limit, just as it does after grant revocation today.
 type vmiQuotaBinding struct {
-	RepositoryID int64                  `json:"repository_id"`
-	Limit        argoworkflow.VMIDemand `json:"limit"`
-	Peak         argoworkflow.VMIDemand `json:"peak"`
+	RepositoryID int64                          `json:"repository_id"`
+	Limit        argoworkflow.VMIDemand         `json:"limit"`
+	Peak         argoworkflow.VMIDemand         `json:"peak"`
+	Receipt      *argoworkflow.VMIDemandSummary `json:"receipt,omitempty"`
 }
 
 type vmiClaim struct {
@@ -67,7 +68,7 @@ type vmiLedger struct {
 // Argo's resource create becomes a get in the submitted Pod. Only Oberth may
 // perform the actual create, after acquiring a persistent quota claim. The
 // launcher account has no create verb, so the Pod cannot bypass this decision.
-func projectVMICreateGuard(wf *wfv1.Workflow, config Config, request Request) error {
+func projectVMICreateGuard(wf *wfv1.Workflow, config Config, request Request, receipt *argoworkflow.VMIDemandReceipt) error {
 	if !argoworkflow.DeclaresVMIResources(wf) {
 		return nil
 	}
@@ -84,11 +85,11 @@ func projectVMICreateGuard(wf *wfv1.Workflow, config Config, request Request) er
 	if ceiling.IsZero() {
 		ceiling = argoworkflow.VMIBudgetLimit()
 	}
-	peak, err := argoworkflow.DeclaredVMIDemand(wf)
-	if err != nil {
-		return err
+	summary := receipt.Summary()
+	binding := vmiQuotaBinding{RepositoryID: request.RepositoryID, Limit: grant.Within(ceiling).DemandLimit(), Peak: summary.Demand}
+	if summary.Valid() {
+		binding.Receipt = &summary
 	}
-	binding := vmiQuotaBinding{request.RepositoryID, grant.Within(ceiling).DemandLimit(), peak}
 	encoded, err := json.Marshal(binding)
 	if err != nil {
 		return err

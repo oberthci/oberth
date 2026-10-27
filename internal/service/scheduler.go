@@ -686,7 +686,7 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 		scheduler.signals.NotifyRun(run.ID)
 		return nil
 	}
-	jobRequest := JobRequest{JobName: jobName, Run: run, Repository: repository, SourceDir: sourceDir}
+	jobRequest := JobRequest{JobName: jobName, Run: run, Repository: repository, SourceDir: sourceDir, UpstreamName: upstream.Name, UpstreamOrg: upstream.Org()}
 	size, err := scheduler.pipelineSize(ctx, jobRequest)
 	if err != nil {
 		_ = logFile.Close()
@@ -733,6 +733,7 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 		_ = logFile.Close()
 		return scheduler.finishInfrastructureFailure(ctx, run, repository, fmt.Errorf("read pipeline KubeVirt demand: %w", err))
 	}
+	jobRequest.VMIDemandReceipt = kubeVirt.Receipt
 	scheduler.admissionRequested(ctx, run.ID)
 	headSince, estimate := scheduler.admissionHistory(ctx, run)
 	releaseAdmission, err := reservation.acquireRequest(ctx, admissionRequest{
