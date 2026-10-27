@@ -133,8 +133,9 @@ ConfigMap with `helm.sh/resource-policy: keep`. Oberth initializes its data once
 with a resourceVersion check and a server-owned initialization marker. Helm
 never owns the mutable data or marker, so later upgrades/rollbacks cannot replay
 an empty reservation set. Missing or corrupt initialized data fails closed.
-Retain this ConfigMap across restarts and rollbacks: deleting it discards pending
-reservations.
+Retain this ConfigMap across restarts and rollbacks. Never use Helm
+`--force-replace` or delete `oberth-vmi-reservations`: replacing/deleting it
+loses pending reservation state.
 The server's separate Role grants VMI create/get and only fixed-name ledger
 get/update; it has no ConfigMap create permission. The frozen Argo Role stays
 unchanged. No hostPath, new Pod privilege or pipeline create permission is added.
@@ -156,7 +157,10 @@ after their resource Pod is gone.
 Pending claims carry their reservation time. When no matching live VMI exists,
 a pending claim closes once its resource Pod UID is absent from a complete API
 list **and** it is more than five minutes old, well beyond the bounded POST.
-This also heals a crash between reservation and POST. A missing timestamp starts
+This also heals a crash between reservation and POST. Reconciliation happens
+on the next reservation, not a background timer: after deleting a defunct
+Workflow and allowing its resource Pods to disappear, the next reservation
+reclaims dead claims once that five-minute margin has elapsed. A missing timestamp starts
 a fresh grace period; a recent claim, a still-present Pod or an incomplete list
 never earns an age-based refund. Timeout/NotFound alone never releases a slot.
 A canceled stale observer cannot send another POST, and a pruned operation must

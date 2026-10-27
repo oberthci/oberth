@@ -42,6 +42,22 @@ publish/apply operations. `--wait-idle` is advisory waiting, **not an admission
 freeze**. Keep submissions paused until checks finish so rollback need not lose
 post-backup runs or abandon already-published external changes.
 
+**Drain legacy resource-based VMI workflows before upgrading.** Finish them, or
+use the normal authorized Workflow cleanup path and allow resource Pods/owned
+VMIs to be garbage-collected. The new server refuses adoption without its quota
+binding. `--wait-idle` does not retrofit old Workflows. See the
+[VMI upgrade note](releases/v0.17.59-kubevirt.md).
+
+**Never use Helm `--force-replace` or delete the
+`oberth-vmi-reservations` ConfigMap.** Preserve that ledger across upgrade,
+rollback and troubleshooting; its mutable state is owned by Oberth, not replayed
+from chart defaults. Deleting/replacing it loses reservation state. After a
+defunct Workflow is deleted and its resource Pods disappear, dead pending claims
+are reclaimed on the next VMI reservation once the five-minute safety margin
+has elapsed. There is no background expiry job; a live matching VMI is adopted
+and remains charged. Claims without timestamps start a fresh margin when first
+reconciled. Do not reset the ledger to unblock capacity.
+
 With the old server still running, take an encrypted backup:
 
 ```sh
@@ -86,6 +102,9 @@ Disable later with `gitcache.shadow: false` in the values file and another
 upgrade. Do not use a zero mismatch count alone to approve go-git: inspect
 errors/skips and the attribute scope described in the release notes. The shadow
 CLI neutralizes system/HOME attributes; the served CLI retains its environment.
+Keep at least 24 hours of representative observations, including restarts and
+error/skip coverage, before a future cutover decision. No default switch or
+automatic promotion is part of this upgrade.
 
 ### Optional release WIF and tag routing
 
@@ -243,7 +262,12 @@ Before resuming normal submissions:
    stay null; old ambiguous zeros becoming null is expected. A child-written
    termination message remains intact and leaves usage unknown. Confirm the
    wrapped Pod retains workflow/parent scheduling selectors plus the server's
-   architecture. Counters are untrusted self-reports, never admission inputs.
+   architecture; confirm VMI create guarding still operates in mixed workflows.
+   Resource/ContainerSet executors and opaque entrypoints remain unknown.
+   Counters are untrusted self-reports, never admission inputs. The seeded
+   executable adds a per-run transfer/readback cost; use the
+   [shipped benchmark](step-resource-usage.md#seed-cost-measurement) on the actual
+   server network/storage if that cost matters for capacity planning.
 2. If shadow is enabled, use an unscoped administrator connection for
    `oberth status --json` (`/api/status`) and the existing authenticated
    `/metrics` scrape. Observe completed `shadow_runs`, errors/skips and both
@@ -260,6 +284,14 @@ Before resuming normal submissions:
    there (or in another route) must not acquire the routed step identity. Do not issue a
    publishing/apply tag just to test routing without its normal authorization.
 
+4. For KubeVirt installs, inspect the kept ledger and its retained resource UID
+   with `kubectl --context "$OBERTH_CONTEXT" -n "$OBERTH_ARGO_NAMESPACE" get
+   configmap oberth-vmi-reservations`. Test ordinary authorized VM work under its
+   existing grant: proven phases should reserve the peak and over-grant creates
+   must still refuse. Do not enlarge grants or delete/replace the ledger to
+   make this check pass. Clean up the test Workflow normally; dead claims are
+   reconciled by the next reservation after Pod cleanup and the safety margin.
+
 Resume external triggers and schedules only after these checks. Take a new
 post-upgrade backup for forward recovery, but retain the pre-upgrade archive
 and key: a v33 backup cannot be restored into the older v32 server.
@@ -270,7 +302,10 @@ Prefer fixing forward when possible. If rollback is necessary, pause all
 submissions/schedules and drain or explicitly account for active Workflows.
 A restore replaces history: runs and uplink changes after the snapshot are lost;
 external publishing/cloud changes are not undone. Do not fabricate a down
-migration, edit the migration ledger, or start an empty database.
+migration, edit the migration ledger, or start an empty database. Retain the
+VMI reservation ledger through Helm rollback and database restore; it is live
+cluster reservation state, not part of the SQLite schema rollback. Never add
+Helm `--force-replace` or delete that ConfigMap as a rollback workaround.
 
 Use the recorded healthy **pre-upgrade** Helm revision and backup, not the newest
 backup by filename. Keep the v0.17.59 CLI available for inspection/restore.
