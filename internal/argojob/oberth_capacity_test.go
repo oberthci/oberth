@@ -34,8 +34,18 @@ func TestOberthWorkflowCapacityAndSecurityOrdering(t *testing.T) {
 					scan = "release-scan"
 					guarded = map[string]bool{"release-lint": false, "release-chart-test": false, "release-verify-publisher-tools": false}
 				}
+				scanRequired := false
 				for _, task := range template.DAG.Tasks {
+					if task.Name == scan {
+						scanRequired = task.When == "" && task.ContinueOn == nil && task.Depends == map[string]string{
+							"build.yaml": "setup", "release.yaml": "release-setup",
+						}[name]
+					}
 					if _, ok := guarded[task.Name]; !ok {
+						continue
+					}
+					if name == "build.yaml" {
+						guarded[task.Name] = task.Depends == "setup"
 						continue
 					}
 					for _, dependency := range strings.Split(task.Depends, " && ") {
@@ -44,14 +54,18 @@ func TestOberthWorkflowCapacityAndSecurityOrdering(t *testing.T) {
 						}
 					}
 				}
+				if !scanRequired {
+					t.Fatal("the security scan must remain unconditional and enforcing after setup")
+				}
 				for task, present := range guarded {
 					if !present {
-						t.Errorf("%s must retain an enforcing dependency on %s", task, scan)
+						t.Errorf("%s has incorrect security ordering for %s", task, name)
 					}
 				}
 			}
-			// Bound the largest possible pair of main containers, not an
-			// average usage estimate or a promise about other workflows.
+			// This bounds only the declared main-container pair. Argo wait/init
+			// containers and Pod overhead are excluded; it is not a whole-Pod
+			// request or a guarantee of free node CPU for other workflows.
 			var largest, second int64
 			for _, request := range requests {
 				if request >= largest {

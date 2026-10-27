@@ -54,10 +54,9 @@
 # declares automountServiceAccountToken: false.
 # internal/argojob/oberth_pipeline_test.go checks the admitted Pods.
 #
-# After setup, security gates lint, OpenBao tests, diagnostics and publisher
-# verification. Shellcheck can run alongside security. Lint gates the remaining
-# tests and chart checks; those gate every build target. Workflow parallelism
-# bounds active Pods without changing any leaf's execution or resource budget.
+# After setup, security runs as a required parallel gate alongside lint and
+# independent checks. Serializing it ahead of branch tests can exhaust the
+# existing 3600-second budget. Workflow parallelism still bounds active Pods.
 apiVersion: argoproj.io/v1alpha1
 kind: Workflow
 metadata:
@@ -88,7 +87,7 @@ spec:
         template: setup
       - name: lint
         template: lint
-        depends: setup && security
+        depends: setup
       - name: test-store
         template: test-store
         depends: lint
@@ -106,7 +105,7 @@ spec:
         depends: lint
       - name: test-openbao
         template: test-openbao
-        depends: setup && security
+        depends: setup
       - name: security
         template: security
         depends: setup
@@ -118,10 +117,10 @@ spec:
         depends: lint
       - name: release-diagnostic
         template: release-diagnostic
-        depends: setup && security
+        depends: setup
       - name: verify-publisher-tools
         template: verify-publisher-tools
-        depends: setup && security
+        depends: setup
       - name: build-amd64
         template: build-amd64
         depends: "test-store && test-service && test-rest && test-gitcache-backends && test-archive-history && chart"
