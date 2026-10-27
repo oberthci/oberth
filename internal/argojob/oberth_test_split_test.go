@@ -144,7 +144,7 @@ func TestOberthSplitBurnsUseTheRaceGroupLauncher(t *testing.T) {
 			}
 			found = true
 			container := template.Container
-			if container == nil || !reflect.DeepEqual(container.Command, []string{"/usr/bin/python3"}) || !reflect.DeepEqual(container.Args, []string{"-I", "-S", "-B", ".oberth/test-packages.py", group}) {
+			if container == nil || !reflect.DeepEqual(usageOriginalCommand(container.Command), []string{"/usr/bin/python3"}) || !reflect.DeepEqual(container.Args, []string{"-I", "-S", "-B", ".oberth/test-packages.py", group}) {
 				t.Fatalf("%s does not invoke its race group", template.Name)
 			}
 			var cgo, procs string

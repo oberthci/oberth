@@ -222,7 +222,7 @@ func TestRepositoryArchiveMigrationPreservesV28HistoryAndLedger(t *testing.T) {
 		t.Fatal(err)
 	}
 	// v30 (#1128) stacks after v29: a real v28 database has neither.
-	if _, err := raw.ExecContext(ctx, `ALTER TABLE schedule_fires DROP COLUMN last_fired_at; DELETE FROM schema_migrations WHERE version=32; DROP TRIGGER run_schedule_entry_immutable; ALTER TABLE runs DROP COLUMN schedule_entry; DELETE FROM schema_migrations WHERE version=31; DROP TRIGGER run_timing_claim; DROP TRIGGER run_timing_grant; DROP TRIGGER run_timing_park; DROP TRIGGER run_timing_terminal; DROP TABLE step_timings; DROP TABLE run_admission_timings; DROP TABLE run_timings;
+	if _, err := raw.ExecContext(ctx, `ALTER TABLE step_results DROP COLUMN memory_peak_bytes; DELETE FROM schema_migrations WHERE version=33; ALTER TABLE schedule_fires DROP COLUMN last_fired_at; DELETE FROM schema_migrations WHERE version=32; DROP TRIGGER run_schedule_entry_immutable; ALTER TABLE runs DROP COLUMN schedule_entry; DELETE FROM schema_migrations WHERE version=31; DROP TRIGGER run_timing_claim; DROP TRIGGER run_timing_grant; DROP TRIGGER run_timing_park; DROP TRIGGER run_timing_terminal; DROP TABLE step_timings; DROP TABLE run_admission_timings; DROP TABLE run_timings;
 DROP INDEX repository_archive_actions_idx;
 DELETE FROM schema_migrations WHERE version >= ?`, repositoryArchiveMigrationVersion); err != nil {
 		t.Fatal(err)

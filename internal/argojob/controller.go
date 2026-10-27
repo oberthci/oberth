@@ -208,16 +208,15 @@ func (controller *Controller) Create(ctx context.Context, request Request) (name
 	// source in place (finding 2, issue #29).
 	existing, getErr := controller.workflows.Get(ctx, request.Name, metav1.GetOptions{})
 	if getErr == nil {
+		request.omitStepUsage = !workflowHasStepUsage(existing)
 		request, err = controller.refreshNonroot(ctx, request)
 		if err != nil {
 			return "", err
 		}
-		if request.nonrootProof != nil {
-			request.SourceVolume = controller.nonrootExpectedSource(request)
-		}
-		// Build the intended spec so we can compare identity digests.
-		// Use a zero SourceVolume; identity comparison excludes the
-		// source claim name from the digest.
+		request.SourceVolume = controller.expectedSourceVolume(request)
+		// Reconstruct the original delivery footprint without reseeding. Legacy
+		// workflows keep their unwrapped command; measured workflows retain the
+		// same helper, including the exact nonroot executor mirror policy.
 		intended, buildErr := Build(controller.config, request)
 		if buildErr != nil {
 			return "", buildErr
@@ -243,7 +242,7 @@ func (controller *Controller) Create(ctx context.Context, request Request) (name
 		return "", err
 	}
 	controller.timingMilestone(ctx, request.RunID, "source-seed-started")
-	volume, err := controller.seeder.Seed(ctx, request.Name, request.SourceDir, credentialed)
+	volume, err := controller.seeder.seed(ctx, request.Name, request.SourceDir, credentialed, request.TrustedKVM == nil)
 	if err != nil {
 		return "", err
 	}
@@ -1132,6 +1131,7 @@ func normalizeSourceVolume(workflow *wfv1.Workflow) {
 		return kept
 	}
 	normalizeContainer := func(c *corev1.Container) {
+		c.Command = usageOriginalCommand(c.Command)
 		c.VolumeMounts = removeMounts(c.VolumeMounts)
 		c.Env = removeVaultCACertEnv(c.Env)
 	}

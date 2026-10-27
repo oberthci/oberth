@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"k8s.io/utils/ptr"
+
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/testdb"
 )
@@ -879,20 +881,20 @@ func TestStepResultsRetainLogByteOffsets(t *testing.T) {
 	result, err := s.PutStepResult(context.Background(), model.StepResult{
 		RunID: run.ID, Burn: "test", Step: "unit", Ordinal: 2,
 		Status: model.StepTimedOut, ExitCode: -1, LogStart: 128, LogEnd: 4096,
-		DeclaredSize: "L", MaxRSSBytes: 64 << 20, UserCPU: 1250 * time.Millisecond, SystemCPU: 250 * time.Millisecond,
+		DeclaredSize: "L", MaxRSSBytes: ptr.To(int64(64 << 20)), UserCPU: ptr.To(1250 * time.Millisecond), SystemCPU: ptr.To(250 * time.Millisecond),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if result.LogStart != 128 || result.LogEnd != 4096 || result.DeclaredSize != "L" ||
-		result.MaxRSSBytes != 64<<20 || result.UserCPU != 1250*time.Millisecond ||
-		result.SystemCPU != 250*time.Millisecond || result.RecordedAt.IsZero() {
+		*result.MaxRSSBytes != 64<<20 || *result.UserCPU != 1250*time.Millisecond ||
+		*result.SystemCPU != 250*time.Millisecond || result.RecordedAt.IsZero() {
 		t.Fatalf("step result = %#v", result)
 	}
 	steps, err := s.StepResults(context.Background(), run.ID)
 	if err != nil || len(steps) != 1 || steps[0].Step != "unit" || steps[0].Status != model.StepTimedOut ||
-		steps[0].DeclaredSize != "L" || steps[0].MaxRSSBytes != 64<<20 ||
-		steps[0].UserCPU != 1250*time.Millisecond || steps[0].SystemCPU != 250*time.Millisecond {
+		steps[0].DeclaredSize != "L" || *steps[0].MaxRSSBytes != 64<<20 ||
+		*steps[0].UserCPU != 1250*time.Millisecond || *steps[0].SystemCPU != 250*time.Millisecond {
 		t.Fatalf("steps = %#v, %v", steps, err)
 	}
 }

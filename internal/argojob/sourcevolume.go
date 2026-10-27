@@ -114,9 +114,9 @@ type SourceVolume struct {
 	ArtifactsSubPath string
 	// BinarySubPath is the directory inside the claim holding the Oberth
 	// server binary, and is empty unless this run's seeding actually wrote
-	// it. When set, Build mounts it read-only into credentialed containers
-	// so pipeline steps can invoke `oberth secretstore exec` without fetching
-	// the binary from a registry or baking it into an image.
+	// it. Build mounts it read-only for resource measurement and, in credentialed
+	// containers, for `oberth secretstore exec`. Neither use fetches a binary
+	// from a registry or requires baking it into a pipeline image.
 	BinarySubPath string
 	// GoProxyCASubPath is the path inside the claim holding the Go module
 	// proxy CA certificate, and is empty unless this run's seeding actually
@@ -153,13 +153,18 @@ func NewSourceSeeder(client kubernetes.Interface, exec ExecStreamer, config Conf
 }
 
 // Seed creates the run's claim and fills it with the checkout at sourceDir,
-// and for credentialed runs with the OpenBao TLS trust anchor beside it.
+// including the verified resource-measurement binary, and for credentialed
+// runs the OpenBao TLS trust anchor beside it.
 //
 // On any failure the claim is removed, so a failed submission does not leave
 // storage behind in the pipeline namespace.
 func (seeder *SourceSeeder) Seed(
 	ctx context.Context, workflowName, sourceDir string, credentialed bool,
 ) (SourceVolume, error) {
+	return seeder.seed(ctx, workflowName, sourceDir, credentialed, true)
+}
+
+func (seeder *SourceSeeder) seed(ctx context.Context, workflowName, sourceDir string, credentialed, measure bool) (SourceVolume, error) {
 	volume := SourceVolume{ClaimName: sourceClaimName(workflowName), SubPath: "src"}
 	if strings.TrimSpace(sourceDir) == "" {
 		return SourceVolume{}, errors.New("argojob: a source checkout directory is required")
@@ -180,7 +185,7 @@ func (seeder *SourceSeeder) Seed(
 	if err := seeder.createClaim(ctx, volume.ClaimName, workflowName); err != nil {
 		return SourceVolume{}, err
 	}
-	if err := seeder.fill(ctx, &volume, sourceDir, credentialed); err != nil {
+	if err := seeder.fill(ctx, &volume, sourceDir, credentialed, measure); err != nil {
 		seeder.DeleteClaim(context.WithoutCancel(ctx), volume.ClaimName)
 		return SourceVolume{}, err
 	}
@@ -227,7 +232,7 @@ func (seeder *SourceSeeder) createClaim(ctx context.Context, name, workflowName 
 // the claim itself; its whole job is to be a filesystem the exec stream can
 // write to.
 func (seeder *SourceSeeder) fill(
-	ctx context.Context, volume *SourceVolume, sourceDir string, credentialed bool,
+	ctx context.Context, volume *SourceVolume, sourceDir string, credentialed, measure bool,
 ) error {
 	podName := volume.ClaimName
 	if err := seeder.createSeedPod(ctx, podName, volume.ClaimName); err != nil {
@@ -267,7 +272,10 @@ func (seeder *SourceSeeder) fill(
 	if err := seeder.fillGoProxyCA(ctx, volume, podName); err != nil {
 		return err
 	}
-	return seeder.fillServerBinary(ctx, volume, podName, credentialed)
+	if credentialed || measure {
+		return seeder.fillServerBinary(ctx, volume, podName)
+	}
+	return nil
 }
 
 // fillVaultCA streams the OpenBao TLS trust anchor into the same claim, over
@@ -345,18 +353,14 @@ func (seeder *SourceSeeder) fillGoProxyCA(
 
 // fillServerBinary streams the running server's own binary into the claim so
 // pipeline containers can invoke `oberth secretstore exec` without fetching
-// it from a registry. Only credentialed runs receive it, because only they
-// need the credential chain; non-credentialed runs have no secret store paths
-// and no token.
+// it from a registry. Ordinary source-backed runs receive the read-only binary for
+// resource measurement; this delivers no credentials or ServiceAccount token.
 //
 // The binary is verified by SHA-256 readback: the digest is computed during
 // the stream and compared against sha256sum run inside the seed pod.
 func (seeder *SourceSeeder) fillServerBinary(
-	ctx context.Context, volume *SourceVolume, podName string, credentialed bool,
+	ctx context.Context, volume *SourceVolume, podName string,
 ) error {
-	if !credentialed {
-		return nil
-	}
 	executablePath, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("argojob: resolve server executable path: %w", err)

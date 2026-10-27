@@ -790,6 +790,10 @@ func (jobs *ArgoJobs) result(completion argojob.Completion) service.JobResult {
 			Burn: step.Burn, Step: step.Step, Ordinal: step.Ordinal, Termination: step.Termination,
 			Status: model.StepStatus(step.Status), ExitCode: step.ExitCode,
 			StartedAt: step.StartedAt, FinishedAt: step.FinishedAt,
+			MaxRSSBytes:     step.Usage.MaxRSSBytes,
+			MemoryPeakBytes: step.Usage.MemoryPeakBytes,
+			UserCPU:         step.Usage.UserCPU,
+			SystemCPU:       step.Usage.SystemCPU,
 		})
 	}
 	if completion.FailedStep != "" {

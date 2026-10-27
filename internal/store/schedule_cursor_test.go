@@ -16,7 +16,7 @@ func TestScheduleCursorMigrationBackfillsWithoutChangingLatestOutcomes(t *testin
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = s.Close() })
-	if _, err := s.db.Exec(`ALTER TABLE schedule_fires DROP COLUMN last_fired_at`); err != nil {
+	if _, err := s.db.Exec(`ALTER TABLE step_results DROP COLUMN memory_peak_bytes; DELETE FROM schema_migrations WHERE version=33; ALTER TABLE schedule_fires DROP COLUMN last_fired_at`); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.db.Exec(`DELETE FROM schema_migrations WHERE version=?`, scheduleCursorMigrationVersion); err != nil {

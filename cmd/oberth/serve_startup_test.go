@@ -13,6 +13,8 @@ import (
 	"testing"
 	"time"
 
+	"k8s.io/utils/ptr"
+
 	"github.com/oberthci/oberth/internal/auditanchor"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
@@ -588,7 +590,7 @@ func seedPreviousV2Database(t *testing.T, path string) (model.AuditHead, string)
 	if _, err := database.PutStepResult(ctx, model.StepResult{
 		RunID: run.ID, Burn: "test", Step: "unit", Ordinal: 0,
 		Status: model.StepPassed, ExitCode: 0, LogStart: 10, LogEnd: 20,
-		DeclaredSize: "XL", MaxRSSBytes: 8192 << 10, UserCPU: 100 * time.Millisecond, SystemCPU: 25 * time.Millisecond,
+		DeclaredSize: "XL", MaxRSSBytes: ptr.To(int64(8192 << 10)), UserCPU: ptr.To(100 * time.Millisecond), SystemCPU: ptr.To(25 * time.Millisecond),
 	}); err != nil {
 		_ = database.Close()
 		t.Fatal(err)
@@ -629,7 +631,7 @@ ALTER TABLE step_results DROP COLUMN max_rss_bytes;
 ALTER TABLE step_results DROP COLUMN declared_size;
 ALTER TABLE uplinks DROP COLUMN admin;
 ALTER TABLE upstreams DROP COLUMN key_name;
-ALTER TABLE schedule_fires DROP COLUMN last_fired_at; DELETE FROM schema_migrations WHERE version=32; DROP TRIGGER run_schedule_entry_immutable;
+ALTER TABLE step_results DROP COLUMN memory_peak_bytes; DELETE FROM schema_migrations WHERE version=33; ALTER TABLE schedule_fires DROP COLUMN last_fired_at; DELETE FROM schema_migrations WHERE version=32; DROP TRIGGER run_schedule_entry_immutable;
 ALTER TABLE runs DROP COLUMN schedule_entry;
 DELETE FROM schema_migrations WHERE version=31;
 DROP TRIGGER run_timing_claim; DROP TRIGGER run_timing_grant; DROP TRIGGER run_timing_park; DROP TRIGGER run_timing_terminal; DROP TABLE step_timings; DROP TABLE run_admission_timings; DROP TABLE run_timings; DROP INDEX runs_admission_idx;
@@ -849,7 +851,7 @@ DROP INDEX uplinks_token_credential_idx;
 DROP TABLE uplinks;
 ALTER TABLE uplinks_v1 RENAME TO uplinks;
 CREATE UNIQUE INDEX uplinks_token_credential_idx ON uplinks(token_credential_id);
-ALTER TABLE schedule_fires DROP COLUMN last_fired_at; DELETE FROM schema_migrations WHERE version=32; DROP TRIGGER run_schedule_entry_immutable;
+DELETE FROM schema_migrations WHERE version=33; ALTER TABLE schedule_fires DROP COLUMN last_fired_at; DELETE FROM schema_migrations WHERE version=32; DROP TRIGGER run_schedule_entry_immutable;
 ALTER TABLE runs DROP COLUMN schedule_entry;
 DELETE FROM schema_migrations WHERE version=31;
 DROP TRIGGER run_timing_claim; DROP TRIGGER run_timing_grant; DROP TRIGGER run_timing_park; DROP TRIGGER run_timing_terminal; DROP TABLE step_timings; DROP TABLE run_admission_timings; DROP TABLE run_timings; DROP INDEX runs_admission_idx;

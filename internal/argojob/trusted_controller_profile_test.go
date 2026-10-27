@@ -98,13 +98,11 @@ func TestTrustedOnlyRefreshRejectsControllerChangeBeforeSeedCreateOrAdoption(t *
 				t.Fatal(err)
 			}
 			seeds := 0
-			controller.WithSourceSeeder(NewSourceSeeder(client, func(_ context.Context, _, _, _ string, _ []string, in io.Reader, _, _ io.Writer) error {
+			var seedRecords []seedExecCall
+			seedExec := recordingExec(&seedRecords)
+			controller.WithSourceSeeder(NewSourceSeeder(client, func(ctx context.Context, ns, pod, container string, command []string, input io.Reader, stdout, stderr io.Writer) error {
 				seeds++
-				if in != nil {
-					_, err := io.Copy(io.Discard, in)
-					return err
-				}
-				return nil
+				return seedExec(ctx, ns, pod, container, command, input, stdout, stderr)
 			}, config))
 			_, createErr := controller.Create(t.Context(), request)
 			if reads != failAt || createErr == nil || !strings.Contains(createErr.Error(), "nonroot controller identity changed after the submission binding was prepared") {

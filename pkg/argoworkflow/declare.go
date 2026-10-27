@@ -159,6 +159,7 @@ func DeclaredSecretPaths(workflow *wfv1.Workflow) ([]string, error) {
 // login token.
 func UsesEnvconsul(template *wfv1.Template) bool {
 	isEnvconsul := func(command []string) bool {
+		command = resourceUsageCommand(command)
 		return len(command) > 0 &&
 			(strings.HasSuffix(command[0], "/envconsul") || command[0] == "envconsul")
 	}
@@ -177,6 +178,7 @@ func UsesEnvconsul(template *wfv1.Template) bool {
 // stripping, and redaction in a single binary.
 func UsesOberthSecretstore(template *wfv1.Template) bool {
 	isOberthSecretstore := func(command, args []string) bool {
+		command = resourceUsageCommand(command)
 		if len(command) == 0 {
 			return false
 		}
@@ -259,4 +261,13 @@ func AuthorizeSecretPaths(paths []string, systemAllowlist []string, trigger peri
 		}
 	}
 	return errors.Join(problems...)
+}
+
+// Resource measurement is outside the credential chain in admitted specs.
+// Keep static plans and post-admission credential classification identical.
+func resourceUsageCommand(command []string) []string {
+	if len(command) > 3 && command[0] == "/run/oberth/usage/oberth" && command[1] == "internal-step-exec" && command[2] == "--" {
+		return command[3:]
+	}
+	return command
 }

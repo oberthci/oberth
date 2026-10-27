@@ -3,7 +3,6 @@ package argojob
 import (
 	"context"
 	"errors"
-	"io"
 	"testing"
 	"time"
 
@@ -132,10 +131,8 @@ func TestTrustedKVMExplicitPOSTRefusalOnly(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			controller.WithSourceSeeder(NewSourceSeeder(kube, func(_ context.Context, _, _, _ string, _ []string, in io.Reader, _, _ io.Writer) error {
-				_, e := io.Copy(io.Discard, in)
-				return e
-			}, config))
+			var seedRecords []seedExecCall
+			controller.WithSourceSeeder(NewSourceSeeder(kube, recordingExec(&seedRecords), config))
 			_, err = controller.Create(context.Background(), request)
 			if !workflows.attempted || errors.Is(err, ErrTrustedKVMCreateRefused) != test.definite {
 				t.Fatalf("POST classification attempted=%v definite=%v err=%v", workflows.attempted, test.definite, err)

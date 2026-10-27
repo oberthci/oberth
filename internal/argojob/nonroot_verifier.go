@@ -100,9 +100,15 @@ func (controller *Controller) refreshNonroot(ctx context.Context, request Reques
 	return controller.PrepareNonroot(ctx, request)
 }
 
-func (controller *Controller) nonrootExpectedSource(request Request) SourceVolume {
+func (controller *Controller) expectedSourceVolume(request Request) SourceVolume {
 	volume := SourceVolume{ClaimName: sourceClaimName(request.Name), SubPath: "src", ArtifactsSubPath: artifactsSubPath}
-	if request.Trigger == periapsis.TriggerRelease {
+	if request.TrustedKVM == nil && !request.omitStepUsage {
+		volume.BinarySubPath = binarySubPath
+	}
+	if controller.config.GoProxyCACertPEM != "" {
+		volume.GoProxyCASubPath = goProxyCASubPath + "/" + goProxyCACertFile
+	}
+	if request.Trigger == periapsis.TriggerRelease || pipelineDeclaresSecretPaths(request.Source) {
 		volume.BinarySubPath = binarySubPath
 		if controller.config.VaultCACertPEM != "" {
 			volume.VaultCASubPath = vaultCASubPath

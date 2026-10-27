@@ -594,7 +594,7 @@ continuity checks; it must never be used to reset or bypass those checks.
   (`S`, `M`, `L`, `XL`). Like the secret declarations, it is statically
   parsed, never evaluated; computed keys or values are rejected. An absent
   declaration or trigger key selects `M`. Per-step `WithSize` remains runtime
-  step metadata inside the Job (rusage markers, per-step telemetry) and does
+  step metadata inside the Job (usage summaries, per-step telemetry) and does
   not set the Job's resources.
 - A repository that declares trusted infrastructure work must provide one
   `Plan` burn and one `Apply` burn with the same literal `.Backend("...")`, plus
@@ -1156,13 +1156,25 @@ continuity checks; it must never be used to reset or bypass those checks.
   plan one set of names and record another. Constructs whose step count is a
   runtime property (`withItems`, `withParam`, `withSequence`) are deliberately
   left out of the plan rather than given a fabricated count.
-- Per-step declared size and measured resource usage never widen the binding
-  array: the runner emits one `oberth-step-rusage {json}` marker line per
-  step into the retained run log (`max_rss_bytes`, `user_cpu_ns`,
-  `system_cpu_ns`, and optional `declared_size`), and the server enriches the
-  durable step record from the final marker at persist time. Marker decoding
-  is advisory — a malformed record defaults the step to size `M` with zero
-  usage.
+- Step resource measurements never widen admission. Source-backed single-main
+  container/script leaves with explicit commands run through the read-only
+  server-delivered `oberth internal-step-exec` wrapper. It forwards signals,
+  preserves streams/exit codes, and writes a bounded, numeric-only v1 summary
+  to the kubelet termination file. No new RBAC, hostPath, capabilities or
+  writable root is required. The server reads it from the already-bound final
+  Pod/main container status, never logs or LastTerminationState. This is advisory
+  build-owned telemetry, not trusted diagnostic or admission evidence.
+  `MaxRSSBytes` is Linux wait4 maximum descendant RSS (not concurrent summed
+  RSS); `MemoryPeakBytes` is this container's cgroup-v2 `memory.peak`, including
+  cache. `UserCPU`/`SystemCPU` are cumulative container CPU from `cpu.stat`,
+  including executor/wrapper overhead, stored/API-encoded as duration nanoseconds
+  (divide by 1e9 for seconds). Missing counters remain independent nulls, including
+  on cgroup v1, OOM/deadline kills that prevent reporting, missing Pods, skipped
+  steps, resource/ContainerSet templates, protected KVM workflows, image-only ENTRYPOINTs,
+  custom termination-file paths or old workflows.
+  No host-level aggregate fallback or deadline widening is allowed. Schema v33
+  migrates each ambiguous legacy zero counter to NULL independently; positive
+  legacy counters survive. Only newly collected summaries can establish zero.
 - Retained output is prefixed by burn and step, redacted before disk for
   streams the oberth credential chain (exec or materialize) wraps, indexed by
   byte range, and served only through bounded reads. Retained logs are bounded
@@ -2431,6 +2443,7 @@ alone is never evidence that missing migrations ran.
 | v30 | Unreleased (#1128) | Versioned immutable run milestones, admission episodes, expanded task identity and bounded step timing | Database restore |
 | v31 | Unreleased (schedule entry identity) | runs: immutable schedule_entry, empty for legacy rows; named schedule queue isolation | Database restore |
 | v32 | Unreleased (#1190) | schedule_fires: durable successful-fire cursor, pending first-fire catch-up; latest outcome/time retained | Database restore |
+| v33 | Unreleased (step resource usage) | Nullable RSS/CPU, container memory peak; ambiguous legacy zero counters become NULL | Database restore |
 
 **Contract test:** `TestEveryMigrationDocumentedInAgentContract` asserts that
 every migration version in `internal/store/schema.go` has a corresponding

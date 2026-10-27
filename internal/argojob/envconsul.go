@@ -284,10 +284,10 @@ func allowedStoreSpellings(declaredPaths []string) map[string]string {
 // key off.
 func templateInvocation(template *wfv1.Template) (command, args []string) {
 	if template.Container != nil {
-		return template.Container.Command, template.Container.Args
+		return usageOriginalCommand(template.Container.Command), template.Container.Args
 	}
 	if template.Script != nil {
-		return template.Script.Command, template.Script.Args
+		return usageOriginalCommand(template.Script.Command), template.Script.Args
 	}
 	return nil, nil
 }

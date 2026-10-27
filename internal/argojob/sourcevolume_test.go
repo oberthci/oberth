@@ -110,12 +110,21 @@ func TestSeedStreamsTheCheckoutIntoThePipelineNamespace(t *testing.T) {
 	var streamed bytes.Buffer
 	var execNamespace, execPod string
 	var execCommand []string
+	var seedRecords []seedExecCall
+	seedExec := recordingExec(&seedRecords)
 	exec := func(_ context.Context, namespace, pod, _ string, command []string,
-		stdin io.Reader, _, _ io.Writer,
+		stdin io.Reader, stdout, stderr io.Writer,
 	) error {
-		execNamespace, execPod, execCommand = namespace, pod, command
-		_, err := io.Copy(&streamed, stdin)
-		return err
+		if strings.Contains(strings.Join(command, " "), "tar -xzf -") {
+			execNamespace, execPod, execCommand = namespace, pod, command
+			raw, err := io.ReadAll(stdin)
+			if err != nil {
+				return err
+			}
+			streamed.Write(raw)
+			stdin = bytes.NewReader(raw)
+		}
+		return seedExec(context.Background(), namespace, pod, seedContainer, command, stdin, stdout, stderr)
 	}
 
 	config := seedTestConfig()
@@ -195,9 +204,8 @@ func TestSeedPodHoldsNoServiceAccountToken(t *testing.T) {
 		return false, nil, nil
 	})
 
-	seeder := NewSourceSeeder(client, func(context.Context, string, string, string, []string, io.Reader, io.Writer, io.Writer) error {
-		return nil
-	}, seedTestConfig())
+	var seedRecords []seedExecCall
+	seeder := NewSourceSeeder(client, recordingExec(&seedRecords), seedTestConfig())
 	if _, err := seeder.Seed(context.Background(), "oberth-oberth-abc-def", writeCheckout(t), false); err != nil {
 		t.Fatal(err)
 	}
@@ -487,8 +495,8 @@ func TestSeedWithholdsTheVaultTrustAnchorFromTheCITier(t *testing.T) {
 	if volume.VaultCASubPath != "" {
 		t.Fatalf("a CI run was given a trust anchor at %q", volume.VaultCASubPath)
 	}
-	if len(calls) != 1 {
-		t.Fatalf("expected only the checkout to be streamed, got %d execs", len(calls))
+	if len(calls) != 3 || volume.BinarySubPath == "" {
+		t.Fatalf("expected checkout and verified measurement binary, got %d execs", len(calls))
 	}
 }
 

@@ -13,12 +13,14 @@ import (
 
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/runprogress"
+	"github.com/oberthci/oberth/internal/stepusage"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 )
 
 // StepResult is one executed pipeline step, in Oberth's vocabulary rather than
 // Argo's. The engine derives it from the Workflow's node tree.
 type StepResult struct {
+	Usage                stepusage.Usage
 	Timing               *model.StepTiming
 	NodeID               string
 	AttemptAmbiguous     bool

@@ -550,6 +550,8 @@ func vaultAddressRequiresPinnedAnchor(address string) bool {
 
 // Request is one run's submission intent.
 type Request struct {
+	// omitStepUsage preserves already-running legacy specs during recovery.
+	omitStepUsage   bool
 	KubeVirtGranted bool
 	// KubeVirtBudget is the repository grant's VMI budget; zero
 	// selects the default. Config.KubeVirtCeiling caps it.
@@ -789,6 +791,7 @@ func Build(config Config, request Request) (*wfv1.Workflow, error) {
 	applyServerBounds(workflow, config)
 	applyServerSecurity(workflow)
 	injectServerVolumes(workflow, config, request, credentialed)
+	injectStepUsageMounts(workflow, request)
 	injectWorkspaceEnvironment(workflow)
 	injectRunEnvironment(workflow, config, request, credentialed)
 	// Per-step identity override (issue #623): for release templates consuming
@@ -847,7 +850,7 @@ func Build(config Config, request Request) (*wfv1.Workflow, error) {
 	if err := projectVMICreateGuard(workflow, config, request); err != nil {
 		return nil, err
 	}
-
+	wrapStepUsage(workflow)
 	digest, err := specIdentity(workflow)
 	if err != nil {
 		return nil, err
@@ -1846,6 +1849,7 @@ func ExtractExecPaths(template *wfv1.Template) []string {
 // invocation in a template's container command+args.
 func extractExecPaths(template *wfv1.Template) []string {
 	extract := func(command, args []string) []string {
+		command = usageOriginalCommand(command)
 		// Combine command and args into one slice for scanning.
 		all := append(command, args...)
 		var paths []string

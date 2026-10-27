@@ -19,7 +19,7 @@
       "oberth.ci/run-id": "run-abc123",
       "oberth.ci/secret-paths": "oberth/data/release/r2-upload-token",
       "oberth.ci/size": "L",
-      "oberth.ci/spec-identity": "186319e07835ce191056f98ce4ab7cf5cbc4592b6ddd39c5328a1b7e5241d6b5",
+      "oberth.ci/spec-identity": "c61c3c72ab10324520b3bc7df6fd4d900ed73b44653f0cf4f9df69b038c0c7cd",
       "workflows.argoproj.io/pod-name-format": "v2"
     }
   },
@@ -48,6 +48,9 @@
                   "name": "",
                   "image": "golang:1.26-alpine@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
                   "command": [
+                    "/run/oberth/usage/oberth",
+                    "internal-step-exec",
+                    "--",
                     "/bin/true"
                   ],
                   "env": [
@@ -148,6 +151,12 @@
                       "readOnly": true,
                       "mountPath": "/tmp/oberth-release",
                       "subPath": "release"
+                    },
+                    {
+                      "name": "oberth-source",
+                      "readOnly": true,
+                      "mountPath": "/run/oberth/usage",
+                      "subPath": "bin"
                     }
                   ],
                   "securityContext": {
@@ -162,7 +171,7 @@
                 },
                 "serviceAccountName": "oberth-argo-credentialed",
                 "automountServiceAccountToken": false,
-                "podSpecPatch": "{\"$setElementOrder/initContainers\":[{\"name\":\"oberth-executor-token\"},{\"name\":\"init\"}],\"containers\":[{\"name\":\"wait\",\"volumeMounts\":[{\"mountPath\":\"/mainctrfs/tools-alias\",\"name\":\"work\",\"readOnly\":true,\"subPath\":\"tools/bin\"},{\"mountPath\":\"/mainctrfs/workspace-parent\",\"name\":\"work\",\"readOnly\":true},{\"mountPath\":\"/mainctrfs/work/src\",\"name\":\"oberth-source\",\"readOnly\":true,\"subPath\":\"source\"},{\"mountPath\":\"/mainctrfs/tmp/oberth-tools\",\"name\":\"work\",\"readOnly\":true,\"subPath\":\"tools\"},{\"mountPath\":\"/mainctrfs/cache/gomod\",\"name\":\"work\",\"readOnly\":true,\"subPath\":\"gomod\"},{\"mountPath\":\"/mainctrfs/cache/gobuild\",\"name\":\"work\",\"readOnly\":true,\"subPath\":\"gobuild\"},{\"mountPath\":\"/mainctrfs/tmp/oberth-trivy\",\"name\":\"work\",\"readOnly\":true,\"subPath\":\"trivy-cache\"},{\"mountPath\":\"/mainctrfs/tmp/oberth-release\",\"name\":\"work\",\"readOnly\":true,\"subPath\":\"release\"}]}],\"initContainers\":[{\"name\":\"oberth-executor-token\",\"image\":\"busybox:1.37@sha256:ab33eacc8251e3807b85bb6dba570e4698c3998eca6f0fc2ccb60575a563ea74\",\"command\":[\"sh\",\"-c\",\"until test -f /var/run/secrets/kubernetes.io/serviceaccount/token; do sleep 1; done\"],\"resources\":{},\"volumeMounts\":[{\"name\":\"exec-sa-token\",\"mountPath\":\"/var/run/secrets/kubernetes.io/serviceaccount\"}],\"securityContext\":{\"capabilities\":{\"drop\":[\"ALL\"]},\"runAsUser\":0,\"runAsGroup\":0,\"runAsNonRoot\":false,\"readOnlyRootFilesystem\":true,\"allowPrivilegeEscalation\":false,\"seccompProfile\":{\"type\":\"RuntimeDefault\"}}},{\"name\":\"init\"}],\"volumes\":[{\"emptyDir\":{\"medium\":\"Memory\",\"sizeLimit\":\"1Mi\"},\"name\":\"exec-sa-token\",\"secret\":null}]}"
+                "podSpecPatch": "{\"$setElementOrder/initContainers\":[{\"name\":\"oberth-executor-token\"},{\"name\":\"init\"}],\"containers\":[{\"name\":\"wait\",\"volumeMounts\":[{\"mountPath\":\"/mainctrfs/tools-alias\",\"name\":\"work\",\"readOnly\":true,\"subPath\":\"tools/bin\"},{\"mountPath\":\"/mainctrfs/workspace-parent\",\"name\":\"work\",\"readOnly\":true},{\"mountPath\":\"/mainctrfs/work/src\",\"name\":\"oberth-source\",\"readOnly\":true,\"subPath\":\"source\"},{\"mountPath\":\"/mainctrfs/tmp/oberth-tools\",\"name\":\"work\",\"readOnly\":true,\"subPath\":\"tools\"},{\"mountPath\":\"/mainctrfs/cache/gomod\",\"name\":\"work\",\"readOnly\":true,\"subPath\":\"gomod\"},{\"mountPath\":\"/mainctrfs/cache/gobuild\",\"name\":\"work\",\"readOnly\":true,\"subPath\":\"gobuild\"},{\"mountPath\":\"/mainctrfs/tmp/oberth-trivy\",\"name\":\"work\",\"readOnly\":true,\"subPath\":\"trivy-cache\"},{\"mountPath\":\"/mainctrfs/tmp/oberth-release\",\"name\":\"work\",\"readOnly\":true,\"subPath\":\"release\"},{\"mountPath\":\"/mainctrfs/run/oberth/usage\",\"name\":\"oberth-source\",\"readOnly\":true,\"subPath\":\"bin\"}]}],\"initContainers\":[{\"name\":\"oberth-executor-token\",\"image\":\"busybox:1.37@sha256:ab33eacc8251e3807b85bb6dba570e4698c3998eca6f0fc2ccb60575a563ea74\",\"command\":[\"sh\",\"-c\",\"until test -f /var/run/secrets/kubernetes.io/serviceaccount/token; do sleep 1; done\"],\"resources\":{},\"volumeMounts\":[{\"name\":\"exec-sa-token\",\"mountPath\":\"/var/run/secrets/kubernetes.io/serviceaccount\"}],\"securityContext\":{\"capabilities\":{\"drop\":[\"ALL\"]},\"runAsUser\":0,\"runAsGroup\":0,\"runAsNonRoot\":false,\"readOnlyRootFilesystem\":true,\"allowPrivilegeEscalation\":false,\"seccompProfile\":{\"type\":\"RuntimeDefault\"}}},{\"name\":\"init\"}],\"volumes\":[{\"emptyDir\":{\"medium\":\"Memory\",\"sizeLimit\":\"1Mi\"},\"name\":\"exec-sa-token\",\"secret\":null}]}"
               },
               "arguments": {}
             }

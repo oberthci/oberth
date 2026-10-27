@@ -409,13 +409,11 @@ func TestNonrootRefreshStopsSeedOrCreateAfterConfigurationChange(t *testing.T) {
 				t.Fatal(err)
 			}
 			seedCalls := 0
-			controller.WithSourceSeeder(NewSourceSeeder(client, func(_ context.Context, _, _, _ string, _ []string, stdin io.Reader, _, _ io.Writer) error {
+			var seedRecords []seedExecCall
+			seedExec := recordingExec(&seedRecords)
+			controller.WithSourceSeeder(NewSourceSeeder(client, func(ctx context.Context, ns, pod, container string, command []string, input io.Reader, stdout, stderr io.Writer) error {
 				seedCalls++
-				if stdin != nil {
-					_, err := io.Copy(io.Discard, stdin)
-					return err
-				}
-				return nil
+				return seedExec(ctx, ns, pod, container, command, input, stdout, stderr)
 			}, config))
 			request := testRequest(periapsis.TriggerCI, nonrootTestDocument)
 			request.SourceDir = writeCheckout(t)
@@ -452,13 +450,11 @@ func TestNonrootCreateAndRecoverPersistedWorkflow(t *testing.T) {
 			t.Fatal(err)
 		}
 		seedCalls := 0
-		controller.WithSourceSeeder(NewSourceSeeder(client, func(_ context.Context, _, _, _ string, _ []string, stdin io.Reader, _, _ io.Writer) error {
+		var seedRecords []seedExecCall
+		seedExec := recordingExec(&seedRecords)
+		controller.WithSourceSeeder(NewSourceSeeder(client, func(ctx context.Context, ns, pod, container string, command []string, input io.Reader, stdout, stderr io.Writer) error {
 			seedCalls++
-			if stdin != nil {
-				_, err := io.Copy(io.Discard, stdin)
-				return err
-			}
-			return nil
+			return seedExec(ctx, ns, pod, container, command, input, stdout, stderr)
 		}, config))
 		source := nonrootTestDocument
 		if script {

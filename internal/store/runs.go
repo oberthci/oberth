@@ -1161,16 +1161,16 @@ func (s *Store) PutStepResult(ctx context.Context, result model.StepResult) (mod
 	if strings.TrimSpace(result.RunID) == "" || strings.TrimSpace(result.Burn) == "" ||
 		strings.TrimSpace(result.Step) == "" || result.Ordinal < 0 || !result.Status.Terminal() ||
 		result.LogStart < 0 || result.LogEnd < result.LogStart || result.DeclaredSize == "" || !result.DeclaredSize.Valid() ||
-		result.MaxRSSBytes < 0 || result.UserCPU < 0 || result.SystemCPU < 0 {
+		negativeMeasurement(result.MaxRSSBytes) || negativeMeasurement(result.MemoryPeakBytes) || negativeMeasurement(result.UserCPU) || negativeMeasurement(result.SystemCPU) {
 		return model.StepResult{}, fmt.Errorf("%w: step result fields are invalid", ErrInvalid)
 	}
 	recorded := unixNano(s.now())
 	row := s.db.QueryRowContext(ctx, `
 INSERT INTO step_results(
     run_id, burn, step, ordinal, status, exit_code, log_start, log_end,
-    declared_size, max_rss_bytes, user_cpu_ns, system_cpu_ns, started_at, finished_at, recorded_at, termination_json
+    declared_size, max_rss_bytes, user_cpu_ns, system_cpu_ns, started_at, finished_at, recorded_at, termination_json, memory_peak_bytes
 )
-VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(run_id, burn, step) DO UPDATE SET
     ordinal = excluded.ordinal,
     status = excluded.status,
@@ -1178,19 +1178,20 @@ ON CONFLICT(run_id, burn, step) DO UPDATE SET
     log_start = excluded.log_start,
     log_end = excluded.log_end,
     declared_size = excluded.declared_size,
-    max_rss_bytes = excluded.max_rss_bytes,
-    user_cpu_ns = excluded.user_cpu_ns,
-    system_cpu_ns = excluded.system_cpu_ns,
+    max_rss_bytes = COALESCE(excluded.max_rss_bytes, step_results.max_rss_bytes),
+    memory_peak_bytes = COALESCE(excluded.memory_peak_bytes, step_results.memory_peak_bytes),
+    user_cpu_ns = COALESCE(excluded.user_cpu_ns, step_results.user_cpu_ns),
+    system_cpu_ns = COALESCE(excluded.system_cpu_ns, step_results.system_cpu_ns),
     started_at = excluded.started_at,
     finished_at = excluded.finished_at,
     recorded_at = excluded.recorded_at,
     termination_json = excluded.termination_json
 RETURNING run_id, burn, step, ordinal, status, exit_code, log_start, log_end,
-		  declared_size, max_rss_bytes, user_cpu_ns, system_cpu_ns, started_at, finished_at, recorded_at, termination_json`,
+		  declared_size, max_rss_bytes, user_cpu_ns, system_cpu_ns, started_at, finished_at, recorded_at, termination_json, memory_peak_bytes`,
 		result.RunID, result.Burn, result.Step, result.Ordinal, result.Status,
 		result.ExitCode, result.LogStart, result.LogEnd, result.DeclaredSize,
-		result.MaxRSSBytes, result.UserCPU.Nanoseconds(), result.SystemCPU.Nanoseconds(),
-		nullableUnixNano(result.StartedAt), nullableUnixNano(result.FinishedAt), recorded, stepDiagnosticJSON(result.Termination, result.RunID))
+		result.MaxRSSBytes, result.UserCPU, result.SystemCPU,
+		nullableUnixNano(result.StartedAt), nullableUnixNano(result.FinishedAt), recorded, stepDiagnosticJSON(result.Termination, result.RunID), result.MemoryPeakBytes)
 	value, err := scanStepResult(row)
 	if err != nil {
 		return model.StepResult{}, fmt.Errorf("put step result: %w", err)
@@ -1201,7 +1202,7 @@ RETURNING run_id, burn, step, ordinal, status, exit_code, log_start, log_end,
 func (s *Store) StepResults(ctx context.Context, runID string) ([]model.StepResult, error) {
 	rows, err := s.db.QueryContext(ctx, `
 SELECT run_id, burn, step, ordinal, status, exit_code, log_start, log_end,
-	   declared_size, max_rss_bytes, user_cpu_ns, system_cpu_ns, started_at, finished_at, recorded_at, termination_json
+	   declared_size, max_rss_bytes, user_cpu_ns, system_cpu_ns, started_at, finished_at, recorded_at, termination_json, memory_peak_bytes
 FROM step_results WHERE run_id = ? ORDER BY ordinal, burn, step`, runID)
 	if err != nil {
 		return nil, fmt.Errorf("list step results: %w", err)
@@ -1247,18 +1248,20 @@ func scanRun(row rowScanner, extra ...any) (model.Run, error) {
 func scanStepResult(row rowScanner) (model.StepResult, error) {
 	var value model.StepResult
 	var started, finished sql.NullInt64
-	var userCPUNanos, systemCPUNanos int64
+	var userCPUNanos, systemCPUNanos, rss, peak sql.NullInt64
 	var recorded int64
 	var diagnostic sql.NullString
 	if err := row.Scan(&value.RunID, &value.Burn, &value.Step, &value.Ordinal,
 		&value.Status, &value.ExitCode, &value.LogStart, &value.LogEnd,
-		&value.DeclaredSize, &value.MaxRSSBytes, &userCPUNanos, &systemCPUNanos,
-		&started, &finished, &recorded, &diagnostic); err != nil {
+		&value.DeclaredSize, &rss, &userCPUNanos, &systemCPUNanos,
+		&started, &finished, &recorded, &diagnostic, &peak); err != nil {
 		return model.StepResult{}, err
 	}
 	value.Termination = readStepDiagnostic(diagnostic, value.RunID)
-	value.UserCPU = time.Duration(userCPUNanos)
-	value.SystemCPU = time.Duration(systemCPUNanos)
+	value.MaxRSSBytes = measurementPointer[int64](rss)
+	value.MemoryPeakBytes = measurementPointer[int64](peak)
+	value.UserCPU = measurementPointer[time.Duration](userCPUNanos)
+	value.SystemCPU = measurementPointer[time.Duration](systemCPUNanos)
 	value.StartedAt, value.FinishedAt = nullableTime(started), nullableTime(finished)
 	value.RecordedAt = fromUnixNano(recorded)
 	return value, nil
@@ -1387,4 +1390,13 @@ func isHexPrefix(value string) bool {
 		}
 	}
 	return true
+}
+
+func negativeMeasurement[T ~int64](value *T) bool { return value != nil && *value < 0 }
+func measurementPointer[T ~int64](value sql.NullInt64) *T {
+	if !value.Valid {
+		return nil
+	}
+	n := T(value.Int64)
+	return &n
 }

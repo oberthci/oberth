@@ -59,6 +59,7 @@ func (controller *Controller) collectStepDiagnostics(ctx context.Context, workfl
 			step.Termination = &model.StepDiagnostic{Unavailable: reason, ObservedAt: &at}
 		} else {
 			step.Termination = projectStepDiagnostic(workflow, node, pod, at)
+			step.Usage = projectStepUsage(workflow, node, pod)
 			if reason := podInfrastructureReason(workflow, node, pod); reason != "" {
 				step.InfrastructureReason = reason
 			}

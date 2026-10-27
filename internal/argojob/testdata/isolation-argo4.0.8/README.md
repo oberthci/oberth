@@ -54,3 +54,10 @@ remain read-only. The final
 Pods replace the legacy token volume with tmpfs and isolate it from pipeline
 containers. Runtime TokenRequest issuance and holder-Pod cleanup are covered
 separately by unit tests and a live kind workflow.
+
+The 2026-10-27 resource-usage wrapper recapture used the same authenticated
+controller module and combined overlay. Explicit-command single-main leaves
+now have the read-only measurement helper and wrapper; ContainerSets remain
+unchanged. All eight fresh submitted Pods passed the retained Kubernetes
+validator. This captures controller construction and mount isolation, not a
+live kubelet or production cluster.
