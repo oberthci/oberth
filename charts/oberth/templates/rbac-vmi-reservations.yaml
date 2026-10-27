@@ -11,12 +11,7 @@ rules:
   - apiGroups: ["kubevirt.io"]
     resources: ["virtualmachineinstances"]
     verbs: ["create", "get"]
-  # Kubernetes cannot restrict create by resourceNames. The implementation uses
-  # only this fixed public ledger; update/get are explicitly name-scoped. No
-  # audit-anchor ConfigMap receives update permission.
-  - apiGroups: [""]
-    resources: ["configmaps"]
-    verbs: ["create"]
+  # The chart pre-creates the public ledger; the server owns only its data.
   - apiGroups: [""]
     resources: ["configmaps"]
     resourceNames: ["oberth-vmi-reservations"]

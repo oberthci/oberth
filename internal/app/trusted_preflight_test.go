@@ -235,7 +235,7 @@ func TestTrustedPreflightAdapterLifecycle(t *testing.T) {
 				}
 				return
 			}
-			if controller.request.ScheduleEntry != "nightly" {
+			if controller.request.ScheduleEntry != "nightly" || controller.request.RepositoryID != repo.ID {
 				t.Fatalf("preflight lost durable entry: %+v", controller.request)
 			}
 			if scenario == "guest granted" {
@@ -293,7 +293,7 @@ func TestTrustedPreflightAdapterLifecycle(t *testing.T) {
 							t.Fatalf("recover granted guest preflight: %v %v", ids, recoverErr)
 						}
 						observed := controller.observed
-						if observed.ScheduleEntry != "nightly" || !observed.KubeVirtGranted || observed.KubeVirtBudget.String() != argoworkflow.VMIBudgetLimit().String() {
+						if observed.RepositoryID != repo.ID || observed.ScheduleEntry != "nightly" || !observed.KubeVirtGranted || observed.KubeVirtBudget.String() != argoworkflow.VMIBudgetLimit().String() {
 							t.Fatalf("recovery observed with budget %v granted=%v", observed.KubeVirtBudget, observed.KubeVirtGranted)
 						}
 						state, recoverErr = database.KVMPreflight(ctx, run.ID)

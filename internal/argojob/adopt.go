@@ -69,6 +69,9 @@ func (controller *Controller) bindAdoption(workflow *wfv1.Workflow, request Adop
 	if !argoworkflow.ScheduleEntryMatches(workflow, request.RunTrigger, request.ScheduleEntry) {
 		return Adoption{}, fmt.Errorf("argojob: Workflow %s adoption schedule entry mismatch", request.Name)
 	}
+	if argoworkflow.DeclaresVMIResources(workflow) && workflow.Annotations[vmiQuotaAnnotation] == "" {
+		return Adoption{}, errors.New("argojob: legacy VMI Workflow lacks a server quota binding; drain legacy VMI workflows before upgrading")
+	}
 	group, err := argoworkflow.RunConcurrencyGroup(workflow)
 	// Pre-#1173 submissions persisted this implicit group without annotating
 	// the Workflow. Preserve that existing holder during recovery only.
@@ -81,12 +84,16 @@ func (controller *Controller) bindAdoption(workflow *wfv1.Workflow, request Adop
 		return Adoption{}, err
 	}
 	demand, err := argoworkflow.DeclaredVMIDemand(workflow)
-	if workflow.Annotations[vmiQuotaAnnotation] == "" {
-		demand, err = argoworkflow.SummedVMIDemand(workflow)
-	}
 	if err != nil {
 		return Adoption{}, err
 	}
+	if argoworkflow.DeclaresVMIResources(workflow) {
+		var quota vmiQuotaBinding
+		if json.Unmarshal([]byte(workflow.Annotations[vmiQuotaAnnotation]), &quota) != nil || quota.RepositoryID <= 0 || !validVMIDemand(quota.Limit) || quota.Peak != demand || !demand.Fits(quota.Limit) {
+			return Adoption{}, errors.New("argojob: VMI Workflow has an invalid server quota binding")
+		}
+	}
+
 	specHash, err := adoptionSpecHash(workflow)
 	if err != nil {
 		return Adoption{}, err

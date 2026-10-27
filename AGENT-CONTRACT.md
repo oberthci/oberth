@@ -2019,13 +2019,19 @@ continuity checks; it must never be used to reset or bypass those checks.
   Oberth mediates repository resource creates before token delivery; submitted
   resource Pods run get and their launcher account cannot create. A separate
   server Role grants VMI create/get and fixed-name public quota-ledger get/update
-  (ConfigMap create cannot be name-scoped). ResourceVersion CAS, actual VMI
-  inspection and durable pending claims enforce the admitted repository grant
+  and no ConfigMap create. The chart pre-creates a metadata-only ledger; server
+  data and its one-time initialization marker survive Helm upgrades/rollbacks.
+  ResourceVersion CAS, actual VMI inspection and durable pending claims enforce the admitted repository grant
   and workflow peak across concurrent controllers/restarts. One claim permits
   one POST, without retries. Ambiguous POST failures retain capacity until an
-  observed matching UID resolves them or an administrator verifies recovery;
-  timeout/NotFound alone never refunds a pending claim. No DB migration is
-  needed; drain legacy VMI resource workflows before upgrading. See
+  observed matching UID resolves them, or the resource Pod UID is absent from
+  a complete list and the claim is more than five minutes old (the POST has a
+  twenty-second request timeout). Missing timestamps start a fresh grace period;
+  timeout/NotFound alone never refunds a pending claim. UID completion uses an
+  independent bounded context. Corrupt objects/mismatches are charged to their
+  own repository; unattributed unreadable legacy VMIs cost the per-VMI maximum.
+  No DB migration is needed. Drain legacy VMI workflows before upgrading;
+  adoption immediately refuses any VMI workflow without a quota binding. See
   `docs/kubevirt-vms.md` for limits, RBAC and recovery.
   `spec.domain.firmware.kernelBoot` is admitted only with a container
   image that is digest-pinned under the containerDisk prefixes, an absolute

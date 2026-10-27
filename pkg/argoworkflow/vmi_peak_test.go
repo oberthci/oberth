@@ -72,7 +72,7 @@ func TestVMIPeakReusedTemplateAndExitCleanup(t *testing.T) {
 }
 
 func TestUnknownVMIGraphUsesSum(t *testing.T) {
-	for _, kind := range []string{"cycle", "unknown-task", "or", "when", "fanout", "recursive", "retry", "exit-create", "task-exit", "template-defaults", "too-large", "mixed-depends"} {
+	for _, kind := range []string{"cycle", "unknown-task", "or", "when", "fanout", "recursive", "retry", "exit-create", "task-exit", "template-defaults", "too-large", "mixed-depends", "continue-on"} {
 		t.Run(kind, func(t *testing.T) {
 			wf := phaseWorkflow([]wfv1.DAGTask{vmTask("a", "create-0"), vmTask("da", "delete-0", "a"), vmTask("b", "create-1", "da"), vmTask("db", "delete-1", "b"), vmTask("c", "create-2", "db")})
 			dag := wf.Spec.Templates[len(wf.Spec.Templates)-1].DAG
@@ -102,6 +102,8 @@ func TestUnknownVMIGraphUsesSum(t *testing.T) {
 				for i := range maxVMIGraphNodes {
 					dag.Tasks = append(dag.Tasks, vmTask(fmt.Sprintf("extra-%d", i), "get-0"))
 				}
+			case "continue-on":
+				dag.Tasks[1].ContinueOn = &wfv1.ContinueOn{Failed: true}
 			case "mixed-depends":
 				dag.Tasks[2].Depends = "da.Succeeded"
 

@@ -428,6 +428,13 @@ type VMIDemand struct {
 	MemoryBytes int64
 }
 
+// VMIInstanceLimit is the hard per-instance admission bound. It also provides
+// conservative accounting for an unreadable legacy VMI without a repository ID.
+func VMIInstanceLimit() VMIDemand {
+	memory := resource.MustParse(maxVMIMemory)
+	return VMIDemand{VMs: 1, Cores: maxVMICores, MemoryBytes: memory.Value()}
+}
+
 // Fits reports whether every requested dimension fits the available budget.
 func (demand VMIDemand) Fits(limit VMIDemand) bool {
 	return demand.VMs <= limit.VMs && demand.Cores <= limit.Cores && demand.MemoryBytes <= limit.MemoryBytes

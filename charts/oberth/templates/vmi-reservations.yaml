@@ -1,0 +1,13 @@
+# Keep mutable ledger data out of Helm's field ownership. Oberth initializes
+# it once via resourceVersion CAS and owns data/initialization fields thereafter.
+# Metadata-only upgrades/rollbacks cannot replay an empty reservation set.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: oberth-vmi-reservations
+  namespace: {{ .Values.argo.namespace }}
+  annotations:
+    helm.sh/resource-policy: keep
+  labels:
+    {{- include "oberth.labels" . | nindent 4 }}
+    oberth.ci/role: vmi-reservations

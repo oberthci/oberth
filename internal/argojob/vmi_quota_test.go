@@ -13,6 +13,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
@@ -24,6 +25,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/dynamic"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/rest"
 	ktesting "k8s.io/client-go/testing"
@@ -35,13 +37,18 @@ import (
 
 func guardedVMIFixture(t *testing.T, id int) (Config, *wfv1.Workflow, *corev1.Pod) {
 	t.Helper()
+	return guardedVMIRepositoryFixture(t, id, 7)
+}
+
+func guardedVMIRepositoryFixture(t *testing.T, id int, repoID int64) (Config, *wfv1.Workflow, *corev1.Pod) {
+	t.Helper()
 	config := testConfig()
 	config.applyDefaults()
 	config.VMLauncherServiceAccount = "vm-launcher"
 	config.ContainerDiskPrefixes = []string{"quay.io/example/"}
 	r := testRequest(periapsis.TriggerCI, kubeVirtWorkflow)
 	r.KubeVirtGranted = true
-	r.RepositoryID = 7
+	r.RepositoryID = repoID
 	r.Name = fmt.Sprintf("quota-%d", id)
 	wf, err := Build(config, r)
 	if err != nil {
@@ -58,8 +65,8 @@ func guardedVMIFixture(t *testing.T, id int) (Config, *wfv1.Workflow, *corev1.Po
 func casQuotaClient() *fake.Clientset {
 	client := fake.NewClientset()
 	var mu sync.Mutex
-	var stored *corev1.ConfigMap
-	revision := 0
+	stored := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: vmiQuotaConfigMap, Namespace: testNamespace, ResourceVersion: "1", Labels: map[string]string{"oberth.ci/role": "vmi-reservations"}}}
+	revision := 1
 	client.PrependReactor("*", "configmaps", func(a ktesting.Action) (bool, runtime.Object, error) {
 		if a.GetVerb() != "get" && a.GetVerb() != "create" && a.GetVerb() != "update" {
 			return false, nil, nil
@@ -231,7 +238,14 @@ func TestVMICreateRefusesUnknownStateAndUnguardedPods(t *testing.T) {
 			case "missing-binding":
 				delete(wf.Annotations, vmiQuotaAnnotation)
 			case "poison-ledger":
-				_, _ = kube.CoreV1().ConfigMaps(config.Namespace).Create(t.Context(), &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: vmiQuotaConfigMap, Namespace: config.Namespace}}, metav1.CreateOptions{})
+				cm, err := kube.CoreV1().ConfigMaps(config.Namespace).Get(t.Context(), vmiQuotaConfigMap, metav1.GetOptions{})
+				if err != nil {
+					t.Fatal(err)
+				}
+				cm.Data = map[string]string{"reservations.json": "invalid"}
+				if _, err = kube.CoreV1().ConfigMaps(config.Namespace).Update(t.Context(), cm, metav1.UpdateOptions{}); err != nil {
+					t.Fatal(err)
+				}
 			case "list-failure":
 				vmi.PrependReactor("list", "virtualmachineinstances", func(ktesting.Action) (bool, runtime.Object, error) { return true, nil, errors.New("API unavailable") })
 			}
@@ -251,6 +265,9 @@ func TestVMICreatePOSTIsNeverAutomaticallyRetried(t *testing.T) {
 	var calls atomic.Int64
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
+		if r.URL.Query().Get("timeout") != vmiAPIRequestTimeout.String() {
+			t.Errorf("API request has no bounded server timeout: %s", r.URL)
+		}
 		if r.Method != "POST" || r.URL.Path != "/apis/kubevirt.io/v1/namespaces/pipeline/virtualmachineinstances" {
 			t.Errorf("unexpected create: %s %s", r.Method, r.URL.Path)
 		}
@@ -565,5 +582,255 @@ func TestVMICreateLiveTopologyAndHotplugBounds(t *testing.T) {
 				t.Fatalf("%s was treated as free capacity", kind)
 			}
 		})
+	}
+}
+
+func TestVMIClaimLostResponseAndFinishFailureRecoverCapacity(t *testing.T) {
+	for _, failure := range []string{"lost-response", "finish-failure"} {
+		t.Run(failure, func(t *testing.T) {
+			kube, vmi := casQuotaClient(), quotaDynamic()
+			config, wf, pod := guardedVMIFixture(t, 1)
+			c := quotaController(config, kube, vmi)
+			normal := c.vmiCreate
+			if failure == "lost-response" {
+				c.vmiCreate = func(ctx context.Context, ns string, obj *unstructured.Unstructured) (*unstructured.Unstructured, error) {
+					_, err := normal(ctx, ns, obj)
+					if err != nil {
+						return nil, err
+					}
+					return nil, context.DeadlineExceeded
+				}
+			}
+			failFinish := failure == "finish-failure"
+			kube.PrependReactor("update", "configmaps", func(a ktesting.Action) (bool, runtime.Object, error) {
+				if !failFinish {
+					return false, nil, nil
+				}
+				cm := a.(ktesting.UpdateAction).GetObject().(*corev1.ConfigMap)
+				var ledger vmiLedger
+				_ = json.Unmarshal([]byte(cm.Data["reservations.json"]), &ledger)
+				for _, claim := range ledger.Claims {
+					if claim.UID != "" {
+						failFinish = false
+						return true, nil, errors.New("finish update lost")
+					}
+				}
+				return false, nil, nil
+			})
+			if err := authorizeTestVMI(t, c, wf, pod); err == nil {
+				t.Fatal("injected failure did not happen")
+			}
+			// Restart: a different operation must persist recovery of the first UID.
+			c = quotaController(config, kube, vmi)
+			_, second, sp := guardedVMIFixture(t, 2)
+			if err := authorizeTestVMI(t, c, second, sp); err != nil {
+				t.Fatal(err)
+			}
+			if err := vmi.Resource(vmiResource).Namespace(wf.Namespace).Delete(t.Context(), wf.Name+"-amd64", metav1.DeleteOptions{}); err != nil {
+				t.Fatal(err)
+			}
+			if err := kube.CoreV1().Pods(pod.Namespace).Delete(t.Context(), pod.Name, metav1.DeleteOptions{}); err != nil {
+				t.Fatal(err)
+			}
+			_, third, tp := guardedVMIFixture(t, 3)
+			if err := authorizeTestVMI(t, c, third, tp); err != nil {
+				t.Fatalf("one live VMI leaked a second slot: %v", err)
+			}
+		})
+	}
+}
+
+func TestVMIClaimAbandonedBeforePOSTSelfHeals(t *testing.T) {
+	for _, scenario := range []string{"expired-gone", "expired-present", "recent-gone", "untimestamped-gone", "partial-pod-list"} {
+		t.Run(scenario, func(t *testing.T) {
+			kube, vmi := casQuotaClient(), quotaDynamic()
+			config, wf, pod := guardedVMIFixture(t, 1)
+			c := quotaController(config, kube, vmi)
+			var binding vmiQuotaBinding
+			if err := json.Unmarshal([]byte(wf.Annotations[vmiQuotaAnnotation]), &binding); err != nil {
+				t.Fatal(err)
+			}
+			for i := 1; i <= 2; i++ {
+				_, w, p := guardedVMIFixture(t, i)
+				if _, err := kube.CoreV1().Pods(p.Namespace).Create(t.Context(), p, metav1.CreateOptions{}); err != nil {
+					t.Fatal(err)
+				}
+				claim := vmiClaim{RepositoryID: 7, PodName: p.Name, PodUID: p.UID, WorkflowUID: w.UID, Name: w.Name + "-amd64", Hash: strings.Repeat("a", 64), Demand: binding.Peak}
+				if _, fresh, err := c.reserveVMIClaim(t.Context(), fmt.Sprint(i), claim, binding); err != nil || !fresh {
+					t.Fatalf("reserve without POST: fresh=%v err=%v", fresh, err)
+				}
+			}
+			cm, err := c.getVMILedger(t.Context())
+			if err != nil {
+				t.Fatal(err)
+			}
+			ledger, err := readVMILedger(cm)
+			if err != nil {
+				t.Fatal(err)
+			}
+			claim := ledger.Claims["1"]
+			if claim.ReservedAt.IsZero() {
+				t.Fatal("claim not timestamped before POST")
+			}
+			switch scenario {
+			case "recent-gone":
+				claim.ReservedAt = time.Now().UTC()
+			case "untimestamped-gone":
+				claim.ReservedAt = time.Time{}
+			default:
+				claim.ReservedAt = time.Now().Add(-2 * vmiPendingGracePeriod).UTC()
+			}
+			ledger.Claims["1"] = claim
+			if err = c.updateVMILedger(t.Context(), cm, ledger); err != nil {
+				t.Fatal(err)
+			}
+			if scenario != "expired-present" {
+				if err = kube.CoreV1().Pods(pod.Namespace).Delete(t.Context(), pod.Name, metav1.DeleteOptions{}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if scenario == "partial-pod-list" {
+				kube.PrependReactor("list", "pods", func(ktesting.Action) (bool, runtime.Object, error) {
+					return true, &corev1.PodList{ListMeta: metav1.ListMeta{Continue: "more"}}, nil
+				})
+			}
+			_, third, tp := guardedVMIFixture(t, 3)
+			err = authorizeTestVMI(t, c, third, tp)
+			if scenario == "expired-gone" {
+				if err != nil {
+					t.Fatalf("crash before POST leaked capacity: %v", err)
+				}
+			} else if err == nil || !strings.Contains(err.Error(), "over grant") {
+				t.Fatalf("unsafe expiry for %s: %v", scenario, err)
+			}
+			for _, a := range vmi.Actions() {
+				if a.GetVerb() == "create" && scenario != "expired-gone" {
+					t.Fatal("unexpired claims allowed a POST")
+				}
+			}
+		})
+	}
+}
+
+func TestVMIFinishClaimIgnoresCallerCancellation(t *testing.T) {
+	claim := vmiClaim{ReservedAt: time.Now().UTC(), RepositoryID: 7, PodName: "resource", PodUID: "pod", WorkflowUID: "wf", Name: "vm", Hash: strings.Repeat("a", 64), Demand: argoworkflow.VMIDemand{VMs: 1, Cores: 2, MemoryBytes: 2 << 30}}
+	data, err := json.Marshal(vmiLedger{Version: 1, Claims: map[string]vmiClaim{"claim": claim}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored := &corev1.ConfigMap{TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "ConfigMap"}, ObjectMeta: metav1.ObjectMeta{Name: vmiQuotaConfigMap, Namespace: testNamespace, ResourceVersion: "1", Labels: map[string]string{"oberth.ci/role": "vmi-reservations"}, Annotations: map[string]string{vmiLedgerInitialized: "1"}}, Data: map[string]string{"reservations.json": string(data)}}
+	var mu sync.Mutex
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		if r.Method == "PUT" {
+			var updated corev1.ConfigMap
+			if err := json.NewDecoder(r.Body).Decode(&updated); err != nil {
+				t.Error(err)
+				w.WriteHeader(400)
+				return
+			}
+			stored = &updated
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(stored)
+	}))
+	defer server.Close()
+	client, err := kubernetes.NewForConfig(&rest.Config{Host: server.URL, ContentConfig: rest.ContentConfig{ContentType: "application/json", AcceptContentTypes: "application/json"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := &Controller{kube: client, config: Config{Namespace: testNamespace}}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if err = c.finishVMIClaim(ctx, "claim", "observed-vmi-uid", false); err != nil {
+		t.Fatalf("canceled caller prevented durable finish: %v", err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	ledger, err := readVMILedger(stored)
+	if err != nil || ledger.Claims["claim"].UID != "observed-vmi-uid" {
+		t.Fatalf("UID not persisted: %+v %v", ledger, err)
+	}
+}
+
+func TestVMIClaimMalformedOrMismatchedVMIIsolatedByRepository(t *testing.T) {
+	for _, scenario := range []string{"unparseable", "unattributed-unparseable", "hash-mismatch", "owner-mismatch"} {
+		t.Run(scenario, func(t *testing.T) {
+			kube, vmi := casQuotaClient(), quotaDynamic()
+			config, wf, pod := guardedVMIFixture(t, 1)
+			c := quotaController(config, kube, vmi)
+			normal := c.vmiCreate
+			c.vmiCreate = func(ctx context.Context, ns string, obj *unstructured.Unstructured) (*unstructured.Unstructured, error) {
+				_, err := normal(ctx, ns, obj)
+				if err != nil {
+					return nil, err
+				}
+				return nil, context.DeadlineExceeded
+			}
+			if err := authorizeTestVMI(t, c, wf, pod); err == nil {
+				t.Fatal("lost response accepted")
+			}
+			c = quotaController(config, kube, vmi)
+			object, err := vmi.Resource(vmiResource).Namespace(wf.Namespace).Get(t.Context(), wf.Name+"-amd64", metav1.GetOptions{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			switch scenario {
+			case "unparseable", "unattributed-unparseable":
+				err = unstructured.SetNestedField(object.Object, "invalid", "spec", "domain", "memory", "guest")
+				if scenario == "unattributed-unparseable" {
+					object.SetLabels(nil)
+				}
+			case "hash-mismatch":
+				a := object.GetAnnotations()
+				a[vmiCreateHashAnnotation] = strings.Repeat("b", 64)
+				object.SetAnnotations(a)
+			case "owner-mismatch":
+				object.SetOwnerReferences(nil)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err = vmi.Resource(vmiResource).Namespace(wf.Namespace).Update(t.Context(), object, metav1.UpdateOptions{}); err != nil {
+				t.Fatal(err)
+			}
+			_, other, op := guardedVMIRepositoryFixture(t, 2, 8)
+			if err = authorizeTestVMI(t, c, other, op); err != nil {
+				t.Fatalf("bad repo 7 blocked repo 8: %v", err)
+			}
+			_, mine, mp := guardedVMIFixture(t, 3)
+			if err = authorizeTestVMI(t, c, mine, mp); err == nil {
+				t.Fatal("uncertain demand became free capacity for its own repo")
+			}
+		})
+	}
+}
+
+func TestVMILedgerIsInitializedOnceWithoutCreatePermission(t *testing.T) {
+	kube := casQuotaClient()
+	c := &Controller{kube: kube, config: Config{Namespace: testNamespace}}
+	cm, err := c.getVMILedger(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cm.Annotations[vmiLedgerInitialized] != "1" || cm.Data["reservations.json"] == "" {
+		t.Fatal("metadata-only chart ledger was not initialized")
+	}
+	cm.Data = nil
+	if _, err = kube.CoreV1().ConfigMaps(testNamespace).Update(t.Context(), cm, metav1.UpdateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err = c.reserveVMIClaim(t.Context(), "missing", vmiClaim{}, vmiQuotaBinding{}); err == nil {
+		t.Fatal("lost initialized data silently reset the ledger")
+	}
+	for _, a := range kube.Actions() {
+		if a.GetVerb() == "create" && a.GetResource().Resource == "configmaps" {
+			t.Fatal("server tried to create the ledger")
+		}
+	}
+	missing := &Controller{kube: fake.NewClientset(), config: Config{Namespace: testNamespace}}
+	if _, err = missing.getVMILedger(t.Context()); err == nil {
+		t.Fatal("missing chart ledger recreated by server")
 	}
 }

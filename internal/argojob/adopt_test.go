@@ -196,12 +196,20 @@ spec:
         memory: 2Gi
 `,
 	}})
+	wf.Annotations[vmiQuotaAnnotation] = `{"repository_id":7,"limit":{"VMs":2,"Cores":6,"MemoryBytes":12884901888},"peak":{"VMs":1,"Cores":3,"MemoryBytes":2147483648}}`
+
 	controller := &Controller{workflows: &staticWorkflowClient{workflow: wf}, config: Config{Namespace: wf.Namespace}}
 	binding, found, err := controller.Adopt(t.Context(), request)
 	want := argoworkflow.VMIDemand{VMs: 1, Cores: 3, MemoryBytes: 2 << 30}
 	if err != nil || !found || binding.KubeVirt != want {
 		t.Fatalf("adopted demand = %#v, %v, %v", binding.KubeVirt, found, err)
 	}
+	validQuota := wf.Annotations[vmiQuotaAnnotation]
+	wf.Annotations[vmiQuotaAnnotation] = "{}"
+	if _, found, err := controller.Adopt(t.Context(), request); found || !errors.Is(err, ErrAdoptionRefused) || !strings.Contains(err.Error(), "invalid server quota binding") {
+		t.Fatalf("invalid quota binding was adopted: %v %v", found, err)
+	}
+	wf.Annotations[vmiQuotaAnnotation] = validQuota
 	delete(wf.Annotations, argoworkflow.ConcurrencyGroupAnnotation)
 	request.Group = argoworkflow.KubeVirtConcurrencyGroup
 	if _, found, err := controller.Adopt(t.Context(), request); err != nil || !found {
@@ -218,5 +226,14 @@ spec:
 	}
 	if _, _, err := controller.Adopt(t.Context(), request); err == nil {
 		t.Fatal("invalid adopted resource demand accepted")
+	}
+}
+
+func TestAdoptionRefusesLegacyVMIWorkflowImmediately(t *testing.T) {
+	wf, request := adoptionWorkflow()
+	wf.Spec.Templates = append(wf.Spec.Templates, wfv1.Template{Name: "vm", Resource: &wfv1.ResourceTemplate{Action: "create"}})
+	controller := &Controller{workflows: &staticWorkflowClient{workflow: wf}, config: Config{Namespace: wf.Namespace}}
+	if _, found, err := controller.Adopt(t.Context(), request); found || !errors.Is(err, ErrAdoptionRefused) || !strings.Contains(err.Error(), "drain legacy VMI workflows before upgrading") {
+		t.Fatalf("legacy workflow not refused early: found=%v error=%v", found, err)
 	}
 }

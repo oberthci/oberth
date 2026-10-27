@@ -32,6 +32,9 @@ const (
 	vmiCreateHashAnnotation = "oberth.ci/vmi-create-sha256"
 	vmiQuotaConfigMap       = "oberth-vmi-reservations"
 	maxVMIClaims            = 2048
+	vmiLedgerInitialized    = "oberth.ci/vmi-ledger-initialized"
+	vmiAPIRequestTimeout    = 20 * time.Second
+	vmiPendingGracePeriod   = 5 * time.Minute
 )
 
 // Public, server-generated and included in the immutable submission identity.
@@ -44,6 +47,7 @@ type vmiQuotaBinding struct {
 }
 
 type vmiClaim struct {
+	ReservedAt   time.Time              `json:"reserved_at"`
 	RepositoryID int64                  `json:"repository_id"`
 	PodName      string                 `json:"pod_name"`
 	PodUID       types.UID              `json:"pod_uid"`
@@ -162,7 +166,7 @@ func guardedResourceTemplate(wf *wfv1.Workflow, pod *corev1.Pod) *wfv1.Template 
 
 // Called at the resource Pod's token barrier, before its executor can run.
 func (c *Controller) ensureVMIForResourcePod(ctx context.Context, wf *wfv1.Workflow, pod *corev1.Pod) error {
-	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, vmiAPIRequestTimeout)
 	defer cancel()
 	t := guardedResourceTemplate(wf, pod)
 	if t == nil || t.Resource.Action != "create" {
@@ -249,6 +253,9 @@ func (c *Controller) ensureVMIForResourcePod(ctx context.Context, wf *wfv1.Workf
 		}
 		return c.finishVMIClaim(ctx, key, observed.GetUID(), false)
 	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	created, err := c.vmiCreate(ctx, wf.Namespace, object)
 	if err != nil {
 		// Only explicit rejections prove no object was created. Transport errors,
@@ -271,11 +278,15 @@ func (c *Controller) ensureVMIForResourcePod(ctx context.Context, wf *wfv1.Workf
 }
 
 func matchesCreatedVMI(object *unstructured.Unstructured, wf *wfv1.Workflow, claim vmiClaim) bool {
-	if object == nil || object.GetUID() == "" || object.GetName() != claim.Name || object.GetNamespace() != wf.Namespace || object.GetAnnotations()[vmiCreateHashAnnotation] != claim.Hash || object.GetAnnotations()[vmiOperationAnnotation] != string(claim.PodUID) || object.GetLabels()[vmiRepositoryLabel] != fmt.Sprint(claim.RepositoryID) {
+	return claim.WorkflowUID == wf.UID && matchesVMIClaim(object, wf.Namespace, claim)
+}
+
+func matchesVMIClaim(object *unstructured.Unstructured, namespace string, claim vmiClaim) bool {
+	if object == nil || object.GetUID() == "" || object.GetName() != claim.Name || object.GetNamespace() != namespace || object.GetAnnotations()[vmiCreateHashAnnotation] != claim.Hash || object.GetAnnotations()[vmiOperationAnnotation] != string(claim.PodUID) || object.GetLabels()[vmiRepositoryLabel] != fmt.Sprint(claim.RepositoryID) {
 		return false
 	}
 	for _, owner := range object.GetOwnerReferences() {
-		if owner.UID == wf.UID && owner.Kind == "Workflow" && owner.Controller != nil && *owner.Controller {
+		if owner.APIVersion == "argoproj.io/v1alpha1" && owner.UID == claim.WorkflowUID && owner.Kind == "Workflow" && owner.Controller != nil && *owner.Controller {
 			return true
 		}
 	}
@@ -315,17 +326,46 @@ func readVMILedger(cm *corev1.ConfigMap) (vmiLedger, error) {
 	return ledger, nil
 }
 
+// Helm owns only metadata; mutable data and this initialization marker are
+// server-owned fields, so upgrades/rollbacks cannot replay an empty ledger.
 func (c *Controller) getVMILedger(ctx context.Context) (*corev1.ConfigMap, error) {
 	client := c.kube.CoreV1().ConfigMaps(c.config.Namespace)
-	cm, err := client.Get(ctx, vmiQuotaConfigMap, metav1.GetOptions{})
-	if apierrors.IsNotFound(err) {
-		body, _ := json.Marshal(vmiLedger{Version: 1, Claims: map[string]vmiClaim{}})
-		cm, err = client.Create(ctx, &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: vmiQuotaConfigMap, Namespace: c.config.Namespace, Labels: map[string]string{"oberth.ci/role": "vmi-reservations"}}, Data: map[string]string{"reservations.json": string(body)}}, metav1.CreateOptions{})
-		if apierrors.IsAlreadyExists(err) {
-			return client.Get(ctx, vmiQuotaConfigMap, metav1.GetOptions{})
+	for range 8 {
+		cm, err := client.Get(ctx, vmiQuotaConfigMap, metav1.GetOptions{})
+		if err != nil {
+			return nil, fmt.Errorf("argojob: read chart-provisioned VMI ledger: %w", err)
 		}
+		if cm.Labels["oberth.ci/role"] != "vmi-reservations" {
+			return nil, errors.New("argojob: invalid VMI ledger metadata")
+		}
+		if cm.Annotations[vmiLedgerInitialized] == "1" {
+			return cm, nil
+		}
+		if cm.Annotations[vmiLedgerInitialized] != "" {
+			return nil, errors.New("argojob: unknown VMI ledger initialization version")
+		}
+		if cm.Data == nil {
+			cm.Data = map[string]string{}
+		}
+		if _, exists := cm.Data["reservations.json"]; !exists {
+			if len(cm.Data) != 0 {
+				return nil, errors.New("argojob: invalid initial VMI ledger")
+			}
+			cm.Data["reservations.json"] = `{"version":1,"claims":{}}`
+		} else if _, err = readVMILedger(cm); err != nil {
+			return nil, err
+		}
+		if cm.Annotations == nil {
+			cm.Annotations = map[string]string{}
+		}
+		cm.Annotations[vmiLedgerInitialized] = "1"
+		updated, err := client.Update(ctx, cm, metav1.UpdateOptions{})
+		if apierrors.IsConflict(err) {
+			continue
+		}
+		return updated, err
 	}
-	return cm, err
+	return nil, errors.New("argojob: VMI ledger initialization conflicts exhausted")
 }
 
 func (c *Controller) updateVMILedger(ctx context.Context, cm *corev1.ConfigMap, ledger vmiLedger) error {
@@ -341,10 +381,51 @@ func (c *Controller) updateVMILedger(ctx context.Context, cm *corev1.ConfigMap, 
 	return err
 }
 
-// ResourceVersion CAS serializes claims across concurrent observers/processes.
-// Live VMIs and pending POSTs count before a new create can be issued. Confirmed
-// deleted UIDs become closed tombstones; a pending POST is never cleared merely
-// because a GET currently finds no VMI (the POST may still be in flight).
+// Reconcile claims even when their original caller never came back. Persist
+// matching live UIDs before making an admission decision; confirmed deletion
+// can then refund the slot. Pending intents expire only after the resource Pod
+// is absent from a complete API list AND a grace period far beyond the bounded
+// POST timeout. A zero timestamp gets a fresh grace period, never an instant
+// refund. Unknown/partial state cannot prove a Pod or VMI absent.
+func reconcileVMIClaims(ledger *vmiLedger, actual map[string]*unstructured.Unstructured, pods *corev1.PodList, namespace string, now time.Time) bool {
+	present := map[types.UID]bool{}
+	for _, pod := range pods.Items {
+		present[pod.UID] = true
+	}
+	changed := false
+	for key, old := range ledger.Claims {
+		claim := old
+		if !claim.Closed {
+			if claim.ReservedAt.IsZero() {
+				claim.ReservedAt = now
+			}
+			object := actual[claim.Name]
+			switch {
+			case object != nil && claim.UID != "" && claim.UID != object.GetUID():
+				claim.Closed = true // A different UID proves the confirmed one is gone.
+			case object != nil && matchesVMIClaim(object, namespace, claim):
+				claim.UID = object.GetUID()
+			case object == nil && claim.UID != "":
+				claim.Closed = true
+			case claim.UID == "" && pods.Continue == "" && !present[claim.PodUID] && now.Sub(claim.ReservedAt) > vmiPendingGracePeriod:
+				claim.Closed = true
+			}
+		}
+		if claim.Closed && pods.Continue == "" && !present[claim.PodUID] {
+			delete(ledger.Claims, key)
+			changed = true
+		} else if claim != old {
+			ledger.Claims[key] = claim
+			changed = true
+		}
+	}
+	return changed
+}
+
+// ResourceVersion CAS serializes pending claims across processes. No create
+// reaches the API until its demand is durably reserved. One malformed live
+// object or conflicting pending operation is charged conservatively to its
+// repository; it never aborts inspection of unrelated repositories.
 func (c *Controller) reserveVMIClaim(ctx context.Context, key string, want vmiClaim, binding vmiQuotaBinding) (vmiClaim, bool, error) {
 	c.vmiQuotaMu.Lock()
 	defer c.vmiQuotaMu.Unlock()
@@ -357,40 +438,10 @@ func (c *Controller) reserveVMIClaim(ctx context.Context, key string, want vmiCl
 		if err != nil {
 			return vmiClaim{}, false, err
 		}
-		if old, ok := ledger.Claims[key]; ok {
-			if old.PodName != want.PodName || old.RepositoryID != want.RepositoryID || old.WorkflowUID != want.WorkflowUID || old.Name != want.Name || old.Hash != want.Hash || old.Demand != want.Demand {
-				return vmiClaim{}, false, errors.New("argojob: VMI create intent changed")
-			}
-			return old, false, nil
-		}
-		// A stale observer must not resurrect an operation after its closed
-		// receipt was pruned. Pod UID existence is checked inside this CAS
-		// attempt, before creating any new intent.
-		currentPod, err := c.kube.CoreV1().Pods(c.config.Namespace).Get(ctx, want.PodName, metav1.GetOptions{})
+		pods, err := c.kube.CoreV1().Pods(c.config.Namespace).List(ctx, metav1.ListOptions{LabelSelector: "workflows.argoproj.io/workflow", Limit: 2048})
 		if err != nil {
 			return vmiClaim{}, false, err
 		}
-		if currentPod.UID != want.PodUID || currentPod.DeletionTimestamp != nil {
-			return vmiClaim{}, false, errors.New("argojob: VMI create operation Pod is gone or replaced")
-		}
-		// A completed operation's tombstone is needed only while its Pod can
-		// return to the identity barrier. Pending/ambiguous POSTs are never pruned.
-		pods, podErr := c.kube.CoreV1().Pods(c.config.Namespace).List(ctx, metav1.ListOptions{LabelSelector: "workflows.argoproj.io/workflow", Limit: 2048})
-		if podErr != nil {
-			return vmiClaim{}, false, podErr
-		}
-		if pods.Continue == "" {
-			present := map[types.UID]bool{}
-			for _, p := range pods.Items {
-				present[p.UID] = true
-			}
-			for k, r := range ledger.Claims {
-				if r.Closed && !present[r.PodUID] {
-					delete(ledger.Claims, k)
-				}
-			}
-		}
-
 		objects, err := c.vmi.Resource(vmiResource).Namespace(c.config.Namespace).List(ctx, metav1.ListOptions{Limit: 2048})
 		if err != nil {
 			return vmiClaim{}, false, err
@@ -399,18 +450,46 @@ func (c *Controller) reserveVMIClaim(ctx context.Context, key string, want vmiCl
 			return vmiClaim{}, false, errors.New("argojob: too many live VMIs for bounded quota inspection")
 		}
 		actual := map[string]*unstructured.Unstructured{}
-		var repoUsed, workflowUsed argoworkflow.VMIDemand
 		for i := range objects.Items {
 			object := &objects.Items[i]
 			actual[object.GetName()] = object
-			// Old/unattributable VMIs are conservatively charged against every repo.
+		}
+		if reconcileVMIClaims(&ledger, actual, pods, c.config.Namespace, time.Now().UTC()) {
+			err = c.updateVMILedger(ctx, cm, ledger)
+			if err != nil && !apierrors.IsConflict(err) {
+				return vmiClaim{}, false, err
+			}
+			continue // Durable repair, including on an eventual over-grant refusal.
+		}
+		if old, ok := ledger.Claims[key]; ok {
+			if old.PodName != want.PodName || old.RepositoryID != want.RepositoryID || old.WorkflowUID != want.WorkflowUID || old.Name != want.Name || old.Hash != want.Hash || old.Demand != want.Demand {
+				return vmiClaim{}, false, errors.New("argojob: VMI create intent changed")
+			}
+			return old, false, nil
+		}
+		// Closed receipts may have been pruned. A stale observer must not start
+		// another POST after its resource Pod has gone or been replaced.
+		currentPod, err := c.kube.CoreV1().Pods(c.config.Namespace).Get(ctx, want.PodName, metav1.GetOptions{})
+		if err != nil {
+			return vmiClaim{}, false, err
+		}
+		if currentPod.UID != want.PodUID || currentPod.DeletionTimestamp != nil {
+			return vmiClaim{}, false, errors.New("argojob: VMI create operation Pod is gone or replaced")
+		}
+		var repoUsed, workflowUsed argoworkflow.VMIDemand
+		for _, object := range actual {
 			repo := object.GetLabels()[vmiRepositoryLabel]
 			if repo != "" && repo != fmt.Sprint(want.RepositoryID) {
 				continue
 			}
-			demand, err := liveVMIDemand(object)
-			if err != nil {
-				return vmiClaim{}, false, err
+			demand, parseErr := liveVMIDemand(object)
+			if parseErr != nil {
+				// Labeled objects can block only their own repository. An unattributed
+				// legacy object is charged the maximum individually admitted VMI.
+				demand = argoworkflow.VMIInstanceLimit()
+				if repo != "" {
+					demand = binding.Limit
+				}
 			}
 			repoUsed = addVMIDemand(repoUsed, demand)
 			for _, owner := range object.GetOwnerReferences() {
@@ -420,43 +499,20 @@ func (c *Controller) reserveVMIClaim(ctx context.Context, key string, want vmiCl
 				}
 			}
 		}
-		for k, claim := range ledger.Claims {
+		for _, claim := range ledger.Claims {
 			if claim.Closed {
 				continue
 			}
-			object := actual[claim.Name]
-			if claim.UID != "" {
-				if object == nil {
-					claim.Closed = true
-					ledger.Claims[k] = claim
-					continue
-				}
-				if object.GetUID() != claim.UID {
-					return vmiClaim{}, false, errors.New("argojob: reserved VMI UID changed")
-				}
+			if object := actual[claim.Name]; matchesVMIClaim(object, c.config.Namespace, claim) && object.GetUID() == claim.UID {
+				continue
 			}
-			if object != nil {
-				if object.GetLabels()[vmiRepositoryLabel] != fmt.Sprint(claim.RepositoryID) || object.GetAnnotations()[vmiCreateHashAnnotation] != claim.Hash || object.GetAnnotations()[vmiOperationAnnotation] != string(claim.PodUID) {
-					return vmiClaim{}, false, errors.New("argojob: live VMI differs from pending reservation")
-				}
-				continue // Actual object was counted above; do not count its claim twice.
-			}
+			// Mismatch stays charged to the claim's repo; only that operation's
+			// own retry is refused. It cannot deny service to every other repo.
 			if claim.RepositoryID == want.RepositoryID {
 				repoUsed = addVMIDemand(repoUsed, claim.Demand)
 			}
 			if claim.WorkflowUID == want.WorkflowUID {
 				workflowUsed = addVMIDemand(workflowUsed, claim.Demand)
-			}
-		}
-		if pods.Continue == "" {
-			present := map[types.UID]bool{}
-			for _, p := range pods.Items {
-				present[p.UID] = true
-			}
-			for k, r := range ledger.Claims {
-				if r.Closed && !present[r.PodUID] {
-					delete(ledger.Claims, k)
-				}
 			}
 		}
 		if len(ledger.Claims) >= maxVMIClaims {
@@ -465,6 +521,7 @@ func (c *Controller) reserveVMIClaim(ctx context.Context, key string, want vmiCl
 		if !addVMIDemand(repoUsed, want.Demand).Fits(binding.Limit) || !addVMIDemand(workflowUsed, want.Demand).Fits(binding.Peak) {
 			return vmiClaim{}, false, fmt.Errorf("argojob: VMI create refused over grant or workflow peak: repository used=%+v requested=%+v limit=%+v workflow used=%+v peak=%+v", repoUsed, want.Demand, binding.Limit, workflowUsed, binding.Peak)
 		}
+		want.ReservedAt = time.Now().UTC()
 		ledger.Claims[key] = want
 		err = c.updateVMILedger(ctx, cm, ledger)
 		if apierrors.IsConflict(err) {
@@ -479,6 +536,8 @@ func (c *Controller) reserveVMIClaim(ctx context.Context, key string, want vmiCl
 }
 
 func (c *Controller) finishVMIClaim(ctx context.Context, key string, uid types.UID, closed bool) error {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
 	c.vmiQuotaMu.Lock()
 	defer c.vmiQuotaMu.Unlock()
 	for range 8 {
@@ -514,7 +573,7 @@ func (c *Controller) finishVMIClaim(ctx context.Context, key string, uid types.U
 func (c *Controller) WithVMICreateClient(client rest.Interface) *Controller {
 	c.vmiCreate = func(ctx context.Context, namespace string, object *unstructured.Unstructured) (*unstructured.Unstructured, error) {
 		result := &unstructured.Unstructured{}
-		err := client.Post().AbsPath("/apis/kubevirt.io/v1/namespaces", namespace, "virtualmachineinstances").MaxRetries(0).Body(object).Do(ctx).Into(result)
+		err := client.Post().AbsPath("/apis/kubevirt.io/v1/namespaces", namespace, "virtualmachineinstances").MaxRetries(0).Timeout(vmiAPIRequestTimeout).Body(object).Do(ctx).Into(result)
 		return result, err
 	}
 	return c

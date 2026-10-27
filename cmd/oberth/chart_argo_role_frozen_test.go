@@ -221,7 +221,6 @@ func TestChartVMICreateGuardPermissionsAreSeparateAndBounded(t *testing.T) {
 	role := findChartRBACDoc(t, docs, "Role", "oberth-vmi-reservations")
 	want := []map[string]any{
 		{"apiGroups": []any{"kubevirt.io"}, "resources": []any{"virtualmachineinstances"}, "verbs": []any{"create", "get"}},
-		{"apiGroups": []any{""}, "resources": []any{"configmaps"}, "verbs": []any{"create"}},
 		{"apiGroups": []any{""}, "resources": []any{"configmaps"}, "resourceNames": []any{"oberth-vmi-reservations"}, "verbs": []any{"get", "update"}},
 	}
 	if role.Metadata.Namespace != "oberth-argo" || canonicalRules(t, role.Rules) != canonicalRules(t, want) {
@@ -235,4 +234,26 @@ func TestChartVMICreateGuardPermissionsAreSeparateAndBounded(t *testing.T) {
 	if canonicalRules(t, binding.Subjects) != canonicalRules(t, frozen.Subjects) {
 		t.Fatal("quota authority was granted to another identity")
 	}
+	ledgerYAML, err := exec.Command("helm", "template", "oberth", "../../charts/oberth", "--set", "image.ref=example.invalid/oberth@"+testImageDigest, "-s", "templates/vmi-reservations.yaml").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ledger map[string]any
+	if err = yaml.NewYAMLOrJSONDecoder(bytes.NewReader(ledgerYAML), 4096).Decode(&ledger); err != nil {
+		t.Fatal(err)
+	}
+	metadata := ledger["metadata"].(map[string]any)
+	if ledger["kind"] != "ConfigMap" || metadata["name"] != "oberth-vmi-reservations" || metadata["namespace"] != "oberth-argo" {
+		t.Fatalf("wrong pre-created ledger: %v", ledger)
+	}
+	if metadata["labels"].(map[string]any)["oberth.ci/role"] != "vmi-reservations" || metadata["annotations"].(map[string]any)["helm.sh/resource-policy"] != "keep" {
+		t.Fatal("ledger identity/lifetime not pinned")
+	}
+	if _, owned := ledger["data"]; owned {
+		t.Fatal("Helm must not own/reset mutable ledger data")
+	}
+	if _, owned := metadata["annotations"].(map[string]any)["oberth.ci/vmi-ledger-initialized"]; owned {
+		t.Fatal("Helm must not own/reset the initialization marker")
+	}
+
 }

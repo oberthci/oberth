@@ -53,7 +53,8 @@ group until capacity frees. A single run exceeding the grant still fails
 admission. Completion, cancellation and supersession release the reservation
 once execution is terminal or Workflow deletion is accepted. On restart, adopted
 branch Workflows retain their VM demand from the verified live spec. Legacy
-Workflows without the server quota binding retain summed demand.
+VMI Workflows without the server quota binding are refused immediately during
+adoption with a drain-before-upgrade hint.
 Each is counted exactly once before new work is admitted, even if its grant
 was reduced or revoked while it ran; new work waits for capacity to drain.
 
@@ -127,29 +128,48 @@ refused before the API POST or launcher-token delivery. Existing grants and
 defaults are unchanged; running Workflows retain their admitted grant snapshot,
 including after revocation, consistently with existing adoption behavior.
 
-The server gets a separate Role with VMI create/get and permission to create
-the ledger ConfigMap. Kubernetes cannot name-scope create, but get/update are
-restricted to `oberth-vmi-reservations`; audit-anchor update is not granted.
-The frozen Argo Role is unchanged. No hostPath, new Pod privilege, or pipeline
-ServiceAccount create permission is added. Drain old VMI workflows before
-upgrading: their old resource-create Pods cannot receive new launcher tokens.
+The chart pre-creates `oberth-vmi-reservations` as a metadata-only public
+ConfigMap with `helm.sh/resource-policy: keep`. Oberth initializes its data once
+with a resourceVersion check and a server-owned initialization marker. Helm
+never owns the mutable data or marker, so later upgrades/rollbacks cannot replay
+an empty reservation set. Missing or corrupt initialized data fails closed.
+Retain this ConfigMap across restarts and rollbacks: deleting it discards pending
+reservations.
+The server's separate Role grants VMI create/get and only fixed-name ledger
+get/update; it has no ConfigMap create permission. The frozen Argo Role stays
+unchanged. No hostPath, new Pod privilege or pipeline create permission is added.
 
-Each durable operation permits only one API POST, with automatic POST retries
-disabled. An explicit API rejection closes its claim; an ambiguous transport
-failure, timeout or cancellation keeps the slot even if a subsequent GET sees
-nothing. A matching observed VMI can resolve the pending claim. Only absence
-of a previously confirmed UID releases its capacity; closed-operation receipts
-are pruned after their resource Pod is gone. The ledger is bounded to 2048
-claims/1 MiB; inspection is bounded and errors refuse further creates.
+**Drain legacy resource-based VMI workflows before upgrading.** Adoption now
+refuses a VMI Workflow without a server quota binding immediately. Old
+resource-create Pods cannot obtain new launcher tokens. See the
+[release note](releases/v0.17.59-kubevirt.md).
 
-If an ambiguous claim has no observable VMI, inspect the ledger and API audit
-records before recovery. Quiesce the server and its outstanding API requests,
-verify the operation cannot still commit, and have an administrator remove
-only that verified-stale claim before restarting. Never delete the entire
-ledger or refund a pending claim based solely on a timeout/NotFound. This
-conservative case can hold capacity until operator recovery. The guard covers
-repository-authored Argo VMI resources; the separate administrator-controlled
-protected runner transport retains its existing policy.
+Each durable operation permits only one API POST, without automatic retries.
+The operation has a 20-second context and the POST sends a 20-second API request
+timeout. Completion saves its UID with an independent ten-second context even
+if the caller was canceled. Reservation also adopts a live UID when name,
+namespace, repository, source hash, operation and Workflow owner match, so a
+lost response or failed completion update cannot permanently leak a slot.
+Confirmed deletion releases that capacity. Closed receipts are pruned only
+after their resource Pod is gone.
+
+Pending claims carry their reservation time. When no matching live VMI exists,
+a pending claim closes once its resource Pod UID is absent from a complete API
+list **and** it is more than five minutes old, well beyond the bounded POST.
+This also heals a crash between reservation and POST. A missing timestamp starts
+a fresh grace period; a recent claim, a still-present Pod or an incomplete list
+never earns an age-based refund. Timeout/NotFound alone never releases a slot.
+A canceled stale observer cannot send another POST, and a pruned operation must
+still prove its current resource Pod UID exists before reserving again.
+
+Malformed labeled VMIs conservatively exhaust only their own repository's
+available grant. An unattributed unreadable legacy VMI is charged the individual
+admission maximum (1 VM, 4 cores, 8Gi) against each repository. Conflicting
+pending operations remain charged to their repository and refuse only their
+own retries; unrelated repositories continue. The ledger remains bounded to
+2048 claims / 1 MiB. API/ledger errors and incomplete VMI inspection fail closed.
+The guard covers repository-authored Argo VMI resources; the separate
+administrator-controlled protected runner transport retains its existing policy.
 
 ## Direct kernel boot
 
