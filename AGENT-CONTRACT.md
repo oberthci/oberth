@@ -2044,19 +2044,28 @@ continuity checks; it must never be used to reset or bypass those checks.
   (including bounded get-only retries) may collapse; create/delete retries and
   dynamic fan-out earn no credits. Terminal-state OR dependencies establish
   ordering only: a later create must require a matching delete's Succeeded
-  status before it receives lifetime credit. Failure, omission, skip, uncertain
+  status before it receives lifetime credit. Mixed top-level `&&`/`||` in
+  dependencies receives no credit; OR groups must be parenthesized. Failure, omission, skip, uncertain
   or unproven conditional deletion and onExit never imply release. A
   non-transitive lifetime relation falls back to the sum; its transitive closure
   must never be used to invent deletion credits across omitted phases.
   Partition exclusivity is limited to one immutable invocation scalar and safe
   expression-tag string equalities, e.g.
   `{{=inputs.parameters['partition'] == '0'}}`, whose binding is explicit and
-  whose resolved producer precedes that invocation. Raw output substitution,
-  YAML defaults, independent selectors and arbitrary output expressions earn
-  no exclusivity credits. Every authored `when` string is submitted unchanged;
+  whose resolved producer has an explicit Succeeded prerequisite on its DAG
+  consumer (or is provably unconditional in an earlier steps group). Mere
+  ancestry/bare/terminal dependencies are insufficient. Output-fed consumer
+  inputs with `default`, `value` or `valueFrom` receive no shared-scalar credit:
+  skipped/omitted producers, or successful producers emitting Argo's internal
+  absent-output sentinel, can activate different consumer fallbacks. Explicit
+  literal arguments remain supported. Raw output substitution, defaults alone,
+  independent selectors and arbitrary output expressions earn no exclusivity credits. Every authored `when` string is submitted unchanged;
   repositories must adopt the safe form themselves. The analyzer executes no
-  planner and is bounded to 4,096 scan/expansion visits, 256 projected nodes and
-  32 partition literals. Repeated creates count separately. The peak remains
+  planner and is bounded to 4,096 shared scan/expansion/scenario proof checks,
+  256 projected nodes and 32 partition literals. A scenario with more than 16
+  enabled create invocations falls back to the sum before reachability analysis.
+  Repeated creates count separately. Demand is memoized per immutable resolved
+  source, without caching or bypassing policy admission. The peak remains
   reserved for the entire workflow; this does not enable early slot release.
   Oberth mediates repository resource creates before token delivery; submitted
   resource Pods run get and their launcher account cannot create. A separate

@@ -123,8 +123,13 @@ contains no VMI creates or deletes. A get-only address template may therefore
 have a bounded retry limit (0–10) without disabling the proof. Retries around
 creates or deletes, unresolved references, dynamic fan-out, cycles, lifecycle
 hooks, unsupported dependency expressions and exit-handler creates keep the
-conservative sum. Work is bounded separately: 4,096 classification/expansion
-visits, 256 projected nodes and at most 32 partition literals. Successful
+conservative sum. A dependency mixing top-level `&&` and `||` must put each
+OR group in parentheses; otherwise the projection falls back rather than
+assuming a delete is required under Argo's operator precedence. Work is bounded
+to 4,096 shared classification/expansion and scenario-proof checks, 256
+projected nodes and at most 32 partition literals. A scenario with more than
+16 enabled create invocations also keeps the sum. Demand is computed once per
+immutable resolved source; repeated admission still checks the current policy. Successful
 completion of a composite template alone does not prove every child delete
 ran successfully.
 
@@ -166,7 +171,19 @@ output as ordinary parameter data:
         value: "{{tasks.select.outputs.parameters.partition}}"
 ```
 
-Input defaults do not count as a binding. The producer must precede the call;
+An input supplied only through a YAML default is not a binding. Output-based
+bindings additionally require an explicit `producer.Succeeded` prerequisite on
+the consuming DAG task. Mere ancestry, bare dependencies and terminal-state ORs
+are insufficient: Argo can substitute an absent-output sentinel for a skipped
+or omitted producer and then use each consumer's own input fallback. In steps
+workflows, only a provably unconditional producer in an earlier step group
+supplies a shared output scalar.
+
+A consumer input with `default`, `value` or `valueFrom` cannot earn shared-scalar
+credit from an unknown output, even when the producer must succeed: a producer
+can emit Argo's internal absent-output sentinel literally and trigger those
+fallbacks. Such graphs retain summed demand. Explicit closed literal arguments
+remain supported; defaults alone never establish exclusivity.
 Oberth never runs a planner before reservation. Direct predecessor-output
 guards may use `{{=tasks['select'].outputs.parameters['partition'] == '0'}}`
 (or `steps['select']` in a steps workflow). Bracket keys and string literals

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"reflect"
 	"slices"
+	"sync"
 
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
 )
@@ -72,10 +73,13 @@ func cloneVMIFragments(fragments map[FragmentKey]Fragment) map[FragmentKey]Fragm
 // parameter declarations; BindParameters stamps the same authoritative binding
 // only after that check, just as ordinary submission has always done.
 type ResolvedRunSource struct {
-	workflow  *wfv1.Workflow
-	lock      Lock
-	fragments map[FragmentKey]Fragment
-	identity  VMIDemandSummary
+	workflow        *wfv1.Workflow
+	lock            Lock
+	fragments       map[FragmentKey]Fragment
+	identity        VMIDemandSummary
+	demandOnce      sync.Once
+	cachedDemand    VMIDemand
+	cachedDemandErr error
 }
 
 func ResolveRunSource(source []byte, fragments map[FragmentKey]Fragment, binding RunSourceBinding) (*ResolvedRunSource, error) {
@@ -135,7 +139,14 @@ func (r *ResolvedRunSource) Policy(policy Policy) Policy {
 	return policy
 }
 
+// The resolved graph and binding are immutable. Admission may ask repeatedly
+// (or concurrently) for the same demand; compute the bounded proof only once.
 func (r *ResolvedRunSource) demand() (VMIDemand, error) {
+	r.demandOnce.Do(func() { r.cachedDemand, r.cachedDemandErr = r.computeDemand() })
+	return r.cachedDemand, r.cachedDemandErr
+}
+
+func (r *ResolvedRunSource) computeDemand() (VMIDemand, error) {
 	if !r.identity.Binding.complete() {
 		return DeclaredVMIDemand(r.workflow)
 	}

@@ -153,8 +153,17 @@ func TestRunVMIPartitionProof(t *testing.T) {
 			if demand.VMs < 4 {
 				t.Fatalf("missing exclusivity proof earned two-VM credit: %+v", demand)
 			}
-			if kind == "unconditional" && demand.VMs != 10 {
-				t.Fatalf("unconditional partitions must need 10 VMs: %+v", demand)
+			if kind == "unconditional" {
+				// All five phases expand to 25 enabled create invocations.
+				// The bounded analyzer now falls back at the 16-create ceiling.
+				sum, sumErr := SummedVMIDemand(r.Workflow())
+				if sumErr != nil || demand != sum {
+					t.Fatalf("unconditional partitions must retain the declared sum at the work bound: %+v, %v", demand, sumErr)
+				}
+				policy.VMIBudget = DefaultVMIBudget()
+				if _, receiptErr := r.Receipt(policy); receiptErr == nil {
+					t.Fatal("unconditional partitions admitted under a two-VM grant")
+				}
 			}
 		})
 	}

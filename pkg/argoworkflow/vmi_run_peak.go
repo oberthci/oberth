@@ -183,13 +183,13 @@ func runVMIDAGDependencies(dag *wfv1.DAGTemplate) (map[string][]vmiDependency, b
 	return deps, true
 }
 
-func vmiDependsOn(deps map[string][]vmiDependency, task, ancestor string, seen map[string]bool) bool {
-	if seen[task] {
-		return false
-	}
-	seen[task] = true
-	for _, d := range deps[task] {
-		if d.name == ancestor || vmiDependsOn(deps, d.name, ancestor, seen) {
+// Order alone is insufficient for output arguments: Argo may substitute an
+// absent-output sentinel for a Skipped/Omitted producer and then use each
+// consumer's own input Default/Value. Require an explicit local Succeeded
+// prerequisite before sharing one output identity across DAG consumers.
+func vmiRequiresOutputSuccess(deps map[string][]vmiDependency, task, producer string) bool {
+	for _, dep := range deps[task] {
+		if dep.name == producer && dep.success {
 			return true
 		}
 	}
@@ -210,7 +210,7 @@ func (g *runVMIGraph) outputScalars(name, path string, refs map[string]vmiScalar
 	}
 }
 
-func runVMIInputs(args wfv1.Arguments, resolve func(string) (vmiScalar, bool)) map[string]vmiScalar {
+func runVMIInputs(args wfv1.Arguments, inputs wfv1.Inputs, resolve func(string) (vmiScalar, bool)) map[string]vmiScalar {
 	env := map[string]vmiScalar{}
 	seen := map[string]bool{}
 	for _, p := range args.Parameters {
@@ -225,6 +225,20 @@ func runVMIInputs(args wfv1.Arguments, resolve func(string) (vmiScalar, bool)) m
 		value := p.Value.String()
 		if match := vmiScalarReference.FindStringSubmatch(value); len(match) == 2 {
 			if scalar, ok := resolve(match[1]); ok {
+				// A successful producer can itself emit Argo's absent-argument
+				// sentinel. ProcessArgs then uses each consumer's Default/Value/
+				// ValueFrom, so producer success alone cannot make those equal.
+				if !scalar.constant {
+					fallback := false
+					for _, input := range inputs.Parameters {
+						if input.Name == p.Name && (input.Default != nil || input.Value != nil || input.ValueFrom != nil) {
+							fallback = true
+						}
+					}
+					if fallback {
+						continue
+					}
+				}
 				env["inputs.parameters."+p.Name] = scalar
 			}
 		} else if vmiGuardLiteral.MatchString(value) {
@@ -273,14 +287,14 @@ func (g *runVMIGraph) expand(name, path string, inherited vmiCondition, inputs m
 					return scalar, true
 				}
 				bits := strings.Split(ref, ".")
-				if len(bits) != 5 || bits[0] != "tasks" || bits[2] != "outputs" || bits[3] != "parameters" || !vmiDependsOn(deps, task.Name, bits[1], map[string]bool{}) {
+				if len(bits) != 5 || bits[0] != "tasks" || bits[2] != "outputs" || bits[3] != "parameters" || !vmiRequiresOutputSuccess(deps, task.Name, bits[1]) {
 					return vmiScalar{}, false
 				}
 				scalar, ok := outputs[bits[1]][bits[4]]
 				return scalar, ok
 			}
 			condition := vmiCombine(inherited, parseVMICondition(task.When, g.trigger, resolve, 0), true)
-			a, b, ok := g.expand(task.Template, path+"/"+task.Name, condition, runVMIInputs(task.Arguments, resolve))
+			a, b, ok := g.expand(task.Template, path+"/"+task.Name, condition, runVMIInputs(task.Arguments, g.templates[task.Template].Inputs, resolve))
 			if !ok {
 				return 0, 0, false
 			}
@@ -320,7 +334,7 @@ func (g *runVMIGraph) expand(name, path string, inherited vmiCondition, inputs m
 					return s, ok
 				}
 				condition := vmiCombine(inherited, parseVMICondition(step.When, g.trigger, resolve, 0), true)
-				a, b, ok := g.expand(step.Template, path+"/"+step.Name, condition, runVMIInputs(step.Arguments, resolve))
+				a, b, ok := g.expand(step.Template, path+"/"+step.Name, condition, runVMIInputs(step.Arguments, g.templates[step.Template].Inputs, resolve))
 				if !ok {
 					return 0, 0, false
 				}
@@ -328,10 +342,15 @@ func (g *runVMIGraph) expand(name, path string, inherited vmiCondition, inputs m
 					g.edge(p, a, true, true)
 				}
 				next = append(next, b)
-				refs := map[string]vmiScalar{}
-				g.outputScalars(step.Template, path+"/"+step.Name, refs)
-				for name, s := range refs {
-					newOutputs["steps."+step.Name+".outputs.parameters."+name] = s
+				// Later groups also run after skipped steps. Their arguments
+				// can fall back to different consumer defaults, so only a
+				// provably unconditional producer supplies a shared scalar.
+				if condition.truth == vmiTrue {
+					refs := map[string]vmiScalar{}
+					g.outputScalars(step.Template, path+"/"+step.Name, refs)
+					for name, s := range refs {
+						newOutputs["steps."+step.Name+".outputs.parameters."+name] = s
+					}
 				}
 			}
 			for key, s := range newOutputs {
@@ -401,6 +420,50 @@ func runVMIPeak(wf *wfv1.Workflow, trigger RunTrigger) (VMIDemand, bool) {
 	if _, _, ok := g.expand(wf.Spec.Entrypoint, "entry", vmiCondition{truth: vmiTrue}, nil); !ok {
 		return VMIDemand{}, false
 	}
+	selectors := map[string][]string{}
+	for _, e := range g.events {
+		if e.condition.unsafe {
+			return VMIDemand{}, false
+		}
+		if e.condition.scalar != "" {
+			values := selectors[e.condition.scalar]
+			if !slices.Contains(values, e.condition.literal) {
+				selectors[e.condition.scalar] = append(values, e.condition.literal)
+			}
+		}
+	}
+	// One immutable invocation scalar is sufficient for a partition proof.
+	// Multiple independent selectors get no mutual-exclusion credits.
+	selector, values := "", []string{""}
+	if len(selectors) > 1 {
+		return VMIDemand{}, false
+	}
+	if len(selectors) == 1 {
+		for id, literals := range selectors {
+			if len(literals) > maxVMIPartitionValues {
+				return VMIDemand{}, false
+			}
+			selector = id
+			values = append(values, literals...)
+		}
+	}
+	// Bound enabled create invocations and charge scenario scans BEFORE the
+	// reachability matrices. This also rejects a large parallel graph before
+	// paying for its transitive closure, irrespective of partition count.
+	scenarios := make([][]runVMIEvent, len(values))
+	for i, value := range values {
+		for _, e := range g.events {
+			if !g.spend(1) {
+				return VMIDemand{}, false
+			}
+			if e.action == "create" && e.condition.evaluate(selector, value) != vmiFalse {
+				scenarios[i] = append(scenarios[i], e)
+				if len(scenarios[i]) > VMIBudgetLimit().MaxVMs {
+					return VMIDemand{}, false
+				}
+			}
+		}
+	}
 	n := len(g.edges)
 	order, execution := make([][]bool, n), make([][]bool, n)
 	for i := range n {
@@ -441,36 +504,9 @@ func runVMIPeak(wf *wfv1.Workflow, trigger RunTrigger) (VMIDemand, bool) {
 			}
 		}
 	}
-	selectors := map[string][]string{}
-	for _, e := range g.events {
-		if e.condition.unsafe {
-			return VMIDemand{}, false
-		}
-		if e.condition.scalar != "" {
-			values := selectors[e.condition.scalar]
-			if !slices.Contains(values, e.condition.literal) {
-				selectors[e.condition.scalar] = append(values, e.condition.literal)
-			}
-		}
-	}
-	// One immutable invocation scalar is sufficient for a partition proof.
-	// Multiple independent selectors get no mutual-exclusion credits.
-	selector, values := "", []string{""}
-	if len(selectors) > 1 {
-		return VMIDemand{}, false
-	}
-	if len(selectors) == 1 {
-		for id, literals := range selectors {
-			if len(literals) > maxVMIPartitionValues {
-				return VMIDemand{}, false
-			}
-			selector = id
-			values = append(values, literals...)
-		}
-	}
 	var peak VMIDemand
-	for _, value := range values {
-		demand, ok := g.scenarioPeak(order, success, selector, value)
+	for i, value := range values {
+		demand, ok := g.scenarioPeak(order, success, selector, value, scenarios[i])
 		if !ok {
 			return VMIDemand{}, false
 		}
@@ -481,11 +517,16 @@ func runVMIPeak(wf *wfv1.Workflow, trigger RunTrigger) (VMIDemand, bool) {
 	return peak, true
 }
 
-func (g *runVMIGraph) scenarioPeak(order, success [][]bool, selector, value string) (VMIDemand, bool) {
-	var creates []runVMIEvent
+func (g *runVMIGraph) scenarioPeak(order, success [][]bool, selector, value string, creates []runVMIEvent) (VMIDemand, bool) {
+	// Inspect only matching deletes rather than scanning every event for each
+	// create pair. All scenario scans and proof checks share the work budget.
+	deletes := map[string][]runVMIEvent{}
 	for _, e := range g.events {
-		if e.action == "create" && e.condition.evaluate(selector, value) != vmiFalse {
-			creates = append(creates, e)
+		if !g.spend(1) {
+			return VMIDemand{}, false
+		}
+		if e.action == "delete" && e.condition.evaluate(selector, value) == vmiTrue {
+			deletes[e.name] = append(deletes[e.name], e)
 		}
 	}
 	before := make([][]bool, len(creates))
@@ -494,11 +535,17 @@ func (g *runVMIGraph) scenarioPeak(order, success [][]bool, selector, value stri
 		vms[i], cores[i], memory[i] = 1, int64(a.demand.Cores), a.demand.MemoryBytes
 		before[i] = make([]bool, len(creates))
 		for j, b := range creates {
+			if !g.spend(1) {
+				return VMIDemand{}, false
+			}
 			if i == j {
 				continue
 			}
-			for _, d := range g.events {
-				if d.action == "delete" && d.name == a.name && d.condition.evaluate(selector, value) == vmiTrue && order[a.node][d.node] && success[d.node][b.node] {
+			for _, d := range deletes[a.name] {
+				if !g.spend(1) {
+					return VMIDemand{}, false
+				}
+				if order[a.node][d.node] && success[d.node][b.node] {
 					before[i][j] = true
 					break
 				}
@@ -511,6 +558,9 @@ func (g *runVMIGraph) scenarioPeak(order, success [][]bool, selector, value stri
 	for i := range creates {
 		for j := range creates {
 			for k := range creates {
+				if !g.spend(1) {
+					return VMIDemand{}, false
+				}
 				if before[i][j] && before[j][k] && !before[i][k] {
 					return VMIDemand{}, false
 				}

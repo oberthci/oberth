@@ -215,12 +215,17 @@ type vmiDependency struct {
 // Precisely recognize conjunctions of successful completion and terminal-state
 // OR groups for ONE predecessor. Terminal groups establish order, not success.
 // No negation, Daemoned, AnySucceeded, mixed-task OR, or arbitrary status logic.
+// Mixed top-level &&/|| is refused: Argo binds && more tightly, so treating
+// each && operand as an OR group could invent a successful delete prerequisite.
 func parseVMIDependencies(expression string) ([]vmiDependency, bool) {
 	if len(expression) > 4096 {
 		return nil, false
 	}
 	parts, ok := splitVMIExpression(strings.TrimSpace(expression), "&&")
 	if !ok {
+		return nil, false
+	}
+	if ors, valid := splitVMIExpression(strings.TrimSpace(expression), "||"); !valid || (len(parts) > 1 && len(ors) > 1) {
 		return nil, false
 	}
 	var out []vmiDependency
