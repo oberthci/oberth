@@ -129,6 +129,57 @@ func waitTestShadow(t *testing.T, cache *Cache) {
 	}
 }
 
+// The worker still runs its real helper, cancellation and reaping paths. Only
+// its deadline source is manual, so it cannot expire during an unrelated clone
+// or before a loaded host has even scheduled the helper process.
+type shadowManualDeadline struct{ context.Context }
+
+func (ctx shadowManualDeadline) Err() error {
+	if errors.Is(context.Cause(ctx.Context), context.DeadlineExceeded) {
+		return context.DeadlineExceeded
+	}
+	return ctx.Context.Err()
+}
+
+func installShadowManualDeadline(t *testing.T, cache *Cache) func() {
+	t.Helper()
+	listener, err := net.ListenTCP("tcp", &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = listener.Close() })
+	deadlines := make(chan context.CancelCauseFunc, 1)
+	cache.CloseShadow()
+	cache.shadow = newShadowStateWithTimeout(cache, t.Context(), shadowTestCommand(t, "ready-timeout:"+listener.Addr().String()),
+		func(parent context.Context, timeout time.Duration) (context.Context, context.CancelFunc) {
+			if timeout != defaultTimeout(0) {
+				t.Errorf("observer changed the production timeout: %v", timeout)
+			}
+			ctx, cancel := context.WithCancelCause(parent)
+			deadlines <- cancel
+			return shadowManualDeadline{ctx}, func() { cancel(context.Canceled) }
+		})
+	completed := uint64(0)
+	return func() {
+		t.Helper()
+		// Liveness bound only: expiration is triggered by the ready handshake,
+		// never by elapsed host time. This starts after foreground delivery.
+		if err := listener.SetDeadline(time.Now().Add(time.Minute)); err != nil {
+			t.Fatal(err)
+		}
+		connection, err := listener.Accept()
+		if err != nil {
+			t.Fatal("helper did not reach the ready handshake", err)
+		}
+		_ = connection.Close()
+		if stats := cache.ShadowStats(); stats.Runs != completed || stats.Errors != completed {
+			t.Fatal("observer finished before its deadline was triggered", stats)
+		}
+		(<-deadlines)(context.DeadlineExceeded)
+		completed++
+	}
+}
+
 func TestShadowNeverChangesCLIDelivery(t *testing.T) {
 	for _, mode := range []string{"real", "mismatch", "tree-mismatch", "tree-mismatch-attr", "timeout", "crash", "nonzero", "cli-failed", "oversize", "hash-guard", "canceled", "priority"} {
 		t.Run(mode, func(t *testing.T) {
@@ -145,8 +196,9 @@ func TestShadowNeverChangesCLIDelivery(t *testing.T) {
 			if _, err := cache.Ensure(t.Context(), "example"); err != nil {
 				t.Fatal(err)
 			}
+			var expireShadow func()
 			if mode == "timeout" {
-				cache.timeout = time.Second
+				expireShadow = installShadowManualDeadline(t, cache)
 			}
 			sha := runGit(t, repository.work, "rev-parse", "HEAD")
 			var expected bytes.Buffer
@@ -160,10 +212,16 @@ func TestShadowNeverChangesCLIDelivery(t *testing.T) {
 			if !bytes.Equal(actual.Bytes(), expected.Bytes()) {
 				t.Fatal("observer changed CLI archive bytes")
 			}
+			if expireShadow != nil {
+				expireShadow()
+			}
 			waitTestShadow(t, cache)
 			workspace := filepath.Join(t.TempDir(), "work")
 			if err := cache.Checkout(t.Context(), "example", sha, workspace); err != nil {
 				t.Fatal(err)
+			}
+			if expireShadow != nil {
+				expireShadow()
 			}
 			waitTestShadow(t, cache)
 			stats := cache.ShadowStats()
