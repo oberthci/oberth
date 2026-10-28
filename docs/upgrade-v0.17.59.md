@@ -270,8 +270,13 @@ Before resuming normal submissions:
    server network/storage if that cost matters for capacity planning.
 2. If shadow is enabled, use an unscoped administrator connection for
    `oberth status --json` (`/api/status`) and the existing authenticated
-   `/metrics` scrape. Observe completed `shadow_runs`, errors/skips and both
-   shadow metrics. Investigate `gogit_hash_guard` or genuine mismatches with
+   `/metrics` scrape. Confirm `oberth_gitcache_shadow_enabled` is 1 and
+   `oberth_gitcache_shadow_compared_total` increases on representative traffic.
+   Observe `oberth_gitcache_shadow_dropped_total` (queue-full drops) alongside
+   `shadow_runs`, errors/skips, mismatch counts and error reasons. Completed
+   comparisons include mismatches and expected attribute gaps, so a positive
+   count alone does not prove clean parity. Investigate `gogit_hash_guard` or
+   genuine mismatches with
    repository/SHA/hash evidence; preserve the pack layout without logging file
    contents or credentials. `expected_attr_gap` is an archive-parity gap, not
    proof of corruption. A restart resets counters; shutdown cancellation is

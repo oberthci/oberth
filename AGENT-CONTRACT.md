@@ -84,6 +84,13 @@ resource/custody requirements are in [database-backup.md](docs/database-backup.m
   Unscoped authenticated admins can read metrics; scoped status omits these counters.
   `shadow_runs` counts completed attempts (including errors): errors/skips must
   be checked before calling any soak green.
+  `oberth_gitcache_shadow_enabled` is a startup-configuration gauge (0 or 1).
+  `oberth_gitcache_shadow_compared_total` counts completed archive/tree hash
+  comparisons, including mismatches and expected attribute gaps, but not helper
+  failures or shutdown cancellation. It must increase during a representative
+  soak; zero mismatches/errors without comparisons proves no parity.
+  `oberth_gitcache_shadow_dropped_total` counts only queue-full drops, a subset
+  of `shadow_skipped`; invalid/unpinnable observations are not queue-full drops.
   Normal goArchive fails closed on detected export attributes, including
   committed root/nested/symlink .gitattributes, macro definitions, info/attributes,
   configured core.attributesFile, and malformed/overlarge attribute files (1 MiB
