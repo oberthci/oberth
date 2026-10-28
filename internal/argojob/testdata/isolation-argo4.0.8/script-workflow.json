@@ -19,7 +19,8 @@
       "oberth.ci/run-id": "run-abc123",
       "oberth.ci/secret-paths": "oberth/data/release/r2-upload-token",
       "oberth.ci/size": "L",
-      "oberth.ci/spec-identity": "26cc4b28fb896fe501153a369285c0f1323c9823a89301c003a54c60ba03b01e",
+      "oberth.ci/spec-identity": "da696afa64a0ea583f0dc4d78cb408dc94a1f092ed30cda8bd6a628bfd642d11",
+      "oberth.ci/step-usage-memory-policy": "explicit-limit-256Mi-v1",
       "workflows.argoproj.io/pod-name-format": "v2"
     }
   },
@@ -90,7 +91,11 @@
               "value": "main"
             }
           ],
-          "resources": {},
+          "resources": {
+            "limits": {
+              "memory": "256Mi"
+            }
+          },
           "volumeMounts": [
             {
               "name": "work",

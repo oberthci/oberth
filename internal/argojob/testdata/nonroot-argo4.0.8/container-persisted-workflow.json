@@ -21,7 +21,8 @@
       "oberth.ci/nonroot-templates": "test",
       "oberth.ci/ref": "refs/heads/main",
       "oberth.ci/run-id": "run-abc123",
-      "oberth.ci/spec-identity": "e690c0e2db909900c6e717552974efe6247245ac72b7819d86a5f70d756d2090",
+      "oberth.ci/spec-identity": "bb1028b59777b1e82f65d7258a8b1d5c0215a2920d383388c3c21f1120d8ab42",
+      "oberth.ci/step-usage-memory-policy": "explicit-limit-256Mi-v1",
       "oberth.ci/verified-controller-profile": "nonroot-static-v1:9f3266af98f0e8b28f4098c906b2bff8d99fa1fdf36e6d396b5239ec2079a833",
       "workflows.argoproj.io/pod-name-format": "v2"
     }
@@ -32,7 +33,11 @@
         "name": "test",
         "inputs": {},
         "outputs": {},
-        "metadata": {},
+        "metadata": {
+          "annotations": {
+            "oberth.ci/step-usage-memory-warning": "usage instrumentation disabled: memory limit unspecified is below the explicit 256Mi instrumentation floor; usage remains unknown; resources are unchanged"
+          }
+        },
         "container": {
           "name": "",
           "image": "golang:1.26.10-trixie@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -147,7 +152,11 @@
         "name": "ordinary",
         "inputs": {},
         "outputs": {},
-        "metadata": {},
+        "metadata": {
+          "annotations": {
+            "oberth.ci/step-usage-memory-warning": "usage instrumentation disabled: memory limit unspecified is below the explicit 256Mi instrumentation floor; usage remains unknown; resources are unchanged"
+          }
+        },
         "container": {
           "name": "",
           "image": "golang:1.26.10-trixie@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -295,7 +304,7 @@
   },
   "status": {
     "phase": "Running",
-    "startedAt": "2026-10-21T11:34:37Z",
+    "startedAt": "2026-10-28T06:58:24Z",
     "finishedAt": null,
     "estimatedDuration": 1,
     "progress": "0/1",
@@ -308,7 +317,7 @@
         "templateName": "test",
         "templateScope": "local/oberth-oberth-run-abc1-aabbccddeeff",
         "phase": "Pending",
-        "startedAt": "2026-10-21T11:34:37Z",
+        "startedAt": "2026-10-28T06:58:24Z",
         "finishedAt": null,
         "estimatedDuration": 1,
         "progress": "0/1",

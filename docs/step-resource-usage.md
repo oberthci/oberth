@@ -12,6 +12,52 @@ add `kubernetes.io/arch` matching the server's `runtime.GOARCH` through
 KVM workflows and unsupported leaves remain unwrapped. This adds no hostPath,
 capabilities, ServiceAccount token or RBAC.
 
+Instrumentation runs in the main container's cgroup and consumes its budget.
+The current wrapper is the full server executable: all linked Go package
+initializers run before `internal-step-exec` dispatch. It is not a small shell
+wrapper. New container/script leaves are therefore measured only with an
+**explicit container memory limit of at least 256Mi**. Smaller or unspecified
+limits keep their original command, resources and scheduling constraints;
+usage remains null. A request is not a limit, and inherited/defaulted limits
+are not sufficient evidence of headroom. Oberth neither raises a limit nor
+adds a memory request. This cutoff is an eligibility policy, not a guarantee
+that the remaining budget is sufficient for arbitrary user code.
+
+At admission the server logs a warning naming the Workflow, template, limit
+and instrumentation floor. The warning is also retained on the template as
+`oberth.ci/step-usage-memory-warning` (visible on the Workflow and its Pod).
+The server stamps `oberth.ci/step-usage-memory-policy` on new Workflows so
+restart/adoption preserves both the new policy and already-running older
+wrapped specs. Existing Pods are not rewritten: resubmit a failed tiny step.
+Skipping usage instrumentation does not remove a repository's explicit
+`oberth secretstore exec` or Argo's emissary; those still consume memory.
+
+Run the admitted tiny-step command through the real Argo v4.0.8 emissary
+under a 32Mi cgroup with swap disabled:
+
+```sh
+hack/test-step-usage-memory.py --argoexec /path/to/linux/argoexec \
+  --receipt /path/to/receipt.json
+```
+
+Docker runs locally; the cluster gains no permissions. The receipt includes cgroup
+peak/events, process RSS and container exit/OOM state. The short shell script
+holds a 4MiB variable so the test exposes overhead that an empty `true` can
+hide under reclaim. Supply `--baseline-binary` to compare the same command
+forced through the previous full-server wrapper. The binary, emissary and
+BusyBox image must match the selected Linux architecture; the default fixture
+image is arm64. `--image`/`--platform` support other local targets. Missing
+tools or a failed container are errors, not skips or successful evidence.
+
+On 2026-10-28 a Linux/arm64 Go 1.26.10 release-flag build on v0.17.61
+measured roughly 45–48MiB wrapper RSS without memory pressure, including
+reclaimable executable pages. Argo plus the wrapper peaked at 139–141MiB in
+a 256Mi cgroup; this motivated the 256Mi eligibility floor. The 32Mi short
+script passed 10/10 admitted runs; the identical forced-wrapper runs were
+OOMKilled/137 10/10. These are synthetic local measurements, not a capture
+of a production Pod. Even an empty command can hide the regression because
+Linux reclaims executable pages aggressively under pressure.
+
 The wrapper forwards catchable signals to the child process group, except
 SIGCHLD and Go runtime SIGURG, like emissary. SIGKILL and SIGSTOP cannot be
 caught. Child signal death returns 128+signal (SIGSEGV is 139). A command that

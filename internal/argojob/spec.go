@@ -552,7 +552,10 @@ func vaultAddressRequiresPinnedAnchor(address string) bool {
 type Request struct {
 	VMIDemandReceipt *argoworkflow.VMIDemandReceipt
 	// omitStepUsage preserves already-running legacy specs during recovery.
-	omitStepUsage   bool
+	omitStepUsage bool
+	// legacyStepUsage reconstructs already-submitted pre-floor wrappers only;
+	// new submissions must never opt out of the instrumentation memory guard.
+	legacyStepUsage bool
 	KubeVirtGranted bool
 	// KubeVirtBudget is the repository grant's VMI budget; zero
 	// selects the default. Config.KubeVirtCeiling caps it.
@@ -859,7 +862,7 @@ func Build(config Config, request Request) (*wfv1.Workflow, error) {
 	if err := projectVMICreateGuard(workflow, config, request, receipt); err != nil {
 		return nil, err
 	}
-	if err := wrapStepUsage(workflow); err != nil {
+	if err := wrapStepUsage(workflow, request.legacyStepUsage); err != nil {
 		return nil, err
 	}
 	digest, err := specIdentity(workflow)

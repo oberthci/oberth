@@ -2,6 +2,7 @@ package argojob
 
 import (
 	"encoding/json"
+	"fmt"
 	"runtime"
 	"slices"
 
@@ -14,6 +15,21 @@ import (
 const usageBinMountPath = "/run/oberth/usage"
 const usageBinPath = usageBinMountPath + "/oberth"
 const usageCommand = "internal-step-exec"
+
+// The full server executable initializes its linked packages before dispatching
+// internal-step-exec. Its startup is not a negligible addition to a tiny step.
+// Require an explicit limit: an absent limit may become a small LimitRange or
+// templateDefault limit outside this transformation's view. Never raise limits
+// or use the memory request as evidence of available cgroup headroom.
+const usageMemoryFloorBytes int64 = 256 << 20
+const usageMemoryPolicyAnnotation = "oberth.ci/step-usage-memory-policy"
+const usageMemoryWarningAnnotation = "oberth.ci/step-usage-memory-warning"
+const usageMemoryPolicy = "explicit-limit-256Mi-v1"
+
+func usageMemorySafe(c *corev1.Container) bool {
+	limit, ok := c.Resources.Limits[corev1.ResourceMemory]
+	return ok && limit.CmpInt64(usageMemoryFloorBytes) >= 0
+}
 
 // Only explicit commands can be wrapped without changing an image's ENTRYPOINT.
 // Script commands retain Argo's appended script path. ContainerSets/resource
@@ -29,12 +45,35 @@ func usageContainer(t *wfv1.Template) *corev1.Container {
 }
 
 func injectStepUsageMounts(wf *wfv1.Workflow, request Request) {
-	if request.omitStepUsage || request.TrustedKVM != nil || !request.binaryDelivered() || request.SourceVolume.ClaimName == "" {
+	if wf.Annotations == nil {
+		wf.Annotations = make(map[string]string)
+	}
+	delete(wf.Annotations, usageMemoryPolicyAnnotation)
+	if !request.legacyStepUsage && !request.omitStepUsage {
+		wf.Annotations[usageMemoryPolicyAnnotation] = usageMemoryPolicy
+	}
+	// Warnings are server-owned, including on leaves that are not measured.
+	walkTemplates(wf, func(t *wfv1.Template) { delete(t.Metadata.Annotations, usageMemoryWarningAnnotation) })
+	if request.omitStepUsage || request.TrustedKVM != nil {
 		return
 	}
 	walkTemplates(wf, func(t *wfv1.Template) {
 		c := usageContainer(t)
 		if c == nil || len(c.Command) == 0 || (c.TerminationMessagePath != "" && c.TerminationMessagePath != stepusage.TerminationPath) {
+			return
+		}
+		if !request.legacyStepUsage && !usageMemorySafe(c) {
+			if t.Metadata.Annotations == nil {
+				t.Metadata.Annotations = make(map[string]string)
+			}
+			limit := "unspecified"
+			if q, ok := c.Resources.Limits[corev1.ResourceMemory]; ok {
+				limit = q.String()
+			}
+			t.Metadata.Annotations[usageMemoryWarningAnnotation] = fmt.Sprintf("usage instrumentation disabled: memory limit %s is below the explicit 256Mi instrumentation floor; usage remains unknown; resources are unchanged", limit)
+			return
+		}
+		if !request.binaryDelivered() || request.SourceVolume.ClaimName == "" {
 			return
 		}
 		// Replace any repository collision with this server-owned, read-only subpath.
@@ -50,11 +89,14 @@ func injectStepUsageMounts(wf *wfv1.Workflow, request Request) {
 
 // Wrap last: credential-chain and executor-token admission inspect the original
 // command. This transformation adds no credentials and changes no security context.
-func wrapStepUsage(wf *wfv1.Workflow) error {
+func wrapStepUsage(wf *wfv1.Workflow, legacy bool) error {
 	var failure error
 	walkTemplates(wf, func(t *wfv1.Template) {
 		c := usageContainer(t)
 		if failure != nil || c == nil || len(c.Command) == 0 || (c.TerminationMessagePath != "" && c.TerminationMessagePath != stepusage.TerminationPath) {
+			return
+		}
+		if !legacy && !usageMemorySafe(c) {
 			return
 		}
 		mounted := slices.ContainsFunc(c.VolumeMounts, func(m corev1.VolumeMount) bool {
@@ -89,6 +131,16 @@ func wrapStepUsage(wf *wfv1.Workflow) error {
 		}
 	})
 	return failure
+}
+
+func stepUsageMemoryWarnings(wf *wfv1.Workflow) []string {
+	var warnings []string
+	walkTemplates(wf, func(t *wfv1.Template) {
+		if warning := t.Metadata.Annotations[usageMemoryWarningAnnotation]; warning != "" {
+			warnings = append(warnings, fmt.Sprintf("workflow=%q template=%q: %s", wf.Name, t.Name, warning))
+		}
+	})
+	return warnings
 }
 
 func projectStepUsage(workflow *wfv1.Workflow, node wfv1.NodeStatus, pod *corev1.Pod) stepusage.Usage {

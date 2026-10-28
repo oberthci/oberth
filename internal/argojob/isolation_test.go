@@ -8,6 +8,7 @@ import (
 
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
 
@@ -131,6 +132,9 @@ func TestBuildPreservesReadonlyToolsAcrossAliases(t *testing.T) {
 func isolationControllerRequest(t *testing.T, shape string) Request {
 	return isolationRequest(t, func(wf *wfv1.Workflow) {
 		leaf := &wf.Spec.Templates[0]
+		// Keep the measured-leaf/architecture proof above the instrumentation
+		// floor. Tiny and unspecified limits have independent negative tests.
+		leaf.Container.Resources.Limits = corev1.ResourceList{corev1.ResourceMemory: resource.MustParse("256Mi")}
 		leaf.AutomountServiceAccountToken = ptr.To(false)
 		leaf.Metadata.Annotations = map[string]string{"oberth.ci/workspace-mounts": "readonly", "oberth.ci/workspace-env": "none"}
 		leaf.Container.VolumeMounts = []corev1.VolumeMount{{Name: "work", MountPath: "/tools-alias", SubPath: "tools/bin"}, {Name: "work", MountPath: "/workspace-parent"}}

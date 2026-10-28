@@ -80,3 +80,11 @@ reconciliation; both submitted Pods passed the retained Kubernetes
 v1.35.7 validator. The module sums and original controller source digest
 remain unchanged; provenance records the new instrumented source digest
 and observed file hashes. No expected Pod was edited manually.
+
+Round 44 (2026-10-28) recaptured current Build outputs after the 256Mi
+usage instrumentation floor and server-owned admission warning/policy annotations.
+The retained authenticated upstream controller and combined capture hooks ran
+unchanged; all 27 submitted Pods across isolation, WIF, nonroot and VMI cases
+passed the retained Kubernetes validator. Isolation inputs now explicitly declare
+256Mi so the measured-leaf architecture and inherited pool checks still exercise
+wrapped Pods. No expected Pod was assembled or edited by hand.

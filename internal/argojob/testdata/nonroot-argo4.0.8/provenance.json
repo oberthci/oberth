@@ -6,18 +6,18 @@
   "source_file": "workflow/controller/workflowpod.go",
   "source_sha256": "97d059a8ffed7854760fa8c109f657a4d6be0e2496ed193ee1dd541118b8f763",
   "capture_boundary": "immediately before var podSpecPatchs / processPodSpecPatch",
-  "instrumented_sha256": "721bf5c4fa52031757797379526e1a3bbeecb5b9105f137ac2fca9bff5f340a1",
+  "instrumented_sha256": "e94c816c3116278d8b6c363568ab3922aed0a178e6afcd83d6fd0a3270b0e8d4",
   "files": {
-    "container-before-patch.json": "61aca3053ad4d274541a20b8ed7d8c8c778ab247a75b647ed48f1eb6f6ccccf5",
-    "container-submitted.json": "de776ff290ad5ace7949482da15093e514104592c4d9514133efe89d257a7931",
-    "script-before-patch.json": "07f81c5c478bea9f87133acd22d172c7cd4d5493d2a268c9558e1499e9cad62b",
-    "script-submitted.json": "ceeb7702334d8a109f5791396849ca2921bb060b9523524be19569fef1d771b3",
+    "container-before-patch.json": "6a6701bd8920415a63928ea420d958d483e3f641ea23158bc9360006b738e616",
+    "container-submitted.json": "14598689823f57ca6d615050f8f26c5b90d720da3aa1afd934846c9929284ac8",
+    "script-before-patch.json": "1ac9de3413df82d8b77511ce0ff99234806a659a3be3a0e568fe8c9096ba55e2",
+    "script-submitted.json": "3127b656a79bf5e9285eca041b07e0d701e9ce0d37790bf4758543f2e9f3e219",
     "controller-profile.json": "7ca0f2aff6cf39e67aa5996672363a3a7a8401449a794f32d5cf375e7267a4c0",
-    "container-persisted-workflow.json": "2c7aac540a70dbd48db25102de26fa5caaf46e67ec57d38d88d9b63be0e828fd",
-    "script-persisted-workflow.json": "c5aec8ce37f429a6dc6a6ac62035698cf773b6fdc4197daea23c738492c5636f",
+    "container-persisted-workflow.json": "c2fbb27f31dd6b40bd573963395bc94a2bbcad8caa82d3480edc6e9fd10a137e",
+    "script-persisted-workflow.json": "070625cbf69c2b18439b9631f553bac237f29f19c39046e74001cae26eda39e3",
     "capture_test.go.txt": "2f75e2e64c0bbe5de567b8cec9bf31601cf62fcb8dfde6a92a5650d8f5f0cf22"
   },
   "stage": "Before processPodSpecPatch, workflow/controller/workflowpod.go:405; observed submitted Pod after main emissary/volume rewriting at417-456.",
   "controller_profile": "nonroot-static-v1; exact executor digest and gloglevel0; raw before-Pods include separate hostile SC control. Persisted Workflows use supported profile and actual operate-to-Running fake API reconciliation.",
-  "recaptured_with": "Go 1.26.10; retained nonroot and isolation capture helpers, authenticated Argo v4.0.8; Kubernetes v1.35.7 validator"
+  "recaptured_with": "2026-10-28 round 44; Go 1.26.10; authenticated upstream Argo v4.0.8, retained combined capture overlay; all 27 submitted Pods pass Kubernetes v1.35.7 ValidatePodCreate"
 }

@@ -1,6 +1,7 @@
 package argojob
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"runtime"
@@ -27,6 +28,7 @@ func TestReleaseStackPreservesVMIQuotaAndStepUsage(t *testing.T) {
 	config.ContainerDiskPrefixes = []string{"quay.io/example/"}
 	config.RunnerImagePrefixes = []string{"busybox:"}
 	config.applyDefaults()
+	source = bytes.Replace(source, []byte(`command: ["true"]`), []byte("command: [\"true\"]\n        resources:\n          limits: {memory: 256Mi}"), 1)
 	request := testRequest(periapsis.TriggerCI, string(source))
 	request.KubeVirtGranted = true
 	request.SourceVolume = SourceVolume{ClaimName: sourceClaimName(request.Name), SubPath: "src", ArtifactsSubPath: artifactsSubPath, BinarySubPath: binarySubPath}
