@@ -37,8 +37,9 @@ type backupManifest struct {
 
 // WriteVerifiedBackup snapshots one committed SQLite view using the online
 // backup API, verifies it, then streams a single database member to output.
-// Plaintext staging lives in a private directory removed on return. Callers
-// must provide sufficient private /tmp storage and an outer process deadline.
+// Plaintext staging lives beside the database in a private directory removed
+// on return. Callers must provide writable parent storage with room for the
+// snapshot plus live WAL growth, and an outer process deadline.
 func WriteVerifiedBackup(ctx context.Context, path string, expected int, opts Options, output io.Writer) (BackupReport, error) {
 	return writeVerifiedBackup(ctx, path, expected, opts, output, false)
 }

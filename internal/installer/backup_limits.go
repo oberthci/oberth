@@ -32,5 +32,5 @@ func (b backupSizeLimits) member(name string) int64 {
 }
 
 func backupLimitError(size, limit int64) error {
-	return fmt.Errorf("backup size %d bytes exceeds limit %d bytes", size, limit)
+	return fmt.Errorf("backup size %d bytes exceeds limit %d bytes (raise --max-database-bytes within the 4 GiB maximum)", size, limit)
 }

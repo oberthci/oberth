@@ -44,9 +44,20 @@ and restored database members, not duplicate live WAL versions. Both nested
 archives, framing, metadata, ciphertext and decompressed extraction remain
 bounded. Large snapshot transfer, local extraction, hashes and restore uploads
 stream; no database-sized byte slices. Failed output streams are canceled and
-partial files removed. The pre-flag server fallback retains hash-stable raw
-copies (absolute 4 GiB per file), then snapshots them locally. No new privileges
-or server RBAC are granted; operators need the existing helper-Pod access.
+partial files removed. Online plaintext staging is a 0700 directory beside the
+source database (the in-pod data PVC), not the small ephemeral `/tmp` volume.
+The source parent must be writable with room for the snapshot and live WAL
+growth. SIGPIPE becomes a returned write error so cleanup runs; after SIGKILL,
+the next online backup sweeps same-euid staging older than ten minutes. A held
+kernel lock protects active snapshots through verification and streaming.
+
+Default-limit requests omit the new flag for old-server compatibility. A custom
+limit may retry an unknown-flag response without the flag only if the old
+128 MiB server cap is stricter or equal; local bounds and verification remain.
+Unsupported smaller limits, missing backup commands and old cap refusals use
+hash-stable raw copies (absolute 4 GiB per file), then snapshot them locally.
+No new privileges or server RBAC are granted; operators need the existing
+helper-Pod access.
 
 Upgrade warns loudly before mutation when migration is pending or source schema
 is unknown. It does not attest/create a fresh backup; `--yes` is never evidence

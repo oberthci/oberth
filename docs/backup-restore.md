@@ -103,21 +103,40 @@ cap; aggregate plaintext has a fixed 128 MiB allowance above the database limit.
 Archive framing and encryption have additional fixed allowances. The bound is
 operator-controlled, not supplied by the archive. All large database transfers,
 hashes and local extraction stream through files rather than whole-file buffers.
-Private staging still needs disk space: budget for the snapshot in the server's
-private `/tmp`, and several database copies on the workstation for verification
-and restore. Raising this flag does not raise the chart's ephemeral-storage
-limit or the ten-minute in-pod snapshot deadline. Encrypted outputs are exclusive
-0600 files; failed transfers/encryption remove partial outputs.
+Private staging still needs disk space. The online snapshot is a private 0700
+directory **beside the source database**, on the server's data volume rather
+than its capped `/tmp` emptyDir. Budget for a full logical snapshot in addition
+to the live database, caches and WAL growth; a long pinned read can retain WAL
+pages until the snapshot finishes. The source parent must be writable by the
+server identity. The operation still has a ten-minute deadline. Raising the
+backup limit does not enlarge the data volume or any resource limit. Budget
+several database copies on the workstation for verification and restore (which
+still use private `/tmp` staging). Encrypted outputs are exclusive 0600 files;
+failed transfers/encryption remove partial outputs.
 
-A server predating this flag uses the existing compatibility utility pod: mount
-its PVC read-only on the same node, stream main/WAL separately, accept only stable
-before/after hashes, then take the online snapshot locally. No shell is executed
-in the server container. Compatibility staging has a separate absolute 4 GiB
-cap per source file, and source changes are retried at most three times. A busy
-old server may need to be drained for a stable copy; the new server does not.
-This fallback creates/deletes only its temporary helper pod using the operator's
-existing access, with no new server privileges or RBAC. Legacy two-member
-main/WAL backups remain readable within the selected aggregate database limit.
+A disconnected in-pod stdout returns a write error through deferred cleanup,
+rather than exiting via SIGPIPE. SIGINT/SIGTERM also unwind cleanup. SIGKILL
+cannot run defers: the next online backup sweeps same-owner snapshot directories
+beside the database older than ten minutes, skipping any with a held kernel
+lock. Active snapshots are locked through verification and streaming, even if
+they exceed that age. Until the next backup, interrupted plaintext stays on the
+data volume with the same privacy boundary as the original database.
+
+For the default limit the CLI omits the new flag, preserving the working in-pod
+backup path on older servers. For a custom limit, an unknown-flag response is
+retried without the flag only when the old server's fixed 128 MiB cap is no
+larger than the operator's limit. The CLI still bounds and verifies the archive
+locally. A server without the backup command, an old `backup size refused`
+response, or an unsupported custom limit below 128 MiB uses the existing
+compatibility utility pod: mount its PVC read-only on the same node, stream
+main/WAL separately, accept only stable before/after hashes, then take the
+online snapshot locally. No shell is executed in the server container.
+Compatibility staging has a separate absolute 4 GiB cap per source file, and
+source changes are retried at most three times. A busy old server may need to
+be drained for a stable copy; the new server does not. This fallback
+creates/deletes only its temporary helper pod using the operator's existing
+access, with no new server privileges or RBAC. Legacy two-member main/WAL
+backups remain readable within the selected aggregate database limit.
 
 The backup also records the deployment's live compatibility values
 (`OBERTH_SCHEMA_IDENTITY`, `OBERTH_AUDIT_DOMAIN`, `OBERTH_WITNESS_KEY_INFO`).

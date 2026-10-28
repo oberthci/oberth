@@ -29,7 +29,7 @@ func BackupMaxBytes(value int64) (int64, error) {
 }
 
 func backupSizeError(size, limit int64) error {
-	return fmt.Errorf("backup size %d bytes exceeds limit %d bytes", size, limit)
+	return fmt.Errorf("backup size %d bytes exceeds limit %d bytes (raise --max-database-bytes within the 4 GiB maximum)", size, limit)
 }
 
 // A read transaction pins one committed SQLite view across bounded backup_step
@@ -37,6 +37,14 @@ func backupSizeError(size, limit int64) error {
 // The driver opens the source read-only; only the new private destination is
 // writable. SHM reader locks may change, but main/WAL data is never written.
 func snapshotOnlineDatabase(ctx context.Context, path string, maxBytes int64) (snapshot string, cleanup func() error, resultErr error) {
+	return snapshotOnlineDatabaseSteps(ctx, path, maxBytes, func(backup *sqlite.Backup) (bool, error) {
+		return backup.Step(128)
+	})
+}
+
+// Separate the step operation so consistency tests can coordinate real writer
+// commits between real backup steps, without sleeps or scheduler assumptions.
+func snapshotOnlineDatabaseSteps(ctx context.Context, path string, maxBytes int64, step func(*sqlite.Backup) (bool, error)) (snapshot string, cleanup func() error, resultErr error) {
 	for _, suffix := range []string{"", "-wal", "-shm"} {
 		f, _, err := openSQLiteSourceFile(path+suffix, suffix == "")
 		if err != nil {
@@ -51,11 +59,12 @@ func snapshotOnlineDatabase(ctx context.Context, path string, maxBytes int64) (s
 	if err := verifySQLiteWALHeader(path); err != nil {
 		return "", nil, err
 	}
-	dir, err := os.MkdirTemp("/tmp", "oberth-online-backup-")
+	// In-pod this is the data PVC, not the small ephemeral /tmp volume. Local
+	// compatibility copies already live in the caller's private work directory.
+	dir, cleanup, err := newOnlineBackupStaging(filepath.Dir(path))
 	if err != nil {
 		return "", nil, err
 	}
-	cleanup = func() error { return os.RemoveAll(dir) }
 	defer func() {
 		if resultErr != nil {
 			resultErr = errors.Join(resultErr, cleanup())
@@ -114,7 +123,7 @@ func snapshotOnlineDatabase(ctx context.Context, path string, maxBytes int64) (s
 			if err := ctx.Err(); err != nil {
 				return err
 			}
-			more, err := backup.Step(128)
+			more, err := step(backup)
 			if err != nil {
 				return err
 			}

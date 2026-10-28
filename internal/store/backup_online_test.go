@@ -131,7 +131,7 @@ func TestOnlineBackupLimitCountsLogicalPagesNotWAL(t *testing.T) {
 	if err != nil || !reflect.DeepEqual(report, verified) {
 		t.Fatal(verified, err)
 	}
-	if _, err := VerifyBackupArchive(t.Context(), bytes.NewReader(output.Bytes()), 20, Options{BackupMaxBytes: limit - 1}); err == nil || !strings.Contains(err.Error(), fmt.Sprint(limit)) {
+	if _, err := VerifyBackupArchive(t.Context(), bytes.NewReader(output.Bytes()), 20, Options{BackupMaxBytes: limit - 1}); err == nil || !strings.Contains(err.Error(), fmt.Sprint(limit)) || !strings.Contains(err.Error(), "--max-database-bytes") {
 		t.Fatalf("restore verifier ignored configured limit: %v", err)
 	}
 	output.Reset()

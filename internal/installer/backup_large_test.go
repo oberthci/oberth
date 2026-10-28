@@ -61,8 +61,8 @@ func TestHistoryBackupLargeStreamAndRestoreRoundTrip(t *testing.T) {
 			if in != nil {
 				t.Fatal("snapshot unexpectedly had stdin")
 			}
-			if !strings.Contains(strings.Join(args, " "), "--max-database-bytes 1073741824") {
-				t.Fatal("snapshot limit not passed to pod", args)
+			if strings.Contains(strings.Join(args, " "), "--max-database-bytes") {
+				t.Fatal("default limit flag breaks older in-pod servers", args)
 			}
 			file, err := os.Open(databasePath)
 			if err != nil {
