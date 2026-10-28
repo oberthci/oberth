@@ -423,19 +423,28 @@ func reconcileVMIClaims(ledger *vmiLedger, actual map[string]*unstructured.Unstr
 	return changed
 }
 
+func maxVMIDemand(a, b argoworkflow.VMIDemand) argoworkflow.VMIDemand {
+	return argoworkflow.VMIDemand{VMs: max(a.VMs, b.VMs), Cores: max(a.Cores, b.Cores), MemoryBytes: max(a.MemoryBytes, b.MemoryBytes)}
+}
+
+// The server-owned claim is a floor even when the live fields parse cleanly.
+// Never let a reduced/edited live value refund a still-active admitted claim.
+func liveVMIClaimDemand(object *unstructured.Unstructured, ledger vmiLedger, namespace string) argoworkflow.VMIDemand {
+	var declared argoworkflow.VMIDemand
+	for _, claim := range ledger.Claims {
+		if !claim.Closed && claim.UID == object.GetUID() && matchesVMIClaim(object, namespace, claim) {
+			declared = maxVMIDemand(declared, claim.Demand)
+		}
+	}
+	return declared
+}
+
 // Only an exact live identity may use a template-declared fallback. Pending
 // claims are reconciled durably before accounting. A changed UID/hash/operation
 // or owner never borrows an old claim's smaller demand. Unknown objects still
 // consume their repository's full grant (or the legacy per-instance maximum).
 func liveVMIClaimFallback(object *unstructured.Unstructured, ledger vmiLedger, namespace string, limit argoworkflow.VMIDemand) argoworkflow.VMIDemand {
-	var declared argoworkflow.VMIDemand
-	for _, claim := range ledger.Claims {
-		if !claim.Closed && claim.UID == object.GetUID() && matchesVMIClaim(object, namespace, claim) {
-			declared.VMs = max(declared.VMs, claim.Demand.VMs)
-			declared.Cores = max(declared.Cores, claim.Demand.Cores)
-			declared.MemoryBytes = max(declared.MemoryBytes, claim.Demand.MemoryBytes)
-		}
-	}
+	declared := liveVMIClaimDemand(object, ledger, namespace)
 	if declared.VMs > 0 {
 		// A grant may have shrunk since the original claim was admitted.
 		return argoworkflow.VMIDemand{VMs: min(declared.VMs, limit.VMs), Cores: min(declared.Cores, limit.Cores), MemoryBytes: min(declared.MemoryBytes, limit.MemoryBytes)}
@@ -508,19 +517,19 @@ func (c *Controller) reserveVMIClaim(ctx context.Context, key string, want vmiCl
 			}
 			demand, parseErr := liveVMIDemand(object)
 			if parseErr != nil {
-				// A matching server-owned claim retains the template's declared
-				// demand even when KubeVirt's live shape is unreadable. Identity
-				// mismatches and unclaimed objects keep the conservative fallback.
+				// An exact claim can bound missing fields or ambiguous memory.
+				// Present unreadable counts and known oversize values cannot
+				// borrow it; identity mismatches also keep conservative fallback.
 				claims := ledger
-				if errors.Is(parseErr, errLiveVMIOverLimit) {
-					// A known oversized current value cannot borrow a smaller claim.
+				if errors.Is(parseErr, errLiveVMIOverLimit) || errors.Is(parseErr, errLiveVMIUnreadableCount) {
+					// Oversized or unreadable present counts cannot borrow a
+					// smaller claim; readable siblings remain charged too.
 					claims = vmiLedger{}
 				}
 				fallback := liveVMIClaimFallback(object, claims, c.config.Namespace, binding.Limit)
-				demand.VMs = max(demand.VMs, fallback.VMs)
-				demand.Cores = max(demand.Cores, fallback.Cores)
-				demand.MemoryBytes = max(demand.MemoryBytes, fallback.MemoryBytes)
+				demand = maxVMIDemand(demand, fallback)
 			}
+			demand = maxVMIDemand(demand, liveVMIClaimDemand(object, ledger, c.config.Namespace))
 			repoUsed = addVMIDemand(repoUsed, demand)
 			for _, owner := range object.GetOwnerReferences() {
 				if owner.UID == want.WorkflowUID && owner.Kind == "Workflow" {

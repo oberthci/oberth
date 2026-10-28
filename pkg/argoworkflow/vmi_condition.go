@@ -119,9 +119,12 @@ func parseVMICondition(s string, trigger RunTrigger, resolve func(string) (vmiSc
 	if len(s) > 4096 || depth > 16 {
 		return vmiCondition{unsafe: true}
 	}
+	// Only an absent/empty authored guard bypasses Argo evaluation.
+	// Whitespace alone reaches govaluate and errors, not true.
+	empty := s == ""
 	s = strings.TrimSpace(s)
 	if s == "" {
-		if depth > 0 {
+		if !empty || depth > 0 {
 			return vmiCondition{unsafe: true}
 		}
 		return vmiCondition{truth: vmiTrue}

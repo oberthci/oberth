@@ -1,12 +1,9 @@
 package argoworkflow
 
 import (
-	"context"
 	"strings"
-	"time"
 
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
-	"github.com/argoproj/argo-workflows/v4/workflow/common"
 	"github.com/expr-lang/expr"
 )
 
@@ -16,30 +13,21 @@ type vmiArgoTaskResults struct {
 	Succeeded, Failed, Errored, Skipped, Omitted, Daemoned, AnySucceeded, AllFailed bool
 }
 
-type vmiArgoDAGContext map[string]*wfv1.DAGTask
-
-func (d vmiArgoDAGContext) GetTask(_ context.Context, name string) *wfv1.DAGTask {
-	return d[name]
-}
-
-// GetTaskDependencies only needs GetTask. These methods complete its pinned
-// DagContext interface; ancestry/timestamps are not used for expression expansion.
-func (vmiArgoDAGContext) GetTaskDependencies(context.Context, string) []string { return nil }
-func (vmiArgoDAGContext) GetTaskFinishedAtTime(context.Context, string) time.Time {
-	return time.Time{}
-}
-
 // Called only AFTER closed-grammar parsing, reference resolution and cycle
-// checks, so Argo's bare/legacy expander never receives a missing predecessor.
+// checks. The vendored expander also refuses nil/missing predecessors on its
+// own, so a future call-order change cannot turn bad input into a panic.
 // Use its exact expansion, hyphen normalization and typed compiler environment.
 // Compilation executes no repository expression or planner. A compile error
 // makes the lifetime proof unsupported: Argo can mark the dependent Errored
 // before its gate succeeds, invalidating a three-state execution prerequisite.
 func compileVMIArgoDependencies(dag *wfv1.DAGTemplate) bool {
-	tasks := vmiArgoDAGContext{}
+	if dag == nil || len(dag.Tasks) > MaxDAGTasks {
+		return false
+	}
+	tasks := map[string]*wfv1.DAGTask{}
 	for i := range dag.Tasks {
 		task := &dag.Tasks[i]
-		if !vmiDNSLabelPattern.MatchString(task.Name) {
+		if !vmiDNSLabelPattern.MatchString(task.Name) || tasks[task.Name] != nil {
 			return false
 		}
 		tasks[task.Name] = task
@@ -52,7 +40,14 @@ func compileVMIArgoDependencies(dag *wfv1.DAGTemplate) bool {
 		}
 	}
 	for i := range dag.Tasks {
-		deps, logic := common.GetTaskDependencies(context.Background(), &dag.Tasks[i], tasks)
+		task := &dag.Tasks[i]
+		if len(task.Depends) > 4096 || len(task.Dependencies) > MaxDAGTasks {
+			return false
+		}
+		deps, logic, ok := expandVMIArgoDependencies(task, tasks)
+		if !ok {
+			return false
+		}
 		if logic == "" { // Argo bypasses evaluateDependsLogic for root tasks.
 			continue
 		}
