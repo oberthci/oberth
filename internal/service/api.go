@@ -17,6 +17,8 @@ import (
 	"sync"
 	"time"
 
+	"k8s.io/utils/clock"
+
 	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/runlog"
@@ -123,6 +125,7 @@ type API struct {
 	health                    Health
 	signals                   *Signals
 	maximumWait               time.Duration
+	waitClock                 clock.Clock // nil uses real time; shared observation/long-poll clock
 	mutationGate              func(context.Context) error
 	promotionWorkspaceRoot    string
 	workspaces                *workspaceLifecycle
@@ -1843,13 +1846,14 @@ func (service *API) prepareWaitRun(ctx context.Context, repositoryName, selector
 	if err != nil {
 		return nil, err
 	}
-	deadline := time.Now().Add(duration)
+	clock := service.schedulingClock()
+	deadline := clock.Now().Add(duration)
 	status, err := service.waitStatus(ctx, repositoryName, selector, trigger, actor)
 	if err != nil {
 		return nil, err
 	}
 	return func(ctx context.Context) (WaitResponse, error) {
-		timer := time.NewTimer(time.Until(deadline))
+		timer := clock.NewTimer(deadline.Sub(clock.Now()))
 		defer timer.Stop()
 		for {
 			// If no matching trigger exists yet, waitStatus preserves the current
@@ -1872,7 +1876,7 @@ func (service *API) prepareWaitRun(ctx context.Context, repositoryName, selector
 			select {
 			case <-ctx.Done():
 				return WaitResponse{}, ctx.Err()
-			case <-timer.C:
+			case <-timer.C():
 				// When a trigger filter is active and the resolved run does not
 				// match it, the awaited run was never seen. Report still_running
 				// so a caller that checks only the flag does not mistake a
@@ -1882,7 +1886,7 @@ func (service *API) prepareWaitRun(ctx context.Context, repositoryName, selector
 					stillRunning = true
 				}
 				if status.Scheduling != nil {
-					status.Scheduling.AgeSeconds = max(0, int64(time.Since(status.Scheduling.ObservedAt)/time.Second))
+					status.Scheduling.AgeSeconds = max(0, int64(clock.Since(status.Scheduling.ObservedAt)/time.Second))
 				}
 				return WaitResponse{StatusResponse: status, StillRunning: stillRunning}, nil
 			case <-changed:

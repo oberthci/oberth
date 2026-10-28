@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	clocktesting "k8s.io/utils/clock/testing"
+
 	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/pkg/periapsis"
@@ -281,6 +283,19 @@ func TestSchedulingAvailableInMCPStatusRunGetAndAPIRun(t *testing.T) {
 	}
 }
 
+type schedulingAgeClock struct {
+	*clocktesting.FakeClock
+	observed chan struct{}
+}
+
+func (c schedulingAgeClock) Since(observed time.Time) time.Duration {
+	age := c.FakeClock.Since(observed)
+	// Publish only after the observation age has been calculated, so the test
+	// advances during the poll rather than during observation construction.
+	c.observed <- struct{}{}
+	return age
+}
+
 func TestWaitSchedulingAgeIncludesLongPoll(t *testing.T) {
 	fixture := newControlFixture(t)
 	run, err := fixture.scheduler.EnqueueCI(t.Context(), CIRequest{EventID: "scheduling-age", Repository: fixture.repo, Branch: "feature/scheduling-age", SHA: strings.Repeat("b", 40), Actor: "agent@host"})
@@ -289,9 +304,40 @@ func TestWaitSchedulingAgeIncludesLongPoll(t *testing.T) {
 	}
 	service := fixture.api(t)
 	service.maximumWait = 1100 * time.Millisecond
-	response, err := service.waitRun(t.Context(), fixture.repo.Name, run.SHA, "", 0, "")
-	if err != nil {
-		t.Fatal(err)
+	clock := schedulingAgeClock{clocktesting.NewFakeClock(time.Date(2026, time.October, 28, 0, 0, 0, 0, time.UTC)), make(chan struct{}, 3)}
+	service.waitClock = clock
+	type result struct {
+		response WaitResponse
+		err      error
+	}
+	done := make(chan result, 1)
+	go func() {
+		response, err := service.waitRun(t.Context(), fixture.repo.Name, run.SHA, "", 0, "")
+		done <- result{response, err}
+	}()
+	// The initial read precedes the timer; the subscribed re-read follows it.
+	// Advance only after the second observation has calculated its zero age.
+	liveness := time.NewTimer(10 * time.Second)
+	defer liveness.Stop()
+	for range 2 {
+		select {
+		case <-clock.observed:
+		case result := <-done:
+			t.Fatalf("wait returned before final observation: %+v", result)
+		case <-liveness.C:
+			t.Fatal("wait did not reach final observation")
+		}
+	}
+	clock.Step(service.maximumWait)
+	var response WaitResponse
+	select {
+	case result := <-done:
+		if result.err != nil {
+			t.Fatal(result.err)
+		}
+		response = result.response
+	case <-liveness.C:
+		t.Fatal("wait did not return after fake deadline")
 	}
 	if !response.StillRunning || response.Scheduling == nil || response.Scheduling.AgeSeconds < 1 {
 		t.Fatalf("stale observation age=%#v", response.Scheduling)
