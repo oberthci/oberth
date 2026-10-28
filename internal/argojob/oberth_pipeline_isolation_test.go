@@ -64,13 +64,15 @@ var (
 	oberthBuildCachedGoLeaves = map[string]bool{
 		"vet": true, "golangci-lint-run": true,
 		"test-store": true, "test-service": true, "test-rest": true,
-		"test-gitcache":        true,
-		"test-archive-history": true,
-		"build-amd64":          true, "build-arm64": true,
+		"test-gitcache":            true,
+		"build-static-git-runtime": true,
+		"test-archive-history":     true,
+		"build-amd64":              true, "build-arm64": true,
 		"build-darwin-amd64": true, "build-darwin-arm64": true,
 	}
 	oberthBuildIsolatedLeaves = map[string]bool{
-		"shellcheck": true, "chart": true, "security": true, "release-diagnostic": true, "test-openbao": true,
+		"test-static-git-runtime": true,
+		"shellcheck":              true, "chart": true, "security": true, "release-diagnostic": true, "test-openbao": true,
 		"vpt-build-and-fetch": true, "vpt-copy-trivy": true, "vpt-verify": true,
 	}
 )

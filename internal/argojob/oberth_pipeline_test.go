@@ -9,6 +9,7 @@ import (
 
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
 
+	"github.com/oberthci/oberth/internal/releaseimage"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 	"github.com/oberthci/oberth/pkg/periapsis"
 )
@@ -43,7 +44,7 @@ func oberthConfig() Config {
 	config.ReleaseWIF.Repositories = map[string]ReleaseWIFRepository{"github/skipops/oberth": {ServiceAccountName: "oberth-per-repo", Templates: map[string]string{"release-publish-images": "image-writer", "release-publish-kvm-harness": "image-writer", "release-publish-chart": "chart-writer", "release-verify": "image-reader"}}}
 	// Oberth's own pipeline uses golang: for toolchain steps and aquasec/trivy:
 	// for the security scan (the official image, pinned by digest).
-	config.RunnerImagePrefixes = []string{"golang:", "aquasec/trivy:"}
+	config.RunnerImagePrefixes = []string{"golang:", "aquasec/trivy:", releaseimage.ServerSubstrate}
 	return config
 }
 
@@ -92,23 +93,25 @@ func TestOberthBuildPipelineIsAdmissible(t *testing.T) {
 	// Every burn build.yaml declares for the CI trigger is present, with the
 	// same dependency edges.
 	assertBurnGraph(t, built, "ci", map[string]string{
-		"setup":                  "",
-		"lint":                   "setup",
-		"test-store":             "lint",
-		"test-service":           "lint",
-		"test-rest":              "lint",
-		"test-gitcache":          "lint",
-		"test-archive-history":   "lint",
-		"test-openbao":           "setup",
-		"security":               "setup",
-		"shellcheck":             "setup",
-		"chart":                  "lint",
-		"release-diagnostic":     "setup",
-		"verify-publisher-tools": "setup",
-		"build-amd64":            "test-store && test-service && test-rest && test-gitcache && test-archive-history && chart",
-		"build-arm64":            "test-store && test-service && test-rest && test-gitcache && test-archive-history && chart",
-		"build-darwin-amd64":     "test-store && test-service && test-rest && test-gitcache && test-archive-history && chart",
-		"build-darwin-arm64":     "test-store && test-service && test-rest && test-gitcache && test-archive-history && chart",
+		"setup":                    "",
+		"lint":                     "setup",
+		"test-store":               "lint",
+		"test-service":             "lint",
+		"test-rest":                "lint",
+		"test-gitcache":            "lint",
+		"build-static-git-runtime": "setup",
+		"test-static-git-runtime":  "build-static-git-runtime",
+		"test-archive-history":     "lint",
+		"test-openbao":             "setup",
+		"security":                 "setup",
+		"shellcheck":               "setup",
+		"chart":                    "lint",
+		"release-diagnostic":       "setup",
+		"verify-publisher-tools":   "setup",
+		"build-amd64":              "test-store && test-service && test-rest && test-gitcache && test-static-git-runtime && test-archive-history && chart",
+		"build-arm64":              "test-store && test-service && test-rest && test-gitcache && test-static-git-runtime && test-archive-history && chart",
+		"build-darwin-amd64":       "test-store && test-service && test-rest && test-gitcache && test-static-git-runtime && test-archive-history && chart",
+		"build-darwin-arm64":       "test-store && test-service && test-rest && test-gitcache && test-static-git-runtime && test-archive-history && chart",
 	})
 }
 
@@ -560,8 +563,14 @@ func TestOberthPipelinesPinCompatibleGoToolchains(t *testing.T) {
 				continue
 			}
 			count++
-			if image != want {
-				t.Errorf("%s template %q uses Go image %q, want %q", document, template, image, want)
+			expectedImage := want
+			if document == "build.yaml" && template == "build-static-git-runtime" {
+				// Same exact Go patch release, with the musl target compiler
+				// environment used by Dockerfile's git-build stage.
+				expectedImage = "golang:1.26.10-alpine3.23@sha256:a07f231c19b03e6106cf442f02a5bcf262147e744d15b7b5e4b6d81d420c70a0"
+			}
+			if image != expectedImage {
+				t.Errorf("%s template %q uses Go image %q, want %q", document, template, image, expectedImage)
 			}
 		}
 		if count == 0 {
