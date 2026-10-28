@@ -23,8 +23,7 @@ import (
 	"github.com/oberthci/oberth/internal/store"
 )
 
-// databaseSnapshotTimeout bounds the in-pod snapshot; the store's snapshot
-// primitive is not itself context-interruptible.
+// databaseSnapshotTimeout bounds the in-pod snapshot and archive stream.
 const databaseSnapshotTimeout = 10 * time.Minute
 
 // archivePrefix and archiveSuffix name what oberth backup writes: a
@@ -55,6 +54,7 @@ func runBackup(ctx context.Context, arguments []string, input io.Reader, output 
 	flags := flag.NewFlagSet("backup", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	var cfg installer.BackupConfig
+	flags.Int64Var(&cfg.MaxDatabaseBytes, "max-database-bytes", store.DefaultBackupMaxBytes, "logical database byte limit (maximum 4 GiB; excludes WAL)")
 	flags.StringVar(&cfg.Output, "output", "", "write the backup to `FILE` instead of ./"+archivePrefix+"<date-time>"+archiveSuffix)
 	flags.StringVar(&cfg.Output, "o", "", "shorthand for --output `FILE`")
 	historyOnly := flags.Bool("history-only", false, "back up runs, issues, promotions and uplinks only: no secrets, no OpenBao root token needed")
@@ -71,6 +71,9 @@ func runBackup(ctx context.Context, arguments []string, input io.Reader, output 
 	}
 	if len(positional) != 0 {
 		return fmt.Errorf("%w: backup takes no arguments (write elsewhere with --output FILE)", errUsage)
+	}
+	if _, err := store.BackupMaxBytes(cfg.MaxDatabaseBytes); err != nil {
+		return fmt.Errorf("%w: %w", errUsage, err)
 	}
 	if *historyOnly {
 		cfg.Scope = installer.BackupScopeHistory
@@ -305,6 +308,7 @@ func runExportSecrets(ctx context.Context, arguments []string, output io.Writer)
 	flags := flag.NewFlagSet("backup export-secrets", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	key := flags.String("key", "", "the backup's private `KEY` instead of ~/.config/oberth/backup/recipient.key")
+	maxBytes := flags.Int64("max-database-bytes", store.DefaultBackupMaxBytes, "logical database byte limit used for this backup (maximum 4 GiB)")
 	out := flags.String("output", "", "write to `FILE` (created 0600) instead of standard output")
 	positional, help, err := parseOperatorFlags(flags, arguments)
 	if help {
@@ -338,7 +342,7 @@ Import into a KV v2 mount with the bao (or vault) CLI:
 	if err != nil {
 		return err
 	}
-	cfg := installer.ExportSecretsConfig{Input: archive, PrivateKey: keyPath}
+	cfg := installer.ExportSecretsConfig{Input: archive, PrivateKey: keyPath, MaxDatabaseBytes: *maxBytes}
 	if *out == "" {
 		if file, ok := output.(*os.File); ok && term.IsTerminal(int(file.Fd())) {
 			return fmt.Errorf("%w: export-secrets writes plaintext secrets; redirect it (> secrets.json) or pass --output FILE", errUsage)
@@ -367,6 +371,7 @@ func runBackupDatabase(ctx context.Context, arguments []string, output io.Writer
 	flags := flag.NewFlagSet("backup database", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	database := flags.String("database", "/data/oberth.sqlite", "SQLite database path")
+	maxBytes := flags.Int64("max-database-bytes", store.DefaultBackupMaxBytes, "logical snapshot byte limit (maximum 4 GiB)")
 	if err := flags.Parse(arguments); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			flags.SetOutput(output)
@@ -376,14 +381,16 @@ func runBackupDatabase(ctx context.Context, arguments []string, output io.Writer
 		return fmt.Errorf("%w: %w", errUsage, err)
 	}
 	if flags.NArg() != 0 || strings.TrimSpace(*database) == "" {
-		return fmt.Errorf("%w: backup database accepts only --database", errUsage)
+		return fmt.Errorf("%w: backup database accepts only --database and --max-database-bytes", errUsage)
 	}
 	if file, ok := output.(*os.File); ok && term.IsTerminal(int(file.Fd())) {
 		return errors.New("backup database writes a binary archive; redirect stdout (oberth backup runs it through kubectl exec)")
 	}
 	ctx, cancel := context.WithTimeout(ctx, databaseSnapshotTimeout)
 	defer cancel()
-	if _, err := store.WriteVerifiedBackup(ctx, *database, store.LatestMigrationVersion(), configuredStoreOptions(ctx), output); err != nil {
+	opts := configuredStoreOptions(ctx)
+	opts.BackupMaxBytes = *maxBytes
+	if _, err := store.WriteVerifiedBackup(ctx, *database, store.LatestMigrationVersion(), opts, output); err != nil {
 		return fmt.Errorf("database snapshot: %w", err)
 	}
 	return nil
@@ -393,6 +400,7 @@ func runRestore(ctx context.Context, arguments []string, input io.Reader, output
 	flags := flag.NewFlagSet("restore", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	var cfg installer.RestoreConfig
+	flags.Int64Var(&cfg.MaxDatabaseBytes, "max-database-bytes", store.DefaultBackupMaxBytes, "logical database byte limit used for this backup (maximum 4 GiB)")
 	flags.BoolVar(&cfg.DryRun, "dry-run", false, "show what would change on this install, then stop")
 	flags.BoolVar(&cfg.Inspect, "inspect", false, "show what the backup holds and stop; needs no cluster")
 	only := flags.String("only", "", "restore only these `PARTS`: history, secrets (comma-separated)")

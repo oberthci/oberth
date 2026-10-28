@@ -74,7 +74,7 @@ func TestBackupArchiveRoundTripChecksEveryMember(t *testing.T) {
 	writeTestMembers(t, source)
 	output := filepath.Join(t.TempDir(), "state.cms")
 	manifest := backupManifest{Format: backupFormat, CreatedAt: "2026-10-17T00:00:00Z", NotRestored: backupNotRestored}
-	if err := writeBackupArchive(context.Background(), source, &manifest, fakeEnvelopeCipher{}, output); err != nil {
+	if err := writeBackupArchive(context.Background(), source, &manifest, fakeEnvelopeCipher{}, output, 0); err != nil {
 		t.Fatal(err)
 	}
 	info, err := os.Stat(output)
@@ -84,12 +84,12 @@ func TestBackupArchiveRoundTripChecksEveryMember(t *testing.T) {
 	if info.Mode().Perm() != 0o600 {
 		t.Fatalf("archive mode = %04o, want 0600", info.Mode().Perm())
 	}
-	if err := writeBackupArchive(context.Background(), source, &manifest, fakeEnvelopeCipher{}, output); err == nil {
+	if err := writeBackupArchive(context.Background(), source, &manifest, fakeEnvelopeCipher{}, output, 0); err == nil {
 		t.Fatal("second write over an existing archive succeeded; want refusal")
 	}
 
 	restored := t.TempDir()
-	got, err := openBackupArchive(context.Background(), output, fakeEnvelopeCipher{}, restored)
+	got, err := openBackupArchive(context.Background(), output, fakeEnvelopeCipher{}, restored, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -135,7 +135,7 @@ func TestBackupArchiveRoundTripChecksEveryMember(t *testing.T) {
 	if err := os.WriteFile(tampered, append(fakeEnvelopeHeader(), rezipped.Bytes()...), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	_, err = openBackupArchive(context.Background(), tampered, fakeEnvelopeCipher{}, t.TempDir())
+	_, err = openBackupArchive(context.Background(), tampered, fakeEnvelopeCipher{}, t.TempDir(), 0)
 	if err == nil || !strings.Contains(err.Error(), backupMemberRoles) {
 		t.Fatalf("tampered member error = %v, want a mismatch naming %s", err, backupMemberRoles)
 	}
@@ -172,7 +172,7 @@ func TestOpenBackupArchiveRefusesUnexpectedEntries(t *testing.T) {
 			if err := os.WriteFile(path, append(fakeEnvelopeHeader(), plaintext.Bytes()...), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := openBackupArchive(context.Background(), path, fakeEnvelopeCipher{}, t.TempDir()); err == nil {
+			if _, err := openBackupArchive(context.Background(), path, fakeEnvelopeCipher{}, t.TempDir(), 0); err == nil {
 				t.Fatal("archive accepted; want refusal")
 			}
 		})
@@ -204,7 +204,7 @@ func TestRequireAuthEnvelopedDataRefusesOtherContent(t *testing.T) {
 		if err := os.WriteFile(path, body, 0o600); err != nil {
 			t.Fatal(err)
 		}
-		if err := requireAuthEnvelopedData(path); err == nil {
+		if err := requireAuthEnvelopedData(path, 0); err == nil {
 			t.Fatalf("%s accepted; want refusal", name)
 		}
 	}
@@ -302,13 +302,13 @@ func TestBackupArchiveOpenSSLRoundTrip(t *testing.T) {
 	writeTestMembers(t, source)
 	output := filepath.Join(t.TempDir(), "state.cms")
 	manifest := backupManifest{Format: backupFormat}
-	if err := writeBackupArchive(context.Background(), source, &manifest, opensslCMS{binary: binary, recipient: certPath}, output); err != nil {
+	if err := writeBackupArchive(context.Background(), source, &manifest, opensslCMS{binary: binary, recipient: certPath}, output, 0); err != nil {
 		if strings.Contains(err.Error(), "aes-256-gcm") || strings.Contains(err.Error(), "cipher") {
 			t.Skipf("host openssl lacks CMS AES-GCM: %v", err)
 		}
 		t.Fatal(err)
 	}
-	if _, err := openBackupArchive(context.Background(), output, opensslCMS{binary: binary, privateKey: keyPath}, t.TempDir()); err != nil {
+	if _, err := openBackupArchive(context.Background(), output, opensslCMS{binary: binary, privateKey: keyPath}, t.TempDir(), 0); err != nil {
 		t.Fatal(err)
 	}
 
@@ -317,7 +317,7 @@ func TestBackupArchiveOpenSSLRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, otherKey := testRecipient(t, t.TempDir(), other, &other.PublicKey)
-	if _, err := openBackupArchive(context.Background(), output, opensslCMS{binary: binary, privateKey: otherKey}, t.TempDir()); err == nil {
+	if _, err := openBackupArchive(context.Background(), output, opensslCMS{binary: binary, privateKey: otherKey}, t.TempDir(), 0); err == nil {
 		t.Fatal("archive opened with the wrong private key")
 	}
 
@@ -330,7 +330,7 @@ func TestBackupArchiveOpenSSLRoundTrip(t *testing.T) {
 	if err := os.WriteFile(tampered, body, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := openBackupArchive(context.Background(), tampered, opensslCMS{binary: binary, privateKey: keyPath}, t.TempDir()); err == nil {
+	if _, err := openBackupArchive(context.Background(), tampered, opensslCMS{binary: binary, privateKey: keyPath}, t.TempDir(), 0); err == nil {
 		t.Fatal("tampered ciphertext accepted")
 	}
 
@@ -340,7 +340,7 @@ func TestBackupArchiveOpenSSLRoundTrip(t *testing.T) {
 	if out, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("build CBC fixture: %v: %s", err, out)
 	}
-	if err := requireAuthEnvelopedData(cbc); err == nil {
+	if err := requireAuthEnvelopedData(cbc, 0); err == nil {
 		t.Fatal("CBC EnvelopedData accepted; want refusal before decryption")
 	}
 }

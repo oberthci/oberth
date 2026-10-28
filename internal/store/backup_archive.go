@@ -35,24 +35,43 @@ type backupManifest struct {
 	Members []backupMember `json:"members"`
 }
 
-// WriteVerifiedBackup writes plaintext only to the supplied private writer. The
-// maintenance command connects it directly to authenticated encryption. Callers
-// must provide a private, bounded tmpfs /tmp and an outer process deadline:
-// snapshotCurrentDatabase is reused unchanged and is not context-interruptible.
-// It refuses observed source changes rather than claiming an online backup lock.
-// No live database is opened writable; no migration or recovery is performed.
-func WriteVerifiedBackup(ctx context.Context, path string, expected int, opts Options, output io.Writer) (report BackupReport, resultErr error) {
+// WriteVerifiedBackup snapshots one committed SQLite view using the online
+// backup API, verifies it, then streams a single database member to output.
+// Plaintext staging lives in a private directory removed on return. Callers
+// must provide sufficient private /tmp storage and an outer process deadline.
+func WriteVerifiedBackup(ctx context.Context, path string, expected int, opts Options, output io.Writer) (BackupReport, error) {
+	return writeVerifiedBackup(ctx, path, expected, opts, output, false)
+}
+
+// WriteStableVerifiedBackup preserves the isolated maintenance utility's stable
+// byte-copy protocol and fixed 128 MiB bound. It is not the live CLI path.
+func WriteStableVerifiedBackup(ctx context.Context, path string, expected int, opts Options, output io.Writer) (BackupReport, error) {
+	opts.BackupMaxBytes = 128 << 20
+	return writeVerifiedBackup(ctx, path, expected, opts, output, true)
+}
+
+func writeVerifiedBackup(ctx context.Context, path string, expected int, opts Options, output io.Writer, stable bool) (report BackupReport, resultErr error) {
 	if ctx == nil || output == nil || expected < 3 || expected > latestMigrationVersion {
 		return report, errors.New("backup arguments refused")
+	}
+	limit, err := BackupMaxBytes(opts.BackupMaxBytes)
+	if err != nil {
+		return report, err
 	}
 	if err := ctx.Err(); err != nil {
 		return report, err
 	}
 	output = backupContextWriter{Writer: output, ctx: ctx}
-	if _, err := backupMembers(path); err != nil {
-		return report, err
+	var snapshot string
+	var cleanup func() error
+	if stable {
+		if _, err := backupMembers(ctx, path, limit); err != nil {
+			return report, err
+		}
+		snapshot, cleanup, err = snapshotCurrentDatabase(path)
+	} else {
+		snapshot, cleanup, err = snapshotOnlineDatabase(ctx, path, limit)
 	}
-	snapshot, cleanup, err := snapshotCurrentDatabase(path)
 	if err != nil {
 		return report, err
 	}
@@ -60,7 +79,7 @@ func WriteVerifiedBackup(ctx context.Context, path string, expected int, opts Op
 	if err := ctx.Err(); err != nil {
 		return report, err
 	}
-	members, err := backupMembers(snapshot)
+	members, err := backupMembers(ctx, snapshot, limit)
 	if err != nil {
 		return report, err
 	}
@@ -68,7 +87,7 @@ func WriteVerifiedBackup(ctx context.Context, path string, expected int, opts Op
 	if err != nil {
 		return BackupReport{}, err
 	}
-	current, err := backupMembers(snapshot)
+	current, err := backupMembers(ctx, snapshot, limit)
 	if err != nil {
 		return BackupReport{}, err
 	}
@@ -114,8 +133,7 @@ func WriteVerifiedBackup(ctx context.Context, path string, expected int, opts Op
 	return report, ctx.Err()
 }
 
-func backupMembers(path string) ([]backupMember, error) {
-	const maxBytes = 128 << 20
+func backupMembers(ctx context.Context, path string, maxBytes int64) ([]backupMember, error) {
 	var members []backupMember
 	var total int64
 	for _, suffix := range []string{"", "-wal"} {
@@ -133,11 +151,11 @@ func backupMembers(path string) ([]backupMember, error) {
 		}
 		if info.Size() < 0 || info.Size() > maxBytes-total {
 			_ = f.Close()
-			return nil, errors.New("backup size refused")
+			return nil, backupSizeError(total+info.Size(), maxBytes)
 		}
 		total += info.Size()
 		h := sha256.New()
-		n, copyErr := io.Copy(h, io.LimitReader(f, info.Size()+1))
+		n, copyErr := io.Copy(h, io.LimitReader(&backupCountingReader{Reader: f, ctx: ctx}, info.Size()+1))
 		closeErr := f.Close()
 		if copyErr != nil || closeErr != nil || n != info.Size() {
 			return nil, errors.New("backup inventory refused")
@@ -180,8 +198,8 @@ func verifyBackupSnapshot(ctx context.Context, snapshot string, expected int, op
 		return report, err
 	}
 	report = BackupReport{Schema: version, AuditHead: head, Integrity: true, ForeignKeys: true}
-	// Close SQLite before inventory and archive. Its private SHM is derivative and
-	// excluded. The main file and committed WAL remain a closed, verified pair.
+	// Close SQLite before inventory and archive. Its private SHM is derivative
+	// and excluded; legacy stable-copy archives may still contain a WAL.
 	if err := inspection.Close(); err != nil {
 		return BackupReport{}, err
 	}
@@ -200,7 +218,11 @@ func VerifyBackupArchive(ctx context.Context, input io.Reader, expected int, opt
 		return report, err
 	}
 	defer func() { resultErr = errors.Join(resultErr, os.RemoveAll(directory)) }()
-	const maxArchiveBytes = (128 << 20) + (64 << 10)
+	limit, err := BackupMaxBytes(opts.BackupMaxBytes)
+	if err != nil {
+		return report, err
+	}
+	maxArchiveBytes := limit + (64 << 10)
 	bounded := &io.LimitedReader{R: input, N: maxArchiveBytes + 1}
 	counter := &backupCountingReader{Reader: bounded, ctx: ctx}
 	reader := tar.NewReader(counter)
@@ -221,7 +243,7 @@ func VerifyBackupArchive(ctx context.Context, input io.Reader, expected int, opt
 			return report, err
 		}
 		if counter.n > maxArchiveBytes {
-			return report, errors.New("archive byte cap exceeded")
+			return report, backupSizeError(counter.n, maxArchiveBytes)
 		}
 		expectedBytes += 512 + ((h.Size+511)/512)*512
 		if seen[h.Name] || h.Typeflag != tar.TypeReg || h.Mode != 0600 || h.Linkname != "" || len(h.PAXRecords) != 0 || h.Size < 0 {
@@ -238,8 +260,11 @@ func VerifyBackupArchive(ctx context.Context, input io.Reader, expected int, opt
 			}
 			continue
 		}
-		if len(manifestBytes) != 0 || (h.Name != "oberth.sqlite" && h.Name != "oberth.sqlite-wal") || h.Size > (128<<20)-total {
+		if len(manifestBytes) != 0 || (h.Name != "oberth.sqlite" && h.Name != "oberth.sqlite-wal") {
 			return report, errors.New("archive inventory refused")
+		}
+		if h.Size > limit-total {
+			return report, backupSizeError(total+h.Size, limit)
 		}
 		total += h.Size
 		if len(members) == 0 && h.Name != "oberth.sqlite" {

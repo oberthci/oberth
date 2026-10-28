@@ -80,15 +80,44 @@ When it finishes, `oberth backup` prints the file and its size, the history
 it holds, the secret, policy, role and grant counts, the verified database
 schema and audit head, which key restores it, and the file's SHA-256.
 
-Backup changes nothing in the cluster. The database snapshot is taken by the
-running server binary itself (`oberth backup database`, run through
-`kubectl exec`): it copies the database and WAL privately, refuses if they
-changed meanwhile, and verifies integrity, foreign keys, the schema identity
-and the audit chain under the deployment's own `OBERTH_AUDIT_DOMAIN` before
-streaming the result out. A server released before that subcommand existed
-gets a stable copy instead: both files are streamed out and must hash
-identically before and after, and the same verified snapshot is then built on
-the workstation. A snapshot that races a write is retried up to three times.
+The running server opens the database read-only and takes a consistent SQLite
+online-backup snapshot of one committed view. Committed WAL changes are folded
+into `oberth.sqlite`; the WAL is not a second backup member. Schema identity,
+integrity, foreign keys and the audit chain are verified before streaming the
+archive. The snapshot does not migrate or write the live database/WAL; SQLite
+may update derivative SHM reader locks. Concurrent writers remain supported.
+
+The default logical database limit is **1 GiB**. `--max-database-bytes BYTES`
+can lower it or raise it to at most **4 GiB**; zero selects the default, never
+unlimited. Refusals name the observed byte size and limit. For example:
+
+```sh
+oberth backup --history-only --max-database-bytes 2147483648
+oberth restore --inspect BACKUP --max-database-bytes 2147483648
+oberth restore BACKUP --max-database-bytes 2147483648
+```
+
+Use the same limit (or a larger allowed one) for restore/inspect and
+`backup export-secrets`. JSON/legacy log members retain their separate 160 MiB
+cap; aggregate plaintext has a fixed 128 MiB allowance above the database limit.
+Archive framing and encryption have additional fixed allowances. The bound is
+operator-controlled, not supplied by the archive. All large database transfers,
+hashes and local extraction stream through files rather than whole-file buffers.
+Private staging still needs disk space: budget for the snapshot in the server's
+private `/tmp`, and several database copies on the workstation for verification
+and restore. Raising this flag does not raise the chart's ephemeral-storage
+limit or the ten-minute in-pod snapshot deadline. Encrypted outputs are exclusive
+0600 files; failed transfers/encryption remove partial outputs.
+
+A server predating this flag uses the existing compatibility utility pod: mount
+its PVC read-only on the same node, stream main/WAL separately, accept only stable
+before/after hashes, then take the online snapshot locally. No shell is executed
+in the server container. Compatibility staging has a separate absolute 4 GiB
+cap per source file, and source changes are retried at most three times. A busy
+old server may need to be drained for a stable copy; the new server does not.
+This fallback creates/deletes only its temporary helper pod using the operator's
+existing access, with no new server privileges or RBAC. Legacy two-member
+main/WAL backups remain readable within the selected aggregate database limit.
 
 The backup also records the deployment's live compatibility values
 (`OBERTH_SCHEMA_IDENTITY`, `OBERTH_AUDIT_DOMAIN`, `OBERTH_WITNESS_KEY_INFO`).
@@ -495,3 +524,17 @@ sudo rm -rf "$P"
 `--force` is needed because the copied CA bundles are single self-signed
 certificates; they are the current ones, so nothing but the service-account
 key changes.
+
+## Upgrading across migrations
+
+Before upgrading, run `oberth backup --history-only` (or a full backup), using
+exactly the target cluster/context and namespace. Confirm successful verification,
+retain the encrypted archive and keep its private key off the machine.
+
+`oberth upgrade` loudly warns when the target schema is newer than the running
+schema, or when the running schema cannot be determined. It does not verify a
+backup's existence or freshness; the warning is unconditional in those cases,
+even with `--yes`, and does not block the upgrade. A matching schema needs no
+migration warning. This avoids treating filenames or an audit entry as proof of
+a usable current backup. Never interpret `--yes` as backup confirmation.
+Migrations are forward-only: Helm rollback alone cannot restore the database.

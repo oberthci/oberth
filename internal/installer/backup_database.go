@@ -8,8 +8,8 @@ package installer
 // over kubectl exec stdout. A server released before that subcommand existed
 // falls back to a stable copy: both SQLite files are streamed out and must
 // hash identically before and after the copy, and the same verified snapshot
-// is then taken locally. Neither path is a racing file copy: a source that
-// changes underneath is refused (and retried a bounded number of times).
+// is then taken locally with the online API. Only the compatibility copy
+// requires stable before/after hashes (with bounded retries).
 //
 // Restore: the file is swapped on the server's PersistentVolumeClaim through a
 // short-lived pod that mounts the claim — never a host path — so it works on
@@ -89,18 +89,28 @@ func parsePodSchema(out []byte) (int, error) {
 // snapshotServerDatabase writes the store's verified database archive
 // (oberth.database-backup/v1) to destination and returns how it was taken.
 func snapshotServerDatabase(ctx context.Context, deps backupDeps, namespace, pod string, schema int, protocol store.ProtocolConfig, workDir, destination string) (string, error) {
+	limit, err := store.BackupMaxBytes(deps.maxDatabaseBytes)
+	if err != nil {
+		return "", err
+	}
 	var lastErr error
 	for attempt := 1; attempt <= databaseSnapshotAttempts; attempt++ {
-		archive, err := deps.runStdout(ctx, nil, "kubectl", kubectlExecArgs(deps.ContextName, namespace, pod, serverContainerName, false,
-			"oberth", "backup", "database", "--database", serverDatabasePath)...)
+		args := kubectlExecArgs(deps.ContextName, namespace, pod, serverContainerName, false,
+			"oberth", "backup", "database", "--database", serverDatabasePath, "--max-database-bytes", strconv.FormatInt(limit, 10))
+		_, err := streamBackupFile(ctx, deps, destination, limit+(64<<10), args)
 		if err == nil {
-			if writeErr := os.WriteFile(destination, archive, 0o600); writeErr != nil { // #nosec G306 G703 -- fixed name inside the private working directory.
-				return "", writeErr
-			}
 			return snapshotInPod, nil
 		}
-		if strings.Contains(err.Error(), `unknown command "backup"`) {
-			_, _ = fmt.Fprintln(deps.Output, "  The deployed server predates `oberth backup database`; taking a hash-checked stable copy instead.")
+		if ctx.Err() != nil {
+			return "", ctx.Err()
+		}
+		// Old images cannot accept the new limit flag. Do not retry their
+		// hard cap or silently drop the requested bound. Use the existing
+		// read-only utility fallback and snapshot its stable copy locally.
+		if strings.Contains(err.Error(), `unknown command "backup"`) ||
+			strings.Contains(err.Error(), "flag provided but not defined: -max-database-bytes") ||
+			strings.Contains(err.Error(), "backup size refused") {
+			_, _ = fmt.Fprintln(deps.Output, "  The deployed server predates bounded online backup; taking a hash-checked stable copy and snapshotting it locally.")
 			return snapshotStableCopy, legacyStableCopyDatabase(ctx, deps, namespace, pod, schema, protocol, workDir, destination)
 		}
 		lastErr = err
@@ -136,7 +146,7 @@ func stableCopyDatabase(ctx context.Context, deps backupDeps, namespace, pod, co
 }
 
 func podSQLiteHashes(ctx context.Context, deps backupDeps, namespace, pod, container string) (map[string]string, error) {
-	command := []string{"sh", "-c", utilitySQLiteHashesScript, "sh", serverDatabasePath}
+	command := []string{"sh", "-c", utilitySQLiteHashesScript, "sh", serverDatabasePath, strconv.FormatInt(store.HardBackupMaxBytes, 10)}
 	out, err := deps.RunCommand(ctx, nil, "kubectl", kubectlExecArgs(deps.ContextName, namespace, pod, container, false, command...)...)
 	if err != nil {
 		return nil, fmt.Errorf("hash server database: %w%s", err, commandOutputSuffix(out))
@@ -171,16 +181,15 @@ func stableCopyOnce(ctx context.Context, deps backupDeps, namespace, pod, contai
 			continue
 		}
 		command := []string{"cat", serverDatabasePath + suffix}
-		body, err := deps.runStdout(ctx, nil, "kubectl", kubectlExecArgs(deps.ContextName, namespace, pod, container, false, command...)...)
+		args := kubectlExecArgs(deps.ContextName, namespace, pod, container, false, command...)
+		// Compatibility staging is bounded independently: a WAL may be
+		// larger than the logical database, but is never a backup member.
+		sum, err := streamBackupFile(ctx, deps, local+suffix, store.HardBackupMaxBytes, args)
 		if err != nil {
-			return fmt.Errorf("stream %s%s: %w", serverDatabasePath, suffix, err)
+			return fmt.Errorf("stream database%s: %w", suffix, err)
 		}
-		sum := sha256.Sum256(body)
-		if hex.EncodeToString(sum[:]) != want {
+		if sum != want {
 			return errors.New("server database changed while it was copied")
-		}
-		if err := os.WriteFile(local+suffix, body, 0o600); err != nil { // #nosec G306 G703 -- fixed name inside a fresh private directory.
-			return err
 		}
 	}
 	after, err := podSQLiteHashes(ctx, deps, namespace, pod, container)
@@ -199,7 +208,7 @@ func stableCopyOnce(ctx context.Context, deps backupDeps, namespace, pod, contai
 	if err != nil {
 		return err
 	}
-	_, writeErr := store.WriteVerifiedBackup(ctx, local, schema, store.Options{Protocol: protocol}, out)
+	_, writeErr := store.WriteVerifiedBackup(ctx, local, schema, store.Options{Protocol: protocol, BackupMaxBytes: deps.maxDatabaseBytes}, out)
 	closeErr := out.Close()
 	return errors.Join(writeErr, closeErr)
 }
@@ -207,7 +216,7 @@ func stableCopyOnce(ctx context.Context, deps backupDeps, namespace, pod, contai
 // verifyDatabaseArchive validates a store database archive offline: SQLite
 // integrity, foreign keys, the exact schema version and identity, and the
 // complete audit hash chain under the recorded audit domain.
-func verifyDatabaseArchive(ctx context.Context, path string, schema int, protocol store.ProtocolConfig) (store.BackupReport, error) {
+func verifyDatabaseArchive(ctx context.Context, path string, schema int, protocol store.ProtocolConfig, maxBytes int64) (store.BackupReport, error) {
 	if schema < 3 || schema > store.LatestMigrationVersion() {
 		return store.BackupReport{}, fmt.Errorf("database schema %d is not readable by this oberth CLI (schema %d); use an oberth release at least as new as the server that wrote the backup",
 			schema, store.LatestMigrationVersion())
@@ -217,7 +226,7 @@ func verifyDatabaseArchive(ctx context.Context, path string, schema int, protoco
 		return store.BackupReport{}, err
 	}
 	defer func() { _ = f.Close() }()
-	report, err := store.VerifyBackupArchive(ctx, f, schema, store.Options{Protocol: protocol})
+	report, err := store.VerifyBackupArchive(ctx, f, schema, store.Options{Protocol: protocol, BackupMaxBytes: maxBytes})
 	if err != nil {
 		return store.BackupReport{}, fmt.Errorf("database validation under schema identity %q and audit domain %q: %w",
 			protocol.SchemaIdentity, protocol.AuditDomain, err)
@@ -297,55 +306,85 @@ stat -c '%u:%g %a' oberth.sqlite`
 // place" rather than "previous database in place".
 const swapCompleteMarker = "oberth-restore: database swapped"
 
-// restoredDatabase is the database pair extracted from a verified archive.
+// restoredDatabase holds private file paths, never database-sized byte slices.
+// The owning backup/restore working directory controls their lifetime.
 type restoredDatabase struct {
-	Main, WAL             []byte
+	Main, WAL             string
 	MainSHA256, WALSHA256 string
 }
 
-// extractDatabaseFiles reads oberth.sqlite (and the optional WAL) out of a
-// store database archive that verifyDatabaseArchive has already accepted.
-func extractDatabaseFiles(path string) (restoredDatabase, error) {
-	f, err := os.Open(path) // #nosec G304 -- fixed member path inside the private working directory.
+// extractDatabaseFiles streams a verified inner archive into adjacent private
+// files. Re-check framing/size even though verification has already succeeded.
+func extractDatabaseFiles(ctx context.Context, path, work string, maxBytes int64) (db restoredDatabase, resultErr error) {
+	limit, err := store.BackupMaxBytes(maxBytes)
 	if err != nil {
-		return restoredDatabase{}, err
+		return db, err
 	}
-	defer func() { _ = f.Close() }()
-	var db restoredDatabase
-	if err := readStoreArchiveFiles(f, func(name string, body []byte) {
-		sum := sha256.Sum256(body)
-		switch name {
-		case "oberth.sqlite":
-			db.Main, db.MainSHA256 = body, hex.EncodeToString(sum[:])
-		case "oberth.sqlite-wal":
-			db.WAL, db.WALSHA256 = body, hex.EncodeToString(sum[:])
-		}
-	}); err != nil {
-		return restoredDatabase{}, err
-	}
-	if db.Main == nil {
-		return restoredDatabase{}, errors.New("database archive has no oberth.sqlite")
-	}
-	return db, nil
-}
-
-// writeRestoredDatabase writes the pair next to each other for local
-// inspection (orphaned-workflow detection).
-func writeRestoredDatabase(dir string, db restoredDatabase) (string, error) {
-	inspectDir, err := os.MkdirTemp(dir, "restored-db-")
+	f, err := os.Open(path) // #nosec G304 -- verified archive in private working directory.
 	if err != nil {
-		return "", err
+		return db, err
 	}
-	path := filepath.Join(inspectDir, "oberth.sqlite")
-	if err := os.WriteFile(path, db.Main, 0o600); err != nil { // #nosec G306 G703 -- fixed name inside a fresh private directory.
-		return "", err
+	defer func() { resultErr = errors.Join(resultErr, f.Close()) }()
+	dir, err := os.MkdirTemp(work, "restored-db-")
+	if err != nil {
+		return db, err
 	}
-	if db.WAL != nil {
-		if err := os.WriteFile(path+"-wal", db.WAL, 0o600); err != nil { // #nosec G306 G703 -- fixed name inside a fresh private directory.
-			return "", err
+	defer func() {
+		if resultErr != nil {
+			resultErr = errors.Join(resultErr, os.RemoveAll(dir))
+		}
+	}()
+	reader := tar.NewReader(io.LimitReader(&backupContextReader{Reader: f, ctx: ctx}, limit+(64<<10)))
+	var total int64
+	seen := map[string]bool{}
+	for {
+		header, err := reader.Next()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return db, err
+		}
+		if seen[header.Name] || header.Typeflag != tar.TypeReg || header.Size < 0 {
+			return db, errors.New("database archive entry refused")
+		}
+		seen[header.Name] = true
+		if header.Name == "manifest.json" {
+			if header.Size > 8192 {
+				return db, errors.New("database manifest refused")
+			}
+			continue
+		}
+		if header.Name != "oberth.sqlite" && header.Name != "oberth.sqlite-wal" {
+			return db, errors.New("database archive inventory refused")
+		}
+		if header.Size > limit-total {
+			return db, backupLimitError(total+header.Size, limit)
+		}
+		total += header.Size
+		destination := filepath.Join(dir, "oberth.sqlite")
+		if header.Name == "oberth.sqlite-wal" {
+			destination += "-wal"
+		}
+		file, err := os.OpenFile(destination, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600) // #nosec G304 -- one of two exact names in fresh private directory.
+		if err != nil {
+			return db, err
+		}
+		hash := sha256.New()
+		_, copyErr := io.CopyN(io.MultiWriter(file, hash), reader, header.Size)
+		if err := errors.Join(copyErr, file.Close()); err != nil {
+			return db, err
+		}
+		if header.Name == "oberth.sqlite" {
+			db.Main, db.MainSHA256 = destination, hex.EncodeToString(hash.Sum(nil))
+		} else {
+			db.WAL, db.WALSHA256 = destination, hex.EncodeToString(hash.Sum(nil))
 		}
 	}
-	return path, nil
+	if db.Main == "" {
+		return db, errors.New("database archive has no oberth.sqlite")
+	}
+	return db, ctx.Err()
 }
 
 // sleepContext waits for d or until ctx ends.
@@ -360,35 +399,18 @@ func sleepContext(ctx context.Context, d time.Duration) error {
 	}
 }
 
-// readStoreArchiveFiles hands each SQLite member of a store database archive
-// to visit. The archive was verified by store.VerifyBackupArchive first; the
-// bounds here only keep a damaged file from exhausting memory.
-func readStoreArchiveFiles(r io.Reader, visit func(name string, body []byte)) error {
-	reader := tar.NewReader(io.LimitReader(r, maxBackupMemberBytes))
-	for {
-		header, err := reader.Next()
-		if errors.Is(err, io.EOF) {
-			return nil
-		}
-		if err != nil {
-			return fmt.Errorf("read database archive: %w", err)
-		}
-		if header.Name != "oberth.sqlite" && header.Name != "oberth.sqlite-wal" {
-			continue
-		}
-		if header.Size < 0 || header.Size > maxBackupMemberBytes {
-			return errors.New("database archive member is oversized")
-		}
-		body := make([]byte, header.Size)
-		if _, err := io.ReadFull(reader, body); err != nil {
-			return fmt.Errorf("read database archive: %w", err)
-		}
-		visit(header.Name, body)
-	}
-}
-
 const databaseCopyContainer = "database-copy"
-const utilitySQLiteHashesScript = `for f in "$1" "$1-wal"; do if [ -f "$f" ]; then sha256sum "$f"; fi; done`
+const utilitySQLiteHashesScript = `set -eu
+for f in "$1" "$1-wal"; do
+  if [ -f "$f" ]; then
+    size=$(stat -c '%s' "$f")
+    if [ "$size" -gt "$2" ]; then
+      printf 'backup size %s bytes exceeds limit %s bytes\n' "$size" "$2" >&2
+      exit 1
+    fi
+    sha256sum "$f"
+  fi
+done`
 
 // Pre-backup-subcommand images also predate native admin file commands. Mount
 // their PVC read-only in a pinned utility pod on the server's existing node;

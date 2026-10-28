@@ -366,15 +366,16 @@ func RunUpgrade(ctx context.Context, cfg UpgradeConfig, deps Deps) (UpgradeResul
 	}
 	defer cleanupProfile()
 
-	// Schema migration announcement: query the running server's schema
-	// version and compare with the target binary's version.
+	// The CLI does not attest a backup's existence/freshness. Warn before any
+	// mutation whenever a migration is known OR the source schema is unknown.
 	if cfg.BinarySchemaVersion > 0 {
 		liveSchema, schemaErr := queryRunningSchemaVersion(ctx, deps, cfg)
-		if schemaErr == nil && liveSchema > 0 && liveSchema < cfg.BinarySchemaVersion {
+		if schemaErr != nil || liveSchema <= 0 {
+			_, _ = fmt.Fprintln(w, "\nWARNING: running database schema is unknown; the target may run forward-only migrations.")
+			warnUpgradeBackup(w, cfg.Namespace)
+		} else if liveSchema < cfg.BinarySchemaVersion {
 			_, _ = fmt.Fprintf(w, "\nSchema migration v%d will run (forward-only; rollback requires a database restore of /data/oberth.sqlite)\n", cfg.BinarySchemaVersion)
-			if !IsLocalServer(server) && !cfg.Yes {
-				return result, fmt.Errorf("schema migration v%d→v%d requires --yes for non-local targets", liveSchema, cfg.BinarySchemaVersion)
-			}
+			warnUpgradeBackup(w, cfg.Namespace)
 		}
 	}
 
@@ -463,6 +464,16 @@ func RunUpgrade(ctx context.Context, cfg UpgradeConfig, deps Deps) (UpgradeResul
 	})
 	_, _ = fmt.Fprintf(w, "\nReady — %s\n", oberthWebUIURL)
 	return result, nil
+}
+
+// Loudly warn even with --yes: that flag acknowledges cluster selection,
+// never backup completion. Do not infer freshness from a filename or audit row.
+func warnUpgradeBackup(w io.Writer, namespace string) {
+	_, _ = fmt.Fprintf(w, "WARNING: NO FRESH BACKUP HAS BEEN VERIFIED by this upgrade.\n"+
+		"  Complete `oberth backup --history-only --namespace %s` against this same cluster/context before proceeding.\n"+
+		"  Confirm successful verification and retain the encrypted file and its private key.\n"+
+		"  This upgrade does not create/check a backup; --yes does not prove one exists.\n"+
+		"  Migrations are forward-only: Helm rollback alone cannot restore the database.\n", namespace)
 }
 
 // helmRevisionLabel accepts Helm's quoted and numeric JSON revision forms.
@@ -640,11 +651,11 @@ func getOberthDeployment(ctx context.Context, deps Deps, namespace string) (*app
 
 // queryRunningSchemaVersion execs into the Oberth pod and runs
 // `oberth version --schema` to obtain the integer schema version.
-// Returns 0 on any error — the caller treats unknown schema as
-// "no announcement" rather than blocking the upgrade.
+// Returns 0 on any error; the caller warns loudly that migration/backup
+// safety is unknown rather than silently omitting backup guidance.
 //
 // Old binaries that do not support --schema return a usage error;
-// the caller falls through to the zero-value path (no announcement).
+// the caller falls through to the unknown-schema warning path.
 func queryRunningSchemaVersion(ctx context.Context, deps Deps, cfg UpgradeConfig) (int, error) {
 	run := deps.RunCommand
 	if run == nil {

@@ -48,7 +48,7 @@ func historyBackup(t *testing.T) (string, *fakeBackupCluster, *fakeBackupCluster
 func TestHistoryOnlyBackupHoldsNoSecrets(t *testing.T) {
 	t.Parallel()
 	archive, _, _ := historyBackup(t)
-	manifest, err := openBackupArchive(context.Background(), archive, fakeEnvelopeCipher{}, t.TempDir())
+	manifest, err := openBackupArchive(context.Background(), archive, fakeEnvelopeCipher{}, t.TempDir(), 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -237,7 +237,7 @@ func TestStoreSummaryCountsHistory(t *testing.T) {
 		t.Fatal(err)
 	}
 	protocol := store.ProtocolConfig{SchemaIdentity: sourceCompat.SchemaIdentity, AuditDomain: sourceCompat.AuditDomain}
-	summary, err := summarizeDatabaseArchive(context.Background(), path, t.TempDir(), protocol)
+	summary, err := summarizeDatabaseArchive(context.Background(), path, t.TempDir(), protocol, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -17,6 +17,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -38,6 +39,8 @@ import (
 
 // BackupConfig selects the source installation and the encrypted output.
 type BackupConfig struct {
+	MaxDatabaseBytes int64 // logical snapshot limit; zero selects 1 GiB
+
 	KubeconfigPath   string
 	ContextName      string
 	Namespace        string
@@ -59,6 +62,9 @@ type BackupConfig struct {
 
 // backupDeps extends Deps with what backup and restore need beyond install.
 type backupDeps struct {
+	maxDatabaseBytes int64
+	runIO            func(context.Context, io.Reader, io.Writer, string, ...string) error
+
 	Deps
 	// runStdout runs a host command and returns its stdout alone (binary
 	// database streams must not be mixed with kubectl's stderr warnings).
@@ -92,6 +98,9 @@ func (cfg *BackupConfig) applyDefaults() {
 // ExecuteBackup resolves the cluster and host tools and runs the backup.
 func ExecuteBackup(ctx context.Context, cfg BackupConfig, host InstallDeps) error {
 	cfg.applyDefaults()
+	if _, err := store.BackupMaxBytes(cfg.MaxDatabaseBytes); err != nil {
+		return err
+	}
 	if strings.TrimSpace(cfg.Output) == "" {
 		return errors.New("--output is required: the encrypted archive to create")
 	}
@@ -153,6 +162,7 @@ func prepareOperatorDeps(host InstallDeps, kubeconfigPath, contextName string, l
 
 	runCommand := host.RunCommand
 	runStdout := CommandRunner(defaultRunCommandStdout)
+	runIO := defaultRunCommandIO
 	if kubeconfigPath != "" {
 		host.LoadKubeConfig = func(name string) (kubernetes.Interface, *rest.Config, string, error) {
 			rules := clientcmd.NewDefaultClientConfigLoadingRules()
@@ -161,6 +171,12 @@ func prepareOperatorDeps(host InstallDeps, kubeconfigPath, contextName string, l
 		}
 		runCommand = withKubeconfigArg(runCommand, kubeconfigPath)
 		runStdout = withKubeconfigArg(runStdout, kubeconfigPath)
+		runIO = func(ctx context.Context, input io.Reader, w io.Writer, name string, args ...string) error {
+			if name == "kubectl" {
+				args = append([]string{"--kubeconfig", kubeconfigPath}, args...)
+			}
+			return defaultRunCommandIO(ctx, input, w, name, args...)
+		}
 	}
 	kubeClient, restConfig, selectedContext, err := host.LoadKubeConfig(contextName)
 	if err != nil {
@@ -193,6 +209,7 @@ func prepareOperatorDeps(host InstallDeps, kubeconfigPath, contextName string, l
 			ReadPassword:   readPassword,
 		},
 		runStdout: runStdout,
+		runIO:     runIO,
 		openssl:   openssl,
 		now:       time.Now,
 	}
@@ -401,6 +418,10 @@ func readSecretAccess(ctx context.Context, deps Deps, namespace string) (secretA
 
 func runBackup(ctx context.Context, cfg BackupConfig, deps backupDeps) (resultErr error) {
 	deps.utilityImage = cfg.UtilityImage
+	deps.maxDatabaseBytes = cfg.MaxDatabaseBytes
+	if _, err := store.BackupMaxBytes(cfg.MaxDatabaseBytes); err != nil {
+		return err
+	}
 	w := deps.Output
 	full := cfg.Scope != BackupScopeHistory
 	if full {
@@ -515,11 +536,11 @@ func runBackup(ctx context.Context, cfg BackupConfig, deps backupDeps) (resultEr
 	if err != nil {
 		return err
 	}
-	report, err := verifyDatabaseArchive(ctx, databasePath, schema, protocol)
+	report, err := verifyDatabaseArchive(ctx, databasePath, schema, protocol, cfg.MaxDatabaseBytes)
 	if err != nil {
 		return err
 	}
-	contents, err := summarizeDatabaseArchive(ctx, databasePath, work, protocol)
+	contents, err := summarizeDatabaseArchive(ctx, databasePath, work, protocol, cfg.MaxDatabaseBytes)
 	if err != nil {
 		return err
 	}
@@ -571,7 +592,7 @@ func runBackup(ctx context.Context, cfg BackupConfig, deps backupDeps) (resultEr
 		},
 		NotRestored: backupNotRestored,
 	}
-	if err := writeBackupArchive(ctx, work, &manifest, deps.cipher, cfg.Output); err != nil {
+	if err := writeBackupArchive(ctx, work, &manifest, deps.cipher, cfg.Output, cfg.MaxDatabaseBytes); err != nil {
 		return err
 	}
 	cipherSHA, err := fileSHA256(cfg.Output)

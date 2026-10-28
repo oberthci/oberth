@@ -10,7 +10,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/oberthci/oberth/internal/model"
@@ -45,7 +44,7 @@ func backupSourceBytes(t *testing.T, p string) map[string][]byte {
 	}
 	return r
 }
-func TestVerifiedBackupPreservesSchema20WALAndSource(t *testing.T) {
+func TestVerifiedBackupFoldsCommittedWALAndPreservesSource(t *testing.T) {
 	p, _ := backupFixture(t)
 	before := backupSourceBytes(t, p)
 	var out bytes.Buffer
@@ -61,7 +60,7 @@ func TestVerifiedBackupPreservesSchema20WALAndSource(t *testing.T) {
 		t.Fatal("source file set changed")
 	}
 	for k, v := range before {
-		if !bytes.Equal(v, after[k]) {
+		if k != "-shm" && !bytes.Equal(v, after[k]) {
 			t.Fatalf("source changed %q", k)
 		}
 	}
@@ -89,7 +88,7 @@ func TestVerifiedBackupPreservesSchema20WALAndSource(t *testing.T) {
 		}
 		if h.Name == "manifest.json" {
 			var m backupManifest
-			if e := json.Unmarshal(b, &m); e != nil || m.Schema != 20 || len(m.Members) != 2 {
+			if e := json.Unmarshal(b, &m); e != nil || m.Schema != 20 || len(m.Members) != 1 {
 				t.Fatal("manifest refused")
 			}
 			continue
@@ -98,8 +97,8 @@ func TestVerifiedBackupPreservesSchema20WALAndSource(t *testing.T) {
 			t.Fatal(e)
 		}
 	}
-	if len(seen) != 3 {
-		t.Fatal("WAL archive incomplete")
+	if len(seen) != 2 || seen["oberth.sqlite-wal"] {
+		t.Fatal("online archive must fold WAL into one main file")
 	}
 	inspection, e := InspectCurrent(context.Background(), filepath.Join(dir, "oberth.sqlite"), Options{})
 	if e != nil {
@@ -271,12 +270,9 @@ func TestVerifiedBackupConcurrentWriterCheckpoint(t *testing.T) {
 		var out bytes.Buffer
 		_, e := WriteVerifiedBackup(ctx, p, 20, Options{}, &out)
 		if e != nil {
-			if !strings.Contains(e.Error(), "sqlite source changed while creating read-only startup snapshot") && !strings.Contains(e.Error(), "backup inventory refused") {
-				close(stop)
-				<-joined
-				t.Fatalf("unexpected concurrent refusal: %v", e)
-			}
-			continue
+			close(stop)
+			<-joined
+			t.Fatalf("online backup must succeed during writers/checkpoints: %v", e)
 		}
 		if _, e := VerifyBackupArchive(ctx, bytes.NewReader(out.Bytes()), 20, Options{}); e != nil {
 			close(stop)

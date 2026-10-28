@@ -56,12 +56,9 @@ const (
 	backupMemberSecretAccess = "kubernetes/secret-access.json" // #nosec G101 -- archive member NAME, not credential material.
 	backupMemberLogs         = "server/logs.tar"
 
-	// The database member is bounded by the store's own 128 MiB snapshot cap
-	// plus tar framing; JSON members are far smaller in practice.
-	maxBackupMemberBytes    = 160 << 20
-	maxBackupPlaintextBytes = 256 << 20
-	maxBackupManifestBytes  = 1 << 20
-	maxBackupCipherBytes    = maxBackupPlaintextBytes + (16 << 20)
+	// Non-database member cap; the database has an operator-configured limit.
+	maxBackupMemberBytes   = 160 << 20
+	maxBackupManifestBytes = 1 << 20
 
 	// minBackupRecipientBits matches the recipient floor of
 	// cmd/oberth-store-backup.
@@ -329,7 +326,11 @@ var authEnvelopedDataOID = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 9, 16, 1,
 // content type is AuthEnvelopedData. Unauthenticated CBC EnvelopedData — which
 // anyone holding the public certificate could also produce, and which OpenSSL
 // would happily decrypt — is refused before any decryption runs.
-func requireAuthEnvelopedData(path string) error {
+func requireAuthEnvelopedData(path string, databaseLimit int64) error {
+	limits, err := backupLimits(databaseLimit)
+	if err != nil {
+		return err
+	}
 	file, err := os.Open(path) // #nosec G304 -- explicit operator archive path.
 	if err != nil {
 		return fmt.Errorf("open backup archive: %w", err)
@@ -339,8 +340,11 @@ func requireAuthEnvelopedData(path string) error {
 	if err != nil {
 		return fmt.Errorf("stat backup archive: %w", err)
 	}
-	if !info.Mode().IsRegular() || info.Size() <= 0 || info.Size() > maxBackupCipherBytes {
-		return fmt.Errorf("backup archive %s is not a regular file within the %d MiB bound", path, maxBackupCipherBytes>>20)
+	if info.Size() > limits.ciphertext {
+		return backupLimitError(info.Size(), limits.ciphertext)
+	}
+	if !info.Mode().IsRegular() || info.Size() <= 0 {
+		return fmt.Errorf("backup archive %s is not a regular file within the %d MiB bound", path, limits.ciphertext>>20)
 	}
 	header := make([]byte, 32)
 	n, err := io.ReadFull(file, header)
@@ -369,11 +373,15 @@ func requireAuthEnvelopedData(path string) error {
 // writeBackupArchive streams manifest + members (read from dir, by member
 // name) through the cipher into a new 0600 output file. The output path must
 // not exist; a failed write removes the partial file.
-func writeBackupArchive(ctx context.Context, dir string, manifest *backupManifest, cipher archiveCipher, output string) (resultErr error) {
+func writeBackupArchive(ctx context.Context, dir string, manifest *backupManifest, cipher archiveCipher, output string, databaseLimit int64) (resultErr error) {
+	limits, err := backupLimits(databaseLimit)
+	if err != nil {
+		return err
+	}
 	manifest.Members = manifest.Members[:0]
 	var total int64
 	for _, name := range requiredBackupMembers(manifest.Format, manifest.Scope) {
-		digest, err := digestBackupMember(filepath.Join(dir, filepath.FromSlash(name)))
+		digest, err := digestBackupMember(filepath.Join(dir, filepath.FromSlash(name)), limits.member(name))
 		if err != nil {
 			return fmt.Errorf("backup member %s: %w", name, err)
 		}
@@ -381,8 +389,8 @@ func writeBackupArchive(ctx context.Context, dir string, manifest *backupManifes
 		total += digest.Size
 		manifest.Members = append(manifest.Members, digest)
 	}
-	if total > maxBackupPlaintextBytes {
-		return fmt.Errorf("backup plaintext is %d MiB, above the %d MiB bound", total>>20, maxBackupPlaintextBytes>>20)
+	if total > limits.plaintext {
+		return backupLimitError(total, limits.plaintext)
 	}
 	manifestBytes, err := json.MarshalIndent(manifest, "", "  ")
 	if err != nil {
@@ -457,19 +465,19 @@ func writeBackupTar(w io.Writer, dir string, manifest []byte, members []backupMe
 	return archive.Close()
 }
 
-func digestBackupMember(path string) (backupMemberDigest, error) {
+func digestBackupMember(path string, maxBytes int64) (backupMemberDigest, error) {
 	f, err := os.Open(path) // #nosec G304 -- fixed member path inside the private working directory.
 	if err != nil {
 		return backupMemberDigest{}, err
 	}
 	defer func() { _ = f.Close() }()
 	hash := sha256.New()
-	n, err := io.Copy(hash, io.LimitReader(f, maxBackupMemberBytes+1))
+	n, err := io.Copy(hash, io.LimitReader(f, maxBytes+1))
 	if err != nil {
 		return backupMemberDigest{}, err
 	}
-	if n > maxBackupMemberBytes {
-		return backupMemberDigest{}, fmt.Errorf("member exceeds the %d MiB bound", maxBackupMemberBytes>>20)
+	if n > maxBytes {
+		return backupMemberDigest{}, backupLimitError(n, maxBytes)
 	}
 	return backupMemberDigest{Size: n, SHA256: hex.EncodeToString(hash.Sum(nil))}, nil
 }
@@ -477,8 +485,12 @@ func digestBackupMember(path string) (backupMemberDigest, error) {
 // openBackupArchive authenticates and decrypts input into dir, extracts the
 // closed member inventory, and verifies every member against the manifest's
 // size and SHA-256. The decrypted tar stream is removed once extracted.
-func openBackupArchive(ctx context.Context, input string, cipher archiveCipher, dir string) (backupManifest, error) {
-	if err := requireAuthEnvelopedData(input); err != nil {
+func openBackupArchive(ctx context.Context, input string, cipher archiveCipher, dir string, databaseLimit int64) (backupManifest, error) {
+	limits, err := backupLimits(databaseLimit)
+	if err != nil {
+		return backupManifest{}, err
+	}
+	if err := requireAuthEnvelopedData(input, databaseLimit); err != nil {
 		return backupManifest{}, err
 	}
 	plaintext := filepath.Join(dir, "archive.tar")
@@ -505,7 +517,7 @@ func openBackupArchive(ctx context.Context, input string, cipher archiveCipher, 
 		defer func() { _ = unzipped.Close() }()
 		plain = unzipped
 	}
-	reader := tar.NewReader(io.LimitReader(plain, maxBackupPlaintextBytes+(1<<20)))
+	reader := tar.NewReader(io.LimitReader(plain, limits.plaintext+(1<<20)))
 
 	allowed := make(map[string]bool, len(legacyMemberOrder)+1)
 	for _, name := range append(slices.Clone(legacyMemberOrder), backupMemberLogs) {
@@ -513,6 +525,7 @@ func openBackupArchive(ctx context.Context, input string, cipher archiveCipher, 
 	}
 	var manifestBytes []byte
 	var extracted []backupMemberDigest
+	var total int64
 	for {
 		if err := ctx.Err(); err != nil {
 			return backupManifest{}, err
@@ -536,9 +549,16 @@ func openBackupArchive(ctx context.Context, input string, cipher archiveCipher, 
 			}
 			continue
 		}
-		if manifestBytes == nil || !allowed[header.Name] || header.Size > maxBackupMemberBytes {
+		if manifestBytes == nil || !allowed[header.Name] {
 			return backupManifest{}, fmt.Errorf("archive entry %q is not part of the %s inventory", header.Name, backupFormat)
 		}
+		if header.Size > limits.member(header.Name) {
+			return backupManifest{}, backupLimitError(header.Size, limits.member(header.Name))
+		}
+		if header.Size > limits.plaintext-total {
+			return backupManifest{}, backupLimitError(total+header.Size, limits.plaintext)
+		}
+		total += header.Size
 		delete(allowed, header.Name)
 		digest, err := extractBackupMember(reader, filepath.Join(dir, filepath.FromSlash(header.Name)), header.Size)
 		if err != nil {
