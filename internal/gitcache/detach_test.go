@@ -3,10 +3,12 @@ package gitcache
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -149,26 +151,70 @@ func TestCaptureBoundsDescendantHoldingOutputPipe(t *testing.T) {
 	if _, err := os.Stat("/bin/sh"); err != nil {
 		t.Skip("/bin/sh is required to hold an inherited descriptor open")
 	}
+	setsid, err := exec.LookPath("setsid")
+	if err != nil {
+		t.Skip("setsid is required to exercise an actually escaped descendant")
+	}
+	root := t.TempDir()
+	ready, pidFile := filepath.Join(root, "ready"), filepath.Join(root, "pid")
+	if err := syscall.Mkfifo(ready, 0600); err != nil {
+		t.Fatal(err)
+	}
 	cache, err := newBackendTestCache(t, Config{
-		Root:      t.TempDir(),
+		Root:      root,
 		GitBinary: "/bin/sh",
+		Env:       map[string]string{"SETSID": setsid, "ESCAPED_PID": pidFile, "ESCAPED_READY": ready},
 		Upstream:  func(string) (string, error) { return "", errors.New("upstream unused") },
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	// The shell exits immediately; the backgrounded child keeps the inherited
-	// stdout pipe open well past the wait delay and then retires on its own.
+	// Handshake after setsid, before the parent exits: merely backgrounding a
+	// child does not escape its process group. The CLI reaper must not kill this
+	// new group. The test owns its cleanup, including reaping on Linux.
+	var escaped *os.Process
+	defer func() {
+		// This cleanup also runs on a failed liveness assertion.
+		if escaped == nil {
+			if raw, err := os.ReadFile(pidFile); err == nil {
+				var pid int
+				if _, err := fmt.Sscan(string(raw), &pid); err == nil && pid > 0 {
+					escaped, _ = os.FindProcess(pid)
+				}
+			}
+		}
+		if escaped != nil {
+			_ = escaped.Kill()
+			_, _ = escaped.Wait()
+		}
+	}()
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
 	started := time.Now()
 	done := make(chan error, 1)
 	go func() {
-		_, waitErr := cache.capture(context.Background(), "", "-c", "sleep 20 & exit 0")
+		_, waitErr := cache.capture(ctx, "", "-c", `"$SETSID" sh -c 'echo $$ > "$ESCAPED_PID"; echo ready > "$ESCAPED_READY"; exec sleep 600' & read -r ready < "$ESCAPED_READY"; exit 0`)
 		done <- waitErr
 	}()
 
 	select {
 	case waitErr := <-done:
+		raw, err := os.ReadFile(pidFile)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var pid int
+		if _, err := fmt.Sscan(string(raw), &pid); err != nil || pid <= 0 {
+			t.Fatalf("invalid escaped fixture PID: %q %v", raw, err)
+		}
+		escaped, err = os.FindProcess(pid)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := escaped.Signal(syscall.Signal(0)); err != nil {
+			t.Fatalf("CLI reaper touched an escaped group: %v", err)
+		}
 		if !errors.Is(waitErr, exec.ErrWaitDelay) {
 			t.Fatalf("capture error = %v, want exec.ErrWaitDelay", waitErr)
 		}

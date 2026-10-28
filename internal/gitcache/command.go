@@ -154,46 +154,41 @@ func (b *cliBackend) execute(ctx context.Context, spec commandSpec, capture bool
 	}
 
 	c.logger.Printf("git %s", c.redactedCommand(spec.args))
+	if err := prepareCLIWait(); err != nil {
+		return "", fmt.Errorf("prepare git process reaping: %w", err)
+	}
 	if err := cmd.Start(); err != nil {
 		return "", fmt.Errorf("start git command: %w", err)
 	}
 
-	done := make(chan error, 1)
-	go func() { done <- cmd.Wait() }()
-	select {
-	case err := <-done:
-		if err != nil {
-			detail := stderrTail.String()
-			if capture {
-				detail = output.String()
-			}
-			detail = c.redactOutput(detail)
-			repository := spec.repository
-			if repository == "" {
-				repository = spec.dir
-			}
-			c.logger.Printf("git command failed: subcommand=%q repository=%q: %v", c.redactOutput(gitSubcommand(spec.args)), c.redactOutput(redactURL(repository)), err)
-			if detail != "" {
-				return "", fmt.Errorf("git command failed: %w: %s", err, detail)
-			}
-			return "", fmt.Errorf("git command failed: %w", err)
-		}
-		return output.String(), nil
-	case <-ctx.Done():
-		if cmd.Process != nil {
-			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-			_ = cmd.Process.Kill()
-		}
-		<-done
+	waitErr, stopErr := waitCLICommand(ctx, cmd)
+	if stopErr != nil {
 		detail := stderrTail.String()
 		if capture {
 			detail = output.String()
 		}
 		if detail = c.redactOutput(detail); detail != "" {
-			return "", fmt.Errorf("git command stopped: %w: %s", context.Cause(ctx), detail)
+			return "", fmt.Errorf("git command stopped: %w: %s", stopErr, detail)
 		}
-		return "", fmt.Errorf("git command stopped: %w", context.Cause(ctx))
+		return "", fmt.Errorf("git command stopped: %w", stopErr)
 	}
+	if waitErr != nil {
+		detail := stderrTail.String()
+		if capture {
+			detail = output.String()
+		}
+		detail = c.redactOutput(detail)
+		repository := spec.repository
+		if repository == "" {
+			repository = spec.dir
+		}
+		c.logger.Printf("git command failed: subcommand=%q repository=%q: %v", c.redactOutput(gitSubcommand(spec.args)), c.redactOutput(redactURL(repository)), waitErr)
+		if detail != "" {
+			return "", fmt.Errorf("git command failed: %w: %s", waitErr, detail)
+		}
+		return "", fmt.Errorf("git command failed: %w", waitErr)
+	}
+	return output.String(), nil
 }
 
 // gitSubcommand skips the global options used by cache commands, including
