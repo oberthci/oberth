@@ -517,12 +517,13 @@ func (c *Controller) reserveVMIClaim(ctx context.Context, key string, want vmiCl
 			}
 			demand, parseErr := liveVMIDemand(object)
 			if parseErr != nil {
-				// A matching server-owned claim retains the template's declared
-				// demand even when KubeVirt's live shape is unreadable. Identity
-				// mismatches and unclaimed objects keep the conservative fallback.
+				// An exact claim can bound missing fields or ambiguous memory.
+				// Present unreadable counts and known oversize values cannot
+				// borrow it; identity mismatches also keep conservative fallback.
 				claims := ledger
-				if errors.Is(parseErr, errLiveVMIOverLimit) {
-					// A known oversized current value cannot borrow a smaller claim.
+				if errors.Is(parseErr, errLiveVMIOverLimit) || errors.Is(parseErr, errLiveVMIUnreadableCount) {
+					// Oversized or unreadable present counts cannot borrow a
+					// smaller claim; readable siblings remain charged too.
 					claims = vmiLedger{}
 				}
 				fallback := liveVMIClaimFallback(object, claims, c.config.Namespace, binding.Limit)

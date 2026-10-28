@@ -129,22 +129,24 @@ hooks, unsupported dependency expressions and exit-handler creates keep the
 conservative sum. A dependency mixing top-level `&&` and `||` must put each
 OR group in parentheses; otherwise the projection falls back rather than
 assuming a delete is required under Argo's operator precedence. Every DAG task
-name must be usable as an Argo expression identifier. The server applies Argo's
-bare/legacy expansion and hyphen normalization, then compiles each dependency
+name must be usable as an Argo expression identifier. The server applies a
+[vendored, parity-tested copy of Argo's bare/legacy expansion](../third_party/argo-depends/README.md)
+and hyphen normalization, then compiles each dependency
 against boolean task-result fields. A compile failure (including keyword names
 such as `in`, `not`, `true` or `if`) keeps the sum: Argo can mark a task Errored
 before its dependency gate succeeds. Compilation executes no expression or
 planner, and its result is reused for each invocation of the resolved template.
 Work is bounded to 4,096 shared classification/expansion and scenario-proof
-checks, 256
-projected nodes and at most 32 partition literals. A scenario with more than
+checks, 256 projected nodes and at most 32 partition literals. A scenario with more than
 16 enabled create invocations also keeps the sum. Demand is computed once per
 immutable resolved source; repeated admission still checks the current policy.
 Successful completion of a composite template alone does not prove every child
 delete ran successfully.
 
-The supported `when` grammar consists of an empty whole guard, bare `true` or
-`false`, a trigger comparison, or a safe partition equality as described below.
+The supported `when` grammar consists of an absent/empty guard (`when: ""`),
+bare `true` or `false`, a trigger comparison, or a safe partition equality as
+described below. A whitespace-only guard is an error in Argo; it is unsupported
+for projection and retains the conservative sum, rather than counting as true.
 These boolean operands may be combined with `&&`, `||` and parentheses. A trigger
 comparison has `{{workflow.parameters.oberth-trigger}}` on the left and a literal
 `branch`, `promotion`, `schedule` or `tag` on the right, using `==` or `!=`;
@@ -242,6 +244,22 @@ unattributable legacy VMI is charged conservatively. An over-grant create is
 refused before the API POST or launcher-token delivery. Existing grants and
 defaults are unchanged; running Workflows retain their admitted grant snapshot,
 including after revocation, consistently with existing adoption behavior.
+
+Live accounting uses current CPU topology and the larger of guest memory and
+memory requests, never hotplug maxima (`maxSockets`/`maxGuest`). A valid exact
+claim is a floor for every readable dimension. Missing fields can use that
+claim as a fallback. On a repository-labeled VMI, a **present, unreadable CPU
+count** (including a string, fraction, null or malformed CPU parent) cannot
+borrow a smaller claim: it consumes the repository's full grant, plus any larger
+readable dimensions.
+Other repositories' labeled objects remain isolated from this accounting.
+
+An **oversized unlabeled VMI** is charged to every repository at its readable
+size. If it exceeds the accounting maximum, it blocks **all new VMI creates
+across repositories** until an administrator removes or repairs it. This is
+intentional fail-closed behavior for an object whose owner cannot be attributed.
+Only an administrator can introduce such an object; repository identities
+cannot create, update or patch VMIs directly.
 
 The chart pre-creates `oberth-vmi-reservations` as a metadata-only public
 ConfigMap with `helm.sh/resource-policy: keep`. Oberth initializes its data once

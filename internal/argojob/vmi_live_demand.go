@@ -11,14 +11,17 @@ import (
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 )
 
+var errLiveVMIUnreadableCount = errors.New("argojob: live VMI has a present but unreadable CPU count")
+
 var errLiveVMIOverLimit = errors.New("argojob: live VMI current demand exceeds the accounting bound")
 
 // Live VMIs include KubeVirt defaults and legacy/admin fields forbidden in
 // authored manifests. Count current topology and max(guest, requested memory),
 // never hotplug ceilings or launcher limits. Read fields independently: a type
-// error must not hide readable dimensions. Ambiguous counts contribute at least
-// one to the topology product; callers still apply a trusted claim floor or the
-// conservative unclaimed fallback. Oversized readable values are retained with
+// error must not hide readable dimensions. Missing counts contribute at least
+// one to the topology product and can use a trusted claim fallback. Present but
+// invalid counts cannot borrow a smaller claim: callers charge the full grant.
+// Oversized readable values are retained with
 // an over-limit error, saturating arithmetic rather than wrapping.
 func liveVMIDemand(object *unstructured.Unstructured) (argoworkflow.VMIDemand, error) {
 	fail := errors.New("argojob: cannot bound live VMI demand")
@@ -26,6 +29,7 @@ func liveVMIDemand(object *unstructured.Unstructured) (argoworkflow.VMIDemand, e
 		return argoworkflow.VMIDemand{}, fail
 	}
 	demand := argoworkflow.VMIDemand{VMs: 1, Cores: 1}
+	unreadableCount := false
 	ambiguous := object.GetAPIVersion() != "kubevirt.io/v1" || object.GetKind() != "VirtualMachineInstance"
 	for _, name := range []string{"cores", "sockets", "threads"} {
 		raw, found, err := unstructured.NestedFieldNoCopy(object.Object, "spec", "domain", "cpu", name)
@@ -33,10 +37,12 @@ func liveVMIDemand(object *unstructured.Unstructured) (argoworkflow.VMIDemand, e
 			// Absent sockets/threads default to one. Missing cores, explicit
 			// nulls and malformed parents require conservative accounting.
 			ambiguous = ambiguous || err != nil || name == "cores" || found
+			unreadableCount = unreadableCount || err != nil || found
 			continue
 		}
 		count, valid := liveVMICPUCount(raw)
 		ambiguous = ambiguous || !valid
+		unreadableCount = unreadableCount || !valid
 		if demand.Cores > math.MaxInt/count {
 			demand.Cores = math.MaxInt
 		} else {
@@ -74,6 +80,9 @@ func liveVMIDemand(object *unstructured.Unstructured) (argoworkflow.VMIDemand, e
 	}
 	if over {
 		return demand, errLiveVMIOverLimit
+	}
+	if unreadableCount {
+		return demand, errLiveVMIUnreadableCount
 	}
 	if ambiguous || !validVMIDemand(demand) {
 		return demand, fail

@@ -2046,8 +2046,8 @@ continuity checks; it must never be used to reset or bypass those checks.
   ordering only: a later create must require a matching delete's Succeeded
   status before it receives lifetime credit. Mixed top-level `&&`/`||` in
   dependencies receives no credit; OR groups must be parenthesized. DAG names
-  and dependencies must also compile after pinned Argo bare/legacy expansion
-  and hyphen normalization, with typed boolean TaskResults. Keywords or other
+  and dependencies must also compile after the vendored, parity-tested pinned
+  Argo bare/legacy expansion and hyphen normalization, with typed boolean TaskResults. Keywords or other
   compile errors force the sum; an Errored status cannot prove a gate passed
   if compilation itself can fail before that gate. Failure, omission, skip,
   uncertain or unproven conditional deletion and onExit never imply release. A
@@ -2068,7 +2068,9 @@ continuity checks; it must never be used to reset or bypass those checks.
   every fragment must parse before boolean folding: an unparsed operand remains
   unsupported even under false-AND or true-OR. Ternary/coalesce, raw output
   interpolation and other syntax outside the documented closed grammar earn no
-  proof. The analyzer executes no planner and is bounded to 4,096 shared
+  proof. Only an absent/empty `when` bypasses evaluation; whitespace alone
+  errors in Argo and retains summed demand here. Authored guard bytes are never
+  rewritten. The analyzer executes no planner and is bounded to 4,096 shared
   scan/expansion/scenario proof checks, 256 projected nodes and 32 partition
   literals. A scenario with more than 16
   enabled create invocations falls back to the sum before reachability analysis.
@@ -2083,7 +2085,12 @@ continuity checks; it must never be used to reset or bypass those checks.
   and no ConfigMap create. The chart pre-creates a metadata-only ledger; server
   data and its one-time initialization marker survive Helm upgrades/rollbacks.
   ResourceVersion CAS, actual VMI inspection and durable pending claims enforce the admitted repository grant
-  and workflow peak across concurrent controllers/restarts. One claim permits
+  and workflow peak across concurrent controllers/restarts. Live values are
+  floored by an exact active claim; present-but-unreadable CPU counts cannot use
+  that smaller fallback and charge the full grant, retaining readable siblings.
+  An oversized unlabeled VMI is charged to every repository and blocks all new
+  VMI creates until an administrator repairs or removes it. Repository identities
+  cannot directly create or mutate VMIs. One claim permits
   one POST, without retries. Ambiguous POST failures retain capacity until an
   observed matching UID resolves them, or the resource Pod UID is absent from
   a complete list and the claim is more than five minutes old (the POST has a
