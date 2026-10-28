@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"time"
 
+	"k8s.io/utils/clock"
+
 	"github.com/oberthci/oberth/internal/model"
 )
 
@@ -40,9 +42,10 @@ func (service *API) observeScheduling(ctx context.Context, run model.Run, steps 
 			return nil
 		}
 	}
-	observed := time.Now().UTC()
+	clock := service.schedulingClock()
+	observed := clock.Now().UTC()
 	result := &model.RunScheduling{ObservedAt: observed, State: "unavailable", Message: "Scheduling observation is unavailable."}
-	defer func() { result.AgeSeconds = int64(time.Since(observed) / time.Second) }()
+	defer func() { result.AgeSeconds = int64(clock.Since(observed) / time.Second) }()
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 	if run.StartedAt == nil && service.scope == nil {
@@ -230,4 +233,12 @@ func (service *API) visibleBlocker(blocker *model.AdmissionBlocker) *model.Admis
 	scoped := *blocker
 	scoped.Used, scoped.Capacity = 0, 0
 	return &scoped
+}
+
+// One clock keeps observation age and the long-poll deadline in the same domain.
+func (service *API) schedulingClock() clock.Clock {
+	if service.waitClock != nil {
+		return service.waitClock
+	}
+	return clock.RealClock{}
 }
