@@ -17,6 +17,8 @@ func runPreflight(ctx context.Context, arguments []string, output io.Writer) err
 		return fmt.Errorf("%w: preflight drift", errUsage)
 	}
 	switch arguments[0] {
+	case "upstreams":
+		return runPreflightUpstreams(arguments[1:], output)
 	case "drift":
 		return runPreflightDrift(ctx, arguments[1:], output, installer.DefaultRunHelm, installer.ResolveHelmKubeArgs)
 	default:

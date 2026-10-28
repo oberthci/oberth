@@ -93,7 +93,6 @@ func TestValidationAndProtocolAllowlist(t *testing.T) {
 	}
 	for _, value := range []string{
 		"ssh://git@codeberg.org/acme/example.git",
-		"https://codeberg.org/acme/example.git",
 		filepath.Join(t.TempDir(), "upstream.git"),
 	} {
 		if err := ValidateUpstream(value); err != nil {
@@ -105,6 +104,7 @@ func TestValidationAndProtocolAllowlist(t *testing.T) {
 		"file:///tmp/repo.git",
 		"git://codeberg.org/acme/example.git",
 		"http://codeberg.org/acme/example.git",
+		"https://codeberg.org/acme/example.git",
 		"https://token@codeberg.org/acme/example.git",
 		"ssh://git:password@codeberg.org/acme/example.git",
 		"--upload-pack=helper",
@@ -121,14 +121,14 @@ func TestValidationAndProtocolAllowlist(t *testing.T) {
 
 func TestValidateUpstreamSchemeErrorContainsGuidance(t *testing.T) {
 	t.Parallel()
-	for _, scheme := range []string{"git", "http", "file", "ftp"} {
+	for _, scheme := range []string{"git", "http", "file", "ftp", "https"} {
 		remote := scheme + "://host/repo"
 		err := ValidateUpstream(remote)
 		if err == nil {
 			t.Fatalf("ValidateUpstream(%q) should fail", remote)
 		}
-		if !strings.Contains(err.Error(), "use ssh:// or https://") {
-			t.Fatalf("ValidateUpstream(%q) error should mention 'use ssh:// or https://', got: %v", remote, err)
+		if !strings.Contains(err.Error(), "use ssh://") {
+			t.Fatalf("ValidateUpstream(%q) error should mention 'use ssh://', got: %v", remote, err)
 		}
 	}
 }

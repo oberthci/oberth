@@ -264,7 +264,7 @@ func (c *Cache) commandEnv(extra map[string]string) []string {
 		"LC_ALL":              "C",
 		"GIT_CONFIG_NOSYSTEM": "1",
 		"GIT_TERMINAL_PROMPT": "0",
-		"GIT_ALLOW_PROTOCOL":  "ssh:https:file",
+		"GIT_ALLOW_PROTOCOL":  "ssh:file",
 	}
 	for key, value := range c.env {
 		values[key] = value
@@ -278,6 +278,8 @@ func (c *Cache) commandEnv(extra map[string]string) []string {
 		delete(values, "GIT_SSH_COMMAND")
 		values["GIT_SSH_VARIANT"] = "simple"
 	}
+	// Caller environment layers cannot re-enable an unavailable transport.
+	values["GIT_ALLOW_PROTOCOL"] = "ssh:file"
 	// Replacement refs are client-controlled Git objects. They must never
 	// alter the meaning of a commit in any server-side validation, checkout,
 	// ancestry, merge, upload, or receive command. Set this after all supplied

@@ -185,8 +185,11 @@ func ValidateUpstream(value string) error {
 	if err != nil {
 		return fmt.Errorf("parse upstream remote: %w", err)
 	}
-	if parsed.Scheme != "ssh" && parsed.Scheme != "https" {
-		return fmt.Errorf("upstream scheme %q is not allowed (use ssh:// or https://)", parsed.Scheme)
+	if parsed.Scheme == "https" {
+		return fmt.Errorf("%w: HTTPS upstreams are unsupported by static Git (built without curl); use ssh:// with pinned host keys", ErrUpstreamRefused)
+	}
+	if parsed.Scheme != "ssh" {
+		return fmt.Errorf("upstream scheme %q is not allowed (use ssh:// with pinned host keys)", parsed.Scheme)
 	}
 	if parsed.Hostname() == "" || strings.HasPrefix(parsed.Hostname(), "-") || parsed.Path == "" || parsed.Path == "/" || parsed.RawQuery != "" || parsed.Fragment != "" {
 		return errors.New("upstream URL requires a host and path and must not contain query or fragment data")
@@ -195,9 +198,6 @@ func ValidateUpstream(value string) error {
 		if part == "." || part == ".." || strings.ContainsAny(part, "\x00\r\n") {
 			return errors.New("upstream URL path contains traversal or control characters")
 		}
-	}
-	if parsed.Scheme == "https" && parsed.User != nil {
-		return errors.New("HTTPS upstream credentials must not be embedded in the URL")
 	}
 	if parsed.User != nil {
 		if _, hasPassword := parsed.User.Password(); hasPassword {

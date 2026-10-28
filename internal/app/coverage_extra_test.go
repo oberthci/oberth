@@ -100,11 +100,10 @@ func TestUpstreamKind_Local(t *testing.T) {
 	}
 }
 
-func TestUpstreamKind_HTTPS(t *testing.T) {
+func TestUpstreamKind_HTTPSRefused(t *testing.T) {
 	t.Parallel()
-	kind, err := UpstreamKind("https://forge.example.net/acme")
-	if err != nil || kind != "https" {
-		t.Fatalf("kind = %q, err = %v", kind, err)
+	if _, err := UpstreamKind("https://forge.example.net/acme"); err == nil || !strings.Contains(err.Error(), "built without curl") {
+		t.Fatalf("HTTPS registration accepted: %v", err)
 	}
 }
 
