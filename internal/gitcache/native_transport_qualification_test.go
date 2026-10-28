@@ -7,6 +7,7 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -64,6 +65,7 @@ func TestBundledGitNativeSSHCloneFetchRefusalAndCancel(t *testing.T) {
 	}()
 
 	var auth atomic.Int32
+	var earlyExit atomic.Bool
 	var stall atomic.Bool
 	stalled := make(chan struct{}, 1)
 	repository := newTestRepository(t)
@@ -106,12 +108,18 @@ func TestBundledGitNativeSSHCloneFetchRefusalAndCancel(t *testing.T) {
 						return
 					}
 					var command struct{ Command string }
-					if request.Type != "exec" || ssh.Unmarshal(request.Payload, &command) != nil || command.Command != "git-upload-pack '/fixture'" {
+					if request.Type != "exec" || ssh.Unmarshal(request.Payload, &command) != nil || (command.Command != "git-upload-pack '/fixture'" && !(earlyExit.Load() && command.Command == "git-receive-pack '/fixture'")) {
 						request.Reply(false, nil)
 						channel.Close()
 						return
 					}
 					request.Reply(true, nil)
+					if earlyExit.Load() {
+						_, _ = io.WriteString(channel.Stderr(), "fatal: repository not found\n")
+						_, _ = channel.SendRequest("exit-status", false, ssh.Marshal(struct{ Code uint32 }{128}))
+						channel.Close()
+						continue
+					}
 					if stall.Load() {
 						select {
 						case stalled <- struct{}{}:
@@ -187,6 +195,17 @@ func TestBundledGitNativeSSHCloneFetchRefusalAndCancel(t *testing.T) {
 		t.Fatal("authentication attempted before host-key check")
 	}
 	pin(host.PublicKey())
+	earlyExit.Store(true)
+	for _, args := range [][]string{{"ls-remote", url}, {"-C", clone, "push", url, "HEAD:refs/heads/refused"}} {
+		ctx, cancel := context.WithTimeout(t.Context(), 60*time.Second)
+		err := cache.run(ctx, commandSpec{args: args})
+		cancel()
+		var exit *exec.ExitError
+		if !errors.As(err, &exit) || exit.ExitCode() != 128 {
+			t.Fatalf("early remote exit %v: %v", args, err)
+		}
+	}
+	earlyExit.Store(false)
 	stall.Store(true)
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()

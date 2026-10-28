@@ -27,8 +27,8 @@ func ExitCode(err error) int {
 	return 255
 }
 
-// Run owns input for the life of this one SSH transport. Closing it on exit
-// joins the stdin copier even when the Git parent stops supplying input.
+// Run serves one transport process. The caller exits after its remote result;
+// a non-pollable stdin read must not delay that result or keep stdout open.
 func Run(ctx context.Context, arguments []string, configPath string, input io.ReadCloser, output, diagnostics io.Writer) error {
 	value, err := parse(arguments)
 	if err != nil {
@@ -133,11 +133,9 @@ func Run(ctx context.Context, arguments []string, configPath string, input io.Re
 	if err := session.Start(value.command); err != nil {
 		return errors.New("SSH Git service refused")
 	}
-	copied := make(chan struct{})
-	go func() { _, _ = io.Copy(pipe, input); _ = pipe.Close(); close(copied) }()
+	go func() { _, _ = io.Copy(pipe, input); _ = pipe.Close() }()
 	err = session.Wait()
 	_ = input.Close()
-	<-copied
 	if ctx.Err() != nil {
 		return context.Cause(ctx)
 	}
