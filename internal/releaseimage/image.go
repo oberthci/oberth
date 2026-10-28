@@ -35,7 +35,7 @@ const (
 
 	// Scratch runtime rebuilt from the checksum-pinned static Git recipe.
 	// Publication of this exact two-platform index is a release prerequisite.
-	ServerSubstrate = ServerRepository + "@sha256:e334fe6881a091068b6ad9d49080d940b8764f0d664c314f997f35d6f55a7446"
+	ServerSubstrate = ServerRepository + "@sha256:f3013396f001c657cf5b1de69827fcb93515274f283e5cd285fbeef729fd24e2"
 )
 
 // Kind selects a release image contract. Only the server image remains.

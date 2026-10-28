@@ -1151,7 +1151,7 @@ spec:
         oberth.ci/workspace-mounts: none
         oberth.ci/workspace-env: none
     container:
-      image: "europe-west4-docker.pkg.dev/skipopsmain/oberth/oberth@sha256:e334fe6881a091068b6ad9d49080d940b8764f0d664c314f997f35d6f55a7446"
+      image: "europe-west4-docker.pkg.dev/skipopsmain/oberth/oberth@sha256:f3013396f001c657cf5b1de69827fcb93515274f283e5cd285fbeef729fd24e2"
       workingDir: /qualification/source/internal/gitcache
       command: ["/qualification/gitcache.test"]
       args: ["-test.v", "-test.timeout=15m", "-test.parallel=2"]
