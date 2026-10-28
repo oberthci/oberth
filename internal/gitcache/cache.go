@@ -36,12 +36,9 @@ type materializeManifest struct {
 
 // Cache owns bare repositories under one persistent root.
 type Cache struct {
-	shadow *shadowState
 	// Hook read-only children stay in the enclosing receive process group.
 	hookChild       bool
 	backend         gitBackend
-	backendName     Backend
-	ssh             SSHConfig
 	root            string
 	outboxRoot      string
 	globalConfig    string
@@ -94,10 +91,8 @@ func New(config Config) (*Cache, error) {
 			return nil, fmt.Errorf("invalid Git environment key %q", key)
 		}
 	}
-	config.SSH.Identities = append([]SSHIdentity(nil), config.SSH.Identities...)
 	cache := &Cache{
 		root:            root,
-		ssh:             config.SSH,
 		outboxRoot:      outboxRoot,
 		globalConfig:    globalConfig,
 		upstream:        config.Upstream,
@@ -110,17 +105,7 @@ func New(config Config) (*Cache, error) {
 		preFinalizeGate: config.PreFinalizeGate,
 		repositoryGate:  config.RepositoryGate,
 	}
-	// Preserve explicit legacy executable configuration for the transition.
-	if config.Backend == "" && config.GitBinary != "" {
-		config.Backend = BackendCLI
-	}
-	if err := cache.initBackend(config.Backend); err != nil {
-		return nil, err
-	}
-	if config.Shadow {
-		cache.backend, cache.backendName = &cliBackend{cache: cache}, BackendCLI
-		cache.shadow = newShadowState(cache, config.ShadowContext, config.ShadowCommand)
-	}
+	cache.backend = &cliBackend{cache: cache}
 	return cache, nil
 }
 
@@ -1159,18 +1144,9 @@ func (c *Cache) ArchiveTar(ctx context.Context, input, ref string, w io.Writer) 
 	if !c.isBare(ctx, repoPath) {
 		return fmt.Errorf("repository is not cached")
 	}
-	var prefix archivePrefix
-	output := w
-	if c.shadow != nil {
-		output = io.MultiWriter(w, &prefix)
-	}
-	err = c.run(ctx, commandSpec{
+	return c.run(ctx, commandSpec{
 		dir:    repoPath,
 		args:   []string{"archive", "--format=tar", ref},
-		stdout: output,
+		stdout: w,
 	})
-	if err == nil && c.shadow != nil {
-		c.queueShadow(repoPath, prefix.commit(ref))
-	}
-	return err
 }

@@ -2,9 +2,9 @@
 
 This runbook covers an existing v0.17.58 install, including its schema v32
 history. Review the [release notes](releases/v0.17.59.md) before starting.
-There are **no required new values**: CLI delivery remains the default, shadow
-mode is off, and existing release files/roles/identities keep their behavior.
-An explicit retained go-git selection now refuses unsupported export rules.
+This is a historical runbook. Current releases support only the Git CLI;
+retired Git settings require explicit migration (see [gitcache.md](gitcache.md)).
+Existing release files/roles/identities keep their behavior.
 
 Migration v33 rebuilds `step_results` in a startup transaction. Allow database
 space for the rebuild and time proportional to retained step history. Do not
@@ -87,24 +87,6 @@ new chart defaults for absent keys while retaining stored configuration and
 pinning installed `compatibility.*` identities. Do not replace those identities
 with new chart defaults or feed the `--all` snapshot back as a new baseline.
 An older unsupported key is refused for explicit migration, not silently removed.
-
-### Optional shadow observation
-
-Save as `v0.17.59-shadow.yaml`:
-
-```yaml
-gitcache:
-  shadow: true
-```
-
-This forces served CLI results and adds observation load, never go-git delivery.
-Disable later with `gitcache.shadow: false` in the values file and another
-upgrade. Do not use a zero mismatch count alone to approve go-git: inspect
-errors/skips and the attribute scope described in the release notes. The shadow
-CLI neutralizes system/HOME attributes; the served CLI retains its environment.
-Keep at least 24 hours of representative observations, including restarts and
-error/skip coverage, before a future cutover decision. No default switch or
-automatic promotion is part of this upgrade.
 
 ### Optional release WIF and tag routing
 
@@ -268,21 +250,7 @@ Before resuming normal submissions:
    executable adds a per-run transfer/readback cost; use the
    [shipped benchmark](step-resource-usage.md#seed-cost-measurement) on the actual
    server network/storage if that cost matters for capacity planning.
-2. If shadow is enabled, use an unscoped administrator connection for
-   `oberth status --json` (`/api/status`) and the existing authenticated
-   `/metrics` scrape. Confirm `oberth_gitcache_shadow_enabled` is 1 and
-   `oberth_gitcache_shadow_compared_total` increases on representative traffic.
-   Observe `oberth_gitcache_shadow_dropped_total` (queue-full drops) alongside
-   `shadow_runs`, errors/skips, mismatch counts and error reasons. Completed
-   comparisons include mismatches and expected attribute gaps, so a positive
-   count alone does not prove clean parity. Investigate `gogit_hash_guard` or
-   genuine mismatches with
-   repository/SHA/hash evidence; preserve the pack layout without logging file
-   contents or credentials. `expected_attr_gap` is an archive-parity gap, not
-   proof of corruption. A restart resets counters; shutdown cancellation is
-   excluded. Verify actual delivered source independently where ambient Git
-   attributes differ from the neutralized shadow reference.
-3. If new release policy is enabled, check the pinned step accounts, exact
+2. If new release policy is enabled, check the pinned step accounts, exact
    cloud trust subjects, branch/sibling refusal and successful intended tag
    exchange. Confirm a matching tag audits the routed `pipeline_file` and uses
    its document size; an unmatched tag still uses release.yaml. A copied template

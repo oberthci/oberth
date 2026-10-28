@@ -1,14 +1,10 @@
 package gitcache
 
 import (
-	"context"
-	"errors"
 	"fmt"
-	"io"
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 )
 
 func TestUploadPackRealClientCloneAndIncrementalNegotiation(t *testing.T) {
@@ -49,34 +45,4 @@ func TestUploadPackRealClientCloneAndIncrementalNegotiation(t *testing.T) {
 		t.Fatalf("private refs leaked: %s", listing)
 	}
 	runGit(t, clone, "fsck", "--full")
-}
-
-func TestGoServiceDeadlineInterruptsStalledClient(t *testing.T) {
-	repository := newTestRepository(t)
-	cache, err := New(Config{Root: filepath.Join(t.TempDir(), "cache"), Backend: BackendGoGit, Upstream: func(string) (string, error) { return repository.upstream, nil }})
-	if err != nil {
-		t.Fatal(err)
-	}
-	ready, err := cache.Ensure(t.Context(), "example")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, service := range []Service{UploadPack, ReceivePack} {
-		t.Run(string(service), func(t *testing.T) {
-			input, writer := io.Pipe()
-			defer func() { _ = writer.Close(); _ = input.Close() }()
-			ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
-			defer cancel()
-			done := make(chan error, 1)
-			go func() { done <- cache.serveLocked(ctx, ready.Path, service, "", input, io.Discard, io.Discard) }()
-			select {
-			case err := <-done:
-				if !errors.Is(err, context.DeadlineExceeded) {
-					t.Fatalf("deadline=%v", err)
-				}
-			case <-time.After(2 * time.Second):
-				t.Fatal("stalled client retained service after deadline")
-			}
-		})
-	}
 }

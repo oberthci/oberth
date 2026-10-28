@@ -543,12 +543,3 @@ trustedTests:
   # Operator must set the actual positive KVM device GID before adding recipes.
   # Zero disables trusted suite execution; no host-specific group is assumed.
   kvmSupplementalGroup: 0
-
-# Backend switch. The release runtime includes Git/OpenSSH for the CLI.
-# Go-git requires explicit opt-in while source delivery is being requalified.
-gitBackend: cli
-
-# Compare CLI source delivery with a bounded, isolated go-git observer.
-# Observations never select the bytes served to builds.
-gitcache:
-  shadow: false

@@ -1199,7 +1199,6 @@ func runRepoVerify(ctx context.Context, arguments []string, output io.Writer) er
 	gitCacheRoot := flags.String("git-cache-root", "/data/git", "root directory for bare Git caches")
 	upstreamKey := flags.String("upstream-key", "/etc/oberth/upstream-key/id_ed25519", "upstream SSH private key")
 	knownHosts := flags.String("known-hosts", "/etc/oberth/known-hosts/known_hosts", "pinned upstream known_hosts")
-	backend := flags.String("git-backend", "go-git", "go-git or one-release cli compatibility backend")
 	all := flags.Bool("all", false, "verify every registered repository")
 	if err := flags.Parse(arguments); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -1256,7 +1255,6 @@ func runRepoVerify(ctx context.Context, arguments []string, output io.Writer) er
 	if settingsErr != nil {
 		return settingsErr
 	}
-	settings := gitSSHSettings(entries, *upstreamKey, *knownHosts)
 	configDirectory, settingsErr := os.MkdirTemp("", "oberth-verify-ssh-")
 	if settingsErr != nil {
 		return settingsErr
@@ -1267,7 +1265,6 @@ func runRepoVerify(ctx context.Context, arguments []string, output io.Writer) er
 		return settingsErr
 	}
 	cache, cacheErr := gitcache.New(gitcache.Config{
-		Backend: gitcache.Backend(*backend), SSH: settings,
 		Env:           sshEnvironment,
 		Root:          *gitCacheRoot,
 		Upstream:      resolver.Remote,

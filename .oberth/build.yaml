@@ -98,8 +98,8 @@ spec:
       - name: test-rest
         template: test-rest
         depends: lint
-      - name: test-gitcache-backends
-        template: test-gitcache-backends
+      - name: test-gitcache
+        template: test-gitcache
         depends: lint
       - name: test-archive-history
         template: test-archive-history
@@ -124,16 +124,16 @@ spec:
         depends: setup
       - name: build-amd64
         template: build-amd64
-        depends: "test-store && test-service && test-rest && test-gitcache-backends && test-archive-history && chart"
+        depends: "test-store && test-service && test-rest && test-gitcache && test-archive-history && chart"
       - name: build-arm64
         template: build-arm64
-        depends: "test-store && test-service && test-rest && test-gitcache-backends && test-archive-history && chart"
+        depends: "test-store && test-service && test-rest && test-gitcache && test-archive-history && chart"
       - name: build-darwin-amd64
         template: build-darwin-amd64
-        depends: "test-store && test-service && test-rest && test-gitcache-backends && test-archive-history && chart"
+        depends: "test-store && test-service && test-rest && test-gitcache && test-archive-history && chart"
       - name: build-darwin-arm64
         template: build-darwin-arm64
-        depends: "test-store && test-service && test-rest && test-gitcache-backends && test-archive-history && chart"
+        depends: "test-store && test-service && test-rest && test-gitcache && test-archive-history && chart"
 
   # ---- setup burn (8 sequential steps) ----
   # Maps to: Test("setup", repositorySteps(inlineToolchainSteps()...)...)
@@ -1014,15 +1014,14 @@ spec:
           cpu: "2"
           memory: "4Gi"
 
-  # Git cache parity is a binding source gate for both adapters during the
-  # go-git requalification. Ordinary package tests use the CLI default.
-  - name: test-gitcache-backends
+  # The native Git cache suite is a binding source gate.
+  - name: test-gitcache
     automountServiceAccountToken: false
     container:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
       workingDir: /work/src
       command: ["/bin/sh"]
-      args: ["hack/test-gitcache-backends.sh"]
+      args: ["hack/test-gitcache.sh"]
       env:
       - name: GOMAXPROCS
         value: "2"

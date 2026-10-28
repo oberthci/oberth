@@ -186,7 +186,7 @@ func TestReleaseRoutesForPushedTagsThroughReceiveAdapter(t *testing.T) {
 	git(work, "init", "--bare", bare)
 	git(work, "push", bare, "main")
 	git(work, "--git-dir="+bare, "symbolic-ref", "HEAD", "refs/heads/main")
-	cache, err := gitcache.New(gitcache.Config{Root: t.TempDir(), Backend: gitcache.BackendCLI,
+	cache, err := gitcache.New(gitcache.Config{Root: t.TempDir(),
 		Upstream: func(string) (string, error) { return bare, nil },
 		RepoQualifier: func(string) (gitcache.RepoQualification, error) {
 			return gitcache.RepoQualification{UpstreamName: "github", Org: "org"}, nil

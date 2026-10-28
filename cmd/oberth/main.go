@@ -52,9 +52,6 @@ func main() {
 		stop()
 		os.Exit(code)
 	}
-	if len(os.Args) > 1 && os.Args[1] == "internal-gitcache-shadow" {
-		os.Exit(gitcache.RunShadowHelper(ctx, os.Args[2:], os.Stdout))
-	}
 	if err := runCLI(ctx, os.Args[1:], os.Stdin, os.Stdout); err != nil {
 		// Ctrl+C during interactive prompts: exit silently with the Unix
 		// convention (128 + SIGINT signal number 2 = 130).

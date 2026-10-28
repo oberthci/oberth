@@ -9,10 +9,10 @@ import (
 )
 
 func TestBackendRefCASAndPackedDeletion(t *testing.T) {
-	for _, backend := range []Backend{BackendCLI, BackendGoGit} {
-		t.Run(string(backend), func(t *testing.T) {
+	for _, backend := range []string{"cli"} {
+		t.Run(backend, func(t *testing.T) {
 			repository := newTestRepository(t)
-			cache, err := New(Config{Root: filepath.Join(t.TempDir(), "cache"), Backend: backend, Upstream: func(string) (string, error) { return repository.upstream, nil }})
+			cache, err := New(Config{Root: filepath.Join(t.TempDir(), "cache"), Upstream: func(string) (string, error) { return repository.upstream, nil }})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -61,30 +61,5 @@ func TestBackendRefCASAndPackedDeletion(t *testing.T) {
 				t.Fatalf("deleted packed ref resurrected: %s", got)
 			}
 		})
-	}
-}
-
-func TestGoGitInvalidGraphNeverPublishesFetchedRefs(t *testing.T) {
-	repository := newTestRepository(t)
-	cache, err := New(Config{Root: filepath.Join(t.TempDir(), "cache"), Backend: BackendGoGit, Upstream: func(string) (string, error) { return repository.upstream, nil }})
-	if err != nil {
-		t.Fatal(err)
-	}
-	ready, err := cache.Ensure(t.Context(), "example")
-	if err != nil {
-		t.Fatal(err)
-	}
-	// A commit's tree dependency is absent. update-ref itself accepts this;
-	// transfer admission must fail without installing any new tracking ref.
-	commit := "tree " + strings.Repeat("1", 40) + "\nparent " + repository.initialSHA + "\nauthor Fixture <fixture@example.invalid> 1600000000 +0000\ncommitter Fixture <fixture@example.invalid> 1600000000 +0000\n\nbroken graph\n"
-	broken := runGitStdin(t, repository.upstream, commit, "hash-object", "-t", "commit", "-w", "--stdin")
-	runGit(t, repository.upstream, "update-ref", "refs/heads/main", broken)
-	if _, _, _, err := cache.ReadDefaultBlob(t.Context(), "example", "policy.yml", 1024); err == nil {
-		t.Fatal("malformed upstream graph accepted")
-	}
-	for _, ref := range []string{"refs/heads/main", upstreamRefPrefix + "heads/main"} {
-		if got := runGit(t, ready.Path, "rev-parse", ref); got != repository.initialSHA {
-			t.Fatalf("unverified ref %s published at %s", ref, got)
-		}
 	}
 }

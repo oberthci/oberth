@@ -142,7 +142,7 @@ func (discardLogger) Printf(string, ...any) {}
 
 // Config constructs a cache rooted at Root. Upstream resolves a validated
 // repository name to a Git remote. Env is an operator-owned allowlist of
-// variables required by Git (for example, a fixed GIT_SSH_COMMAND).
+// variables required by Git (for example, the fixed native GIT_SSH).
 // RepoQualification carries the upstream and org identity for a repository,
 // used to determine the org-qualified cache directory path.
 type RepoQualification struct {
@@ -151,16 +151,6 @@ type RepoQualification struct {
 }
 
 type Config struct {
-	// Backend defaults to CLI during go-git requalification. BackendGoGit
-	// requires explicit selection; GitBinary configures the CLI executable.
-	Backend Backend
-	SSH     SSHConfig
-	// Shadow compares immutable CLI deliveries asynchronously. It forces CLI
-	// authority even if BackendGoGit was selected. ShadowCommand is a trusted
-	// helper executable prefix; nil uses this executable's internal command.
-	Shadow        bool
-	ShadowContext context.Context
-	ShadowCommand []string
 	// RepositoryGate refuses network/cache admission while a repository is archived.
 	RepositoryGate func(context.Context, string) error
 	Root           string

@@ -204,8 +204,6 @@ type serveOptions struct {
 	// Promotion grant maximum lifetime. Default 24h, hard ceiling 168h (7 days).
 	promotionGrantMaxLifetime time.Duration
 
-	gitBackend              string
-	gitcacheShadow          bool
 	gitCommandTimeout       time.Duration
 	gcInterval              time.Duration
 	pushBannerURL           string
@@ -312,8 +310,6 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 	flags.StringVar(&options.trustedRecipesFile, "trusted-tests-recipes", "", "public operator-approved trusted suite recipes JSON file (requires --vm-kvm-enabled)")
 	flags.Int64Var(&options.trustedKVMGroup, "trusted-tests-kvm-group", 0, "operator-approved positive /dev/kvm supplemental GID required for trusted suites; no default device group")
 	flags.DurationVar(&options.promotionGrantMaxLifetime, "promotion-grant-max-lifetime", 24*time.Hour, "maximum lifetime for promotion grants (default 24h, hard ceiling 168h)")
-	flags.StringVar(&options.gitBackend, "git-backend", "cli", "Git backend: cli (default) or go-git (explicit opt-in)")
-	flags.BoolVar(&options.gitcacheShadow, "gitcache-shadow", os.Getenv("OBERTH_GITCACHE_SHADOW") == "1", "compare CLI source delivery with isolated go-git shadow checks")
 	flags.DurationVar(&options.gitCommandTimeout, "git-timeout", 10*time.Minute, "Git command timeout")
 	flags.DurationVar(&options.gcInterval, "git-gc-interval", 24*time.Hour, "periodic Git GC interval")
 	flags.StringVar(&options.pushBannerURL, "push-banner-url", "", "optional HTTPS dashboard URL echoed to every accepted git push")
@@ -378,9 +374,6 @@ func validateServeOptions(options serveOptions) error {
 	}
 	if err := validateArgoServeOptions(options); err != nil {
 		return err
-	}
-	if options.gitBackend != "" && options.gitBackend != "go-git" && options.gitBackend != "cli" {
-		return errors.New("serve: git-backend must be go-git or cli")
 	}
 	if options.maxConcurrent <= 0 || options.maxConcurrent > 64 || options.gitCommandTimeout <= 0 || options.gcInterval <= 0 {
 		return errors.New("serve: concurrency, timeout, and GC values must be positive")
@@ -690,11 +683,8 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 		return err
 	}
 	upstreams := app.Upstreams{Catalog: database}
-	sshSettings := gitSSHSettings(sshEntries, options.upstreamKey, options.knownHosts)
 	git, err := gitcache.New(gitcache.Config{
 		Root: filepath.Join(options.dataRoot, "git"), Upstream: upstreams.Remote,
-		Backend: gitcache.Backend(options.gitBackend), SSH: sshSettings,
-		Shadow: options.gitcacheShadow, ShadowContext: ctx,
 		CommandTimeout:  options.gitCommandTimeout,
 		Env:             sshEnvironment,
 		Logger:          logger,
@@ -705,7 +695,6 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 	if err != nil {
 		return err
 	}
-	defer git.CloseShadow()
 	// One-time, idempotent, crash-safe move of pre-#264 flat cache
 	// directories (<root>/<repo>.git) to the org-qualified layout the
 	// RepoQualifier now derives. Runs before any listener exists, so no
@@ -792,7 +781,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 			options.sizeWeights.XL, budget, options.maxConcurrent, options.sizeWeights.M, budget)
 	}
 	retention.AcquirePurge = scheduler.AcquireEvidencePurge
-	health := app.Health{Store: database, Audit: anchors.Ready, VCSCache: &app.VCSSnapshot{}, GitcacheShadow: git.ShadowStats, Configured: func(ctx context.Context) error {
+	health := app.Health{Store: database, Audit: anchors.Ready, VCSCache: &app.VCSSnapshot{}, Configured: func(ctx context.Context) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
@@ -1068,7 +1057,6 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 	httpAPI, err := api.New(authenticator, controlAPI, controlAPI, version,
 		api.WithErrorClassifier(classifyViewError),
 		api.WithMaximumToolWait(service.DefaultMaximumWait),
-		api.WithMetrics(git.WriteShadowMetrics),
 	)
 	if err != nil {
 		return err
@@ -2006,14 +1994,6 @@ func buildPerUpstreamSSHCommand(ctx context.Context, database *store.Store, opti
 		return "", err
 	}
 	return sshCommandFromEntries(entries, options, configPath)
-}
-
-func gitSSHSettings(entries []app.SSHConfigEntry, key, hosts string) gitcache.SSHConfig {
-	settings := gitcache.SSHConfig{PrivateKeyPath: key, KnownHostsPath: hosts}
-	for _, entry := range entries {
-		settings.Identities = append(settings.Identities, gitcache.SSHIdentity{Host: entry.Host, PrivateKeyPath: entry.IdentityFile})
-	}
-	return settings
 }
 
 func sshCommandFromEntries(entries []app.SSHConfigEntry, options serveOptions, configPath string) (string, error) {

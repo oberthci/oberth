@@ -108,9 +108,8 @@ helm show values oberth/oberth
 `oberth upgrade` keeps stored release configuration and merges new chart defaults
 for keys that were absent, then applies `--values`/`--set` overrides. It uses
 Helm's `--reset-then-reuse-values` mode. The chart also supports direct
-`--reuse-values` upgrades from v0.17.53: missing `utilityImage` and `gitBackend`
-fall back to the pinned BusyBox helper and `go-git`. Custom utility-image mirrors
-and explicit backend selections are preserved.
+`--reuse-values` upgrades from v0.17.53: missing `utilityImage` falls back to the pinned BusyBox helper. Custom
+utility-image mirrors are preserved. Native Git is the only source backend.
 
 Upgrades require Helm 3.14 or newer. Before applying changes, the CLI reads
 `helm get values --all` and pins the installed `compatibility.schemaIdentity`,
@@ -133,7 +132,7 @@ Re-running `oberth install` and restoring a backup intentionally retain
 `--reuse-values`: these paths preserve installed chart defaults, while restore
 sets only the database identities it needs. Every newly introduced value must
 therefore have a template fallback. The v0.17.53 raw-values render and actual
-Helm install/restore tests cover both new keys, `utilityImage` and `gitBackend`.
+Helm install/restore tests cover the `utilityImage` fallback.
 
 The SSH host key is generated once into OpenBao and reused across upgrades.
 With a production secret store the HTTPS certificate is a 30-day leaf the
@@ -444,7 +443,7 @@ the exact annotated tag only after the run is green.
 - [docs/secretstore-verification.md](docs/secretstore-verification.md) — three-tier secret-store verification
 - [docs/helm-service-migration.md](docs/helm-service-migration.md) — two-stage ownership-safe Service migration
 - [docs/standalone-configuration.md](docs/standalone-configuration.md) — preserving deployment protocol identities and configuring an owned private module namespace
-- [v0.17.59 release notes](docs/releases/v0.17.59.md) — shadow observation, resource measurements and release policy
+- [v0.17.59 release notes](docs/releases/v0.17.59.md) — resource measurements and release policy
 - [v0.17.59 upgrade runbook](docs/upgrade-v0.17.59.md) — backup, optional values, verification and schema-safe rollback
 - [docs/upgrade-schema-v3.md](docs/upgrade-schema-v3.md) — upgrading across a backup-and-replace store schema boundary (v2 → v3)
 - [docs/backup-restore.md](docs/backup-restore.md) — `oberth backup` / `oberth restore`: one encrypted file with the history and the secrets pipelines use, restored onto a fresh install
@@ -454,29 +453,13 @@ the exact annotated tag only after the run is green.
 
 Apache License 2.0 — see [LICENSE](LICENSE).
 
-Source delivery currently defaults to the Git CLI (`--git-backend=cli`, chart
-`gitBackend: cli`). The go-git backend remains an explicit opt-in while it is
-requalified after the v0.17.57 streaming-delta corruption incident. Releases
-use the reviewed v0.17.56 CLI-capable runtime substrate. An installation that
-retained `gitBackend: go-git` from v0.17.57 should explicitly set
-`--set gitBackend=cli` during upgrade; retained settings are not overwritten.
+Source delivery uses the Git CLI exclusively. The runtime contains static Git,
+static Oberth, its native SSH transport alias and a CA bundle, runs as UID/GID
+65534, and includes neither a shell nor OpenSSH. See
+[the source transport contract](docs/gitcache.md) for supported transports and
+migration of retired configuration.
 
-To diagnose a quiescent bare mirror without modifying its packs or refs, run
-`hack/repro-archive.sh -repo /path/to/mirror.git -commit FULL_SHA`. It streams
-through the server's Cache.ArchiveTar path and compares every entry and file
-byte with `git archive`. A failure reports the first path/offset, blob ID and
-pack offsets/delta bases. `--original-decoder` (before the flags) builds an
-overlay reproducing v0.17.57's decoder and lack of decoded-object verification;
-it never edits the checkout. `-all` checks every reachable commit, and
-`-inspect path` prints that file's object chain even on success. Use a snapshot
-or stop external writers first; the diagnostic's lock is process-local. The
-checker requires Go and Git (plus Python 3 for the original-decoder overlay),
-performs no network access and never executes source from the input mirror.
-It can also be built once with `go build -o archive-parity ./hack/archive-parity`.
-
-`hack/test-archive-history.sh` is the offline race-enabled gate over every
-file at all 878 commits in a real three-pack Kubernetes gengo fixture. Branch
-builds depend on its dedicated lane; the release test also runs the complete
-fixture before building or publishing. See internal/gitcache/testdata/README.md
-for provenance and third_party/go-git/OBERTH-PATCH.md for the narrow upstream
-correction retained pending a fixed upstream release.
+`hack/test-gitcache.sh` is the complete race-enabled CLI cache gate.
+`hack/test-archive-history.sh` also checks every file at every commit in the
+public three-pack Kubernetes gengo fixture through the CLI ArchiveTar path,
+and verifies the incident-triggering checkout against Git archive.

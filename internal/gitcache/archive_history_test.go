@@ -4,95 +4,48 @@ import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
-	"compress/zlib"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"github.com/oberthci/oberth/internal/gitcache"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
-
 	"strings"
 	"testing"
-	"time"
-
-	"github.com/oberthci/oberth/internal/archivecheck"
-	"github.com/oberthci/oberth/internal/gitcache"
 )
 
-func TestShadowFixtureProcess(t *testing.T) {
-	marker := -1
-	for i, arg := range os.Args {
-		if arg == "shadow-fixture" {
-			marker = i
-			break
-		}
-	}
-	if marker < 0 {
-		return
-	}
-	args := os.Args[marker+1:]
-	if len(args) != 4 {
-		os.Exit(2)
-	}
-	os.Exit(gitcache.RunShadowHelper(context.Background(), args, os.Stdout))
-}
-
-func TestShadowRealCorruptionFixture(t *testing.T) {
-	repository := extractHistoryFixture(t)
-	root := t.TempDir()
-	// Preserve the exact incident-triggering pack/delta layout, not a repack.
-	if err := os.Symlink(repository, filepath.Join(root, "mirror.git")); err != nil {
-		t.Fatal(err)
-	}
-	executable, err := os.Executable()
+func fixtureGit(ctx context.Context, repo string, args ...string) ([]byte, error) {
+	cmd := exec.CommandContext(ctx, "git", append([]string{"--no-replace-objects", "-C", repo}, args...)...)
+	cmd.Env = append(os.Environ(), "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=/dev/null", "GIT_ATTR_NOSYSTEM=1")
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
 	if err != nil {
-		t.Fatal(err)
+		return nil, fmt.Errorf("fixture git %s: %w: %s", args[0], err, stderr.String())
 	}
-	cache, err := gitcache.New(gitcache.Config{Root: root, Backend: gitcache.BackendGoGit, Shadow: true, ShadowContext: t.Context(), ShadowCommand: []string{executable, "-test.run=^TestShadowFixtureProcess$", "--", "shadow-fixture"}, Upstream: func(string) (string, error) { return "", errors.New("shadow must not fetch") }})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(cache.CloseShadow)
-	const commit = "483edb0165750b273a453b5d5de61183091fda14"
-	var actual bytes.Buffer
-	if err := cache.ArchiveTar(t.Context(), "mirror", commit, &actual); err != nil {
-		t.Fatal(err)
-	}
-	expected, err := archivecheck.Git(t.Context(), repository, "archive", "--format=tar", commit)
-	if err != nil || !bytes.Equal(actual.Bytes(), expected) {
-		t.Fatalf("shadow changed CLI bytes: %v", err)
-	}
-	if err := cache.Checkout(t.Context(), "mirror", commit, filepath.Join(t.TempDir(), "work")); err != nil {
-		t.Fatal(err)
-	}
-	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
-	defer cancel()
-	if err := cache.WaitShadow(ctx); err != nil {
-		t.Fatal(err)
-	}
-	if stats := cache.ShadowStats(); stats.Runs != 2 || stats.Errors != 0 || stats.Mismatches != 0 || stats.Skipped != 0 {
-		t.Fatalf("incident fixture parity: %+v", stats)
-	}
+	return out, nil
 }
-
 func TestArchiveRealHistory(t *testing.T) {
 	repository := os.Getenv("OBERTH_ARCHIVE_PARITY_REPO")
 	if repository == "" {
-		t.Skip("set OBERTH_ARCHIVE_PARITY_REPO to run every commit of a real multi-pack mirror")
+		t.Skip("set OBERTH_ARCHIVE_PARITY_REPO=fixture for the full offline history")
 	}
 	if repository == "fixture" {
 		repository = extractHistoryFixture(t)
 	}
-	checker, err := archivecheck.New(repository)
+	root := t.TempDir()
+	if err := os.Symlink(repository, filepath.Join(root, "mirror.git")); err != nil {
+		t.Fatal(err)
+	}
+	cache, err := gitcache.New(gitcache.Config{Root: root, Upstream: func(string) (string, error) { return "", errors.New("offline fixture must not fetch") }})
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer checker.Close()
-	body, err := archivecheck.Git(t.Context(), repository, "rev-list", "--all")
+	body, err := fixtureGit(t.Context(), repository, "rev-list", "--all")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -101,15 +54,19 @@ func TestArchiveRealHistory(t *testing.T) {
 		t.Fatal("empty history")
 	}
 	for i, commit := range commits {
-		if err := checker.Check(t.Context(), commit); err != nil {
+		var actual bytes.Buffer
+		if err := cache.ArchiveTar(t.Context(), "mirror", commit, &actual); err != nil {
 			t.Fatalf("commit=%s: %v", commit, err)
+		}
+		expected, err := fixtureGit(t.Context(), repository, "archive", "--format=tar", commit)
+		if err != nil || !bytes.Equal(actual.Bytes(), expected) {
+			t.Fatalf("commit=%s archive differs: %v", commit, err)
 		}
 		if i%100 == 0 || i == len(commits)-1 {
 			t.Logf("archived all files at %d/%d commits", i+1, len(commits))
 		}
 	}
 }
-
 func extractHistoryFixture(t *testing.T) string {
 	t.Helper()
 	body, err := os.ReadFile("testdata/gengo-multipack.tar.gz")
@@ -166,10 +123,10 @@ func extractHistoryFixture(t *testing.T) string {
 	if err != nil || len(packs) != 3 {
 		t.Fatalf("need three packs, got %v: %v", packs, err)
 	}
-	if _, err := archivecheck.Git(t.Context(), directory, "fsck", "--full"); err != nil {
+	if _, err := fixtureGit(t.Context(), directory, "fsck", "--full"); err != nil {
 		t.Fatal(err)
 	}
-	count, err := archivecheck.Git(t.Context(), directory, "rev-list", "--all", "--count")
+	count, err := fixtureGit(t.Context(), directory, "rev-list", "--all", "--count")
 	if err != nil || strings.TrimSpace(string(count)) != "878" {
 		t.Fatalf("fixture history changed: %s %v", count, err)
 	}
@@ -180,7 +137,7 @@ func extractHistoryFixture(t *testing.T) string {
 // enough. This real commit also corrupts with the released streaming decoder.
 func TestCheckoutRealDeltaParity(t *testing.T) {
 	repository := extractHistoryFixture(t)
-	cache, err := gitcache.New(gitcache.Config{Root: filepath.Join(t.TempDir(), "cache"), Backend: gitcache.BackendGoGit, Upstream: func(string) (string, error) { return repository, nil }})
+	cache, err := gitcache.New(gitcache.Config{Root: filepath.Join(t.TempDir(), "cache"), Upstream: func(string) (string, error) { return repository, nil }})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -192,7 +149,7 @@ func TestCheckoutRealDeltaParity(t *testing.T) {
 	if err := cache.Checkout(t.Context(), "mirror", commit, work); err != nil {
 		t.Fatal(err)
 	}
-	body, err := archivecheck.Git(t.Context(), repository, "archive", "--format=tar", commit)
+	body, err := fixtureGit(t.Context(), repository, "archive", "--format=tar", commit)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -238,113 +195,3 @@ func TestCheckoutRealDeltaParity(t *testing.T) {
 // Exercise the complete helper protocol on the real multi-pack delta fixture.
 // The Git shim changes one decoded blob only AFTER CLI archive succeeds; a
 // valid-compression, same-size loose override models the old decoder's bytes.
-func TestShadowHelperCorruptedRealFixtureHashGuard(t *testing.T) {
-	for _, attributes := range []bool{false, true} {
-		t.Run(fmt.Sprintf("export-rules=%v", attributes), func(t *testing.T) {
-			repository := extractHistoryFixture(t)
-			// Use an unpacked copy for deterministic byte corruption. The original
-			// packed/delta layout is exercised by TestShadowRealCorruptionFixture.
-			packs := filepath.Join(repository, "objects", "pack")
-			outside := filepath.Join(t.TempDir(), "packs")
-			if err := os.Rename(packs, outside); err != nil {
-				t.Fatal(err)
-			}
-			if err := os.Mkdir(packs, 0700); err != nil {
-				t.Fatal(err)
-			}
-			files, err := filepath.Glob(filepath.Join(outside, "*.pack"))
-			if err != nil {
-				t.Fatal(err)
-			}
-			for _, file := range files {
-				input, err := os.Open(file)
-				if err != nil {
-					t.Fatal(err)
-				}
-				cmd := exec.CommandContext(t.Context(), "git", "-C", repository, "unpack-objects", "-r")
-				cmd.Stdin = input
-				output, err := cmd.CombinedOutput()
-				_ = input.Close()
-				if err != nil {
-					t.Fatalf("unpack fixture: %v %s", err, output)
-				}
-			}
-			const commit = "483edb0165750b273a453b5d5de61183091fda14"
-			const name = "types/types.go"
-			if attributes {
-				if err := os.MkdirAll(filepath.Join(repository, "info"), 0700); err != nil {
-					t.Fatal(err)
-				}
-				if err := os.WriteFile(filepath.Join(repository, "info", "attributes"), []byte(name+" export-ignore\n"), 0600); err != nil {
-					t.Fatal(err)
-				}
-			}
-			entry, err := archivecheck.Git(t.Context(), repository, "ls-tree", commit, name)
-			if err != nil {
-				t.Fatal(err)
-			}
-			fields := strings.Fields(string(entry))
-			if len(fields) != 4 {
-				t.Fatalf("fixture entry: %q", entry)
-			}
-			hash := fields[2]
-			blob, err := exec.CommandContext(t.Context(), "git", "-C", repository, "cat-file", "blob", hash).Output()
-			if err != nil || len(blob) == 0 {
-				t.Fatalf("fixture blob: %v", err)
-			}
-			blob[len(blob)/2] ^= 1
-			var compressed bytes.Buffer
-			z := zlib.NewWriter(&compressed)
-			if _, err := fmt.Fprintf(z, "blob %d\x00", len(blob)); err != nil {
-				t.Fatal(err)
-			}
-			if _, err := z.Write(blob); err != nil {
-				t.Fatal(err)
-			}
-			if err := z.Close(); err != nil {
-				t.Fatal(err)
-			}
-			root := t.TempDir()
-			corrupt := filepath.Join(root, "corrupt")
-			if err := os.WriteFile(corrupt, compressed.Bytes(), 0600); err != nil {
-				t.Fatal(err)
-			}
-			id := hash
-			target := filepath.Join(repository, "objects", id[:2], id[2:])
-			if err := os.MkdirAll(filepath.Dir(target), 0700); err != nil {
-				t.Fatal(err)
-			}
-			if err := os.Chmod(target, 0600); err != nil {
-				t.Fatal(err)
-			}
-			git, err := exec.LookPath("git")
-			if err != nil {
-				t.Fatal(err)
-			}
-			git, err = filepath.Abs(git)
-			if err != nil {
-				t.Fatal(err)
-			}
-			quote := func(s string) string { return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'" }
-			shim := filepath.Join(root, "git")
-			script := "#!/bin/sh\nset -eu\n" +
-				"test \"${GIT_ATTR_NOSYSTEM-}\" = 1\ntest \"$HOME\" = /dev/null\ntest \"${XDG_CONFIG_HOME-}\" = /dev/null\n" +
-				"test \"$1\" = -c\ntest \"$2\" = core.attributesFile=/dev/null\n" + quote(git) + " \"$@\"\ncase \"$*\" in *--format=tar*) cp " + quote(corrupt) + " " + quote(target) + " ;; esac\n"
-			if err := os.WriteFile(shim, []byte(script), 0700); err != nil {
-				t.Fatal(err)
-			}
-			exe, err := os.Executable()
-			if err != nil {
-				t.Fatal(err)
-			}
-			ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
-			defer cancel()
-			cmd := exec.CommandContext(ctx, exe, "-test.run=^TestShadowFixtureProcess$", "--", "shadow-fixture", repository, commit, shim, "/dev/null")
-			output, err := cmd.CombinedOutput()
-			var exit *exec.ExitError
-			if !errors.As(err, &exit) || exit.ExitCode() != 21 || len(output) != 0 {
-				t.Fatalf("RunShadowHelper must return gogit_hash_guard (21), not an attr gap: %v output=%q", err, output)
-			}
-		})
-	}
-}

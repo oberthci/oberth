@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-func TestConservativePromotionMerge(t *testing.T) {
+func TestNativeGitPromotionMerge(t *testing.T) {
 	cases := []struct {
 		name, left, right string
 		conflict          bool
@@ -15,19 +15,18 @@ func TestConservativePromotionMerge(t *testing.T) {
 		{"disjoint paths", "target.txt", "source.txt", false},
 		{"identical blob", "file.txt", "file.txt", false},
 		{"different blob", "file.txt", "file.txt", true},
-		{"nonoverlapping lines still refuse", "file.txt", "file.txt", true},
+		{"nonoverlapping lines refuse", "file.txt", "file.txt", true},
 		{"delete versus modify", "DELETE", "file.txt", true},
 		{"identical deletion", "DELETE", "DELETE", false},
 		{"file versus directory", "new", "new/child", true},
 	}
-	for _, backend := range []Backend{BackendCLI, BackendGoGit} {
-		t.Run(string(backend), func(t *testing.T) {
+	for _, backend := range []string{"cli"} {
+		t.Run(backend, func(t *testing.T) {
 			for _, test := range cases {
 				t.Run(test.name, func(t *testing.T) {
 					repository := newTestRepository(t)
-					// Multiple lines make the conservative-policy difference explicit: Git's
-					// content merge could combine first/last edits, but this policy refuses.
-					if test.name == "nonoverlapping lines still refuse" {
+					// Preserve the refusal of independent edits in the same file.
+					if test.name == "nonoverlapping lines refuse" {
 						repository.initialSHA = repository.commit(t, "baseline", "first\nsecond\nthird\nfourth\nfifth\n")
 					}
 					change := func(path, contents, message string) string {
@@ -51,7 +50,7 @@ func TestConservativePromotionMerge(t *testing.T) {
 					if test.name == "identical blob" {
 						targetBody = sourceBody
 					}
-					if test.name == "nonoverlapping lines still refuse" {
+					if test.name == "nonoverlapping lines refuse" {
 						sourceBody = "source first\nsecond\nthird\nfourth\nfifth\n"
 						targetBody = "first\nsecond\nthird\nfourth\ntarget fifth\n"
 					}
@@ -59,7 +58,7 @@ func TestConservativePromotionMerge(t *testing.T) {
 					runGit(t, repository.work, "checkout", "main")
 					base := change(test.left, targetBody, "target")
 					runGit(t, repository.work, "push", "origin", "main")
-					cache, err := New(Config{Root: filepath.Join(t.TempDir(), "cache"), Backend: backend, Upstream: func(string) (string, error) { return repository.upstream, nil }})
+					cache, err := New(Config{Root: filepath.Join(t.TempDir(), "cache"), Upstream: func(string) (string, error) { return repository.upstream, nil }})
 					if err != nil {
 						t.Fatal(err)
 					}

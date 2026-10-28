@@ -61,6 +61,5 @@ func (c *Cache) checkoutLocked(ctx context.Context, source, sha, destination str
 		return fmt.Errorf("checkout immutable workspace SHA: %w", err)
 	}
 	clean = true
-	c.queueShadow(source, sha)
 	return nil
 }

@@ -9,7 +9,6 @@ ARG BUILD_CACHE_NAMESPACE=default
 RUN apk add --no-cache ca-certificates=20261020-r0
 WORKDIR /src
 COPY go.mod go.sum ./
-COPY third_party/go-git ./third_party/go-git
 RUN --mount=type=cache,id=oberth-server-${BUILD_CACHE_NAMESPACE}-gomod,target=/go/pkg/mod,sharing=locked go mod download
 COPY . .
 ARG TARGETOS=linux

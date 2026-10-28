@@ -97,7 +97,7 @@ func TestOberthBuildPipelineIsAdmissible(t *testing.T) {
 		"test-store":             "lint",
 		"test-service":           "lint",
 		"test-rest":              "lint",
-		"test-gitcache-backends": "lint",
+		"test-gitcache":          "lint",
 		"test-archive-history":   "lint",
 		"test-openbao":           "setup",
 		"security":               "setup",
@@ -105,10 +105,10 @@ func TestOberthBuildPipelineIsAdmissible(t *testing.T) {
 		"chart":                  "lint",
 		"release-diagnostic":     "setup",
 		"verify-publisher-tools": "setup",
-		"build-amd64":            "test-store && test-service && test-rest && test-gitcache-backends && test-archive-history && chart",
-		"build-arm64":            "test-store && test-service && test-rest && test-gitcache-backends && test-archive-history && chart",
-		"build-darwin-amd64":     "test-store && test-service && test-rest && test-gitcache-backends && test-archive-history && chart",
-		"build-darwin-arm64":     "test-store && test-service && test-rest && test-gitcache-backends && test-archive-history && chart",
+		"build-amd64":            "test-store && test-service && test-rest && test-gitcache && test-archive-history && chart",
+		"build-arm64":            "test-store && test-service && test-rest && test-gitcache && test-archive-history && chart",
+		"build-darwin-amd64":     "test-store && test-service && test-rest && test-gitcache && test-archive-history && chart",
+		"build-darwin-arm64":     "test-store && test-service && test-rest && test-gitcache && test-archive-history && chart",
 	})
 }
 

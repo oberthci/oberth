@@ -24,17 +24,6 @@ func newBackendTestCache(t *testing.T, config Config) (*Cache, error) {
 		config.Env = make(map[string]string)
 	}
 	config.Env["GORACE"] = "atexit_sleep_ms=0"
-	selected := config.Backend
-	if selected == "" {
-		selected = Backend(os.Getenv("OBERTH_TEST_GIT_BACKEND"))
-	}
-	if selected == "" {
-		selected = BackendCLI
-	}
-	if config.GitBinary != "" {
-		selected = BackendCLI
-	}
-	config.Backend = selected
 	return New(config)
 }
 
@@ -66,14 +55,6 @@ func TestBackendRoutesRunAndCapture(t *testing.T) {
 	}
 }
 
-func TestBackendRejectsUnknownImplementation(t *testing.T) {
-	t.Parallel()
-	_, err := New(Config{Root: t.TempDir(), Upstream: func(string) (string, error) { return "unused", nil }, Backend: "unknown"})
-	if err == nil {
-		t.Fatal("unknown backend accepted")
-	}
-}
-
 // A real Git client invokes this test executable as its server-side helper,
 // so protocol/policy fixtures traverse the selected backend as well. Calling
 // git receive-pack directly here would silently bypass parity coverage.
@@ -84,7 +65,6 @@ type backendServiceFixture struct {
 
 type backendFixtureConfig struct {
 	Root           string
-	Backend        Backend
 	GitBinary      string
 	Env            map[string]string
 	Redact         []string
@@ -97,7 +77,7 @@ func backendServiceCommand(t *testing.T, cache *Cache, service Service) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fixture := backendServiceFixture{Config: backendFixtureConfig{Root: cache.root, Backend: cache.backendName, GitBinary: cache.gitBinary, Env: cache.env, Redact: cache.redact, CommandTimeout: cache.timeout}, Service: service}
+	fixture := backendServiceFixture{Config: backendFixtureConfig{Root: cache.root, GitBinary: cache.gitBinary, Env: cache.env, Redact: cache.redact, CommandTimeout: cache.timeout}, Service: service}
 	body, err := json.Marshal(fixture)
 	if err != nil {
 		t.Fatal(err)
@@ -137,7 +117,7 @@ func TestBackendServiceProcess(t *testing.T) {
 		os.Exit(2)
 	}
 	cache, err := New(Config{
-		Root: fixture.Config.Root, Backend: fixture.Config.Backend, GitBinary: fixture.Config.GitBinary,
+		Root: fixture.Config.Root, GitBinary: fixture.Config.GitBinary,
 		Env: fixture.Config.Env, Redact: fixture.Config.Redact, CommandTimeout: fixture.Config.CommandTimeout,
 		Upstream: func(string) (string, error) { return "", errors.New("fixture upstream unused") },
 	})
@@ -154,39 +134,12 @@ func TestBackendServiceProcess(t *testing.T) {
 	os.Exit(0)
 }
 
-func TestDefaultBackendAndExplicitLegacyExecutable(t *testing.T) {
-	for _, test := range []struct {
-		name   string
-		config Config
-		want   Backend
-	}{
-		{name: "default", want: BackendCLI},
-		{name: "explicit Go", config: Config{Backend: BackendGoGit}, want: BackendGoGit},
-		{name: "explicit CLI", config: Config{Backend: BackendCLI}, want: BackendCLI},
-		{name: "legacy executable", config: Config{GitBinary: "git"}, want: BackendCLI},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			config := test.config
-			config.Root = t.TempDir()
-			config.Upstream = func(string) (string, error) { return "unused", nil }
-			cache, err := New(config)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if cache.backendName != test.want {
-				t.Fatalf("backend=%s want %s", cache.backendName, test.want)
-			}
-		})
-	}
-}
-
-func TestFixtureDefaultsToProductionBackend(t *testing.T) {
-	t.Setenv("OBERTH_TEST_GIT_BACKEND", "")
-	cache, err := newBackendTestCache(t, Config{Root: t.TempDir(), Upstream: func(string) (string, error) { return "unused", nil }})
+func TestOnlyProductionBackendIsCLI(t *testing.T) {
+	cache, err := New(Config{Root: t.TempDir(), Upstream: func(string) (string, error) { return "unused", nil }})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cache.backendName != BackendCLI {
-		t.Fatalf("fixture backend=%s, production default must be CLI", cache.backendName)
+	if _, ok := cache.backend.(*cliBackend); !ok {
+		t.Fatalf("non-CLI backend %T", cache.backend)
 	}
 }

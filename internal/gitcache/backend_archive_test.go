@@ -31,10 +31,15 @@ func TestBackendArchiveParity(t *testing.T) {
 		Link string
 		Body string
 	}
-	var expected map[string]entry
-	for _, backend := range []Backend{BackendCLI, BackendGoGit} {
-		t.Run(string(backend), func(t *testing.T) {
-			cache, err := New(Config{Root: filepath.Join(t.TempDir(), "cache"), Backend: backend, Upstream: func(string) (string, error) { return repository.upstream, nil }})
+	expected := map[string]entry{
+		"file.txt":   {0o664, tar.TypeReg, "", "initial\n"},
+		"nested/":    {0o775, tar.TypeDir, "", ""},
+		"nested/run": {0o775, tar.TypeReg, "", "#!/bin/sh\nprintf example\\n\n"},
+		"link":       {0o777, tar.TypeSymlink, "nested/run", ""},
+	}
+	for _, backend := range []string{"cli"} {
+		t.Run(backend, func(t *testing.T) {
+			cache, err := New(Config{Root: filepath.Join(t.TempDir(), "cache"), Upstream: func(string) (string, error) { return repository.upstream, nil }})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -64,9 +69,7 @@ func TestBackendArchiveParity(t *testing.T) {
 				}
 				result[header.Name] = entry{header.Mode, header.Typeflag, header.Linkname, string(body)}
 			}
-			if backend == BackendCLI {
-				expected = result
-			} else if !reflect.DeepEqual(result, expected) {
+			if !reflect.DeepEqual(result, expected) {
 				t.Fatalf("archive differs from CLI:\n got %#v\nwant %#v", result, expected)
 			}
 		})

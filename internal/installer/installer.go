@@ -1780,7 +1780,7 @@ func OberthHelmArgs(cfg Config, openbao OpenBaoResult, rekor RekorResult) []stri
 	// values. No-op on first install. This intentionally retains installed
 	// chart defaults, including compatibility identities. New chart keys must
 	// have template fallbacks; test-chart-upgrade.sh and the real Helm install
-	// rerun test cover every key added since v0.17.53 (utilityImage/gitBackend).
+	// rerun test cover every key added since v0.17.53 (utilityImage).
 	args = append(args, "--reuse-values")
 	return args
 }

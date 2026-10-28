@@ -142,7 +142,7 @@ func testServerImageContainerAndExecContract(t *testing.T, override string) {
 	}
 }
 
-func TestBothGitBackendsGateCIBuilds(t *testing.T) {
+func TestNativeGitCacheGatesCIBuilds(t *testing.T) {
 	body, err := os.ReadFile("../../.oberth/build.yaml")
 	if err != nil {
 		t.Fatal(err)
@@ -168,20 +168,20 @@ func TestBothGitBackendsGateCIBuilds(t *testing.T) {
 	lane := false
 	gate := false
 	for _, template := range workflow.Spec.Templates {
-		if template.Name == "test-gitcache-backends" {
-			lane = strings.Join(template.Container.Args, " ") == "hack/test-gitcache-backends.sh"
+		if template.Name == "test-gitcache" {
+			lane = strings.Join(template.Container.Args, " ") == "hack/test-gitcache.sh"
 		}
 		for _, task := range template.DAG.Tasks {
-			if task.Name == "test-gitcache-backends" {
-				gate = task.Template == "test-gitcache-backends" && task.Depends == "lint"
+			if task.Name == "test-gitcache" {
+				gate = task.Template == "test-gitcache" && task.Depends == "lint"
 			}
-			if strings.HasPrefix(task.Name, "build-") && !strings.Contains(task.Depends, "test-gitcache-backends") {
-				t.Errorf("%s bypasses backend parity gate", task.Name)
+			if strings.HasPrefix(task.Name, "build-") && !strings.Contains(task.Depends, "test-gitcache") {
+				t.Errorf("%s bypasses native Git cache gate", task.Name)
 			}
 		}
 	}
 	if !lane || !gate {
-		t.Fatalf("backend CI lane=%v gate=%v", lane, gate)
+		t.Fatalf("native Git CI lane=%v gate=%v", lane, gate)
 	}
 }
 

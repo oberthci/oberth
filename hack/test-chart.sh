@@ -101,9 +101,6 @@ helm template oberth "$notes_chart" --namespace default \
   --set "image.ref=$server_image" \
   --show-only templates/notes-contract.yaml >"$notes"
 render >"$manifest"
-grep -q -- '--git-backend=cli' "$manifest"
-render --set gitBackend=null | grep -q -- '--git-backend=cli'
-render --set gitBackend=go-git | grep -q -- '--git-backend=go-git'
 render >"$empty_release_manifest"  # default render has no releaseSecrets
 render >"$generated_secrets_manifest"
 render \

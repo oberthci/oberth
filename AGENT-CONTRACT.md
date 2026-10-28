@@ -108,65 +108,13 @@ operator's responsibility; Helm rollback alone cannot undo a migration.
   hands them to UID/GID `65534` before the server starts; no manual node
   preparation is required. The two roots must not be equal, nested, aliased, or
   located under a critical system directory.
-- The server defaults to the Git CLI while the go-git backend is requalified
-  after a streaming-delta source corruption incident. The release runtime
-  uses the reviewed v0.17.56 Alpine substrate with Git/OpenSSH; go-git is an
-  explicit opt-in. Its decoded object bytes are hashed against the requested
-  Git ID on consumption, and failed checkouts are removed before seeding.
-  Optional `OBERTH_GITCACHE_SHADOW=1` (chart `gitcache.shadow`, default false)
-  forces CLI authority. Successful ArchiveTar and Checkout calls enqueue
-  archive comparisons at the immutable SHA. Archive observations pin Git's
-  emitted PAX commit, never a later moving ref. A Checkout hook compares fresh
-  archives; it does NOT read/compare the delivered checkout directory or seed.
-  One isolated helper at a time reads the local cache, with 16 pending jobs
-  and the normal Git command timeout in a separate budget. Full queues or
-  unpinnable archives increment `shadow_skipped`; shutdown cancellation does
-  not increment runs/errors/skips. The helper is started with `nice -n 10` before
-  its runtime threads exist. On Linux it writes its own `oom_score_adj=1000`;
-  inability to apply this preference skips work as `gogit_other`; a missing
-  `nice` skips work as `nice_unavailable`. Neither runs at server priority or
-  requires a new capability or RBAC.
-  The helper retains the 32 MiB object LRU and streaming decoder, streams tar
-  data with a 32 KiB buffer, has a 128 MiB Go soft memory limit, and is killed
-  on timeout/shutdown (one second to reap its Git child, then the entire process
-  group is killed). Its output is bounded to 4096 bytes through the actual
-  io.Copy path; overflow immediately kills/reaps the process group. It cannot
-  seed a workspace or select returned bytes. Both archives are rebuilt at the
-  pinned SHA; SHA-256 compares every file byte and ordered entry
-  name/mode/type/link/size, excluding tar framing/global PAX/padding. Git tree
-  IDs are compared too. Disagreements increment
-  `oberth_gitcache_shadow_mismatch_total` and log structured repo/SHA/hashes;
-  helper stderr is discarded. No error message or file contents enter metrics.
-  Fixed helper exit codes 20..26 map respectively to `cli_failed`,
-  `gogit_hash_guard`, `gogit_other`, `oversize`, `canceled`, `expected_attr_gap`,
-  `timeout`. Process shutdown does not count; per-job deadlines count as `timeout`.
-  Unknown nonzero exits, crashes, spawn/protocol failures map to `gogit_other`.
-  `oberth_gitcache_shadow_errors_total{reason}` exports those seven labels plus
-  `nice_unavailable`; `/api/status` retains process-local runs/mismatches/errors/skips.
-  Unscoped authenticated admins can read metrics; scoped status omits these counters.
-  `shadow_runs` counts completed attempts (including errors): errors/skips must
-  be checked before calling any soak green.
-  `oberth_gitcache_shadow_enabled` is a startup-configuration gauge (0 or 1).
-  `oberth_gitcache_shadow_compared_total` counts completed archive/tree hash
-  comparisons, including mismatches and expected attribute gaps, but not helper
-  failures or shutdown cancellation. It must increase during a representative
-  soak; zero mismatches/errors without comparisons proves no parity.
-  `oberth_gitcache_shadow_dropped_total` counts only queue-full drops, a subset
-  of `shadow_skipped`; invalid/unpinnable observations are not queue-full drops.
-  Normal goArchive fails closed on detected export attributes, including
-  committed root/nested/symlink .gitattributes, macro definitions, info/attributes,
-  configured core.attributesFile, and malformed/overlarge attribute files (1 MiB
-  file / 64 KiB line bound). The detector splits only on space/tab/CR/LF, like Git.
-  Shadow always walks every blob through verified storage and compares tree IDs,
-  even if the detector fires. Only differing archive digests with a detected gap
-  and equal tree IDs count as `expected_attr_gap`; an unused rule with identical
-  archives is clean, and a tree disagreement is always a mismatch. Integrity
-  failures always count as `gogit_hash_guard`. The isolated Git child disables
-  system attributes, uses neutral HOME/XDG, and overrides core.attributesFile
-  with /dev/null so ambient attributes cannot affect the comparison. Committed
-  attributes and repository info/attributes still apply. Git pattern precedence
-  and pretty-format substitution remain unimplemented in goArchive. Expected
-  attribute gaps do not count as clean archive parity. The CLI result is served.
+- Native Git CLI is the only source backend. The runtime is scratch with static
+  Git, static Oberth, the `oberth-git-ssh` alias and a CA bundle, UID/GID 65534.
+  No shell or OpenSSH is present. Git's GIT_SSH points at the native pinned-key
+  transport with GIT_SSH_VARIANT=simple; GIT_SSH_COMMAND is never inherited.
+  Promotion retains conservative path conflicts and uses native Git plumbing.
+  Removed backend/shadow flags, chart settings, status fields and counters
+  are not accepted. See docs/gitcache.md for explicit values migration.
   The cache init
   and restore file-tool container use the shared digest-pinned BusyBox utility
   image, overridable with chart `utilityImage` / installer `--utility-image`
@@ -1045,15 +993,12 @@ continuity checks; it must never be used to reset or bypass those checks.
   a single flattened layer binding the exact source-built executable for its
   platform. The published reference is always the index digest; the Helm
   chart pins the index digest, never a single-platform manifest.
-- The server substrate is the already released v0.17.56 digest-pinned Alpine
-  index, with Git/OpenSSH and the fixed exact runtime package pins. Repack
-  replaces only the bootstrap server binary and requires Git, SSH and CA data
-  at assembly and readback. Dockerfile's final runtime target includes those
-  tools. The package-free scratch-runtime target is experimental and explicitly
-  selects go-git; it is not the release substrate while CLI is the default.
-  Requalification requires the offline real multi-pack all-commit archive gate,
-  checkout parity and both-backend race suites. Passing them does not switch
-  the default automatically; that requires a separate reviewed decision.
+- The server substrate is a reviewed, digest-pinned scratch index containing
+  static Git built from a checksum-pinned source, static Oberth, its native
+  SSH alias, and CA data. Repack replaces only the server executable and
+  refuses extra runtime files or a changed SSH alias at assembly/readback.
+  Local runtime qualification runs the complete CLI cache suite, host-key
+  mismatch refusal and cancellation/reaping checks without a shell/OpenSSH.
 - There is no runner image artifact: Job substrates are public standard
   golang images selected per repository under the administrator prefix
   allowlist.
@@ -2494,7 +2439,7 @@ merged below stored release configuration, then user values and pinned arguments
 apply. Explicit false, zero and empty configured values are not replaced merely
 because they are empty. Direct `--reuse-values` upgrades also need template
 fallbacks for newly introduced keys: `utilityImage` falls back to the shared
-utility pin and `gitBackend` to `cli`. `hack/test-chart-upgrade.sh` renders the
+utility pin. Native Git is the only backend. `hack/test-chart-upgrade.sh` renders the
 new chart against the unmodified v0.17.53 values shape, both with and without
 new defaults. It runs from branch and release chart gates before publication.
 

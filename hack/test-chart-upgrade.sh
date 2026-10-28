@@ -10,7 +10,7 @@ script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 fixture=$script_dir/testdata/chart-values-v0.17.53.yaml
 utility_image=${2:-$(awk '$1 == "utilityImage:" { print $2 }' "$chart/values.yaml")}
 test -n "$utility_image"
-if grep -Eq '^(utilityImage|gitBackend):' "$fixture"; then
+if grep -Eq '^utilityImage:' "$fixture"; then
   echo 'historical values fixture must predate scratch-image settings' >&2
   exit 1
 fi
@@ -29,8 +29,6 @@ check_default() {
     grep -n 'image:' "$work/rendered.yaml" >&2
     exit 1
   fi
-  grep -Fq -- '--git-backend=cli' "$work/rendered.yaml"
-  grep -A1 -F 'name: OBERTH_GITCACHE_SHADOW' "$work/rendered.yaml" | grep -Fq 'value: "0"'
   if grep -Eq '^[[:space:]]+image:[[:space:]]*(""|null)?[[:space:]]*$' "$work/rendered.yaml"; then
     echo 'upgrade rendered an empty container image' >&2
     exit 1
@@ -47,38 +45,27 @@ check_default
   --values "$fixture" --set-string "image.ref=$server_image" >"$work/rendered.yaml"
 check_default
 
-# A previously stored mirror/backend choice (including a forward-repair value)
-# wins over the CLI default, before any fresh --set overrides are supplied.
-# Use the opt-in backend so retaining the default cannot conceal lost values.
+# A previously stored utility mirror choice
+# is retained before fresh --set overrides.
 cp -- "$fixture" "$work/stored-values.yaml"
-printf '\nutilityImage: %s\ngitBackend: go-git\n' "$mirror" >>"$work/stored-values.yaml"
+printf '\nutilityImage: %s\n' "$mirror" >>"$work/stored-values.yaml"
 "$helm_tool" template oberth "$chart" --is-upgrade --namespace oberth \
   --values "$work/stored-values.yaml" --set-string "image.ref=$server_image" >"$work/rendered.yaml"
 grep -Fq -- "image: \"$mirror\"" "$work/rendered.yaml"
-grep -Fq -- '--git-backend=go-git' "$work/rendered.yaml"
 
-# Operator mirrors and the one-release backend switch retain precedence.
+# Operator mirrors retain precedence.
 for source in "$legacy_chart" "$chart"; do
   "$helm_tool" template oberth "$source" --is-upgrade --namespace oberth \
     --values "$fixture" --set-string "image.ref=$server_image" \
-    --set-string "utilityImage=$mirror" --set-string gitBackend=go-git >"$work/rendered.yaml"
+    --set-string "utilityImage=$mirror" >"$work/rendered.yaml"
   grep -Fq -- "image: \"$mirror\"" "$work/rendered.yaml"
-  grep -Fq -- '--git-backend=go-git' "$work/rendered.yaml"
 done
 
-# The shadow setting also works when a reused release has no gitcache map.
-for source in "$legacy_chart" "$chart"; do
-  for shadow in true false; do
-    expected=0
-    if [ "$shadow" = true ]; then expected=1; fi
-    "$helm_tool" template oberth "$source" --is-upgrade --namespace oberth \
-      --values "$fixture" --set-string "image.ref=$server_image" \
-      --set "gitcache.shadow=$shadow" >"$work/rendered.yaml"
-    grep -A1 -F 'name: OBERTH_GITCACHE_SHADOW' "$work/rendered.yaml" | grep -Fq "value: \"$expected\""
-  done
+# Retired backend/shadow configuration must be migrated explicitly.
+for retired in gitBackend=cli gitcache.shadow=true; do
+  if "$helm_tool" template oberth "$chart" --set-string "image.ref=$server_image" \
+    --set "$retired" >"$work/rendered.yaml" 2>/dev/null; then
+    echo "retired setting accepted: $retired" >&2
+    exit 1
+  fi
 done
-if "$helm_tool" template oberth "$chart" --set-string "image.ref=$server_image" \
-  --set-string gitcache.shadow=true >"$work/rendered.yaml" 2>/dev/null; then
-  echo 'gitcache.shadow must reject a string boolean' >&2
-  exit 1
-fi

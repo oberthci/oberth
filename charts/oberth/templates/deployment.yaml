@@ -160,7 +160,6 @@ spec:
           command: ["/usr/local/bin/oberth"]
           args:
             - serve
-            - --git-backend={{ .Values.gitBackend | default "cli" }}
             - --data=/data
             - --database=/data/oberth.sqlite
             - --ssh-listen=:2222
@@ -345,9 +344,6 @@ spec:
             - --promotion-grant-max-lifetime={{ $grantMaxLifetime }}
             {{- end }}
           env:
-            {{- $gitcache := .Values.gitcache | default dict }}
-            - name: OBERTH_GITCACHE_SHADOW
-              value: {{ ternary "1" "0" ($gitcache.shadow | default false) | quote }}
             - name: OBERTH_IDENTITY_STORE
               value: openbao
             - name: VAULT_ADDR
