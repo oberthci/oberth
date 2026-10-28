@@ -165,7 +165,7 @@ func backup(ctx context.Context, c config, public io.Writer) (resultErr error) {
 		_ = input.Close()
 		return e
 	}
-	report, exportErr := store.WriteVerifiedBackup(ctx, c.database, c.schema, opts, input)
+	report, exportErr := store.WriteStableVerifiedBackup(ctx, c.database, c.schema, opts, input)
 	closeErr := input.Close()
 	if exportErr != nil || closeErr != nil {
 		_ = cmd.Process.Kill()

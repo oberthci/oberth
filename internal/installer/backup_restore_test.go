@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -343,6 +344,22 @@ func (c *fakeBackupCluster) deps(output *bytes.Buffer) backupDeps {
 			PollInterval: time.Millisecond,
 		},
 		runStdout: c.run,
+		runIO: func(ctx context.Context, input io.Reader, w io.Writer, name string, args ...string) error {
+			var body []byte
+			if input != nil {
+				var err error
+				body, err = io.ReadAll(input)
+				if err != nil {
+					return err
+				}
+			}
+			b, err := c.run(ctx, body, name, args...)
+			if err != nil {
+				return err
+			}
+			_, err = w.Write(b)
+			return err
+		},
 		cipher:    fakeEnvelopeCipher{},
 		now:       func() time.Time { return time.Date(2026, 10, 17, 9, 30, 0, 0, time.UTC) },
 		rootToken: testBackupToken,
@@ -613,7 +630,7 @@ func TestBackupCapturesOpenBaoDatabaseAndValues(t *testing.T) {
 		t.Fatalf("backup wrote to OpenBao: %v", source.bao.writes)
 	}
 	work := t.TempDir()
-	manifest, err := openBackupArchive(context.Background(), output, fakeEnvelopeCipher{}, work)
+	manifest, err := openBackupArchive(context.Background(), output, fakeEnvelopeCipher{}, work, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -670,7 +687,7 @@ func TestBackupFallsBackToStableCopyOnOlderServers(t *testing.T) {
 	output, _, source := backupFixtureArchive(t, true)
 	assertUtilityHelperImage(t, source, "registry.internal/busybox@sha256:fixture")
 	work := t.TempDir()
-	manifest, err := openBackupArchive(context.Background(), output, fakeEnvelopeCipher{}, work)
+	manifest, err := openBackupArchive(context.Background(), output, fakeEnvelopeCipher{}, work, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -678,7 +695,7 @@ func TestBackupFallsBackToStableCopyOnOlderServers(t *testing.T) {
 		t.Fatalf("snapshot = %q, want %q", manifest.Database.Snapshot, snapshotStableCopy)
 	}
 	protocol := store.ProtocolConfig{SchemaIdentity: sourceCompat.SchemaIdentity, AuditDomain: sourceCompat.AuditDomain}
-	if _, err := verifyDatabaseArchive(context.Background(), filepath.Join(work, filepath.FromSlash(backupMemberDatabase)), manifest.Database.Schema, protocol); err != nil {
+	if _, err := verifyDatabaseArchive(context.Background(), filepath.Join(work, filepath.FromSlash(backupMemberDatabase)), manifest.Database.Schema, protocol, 0); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -849,10 +866,10 @@ func TestStageUploadScriptReportsTheReceivedSize(t *testing.T) {
 	if err != nil {
 		t.Fatalf("upload script: %v", err)
 	}
-	if err := checkUploadedSize("oberth.sqlite", out, len(payload)); err != nil {
+	if err := checkUploadedSize("oberth.sqlite", out, int64(len(payload))); err != nil {
 		t.Fatal(err)
 	}
-	if err := checkUploadedSize("oberth.sqlite", out, len(payload)+1); err == nil {
+	if err := checkUploadedSize("oberth.sqlite", out, int64(len(payload))+1); err == nil {
 		t.Fatal("a size mismatch was accepted")
 	}
 }
@@ -967,13 +984,13 @@ func TestRestoreRefusesADatabaseUnderTheWrongAuditDomain(t *testing.T) {
 	archive, runID, _ := backupFixtureArchive(t, false)
 	// Rewrite the manifest's audit domain: the chain no longer verifies.
 	work := t.TempDir()
-	manifest, err := openBackupArchive(context.Background(), archive, fakeEnvelopeCipher{}, work)
+	manifest, err := openBackupArchive(context.Background(), archive, fakeEnvelopeCipher{}, work, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
 	manifest.Compatibility.AuditDomain = "oberth-audit-v1"
 	rewritten := filepath.Join(t.TempDir(), "rewritten.cms")
-	if err := writeBackupArchive(context.Background(), work, &manifest, fakeEnvelopeCipher{}, rewritten); err != nil {
+	if err := writeBackupArchive(context.Background(), work, &manifest, fakeEnvelopeCipher{}, rewritten, 0); err != nil {
 		t.Fatal(err)
 	}
 	target := restoreTargetCluster(t, runID)

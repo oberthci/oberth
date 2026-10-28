@@ -62,7 +62,7 @@ func TestBackupLeavesOutIdentitiesAndHelmValues(t *testing.T) {
 	t.Parallel()
 	archive, _, _, _ := reinstallFixture(t)
 	work := t.TempDir()
-	manifest, err := openBackupArchive(context.Background(), archive, fakeEnvelopeCipher{}, work)
+	manifest, err := openBackupArchive(context.Background(), archive, fakeEnvelopeCipher{}, work, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,7 +92,7 @@ func TestBackupLeavesOutIdentitiesAndHelmValues(t *testing.T) {
 func writeLegacyArchive(t *testing.T, dir string, manifest *backupManifest, members []string, output string) error {
 	t.Helper()
 	for _, name := range members {
-		digest, err := digestBackupMember(filepath.Join(dir, filepath.FromSlash(name)))
+		digest, err := digestBackupMember(filepath.Join(dir, filepath.FromSlash(name)), maxBackupCipherBytes)
 		if err != nil {
 			return err
 		}
@@ -130,7 +130,7 @@ func TestOpenBackupArchiveReadsOlderFormats(t *testing.T) {
 		if err := writeLegacyArchive(t, dir, &manifest, members, output); err != nil {
 			t.Fatal(err)
 		}
-		opened, err := openBackupArchive(context.Background(), output, fakeEnvelopeCipher{}, t.TempDir())
+		opened, err := openBackupArchive(context.Background(), output, fakeEnvelopeCipher{}, t.TempDir(), 0)
 		if err != nil || opened.Format != tc.format {
 			t.Fatalf("open %s %v: %+v, %v", tc.format, tc.extra, opened.Format, err)
 		}
@@ -232,7 +232,7 @@ func TestNewerArchiveFormatNamesTheRelease(t *testing.T) {
 	if err := writeLegacyArchive(t, dir, &manifest, backupMemberOrder, output); err != nil {
 		t.Fatal(err)
 	}
-	_, err := openBackupArchive(context.Background(), output, fakeEnvelopeCipher{}, t.TempDir())
+	_, err := openBackupArchive(context.Background(), output, fakeEnvelopeCipher{}, t.TempDir(), 0)
 	if err == nil || !strings.Contains(err.Error(), "use the oberth release that wrote it") {
 		t.Fatalf("newer format error = %v", err)
 	}

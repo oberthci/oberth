@@ -41,6 +41,8 @@ import (
 
 // RestoreConfig selects the archive, its key, and the target installation.
 type RestoreConfig struct {
+	MaxDatabaseBytes int64 // same logical snapshot limit as backup
+
 	KubeconfigPath   string
 	ContextName      string
 	Namespace        string
@@ -82,6 +84,9 @@ func (cfg *RestoreConfig) applyDefaults() {
 // ExecuteRestore resolves the cluster and host tools and runs the restore.
 func ExecuteRestore(ctx context.Context, cfg RestoreConfig, host InstallDeps) error {
 	cfg.applyDefaults()
+	if _, err := store.BackupMaxBytes(cfg.MaxDatabaseBytes); err != nil {
+		return err
+	}
 	if strings.TrimSpace(cfg.Input) == "" {
 		return errors.New("--input is required: the archive written by oberth backup")
 	}
@@ -160,7 +165,7 @@ func loadRestoreArchive(ctx context.Context, cfg RestoreConfig, deps backupDeps,
 		return archive, fmt.Errorf("read archive: %w", err)
 	}
 	archive.CipherSHA = sha
-	if archive.Manifest, err = openBackupArchive(ctx, cfg.Input, deps.cipher, work); err != nil {
+	if archive.Manifest, err = openBackupArchive(ctx, cfg.Input, deps.cipher, work, cfg.MaxDatabaseBytes); err != nil {
 		return archive, err
 	}
 	if archive.Manifest.Scope == BackupScopeHistory {
@@ -210,19 +215,17 @@ func loadRestoreArchive(ctx context.Context, cfg RestoreConfig, deps backupDeps,
 		return archive, fmt.Errorf("archive compatibility values: %w", err)
 	}
 	databaseMember := filepath.Join(work, filepath.FromSlash(backupMemberDatabase))
-	if archive.Report, err = verifyDatabaseArchive(ctx, databaseMember, archive.Manifest.Database.Schema, protocol); err != nil {
+	if archive.Report, err = verifyDatabaseArchive(ctx, databaseMember, archive.Manifest.Database.Schema, protocol, cfg.MaxDatabaseBytes); err != nil {
 		return archive, err
 	}
 	if archive.Report.AuditHead.ID != archive.Manifest.Database.AuditHeadID ||
 		hex.EncodeToString(archive.Report.AuditHead.SHA256) != archive.Manifest.Database.AuditHeadSHA256 {
 		return archive, errors.New("the verified database audit head differs from the one the manifest records")
 	}
-	if archive.Database, err = extractDatabaseFiles(databaseMember); err != nil {
+	if archive.Database, err = extractDatabaseFiles(ctx, databaseMember, work, cfg.MaxDatabaseBytes); err != nil {
 		return archive, err
 	}
-	if archive.LocalDatabase, err = writeRestoredDatabase(work, archive.Database); err != nil {
-		return archive, err
-	}
+	archive.LocalDatabase = archive.Database.Main
 	if archive.Contents, err = summarizeDatabase(ctx, archive.LocalDatabase, protocol); err != nil {
 		return archive, err
 	}
@@ -259,6 +262,7 @@ type restoreTarget struct {
 }
 
 func runRestore(ctx context.Context, cfg RestoreConfig, deps backupDeps) (resultErr error) {
+	deps.maxDatabaseBytes = cfg.MaxDatabaseBytes
 	w := deps.Output
 	work, err := os.MkdirTemp("", "oberth-restore-")
 	if err != nil {
@@ -384,7 +388,7 @@ func readTargetContents(ctx context.Context, cfg RestoreConfig, deps backupDeps,
 		target.ContentsNote = err.Error()
 		return
 	}
-	summary, err := summarizeDatabaseArchive(ctx, snapshot, dir, protocol)
+	summary, err := summarizeDatabaseArchive(ctx, snapshot, dir, protocol, cfg.MaxDatabaseBytes)
 	if err != nil {
 		target.ContentsNote = err.Error()
 		return
@@ -755,18 +759,32 @@ func swapDatabase(ctx context.Context, cfg RestoreConfig, deps backupDeps, archi
 	if out, err := inPod(nil, stageResetScript); err != nil {
 		return fmt.Errorf("clear staging directory %s: %w%s", restoreStageDir, err, commandOutputSuffix(out))
 	}
-	upload := func(data []byte, member string) error {
-		out, err := inPod(data, stageUploadScript, member)
-		if err != nil {
-			return fmt.Errorf("upload %s: %w%s", member, err, commandOutputSuffix(out))
+	upload := func(path, member string) error {
+		if deps.runIO == nil {
+			return errors.New("restore stdin stream runner unavailable")
 		}
-		return checkUploadedSize(member, out, len(data))
+		file, err := os.Open(path) // #nosec G304 -- verified member in private restore working directory.
+		if err != nil {
+			return err
+		}
+		defer func() { _ = file.Close() }()
+		info, err := file.Stat()
+		if err != nil {
+			return err
+		}
+		command := []string{"sh", "-c", stageUploadScript, "sh", member}
+		out := &backupDiagnostic{}
+		err = deps.runIO(ctx, file, out, "kubectl", kubectlExecArgs(deps.ContextName, cfg.Namespace, name, restoreHelperContainer, true, command...)...)
+		if err != nil {
+			return fmt.Errorf("upload %s: %w%s", member, err, commandOutputSuffix(out.data))
+		}
+		return checkUploadedSize(member, out.data, info.Size())
 	}
 	if err := upload(archive.Database.Main, "oberth.sqlite"); err != nil {
 		return err
 	}
 	walSHA := "-"
-	if archive.Database.WAL != nil {
+	if archive.Database.WAL != "" {
 		walSHA = archive.Database.WALSHA256
 		if err := upload(archive.Database.WAL, "oberth.sqlite-wal"); err != nil {
 			return err
@@ -789,9 +807,9 @@ func swapDatabase(ctx context.Context, cfg RestoreConfig, deps backupDeps, archi
 
 // checkUploadedSize compares the size stageUploadScript reports with what
 // was sent, so a truncated upload stops before the swap (#067).
-func checkUploadedSize(member string, out []byte, want int) error {
+func checkUploadedSize(member string, out []byte, want int64) error {
 	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
-	got, err := strconv.Atoi(strings.TrimSpace(lines[len(lines)-1]))
+	got, err := strconv.ParseInt(strings.TrimSpace(lines[len(lines)-1]), 10, 64)
 	if err != nil {
 		return fmt.Errorf("upload %s: the restore pod did not report the received size%s", member, commandOutputSuffix(out))
 	}

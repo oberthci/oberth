@@ -36,6 +36,8 @@ type SecretsExportElement struct {
 
 // ExportSecretsConfig selects the archive and its key.
 type ExportSecretsConfig struct {
+	MaxDatabaseBytes int64
+
 	Input      string
 	PrivateKey string
 }
@@ -62,7 +64,7 @@ func exportFromArchive(ctx context.Context, cfg ExportSecretsConfig, host Instal
 		return fmt.Errorf("create private working directory: %w", err)
 	}
 	defer func() { resultErr = errors.Join(resultErr, os.RemoveAll(work)) }()
-	archive, err := loadRestoreArchive(ctx, RestoreConfig{Input: cfg.Input}, deps, work)
+	archive, err := loadRestoreArchive(ctx, RestoreConfig{Input: cfg.Input, MaxDatabaseBytes: cfg.MaxDatabaseBytes}, deps, work)
 	if err != nil {
 		return err
 	}

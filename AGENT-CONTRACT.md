@@ -27,6 +27,32 @@ The fixture must pass every assertion and positively join its process/cgroup;
 missing sandbox protection is fatal, not a skip. Exact build/invocation and
 resource/custody requirements are in [database-backup.md](docs/database-backup.md).
 
+### Operator database backups (#1208)
+
+The released CLI uses SQLite's online backup API through a read-only source
+connection and a pinned read transaction. It folds committed WAL pages into one
+verified `oberth.sqlite` member, then streams the archive. Source main/WAL data
+are not written; derivative SHM reader locks may change. Schema, integrity,
+foreign-key and audit verification still precede archive emission. Legacy
+main/WAL archives remain readable. The maintenance utility above explicitly
+uses `WriteStableVerifiedBackup` and retains its old protocol and 128 MiB bound.
+
+`backup`, `backup database`, `restore`/`--inspect` and `backup export-secrets`
+accept the operator's `--max-database-bytes`: default 1 GiB, hard maximum 4 GiB,
+zero selects the default, never unlimited. The limit applies to logical pages
+and restored database members, not duplicate live WAL versions. Both nested
+archives, framing, metadata, ciphertext and decompressed extraction remain
+bounded. Large snapshot transfer, local extraction, hashes and restore uploads
+stream; no database-sized byte slices. Failed output streams are canceled and
+partial files removed. The pre-flag server fallback retains hash-stable raw
+copies (absolute 4 GiB per file), then snapshots them locally. No new privileges
+or server RBAC are granted; operators need the existing helper-Pod access.
+
+Upgrade warns loudly before mutation when migration is pending or source schema
+is unknown. It does not attest/create a fresh backup; `--yes` is never evidence
+of backup success. A verified retained backup and its private key are the
+operator's responsibility; Helm rollback alone cannot undo a migration.
+
 ### Persistent data
 
 - One PVC mounted at `/data` stores `oberth.sqlite`, bare Git caches under

@@ -32,16 +32,12 @@ func clusterUID(ctx context.Context, deps backupDeps) string {
 
 // summarizeDatabaseArchive counts what a verified store database archive
 // holds, opening a private copy read-only.
-func summarizeDatabaseArchive(ctx context.Context, archivePath, work string, protocol store.ProtocolConfig) (store.ContentSummary, error) {
-	db, err := extractDatabaseFiles(archivePath)
+func summarizeDatabaseArchive(ctx context.Context, archivePath, work string, protocol store.ProtocolConfig, maxBytes int64) (store.ContentSummary, error) {
+	db, err := extractDatabaseFiles(ctx, archivePath, work, maxBytes)
 	if err != nil {
 		return store.ContentSummary{}, err
 	}
-	path, err := writeRestoredDatabase(work, db)
-	if err != nil {
-		return store.ContentSummary{}, err
-	}
-	return summarizeDatabase(ctx, path, protocol)
+	return summarizeDatabase(ctx, db.Main, protocol)
 }
 
 func summarizeDatabase(ctx context.Context, path string, protocol store.ProtocolConfig) (summary store.ContentSummary, resultErr error) {

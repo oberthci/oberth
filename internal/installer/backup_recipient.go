@@ -64,7 +64,7 @@ func readTLV(data []byte) (tag byte, content, rest []byte, err error) {
 	tag, length, offset := data[0], int(data[1]), 2
 	if length&0x80 != 0 {
 		n := length & 0x7f
-		if n == 0 || n > 4 || len(data) < 2+n {
+		if n == 0 || n > 5 || len(data) < 2+n {
 			return 0, nil, nil, errors.New("unsupported length")
 		}
 		length = 0

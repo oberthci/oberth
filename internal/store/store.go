@@ -49,7 +49,9 @@ var (
 )
 
 type Options struct {
-	Protocol ProtocolConfig
+	// BackupMaxBytes bounds backup/verification only; zero selects 1 GiB.
+	BackupMaxBytes int64
+	Protocol       ProtocolConfig
 
 	BusyTimeout time.Duration
 	Now         func() time.Time

@@ -272,7 +272,7 @@ func TestBackupRecordsTheServerPublicIdentity(t *testing.T) {
 	ca := testCertificatePEM(t, "ca")
 	archive, _, _ := pinsFixture(t, ca, ca, false)
 	work := t.TempDir()
-	if _, err := openBackupArchive(context.Background(), archive, fakeEnvelopeCipher{}, work); err != nil {
+	if _, err := openBackupArchive(context.Background(), archive, fakeEnvelopeCipher{}, work, 0); err != nil {
 		t.Fatal(err)
 	}
 	body, err := os.ReadFile(filepath.Join(work, filepath.FromSlash(backupMemberReference)))
