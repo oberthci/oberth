@@ -214,7 +214,7 @@ func VerifyBackupArchive(ctx context.Context, input io.Reader, expected int, opt
 	if ctx == nil || input == nil || expected < 3 || expected > latestMigrationVersion {
 		return report, errors.New("verification arguments refused")
 	}
-	directory, err := os.MkdirTemp("/tmp", "oberth-backup-verify-")
+	directory, err := os.MkdirTemp(opts.SnapshotTempDir, "oberth-backup-verify-")
 	if err != nil {
 		return report, err
 	}

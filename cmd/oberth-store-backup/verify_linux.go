@@ -65,7 +65,7 @@ func runVerify(args []string, public io.Writer) (resultErr error) {
 	if !ok || int64(stat.Uid) != int64(os.Geteuid()) {
 		return errors.New("private recipient owner refused")
 	}
-	opts := store.Options{BackupMaxBytes: 128 << 20, Protocol: store.ProtocolConfig{SchemaIdentity: identity, AuditDomain: domain}}
+	opts := store.Options{BackupMaxBytes: 128 << 20, SnapshotTempDir: "/tmp", Protocol: store.ProtocolConfig{SchemaIdentity: identity, AuditDomain: domain}}
 	if err := opts.Protocol.Validate(); err != nil {
 		return err
 	}

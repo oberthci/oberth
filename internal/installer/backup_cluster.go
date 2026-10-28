@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -41,7 +42,7 @@ func summarizeDatabaseArchive(ctx context.Context, archivePath, work string, pro
 }
 
 func summarizeDatabase(ctx context.Context, path string, protocol store.ProtocolConfig) (summary store.ContentSummary, resultErr error) {
-	inspection, err := store.InspectCurrent(ctx, path, store.Options{Protocol: protocol})
+	inspection, err := store.InspectCurrent(ctx, path, store.Options{Protocol: protocol, SnapshotTempDir: filepath.Dir(path)})
 	if err != nil {
 		return summary, fmt.Errorf("open database for its summary: %w", err)
 	}

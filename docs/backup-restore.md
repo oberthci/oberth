@@ -103,24 +103,42 @@ cap; aggregate plaintext has a fixed 128 MiB allowance above the database limit.
 Archive framing and encryption have additional fixed allowances. The bound is
 operator-controlled, not supplied by the archive. All large database transfers,
 hashes and local extraction stream through files rather than whole-file buffers.
-Private staging still needs disk space. The online snapshot is a private 0700
-directory **beside the source database**, on the server's data volume rather
-than its capped `/tmp` emptyDir. Budget for a full logical snapshot in addition
-to the live database, caches and WAL growth; a long pinned read can retain WAL
-pages until the snapshot finishes. The source parent must be writable by the
-server identity. The operation still has a ten-minute deadline. Raising the
-backup limit does not enlarge the data volume or any resource limit. Budget
-several database copies on the workstation for verification and restore (which
-still use private `/tmp` staging). Encrypted outputs are exclusive 0600 files;
-failed transfers/encryption remove partial outputs.
+Online staging uses a private 0700 directory beside the source database, on the
+server's data PVC. Before creating any snapshot files, the server checks
+unprivileged available bytes on that filesystem. It requires the pinned
+snapshot size **plus max(256 MiB, one quarter of that size), plus 64 KiB for
+metadata**. It rechecks before and after every SQLite `Step(128)`, counting only
+allocated file blocks toward completed space (sparse file length is not enough).
+A drop below the remaining-copy requirement aborts and removes the partial
+snapshot; schema/audit verification and archive emission do not follow a failed
+copy. A directory lock serializes snapshots sharing the database parent through
+archive emission, preventing another backup from spending the measured reserve.
 
-A disconnected in-pod stdout returns a write error through deferred cleanup,
-rather than exiting via SIGPIPE. SIGINT/SIGTERM also unwind cleanup. SIGKILL
-cannot run defers: the next online backup sweeps same-owner snapshot directories
-beside the database older than ten minutes, skipping any with a held kernel
-lock. Active snapshots are locked through verification and streaming, even if
-they exceed that age. Until the next backup, interrupted plaintext stays on the
-data volume with the same privacy boundary as the original database.
+A refusal names the volume, available bytes and required bytes. Grow/free the
+PVC or use a read-only compatibility copy on a larger workstation volume.
+Restore's live-target preview uses this same guard: it reports unavailable
+counts on refusal, without retrying or bypassing the guard. The reserve does
+not enlarge the PVC or replace the scheduler's separate optional disk floor.
+These are repeated free-space observations, not an OS quota: unrelated writers
+can still consume space between checks. The operation retains its ten-minute
+deadline, and a pinned read can retain growing WAL pages until it finishes.
+
+Workstation backup/restore verification uses its private work directory;
+standalone store inspection/verification honors `TMPDIR`. On systems where
+`/tmp` is a small tmpfs, choose a disk-backed directory with room for several
+database copies, for example `TMPDIR=/large/private-temp oberth restore ...`.
+Encrypted outputs remain exclusive 0600 files; failed output streams are removed.
+The separate source-built maintenance utility still pins its qualified `/tmp`
+private tmpfs and fixed 128 MiB bound; ambient TMPDIR cannot redirect it.
+
+Disconnected in-pod stdout returns a write error through deferred cleanup,
+rather than exiting via SIGPIPE. SIGINT/SIGTERM also unwind cleanup. After
+SIGKILL, server startup sweeps same-owner interrupted snapshot directories,
+including fresh ones, before identity/database startup I/O. Online backups also
+sweep entries older than ten minutes. Held locks protect active snapshots, and
+symlink directories/markers are never followed. One bad entry is logged with its
+path for manual repair; other entries and later backups are still attempted,
+subject to the free-space guard.
 
 For the default limit the CLI omits the new flag, preserving the working in-pod
 backup path on older servers. For a custom limit, an unknown-flag response is

@@ -119,6 +119,11 @@ func snapshotServerDatabase(ctx context.Context, deps backupDeps, namespace, pod
 		if ctx.Err() != nil {
 			return "", ctx.Err()
 		}
+		// A restore's optional target preview uses this same path. Do not
+		// retry a space refusal, or bypass it as an old-server capability gap.
+		if strings.Contains(err.Error(), store.ErrBackupSpace.Error()) {
+			return "", err
+		}
 		// An older server with no backup command, an old cap refusal, or a
 		// requested bound smaller than its cap needs the stable-copy fallback.
 		if strings.Contains(err.Error(), `unknown command "backup"`) ||
@@ -240,7 +245,7 @@ func verifyDatabaseArchive(ctx context.Context, path string, schema int, protoco
 		return store.BackupReport{}, err
 	}
 	defer func() { _ = f.Close() }()
-	report, err := store.VerifyBackupArchive(ctx, f, schema, store.Options{Protocol: protocol, BackupMaxBytes: maxBytes})
+	report, err := store.VerifyBackupArchive(ctx, f, schema, store.Options{Protocol: protocol, BackupMaxBytes: maxBytes, SnapshotTempDir: filepath.Dir(path)})
 	if err != nil {
 		return store.BackupReport{}, fmt.Errorf("database validation under schema identity %q and audit domain %q: %w",
 			protocol.SchemaIdentity, protocol.AuditDomain, err)
