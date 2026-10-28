@@ -42,14 +42,26 @@ func TestUpgradeMergesNewChartDefaults(t *testing.T) {
 // live cluster or a dependency on Helm's Go SDK. Its memory driver substitutes
 // a nonmutating kube client; HTTP supplies discovery metadata only.
 func TestUpgradeActualHelmPreservesOldValuesAndAddsDefaults(t *testing.T) {
+	for _, version := range []string{"0.17.53", "0.17.62"} {
+		t.Run(version, func(t *testing.T) { testUpgradeActualHelmPreservesOldValues(t, version) })
+	}
+}
+
+func testUpgradeActualHelmPreservesOldValues(t *testing.T, oldVersion string) {
 	requireHelmForUpgradeTest(t)
-	old, err := os.ReadFile("../../hack/testdata/chart-values-v0.17.53.yaml")
+	old, err := os.ReadFile("../../hack/testdata/chart-values-v" + oldVersion + ".yaml")
 	if err != nil {
 		t.Fatal(err)
 	}
 	var values map[string]any
 	if err := yaml.Unmarshal(old, &values); err != nil {
 		t.Fatal(err)
+	}
+	if oldVersion == "0.17.62" {
+		cache, ok := values["gitcache"].(map[string]any)
+		if values["gitBackend"] != "cli" || !ok || cache["shadow"] != false {
+			t.Fatal("v0.17.62 fixture lost raw legacy defaults")
+		}
 	}
 	values["removedOldDefault"] = "not user configuration"
 	values["compatibility"] = map[string]any{"schemaIdentity": testUpgradeCompatibility.SchemaIdentity, "auditDomain": testUpgradeCompatibility.AuditDomain, "witnessKeyInfo": testUpgradeCompatibility.WitnessKeyInfo}
@@ -63,7 +75,7 @@ func TestUpgradeActualHelmPreservesOldValuesAndAddsDefaults(t *testing.T) {
 		"name": "oberth", "namespace": "oberth", "version": 1,
 		"info": map[string]any{"status": "deployed"},
 		"chart": map[string]any{
-			"metadata": map[string]any{"apiVersion": "v2", "name": "oberth", "version": "0.17.53"},
+			"metadata": map[string]any{"apiVersion": "v2", "name": "oberth", "version": oldVersion},
 			"values":   values,
 		},
 		"config": config,
@@ -151,6 +163,11 @@ func TestUpgradeActualHelmPreservesOldValuesAndAddsDefaults(t *testing.T) {
 	if err := json.Unmarshal(out, &upgraded); err != nil {
 		t.Fatalf("decode actual upgrade: %v\n%s", err, out)
 	}
+	for _, forbidden := range []string{"--git-backend", "OBERTH_GITCACHE_SHADOW"} {
+		if strings.Contains(upgraded.Manifest, forbidden) {
+			t.Fatalf("legacy field reactivated %s", forbidden)
+		}
+	}
 	for _, want := range []string{containerimage.Utility, "round17.example/stored", "--retention-keep-newest=0", image} {
 		if !strings.Contains(upgraded.Manifest, want) {
 			t.Errorf("upgrade render lost default/configuration %q", want)
@@ -205,6 +222,11 @@ func TestUpgradeActualHelmPreservesOldValuesAndAddsDefaults(t *testing.T) {
 			}
 			if err := json.Unmarshal(out, &result); err != nil {
 				t.Fatal(err)
+			}
+			for _, forbidden := range []string{"--git-backend", "OBERTH_GITCACHE_SHADOW"} {
+				if strings.Contains(result.Manifest, forbidden) {
+					t.Fatalf("legacy field reactivated %s", forbidden)
+				}
 			}
 			for _, want := range []string{containerimage.Utility, compat.SchemaIdentity, compat.AuditDomain, compat.WitnessKeyInfo} {
 				if !strings.Contains(result.Manifest, want) {

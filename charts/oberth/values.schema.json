@@ -21,6 +21,19 @@
     "compatibility"
   ],
   "properties": {
+    "gitBackend": {
+      "type": "string",
+      "enum": ["cli"],
+      "description": "Accepted and ignored for legacy chart reuse; Git CLI is the only backend."
+    },
+    "gitcache": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "shadow": {"type": "boolean", "enum": [false]}
+      },
+      "description": "Accepted and ignored for legacy chart reuse; shadow execution is removed."
+    },
     "utilityImage": {
       "type": "string",
       "minLength": 1,

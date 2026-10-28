@@ -62,10 +62,18 @@ for source in "$legacy_chart" "$chart"; do
 done
 
 # Retired backend/shadow configuration must be migrated explicitly.
-for retired in gitBackend=cli gitcache.shadow=true; do
+for retired in gitBackend=go-git gitcache.shadow=true; do
   if "$helm_tool" template oberth "$chart" --set-string "image.ref=$server_image" \
     --set "$retired" >"$work/rendered.yaml" 2>/dev/null; then
     echo "retired setting accepted: $retired" >&2
     exit 1
   fi
 done
+
+# Safe historical defaults remain accepted but have no runtime wiring.
+"$helm_tool" template oberth "$chart" --set-string "image.ref=$server_image" \
+  --set gitBackend=cli --set gitcache.shadow=false >"$work/rendered.yaml"
+if grep -Eq -- '--git-backend|OBERTH_GITCACHE_SHADOW' "$work/rendered.yaml"; then
+  echo 'legacy configuration reactivated a removed backend' >&2
+  exit 1
+fi
