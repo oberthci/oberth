@@ -550,6 +550,7 @@ func vaultAddressRequiresPinnedAnchor(address string) bool {
 
 // Request is one run's submission intent.
 type Request struct {
+	VMIDemandReceipt *argoworkflow.VMIDemandReceipt
 	// omitStepUsage preserves already-running legacy specs during recovery.
 	omitStepUsage   bool
 	KubeVirtGranted bool
@@ -654,19 +655,20 @@ func Build(config Config, request Request) (*wfv1.Workflow, error) {
 	if err := request.validate(); err != nil {
 		return nil, err
 	}
-	workflow, err := argoworkflow.Decode(request.Source)
+	resolved, err := argoworkflow.ResolveRunSource(request.Source, request.Fragments, argoworkflow.RunSourceBinding{
+		RunID: request.RunID, RepositoryID: request.RepositoryID, SHA: request.SHA,
+		File: request.PipelineFile, Trigger: request.RunTrigger, ScheduleEntry: request.ScheduleEntry,
+	})
 	if err != nil {
 		return nil, err
 	}
+	workflow := resolved.Workflow()
 	if request.TrustedKVM != nil {
 		if err := admitTrustedKVMSource(workflow); err != nil {
 			return nil, err
 		}
 	}
-	fragmentLock, err := argoworkflow.Resolve(workflow, request.Fragments)
-	if err != nil {
-		return nil, err
-	}
+	fragmentLock := resolved.Lock()
 	wifLeaves, err := authorizeReleaseWIF(workflow, config, request)
 	if err != nil {
 		return nil, err
@@ -719,13 +721,23 @@ func Build(config Config, request Request) (*wfv1.Workflow, error) {
 	if err != nil {
 		return nil, err
 	}
+	policy := argoworkflow.Policy{
+		RunnerImagePrefixes: config.RunnerImagePrefixes, KubeVirt: request.KubeVirtGranted, ContainerDiskPrefixes: config.ContainerDiskPrefixes,
+		VMIBudget: request.KubeVirtBudget, VMICeiling: config.KubeVirtCeiling,
+	}
+	receipt, err := resolved.Receipt(policy)
+	if err != nil {
+		return nil, err
+	}
+	if request.VMIDemandReceipt != nil {
+		if err := request.VMIDemandReceipt.Verify(receipt); err != nil {
+			return nil, err
+		}
+	}
 	// Prepare admits and binds in one call so the order cannot be got wrong.
 	if err := argoworkflow.Prepare(
 		workflow,
-		argoworkflow.Policy{
-			RunnerImagePrefixes: config.RunnerImagePrefixes, KubeVirt: request.KubeVirtGranted, ContainerDiskPrefixes: config.ContainerDiskPrefixes,
-			VMIBudget: request.KubeVirtBudget, VMICeiling: config.KubeVirtCeiling,
-		},
+		resolved.Policy(policy),
 		identity,
 	); err != nil {
 		return nil, err
@@ -832,10 +844,7 @@ func Build(config Config, request Request) (*wfv1.Workflow, error) {
 
 	// Stamp before wrapping so producer inputs cannot inherit a stale
 	// document default instead of the durable run's trigger.
-	if err := argoworkflow.SetTriggerParameter(workflow, request.effectiveRunTrigger()); err != nil {
-		return nil, err
-	}
-	if err := argoworkflow.SetScheduleParameter(workflow, request.effectiveRunTrigger(), request.ScheduleEntry); err != nil {
+	if err := resolved.BindParameters(workflow, request.effectiveRunTrigger()); err != nil {
 		return nil, err
 	}
 	if request.TrustedKVM != nil {
@@ -847,7 +856,7 @@ func Build(config Config, request Request) (*wfv1.Workflow, error) {
 		return nil, err
 	}
 
-	if err := projectVMICreateGuard(workflow, config, request); err != nil {
+	if err := projectVMICreateGuard(workflow, config, request, receipt); err != nil {
 		return nil, err
 	}
 	if err := wrapStepUsage(workflow); err != nil {

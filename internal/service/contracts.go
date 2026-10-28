@@ -16,6 +16,7 @@ import (
 	"github.com/oberthci/oberth/internal/runprogress"
 	"github.com/oberthci/oberth/internal/store"
 	"github.com/oberthci/oberth/internal/vmrunner"
+	"github.com/oberthci/oberth/pkg/argoworkflow"
 	"github.com/oberthci/oberth/pkg/periapsis"
 )
 
@@ -353,9 +354,11 @@ type LogStore interface {
 }
 
 type JobRequest struct {
-	JobName    string
-	Run        model.Run
-	Repository model.Repository
+	// VMIDemandReceipt carries the exact graph reserved before submission.
+	VMIDemandReceipt *argoworkflow.VMIDemandReceipt
+	JobName          string
+	Run              model.Run
+	Repository       model.Repository
 	// UpstreamName is the registered name of the repository's upstream,
 	// resolved by the scheduler for all credentialed runs. Used to
 	// construct canonical per-repo identity keys.

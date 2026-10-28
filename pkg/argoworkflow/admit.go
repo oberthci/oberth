@@ -42,6 +42,8 @@ const (
 // path's controls so an Argo-authored repository cannot reach substrate the
 // periapsis path is denied.
 type Policy struct {
+	// Only ResolveRunSource may attach a source-bound, server-owned context.
+	runVMISource *ResolvedRunSource
 	// RunnerImagePrefixes is the same administrator allowlist the Go path
 	// applies to a declared RunnerImage. Empty selects the built-in
 	// periapsis.DefaultRunnerImagePrefixes.
@@ -308,7 +310,14 @@ func admitTemplates(workflow *wfv1.Workflow, policy Policy) []error {
 	}
 	grant, ceiling, budget := policy.effectiveVMIBudget()
 	declaredCreates := vmiCreates
-	if demand, err := DeclaredVMIDemand(workflow); err == nil {
+	demand, demandErr := DeclaredVMIDemand(workflow)
+	if policy.runVMISource != nil {
+		demand, demandErr = policy.runVMISource.demandFor(workflow)
+		if demandErr != nil {
+			problems = append(problems, demandErr)
+		}
+	}
+	if demandErr == nil {
 		vmiCreates, vmiCores = demand.VMs, demand.Cores
 		vmiMemory = *resource.NewQuantity(demand.MemoryBytes, resource.BinarySI)
 	}

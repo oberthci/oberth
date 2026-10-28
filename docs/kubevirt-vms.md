@@ -99,22 +99,137 @@ Admission and the server create guard both enforce the budget. Credentialed work
 ## Proven VM phases and the create guard
 
 A resource create task finishes while its VMI is still alive. A dependency on
-that create alone therefore earns no concurrency discount. Oberth counts each
-create invocation separately, including repeated use of one template or VM
-name. Two invocations are non-overlapping only if a matching explicit delete
-is a descendant of the earlier create **and an ancestor of the later create**.
+that create alone therefore earns no concurrency discount. The lifetime
+projection counts each create invocation separately, including repeated use of
+one template or VM name. Its count, cores and memory are each capped at the
+corresponding per-template sum: a create template has one fixed VMI name, so
+repeated invocations cannot have two live VMIs under that name. Two invocations
+are non-overlapping only if a matching explicit delete is a descendant of the
+earlier create **and an ancestor of the later create**.
 Exit-handler cleanup never proves a barrier. Deletes use Argo's normal waiting
 semantics; authored resource flags and success/failure conditions remain refused.
 
-For bounded unconditional DAGs and steps, including nested named templates,
-Oberth computes the maximum concurrent count, cores and memory independently
-from these lifetime relations. For example, two parallel 2-core/6Gi VMs followed
-by serial create/use/delete phases reserve 2 VMs, 4 cores and 12Gi, even when
-four different create templates exist. Cycles, unknown references, conditions,
-fan-out, retry policies, lifecycle hooks, unsupported dependency expressions,
-exit-handler creates, or expansion beyond 256 nodes fall back to the existing
-sum of declared create templates. There is no phase-based early release to the
-scheduler: it holds this peak for the whole workflow, as before.
+For bounded DAGs and steps, Oberth computes the maximum concurrent count, cores
+and memory independently from these lifetime relations. For example, two
+parallel 2-core/6Gi VMs followed by serial create/use/delete phases reserve
+2 VMs, 4 cores and 12Gi, even when four different create templates exist.
+The context-free sizing API remains conservative. During a real run, sizing
+also uses the durable run trigger and the exact policy-admitted fragment
+resolution that final submission uses. The demand receipt binds the run,
+repository, executed commit, pipeline file, trigger, schedule entry, source
+digest and resolved graph digest. A changed source or resolution cannot use an
+earlier reservation. Recovery restores the peak recorded with the submitted
+Workflow; it does not resolve fragment tags again.
+
+The run-aware projection collapses a resolved subgraph only after proving it
+contains no VMI creates or deletes. A get-only address template may therefore
+have a bounded retry limit (0–10) without disabling the proof. Retries around
+creates or deletes, unresolved references, dynamic fan-out, cycles, lifecycle
+hooks, unsupported dependency expressions and exit-handler creates keep the
+conservative sum. A dependency mixing top-level `&&` and `||` must put each
+OR group in parentheses; otherwise the projection falls back rather than
+assuming a delete is required under Argo's operator precedence. Every DAG task
+name must be usable as an Argo expression identifier. The server applies Argo's
+bare/legacy expansion and hyphen normalization, then compiles each dependency
+against boolean task-result fields. A compile failure (including keyword names
+such as `in`, `not`, `true` or `if`) keeps the sum: Argo can mark a task Errored
+before its dependency gate succeeds. Compilation executes no expression or
+planner, and its result is reused for each invocation of the resolved template.
+Work is bounded to 4,096 shared classification/expansion and scenario-proof
+checks, 256
+projected nodes and at most 32 partition literals. A scenario with more than
+16 enabled create invocations also keeps the sum. Demand is computed once per
+immutable resolved source; repeated admission still checks the current policy.
+Successful completion of a composite template alone does not prove every child
+delete ran successfully.
+
+The supported `when` grammar consists of an empty whole guard, bare `true` or
+`false`, a trigger comparison, or a safe partition equality as described below.
+These boolean operands may be combined with `&&`, `||` and parentheses. A trigger
+comparison has `{{workflow.parameters.oberth-trigger}}` on the left and a literal
+`branch`, `promotion`, `schedule` or `tag` on the right, using `==` or `!=`;
+either side may be quoted. Every operand in the same authored guard must parse
+before any folding: `false && X` and `true || X` remain unsupported when `X` is
+unparsed. Ternary/coalesce operators, raw output interpolation, arbitrary
+indexing/calls, backslashes, commas and missing operands earn no proof. Brackets
+are supported only inside the exact safe partition expression tags below.
+
+YAML defaults, environment values and claimed trigger parameters never select
+the run trigger. The server retains **every authored `when` string byte-for-byte**.
+
+Schedule partitions earn mutual-exclusion credit only for guards already
+written as an entire safe expression tag with a quoted string literal:
+
+```yaml
+inputs:
+  parameters:
+    - name: partition
+dag:
+  tasks:
+    - name: partition-0
+      template: vm-phases
+      when: "{{=inputs.parameters['partition'] == '0'}}"
+    - name: partition-1
+      template: vm-phases
+      when: "{{=inputs.parameters['partition'] == '1'}}"
+```
+
+The input must be explicitly supplied by that invocation, either as a literal
+or as the named final scalar output of a resolved, lifetime-neutral predecessor.
+For example, the caller of the partitioned template can pass its producer's
+output as ordinary parameter data:
+
+```yaml
+- name: schedule-parts
+  template: partitioned-phases
+  depends: select.Succeeded
+  arguments:
+    parameters:
+      - name: partition
+        value: "{{tasks.select.outputs.parameters.partition}}"
+```
+
+An input supplied only through a YAML default is not a binding. Output-based
+bindings additionally require an explicit `producer.Succeeded` prerequisite on
+the consuming DAG task. Mere ancestry, bare dependencies and terminal-state ORs
+are insufficient: Argo can substitute an absent-output sentinel for a skipped
+or omitted producer and then use each consumer's own input fallback. In steps
+workflows, only a provably unconditional producer in an earlier step group
+supplies a shared output scalar.
+
+A consumer input with `default`, `value` or `valueFrom` cannot earn shared-scalar
+credit from an unknown output, even when the producer must succeed: a producer
+can emit Argo's internal absent-output sentinel literally and trigger those
+fallbacks. Such graphs retain summed demand. Explicit closed literal arguments
+remain supported; defaults alone never establish exclusivity.
+Oberth never runs a planner before reservation. Direct predecessor-output
+guards may use `{{=tasks['select'].outputs.parameters['partition'] == '0'}}`
+(or `steps['select']` in a steps workflow). Bracket keys and string literals
+use single quotes; names use ASCII letters/digits/underscore/hyphen, and a
+literal is 1–64 bytes. One immutable invocation scalar and distinct literal
+equalities prove that at most one partition runs, even while its value is
+unknown. Duplicate equalities can overlap and are charged together. Independent
+selectors or unsupported output expressions get no exclusivity credit.
+
+`when: "{{inputs.parameters.partition}} == 0"` is deliberately **not** a proof:
+raw substitution inserts untrusted output into an expression's source. Such
+guards retain conservative summed demand; Oberth never rewrites them into the
+safe form. Repositories must adopt the safe form themselves. Unexpected scalar
+text cannot enable several safe equalities; missing or unbound inputs earn no
+partition credits.
+
+Cleanup dependencies may use an exact same-task terminal-state OR group such
+as `(driver.Succeeded || driver.Failed || driver.Errored)` (optionally including
+both `.Skipped` and `.Omitted`). These establish **ordering only**. Only a
+matching delete's required **Succeeded** status can end a VM's lifetime before
+a later create. Failed, errored, skipped, omitted or unproven conditional
+deletes earn no release credit. A three-state group also proves its predecessor
+ran; a five-state group may accept an omitted phase and cannot carry that proof
+forward. If these paths fail to establish a partial order of lifetimes, sizing
+retains the sum instead of inventing transitive deletion credits.
+The failure-cleanup DAG and cancellation
+`onExit` are unchanged. There is no phase-based early release to the scheduler:
+it holds the admitted peak for the whole workflow, as before.
 
 The server also enforces limits immediately before each VMI create. It changes
 the resource Pod's pinned Argo executor command from create to get, and performs

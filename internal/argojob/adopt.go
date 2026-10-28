@@ -89,7 +89,19 @@ func (controller *Controller) bindAdoption(workflow *wfv1.Workflow, request Adop
 	}
 	if argoworkflow.DeclaresVMIResources(workflow) {
 		var quota vmiQuotaBinding
-		if json.Unmarshal([]byte(workflow.Annotations[vmiQuotaAnnotation]), &quota) != nil || quota.RepositoryID <= 0 || !validVMIDemand(quota.Limit) || quota.Peak != demand || !demand.Fits(quota.Limit) {
+		if json.Unmarshal([]byte(workflow.Annotations[vmiQuotaAnnotation]), &quota) != nil {
+			return Adoption{}, errors.New("argojob: VMI Workflow has an invalid server quota binding")
+		}
+		if quota.Receipt != nil {
+			r := quota.Receipt
+			if !r.Valid() || r.Binding.RunID != request.RunID || r.Binding.RepositoryID != quota.RepositoryID || r.Binding.SHA != request.SHA || r.Binding.Trigger != request.RunTrigger || r.Binding.ScheduleEntry != request.ScheduleEntry || r.Demand != quota.Peak {
+				return Adoption{}, errors.New("argojob: VMI Workflow has an invalid run demand receipt")
+			}
+			// This is the server-admitted, source/resolution-bound peak, not a
+			// new analysis of a fresh checkout or a now-moved fragment tag.
+			demand = r.Demand
+		}
+		if quota.RepositoryID <= 0 || !validVMIDemand(quota.Limit) || quota.Peak != demand || !demand.Fits(quota.Limit) {
 			return Adoption{}, errors.New("argojob: VMI Workflow has an invalid server quota binding")
 		}
 	}

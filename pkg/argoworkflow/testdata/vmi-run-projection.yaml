@@ -1,0 +1,550 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata: {}
+spec:
+  activeDeadlineSeconds: 3600
+  arguments:
+    parameters:
+    - name: oberth-trigger
+      value: tag
+  entrypoint: main
+  onExit: cleanup
+  templates:
+  - inputs: {}
+    metadata: {}
+    name: create-a
+    outputs: {}
+    resource:
+      action: create
+      manifest: |
+        apiVersion: kubevirt.io/v1
+        kind: VirtualMachineInstance
+        metadata:
+          name: "{{workflow.name}}-a"
+          labels:
+            oberth.ci/workflow: "{{workflow.name}}"
+        spec:
+          architecture: amd64
+          domain:
+            cpu:
+              cores: 2
+            resources:
+              requests:
+                cpu: "2"
+                memory: 6Gi
+            devices:
+              disks:
+                - name: root
+                  disk:
+                    bus: virtio
+                - name: init
+                  disk:
+                    bus: virtio
+              interfaces:
+                - name: default
+                  masquerade: {}
+          networks:
+            - name: default
+              pod: {}
+          volumes:
+            - name: root
+              containerDisk:
+                image: quay.io/example/disk@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+            - name: init
+              cloudInitNoCloud:
+                userData: |
+                  #cloud-config
+                  runcmd:
+                    - echo ready
+      setOwnerReference: true
+  - inputs: {}
+    metadata: {}
+    name: delete-a
+    outputs: {}
+    resource:
+      action: delete
+      manifest: |
+        apiVersion: kubevirt.io/v1
+        kind: VirtualMachineInstance
+        metadata:
+          name: "{{workflow.name}}-a"
+          labels:
+            oberth.ci/workflow: "{{workflow.name}}"
+      setOwnerReference: true
+  - inputs: {}
+    metadata: {}
+    name: address-a
+    outputs: {}
+    resource:
+      action: get
+      manifest: |
+        apiVersion: kubevirt.io/v1
+        kind: VirtualMachineInstance
+        metadata:
+          name: "{{workflow.name}}-a"
+          labels:
+            oberth.ci/workflow: "{{workflow.name}}"
+      setOwnerReference: true
+    retryStrategy:
+      limit: 3
+  - inputs: {}
+    metadata: {}
+    name: create-b
+    outputs: {}
+    resource:
+      action: create
+      manifest: |
+        apiVersion: kubevirt.io/v1
+        kind: VirtualMachineInstance
+        metadata:
+          name: "{{workflow.name}}-b"
+          labels:
+            oberth.ci/workflow: "{{workflow.name}}"
+        spec:
+          architecture: amd64
+          domain:
+            cpu:
+              cores: 2
+            resources:
+              requests:
+                cpu: "2"
+                memory: 6Gi
+            devices:
+              disks:
+                - name: root
+                  disk:
+                    bus: virtio
+                - name: init
+                  disk:
+                    bus: virtio
+              interfaces:
+                - name: default
+                  masquerade: {}
+          networks:
+            - name: default
+              pod: {}
+          volumes:
+            - name: root
+              containerDisk:
+                image: quay.io/example/disk@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+            - name: init
+              cloudInitNoCloud:
+                userData: |
+                  #cloud-config
+                  runcmd:
+                    - echo ready
+      setOwnerReference: true
+  - inputs: {}
+    metadata: {}
+    name: delete-b
+    outputs: {}
+    resource:
+      action: delete
+      manifest: |
+        apiVersion: kubevirt.io/v1
+        kind: VirtualMachineInstance
+        metadata:
+          name: "{{workflow.name}}-b"
+          labels:
+            oberth.ci/workflow: "{{workflow.name}}"
+      setOwnerReference: true
+  - inputs: {}
+    metadata: {}
+    name: address-b
+    outputs: {}
+    resource:
+      action: get
+      manifest: |
+        apiVersion: kubevirt.io/v1
+        kind: VirtualMachineInstance
+        metadata:
+          name: "{{workflow.name}}-b"
+          labels:
+            oberth.ci/workflow: "{{workflow.name}}"
+      setOwnerReference: true
+    retryStrategy:
+      limit: 3
+  - inputs: {}
+    metadata: {}
+    name: create-c
+    outputs: {}
+    resource:
+      action: create
+      manifest: |
+        apiVersion: kubevirt.io/v1
+        kind: VirtualMachineInstance
+        metadata:
+          name: "{{workflow.name}}-c"
+          labels:
+            oberth.ci/workflow: "{{workflow.name}}"
+        spec:
+          architecture: amd64
+          domain:
+            cpu:
+              cores: 2
+            resources:
+              requests:
+                cpu: "2"
+                memory: 6Gi
+            devices:
+              disks:
+                - name: root
+                  disk:
+                    bus: virtio
+                - name: init
+                  disk:
+                    bus: virtio
+              interfaces:
+                - name: default
+                  masquerade: {}
+          networks:
+            - name: default
+              pod: {}
+          volumes:
+            - name: root
+              containerDisk:
+                image: quay.io/example/disk@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+            - name: init
+              cloudInitNoCloud:
+                userData: |
+                  #cloud-config
+                  runcmd:
+                    - echo ready
+      setOwnerReference: true
+  - inputs: {}
+    metadata: {}
+    name: delete-c
+    outputs: {}
+    resource:
+      action: delete
+      manifest: |
+        apiVersion: kubevirt.io/v1
+        kind: VirtualMachineInstance
+        metadata:
+          name: "{{workflow.name}}-c"
+          labels:
+            oberth.ci/workflow: "{{workflow.name}}"
+      setOwnerReference: true
+  - inputs: {}
+    metadata: {}
+    name: address-c
+    outputs: {}
+    resource:
+      action: get
+      manifest: |
+        apiVersion: kubevirt.io/v1
+        kind: VirtualMachineInstance
+        metadata:
+          name: "{{workflow.name}}-c"
+          labels:
+            oberth.ci/workflow: "{{workflow.name}}"
+      setOwnerReference: true
+    retryStrategy:
+      limit: 3
+  - inputs: {}
+    metadata: {}
+    name: create-k
+    outputs: {}
+    resource:
+      action: create
+      manifest: |
+        apiVersion: kubevirt.io/v1
+        kind: VirtualMachineInstance
+        metadata:
+          name: "{{workflow.name}}-k"
+          labels:
+            oberth.ci/workflow: "{{workflow.name}}"
+        spec:
+          architecture: amd64
+          domain:
+            cpu:
+              cores: 2
+            resources:
+              requests:
+                cpu: "2"
+                memory: 6Gi
+            devices:
+              disks:
+                - name: root
+                  disk:
+                    bus: virtio
+                - name: init
+                  disk:
+                    bus: virtio
+              interfaces:
+                - name: default
+                  masquerade: {}
+          networks:
+            - name: default
+              pod: {}
+          volumes:
+            - name: root
+              containerDisk:
+                image: quay.io/example/disk@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+            - name: init
+              cloudInitNoCloud:
+                userData: |
+                  #cloud-config
+                  runcmd:
+                    - echo ready
+      setOwnerReference: true
+  - inputs: {}
+    metadata: {}
+    name: delete-k
+    outputs: {}
+    resource:
+      action: delete
+      manifest: |
+        apiVersion: kubevirt.io/v1
+        kind: VirtualMachineInstance
+        metadata:
+          name: "{{workflow.name}}-k"
+          labels:
+            oberth.ci/workflow: "{{workflow.name}}"
+      setOwnerReference: true
+  - inputs: {}
+    metadata: {}
+    name: address-k
+    outputs: {}
+    resource:
+      action: get
+      manifest: |
+        apiVersion: kubevirt.io/v1
+        kind: VirtualMachineInstance
+        metadata:
+          name: "{{workflow.name}}-k"
+          labels:
+            oberth.ci/workflow: "{{workflow.name}}"
+      setOwnerReference: true
+    retryStrategy:
+      limit: 3
+  - inputs: {}
+    metadata: {}
+    name: cleanup
+    outputs: {}
+    steps:
+    - - arguments: {}
+        name: cleanup-a
+        template: delete-a
+      - arguments: {}
+        name: cleanup-b
+        template: delete-b
+      - arguments: {}
+        name: cleanup-c
+        template: delete-c
+      - arguments: {}
+        name: cleanup-k
+        template: delete-k
+  - dag:
+      failFast: false
+      tasks:
+      - arguments: {}
+        name: a
+        template: create-a
+        when: '{{workflow.parameters.oberth-trigger}} == branch || {{workflow.parameters.oberth-trigger}}
+          == promotion || {{workflow.parameters.oberth-trigger}} == schedule'
+      - arguments: {}
+        depends: a.Succeeded
+        name: address-a
+        template: address-a
+        when: '{{workflow.parameters.oberth-trigger}} == branch || {{workflow.parameters.oberth-trigger}}
+          == promotion || {{workflow.parameters.oberth-trigger}} == schedule'
+      - arguments: {}
+        name: b
+        template: create-b
+        when: '{{workflow.parameters.oberth-trigger}} == branch || {{workflow.parameters.oberth-trigger}}
+          == promotion || {{workflow.parameters.oberth-trigger}} == schedule'
+      - arguments: {}
+        depends: b.Succeeded
+        name: address-b
+        template: address-b
+        when: '{{workflow.parameters.oberth-trigger}} == branch || {{workflow.parameters.oberth-trigger}}
+          == promotion || {{workflow.parameters.oberth-trigger}} == schedule'
+      - arguments: {}
+        depends: address-a.Succeeded
+        name: driver-a
+        templateRef:
+          name: example/driver@v1
+          template: run
+        when: '{{workflow.parameters.oberth-trigger}} == branch || {{workflow.parameters.oberth-trigger}}
+          == promotion || {{workflow.parameters.oberth-trigger}} == schedule'
+      - arguments: {}
+        depends: address-b.Succeeded
+        name: driver-b
+        templateRef:
+          name: example/driver@v1
+          template: run
+        when: '{{workflow.parameters.oberth-trigger}} == branch || {{workflow.parameters.oberth-trigger}}
+          == promotion || {{workflow.parameters.oberth-trigger}} == schedule'
+      - arguments: {}
+        depends: (driver-a.Succeeded || driver-a.Failed || driver-a.Errored)
+        name: delete-a
+        template: delete-a
+        when: '{{workflow.parameters.oberth-trigger}} == branch || {{workflow.parameters.oberth-trigger}}
+          == promotion || {{workflow.parameters.oberth-trigger}} == schedule'
+      - arguments: {}
+        depends: (driver-b.Succeeded || driver-b.Failed || driver-b.Errored)
+        name: delete-b
+        template: delete-b
+        when: '{{workflow.parameters.oberth-trigger}} == branch || {{workflow.parameters.oberth-trigger}}
+          == promotion || {{workflow.parameters.oberth-trigger}} == schedule'
+      - arguments: {}
+        depends: delete-a.Succeeded && delete-b.Succeeded
+        name: c
+        template: create-c
+        when: '{{workflow.parameters.oberth-trigger}} == branch || {{workflow.parameters.oberth-trigger}}
+          == promotion || {{workflow.parameters.oberth-trigger}} == schedule'
+      - arguments: {}
+        depends: c.Succeeded
+        name: address-c
+        template: address-c
+        when: '{{workflow.parameters.oberth-trigger}} == branch || {{workflow.parameters.oberth-trigger}}
+          == promotion || {{workflow.parameters.oberth-trigger}} == schedule'
+      - arguments: {}
+        depends: address-c.Succeeded
+        name: qualify-1
+        templateRef:
+          name: example/driver@v1
+          template: run
+        when: '{{workflow.parameters.oberth-trigger}} == branch || {{workflow.parameters.oberth-trigger}}
+          == promotion || {{workflow.parameters.oberth-trigger}} == schedule'
+      - arguments: {}
+        depends: (qualify-1.Succeeded || qualify-1.Failed || qualify-1.Errored)
+        name: delete-c
+        template: delete-c
+        when: '{{workflow.parameters.oberth-trigger}} == branch || {{workflow.parameters.oberth-trigger}}
+          == promotion || {{workflow.parameters.oberth-trigger}} == schedule'
+      - arguments: {}
+        depends: delete-c.Succeeded
+        name: c-fresh
+        template: create-c
+        when: '{{workflow.parameters.oberth-trigger}} == branch || {{workflow.parameters.oberth-trigger}}
+          == promotion || {{workflow.parameters.oberth-trigger}} == schedule'
+      - arguments: {}
+        depends: c-fresh.Succeeded
+        name: address-c-fresh
+        template: address-c
+        when: '{{workflow.parameters.oberth-trigger}} == branch || {{workflow.parameters.oberth-trigger}}
+          == promotion || {{workflow.parameters.oberth-trigger}} == schedule'
+      - arguments: {}
+        depends: address-c-fresh.Succeeded
+        name: qualify-2
+        templateRef:
+          name: example/driver@v1
+          template: run
+        when: '{{workflow.parameters.oberth-trigger}} == branch || {{workflow.parameters.oberth-trigger}}
+          == promotion || {{workflow.parameters.oberth-trigger}} == schedule'
+      - arguments: {}
+        depends: (qualify-2.Succeeded || qualify-2.Failed || qualify-2.Errored)
+        name: delete-c-fresh
+        template: delete-c
+        when: '{{workflow.parameters.oberth-trigger}} == branch || {{workflow.parameters.oberth-trigger}}
+          == promotion || {{workflow.parameters.oberth-trigger}} == schedule'
+      - arguments: {}
+        depends: delete-c-fresh.Succeeded
+        name: k
+        template: create-k
+        when: '{{workflow.parameters.oberth-trigger}} == branch || {{workflow.parameters.oberth-trigger}}
+          == promotion || {{workflow.parameters.oberth-trigger}} == schedule'
+      - arguments: {}
+        depends: k.Succeeded
+        name: address-k
+        template: address-k
+        when: '{{workflow.parameters.oberth-trigger}} == branch || {{workflow.parameters.oberth-trigger}}
+          == promotion || {{workflow.parameters.oberth-trigger}} == schedule'
+      - arguments: {}
+        depends: address-k.Succeeded
+        name: qualify-k
+        templateRef:
+          name: example/driver@v1
+          template: run
+        when: '{{workflow.parameters.oberth-trigger}} == branch || {{workflow.parameters.oberth-trigger}}
+          == promotion || {{workflow.parameters.oberth-trigger}} == schedule'
+      - arguments: {}
+        depends: (qualify-k.Succeeded || qualify-k.Failed || qualify-k.Errored)
+        name: delete-k
+        template: delete-k
+        when: '{{workflow.parameters.oberth-trigger}} == branch || {{workflow.parameters.oberth-trigger}}
+          == promotion || {{workflow.parameters.oberth-trigger}} == schedule'
+    inputs: {}
+    metadata: {}
+    name: phases
+    outputs: {}
+  - dag:
+      tasks:
+      - arguments: {}
+        name: partition-0
+        template: phases
+        when: "{{=inputs.parameters['partition'] == '0'}}"
+      - arguments: {}
+        name: partition-1
+        template: phases
+        when: "{{=inputs.parameters['partition'] == '1'}}"
+      - arguments: {}
+        name: partition-2
+        template: phases
+        when: "{{=inputs.parameters['partition'] == '2'}}"
+      - arguments: {}
+        name: partition-3
+        template: phases
+        when: "{{=inputs.parameters['partition'] == '3'}}"
+      - arguments: {}
+        name: partition-4
+        template: phases
+        when: "{{=inputs.parameters['partition'] == '4'}}"
+    inputs:
+      parameters:
+      - name: partition
+    metadata: {}
+    name: partitions
+    outputs: {}
+  - container:
+      command:
+      - sh
+      - -c
+      - printf '0' > /tmp/partition
+      image: busybox:1.37@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      name: ""
+      resources: {}
+    inputs: {}
+    metadata: {}
+    name: selector
+    outputs:
+      parameters:
+      - name: partition
+        valueFrom:
+          path: /tmp/partition
+  - dag:
+      failFast: false
+      tasks:
+      - arguments: {}
+        name: install
+        templateRef:
+          name: example/toolchain@v1
+          template: install
+      - arguments: {}
+        depends: install.Succeeded
+        name: branch
+        template: phases
+        when: '{{workflow.parameters.oberth-trigger}} == branch || {{workflow.parameters.oberth-trigger}}
+          == promotion'
+      - arguments: {}
+        depends: install.Succeeded
+        name: select
+        template: selector
+        when: '{{workflow.parameters.oberth-trigger}} == schedule'
+      - arguments:
+          parameters:
+          - name: partition
+            value: '{{tasks.select.outputs.parameters.partition}}'
+        depends: select.Succeeded
+        name: schedule
+        template: partitions
+        when: '{{workflow.parameters.oberth-trigger}} == schedule'
+    inputs: {}
+    metadata: {}
+    name: main
+    outputs: {}
+status:
+  finishedAt: null
+  startedAt: null
