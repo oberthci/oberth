@@ -42,6 +42,7 @@ type shadowComparison struct {
 
 type shadowState struct {
 	runs, mismatches, failures, skipped atomic.Uint64
+	compared, dropped                   atomic.Uint64
 	errorsByReason                      [shadowReasonCount]atomic.Uint64
 	ctx                                 context.Context
 	cancel                              context.CancelFunc
@@ -89,6 +90,7 @@ func (c *Cache) queueShadow(path, sha string) {
 	case s.jobs <- job:
 	default:
 		s.skipped.Add(1)
+		s.dropped.Add(1)
 	}
 }
 
@@ -135,6 +137,14 @@ func (c *Cache) ShadowStats() ShadowStats {
 }
 
 func (c *Cache) WriteShadowMetrics(w io.Writer) {
+	var enabled, compared, dropped uint64
+	if c.shadow != nil {
+		enabled = 1
+		compared, dropped = c.shadow.compared.Load(), c.shadow.dropped.Load()
+	}
+	_, _ = fmt.Fprintf(w, "# HELP oberth_gitcache_shadow_enabled Whether shadow mode was enabled at startup.\n# TYPE oberth_gitcache_shadow_enabled gauge\noberth_gitcache_shadow_enabled %d\n", enabled)
+	_, _ = fmt.Fprintf(w, "# HELP oberth_gitcache_shadow_compared_total Completed archive/tree comparisons, including mismatches and expected attribute gaps.\n# TYPE oberth_gitcache_shadow_compared_total counter\noberth_gitcache_shadow_compared_total %d\n", compared)
+	_, _ = fmt.Fprintf(w, "# HELP oberth_gitcache_shadow_dropped_total Shadow observations dropped because the bounded queue was full.\n# TYPE oberth_gitcache_shadow_dropped_total counter\noberth_gitcache_shadow_dropped_total %d\n", dropped)
 	_, _ = fmt.Fprintf(w, "# HELP oberth_gitcache_shadow_mismatch_total CLI/go-git archive or tree disagreements.\n# TYPE oberth_gitcache_shadow_mismatch_total counter\noberth_gitcache_shadow_mismatch_total %d\n", c.ShadowStats().Mismatches)
 	_, _ = fmt.Fprint(w, "# HELP oberth_gitcache_shadow_errors_total Incomplete shadow comparisons by fixed reason; shutdown cancellation excluded.\n# TYPE oberth_gitcache_shadow_errors_total counter\n")
 	for reason, name := range shadowReasonNames {
@@ -168,6 +178,9 @@ func (s *shadowState) work() {
 				return
 			} // Shutdown is not a failed soak observation.
 			s.runs.Add(1)
+			if err == nil {
+				s.compared.Add(1)
+			}
 			if err == nil && comparison.ExpectedAttrGap && comparison.CLIArchive != comparison.GoArchive && comparison.CLITree == comparison.GoTree {
 				err = errArchiveAttrGap
 			}

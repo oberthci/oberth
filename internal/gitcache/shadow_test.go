@@ -129,6 +129,41 @@ func waitTestShadow(t *testing.T, cache *Cache) {
 	}
 }
 
+func requireShadowMetric(t *testing.T, cache *Cache, name string, value uint64) {
+	t.Helper()
+	var metrics bytes.Buffer
+	cache.WriteShadowMetrics(&metrics)
+	if !strings.Contains(metrics.String(), fmt.Sprintf("\n%s %d\n", name, value)) {
+		t.Fatalf("missing %s=%d in metrics:\n%s", name, value, metrics.String())
+	}
+}
+
+func TestShadowMetricsAtStartup(t *testing.T) {
+	for _, enabled := range []bool{false, true} {
+		t.Run(fmt.Sprintf("enabled=%t", enabled), func(t *testing.T) {
+			cache, err := New(Config{Root: t.TempDir(), Shadow: enabled, ShadowContext: t.Context(), Upstream: func(string) (string, error) { return "", errors.New("must not fetch") }})
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(cache.CloseShadow)
+			var wantEnabled uint64
+			if enabled {
+				wantEnabled = 1
+			}
+			requireShadowMetric(t, cache, "oberth_gitcache_shadow_enabled", wantEnabled)
+			requireShadowMetric(t, cache, "oberth_gitcache_shadow_compared_total", 0)
+			requireShadowMetric(t, cache, "oberth_gitcache_shadow_dropped_total", 0)
+			var metrics bytes.Buffer
+			cache.WriteShadowMetrics(&metrics)
+			for name, kind := range map[string]string{"enabled": "gauge", "compared_total": "counter", "dropped_total": "counter"} {
+				if !strings.Contains(metrics.String(), "# TYPE oberth_gitcache_shadow_"+name+" "+kind+"\n") {
+					t.Fatal(metrics.String())
+				}
+			}
+		})
+	}
+}
+
 func TestShadowNeverChangesCLIDelivery(t *testing.T) {
 	for _, mode := range []string{"real", "mismatch", "tree-mismatch", "tree-mismatch-attr", "timeout", "crash", "nonzero", "cli-failed", "oversize", "hash-guard", "canceled", "priority"} {
 		t.Run(mode, func(t *testing.T) {
@@ -199,6 +234,12 @@ func TestShadowNeverChangesCLIDelivery(t *testing.T) {
 			} else if stats.Mismatches != 0 || stats.Errors != 0 {
 				t.Fatalf("real archive mismatch: %+v %s", stats, logs.String())
 			}
+			wantCompared := uint64(2)
+			if stats.Errors != 0 {
+				wantCompared = 0
+			}
+			requireShadowMetric(t, cache, "oberth_gitcache_shadow_compared_total", wantCompared)
+			requireShadowMetric(t, cache, "oberth_gitcache_shadow_dropped_total", 0)
 			if strings.Contains(logs.String(), "private-source-contents") || strings.Contains(logs.String(), "credential=secret") {
 				t.Fatal("helper stderr leaked")
 			}
@@ -216,6 +257,19 @@ func TestShadowQueueIsBoundedAndNonblocking(t *testing.T) {
 	if len(cache.shadow.jobs) != shadowQueueSize || cache.ShadowStats().Skipped != 5 {
 		t.Fatal(cache.ShadowStats())
 	}
+	// Successfully refilling a free slot, invalid observations and shutdown are
+	// not queue-full drops, although invalid observations still count as skipped.
+	<-cache.shadow.jobs
+	cache.queueShadow(filepath.Join(cache.root, "repo.git"), strings.Repeat("a", 40))
+	cache.queueShadow(filepath.Join(cache.root, "repo.git"), "invalid-sha")
+	cache.queueShadow(filepath.Join(filepath.Dir(cache.root), "outside.git"), strings.Repeat("a", 40))
+	if cache.ShadowStats().Skipped != 7 {
+		t.Fatal(cache.ShadowStats())
+	}
+	cancel()
+	cache.queueShadow(filepath.Join(cache.root, "repo.git"), strings.Repeat("a", 40))
+	requireShadowMetric(t, cache, "oberth_gitcache_shadow_dropped_total", 5)
+	requireShadowMetric(t, cache, "oberth_gitcache_shadow_compared_total", 0)
 }
 
 func TestShadowCanonicalHashIncludesFileBytesAndMetadata(t *testing.T) {
@@ -313,6 +367,8 @@ func TestNewShadowStateShutdownDoesNotCountCancellation(t *testing.T) {
 	if strings.Contains(metrics.String(), "} 1\n") {
 		t.Fatal(metrics.String())
 	}
+	requireShadowMetric(t, cache, "oberth_gitcache_shadow_compared_total", 0)
+	requireShadowMetric(t, cache, "oberth_gitcache_shadow_dropped_total", 0)
 }
 
 func TestShadowOutputBoundThroughIOCopy(t *testing.T) {

@@ -111,6 +111,7 @@ func TestShadowExportAttributeGapsAreNotMismatches(t *testing.T) {
 				}
 			}
 			waitTestShadow(t, cache)
+			requireShadowMetric(t, cache, "oberth_gitcache_shadow_compared_total", 1)
 			wantErrors := uint64(1)
 			if kind == "unused" || kind == "configured" {
 				wantErrors = 0
