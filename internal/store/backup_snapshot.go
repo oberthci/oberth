@@ -5,8 +5,10 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
+	"time"
 
 	"modernc.org/sqlite"
 )
@@ -45,6 +47,10 @@ func snapshotOnlineDatabase(ctx context.Context, path string, maxBytes int64) (s
 // Separate the step operation so consistency tests can coordinate real writer
 // commits between real backup steps, without sleeps or scheduler assumptions.
 func snapshotOnlineDatabaseSteps(ctx context.Context, path string, maxBytes int64, step func(*sqlite.Backup) (bool, error)) (snapshot string, cleanup func() error, resultErr error) {
+	return snapshotOnlineDatabaseWithSpace(ctx, path, maxBytes, step, backupVolumeFreeBytes)
+}
+
+func snapshotOnlineDatabaseWithSpace(ctx context.Context, path string, maxBytes int64, step func(*sqlite.Backup) (bool, error), free func(string) (int64, error)) (snapshot string, cleanup func() error, resultErr error) {
 	for _, suffix := range []string{"", "-wal", "-shm"} {
 		f, _, err := openSQLiteSourceFile(path+suffix, suffix == "")
 		if err != nil {
@@ -59,25 +65,21 @@ func snapshotOnlineDatabaseSteps(ctx context.Context, path string, maxBytes int6
 	if err := verifySQLiteWALHeader(path); err != nil {
 		return "", nil, err
 	}
-	// In-pod this is the data PVC, not the small ephemeral /tmp volume. Local
-	// compatibility copies already live in the caller's private work directory.
-	dir, cleanup, err := newOnlineBackupStaging(filepath.Dir(path))
+	parent := filepath.Dir(path)
+	volume, err := lockOnlineBackupVolume(parent)
 	if err != nil {
 		return "", nil, err
 	}
+	cleanup = volume.Close
 	defer func() {
 		if resultErr != nil {
 			resultErr = errors.Join(resultErr, cleanup())
 		}
 	}()
-	snapshot = filepath.Join(dir, "oberth.sqlite")
-	f, err := os.OpenFile(snapshot, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600) // #nosec G304 -- fixed filename in fresh private directory.
-	if err != nil {
-		return "", cleanup, err
+	if err := sweepOnlineBackupStaging(parent, time.Now()); err != nil {
+		log.Printf("WARNING: interrupted database snapshot cleanup incomplete; inspect/remove the named stale entry: %v", err)
 	}
-	if err := f.Close(); err != nil {
-		return "", cleanup, err
-	}
+
 	db, err := sql.Open("sqlite", currentDatabaseDSN(path, "ro", false))
 	if err != nil {
 		return "", cleanup, err
@@ -107,6 +109,29 @@ func snapshotOnlineDatabaseSteps(ctx context.Context, path string, maxBytes int6
 	if size := pages * pageSize; size > maxBytes {
 		return "", cleanup, backupSizeError(size, maxBytes)
 	}
+	// Inventory the pinned view before creating any staging file. Keep space for
+	// live WAL/activity even when the operator raises the logical database limit.
+	size := pages * pageSize
+	guard := backupSpaceGuard{volume: parent, size: size, reserve: max(backupSpaceMinimumReserve, size/4), free: free}
+	if err := guard.check(); err != nil {
+		return "", cleanup, err
+	}
+	dir, stageCleanup, err := newOnlineBackupStaging(parent)
+	if err != nil {
+		return "", cleanup, err
+	}
+	volumeCleanup := cleanup
+	cleanup = func() error { return errors.Join(stageCleanup(), volumeCleanup()) }
+	snapshot = filepath.Join(dir, "oberth.sqlite")
+	f, err := os.OpenFile(snapshot, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600) // #nosec G304 -- fixed filename in fresh private directory.
+	if err != nil {
+		return "", cleanup, err
+	}
+	if err := f.Close(); err != nil {
+		return "", cleanup, err
+	}
+	guard.snapshot = snapshot
+
 	err = conn.Raw(func(raw any) (resultErr error) {
 		driver, ok := raw.(interface {
 			NewBackup(string) (*sqlite.Backup, error)
@@ -123,8 +148,14 @@ func snapshotOnlineDatabaseSteps(ctx context.Context, path string, maxBytes int6
 			if err := ctx.Err(); err != nil {
 				return err
 			}
+			if err := guard.check(); err != nil {
+				return err
+			}
 			more, err := step(backup)
 			if err != nil {
+				return err
+			}
+			if err := guard.check(); err != nil {
 				return err
 			}
 			if !more {

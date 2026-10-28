@@ -51,7 +51,10 @@ var (
 type Options struct {
 	// BackupMaxBytes bounds backup/verification only; zero selects 1 GiB.
 	BackupMaxBytes int64
-	Protocol       ProtocolConfig
+	// SnapshotTempDir selects private inspection/verification staging. Empty
+	// honors TMPDIR; the isolated maintenance utility explicitly pins /tmp.
+	SnapshotTempDir string
+	Protocol        ProtocolConfig
 
 	BusyTimeout time.Duration
 	Now         func() time.Time
@@ -98,7 +101,7 @@ func MigrateLegacyV1(ctx context.Context, path string, expectedHead model.AuditH
 // exact schema understood by this binary. The live daemon uses this handle to
 // verify rollback-external audit continuity before opening SQLite writable.
 func InspectCurrent(ctx context.Context, path string, opts Options) (*Store, error) {
-	snapshotPath, cleanup, err := snapshotCurrentDatabase(path)
+	snapshotPath, cleanup, err := snapshotCurrentDatabaseIn(path, opts.SnapshotTempDir)
 	if err != nil {
 		return nil, err
 	}
@@ -114,7 +117,7 @@ func InspectCurrent(ctx context.Context, path string, opts Options) (*Store, err
 // consistent snapshot and returns the audit head that migration v2 will
 // deterministically produce. It never opens the live database writable.
 func InspectLegacyV1(ctx context.Context, path string, opts Options) (head model.AuditHead, resultErr error) {
-	snapshotPath, cleanup, err := snapshotCurrentDatabase(path)
+	snapshotPath, cleanup, err := snapshotCurrentDatabaseIn(path, opts.SnapshotTempDir)
 	if err != nil {
 		return model.AuditHead{}, err
 	}
@@ -379,7 +382,12 @@ type sqliteSnapshotState struct {
 }
 
 func snapshotCurrentDatabase(path string) (string, func() error, error) {
-	directory, err := os.MkdirTemp("/tmp", "oberth-sqlite-inspect-")
+	// Preserve the maintenance writer's qualified private-tmpfs location.
+	return snapshotCurrentDatabaseIn(path, "/tmp")
+}
+
+func snapshotCurrentDatabaseIn(path, tempDir string) (string, func() error, error) {
+	directory, err := os.MkdirTemp(tempDir, "oberth-sqlite-inspect-")
 	if err != nil {
 		return "", nil, fmt.Errorf("create private sqlite inspection directory: %w", err)
 	}

@@ -114,5 +114,8 @@ UPDATE backup_pad SET data=randomblob(3000) WHERE id IN (1,3000,6000)`)
 			t.Fatal("writer did not advance independently of snapshot", live, pinned, writes, err)
 		}
 		t.Logf("round %d: %d steps, %d interleaved commits, pinned=%d live=%d", round, steps, writes, pinned, live)
+		if err := cleanup(); err != nil {
+			t.Fatal(err)
+		}
 	}
 }

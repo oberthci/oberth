@@ -19,9 +19,6 @@ const onlineBackupStagingMaxAge = 10 * time.Minute
 const onlineBackupStagingPrefix = "oberth-online-backup-"
 
 func newOnlineBackupStaging(parent string) (string, func() error, error) {
-	if err := sweepOnlineBackupStaging(parent, time.Now()); err != nil {
-		return "", nil, fmt.Errorf("clean interrupted database snapshots: %w", err)
-	}
 	dir, err := os.MkdirTemp(parent, onlineBackupStagingPrefix)
 	if err != nil {
 		return "", nil, fmt.Errorf("stage database snapshot on database volume: %w", err)
@@ -61,10 +58,38 @@ func lockOnlineBackupStaging(dir string) (*os.File, error) {
 // same-prefix directories whose active lock is free. Directory symlinks are
 // never traversed. A still-running backup remains protected even past its TTL.
 func sweepOnlineBackupStaging(parent string, now time.Time) error {
-	entries, err := os.ReadDir(parent)
+	return sweepOnlineBackupStagingBefore(parent, now.Add(-onlineBackupStagingMaxAge))
+}
+
+// SweepBackupStagingAtStartup reclaims interrupted snapshots, including fresh
+// ones after a restart. Active locks still protect execs or another server.
+// Return all cleanup warnings after attempting every candidate; callers must
+// report them but may continue (the independent free-space guard still applies).
+func SweepBackupStagingAtStartup(database string) (resultErr error) {
+	if strings.TrimSpace(database) == "" {
+		return errors.New("snapshot cleanup requires a database path")
+	}
+	parent := filepath.Dir(database)
+	if _, err := os.Stat(parent); errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	volume, err := lockOnlineBackupVolume(parent)
 	if err != nil {
 		return err
 	}
+	defer func() { resultErr = errors.Join(resultErr, volume.Close()) }()
+	return sweepOnlineBackupStagingBefore(parent, time.Time{})
+}
+
+func sweepOnlineBackupStagingBefore(parent string, olderThan time.Time) error {
+	entries, err := os.ReadDir(parent)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	var failures error
 	for _, entry := range entries {
 		if !entry.IsDir() || !strings.HasPrefix(entry.Name(), onlineBackupStagingPrefix) {
 			continue
@@ -74,9 +99,10 @@ func sweepOnlineBackupStaging(parent string, now time.Time) error {
 			if errors.Is(err, os.ErrNotExist) {
 				continue
 			}
-			return err
+			failures = errors.Join(failures, err)
+			continue
 		}
-		if !onlineBackupStagingOwned(info) || now.Sub(info.ModTime()) <= onlineBackupStagingMaxAge {
+		if !onlineBackupStagingOwned(info) || (!olderThan.IsZero() && !info.ModTime().Before(olderThan)) {
 			continue
 		}
 		dir := filepath.Join(parent, entry.Name())
@@ -85,15 +111,16 @@ func sweepOnlineBackupStaging(parent string, now time.Time) error {
 			continue
 		}
 		if err != nil {
-			return err
+			failures = errors.Join(failures, fmt.Errorf("stale snapshot %q: %w", dir, err))
+			continue
 		}
 		current, err := os.Lstat(dir)
 		if err == nil && current.IsDir() && os.SameFile(info, current) && onlineBackupStagingOwned(current) {
 			err = os.RemoveAll(dir)
 		}
 		if err = errors.Join(err, active.Close()); err != nil && !errors.Is(err, os.ErrNotExist) {
-			return err
+			failures = errors.Join(failures, fmt.Errorf("stale snapshot %q: %w", dir, err))
 		}
 	}
-	return nil
+	return failures
 }

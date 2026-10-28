@@ -886,7 +886,7 @@ func orphanedWorkflows(ctx context.Context, workflows []runWorkflow, archive res
 		return nil, nil
 	}
 	compat := archive.Manifest.Compatibility
-	inspection, err := store.InspectCurrent(ctx, archive.LocalDatabase, store.Options{Protocol: store.ProtocolConfig{SchemaIdentity: compat.SchemaIdentity, AuditDomain: compat.AuditDomain}})
+	inspection, err := store.InspectCurrent(ctx, archive.LocalDatabase, store.Options{Protocol: store.ProtocolConfig{SchemaIdentity: compat.SchemaIdentity, AuditDomain: compat.AuditDomain}, SnapshotTempDir: filepath.Dir(archive.LocalDatabase)})
 	if err != nil {
 		return nil, fmt.Errorf("open restored database: %w", err)
 	}

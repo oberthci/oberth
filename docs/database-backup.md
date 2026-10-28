@@ -8,7 +8,7 @@ live database. A deployment-specific execution plan must bind its source and
 binary, OpenSSL executable and libraries, exact PVC/PV/Pod identity, file mounts,
 public protocol identifiers, and recipient certificate before execution.
 
-The export reuses `snapshotCurrentDatabase` unchanged. That primitive copies the
+The export retains the `snapshotCurrentDatabase` stable-copy protocol. It copies the
 main database and optional WAL to a private directory and refuses if subsequent
 source hashes differ. It does not claim SQLite's Online Backup API locking
 semantics. The private copy must pass the exact expected schema, integrity,

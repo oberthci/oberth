@@ -45,11 +45,23 @@ archives, framing, metadata, ciphertext and decompressed extraction remain
 bounded. Large snapshot transfer, local extraction, hashes and restore uploads
 stream; no database-sized byte slices. Failed output streams are canceled and
 partial files removed. Online plaintext staging is a 0700 directory beside the
-source database (the in-pod data PVC), not the small ephemeral `/tmp` volume.
-The source parent must be writable with room for the snapshot and live WAL
-growth. SIGPIPE becomes a returned write error so cleanup runs; after SIGKILL,
-the next online backup sweeps same-euid staging older than ten minutes. A held
-kernel lock protects active snapshots through verification and streaming.
+source database. Before staging, statfs available bytes must cover the pinned
+snapshot plus max(256 MiB, snapshot/4) and 64 KiB metadata. Every Step(128) is
+bracketed by rechecks of remaining unallocated snapshot bytes plus that reserve;
+file length alone never counts sparse pages as allocated. Refusal aborts and
+cleans staging, with volume/free/required bytes and remedies named. A directory
+flock serializes snapshots sharing the database parent through emission.
+Restore target preview uses the same guarded path and never retries/bypasses a
+space refusal. External writers remain outside these observational guards.
+
+SIGPIPE becomes a returned write error so cleanup runs. Before identity/SQLite
+startup I/O, the server sweeps same-euid unlocked staging regardless of age;
+online backups also sweep entries older than ten minutes. Held locks protect
+active snapshots. Cleanup attempts every candidate and logs per-entry failures
+without disabling later backups; space checks remain mandatory. Workstation
+verification uses its private working volume, and generic inspection/verification
+honors TMPDIR. The isolated maintenance writer/verifier explicitly retain their
+qualified private /tmp and 128 MiB protocol.
 
 Default-limit requests omit the new flag for old-server compatibility. A custom
 limit may retry an unknown-flag response without the flag only if the old

@@ -525,13 +525,16 @@ func validAuditURL(raw string, insecureHTTP bool) bool {
 }
 
 func serve(ctx context.Context, options serveOptions, logger *log.Logger) (result error) {
+	if err := os.MkdirAll(options.dataRoot, 0o700); err != nil {
+		return fmt.Errorf("create data root: %w", err)
+	}
+	if err := store.SweepBackupStagingAtStartup(options.database); err != nil {
+		logger.Printf("WARNING: interrupted database snapshot cleanup incomplete; inspect/remove the named stale entry: %v", err)
+	}
 	if identityStoreEnabled() {
 		if err := bootstrapRuntimeIdentities(ctx, &options); err != nil {
 			return fmt.Errorf("load OpenBao identities: %w", err)
 		}
-	}
-	if err := os.MkdirAll(options.dataRoot, 0o700); err != nil {
-		return fmt.Errorf("create data root: %w", err)
 	}
 	restConfig, err := rest.InClusterConfig()
 	if err != nil {
