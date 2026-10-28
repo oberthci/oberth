@@ -685,7 +685,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 	if err != nil {
 		return err
 	}
-	sshCommand, err := sshCommandFromEntries(sshEntries, options, "/tmp/oberth-ssh-config")
+	sshEnvironment, err := nativeGitSSHEnvironment(sshEntries, options, "/tmp/oberth-ssh-config")
 	if err != nil {
 		return err
 	}
@@ -696,7 +696,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 		Backend: gitcache.Backend(options.gitBackend), SSH: sshSettings,
 		Shadow: options.gitcacheShadow, ShadowContext: ctx,
 		CommandTimeout:  options.gitCommandTimeout,
-		Env:             map[string]string{"GIT_SSH_COMMAND": sshCommand, "GIT_SSH_VARIANT": "ssh"},
+		Env:             sshEnvironment,
 		Logger:          logger,
 		RepoQualifier:   upstreams.QualifyInput,
 		RepositoryGate:  upstreams.RequireActive,

@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	_ "time/tzdata"
 
@@ -37,6 +38,16 @@ func main() {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+	if filepath.Base(os.Args[0]) == "oberth-git-ssh" {
+		code := runGitSSH(ctx, os.Args[1:], os.Stdin, os.Stdout, os.Stderr)
+		stop()
+		os.Exit(code)
+	}
+	if len(os.Args) > 1 && os.Args[1] == "git-ssh" {
+		code := runGitSSH(ctx, os.Args[2:], os.Stdin, os.Stdout, os.Stderr)
+		stop()
+		os.Exit(code)
+	}
 	if len(os.Args) > 1 && os.Args[1] == "internal-gitcache-shadow" {
 		os.Exit(gitcache.RunShadowHelper(ctx, os.Args[2:], os.Stdout))
 	}
@@ -81,6 +92,7 @@ Commands:
   backup        Write an encrypted backup of OpenBao state and the server database
   restore       Restore an oberth backup onto an installed Oberth
   admin         Read local files or hash the database for maintenance
+  git-ssh       Run Git's native pinned-key SSH transport
   serve         Start the Oberth server
   upstream      Manage upstream forge connections
   repo          Manage repository mappings

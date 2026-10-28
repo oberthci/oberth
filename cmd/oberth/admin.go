@@ -1262,13 +1262,13 @@ func runRepoVerify(ctx context.Context, arguments []string, output io.Writer) er
 		return settingsErr
 	}
 	defer func() { _ = os.RemoveAll(configDirectory) }()
-	sshCommand, settingsErr := sshCommandFromEntries(entries, sshOptions, filepath.Join(configDirectory, "config"))
+	sshEnvironment, settingsErr := nativeGitSSHEnvironment(entries, sshOptions, filepath.Join(configDirectory, "config"))
 	if settingsErr != nil {
 		return settingsErr
 	}
 	cache, cacheErr := gitcache.New(gitcache.Config{
 		Backend: gitcache.Backend(*backend), SSH: settings,
-		Env:           map[string]string{"GIT_SSH_COMMAND": sshCommand, "GIT_SSH_VARIANT": "ssh"},
+		Env:           sshEnvironment,
 		Root:          *gitCacheRoot,
 		Upstream:      resolver.Remote,
 		RepoQualifier: resolver.QualifyInput,

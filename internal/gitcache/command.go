@@ -256,6 +256,12 @@ func (c *Cache) commandEnv(extra map[string]string) []string {
 	for key, value := range extra {
 		values[key] = value
 	}
+	if values["OBERTH_GIT_SSH_CONFIG"] != "" {
+		// The native transport must not become a shell command through an
+		// inherited or accidentally supplied compatibility environment layer.
+		delete(values, "GIT_SSH_COMMAND")
+		values["GIT_SSH_VARIANT"] = "simple"
+	}
 	// Replacement refs are client-controlled Git objects. They must never
 	// alter the meaning of a commit in any server-side validation, checkout,
 	// ancestry, merge, upload, or receive command. Set this after all supplied
