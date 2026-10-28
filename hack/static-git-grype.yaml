@@ -1,0 +1,9 @@
+# Static C coverage is explicit; never silently suppress a component or match.
+ignore: []
+match:
+  stock:
+    using-cpes: true
+db:
+  validate-age: true
+  max-allowed-built-age: 120h
+check-for-app-update: false

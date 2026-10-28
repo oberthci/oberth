@@ -707,6 +707,13 @@ publish_images() {
 	"$release_image_tool" publish "$tag" "$sha" "$created" "$release_dir" "$gar_key"
 	reference=$(sed -n '1p' "$release_dir/server-image.txt")
 	[ -n "$reference" ] || fail "release image helper produced an empty reference"
+	# Bind the static C SBOM to every published Git byte before scanning/signing.
+	"$release_image_tool" verify "$tag" "$sha" "$created" "$release_dir" "$gar_key"
+	for architecture in amd64 arm64; do
+	    "$release_image_tool" static-sbom "$architecture" "$release_dir/static-git-$architecture.cdx.json"
+	done
+	"$release_image_tool" static-sbom amd64 "$release_dir/static-git-control.cdx.json" control
+	/bin/sh hack/scan-static-git.sh "$release_dir" amd64 arm64
 	scan_image "$reference"
 	prepare_signing_identity
 	sign_registry_object "$reference"

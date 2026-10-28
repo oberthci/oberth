@@ -3,15 +3,20 @@
 Git CLI is the only backend. There is no in-process Git implementation,
 comparison worker or shadow telemetry. Retired `--git-backend`,
 `--gitcache-shadow` and OBERTH_GITCACHE_SHADOW settings have no runtime role.
-The chart schema refuses retired `gitBackend` and `gitcache` keys. Export
-installed values, remove these keys, and reconcile explicitly using the
-existing upgrade migration procedure; do not change compatibility identities.
-Unknown values remain refused rather than silently discarded.
+For upgrade/install/restore value reuse, the chart accepts and ignores exactly
+`gitBackend: cli` and `gitcache.shadow: false`. `go-git`, `shadow: true` and
+unknown fields remain refused. These legacy defaults never select a backend
+or start a shadow worker.
 
 The scratch server image contains static Git 2.56.0 (zlib only), static Oberth,
 `oberth-git-ssh -> oberth`, and the pinned Alpine CA bundle. It has no shell,
-OpenSSH, curl or package database. Git HTTP(S) transports and hooks requiring
-interpreters are unavailable. Upstream source access uses SSH with key-file
+OpenSSH, curl or package database. HTTPS upstreams are refused during validation and registration with a message
+to use pinned-key SSH. `GIT_ALLOW_PROTOCOL=ssh:file` is forced even after
+per-command environment overlays. Hooks requiring interpreters are unavailable.
+Before upgrading an existing installation, capture its complete `oberth upstream
+list` metadata and run the new CLI's `oberth preflight upstreams --inventory FILE`.
+It refuses existing HTTPS registrations and reports names, never URLs or keys;
+migrate them to verified pinned-key SSH before upgrading. Upstream source access uses SSH with key-file
 authentication and the existing operator-pinned known_hosts; missing or
 mismatched pins refuse before authentication. Registration's in-Go key probe
 still requires operator verification; there is no TOFU in the Git transport.
@@ -35,8 +40,14 @@ utility image; server execs use native Oberth subcommands.
 `hack/test-gitcache.sh` gates the complete race-enabled CLI suite. The public
 multi-pack history gate retains full-commit archive coverage and the checkout
 regression; go-git-specific decoder and comparison tests were removed together
-with that implementation. Runtime container qualification must also run the
-same CLI suite using the bundled Git and native fixtures.
+with that implementation. The required `build-static-git-runtime` / `test-static-git-runtime` CI chain
+builds the same pinned C recipe as Dockerfile's git-build stage, then runs the
+complete tagged CLI suite inside the scratch substrate with those fresh Git
+and Oberth binaries mounted read-only. It covers early upload/receive remote
+exit 128, host-key mismatch, fetch and cancellation. CI retains its server-owned
+security baseline; the local packet additionally qualifies UID 65534. The
+qualification is currently native-amd64; arm64 has static/byte/scan checks,
+not a behavioural-equivalence claim.
 
 The receive hooks are symlinks to the running Oberth executable. Native
 pre-receive/update dispatch preserves batch/public-ref bounds, duplicate
@@ -57,3 +68,13 @@ platforms must be rebuilt and their exact index published before a release.
 Standalone `serve` and `admin gc` installations also need an adjacent
 `oberth-git-ssh -> oberth` executable alias. The container ships that alias;
 `oberth git-ssh` remains available as an explicit subcommand for diagnostics.
+
+The exact build APK closure, source/patch/scanner hashes and linked musl/zlib
+revisions are in `internal/staticgit/build.env`. Qualified Git and linked archive
+hashes are architecture-bound. A CycloneDX SBOM records source Git as generic +
+CPE (not a falsely Alpine-patched Git), plus actual Alpine musl and zlib. The
+release helper verifies the Git bytes in each final image before the Grype C
+scan and existing Trivy Go scan. A known-vulnerable source-Git control must
+produce HIGH/CRITICAL findings; the actual components must have none, including
+ignored findings. Missing metadata, drift, scan errors and stale databases
+refuse signing. Image labels expose the component versions and source hash.

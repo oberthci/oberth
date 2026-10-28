@@ -1,0 +1,14 @@
+{
+  "amd64": {
+    "architecture": "amd64",
+    "git_sha256": "c2db4b385a29db281a04e1efe7bab9ea0eb264991a513e190db086b9312e0547",
+    "musl_archive_sha256": "550a04cad16fe7318c4a62dd9995202a673c21ed8f05fa0963f70d22d49035b2",
+    "zlib_archive_sha256": "1cd275b3042ecbcace597cd72d301ea6f9bcb83ee09c9074ff9c87276cc070f2"
+  },
+  "arm64": {
+    "architecture": "arm64",
+    "git_sha256": "01b144cd5fa3e4171251d93a644c7c1856ef17499c14405ef648abf080922f29",
+    "musl_archive_sha256": "e2db1e33d809aa720c4f269704f4f36c350105955f038000107d92871e147abd",
+    "zlib_archive_sha256": "c6cff2bdcbb98c3f921a8abc7bc5793d9d4fb90f6fd350ea081b056752e93f58"
+  }
+}

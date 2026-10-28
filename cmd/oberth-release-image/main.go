@@ -13,6 +13,7 @@ import (
 
 	"github.com/oberthci/oberth/internal/releasecredential"
 	"github.com/oberthci/oberth/internal/releaseimage"
+	"github.com/oberthci/oberth/internal/staticgit"
 )
 
 var (
@@ -32,6 +33,20 @@ func run(ctx context.Context, arguments []string) error {
 		return errors.New("expected publish, verify, publish-kvm, or verify-kvm")
 	}
 	switch arguments[0] {
+	case "static-sbom":
+		if len(arguments) != 3 && (len(arguments) != 4 || arguments[3] != "control") {
+			return errors.New("usage: oberth-release-image static-sbom ARCH OUTPUT [control]")
+		}
+		output, err := os.OpenFile(arguments[2], os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0600) // #nosec G304 -- explicit release metadata output path.
+		if err != nil {
+			return err
+		}
+		result := staticgit.WriteSBOM(output, arguments[1], len(arguments) == 4)
+		closed := output.Close()
+		if result != nil {
+			return result
+		}
+		return closed
 	case "publish", "verify":
 		return runServer(ctx, arguments)
 	case "publish-kvm", "verify-kvm":

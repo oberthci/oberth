@@ -1,9 +1,12 @@
 package integration_test
 
 import (
+	"fmt"
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/oberthci/oberth/internal/staticgit"
 )
 
 func TestServerImageUsesPinnedMinimalContract(t *testing.T) {
@@ -25,11 +28,7 @@ func TestServerImageUsesPinnedMinimalContract(t *testing.T) {
 		`go build -trimpath -buildvcs=false -ldflags="-s -w -X main.version=${VERSION}" -o /out/oberth ./cmd/oberth`,
 		"FROM scratch AS runtime",
 		"ca-certificates=20261020-r0",
-		"git-2.56.0.tar.xz",
 		"26c56c296b38c0695b26fa95f475f1d01704d2d38e73465ca30b0b2f5dc789d3",
-		"NO_CURL=YesPlease NO_OPENSSL=YesPlease NO_EXPAT=YesPlease",
-		"NO_PERL=YesPlease NO_PYTHON=YesPlease NO_TCLTK=YesPlease NO_GETTEXT=YesPlease",
-		"LDFLAGS=-static",
 		"COPY --from=build --chmod=0755 /out/ /usr/local/bin/",
 		"COPY --from=git-build --chmod=0755 /out/git /usr/bin/git",
 		"ln -s oberth /out/oberth-git-ssh",
@@ -40,6 +39,23 @@ func TestServerImageUsesPinnedMinimalContract(t *testing.T) {
 		if !strings.Contains(dockerfile, required) {
 			t.Fatalf("server Dockerfile lacks %q", required)
 		}
+	}
+	recipe, err := os.ReadFile("../../hack/build-static-git.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, required := range []string{"NO_CURL=YesPlease NO_OPENSSL=YesPlease NO_EXPAT=YesPlease", "NO_PERL=YesPlease NO_PYTHON=YesPlease NO_TCLTK=YesPlease NO_GETTEXT=YesPlease", "LDFLAGS=-static", "--fuzz=0", "$GIT_SOURCE_SHA256", "$GIT_PATCH_SHA256"} {
+		if !strings.Contains(string(recipe), required) {
+			t.Fatalf("canonical static Git recipe lacks %q", required)
+		}
+	}
+	for key, value := range staticgit.Labels() {
+		if !strings.Contains(dockerfile, fmt.Sprintf("%s=\"%s\"", key, value)) {
+			t.Fatalf("runtime component label %s drifted", key)
+		}
+	}
+	if !strings.Contains(dockerfile, "/bin/sh /tmp/install-static-git-packages.sh /pins/static-git.env") || !strings.Contains(dockerfile, "/bin/sh /tmp/build-static-git.sh /pins/static-git.env") {
+		t.Fatal("Dockerfile bypassed the pinned canonical Git build")
 	}
 	if strings.Count(dockerfile, "type=cache") != 3 ||
 		strings.Count(dockerfile, "id=oberth-server-${BUILD_CACHE_NAMESPACE}-gomod") != 2 ||

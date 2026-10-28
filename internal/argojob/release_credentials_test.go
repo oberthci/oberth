@@ -80,6 +80,7 @@ func TestReleaseCredentialsBindActionToDelegatedRole(t *testing.T) {
 					// broad writer. A missing/rejected key must never fall back.
 					f.write("secrets/gar-sa-key/GAR_SA_KEY", releaseCredentialJSON("terraform"))
 					f.tool("oberth-release-image", `printf 'image:%s\n' "$1" >>"$FIXTURE_TRACE"
+if [ "$1" = static-sbom ]; then printf 'fixture SBOM\n' >"$3"; exit 0; fi
 test "$6" = "$FIXTURE_ROOT/secrets/.runtime/.gar-token"
 test "$(cat "$6")" = fixture-restricted-access-token`)
 					helm := strings.Replace(immutableChartFixture, "registry) cat >/dev/null;;", `registry) test "$(cat)" = fixture-restricted-access-token;;`, 1)

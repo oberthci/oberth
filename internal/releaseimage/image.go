@@ -6,6 +6,8 @@ import (
 	"archive/tar"
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -25,6 +27,7 @@ import (
 	"github.com/google/go-containerregistry/pkg/v1/remote"
 	"github.com/google/go-containerregistry/pkg/v1/remote/transport"
 	"github.com/google/go-containerregistry/pkg/v1/tarball"
+	"github.com/oberthci/oberth/internal/staticgit"
 )
 
 const (
@@ -66,23 +69,34 @@ type imageContract struct {
 	platforms  []string
 	required   []string
 	forbidden  []string
+	gitSHA     map[string]string
 	config     v1.Config
 }
 
 func contract(kind Kind) (imageContract, error) {
 	switch kind {
 	case Server:
+		digests := make(map[string]string)
+		for _, arch := range []string{"amd64", "arm64"} {
+			artifact, err := staticgit.Qualified(arch)
+			if err != nil {
+				return imageContract{}, err
+			}
+			digests[arch] = artifact.GitSHA256
+		}
 		return imageContract{
 			repository: ServerRepository,
 			substrate:  ServerSubstrate,
 			binaryName: "oberth",
 			imagePath:  "usr/local/bin/oberth",
 			platforms:  []string{"amd64", "arm64"},
+			gitSHA:     digests,
 			required: []string{
 				"etc/ssl/certs/ca-certificates.crt", "usr/bin/git", "usr/local/bin/oberth-git-ssh",
 			},
 			config: v1.Config{
-				User: "65534:65534", Env: []string{"HOME=/data", "TMPDIR=/tmp", "PATH=/usr/local/bin:/usr/bin"},
+				Labels: staticgit.Labels(),
+				User:   "65534:65534", Env: []string{"HOME=/data", "TMPDIR=/tmp", "PATH=/usr/local/bin:/usr/bin"},
 				Entrypoint: []string{"/usr/local/bin/oberth"}, Cmd: []string{"serve"}, WorkingDir: "/data",
 			},
 		}, nil
@@ -107,6 +121,11 @@ func Repack(base v1.Image, kind Kind, architecture string, binary []byte, create
 	}
 	if baseConfig.OS != "linux" || baseConfig.Architecture != architecture || baseConfig.Variant != "" {
 		return nil, fmt.Errorf("%s substrate platform is %s/%s/%s, want linux/%s", kind, baseConfig.OS, baseConfig.Architecture, baseConfig.Variant, architecture)
+	}
+	for key, want := range staticgit.Labels() {
+		if baseConfig.Config.Labels[key] != want {
+			return nil, fmt.Errorf("substrate static-component label %s does not match the qualified record", key)
+		}
 	}
 	if len(binary) == 0 {
 		return nil, errors.New("release executable is empty")
@@ -206,12 +225,7 @@ func Repack(base v1.Image, kind Kind, architecture string, binary []byte, create
 	configFile.Created = v1.Time{Time: created}
 	configFile.Author = "Oberth"
 	configFile.Config = definition.config
-	configFile.Config.Labels = map[string]string{
-		"org.opencontainers.image.created":  created.Format(time.RFC3339),
-		"org.opencontainers.image.revision": revision,
-		"org.opencontainers.image.source":   "https://github.com/oberthci/oberth",
-		"org.opencontainers.image.version":  version,
-	}
+	configFile.Config.Labels = releaseLabels(created, version, revision)
 	configFile.History = []v1.History{{
 		Created: v1.Time{Time: created}, CreatedBy: "oberth repository release", Comment: "clean flattened substrate plus exact source-built executable",
 	}}
@@ -411,12 +425,7 @@ func verifyImage(image v1.Image, definition imageContract, architecture string, 
 	}
 	created = created.UTC().Truncate(time.Second)
 	expectedConfig := definition.config
-	expectedConfig.Labels = map[string]string{
-		"org.opencontainers.image.created":  created.Format(time.RFC3339),
-		"org.opencontainers.image.revision": revision,
-		"org.opencontainers.image.source":   "https://github.com/oberthci/oberth",
-		"org.opencontainers.image.version":  version,
-	}
+	expectedConfig.Labels = releaseLabels(created, version, revision)
 	if configFile.OS != "linux" || configFile.Architecture != architecture || !configFile.Created.Equal(created) ||
 		!reflect.DeepEqual(configFile.Config, expectedConfig) || len(configFile.History) != 1 {
 		return errors.New("release image configuration is not the canonical runtime contract")
@@ -446,6 +455,16 @@ func verifyImage(image v1.Image, definition imageContract, architecture string, 
 		}
 		if forbiddenPath(cleanName, definition.forbidden) {
 			return fmt.Errorf("release image contains forbidden repository dependency %s", cleanName)
+		}
+		if cleanName == "usr/bin/git" {
+			hash := sha256.New()
+			if _, err := io.CopyN(hash, archive, header.Size); err != nil {
+				return err
+			}
+			if hex.EncodeToString(hash.Sum(nil)) != definition.gitSHA[architecture] {
+				return errors.New("published static Git bytes differ from the SBOM component record")
+			}
+			continue
 		}
 		if cleanName != definition.imagePath {
 			continue
@@ -500,4 +519,13 @@ func (c PublishConfig) authenticator() authn.Authenticator {
 		return c.Authenticator
 	}
 	return garAuthenticator(c.AccessToken)
+}
+
+func releaseLabels(created time.Time, version, revision string) map[string]string {
+	labels := staticgit.Labels()
+	labels["org.opencontainers.image.created"] = created.Format(time.RFC3339)
+	labels["org.opencontainers.image.revision"] = revision
+	labels["org.opencontainers.image.source"] = "https://github.com/oberthci/oberth"
+	labels["org.opencontainers.image.version"] = version
+	return labels
 }

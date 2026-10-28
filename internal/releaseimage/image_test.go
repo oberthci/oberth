@@ -4,6 +4,8 @@ import (
 	"archive/tar"
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -16,6 +18,7 @@ import (
 	"github.com/google/go-containerregistry/pkg/v1/mutate"
 	"github.com/google/go-containerregistry/pkg/v1/remote/transport"
 	"github.com/google/go-containerregistry/pkg/v1/tarball"
+	"github.com/oberthci/oberth/internal/staticgit"
 )
 
 func TestRepackRemovesPriorOberthAndAddsOnlyExactNewExecutable(t *testing.T) {
@@ -73,6 +76,7 @@ func TestVerifyImageBindsLayerConfigAndExactExecutable(t *testing.T) {
 		t.Fatal(err)
 	}
 	definition, _ := contract(Server)
+	definition.gitSHA = fixtureGitDigests()
 	if err := verifyImage(image, definition, "amd64", binary, created, "v1.2.3", "0123456789abcdef"); err != nil {
 		t.Fatal(err)
 	}
@@ -116,6 +120,7 @@ func TestRepackAcceptsArm64SubstrateForArm64Release(t *testing.T) {
 		t.Fatal(err)
 	}
 	definition, _ := contract(Server)
+	definition.gitSHA = fixtureGitDigests()
 	if err := verifyImage(image, definition, "arm64", binary, created, "v1.2.3", "0123456789abcdef"); err != nil {
 		t.Fatal(err)
 	}
@@ -238,6 +243,7 @@ func testBaseImage(t *testing.T, created time.Time, files map[string]testEntry) 
 	}
 	config.OS = "linux"
 	config.Architecture = "amd64"
+	config.Config.Labels = staticgit.Labels()
 	image, err = mutate.ConfigFile(image, config)
 	if err != nil {
 		t.Fatal(err)
@@ -529,12 +535,7 @@ func TestVerifyImageRejectsMissingExecutable(t *testing.T) {
 	config.Author = "Oberth"
 	definition, _ := contract(Server)
 	config.Config = definition.config
-	config.Config.Labels = map[string]string{
-		"org.opencontainers.image.created":  created.Format("2006-01-02T15:04:05Z07:00"),
-		"org.opencontainers.image.revision": "abc",
-		"org.opencontainers.image.source":   "https://github.com/oberthci/oberth",
-		"org.opencontainers.image.version":  "v1.0.0",
-	}
+	config.Config.Labels = releaseLabels(created, "v1.0.0", "abc")
 	config.History = []v1.History{{
 		Created: v1.Time{Time: created}, CreatedBy: "oberth repository release", Comment: "clean flattened substrate plus exact source-built executable",
 	}}
@@ -570,12 +571,7 @@ func TestVerifyImageRejectsNonExecutablePermissions(t *testing.T) {
 	config.Author = "Oberth"
 	definition, _ := contract(Server)
 	config.Config = definition.config
-	config.Config.Labels = map[string]string{
-		"org.opencontainers.image.created":  created.Format("2006-01-02T15:04:05Z07:00"),
-		"org.opencontainers.image.revision": "abc",
-		"org.opencontainers.image.source":   "https://github.com/oberthci/oberth",
-		"org.opencontainers.image.version":  "v1.0.0",
-	}
+	config.Config.Labels = releaseLabels(created, "v1.0.0", "abc")
 	config.History = []v1.History{{
 		Created: v1.Time{Time: created}, CreatedBy: "oberth repository release", Comment: "clean flattened substrate plus exact source-built executable",
 	}}
@@ -609,12 +605,7 @@ func TestVerifyImageRejectsMissingRequiredBootstrapPath(t *testing.T) {
 	config.Author = "Oberth"
 	definition, _ := contract(Server)
 	config.Config = definition.config
-	config.Config.Labels = map[string]string{
-		"org.opencontainers.image.created":  created.Format("2006-01-02T15:04:05Z07:00"),
-		"org.opencontainers.image.revision": "abc",
-		"org.opencontainers.image.source":   "https://github.com/oberthci/oberth",
-		"org.opencontainers.image.version":  "v1.0.0",
-	}
+	config.Config.Labels = releaseLabels(created, "v1.0.0", "abc")
 	config.History = []v1.History{{
 		Created: v1.Time{Time: created}, CreatedBy: "oberth repository release", Comment: "clean flattened substrate plus exact source-built executable",
 	}}
@@ -665,5 +656,22 @@ func TestCLIRuntimeRejectsMissingGitAndSSH(t *testing.T) {
 				t.Fatalf("substrate missing %s accepted", missing)
 			}
 		})
+	}
+}
+
+func fixtureGitDigests() map[string]string {
+	sum := sha256.Sum256([]byte("git"))
+	return map[string]string{"amd64": hex.EncodeToString(sum[:]), "arm64": hex.EncodeToString(sum[:])}
+}
+func TestProductionVerificationRejectsUnqualifiedStaticGit(t *testing.T) {
+	created := time.Date(2026, 10, 28, 0, 0, 0, 0, time.UTC)
+	base := testBaseImage(t, created, map[string]testEntry{"usr/local/bin/oberth": {body: "old", mode: 0755}, "usr/bin/git": {body: "git", mode: 0755}, "usr/local/bin/oberth-git-ssh": {link: "oberth", mode: 0777}, "etc/ssl/certs/ca-certificates.crt": {body: "roots", mode: 0644}})
+	image, err := Repack(base, Server, "amd64", []byte("new"), created, "test", "rev")
+	if err != nil {
+		t.Fatal(err)
+	}
+	definition, _ := contract(Server)
+	if err := verifyImage(image, definition, "amd64", []byte("new"), created, "test", "rev"); err == nil {
+		t.Fatal("arbitrary Git bytes accepted under qualified static-component labels")
 	}
 }

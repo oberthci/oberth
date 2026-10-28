@@ -166,7 +166,7 @@ func ValidateSHA(value string) error {
 func ValidateBranch(value string) error { return validateRefPart("branch", value) }
 func ValidateTag(value string) error    { return validateRefPart("tag", value) }
 
-// ValidateUpstream permits only explicit SSH/HTTPS URLs and absolute local
+// ValidateUpstream permits only explicit SSH URLs and absolute local
 // paths used by hermetic tests. Git helper protocols, option-like values,
 // embedded URL credentials, and control characters fail closed.
 func ValidateUpstream(value string) error {

@@ -85,7 +85,17 @@ case "$1" in
  *) exit 90;;
 esac`)
 	f.tool("trivy", ":")
-	f.tool("oberth-release-image", ":")
+	f.tool("oberth-release-image", `case "$1" in
+ static-sbom) printf 'fixture SBOM\n' >"$3";;
+ *) :;;
+ esac`)
+	f.write("hack/scan-static-git.sh", `#!/bin/sh
+set -eu
+for arch in amd64 arm64; do test -s "$1/static-git-$arch.cdx.json"; done
+test -s "$1/static-git-control.cdx.json"
+printf 'static-c-scan\n' >>"$FIXTURE_TRACE"
+test ! -e "$FIXTURE_ROOT/fail-static-scan"
+`)
 	f.tool("oberth-release-support", `case "$1" in
  registry-token) /usr/bin/python3 -I -S -B - "$2" "$3" "$4" <<'PYTOKEN'
 import json, os, stat, sys
@@ -385,5 +395,14 @@ func TestFinalizeRequiresBoundReceiptAndNeverExecutesOtherPayload(t *testing.T) 
 				t.Fatalf("finalize executed downloaded bytes with credentials: %s", f.log())
 			}
 		})
+	}
+}
+
+func TestReleaseRefusesSigningAfterStaticComponentScanFailure(t *testing.T) {
+	f := newReleaseRuntimeFixture(t)
+	f.write("fail-static-scan", "fixture failure")
+	out, err := f.run("publish-images", true)
+	if err == nil || !strings.Contains(f.log(), "static-c-scan") || strings.Contains(f.log(), "cosign:sign:") {
+		t.Fatalf("C scan failure did not refuse signing: %v %s %s", err, out, f.log())
 	}
 }

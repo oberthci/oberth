@@ -26,23 +26,20 @@ RUN --mount=type=cache,id=oberth-server-${BUILD_CACHE_NAMESPACE}-gomod,target=/g
 # shell tools enter the runtime. A source change must update both the tar hash
 # and the reviewed local-transport patch before rebuilding the substrate.
 FROM --platform=$TARGETPLATFORM golang:1.26.10-alpine3.23@sha256:a07f231c19b03e6106cf442f02a5bcf262147e744d15b7b5e4b6d81d420c70a0 AS git-build
-RUN apk add --no-cache build-base zlib-dev zlib-static patch linux-headers ca-certificates=20261020-r0
-WORKDIR /git
-RUN wget -qO /tmp/git.tar.xz https://www.kernel.org/pub/software/scm/git/git-2.56.0.tar.xz && \
-    echo "26c56c296b38c0695b26fa95f475f1d01704d2d38e73465ca30b0b2f5dc789d3  /tmp/git.tar.xz" | sha256sum -c - && \
-    tar -xJf /tmp/git.tar.xz --strip-components=1 && rm /tmp/git.tar.xz
+COPY internal/staticgit/build.env /pins/static-git.env
+COPY hack/install-static-git-packages.sh /tmp/install-static-git-packages.sh
+RUN /bin/sh /tmp/install-static-git-packages.sh /pins/static-git.env
 COPY hack/static-git-no-shell.patch /tmp/static-git-no-shell.patch
-RUN patch -p1 --fuzz=0 < /tmp/static-git-no-shell.patch && \
-    make -j2 git prefix=/usr CFLAGS="-O2 -ffile-prefix-map=/git=." LDFLAGS=-static \
-      NO_CURL=YesPlease NO_OPENSSL=YesPlease NO_EXPAT=YesPlease \
-      NO_PERL=YesPlease NO_PYTHON=YesPlease NO_TCLTK=YesPlease NO_GETTEXT=YesPlease \
-      NO_ICONV=YesPlease NO_LIBPCRE2=YesPlease NO_REGEX=YesPlease NO_RUST=YesPlease && \
-    mkdir /out && cp git /out/git && strip /out/git && \
-    ! readelf -l /out/git | grep -q INTERP && ! readelf -d /out/git | grep -q NEEDED
+COPY hack/build-static-git.sh /tmp/build-static-git.sh
+RUN /bin/sh /tmp/build-static-git.sh /pins/static-git.env /tmp/static-git-no-shell.patch /out
 
 # Rebuild both platform substrates and hand off their exact index before
 # changing the release pin. The source Git CLI is the only serving backend.
 FROM scratch AS runtime
+LABEL org.oberth.static-git.version="2.56.0" \
+      org.oberth.static-git.source-sha256="26c56c296b38c0695b26fa95f475f1d01704d2d38e73465ca30b0b2f5dc789d3" \
+      org.oberth.static-git.musl="1.2.5-r24" \
+      org.oberth.static-git.zlib="1.3.2-r1"
 COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 COPY --from=build --chmod=0755 /out/ /usr/local/bin/
 COPY --from=git-build --chmod=0755 /out/git /usr/bin/git
