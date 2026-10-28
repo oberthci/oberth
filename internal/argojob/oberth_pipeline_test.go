@@ -3,13 +3,14 @@ package argojob
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"strings"
 	"testing"
 
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
+	"sigs.k8s.io/yaml"
 
-	"github.com/oberthci/oberth/internal/releaseimage"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 	"github.com/oberthci/oberth/pkg/periapsis"
 )
@@ -44,8 +45,19 @@ func oberthConfig() Config {
 	config.ReleaseWIF.Repositories = map[string]ReleaseWIFRepository{"github/skipops/oberth": {ServiceAccountName: "oberth-per-repo", Templates: map[string]string{"release-publish-images": "image-writer", "release-publish-kvm-harness": "image-writer", "release-publish-chart": "chart-writer", "release-verify": "image-reader"}}}
 	// Oberth's own pipeline uses golang: for toolchain steps and aquasec/trivy:
 	// for the security scan (the official image, pinned by digest).
-	config.RunnerImagePrefixes = []string{"golang:", "aquasec/trivy:", releaseimage.ServerSubstrate}
+	config.RunnerImagePrefixes = []string{"golang:", "debian:", "aquasec/trivy:"}
+	config.NonrootProfile = argoworkflow.NonrootStaticProfile
 	return config
+}
+
+// Selected nonroot leaves require the existing verified controller profile.
+// Unit pipeline renders use the existing private controller-proof fixture;
+// production admission still requires the real current controller proof.
+func buildOberthPipeline(config Config, request Request) (*wfv1.Workflow, error) {
+	if request.Trigger == periapsis.TriggerCI {
+		request = nonrootFixtureProof(request)
+	}
+	return Build(config, request)
 }
 
 // oberthReleaseApprovedSecrets returns the approval-table grants for
@@ -67,7 +79,7 @@ func oberthReleaseApprovedSecrets() map[string]bool {
 // TestOberthBuildPipelineIsAdmissible proves the CI document decodes, clears
 // the structural gate, and produces a submission bound to the CI identity.
 func TestOberthBuildPipelineIsAdmissible(t *testing.T) {
-	built, err := Build(oberthConfig(), Request{
+	built, err := buildOberthPipeline(oberthConfig(), Request{
 		RunID: "run-abc123", Name: "oberth-oberth-run-abc1-aabbccddeeff",
 		Repo: "oberth", UpstreamOrg: "skipops", UpstreamName: "github",
 		Ref: "refs/heads/main", SHA: testSHA, Trigger: periapsis.TriggerCI,
@@ -82,6 +94,24 @@ func TestOberthBuildPipelineIsAdmissible(t *testing.T) {
 	}
 	if built.Spec.AutomountServiceAccountToken == nil || *built.Spec.AutomountServiceAccountToken {
 		t.Fatal("the CI pipeline automounts a ServiceAccount token")
+	}
+
+	foundQualification := false
+	for _, template := range built.Spec.Templates {
+		if template.Name != "test-static-git-runtime" {
+			continue
+		}
+		foundQualification = true
+		security := template.Container.SecurityContext
+		if security == nil || security.RunAsUser == nil || *security.RunAsUser != 65534 || security.RunAsGroup == nil || *security.RunAsGroup != 65534 || security.ReadOnlyRootFilesystem == nil || !*security.ReadOnlyRootFilesystem {
+			t.Fatal("static Git qualification lost its assigned nonroot/read-only baseline")
+		}
+		if err := credentialMaterial(&template); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if !foundQualification {
+		t.Fatal("static Git qualification missing")
 	}
 
 	// Declared weight matches periapsis.go's JobSizes{"ci": "L"}.
@@ -119,7 +149,7 @@ func TestOberthBuildPipelineIsAdmissible(t *testing.T) {
 // same gate and binds the release identity, and that its declared secret paths
 // are the ones periapsis.go declares.
 func TestOberthReleasePipelineIsAdmissible(t *testing.T) {
-	built, err := Build(oberthConfig(), Request{
+	built, err := buildOberthPipeline(oberthConfig(), Request{
 		RunID: "run-abc123", Name: "oberth-oberth-run-abc1-aabbccddeeff",
 		Repo: "oberth", UpstreamOrg: "skipops", UpstreamName: "github",
 		Ref: "refs/tags/v0.1.0", SHA: testSHA, Trigger: periapsis.TriggerRelease,
@@ -185,7 +215,7 @@ func TestOberthReleasePipelineIsAdmissible(t *testing.T) {
 // This is the trust-tier boundary: a branch push must never reach release
 // credentials, regardless of how the document was authored.
 func TestOberthReleasePipelineOnBranchPushRefusesSystemPaths(t *testing.T) {
-	_, err := Build(oberthConfig(), Request{
+	_, err := buildOberthPipeline(oberthConfig(), Request{
 		RunID: "run-abc123", Name: "oberth-oberth-run-abc1-aabbccddeeff",
 		Repo: "oberth", UpstreamOrg: "skipops", UpstreamName: "github",
 		Ref: "refs/heads/main", SHA: testSHA, Trigger: periapsis.TriggerCI,
@@ -206,7 +236,7 @@ func TestOberthReleasePipelineOnBranchPushRefusesSystemPaths(t *testing.T) {
 func TestOberthReleasePipelineOnBranchRefusedWithoutAllowlist(t *testing.T) {
 	// No approval-table grants: the release document's system paths are
 	// CI-ineligible regardless.
-	_, err := Build(oberthConfig(), Request{
+	_, err := buildOberthPipeline(oberthConfig(), Request{
 		RunID: "run-abc123", Name: "oberth-oberth-run-abc1-aabbccddeeff",
 		Repo: "oberth", UpstreamOrg: "skipops", UpstreamName: "github",
 		Ref: "refs/heads/main", SHA: testSHA, Trigger: periapsis.TriggerCI,
@@ -290,7 +320,7 @@ func TestOberthReleasePipelineWrapsCredentialedStepsWithSecretstoreExec(t *testi
 // root, so each credentialed release leaf must create its own private child
 // inside the server-owned memory volume before fetching any secret.
 func TestOberthReleasePublisherUsesPrivateChildDir(t *testing.T) {
-	built, err := Build(oberthConfig(), Request{
+	built, err := buildOberthPipeline(oberthConfig(), Request{
 		RunID: "run-abc123", Name: "oberth-oberth-run-abc1-aabbccddeeff",
 		Repo: "oberth", UpstreamOrg: "skipops", UpstreamName: "github",
 		Ref: "refs/tags/v0.1.0", SHA: testSHA, Trigger: periapsis.TriggerRelease,
@@ -418,7 +448,7 @@ func TestOberthPipelinesMountTheServerProvidedSource(t *testing.T) {
 			trigger = periapsis.TriggerRelease
 			approved = oberthReleaseApprovedSecrets()
 		}
-		built, err := Build(oberthConfig(), Request{
+		built, err := buildOberthPipeline(oberthConfig(), Request{
 			RunID: "run-abc123", Name: "oberth-oberth-run-abc1-aabbccddeeff",
 			Repo: "oberth", UpstreamOrg: "skipops", UpstreamName: "github", Ref: "refs/heads/main",
 			SHA: testSHA, Trigger: trigger, Source: loadPipeline(t, name),
@@ -585,7 +615,7 @@ func TestOberthPipelinesPinCompatibleGoToolchains(t *testing.T) {
 // chain (secretstore exec or envconsul) and withholds it from non-credentialed
 // templates (setup, lint, test, scan, chart-test, build, package-chart).
 func TestOberthReleasePipelineScopesTokenToCredentialedTemplates(t *testing.T) {
-	workflow, err := Build(oberthConfig(), Request{
+	workflow, err := buildOberthPipeline(oberthConfig(), Request{
 		RunID: "run-abc123", Name: "oberth-oberth-run-abc1-aabbccddeeff",
 		Repo: "oberth", UpstreamOrg: "skipops", UpstreamName: "github",
 		Ref: "refs/tags/v0.1.0", SHA: testSHA, Trigger: periapsis.TriggerRelease,
@@ -783,4 +813,30 @@ func releasePipelineWithoutWIF(t *testing.T) []byte {
 	t.Helper()
 	source := string(loadPipeline(t, "release.yaml"))
 	return []byte(regexp.MustCompile(`(?m)^        oberth.ci/release-wif-role: [a-z-]+\n`).ReplaceAllString(source, ""))
+}
+
+func TestStaticGitQualificationUsesOnlyInstalledRunnerPrefixes(t *testing.T) {
+	body, err := os.ReadFile(filepath.Join(repositoryRoot(t), "charts/oberth/values.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var values struct {
+		RunnerImagePrefixes []string `json:"runnerImagePrefixes"`
+	}
+	if err := yaml.Unmarshal(body, &values); err != nil {
+		t.Fatal(err)
+	}
+	config := oberthConfig()
+	if !reflect.DeepEqual(config.RunnerImagePrefixes, values.RunnerImagePrefixes) {
+		t.Fatalf("pipeline admission fixture differs from installed prefixes: %v vs %v", config.RunnerImagePrefixes, values.RunnerImagePrefixes)
+	}
+	request := Request{RunID: "run-static-git", Name: "oberth-static-git", Repo: "oberth", UpstreamOrg: "skipops", UpstreamName: "github", Ref: "refs/heads/main", SHA: testSHA, Trigger: periapsis.TriggerCI, Source: loadPipeline(t, "build.yaml")}
+	if _, err := Build(config, request); err == nil {
+		t.Fatal("nonroot qualification accepted without current controller proof")
+	}
+	request = nonrootFixtureProof(request)
+	config.NonrootProfile = ""
+	if _, err := Build(config, request); err == nil {
+		t.Fatal("nonroot qualification accepted with disabled controller profile")
+	}
 }

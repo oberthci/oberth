@@ -42,12 +42,19 @@ multi-pack history gate retains full-commit archive coverage and the checkout
 regression; go-git-specific decoder and comparison tests were removed together
 with that implementation. The required `build-static-git-runtime` / `test-static-git-runtime` CI chain
 builds the same pinned C recipe as Dockerfile's git-build stage, then runs the
-complete tagged CLI suite inside the scratch substrate with those fresh Git
-and Oberth binaries mounted read-only. It covers early upload/receive remote
-exit 128, host-key mismatch, fetch and cancellation. CI retains its server-owned
-security baseline; the local packet additionally qualifies UID 65534. The
-qualification is currently native-amd64; arm64 has static/byte/scan checks,
-not a behavioural-equivalence claim.
+complete tagged CLI suite on the already allowed, digest-pinned Go runner.
+The built scratch-like payload is mounted read-only; Oberth's verified nonroot
+profile assigns real UID/GID 65534. A static, single-threaded CI launcher uses
+Landlock to expose only payload/fixture/tmp/proc/dev reads and permit execution
+only of candidate Git, Oberth and the test executable. The runner's templates
+and interpreters cannot mask missing runtime dependencies; PATH has no shell.
+Git object/quarantine moves remain allowed within non-executable `/tmp`.
+Landlock ABI 2 or newer and the already enabled `nonroot-static-v1` controller
+profile are required: unavailable restrictions fail closed. No image-prefix,
+privilege, capability or security-context exception is introduced. The full
+suite retains early upload/receive exit128, mismatch, fetch and cancellation
+checks, plus explicit UID/capability/read-only/no-shell assertions. Native-amd64
+behaviour is qualified; arm64 retains static/byte/scan checks.
 
 The receive hooks are symlinks to the running Oberth executable. Native
 pre-receive/update dispatch preserves batch/public-ref bounds, duplicate

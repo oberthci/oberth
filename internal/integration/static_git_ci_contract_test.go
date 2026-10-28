@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
-	"github.com/oberthci/oberth/internal/releaseimage"
 	"sigs.k8s.io/yaml"
 )
 
@@ -24,10 +23,13 @@ func checkStaticGitGate(workflow *wfv1.Workflow) error {
 	if strings.Join(build.Container.Command, " ") != "/bin/sh" || strings.Join(build.Container.Args, " ") != "hack/qualify-static-git-build.sh" {
 		return fmt.Errorf("canonical build bypassed")
 	}
-	if runtime.Container.Image != releaseimage.ServerSubstrate || strings.Join(runtime.Container.Command, " ") != "/qualification/gitcache.test" || strings.Contains(strings.Join(runtime.Container.Args, " "), "-test.run") || runtime.Container.WorkingDir != "/qualification/source/internal/gitcache" {
+	if runtime.Container.Image != "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd" || strings.Join(runtime.Container.Command, " ") != "/qualification/launch-static-git" || len(runtime.Container.Args) != 0 || runtime.Container.WorkingDir != "/qualification/source/internal/gitcache" {
 		return fmt.Errorf("qualification bypassed or narrowed")
 	}
-	wanted := map[string]string{"/qualification": "static-git-qualification", "/usr/bin/git": "static-git-qualification/git", "/usr/local/bin/oberth": "static-git-qualification/oberth"}
+	if workflow.Annotations["oberth.ci/nonroot-templates"] != "test-static-git-runtime" {
+		return fmt.Errorf("qualification lost server-owned UID/GID65534 profile")
+	}
+	wanted := map[string]string{"/qualification": "static-git-qualification", "/usr/bin/git": "static-git-qualification/rootfs/usr/bin/git", "/usr/local/bin": "static-git-qualification/rootfs/usr/local/bin", "/etc/ssl/certs/ca-certificates.crt": "static-git-qualification/rootfs/etc/ssl/certs/ca-certificates.crt"}
 	for _, mount := range runtime.Container.VolumeMounts {
 		if path, ok := wanted[mount.MountPath]; ok {
 			if !mount.ReadOnly || mount.Name != "work" || mount.SubPath != path {
@@ -77,18 +79,24 @@ func TestStaticGitRuntimeIsARequiredFreshArtifactGate(t *testing.T) {
 	if err := checkStaticGitGate(&workflow); err != nil {
 		t.Fatal(err)
 	}
-	for _, fault := range []string{"stale-git", "writable-helper", "conditional", "missing-gate"} {
+	for _, fault := range []string{"stale-git", "writable-helper", "conditional", "missing-gate", "wrong-runner", "missing-nonroot"} {
 		t.Run(fault, func(t *testing.T) {
 			candidate := workflow.DeepCopy()
+			if fault == "missing-nonroot" {
+				delete(candidate.Annotations, "oberth.ci/nonroot-templates")
+			}
 			for i := range candidate.Spec.Templates {
 				template := &candidate.Spec.Templates[i]
 				if template.Name == "test-static-git-runtime" {
+					if fault == "wrong-runner" {
+						template.Container.Image = "europe-west4-docker.pkg.dev/skipopsmain/oberth/oberth@sha256:" + strings.Repeat("f", 64)
+					}
 					for j := range template.Container.VolumeMounts {
 						mount := &template.Container.VolumeMounts[j]
 						if fault == "stale-git" && mount.MountPath == "/usr/bin/git" {
 							mount.SubPath = "old/git"
 						}
-						if fault == "writable-helper" && mount.MountPath == "/usr/local/bin/oberth" {
+						if fault == "writable-helper" && mount.MountPath == "/usr/local/bin" {
 							mount.ReadOnly = false
 						}
 					}
@@ -114,7 +122,7 @@ func TestStaticGitRuntimeIsARequiredFreshArtifactGate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, required := range []string{"hack/install-static-git-packages.sh", "hack/build-static-git.sh", "-tags=staticgit_qualification", "./cmd/oberth", "./hack/static-git-metadata", "hack/scan-static-git.sh"} {
+	for _, required := range []string{"hack/install-static-git-packages.sh", "hack/build-static-git.sh", "-tags=staticgit_qualification", "./cmd/oberth", "./hack/static-git-metadata", "hack/scan-static-git.sh", "hack/static-git-launcher.c", "$rootfs/usr/local/bin/oberth-git-ssh"} {
 		if !strings.Contains(string(recipe), required) {
 			t.Fatalf("CI build omitted %s", required)
 		}

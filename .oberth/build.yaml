@@ -63,6 +63,7 @@ kind: Workflow
 metadata:
   annotations:
     oberth.ci/size: L
+    oberth.ci/nonroot-templates: test-static-git-runtime
 spec:
   entrypoint: ci
   # Bound repository-local fan-out; keep node CPU available to other workflows.
@@ -1151,10 +1152,11 @@ spec:
         oberth.ci/workspace-mounts: none
         oberth.ci/workspace-env: none
     container:
-      image: "europe-west4-docker.pkg.dev/skipopsmain/oberth/oberth@sha256:f3013396f001c657cf5b1de69827fcb93515274f283e5cd285fbeef729fd24e2"
+      image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
       workingDir: /qualification/source/internal/gitcache
-      command: ["/qualification/gitcache.test"]
-      args: ["-test.v", "-test.timeout=15m", "-test.parallel=2"]
+      # Server-owned nonroot profile supplies UID/GID65534 and read-only mounts.
+      # The static launcher denies execution outside the candidate payload.
+      command: ["/qualification/launch-static-git"]
       env:
       - name: HOME
         value: /tmp
@@ -1169,15 +1171,16 @@ spec:
         readOnly: true
       - name: work
         mountPath: /usr/bin/git
-        subPath: static-git-qualification/git
+        subPath: static-git-qualification/rootfs/usr/bin/git
         readOnly: true
       - name: work
-        mountPath: /usr/local/bin/oberth
-        subPath: static-git-qualification/oberth
+        mountPath: /usr/local/bin
+        subPath: static-git-qualification/rootfs/usr/local/bin
         readOnly: true
       - name: work
-        mountPath: /tmp
-        subPath: static-git-qualification/tmp
+        mountPath: /etc/ssl/certs/ca-certificates.crt
+        subPath: static-git-qualification/rootfs/etc/ssl/certs/ca-certificates.crt
+        readOnly: true
       resources:
         requests:
           cpu: "2"

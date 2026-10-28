@@ -171,7 +171,7 @@ func TestPlannedStepsAgreeWithObservedStepsForOberthsOwnPipelines(t *testing.T) 
 			if entry.trigger == periapsis.TriggerRelease {
 				approved = oberthReleaseApprovedSecrets()
 			}
-			built, err := Build(oberthConfig(), Request{
+			built, err := buildOberthPipeline(oberthConfig(), Request{
 				RunID: "run-abc123", Name: "oberth-oberth-run-abc1-aabbccddeeff",
 				Repo: "oberth", UpstreamOrg: "skipops", UpstreamName: "github",
 				Ref: "refs/heads/main", SHA: testSHA, Trigger: entry.trigger,

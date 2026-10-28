@@ -88,7 +88,7 @@ func buildOberthPipelineForIsolation(t *testing.T, trigger periapsis.Trigger, so
 		approved = oberthReleaseApprovedSecrets()
 		ref = "refs/tags/v0.1.0"
 	}
-	return Build(config, Request{
+	return buildOberthPipeline(config, Request{
 		RunID: "run-abc123", Name: "oberth-oberth-run-abc1-aabbccddeeff",
 		Repo: "oberth", UpstreamOrg: "skipops", UpstreamName: "github",
 		Ref: ref, SHA: testSHA, Trigger: trigger,
