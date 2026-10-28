@@ -90,6 +90,19 @@ operator's responsibility; Helm rollback alone cannot undo a migration.
   zombie. Because a transport child (`git-upload-pack`, `git-receive-pack`)
   loses `GIT_CONFIG_COUNT` from its environment, this file is the only layer
   that reaches it; do not replace it with environment variables alone.
+- Linux CLI Git commands start in distinct process groups. Oberth enables
+  unprivileged child-subreaper adoption, observes the leader with
+  `waitid(WNOWAIT)`, and keeps that leader unreaped while signaling its group.
+  This pins the group ID against reuse. Adopted zombies are reaped through
+  pidfds only after verifying their group and parent; unrelated commands keep
+  their own `exec.Cmd.Wait` status. Cancellation/deadline causes are preserved,
+  descendant draining has a five-second refusal bound, and cleanup errors are
+  surfaced. Procfs and pidfd wait support are required before starting a CLI
+  command; no capabilities, hostPath or Kubernetes RBAC are added. Managed Git
+  maintenance must keep descendants inside their command group; the reaper
+  never signals outside that group. Darwin uses kqueue to keep the same
+  leader-before-signal invariant and native init orphan reaping; other platforms
+  refuse CLI process execution before forking.
 - The chart's `prepare-caches` init container creates the CI cache root
   `/var/cache/oberth/ci` and release cache root `/var/cache/oberth/release` and
   hands them to UID/GID `65534` before the server starts; no manual node
