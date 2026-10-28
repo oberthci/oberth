@@ -49,14 +49,21 @@ type shadowState struct {
 	jobs                                chan shadowJob
 	command                             []string
 	cache                               *Cache
+	withTimeout                         func(context.Context, time.Duration) (context.Context, context.CancelFunc)
 }
 
 func newShadowState(c *Cache, parent context.Context, command []string) *shadowState {
+	return newShadowStateWithTimeout(c, parent, command, context.WithTimeout)
+}
+
+// Keep the observer deadline separate from CLI delivery. Tests supply a
+// synchronized deadline here; production always uses context.WithTimeout.
+func newShadowStateWithTimeout(c *Cache, parent context.Context, command []string, withTimeout func(context.Context, time.Duration) (context.Context, context.CancelFunc)) *shadowState {
 	if parent == nil {
 		parent = context.Background()
 	}
 	ctx, cancel := context.WithCancel(parent)
-	s := &shadowState{ctx: ctx, cancel: cancel, done: make(chan struct{}), jobs: make(chan shadowJob, shadowQueueSize), cache: c}
+	s := &shadowState{ctx: ctx, cancel: cancel, done: make(chan struct{}), jobs: make(chan shadowJob, shadowQueueSize), cache: c, withTimeout: withTimeout}
 	s.command = append([]string(nil), command...)
 	if len(s.command) == 0 {
 		if executable, err := os.Executable(); err == nil {
@@ -160,7 +167,7 @@ func (s *shadowState) work() {
 				close(job.barrier)
 				continue
 			}
-			ctx, cancel := context.WithTimeout(s.ctx, s.cache.timeout)
+			ctx, cancel := s.withTimeout(s.ctx, s.cache.timeout)
 			comparison, err := s.compare(ctx, job)
 			cancel()
 
