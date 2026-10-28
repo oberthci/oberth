@@ -26,6 +26,12 @@ var (
 )
 
 func main() {
+	if len(os.Args) > 2 && os.Args[1] == "backup" && os.Args[2] == "database" {
+		// kubectl exec may lose its stdout reader. Return EPIPE through the
+		// backup writer so deferred plaintext cleanup runs instead of taking
+		// Go's special SIGPIPE exit on fd 1. SIGKILL is reclaimed next backup.
+		signal.Ignore(syscall.SIGPIPE)
+	}
 	if len(os.Args) > 1 && os.Args[1] == "internal-step-exec" {
 		os.Exit(stepusage.Run(os.Args[2:], os.Stdin, os.Stdout, os.Stderr))
 	}

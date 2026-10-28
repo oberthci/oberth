@@ -84,25 +84,72 @@ func TestBackupCommandKeepsStderrOutOfArchive(t *testing.T) {
 	}
 }
 
-func TestBackupOldLimitFlagFallsBackToStableCopy(t *testing.T) {
+func TestBackupOlderServerUsesInPodPath(t *testing.T) {
+	for _, limit := range []int64{0, store.DefaultBackupMaxBytes, 128 << 20, 2 << 30} {
+		t.Run(fmt.Sprint(limit), func(t *testing.T) {
+			archive, _, _ := sourceDatabase(t)
+			source := newFakeBackupCluster(t, sourceCompat)
+			var output bytes.Buffer
+			deps := source.deps(&output)
+			deps.maxDatabaseBytes = limit
+			calls := 0
+			deps.runIO = func(_ context.Context, _ io.Reader, out io.Writer, _ string, args ...string) error {
+				if !strings.Contains(strings.Join(args, " "), "backup database") {
+					t.Fatal("utility fallback used", args)
+				}
+				calls++
+				if strings.Contains(strings.Join(args, " "), "--max-database-bytes") {
+					if _, err := out.Write([]byte("partial")); err != nil {
+						return err
+					}
+					return errors.New("oberth: flag provided but not defined: -max-database-bytes")
+				}
+				_, err := out.Write(archive)
+				return err
+			}
+			path := filepath.Join(t.TempDir(), "database.tar")
+			protocol := store.ProtocolConfig{SchemaIdentity: sourceCompat.SchemaIdentity, AuditDomain: sourceCompat.AuditDomain}
+			mode, err := snapshotServerDatabase(t.Context(), deps, DefaultNamespace, "oberth-1", store.LatestMigrationVersion(), protocol, t.TempDir(), path)
+			wantCalls := 1
+			if limit != 0 && limit != store.DefaultBackupMaxBytes {
+				wantCalls = 2
+			}
+			if err != nil || mode != snapshotInPod || calls != wantCalls {
+				t.Fatal(mode, err, calls, output.String())
+			}
+			if _, err := verifyDatabaseArchive(t.Context(), path, store.LatestMigrationVersion(), protocol, limit); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestBackupOldFlagSmallLimitKeepsFallbackBound(t *testing.T) {
 	archive, raw, _ := sourceDatabase(t)
 	source := newFakeBackupCluster(t, sourceCompat)
 	source.database, source.rawFiles = archive, raw
 	var output bytes.Buffer
 	deps := source.deps(&output)
+	deps.maxDatabaseBytes = 64 << 20 // Less than the old server's own fixed cap.
 	run := deps.runIO
+	calls := 0
 	deps.runIO = func(ctx context.Context, in io.Reader, out io.Writer, name string, args ...string) error {
 		if strings.Contains(strings.Join(args, " "), "backup database") {
+			calls++
+			if !strings.Contains(strings.Join(args, " "), "--max-database-bytes") {
+				t.Fatal("small bound dropped")
+			}
 			return errors.New("oberth: flag provided but not defined: -max-database-bytes")
 		}
 		return run(ctx, in, out, name, args...)
 	}
 	path := filepath.Join(t.TempDir(), "database.tar")
-	mode, err := snapshotServerDatabase(t.Context(), deps, DefaultNamespace, "oberth-1", store.LatestMigrationVersion(), store.ProtocolConfig{SchemaIdentity: sourceCompat.SchemaIdentity, AuditDomain: sourceCompat.AuditDomain}, t.TempDir(), path)
-	if err != nil || mode != snapshotStableCopy {
-		t.Fatal(mode, err)
+	protocol := store.ProtocolConfig{SchemaIdentity: sourceCompat.SchemaIdentity, AuditDomain: sourceCompat.AuditDomain}
+	mode, err := snapshotServerDatabase(t.Context(), deps, DefaultNamespace, "oberth-1", store.LatestMigrationVersion(), protocol, t.TempDir(), path)
+	if err != nil || mode != snapshotStableCopy || calls != 1 {
+		t.Fatal(mode, err, calls)
 	}
-	if _, err := verifyDatabaseArchive(t.Context(), path, store.LatestMigrationVersion(), store.ProtocolConfig{SchemaIdentity: sourceCompat.SchemaIdentity, AuditDomain: sourceCompat.AuditDomain}, 0); err != nil {
+	if _, err := verifyDatabaseArchive(t.Context(), path, store.LatestMigrationVersion(), protocol, deps.maxDatabaseBytes); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -125,7 +172,7 @@ func TestBackupArchiveLimitRefusesBeforeBody(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err := openBackupArchive(t.Context(), file, fakeEnvelopeCipher{}, t.TempDir(), limit)
-	if err == nil || !strings.Contains(err.Error(), fmt.Sprint(size)) || !strings.Contains(err.Error(), fmt.Sprint(size-1)) {
+	if err == nil || !strings.Contains(err.Error(), fmt.Sprint(size)) || !strings.Contains(err.Error(), fmt.Sprint(size-1)) || !strings.Contains(err.Error(), "--max-database-bytes") {
 		t.Fatal(err)
 	}
 }

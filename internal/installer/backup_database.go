@@ -94,19 +94,33 @@ func snapshotServerDatabase(ctx context.Context, deps backupDeps, namespace, pod
 		return "", err
 	}
 	var lastErr error
+	// Preserve the working in-pod path on older servers for ordinary requests.
+	// The workstation still verifies the received archive against this limit.
+	useLimitFlag := limit != store.DefaultBackupMaxBytes
 	for attempt := 1; attempt <= databaseSnapshotAttempts; attempt++ {
 		args := kubectlExecArgs(deps.ContextName, namespace, pod, serverContainerName, false,
-			"oberth", "backup", "database", "--database", serverDatabasePath, "--max-database-bytes", strconv.FormatInt(limit, 10))
+			"oberth", "backup", "database", "--database", serverDatabasePath)
+		if useLimitFlag {
+			args = append(args, "--max-database-bytes", strconv.FormatInt(limit, 10))
+		}
 		_, err := streamBackupFile(ctx, deps, destination, limit+(64<<10), args)
+		if err != nil && ctx.Err() == nil && useLimitFlag &&
+			strings.Contains(err.Error(), "flag provided but not defined: -max-database-bytes") && limit >= 128<<20 {
+			// The old server's fixed 128 MiB cap is stricter. Retry its original
+			// invocation before paying for a utility Pod or requiring a stable
+			// transfer of the live main/WAL. Keep the local stream/verify bound.
+			useLimitFlag = false
+			args = args[:len(args)-2]
+			_, err = streamBackupFile(ctx, deps, destination, limit+(64<<10), args)
+		}
 		if err == nil {
 			return snapshotInPod, nil
 		}
 		if ctx.Err() != nil {
 			return "", ctx.Err()
 		}
-		// Old images cannot accept the new limit flag. Do not retry their
-		// hard cap or silently drop the requested bound. Use the existing
-		// read-only utility fallback and snapshot its stable copy locally.
+		// An older server with no backup command, an old cap refusal, or a
+		// requested bound smaller than its cap needs the stable-copy fallback.
 		if strings.Contains(err.Error(), `unknown command "backup"`) ||
 			strings.Contains(err.Error(), "flag provided but not defined: -max-database-bytes") ||
 			strings.Contains(err.Error(), "backup size refused") {
