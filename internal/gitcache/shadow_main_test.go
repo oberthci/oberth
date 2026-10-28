@@ -11,6 +11,12 @@ import (
 // Exercise newShadowState's actual default executable/entrypoint in the test
 // binary, without substituting a custom ShadowCommand for that wiring test.
 func TestMain(m *testing.M) {
+	if code, handled := ReceiveHookInvocation(context.Background(), os.Args, os.Stdin, os.Stderr); handled {
+		os.Exit(code)
+	}
+	if code, handled := nativeFixtureInvocation(); handled {
+		os.Exit(code)
+	}
 	if len(os.Args) > 1 && os.Args[1] == "internal-gitcache-shadow" {
 		ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 		code := RunShadowHelper(ctx, os.Args[2:], os.Stdout)

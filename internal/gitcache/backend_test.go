@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,6 +17,13 @@ import (
 // tests with an explicit executable continue to exercise the CLI adapter.
 func newBackendTestCache(t *testing.T, config Config) (*Cache, error) {
 	t.Helper()
+	// Native hook fixtures execute this test binary once per ref. Disable only
+	// race's one-second successful-exit sleep; keep detection and exit status.
+	config.Env = maps.Clone(config.Env)
+	if config.Env == nil {
+		config.Env = make(map[string]string)
+	}
+	config.Env["GORACE"] = "atexit_sleep_ms=0"
 	selected := config.Backend
 	if selected == "" {
 		selected = Backend(os.Getenv("OBERTH_TEST_GIT_BACKEND"))

@@ -23,20 +23,16 @@ func TestServerImageUsesPinnedMinimalContract(t *testing.T) {
 		// (default dev) so release images report the real tag.
 		"ARG VERSION=dev",
 		`go build -trimpath -buildvcs=false -ldflags="-s -w -X main.version=${VERSION}" -o /out/oberth ./cmd/oberth`,
-		"FROM alpine:3.23@sha256:fd791d74b68913cbb027c6546007b3f0d3bc45125f797758156952bc2d6daf40 AS cli-runtime",
-		"FROM scratch AS scratch-runtime",
-		"FROM cli-runtime AS runtime",
-		"COPY third_party/go-git ./third_party/go-git",
+		"FROM scratch AS runtime",
 		"ca-certificates=20261020-r0",
-		"git=2.52.0-r0",
-		"libcrypto3=3.5.9-r0",
-		"libssl3=3.5.9-r0",
-		"pcre2=10.49-r0",
-		"libcurl=8.23.0-r0",
-		"libexpat=2.9.0-r0",
-		"brotli-libs=1.2.1-r0",
-		"openssh-client-default=10.2_p1-r0",
-		"tzdata=2026e-r0",
+		"git-2.56.0.tar.xz",
+		"26c56c296b38c0695b26fa95f475f1d01704d2d38e73465ca30b0b2f5dc789d3",
+		"NO_CURL=YesPlease NO_OPENSSL=YesPlease NO_EXPAT=YesPlease",
+		"NO_PERL=YesPlease NO_PYTHON=YesPlease NO_TCLTK=YesPlease NO_GETTEXT=YesPlease",
+		"LDFLAGS=-static",
+		"COPY --from=build --chmod=0755 /out/ /usr/local/bin/",
+		"COPY --from=git-build --chmod=0755 /out/git /usr/bin/git",
+		"ln -s oberth /out/oberth-git-ssh",
 		"USER 65534:65534",
 		`ENTRYPOINT ["/usr/local/bin/oberth"]`,
 		`CMD ["serve"]`,
@@ -61,28 +57,22 @@ func TestServerImageUsesPinnedMinimalContract(t *testing.T) {
 		}
 	}
 	instructions := serverImageDockerInstructions(dockerfile)
-	if instructions[len(instructions)-1] != "FROM cli-runtime AS runtime" {
-		t.Fatal("release default must retain the CLI-capable runtime")
-	}
-	cliStart, scratchStart := -1, -1
+	start := -1
 	for i, instruction := range instructions {
-		if strings.HasPrefix(instruction, "FROM alpine:") {
-			cliStart = i
-		}
-		if instruction == "FROM scratch AS scratch-runtime" {
-			scratchStart = i
+		if strings.HasPrefix(instruction, "FROM ") {
+			start = i
 		}
 	}
-	if cliStart < 0 || scratchStart <= cliStart {
-		t.Fatal("missing CLI runtime before experimental scratch target")
+	if start < 0 || instructions[start] != "FROM scratch AS runtime" {
+		t.Fatal("runtime must be scratch")
 	}
-	cli := strings.Join(instructions[cliStart+1:scratchStart], "\n")
-	if strings.Count(cli, "apk add --no-cache") != 1 || !strings.Contains(cli, "rm -f /var/log/apk.log") || !strings.Contains(cli, "COPY --from=build /out/oberth /usr/local/bin/oberth") {
-		t.Fatal("CLI runtime must install reviewed tools, clean APK log and copy the server")
-	}
-	scratch := strings.Join(instructions[scratchStart+1:len(instructions)-1], "\n")
-	if !strings.Contains(scratch, `CMD ["serve", "--git-backend=go-git"]`) {
-		t.Fatal("experimental scratch target must explicitly opt into go-git")
+	for _, instruction := range instructions[start+1:] {
+		if strings.HasPrefix(instruction, "RUN ") || strings.Contains(instruction, "/bin/sh") || strings.Contains(instruction, "/usr/bin/ssh") {
+			t.Fatalf("runtime retains shell or SSH tooling: %s", instruction)
+		}
+		if strings.HasPrefix(instruction, "COPY ") && instruction != "COPY --from=build --chmod=0755 /out/ /usr/local/bin/" && instruction != "COPY --from=git-build --chmod=0755 /out/git /usr/bin/git" && instruction != "COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt" {
+			t.Fatalf("unexpected runtime payload: %s", instruction)
+		}
 	}
 
 	ignoreRaw, err := os.ReadFile("../../.dockerignore")

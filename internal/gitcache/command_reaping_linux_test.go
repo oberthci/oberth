@@ -38,20 +38,22 @@ func TestCLICommandReapsCanceledDescendants(t *testing.T) {
 	if err := unix.Prctl(unix.PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0); err != nil {
 		t.Fatal(err)
 	}
-	for _, cause := range []error{context.Canceled, context.DeadlineExceeded} {
-		t.Run(cause.Error(), func(t *testing.T) {
+	for _, test := range []struct {
+		cause   error
+		fixture string
+	}{
+		{context.Canceled, "reap-root"}, {context.DeadlineExceeded, "reap-root"},
+		{context.Canceled, "hook-root"}, {context.DeadlineExceeded, "hook-root"},
+	} {
+		cause := test.cause
+		t.Run(test.fixture+"/"+cause.Error(), func(t *testing.T) {
 			t.Parallel()
 			root := t.TempDir()
-			script := filepath.Join(root, "git")
-			body := `#!/bin/sh
-echo $$ > "$ROOT_PID"
-sh -c 'echo $$ > "$CHILD_PID"; sleep 600 & echo $! > "$LEAF_PID"; printf "ready\n"; wait' &
-wait
-`
-			if err := os.WriteFile(script, []byte(body), 0600); err != nil {
+			executable, err := os.Executable()
+			if err != nil {
 				t.Fatal(err)
 			}
-			cache, err := New(Config{Root: filepath.Join(root, "cache"), Backend: BackendCLI, GitBinary: "/bin/sh",
+			cache, err := New(Config{Root: filepath.Join(root, "cache"), GitBinary: executable,
 				Env:      map[string]string{"ROOT_PID": filepath.Join(root, "root"), "CHILD_PID": filepath.Join(root, "child"), "LEAF_PID": filepath.Join(root, "leaf")},
 				Upstream: func(string) (string, error) { return "/unused", nil }})
 			if err != nil {
@@ -59,13 +61,13 @@ wait
 			}
 			// This direct child is in a different group. Its exit status belongs
 			// to exec.Cmd.Wait, never the git descendant reaper.
-			sentinel := exec.Command("sleep", "600")
+			sentinel := exec.Command(executable, "internal-gitcache-fixture", "sleep")
 			sentinel.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 			if err := sentinel.Start(); err != nil {
 				t.Fatal(err)
 			}
 			defer func() { _ = sentinel.Process.Kill(); _ = sentinel.Wait() }()
-			exited := exec.Command("sh", "-c", "exit 7")
+			exited := exec.Command(executable, "internal-gitcache-fixture", "exit7")
 			exited.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 			if err := exited.Start(); err != nil {
 				t.Fatal(err)
@@ -83,7 +85,9 @@ wait
 			defer cancel(context.Canceled)
 			ready := &cliReadyWriter{ready: make(chan struct{})}
 			done := make(chan error, 1)
-			go func() { done <- cache.run(ctx, commandSpec{args: []string{script}, stdout: ready, stderr: io.Discard}) }()
+			go func() {
+				done <- cache.run(ctx, commandSpec{args: []string{"internal-gitcache-fixture", test.fixture}, stdout: ready, stderr: io.Discard})
+			}()
 			select {
 			case <-ready.ready:
 			case err := <-done:

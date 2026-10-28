@@ -104,7 +104,9 @@ func (b *cliBackend) execute(ctx context.Context, spec commandSpec, capture bool
 	cmd := exec.Command(c.gitBinary, spec.args...) //nolint:gosec,noctx
 	cmd.Dir = spec.dir
 	cmd.Stdin = spec.stdin
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if !c.hookChild {
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	}
 	cmd.Env = c.commandEnv(spec.env)
 	if spec.stdin == nil {
 		// With no caller stdin, os/exec's only copying goroutines drain the
@@ -154,14 +156,28 @@ func (b *cliBackend) execute(ctx context.Context, spec commandSpec, capture bool
 	}
 
 	c.logger.Printf("git %s", c.redactedCommand(spec.args))
-	if err := prepareCLIWait(); err != nil {
-		return "", fmt.Errorf("prepare git process reaping: %w", err)
+	if !c.hookChild {
+		if err := prepareCLIWait(); err != nil {
+			return "", fmt.Errorf("prepare git process reaping: %w", err)
+		}
 	}
 	if err := cmd.Start(); err != nil {
 		return "", fmt.Errorf("start git command: %w", err)
 	}
 
-	waitErr, stopErr := waitCLICommand(ctx, cmd)
+	var waitErr, stopErr error
+	if c.hookChild {
+		// Only fixed, read-only builtins run here. Keeping them in the receive
+		// group lets its outer reaper collect every descendant if the hook dies.
+		stop := context.AfterFunc(ctx, func() { _ = cmd.Process.Kill() })
+		waitErr = cmd.Wait()
+		stop()
+		if ctx.Err() != nil {
+			stopErr = context.Cause(ctx)
+		}
+	} else {
+		waitErr, stopErr = waitCLICommand(ctx, cmd)
+	}
 	if stopErr != nil {
 		detail := stderrTail.String()
 		if capture {

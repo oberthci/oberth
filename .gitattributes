@@ -1,3 +1,6 @@
 # Keep the reviewed upstream module bytes, including its original CRLF files.
 third_party/go-git/** -text
 third_party/go-git/plumbing/format/commitgraph/*.go whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+
+# Unified patch context is data, including its leading space and blank lines.
+hack/static-git-no-shell.patch whitespace=-space-before-tab,-blank-at-eol

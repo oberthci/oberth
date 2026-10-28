@@ -38,6 +38,10 @@ func main() {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+	if code, handled := gitcache.ReceiveHookInvocation(ctx, os.Args, os.Stdin, os.Stderr); handled {
+		stop()
+		os.Exit(code)
+	}
 	if filepath.Base(os.Args[0]) == "oberth-git-ssh" {
 		code := runGitSSH(ctx, os.Args[1:], os.Stdin, os.Stdout, os.Stderr)
 		stop()

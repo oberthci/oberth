@@ -31,7 +31,6 @@ func TestGitCommandsNeverDetachBackgroundMaintenance(t *testing.T) {
 		CommandTimeout: 2 * time.Minute,
 		Upstream:       func(string) (string, error) { return "", errors.New("upstream unused") },
 		Env:            map[string]string{"GIT_TRACE": trace},
-		Backend:        BackendCLI,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -148,12 +147,9 @@ func TestCommandEnvPinsManagedGlobalGitConfig(t *testing.T) {
 // escaped the process group still holds the stdout pipe, so Cmd.Wait blocks on
 // the copying goroutine forever while the caller keeps the repository lock.
 func TestCaptureBoundsDescendantHoldingOutputPipe(t *testing.T) {
-	if _, err := os.Stat("/bin/sh"); err != nil {
-		t.Skip("/bin/sh is required to hold an inherited descriptor open")
-	}
-	setsid, err := exec.LookPath("setsid")
+	executable, err := os.Executable()
 	if err != nil {
-		t.Skip("setsid is required to exercise an actually escaped descendant")
+		t.Fatal(err)
 	}
 	root := t.TempDir()
 	ready, pidFile := filepath.Join(root, "ready"), filepath.Join(root, "pid")
@@ -162,8 +158,8 @@ func TestCaptureBoundsDescendantHoldingOutputPipe(t *testing.T) {
 	}
 	cache, err := newBackendTestCache(t, Config{
 		Root:      root,
-		GitBinary: "/bin/sh",
-		Env:       map[string]string{"SETSID": setsid, "ESCAPED_PID": pidFile, "ESCAPED_READY": ready},
+		GitBinary: executable,
+		Env:       map[string]string{"ESCAPED_PID": pidFile, "ESCAPED_READY": ready},
 		Upstream:  func(string) (string, error) { return "", errors.New("upstream unused") },
 	})
 	if err != nil {
@@ -194,7 +190,7 @@ func TestCaptureBoundsDescendantHoldingOutputPipe(t *testing.T) {
 	started := time.Now()
 	done := make(chan error, 1)
 	go func() {
-		_, waitErr := cache.capture(ctx, "", "-c", `"$SETSID" sh -c 'echo $$ > "$ESCAPED_PID"; echo ready > "$ESCAPED_READY"; exec sleep 600' & read -r ready < "$ESCAPED_READY"; exit 0`)
+		_, waitErr := cache.capture(ctx, "", "internal-gitcache-fixture", "hold-pipe")
 		done <- waitErr
 	}()
 

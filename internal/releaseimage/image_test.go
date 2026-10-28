@@ -23,7 +23,7 @@ func TestRepackRemovesPriorOberthAndAddsOnlyExactNewExecutable(t *testing.T) {
 	base := testBaseImage(t, created, map[string]testEntry{
 		"usr/local/bin/oberth":              {body: "old executable", mode: 0o755},
 		"usr/bin/git":                       {body: "git", mode: 0o755},
-		"usr/bin/ssh":                       {body: "ssh", mode: 0o755},
+		"usr/local/bin/oberth-git-ssh":      {link: "oberth", mode: 0o777},
 		"etc/ssl/certs/ca-certificates.crt": {body: "roots", mode: 0o644},
 	})
 	newBinary := []byte("new exact executable")
@@ -51,7 +51,7 @@ func TestRepackRejectsSubstrateWithoutExpectedExecutable(t *testing.T) {
 	created := time.Date(2026, 8, 6, 10, 0, 0, 0, time.UTC)
 	base := testBaseImage(t, created, map[string]testEntry{
 		"usr/bin/git":                       {body: "git", mode: 0o755},
-		"usr/bin/ssh":                       {body: "ssh", mode: 0o755},
+		"usr/local/bin/oberth-git-ssh":      {link: "oberth", mode: 0o777},
 		"etc/ssl/certs/ca-certificates.crt": {body: "roots", mode: 0o644},
 	})
 	if _, err := Repack(base, Server, "amd64", []byte("new"), created, "v1.2.3", "abc"); err == nil {
@@ -64,7 +64,7 @@ func TestVerifyImageBindsLayerConfigAndExactExecutable(t *testing.T) {
 	base := testBaseImage(t, created, map[string]testEntry{
 		"usr/local/bin/oberth":              {body: "prior server", mode: 0o755},
 		"usr/bin/git":                       {body: "git", mode: 0o755},
-		"usr/bin/ssh":                       {body: "ssh", mode: 0o755},
+		"usr/local/bin/oberth-git-ssh":      {link: "oberth", mode: 0o777},
 		"etc/ssl/certs/ca-certificates.crt": {body: "roots", mode: 0o644},
 	})
 	binary := []byte("new server")
@@ -98,7 +98,7 @@ func TestRepackAcceptsArm64SubstrateForArm64Release(t *testing.T) {
 	base := testBaseImage(t, created, map[string]testEntry{
 		"usr/local/bin/oberth":              {body: "prior server", mode: 0o755},
 		"usr/bin/git":                       {body: "git", mode: 0o755},
-		"usr/bin/ssh":                       {body: "ssh", mode: 0o755},
+		"usr/local/bin/oberth-git-ssh":      {link: "oberth", mode: 0o777},
 		"etc/ssl/certs/ca-certificates.crt": {body: "roots", mode: 0o644},
 	})
 	config, err := base.ConfigFile()
@@ -148,7 +148,7 @@ func TestRepackRejectsArchitectureWithoutMatchingSubstrate(t *testing.T) {
 	base := testBaseImage(t, created, map[string]testEntry{
 		"usr/local/bin/oberth":              {body: "prior server", mode: 0o755},
 		"usr/bin/git":                       {body: "git", mode: 0o755},
-		"usr/bin/ssh":                       {body: "ssh", mode: 0o755},
+		"usr/local/bin/oberth-git-ssh":      {link: "oberth", mode: 0o777},
 		"etc/ssl/certs/ca-certificates.crt": {body: "roots", mode: 0o644},
 	})
 	if _, err := Repack(base, Server, "arm64", []byte("arm64 server"), created, "v1.2.3", "0123456789abcdef"); err == nil {
@@ -161,7 +161,7 @@ func TestRepackRejectsSubstrateWhoseConfigDoesNotMatchRequestedPlatform(t *testi
 	base := testBaseImage(t, created, map[string]testEntry{
 		"usr/local/bin/oberth":              {body: "prior server", mode: 0o755},
 		"usr/bin/git":                       {body: "git", mode: 0o755},
-		"usr/bin/ssh":                       {body: "ssh", mode: 0o755},
+		"usr/local/bin/oberth-git-ssh":      {link: "oberth", mode: 0o777},
 		"etc/ssl/certs/ca-certificates.crt": {body: "roots", mode: 0o644},
 	})
 	config, err := base.ConfigFile()
@@ -196,6 +196,7 @@ func TestForbiddenPathMatchesPrefixesAndWildcards(t *testing.T) {
 }
 
 type testEntry struct {
+	link string
 	body string
 	mode int64
 }
@@ -205,7 +206,12 @@ func testBaseImage(t *testing.T, created time.Time, files map[string]testEntry) 
 	var body bytes.Buffer
 	writer := tar.NewWriter(&body)
 	for name, entry := range files {
-		if err := writer.WriteHeader(&tar.Header{Name: name, Mode: entry.mode, Size: int64(len(entry.body)), ModTime: created}); err != nil {
+		header := &tar.Header{Name: name, Mode: entry.mode, Size: int64(len(entry.body)), ModTime: created}
+		if entry.link != "" {
+			header.Typeflag = tar.TypeSymlink
+			header.Linkname = entry.link
+		}
+		if err := writer.WriteHeader(header); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := writer.Write([]byte(entry.body)); err != nil {
@@ -398,7 +404,7 @@ func TestRepackRejectsEmptyBinary(t *testing.T) {
 	base := testBaseImage(t, created, map[string]testEntry{
 		"usr/local/bin/oberth":              {body: "old executable", mode: 0o755},
 		"usr/bin/git":                       {body: "git", mode: 0o755},
-		"usr/bin/ssh":                       {body: "ssh", mode: 0o755},
+		"usr/local/bin/oberth-git-ssh":      {link: "oberth", mode: 0o777},
 		"etc/ssl/certs/ca-certificates.crt": {body: "roots", mode: 0o644},
 	})
 	if _, err := Repack(base, Server, "amd64", nil, created, "v1.2.3", "abc"); err == nil {
@@ -413,7 +419,7 @@ func TestRepackRejectsZeroCreatedTime(t *testing.T) {
 	base := testBaseImage(t, time.Now(), map[string]testEntry{
 		"usr/local/bin/oberth":              {body: "old executable", mode: 0o755},
 		"usr/bin/git":                       {body: "git", mode: 0o755},
-		"usr/bin/ssh":                       {body: "ssh", mode: 0o755},
+		"usr/local/bin/oberth-git-ssh":      {link: "oberth", mode: 0o777},
 		"etc/ssl/certs/ca-certificates.crt": {body: "roots", mode: 0o644},
 	})
 	if _, err := Repack(base, Server, "amd64", []byte("binary"), time.Time{}, "v1.2.3", "abc"); err == nil {
@@ -463,7 +469,7 @@ func TestRepackRejectsUnsupportedArchitecture(t *testing.T) {
 	base := testBaseImage(t, created, map[string]testEntry{
 		"usr/local/bin/oberth":              {body: "old executable", mode: 0o755},
 		"usr/bin/git":                       {body: "git", mode: 0o755},
-		"usr/bin/ssh":                       {body: "ssh", mode: 0o755},
+		"usr/local/bin/oberth-git-ssh":      {link: "oberth", mode: 0o777},
 		"etc/ssl/certs/ca-certificates.crt": {body: "roots", mode: 0o644},
 	})
 	// riscv64 is not in the server platform list
@@ -506,7 +512,7 @@ func TestVerifyImageRejectsMissingExecutable(t *testing.T) {
 	// Build a single-layer image without the expected executable
 	layer := testTarLayer(t, map[string]testEntry{
 		"usr/bin/git":                       {body: "git", mode: 0o755},
-		"usr/bin/ssh":                       {body: "ssh", mode: 0o755},
+		"usr/local/bin/oberth-git-ssh":      {link: "oberth", mode: 0o777},
 		"etc/ssl/certs/ca-certificates.crt": {body: "roots", mode: 0o644},
 	})
 	image, err := mutate.AppendLayers(empty.Image, layer)
@@ -547,7 +553,7 @@ func TestVerifyImageRejectsNonExecutablePermissions(t *testing.T) {
 	layer := testTarLayer(t, map[string]testEntry{
 		"usr/local/bin/oberth":              {body: "server", mode: 0o644}, // Not executable
 		"usr/bin/git":                       {body: "git", mode: 0o755},
-		"usr/bin/ssh":                       {body: "ssh", mode: 0o755},
+		"usr/local/bin/oberth-git-ssh":      {link: "oberth", mode: 0o777},
 		"etc/ssl/certs/ca-certificates.crt": {body: "roots", mode: 0o644},
 	})
 	image, err := mutate.AppendLayers(empty.Image, layer)

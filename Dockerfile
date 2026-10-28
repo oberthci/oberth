@@ -20,65 +20,35 @@ ARG VERSION=dev
 RUN --mount=type=cache,id=oberth-server-${BUILD_CACHE_NAMESPACE}-gomod,target=/go/pkg/mod,sharing=locked \
     --mount=type=cache,id=oberth-server-${BUILD_CACHE_NAMESPACE}-gobuild,target=/root/.cache/go-build,sharing=locked \
     CGO_ENABLED=0 GOOS="$TARGETOS" GOARCH="$TARGETARCH" \
-    go build -trimpath -buildvcs=false -ldflags="-s -w -X main.version=${VERSION}" -o /out/oberth ./cmd/oberth
+    go build -trimpath -buildvcs=false -ldflags="-s -w -X main.version=${VERSION}" -o /out/oberth ./cmd/oberth && \
+    ln -s oberth /out/oberth-git-ssh
 
-# CLI-capable release runtime, restored while go-git is requalified.
-FROM alpine:3.23@sha256:fd791d74b68913cbb027c6546007b3f0d3bc45125f797758156952bc2d6daf40 AS cli-runtime
-# These exact pins match the reviewed v0.17.56 release substrate.
-RUN apk add --no-cache \
-    ca-certificates=20261020-r0 \
-    git=2.52.0-r0 \
-    # CVE-2026-14456 (HIGH): the alpine:3.23 base at the digest above still
-    # ships libcrypto3/libssl3 3.5.7-r0. The fixed 3.5.9-r0 is available for
-    # x86_64 and aarch64 (and supersedes the prior 3.5.8-r0 pin). Exact-pin the
-    # current repository revision so a superseding version fails the build
-    # loudly and is deliberately reviewed — never silently drift.
-    libcrypto3=3.5.9-r0 \
-    libssl3=3.5.9-r0 \
-    # CVE-2026-92392 (HIGH): HTTP/2 upload use-after-free affects the prior
-    # libcurl 8.22.0-r0 pin. The fixed 8.23.0-r0 is available for x86_64 and
-    # aarch64 and retains the earlier libcurl security fixes. Exact-pinned
-    # like libcrypto3 above: when the repository supersedes this revision,
-    # fail the build loudly and re-pin deliberately — never drift silently.
-    libcurl=8.23.0-r0 \
-    # CVE-2026-103111 (HIGH): pcre2 arrives as a runtime dependency; the
-    # digest-pinned Alpine base still contains 10.48-r0 while 10.49-r0 is
-    # fixed and available for x86_64 and aarch64. Pin the fixed APK revision
-    # so substrate builds fail loudly if the repository supersedes it.
-    pcre2=10.49-r0 \
-    # CVE-2026-93990, CVE-2026-77214 (HIGH): libexpat arrives as git's
-    # transitive dependency; the alpine:3.23 base digest above still resolves
-    # 2.8.4-r0 while the fixed 2.9.0-r0 exists only in the apk repository
-    # (verified present for x86_64 and aarch64). Exact-pinned like libcrypto3
-    # above: when the repo supersedes 2.9.0-r0 this line fails the build
-    # loudly — re-pin deliberately, never drift silently.
-    libexpat=2.9.0-r0 \
-    # CVE-2026-111497 (HIGH): brotli-libs arrives as libcurl's transitive
-    # dependency; the alpine:3.23 base digest above still resolves 1.2.0-r0
-    # while the fixed 1.2.1-r0 exists only in the apk repository (verified
-    # present for x86_64 and aarch64). Exact-pinned like libcrypto3 above.
-    brotli-libs=1.2.1-r0 \
-    openssh-client-default=10.2_p1-r0 \
-    tzdata=2026e-r0 \
-    && rm -f /var/log/apk.log
-COPY --from=build /out/oberth /usr/local/bin/oberth
-ENV HOME=/tmp
-USER 65534:65534
-ENTRYPOINT ["/usr/local/bin/oberth"]
-CMD ["serve"]
+# Git uses the target platform's musl compiler; no Git transport libraries or
+# shell tools enter the runtime. A source change must update both the tar hash
+# and the reviewed local-transport patch before rebuilding the substrate.
+FROM --platform=$TARGETPLATFORM golang:1.26.10-alpine3.23@sha256:a07f231c19b03e6106cf442f02a5bcf262147e744d15b7b5e4b6d81d420c70a0 AS git-build
+RUN apk add --no-cache build-base zlib-dev zlib-static patch linux-headers ca-certificates=20261020-r0
+WORKDIR /git
+RUN wget -qO /tmp/git.tar.xz https://www.kernel.org/pub/software/scm/git/git-2.56.0.tar.xz && \
+    echo "26c56c296b38c0695b26fa95f475f1d01704d2d38e73465ca30b0b2f5dc789d3  /tmp/git.tar.xz" | sha256sum -c - && \
+    tar -xJf /tmp/git.tar.xz --strip-components=1 && rm /tmp/git.tar.xz
+COPY hack/static-git-no-shell.patch /tmp/static-git-no-shell.patch
+RUN patch -p1 --fuzz=0 < /tmp/static-git-no-shell.patch && \
+    make -j2 git prefix=/usr CFLAGS="-O2 -ffile-prefix-map=/git=." LDFLAGS=-static \
+      NO_CURL=YesPlease NO_OPENSSL=YesPlease NO_EXPAT=YesPlease \
+      NO_PERL=YesPlease NO_PYTHON=YesPlease NO_TCLTK=YesPlease NO_GETTEXT=YesPlease \
+      NO_ICONV=YesPlease NO_LIBPCRE2=YesPlease NO_REGEX=YesPlease NO_RUST=YesPlease && \
+    mkdir /out && cp git /out/git && strip /out/git && \
+    ! readelf -l /out/git | grep -q INTERP && ! readelf -d /out/git | grep -q NEEDED
 
-# Explicit experimental target only: the release default below includes Git/SSH.
-FROM scratch AS scratch-runtime
+# Rebuild both platform substrates and hand off their exact index before
+# changing the release pin. The source Git CLI is the only serving backend.
+FROM scratch AS runtime
 COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
-COPY --from=build /out/oberth /usr/local/bin/oberth
-ENV HOME=/data TMPDIR=/tmp PATH=/usr/local/bin
+COPY --from=build --chmod=0755 /out/ /usr/local/bin/
+COPY --from=git-build --chmod=0755 /out/git /usr/bin/git
+ENV HOME=/data TMPDIR=/tmp PATH=/usr/local/bin:/usr/bin
 WORKDIR /data
 USER 65534:65534
 ENTRYPOINT ["/usr/local/bin/oberth"]
-CMD ["serve", "--git-backend=go-git"]
-
-# SUBSTRATE REBUILD REQUIRED when changing runtime packages/configuration:
-# build both architectures, verify ELF architecture, Repack and Trivy, publish
-# the exact index preserving digests and update ServerSubstrate in image.go.
-# This incident restores the already published, reviewed v0.17.56 substrate.
-FROM cli-runtime AS runtime
+CMD ["serve"]
