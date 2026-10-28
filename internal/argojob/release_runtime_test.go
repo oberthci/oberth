@@ -89,13 +89,7 @@ esac`)
  static-sbom) printf 'fixture SBOM\n' >"$3";;
  *) :;;
  esac`)
-	f.write("hack/scan-static-git.sh", `#!/bin/sh
-set -eu
-for arch in amd64 arm64; do test -s "$1/static-git-$arch.cdx.json"; done
-test -s "$1/static-git-control.cdx.json"
-printf 'static-c-scan\n' >>"$FIXTURE_TRACE"
-test ! -e "$FIXTURE_ROOT/fail-static-scan"
-`)
+	f.staticGitScan(`test ! -e "$FIXTURE_ROOT/fail-static-scan"`)
 	f.tool("oberth-release-support", `case "$1" in
  registry-token) /usr/bin/python3 -I -S -B - "$2" "$3" "$4" <<'PYTOKEN'
 import json, os, stat, sys
@@ -131,6 +125,22 @@ esac`)
 esac`)
 	return f
 }
+
+// Inject the scanner only into the fixture's canonical script path. Production
+// release.sh still has one fixed scanner; no environment override can disable it.
+func (f *releaseRuntimeFixture) staticGitScan(body string) {
+	f.write("hack/scan-static-git.sh", `#!/bin/sh
+set -eu
+test "$#" -eq 3
+test "$1" = "$FIXTURE_CANDIDATE"
+test "$2" = amd64
+test "$3" = arm64
+for arch in amd64 arm64; do test -s "$1/static-git-$arch.cdx.json"; done
+test -s "$1/static-git-control.cdx.json"
+printf 'static-c-scan\n' >>"$FIXTURE_TRACE"
+`+body+"\n")
+}
+
 func (f *releaseRuntimeFixture) absolute(p, body string, mode os.FileMode) {
 	f.t.Helper()
 	if e := os.MkdirAll(filepath.Dir(p), 0700); e != nil {

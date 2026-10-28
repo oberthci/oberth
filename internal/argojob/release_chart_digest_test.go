@@ -18,6 +18,7 @@ func newReleaseChartDigestFixture(test *testing.T) *releaseRuntimeFixture {
 		test.Skip("Helm is required for release chart packaging tests")
 	}
 	fixture := newReleaseRuntimeFixture(test)
+	fixture.write("require-signature", "yes")
 	chart := filepath.Join(fixture.root, "charts", "oberth")
 	if err := os.CopyFS(chart, os.DirFS(filepath.Join(repositoryRoot(test), "charts", "oberth"))); err != nil {
 		test.Fatal(err)
@@ -35,10 +36,18 @@ exec "$FIXTURE_HELM" "$@"`)
  *) exit 90;;
 esac`)
 	fixture.tool("oberth-release-image", `case "$1" in
- publish) printf 'europe-west4-docker.pkg.dev/skipopsmain/oberth/oberth@sha256:%064d\n' 0 | tr 0 c >"$FIXTURE_CANDIDATE/server-image.txt";;
- verify) :;;
+ publish)
+  printf 'image:publish\n' >>"$FIXTURE_TRACE"
+  printf 'europe-west4-docker.pkg.dev/skipopsmain/oberth/oberth@sha256:%064d\n' 0 | tr 0 c >"$FIXTURE_CANDIDATE/server-image.txt";;
+ verify) printf 'image:verify\n' >>"$FIXTURE_TRACE";;
+ static-sbom)
+  test "$#" -eq 3 || { test "$#" -eq 4 && test "$4" = control; }
+  case "$2" in amd64|arm64) :;; *) exit 90;; esac
+  printf 'image:static-sbom:%s:%s\n' "$2" "${4:-actual}" >>"$FIXTURE_TRACE"
+  printf 'fixture %s %s SBOM\n' "$2" "${4:-actual}" >"$3";;
  *) exit 90;;
 esac`)
+	fixture.tool("trivy", `printf 'trivy:scan\n' >>"$FIXTURE_TRACE"`)
 	return fixture
 }
 
@@ -54,6 +63,7 @@ func TestReleaseChartPackagesPublishedImageDigest(test *testing.T) {
 			test.Fatalf("%s: %v\n%s", action, err, output)
 		}
 	}
+	requireReleaseChartScanOrder(test, fixture.log(), true)
 	published, err := os.ReadFile(filepath.Join(fixture.candidate, "server-image.txt"))
 	if err != nil {
 		test.Fatal(err)
@@ -111,5 +121,37 @@ func TestReleaseChartRejectsPackagedSeedDigest(test *testing.T) {
 	}
 	if !bytes.Equal(original, after) {
 		test.Fatal("stale archive replaced the release chart")
+	}
+}
+
+// This is the actual release.sh entrypoint with real Helm and synthetic external
+// tools. No scanner download or registry/signing credential is used by the test.
+func requireReleaseChartScanOrder(test *testing.T, trace string, signed bool) {
+	test.Helper()
+	steps := []string{"image:publish", "image:verify", "image:static-sbom:amd64:actual", "image:static-sbom:arm64:actual", "image:static-sbom:amd64:control", "static-c-scan"}
+	if signed {
+		steps = append(steps, "trivy:scan", "cosign:sign:keyenv=", "image:verify", "helm:package")
+	}
+	remaining := trace
+	for _, step := range steps {
+		marker := step + "\n"
+		index := strings.Index(remaining, marker)
+		if index < 0 {
+			test.Fatalf("release omitted or reordered %s: %s", step, trace)
+		}
+		remaining = remaining[index+len(marker):]
+	}
+}
+
+func TestReleaseChartScanFailurePreventsSigning(test *testing.T) {
+	fixture := newReleaseChartDigestFixture(test)
+	fixture.staticGitScan("exit 25")
+	output, err := fixture.run("publish-images", true)
+	if err == nil {
+		test.Fatalf("injected scan failure accepted: %s", output)
+	}
+	requireReleaseChartScanOrder(test, fixture.log(), false)
+	if strings.Contains(fixture.log(), "cosign:sign:") || strings.Contains(fixture.log(), "helm:package") {
+		test.Fatalf("scan failure reached signing or packaging: %s", fixture.log())
 	}
 }
