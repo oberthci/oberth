@@ -78,3 +78,11 @@ Both before-patch and submitted Pods retain pool=ci; wrapped submitted Pods
 also get the server architecture. Replaying the round-25b inputs against this
 controller control fails on all seven wrapped shapes, proving the regression.
 All eight corrected submitted Pods pass the retained Kubernetes validator.
+
+Round 44 (2026-10-28) recaptured current Build outputs after the 256Mi
+usage instrumentation floor and server-owned admission warning/policy annotations.
+The retained authenticated upstream controller and combined capture hooks ran
+unchanged; all 27 submitted Pods across isolation, WIF, nonroot and VMI cases
+passed the retained Kubernetes validator. Isolation inputs now explicitly declare
+256Mi so the measured-leaf architecture and inherited pool checks still exercise
+wrapped Pods. No expected Pod was assembled or edited by hand.

@@ -18,7 +18,8 @@
       "oberth.ci/release-wif-policy-sha256": "780be93926c681cc4b9819ad1c0785bbea6adf0cebe5ef9fd38dd49e6fe47a64",
       "oberth.ci/run-id": "run-abc123",
       "oberth.ci/size": "L",
-      "oberth.ci/spec-identity": "c1436cc07db0f015c243c00648c8fb3b8ca598bc9ba03b8d53a47de75a0eecab",
+      "oberth.ci/spec-identity": "75618200149d63435dc080e6f7bbe16fedd22a59c06de53e82946a824f47bf5d",
+      "oberth.ci/step-usage-memory-policy": "explicit-limit-256Mi-v1",
       "workflows.argoproj.io/pod-name-format": "v2"
     }
   },
@@ -32,6 +33,7 @@
           "annotations": {
             "oberth.ci/release-wif-adc": "{\"audience\":\"//iam.googleapis.com/projects/123/locations/global/workloadIdentityPools/oberth-release-images/providers/tuxbox\",\"credential_source\":{\"file\":\"/run/oberth-gar/token\"},\"service_account_impersonation_url\":\"https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/image-writer@example-project.iam.gserviceaccount.com:generateAccessToken\",\"subject_token_type\":\"urn:ietf:params:oauth:token-type:jwt\",\"token_url\":\"https://sts.googleapis.com/v1/token\",\"type\":\"external_account\"}",
             "oberth.ci/release-wif-role": "artifact-deployer",
+            "oberth.ci/step-usage-memory-warning": "usage instrumentation disabled: memory limit unspecified is below the explicit 256Mi instrumentation floor; usage remains unknown; resources are unchanged",
             "oberth.ci/workspace-env": "none",
             "oberth.ci/workspace-mounts": "none"
           }

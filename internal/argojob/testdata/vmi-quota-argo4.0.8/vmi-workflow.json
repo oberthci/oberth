@@ -17,7 +17,8 @@
     "annotations": {
       "oberth.ci/ref": "refs/heads/main",
       "oberth.ci/run-id": "run-abc123",
-      "oberth.ci/spec-identity": "7cd66748c374cbee30eb2ea68e9718f033bd1c44ffcd761a758f90019c69992a",
+      "oberth.ci/spec-identity": "59b8543e0d516bc697251fa23973fe4effcc0e8ff21308b90105787da8ea34cb",
+      "oberth.ci/step-usage-memory-policy": "explicit-limit-256Mi-v1",
       "oberth.ci/vmi-quota": "{\"repository_id\":7,\"limit\":{\"VMs\":2,\"Cores\":6,\"MemoryBytes\":12884901888},\"peak\":{\"VMs\":1,\"Cores\":2,\"MemoryBytes\":2147483648}}",
       "workflows.argoproj.io/pod-name-format": "v2"
     }

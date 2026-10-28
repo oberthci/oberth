@@ -1214,7 +1214,15 @@ continuity checks; it must never be used to reset or bypass those checks.
   left out of the plan rather than given a fabricated count.
 - Step resource measurements never widen admission. Source-backed single-main
   container/script leaves with explicit commands run through the read-only
-  server-delivered `oberth internal-step-exec` wrapper. It forwards signals,
+  server-delivered `oberth internal-step-exec` wrapper on new submissions
+  only when the leaf has an explicit memory limit of at
+  least 256Mi. The full server's package initialization consumes the main
+  container's memory budget. Smaller or unspecified limits stay unwrapped,
+  with an admission log/template annotation warning and null usage, without
+  changing requests, limits or scheduling. Requests and inherited/defaulted
+  limits cannot establish instrumentation headroom. The policy annotation
+  preserves pre-policy wrapped specs on adoption; existing Pods are not
+  rewritten. For measured leaves the wrapper forwards signals,
   preserves streams/exit codes, and writes a bounded, numeric-only v1 summary
   to the kubelet termination file. No new RBAC, hostPath, capabilities or
   writable root is required. The server reads it from the already-bound final

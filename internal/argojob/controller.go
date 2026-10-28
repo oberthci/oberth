@@ -208,7 +208,8 @@ func (controller *Controller) Create(ctx context.Context, request Request) (name
 	// source in place (finding 2, issue #29).
 	existing, getErr := controller.workflows.Get(ctx, request.Name, metav1.GetOptions{})
 	if getErr == nil {
-		request.omitStepUsage = !workflowHasStepUsage(existing)
+		request.omitStepUsage = !workflowHasStepUsage(existing) && existing.Annotations[usageMemoryPolicyAnnotation] != usageMemoryPolicy
+		request.legacyStepUsage = !request.omitStepUsage && existing.Annotations[usageMemoryPolicyAnnotation] != usageMemoryPolicy
 		request, err = controller.refreshNonroot(ctx, request)
 		if err != nil {
 			return "", err
@@ -277,6 +278,9 @@ func (controller *Controller) Create(ctx context.Context, request Request) (name
 		return "", saErr
 	}
 	attemptedCreate = true
+	for _, warning := range stepUsageMemoryWarnings(intended) {
+		log.Printf("WARN: %s", warning)
+	}
 	created, createErr := controller.workflows.Create(ctx, intended, metav1.CreateOptions{})
 	if createErr == nil {
 		controller.adoptClaimBestEffort(ctx, volume.ClaimName, created.Name, string(created.UID))
