@@ -21,7 +21,7 @@ func bindGitSSHParent() (func(), error) {
 	}
 	if parent <= 1 || os.Getppid() != parent {
 		runtime.UnlockOSThread()
-		return nil, errors.New("Git parent exited")
+		return nil, errors.New("git parent exited")
 	}
 	return runtime.UnlockOSThread, nil
 }

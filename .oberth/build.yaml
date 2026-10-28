@@ -1095,7 +1095,7 @@ spec:
       - name: CGO_ENABLED
         value: "1"
       - name: PATH
-        value: "/tmp/oberth-tools/bin:/usr/local/bin:/usr/bin:/bin"
+        value: "/tmp/oberth-tools/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
       - name: OBERTH_TOOLS_DIR
         value: "/tmp/oberth-tools"
       - name: HOME

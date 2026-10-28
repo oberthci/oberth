@@ -2,11 +2,12 @@ package gitcache
 
 import (
 	"errors"
-	"golang.org/x/sys/unix"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
+
+	"golang.org/x/sys/unix"
 )
 
 // Legacy receive directories remain collectible after backend removal.

@@ -6,6 +6,7 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -221,10 +222,40 @@ func TestCancelClosesBlockedHandshake(t *testing.T) {
 	cancel()
 	select {
 	case err := <-done:
-		if err != context.Canceled {
+		if !errors.Is(err, context.Canceled) {
 			t.Fatalf("cause lost: %v", err)
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("canceled transport hung")
+	}
+}
+
+func TestConfiguredFileConfinesProjectedSymlinks(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(dir, "..data"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "..data", "key"), []byte("fixture"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "key")
+	if err := os.Symlink("..data/key", path); err != nil {
+		t.Fatal(err)
+	}
+	if body, err := readFile(path, true); err != nil || string(body) != "fixture" {
+		t.Fatalf("projected key refused: %q, %v", body, err)
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	outside := filepath.Join(t.TempDir(), "key")
+	if err := os.WriteFile(outside, []byte("outside"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, path); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readFile(path, true); err == nil {
+		t.Fatal("configured file escaped its directory through a symlink")
 	}
 }

@@ -32,3 +32,37 @@ func TestReadReferenceRequiresOneCanonicalLine(t *testing.T) {
 		t.Fatal("multi-line image reference was accepted")
 	}
 }
+
+func TestStaticSBOMOutputConfinesCanonicalFilename(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "static-git-amd64.cdx.json")
+	if err := run(t.Context(), []string{"static-sbom", "amd64", path}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	outside := filepath.Join(t.TempDir(), "outside.json")
+	if err := os.WriteFile(outside, []byte("unchanged"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, path); err != nil {
+		t.Fatal(err)
+	}
+	if err := run(t.Context(), []string{"static-sbom", "amd64", path}); err == nil {
+		t.Fatal("SBOM output escaped through a symlink")
+	}
+	body, err := os.ReadFile(outside)
+	if err != nil || string(body) != "unchanged" {
+		t.Fatalf("outside file changed: %q, %v", body, err)
+	}
+	for _, arguments := range [][]string{
+		{"static-sbom", "amd64", filepath.Join(dir, "other.json")},
+		{"static-sbom", "other", path},
+		{"static-sbom", "amd64", dir + "/../static-git-amd64.cdx.json"},
+	} {
+		if err := run(t.Context(), arguments); err == nil {
+			t.Fatalf("invalid SBOM output accepted: %v", arguments)
+		}
+	}
+}

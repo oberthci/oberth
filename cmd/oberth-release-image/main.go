@@ -37,7 +37,23 @@ func run(ctx context.Context, arguments []string) error {
 		if len(arguments) != 3 && (len(arguments) != 4 || arguments[3] != "control") {
 			return errors.New("usage: oberth-release-image static-sbom ARCH OUTPUT [control]")
 		}
-		output, err := os.OpenFile(arguments[2], os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0600) // #nosec G304 -- explicit release metadata output path.
+		arch, path := arguments[1], arguments[2]
+		if arch != "amd64" && arch != "arm64" {
+			return errors.New("unsupported static SBOM architecture")
+		}
+		name := "static-git-" + arch + ".cdx.json"
+		if len(arguments) == 4 {
+			name = "static-git-control.cdx.json"
+		}
+		if filepath.Clean(path) != path || filepath.Base(path) != name {
+			return errors.New("static SBOM output must use its canonical filename")
+		}
+		root, err := os.OpenRoot(filepath.Dir(path))
+		if err != nil {
+			return err
+		}
+		defer func() { _ = root.Close() }()
+		output, err := root.OpenFile(name, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0600)
 		if err != nil {
 			return err
 		}

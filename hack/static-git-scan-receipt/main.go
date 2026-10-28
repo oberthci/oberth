@@ -35,7 +35,15 @@ func severe(match match) bool {
 	return strings.EqualFold(match.Vulnerability.Severity, "high") || strings.EqualFold(match.Vulnerability.Severity, "critical")
 }
 func read(path string, value any) (string, error) {
-	file, err := os.Open(path)
+	if !filepath.IsAbs(path) || filepath.Clean(path) != path {
+		return "", errors.New("static metadata path must be clean and absolute")
+	}
+	root, err := os.OpenRoot(filepath.Dir(path))
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = root.Close() }()
+	file, err := root.Open(filepath.Base(path))
 	if err != nil {
 		return "", err
 	}

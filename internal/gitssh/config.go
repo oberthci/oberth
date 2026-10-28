@@ -85,7 +85,14 @@ func readFile(path string, private bool) ([]byte, error) {
 	if !filepath.IsAbs(path) || filepath.Clean(path) != path || strings.ContainsAny(path, "\x00\r\n$%\"\\") {
 		return nil, errors.New("invalid configured path")
 	}
-	file, err := os.Open(path) // #nosec G304 -- operator-configured absolute path, bounded and checked below.
+	// Root confinement allows projected-volume symlinks within the configured
+	// directory, but refuses a final symlink escaping it (including races).
+	root, err := os.OpenRoot(filepath.Dir(path))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = root.Close() }()
+	file, err := root.Open(filepath.Base(path))
 	if err != nil {
 		return nil, err
 	}

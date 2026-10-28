@@ -830,6 +830,34 @@ func TestStaticGitQualificationUsesOnlyInstalledRunnerPrefixes(t *testing.T) {
 	if !reflect.DeepEqual(config.RunnerImagePrefixes, values.RunnerImagePrefixes) {
 		t.Fatalf("pipeline admission fixture differs from installed prefixes: %v vs %v", config.RunnerImagePrefixes, values.RunnerImagePrefixes)
 	}
+	var workflow wfv1.Workflow
+	if err := yaml.Unmarshal(loadPipeline(t, "build.yaml"), &workflow); err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, template := range workflow.Spec.Templates {
+		if template.Name != "build-static-git-runtime" {
+			continue
+		}
+		found = true
+		if template.Container == nil || !strings.Contains(template.Container.Image, "-alpine3.23@sha256:") {
+			t.Fatal("static musl build requires the pinned Alpine runner")
+		}
+		foundAPK := false
+		for _, variable := range template.Container.Env {
+			if variable.Name == "PATH" {
+				for _, entry := range strings.Split(variable.Value, ":") {
+					foundAPK = foundAPK || entry == "/sbin"
+				}
+			}
+		}
+		if !foundAPK {
+			t.Fatal("Alpine apk in /sbin is unreachable through the CI PATH")
+		}
+	}
+	if !found {
+		t.Fatal("static musl build template missing")
+	}
 	request := Request{RunID: "run-static-git", Name: "oberth-static-git", Repo: "oberth", UpstreamOrg: "skipops", UpstreamName: "github", Ref: "refs/heads/main", SHA: testSHA, Trigger: periapsis.TriggerCI, Source: loadPipeline(t, "build.yaml")}
 	if _, err := Build(config, request); err == nil {
 		t.Fatal("nonroot qualification accepted without current controller proof")

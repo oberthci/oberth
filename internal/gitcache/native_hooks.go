@@ -186,10 +186,9 @@ func installNativeHook(hooks, name string) error {
 	}
 	temporary := temp.Name()
 	if err := temp.Close(); err != nil {
-		os.Remove(temporary)
-		return err
+		return errors.Join(err, os.Remove(temporary))
 	}
-	defer os.Remove(temporary)
+	defer func() { _ = os.Remove(temporary) }()
 	if err := os.Remove(temporary); err != nil {
 		return err
 	}

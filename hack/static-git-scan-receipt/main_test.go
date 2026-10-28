@@ -81,3 +81,22 @@ func TestReceiptRequiresCompleteQualifiedScan(t *testing.T) {
 		})
 	}
 }
+
+func TestReceiptMetadataRefusesDirectoryEscape(t *testing.T) {
+	dir := t.TempDir()
+	outside := filepath.Join(t.TempDir(), "scan.json")
+	if err := os.WriteFile(outside, []byte(`{"fixture":true}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "scan.json")
+	if err := os.Symlink(outside, path); err != nil {
+		t.Fatal(err)
+	}
+	var value any
+	if _, err := read(path, &value); err == nil {
+		t.Fatal("scan receipt followed an escaping metadata symlink")
+	}
+	if _, err := read("scan.json", &value); err == nil {
+		t.Fatal("scan receipt accepted a relative metadata path")
+	}
+}

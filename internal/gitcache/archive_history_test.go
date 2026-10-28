@@ -9,13 +9,14 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"github.com/oberthci/oberth/internal/gitcache"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/oberthci/oberth/internal/gitcache"
 )
 
 func fixtureGit(ctx context.Context, repo string, args ...string) ([]byte, error) {
