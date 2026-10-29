@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"modernc.org/sqlite"
+
+	"github.com/oberthci/oberth/internal/testtimeout"
 )
 
 func TestOnlineBackupMultiStepPinnedViewWithWriter(t *testing.T) {
@@ -23,7 +25,7 @@ INSERT INTO backup_pad SELECT i, zeroblob(3000) FROM n;
 PRAGMA wal_checkpoint(PASSIVE);`); err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithTimeout(t.Context(), 60*time.Second) // Liveness only; channels synchronize every commit.
+	ctx, cancel := context.WithTimeout(t.Context(), testtimeout.Start(60*time.Second)) // Liveness only; channels synchronize every commit.
 	defer cancel()
 	requests := make(chan struct{})
 	committed := make(chan error)

@@ -16,6 +16,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/oberthci/oberth/internal/testtimeout"
 )
 
 type parallelCache struct{ active, peak, archives atomic.Int32 }
@@ -86,8 +88,8 @@ func TestParallelGoModDownloads(t *testing.T) {
 	root.WriteString(")\n")
 	server := &http.Server{
 		Handler:           NewHandler(cache, "go.example.test", mapping),
-		ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second,
-		IdleTimeout: 30 * time.Second, WriteTimeout: 2 * time.Minute,
+		ReadHeaderTimeout: testtimeout.Start(10 * time.Second), ReadTimeout: testtimeout.Start(30 * time.Second),
+		IdleTimeout: testtimeout.Start(30 * time.Second), WriteTimeout: testtimeout.Start(2 * time.Minute),
 		TLSConfig: &tls.Config{MinVersion: tls.VersionTLS13, Certificates: []tls.Certificate{cert}},
 	}
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
@@ -97,7 +99,7 @@ func TestParallelGoModDownloads(t *testing.T) {
 	served := make(chan error, 1)
 	go func() { served <- server.Serve(tls.NewListener(listener, server.TLSConfig)) }()
 	t.Cleanup(func() { _ = server.Close(); <-served })
-	ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
+	ctx, cancel := context.WithTimeout(t.Context(), testtimeout.Start(time.Minute))
 	defer cancel()
 	var workers sync.WaitGroup
 	for range clients {

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/testtimeout"
 )
 
 func TestAuditFenceSucceedsUnderContinuousTokenTouches(t *testing.T) {
@@ -25,7 +26,7 @@ func TestAuditFenceSucceedsUnderContinuousTokenTouches(t *testing.T) {
 	if _, err := s.ActivateTokenCredential(t.Context(), credential.ID); err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), testtimeout.Start(5*time.Second))
 	defer cancel()
 	touches := make(chan struct{}, 16)
 	done := make(chan error, 1)
@@ -129,7 +130,7 @@ func TestLiveReadersUseStartupTimeoutAndAvoidPrimaryConnection(t *testing.T) {
 			}
 			defer func() { _ = tx.Rollback() }()
 			// Primary is held: a reader must use cached startup metadata.
-			ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+			ctx, cancel := context.WithTimeout(t.Context(), testtimeout.Start(time.Second))
 			defer cancel()
 			readers, err := s.openLiveReaders(ctx, 4)
 			if err != nil {

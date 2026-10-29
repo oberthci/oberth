@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/testtimeout"
 )
 
 // The helper runs the actual CLI main, or the production in-pod wait loop in
@@ -39,7 +40,7 @@ func TestUpgradeWaitProcessHelper(t *testing.T) {
 		}
 		pgid, _ := syscall.Getpgid(0)
 		fmt.Printf("fixture observer pid=%d ppid=%d pgid=%d\n", os.Getpid(), os.Getppid(), pgid)
-		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+		ctx, cancel := context.WithTimeout(context.Background(), testtimeout.Start(3*time.Minute))
 		defer cancel()
 		err := waitIdle(ctx, &http.Client{Timeout: 5 * time.Second}, os.Getenv("OBERTH_TEST_WAIT_URL"), time.Second, idleWaitOptions{mode: "all", output: os.Stdout})
 		if err != nil {
@@ -113,7 +114,7 @@ esac
 			if err := os.WriteFile(kubeconfig, []byte("apiVersion: v1\nkind: Config\ncurrent-context: fixture\ncontexts:\n- name: fixture\n  context:\n    cluster: fixture\n    user: fixture\nclusters:\n- name: fixture\n  cluster:\n    server: https://127.0.0.1:1\nusers:\n- name: fixture\n  user: {}\n"), 0600); err != nil {
 				t.Fatal(err)
 			}
-			ctx, cancel := context.WithTimeout(t.Context(), 170*time.Second)
+			ctx, cancel := context.WithTimeout(t.Context(), testtimeout.Start(170*time.Second))
 			defer cancel()
 			command := exec.CommandContext(ctx, "/bin/sh", "-c", `exec "$@"`, "fixture", executable, "-test.run", "^TestUpgradeWaitProcessHelper$")
 			command.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
@@ -137,6 +138,10 @@ esac
 				oldCritical = "yes"
 			}
 			command.Env = []string{"PATH=" + root + ":/usr/bin:/bin", "HOME=" + root, "KUBECONFIG=" + kubeconfig, "OBERTH_TEST_WAIT_ROLE=cli", "OBERTH_TEST_EXECUTABLE=" + executable, "OBERTH_TEST_WAIT_URL=" + server.URL + "/v1/idle", "OBERTH_TEST_WAIT_PID=" + pidPath, "OBERTH_TEST_WAIT_LIMIT=" + limit, "OBERTH_TEST_UPGRADE_MARKER=" + upgradePath, "OBERTH_TEST_ALREADY=" + already, "OBERTH_TEST_OLD_CRITICAL=" + oldCritical}
+			// Keep the test-only scale through this private subprocess environment.
+			if scale, set := os.LookupEnv("OBERTH_TEST_TIMEOUT_SCALE"); set {
+				command.Env = append(command.Env, "OBERTH_TEST_TIMEOUT_SCALE="+scale)
+			}
 			command.WaitDelay = 5 * time.Second
 			var output strings.Builder
 			command.Stdout, command.Stderr = &output, &output
@@ -149,7 +154,7 @@ esac
 			go func() { finished <- command.Wait() }()
 			if mode == "kill-child" || mode == "kill-group" || mode == "cancel" {
 				var pid int
-				until := time.NewTimer(15 * time.Second)
+				until := time.NewTimer(testtimeout.Start(15 * time.Second))
 				defer until.Stop()
 				for pid == 0 {
 					select {

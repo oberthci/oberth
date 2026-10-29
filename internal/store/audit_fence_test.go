@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/testtimeout"
 )
 
 func TestAuditFenceRejectsMovedHeadAndAllowsFreshRetry(t *testing.T) {
@@ -128,7 +129,7 @@ func TestAuditVerificationCPUDoesNotOwnPrimaryConnection(t *testing.T) {
 		if err != nil {
 			return head, anchor, err
 		}
-		ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+		ctx, cancel := context.WithTimeout(t.Context(), testtimeout.Start(time.Second))
 		defer cancel()
 		if _, err := s.AppendAuditAction(ctx, model.AuditActionSpec{Actor: "test", Action: "concurrent.writer", ResourceType: "test"}); err != nil {
 			t.Fatalf("writer blocked during verification: %v", err)

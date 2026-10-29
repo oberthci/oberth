@@ -12,6 +12,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/oberthci/oberth/internal/testtimeout"
 )
 
 // TestMCPRejectsOversizeBody verifies that the MaxBytesReader guard rejects a
@@ -370,7 +372,7 @@ func TestMCPWriteTimeoutRegressionLongPoll(t *testing.T) {
 
 	// Make a request for "wait" which will exceed WriteTimeout.
 	body := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"wait","arguments":{"sha":"` + strings.Repeat("a", 40) + `"}}}`
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), testtimeout.Start(5*time.Second))
 	defer cancel()
 	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, "http://"+ln2.Addr().String()+"/mcp", strings.NewReader(body))
 	req.Header.Set("Authorization", "Bearer valid-token")

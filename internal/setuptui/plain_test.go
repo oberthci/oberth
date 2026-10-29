@@ -14,6 +14,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/oberthci/oberth/internal/installer"
+	"github.com/oberthci/oberth/internal/testtimeout"
 )
 
 // Plain mode asks the same questions: it lists the kubeconfig contexts and,
@@ -109,7 +110,7 @@ func TestPlainModeStopsAtPromptWhenInterrupted(t *testing.T) {
 		if !errors.Is(err, installer.ErrInterrupted) {
 			t.Fatalf("interrupted plain setup must return ErrInterrupted, got %v", err)
 		}
-	case <-time.After(5 * time.Second):
+	case <-time.After(testtimeout.Start(5 * time.Second)):
 		t.Fatal("plain setup kept waiting for input after ctrl+c")
 	}
 }

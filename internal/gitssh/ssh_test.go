@@ -19,6 +19,8 @@ import (
 
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/knownhosts"
+
+	"github.com/oberthci/oberth/internal/testtimeout"
 )
 
 func TestClosedArguments(t *testing.T) {
@@ -142,7 +144,7 @@ func TestPinnedTransportStreamsAndPreservesExitStatus(t *testing.T) {
 		_, _ = channel.SendRequest("exit-status", false, ssh.Marshal(struct{ Code uint32 }{23}))
 		completed <- nil
 	}()
-	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), testtimeout.Start(10*time.Second))
 	defer cancel()
 	var out, diagnostics bytes.Buffer
 	err = Run(ctx, []string{"git@127.0.0.1", "git-upload-pack '/fixture'"}, config, io.NopCloser(strings.NewReader("request")), &out, &diagnostics)
@@ -179,7 +181,7 @@ func TestHostKeyMismatchRefusesBeforeAuthentication(t *testing.T) {
 		cfg.AddHostKey(offered)
 		_, _, _, _ = ssh.NewServerConn(raw, cfg)
 	}()
-	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), testtimeout.Start(10*time.Second))
 	defer cancel()
 	err = Run(ctx, []string{"git@127.0.0.1", "git-upload-pack '/fixture'"}, config, io.NopCloser(strings.NewReader("")), io.Discard, io.Discard)
 	if err == nil || ExitCode(err) != 255 {
@@ -215,7 +217,7 @@ func TestCancelClosesBlockedHandshake(t *testing.T) {
 	var peer net.Conn
 	select {
 	case peer = <-accepted:
-	case <-time.After(10 * time.Second):
+	case <-time.After(testtimeout.Start(10 * time.Second)):
 		t.Fatal("connection not started")
 	}
 	defer peer.Close()
@@ -225,7 +227,7 @@ func TestCancelClosesBlockedHandshake(t *testing.T) {
 		if !errors.Is(err, context.Canceled) {
 			t.Fatalf("cause lost: %v", err)
 		}
-	case <-time.After(5 * time.Second):
+	case <-time.After(testtimeout.Start(5 * time.Second)):
 		t.Fatal("canceled transport hung")
 	}
 }

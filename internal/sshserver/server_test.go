@@ -18,6 +18,7 @@ import (
 	"golang.org/x/crypto/ssh"
 
 	"github.com/oberthci/oberth/internal/gitcache"
+	"github.com/oberthci/oberth/internal/testtimeout"
 )
 
 const (
@@ -625,7 +626,7 @@ func noOpUpdateHandler() UpdateHandler {
 
 func waitFor(t *testing.T, timeout time.Duration, condition func() bool) {
 	t.Helper()
-	deadline := time.Now().Add(timeout)
+	deadline := time.Now().Add(testtimeout.Start(timeout))
 	for time.Now().Before(deadline) {
 		if condition() {
 			return
@@ -658,7 +659,7 @@ func startServer(t *testing.T, server *Server, signer ssh.Signer) (*ssh.Client, 
 			if err != nil {
 				t.Errorf("Serve: %v", err)
 			}
-		case <-time.After(2 * time.Second):
+		case <-time.After(testtimeout.Start(2 * time.Second)):
 			t.Error("SSH server did not stop")
 		}
 	}
@@ -669,7 +670,7 @@ func clientConfig(signer ssh.Signer) *ssh.ClientConfig {
 		User:            "git",
 		Auth:            []ssh.AuthMethod{ssh.PublicKeys(signer)},
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(), // Test-only listener and generated host key.
-		Timeout:         2 * time.Second,
+		Timeout:         testtimeout.Start(2 * time.Second),
 	}
 }
 

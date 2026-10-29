@@ -22,6 +22,7 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 	"k8s.io/utils/ptr"
 
+	"github.com/oberthci/oberth/internal/testtimeout"
 	"github.com/oberthci/oberth/internal/vmrunner"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 	"github.com/oberthci/oberth/pkg/periapsis"
@@ -340,7 +341,7 @@ func TestTrustedKVMCleanupRequiresExactUIDAndObservedAbsence(t *testing.T) {
 		t.Fatal(err)
 	}
 	controller.interval = time.Millisecond
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), testtimeout.Start(time.Second))
 	defer cancel()
 	if err := controller.CleanupTrustedKVM(ctx, wf.Name, request.RunID, ""); err == nil {
 		t.Fatal("empty UID discharged uncertain submission")

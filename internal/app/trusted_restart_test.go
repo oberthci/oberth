@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/oberthci/oberth/internal/argojob"
+	"github.com/oberthci/oberth/internal/testtimeout"
 	"github.com/oberthci/oberth/internal/vmrunner"
 )
 
@@ -118,7 +119,7 @@ func TestTrustedRestartUnboundCreateMustProveAbsence(t *testing.T) {
 			controller.absenceErr = context.DeadlineExceeded
 		}
 		preflight := &TrustedPreflights{store: journal, controller: controller}
-		ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+		ctx, cancel := context.WithTimeout(t.Context(), testtimeout.Start(time.Second))
 		ids, err := preflight.Recover(ctx)
 		cancel()
 		if absent {

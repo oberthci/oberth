@@ -18,6 +18,8 @@ import (
 	"time"
 
 	"golang.org/x/crypto/ssh"
+
+	"github.com/oberthci/oberth/internal/testtimeout"
 )
 
 // Real Git leaves the helper's pipe stdin open while awaiting the initial
@@ -114,7 +116,7 @@ func TestRealGitReturnsWhenRemoteExitsBeforeReadingStdin(t *testing.T) {
 		{"git-receive-pack", []string{"push", "git@fixture:/fixture", "HEAD:refs/heads/refused"}},
 	} {
 		t.Run(test.service, func(t *testing.T) {
-			ctx, cancel := context.WithTimeout(t.Context(), 60*time.Second)
+			ctx, cancel := context.WithTimeout(t.Context(), testtimeout.Start(60*time.Second))
 			defer cancel()
 			command := exec.CommandContext(ctx, "git", test.args...)
 			command.Dir = work

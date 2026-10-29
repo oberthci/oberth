@@ -14,6 +14,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/oberthci/oberth/internal/testtimeout"
 )
 
 func TestReceivePackAllowsOnlyBranchesAndTags(t *testing.T) {
@@ -363,7 +365,7 @@ func TestReceiveTransactionSerializesActorBoundSnapshots(t *testing.T) {
 	select {
 	case <-secondEntered:
 		t.Fatal("second actor entered receive transaction before first capture completed")
-	case <-time.After(25 * time.Millisecond):
+	case <-time.After(testtimeout.Scale(25 * time.Millisecond)):
 	}
 	close(releaseFirst)
 	if err := <-firstDone; err != nil {
@@ -464,7 +466,7 @@ func TestReceiveCallbackDeliveryKeepsLaterReceivesOrdered(t *testing.T) {
 	select {
 	case <-secondReceiveEntered:
 		t.Fatal("later receive began before the prior durable callback completed")
-	case <-time.After(25 * time.Millisecond):
+	case <-time.After(testtimeout.Scale(25 * time.Millisecond)):
 	}
 	close(releaseCallback)
 	if err := <-firstDone; err != nil {
@@ -764,7 +766,7 @@ func TestPreFinalizeGateBlocksRefPublication(t *testing.T) {
 	repository := newTestRepository(t)
 	cache, err := newBackendTestCache(t, Config{
 		Root:           filepath.Join(t.TempDir(), "cache"),
-		CommandTimeout: 10 * time.Second,
+		CommandTimeout: testtimeout.Start(10 * time.Second),
 		Upstream: func(repo string) (string, error) {
 			if repo != "example" {
 				return "", fmt.Errorf("unknown repo %s", repo)
@@ -847,7 +849,7 @@ func TestGateFailedReplayDeliversWithOriginalAttribution(t *testing.T) {
 	}
 	cache, err := newBackendTestCache(t, Config{
 		Root:           root,
-		CommandTimeout: 10 * time.Second,
+		CommandTimeout: testtimeout.Start(10 * time.Second),
 		Upstream:       upstreamFunc,
 		PreFinalizeGate: func(context.Context) error {
 			return errors.New("gate failing")
@@ -881,7 +883,7 @@ func TestGateFailedReplayDeliversWithOriginalAttribution(t *testing.T) {
 	// Restart with a healthy gate — simulates gate recovery (e.g. TSA reachable again).
 	restarted, err := newBackendTestCache(t, Config{
 		Root:           root,
-		CommandTimeout: 10 * time.Second,
+		CommandTimeout: testtimeout.Start(10 * time.Second),
 		Upstream:       upstreamFunc,
 	})
 	if err != nil {
@@ -929,7 +931,7 @@ func TestGateFailedReplayRefusesWhileGateStillFails(t *testing.T) {
 	}
 	cache, err := newBackendTestCache(t, Config{
 		Root:           root,
-		CommandTimeout: 10 * time.Second,
+		CommandTimeout: testtimeout.Start(10 * time.Second),
 		Upstream:       upstreamFunc,
 		PreFinalizeGate: func(context.Context) error {
 			return gateErr
@@ -960,7 +962,7 @@ func TestGateFailedReplayRefusesWhileGateStillFails(t *testing.T) {
 	// Restart with still-failing gate.
 	restarted, err := newBackendTestCache(t, Config{
 		Root:           root,
-		CommandTimeout: 10 * time.Second,
+		CommandTimeout: testtimeout.Start(10 * time.Second),
 		Upstream:       upstreamFunc,
 		PreFinalizeGate: func(context.Context) error {
 			return gateErr
@@ -1010,7 +1012,7 @@ func TestGateFailedReservationRecoveredByLaterReceive(t *testing.T) {
 	}
 	cache, err := newBackendTestCache(t, Config{
 		Root:           root,
-		CommandTimeout: 10 * time.Second,
+		CommandTimeout: testtimeout.Start(10 * time.Second),
 		Upstream:       upstreamFunc,
 		PreFinalizeGate: func(context.Context) error {
 			gateMu.Lock()
@@ -1091,7 +1093,7 @@ func TestGateFailedPendingReceiveShowsGateFailedState(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "cache")
 	cache, err := newBackendTestCache(t, Config{
 		Root:           root,
-		CommandTimeout: 10 * time.Second,
+		CommandTimeout: testtimeout.Start(10 * time.Second),
 		Upstream: func(repo string) (string, error) {
 			if repo != "example" {
 				return "", fmt.Errorf("unknown repo %s", repo)
@@ -1192,7 +1194,7 @@ func TestReservedReplayRefusesWhileGateFails(t *testing.T) {
 	// Restart with a failing gate — replay must refuse finalization.
 	restarted, err := newBackendTestCache(t, Config{
 		Root:           root,
-		CommandTimeout: 10 * time.Second,
+		CommandTimeout: testtimeout.Start(10 * time.Second),
 		Upstream:       upstreamFunc,
 		PreFinalizeGate: func(context.Context) error {
 			return errors.New("gate check failed for reserved")
@@ -1269,7 +1271,7 @@ func TestReservedReplayDeliversWithOriginalAttribution(t *testing.T) {
 	var gateRan bool
 	restarted, err := newBackendTestCache(t, Config{
 		Root:           root,
-		CommandTimeout: 10 * time.Second,
+		CommandTimeout: testtimeout.Start(10 * time.Second),
 		Upstream:       upstreamFunc,
 		PreFinalizeGate: func(context.Context) error {
 			gateRan = true
@@ -1312,7 +1314,7 @@ func newTestCacheAt(t *testing.T, root, upstream string) *Cache {
 	t.Helper()
 	cache, err := newBackendTestCache(t, Config{
 		Root:           root,
-		CommandTimeout: 10 * time.Second,
+		CommandTimeout: testtimeout.Start(10 * time.Second),
 		Upstream: func(repo string) (string, error) {
 			if repo != "example" {
 				return "", fmt.Errorf("unknown repo %s", repo)

@@ -17,6 +17,8 @@ import (
 	"time"
 
 	"golang.org/x/sys/unix"
+
+	"github.com/oberthci/oberth/internal/testtimeout"
 )
 
 // Use a private test process so enabling subreaping cannot change ownership in
@@ -92,7 +94,7 @@ func TestCLICommandReapsCanceledDescendants(t *testing.T) {
 			case <-ready.ready:
 			case err := <-done:
 				t.Fatalf("fixture exited before descendants were ready: %v", err)
-			case <-time.After(10 * time.Second):
+			case <-time.After(testtimeout.Start(10 * time.Second)):
 				t.Fatal("descendant fixture did not become ready")
 			}
 			pids := make([]int, 3)
@@ -114,7 +116,7 @@ func TestCLICommandReapsCanceledDescendants(t *testing.T) {
 			// not survive the isolated regression process.
 			defer func() {
 				for _, pid := range pids[1:] {
-					deadline := time.Now().Add(10 * time.Second)
+					deadline := time.Now().Add(testtimeout.Start(10 * time.Second))
 					for {
 						var status unix.WaitStatus
 						waited, _ := unix.Wait4(pid, &status, unix.WNOHANG, nil)
@@ -137,7 +139,7 @@ func TestCLICommandReapsCanceledDescendants(t *testing.T) {
 				if !errors.Is(err, cause) {
 					t.Fatalf("lost cancellation cause: %v", err)
 				}
-			case <-time.After(10 * time.Second):
+			case <-time.After(testtimeout.Start(10 * time.Second)):
 				t.Fatal("canceled command did not join")
 			}
 			for _, pid := range pids {

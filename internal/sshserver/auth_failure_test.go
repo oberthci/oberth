@@ -24,6 +24,7 @@ import (
 	"github.com/oberthci/oberth/internal/app"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/internal/testtimeout"
 )
 
 type authTestLogger struct {
@@ -83,7 +84,7 @@ func TestLookupFailuresAbortAuthenticationAsServerErrors(t *testing.T) {
 				select {
 				case server.connections <- struct{}{}:
 					release(server.connections)
-				case <-time.After(5 * time.Second):
+				case <-time.After(testtimeout.Start(5 * time.Second)):
 					t.Fatal("outage handler did not release its connection slot")
 				}
 				cancel()
@@ -264,7 +265,7 @@ func TestOpenSSHLookupTimeoutShowsServerError(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	commandCtx, stop := context.WithTimeout(t.Context(), 10*time.Second)
+	commandCtx, stop := context.WithTimeout(t.Context(), testtimeout.Start(10*time.Second))
 	defer stop()
 	output, err := exec.CommandContext(commandCtx, executable, "-F", "/dev/null", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null", "-o", "IdentitiesOnly=yes", "-i", keyPath, "-p", port, "git@127.0.0.1", "git-upload-pack 'example.git'").CombinedOutput()
 	if err == nil {

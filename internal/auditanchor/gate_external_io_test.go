@@ -10,6 +10,7 @@ import (
 
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/internal/testtimeout"
 
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
@@ -63,11 +64,11 @@ func TestSlowKubernetesReconcileDoesNotBlockWriter(t *testing.T) {
 			case <-entered:
 			case err := <-gateDone:
 				t.Fatalf("gate did not reach Kubernetes reconciliation: %v", err)
-			case <-time.After(5 * time.Second):
+			case <-time.After(testtimeout.Start(5 * time.Second)):
 				t.Fatal("gate did not reach Kubernetes reconciliation")
 			}
 			// Kubernetes is still waiting; an unrelated durable mutation must commit.
-			ctx, cancel := context.WithTimeout(t.Context(), 4*time.Second)
+			ctx, cancel := context.WithTimeout(t.Context(), testtimeout.Start(4*time.Second))
 			started := time.Now()
 			_, writeErr := writeStore.AppendAuditAction(ctx, model.AuditActionSpec{Actor: "test", Action: "writer.during.kubernetes", ResourceType: "test"})
 			elapsed := time.Since(started)

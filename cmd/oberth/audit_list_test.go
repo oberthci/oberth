@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/oberthci/oberth/internal/service"
+	"github.com/oberthci/oberth/internal/testtimeout"
 )
 
 func TestAuditCLIForwardsFiltersToTheMCPTool(t *testing.T) {
@@ -45,7 +46,7 @@ func TestAuditTailDoesNotRepeatAppendBetweenHeadAndPage(t *testing.T) {
 	previous := auditTailInterval
 	auditTailInterval = time.Millisecond
 	t.Cleanup(func() { auditTailInterval = previous })
-	ctx, cancel := context.WithTimeout(t.Context(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), testtimeout.Start(60*time.Second))
 	defer cancel()
 	calls := 0
 	remote := auditCallFunc(func(_ context.Context, _ string, _ any) (json.RawMessage, error) {

@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/oberthci/oberth/internal/testtimeout"
 )
 
 // runGitStdin runs one git command with the given stdin, failing the test on
@@ -99,7 +101,7 @@ func TestGitFailureDetailRedactsConfiguredSecret(t *testing.T) {
 	t.Parallel()
 	cache, err := newBackendTestCache(t, Config{
 		Root:           filepath.Join(t.TempDir(), "cache"),
-		CommandTimeout: 10 * time.Second,
+		CommandTimeout: testtimeout.Start(10 * time.Second),
 		Redact:         []string{"s3cr3t-token-value"},
 		Upstream:       func(string) (string, error) { return "unused", nil },
 	})
@@ -132,7 +134,7 @@ func TestManagedGitConfigEnablesFsck(t *testing.T) {
 	// Verify the runtime environment carries the fsck overrides too.
 	cache, err := newBackendTestCache(t, Config{
 		Root:           t.TempDir(),
-		CommandTimeout: 10 * time.Second,
+		CommandTimeout: testtimeout.Start(10 * time.Second),
 		Upstream:       func(string) (string, error) { return "unused", nil },
 	})
 	if err != nil {

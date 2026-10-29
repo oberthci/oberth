@@ -9,6 +9,10 @@ import (
 	"time"
 )
 
+// Overridden by the integration test's build to match its timeout scale.
+// The host-driver environment is intentionally scrubbed by the harness.
+var readinessTimeout = "30s"
+
 func main() {
 	args := os.Args[1:]
 	if args[0] == "--case" {
@@ -26,8 +30,13 @@ func main() {
 		}
 		socket := args[5]
 		// Both readiness phases share this test-only scheduling budget, well
-		// inside the integration test's two-minute parent watchdog.
-		deadline := time.Now().Add(30 * time.Second)
+		// inside the integration test's scaled parent watchdog.
+		budget, err := time.ParseDuration(readinessTimeout)
+		if err != nil || budget <= 0 {
+			os.Stderr.WriteString("invalid fixture readiness budget\n")
+			os.Exit(2)
+		}
+		deadline := time.Now().Add(budget)
 		for {
 			conn, e := net.Dial("unix", socket)
 			if e == nil {

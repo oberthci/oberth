@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/oberthci/oberth/internal/testtimeout"
 	"github.com/oberthci/oberth/pkg/periapsis"
 )
 
@@ -73,7 +74,7 @@ chmod +x "$8"
 `)
 			source := strings.ReplaceAll(script, "/work/src", src)
 			source = strings.Replace(source, `BAO_DIR="/tmp/openbao"`, `BAO_DIR="`+bao+`"`, 1)
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), testtimeout.Start(5*time.Second))
 			defer cancel()
 			cmd := exec.CommandContext(ctx, "/bin/bash", "-c", source)
 			cmd.Env = []string{"PATH=" + bin + ":/usr/bin:/bin", "HOME=" + dir, "FAIL_PHASE=" + phase, "TRACE=" + trace, "EXPECTED_PACKAGE=" + filepath.Join(src, "internal/installer")}

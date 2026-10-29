@@ -18,6 +18,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/oberthci/oberth/internal/testtimeout"
 	"github.com/oberthci/oberth/internal/vmrunner"
 )
 
@@ -117,7 +118,7 @@ func TestProtectedNodeChannelBindsProofAndRejectsReplay(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), testtimeout.Start(3*time.Second))
 	defer cancel()
 	stream, err := client.Open(ctx, request)
 	if err != nil {

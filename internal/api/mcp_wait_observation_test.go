@@ -16,6 +16,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/oberthci/oberth/internal/testtimeout"
 )
 
 type unmarshalableWaitResult struct{ Invalid chan int }
@@ -178,7 +180,7 @@ func TestMCPWaitObservationWriteFailuresAndPanic(t *testing.T) {
 				t.Fatal("observer invocation mismatch")
 			}
 			writes := writer.writes
-			time.Sleep(5 * time.Millisecond)
+			time.Sleep(testtimeout.Scale(5 * time.Millisecond))
 			if writer.writes != writes {
 				t.Fatal("writer survived terminal event")
 			}
@@ -211,7 +213,7 @@ func TestMCPWaitObservationRealTLS(t *testing.T) {
 				tls.EnableHTTP2 = http2
 				tls.StartTLS()
 				defer tls.Close()
-				ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+				ctx, cancel := context.WithTimeout(context.Background(), testtimeout.Start(3*time.Second))
 				defer cancel()
 				req, err := http.NewRequestWithContext(ctx, http.MethodPost, tls.URL+"/mcp", strings.NewReader(waitRPC))
 				if err != nil {
@@ -245,7 +247,7 @@ func TestMCPWaitObservationRealTLS(t *testing.T) {
 				}
 				select {
 				case <-events.terminal:
-				case <-time.After(time.Second):
+				case <-time.After(testtimeout.Start(time.Second)):
 					t.Fatal("missing terminal")
 				}
 				select {
@@ -274,7 +276,7 @@ func TestMCPWaitObservationActualLoggerNoRawError(t *testing.T) {
 		server.Handler().ServeHTTP(writer, streamRequest(waitRPC, "text/event-stream", "valid-token"))
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), testtimeout.Start(5*time.Second))
 	defer cancel()
 	command := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestMCPWaitObservationActualLoggerNoRawError$")
 	command.Env = append(os.Environ(), child+"=1")
@@ -313,7 +315,7 @@ func TestMCPWaitObservationSocketDeadline(t *testing.T) {
 				return nil, ctx.Err()
 			}, time.Now().Add(time.Minute), trace)
 			trace.finish()
-			if err == nil || time.Since(started) > time.Second {
+			if err == nil || time.Since(started) > testtimeout.Start(time.Second) {
 				t.Fatal("deadline not preserved")
 			}
 			<-readerDone

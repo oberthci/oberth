@@ -23,6 +23,8 @@ import (
 
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/knownhosts"
+
+	"github.com/oberthci/oberth/internal/testtimeout"
 )
 
 // This qualification is compiled explicitly and run in the scratch runtime.
@@ -197,7 +199,7 @@ func TestBundledGitNativeSSHCloneFetchRefusalAndCancel(t *testing.T) {
 	pin(host.PublicKey())
 	earlyExit.Store(true)
 	for _, args := range [][]string{{"ls-remote", url}, {"-C", clone, "push", url, "HEAD:refs/heads/refused"}} {
-		ctx, cancel := context.WithTimeout(t.Context(), 60*time.Second)
+		ctx, cancel := context.WithTimeout(t.Context(), testtimeout.Start(60*time.Second))
 		err := cache.run(ctx, commandSpec{args: args})
 		cancel()
 		var exit *exec.ExitError
@@ -215,7 +217,7 @@ func TestBundledGitNativeSSHCloneFetchRefusalAndCancel(t *testing.T) {
 	case <-stalled:
 	case err := <-done:
 		t.Fatalf("native Git exited before stalled service: %v", err)
-	case <-time.After(10 * time.Second):
+	case <-time.After(testtimeout.Start(10 * time.Second)):
 		t.Fatal("native helper did not reach stalled service")
 	}
 	// Capture the actual Git/helper PIDs while alive, before cancellation.
@@ -243,7 +245,7 @@ func TestBundledGitNativeSSHCloneFetchRefusalAndCancel(t *testing.T) {
 		if err == nil {
 			t.Fatal("canceled fetch succeeded")
 		}
-	case <-time.After(10 * time.Second):
+	case <-time.After(testtimeout.Start(10 * time.Second)):
 		t.Fatal("canceled Git/helper not reaped")
 	}
 	for _, pid := range pids {

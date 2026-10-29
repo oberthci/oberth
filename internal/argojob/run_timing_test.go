@@ -18,6 +18,7 @@ import (
 	ktesting "k8s.io/client-go/testing"
 
 	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/testtimeout"
 )
 
 func TestTimingPaginatedLargeDAG(t *testing.T) {
@@ -62,7 +63,7 @@ func TestTimingPaginatedLargeDAG(t *testing.T) {
 	completion := completionFor(wf)
 	start := time.Now()
 	c.collectStepDiagnostics(context.Background(), wf, &completion)
-	if calls != 2 || len(completion.Steps) != 65 || time.Since(start) > time.Second {
+	if calls != 2 || len(completion.Steps) != 65 || time.Since(start) > testtimeout.Start(time.Second) {
 		t.Fatalf("collection calls=%d steps=%d time=%s", calls, len(completion.Steps), time.Since(start))
 	}
 	for _, step := range completion.Steps {

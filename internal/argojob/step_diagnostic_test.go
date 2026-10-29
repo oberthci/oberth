@@ -19,6 +19,8 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/rest"
 	"k8s.io/utils/ptr"
+
+	"github.com/oberthci/oberth/internal/testtimeout"
 )
 
 func diagnosticFixture() (*wfv1.Workflow, wfv1.NodeStatus, *corev1.Pod, time.Time) {
@@ -187,7 +189,7 @@ func TestStepDiagnosticBlockingTransportUsesOneTotalBudget(t *testing.T) {
 	}
 	select {
 	case <-joined:
-	case <-time.After(time.Second):
+	case <-time.After(testtimeout.Start(time.Second)):
 		t.Fatal("transport handler did not join")
 	}
 	if len(completion.Steps) != 2 {

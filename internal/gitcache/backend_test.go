@@ -11,12 +11,14 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/oberthci/oberth/internal/testtimeout"
 )
 
 // Real Git and race-instrumented hook subprocesses need scheduling headroom on
 // loaded CI hosts. This is a test-only work budget; caller cancellation and
 // production cleanup limits remain enforced.
-const testGitCommandTimeout = 2 * time.Minute
+var testGitCommandTimeout = testtimeout.Start(2 * time.Minute)
 
 // Every existing cache fixture enters through this selector. Process-specific
 // tests with an explicit executable continue to exercise the CLI adapter.

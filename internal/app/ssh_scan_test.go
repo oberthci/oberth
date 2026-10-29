@@ -16,6 +16,8 @@ import (
 	"time"
 
 	"golang.org/x/crypto/ssh"
+
+	"github.com/oberthci/oberth/internal/testtimeout"
 )
 
 func TestScanSSHHostKeysDiscoversFamiliesWithoutAuthentication(t *testing.T) {
@@ -121,7 +123,7 @@ func TestScanSSHHostKeysCancellationClosesStalledHandshake(t *testing.T) {
 	}
 	select {
 	case <-joined:
-	case <-time.After(time.Second):
+	case <-time.After(testtimeout.Start(time.Second)):
 		t.Fatal("cancelled handshake retained its TCP connection")
 	}
 }

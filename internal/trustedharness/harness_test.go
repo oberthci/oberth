@@ -11,6 +11,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/oberthci/oberth/internal/testtimeout"
 )
 
 func guestBundle(t *testing.T, names []string) []byte {
@@ -100,14 +102,14 @@ func TestHostWaitpidOwnsVerdict(t *testing.T) {
 	if err := os.WriteFile(driver, []byte("#!/bin/sh\nprintf '{\"Outcome\":\"passed\"}'\nexit 1\n"), 0700); err != nil {
 		t.Fatal(err)
 	}
-	if err := runHostCase(context.Background(), driver, dir, "one", "qmp", "guest", time.Now().Add(time.Minute)); err == nil {
+	if err := runHostCase(context.Background(), driver, dir, "one", "qmp", "guest", time.Now().Add(testtimeout.Start(time.Minute))); err == nil {
 		t.Fatal("forged PASS stdout overrode failed host process")
 	}
 	if err := os.WriteFile(driver, []byte("#!/bin/sh\n[ \"$LD_PRELOAD\" = \"\" ] || exit 1\n[ \"$1\" = --case ] || exit 2\nexit 0\n"), 0700); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("LD_PRELOAD", "candidate.so")
-	if err := runHostCase(context.Background(), driver, dir, "one", "qmp", "guest", time.Now().Add(time.Minute)); err != nil {
+	if err := runHostCase(context.Background(), driver, dir, "one", "qmp", "guest", time.Now().Add(testtimeout.Start(time.Minute))); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(driver, []byte("#!/bin/sh\nsleep 30 &\nwait\n"), 0700); err != nil {
@@ -116,10 +118,10 @@ func TestHostWaitpidOwnsVerdict(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 	start := time.Now()
-	if err := runHostCase(ctx, driver, dir, "one", "qmp", "guest", time.Now().Add(time.Minute)); err == nil {
+	if err := runHostCase(ctx, driver, dir, "one", "qmp", "guest", time.Now().Add(testtimeout.Start(time.Minute))); err == nil {
 		t.Fatal("timeout passed")
 	}
-	if time.Since(start) > 3*time.Second {
+	if time.Since(start) > testtimeout.Start(3*time.Second) {
 		t.Fatal("process group did not join after cancellation")
 	}
 }

@@ -13,6 +13,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/oberthci/oberth/internal/testtimeout"
 )
 
 type streamingBackend struct {
@@ -57,8 +59,8 @@ func streamTestServer(t *testing.T, backend *streamingBackend) *Server {
 	if err != nil {
 		t.Fatal(err)
 	}
-	server.mcpHeartbeatInterval = 10 * time.Millisecond
-	server.mcpStreamWriteTimeout = 100 * time.Millisecond
+	server.mcpHeartbeatInterval = testtimeout.Scale(10 * time.Millisecond)
+	server.mcpStreamWriteTimeout = testtimeout.Start(100 * time.Millisecond)
 	return server
 }
 
@@ -136,7 +138,7 @@ func TestMCPStreamTLSHeartbeatAndFinalRPC(t *testing.T) {
 			tls.EnableHTTP2 = http2
 			tls.StartTLS()
 			defer tls.Close()
-			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), testtimeout.Start(3*time.Second))
 			defer cancel()
 			req, err := http.NewRequestWithContext(ctx, http.MethodPost, tls.URL+"/mcp", strings.NewReader(waitRPC))
 			if err != nil {
@@ -241,7 +243,7 @@ func TestMCPStreamWriteFailureCancelsObserverAndJoins(t *testing.T) {
 				t.Fatal("overall deadline not restored")
 			}
 			writes := writer.writes
-			time.Sleep(5 * time.Millisecond)
+			time.Sleep(testtimeout.Scale(5 * time.Millisecond))
 			if writer.writes != writes {
 				t.Fatal("writer survived handler")
 			}
@@ -267,7 +269,7 @@ func TestMCPStreamFlushFailureAndPanicJoin(t *testing.T) {
 		_ = server.streamLongPoll(writer, httptest.NewRequest(http.MethodPost, "/mcp", nil), rpcResponse{}, func(context.Context) (any, error) { panic("observer") }, time.Now().Add(time.Minute))
 	}()
 	writes := writer.writes
-	time.Sleep(5 * time.Millisecond)
+	time.Sleep(testtimeout.Scale(5 * time.Millisecond))
 	if writer.writes != writes {
 		t.Fatal("heartbeat survived panic")
 	}
@@ -294,7 +296,7 @@ func TestMCPStreamClientDisconnectStopsOnlyObserver(t *testing.T) {
 	}
 	select {
 	case <-observed:
-	case <-time.After(time.Second):
+	case <-time.After(testtimeout.Start(time.Second)):
 		t.Fatal("observer survived disconnected client")
 	}
 	if backend.calledName != "" {
@@ -335,7 +337,7 @@ func TestMCPStreamSurvivesProxyIdleDeadline(t *testing.T) {
 						}
 					}
 					select {
-					case <-time.After(350 * time.Millisecond):
+					case <-time.After(testtimeout.Scale(350 * time.Millisecond)):
 						return map[string]bool{"still_running": true}, nil
 					case <-ctx.Done():
 						return nil, ctx.Err()
@@ -344,13 +346,13 @@ func TestMCPStreamSurvivesProxyIdleDeadline(t *testing.T) {
 			}}
 			server := streamTestServer(t, backend)
 			if mode == "initial SSE only" {
-				server.mcpHeartbeatInterval = time.Second
+				server.mcpHeartbeatInterval = testtimeout.Scale(time.Second)
 			}
 			handler := server.Handler()
 			if mode == "silent JSON" {
 				handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					select {
-					case <-time.After(350 * time.Millisecond):
+					case <-time.After(testtimeout.Scale(350 * time.Millisecond)):
 						handlerResult := `{"jsonrpc":"2.0","id":"exact-request","result":{}}`
 						_, _ = io.WriteString(w, handlerResult)
 					case <-r.Context().Done():
@@ -366,11 +368,11 @@ func TestMCPStreamSurvivesProxyIdleDeadline(t *testing.T) {
 				if err != nil {
 					return nil, err
 				}
-				idle := 100 * time.Millisecond
+				idle := testtimeout.Scale(100 * time.Millisecond)
 				if mode == "heartbeat SSE" {
 					// The frame handshake supplies the success condition. This
 					// remains a deadline, but is only a failure backstop under load.
-					idle = 5 * time.Second
+					idle = testtimeout.Start(5 * time.Second)
 				}
 				return idleReadConn{Conn: conn, idle: idle}, nil
 			}
@@ -415,7 +417,7 @@ func TestMCPStreamSurvivesProxyIdleDeadline(t *testing.T) {
 			defer proxy.Close()
 			req, _ := http.NewRequest(http.MethodPost, proxy.URL+"/mcp", strings.NewReader(waitRPC))
 			if mode == "heartbeat SSE" {
-				ctx, cancel := context.WithTimeout(req.Context(), 10*time.Second)
+				ctx, cancel := context.WithTimeout(req.Context(), testtimeout.Start(10*time.Second))
 				defer cancel()
 				req = req.WithContext(ctx)
 			}
@@ -513,7 +515,7 @@ func TestMCPStreamBoundsSocketBackpressure(t *testing.T) {
 			if called == initial {
 				t.Fatalf("observer called=%v initial=%v", called, initial)
 			}
-			if time.Since(started) > time.Second {
+			if time.Since(started) > testtimeout.Start(time.Second) {
 				t.Fatal("blocked stream exceeded write bound")
 			}
 			<-readerDone

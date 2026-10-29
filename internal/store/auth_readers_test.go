@@ -11,6 +11,7 @@ import (
 	sqlite3 "modernc.org/sqlite/lib"
 
 	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/testtimeout"
 )
 
 func authReaderFixture(t *testing.T) (*Store, model.Uplink) {
@@ -53,7 +54,7 @@ func TestSSHLookupDuringWriterHold(t *testing.T) {
 	}
 	t.Logf("primary connection wait: %s; waits=%d", time.Since(started), s.db.Stats().WaitCount)
 	started = time.Now()
-	ctxRead, cancelRead := context.WithTimeout(t.Context(), 4*time.Second)
+	ctxRead, cancelRead := context.WithTimeout(t.Context(), testtimeout.Start(4*time.Second))
 	defer cancelRead()
 	for range 16 {
 		got, err := s.UplinkByFingerprint(ctxRead, uplink.Fingerprint)

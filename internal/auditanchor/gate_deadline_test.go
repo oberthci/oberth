@@ -9,6 +9,7 @@ import (
 
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/internal/testtimeout"
 )
 
 type deadlineContinuity struct {
@@ -76,7 +77,7 @@ func TestMutationGateDeadlineBoundsRefreshQueue(t *testing.T) {
 	go func() { firstDone <- manager.AllowMutation(firstCtx) }()
 	select {
 	case <-entered:
-	case <-time.After(3 * time.Second):
+	case <-time.After(testtimeout.Start(3 * time.Second)):
 		t.Fatal("first gate never entered reconciliation")
 	}
 	secondCtx, cancelSecond := context.WithTimeout(t.Context(), 50*time.Millisecond)

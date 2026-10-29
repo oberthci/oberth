@@ -20,6 +20,8 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/fake"
 	clienttesting "k8s.io/client-go/testing"
+
+	"github.com/oberthci/oberth/internal/testtimeout"
 )
 
 func TestAcquireHostKeysAcceptsPublishedFingerprintForWellKnownForge(t *testing.T) {
@@ -269,7 +271,7 @@ func TestProbeSSHAuthenticationHandshakesWithoutOpeningChannels(t *testing.T) {
 	}
 	address := listener.Addr().String()
 	knownHosts := []byte(knownhosts.Line([]string{address}, hostKey) + "\n")
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), testtimeout.Start(5*time.Second))
 	defer cancel()
 	if err := ProbeSSHAuthentication(ctx, "ssh://git@"+address+"/acme", pem.EncodeToMemory(privateBlock), knownHosts); err != nil {
 		t.Fatal(err)
@@ -335,7 +337,7 @@ func TestProbeSSHAuthenticationRejectionSatisfiesClassifier(t *testing.T) {
 	}
 	address := listener.Addr().String()
 	knownHosts := []byte(knownhosts.Line([]string{address}, hostKey) + "\n")
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), testtimeout.Start(5*time.Second))
 	defer cancel()
 	probeErr := ProbeSSHAuthentication(ctx, "ssh://git@"+address+"/org", pem.EncodeToMemory(privateBlock), knownHosts)
 	if probeErr == nil {

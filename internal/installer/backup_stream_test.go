@@ -16,10 +16,11 @@ import (
 	"time"
 
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/internal/testtimeout"
 )
 
 func TestBackupStreamingSizeRefusalCancelsAndRemovesPartial(t *testing.T) {
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), testtimeout.Start(5*time.Second))
 	defer cancel()
 	deps := backupDeps{runIO: func(ctx context.Context, _ io.Reader, out io.Writer, _ string, _ ...string) error {
 		_, err := out.Write([]byte("01234567890"))

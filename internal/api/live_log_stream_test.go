@@ -14,6 +14,8 @@ import (
 	"testing"
 	"testing/synctest"
 	"time"
+
+	"github.com/oberthci/oberth/internal/testtimeout"
 )
 
 type liveStreamBackend struct {
@@ -137,10 +139,10 @@ func TestLiveLogStreamFlushAndWriteDeadline(t *testing.T) {
 		t.Fatal(err)
 	}
 	httpServer := httptest.NewUnstartedServer(server.Handler())
-	httpServer.Config.WriteTimeout = 50 * time.Millisecond
+	httpServer.Config.WriteTimeout = testtimeout.Scale(50 * time.Millisecond)
 	httpServer.Start()
 	defer httpServer.Close()
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), testtimeout.Start(3*time.Second))
 	defer cancel()
 	request, _ := http.NewRequestWithContext(ctx, http.MethodGet, httpServer.URL+"/api/runs/run-1/livelog/stream", nil)
 	request.Header.Set("Authorization", "Bearer valid-token")
@@ -159,7 +161,7 @@ func TestLiveLogStreamFlushAndWriteDeadline(t *testing.T) {
 			break
 		}
 	}
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(testtimeout.Scale(100 * time.Millisecond))
 	close(release)
 	tail, err := io.ReadAll(reader)
 	if err != nil {
@@ -345,7 +347,7 @@ func TestLiveLogStreamDroppedConnectionResumesExactCursor(t *testing.T) {
 			}
 			httpServer := httptest.NewServer(server.Handler())
 			defer httpServer.Close()
-			ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+			ctx, cancel := context.WithTimeout(t.Context(), testtimeout.Start(3*time.Second))
 			defer cancel()
 			streamCtx, drop := context.WithCancel(ctx)
 			defer drop()

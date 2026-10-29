@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/oberthci/oberth/internal/testtimeout"
 )
 
 func TestDrainReadinessAndNewMutations(t *testing.T) {
@@ -74,11 +76,11 @@ func TestDrainLongPollReturnsReconnectAndJoins(t *testing.T) {
 			}()
 			select {
 			case <-started:
-			case <-time.After(time.Second):
+			case <-time.After(testtimeout.Start(time.Second)):
 				t.Fatal("observer never started")
 			}
 			server.BeginDrain()
-			shutdownCtx, cancel := context.WithTimeout(t.Context(), time.Second)
+			shutdownCtx, cancel := context.WithTimeout(t.Context(), testtimeout.Start(time.Second))
 			defer cancel()
 			if err := httpServer.Config.Shutdown(shutdownCtx); err != nil {
 				t.Fatal(err)
@@ -140,7 +142,7 @@ func TestDrainLetsAcceptedMutationFinish(t *testing.T) {
 	}()
 	select {
 	case <-started:
-	case <-time.After(time.Second):
+	case <-time.After(testtimeout.Start(time.Second)):
 		t.Fatal("mutation not started")
 	}
 	server.BeginDrain()
@@ -150,7 +152,7 @@ func TestDrainLetsAcceptedMutationFinish(t *testing.T) {
 	default:
 	}
 	close(finish)
-	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), testtimeout.Start(time.Second))
 	defer cancel()
 	if err := httpServer.Config.Shutdown(ctx); err != nil {
 		t.Fatal(err)
@@ -209,7 +211,7 @@ func TestDrainConvertsCanceledReadsAndAuthToUnavailable(t *testing.T) {
 			server.BeginDrain()
 			select {
 			case <-done:
-			case <-time.After(time.Second):
+			case <-time.After(testtimeout.Start(time.Second)):
 				t.Fatal("read did not stop")
 			}
 			if recorder.Code != http.StatusServiceUnavailable {
@@ -263,7 +265,7 @@ func TestDrainDoesNotAdmitMutationWhoseBodyArrivesLate(t *testing.T) {
 	writer.Close()
 	select {
 	case <-done:
-	case <-time.After(time.Second):
+	case <-time.After(testtimeout.Start(time.Second)):
 		t.Fatal("late body did not finish")
 	}
 	if recorder.Code != http.StatusServiceUnavailable || backend.calledName != "" {

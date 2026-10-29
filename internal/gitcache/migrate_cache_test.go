@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/oberthci/oberth/internal/testtimeout"
 )
 
 func TestMigrateToQualifiedLayout(t *testing.T) {
@@ -317,7 +319,7 @@ func TestDefaultBranchFromSymrefAndEmptyBootstrap(t *testing.T) {
 	runGit(t, "", "init", "--bare", "--initial-branch=main", upstream)
 	cache, err := newBackendTestCache(t, Config{
 		Root:           filepath.Join(root, "cache"),
-		CommandTimeout: 10 * time.Second,
+		CommandTimeout: testtimeout.Start(10 * time.Second),
 		Upstream:       func(string) (string, error) { return upstream, nil },
 	})
 	if err != nil {

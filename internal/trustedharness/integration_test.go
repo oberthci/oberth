@@ -17,16 +17,21 @@ import (
 	"testing"
 	"time"
 
+	"github.com/oberthci/oberth/internal/testtimeout"
 	"github.com/oberthci/oberth/internal/vmrunner"
 )
 
 // Native subprocess startup and socket readiness need scheduling headroom on
 // loaded CI hosts. Keep the fixture's readiness deadline inside this watchdog.
-const protectedTransportTestTimeout = 2 * time.Minute
+var protectedTransportTestTimeout = testtimeout.Start(2 * time.Minute)
 
 func TestHarnessProtectedTransportIntegration(t *testing.T) {
 	binary := filepath.Join(t.TempDir(), "native-fixture")
-	build := exec.Command("go", "build", "-trimpath", "-o", binary, "./testdata/fixture.go")
+	buildCtx, cancelBuild := context.WithTimeout(t.Context(), testtimeout.Start(2*time.Minute))
+	defer cancelBuild()
+	// The host driver runs with a scrubbed environment. Bind its test-only
+	// readiness budget at build time rather than weakening that boundary.
+	build := exec.CommandContext(buildCtx, "go", "build", "-trimpath", "-ldflags=-X main.readinessTimeout="+testtimeout.Start(30*time.Second).String(), "-o", binary, "./testdata/fixture.go")
 	build.Env = append(os.Environ(), "CGO_ENABLED=0", "GOTOOLCHAIN=local")
 	if out, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build native fixture: %v: %s", err, out)

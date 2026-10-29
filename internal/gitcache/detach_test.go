@@ -11,6 +11,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/oberthci/oberth/internal/testtimeout"
 )
 
 // TestGitCommandsNeverDetachBackgroundMaintenance pins the invariant that no
@@ -28,7 +30,7 @@ func TestGitCommandsNeverDetachBackgroundMaintenance(t *testing.T) {
 	trace := filepath.Join(root, "git-trace.log")
 	cache, err := newBackendTestCache(t, Config{
 		Root:           filepath.Join(root, "cache"),
-		CommandTimeout: 2 * time.Minute,
+		CommandTimeout: testtimeout.Start(2 * time.Minute),
 		Upstream:       func(string) (string, error) { return "", errors.New("upstream unused") },
 		Env:            map[string]string{"GIT_TRACE": trace},
 	})
@@ -217,7 +219,7 @@ func TestCaptureBoundsDescendantHoldingOutputPipe(t *testing.T) {
 		if elapsed := time.Since(started); elapsed < captureWaitDelay {
 			t.Fatalf("capture returned after %s, before the %s wait delay", elapsed, captureWaitDelay)
 		}
-	case <-time.After(captureWaitDelay + 30*time.Second):
+	case <-time.After(testtimeout.Start(captureWaitDelay + 30*time.Second)):
 		t.Fatal("capture never returned: an escaped descendant holding the output pipe wedges the repository lock")
 	}
 }

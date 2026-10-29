@@ -17,6 +17,7 @@ import (
 	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/internal/testtimeout"
 )
 
 func TestRunCancelCLIForwardsToTheMCPTool(t *testing.T) {
@@ -199,7 +200,7 @@ func TestRunCancelInPodRecordsTheCancelAndWakesTheDaemon(t *testing.T) {
 	}
 	select {
 	case <-woken:
-	case <-time.After(5 * time.Second):
+	case <-time.After(testtimeout.Start(5 * time.Second)):
 		t.Fatal("the daemon was not asked to run its cancellation pass")
 	}
 	pending, err := database.PendingRunCancellations(ctx)

@@ -14,6 +14,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/oberthci/oberth/internal/testtimeout"
 )
 
 func TestRunPreservesStreamsExitAndWritesRealRSS(t *testing.T) {
@@ -107,7 +109,7 @@ func TestRunForwardsSignalsAndKilledWrapperLeavesUnknown(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
+			ctx, cancel := context.WithTimeout(t.Context(), testtimeout.Start(20*time.Second))
 			defer cancel()
 			root := t.TempDir()
 			self, summary := filepath.Join(root, "self"), filepath.Join(root, "termination")

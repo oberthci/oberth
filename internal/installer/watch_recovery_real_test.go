@@ -34,6 +34,8 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
 	sigsyaml "sigs.k8s.io/yaml"
+
+	"github.com/oberthci/oberth/internal/testtimeout"
 )
 
 var realWatchConfig = flag.String("watch-fixture-config", "", "owned tmpfs synthetic client config")
@@ -121,7 +123,7 @@ func realWatchDeps(t *testing.T) (context.Context, Deps, realWatchBinding) {
 	if err != nil {
 		t.Fatal("synthetic API client unavailable")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), testtimeout.Start(12*time.Minute))
 	t.Cleanup(cancel)
 	d := Deps{KubeClient: c, RestConfig: r, ContextName: k.CurrentContext, Output: io.Discard}
 	d.RunHelm = func(ctx context.Context, args []string) ([]byte, error) {

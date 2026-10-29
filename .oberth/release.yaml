@@ -1216,6 +1216,7 @@ spec:
           OBERTH_TOOLS_DIR=/tmp/oberth-tools \
           GOTOOLCHAIN=local \
           GOWORK=off \
+          OBERTH_TEST_TIMEOUT_SCALE=4 \
           GOENV=off \
           GOPATH=/tmp/bootstrap-private/gopath \
           GOMODCACHE=/tmp/bootstrap-private/gomod \

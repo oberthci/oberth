@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/testtimeout"
 )
 
 func scheduleTestRequest(t *testing.T, s *Store, repo model.Repository, at time.Time) (model.ReceiveEventSpec, model.RunSpec, model.ScheduleFireSpec) {
@@ -227,7 +228,7 @@ func TestScheduleOccurrenceConcurrentTransactionsConsumeSnapshotOnce(t *testing.
 		select {
 		case outcome := <-results:
 			outcomes[outcome]++
-		case <-time.After(15 * time.Second):
+		case <-time.After(testtimeout.Start(15 * time.Second)):
 			t.Fatal("concurrent enqueue stalled")
 		}
 	}

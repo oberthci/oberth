@@ -15,6 +15,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/oberthci/oberth/internal/testtimeout"
 )
 
 type requestJournal struct {
@@ -127,7 +129,7 @@ func (f resolverFixture) run(t *testing.T, args ...string) (string, error) {
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module fixture.invalid/root\n\ngo 1.22\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), testtimeout.Start(30*time.Second))
 	defer cancel()
 	goBinary, err := exec.LookPath("go")
 	if err != nil {

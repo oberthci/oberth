@@ -25,6 +25,7 @@ import (
 
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/internal/testtimeout"
 )
 
 func registerTestUpstream(t *testing.T, databasePath, name, baseURL string) {
@@ -401,7 +402,7 @@ func TestAdminMutationGateUsesLiveDaemonSocket(t *testing.T) {
 	}
 	select {
 	case <-called:
-	case <-time.After(time.Second):
+	case <-time.After(testtimeout.Start(time.Second)):
 		t.Fatal("live daemon mutation gate was not invoked")
 	}
 	if err := requestAdminMutationGate(context.Background(), socket, "test.mutation", "/tmp/rolled-back.sqlite"); err == nil ||
@@ -413,7 +414,7 @@ func TestAdminMutationGateUsesLiveDaemonSocket(t *testing.T) {
 		t.Fatal("daemon gate ran for a non-live database target")
 	default:
 	}
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), testtimeout.Start(time.Second))
 	defer cancel()
 	if err := server.Shutdown(shutdownCtx); err != nil {
 		t.Fatal(err)

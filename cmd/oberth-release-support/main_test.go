@@ -19,6 +19,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/oberthci/oberth/internal/testtimeout"
 )
 
 const testAccount = "0123456789abcdef0123456789abcdef"
@@ -33,7 +35,7 @@ func TestReleaseHeartbeatIsPeriodicBeforeCommandExit(t *testing.T) {
 		finished <- runHeartbeatCommand("publish-r2", exec.CommandContext(ctx, "/bin/sleep", "30"), output, 10*time.Millisecond)
 	}()
 
-	deadline := time.NewTimer(2 * time.Second)
+	deadline := time.NewTimer(testtimeout.Start(2 * time.Second))
 	defer deadline.Stop()
 	for strings.Count(output.String(), "release heartbeat: publish-r2 active\n") < 2 {
 		select {
@@ -148,7 +150,7 @@ func TestReleaseHeartbeatSurvivesPartialChildOutputThroughLineBuffer(t *testing.
 		finished <- runHeartbeatCommand("publish-r2", command, output, 10*time.Millisecond)
 	}()
 
-	deadline := time.NewTimer(2 * time.Second)
+	deadline := time.NewTimer(testtimeout.Start(2 * time.Second))
 	defer deadline.Stop()
 	for strings.Count(output.String(), "release heartbeat: publish-r2 active\n") < 2 {
 		select {
@@ -234,7 +236,7 @@ func TestReleaseHeartbeatTerminatesActiveProcessTreeOnOutputFailure(t *testing.T
 	if err == nil || !strings.Contains(err.Error(), "write periodic release heartbeat") {
 		t.Fatalf("output failure result = %v", err)
 	}
-	if elapsed := time.Since(started); elapsed > 3*time.Second {
+	if elapsed := time.Since(started); elapsed > testtimeout.Start(3*time.Second) {
 		t.Fatalf("release process tree termination took %s, want at most 3s", elapsed)
 	}
 	childPID := output.ChildPID(t)
@@ -275,7 +277,7 @@ func TestReleaseHeartbeatAtomicallyTerminatesIsolatedRunnerGroup(t *testing.T) {
 	var waitErr error
 	select {
 	case waitErr = <-waited:
-	case <-time.After(5 * time.Second):
+	case <-time.After(testtimeout.Start(5 * time.Second)):
 		t.Fatal("isolated release process group was not terminated promptly")
 	}
 	var exitErr *exec.ExitError
@@ -312,7 +314,7 @@ func TestReleaseHeartbeatLocalLeaderCancellationKillsDescendants(t *testing.T) {
 			command := exec.CommandContext(ctx, "/bin/sh", "-c", "sleep 30 & child=$!; printf '%s\\n' \"$child\" > \"$OBERTH_RELEASE_LOCAL_LEADER_TEST_MARKER\"; printf 'child-ready\\n'; wait \"$child\"")
 			finished <- runHeartbeatCommand("publish-images", command, output, 10*time.Millisecond)
 		}()
-		deadline := time.NewTimer(2 * time.Second)
+		deadline := time.NewTimer(testtimeout.Start(2 * time.Second))
 		defer deadline.Stop()
 		for !strings.Contains(output.String(), "child-ready\n") {
 			select {
@@ -346,7 +348,7 @@ func TestReleaseHeartbeatLocalLeaderCancellationKillsDescendants(t *testing.T) {
 		t.Fatal(err)
 	}
 	marker := filepath.Join(t.TempDir(), "child-pid")
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), testtimeout.Start(5*time.Second))
 	defer cancel()
 	command := exec.CommandContext(ctx, testBinary, "-test.run=^TestReleaseHeartbeatLocalLeaderCancellationKillsDescendants$")
 	command.Env = append(os.Environ(), helperEnvironment+"=1", markerEnvironment+"="+marker, runnerOwnsGroupEnv+"=")
@@ -365,7 +367,7 @@ func TestReleaseHeartbeatWaitDelayTerminatesBackgroundDescendant(t *testing.T) {
 	if !errors.Is(err, exec.ErrWaitDelay) {
 		t.Fatalf("background descendant result = %v, want exec.ErrWaitDelay", err)
 	}
-	if elapsed := time.Since(started); elapsed > 2*time.Second {
+	if elapsed := time.Since(started); elapsed > testtimeout.Start(2*time.Second) {
 		t.Fatalf("background descendant cleanup took %s, want at most 2s", elapsed)
 	}
 	childPID := childPIDFromOutput(t, output.String())
@@ -387,7 +389,7 @@ func TestReleaseHeartbeatNonzeroExitRetiresBackgroundDescendant(t *testing.T) {
 	if !strings.Contains(err.Error(), "release command left a background process") {
 		t.Fatalf("nonzero background-parent error lacks containment evidence: %v", err)
 	}
-	if elapsed := time.Since(started); elapsed > 2*time.Second {
+	if elapsed := time.Since(started); elapsed > testtimeout.Start(2*time.Second) {
 		t.Fatalf("nonzero background descendant cleanup took %s, want at most 2s", elapsed)
 	}
 	childPID := childPIDFromOutput(t, output.String())
@@ -516,7 +518,7 @@ func processIsRunning(pid int) bool {
 }
 
 func waitForProcessExit(pid int, timeout time.Duration) bool {
-	deadline := time.Now().Add(timeout)
+	deadline := time.Now().Add(testtimeout.Start(timeout))
 	for {
 		if !processIsRunning(pid) {
 			return true
@@ -524,7 +526,7 @@ func waitForProcessExit(pid int, timeout time.Duration) bool {
 		if !time.Now().Before(deadline) {
 			return false
 		}
-		time.Sleep(10 * time.Millisecond)
+		time.Sleep(testtimeout.Scale(10 * time.Millisecond))
 	}
 }
 

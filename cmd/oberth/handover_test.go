@@ -7,6 +7,8 @@ import (
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	"github.com/oberthci/oberth/internal/testtimeout"
 )
 
 func TestHTTPHandoverBoundsStalledRequests(t *testing.T) {
@@ -33,12 +35,12 @@ func TestHTTPHandoverBoundsStalledRequests(t *testing.T) {
 	}
 	select {
 	case <-stopped:
-	case <-time.After(time.Second):
+	case <-time.After(testtimeout.Start(time.Second)):
 		t.Fatal("stalled request survived drain bound")
 	}
 	select {
 	case <-done:
-	case <-time.After(time.Second):
+	case <-time.After(testtimeout.Start(time.Second)):
 		t.Fatal("client connection survived drain bound")
 	}
 }

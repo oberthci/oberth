@@ -20,6 +20,7 @@ import (
 
 	"github.com/oberthci/oberth/internal/runlog"
 	"github.com/oberthci/oberth/internal/runprogress"
+	"github.com/oberthci/oberth/internal/testtimeout"
 )
 
 const logStamp = "2026-10-23T01:00:00.123456789Z"
@@ -207,7 +208,7 @@ func TestWaitLiveBeforeCompletionAndFinalTail(t *testing.T) {
 		}()
 		return reader, nil
 	})
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), testtimeout.Start(10*time.Second))
 	defer cancel()
 	result := make(chan error, 1)
 	go func() {
@@ -224,7 +225,7 @@ func TestWaitLiveBeforeCompletionAndFinalTail(t *testing.T) {
 	}
 	// A real growing file and active step reader observe the numbered line while
 	// the workflow is still running, independently of the browser connection.
-	deadline := time.Now().Add(time.Second)
+	deadline := time.Now().Add(testtimeout.Start(time.Second))
 	for {
 		body, readErr := store.ReadActive("live", "build", "compile")
 		if readErr == nil && strings.Contains(string(body), "line-001") {
@@ -374,7 +375,7 @@ func TestLiveFollowerConcurrencyBoundAndFastSteps(t *testing.T) {
 		return io.NopCloser(strings.NewReader(stamped("fast"))), nil
 	}, &runBudgetWriter{destination: io.Discard, remaining: 1 << 20}, nil)
 	logs.observe(wf)
-	deadline := time.After(5 * time.Second)
+	deadline := time.After(testtimeout.Start(5 * time.Second))
 	for i := 0; i < maxLogFollowers; i++ {
 		select {
 		case <-ready:

@@ -11,6 +11,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/oberthci/oberth/internal/testtimeout"
 )
 
 func TestParseRepoPathAcceptsOrgQualifiedAndBare(t *testing.T) {
@@ -367,7 +369,7 @@ func TestPreparePromotionCreatesUnbornTarget(t *testing.T) {
 	runGit(t, "", "init", "--bare", "--initial-branch=main", upstream)
 	cache, err := newBackendTestCache(t, Config{
 		Root:           filepath.Join(root, "cache"),
-		CommandTimeout: 10 * time.Second,
+		CommandTimeout: testtimeout.Start(10 * time.Second),
 		Upstream:       func(string) (string, error) { return upstream, nil },
 	})
 	if err != nil {
@@ -1110,7 +1112,7 @@ func TestLsRemoteHeadsFailsForUnreachableUpstream(t *testing.T) {
 	t.Parallel()
 	cache, err := newBackendTestCache(t, Config{
 		Root:           t.TempDir(),
-		CommandTimeout: 5 * time.Second,
+		CommandTimeout: testtimeout.Start(5 * time.Second),
 		Upstream: func(repo string) (string, error) {
 			return "/nonexistent/upstream/" + repo + ".git", nil
 		},
@@ -1236,7 +1238,7 @@ func newTestCache(t *testing.T, upstream string) *Cache {
 	t.Helper()
 	cache, err := newBackendTestCache(t, Config{
 		Root:           filepath.Join(t.TempDir(), "cache"),
-		CommandTimeout: 10 * time.Second,
+		CommandTimeout: testtimeout.Start(10 * time.Second),
 		Upstream: func(repo string) (string, error) {
 			if repo != "example" {
 				return "", fmt.Errorf("unknown repo %s", repo)
@@ -1292,7 +1294,7 @@ func TestEnsureRefusedUpstreamDoesNotServeStaleCache(t *testing.T) {
 	// refuses "wrong-org/example" with ErrUpstreamRefused.
 	cache, err := newBackendTestCache(t, Config{
 		Root:           filepath.Join(t.TempDir(), "cache"),
-		CommandTimeout: 10 * time.Second,
+		CommandTimeout: testtimeout.Start(10 * time.Second),
 		Upstream: func(input string) (string, error) {
 			if input == "example" {
 				return repository.upstream, nil
@@ -1332,7 +1334,7 @@ func TestEnsureUnreachableUpstreamStillServesStaleCache(t *testing.T) {
 
 	cache, err := newBackendTestCache(t, Config{
 		Root:           filepath.Join(t.TempDir(), "cache"),
-		CommandTimeout: 10 * time.Second,
+		CommandTimeout: testtimeout.Start(10 * time.Second),
 		Upstream: func(input string) (string, error) {
 			if !reachable {
 				// Non-ErrUpstreamRefused error: a transient failure.
@@ -1421,7 +1423,7 @@ func TestGCAllFindsQualifiedLayoutCaches(t *testing.T) {
 
 	cache, err := newBackendTestCache(t, Config{
 		Root:           root,
-		CommandTimeout: 10 * time.Second,
+		CommandTimeout: testtimeout.Start(10 * time.Second),
 		Upstream:       func(string) (string, error) { return "/dev/null", nil },
 	})
 	if err != nil {

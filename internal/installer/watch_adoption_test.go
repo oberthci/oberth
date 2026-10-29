@@ -22,6 +22,8 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/rest"
 	ktesting "k8s.io/client-go/testing"
+
+	"github.com/oberthci/oberth/internal/testtimeout"
 )
 
 func watchFixture(t *testing.T) (Config, Deps, *fake.Clientset, watchAdoptionPlan, *bytes.Buffer) {
@@ -478,7 +480,7 @@ func TestWatchPreviewRealSubprocessBoundsAndSanitizes(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(dir, "helm"), []byte(script), 0700); err != nil {
 			t.Fatal(err)
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), testtimeout.Start(5*time.Second))
 		out, err := DefaultRunHelm(ctx, args)
 		cancel()
 		if err == nil || len(out) != 0 || strings.Contains(err.Error(), "private fixture") {
