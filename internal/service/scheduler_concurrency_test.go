@@ -127,7 +127,7 @@ func TestSchedulerCreatesJobsConcurrentlyForOneRepository(t *testing.T) {
 				stopScheduler()
 				select {
 				case <-finished:
-				case <-time.After(testTimeout(15 * time.Second)):
+				case <-time.After(testStartTimeout(15 * time.Second)):
 					t.Error("scheduler did not stop")
 				}
 			}()
@@ -135,7 +135,7 @@ func TestSchedulerCreatesJobsConcurrentlyForOneRepository(t *testing.T) {
 			// Lower bound: every run the size admits must reach Job creation
 			// while all the others are still held inside Wait. A serializing
 			// gate delivers the first and then nothing.
-			deadline := time.NewTimer(testTimeout(15 * time.Second))
+			deadline := time.NewTimer(testStartTimeout(15 * time.Second))
 			defer deadline.Stop()
 			for admitted := 1; admitted <= size.expected; admitted++ {
 				select {

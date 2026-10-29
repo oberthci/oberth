@@ -13,7 +13,7 @@ const kubevirtGroup = "kubevirt"
 // awaitAdmission waits until the run's reservation satisfies accept.
 func (fixture *groupFixture) awaitAdmission(t *testing.T, run model.Run, what string, accept func(*model.AdmissionObservation) bool) *model.AdmissionObservation {
 	t.Helper()
-	deadline := time.Now().Add(testTimeout(15 * time.Second))
+	deadline := time.Now().Add(testStartTimeout(15 * time.Second))
 	for {
 		snapshot := fixture.scheduler.AdmissionSnapshot(run.QueueSequence)
 		if accept(snapshot) {

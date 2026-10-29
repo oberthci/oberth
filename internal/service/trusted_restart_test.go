@@ -93,7 +93,7 @@ func TestTrustedRestartInterruptsThenRunsFreshPreflightBeforeDelivery(t *testing
 	go func() { done <- fixture.scheduler.ProcessNext(ctx) }()
 	select {
 	case <-first.started:
-	case <-time.After(testTimeout(time.Second)):
+	case <-time.After(testStartTimeout(time.Second)):
 		t.Fatal("preflight never started")
 	}
 	cancel()
@@ -231,7 +231,7 @@ func TestTrustedShutdownAfterCleanupLeavesParentForRecovery(t *testing.T) {
 	go func() { done <- fixture.scheduler.ProcessNext(ctx) }()
 	select {
 	case <-first.started:
-	case <-time.After(testTimeout(time.Second)):
+	case <-time.After(testStartTimeout(time.Second)):
 		t.Fatal("preflight never started")
 	}
 	cancel()

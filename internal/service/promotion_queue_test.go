@@ -84,7 +84,7 @@ func TestSecondPromotionWaitsAndIsPreparedOnTheNewTarget(t *testing.T) {
 		t.Fatal(err)
 	}
 	fixture.signals.NotifyPromotion(first.ID)
-	deadline := time.Now().Add(testTimeout(10 * time.Second))
+	deadline := time.Now().Add(testStartTimeout(10 * time.Second))
 	for {
 		current, err := fixture.store.Promotion(ctx, second.ID)
 		if err != nil {
@@ -204,7 +204,7 @@ func TestRetriedPromotionQueuesBehindAPendingOne(t *testing.T) {
 		t.Fatal(err)
 	}
 	fixture.signals.NotifyPromotion(pending.ID)
-	deadline := time.Now().Add(testTimeout(10 * time.Second))
+	deadline := time.Now().Add(testStartTimeout(10 * time.Second))
 	for {
 		current, err := fixture.store.Promotion(ctx, retried.ID)
 		if err != nil {
@@ -311,7 +311,7 @@ func TestShutdownCancelsAQueuedPromotionWait(t *testing.T) {
 		t.Fatalf("second promotion was not queued: %#v", queued)
 	}
 
-	shutdownCtx, cancel := context.WithTimeout(ctx, testTimeout(2*time.Second))
+	shutdownCtx, cancel := context.WithTimeout(ctx, testStartTimeout(2*time.Second))
 	defer cancel()
 	started := time.Now()
 	if err := control.Shutdown(shutdownCtx); err != nil {
@@ -394,7 +394,7 @@ func TestNoBackgroundWorkStartsAfterShutdown(t *testing.T) {
 	go func() { control.waitBackground(); close(done) }()
 	select {
 	case <-done:
-	case <-time.After(testTimeout(2 * time.Second)):
+	case <-time.After(testStartTimeout(2 * time.Second)):
 		t.Fatal("background work outlived Shutdown")
 	}
 }

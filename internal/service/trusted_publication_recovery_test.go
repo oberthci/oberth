@@ -145,7 +145,7 @@ func TestTrustedPreflightSchedulerStartupRecovery(t *testing.T) {
 			// The outer bound only keeps a hung scheduler from hanging the
 			// test.
 			recovered := make(chan struct{})
-			ctx, cancel := context.WithTimeout(context.Background(), testTimeout(30*time.Second))
+			ctx, cancel := context.WithTimeout(context.Background(), testStartTimeout(30*time.Second))
 			f.scheduler.onStartupRecovered = func() { close(recovered); <-ctx.Done() }
 			defer cancel()
 			result := make(chan error, 1)

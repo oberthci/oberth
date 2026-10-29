@@ -397,7 +397,7 @@ func TestKubeVirtRestartRestoresTwoRunsBeforeAdmittingThird(t *testing.T) {
 	for range runs {
 		select {
 		case <-engine.adopted:
-		case <-time.After(testTimeout(60 * time.Second)):
+		case <-time.After(testStartTimeout(60 * time.Second)):
 			t.Fatal("adopted observer did not start")
 		}
 	}

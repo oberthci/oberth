@@ -20,7 +20,7 @@ func TestSchedulerReadinessOnlyAfterRecoveryAndUntilStop(t *testing.T) {
 	go func() { done <- scheduler.Run(ctx) }()
 	select {
 	case <-recovered:
-	case <-time.After(testTimeout(time.Second)):
+	case <-time.After(testStartTimeout(time.Second)):
 		t.Fatal("recovery did not finish")
 	}
 	if !scheduler.Recovered() {
@@ -32,7 +32,7 @@ func TestSchedulerReadinessOnlyAfterRecoveryAndUntilStop(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-	case <-time.After(testTimeout(time.Second)):
+	case <-time.After(testStartTimeout(time.Second)):
 		t.Fatal("scheduler did not stop")
 	}
 	if scheduler.Recovered() {

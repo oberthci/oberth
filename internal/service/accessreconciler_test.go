@@ -578,13 +578,13 @@ func TestResyncSurvivesBrokenWatch(t *testing.T) {
 	reconciler := NewAccessReconciler(client, "oberth", database, logger)
 	reconciler.resyncInterval = testTimeout(50 * time.Millisecond)
 
-	ctx, cancel := context.WithTimeout(context.Background(), testTimeout(5*time.Second))
+	ctx, cancel := context.WithTimeout(context.Background(), testStartTimeout(5*time.Second))
 	defer cancel()
 
 	go func() { _ = reconciler.Watch(ctx) }()
 
 	// Poll until sqlite converges despite broken watch.
-	deadline := time.After(testTimeout(3 * time.Second))
+	deadline := time.After(testStartTimeout(3 * time.Second))
 	for {
 		grants, err := database.SecretAccessList(context.Background(), "", false)
 		if err != nil {

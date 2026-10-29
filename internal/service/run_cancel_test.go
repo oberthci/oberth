@@ -54,7 +54,7 @@ func (fixture *groupFixture) assertNoCIIssue(t *testing.T, repository model.Repo
 
 func (fixture *groupFixture) awaitNoPendingCancellations(t *testing.T) {
 	t.Helper()
-	deadline := time.Now().Add(testTimeout(15 * time.Second))
+	deadline := time.Now().Add(testStartTimeout(15 * time.Second))
 	for {
 		pending, err := fixture.store.PendingRunCancellations(t.Context())
 		if err != nil {
@@ -234,7 +234,7 @@ func TestRunCancelRunningRunDeletesItsWorkflowAndKeepsTheCancel(t *testing.T) {
 
 func (fixture *groupFixture) awaitRunStarted(t *testing.T, id string) model.Run {
 	t.Helper()
-	deadline := time.Now().Add(testTimeout(15 * time.Second))
+	deadline := time.Now().Add(testStartTimeout(15 * time.Second))
 	for {
 		run := fixture.run(t, id)
 		if run.StartedAt != nil {

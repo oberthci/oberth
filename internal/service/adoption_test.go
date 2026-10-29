@@ -67,7 +67,7 @@ func (jobs *adoptingJobs) WaitResumed(ctx context.Context, name string, output i
 
 func waitAdoptedStatus(t *testing.T, database *store.Store, id string, status model.RunStatus) model.Run {
 	t.Helper()
-	deadline := time.After(testTimeout(5 * time.Second))
+	deadline := time.After(testStartTimeout(5 * time.Second))
 	ticker := time.NewTicker(testTimeout(time.Millisecond))
 	defer ticker.Stop()
 	for {
@@ -157,7 +157,7 @@ func TestStartupAdoptsBranchWorkflowAndFinalizesSameRun(t *testing.T) {
 			case <-jobs.waitEntered:
 			case err := <-done:
 				t.Fatalf("scheduler stopped: %v", err)
-			case <-time.After(testTimeout(5 * time.Second)):
+			case <-time.After(testStartTimeout(5 * time.Second)):
 				t.Fatal("adopted Wait not entered")
 			}
 			if !finishedWhileDown {
@@ -251,7 +251,7 @@ func TestAdoptedWorkflowSurvivesShutdownWithWorkspace(t *testing.T) {
 	case <-jobs.waitEntered:
 	case err := <-done:
 		t.Fatalf("scheduler stopped: %v", err)
-	case <-time.After(testTimeout(5 * time.Second)):
+	case <-time.After(testStartTimeout(5 * time.Second)):
 		t.Fatal("Wait not entered")
 	}
 	cancel()
@@ -304,7 +304,7 @@ func TestAdoptedAdmissionIsIdempotentAndHoldsItsGroup(t *testing.T) {
 			granted <- release
 		}
 	}()
-	deadline := time.Now().Add(testTimeout(time.Second))
+	deadline := time.Now().Add(testStartTimeout(time.Second))
 	for {
 		gate.mu.Lock()
 		prepared := waiting.prepared
@@ -333,7 +333,7 @@ func TestAdoptedAdmissionIsIdempotentAndHoldsItsGroup(t *testing.T) {
 	select {
 	case release := <-granted:
 		release()
-	case <-time.After(testTimeout(time.Second)):
+	case <-time.After(testStartTimeout(time.Second)):
 		t.Fatal("group did not pass after completion")
 	}
 	if gate.used != 0 || gate.runs != 0 {
@@ -361,7 +361,7 @@ func TestAdoptedRunStillHonorsCancelAndSupersede(t *testing.T) {
 			case <-jobs.waitEntered:
 			case err := <-done:
 				t.Fatalf("resume stopped: %v", err)
-			case <-time.After(testTimeout(5 * time.Second)):
+			case <-time.After(testStartTimeout(5 * time.Second)):
 				t.Fatal("Wait not entered")
 			}
 			if supersede {
@@ -413,7 +413,7 @@ func TestNewBranchWorkflowSurvivesShutdown(t *testing.T) {
 	case <-jobs.waitEntered:
 	case err := <-done:
 		t.Fatalf("execute stopped: %v", err)
-	case <-time.After(testTimeout(5 * time.Second)):
+	case <-time.After(testStartTimeout(5 * time.Second)):
 		t.Fatal("Wait not entered")
 	}
 	cancel()

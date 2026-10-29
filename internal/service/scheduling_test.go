@@ -317,7 +317,7 @@ func TestWaitSchedulingAgeIncludesLongPoll(t *testing.T) {
 	}()
 	// The initial read precedes the timer; the subscribed re-read follows it.
 	// Advance only after the second observation has calculated its zero age.
-	liveness := time.NewTimer(testTimeout(10 * time.Second))
+	liveness := time.NewTimer(testStartTimeout(10 * time.Second))
 	defer liveness.Stop()
 	for range 2 {
 		select {
