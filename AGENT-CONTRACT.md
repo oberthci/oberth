@@ -834,6 +834,14 @@ continuity checks; it must never be used to reset or bypass those checks.
   must never be re-issued on 503, `-32001` or a lost reply: the request may
   already have committed. Inspect durable state instead (`run_get`,
   `promote_status`, `issue_get`, `promotion_list`) and act on what it records.
+- Every MCP tool advertises an object `outputSchema`. Structured tool content,
+  when present, is always an object; list fields are arrays including empty
+  lists. `promote_grant_list` returns `{"grants":[]}`, and successful
+  `issue_delete` returns `{"id":123,"deleted":true}`. The HTTP `/api/grants`
+  list remains an array. Text retains existing log/diagnostic views; otherwise
+  it encodes the same result object. Authenticated tool refusal text keeps its
+  stable error class and may append only an explicitly public service reason.
+  Raw dependency chains stay masked; scoped missing/hidden equivalence remains.
 - MCP exposes 62 tools: `status`, bounded named-step `logs`, exact-run
   `run_get`/`run_logs`, `run_retry`, audited `run_rerun` (#1098), audited `run_cancel`/`run_purge`, `run_kvm_preflight`, `artifacts`/`artifact_get`, `wait`, `sync`, `promote`,
   `promotion_list`, `promote_status`, audited `promote_retry` (#1097), `publish_retry`, issue

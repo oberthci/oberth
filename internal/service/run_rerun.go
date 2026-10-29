@@ -42,7 +42,7 @@ func RunRerunPolicy(run model.Run, admin, force bool) (string, error) {
 	release := run.Release || run.RefKind == model.RefTag
 	if !admin {
 		if release || run.RefKind != model.RefBranch || run.Trigger != "branch" {
-			return "", fmt.Errorf("%w: a non-admin uplink may rerun only branch-push runs, not %s runs", ErrForbidden, run.Trigger)
+			return "", refuse(ErrForbidden, "a non-admin uplink may rerun only branch-push runs, not %s runs", run.Trigger)
 		}
 		return "", nil
 	}
@@ -66,7 +66,7 @@ func (service *API) rerunRun(ctx context.Context, actor api.Actor, id, reason st
 		return api.RunRerunResponse{}, fmt.Errorf("%w: run ID is required", ErrInvalidInput)
 	}
 	if service.history == nil || service.runReruns == nil {
-		return api.RunRerunResponse{}, fmt.Errorf("%w: run rerun", ErrUnavailable)
+		return api.RunRerunResponse{}, refuse(ErrUnavailable, "run rerun")
 	}
 	reason = strings.TrimSpace(reason)
 	if err := store.ValidateCancelReason(reason); err != nil {
@@ -87,7 +87,7 @@ func (service *API) rerunRun(ctx context.Context, actor api.Actor, id, reason st
 		return api.RunRerunResponse{}, err
 	}
 	if service.enqueues == nil {
-		return api.RunRerunResponse{}, fmt.Errorf("%w: run rerun queue", ErrUnavailable)
+		return api.RunRerunResponse{}, refuse(ErrUnavailable, "run rerun queue")
 	}
 	if source.Status == model.RunFailed && source.Phase == "publishing" {
 		// Every step passed; re-running them would repeat a release's
@@ -132,7 +132,7 @@ func (service *API) rerunRun(ctx context.Context, actor api.Actor, id, reason st
 // roll the upstream branch back over newer pushes.
 func (service *API) requireBranchHead(ctx context.Context, run model.Run) error {
 	if service.refs == nil {
-		return fmt.Errorf("%w: branch head lookup for run rerun", ErrUnavailable)
+		return refuse(ErrUnavailable, "branch head lookup for run rerun")
 	}
 	repository, err := service.repositoryByID(ctx, run.RepoID)
 	if err != nil {

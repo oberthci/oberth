@@ -112,6 +112,7 @@ func mcpWaitWriteOutcome(err error, phase string) string {
 // log. Unknown failures refer to this request's fixed public nonce instead.
 func (server *Server) classifyWaitFailure(err error, trace *mcpWaitObservation) map[string]any {
 	code, message := server.classifyError(err)
+	message = toolRefusalMessage(err, code, message)
 	if code == http.StatusInternalServerError {
 		message = "internal error (reference " + trace.event.Nonce + ")"
 	}

@@ -224,6 +224,17 @@ type PendingDeclaration struct {
 	LastSeenAt  string `json:"last_seen_at"`
 }
 
+// PromotionGrantListResponse keeps even an empty grant list a JSON object.
+type PromotionGrantListResponse struct {
+	Grants []map[string]any `json:"grants"`
+}
+
+// IssueDeleteResponse acknowledges a successful deletion without a null result.
+type IssueDeleteResponse struct {
+	ID      int64 `json:"id"`
+	Deleted bool  `json:"deleted"`
+}
+
 // RunListResponse wraps run_list results as a JSON object so MCP
 // structuredContent satisfies the record requirement (#794).
 type RunListResponse struct {
@@ -318,6 +329,10 @@ func writeRPC(writer http.ResponseWriter, response rpcResponse) {
 }
 
 func toolSuccess(payload any) map[string]any {
+	raw, err := json.Marshal(payload)
+	if err != nil || len(raw) == 0 || raw[0] != '{' {
+		return toolFailure(errors.New("internal error: tool result must be a JSON object"))
+	}
 	isError := false
 	if value, ok := payload.(interface{ MCPToolIsError() bool }); ok {
 		isError = value.MCPToolIsError()
@@ -325,30 +340,39 @@ func toolSuccess(payload any) map[string]any {
 	if value, ok := payload.(interface{ MCPToolText() string }); ok {
 		return map[string]any{
 			"content":           []map[string]string{{"type": "text", "text": value.MCPToolText()}},
-			"structuredContent": payload,
+			"structuredContent": json.RawMessage(raw),
 			"isError":           isError,
 		}
 	}
-	raw, err := json.Marshal(payload)
-	if err != nil {
-		return toolFailure(err)
-	}
-	return map[string]any{"content": []map[string]string{{"type": "text", "text": string(raw)}}, "structuredContent": payload, "isError": false}
+	return map[string]any{"content": []map[string]string{{"type": "text", "text": string(raw)}}, "structuredContent": json.RawMessage(raw), "isError": false}
 }
 
 // classifyToolFailure applies the same error classifier the dashboard API uses,
 // so MCP tool errors never leak raw internal error chains (sqlite context, file
 // paths, internal state). Actionable classes (invalid input, not found, lock-owned,
 // ambiguous) keep their message; unknown errors are logged server-side with a
-// correlation ID and returned as a generic message carrying that ID.
+// correlation ID and returned as a generic message carrying that ID. Only
+// explicitly public service reasons extend forbidden/unavailable classes.
 func (server *Server) classifyToolFailure(err error) map[string]any {
 	code, message := server.classifyError(err)
+	message = toolRefusalMessage(err, code, message)
 	if code == http.StatusInternalServerError {
 		correlationID := requestCorrelationID()
 		log.Printf("mcp: tool error [%s]: %v", correlationID, err)
 		message = fmt.Sprintf("internal error (reference %s)", correlationID)
 	}
 	return toolFailure(errors.New(message))
+}
+
+// toolRefusalMessage is shared by ordinary calls and both long-poll transports.
+// Only explicitly public service reasons may extend a refusal. Never use the
+// raw error string: it can contain dependencies or inaccessible resources.
+func toolRefusalMessage(err error, code int, message string) string {
+	var reason interface{ MCPErrorReason() string }
+	if (code == http.StatusForbidden || code == http.StatusServiceUnavailable) && errors.As(err, &reason) {
+		return message + ": " + reason.MCPErrorReason()
+	}
+	return message
 }
 
 func toolFailure(err error) map[string]any {
@@ -407,7 +431,7 @@ func toolDefinitions() []map[string]any {
 		return schema
 	}
 	tool := func(name, description string, schema map[string]any) map[string]any {
-		return map[string]any{"name": name, "description": description, "inputSchema": schema}
+		return map[string]any{"name": name, "description": description, "inputSchema": schema, "outputSchema": toolOutputSchema(name)}
 	}
 	return []map[string]any{
 		tool("status", "Return concise CI status for a full SHA, short SHA, or branch, including the failed step.", object(map[string]any{"repo": stringProperty("Repository name when the selector is ambiguous"), "ref": stringProperty("Full SHA, short SHA, or branch")}, "ref")),

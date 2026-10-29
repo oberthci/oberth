@@ -163,12 +163,12 @@ func TestPromoteGrantListIsReadOnly(t *testing.T) {
 	if err != nil {
 		t.Fatalf("promote_grant_list with non-admin error = %v, want success", err)
 	}
-	grants, ok := result.([]map[string]any)
+	response, ok := result.(api.PromotionGrantListResponse)
 	if !ok {
-		t.Fatalf("promote_grant_list result type = %T, want []map[string]any", result)
+		t.Fatalf("promote_grant_list result type = %T, want api.PromotionGrantListResponse", result)
 	}
-	if len(grants) != 0 {
-		t.Fatalf("promote_grant_list result length = %d, want 0", len(grants))
+	if len(response.Grants) != 0 {
+		t.Fatalf("promote_grant_list result length = %d, want 0", len(response.Grants))
 	}
 }
 

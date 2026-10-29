@@ -171,7 +171,7 @@ func describeArtifact(name string, content io.ReadCloser) (api.ArtifactObject, e
 
 func (service *API) artifactRun(ctx context.Context, id string) (string, error) {
 	if service.artifacts == nil || service.history == nil {
-		return "", fmt.Errorf("%w: artifacts", ErrUnavailable)
+		return "", refuse(ErrUnavailable, "artifacts")
 	}
 	if strings.TrimSpace(id) == "" {
 		return "", fmt.Errorf("%w: run ID is required", ErrInvalidInput)

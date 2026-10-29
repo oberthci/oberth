@@ -44,7 +44,7 @@ func (service *API) readKVMPreflight(ctx context.Context, id string) (KVMPreflig
 	var result KVMPreflightResponse
 	upstreams, ok := service.runs.(upstreamResolver)
 	if service.history == nil || service.repositories == nil || service.kvmPreflights == nil || !ok {
-		return result, fmt.Errorf("%w: KVM preflight history", ErrUnavailable)
+		return result, refuse(ErrUnavailable, "KVM preflight history")
 	}
 	run, err := service.resolveReadRunID(ctx, id)
 	if err != nil {

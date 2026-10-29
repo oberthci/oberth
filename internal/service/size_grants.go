@@ -15,7 +15,7 @@ import (
 // mirroring the KubeVirt grant: scoped lookup, admin-only audited mutation.
 func (service *API) sizeGrantTool(ctx context.Context, actor api.Actor, name, repoName, maximum string) (any, error) {
 	if service.sizeGrants == nil || service.repositories == nil {
-		return nil, fmt.Errorf("%w: size grants", ErrUnavailable)
+		return nil, refuse(ErrUnavailable, "size grants")
 	}
 	if strings.TrimSpace(repoName) == "" {
 		return nil, fmt.Errorf("%w: repository is required", ErrInvalidInput)
@@ -46,7 +46,7 @@ func (service *API) sizeGrantTool(ctx context.Context, actor api.Actor, name, re
 		return map[string]any{"repo": repoName, "max_size": current, "state": state, "grant": grant}, nil
 	}
 	if !actor.Admin {
-		return nil, fmt.Errorf("%w: size grants require an admin uplink", ErrForbidden)
+		return nil, refuse(ErrForbidden, "size grants require an admin uplink")
 	}
 	var size periapsis.Size
 	if name == "size_grant" {

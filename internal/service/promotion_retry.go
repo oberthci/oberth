@@ -37,10 +37,10 @@ func (service *API) promoteRetry(ctx context.Context, actor api.Actor, id string
 		return api.PromoteRetryResponse{}, fmt.Errorf("%w: promotion ID is required", ErrInvalidInput)
 	}
 	if !actor.Admin && service.promotionGrants == nil {
-		return api.PromoteRetryResponse{}, fmt.Errorf("%w: promote_retry requires an admin uplink or a promotion grant", ErrForbidden)
+		return api.PromoteRetryResponse{}, refuse(ErrForbidden, "promote_retry requires an admin uplink or a promotion grant")
 	}
 	if service.git == nil || service.promotions == nil || service.promotionRuns == nil || service.enqueues == nil || service.auditor == nil {
-		return api.PromoteRetryResponse{}, fmt.Errorf("%w: promotion", ErrUnavailable)
+		return api.PromoteRetryResponse{}, refuse(ErrUnavailable, "promotion")
 	}
 	failed, err := service.promotions.Promotion(ctx, strings.TrimSpace(id))
 	if err != nil {
@@ -133,7 +133,7 @@ type UplinkDirectory interface {
 // store.requireKVMRetryPromotionAuthority, where revoked credentials do not vote.
 func (service *API) currentPromotionAuthority(ctx context.Context, failed model.Promotion) (api.Actor, error) {
 	if service.uplinks == nil {
-		return api.Actor{}, fmt.Errorf("%w: uplink directory", ErrUnavailable)
+		return api.Actor{}, refuse(ErrUnavailable, "uplink directory")
 	}
 	uplinks, err := service.uplinks.UplinksByIdentity(ctx, failed.Actor)
 	if err != nil {

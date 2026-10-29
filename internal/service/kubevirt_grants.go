@@ -12,7 +12,7 @@ import (
 
 func (service *API) kubeVirtGrantTool(ctx context.Context, actor api.Actor, name, repoName string, budget store.KubeVirtBudget) (any, error) {
 	if service.kubeVirtGrants == nil || service.repositories == nil {
-		return nil, fmt.Errorf("%w: KubeVirt grants", ErrUnavailable)
+		return nil, refuse(ErrUnavailable, "KubeVirt grants")
 	}
 	if strings.TrimSpace(repoName) == "" {
 		return nil, fmt.Errorf("%w: repository is required", ErrInvalidInput)
@@ -39,7 +39,7 @@ func (service *API) kubeVirtGrantTool(ctx context.Context, actor api.Actor, name
 		return map[string]any{"repo": repoName, "granted": grant.RevokedAt == nil, "state": state, "grant": grant, "max_memory": grant.MaxMemory()}, nil
 	}
 	if !actor.Admin {
-		return nil, fmt.Errorf("%w: KubeVirt grants require an admin uplink", ErrForbidden)
+		return nil, refuse(ErrForbidden, "KubeVirt grants require an admin uplink")
 	}
 	if name == "kubevirt_grant" {
 		if err := refuseArchivedGrant(repository, name, repoName); err != nil {

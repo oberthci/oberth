@@ -61,7 +61,7 @@ func (r *Retention) now() time.Time {
 
 func (r *Retention) Purge(ctx context.Context, actor api.Actor, id, what, reason string) (model.EvidencePurge, error) {
 	if !actor.Admin || actor.Scoped() {
-		return model.EvidencePurge{}, fmt.Errorf("%w: run_purge requires an unscoped admin uplink", ErrForbidden)
+		return model.EvidencePurge{}, refuse(ErrForbidden, "run_purge requires an unscoped admin uplink")
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()

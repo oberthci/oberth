@@ -419,7 +419,7 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 		return service.rerunRun(ctx, actor, arguments.ID, arguments.Reason, arguments.Force)
 	case "run_purge":
 		if !actor.Admin || actor.Scoped() {
-			return nil, fmt.Errorf("%w: run_purge requires an unscoped admin uplink", ErrForbidden)
+			return nil, refuse(ErrForbidden, "run_purge requires an unscoped admin uplink")
 		}
 		var arguments struct {
 			ID     string `json:"id"`
@@ -430,7 +430,7 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 			return nil, err
 		}
 		if service.retention == nil {
-			return nil, fmt.Errorf("%w: retention", ErrUnavailable)
+			return nil, refuse(ErrUnavailable, "retention")
 		}
 		value, err := service.retention.Purge(ctx, actor, arguments.ID, arguments.What, arguments.Reason)
 		if errors.Is(err, store.ErrInvalid) {
@@ -637,7 +637,10 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 		if err := decodeTool(raw, &arguments); err != nil {
 			return nil, err
 		}
-		return nil, service.issueDelete(ctx, actor, arguments.ID)
+		if err := service.issueDelete(ctx, actor, arguments.ID); err != nil {
+			return nil, err
+		}
+		return api.IssueDeleteResponse{ID: arguments.ID, Deleted: true}, nil
 	case "issue_list":
 		var arguments struct {
 			Repo   string `json:"repo"`
@@ -673,7 +676,7 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 			return nil, err
 		}
 		if service.issues == nil {
-			return nil, fmt.Errorf("%w: issues", ErrUnavailable)
+			return nil, refuse(ErrUnavailable, "issues")
 		}
 		lock, err := service.issues.AcquireIssueLock(ctx, arguments.ID, actor.Identity)
 		if err != nil {
@@ -846,7 +849,7 @@ func (service *API) Runs(ctx context.Context, actor api.Actor, filter api.RunFil
 		return nil, err
 	}
 	if service.history == nil {
-		return nil, fmt.Errorf("%w: run history", ErrUnavailable)
+		return nil, refuse(ErrUnavailable, "run history")
 	}
 	if !api.ValidRunView(filter.View) {
 		return nil, fmt.Errorf("%w: view must be all, active or history", ErrInvalidInput)
@@ -911,7 +914,7 @@ func (service *API) RunCounts(ctx context.Context, actor api.Actor) (any, error)
 		return nil, err
 	}
 	if service.history == nil {
-		return nil, fmt.Errorf("%w: run history", ErrUnavailable)
+		return nil, refuse(ErrUnavailable, "run history")
 	}
 	return service.history.CountRuns(ctx)
 }
@@ -925,7 +928,7 @@ func (service *API) Grants(ctx context.Context, actor api.Actor, filter api.Gran
 		return nil, err
 	}
 	if service.promotionGrants == nil || service.runs == nil {
-		return nil, fmt.Errorf("%w: promotion grants", ErrUnavailable)
+		return nil, refuse(ErrUnavailable, "promotion grants")
 	}
 	storeFilter := model.PromotionGrantListFilter{
 		SourceSHA: filter.SHA,
@@ -980,7 +983,7 @@ func (service *API) Run(ctx context.Context, actor api.Actor, id string) (any, e
 		return nil, err
 	}
 	if service.history == nil {
-		return nil, fmt.Errorf("%w: run history", ErrUnavailable)
+		return nil, refuse(ErrUnavailable, "run history")
 	}
 	if strings.TrimSpace(id) == "" {
 		return nil, fmt.Errorf("%w: run ID is required", ErrInvalidInput)
@@ -1037,7 +1040,7 @@ func (service *API) RunLogFiltered(ctx context.Context, actor api.Actor, id, bur
 		return nil, err
 	}
 	if service.logs == nil || service.history == nil {
-		return nil, fmt.Errorf("%w: logs", ErrUnavailable)
+		return nil, refuse(ErrUnavailable, "logs")
 	}
 	if strings.TrimSpace(id) == "" {
 		return nil, fmt.Errorf("%w: run ID is required", ErrInvalidInput)
@@ -1117,7 +1120,7 @@ func (service *API) RunLogLive(ctx context.Context, actor api.Actor, id string, 
 		return nil, err
 	}
 	if service.logs == nil || service.history == nil {
-		return nil, fmt.Errorf("%w: logs", ErrUnavailable)
+		return nil, refuse(ErrUnavailable, "logs")
 	}
 	if strings.TrimSpace(id) == "" {
 		return nil, fmt.Errorf("%w: run ID is required", ErrInvalidInput)
@@ -1222,14 +1225,14 @@ func (service *API) Issues(ctx context.Context, actor api.Actor, filter api.Issu
 
 func (service *API) Status(ctx context.Context, actor api.Actor) (any, error) {
 	if service.health == nil {
-		return nil, fmt.Errorf("%w: status", ErrUnavailable)
+		return nil, refuse(ErrUnavailable, "status")
 	}
 	if actor.Scoped() {
 		// Installation-wide status counts every upstream and repository;
 		// a scoped actor gets the scoped view or nothing (#073).
 		scoped, ok := service.health.(ScopedHealth)
 		if !ok {
-			return nil, fmt.Errorf("%w: scoped status", ErrUnavailable)
+			return nil, refuse(ErrUnavailable, "scoped status")
 		}
 		return scoped.ScopedStatus(ctx, actor)
 	}
@@ -1238,7 +1241,7 @@ func (service *API) Status(ctx context.Context, actor api.Actor) (any, error) {
 
 func (service *API) Ready(ctx context.Context) error {
 	if service.health == nil {
-		return fmt.Errorf("%w: readiness", ErrUnavailable)
+		return refuse(ErrUnavailable, "readiness")
 	}
 	return service.health.Ready(ctx)
 }
@@ -1790,7 +1793,7 @@ func toolLogFilter(pattern string, context, offset, limit int, tail bool) (runlo
 
 func (service *API) logsFor(ctx context.Context, repositoryName, selector, wanted string, filter runlog.Filter) (LogResponse, error) {
 	if service.logs == nil || service.history == nil {
-		return LogResponse{}, fmt.Errorf("%w: logs", ErrUnavailable)
+		return LogResponse{}, refuse(ErrUnavailable, "logs")
 	}
 	if !validSHASelector(selector) || strings.TrimSpace(wanted) == "" {
 		return LogResponse{}, fmt.Errorf("%w: SHA and step are required", ErrInvalidInput)
@@ -1878,7 +1881,7 @@ func (service *API) prepareWaitRun(ctx context.Context, repositoryName, selector
 // cannot change which run this observer waits for.
 func (service *API) prepareWaitRunID(ctx context.Context, id string, requestedSeconds int) (func(context.Context) (WaitResponse, error), error) {
 	if service.history == nil || service.repositories == nil {
-		return nil, fmt.Errorf("%w: run history", ErrUnavailable)
+		return nil, refuse(ErrUnavailable, "run history")
 	}
 	run, err := service.resolveReadRunID(ctx, id)
 	if err != nil {
@@ -1999,7 +2002,7 @@ func validSHASelector(value string) bool {
 
 func (service *API) sync(ctx context.Context, actor api.Actor, repositoryName, selector, branch string) (model.Run, error) {
 	if service.git == nil || service.auditor == nil {
-		return model.Run{}, fmt.Errorf("%w: sync", ErrUnavailable)
+		return model.Run{}, refuse(ErrUnavailable, "sync")
 	}
 	if !validOID(selector) {
 		return model.Run{}, fmt.Errorf("%w: sync requires a full SHA", ErrInvalidInput)
@@ -2079,10 +2082,10 @@ func (service *API) promote(ctx context.Context, actor api.Actor, repositoryName
 	// rejected before any state is read, preserving the original behavior and
 	// the TestPromoteRejectsNonAdmin contract.
 	if !actor.Admin && service.promotionGrants == nil {
-		return model.Promotion{}, fmt.Errorf("%w: promote requires an admin uplink; mint one with: oberth uplink add --admin - <identity>@<host> < key.pub", ErrForbidden)
+		return model.Promotion{}, refuse(ErrForbidden, "promote requires an admin uplink; mint one with: oberth uplink add --admin - <identity>@<host> < key.pub")
 	}
 	if service.git == nil || service.promotions == nil || service.promotionRuns == nil || service.enqueues == nil || service.auditor == nil {
-		return model.Promotion{}, fmt.Errorf("%w: promotion", ErrUnavailable)
+		return model.Promotion{}, refuse(ErrUnavailable, "promotion")
 	}
 	if strings.TrimSpace(target) == "" {
 		return model.Promotion{}, fmt.Errorf("%w: promotion target is required", ErrInvalidInput)
@@ -2120,15 +2123,17 @@ func (service *API) admitPromotion(ctx context.Context, actor api.Actor, reposit
 	var grantID string
 	if !actor.Admin {
 		if service.promotionGrants == nil {
-			return model.Promotion{}, fmt.Errorf("%w: promote requires an admin uplink or a promotion grant", ErrForbidden)
+			return model.Promotion{}, refuse(ErrForbidden, "promote requires an admin uplink or a promotion grant")
 		}
 		grant, matchErr := service.promotionGrants.MatchingPromotionGrant(ctx, repository.ID, candidate.SHA, target)
 		if errors.Is(matchErr, store.ErrInvalidState) {
-			return model.Promotion{}, fmt.Errorf("%w: %s", ErrForbidden, matchErr.Error())
+			return model.Promotion{}, refuse(fmt.Errorf("%w: %s", ErrForbidden, matchErr.Error()), "matching promotion grant is held by a pending promotion; inspect promotion_list")
+		}
+		if errors.Is(matchErr, store.ErrNotFound) {
+			return model.Promotion{}, refuse(ErrForbidden, "no matching promotion grant; request one from an admin with promote_grant")
 		}
 		if matchErr != nil {
-			return model.Promotion{}, fmt.Errorf("%w: no matching promotion grant for repository %q, SHA %s, target %q; request one from an admin with promote_grant",
-				ErrForbidden, repository.Name, candidate.SHA, target)
+			return model.Promotion{}, fmt.Errorf("match promotion grant: %w", matchErr)
 		}
 		grantID = grant.ID
 	}
@@ -2367,7 +2372,7 @@ func (service *API) upstreamID(ctx context.Context, name string) (int64, error) 
 	}
 	source, ok := service.runs.(ScopeSource)
 	if !ok {
-		return 0, fmt.Errorf("%w: upstream lookup", ErrUnavailable)
+		return 0, refuse(ErrUnavailable, "upstream lookup")
 	}
 	upstreams, err := source.ListUpstreams(ctx)
 	if err != nil {
@@ -2486,7 +2491,7 @@ func (service *API) issueDelete(ctx context.Context, actor api.Actor, id int64) 
 
 func (service *API) issueList(ctx context.Context, repositoryName, kind, state, query string, before int64, limit int) (model.IssuePage, error) {
 	if service.issues == nil {
-		return model.IssuePage{}, fmt.Errorf("%w: issues", ErrUnavailable)
+		return model.IssuePage{}, refuse(ErrUnavailable, "issues")
 	}
 	filter := model.IssueListFilter{Kind: model.IssueKind(kind), State: model.IssueState(state), Query: query, BeforeID: before, Limit: limit}
 	if repositoryName != "" {
@@ -2728,7 +2733,7 @@ func (service *API) canonicalAccessRepo(ctx context.Context, repo string) (strin
 
 func (service *API) accessList(ctx context.Context, repo string, includeRevoked bool) (api.AccessListResponse, error) {
 	if service.secretAccess == nil {
-		return api.AccessListResponse{}, fmt.Errorf("%w: secret access", ErrUnavailable)
+		return api.AccessListResponse{}, refuse(ErrUnavailable, "secret access")
 	}
 	// A non-empty filter accepts every repository spelling; persisted rows
 	// key on the qualified form, so a bare filter passed through verbatim
@@ -2758,7 +2763,7 @@ func (service *API) accessList(ctx context.Context, repo string, includeRevoked 
 // auto-approves. Issue #623, finding 4.
 func (service *API) accessListPending(ctx context.Context, repo string) (api.AccessListPendingResponse, error) {
 	if service.secretAccess == nil {
-		return api.AccessListPendingResponse{}, fmt.Errorf("%w: secret access", ErrUnavailable)
+		return api.AccessListPendingResponse{}, refuse(ErrUnavailable, "secret access")
 	}
 	if strings.TrimSpace(repo) != "" {
 		canonical, err := service.canonicalAccessRepo(ctx, repo)
@@ -2788,10 +2793,10 @@ func (service *API) accessListPending(ctx context.Context, repo string) (api.Acc
 
 func (service *API) accessAllow(ctx context.Context, actor api.Actor, repo, step, secret string) (api.AccessGrantResponse, error) {
 	if !actor.Admin {
-		return api.AccessGrantResponse{}, fmt.Errorf("%w: access_allow requires an admin uplink; mint one with: oberth uplink add --admin - <identity>@<host> < key.pub", ErrForbidden)
+		return api.AccessGrantResponse{}, refuse(ErrForbidden, "access_allow requires an admin uplink; mint one with: oberth uplink add --admin - <identity>@<host> < key.pub")
 	}
 	if service.secretAccess == nil {
-		return api.AccessGrantResponse{}, fmt.Errorf("%w: secret access", ErrUnavailable)
+		return api.AccessGrantResponse{}, refuse(ErrUnavailable, "secret access")
 	}
 	if strings.TrimSpace(repo) == "" || strings.TrimSpace(step) == "" || strings.TrimSpace(secret) == "" {
 		return api.AccessGrantResponse{}, fmt.Errorf("%w: repo, step, and secret are required", ErrInvalidInput)
@@ -2852,10 +2857,10 @@ func (service *API) accessAllow(ctx context.Context, actor api.Actor, repo, step
 
 func (service *API) accessRevoke(ctx context.Context, actor api.Actor, repo, step, secret string) (api.AccessGrantResponse, error) {
 	if !actor.Admin {
-		return api.AccessGrantResponse{}, fmt.Errorf("%w: access_revoke requires an admin uplink; mint one with: oberth uplink add --admin - <identity>@<host> < key.pub", ErrForbidden)
+		return api.AccessGrantResponse{}, refuse(ErrForbidden, "access_revoke requires an admin uplink; mint one with: oberth uplink add --admin - <identity>@<host> < key.pub")
 	}
 	if service.secretAccess == nil {
-		return api.AccessGrantResponse{}, fmt.Errorf("%w: secret access", ErrUnavailable)
+		return api.AccessGrantResponse{}, refuse(ErrUnavailable, "secret access")
 	}
 	if strings.TrimSpace(repo) == "" || strings.TrimSpace(step) == "" || strings.TrimSpace(secret) == "" {
 		return api.AccessGrantResponse{}, fmt.Errorf("%w: repo, step, and secret are required", ErrInvalidInput)
@@ -2920,10 +2925,10 @@ func (service *API) accessRevoke(ctx context.Context, actor api.Actor, repo, ste
 
 func (service *API) repoRemove(ctx context.Context, actor api.Actor, repo string) (any, error) {
 	if !actor.Admin {
-		return nil, fmt.Errorf("%w: repo_remove requires an admin uplink; mint one with: oberth uplink add --admin - <identity>@<host> < key.pub", ErrForbidden)
+		return nil, refuse(ErrForbidden, "repo_remove requires an admin uplink; mint one with: oberth uplink add --admin - <identity>@<host> < key.pub")
 	}
 	if service.repositoryRemover == nil {
-		return nil, fmt.Errorf("%w: repository removal", ErrUnavailable)
+		return nil, refuse(ErrUnavailable, "repository removal")
 	}
 	if strings.TrimSpace(repo) == "" {
 		return nil, fmt.Errorf("%w: repo is required", ErrInvalidInput)
@@ -2979,7 +2984,7 @@ func wireAccessGrant(grant store.SecretAccessGrant) api.AccessGrantResponse {
 // Idempotent: if upstream already has the object, succeeds without pushing.
 func (service *API) publishRetry(ctx context.Context, actor api.Actor, id string) (api.PublishRetryResponse, error) {
 	if service.promotions == nil || service.enqueues == nil || service.auditor == nil {
-		return api.PublishRetryResponse{}, fmt.Errorf("%w: publish retry", ErrUnavailable)
+		return api.PublishRetryResponse{}, refuse(ErrUnavailable, "publish retry")
 	}
 	if strings.TrimSpace(id) == "" {
 		return api.PublishRetryResponse{}, fmt.Errorf("%w: run or promotion ID is required", ErrInvalidInput)

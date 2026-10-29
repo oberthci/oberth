@@ -79,7 +79,7 @@ func (service *API) forActor(ctx context.Context, actor api.Actor) (*API, error)
 	}
 	source, ok := service.runs.(ScopeSource)
 	if !ok {
-		return nil, fmt.Errorf("%w: uplink scope", ErrUnavailable)
+		return nil, refuse(ErrUnavailable, "uplink scope")
 	}
 	upstreams, err := source.ListUpstreams(ctx)
 	if err != nil {
@@ -152,7 +152,7 @@ type scopedRunRetries struct {
 
 func (retry scopedRunRetries) RetryRun(ctx context.Context, id, actor string) (model.EnqueueRunResult, error) {
 	if retry.history == nil {
-		return model.EnqueueRunResult{}, fmt.Errorf("%w: run retry history", ErrUnavailable)
+		return model.EnqueueRunResult{}, refuse(ErrUnavailable, "run retry history")
 	}
 	if _, err := retry.history.ResolveRunID(ctx, id); err != nil {
 		return model.EnqueueRunResult{}, err
@@ -169,7 +169,7 @@ type scopedRunCancels struct {
 // exact ID, so no caller can cancel a run outside the actor's scope.
 func (cancel scopedRunCancels) CancelRun(ctx context.Context, request model.RunCancelRequest) (model.RunCancelResult, error) {
 	if cancel.history == nil {
-		return model.RunCancelResult{}, fmt.Errorf("%w: run cancel history", ErrUnavailable)
+		return model.RunCancelResult{}, refuse(ErrUnavailable, "run cancel history")
 	}
 	if _, err := cancel.history.ResolveRunID(ctx, request.RunID); err != nil {
 		return model.RunCancelResult{}, err
@@ -186,7 +186,7 @@ type scopedRunReruns struct {
 // exact ID, so no caller can rerun a run outside the actor's scope.
 func (rerun scopedRunReruns) RerunRun(ctx context.Context, request model.RunRerunRequest) (model.RunRerunResult, error) {
 	if rerun.history == nil {
-		return model.RunRerunResult{}, fmt.Errorf("%w: run rerun history", ErrUnavailable)
+		return model.RunRerunResult{}, refuse(ErrUnavailable, "run rerun history")
 	}
 	if _, err := rerun.history.ResolveRunID(ctx, request.RunID); err != nil {
 		return model.RunRerunResult{}, err
@@ -201,7 +201,7 @@ func (rerun scopedRunReruns) RunRerunOf(ctx context.Context, runID string) (stri
 // requireUnscoped refuses installation-wide operations to a scoped actor.
 func requireUnscoped(actor api.Actor, operation string) error {
 	if actor.Scoped() {
-		return fmt.Errorf("%w: %s acts on the whole installation and is not available to a scoped uplink", ErrForbidden, operation)
+		return refuse(ErrForbidden, "%s acts on the whole installation and is not available to a scoped uplink", operation)
 	}
 	return nil
 }
@@ -333,7 +333,7 @@ func (runs scopedRuns) ResolveWaitRun(ctx context.Context, repoID int64, selecto
 func (runs scopedRuns) Upstream(ctx context.Context, id int64) (model.Upstream, error) {
 	resolver, ok := runs.inner.(upstreamResolver)
 	if !ok {
-		return model.Upstream{}, fmt.Errorf("%w: upstream lookup", ErrUnavailable)
+		return model.Upstream{}, refuse(ErrUnavailable, "upstream lookup")
 	}
 	if !runs.scope.seesUpstreamID(id) {
 		return model.Upstream{}, fmt.Errorf("%w: upstream", store.ErrNotFound)
@@ -355,7 +355,7 @@ func (runs scopedRuns) DistinctBranchRefsForSHA(ctx context.Context, repoID int6
 // QueuedRunPosition withholds the queue position: it counts every queued
 // run ahead, in or out of scope, so it would reveal out-of-scope volume.
 func (runs scopedRuns) QueuedRunPosition(context.Context, string) (int64, error) {
-	return 0, fmt.Errorf("%w: queue position is not shown to a scoped uplink", ErrUnavailable)
+	return 0, refuse(ErrUnavailable, "queue position is not shown to a scoped uplink")
 }
 
 type scopedHistory struct {
@@ -378,7 +378,7 @@ func (history scopedHistory) ResolveRunID(ctx context.Context, id string) (model
 	// Backends without scoped resolution must fail closed for prefixes.
 	id = strings.ToLower(strings.TrimSpace(id))
 	if len(id) != 32 {
-		return model.Run{}, fmt.Errorf("%w: scoped run ID resolution", ErrUnavailable)
+		return model.Run{}, refuse(ErrUnavailable, "scoped run ID resolution")
 	}
 	return history.Run(ctx, id)
 }

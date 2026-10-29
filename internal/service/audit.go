@@ -20,7 +20,7 @@ func auditedGitMutation(
 	mutate func() error,
 ) error {
 	if auditor == nil {
-		return fmt.Errorf("%w: audit", ErrUnavailable)
+		return refuse(ErrUnavailable, "audit")
 	}
 	intentDetails, err := json.Marshal(details)
 	if err != nil {

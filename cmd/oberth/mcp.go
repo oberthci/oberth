@@ -81,9 +81,10 @@ type toolsListResult struct {
 
 // mcpTool describes one MCP tool.
 type mcpTool struct {
-	Name        string          `json:"name"`
-	Description string          `json:"description,omitempty"`
-	InputSchema json.RawMessage `json:"inputSchema,omitempty"`
+	Name         string          `json:"name"`
+	Description  string          `json:"description,omitempty"`
+	InputSchema  json.RawMessage `json:"inputSchema,omitempty"`
+	OutputSchema json.RawMessage `json:"outputSchema,omitempty"`
 }
 
 // toolsCallParams are the params for tools/call.
@@ -94,8 +95,9 @@ type toolsCallParams struct {
 
 // toolsCallResult is the result from tools/call.
 type toolsCallResult struct {
-	Content []mcpContent `json:"content"`
-	IsError bool         `json:"isError,omitempty"`
+	Content           []mcpContent               `json:"content"`
+	StructuredContent map[string]json.RawMessage `json:"structuredContent,omitempty"`
+	IsError           bool                       `json:"isError,omitempty"`
 }
 
 // mcpContent describes one content block in a tool result.
@@ -233,8 +235,10 @@ func runMCPCall(ctx context.Context, arguments []string, output io.Writer) error
 	if err := json.Unmarshal(response.Result, &result); err != nil {
 		return fmt.Errorf("invalid tools/call result: %w", err)
 	}
+	printed := false
 	for _, content := range result.Content {
 		if content.Type == "text" && content.Text != "" {
+			printed = true
 			if _, err := fmt.Fprint(output, content.Text); err != nil {
 				return err
 			}
@@ -243,6 +247,11 @@ func runMCPCall(ctx context.Context, arguments []string, output io.Writer) error
 					return err
 				}
 			}
+		}
+	}
+	if !printed && result.StructuredContent != nil {
+		if err := json.NewEncoder(output).Encode(result.StructuredContent); err != nil {
+			return err
 		}
 	}
 	if result.IsError {

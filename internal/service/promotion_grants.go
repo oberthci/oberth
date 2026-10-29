@@ -13,10 +13,10 @@ import (
 
 func (service *API) promoteGrant(ctx context.Context, actor api.Actor, raw json.RawMessage) (any, error) {
 	if !actor.Admin {
-		return nil, fmt.Errorf("%w: promote_grant requires an admin uplink", ErrForbidden)
+		return nil, refuse(ErrForbidden, "promote_grant requires an admin uplink")
 	}
 	if service.promotionGrants == nil || service.runs == nil {
-		return nil, fmt.Errorf("%w: promotion grants", ErrUnavailable)
+		return nil, refuse(ErrUnavailable, "promotion grants")
 	}
 	var arguments struct {
 		Repo    string `json:"repo"`
@@ -65,10 +65,10 @@ func (service *API) promoteGrant(ctx context.Context, actor api.Actor, raw json.
 
 func (service *API) promoteGrantRevoke(ctx context.Context, actor api.Actor, raw json.RawMessage) (any, error) {
 	if !actor.Admin {
-		return nil, fmt.Errorf("%w: promote_grant_revoke requires an admin uplink", ErrForbidden)
+		return nil, refuse(ErrForbidden, "promote_grant_revoke requires an admin uplink")
 	}
 	if service.promotionGrants == nil {
-		return nil, fmt.Errorf("%w: promotion grants", ErrUnavailable)
+		return nil, refuse(ErrUnavailable, "promotion grants")
 	}
 	var arguments struct {
 		ID string `json:"id"`
@@ -88,7 +88,7 @@ func (service *API) promoteGrantRevoke(ctx context.Context, actor api.Actor, raw
 
 func (service *API) promoteGrantList(ctx context.Context, actor api.Actor, raw json.RawMessage) (any, error) {
 	if service.promotionGrants == nil || service.runs == nil {
-		return nil, fmt.Errorf("%w: promotion grants", ErrUnavailable)
+		return nil, refuse(ErrUnavailable, "promotion grants")
 	}
 	var arguments struct {
 		Repo   string `json:"repo"`
@@ -130,7 +130,7 @@ func (service *API) promoteGrantList(ctx context.Context, actor api.Actor, raw j
 	for _, grant := range grants {
 		result = append(result, promotionGrantResponse(grant))
 	}
-	return result, nil
+	return api.PromotionGrantListResponse{Grants: result}, nil
 }
 
 func promotionGrantResponse(grant model.PromotionGrant) map[string]any {
