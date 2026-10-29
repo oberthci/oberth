@@ -123,7 +123,7 @@ func TestRunPurgeAuditsRemovalAndPreservesHistory(t *testing.T) {
 	f := newRetentionFixture(t)
 	run := f.run(t, "feature/purge", "branch", true)
 	actor := api.Actor{Identity: "owner", Admin: true}
-	arguments, _ := json.Marshal(map[string]string{"id": run.ID[:12], "what": "both", "reason": "remove retained output"})
+	arguments, _ := json.Marshal(map[string]string{"id": run.ID[:8], "what": "both", "reason": "remove retained output"})
 	value, err := f.api.CallTool(ctx, actor, "run_purge", arguments)
 	if err != nil {
 		t.Fatal(err)

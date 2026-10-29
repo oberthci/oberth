@@ -38,7 +38,7 @@ func TestRunRetryToolQueuesRunAndChecksMutationGate(t *testing.T) {
 		t.Fatal(err)
 	}
 	actor := api.Actor{Identity: "reviewer@host"}
-	args, _ := json.Marshal(map[string]string{"id": source.ID[:12]})
+	args, _ := json.Marshal(map[string]string{"id": source.ID[:8]})
 	service.mutationGate = func(context.Context) error { return ErrForbidden }
 	if _, err := service.CallTool(ctx, actor, "run_retry", args); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("mutation gate = %v", err)

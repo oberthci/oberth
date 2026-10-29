@@ -236,8 +236,12 @@ func (service *API) releaseAdmission(ctx context.Context, actor api.Actor, runID
 		return model.AdmissionRelease{}, fmt.Errorf("%w: admission_release requires an admin uplink", ErrForbidden)
 	}
 	releaser, ok := service.admission.(AdmissionReleaser)
-	if !ok {
+	if !ok || service.history == nil {
 		return model.AdmissionRelease{}, fmt.Errorf("%w: admission release", ErrUnavailable)
 	}
-	return releaser.ReleaseAdmission(ctx, runID, actor.Identity, force)
+	run, err := service.resolveReadRunID(ctx, runID)
+	if err != nil {
+		return model.AdmissionRelease{}, err
+	}
+	return releaser.ReleaseAdmission(ctx, run.ID, actor.Identity, force)
 }

@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-// The push banner prints twelve characters and the dashboard abbreviates too,
+// The push banner prints eight characters and the dashboard abbreviates too,
 // so the identifier a reader has to hand is usually a prefix. Refusing it sends
 // them to list runs and copy the long form, for no reason: the server can be
 // asked which run it is.
@@ -16,7 +16,7 @@ func TestRunIDPrefixResolvesToTheOneRunItMatches(t *testing.T) {
 		"d34b5c086299373274a65f2e361c0be2",
 	}
 
-	resolved, err := resolveRunIDPrefix("ba7760409e48", known)
+	resolved, err := resolveRunIDPrefix("ba776040", known)
 	if err != nil {
 		t.Fatalf("a unique prefix was refused: %v", err)
 	}
@@ -45,7 +45,7 @@ func TestAmbiguousPrefixNamesTheCandidates(t *testing.T) {
 		"ba7760409e48ffffffffffffffffffff",
 	}
 
-	_, err := resolveRunIDPrefix("ba7760409e48", known)
+	_, err := resolveRunIDPrefix("ba776040", known)
 	if err == nil {
 		t.Fatal("an ambiguous prefix resolved to one run")
 	}

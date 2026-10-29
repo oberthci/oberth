@@ -796,9 +796,10 @@ continuity checks; it must never be used to reset or bypass those checks.
   `/api/grants` (read-only promotion grant list; filters `repo`, `sha`,
   `status`; mirrors `promote_grant_list`; no mutation endpoints), and
   `/api/status`. The run views resolve by full run ID or an unambiguous
-  hexadecimal prefix of at least 12 characters (the push-feedback ID); responses retain the full
-  canonical ID. Ambiguous prefixes are rejected with guidance to use the full
-  ID; malformed or shorter prefixes are invalid input. These views never
+  hexadecimal prefix of at least 8 characters (the push-feedback ID); responses
+  retain the full canonical ID. Prefix resolution searches only runs the caller
+  is authorized to see. Ambiguous prefixes are rejected with the matching full
+  IDs only; malformed or shorter prefixes are invalid input. These views never
   acquire or renew a CI issue lock; the MCP `status`, `wait`, `issue_get`, and `issue_get_many` tools are
   equally read-only and do not renew locks — renewal happens only through the
   explicit `issue_lock` tool, which is a mutating operation gated by the

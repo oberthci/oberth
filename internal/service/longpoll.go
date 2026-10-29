@@ -25,6 +25,7 @@ func (service *API) PrepareLongPoll(ctx context.Context, actor api.Actor, name s
 	switch name {
 	case "wait":
 		var arguments struct {
+			ID      string `json:"id"`
 			Repo    string `json:"repo"`
 			SHA     string `json:"sha"`
 			Trigger string `json:"trigger"`
@@ -33,7 +34,15 @@ func (service *API) PrepareLongPoll(ctx context.Context, actor api.Actor, name s
 		if err := decodeTool(raw, &arguments); err != nil {
 			return nil, err
 		}
-		prepared, err := service.prepareWaitRun(ctx, arguments.Repo, arguments.SHA, arguments.Trigger, arguments.Timeout, actor.Identity)
+		var prepared func(context.Context) (WaitResponse, error)
+		if arguments.ID != "" {
+			if arguments.Repo != "" || arguments.SHA != "" || arguments.Trigger != "" {
+				return nil, fmt.Errorf("%w: id cannot be combined with repo, sha, or trigger", ErrInvalidInput)
+			}
+			prepared, err = service.prepareWaitRunID(ctx, arguments.ID, arguments.Timeout)
+		} else {
+			prepared, err = service.prepareWaitRun(ctx, arguments.Repo, arguments.SHA, arguments.Trigger, arguments.Timeout, actor.Identity)
+		}
 		if err != nil {
 			return nil, err
 		}

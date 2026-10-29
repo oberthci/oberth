@@ -468,8 +468,8 @@ func (s *Store) RunIDsExist(ctx context.Context, ids []string) (map[string]bool,
 	return exists, nil
 }
 
-// ResolveRunID is a read-only lookup for a full durable ID or a unique
-// hexadecimal prefix of at least 12 characters, as printed by push feedback.
+// ResolveRunID looks up a full durable ID or a unique hexadecimal prefix of
+// at least 8 characters, as printed by push feedback.
 // Keep Run exact-only: mutation and scheduler identity lookups never abbreviate.
 func (s *Store) ResolveRunID(ctx context.Context, id string) (model.Run, error) {
 	return s.ResolveRunIDIn(ctx, id, nil)
@@ -480,29 +480,34 @@ func (s *Store) ResolveRunID(ctx context.Context, id string) (model.Run, error) 
 // alone (#073).
 func (s *Store) ResolveRunIDIn(ctx context.Context, id string, repoIDs []int64) (model.Run, error) {
 	id = strings.ToLower(strings.TrimSpace(id))
-	if len(id) < 12 || len(id) > 32 || !isHexPrefix(id) {
-		return model.Run{}, fmt.Errorf("%w: run ID must be 12 to 32 hexadecimal characters", ErrInvalid)
+	if len(id) < 8 || len(id) > 32 || !isHexPrefix(id) {
+		return model.Run{}, fmt.Errorf("%w: run ID must be 8 to 32 hexadecimal characters", ErrInvalid)
 	}
 	if len(id) == 32 && repoIDs == nil {
 		return s.Run(ctx, id)
 	}
 	restriction, restrictionArgs := repoRestriction("repo_id", repoIDs)
-	rows, err := s.db.QueryContext(ctx, `SELECT `+runColumns+` FROM runs WHERE id LIKE ?`+restriction+` LIMIT 2`, // #nosec G202 -- the restriction is a fixed column and ? placeholders from repoRestriction.
-		append([]any{id + "%"}, restrictionArgs...)...)
+	// Hex IDs sort below 'g', so this range uses the existing primary key.
+	// Restrict scope before checking ambiguity or returning matching IDs.
+	rows, err := s.db.QueryContext(ctx, `SELECT id FROM runs WHERE id >= ? AND id < ?`+restriction+` ORDER BY id`, // #nosec G202 -- the restriction is a fixed column and ? placeholders from repoRestriction.
+		append([]any{id, id + "g"}, restrictionArgs...)...)
 	if err != nil {
 		return model.Run{}, fmt.Errorf("resolve run ID prefix: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
-	var matches []model.Run
+	var matches []string
 	for rows.Next() {
-		run, err := scanRun(rows)
-		if err != nil {
+		var match string
+		if err := rows.Scan(&match); err != nil {
 			return model.Run{}, fmt.Errorf("scan run ID prefix: %w", err)
 		}
-		matches = append(matches, run)
+		matches = append(matches, match)
 	}
 	if err := rows.Err(); err != nil {
 		return model.Run{}, fmt.Errorf("resolve run ID prefix: %w", err)
+	}
+	if err := rows.Close(); err != nil {
+		return model.Run{}, fmt.Errorf("close run ID prefix: %w", err)
 	}
 	switch len(matches) {
 	case 0:
@@ -511,9 +516,9 @@ func (s *Store) ResolveRunIDIn(ctx context.Context, id string, repoIDs []int64) 
 		}
 		return model.Run{}, fmt.Errorf("%w: run ID %q", ErrNotFound, id)
 	case 1:
-		return matches[0], nil
+		return s.Run(ctx, matches[0])
 	default:
-		return model.Run{}, fmt.Errorf("%w: run ID prefix %q; use the full run ID", ErrAmbiguous, id)
+		return model.Run{}, fmt.Errorf("%w: run ID prefix %q matches: %s; use the full run ID", ErrAmbiguous, id, strings.Join(matches, ", "))
 	}
 }
 

@@ -194,16 +194,16 @@ call the proxy hostname directly.
 |------|-------------|
 | `status` | CI status for a SHA or branch, including the failed step |
 | `logs` | One named step's log output for a SHA, optionally filtered |
-| `run_kvm_preflight` | Bounded historical KVM intent, receipt/refusal and cleanup by exact run ID or unique 12+ character prefix |
-| `run_get` | One durable run and its steps by full run ID or unique 12+ character prefix |
+| `run_kvm_preflight` | Bounded historical KVM intent, receipt/refusal and cleanup by exact run ID or unique 8+ character prefix |
+| `run_get` | One durable run and its steps by full run ID or unique 8+ character prefix |
 | `run_retry` | Requeue the newest interrupted or infrastructure-failed branch run using its same repo/ref/SHA; workflow-level failures without a failed step qualify, while test failures and older runs are refused |
 | `run_rerun` | Rerun a failed or interrupted run at the same SHA and ref (`id`, optional `reason`, admin-only `force`), linked by `rerun_of`: covers failed steps (flaky tests), non-newest runs and tag/release runs. Refused while the ref has an active run, once a branch moved past the SHA, for promotion/plan/apply runs, and for a tag that is already published or green or whose release failed only in publication (use `publish_retry` on that run). A publishing-only failure is re-pushed as `publish_retry` does instead of re-run. Non-admins: branch-push runs; tags need admin and `force`. Audited as `run.rerun` |
 | `run_cancel` | Cancel one queued, waiting or running run (audited; `id`, optional `reason`, admin-only `force`). The run becomes `interrupted` with phase `cancelled` and a reason naming the caller; a claimed run's Workflow is deleted and its admission released at once; it is never re-fired and opens no CI issue. Non-admins: branch-push runs outside a concurrency group only. Admins: any run, with `force` for tag/release and apply runs. Cancelling promotion CI fails the promotion without merging. Terminal runs are refused |
 | `run_purge` | Purge retained logs, artifacts or both for a terminal run; requires an unscoped admin uplink and `id`, `what`, `reason`. Active runs and protected release/promotion/issue/grant evidence are refused. Run/step history remains; audited purge markers identify the actor and date |
-| `run_logs` | One exact burn/step log by full run ID or unique 12+ character prefix, optionally filtered |
+| `run_logs` | One exact burn/step log by full run ID or unique 8+ character prefix, optionally filtered |
 | `artifacts` | The files a run kept, with size and modification time |
 | `artifact_get` | One artifact's contents by run ID and name, optionally filtered |
-| `wait` | Long-poll until a SHA reaches a terminal state |
+| `wait` | Long-poll until a SHA or exact run ID reaches a terminal state |
 | `sync` | Park a WIP branch upstream without a green gate (not completion evidence) |
 | `promote` | Green-gate a SHA, merge with target branch, push without force |
 | `promotion_list` | Recover durable promotion IDs by exact repo/full source SHA/status; bounded pages with an admission-sequence cursor |
@@ -249,14 +249,23 @@ named-step grants. A missing exact tuple is refused without changing grants.
 Revocation removes admission approval immediately; complete the documented
 `oberth secretstore sync` procedure to remove the corresponding Bao policy read.
 
-`run_get` and `run_logs` accept the 12-character run ID printed after a push.
-A prefix must be unique across all repositories; if it is ambiguous, use the
-full 32-character ID. Responses always include that full ID.
+Run-ID arguments accept the 8-character run ID printed after a push, or any
+unique hexadecimal prefix of at least 8 characters. Uniqueness is checked only
+among runs the caller is authorized to see. An ambiguous prefix returns the
+matching full IDs; use a longer prefix or the full 32-character ID. Responses
+always include that full ID.
+
+For `run_logs`, omitting `burn` defaults to the run's failed burn and, if `step`
+is also omitted, its failed step. Otherwise an omitted `step` defaults only
+when the selected burn has exactly one step.
 
 For an active Argo step, retained output may not exist until the step completes.
 `run_logs` and `logs` then return a `step log is pending` error with the run and
 step identity and retry guidance. Available retained output remains readable
 with the usual filters; an unknown step still returns not-found.
+
+To wait for one exact run, pass `{"id":"<run ID or unique 8+ character prefix>"}`.
+The `id` argument cannot be combined with `repo`, `sha`, or `trigger`.
 
 To wait for a release, pass `{"sha":"<commit-or-tag-object-sha>","trigger":"release"}`.
 `release` and `tag` select the tag-triggered run, even if a newer branch or
@@ -638,7 +647,7 @@ acquires or renews locks. This is live pagination, not a point-in-time snapshot.
 
 ### Historical KVM preflight evidence
 
-`run_kvm_preflight {"id":"<run ID or unique 12+ character prefix>"}` is an
+`run_kvm_preflight {"id":"<run ID or unique 8+ character prefix>"}` is an
 authenticated read. It returns the canonical run ID, qualified repository,
 candidate SHA and parent status. A known run without a KVM preflight returns
 `present: false`; unknown or ambiguous run IDs remain errors.

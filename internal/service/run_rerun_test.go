@@ -153,7 +153,7 @@ func TestRunRerunAfterTestFailurePassesAndStatusReportsNewestRun(t *testing.T) {
 		t.Fatal("run_retry accepted a test failure; run_rerun would be redundant")
 	}
 
-	response := harness.rerun(t, rerunUplink, map[string]any{"id": failed.ID, "reason": "flaky integration test"})
+	response := harness.rerun(t, rerunUplink, map[string]any{"id": failed.ID[:8], "reason": "flaky integration test"})
 	if response.Mode != "rerun" || response.RerunOf != failed.ID || response.RunID == "" || response.SHA != rerunSHA || response.Ref != rerunBranch {
 		t.Fatalf("run_rerun = %#v", response)
 	}

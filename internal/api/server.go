@@ -333,10 +333,10 @@ func (server *Server) handleRuns(writer http.ResponseWriter, request *http.Reque
 		switch {
 		case parseErr == nil && before >= 1:
 			filter.Before = before
-			// A run ID (or its 12+ character prefix) can be all digits; the
+			// A run ID (or its 8+ character prefix) can be all digits; the
 			// service tries it as a run first and falls back to the
 			// sequence only for an unscoped caller (#073).
-			if len(raw) >= 12 {
+			if len(raw) >= 8 {
 				filter.BeforeRun = raw
 			}
 		case parseErr != nil && validRunSelector(raw):
@@ -402,8 +402,8 @@ func (server *Server) handleRunLog(writer http.ResponseWriter, request *http.Req
 	id := request.PathValue("run")
 	query := request.URL.Query()
 	burn, step := query.Get("burn"), query.Get("step")
-	if !validRunSelector(id) || !validRunSelector(burn) || !validRunSelector(step) {
-		writeJSON(writer, http.StatusBadRequest, map[string]string{"error": "run ID plus burn and step query parameters are required"})
+	if !validRunSelector(id) || (burn != "" && !validRunSelector(burn)) || (step != "" && !validRunSelector(step)) {
+		writeJSON(writer, http.StatusBadRequest, map[string]string{"error": "run ID is required; burn and step must be valid selectors when provided"})
 		return
 	}
 	filter, err := logFilterFrom(query)
@@ -417,6 +417,9 @@ func (server *Server) handleRunLog(writer http.ResponseWriter, request *http.Req
 
 func logFilterFrom(query url.Values) (runlog.Filter, error) {
 	filter := runlog.Filter{Pattern: query.Get("pattern"), Tail: query.Get("tail") == "true"}
+	if raw, present := query["tail"]; present && (len(raw) != 1 || (raw[0] != "true" && raw[0] != "false")) {
+		return runlog.Filter{}, errors.New("tail must be boolean (true or false)")
+	}
 	for _, field := range []struct {
 		name   string
 		target *int
@@ -428,7 +431,7 @@ func logFilterFrom(query url.Values) (runlog.Filter, error) {
 		}
 		value, err := strconv.Atoi(raw)
 		if err != nil || value < 0 {
-			return runlog.Filter{}, fmt.Errorf("invalid log %s: must be a non-negative integer", name)
+			return runlog.Filter{}, fmt.Errorf("invalid log %s: must be a non-negative integer line count", name)
 		}
 		*target = value
 	}
