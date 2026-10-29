@@ -45,7 +45,11 @@ helm_tool=$tools_dir/bin/helm
 trivy_tool=$tools_dir/bin/trivy
 release_support_tool=$tools_dir/bin/oberth-release-support
 release_image_tool=$tools_dir/bin/oberth-release-image
-go_tool=/usr/local/go/bin/go
+go_tool=${GO:-/usr/local/go/bin/go}
+case "$go_tool" in
+	/*) ;;
+	*) printf '%s\n' 'release: GO must name an absolute Go executable' >&2; exit 1 ;;
+esac
 runtime_receipt=${OBERTH_RUNTIME_RECEIPT:-/tmp/oberth-runtime-receipts/receipt}
 release_public_key=.oberth/pins/release-cosign.pub
 release_public_key_sha256=036dd71c9d3c07a19bff06d4392874014573f695620ac8554d9df175094c4a31
@@ -700,6 +704,7 @@ scan_image() {
 publish_images() {
 	validate_source
 	require_artifacts
+	command -v "$go_tool" >/dev/null 2>&1 || fail "Go is not installed"
 	command -v "$release_image_tool" >/dev/null 2>&1 || fail "oberth-release-image is not installed"
 	command -v "$trivy_tool" >/dev/null 2>&1 || fail "Trivy is not installed"
 	prepare_registry_auth
@@ -713,7 +718,7 @@ publish_images() {
 	    "$release_image_tool" static-sbom "$architecture" "$release_dir/static-git-$architecture.cdx.json"
 	done
 	"$release_image_tool" static-sbom amd64 "$release_dir/static-git-control.cdx.json" control
-	/bin/sh hack/scan-static-git.sh "$release_dir" amd64 arm64
+	GO="$go_tool" /bin/sh hack/scan-static-git.sh "$release_dir" amd64 arm64
 	scan_image "$reference"
 	prepare_signing_identity
 	sign_registry_object "$reference"

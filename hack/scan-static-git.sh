@@ -3,6 +3,13 @@ set -eu
 source_root=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 # shellcheck disable=SC1091
 . "$source_root/internal/staticgit/build.env"
+# Credentialed release steps intentionally have only /usr/bin:/bin on PATH.
+go_tool=${GO:-/usr/local/go/bin/go}
+case "$go_tool" in
+  /*) ;;
+  *) echo 'static Git scan: GO must name an absolute Go executable' >&2; exit 1 ;;
+esac
+test -x "$go_tool" || { echo 'static Git scan: Go executable is unavailable' >&2; exit 1; }
 input_dir=$1
 shift
 test "$#" -gt 0
@@ -23,7 +30,7 @@ fi
 printf '%s  %s\n' "$scanner_sha" "$archive" | sha256sum -c -
 # Root CI containers lack CAP_CHOWN; do not restore archive ownership.
 tar --no-same-owner -xzf "$archive" -C "$scratch" grype
-go build -trimpath -buildvcs=false -o "$scratch/scanner-driver" "$source_root/hack/static-git-scanner"
+"$go_tool" build -trimpath -buildvcs=false -o "$scratch/scanner-driver" "$source_root/hack/static-git-scanner"
 if "$scratch/scanner-driver" "$scratch/grype" "$source_root/hack/static-git-grype.yaml" \
   "$scratch/db" "$input_dir/static-git-control.cdx.json" "alpine:$ALPINE_VERSION" \
   > "$input_dir/static-git-control.scan.json"; then
@@ -37,7 +44,7 @@ for artifact_arch do
   "$scratch/scanner-driver" "$scratch/grype" "$source_root/hack/static-git-grype.yaml" \
     "$scratch/db" "$input_dir/static-git-$artifact_arch.cdx.json" "alpine:$ALPINE_VERSION" \
     > "$input_dir/static-git-$artifact_arch.scan.json"
-  go run "$source_root/hack/static-git-scan-receipt" --arch "$artifact_arch" \
+  "$go_tool" run "$source_root/hack/static-git-scan-receipt" --arch "$artifact_arch" \
     --sbom "$input_dir/static-git-$artifact_arch.cdx.json" \
     --scan "$input_dir/static-git-$artifact_arch.scan.json" \
     --control "$input_dir/static-git-control.scan.json" \
