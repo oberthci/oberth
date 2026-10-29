@@ -30,7 +30,7 @@ func TestAuditFenceRejectsMovedHeadAndAllowsFreshRetry(t *testing.T) {
 	}
 }
 
-func TestAuditFenceRejectsChangesWithUnchangedHead(t *testing.T) {
+func TestAuditFenceReverifiesChangesWithUnchangedHead(t *testing.T) {
 	for _, change := range []string{"prefix", "receipt", "change-then-restore", "unrelated-write"} {
 		t.Run(change, func(t *testing.T) {
 			now := time.Now()
@@ -68,8 +68,19 @@ func TestAuditFenceRejectsChangesWithUnchangedHead(t *testing.T) {
 					return err
 				}
 			})
-			if !errors.Is(err, ErrAuditStateChanged) {
-				t.Fatalf("%s accepted with unchanged head: %v", change, err)
+			switch change {
+			case "prefix":
+				if err == nil || !strings.Contains(err.Error(), "audit action 1 hash is invalid") {
+					t.Fatalf("prefix not rejected by re-verification: %v", err)
+				}
+			case "receipt":
+				if !errors.Is(err, ErrAuditStateChanged) || !strings.Contains(err.Error(), "checkpoint differs") {
+					t.Fatalf("changed external proof accepted: %v", err)
+				}
+			default:
+				if err != nil {
+					t.Fatalf("unchanged protected state refused after %s: %v", change, err)
+				}
 			}
 		})
 	}
@@ -97,8 +108,8 @@ func TestAuditFenceRejectsPendingPublicationChange(t *testing.T) {
 		_, err := s.db.ExecContext(t.Context(), `UPDATE publications SET actor='forged' WHERE id=?`, publication.ID)
 		return err
 	})
-	if !errors.Is(err, ErrAuditStateChanged) {
-		t.Fatalf("pending-row change = %v", err)
+	if err == nil || !strings.Contains(err.Error(), "does not match its latest chained audit action") {
+		t.Fatalf("pending-row change not rejected by re-verification: %v", err)
 	}
 	invoked := false
 	_, _, err = s.VerifyAuditMutationStateUnanchored(t.Context(), nil, nil, func(model.AuditHead, model.AuditAnchor) error { invoked = true; return nil })

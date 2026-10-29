@@ -10,29 +10,19 @@ import (
 	"github.com/oberthci/oberth/internal/model"
 )
 
-// ErrAuditStateChanged is a retryable refusal, never a successful gate. One
-// attempt is made per call so a busy writer cannot cause unbounded retries or
-// repeated external side effects inside a request.
+// ErrAuditStateChanged is a retryable refusal, never a successful gate.
+// Local re-verification is bounded; external verification runs only once.
 var ErrAuditStateChanged = errors.New("store: audit state changed during verification; retry")
 
-// openAuditReader creates a private, deferred, read-only connection to the live
-// WAL. Its data_version must be compared only on this exact connection. Since
-// it never writes, committed database changes (including this Store's writes)
-// change its observed version. Never inherit _txlock=immediate or immutable=1.
+const auditFenceExtraRounds = 2
+
+// Keep this exact reader connection across every snapshot and fence: only its
+// own data_version values are comparable. It never writes to the live WAL.
 func (s *Store) openAuditReader(ctx context.Context) (*sql.DB, *sql.Conn, error) {
-	var path string
-	if err := s.db.QueryRowContext(ctx, `SELECT file FROM pragma_database_list WHERE name='main'`).Scan(&path); err != nil {
-		return nil, nil, fmt.Errorf("locate audit verification database: %w", err)
-	}
-	if path == "" {
-		return nil, nil, fmt.Errorf("%w: audit verification requires a file-backed WAL database", ErrInvalid)
-	}
-	db, err := sql.Open("sqlite", currentDatabaseDSN(path, "ro", false))
+	db, err := s.openLiveReaders(ctx, 1)
 	if err != nil {
-		return nil, nil, fmt.Errorf("open audit verification reader: %w", err)
+		return nil, nil, err
 	}
-	db.SetMaxOpenConns(1)
-	db.SetMaxIdleConns(1)
 	conn, err := db.Conn(ctx)
 	if err != nil {
 		_ = db.Close()
@@ -62,24 +52,11 @@ func (s *Store) verifyAuditWithFence(
 		return head, anchor, err
 	}
 	defer func() { resultErr = errors.Join(resultErr, conn.Close(), db.Close()) }()
-	// Read the counter before the first snapshot read. A commit in between can
-	// only cause a conservative refusal, never acceptance of a stale snapshot.
-	version, err := auditDataVersion(ctx, conn)
-	if err != nil {
-		return head, anchor, err
-	}
-	tx, err := conn.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
-	if err != nil {
-		return head, anchor, fmt.Errorf("begin audit verification snapshot: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-	head, anchor, err = verify(tx)
+	version, head, anchor, err := readAuditVerification(ctx, conn, verify)
 	if err != nil {
 		return model.AuditHead{}, model.AuditAnchor{}, err
 	}
-	if err := tx.Commit(); err != nil {
-		return model.AuditHead{}, model.AuditAnchor{}, fmt.Errorf("finish audit verification snapshot: %w", err)
-	}
+
 	// The result is immutable to the callback: it gets independent slices. The
 	// read transaction is already over, so slow I/O pins neither a writer nor WAL
 	// snapshot pages. Failure remains fail-closed even if external writes occur.
@@ -90,34 +67,82 @@ func (s *Store) verifyAuditWithFence(
 	if err := external(callbackHead, callbackAnchor); err != nil {
 		return model.AuditHead{}, model.AuditAnchor{}, err
 	}
-	// Store writer DSNs always use BEGIN IMMEDIATE. No callback, hashing or
-	// network I/O occurs under this reservation. Other writers remain excluded
-	// from these comparisons through commit.
+	for round := 0; ; round++ {
+		changed, err := s.auditVerificationFence(ctx, conn, head, version)
+		if err != nil {
+			return model.AuditHead{}, model.AuditAnchor{}, err
+		}
+		if !changed {
+			return head, anchor, nil
+		}
+		if round == auditFenceExtraRounds {
+			return model.AuditHead{}, model.AuditAnchor{}, fmt.Errorf("%w: local re-verification rounds exhausted", ErrAuditStateChanged)
+		}
+		// The writer fence has ended. Rehash every protected row on a new read
+		// snapshot, using the same reader and a fresh counter. Unrelated writes
+		// during external I/O need not invalidate an unchanged verified result.
+		nextVersion, nextHead, nextAnchor, err := readAuditVerification(ctx, conn, verify)
+		if err != nil {
+			return model.AuditHead{}, model.AuditAnchor{}, err
+		}
+		if nextHead.ID != head.ID || !bytes.Equal(nextHead.SHA256, head.SHA256) || !sameVerifiedAuditAnchor(nextAnchor, anchor) {
+			return model.AuditHead{}, model.AuditAnchor{}, fmt.Errorf("%w: re-verified head or checkpoint differs from external proof", ErrAuditStateChanged)
+		}
+		version = nextVersion
+	}
+}
+
+func readAuditVerification(ctx context.Context, conn *sql.Conn, verify func(*sql.Tx) (model.AuditHead, model.AuditAnchor, error)) (int64, model.AuditHead, model.AuditAnchor, error) {
+	version, err := auditDataVersion(ctx, conn)
+	if err != nil {
+		return 0, model.AuditHead{}, model.AuditAnchor{}, err
+	}
+	tx, err := conn.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return 0, model.AuditHead{}, model.AuditAnchor{}, fmt.Errorf("begin audit verification snapshot: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	head, anchor, err := verify(tx)
+	if err != nil {
+		return 0, model.AuditHead{}, model.AuditAnchor{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, model.AuditHead{}, model.AuditAnchor{}, fmt.Errorf("finish audit verification snapshot: %w", err)
+	}
+	return version, head, anchor, nil
+}
+
+func sameVerifiedAuditAnchor(a, b model.AuditAnchor) bool {
+	return a.ID == b.ID && a.AuditID == b.AuditID && bytes.Equal(a.AuditSHA256, b.AuditSHA256) &&
+		a.TSAURL == b.TSAURL && bytes.Equal(a.Receipt, b.Receipt) && a.AnchoredAt.Equal(b.AnchoredAt) && a.CreatedAt.Equal(b.CreatedAt)
+}
+
+// This reservation contains only bounded local comparisons; no callback,
+// hashing or network I/O. It ends before any retry begins.
+func (s *Store) auditVerificationFence(ctx context.Context, conn *sql.Conn, head model.AuditHead, version int64) (bool, error) {
 	fence, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return model.AuditHead{}, model.AuditAnchor{}, fmt.Errorf("begin audit verification fence: %w", err)
+		return false, fmt.Errorf("begin audit verification fence: %w", err)
 	}
 	defer func() { _ = fence.Rollback() }()
 	current, err := readAuditHead(ctx, fence)
 	if err != nil {
-		return model.AuditHead{}, model.AuditAnchor{}, err
+		return false, err
 	}
 	if current.ID != head.ID || !bytes.Equal(current.SHA256, head.SHA256) {
-		return model.AuditHead{}, model.AuditAnchor{}, fmt.Errorf("%w: verified head %d differs from current head %d", ErrAuditStateChanged, head.ID, current.ID)
+		return false, fmt.Errorf("%w: verified head %d differs from current head %d", ErrAuditStateChanged, head.ID, current.ID)
 	}
 	currentVersion, err := auditDataVersion(ctx, conn)
 	if err != nil {
-		return model.AuditHead{}, model.AuditAnchor{}, err
+		return false, err
 	}
 	if currentVersion != version {
-		// Head equality alone misses prefix, pending-publication, receipt, anchor,
-		// schema, and change-then-restore commits. Reject all such changes too.
-		return model.AuditHead{}, model.AuditAnchor{}, fmt.Errorf("%w: database changed with an unchanged head", ErrAuditStateChanged)
+		return true, nil
 	}
 	if err := fence.Commit(); err != nil {
-		return model.AuditHead{}, model.AuditAnchor{}, fmt.Errorf("commit audit verification fence: %w", err)
+		return false, fmt.Errorf("commit audit verification fence: %w", err)
 	}
-	return head, anchor, nil
+	return false, nil
 }
 
 // withAuditReadSnapshot keeps full-chain CPU work off the primary connection

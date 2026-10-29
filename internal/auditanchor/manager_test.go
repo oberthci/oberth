@@ -398,8 +398,8 @@ func TestMutationGateRejectsTamperingDuringExternalChecks(t *testing.T) {
 			} else {
 				continuity.reconcileHook = attemptWrite
 			}
-			if err := manager.AllowMutation(ctx); !errors.Is(err, store.ErrAuditStateChanged) {
-				t.Fatalf("gate after concurrent tamper = %v, want retryable refusal", err)
+			if err := manager.AllowMutation(ctx); err == nil || !strings.Contains(err.Error(), "audit action 1 hash is invalid") {
+				t.Fatalf("tamper not detected by re-verification: %v", err)
 			}
 			if !attempted || writeErr != nil {
 				t.Fatalf("write during %s: attempted=%t error=%v", stage, attempted, writeErr)

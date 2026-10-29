@@ -69,6 +69,9 @@ type Store struct {
 	done     bool
 	readOnly bool
 	cleanup  func() error
+
+	liveReaderDSN string // immutable after startup; shared live WAL reader settings
+
 	// reruns caches run_rerun lineage (#1098); see RunRerunOf.
 	reruns rerunLineage
 }
@@ -235,6 +238,10 @@ func open(
 		_ = db.Close()
 		return nil, err
 	}
+	if err := s.configureLiveReaders(ctx, opts.BusyTimeout); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
 	if err := s.verifyConfiguredProtocol(ctx); err != nil {
 		_ = db.Close()
 		return nil, err
@@ -332,6 +339,12 @@ func openCurrentUnverified(ctx context.Context, path string, opts Options, readO
 	if err := s.configureCurrent(ctx, opts.BusyTimeout, readOnly, immutable); err != nil {
 		_ = db.Close()
 		return nil, err
+	}
+	if !readOnly {
+		if err := s.configureLiveReaders(ctx, opts.BusyTimeout); err != nil {
+			_ = db.Close()
+			return nil, err
+		}
 	}
 	return s, nil
 }

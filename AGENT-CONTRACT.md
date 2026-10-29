@@ -165,10 +165,15 @@ connection, end that snapshot, and perform timestamp/continuity verification
 without holding the primary writer connection. A final short BEGIN IMMEDIATE
 transaction compares the verified head ID/digest and the same reader's
 data_version before committing the gate. Head equality alone is insufficient:
-same-head changes to the prefix, pending rows and receipts must also refuse.
-Any committed database change causes a retryable refusal with one attempt per
-call; a fresh call repeats verification. All modes recheck the complete chain;
-no cached permission or prefix bypass is used by mutation gates.
+same-head tampering of the prefix, pending rows and receipts must also be checked.
+When only data_version changes, the gate ends the writer transaction and
+re-verifies a fresh snapshot on the same reader, with at most two extra rounds.
+The re-verified head and checkpoint must equal the external proof; external I/O
+runs once. Moved heads, changed proofs, tampering and exhausted retries refuse.
+Live readers share a startup-cached read-only DSN with query_only and the Store's
+busy timeout. A mutation gate has a 30-second total deadline, including waiting
+for refresh. All modes recheck the complete chain; no cached permission or prefix
+bypass is used. Local prefix pins apply within a cycle, not across fresh cycles.
 
 ### Kubernetes Secrets
 

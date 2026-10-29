@@ -8,10 +8,18 @@
   `PRAGMA data_version` are unchanged. The reservation excludes other writers
   through the gate commit. The version check also catches changes to older
   audit rows, pending publications, or receipts that leave the head unchanged.
-  Any committed database change causes a retryable refusal; one attempt is made per
-  gate call. No permission is cached across calls, and failures of local or
-  external verification continue to refuse mutation. Local and timestamp-only
-  gates use the same protocol and recheck the full chain, including its prefix.
+  If the counter changes while the head is unchanged, the gate ends the writer
+  transaction and re-verifies a fresh snapshot on the same reader connection.
+  At most two extra local rounds are allowed; they must produce the same head
+  and byte-identical checkpoint supplied to external verification. External
+  calls run once. Head movement, changed checkpoints, tampering, cancellation
+  and exhausted retries still refuse mutation. The total gate deadline is
+  30 seconds by default, including waiting for refresh; a shorter caller deadline
+  applies. Every live reader uses the Store's busy timeout and query_only,
+  with its DSN resolved at startup so opening a reader does not queue on the
+  primary connection. Local and timestamp-only gates hash the full chain,
+  including its prefix. Their verified-prefix pin is scoped to the current
+  verification cycle; a new cycle may establish a new pin.
 
 - Pipeline leaves can opt out of their pipeline token and automatic shared
   workspace access even inside credentialed workflows. Explicit false token
