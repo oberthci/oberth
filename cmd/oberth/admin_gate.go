@@ -32,14 +32,14 @@ func newAdminGateServer(gate func(context.Context) error, databasePath string, w
 			http.Error(output, "queue state unavailable", http.StatusServiceUnavailable)
 			return
 		}
-		state, err := counts[0](request.Context())
-		if err != nil {
-			http.Error(output, "queue state unavailable", http.StatusServiceUnavailable)
-			return
-		}
 		mode := request.URL.Query().Get("wait_for")
 		if mode != "" && mode != "all" && mode != "critical" {
 			http.Error(output, "invalid wait selection", http.StatusBadRequest)
+			return
+		}
+		state, err := counts[0](request.Context())
+		if err != nil {
+			http.Error(output, "queue state unavailable", http.StatusServiceUnavailable)
 			return
 		}
 		if !state.Valid() {

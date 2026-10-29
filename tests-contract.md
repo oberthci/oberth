@@ -324,3 +324,18 @@ exact cleanup and requires the parent to stay running for startup recovery,
 which then shows it as `server restart, re-queued as <run12>`.
 `TestTrustedRestartRecoveryHasOwnBoundWithoutCallerDeadline` requires the
 two-minute per-execution recovery bound when startup has no deadline.
+
+Upgrade idle-probe retries: `TestUpgradeWaitRetriesTimeoutBeforeUpgrade` uses a
+fake HTTP transport and clock through the real installer wait path: a five-second
+probe timeout followed by idle reaches Helm upgrade, while persistent timeouts
+consume exactly the two-minute wait budget, refuse upgrade and preserve the last
+probe cause with throttled diagnostics. `TestWaitIdleTransientFailuresBackOffAndRecover`
+checks transport/503/truncated-body recovery and backoff reset on a valid busy
+sample; protocol-error and cancellation tests pin immediate refusal and prompt
+cancellation. `TestIdleSnapshotAdminProbeDoesNotWaitForStorage` blocks a background
+read while 100 admin probes answer from memory, then proves expiry, refresh and
+failure invalidation. Missing/invalid/late samples cannot establish idle.
+
+`TestUpgradeWaitDeadlineRetainsChildProbeDiagnostic` splits child output at every
+byte and proves the local deadline retains its last reported probe cause even
+when kubectl is killed; a subsequent busy snapshot clears that stale cause.

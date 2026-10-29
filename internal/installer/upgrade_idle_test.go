@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"reflect"
 	"strings"
@@ -112,6 +113,35 @@ func TestUpgradeWaitOldBinaryDiagnostic(t *testing.T) {
 			if mapped != test.mapped {
 				t.Fatalf("mapped=%v want=%v: %v", mapped, test.mapped, err)
 			}
+		})
+	}
+}
+
+func TestUpgradeWaitDeadlineRetainsChildProbeDiagnostic(t *testing.T) {
+	for _, recovered := range []bool{false, true} {
+		t.Run(fmt.Sprint(recovered), func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				cfg := UpgradeConfig{WaitFor: "critical", WaitTimeout: time.Minute}
+				err := waitForUpgradeIdle(t.Context(), cfg, Deps{RunCommandStream: func(ctx context.Context, w io.Writer, _ string, _ ...string) error {
+					line := "Waiting for critical queue: transient idle probe failure: fixture socket timeout; retrying (elapsed=5s)\n"
+					if recovered {
+						line += "Waiting for critical queue: queued=1 running=0 branch=0 critical=1\n"
+					}
+					for _, b := range []byte(line) {
+						if _, err := w.Write([]byte{b}); err != nil {
+							return err
+						}
+					}
+					<-ctx.Done()
+					return errors.New("signal: killed")
+				}})
+				if !errors.Is(err, context.DeadlineExceeded) || !strings.Contains(err.Error(), "upgrade not attempted") {
+					t.Fatal(err)
+				}
+				if strings.Contains(err.Error(), "last reported idle probe failure: fixture socket timeout") == recovered {
+					t.Fatalf("recovered=%t err=%v", recovered, err)
+				}
+			})
 		})
 	}
 }

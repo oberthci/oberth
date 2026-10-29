@@ -125,7 +125,7 @@ esac
 				command = exec.CommandContext(ctx, setsid, "/bin/sh", "-c", `exec "$@"`, "fixture", executable, "-test.run", "^TestUpgradeWaitProcessHelper$")
 			}
 			limit := "3m"
-			if mode == "deadline" {
+			if mode == "deadline" || mode == "unavailable" {
 				limit = "250ms"
 			}
 			already := "no"
