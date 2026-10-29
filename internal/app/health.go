@@ -100,7 +100,7 @@ type SecretStoreStatus struct {
 // AuditChainStatus reports the local audit hash-chain head and the latest
 // external checkpoint. Anchored is false when no external witness or
 // timestamp authority is configured (local-only mode). Detail carries the
-// readiness diagnostic when the anchoring pipeline (TSA or Rekor witness) is
+// status diagnostic when the anchoring pipeline (TSA or Rekor witness) is
 // unhealthy.
 type AuditChainStatus struct {
 	HeadID     int64  `json:"head_id"`
@@ -146,9 +146,11 @@ type HealthStatus struct {
 // freshly installed deployment stays alive but intentionally not ready until
 // its first upstream is registered: the pod accepts in-pod administration
 // (liveness passes, so no restarts) while the readiness probe keeps it out of
-// Service endpoints. Once an upstream exists, readiness additionally requires
-// its durable SSH credentials (when any non-local upstream exists), a
-// responsive Kubernetes API, and externally anchored audit integrity.
+// Service endpoints. Readiness also requires a usable database and durable
+// SSH credentials when any non-local upstream exists. Kubernetes availability
+// and periodic audit health are diagnostics in Status, not Service membership:
+// taking those dependencies down must not remove the cached Git/SSH endpoint.
+// Audit authorization remains enforced by each operation's mutation gate.
 func (health Health) Ready(ctx context.Context) error {
 	if health.ReadyGate != nil {
 		if err := health.ReadyGate(ctx); err != nil {
@@ -162,7 +164,7 @@ func (health Health) Ready(ctx context.Context) error {
 }
 
 func (health Health) probeReady(ctx context.Context) error {
-	if health.Store == nil || health.Configured == nil || health.Cluster == nil || health.Audit == nil || health.VCS == nil {
+	if health.Store == nil || health.Configured == nil {
 		return errors.New("app: health dependencies are unavailable")
 	}
 	upstreams, err := health.Store.ListUpstreams(ctx)
@@ -177,13 +179,7 @@ func (health Health) probeReady(ctx context.Context) error {
 			return fmt.Errorf("app: upstream configuration is unavailable: %w", err)
 		}
 	}
-	if err := health.Cluster(ctx); err != nil {
-		return fmt.Errorf("app: Kubernetes API is unavailable: %w", err)
-	}
-	if err := health.Audit(ctx); err != nil {
-		return fmt.Errorf("app: audit integrity is unavailable: %w", err)
-	}
-	return nil
+	return ctx.Err()
 }
 
 // requiresSSHIdentity returns true when at least one upstream uses an SSH-based

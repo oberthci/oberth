@@ -32,11 +32,13 @@ Kubernetes sends SIGKILL; a pod killed early loses the clean handover, not the
 adoptable Workflows.
 
 Readiness stays unavailable until owner recovery and Workflow adoption finish.
-Dependency checks run immediately in the background and then every two seconds,
-with a three-second probe deadline. `/readyz` reads the snapshot without database,
+Database/configuration checks run immediately in the background and then every
+two seconds, with a three-second probe deadline. `/readyz` reads the snapshot without database,
 credential or Kubernetes calls. Missing, failed or older-than-15-second samples
-fail closed. Upstream forge reachability remains a diagnostic rather than a
-readiness dependency.
+fail closed. Kubernetes availability, periodic audit health and upstream forge
+reachability remain status diagnostics rather than readiness dependencies.
+Startup audit verification, owner recovery and operation-level mutation gates
+remain required; keeping the endpoint routable does not authorize writes.
 
 `oberth mcp call` reconnects only for an explicit list of pure reads: `wait`,
 `status`, `logs`, `system_status`, `run_get`, `run_logs`, `run_list`,

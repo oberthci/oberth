@@ -10,8 +10,8 @@ metadata:
 spec:
   type: ClusterIP
   # This read-only listener remains useful to already-running CI while the
-  # server's /readyz fails on scheduler recovery, Kubernetes or audit health.
-  # Keep only this Service routable; the API/SSH readiness gate is unchanged.
+  # server's /readyz fails on recovery or database/configuration readiness.
+  # Only this read-only Service bypasses the API/SSH serving readiness gate.
   publishNotReadyAddresses: true
   selector:
     {{- include "oberth.selectorLabels" . | nindent 4 }}

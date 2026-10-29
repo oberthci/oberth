@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-// ReadinessSnapshot prevents Kubernetes/credential probes from blocking HTTP
+// ReadinessSnapshot prevents database/credential checks from blocking HTTP
 // readiness requests. An absent or stale sample fails closed.
 type ReadinessSnapshot struct {
 	mu      sync.RWMutex
