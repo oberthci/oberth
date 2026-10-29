@@ -58,6 +58,9 @@ func TestMutationGateDeadlineBoundsExternalWork(t *testing.T) {
 		t.Fatalf("gate deadline: entered=%t duration=%s err=%v", entered, time.Since(started), err)
 	}
 	continuity.reconcile = nil
+	// Give the lock-reuse probe the normal gate budget so reader startup on
+	// a loaded host cannot obscure whether the expired attempt released it.
+	manager.gateTimeout = defaultGateTimeout
 	if err := manager.AllowMutation(t.Context()); err != nil {
 		t.Fatalf("deadline failed to release refresh lock: %v", err)
 	}

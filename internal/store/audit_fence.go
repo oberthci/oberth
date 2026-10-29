@@ -78,9 +78,11 @@ func (s *Store) verifyAuditWithFence(
 		if round == auditFenceExtraRounds {
 			return model.AuditHead{}, model.AuditAnchor{}, fmt.Errorf("%w: local re-verification rounds exhausted", ErrAuditStateChanged)
 		}
-		// The writer fence has ended. Rehash every protected row on a new read
-		// snapshot, using the same reader and a fresh counter. Unrelated writes
-		// during external I/O need not invalidate an unchanged verified result.
+		// The writer fence has ended. Re-verify protected state on a new read
+		// snapshot, using the same reader and a fresh counter. The local gate
+		// independently checks whether its prefix cache is still trusted.
+		// Unrelated writes during external I/O need not invalidate an unchanged
+		// verified result.
 		nextVersion, nextHead, nextAnchor, err := readAuditVerification(ctx, conn, verify)
 		if err != nil {
 			return model.AuditHead{}, model.AuditAnchor{}, err

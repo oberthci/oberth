@@ -229,9 +229,8 @@ func (s *Store) VerifyAuditState(ctx context.Context) (model.AuditHead, error) {
 // verification via VerifyAuditState.
 //
 // Callers must own a trusted immutable prefix. Mutation gates instead use
-// VerifyLocalAuditMutationState, hashing the complete chain and checking the
-// in-process prefix pin inside one snapshot; a cached head cannot hide prefix
-// tampering between periodic full verifications.
+// VerifyLocalAuditMutationState, which checks cache provenance and the
+// in-process prefix pin inside the snapshot/fence protocol.
 func (s *Store) VerifyAuditStateSince(ctx context.Context, sinceID int64, sinceDigest []byte) (model.AuditHead, error) {
 	if sinceID <= 0 || len(sinceDigest) != sha256.Size {
 		return s.VerifyAuditState(ctx)
@@ -314,24 +313,49 @@ func (s *Store) verifyAuditMutationStateOutsideWriter(
 }
 
 // VerifyLocalAuditMutationState applies the same snapshot/fence protocol to
-// local-only and timestamp-only gates. All chain rows and pending publication
-// bindings are checked afresh; a cached head never hides prefix tampering.
+// local-only and timestamp-only gates. An unchanged trusted Store connection
+// permits suffix verification; outside commits, schema/checkpoint changes and
+// periodic expiry force full verification. Pending bindings are always fresh.
 func (s *Store) VerifyLocalAuditMutationState(
 	ctx context.Context,
 	verifiedPrefix model.AuditHead,
 	whileVerified func(model.AuditHead, model.AuditAnchor) error,
 ) (model.AuditHead, model.AuditAnchor, error) {
+	if s.readOnly || s.auditGate == nil {
+		return model.AuditHead{}, model.AuditAnchor{}, fmt.Errorf("%w: mutation gate requires a configured writable Store", ErrInvalidState)
+	}
 	if whileVerified == nil {
 		return model.AuditHead{}, model.AuditAnchor{}, fmt.Errorf("%w: audit mutation verification callback is required", ErrInvalid)
 	}
-	return s.verifyAuditWithFence(ctx, func(tx *sql.Tx) (model.AuditHead, model.AuditAnchor, error) {
-		head, err := s.verifyAuditChain(ctx, tx)
+	select {
+	case s.auditGate <- struct{}{}:
+		defer func() { <-s.auditGate }()
+	case <-ctx.Done():
+		return model.AuditHead{}, model.AuditAnchor{}, ctx.Err()
+	}
+	before, err := s.auditCacheKey(ctx)
+	if err != nil {
+		s.localAudit.valid = false
+		return model.AuditHead{}, model.AuditAnchor{}, err
+	}
+	next := s.localAudit
+	head, anchor, err := s.verifyAuditWithFence(ctx, func(tx *sql.Tx) (model.AuditHead, model.AuditAnchor, error) {
+		// Establish the snapshot before sampling the primary counter again.
+		var schema int64
+		if err := tx.QueryRowContext(ctx, `PRAGMA schema_version`).Scan(&schema); err != nil {
+			return model.AuditHead{}, model.AuditAnchor{}, err
+		}
+		anchor, err := scanAuditAnchor(tx.QueryRowContext(ctx, `SELECT id, audit_id, audit_sha256, tsa_url, receipt, anchored_at, created_at FROM audit_anchors ORDER BY id DESC LIMIT 1`))
+		if errors.Is(err, ErrNotFound) {
+			err = nil
+		}
 		if err != nil {
 			return model.AuditHead{}, model.AuditAnchor{}, err
 		}
-		// Preserve the prior gate's in-process verified-prefix pin while
-		// still hashing every row. A valid shorter/rebuilt chain is not an
-		// acceptable replacement for a prefix already verified this cycle.
+		head, err := s.readLocalAuditChain(ctx, tx, before, anchor, schema, &next)
+		if err != nil {
+			return model.AuditHead{}, model.AuditAnchor{}, err
+		}
 		if verifiedPrefix.ID > 0 {
 			if err := verifyAuditHeadReference(ctx, tx, verifiedPrefix); err != nil {
 				return model.AuditHead{}, model.AuditAnchor{}, fmt.Errorf("verified audit prefix: %w", err)
@@ -340,15 +364,17 @@ func (s *Store) VerifyLocalAuditMutationState(
 		if err := verifyPendingPublicationIntents(ctx, tx); err != nil {
 			return model.AuditHead{}, model.AuditAnchor{}, err
 		}
-		anchor, err := scanAuditAnchor(tx.QueryRowContext(ctx, `SELECT id, audit_id, audit_sha256, tsa_url, receipt, anchored_at, created_at FROM audit_anchors ORDER BY id DESC LIMIT 1`))
-		if errors.Is(err, ErrNotFound) {
-			err = nil
-		}
-		if err == nil && anchor.ID != 0 {
+		if anchor.ID != 0 {
 			err = verifyAuditHeadReference(ctx, tx, model.AuditHead{ID: anchor.AuditID, SHA256: anchor.AuditSHA256})
 		}
 		return head, anchor, err
 	}, whileVerified)
+	if err != nil {
+		s.localAudit.valid = false
+		return model.AuditHead{}, model.AuditAnchor{}, err
+	}
+	s.localAudit = next
+	return head, anchor, nil
 }
 
 func verifyAuditHeadReference(ctx context.Context, reader auditStateQuerier, head model.AuditHead) error {

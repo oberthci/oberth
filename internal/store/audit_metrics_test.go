@@ -137,7 +137,7 @@ func metricBit(value bool) int {
 	return 0
 }
 
-func seedAuditMetricRows(t *testing.T, database *Store, count int, createdAt time.Time) model.AuditHead {
+func seedAuditMetricRows(t testing.TB, database *Store, count int, createdAt time.Time) model.AuditHead {
 	t.Helper()
 	ctx := context.Background()
 	tx, err := database.db.BeginTx(ctx, nil)
