@@ -1,5 +1,18 @@
 # Security invariants
 
+- Audit mutation gates hash and verify a fresh read-only WAL snapshot before
+  timestamp verification and Kubernetes continuity reconciliation. External
+  calls run after the read transaction ends and hold no SQLite writer
+  reservation. A short `BEGIN IMMEDIATE` transaction then accepts the result
+  only if the audit head (ID and SHA-256) and the same reader connection's
+  `PRAGMA data_version` are unchanged. The reservation excludes other writers
+  through the gate commit. The version check also catches changes to older
+  audit rows, pending publications, or receipts that leave the head unchanged.
+  Any committed database change causes a retryable refusal; one attempt is made per
+  gate call. No permission is cached across calls, and failures of local or
+  external verification continue to refuse mutation. Local and timestamp-only
+  gates use the same protocol and recheck the full chain, including its prefix.
+
 - Pipeline leaves can opt out of their pipeline token and automatic shared
   workspace access even inside credentialed workflows. Explicit false token
   requests, read-only mount aliases and executor mirrors are preserved through

@@ -17,6 +17,7 @@ import (
 type AnchorStore interface {
 	VerifyAuditState(context.Context) (model.AuditHead, error)
 	VerifyAuditStateSince(context.Context, int64, []byte) (model.AuditHead, error)
+	VerifyLocalAuditMutationState(context.Context, model.AuditHead, func(model.AuditHead, model.AuditAnchor) error) (model.AuditHead, model.AuditAnchor, error)
 	AuditHeadHint(context.Context) (model.AuditHead, error)
 	VerifyAuditMutationState(context.Context, []model.AuditWitnessIntent, []model.AuditWitness, func(model.AuditHead, model.AuditAnchor) error) (model.AuditHead, model.AuditAnchor, error)
 	VerifyAuditMutationStateUnanchored(context.Context, []model.AuditWitnessIntent, []model.AuditWitness, func(model.AuditHead, model.AuditAnchor) error) (model.AuditHead, model.AuditAnchor, error)
@@ -317,31 +318,31 @@ func (manager *Manager) AllowMutation(ctx context.Context) error {
 	return nil
 }
 
-// allowMutationWithoutWitness is the mutation gate for deployments with no
-// external witness configured. The complete local hash chain is re-verified
-// immediately before the mutation; when a timestamp authority is configured
-// the persisted signed checkpoint tip must additionally verify and match the
-// in-process verified tip.
+// allowMutationWithoutWitness uses the same read-only snapshot and short
+// commit fence as witnessed gates. Receipt verification runs outside SQLite's
+// writer reservation, with all local protected state bound to the final fence.
 func (manager *Manager) allowMutationWithoutWitness(ctx context.Context) error {
-	sinceID, sinceDigest := manager.getVerifiedHead()
-	if _, err := manager.store.VerifyAuditStateSince(ctx, sinceID, sinceDigest); err != nil {
-		return fmt.Errorf("audit anchor: mutation gate verify local protected state: %w", err)
-	}
-	if manager.authority == nil {
-		return nil
-	}
-	persisted, err := manager.store.LatestAuditAnchor(ctx)
-	if err != nil {
-		return fmt.Errorf("audit anchor: mutation gate persisted checkpoints: %w", err)
-	}
-	if err := manager.authority.Verify(persisted); err != nil {
-		return fmt.Errorf("audit anchor: mutation gate persisted checkpoints: %w", err)
-	}
 	manager.mu.RLock()
 	cachedAnchor := manager.anchor
 	manager.mu.RUnlock()
-	if !sameAuditAnchor(persisted, cachedAnchor) {
-		return errors.New("audit anchor: mutation gate persisted checkpoint tip differs from the verified in-process tip")
+	sinceID, sinceDigest := manager.getVerifiedHead()
+	_, _, err := manager.store.VerifyLocalAuditMutationState(ctx, model.AuditHead{ID: sinceID, SHA256: sinceDigest}, func(_ model.AuditHead, persisted model.AuditAnchor) error {
+		if manager.authority == nil {
+			return nil
+		}
+		if persisted.ID == 0 {
+			return fmt.Errorf("audit anchor: mutation gate persisted checkpoints: %w", store.ErrNotFound)
+		}
+		if err := manager.authority.Verify(persisted); err != nil {
+			return fmt.Errorf("audit anchor: mutation gate persisted checkpoints: %w", err)
+		}
+		if !sameAuditAnchor(persisted, cachedAnchor) {
+			return errors.New("audit anchor: mutation gate persisted checkpoint tip differs from the verified in-process tip")
+		}
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("audit anchor: mutation gate verify local protected state: %w", err)
 	}
 	return nil
 }

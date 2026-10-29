@@ -160,6 +160,16 @@ appending, preventing concurrently opened writers from mixing domains. A
 mismatched witness domain derives another identity and fails existing external
 continuity checks; it must never be used to reset or bypass those checks.
 
+Audit mutation gates verify protected state on a separate read-only WAL
+connection, end that snapshot, and perform timestamp/continuity verification
+without holding the primary writer connection. A final short BEGIN IMMEDIATE
+transaction compares the verified head ID/digest and the same reader's
+data_version before committing the gate. Head equality alone is insufficient:
+same-head changes to the prefix, pending rows and receipts must also refuse.
+Any committed database change causes a retryable refusal with one attempt per
+call; a fresh call repeats verification. All modes recheck the complete chain;
+no cached permission or prefix bypass is used by mutation gates.
+
 ### Kubernetes Secrets
 
 - Optional release federation is disabled unless an administrator supplies
