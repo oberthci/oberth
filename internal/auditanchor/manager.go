@@ -59,9 +59,10 @@ var ErrWitnessUnavailable = errors.New("audit anchor: external witness unavailab
 // ManagerConfig configures the audit integrity manager. Store is always
 // required: the local gap-free SHA-256 hash chain is not optional. Authority
 // (RFC 3161 timestamps) and Witness (Rekor transparency log) are each
-// optional; leaving both nil selects local-only mode, where every cycle and
-// every mutation gate still verify the complete local chain but no external
-// service is ever contacted. A Witness requires rollback-external Continuity.
+// optional; leaving both nil selects local-only mode, where every cycle
+// verifies the complete local chain and mutation gates incrementally verify
+// trusted local appends. No external service is contacted in local-only mode.
+// A Witness requires rollback-external Continuity.
 type ManagerConfig struct {
 	// GateTimeout bounds a mutation gate including its wait for refresh. Zero selects 30 seconds.
 	GateTimeout time.Duration
@@ -267,8 +268,8 @@ func (manager *Manager) Ready(ctx context.Context) error {
 // alone is intentionally insufficient: it is a cached liveness signal and
 // would leave a window between periodic anchor cycles. Without an external
 // witness there is no rollback-external history to refresh; the gate then
-// re-verifies the complete local hash chain (and, when a timestamp authority
-// is configured, the persisted signed checkpoint tip) before every mutation.
+// verifies the local chain through the Store's process-local incremental cache
+// (and, when configured, the persisted signed checkpoint tip) on every mutation.
 func (manager *Manager) AllowMutation(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, manager.gateTimeout)
 	defer cancel()
@@ -341,7 +342,7 @@ func (manager *Manager) allowMutationWithoutWitness(ctx context.Context) error {
 	cachedAnchor := manager.anchor
 	manager.mu.RUnlock()
 	sinceID, sinceDigest := manager.getVerifiedHead()
-	_, _, err := manager.store.VerifyLocalAuditMutationState(ctx, model.AuditHead{ID: sinceID, SHA256: sinceDigest}, func(_ model.AuditHead, persisted model.AuditAnchor) error {
+	head, _, err := manager.store.VerifyLocalAuditMutationState(ctx, model.AuditHead{ID: sinceID, SHA256: sinceDigest}, func(_ model.AuditHead, persisted model.AuditAnchor) error {
 		if manager.authority == nil {
 			return nil
 		}
@@ -359,6 +360,7 @@ func (manager *Manager) allowMutationWithoutWitness(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("audit anchor: mutation gate verify local protected state: %w", err)
 	}
+	manager.setVerifiedHead(head)
 	return nil
 }
 
@@ -376,6 +378,17 @@ func (manager *Manager) cycle(ctx context.Context) {
 	if err != nil {
 		manager.setResult(model.AuditAnchor{}, fmt.Errorf("audit anchor: verify local protected state: %w", err))
 		return
+	}
+	if manager.witness == nil {
+		// A self-consistent shortened/rebuilt chain cannot reset the local
+		// process pin at the next cycle. Check it before advancing the pin.
+		sinceID, sinceDigest := manager.getVerifiedHead()
+		if sinceID > 0 {
+			if _, err := manager.store.VerifyAuditStateSince(ctx, sinceID, sinceDigest); err != nil {
+				manager.setResult(model.AuditAnchor{}, fmt.Errorf("audit anchor: verify prior local prefix: %w", err))
+				return
+			}
+		}
 	}
 	manager.setVerifiedHead(head)
 	var existing model.AuditAnchor

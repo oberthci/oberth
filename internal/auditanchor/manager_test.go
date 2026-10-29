@@ -1202,8 +1202,8 @@ func TestManagerDegradedStartupBlocksMutationsUntilRecovery(t *testing.T) {
 
 // TestManagerLocalModeVerifiesChainWithoutExternalServices covers the default
 // configuration: no Rekor witness, no timestamp authority. The local SHA-256
-// hash chain is still verified at startup, on every cycle, and before every
-// mutation; readiness never goes stale because there is no checkpoint to age.
+// hash chain is still verified at startup, on every cycle, and incrementally
+// before mutations; readiness never goes stale because no checkpoint ages.
 func TestManagerLocalModeVerifiesChainWithoutExternalServices(t *testing.T) {
 	ctx := context.Background()
 	now := time.Date(2026, 8, 8, 9, 0, 0, 0, time.UTC)
@@ -1246,8 +1246,8 @@ func TestManagerLocalModeVerifiesChainWithoutExternalServices(t *testing.T) {
 		t.Fatalf("local mode recorded a signed checkpoint: %+v", anchor)
 	}
 
-	// Local mode re-verifies the full chain on each gate. An unchanged cached
-	// head must not hide tampering of a previously verified row.
+	// Outside edits invalidate the prefix cache. An unchanged cached head
+	// must not hide tampering of a previously verified row.
 	raw, err := sql.Open("sqlite", path)
 	if err != nil {
 		t.Fatal(err)

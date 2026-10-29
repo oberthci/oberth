@@ -755,7 +755,7 @@ func TestImmediateTransactionDSNConfiguresInitialBusyTimeout(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "file.sqlite?_pragma=foreign_keys%281%29&_pragma=busy_timeout%281500%29&_txlock=immediate&mode=rwc"
+	want := "file.sqlite?_pragma=foreign_keys%281%29&_pragma=busy_timeout%281500%29&_pragma=recursive_triggers%281%29&_txlock=immediate&mode=rwc"
 	if got != want {
 		t.Fatalf("DSN = %q, want %q", got, want)
 	}

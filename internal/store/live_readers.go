@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"net/url"
+	"os"
 	"time"
 )
 
@@ -31,6 +32,11 @@ func (s *Store) configureLiveReaders(ctx context.Context, busyTimeout time.Durat
 	query.Add("_pragma", fmt.Sprintf("busy_timeout(%d)", busyTimeout.Milliseconds()))
 	location.RawQuery = query.Encode()
 	s.liveReaderDSN = location.String()
+	s.livePath = path
+	s.liveFile, err = os.Stat(path)
+	if err != nil {
+		return fmt.Errorf("stat live reader database: %w", err)
+	}
 	return nil
 }
 

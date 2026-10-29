@@ -71,7 +71,13 @@ type Store struct {
 	readOnly bool
 	cleanup  func() error
 
-	liveReaderDSN string // immutable after startup; shared live WAL reader settings
+	liveReaderDSN  string // immutable after startup; shared live WAL reader settings
+	livePath       string
+	liveFile       os.FileInfo
+	auditGate      chan struct{}
+	auditSchema    [sha256.Size]byte
+	auditCacheSafe bool
+	localAudit     localAuditCache // protected by auditGate
 
 	// reruns caches run_rerun lineage (#1098); see RunRerunOf.
 	reruns rerunLineage
@@ -269,6 +275,10 @@ func open(
 		_ = db.Close()
 		return nil, err
 	}
+	if err := s.configureAuditCache(ctx); err != nil {
+		_ = s.Close()
+		return nil, err
+	}
 	return s, nil
 }
 
@@ -294,6 +304,10 @@ func openCurrent(ctx context.Context, path string, opts Options, readOnly bool) 
 	if !readOnly {
 		if err := s.openAuthReaders(ctx, opts.BusyTimeout); err != nil {
 			_ = s.db.Close()
+			return nil, err
+		}
+		if err := s.configureAuditCache(ctx); err != nil {
+			_ = s.Close()
 			return nil, err
 		}
 	}
@@ -374,6 +388,7 @@ func immediateTransactionDSN(path string, busyTimeout time.Duration) (string, er
 		}
 	}
 	query.Add("_pragma", fmt.Sprintf("busy_timeout(%d)", busyTimeout.Milliseconds()))
+	query.Add("_pragma", "recursive_triggers(1)")
 	query.Set("_txlock", "immediate")
 	return base + "?" + query.Encode(), nil
 }
@@ -395,6 +410,7 @@ func currentDatabaseDSN(path, mode string, immutable bool) string {
 	}
 	if mode == "rw" {
 		query.Set("_txlock", "immediate")
+		query.Add("_pragma", "recursive_triggers(1)")
 	}
 	location.RawQuery = query.Encode()
 	return location.String()
