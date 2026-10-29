@@ -161,3 +161,31 @@ func TestWaitIdleCancellationInterruptsBackoff(t *testing.T) {
 		}
 	})
 }
+
+type idleDrainBody struct {
+	data   *strings.Reader
+	read   int
+	closed bool
+}
+
+func (b *idleDrainBody) Read(p []byte) (int, error) {
+	n, err := b.data.Read(p)
+	b.read += n
+	return n, err
+}
+func (b *idleDrainBody) Close() error { b.closed = true; return nil }
+
+func TestIdleProbeDrainsServerErrorBodyBeforeClose(t *testing.T) {
+	for _, size := range []int{64, 8192} {
+		body := &idleDrainBody{data: strings.NewReader(strings.Repeat("x", size))}
+		client := &http.Client{Transport: idleRoundTrip(func(*http.Request) (*http.Response, error) {
+			response := idleResponse(503, "")
+			response.Body = body
+			return response, nil
+		})}
+		_, _, _, transient, err := probeIdle(t.Context(), client, "http://fixture", "critical")
+		if err == nil || !transient || !body.closed || body.read != min(size, 4097) {
+			t.Fatalf("size=%d read=%d closed=%t transient=%t err=%v", size, body.read, body.closed, transient, err)
+		}
+	}
+}

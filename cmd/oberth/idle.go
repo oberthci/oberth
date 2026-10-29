@@ -141,7 +141,13 @@ func probeIdle(ctx context.Context, client *http.Client, target, mode string) (s
 			return state, false, false, false, nil
 		}
 	default:
-		return state, false, false, response.StatusCode >= 500 && response.StatusCode <= 599, fmt.Errorf("live daemon queue unavailable (HTTP %d)", response.StatusCode)
+		retry := response.StatusCode >= 500 && response.StatusCode <= 599
+		if retry {
+			// Small daemon error bodies can be drained so the Unix-socket
+			// connection is reused; oversized/stalled bodies stay bounded.
+			_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 4097))
+		}
+		return state, false, false, retry, fmt.Errorf("live daemon queue unavailable (HTTP %d)", response.StatusCode)
 	}
 	body, readErr := io.ReadAll(io.LimitReader(response.Body, 4097))
 	if readErr != nil {

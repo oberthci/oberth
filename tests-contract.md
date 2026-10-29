@@ -339,3 +339,13 @@ failure invalidation. Missing/invalid/late samples cannot establish idle.
 `TestUpgradeWaitDeadlineRetainsChildProbeDiagnostic` splits child output at every
 byte and proves the local deadline retains its last reported probe cause even
 when kubectl is killed; a subsequent busy snapshot clears that stale cause.
+
+
+Idle sampler freshness follow-up: `TestIdleSnapshotSlowReadsRemainAvailableToWaiter`
+uses 4.5-second reads at six waiter start phases; the waiter gets idle within
+seven seconds, including initial retry backoff. `TestIdleSnapshotExpiresDuringStuckRead`
+keeps the ten-second freshness bound even if a reader ignores its five-second
+deadline. Store queue-reader tests hold the primary transaction, observe only
+committed queue state, see the next commit immediately, and verify read-only,
+bounded reader lifetime. Error-body tests cover bounded draining of HTTP 5xx;
+the local deadline test also rejects the retry-progress suffix in its final cause.

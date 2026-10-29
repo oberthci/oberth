@@ -3060,9 +3060,10 @@ selected server's private admin socket; `--wait-for=critical` excludes ordinary
 branch/schedule CI and retains tag/release, promotion, plan, apply and unknown
 triggers. Classification is server-owned and installation-wide, from one read
 snapshot. The admin endpoint reads only an in-memory sample, refreshed in the
-background about once per second from SQLite (no Argo scan). Missing, invalid,
-failed or five-second-old samples return unavailable, never idle; age is measured
-from the start of the read so a delayed result cannot look fresh.
+background on a dedicated read-only WAL pool, with a five-second read budget
+and a one-second interval (no Argo scan or wait for the primary writer connection).
+Missing, invalid, failed or ten-second-old samples return unavailable, never
+idle; age is measured from read start so a delayed result cannot look fresh.
 The versioned private response preserves old all-run status codes;
 critical selection refuses unsupported observation. No schema, grants or RBAC
 changes are required. This is advisory, never an admission freeze or proof that

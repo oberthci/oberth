@@ -91,7 +91,9 @@ backoff from one second up to thirty seconds, within the original wait deadline.
 Transient failures print at most once per minute; a failed wait reports the last
 probe cause. Authentication, other client errors and malformed snapshots stop
 immediately. The server answers from a background queue sample in memory; missing,
-failed or five-second-old samples return unavailable and are retried.
+failed or ten-second-old samples return unavailable and are retried. A dedicated
+read-only WAL pool keeps the sampler off the primary writer connection; its
+five-second read budget and one-second interval fit within the cache lifetime.
 This retry behavior requires an in-pod `wait-idle` binary containing the fix.
 
 `--wait-idle` waits for all queued and running runs. `--wait-for=all` is equivalent;

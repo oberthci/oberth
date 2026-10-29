@@ -943,6 +943,7 @@ func (w *upgradeWaitWriter) Write(p []byte) (int, error) {
 		if strings.HasSuffix(w.probeLine, "\n") {
 			if strings.HasPrefix(w.probeLine, "Waiting for ") {
 				if _, reason, ok := strings.Cut(w.probeLine, " queue: transient idle probe failure: "); ok {
+					reason, _, _ = strings.Cut(reason, "; retrying (elapsed=")
 					w.lastProbeFailure = strings.TrimSpace(reason)
 				} else if strings.Contains(w.probeLine, " queue: queued=") || strings.Contains(w.probeLine, " queue: busy ") {
 					w.lastProbeFailure = ""

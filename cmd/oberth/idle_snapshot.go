@@ -9,10 +9,15 @@ import (
 	"github.com/oberthci/oberth/internal/model"
 )
 
-const idleSnapshotMaxAge = 5 * time.Second
+const (
+	idleSnapshotReadBudget = 5 * time.Second
+	idleSnapshotInterval   = time.Second
+	// Cover a full read plus interval and leave margin for slow I/O.
+	idleSnapshotMaxAge = 10 * time.Second
+)
 
 // idleQueueSnapshot keeps admin probes off the database's single connection.
-// Samples remain advisory; failed, slow or stale reads can never report idle.
+// Samples remain advisory; failed, timed-out or stale reads cannot report idle.
 // Like the readiness sampler, only the background observer does storage I/O.
 type idleQueueSnapshot struct {
 	mu       sync.Mutex
@@ -41,14 +46,14 @@ func (s *idleQueueSnapshot) watch(ctx context.Context, read func(context.Context
 		// Timestamp the start, so a slow read cannot publish old idle state as
 		// fresh. Expiry also applies while a replacement sample is blocked.
 		observed := time.Now()
-		probeCtx, cancel := context.WithTimeout(ctx, idleSnapshotMaxAge)
+		probeCtx, cancel := context.WithTimeout(ctx, idleSnapshotReadBudget)
 		state, err := read(probeCtx)
 		valid := err == nil && probeCtx.Err() == nil && state.Valid()
 		cancel()
 		s.mu.Lock()
 		s.state, s.observed, s.valid = state, observed, valid
 		s.mu.Unlock()
-		timer := time.NewTimer(time.Second)
+		timer := time.NewTimer(idleSnapshotInterval)
 		select {
 		case <-ctx.Done():
 			timer.Stop()

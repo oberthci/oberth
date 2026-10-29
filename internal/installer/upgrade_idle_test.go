@@ -138,6 +138,9 @@ func TestUpgradeWaitDeadlineRetainsChildProbeDiagnostic(t *testing.T) {
 				if !errors.Is(err, context.DeadlineExceeded) || !strings.Contains(err.Error(), "upgrade not attempted") {
 					t.Fatal(err)
 				}
+				if strings.Contains(err.Error(), "; retrying (elapsed=") {
+					t.Fatalf("retry progress suffix leaked into final error: %v", err)
+				}
 				if strings.Contains(err.Error(), "last reported idle probe failure: fixture socket timeout") == recovered {
 					t.Fatalf("recovered=%t err=%v", recovered, err)
 				}

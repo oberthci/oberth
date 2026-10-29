@@ -659,6 +659,9 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 	if err := database.OpenSSHAuthReaders(ctx); err != nil {
 		return err
 	}
+	if err := database.OpenIdleQueueReaders(ctx); err != nil {
+		return fmt.Errorf("open upgrade queue readers: %w", err)
+	}
 	anchors, err := auditanchor.NewManager(newAuditManagerConfig(database))
 	if err != nil {
 		return err
