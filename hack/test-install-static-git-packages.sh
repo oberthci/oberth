@@ -7,7 +7,7 @@ script=${1:-$source_root/hack/install-static-git-packages.sh}
 scratch=$(mktemp -d)
 trap 'rm -rf "$scratch"' EXIT HUP INT TERM
 apk_fixture=$scratch/apk
-export apk_test_log=$scratch/args
+export apk_test_log="$scratch/args"
 server_path=/tmp/oberth-tools/bin:/usr/local/bin:/usr/bin:/bin
 cat > "$scratch/pins" <<'PINS'
 APK_PACKAGES='apk-tools=3.0.8-r0 musl=1.2.5-r24 zlib=1.3.2-r1'
