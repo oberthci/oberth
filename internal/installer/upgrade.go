@@ -48,6 +48,7 @@ type UpgradeConfig struct {
 	UserSet               []string // --set: repeatable key=value pairs
 	ArgoControllerProfile string   // explicit supported controller transition; empty preserves existing profile
 	BinarySchemaVersion   int      // set by the caller to store.LatestMigrationVersion()
+	storedValues          string   // internal schema-validated legacy migration snapshot
 }
 
 // ErrPinnedKeyOverride is returned when a user --set or --values file
@@ -99,6 +100,7 @@ type UpgradeResult struct {
 	TargetVersion   string
 	AlreadyUpToDate bool
 	Upgraded        bool
+	Migrated        string // legacy key/value stripped from stored configuration
 }
 
 // ValidateUpgrade checks UpgradeConfig for invalid flag combinations and
@@ -380,6 +382,22 @@ func RunUpgrade(ctx context.Context, cfg UpgradeConfig, deps Deps) (UpgradeResul
 	}
 
 	if cfg.DryRun {
+		revision, err := deployedUpgradeRevision(ctx, cfg.Namespace, deps)
+		if err != nil {
+			return result, err
+		}
+		values, err := readUpgradeStoredValues(ctx, cfg.Namespace, revision, deps)
+		if err != nil {
+			return result, err
+		}
+		result.Migrated, err = migrateUpgradeShadow(values)
+		if err != nil {
+			return result, err
+		}
+		if result.Migrated != "" {
+			cfg.storedValues = "<cleaned-deployed-values.json>"
+			_, _ = fmt.Fprintf(w, "Would strip stored legacy %s from deployed revision %s before applying the cleaned snapshot.\n", result.Migrated, revision)
+		}
 		if profile != nil {
 			profile.describe(w, cfg.Timeout)
 		}
@@ -410,10 +428,15 @@ func RunUpgrade(ctx context.Context, cfg UpgradeConfig, deps Deps) (UpgradeResul
 		return result, err
 	}
 
-	compatibility, err := prepareUpgradeValues(ctx, cfg, deps, chart, imageRef)
+	prepared, err := prepareUpgradeValues(ctx, cfg, deps, chart, imageRef)
 	if err != nil {
 		return result, err
 	}
+
+	defer prepared.cleanup()
+	cfg.storedValues = prepared.storedValues
+	result.Migrated = prepared.migrated
+	compatibility := prepared.compatibility
 
 	if cfg.WaitIdle {
 		if err := waitForUpgradeIdle(ctx, cfg, deps); err != nil {
@@ -459,9 +482,11 @@ func RunUpgrade(ctx context.Context, cfg UpgradeConfig, deps Deps) (UpgradeResul
 	}
 	result.Upgraded = true
 	deps.Output = w
-	recordServerAudit(ctx, deps, cfg.Namespace, "deploy/oberth", "upgrade.completed", map[string]any{
-		"from": currentVersion, "to": targetVersion,
-	})
+	details := map[string]any{"from": currentVersion, "to": targetVersion}
+	if result.Migrated != "" {
+		details["migrated"] = result.Migrated
+	}
+	recordServerAudit(ctx, deps, cfg.Namespace, "deploy/oberth", "upgrade.completed", details)
 	_, _ = fmt.Fprintf(w, "\nReady — %s\n", oberthWebUIURL)
 	return result, nil
 }
@@ -540,14 +565,17 @@ func resolveChartImageRef(ctx context.Context, deps Deps, chart, targetVersion s
 // operator must fix forward with a new 'oberth upgrade'.
 func upgradeHelmArgs(cfg UpgradeConfig, chart, imageRef string, compatibility backupCompatibility) (prefix, flags []string) {
 	prefix = []string{"upgrade", "oberth", chart, "-n", cfg.Namespace}
-	args := []string{
-		// Merge new defaults below stored configuration and user overrides.
-		// --reuse-values replaces the new chart's defaults with the old ones.
-		"--reset-then-reuse-values",
-		"--set-string", "image.ref=" + imageRef,
-		"--set-string", "compatibility.schemaIdentity=" + compatibility.SchemaIdentity,
-		"--set-string", "compatibility.auditDomain=" + compatibility.AuditDomain,
-		"--set-string", "compatibility.witnessKeyInfo=" + compatibility.WitnessKeyInfo,
+	// Merge new defaults below stored configuration and user overrides. When
+	// migrating shadow, reuse the validated snapshot so Helm cannot resurrect it.
+	args := []string{"--reset-then-reuse-values"}
+	if cfg.storedValues != "" {
+		args = []string{"--reset-values", "--values", cfg.storedValues}
+	}
+	args = append(args,
+		"--set-string", "image.ref="+imageRef,
+		"--set-string", "compatibility.schemaIdentity="+compatibility.SchemaIdentity,
+		"--set-string", "compatibility.auditDomain="+compatibility.AuditDomain,
+		"--set-string", "compatibility.witnessKeyInfo="+compatibility.WitnessKeyInfo,
 		// Keep the existing proxy enablement and mapping from reused values.
 		"--set", "argo.goProxy.port=8444",
 		// Retain the explicit promotion grant lifetime safety pin (#826).
@@ -556,9 +584,9 @@ func upgradeHelmArgs(cfg UpgradeConfig, chart, imageRef string, compatibility ba
 		// An absent enabled key renders false; a present value remains subject
 		// to the chart's boolean schema. Only the reviewed image pins override
 		// stored connector configuration (#671).
-		"--set-string", "watchTunnel.image=" + watchTunnelImageDefault,
-		"--set-string", "watchTunnel.openbaoImage=" + watchTunnelOpenbaoImageDefault,
-	}
+		"--set-string", "watchTunnel.image="+watchTunnelImageDefault,
+		"--set-string", "watchTunnel.openbaoImage="+watchTunnelOpenbaoImageDefault,
+	)
 	if cfg.ArgoControllerProfile != "" {
 		args = append(args, "--set-string", "argo.controllerProfile="+cfg.ArgoControllerProfile)
 	}

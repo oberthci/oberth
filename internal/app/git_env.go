@@ -200,15 +200,6 @@ func BuildSSHConfig(entries []SSHConfigEntry, defaultKeyPath, knownHostsPath str
 	return builder.String(), nil
 }
 
-// GitSSHCommandFromConfig returns the GIT_SSH_COMMAND value that uses a
-// generated SSH config file instead of inline arguments.
-func GitSSHCommandFromConfig(configPath string) (string, error) {
-	if err := validateOperatorPath(configPath); err != nil {
-		return "", fmt.Errorf("app: SSH config path: %w", err)
-	}
-	return shellQuote("ssh") + " " + shellQuote("-F") + " " + shellQuote(configPath), nil
-}
-
 // UpstreamSSHHost extracts the SSH hostname and port from an upstream base URL.
 // Returns empty strings for non-SSH upstreams instead of an error so callers
 // can skip local upstreams without branching.

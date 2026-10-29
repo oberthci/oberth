@@ -21,7 +21,8 @@ else
   wget -q -T 120 -O "$archive" "$url"
 fi
 printf '%s  %s\n' "$scanner_sha" "$archive" | sha256sum -c -
-tar -xzf "$archive" -C "$scratch" grype
+# Root CI containers lack CAP_CHOWN; do not restore archive ownership.
+tar --no-same-owner -xzf "$archive" -C "$scratch" grype
 go build -trimpath -buildvcs=false -o "$scratch/scanner-driver" "$source_root/hack/static-git-scanner"
 if "$scratch/scanner-driver" "$scratch/grype" "$source_root/hack/static-git-grype.yaml" \
   "$scratch/db" "$input_dir/static-git-control.cdx.json" "alpine:$ALPINE_VERSION" \

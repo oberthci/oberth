@@ -11,7 +11,8 @@ test -z "$(ls -A "$build_dir")"
 wget -qO /tmp/oberth-git-source.tar.xz "https://www.kernel.org/pub/software/scm/git/git-$GIT_VERSION.tar.xz"
 printf '%s  %s\n' "$GIT_SOURCE_SHA256" /tmp/oberth-git-source.tar.xz | sha256sum -c -
 printf '%s  %s\n' "$GIT_PATCH_SHA256" "$patch_file" | sha256sum -c -
-tar -xJf /tmp/oberth-git-source.tar.xz -C "$build_dir" --strip-components=1
+# Root CI containers lack CAP_CHOWN; do not restore archive ownership.
+tar --no-same-owner -xJf /tmp/oberth-git-source.tar.xz -C "$build_dir" --strip-components=1
 rm /tmp/oberth-git-source.tar.xz
 cd "$build_dir"
 patch -p1 --fuzz=0 < "$patch_file"

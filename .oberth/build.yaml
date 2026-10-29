@@ -1812,7 +1812,8 @@ spec:
           curl --connect-timeout 10 --max-time 40 -fsSL -o "$BAO_DIR/$BAO_ARCHIVE" "$BAO_URL"
           cd "$BAO_DIR"
           sha256sum -c /work/src/.oberth/pins/openbao.sha256
-          tar xzf "$BAO_ARCHIVE" bao
+          # Root CI containers lack CAP_CHOWN; do not restore archive ownership.
+          tar --no-same-owner -xzf "$BAO_ARCHIVE" bao
           chmod +x bao
         '
         cd /work/src
