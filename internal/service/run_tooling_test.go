@@ -17,7 +17,7 @@ import (
 	"github.com/oberthci/oberth/internal/store"
 )
 
-// #553: the 12-character ID printed by push feedback must be directly usable.
+// #1213: the 8-character ID printed by push feedback must be directly usable.
 func TestRunGetAcceptsPushFeedbackID(t *testing.T) {
 	fixture := newControlFixture(t)
 	ctx := context.Background()
@@ -28,7 +28,7 @@ func TestRunGetAcceptsPushFeedbackID(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, id := range []string{run.ID, run.ID[:12]} {
+	for _, id := range []string{run.ID, run.ID[:8], run.ID[:12]} {
 		value, err := fixture.api(t).CallTool(ctx, api.Actor{Identity: "agent@host"}, "run_get",
 			json.RawMessage(fmt.Sprintf(`{"id":%q}`, id)))
 		if err != nil {
@@ -78,7 +78,7 @@ func TestActiveRunLogsWithoutRetainedOutputArePending(t *testing.T) {
 				}
 			}
 			control := fixture.api(t)
-			arguments := json.RawMessage(fmt.Sprintf(`{"id":%q,"burn":"release-build-variants","step":"release-build-variants","pattern":"Building variant|vmlinuz size|FATAL|error:|built in","limit":20}`, run.ID[:12]))
+			arguments := json.RawMessage(fmt.Sprintf(`{"id":%q,"burn":"release-build-variants","step":"release-build-variants","pattern":"Building variant|vmlinuz size|FATAL|error:|built in","limit":20}`, run.ID[:8]))
 			_, err = control.CallTool(ctx, api.Actor{Identity: "agent@host"}, "run_logs", arguments)
 			if !errors.Is(err, ErrStepLogPending) {
 				t.Fatalf("active run_logs returned %v, want an actionable pending error", err)
@@ -118,7 +118,7 @@ func TestActiveRunLogsWithoutRetainedOutputArePending(t *testing.T) {
 
 func TestRunToolsRejectInvalidIDPrefixesAsInputErrors(t *testing.T) {
 	fixture := newControlFixture(t)
-	for _, id := range []string{"abc123", "abc12345678", "abc12345678%", "abc12345678_", "../../etc/passwd", strings.Repeat("a", 33)} {
+	for _, id := range []string{"abc123", "abc1234", "abc12345678%", "abc12345678_", "../../etc/passwd", strings.Repeat("a", 33)} {
 		for _, tool := range []string{"run_get", "run_logs"} {
 			args := map[string]string{"id": id}
 			if tool == "run_logs" {

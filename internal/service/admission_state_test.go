@@ -94,7 +94,8 @@ func TestRetainedReservationIsListedAndReleasable(t *testing.T) {
 		t.Fatal("a refused release was audited as done")
 	}
 	scheduler.jobs = fixture.jobs
-	released, err := scheduler.ReleaseAdmission(ctx, stale.ID, "admin@host", false)
+	control := &API{history: fixture.store, admission: scheduler}
+	released, err := control.releaseAdmission(ctx, api.Actor{Identity: "admin@host", Admin: true}, stale.ID[:8], false)
 	if err != nil || !released.Verified || released.State != "retained" || released.Weight != 2 {
 		t.Fatalf("release = %#v, %v", released, err)
 	}

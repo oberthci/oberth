@@ -497,7 +497,7 @@ func TestRunDetailAndLogViewsRequireAuthAndForwardSelectors(t *testing.T) {
 		t.Fatalf("run log = %d, forwarded %q/%q", logResponse.Code, backend.logBurn, backend.logStep)
 	}
 	backend.logCalls = 0
-	for _, query := range []string{"", "burn=test", "step=unit", "burn=%20&step=unit"} {
+	for _, query := range []string{"burn=%20&step=unit", "burn=test&step=%20"} {
 		malformed := httptest.NewRequest(http.MethodGet, "/api/runs/run-1/logs?"+query, nil)
 		malformed.Header.Set("Authorization", "Bearer valid-token")
 		rejected := httptest.NewRecorder()
@@ -508,6 +508,19 @@ func TestRunDetailAndLogViewsRequireAuthAndForwardSelectors(t *testing.T) {
 	}
 	if backend.logCalls != 0 {
 		t.Fatalf("malformed log selectors reached the backend %d times", backend.logCalls)
+	}
+}
+
+func TestLogFilterValidationNamesFieldAndType(t *testing.T) {
+	for _, test := range []struct{ field, value, expected string }{
+		{"tail", "10", "boolean"}, {"tail", "", "boolean"},
+		{"limit", "true", "line count"}, {"limit", "-1", "line count"},
+		{"offset", "abc", "line count"}, {"context", "1.5", "line count"},
+	} {
+		_, err := logFilterFrom(map[string][]string{test.field: {test.value}})
+		if err == nil || !strings.Contains(err.Error(), test.field) || !strings.Contains(err.Error(), test.expected) {
+			t.Errorf("%s=%s: %v, want %s", test.field, test.value, err, test.expected)
+		}
 	}
 }
 
@@ -670,7 +683,7 @@ func TestMCPToolInputsMatchContract(t *testing.T) {
 		"run_purge":          {"id", "reason", "what"},
 		"run_kvm_preflight":  {"id"},
 		"run_logs":           {"burn", "context", "id", "limit", "offset", "pattern", "step", "tail"},
-		"wait":               {"repo", "sha", "timeout", "trigger"},
+		"wait":               {"id", "repo", "sha", "timeout", "trigger"},
 		"sync":               {"branch", "repo", "sha"},
 		"promote":            {"branch", "repo", "sha"},
 		"issue_list":         {"before", "kind", "limit", "query", "repo", "state"},

@@ -87,7 +87,7 @@ func TestRunCancelQueuedRunIsNeverClaimed(t *testing.T) {
 	fixture := newGroupFixture(t, 3)
 	queued := fixture.branch(t, fixture.beacon, "feature-q", "a")
 
-	response := mustRunCancel(t, fixture.control, cancelAgent, map[string]any{"id": queued.ID[:12], "reason": "pushed by mistake"})
+	response := mustRunCancel(t, fixture.control, cancelAgent, map[string]any{"id": queued.ID[:8], "reason": "pushed by mistake"})
 	if response.RunID != queued.ID || response.PreviousState != "queued" || response.Workflow != "none" ||
 		response.Status != "interrupted" || response.Phase != "cancelled" || response.CancelledBy != cancelAgent.Identity ||
 		response.Reason != "cancelled by agent@host: pushed by mistake" || response.Warning != "" {

@@ -4018,7 +4018,7 @@ func TestPublishRetrySucceedsAfterSimulatedForge500(t *testing.T) {
 	// Clear the forge error and retry.
 	fixture.git.remoteRefErr = nil
 	svc := fixture.api(t)
-	result, err := svc.publishRetry(context.Background(), api.Actor{Identity: "retry@host", Admin: true}, run.ID)
+	result, err := svc.publishRetry(context.Background(), api.Actor{Identity: "retry@host", Admin: true}, run.ID[:8])
 	if err != nil {
 		t.Fatalf("publish_retry error = %v", err)
 	}

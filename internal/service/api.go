@@ -11,6 +11,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strconv"
 	"strings"
@@ -450,8 +451,8 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 		if err := decodeTool(raw, &arguments); err != nil {
 			return nil, err
 		}
-		if strings.TrimSpace(arguments.ID) == "" || strings.TrimSpace(arguments.Burn) == "" || strings.TrimSpace(arguments.Step) == "" {
-			return nil, fmt.Errorf("%w: run ID, burn, and step are required", ErrInvalidInput)
+		if strings.TrimSpace(arguments.ID) == "" {
+			return nil, fmt.Errorf("%w: run ID is required", ErrInvalidInput)
 		}
 		filter, err := toolLogFilter(arguments.Pattern, arguments.Context, arguments.Offset, arguments.Limit, arguments.Tail)
 		if err != nil {
@@ -960,11 +961,11 @@ func (service *API) Grants(ctx context.Context, actor api.Actor, filter api.Gran
 }
 
 // resolveReadRunID accepts the unique ID prefix emitted by push feedback.
-// Mutation paths continue using exact durable IDs through Store.Run.
+// Writers receive the resolved full ID and keep their exact identity lookups.
 func (service *API) resolveReadRunID(ctx context.Context, id string) (model.Run, error) {
 	run, err := service.history.ResolveRunID(ctx, id)
 	if errors.Is(err, store.ErrInvalid) {
-		return model.Run{}, fmt.Errorf("%w: run ID must be 12 to 32 hexadecimal characters", ErrInvalidInput)
+		return model.Run{}, fmt.Errorf("%w: run ID must be 8 to 32 hexadecimal characters", ErrInvalidInput)
 	}
 	return run, err
 }
@@ -1038,8 +1039,8 @@ func (service *API) RunLogFiltered(ctx context.Context, actor api.Actor, id, bur
 	if service.logs == nil || service.history == nil {
 		return nil, fmt.Errorf("%w: logs", ErrUnavailable)
 	}
-	if strings.TrimSpace(id) == "" || strings.TrimSpace(burn) == "" || strings.TrimSpace(step) == "" {
-		return nil, fmt.Errorf("%w: run ID, burn, and step are required", ErrInvalidInput)
+	if strings.TrimSpace(id) == "" {
+		return nil, fmt.Errorf("%w: run ID is required", ErrInvalidInput)
 	}
 	run, err := service.resolveReadRunID(ctx, id)
 	if err != nil {
@@ -1048,6 +1049,27 @@ func (service *API) RunLogFiltered(ctx context.Context, actor api.Actor, id, bur
 	steps, err := service.stepsForRun(ctx, run)
 	if err != nil {
 		return nil, fmt.Errorf("load run steps: %w", err)
+	}
+	if strings.TrimSpace(burn) == "" {
+		burn = run.FailedBurn
+		if strings.TrimSpace(step) == "" {
+			step = run.FailedStep
+		}
+	}
+	if strings.TrimSpace(burn) == "" {
+		return nil, fmt.Errorf("%w: burn is required when the run has no failed burn", ErrInvalidInput)
+	}
+	if strings.TrimSpace(step) == "" {
+		var count int
+		for _, result := range steps {
+			if result.Burn == burn {
+				step = result.Step
+				count++
+			}
+		}
+		if count != 1 {
+			return nil, fmt.Errorf("%w: step is required unless burn %q has exactly one step", ErrInvalidInput, burn)
+		}
 	}
 	recorded := false
 	for _, result := range steps {
@@ -1755,8 +1777,13 @@ func progressStepResult(runID string, event runprogress.Event) model.StepResult 
 }
 
 func toolLogFilter(pattern string, context, offset, limit int, tail bool) (runlog.Filter, error) {
-	if context < 0 || offset < 0 || limit < 0 {
-		return runlog.Filter{}, fmt.Errorf("%w: log context, offset, and limit must not be negative", ErrInvalidInput)
+	for _, field := range []struct {
+		name  string
+		value int
+	}{{"context", context}, {"offset", offset}, {"limit", limit}} {
+		if field.value < 0 {
+			return runlog.Filter{}, fmt.Errorf("%w: %s must be a non-negative line count", ErrInvalidInput, field.name)
+		}
 	}
 	return runlog.Filter{Pattern: pattern, Context: context, Offset: offset, Limit: limit, Tail: tail}, nil
 }
@@ -1842,13 +1869,42 @@ func (service *API) prepareWaitRun(ctx context.Context, repositoryName, selector
 		return nil, fmt.Errorf("%w: full or short SHA is required", ErrInvalidInput)
 	}
 	trigger = normalizeTrigger(strings.TrimSpace(trigger))
+	return service.prepareWaitStatus(ctx, trigger, requestedSeconds, func(ctx context.Context) (StatusResponse, error) {
+		return service.waitStatus(ctx, repositoryName, selector, trigger, actor)
+	})
+}
+
+// prepareWaitRunID pins the unique prefix once, so a later collision or rerun
+// cannot change which run this observer waits for.
+func (service *API) prepareWaitRunID(ctx context.Context, id string, requestedSeconds int) (func(context.Context) (WaitResponse, error), error) {
+	if service.history == nil || service.repositories == nil {
+		return nil, fmt.Errorf("%w: run history", ErrUnavailable)
+	}
+	run, err := service.resolveReadRunID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	return service.prepareWaitStatus(ctx, "", requestedSeconds, func(ctx context.Context) (StatusResponse, error) {
+		current, err := service.history.Run(ctx, run.ID)
+		if err != nil {
+			return StatusResponse{}, err
+		}
+		repository, err := service.repositories.Repository(ctx, current.RepoID)
+		if err != nil {
+			return StatusResponse{}, err
+		}
+		return service.statusForRun(ctx, repository, current)
+	})
+}
+
+func (service *API) prepareWaitStatus(ctx context.Context, trigger string, requestedSeconds int, observe func(context.Context) (StatusResponse, error)) (func(context.Context) (WaitResponse, error), error) {
 	duration, err := service.waitDuration(requestedSeconds)
 	if err != nil {
 		return nil, err
 	}
 	clock := service.schedulingClock()
 	deadline := clock.Now().Add(duration)
-	status, err := service.waitStatus(ctx, repositoryName, selector, trigger, actor)
+	status, err := observe(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -1865,7 +1921,7 @@ func (service *API) prepareWaitRun(ctx context.Context, repositoryName, selector
 			changed := service.signals.Run(status.Run.ID)
 			// Re-read after subscribing so a transition between the first read and
 			// channel lookup cannot be lost.
-			status, err = service.waitStatus(ctx, repositoryName, selector, trigger, actor)
+			status, err = observe(ctx)
 			if err != nil {
 				return WaitResponse{}, err
 			}
@@ -1890,7 +1946,7 @@ func (service *API) prepareWaitRun(ctx context.Context, repositoryName, selector
 				}
 				return WaitResponse{StatusResponse: status, StillRunning: stillRunning}, nil
 			case <-changed:
-				status, err = service.waitStatus(ctx, repositoryName, selector, trigger, actor)
+				status, err = observe(ctx)
 				if err != nil {
 					return WaitResponse{}, err
 				}
@@ -2934,7 +2990,10 @@ func (service *API) publishRetry(ctx context.Context, actor api.Actor, id string
 	var runID string
 
 	if service.history != nil {
-		run, runErr := service.history.Run(ctx, id)
+		run, runErr := service.resolveReadRunID(ctx, id)
+		if runErr != nil && !errors.Is(runErr, store.ErrNotFound) && !errors.Is(runErr, ErrInvalidInput) {
+			return api.PublishRetryResponse{}, runErr
+		}
 		if runErr == nil {
 			if run.Trigger == "promotion" {
 				if promotion, promErr := service.promotions.PromotionByRun(ctx, run.ID); promErr == nil {
@@ -3038,6 +3097,22 @@ func decodeTool(raw json.RawMessage, value any) error {
 	decoder := json.NewDecoder(io.LimitReader(bytes.NewReader(raw), maximumToolBytes+1))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(value); err != nil {
+		var typeErr *json.UnmarshalTypeError
+		if errors.As(err, &typeErr) && typeErr.Field != "" {
+			expected := typeErr.Type.String()
+			switch expected {
+			case "bool":
+				expected = "boolean"
+			case "int", "int64":
+				expected = "integer"
+				// Log arguments carry pattern; list limits are page sizes.
+				if _, ok := reflect.TypeOf(value).Elem().FieldByName("Pattern"); ok &&
+					(typeErr.Field == "limit" || typeErr.Field == "context" || typeErr.Field == "offset") {
+					expected = "non-negative integer line count"
+				}
+			}
+			return fmt.Errorf("%w: %s must be %s", ErrInvalidInput, typeErr.Field, expected)
+		}
 		return fmt.Errorf("%w: decode tool arguments: %w", ErrInvalidInput, err)
 	}
 	var trailing any

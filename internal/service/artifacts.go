@@ -176,7 +176,7 @@ func (service *API) artifactRun(ctx context.Context, id string) (string, error) 
 	if strings.TrimSpace(id) == "" {
 		return "", fmt.Errorf("%w: run ID is required", ErrInvalidInput)
 	}
-	run, err := service.history.Run(ctx, id)
+	run, err := service.resolveReadRunID(ctx, id)
 	if err != nil {
 		return "", err
 	}

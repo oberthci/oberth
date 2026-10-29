@@ -374,17 +374,13 @@ func (history scopedHistory) ResolveRunID(ctx context.Context, id string) (model
 	if resolver, ok := history.inner.(runIDResolver); ok {
 		return resolver.ResolveRunIDIn(ctx, id, history.scope.repoIDs)
 	}
-	run, err := history.inner.ResolveRunID(ctx, id)
-	if err != nil {
-		return model.Run{}, err
+	// A global prefix lookup could leak out-of-scope collisions in its error.
+	// Backends without scoped resolution must fail closed for prefixes.
+	id = strings.ToLower(strings.TrimSpace(id))
+	if len(id) != 32 {
+		return model.Run{}, fmt.Errorf("%w: scoped run ID resolution", ErrUnavailable)
 	}
-	if !history.scope.seesRepo(run.RepoID) {
-		if trimmed := strings.ToLower(strings.TrimSpace(id)); len(trimmed) < 32 {
-			return model.Run{}, fmt.Errorf("%w: run ID %q", store.ErrNotFound, trimmed)
-		}
-		return model.Run{}, hiddenRun()
-	}
-	return run, nil
+	return history.Run(ctx, id)
 }
 
 func (history scopedHistory) ListRecentRuns(ctx context.Context, filter model.RunListFilter) ([]model.Run, error) {
@@ -868,9 +864,9 @@ func (cursor *pageCursor) UnmarshalJSON(raw []byte) error {
 		text = strings.TrimSpace(text)
 		if sequence, parseErr := strconv.ParseInt(text, 10, 64); parseErr == nil {
 			cursor.Sequence = sequence
-			// A 12+ digit string may also be a record ID; the list tries it
+			// An 8+ digit string may also be a record ID; the list tries it
 			// as one first.
-			if len(text) < 12 {
+			if len(text) < 8 {
 				text = ""
 			}
 		}
