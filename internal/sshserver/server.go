@@ -71,6 +71,12 @@ type discardLogger struct{}
 
 func (discardLogger) Printf(string, ...any) {}
 
+// Resolver failures are infrastructure errors, never evidence that a key is
+// unauthorized. Keep them distinct from an ordinary missing registration.
+type identityLookupError struct{ error }
+
+func (e identityLookupError) Unwrap() error { return e.error }
+
 type Config struct {
 	HostSigner ssh.Signer
 	Resolver   IdentityResolver
@@ -181,7 +187,7 @@ func New(config Config) (*Server, error) {
 				identity, found, err = config.Resolver.ResolveFingerprint(fingerprint)
 			}
 			if err != nil {
-				return nil, fmt.Errorf("resolve public key: %w", err)
+				return nil, identityLookupError{fmt.Errorf("resolve public key: %w", err)}
 			}
 			identity = strings.TrimSpace(identity)
 			if !found || identity == "" {
@@ -285,7 +291,32 @@ func (s *Server) handleConn(ctx context.Context, connection net.Conn) error {
 		}
 	}()
 	defer close(stopClose)
-	serverConn, channels, requests, err := ssh.NewServerConn(connection, s.config)
+	// Callbacks and pre-auth transport state belong to this connection. A
+	// regular callback error causes x/crypto/ssh to send USERAUTH_FAILURE,
+	// hiding lookup outages as "Permission denied (publickey)". Announce a
+	// generic transient server error and close before it can send that denial.
+	config := *s.config
+	var preAuth ssh.ServerPreAuthConn
+	config.PreAuthConnCallback = func(conn ssh.ServerPreAuthConn) { preAuth = conn }
+	config.PublicKeyCallback = func(conn ssh.ConnMetadata, key ssh.PublicKey) (*ssh.Permissions, error) {
+		permissions, err := s.config.PublicKeyCallback(conn, key)
+		var lookupErr identityLookupError
+		if errors.As(err, &lookupErr) {
+			s.logger.Printf("SSH identity lookup unavailable: %v", lookupErr.error)
+			if preAuth != nil {
+				_ = preAuth.SendAuthBanner("oberth: temporary server error: SSH identity lookup unavailable; retry later\n")
+			}
+			_ = connection.Close()
+		}
+		return permissions, err
+	}
+	// The library caches public-key probe results. Recheck after proof of key
+	// possession so revocation or scope changes committed since the probe take
+	// effect before authentication succeeds.
+	config.VerifiedPublicKeyCallback = func(conn ssh.ConnMetadata, key ssh.PublicKey, _ *ssh.Permissions, _ string) (*ssh.Permissions, error) {
+		return config.PublicKeyCallback(conn, key)
+	}
+	serverConn, channels, requests, err := ssh.NewServerConn(connection, &config)
 	if err != nil {
 		return fmt.Errorf("SSH handshake: %w", err)
 	}

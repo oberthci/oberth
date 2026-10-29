@@ -704,6 +704,13 @@ continuity checks; it must never be used to reset or bypass those checks.
   the chart contract.
 - Authentication maps the SHA-256 SSH public-key fingerprint to exactly one
   durable uplink identity.
+- SSH identity and scope reads use a bounded, separate read-only WAL pool,
+  with a fresh committed snapshot for each lookup. No authorization cache or
+  immutable SQLite connection is used. The signed authentication request
+  rechecks the key and scope after the initial public-key probe, so a committed
+  revocation cannot be bypassed by the SSH library's probe cache. Lookup
+  failures log the storage error, send a generic temporary-server-error banner
+  and close the connection before an authentication denial can be sent.
 - Only `git-upload-pack` and `git-receive-pack` are accepted. Receive-pack may
   update only `refs/heads/*` and `refs/tags/*`; shell, PTY, forwarding, helper
   protocols, replacement refs, and other namespaces are rejected.
