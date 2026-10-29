@@ -418,7 +418,7 @@ func TestReceiveCallbackCanInspectAcceptedGitObject(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-	case <-time.After(3 * time.Second):
+	case <-time.After(testGitCommandTimeout):
 		t.Fatal("receive callback deadlocked while re-entering Git cache")
 	}
 }

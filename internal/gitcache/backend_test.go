@@ -13,10 +13,20 @@ import (
 	"time"
 )
 
+// Real Git and race-instrumented hook subprocesses need scheduling headroom on
+// loaded CI hosts. This is a test-only work budget; caller cancellation and
+// production cleanup limits remain enforced.
+const testGitCommandTimeout = 2 * time.Minute
+
 // Every existing cache fixture enters through this selector. Process-specific
 // tests with an explicit executable continue to exercise the CLI adapter.
 func newBackendTestCache(t *testing.T, config Config) (*Cache, error) {
 	t.Helper()
+	// Preserve longer budgets and zero's production default; lift only the
+	// short fixture deadlines that can otherwise fail on wall-clock load.
+	if config.CommandTimeout > 0 && config.CommandTimeout < testGitCommandTimeout {
+		config.CommandTimeout = testGitCommandTimeout
+	}
 	// Native hook fixtures execute this test binary once per ref. Disable only
 	// race's one-second successful-exit sleep; keep detection and exit status.
 	config.Env = maps.Clone(config.Env)
