@@ -96,7 +96,7 @@ func (service *API) scheduleList(ctx context.Context, raw json.RawMessage) (any,
 		return nil, err
 	}
 	if service.schedules == nil {
-		return nil, fmt.Errorf("%w: schedules", ErrUnavailable)
+		return nil, refuse(ErrUnavailable, "schedules")
 	}
 	var repositories []model.Repository
 	if strings.TrimSpace(arguments.Repo) != "" {
@@ -134,10 +134,10 @@ func (service *API) scheduleList(ctx context.Context, raw json.RawMessage) (any,
 // repositories, and a hidden repository answers as a missing one.
 func (service *API) scheduleEntry(ctx context.Context, actor api.Actor, tool, repo, entry string) (model.Repository, ScheduleRepoView, ScheduleEntryView, error) {
 	if !actor.Admin {
-		return model.Repository{}, ScheduleRepoView{}, ScheduleEntryView{}, fmt.Errorf("%w: %s requires an admin uplink", ErrForbidden, tool)
+		return model.Repository{}, ScheduleRepoView{}, ScheduleEntryView{}, refuse(ErrForbidden, "%s requires an admin uplink", tool)
 	}
 	if service.schedules == nil || service.auditor == nil {
-		return model.Repository{}, ScheduleRepoView{}, ScheduleEntryView{}, fmt.Errorf("%w: schedules", ErrUnavailable)
+		return model.Repository{}, ScheduleRepoView{}, ScheduleEntryView{}, refuse(ErrUnavailable, "schedules")
 	}
 	if strings.TrimSpace(repo) == "" || strings.TrimSpace(entry) == "" {
 		return model.Repository{}, ScheduleRepoView{}, ScheduleEntryView{}, fmt.Errorf("%w: repo and entry are required", ErrInvalidInput)
@@ -177,7 +177,7 @@ func (service *API) schedulePauseResume(ctx context.Context, actor api.Actor, pa
 		return nil, err
 	}
 	if !actor.Admin {
-		return nil, fmt.Errorf("%w: %s requires an admin uplink", ErrForbidden, tool)
+		return nil, refuse(ErrForbidden, "%s requires an admin uplink", tool)
 	}
 	repository, view, entry, err := service.scheduleEntry(ctx, actor, tool, arguments.Repo, arguments.Entry)
 	if err != nil {
@@ -246,7 +246,7 @@ func (service *API) scheduleTrigger(ctx context.Context, actor api.Actor, raw js
 		return nil, err
 	}
 	if service.auditor == nil {
-		return nil, fmt.Errorf("%w: audit", ErrUnavailable)
+		return nil, refuse(ErrUnavailable, "audit")
 	}
 	enqueued, err := service.schedules.EnqueueSchedule(ctx, plan, actor.Identity)
 	if err != nil {

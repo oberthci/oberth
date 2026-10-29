@@ -233,11 +233,11 @@ type AdmissionReleaser interface {
 
 func (service *API) releaseAdmission(ctx context.Context, actor api.Actor, runID string, force bool) (model.AdmissionRelease, error) {
 	if !actor.Admin {
-		return model.AdmissionRelease{}, fmt.Errorf("%w: admission_release requires an admin uplink", ErrForbidden)
+		return model.AdmissionRelease{}, refuse(ErrForbidden, "admission_release requires an admin uplink")
 	}
 	releaser, ok := service.admission.(AdmissionReleaser)
 	if !ok || service.history == nil {
-		return model.AdmissionRelease{}, fmt.Errorf("%w: admission release", ErrUnavailable)
+		return model.AdmissionRelease{}, refuse(ErrUnavailable, "admission release")
 	}
 	run, err := service.resolveReadRunID(ctx, runID)
 	if err != nil {

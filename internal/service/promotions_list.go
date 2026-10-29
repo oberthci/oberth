@@ -28,7 +28,7 @@ func (service *API) promotionList(ctx context.Context, args promotionListArgumen
 		return api.PromotionListResponse{}, fmt.Errorf("%w: promotion list requires a full source SHA, known status and bounded positive cursor/limit", ErrInvalidInput)
 	}
 	if service.promotions == nil {
-		return api.PromotionListResponse{}, fmt.Errorf("%w: promotion history", ErrUnavailable)
+		return api.PromotionListResponse{}, refuse(ErrUnavailable, "promotion history")
 	}
 	filter := model.PromotionListFilter{SourceSHA: args.SourceSHA, Status: args.Status, Before: args.Before.Sequence, Limit: args.Limit}
 	if args.Before.ID != "" {

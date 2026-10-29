@@ -19,7 +19,7 @@ func (service *API) verifySecretStore(ctx context.Context, actor api.Actor, raw 
 	// AI-CONTRACT: reject non-admin uplinks before reading configuration,
 	// requesting a ServiceAccount token, or contacting the secret store.
 	if !actor.Admin {
-		return api.SecretStoreVerifyResponse{}, fmt.Errorf("%w: secretstore_verify requires an admin uplink", ErrForbidden)
+		return api.SecretStoreVerifyResponse{}, refuse(ErrForbidden, "secretstore_verify requires an admin uplink")
 	}
 	var arguments api.SecretStoreVerifyRequest
 	if err := decodeTool(raw, &arguments); err != nil {
@@ -29,7 +29,7 @@ func (service *API) verifySecretStore(ctx context.Context, actor api.Actor, raw 
 		return api.SecretStoreVerifyResponse{}, fmt.Errorf("%w: %w", ErrInvalidInput, err)
 	}
 	if service.secretStoreVerifier == nil {
-		return api.SecretStoreVerifyResponse{}, fmt.Errorf("%w: secret-store verification is not configured", ErrUnavailable)
+		return api.SecretStoreVerifyResponse{}, refuse(ErrUnavailable, "secret-store verification is not configured")
 	}
 	deadlineCtx, cancel := context.WithTimeout(ctx, time.Duration(arguments.Timeout)*time.Second)
 	defer cancel()

@@ -63,7 +63,7 @@ func (ingestor *PushIngestor) Branch(ctx context.Context, push BranchPush) (Push
 		return PushResult{Repository: repository, Deleted: true, Duplicate: duplicate, Reason: "branch deletion requires no CI run"}, nil
 	}
 	if ingestor.branches == nil {
-		return PushResult{}, fmt.Errorf("%w: CI queue", ErrUnavailable)
+		return PushResult{}, refuse(ErrUnavailable, "CI queue")
 	}
 	if !validOID(push.NewOID) {
 		return PushResult{}, fmt.Errorf("%w: branch object ID is invalid", ErrInvalidInput)
@@ -120,7 +120,7 @@ func (ingestor *PushIngestor) Tag(ctx context.Context, push TagPush) (PushResult
 		return PushResult{Repository: repository, Duplicate: duplicate, Reason: "release tags are immutable"}, nil
 	}
 	if ingestor.releases == nil {
-		return PushResult{}, fmt.Errorf("%w: release admission", ErrUnavailable)
+		return PushResult{}, refuse(ErrUnavailable, "release admission")
 	}
 	if !validOID(push.NewOID) {
 		return PushResult{}, fmt.Errorf("%w: tag object ID is invalid", ErrInvalidInput)

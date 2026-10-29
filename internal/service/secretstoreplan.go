@@ -58,10 +58,10 @@ type SecretStorePlanStep struct {
 
 func (service *API) secretStorePlan(ctx context.Context, actor api.Actor, raw json.RawMessage) (SecretStorePlanResponse, error) {
 	if !actor.Admin {
-		return SecretStorePlanResponse{}, fmt.Errorf("%w: secretstore_plan requires an admin uplink", ErrForbidden)
+		return SecretStorePlanResponse{}, refuse(ErrForbidden, "secretstore_plan requires an admin uplink")
 	}
 	if service.secretAccess == nil {
-		return SecretStorePlanResponse{}, fmt.Errorf("%w: secret access", ErrUnavailable)
+		return SecretStorePlanResponse{}, refuse(ErrUnavailable, "secret access")
 	}
 	// Read all active grants.
 	grants, err := service.secretAccess.SecretAccessList(ctx, "", false)
@@ -319,13 +319,13 @@ func (r SecretStoreSyncReceiptResponse) MCPToolIsError() bool { return false }
 // receipt is still valuable audit evidence.
 func (service *API) secretStoreSyncReceipt(ctx context.Context, actor api.Actor, raw json.RawMessage) (SecretStoreSyncReceiptResponse, error) {
 	if !actor.Admin {
-		return SecretStoreSyncReceiptResponse{}, fmt.Errorf("%w: secretstore_sync_receipt requires an admin uplink", ErrForbidden)
+		return SecretStoreSyncReceiptResponse{}, refuse(ErrForbidden, "secretstore_sync_receipt requires an admin uplink")
 	}
 	if service.auditor == nil {
-		return SecretStoreSyncReceiptResponse{}, fmt.Errorf("%w: audit", ErrUnavailable)
+		return SecretStoreSyncReceiptResponse{}, refuse(ErrUnavailable, "audit")
 	}
 	if service.secretAccess == nil {
-		return SecretStoreSyncReceiptResponse{}, fmt.Errorf("%w: secret access", ErrUnavailable)
+		return SecretStoreSyncReceiptResponse{}, refuse(ErrUnavailable, "secret access")
 	}
 
 	var request SecretStoreSyncReceiptRequest

@@ -711,3 +711,32 @@ in-flight work and pending promotions, keeps all evidence, drops the Git cache,
 and refuses pushes and new runs until restored. History remains readable.
 Remove its releaseWIF mapping and list it under chart `archivedRepositories` to
 make stale release capabilities fail chart validation.
+
+
+## Tool results and refusals
+
+Every tool advertises an object `outputSchema` in `tools/list`. When present,
+`structuredContent` is always a JSON object. List results use a named array:
+`promote_grant_list` returns `{"grants":[]}` when no grants match, just as
+`run_list` uses `runs` and `repo_list` uses `repositories`. Successful
+`issue_delete` returns `{"id":123,"deleted":true}`. Clients consuming the old
+bare promotion-grant array or null deletion result must decode these objects.
+The read-only HTTP `/api/grants` endpoint retains its existing array response.
+
+Ordinary JSON tool results carry the same object in their text content. Log
+and diagnostic tools retain their readable text view. `oberth mcp call` prints
+that text, or the structured object when a peer supplies no text blocks.
+
+A refused tool sets `isError:true` and returns text with the stable error class
+followed by an explicitly safe reason, for example:
+
+```text
+forbidden: promote requires an admin uplink; mint one with: oberth uplink add --admin - <identity>@<host> < key.pub
+forbidden: no matching promotion grant; request one from an admin with promote_grant
+service unavailable: promotion grants
+```
+
+Only public policy/capability reasons are included. Dependency error chains
+remain masked. A resource outside the uplink's scope still answers like a
+missing resource, without revealing its existence. An HTTP authentication
+failure is separate from an authenticated tool refusal.

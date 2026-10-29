@@ -55,7 +55,7 @@ func (service *API) auditList(ctx context.Context, actor api.Actor, raw json.Raw
 		return nil, err
 	}
 	if !actor.Admin {
-		return nil, fmt.Errorf("%w: audit_list requires an admin uplink", ErrForbidden)
+		return nil, refuse(ErrForbidden, "audit_list requires an admin uplink")
 	}
 	var arguments struct {
 		Action string `json:"action"`
@@ -71,7 +71,7 @@ func (service *API) auditList(ctx context.Context, actor api.Actor, raw json.Raw
 	}
 	lister, ok := service.auditor.(AuditLister)
 	if !ok || lister == nil {
-		return nil, fmt.Errorf("%w: audit listing", ErrUnavailable)
+		return nil, refuse(ErrUnavailable, "audit listing")
 	}
 	if arguments.Before < 0 || arguments.Limit < 0 {
 		return nil, fmt.Errorf("%w: before and limit must not be negative", ErrInvalidInput)
@@ -93,7 +93,7 @@ func (service *API) auditList(ctx context.Context, actor api.Actor, raw json.Raw
 	}
 	if strings.TrimSpace(arguments.Repo) != "" {
 		if service.runs == nil {
-			return nil, fmt.Errorf("%w: repositories", ErrUnavailable)
+			return nil, refuse(ErrUnavailable, "repositories")
 		}
 		repository, err := service.runs.RepositoryByName(ctx, arguments.Repo)
 		if err != nil {

@@ -128,7 +128,7 @@ func TestMCPWaitObservationWriteFailuresAndPanic(t *testing.T) {
 		{name: "heartbeat", outcome: "heartbeat-write-failed", failAt: 2, block: true},
 		{name: "final", outcome: "final-write-failed", failAt: 2},
 		{name: "panic", outcome: "panic", panicCall: true},
-		{name: "marshal", outcome: "marshal-failed", marshal: true},
+		{name: "invalid-result", outcome: "final-frame-flushed", marshal: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			called := false
@@ -168,6 +168,12 @@ func TestMCPWaitObservationWriteFailuresAndPanic(t *testing.T) {
 				server.Handler().ServeHTTP(writer, streamRequest(waitRPC, "text/event-stream", "valid-token"))
 			}()
 			events.check(t, writer.Header().Get("X-Oberth-Wait-ID"), "sse", tc.outcome)
+			if tc.marshal {
+				body := writer.Body.String()
+				if !strings.Contains(body, `"isError":true`) || strings.Contains(body, `"structuredContent"`) || !strings.Contains(body, "tool result must be a JSON object") {
+					t.Fatalf("invalid structured result must become a complete tool error: %s", body)
+				}
+			}
 			if called != (tc.failAt != 1) {
 				t.Fatal("observer invocation mismatch")
 			}

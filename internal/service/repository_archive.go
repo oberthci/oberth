@@ -14,13 +14,13 @@ import (
 
 func (service *API) repoArchive(ctx context.Context, actor api.Actor, name string, archived bool) (any, error) {
 	if !actor.Admin || actor.Scoped() {
-		return nil, fmt.Errorf("%w: repository archive requires an unscoped admin uplink", ErrForbidden)
+		return nil, refuse(ErrForbidden, "repository archive requires an unscoped admin uplink")
 	}
 	if strings.TrimSpace(name) == "" {
 		return nil, fmt.Errorf("%w: repo is required", ErrInvalidInput)
 	}
 	if service.repositoryArchiver == nil || service.changeRepositoryArchive == nil {
-		return nil, fmt.Errorf("%w: repository archive", ErrUnavailable)
+		return nil, refuse(ErrUnavailable, "repository archive")
 	}
 	repository, err := service.runs.RepositoryByName(ctx, name)
 	if err != nil {

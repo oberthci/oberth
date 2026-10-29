@@ -403,3 +403,55 @@ func TestClassifyMCPTransportExplainsUnresolvedLocalNames(t *testing.T) {
 		t.Fatalf("the mDNS hint is shown for a non-.local name: %v", err)
 	}
 }
+
+func TestMCPStructuredResponseDecoding(t *testing.T) {
+	for _, raw := range []string{`{"structuredContent":{"grants":[]}}`, `{"structuredContent":{"id":7,"deleted":true}}`} {
+		var result toolsCallResult
+		if err := json.Unmarshal([]byte(raw), &result); err != nil {
+			t.Fatal(err)
+		}
+		if result.StructuredContent == nil {
+			t.Fatalf("missing object: %s", raw)
+		}
+	}
+	var result toolsCallResult
+	if err := json.Unmarshal([]byte(`{"structuredContent":[]}`), &result); err == nil {
+		t.Fatal("accepted array structuredContent")
+	}
+	var tool mcpTool
+	if err := json.Unmarshal([]byte(`{"name":"promote_grant_list","outputSchema":{"type":"object"}}`), &tool); err != nil {
+		t.Fatal(err)
+	}
+	if len(tool.OutputSchema) == 0 {
+		t.Fatal("discarded outputSchema")
+	}
+}
+
+func TestMCPCallStructuredOnlyResult(t *testing.T) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req jsonRPCRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Error(err)
+			return
+		}
+		testWriteJSONRPCResult(w, &req.ID, map[string]any{"structuredContent": map[string]any{"grants": []any{}}})
+	}))
+	defer server.Close()
+	defer withTestMCPClient(t, server)()
+	var output strings.Builder
+	if err := runMCPCall(context.Background(), []string{"promote_grant_list", "--url", server.URL, "--token-file", structuredMCPTokenFile(t)}, &output); err != nil {
+		t.Fatal(err)
+	}
+	if output.String() != "{\"grants\":[]}\n" {
+		t.Fatalf("unexpected output: %q", output.String())
+	}
+}
+
+func structuredMCPTokenFile(t *testing.T) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "token")
+	if err := os.WriteFile(path, []byte("test-token"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}

@@ -14,7 +14,7 @@ func (service *API) retryRun(ctx context.Context, actor api.Actor, id string) (m
 		return model.Run{}, fmt.Errorf("%w: run ID is required", ErrInvalidInput)
 	}
 	if service.history == nil || service.runRetries == nil || service.enqueues == nil {
-		return model.Run{}, fmt.Errorf("%w: run retry", ErrUnavailable)
+		return model.Run{}, refuse(ErrUnavailable, "run retry")
 	}
 	// The actor-scoped history resolves the ID before the writer sees it. The
 	// scoped writer repeats this guard so future callers cannot bypass it.

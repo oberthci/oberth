@@ -315,59 +315,6 @@ func TestMCPRepoListReturnsObject(t *testing.T) {
 	}
 }
 
-// TestMCPAllToolsReturnObjectStructuredContent verifies that every
-// registered MCP tool produces a JSON object (not array, not scalar)
-// in structuredContent for a representative successful call (#794).
-// NOTE: this test exercises the fakeBackend, which always returns an
-// object. The service-level shape test in internal/service/mcp_shape_test.go
-// exercises the real API.CallTool and is the mutation-evidence test for #794.
-func TestMCPAllToolsReturnObjectStructuredContent(t *testing.T) {
-	t.Parallel()
-	server, _ := testServer(t)
-	// Tools that are known to return objects by construction. The
-	// test sends a tools/call for each and asserts the structuredContent
-	// is a JSON object.
-	for _, tool := range []struct {
-		name string
-		args string
-	}{
-		{"status", `{"ref":"main"}`},
-		{"run_list", `{}`},
-		{"repo_list", `{}`},
-		{"system_status", `{}`},
-	} {
-		t.Run(tool.name, func(t *testing.T) {
-			body := fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":%q,"arguments":%s}}`, tool.name, tool.args)
-			request := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(body))
-			request.Header.Set("Authorization", "Bearer valid-token")
-			response := httptest.NewRecorder()
-			server.Handler().ServeHTTP(response, request)
-
-			var envelope struct {
-				Result struct {
-					Structured json.RawMessage `json:"structuredContent"`
-					IsError    bool            `json:"isError"`
-				} `json:"result"`
-			}
-			if err := json.Unmarshal(response.Body.Bytes(), &envelope); err != nil {
-				t.Fatalf("decode response: %v body=%s", err, response.Body.String())
-			}
-			if len(envelope.Result.Structured) == 0 {
-				// Tool errors have no structuredContent; skip.
-				if envelope.Result.IsError {
-					return
-				}
-				t.Fatalf("non-error response has empty structuredContent")
-			}
-			// Must be a JSON object (starts with '{'), not an array or scalar.
-			trimmed := strings.TrimSpace(string(envelope.Result.Structured))
-			if trimmed[0] != '{' {
-				t.Fatalf("structuredContent is not a JSON object: %s", trimmed[:min(80, len(trimmed))])
-			}
-		})
-	}
-}
-
 // TestMCPWriteTimeoutRegressionLongPoll verifies that a long-poll tool
 // (wait) completes successfully even when the HTTP server's WriteTimeout
 // is shorter than the tool's execution time. This is the regression test
@@ -466,4 +413,35 @@ func (s *slowWaitBackend) CallTool(ctx context.Context, actor Actor, name string
 		}
 	}
 	return s.fakeBackend.CallTool(ctx, actor, name, arguments)
+}
+
+type publicRefusalTestError struct {
+	cause  error
+	reason string
+}
+
+func (e *publicRefusalTestError) Error() string          { return "token=secret-value " + e.cause.Error() }
+func (e *publicRefusalTestError) Unwrap() error          { return e.cause }
+func (e *publicRefusalTestError) MCPErrorReason() string { return e.reason }
+func TestMCPOnlyExplicitPublicRefusalReasons(t *testing.T) {
+	for _, code := range []int{http.StatusForbidden, http.StatusServiceUnavailable, http.StatusNotFound, http.StatusInternalServerError} {
+		server, _ := testServer(t)
+		server.classifyError = func(error) (int, string) { return code, "stable class" }
+		secret := errors.New("secret-value")
+		marked := &publicRefusalTestError{cause: secret, reason: "safe remediation"}
+		for _, err := range []error{fmt.Errorf("outer secret-value: %w", marked), errors.Join(secret, marked), fmt.Errorf("raw secret-value: %w", secret)} {
+			trace := &mcpWaitObservation{event: mcpWaitEvent{Nonce: "fixed-reference"}}
+			for _, result := range []map[string]any{server.classifyToolFailure(err), server.classifyWaitFailure(err, trace)} {
+				raw, _ := json.Marshal(result)
+				text := string(raw)
+				if strings.Contains(text, "secret-value") {
+					t.Fatalf("raw error leaked: %s", text)
+				}
+				wantReason := (code == http.StatusForbidden || code == http.StatusServiceUnavailable) && errors.As(err, &marked)
+				if strings.Contains(text, "safe remediation") != wantReason {
+					t.Fatalf("wrong public reason policy: %s", text)
+				}
+			}
+		}
+	}
 }

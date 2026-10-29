@@ -56,11 +56,11 @@ func RunCancelPolicy(run model.Run, admin, force bool) (string, error) {
 	if !admin {
 		switch {
 		case releaseLike:
-			return "", fmt.Errorf("%w: release, tag and apply runs can be cancelled only by an admin uplink", ErrForbidden)
+			return "", refuse(ErrForbidden, "release, tag and apply runs can be cancelled only by an admin uplink")
 		case run.ConcurrencyGroup != "":
-			return "", fmt.Errorf("%w: runs in concurrency group %q can be cancelled only by an admin uplink", ErrForbidden, run.ConcurrencyGroup)
+			return "", refuse(ErrForbidden, "runs in concurrency group %q can be cancelled only by an admin uplink", run.ConcurrencyGroup)
 		case run.RefKind != model.RefBranch || run.Trigger != "branch":
-			return "", fmt.Errorf("%w: a non-admin uplink may cancel only branch-push runs, not %s runs", ErrForbidden, run.Trigger)
+			return "", refuse(ErrForbidden, "a non-admin uplink may cancel only branch-push runs, not %s runs", run.Trigger)
 		}
 		return "", nil
 	}
@@ -102,7 +102,7 @@ func (service *API) cancelRun(ctx context.Context, actor api.Actor, id, reason s
 		return api.RunCancelResponse{}, fmt.Errorf("%w: run ID is required", ErrInvalidInput)
 	}
 	if service.history == nil || service.runCancels == nil {
-		return api.RunCancelResponse{}, fmt.Errorf("%w: run cancel", ErrUnavailable)
+		return api.RunCancelResponse{}, refuse(ErrUnavailable, "run cancel")
 	}
 	reason = strings.TrimSpace(reason)
 	if err := store.ValidateCancelReason(reason); err != nil {

@@ -40,10 +40,10 @@ type issueCloseResult struct {
 
 func (service *API) issueLifecycleTool(ctx context.Context, actor api.Actor, name string, raw json.RawMessage) (any, error) {
 	if !actor.Admin {
-		return nil, fmt.Errorf("%w: %s requires an admin uplink", ErrForbidden, name)
+		return nil, refuse(ErrForbidden, "%s requires an admin uplink", name)
 	}
 	if service.issues == nil || service.issueLifecycle == nil {
-		return nil, fmt.Errorf("%w: issue lifecycle", ErrUnavailable)
+		return nil, refuse(ErrUnavailable, "issue lifecycle")
 	}
 	if name == "issue_unlock" {
 		var args struct {

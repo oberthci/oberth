@@ -73,10 +73,10 @@ func (scheduler *Scheduler) resolveTrustedRequirement(ctx context.Context, repos
 	}
 	if requirement.Contract != nil {
 		if scheduler.trusted == nil {
-			return requirement, fmt.Errorf("%w: trusted test profile %s requires a protected suite executor and verified result evidence", ErrUnavailable, requirement.Contract.Profile)
+			return requirement, refuse(ErrUnavailable, "trusted test profile %s requires a protected suite executor and verified result evidence", requirement.Contract.Profile)
 		}
 		if _, ok := scheduler.store.(vmrunner.KVMJournal); !ok {
-			return requirement, fmt.Errorf("%w: trusted test journal unavailable", ErrUnavailable)
+			return requirement, refuse(ErrUnavailable, "trusted test journal unavailable")
 		}
 		if err = scheduler.trusted.Supports(*requirement.Contract); err != nil {
 			return requirement, err

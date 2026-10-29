@@ -30,13 +30,13 @@ type uplinkView struct {
 
 func (service *API) uplinkLifecycleTool(ctx context.Context, actor api.Actor, name string, raw json.RawMessage) (any, error) {
 	if !actor.Admin {
-		return nil, fmt.Errorf("%w: %s requires admin", ErrForbidden, name)
+		return nil, refuse(ErrForbidden, "%s requires admin", name)
 	}
 	if err := requireUnscoped(actor, name); err != nil {
 		return nil, err
 	}
 	if service.uplinkLifecycle == nil {
-		return nil, fmt.Errorf("%w: uplink lifecycle", ErrUnavailable)
+		return nil, refuse(ErrUnavailable, "uplink lifecycle")
 	}
 	if name == "uplink_list" {
 		var args struct{}
@@ -82,7 +82,7 @@ func (service *API) uplinkLifecycleTool(ctx context.Context, actor api.Actor, na
 
 func (service *API) dismissAccess(ctx context.Context, actor api.Actor, raw json.RawMessage) (any, error) {
 	if !actor.Admin {
-		return nil, fmt.Errorf("%w: access_dismiss requires admin", ErrForbidden)
+		return nil, refuse(ErrForbidden, "access_dismiss requires admin")
 	}
 	if err := requireUnscoped(actor, "access_dismiss"); err != nil {
 		return nil, err
@@ -96,7 +96,7 @@ func (service *API) dismissAccess(ctx context.Context, actor api.Actor, raw json
 		return nil, err
 	}
 	if service.declarationDismissal == nil {
-		return nil, fmt.Errorf("%w: access dismissal", ErrUnavailable)
+		return nil, refuse(ErrUnavailable, "access dismissal")
 	}
 	repo := args.Repo
 	if err := service.declarationDismissal.DismissGrantDeclaration(ctx, actor.Identity, repo, args.Step, args.Secret); err != nil {
@@ -114,7 +114,7 @@ type DeclarationDismissal interface {
 
 func (service *API) listKubeVirtGrants(ctx context.Context, actor api.Actor, raw json.RawMessage) (any, error) {
 	if !actor.Admin {
-		return nil, fmt.Errorf("%w: kubevirt_grant_list requires admin", ErrForbidden)
+		return nil, refuse(ErrForbidden, "kubevirt_grant_list requires admin")
 	}
 	if err := requireUnscoped(actor, "kubevirt_grant_list"); err != nil {
 		return nil, err
@@ -124,7 +124,7 @@ func (service *API) listKubeVirtGrants(ctx context.Context, actor api.Actor, raw
 		return nil, err
 	}
 	if service.kubeVirtGrants == nil || service.repositories == nil {
-		return nil, fmt.Errorf("%w: KubeVirt grants", ErrUnavailable)
+		return nil, refuse(ErrUnavailable, "KubeVirt grants")
 	}
 	repos, err := service.repositories.ListRepositories(ctx)
 	if err != nil {
