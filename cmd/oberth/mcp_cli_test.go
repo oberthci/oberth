@@ -415,8 +415,11 @@ func TestMCPStructuredResponseDecoding(t *testing.T) {
 		}
 	}
 	var result toolsCallResult
-	if err := json.Unmarshal([]byte(`{"structuredContent":[]}`), &result); err == nil {
-		t.Fatal("accepted array structuredContent")
+	if err := json.Unmarshal([]byte(`{"structuredContent":[]}`), &result); err != nil {
+		t.Fatalf("legacy array must not prevent decoding text: %v", err)
+	}
+	if string(result.StructuredContent) != "[]" {
+		t.Fatalf("legacy structured content was not retained: %s", result.StructuredContent)
 	}
 	var tool mcpTool
 	if err := json.Unmarshal([]byte(`{"name":"promote_grant_list","outputSchema":{"type":"object"}}`), &tool); err != nil {
@@ -427,23 +430,54 @@ func TestMCPStructuredResponseDecoding(t *testing.T) {
 	}
 }
 
-func TestMCPCallStructuredOnlyResult(t *testing.T) {
-	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var req jsonRPCRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			t.Error(err)
-			return
-		}
-		testWriteJSONRPCResult(w, &req.ID, map[string]any{"structuredContent": map[string]any{"grants": []any{}}})
-	}))
-	defer server.Close()
-	defer withTestMCPClient(t, server)()
-	var output strings.Builder
-	if err := runMCPCall(context.Background(), []string{"promote_grant_list", "--url", server.URL, "--token-file", structuredMCPTokenFile(t)}, &output); err != nil {
-		t.Fatal(err)
-	}
-	if output.String() != "{\"grants\":[]}\n" {
-		t.Fatalf("unexpected output: %q", output.String())
+// Mixed-version rollouts must preserve text from old servers even when their
+// structuredContent is an array, null or scalar. Only objects supply a fallback.
+func TestMCPCallStructuredContentCompatibility(t *testing.T) {
+	for _, tc := range []struct {
+		name, structured, text, want string
+		isError                      bool
+	}{
+		{name: "object fallback", structured: `{"grants":[]}`, want: "{\"grants\":[]}\n"},
+		{name: "object with whitespace", structured: " \n{\"grants\":[]} \t", want: "{\"grants\":[]}\n"},
+		{name: "text preferred", structured: `{"grants":[]}`, text: "readable text", want: "readable text\n"},
+		{name: "legacy empty array", structured: `[]`, text: `[]`, want: "[]\n"},
+		{name: "legacy populated array", structured: `[{"id":"grant-1"}]`, text: `[{"id":"grant-1"}]`, want: "[{\"id\":\"grant-1\"}]\n"},
+		{name: "legacy null", structured: `null`, text: `null`, want: "null\n"},
+		{name: "legacy scalar", structured: `"legacy"`, text: "legacy text", want: "legacy text\n"},
+		{name: "text only", text: "legacy text", want: "legacy text\n"},
+		{name: "array without text", structured: `[]`},
+		{name: "null without text", structured: `null`},
+		{name: "scalar without text", structured: `true`},
+		{name: "legacy tool error", structured: `[]`, text: "forbidden", want: "forbidden\n", isError: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var req jsonRPCRequest
+				if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+					t.Error(err)
+					return
+				}
+				result := toolsCallResult{IsError: tc.isError, StructuredContent: json.RawMessage(tc.structured)}
+				if tc.text != "" {
+					result.Content = []mcpContent{{Type: "text", Text: tc.text}}
+				}
+				testWriteJSONRPCResult(w, &req.ID, result)
+			}))
+			defer server.Close()
+			defer withTestMCPClient(t, server)()
+			var output strings.Builder
+			err := runMCPCall(context.Background(), []string{"promote_grant_list", "--url", server.URL, "--token-file", structuredMCPTokenFile(t)}, &output)
+			if tc.isError {
+				if !errors.Is(err, errMCPToolError) {
+					t.Fatalf("error=%v, want tool error", err)
+				}
+			} else if err != nil {
+				t.Fatal(err)
+			}
+			if output.String() != tc.want {
+				t.Fatalf("output=%q, want %q", output.String(), tc.want)
+			}
+		})
 	}
 }
 

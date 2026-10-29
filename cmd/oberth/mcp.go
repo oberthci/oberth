@@ -95,9 +95,9 @@ type toolsCallParams struct {
 
 // toolsCallResult is the result from tools/call.
 type toolsCallResult struct {
-	Content           []mcpContent               `json:"content"`
-	StructuredContent map[string]json.RawMessage `json:"structuredContent,omitempty"`
-	IsError           bool                       `json:"isError,omitempty"`
+	Content           []mcpContent    `json:"content"`
+	StructuredContent json.RawMessage `json:"structuredContent,omitempty"`
+	IsError           bool            `json:"isError,omitempty"`
 }
 
 // mcpContent describes one content block in a tool result.
@@ -249,8 +249,11 @@ func runMCPCall(ctx context.Context, arguments []string, output io.Writer) error
 			}
 		}
 	}
-	if !printed && result.StructuredContent != nil {
-		if err := json.NewEncoder(output).Encode(result.StructuredContent); err != nil {
+	// Older servers may return arrays or null here. Keep their text usable;
+	// only an object can supply the structured-only fallback.
+	structured := bytes.TrimSpace(result.StructuredContent)
+	if !printed && bytes.HasPrefix(structured, []byte("{")) {
+		if err := json.NewEncoder(output).Encode(json.RawMessage(structured)); err != nil {
 			return err
 		}
 	}
