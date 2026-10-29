@@ -203,20 +203,6 @@ func TestBuildSSHConfigRejectsHostileValues(t *testing.T) {
 	}
 }
 
-func TestGitSSHCommandFromConfigQuotesForShellEvaluation(t *testing.T) {
-	t.Parallel()
-	command, err := GitSSHCommandFromConfig("/tmp/oberth-ssh-config")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if command != `'ssh' '-F' '/tmp/oberth-ssh-config'` {
-		t.Fatalf("command = %q", command)
-	}
-	if _, err := GitSSHCommandFromConfig("/tmp/oberth\nssh-config"); err == nil {
-		t.Fatal("hostile config path was accepted")
-	}
-}
-
 func TestUpstreamSSHHostParsesSSHURLsOnly(t *testing.T) {
 	t.Parallel()
 	for _, test := range []struct{ url, host, port string }{

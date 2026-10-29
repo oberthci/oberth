@@ -1,13 +1,17 @@
 package installer
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+
+	"k8s.io/client-go/rest"
 )
 
 func TestUpgradeRequiresSupportedHelm(t *testing.T) {
@@ -121,12 +125,15 @@ func TestUpgradeSchemaPreflightUsesOnlyStoredOverridesAndCleansFiles(t *testing.
 				}
 				return nil, nil
 			}}
-			compat, err := prepareUpgradeValues(t.Context(), UpgradeConfig{Namespace: "chosen"}, deps, "chart", "image")
+			prepared, err := prepareUpgradeValues(t.Context(), UpgradeConfig{Namespace: "chosen"}, deps, "chart", "image")
 			if (err == nil) != (failAt == "") {
 				t.Fatalf("%s: %v", failAt, err)
 			}
-			if err == nil && compat != testUpgradeCompatibility {
-				t.Fatal(compat)
+			if err == nil {
+				if prepared.compatibility != testUpgradeCompatibility {
+					t.Fatal(prepared.compatibility)
+				}
+				prepared.cleanup()
 			}
 			if temporary != "" {
 				if _, err := os.Stat(filepath.Dir(temporary)); !errors.Is(err, os.ErrNotExist) {
@@ -137,5 +144,122 @@ func TestUpgradeSchemaPreflightUsesOnlyStoredOverridesAndCleansFiles(t *testing.
 				t.Fatal(calls)
 			}
 		})
+	}
+}
+
+func TestUpgradeMigratesOnlyStoredBooleanShadow(t *testing.T) {
+	for _, raw := range []string{
+		`{"gitcache":{"shadow":true},"pushBannerURL":"","retention":{"keepNewestPerRef":0},"argo":{"enabled":false}}`,
+		`{"gitcache":{"shadow":false},"podLabels":{"arbitrary.example/key":"kept"},"retention":{"keepNewestPerRef":9007199254740993}}`,
+	} {
+		t.Run(raw, func(t *testing.T) {
+			var output bytes.Buffer
+			deps := Deps{Output: &output, RunHelm: func(_ context.Context, args []string) ([]byte, error) {
+				if args[0] == "get" {
+					if slices.Contains(args, "--all") {
+						out, _ := testUpgradeValuePreflight(args)
+						return out, nil
+					}
+					return []byte(raw), nil
+				}
+				if args[0] != "template" {
+					t.Fatalf("preflight mutated release: %v", args)
+				}
+				body, err := os.ReadFile(args[slices.Index(args, "--values")+1])
+				if err != nil {
+					t.Fatal(err)
+				}
+				var got, want map[string]any
+				gotDecoder := json.NewDecoder(bytes.NewReader(body))
+				gotDecoder.UseNumber()
+				if err := gotDecoder.Decode(&got); err != nil {
+					t.Fatal(err)
+				}
+				decoder := json.NewDecoder(strings.NewReader(raw))
+				decoder.UseNumber()
+				if err := decoder.Decode(&want); err != nil {
+					t.Fatal(err)
+				}
+				delete(want, "gitcache")
+				gotJSON, _ := json.Marshal(got)
+				wantJSON, _ := json.Marshal(want)
+				if !bytes.Equal(gotJSON, wantJSON) {
+					t.Fatalf("migration changed other stored values: got %s want %s", gotJSON, wantJSON)
+				}
+				return nil, nil
+			}}
+			cfg := UpgradeConfig{Namespace: "chosen"}
+			prepared, err := prepareUpgradeValues(t.Context(), cfg, deps, "chart", "image")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer prepared.cleanup()
+			if prepared.storedValues == "" || !strings.Contains(output.String(), "Dropped stored inert legacy gitcache.shadow") {
+				t.Fatal("migration snapshot or explicit deviation missing")
+			}
+			cfg.storedValues = prepared.storedValues
+			_, flags := upgradeHelmArgs(cfg, "chart", "image", prepared.compatibility)
+			if !slices.Contains(flags, "--reset-values") || slices.Contains(flags, "--reset-then-reuse-values") || flags[slices.Index(flags, "--values")+1] != prepared.storedValues {
+				t.Fatalf("apply would resurrect stored shadow: %v", flags)
+			}
+			if _, err := os.Stat(prepared.storedValues); err != nil {
+				t.Fatalf("snapshot removed before apply: %v", err)
+			}
+			prepared.cleanup()
+			if _, err := os.Stat(prepared.storedValues); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("snapshot leaked: %v", err)
+			}
+		})
+	}
+}
+
+// Stop at the Helm boundary: the real command path must apply the exact
+// validated migration snapshot, then erase it even if applying fails.
+func TestRunUpgradeAppliesValidatedShadowMigrationSnapshot(t *testing.T) {
+	stop := errors.New("stop before applying release")
+	var validated []byte
+	var snapshot string
+	applied := false
+	deps := Deps{
+		RestConfig: &rest.Config{Host: "https://127.0.0.1:6443"},
+		RunHelm: func(_ context.Context, args []string) ([]byte, error) {
+			if args[0] == "get" && !slices.Contains(args, "--all") {
+				return []byte(`{"gitcache":{"shadow":true},"pushBannerURL":""}`), nil
+			}
+			if out, ok := testUpgradeValuePreflight(args); ok && args[0] != "template" {
+				return out, nil
+			}
+			switch args[0] {
+			case "list":
+				return []byte(`[{"name":"oberth","status":"deployed","chart":"oberth-0.17.62"}]`), nil
+			case "show":
+				return []byte("image:\n  ref: example.invalid/oberth@sha256:" + strings.Repeat("1", 64) + "\n"), nil
+			case "template":
+				snapshot = args[slices.Index(args, "--values")+1]
+				var err error
+				validated, err = os.ReadFile(snapshot)
+				return nil, err
+			case "upgrade":
+				applied = true
+				if !slices.Contains(args, "--reset-values") || slices.Contains(args, "--reset-then-reuse-values") || args[slices.Index(args, "--values")+1] != snapshot {
+					t.Fatalf("wrong apply values: %v", args)
+				}
+				body, err := os.ReadFile(snapshot)
+				if err != nil || !bytes.Equal(body, validated) || string(body) != `{"pushBannerURL":""}` {
+					t.Fatalf("apply differed from validation: %s: %v", body, err)
+				}
+				return nil, stop
+			default:
+				t.Fatalf("unexpected Helm command: %v", args)
+				return nil, nil
+			}
+		},
+	}
+	_, err := RunUpgrade(t.Context(), UpgradeConfig{Namespace: "oberth", BinaryVersion: "0.17.63", ChartOverride: "fixture"}, deps)
+	if !errors.Is(err, stop) || !applied {
+		t.Fatalf("did not reach apply with migration: %v", err)
+	}
+	if _, err := os.Stat(snapshot); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("failed upgrade leaked private snapshot: %v", err)
 	}
 }

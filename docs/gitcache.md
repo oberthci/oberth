@@ -4,9 +4,13 @@ Git CLI is the only backend. There is no in-process Git implementation,
 comparison worker or shadow telemetry. Retired `--git-backend`,
 `--gitcache-shadow` and OBERTH_GITCACHE_SHADOW settings have no runtime role.
 For upgrade/install/restore value reuse, the chart accepts and ignores exactly
-`gitBackend: cli` and `gitcache.shadow: false`. `go-git`, `shadow: true` and
-unknown fields remain refused. These legacy defaults never select a backend
-or start a shadow worker.
+`gitBackend: cli` and `gitcache.shadow: false`. `go-git`, newly supplied
+`shadow: true` and unknown fields remain refused.
+`oberth upgrade` migrates an already stored boolean `gitcache.shadow` by
+removing that key from a private snapshot used for both schema preflight and
+application, with an explicit diagnostic. All other user configuration remains
+subject to the target schema; the original Helm revision remains untouched
+for exact rollback. This migration does not enable a shadow worker.
 
 The scratch server image contains static Git 2.56.0 (zlib only), static Oberth,
 `oberth-git-ssh -> oberth`, and the pinned Alpine CA bundle. It has no shell,
@@ -85,3 +89,9 @@ scan and existing Trivy Go scan. A known-vulnerable source-Git control must
 produce HIGH/CRITICAL findings; the actual components must have none, including
 ignored findings. Missing metadata, drift, scan errors and stale databases
 refuse signing. Image labels expose the component versions and source hash.
+
+Alpine's live repositories may retire pinned APK revisions. Rebuilds then fail
+closed even for unrelated source changes. Follow the [static Git re-pin and
+re-qualification procedure](../internal/staticgit/README.md); preserve the
+required `test-static-git-runtime` gate and review both architecture byte pins
+before accepting a replacement substrate.

@@ -18,8 +18,15 @@ issues. This preflight does not access the server or modify registrations.
 The chart keeps `gitBackend: cli` and `gitcache.shadow: false` as accepted,
 ignored legacy defaults so install reruns, restore and Helm value reuse work.
 Old instructions that enable shadow comparison (including the historical
-v0.17.59 guide) no longer apply: `go-git` and `shadow: true` are refused. Remove
-such settings explicitly before upgrade; preserve other compatibility values.
+v0.17.59 guide) no longer apply. `oberth upgrade` strips either boolean value
+of an already stored `gitcache.shadow`, reports the migration, and applies the
+same cleaned snapshot it schema-validates; the saved Helm revision is unchanged
+for rollback. An explicit new `shadow: true` override, malformed value,
+unsupported backend or unrelated unknown key still fails schema validation.
+The v0.17.63 CLI predates this migration: with that CLI, use an explicitly
+cleaned values file and `helm upgrade --reset-values --values CLEANED_FILE`,
+preserving compatibility identities and the original values for rollback.
+Do not use the cleaned snapshot as rollback configuration.
 
 Standalone serve/admin-gc installations require the executable alias
 `oberth-git-ssh -> oberth` adjacent to the installed binary. The container ships

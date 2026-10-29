@@ -50,56 +50,104 @@ func readUpgradeCompatibility(ctx context.Context, namespace string, deps Deps) 
 	return compat, nil
 }
 
+type preparedUpgradeValues struct {
+	compatibility backupCompatibility
+	storedValues  string // cleaned user snapshot; empty keeps ordinary Helm reuse
+	cleanup       func()
+}
+
 // Helm owns schema evaluation (including local refs and additionalProperties).
 // Validate only reused USER configuration here, not old defaults for keys that
 // no longer exist. Unknown keys are reported and refused; never silently prune
 // administrator configuration or print a rendered manifest into the plan/log.
-func prepareUpgradeValues(ctx context.Context, cfg UpgradeConfig, deps Deps, chart, imageRef string) (backupCompatibility, error) {
+func prepareUpgradeValues(ctx context.Context, cfg UpgradeConfig, deps Deps, chart, imageRef string) (preparedUpgradeValues, error) {
 	compat, err := readUpgradeCompatibility(ctx, cfg.Namespace, deps)
 	if err != nil {
-		return compat, err
+		return preparedUpgradeValues{}, err
 	}
 	raw, err := deps.RunHelm(ctx, []string{"get", "values", "oberth", "-n", cfg.Namespace, "-o", "json"})
 	if err != nil {
-		return compat, fmt.Errorf("read stored release configuration before upgrade: %w", err)
+		return preparedUpgradeValues{}, fmt.Errorf("read stored release configuration before upgrade: %w", err)
 	}
 	var values map[string]any
-	if json.Unmarshal(raw, &values) != nil {
-		return compat, fmt.Errorf("cannot decode stored release configuration before upgrade")
+	decoder := json.NewDecoder(strings.NewReader(string(raw)))
+	decoder.UseNumber() // The applied snapshot must preserve exact stored integers.
+	if !json.Valid(raw) || decoder.Decode(&values) != nil {
+		return preparedUpgradeValues{}, fmt.Errorf("cannot decode stored release configuration before upgrade")
 	}
 	if values == nil {
 		values = map[string]any{}
 	}
+	// Only the retired boolean is migrated. Other administrator keys still
+	// reach the target schema unchanged; malformed shadow values are refused.
+	removedShadow := false
+	var legacyShadow bool
+	if cache, ok := values["gitcache"].(map[string]any); ok {
+		if shadow, present := cache["shadow"]; present {
+			value, ok := shadow.(bool)
+			if !ok {
+				return preparedUpgradeValues{}, &ErrSchemaValidation{Detail: "stored gitcache.shadow must be a legacy boolean; no upgrade applied"}
+			}
+			legacyShadow = value
+			delete(cache, "shadow")
+			if len(cache) == 0 {
+				delete(values, "gitcache")
+			}
+			removedShadow = true
+		}
+	}
 	body, err := json.Marshal(values)
 	if err != nil {
-		return compat, err
+		return preparedUpgradeValues{}, err
 	}
 	directory, err := os.MkdirTemp("", "oberth-upgrade-values-")
 	if err != nil {
-		return compat, err
+		return preparedUpgradeValues{}, err
 	}
-	defer func() { _ = os.RemoveAll(directory) }()
+	cleanup := func() { _ = os.RemoveAll(directory) }
+	keepSnapshot := false
+	defer func() {
+		if !keepSnapshot {
+			cleanup()
+		}
+	}()
 	path := filepath.Join(directory, "stored-values.json")
 	if err := os.WriteFile(path, body, 0600); err != nil {
-		return compat, err
+		return preparedUpgradeValues{}, err
+	}
+	if removedShadow {
+		cfg.storedValues = path
 	}
 	_, flags := upgradeHelmArgs(cfg, chart, imageRef, compat)
 	args := []string{"template", "oberth", chart, "-n", cfg.Namespace, "--is-upgrade", "--values", path}
 	// Use the exact upgrade pins and operator overrides, in the same order.
 	for i := 0; i < len(flags); i++ {
 		switch flags[i] {
-		case "--reset-then-reuse-values", "--wait":
+		case "--reset-then-reuse-values", "--reset-values", "--wait":
 		case "--timeout":
 			i++
-		case "--set", "--set-string", "--values", "--version":
+		case "--values":
+			if flags[i+1] != path {
+				args = append(args, flags[i], flags[i+1])
+			}
+			i++
+		case "--set", "--set-string", "--version":
 			args = append(args, flags[i], flags[i+1])
 			i++
 		default:
-			return compat, fmt.Errorf("unexpected generated upgrade flag %q", flags[i])
+			return preparedUpgradeValues{}, fmt.Errorf("unexpected generated upgrade flag %q", flags[i])
 		}
 	}
 	if _, err := deps.RunHelm(ctx, args); err != nil {
-		return compat, &ErrSchemaValidation{Detail: fmt.Sprintf("stored configuration/overrides do not render against the target chart; no upgrade applied. Export installed values with helm get values --all, remove/migrate unsupported keys in an explicit values file, and reconcile with helm upgrade --reset-values --values CLEANED_FILE (preserving compatibility.*) before retrying: %v", err)}
+		return preparedUpgradeValues{}, &ErrSchemaValidation{Detail: fmt.Sprintf("stored configuration/overrides do not render against the target chart; no upgrade applied. Export installed values with helm get values --all, remove/migrate unsupported keys in an explicit values file, and reconcile with helm upgrade --reset-values --values CLEANED_FILE (preserving compatibility.*) before retrying: %v", err)}
 	}
-	return compat, nil
+	prepared := preparedUpgradeValues{compatibility: compat, cleanup: cleanup}
+	if removedShadow {
+		prepared.storedValues = path
+		if deps.Output != nil {
+			_, _ = fmt.Fprintf(deps.Output, "Dropped stored inert legacy gitcache.shadow=%t for this upgrade; the prior Helm revision retains its original value for rollback.\n", legacyShadow)
+		}
+	}
+	keepSnapshot = true
+	return prepared, nil
 }

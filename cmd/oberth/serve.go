@@ -1988,28 +1988,6 @@ func perUpstreamSSHEntries(ctx context.Context, database *store.Store, options s
 	return entries, nil
 }
 
-func buildPerUpstreamSSHCommand(ctx context.Context, database *store.Store, options serveOptions, configPath string, logger *log.Logger) (string, error) {
-	entries, err := perUpstreamSSHEntries(ctx, database, options, logger)
-	if err != nil {
-		return "", err
-	}
-	return sshCommandFromEntries(entries, options, configPath)
-}
-
-func sshCommandFromEntries(entries []app.SSHConfigEntry, options serveOptions, configPath string) (string, error) {
-	if len(entries) == 0 {
-		return app.GitSSHCommandPaths(options.upstreamKey, options.knownHosts)
-	}
-	configBody, err := app.BuildSSHConfig(entries, options.upstreamKey, options.knownHosts)
-	if err != nil {
-		return "", fmt.Errorf("build per-upstream SSH config: %w", err)
-	}
-	if err := os.WriteFile(configPath, []byte(configBody), 0o600); err != nil {
-		return "", fmt.Errorf("write per-upstream SSH config: %w", err)
-	}
-	return app.GitSSHCommandFromConfig(configPath)
-}
-
 func pathWithin(root, path string) bool { return gitoid.StrictPathWithin(root, path) }
 
 // buildGoProxyRepoMap discovers only repositories owned by the administrator's

@@ -43,11 +43,16 @@ func TestUpgradeMergesNewChartDefaults(t *testing.T) {
 // a nonmutating kube client; HTTP supplies discovery metadata only.
 func TestUpgradeActualHelmPreservesOldValuesAndAddsDefaults(t *testing.T) {
 	for _, version := range []string{"0.17.53", "0.17.62"} {
-		t.Run(version, func(t *testing.T) { testUpgradeActualHelmPreservesOldValues(t, version) })
+		t.Run(version, func(t *testing.T) { testUpgradeActualHelmPreservesOldValues(t, version, nil) })
+	}
+	for _, shadow := range []bool{true, false} {
+		t.Run(fmt.Sprintf("0.17.62-stored-shadow-%t", shadow), func(t *testing.T) {
+			testUpgradeActualHelmPreservesOldValues(t, "0.17.62", &shadow)
+		})
 	}
 }
 
-func testUpgradeActualHelmPreservesOldValues(t *testing.T, oldVersion string) {
+func testUpgradeActualHelmPreservesOldValues(t *testing.T, oldVersion string, shadow *bool) {
 	requireHelmForUpgradeTest(t)
 	old, err := os.ReadFile("../../hack/testdata/chart-values-v" + oldVersion + ".yaml")
 	if err != nil {
@@ -66,6 +71,9 @@ func testUpgradeActualHelmPreservesOldValues(t *testing.T, oldVersion string) {
 	values["removedOldDefault"] = "not user configuration"
 	values["compatibility"] = map[string]any{"schemaIdentity": testUpgradeCompatibility.SchemaIdentity, "auditDomain": testUpgradeCompatibility.AuditDomain, "witnessKeyInfo": testUpgradeCompatibility.WitnessKeyInfo}
 	config := map[string]any{"image": map[string]any{"ref": "example.invalid/old@sha256:" + strings.Repeat("2", 64)}, "argo": map[string]any{"enabled": true, "goProxy": map[string]any{"enabled": false}}, "pushBannerURL": "", "retention": map[string]any{"keepNewestPerRef": 0}, "podAnnotations": map[string]any{"round17.example/stored": "kept"}}
+	if shadow != nil {
+		config["gitcache"] = map[string]any{"shadow": *shadow}
+	}
 	values["pushBannerURL"] = ""
 	values["retention"].(map[string]any)["keepNewestPerRef"] = 0
 	values["argo"].(map[string]any)["goProxy"].(map[string]any)["enabled"] = false
@@ -138,10 +146,13 @@ func testUpgradeActualHelmPreservesOldValues(t *testing.T, oldVersion string) {
 	if err := requireUpgradeHelmVersion(t.Context(), deps); err != nil {
 		t.Fatal(err)
 	}
-	compat, err := prepareUpgradeValues(t.Context(), cfg, deps, chart, image)
+	prepared, err := prepareUpgradeValues(t.Context(), cfg, deps, chart, image)
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer prepared.cleanup()
+	cfg.storedValues = prepared.storedValues
+	compat := prepared.compatibility
 	if compat != testUpgradeCompatibility {
 		t.Fatalf("identities from installed chart defaults lost: %+v", compat)
 	}
@@ -182,6 +193,20 @@ func testUpgradeActualHelmPreservesOldValues(t *testing.T, oldVersion string) {
 		if !strings.Contains(upgraded.Manifest, want) {
 			t.Errorf("render dropped installed identity %q", want)
 		}
+	}
+	if shadow != nil {
+		if cache, ok := upgraded.Config["gitcache"].(map[string]any); ok {
+			if _, present := cache["shadow"]; present {
+				t.Fatalf("stored shadow survived actual Helm upgrade: %+v", cache)
+			}
+		}
+		unchanged, err := os.ReadFile(history)
+		if err != nil || string(unchanged) != string(encoded) {
+			t.Fatalf("migration changed prior release/rollback input: %v", err)
+		}
+		// Raw install/restore compatibility below is independent of this upgrade
+		// migration: it retains the original false-valued chart defaults.
+		delete(config, "gitcache")
 	}
 	proxy := upgraded.Config["argo"].(map[string]any)["goProxy"].(map[string]any)
 	if proxy["enabled"] != false || upgraded.Config["pushBannerURL"] != "" {
@@ -237,10 +262,13 @@ func testUpgradeActualHelmPreservesOldValues(t *testing.T, oldVersion string) {
 	}
 	// A user-set removed key must be refused by the TARGET schema before upgrade.
 	// Exercise top-level and nested additionalProperties=false with real Helm.
-	for _, nested := range []bool{false, true} {
+	for _, nested := range []string{"top", "retention", "gitcache"} {
 		parent := config
-		if nested {
+		if nested == "retention" {
 			parent = config["retention"].(map[string]any)
+		} else if nested == "gitcache" {
+			config["gitcache"] = map[string]any{"shadow": true}
+			parent = config["gitcache"].(map[string]any)
 		}
 		parent["removedByTarget"] = true
 		encoded, err = json.Marshal(release)
@@ -250,12 +278,34 @@ func testUpgradeActualHelmPreservesOldValues(t *testing.T, oldVersion string) {
 		if err := os.WriteFile(history, encoded, 0600); err != nil {
 			t.Fatal(err)
 		}
+		cfg.storedValues = ""
 		_, err = prepareUpgradeValues(t.Context(), cfg, deps, chart, image)
 		var schemaErr *ErrSchemaValidation
 		if !errors.As(err, &schemaErr) || !strings.Contains(err.Error(), "removedByTarget") {
 			t.Fatalf("unknown stored key reached upgrade: %v", err)
 		}
 		delete(parent, "removedByTarget")
+		if nested == "gitcache" {
+			delete(config, "gitcache")
+		}
+	}
+
+	// Malformed legacy values are not migrated into valid configuration.
+	for _, shadow := range []any{"true", 1, nil} {
+		config["gitcache"] = map[string]any{"shadow": shadow}
+		encoded, err = json.Marshal(release)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(history, encoded, 0600); err != nil {
+			t.Fatal(err)
+		}
+		cfg.storedValues = ""
+		_, err = prepareUpgradeValues(t.Context(), cfg, deps, chart, image)
+		var schemaErr *ErrSchemaValidation
+		if !errors.As(err, &schemaErr) || !strings.Contains(err.Error(), "shadow") {
+			t.Fatalf("malformed stored shadow accepted: %v", err)
+		}
 	}
 
 }

@@ -13,7 +13,7 @@ import (
 	"github.com/oberthci/oberth/internal/store"
 )
 
-// TestBuildPerUpstreamSSHCommandUsesProjectedKeyFiles pins the serve-time
+// TestPerUpstreamNativeSSHEnvironmentUsesProjectedKeyFiles pins the serve-time
 // contract: per-upstream identities are referenced in place on the Secret
 // volume mount — no key bytes are read, copied, or written anywhere — the
 // generated config maps each dedicated upstream host to its projected file
@@ -21,7 +21,7 @@ import (
 // key stay on the shared fallback, and a malformed key name from the
 // database (treated as untrusted input) is skipped instead of being joined
 // into a path.
-func TestBuildPerUpstreamSSHCommandUsesProjectedKeyFiles(t *testing.T) {
+func TestPerUpstreamNativeSSHEnvironmentUsesProjectedKeyFiles(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	directory := t.TempDir()
@@ -56,12 +56,12 @@ func TestBuildPerUpstreamSSHCommandUsesProjectedKeyFiles(t *testing.T) {
 	options := serveOptions{upstreamKey: sharedKey, knownHosts: knownHosts}
 	configPath := filepath.Join(directory, "ssh-config")
 	logger := log.New(io.Discard, "", 0)
-	command, err := buildPerUpstreamSSHCommand(ctx, database, options, configPath, logger)
+	entries, err := perUpstreamSSHEntries(ctx, database, options, logger)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if command != "'ssh' '-F' '"+configPath+"'" {
-		t.Fatalf("command = %q", command)
+	if _, err := nativeGitSSHEnvironment(entries, options, configPath); err != nil {
+		t.Fatal(err)
 	}
 	body, err := os.ReadFile(configPath)
 	if err != nil {
@@ -92,10 +92,10 @@ func TestBuildPerUpstreamSSHCommandUsesProjectedKeyFiles(t *testing.T) {
 	}
 }
 
-// TestBuildPerUpstreamSSHCommandFallsBackToLegacySingleKey pins backward
-// compatibility: with no dedicated keys registered, the command is the
-// legacy inline single-key transport and no config file is written.
-func TestBuildPerUpstreamSSHCommandFallsBackToLegacySingleKey(t *testing.T) {
+// TestPerUpstreamNativeSSHEnvironmentFallsBackToLegacySingleKey pins backward
+// compatibility: with no dedicated keys registered, the native config retains
+// the shared identity. No shell-interpreted transport is returned.
+func TestPerUpstreamNativeSSHEnvironmentFallsBackToLegacySingleKey(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	directory := t.TempDir()
@@ -114,15 +114,20 @@ func TestBuildPerUpstreamSSHCommandFallsBackToLegacySingleKey(t *testing.T) {
 	}
 	options := serveOptions{upstreamKey: sharedKey, knownHosts: knownHosts}
 	configPath := filepath.Join(directory, "ssh-config")
-	command, err := buildPerUpstreamSSHCommand(ctx, database, options, configPath, log.New(io.Discard, "", 0))
+	entries, err := perUpstreamSSHEntries(ctx, database, options, log.New(io.Discard, "", 0))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(command, "'-i' '"+sharedKey+"'") || !strings.Contains(command, "'-F' '/dev/null'") {
-		t.Fatalf("legacy fallback command = %q", command)
+	env, err := nativeGitSSHEnvironment(entries, options, configPath)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if _, err := os.Stat(configPath); !os.IsNotExist(err) {
-		t.Fatalf("config file must not exist for the legacy path: %v", err)
+	if _, ok := env["GIT_SSH_COMMAND"]; ok {
+		t.Fatal("shell transport returned")
+	}
+	body, err := os.ReadFile(configPath)
+	if err != nil || !strings.Contains(string(body), "Host *\n") || !strings.Contains(string(body), `IdentityFile "`+sharedKey+`"`) {
+		t.Fatalf("shared fallback missing: %s: %v", body, err)
 	}
 }
 
