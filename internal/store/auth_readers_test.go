@@ -27,32 +27,20 @@ func authReaderFixture(t *testing.T) (*Store, model.Uplink) {
 	return s, uplink
 }
 
-func TestSSHLookupDuringAuditGateHold(t *testing.T) {
+func TestSSHLookupDuringWriterHold(t *testing.T) {
 	s, uplink := authReaderFixture(t)
-	entered, release := make(chan struct{}), make(chan struct{})
-	finished := make(chan error, 1)
-	go func() {
-		_, _, err := s.VerifyAuditMutationStateUnanchored(t.Context(), nil, nil, func(model.AuditHead, model.AuditAnchor) error {
-			close(entered)
-			<-release
-			return nil
-		})
-		finished <- err
-	}()
-	<-entered
-	defer func() {
-		close(release)
-		if err := <-finished; err != nil {
-			t.Error(err)
-		}
-	}()
-	// Reproduce the old path with the real audit transaction holding the sole
-	// primary connection. Use the production five-second identity deadline.
+	tx, err := s.db.BeginTx(t.Context(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	// Hold the primary writer directly: audit callbacks no longer own it.
+	// Use the production five-second identity deadline.
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 	started := time.Now()
 	var id int64
-	err := s.db.QueryRowContext(ctx, `SELECT id FROM uplinks WHERE fingerprint=?`, uplink.Fingerprint).Scan(&id)
+	err = s.db.QueryRowContext(ctx, `SELECT id FROM uplinks WHERE fingerprint=?`, uplink.Fingerprint).Scan(&id)
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("primary lookup = %v, want deadline", err)
 	}

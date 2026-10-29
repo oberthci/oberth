@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"database/sql"
 	"encoding/pem"
 	"errors"
 	"fmt"
@@ -134,8 +135,9 @@ func (s *revokeOnSign) Sign(random io.Reader, data []byte) (*ssh.Signature, erro
 	return s.Signer.Sign(random, data)
 }
 
-func TestDurableKeyAuthDuringAuditHoldAndRevocation(t *testing.T) {
-	db, err := store.Open(t.Context(), filepath.Join(t.TempDir(), "auth.sqlite"), store.Options{})
+func TestDurableKeyAuthDuringWriterHoldAndRevocation(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "auth.sqlite")
+	db, err := store.Open(t.Context(), path, store.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -160,22 +162,19 @@ func TestDurableKeyAuthDuringAuditHoldAndRevocation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	entered, release := make(chan struct{}), make(chan struct{})
-	gateDone := make(chan error, 1)
-	go func() {
-		_, _, err := db.VerifyAuditMutationStateUnanchored(t.Context(), nil, nil, func(model.AuditHead, model.AuditAnchor) error { close(entered); <-release; return nil })
-		gateDone <- err
-	}()
-	<-entered
-	// A complete SSH handshake, including both durable lookups, must succeed
-	// while the real audit gate owns the writer connection.
+	raw, err := sql.Open("sqlite", path+"?_txlock=immediate")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = raw.Close() }()
+	tx, err := raw.BeginTx(t.Context(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Hold a real SQLite writer independently of the audit gate callback,
+	// which deliberately performs external I/O without reserving the writer.
 	func() {
-		defer func() {
-			close(release)
-			if err := <-gateDone; err != nil {
-				t.Error(err)
-			}
-		}()
+		defer func() { _ = tx.Rollback() }()
 		_, stop := startServer(t, server, signer)
 		stop()
 	}()
