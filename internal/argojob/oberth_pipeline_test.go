@@ -2,6 +2,7 @@ package argojob
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"regexp"
@@ -843,17 +844,6 @@ func TestStaticGitQualificationUsesOnlyInstalledRunnerPrefixes(t *testing.T) {
 		if template.Container == nil || !strings.Contains(template.Container.Image, "-alpine3.23@sha256:") {
 			t.Fatal("static musl build requires the pinned Alpine runner")
 		}
-		foundAPK := false
-		for _, variable := range template.Container.Env {
-			if variable.Name == "PATH" {
-				for _, entry := range strings.Split(variable.Value, ":") {
-					foundAPK = foundAPK || entry == "/sbin"
-				}
-			}
-		}
-		if !foundAPK {
-			t.Fatal("Alpine apk in /sbin is unreachable through the CI PATH")
-		}
 	}
 	if !found {
 		t.Fatal("static musl build template missing")
@@ -866,5 +856,18 @@ func TestStaticGitQualificationUsesOnlyInstalledRunnerPrefixes(t *testing.T) {
 	config.NonrootProfile = ""
 	if _, err := Build(config, request); err == nil {
 		t.Fatal("nonroot qualification accepted with disabled controller profile")
+	}
+}
+
+func TestStaticGitPackageInstallerWithInjectedServerPath(t *testing.T) {
+	command := exec.Command("/bin/sh", "hack/test-install-static-git-packages.sh")
+	command.Dir = repositoryRoot(t)
+	command.Env = []string{
+		"PATH=/tmp/oberth-tools/bin:/usr/local/bin:/usr/bin:/bin",
+		"HOME=" + t.TempDir(),
+		"TMPDIR=" + t.TempDir(),
+	}
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("package installer with injected server PATH: %v\n%s", err, output)
 	}
 }
