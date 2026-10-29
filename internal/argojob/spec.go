@@ -1978,17 +1978,17 @@ func hasWorkspaceVCT(workflow *wfv1.Workflow) bool {
 // container in a workspace-equipped pipeline receives. These are the values
 // that were previously copy-pasted into every template's env block.
 //
-// Step-specific overrides (GOBIN, CGO_ENABLED, GOARCH, GOMEMLIMIT) stay in the
-// YAML and survive this injection: overrideEnvironment strips the server's value
-// for a name collision, so a step that declares GOBIN keeps its own value while
-// the workspace provides the baseline it does not need to repeat.
+// The server PATH replaces any step-declared PATH so the workspace tools remain
+// reachable. Other injected workspace variables also win name collisions.
+// Step-specific variables not injected here (GOBIN, CGO_ENABLED, GOARCH,
+// GOMEMLIMIT) stay in the YAML.
 //
 // GOMODCACHE and GOCACHE point at the per-run VCT fallback paths. When the
 // administrator configures a persistent cache, injectRunEnvironment (which runs
 // after this) overrides them with the persistent mount paths.
 func workspaceEnvironment() []corev1.EnvVar {
 	return []corev1.EnvVar{
-		{Name: "PATH", Value: WorkspaceToolsMountPath + "/bin:/usr/local/bin:/usr/bin:/bin"},
+		{Name: "PATH", Value: WorkspaceToolsMountPath + "/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"},
 		{Name: "OBERTH_TOOLS_DIR", Value: WorkspaceToolsMountPath},
 		{Name: "HOME", Value: "/tmp"},
 		{Name: "GOPATH", Value: WorkspaceToolsMountPath + "/gopath"},

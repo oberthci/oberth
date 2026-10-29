@@ -13,6 +13,7 @@ import (
 
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 	"github.com/oberthci/oberth/pkg/periapsis"
@@ -161,6 +162,61 @@ func TestBuildOverridesRunIdentityTheDocumentTriesToSet(t *testing.T) {
 	}
 	if _, present := environment["OBERTH_VAULT_ROLE"]; present {
 		t.Fatal("a CI submission was given a Vault role")
+	}
+}
+
+func TestBuildWorkspacePATH(t *testing.T) {
+	for _, test := range []struct {
+		name         string
+		declaredPATH string
+		want         string
+	}{
+		{
+			name: "injected",
+			want: WorkspaceToolsMountPath + "/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+		},
+		{
+			name:         "declared-is-replaced",
+			declaredPATH: "/usr/local/bin:/usr/bin:/bin",
+			want:         WorkspaceToolsMountPath + "/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			workflow, err := argoworkflow.Decode([]byte(greedyDocument))
+			if err != nil {
+				t.Fatal(err)
+			}
+			workflow.Spec.VolumeClaimTemplates = []corev1.PersistentVolumeClaim{{
+				ObjectMeta: metav1.ObjectMeta{Name: WorkspaceVolumeName},
+				Spec: corev1.PersistentVolumeClaimSpec{
+					AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
+				},
+			}}
+			if test.declaredPATH != "" {
+				workflow.Spec.Templates[0].Container.Env = append(workflow.Spec.Templates[0].Container.Env,
+					corev1.EnvVar{Name: "PATH", Value: test.declaredPATH})
+			}
+			source, err := json.Marshal(workflow)
+			if err != nil {
+				t.Fatal(err)
+			}
+			built, err := Build(testConfig(), testRequest(periapsis.TriggerCI, string(source)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			count := 0
+			for _, env := range templateNamed(t, built, "main").Container.Env {
+				if env.Name == "PATH" {
+					count++
+					if env.Value != test.want {
+						t.Errorf("PATH = %q, want %q", env.Value, test.want)
+					}
+				}
+			}
+			if count != 1 {
+				t.Errorf("PATH entries = %d, want 1", count)
+			}
+		})
 	}
 }
 
