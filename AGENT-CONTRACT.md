@@ -172,8 +172,16 @@ The re-verified head and checkpoint must equal the external proof; external I/O
 runs once. Moved heads, changed proofs, tampering and exhausted retries refuse.
 Live readers share a startup-cached read-only DSN with query_only and the Store's
 busy timeout. A mutation gate has a 30-second total deadline, including waiting
-for refresh. All modes recheck the complete chain; no cached permission or prefix
-bypass is used. Local prefix pins apply within a cycle, not across fresh cycles.
+for refresh. Witnessed gates recheck the complete chain. Local-only and
+timestamp-only gates may reuse a successfully fenced in-process prefix and
+verify its new suffix; outside commits, connection/schema/checkpoint changes,
+failed gates and one-minute expiry force full verification. Startup and periodic
+cycles still scan the complete chain. Local prefix pins survive fresh cycles
+and failed gates, so a valid shorter history cannot clear a rollback refusal.
+SSH identity readers open explicitly during daemon startup; one-shot Store
+openers retain only the primary connection. See
+[audit-verification-cache.md](docs/audit-verification-cache.md) for the cache's
+trust assumptions and complete invalidation rules.
 
 ### Kubernetes Secrets
 
