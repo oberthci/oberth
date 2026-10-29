@@ -26,7 +26,7 @@ func (store fakeHealthStore) ListRepositories(context.Context) ([]model.Reposito
 	return store.repositories, store.err
 }
 
-func TestHealthRequiresConfiguredUpstreamAndCluster(t *testing.T) {
+func TestHealthRequiresConfiguredUpstreamAndDatabase(t *testing.T) {
 	t.Parallel()
 	health := Health{
 		Store: fakeHealthStore{}, Configured: func(context.Context) error { return nil },
@@ -54,15 +54,23 @@ func TestHealthRequiresConfiguredUpstreamAndCluster(t *testing.T) {
 	}
 	health.VCS = func(context.Context, model.Upstream) error { return nil }
 	health.Cluster = func(context.Context) error { return errors.New("cluster down") }
-	if err := health.Ready(context.Background()); err == nil {
-		t.Fatal("readiness passed with an unavailable cluster")
+	if err := health.Ready(context.Background()); err != nil {
+		t.Fatalf("cluster outage removed cached service from readiness: %v", err)
 	}
-	health.Cluster = func(context.Context) error { return nil }
 	health.Audit = func(context.Context) error { return errors.New("anchor stale") }
-	if err := health.Ready(context.Background()); err == nil {
-		t.Fatal("readiness passed with stale audit anchoring")
+	if err := health.Ready(context.Background()); err != nil {
+		t.Fatalf("audit outage removed cached service from readiness: %v", err)
+	}
+	value, err := health.Status(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	status := value.(HealthStatus)
+	if status.Cluster != "unavailable" || status.Audit != "unavailable" || status.Database != "ready" {
+		t.Fatalf("dependency degradation disappeared from status: %+v", status)
 	}
 	health.Audit = func(context.Context) error { return nil }
+	health.Cluster = func(context.Context) error { return nil }
 	if err := health.Ready(context.Background()); err != nil {
 		t.Fatal(err)
 	}

@@ -1,8 +1,9 @@
 # Go module proxy availability
 
 The private mirror has its own TLS listener on the Oberth pod. A pod can be
-Running with that listener open while `/readyz` reports a scheduler, Kubernetes
-API or audit dependency failure. With a single endpoint, a readiness-gated
+Running with that listener open while `/readyz` reports pending scheduler
+recovery, failed database/configuration checks or a stale serving snapshot.
+With a single endpoint, a readiness-gated
 Service then has no usable backend: kube-proxy can reject connections before
 any HTTP request reaches Oberth. A local request can work at the same time that
 a pipeline sees `connect: connection refused` through the ClusterIP (#1204).
@@ -10,15 +11,17 @@ a pipeline sees `connect: connection refused` through the ClusterIP (#1204).
 The goproxy Service sets `publishNotReadyAddresses: true` so already-running
 pipelines can keep reading mirrored source during these dependency failures.
 Only the private, read-only proxy Service bypasses pod readiness. The API/SSH
-Service, mutation gates, TLS verification, namespace ownership and NetworkPolicy
-boundaries retain their existing behavior. The listener is still owned by the
-server process and closes during shutdown. Publication is not a guarantee that
+Service still respects startup recovery, database/configuration readiness and
+shutdown drain. Kubernetes API availability and periodic audit health remain
+status diagnostics; operation-level mutation gates, TLS verification, namespace
+ownership and NetworkPolicy boundaries remain enforced. The listener is still
+owned by the server process and closes during shutdown. Publication is not a guarantee that
 a pod starting up or shutting down already has a usable listener.
 
 Readiness, liveness and startup probes have explicit five-second timeouts. The
 previous implicit one-second deadline included TLS handshake and CPU scheduling,
 not just handler execution. Readiness dependency checks already run in a bounded
-background snapshot; `/readyz` does not perform those network checks inline.
+background snapshot; `/readyz` does not perform those checks inline.
 A five-second timeout gives a loaded process more scheduling time; it does not
 turn a genuine 503 into readiness. A Running pod and a single successful local
 probe are insufficient evidence that the Service stayed routable throughout a
