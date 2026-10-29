@@ -264,9 +264,10 @@ func testUpgradeActualHelmPreservesOldValues(t *testing.T, oldVersion string, sh
 	// Exercise top-level and nested additionalProperties=false with real Helm.
 	for _, nested := range []string{"top", "retention", "gitcache"} {
 		parent := config
-		if nested == "retention" {
+		switch nested {
+		case "retention":
 			parent = config["retention"].(map[string]any)
-		} else if nested == "gitcache" {
+		case "gitcache":
 			config["gitcache"] = map[string]any{"shadow": true}
 			parent = config["gitcache"].(map[string]any)
 		}
