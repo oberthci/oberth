@@ -46,7 +46,9 @@ func deadlineTestManager(t *testing.T, timeout time.Duration) (*Manager, *deadli
 }
 
 func TestMutationGateDeadlineBoundsExternalWork(t *testing.T) {
-	manager, continuity := deadlineTestManager(t, 100*time.Millisecond)
+	// Scale the injected deadline and its observation allowance together so
+	// the bound remains strict relative to the work's test-only budget.
+	manager, continuity := deadlineTestManager(t, testtimeout.Scale(100*time.Millisecond))
 	entered := false
 	continuity.reconcile = func(ctx context.Context) error {
 		entered = true
@@ -55,13 +57,13 @@ func TestMutationGateDeadlineBoundsExternalWork(t *testing.T) {
 	}
 	started := time.Now()
 	err := manager.AllowMutation(context.Background())
-	if !errors.Is(err, context.DeadlineExceeded) || !entered || time.Since(started) > 3*time.Second {
+	if !errors.Is(err, context.DeadlineExceeded) || !entered || time.Since(started) > testtimeout.Scale(3*time.Second) {
 		t.Fatalf("gate deadline: entered=%t duration=%s err=%v", entered, time.Since(started), err)
 	}
 	continuity.reconcile = nil
-	// Give the lock-reuse probe the normal gate budget so reader startup on
+	// Give the lock-reuse probe a scaled normal gate budget so reader startup on
 	// a loaded host cannot obscure whether the expired attempt released it.
-	manager.gateTimeout = defaultGateTimeout
+	manager.gateTimeout = testtimeout.Start(defaultGateTimeout)
 	if err := manager.AllowMutation(t.Context()); err != nil {
 		t.Fatalf("deadline failed to release refresh lock: %v", err)
 	}

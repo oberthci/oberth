@@ -22,6 +22,7 @@ import (
 
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/internal/testtimeout"
 	"github.com/oberthci/oberth/internal/vmrunner"
 )
 
@@ -313,7 +314,7 @@ func TestActualPodAuthorityMutationsRefusedAndRetained(t *testing.T) {
 			// Cleanup observes and discharges two durable resources through
 			// multiple API and journal calls. Keep this success path bounded
 			// without making a loaded release test depend on a one-second budget.
-			must(t, (&vmrunner.PilotReconciler{Journal: f.s, Runtime: f.b, Timeout: 10 * time.Second}).Cleanup(f.ctx, f.plan.Spec.RunID))
+			must(t, (&vmrunner.PilotReconciler{Journal: f.s, Runtime: f.b, Timeout: testtimeout.Start(10 * time.Second)}).Cleanup(f.ctx, f.plan.Spec.RunID))
 			state, err = f.s.PilotExecution(f.ctx, f.plan.Spec.RunID)
 			must(t, err)
 			if !state.Cleaned || state.Failure == "" {
