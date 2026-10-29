@@ -29,12 +29,14 @@ import (
 type authTestLogger struct {
 	mu    sync.Mutex
 	lines string
+	calls int
 }
 
 func (l *authTestLogger) Printf(format string, args ...any) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.lines += fmt.Sprintf(format, args...)
+	l.calls++
 }
 
 func TestLookupFailuresAbortAuthenticationAsServerErrors(t *testing.T) {
@@ -43,7 +45,7 @@ func TestLookupFailuresAbortAuthenticationAsServerErrors(t *testing.T) {
 			t.Run(fmt.Sprintf("stage-%d-%v", stage, failure), func(t *testing.T) {
 				logger := &authTestLogger{}
 				var calls atomic.Int32
-				server, err := New(Config{HostSigner: newSigner(t), Git: &fakeGit{}, OnUpdate: noOpUpdateHandler(), Logger: logger,
+				server, err := New(Config{HostSigner: newSigner(t), Git: &fakeGit{}, OnUpdate: noOpUpdateHandler(), Logger: logger, MaxConnections: 1,
 					Resolver: IdentityResolverFunc(func(string) (string, bool, error) {
 						if calls.Add(1) == stage {
 							return "", false, failure
@@ -76,14 +78,22 @@ func TestLookupFailuresAbortAuthenticationAsServerErrors(t *testing.T) {
 				if !strings.Contains(banners, "temporary server error") || !strings.Contains(banners, "retry later") {
 					t.Fatalf("missing transient banner: %q", banners)
 				}
+				// Wait for the handler's deferred slot release before cancellation,
+				// so Serve has finished logging while its context is still live.
+				select {
+				case server.connections <- struct{}{}:
+					release(server.connections)
+				case <-time.After(5 * time.Second):
+					t.Fatal("outage handler did not release its connection slot")
+				}
 				cancel()
 				if err := <-done; err != nil {
 					t.Fatal(err)
 				}
 				logger.mu.Lock()
 				defer logger.mu.Unlock()
-				if !strings.Contains(logger.lines, failure.Error()) {
-					t.Fatalf("failure not logged: %s", logger.lines)
+				if logger.calls != 1 || !strings.Contains(logger.lines, failure.Error()) || !strings.Contains(logger.lines, "SSH identity lookup unavailable") {
+					t.Fatalf("want one outage log, got %d: %s", logger.calls, logger.lines)
 				}
 			})
 		}
@@ -146,6 +156,9 @@ func TestDurableKeyAuthDuringWriterHoldAndRevocation(t *testing.T) {
 			t.Error(err)
 		}
 	}()
+	if err := db.OpenSSHAuthReaders(t.Context()); err != nil {
+		t.Fatal(err)
+	}
 	signer := newSigner(t)
 	credential, err := db.CreateTokenCredential(t.Context(), model.TokenCredentialSpec{Name: "ssh", Digest: make([]byte, 32)})
 	if err != nil {

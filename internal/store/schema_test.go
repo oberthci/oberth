@@ -376,6 +376,9 @@ VALUES
 		t.Fatalf("upgrade v1 schema: %v", err)
 	}
 	defer func() { _ = upgraded.Close() }()
+	if upgraded.authDB != nil {
+		t.Fatal("one-shot legacy migration opened SSH readers")
+	}
 	var version int
 	if err := upgraded.db.QueryRow(`SELECT MAX(version) FROM schema_migrations`).Scan(&version); err != nil {
 		t.Fatal(err)

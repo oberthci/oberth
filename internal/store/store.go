@@ -265,10 +265,6 @@ func open(
 			return nil, fmt.Errorf("reconcile inconsistent publications: %w", err)
 		}
 	}
-	if err := s.openAuthReaders(ctx, opts.BusyTimeout); err != nil {
-		_ = db.Close()
-		return nil, err
-	}
 	return s, nil
 }
 
@@ -287,12 +283,6 @@ func openCurrent(ctx context.Context, path string, opts Options, readOnly bool) 
 	}
 	if !readOnly {
 		if err := s.migrate(ctx, nil); err != nil {
-			_ = s.db.Close()
-			return nil, err
-		}
-	}
-	if !readOnly {
-		if err := s.openAuthReaders(ctx, opts.BusyTimeout); err != nil {
 			_ = s.db.Close()
 			return nil, err
 		}
@@ -1894,7 +1884,7 @@ RETURNING id, fingerprint, identity, token_credential_id, auth_actor, admin, cre
 func (s *Store) UplinkByFingerprint(ctx context.Context, fingerprint string) (model.Uplink, error) {
 	db := s.authDB
 	if db == nil {
-		db = s.db // read-only inspection handles and internal fixtures
+		db = s.db // CLI, inspection handles and internal fixtures
 	}
 	// A fresh deferred transaction binds the key and all its scopes to one
 	// committed snapshot. End it before returning; never retain a snapshot

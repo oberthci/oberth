@@ -7,10 +7,13 @@ these reads behind the server's single writer connection. Each lookup uses a
 fresh snapshot; committed revocations and scope changes take effect on the
 next lookup, including a second check after the client signs its key proof.
 Existing authenticated connections retain their session identity and scope.
+The daemon opens the reader pool before serving; CLI and one-shot maintenance
+store handles do not open it.
 
 A missing or revoked key receives the usual authentication refusal. A lookup
-timeout or database failure instead logs `SSH identity lookup unavailable`,
-sends `temporary server error: SSH identity lookup unavailable; retry later`,
+timeout or database failure instead logs `SSH identity lookup unavailable`
+once per connection, sends
+`temporary server error: SSH identity lookup unavailable; retry later`,
 and closes the connection. Retry those connections; a server-side lookup
 failure does not indicate that the client key needs to be registered again.
 
