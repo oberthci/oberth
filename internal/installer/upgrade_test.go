@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -865,15 +866,27 @@ func TestResolveChartImageRefEmpty(t *testing.T) {
 func TestRunUpgradeFullFlow(t *testing.T) {
 	t.Parallel()
 	for _, auditFails := range []bool{false, true} {
-		t.Run(fmt.Sprintf("audit-fails=%t", auditFails), func(t *testing.T) {
-			testRunUpgradeFullFlow(t, auditFails)
-		})
+		for _, shadow := range []string{"", "true", "false"} {
+			t.Run(fmt.Sprintf("audit-fails=%t/shadow=%s", auditFails, shadow), func(t *testing.T) {
+				testRunUpgradeFullFlow(t, auditFails, shadow)
+			})
+		}
 	}
 }
 
-func testRunUpgradeFullFlow(t *testing.T, auditFails bool) {
+func testRunUpgradeFullFlow(t *testing.T, auditFails bool, shadow string) {
 	t.Parallel()
 	var output bytes.Buffer
+	migrated := ""
+	details := map[string]string{"from": "0.12.34", "to": "0.12.35"}
+	if shadow != "" {
+		migrated = "gitcache.shadow=" + shadow
+		details["migrated"] = migrated
+	}
+	auditDetails, err := json.Marshal(details)
+	if err != nil {
+		t.Fatal(err)
+	}
 	targetImage := "europe-west4-docker.pkg.dev/skipopsmain/oberth/oberth:v0.12.35@sha256:abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
 	replicas := int32(1)
 
@@ -907,6 +920,9 @@ func testRunUpgradeFullFlow(t *testing.T, auditFails bool) {
 	deps := Deps{
 		Output: &output,
 		RunHelm: func(_ context.Context, args []string) ([]byte, error) {
+			if shadow != "" && args[0] == "get" && !slices.Contains(args, "--all") {
+				return []byte(fmt.Sprintf(`{"gitcache":{"shadow":%s}}`, shadow)), nil
+			}
 			if out, ok := testUpgradeValuePreflight(args); ok {
 				return out, nil
 			}
@@ -936,7 +952,7 @@ func testRunUpgradeFullFlow(t *testing.T, auditFails bool) {
 				if !verified || name != "kubectl" {
 					t.Fatalf("audit before verification: %s %v", name, args)
 				}
-				want := []string{"exec", "-c", "oberth", "-n", "oberth", "deploy/oberth", "--", "/usr/local/bin/oberth", "audit", "record", "upgrade.completed", "--details", `{"from":"0.12.34","to":"0.12.35"}`}
+				want := []string{"exec", "-c", "oberth", "-n", "oberth", "deploy/oberth", "--", "/usr/local/bin/oberth", "audit", "record", "upgrade.completed", "--details", string(auditDetails)}
 				if !reflect.DeepEqual(args, want) {
 					t.Fatalf("audit args=%v want=%v", args, want)
 				}
@@ -960,6 +976,9 @@ func testRunUpgradeFullFlow(t *testing.T, auditFails bool) {
 	}, deps)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if result.Migrated != migrated {
+		t.Fatalf("migration result = %q, want %q", result.Migrated, migrated)
 	}
 	if !recorded {
 		t.Fatal("upgrade completion was not recorded")

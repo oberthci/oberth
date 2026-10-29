@@ -100,6 +100,7 @@ type UpgradeResult struct {
 	TargetVersion   string
 	AlreadyUpToDate bool
 	Upgraded        bool
+	Migrated        string // legacy key/value stripped from stored configuration
 }
 
 // ValidateUpgrade checks UpgradeConfig for invalid flag combinations and
@@ -381,6 +382,22 @@ func RunUpgrade(ctx context.Context, cfg UpgradeConfig, deps Deps) (UpgradeResul
 	}
 
 	if cfg.DryRun {
+		revision, err := deployedUpgradeRevision(ctx, cfg.Namespace, deps)
+		if err != nil {
+			return result, err
+		}
+		values, err := readUpgradeStoredValues(ctx, cfg.Namespace, revision, deps)
+		if err != nil {
+			return result, err
+		}
+		result.Migrated, err = migrateUpgradeShadow(values)
+		if err != nil {
+			return result, err
+		}
+		if result.Migrated != "" {
+			cfg.storedValues = "<cleaned-deployed-values.json>"
+			_, _ = fmt.Fprintf(w, "Would strip stored legacy %s from deployed revision %s before applying the cleaned snapshot.\n", result.Migrated, revision)
+		}
 		if profile != nil {
 			profile.describe(w, cfg.Timeout)
 		}
@@ -418,6 +435,7 @@ func RunUpgrade(ctx context.Context, cfg UpgradeConfig, deps Deps) (UpgradeResul
 
 	defer prepared.cleanup()
 	cfg.storedValues = prepared.storedValues
+	result.Migrated = prepared.migrated
 	compatibility := prepared.compatibility
 
 	if cfg.WaitIdle {
@@ -464,9 +482,11 @@ func RunUpgrade(ctx context.Context, cfg UpgradeConfig, deps Deps) (UpgradeResul
 	}
 	result.Upgraded = true
 	deps.Output = w
-	recordServerAudit(ctx, deps, cfg.Namespace, "deploy/oberth", "upgrade.completed", map[string]any{
-		"from": currentVersion, "to": targetVersion,
-	})
+	details := map[string]any{"from": currentVersion, "to": targetVersion}
+	if result.Migrated != "" {
+		details["migrated"] = result.Migrated
+	}
+	recordServerAudit(ctx, deps, cfg.Namespace, "deploy/oberth", "upgrade.completed", details)
 	_, _ = fmt.Fprintf(w, "\nReady — %s\n", oberthWebUIURL)
 	return result, nil
 }

@@ -28,6 +28,16 @@ cleaned values file and `helm upgrade --reset-values --values CLEANED_FILE`,
 preserving compatibility identities and the original values for rollback.
 Do not use the cleaned snapshot as rollback configuration.
 
+Upgrade preflight reads the deployed Helm revision, even if a newer attempt
+failed, so a forward repair migrates the same stored configuration Helm would
+reuse. Dry-run reports the stripped legacy key and the `--reset-values` plan;
+a successful upgrade records the key/value in `upgrade.completed` audit details.
+The private values snapshot stays in `$TMPDIR` through Helm apply and rollout
+(0700 directory, 0600 file). Normal and error returns remove it; SIGKILL, OOM or
+power loss can leave it behind. After confirming no upgrade is running, remove
+any leftover `oberth-upgrade-values-*` directory from that operator's temporary
+directory. Treat the snapshot as sensitive operator configuration.
+
 Standalone serve/admin-gc installations require the executable alias
 `oberth-git-ssh -> oberth` adjacent to the installed binary. The container ships
 it. Existing hooks are replaced atomically on cache preparation. For rollback,

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"golang.org/x/mod/semver"
@@ -28,8 +29,8 @@ func requireUpgradeHelmVersion(ctx context.Context, deps Deps) error {
 
 // These deployment identities may live only in the INSTALLED chart's defaults.
 // Neither the new chart's defaults nor a caller override can supply them.
-func readUpgradeCompatibility(ctx context.Context, namespace string, deps Deps) (backupCompatibility, error) {
-	raw, err := deps.RunHelm(ctx, []string{"get", "values", "oberth", "-n", namespace, "--all", "-o", "json"})
+func readUpgradeCompatibility(ctx context.Context, namespace, revision string, deps Deps) (backupCompatibility, error) {
+	raw, err := deps.RunHelm(ctx, []string{"get", "values", "oberth", "-n", namespace, "--revision", revision, "--all", "-o", "json"})
 	if err != nil {
 		return backupCompatibility{}, fmt.Errorf("cannot read installed compatibility identities with helm get values --all: %w", err)
 	}
@@ -50,10 +51,74 @@ func readUpgradeCompatibility(ctx context.Context, namespace string, deps Deps) 
 	return compat, nil
 }
 
+// Helm upgrades reuse the deployed revision, even when the latest attempt failed.
+// Resolve it once so the compatibility and user-value reads describe that same release.
+func deployedUpgradeRevision(ctx context.Context, namespace string, deps Deps) (string, error) {
+	raw, err := deps.RunHelm(ctx, []string{"history", "oberth", "-n", namespace, "-o", "json"})
+	if err != nil {
+		return "", fmt.Errorf("read deployed release history before upgrade: %w", err)
+	}
+	var history []struct {
+		Revision int    `json:"revision"`
+		Status   string `json:"status"`
+	}
+	if err := json.Unmarshal(raw, &history); err != nil {
+		return "", fmt.Errorf("decode deployed release history before upgrade: %w", err)
+	}
+	revision := 0
+	for _, entry := range history {
+		if entry.Status == "deployed" && entry.Revision > revision {
+			revision = entry.Revision
+		}
+	}
+	if revision == 0 {
+		return "", fmt.Errorf("no deployed Helm revision found; refusing to reuse a failed release's configuration")
+	}
+	return strconv.Itoa(revision), nil
+}
+
 type preparedUpgradeValues struct {
 	compatibility backupCompatibility
 	storedValues  string // cleaned user snapshot; empty keeps ordinary Helm reuse
+	migrated      string // stripped legacy key/value, empty when no migration is needed
 	cleanup       func()
+}
+
+func readUpgradeStoredValues(ctx context.Context, namespace, revision string, deps Deps) (map[string]any, error) {
+	raw, err := deps.RunHelm(ctx, []string{"get", "values", "oberth", "-n", namespace, "--revision", revision, "-o", "json"})
+	if err != nil {
+		return nil, fmt.Errorf("read stored release configuration before upgrade: %w", err)
+	}
+	var values map[string]any
+	decoder := json.NewDecoder(strings.NewReader(string(raw)))
+	decoder.UseNumber() // The applied snapshot must preserve exact stored integers.
+	if !json.Valid(raw) || decoder.Decode(&values) != nil {
+		return nil, fmt.Errorf("cannot decode stored release configuration before upgrade")
+	}
+	if values == nil {
+		values = map[string]any{}
+	}
+	return values, nil
+}
+
+func migrateUpgradeShadow(values map[string]any) (string, error) {
+	// Only the retired boolean is migrated. Other administrator keys still
+	// reach the target schema unchanged; malformed shadow values are refused.
+	migrated := ""
+	if cache, ok := values["gitcache"].(map[string]any); ok {
+		if shadow, present := cache["shadow"]; present {
+			value, ok := shadow.(bool)
+			if !ok {
+				return "", &ErrSchemaValidation{Detail: "stored gitcache.shadow must be a legacy boolean; no upgrade applied"}
+			}
+			delete(cache, "shadow")
+			if len(cache) == 0 {
+				delete(values, "gitcache")
+			}
+			migrated = fmt.Sprintf("gitcache.shadow=%t", value)
+		}
+	}
+	return migrated, nil
 }
 
 // Helm owns schema evaluation (including local refs and additionalProperties).
@@ -61,40 +126,21 @@ type preparedUpgradeValues struct {
 // no longer exist. Unknown keys are reported and refused; never silently prune
 // administrator configuration or print a rendered manifest into the plan/log.
 func prepareUpgradeValues(ctx context.Context, cfg UpgradeConfig, deps Deps, chart, imageRef string) (preparedUpgradeValues, error) {
-	compat, err := readUpgradeCompatibility(ctx, cfg.Namespace, deps)
+	revision, err := deployedUpgradeRevision(ctx, cfg.Namespace, deps)
 	if err != nil {
 		return preparedUpgradeValues{}, err
 	}
-	raw, err := deps.RunHelm(ctx, []string{"get", "values", "oberth", "-n", cfg.Namespace, "-o", "json"})
+	compat, err := readUpgradeCompatibility(ctx, cfg.Namespace, revision, deps)
 	if err != nil {
-		return preparedUpgradeValues{}, fmt.Errorf("read stored release configuration before upgrade: %w", err)
+		return preparedUpgradeValues{}, err
 	}
-	var values map[string]any
-	decoder := json.NewDecoder(strings.NewReader(string(raw)))
-	decoder.UseNumber() // The applied snapshot must preserve exact stored integers.
-	if !json.Valid(raw) || decoder.Decode(&values) != nil {
-		return preparedUpgradeValues{}, fmt.Errorf("cannot decode stored release configuration before upgrade")
+	values, err := readUpgradeStoredValues(ctx, cfg.Namespace, revision, deps)
+	if err != nil {
+		return preparedUpgradeValues{}, err
 	}
-	if values == nil {
-		values = map[string]any{}
-	}
-	// Only the retired boolean is migrated. Other administrator keys still
-	// reach the target schema unchanged; malformed shadow values are refused.
-	removedShadow := false
-	var legacyShadow bool
-	if cache, ok := values["gitcache"].(map[string]any); ok {
-		if shadow, present := cache["shadow"]; present {
-			value, ok := shadow.(bool)
-			if !ok {
-				return preparedUpgradeValues{}, &ErrSchemaValidation{Detail: "stored gitcache.shadow must be a legacy boolean; no upgrade applied"}
-			}
-			legacyShadow = value
-			delete(cache, "shadow")
-			if len(cache) == 0 {
-				delete(values, "gitcache")
-			}
-			removedShadow = true
-		}
+	migrated, err := migrateUpgradeShadow(values)
+	if err != nil {
+		return preparedUpgradeValues{}, err
 	}
 	body, err := json.Marshal(values)
 	if err != nil {
@@ -115,7 +161,7 @@ func prepareUpgradeValues(ctx context.Context, cfg UpgradeConfig, deps Deps, cha
 	if err := os.WriteFile(path, body, 0600); err != nil {
 		return preparedUpgradeValues{}, err
 	}
-	if removedShadow {
+	if migrated != "" {
 		cfg.storedValues = path
 	}
 	_, flags := upgradeHelmArgs(cfg, chart, imageRef, compat)
@@ -141,11 +187,11 @@ func prepareUpgradeValues(ctx context.Context, cfg UpgradeConfig, deps Deps, cha
 	if _, err := deps.RunHelm(ctx, args); err != nil {
 		return preparedUpgradeValues{}, &ErrSchemaValidation{Detail: fmt.Sprintf("stored configuration/overrides do not render against the target chart; no upgrade applied. Export installed values with helm get values --all, remove/migrate unsupported keys in an explicit values file, and reconcile with helm upgrade --reset-values --values CLEANED_FILE (preserving compatibility.*) before retrying: %v", err)}
 	}
-	prepared := preparedUpgradeValues{compatibility: compat, cleanup: cleanup}
-	if removedShadow {
+	prepared := preparedUpgradeValues{compatibility: compat, migrated: migrated, cleanup: cleanup}
+	if migrated != "" {
 		prepared.storedValues = path
 		if deps.Output != nil {
-			_, _ = fmt.Fprintf(deps.Output, "Dropped stored inert legacy gitcache.shadow=%t for this upgrade; the prior Helm revision retains its original value for rollback.\n", legacyShadow)
+			_, _ = fmt.Fprintf(deps.Output, "Dropped stored inert legacy %s for this upgrade; the prior Helm revision retains its original value for rollback.\n", migrated)
 		}
 	}
 	keepSnapshot = true

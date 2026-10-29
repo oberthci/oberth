@@ -61,3 +61,15 @@ func TestNativeGitSSHEnvironmentKeepsFallbackWhenNoPerHostKeys(t *testing.T) {
 		t.Fatal("fallback identity lost")
 	}
 }
+
+func TestNativeGitSSHEnvironmentRejectsUnsafeConfigPaths(t *testing.T) {
+	root := t.TempDir()
+	options := serveOptions{upstreamKey: filepath.Join(root, "key"), knownHosts: filepath.Join(root, "hosts")}
+	for _, path := range []string{"relative/ssh-config", "/tmp/../x"} {
+		t.Run(path, func(t *testing.T) {
+			if _, err := nativeGitSSHEnvironment(nil, options, path); err == nil || !strings.Contains(err.Error(), "SSH config path must be absolute and clean") {
+				t.Fatalf("unsafe config path %q: %v", path, err)
+			}
+		})
+	}
+}

@@ -30,6 +30,8 @@ func controllerUpgradeFixture(t *testing.T) (UpgradeConfig, Deps, *[][]string) {
 	deps.RunHelm = func(_ context.Context, args []string) ([]byte, error) {
 		calls = append(calls, slices.Clone(args))
 		switch args[0] {
+		case "history":
+			return []byte(`[{"revision":82,"status":"deployed"}]`), nil
 		case "version":
 			return []byte("v4.2.3"), nil
 		case "template":

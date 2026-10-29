@@ -325,6 +325,9 @@ func testUpgradeValuePreflight(args []string) ([]byte, bool) {
 	if len(args) == 0 {
 		return nil, false
 	}
+	if args[0] == "history" {
+		return []byte(`[{"revision":1,"status":"deployed"}]`), true
+	}
 	if args[0] == "version" {
 		return []byte("v4.2.3"), true
 	}
