@@ -25,7 +25,9 @@ type Health struct {
 	// ReadyGate checks process-local recovery state without network or store reads.
 	ReadyGate ClusterProbe
 	// Readiness is refreshed off the HTTP request path; nil retains direct probes.
-	Readiness  *ReadinessSnapshot
+	Readiness *ReadinessSnapshot
+	// Log optionally records readiness transitions from the background watcher.
+	Log        func(string, ...any)
 	Storage    func(context.Context) (any, error)
 	Store      HealthStore
 	Configured ClusterProbe
@@ -100,7 +102,7 @@ type SecretStoreStatus struct {
 // AuditChainStatus reports the local audit hash-chain head and the latest
 // external checkpoint. Anchored is false when no external witness or
 // timestamp authority is configured (local-only mode). Detail carries the
-// readiness diagnostic when the anchoring pipeline (TSA or Rekor witness) is
+// status diagnostic when the anchoring pipeline (TSA or Rekor witness) is
 // unhealthy.
 type AuditChainStatus struct {
 	HeadID     int64  `json:"head_id"`
@@ -146,9 +148,11 @@ type HealthStatus struct {
 // freshly installed deployment stays alive but intentionally not ready until
 // its first upstream is registered: the pod accepts in-pod administration
 // (liveness passes, so no restarts) while the readiness probe keeps it out of
-// Service endpoints. Once an upstream exists, readiness additionally requires
-// its durable SSH credentials (when any non-local upstream exists), a
-// responsive Kubernetes API, and externally anchored audit integrity.
+// Service endpoints. Readiness also requires a usable database and durable
+// SSH credentials when any non-local upstream exists. Kubernetes availability
+// and periodic audit health are diagnostics in Status, not Service membership:
+// taking those dependencies down must not remove the cached Git/SSH endpoint.
+// Audit authorization remains enforced by each operation's mutation gate.
 func (health Health) Ready(ctx context.Context) error {
 	if health.ReadyGate != nil {
 		if err := health.ReadyGate(ctx); err != nil {
@@ -162,28 +166,31 @@ func (health Health) Ready(ctx context.Context) error {
 }
 
 func (health Health) probeReady(ctx context.Context) error {
-	if health.Store == nil || health.Configured == nil || health.Cluster == nil || health.Audit == nil || health.VCS == nil {
-		return errors.New("app: health dependencies are unavailable")
+	_, err := health.probeReadySample(ctx)
+	return err
+}
+
+// probeReadySample measures the database check, including connection-pool wait
+// and query execution, separately from credential checks.
+func (health Health) probeReadySample(ctx context.Context) (time.Duration, error) {
+	if health.Store == nil || health.Configured == nil {
+		return 0, errReadinessDependencies
 	}
+	started := time.Now()
 	upstreams, err := health.Store.ListUpstreams(ctx)
+	dbWait := time.Since(started)
 	if err != nil {
-		return fmt.Errorf("app: database is unavailable: %w", err)
+		return dbWait, fmt.Errorf("%w: %w", errReadinessDatabase, err)
 	}
 	if len(upstreams) == 0 {
-		return errors.New("app: no upstream is configured")
+		return dbWait, errReadinessNoUpstream
 	}
 	if requiresSSHIdentity(upstreams) {
 		if err := health.Configured(ctx); err != nil {
-			return fmt.Errorf("app: upstream configuration is unavailable: %w", err)
+			return dbWait, fmt.Errorf("%w: %w", errReadinessConfiguration, err)
 		}
 	}
-	if err := health.Cluster(ctx); err != nil {
-		return fmt.Errorf("app: Kubernetes API is unavailable: %w", err)
-	}
-	if err := health.Audit(ctx); err != nil {
-		return fmt.Errorf("app: audit integrity is unavailable: %w", err)
-	}
-	return nil
+	return dbWait, ctx.Err()
 }
 
 // requiresSSHIdentity returns true when at least one upstream uses an SSH-based

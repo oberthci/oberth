@@ -255,9 +255,12 @@ anchors). What local-only mode gives up is exactly the external evidence: a
 whole-database rollback to another self-consistent chain is not detectable
 without a witness.
 
-Readiness covers completed startup recovery, the database, configured projected
-identity, Kubernetes and audit integrity. Dependency probes refresh a bounded
-background snapshot; the HTTP probe performs no network or store calls. Shutdown
+Readiness covers completed startup recovery, the database and configured upstream
+identity. Kubernetes availability and periodic audit health are diagnostics in
+`/api/status`; they do not withdraw an otherwise usable cached Git/SSH endpoint.
+Every mutation still passes its audit integrity gate. Serving prerequisites
+refresh a bounded background snapshot; the HTTP probe performs no network or
+store calls. Shutdown
 removes readiness before stopping admission and drains HTTP/SSE observers. See
 [restart handover](restart-handover.md) for client retries and upgrade behavior.
 Upstream availability is a bounded diagnostic in `/status`, not a readiness
