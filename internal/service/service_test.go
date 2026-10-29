@@ -286,7 +286,7 @@ func TestWaitReturnsCleanTimeoutWithoutPolling(t *testing.T) {
 		repo: model.Repository{ID: 1, Name: "oberth"},
 		run:  model.Run{ID: "run-1", RepoID: 1, Ref: "feature/a", SHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Status: model.RunRunning},
 	}
-	service, err := NewAPI(APIConfig{Runs: store, Signals: NewSignals(), MaximumWait: 30 * time.Millisecond})
+	service, err := NewAPI(APIConfig{Runs: store, Signals: NewSignals(), MaximumWait: testTimeout(30 * time.Millisecond)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -299,7 +299,7 @@ func TestWaitReturnsCleanTimeoutWithoutPolling(t *testing.T) {
 	if !ok || !response.StillRunning || response.Run.ID != "run-1" {
 		t.Fatalf("wait response = %#v", value)
 	}
-	if elapsed := time.Since(started); elapsed < 20*time.Millisecond || elapsed > 250*time.Millisecond {
+	if elapsed := time.Since(started); elapsed < testTimeout(20*time.Millisecond) || elapsed > testTimeout(250*time.Millisecond) {
 		t.Fatalf("wait elapsed = %s", elapsed)
 	}
 }
@@ -396,7 +396,7 @@ func TestWaitUnmatchedTriggerReportsStillRunning(t *testing.T) {
 			SHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Status: model.RunPassed,
 		},
 	}
-	svc, err := NewAPI(APIConfig{Runs: store, Signals: NewSignals(), MaximumWait: 30 * time.Millisecond})
+	svc, err := NewAPI(APIConfig{Runs: store, Signals: NewSignals(), MaximumWait: testTimeout(30 * time.Millisecond)})
 	if err != nil {
 		t.Fatal(err)
 	}

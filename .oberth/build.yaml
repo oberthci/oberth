@@ -908,6 +908,9 @@ spec:
       command: ["/usr/bin/python3"]
       args: ["-I", "-S", "-B", ".oberth/test-packages.py", "service"]
       env:
+      # Loaded CI hosts need longer test harness waits; production budgets stay fixed.
+      - name: OBERTH_TEST_TIMEOUT_SCALE
+        value: "4"
       - name: GOMAXPROCS
         value: "2"
       - name: CGO_ENABLED

@@ -23,7 +23,7 @@ func acquireRequestForTest(reservation *admissionReservation, request admissionR
 
 func acquireRequestWithinBudget(t *testing.T, reservation *admissionReservation, request admissionRequest) func() {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), admissionAcquireBudget)
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout(admissionAcquireBudget))
 	defer cancel()
 	release, err := reservation.acquireRequest(ctx, request)
 	if err != nil {
@@ -376,7 +376,7 @@ func TestGroupAdmissionSnapshotNamesTheGroupAndItsHolder(t *testing.T) {
 func awaitWaiting(t *testing.T, reservation *admissionReservation) {
 	t.Helper()
 	gate := reservation.gate
-	deadline := time.Now().Add(admissionAcquireBudget)
+	deadline := time.Now().Add(testTimeout(admissionAcquireBudget))
 	for {
 		gate.mu.Lock()
 		prepared, granted, canceled := reservation.prepared, reservation.granted, reservation.canceled
@@ -390,7 +390,7 @@ func awaitWaiting(t *testing.T, reservation *admissionReservation) {
 		if time.Now().After(deadline) {
 			t.Fatalf("reservation %d was never prepared", reservation.sequence)
 		}
-		time.Sleep(time.Millisecond)
+		time.Sleep(testTimeout(time.Millisecond))
 	}
 }
 
@@ -412,7 +412,7 @@ func awaitWake(t *testing.T, wakes <-chan struct{}) {
 
 func contextDeadline(t *testing.T) <-chan struct{} {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), admissionAcquireBudget)
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout(admissionAcquireBudget))
 	t.Cleanup(cancel)
 	return ctx.Done()
 }

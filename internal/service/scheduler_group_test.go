@@ -280,7 +280,7 @@ func newGroupFixture(t *testing.T, maxConcurrent int) *groupFixture {
 	control, err := NewAPI(APIConfig{
 		Runs: database, History: database, Repositories: database, Issues: database,
 		Promotions: database, PromotionRuns: database, Enqueues: scheduler, Logs: logs, Auditor: database,
-		Signals: signals, MaximumWait: 50 * time.Millisecond, Admission: scheduler,
+		Signals: signals, MaximumWait: testTimeout(50 * time.Millisecond), Admission: scheduler,
 		PromotionWorkspaceRoot: filepath.Join(root, "promotion-work"), RunCancels: database,
 	})
 	if err != nil {
@@ -308,7 +308,7 @@ func (fixture *groupFixture) start(t *testing.T) {
 			if err != nil {
 				t.Errorf("scheduler stopped with %v", err)
 			}
-		case <-time.After(15 * time.Second):
+		case <-time.After(testTimeout(15 * time.Second)):
 			t.Error("scheduler did not stop")
 		}
 	}
@@ -352,7 +352,7 @@ func (fixture *groupFixture) run(t *testing.T, id string) model.Run {
 // that admission of its successor means finalization has also completed.
 func (fixture *groupFixture) awaitTerminal(t *testing.T, id string) model.Run {
 	t.Helper()
-	deadline := time.NewTimer(15 * time.Second)
+	deadline := time.NewTimer(testTimeout(15 * time.Second))
 	defer deadline.Stop()
 	for {
 		changed := fixture.scheduler.signals.Run(id)
@@ -372,7 +372,7 @@ func (fixture *groupFixture) awaitTerminal(t *testing.T, id string) model.Run {
 func (fixture *groupFixture) awaitCreated(t *testing.T, count int) map[string]bool {
 	t.Helper()
 	created := map[string]bool{}
-	deadline := time.After(15 * time.Second)
+	deadline := time.After(testTimeout(15 * time.Second))
 	for len(created) < count {
 		select {
 		case runID := <-fixture.engine.created:
@@ -390,14 +390,14 @@ func (fixture *groupFixture) assertNothingCreated(t *testing.T) {
 	select {
 	case runID := <-fixture.engine.created:
 		t.Fatalf("run %s reached Job creation while it should have been waiting", runID)
-	case <-time.After(300 * time.Millisecond):
+	case <-time.After(testTimeout(300 * time.Millisecond)):
 	}
 }
 
 // awaitParked waits until the run holds a group-waiting reservation.
 func (fixture *groupFixture) awaitParked(t *testing.T, run model.Run, holder string) *model.AdmissionObservation {
 	t.Helper()
-	deadline := time.Now().Add(15 * time.Second)
+	deadline := time.Now().Add(testTimeout(15 * time.Second))
 	for {
 		snapshot := fixture.scheduler.AdmissionSnapshot(run.QueueSequence)
 		if snapshot != nil && snapshot.State == "waiting" && snapshot.GroupHolder == holder && holder != "" {
@@ -406,7 +406,7 @@ func (fixture *groupFixture) awaitParked(t *testing.T, run model.Run, holder str
 		if time.Now().After(deadline) {
 			t.Fatalf("run %s never parked on its group behind %s: %#v", run.ID, holder, snapshot)
 		}
-		time.Sleep(5 * time.Millisecond)
+		time.Sleep(testTimeout(5 * time.Millisecond))
 	}
 }
 
@@ -644,7 +644,7 @@ func TestSchedulerKeepsTheGroupWhenAFailedWaitsWorkflowCannotBeDeleted(t *testin
 		if err == nil || !strings.Contains(err.Error(), "delete Workflow") {
 			t.Fatalf("holder whose Workflow could not be deleted returned %v", err)
 		}
-	case <-time.After(15 * time.Second):
+	case <-time.After(testTimeout(15 * time.Second)):
 		t.Fatal("the holder's execution never returned")
 	}
 	// The holder's execution, including its deferred release and cleanup,
@@ -660,7 +660,7 @@ func TestSchedulerKeepsTheGroupWhenAFailedWaitsWorkflowCannotBeDeleted(t *testin
 	cancelMember()
 	select {
 	case <-memberDone:
-	case <-time.After(15 * time.Second):
+	case <-time.After(testTimeout(15 * time.Second)):
 		t.Fatal("the parked member never returned after its context ended")
 	}
 	if fixture.engine.wasCreated(next.ID) {
@@ -726,7 +726,7 @@ func TestSchedulerFailsARunWhoseConcurrencyGroupIsMalformed(t *testing.T) {
 	if created := fixture.awaitCreated(t, 1); !created[good.ID] {
 		t.Fatalf("created %v; want only the well-formed run %s", created, good.ID)
 	}
-	deadline := time.Now().Add(15 * time.Second)
+	deadline := time.Now().Add(testTimeout(15 * time.Second))
 	for {
 		failed := fixture.run(t, bad.ID)
 		if failed.Status == model.RunFailed {
@@ -739,7 +739,7 @@ func TestSchedulerFailsARunWhoseConcurrencyGroupIsMalformed(t *testing.T) {
 		if time.Now().After(deadline) {
 			t.Fatalf("malformed-group run never failed: %#v", failed)
 		}
-		time.Sleep(5 * time.Millisecond)
+		time.Sleep(testTimeout(5 * time.Millisecond))
 	}
 	if fixture.engine.wasCreated(bad.ID) {
 		t.Fatal("a run with a malformed group reached Job creation")

@@ -26,7 +26,7 @@ func TestAccessListResolvesRepoSpelling(t *testing.T) {
 		Issues: fixture.store, Promotions: fixture.store, PromotionRuns: fixture.store,
 		Enqueues: fixture.scheduler, Git: fixture.git, Refs: fixture.refs,
 		Logs: fixture.logs, Auditor: fixture.store,
-		Signals: fixture.signals, MaximumWait: 50 * time.Millisecond,
+		Signals: fixture.signals, MaximumWait: testTimeout(50 * time.Millisecond),
 		PromotionWorkspaceRoot: filepath.Join(fixture.root, "promotion-work"),
 		SecretAccess:           fixture.store,
 	})

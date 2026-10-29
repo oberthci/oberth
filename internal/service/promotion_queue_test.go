@@ -73,7 +73,7 @@ func TestSecondPromotionWaitsAndIsPreparedOnTheNewTarget(t *testing.T) {
 	if second.Status != model.PromotionPending || second.RunID != "" || second.PreviousSHA != "" {
 		t.Fatalf("second promotion was planned beside a pending one: %#v", second)
 	}
-	time.Sleep(200 * time.Millisecond)
+	time.Sleep(testTimeout(200 * time.Millisecond))
 	if prepared() != 1 {
 		t.Fatalf("second promotion was prepared while the first was pending (%d prepares)", prepared())
 	}
@@ -84,7 +84,7 @@ func TestSecondPromotionWaitsAndIsPreparedOnTheNewTarget(t *testing.T) {
 		t.Fatal(err)
 	}
 	fixture.signals.NotifyPromotion(first.ID)
-	deadline := time.Now().Add(10 * time.Second)
+	deadline := time.Now().Add(testTimeout(10 * time.Second))
 	for {
 		current, err := fixture.store.Promotion(ctx, second.ID)
 		if err != nil {
@@ -99,7 +99,7 @@ func TestSecondPromotionWaitsAndIsPreparedOnTheNewTarget(t *testing.T) {
 		if current.Status.Terminal() || time.Now().After(deadline) {
 			t.Fatalf("second promotion never planned: %#v", current)
 		}
-		time.Sleep(20 * time.Millisecond)
+		time.Sleep(testTimeout(20 * time.Millisecond))
 	}
 	if prepared() != 2 {
 		t.Fatalf("prepares = %d, want 2", prepared())
@@ -195,7 +195,7 @@ func TestRetriedPromotionQueuesBehindAPendingOne(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	time.Sleep(200 * time.Millisecond)
+	time.Sleep(testTimeout(200 * time.Millisecond))
 	if current, _ := fixture.store.Promotion(ctx, retried.ID); current.RunID != "" || prepares() != before {
 		t.Fatalf("the retry was prepared beside a pending promotion: %#v (%d prepares)", current, prepares()-before)
 	}
@@ -204,7 +204,7 @@ func TestRetriedPromotionQueuesBehindAPendingOne(t *testing.T) {
 		t.Fatal(err)
 	}
 	fixture.signals.NotifyPromotion(pending.ID)
-	deadline := time.Now().Add(10 * time.Second)
+	deadline := time.Now().Add(testTimeout(10 * time.Second))
 	for {
 		current, err := fixture.store.Promotion(ctx, retried.ID)
 		if err != nil {
@@ -219,7 +219,7 @@ func TestRetriedPromotionQueuesBehindAPendingOne(t *testing.T) {
 		if current.Status.Terminal() || time.Now().After(deadline) {
 			t.Fatalf("retry never planned: %#v", current)
 		}
-		time.Sleep(20 * time.Millisecond)
+		time.Sleep(testTimeout(20 * time.Millisecond))
 	}
 }
 
@@ -289,7 +289,7 @@ func TestShutdownCancelsAQueuedPromotionWait(t *testing.T) {
 		Issues: fixture.store, Promotions: promotions, PromotionRuns: fixture.store,
 		Enqueues: fixture.scheduler, Git: fixture.git, Refs: fixture.refs,
 		Logs: fixture.logs, Auditor: fixture.store,
-		Signals: fixture.signals, MaximumWait: 50 * time.Millisecond,
+		Signals: fixture.signals, MaximumWait: testTimeout(50 * time.Millisecond),
 		PromotionWorkspaceRoot: filepath.Join(fixture.root, "promotion-work"),
 	})
 	if err != nil {
@@ -311,7 +311,7 @@ func TestShutdownCancelsAQueuedPromotionWait(t *testing.T) {
 		t.Fatalf("second promotion was not queued: %#v", queued)
 	}
 
-	shutdownCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	shutdownCtx, cancel := context.WithTimeout(ctx, testTimeout(2*time.Second))
 	defer cancel()
 	started := time.Now()
 	if err := control.Shutdown(shutdownCtx); err != nil {
@@ -322,7 +322,7 @@ func TestShutdownCancelsAQueuedPromotionWait(t *testing.T) {
 	promotions.mu.Unlock()
 	// The notify is the proof: a planner still waiting would wake on it.
 	fixture.signals.NotifyPromotion(queued.ID)
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(testTimeout(100 * time.Millisecond))
 	promotions.mu.Lock()
 	after := promotions.after
 	promotions.mu.Unlock()
@@ -394,7 +394,7 @@ func TestNoBackgroundWorkStartsAfterShutdown(t *testing.T) {
 	go func() { control.waitBackground(); close(done) }()
 	select {
 	case <-done:
-	case <-time.After(2 * time.Second):
+	case <-time.After(testTimeout(2 * time.Second)):
 		t.Fatal("background work outlived Shutdown")
 	}
 }
