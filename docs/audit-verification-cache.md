@@ -87,14 +87,24 @@ of that cycle's configured interval: it is checked at the next gate, not by
 an additional background timer. Full gate scans are not skipped just because
 a periodic cycle recently scanned the database.
 
-A concurrent append still makes the final fence refuse the current attempt
-with `ErrAuditStateChanged`; a fresh attempt verifies it. If only the reader's
-version changed, bounded local re-verification uses a fresh snapshot. Own
-unrelated writes can reuse the prefix; outside commits force the full scan.
-External verification runs once, and the head and complete checkpoint must
-remain identical to its inputs. As before, the fence ends before the caller's
-application mutation begins; the gate does not hold a writer across that
-mutation or across network I/O.
+A concurrent head advance makes the final fence refuse the current attempt
+with `ErrAuditVerificationBusy` (also matching `ErrAuditStateChanged`). If only
+the reader's version changed, up to two extra local snapshots can salvage the
+same external proof; exhaustion also reports contention. The manager retries
+these refusals automatically with backoff from 10 ms to 250 ms, under the gate's
+overall 30-second default deadline, including its serialized queue wait. Each
+fresh attempt repeats all local and configured external checks. External
+verification runs once per attempt, and the head and complete checkpoint must
+remain identical to its inputs. Own unrelated writes can reuse the prefix;
+outside commits force the full scan.
+
+Integrity failures, changed checkpoints, head regressions and file replacements
+do not receive the contention classification and fail immediately. A retry
+never grants permission without a new successful fence. A contention timeout
+preserves both the transient classification and the context error; MCP mutation
+requests report an unavailable service with a public reason to retry. As before,
+the fence ends before the caller's application mutation begins; the gate does
+not hold a writer across that mutation, backoff or network I/O.
 
 ## Detection guarantees and cost
 

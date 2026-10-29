@@ -79,6 +79,23 @@ func TestMCPRefusalReasonsAndScope(t *testing.T) {
 		result := resultCall(t, resultServer(t, f.api(t), actor), "promote_grant_list", map[string]any{})
 		assertRefusal(t, result, "service unavailable: promotion grants", "")
 	})
+	t.Run("transient audit contention", func(t *testing.T) {
+		control := f.api(t)
+		gateErr := fmt.Errorf("%w: /private/database.sqlite", store.ErrAuditVerificationBusy)
+		control.mutationGate = func(context.Context) error { return gateErr }
+		_, err := control.CallTool(t.Context(), actor, "promote", json.RawMessage(`{}`))
+		if !errors.Is(err, ErrUnavailable) || !errors.Is(err, store.ErrAuditVerificationBusy) {
+			t.Fatalf("contention lost its transient/unavailable classification: %v", err)
+		}
+		result := resultCall(t, resultServer(t, control, actor), "promote", args)
+		assertRefusal(t, result, "service unavailable: transient audit verification contention; retry the request", "/private/database.sqlite")
+	})
+	t.Run("audit integrity mismatch", func(t *testing.T) {
+		control := f.api(t)
+		control.mutationGate = func(context.Context) error { return store.ErrAuditStateChanged }
+		result := resultCall(t, resultServer(t, control, actor), "promote", args)
+		assertRefusal(t, result, "service unavailable", "transient")
+	})
 	t.Run("out of scope equals missing", func(t *testing.T) {
 		scope := newScopeFixture(t)
 		scope.service.sizeGrants = scope.store
