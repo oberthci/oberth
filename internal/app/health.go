@@ -25,7 +25,9 @@ type Health struct {
 	// ReadyGate checks process-local recovery state without network or store reads.
 	ReadyGate ClusterProbe
 	// Readiness is refreshed off the HTTP request path; nil retains direct probes.
-	Readiness  *ReadinessSnapshot
+	Readiness *ReadinessSnapshot
+	// Log optionally records readiness transitions from the background watcher.
+	Log        func(string, ...any)
 	Storage    func(context.Context) (any, error)
 	Store      HealthStore
 	Configured ClusterProbe
@@ -164,22 +166,31 @@ func (health Health) Ready(ctx context.Context) error {
 }
 
 func (health Health) probeReady(ctx context.Context) error {
+	_, err := health.probeReadySample(ctx)
+	return err
+}
+
+// probeReadySample measures the database check, including connection-pool wait
+// and query execution, separately from credential checks.
+func (health Health) probeReadySample(ctx context.Context) (time.Duration, error) {
 	if health.Store == nil || health.Configured == nil {
-		return errors.New("app: health dependencies are unavailable")
+		return 0, errReadinessDependencies
 	}
+	started := time.Now()
 	upstreams, err := health.Store.ListUpstreams(ctx)
+	dbWait := time.Since(started)
 	if err != nil {
-		return fmt.Errorf("app: database is unavailable: %w", err)
+		return dbWait, fmt.Errorf("%w: %w", errReadinessDatabase, err)
 	}
 	if len(upstreams) == 0 {
-		return errors.New("app: no upstream is configured")
+		return dbWait, errReadinessNoUpstream
 	}
 	if requiresSSHIdentity(upstreams) {
 		if err := health.Configured(ctx); err != nil {
-			return fmt.Errorf("app: upstream configuration is unavailable: %w", err)
+			return dbWait, fmt.Errorf("%w: %w", errReadinessConfiguration, err)
 		}
 	}
-	return ctx.Err()
+	return dbWait, ctx.Err()
 }
 
 // requiresSSHIdentity returns true when at least one upstream uses an SSH-based

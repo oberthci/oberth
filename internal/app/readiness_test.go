@@ -3,6 +3,8 @@ package app
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -47,7 +49,7 @@ func TestReadinessSnapshotNeverProbesOnRequestAndFailsClosed(t *testing.T) {
 		t.Fatal("startup gate bypassed")
 	}
 	health.ReadyGate = nil
-	health.Readiness.checked = time.Now().Add(-time.Minute)
+	setReadinessChecked(health.Readiness, time.Now().Add(-time.Minute))
 	if health.Ready(t.Context()) == nil {
 		t.Fatal("stale green sample accepted")
 	}
@@ -60,6 +62,184 @@ func TestReadinessSnapshotNeverProbesOnRequestAndFailsClosed(t *testing.T) {
 	health.refreshReadiness(t.Context())
 	if err := health.Ready(t.Context()); err != nil {
 		t.Fatalf("database recovered but readiness did not: %v", err)
+	}
+}
+
+func setReadinessChecked(snapshot *ReadinessSnapshot, checked time.Time) {
+	snapshot.mu.Lock()
+	defer snapshot.mu.Unlock()
+	snapshot.checked = checked
+}
+
+type readinessBlockingStore struct {
+	fakeHealthStore
+}
+
+func (store readinessBlockingStore) ListUpstreams(ctx context.Context) ([]model.Upstream, error) {
+	<-ctx.Done()
+	return nil, fmt.Errorf("waiting for connection: %w", ctx.Err())
+}
+
+func TestReadinessDeadlineRetainsGreenWithoutRenewingAge(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		age  time.Duration
+	}{
+		{name: "fresh", age: time.Second},
+		{name: "stale", age: readinessMaxAge + time.Second},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			health := Health{
+				Store:      fakeHealthStore{upstreams: []model.Upstream{{Kind: "local"}}},
+				Configured: func(context.Context) error { return nil }, Readiness: &ReadinessSnapshot{},
+			}
+			health.refreshReadiness(t.Context())
+			checked := time.Now().Add(-test.age)
+			setReadinessChecked(health.Readiness, checked)
+			health.Store = readinessBlockingStore{}
+			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Millisecond)
+			defer cancel()
+			health.refreshReadiness(ctx)
+			if !errors.Is(ctx.Err(), context.DeadlineExceeded) {
+				t.Fatal("store did not wait for the deadline")
+			}
+			health.Readiness.mu.RLock()
+			retained := health.Readiness.checked.Equal(checked) && health.Readiness.err == nil
+			health.Readiness.mu.RUnlock()
+			if !retained {
+				t.Fatal("deadline replaced or renewed the last green sample")
+			}
+			err := health.Ready(t.Context())
+			if test.age < readinessMaxAge && err != nil {
+				t.Fatalf("fresh green sample lost after deadline: %v", err)
+			}
+			if test.age > readinessMaxAge && !errors.Is(err, errReadinessStale) {
+				t.Fatalf("expired green sample = %v, want stale", err)
+			}
+		})
+	}
+}
+
+func TestReadinessHardErrorsImmediatelyReplaceGreen(t *testing.T) {
+	for _, test := range []struct {
+		name          string
+		store         fakeHealthStore
+		configuredErr error
+		cancel        bool
+		want          error
+	}{
+		{name: "database", store: fakeHealthStore{err: errors.New("database I/O failed")}, want: errReadinessDatabase},
+		{name: "no upstream", want: errReadinessNoUpstream},
+		{name: "credentials", store: fakeHealthStore{upstreams: []model.Upstream{{Kind: "ssh"}}}, configuredErr: errors.New("missing key"), want: errReadinessConfiguration},
+		{name: "canceled", store: fakeHealthStore{upstreams: []model.Upstream{{Kind: "local"}}}, cancel: true, want: context.Canceled},
+		{name: "canceled with deadline error", store: fakeHealthStore{err: context.DeadlineExceeded}, cancel: true, want: context.DeadlineExceeded},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			health := Health{
+				Store:      fakeHealthStore{upstreams: []model.Upstream{{Kind: "local"}}},
+				Configured: func(context.Context) error { return nil }, Readiness: &ReadinessSnapshot{},
+			}
+			health.refreshReadiness(t.Context())
+			health.Store = test.store
+			health.Configured = func(context.Context) error { return test.configuredErr }
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			if test.cancel {
+				cancel()
+			}
+			health.refreshReadiness(ctx)
+			if err := health.Ready(t.Context()); !errors.Is(err, test.want) {
+				t.Fatalf("readiness = %v, want immediate %v", err, test.want)
+			}
+		})
+	}
+}
+
+func TestReadinessDeadlineCannotCreateGreen(t *testing.T) {
+	for _, priorErr := range []error{nil, errors.New("database unavailable")} {
+		snapshot := &ReadinessSnapshot{}
+		if priorErr != nil {
+			snapshot.checked, snapshot.err = time.Now(), priorErr
+		}
+		health := Health{Store: readinessBlockingStore{}, Configured: func(context.Context) error { return nil }, Readiness: snapshot}
+		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Millisecond)
+		health.refreshReadiness(ctx)
+		cancel()
+		if err := health.Ready(t.Context()); !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("deadline without a prior green sample = %v, want unready", err)
+		}
+	}
+}
+
+func TestReadinessLogsOnlyTransitions(t *testing.T) {
+	var messages []string
+	database := &fakeHealthStore{upstreams: []model.Upstream{{Kind: "local"}}}
+	health := Health{
+		Store: database, Configured: func(context.Context) error { return nil }, Readiness: &ReadinessSnapshot{},
+		Log: func(format string, args ...any) { messages = append(messages, fmt.Sprintf(format, args...)) },
+	}
+	health.refreshReadiness(t.Context())
+	health.refreshReadiness(t.Context())
+	database.err = errors.New("sensitive arbitrary database detail")
+	health.refreshReadiness(t.Context())
+	health.refreshReadiness(t.Context())
+	for range 100 {
+		_ = health.Ready(t.Context())
+	}
+	database.err = nil
+	health.refreshReadiness(t.Context())
+	health.refreshReadiness(t.Context())
+	if len(messages) != 2 {
+		t.Fatalf("got %d logs, want two transitions: %v", len(messages), messages)
+	}
+	for i, expected := range []string{"state=unready reason=database_error", "state=ready reason=ready"} {
+		if !strings.Contains(messages[i], expected) {
+			t.Fatalf("log %d = %q, want %q", i, messages[i], expected)
+		}
+		for _, field := range []string{"sample_age=", "db_wait=", "probe_duration=", "outage_duration="} {
+			if !strings.Contains(messages[i], field) {
+				t.Fatalf("missing %q in %q", field, messages[i])
+			}
+		}
+		if strings.Contains(messages[i], "sensitive") {
+			t.Fatalf("unbounded error detail in %q", messages[i])
+		}
+	}
+}
+
+func TestReadinessLogsStaleDeadlineAndRecoveryGateTransitions(t *testing.T) {
+	var messages []string
+	health := Health{
+		Store:      fakeHealthStore{upstreams: []model.Upstream{{Kind: "local"}}},
+		Configured: func(context.Context) error { return nil }, Readiness: &ReadinessSnapshot{},
+		Log: func(format string, args ...any) { messages = append(messages, fmt.Sprintf(format, args...)) },
+	}
+	health.refreshReadiness(t.Context())
+	health.Store = readinessBlockingStore{}
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Millisecond)
+	defer cancel()
+	health.refreshReadiness(ctx)
+	if len(messages) != 0 {
+		t.Fatalf("tolerated deadline logged a transition: %v", messages)
+	}
+	setReadinessChecked(health.Readiness, time.Now().Add(-readinessMaxAge-time.Second))
+	health.refreshReadiness(ctx)
+	health.refreshReadiness(ctx)
+	health.Store = fakeHealthStore{upstreams: []model.Upstream{{Kind: "local"}}}
+	health.refreshReadiness(t.Context())
+	health.ReadyGate = func(context.Context) error { return errors.New("recovering") }
+	health.refreshReadiness(t.Context())
+	health.refreshReadiness(t.Context())
+	health.ReadyGate = nil
+	health.refreshReadiness(t.Context())
+	want := []string{"state=unready reason=stale", "state=ready reason=ready", "state=unready reason=startup_recovery", "state=ready reason=ready"}
+	if len(messages) != len(want) {
+		t.Fatalf("logs = %v, want %v", messages, want)
+	}
+	for i, expected := range want {
+		if !strings.Contains(messages[i], expected) {
+			t.Fatalf("log %d = %q, want %q", i, messages[i], expected)
+		}
 	}
 }
 

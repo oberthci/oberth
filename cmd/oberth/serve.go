@@ -670,8 +670,8 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 		}
 	}
 	if witnessRecoveryDeferred {
-		logger.Printf("WARNING: pod alive (liveness passes) but not ready (readiness blocked, mutations gated)")
-		logger.Printf("WARNING: background audit anchor cycle will restore readiness when Rekor becomes available")
+		logger.Printf("WARNING: pod alive (liveness passes) but not ready until scheduler activation passes the audit mutation gate")
+		logger.Printf("WARNING: background audit anchor cycle will allow scheduler activation when Rekor becomes available")
 	}
 
 	sshEntries, err := perUpstreamSSHEntries(ctx, database, options, logger)
@@ -862,6 +862,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 		return nil
 	}
 	health.Readiness = &app.ReadinessSnapshot{}
+	health.Log = logger.Printf
 	readinessCtx, stopReadiness := context.WithCancel(ctx)
 	readinessDone := make(chan struct{})
 	go func(snapshot app.Health) { defer close(readinessDone); snapshot.WatchReadiness(readinessCtx) }(health)
