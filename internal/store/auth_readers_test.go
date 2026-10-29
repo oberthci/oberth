@@ -3,8 +3,12 @@ package store
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"testing"
 	"time"
+
+	"modernc.org/sqlite"
+	sqlite3 "modernc.org/sqlite/lib"
 
 	"github.com/oberthci/oberth/internal/model"
 )
@@ -13,6 +17,9 @@ func authReaderFixture(t *testing.T) (*Store, model.Uplink) {
 	t.Helper()
 	now := time.Now()
 	s := testStore(t, &now)
+	if err := s.OpenSSHAuthReaders(t.Context()); err != nil {
+		t.Fatal(err)
+	}
 	credential, err := s.CreateTokenCredential(t.Context(), model.TokenCredentialSpec{Name: "auth-test", Digest: make([]byte, 32)})
 	if err != nil {
 		t.Fatal(err)
@@ -35,8 +42,8 @@ func TestSSHLookupDuringWriterHold(t *testing.T) {
 	}
 	defer func() { _ = tx.Rollback() }()
 	// Hold the primary writer directly: audit callbacks no longer own it.
-	// Use the production five-second identity deadline.
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	// A short deadline proves the same pool contention.
+	ctx, cancel := context.WithTimeout(t.Context(), 250*time.Millisecond)
 	defer cancel()
 	started := time.Now()
 	var id int64
@@ -108,24 +115,73 @@ func TestSSHLookupRevocationAndScopeAreImmediate(t *testing.T) {
 func TestSSHReadersAreReadOnlyAndBounded(t *testing.T) {
 	s, uplink := authReaderFixture(t)
 	var releases []func()
+	defer func() {
+		for _, release := range releases {
+			release()
+		}
+	}()
 	for range 4 {
 		conn, err := s.authDB.Conn(t.Context())
 		if err != nil {
 			t.Fatal(err)
 		}
 		releases = append(releases, func() { _ = conn.Close() })
-		if _, err := conn.ExecContext(t.Context(), `DELETE FROM uplinks`); err == nil {
-			t.Fatal("auth reader allowed a write")
+		_, err = conn.ExecContext(t.Context(), `DELETE FROM uplinks`)
+		var sqliteErr *sqlite.Error
+		if !errors.As(err, &sqliteErr) || sqliteErr.Code() != sqlite3.SQLITE_READONLY {
+			t.Fatalf("auth reader write = %v, want SQLITE_READONLY", err)
 		}
 	}
-	defer func() {
-		for _, release := range releases {
-			release()
-		}
-	}()
 	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
 	defer cancel()
 	if _, err := s.UplinkByFingerprint(ctx, uplink.Fingerprint); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("exhausted auth pool = %v", err)
+	}
+}
+
+func TestSSHReadersRequireServerStartup(t *testing.T) {
+	for _, name := range []string{"open", "genesis", "admin", "current", "inspection"} {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "oberth.sqlite")
+			opener := Open
+			switch name {
+			case "genesis":
+				opener = CreateGenesis
+			case "admin":
+				opener = OpenAdminClient
+			case "current", "inspection":
+				seed, err := CreateGenesis(t.Context(), path, Options{})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := seed.Close(); err != nil {
+					t.Fatal(err)
+				}
+				opener = OpenCurrent
+				if name == "inspection" {
+					opener = InspectCurrent
+				}
+			}
+			s, err := opener(t.Context(), path, Options{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				if err := s.Close(); err != nil {
+					t.Error(err)
+				}
+			})
+			if s.authDB != nil {
+				t.Fatal("store opener created SSH readers before server startup")
+			}
+			if name != "inspection" {
+				if err := s.OpenSSHAuthReaders(t.Context()); err != nil {
+					t.Fatal(err)
+				}
+				if s.authDB == nil {
+					t.Fatal("server startup did not create SSH readers")
+				}
+			}
+		})
 	}
 }

@@ -258,7 +258,10 @@ func (s *Server) Serve(ctx context.Context, listener net.Listener) error {
 			defer active.Done()
 			defer release(s.connections)
 			if err := s.handleConn(ctx, connection); err != nil && ctx.Err() == nil {
-				s.logger.Printf("SSH connection failed: %v", err)
+				var lookupErr identityLookupError
+				if !errors.As(err, &lookupErr) {
+					s.logger.Printf("SSH connection failed: %v", err)
+				}
 			}
 		}()
 	}
@@ -297,11 +300,14 @@ func (s *Server) handleConn(ctx context.Context, connection net.Conn) error {
 	// generic transient server error and close before it can send that denial.
 	config := *s.config
 	var preAuth ssh.ServerPreAuthConn
+	var lookupFailure error
 	config.PreAuthConnCallback = func(conn ssh.ServerPreAuthConn) { preAuth = conn }
+	// #nosec G408 -- Per-connection failure state only deduplicates diagnostics; permissions always come from a fresh lookup, including after signature verification.
 	config.PublicKeyCallback = func(conn ssh.ConnMetadata, key ssh.PublicKey) (*ssh.Permissions, error) {
 		permissions, err := s.config.PublicKeyCallback(conn, key)
 		var lookupErr identityLookupError
-		if errors.As(err, &lookupErr) {
+		if errors.As(err, &lookupErr) && lookupFailure == nil {
+			lookupFailure = err
 			s.logger.Printf("SSH identity lookup unavailable: %v", lookupErr.error)
 			if preAuth != nil {
 				_ = preAuth.SendAuthBanner("oberth: temporary server error: SSH identity lookup unavailable; retry later\n")
@@ -318,6 +324,9 @@ func (s *Server) handleConn(ctx context.Context, connection net.Conn) error {
 	}
 	serverConn, channels, requests, err := ssh.NewServerConn(connection, &config)
 	if err != nil {
+		if lookupFailure != nil {
+			return fmt.Errorf("SSH handshake: %w", lookupFailure)
+		}
 		return fmt.Errorf("SSH handshake: %w", err)
 	}
 	maximumDeadline := time.Now().Add(s.sessionTimeout)

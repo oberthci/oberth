@@ -656,6 +656,9 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 		return database.Close()
 	}
 	defer func() { result = errors.Join(result, closeDatabase()) }()
+	if err := database.OpenSSHAuthReaders(ctx); err != nil {
+		return err
+	}
 	anchors, err := auditanchor.NewManager(newAuditManagerConfig(database))
 	if err != nil {
 		return err
