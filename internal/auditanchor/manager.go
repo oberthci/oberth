@@ -17,6 +17,7 @@ import (
 type AnchorStore interface {
 	VerifyAuditState(context.Context) (model.AuditHead, error)
 	VerifyAuditStateSince(context.Context, int64, []byte) (model.AuditHead, error)
+	VerifyLocalAuditMutationState(context.Context, model.AuditHead, func(model.AuditHead, model.AuditAnchor) error) (model.AuditHead, model.AuditAnchor, error)
 	AuditHeadHint(context.Context) (model.AuditHead, error)
 	VerifyAuditMutationState(context.Context, []model.AuditWitnessIntent, []model.AuditWitness, func(model.AuditHead, model.AuditAnchor) error) (model.AuditHead, model.AuditAnchor, error)
 	VerifyAuditMutationStateUnanchored(context.Context, []model.AuditWitnessIntent, []model.AuditWitness, func(model.AuditHead, model.AuditAnchor) error) (model.AuditHead, model.AuditAnchor, error)
@@ -51,6 +52,8 @@ type managerLogger interface {
 	Printf(string, ...any)
 }
 
+const defaultGateTimeout = 30 * time.Second
+
 var ErrWitnessUnavailable = errors.New("audit anchor: external witness unavailable")
 
 // ManagerConfig configures the audit integrity manager. Store is always
@@ -60,27 +63,30 @@ var ErrWitnessUnavailable = errors.New("audit anchor: external witness unavailab
 // every mutation gate still verify the complete local chain but no external
 // service is ever contacted. A Witness requires rollback-external Continuity.
 type ManagerConfig struct {
-	Store      AnchorStore
-	Authority  Authority
-	Witness    Witness
-	Continuity Continuity
-	Interval   time.Duration
-	MaxAge     time.Duration
-	Now        func() time.Time
-	Logger     managerLogger
+	// GateTimeout bounds a mutation gate including its wait for refresh. Zero selects 30 seconds.
+	GateTimeout time.Duration
+	Store       AnchorStore
+	Authority   Authority
+	Witness     Witness
+	Continuity  Continuity
+	Interval    time.Duration
+	MaxAge      time.Duration
+	Now         func() time.Time
+	Logger      managerLogger
 }
 
 type Manager struct {
-	store      AnchorStore
-	authority  Authority
-	witness    Witness
-	continuity Continuity
-	interval   time.Duration
-	maxAge     time.Duration
-	now        func() time.Time
-	logger     managerLogger
+	store       AnchorStore
+	authority   Authority
+	witness     Witness
+	continuity  Continuity
+	interval    time.Duration
+	maxAge      time.Duration
+	gateTimeout time.Duration
+	now         func() time.Time
+	logger      managerLogger
 
-	refreshMu              sync.Mutex
+	refreshMu              refreshMutex
 	mu                     sync.RWMutex
 	checked                bool
 	witnessHistoryVerified bool
@@ -100,12 +106,18 @@ func NewManager(config ManagerConfig) (*Manager, error) {
 	if config.Interval <= 0 || config.MaxAge < config.Interval {
 		return nil, errors.New("audit anchor: positive interval and max age at least as long as the interval are required")
 	}
+	if config.GateTimeout < 0 {
+		return nil, errors.New("audit anchor: gate timeout must not be negative")
+	}
+	if config.GateTimeout == 0 {
+		config.GateTimeout = defaultGateTimeout
+	}
 	if config.Now == nil {
 		config.Now = time.Now
 	}
 	return &Manager{
 		store: config.Store, authority: config.Authority, witness: config.Witness, continuity: config.Continuity, interval: config.Interval,
-		maxAge: config.MaxAge, now: config.Now, logger: config.Logger,
+		maxAge: config.MaxAge, gateTimeout: config.GateTimeout, now: config.Now, logger: config.Logger,
 	}, nil
 }
 
@@ -258,7 +270,11 @@ func (manager *Manager) Ready(ctx context.Context) error {
 // re-verifies the complete local hash chain (and, when a timestamp authority
 // is configured, the persisted signed checkpoint tip) before every mutation.
 func (manager *Manager) AllowMutation(ctx context.Context) error {
-	manager.refreshMu.Lock()
+	ctx, cancel := context.WithTimeout(ctx, manager.gateTimeout)
+	defer cancel()
+	if err := manager.refreshMu.LockContext(ctx); err != nil {
+		return fmt.Errorf("audit anchor: mutation gate refresh wait: %w", err)
+	}
 	defer manager.refreshMu.Unlock()
 	if err := manager.Ready(ctx); err != nil {
 		return err
@@ -317,31 +333,31 @@ func (manager *Manager) AllowMutation(ctx context.Context) error {
 	return nil
 }
 
-// allowMutationWithoutWitness is the mutation gate for deployments with no
-// external witness configured. The complete local hash chain is re-verified
-// immediately before the mutation; when a timestamp authority is configured
-// the persisted signed checkpoint tip must additionally verify and match the
-// in-process verified tip.
+// allowMutationWithoutWitness uses the same read-only snapshot and short
+// commit fence as witnessed gates. Receipt verification runs outside SQLite's
+// writer reservation, with all local protected state bound to the final fence.
 func (manager *Manager) allowMutationWithoutWitness(ctx context.Context) error {
-	sinceID, sinceDigest := manager.getVerifiedHead()
-	if _, err := manager.store.VerifyAuditStateSince(ctx, sinceID, sinceDigest); err != nil {
-		return fmt.Errorf("audit anchor: mutation gate verify local protected state: %w", err)
-	}
-	if manager.authority == nil {
-		return nil
-	}
-	persisted, err := manager.store.LatestAuditAnchor(ctx)
-	if err != nil {
-		return fmt.Errorf("audit anchor: mutation gate persisted checkpoints: %w", err)
-	}
-	if err := manager.authority.Verify(persisted); err != nil {
-		return fmt.Errorf("audit anchor: mutation gate persisted checkpoints: %w", err)
-	}
 	manager.mu.RLock()
 	cachedAnchor := manager.anchor
 	manager.mu.RUnlock()
-	if !sameAuditAnchor(persisted, cachedAnchor) {
-		return errors.New("audit anchor: mutation gate persisted checkpoint tip differs from the verified in-process tip")
+	sinceID, sinceDigest := manager.getVerifiedHead()
+	_, _, err := manager.store.VerifyLocalAuditMutationState(ctx, model.AuditHead{ID: sinceID, SHA256: sinceDigest}, func(_ model.AuditHead, persisted model.AuditAnchor) error {
+		if manager.authority == nil {
+			return nil
+		}
+		if persisted.ID == 0 {
+			return fmt.Errorf("audit anchor: mutation gate persisted checkpoints: %w", store.ErrNotFound)
+		}
+		if err := manager.authority.Verify(persisted); err != nil {
+			return fmt.Errorf("audit anchor: mutation gate persisted checkpoints: %w", err)
+		}
+		if !sameAuditAnchor(persisted, cachedAnchor) {
+			return errors.New("audit anchor: mutation gate persisted checkpoint tip differs from the verified in-process tip")
+		}
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("audit anchor: mutation gate verify local protected state: %w", err)
 	}
 	return nil
 }

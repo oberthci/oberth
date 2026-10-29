@@ -345,7 +345,7 @@ func TestMutationGateDoesNotReconcileAfterStateChangesDuringWitnessRecovery(t *t
 	}
 }
 
-func TestMutationGateHoldsSQLiteWriterLeaseThroughExternalChecks(t *testing.T) {
+func TestMutationGateRejectsTamperingDuringExternalChecks(t *testing.T) {
 	for _, stage := range []string{"authority verification", "continuity reconciliation"} {
 		t.Run(stage, func(t *testing.T) {
 			ctx := context.Background()
@@ -398,18 +398,14 @@ func TestMutationGateHoldsSQLiteWriterLeaseThroughExternalChecks(t *testing.T) {
 			} else {
 				continuity.reconcileHook = attemptWrite
 			}
-			if err := manager.AllowMutation(ctx); err != nil {
-				t.Fatalf("valid mutation gate: %v", err)
+			if err := manager.AllowMutation(ctx); err == nil || !strings.Contains(err.Error(), "audit action 1 hash is invalid") {
+				t.Fatalf("tamper not detected by re-verification: %v", err)
 			}
-			if !attempted || writeErr == nil {
-				t.Fatalf("concurrent write during %s: attempted=%t error=%v", stage, attempted, writeErr)
+			if !attempted || writeErr != nil {
+				t.Fatalf("write during %s: attempted=%t error=%v", stage, attempted, writeErr)
 			}
-			message := strings.ToLower(writeErr.Error())
-			if !strings.Contains(message, "locked") && !strings.Contains(message, "busy") {
-				t.Fatalf("concurrent write during %s failed for an unexpected reason: %v", stage, writeErr)
-			}
-			if _, err := database.VerifyAuditChain(ctx); err != nil {
-				t.Fatalf("blocked concurrent write changed the audit chain: %v", err)
+			if _, err := database.VerifyAuditChain(ctx); err == nil {
+				t.Fatal("subsequent verification accepted the altered audit chain")
 			}
 		})
 	}
@@ -1250,9 +1246,8 @@ func TestManagerLocalModeVerifiesChainWithoutExternalServices(t *testing.T) {
 		t.Fatalf("local mode recorded a signed checkpoint: %+v", anchor)
 	}
 
-	// Chain tampering must still close the gate: local mode is unanchored,
-	// not unverified. Tamper the LATEST action so the incremental gate
-	// (which verifies only the suffix past the verified head) catches it.
+	// Local mode re-verifies the full chain on each gate. An unchanged cached
+	// head must not hide tampering of a previously verified row.
 	raw, err := sql.Open("sqlite", path)
 	if err != nil {
 		t.Fatal(err)
@@ -1269,11 +1264,6 @@ func TestManagerLocalModeVerifiesChainWithoutExternalServices(t *testing.T) {
 	if err := raw.Close(); err != nil {
 		t.Fatal(err)
 	}
-	// Reset verified head so incremental gate re-verifies the tampered row.
-	manager.mu.Lock()
-	manager.verifiedHead = 0
-	manager.verifiedDigest = nil
-	manager.mu.Unlock()
 	if err := manager.AllowMutation(ctx); err == nil || !strings.Contains(err.Error(), "verify local protected state") {
 		t.Fatalf("local-mode mutation gate after chain tampering error = %v", err)
 	}
