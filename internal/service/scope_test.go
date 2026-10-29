@@ -172,7 +172,7 @@ func newScopeFixture(t *testing.T) *scopeFixture {
 		Promotions: database, Logs: logs, Artifacts: kept, Auditor: database,
 		SecretAccess: database, KubeVirtGrants: database, PromotionGrants: database, RepositoryRemover: database,
 		KVMPreflights: database, Health: fixture.health, Signals: NewSignals(), RunCancels: database, RunReruns: database,
-		MaximumWait: 50 * time.Millisecond, PromotionWorkspaceRoot: filepath.Join(root, "promotion-work"),
+		MaximumWait: testTimeout(50 * time.Millisecond), PromotionWorkspaceRoot: filepath.Join(root, "promotion-work"),
 		SecretStoreVerifier: func(context.Context, api.SecretStoreVerifyRequest) (api.SecretStoreVerifyResponse, error) {
 			return api.SecretStoreVerifyResponse{}, nil
 		},

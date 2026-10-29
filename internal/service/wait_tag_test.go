@@ -189,11 +189,11 @@ func TestWaitWakesForReleaseAdmittedAfterTerminalBranch(t *testing.T) {
 	}
 	finishWaitFixtureRun(t, fixture, branch.ID)
 	observed := observedWaitStore{Store: fixture.store, resolved: make(chan struct{}, 1)}
-	control, err := NewAPI(APIConfig{Runs: observed, Signals: fixture.signals, MaximumWait: 2 * time.Second})
+	control, err := NewAPI(APIConfig{Runs: observed, Signals: fixture.signals, MaximumWait: testTimeout(2 * time.Second)})
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout(3*time.Second))
 	defer cancel()
 	type result struct {
 		value any

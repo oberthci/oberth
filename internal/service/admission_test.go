@@ -16,7 +16,7 @@ const admissionAcquireBudget = 2 * time.Second
 
 func acquireWithinBudget(t *testing.T, reservation *admissionReservation, size periapsis.Size) (func(), error) {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), admissionAcquireBudget)
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout(admissionAcquireBudget))
 	defer cancel()
 	return reservation.acquire(ctx, size)
 }
@@ -213,7 +213,7 @@ func assertNotAcquired(t *testing.T, acquired <-chan func()) {
 	case release := <-acquired:
 		release()
 		t.Fatal("reservation acquired unexpectedly")
-	case <-time.After(20 * time.Millisecond):
+	case <-time.After(testTimeout(20 * time.Millisecond)):
 	}
 }
 
@@ -222,7 +222,7 @@ func awaitAcquired(t *testing.T, acquired <-chan func()) func() {
 	select {
 	case release := <-acquired:
 		return release
-	case <-time.After(time.Second):
+	case <-time.After(testTimeout(time.Second)):
 		t.Fatal("reservation did not acquire")
 		return nil
 	}
@@ -261,7 +261,7 @@ func TestWeightedAdmissionAbandonWithdrawsOnlyUngrantedReservations(t *testing.T
 		if !errors.Is(err, errAdmissionAbandoned) {
 			t.Fatalf("abandoned waiter returned %v", err)
 		}
-	case <-time.After(admissionAcquireBudget):
+	case <-time.After(testTimeout(admissionAcquireBudget)):
 		t.Fatal("abandoned waiter never woke")
 	}
 	releaseBehind := awaitAcquired(t, acquired)

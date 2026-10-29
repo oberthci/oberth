@@ -133,7 +133,7 @@ func TestNewPushWaitsWhilePreviousRunPublishes(t *testing.T) {
 	go func() { processed <- fixture.scheduler.ProcessNext(ctx) }()
 	select {
 	case <-fixture.git.publishStarted:
-	case <-time.After(5 * time.Second):
+	case <-time.After(testTimeout(5 * time.Second)):
 		close(fixture.git.publishRelease)
 		t.Fatal("first run did not reach durable publication")
 	}
@@ -149,7 +149,7 @@ func TestNewPushWaitsWhilePreviousRunPublishes(t *testing.T) {
 	var processErr error
 	select {
 	case processErr = <-processed:
-	case <-time.After(5 * time.Second):
+	case <-time.After(testTimeout(5 * time.Second)):
 		t.Fatal("first publication did not finish after release")
 	}
 
@@ -219,14 +219,14 @@ func TestSchedulerSkipsSameRefRunWhilePublicationPending(t *testing.T) {
 			if schedulerErr != nil {
 				t.Errorf("scheduler run: %v", schedulerErr)
 			}
-		case <-time.After(5 * time.Second):
+		case <-time.After(testTimeout(5 * time.Second)):
 			t.Error("scheduler did not stop after cancellation")
 		}
 	})
 
 	waitForStatus := func(runID string, wanted model.RunStatus) model.Run {
 		t.Helper()
-		timer := time.NewTimer(5 * time.Second)
+		timer := time.NewTimer(testTimeout(5 * time.Second))
 		defer timer.Stop()
 		for {
 			run, err := fixture.store.Run(context.Background(), runID)
@@ -269,7 +269,7 @@ func TestSchedulerSkipsSameRefRunWhilePublicationPending(t *testing.T) {
 	}
 	select {
 	case <-fixture.git.publishStarted:
-	case <-time.After(5 * time.Second):
+	case <-time.After(testTimeout(5 * time.Second)):
 		t.Fatal("first run did not reach publication")
 	}
 
@@ -395,7 +395,7 @@ func TestFastForwardPromotionOutlivesCanceledRequest(t *testing.T) {
 	}()
 	select {
 	case <-fixture.git.promotionPublishStarted:
-	case <-time.After(5 * time.Second):
+	case <-time.After(testTimeout(5 * time.Second)):
 		t.Fatal("fast-forward publication did not start")
 	}
 	cancel()
@@ -403,7 +403,7 @@ func TestFastForwardPromotionOutlivesCanceledRequest(t *testing.T) {
 	var completed result
 	select {
 	case completed = <-done:
-	case <-time.After(5 * time.Second):
+	case <-time.After(testTimeout(5 * time.Second)):
 		t.Fatal("fast-forward publication did not finish after request cancellation")
 	}
 	if completed.err != nil {
@@ -447,14 +447,14 @@ func TestFastForwardPendingPublicationRecoversWithoutRestart(t *testing.T) {
 			if runErr != nil {
 				t.Errorf("scheduler run: %v", runErr)
 			}
-		case <-time.After(5 * time.Second):
+		case <-time.After(testTimeout(5 * time.Second)):
 			t.Error("scheduler did not stop")
 		}
 	})
 	for index := 0; index < 2; index++ {
 		select {
 		case <-failing.empty:
-		case <-time.After(5 * time.Second):
+		case <-time.After(testTimeout(5 * time.Second)):
 			t.Fatalf("scheduler startup empty claim %d did not occur", index+1)
 		}
 	}
@@ -463,7 +463,7 @@ func TestFastForwardPendingPublicationRecoversWithoutRestart(t *testing.T) {
 		Runs: fixture.store, History: fixture.store, Repositories: fixture.store,
 		Issues: fixture.store, Promotions: fixture.store, PromotionRuns: fixture.store,
 		Enqueues: scheduler, Git: fixture.git, Logs: fixture.logs, Auditor: fixture.store,
-		Signals: fixture.signals, MaximumWait: 50 * time.Millisecond,
+		Signals: fixture.signals, MaximumWait: testTimeout(50 * time.Millisecond),
 		PromotionWorkspaceRoot: filepath.Join(fixture.root, "fast-forward-recovery-api"),
 	})
 	if err != nil {
@@ -479,7 +479,7 @@ func TestFastForwardPendingPublicationRecoversWithoutRestart(t *testing.T) {
 		t.Fatalf("promotion before scheduler recovery = %#v", pending)
 	}
 	releaseRecovery()
-	deadline := time.Now().Add(2 * time.Second)
+	deadline := time.Now().Add(testTimeout(2 * time.Second))
 	for {
 		recovered, lookupErr := fixture.store.Promotion(context.Background(), pending.ID)
 		if lookupErr != nil {
@@ -494,7 +494,7 @@ func TestFastForwardPendingPublicationRecoversWithoutRestart(t *testing.T) {
 		if time.Now().After(deadline) {
 			t.Fatalf("pending publication was not recovered without restart: %#v", recovered)
 		}
-		time.Sleep(10 * time.Millisecond)
+		time.Sleep(testTimeout(10 * time.Millisecond))
 	}
 }
 
@@ -521,14 +521,14 @@ func TestPublicationRecoveryWakeDoesNotSeizeUnrelatedLivePublication(t *testing.
 			if runErr != nil {
 				t.Errorf("scheduler run: %v", runErr)
 			}
-		case <-time.After(5 * time.Second):
+		case <-time.After(testTimeout(5 * time.Second)):
 			t.Error("scheduler did not stop")
 		}
 	})
 	for index := 0; index < 2; index++ {
 		select {
 		case <-observed.empty:
-		case <-time.After(5 * time.Second):
+		case <-time.After(testTimeout(5 * time.Second)):
 			t.Fatalf("scheduler startup empty claim %d did not occur", index+1)
 		}
 	}
@@ -601,7 +601,7 @@ func TestPublicationCoordinatorSerializesLiveDeliveryAndStartupRecovery(t *testi
 	}()
 	select {
 	case <-fixture.git.promotionPublishStarted:
-	case <-time.After(5 * time.Second):
+	case <-time.After(testTimeout(5 * time.Second)):
 		t.Fatal("live publication delivery did not start")
 	}
 	recoveryDone := make(chan error, 1)
@@ -609,7 +609,7 @@ func TestPublicationCoordinatorSerializesLiveDeliveryAndStartupRecovery(t *testi
 	select {
 	case err := <-recoveryDone:
 		t.Fatalf("startup recovery bypassed active delivery coordinator: %v", err)
-	case <-time.After(100 * time.Millisecond):
+	case <-time.After(testTimeout(100 * time.Millisecond)):
 	}
 	close(fixture.git.promotionPublishRelease)
 
@@ -618,7 +618,7 @@ func TestPublicationCoordinatorSerializesLiveDeliveryAndStartupRecovery(t *testi
 		if delivered.err != nil || delivered.finalization.Promotion.Status != model.PromotionPassed {
 			t.Fatalf("live delivery = %#v, %v", delivered.finalization, delivered.err)
 		}
-	case <-time.After(5 * time.Second):
+	case <-time.After(testTimeout(5 * time.Second)):
 		t.Fatal("live publication delivery did not finish")
 	}
 	select {
@@ -626,7 +626,7 @@ func TestPublicationCoordinatorSerializesLiveDeliveryAndStartupRecovery(t *testi
 		if err != nil {
 			t.Fatal(err)
 		}
-	case <-time.After(5 * time.Second):
+	case <-time.After(testTimeout(5 * time.Second)):
 		t.Fatal("startup recovery did not observe terminal publication")
 	}
 	if len(fixture.git.promotions) != 1 {
@@ -668,7 +668,7 @@ func TestPublicationCoordinatorRechecksGateAfterBoundedWait(t *testing.T) {
 			if !errors.Is(deliveryErr, errMutationBlocked) {
 				t.Fatalf("delivery after gate closed = %v, want mutation blocked", deliveryErr)
 			}
-		case <-time.After(5 * time.Second):
+		case <-time.After(testTimeout(5 * time.Second)):
 			t.Fatal("delivery remained blocked after coordinator release")
 		}
 		if len(fixture.git.promotions) != 0 {
@@ -680,7 +680,7 @@ func TestPublicationCoordinatorRechecksGateAfterBoundedWait(t *testing.T) {
 		fixture := newControlFixture(t)
 		_, publication := beginPendingPromotionPublication(t, fixture, "main", baseSHA, resultSHA)
 		permit := <-fixture.scheduler.deliveryPermit
-		ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
+		ctx, cancel := context.WithTimeout(context.Background(), testTimeout(25*time.Millisecond))
 		defer cancel()
 		_, err := fixture.scheduler.DeliverPublication(ctx, publication.ID)
 		fixture.scheduler.deliveryPermit <- permit
@@ -776,13 +776,13 @@ func TestSchedulerPausesAndResumesCompletedWorkWhenMutationGateCloses(t *testing
 		cancelScheduler()
 		select {
 		case <-schedulerDone:
-		case <-time.After(5 * time.Second):
+		case <-time.After(testTimeout(5 * time.Second)):
 			t.Error("scheduler did not stop")
 		}
 	}()
 	select {
 	case <-jobs.started:
-	case <-time.After(5 * time.Second):
+	case <-time.After(testTimeout(5 * time.Second)):
 		t.Fatal("Job did not start")
 	}
 	gate.set(errors.New("audit witness unavailable"))
@@ -790,7 +790,7 @@ func TestSchedulerPausesAndResumesCompletedWorkWhenMutationGateCloses(t *testing
 	select {
 	case <-schedulerDone:
 		t.Fatalf("scheduler exited during recoverable audit outage: %v", schedulerErr)
-	case <-time.After(200 * time.Millisecond):
+	case <-time.After(testTimeout(200 * time.Millisecond)):
 	}
 	paused, err := fixture.store.Run(context.Background(), run.ID)
 	if err != nil {
@@ -811,7 +811,7 @@ func TestSchedulerPausesAndResumesCompletedWorkWhenMutationGateCloses(t *testing
 		if schedulerErr != nil {
 			t.Fatalf("scheduler after recovery = %v", schedulerErr)
 		}
-	case <-time.After(5 * time.Second):
+	case <-time.After(testTimeout(5 * time.Second)):
 		t.Fatal("scheduler did not stop after recovered run")
 	}
 }
@@ -841,14 +841,14 @@ func TestDurableEnqueueWakeSurvivesMutationGateClosingBeforeAcceptance(t *testin
 			if runErr != nil {
 				t.Errorf("scheduler run: %v", runErr)
 			}
-		case <-time.After(5 * time.Second):
+		case <-time.After(testTimeout(5 * time.Second)):
 			t.Error("scheduler did not stop")
 		}
 	})
 	for index := 0; index < 2; index++ {
 		select {
 		case <-observed.empty:
-		case <-time.After(5 * time.Second):
+		case <-time.After(testTimeout(5 * time.Second)):
 			t.Fatalf("scheduler startup empty claim %d did not occur", index+1)
 		}
 	}
@@ -1343,7 +1343,7 @@ func (fixture *controlFixture) api(t *testing.T) *API {
 		Issues: fixture.store, Promotions: fixture.store, PromotionRuns: fixture.store,
 		Enqueues: fixture.scheduler, Git: fixture.git, Refs: fixture.refs,
 		Logs: fixture.logs, Auditor: fixture.store,
-		Signals: fixture.signals, MaximumWait: 50 * time.Millisecond,
+		Signals: fixture.signals, MaximumWait: testTimeout(50 * time.Millisecond),
 		PromotionWorkspaceRoot: filepath.Join(fixture.root, "promotion-work"),
 	})
 	if err != nil {
@@ -1378,7 +1378,7 @@ func TestSchedulerPassesStaticSizeIntoJobCreation(t *testing.T) {
 
 func waitForFixtureRunStatus(t *testing.T, fixture *controlFixture, runID string, wanted model.RunStatus) model.Run {
 	t.Helper()
-	timer := time.NewTimer(5 * time.Second)
+	timer := time.NewTimer(testTimeout(5 * time.Second))
 	defer timer.Stop()
 	for {
 		run, err := fixture.store.Run(context.Background(), runID)
@@ -2039,7 +2039,7 @@ func TestSupersessionBetweenJobIntentAndCreateCannotOrphanJob(t *testing.T) {
 	go func() { processed <- scheduler.ProcessNext(ctx) }()
 	select {
 	case <-jobs.createStarted:
-	case <-time.After(5 * time.Second):
+	case <-time.After(testTimeout(5 * time.Second)):
 		t.Fatal("worker did not reach Job creation")
 	}
 	if _, err := scheduler.EnqueueCI(ctx, CIRequest{
@@ -2054,7 +2054,7 @@ func TestSupersessionBetweenJobIntentAndCreateCannotOrphanJob(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-	case <-time.After(5 * time.Second):
+	case <-time.After(testTimeout(5 * time.Second)):
 		t.Fatal("superseded worker did not finish")
 	}
 	jobs.mu.Lock()
@@ -2098,7 +2098,7 @@ func TestSupersessionDeleteFailureRetainsCancellationUntilRetry(t *testing.T) {
 	go func() { processed <- scheduler.ProcessNext(ctx) }()
 	select {
 	case <-jobs.createStarted:
-	case <-time.After(5 * time.Second):
+	case <-time.After(testTimeout(5 * time.Second)):
 		t.Fatal("worker did not reach Job creation")
 	}
 	if _, err := scheduler.EnqueueCI(ctx, CIRequest{
@@ -2113,7 +2113,7 @@ func TestSupersessionDeleteFailureRetainsCancellationUntilRetry(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), "injected Job deletion failure") {
 			t.Fatalf("worker error = %v, want deletion failure", err)
 		}
-	case <-time.After(5 * time.Second):
+	case <-time.After(testTimeout(5 * time.Second)):
 		t.Fatal("superseded worker did not finish")
 	}
 	pending, err := fixture.store.PendingRunCancellations(ctx)
@@ -2218,7 +2218,7 @@ func TestSchedulerShutdownCancelsAndJoinsWorkers(t *testing.T) {
 	go func() { runReturned <- scheduler.Run(ctx) }()
 	select {
 	case <-jobs.started:
-	case <-time.After(time.Second):
+	case <-time.After(testTimeout(time.Second)):
 		t.Fatal("scheduler did not start the Job")
 	}
 	jobName, err := deterministicJobName(fixture.repo.Name, enqueued.ID)
@@ -2236,7 +2236,7 @@ func TestSchedulerShutdownCancelsAndJoinsWorkers(t *testing.T) {
 	cancel()
 	select {
 	case <-jobs.canceled:
-	case <-time.After(time.Second):
+	case <-time.After(testTimeout(time.Second)):
 		t.Fatal("worker did not observe scheduler cancellation")
 	}
 	select {
@@ -2250,7 +2250,7 @@ func TestSchedulerShutdownCancelsAndJoinsWorkers(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-	case <-time.After(time.Second):
+	case <-time.After(testTimeout(time.Second)):
 		t.Fatal("scheduler did not join its canceled worker")
 	}
 	// Shutdown must NOT delete the Job inline any more: the requeue records
@@ -2723,7 +2723,7 @@ func TestPromotionFastForwardDivergentAndNonFastForwardFailure(t *testing.T) {
 			Runs: fixture.store, History: fixture.store, Repositories: fixture.store,
 			Issues: fixture.store, Promotions: fixture.store, PromotionRuns: fixture.store,
 			Enqueues: failingScheduler, Git: fixture.git, Logs: fixture.logs, Auditor: fixture.store,
-			Signals: fixture.signals, MaximumWait: 50 * time.Millisecond,
+			Signals: fixture.signals, MaximumWait: testTimeout(50 * time.Millisecond),
 			PromotionWorkspaceRoot: filepath.Join(fixture.root, "promotion-fast-crash"),
 		})
 		if err != nil {
@@ -2861,7 +2861,7 @@ func TestFastForwardPromotionPublicationWakesSameRefQueue(t *testing.T) {
 		Runs: fixture.store, History: fixture.store, Repositories: fixture.store,
 		Issues: fixture.store, Promotions: fixture.store, PromotionRuns: fixture.store,
 		Enqueues: scheduler, Git: fixture.git, Logs: fixture.logs, Auditor: fixture.store,
-		Signals: fixture.signals, MaximumWait: 50 * time.Millisecond,
+		Signals: fixture.signals, MaximumWait: testTimeout(50 * time.Millisecond),
 		PromotionWorkspaceRoot: filepath.Join(fixture.root, "promotion-publication-wake-api"),
 	})
 	if err != nil {
@@ -2883,7 +2883,7 @@ func TestFastForwardPromotionPublicationWakesSameRefQueue(t *testing.T) {
 			if schedulerErr != nil {
 				t.Errorf("scheduler run: %v", schedulerErr)
 			}
-		case <-time.After(5 * time.Second):
+		case <-time.After(testTimeout(5 * time.Second)):
 			t.Error("scheduler did not stop after cancellation")
 		}
 	})
@@ -2893,7 +2893,7 @@ func TestFastForwardPromotionPublicationWakesSameRefQueue(t *testing.T) {
 	for index := 0; index < 2; index++ {
 		select {
 		case <-observed.empty:
-		case <-time.After(5 * time.Second):
+		case <-time.After(testTimeout(5 * time.Second)):
 			t.Fatalf("scheduler startup empty claim %d did not occur", index+1)
 		}
 	}
@@ -2910,7 +2910,7 @@ func TestFastForwardPromotionPublicationWakesSameRefQueue(t *testing.T) {
 	}()
 	select {
 	case <-fixture.git.promotionPublishStarted:
-	case <-time.After(5 * time.Second):
+	case <-time.After(testTimeout(5 * time.Second)):
 		t.Fatal("fast-forward promotion did not reach durable publication")
 	}
 
@@ -2923,7 +2923,7 @@ func TestFastForwardPromotionPublicationWakesSameRefQueue(t *testing.T) {
 	}
 	select {
 	case <-observed.empty:
-	case <-time.After(5 * time.Second):
+	case <-time.After(testTimeout(5 * time.Second)):
 		t.Fatal("scheduler did not consume the gated run's enqueue wake")
 	}
 	queued, err := fixture.store.Run(context.Background(), blocked.ID)
@@ -2939,7 +2939,7 @@ func TestFastForwardPromotionPublicationWakesSameRefQueue(t *testing.T) {
 	var promoted promotionResult
 	select {
 	case promoted = <-promotionDone:
-	case <-time.After(5 * time.Second):
+	case <-time.After(testTimeout(5 * time.Second)):
 		t.Fatal("fast-forward promotion did not finish after publication release")
 	}
 	if promoted.err != nil {
@@ -2954,7 +2954,7 @@ func TestFastForwardPromotionPublicationWakesSameRefQueue(t *testing.T) {
 		if claimed.ID != blocked.ID {
 			t.Fatalf("claim after fast-forward publication = %s, want %s", claimed.ID, blocked.ID)
 		}
-	case <-time.After(5 * time.Second):
+	case <-time.After(testTimeout(5 * time.Second)):
 		t.Fatal("fast-forward publication finalization did not wake the gated queue")
 	}
 	waitForFixtureRunStatus(t, fixture, blocked.ID, model.RunPassed)
@@ -3077,7 +3077,7 @@ func TestAdmittedPromotionCompensationSurvivesRequestCancellation(t *testing.T) 
 		}()
 		select {
 		case <-fixture.git.prepareStarted:
-		case <-time.After(5 * time.Second):
+		case <-time.After(testTimeout(5 * time.Second)):
 			t.Fatal("promotion planning did not start")
 		}
 		cancel()
@@ -3087,7 +3087,7 @@ func TestAdmittedPromotionCompensationSurvivesRequestCancellation(t *testing.T) 
 				t.Fatal(result.err)
 			}
 			assertTerminal(t, fixture, requireToolPromotion(t, fixture, result.value), branch, filepath.Join(fixture.root, "promotion-work"), false)
-		case <-time.After(5 * time.Second):
+		case <-time.After(testTimeout(5 * time.Second)):
 			t.Fatal("planning cancellation did not compensate")
 		}
 	})
@@ -3122,7 +3122,7 @@ func TestAdmittedPromotionCompensationSurvivesRequestCancellation(t *testing.T) 
 		}()
 		select {
 		case <-observer.started:
-		case <-time.After(5 * time.Second):
+		case <-time.After(testTimeout(5 * time.Second)):
 			t.Fatal("promotion enqueue notification did not start")
 		}
 		cancel()
@@ -3132,7 +3132,7 @@ func TestAdmittedPromotionCompensationSurvivesRequestCancellation(t *testing.T) 
 				t.Fatal(result.err)
 			}
 			assertTerminal(t, fixture, requireToolPromotion(t, fixture, result.value), branch, filepath.Join(fixture.root, "cancel-enqueue"), true)
-		case <-time.After(5 * time.Second):
+		case <-time.After(testTimeout(5 * time.Second)):
 			t.Fatal("enqueue cancellation did not compensate")
 		}
 	})
@@ -3629,7 +3629,7 @@ func TestAccessAllowRequiresAdminUplink(t *testing.T) {
 		Issues: fixture.store, Promotions: fixture.store, PromotionRuns: fixture.store,
 		Enqueues: fixture.scheduler, Git: fixture.git, Refs: fixture.refs,
 		Logs: fixture.logs, Auditor: fixture.store,
-		Signals: fixture.signals, MaximumWait: 50 * time.Millisecond,
+		Signals: fixture.signals, MaximumWait: testTimeout(50 * time.Millisecond),
 		PromotionWorkspaceRoot: filepath.Join(fixture.root, "promotion-work"),
 		SecretAccess:           secretStore,
 	})
@@ -3675,7 +3675,7 @@ func TestAccessRevokeRequiresAdminUplink(t *testing.T) {
 		Issues: fixture.store, Promotions: fixture.store, PromotionRuns: fixture.store,
 		Enqueues: fixture.scheduler, Git: fixture.git, Refs: fixture.refs,
 		Logs: fixture.logs, Auditor: fixture.store,
-		Signals: fixture.signals, MaximumWait: 50 * time.Millisecond,
+		Signals: fixture.signals, MaximumWait: testTimeout(50 * time.Millisecond),
 		PromotionWorkspaceRoot: filepath.Join(fixture.root, "promotion-work"),
 		SecretAccess:           secretStore,
 	})
@@ -3709,7 +3709,7 @@ func TestPromoteRejectsNonAdmin(t *testing.T) {
 		Issues: fixture.store, Promotions: fixture.store, PromotionRuns: fixture.store,
 		Enqueues: fixture.scheduler, Git: fixture.git, Refs: fixture.refs,
 		Logs: fixture.logs, Auditor: fixture.store,
-		Signals: fixture.signals, MaximumWait: 50 * time.Millisecond,
+		Signals: fixture.signals, MaximumWait: testTimeout(50 * time.Millisecond),
 		PromotionWorkspaceRoot: filepath.Join(fixture.root, "promotion-work"),
 	})
 	if err != nil {
@@ -3782,7 +3782,7 @@ func TestRepoRemoveRequiresAdminUplink(t *testing.T) {
 		Issues: fixture.store, Promotions: fixture.store, PromotionRuns: fixture.store,
 		Enqueues: fixture.scheduler, Git: fixture.git, Refs: fixture.refs,
 		Logs: fixture.logs, Auditor: fixture.store,
-		Signals: fixture.signals, MaximumWait: 50 * time.Millisecond,
+		Signals: fixture.signals, MaximumWait: testTimeout(50 * time.Millisecond),
 		PromotionWorkspaceRoot: filepath.Join(fixture.root, "promotion-work"),
 		RepositoryRemover:      remover,
 		RemoveGitCache: func(name string) error {
@@ -3845,7 +3845,7 @@ func TestRepoRemoveSurfacesCacheCleanupFailure(t *testing.T) {
 		Issues: fixture.store, Promotions: fixture.store, PromotionRuns: fixture.store,
 		Enqueues: fixture.scheduler, Git: fixture.git, Refs: fixture.refs,
 		Logs: fixture.logs, Auditor: fixture.store,
-		Signals: fixture.signals, MaximumWait: 50 * time.Millisecond,
+		Signals: fixture.signals, MaximumWait: testTimeout(50 * time.Millisecond),
 		PromotionWorkspaceRoot: filepath.Join(fixture.root, "promotion-work"),
 		RepositoryRemover:      remover,
 		RemoveGitCache: func(string) error {
@@ -3890,7 +3890,7 @@ func TestAccessRevokeResponseCarriesPolicySyncWarning(t *testing.T) {
 		Issues: fixture.store, Promotions: fixture.store, PromotionRuns: fixture.store,
 		Enqueues: fixture.scheduler, Git: fixture.git, Refs: fixture.refs,
 		Logs: fixture.logs, Auditor: fixture.store,
-		Signals: fixture.signals, MaximumWait: 50 * time.Millisecond,
+		Signals: fixture.signals, MaximumWait: testTimeout(50 * time.Millisecond),
 		PromotionWorkspaceRoot: filepath.Join(fixture.root, "promotion-work"),
 		SecretAccess:           secretStore,
 	})
@@ -3939,7 +3939,7 @@ func TestAccessAllowResponseCarriesPolicySyncWarning(t *testing.T) {
 		Issues: fixture.store, Promotions: fixture.store, PromotionRuns: fixture.store,
 		Enqueues: fixture.scheduler, Git: fixture.git, Refs: fixture.refs,
 		Logs: fixture.logs, Auditor: fixture.store,
-		Signals: fixture.signals, MaximumWait: 50 * time.Millisecond,
+		Signals: fixture.signals, MaximumWait: testTimeout(50 * time.Millisecond),
 		PromotionWorkspaceRoot: filepath.Join(fixture.root, "promotion-work"),
 		SecretAccess:           secretStore,
 	})

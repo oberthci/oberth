@@ -79,7 +79,7 @@ func newRerunHarness(t *testing.T, results ...JobResult) *rerunHarness {
 		Runs: fixture.store, History: fixture.store, RunRetries: fixture.store, RunReruns: fixture.store,
 		Repositories: fixture.store, Issues: fixture.store, Promotions: fixture.store, PromotionRuns: fixture.store,
 		Enqueues: harness.scheduler, Git: harness.git, Refs: harness.refs, Logs: fixture.logs, Auditor: fixture.store,
-		Signals: fixture.signals, MaximumWait: 50 * time.Millisecond,
+		Signals: fixture.signals, MaximumWait: testTimeout(50 * time.Millisecond),
 		PromotionWorkspaceRoot: filepath.Join(fixture.root, "rerun-promotion-work"),
 	})
 	if err != nil {

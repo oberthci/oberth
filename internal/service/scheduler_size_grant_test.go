@@ -12,7 +12,7 @@ import (
 
 func awaitRunStatus(t *testing.T, fixture *concurrencyFixture, runID string, want model.RunStatus) model.Run {
 	t.Helper()
-	deadline := time.Now().Add(15 * time.Second)
+	deadline := time.Now().Add(testTimeout(15 * time.Second))
 	for {
 		run, err := fixture.store.Run(context.Background(), runID)
 		if err != nil {
@@ -24,7 +24,7 @@ func awaitRunStatus(t *testing.T, fixture *concurrencyFixture, runID string, wan
 		if time.Now().After(deadline) {
 			t.Fatalf("run %s is %s, want %s", runID, run.Status, want)
 		}
-		time.Sleep(20 * time.Millisecond)
+		time.Sleep(testTimeout(20 * time.Millisecond))
 	}
 }
 
@@ -74,7 +74,7 @@ func TestUngrantedXLIsRefusedWithoutHoldingTheQueue(t *testing.T) {
 		if admitted != light {
 			t.Fatalf("admitted %s, want the other repository's run %s", admitted, light)
 		}
-	case <-time.After(10 * time.Second):
+	case <-time.After(testTimeout(10 * time.Second)):
 		t.Fatal("the other repository's run was not admitted")
 	}
 

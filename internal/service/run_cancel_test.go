@@ -54,7 +54,7 @@ func (fixture *groupFixture) assertNoCIIssue(t *testing.T, repository model.Repo
 
 func (fixture *groupFixture) awaitNoPendingCancellations(t *testing.T) {
 	t.Helper()
-	deadline := time.Now().Add(15 * time.Second)
+	deadline := time.Now().Add(testTimeout(15 * time.Second))
 	for {
 		pending, err := fixture.store.PendingRunCancellations(t.Context())
 		if err != nil {
@@ -66,7 +66,7 @@ func (fixture *groupFixture) awaitNoPendingCancellations(t *testing.T) {
 		if time.Now().After(deadline) {
 			t.Fatalf("cancellation obligations never settled: %#v", pending)
 		}
-		time.Sleep(5 * time.Millisecond)
+		time.Sleep(testTimeout(5 * time.Millisecond))
 	}
 }
 
@@ -214,7 +214,7 @@ func TestRunCancelRunningRunDeletesItsWorkflowAndKeepsTheCancel(t *testing.T) {
 		t.Fatalf("Workflow %s was not deleted", submitted.JobName)
 	}
 	// The owner's late result never replaces the cancel.
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(testTimeout(100 * time.Millisecond))
 	assertCancelled(t, fixture.run(t, running.ID), cancelAgent.Identity, "stuck test")
 	fixture.assertNoCIIssue(t, fixture.beacon, "busy")
 
@@ -234,7 +234,7 @@ func TestRunCancelRunningRunDeletesItsWorkflowAndKeepsTheCancel(t *testing.T) {
 
 func (fixture *groupFixture) awaitRunStarted(t *testing.T, id string) model.Run {
 	t.Helper()
-	deadline := time.Now().Add(15 * time.Second)
+	deadline := time.Now().Add(testTimeout(15 * time.Second))
 	for {
 		run := fixture.run(t, id)
 		if run.StartedAt != nil {
@@ -243,7 +243,7 @@ func (fixture *groupFixture) awaitRunStarted(t *testing.T, id string) model.Run 
 		if time.Now().After(deadline) {
 			t.Fatalf("run %s never started: %#v", id, run)
 		}
-		time.Sleep(5 * time.Millisecond)
+		time.Sleep(testTimeout(5 * time.Millisecond))
 	}
 }
 

@@ -74,7 +74,7 @@ func TestSecretStoreVerifyHonorsCancellation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout(20*time.Millisecond))
 	defer cancel()
 	_, err = control.CallTool(ctx, api.Actor{Identity: "admin@host", Admin: true}, "secretstore_verify", json.RawMessage(`{"timeout":120}`))
 	if !errors.Is(err, context.DeadlineExceeded) {

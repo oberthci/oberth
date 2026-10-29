@@ -241,7 +241,7 @@ func TestRetentionDefaultsKeepLogsAndTimerSweepsWithoutCollection(t *testing.T) 
 	f.retained(t, run.ID, true)
 	f.retention.LogPolicy.Age = time.Hour
 	f.retention.ArtifactPolicy.Age = time.Hour
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout(30*time.Second))
 	defer cancel()
 	// End after the completed sweep observes that artifact evidence is gone,
 	// avoiding a timing assumption about filesystem or audit-commit latency.
@@ -340,7 +340,7 @@ func TestPurgeWaitsForCancelledSchedulerWriter(t *testing.T) {
 	defer release()
 	select {
 	case <-jobs.started:
-	case <-time.After(10 * time.Second):
+	case <-time.After(testTimeout(10 * time.Second)):
 		t.Fatal("scheduler did not start")
 	}
 	cancelled, err := fixture.store.CancelRun(ctx, model.RunCancelRequest{RunID: run.ID, Actor: "owner", Reason: "stop run"})
@@ -363,7 +363,7 @@ func TestPurgeWaitsForCancelledSchedulerWriter(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-	case <-time.After(10 * time.Second):
+	case <-time.After(testTimeout(10 * time.Second)):
 		t.Fatal("scheduler did not finish")
 	}
 	if _, err := retention.Purge(ctx, actor, run.ID, "both", "remove cancelled evidence"); err != nil {
