@@ -140,8 +140,11 @@ func (c *protectedControllerFixture) TrustedKVMReceipt(_ context.Context, r argo
 	return vmrunner.KVMReceipt{IntentDigest: d, WorkflowUID: uid, Binding: vmrunner.KVMTerminationBinding{Namespace: intent.Namespace, WorkflowName: intent.WorkflowName, WorkflowUID: uid, PodName: "pod", PodUID: "pod-uid", ContainerID: "containerd://id", HarnessImageRef: intent.Recipe.HarnessImage, AdmittedAt: intent.AdmittedAt, Deadline: intent.Deadline}, Report: vmrunner.KVMReport{Version: 1, IntentDigest: d, InventoryDigest: intent.InventoryDigest, CaseCount: intent.CaseCount, ArtifactSetDigest: strings.Repeat("f", 64)}, Termination: vmrunner.KVMTerminationRecord{ImageID: "sha256:" + strings.Repeat("c", 64), ContainerID: "containerd://id", PodUID: "pod-uid", WorkflowUID: uid, StartedAt: intent.AdmittedAt, FinishedAt: now}, FinishedAt: now}, nil
 }
 func TestTrustedPreflightAdapterLifecycle(t *testing.T) {
+	// Every scenario owns its controller, grant loader, workspace and database.
+	t.Parallel()
 	for _, scenario := range []string{"pass", "pass empty org", "workflow failed", "workflow observation failed", "infrastructure failed", "infrastructure observation failed", "definite create refusal", "uncertain create", "recover absent", "unapproved", "guest granted", "guest revoked", "guest recover"} {
 		t.Run(scenario, func(t *testing.T) {
+			t.Parallel()
 			org, wantRepo := "org", "upstream/org/repo"
 			if scenario == "pass empty org" {
 				org, wantRepo = "", "upstream/upstream/repo"

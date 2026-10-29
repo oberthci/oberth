@@ -833,12 +833,13 @@ spec:
           memory: "8Gi"
 
   # ---- parallel race-test burns ----
-  # Each package runs once: dedicated store/service groups and the remainder
-  # discovered by go list ./.... The package-union contract covers new packages.
+  # Each package runs once: dedicated store/service/gitcache groups and the
+  # remainder discovered by go list ./.... Git-cache already has a required
+  # parallel burn below; exclude it from rest to avoid running that suite twice.
+  # The package-union contract covers new packages.
   # All groups keep the race detector and uncached execution. The explicit
   # twenty-minute timeout provides headroom; independent Pods bound contention.
-  # CI samples put store at 494-600s and service at 400-545s; other
-  # packages stay below 30s. Give each group a bounded two-CPU lane.
+  # Give each group a bounded two-CPU lane; workflow parallelism remains two.
   - name: test-store
     automountServiceAccountToken: false
     container:

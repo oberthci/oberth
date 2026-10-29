@@ -191,7 +191,10 @@ func TestOpenStartupDatabaseRejectsEmptyFileOnTOCTOURace(t *testing.T) {
 }
 
 func TestOpenStartupDatabaseMigratesLegacyV1OnlyWithEmptyContinuity(t *testing.T) {
+	// Each case uses a private legacy database and continuity fixture.
+	t.Parallel()
 	t.Run("empty external continuity", func(t *testing.T) {
+		t.Parallel()
 		path := filepath.Join(t.TempDir(), "oberth-v1.sqlite")
 		seedLegacyV1Database(t, path, 1)
 		continuity := &staticStartupContinuity{}
@@ -217,6 +220,7 @@ func TestOpenStartupDatabaseMigratesLegacyV1OnlyWithEmptyContinuity(t *testing.T
 	})
 
 	t.Run("exact prepared intent resumes", func(t *testing.T) {
+		t.Parallel()
 		path := filepath.Join(t.TempDir(), "oberth-v1.sqlite")
 		seedLegacyV1Database(t, path, 1)
 		head, err := store.InspectLegacyV1(context.Background(), path, store.Options{})
@@ -243,6 +247,7 @@ func TestOpenStartupDatabaseMigratesLegacyV1OnlyWithEmptyContinuity(t *testing.T
 	})
 
 	t.Run("existing external continuity", func(t *testing.T) {
+		t.Parallel()
 		path := filepath.Join(t.TempDir(), "oberth-v1.sqlite")
 		seedLegacyV1Database(t, path, 1)
 		before := readAuthoritativeSQLiteFiles(t, path)
@@ -266,6 +271,7 @@ func TestOpenStartupDatabaseMigratesLegacyV1OnlyWithEmptyContinuity(t *testing.T
 	})
 
 	t.Run("completed external continuity", func(t *testing.T) {
+		t.Parallel()
 		path := filepath.Join(t.TempDir(), "oberth-v1.sqlite")
 		seedLegacyV1Database(t, path, 1)
 		before := readAuthoritativeSQLiteFiles(t, path)
@@ -285,6 +291,7 @@ func TestOpenStartupDatabaseMigratesLegacyV1OnlyWithEmptyContinuity(t *testing.T
 	})
 
 	t.Run("ambiguous intent create resumes without duplicate", func(t *testing.T) {
+		t.Parallel()
 		path := filepath.Join(t.TempDir(), "oberth-v1.sqlite")
 		seedLegacyV1Database(t, path, 1)
 		before := readAuthoritativeSQLiteFiles(t, path)
@@ -321,6 +328,7 @@ func TestOpenStartupDatabaseMigratesLegacyV1OnlyWithEmptyContinuity(t *testing.T
 	})
 
 	t.Run("post-migration verification failure retries current schema", func(t *testing.T) {
+		t.Parallel()
 		path := filepath.Join(t.TempDir(), "oberth-v1.sqlite")
 		seedLegacyV1Database(t, path, 3)
 		continuity := &staticStartupContinuity{}
@@ -349,6 +357,7 @@ func TestOpenStartupDatabaseMigratesLegacyV1OnlyWithEmptyContinuity(t *testing.T
 	})
 
 	t.Run("empty legacy audit history needs no migration intent", func(t *testing.T) {
+		t.Parallel()
 		path := filepath.Join(t.TempDir(), "oberth-v1.sqlite")
 		seedLegacyV1Database(t, path, 0)
 		continuity := &staticStartupContinuity{}

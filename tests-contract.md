@@ -166,14 +166,16 @@ host cache; `TestTrivyGuardWorkspaceCache` treats `/tmp` as private and
 `/work/cache` as shared for cache leaves.
 
 Parallel CI race groups: `TestOberthRaceGroupsCoverEveryPackageExactlyOnce`
-compares the store/service/remainder partition with the actual `go list ./...`
+compares the store/service/gitcache/remainder partition with the actual `go list ./...`
 inventory and refuses missing or duplicate packages.
 `TestOberthRaceGroupLauncherPreservesChecks` records actual Go invocations,
 retains race/verbose/uncached execution and the explicit timeout, and proves a
 newly listed package joins the remainder.
 `TestOberthSplitBurnsUseTheRaceGroupLauncher` checks the admitted Pod commands,
 CGO and processor limits; the existing graph and isolation contracts cover
-all three race burns and require each one before every cross-build.
+all four race burns and require each one before every cross-build.
+The Git-cache wrapper retains its static package contract before invoking its
+dedicated race group; that package must not also run in the remainder.
 
 Audit read surfaces (#1104): HTTP and MCP must agree on filtered entries and
 paging, and refuse scoped and non-admin callers. Status reads the latest backup

@@ -6,14 +6,17 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -63,64 +66,77 @@ func TestMCPTimeoutFlag(t *testing.T) {
 	}
 }
 
-// Exercise the actual CLI HTTP/SSE path beyond both former 60-second limits.
-// This intentionally takes over a minute, including in ordinary CI suites.
+// Exercise the actual CLI HTTP/TLS/SSE path beyond both former 60-second
+// limits. In-memory connections let synctest advance the full minute virtually.
 func TestMCPCallStreamsHeartbeatsBeyondSixtySeconds(t *testing.T) {
-	var heartbeats atomic.Int64
-	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var request jsonRPCRequest
-		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-			t.Error(err)
-			return
-		}
-		w.Header().Set("Content-Type", mcpContentTypeSSE)
-		finished := time.NewTimer(61 * time.Second)
-		defer finished.Stop()
-		ticker := time.NewTicker(time.Second)
-		defer ticker.Stop()
-		for {
-			if _, err := fmt.Fprint(w, ": keepalive\n\n"); err != nil {
-				return
-			}
-			if err := http.NewResponseController(w).Flush(); err != nil {
+	synctest.Test(t, func(t *testing.T) {
+		var heartbeats atomic.Int64
+		server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var request jsonRPCRequest
+			if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 				t.Error(err)
 				return
 			}
-			heartbeats.Add(1)
-			select {
-			case <-r.Context().Done():
-				return
-			case <-ticker.C:
-				continue
-			case <-finished.C:
-				payload, err := json.Marshal(jsonRPCResponse{JSONRPC: mcpJSONRPCVersion, ID: &request.ID, Result: json.RawMessage(`{"content":[{"type":"text","text":"finished"}]}`)})
-				if err != nil {
+			w.Header().Set("Content-Type", mcpContentTypeSSE)
+			finished := time.NewTimer(61 * time.Second)
+			defer finished.Stop()
+			ticker := time.NewTicker(time.Second)
+			defer ticker.Stop()
+			for {
+				if _, err := fmt.Fprint(w, ": keepalive\n\n"); err != nil {
+					return
+				}
+				if err := http.NewResponseController(w).Flush(); err != nil {
 					t.Error(err)
 					return
 				}
-				_, _ = fmt.Fprintf(w, "event: message\ndata: %s\n\n", payload)
-				return
+				heartbeats.Add(1)
+				select {
+				case <-r.Context().Done():
+					return
+				case <-ticker.C:
+					continue
+				case <-finished.C:
+					payload, err := json.Marshal(jsonRPCResponse{JSONRPC: mcpJSONRPCVersion, ID: &request.ID, Result: json.RawMessage(`{"content":[{"type":"text","text":"finished"}]}`)})
+					if err != nil {
+						t.Error(err)
+						return
+					}
+					_, _ = fmt.Fprintf(w, "event: message\ndata: %s\n\n", payload)
+					return
+				}
 			}
+		}))
+		// Replace the TCP listener before starting TLS; all network waits then
+		// belong to the synctest bubble, including the client's timeout timer.
+		_ = server.Listener.Close()
+		listener := &mcpPipeListener{connections: make(chan net.Conn), closed: make(chan struct{})}
+		server.Listener = listener
+		server.StartTLS()
+		defer server.Close()
+		original := mcpHTTPClientFunc
+		client := server.Client()
+		client.Transport.(*http.Transport).DialContext = listener.dialContext
+		client.Timeout = mcpRequestTimeout
+		mcpHTTPClientFunc = func(string) (*http.Client, error) { return client, nil }
+		defer func() { mcpHTTPClientFunc = original }()
+		t.Setenv("OBERTH_TOKEN", "heartbeat-test-token")
+		var output strings.Builder
+		started := time.Now()
+		err := runMCPCall(t.Context(), []string{"custom_poll", `{"timeout":300}`, "--url", server.URL}, &output)
+		if err != nil || output.String() != "finished\n" {
+			t.Fatalf("streaming call = %q, %v", output.String(), err)
 		}
-	}))
-	defer server.Close()
-	original := mcpHTTPClientFunc
-	client := server.Client()
-	client.Timeout = mcpRequestTimeout
-	mcpHTTPClientFunc = func(string) (*http.Client, error) { return client, nil }
-	defer func() { mcpHTTPClientFunc = original }()
-	t.Setenv("OBERTH_TOKEN", "heartbeat-test-token")
-	var output strings.Builder
-	err := runMCPCall(t.Context(), []string{"custom_poll", `{"timeout":300}`, "--url", server.URL}, &output)
-	if err != nil || output.String() != "finished\n" {
-		t.Fatalf("streaming call = %q, %v", output.String(), err)
-	}
-	if heartbeats.Load() < 2 {
-		t.Fatal("long-running tool did not stream heartbeats")
-	}
-	if client.Timeout != mcpRequestTimeout {
-		t.Fatal("shared HTTP client was mutated")
-	}
+		if elapsed := time.Since(started); elapsed != 61*time.Second {
+			t.Fatalf("stream duration = %s, want 61s", elapsed)
+		}
+		if heartbeats.Load() < 60 {
+			t.Fatal("long-running tool did not stream heartbeats")
+		}
+		if client.Timeout != mcpRequestTimeout {
+			t.Fatal("shared HTTP client was mutated")
+		}
+	})
 }
 
 func TestMCPCallDeadlineErrorNamesLimit(t *testing.T) {
@@ -207,5 +223,38 @@ func TestMCPDeadlineTransportDoesNotExposeURL(t *testing.T) {
 	err := classifyMCPTransport(&url.Error{Op: "Post", URL: "https://example.org/mcp?credential=private-fixture", Err: context.DeadlineExceeded})
 	if !errors.Is(err, context.DeadlineExceeded) || strings.Contains(err.Error(), "private-fixture") {
 		t.Fatalf("timeout classification = %v", err)
+	}
+}
+
+// mcpPipeListener runs real HTTP/TLS over bubble-local, synchronous pipes.
+// No kernel socket or wall-clock scheduling is needed for deadline coverage.
+type mcpPipeListener struct {
+	connections chan net.Conn
+	closed      chan struct{}
+	once        sync.Once
+}
+
+func (listener *mcpPipeListener) Accept() (net.Conn, error) {
+	select {
+	case conn := <-listener.connections:
+		return conn, nil
+	case <-listener.closed:
+		return nil, net.ErrClosed
+	}
+}
+func (listener *mcpPipeListener) Close() error {
+	listener.once.Do(func() { close(listener.closed) })
+	return nil
+}
+func (*mcpPipeListener) Addr() net.Addr { return &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 443} }
+func (listener *mcpPipeListener) dialContext(ctx context.Context, _, _ string) (net.Conn, error) {
+	client, server := net.Pipe()
+	select {
+	case listener.connections <- server:
+		return client, nil
+	case <-ctx.Done():
+		_ = client.Close()
+		_ = server.Close()
+		return nil, ctx.Err()
 	}
 }

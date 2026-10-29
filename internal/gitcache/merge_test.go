@@ -8,6 +8,7 @@ import (
 )
 
 func TestNativeGitPromotionMerge(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name, left, right string
 		conflict          bool
@@ -24,6 +25,8 @@ func TestNativeGitPromotionMerge(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			for _, test := range cases {
 				t.Run(test.name, func(t *testing.T) {
+					// Each merge owns both repositories and its cache.
+					t.Parallel()
 					repository := newTestRepository(t)
 					// Preserve the refusal of independent edits in the same file.
 					if test.name == "nonoverlapping lines refuse" {
