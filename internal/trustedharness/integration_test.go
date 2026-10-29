@@ -20,6 +20,10 @@ import (
 	"github.com/oberthci/oberth/internal/vmrunner"
 )
 
+// Native subprocess startup and socket readiness need scheduling headroom on
+// loaded CI hosts. Keep the fixture's readiness deadline inside this watchdog.
+const protectedTransportTestTimeout = 2 * time.Minute
+
 func TestHarnessProtectedTransportIntegration(t *testing.T) {
 	binary := filepath.Join(t.TempDir(), "native-fixture")
 	build := exec.Command("go", "build", "-trimpath", "-o", binary, "./testdata/fixture.go")
@@ -63,7 +67,7 @@ func TestHarnessProtectedTransportIntegration(t *testing.T) {
 			}
 			inventory, count := verified.Inventory()
 			now := time.Now().UTC()
-			intent := vmrunner.KVMIntent{RunID: "fixture", RepoID: 1, Repository: "upstream/org/repo", CandidateSHA: strings.Repeat("a", 40), BaselineSHA: strings.Repeat("b", 40), Contract: contract, Recipe: vmrunner.KVMRecipe{SuiteSHA256: contract.SuiteSHA256, GuestSHA256: guestHash, HarnessImage: "registry.example/harness@sha256:" + strings.Repeat("c", 64), SuiteURL: "https://example.org/suite", GuestURL: "https://example.org/guest"}, Namespace: "pipelines", WorkflowName: "fixture-trusted", WorkflowSpecDigest: strings.Repeat("d", 64), InventoryDigest: inventory, CaseCount: count, AdmittedAt: now, Deadline: now.Add(5 * time.Second)}
+			intent := vmrunner.KVMIntent{RunID: "fixture", RepoID: 1, Repository: "upstream/org/repo", CandidateSHA: strings.Repeat("a", 40), BaselineSHA: strings.Repeat("b", 40), Contract: contract, Recipe: vmrunner.KVMRecipe{SuiteSHA256: contract.SuiteSHA256, GuestSHA256: guestHash, HarnessImage: "registry.example/harness@sha256:" + strings.Repeat("c", 64), SuiteURL: "https://example.org/suite", GuestURL: "https://example.org/guest"}, Namespace: "pipelines", WorkflowName: "fixture-trusted", WorkflowSpecDigest: strings.Repeat("d", 64), InventoryDigest: inventory, CaseCount: count, AdmittedAt: now, Deadline: now.Add(2 * protectedTransportTestTimeout)}
 			root := t.TempDir()
 			if err := os.WriteFile(filepath.Join(root, "program"), []byte("untrusted candidate bytes"), 0600); err != nil {
 				t.Fatal(err)
@@ -83,7 +87,9 @@ func TestHarnessProtectedTransportIntegration(t *testing.T) {
 				qemu = exec.Command(binary, append([]string{"qemu"}, args...)...)
 				return qemu
 			}}
-			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			// The caller watchdog expires before the intent, so timeout cannot
+			// pass because of an unrelated admission deadline.
+			ctx, cancel := context.WithTimeout(context.Background(), protectedTransportTestTimeout)
 			defer cancel()
 			// Keep socket paths short while respecting the runner's writable TMPDIR.
 			private, err := os.MkdirTemp("", "kh-")
@@ -92,15 +98,22 @@ func TestHarnessProtectedTransportIntegration(t *testing.T) {
 			}
 			defer os.RemoveAll(private)
 			report, err := run(ctx, intent, root, private, deps)
-			if scenario == "pass" {
+			switch scenario {
+			case "pass":
 				if err != nil {
 					t.Fatal(err)
 				}
 				if report.InventoryDigest != inventory || report.CaseCount != 2 || report.ArtifactSetDigest == "" {
 					t.Fatalf("wrong actual completed inventory: %#v", report)
 				}
-			} else if err == nil {
-				t.Fatal("negative execution produced pass")
+			case "timeout":
+				if ctx.Err() != context.DeadlineExceeded || err == nil || !strings.Contains(err.Error(), "trusted host case timeout failed:") {
+					t.Fatalf("timeout must reach the caller deadline in the timeout case: %v (context: %v)", err, ctx.Err())
+				}
+			default:
+				if err == nil {
+					t.Fatal("negative execution produced pass")
+				}
 			}
 			if qemu != nil && qemu.ProcessState == nil {
 				t.Fatal("QEMU not joined")
@@ -141,7 +154,7 @@ func TestHarnessProtectedTransportIntegration(t *testing.T) {
 			}
 			served <- err
 		}()
-		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), protectedTransportTestTimeout)
 		defer cancel()
 		cmd := exec.CommandContext(ctx, binary, "--case", "first", "--qmp", filepath.Join(private, "missing.sock"), "--guest-control", guest)
 		out, err := cmd.CombinedOutput()
@@ -150,7 +163,7 @@ func TestHarnessProtectedTransportIntegration(t *testing.T) {
 			t.Fatalf("guest response: %v", serveErr)
 		}
 		var exit *exec.ExitError
-		if ctx.Err() != nil || !errors.As(err, &exit) || exit.ExitCode() != 2 {
+		if ctx.Err() != nil || !errors.As(err, &exit) || exit.ExitCode() != 2 || !bytes.Contains(out, []byte("fixture QMP readiness deadline exceeded")) {
 			t.Fatalf("missing QMP must reach the fixture readiness deadline: %v: %s", err, out)
 		}
 	})

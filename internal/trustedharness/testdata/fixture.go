@@ -14,14 +14,20 @@ func main() {
 	if args[0] == "--case" {
 		id := args[1]
 		if id == "timeout" {
-			time.Sleep(time.Minute)
+			// Only caller cancellation may finish this case; a longer test
+			// watchdog must not turn the synthetic stall into a success.
+			for {
+				time.Sleep(time.Minute)
+			}
 		}
 		if id == "fail" {
 			os.Stdout.WriteString(`{"all":"passed"}`)
 			os.Exit(1)
 		}
 		socket := args[5]
-		deadline := time.Now().Add(2 * time.Second)
+		// Both readiness phases share this test-only scheduling budget, well
+		// inside the integration test's two-minute parent watchdog.
+		deadline := time.Now().Add(30 * time.Second)
 		for {
 			conn, e := net.Dial("unix", socket)
 			if e == nil {
@@ -31,6 +37,7 @@ func main() {
 				break
 			}
 			if time.Now().After(deadline) {
+				os.Stderr.WriteString("fixture guest-control readiness deadline exceeded\n")
 				os.Exit(2)
 			}
 			time.Sleep(time.Millisecond)
@@ -43,6 +50,7 @@ func main() {
 				break
 			}
 			if time.Now().After(deadline) {
+				os.Stderr.WriteString("fixture QMP readiness deadline exceeded\n")
 				os.Exit(2)
 			}
 			time.Sleep(time.Millisecond)
