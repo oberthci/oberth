@@ -49,13 +49,13 @@ func runPacking(t *testing.T, maxConcurrentJobs, expected int, branches []string
 		cancel()
 		select {
 		case <-finished:
-		case <-time.After(testTimeout(15 * time.Second)):
+		case <-time.After(testStartTimeout(15 * time.Second)):
 			t.Error("scheduler did not stop")
 		}
 	})
 	// Wait for every expected Job creation, not for a quiet interval that
 	// can expire before even the first admission on a busy host.
-	deadline := time.NewTimer(testTimeout(20 * time.Second))
+	deadline := time.NewTimer(testStartTimeout(20 * time.Second))
 	defer deadline.Stop()
 	for admitted < expected {
 		select {

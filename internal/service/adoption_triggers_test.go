@@ -102,7 +102,7 @@ func waitSlice2Worker(t *testing.T, done <-chan error, entered <-chan struct{}) 
 	case <-entered:
 	case err := <-done:
 		t.Fatalf("scheduler stopped before Wait: %v", err)
-	case <-time.After(testTimeout(5 * time.Second)):
+	case <-time.After(testStartTimeout(5 * time.Second)):
 		t.Fatal("adopted Wait not entered")
 	}
 }
@@ -121,7 +121,7 @@ func slice2Workspaces(t *testing.T, fixture *recoveryFixture, run model.Run, pro
 }
 func waitSlice2Cleanup(t *testing.T, paths []string) {
 	t.Helper()
-	deadline := time.Now().Add(testTimeout(5 * time.Second))
+	deadline := time.Now().Add(testStartTimeout(5 * time.Second))
 	for {
 		remaining := false
 		for _, path := range paths {
@@ -180,14 +180,14 @@ func (owner *slice2Owner) waitEntered(t *testing.T, entered <-chan struct{}) {
 	case <-entered:
 	case <-owner.done:
 		t.Fatalf("scheduler stopped before Wait: %v", owner.err)
-	case <-time.After(testTimeout(5 * time.Second)):
+	case <-time.After(testStartTimeout(5 * time.Second)):
 		t.Fatal("adopted Wait not entered")
 	}
 }
 
 func (owner *slice2Owner) waitTerminal(t *testing.T, scheduler *Scheduler, database *store.Store, id string) model.Run {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(t.Context(), testTimeout(time.Minute))
+	ctx, cancel := context.WithTimeout(t.Context(), testStartTimeout(time.Minute))
 	defer cancel()
 	last := model.Run{ID: id}
 	for {
@@ -363,7 +363,7 @@ func TestAdoptedTriggerPublicationRecoversPushBeforeLedgerFinalization(t *testin
 				if err == nil || !strings.Contains(err.Error(), "injected crash") {
 					t.Fatal("expected post-push crash", err)
 				}
-			case <-time.After(testTimeout(5 * time.Second)):
+			case <-time.After(testStartTimeout(5 * time.Second)):
 				t.Fatal("post-push failure not returned")
 			}
 			pending, err := fixture.store.PendingPublications(context.Background())
@@ -397,7 +397,7 @@ func TestAdoptedTriggerPublicationRecoversPushBeforeLedgerFinalization(t *testin
 			case <-ready:
 			case err := <-done2:
 				t.Fatal("publication recovery failed", err)
-			case <-time.After(testTimeout(5 * time.Second)):
+			case <-time.After(testStartTimeout(5 * time.Second)):
 				t.Fatal("publication recovery stalled")
 			}
 			cancel2()

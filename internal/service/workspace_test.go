@@ -367,7 +367,7 @@ func TestWorkerJoinCompletesEmptyNameSupersedeBeforeCleanup(t *testing.T) {
 	go func() { processed <- scheduler.ProcessNext(ctx) }()
 	select {
 	case <-git.started:
-	case <-time.After(testTimeout(5 * time.Second)):
+	case <-time.After(testStartTimeout(5 * time.Second)):
 		close(git.release)
 		t.Fatal("checkout did not start")
 	}
@@ -395,7 +395,7 @@ func TestWorkerJoinCompletesEmptyNameSupersedeBeforeCleanup(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-	case <-time.After(testTimeout(5 * time.Second)):
+	case <-time.After(testStartTimeout(5 * time.Second)):
 		t.Fatal("superseded worker did not return")
 	}
 	pending, err = fixture.store.PendingRunCancellations(ctx)

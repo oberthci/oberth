@@ -27,7 +27,7 @@ func pending(t *testing.T, gate *weightedAdmission, sequence int64, request admi
 	t.Helper()
 	reservation := gate.reserve(sequence)
 	go func() { _, _ = reservation.acquireRequest(context.Background(), request) }()
-	deadline := time.Now().Add(testTimeout(admissionAcquireBudget))
+	deadline := time.Now().Add(testStartTimeout(admissionAcquireBudget))
 	for {
 		gate.mu.Lock()
 		settled := reservation.prepared || reservation.granted
@@ -287,7 +287,7 @@ func TestRegrantWithoutAHeadClearsBackfilled(t *testing.T) {
 	go func() {
 		_, _ = small.acquireRequest(context.Background(), admissionRequest{RunID: "small", Size: periapsis.S})
 	}()
-	deadline := time.Now().Add(testTimeout(admissionAcquireBudget))
+	deadline := time.Now().Add(testStartTimeout(admissionAcquireBudget))
 	for !granted(gate, small) {
 		if time.Now().After(deadline) {
 			t.Fatal("the parked run was not granted again")

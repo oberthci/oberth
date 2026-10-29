@@ -45,7 +45,7 @@ func TestSchedulerPausesAdmissionWithoutStoppingExistingWork(t *testing.T) {
 		cancel()
 		select {
 		case <-finished:
-		case <-time.After(testTimeout(time.Minute)):
+		case <-time.After(testStartTimeout(time.Minute)):
 			t.Error("scheduler did not stop")
 		}
 	}()
@@ -54,7 +54,7 @@ func TestSchedulerPausesAdmissionWithoutStoppingExistingWork(t *testing.T) {
 	case initialRun = <-jobs.admitted:
 	case <-finished:
 		t.Fatal("scheduler exited")
-	case <-time.After(testTimeout(time.Minute)):
+	case <-time.After(testStartTimeout(time.Minute)):
 		t.Fatal("initial job not admitted")
 	}
 	jobs.blocked.Store(true)
@@ -63,7 +63,7 @@ func TestSchedulerPausesAdmissionWithoutStoppingExistingWork(t *testing.T) {
 	case <-jobs.waiting:
 	case err := <-finished:
 		t.Fatalf("profile outage terminated scheduler: %v", err)
-	case <-time.After(testTimeout(time.Minute)):
+	case <-time.After(testStartTimeout(time.Minute)):
 		t.Fatal("admission gate not called")
 	}
 	select {
@@ -85,7 +85,7 @@ func TestSchedulerPausesAdmissionWithoutStoppingExistingWork(t *testing.T) {
 	case <-jobs.admitted:
 	case err := <-finished:
 		t.Fatalf("scheduler failed to recover: %v", err)
-	case <-time.After(testTimeout(time.Minute)):
+	case <-time.After(testStartTimeout(time.Minute)):
 		t.Fatal("admission did not resume")
 	}
 }

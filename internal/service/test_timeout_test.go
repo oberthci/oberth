@@ -25,16 +25,23 @@ var serviceTestTimeoutScale = func() time.Duration {
 	return time.Duration(scale)
 }()
 
-// testTimeout scales only test harness wall-clock budgets, polling intervals
-// and shortened fixture timers. Product timeout contracts and fake time stay
-// literal. Every guard remains finite, including at the maximum scale of 100.
+// testTimeout scales deliberately elapsed fixture timers, observation windows
+// and polling intervals. Product timeout contracts and fake time stay literal.
 func testTimeout(base time.Duration) time.Duration {
 	return base * serviceTestTimeoutScale
 }
 
+// testStartTimeout bounds expected asynchronous progress, including startup,
+// acquisition, completion and shutdown. These guards fail on expiry rather than
+// deliberately waiting it out; allow at least 30s for a loaded host to schedule
+// the worker. The floor adds no delay when the expected event arrives promptly.
+func testStartTimeout(base time.Duration) time.Duration {
+	return max(testTimeout(base), 30*time.Second)
+}
+
 func TestServiceTestTimeoutScale(t *testing.T) {
 	if os.Getenv("OBERTH_TIMEOUT_SCALE_PROBE") == "1" {
-		fmt.Printf("scaled=%d\n", testTimeout(3*time.Millisecond))
+		fmt.Printf("scaled=%d start=%d longer=%d\n", testTimeout(3*time.Millisecond), testStartTimeout(time.Second), testStartTimeout(20*time.Second))
 		return
 	}
 	executable, err := os.Executable()
@@ -51,7 +58,7 @@ func TestServiceTestTimeoutScale(t *testing.T) {
 		{"whitespace", " 4", 0}, {"overflow", "999999999999999999999999", 0},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			ctx, cancel := context.WithTimeout(t.Context(), testTimeout(10*time.Second))
+			ctx, cancel := context.WithTimeout(t.Context(), testStartTimeout(10*time.Second))
 			defer cancel()
 			command := exec.CommandContext(ctx, executable, "-test.run=^TestServiceTestTimeoutScale$", "-test.count=1")
 			for _, entry := range os.Environ() {
@@ -71,7 +78,7 @@ func TestServiceTestTimeoutScale(t *testing.T) {
 				if err == nil || !strings.Contains(string(output), "OBERTH_TEST_TIMEOUT_SCALE must be an integer in 1..100") {
 					t.Fatalf("invalid scale %q: %v, %s", test.raw, err, output)
 				}
-			} else if err != nil || !strings.Contains(string(output), fmt.Sprintf("scaled=%d\n", time.Duration(test.scale)*3*time.Millisecond)) {
+			} else if err != nil || !strings.Contains(string(output), fmt.Sprintf("scaled=%d start=%d longer=%d\n", time.Duration(test.scale)*3*time.Millisecond, max(time.Duration(test.scale)*time.Second, 30*time.Second), max(time.Duration(test.scale)*20*time.Second, 30*time.Second))) {
 				t.Fatalf("scale %q: %v, %s", test.raw, err, output)
 			}
 		})
