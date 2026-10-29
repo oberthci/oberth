@@ -1,5 +1,19 @@
 # Native Git source transport
 
+Incoming Git SSH authentication reads key registrations and scopes directly
+from the live SQLite WAL through a separate pool of at most four read-only
+connections. Writer transactions, including audit verification, do not queue
+these reads behind the server's single writer connection. Each lookup uses a
+fresh snapshot; committed revocations and scope changes take effect on the
+next lookup, including a second check after the client signs its key proof.
+Existing authenticated connections retain their session identity and scope.
+
+A missing or revoked key receives the usual authentication refusal. A lookup
+timeout or database failure instead logs `SSH identity lookup unavailable`,
+sends `temporary server error: SSH identity lookup unavailable; retry later`,
+and closes the connection. Retry those connections; a server-side lookup
+failure does not indicate that the client key needs to be registered again.
+
 Git CLI is the only backend. There is no in-process Git implementation,
 comparison worker or shadow telemetry. Retired `--git-backend`,
 `--gitcache-shadow` and OBERTH_GITCACHE_SHADOW settings have no runtime role.

@@ -63,6 +63,7 @@ type Options struct {
 type Store struct {
 	protocol ProtocolConfig
 
+	authDB   *sql.DB // bounded, read-only WAL readers; no cached authorization
 	db       *sql.DB
 	now      func() time.Time
 	mu       sync.Mutex
@@ -257,6 +258,10 @@ func open(
 			return nil, fmt.Errorf("reconcile inconsistent publications: %w", err)
 		}
 	}
+	if err := s.openAuthReaders(ctx, opts.BusyTimeout); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
 	return s, nil
 }
 
@@ -275,6 +280,12 @@ func openCurrent(ctx context.Context, path string, opts Options, readOnly bool) 
 	}
 	if !readOnly {
 		if err := s.migrate(ctx, nil); err != nil {
+			_ = s.db.Close()
+			return nil, err
+		}
+	}
+	if !readOnly {
+		if err := s.openAuthReaders(ctx, opts.BusyTimeout); err != nil {
 			_ = s.db.Close()
 			return nil, err
 		}
@@ -1033,18 +1044,22 @@ func (s *Store) Close() error {
 		return nil
 	}
 	s.done = true
+	var authErr error
+	if s.authDB != nil {
+		authErr = s.authDB.Close()
+	}
 	if s.readOnly {
 		closeErr := s.db.Close()
 		if s.cleanup != nil {
-			return errors.Join(closeErr, s.cleanup())
+			return errors.Join(authErr, closeErr, s.cleanup())
 		}
-		return closeErr
+		return errors.Join(authErr, closeErr)
 	}
 	if _, err := s.db.ExecContext(context.Background(), `PRAGMA wal_checkpoint(TRUNCATE)`); err != nil {
 		_ = s.db.Close()
-		return fmt.Errorf("checkpoint sqlite WAL: %w", err)
+		return errors.Join(authErr, fmt.Errorf("checkpoint sqlite WAL: %w", err))
 	}
-	return s.db.Close()
+	return errors.Join(authErr, s.db.Close())
 }
 
 // CreateUpstream inserts a named upstream. Production callers go through the
@@ -1864,7 +1879,19 @@ RETURNING id, fingerprint, identity, token_credential_id, auth_actor, admin, cre
 }
 
 func (s *Store) UplinkByFingerprint(ctx context.Context, fingerprint string) (model.Uplink, error) {
-	row := s.db.QueryRowContext(ctx, `
+	db := s.authDB
+	if db == nil {
+		db = s.db // read-only inspection handles and internal fixtures
+	}
+	// A fresh deferred transaction binds the key and all its scopes to one
+	// committed snapshot. End it before returning; never retain a snapshot
+	// across authentication requests or across the public-key probe/signature.
+	tx, err := db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return model.Uplink{}, fmt.Errorf("begin SSH identity lookup: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	row := tx.QueryRowContext(ctx, `
 SELECT id, fingerprint, identity, token_credential_id, auth_actor, admin, created_at, updated_at
 FROM uplinks WHERE fingerprint = ? AND NOT EXISTS (
  SELECT 1 FROM token_credentials t WHERE t.id=uplinks.token_credential_id AND t.revoked_at IS NOT NULL
@@ -1878,9 +1905,12 @@ FROM uplinks WHERE fingerprint = ? AND NOT EXISTS (
 	}
 	value.Admin = admin != 0
 	value.CreatedAt, value.UpdatedAt = fromUnixNano(created), fromUnixNano(updated)
-	scopes, err := loadUplinkScopes(ctx, s.db, value.ID)
+	scopes, err := loadUplinkScopes(ctx, tx, value.ID)
 	if err != nil {
 		return model.Uplink{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return model.Uplink{}, fmt.Errorf("finish SSH identity lookup: %w", err)
 	}
 	value.Scope = scopes
 	return value, nil
