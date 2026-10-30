@@ -48,7 +48,7 @@ func TestScheduleEntriesAreIndependentAndSurviveRetryRecovery(t *testing.T) {
 	if _, err = s.FinishRun(ctx, nightly.ID, model.RunResult{Status: model.RunInterrupted}); err != nil {
 		t.Fatal(err)
 	}
-	retried, err := s.RetryRun(ctx, nightly.ID, "admin")
+	retried, err := s.RetryRun(ctx, model.RunRetryRequest{RunID: nightly.ID, Actor: "admin"})
 	if err != nil || retried.ScheduleEntry != "nightly" {
 		t.Fatalf("retry: %+v %v", retried, err)
 	}

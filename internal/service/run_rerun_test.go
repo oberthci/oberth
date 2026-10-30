@@ -322,7 +322,7 @@ func TestRunRerunPolicy(t *testing.T) {
 		"plan by an uplink":  {run: model.Run{Trigger: "plan", RefKind: model.RefBranch}, want: ErrInvalidInput},
 		"admin branch force": {run: branch, admin: true, force: true},
 	} {
-		_, err := RunRerunPolicy(test.run, test.admin, test.force)
+		_, err := RunRerunPolicy(test.run, test.admin, test.force, false)
 		if (test.want == nil && err != nil) || (test.want != nil && !errors.Is(err, test.want)) {
 			t.Errorf("%s: error = %v, want %v", name, err, test.want)
 		}

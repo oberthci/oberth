@@ -160,11 +160,11 @@ func TestArchivedRepositoryRefusesPublicationRetryWithoutReactivation(t *testing
 	if err != nil || pub.Status != model.PublicationFailed {
 		t.Fatalf("changed archived publication: %+v, %v", pub, err)
 	}
-	if _, err := db.RetryRun(ctx, run.ID, "admin"); !errors.Is(err, ErrRepositoryArchived) {
+	if _, err := db.RetryRun(ctx, model.RunRetryRequest{RunID: run.ID, Actor: "admin"}); !errors.Is(err, ErrRepositoryArchived) {
 		t.Fatalf("run retry = %v", err)
 	}
 	authorized := false
-	_, err = db.RerunRun(ctx, model.RunRerunRequest{RunID: run.ID, Actor: "admin", Authorize: func(model.Run) (string, error) { authorized = true; return "", nil }})
+	_, err = db.RerunRun(ctx, model.RunRerunRequest{RunID: run.ID, Actor: "admin", Authorize: func(model.Run, model.RunReplayEvidence) (string, error) { authorized = true; return "", nil }})
 	if !errors.Is(err, ErrRepositoryArchived) || authorized {
 		t.Fatalf("rerun = %v; contacted authorizer = %v", err, authorized)
 	}

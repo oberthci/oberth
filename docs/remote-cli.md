@@ -62,10 +62,12 @@ oberth status
 
 The list and detail commands are read-only. `oberth run retry` calls the
 `run_retry` MCP tool using the same uplink token; it queues a fresh attempt
-for an interrupted or infrastructure-failed branch run and records the caller
-as actor. Workflow-level failures without a failed step are eligible. The
-source must still be the newest run for its branch; test failures, older runs,
-and release runs cannot be retried this way.
+for an interrupted or infrastructure-failed run and records the caller as actor.
+Workflow-level failures without a failed step are eligible. The source must still
+be the newest run for its ref, and the ref must have no active run. An admin can
+also retry tag/release infrastructure failures before credentialed/publication
+work started; the tag object, tested commit and release admission are retained.
+Test failures, older runs and promotion/plan/apply runs cannot be retried this way.
 
 `oberth issues` prints the first page and its full matching count, such as
 `1–50 of 93`. The dashboard shows the same page range and state/kind counts.
@@ -77,8 +79,12 @@ no longer the newest of its branch (as long as the branch head is still that
 SHA), and tag/release runs. The new run is linked to the original (`oberth
 run` prints `rerun of`), and `status`, `wait` and `promote` on the SHA follow
 it. A non-admin uplink may rerun branch-push runs; a tag/release rerun needs
-an admin and `--force`, and a tag that is already published or green is
-refused. When every step passed and only the upstream push failed, the push
+an admin. It needs `--force` when any `Secrets=true` step or publication started,
+or when the plan/progress evidence is unavailable. Failing test/build steps before
+unreached credentialed steps needs no force. A skipped credentialed step without
+start/log evidence does not require force; a started one does, even if it failed.
+Runs that failed before Workflow intent with no step evidence can be replayed
+without a plan. A tag that is already published or green is refused. When every step passed and only the upstream push failed, the push
 is retried instead of re-running the pipeline.
 
 `oberth promotion retry` calls the `promote_retry` MCP tool with the same

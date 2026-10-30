@@ -62,7 +62,11 @@ func (s *Store) RerunRun(ctx context.Context, request model.RunRerunRequest) (mo
 	}
 	var warning string
 	if request.Authorize != nil {
-		if warning, err = request.Authorize(source); err != nil {
+		evidence, evidenceErr := replayEvidenceTx(ctx, tx, source.ID)
+		if evidenceErr != nil {
+			return model.RunRerunResult{}, evidenceErr
+		}
+		if warning, err = request.Authorize(source, evidence); err != nil {
 			return model.RunRerunResult{}, err
 		}
 	}

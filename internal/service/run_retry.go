@@ -22,7 +22,18 @@ func (service *API) retryRun(ctx context.Context, actor api.Actor, id string) (m
 	if err != nil {
 		return model.Run{}, err
 	}
-	enqueued, err := service.runRetries.RetryRun(ctx, previous.ID, actor.Identity)
+	if previous.Release || previous.RefKind == model.RefTag {
+		if err := authorizeRunRerun(previous, actor.Admin); err != nil {
+			return model.Run{}, err
+		}
+	}
+	enqueued, err := service.runRetries.RetryRun(ctx, model.RunRetryRequest{
+		RunID: previous.ID, Actor: actor.Identity,
+		Authorize: func(current model.Run, evidence model.RunReplayEvidence) error {
+			_, err := RunRerunPolicy(current, actor.Admin, false, service.releaseReplaySafe(current, evidence))
+			return err
+		},
+	})
 	if err != nil {
 		return model.Run{}, err
 	}
