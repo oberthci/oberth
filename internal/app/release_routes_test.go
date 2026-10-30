@@ -163,6 +163,7 @@ func TestGrantFreeWIFReleaseAndBranchRefusalThroughEngine(t *testing.T) {
 // outbox, ReceiveHandler and PushIngestor before reading the admitted run.
 // This covers prefix stripping instead of calling AdmitRelease with a bare tag.
 func TestReleaseRoutesForPushedTagsThroughReceiveAdapter(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git unavailable")
 	}

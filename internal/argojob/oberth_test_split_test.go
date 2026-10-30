@@ -36,11 +36,11 @@ func TestOberthRaceGroupsCoverEveryPackageExactlyOnce(t *testing.T) {
 	if err := json.Unmarshal(output, &groups); err != nil {
 		t.Fatal(err)
 	}
-	if len(groups) != 3 {
-		t.Fatalf("race groups = %v, want store, service and rest", groups)
+	if len(groups) != 4 {
+		t.Fatalf("race groups = %v, want store, service, gitcache and rest", groups)
 	}
 	owners := map[string]string{}
-	for _, name := range []string{"store", "service", "rest"} {
+	for _, name := range []string{"store", "service", "gitcache", "rest"} {
 		if len(groups[name]) == 0 {
 			t.Fatalf("empty race group %s", name)
 		}
@@ -61,7 +61,7 @@ func TestOberthRaceGroupsCoverEveryPackageExactlyOnce(t *testing.T) {
 	if !reflect.DeepEqual(actual, want) {
 		t.Fatalf("race package union = %v, want go list ./... = %v", actual, want)
 	}
-	for _, name := range []string{"store", "service"} {
+	for _, name := range []string{"store", "service", "gitcache"} {
 		want := []string{"github.com/oberthci/oberth/internal/" + name}
 		if !reflect.DeepEqual(groups[name], want) {
 			t.Errorf("%s group = %v, want %v", name, groups[name], want)
@@ -95,7 +95,7 @@ else:
 	if err := os.WriteFile(goPath, []byte(fakeGo), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	for _, group := range []string{"store", "service", "rest"} {
+	for _, group := range []string{"store", "service", "gitcache", "rest"} {
 		t.Run(group, func(t *testing.T) {
 			argsFile := filepath.Join(root, group+".json")
 			command := exec.Command("python3", "-I", "-S", "-B", ".oberth/test-packages.py", group)
@@ -115,7 +115,7 @@ else:
 			want := []string{"test", "-race", "-v", "-count=1", "-p=2", "-timeout=20m"}
 			for _, pkg := range packages {
 				owner := "rest"
-				for _, dedicated := range []string{"store", "service"} {
+				for _, dedicated := range []string{"store", "service", "gitcache"} {
 					if pkg == "github.com/oberthci/oberth/internal/"+dedicated {
 						owner = dedicated
 					}
@@ -136,7 +136,7 @@ func TestOberthSplitBurnsUseTheRaceGroupLauncher(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, group := range []string{"store", "service", "rest"} {
+	for _, group := range []string{"store", "service", "gitcache", "rest"} {
 		found := false
 		for _, template := range built.Spec.Templates {
 			if template.Name != "test-"+group {
@@ -144,7 +144,22 @@ func TestOberthSplitBurnsUseTheRaceGroupLauncher(t *testing.T) {
 			}
 			found = true
 			container := template.Container
-			if container == nil || !reflect.DeepEqual(usageOriginalCommand(container.Command), []string{"/usr/bin/python3"}) || !reflect.DeepEqual(container.Args, []string{"-I", "-S", "-B", ".oberth/test-packages.py", group}) {
+			wantCommand := []string{"/usr/bin/python3"}
+			wantArgs := []string{"-I", "-S", "-B", ".oberth/test-packages.py", group}
+			if group == "gitcache" {
+				// Retain the static-Git package contract before the dedicated
+				// race suite, which must not also run in the rest group.
+				wantCommand = []string{"/bin/sh"}
+				wantArgs = []string{"hack/test-gitcache.sh"}
+				script, err := os.ReadFile(filepath.Join(repositoryRoot(t), "hack/test-gitcache.sh"))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !strings.Contains(string(script), "/bin/sh hack/test-install-static-git-packages.sh\nexec python3 -I -S -B .oberth/test-packages.py gitcache\n") {
+					t.Fatal("Git-cache gate must retain its package contract and race group launcher")
+				}
+			}
+			if container == nil || !reflect.DeepEqual(usageOriginalCommand(container.Command), wantCommand) || !reflect.DeepEqual(container.Args, wantArgs) {
 				t.Fatalf("%s does not invoke its race group", template.Name)
 			}
 			var cgo, procs string

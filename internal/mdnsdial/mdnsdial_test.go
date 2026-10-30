@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net"
 	"strings"
+	"syscall"
 	"testing"
 )
 
@@ -87,11 +88,30 @@ func TestDialerFallsBackForLocalNames(t *testing.T) {
 		return []net.IP{net.ParseIP("127.0.0.2"), net.ParseIP("127.0.0.1")}, nil
 	}
 
-	conn, err := offline().DialContext(context.Background(), "tcp", net.JoinHostPort("oberth-mdnsdial-test.local", port))
+	dialer := offline()
+	var attempted []string
+	// A second loopback address can blackhole for over a minute on macOS.
+	// Inject the refusal before connect; the successful fallback still uses
+	// the real listener, and both attempted addresses remain observable.
+	dialer.Base.ControlContext = func(_ context.Context, _, address string, _ syscall.RawConn) error {
+		host, _, err := net.SplitHostPort(address)
+		if err != nil {
+			return err
+		}
+		attempted = append(attempted, host)
+		if host == "127.0.0.2" {
+			return syscall.ECONNREFUSED
+		}
+		return nil
+	}
+	conn, err := dialer.DialContext(context.Background(), "tcp", net.JoinHostPort("oberth-mdnsdial-test.local", port))
 	if err != nil {
 		t.Fatalf("dial = %v", err)
 	}
 	_ = conn.Close()
+	if strings.Join(attempted, ",") != "127.0.0.2,127.0.0.1" {
+		t.Fatalf("fallback attempts = %v", attempted)
+	}
 	if len(asked) != 1 || asked[0] != "oberth-mdnsdial-test.local" {
 		t.Fatalf("Lookup asked %v", asked)
 	}

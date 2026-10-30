@@ -14,6 +14,7 @@ def package_groups():
     dedicated = {
         "store": "github.com/oberthci/oberth/internal/store",
         "service": "github.com/oberthci/oberth/internal/service",
+        "gitcache": "github.com/oberthci/oberth/internal/gitcache",
     }
     if not set(dedicated.values()).issubset(packages):
         raise SystemExit("dedicated test packages are missing")
@@ -26,7 +27,7 @@ def package_groups():
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("group", nargs="?", choices=("store", "service", "rest"))
+    parser.add_argument("group", nargs="?", choices=("store", "service", "gitcache", "rest"))
     parser.add_argument("--list", action="store_true", help="print the package partition without running tests")
     args = parser.parse_args()
     if not args.list and args.group is None:

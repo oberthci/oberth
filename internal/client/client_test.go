@@ -186,7 +186,12 @@ func TestANonJSONBodyDoesNotPanic(t *testing.T) {
 	defer server.Close()
 
 	var out struct{}
-	err := newClient(t, server).Get(context.Background(), "/api/runs", nil, &out)
+	// These cases inspect one response, including its retry classification.
+	// Reconnect behavior and its deadline are covered in restart_test.go.
+	err, retry := newClient(t, server).getOnce(t.Context(), "/api/runs", nil, &out)
+	if !retry {
+		t.Fatal("gateway failure lost its transient classification")
+	}
 	if err == nil {
 		t.Fatal("an HTML error body was accepted")
 	}
@@ -209,7 +214,10 @@ func TestNoFailurePathEverEchoesTheToken(t *testing.T) {
 			_, _ = w.Write([]byte(tc.body))
 		}))
 		var out struct{}
-		err := newClient(t, server).Get(context.Background(), "/api/runs", nil, &out)
+		err, retry := newClient(t, server).getOnce(t.Context(), "/api/runs", nil, &out)
+		if retry != (tc.code == http.StatusBadGateway) {
+			t.Fatalf("status %d retry = %v", tc.code, retry)
+		}
 		server.Close()
 		if err == nil {
 			continue
@@ -227,7 +235,10 @@ func TestNoFailurePathEverEchoesTheToken(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out struct{}
-	if err := client.Get(context.Background(), "/api/runs", nil, &out); err != nil {
+	if err, retry := client.getOnce(t.Context(), "/api/runs", nil, &out); err != nil {
+		if !retry {
+			t.Fatal("connection refusal lost its transient classification")
+		}
 		if strings.Contains(err.Error(), secret) {
 			t.Fatalf("a transport error leaked the token: %v", err)
 		}
@@ -628,7 +639,10 @@ func TestTransportErrorPreservesConnectionRefused(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out struct{}
-	err = api.Get(context.Background(), "/api/runs", nil, &out)
+	err, retry := api.getOnce(t.Context(), "/api/runs", nil, &out)
+	if !retry {
+		t.Fatal("connection refusal lost its transient classification")
+	}
 	if err == nil {
 		t.Fatal("a connection to port 1 succeeded")
 	}

@@ -152,6 +152,7 @@ func TestStepDiagnosticRetryTieMarkedWithoutChangingSelection(t *testing.T) {
 }
 
 func TestStepDiagnosticBlockingTransportUsesOneTotalBudget(t *testing.T) {
+	t.Parallel()
 	wf, node, _, _ := diagnosticFixture()
 	other := node
 	other.ID = "workflow-test-5678"
