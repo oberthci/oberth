@@ -734,9 +734,11 @@ if grep -Fq 'publishNotReadyAddresses: true' "$manifest"; then
   exit 1
 fi
 render --show-only templates/deployment.yaml >"$manifest"
-for probe in readiness startup liveness; do
+for probe in readiness startup; do
   sed -n "/${probe}Probe:/,/periodSeconds:/p" "$manifest" | grep -Fq 'timeoutSeconds: 5'
 done
+# Liveness tolerates slow responses under load before counting a failure.
+sed -n "/livenessProbe:/,/periodSeconds:/p" "$manifest" | grep -Fq 'timeoutSeconds: 15'
 
 # --- Promotion grant max lifetime (#826) -------------------------------------
 # Default renders the 24h lifetime flag.
