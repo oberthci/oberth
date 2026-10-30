@@ -1587,17 +1587,8 @@ func (scheduler *Scheduler) reconcileStrandedRunsWithGate(ctx context.Context, r
 		return fmt.Errorf("load stranded runs for reconciliation: %w", err)
 	}
 	for _, run := range runs {
-		_, canSettle := scheduler.jobs.(JobCreateSettler)
-		unacknowledged := canSettle && run.Phase == "waiting"
-		if unacknowledged {
-			eligible, err := scheduler.withoutPendingPreflight(ctx, run)
-			if err != nil {
-				return err
-			}
-			unacknowledged = eligible
-		}
-		if isPendingCreate(run) || unacknowledged {
-			scheduler.registerCreateCleanup(run, nil, isPendingCreate(run))
+		if isPendingCreate(run) {
+			scheduler.registerCreateCleanup(run, nil, true)
 			continue
 		}
 		if adopter, ok := scheduler.jobs.(JobAdopter); ok && workflowRunAdoptable(run) {
@@ -1617,6 +1608,22 @@ func (scheduler *Scheduler) reconcileStrandedRunsWithGate(ctx context.Context, r
 					if err := adopt(run, size); err != nil {
 						return adoptionFailure(adopter, run, err)
 					}
+					continue
+				}
+			}
+		}
+		if _, canSettle := scheduler.jobs.(JobCreateSettler); canSettle && run.Phase == "waiting" {
+			eligible, err := scheduler.withoutPendingPreflight(ctx, run)
+			if err != nil {
+				return err
+			}
+			if eligible {
+				_, contractErr := scheduler.readCreateAdmission(run)
+				// File absence is the pre-feature/never-submitted path. An
+				// unreadable or corrupt file still denotes a possible POST;
+				// registration conservatively restores that unknown contract.
+				if !errors.Is(contractErr, os.ErrNotExist) {
+					scheduler.registerCreateCleanup(run, nil, false)
 					continue
 				}
 			}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"sync/atomic"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/runprogress"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 	"github.com/oberthci/oberth/pkg/periapsis"
 )
@@ -19,6 +21,7 @@ type pendingCreateJobs struct {
 	*fakeJobs
 	createHook func(context.Context, JobRequest) error
 	settle     func(context.Context, string, string, time.Time) (bool, error)
+	adoptCalls atomic.Int32
 }
 
 func (j *pendingCreateJobs) CreateCI(ctx context.Context, req JobRequest) error {
@@ -30,6 +33,18 @@ func (j *pendingCreateJobs) CreateCI(ctx context.Context, req JobRequest) error 
 	}
 	return j.fakeJobs.CreateCI(ctx, req)
 }
+func (j *pendingCreateJobs) Adopt(context.Context, model.Run) (periapsis.Size, bool, error) {
+	j.adoptCalls.Add(1)
+	return periapsis.M, false, nil
+}
+func (*pendingCreateJobs) JobNamespace() string { return "test-argo" }
+func (j *pendingCreateJobs) WaitResumed(ctx context.Context, name string, out io.Writer, _ []runprogress.Event, _ int64) (JobResult, error) {
+	return j.Wait(ctx, name, out)
+}
+
+var _ JobAdopter = (*pendingCreateJobs)(nil)
+var _ JobCreateSettler = (*pendingCreateJobs)(nil)
+
 func (j *pendingCreateJobs) SettleCreate(ctx context.Context, name, id string, boundary time.Time) (bool, error) {
 	return j.settle(ctx, name, id, boundary)
 }
@@ -186,7 +201,7 @@ func TestWorkflowCreateBrownoutTenMinutesDoesNotStopServerOrOtherRuns(t *testing
 	}
 }
 
-func TestWorkflowCreateRestartRestoresGrantsWithoutWaitingForAPI(t *testing.T) {
+func TestWorkflowCreateRestartRestoresGrantsWithoutWaitingForSettlement(t *testing.T) {
 	for _, marked := range []bool{false, true} {
 		t.Run(fmt.Sprintf("marked=%t", marked), func(t *testing.T) {
 			f := newControlFixture(t, JobResult{Status: model.RunFailed, Phase: "infrastructure"})
@@ -248,6 +263,13 @@ func TestWorkflowCreateRestartRestoresGrantsWithoutWaitingForAPI(t *testing.T) {
 			case <-apiEntered:
 			case <-time.After(testStartTimeout(time.Second)):
 				t.Fatal("pending worker never started")
+			}
+			wantAdopts := int32(0)
+			if !marked {
+				wantAdopts = 2
+			}
+			if jobs.adoptCalls.Load() != wantAdopts {
+				t.Fatalf("unacknowledged recovery bypassed adoption: %d", jobs.adoptCalls.Load())
 			}
 			state := f.scheduler.AdmissionState()
 			if state.Used != 2 || state.Runs != 2 || f.scheduler.pendingCreateCount() != 2 {
