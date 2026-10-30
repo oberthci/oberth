@@ -175,7 +175,7 @@ func (s *Store) VerifyAuditChain(ctx context.Context) (model.AuditHead, error) {
 // callers can rely on the result being the first entry of a virgin chain.
 func (s *Store) SoleAuditAction(ctx context.Context) (model.AuditAction, error) {
 	var sole model.AuditAction
-	head, err := s.walkVerifiedAuditChain(ctx, s.reader(), func(action model.AuditAction) {
+	head, err := s.walkVerifiedAuditChain(ctx, s.auditReader(), func(action model.AuditAction) {
 		if action.ID == 1 {
 			sole = action
 		}
@@ -194,7 +194,7 @@ func (s *Store) SoleAuditAction(ctx context.Context) (model.AuditAction, error) 
 // detection, which must recognize an already-appended acknowledgment.
 func (s *Store) TailAuditAction(ctx context.Context) (model.AuditAction, error) {
 	var tail model.AuditAction
-	head, err := s.walkVerifiedAuditChain(ctx, s.reader(), func(action model.AuditAction) {
+	head, err := s.walkVerifiedAuditChain(ctx, s.auditReader(), func(action model.AuditAction) {
 		tail = action // the visitor runs in ID order; the last call is the tail
 	})
 	if err != nil {
@@ -252,7 +252,7 @@ func (s *Store) VerifyAuditStateSince(ctx context.Context, sinceID int64, sinceD
 // recovery; VerifyAuditMutationState subsequently recomputes the complete
 // chain in one authoritative SQLite snapshot.
 func (s *Store) AuditHeadHint(ctx context.Context) (model.AuditHead, error) {
-	return readAuditHead(ctx, s.reader())
+	return readAuditHead(ctx, s.auditReader())
 }
 
 func readAuditHead(ctx context.Context, reader auditStateQuerier) (model.AuditHead, error) {
@@ -747,13 +747,13 @@ VALUES(?, ?, ?, ?, ?, ?)`, spec.AuditID, append([]byte(nil), spec.AuditSHA256...
 }
 
 func (s *Store) LatestAuditAnchor(ctx context.Context) (model.AuditAnchor, error) {
-	return scanAuditAnchor(s.reader().QueryRowContext(ctx, `
+	return scanAuditAnchor(s.auditReader().QueryRowContext(ctx, `
 SELECT id, audit_id, audit_sha256, tsa_url, receipt, anchored_at, created_at
 FROM audit_anchors ORDER BY id DESC LIMIT 1`))
 }
 
 func (s *Store) AuditAnchors(ctx context.Context) ([]model.AuditAnchor, error) {
-	rows, err := s.reader().QueryContext(ctx, `
+	rows, err := s.auditReader().QueryContext(ctx, `
 SELECT id, audit_id, audit_sha256, tsa_url, receipt, anchored_at, created_at
 FROM audit_anchors ORDER BY id`)
 	if err != nil {
@@ -800,7 +800,7 @@ func (s *Store) VerifyAuditWitnesses(ctx context.Context, witnesses []model.Audi
 		}
 		witnessedHeads[digest] = struct{}{}
 	}
-	rows, err := s.reader().QueryContext(ctx, `SELECT id, audit_sha256 FROM audit_anchors ORDER BY id`)
+	rows, err := s.auditReader().QueryContext(ctx, `SELECT id, audit_sha256 FROM audit_anchors ORDER BY id`)
 	if err != nil {
 		return fmt.Errorf("read audit anchor references: %w", err)
 	}
@@ -856,7 +856,7 @@ func (s *Store) VerifyAuditWitnessIntents(ctx context.Context, intents []model.A
 func (s *Store) auditHashIndex(ctx context.Context) (map[int64][sha256.Size]byte, error) {
 	byID := make(map[int64][sha256.Size]byte)
 	byID[0] = [sha256.Size]byte{}
-	rows, err := s.reader().QueryContext(ctx, `SELECT id, sha256 FROM audit_actions ORDER BY id`)
+	rows, err := s.auditReader().QueryContext(ctx, `SELECT id, sha256 FROM audit_actions ORDER BY id`)
 	if err != nil {
 		return nil, fmt.Errorf("read audit hash index: %w", err)
 	}
@@ -905,7 +905,7 @@ func (s *Store) VerifyAuditAnchorReferences(ctx context.Context, anchors []model
 }
 
 func (s *Store) auditAnchor(ctx context.Context, id int64) (model.AuditAnchor, error) {
-	return scanAuditAnchor(s.reader().QueryRowContext(ctx, `
+	return scanAuditAnchor(s.auditReader().QueryRowContext(ctx, `
 SELECT id, audit_id, audit_sha256, tsa_url, receipt, anchored_at, created_at
 FROM audit_anchors WHERE id = ?`, id))
 }
@@ -916,7 +916,7 @@ FROM audit_anchors WHERE id = ?`, id))
 func (s *Store) LatestAuditActionByType(ctx context.Context, action, resourceType string) (model.AuditAction, error) {
 	var result model.AuditAction
 	var createdAt int64
-	err := s.reader().QueryRowContext(ctx, `
+	err := s.auditReader().QueryRowContext(ctx, `
 SELECT id, actor, action, resource_type, resource_id, details, previous_sha256, sha256, created_at
 FROM audit_actions WHERE action = ? AND resource_type = ? ORDER BY id DESC LIMIT 1`, action, resourceType).Scan(
 		&result.ID, &result.Actor, &result.Action, &result.ResourceType, &result.ResourceID,

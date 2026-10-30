@@ -182,7 +182,12 @@ Writable Store openers create an eight-connection read-only WAL pool after
 migration and recovery. Repository/upstream mappings, status/list queries and
 pilot read snapshots use it; they never reserve the single writer. SSH identity
 and idle sampler pools still open explicitly during daemon startup and keep
-their reserved capacity. Private inspection snapshots retain their original
+their reserved capacity. Audit listings and chain/witness scan queries have a
+separate two-connection read-only pool so they cannot exhaust mapping slots;
+audit verification snapshots retain their dedicated readers.
+Token identity and scope reads share one fresh read-only transaction. Shutdown
+claims ownership under the Store mutex and releases it before draining pools
+and checkpointing. Private inspection snapshots retain their original
 connection policy. Audit cache-key sampling and the final mutation fence still
 use the writer connection for their continuity guarantees. See
 [audit-verification-cache.md](docs/audit-verification-cache.md) for the cache's

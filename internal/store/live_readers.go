@@ -9,7 +9,10 @@ import (
 	"time"
 )
 
-const liveReadConnections = 8
+const (
+	liveReadConnections  = 8
+	auditReadConnections = 2
+)
 
 // Initialize only after migrations and startup recovery, before publishing the
 // Store to callers. Authentication and idle sampling retain their own pools so
@@ -20,7 +23,20 @@ func (s *Store) configureReadPool(ctx context.Context) error {
 		return err
 	}
 	s.readDB = db
+	// Full-chain and witness scans must not occupy hot mapping/list slots.
+	auditDB, err := s.openLiveReaders(ctx, auditReadConnections)
+	if err != nil {
+		return err
+	}
+	s.auditReadDB = auditDB
 	return nil
+}
+
+func (s *Store) auditReader() *sql.DB {
+	if s.auditReadDB != nil {
+		return s.auditReadDB
+	}
+	return s.reader()
 }
 
 func (s *Store) reader() *sql.DB {

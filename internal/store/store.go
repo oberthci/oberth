@@ -63,15 +63,16 @@ type Options struct {
 type Store struct {
 	protocol ProtocolConfig
 
-	authDB   *sql.DB // bounded, read-only WAL readers; no cached authorization
-	idleDB   *sql.DB // read-only WAL pool for the upgrade queue sampler
-	readDB   *sql.DB // bounded, read-only WAL pool for ordinary live queries
-	db       *sql.DB
-	now      func() time.Time
-	mu       sync.Mutex
-	done     bool
-	readOnly bool
-	cleanup  func() error
+	authDB      *sql.DB // bounded, read-only WAL readers; no cached authorization
+	idleDB      *sql.DB // read-only WAL pool for the upgrade queue sampler
+	readDB      *sql.DB // bounded, read-only WAL pool for ordinary live queries
+	auditReadDB *sql.DB // separate bounded WAL pool for audit scans
+	db          *sql.DB
+	now         func() time.Time
+	mu          sync.Mutex
+	done        bool
+	readOnly    bool
+	cleanup     func() error
 
 	liveReaderDSN  string // immutable after startup; shared live WAL reader settings
 	livePath       string
@@ -1076,12 +1077,15 @@ ORDER BY sequence`)
 
 func (s *Store) Close() error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	if s.done {
+		s.mu.Unlock()
 		return nil
 	}
 	s.done = true
-	var authErr, idleErr, readErr error
+	// Claim shutdown once, then let active database operations finish without
+	// holding the Store mutex across connection closes or the WAL checkpoint.
+	s.mu.Unlock()
+	var authErr, idleErr, readErr, auditReadErr error
 	if s.authDB != nil {
 		authErr = s.authDB.Close()
 	}
@@ -1091,7 +1095,10 @@ func (s *Store) Close() error {
 	if s.readDB != nil {
 		readErr = s.readDB.Close()
 	}
-	readersErr := errors.Join(authErr, idleErr, readErr)
+	if s.auditReadDB != nil {
+		auditReadErr = s.auditReadDB.Close()
+	}
+	readersErr := errors.Join(authErr, idleErr, readErr, auditReadErr)
 	if s.readOnly {
 		closeErr := s.db.Close()
 		if s.cleanup != nil {
@@ -2054,7 +2061,13 @@ func (s *Store) AuthenticatedUplinkByDigest(ctx context.Context, digest []byte) 
 	if len(digest) != 32 {
 		return model.AuthenticatedUplink{}, ErrNotFound
 	}
-	row := s.reader().QueryRowContext(ctx, `
+	// Bind token authority and scopes to the same fresh committed snapshot.
+	tx, err := s.reader().BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return model.AuthenticatedUplink{}, fmt.Errorf("begin token identity lookup: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	row := tx.QueryRowContext(ctx, `
 SELECT u.id, u.fingerprint, u.identity, u.token_credential_id, u.auth_actor, u.admin, u.created_at, u.updated_at,
        t.id, t.name, t.digest, t.created_at, t.activated_at, t.last_used_at, t.revoked_at
 FROM token_credentials t
@@ -2073,9 +2086,12 @@ WHERE t.digest = ? AND t.activated_at IS NOT NULL AND t.revoked_at IS NULL`, dig
 		return model.AuthenticatedUplink{}, translateNotFound("authenticated uplink", err)
 	}
 	// A scope that cannot be read must not authenticate as unscoped (#073).
-	scopes, err := loadUplinkScopes(ctx, s.reader(), value.ID)
+	scopes, err := loadUplinkScopes(ctx, tx, value.ID)
 	if err != nil {
 		return model.AuthenticatedUplink{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return model.AuthenticatedUplink{}, fmt.Errorf("finish token identity lookup: %w", err)
 	}
 	value.Scope = scopes
 	value.Admin = admin != 0
