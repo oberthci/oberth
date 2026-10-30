@@ -7,6 +7,7 @@ A marker denies new responses even with Git down and survives cache restarts.
 import argparse
 import hashlib
 import os
+import sys
 from pathlib import Path
 
 
@@ -26,6 +27,14 @@ def main():
     key = hashlib.sha256(
         ("module-artifact-v1\0" + args.repository + "\0" + args.module + "\0" + args.version).encode()
     ).hexdigest()
+    manifest = root / "versions" / key[:2] / (key + ".json")
+    if not manifest.is_file():
+        print(
+            "WARNING: no cached metadata entry matches these exact coordinates; "
+            "installing a pre-emptive marker. Check the mapped repository spelling "
+            "and verify the served version returns 403.",
+            file=sys.stderr,
+        )
     revoked = root / "revoked"
     revoked.mkdir(mode=0o700, exist_ok=True)
     marker = revoked / key

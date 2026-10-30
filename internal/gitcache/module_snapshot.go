@@ -3,6 +3,7 @@ package gitcache
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 )
@@ -63,4 +64,26 @@ func (c *Cache) modulePath(ctx context.Context, input string) (string, string, e
 		return c.pathWithQualifier(input, func(input string) (RepoQualification, error) { return c.qualifyContext(ctx, input) })
 	}
 	return c.path(input)
+}
+
+// ErrModuleSourceMissing means a pinned commit is positively absent locally.
+// Retrying the same read cannot reconstruct a pruned object or rebind its tag.
+var ErrModuleSourceMissing = errors.New("pinned module commit is not cached")
+
+// Called with the repository lock held, only after a failed pinned read. Use
+// cat-file's machine-readable missing response, never localized stderr or an
+// exit status that could also denote a transient process/filesystem failure.
+func (c *Cache) classifyModuleReadFailure(ctx context.Context, path, ref string, cause error) error {
+	if ctx.Err() != nil || ValidateSHA(ref) != nil {
+		return cause
+	}
+	query := ref + "^{commit}"
+	output := &headBuffer{max: 256}
+	if err := c.run(ctx, commandSpec{dir: path, args: []string{"cat-file", "--batch-check=%(objectname) %(objecttype)"}, stdin: strings.NewReader(query + "\n"), stdout: output}); err != nil {
+		return cause
+	}
+	if strings.TrimSpace(string(output.data)) == query+" missing" {
+		return fmt.Errorf("%w: %w", ErrModuleSourceMissing, cause)
+	}
+	return cause
 }

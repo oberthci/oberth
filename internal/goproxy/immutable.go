@@ -11,8 +11,11 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
+
+	"github.com/oberthci/oberth/internal/gitcache"
 )
 
 // moduleTagSnapshot pins all representations to one immutable Git object.
@@ -345,7 +348,11 @@ func (h *Handler) serveImmutable(w http.ResponseWriter, r *http.Request, reposit
 	}
 	w.Header().Set("Content-Type", map[string]string{".info": "application/json", ".mod": "text/plain; charset=utf-8", ".zip": "application/zip"}[ext])
 	w.Header().Set("ETag", `"`+object.SHA256+`"`)
-	w.Header().Set("Cache-Control", "private, max-age=31536000, immutable")
+	if strings.HasSuffix(r.URL.Path, "/@latest") {
+		w.Header().Set("Cache-Control", "private, no-cache")
+	} else {
+		w.Header().Set("Cache-Control", "private, max-age=31536000, immutable")
+	}
 	http.ServeContent(w, r, version+ext, time.Time{}, file)
 }
 
@@ -367,7 +374,7 @@ func (h *Handler) buildVersion(ctx context.Context, repository, modulePath, vers
 	}
 	mod, err := h.cache.ShowFile(ctx, repository, source, "go.mod")
 	if err != nil {
-		return "", nil, backendBuildError()
+		return "", nil, moduleReadBuildError(err)
 	}
 	info, err := json.Marshal(map[string]string{"Version": version, "Time": timestamp.UTC().Format(time.RFC3339)})
 	if err != nil {
@@ -399,6 +406,36 @@ type proxyBuildError struct {
 }
 
 func (e *proxyBuildError) Error() string { return e.class }
+func moduleReadBuildError(err error) *proxyBuildError {
+	if errors.Is(err, gitcache.ErrModuleSourceMissing) {
+		return &proxyBuildError{class: "pinned_source_missing", status: http.StatusInternalServerError}
+	}
+	return backendBuildError()
+}
+
+// Discovery stays live, but a denied version cannot be advertised as usable.
+// Unknown marker state fails closed instead of silently skipping a policy error.
+func (h *Handler) visibleVersions(ctx context.Context, repository, modulePath string, versions []string) ([]string, error) {
+	if h.artifacts == nil {
+		return versions, nil
+	}
+	visible := versions[:0]
+	for _, version := range versions {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		if err := h.artifacts.revoked(repository, modulePath, version); err != nil {
+			var denial *proxyBuildError
+			if errors.As(err, &denial) && denial.status == http.StatusForbidden {
+				continue
+			}
+			return nil, err
+		}
+		visible = append(visible, version)
+	}
+	return visible, nil
+}
+
 func backendBuildError() *proxyBuildError {
 	return &proxyBuildError{class: "private_backend_unavailable", status: http.StatusServiceUnavailable}
 }

@@ -2458,7 +2458,8 @@ no Git or catalog lookup. Cache hits still require the current handler's
 namespace/repository mapping. Private cache data stays on the server PVC;
 pipeline mounts and network authority are unchanged. Corrupt entries fail
 closed without rebuilding from a possibly moved tag. `list` and `@latest`
-remain live queries.
+remain live queries that filter revoked versions; selected `@latest` info uses
+the same pinned metadata and rechecks denial before serving.
 
 At most two cold version fills execute per handler, with duplicate requests
 sharing one fill. Each fill gets two read-only attempts of at most 15 seconds
@@ -2469,11 +2470,15 @@ can leave it. Git repository-lock and catalog waits honor the fill context; loca
 operations and Git process teardown retain their OS/cleanup behavior. Failed
 fills are not cached. Go does not automatically retry a terminal 503 or interpret
 `Retry-After` as a retry policy; these safe retries happen inside the proxy, not
-by replaying pipeline steps. Exhaustion is 503 with `Retry-After: 1`. The cache
+by replaying pipeline steps. Transient exhaustion is 503 with `Retry-After: 1`; a positively missing pinned
+commit is terminal 500 (`pinned_source_missing`) with no internal retry or tag
+rebinding. The cache
 has no automatic expiry/GC and consumes server data volume space. Tag deletion
 does not revoke already pinned bytes; administrator-owned per-version markers
 under `revoked/` deny all explicit reads without Git, including after restart.
-The local `hack/goproxy-revoke.py` utility creates these durable markers; see
+The local `hack/goproxy-revoke.py` utility creates these durable markers and
+warns on unmatched coordinates while permitting pre-emptive denial. The scratch
+server cannot run it; use a pinned Python maintenance pod or the node data owner. See
 [cache operations](docs/goproxy-availability.md#immutable-version-artifacts).
 
 **GOPROXY ordering:** `<mirror>,https://proxy.golang.org|direct`

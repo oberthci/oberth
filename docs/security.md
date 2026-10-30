@@ -172,6 +172,9 @@ deletion, including for clients without go.sum. Tag deletion or Go retraction
 alone is not revocation. Administrators can durably deny one mapped
 (repository, module, version) with `hack/goproxy-revoke.py` against the server
 volume; its `revoked/` marker overrides warm and cold reads with 403 without
-consulting Git. Preserve these policy markers during cache maintenance. Already
+consulting Git. Live discovery filters those versions; `@latest` never selects a
+revoked version. The utility warns on unmatched coordinates; verify the exact
+repository mapping and a 403 response. Use a separate pinned Python maintenance
+pod for the scratch server image, as described below. Preserve these policy markers during cache maintenance. Already
 streaming responses and client caches cannot be recalled; see
 [revocation operations](goproxy-availability.md#tag-deletion-and-per-version-revocation).

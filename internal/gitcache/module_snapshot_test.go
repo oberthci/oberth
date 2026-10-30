@@ -158,3 +158,26 @@ func TestModuleListTagsIsNotStarvedByOrdinaryRepositoryUsers(t *testing.T) {
 		t.Fatalf("ordinary users starved deadline-aware ListTags: %v", err)
 	}
 }
+
+func TestPinnedModuleReadClassifiesOnlyConfirmedMissingCommit(t *testing.T) {
+	repository := newTestRepository(t)
+	cache := newTestCache(t, repository.upstream)
+	if _, err := cache.Ensure(t.Context(), "example"); err != nil {
+		t.Fatal(err)
+	}
+	missing := strings.Repeat("f", 40)
+	if _, err := cache.ShowFile(t.Context(), "example", missing, "go.mod"); !errors.Is(err, ErrModuleSourceMissing) {
+		t.Fatalf("missing pinned blob not classified: %v", err)
+	}
+	if err := cache.ArchiveTar(t.Context(), "example", missing, io.Discard); !errors.Is(err, ErrModuleSourceMissing) {
+		t.Fatalf("missing pinned archive not classified: %v", err)
+	}
+	if _, err := cache.ShowFile(t.Context(), "example", repository.initialSHA, "nonexistent-file"); err == nil || errors.Is(err, ErrModuleSourceMissing) {
+		t.Fatalf("existing source misclassified missing: %v", err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if err := cache.ArchiveTar(ctx, "example", missing, io.Discard); !errors.Is(err, context.Canceled) || errors.Is(err, ErrModuleSourceMissing) {
+		t.Fatalf("cancellation became permanent: %v", err)
+	}
+}

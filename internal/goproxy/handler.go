@@ -183,6 +183,13 @@ func (h *Handler) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		backendUnavailable(w)
 		return
 	}
+	if versionRequest == "list" || versionRequest == "@latest" {
+		versions, err = h.visibleVersions(r.Context(), repoInput, modulePath, versions)
+		if err != nil {
+			writeBuildError(w, err)
+			return
+		}
+	}
 	if versionRequest == "list" {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		for _, v := range versions {
@@ -205,6 +212,12 @@ func (h *Handler) serveHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if !found {
 		privateUnavailable(w)
+		return
+	}
+	if h.artifacts != nil {
+		// @latest chooses from live tags, then uses the same pinned .info as
+		// an explicit version request and rechecks revocation before serving.
+		h.serveImmutable(w, r, repoInput, modulePath, version, extension)
 		return
 	}
 	switch extension {
@@ -278,7 +291,7 @@ func (h *Handler) buildZip(ctx context.Context, input, modulePath, version, ref 
 	// Read the tar archive from git.
 	var tarBuf bytes.Buffer
 	if err := h.cache.ArchiveTar(ctx, input, ref, &tarBuf); err != nil {
-		return nil, &proxyBuildError{class: "private_backend_unavailable", status: http.StatusServiceUnavailable}
+		return nil, moduleReadBuildError(err)
 	}
 
 	// Extract the tar to a temporary directory so we can build a canonical

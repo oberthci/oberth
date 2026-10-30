@@ -1138,7 +1138,7 @@ func (c *Cache) ShowFile(ctx context.Context, input, ref, filePath string) ([]by
 		args:   []string{"show", ref + ":" + filePath},
 		stdout: &buf,
 	}); err != nil {
-		return nil, err
+		return nil, c.classifyModuleReadFailure(ctx, repoPath, ref, err)
 	}
 	return buf.Bytes(), nil
 }
@@ -1158,9 +1158,13 @@ func (c *Cache) ArchiveTar(ctx context.Context, input, ref string, w io.Writer) 
 	if !c.isBare(ctx, repoPath) {
 		return fmt.Errorf("repository is not cached")
 	}
-	return c.run(ctx, commandSpec{
+	err = c.run(ctx, commandSpec{
 		dir:    repoPath,
 		args:   []string{"archive", "--format=tar", ref},
 		stdout: w,
 	})
+	if err != nil {
+		return c.classifyModuleReadFailure(ctx, repoPath, ref, err)
+	}
+	return nil
 }

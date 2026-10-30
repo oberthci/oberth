@@ -80,8 +80,8 @@ recompressed the tree every time. These operations shared the repository mutex
 with other Git work. A backend failure surfaced as a generic 502, including
 failures caused by a slow or canceled local command.
 
-The first explicit canonical tagged-version request builds cheap `.info` and
-`.mod` metadata. It confirms tag membership and pins one immutable Git object
+The first request for a canonical tagged version (including one selected by
+`@latest`) builds cheap `.info` and `.mod` metadata. It confirms tag membership and pins one immutable Git object
 and timestamp. Only a `.zip` request archives and compresses that pinned object,
 then publishes a separate no-clobber zip manifest with the same source identity.
 Metadata requests never need a zip or consume archive/extraction IO; an invalid
@@ -97,7 +97,12 @@ A cached explicit version stays pinned across process restarts and tag changes.
 Warm reads check object size and SHA-256 before serving, without Git processes,
 repository locks or catalog reads. Unknown/unmapped private modules remain
 refused before cache access. `list` and `@latest` remain live queries; a cache
-cannot determine whether a newer tag exists while Git is unavailable.
+cannot determine whether a newer tag exists while Git is unavailable. Discovery
+omits revoked versions; `@latest` selects the highest remaining release (or
+prerelease if no release remains), then serves its pinned `.info`. That mutable
+`@latest` URL requires revalidation; it does not inherit explicit versions'
+immutable one-year cache lifetime. Unknown
+revocation-marker state fails closed rather than advertising that version.
 
 Concurrent requests for one missing version share a fill; at most two fills run
 at once per handler. Warm reads bypass those slots. Read-only backend work has
@@ -112,7 +117,13 @@ repository-lock callers now share one fair queue, including ordinary operations;
 module readers can leave that queue at their deadline without polling. Disk syscalls and existing Git
 process-group cleanup are not made interruptible by that context. Backend
 exhaustion returns **503 with `Retry-After: 1` and `Cache-Control: no-store`**;
-failed fills are not negative-cached. Corrupt/contradictory cache data fails
+failed fills are not negative-cached. If a pinned commit has been pruned from
+the bare repository, Git confirms its absence with the object protocol and the
+proxy returns permanent **500 / `pinned_source_missing`**, without `Retry-After`
+or a second internal archive attempt. It never substitutes the moved tag.
+Already cached representations remain available; restore the exact missing
+object from an authoritative copy to build a missing zip. Do not reset the pin
+to resolve this condition. Corrupt/contradictory cache data fails
 closed as 500 and is not regenerated from a possibly moved tag.
 
 The Go resolver does **not** automatically retry 503 or honor `Retry-After` as
@@ -156,9 +167,13 @@ python3 hack/goproxy-revoke.py --cache-root /data/goproxy \
 ```
 
 Use the **exact mapped Git input**, full module path, and canonical version.
-The utility prints the SHA-256 keyed marker in `<cache>/revoked`. Its existence
-returns private 403 for every explicit representation, including warm hits and
-cold fills, across restarts and tag recreation. The marker is checked before
+The utility prints the SHA-256 keyed marker in `<cache>/revoked`. If no cached
+metadata entry matches those exact coordinates, it warns on stderr while still
+installing a pre-emptive marker. Treat an unexpected warning as a possible typo
+or mapping mismatch, not confirmation that an already served version is denied.
+The marker returns private 403 for every explicit representation, including warm
+hits and cold fills, across restarts and tag recreation. Discovery omits the
+revoked version from live `list`/`@latest`. The marker is checked before
 work and again before serving; an already streaming response cannot be recalled.
 For immediate containment of in-flight responses, quiesce the proxy first.
 Markers are administrator-owned policy: retain them during cache reclamation,
@@ -166,6 +181,108 @@ and remove one only to deliberately re-enable its original pinned bytes. No
 rebind occurs on unrevocation. Whole-cache resets lose both pins and revocations;
 copy markers aside and restore them before resuming service. Clients' existing
 local caches and already downloaded secrets require separate remediation.
+
+### Running the utility with the scratch server image
+
+The server image is `FROM scratch`: it has no Python, shell or `hack/` directory.
+Run the utility from a checked-out release source on the node as the data owner
+for a hostPath, or use a separate maintenance pod for a PVC. Do not try to run
+Python through `kubectl exec` in the server container.
+
+For a PVC, quiesce/drain the server using the normal operator procedure, record
+its replica count and node, scale its Deployment to zero and wait for the old
+pod to terminate. Mount the same RWO claim on that node with the **same numeric
+UID/GID as the data-volume owner** (chart defaults 65534/65534). Group membership
+alone cannot read a 0700 cache. Use an approved Python 3 image **pinned by digest**
+and available to that node; the example deliberately requires the operator's
+image and installed resource names. It does not change cache ownership or modes.
+
+```bash
+set -eu
+: "${OBERTH_NAMESPACE:?installed namespace}"
+: "${OBERTH_DEPLOYMENT:?installed Deployment}"
+: "${OBERTH_POD:?current server pod name}"
+: "${OBERTH_DATA_PVC:?server data PVC name}"
+: "${PYTHON_IMAGE:?approved Python 3 image pinned as name@sha256:digest}"
+case "$PYTHON_IMAGE" in *@sha256:*) ;; *) echo 'Python image must be pinned by digest' >&2; exit 1 ;; esac
+# Override these if the installed server/data owner differs from chart defaults.
+DATA_UID=${DATA_UID:-65534}
+DATA_GID=${DATA_GID:-65534}
+REVOKE_REPOSITORY=forge/owner/repository
+REVOKE_MODULE=go.example.test/module
+REVOKE_VERSION=v1.2.3
+server_node=$(kubectl -n "$OBERTH_NAMESPACE" get pod "$OBERTH_POD" -o jsonpath='{.spec.nodeName}')
+server_replicas=$(kubectl -n "$OBERTH_NAMESPACE" get deployment "$OBERTH_DEPLOYMENT" -o jsonpath='{.spec.replicas}')
+maintenance_pod="oberth-goproxy-revoke-$(date +%s)"
+kubectl -n "$OBERTH_NAMESPACE" scale deployment "$OBERTH_DEPLOYMENT" --replicas=0
+kubectl -n "$OBERTH_NAMESPACE" wait --for=delete "pod/$OBERTH_POD" --timeout=180s
+kubectl -n "$OBERTH_NAMESPACE" create configmap "$maintenance_pod"   --from-file=goproxy-revoke.py=hack/goproxy-revoke.py --dry-run=client -o yaml |   kubectl -n "$OBERTH_NAMESPACE" apply -f -
+kubectl -n "$OBERTH_NAMESPACE" apply -f - <<YAML
+apiVersion: v1
+kind: Pod
+metadata:
+  name: $maintenance_pod
+spec:
+  nodeName: $server_node
+  restartPolicy: Never
+  automountServiceAccountToken: false
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: $DATA_UID
+    runAsGroup: $DATA_GID
+    seccompProfile:
+      type: RuntimeDefault
+  containers:
+    - name: revoke
+      image: $PYTHON_IMAGE
+      command: [python3, /maintenance/goproxy-revoke.py]
+      args: [--cache-root, /data/goproxy, --repository, "$REVOKE_REPOSITORY", --module, "$REVOKE_MODULE", --version, "$REVOKE_VERSION"]
+      env:
+        - name: PYTHONDONTWRITEBYTECODE
+          value: "1"
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop: [ALL]
+      volumeMounts:
+        - name: data
+          mountPath: /data
+        - name: utility
+          mountPath: /maintenance
+          readOnly: true
+  volumes:
+    - name: data
+      persistentVolumeClaim:
+        claimName: $OBERTH_DATA_PVC
+    - name: utility
+      configMap:
+        name: $maintenance_pod
+YAML
+kubectl -n "$OBERTH_NAMESPACE" wait --for=jsonpath='{.status.phase}'=Succeeded "pod/$maintenance_pod" --timeout=180s
+kubectl -n "$OBERTH_NAMESPACE" logs "$maintenance_pod"
+kubectl -n "$OBERTH_NAMESPACE" delete pod "$maintenance_pod" --wait=true
+kubectl -n "$OBERTH_NAMESPACE" delete configmap "$maintenance_pod"
+kubectl -n "$OBERTH_NAMESPACE" scale deployment "$OBERTH_DEPLOYMENT" --replicas="$server_replicas"
+kubectl -n "$OBERTH_NAMESPACE" rollout status deployment "$OBERTH_DEPLOYMENT" --timeout=5m
+```
+
+If the utility fails, inspect its logs and keep the server quiesced until the
+marker is confirmed; the `set -e` example does not resume it after a failed step.
+After resuming, verify with the configured CA from a permitted proxy client:
+
+```bash
+: "${GOPROXY_CA:?CA certificate file}"
+: "${REVOKED_MOD_URL:?complete escaped URL for the revoked version .mod}"
+status=$(curl --cacert "$GOPROXY_CA" -sS -o /dev/null -w '%{http_code}' "$REVOKED_MOD_URL")
+test "$status" = 403
+```
+
+Also check the version is absent from `@v/list` and is not selected by `@latest`.
+For pre-emptive denial of a version never served, 403 alone cannot prove the
+repository key was correct: unknown private versions also return 403. Verify
+its exact mapped Git input separately. Revocation does not require deleting the
+tag; deleting a tag alone still cannot revoke pinned artifacts.
 
 The cache has no GC or size metric. Budget for each selected version's compressed
 zip plus metadata and temporary extracted/archived trees during two concurrent
