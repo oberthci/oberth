@@ -49,7 +49,7 @@ func (s *Store) reader() *sql.DB {
 }
 
 // configureLiveReaders resolves the actual filename once at startup. Audit
-// readers and SSH identity readers share this DSN builder; opening a reader
+// readers and reserved authentication readers share this DSN builder; opening a reader
 // never needs to acquire the primary connection held by another transaction.
 func (s *Store) configureLiveReaders(ctx context.Context, busyTimeout time.Duration) error {
 	var path string

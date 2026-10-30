@@ -19,10 +19,6 @@ const (
 	maxFilterLineBytes       = 64 << 10
 )
 
-// Limit CPU-heavy RE2 scans across concurrent run-log requests. Waiting uses
-// the same request budget as the scan, rather than starting a new deadline.
-var patternScans = make(chan struct{}, 2)
-
 type contextReader struct {
 	ctx    context.Context
 	reader io.Reader
@@ -97,14 +93,6 @@ func scanBoundedRanges(file io.ReaderAt, ranges []Range, total int64, filter Fil
 	pattern, err := compilePattern(filter.Pattern)
 	if err != nil {
 		return nil, Meta{}, err
-	}
-	if pattern != nil {
-		select {
-		case patternScans <- struct{}{}:
-			defer func() { <-patternScans }()
-		case <-filter.ctx().Done():
-			return nil, Meta{}, filter.ctx().Err()
-		}
 	}
 	candidates := clippedRanges(ranges, filter)
 	remaining, window := MaxScanBytes, MaxScanBytes

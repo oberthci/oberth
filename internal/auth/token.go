@@ -83,7 +83,7 @@ type Authenticator struct {
 }
 
 func (a Authenticator) Authenticate(ctx context.Context, plaintext string) (model.AuthenticatedUplink, error) {
-	if a.Tokens == nil || plaintext == "" {
+	if a.Tokens == nil || !validTokenShape(plaintext) {
 		return model.AuthenticatedUplink{}, ErrInvalidToken
 	}
 	digest := sha256.Sum256([]byte(plaintext))
@@ -115,4 +115,20 @@ func (a Authenticator) Authenticate(ctx context.Context, plaintext string) (mode
 		return model.AuthenticatedUplink{}, fmt.Errorf("auth: record token use: %w", err)
 	}
 	return authenticated, nil
+}
+
+// Issuer emits 32 random bytes in unpadded URL base64 after this fixed prefix.
+// Reject malformed input before hashing or acquiring an authentication reader.
+func validTokenShape(token string) bool {
+	const prefix = "oberth_"
+	if len(token) != len(prefix)+base64.RawURLEncoding.EncodedLen(32) || !strings.HasPrefix(token, prefix) {
+		return false
+	}
+	for _, c := range []byte(token[len(prefix):]) {
+		if c >= 'A' && c <= 'Z' || c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '-' || c == '_' {
+			continue
+		}
+		return false
+	}
+	return true
 }

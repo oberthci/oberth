@@ -158,8 +158,10 @@ oberth log run-abc --burn ci --step test --pattern 'FAIL|Error' --context 3
 Log reads have bounded work: at most 4 MiB of retained-file discovery for an
 active run, then at most 4 MiB of filtering (including tail lookback retries).
 Head reads stop when the returned-line limit is met; regexes never scan the
-whole step solely to count matches. At most two run-log pattern scans execute
-at once across the process; queued scans use their existing request deadline.
+whole step solely to count matches. At most two interactive API/MCP run-log
+pattern scans execute at once across the process; queued requests use their
+existing deadline. Internal CI issue excerpts keep their byte/record bounds
+and do not wait for those interactive slots.
 Individual records above 64 KiB are omitted and counted as `omitted_long_lines`. Output remains capped at 4 MiB.
 
 Structured HTTP/MCP responses report `scan_complete`, `bytes_exact`,
@@ -187,9 +189,16 @@ Run/log tool reads have a 10s server budget including scope and DB-pool waits;
 optional live scheduling observation has its existing 2s sub-budget. Bearer
 authentication has a separate 5s budget, including the authoritative token
 last-used update when due. A committed `last_used_at` newer than one minute skips
-the writer; every request still reads fresh identity/scopes/revocation. Due
-updates are conditional so concurrent requests write the timestamp at most once
-per minute. Errors while recording due use still fail closed. Auth contention
+the writer; every request still reads fresh identity/scopes/revocation. Server
+token lookups and SSH share four reserved read-only auth connections, separate
+from the eight ordinary dashboard/list readers. Per-Store admission limits each
+protocol to three reads, including connection waiters, preserving at least one
+connection for the other protocol. Waiting uses the caller's existing deadline.
+Malformed bearer strings are rejected before hashing or database access: issued
+tokens are `oberth_` plus 43 unpadded URL-base64 characters (50 bytes total).
+Correctly shaped unknown tokens still require a fresh lookup. Due updates are
+conditional so concurrent requests write the timestamp at most once per minute.
+Errors while recording due use still fail closed. Auth contention
 fails closed with retryable HTTP 503 rather than claiming a valid credential is invalid. CPU scheduling or a stuck kernel
 file read can still delay wall-clock return; cancellation is checked between
 bounded reads. `run_get` does not fetch pod logs; use `summary:true` when timing

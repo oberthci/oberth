@@ -1942,6 +1942,14 @@ func (service *API) readStepLogFiltered(ctx context.Context, run model.Run, burn
 	if err := service.purgedEvidence(ctx, run, "logs"); err != nil {
 		return nil, runlog.Meta{}, err
 	}
+	if filter.Pattern != "" {
+		select {
+		case runLogPatternScans <- struct{}{}:
+			defer func() { <-runLogPatternScans }()
+		case <-ctx.Done():
+			return nil, runlog.Meta{}, ctx.Err()
+		}
+	}
 	if run.Status.Active() {
 		body, meta, err := service.logs.ReadActiveFiltered(run.ID, burn, step, filter)
 		if errors.Is(err, os.ErrNotExist) {
