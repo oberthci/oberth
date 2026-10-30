@@ -1165,7 +1165,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 		if err := waitForAuditIntegrity(activationCtx, anchors.AllowMutation); err != nil {
 			return err
 		}
-		if err := scheduler.RetryRecovery(activationCtx, "RecoverOwnerState", database.RecoverOwnerState); err != nil {
+		if err := scheduler.RetryStorageRecovery(activationCtx, "RecoverOwnerState", database.RecoverOwnerState); err != nil {
 			return fmt.Errorf("recover owner state after audit verification: %w", err)
 		}
 		if err := scheduler.RetryRecovery(activationCtx, "ReplayPending", sshService.ReplayPending); err != nil {

@@ -32,7 +32,9 @@ func transientDatabaseError(err error) bool {
 // observers, which must not turn an unavailable read into cancellation.
 func IsTransientDatabaseError(err error) bool { return transientDatabaseError(err) }
 
-func preflightDatabaseError(err error) bool {
+// A returned preflight deadline authorizes exact, fail-closed cleanup, not DB
+// replay. It may originate in Kubernetes or the executor as well as storage.
+func recoverablePreflightError(err error) bool {
 	return (errors.Is(err, context.DeadlineExceeded) || store.IsTransientLockError(err)) && transientDatabaseAttemptError(err, true)
 }
 
@@ -69,35 +71,45 @@ func transientDatabaseAttemptError(err error, expired bool) bool {
 
 // A background owner keeps the exact storage continuation pending, rather than
 // replaying its surrounding Workflow creation, observation or Git mutation.
-// Each attempt has a fresh 10s budget; exponential backoff is capped at 5s.
-// Retries last only for the scheduler lifetime. Short cleanup/attempt contexts
-// must not turn a dependency outage into a fatal worker completion; shutdown
-// still uses the caller's original bounded cleanup context without retries.
+// Single storage calls have fresh 10s budgets; backoff is capped at 5s.
+// Owner shutdown stops retries between attempts, never an in-flight detached
+// cleanup/finalization. Calls starting after shutdown use the original context.
 // No retry scope is installed on client request contexts.
 func retryDatabase[T any](ctx context.Context, operation string, attempt func(context.Context) (T, error)) (T, error) {
-	return retryDatabaseClassified(ctx, operation, attempt, transientDatabaseAttemptError)
+	return retryDatabaseClassified(ctx, operation, databaseAttemptBudget, attempt, transientDatabaseAttemptError)
 }
 
-func retryDatabaseClassified[T any](ctx context.Context, operation string, attempt func(context.Context) (T, error), transient func(error, bool) bool) (T, error) {
+func retryDatabaseClassified[T any](ctx context.Context, operation string, budget time.Duration, attempt func(context.Context) (T, error), transient func(error, bool) bool) (T, error) {
 	scope, ok := ctx.Value(databaseRetryKey{}).(*databaseRetryScope)
-	if !ok || scope.lifetime.Err() != nil {
+	if !ok || scope == nil || scope.lifetime.Err() != nil {
 		return attempt(ctx)
 	}
-	base, cancel := context.WithCancel(context.WithoutCancel(ctx))
-	stop := context.AfterFunc(scope.lifetime, cancel)
-	defer func() { stop(); cancel() }()
+	// Composite operations retain their caller's cancellation/deadline. Only
+	// storage attempts may detach a short caller context; lifetime is checked
+	// between attempts so shutdown cannot abort deliberate drain work.
+	base := ctx
+	if budget > 0 {
+		base = context.WithoutCancel(ctx)
+	}
 	delay := databaseRetryMinimum
 	var nextLog time.Time
 	for {
 		// A storage call that ignores its deadline remains a local wedge.
 		// Suspend only the intentional retry sleep after a completed failure.
 		beatDispatch(ctx)
-		attemptCtx, cancelAttempt := context.WithTimeout(base, databaseAttemptBudget)
+		attemptCtx := base
+		cancelAttempt := func() {}
+		if budget > 0 {
+			attemptCtx, cancelAttempt = context.WithTimeout(base, budget)
+		}
 		value, err := attempt(attemptCtx)
 		expired := errors.Is(attemptCtx.Err(), context.DeadlineExceeded)
 		cancelAttempt()
 		if err == nil {
 			return value, err
+		}
+		if scope.lifetime.Err() != nil {
+			return value, scope.lifetime.Err()
 		}
 		if base.Err() != nil {
 			return value, base.Err()
@@ -110,21 +122,25 @@ func retryDatabaseClassified[T any](ctx context.Context, operation string, attem
 			log.Printf("WARN: scheduler database operation=%s retry_pending=true retries_total=%d retry_in=%s error=%q", operation, total, delay, err)
 			nextLog = now.Add(30 * time.Second)
 		}
-		if err := waitDatabaseRetry(base, delay); err != nil {
+		if err := waitDatabaseRetry(ctx, scope.lifetime, delay); err != nil {
 			return value, err
 		}
 		delay = min(2*delay, databaseRetryMaximum)
 	}
 }
 
-func waitDatabaseRetry(ctx context.Context, delay time.Duration) error {
+func waitDatabaseRetry(ctx, lifetime context.Context, delay time.Duration) error {
+	// Preserve dispatch progress values, but stop the backoff on owner shutdown.
+	ctx, cancel := context.WithCancel(context.WithoutCancel(ctx))
+	stop := context.AfterFunc(lifetime, cancel)
+	defer func() { stop(); cancel() }()
 	resume := suspendDispatch(ctx)
 	defer resume()
 	timer := time.NewTimer(delay)
 	defer timer.Stop()
 	select {
 	case <-ctx.Done():
-		return ctx.Err()
+		return lifetime.Err()
 	case <-timer.C:
 		return nil
 	}
@@ -141,11 +157,48 @@ func retryDatabaseError(ctx context.Context, operation string, attempt func(cont
 // in recovery and finalization. It never counts ordinary client-request errors.
 func (scheduler *Scheduler) DatabaseRetries() uint64 { return scheduler.databaseRetryCount.Load() }
 
-// RetryRecovery is for idempotent owner activation/replay before Run starts.
-// Permanent verification failures still reach the fatal component channel.
+// RetryRecovery scopes idempotent activation/replay without imposing a storage
+// statement timeout on Git, Kubernetes or multi-statement recovery. Bare external
+// deadlines are not database evidence; storage calls inside replay retry locally.
 func (scheduler *Scheduler) RetryRecovery(ctx context.Context, operation string, recover func(context.Context) error) error {
+	return scheduler.retryRecovery(ctx, operation, recover, func(err error, _ bool) bool {
+		return transientLockError(err)
+	})
+}
+
+// RetryStorageRecovery is for a known, idempotent, database-only transaction.
+// It keeps the caller's operation budget, including long startup recovery.
+func (scheduler *Scheduler) RetryStorageRecovery(ctx context.Context, operation string, recover func(context.Context) error) error {
+	return scheduler.retryRecovery(ctx, operation, recover, transientDatabaseAttemptError)
+}
+
+func (scheduler *Scheduler) retryRecovery(ctx context.Context, operation string, recover func(context.Context) error, transient func(error, bool) bool) error {
 	ctx = context.WithValue(ctx, databaseRetryKey{}, &databaseRetryScope{lifetime: ctx, owner: scheduler})
-	return retryDatabaseError(ctx, operation, recover)
+	_, err := retryDatabaseClassified(ctx, operation, 0, func(ctx context.Context) (struct{}, error) {
+		return struct{}{}, recover(ctx)
+	}, transient)
+	return err
+}
+
+// A composite operation may contain external deadlines. Only homogeneous,
+// positively typed SQLite contention permits replay at that boundary.
+func transientLockError(err error) bool {
+	if joined, ok := err.(interface{ Unwrap() []error }); ok {
+		children := joined.Unwrap()
+		if len(children) == 0 {
+			return false
+		}
+		for _, child := range children {
+			if !transientLockError(child) {
+				return false
+			}
+		}
+		return true
+	}
+	if wrapped, ok := err.(interface{ Unwrap() error }); ok {
+		return transientLockError(wrapped.Unwrap())
+	}
+	return store.IsTransientLockError(err)
 }
 
 type databaseAuditor struct{ Auditor }

@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"strconv"
+	"time"
 
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/vmrunner"
@@ -179,7 +180,7 @@ func (scheduler *Scheduler) recoverTrustedPreflights(ctx context.Context) error 
 	if scheduler.trusted == nil {
 		return fmt.Errorf("pending trusted preflight cleanup requires configured executor")
 	}
-	runs, err := retryDatabase(ctx, "RecoverTrustedPreflights", scheduler.trusted.Recover)
+	runs, err := scheduler.trusted.Recover(ctx)
 	if err != nil {
 		log.Printf("WARN: trusted preflight recovery remains pending: %v", err)
 	}
@@ -204,13 +205,22 @@ func (scheduler *Scheduler) recoverDatabasePreflight(ctx context.Context, id str
 	}
 	total := scheduler.databaseRetryCount.Add(1)
 	log.Printf("WARN: scheduler database operation=TrustedPreflight retry_pending=true retries_total=%d", total)
-	_, err := retryDatabaseClassified(ctx, "RecoverTrustedRun", func(ctx context.Context) (struct{}, error) {
-		return struct{}{}, recoverer.RecoverRun(ctx, id)
-	}, func(err error, expired bool) bool {
-		return transientDatabaseAttemptError(err, expired) || preflightDatabaseError(err)
+	// This is a composite Kubernetes cleanup, not a DB statement. It must
+	// retain its own recovery budget and must not hold a worker forever.
+	recoveryCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+	err := scheduler.RetryRecovery(recoveryCtx, "RecoverTrustedRun", func(ctx context.Context) error {
+		return recoverer.RecoverRun(ctx, id)
 	})
 	if err != nil {
-		return err
+		pending := recoverablePreflightError(err) || (ctx.Err() != nil && transientDatabaseAttemptError(err, true))
+		if !pending {
+			return err
+		}
+		log.Printf("WARN: trusted preflight recovery remains pending run=%s: %v", id, err)
+		// The durable journal and retained grant still forbid publication/reuse.
+		// Startup recovery can resume this exact obligation after restart.
+		return nil
 	}
 	if err := scheduler.interruptRecoveredPreflight(ctx, id); err != nil {
 		return err

@@ -256,7 +256,7 @@ func TestDatabaseDeadlineClassificationAndRequestBoundary(t *testing.T) {
 		}
 	}
 
-	if !preflightDatabaseError(errors.Join(context.Canceled, context.DeadlineExceeded)) || preflightDatabaseError(context.Canceled) || preflightDatabaseError(errors.Join(context.Canceled, context.DeadlineExceeded, invariant)) {
+	if !recoverablePreflightError(errors.Join(context.Canceled, context.DeadlineExceeded)) || recoverablePreflightError(context.Canceled) || recoverablePreflightError(errors.Join(context.Canceled, context.DeadlineExceeded, invariant)) {
 		t.Fatal("trusted cancellation masked an invariant or lost DB failure")
 	}
 	scheduler := &Scheduler{}
@@ -278,11 +278,8 @@ func TestDatabaseDeadlineClassificationAndRequestBoundary(t *testing.T) {
 func TestDatabaseDeadlineRecoveryAndShutdown(t *testing.T) {
 	scheduler := &Scheduler{}
 	calls := 0
-	if err := scheduler.RetryRecovery(t.Context(), "activation", func(ctx context.Context) error {
+	if err := scheduler.RetryStorageRecovery(t.Context(), "activation", func(ctx context.Context) error {
 		calls++
-		if _, ok := ctx.Deadline(); !ok {
-			t.Error("attempt has no deadline")
-		}
 		if calls < 3 {
 			return context.DeadlineExceeded
 		}

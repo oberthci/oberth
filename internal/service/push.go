@@ -35,10 +35,10 @@ func NewPushIngestor(config PushConfig) (*PushIngestor, error) {
 		return nil, errors.New("service: repository store/discoverer, push Git, and receive recorder are required")
 	}
 	return &PushIngestor{
-		repositories: config.Repositories,
+		repositories: databaseRepositories{config.Repositories},
 		discoverer:   config.Discoverer,
 		git:          config.Git,
-		receives:     config.Receives,
+		receives:     databaseReceives{config.Receives},
 		branches:     config.Branches,
 		releases:     config.Releases,
 	}, nil

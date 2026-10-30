@@ -30,7 +30,7 @@ func (p *deadlinePreflight) Execute(ctx context.Context, job JobRequest, require
 }
 func (p *deadlinePreflight) RecoverRun(ctx context.Context, id string) error {
 	if p.recovered.Add(1) < 3 {
-		return p.failure
+		return deadlineBusyError(5)
 	}
 	if p.beforeCleanup != nil {
 		p.beforeCleanup()

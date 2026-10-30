@@ -914,7 +914,7 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 			cancelState()
 			if (stateErr != nil && !errors.Is(stateErr, store.ErrNotFound)) || (stateErr == nil && !state.Cleaned) {
 				reservation.retain()
-				if preflightDatabaseError(err) && ctx.Err() == nil {
+				if recoverablePreflightError(err) && ctx.Err() == nil {
 					return scheduler.recoverDatabasePreflight(ctx, run.ID, reservation)
 				}
 				return errors.Join(err, stateErr)

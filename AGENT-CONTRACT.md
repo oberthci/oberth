@@ -1422,7 +1422,13 @@ trust assumptions and complete invalidation rules.
   `operation`, `retry_pending`, `retries_total` and `retry_in`; unscoped
   `system_status`/`GET /api/status` exposes `database_retries_total` (process
   lifetime, omitted at zero). Client request contexts keep their own deadline
-  and ordinary error behavior; startup readiness stays gated until recovery.
+  and ordinary error behavior. Composite startup recovery and Git replay keep
+  their caller's operation budget; the 10-second budget applies to storage
+  calls, not Kubernetes cleanup or a whole replay. Bare external deadlines do
+  not authorize database retries. Trusted startup cleanup logs pending failures
+  and continues with its durable obligations intact. Owner shutdown stops
+  retries between attempts and leaves in-flight detached cleanup/finalization
+  to finish. The create-settlement worker keeps its own bounded attempts/backoff.
   A transient parent-run observation retries without canceling the trusted
   preflight; only authoritative terminal state or a hard read failure cancels it.
   A trusted preflight that returned a DB failure is cleaned by exact run ID,
