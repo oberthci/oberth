@@ -67,7 +67,9 @@ func (scheduler *Scheduler) resolveTrustedRequirement(ctx context.Context, repos
 		// current operator-owned recipes, including at publication boundaries.
 		authorizeRotation = scheduler.trusted.Supports
 	}
+	resume := suspendDispatch(ctx)
 	requirement, err := vmrunner.ResolveRequirement(ctx, scheduler.git, upstream.QualifiedRepo(repository.Name), candidateSHA, authorizeRotation)
+	resume()
 	if err != nil {
 		return requirement, err
 	}

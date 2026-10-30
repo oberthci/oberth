@@ -29,6 +29,8 @@ type Health struct {
 	// ReadinessUpstreams reserves a DB reader for the background sampler;
 	// dashboard/mapping queries must not consume its connection. Nil uses Store.
 	ReadinessUpstreams func(context.Context) ([]model.Upstream, error)
+	// WriterReady reports completed hard write failures without touching storage.
+	WriterReady func() error
 	// Log records readiness transitions and the watcher's first retained deadline.
 	Log        func(string, ...any)
 	Storage    func(context.Context) (any, error)
@@ -180,6 +182,11 @@ func (health Health) probeReady(ctx context.Context) error {
 func (health Health) probeReadySample(ctx context.Context) (time.Duration, error) {
 	if health.Store == nil || health.Configured == nil {
 		return 0, errReadinessDependencies
+	}
+	if health.WriterReady != nil {
+		if err := health.WriterReady(); err != nil {
+			return 0, fmt.Errorf("%w: %w", errReadinessDatabase, err)
+		}
 	}
 	started := time.Now()
 	read := health.ReadinessUpstreams

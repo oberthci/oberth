@@ -17,6 +17,7 @@ import (
 	"log"
 
 	"github.com/oberthci/oberth/internal/gitoid"
+	"github.com/oberthci/oberth/internal/liveness"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/runlog"
 	"github.com/oberthci/oberth/internal/runprogress"
@@ -61,6 +62,8 @@ type SchedulerConfig struct {
 }
 
 type Scheduler struct {
+	dispatchProgress   liveness.Heartbeat
+	headProgress       liveness.Heartbeat
 	startupRecovered   atomic.Bool
 	store              SchedulerStore
 	git                WorkspaceGit
@@ -92,6 +95,7 @@ type Scheduler struct {
 	// onStartupRecovered, when set (tests only), is called once Run has
 	// finished startup recovery and is about to enter its dispatch loop.
 	onStartupRecovered func()
+	dispatchTicks      <-chan time.Time // test-only idle polling clock
 }
 
 // PromotionRetrier re-promotes a promotion whose publication failed because
@@ -115,7 +119,7 @@ func (scheduler *Scheduler) retryMovedPromotion(ctx context.Context, finalizatio
 		finalization.Publication.Status != model.PublicationFailed || finalization.TargetMovedTo == "" {
 		return
 	}
-	hook.retrier.RetryMovedPromotion(ctx, finalization.Promotion)
+	hook.retrier.RetryMovedPromotion(withoutDispatchProgress(ctx), finalization.Promotion)
 }
 
 func NewScheduler(config SchedulerConfig) (*Scheduler, error) {
@@ -345,10 +349,13 @@ func (scheduler *Scheduler) completeCancellationsWithGate(ctx context.Context, c
 		return err
 	}
 	for _, cancellation := range cancellations {
+		beatDispatch(ctx)
 		if strings.TrimSpace(cancellation.JobName) == "" {
 			continue
 		}
-		if err := scheduler.jobs.Delete(ctx, cancellation.JobName, cancellation.RunID); err != nil {
+		if err := runDispatchExternal(ctx, func(ctx context.Context) error {
+			return scheduler.jobs.Delete(ctx, cancellation.JobName, cancellation.RunID)
+		}); err != nil {
 			return fmt.Errorf("delete superseded Job %s: %w", cancellation.JobName, err)
 		}
 		if err := scheduler.store.CompleteRunCancellation(ctx, cancellation.RunID, cancellation.JobName); err != nil {
@@ -436,6 +443,8 @@ func (scheduler *Scheduler) Run(ctx context.Context) error {
 	if err := scheduler.recoverOwnedWorkspaces(workerCtx); err != nil {
 		return err
 	}
+	scheduler.dispatchProgress.Beat()
+	dispatchCtx := withDispatchProgress(workerCtx, &scheduler.dispatchProgress)
 	scheduler.startupRecovered.Store(true)
 	defer scheduler.startupRecovered.Store(false)
 	if scheduler.onStartupRecovered != nil {
@@ -462,7 +471,12 @@ func (scheduler *Scheduler) Run(ctx context.Context) error {
 	}
 	priorityPoll := time.NewTicker(priorityPollInterval)
 	defer priorityPoll.Stop()
+	ticks := priorityPoll.C
+	if scheduler.dispatchTicks != nil {
+		ticks = scheduler.dispatchTicks
+	}
 	for {
+		scheduler.dispatchProgress.Beat()
 		priorityErr := scheduler.refreshPriorities(workerCtx)
 		if priorityErr != nil && !store.IsTransientLockError(priorityErr) {
 			join()
@@ -472,6 +486,7 @@ func (scheduler *Scheduler) Run(ctx context.Context) error {
 			return priorityErr
 		}
 		for priorityErr == nil {
+			scheduler.dispatchProgress.Beat()
 			if !scheduler.dispatchSlotAvailable(active) {
 				available, err := scheduler.priorityDispatchAvailable(workerCtx, active)
 				if store.IsTransientLockError(err) {
@@ -488,14 +503,14 @@ func (scheduler *Scheduler) Run(ctx context.Context) error {
 					break
 				}
 			}
-			if err := scheduler.awaitMutation(workerCtx); err != nil {
+			if err := scheduler.awaitDispatchMutation(dispatchCtx); err != nil {
 				join()
 				if ctx.Err() != nil {
 					return nil
 				}
 				return err
 			}
-			if err := scheduler.awaitAdmission(workerCtx); err != nil {
+			if err := scheduler.awaitDispatchAdmission(dispatchCtx); err != nil {
 				join()
 				if ctx.Err() != nil {
 					return nil
@@ -530,12 +545,12 @@ func (scheduler *Scheduler) Run(ctx context.Context) error {
 		scheduler.admission.grantLocked()
 		scheduler.admission.mu.Unlock()
 		select {
-		case <-priorityPoll.C:
+		case <-ticks:
 		case <-ctx.Done():
 			join()
 			return nil
 		case <-scheduler.wake:
-			if err := scheduler.completePendingCancellationsWithGate(workerCtx, scheduler.awaitMutation); err != nil {
+			if err := scheduler.completePendingCancellationsWithGate(dispatchCtx, scheduler.awaitDispatchMutation); err != nil {
 				join()
 				if ctx.Err() != nil {
 					return nil
@@ -543,7 +558,7 @@ func (scheduler *Scheduler) Run(ctx context.Context) error {
 				return err
 			}
 		case <-scheduler.publicationWake:
-			if err := scheduler.recoverNotifiedPublicationsWithGate(workerCtx, scheduler.awaitMutation); err != nil {
+			if err := scheduler.recoverNotifiedPublicationsWithGate(dispatchCtx, scheduler.awaitDispatchMutation); err != nil {
 				join()
 				if ctx.Err() != nil {
 					return nil
@@ -1333,6 +1348,7 @@ func (scheduler *Scheduler) recoverNotifiedPublicationsWithGate(ctx context.Cont
 func (scheduler *Scheduler) recoverPublicationIDsWithGate(ctx context.Context, ids []string, require mutationRequirement) error {
 	var recoveryErr error
 	for _, id := range ids {
+		beatDispatch(ctx)
 		finalization, err := scheduler.deliverPublicationWithGate(ctx, id, require)
 		if err != nil {
 			recoveryErr = errors.Join(recoveryErr, fmt.Errorf("recover publication %s: %w", id, err))
@@ -1340,10 +1356,14 @@ func (scheduler *Scheduler) recoverPublicationIDsWithGate(ctx context.Context, i
 		}
 		var cleanupErr error
 		if finalization.Run.ID != "" {
+			beatDispatch(ctx)
 			cleanupErr = scheduler.workspaces.cleanupRun(ctx, finalization.Run.ID)
+			beatDispatch(ctx)
 		}
 		if finalization.Promotion.ID != "" {
+			beatDispatch(ctx)
 			cleanupErr = errors.Join(cleanupErr, scheduler.workspaces.cleanupPromotion(ctx, finalization.Promotion.ID))
+			beatDispatch(ctx)
 		}
 		if cleanupErr != nil {
 			recoveryErr = errors.Join(recoveryErr, fmt.Errorf("clean finalized publication workspace %s: %w", id, cleanupErr))
@@ -1372,11 +1392,16 @@ func (scheduler *Scheduler) deliverPublicationWithGate(
 	if strings.TrimSpace(publicationID) == "" {
 		return model.PublicationFinalization{}, fmt.Errorf("%w: publication ID is required", ErrInvalidInput)
 	}
+	// Another delivery can hold the permit across upstream I/O. Waiting for
+	// it must not turn that dependency outage into a process restart.
+	resume := suspendDispatch(ctx)
 	select {
 	case <-ctx.Done():
+		resume()
 		return model.PublicationFinalization{}, ctx.Err()
 	case <-scheduler.deliveryPermit:
 	}
+	resume()
 	defer func() { scheduler.deliveryPermit <- struct{}{} }()
 	if err := require(ctx); err != nil {
 		return model.PublicationFinalization{}, err

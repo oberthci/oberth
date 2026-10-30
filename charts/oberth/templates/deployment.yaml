@@ -409,10 +409,13 @@ spec:
           livenessProbe:
             httpGet:
               scheme: HTTPS
-              path: /healthz
+              path: /livez
               port: https
-            timeoutSeconds: 5
-            periodSeconds: 10
+            timeoutSeconds: 15
+            # Five minutes without local progress, then three failures a minute
+            # apart, tolerates sustained CI load before restarting the process.
+            periodSeconds: 60
+            failureThreshold: 3
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
           securityContext:

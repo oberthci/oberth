@@ -43,7 +43,9 @@ func deliverPublication(
 	if err != nil {
 		return model.PublicationFinalization{}, err
 	}
+	resume := suspendDispatch(ctx)
 	remoteSHA, exists, err := git.RemoteRef(ctx, repositoryInput, ref)
+	resume()
 	if err != nil {
 		failure := fmt.Errorf("read remote ref for publication %s: %w", publication.ID, err)
 		return publications.FinalizePublication(ctx, publication.ID, model.PublicationFailed, failure.Error())
@@ -96,7 +98,9 @@ func attemptPublicationMutation(
 
 	// A failed push or audit response can be ambiguous: the remote may already
 	// hold the exact result. Read it before deciding whether the operation is red.
+	resume := suspendDispatch(ctx)
 	remoteSHA, exists, verifyErr := git.RemoteRef(ctx, repositoryInput, ref)
+	resume()
 	if verifyErr != nil {
 		failure := errors.Join(
 			fmt.Errorf("publication %s mutation was ambiguous: %w", publication.ID, mutationErr),
@@ -135,6 +139,8 @@ func finalizeMovedPublication(ctx context.Context, publications PublicationStore
 }
 
 func mutatePublication(ctx context.Context, git PublicationGit, repository string, publication model.Publication, forceBranch bool) error {
+	resume := suspendDispatch(ctx)
+	defer resume()
 	if publication.PromotionID != "" {
 		return git.PushPromotion(ctx, repository, publication.Ref, publication.ResultSHA)
 	}

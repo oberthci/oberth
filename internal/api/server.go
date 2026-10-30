@@ -124,6 +124,7 @@ const writeDeadlineMargin = 1 * time.Minute
 
 type Server struct {
 	metrics               func(io.Writer)
+	liveness              func() error
 	draining              atomic.Bool
 	drainContext          context.Context
 	stopObservers         context.CancelFunc
@@ -176,6 +177,11 @@ func WithErrorClassifier(classifier ErrorClassifier) func(*Server) {
 	return func(server *Server) { server.classifyError = classifier }
 }
 
+// WithLiveness installs a process-local, nonblocking progress check.
+func WithLiveness(check func() error) func(*Server) {
+	return func(server *Server) { server.liveness = check }
+}
+
 // WithMetrics publishes fixed process counters to unscoped administrators.
 func WithMetrics(write func(io.Writer)) func(*Server) {
 	return func(server *Server) { server.metrics = write }
@@ -224,7 +230,7 @@ func (server *Server) Handler() http.Handler {
 		writer.Header().Set("Referrer-Policy", "no-referrer")
 		writer.Header().Set("Strict-Transport-Security", "max-age=31536000")
 		writer.Header().Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
-		if request.URL.Path != "/healthz" && server.refuseDuringDrain(writer) {
+		if request.URL.Path != "/healthz" && request.URL.Path != "/livez" && server.refuseDuringDrain(writer) {
 			return
 		}
 		if request.Method == http.MethodGet {
@@ -241,6 +247,14 @@ func (server *Server) Handler() http.Handler {
 func (server *Server) routes() {
 	server.mux.HandleFunc("GET /healthz", func(writer http.ResponseWriter, _ *http.Request) {
 		writeJSON(writer, http.StatusOK, map[string]string{"status": "ok"})
+	})
+	server.mux.HandleFunc("GET /livez", func(writer http.ResponseWriter, _ *http.Request) {
+		// Graceful drain must be allowed to finish without a liveness restart.
+		if !server.draining.Load() && (server.liveness == nil || server.liveness() != nil) {
+			writeJSON(writer, http.StatusServiceUnavailable, map[string]string{"status": "stalled"})
+			return
+		}
+		writeJSON(writer, http.StatusOK, map[string]string{"status": "live"})
 	})
 	server.mux.HandleFunc("GET /readyz", func(writer http.ResponseWriter, request *http.Request) {
 		if err := server.views.Ready(request.Context()); err != nil || server.draining.Load() {
