@@ -70,9 +70,10 @@ particular execution was automatic.
 The dashboard defaults to the latest run for each `(repository, ref kind, ref)`.
 The optional HTTP parameter `latest_per_ref=1` asks `/api/runs` for this view;
 it accepts the ordinary `all` view only. Each head has `earlier_attempts`, the
-count of all retained older attempts for that exact group. The server groups a narrow covering index and fetches only selected head rows,
-before applying the cursor, so an older page cannot resurrect an earlier
-attempt as the current head. Counts and heads honor the actor's repository
+count of all retained older attempts for that exact group. The server first
+groups a narrow covering index into exact heads, then applies the page cursor
+to those heads before fetching selected wide rows. An older page cannot
+resurrect an earlier attempt as the current head. Counts and heads honor the actor's repository
 scope. Existing requests without the parameter keep their flat list and paging.
 
 Click `n earlier attempts` to load history for that ref, with further history
@@ -129,6 +130,25 @@ constant-time maintained-head table. The benchmark includes 50,000 runs, 2,000
 refs and 2KiB errors, plus an assertion on the actual query plan.
 
 Upgrade applies the new index through the ordered migration ledger. v0.17.72
-supports schema 34 and refuses schema 35, so Helm-only image rollback is not
-available after migration. Qualify backups and any schema downgrade separately
-on a database copy; do not edit the migration ledger on a live server.
+supports schema 34 and refuses schema 35. Rollback is **database restore only**:
+restore a verified pre-upgrade schema-34 backup before starting the pinned old
+binary/chart, with writers stopped and installation/witness continuity preserved.
+Do not drop the index or edit migration-ledger rows to downgrade. A schema-35
+backup is not a rollback backup for v0.17.72.
+
+**Take and verify a fresh backup immediately before upgrading.** Record its
+actual schema, audit head and current external witness state; retain a protected
+off-volume copy and required restore keys. A restore loses all database changes
+recorded after that backup. External witnesses ahead of the backup can refuse a
+normal restore, so backup integrity alone does not establish operational rollback
+permission. OpenBao secrets, grants, chart values, identities, logs and VM resource
+ownership need their own preserved recovery state. Qualify the restore path on a
+copy with the old binary before deployment; otherwise choose forward repair.
+See [schema-35 restore qualification](schema35-rollback-qualification.md).
+
+The schema-35 emergency restore ordering is defined in the
+[v0.17.73 runbook](v073-upgrade-runbook.md). `oberth restore` with the new binary
+does not downgrade it; the old chart must first be staged without starting a
+Pod. The old chart rejects replicaCount=0, so use the rehearsed single-field
+maintenance copy described there. Check the Rekor/pending-intent deadline before
+replacing any database.
