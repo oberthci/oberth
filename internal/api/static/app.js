@@ -173,7 +173,8 @@ function runStatusCell(run) {
   return `${statusIcon(status)}${pill(statusLabel(status), statusKind(status))}`;
 }
 function scheduleBadge(run) { return run.Trigger === "schedule" && run.ScheduleEntry ? `<span class="v4b dim" title="schedule entry">${esc(run.ScheduleEntry)}</span>` : ""; }
-function releaseBadge(run) { return run.Release ? '<span class="v4b release">⏏ RELEASE</span>' : ""; }
+function priorityBadge(run) { return run.priority_class ? `<span class="v4b dim" title="${esc(run.priority_reason || "")}">${esc(run.priority_class)} priority</span>` : ""; }
+function releaseBadge(run) { return priorityBadge(run) + (run.Release ? '<span class="v4b release">⏏ RELEASE</span>' : ""); }
 function runDuration(run) {
   return spanSeconds(run.StartedAt, run.FinishedAt, run.Status === "running");
 }

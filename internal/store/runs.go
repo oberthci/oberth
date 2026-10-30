@@ -19,7 +19,7 @@ const runColumns = `
 queue_sequence, COALESCE(admission_sequence, queue_sequence), id, repo_id, ref_kind, ref, sha, actor, release, credentialed, trigger,
 phase, job_name, tested_sha, base_sha, failed_burn, failed_step, error,
 status, reason, superseded_by, queued_at, started_at, finished_at, created_at, updated_at,
-concurrency_group, schedule_entry`
+concurrency_group, schedule_entry, ` + basePrioritySQL + `, ` + priorityReasonSQL
 
 // ErrRunCursorNotFound lets clients restart paging without exposing a missing run ID.
 var ErrRunCursorNotFound = fmt.Errorf("%w: cursor run no longer retained; restart from the first page", ErrNotFound)
@@ -177,7 +177,7 @@ WHERE repo_id = ? AND ref_kind = 'branch' AND ref = ? AND id != ? AND schedule_e
 	if _, err := tx.ExecContext(ctx, `UPDATE runs SET reason = 're-queued after restart' WHERE id = ? AND superseded_by = ?`, run.ID, result.ID); err != nil {
 		return model.Run{}, fmt.Errorf("record restart requeue reason: %w", err)
 	}
-	return result.Run, nil
+	return s.inheritQueuePriorityTx(ctx, tx, run, result.Run)
 }
 
 func validateRunSpec(spec model.RunSpec) (model.RunSpec, error) {
@@ -309,19 +309,8 @@ func (s *Store) ClaimNextRun(ctx context.Context) (model.Run, error) {
 UPDATE runs
 SET status = 'running', phase = 'waiting', updated_at = ?
 WHERE queue_sequence = (
-    SELECT candidate.queue_sequence
-    FROM runs AS candidate
-    WHERE candidate.status = 'queued'
-      AND NOT EXISTS (
-          SELECT 1
-          FROM publications AS publication
-          WHERE publication.status = 'pending'
-            AND publication.repo_id = candidate.repo_id
-            AND publication.ref_kind = candidate.ref_kind
-            AND publication.ref = candidate.ref
-      )
-    ORDER BY candidate.admission_sequence, candidate.queue_sequence
-    LIMIT 1
+    SELECT queue_sequence FROM runs WHERE `+claimableRunSQL+`
+    ORDER BY `+priorityOrderSQL(fromUnixNano(now))+` LIMIT 1
 )
 RETURNING `+runColumns, now))
 	if err != nil {
@@ -1002,14 +991,15 @@ func (s *Store) listFlatRuns(ctx context.Context, filter model.RunListFilter) ([
 	if filter.Before == 0 && filter.BeforeRun == "" {
 		queued, err := func() ([]model.Run, error) {
 			args := append([]any{filter.RepoID, filter.RepoID, filter.Ref, filter.Ref}, restrictionArgs...)
+			priorityOrder := priorityOrderSQL(s.now())
 			rows, err := tx.QueryContext(ctx, `
 WITH queue AS (
-  SELECT *, ROW_NUMBER() OVER (ORDER BY admission_sequence, queue_sequence) AS queue_position FROM runs
+  SELECT *, ROW_NUMBER() OVER (ORDER BY `+priorityOrder+`) AS queue_position FROM runs
   WHERE status = 'queued' OR (status = 'running' AND started_at IS NULL)
 )
 SELECT `+runColumns+`, queue_position FROM queue
 WHERE (? = 0 OR repo_id = ?) AND (? = '' OR ref = ?)`+restriction+`
-ORDER BY admission_sequence, queue_sequence LIMIT ?`, append(args, MaxActiveRuns)...) // #nosec G202 -- fixed columns and parameterized restriction.
+ORDER BY `+priorityOrder+` LIMIT ?`, append(args, MaxActiveRuns)...) // #nosec G202 -- fixed columns and parameterized restriction.
 			if err != nil {
 				return nil, fmt.Errorf("list queued runs: %w", err)
 			}
@@ -1237,7 +1227,7 @@ func scanRun(row rowScanner, extra ...any) (model.Run, error) {
 		&value.SHA, &value.Actor, &release, &credentialed, &value.Trigger, &value.Phase, &value.JobName,
 		&value.TestedSHA, &value.BaseSHA, &value.FailedBurn, &value.FailedStep, &value.Error,
 		&value.Status, &value.Reason, &value.SupersededBy, &queued, &started, &finished,
-		&created, &updated, &value.ConcurrencyGroup, &value.ScheduleEntry,
+		&created, &updated, &value.ConcurrencyGroup, &value.ScheduleEntry, &value.Priority, &value.PriorityReason,
 	}
 	if err := row.Scan(append(dest, extra...)...); err != nil {
 		return model.Run{}, err

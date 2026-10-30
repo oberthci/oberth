@@ -411,23 +411,29 @@ func (fixture *groupFixture) awaitParked(t *testing.T, run model.Run, holder str
 }
 
 // The #658 acceptance scenario: two branch pushes and an apply tag of one
-// repository's group never execute concurrently and run in claim order, while
+// repository's group never execute concurrently; waiting tags take priority, while
 // an unrelated repository's run is admitted during the group's run.
 func TestSchedulerSerializesAConcurrencyGroupAcrossTriggersWhileOtherRepositoriesRun(t *testing.T) {
 	fixture := newGroupFixture(t, 3)
+	if _, err := fixture.store.SetSizeGrant(t.Context(), fixture.terraform.ID, "admin", periapsis.L); err != nil {
+		t.Fatal(err)
+	}
 	fixture.engine.declare("fix-a", terraformState, periapsis.M)
 	fixture.engine.declare("fix-b", terraformState, periapsis.M)
 	fixture.engine.declare("apply-1", terraformState, periapsis.M)
 	fixture.engine.declare("feature-x", "", periapsis.M)
 	planA := fixture.branch(t, fixture.terraform, "fix-a", "a")
+	fixture.start(t)
+	if first := fixture.awaitCreated(t, 1); !first[planA.ID] {
+		t.Fatalf("first holder = %v", first)
+	}
 	planB := fixture.branch(t, fixture.terraform, "fix-b", "b")
 	apply := fixture.tag(t, fixture.terraform, "apply-1", "c", "d")
 	other := fixture.branch(t, fixture.beacon, "feature-x", "e")
-	fixture.start(t)
 
-	created := fixture.awaitCreated(t, 2)
-	if !created[planA.ID] || !created[other.ID] {
-		t.Fatalf("created %v; want the oldest group run and the other repository's run together", created)
+	created := fixture.awaitCreated(t, 1)
+	if !created[other.ID] {
+		t.Fatalf("created %v; want the other repository alongside the existing group holder", created)
 	}
 	fixture.assertNothingCreated(t)
 	fixture.awaitParked(t, planB, planA.ID)
@@ -455,15 +461,15 @@ func TestSchedulerSerializesAConcurrencyGroupAcrossTriggersWhileOtherRepositorie
 	}
 
 	fixture.engine.finish(t, planA.ID)
-	if next := fixture.awaitCreated(t, 1); !next[planB.ID] {
-		t.Fatalf("after the first plan the group admitted %v; want the older branch run %s", next, planB.ID)
+	if next := fixture.awaitCreated(t, 1); !next[apply.ID] {
+		t.Fatalf("after the existing holder the group admitted %v; want the highest-priority tag %s", next, apply.ID)
 	}
 	fixture.assertNothingCreated(t)
-	fixture.engine.finish(t, planB.ID)
-	if next := fixture.awaitCreated(t, 1); !next[apply.ID] {
-		t.Fatalf("after both plans the group admitted %v; want the apply %s", next, apply.ID)
-	}
 	fixture.engine.finish(t, apply.ID)
+	if next := fixture.awaitCreated(t, 1); !next[planB.ID] {
+		t.Fatalf("after the tag the group admitted %v; want branch %s", next, planB.ID)
+	}
+	fixture.engine.finish(t, planB.ID)
 	fixture.engine.finish(t, other.ID)
 	fixture.engine.assertNoViolations(t)
 }

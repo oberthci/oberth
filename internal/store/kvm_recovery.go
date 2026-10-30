@@ -188,7 +188,7 @@ func (s *Store) enqueueKVMRetryTx(ctx context.Context, tx *sql.Tx, run model.Run
 			}
 		}
 	}
-	return enqueued.Run, nil
+	return s.inheritQueuePriorityTx(ctx, tx, run, enqueued.Run)
 }
 
 // A promotion retry retains the exact original plan and grant. It must still

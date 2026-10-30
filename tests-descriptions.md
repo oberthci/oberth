@@ -68,3 +68,11 @@ key generation or network requests. They reject impersonation and caller
 authority hooks, added non-label metadata and a wrong owner index after plan
 entry reordering. A public open-descriptor replacement control proves running
 inode byte binding. All new checks are UNRUN.
+
+Queue priority tests use real SQLite for classification, queue views, audited
+admin bumps, persistence, v33 migration and starvation/restart boundaries. Gate
+tests control grants and time deterministically for class/FIFO order, class-local
+backfill and head-wait drains. Service tests reject non-admin/scoped changes and
+mutation-gate bypass. A running scheduler with a fake engine reproduces the
+release-candidate dispatch-ceiling problem: an S RC enters the remaining 1/4
+weight while older ordinary L claims wait, then normal work resumes in FIFO.

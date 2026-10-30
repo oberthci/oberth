@@ -45,7 +45,12 @@ func (service *API) observeScheduling(ctx context.Context, run model.Run, steps 
 	clock := service.schedulingClock()
 	observed := clock.Now().UTC()
 	result := &model.RunScheduling{ObservedAt: observed, State: "unavailable", Message: "Scheduling observation is unavailable."}
-	defer func() { result.AgeSeconds = int64(clock.Since(observed) / time.Second) }()
+	defer func() {
+		result.AgeSeconds = int64(clock.Since(observed) / time.Second)
+		if run.Priority != "" {
+			result.Message = run.PriorityMessage(observed) + " " + result.Message
+		}
+	}()
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 	if run.StartedAt == nil && service.scope == nil {
@@ -60,7 +65,7 @@ func (service *API) observeScheduling(ctx context.Context, run model.Run, steps 
 	}
 	if run.Status == model.RunQueued {
 		result.State = "queued"
-		result.Message = "Awaiting scheduler claim; queue position is accepted order, not an execution estimate."
+		result.Message = "Awaiting scheduler claim; queue position follows priority then FIFO, not an execution estimate."
 		if observer, ok := service.admission.(admissionBlockerObserver); ok {
 			if blocker := service.visibleBlocker(observer.AdmissionBlocker()); blocker != nil {
 				result.Message += " " + blockedBehindMessage(blocker)

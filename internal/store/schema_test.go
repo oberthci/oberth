@@ -29,8 +29,8 @@ func TestSchemaMigrationsAreContiguous(t *testing.T) {
 	if err := validateMigrations(migrations, latestMigrationVersion); err != nil {
 		t.Fatal(err)
 	}
-	if latestMigrationVersion != 33 {
-		t.Fatalf("latest migration version = %d, want 33", latestMigrationVersion)
+	if latestMigrationVersion != 34 {
+		t.Fatalf("latest migration version = %d, want 34", latestMigrationVersion)
 	}
 	if len(migrations) != latestMigrationVersion {
 		t.Fatalf("migration count = %d, want %d", len(migrations), latestMigrationVersion)
@@ -602,7 +602,7 @@ ALTER TABLE uplinks_v1 RENAME TO uplinks;
 CREATE UNIQUE INDEX uplinks_token_credential_idx ON uplinks(token_credential_id);
 ALTER TABLE upstreams DROP COLUMN key_name;
 ALTER TABLE runs DROP COLUMN credentialed;
-ALTER TABLE step_results DROP COLUMN memory_peak_bytes; DELETE FROM schema_migrations WHERE version=33; ALTER TABLE schedule_fires DROP COLUMN last_fired_at; DELETE FROM schema_migrations WHERE version=32; DROP TRIGGER run_schedule_entry_immutable; ALTER TABLE runs DROP COLUMN schedule_entry; DELETE FROM schema_migrations WHERE version=31; DROP TRIGGER run_timing_claim; DROP TRIGGER run_timing_grant; DROP TRIGGER run_timing_park; DROP TRIGGER run_timing_terminal; DROP TABLE step_timings; DROP TABLE run_admission_timings; DROP TABLE run_timings;
+DROP TABLE IF EXISTS run_priority_overrides; DROP TABLE IF EXISTS queue_priority_patterns; DELETE FROM schema_migrations WHERE version>=34; ALTER TABLE step_results DROP COLUMN memory_peak_bytes; DELETE FROM schema_migrations WHERE version=33; ALTER TABLE schedule_fires DROP COLUMN last_fired_at; DELETE FROM schema_migrations WHERE version=32; DROP TRIGGER run_schedule_entry_immutable; ALTER TABLE runs DROP COLUMN schedule_entry; DELETE FROM schema_migrations WHERE version=31; DROP TRIGGER run_timing_claim; DROP TRIGGER run_timing_grant; DROP TRIGGER run_timing_park; DROP TRIGGER run_timing_terminal; DROP TABLE step_timings; DROP TABLE run_admission_timings; DROP TABLE run_timings;
 DROP INDEX repository_archive_actions_idx;
 DROP INDEX runs_admission_idx; ALTER TABLE runs DROP COLUMN admission_sequence;
 ALTER TABLE runs DROP COLUMN concurrency_group;
@@ -951,10 +951,12 @@ func TestFreshSchemaIsCompleteAndIdempotent(t *testing.T) {
 		"promotion_grants",
 		"promotions",
 		"publications",
+		"queue_priority_patterns",
 		"receive_events",
 		"repositories",
 		"run_admission_timings",
 		"run_cancellations",
+		"run_priority_overrides",
 		"run_timings",
 		"runs",
 		"schedule_fires",
@@ -1050,6 +1052,8 @@ func TestFreshSchemaIsCompleteAndIdempotent(t *testing.T) {
 	})
 
 	expectedColumns := map[string][]string{
+		"queue_priority_patterns":   {"pattern"},
+		"run_priority_overrides":    {"run_id", "priority", "reason", "actor", "updated_at"},
 		"schedule_fires":            {"repo", "entry", "fired_at", "outcome", "last_fired_at"},
 		"run_timings":               {"run_id", "version", "claimed_at", "checkout_ready_at", "source_seed_started_at", "source_ready_at", "workflow_created_at", "terminal_at", "workflow_json"},
 		"run_admission_timings":     {"run_id", "episode", "requested_at", "granted_at", "closed_at"},

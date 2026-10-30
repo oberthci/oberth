@@ -82,6 +82,7 @@ type APIConfig struct {
 	SecretAccess              SecretAccessStore
 	KubeVirtGrants            KubeVirtGrantStore
 	SizeGrants                SizeGrantStore
+	QueuePriorities           QueuePriorityStore
 	SecretStoreVerifier       SecretStoreVerifier
 	SecretAccessReconciler    *AccessReconciler
 	RepositoryArchiver        RepositoryArchiver
@@ -133,6 +134,7 @@ type API struct {
 	secretAccess              SecretAccessStore
 	kubeVirtGrants            KubeVirtGrantStore
 	sizeGrants                SizeGrantStore
+	queuePriorities           QueuePriorityStore
 	secretStoreVerifier       SecretStoreVerifier
 	secretAccessReconciler    *AccessReconciler
 	repositoryArchiver        RepositoryArchiver
@@ -214,6 +216,7 @@ func NewAPI(config APIConfig) (*API, error) {
 		secretAccess: config.SecretAccess, secretAccessReconciler: config.SecretAccessReconciler,
 		kubeVirtGrants:      config.KubeVirtGrants,
 		sizeGrants:          config.SizeGrants,
+		queuePriorities:     config.QueuePriorities,
 		secretStoreVerifier: config.SecretStoreVerifier,
 		repositoryArchiver:  config.RepositoryArchiver, changeRepositoryArchive: config.ChangeRepositoryArchive,
 		repositoryRemover: config.RepositoryRemover, removeGitCache: config.RemoveGitCache,
@@ -316,6 +319,8 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 		default:
 			return service.secretStoreSyncReceipt(ctx, actor, raw)
 		}
+	case "queue_priority_config", "queue_priority_get", "run_priority":
+		return service.queuePriorityTool(ctx, actor, name, raw)
 	case "admission_release":
 		if err := requireUnscoped(actor, name); err != nil {
 			return nil, err
@@ -1469,9 +1474,22 @@ func displayRunStatus(run model.Run) string {
 }
 
 func presentationRun(run model.Run) model.Run {
+	return presentationRunAt(run, time.Now())
+}
+
+func presentationRunAt(run model.Run, now time.Time) model.Run {
 	visible := visibleRun(run)
 	visible.DisplayStatus = displayRunStatus(run)
 	visible.DisplayReason = runDisplayReason(run)
+	if run.Priority != "" {
+		visible.Priority, visible.PriorityReason = run.EffectivePriority(now)
+		// Active display_reason intentionally describes queue priority. Scheduling
+		// presentation may replace it with a more specific wait/preflight reason;
+		// priority_class/reason remain available. Terminal causes keep their text.
+		if run.Status.Active() {
+			visible.DisplayReason = run.PriorityMessage(now)
+		}
+	}
 	return visible
 }
 
@@ -1536,7 +1554,7 @@ func (service *API) presentationRuns(ctx context.Context, runs []model.Run) ([]m
 }
 
 func (service *API) presentationRunWithSuccessor(ctx context.Context, run model.Run, successors map[string]model.Run) model.Run {
-	visible := presentationRun(run)
+	visible := presentationRunAt(run, service.schedulingClock().Now())
 	if run.Status == model.RunRunning && run.StartedAt != nil && service.submittedKVMPreflight(ctx, run) {
 		visible.Phase = "preflight"
 	}
@@ -2664,7 +2682,7 @@ func MutatingTool(name string) bool {
 		"access_allow", "access_revoke",
 		"kubevirt_grant", "kubevirt_revoke",
 		"size_grant", "size_revoke",
-		"admission_release",
+		"admission_release", "queue_priority_config", "run_priority",
 		"repo_remove", "repo_archive", "repo_unarchive",
 		"secretstore_sync_receipt",
 		"promote_grant", "promote_grant_revoke",

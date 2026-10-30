@@ -118,7 +118,7 @@ CREATE TABLE step_results (
  termination_json TEXT CHECK(termination_json IS NULL OR length(termination_json)<=4096),
  PRIMARY KEY(run_id,burn,step));
 CREATE INDEX step_results_order_idx ON step_results(run_id,ordinal,burn,step);
-DELETE FROM schema_migrations WHERE version=33;`)
+DELETE FROM schema_migrations WHERE version>=33;`)
 	if err != nil {
 		t.Fatal(err)
 	}

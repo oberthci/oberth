@@ -434,6 +434,28 @@ trust assumptions and complete invalidation rules.
   XL), S ≤ M ≤ L ≤ XL; sizes left unset keep their defaults. The queue-head
   message names a finite XL by weight ("XL · 11w") and a whole-budget XL as
   "needs a full drain". S packing uses the configured S and M weights.
+- Run priority is computed server-side: `highest` for tag/release and promotion
+  runs, `high` for branch refs matching administrator RC globs, otherwise
+  `normal`. Repositories/pipelines cannot supply priority. Both durable claims
+  and weighted admission sort by effective class, then original admission FIFO.
+  Normal work waiting 60 minutes joins `highest` with its original FIFO place;
+  automatic restart refires preserve its wait and explicit admin bump. Existing
+  grants are never preempted. Backfill/head-wait rules apply within each class;
+  a waiting higher class prevents lower-class backfill. Group/VM parking still
+  releases weight and lets unrelated work proceed. Bounded extra priority claims
+  let higher classes reach the gate past ordinary waiting dispatch slots.
+  `priority_class` and `priority_reason` are run projections; active
+  `display_reason` and dashboard badges also explain them.
+  Unscoped-admin MCP `queue_priority_config {rc_patterns}` atomically replaces
+  up to 16 case-sensitive globs (1..256 bytes, `*`/`?` match slash; `[]` disables).
+  Defaults have no RC globs. `queue_priority_get {}` reads them and the fixed
+  60-minute starvation threshold. `run_priority {run_id, priority, reason}` raises
+  one unadmitted run to `high`/`highest`; no lowering or preemption. Config and
+  bump mutations use the audit gate and atomically append `queue.priority.config`
+  / `run.priority` with actor, previous value and reason. Waiting reservations
+  refresh on notification and a one-second poll; admin calls refresh local
+  waiting reservations before returning. Schema v34 stores only admin patterns
+  and per-run overrides, never repository declarations.
 - Bounded backfill (#1085): when the queue head (the first claimed,
   prepared, unparked run) does not fit, later runs that fit the spare weight
   are admitted beside it, marked `backfilled`, until the head has waited
@@ -523,7 +545,7 @@ trust assumptions and complete invalidation rules.
   `oberth.ci/concurrency-group: <name>` (#658) makes the run a member of a
   mutual-exclusion group scoped to the declaring repository: at most one run
   of a (repository, group) holds admission at a time, across branch,
-  promotion and tag triggers, and members are admitted in claim (FIFO) order.
+  promotion and tag triggers, and members are admitted by priority, then claim FIFO.
   VMI resource templates do not imply a concurrency group. Any valid declared
   group is allowed, and an ungrouped VMI run shows no group badge (#1173).
   The group never changes a run's weight or identity, XL keeps its
@@ -872,7 +894,7 @@ trust assumptions and complete invalidation rules.
   it encodes the same result object. Authenticated tool refusal text keeps its
   stable error class and may append only an explicitly public service reason.
   Raw dependency chains stay masked; scoped missing/hidden equivalence remains.
-- MCP exposes 62 tools: `status`, bounded named-step `logs`, exact-run
+- MCP exposes 65 tools: `status`, bounded named-step `logs`, exact-run
   `run_get`/`run_logs`, `run_retry`, audited `run_rerun` (#1098), audited `run_cancel`/`run_purge`, `run_kvm_preflight`, `artifacts`/`artifact_get`, `wait`, `sync`, `promote`,
   `promotion_list`, `promote_status`, audited `promote_retry` (#1097), `publish_retry`, issue
   create/get/get_many/update/append/close/reopen/delete/list/lock/unlock/close_many,
@@ -880,7 +902,7 @@ trust assumptions and complete invalidation rules.
   `access_dismiss` and `kubevirt_grant_list`, admin-only `kubevirt_grant` and
   `kubevirt_revoke`, read-only `kubevirt_grant_get`, admin-only `size_grant`
   and `size_revoke`, read-only `size_grant_get` (#1021), admin-only
-  unscoped `admission_release` (#1099), `repo_list`, `repo_remove`, `repo_archive`, `repo_unarchive`, `run_list`,
+  unscoped `admission_release` (#1099), `queue_priority_config`, `queue_priority_get`, `run_priority`, `repo_list`, `repo_remove`, `repo_archive`, `repo_unarchive`, `run_list`,
   admin-only `audit_list` (#1104; verified entries, never available to a scoped uplink;
   `GET /api/audit` shares its filters, response and restrictions),
   `schedule_list` (also `GET /api/schedules`, with the same repository scope) plus admin-only audited `schedule_pause`, `schedule_resume` and `schedule_trigger` (#1106; pause state is the audit chain, trigger goes through `EnqueueCI`),
@@ -1080,7 +1102,7 @@ trust assumptions and complete invalidation rules.
   not persisted and never changes run state or constitutes execution evidence.
   `observed_at` and `age_seconds` describe snapshot freshness (including time
   spent in MCP long-poll); underlying controller state can lag reality.
-- Scheduling queue position is one-based accepted order among all durable
+- Scheduling queue position is one-based effective priority then FIFO order among all durable
   queued runs, not an ETA or execution order: publication-gated refs can be
   bypassed. Admission position is separately one-based among live weighted
   reservations, with `preparing`, `waiting`, and `admitted` states. Missing
@@ -1126,7 +1148,7 @@ trust assumptions and complete invalidation rules.
   and not audited. The same grant pass admits the runs behind it.
 - Run list views (#1122): `/api/runs`, MCP `run_list`, `oberth runs` and the
   dashboard use one default order. The first page carries every not-yet-
-  admitted run, capped at 500, in admission order (`admission_sequence`,
+  admitted run, capped at 500, by effective priority then admission order (`admission_sequence`,
   then `queue_sequence`), preserving restart FIFO order; below it, admitted
   and terminal runs sort by `started_at` descending, breaking ties by ID.
   A terminal run that was never admitted sorts by `finished_at`. The dated
@@ -2561,6 +2583,7 @@ alone is never evidence that missing migrations ran.
 | v31 | Unreleased (schedule entry identity) | runs: immutable schedule_entry, empty for legacy rows; named schedule queue isolation | Database restore |
 | v32 | Unreleased (#1190) | schedule_fires: durable successful-fire cursor, pending first-fire catch-up; latest outcome/time retained | Database restore |
 | v33 | Unreleased (step resource usage) | Nullable RSS/CPU, container memory peak; ambiguous legacy zero counters become NULL | Database restore |
+| v34 | Unreleased (queue priority) | Administrator RC branch patterns and audited per-run priority bumps; no pipeline-controlled priority | Database restore |
 
 **Contract test:** `TestEveryMigrationDocumentedInAgentContract` asserts that
 every migration version in `internal/store/schema.go` has a corresponding

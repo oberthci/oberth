@@ -351,3 +351,15 @@ deadline. Store queue-reader tests hold the primary transaction, observe only
 committed queue state, see the next commit immediately, and verify read-only,
 bounded reader lifetime. Error-body tests cover bounded draining of HTTP 5xx;
 the local deadline test also rejects the retry-progress suffix in its final cause.
+
+Queue priority: `TestQueuePriorityClassificationAndFIFO` checks server-owned
+classes, tag/promotion precedence, administrator RC globs, FIFO and queue-position
+agreement across durable views. Boundary and restart tests cover the 60-minute
+starvation boost, schema v33 upgrades, durable bumps and retained restart age.
+`TestQueuePriorityToolsAdminOnlyAuditedAndGated` refuses ordinary/scoped actors
+and blocked audit gates. Admission tests keep weighted budgets, same-class
+backfill and head-wait drains. The complete scheduler regression
+`TestSchedulerReleaseCandidateOvertakesAlreadyClaimedBranchQueue` puts an RC
+behind ordinary claimed L runs and proves it reaches the spare weight first,
+then preserves ordinary FIFO. Cross-trigger group tests retain the live holder
+while a waiting tag takes priority over a waiting branch.
