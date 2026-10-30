@@ -2,6 +2,7 @@ package argojob
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"strings"
 	"testing"
@@ -12,6 +13,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/fake"
 	ktesting "k8s.io/client-go/testing"
@@ -178,5 +180,70 @@ func TestResourcePodReceivesLauncherBoundToken(t *testing.T) {
 	wf.Status.Nodes["node-id"] = wfv1.NodeStatus{TemplateName: "ordinary"}
 	if resourcePodTemplate(wf, pod, config.VMLauncherServiceAccount) {
 		t.Fatal("ordinary node selected launcher identity")
+	}
+}
+
+func TestResourceDeleteBarrierWaitsAcrossTicks(t *testing.T) {
+	for _, resource := range []schema.GroupVersionResource{vmiResource, dataVolumeResource, pvcResource} {
+		t.Run(resource.Resource, func(t *testing.T) {
+			config, wf, pod := guardedVMIFixture(t, 1)
+			object := ownedCleanupObject(wf, resource, "amd64")
+			// A deletion older than the API-call budget must still be pending. No
+			// wall-clock sleep is needed to exercise a 30-second guest/finalizer.
+			deleting := metav1.NewTime(time.Now().Add(-30 * time.Second))
+			object.SetDeletionTimestamp(&deleting)
+			object.SetFinalizers([]string{"test/slow-shutdown"})
+			client := cleanupClient()
+			if _, err := client.Resource(resource).Namespace(wf.Namespace).Create(t.Context(), object, metav1.CreateOptions{}); err != nil {
+				t.Fatal(err)
+			}
+			wf.Spec.Templates[0].Resource = &wfv1.ResourceTemplate{Action: "delete", SetOwnerReference: true, Manifest: fmt.Sprintf("apiVersion: %s\nkind: %s\nmetadata:\n  name: '{{workflow.name}}-amd64'\n  uid: 'amd64-uid'\n  labels:\n    oberth.ci/workflow: '{{workflow.name}}'\n", resource.GroupVersion().String(), object.GetKind())}
+			pod.Spec.ServiceAccountName = config.PipelineServiceAccount
+			pod.Spec.Volumes = []corev1.Volume{{Name: executorTokenVolume, VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{Medium: corev1.StorageMediumMemory}}}}
+			pod.Spec.InitContainers = []corev1.Container{{Name: executorTokenWaiter, Image: config.SourceSeedImage, Command: []string{"sh", "-c", executorTokenWaitCommand}, VolumeMounts: []corev1.VolumeMount{{Name: executorTokenVolume, MountPath: executorTokenDir}}}}
+			pod.Spec.Containers[0].Command = []string{"argoexec", "version"}
+			pod.Spec.Containers[0].VolumeMounts = []corev1.VolumeMount{{Name: executorTokenVolume, MountPath: executorTokenDir}}
+			pod.Status.InitContainerStatuses = []corev1.ContainerStatus{{Name: executorTokenWaiter, State: corev1.ContainerState{Running: &corev1.ContainerStateRunning{}}}}
+			kube := fake.NewClientset(pod, &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "kube-root-ca.crt", Namespace: wf.Namespace}, Data: map[string]string{"ca.crt": "public-ca"}})
+			kube.PrependReactor("create", "pods", func(a ktesting.Action) (bool, runtime.Object, error) {
+				a.(ktesting.CreateAction).GetObject().(*corev1.Pod).UID = "holder-id"
+				return false, nil, nil
+			})
+			requests := 0
+			kube.PrependReactor("create", "serviceaccounts", func(ktesting.Action) (bool, runtime.Object, error) {
+				requests++
+				return true, &authenticationv1.TokenRequest{Status: authenticationv1.TokenRequestStatus{Token: "token", ExpirationTimestamp: metav1.NewTime(time.Now().Add(2 * time.Hour))}}, nil
+			})
+			deliveries := 0
+			c := &Controller{kube: kube, vmi: client, config: config, seeder: &SourceSeeder{exec: func(context.Context, string, string, string, []string, io.Reader, io.Writer, io.Writer) error {
+				deliveries++
+				return nil
+			}}}
+			delivered := map[types.UID]bool{}
+			for range 3 {
+				if err := c.deliverExecutorTokens(t.Context(), wf, delivered); err != nil {
+					t.Fatalf("slow delete aborted observation: %v", err)
+				}
+			}
+			if deliveries != 0 || requests != 0 || delivered[pod.UID] {
+				t.Fatal("pending deletion released its token/phase barrier")
+			}
+			for _, action := range client.Actions() {
+				if action.GetVerb() == "delete" {
+					t.Fatal("reissued delete while target was terminating")
+				}
+			}
+			if err := client.Resource(resource).Namespace(wf.Namespace).Delete(t.Context(), object.GetName(), metav1.DeleteOptions{}); err != nil {
+				t.Fatal(err)
+			}
+			for range 2 {
+				if err := c.deliverExecutorTokens(t.Context(), wf, delivered); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if deliveries != 1 || requests != 1 || !delivered[pod.UID] {
+				t.Fatalf("absence did not release barrier once: deliveries=%d requests=%d", deliveries, requests)
+			}
+		})
 	}
 }

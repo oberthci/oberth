@@ -138,6 +138,9 @@ func (controller *Controller) deliverExecutorTokens(ctx context.Context, wf *wfv
 		serviceAccount := controller.config.ExecutorServiceAccount
 		if launcher {
 			if err := controller.ensureVMIForResourcePod(ctx, wf, pod); err != nil {
+				if errors.Is(err, errResourceDeletePending) {
+					continue
+				}
 				return err
 			}
 			serviceAccount = controller.config.VMLauncherServiceAccount

@@ -65,9 +65,9 @@ type vmiLedger struct {
 	Claims  map[string]vmiClaim `json:"claims"`
 }
 
-// Argo's resource create becomes a get in the submitted Pod. Only Oberth may
-// perform the actual create, after acquiring a persistent quota claim. The
-// launcher account has no create verb, so the Pod cannot bypass this decision.
+// Argo resource creates become gets; deletes become harmless version calls.
+// Only Oberth performs mutations at the token barrier. The launcher account
+// has neither create nor delete permission.
 func projectVMICreateGuard(wf *wfv1.Workflow, config Config, request Request, receipt *argoworkflow.VMIDemandReceipt) error {
 	if !argoworkflow.DeclaresVMIResources(wf) {
 		return nil
@@ -97,8 +97,12 @@ func projectVMICreateGuard(wf *wfv1.Workflow, config Config, request Request, re
 	wf.Annotations[vmiQuotaAnnotation] = string(encoded)
 	for i := range wf.Spec.Templates {
 		t := &wf.Spec.Templates[i]
-		if t.Resource == nil || t.Resource.Action != "create" {
+		if t.Resource == nil || (t.Resource.Action != "create" && t.Resource.Action != "delete") {
 			continue
+		}
+		command := []string{"argoexec", "resource", "get"}
+		if t.Resource.Action == "delete" {
+			command = []string{"argoexec", "version"}
 		}
 		patch := map[string]any{}
 		if t.PodSpecPatch != "" {
@@ -110,13 +114,13 @@ func projectVMICreateGuard(wf *wfv1.Workflow, config Config, request Request, re
 		found := false
 		for _, item := range containers {
 			if c, ok := item.(map[string]any); ok && c["name"] == "main" {
-				c["command"] = []string{"argoexec", "resource", "get"}
+				c["command"] = command
 				c["args"] = []string{}
 				found = true
 			}
 		}
 		if !found {
-			containers = append(containers, map[string]any{"name": "main", "command": []string{"argoexec", "resource", "get"}, "args": []string{}})
+			containers = append(containers, map[string]any{"name": "main", "command": command, "args": []string{}})
 		}
 		patch["containers"] = containers
 		body, err := json.Marshal(patch)
@@ -131,14 +135,17 @@ func projectVMICreateGuard(wf *wfv1.Workflow, config Config, request Request, re
 // Argo wraps main in emissary after applying podSpecPatch. Accept only its
 // logging flags followed by the exact get command, or the unwrapped command.
 func guardedVMIGetCommand(command, args []string) bool {
+	return guardedResourceCommand(command, args, []string{"argoexec", "resource", "get"})
+}
+
+func guardedResourceCommand(command, args, want []string) bool {
 	if len(args) != 0 {
 		return false
 	}
-	want := []string{"argoexec", "resource", "get"}
 	if slices.Equal(command, want) {
 		return true
 	}
-	if len(command) < 6 || command[0] != "/var/run/argo/argoexec" || command[1] != "emissary" {
+	if len(command) < 5 || command[0] != "/var/run/argo/argoexec" || command[1] != "emissary" {
 		return false
 	}
 	i := 2
@@ -170,6 +177,9 @@ func (c *Controller) ensureVMIForResourcePod(ctx context.Context, wf *wfv1.Workf
 	ctx, cancel := context.WithTimeout(ctx, vmiAPIRequestTimeout)
 	defer cancel()
 	t := guardedResourceTemplate(wf, pod)
+	if t != nil && t.Resource.Action == "delete" {
+		return c.ensureResourceDelete(ctx, wf, pod, t)
+	}
 	if t == nil || t.Resource.Action != "create" {
 		return nil
 	}

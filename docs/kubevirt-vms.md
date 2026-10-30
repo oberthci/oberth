@@ -75,7 +75,7 @@ For local admission checks, run `oberth validate --kubevirt
 --container-disk-prefixes=quay.io/example/`; this checks the manifest but does
 not grant the repository capability.
 The chart creates `argo.vmLauncherServiceAccount` in the CI namespace and
-gives it a VMI get/list/watch/delete Role; it cannot create VMIs. The shared Argo executor account receives no VMI
+gives it a VMI get/list/watch Role. The server performs creates and deletes. The shared Argo executor account receives no VMI
 permission. Resource templates use the launcher as their per-template
 executor; other steps keep the ordinary, tokenless pipeline identity.
 For a resource Pod, Oberth resolves Argo's node ID to the named VMI template,
@@ -88,7 +88,9 @@ The VMI manifest must use `kubevirt.io/v1`,
 `kind: VirtualMachineInstance`, `metadata.name:
 "{{workflow.name}}-<suffix>"`, and exactly one label,
 `oberth.ci/workflow: "{{workflow.name}}"`. `setOwnerReference: true` is
-required. Only those two substitutions are permitted. The manifest must be
+required. Delete manifests may also carry `metadata.uid`, either a literal UID
+or exactly `"{{inputs.parameters.uid}}"` (using a named template input). Other
+substitutions remain refused. The manifest must be
 one YAML document with no carriage returns. Create manifests are limited to
 the admitted containerDisk, inline cloud-init, emptyDisk, pod networking,
 masquerade interface, CPU, memory, architecture and kernelBoot fields. Get
@@ -335,18 +337,78 @@ volume is still required for the root disk.
 
 ## Cleanup
 
-Oberth's run cleanup owns VMI deletion; a workflow needs no explicit delete
-step. After a run completes, fails or is cancelled, Oberth lists VMIs with the
-run's Workflow label and deletes survivors whose names have that Workflow
-prefix, using observed UID preconditions. A VMI that is already gone, or was
-never created because the run failed first, is not an error, so a run that
-fails before its VM exists finishes with a clean cleanup. The Workflow owner
-reference removes VMIs too, when the Workflow itself is deleted.
+Oberth's default terminal cleanup deletes leftover VMIs using the run's label,
+name prefix, Workflow owner UID and an observed UID precondition. This backstop
+is best effort: failures are audited while the run becomes terminal. Without
+the original Workflow UID, it cannot prove ownership and leaves objects alone.
 
-An exit-handler delete template remains admitted for releasing VMs before the
-run ends. It is safe when the VMI never existed: Argo's resource executor
-(v4.0.8) always runs `kubectl delete --ignore-not-found`, so Oberth still
-refuses resource `flags`. The KubeVirt installation and cluster reachability
-policy are managed separately from this admission and identity increment.
-Cleanup is best effort: failures are logged and audited, while the finished
-run still becomes terminal.
+To require cleanup before PASS, opt into the terminal verdict:
+
+```yaml
+metadata:
+  annotations:
+    oberth.ci/cleanup-verdict: "30"
+```
+
+The value is a total deadline in seconds, from 1 to 300. This requires the
+repository's KubeVirt grant. After Argo completes, Oberth records an
+`oberth-cleanup/cleanup-verdict` hook result and writes its progress and object
+list to the step log. It deletes run-created VMIs, DataVolumes and PVCs with
+UID preconditions and waits for complete absence readback. Remaining objects,
+foreign replacements, missing ownership proof, API errors or incomplete lists
+fail the hook and the run. Recovery applies the same gate before reporting a
+terminal result. Polling backs off exponentially from 100ms to a 2s cap,
+within the declared total deadline. A clean verdict preserves an earlier
+pipeline failure. Observer API, configuration and log-storage failures are
+classified as infrastructure failures; leftovers and unproven ownership remain
+pipeline failures. An existing pipeline failure keeps that attribution.
+
+Cleanup includes Workflow-owned volumeClaimTemplates and source PVCs. PVCs
+owned by a DataVolume must prove that parent's UID and Workflow ownership.
+Label-filtered inventory is bounded to 2,048 matching run objects per resource
+type. Initial and final prefix scans discover unlabeled PVCs without counting
+unrelated namespace objects against that bound. Waiting polls read known
+unlabeled names directly. All lists paginate; incomplete reads fail closed.
+Same-prefix objects with
+unproven ownership are listed as leftovers and never deleted. The hook name
+`oberth-cleanup` is reserved when this annotation is present.
+
+Explicit resource deletes still allow early phase release. They pass through
+the server's token barrier: Oberth verifies the Workflow owner UID, checks the
+authored UID when present, sends a UID-precondition API delete, and waits for
+absence across controller ticks. Each API attempt has a 20-second bound; a
+slow guest or storage finalizer keeps the step pending until absence or the
+Workflow deadline. The pinned Argo main container then runs
+`argoexec version`; it receives no delete permission and cannot repeat a
+name-only delete against a replacement. A missing target succeeds. Flags,
+force deletion and arbitrary selectors remain refused.
+
+For example, pass the create step's UID output as the delete template's `uid`
+input, then use:
+
+```yaml
+- name: delete-vmi
+  inputs:
+    parameters:
+      - name: uid
+  resource:
+    action: delete
+    setOwnerReference: true
+    manifest: |
+      apiVersion: kubevirt.io/v1
+      kind: VirtualMachineInstance
+      metadata:
+        name: "{{workflow.name}}-amd64"
+        uid: "{{inputs.parameters.uid}}"
+        labels:
+          oberth.ci/workflow: "{{workflow.name}}"
+```
+
+The same metadata-only, UID-pinned delete is admitted for
+`cdi.kubevirt.io/v1beta1` `DataVolume` and `v1` `PersistentVolumeClaim`.
+DataVolume deletion uses foreground propagation. This adds no DataVolume/PVC
+create or get templates, disk cloning, external volume references, or pipeline
+storage permissions. Disk deletes count toward the existing per-VM resource
+template cap. Existing creation admission remains in force. Drain
+running resource-delete workflows before upgrading, since legacy Pods lack
+the server delete guard and the launcher account no longer has delete access.

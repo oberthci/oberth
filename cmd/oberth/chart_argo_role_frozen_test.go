@@ -169,7 +169,7 @@ func TestChartVMLauncherHasOnlyVMIAndTaskResultRoles(t *testing.T) {
 		}
 	}
 	role := findChartRBACDoc(t, docs, "Role", "oberth-argo-vm-launcher")
-	want := []map[string]any{{"apiGroups": []any{"kubevirt.io"}, "resources": []any{"virtualmachineinstances"}, "verbs": []any{"get", "list", "watch", "delete"}}}
+	want := []map[string]any{{"apiGroups": []any{"kubevirt.io"}, "resources": []any{"virtualmachineinstances"}, "verbs": []any{"get", "list", "watch"}}}
 	if got := canonicalRules(t, role.Rules); got != canonicalRules(t, want) {
 		t.Fatalf("VM launcher Role rules = %s", got)
 	}
@@ -256,4 +256,21 @@ func TestChartVMICreateGuardPermissionsAreSeparateAndBounded(t *testing.T) {
 		t.Fatal("Helm must not own/reset the initialization marker")
 	}
 
+}
+
+func TestChartCleanupPermissionsStayOnServer(t *testing.T) {
+	docs := renderArgoRBAC(t)
+	role := findChartRBACDoc(t, docs, "Role", "oberth-argo-vmi-cleanup")
+	want := []map[string]any{
+		{"apiGroups": []any{"kubevirt.io"}, "resources": []any{"virtualmachineinstances"}, "verbs": []any{"get", "list", "delete"}},
+		{"apiGroups": []any{"cdi.kubevirt.io"}, "resources": []any{"datavolumes"}, "verbs": []any{"get", "list", "delete"}},
+		{"apiGroups": []any{""}, "resources": []any{"persistentvolumeclaims"}, "verbs": []any{"get", "list", "delete"}},
+	}
+	if got := canonicalRules(t, role.Rules); got != canonicalRules(t, want) {
+		t.Fatalf("cleanup Role=%s", got)
+	}
+	binding := findChartRBACDoc(t, docs, "RoleBinding", role.Metadata.Name)
+	if len(binding.Subjects) != 1 || binding.Subjects[0]["name"] != "oberth" {
+		t.Fatalf("cleanup permission escaped server identity: %+v", binding.Subjects)
+	}
 }

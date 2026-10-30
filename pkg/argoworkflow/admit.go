@@ -97,6 +97,12 @@ func Admit(workflow *wfv1.Workflow, policy Policy) error {
 		}
 	}
 	problems = append(problems, admitTemplates(workflow, policy)...)
+	if _, err := CleanupVerdictTimeout(workflow); err != nil {
+		problems = append(problems, err)
+	} else if _, declared := workflow.Annotations[CleanupVerdictAnnotation]; declared && !policy.KubeVirt {
+		problems = append(problems, errors.New("argoworkflow: cleanup verdict requires an active repository KubeVirt admin grant"))
+	}
+
 	if _, err := DeclaredNonrootTemplates(workflow); err != nil {
 		problems = append(problems, err)
 	}
