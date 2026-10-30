@@ -240,19 +240,19 @@ func (controller *Controller) Create(ctx context.Context, request Request) (name
 	// Workflow definitively does not exist. Seed the source claim.
 	request, err = controller.refreshNonroot(ctx, request)
 	if err != nil {
-		return "", err
+		return "", &beforeWorkflowCreateFailure{cause: err}
 	}
 	controller.timingMilestone(ctx, request.RunID, "source-seed-started")
 	volume, err := controller.seeder.seed(ctx, request.Name, request.SourceDir, credentialed, request.TrustedKVM == nil)
 	if err != nil {
-		return "", err
+		return "", &beforeWorkflowCreateFailure{cause: err}
 	}
 	controller.timingMilestone(ctx, request.RunID, "source-ready")
 	request.SourceVolume = volume
 	request, err = controller.refreshNonroot(ctx, request)
 	if err != nil {
 		controller.seeder.DeleteClaim(context.WithoutCancel(ctx), volume.ClaimName)
-		return "", err
+		return "", &beforeWorkflowCreateFailure{cause: err}
 	}
 
 	intended, err := Build(controller.config, request)

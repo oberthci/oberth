@@ -357,3 +357,17 @@ func (scheduler *Scheduler) pendingCreateCount() int {
 	defer scheduler.createMu.Unlock()
 	return len(scheduler.createPending)
 }
+
+// The shared background owner retains capacity during uncertain create/delete
+// outcomes; API outages must not turn this run's cleanup into a component exit.
+func (scheduler *Scheduler) deferCreateCleanup(ctx context.Context, run model.Run, name string, grant *admissionReservation) {
+	grant.retain()
+	persistCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	err := scheduler.store.MarkRunCreatePending(persistCtx, run.ID, name)
+	cancel()
+	run.JobName = name
+	scheduler.registerCreateCleanup(run, grant, err == nil)
+	if err != nil {
+		log.Printf("WARN: create_cleanup run=%q persistence_deferred=true", run.ID)
+	}
+}

@@ -23,6 +23,7 @@ const (
 var (
 	errReadinessStale         = errors.New("app: readiness probe pending or stale")
 	errReadinessDependencies  = errors.New("app: health dependencies are unavailable")
+	errReadinessWriter        = errors.New("app: writer persistence window exceeded")
 	errReadinessDatabase      = errors.New("app: database is unavailable")
 	errReadinessNoUpstream    = errors.New("app: no upstream is configured")
 	errReadinessConfiguration = errors.New("app: upstream configuration is unavailable")
@@ -128,7 +129,7 @@ func (health Health) refreshReadiness(ctx context.Context) {
 	// Deadlines and typed SQLite contention retain the last success without
 	// renewing its age. Cancellation
 	// and hard errors still replace it immediately.
-	retainGreen := (errors.Is(err, context.DeadlineExceeded) || store.IsTransientLockError(err)) && !errors.Is(err, context.Canceled) &&
+	retainGreen := !errors.Is(err, errReadinessWriter) && (errors.Is(err, context.DeadlineExceeded) || store.IsTransientLockError(err)) && !errors.Is(err, context.Canceled) &&
 		!errors.Is(ctx.Err(), context.Canceled) && !snapshot.checked.IsZero() && snapshot.err == nil
 	logRetained := false
 	if retainGreen {

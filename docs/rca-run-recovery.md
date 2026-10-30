@@ -1,27 +1,36 @@
 # Pre-step recovery and the run list
 
-A branch run that fails from infrastructure before any pipeline step starts can
-receive **one** automatic retry at the same SHA. This addresses transient
-workflow creation, source seeding, executor identity delivery, and pre-step
-workflow deadline failures. Release/tag, promotion, plan and apply execution is
-excluded. Normal step failures are never automatically replayed.
+A branch run can receive **one** automatic retry at the same SHA for an
+allow-listed infrastructure failure with positive proof that no Workflow POST
+occurred. Eligible source-checkout deadlines and native preparation failures
+after a definitive Workflow NotFound can qualify. Permanent configuration,
+policy, malformed pipeline and missing-SHA failures do not. Release/tag,
+promotion, plan and apply execution is excluded.
 
-The scheduler checks every retained progress attempt, the engine's step results
-and earlier Workflow attempts, and terminal observations. It does not use the
-run's StartedAt as a step-start indicator: that timestamp means resource
-admission. Missing progress files contain no emitted records; malformed, torn,
-or otherwise unreadable progress refuses automatic retry. Any known step start,
-completion or non-queued result refuses it. Explicit hard engine validation
-errors also refuse it. Later executor-identity failures preserve already
-observed Workflow execution evidence instead of discarding it.
+Only fresh dispatch initializes an explicit empty progress journal, before
+execution; it never truncates existing evidence. A missing journal in any later
+check is unknown and refuses replay. Every retained progress attempt, engine
+step/attempt result and terminal observation still participates in the guard.
+Run StartedAt means admission, not step execution. Started/completed/non-queued
+steps and unreadable/torn history refuse retry. Source preparation must also
+carry a trusted infrastructure classification; an unclassified error is not a
+retry authorization.
 
-A failed workflow-create attempt must pass ownership-checked deletion before
-recording a retryable failure. Observation errors first attempt terminal result
-recovery; a real terminal result takes precedence. If no terminal result can be
-read, the existing ownership-checked deletion must succeed. Failed cleanup keeps
-the original run owned and its admission retained; no replacement is queued.
-This uses the existing engine cancellation contract (accepted ownership-checked
-deletion), not a new Kubernetes termination protocol.
+After a Workflow create attempt, only the native engine's positive pre-POST
+proof can opt in. Submission-record failure, observed/completed-while-down
+Workflows and uncertain-create settlement never request automatic retry, even
+with an empty journal. Post-create workflow deadlines preserve their original
+job phase and do not auto-retry. Partial executor observations retain step-start
+evidence without collecting artifacts from a live workspace; artifact collection
+requires an actually terminal Workflow.
+
+Definite rejection and foreign-name refusal never route through Delete. An
+uncertain POST uses v0.17.72's shared create-settlement worker. A failed delete
+after successful creation/submission-record failure also transfers to that
+worker when the engine supports settlement. Its run and admission stay retained
+while Kubernetes is unavailable; unrelated runs can progress and the worker's
+error never exits the scheduler. Only confirmed cleanup settles it, without an
+automatic execution retry. Existing ownership checks remain mandatory.
 
 The writer transaction records failure, creates the retry, links both attempts
 and appends `run.retry.auto` atomically. It rechecks that the source is newest for
@@ -32,7 +41,8 @@ copy resets credential admission and re-earns grants through the ordinary path.
 It preserves source, schedule entry, actor and queue priority. No arbitrary build
 step is replayed from stderr or a client-side timeout.
 
-The one-retry marker survives restart requeue and manual retry/rerun. Human
+The one-retry marker survives restart requeue, KVM preflight restart recovery
+and manual retry/rerun. Human
 reasons carry its fast read-side projection; immutable `run.auto-retry-lineage`
 receipts preserve it if cancellation/supersession replaces the human reason.
 An explicitly requested manual replay is still allowed by its existing policy,
@@ -48,15 +58,20 @@ Its presentation status is `infra-retried`, with an amber `infra error, retried`
 label and a link to the retry. An exhausted retry can still be red. Superseded
 attempts keep their durable interrupted Status but have a distinct
 `display_status: superseded`, separate from intentional cancellation. Existing
-JSON fields and ordinary run-list behavior remain available.
+Raw status fields and ordinary run-list behavior remain available. Existing
+`display_status` values change for affected rows: `cancelled` becomes
+`superseded`, and an automatically retried `failed` row becomes `infra-retried`.
+Clients should accept those display enums. `auto_retry_of` can also describe
+spent-budget lineage on a manual replay; audit actions identify whether a
+particular execution was automatic.
 
 ## Dashboard history
 
 The dashboard defaults to the latest run for each `(repository, ref kind, ref)`.
 The optional HTTP parameter `latest_per_ref=1` asks `/api/runs` for this view;
 it accepts the ordinary `all` view only. Each head has `earlier_attempts`, the
-count of all retained older attempts for that exact group. The server ranks
-heads before applying the cursor, so an older page cannot resurrect an earlier
+count of all retained older attempts for that exact group. The server groups a narrow covering index and fetches only selected head rows,
+before applying the cursor, so an older page cannot resurrect an earlier
 attempt as the current head. Counts and heads honor the actor's repository
 scope. Existing requests without the parameter keep their flat list and paging.
 
@@ -85,6 +100,10 @@ cannot keep the pod Ready forever. No successful initial sample means unready.
 Hard DB errors, absent upstream configuration, credential failures, cancellation,
 and startup/shutdown recovery gates retain their fail-closed behavior.
 
+Reader retention excludes the writer readiness signal: once the writer's own
+90-second confirmed-contention policy reports failure, the next readiness
+sample publishes it immediately instead of granting another 90-second window.
+Sampler scheduling can still add its ordinary in-flight probe latency.
 Liveness and writer progress budgets are unchanged. Readiness is routing
 availability, not write authorization: database writes still run through real
 transactions and current integrity/mutation gates. Admission, access, resource
@@ -98,3 +117,18 @@ Retained deadline and busy samples have separate counters
 `oberth_readiness_retained_busy_total`; the first retained transient event after
 a successful sample is logged without exposing raw database errors. Snapshot
 age metrics and readiness transition logs remain available.
+
+## Schema and query cost
+
+Schema **35** adds `runs_latest_ref_idx` on repository, ref kind, ref and descending
+queue sequence. Exact head/count aggregation scans only that covering index;
+wide historical errors are not window-sorted or read. Only selected heads fetch
+wide rows. Queue positions retain the global priority order of the flat view.
+Work still grows with retained history; this is an indexed aggregate, not a
+constant-time maintained-head table. The benchmark includes 50,000 runs, 2,000
+refs and 2KiB errors, plus an assertion on the actual query plan.
+
+Upgrade applies the new index through the ordered migration ledger. v0.17.72
+supports schema 34 and refuses schema 35, so Helm-only image rollback is not
+available after migration. Qualify backups and any schema downgrade separately
+on a database copy; do not edit the migration ledger on a live server.

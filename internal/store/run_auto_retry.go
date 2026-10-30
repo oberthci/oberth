@@ -48,7 +48,7 @@ func (s *Store) inheritAutoRetryTx(ctx context.Context, tx *sql.Tx, previous mod
 // Failure, retry, lineage and audit commit together. This is never a second
 // attempt at publication or tag-tier execution, and never supersedes newer work.
 func (s *Store) autoRetryPreStepTx(ctx context.Context, tx *sql.Tx, source model.Run, now int64) (model.Run, error) {
-	if source.Status != model.RunFailed || source.Phase != "infrastructure" || source.FailedStep != "" || source.FailedBurn != "" || source.RefKind != model.RefBranch || source.Release || source.AutoRetryOf != "" || source.AutoRetriedBy != "" || source.SupersededBy != "" || source.Trigger == "promotion" || source.Trigger == "plan" || source.Trigger == "apply" {
+	if source.Status != model.RunFailed || source.Phase != "infrastructure" || source.FailedStep != "" || source.FailedBurn != "" || source.RefKind != model.RefBranch || source.Release || source.AutoRetryOf != "" || source.AutoRetriedBy != "" || source.SupersededBy != "" || (source.Trigger != "branch" && source.Trigger != "push" && source.Trigger != "schedule" && source.Trigger != "manual") {
 		return source, nil
 	}
 	if err := requireRepositoryActive(ctx, tx, source.RepoID); err != nil {

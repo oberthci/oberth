@@ -340,6 +340,26 @@ func (store *Store) Tail(runID string, maximum int64) ([]byte, error) {
 	return io.ReadAll(io.LimitReader(file, maximum))
 }
 
+// InitializeStepProgress records an explicitly empty journal before a fresh
+// dispatch can execute anything. Existing evidence is never truncated/repaired.
+// A missing journal in any later observation/recovery remains unknown.
+func (store *Store) InitializeStepProgress(runID string) error {
+	path, err := store.progressPath(runID)
+	if err != nil {
+		return err
+	}
+	store.progressMu.Lock()
+	defer store.progressMu.Unlock()
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o640) //nolint:gosec // Validated run ID under the private log directory.
+	if errors.Is(err, os.ErrExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("initialize step progress: %w", err)
+	}
+	return errors.Join(file.Sync(), file.Close())
+}
+
 // AppendStepProgress durably journals one bounded state transition. The
 // scheduler is the sole writer for a run; the lock also keeps dashboard reads
 // from observing a partial record in this process.

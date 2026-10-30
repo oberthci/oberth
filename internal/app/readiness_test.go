@@ -429,7 +429,7 @@ func TestReadinessWriterBusyRequiresPersistentProbeErrors(t *testing.T) {
 	sample(100*time.Second, nil, true)
 	sample(110*time.Second, writerBusyReadinessError(5), true)
 	sample(199*time.Second, writerBusyReadinessError(6), true)
-	sample(200*time.Second, writerBusyReadinessError(5), true)
+	sample(200*time.Second, writerBusyReadinessError(5), false)
 	setReadinessChecked(health.Readiness, time.Now().Add(-readinessMaxAge-time.Second))
 	assertReady(false) // Persistent contention also exhausts the last-green window.
 	sample(201*time.Second, nil, true)

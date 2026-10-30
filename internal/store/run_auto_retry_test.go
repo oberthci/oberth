@@ -52,7 +52,7 @@ func TestAutoRetryPreStepIsAtomicAuditedAndOnlyOnce(t *testing.T) {
 }
 
 func TestAutoRetryRefusesExecutedStepsReleasesAndStaleWork(t *testing.T) {
-	for _, kind := range []string{"step-started", "step-passed", "failed-step", "tag", "release", "plan", "apply", "newer-terminal", "pending-delete", "publication"} {
+	for _, kind := range []string{"step-started", "step-passed", "failed-step", "tag", "release", "trigger-tag", "trigger-release", "plan", "apply", "newer-terminal", "pending-delete", "publication"} {
 		t.Run(kind, func(t *testing.T) {
 			now := time.Now()
 			s := testStore(t, &now)
@@ -85,6 +85,10 @@ func TestAutoRetryRefusesExecutedStepsReleasesAndStaleWork(t *testing.T) {
 				if _, err := s.PutStepResult(t.Context(), step); err != nil {
 					t.Fatal(err)
 				}
+			case "trigger-tag", "trigger-release":
+				if _, err := s.db.Exec(`UPDATE runs SET trigger=? WHERE id=?`, strings.TrimPrefix(kind, "trigger-"), r.ID); err != nil {
+					t.Fatal(err)
+				}
 			case "failed-step":
 				result.FailedBurn = "ci"
 				result.FailedStep = "unit"
@@ -93,9 +97,14 @@ func TestAutoRetryRefusesExecutedStepsReleasesAndStaleWork(t *testing.T) {
 				if _, err := s.FinishRun(t.Context(), newer.ID, model.RunResult{Status: model.RunPassed}); err != nil {
 					t.Fatal(err)
 				}
-				// The older source was superseded; finishing it must not resurrect it.
-				if _, err := s.FinishRun(t.Context(), r.ID, result); err == nil {
-					t.Fatal("superseded source was finished/retried")
+				// Restore the source's active fence only, so the newer-sequence
+				// predicate is tested independently of enqueue supersession.
+				if _, err := s.db.Exec(`UPDATE runs SET status='running',superseded_by='',reason='' WHERE id=?`, r.ID); err != nil {
+					t.Fatal(err)
+				}
+				finished, err := s.FinishRun(t.Context(), r.ID, result)
+				if err != nil || finished.AutoRetriedBy != "" {
+					t.Fatal("older source replayed over newer terminal run", finished, err)
 				}
 				return
 			case "pending-delete":
@@ -177,5 +186,30 @@ func TestAutoRetryAuditFailureRollsBackFailureAndEnqueueTogether(t *testing.T) {
 	var count int
 	if err := s.db.QueryRow(`SELECT count(*) FROM runs`).Scan(&count); err != nil || count != 1 {
 		t.Fatal("orphan retry committed", count, err)
+	}
+}
+
+func TestRCARevisionKVMRestartPreservesSpentAutoRetryBudget(t *testing.T) {
+	now := time.Now().UTC()
+	s := testStore(t, &now)
+	intent := kvmIntent(t, s)
+	original := intent.RunID
+	failed, err := s.FinishRun(t.Context(), original, autoRetryResult())
+	if err != nil || failed.AutoRetriedBy == "" {
+		t.Fatal(failed, err)
+	}
+	child, err := s.ClaimNextRun(t.Context())
+	if err != nil || child.ID != failed.AutoRetriedBy {
+		t.Fatal(child, err)
+	}
+	intent.RunID, intent.WorkflowName = child.ID, "trusted-"+child.ID
+	reserveRestartPreflight(t, s, intent, true)
+	next, err := s.RecoverKVMPreflight(t.Context(), child.ID)
+	if err != nil || next.ID == "" || next.AutoRetryOf != original {
+		t.Fatal("KVM recovery reset retry budget", next, err)
+	}
+	exhausted, err := s.FinishRun(t.Context(), next.ID, autoRetryResult())
+	if err != nil || exhausted.AutoRetriedBy != "" {
+		t.Fatal("KVM successor retried again", exhausted, err)
 	}
 }

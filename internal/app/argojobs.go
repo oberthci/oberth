@@ -690,8 +690,10 @@ func (jobs *ArgoJobs) wait(ctx context.Context, name string, destination io.Writ
 	// A terminal Workflow keeps its outputs even when its observation ended in
 	// error (log budget breach, executor identity retirement): the scheduler
 	// then records the Workflow's real result, which includes its artifacts.
-	if reason := jobs.collectArtifacts(context.WithoutCancel(ctx), name, intent.runID, intent.trigger, completion.VMIDiagnostics); reason != "" {
-		jobs.recordArtifactFailure(context.WithoutCancel(ctx), intent.runID, reason)
+	if completion.Terminal || completion.Succeeded {
+		if reason := jobs.collectArtifacts(context.WithoutCancel(ctx), name, intent.runID, intent.trigger, completion.VMIDiagnostics); reason != "" {
+			jobs.recordArtifactFailure(context.WithoutCancel(ctx), intent.runID, reason)
+		}
 	}
 	return jobs.result(completion), err
 }

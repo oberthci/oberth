@@ -58,7 +58,7 @@ func TestWorkflowCreateContractCleanupAfterDefiniteFailure(t *testing.T) {
 				t.Fatal(lookupErr)
 			}
 			if mode == "deletion-unconfirmed" {
-				if err == nil || statErr != nil || current.Status != model.RunRunning {
+				if err != nil || statErr != nil || current.Status != model.RunRunning || !isPendingCreate(current) || !f.scheduler.ownsCreateCleanup(source.ID) || current.AutoRetriedBy != "" {
 					t.Fatalf("uncertain active submission lost its contract: run=%+v err=%v stat=%v", current, err, statErr)
 				}
 			} else if err != nil || !os.IsNotExist(statErr) || current.Status != model.RunFailed {

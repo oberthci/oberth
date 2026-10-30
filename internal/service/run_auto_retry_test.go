@@ -15,7 +15,7 @@ import (
 )
 
 func TestPreStepAutoRetryUsesAllProgressAndExecutionEvidence(t *testing.T) {
-	for _, kind := range []string{"empty", "queued", "started", "earlier-start-then-queued", "torn", "result-started", "observation-started", "earlier-workflow-attempt", "release", "tag", "promotion", "plan", "apply"} {
+	for _, kind := range []string{"empty", "missing", "queued", "started", "earlier-start-then-queued", "torn", "result-started", "observation-started", "earlier-workflow-attempt", "release", "tag", "trigger-tag", "trigger-release", "promotion", "plan", "apply"} {
 		t.Run(kind, func(t *testing.T) {
 			root := t.TempDir()
 			logs, err := runlog.Open(root)
@@ -26,6 +26,11 @@ func TestPreStepAutoRetryUsesAllProgressAndExecutionEvidence(t *testing.T) {
 			run := model.Run{ID: strings.Repeat("a", 32), RefKind: model.RefBranch, Trigger: "branch"}
 			result := JobResult{Status: model.RunFailed, Phase: "infrastructure"}
 			now := time.Now()
+			if kind == "empty" {
+				if err := logs.InitializeStepProgress(run.ID); err != nil {
+					t.Fatal(err)
+				}
+			}
 			if kind == "queued" || kind == "started" || kind == "earlier-start-then-queued" {
 				event := runprogress.Event{Version: 1, Burn: "ci", Step: "unit", Ordinal: 0, DeclaredSize: "M", Status: runprogress.StepQueued}
 				if kind != "queued" {
@@ -59,6 +64,8 @@ func TestPreStepAutoRetryUsesAllProgressAndExecutionEvidence(t *testing.T) {
 				run.Release = true
 			case "tag":
 				run.RefKind = model.RefTag
+			case "trigger-tag", "trigger-release":
+				run.Trigger = strings.TrimPrefix(kind, "trigger-")
 			case "promotion", "plan", "apply":
 				run.Trigger = kind
 			}
@@ -83,10 +90,14 @@ func TestAutomaticRetryPresentationPreservesRawFailureAndShowsAmber(t *testing.T
 
 type rcaCreateFailure struct {
 	recoveryJobs
-	createErr error
+	createErr   error
+	createCalls int
 }
 
-func (j *rcaCreateFailure) CreateCI(context.Context, JobRequest) error { return j.createErr }
+func (j *rcaCreateFailure) CreateCI(context.Context, JobRequest) error {
+	j.createCalls++
+	return j.createErr
+}
 
 func TestAutomaticRetryRequiresFailedCreateCleanupAndKeepsStartedSteps(t *testing.T) {
 	for _, kind := range []string{"create", "create-delete-fails", "started-before-identity", "pre-step-deadline"} {
@@ -112,20 +123,16 @@ func TestAutomaticRetryRequiresFailedCreateCleanupAndKeepsStartedSteps(t *testin
 			if lookupErr != nil {
 				t.Fatal(lookupErr)
 			}
-			if kind == "create-delete-fails" {
-				if err == nil || current.Status != model.RunRunning || current.AutoRetriedBy != "" {
-					t.Fatal("uncertain cleanup allowed retry", current, err)
-				}
-				return
-			}
 			if err != nil {
 				t.Fatal(err)
 			}
-			if kind == "pre-step-deadline" && current.AutoRetriedBy == "" {
-				t.Fatal("pre-step workflow deadline did not retry", current)
+			if kind == "create" || kind == "create-delete-fails" {
+				if current.Status != model.RunFailed || current.AutoRetriedBy != "" || len(jobs.deleted) != 0 {
+					t.Fatal("unproven create error retried or deleted a possibly foreign name", current, jobs.deleted)
+				}
 			}
-			if kind == "create" && (current.AutoRetriedBy == "" || len(jobs.deleted) != 1) {
-				t.Fatal("settled create failure did not retry", current, jobs.deleted)
+			if kind == "pre-step-deadline" && (current.AutoRetriedBy != "" || current.Phase != "job") {
+				t.Fatal("post-create deadline retried or raw phase rewritten", current)
 			}
 			if kind == "started-before-identity" && current.AutoRetriedBy != "" {
 				t.Fatal("wait error erased started-step evidence", current)

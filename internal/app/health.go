@@ -185,7 +185,7 @@ func (health Health) probeReadySample(ctx context.Context) (time.Duration, error
 	}
 	if health.WriterReady != nil {
 		if err := health.WriterReady(); err != nil {
-			return 0, fmt.Errorf("%w: %w", errReadinessDatabase, err)
+			return 0, fmt.Errorf("%w: %w: %w", errReadinessDatabase, errReadinessWriter, err)
 		}
 	}
 	started := time.Now()
