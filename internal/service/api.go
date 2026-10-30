@@ -2111,10 +2111,10 @@ func (service *API) promote(ctx context.Context, actor api.Actor, repositoryName
 		return model.Promotion{}, refuse(ErrUnavailable, "promotion")
 	}
 	if strings.TrimSpace(target) == "" {
-		return model.Promotion{}, fmt.Errorf("%w: promotion target is required", ErrInvalidInput)
+		return model.Promotion{}, refuse(ErrInvalidInput, "promotion target is required")
 	}
 	if !validOID(selector) {
-		return model.Promotion{}, fmt.Errorf("%w: promotion requires a full SHA", ErrInvalidInput)
+		return model.Promotion{}, refuse(ErrInvalidInput, "promotion requires a full SHA")
 	}
 	repository, candidate, err := service.resolveRun(ctx, repositoryName, selector)
 	if err != nil {
@@ -2141,7 +2141,7 @@ func (service *API) admitPromotion(ctx context.Context, actor api.Actor, reposit
 		return model.Promotion{}, store.ErrRepositoryArchived
 	}
 	if candidate.RefKind != model.RefBranch || candidate.Status != model.RunPassed || !sameOID(candidate.TestedSHA, candidate.SHA) {
-		return model.Promotion{}, errors.New("service: promotion source must be the exactly tested green branch commit")
+		return model.Promotion{}, refuse(ErrInvalidInput, "promotion source must be the exactly tested green branch commit")
 	}
 	var grantID string
 	if !actor.Admin {
@@ -2670,7 +2670,8 @@ func (service *API) requireMutation(ctx context.Context) error {
 		if errors.Is(err, store.ErrAuditVerificationBusy) {
 			return refuse(fmt.Errorf("%w: %w", ErrUnavailable, err), "transient audit verification contention; retry the request")
 		}
-		return fmt.Errorf("%w: audit integrity is unavailable: %w", ErrUnavailable, err)
+		return refuse(fmt.Errorf("%w: audit integrity is unavailable: %w", ErrUnavailable, err),
+			"audit integrity could not be verified; retry when the audit gate is available")
 	}
 	return nil
 }
