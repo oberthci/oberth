@@ -677,7 +677,7 @@ func TestMCPToolInputsMatchContract(t *testing.T) {
 	want := map[string][]string{
 		"status":             {"ref", "repo"},
 		"logs":               {"context", "limit", "offset", "pattern", "repo", "sha", "step", "tail"},
-		"run_get":            {"id"},
+		"run_get":            {"id", "summary"},
 		"run_retry":          {"id"},
 		"run_cancel":         {"force", "id", "reason"},
 		"run_purge":          {"id", "reason", "what"},
@@ -687,7 +687,8 @@ func TestMCPToolInputsMatchContract(t *testing.T) {
 		"sync":               {"branch", "repo", "sha"},
 		"promote":            {"branch", "repo", "sha"},
 		"issue_list":         {"before", "kind", "limit", "query", "repo", "state"},
-		"issue_get_many":     {"ids"},
+		"issue_get":          {"body_limit", "fields", "id"},
+		"issue_get_many":     {"body_limit", "fields", "ids"},
 		"secretstore_verify": {"expect", "keys", "paths", "release_tier", "repo", "tier", "timeout"},
 	}
 	for _, definition := range toolDefinitions() {

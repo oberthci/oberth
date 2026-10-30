@@ -32,10 +32,7 @@ func TestIssueAppendConcatenatesWithSeparator(t *testing.T) {
 	if err != nil {
 		t.Fatalf("issue_append: %v", err)
 	}
-	got, ok := value.(api.IssueResponse)
-	if !ok {
-		t.Fatalf("unexpected type %T", value)
-	}
+	got := readAcknowledgedIssue(t, service, actor, value)
 	if got.ID != issue.ID {
 		t.Fatalf("id = %d, want %d", got.ID, issue.ID)
 	}
@@ -78,7 +75,7 @@ func TestIssueAppendOnEmptyBody(t *testing.T) {
 	if err != nil {
 		t.Fatalf("issue_append on empty body: %v", err)
 	}
-	got := value.(api.IssueResponse)
+	got := readAcknowledgedIssue(t, service, actor, value)
 	if !strings.Contains(got.Body, "first entry") {
 		t.Fatalf("body missing appended text: %s", got.Body)
 	}
@@ -164,7 +161,7 @@ func TestIssueUpdateExpectedBodySHA256AcceptsMatch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("issue_update with matching sha256: %v", err)
 	}
-	got := value.(api.IssueResponse)
+	got := readAcknowledgedIssue(t, service, actor, value)
 	if got.Body != "new body" {
 		t.Fatalf("body = %q, want %q", got.Body, "new body")
 	}
@@ -218,7 +215,7 @@ func TestIssueUpdateWithoutSHA256StillWorks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("issue_update without sha256: %v", err)
 	}
-	got := value.(api.IssueResponse)
+	got := readAcknowledgedIssue(t, service, actor, value)
 	if got.Body != "updated" {
 		t.Fatalf("body = %q, want %q", got.Body, "updated")
 	}

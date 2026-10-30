@@ -10,7 +10,7 @@ import (
 	"github.com/oberthci/oberth/internal/store"
 )
 
-func (service *API) issueGetMany(ctx context.Context, actor api.Actor, ids []int64) (api.IssueGetManyResponse, error) {
+func (service *API) issueGetMany(ctx context.Context, actor api.Actor, ids []int64, options issueReadOptions) (api.IssueGetManyResponse, error) {
 	response := api.IssueGetManyResponse{}
 	if len(ids) < 1 || len(ids) > maximumIssuePage {
 		return response, fmt.Errorf("%w: ids must contain between 1 and 50 issue IDs", ErrInvalidInput)
@@ -45,13 +45,13 @@ func (service *API) issueGetMany(ctx context.Context, actor api.Actor, ids []int
 		case err != nil:
 			return api.IssueGetManyResponse{}, err
 		default:
-			wire := wireIssue(issue)
-			// Raw strings alone are a lower bound on JSON size. Avoid allocating
-			// an encoded copy of an individually oversized stored body/title.
-			if len(wire.Body)+len(wire.Title)+len(wire.Branch)+len(wire.Kind)+len(wire.State)+len(wire.CIOrigin)+len(wire.CIWorkID) > api.IssueGetManyMaximumBytes {
+			result.Issue = options.project(issue)
+			// Apply projection/truncation before enforcing the encoded budget.
+			// Raw strings are a lower bound, avoiding an encoded allocation for
+			// oversized records while allowing metadata-only reads of huge bodies.
+			if issueReadBytes(result.Issue) > api.IssueGetManyMaximumBytes {
 				continue
 			}
-			result.Issue = &wire
 		}
 		candidate, err := json.Marshal(result)
 		if err != nil {
