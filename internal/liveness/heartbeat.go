@@ -15,6 +15,11 @@ import (
 const MaxStall = 5 * time.Minute
 const Interval = 30 * time.Second
 
+// BusyReadinessWindow requires confirmed contention across several writer
+// probes before a readable WAL is removed from service. One busy sample must
+// never mature just because another probe is slow or the watcher has stopped.
+const BusyReadinessWindow = 90 * time.Second
+
 var ErrStalled = errors.New("local progress stalled")
 
 type sample struct {
@@ -81,18 +86,38 @@ func (heartbeat *Heartbeat) Suspend() func() {
 }
 
 type probeResult struct {
-	err   error
-	class string
+	err       error
+	class     string
+	observed  time.Time
+	busySince time.Time
 }
 
-// ProbeError is a completed hard failure for readiness/diagnostics. Deadlines
-// belong to liveness: a readable WAL may stay ready while its writer is wedged.
+// ProbeError is a completed failure for readiness. Busy/locked errors must be
+// confirmed across BusyReadinessWindow; other hard failures are immediate.
+// Deadlines belong to liveness: a readable WAL may stay ready while its writer
+// is wedged. All samples, including transient busy errors, remain diagnostic.
 func (heartbeat *Heartbeat) ProbeError() error {
 	result := heartbeat.probe.Load()
 	if result == nil || result.class == "deadline" {
 		return nil
 	}
+	if result.class == "busy" && result.observed.Sub(result.busySince) < BusyReadinessWindow {
+		return nil
+	}
 	return result.err
+}
+
+// recordProbe has one writer (Watch). Only completed samples can confirm busy
+// persistence. Success, deadlines and other error classes end the busy episode.
+func (heartbeat *Heartbeat) recordProbe(err error) {
+	result := &probeResult{err: err, class: probeErrorClass(err), observed: heartbeat.clock()}
+	if result.class == "busy" {
+		result.busySince = result.observed
+		if previous := heartbeat.probe.Load(); previous != nil && previous.class == "busy" {
+			result.busySince = previous.busySince
+		}
+	}
+	heartbeat.probe.Store(result)
 }
 
 func (heartbeat *Heartbeat) ErrorClass() string {
@@ -149,7 +174,7 @@ func (heartbeat *Heartbeat) Watch(ctx context.Context, interval time.Duration, p
 		if ctx.Err() != nil {
 			return
 		}
-		heartbeat.probe.Store(&probeResult{err: err, class: probeErrorClass(err)})
+		heartbeat.recordProbe(err)
 		if !errors.Is(err, context.DeadlineExceeded) {
 			heartbeat.Beat()
 		}

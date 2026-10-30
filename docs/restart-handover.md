@@ -65,12 +65,16 @@ A serial background heartbeat attempts a no-op write and commit through the
 production SQLite writer every 30 seconds. Each attempt has a five-minute
 deadline, so slow queued writes can complete. Successes and completed hard
 errors renew responsiveness; deadlines never renew it. Fast disk-full, read-only,
-corrupt-database and SQLite busy/locked errors are recorded for the background
-readiness snapshot and logged by bounded error class, instead of causing a
-restart loop. Recovery clears the error. This uses existing migration metadata
-without changing its values, adding audit actions, or requiring a schema
-migration. HTTP probes read only
-process memory and never acquire the writer or worker locks.
+corrupt-database and SQLite busy/locked errors are logged by bounded error class
+instead of causing a restart loop. Disk-full, read-only and corrupt-database
+errors fail the next background readiness sample. SQLite busy/locked errors
+must recur across at least 90 seconds of completed writer probes before they
+fail readiness; one old busy sample never ages into a failure by itself.
+Success, a deadline, or another error class starts a fresh busy episode.
+Recovery clears the error. This uses existing migration metadata without
+changing its values, adding audit actions, or requiring a schema migration.
+HTTP probes read only process memory and never acquire the writer or worker
+locks.
 
 The scheduler dispatch loop is monitored after startup recovery, including idle
 priority polling and local admission locking. Admission head-wait persistence

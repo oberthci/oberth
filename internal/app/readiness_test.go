@@ -10,6 +10,7 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/oberthci/oberth/internal/liveness"
 	"github.com/oberthci/oberth/internal/model"
 )
 
@@ -347,4 +348,88 @@ func TestReadinessWriterHardFailureOverridesReadableWALAndRecovers(t *testing.T)
 	if err := health.Ready(t.Context()); err != nil {
 		t.Fatal("writer recovery did not restore readiness", err)
 	}
+}
+
+type writerBusyReadinessError int
+
+func (err writerBusyReadinessError) Error() string { return "writer contention" }
+func (err writerBusyReadinessError) Code() int     { return int(err) }
+
+func TestReadinessWriterBusyRequiresPersistentProbeErrors(t *testing.T) {
+	start := time.Now()
+	var elapsed atomic.Int64
+	heartbeat := &liveness.Heartbeat{Now: func() time.Time { return start.Add(time.Duration(elapsed.Load())) }}
+	ctx, cancel := context.WithCancel(t.Context())
+	entered := make(chan struct{})
+	complete := make(chan error)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		heartbeat.Watch(ctx, time.Millisecond, func(ctx context.Context) error {
+			select {
+			case entered <- struct{}{}:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+			select {
+			case err := <-complete:
+				return err
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		})
+	}()
+	defer func() {
+		cancel()
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			t.Error("writer watcher did not stop")
+		}
+	}()
+	waitProbe := func() {
+		t.Helper()
+		select {
+		case <-entered:
+		case <-time.After(5 * time.Second):
+			t.Fatal("writer probe did not run")
+		}
+	}
+	waitProbe()
+	database := &readinessCountingStore{fakeHealthStore: fakeHealthStore{upstreams: []model.Upstream{{Kind: "local"}}}}
+	health := Health{Store: database, Configured: func(context.Context, []model.Upstream) error { return nil }, Readiness: &ReadinessSnapshot{}, WriterReady: heartbeat.ProbeError}
+	assertReady := func(want bool) {
+		t.Helper()
+		health.refreshReadiness(t.Context())
+		err := health.Ready(t.Context())
+		if (err == nil) != want {
+			t.Fatalf("ready=%t, want %t: %v", err == nil, want, err)
+		}
+		if !want && !errors.Is(err, errReadinessDatabase) {
+			t.Fatal("writer error was not classified as database readiness", err)
+		}
+		if err := heartbeat.Check(); err != nil {
+			t.Fatal("completed probes must keep liveness green", err)
+		}
+	}
+	sample := func(at time.Duration, err error, ready bool) {
+		t.Helper()
+		elapsed.Store(int64(at))
+		select {
+		case complete <- err:
+		case <-time.After(5 * time.Second):
+			t.Fatal("writer probe did not complete")
+		}
+		waitProbe() // previous completion, publication and heartbeat renewal happened
+		assertReady(ready)
+	}
+	sample(0, writerBusyReadinessError(5), true)
+	elapsed.Store(int64(100 * time.Second))
+	assertReady(true) // no second busy completion; elapsed time alone is insufficient
+	sample(100*time.Second, nil, true)
+	sample(110*time.Second, writerBusyReadinessError(5), true)
+	sample(199*time.Second, writerBusyReadinessError(6), true)
+	sample(200*time.Second, writerBusyReadinessError(5), false)
+	sample(201*time.Second, nil, true)
+	sample(210*time.Second, errors.New("disk unavailable"), false)
 }

@@ -223,7 +223,7 @@ func TestWriterHeartbeatFastErrorsStayLiveAndExposeReadinessFailure(t *testing.T
 				})
 			}()
 			defer func() { cancel(); receive(t, done) }()
-			for range 6 {
+			for attempt := range 6 {
 				receive(t, entered)
 				elapsed.Add(int64(2 * time.Minute))
 				complete <- fmt.Errorf("write heartbeat: %w", test.err)
@@ -231,8 +231,15 @@ func TestWriterHeartbeatFastErrorsStayLiveAndExposeReadinessFailure(t *testing.T
 				if err := h.Check(); err != nil {
 					t.Fatal("fast persistent DB error caused a restart", err)
 				}
-				if !errors.Is(h.ProbeError(), test.err) || h.ErrorClass() != test.class {
-					t.Fatalf("missing failure diagnostics: %v, %s", h.ProbeError(), h.ErrorClass())
+				if h.ErrorClass() != test.class {
+					t.Fatal("lost diagnostic error class", h.ErrorClass())
+				}
+				if test.class == "busy" && attempt == 0 {
+					if h.ProbeError() != nil {
+						t.Fatal("one busy sample removed readiness")
+					}
+				} else if !errors.Is(h.ProbeError(), test.err) {
+					t.Fatalf("persistent/hard failure missing from readiness: %v", h.ProbeError())
 				}
 			}
 			receive(t, entered)
@@ -243,5 +250,49 @@ func TestWriterHeartbeatFastErrorsStayLiveAndExposeReadinessFailure(t *testing.T
 				t.Fatal("writer recovery did not clear diagnostics")
 			}
 		})
+	}
+}
+
+func TestWriterHeartbeatBusyReadinessRequiresConsecutiveCompletedSamples(t *testing.T) {
+	now := time.Now()
+	h := Heartbeat{Now: func() time.Time { return now }}
+	busy := sqliteProbeError(5)
+	locked := sqliteProbeError(6)
+	sample := func(after time.Duration, err error) {
+		t.Helper()
+		now = now.Add(after)
+		h.recordProbe(err)
+	}
+	sample(0, busy)
+	if h.ProbeError() != nil || h.ErrorClass() != "busy" {
+		t.Fatal("transient busy lost diagnostics or failed readiness")
+	}
+	now = now.Add(2 * BusyReadinessWindow)
+	if h.ProbeError() != nil {
+		t.Fatal("one completed busy result aged into a readiness failure")
+	}
+	sample(0, nil) // a success ends the episode, even after a long wait
+	sample(time.Second, busy)
+	sample(BusyReadinessWindow-time.Nanosecond, locked)
+	if h.ProbeError() != nil {
+		t.Fatal("busy readiness failed before persistence threshold")
+	}
+	sample(time.Nanosecond, busy)
+	if !errors.Is(h.ProbeError(), busy) {
+		t.Fatal("confirmed persistent busy did not fail readiness")
+	}
+	for _, reset := range []error{nil, context.DeadlineExceeded, syscall.ENOSPC, syscall.EROFS} {
+		sample(time.Second, reset)
+		if reset != nil && !errors.Is(reset, context.DeadlineExceeded) && !errors.Is(h.ProbeError(), reset) {
+			t.Fatal("other hard failures must remain immediate")
+		}
+		sample(time.Second, busy)
+		if h.ProbeError() != nil {
+			t.Fatal("previous busy episode leaked across a success, deadline or different hard error")
+		}
+		sample(BusyReadinessWindow, busy)
+		if !errors.Is(h.ProbeError(), busy) {
+			t.Fatal("new persistent episode never matured")
+		}
 	}
 }
