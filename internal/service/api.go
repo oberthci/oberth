@@ -1614,6 +1614,7 @@ func (service *API) presentationRuns(ctx context.Context, runs []model.Run) ([]m
 }
 
 func (service *API) presentationRunWithSuccessor(ctx context.Context, run model.Run, successors map[string]model.Run) model.Run {
+	run = service.withAdmissionPriority(run)
 	visible := presentationRunAt(run, service.schedulingClock().Now())
 	if run.Status == model.RunRunning && run.StartedAt != nil && service.submittedKVMPreflight(ctx, run) {
 		visible.Phase = "preflight"

@@ -454,6 +454,13 @@ func TestPrioritySchedulerSurvivesBusyReadsAndResumesDispatch(t *testing.T) {
 }
 
 func TestPriorityReleaseStreamPreservesAgingAndResourceBounds(t *testing.T) {
+	// The lead tag comes through real server admission, without a grant. On
+	// the old grant-dependent classifier it is normal and cannot overtake.
+	f := newControlFixture(t)
+	realTag, err := f.scheduler.AdmitRelease(t.Context(), ReleaseRequest{EventID: "stream-tag", Repository: f.repo, Tag: "v1", ObjectSHA: strings.Repeat("b", 40), CommitSHA: strings.Repeat("c", 40), Actor: "pusher"})
+	if err != nil {
+		t.Fatal(err)
+	}
 	clock := &fakeClock{now: time.Now().UTC()}
 	g := newWeightedAdmission(4)
 	g.now, g.maxHeadWait, g.maxRuns = clock.Now, 20*time.Minute, 1
@@ -465,7 +472,7 @@ func TestPriorityReleaseStreamPreservesAgingAndResourceBounds(t *testing.T) {
 	}
 	normal := priorityWaiter(g, 2, model.PriorityNormal, origin, periapsis.XL)
 	clock.now = origin.Add(45 * time.Minute)
-	tag := priorityWaiter(g, 3, model.PriorityHighest, clock.Now(), periapsis.XL)
+	tag := priorityWaiter(g, 3, realTag.Priority, clock.Now(), periapsis.L)
 	promotion := priorityWaiter(g, 4, model.PriorityHighest, clock.Now(), periapsis.XL)
 	if granted(g, tag) || granted(g, normal) {
 		t.Fatal("priority preempted existing resource grant")
@@ -528,5 +535,140 @@ func TestPriorityReleaseAdmissionWithoutGrantAndBranchTransportSignals(t *testin
 	next, err := f.store.NextQueuedRun(ctx)
 	if err != nil || next.ID != release.ID {
 		t.Fatalf("release remained behind ordinary branch queue: %+v %v", next, err)
+	}
+}
+
+func TestPriorityOversizedReleaseAllowsNormalBackfillAndSurvivesRefresh(t *testing.T) {
+	for _, maximum := range []periapsis.Size{periapsis.L, periapsis.XL} {
+		t.Run(string(maximum), func(t *testing.T) {
+			f := newControlFixture(t)
+			ctx := t.Context()
+			if maximum == periapsis.XL {
+				if _, err := f.store.SetSizeGrant(ctx, f.repo.ID, "admin", maximum); err != nil {
+					t.Fatal(err)
+				}
+			}
+			tag, err := f.scheduler.AdmitRelease(ctx, ReleaseRequest{EventID: "oversized-tag", Repository: f.repo, Tag: "v1", ObjectSHA: strings.Repeat("b", 40), CommitSHA: strings.Repeat("c", 40), Actor: "pusher"})
+			if err != nil || tag.Priority != model.PriorityHighest {
+				t.Fatalf("tag=%+v %v", tag, err)
+			}
+			claimed, err := f.store.ClaimNextRun(ctx)
+			if err != nil || claimed.ID != tag.ID {
+				t.Fatalf("claim=%+v %v", claimed, err)
+			}
+			g := newWeightedAdmission(4)
+			g.maxHeadWait = 20 * time.Minute
+			f.scheduler.admission = g
+			holder := g.reserve(-1)
+			releaseHolder, err := holder.acquire(ctx, periapsis.M)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer releaseHolder()
+			r := g.reserveRun(claimed)
+			limit, err := f.scheduler.releasePriorityMaximum(ctx, claimed)
+			if err != nil || limit != maximum {
+				t.Fatalf("size maximum=%s %v", limit, err)
+			}
+			waitCtx, cancel := context.WithCancel(ctx)
+			done := make(chan error, 1)
+			go func() {
+				release, err := r.acquireRequest(waitCtx, admissionRequest{RunID: tag.ID, RepoID: tag.RepoID, RefKind: tag.RefKind, Size: periapsis.XL, PriorityMaximum: limit})
+				if release != nil {
+					release()
+				}
+				done <- err
+			}()
+			defer func() { cancel(); <-done }()
+			deadline := time.Now().Add(testStartTimeout(10 * time.Second))
+			for {
+				g.mu.Lock()
+				prepared := r.prepared
+				g.mu.Unlock()
+				if prepared {
+					break
+				}
+				if time.Now().After(deadline) {
+					t.Fatal("release never prepared")
+				}
+				time.Sleep(testTimeout(time.Millisecond))
+			}
+			// A fitting ordinary run after the XL head must backfill when the
+			// tag has no XL grant; an explicit XL grant may still force drain.
+			light := priorityWaiter(g, tag.QueueSequence+1, model.PriorityNormal, tag.QueuedAt, periapsis.S)
+			defer light.cancel()
+			if granted(g, light) != (maximum == periapsis.L) {
+				t.Fatalf("normal backfill=%v with maximum %s", granted(g, light), maximum)
+			}
+			if err := f.scheduler.refreshPriorities(ctx); err != nil {
+				t.Fatal(err)
+			}
+			p, reason, ok := f.scheduler.AdmissionPriority(tag.QueueSequence)
+			want := model.PriorityHighest
+			if maximum == periapsis.L {
+				want = model.PriorityNormal
+				if !strings.Contains(reason, "size XL exceeds repository maximum L") {
+					t.Fatalf("missing size reason: %s", reason)
+				}
+			}
+			if !ok || p != want {
+				t.Fatalf("refresh changed capped priority=%s %s", p, reason)
+			}
+			control, err := NewAPI(APIConfig{Runs: f.store, Repositories: f.store, Admission: f.scheduler})
+			if err != nil {
+				t.Fatal(err)
+			}
+			presented := control.presentationRun(ctx, claimed)
+			if presented.Priority != want || presented.PriorityReason != reason {
+				t.Fatalf("run_get priority disagrees with gate: %+v", presented)
+			}
+			if observation := control.scheduling(ctx, claimed, nil); !strings.Contains(observation.Message, reason) {
+				t.Fatalf("scheduling hides size limit: %+v", observation)
+			}
+			if maximum == periapsis.XL {
+				if _, err := f.store.SetSizeGrant(ctx, f.repo.ID, "admin", periapsis.L); err != nil {
+					t.Fatal(err)
+				}
+				if err := f.scheduler.refreshPriorities(ctx); err != nil {
+					t.Fatal(err)
+				}
+				if p, _, _ := f.scheduler.AdmissionPriority(tag.QueueSequence); p != model.PriorityNormal {
+					t.Fatal("lowered maximum failed to cap existing XL waiter")
+				}
+				kick(g)
+				if !granted(g, light) {
+					t.Fatal("lowered maximum failed to restore normal backfill")
+				}
+			}
+		})
+	}
+}
+
+func TestPrioritySizeCapPreservesAdminBumpsPromotionsAndAging(t *testing.T) {
+	g := newWeightedAdmission(4)
+	now := time.Now()
+	for _, tc := range []struct {
+		reason string
+		want   model.RunPriority
+	}{
+		{model.TagReleasePriorityReason, model.PriorityNormal},
+		{"admin bump: deliberately urgent", model.PriorityHighest},
+		{"promotion run", model.PriorityHighest},
+	} {
+		r := &admissionReservation{gate: g, prepared: true, size: periapsis.XL, priority: model.PriorityHighest, priorityReason: tc.reason, queuedAt: now}
+		if got := r.effectivePriority(now); got != tc.want {
+			t.Fatalf("size cap for %q=%s", tc.reason, got)
+		}
+		if got := r.effectivePriority(now.Add(time.Hour)); got != model.PriorityHighest {
+			t.Fatalf("size cap disabled aging for %q", tc.reason)
+		}
+	}
+}
+
+func TestPriorityOversizedTagRetainsExplicitAdminFallback(t *testing.T) {
+	r := &admissionReservation{prepared: true, size: periapsis.XL, priority: model.PriorityHighest, priorityReason: model.TagReleasePriorityReason, priorityOverride: model.PriorityHigh, priorityOverrideReason: "intentional expedite"}
+	run := r.priorityRun()
+	if run.Priority != model.PriorityHigh || run.PriorityReason != "admin bump: intentional expedite" {
+		t.Fatalf("size cap lost explicit fallback: %+v", run)
 	}
 }

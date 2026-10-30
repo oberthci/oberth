@@ -402,8 +402,8 @@ func TestQueuePriorityTagsIndependentOfSizeGrantsAndBranchSignals(t *testing.T) 
 			return "explicit release replay authorization", nil
 		},
 	})
-	if err != nil || !authorized || retry.Enqueued.Priority != model.PriorityHighest {
-		t.Fatalf("rerun lost release priority after size grant revocation: %+v %v", retry, err)
+	if err != nil || !authorized || retry.Enqueued.Priority != model.PriorityNormal {
+		t.Fatalf("rerun ignored automatic priority revocation: %+v %v", retry, err)
 	}
 	next, err := s.NextQueuedRun(ctx)
 	if err != nil || next.ID != otherTag.ID {
@@ -421,8 +421,8 @@ func TestQueuePriorityTagsIndependentOfSizeGrantsAndBranchSignals(t *testing.T) 
 		}
 		_, tagFlag := data["tag_priority"]
 		_, previousTagFlag := data["previous_tag_priority"]
-		if actor != "admin" || tagFlag || previousTagFlag {
-			t.Fatalf("size audit still claims to control tag priority: %s by %s: %s", action, actor, details)
+		if actor != "admin" || tagFlag || previousTagFlag || data["automatic_tag_priority_enabled"] != (action == "size.grant") || data["previous_automatic_tag_priority_enabled"] != true {
+			t.Fatalf("size audit has incorrect automatic priority state: %s by %s: %s", action, actor, details)
 		}
 	}
 	// Trusted plan/apply have cancellation guards, but no automatic urgency.
@@ -450,8 +450,12 @@ func TestQueuePriorityReleaseStreamKeepsSixtyMinuteFairnessBound(t *testing.T) {
 		spec := testRunSpec(repo.ID, fmt.Sprintf("v1.%d", i), strings.Repeat("b", 40))
 		spec.RefKind, spec.Trigger, spec.Release = model.RefTag, "tag", true
 		tag, err := s.EnqueueRun(ctx, spec)
-		if err != nil || tag.Priority != model.PriorityHighest {
-			t.Fatalf("ungranted release: %+v %v", tag, err)
+		want := model.PriorityNormal
+		if i == 0 {
+			want = model.PriorityHighest
+		}
+		if err != nil || tag.Priority != want {
+			t.Fatalf("ungranted release %d: %+v %v", i, tag, err)
 		}
 		if i == 0 {
 			firstTag = tag.ID
@@ -467,6 +471,101 @@ func TestQueuePriorityReleaseStreamKeepsSixtyMinuteFairnessBound(t *testing.T) {
 		next, err := read(ctx)
 		if err != nil || next.ID != old.ID {
 			t.Fatalf("tag stream starved old branch at boundary: %+v %v", next, err)
+		}
+	}
+}
+
+func TestQueuePriorityOneWaitingTagPerRepoAndAdminOptOut(t *testing.T) {
+	now := time.Now()
+	s := testStore(t, &now)
+	ctx := t.Context()
+	repo := createRepo(t, s)
+	other, err := s.CreateRepository(ctx, model.RepositorySpec{Name: "second", UpstreamID: repo.UpstreamID, DefaultBranch: "main"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	enqueue := func(repoID int64, ref string) model.Run {
+		t.Helper()
+		spec := testRunSpec(repoID, ref, strings.Repeat("a", 40))
+		spec.RefKind, spec.Trigger, spec.Release = model.RefTag, "tag", true
+		r, err := s.EnqueueRun(ctx, spec)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return r.Run
+	}
+	first := enqueue(repo.ID, "junk-1")
+	second := enqueue(repo.ID, "junk-2")
+	third := enqueue(repo.ID, "junk-3")
+	otherTag := enqueue(other.ID, "junk-1")
+	check := func(id string, want model.RunPriority, reason string) {
+		t.Helper()
+		r, err := s.Run(ctx, id)
+		if err != nil || r.Priority != want || !strings.Contains(r.PriorityReason, reason) {
+			t.Fatalf("priority=%+v %v; want %s/%s", r, err, want, reason)
+		}
+	}
+	check(first.ID, model.PriorityHighest, "oldest waiting")
+	check(second.ID, model.PriorityNormal, "earlier tag")
+	check(third.ID, model.PriorityNormal, "earlier tag")
+	check(otherTag.ID, model.PriorityHighest, "oldest waiting")
+	claimed, err := s.ClaimNextRun(ctx)
+	if err != nil || claimed.ID != first.ID || claimed.StartedAt != nil {
+		t.Fatalf("claim=%+v %v", claimed, err)
+	}
+	// Claiming is not resource admission: don't grant a second automatic boost.
+	check(second.ID, model.PriorityNormal, "earlier tag")
+	if _, err := s.MarkRunAdmitted(ctx, first.ID); err != nil {
+		t.Fatal(err)
+	}
+	check(second.ID, model.PriorityHighest, "oldest waiting")
+	check(third.ID, model.PriorityNormal, "earlier tag")
+	if _, err := s.FinishRun(ctx, second.ID, model.RunResult{Status: model.RunFailed}); err != nil {
+		t.Fatal(err)
+	}
+	check(third.ID, model.PriorityHighest, "oldest waiting")
+	// Admin opt-out works on a never-granted repository, survives future tags
+	// and does not disable other repos, promotions, explicit bumps or aging.
+	grant, err := s.SetSizeGrant(ctx, repo.ID, "admin", "")
+	if err != nil || grant.RevokedAt == nil {
+		t.Fatalf("revoke never granted=%+v %v", grant, err)
+	}
+	check(third.ID, model.PriorityNormal, "disabled by size_revoke")
+	newTag := enqueue(repo.ID, "junk-4")
+	check(newTag.ID, model.PriorityNormal, "disabled by size_revoke")
+	check(otherTag.ID, model.PriorityHighest, "oldest waiting")
+	if _, err := s.BumpRunPriority(ctx, "admin", third.ID, model.PriorityHigh, "intentional expedite"); err != nil {
+		t.Fatal(err)
+	}
+	check(third.ID, model.PriorityHigh, "admin bump")
+	spec := testRunSpec(repo.ID, "promotion/main/1", strings.Repeat("b", 40))
+	spec.Trigger = "promotion"
+	promotion, err := s.EnqueueRun(ctx, spec)
+	if err != nil || promotion.Priority != model.PriorityHighest {
+		t.Fatalf("promotion disabled=%+v %v", promotion, err)
+	}
+	// L is sufficient to opt back in; the per-repo cap still applies.
+	if _, err := s.SetSizeGrant(ctx, repo.ID, "admin", periapsis.L); err != nil {
+		t.Fatal(err)
+	}
+	check(third.ID, model.PriorityHighest, "oldest waiting")
+	if bumped, err := s.Run(ctx, third.ID); err != nil || bumped.PriorityOverride != model.PriorityHigh || bumped.PriorityOverrideReason != "intentional expedite" {
+		t.Fatalf("automatic boost discarded explicit fallback: %+v %v", bumped, err)
+	}
+	check(newTag.ID, model.PriorityNormal, "earlier tag")
+	// Exercise both run-list CTE and per-repo subquery correlations.
+	for _, list := range []func() ([]model.Run, error){
+		func() ([]model.Run, error) { return s.ListRecentRuns(ctx, model.RunListFilter{}) },
+		func() ([]model.Run, error) { return s.ListLatestRunsPerRepo(ctx, 12) },
+	} {
+		runs, err := list()
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, r := range runs {
+			if r.ID == newTag.ID && r.Priority != model.PriorityNormal {
+				t.Fatalf("list bypassed per-repo cap: %+v", r)
+			}
 		}
 	}
 }

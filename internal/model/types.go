@@ -130,8 +130,12 @@ type RepositorySpec struct {
 type Run struct {
 	Priority       RunPriority `json:"priority_class"`
 	PriorityReason string      `json:"priority_reason"`
-	ID             string
-	QueueSequence  int64
+	// The explicit admin fallback survives a withheld automatic tag boost.
+	PriorityOverride       RunPriority `json:"-"`
+	PriorityOverrideReason string      `json:"-"`
+
+	ID            string
+	QueueSequence int64
 	// AdmissionSequence retains restart FIFO order; QueueSequence is the cursor.
 	AdmissionSequence int64 `json:"-"`
 	QueuePosition     int64 `json:"QueuePosition,omitempty"`

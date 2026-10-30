@@ -233,8 +233,8 @@ call the proxy hostname directly.
 | `kubevirt_grant` | Grant a repository permission to run KubeVirt VMI templates (admin-only, audited) |
 | `kubevirt_revoke` | Revoke a repository's KubeVirt permission (admin-only, audited) |
 | `kubevirt_grant_get` | Read a repository's KubeVirt permission: `never_granted`, `granted`, or `revoked`; granted and revoked responses include the audit record |
-| `size_grant` | Set a repository's maximum admission size, `L` or `XL` (admin-only, audited); without a grant the maximum is `L` |
-| `size_revoke` | Revoke a repository's size grant, returning it to `L` (admin-only, audited) |
+| `size_grant` | Set a repository's maximum admission size, `L` or `XL` (admin-only, audited); without a grant the maximum is `L`; re-enables the oldest waiting tag's automatic boost within that maximum |
+| `size_revoke` | Return a repository to `L` and disable automatic tag priority, even if never granted (admin-only, audited) |
 | `size_grant_get` | Read a repository's maximum admission size (`max_size`) and grant state: `never_granted`, `granted`, or `revoked` |
 | `queue_priority_config` | Replace administrator RC globs with `rc_patterns` (e.g. `["rc/*", "release/*"]`); `[]` disables; unscoped admin, audited |
 | `queue_priority_get` | Read RC patterns and the 60-minute normal/high starvation threshold; unscoped admin |
@@ -782,15 +782,23 @@ failure is separate from an authenticated tool refusal.
 
 ### Queue priority administration
 
-Priority is server-owned: promotions and server-classified tag/release runs are
-`highest`, without a size grant. Automatic release priority requires a stored
-tag ref plus the server's release flag or tag/release trigger. Branch names,
-branch release flags and branch trigger spellings cannot supply it. Size grants
-only control resource size; granting/revoking one does not change tag priority,
-including for old runs and authorized reruns. New `size.grant` / `size.revoke`
-audits no longer emit the obsolete `tag_priority` / `previous_tag_priority`
-fields; historical audit rows remain unchanged. Configured RC branches are
-`high`; other runs are `normal`.
+Priority is server-owned: promotions and the oldest waiting server-classified
+tag/release run per repository are `highest`. Claimed but unadmitted tags count
+as waiting; later tags of the same repository stay `normal`. A tag ref plus the
+server's release flag or tag/release trigger is required. Branch names, flags,
+triggers and pipeline annotations cannot claim automatic tag priority.
+
+No grant record defaults to automatic tag priority within L. Exact checkout
+resolves size: a tag above `MaxRunSize` uses normal order, with a withheld-boost
+reason, while retaining its reviewed execution size. Priority before checkout
+and durable queue position are provisional with respect to size. `size_revoke`
+disables the automatic boost even for a never-granted repository (existing
+revoked records also disable it); `size_grant` with L or XL re-enables it within
+that maximum. This also applies to authorized reruns. Local MCP changes refresh
+waiting work immediately; CLI/external changes are polled. New size audits
+include `automatic_tag_priority_enabled` and
+`previous_automatic_tag_priority_enabled`; historical audit rows are unchanged.
+Configured RC branches are `high`; other runs are `normal`.
 Both normal and high runs waiting 60 minutes join `highest` in their original
 FIFO position. Plan/apply triggers receive no automatic priority: their cancel
 restrictions protect external state and do not establish queue urgency. Running

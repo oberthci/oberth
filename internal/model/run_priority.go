@@ -13,6 +13,9 @@ const (
 	PriorityHigh           RunPriority = "high"
 	PriorityHighest        RunPriority = "highest"
 	PriorityStarvationWait             = time.Hour
+	// TagReleasePriorityReason identifies the automatic boost, so size limits
+	// never downgrade an explicit admin bump or a promotion.
+	TagReleasePriorityReason = "tag/release run: oldest waiting server-classified tag ref"
 )
 
 func (p RunPriority) Rank() int {

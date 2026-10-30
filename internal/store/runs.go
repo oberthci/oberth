@@ -19,7 +19,8 @@ const runColumns = `
 queue_sequence, COALESCE(admission_sequence, queue_sequence), id, repo_id, ref_kind, ref, sha, actor, release, credentialed, trigger,
 phase, job_name, tested_sha, base_sha, failed_burn, failed_step, error,
 status, reason, superseded_by, queued_at, started_at, finished_at, created_at, updated_at,
-concurrency_group, schedule_entry, ` + basePrioritySQL + `, ` + priorityReasonSQL
+concurrency_group, schedule_entry, ` + basePrioritySQL + `, ` + priorityReasonSQL + `,
+COALESCE(` + overridePrioritySQL + `,''), COALESCE((SELECT reason FROM run_priority_overrides WHERE run_id=id),'')`
 
 // ErrRunCursorNotFound lets clients restart paging without exposing a missing run ID.
 var ErrRunCursorNotFound = fmt.Errorf("%w: cursor run no longer retained; restart from the first page", ErrNotFound)
@@ -1000,7 +1001,7 @@ WITH queue AS (
   SELECT *, ROW_NUMBER() OVER (ORDER BY `+priorityOrder+`) AS queue_position FROM runs
   WHERE status = 'queued' OR (status = 'running' AND started_at IS NULL)
 )
-SELECT `+runColumns+`, queue_position FROM queue
+SELECT `+runColumns+`, queue_position FROM queue AS runs
 WHERE (? = 0 OR repo_id = ?) AND (? = '' OR ref = ?)`+restriction+`
 ORDER BY `+priorityOrder+` LIMIT ?`, append(args, MaxActiveRuns)...) // #nosec G202 -- fixed columns and parameterized restriction.
 			if err != nil {
@@ -1135,7 +1136,7 @@ func (s *Store) ListLatestRunsPerRepo(ctx context.Context, perRepo int) ([]model
 SELECT `+runColumns+` FROM (
     SELECT *, ROW_NUMBER() OVER (PARTITION BY repo_id ORDER BY queue_sequence DESC) AS rn
     FROM runs
-) WHERE rn <= ?
+) AS runs WHERE rn <= ?
 ORDER BY queue_sequence DESC`, perRepo)
 	if err != nil {
 		return nil, fmt.Errorf("list latest runs per repo: %w", err)
@@ -1236,7 +1237,7 @@ func scanRun(row rowScanner, extra ...any) (model.Run, error) {
 		&value.SHA, &value.Actor, &release, &credentialed, &value.Trigger, &value.Phase, &value.JobName,
 		&value.TestedSHA, &value.BaseSHA, &value.FailedBurn, &value.FailedStep, &value.Error,
 		&value.Status, &value.Reason, &value.SupersededBy, &queued, &started, &finished,
-		&created, &updated, &value.ConcurrencyGroup, &value.ScheduleEntry, &value.Priority, &value.PriorityReason,
+		&created, &updated, &value.ConcurrencyGroup, &value.ScheduleEntry, &value.Priority, &value.PriorityReason, &value.PriorityOverride, &value.PriorityOverrideReason,
 	}
 	if err := row.Scan(append(dest, extra...)...); err != nil {
 		return model.Run{}, err

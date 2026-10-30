@@ -34,6 +34,7 @@ func (service *API) scheduling(ctx context.Context, run model.Run, steps []model
 
 // List rows already carry a position computed over the complete durable queue.
 func (service *API) observeScheduling(ctx context.Context, run model.Run, steps []model.StepResult, lookupPosition bool) *model.RunScheduling {
+	run = service.withAdmissionPriority(run)
 	if !run.Status.Active() {
 		return nil
 	}
