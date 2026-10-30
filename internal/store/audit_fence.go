@@ -15,13 +15,14 @@ import (
 // proofs, replaced files and regressed heads must remain fail-closed.
 var ErrAuditStateChanged = errors.New("store: audit state changed during verification; retry")
 
-// ErrAuditVerificationBusy classifies advancing audit heads as transient. Callers
-// must repeat ALL verification, including external proof checks, before allowing
+// ErrAuditVerificationBusy classifies advancing heads and clean re-verification
+// exhaustion as transient. Callers must repeat verification before allowing
 // a mutation. It also matches ErrAuditStateChanged for existing callers.
 var ErrAuditVerificationBusy = fmt.Errorf("%w: transient verification contention", ErrAuditStateChanged)
 
 // Bound re-verification for untrusted outside commits or altered schemas.
-// Exhaustion fails closed; only an advancing head permits a Manager retry.
+// Clean exhaustion refuses this attempt but permits a fresh Manager retry.
+// Verification errors and changed proofs return immediately, without Busy.
 const auditFenceExtraRounds = 2
 
 // Keep this exact reader connection across every snapshot and fence: only its
@@ -49,6 +50,7 @@ func auditDataVersion(ctx context.Context, conn *sql.Conn) (int64, error) {
 
 func (s *Store) verifyAuditWithFence(
 	ctx context.Context,
+	initialKey *auditCacheKey,
 	verify func(*sql.Tx) (model.AuditHead, model.AuditAnchor, error),
 	external func(model.AuditHead, model.AuditAnchor) error,
 ) (head model.AuditHead, anchor model.AuditAnchor, resultErr error) {
@@ -60,7 +62,7 @@ func (s *Store) verifyAuditWithFence(
 		return head, anchor, err
 	}
 	defer func() { resultErr = errors.Join(resultErr, conn.Close(), db.Close()) }()
-	proof, head, anchor, err := s.readAuditVerification(ctx, conn, verify)
+	proof, head, anchor, err := s.readAuditVerification(ctx, conn, initialKey, verify)
 	if err != nil {
 		return model.AuditHead{}, model.AuditAnchor{}, err
 	}
@@ -84,14 +86,17 @@ func (s *Store) verifyAuditWithFence(
 			return head, anchor, nil
 		}
 		if round == auditFenceExtraRounds {
-			return model.AuditHead{}, model.AuditAnchor{}, fmt.Errorf("%w: local re-verification rounds exhausted", ErrAuditStateChanged)
+			// Every completed snapshot verified successfully with the same proof.
+			// A further commit cannot grant permission, but may be a legitimate admin
+			// writer. Retry the whole gate; any failed verification remains fatal.
+			return model.AuditHead{}, model.AuditAnchor{}, fmt.Errorf("%w: local re-verification rounds exhausted", ErrAuditVerificationBusy)
 		}
 		// The writer fence has ended. Re-verify protected state on a new read
 		// snapshot, using the same reader and a fresh counter. The local gate
 		// independently checks whether its prefix cache is still trusted.
 		// Unrelated writes during external I/O need not invalidate an unchanged
 		// verified result.
-		nextProof, nextHead, nextAnchor, err := s.readAuditVerification(ctx, conn, verify)
+		nextProof, nextHead, nextAnchor, err := s.readAuditVerification(ctx, conn, nil, verify)
 		if err != nil {
 			return model.AuditHead{}, model.AuditAnchor{}, err
 		}
@@ -115,10 +120,16 @@ type auditFenceProof struct {
 	trustedSchema bool
 }
 
-func (s *Store) readAuditVerification(ctx context.Context, conn *sql.Conn, verify func(*sql.Tx) (model.AuditHead, model.AuditAnchor, error)) (proof auditFenceProof, head model.AuditHead, anchor model.AuditAnchor, err error) {
-	proof.writer, err = s.auditCacheKey(ctx)
-	if err != nil {
-		return
+func (s *Store) readAuditVerification(ctx context.Context, conn *sql.Conn, initialKey *auditCacheKey, verify func(*sql.Tx) (model.AuditHead, model.AuditAnchor, error)) (proof auditFenceProof, head model.AuditHead, anchor model.AuditAnchor, err error) {
+	// Local gates already sampled this key before opening the reader snapshot.
+	// Reuse it only for the initial snapshot; retries always sample afresh.
+	if initialKey != nil {
+		proof.writer = *initialKey
+	} else {
+		proof.writer, err = s.auditCacheKey(ctx)
+		if err != nil {
+			return
+		}
 	}
 	proof.readerVersion, err = auditDataVersion(ctx, conn)
 	if err != nil {
@@ -187,7 +198,8 @@ func (s *Store) auditVerificationFence(ctx context.Context, conn *sql.Conn, head
 	if err != nil {
 		return false, err
 	}
-	if currentVersion != proof.readerVersion || key != proof.writer {
+	writerChanged := key != proof.writer
+	if currentVersion != proof.readerVersion || writerChanged {
 		currentAnchor, err := scanAuditAnchor(fence.QueryRowContext(ctx, `SELECT id, audit_id, audit_sha256, tsa_url, receipt, anchored_at, created_at FROM audit_anchors ORDER BY id DESC LIMIT 1`))
 		if errors.Is(err, ErrNotFound) {
 			err = nil
@@ -205,7 +217,7 @@ func (s *Store) auditVerificationFence(ctx context.Context, conn *sql.Conn, head
 		// Only canonical-schema commits on our own physical writer are trusted.
 		// Foreign edits or altered guards need fresh full verification, even when
 		// head/digest/receipt are unchanged (prefix and pending-row tampering).
-		if key != proof.writer || !proof.trustedSchema || schema != proof.schema {
+		if writerChanged || !proof.trustedSchema || schema != proof.schema {
 			return true, nil
 		}
 	}

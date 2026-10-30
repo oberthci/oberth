@@ -24,8 +24,12 @@ they cannot update or delete a verified prefix. Cache eligibility requires
 the binary's canonical audit table and unconditional update/delete guards.
 Writable connections enable `recursive_triggers`, making the delete guard
 apply to `INSERT OR REPLACE` too, including replacements from other triggers.
-Disabling that setting disables cache reuse. A modified startup guard never
-becomes a cache trust root even if the current rows pass a full hash scan.
+The setting is sampled before the snapshot and inside the fence; observing
+it disabled prevents reuse. The primary connection's Store code is trusted
+not to toggle it off and back on between samples. These observations cannot
+detect such a toggle by code controlling that same connection. A modified
+startup guard never becomes a cache trust root even if the current rows pass
+a full hash scan.
 
 The startup schema fingerprint and guard eligibility are captured atomically.
 A later schema fingerprint must match that baseline before a full scan can
@@ -90,8 +94,8 @@ a periodic cycle recently scanned the database.
 A concurrent head advance makes the final fence refuse the current attempt
 with `ErrAuditVerificationBusy` (also matching `ErrAuditStateChanged`). The old
 verified boundary must still match; a replaced boundary or regressed head is
-an integrity failure. The manager retries advances with backoff from 10 ms to
-250 ms, under the gate's overall 30-second default deadline, including its
+an integrity failure. The manager retries transient contention with backoff
+from 10 ms to 250 ms, under the gate's overall 30-second default deadline, including its
 serialized queue wait. Each fresh attempt repeats local verification and
 recovers fresh external history.
 
@@ -101,6 +105,9 @@ Immutable continuity records make that proof independent of local audit
 appends. Changed history requires reconciliation again, failures are never
 cached, and every subsequent gate performs its own reconciliation. Timestamp
 receipt checks and unresolved-intent checks still run on each attempt.
+Same-history retries also reuse the latest-record GET from reconciliation;
+a continuity record deleted during those retries is detected at the next
+gate rather than by another GET within this gate's bounded deadline.
 
 ## Narrow commit fence
 
@@ -109,8 +116,9 @@ signal. After a commit, the short writer reservation compares the audit head
 ID/SHA and complete latest checkpoint. It also compares a primary connection
 key sampled before the read snapshot, the current file identity and schema
 cookie. The snapshot's schema fingerprint must match the startup baseline,
-the startup audit guards must be canonical, and recursive triggers must remain
-enabled before trusted Store writes can take this path.
+the startup audit guards must be canonical, and recursive triggers must be
+enabled at both primary-key samples. The primary connection itself remains
+trusted not to toggle that setting between samples.
 
 The primary connection's own commits leave its `data_version` unchanged.
 With that trusted key and schema unchanged, run-status, token-touch and log
@@ -123,11 +131,17 @@ head and checkpoint remain identical. Such edits still require fresh local
 verification outside the writer reservation: head-only comparisons cannot
 detect prefix or pending-publication tampering. Altered schemas also retain
 this conservative path. Up to two extra snapshots can salvage an unchanged
-proof. Exhaustion is a fail-closed state-change error, **not** a busy error,
-so the manager does not repeatedly perform external I/O for non-head changes.
-Sustained writes from a second Store or administrator connection can therefore
-still refuse a gate. Such connections remain outside the trusted Store-write
-optimization; table-scoped counters cannot safely classify their writes.
+proof. If every extra round verifies cleanly with the identical head and
+checkpoint, exhaustion returns `ErrAuditVerificationBusy`. This refuses the
+current attempt and lets the manager retry under its overall deadline, so
+legitimate concurrent CLI/admin writers need not cause an immediate refusal.
+The first failed verification or changed proof still fails immediately, without
+Busy. A retry recovers fresh external history; the per-gate reconciliation
+cache avoids repeating Kubernetes reconciliation for identical history.
+Sustained outside writes can still exhaust the overall gate deadline, and the
+API reports the transient contention reason to clients. Such connections remain
+outside the trusted Store-write optimization; table-scoped counters cannot
+safely classify their writes.
 
 Integrity failures, changed checkpoints, head regressions and file replacements
 fail immediately without the contention classification. A retry never grants

@@ -63,7 +63,7 @@ func TestAuditFenceSucceedsUnderContinuousTokenTouches(t *testing.T) {
 	}()
 	calls := 0
 	verifies := 0
-	_, _, err = s.verifyAuditWithFence(ctx, func(tx *sql.Tx) (model.AuditHead, model.AuditAnchor, error) {
+	_, _, err = s.verifyAuditWithFence(ctx, nil, func(tx *sql.Tx) (model.AuditHead, model.AuditAnchor, error) {
 		verifies++
 		head, anchor, _, err := s.verifyAuditMutationState(ctx, tx, nil, nil, false)
 		return head, anchor, err
@@ -99,7 +99,7 @@ func TestAuditFenceIgnoresNonAuditCommitInEveryVerificationWindow(t *testing.T) 
 		t.Fatal(err)
 	}
 	snapshots, external := 0, 0
-	_, _, err = s.verifyAuditWithFence(t.Context(), func(tx *sql.Tx) (model.AuditHead, model.AuditAnchor, error) {
+	_, _, err = s.verifyAuditWithFence(t.Context(), nil, func(tx *sql.Tx) (model.AuditHead, model.AuditAnchor, error) {
 		snapshots++
 		head, anchor, _, err := s.verifyAuditMutationState(t.Context(), tx, nil, nil, false)
 		if err != nil {

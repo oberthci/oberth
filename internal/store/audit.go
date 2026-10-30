@@ -307,7 +307,7 @@ func (s *Store) verifyAuditMutationStateOutsideWriter(
 	if whileVerified == nil {
 		return model.AuditHead{}, model.AuditAnchor{}, fmt.Errorf("%w: audit mutation verification callback is required", ErrInvalid)
 	}
-	return s.verifyAuditWithFence(ctx, func(tx *sql.Tx) (model.AuditHead, model.AuditAnchor, error) {
+	return s.verifyAuditWithFence(ctx, nil, func(tx *sql.Tx) (model.AuditHead, model.AuditAnchor, error) {
 		head, anchor, _, err := s.verifyAuditMutationState(ctx, tx, intents, witnesses, requireAnchor)
 		return head, anchor, err
 	}, whileVerified)
@@ -340,7 +340,7 @@ func (s *Store) VerifyLocalAuditMutationState(
 		return model.AuditHead{}, model.AuditAnchor{}, err
 	}
 	next := s.localAudit
-	head, anchor, err := s.verifyAuditWithFence(ctx, func(tx *sql.Tx) (model.AuditHead, model.AuditAnchor, error) {
+	head, anchor, err := s.verifyAuditWithFence(ctx, &before, func(tx *sql.Tx) (model.AuditHead, model.AuditAnchor, error) {
 		// Establish the snapshot before sampling the primary counter again.
 		var schema int64
 		if err := tx.QueryRowContext(ctx, `PRAGMA schema_version`).Scan(&schema); err != nil {
