@@ -69,8 +69,13 @@ func TestUpgradeWaitProcessGraph(t *testing.T) {
 			}
 			pidPath, upgradePath := filepath.Join(root, "wait.pid"), filepath.Join(root, "upgrade.attempted")
 			var firstProbe atomic.Int64
+			var unavailableProbes atomic.Int64
+			unavailableRetried := make(chan struct{})
 			admin := newAdminGateServer(nil, "fixture", nil, func(context.Context) (model.IdleQueueStatus, error) {
 				if mode == "unavailable" {
+					if unavailableProbes.Add(1) == 2 {
+						close(unavailableRetried)
+					}
 					return model.IdleQueueStatus{}, errors.New("fixture unavailable")
 				}
 				firstProbe.CompareAndSwap(0, time.Now().UnixNano())
@@ -126,7 +131,7 @@ esac
 				command = exec.CommandContext(ctx, setsid, "/bin/sh", "-c", `exec "$@"`, "fixture", executable, "-test.run", "^TestUpgradeWaitProcessHelper$")
 			}
 			limit := "3m"
-			if mode == "deadline" || mode == "unavailable" {
+			if mode == "deadline" {
 				limit = "250ms"
 			}
 			already := "no"
@@ -152,6 +157,23 @@ esac
 			t.Cleanup(func() { _ = syscall.Kill(-command.Process.Pid, syscall.SIGKILL) })
 			finished := make(chan error, 1)
 			go func() { finished <- command.Wait() }()
+			if mode == "unavailable" {
+				// A second request proves the first 503 was reported and
+				// retried. Start-up scheduling must not consume a tiny local
+				// deadline before the observer has even reached the API.
+				until := time.NewTimer(testtimeout.Start(15 * time.Second))
+				defer until.Stop()
+				select {
+				case err := <-finished:
+					t.Fatalf("CLI exited before retrying unavailable queue: %v: %s", err, &output)
+				case <-until.C:
+					t.Fatal("unavailable queue was not retried")
+				case <-unavailableRetried:
+				}
+				if err := command.Process.Signal(syscall.SIGTERM); err != nil {
+					t.Fatal(err)
+				}
+			}
 			if mode == "kill-child" || mode == "kill-group" || mode == "cancel" {
 				var pid int
 				until := time.NewTimer(testtimeout.Start(15 * time.Second))
@@ -236,7 +258,7 @@ esac
 						t.Fatalf("deadline: %v: %s", err, text)
 					}
 				case "unavailable":
-					if exit.ExitCode() != 1 || !strings.Contains(text, "HTTP 503") {
+					if exit.ExitCode() != 1 || unavailableProbes.Load() < 2 || !strings.Contains(text, "HTTP 503") || !strings.Contains(text, "context canceled") {
 						t.Fatalf("unavailable: %v: %s", err, text)
 					}
 				case "old-critical":
