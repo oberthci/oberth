@@ -127,7 +127,7 @@ ON CONFLICT(repo_id) DO UPDATE SET max_size=excluded.max_size,granted_by=exclude
 	if err != nil {
 		return SizeGrant{}, err
 	}
-	details, err := json.Marshal(map[string]any{"repo_id": repoID, "max_size": string(max), "previous_max_size": previous, "tag_priority": allow, "previous_tag_priority": active})
+	details, err := json.Marshal(map[string]any{"repo_id": repoID, "max_size": string(max), "previous_max_size": previous})
 	if err != nil {
 		return SizeGrant{}, err
 	}

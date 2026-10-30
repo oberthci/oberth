@@ -165,9 +165,6 @@ func TestQueuePriorityToolsAdminOnlyAuditedAndGated(t *testing.T) {
 func TestPriorityDispatchClaimsPastLowerClassWaitersAndRefreshesBumps(t *testing.T) {
 	f := newControlFixture(t)
 	ctx := context.Background()
-	if _, err := f.store.SetSizeGrant(ctx, f.repo.ID, "admin", periapsis.L); err != nil {
-		t.Fatal(err)
-	}
 	g := newWeightedAdmission(2)
 	scheduler := &Scheduler{store: f.store, admission: g, maxConcurrent: 1}
 	holder := g.reserve(-1)
@@ -178,7 +175,11 @@ func TestPriorityDispatchClaimsPastLowerClassWaitersAndRefreshesBumps(t *testing
 	defer release()
 	enqueue := func(ref string, kind model.RefKind) model.Run {
 		t.Helper()
-		r, err := f.store.EnqueueRun(ctx, model.RunSpec{RepoID: f.repo.ID, RefKind: kind, Ref: ref, SHA: strings.Repeat("a", 40), Actor: "dev", Trigger: "push"})
+		trigger := "push"
+		if kind == model.RefTag {
+			trigger = "tag"
+		}
+		r, err := f.store.EnqueueRun(ctx, model.RunSpec{RepoID: f.repo.ID, RefKind: kind, Ref: ref, SHA: strings.Repeat("a", 40), Actor: "dev", Trigger: trigger})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -449,5 +450,83 @@ func TestPrioritySchedulerSurvivesBusyReadsAndResumesDispatch(t *testing.T) {
 			f.engine.finish(t, waiting.ID)
 			f.awaitTerminal(t, waiting.ID)
 		})
+	}
+}
+
+func TestPriorityReleaseStreamPreservesAgingAndResourceBounds(t *testing.T) {
+	clock := &fakeClock{now: time.Now().UTC()}
+	g := newWeightedAdmission(4)
+	g.now, g.maxHeadWait, g.maxRuns = clock.Now, 20*time.Minute, 1
+	origin := clock.Now()
+	holder := g.reserve(1)
+	release, err := holder.acquire(t.Context(), periapsis.XL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	normal := priorityWaiter(g, 2, model.PriorityNormal, origin, periapsis.XL)
+	clock.now = origin.Add(45 * time.Minute)
+	tag := priorityWaiter(g, 3, model.PriorityHighest, clock.Now(), periapsis.XL)
+	promotion := priorityWaiter(g, 4, model.PriorityHighest, clock.Now(), periapsis.XL)
+	if granted(g, tag) || granted(g, normal) {
+		t.Fatal("priority preempted existing resource grant")
+	}
+	release()
+	if !granted(g, tag) || granted(g, normal) || granted(g, promotion) {
+		t.Fatal("release did not lead ordinary work")
+	}
+	tag.release()
+	if !granted(g, promotion) || granted(g, normal) {
+		t.Fatal("promotion lost highest-class FIFO")
+	}
+	clock.now = origin.Add(time.Hour - time.Nanosecond)
+	var later []*admissionReservation
+	for seq := int64(5); seq < 25; seq++ {
+		later = append(later, priorityWaiter(g, seq, model.PriorityHighest, clock.Now(), periapsis.XL))
+	}
+	g.mu.Lock()
+	before := g.waiters[0]
+	g.mu.Unlock()
+	if before == normal {
+		t.Fatal("normal aged before the 60-minute bound")
+	}
+	clock.now = origin.Add(time.Hour)
+	promotion.release()
+	if !granted(g, normal) {
+		t.Fatal("continuous releases starved aged normal")
+	}
+	g.mu.Lock()
+	used, runs := g.used, g.runs
+	g.mu.Unlock()
+	if used != 4 || runs != 1 {
+		t.Fatalf("capacity exceeded: weight=%d runs=%d", used, runs)
+	}
+	normal.release()
+	for _, candidate := range later {
+		if !granted(g, candidate) {
+			t.Fatal("highest-class FIFO changed after starvation guard")
+		}
+		candidate.release()
+	}
+}
+
+func TestPriorityReleaseAdmissionWithoutGrantAndBranchTransportSignals(t *testing.T) {
+	f := newControlFixture(t)
+	ctx := t.Context()
+	if _, err := f.store.SizeGrant(ctx, f.repo.ID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("fixture unexpectedly has a size grant: %v", err)
+	}
+	for _, trigger := range []string{"branch", "tag", "release"} {
+		branch, err := f.scheduler.EnqueueCI(ctx, CIRequest{EventID: "priority-branch-" + trigger, Repository: f.repo, Branch: "release/" + trigger, SHA: strings.Repeat("a", 40), Actor: "pusher", Trigger: trigger})
+		if err != nil || branch.Priority != model.PriorityNormal || branch.RefKind != model.RefBranch {
+			t.Fatalf("branch transport claimed release urgency: %+v %v", branch, err)
+		}
+	}
+	release, err := f.scheduler.AdmitRelease(ctx, ReleaseRequest{EventID: "priority-tag", Repository: f.repo, Tag: "v1.2.3", ObjectSHA: strings.Repeat("b", 40), CommitSHA: strings.Repeat("c", 40), Actor: "pusher"})
+	if err != nil || release.Priority != model.PriorityHighest || release.RefKind != model.RefTag || !release.Release {
+		t.Fatalf("genuine ungranted tag failed priority admission: %+v %v", release, err)
+	}
+	next, err := f.store.NextQueuedRun(ctx)
+	if err != nil || next.ID != release.ID {
+		t.Fatalf("release remained behind ordinary branch queue: %+v %v", next, err)
 	}
 }

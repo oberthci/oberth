@@ -1154,3 +1154,17 @@ spec:
 `
 	mustAdmit(t, document, Policy{})
 }
+
+func TestPipelinePriorityAnnotationDoesNotSetArgoPriority(t *testing.T) {
+	workflow, err := Decode([]byte(strings.Replace(admissibleDocument, "spec:\n", "metadata:\n  annotations:\n    oberth.ci/priority: highest\nspec:\n", 1)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Admit(workflow, Policy{}); err != nil {
+		t.Fatal(err)
+	}
+	if workflow.Spec.Priority != nil {
+		t.Fatal("annotation changed controller priority")
+	}
+	refuse(t, strings.Replace(admissibleDocument, "spec:\n", "spec:\n  priority: 1000\n", 1), Policy{}, "spec.priority")
+}

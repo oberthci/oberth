@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -83,9 +84,6 @@ func TestQueuePriorityStarvationAtBoundary(t *testing.T) {
 	s := testStore(t, &now)
 	repo := createRepo(t, s)
 	ctx := context.Background()
-	if _, err := s.SetSizeGrant(ctx, repo.ID, "admin", periapsis.L); err != nil {
-		t.Fatal(err)
-	}
 	normal, err := s.EnqueueRun(ctx, testRunSpec(repo.ID, "feature/old", strings.Repeat("a", 40)))
 	if err != nil {
 		t.Fatal(err)
@@ -308,7 +306,7 @@ func TestQueuePriorityHighAgesWithoutLosingFIFOToNormals(t *testing.T) {
 	}
 }
 
-func TestQueuePriorityTagGrantIsScopedAuditedAndRecheckedForReruns(t *testing.T) {
+func TestQueuePriorityTagsIndependentOfSizeGrantsAndBranchSignals(t *testing.T) {
 	now := time.Now()
 	s := testStore(t, &now)
 	repo := createRepo(t, s)
@@ -330,16 +328,20 @@ func TestQueuePriorityTagGrantIsScopedAuditedAndRecheckedForReruns(t *testing.T)
 	ordinary := enqueue(repo.ID, "ordinary", model.RefBranch, "push", false)
 	tag := enqueue(repo.ID, "v1", model.RefTag, "tag", true)
 	otherTag := enqueue(other.ID, "junk", model.RefTag, "tag", true)
-	// Each receive-controlled tag/release signal independently needs a grant.
+	// Coherent tag runs receive priority without a grant. Branch-only signals do not.
 	ungranted := []model.Run{tag, otherTag,
 		enqueue(other.ID, "ref-only", model.RefTag, "push", false),
-		enqueue(other.ID, "trigger-only", model.RefBranch, "tag", false),
-		enqueue(other.ID, "release-trigger", model.RefBranch, "release", false),
-		enqueue(other.ID, "release-flag", model.RefBranch, "push", true),
+		enqueue(repo.ID, "trigger-only", model.RefBranch, "tag", false),
+		enqueue(repo.ID, "release-trigger", model.RefBranch, "release", false),
+		enqueue(repo.ID, "release-flag", model.RefBranch, "push", true),
 	}
 	for _, r := range ungranted {
-		if r.Priority != model.PriorityNormal {
-			t.Fatalf("ungranted tag/release jumped queue: %+v", r)
+		want := model.PriorityNormal
+		if r.ID == tag.ID || r.ID == otherTag.ID {
+			want = model.PriorityHighest
+		}
+		if r.Priority != want {
+			t.Fatalf("ungranted tag/branch classification: %+v; want %s", r, want)
 		}
 	}
 	if _, err = s.SetSizeGrant(ctx, repo.ID, "admin", periapsis.L); err != nil {
@@ -348,10 +350,19 @@ func TestQueuePriorityTagGrantIsScopedAuditedAndRecheckedForReruns(t *testing.T)
 	for _, tc := range []struct {
 		id   string
 		want model.RunPriority
-	}{{tag.ID, model.PriorityHighest}, {otherTag.ID, model.PriorityNormal}, {ordinary.ID, model.PriorityNormal}} {
+	}{{tag.ID, model.PriorityHighest}, {otherTag.ID, model.PriorityHighest}, {ordinary.ID, model.PriorityNormal}} {
 		r, err := s.Run(ctx, tc.id)
 		if err != nil || r.Priority != tc.want {
 			t.Fatalf("scoped grant: %+v %v", r, err)
+		}
+	}
+	for _, candidate := range ungranted {
+		if candidate.RefKind != model.RefBranch {
+			continue
+		}
+		got, err := s.Run(ctx, candidate.ID)
+		if err != nil || got.Priority != model.PriorityNormal {
+			t.Fatalf("branch signals acquired release priority with a size grant: %+v %v", got, err)
 		}
 	}
 	flat, err := s.ListRecentRuns(ctx, model.RunListFilter{})
@@ -381,7 +392,7 @@ func TestQueuePriorityTagGrantIsScopedAuditedAndRecheckedForReruns(t *testing.T)
 	}
 	authorized := false
 	retry, err := s.RerunRun(ctx, model.RunRerunRequest{
-		RunID: tag.ID, Actor: "admin", Reason: "recheck revoked priority grant", Force: true,
+		RunID: tag.ID, Actor: "admin", Reason: "replay release after size grant revocation", Force: true,
 		ReplayAudit: &model.RunReplayAudit{Basis: "forced"},
 		Authorize: func(current model.Run, _ model.RunReplayEvidence) (string, error) {
 			if current.ID != tag.ID {
@@ -391,19 +402,16 @@ func TestQueuePriorityTagGrantIsScopedAuditedAndRecheckedForReruns(t *testing.T)
 			return "explicit release replay authorization", nil
 		},
 	})
-	if err != nil || !authorized || retry.Enqueued.Priority != model.PriorityNormal {
-		t.Fatalf("rerun bypassed revoked grant: %+v %v", retry, err)
+	if err != nil || !authorized || retry.Enqueued.Priority != model.PriorityHighest {
+		t.Fatalf("rerun lost release priority after size grant revocation: %+v %v", retry, err)
 	}
 	next, err := s.NextQueuedRun(ctx)
-	if err != nil || next.ID != ordinary.ID {
-		t.Fatalf("junk tags or rerun jumped ordinary FIFO: %+v %v", next, err)
+	if err != nil || next.ID != otherTag.ID {
+		t.Fatalf("next genuine tag lost highest-class FIFO: %+v %v", next, err)
 	}
-	for _, tc := range []struct {
-		action            string
-		previous, current bool
-	}{{"size.grant", false, true}, {"size.revoke", true, false}} {
+	for _, action := range []string{"size.grant", "size.revoke"} {
 		var actor, details string
-		err := s.db.QueryRowContext(ctx, `SELECT actor,details FROM audit_actions WHERE action=? AND resource_id=?`, tc.action, repo.ID).Scan(&actor, &details)
+		err := s.db.QueryRowContext(ctx, `SELECT actor,details FROM audit_actions WHERE action=? AND resource_id=?`, action, repo.ID).Scan(&actor, &details)
 		var data map[string]any
 		if err != nil {
 			t.Fatal(err)
@@ -411,8 +419,10 @@ func TestQueuePriorityTagGrantIsScopedAuditedAndRecheckedForReruns(t *testing.T)
 		if err = json.Unmarshal([]byte(details), &data); err != nil {
 			t.Fatal(err)
 		}
-		if actor != "admin" || data["tag_priority"] != tc.current || data["previous_tag_priority"] != tc.previous {
-			t.Fatalf("tag grant audit %s by %s: %s", tc.action, actor, details)
+		_, tagFlag := data["tag_priority"]
+		_, previousTagFlag := data["previous_tag_priority"]
+		if actor != "admin" || tagFlag || previousTagFlag {
+			t.Fatalf("size audit still claims to control tag priority: %s by %s: %s", action, actor, details)
 		}
 	}
 	// Trusted plan/apply have cancellation guards, but no automatic urgency.
@@ -420,6 +430,43 @@ func TestQueuePriorityTagGrantIsScopedAuditedAndRecheckedForReruns(t *testing.T)
 		r := enqueue(repo.ID, trigger, model.RefBranch, trigger, false)
 		if r.Priority != model.PriorityNormal {
 			t.Fatalf("trusted %s acquired automatic priority: %+v", trigger, r)
+		}
+	}
+}
+
+func TestQueuePriorityReleaseStreamKeepsSixtyMinuteFairnessBound(t *testing.T) {
+	now := time.Now().UTC()
+	s := testStore(t, &now)
+	repo := createRepo(t, s)
+	ctx := t.Context()
+	old, err := s.EnqueueRun(ctx, testRunSpec(repo.ID, "feature/old", strings.Repeat("a", 40)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	origin := now
+	now = origin.Add(45 * time.Minute)
+	var firstTag string
+	for i := 0; i < 20; i++ {
+		spec := testRunSpec(repo.ID, fmt.Sprintf("v1.%d", i), strings.Repeat("b", 40))
+		spec.RefKind, spec.Trigger, spec.Release = model.RefTag, "tag", true
+		tag, err := s.EnqueueRun(ctx, spec)
+		if err != nil || tag.Priority != model.PriorityHighest {
+			t.Fatalf("ungranted release: %+v %v", tag, err)
+		}
+		if i == 0 {
+			firstTag = tag.ID
+		}
+	}
+	now = origin.Add(time.Hour - time.Nanosecond)
+	next, err := s.NextQueuedRun(ctx)
+	if err != nil || next.ID != firstTag {
+		t.Fatalf("release did not overtake younger-than-60m branch: %+v %v", next, err)
+	}
+	now = origin.Add(time.Hour)
+	for _, read := range []func(context.Context) (model.Run, error){s.NextQueuedRun, s.ClaimNextRun} {
+		next, err := read(ctx)
+		if err != nil || next.ID != old.ID {
+			t.Fatalf("tag stream starved old branch at boundary: %+v %v", next, err)
 		}
 	}
 }

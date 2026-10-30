@@ -444,11 +444,13 @@ trust assumptions and complete invalidation rules.
   XL), S ≤ M ≤ L ≤ XL; sizes left unset keep their defaults. The queue-head
   message names a finite XL by weight ("XL · 11w") and a whole-budget XL as
   "needs a full drain". S packing uses the configured S and M weights.
-- Run priority is computed server-side: `highest` for tag/release and promotion
-  runs, `high` for branch refs matching administrator RC globs, otherwise
+- Run priority is computed server-side: `highest` for server-classified tag
+  refs (release flag or tag/release trigger) and promotion runs, without a size
+  grant. Branch names/flags/triggers cannot claim automatic release priority.
+  Size grants govern resources only. `high` is for administrator RC globs, otherwise
   `normal`. Repositories/pipelines cannot supply priority. Both durable claims
   and weighted admission sort by effective class, then original admission FIFO.
-  Normal work waiting 60 minutes joins `highest` with its original FIFO place;
+  Normal and high work waiting 60 minutes join `highest` with their original FIFO place;
   automatic restart refires preserve its wait and explicit admin bump. Existing
   grants are never preempted. Backfill/head-wait rules apply within each class;
   a waiting higher class prevents lower-class backfill. Group/VM parking still
@@ -463,9 +465,10 @@ trust assumptions and complete invalidation rules.
   one unadmitted run to `high`/`highest`; no lowering or preemption. Config and
   bump mutations use the audit gate and atomically append `queue.priority.config`
   / `run.priority` with actor, previous value and reason. Waiting reservations
-  refresh on notification and a one-second poll; admin calls refresh local
+  refresh on notification and a 15-second poll; admin calls refresh local
   waiting reservations before returning. Schema v34 stores only admin patterns
   and per-run overrides, never repository declarations.
+  See [release-priority.md](docs/release-priority.md) for resource and fairness bounds.
 - Bounded backfill (#1085): when the queue head (the first claimed,
   prepared, unparked run) does not fit, later runs that fit the spare weight
   are admitted beside it, marked `backfilled`, until the head has waited

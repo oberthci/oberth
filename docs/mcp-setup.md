@@ -782,18 +782,21 @@ failure is separate from an authenticated tool refusal.
 
 ### Queue priority administration
 
-Priority is server-owned: promotions are `highest`; tags/releases are `highest`
-only when their repository has an active administrator size grant (`size_grant`,
-including an explicit L grant). The audited `size.grant` / `size.revoke` details
-include `tag_priority` and `previous_tag_priority`. Revocation removes automatic
-tag/release priority, including for old runs and reruns; an admin may still bump
-an individual run. Configured RC branches are `high`; other runs are `normal`.
+Priority is server-owned: promotions and server-classified tag/release runs are
+`highest`, without a size grant. Automatic release priority requires a stored
+tag ref plus the server's release flag or tag/release trigger. Branch names,
+branch release flags and branch trigger spellings cannot supply it. Size grants
+only control resource size; granting/revoking one does not change tag priority,
+including for old runs and authorized reruns. New `size.grant` / `size.revoke`
+audits no longer emit the obsolete `tag_priority` / `previous_tag_priority`
+fields; historical audit rows remain unchanged. Configured RC branches are
+`high`; other runs are `normal`.
 Both normal and high runs waiting 60 minutes join `highest` in their original
 FIFO position. Plan/apply triggers receive no automatic priority: their cancel
 restrictions protect external state and do not establish queue urgency. Running
 work keeps its resources. Backfill and head-wait bounds apply within each class. Local admin
-RC configuration and bumps wake dispatch immediately; aging, size grants and
-external configuration changes are refreshed within 15 seconds. SQLite lock
+RC configuration and bumps wake dispatch immediately; aging and external
+priority configuration changes are refreshed within 15 seconds. SQLite lock
 contention defers refresh.
 
 An unscoped admin can call `queue_priority_config` with

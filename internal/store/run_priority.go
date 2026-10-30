@@ -30,17 +30,16 @@ CREATE TABLE IF NOT EXISTS run_priority_overrides (
 // Inner priority tables have no id/ref columns, so those bind to the outer run.
 // Apply/plan cancellation guards protect external state, not queue urgency: those
 // triggers remain ordinary work unless an admin pattern/bump or aging raises them.
-// Tag/release fields are pusher-controlled; require an explicit active size grant
-// (including L) before giving them installation-wide priority. Grant/revoke audits
-// record this capability. Evaluate it on reads so old reruns cannot bypass revocation.
-const tagReleaseSQL = `(release=1 OR ref_kind='tag' OR trigger IN ('tag','release'))`
-const tagPriorityGrantSQL = `(repo_id IN (SELECT repo_id FROM size_grants WHERE revoked_at IS NULL))`
-const priorityTagReleaseSQL = `(` + tagReleaseSQL + ` AND ` + tagPriorityGrantSQL + `)`
+// Only the server's tag-ref classification can get automatic release urgency.
+// A branch cannot gain it through its name, release flag or trigger spelling.
+// Resource-size grants govern size, not queue urgency. Aging keeps the existing
+// 60-minute fairness bound under a sustained stream of tag/release work.
+const priorityTagReleaseSQL = `(ref_kind='tag' AND (release=1 OR trigger IN ('tag','release')))`
 const naturalHighestSQL = `(trigger='promotion' OR ` + priorityTagReleaseSQL + `)`
 const overridePrioritySQL = `(SELECT priority FROM run_priority_overrides WHERE run_id=id)`
 const rcPatternSQL = `(SELECT pattern FROM queue_priority_patterns WHERE ref_kind='branch' AND ref GLOB pattern ORDER BY pattern LIMIT 1)`
 const basePrioritySQL = `CASE WHEN ` + naturalHighestSQL + ` THEN 'highest' WHEN ` + overridePrioritySQL + ` IS NOT NULL THEN ` + overridePrioritySQL + ` WHEN ` + rcPatternSQL + ` IS NOT NULL THEN 'high' ELSE 'normal' END`
-const priorityReasonSQL = `CASE WHEN ` + priorityTagReleaseSQL + ` THEN 'tag/release run: active repository size grant' WHEN trigger='promotion' THEN 'promotion run' WHEN ` + overridePrioritySQL + ` IS NOT NULL THEN 'admin bump: ' || (SELECT reason FROM run_priority_overrides WHERE run_id=id) WHEN ` + rcPatternSQL + ` IS NOT NULL THEN 'release-candidate pattern: ' || ` + rcPatternSQL + ` ELSE 'ordinary run' END`
+const priorityReasonSQL = `CASE WHEN ` + priorityTagReleaseSQL + ` THEN 'tag/release run: server-classified tag ref' WHEN trigger='promotion' THEN 'promotion run' WHEN ` + overridePrioritySQL + ` IS NOT NULL THEN 'admin bump: ' || (SELECT reason FROM run_priority_overrides WHERE run_id=id) WHEN ` + rcPatternSQL + ` IS NOT NULL THEN 'release-candidate pattern: ' || ` + rcPatternSQL + ` ELSE 'ordinary run' END`
 
 // priorityOrderSQL shares the effective class with the in-memory gate. The
 // clock is rendered from an int64, never request text, and is fixed per query.
