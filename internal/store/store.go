@@ -63,7 +63,7 @@ type Options struct {
 type Store struct {
 	protocol ProtocolConfig
 
-	authDB      *sql.DB // bounded, read-only WAL readers; no cached authorization
+	authDB      *sql.DB // reserved SSH/bearer read-only WAL readers; no cached authorization
 	idleDB      *sql.DB // read-only WAL pool for the upgrade queue sampler
 	readinessDB *sql.DB // reserved read-only WAL connection for readiness sampling
 	readDB      *sql.DB // bounded, read-only WAL pool for ordinary live queries
@@ -1935,14 +1935,10 @@ RETURNING id, fingerprint, identity, token_credential_id, auth_actor, admin, cre
 }
 
 func (s *Store) UplinkByFingerprint(ctx context.Context, fingerprint string) (model.Uplink, error) {
-	db := s.authDB
-	if db == nil {
-		db = s.reader() // CLI, inspection handles and internal fixtures
-	}
 	// A fresh deferred transaction binds the key and all its scopes to one
 	// committed snapshot. End it before returning; never retain a snapshot
 	// across authentication requests or across the public-key probe/signature.
-	tx, err := db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	tx, err := s.authReader().BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
 		return model.Uplink{}, fmt.Errorf("begin SSH identity lookup: %w", err)
 	}
@@ -2053,7 +2049,7 @@ func (s *Store) TokenCredentialByDigest(ctx context.Context, digest []byte) (mod
 	if len(digest) != 32 {
 		return model.TokenCredential{}, ErrNotFound
 	}
-	value, err := scanTokenCredential(s.reader().QueryRowContext(ctx, `
+	value, err := scanTokenCredential(s.authReader().QueryRowContext(ctx, `
 SELECT id, name, digest, created_at, activated_at, last_used_at, revoked_at
 FROM token_credentials WHERE digest = ?`, digest))
 	if err != nil {
@@ -2067,7 +2063,7 @@ func (s *Store) AuthenticatedUplinkByDigest(ctx context.Context, digest []byte) 
 		return model.AuthenticatedUplink{}, ErrNotFound
 	}
 	// Bind token authority and scopes to the same fresh committed snapshot.
-	tx, err := s.reader().BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	tx, err := s.authReader().BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
 		return model.AuthenticatedUplink{}, fmt.Errorf("begin token identity lookup: %w", err)
 	}
@@ -2144,7 +2140,7 @@ WHERE id = ? AND activated_at IS NOT NULL AND revoked_at IS NULL
 	// that benign no-op from an inactive/revoked credential, without caching
 	// authority or converting a revocation race into a successful touch.
 	var active string
-	err = s.reader().QueryRowContext(ctx, `SELECT id FROM token_credentials
+	err = s.authReader().QueryRowContext(ctx, `SELECT id FROM token_credentials
 WHERE id = ? AND activated_at IS NOT NULL AND revoked_at IS NULL`, id).Scan(&active)
 	return translateNotFound("token credential", err)
 }
