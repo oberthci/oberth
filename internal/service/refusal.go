@@ -4,7 +4,7 @@ import "fmt"
 
 // toolRefusal separates a deliberately public reason from its private cause.
 // Never put dependency error strings into reason, even when the dependency
-// wraps ErrForbidden or ErrUnavailable.
+// wraps a validation, conflict, forbidden or unavailable sentinel.
 type toolRefusal struct {
 	cause  error
 	reason string

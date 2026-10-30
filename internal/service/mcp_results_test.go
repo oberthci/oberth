@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -136,6 +137,10 @@ func resultServer(t *testing.T, control *API, actor api.Actor) *api.Server {
 		switch {
 		case errors.Is(err, store.ErrNotFound):
 			return http.StatusNotFound, "not found"
+		case errors.Is(err, ErrInvalidInput):
+			return http.StatusBadRequest, err.Error()
+		case errors.Is(err, store.ErrInvalidState):
+			return http.StatusConflict, err.Error()
 		case errors.Is(err, ErrForbidden):
 			return http.StatusForbidden, "forbidden"
 		case errors.Is(err, ErrUnavailable):
@@ -149,6 +154,124 @@ func resultServer(t *testing.T, control *API, actor api.Actor) *api.Server {
 	}
 	return server
 }
+
+func TestMCPPromotionValidationRefusals(t *testing.T) {
+	const sha = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	admin := api.Actor{Identity: "agent@host", Admin: true}
+	for _, tc := range []struct {
+		name   string
+		kind   model.RefKind
+		status model.RunStatus
+		tested string
+	}{
+		{"failed source", model.RefBranch, model.RunFailed, sha},
+		{"tag source", model.RefTag, model.RunPassed, sha},
+		{"untested source", model.RefBranch, model.RunPassed, strings.Repeat("b", 40)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newControlFixture(t)
+			run, err := f.store.EnqueueRun(t.Context(), model.RunSpec{
+				RepoID: f.repo.ID, RefKind: tc.kind, Ref: "feature/promote",
+				SHA: sha, TestedSHA: tc.tested, Actor: admin.Identity, Trigger: "branch",
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := f.store.ClaimNextRun(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := f.store.FinishRun(t.Context(), run.ID, model.RunResult{Status: tc.status, TestedSHA: tc.tested}); err != nil {
+				t.Fatal(err)
+			}
+			result := resultCall(t, resultServer(t, f.api(t), admin), "promote", map[string]any{"sha": sha, "branch": "main"})
+			assertRefusal(t, result, "invalid input: promotion source must be the exactly tested green branch commit", "reference")
+			if len(f.git.preparedRepos) != 0 {
+				t.Fatal("refused source reached Git mutation")
+			}
+		})
+	}
+	t.Run("invalid input", func(t *testing.T) {
+		f := newControlFixture(t)
+		result := resultCall(t, resultServer(t, f.api(t), admin), "promote", map[string]any{"sha": "short", "branch": "main"})
+		assertRefusal(t, result, "invalid input: promotion requires a full SHA", "reference")
+	})
+	t.Run("wrong sync branch", func(t *testing.T) {
+		f := newControlFixture(t)
+		seedGreenPromotionCandidate(t, f, sha)
+		result := resultCall(t, resultServer(t, f.api(t), admin), "sync", map[string]any{"sha": sha, "branch": "other"})
+		assertRefusal(t, result, "service: invalid input: no run for SHA", "reference")
+	})
+	t.Run("retry admission conflict", func(t *testing.T) {
+		f := newControlFixture(t)
+		seedGreenPromotionCandidate(t, f, sha)
+		failed, err := f.store.AppendPromotion(t.Context(), model.PromotionSpec{
+			RepoID: f.repo.ID, SourceBranch: "feature/promote", SourceSHA: sha, TargetRef: "main", Actor: admin.Identity,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := f.store.FinishPromotion(t.Context(), failed.ID, model.PromotionFailed, "", "promotion paths conflict; rebase onto main"); err != nil {
+			t.Fatal(err)
+		}
+		control := f.api(t)
+		control.promotions = &failingPromotionAdmission{PromotionRepository: f.store,
+			err: fmt.Errorf("token=secret-value SELECT * FROM promotions /private/database.sqlite: %w", store.ErrInvalidState)}
+		result := resultCall(t, resultServer(t, control, admin), "promote_retry", map[string]any{"id": failed.ID})
+		assertRefusal(t, result, "conflict: promotion retry conflicts with the current state; inspect promotion_list and promote_status", "secret-value")
+		if strings.Contains(result.Content[0].Text, "SELECT") || strings.Contains(result.Content[0].Text, "/private/") {
+			t.Fatal("admission conflict cause leaked")
+		}
+	})
+	t.Run("merge conflict retains durable result", func(t *testing.T) {
+		f := newControlFixture(t)
+		seedGreenPromotionCandidate(t, f, sha)
+		f.git.prepareErr = errors.New("promotion paths conflict; rebase onto main")
+		server := resultServer(t, f.api(t), admin)
+		result := resultCall(t, server, "promote", map[string]any{"sha": sha, "branch": "main"})
+		var admitted struct {
+			ID string `json:"id"`
+		}
+		if err := json.Unmarshal(result.Structured, &admitted); err != nil || result.IsError || admitted.ID == "" {
+			t.Fatalf("merge conflict lost its durable promotion result: %+v", result)
+		}
+		status := resultCall(t, server, "promote_status", map[string]any{"id": admitted.ID})
+		if status.IsError || !strings.Contains(string(status.Structured), "rebase onto main") {
+			t.Fatalf("merge conflict remediation is not visible: %+v", status)
+		}
+	})
+	t.Run("audit gate retry", func(t *testing.T) {
+		f := newControlFixture(t)
+		control := f.api(t)
+		control.mutationGate = func(context.Context) error {
+			return errors.New("token=secret-value SELECT * FROM audit /private/database.sqlite")
+		}
+		result := resultCall(t, resultServer(t, control, admin), "promote_retry", map[string]any{"id": "promotion-1"})
+		assertRefusal(t, result, "service unavailable: audit integrity could not be verified; retry when the audit gate is available", "secret-value")
+		if strings.Contains(result.Content[0].Text, "SELECT") || strings.Contains(result.Content[0].Text, "/private/") {
+			t.Fatal("audit gate cause leaked")
+		}
+	})
+	t.Run("unexpected error", func(t *testing.T) {
+		f := newControlFixture(t)
+		seedGreenPromotionCandidate(t, f, sha)
+		control := f.apiWithGrants(t, &failingGrantLookup{err: errors.New("token=secret-value SELECT * FROM grants /private/database.sqlite")})
+		result := resultCall(t, resultServer(t, control, api.Actor{Identity: "agent@host"}), "promote", map[string]any{"sha": sha, "branch": "main"})
+		assertRefusal(t, result, "internal error (reference ", "secret-value")
+		if !regexp.MustCompile(`^internal error \(reference [a-f0-9]{16}\)$`).MatchString(result.Content[0].Text) {
+			t.Fatalf("unexpected internal error response: %+v", result)
+		}
+	})
+}
+
+type failingPromotionAdmission struct {
+	PromotionRepository
+	err error
+}
+
+func (f *failingPromotionAdmission) AppendPromotion(context.Context, model.PromotionSpec) (model.Promotion, error) {
+	return model.Promotion{}, f.err
+}
+
 func resultRPC(t *testing.T, server *api.Server, method string, params any) json.RawMessage {
 	t.Helper()
 	raw, err := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": 1, "method": method, "params": params})

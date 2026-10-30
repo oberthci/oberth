@@ -94,7 +94,8 @@ func (service *API) admitPromotionRetry(ctx context.Context, actor api.Actor, fa
 	promotion, err := service.admitPromotion(ctx, actor, repository, candidate, failed.TargetRef, failed.ID, mode)
 	if err != nil {
 		if errors.Is(err, store.ErrInvalidState) {
-			return model.Repository{}, model.Run{}, model.Promotion{}, fmt.Errorf("%w: %s", ErrInvalidInput, err.Error())
+			return model.Repository{}, model.Run{}, model.Promotion{}, refuse(err,
+				"promotion retry conflicts with the current state; inspect promotion_list and promote_status")
 		}
 		return model.Repository{}, model.Run{}, model.Promotion{}, err
 	}

@@ -352,7 +352,7 @@ func toolSuccess(payload any) map[string]any {
 // paths, internal state). Actionable classes (invalid input, not found, lock-owned,
 // ambiguous) keep their message; unknown errors are logged server-side with a
 // correlation ID and returned as a generic message carrying that ID. Only
-// explicitly public service reasons extend forbidden/unavailable classes.
+// explicitly public service reasons extend validation/precondition classes.
 func (server *Server) classifyToolFailure(err error) map[string]any {
 	code, message := server.classifyError(err)
 	message = toolRefusalMessage(err, code, message)
@@ -369,7 +369,17 @@ func (server *Server) classifyToolFailure(err error) map[string]any {
 // raw error string: it can contain dependencies or inaccessible resources.
 func toolRefusalMessage(err error, code int, message string) string {
 	var reason interface{ MCPErrorReason() string }
-	if (code == http.StatusForbidden || code == http.StatusServiceUnavailable) && errors.As(err, &reason) {
+	if !errors.As(err, &reason) {
+		return message
+	}
+	switch code {
+	case http.StatusBadRequest:
+		// These classifiers may return err.Error(). Replace it rather than
+		// appending to it: the marked refusal can wrap a private cause.
+		return "invalid input: " + reason.MCPErrorReason()
+	case http.StatusConflict:
+		return "conflict: " + reason.MCPErrorReason()
+	case http.StatusForbidden, http.StatusServiceUnavailable:
 		return message + ": " + reason.MCPErrorReason()
 	}
 	return message

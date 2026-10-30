@@ -426,12 +426,20 @@ func (e *publicRefusalTestError) Error() string          { return "token=secret-
 func (e *publicRefusalTestError) Unwrap() error          { return e.cause }
 func (e *publicRefusalTestError) MCPErrorReason() string { return e.reason }
 func TestMCPOnlyExplicitPublicRefusalReasons(t *testing.T) {
-	for _, code := range []int{http.StatusForbidden, http.StatusServiceUnavailable, http.StatusNotFound, http.StatusInternalServerError} {
+	for _, code := range []int{http.StatusBadRequest, http.StatusConflict, http.StatusForbidden, http.StatusServiceUnavailable, http.StatusNotFound, http.StatusInternalServerError} {
 		server, _ := testServer(t)
-		server.classifyError = func(error) (int, string) { return code, "stable class" }
+		server.classifyError = func(err error) (int, string) {
+			var public interface{ MCPErrorReason() string }
+			if (code == http.StatusBadRequest || code == http.StatusConflict) && errors.As(err, &public) {
+				return code, err.Error()
+			}
+			return code, "stable class"
+		}
 		secret := errors.New("secret-value")
 		marked := &publicRefusalTestError{cause: secret, reason: "safe remediation"}
 		for _, err := range []error{fmt.Errorf("outer secret-value: %w", marked), errors.Join(secret, marked), fmt.Errorf("raw secret-value: %w", secret)} {
+			var public interface{ MCPErrorReason() string }
+			hasReason := errors.As(err, &public)
 			trace := &mcpWaitObservation{event: mcpWaitEvent{Nonce: "fixed-reference"}}
 			for _, result := range []map[string]any{server.classifyToolFailure(err), server.classifyWaitFailure(err, trace)} {
 				raw, _ := json.Marshal(result)
@@ -439,7 +447,7 @@ func TestMCPOnlyExplicitPublicRefusalReasons(t *testing.T) {
 				if strings.Contains(text, "secret-value") {
 					t.Fatalf("raw error leaked: %s", text)
 				}
-				wantReason := (code == http.StatusForbidden || code == http.StatusServiceUnavailable) && errors.As(err, &marked)
+				wantReason := (code == http.StatusBadRequest || code == http.StatusConflict || code == http.StatusForbidden || code == http.StatusServiceUnavailable) && hasReason
 				if strings.Contains(text, "safe remediation") != wantReason {
 					t.Fatalf("wrong public reason policy: %s", text)
 				}
