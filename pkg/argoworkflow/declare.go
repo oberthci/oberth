@@ -213,6 +213,24 @@ func UsesSecrets(template *wfv1.Template) bool {
 	return UsesEnvconsul(template) || UsesOberthSecretstore(template)
 }
 
+// UsesCredentials is the shared credential-admission and replay-plan predicate.
+// WIF grants an audience-scoped token even without a secret-store command.
+func UsesCredentials(template *wfv1.Template) bool {
+	if template == nil {
+		return false
+	}
+	return UsesSecrets(template) || UsesReleaseWIF(template)
+}
+
+// UsesReleaseWIF is also used by the capability admission walk.
+func UsesReleaseWIF(template *wfv1.Template) bool {
+	if template == nil {
+		return false
+	}
+	_, present := template.Metadata.Annotations[ReleaseWIFRoleAnnotation]
+	return present
+}
+
 // AuthorizeSecretPaths proves every declared path is one this repository may
 // reach for this trigger, reusing the Go path's hierarchical scoping rules so
 // both authoring formats answer to the same namespace policy.

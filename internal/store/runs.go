@@ -943,6 +943,9 @@ RETURNING `+runColumns,
 	} else if err := s.projectRunIssue(ctx, tx, value, result.FailureTail, now); err != nil {
 		return model.Run{}, err
 	}
+	if err := s.recordTerminalObservationTx(ctx, tx, value, result.TerminalObservation, now); err != nil {
+		return model.Run{}, err
+	}
 	return value, nil
 }
 
@@ -1195,7 +1198,13 @@ RETURNING run_id, burn, step, ordinal, status, exit_code, log_start, log_end,
 }
 
 func (s *Store) StepResults(ctx context.Context, runID string) ([]model.StepResult, error) {
-	rows, err := s.reader().QueryContext(ctx, `
+	return stepResultsFrom(ctx, s.reader(), runID)
+}
+
+func stepResultsFrom(ctx context.Context, database interface {
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+}, runID string) ([]model.StepResult, error) {
+	rows, err := database.QueryContext(ctx, `
 SELECT run_id, burn, step, ordinal, status, exit_code, log_start, log_end,
 	   declared_size, max_rss_bytes, user_cpu_ns, system_cpu_ns, started_at, finished_at, recorded_at, termination_json, memory_peak_bytes
 FROM step_results WHERE run_id = ? ORDER BY ordinal, burn, step`, runID)

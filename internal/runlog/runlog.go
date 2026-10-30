@@ -472,80 +472,70 @@ func (store *Store) WriteStepPlan(runID string, steps []runprogress.PlannedStep)
 // file; the error wraps os.ErrNotExist so callers can treat that as "no plan"
 // rather than as a failure.
 func (store *Store) StepPlan(runID string) ([]runprogress.PlannedStep, error) {
+	plan, err := store.StepPlanRecord(runID)
+	return plan.Steps, err
+}
+
+// StepPlanRecord retains version provenance for fail-closed replay decisions.
+func (store *Store) StepPlanRecord(runID string) (runprogress.Plan, error) {
 	path, err := store.planPath(runID)
 	if err != nil {
-		return nil, err
+		return runprogress.Plan{}, err
 	}
 	// planPath validated the run ID and confined this path to the log root.
 	file, err := os.Open(path) //nolint:gosec
 	if err != nil {
-		return nil, fmt.Errorf("open step plan: %w", err)
+		return runprogress.Plan{}, fmt.Errorf("open step plan: %w", err)
 	}
 	defer func() { _ = file.Close() }()
 	body, err := io.ReadAll(io.LimitReader(file, runprogress.MaxPlanBytes+1))
 	if err != nil {
-		return nil, fmt.Errorf("read step plan: %w", err)
+		return runprogress.Plan{}, fmt.Errorf("read step plan: %w", err)
 	}
 	if len(body) > runprogress.MaxPlanBytes {
-		return nil, errors.New("step plan exceeds its byte bound")
+		return runprogress.Plan{}, errors.New("step plan exceeds its byte bound")
 	}
 	decoder := json.NewDecoder(bytes.NewReader(body))
 	decoder.DisallowUnknownFields()
 	var plan runprogress.Plan
 	if err := decoder.Decode(&plan); err != nil {
-		return nil, fmt.Errorf("decode step plan: %w", err)
+		return runprogress.Plan{}, fmt.Errorf("decode step plan: %w", err)
 	}
 	if err := plan.Validate(); err != nil {
-		return nil, fmt.Errorf("decode step plan: %w", err)
+		return runprogress.Plan{}, fmt.Errorf("decode step plan: %w", err)
+	}
+	if plan.Version == runprogress.PlanVersion {
+		var wire struct {
+			Steps []struct {
+				Credentialed *bool `json:"credentialed"`
+			}
+		}
+		if err := json.Unmarshal(body, &wire); err != nil {
+			return runprogress.Plan{}, err
+		}
+		for _, step := range wire.Steps {
+			if step.Credentialed == nil {
+				return runprogress.Plan{}, errors.New("current plan lacks explicit credential classification")
+			}
+		}
 	}
 	sort.Slice(plan.Steps, func(left, right int) bool { return plan.Steps[left].Ordinal < plan.Steps[right].Ordinal })
-	return plan.Steps, nil
+	return plan, nil
 }
 
 // StepProgress returns the latest transition for every planned step in stable
 // ordinal order. A crash-truncated final record is ignored; every preceding
 // newline-terminated record remains authoritative.
 func (store *Store) StepProgress(runID string) ([]runprogress.Event, error) {
-	path, err := store.progressPath(runID)
+	events, err := store.readStepProgress(runID, false)
 	if err != nil {
 		return nil, err
 	}
-	// Writers append one validated record and only repair an unterminated tail.
-	// Readers consume the immutable newline-terminated prefix below, so a
-	// slow append for any run must not hold all run_get requests behind a lock.
-	file, err := os.Open(path) //nolint:gosec
-	if err != nil {
-		return nil, fmt.Errorf("open step progress journal: %w", err)
-	}
-	defer func() { _ = file.Close() }()
-	body, err := io.ReadAll(io.LimitReader(file, maxProgressBytes+1))
-	if err != nil {
-		return nil, fmt.Errorf("read step progress journal: %w", err)
-	}
-	if len(body) > maxProgressBytes {
-		return nil, errors.New("step progress journal exceeds its byte bound")
-	}
-	lastNewline := bytes.LastIndexByte(body, '\n')
-	if lastNewline < 0 {
-		return []runprogress.Event{}, nil
-	}
-	// v0.17.44 could journal a retried DAG's attempt name as its burn.
-	// Only ignore such an orphan when the canonical key is known, and never
-	// discard an explicitly planned name. Decode before filtering so malformed
-	// records and conflicts between genuine keys still fail closed.
-	var events []runprogress.Event
 	known := make(map[string]bool)
-	for index, line := range bytes.Split(body[:lastNewline], []byte("\n")) {
-		if len(line) == 0 {
-			continue
-		}
-		event, decodeErr := runprogress.Decode(line)
-		if decodeErr != nil {
-			return nil, fmt.Errorf("decode step progress journal record %d: %w", index, decodeErr)
-		}
-		events = append(events, event)
+	for _, event := range events {
 		known[event.Burn+"\x00"+event.Step] = true
 	}
+	// Legacy aliases remain filtered only in this display projection.
 	planned := make(map[string]bool)
 	if plan, err := store.StepPlan(runID); err == nil {
 		for _, step := range plan {
@@ -576,6 +566,54 @@ func (store *Store) StepProgress(runID string) ([]runprogress.Event, error) {
 	}
 	sort.Slice(result, func(left, right int) bool { return result[left].Ordinal < result[right].Ordinal })
 	return result, nil
+}
+
+// StepProgressHistory returns every validated observation, retaining earlier
+// starts and legacy attempts. Replay decisions must not use the latest-only
+// display projection, and must not ignore a torn final record.
+func (store *Store) StepProgressHistory(runID string) ([]runprogress.Event, error) {
+	return store.readStepProgress(runID, true)
+}
+
+func (store *Store) readStepProgress(runID string, strict bool) ([]runprogress.Event, error) {
+	path, err := store.progressPath(runID)
+	if err != nil {
+		return nil, err
+	}
+	// Writers append one validated record and only repair an unterminated tail.
+	// Readers consume the immutable newline-terminated prefix below, so a
+	// slow append for any run must not hold all run_get requests behind a lock.
+	file, err := os.Open(path) //nolint:gosec
+	if err != nil {
+		return nil, fmt.Errorf("open step progress journal: %w", err)
+	}
+	defer func() { _ = file.Close() }()
+	body, err := io.ReadAll(io.LimitReader(file, maxProgressBytes+1))
+	if err != nil {
+		return nil, fmt.Errorf("read step progress journal: %w", err)
+	}
+	if len(body) > maxProgressBytes {
+		return nil, errors.New("step progress journal exceeds its byte bound")
+	}
+	lastNewline := bytes.LastIndexByte(body, '\n')
+	if strict && len(body) > 0 && lastNewline != len(body)-1 {
+		return nil, errors.New("step progress journal has an incomplete record")
+	}
+	if lastNewline < 0 {
+		return []runprogress.Event{}, nil
+	}
+	var events []runprogress.Event
+	for index, line := range bytes.Split(body[:lastNewline], []byte("\n")) {
+		if len(line) == 0 {
+			continue
+		}
+		event, decodeErr := runprogress.Decode(line)
+		if decodeErr != nil {
+			return nil, fmt.Errorf("decode step progress journal record %d: %w", index, decodeErr)
+		}
+		events = append(events, event)
+	}
+	return events, nil
 }
 
 // LegacyRetryBurn removes an exact numeric attempt suffix, task(N), from a

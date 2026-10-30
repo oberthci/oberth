@@ -65,7 +65,7 @@ func newRerunHarness(t *testing.T, results ...JobResult) *rerunHarness {
 	t.Helper()
 	fixture := newControlFixture(t, results...)
 	harness := &rerunHarness{fixture: fixture, git: &tagPushGit{controlGit: fixture.git},
-		refs: stubRefResolver{branches: map[string]map[string]string{"codeberg/acme/oberth": {rerunBranch: rerunSHA}}}}
+		refs: stubRefResolver{branches: map[string]map[string]string{"codeberg/acme/oberth": {rerunBranch: rerunSHA, "refs/tags/" + rerunTag: rerunTagObject}}}}
 	var err error
 	harness.scheduler, err = NewScheduler(SchedulerConfig{
 		Store: fixture.store, Git: harness.git, Logs: fixture.logs, Jobs: fixture.jobs, ReleaseJobs: fixture.jobs,
@@ -322,7 +322,7 @@ func TestRunRerunPolicy(t *testing.T) {
 		"plan by an uplink":  {run: model.Run{Trigger: "plan", RefKind: model.RefBranch}, want: ErrInvalidInput},
 		"admin branch force": {run: branch, admin: true, force: true},
 	} {
-		_, err := RunRerunPolicy(test.run, test.admin, test.force)
+		_, err := RunRerunPolicy(test.run, test.admin, test.force, false)
 		if (test.want == nil && err != nil) || (test.want != nil && !errors.Is(err, test.want)) {
 			t.Errorf("%s: error = %v, want %v", name, err, test.want)
 		}
@@ -359,4 +359,8 @@ func TestTagRerunRefusesAThirdExecutionAfterAPublishingFailure(t *testing.T) {
 		t.Fatalf("release executions %d, tag publications %v after %d attempts; want 2 executions and one delivered tag",
 			executions, harness.git.syncedTags, harness.git.tagAttempts())
 	}
+}
+
+func (s stubRefResolver) TagObjectSHA(ctx context.Context, repo, tag string) (string, error) {
+	return s.RefSHA(ctx, repo, "refs/tags/"+tag)
 }

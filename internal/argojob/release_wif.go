@@ -160,8 +160,7 @@ func authorizeReleaseWIF(wf *wfv1.Workflow, config Config, request Request) ([]*
 		top[&wf.Spec.Templates[i]] = true
 	}
 	walkTemplates(wf, func(t *wfv1.Template) {
-		_, declared := t.Metadata.Annotations[argoworkflow.ReleaseWIFRoleAnnotation]
-		if !declared || failure != nil {
+		if !argoworkflow.UsesReleaseWIF(t) || failure != nil {
 			return
 		}
 		if err := authorizeReleaseWIFLeaf(wf, t, top[t], config, request); err != nil {

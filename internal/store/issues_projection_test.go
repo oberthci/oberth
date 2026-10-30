@@ -75,7 +75,7 @@ func TestInfrastructureRunRetriesWithoutProjectingCIRedIssue(t *testing.T) {
 	if _, err := database.OpenCIIssue(ctx, repository.ID, branch); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("infrastructure failure opened CI-red issue: %v", err)
 	}
-	retry, err := database.RetryRun(ctx, run.ID, "reviewer@host")
+	retry, err := database.RetryRun(ctx, model.RunRetryRequest{RunID: run.ID, Actor: "reviewer@host"})
 	if err != nil || retry.SHA != run.SHA {
 		t.Fatalf("infrastructure retry = %#v, %v", retry, err)
 	}
@@ -209,7 +209,7 @@ func TestContainerMemoryLimitOOMProjectsCIRedIssue(t *testing.T) {
 	if err != nil || !strings.Contains(issue.Body, "OOMKilled") {
 		t.Fatalf("container OOM missing from issue: %#v, %v", issue, err)
 	}
-	if _, err := database.RetryRun(t.Context(), run.ID, "reviewer@host"); !errors.Is(err, ErrInvalidState) {
+	if _, err := database.RetryRun(t.Context(), model.RunRetryRequest{RunID: run.ID, Actor: "reviewer@host"}); !errors.Is(err, ErrInvalidState) {
 		t.Fatalf("container OOM became infrastructure-retryable: %v", err)
 	}
 }

@@ -521,12 +521,13 @@ func (controller *Controller) wait(ctx context.Context, name, runID string, dest
 			// node transitions and the workflow phase are not written
 			// atomically, so a status read that races the final update can
 			// miss a step's terminal event.
-			settled := controller.settle(ctx, name, runID, workflow)
+			settled, completeRead := controller.settle(ctx, name, runID, workflow)
 			if binding.UID != "" && !binding.matches(settled) {
 				return Completion{}, errors.New("argojob: adopted Workflow identity changed at completion")
 			}
 			controller.retainWorkflowTiming(ctx, settled)
 			completion := completionFor(settled)
+			completion.ObservationComplete = completion.ObservationComplete && completeRead
 			completion.Steps = reporter.order(completion.Steps)
 			controller.collectStepDiagnostics(ctx, settled, &completion)
 			controller.collectVMIFailure(ctx, settled, &completion, budget)
@@ -584,17 +585,17 @@ func (controller *Controller) wait(ctx context.Context, name, runID string, dest
 
 // settle re-reads the Workflow once after it reports completion, preferring
 // the later observation when it carries more terminal node results.
-func (controller *Controller) settle(ctx context.Context, name, runID string, observed *wfv1.Workflow) *wfv1.Workflow {
+func (controller *Controller) settle(ctx context.Context, name, runID string, observed *wfv1.Workflow) (*wfv1.Workflow, bool) {
 	settleCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 	defer cancel()
 	final, err := controller.workflows.Get(settleCtx, name, metav1.GetOptions{})
 	if err != nil || controller.verifyOwnership(final, runID) != nil {
-		return observed
+		return observed, false
 	}
 	if len(final.Status.Nodes) < len(observed.Status.Nodes) {
-		return observed
+		return observed, false
 	}
-	return final
+	return final, true
 }
 
 // verifyOwnership refuses to report on a Workflow that is not this run's. A
@@ -704,11 +705,13 @@ func (controller *Controller) TerminalState(ctx context.Context, name string) (*
 	if !workflow.Status.Phase.Completed() {
 		return nil, ErrNotTerminal
 	}
-	completion := completionFor(workflow)
-	controller.retainWorkflowTiming(ctx, workflow)
-	controller.collectVMIFailure(ctx, workflow, &completion, nil)
-	controller.collectStepDiagnostics(ctx, workflow, &completion)
-	controller.cleanupVerdict(ctx, workflow, runID, nil, &completion)
+	settled, completeRead := controller.settle(ctx, name, runID, workflow)
+	completion := completionFor(settled)
+	completion.ObservationComplete = completion.ObservationComplete && completeRead
+	controller.retainWorkflowTiming(ctx, settled)
+	controller.collectVMIFailure(ctx, settled, &completion, nil)
+	controller.collectStepDiagnostics(ctx, settled, &completion)
+	controller.cleanupVerdict(ctx, settled, runID, nil, &completion)
 	return &completion, nil
 }
 

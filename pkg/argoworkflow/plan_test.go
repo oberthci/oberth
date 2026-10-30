@@ -388,3 +388,31 @@ func TestUsesSecrets(t *testing.T) {
 		})
 	}
 }
+
+func TestPlannedStepsCredentialedIncludesReleaseWIF(t *testing.T) {
+	workflow, err := Decode([]byte(planDocument))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := range workflow.Spec.Templates {
+		if workflow.Spec.Templates[i].Name == "test" {
+			workflow.Spec.Templates[i].Metadata.Annotations = map[string]string{ReleaseWIFRoleAnnotation: "image-writer"}
+		}
+	}
+	planned, err := PlannedSteps(workflow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, step := range planned {
+		if step.Burn == "test" && step.Step == "test" {
+			found = true
+			if !step.Credentialed || step.Secrets {
+				t.Fatalf("WIF plan was not credentialed independently of secret store: %+v", step)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("missing WIF leaf")
+	}
+}

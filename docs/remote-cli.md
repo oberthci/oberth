@@ -62,10 +62,12 @@ oberth status
 
 The list and detail commands are read-only. `oberth run retry` calls the
 `run_retry` MCP tool using the same uplink token; it queues a fresh attempt
-for an interrupted or infrastructure-failed branch run and records the caller
-as actor. Workflow-level failures without a failed step are eligible. The
-source must still be the newest run for its branch; test failures, older runs,
-and release runs cannot be retried this way.
+for an interrupted or infrastructure-failed run and records the caller as actor.
+Workflow-level failures without a failed step are eligible. The source must still
+be the newest run for its ref, and the ref must have no active run. An admin can
+also retry tag/release infrastructure failures before credentialed/publication
+work started; the tag object, tested commit and release admission are retained.
+Test failures, older runs and promotion/plan/apply runs cannot be retried this way.
 
 `oberth issues` prints the first page and its full matching count, such as
 `1–50 of 93`. The dashboard shows the same page range and state/kind counts.
@@ -77,9 +79,20 @@ no longer the newest of its branch (as long as the branch head is still that
 SHA), and tag/release runs. The new run is linked to the original (`oberth
 run` prints `rerun of`), and `status`, `wait` and `promote` on the SHA follow
 it. A non-admin uplink may rerun branch-push runs; a tag/release rerun needs
-an admin and `--force`, and a tag that is already published or green is
-refused. When every step passed and only the upstream push failed, the push
-is retried instead of re-running the pipeline.
+an admin. Force-free tag replay requires the newest run, an unchanged exact tag
+object, and safe evidence for every run of that tag. Submitted attempts need a
+version 2 credential-aware plan and a durable complete terminal Workflow
+observation. Secret-store and release WIF steps both count as credentialed.
+A started credentialed step, incomplete observation (including observation
+outages or synthesized interruption), legacy plan, missing evidence, older
+source or moved tag requires `--force`. A missing journal is unknown unless
+an observed terminal Workflow explicitly had zero nodes. Pre-intent attempts
+with no step evidence can be replayed without a plan. These rules also apply
+to tag infrastructure retries; `run retry` has no force override.
+Pending Workflow deletion blocks retry and rerun even with force, until cleanup
+is confirmed. A published/green tag remains refused. When every step passed and
+only the upstream push failed, the push is retried instead of executing the
+pipeline. Audit records include the replay basis and evidence counts.
 
 `oberth promotion retry` calls the `promote_retry` MCP tool with the same
 uplink token. A failed or interrupted promotion (the push failed, the target

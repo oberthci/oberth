@@ -302,8 +302,8 @@ func TestPlannedStepSecretsIsAdditive(t *testing.T) {
 		step     PlannedStep
 		wantJSON string
 	}{
-		{"plain", PlannedStep{Burn: "test", Step: "lint", Ordinal: 0}, `{"burn":"test","step":"lint","ordinal":0}`},
-		{"secrets", PlannedStep{Burn: "publish", Step: "push", Ordinal: 1, Secrets: true}, `{"burn":"publish","step":"push","ordinal":1,"secrets":true}`},
+		{"plain", PlannedStep{Burn: "test", Step: "lint", Ordinal: 0}, `{"burn":"test","step":"lint","ordinal":0,"credentialed":false}`},
+		{"secrets", PlannedStep{Burn: "publish", Step: "push", Ordinal: 1, Secrets: true}, `{"burn":"publish","step":"push","ordinal":1,"secrets":true,"credentialed":false}`},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {

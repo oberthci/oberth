@@ -87,7 +87,7 @@ type RunHistory interface {
 }
 
 type RunRetryStore interface {
-	RetryRun(context.Context, string, string) (model.EnqueueRunResult, error)
+	RetryRun(context.Context, model.RunRetryRequest) (model.EnqueueRunResult, error)
 }
 
 type RunQueueStore interface {
@@ -347,12 +347,14 @@ type LogStore interface {
 	ReadFrom(string, int64, int64) ([]byte, int64, int64, error)
 	AppendStepProgress(string, runprogress.Event) error
 	StepProgress(string) ([]runprogress.Event, error)
+	StepProgressHistory(string) ([]runprogress.Event, error)
 	// WriteStepPlan records the run's declared step list once, at submission,
 	// and StepPlan reads it back. A run with no plan returns an error wrapping
 	// os.ErrNotExist, which readers treat as "this run predates its plan" and
 	// not as a failure.
 	WriteStepPlan(string, []runprogress.PlannedStep) error
 	StepPlan(string) ([]runprogress.PlannedStep, error)
+	StepPlanRecord(string) (runprogress.Plan, error)
 }
 
 type JobRequest struct {
@@ -382,14 +384,15 @@ type JobRequest struct {
 }
 
 type JobResult struct {
-	Status     model.RunStatus
-	Phase      string
-	TestedSHA  string
-	BaseSHA    string
-	FailedBurn string
-	FailedStep string
-	Error      string
-	Steps      []model.StepResult
+	TerminalObservation *model.RunTerminalObservation
+	Status              model.RunStatus
+	Phase               string
+	TestedSHA           string
+	BaseSHA             string
+	FailedBurn          string
+	FailedStep          string
+	Error               string
+	Steps               []model.StepResult
 }
 
 // ErrJobNotTerminal is returned by TerminalResult when the named Job has not

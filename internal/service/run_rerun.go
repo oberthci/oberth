@@ -23,35 +23,37 @@ const (
 	rerunModePublish = "publish_retry" // only the publication failed; it was re-pushed
 )
 
-// releaseRerunWarning is recorded with every tag/release rerun.
+// releaseRerunWarning is recorded with forced tag/release reruns.
 const releaseRerunWarning = "release rerun re-executes release.yaml at the same tag: anything the failed run's Workflow already published stays published and must tolerate being published again; Oberth itself publishes the tag object at most once"
 
-// RunRerunPolicy decides whether an actor may rerun run and returns the
-// warning to record. A non-admin uplink may rerun only branch-push runs
-// (trigger branch) in repositories it can see, whichever step failed. An
-// admin may also rerun scheduled runs and, with an explicit force, tag and
-// release runs. Promotion, plan and apply runs are re-driven by promote_retry
-// and the trusted plan flow and are refused to everyone.
-func RunRerunPolicy(run model.Run, admin, force bool) (string, error) {
+// authorizeRunRerun keeps actor/trigger authorization independent of replay
+// evidence. Safe tag/release reruns still require an admin.
+func authorizeRunRerun(run model.Run, admin bool) error {
 	switch run.Trigger {
 	case "promotion":
-		return "", fmt.Errorf("%w: run %s is promotion CI; retry its promotion with promote_retry", ErrInvalidInput, run.ID)
+		return fmt.Errorf("%w: run %s is promotion CI; retry its promotion with promote_retry", ErrInvalidInput, run.ID)
 	case "plan", "apply":
-		return "", fmt.Errorf("%w: %s runs are re-driven by the trusted plan flow, not rerun", ErrInvalidInput, run.Trigger)
+		return fmt.Errorf("%w: %s runs are re-driven by the trusted plan flow, not rerun", ErrInvalidInput, run.Trigger)
 	}
-	release := run.Release || run.RefKind == model.RefTag
-	if !admin {
-		if release || run.RefKind != model.RefBranch || run.Trigger != "branch" {
-			return "", refuse(ErrForbidden, "a non-admin uplink may rerun only branch-push runs, not %s runs", run.Trigger)
-		}
-		return "", nil
+	if !admin && (run.Release || run.RefKind != model.RefBranch || run.Trigger != "branch") {
+		return refuse(ErrForbidden, "a non-admin uplink may rerun only branch-push runs, not %s runs", run.Trigger)
 	}
-	if release {
-		if !force {
-			return "", fmt.Errorf("%w: run %s is a %s run; a rerun re-executes release.yaml, and anything the failed run already published stays published. "+
-				"Repeat with force to rerun it anyway", ErrInvalidInput, run.ID, run.Trigger)
+	return nil
+}
+
+// RunRerunPolicy requires confirmation if a tag/release may have already
+// performed credentialed or publication work. Unknown evidence is not safe.
+func RunRerunPolicy(run model.Run, admin, force, safe bool) (string, error) {
+	if err := authorizeRunRerun(run, admin); err != nil {
+		return "", err
+	}
+	if run.Release || run.RefKind == model.RefTag {
+		if !force && !safe {
+			return "", fmt.Errorf("%w: run %s is a %s run with started or unknown credentialed/publication work; repeat with force to re-execute release.yaml (anything already published stays published)", ErrInvalidInput, run.ID, run.Trigger)
 		}
-		return releaseRerunWarning, nil
+		if force {
+			return releaseRerunWarning, nil
+		}
 	}
 	return "", nil
 }
@@ -83,13 +85,16 @@ func (service *API) rerunRun(ctx context.Context, actor api.Actor, id, reason st
 	case source.Status == model.RunPassed:
 		return api.RunRerunResponse{}, fmt.Errorf("%w: run %s already passed", ErrInvalidInput, source.ID)
 	}
-	if _, err := RunRerunPolicy(source, actor.Admin, force); err != nil {
+	if err := authorizeRunRerun(source, actor.Admin); err != nil {
 		return api.RunRerunResponse{}, err
 	}
 	if service.enqueues == nil {
 		return api.RunRerunResponse{}, refuse(ErrUnavailable, "run rerun queue")
 	}
 	if source.Status == model.RunFailed && source.Phase == "publishing" {
+		if _, err := RunRerunPolicy(source, actor.Admin, force, false); err != nil {
+			return api.RunRerunResponse{}, err
+		}
 		// Every step passed; re-running them would repeat a release's
 		// publishing work. Re-push the exact recorded object instead.
 		retried, err := service.publishRetry(ctx, actor, source.ID)
@@ -106,10 +111,35 @@ func (service *API) rerunRun(ctx context.Context, actor api.Actor, id, reason st
 			return api.RunRerunResponse{}, err
 		}
 	}
+	audit := &model.RunReplayAudit{Basis: "branch"}
+	tagCheck := func(model.Run) *bool { return nil }
+	if source.Release || source.RefKind == model.RefTag {
+		check, lookupErr := service.prepareReplayTagCheck(ctx, source)
+		if lookupErr != nil {
+			if !force {
+				return api.RunRerunResponse{}, lookupErr
+			}
+		} else {
+			tagCheck = check
+		}
+	}
 	result, err := service.runReruns.RerunRun(ctx, model.RunRerunRequest{
-		RunID: source.ID, Actor: actor.Identity, Reason: reason, Force: force,
-		Authorize: func(current model.Run) (string, error) {
-			return RunRerunPolicy(current, actor.Admin, force)
+		RunID: source.ID, Actor: actor.Identity, Reason: reason, Force: force, ReplayAudit: audit,
+		Authorize: func(current model.Run, evidence model.RunReplayEvidence) (string, error) {
+			safe := false
+			var moved *bool
+			if current.Release || current.RefKind == model.RefTag {
+				moved = tagCheck(current)
+			}
+			if !force && (current.Release || current.RefKind == model.RefTag) {
+				*audit, safe = service.releaseReplayDecision(current, evidence, moved != nil && !*moved)
+			}
+			audit.TagMoved = moved
+			if force && (current.Release || current.RefKind == model.RefTag) {
+				audit.Basis = "forced"
+				audit.PublicationStarted = evidence.PublicationStarted
+			}
+			return RunRerunPolicy(current, actor.Admin, force, safe)
 		},
 	})
 	if err != nil {

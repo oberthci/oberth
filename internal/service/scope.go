@@ -150,14 +150,14 @@ type scopedRunRetries struct {
 	history RunHistory
 }
 
-func (retry scopedRunRetries) RetryRun(ctx context.Context, id, actor string) (model.EnqueueRunResult, error) {
+func (retry scopedRunRetries) RetryRun(ctx context.Context, request model.RunRetryRequest) (model.EnqueueRunResult, error) {
 	if retry.history == nil {
 		return model.EnqueueRunResult{}, refuse(ErrUnavailable, "run retry history")
 	}
-	if _, err := retry.history.ResolveRunID(ctx, id); err != nil {
+	if _, err := retry.history.ResolveRunID(ctx, request.RunID); err != nil {
 		return model.EnqueueRunResult{}, err
 	}
-	return retry.inner.RetryRun(ctx, id, actor)
+	return retry.inner.RetryRun(ctx, request)
 }
 
 type scopedRunCancels struct {

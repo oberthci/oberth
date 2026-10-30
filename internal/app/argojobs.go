@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
 	"k8s.io/apimachinery/pkg/api/resource"
 
 	"github.com/oberthci/oberth/internal/argojob"
@@ -260,7 +261,7 @@ func (jobs *ArgoJobs) PlannedSteps(_ context.Context, request service.JobRequest
 	}
 	steps := make([]runprogress.PlannedStep, 0, len(planned))
 	for _, step := range planned {
-		steps = append(steps, runprogress.PlannedStep{Burn: step.Burn, Step: step.Step, Ordinal: step.Ordinal, Secrets: step.Secrets})
+		steps = append(steps, runprogress.PlannedStep{Burn: step.Burn, Step: step.Step, Ordinal: step.Ordinal, Secrets: step.Secrets, Credentialed: step.Credentialed})
 	}
 	return steps, nil
 }
@@ -784,6 +785,14 @@ func (jobs *ArgoJobs) forget(name, runID string) {
 // engine produces, so nothing downstream can tell which engine ran.
 func (jobs *ArgoJobs) result(completion argojob.Completion) service.JobResult {
 	result := service.JobResult{Status: model.RunFailed, Phase: "job"}
+	if completion.ObservationComplete {
+		observation := &model.RunTerminalObservation{Version: 1, JobName: completion.Name, Nodes: completion.ObservedNodes}
+		for _, step := range completion.ReplayAttempts {
+			started := step.StartedAt != nil || step.Status == runprogress.StepRunning || step.Status == runprogress.StepPassed || step.Status == runprogress.StepFailed || step.Status == runprogress.StepTimedOut
+			observation.Steps = append(observation.Steps, model.RunObservedStep{Burn: step.Burn, Step: step.Step, Status: model.StepStatus(step.Status), Started: started})
+		}
+		result.TerminalObservation = observation
+	}
 	if completion.Succeeded {
 		result.Status = model.RunPassed
 		result.Phase = "passed"
@@ -863,7 +872,37 @@ func (jobs *ArgoJobs) PipelineCredentialed(_ context.Context, request service.Jo
 		return false, fmt.Errorf("decode pipeline for credential detection: %w", err)
 	}
 	paths, err := argoworkflow.DeclaredSecretPaths(workflow)
-	return err == nil && len(paths) > 0, nil
+	if err != nil {
+		return false, err
+	}
+	credentialed := len(paths) > 0
+	// Include inline leaves; use the same predicate as credential admission/plan.
+	var walk func(*wfv1.Template, int)
+	walk = func(t *wfv1.Template, depth int) {
+		if depth > argoworkflow.MaxIdentityWalkDepth {
+			credentialed = true
+			return
+		}
+		credentialed = credentialed || argoworkflow.UsesCredentials(t)
+		for _, group := range t.Steps {
+			for _, step := range group.Steps {
+				if step.Inline != nil {
+					walk(step.Inline, depth+1)
+				}
+			}
+		}
+		if t.DAG != nil {
+			for _, task := range t.DAG.Tasks {
+				if task.Inline != nil {
+					walk(task.Inline, depth+1)
+				}
+			}
+		}
+	}
+	for i := range workflow.Spec.Templates {
+		walk(&workflow.Spec.Templates[i], 0)
+	}
+	return credentialed, nil
 }
 
 var (

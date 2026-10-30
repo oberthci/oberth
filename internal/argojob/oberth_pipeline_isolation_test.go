@@ -305,7 +305,7 @@ func checkOberthBuildIsolation(workflow *wfv1.Workflow) error {
 				}
 				for _, e := range c.Env {
 					if e.Name == "GOLANGCI_LINT_CACHE" && strings.HasPrefix(e.Value, WorkspaceToolsMountPath) && name == "golangci-lint-run" &&
-						!strings.HasPrefix(strings.Join(c.Args, " "), "GOLANGCI_LINT_CACHE=/tmp/private-") {
+						(len(c.Args) == 0 || c.Args[0] != "hack/run-ci-lint.sh") {
 						fail("golangci-lint writes its cache inside the read-only tools")
 					}
 				}
@@ -390,7 +390,7 @@ func TestOberthPipelinesIsolationRejectsDrift(t *testing.T) {
 		{"build.yaml", "diagnostic mounts the whole claim",
 			"        mountPath: /tmp/diagnostic-work\n        subPath: diagnostic\n", "        mountPath: /tmp/diagnostic-work\n"},
 		{"build.yaml", "lint cache inside the read-only tools",
-			`args: ["GOLANGCI_LINT_CACHE=/tmp/private-golangci-lint", "/tmp/oberth-tools/bin/golangci-lint", `,
+			`args: ["hack/run-ci-lint.sh", "/tmp/oberth-tools/bin/golangci-lint", `,
 			`args: ["/tmp/oberth-tools/bin/golangci-lint", `},
 	}
 	for _, tc := range cases {

@@ -58,7 +58,7 @@ func TestRerunRunRefusesWithoutQueueingAndRecordsLineage(t *testing.T) {
 	}
 	denied := errors.New("denied")
 	if _, err := s.RerunRun(ctx, model.RunRerunRequest{RunID: failed.ID, Actor: "agent@host",
-		Authorize: func(model.Run) (string, error) { return "", denied }}); !errors.Is(err, denied) {
+		Authorize: func(model.Run, model.RunReplayEvidence) (string, error) { return "", denied }}); !errors.Is(err, denied) {
 		t.Fatalf("unauthorized rerun error = %v", err)
 	}
 	if _, err := s.RerunRun(ctx, model.RunRerunRequest{RunID: failed.ID, Actor: "agent@host", Reason: "two\nlines"}); !errors.Is(err, ErrInvalid) {

@@ -38,8 +38,8 @@
 # declare a cache volume here -- admission refuses a repository hostPath, and
 # the server decides whether a cache exists at all.
 #
-# Only these two caches persist between runs. Tool binaries stay on the per-run
-# `work` claim on purpose: `go install` publishes into GOBIN with a truncating
+# Go module/build caches and the versioned lint result cache persist between runs.
+# Tool binaries stay on the per-run `work` claim on purpose: `go install` publishes into GOBIN with a truncating
 # write, and a warm build cache makes reinstalling them a few seconds anyway.
 #
 # Tool custody (#567): the setup burn is the only writer of those tools. Every
@@ -47,15 +47,16 @@
 # build-*) do so through an explicit readOnly request on that mount, which the
 # server honours while keeping the persistent Go caches writable (the
 # `readonly` annotation would make those read-only too, and `none` would drop
-# them for a cold private cache per leaf); golangci-lint gets a Pod-private
-# cache because its default lives inside the tools directory. shellcheck,
-# chart, security (Trivy, Pod-private DB) and release-diagnostic opt out of the
+# them for a cold private cache per leaf). The lint wrapper selects the existing
+# repository cache, with a Pod-private fallback, outside the read-only tools.
+# shellcheck, chart, security (Trivy, Pod-private DB) and release-diagnostic opt out of the
 # shared workspace entirely. This pipeline holds no credential; every leaf
 # declares automountServiceAccountToken: false.
 # internal/argojob/oberth_pipeline_test.go checks the admitted Pods.
 #
 # After setup, security runs as a required parallel gate alongside lint and
-# independent checks. Serializing it ahead of branch tests can exhaust the
+# independent checks. Tests/chart start after setup; every output build still
+# requires lint explicitly. Serializing lint ahead of branch tests can exhaust the
 # workflow budget. Allow 90 minutes for setup and builds on loaded hosts;
 # workflow parallelism still bounds active Pods.
 apiVersion: argoproj.io/v1alpha1
@@ -92,13 +93,13 @@ spec:
         depends: setup
       - name: test-store
         template: test-store
-        depends: lint
+        depends: setup
       - name: test-service
         template: test-service
-        depends: lint
+        depends: setup
       - name: test-rest
         template: test-rest
-        depends: lint
+        depends: setup
       - name: build-static-git-runtime
         template: build-static-git-runtime
         depends: setup
@@ -107,10 +108,10 @@ spec:
         depends: build-static-git-runtime
       - name: test-gitcache
         template: test-gitcache
-        depends: lint
+        depends: setup
       - name: test-archive-history
         template: test-archive-history
-        depends: lint
+        depends: setup
       - name: test-openbao
         template: test-openbao
         depends: setup
@@ -122,7 +123,7 @@ spec:
         depends: setup
       - name: chart
         template: chart
-        depends: lint
+        depends: setup
       - name: release-diagnostic
         template: release-diagnostic
         depends: setup
@@ -131,16 +132,16 @@ spec:
         depends: setup
       - name: build-amd64
         template: build-amd64
-        depends: "test-store && test-service && test-rest && test-gitcache && test-static-git-runtime && test-archive-history && chart"
+        depends: "lint && test-store && test-service && test-rest && test-gitcache && test-static-git-runtime && test-archive-history && chart"
       - name: build-arm64
         template: build-arm64
-        depends: "test-store && test-service && test-rest && test-gitcache && test-static-git-runtime && test-archive-history && chart"
+        depends: "lint && test-store && test-service && test-rest && test-gitcache && test-static-git-runtime && test-archive-history && chart"
       - name: build-darwin-amd64
         template: build-darwin-amd64
-        depends: "test-store && test-service && test-rest && test-gitcache && test-static-git-runtime && test-archive-history && chart"
+        depends: "lint && test-store && test-service && test-rest && test-gitcache && test-static-git-runtime && test-archive-history && chart"
       - name: build-darwin-arm64
         template: build-darwin-arm64
-        depends: "test-store && test-service && test-rest && test-gitcache && test-static-git-runtime && test-archive-history && chart"
+        depends: "lint && test-store && test-service && test-rest && test-gitcache && test-static-git-runtime && test-archive-history && chart"
 
   # ---- setup burn (8 sequential steps) ----
   # Maps to: Test("setup", repositorySteps(inlineToolchainSteps()...)...)
@@ -704,7 +705,7 @@ spec:
   # ---- lint burn (2 sequential steps) ----
   # Maps to: Test("lint", repositorySteps(
   #   ctx.Go.Vet("./..."),
-  #   ctx.Lint.GolangciLint("./...").Size(L).Env("GOMEMLIMIT","2GiB"))
+  #   ctx.Lint.GolangciLint("./...").Size(L).Env("GOMEMLIMIT","6GiB"))
   #   ...).After("setup")
   - name: lint
     steps:
@@ -771,19 +772,19 @@ spec:
           memory: "4Gi"
 
   # [golangci-lint-./...]
-  # golangci-lint exceeds the M (1Gi) budget and is OOMKilled at M --
-  # proven by run 53e6d1d7 (2026-08-09); L grants 3Gi. GOMEMLIMIT rises
-  # with the budget (SDK default 768MiB would GC-thrash inside an L pod).
+  # Keep one analysis worker under load. Use 6GiB of the actual 8Gi limit
+  # for the Go runtime, leaving 2GiB headroom without the old 2GiB soft cap.
+  # Internal --timeout is cooperative; the wrapper enforces a process deadline.
   - name: golangci-lint-run
     automountServiceAccountToken: false
     container:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
       workingDir: /work/src
-      command: ["/usr/bin/env"]
-      args: ["GOLANGCI_LINT_CACHE=/tmp/private-golangci-lint", "/tmp/oberth-tools/bin/golangci-lint", "run", "--timeout=10m", "--concurrency=1", "./..."]
+      command: ["/bin/sh"]
+      args: ["hack/run-ci-lint.sh", "/tmp/oberth-tools/bin/golangci-lint", "run", "--timeout=10m", "--concurrency=1", "./..."]
       env:
       - name: GOMEMLIMIT
-        value: "2GiB"
+        value: "6GiB"
       - name: PATH
         value: "/tmp/oberth-tools/bin:/usr/local/bin:/usr/bin:/bin"
       - name: OBERTH_TOOLS_DIR

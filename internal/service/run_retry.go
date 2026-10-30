@@ -22,7 +22,30 @@ func (service *API) retryRun(ctx context.Context, actor api.Actor, id string) (m
 	if err != nil {
 		return model.Run{}, err
 	}
-	enqueued, err := service.runRetries.RetryRun(ctx, previous.ID, actor.Identity)
+	if previous.Release || previous.RefKind == model.RefTag {
+		if err := authorizeRunRerun(previous, actor.Admin); err != nil {
+			return model.Run{}, err
+		}
+	}
+	audit := &model.RunReplayAudit{Basis: "branch"}
+	tagCheck := func(model.Run) *bool { return nil }
+	if previous.Release || previous.RefKind == model.RefTag {
+		tagCheck, err = service.prepareReplayTagCheck(ctx, previous)
+		if err != nil {
+			return model.Run{}, err
+		}
+	}
+	enqueued, err := service.runRetries.RetryRun(ctx, model.RunRetryRequest{
+		RunID: previous.ID, Actor: actor.Identity, ReplayAudit: audit,
+		Authorize: func(current model.Run, evidence model.RunReplayEvidence) error {
+			moved := tagCheck(current)
+			decision, safe := service.releaseReplayDecision(current, evidence, moved != nil && !*moved)
+			decision.TagMoved = moved
+			*audit = decision
+			_, err := RunRerunPolicy(current, actor.Admin, false, safe)
+			return err
+		},
+	})
 	if err != nil {
 		return model.Run{}, err
 	}

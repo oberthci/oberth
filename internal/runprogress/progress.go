@@ -153,7 +153,7 @@ func (event Event) Terminal() bool { return event.Status.terminal() }
 // plan is written once per run by the server, so the bound only has to admit a
 // pipeline a human wrote; MaxPlannedSteps caps the entries long before this.
 const (
-	PlanVersion  = 1
+	PlanVersion  = 2
 	MaxPlanBytes = 256 << 10
 )
 
@@ -167,12 +167,15 @@ const (
 // Secrets records that the declared step runs a credential chain and so
 // receives the secret store login token. It is a property of the reviewed
 // document, not an outcome, so the plan may carry it; plans written before it
-// existed decode with it false.
+// existed decode with it false and cannot prove replay safety. Credentialed
+// adds every admitted credential class, including WIF; version 2 records it
+// explicitly even when false.
 type PlannedStep struct {
-	Burn    string `json:"burn"`
-	Step    string `json:"step"`
-	Ordinal int    `json:"ordinal"`
-	Secrets bool   `json:"secrets,omitempty"`
+	Burn         string `json:"burn"`
+	Step         string `json:"step"`
+	Ordinal      int    `json:"ordinal"`
+	Secrets      bool   `json:"secrets,omitempty"`
+	Credentialed bool   `json:"credentialed"`
 }
 
 // Plan is the durable record of what a run intended to do, written before its
@@ -184,7 +187,7 @@ type Plan struct {
 }
 
 func (plan Plan) Validate() error {
-	if plan.Version != PlanVersion {
+	if plan.Version != 1 && plan.Version != PlanVersion {
 		return fmt.Errorf("unsupported plan version %d", plan.Version)
 	}
 	keys := make(map[string]struct{}, len(plan.Steps))

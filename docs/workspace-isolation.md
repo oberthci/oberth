@@ -115,7 +115,11 @@ credential chain (`envconsul`, `oberth secretstore exec|materialize`): a
 planted object would execute with the leaf's secrets in its environment. Use
 `none` there. On the release tier `cache` is admitted on credentialed leaves
 too, because the release root is written only by tag runs. Go's module and build caches tolerate
-concurrent writers; nothing else should be kept there. In particular, a
+concurrent writers. Oberth's branch lint wrapper also keeps its versioned
+golangci-lint v2.12.2 result cache here: that pinned tool uses a Go-derived
+cache with local multi-process file locking. This requires the existing
+node-local filesystem, not an NFS cache. With no configured cache root, lint
+uses private `/tmp` instead. Tool binaries remain on the per-run claim. A
 Trivy `--cache-dir` inside `/work/cache` is treated as shared by the Trivy
 guard (unordered pairs are refused), and since concurrent runs of the same
 repository share the directory, keep Trivy's database in `/tmp`.

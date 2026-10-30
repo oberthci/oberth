@@ -368,8 +368,30 @@ func TestQueuePriorityTagGrantIsScopedAuditedAndRecheckedForReruns(t *testing.T)
 	if _, err = s.SetSizeGrant(ctx, repo.ID, "admin", ""); err != nil {
 		t.Fatal(err)
 	}
-	retry, err := s.RerunRun(ctx, model.RunRerunRequest{RunID: tag.ID, Actor: "scoped-dev", Reason: "retry"})
-	if err != nil || retry.Enqueued.Priority != model.PriorityNormal {
+	before, err := s.CountRuns(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.RerunRun(ctx, model.RunRerunRequest{RunID: tag.ID, Actor: "admin", Force: true}); !errors.Is(err, ErrInvalidState) {
+		t.Fatalf("tag rerun without authorization accepted: %v", err)
+	}
+	after, err := s.CountRuns(ctx)
+	if err != nil || after.Total != before.Total {
+		t.Fatalf("unauthorized rerun changed queue: before=%+v after=%+v err=%v", before, after, err)
+	}
+	authorized := false
+	retry, err := s.RerunRun(ctx, model.RunRerunRequest{
+		RunID: tag.ID, Actor: "admin", Reason: "recheck revoked priority grant", Force: true,
+		ReplayAudit: &model.RunReplayAudit{Basis: "forced"},
+		Authorize: func(current model.Run, _ model.RunReplayEvidence) (string, error) {
+			if current.ID != tag.ID {
+				t.Fatalf("authorized wrong run: %s", current.ID)
+			}
+			authorized = true
+			return "explicit release replay authorization", nil
+		},
+	})
+	if err != nil || !authorized || retry.Enqueued.Priority != model.PriorityNormal {
 		t.Fatalf("rerun bypassed revoked grant: %+v %v", retry, err)
 	}
 	next, err := s.NextQueuedRun(ctx)
