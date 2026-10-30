@@ -37,6 +37,8 @@ const (
 	vmiPendingGracePeriod   = 5 * time.Minute
 )
 
+var errVMIOverGrant = errors.New("VMI create refused over grant or workflow peak")
+
 // Public, server-generated and included in the immutable submission identity.
 // Existing grants/defaults are unchanged; a running workflow retains its
 // admitted limit, just as it does after grant revocation today.
@@ -599,7 +601,7 @@ func (c *Controller) reserveVMIClaim(ctx context.Context, key string, want vmiCl
 			return vmiClaim{}, false, errors.New("argojob: VMI reservation ledger is full")
 		}
 		if !addVMIDemand(repoUsed, want.Demand).Fits(binding.Limit) || !addVMIDemand(workflowUsed, want.Demand).Fits(binding.Peak) {
-			return vmiClaim{}, false, fmt.Errorf("argojob: VMI create refused over grant or workflow peak: repository used=%+v requested=%+v limit=%+v workflow used=%+v peak=%+v", repoUsed, want.Demand, binding.Limit, workflowUsed, binding.Peak)
+			return vmiClaim{}, false, fmt.Errorf("argojob: %w: repository used=%+v requested=%+v limit=%+v workflow used=%+v peak=%+v", errVMIOverGrant, repoUsed, want.Demand, binding.Limit, workflowUsed, binding.Peak)
 		}
 		want.ReservedAt = time.Now().UTC()
 		ledger.Claims[key] = want

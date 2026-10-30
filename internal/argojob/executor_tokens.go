@@ -97,6 +97,9 @@ func (controller *Controller) deliverExecutorTokens(ctx context.Context, wf *wfv
 	}
 	pods, err := controller.kube.CoreV1().Pods(wf.Namespace).List(ctx, metav1.ListOptions{LabelSelector: "workflows.argoproj.io/workflow=" + wf.Name})
 	if err != nil {
+		if ctx.Err() == nil && retryExecutorIdentityRead(err) {
+			return nil
+		}
 		return identityFailure("pod_list", err)
 	}
 	for i := range pods.Items {
@@ -155,9 +158,22 @@ func (controller *Controller) deliverExecutorTokens(ctx context.Context, wf *wfv
 		}
 		holder, err := controller.executorIdentityPod(ctx, wf, serviceAccount)
 		if err != nil {
+			if ctx.Err() == nil && retryExecutorIdentityRead(err) {
+				continue
+			}
 			return identityFailure("identity_pod", err)
 		}
-		token, err := controller.kube.CoreV1().ServiceAccounts(wf.Namespace).CreateToken(ctx, serviceAccount, &authenticationv1.TokenRequest{Spec: authenticationv1.TokenRequestSpec{ExpirationSeconds: &seconds, BoundObjectRef: &authenticationv1.BoundObjectReference{Kind: "Pod", APIVersion: "v1", Name: holder.Name, UID: holder.UID}}}, metav1.CreateOptions{})
+		ca, err := controller.kube.CoreV1().ConfigMaps(wf.Namespace).Get(ctx, "kube-root-ca.crt", metav1.GetOptions{})
+		if err != nil {
+			if ctx.Err() == nil && retryExecutorIdentityRead(err) {
+				continue
+			}
+			return identityFailure("trust_anchor", err)
+		}
+		if ca.Data["ca.crt"] == "" {
+			return identityFailure("trust_anchor_response", errors.New("executor API trust anchor is empty"))
+		}
+		token, err := controller.requestExecutorIdentity(ctx, wf.Namespace, serviceAccount, &authenticationv1.TokenRequest{Spec: authenticationv1.TokenRequestSpec{ExpirationSeconds: &seconds, BoundObjectRef: &authenticationv1.BoundObjectReference{Kind: "Pod", APIVersion: "v1", Name: holder.Name, UID: holder.UID}}})
 		if err != nil {
 			return identityFailure("token_request", err)
 		}
@@ -167,16 +183,12 @@ func (controller *Controller) deliverExecutorTokens(ctx context.Context, wf *wfv
 		if token.Status.Token == "" {
 			return identityFailure("token_response", errors.New("empty executor token response"))
 		}
-		ca, err := controller.kube.CoreV1().ConfigMaps(wf.Namespace).Get(ctx, "kube-root-ca.crt", metav1.GetOptions{})
-		if err != nil {
-			return identityFailure("trust_anchor", err)
-		}
-		if ca.Data["ca.crt"] == "" {
-			return identityFailure("trust_anchor_response", errors.New("executor API trust anchor is empty"))
-		}
 		payload := []byte(token.Status.Token + "\n" + wf.Namespace + "\n" + base64.StdEncoding.EncodeToString([]byte(ca.Data["ca.crt"])) + "\n")
 		err = controller.execExecutorIdentity(ctx, wf, pod, launcher, payload)
 		clear(payload)
+		if errors.Is(err, errExecutorIdentityTargetGone) {
+			continue
+		}
 		if err != nil {
 			return err
 		}
@@ -330,4 +342,26 @@ func (controller *Controller) retireIdentityPod(ctx context.Context, wf *wfv1.Wo
 		return nil
 	}
 	return err
+}
+
+// TokenRequest gets at most one re-request, only for explicit load/timeouts.
+// Both calls and their backoff share a single 20-second per-Pod deadline.
+func (controller *Controller) requestExecutorIdentity(ctx context.Context, namespace, account string, request *authenticationv1.TokenRequest) (*authenticationv1.TokenRequest, error) {
+	requestCtx, cancel := context.WithTimeout(ctx, executorIdentityAttemptTimeout)
+	defer cancel()
+	for attempt := 1; ; attempt++ {
+		token, err := controller.kube.CoreV1().ServiceAccounts(namespace).CreateToken(requestCtx, account, request, metav1.CreateOptions{})
+		var network interface{ Timeout() bool }
+		transient := apierrors.IsTooManyRequests(err) || apierrors.IsServiceUnavailable(err) || apierrors.IsTimeout(err) || apierrors.IsServerTimeout(err) || errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &network) && network.Timeout())
+		if err == nil || attempt == 2 || !transient || requestCtx.Err() != nil {
+			return token, err
+		}
+		timer := time.NewTimer(executorIdentityBackoff(1))
+		select {
+		case <-requestCtx.Done():
+			timer.Stop()
+			return nil, requestCtx.Err()
+		case <-timer.C:
+		}
+	}
 }

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math/rand/v2"
 	"net"
 	"strconv"
 	"time"
@@ -36,10 +37,15 @@ type executorIdentityError struct {
 	reason   string
 	attempts int
 	cause    error
+	public   string
 }
 
 func (err *executorIdentityError) Error() string {
-	return fmt.Sprintf("deliver executor identity failed (stage=%s reason=%s attempts=%d)", err.stage, err.reason, err.attempts)
+	text := fmt.Sprintf("deliver executor identity failed (stage=%s reason=%s attempts=%d)", err.stage, err.reason, err.attempts)
+	if err.public != "" {
+		text += ": " + err.public
+	}
+	return text
 }
 func (err *executorIdentityError) Unwrap() error { return err.cause }
 func (err *executorIdentityError) InfrastructureFailure() bool {
@@ -62,7 +68,17 @@ func identityFailure(stage string, err error) error {
 		reason = "invalid_response"
 	}
 
-	return &executorIdentityError{stage: stage, reason: reason, attempts: 1, cause: err}
+	failure := &executorIdentityError{stage: stage, reason: reason, attempts: 1, cause: err}
+	if stage == "launcher_provision" && errors.Is(err, errVMIOverGrant) {
+		failure.reason, failure.public = "vmi_over_grant", errVMIOverGrant.Error()
+	}
+	if stage == "target_validation" || stage == "identity_pod" {
+		switch err.Error() {
+		case "executor token target is not memory-backed", "ephemeral container can access executor identity", "executor identity waiter was modified", "pipeline container can access executor identity", "executor identity waiter missing", "executor identity target owner changed", "executor identity target has no UID", "executor identity target changed during exec", "executor identity lifetime Pod does not match", "executor identity owner changed":
+			failure.public = err.Error() // Exact allowlist of fixed internal diagnostics.
+		}
+	}
+	return failure
 }
 
 func executorIdentityErrorClass(err error) string {
@@ -130,42 +146,130 @@ func workflowOwnsIdentityTarget(workflow *wfv1.Workflow, pod *corev1.Pod) bool {
 	return false
 }
 
+// A disappearing target is left to Argo's lifecycle/result observation. The
+// delivered map must not cache it; a replacement is validated on the next tick.
+var errExecutorIdentityTargetGone = errors.New("executor identity target gone")
+
+func (controller *Controller) executorIdentityTarget(ctx context.Context, workflow *wfv1.Workflow, original *corev1.Pod, launcher bool) (*corev1.Pod, error) {
+	pod, err := controller.kube.CoreV1().Pods(workflow.Namespace).Get(ctx, original.Name, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		return nil, errExecutorIdentityTargetGone
+	}
+	if err != nil {
+		return nil, err
+	}
+	if pod.UID == "" || original.UID == "" {
+		return nil, identityFailure("target_validation", errors.New("executor identity target has no UID"))
+	}
+	if pod.UID != original.UID || pod.DeletionTimestamp != nil {
+		return nil, errExecutorIdentityTargetGone
+	}
+	if !workflowOwnsIdentityTarget(workflow, pod) {
+		return nil, identityFailure("target_validation", errors.New("executor identity target owner changed"))
+	}
+	if err := validateExecutorTokenTarget(pod, controller.config.SourceSeedImage, launcher); err != nil {
+		return nil, identityFailure("target_validation", err)
+	}
+	for _, status := range pod.Status.InitContainerStatuses {
+		if status.Name == executorTokenWaiter && status.State.Terminated != nil && status.State.Terminated.ExitCode != 0 {
+			return nil, errExecutorIdentityTargetGone
+		}
+	}
+	return pod, nil
+}
+
+func identityWaiterState(pod *corev1.Pod) (running, complete bool) {
+	for _, status := range pod.Status.InitContainerStatuses {
+		if status.Name == executorTokenWaiter {
+			return status.State.Running != nil, status.State.Terminated != nil && status.State.Terminated.ExitCode == 0
+		}
+	}
+	return false, false
+}
+
+// Exec addresses a Pod by name, not UID. Verify again after an acknowledgement;
+// on uncertainty retire the bound identity so a replacement cannot keep it.
+// A remote exit gets exactly one reconciliation read, never another exec.
+func (controller *Controller) reconcileExecutorIdentity(ctx context.Context, workflow *wfv1.Workflow, original *corev1.Pod, launcher bool, execErr error) error {
+	pod, err := controller.executorIdentityTarget(ctx, workflow, original, launcher)
+	if err == nil {
+		_, complete := identityWaiterState(pod)
+		if execErr == nil || complete {
+			return nil
+		}
+		return execErr
+	}
+	var invalid *executorIdentityError
+	if execErr != nil && !errors.As(err, &invalid) {
+		if errors.Is(err, errExecutorIdentityTargetGone) {
+			return err
+		}
+		return execErr // Unknown acknowledgement remains the original hard exit.
+	}
+	var failure *executorIdentityError
+	if errors.As(err, &invalid) {
+		failure = invalid
+	} else if errors.Is(err, errExecutorIdentityTargetGone) {
+		failure = identityFailure("target_validation", errors.New("executor identity target changed during exec")).(*executorIdentityError)
+	} else {
+		failure = identityFailure("pod_read", err).(*executorIdentityError)
+	}
+	account := controller.config.ExecutorServiceAccount
+	if launcher {
+		account = controller.config.VMLauncherServiceAccount
+	}
+	if retireErr := controller.retireIdentityPod(ctx, workflow, account); retireErr != nil {
+		failure.cause = errors.Join(failure.cause, retireErr)
+	}
+	return failure
+}
+
 func (controller *Controller) execExecutorIdentity(ctx context.Context, workflow *wfv1.Workflow, original *corev1.Pod, launcher bool, payload []byte) error {
 	for attempt := 1; attempt <= executorIdentityAttempts; attempt++ {
 		attemptCtx, cancel := context.WithTimeout(ctx, executorIdentityAttemptTimeout)
 		started := time.Now()
-		pod, err := controller.kube.CoreV1().Pods(workflow.Namespace).Get(attemptCtx, original.Name, metav1.GetOptions{})
+		pod, err := controller.executorIdentityTarget(attemptCtx, workflow, original, launcher)
 		stage, reason, retry := "pod_read", "", false
-		if err != nil {
+		reconciled := false
+		if errors.Is(err, errExecutorIdentityTargetGone) {
+			cancel()
+			return err
+		}
+		var invalid *executorIdentityError
+		if errors.As(err, &invalid) {
+			stage, reason = invalid.stage, invalid.reason
+		} else if err != nil {
 			retry = retryExecutorIdentityRead(err)
-		} else if pod.UID == "" || original.UID == "" || pod.UID != original.UID || !workflowOwnsIdentityTarget(workflow, pod) {
-			stage = "target_validation"
-			err, reason = errors.New("executor identity target changed"), "target_changed"
-		} else if err = validateExecutorTokenTarget(pod, controller.config.SourceSeedImage, launcher); err != nil {
-			stage, reason = "target_validation", "invalid_target"
 		} else {
 			stage = "exec"
-			running, complete := false, false
-			for _, status := range pod.Status.InitContainerStatuses {
-				if status.Name != executorTokenWaiter {
-					continue
-				}
-				running = status.State.Running != nil
-				complete = status.State.Terminated != nil && status.State.Terminated.ExitCode == 0
-			}
+			running, complete := identityWaiterState(pod)
 			if complete {
-				// The verified waiter's exact command can complete only after the token
-				// marker exists. A previous exec committed but lost its acknowledgement.
+				// The exact verified waiter can finish only after the marker exists.
 				cancel()
 				return nil
 			}
 			if !running {
-				err, reason, retry = errors.New("executor waiter not running"), "waiter_not_running", false
-			} else {
-				err = controller.seeder.exec(attemptCtx, workflow.Namespace, pod.Name, executorTokenWaiter,
-					[]string{"sh", "-c", executorIdentityDeliveryCommand}, bytes.NewReader(payload), io.Discard, io.Discard)
-				retry = retryExecutorIdentityExec(err)
+				cancel()
+				return errExecutorIdentityTargetGone
 			}
+			// StreamWithContext may return before its stdin copier stops. This private
+			// immutable copy is never cleared while a stale copier could still read it.
+			err = controller.seeder.exec(attemptCtx, workflow.Namespace, pod.Name, executorTokenWaiter,
+				[]string{"sh", "-c", executorIdentityDeliveryCommand}, bytes.NewReader(bytes.Clone(payload)), io.Discard, io.Discard)
+			if err == nil || executorIdentityErrorClass(err) == "remote_exit" {
+				err = controller.reconcileExecutorIdentity(attemptCtx, workflow, original, launcher, err)
+				reconciled = true
+				if errors.Is(err, errExecutorIdentityTargetGone) {
+					cancel()
+					return err
+				}
+				if errors.As(err, &invalid) {
+					invalid.attempts = attempt
+					cancel()
+					return invalid // Retirement already attempted; do not deliver again.
+				}
+			}
+			retry = retryExecutorIdentityExec(err)
 		}
 		if errors.Is(attemptCtx.Err(), context.DeadlineExceeded) && err != nil && (retry || errors.Is(err, context.Canceled)) {
 			err = errors.Join(err, context.DeadlineExceeded)
@@ -182,11 +286,29 @@ func (controller *Controller) execExecutorIdentity(ctx context.Context, workflow
 			reason = executorIdentityErrorClass(err)
 		}
 		failure := &executorIdentityError{stage: stage, reason: reason, attempts: attempt, cause: err}
+		if invalid != nil {
+			failure.public = invalid.public
+		}
 		log.Printf("executor_identity: workflow=%s pod=%s uid=%s stage=%s reason=%s attempt=%d/%d elapsed=%s", strconv.Quote(workflow.Name), strconv.Quote(original.Name), strconv.Quote(string(original.UID)), stage, reason, attempt, executorIdentityAttempts, time.Since(started))
 		if ctx.Err() != nil || !retry || attempt == executorIdentityAttempts {
+			if ctx.Err() == nil && stage == "exec" && !reconciled {
+				// The final attempt can commit at its deadline. Use a fresh bounded read,
+				// under the original caller, before giving up without another exec.
+				reconcileCtx, stop := context.WithTimeout(ctx, 2*time.Second)
+				checked := controller.reconcileExecutorIdentity(reconcileCtx, workflow, original, launcher, err)
+				stop()
+				if checked == nil || errors.Is(checked, errExecutorIdentityTargetGone) {
+					return checked
+				}
+				var invalid *executorIdentityError
+				if errors.As(checked, &invalid) {
+					invalid.attempts = attempt
+					return invalid
+				}
+			}
 			return failure
 		}
-		timer := time.NewTimer(time.Duration(1<<(attempt-1)) * time.Second)
+		timer := time.NewTimer(executorIdentityBackoff(attempt))
 		select {
 		case <-ctx.Done():
 			timer.Stop()
@@ -195,4 +317,10 @@ func (controller *Controller) execExecutorIdentity(ctx context.Context, workflow
 		}
 	}
 	panic("unreachable executor identity retry")
+}
+
+// ±50% jitter avoids lockstep retries under shared API/runtime load.
+func executorIdentityBackoff(attempt int) time.Duration {
+	base := time.Duration(1<<(attempt-1)) * time.Second
+	return base/2 + time.Duration(rand.Int64N(int64(base)+1))
 }

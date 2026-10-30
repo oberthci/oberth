@@ -1,10 +1,12 @@
 package argojob
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"errors"
 	"io"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -57,6 +59,10 @@ func executorRetryFixture(t *testing.T) (*Controller, *wfv1.Workflow, *corev1.Po
 }
 
 func TestExecutorIdentityTransientExecRetryReusesOneTokenAndPayload(t *testing.T) {
+	var captured bytes.Buffer
+	previous := log.Writer()
+	log.SetOutput(&captured)
+	defer log.SetOutput(previous)
 	synctest.Test(t, func(t *testing.T) {
 		controller, wf, pod, requests := executorRetryFixture(t)
 		attempts := 0
@@ -89,10 +95,13 @@ func TestExecutorIdentityTransientExecRetryReusesOneTokenAndPayload(t *testing.T
 		if err := controller.deliverExecutorTokens(t.Context(), wf, delivered); err != nil {
 			t.Fatal(err)
 		}
-		if attempts != 3 || *requests != 1 || !delivered[pod.UID] || time.Since(started) != 3*time.Second {
+		if attempts != 3 || *requests != 1 || !delivered[pod.UID] || (time.Since(started) < 1500*time.Millisecond || time.Since(started) > 4500*time.Millisecond) {
 			t.Fatalf("retry budget/credentials: attempts=%d requests=%d elapsed=%s", attempts, *requests, time.Since(started))
 		}
 	})
+	if strings.Contains(captured.String(), "private-token") || !strings.Contains(captured.String(), "state=recovered") {
+		t.Fatalf("unsafe/missing delivery logs: %q", captured.String())
+	}
 }
 
 func TestExecutorIdentityExecDeadlineBudgetAndSafeError(t *testing.T) {
@@ -110,7 +119,7 @@ func TestExecutorIdentityExecDeadlineBudgetAndSafeError(t *testing.T) {
 		if !errors.As(err, &classified) || !classified.InfrastructureFailure() || !errors.Is(err, context.DeadlineExceeded) || classified.attempts != 3 {
 			t.Fatalf("lost infrastructure classification/cause: %v", err)
 		}
-		if attempts != 3 || *requests != 1 || time.Since(started) != 63*time.Second {
+		if attempts != 3 || *requests != 1 || (time.Since(started) < 61500*time.Millisecond || time.Since(started) > 66500*time.Millisecond) {
 			t.Fatalf("unbounded retry: attempts=%d requests=%d elapsed=%s", attempts, *requests, time.Since(started))
 		}
 		safe := identityFailure("exec", errors.New("private-token arbitrary response"))
@@ -145,7 +154,7 @@ func TestExecutorIdentityPermanentExecErrorsDoNotRetry(t *testing.T) {
 }
 
 func TestExecutorIdentityRetryRevalidatesTargetAndReconcilesLostAck(t *testing.T) {
-	for _, scenario := range []string{"new-uid", "foreign-owner", "modified-waiter", "token-committed"} {
+	for _, scenario := range []string{"new-uid", "deleted", "dying", "waiter-failed", "foreign-owner", "modified-waiter", "token-committed", "remote-exit-committed"} {
 		t.Run(scenario, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				controller, wf, pod, requests := executorRetryFixture(t)
@@ -156,15 +165,28 @@ func TestExecutorIdentityRetryRevalidatesTargetAndReconcilesLostAck(t *testing.T
 					switch scenario {
 					case "new-uid":
 						current.UID = "replacement-uid"
+					case "deleted":
+						if err := controller.kube.CoreV1().Pods(wf.Namespace).Delete(t.Context(), pod.Name, metav1.DeleteOptions{}); err != nil {
+							t.Fatal(err)
+						}
+						return io.ErrUnexpectedEOF
+					case "dying":
+						now := metav1.Now()
+						current.DeletionTimestamp = &now
+					case "waiter-failed":
+						current.Status.InitContainerStatuses[0].State = corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{ExitCode: 1}}
 					case "foreign-owner":
 						current.OwnerReferences[0].UID = "foreign-workflow"
 					case "modified-waiter":
 						current.Spec.InitContainers[0].Image = "untrusted"
-					case "token-committed":
+					case "token-committed", "remote-exit-committed":
 						current.Status.InitContainerStatuses[0].State = corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{ExitCode: 0}}
 					}
 					if _, err := controller.kube.CoreV1().Pods(wf.Namespace).Update(t.Context(), current, metav1.UpdateOptions{}); err != nil {
 						t.Fatal(err)
+					}
+					if scenario == "remote-exit-committed" {
+						return kexec.CodeExitError{Err: errors.New("waiter stopped exec"), Code: 137}
 					}
 					return io.ErrUnexpectedEOF
 				}
@@ -173,7 +195,11 @@ func TestExecutorIdentityRetryRevalidatesTargetAndReconcilesLostAck(t *testing.T
 				if attempts != 1 || *requests != 1 {
 					t.Fatal("replayed delivery after target changed or waiter completed")
 				}
-				if scenario == "token-committed" {
+				if scenario == "new-uid" || scenario == "deleted" || scenario == "dying" || scenario == "waiter-failed" {
+					if err != nil || delivered[pod.UID] {
+						t.Fatal("gone target was cached or overrode workflow observation", err)
+					}
+				} else if scenario == "token-committed" || scenario == "remote-exit-committed" {
 					if err != nil || !delivered[pod.UID] {
 						t.Fatal("lost acknowledgement was not reconciled", err)
 					}
@@ -203,7 +229,7 @@ func TestExecutorIdentityRetryHandlesReadErrorsAndCancellation(t *testing.T) {
 			attempts++
 			return nil
 		}
-		if err := controller.deliverExecutorTokens(t.Context(), wf, map[types.UID]bool{}); err != nil || attempts != 1 || reads != 2 {
+		if err := controller.deliverExecutorTokens(t.Context(), wf, map[types.UID]bool{}); err != nil || attempts != 1 || reads != 3 {
 			t.Fatalf("transient target read ended run: %v", err)
 		}
 		// A short parent deadline cancels the in-flight attempt; no new attempt or

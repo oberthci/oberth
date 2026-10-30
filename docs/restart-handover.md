@@ -21,24 +21,59 @@ indicators; a quiet command can have a healthy connection without new output.
 
 Executor identity delivery uses a Pod-bound Kubernetes TokenRequest, streamed
 on stdin into the workflow-owned executor waiter. It does not use a Kubernetes
-Secret or the application's OpenBao credentials. Transient exec/transport errors
-are retried at most three times, with a 20-second budget for each target read and
-exec attempt, and one- then two-second backoff (at most 63 seconds for that retry
-sequence, shortened by cancellation). Each attempt rechecks the Pod UID,
-Workflow owner and waiter configuration. The same payload is reused, staging is
-private to each exec, and the token marker is committed without overwriting an
-existing marker. A successfully completed waiter reconciles a lost exec
-acknowledgement. Access denials, invalid targets and remote command exit errors
-are not retried.
+Secret or the application's OpenBao credentials. Retryable Pod-list,
+identity-holder and trust-anchor API reads defer delivery to the next Wait tick
+without marking that Pod delivered. The trust anchor is read before minting a
+token. TokenRequest permits one re-request for explicit throttling,
+unavailability or timeout, sharing a 20-second deadline; permission and
+validation refusals do not re-request. Once a token response succeeds, all exec
+attempts reuse that same token and payload.
 
-Exhausted executor-identity delivery is recorded as `failed` with phase
-`infrastructure`, after the existing terminal-result check and ownership-checked
-Workflow deletion. A real terminal CI result takes precedence; unsuccessful
-deletion leaves the run owned for recovery. `run_retry` retains its existing
-branch/newest-run restrictions. Bounded `executor_identity` logs record the
-Workflow, Pod UID, stage, reason class and attempt, never token bytes or raw
-transport response bodies. A delivery error alone cannot establish whether an
-old failure was an API timeout, a kubelet/runtime exec delay or a lost response.
+Transient exec/transport errors allow **three attempts total (two retries)**.
+Each target-read/exec attempt has a 20-second budget; backoffs have one- and
+two-second bases with ±50% jitter. A final failed exec gets one reconciliation
+read of at most two seconds, for at most 66.5 seconds in that exec sequence,
+shortened by caller cancellation. Remote exits get one reconciliation read
+inside their attempt and no re-exec. A verified waiter that terminated with
+exit code zero proves that the marker was committed, including after a lost
+acknowledgement on the final attempt.
+
+Each attempt rechecks the Pod UID, Workflow owner, deletion state and waiter
+configuration. A gone, replaced, deleting or failed-waiter target is skipped
+without caching delivery; Argo's observation determines its result and any
+replacement is validated on a later tick. Live same-UID ownership/spec/volume
+violations remain hard failures. After an exec acknowledgement the target is
+re-read; an identity mismatch or unverifiable successful delivery attempts to
+retire the bound identity-holder Pod and fails rather than accepting it.
+Retirement failure remains an error; Workflow cleanup is still required.
+
+Payload fields are newline-framed, with a nonempty base64 CA line decoded and
+checked before any public-file replacement. The token marker is committed last
+with a no-clobber hard link. Each exec has private staging and an immutable
+stdin copy, so a stale client-go copier cannot race clearing the caller's
+payload. Clean exits remove staging. A killed exec can leave a private 0700
+staging directory (including a token hard link) on the same memory volume until
+the Pod is removed. No new credential audience or persistent storage is added.
+
+Delivery is sequential within a Wait tick. One Pod's retries can delay other
+Pod waiters and log observation in that run; the budgets above are per Pod,
+not a total per-tick limit. Jitter reduces synchronized retries across runs.
+
+Only recognized transport/API failures at identity-delivery stages are labelled
+`infrastructure`. Policy, quota, ownership, target, invalid token/CA response,
+remote exit and unclassified errors remain hard `job` failures. Fixed safe
+validation diagnostics and the VMI over-grant reason stay actionable; raw
+transport/server response text stays out of public errors and logs. A real
+terminal CI result takes precedence, and ownership-checked Workflow deletion
+must succeed before an observation failure terminalizes the run. Unsuccessful
+deletion leaves the run owned for recovery. Existing replay authorization and
+evidence rules still apply to `run_retry`.
+
+Bounded `executor_identity` logs record the Workflow, Pod UID, stage, reason
+class and attempt, never token bytes or raw response bodies. A delivery error
+alone cannot establish whether an old failure was an API timeout, a
+kubelet/runtime exec delay or a lost response.
+
 
 On SIGTERM the server marks `/readyz` unavailable before cancelling scheduler
 workers. New HTTP/MCP requests receive 503 with `Retry-After: 1`; `/healthz` and
