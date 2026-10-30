@@ -26,6 +26,11 @@ import (
 var dataVolumeResource = schema.GroupVersionResource{Group: "cdi.kubevirt.io", Version: "v1beta1", Resource: "datavolumes"}
 var pvcResource = schema.GroupVersionResource{Version: "v1", Resource: "persistentvolumeclaims"}
 
+// A deleting target keeps its resource Pod at the token barrier. The next
+// controller tick retries observation; slow guest/storage shutdown is not a
+// fatal API error and must not mark the delete step successful prematurely.
+var errResourceDeletePending = errors.New("argojob: resource deletion is pending")
+
 func workflowOwnsResource(wf *wfv1.Workflow, object *unstructured.Unstructured) bool {
 	if wf.UID == "" || object.GetNamespace() != wf.Namespace {
 		return false
@@ -144,24 +149,22 @@ func (c *Controller) ensureResourceDelete(ctx context.Context, wf *wfv1.Workflow
 		return fmt.Errorf("argojob: refusing delete of foreign %s/%s (not created by this run)", object.GetKind(), name)
 	}
 	pinned := observed.GetUID()
-	if err := client.Delete(ctx, name, cleanupDeleteOptions(resource, pinned)); err != nil && !apierrors.IsNotFound(err) {
-		return err
-	}
-	for {
-		current, err := client.Get(ctx, name, metav1.GetOptions{})
-		if apierrors.IsNotFound(err) {
-			return nil
-		}
-		if err != nil {
-			return fmt.Errorf("argojob: delete absence readback %s/%s: %w", object.GetKind(), name, err)
-		}
-		if current.GetUID() != pinned {
-			return fmt.Errorf("argojob: foreign replacement remains at %s/%s; refusing delete", object.GetKind(), name)
-		}
-		if err := waitCleanupPoll(ctx); err != nil {
-			return fmt.Errorf("argojob: leftover %s/%s uid=%s: %w", object.GetKind(), name, pinned, err)
+	if observed.GetDeletionTimestamp() == nil {
+		if err := client.Delete(ctx, name, cleanupDeleteOptions(resource, pinned)); err != nil && !apierrors.IsNotFound(err) {
+			return err
 		}
 	}
+	current, err := client.Get(ctx, name, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("argojob: delete absence readback %s/%s: %w", object.GetKind(), name, err)
+	}
+	if current.GetUID() != pinned {
+		return fmt.Errorf("argojob: foreign replacement remains at %s/%s; refusing delete", object.GetKind(), name)
+	}
+	return fmt.Errorf("%w: %s/%s uid=%s", errResourceDeletePending, object.GetKind(), name, pinned)
 }
 
 func cleanupDeleteOptions(resource schema.GroupVersionResource, uid types.UID) metav1.DeleteOptions {

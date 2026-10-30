@@ -369,7 +369,9 @@ unproven ownership are listed as leftovers and never deleted. The hook name
 Explicit resource deletes still allow early phase release. They pass through
 the server's token barrier: Oberth verifies the Workflow owner UID, checks the
 authored UID when present, sends a UID-precondition API delete, and waits for
-absence for at most 20 seconds. The pinned Argo main container then runs
+absence across controller ticks. Each API attempt has a 20-second bound; a
+slow guest or storage finalizer keeps the step pending until absence or the
+Workflow deadline. The pinned Argo main container then runs
 `argoexec version`; it receives no delete permission and cannot repeat a
 name-only delete against a replacement. A missing target succeeds. Flags,
 force deletion and arbitrary selectors remain refused.

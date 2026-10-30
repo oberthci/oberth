@@ -102,6 +102,9 @@ func TestGuardedResourceDeletes(t *testing.T) {
 				if success && err != nil {
 					t.Fatal(err)
 				}
+				if mode == "leftover" && !errors.Is(err, errResourceDeletePending) {
+					t.Fatalf("slow deletion must remain pending: %v", err)
+				}
 				if !success && err == nil {
 					t.Fatal("unsafe delete passed")
 				}
