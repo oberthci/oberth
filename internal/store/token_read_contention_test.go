@@ -29,3 +29,50 @@ func TestBearerIdentityReadIsIndependentButTokenTouchWaitsForWriter(t *testing.T
 		t.Fatalf("token touch did not expose writer wait: %v", err)
 	}
 }
+
+func TestTokenUseWritesAtMostOncePerMinuteUnderConcurrentTouches(t *testing.T) {
+	s, uplink := authReaderFixture(t)
+	now := time.Now().UTC()
+	s.now = func() time.Time { return now }
+	changes := func() int {
+		t.Helper()
+		var n int
+		if err := s.db.QueryRowContext(t.Context(), "SELECT total_changes()").Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	before := changes()
+	if err := s.TouchTokenCredential(t.Context(), uplink.TokenCredentialID); err != nil {
+		t.Fatal(err)
+	}
+	if changes()-before != 1 {
+		t.Fatal("first touch was not one actual update")
+	}
+	now = now.Add(59 * time.Second)
+	if err := s.TouchTokenCredential(t.Context(), uplink.TokenCredentialID); err != nil {
+		t.Fatal(err)
+	}
+	if changes()-before != 1 {
+		t.Fatal("recent token timestamp was rewritten")
+	}
+	now = now.Add(time.Second)
+	done := make(chan error, 12)
+	for range 12 {
+		go func() { done <- s.TouchTokenCredential(t.Context(), uplink.TokenCredentialID) }()
+	}
+	for range 12 {
+		if err := <-done; err != nil {
+			t.Fatal(err)
+		}
+	}
+	if changes()-before != 2 {
+		t.Fatalf("concurrent due touches wrote more than once: %d", changes()-before)
+	}
+	if err := s.RevokeTokenCredential(t.Context(), uplink.TokenCredentialID); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.TouchTokenCredential(t.Context(), uplink.TokenCredentialID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("throttle hid revocation: %v", err)
+	}
+}

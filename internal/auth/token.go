@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"time"
 
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
@@ -78,6 +79,7 @@ func (i Issuer) Issue(ctx context.Context, name string, output io.Writer) (model
 
 type Authenticator struct {
 	Tokens TokenRepository
+	Now    func() time.Time
 }
 
 func (a Authenticator) Authenticate(ctx context.Context, plaintext string) (model.AuthenticatedUplink, error) {
@@ -96,6 +98,15 @@ func (a Authenticator) Authenticate(ctx context.Context, plaintext string) (mode
 	if credential.RevokedAt != nil || len(credential.Digest) != sha256.Size ||
 		subtle.ConstantTimeCompare(credential.Digest, digest[:]) != 1 {
 		return model.AuthenticatedUplink{}, ErrInvalidToken
+	}
+	now := time.Now()
+	if a.Now != nil {
+		now = a.Now()
+	}
+	// Authority and revocation above are always freshly read. Last-used is
+	// telemetry, so a recent committed timestamp needs no writer connection.
+	if credential.LastUsedAt != nil && now.Sub(*credential.LastUsedAt) < store.TokenCredentialTouchInterval {
+		return authenticated, nil
 	}
 	if err := a.Tokens.TouchTokenCredential(ctx, credential.ID); err != nil {
 		if errors.Is(err, store.ErrNotFound) {

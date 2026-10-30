@@ -1,9 +1,13 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -34,6 +38,9 @@ func TestRunReadsBoundDatabaseWaitAndPreserveEarlierDeadline(t *testing.T) {
 					value, err := service.CallTool(ctx, api.Actor{Identity: "reader"}, tool, json.RawMessage(`{"id":"aaaaaaaa"}`))
 					if value != nil || !errors.Is(err, context.DeadlineExceeded) || !errors.Is(err, ErrUnavailable) || time.Since(started) != min(budget, runReadBudget) {
 						t.Fatalf("unbounded read or lost error classification: value=%+v err=%v duration=%s", value, err, time.Since(started))
+					}
+					if strings.Count(err.Error(), "run read budget exhausted") != 1 || strings.Count(err.Error(), "unavailable") != 1 {
+						t.Fatalf("deadline refusal wrapped twice: %v", err)
 					}
 				})
 			})
@@ -90,6 +97,62 @@ func TestRunLogsBoundedMetadataAndByteCursorReachCaller(t *testing.T) {
 		if got.Output != line || got.ScanComplete || !got.HasMore || !got.BytesExact || got.WithheldBytes == 0 || got.NextByteOffset != cursor+int64(len(line)) {
 			t.Fatalf("lost bounded metadata: %+v", got)
 		}
+		if text := got.MCPToolText(); !strings.HasPrefix(text, line) || !strings.Contains(text, "[Log continuation:") || got.Output != line {
+			t.Fatalf("nonempty page lost raw output or continuation: %q", text)
+		}
 		cursor = got.NextByteOffset
+	}
+}
+
+func TestRunLogsEmptyActiveWindowHasMCPContinuation(t *testing.T) {
+	f := newRetentionFixture(t)
+	run := f.run(t, "feature/empty-window", "branch", false)
+	if _, err := f.retention.Database.ClaimNextRun(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.retention.Database.PutStepResult(t.Context(), model.StepResult{RunID: run.ID, Burn: "test", Step: "unit", Status: model.StepPassed, DeclaredSize: "M"}); err != nil {
+		t.Fatal(err)
+	}
+	wanted := "[test/unit] actual error\n"
+	raw := strings.Repeat("[other/step] noise\n", 360000) + wanted
+	if err := os.WriteFile(filepath.Join(f.root, "logs", run.ID+".log"), []byte(raw), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	server, err := api.New(runSurfaceAuth{}, f.api, f.api, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cursor int64
+	for page := 0; page < 2; page++ {
+		args := map[string]any{"id": run.ID, "burn": "test", "step": "unit", "byte_offset": cursor}
+		body, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": map[string]any{"name": "run_logs", "arguments": args}})
+		req := httptest.NewRequest(http.MethodPost, "/mcp", bytes.NewReader(body))
+		req.Header.Set("Authorization", "Bearer test")
+		response := httptest.NewRecorder()
+		server.Handler().ServeHTTP(response, req)
+		var rpc struct {
+			Result struct {
+				Content []struct {
+					Text string `json:"text"`
+				} `json:"content"`
+				StructuredContent LogResponse `json:"structuredContent"`
+				IsError           bool        `json:"isError"`
+			} `json:"result"`
+		}
+		if err := json.Unmarshal(response.Body.Bytes(), &rpc); err != nil {
+			t.Fatal(err)
+		}
+		if response.Code != http.StatusOK || rpc.Result.IsError || len(rpc.Result.Content) != 1 {
+			t.Fatalf("MCP failed: %d %s", response.Code, response.Body)
+		}
+		got, text := rpc.Result.StructuredContent, rpc.Result.Content[0].Text
+		if page == 0 {
+			if got.Output != "" || !got.HasMore || got.NextByteOffset <= 0 || !strings.Contains(text, "No lines in this bounded window") || !strings.Contains(text, fmt.Sprintf("byte_offset=%d", got.NextByteOffset)) || !strings.Contains(text, "offset=0") {
+				t.Fatalf("empty page lacks continuation: %+v text=%q", got, text)
+			}
+			cursor = got.NextByteOffset
+		} else if got.Output != wanted || text != wanted || got.HasMore {
+			t.Fatalf("continuation failed: %+v text=%q", got, text)
+		}
 	}
 }

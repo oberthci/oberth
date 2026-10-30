@@ -45,7 +45,9 @@ func TestAuditFenceSucceedsUnderContinuousTokenTouches(t *testing.T) {
 				done <- nil
 				return
 			case <-ticker.C:
-				if err := s.TouchTokenCredential(ctx, credential.ID); err != nil {
+				// Force actual last-used commits even though production touches
+				// are now throttled. This regression exercises the writer fence.
+				if _, err := s.db.ExecContext(ctx, `UPDATE token_credentials SET last_used_at=COALESCE(last_used_at,0)+1 WHERE id=?`, credential.ID); err != nil {
 					if ctx.Err() != nil {
 						done <- nil
 					} else {

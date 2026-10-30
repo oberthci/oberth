@@ -263,7 +263,7 @@ func TestMCPInitializeAdvertisesAgentReadableDashboardState(t *testing.T) {
 	if err := json.Unmarshal(response.Body.Bytes(), &decoded); err != nil {
 		t.Fatal(err)
 	}
-	for _, route := range []string{"/api/runs", "/api/repos", "/api/issues", "/api/grants", "/api/status"} {
+	for _, route := range []string{"/api/runs", "/api/repos", "/api/issues", "/api/grants", "/api/status", "has_more", "byte_offset", "offset=0", "empty window"} {
 		if !strings.Contains(decoded.Result.Instructions, route) {
 			t.Fatalf("initialize instructions omit %s: %q", route, decoded.Result.Instructions)
 		}
@@ -676,13 +676,14 @@ func TestMCPToolInputsMatchContract(t *testing.T) {
 	t.Parallel()
 	want := map[string][]string{
 		"status":             {"ref", "repo"},
-		"logs":               {"context", "limit", "offset", "pattern", "repo", "sha", "step", "tail"},
+		"logs":               {"byte_offset", "context", "limit", "offset", "pattern", "repo", "sha", "step", "tail"},
 		"run_get":            {"id", "summary"},
+		"artifact_get":       {"context", "id", "limit", "name", "offset", "pattern", "tail"},
 		"run_retry":          {"id"},
 		"run_cancel":         {"force", "id", "reason"},
 		"run_purge":          {"id", "reason", "what"},
 		"run_kvm_preflight":  {"id"},
-		"run_logs":           {"burn", "context", "id", "limit", "offset", "pattern", "step", "tail"},
+		"run_logs":           {"burn", "byte_offset", "context", "id", "limit", "offset", "pattern", "step", "tail"},
 		"wait":               {"id", "repo", "sha", "timeout", "trigger"},
 		"sync":               {"branch", "repo", "sha"},
 		"promote":            {"branch", "repo", "sha"},

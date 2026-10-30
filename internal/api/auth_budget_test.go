@@ -45,3 +45,12 @@ func TestLogByteCursorValidationAndForwarding(t *testing.T) {
 		t.Fatalf("byte cursor not forwarded: %d %+v", response.Code, backend.logFilter)
 	}
 }
+
+func TestArtifactDownloadRejectsLogByteCursor(t *testing.T) {
+	server, _ := testServer(t)
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, artifactRequest(t, "/api/runs/aaaaaaaa/artifacts/report.txt?byte_offset=0"))
+	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "only supported for run logs") {
+		t.Fatalf("artifact ignored log cursor: %d %s", response.Code, response.Body)
+	}
+}

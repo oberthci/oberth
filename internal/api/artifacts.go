@@ -54,6 +54,10 @@ func (server *Server) handleRunArtifacts(writer http.ResponseWriter, request *ht
 }
 
 func (server *Server) handleRunArtifactDownload(writer http.ResponseWriter, request *http.Request) {
+	if _, present := request.URL.Query()["byte_offset"]; present {
+		writeJSON(writer, http.StatusBadRequest, map[string]string{"error": "byte_offset is only supported for run logs, not artifact downloads"})
+		return
+	}
 	id := request.PathValue("run")
 	name := request.PathValue("name")
 	if !validRunSelector(id) || strings.TrimSpace(name) == "" {

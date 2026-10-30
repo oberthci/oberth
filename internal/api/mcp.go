@@ -289,7 +289,7 @@ func (server *Server) handleMCP(writer http.ResponseWriter, request *http.Reques
 			"protocolVersion": mcpProtocolVersion,
 			"capabilities":    map[string]any{"tools": map[string]any{}},
 			"serverInfo":      map[string]string{"name": "oberth", "version": server.version},
-			"instructions":    "Use status/wait/logs for SHA-oriented CI, run_get/run_logs for exact promotion run IDs, sync only to park the selected exact WIP branch upstream without a green gate, and promote to merge, test, and push a target branch. Sync is not completion evidence. Prefer issue_get/issue_get_many with fields/body_limit and run_get with summary:true for routine status reads; full records remain available. Filter logs with pattern/context/offset/limit/tail rather than retrieving a whole step; a step can exceed a context window and the response reports what it withheld. A step named frag-<hash>-<template> came from another repository's pinned pipeline fragment, not from the repository under test, so a failure there is usually the pinned version rather than this commit. Authenticated JSON dashboard state is available at /api/runs, /api/repos, /api/issues, /api/grants, and /api/status.",
+			"instructions":    "Use status/wait/logs for SHA-oriented CI, run_get/run_logs for exact promotion run IDs, sync only to park the selected exact WIP branch upstream without a green gate, and promote to merge, test, and push a target branch. Sync is not completion evidence. Prefer issue_get/issue_get_many with fields/body_limit and run_get with summary:true for routine status reads; full records remain available. Filter logs with pattern/context/limit/tail rather than retrieving a whole step. Log reads scan bounded byte windows; counts are lower bounds unless scan_complete is true. When has_more is true, continue with next_byte_offset as byte_offset, offset=0 and the same tail/pattern/context, including after an empty window. offset skips only within the current scanned window; with tail that window can change during lookback. An empty incomplete page does not prove absence. A step named frag-<hash>-<template> came from another repository's pinned pipeline fragment, not from the repository under test, so a failure there is usually the pinned version rather than this commit. Authenticated JSON dashboard state is available at /api/runs, /api/repos, /api/issues, /api/grants, and /api/status.",
 		}
 	case "ping":
 		response.Result = map[string]any{}
@@ -436,7 +436,7 @@ func toolDefinitions() []map[string]any {
 	logFilterProperties := func(properties map[string]any) map[string]any {
 		properties["pattern"] = stringProperty("RE2 pattern; only matching lines are returned, matched against the line with its [burn/step] prefix removed")
 		properties["context"] = integerProperty("Lines of context each side of a match")
-		properties["offset"] = integerProperty("First line to return in the scanned window, 0-based; pages through matches when pattern is set")
+		properties["offset"] = integerProperty("Skip lines or matches only within the current scanned window, not globally from the step start; tail lookback can change that window; use offset:0 with byte_offset continuations")
 		if _, artifact := properties["name"]; !artifact {
 			properties["byte_offset"] = integerProperty("Absolute retained-run byte cursor from next_byte_offset; head scans move forward, tail scans move backward; reset offset to zero when continuing")
 		}

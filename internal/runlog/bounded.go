@@ -19,6 +19,10 @@ const (
 	maxFilterLineBytes       = 64 << 10
 )
 
+// Limit CPU-heavy RE2 scans across concurrent run-log requests. Waiting uses
+// the same request budget as the scan, rather than starting a new deadline.
+var patternScans = make(chan struct{}, 2)
+
 type contextReader struct {
 	ctx    context.Context
 	reader io.Reader
@@ -94,6 +98,14 @@ func scanBoundedRanges(file io.ReaderAt, ranges []Range, total int64, filter Fil
 	if err != nil {
 		return nil, Meta{}, err
 	}
+	if pattern != nil {
+		select {
+		case patternScans <- struct{}{}:
+			defer func() { <-patternScans }()
+		case <-filter.ctx().Done():
+			return nil, Meta{}, filter.ctx().Err()
+		}
+	}
 	candidates := clippedRanges(ranges, filter)
 	remaining, window := MaxScanBytes, MaxScanBytes
 	if filter.Tail && filter.Limit > 0 {
@@ -142,6 +154,11 @@ func scanBoundedRanges(file io.ReaderAt, ranges []Range, total int64, filter Fil
 				if len(line) != 0 || oversized {
 					if discard {
 						discard = false
+						if oversized {
+							meta.TotalLines++
+							meta.OmittedLongLines++
+							collector.dropped = true
+						}
 						if first && filter.Tail && readErr == nil {
 							meta.NextByteOffset = position
 						}
@@ -207,6 +224,11 @@ func scanBoundedRanges(file io.ReaderAt, ranges []Range, total int64, filter Fil
 		}
 		if len(candidates) != 0 {
 			if filter.Tail {
+				// A window entirely inside a giant record can discard right up
+				// to the incoming cursor. Continue before that window instead.
+				if len(selected) != 0 && meta.NextByteOffset >= candidates[len(candidates)-1].End {
+					meta.NextByteOffset = selected[0].Start
+				}
 				meta.HasMore = meta.NextByteOffset > candidates[0].Start
 			} else {
 				meta.HasMore = meta.NextByteOffset < candidates[len(candidates)-1].End
@@ -248,6 +270,23 @@ func originalEnd(ranges []Range, selected Range) int64 {
 	return selected.End
 }
 
+// Track complete records during discovery itself. A bounded lookbehind cannot
+// find the last newline when the window ends deep inside a giant record.
+type completeRecordReader struct {
+	reader       io.Reader
+	position     int64
+	lastComplete int64
+}
+
+func (r *completeRecordReader) Read(p []byte) (int, error) {
+	n, err := r.reader.Read(p)
+	if newline := bytes.LastIndexByte(p[:n], '\n'); newline >= 0 {
+		r.lastComplete = r.position + int64(newline) + 1
+	}
+	r.position += int64(n)
+	return n, err
+}
+
 // readActiveBounded discovers ranges only inside a bounded raw-log window.
 // A missing step in a partial window is an incomplete observation, not proof
 // that the step has no output. Continuation cursors are absolute file offsets.
@@ -283,6 +322,7 @@ func (store *Store) readActiveBounded(runID, burn, step string, filter Filter) (
 	}
 	reader := bufio.NewReaderSize(contextReader{filter.ctx(), io.NewSectionReader(file, start, end-start)}, maxFilterLineBytes)
 	base := start
+	discoveryOmitted := 0
 	if start > 0 {
 		var previous [1]byte
 		if _, err := file.ReadAt(previous[:], start-1); err != nil {
@@ -301,7 +341,8 @@ func (store *Store) readActiveBounded(runID, burn, step string, filter Filter) (
 			}
 		}
 	}
-	index, err := indexReader(runID, contextReader{filter.ctx(), reader})
+	complete := &completeRecordReader{reader: contextReader{filter.ctx(), reader}}
+	index, err := indexReader(runID, complete)
 	if err != nil {
 		return nil, Meta{}, err
 	}
@@ -309,20 +350,18 @@ func (store *Store) readActiveBounded(runID, burn, step string, filter Filter) (
 	if start > 0 {
 		discoveryBytes++
 	}
-	if end < info.Size() && end > base {
-		lookStart := max(base, end-initialTailBytes)
-		last := make([]byte, end-lookStart)
-		if _, err := file.ReadAt(last, lookStart); err != nil {
-			return nil, Meta{}, err
-		}
-		discoveryBytes += int64(len(last))
-		if newline := bytes.LastIndexByte(last, '\n'); newline >= 0 {
-			end = lookStart + int64(newline) + 1
-		}
+	rawEnd := end
+	if end < info.Size() {
+		end = base + complete.lastComplete
 	}
 	ranges := make([]Range, 0)
 	for _, r := range index.Ranges {
 		if r.Burn == burn && r.Step == step {
+			// Only count a discovery omission when its marker attributes it
+			// to this step. An unmarked leading fragment has unknown ownership.
+			if rawEnd < info.Size() && rawEnd-end > maxFilterLineBytes && r.End+base == rawEnd {
+				discoveryOmitted++
+			}
 			r.Start += base
 			r.End = min(end, r.End+base)
 			if r.End > r.Start {
@@ -339,16 +378,26 @@ func (store *Store) readActiveBounded(runID, burn, step string, filter Filter) (
 		return nil, Meta{}, err
 	}
 	meta.DiscoveryBytes = discoveryBytes
+	meta.OmittedLongLines += discoveryOmitted
+	meta.TotalLines += discoveryOmitted
+	meta.WithheldLines += discoveryOmitted
 	meta.BytesExact, meta.ScanComplete = !partial, meta.ScanComplete && !partial
 	if !meta.HasMore {
 		if filter.Tail {
 			meta.NextByteOffset, meta.HasMore = base, start > 0
-			if meta.NextByteOffset >= end && start > 0 {
+			if meta.NextByteOffset >= rawEnd && start > 0 {
 				meta.NextByteOffset = start
 			}
 		} else {
-			meta.NextByteOffset, meta.HasMore = end, end < info.Size()
+			meta.NextByteOffset = end
+			if end <= start {
+				meta.NextByteOffset = rawEnd
+			}
+			meta.HasMore = meta.NextByteOffset < info.Size()
 		}
+	}
+	if filter.Tail && meta.HasMore && meta.NextByteOffset >= rawEnd {
+		meta.NextByteOffset, meta.HasMore = start, start > 0
 	}
 	meta.Truncated = meta.Truncated || partial
 	return body, meta, nil

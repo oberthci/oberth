@@ -2122,14 +2122,31 @@ func scanTokenCredential(row rowScanner) (model.TokenCredential, error) {
 	return value, nil
 }
 
+const TokenCredentialTouchInterval = time.Minute
+
 func (s *Store) TouchTokenCredential(ctx context.Context, id string) error {
+	now := s.now()
 	result, err := s.db.ExecContext(ctx, `
 UPDATE token_credentials SET last_used_at = ?
-WHERE id = ? AND activated_at IS NOT NULL AND revoked_at IS NULL`, unixNano(s.now()), id)
+WHERE id = ? AND activated_at IS NOT NULL AND revoked_at IS NULL
+  AND (last_used_at IS NULL OR last_used_at <= ?)`, unixNano(now), id, unixNano(now.Add(-TokenCredentialTouchInterval)))
 	if err != nil {
 		return fmt.Errorf("touch token credential: %w", err)
 	}
-	return requireChanged("token credential", result)
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("read token use change: %w", err)
+	}
+	if changed != 0 {
+		return nil
+	}
+	// A concurrent request may already have touched the token. Distinguish
+	// that benign no-op from an inactive/revoked credential, without caching
+	// authority or converting a revocation race into a successful touch.
+	var active string
+	err = s.reader().QueryRowContext(ctx, `SELECT id FROM token_credentials
+WHERE id = ? AND activated_at IS NOT NULL AND revoked_at IS NULL`, id).Scan(&active)
+	return translateNotFound("token credential", err)
 }
 
 func (s *Store) RevokeTokenCredential(ctx context.Context, id string) error {

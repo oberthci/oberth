@@ -5,8 +5,10 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/oberthci/oberth/internal/api"
@@ -561,17 +563,26 @@ type RunDetailResponse struct {
 	RerunOf string `json:"RerunOf,omitempty"`
 }
 
-// MCPToolText keeps recorded output exact and explains an unexecuted step to
-// text-only clients while structuredContent retains the empty slice metadata.
+// MCPToolText makes incomplete windows actionable for text-only clients.
+// The structured Output remains the exact recorded slice without trailers.
 func (response LogResponse) MCPToolText() string {
+	text := response.Output
 	if response.Note != "" {
-		text := response.Note
+		text = response.Note
 		if response.RunError != "" {
 			text += "\nRun error: " + response.RunError
 		}
-		return text
 	}
-	return response.Output
+	if response.HasMore {
+		if response.ReturnedLines == 0 {
+			text = fmt.Sprintf("No lines in this bounded window (scanned %d bytes).", response.ScannedBytes+response.DiscoveryBytes)
+		}
+		if text != "" && !strings.HasSuffix(text, "\n") {
+			text += "\n"
+		}
+		text += fmt.Sprintf("[Log continuation: has_more=true; continue with byte_offset=%d, offset=0, same tail/pattern/context.]", response.NextByteOffset)
+	}
+	return text
 }
 
 type WaitResponse struct {

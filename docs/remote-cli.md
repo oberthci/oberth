@@ -158,8 +158,9 @@ oberth log run-abc --burn ci --step test --pattern 'FAIL|Error' --context 3
 Log reads have bounded work: at most 4 MiB of retained-file discovery for an
 active run, then at most 4 MiB of filtering (including tail lookback retries).
 Head reads stop when the returned-line limit is met; regexes never scan the
-whole step solely to count matches. Individual records above 64 KiB are omitted
-and counted as `omitted_long_lines`. Output remains capped at 4 MiB.
+whole step solely to count matches. At most two run-log pattern scans execute
+at once across the process; queued scans use their existing request deadline.
+Individual records above 64 KiB are omitted and counted as `omitted_long_lines`. Output remains capped at 4 MiB.
 
 Structured HTTP/MCP responses report `scan_complete`, `bytes_exact`,
 `scanned_bytes`, `discovery_bytes`, `withheld_lines`, `withheld_bytes`,
@@ -172,17 +173,24 @@ When `has_more` is true, pass `next_byte_offset` as `byte_offset` (CLI:
 `--byte-offset`), keep the same `tail`, `pattern` and `context`, and reset
 `offset` to zero. The cursor is an absolute retained run-file byte position;
 head pages move forward and tail pages backward. `offset` still skips lines or
-matches inside the scanned window. Context is local to each page; it can be
-clipped at page boundaries. Logs can grow while active, so these are not
+matches inside the scanned window, including with tail. This differs from a
+global offset from the step start: tail lookback can move that window during
+the call. Use byte cursors with `offset=0` for stable continuation. Context is
+local to each page; it can be clipped at page boundaries. Logs can grow while active, so these are not
 snapshot cursors. `oberth log` and `oberth mcp call ... run_logs` print the
-completeness/count/cursor summary on stderr; MCP text content remains the exact
-raw slice and structuredContent carries the metadata.
+completeness/count/cursor summary on stderr. MCP text appends a continuation
+trailer whenever `has_more` is true; an empty incomplete page explicitly tells
+the client to continue. `structuredContent.output` remains the exact raw slice
+without that trailer. Completed text pages keep the raw output unchanged.
 
 Run/log tool reads have a 10s server budget including scope and DB-pool waits;
 optional live scheduling observation has its existing 2s sub-budget. Bearer
 authentication has a separate 5s budget, including the authoritative token
-last-used update. Auth contention fails closed with retryable HTTP 503 rather
-than claiming a valid credential is invalid. CPU scheduling or a stuck kernel
+last-used update when due. A committed `last_used_at` newer than one minute skips
+the writer; every request still reads fresh identity/scopes/revocation. Due
+updates are conditional so concurrent requests write the timestamp at most once
+per minute. Errors while recording due use still fail closed. Auth contention
+fails closed with retryable HTTP 503 rather than claiming a valid credential is invalid. CPU scheduling or a stuck kernel
 file read can still delay wall-clock return; cancellation is checked between
 bounded reads. `run_get` does not fetch pod logs; use `summary:true` when timing
 and repository details are unnecessary. This does not change artifact reads or
