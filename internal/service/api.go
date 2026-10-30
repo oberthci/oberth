@@ -1896,6 +1896,9 @@ func (service *API) logsFor(ctx context.Context, repositoryName, selector, wante
 }
 
 func (service *API) stepLogResponse(ctx context.Context, run model.Run, steps []model.StepResult, burn, step string, filter runlog.Filter) (LogResponse, error) {
+	if run.Status.Terminal() {
+		forgetActiveLogIndex(service.logs, run.ID)
+	}
 	for _, result := range steps {
 		if result.Burn != burn || result.Step != step {
 			continue

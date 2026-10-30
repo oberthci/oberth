@@ -345,6 +345,9 @@ func (scheduler *Scheduler) completeCancellationsWithGate(ctx context.Context, c
 	// and leaving it in place keeps the run at the head of the FIFO (or ahead
 	// of its group) until a restart.
 	scheduler.abandonAdmissions(ctx, cancellations)
+	for _, cancellation := range cancellations {
+		forgetActiveLogIndex(scheduler.logs, cancellation.RunID)
+	}
 	if err := require(ctx); err != nil {
 		return err
 	}
@@ -1487,6 +1490,7 @@ func (scheduler *Scheduler) finishPublication(_ context.Context, _ model.Reposit
 }
 
 func (scheduler *Scheduler) finishInfrastructureFailure(ctx context.Context, run model.Run, _ model.Repository, failure error) error {
+	defer forgetActiveLogIndex(scheduler.logs, run.ID)
 	_, err := scheduler.store.FinishRun(ctx, run.ID, model.RunResult{Status: model.RunFailed, Phase: "infrastructure", Error: failure.Error()})
 	if errors.Is(err, store.ErrInvalidState) {
 		scheduler.signals.NotifyRun(run.ID)

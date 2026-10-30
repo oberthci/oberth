@@ -136,6 +136,7 @@ func (service *API) cancelRun(ctx context.Context, actor api.Actor, id, reason s
 	if err != nil {
 		return api.RunCancelResponse{}, err
 	}
+	forgetActiveLogIndex(service.logs, run.ID)
 	service.signals.NotifyRun(run.ID)
 	if result.PromotionID != "" {
 		service.signals.NotifyPromotion(result.PromotionID)

@@ -162,6 +162,19 @@ whole step solely to count matches. At most two interactive API/MCP run-log
 pattern scans execute at once across the process; queued requests use their
 existing deadline. Internal CI issue excerpts keep their byte/record bounds
 and do not wait for those interactive slots.
+
+Running runs retain an in-memory range index per run. Each request extends it
+by at most 2 MiB of new bytes, without rediscovering bytes already in that index.
+Repeated head requests can therefore find steps beyond the first 4 MiB even
+without changing the cursor. Until the index catches up, deep cursors and tail
+reads use a bounded discovery window within the same 4 MiB discovery budget.
+Use `has_more` and byte cursors for complete traversal, including empty pages.
+The cache keeps at most 64 runs, evicts idle entries by least recent use, and
+caps each run at 4096 ranges, 128 KiB of marker labels and a 64 KiB partial-record
+prefix. Runs exceeding those limits use bounded window discovery. Finishing or
+purging a run releases its cache entry; restarting the server starts it cold.
+No active read publishes the durable terminal index.
+
 Individual records above 64 KiB are omitted and counted as `omitted_long_lines`. Output remains capped at 4 MiB.
 
 Structured HTTP/MCP responses report `scan_complete`, `bytes_exact`,
