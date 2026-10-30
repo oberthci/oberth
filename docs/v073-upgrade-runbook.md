@@ -33,19 +33,31 @@ with no new-only fields such as `admission.runtimeCapacity`. Do not use
 Helm 4, kubectl, Python 3 and normal host utilities in PATH. Space is needed for
 several database copies; use a private disk-backed working directory.
 
+The variable-only block below is safe to run in a fresh emergency shell: it
+does not capture evidence, back up or change the cluster. Reuse the original
+WORK/BACKUP paths; do not re-run the pre-upgrade capture block during recovery.
+
 ```bash
 set -euo pipefail
 : "${KCFG:?explicit kubeconfig}" "${CTX:?target context}" "${NS:?namespace}"
 : "${ARGO_NS:?Workflow namespace}" "${OLD_CLI:?pinned v0.17.72 executable}"
 : "${OLD_CHART:?verified unpacked v0.17.72 chart}" "${OLD_VALUES:?old values file}"
 : "${BACKUP:?fresh off-volume backup output path}" "${KEY:?recipient private key}"
-: "${CERT:?recipient certificate}" "${WORK:?private recovery evidence directory}"
+: "${OLD_IMAGE:?exact old image ref including sha256 digest}"
+: "${WORK:?private recovery evidence directory}"
 umask 077
-mkdir -p "$WORK"
-chmod 700 "$WORK"
 k=(kubectl --kubeconfig "$KCFG" --context "$CTX" -n "$NS")
 h=(helm --kubeconfig "$KCFG" --kube-context "$CTX")
 c=(--kubeconfig "$KCFG" --context "$CTX" --namespace "$NS" --argo-namespace "$ARGO_NS")
+```
+
+Capture pre-upgrade evidence once, into a new private directory. This block
+refuses an existing directory so it cannot overwrite the original evidence.
+
+```bash
+: "${CERT:?recipient certificate}"
+test ! -e "$WORK"
+mkdir -m 700 "$WORK"
 "$OLD_CLI" version --schema  # expected 34: binary support, not the DB ledger
 "${k[@]}" exec deploy/oberth -c oberth -- /usr/local/bin/oberth version --schema
 "${h[@]}" get values oberth -n "$NS" --all > "$WORK/installed-values.yaml"
@@ -85,8 +97,12 @@ print('Rollback backup:', m['database'])
 PY
 ```
 
-Only then apply the coordinator's pinned upgrade. `oberth upgrade` has no
-`--atomic` or `--force-replace`: use its `--dry-run`, review, then `--yes`.
+Only then apply the coordinator's pinned upgrade. On tuxbox, the coordinator
+reports `audit_mode=local` (no Rekor), and upgrades with Helm using the chart
+from the Git tag, **not** `oberth upgrade`. The rehearsal uses the same Helm
+upgrade path; re-check the actual audit mode/configuration before each operation.
+The generic `oberth upgrade` command has no `--atomic` or `--force-replace`;
+if using that separate installer path, use `--dry-run`, review, then `--yes`.
 Confirm the new binary's support and a newly verified backup's actual schema 35,
 readiness/liveness, admission and run recovery. New writes and witness publication
 can make the old backup unusable even when schema compatibility was rehearsed.
@@ -177,12 +193,14 @@ PY
 "${h[@]}" upgrade oberth "$MAINT_CHART" -n "$NS" --reset-values -f "$OLD_VALUES"
 "${k[@]}" get deploy/oberth -o json > "$WORK/staged-old-deployment.json"
 "${k[@]}" get pods -l 'app.kubernetes.io/name=oberth,app.kubernetes.io/instance=oberth' -o json > "$WORK/staged-old-pods.json"
-python3 - "$WORK/staged-old-deployment.json" "$WORK/staged-old-pods.json" <<'PY'
+python3 - "$WORK/staged-old-deployment.json" "$WORK/staged-old-pods.json" "$OLD_IMAGE" <<'PY'
 import json, sys
 d = json.load(open(sys.argv[1]))
 assert d['spec']['replicas'] == 0
 assert not json.load(open(sys.argv[2]))['items'], 'Server Pod exists: stop'
-print('Staged image:', next(c['image'] for c in d['spec']['template']['spec']['containers'] if c['name'] == 'oberth'))
+image = next(c['image'] for c in d['spec']['template']['spec']['containers'] if c['name'] == 'oberth')
+assert image == sys.argv[3], f'Staged image mismatch: {image} != {sys.argv[3]}; stop'
+print('Staged old image verified:', image)
 PY
 # Re-check current witness records/prefix and authoritative remote history now (above).
 "$OLD_CLI" restore "$BACKUP" --only history --private-key "$KEY" --chart "$OLD_CHART" \
