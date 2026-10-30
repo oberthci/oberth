@@ -351,7 +351,7 @@ func TestExecutorIdentityClassificationRequiresTransportOrAPIEvidence(t *testing
 		{"exec", errors.New("unclassified local failure"), false},
 		{"pod_read", apierrors.NewNotFound(schema.GroupResource{Resource: "pods"}, "step"), false},
 	} {
-		failure := identityFailure(tc.stage, tc.cause).(*executorIdentityError)
+		failure := identityFailure(tc.stage, tc.cause)
 		if failure.InfrastructureFailure() != tc.infra {
 			t.Errorf("stage=%s reason=%s infrastructure=%t want %t", tc.stage, failure.reason, failure.InfrastructureFailure(), tc.infra)
 		}

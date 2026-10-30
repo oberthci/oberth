@@ -59,7 +59,7 @@ func (err *executorIdentityError) InfrastructureFailure() bool {
 	return false
 }
 
-func identityFailure(stage string, err error) error {
+func identityFailure(stage string, err error) *executorIdentityError {
 	reason := executorIdentityErrorClass(err)
 	if stage == "target_validation" {
 		reason = "invalid_target"
@@ -74,7 +74,7 @@ func identityFailure(stage string, err error) error {
 	}
 	if stage == "target_validation" || stage == "identity_pod" {
 		switch err.Error() {
-		case "executor token target is not memory-backed", "ephemeral container can access executor identity", "executor identity waiter was modified", "pipeline container can access executor identity", "executor identity waiter missing", "executor identity target owner changed", "executor identity target has no UID", "executor identity target changed during exec", "executor identity lifetime Pod does not match", "executor identity owner changed":
+		case "executor token target is not memory-backed", "ephemeral container can access executor identity", "executor identity waiter was modified", "pipeline container can access executor identity", "executor identity waiter missing", "executor identity target owner changed", "executor identity target has no UID", "executor identity target changed during exec", "executor identity lifetime Pod has unexpected ownership or configuration", "executor identity owner changed":
 			failure.public = err.Error() // Exact allowlist of fixed internal diagnostics.
 		}
 	}
@@ -210,9 +210,9 @@ func (controller *Controller) reconcileExecutorIdentity(ctx context.Context, wor
 	if errors.As(err, &invalid) {
 		failure = invalid
 	} else if errors.Is(err, errExecutorIdentityTargetGone) {
-		failure = identityFailure("target_validation", errors.New("executor identity target changed during exec")).(*executorIdentityError)
+		failure = identityFailure("target_validation", errors.New("executor identity target changed during exec"))
 	} else {
-		failure = identityFailure("pod_read", err).(*executorIdentityError)
+		failure = identityFailure("pod_read", err)
 	}
 	account := controller.config.ExecutorServiceAccount
 	if launcher {
@@ -322,5 +322,5 @@ func (controller *Controller) execExecutorIdentity(ctx context.Context, workflow
 // ±50% jitter avoids lockstep retries under shared API/runtime load.
 func executorIdentityBackoff(attempt int) time.Duration {
 	base := time.Duration(1<<(attempt-1)) * time.Second
-	return base/2 + time.Duration(rand.Int64N(int64(base)+1))
+	return base/2 + time.Duration(rand.Int64N(int64(base)+1)) //nolint:gosec // Public scheduling jitter, not a security value.
 }
