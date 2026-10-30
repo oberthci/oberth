@@ -2,6 +2,7 @@ package argojob
 
 import (
 	"fmt"
+	"strings"
 
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
@@ -20,6 +21,12 @@ func recordRestartCut(workflow *wfv1.Workflow, node wfv1.NodeStatus, pod *corev1
 	if node.Outputs != nil && node.Outputs.ExitCode != nil && *node.Outputs.ExitCode != "" && !nodeExitCodeKnown(node) {
 		return // malformed evidence is not evidence that the exit was lost
 	}
+	// Node text is never positive evidence, but explicit OOM/deadline evidence
+	// must not turn into a restart cut when its Pod has been collected.
+	message := strings.ToLower(node.Message)
+	if strings.Contains(message, "oomkilled") || strings.Contains(message, "deadline") {
+		return
+	}
 	diagnostic := step.Termination
 	if diagnostic != nil && diagnostic.Available && diagnostic.Container != nil {
 		t := diagnostic.Container
@@ -37,7 +44,15 @@ func recordRestartCut(workflow *wfv1.Workflow, node wfv1.NodeStatus, pod *corev1
 	if step.ExitCodeKnown {
 		return
 	}
-	if diagnostic != nil && (diagnostic.Unavailable == "binding-mismatch" || diagnostic.Unavailable == "ambiguous-attempt" || diagnostic.Unavailable == "invalid-termination" || diagnostic.Unavailable == "unsupported-shape") {
+	// Only a complete-snapshot absence or an exact readable Pod lacking its
+	// current main termination supplies positive missing-exit evidence. API
+	// failures, incomplete lists and nodes that never got a Pod stay ambiguous.
+	if diagnostic == nil {
+		return
+	}
+	switch diagnostic.Unavailable {
+	case "pod-absent", "termination-unavailable":
+	default:
 		return
 	}
 	step.restartCutReason = "adopted Pod attempt has no recorded process exit code"

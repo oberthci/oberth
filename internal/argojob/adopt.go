@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -20,11 +21,12 @@ import (
 // Adoption pins observation to the exact Workflow found during owner recovery.
 // Resource size comes from that submission, never from the current default branch.
 type Adoption struct {
-	KubeVirt   argoworkflow.VMIDemand
-	Size       periapsis.Size
-	UID        types.UID
-	Identity   string
-	SpecSHA256 string
+	RestartedAt time.Time
+	KubeVirt    argoworkflow.VMIDemand
+	Size        periapsis.Size
+	UID         types.UID
+	Identity    string
+	SpecSHA256  string
 }
 
 // ErrAdoptionRefused marks a Workflow that exists but must not be observed as
@@ -110,7 +112,7 @@ func (controller *Controller) bindAdoption(workflow *wfv1.Workflow, request Adop
 	if err != nil {
 		return Adoption{}, err
 	}
-	return Adoption{KubeVirt: demand, Size: size, UID: workflow.UID, Identity: identity, SpecSHA256: specHash}, nil
+	return Adoption{RestartedAt: controller.restartedAt, KubeVirt: demand, Size: size, UID: workflow.UID, Identity: identity, SpecSHA256: specHash}, nil
 }
 
 // Argo's status and API metadata change while it runs. Its live spec must stay

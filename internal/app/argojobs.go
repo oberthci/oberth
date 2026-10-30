@@ -721,7 +721,7 @@ func (jobs *ArgoJobs) wait(ctx context.Context, name string, destination io.Writ
 				// A weaker later cut snapshot cannot erase a terminal red verdict
 				// already observed for this binding (including conflicting exits).
 				// A newly observed real failure still replaces an earlier cut.
-				if fresh.Interrupted && completion.Name != "" && !completion.Succeeded && !completion.Infrastructure && !completion.Interrupted {
+				if fresh.Interrupted && completion.Terminal && !completion.Succeeded && !completion.Infrastructure && !completion.Interrupted {
 					return jobs.result(completion), nil
 				}
 				return jobs.result(*fresh), nil
@@ -732,10 +732,12 @@ func (jobs *ArgoJobs) wait(ctx context.Context, name string, destination io.Writ
 		return service.JobResult{Reobserve: reobserve}, err
 	}
 	// A terminal Workflow keeps its outputs even when its observation ended in
-	// error (log budget breach, executor identity retirement): the scheduler
-	// then records the Workflow's real result, which includes its artifacts.
-	if reason := jobs.collectArtifacts(context.WithoutCancel(ctx), name, intent.runID, intent.trigger, completion.VMIDiagnostics); reason != "" {
-		jobs.recordArtifactFailure(context.WithoutCancel(ctx), intent.runID, reason)
+	// error (log budget breach, executor identity retirement). Partial evidence
+	// from a running Workflow must not trigger live artifact collection.
+	if completion.Terminal || completion.Succeeded {
+		if reason := jobs.collectArtifacts(context.WithoutCancel(ctx), name, intent.runID, intent.trigger, completion.VMIDiagnostics); reason != "" {
+			jobs.recordArtifactFailure(context.WithoutCancel(ctx), intent.runID, reason)
+		}
 	}
 	result := jobs.result(completion)
 	result.Reobserve = reobserve

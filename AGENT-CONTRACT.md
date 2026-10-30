@@ -1438,9 +1438,14 @@ trust assumptions and complete invalidation rules.
   uses the same observation, artifact collection, step persistence and normal
   publication/issue finalization as a newly submitted Workflow.
   Verified adoption distinguishes a missing process exit from the legacy
-  synthetic exit-code-1 display fallback. A failed Pod attempt without durable
-  exit evidence becomes `interrupted` / phase `interrupted`, with no failed-step
-  attribution; the existing amber/cancelled presentation and `run_retry` apply.
+  synthetic exit-code-1 display fallback. New progress markers omit unknown
+  exit codes rather than persisting the synthetic 1. A failed Pod attempt that
+  started before this server process initialized, without durable exit evidence,
+  becomes `interrupted` / phase `interrupted`, with no failed-step
+  attribution only when a complete Pod snapshot confirms `pod-absent`, or an
+  exact readable owned Pod lacks a main termination. LIST errors, incomplete
+  snapshots and nodes that never got a Pod stay ambiguous/red; the existing
+  amber/cancelled presentation and `run_retry` apply.
   A continuity-gap line alone never overrides a known nonzero node or bound-Pod
   exit, or turns a successful Workflow into an interruption. Ambiguous attempts,
   malformed/foreign or conflicting exit evidence, an independent real test failure, hard cleanup
@@ -1451,7 +1456,10 @@ trust assumptions and complete invalidation rules.
   or observer error, its result carries an immutable adoption binding into the
   fresh terminal read after the in-process intent is forgotten. Retained exact
   journal failures and real exits already observed for that attempt survive a
-  later incomplete snapshot; fallback still accepts a newly reported real failure. Restart cuts do not publish or create a new CI-red issue.
+  later incomplete snapshot; fallback still accepts a newly reported real failure.
+  Only an explicitly terminal earlier Workflow verdict can override a fresh cut;
+  a partial running observation cannot fabricate a red Workflow-running result.
+  Restart cuts do not publish or create a new CI-red issue.
   Observation retries failed Workflow reads for a bounded grace (2 minutes).
   An adopted run whose observation still fails settles like a submitted one:
   a terminal Workflow keeps its real result and artifacts (also after a log

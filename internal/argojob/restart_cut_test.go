@@ -37,7 +37,7 @@ func restartCutFixture(t *testing.T, change func(*wfv1.Workflow, *wfv1.NodeStatu
 			t.Fatal(err)
 		}
 	}
-	controller := &Controller{workflows: &staticWorkflowClient{workflow: wf}, kube: kube, config: Config{Namespace: wf.Namespace, MaxRunLogBytes: 1 << 20}, interval: time.Millisecond}
+	controller := &Controller{restartedAt: time.Now().UTC(), workflows: &staticWorkflowClient{workflow: wf}, kube: kube, config: Config{Namespace: wf.Namespace, MaxRunLogBytes: 1 << 20}, interval: time.Millisecond}
 	controller.WithPodLogFollower(func(context.Context, string, string, corev1.PodLogOptions) (io.ReadCloser, error) {
 		return io.NopCloser(strings.NewReader("")), nil
 	})

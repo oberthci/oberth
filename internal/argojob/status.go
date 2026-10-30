@@ -49,6 +49,7 @@ type StepResult struct {
 
 // Completion is the terminal outcome of one submitted Workflow.
 type Completion struct {
+	Terminal            bool
 	Interrupted         bool
 	ObservationComplete bool
 	ObservedNodes       int
@@ -651,6 +652,7 @@ func completeTerminalTree(workflow *wfv1.Workflow) bool {
 func completionFor(workflow *wfv1.Workflow) Completion {
 	completion := Completion{
 		Name:                workflow.Name,
+		Terminal:            workflow.Status.Phase.Completed(),
 		ObservationComplete: completeTerminalTree(workflow), ObservedNodes: len(workflow.Status.Nodes), ReplayAttempts: stepAttempts(workflow),
 		Phase:     string(workflow.Status.Phase),
 		Reason:    strings.TrimSpace(workflow.Status.Message),
