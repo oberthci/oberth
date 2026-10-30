@@ -127,7 +127,7 @@ func TestRunLogsEmptyActiveWindowHasMCPContinuation(t *testing.T) {
 		t.Fatal(err)
 	}
 	var cursor int64
-	for page := 0; page < 2; page++ {
+	for page := 0; page < 8; page++ {
 		args := map[string]any{"id": run.ID, "burn": "test", "step": "unit", "byte_offset": cursor}
 		body, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": map[string]any{"name": "run_logs", "arguments": args}})
 		req := httptest.NewRequest(http.MethodPost, "/mcp", bytes.NewReader(body))
@@ -153,13 +153,91 @@ func TestRunLogsEmptyActiveWindowHasMCPContinuation(t *testing.T) {
 		if got.ScanLimitBytes != runlog.MaxCallScanBytes || got.TotalScannedBytes != got.ScannedBytes+got.DiscoveryBytes || got.TotalScannedBytes > got.ScanLimitBytes {
 			t.Fatalf("MCP active read lost aggregate cap: %+v", got)
 		}
-		if page == 0 {
+		if got.Output == "" {
 			if got.Output != "" || !got.HasMore || got.NextByteOffset <= 0 || !strings.Contains(text, "No lines in this bounded window") || !strings.Contains(text, fmt.Sprintf("byte_offset=%d", got.NextByteOffset)) || !strings.Contains(text, "offset=0") {
 				t.Fatalf("empty page lacks continuation: %+v text=%q", got, text)
 			}
 			cursor = got.NextByteOffset
-		} else if got.Output != wanted || text != wanted || got.HasMore {
-			t.Fatalf("continuation failed: %+v text=%q", got, text)
+		} else {
+			if got.Output != wanted || text != wanted || got.HasMore {
+				t.Fatalf("continuation failed: %+v text=%q", got, text)
+			}
+			return
 		}
+	}
+	t.Fatal("bounded continuation never reached the active step")
+}
+
+func TestRunLogsRunningIndexFindsLateStepWithIdenticalRequest(t *testing.T) {
+	f := newRetentionFixture(t)
+	run := f.run(t, "feature/repeated-active", "branch", false)
+	if _, err := f.retention.Database.ClaimNextRun(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.retention.Database.PutStepResult(t.Context(), model.StepResult{RunID: run.ID, Burn: "test", Step: "unit", Status: model.StepPassed, DeclaredSize: "M"}); err != nil {
+		t.Fatal(err)
+	}
+	wanted := "[test/unit] late failure\n"
+	raw := strings.Repeat("[other/step] noise\n", 360000) + wanted
+	if err := os.WriteFile(filepath.Join(f.root, "logs", run.ID+".log"), []byte(raw), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	args, _ := json.Marshal(map[string]any{"id": run.ID, "burn": "test", "step": "unit", "pattern": "failure", "limit": 1})
+	var discovered int64
+	for range 8 {
+		value, err := f.api.CallTool(t.Context(), api.Actor{Identity: "reader"}, "run_logs", args)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := value.(LogResponse)
+		discovered += got.DiscoveryBytes
+		if got.Output == wanted {
+			if discovered != int64(len(raw)) || got.HasMore {
+				t.Fatalf("repeated discovery or lost completion: %+v total=%d", got, discovered)
+			}
+			return
+		}
+		if got.Output != "" || !got.HasMore {
+			t.Fatalf("missing incomplete observation: %+v", got)
+		}
+	}
+	t.Fatal("identical requests never found late running step")
+}
+
+type forgettingLogStore struct {
+	LogStore
+	forgotten []string
+}
+
+func (logs *forgettingLogStore) ForgetActiveIndex(id string) {
+	logs.forgotten = append(logs.forgotten, id)
+}
+
+func TestRunLogsTerminalUnexecutedStepDropsActiveIndex(t *testing.T) {
+	f := newRetentionFixture(t)
+	run := f.run(t, "feature/unexecuted", "branch", true)
+	logs := &forgettingLogStore{LogStore: f.retention.Logs}
+	f.api.logs = logs
+	steps := []model.StepResult{{Burn: "test", Step: "unit", Termination: &model.StepDiagnostic{Unavailable: "not-executed"}}}
+	response, err := f.api.stepLogResponse(t.Context(), run, steps, "test", "unit", runlog.Filter{})
+	if err != nil || response.Note != "step was not executed; no log recorded" || len(logs.forgotten) != 1 || logs.forgotten[0] != run.ID {
+		t.Fatalf("terminal early return retained cache: %+v forgotten=%v err=%v", response, logs.forgotten, err)
+	}
+}
+
+func TestRunLogsInfrastructureFailureDropsActiveIndex(t *testing.T) {
+	f := newRetentionFixture(t)
+	run := f.run(t, "feature/infrastructure-finish", "branch", false)
+	claimed, err := f.retention.Database.ClaimNextRun(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	logs := &forgettingLogStore{LogStore: f.retention.Logs}
+	scheduler := &Scheduler{store: f.retention.Database, logs: logs}
+	if err := scheduler.finishInfrastructureFailure(t.Context(), claimed, f.repo, errors.New("job creation failed")); err != nil {
+		t.Fatal(err)
+	}
+	if len(logs.forgotten) != 1 || logs.forgotten[0] != run.ID {
+		t.Fatalf("infrastructure finish retained index: %v", logs.forgotten)
 	}
 }

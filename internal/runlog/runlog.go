@@ -91,8 +91,13 @@ type Meta struct {
 }
 
 type Store struct {
-	directory  string
-	progressMu sync.RWMutex
+	directory      string
+	progressMu     sync.RWMutex
+	runningMu      sync.Mutex
+	running        map[string]*runningIndex
+	runningClock   uint64
+	runningSlots   int
+	runningEntries int
 }
 
 func Open(directory string) (*Store, error) {
@@ -143,6 +148,8 @@ func (store *Store) Resume(runID string) (*os.File, []runprogress.Event, int64, 
 }
 
 func (store *Store) BuildIndex(runID string) (Index, error) {
+	store.ForgetActiveIndex(runID)
+	defer store.ForgetActiveIndex(runID)
 	path, err := store.logPath(runID)
 	if err != nil {
 		return Index{}, err
@@ -206,15 +213,15 @@ func (store *Store) ReadFiltered(runID, burn, step string, filter Filter) ([]byt
 }
 
 // ReadActive returns the most recent bounded bytes for one step from a run's
-// growing redacted log. It builds an in-memory snapshot index only; the durable
-// terminal index remains written exclusively by BuildIndex after Job exit.
+// growing redacted log. It extends a bounded in-memory index with new bytes;
+// BuildIndex alone publishes the durable terminal index after Job exit.
 func (store *Store) ReadActive(runID, burn, step string) ([]byte, error) {
 	body, _, err := store.ReadActiveFiltered(runID, burn, step, Filter{Tail: true})
 	return body, err
 }
 
 func (store *Store) ReadActiveFiltered(runID, burn, step string, filter Filter) ([]byte, Meta, error) {
-	return store.readActiveBounded(runID, burn, step, filter)
+	return store.readActiveIndexed(runID, burn, step, filter)
 }
 
 // LiveLogSize stats the append-only log without opening or reading its bytes.
