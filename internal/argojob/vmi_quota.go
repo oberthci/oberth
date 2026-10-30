@@ -48,16 +48,18 @@ type vmiQuotaBinding struct {
 }
 
 type vmiClaim struct {
-	ReservedAt   time.Time              `json:"reserved_at"`
-	RepositoryID int64                  `json:"repository_id"`
-	PodName      string                 `json:"pod_name"`
-	PodUID       types.UID              `json:"pod_uid"`
-	WorkflowUID  types.UID              `json:"workflow_uid"`
-	Name         string                 `json:"name"`
-	Hash         string                 `json:"hash"`
-	Demand       argoworkflow.VMIDemand `json:"demand"`
-	UID          types.UID              `json:"uid,omitempty"`
-	Closed       bool                   `json:"closed,omitempty"`
+	CleanupWorkflow string                 `json:"cleanup_workflow,omitempty"`
+	CleanupRun      string                 `json:"cleanup_run,omitempty"`
+	ReservedAt      time.Time              `json:"reserved_at"`
+	RepositoryID    int64                  `json:"repository_id"`
+	PodName         string                 `json:"pod_name"`
+	PodUID          types.UID              `json:"pod_uid"`
+	WorkflowUID     types.UID              `json:"workflow_uid"`
+	Name            string                 `json:"name"`
+	Hash            string                 `json:"hash"`
+	Demand          argoworkflow.VMIDemand `json:"demand"`
+	UID             types.UID              `json:"uid,omitempty"`
+	Closed          bool                   `json:"closed,omitempty"`
 }
 
 type vmiLedger struct {
@@ -246,6 +248,9 @@ func (c *Controller) ensureVMIForResourcePod(ctx context.Context, wf *wfv1.Workf
 	keyHash := sha256.Sum256([]byte(pod.UID))
 	key := hex.EncodeToString(keyHash[:])
 	desired := vmiClaim{PodName: pod.Name, PodUID: pod.UID, RepositoryID: binding.RepositoryID, WorkflowUID: wf.UID, Name: object.GetName(), Hash: hash, Demand: op.Demand}
+	if _, declared := wf.Annotations[argoworkflow.CleanupVerdictAnnotation]; declared {
+		desired.CleanupWorkflow, desired.CleanupRun = wf.Name, wf.Annotations[runIDAnnotation]
+	}
 	claim, fresh, err := c.reserveVMIClaim(ctx, key, desired, binding)
 	if err != nil {
 		return fmt.Errorf("argojob: VMI %s repository %d template %s: %w", desired.Name, desired.RepositoryID, t.Name, err)
@@ -422,7 +427,7 @@ func reconcileVMIClaims(ledger *vmiLedger, actual map[string]*unstructured.Unstr
 				claim.Closed = true
 			}
 		}
-		if claim.Closed && pods.Continue == "" && !present[claim.PodUID] {
+		if claim.Closed && claim.CleanupWorkflow == "" && pods.Continue == "" && !present[claim.PodUID] {
 			delete(ledger.Claims, key)
 			changed = true
 		} else if claim != old {
@@ -497,7 +502,33 @@ func (c *Controller) reserveVMIClaim(ctx context.Context, key string, want vmiCl
 			object := &objects.Items[i]
 			actual[object.GetName()] = object
 		}
-		if reconcileVMIClaims(&ledger, actual, pods, c.config.Namespace, time.Now().UTC()) {
+		// Cleanup UIDs outlive resource Pods and early disposal. Release their
+		// receipts only after the original Workflow is independently gone.
+		receiptsChanged := false
+		presentPods := map[types.UID]bool{}
+		for _, pod := range pods.Items {
+			presentPods[pod.UID] = true
+		}
+		checked := map[types.UID]bool{}
+		gone := map[types.UID]bool{}
+		for key, claim := range ledger.Claims {
+			if claim.CleanupWorkflow == "" || !claim.Closed || pods.Continue != "" || presentPods[claim.PodUID] || c.workflows == nil {
+				continue
+			}
+			if !checked[claim.WorkflowUID] {
+				workflow, readErr := c.workflows.Get(ctx, claim.CleanupWorkflow, metav1.GetOptions{})
+				// An unreadable Workflow retains its receipts. It must not
+				// deny unrelated repositories a reservation.
+				gone[claim.WorkflowUID] = apierrors.IsNotFound(readErr) || (readErr == nil && workflow.UID != claim.WorkflowUID)
+				checked[claim.WorkflowUID] = true
+			}
+			if gone[claim.WorkflowUID] {
+				claim.CleanupWorkflow, claim.CleanupRun = "", ""
+				ledger.Claims[key] = claim
+				receiptsChanged = true
+			}
+		}
+		if reconciled := reconcileVMIClaims(&ledger, actual, pods, c.config.Namespace, time.Now().UTC()); reconciled || receiptsChanged {
 			err = c.updateVMILedger(ctx, cm, ledger)
 			if err != nil && !apierrors.IsConflict(err) {
 				return vmiClaim{}, false, err
@@ -505,7 +536,7 @@ func (c *Controller) reserveVMIClaim(ctx context.Context, key string, want vmiCl
 			continue // Durable repair, including on an eventual over-grant refusal.
 		}
 		if old, ok := ledger.Claims[key]; ok {
-			if old.PodName != want.PodName || old.RepositoryID != want.RepositoryID || old.WorkflowUID != want.WorkflowUID || old.Name != want.Name || old.Hash != want.Hash || old.Demand != want.Demand {
+			if old.PodName != want.PodName || old.RepositoryID != want.RepositoryID || old.WorkflowUID != want.WorkflowUID || old.Name != want.Name || old.Hash != want.Hash || old.Demand != want.Demand || old.CleanupWorkflow != want.CleanupWorkflow || old.CleanupRun != want.CleanupRun {
 				return vmiClaim{}, false, errors.New("argojob: VMI create intent changed")
 			}
 			return old, false, nil

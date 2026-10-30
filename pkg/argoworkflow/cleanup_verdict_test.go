@@ -1,12 +1,45 @@
 package argoworkflow
 
 import (
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
 )
+
+func TestCleanupAbsenceGetAdmission(t *testing.T) {
+	metadata := admittedVMIManifest[:strings.Index(admittedVMIManifest, "spec:\n")]
+	read := &wfv1.ResourceTemplate{Action: "get", SetOwnerReference: true, Manifest: metadata, Flags: []string{"--ignore-not-found"}}
+	if err := admitVMIResource("absence", read, nil); err != nil {
+		t.Fatal(err)
+	}
+	for _, flags := range [][]string{{"--ignore-not-found=true"}, {"--ignore-not-found", "--ignore-not-found"}, {"--ignore-not-found", "--all-namespaces"}, {"--ignore-not-found", "--raw=/api/v1/secrets"}, {"--ignore-not-found", "--selector=x"}} {
+		bad := read.DeepCopy()
+		bad.Flags = flags
+		if err := admitVMIResource("absence", bad, nil); err == nil {
+			t.Fatalf("admitted flags %v", flags)
+		}
+	}
+	for _, action := range []string{"create", "delete"} {
+		bad := read.DeepCopy()
+		bad.Action = action
+		if err := admitVMIResource("absence", bad, nil); err == nil {
+			t.Fatalf("admitted absence flag on %s", action)
+		}
+	}
+	deadline := int64(60)
+	wf := &wfv1.Workflow{Spec: wfv1.WorkflowSpec{Entrypoint: "absence", ActiveDeadlineSeconds: &deadline, Templates: []wfv1.Template{{Name: "absence", Resource: read}}}}
+	identity := testBranchIdentity()
+	identity.VMLauncherServiceAccountName = "oberth-argo-vm-launcher"
+	if err := Prepare(wf, Policy{KubeVirt: true}, identity); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(wf.Spec.Templates[0].Resource.Flags, []string{"--ignore-not-found"}) {
+		t.Fatal("absence flag was lost during projection")
+	}
+}
 
 func TestCleanupDeleteAdmission(t *testing.T) {
 	metadata := admittedVMIManifest[:strings.Index(admittedVMIManifest, "spec:\n")]

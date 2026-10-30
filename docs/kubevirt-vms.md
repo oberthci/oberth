@@ -356,12 +356,31 @@ repository's KubeVirt grant. After Argo completes, Oberth records an
 list to the step log. It deletes run-created VMIs, DataVolumes and PVCs with
 UID preconditions and waits for complete absence readback. Remaining objects,
 foreign replacements, missing ownership proof, API errors or incomplete lists
-fail the hook and the run. Recovery applies the same gate before reporting a
+fail the hook and the run. Each safe guest deletion is independently attempted,
+even after a sibling inventory or deletion failure. The cancellation backstop
+also attempts every guest. Recovery applies the same gate before reporting a
 terminal result. Polling backs off exponentially from 100ms to a 2s cap,
 within the declared total deadline. A clean verdict preserves an earlier
 pipeline failure. Observer API, configuration and log-storage failures are
 classified as infrastructure failures; leftovers and unproven ownership remain
 pipeline failures. An existing pipeline failure keeps that attribution.
+
+For verdict-enabled runs, the server's bounded reservation ledger retains the
+run ID, Workflow name/UID and confirmed original VMI UIDs through early disposal
+and resource-Pod removal. Closed receipts are reclaimed on later reservations
+only after the original Workflow and resource Pod are gone. A replacement UID,
+changed VMI run label or Workflow owner is refused. An unconfirmed create intent
+fails the verdict even when a read currently returns NotFound: an in-flight POST
+has not yet been ruled out. Safe sibling cleanup is still attempted.
+
+The public step-log receipt identifies the run, namespace, Workflow UID and
+original VMI UIDs. The observer requires actual NotFound reads for original VMI
+names, plus a complete independent Pod inventory with no associated
+virt-launcher, including terminating Pods. Pod matching uses original UID labels,
+VMI owner references, domain labels and the launcher name prefix. A delayed
+launcher keeps cleanup pending; an unreadable Pod inventory or retained launcher
+fails the verdict. This proves API resource absence, not physical node-file
+erasure. Pod observation uses the server's existing namespaced permission.
 
 Cleanup includes Workflow-owned volumeClaimTemplates and source PVCs. PVCs
 owned by a DataVolume must prove that parent's UID and Workflow ownership.
@@ -380,7 +399,7 @@ absence across controller ticks. Each API attempt has a 20-second bound; a
 slow guest or storage finalizer keeps the step pending until absence or the
 Workflow deadline. The pinned Argo main container then runs
 `argoexec version`; it receives no delete permission and cannot repeat a
-name-only delete against a replacement. A missing target succeeds. Flags,
+name-only delete against a replacement. A missing target succeeds. Delete flags,
 force deletion and arbitrary selectors remain refused.
 
 For example, pass the create step's UID output as the delete template's `uid`
@@ -412,3 +431,30 @@ storage permissions. Disk deletes count toward the existing per-VM resource
 template cap. Existing creation admission remains in force. Drain
 running resource-delete workflows before upgrading, since legacy Pods lack
 the server delete guard and the launcher account no longer has delete access.
+
+
+An absence readback may use the exact flag `--ignore-not-found` on a VMI get:
+
+```yaml
+resource:
+  action: get
+  flags: ["--ignore-not-found"]
+  setOwnerReference: true
+  manifest: |
+    apiVersion: kubevirt.io/v1
+    kind: VirtualMachineInstance
+    metadata:
+      name: "{{workflow.name}}-amd64"
+      labels:
+        oberth.ci/workflow: "{{workflow.name}}"
+```
+
+The pinned Argo executor returns success and empty output for an actual API
+NotFound. A resource output parameter such as `{.metadata.uid}` receives an empty
+value on absence; a present VMI still returns its UID and must be treated as
+residue by the final L1 check. The terminal cleanup verdict supplies the stronger
+launcher/backing-resource proof. Forbidden responses, timeouts and unexecuted
+reads remain failures; `continueOn` does not waive those failures in Oberth.
+Ordinary get templates retain their existing missing-object failure behavior.
+No other flags, selectors, resource kinds, arbitrary substitutions or cell API
+credentials are added by this read primitive.

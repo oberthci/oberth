@@ -2,6 +2,7 @@ package argojob
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -9,6 +10,9 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
+
+	"github.com/oberthci/oberth/pkg/argoworkflow"
 )
 
 var vmiResource = schema.GroupVersionResource{Group: "kubevirt.io", Version: "v1", Resource: "virtualmachineinstances"}
@@ -59,18 +63,36 @@ func (controller *Controller) cleanupVMIsForRun(ctx context.Context, workflow *w
 	if err != nil {
 		return fmt.Errorf("argojob: list run VMIs: %w", err)
 	}
+	known := map[string]types.UID{}
+	var failures []error
+	if _, declared := workflow.Annotations[argoworkflow.CleanupVerdictAnnotation]; declared {
+		var identityErr error
+		known, identityErr = controller.cleanupIdentities(ctx, workflow)
+		if identityErr != nil {
+			var pending *cleanupPendingIdentityError
+			if !errors.As(identityErr, &pending) {
+				return identityErr
+			}
+			failures = append(failures, identityErr)
+		}
+	}
 	for _, object := range objects.Items {
 		if object.GetLabels()["oberth.ci/workflow"] != workflowName || !strings.HasPrefix(object.GetName(), workflowName+"-") || !workflowOwnsResource(workflow, &object) {
 			continue
 		}
+		if original := known[cleanupKey(vmiResource, object.GetName())]; original != "" && original != object.GetUID() {
+			failures = append(failures, fmt.Errorf("argojob: replacement VMI %s; original UID differs", object.GetName()))
+			continue
+		}
 		uid := object.GetUID()
 		if uid == "" {
-			return fmt.Errorf("argojob: VMI %s has no UID", object.GetName())
+			failures = append(failures, fmt.Errorf("argojob: VMI %s has no UID", object.GetName()))
+			continue
 		}
 		err = client.Delete(ctx, object.GetName(), metav1.DeleteOptions{Preconditions: &metav1.Preconditions{UID: &uid}})
 		if err != nil && !apierrors.IsNotFound(err) {
-			return fmt.Errorf("argojob: delete leftover VMI %s: %w", object.GetName(), err)
+			failures = append(failures, fmt.Errorf("argojob: delete leftover VMI %s: %w", object.GetName(), err))
 		}
 	}
-	return nil
+	return errors.Join(failures...)
 }

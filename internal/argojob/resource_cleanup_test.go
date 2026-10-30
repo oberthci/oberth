@@ -25,6 +25,8 @@ import (
 
 	"github.com/oberthci/oberth/internal/runprogress"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/client-go/kubernetes/fake"
 )
 
 func cleanupClient() *dynamicfake.FakeDynamicClient {
@@ -98,6 +100,7 @@ func TestGuardedResourceDeletes(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
+				c.kube = cleanupKubeClient()
 				c.WithVMIClient(client)
 				ctx, cancel := context.WithTimeout(t.Context(), 200*time.Millisecond)
 				defer cancel()
@@ -178,6 +181,7 @@ func TestCleanupVerdictGatesWaitAndRecovery(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
+				c.kube = cleanupKubeClient()
 				c.WithVMIClient(client)
 				var completion Completion
 				var log bytes.Buffer
@@ -257,6 +261,7 @@ func TestCleanupVerdictRefusesUnlabeledForeignOrOrphan(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	c.kube = cleanupKubeClient()
 	c.WithVMIClient(client)
 	completion := Completion{Succeeded: true}
 	var log bytes.Buffer
@@ -282,6 +287,7 @@ func TestCleanupVerdictRequiresRetainedStepLog(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	c.kube = cleanupKubeClient()
 	c.WithVMIClient(cleanupClient())
 	completion := Completion{Succeeded: true}
 	c.cleanupVerdict(t.Context(), wf, wf.Annotations[runIDAnnotation], brokenCleanupLog{}, &completion)
@@ -297,6 +303,7 @@ func TestCleanupVerdictPreservesPipelineFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	c.kube = cleanupKubeClient()
 	c.WithVMIClient(cleanupClient())
 	completion := Completion{Succeeded: false, FailedBurn: "test", FailedStep: "driver", Reason: "guest failed"}
 	var log bytes.Buffer
@@ -325,9 +332,9 @@ func TestCleanupVerdictBackoffBoundsListRate(t *testing.T) {
 	config, wf, _ := guardedVMIFixture(t, 1)
 	wf.Annotations[argoworkflow.CleanupVerdictAnnotation] = "1"
 	client := cleanupClient()
-	object := ownedCleanupObject(wf, vmiResource, "slow")
+	object := ownedCleanupObject(wf, pvcResource, "slow")
 	object.SetLabels(nil)
-	if _, err := client.Resource(vmiResource).Namespace(wf.Namespace).Create(t.Context(), object, metav1.CreateOptions{}); err != nil {
+	if _, err := client.Resource(pvcResource).Namespace(wf.Namespace).Create(t.Context(), object, metav1.CreateOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	client.PrependReactor("delete", "*", func(ktesting.Action) (bool, runtime.Object, error) { return true, nil, nil })
@@ -335,6 +342,7 @@ func TestCleanupVerdictBackoffBoundsListRate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	c.kube = cleanupKubeClient()
 	c.WithVMIClient(client)
 	completion := Completion{Succeeded: true}
 	c.cleanupVerdict(t.Context(), wf, wf.Annotations[runIDAnnotation], nil, &completion)
@@ -430,6 +438,7 @@ func TestCleanupVerdictSharedNamespaceInventory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	c.kube = cleanupKubeClient()
 	c.WithVMIClient(client)
 	completion := Completion{Succeeded: true}
 	var log bytes.Buffer
@@ -474,6 +483,7 @@ func TestCleanupVerdictFinalPrefixScanFindsLateUnlabeledPVC(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	c.kube = cleanupKubeClient()
 	c.WithVMIClient(client)
 	completion := Completion{Succeeded: true}
 	var log bytes.Buffer
@@ -524,7 +534,9 @@ func TestCleanupVerdictFailureAttribution(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
+				c.kube = cleanupKubeClient()
 				if mode != "nil-client" {
+					c.kube = cleanupKubeClient()
 					c.WithVMIClient(client)
 				}
 				completion := Completion{Succeeded: !pipelineFailed}
@@ -549,4 +561,8 @@ func TestCleanupVerdictFailureAttribution(t *testing.T) {
 			})
 		}
 	}
+}
+
+func cleanupKubeClient() *fake.Clientset {
+	return fake.NewClientset(&corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: vmiQuotaConfigMap, Namespace: testNamespace, Labels: map[string]string{"oberth.ci/role": "vmi-reservations"}, Annotations: map[string]string{vmiLedgerInitialized: "1"}}, Data: map[string]string{"reservations.json": `{"version":1,"claims":{}}`}})
 }
