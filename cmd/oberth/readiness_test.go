@@ -21,7 +21,7 @@ func TestReadinessConfigurationPreservesSecretDeadlines(t *testing.T) {
 		want                               error
 	}{
 		{"shorter Secret deadline", 3 * time.Second, 0, 3 * time.Second, context.DeadlineExceeded},
-		{"sampler deadline", 20 * time.Second, 0, app.ReadinessProbeBudget, context.DeadlineExceeded},
+		{"sampler deadline", app.ReadinessProbeBudget + time.Second, 0, app.ReadinessProbeBudget, context.DeadlineExceeded},
 		{"cancellation", 20 * time.Second, time.Second, time.Second, context.Canceled},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -45,7 +45,7 @@ func TestReadinessConfigurationPreservesSecretDeadlines(t *testing.T) {
 				if !errors.Is(err, tc.want) || time.Since(started) != tc.elapsed {
 					t.Fatalf("credential result %v after %s; want %v after %s", err, time.Since(started), tc.want, tc.elapsed)
 				}
-				if tc.secretBudget < app.ReadinessProbeBudget && ctx.Err() != nil {
+				if tc.cancelAfter == 0 && tc.secretBudget < app.ReadinessProbeBudget && ctx.Err() != nil {
 					t.Fatal("shorter Secret deadline unexpectedly exhausted outer budget")
 				}
 			})

@@ -7,14 +7,16 @@ import (
 	"io"
 	"sync"
 	"time"
+
+	"github.com/oberthci/oberth/internal/store"
 )
 
 const (
 	readinessInterval = 5 * time.Second
 	// ReadinessProbeBudget also sets the minimum SQLite readiness busy timeout.
-	ReadinessProbeBudget = 10 * time.Second
+	ReadinessProbeBudget = 30 * time.Second
 	// This is an elapsed-time bound, independent of how many attempts complete.
-	// The ticker drops missed ticks: full-budget reads run about every ten seconds.
+	// The ticker drops missed ticks: full-budget reads run about every thirty seconds.
 	readinessMaxAge = 90 * time.Second
 )
 
@@ -35,6 +37,7 @@ type ReadinessSnapshot struct {
 	dbWait            time.Duration
 	probeDuration     time.Duration
 	retainedDeadlines uint64
+	retainedBusy      uint64
 	retainedLogged    bool
 	// Shared by HTTP observations and the watcher so an expiry during a stalled
 	// read is logged once, even if many concurrent requests observe it.
@@ -63,12 +66,12 @@ func (snapshot *ReadinessSnapshot) sampleAge(now time.Time) time.Duration {
 // Sample presence distinguishes an uninitialized snapshot from an age of zero.
 func (snapshot *ReadinessSnapshot) WriteMetrics(w io.Writer) {
 	snapshot.mu.RLock()
-	age, retained, present := snapshot.sampleAge(time.Now()).Seconds(), snapshot.retainedDeadlines, 0
+	age, retained, busy, present := snapshot.sampleAge(time.Now()).Seconds(), snapshot.retainedDeadlines, snapshot.retainedBusy, 0
 	if !snapshot.checked.IsZero() {
 		present = 1
 	}
 	snapshot.mu.RUnlock()
-	_, _ = fmt.Fprintf(w, "# TYPE oberth_readiness_sample_present gauge\noberth_readiness_sample_present %d\n# TYPE oberth_readiness_sample_age_seconds gauge\noberth_readiness_sample_age_seconds %g\n# TYPE oberth_readiness_retained_deadlines_total counter\noberth_readiness_retained_deadlines_total %d\n", present, age, retained)
+	_, _ = fmt.Fprintf(w, "# TYPE oberth_readiness_sample_present gauge\noberth_readiness_sample_present %d\n# TYPE oberth_readiness_sample_age_seconds gauge\noberth_readiness_sample_age_seconds %g\n# TYPE oberth_readiness_retained_deadlines_total counter\noberth_readiness_retained_deadlines_total %d\n# TYPE oberth_readiness_retained_busy_total counter\noberth_readiness_retained_busy_total %d\n", present, age, retained, busy)
 }
 
 func (health Health) observeReadiness(gateErr error) error {
@@ -122,13 +125,18 @@ func (health Health) refreshReadiness(ctx context.Context) {
 	now := time.Now()
 	snapshot := health.Readiness
 	snapshot.mu.Lock()
-	// A deadline retains the last success without renewing its age. Cancellation
+	// Deadlines and typed SQLite contention retain the last success without
+	// renewing its age. Cancellation
 	// and hard errors still replace it immediately.
-	retainGreen := errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, context.Canceled) &&
+	retainGreen := (errors.Is(err, context.DeadlineExceeded) || store.IsTransientLockError(err)) && !errors.Is(err, context.Canceled) &&
 		!errors.Is(ctx.Err(), context.Canceled) && !snapshot.checked.IsZero() && snapshot.err == nil
 	logRetained := false
 	if retainGreen {
-		snapshot.retainedDeadlines++
+		if store.IsTransientLockError(err) {
+			snapshot.retainedBusy++
+		} else {
+			snapshot.retainedDeadlines++
+		}
 		logRetained = !snapshot.retainedLogged
 		snapshot.retainedLogged = true
 	} else {
@@ -141,7 +149,11 @@ func (health Health) refreshReadiness(ctx context.Context) {
 	age := snapshot.sampleAge(now)
 	snapshot.mu.Unlock()
 	if logRetained && health.Log != nil {
-		health.Log("readiness: event=retained_deadline sample_age=%s db_wait=%s probe_duration=%s", age, dbWait, now.Sub(started))
+		event := "retained_deadline"
+		if store.IsTransientLockError(err) {
+			event = "retained_busy"
+		}
+		health.Log("readiness: event=%s sample_age=%s db_wait=%s probe_duration=%s", event, age, dbWait, now.Sub(started))
 	}
 	_ = health.observeReadiness(gateErr)
 }
@@ -170,7 +182,7 @@ func readinessReason(err error) string {
 }
 
 // WatchReadiness probes immediately, then on a five-second ticker. Probes run
-// serially and can take up to ten seconds, so slow probes reduce the cadence.
+// serially and can take up to thirty seconds, so slow probes reduce the cadence.
 // All remote probes must honor the context to avoid stalling process shutdown.
 func (health Health) WatchReadiness(ctx context.Context) {
 	ticker := time.NewTicker(readinessInterval)

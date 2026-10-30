@@ -46,9 +46,24 @@ func TestExecutorIdentityFailureIsInfrastructureAndRunRetryApplies(t *testing.T)
 	if len(fixture.jobs.deleted) != 1 {
 		t.Fatal("live Workflow was not deleted before recording infrastructure failure")
 	}
+	if failed.AutoRetriedBy == "" {
+		t.Fatal("pre-step identity failure was not automatically retried")
+	}
+	child, err := fixture.store.Run(t.Context(), failed.AutoRetriedBy)
+	if err != nil || child.AutoRetryOf != source.ID || child.SHA != source.SHA {
+		t.Fatal("automatic retry lost source", child, err)
+	}
+	if err := fixture.scheduler.ProcessNext(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	child, err = fixture.store.Run(t.Context(), child.ID)
+	if err != nil || child.AutoRetriedBy != "" || child.Status != model.RunFailed {
+		t.Fatal("automatic retry ran twice", child, err)
+	}
+
 	control := fixture.api(t)
 	control.runRetries = fixture.store
-	value, err := control.CallTool(t.Context(), api.Actor{Identity: "operator@host"}, "run_retry", json.RawMessage(fmt.Sprintf(`{"id":%q}`, failed.ID)))
+	value, err := control.CallTool(t.Context(), api.Actor{Identity: "operator@host"}, "run_retry", json.RawMessage(fmt.Sprintf(`{"id":%q}`, child.ID)))
 	if err != nil {
 		t.Fatal(err)
 	}

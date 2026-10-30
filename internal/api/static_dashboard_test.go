@@ -210,7 +210,7 @@ func TestRunsPageIsOneFlatFilteredList(t *testing.T) {
 		}
 		return source[from : from+to]
 	}
-	for _, want := range []string{"`/api/runs?limit=${runPageSize}`", `new URLSearchParams({ limit: String(runPageSize) })`, `api("/api/runs/counts")`} {
+	for _, want := range []string{"`/api/runs?limit=${runPageSize}${state.collapseRuns ?", `new URLSearchParams({ limit: String(runPageSize) })`, `api("/api/runs/counts")`} {
 		if !strings.Contains(source, want) {
 			t.Fatalf("app.js run loading is missing %s", want)
 		}
@@ -231,7 +231,7 @@ func TestRunsPageIsOneFlatFilteredList(t *testing.T) {
 			t.Fatalf("runs page still has separate section %q", unwanted)
 		}
 	}
-	table := section("function runsTable(", "\nasync function renderRuns(")
+	table := section("function runRow(", "\nasync function renderRuns(")
 	for _, want := range []string{"queuePhase(run)", "queueSize(run)", "queueSizeTitle(run)", `title="${esc(queueDetail(run))}"`, "runMessageCell(run)", "runTimeLabel(run)"} {
 		if !strings.Contains(table, want) {
 			t.Fatalf("flat runs table is missing %s", want)
@@ -294,20 +294,20 @@ func TestRunsFiltersCountsAndCancelledSuccessors(t *testing.T) {
 	t.Parallel()
 	source := string(staticAssets["app.js"].body)
 	for _, want := range []string{
-		`const runFilters = ["all", "queued", "running", "passed", "failed", "cancelled"]`,
+		`const runFilters = ["all", "queued", "running", "passed", "failed", "infra-retried", "superseded", "cancelled"]`,
 		`const statusOK = state.filter === "all" || displayRunStatus(run) === state.filter`,
 		`return statusOK && (!state.releaseOnly || run.Release)`,
 		`data-kind-filter="release"`, `state.releaseOnly = !state.releaseOnly`,
 		`localStorage.setItem("oberth-kind", state.releaseOnly ? "release" : "all")`,
 		`if (saved === "waiting") return "queued"`,
-		`if (saved === "interrupted" || saved === "superseded") return "cancelled"`,
+		`if (saved === "interrupted") return "cancelled"`,
 		`localStorage.getItem("oberth-filter") === "release"`,
 		`state.runCounts?.Queued`, `state.runCounts?.QueuedByRepo?.[selectedRepo?.ID]`,
 		`const datedTotal = Math.max(0, (counts.get(state.repo) || 0) - queued)`,
-		`state.runSourceCount = dated.length`,
+		`state.runSourceCount = state.collapseRuns ? source.length : dated.length`,
 		`function shortSuccessor(s) { return String(s || "").slice(0, 12); }`,
 		`view successor ${esc(shortSuccessor(run.SupersededBy))}`,
-		`status === "cancelled" ?`, `esc(runMessage(run))`, `server restart, retry needed`, `retry-warning`,
+		`(status === "cancelled" || status === "superseded") ?`, `esc(runMessage(run))`, `server restart, retry needed`, `retry-warning`,
 	} {
 		if !strings.Contains(source, want) {
 			t.Fatalf("dashboard missing %q", want)
@@ -369,7 +369,7 @@ func TestRunDetailStepsAreUniformOrderedRows(t *testing.T) {
 			t.Fatalf("dashboard retains the credentialed badge: %q", unwanted)
 		}
 	}
-	table := section("function runsTable(", "\nasync function renderRuns(")
+	table := section("function runRow(", "\nasync function renderRuns(")
 	if !strings.Contains(table, "${releaseBadge(run)}") {
 		t.Fatal("runs table lost the release badge")
 	}

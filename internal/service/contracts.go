@@ -386,6 +386,8 @@ type JobRequest struct {
 }
 
 type JobResult struct {
+	// Includes earlier workflow attempts even when the latest display row is queued.
+	ObservedStepStart   bool
 	TerminalObservation *model.RunTerminalObservation
 	Status              model.RunStatus
 	Phase               string

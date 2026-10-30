@@ -808,6 +808,11 @@ func (jobs *ArgoJobs) forget(name, runID string) {
 // engine produces, so nothing downstream can tell which engine ran.
 func (jobs *ArgoJobs) result(completion argojob.Completion) service.JobResult {
 	result := service.JobResult{Status: model.RunFailed, Phase: "job"}
+	for _, step := range completion.ReplayAttempts {
+		if step.StartedAt != nil || (step.Status != runprogress.StepQueued && step.Status != runprogress.StepSkipped) {
+			result.ObservedStepStart = true
+		}
+	}
 	if completion.ObservationComplete {
 		observation := &model.RunTerminalObservation{Version: 1, JobName: completion.Name, Nodes: completion.ObservedNodes}
 		for _, step := range completion.ReplayAttempts {

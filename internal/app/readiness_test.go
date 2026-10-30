@@ -405,7 +405,7 @@ func TestReadinessWriterBusyRequiresPersistentProbeErrors(t *testing.T) {
 		if (err == nil) != want {
 			t.Fatalf("ready=%t, want %t: %v", err == nil, want, err)
 		}
-		if !want && !errors.Is(err, errReadinessDatabase) {
+		if !want && !errors.Is(err, errReadinessDatabase) && !errors.Is(err, errReadinessStale) {
 			t.Fatal("writer error was not classified as database readiness", err)
 		}
 		if err := heartbeat.Check(); err != nil {
@@ -429,7 +429,9 @@ func TestReadinessWriterBusyRequiresPersistentProbeErrors(t *testing.T) {
 	sample(100*time.Second, nil, true)
 	sample(110*time.Second, writerBusyReadinessError(5), true)
 	sample(199*time.Second, writerBusyReadinessError(6), true)
-	sample(200*time.Second, writerBusyReadinessError(5), false)
+	sample(200*time.Second, writerBusyReadinessError(5), true)
+	setReadinessChecked(health.Readiness, time.Now().Add(-readinessMaxAge-time.Second))
+	assertReady(false) // Persistent contention also exhausts the last-green window.
 	sample(201*time.Second, nil, true)
 	sample(210*time.Second, errors.New("disk unavailable"), false)
 }

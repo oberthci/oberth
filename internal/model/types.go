@@ -128,8 +128,11 @@ type RepositorySpec struct {
 }
 
 type Run struct {
-	Priority       RunPriority `json:"priority_class"`
-	PriorityReason string      `json:"priority_reason"`
+	EarlierAttempts int         `json:"earlier_attempts,omitempty"`
+	AutoRetryOf     string      `json:"auto_retry_of,omitempty"`
+	AutoRetriedBy   string      `json:"auto_retried_by,omitempty"`
+	Priority        RunPriority `json:"priority_class"`
+	PriorityReason  string      `json:"priority_reason"`
 	// The explicit admin fallback survives a withheld automatic tag boost.
 	PriorityOverride       RunPriority `json:"-"`
 	PriorityOverrideReason string      `json:"-"`
@@ -189,6 +192,8 @@ type RunSpec struct {
 }
 
 type RunResult struct {
+	// AutoRetryPreStep is set only by the scheduler after cleanup and progress checks.
+	AutoRetryPreStep    bool `json:"-"`
 	TerminalObservation *RunTerminalObservation
 	Status              RunStatus
 	Phase               string
@@ -203,9 +208,10 @@ type RunResult struct {
 }
 
 type RunListFilter struct {
-	RepoID int64
-	Ref    string
-	Limit  int
+	LatestPerRef bool
+	RepoID       int64
+	Ref          string
+	Limit        int
 	// Before is an exclusive QueueSequence cursor: zero starts at the newest
 	// run, a page's last QueueSequence fetches the next older page.
 	Before int64

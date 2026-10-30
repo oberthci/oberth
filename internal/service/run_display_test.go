@@ -26,7 +26,7 @@ func TestDisplayRunStatusSeparatesPrestartAndTerminalCauses(t *testing.T) {
 		{"claimed", model.Run{Status: model.RunRunning}, "queued"},
 		{"legacy waiting", model.Run{Status: model.RunWaiting}, "queued"},
 		{"started", model.Run{Status: model.RunRunning, StartedAt: &started}, "running"},
-		{"superseded", model.Run{Status: model.RunInterrupted, SupersededBy: "newer"}, "cancelled"},
+		{"superseded", model.Run{Status: model.RunInterrupted, SupersededBy: "newer"}, "superseded"},
 		{"cancelled", model.Run{Status: model.RunInterrupted, Phase: model.PhaseCancelled}, "cancelled"},
 		{"restart", model.Run{Status: model.RunInterrupted, Reason: "oberth restarted"}, "cancelled"},
 		{"passed", model.Run{Status: model.RunPassed}, "passed"},
@@ -128,7 +128,7 @@ func TestRunViewsAddDisplayStatusAndReasonToDefaultList(t *testing.T) {
 		t.Fatal(err)
 	}
 	history := historyValue.([]model.Run)
-	if len(history) != 1 || history[0].ID != run.ID || history[0].DisplayStatus != "cancelled" ||
+	if len(history) != 1 || history[0].ID != run.ID || history[0].DisplayStatus != "superseded" ||
 		history[0].SupersededBy == "" || history[0].DisplayReason != "superseded by bbbbbbbb" {
 		t.Fatalf("history did not link successor: %+v", history)
 	}
@@ -158,7 +158,7 @@ func TestRestartRefireDisplaysCancelledWithSuccessor(t *testing.T) {
 	}
 	run := value.(RunDetailResponse).Run
 	want := "server restart, re-queued as " + shortRunID(replacement.ID)
-	if run.DisplayStatus != "cancelled" || run.DisplayReason != want || run.SupersededBy != replacement.ID {
+	if run.DisplayStatus != "superseded" || run.DisplayReason != want || run.SupersededBy != replacement.ID {
 		t.Fatalf("restart presentation = %+v, want %q", run, want)
 	}
 }
@@ -267,7 +267,11 @@ func TestDisplayReasonUsesDurableCauseNotSHAOrTextHeuristics(t *testing.T) {
 	} {
 		run := model.Run{Status: model.RunInterrupted, Reason: tc.reason, Phase: tc.phase, SupersededBy: successor.ID, SHA: successor.SHA, Ref: successor.Ref}
 		got := service.presentationRunWithSuccessor(t.Context(), run, map[string]model.Run{successor.ID: successor})
-		if got.DisplayStatus != "cancelled" || got.DisplayReason != tc.want {
+		wantStatus := "superseded"
+		if tc.phase == model.PhaseCancelled {
+			wantStatus = "cancelled"
+		}
+		if got.DisplayStatus != wantStatus || got.DisplayReason != tc.want {
 			t.Fatalf("%s: %+v", tc.reason, got)
 		}
 	}
@@ -289,7 +293,7 @@ func TestScopedDisplayDoesNotLinkHiddenSuccessor(t *testing.T) {
 	for _, reason := range []string{"superseded by newer run", "re-queued after restart", store.KVMRestartRetryReason} {
 		run := model.Run{Status: model.RunInterrupted, Reason: reason, SupersededBy: strings.Repeat("b", 32)}
 		got := service.presentationRunWithSuccessor(t.Context(), run, nil)
-		if got.SupersededBy != "" || strings.Contains(got.DisplayReason, "bbbb") || got.DisplayStatus != "cancelled" {
+		if got.SupersededBy != "" || strings.Contains(got.DisplayReason, "bbbb") || got.DisplayStatus != "superseded" {
 			t.Fatalf("hidden successor leaked: %+v", got)
 		}
 		if reason == store.KVMRestartRetryReason && got.DisplayReason != "server restart, re-queued" {

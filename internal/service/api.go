@@ -897,20 +897,24 @@ func (service *API) Runs(ctx context.Context, actor api.Actor, filter api.RunFil
 	if !api.ValidRunView(filter.View) {
 		return nil, fmt.Errorf("%w: view must be all, active or history", ErrInvalidInput)
 	}
+	if filter.LatestPerRef && filter.View != "" && filter.View != api.RunViewAll {
+		return nil, fmt.Errorf("%w: latest_per_ref requires all view", ErrInvalidInput)
+	}
+
 	if filter.View == api.RunViewActive {
 		return service.activeRuns(ctx, filter)
 	}
 	if filter.Before < 0 || service.scope != nil && filter.Before > 0 && filter.BeforeRun == "" {
 		return nil, fmt.Errorf("%w: before must be a positive run sequence, or a run ID for a scoped uplink", ErrInvalidInput)
 	}
-	storeFilter := model.RunListFilter{Ref: filter.Ref, Limit: filter.Limit, Before: filter.Before, Terminal: filter.View == api.RunViewHistory}
+	storeFilter := model.RunListFilter{LatestPerRef: filter.LatestPerRef, Ref: filter.Ref, Limit: filter.Limit, Before: filter.Before, Terminal: filter.View == api.RunViewHistory}
 	if strings.TrimSpace(filter.BeforeRun) != "" {
 		// A cursor that is both a sequence and a run-ID spelling is a run
 		// first; an unscoped caller falls back to the sequence (#073).
 		cursor, err := service.resolveReadRunID(ctx, filter.BeforeRun)
 		switch {
 		case err == nil:
-			if filter.View == api.RunViewHistory {
+			if filter.LatestPerRef || filter.View == api.RunViewHistory {
 				storeFilter.Before = cursor.QueueSequence
 			} else {
 				storeFilter.Before, storeFilter.BeforeRun = 0, cursor.ID
@@ -1529,6 +1533,10 @@ func displayRunStatus(run model.Run) string {
 		return string(model.RunQueued)
 	case run.Status == model.RunRunning && run.StartedAt == nil:
 		return string(model.RunQueued)
+	case run.Status == model.RunInterrupted && run.Phase == model.PhaseCancelled:
+		return model.PhaseCancelled
+	case run.Status == model.RunInterrupted && run.SupersededBy != "":
+		return "superseded"
 	case run.Status == model.RunInterrupted:
 		return model.PhaseCancelled
 	default:
@@ -1547,6 +1555,11 @@ func presentationRunAt(run model.Run, now time.Time) model.Run {
 	if run.Status == model.RunFailed && model.IsExecutionDeadlineReason(run.Error) {
 		visible.DisplayStatus, visible.DisplayReason = "deadline-exceeded", model.ExecutionDeadlineMessage
 	}
+	if run.Status == model.RunFailed && run.AutoRetriedBy != "" {
+		visible.DisplayStatus = "infra-retried"
+		visible.DisplayReason = "infra error, retried as " + shortRunID(run.AutoRetriedBy)
+	}
+
 	if run.Priority != "" {
 		visible.Priority, visible.PriorityReason = run.EffectivePriority(now)
 		// Active display_reason intentionally describes queue priority. Scheduling

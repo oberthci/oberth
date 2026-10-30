@@ -93,6 +93,10 @@ func (s *Store) RetryRun(ctx context.Context, request model.RunRetryRequest) (mo
 	if err != nil {
 		return model.EnqueueRunResult{}, fmt.Errorf("enqueue retry: %w", err)
 	}
+	if err := s.inheritAutoRetryTx(ctx, tx, previous, &enqueued.Run); err != nil {
+		return model.EnqueueRunResult{}, err
+	}
+
 	detailsMap := replayAuditDetails(previous.Release || previous.RefKind == model.RefTag, request.ReplayAudit)
 	for key, value := range map[string]any{"source_run_id": previous.ID, "run_id": enqueued.ID, "repo_id": previous.RepoID, "ref_kind": previous.RefKind, "ref": previous.Ref, "sha": previous.SHA} {
 		detailsMap[key] = value

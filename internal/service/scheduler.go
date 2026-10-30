@@ -1002,6 +1002,15 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 			return logFile.Close()
 		}
 		_ = logFile.Close()
+		if run.RefKind == model.RefBranch && !run.Release && run.Trigger != "promotion" && run.Trigger != "plan" && run.Trigger != "apply" {
+			cleanupCtx, stop := boundedWorkspaceCleanupContext(ctx)
+			deleteErr := scheduler.jobs.Delete(cleanupCtx, jobName, run.ID)
+			stop()
+			if deleteErr != nil {
+				reservation.retain()
+				return errors.Join(err, fmt.Errorf("settle failed workflow create: %w", deleteErr))
+			}
+		}
 		return scheduler.finishInfrastructureFailure(ctx, run, repository, fmt.Errorf("create Job: %w", err))
 	}
 	reservation.markSubmitted()
@@ -1200,7 +1209,7 @@ func (scheduler *Scheduler) observeRun(ctx context.Context, run model.Run, repos
 				return fmt.Errorf("delete Workflow %s before terminalizing failed run %s: %w",
 					jobName, run.ID, deleteErr)
 			}
-			jobResult = JobResult{Status: model.RunFailed, Phase: failurePhase, Error: waitErr.Error()}
+			jobResult = JobResult{Status: model.RunFailed, Phase: failurePhase, Error: waitErr.Error(), Steps: jobResult.Steps, ObservedStepStart: jobResult.ObservedStepStart, TerminalObservation: jobResult.TerminalObservation}
 		}
 	}
 	// The Workflow is now terminal or its deletion has been accepted, so its
@@ -1255,7 +1264,16 @@ func (scheduler *Scheduler) observeRun(ctx context.Context, run model.Run, repos
 			failureTail = string(tail)
 		}
 	}
-	_, err := scheduler.store.FinishRun(finalizeCtx, run.ID, model.RunResult{
+	retryCause := infrastructure != nil && infrastructure.InfrastructureFailure()
+	if waitErr == nil && (jobResult.Phase == "infrastructure" || (jobResult.Phase == "job" && jobResult.Error == model.ExecutionDeadlineMessage)) {
+		retryCause = true
+	}
+	autoRetry := retryCause && scheduler.preStepAutoRetry(run, jobResult)
+	if autoRetry {
+		jobResult.Phase = "infrastructure"
+	}
+	finished, err := scheduler.store.FinishRun(finalizeCtx, run.ID, model.RunResult{
+		AutoRetryPreStep:    autoRetry,
 		TerminalObservation: jobResult.TerminalObservation, Status: jobResult.Status, Phase: jobResult.Phase, TestedSHA: checkoutSHA, BaseSHA: jobResult.BaseSHA,
 		FailedBurn: jobResult.FailedBurn, FailedStep: jobResult.FailedStep, Error: jobResult.Error,
 		FailureTail: failureTail,
@@ -1268,6 +1286,10 @@ func (scheduler *Scheduler) observeRun(ctx context.Context, run model.Run, repos
 	}
 	if err != nil {
 		return fmt.Errorf("finish run %s: %w", run.ID, err)
+	}
+	if finished.AutoRetriedBy != "" {
+		scheduler.signals.NotifyRun(finished.AutoRetriedBy)
+		scheduler.signalQueue()
 	}
 	if promotion.ID != "" {
 		scheduler.signals.NotifyPromotion(promotion.ID)
@@ -1559,13 +1581,20 @@ func (scheduler *Scheduler) finishPublication(_ context.Context, _ model.Reposit
 
 func (scheduler *Scheduler) finishInfrastructureFailure(ctx context.Context, run model.Run, _ model.Repository, failure error) error {
 	defer forgetActiveLogIndex(scheduler.logs, run.ID)
-	_, err := scheduler.store.FinishRun(ctx, run.ID, model.RunResult{Status: model.RunFailed, Phase: "infrastructure", Error: failure.Error()})
+	result := JobResult{Status: model.RunFailed, Phase: "infrastructure", Error: failure.Error()}
+	var classified InfrastructureError
+	allow := !errors.As(failure, &classified) || classified.InfrastructureFailure()
+	finished, err := scheduler.store.FinishRun(ctx, run.ID, model.RunResult{AutoRetryPreStep: allow && scheduler.preStepAutoRetry(run, result), Status: model.RunFailed, Phase: "infrastructure", Error: failure.Error()})
 	if errors.Is(err, store.ErrInvalidState) {
 		scheduler.signals.NotifyRun(run.ID)
 		return nil
 	}
 	if err != nil {
 		return errors.Join(failure, err)
+	}
+	if finished.AutoRetriedBy != "" {
+		scheduler.signals.NotifyRun(finished.AutoRetriedBy)
+		scheduler.signalQueue()
 	}
 	if run.Trigger == "promotion" {
 		promotion, promotionErr := scheduler.store.PromotionByRun(ctx, run.ID)

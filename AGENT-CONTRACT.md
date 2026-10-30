@@ -857,7 +857,7 @@ trust assumptions and complete invalidation rules.
   `Running` but not ready until its first upstream is registered in-pod;
   registration then also requires the upstream's durable SSH credentials for
   readiness to hold.
-- Readiness sampling has its own read-only WAL connection, a ten-second budget
+- Readiness sampling has its own read-only WAL connection, a thirty-second budget
   and five-second cadence. A successful sample expires after 90 seconds of
   elapsed time, independent of attempt count; deadlines do not renew it.
   Ten-second probes overrun the ticker, which drops missed ticks. Hard errors
@@ -3182,3 +3182,18 @@ A same-version no-op exits zero with `Already running vX; no upgrade performed`;
 explicit dry-run/help also succeed.
 Existing Workflow adoption, preflight recovery and publication ownership rules
 are unchanged. See [restart handover](docs/restart-handover.md).
+
+
+**RCA recovery / run-list UX:** branch infrastructure failures before any known
+step execution can receive one atomic, audited retry at the same SHA. Release,
+tag, promotion, plan and apply runs never auto-retry. All progress attempts,
+engine observations, cleanup completion and writer-side newest/step/publication
+fences apply. The automatic budget survives restart and manual replay lineage.
+Raw failed/interrupted statuses remain; additive retry links and `infra-retried`
+(amber) / `superseded` display states explain them. The dashboard defaults to
+scoped latest-ref heads with expandable retained history, hiding superseded
+attempts unless requested; `latest_per_ref=1` is opt-in for HTTP clients.
+Readiness uses a 30s background reader budget, retaining green on deadline or
+typed SQLite contention without renewing the 90s last-success age. Hard errors,
+startup recovery, liveness, write integrity and admission gates remain enforced.
+See [recovery, history and readiness semantics](docs/rca-run-recovery.md).

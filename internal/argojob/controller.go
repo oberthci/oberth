@@ -488,7 +488,9 @@ func (controller *Controller) wait(ctx context.Context, name, runID string, dest
 			return Completion{}, errors.New("argojob: adopted Workflow identity changed")
 		}
 		if err := controller.deliverExecutorTokens(ctx, workflow, delivered); err != nil {
-			return Completion{}, err
+			// Preserve observed execution evidence; a delivery error on a later
+			// Pod must not make already executed steps look like a pre-step failure.
+			return completionFor(workflow), err
 		}
 		if workflow.Status.Phase.Completed() {
 			// One final read after the controller marks completion: the last

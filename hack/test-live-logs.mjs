@@ -6,6 +6,8 @@ const source = readFileSync(new URL('../internal/api/static/app.js', import.meta
 const sandbox = vm.createContext({ console, URLSearchParams, Map, Set, Date, location:{pathname:'/runs/live-run'}, document: {getElementById(){return null;}}, localStorage:{getItem(){return null;}}, setInterval() {}, clearInterval() {}, requestAnimationFrame() {return 1;}, cancelAnimationFrame() {} });
 vm.runInContext(source.slice(0, source.indexOf('/* ---------- events ---------- */')), sandbox);
 const run = code => vm.runInContext(code, sandbox);
+assert.equal(run("state.collapseRuns"), true);
+assert.equal(run("state.showSuperseded"), false);
 run(`
   repoName = () => 'oberth';
   const fixtureRun = { ID: 'live-run', Ref: 'fix/live', Phase: 'test', Status: 'running' };
@@ -225,3 +227,30 @@ run(`state.step='build / compile'; state.stepRunID='scroll-run'; termReads=0; st
 await run('awaitResult');
 assert.ok(run('renderedHTML').includes('fixture log') && run('renderedHTML').includes('live output'), 'an execution display label must not stop durable-running log refresh');
 console.log('live log dashboard checks passed');
+
+// RCA run-list vocabulary is additive: raw failure/cancellation states survive.
+assert.equal(run(`displayRunStatus({Status:'failed',auto_retried_by:'retry'})`), 'infra-retried');
+assert.equal(run(`statusKind('infra-retried')`), 'warn');
+assert.equal(run(`displayRunStatus({Status:'interrupted',SupersededBy:'new'})`), 'superseded');
+assert.equal(run(`displayRunStatus({Status:'interrupted'})`), 'cancelled');
+assert.equal(run(`state.showSuperseded=false;state.filter='all';runMatches({Status:'interrupted',SupersededBy:'new'})`), false);
+assert.equal(run(`state.showSuperseded=true;runMatches({Status:'interrupted',SupersededBy:'new'})`), true);
+run(`state.showSuperseded=false;state.collapseRuns=true;state.attempts.clear();state.attempts.set('head',{rows:[{ID:'old',RepoID:1,Status:'interrupted',SupersededBy:'head'}],next:''});`);
+assert.ok(run(`runsTable([{ID:'head',RepoID:1,Status:'passed',Ref:'feature',earlier_attempts:1}])`).includes('1 earlier attempts'));
+assert.ok(!run(`runsTable([{ID:'head',RepoID:1,Status:'passed',Ref:'feature',earlier_attempts:1}])`).includes('data-run-id="old"'));
+run(`state.showSuperseded=true;`);
+assert.ok(run(`runsTable([{ID:'head',RepoID:1,Status:'passed',Ref:'feature',earlier_attempts:1}])`).includes('data-run-id="old"'));
+
+run(`state.collapseRuns=true; let rcaRequests=[]; api=async path=>{rcaRequests.push(path);return {body:[],next:''};};awaitResult=loadRuns();`);
+await run('awaitResult');
+assert.ok(run(`rcaRequests[0]`).includes('latest_per_ref=1'));
+run(`
+ state.repos=[{ID:1,Name:'ours'},{ID:2,Name:'theirs'}];state.status={upstream_info:[]};
+ state.runs=[{ID:'rca-head',RepoID:1,Ref:'feature',RefKind:'branch',Status:'passed'}];state.repoRuns=[];state.attempts.clear();route=()=>{};
+ api=async path=>({body:[state.runs[0],{ID:'our-old',RepoID:1,Ref:'feature',RefKind:'branch'},{ID:'other-repo',RepoID:2,Ref:'feature',RefKind:'branch'},{ID:'other-ref',RepoID:1,Ref:'elsewhere',RefKind:'branch'}],next:''});
+ awaitResult=loadRunAttempts('rca-head',false);
+`);
+await run('awaitResult');
+assert.equal(run(`JSON.stringify(state.attempts.get('rca-head').rows.map(row=>row.ID))`), JSON.stringify(['our-old']));
+
+assert.equal(run(`summaryLines({Run:{ID:'original',Status:'failed',auto_retried_by:'retry',display_reason:'infra error, retried as retry'},Steps:[]}).some(line => line.startsWith('[queued]'))`), false);

@@ -113,6 +113,10 @@ ORDER BY queue_sequence LIMIT 1`, source.RepoID, source.RefKind, source.Ref, sou
 	if err != nil {
 		return model.RunRerunResult{}, fmt.Errorf("enqueue rerun: %w", err)
 	}
+	if err := s.inheritAutoRetryTx(ctx, tx, source, &enqueued.Run); err != nil {
+		return model.RunRerunResult{}, err
+	}
+
 	detailsMap := replayAuditDetails(source.Release || source.RefKind == model.RefTag, request.ReplayAudit)
 	for key, value := range map[string]any{
 		"source_run_id": source.ID, "run_id": enqueued.ID, "repo_id": source.RepoID,

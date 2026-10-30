@@ -14,6 +14,9 @@ const state = {
   runCounts: null, runCursor: 0, runCursorHistory: [], runStart: 1, runStartHistory: [], runSourceCount: 0,
   runNext: 0, runsNext: "", repoRunsNext: "",
   timer: null, routeSeq: 0,
+ collapseRuns: localStorage.getItem("oberth-collapse-runs") !== "false",
+ showSuperseded: localStorage.getItem("oberth-show-superseded") === "true",
+ attempts: new Map(),
   filter: readRunFilter(),
   releaseOnly: localStorage.getItem("oberth-kind") === "release" || localStorage.getItem("oberth-filter") === "release",
   repo: localStorage.getItem("oberth-repo") || "all",
@@ -28,13 +31,13 @@ const state = {
   pendingController: null, // AbortController for in-flight API requests
   statusPending: null, statusFailedAt: 0, // the background /api/status fetch (ensureStatus)
 };
-const runFilters = ["all", "queued", "running", "passed", "failed", "cancelled"];
+const runFilters = ["all", "queued", "running", "passed", "failed", "infra-retried", "superseded", "cancelled"];
 
 function readRunFilter() {
   const saved = localStorage.getItem("oberth-filter");
   if (saved === "waiting") return "queued";
-  if (saved === "interrupted" || saved === "superseded") return "cancelled";
-  return ["queued", "running", "passed", "failed", "cancelled"].includes(saved) ? saved : "all";
+  if (saved === "interrupted") return "cancelled";
+  return ["queued", "running", "passed", "failed", "infra-retried", "superseded", "cancelled"].includes(saved) ? saved : "all";
 }
 
 /* ---------- tiny utilities (unchanged from the old dashboard) ---------- */
@@ -132,6 +135,7 @@ function statusKind(status) {
     case "passed": case "delivered": return "pass";
     case "failed": case "timed_out": case "deadline-exceeded": return "fail";
     case "running": return "run";
+ case "infra-retried": return "warn";
     /* "queued" is Argo made a Pod for this and it has not started; "pending"
        is the pipeline declares this and execution has not reached it. Both
        read as not-yet-started to the eye, so they share a kind and a glyph —
@@ -144,6 +148,7 @@ function statusKind(status) {
 function statusLabel(status) {
   const s = String(status || "").toLowerCase();
   if (s === "timed_out") return "timed out";
+ if (s === "infra-retried") return "infra error, retried";
   return s || "unknown";
 }
 function pill(label, kind) {
@@ -153,17 +158,19 @@ function pill(label, kind) {
 }
 function statusIcon(status) {
   const kind = statusKind(status);
-  const glyph = { pass: "✓", fail: "✗", cancel: "⊘", run: "◠", pending: "◌", unknown: "?" }[kind] || "?";
+  const glyph = { pass: "✓", fail: "✗", cancel: "⊘", run: "◠", pending: "◌", warn: "↻", unknown: "?" }[kind] || "?";
   return `<span class="ic ${kind}">${glyph}</span>`;
 }
 function bigIcon(status) {
   const kind = statusKind(status);
-  const cls = { pass: "g", fail: "r", run: "o" }[kind] || "d";
-  const glyph = { pass: "✓", fail: "✗", cancel: "⊘", run: "◠", pending: "◌", unknown: "?" }[kind] || "?";
+  const cls = { pass: "g", fail: "r", run: "o", warn: "warn" }[kind] || "d";
+  const glyph = { pass: "✓", fail: "✗", cancel: "⊘", run: "◠", pending: "◌", warn: "↻", unknown: "?" }[kind] || "?";
   return `<span class="ic ${cls}">${glyph}</span>`;
 }
 function displayRunStatus(run) {
-  if (run.display_status) return run.display_status;
+  if (run.auto_retried_by) return "infra-retried";
+ if (run.SupersededBy && run.Status === "interrupted" && run.Phase !== "cancelled") return "superseded";
+ if (run.display_status) return run.display_status;
   if (run.Status === "interrupted") return "cancelled";
   if (run.Status === "waiting" || run.Status === "queued" || (run.Status === "running" && !run.StartedAt)) return "queued";
   return run.Status;
@@ -311,6 +318,7 @@ function submitToken() {
   if (!value) return;
   closeLiveLog();
   state.authGen++;
+  state.attempts.clear();
   if (state.pendingController) { state.pendingController.abort(); state.pendingController = null; }
   setToken(value);
   route();
@@ -318,6 +326,7 @@ function submitToken() {
 function clearToken() {
   closeLiveLog();
   state.authGen++;
+  state.attempts.clear();
   if (state.pendingController) { state.pendingController.abort(); state.pendingController = null; }
   setToken(null); setConn(false, "signed out"); showTokenPrompt();
 }
@@ -377,7 +386,7 @@ const runPageSize = 100;
 /* The default list has the whole queue first, then admitted and terminal
    runs in descending admission time. */
 async function loadRuns() {
-  const page = await api(`/api/runs?limit=${runPageSize}`, { withNext: true });
+  const page = await api(`/api/runs?limit=${runPageSize}${state.collapseRuns ? "&latest_per_ref=1" : ""}`, { withNext: true });
   state.runs = page.body || [];
   state.runsNext = page.next;
 }
@@ -386,6 +395,7 @@ async function loadRuns() {
 async function loadRepoRuns() {
   if (state.repo === "all" && !state.runCursor) { state.repoRuns = []; state.repoRunsNext = ""; return; }
   const query = new URLSearchParams({ limit: String(runPageSize) });
+ if (state.collapseRuns) query.set("latest_per_ref", "1");
   if (state.repo !== "all") query.set("repo", state.repo);
   if (state.runCursor) query.set("before", String(state.runCursor));
   try {
@@ -406,6 +416,7 @@ async function loadRunCounts() {
 }
 function changeRunRepo(repo) {
   state.repo = repo;
+  state.attempts.clear();
   state.runCursor = 0;
   state.runCursorHistory = [];
   state.runStart = 1;
@@ -421,7 +432,7 @@ async function loadStatus(opts) {
    release kind compose on the loaded page. */
 function runMatches(run) {
   const statusOK = state.filter === "all" || displayRunStatus(run) === state.filter;
-  return statusOK && (!state.releaseOnly || run.Release);
+  return statusOK && (!state.releaseOnly || run.Release) && (state.showSuperseded || state.filter === "superseded" || displayRunStatus(run) !== "superseded");
 }
 function repoCounts(runs) {
   const counts = new Map([["all", runs.length]]);
@@ -467,18 +478,38 @@ function runTimeLabel(run) {
 }
 function runMessageCell(run) {
   const message = displayRunStatus(run) === "queued" ? queueReason(run) : runMessage(run);
-  if (run.SupersededBy) {
+  if (run.auto_retried_by) return `<button type="button" class="run-successor retry-warning" data-run-id="${esc(run.auto_retried_by)}">${esc(message)}</button>`;
+ if (run.SupersededBy) {
     return `<button type="button" class="run-successor" data-run-id="${esc(run.SupersededBy)}">${esc(message)}</button>`;
   }
   return run.display_reason === "server restart, retry needed" ? `<span class="retry-warning">${esc(message)}</span>` : esc(message);
 }
-function runsTable(runs) {
-  return `<div class="table runs-table"><div class="trow head"><div>status</div><div>run</div><div>sha</div><div>actor</div><div>when</div><div>message</div></div>${runs.map(run => {
+function runRow(run) {
     const queued = displayRunStatus(run) === "queued";
     const status = queuePhase(run);
     const group = admissionOf(run)?.group || run.ConcurrencyGroup;
     return `<div class="trow" data-run-id="${esc(run.ID)}"><div class="status-cell run-status">${statusIcon(status)}${pill(statusLabel(status), statusKind(status))}</div><div class="primary"><div class="repo-name">${esc(repoName(run.RepoID))} ${releaseBadge(run)}${scheduleBadge(run)}${group ? ` <span class="v4b dim" title="concurrency group">${esc(group)}</span>` : ""}</div><div class="branch">${esc(run.RefKind === "tag" ? "tag " : "")}${esc(run.Ref)}</div></div><div class="sha">${esc(shortSha(run.SHA))}</div><div class="clip" title="${esc(run.Actor)}">${esc(run.Actor || "--")}</div><div class="nowrap" title="${esc(fmtTime(runWhen(run)))}">${esc(runTimeLabel(run))}<br><span class="meta"${queued ? ` title="${esc(queueSizeTitle(run))}"` : ""}>${queued ? esc(queueSize(run)) : esc(fmtDur(runDuration(run)))}</span></div><div class="clip" title="${esc(queueDetail(run))}">${runMessageCell(run)}</div></div>`;
-  }).join("")}</div>`;
+}
+function runsTable(runs) {
+ return `<div class="table runs-table"><div class="trow head"><div>status</div><div>run</div><div>sha</div><div>actor</div><div>when</div><div>message</div></div>${runs.map(run => {
+  const expanded = state.attempts.get(run.ID);
+  const earlier = Number(run.earlier_attempts || 0);
+  return runRow(run) + (state.collapseRuns && earlier ? `<div class="attempt-toggle"><button type="button" data-action="toggle-attempts" data-head="${esc(run.ID)}" aria-expanded="${!!expanded}">${expanded ? "▾" : "▸"} ${esc(earlier)} earlier attempts</button></div>${expanded ? expanded.rows.filter(row => state.showSuperseded || displayRunStatus(row) !== "superseded").map(runRow).join("") + (!state.showSuperseded ? '<div class="meta attempt-note">Superseded attempts hidden; enable “show superseded” to include them.</div>' : '') + (expanded.next ? `<button type="button" class="attempt-toggle" data-action="older-attempts" data-head="${esc(run.ID)}">older attempts ›</button>` : '') : ""}` : "");
+ }).join("")}</div>`;
+}
+async function loadRunAttempts(id, older) {
+ const head = [...state.runs, ...state.repoRuns].find(run => run.ID === id);
+ if (!head || (older && !state.attempts.has(id))) return;
+ if (!older && state.attempts.has(id)) { state.attempts.delete(id); route(); return; }
+ const previous = state.attempts.get(id), generation = state.authGen;
+ const query = new URLSearchParams({repo: repoKeyOf(head.RepoID), ref: head.Ref, limit: String(runPageSize)});
+ if (older && previous?.next) query.set("before", String(previous.next));
+ const page = await api("/api/runs?" + query, {withNext:true});
+ if (generation !== state.authGen) return;
+ const rows = [...(older ? previous.rows : []), ...(page.body || []).filter(run => run.ID !== id && run.RepoID === head.RepoID && run.Ref === head.Ref && run.RefKind === head.RefKind)];
+ const seen = new Set();
+ state.attempts.set(id, {rows: rows.filter(run => !seen.has(run.ID) && seen.add(run.ID)), next: page.next});
+ route();
 }
 async function renderRuns(seq) {
   setChrome("runs", "/ runs");
@@ -503,8 +534,8 @@ async function renderRuns(seq) {
      A server without the header pages by the oldest run's sequence. */
   const named = source === runs ? state.runsNext : state.repoRunsNext;
   const dated = source.filter(run => displayRunStatus(run) !== "queued");
-  state.runSourceCount = dated.length;
-  state.runNext = dated.length === runPageSize ? (named || source[source.length - 1].QueueSequence || 0) : 0;
+  state.runSourceCount = state.collapseRuns ? source.length : dated.length;
+  state.runNext = (state.collapseRuns ? source.length : dated.length) === runPageSize ? (named || source[source.length - 1].QueueSequence || 0) : 0;
   const page = state.runCursorHistory.length + 1;
   const selectedRepo = state.repos.find(repo => repoKey(repo) === state.repo);
   const current = runs.filter(run => state.repo === "all" || repoKeyOf(run.RepoID) === state.repo);
@@ -525,7 +556,9 @@ async function renderRuns(seq) {
         <div class="toolbar">
           ${runFilters.map(f => `<button class="chip ${state.filter === f ? "on" : ""}" data-status-filter="${esc(f)}">${esc(f)}</button>`).join("")}
           <button class="chip ${state.releaseOnly ? "on" : ""}" data-kind-filter="release" aria-pressed="${state.releaseOnly}">release</button>
-          <span class="count">${pageRange(state.runStart, dated.length, datedTotal)}${state.filter === "all" && !state.releaseOnly ? "" : ` · ${visible.length} match this page`}</span>
+          <button class="chip ${state.collapseRuns ? "on" : ""}" data-action="toggle-collapse-runs" aria-pressed="${state.collapseRuns}">latest per ref</button>
+          <button class="chip ${state.showSuperseded ? "on" : ""}" data-action="toggle-superseded" title="Include superseded in expanded history; turn off latest per ref for the full list" aria-pressed="${state.showSuperseded}">show superseded</button>
+          <span class="count">${state.collapseRuns ? `${source.length} latest refs · page ${page}` : pageRange(state.runStart, dated.length, datedTotal)}${state.filter === "all" && !state.releaseOnly ? "" : ` · ${visible.length} match this page`}</span>
         </div>
         ${visible.length ? runsTable(visible) : `<div class="empty">No runs match the current filters.</div>`}
         ${page > 1 || state.runNext ? `<div class="issue-pager">
@@ -808,6 +841,7 @@ function summaryLines(detail) {
     lines.push(`[queued] ${scheduling.message || "Awaiting scheduler."}`);
     if (admission.weight) lines.push(`capacity: need ${admission.weight} weight · ${admission.used}/${admission.capacity} used${admission.position ? ` · queue position ${admission.position}` : ""}`);
   }
+  else if (kind === "warn") lines.push(`[infra error, retried] ${runMessage(run)}`);
   else if (kind === "cancel") lines.push(`[${status}] ${runMessage(run)}`);
   else lines.push(`[queued] queued behind earlier work for this repository`);
   const execution = detail.Scheduling?.execution;
@@ -1119,7 +1153,8 @@ async function renderRunDetailView(detail, seq) {
       </div>
     </div>
     <div id="runBanners">${kind === "fail" ? `<div class="fbanner"><b>✗ ${esc(run.FailedStep ? (run.FailedBurn ? run.FailedBurn + " / " : "") + run.FailedStep : "run failed")}</b><span class="err" title="${esc(run.Error)}">${esc(run.Error || "")}</span></div>` : ""}
-    ${status === "cancelled" ? `<div class="sbanner${runMessage(run) === "server restart, retry needed" ? " retry-warning" : ""}"><span class="err">${esc(runMessage(run))}</span>${run.SupersededBy ? `<button class="chip" data-run-id="${esc(run.SupersededBy)}">view successor ${esc(shortSuccessor(run.SupersededBy))}</button>` : ""}</div>` : ""}
+    ${(status === "cancelled" || status === "superseded") ? `<div class="sbanner${runMessage(run) === "server restart, retry needed" ? " retry-warning" : ""}"><span class="err">${esc(runMessage(run))}</span>${run.SupersededBy ? `<button class="chip" data-run-id="${esc(run.SupersededBy)}">view successor ${esc(shortSuccessor(run.SupersededBy))}</button>` : ""}</div>` : ""}
+    ${status === "infra-retried" ? `<div class="sbanner retry-warning"><span>${esc(runMessage(run))}</span><button class="chip" data-run-id="${esc(run.auto_retried_by)}">view retry</button><span>${esc(run.Error || "")}</span></div>` : ""}
     </div><div class="v4-body">
       <div class="slist" id="stepList">
         <div class="sl-h"><span>STEPS · ${stepCount}${run.Release ? " · RELEASE" : ""}</span></div>
@@ -1369,6 +1404,10 @@ document.addEventListener("click", event => {
     case "toggle-theme": toggleTheme(); break;
     case "refresh": state.logCache.clear(); route(); break;
     case "toggle-exec": toggleExecutorLines(); break;
+    case "toggle-collapse-runs": state.collapseRuns = !state.collapseRuns; localStorage.setItem("oberth-collapse-runs", String(state.collapseRuns)); changeRunRepo(state.repo); state.attempts.clear(); route(); break;
+    case "toggle-superseded": state.showSuperseded = !state.showSuperseded; localStorage.setItem("oberth-show-superseded", String(state.showSuperseded)); route(); break;
+    case "toggle-attempts": loadRunAttempts(target.dataset.head, false).catch(err => { if (err.message !== "stale request") replaceApp(`<div class="empty">${esc(err.message)}</div>`); }); break;
+    case "older-attempts": loadRunAttempts(target.dataset.head, true).catch(err => { if (err.message !== "stale request") replaceApp(`<div class="empty">${esc(err.message)}</div>`); }); break;
     case "clear-token": clearToken(); break;
     case "submit-token": submitToken(); break;
     case "close-issue": closeIssue(); break;
