@@ -14,7 +14,10 @@ import (
 const (
 	// Discovery and filtering have separate byte budgets. Active reads perform
 	// at most two bounded passes, independent of the total retained run size.
-	MaxScanBytes       int64 = 4 << 20
+	MaxScanBytes int64 = 4 << 20
+	// Active reads can spend one bounded pass discovering ranges and one
+	// filtering them. This is the aggregate per-call bound, not a deadline.
+	MaxCallScanBytes   int64 = 2 * MaxScanBytes
 	initialTailBytes   int64 = 64 << 10
 	maxFilterLineBytes       = 64 << 10
 )
@@ -120,7 +123,10 @@ func scanBoundedRanges(file io.ReaderAt, ranges []Range, total int64, filter Fil
 				meta.ScannedBytes++
 				discard = previous[0] != '\n'
 			}
-			reader := bufio.NewReaderSize(contextReader{filter.ctx(), io.NewSectionReader(file, r.Start, r.End-r.Start)}, maxFilterLineBytes)
+			// Parallel steps can produce one tiny range per record. Size the buffer
+			// to that span (+1 for EOF detection), not 64 KiB per interleaved line.
+			bufferSize := int(min(int64(maxFilterLineBytes-1), r.End-r.Start)) + 1
+			reader := bufio.NewReaderSize(contextReader{filter.ctx(), io.NewSectionReader(file, r.Start, r.End-r.Start)}, bufferSize)
 			position, oversized := r.Start, false
 			wholeEnd := originalEnd(ranges, r)
 			if first {
@@ -239,6 +245,7 @@ func scanBoundedRanges(file io.ReaderAt, ranges []Range, total int64, filter Fil
 		window = min(window*2, remaining)
 	}
 	meta.ScannedBytes = scanned
+	meta.TotalScannedBytes, meta.ScanLimitBytes = scanned, MaxScanBytes
 	return body, meta, nil
 }
 
@@ -275,10 +282,10 @@ func (r *completeRecordReader) Read(p []byte) (int, error) {
 	return n, err
 }
 
-// readActiveBounded discovers ranges only inside a bounded raw-log window.
+// readActiveWindow discovers ranges only inside a bounded raw-log window.
 // A missing step in a partial window is an incomplete observation, not proof
 // that the step has no output. Continuation cursors are absolute file offsets.
-func (store *Store) readActiveBounded(runID, burn, step string, filter Filter) ([]byte, Meta, error) {
+func (store *Store) readActiveWindow(runID, burn, step string, filter Filter, maximum int64) ([]byte, Meta, error) {
 	path, err := store.logPath(runID)
 	if err != nil {
 		return nil, Meta{}, err
@@ -304,9 +311,9 @@ func (store *Store) readActiveBounded(runID, burn, step string, filter Filter) (
 		}
 	}
 	if filter.Tail {
-		start = max(start, end-(MaxScanBytes-initialTailBytes-1))
+		start = max(start, end-(maximum-min(initialTailBytes, maximum/2)-1))
 	} else {
-		end = min(end, start+(MaxScanBytes-initialTailBytes-1))
+		end = min(end, start+(maximum-min(initialTailBytes, maximum/2)-1))
 	}
 	reader := bufio.NewReaderSize(contextReader{filter.ctx(), io.NewSectionReader(file, start, end-start)}, maxFilterLineBytes)
 	base := start
@@ -366,6 +373,7 @@ func (store *Store) readActiveBounded(runID, burn, step string, filter Filter) (
 		return nil, Meta{}, err
 	}
 	meta.DiscoveryBytes = discoveryBytes
+	meta.TotalScannedBytes, meta.ScanLimitBytes = meta.ScannedBytes+discoveryBytes, MaxCallScanBytes
 	meta.OmittedLongLines += discoveryOmitted
 	meta.TotalLines += discoveryOmitted
 	meta.WithheldLines += discoveryOmitted

@@ -40,6 +40,8 @@ func (store *Store) UsageByRun() (map[string]int64, error) {
 }
 
 func (store *Store) Purge(runID string) (int64, error) {
+	store.ForgetActiveIndex(runID)
+	defer store.ForgetActiveIndex(runID)
 	if _, err := store.logPath(runID); err != nil {
 		return 0, err
 	}

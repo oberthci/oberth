@@ -63,11 +63,11 @@ func TestActiveBoundedWindowNeverReturnsCutOffRecord(t *testing.T) {
 	final := "[t/u] final 界 " + strings.Repeat("z", 100) + "\n"
 	store := seedRun(t, "cut-off-review", []string{strings.TrimSuffix(giant, "\n"), strings.TrimSuffix(final, "\n")})
 	cursor := int64(1) // Discovery discards almost its whole window before this newline.
-	body, meta, err := store.ReadActiveFiltered("cut-off-review", "t", "u", Filter{ByteOffset: &cursor})
+	body, meta, err := store.readActiveWindow("cut-off-review", "t", "u", Filter{ByteOffset: &cursor}, MaxScanBytes)
 	if err != nil || len(body) != 0 || !meta.HasMore || meta.NextByteOffset != int64(len(giant)) {
 		t.Fatalf("offered a partial record: %q %+v %v", body, meta, err)
 	}
-	body, meta, err = store.ReadActiveFiltered("cut-off-review", "t", "u", Filter{ByteOffset: &meta.NextByteOffset})
+	body, meta, err = store.readActiveWindow("cut-off-review", "t", "u", Filter{ByteOffset: &meta.NextByteOffset}, MaxScanBytes)
 	if err != nil || string(body) != final || !utf8.Valid(body) || meta.HasMore {
 		t.Fatalf("continuation lost complete record: %q %+v %v", body, meta, err)
 	}

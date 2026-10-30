@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/runlog"
 	"github.com/oberthci/oberth/internal/testtimeout"
@@ -39,9 +40,10 @@ func TestRunLogPatternReserveDoesNotBlockCIIssueCreation(t *testing.T) {
 	reader := &API{logs: heldPatternLogs{LogStore: logs, entered: entered, release: unblock}}
 	run := model.Run{ID: "run-pattern-reserve", Status: model.RunFailed}
 	done := make(chan error, 2)
-	for range 2 {
+	for index := range 2 {
 		go func() {
-			_, _, err := reader.readStepLogFiltered(t.Context(), run, "test", "unit", runlog.Filter{Pattern: "Error:"})
+			ctx := withRunLogCaller(t.Context(), api.Actor{TokenCredentialID: string(rune('a' + index))})
+			_, _, err := reader.readStepLogFiltered(ctx, run, "test", "unit", runlog.Filter{Pattern: "Error:"})
 			done <- err
 		}()
 	}

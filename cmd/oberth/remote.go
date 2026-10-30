@@ -520,24 +520,26 @@ func runRunRetry(ctx context.Context, arguments []string, output io.Writer) erro
 }
 
 type remoteLog struct {
-	RunID            string `json:"run_id"`
-	Burn             string `json:"burn"`
-	Step             string `json:"step"`
-	Output           string `json:"output"`
-	Note             string `json:"note"`
-	RunError         string `json:"run_error"`
-	TotalLines       int    `json:"total_lines"`
-	MatchedLines     int    `json:"matched_lines"`
-	ReturnedLines    int    `json:"returned_lines"`
-	Truncated        bool   `json:"truncated"`
-	Bytes            int64  `json:"bytes"`
-	ScanComplete     *bool  `json:"scan_complete"`
-	BytesExact       *bool  `json:"bytes_exact"`
-	HasMore          bool   `json:"has_more"`
-	NextByteOffset   int64  `json:"next_byte_offset"`
-	WithheldLines    int    `json:"withheld_lines"`
-	WithheldBytes    int64  `json:"withheld_bytes"`
-	OmittedLongLines int    `json:"omitted_long_lines"`
+	TotalScannedBytes int64  `json:"total_scanned_bytes"`
+	ScanLimitBytes    int64  `json:"scan_limit_bytes"`
+	RunID             string `json:"run_id"`
+	Burn              string `json:"burn"`
+	Step              string `json:"step"`
+	Output            string `json:"output"`
+	Note              string `json:"note"`
+	RunError          string `json:"run_error"`
+	TotalLines        int    `json:"total_lines"`
+	MatchedLines      int    `json:"matched_lines"`
+	ReturnedLines     int    `json:"returned_lines"`
+	Truncated         bool   `json:"truncated"`
+	Bytes             int64  `json:"bytes"`
+	ScanComplete      *bool  `json:"scan_complete"`
+	BytesExact        *bool  `json:"bytes_exact"`
+	HasMore           bool   `json:"has_more"`
+	NextByteOffset    int64  `json:"next_byte_offset"`
+	WithheldLines     int    `json:"withheld_lines"`
+	WithheldBytes     int64  `json:"withheld_bytes"`
+	OmittedLongLines  int    `json:"omitted_long_lines"`
 }
 
 func runRemoteLog(ctx context.Context, arguments []string, output io.Writer) error {
@@ -640,6 +642,9 @@ func (log remoteLog) readSummary() string {
 	summary := fmt.Sprintf("%d of %s%d lines returned, %s%d matched, %s%d bytes in the step", log.ReturnedLines, lineQualifier, log.TotalLines, lineQualifier, log.MatchedLines, byteQualifier, log.Bytes)
 	if log.ScanComplete != nil {
 		summary += fmt.Sprintf("; withheld %s%d lines / %s%d bytes; %d oversized lines omitted", lineQualifier, log.WithheldLines, byteQualifier, log.WithheldBytes, log.OmittedLongLines)
+	}
+	if log.ScanLimitBytes > 0 {
+		summary += fmt.Sprintf("; scanned %d of %d byte scan budget", log.TotalScannedBytes, log.ScanLimitBytes)
 	}
 	if log.HasMore {
 		summary += fmt.Sprintf("; continue with byte_offset=%d (--byte-offset %d), offset=0 and the same tail/pattern/context", log.NextByteOffset, log.NextByteOffset)
