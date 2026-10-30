@@ -74,6 +74,11 @@ func (scope *repoScope) qualified(repository model.Repository) string {
 // actor, otherwise a copy whose dependencies see only the actor's scope.
 // Calling it again on a scoped copy returns that copy.
 func (service *API) forActor(ctx context.Context, actor api.Actor) (*API, error) {
+	if !actor.Admin && !service.redactPressure {
+		copy := *service
+		copy.redactPressure = true
+		service = &copy
+	}
 	if service.scope != nil || !actor.Scoped() {
 		return service, nil
 	}

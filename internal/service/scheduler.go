@@ -59,6 +59,7 @@ type SchedulerConfig struct {
 	// When positive, admission is held until the filesystem containing
 	// WorkspaceRoot has at least this many free bytes. Default 0 = disabled.
 	AdmissionDiskFloorBytes int64
+	AdmissionPressure       AdmissionPressureConfig
 }
 
 type Scheduler struct {
@@ -132,6 +133,9 @@ func (scheduler *Scheduler) retryMovedPromotion(ctx context.Context, finalizatio
 }
 
 func NewScheduler(config SchedulerConfig) (*Scheduler, error) {
+	if err := config.AdmissionPressure.Validate(); err != nil {
+		return nil, fmt.Errorf("admission pressure: %w", err)
+	}
 	if config.Store == nil || config.Git == nil || config.Logs == nil || config.Jobs == nil || config.Auditor == nil {
 		return nil, errors.New("service: scheduler store, Git, logs, jobs, and auditor are required")
 	}
@@ -184,6 +188,7 @@ func NewScheduler(config SchedulerConfig) (*Scheduler, error) {
 	// (weight 1) pack two per M slot. A grant wakes the loop too, so it can
 	// claim into weight a small run left spare.
 	scheduler.admission.maxRuns = scheduler.admission.capacity
+	scheduler.admission.pressure = newPressureCheck(config.AdmissionPressure)
 	scheduler.admission.onPark = scheduler.signalQueue
 	scheduler.admission.onGrant = scheduler.signalQueue
 	if config.MaxHeadWait > 0 {

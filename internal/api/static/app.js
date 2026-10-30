@@ -451,6 +451,8 @@ function queueReason(run) {
   if (a.vm_capacity) return "waiting for trusted VM capacity";
   if (a.disk_floor?.below_floor) return "waiting for disk space";
   if (a.group_holder || a.group_ahead) return `waiting for group ${a.group}`;
+  const pressure = a.pressure || b?.pressure;
+  if (pressure) return pressure.redacted ? `deferred: host ${pressure.resource} pressure` : `deferred: ${pressure.resource} pressure ${Number(pressure.avg60).toFixed(1)}%`;
   if (a.head_of_queue && b) return `waiting for capacity (${b.size}${b.full_drain ? ", needs the whole host" : ""})`
     + (b.backfilling ? " · smaller runs admitted meanwhile" : b.draining ? " · host draining for it" : "");
   if (b) return `waiting behind ${b.repo}/${b.ref} (${b.size})`;
@@ -1294,6 +1296,13 @@ function svcCard(name, value, sub, mood) {
   const cls = mood || (value === "ready" ? "ok" : "bad");
   return `<div class="svc ${cls}"><div class="svc-name"><span class="led ${cls === "ok" ? "ok" : cls === "warn" ? "" : "bad"}"></span>${esc(name)}</div><div class="svc-val">${esc(value)}</div>${sub ? `<div class="svc-sub">${sub}</div>` : ""}</div>`;
 }
+function pressureStatusCard(pressure) {
+  if (!pressure) return "";
+  const sample = pressure.sample;
+  const detail = sample ? `IO full ${Number(sample.io.full_avg60).toFixed(1)}% · CPU some ${Number(sample.cpu.some_avg60).toFixed(1)}% · memory full ${Number(sample.memory.full_avg60).toFixed(1)}% (avg60)` : "PSI unavailable; admission fails open";
+  const value = pressure.holding ? `deferring new grants (${pressure.resource})` : pressure.available ? "accepting new grants" : "unavailable";
+  return svcCard("host pressure", value, detail, pressure.holding || !pressure.available ? "warn" : "ok");
+}
 async function renderStatus(seq) {
   setChrome("status", "/ status");
   await Promise.all([loadStatus(), loadRepos().catch(() => { })]);
@@ -1313,6 +1322,7 @@ async function renderStatus(seq) {
       ${svcCard("audit anchor", s.audit || "unavailable", chain && chain.detail ? esc(chain.detail) : s.audit_mode === "local" ? "local hash chain — external anchoring off" : "")}
       ${svcCard("secret store", storeValue, store && store.address ? esc(store.address) : "OpenBao release secrets disabled", storeMood)}
       ${svcCard("server", s.version || document.body.dataset.version || "dev", "", "ok")}
+      ${pressureStatusCard(s.admission?.pressure)}
     </div>
     <div class="vcs-panel">
       <div class="vcs-head">Upstreams</div>

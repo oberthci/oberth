@@ -178,3 +178,11 @@ repository mapping and a 403 response. Use a separate pinned Python maintenance
 pod for the scratch server image, as described below. Preserve these policy markers during cache maintenance. Already
 streaming responses and client caches cannot be recalled; see
 [revocation operations](goproxy-availability.md#tag-deletion-and-per-version-revocation).
+
+Host pressure admission reads only the fixed Linux `/proc/pressure/{io,cpu,memory}`
+files, with bounded parsing and no host mount or extra privilege. The observations
+are scheduling hints; malformed/unavailable PSI fails open and never changes
+running-workflow authority or execution verdicts. Scoped status, reservation and
+run views omit host PSI numbers while retaining a non-numeric pressure cause,
+as they omit aggregate capacity. Non-admin and MCP run reasons also omit
+pressure percentages and timing details. The existing unscoped admin metrics authorization remains in force.

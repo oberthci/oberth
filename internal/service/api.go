@@ -104,6 +104,7 @@ type APIConfig struct {
 }
 
 type API struct {
+	redactPressure            bool
 	promotionProgress         *sync.Map
 	releasePreflight          ReleasePreflighter
 	uplinkLifecycle           UplinkLifecycle
@@ -269,6 +270,9 @@ func (service *API) Shutdown(ctx context.Context) error {
 }
 
 func (service *API) CallTool(ctx context.Context, actor api.Actor, name string, raw json.RawMessage) (value any, resultErr error) {
+	copy := *service
+	copy.redactPressure = true
+	service = &copy
 	if name == "run_logs" || name == "logs" {
 		ctx = withRunLogCaller(ctx, actor)
 	}
