@@ -7,11 +7,32 @@ import (
 	"github.com/oberthci/oberth/internal/model"
 )
 
+// OpenIdleQueueReaders isolates the background queue sampler from the primary
+// writer. The server calls this once at startup, before sharing the Store with
+// goroutines. CLI/inspection handles retain primary-connection reads. Close owns
+// this single-connection read-only WAL pool; it shares the live-reader policy
+// used by SSH authentication readers.
+func (s *Store) OpenIdleQueueReaders(ctx context.Context) error {
+	if s.idleDB != nil {
+		return nil
+	}
+	db, err := s.openLiveReaders(ctx, 1)
+	if err != nil {
+		return err
+	}
+	s.idleDB = db
+	return nil
+}
+
 // IdleQueueStatus aggregates the entire live queue in one database snapshot;
 // paginated/scoped run views cannot establish installation-wide quiescence.
 func (s *Store) IdleQueueStatus(ctx context.Context) (model.IdleQueueStatus, error) {
 	state := model.IdleQueueStatus{Version: 1}
-	rows, err := s.db.QueryContext(ctx, `SELECT status, started_at IS NOT NULL, ref_kind, trigger, release, COUNT(*)
+	db := s.idleDB
+	if db == nil {
+		db = s.db
+	}
+	rows, err := db.QueryContext(ctx, `SELECT status, started_at IS NOT NULL, ref_kind, trigger, release, COUNT(*)
 FROM runs WHERE status IN ('queued','running') GROUP BY status, started_at IS NOT NULL, ref_kind, trigger, release`)
 	if err != nil {
 		return state, fmt.Errorf("observe upgrade queue: %w", err)

@@ -898,6 +898,13 @@ func waitForUpgradeIdle(ctx context.Context, cfg UpgradeConfig, deps Deps) error
 			cause = errors.Join(cause, ctx.Err())
 		}
 		cause = errors.Join(cause, writer.err())
+		// The local deadline may kill kubectl before the in-pod waiter can
+		// print its final error. Retain its last reported probe cause too.
+		if ctx.Err() != nil {
+			if reason := childOutput.probeFailure(); reason != "" {
+				cause = fmt.Errorf("%w; last reported idle probe failure: %s", cause, reason)
+			}
+		}
 		if cfg.WaitFor == "critical" && childOutput.unsupportedFlag() {
 			cause = fmt.Errorf("server too old for --wait-for=critical; use --wait-for=all: %w", cause)
 		}
@@ -912,6 +919,8 @@ type upgradeWaitWriter struct {
 	failure            error
 	diagnosticTail     string
 	unsupportedWaitFor bool
+	probeLine          string
+	lastProbeFailure   string
 }
 
 func (w *upgradeWaitWriter) Write(p []byte) (int, error) {
@@ -924,6 +933,25 @@ func (w *upgradeWaitWriter) Write(p []byte) (int, error) {
 		diagnostic = diagnostic[len(diagnostic)-len(unknownFlag)+1:]
 	}
 	w.diagnosticTail = strings.Clone(diagnostic)
+	// Child stdout/stderr may split diagnostics at any byte. Keep at most one
+	// bounded line and one reason; never retain the whole subprocess output.
+	for _, part := range strings.SplitAfter(string(p), "\n") {
+		w.probeLine += part
+		if len(w.probeLine) > 4096 {
+			w.probeLine = strings.Clone(w.probeLine[len(w.probeLine)-4096:])
+		}
+		if strings.HasSuffix(w.probeLine, "\n") {
+			if strings.HasPrefix(w.probeLine, "Waiting for ") {
+				if _, reason, ok := strings.Cut(w.probeLine, " queue: transient idle probe failure: "); ok {
+					reason, _, _ = strings.Cut(reason, "; retrying (elapsed=")
+					w.lastProbeFailure = strings.TrimSpace(reason)
+				} else if strings.Contains(w.probeLine, " queue: queued=") || strings.Contains(w.probeLine, " queue: busy ") {
+					w.lastProbeFailure = ""
+				}
+			}
+			w.probeLine = ""
+		}
+	}
 	n, err := w.output.Write(p)
 	if err == nil && n != len(p) {
 		err = io.ErrShortWrite
@@ -937,4 +965,10 @@ func (w *upgradeWaitWriter) unsupportedFlag() bool {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return w.unsupportedWaitFor
+}
+
+func (w *upgradeWaitWriter) probeFailure() string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.lastProbeFailure
 }

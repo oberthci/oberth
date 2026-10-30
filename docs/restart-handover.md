@@ -86,6 +86,16 @@ oberth upgrade --yes --wait-idle --wait-timeout=2h --timeout=5m
 oberth upgrade --yes --wait-for=critical --wait-timeout=2h
 ```
 
+Idle probes retry transport timeouts, interrupted reads and server errors with
+backoff from one second up to thirty seconds, within the original wait deadline.
+Transient failures print at most once per minute; a failed wait reports the last
+probe cause. Authentication, other client errors and malformed snapshots stop
+immediately. The server answers from a background queue sample in memory; missing,
+failed or ten-second-old samples return unavailable and are retried. A dedicated
+read-only WAL pool keeps the sampler off the primary writer connection; its
+five-second read budget and one-second interval fit within the cache lifetime.
+This retry behavior requires an in-pod `wait-idle` binary containing the fix.
+
 `--wait-idle` waits for all queued and running runs. `--wait-for=all` is equivalent;
 `--wait-for=critical` also enables waiting, but excludes ordinary branch/schedule
 CI. Tags/releases, promotions, plans, applies and unknown trigger kinds remain
@@ -100,11 +110,11 @@ separate `--timeout` (default five minutes) applies to Helm/rollout and version
 verification. An earlier caller deadline or SIGINT/SIGTERM cancels observation.
 The local kubectl process is explicitly bounded by the queue-wait context;
 joining inherited output pipes has a separate five-second cleanup bound.
-Timeout, cancellation, unavailable queue state or a killed local child aborts
-before any Helm upgrade or controller-profile mutation. The error identifies
+Timeout, cancellation, persistently unavailable queue state or a killed local
+child aborts before any Helm upgrade or controller-profile mutation. The error identifies
 local `kubectl exec`, elapsed time, the configured limit and that the upgrade
-was not attempted. There is no automatic retry or assumption that an unreadable
-queue is idle.
+was not attempted. A failed local `kubectl exec` session is not retried, and
+an unreadable queue is never assumed idle.
 
 The command reads the selected context/namespace's live daemon through its
 private admin socket, without opening the database from another process or

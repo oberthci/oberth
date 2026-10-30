@@ -49,7 +49,7 @@ func TestWaitIdleFailsClosedAndIsBounded(t *testing.T) {
 		if err == nil {
 			t.Fatalf("status %d accepted", status)
 		}
-		if status == http.StatusConflict && !errors.Is(err, context.DeadlineExceeded) {
+		if (status == http.StatusConflict || status == http.StatusServiceUnavailable) && !errors.Is(err, context.DeadlineExceeded) {
 			t.Fatal(err)
 		}
 	}
@@ -120,7 +120,9 @@ func TestWaitIdleCriticalReportsStatusBeforeCapability(t *testing.T) {
 			client := &http.Client{Transport: idleRoundTrip(func(*http.Request) (*http.Response, error) {
 				return &http.Response{StatusCode: status, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(""))}, nil
 			})}
-			err := waitIdle(t.Context(), client, "http://fixture/v1/idle", time.Second, idleWaitOptions{mode: "critical"})
+			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Millisecond)
+			defer cancel()
+			err := waitIdle(ctx, client, "http://fixture/v1/idle", time.Second, idleWaitOptions{mode: "critical"})
 			want := "does not support critical queue observation"
 			if status == 400 || status == 503 {
 				want = fmt.Sprintf("live daemon queue unavailable (HTTP %d)", status)

@@ -64,6 +64,7 @@ type Store struct {
 	protocol ProtocolConfig
 
 	authDB   *sql.DB // bounded, read-only WAL readers; no cached authorization
+	idleDB   *sql.DB // read-only WAL pool for the upgrade queue sampler
 	db       *sql.DB
 	now      func() time.Time
 	mu       sync.Mutex
@@ -1065,22 +1066,26 @@ func (s *Store) Close() error {
 		return nil
 	}
 	s.done = true
-	var authErr error
+	var authErr, idleErr error
 	if s.authDB != nil {
 		authErr = s.authDB.Close()
 	}
+	if s.idleDB != nil {
+		idleErr = s.idleDB.Close()
+	}
+	readersErr := errors.Join(authErr, idleErr)
 	if s.readOnly {
 		closeErr := s.db.Close()
 		if s.cleanup != nil {
-			return errors.Join(authErr, closeErr, s.cleanup())
+			return errors.Join(readersErr, closeErr, s.cleanup())
 		}
-		return errors.Join(authErr, closeErr)
+		return errors.Join(readersErr, closeErr)
 	}
 	if _, err := s.db.ExecContext(context.Background(), `PRAGMA wal_checkpoint(TRUNCATE)`); err != nil {
 		_ = s.db.Close()
-		return errors.Join(authErr, fmt.Errorf("checkpoint sqlite WAL: %w", err))
+		return errors.Join(readersErr, fmt.Errorf("checkpoint sqlite WAL: %w", err))
 	}
-	return errors.Join(authErr, s.db.Close())
+	return errors.Join(readersErr, s.db.Close())
 }
 
 // CreateUpstream inserts a named upstream. Production callers go through the
