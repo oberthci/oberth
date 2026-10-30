@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -1109,10 +1110,62 @@ func (scheduler *Scheduler) observeRun(ctx context.Context, run model.Run, repos
 		checkoutSHA = run.SHA
 	}
 	releaseAdmission := reservation.release
-	progressLog := newStepProgressLogWriter(
-		newRunLogWriter(logFile, scheduler.maxRunLogBytes-observation.retained),
-		func(event runprogress.Event) error { return scheduler.logs.AppendStepProgress(run.ID, event) },
-	)
+	journal, journalErr := runlog.OpenPodLogJournal(logFile, scheduler.maxRunLogBytes)
+	// A journal is optional delivery evidence. A bad file must not strand an
+	// otherwise-owned Workflow or return a fatal error to the dispatcher.
+	seekSize, seekErr := logFile.Seek(0, io.SeekEnd)
+	if seekErr != nil && journalErr == nil {
+		journalErr = seekErr
+	}
+	logDetached := false
+	var logDestination io.Writer = logFile
+	retained := observation.retained
+	if info, err := logFile.Stat(); err == nil {
+		retained = info.Size()
+	} else {
+		journalErr = errors.Join(journalErr, err)
+		if seekErr == nil {
+			retained = seekSize
+		} else {
+			// No safe retained-file access: keep progress/termination observation
+			// alive without writing unbounded bytes to a file of unknown size.
+			logDetached = true
+			logDestination = io.Discard
+			log.Printf("WARN: run=%s log continuity lost: retained log unavailable", run.ID)
+		}
+	}
+	observation.retained = retained
+	progressLog := newStepProgressLogWriter(newRunLogWriter(logDestination, scheduler.maxRunLogBytes-retained), func(event runprogress.Event) error { return scheduler.logs.AppendStepProgress(run.ID, event) })
+	progressLog.logFile = logFile
+	progressLog.onContinuityLost = func() {
+		if scheduler.auditor == nil {
+			return
+		}
+		auditCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Second)
+		defer cancel()
+		_, _ = scheduler.auditor.AppendAuditAction(auditCtx, model.AuditActionSpec{Actor: "oberth", Action: "run.log-continuity.lost", ResourceType: "run", ResourceID: run.ID, Details: `{"reason":"durable-journal-unavailable"}`})
+	}
+	progressLog.journal = journal
+	if journalErr != nil {
+		if journal != nil {
+			_ = journal.Close()
+			progressLog.journal = nil
+		}
+		progressLog.losePodLogDurability()
+		if info, err := logFile.Stat(); err == nil {
+			observation.retained = info.Size()
+		}
+	}
+	projectionReady, workflowSettled := false, false
+	defer func() {
+		if progressLog.journal != nil {
+			_ = progressLog.journal.Close()
+		}
+		if projectionReady && workflowSettled {
+			scheduler.pruneTerminalPodJournal(ctx, run.ID, logFile.Name())
+		}
+	}()
+
 	// The plan is recorded here: after the pipeline object exists, so a run
 	// that never reached submission carries no claim about work it would have
 	// done, and before the engine's first observation, so the step list is
@@ -1132,6 +1185,7 @@ func (scheduler *Scheduler) observeRun(ctx context.Context, run model.Run, repos
 	} else {
 		jobResult, waitErr = scheduler.jobs.Wait(ctx, jobName, progressLog)
 	}
+	progressLog.recoverPodProjection(scheduler.maxRunLogBytes)
 	if progressErr := progressLog.Close(); progressErr != nil && waitErr == nil {
 		waitErr = progressErr
 	}
@@ -1181,12 +1235,19 @@ func (scheduler *Scheduler) observeRun(ctx context.Context, run model.Run, repos
 			}
 		}
 	}
+	// Once at finalization: the WAL already protected every acknowledged
+	// batch. Only a synced, indexed projection permits terminal WAL pruning.
+	projectionSyncErr := logFile.Sync()
 	closeErr := logFile.Close()
-	if closeErr != nil && waitErr == nil {
+	if !logDetached && projectionSyncErr != nil && waitErr == nil {
+		waitErr = projectionSyncErr
+	}
+	if !logDetached && closeErr != nil && waitErr == nil {
 		waitErr = closeErr
 	}
 	index, indexErr := scheduler.logs.BuildIndex(run.ID)
-	if indexErr != nil && waitErr == nil {
+	projectionReady = projectionSyncErr == nil && indexErr == nil
+	if !logDetached && indexErr != nil && waitErr == nil {
 		waitErr = indexErr
 	}
 	failurePhase := "job"
@@ -1202,6 +1263,7 @@ func (scheduler *Scheduler) observeRun(ctx context.Context, run model.Run, repos
 				reservation.retain()
 				return err
 			}
+			workflowSettled = true
 			scheduler.signals.NotifyRun(run.ID)
 			return nil
 		}
@@ -1253,6 +1315,7 @@ func (scheduler *Scheduler) observeRun(ctx context.Context, run model.Run, repos
 	// next run here, before the slow finalization and publication below.
 	// Releasing as soon as Wait returned handed the group on while a Workflow
 	// whose Wait merely failed could still be running.
+	workflowSettled = true
 	releaseAdmission()
 	if !validJobRunStatus(jobResult.Status) {
 		jobResult = JobResult{Status: model.RunFailed, Phase: "job", Error: "Job returned an invalid terminal status"}
@@ -2037,4 +2100,18 @@ func (scheduler *Scheduler) awaitAdmission(ctx context.Context) error {
 		return gate.AwaitAdmission(ctx)
 	}
 	return ctx.Err()
+}
+
+// Cleanup is best effort after the durable terminal verdict and index. Active
+// owner resumptions retain their checkpoint; cleanup errors never stop dispatch.
+func (scheduler *Scheduler) pruneTerminalPodJournal(parent context.Context, runID, logPath string) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), time.Second)
+	defer cancel()
+	run, err := scheduler.store.Run(ctx, runID)
+	if err != nil || !run.Status.Terminal() {
+		return
+	}
+	if err := runlog.PrunePodLogJournal(logPath); err != nil {
+		log.Print("WARN: terminal pod-log journal cleanup unavailable")
+	}
 }

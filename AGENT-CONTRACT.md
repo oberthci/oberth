@@ -3008,12 +3008,33 @@ checks apply equally to server and init history.
 
 Schema 21 adds optional bounded termination JSON to durable step results. The Argo
 engine retains the exact selected retry node identity and reads its owned Pod
-before normal cleanup under a five-second aggregate observation budget. Only
-current `main` termination with matching Workflow/node/Pod/container identity is
-reported. Retry ambiguity, unsupported container sets, unavailable Pods and
-contradictory status produce a fixed unavailable category; no raw Kubernetes
-message, unknown reason, environment or event is retained. Container OOM reason
-and Pod deadline reason are separate observations; exit 137 alone means neither.
+before normal cleanup under a five-second aggregate observation budget. Current
+`main` termination, or the current failed init container when main never started,
+is reported only with matching Workflow/node/Pod/container identity. Init evidence
+adds `container_kind: init`; absent/`main` means the existing main observation.
+Retry ambiguity, unsupported container sets, unavailable Pods and contradictory
+status produce a fixed unavailable category. Unknown reasons stay normalized;
+no environment or event dump is retained. An observed termination message is
+now retained as authorized run output (`message`, at most 1536 UTF-8 bytes,
+`message_truncated` when bounded further to keep the diagnostic within 4096
+bytes). Log summaries quote control characters. Message contents do not establish
+infrastructure authority. Container OOM reason and Pod deadline reason are
+separate observations; exit 137 alone means neither.
+
+Step log collection selects the failed init instead of requesting nonexistent
+main logs. Received complete records and inclusive timestamp/count/digest cursors
+have a bounded write-ahead journal, repaired before adoption resumes. Finished
+cursors do not replay old Pods. Final requests have a 60-second lease, at most
+three attempts, and a shared 120-second drain budget including follower overflow.
+Submitted Workflows retain owned Pods through their completion TTL (minimum
+180 seconds, no immediate PodGC or indefinite finalizer). Missing logs and
+termination details remain explicit unknowns. Journal errors mark continuity lost
+for that run, fall back to retained output without restart cursors, and never
+escape as a fatal dispatcher error. A fixed retained marker and best-effort
+`run.log-continuity.lost` audit observation record the degradation. Commits capture
+intervening prefixes and use one WAL sync, with one final projection sync; active journals count
+toward retention, and synced/indexed terminal runs prune them immediately. See
+[log continuity](docs/log-continuity.md).
 
 `run_get` exposes this record through the existing typed step JSON. Old NULL
 records explicitly mean `not-recorded`; no historical cause is backfilled.
@@ -3149,7 +3170,9 @@ conditions, environment, token contents or object dumps are retained. Graphs are
 bounded to 2048 tasks / 256 KiB; unsupported graphs remain explicitly unavailable.
 Per node/Pod incarnation, timing contains Pod creation, PodScheduled transition,
 current init-container start/end (including executor identity initialization),
-current main start/end, and node completion. Dependency readiness is logical
+current main start/end, and node completion. A failed init never supplies a
+main timing: its observed init timing remains, and main is unavailable.
+Dependency readiness is logical
 readiness: the latest successful simple DAG predecessor finish, or DAG start
 for a task without predecessors. Expressions, guards, loops, retry ambiguity,
 and unsupported shapes leave readiness unknown. This is not a measured Argo

@@ -1198,6 +1198,11 @@ func applyServerBounds(workflow *wfv1.Workflow, config Config) {
 		workflow.Spec.ActiveDeadlineSeconds = &bounded
 	}
 	ttl := config.TTLSeconds
+	// Keep Workflow-owned Pods through settling, diagnostics and the shared
+	// two-minute final drain, even if the configured TTL is shorter.
+	if ttl < 180 {
+		ttl = 180
+	}
 	workflow.Spec.TTLStrategy = &wfv1.TTLStrategy{SecondsAfterCompletion: &ttl}
 	// No PodGC: owner-reference collection removes step Pods together with the
 	// TTL-deleted Workflow, preserving pod logs for the full retention window.

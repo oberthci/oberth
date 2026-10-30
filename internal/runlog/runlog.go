@@ -117,7 +117,7 @@ func (store *Store) Create(runID string) (*os.File, error) {
 	}
 	// logPath validates the run ID and proves the resulting path remains under
 	// the configured log directory.
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o640) //nolint:gosec
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_RDWR, 0o640) //nolint:gosec
 	if err != nil {
 		return nil, fmt.Errorf("create run log: %w", err)
 	}
@@ -135,7 +135,7 @@ func (store *Store) Resume(runID string) (*os.File, []runprogress.Event, int64, 
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return nil, nil, 0, err
 	}
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o640) //nolint:gosec
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_RDWR, 0o640) //nolint:gosec
 	if err != nil {
 		return nil, nil, 0, fmt.Errorf("resume run log: %w", err)
 	}

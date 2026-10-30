@@ -1,0 +1,234 @@
+[
+  {
+    "workflow": {
+      "metadata": {
+        "name": "oberth-cloudtaser-docs-105ea601-390f6c44a6e0",
+        "namespace": "oberth-argo",
+        "uid": "26f562d6-9c50-4225-ab2e-f261f3c11728",
+        "annotations": {
+          "oberth.ci/run-id": "105ea601c2843d2091cc4d16d5d4d6dd",
+          "oberth.ci/spec-identity": "3dd119d9c892ae95d8ab525b6009ba53f5d40146e494940f6f0d1a4bd7ce4386",
+          "workflows.argoproj.io/pod-name-format": "v2"
+        }
+      },
+      "status": {
+        "phase": "Failed",
+        "nodes": {
+          "oberth-cloudtaser-docs-105ea601-390f6c44a6e0-3725571690": {
+            "displayName": "test-stock-cos-targets",
+            "finishedAt": "2026-10-30T17:48:28Z",
+            "id": "oberth-cloudtaser-docs-105ea601-390f6c44a6e0-3725571690",
+            "name": "oberth-cloudtaser-docs-105ea601-390f6c44a6e0.test-stock-cos-targets",
+            "phase": "Failed",
+            "startedAt": "2026-10-30T17:48:09Z",
+            "templateName": "test-stock-cos-targets",
+            "type": "Pod"
+          }
+        }
+      }
+    },
+    "pod": {
+      "metadata": {
+        "name": "oberth-cloudtaser-docs-105ea601-390f6c44a6e0-test-stock-cos-targets-3725571690",
+        "namespace": "oberth-argo",
+        "uid": "4ececbe9-4a20-49b1-a1c1-5f9cc063186c",
+        "ownerReferences": [
+          {
+            "apiVersion": "argoproj.io/v1alpha1",
+            "blockOwnerDeletion": true,
+            "controller": true,
+            "kind": "Workflow",
+            "name": "oberth-cloudtaser-docs-105ea601-390f6c44a6e0",
+            "uid": "26f562d6-9c50-4225-ab2e-f261f3c11728"
+          }
+        ],
+        "annotations": {
+          "workflows.argoproj.io/node-id": "oberth-cloudtaser-docs-105ea601-390f6c44a6e0-3725571690",
+          "workflows.argoproj.io/node-name": "oberth-cloudtaser-docs-105ea601-390f6c44a6e0.test-stock-cos-targets"
+        }
+      },
+      "status": {
+        "containerStatuses": [
+          {
+            "name": "main",
+            "restartCount": 0,
+            "state": {
+              "waiting": {
+                "reason": "PodInitializing"
+              }
+            }
+          },
+          {
+            "name": "wait",
+            "restartCount": 0,
+            "state": {
+              "waiting": {
+                "reason": "PodInitializing"
+              }
+            }
+          }
+        ],
+        "initContainerStatuses": [
+          {
+            "name": "oberth-executor-token",
+            "containerID": "containerd://d9dcda0e62a37421ce91d5f2dece6cabd7986346741159529bc0ee0050011f61",
+            "restartCount": 0,
+            "state": {
+              "terminated": {
+                "containerID": "containerd://d9dcda0e62a37421ce91d5f2dece6cabd7986346741159529bc0ee0050011f61",
+                "exitCode": 0,
+                "finishedAt": "2026-10-30T17:48:12Z",
+                "reason": "Completed",
+                "startedAt": "2026-10-30T17:48:11Z"
+              }
+            }
+          },
+          {
+            "name": "init",
+            "containerID": "containerd://f539254781acc15fa31eb98d23ab5fdd16c020559c903766451acd9a525e5238",
+            "restartCount": 0,
+            "state": {
+              "terminated": {
+                "containerID": "containerd://f539254781acc15fa31eb98d23ab5fdd16c020559c903766451acd9a525e5238",
+                "exitCode": 0,
+                "finishedAt": "2026-10-30T17:48:21Z",
+                "reason": "Completed",
+                "startedAt": "2026-10-30T17:48:21Z"
+              }
+            }
+          },
+          {
+            "name": "install-jq",
+            "containerID": "containerd://49d3a67fd1f88e310d80e376645f03e99019d825722d3eb750156354a0096cc0",
+            "restartCount": 0,
+            "state": {
+              "terminated": {
+                "containerID": "containerd://49d3a67fd1f88e310d80e376645f03e99019d825722d3eb750156354a0096cc0",
+                "exitCode": 23,
+                "finishedAt": "2026-10-30T17:48:28Z",
+                "reason": "Error",
+                "startedAt": "2026-10-30T17:48:27Z"
+              }
+            }
+          }
+        ]
+      }
+    }
+  },
+  {
+    "workflow": {
+      "metadata": {
+        "name": "oberth-cloudtaser-docs-2a1971bf-5bc08e73f145",
+        "namespace": "oberth-argo",
+        "uid": "39714b57-29aa-452d-a1b4-367fd91a754b",
+        "annotations": {
+          "oberth.ci/run-id": "2a1971bf032c2227bc6602767b2ef446",
+          "oberth.ci/spec-identity": "823126138d5804f202167eb7625141414634d6b8a948015038b5f99ba04aa974",
+          "workflows.argoproj.io/pod-name-format": "v2"
+        }
+      },
+      "status": {
+        "phase": "Failed",
+        "nodes": {
+          "oberth-cloudtaser-docs-2a1971bf-5bc08e73f145-2067775598": {
+            "displayName": "test-stock-cos-targets",
+            "finishedAt": "2026-10-30T17:30:02Z",
+            "id": "oberth-cloudtaser-docs-2a1971bf-5bc08e73f145-2067775598",
+            "name": "oberth-cloudtaser-docs-2a1971bf-5bc08e73f145.test-stock-cos-targets",
+            "phase": "Failed",
+            "startedAt": "2026-10-30T17:29:42Z",
+            "templateName": "test-stock-cos-targets",
+            "type": "Pod"
+          }
+        }
+      }
+    },
+    "pod": {
+      "metadata": {
+        "name": "oberth-cloudtaser-docs-2a1971bf-5bc08e73f145-test-stock-cos-targets-2067775598",
+        "namespace": "oberth-argo",
+        "uid": "4c1643c0-238c-4e10-b610-25e805c0fbfc",
+        "ownerReferences": [
+          {
+            "apiVersion": "argoproj.io/v1alpha1",
+            "blockOwnerDeletion": true,
+            "controller": true,
+            "kind": "Workflow",
+            "name": "oberth-cloudtaser-docs-2a1971bf-5bc08e73f145",
+            "uid": "39714b57-29aa-452d-a1b4-367fd91a754b"
+          }
+        ],
+        "annotations": {
+          "workflows.argoproj.io/node-id": "oberth-cloudtaser-docs-2a1971bf-5bc08e73f145-2067775598",
+          "workflows.argoproj.io/node-name": "oberth-cloudtaser-docs-2a1971bf-5bc08e73f145.test-stock-cos-targets"
+        }
+      },
+      "status": {
+        "containerStatuses": [
+          {
+            "name": "main",
+            "restartCount": 0,
+            "state": {
+              "waiting": {
+                "reason": "PodInitializing"
+              }
+            }
+          },
+          {
+            "name": "wait",
+            "restartCount": 0,
+            "state": {
+              "waiting": {
+                "reason": "PodInitializing"
+              }
+            }
+          }
+        ],
+        "initContainerStatuses": [
+          {
+            "name": "oberth-executor-token",
+            "containerID": "containerd://48724c8f9a5ebe9805b5d7f68854730c5e5faaac19bccd6be48b22a08a17a170",
+            "restartCount": 0,
+            "state": {
+              "terminated": {
+                "containerID": "containerd://48724c8f9a5ebe9805b5d7f68854730c5e5faaac19bccd6be48b22a08a17a170",
+                "exitCode": 0,
+                "finishedAt": "2026-10-30T17:29:48Z",
+                "reason": "Completed",
+                "startedAt": "2026-10-30T17:29:47Z"
+              }
+            }
+          },
+          {
+            "name": "init",
+            "containerID": "containerd://d6fa1604ff599492e9ce5e09ad68191f355462f3680b62219d6f14b59e4bfa22",
+            "restartCount": 0,
+            "state": {
+              "terminated": {
+                "containerID": "containerd://d6fa1604ff599492e9ce5e09ad68191f355462f3680b62219d6f14b59e4bfa22",
+                "exitCode": 0,
+                "finishedAt": "2026-10-30T17:29:54Z",
+                "reason": "Completed",
+                "startedAt": "2026-10-30T17:29:54Z"
+              }
+            }
+          },
+          {
+            "name": "install-jq",
+            "containerID": "containerd://1afdcfcc79b8463471e4811d8b4308214d76a244bb5fe25e86c0cf886affb9df",
+            "restartCount": 0,
+            "state": {
+              "terminated": {
+                "containerID": "containerd://1afdcfcc79b8463471e4811d8b4308214d76a244bb5fe25e86c0cf886affb9df",
+                "exitCode": 23,
+                "finishedAt": "2026-10-30T17:30:02Z",
+                "reason": "Error",
+                "startedAt": "2026-10-30T17:30:02Z"
+              }
+            }
+          }
+        ]
+      }
+    }
+  }
+]

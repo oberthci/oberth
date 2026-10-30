@@ -534,6 +534,7 @@ func TestLiveFinalDrainHardDeadline(t *testing.T) {
 		worker.done = make(chan struct{})
 		worker.markTerminal()
 		calls := 0
+		started := time.Now()
 		worker.owner.reader = func(ctx context.Context, _, _ string, options corev1.PodLogOptions) (io.ReadCloser, error) {
 			if options.Follow {
 				t.Fatal("final read follows")
@@ -541,14 +542,14 @@ func TestLiveFinalDrainHardDeadline(t *testing.T) {
 			calls++
 			start := time.Now()
 			<-ctx.Done()
-			if time.Since(start) != 30*time.Second {
+			if elapsed := time.Since(start); elapsed > finalLogReadTimeout || elapsed <= 0 {
 				t.Fatal("final deadline changed")
 			}
 			return nil, ctx.Err()
 		}
 		worker.run()
-		if calls != 3 {
-			t.Fatal("final retry bound changed", calls)
+		if calls < 2 || calls > 3 || time.Since(started) > finalLogDrainBudget {
+			t.Fatal("final retry/budget bound changed", calls, time.Since(started))
 		}
 	})
 }
