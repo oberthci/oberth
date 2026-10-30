@@ -162,6 +162,10 @@ func TestWorkflowCreateRecoveryWaitingExistingWorkflowAdoptsBeforeCleanup(t *tes
 			if current.Phase != "running" || current.Status != model.RunRunning || current.SupersededBy != "" {
 				t.Fatalf("adoption failed to mark original run submitted: %+v", current)
 			}
+			if _, err := os.Stat(scheduler.createAdmissionPath(run.ID)); !os.IsNotExist(err) {
+				t.Fatalf("adoption leaked acknowledged create contract: %v", err)
+			}
+
 			cancel()
 			select {
 			case err := <-done:

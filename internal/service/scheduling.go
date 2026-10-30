@@ -54,7 +54,7 @@ func (service *API) observeScheduling(ctx context.Context, run model.Run, steps 
 	}()
 	if isPendingCreate(run) {
 		result.State = "infra-pending"
-		result.Message = "Workflow creation outcome is uncertain; background cleanup is pending and its admission is held."
+		result.Message = "Workflow creation outcome is uncertain; background cleanup is pending."
 		return result
 	}
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)

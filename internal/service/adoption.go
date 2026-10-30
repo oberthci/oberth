@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"os"
 	"time"
 
 	"github.com/oberthci/oberth/internal/model"
@@ -145,6 +146,11 @@ func (scheduler *Scheduler) resumeAdoptedRun(ctx context.Context, run model.Run,
 			reservation.retain()
 			return err
 		}
+	}
+	if run.Status == model.RunRunning && run.Phase == "running" {
+		// The matching Workflow is adopted and submission is durable. A
+		// failed unlink is retried by terminal workspace recovery.
+		_ = os.Remove(scheduler.createAdmissionPath(run.ID))
 	}
 	err = scheduler.observeRun(ctx, run, repository, require, reservation, runObservation{
 		file: file, events: events, retained: retained, adopted: true,

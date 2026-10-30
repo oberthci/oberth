@@ -47,7 +47,11 @@ func (scheduler *Scheduler) createTime() time.Time {
 	return time.Now()
 }
 func (scheduler *Scheduler) createAdmissionPath(id string) string {
-	return filepath.Join(scheduler.workspaceRoot, ".create-admissions", id+".json")
+	return runCreateAdmissionPath(scheduler.workspaceRoot, id)
+}
+
+func runCreateAdmissionPath(root, id string) string {
+	return filepath.Join(root, ".create-admissions", id+".json")
 }
 
 // Persist the server-admitted contract before POST. Recovery must never need a
@@ -109,15 +113,8 @@ func (scheduler *Scheduler) readCreateAdmission(run model.Run) (createAdmission,
 	return saved, nil
 }
 
-// registerCreateCleanup is local scheduling only. It never calls Kubernetes or
-// waits for settlement, including on startup, push and cancellation paths.
-func (scheduler *Scheduler) registerCreateCleanup(run model.Run, grant *admissionReservation, persisted bool) {
-	scheduler.createMu.Lock()
-	if _, exists := scheduler.createPending[run.ID]; exists {
-		scheduler.createMu.Unlock()
-		return
-	}
-	scheduler.createMu.Unlock()
+// restoreCreateGrant only restores local admission accounting.
+func (scheduler *Scheduler) restoreCreateGrant(run model.Run, grant *admissionReservation) (*admissionReservation, error) {
 	if grant == nil {
 		scheduler.admission.mu.Lock()
 		existing := scheduler.admission.reservations[run.QueueSequence]
@@ -141,8 +138,7 @@ func (scheduler *Scheduler) registerCreateCleanup(run model.Run, grant *admissio
 			run.ConcurrencyGroup = ""
 			grant, err = scheduler.admission.adopt(run, periapsis.XL, argoworkflow.VMIBudgetLimit().DemandLimit())
 			if err != nil {
-				log.Printf("WARN: create_cleanup run=%q restore_conflict=true", run.ID)
-				return
+				return nil, err
 			}
 			scheduler.admission.mu.Lock()
 			scheduler.admission.used += scheduler.admission.capacity - grant.weight
@@ -154,15 +150,29 @@ func (scheduler *Scheduler) registerCreateCleanup(run model.Run, grant *admissio
 	grant.retained = true
 	grant.submitted = false
 	scheduler.admission.mu.Unlock()
-	now := scheduler.createTime()
+	return grant, nil
+}
+
+// registerCreateCleanup never waits for Kubernetes, including on startup,
+// push and cancellation paths. Failed local restores are owned by the worker.
+func (scheduler *Scheduler) registerCreateCleanup(run model.Run, grant *admissionReservation, persisted bool) {
+	// Serialize local restoration and registration so concurrent wake/cancel
+	// callers cannot repeat its admission side effects.
 	scheduler.createMu.Lock()
+	defer scheduler.createMu.Unlock()
+	if _, exists := scheduler.createPending[run.ID]; exists {
+		return
+	}
+	restored, err := scheduler.restoreCreateGrant(run, grant)
+	if err != nil {
+		log.Printf("WARN: create_cleanup run=%q restore_conflict=true deferred=true", run.ID)
+	}
+	now := scheduler.createTime()
 	if scheduler.createPending == nil {
 		scheduler.createPending = make(map[string]*pendingCreate)
 	}
-	if _, exists := scheduler.createPending[run.ID]; !exists {
-		scheduler.createPending[run.ID] = &pendingCreate{runID: run.ID, grant: grant, persisted: persisted, next: now, since: now}
-	}
-	scheduler.createMu.Unlock()
+	// A nil grant is an owned, retryable restore failure, never a dropped run.
+	scheduler.createPending[run.ID] = &pendingCreate{runID: run.ID, grant: restored, persisted: persisted, next: now, since: now}
 	scheduler.signalCreateCleanup()
 }
 func (scheduler *Scheduler) signalCreateCleanup() {
@@ -266,6 +276,15 @@ func (scheduler *Scheduler) settleCreateAttempt(ctx context.Context, pending *pe
 		}
 		pending.persisted = true
 	}
+	if pending.grant == nil {
+		grant, err := scheduler.restoreCreateGrant(run, nil)
+		if err != nil {
+			return false, err
+		}
+		scheduler.createMu.Lock()
+		pending.grant = grant
+		scheduler.createMu.Unlock()
+	}
 	cancellations, err := scheduler.store.PendingRunCancellations(ctx)
 	if err != nil {
 		return false, err
@@ -328,7 +347,6 @@ func (scheduler *Scheduler) settleCreateAttempt(ctx context.Context, pending *pe
 	if err != nil {
 		return false, err
 	}
-	_ = os.Remove(scheduler.createAdmissionPath(run.ID))
 	log.Printf("create_cleanup run=%q settled=true", run.ID)
 	return true, nil
 }

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"time"
@@ -54,6 +55,12 @@ func (lifecycle *workspaceLifecycle) cleanupRun(ctx context.Context, runID strin
 	}
 	if err := lifecycle.remove(path); err != nil {
 		return fmt.Errorf("remove terminal run workspace %s: %w", runID, err)
+	}
+	// Contract metadata lives outside the checkout, but has the same durable
+	// terminal-owner/pending-cancellation guard. Startup recovery retries this
+	// removal too, including when the checkout is already absent.
+	if err := os.Remove(runCreateAdmissionPath(lifecycle.root, runID)); err != nil && !errors.Is(err, os.ErrNotExist) {
+		log.Printf("WARN: create_cleanup run=%q contract_removal_pending=true", runID)
 	}
 	return nil
 }
