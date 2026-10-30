@@ -62,6 +62,7 @@ type SchedulerConfig struct {
 }
 
 type Scheduler struct {
+	databaseRetryCount atomic.Uint64
 	dispatchProgress   liveness.Heartbeat
 	headProgress       liveness.Heartbeat
 	startupRecovered   atomic.Bool
@@ -175,6 +176,7 @@ func NewScheduler(config SchedulerConfig) (*Scheduler, error) {
 		createWake: make(chan struct{}, 1), createPending: make(map[string]*pendingCreate),
 		publicationSet: make(map[string]struct{}), deliveryPermit: deliveryPermit, capacityWait: waitTrustedCapacity,
 	}
+	scheduler.workspaces.owners = scheduler.database()
 	// Runs parked on their concurrency group (#658) do not hold a dispatch
 	// slot, so the gate carries its own run ceiling, and a newly parked run
 	// wakes the dispatch loop to claim past it. The ceiling is the weight
@@ -246,7 +248,7 @@ func (scheduler *Scheduler) enqueueCI(ctx context.Context, request CIRequest, fi
 		}
 		result, err = state.EnqueueScheduleOccurrence(ctx, event, spec, *fire)
 	} else {
-		result.Enqueued, err = scheduler.store.EnqueueReceiveEvent(ctx, event, spec)
+		result.Enqueued, err = scheduler.database().EnqueueReceiveEvent(ctx, event, spec)
 	}
 	if err == nil && result.Enqueued.ID != "" {
 		err = scheduler.AcceptEnqueue(ctx, result.Enqueued)
@@ -264,7 +266,7 @@ func (scheduler *Scheduler) AdmitRelease(ctx context.Context, request ReleaseReq
 	}
 	event := receiveSpec(request.EventID, request.Actor, request.Repository.ID, model.RefTag, request.Tag,
 		request.OldSHA, request.ObjectSHA, request.CommitSHA, "queued")
-	enqueued, err := scheduler.store.EnqueueReceiveEvent(ctx, event, model.RunSpec{
+	enqueued, err := scheduler.database().EnqueueReceiveEvent(ctx, event, model.RunSpec{
 		RepoID: request.Repository.ID, RefKind: model.RefTag, Ref: request.Tag,
 		SHA: request.ObjectSHA, Actor: request.Actor, Release: true, Credentialed: true, Trigger: "tag", TestedSHA: request.CommitSHA,
 	})
@@ -336,7 +338,7 @@ func (scheduler *Scheduler) completePendingCancellations(ctx context.Context) er
 }
 
 func (scheduler *Scheduler) completePendingCancellationsWithGate(ctx context.Context, require mutationRequirement) error {
-	pending, err := scheduler.store.PendingRunCancellations(ctx)
+	pending, err := scheduler.database().PendingRunCancellations(ctx)
 	if err != nil {
 		return fmt.Errorf("load pending run cancellations: %w", err)
 	}
@@ -362,7 +364,7 @@ func (scheduler *Scheduler) completeCancellationsWithGate(ctx context.Context, c
 	}
 	// Supplied snapshots can predate a lost-acknowledgement re-arm. Use the
 	// current ledger entry and compare it again when completing the pass.
-	pending, err := scheduler.store.PendingRunCancellations(ctx)
+	pending, err := scheduler.database().PendingRunCancellations(ctx)
 	if err != nil {
 		return err
 	}
@@ -380,7 +382,7 @@ func (scheduler *Scheduler) completeCancellationsWithGate(ctx context.Context, c
 			continue
 		}
 		cancellation = current
-		run, err := scheduler.store.Run(ctx, cancellation.RunID)
+		run, err := scheduler.database().Run(ctx, cancellation.RunID)
 		if err != nil {
 			return err
 		}
@@ -393,7 +395,7 @@ func (scheduler *Scheduler) completeCancellationsWithGate(ctx context.Context, c
 		}); err != nil {
 			return fmt.Errorf("delete superseded Job %s: %w", cancellation.JobName, err)
 		}
-		if err := scheduler.store.CompleteObservedRunCancellation(ctx, cancellation); err != nil {
+		if err := scheduler.database().CompleteObservedRunCancellation(ctx, cancellation); err != nil {
 			return fmt.Errorf("complete cancellation for run %s: %w", cancellation.RunID, err)
 		}
 		scheduler.admission.releaseDeletedRun(cancellation.RunID)
@@ -414,7 +416,7 @@ func (scheduler *Scheduler) completeCancellationsWithGate(ctx context.Context, c
 // accepted.
 func (scheduler *Scheduler) abandonAdmissions(ctx context.Context, cancellations []model.RunCancellation) {
 	for _, cancellation := range cancellations {
-		run, err := scheduler.store.Run(ctx, cancellation.RunID)
+		run, err := scheduler.database().Run(ctx, cancellation.RunID)
 		if err != nil || !run.Status.Terminal() {
 			continue
 		}
@@ -434,6 +436,7 @@ func (scheduler *Scheduler) Recovered() bool { return scheduler.startupRecovered
 // slot for the claims behind it (see dispatchSlotAvailable).
 func (scheduler *Scheduler) Run(ctx context.Context) error {
 	workerCtx, cancelWorkers := context.WithCancel(ctx)
+	workerCtx = context.WithValue(workerCtx, databaseRetryKey{}, &databaseRetryScope{lifetime: workerCtx, owner: scheduler})
 	defer cancelWorkers()
 	var workers sync.WaitGroup
 	join := func() {
@@ -514,7 +517,7 @@ func (scheduler *Scheduler) Run(ctx context.Context) error {
 	}
 	for {
 		scheduler.dispatchProgress.Beat()
-		priorityErr := scheduler.refreshPriorities(workerCtx)
+		priorityErr := scheduler.refreshPriorities(dispatchCtx)
 		if priorityErr != nil && !store.IsTransientLockError(priorityErr) {
 			join()
 			if ctx.Err() != nil {
@@ -525,7 +528,7 @@ func (scheduler *Scheduler) Run(ctx context.Context) error {
 		for priorityErr == nil {
 			scheduler.dispatchProgress.Beat()
 			if !scheduler.dispatchSlotAvailable(active) {
-				available, err := scheduler.priorityDispatchAvailable(workerCtx, active)
+				available, err := scheduler.priorityDispatchAvailable(dispatchCtx, active)
 				if store.IsTransientLockError(err) {
 					break // Keep workers alive; retry on the next notification or poll.
 				}
@@ -554,7 +557,7 @@ func (scheduler *Scheduler) Run(ctx context.Context) error {
 				}
 				return err
 			}
-			run, err := scheduler.store.ClaimNextRun(workerCtx)
+			run, err := scheduler.database().ClaimNextRun(dispatchCtx)
 			if queueEmpty(err) {
 				break
 			}
@@ -610,6 +613,9 @@ func (scheduler *Scheduler) Run(ctx context.Context) error {
 			active--
 			if err != nil {
 				join()
+				if ctx.Err() != nil {
+					return nil
+				}
 				return err
 			}
 		}
@@ -648,7 +654,7 @@ func (scheduler *Scheduler) ProcessNext(ctx context.Context) error {
 	if err := scheduler.requireMutation(ctx); err != nil {
 		return err
 	}
-	run, err := scheduler.store.ClaimNextRun(ctx)
+	run, err := scheduler.database().ClaimNextRun(ctx)
 	if err != nil {
 		return err
 	}
@@ -675,7 +681,7 @@ func (scheduler *Scheduler) executeAndCleanupReservedWithGate(
 	defer finishEvidence()
 	// A cancellation can terminalize a claim before its goroutine starts. Do
 	// not create logs after a purge that completed in that dispatch window.
-	current, executeErr := scheduler.store.Run(ctx, run.ID)
+	current, executeErr := scheduler.database().Run(ctx, run.ID)
 	if executeErr == nil && current.Status.Active() {
 		executeErr = scheduler.execute(ctx, run, require, reservation)
 	}
@@ -685,7 +691,7 @@ func (scheduler *Scheduler) executeAndCleanupReservedWithGate(
 	cleanupCtx, cancelCleanup := boundedWorkspaceCleanupContext(ctx)
 	defer cancelCleanup()
 	if workflowRunAdoptable(run) {
-		current, err := scheduler.store.Run(cleanupCtx, run.ID)
+		current, err := scheduler.database().Run(cleanupCtx, run.ID)
 		if err != nil {
 			return errors.Join(executeErr, err)
 		}
@@ -693,10 +699,10 @@ func (scheduler *Scheduler) executeAndCleanupReservedWithGate(
 			return executeErr
 		}
 	}
-	settleErr := scheduler.store.CompleteSupersededRunCancellationWithoutJob(cleanupCtx, run.ID)
+	settleErr := scheduler.database().CompleteSupersededRunCancellationWithoutJob(cleanupCtx, run.ID)
 	cleanupErr := scheduler.workspaces.cleanupRun(cleanupCtx, run.ID)
 	if run.Trigger == "promotion" {
-		promotion, err := scheduler.store.PromotionByRun(cleanupCtx, run.ID)
+		promotion, err := scheduler.database().PromotionByRun(cleanupCtx, run.ID)
 		if err != nil {
 			cleanupErr = errors.Join(cleanupErr, fmt.Errorf("load promotion workspace owner for run %s: %w", run.ID, err))
 		} else {
@@ -720,7 +726,7 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 	if err := require(ctx); err != nil {
 		return err
 	}
-	repository, err := scheduler.store.Repository(ctx, run.RepoID)
+	repository, err := scheduler.database().Repository(ctx, run.RepoID)
 	if err != nil {
 		return scheduler.finishInfrastructureFailure(ctx, run, model.Repository{}, fmt.Errorf("load run repository: %w", err))
 	}
@@ -734,7 +740,7 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 	}
 	// The cache input is fully qualified so same-named repositories under
 	// different upstreams check out from their own caches (issue #264).
-	upstream, err := scheduler.store.Upstream(ctx, repository.UpstreamID)
+	upstream, err := scheduler.database().Upstream(ctx, repository.UpstreamID)
 	if err != nil {
 		return scheduler.finishInfrastructureFailure(ctx, run, repository, fmt.Errorf("load run repository upstream: %w", err))
 	}
@@ -757,9 +763,9 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 	}
 	var current model.Run
 	if requirement.Contract == nil {
-		current, err = scheduler.store.SetRunJobName(ctx, run.ID, jobName)
+		current, err = scheduler.database().SetRunJobName(ctx, run.ID, jobName)
 	} else {
-		current, err = scheduler.store.Run(ctx, run.ID)
+		current, err = scheduler.database().Run(ctx, run.ID)
 	}
 	if err != nil {
 		_ = logFile.Close()
@@ -809,7 +815,7 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 	if group != "" {
 		// Recorded before admission so a run waiting on its group already
 		// says which group it waits on (status, run_get, scheduling reason).
-		if groupErr := scheduler.store.SetRunConcurrencyGroup(ctx, run.ID, group); groupErr != nil {
+		if groupErr := scheduler.database().SetRunConcurrencyGroup(ctx, run.ID, group); groupErr != nil {
 			_ = logFile.Close()
 			return scheduler.finishInfrastructureFailure(ctx, run, repository, fmt.Errorf("record concurrency group: %w", groupErr))
 		}
@@ -846,7 +852,7 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 	}
 	defer releaseAdmission()
 	if reservation.wasDelayed() {
-		current, err = scheduler.store.Run(ctx, run.ID)
+		current, err = scheduler.database().Run(ctx, run.ID)
 		if err != nil {
 			_ = logFile.Close()
 			return scheduler.finishInfrastructureFailure(ctx, run, repository, fmt.Errorf("verify run before weighted admission: %w", err))
@@ -868,7 +874,7 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 		_ = logFile.Close()
 		return err
 	}
-	current, err = scheduler.store.MarkRunAdmitted(ctx, run.ID)
+	current, err = scheduler.database().MarkRunAdmitted(ctx, run.ID)
 	if err != nil {
 		_ = logFile.Close()
 		return scheduler.finishInfrastructureFailure(ctx, run, repository, fmt.Errorf("record weighted admission: %w", err))
@@ -882,7 +888,7 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 		return nil
 	}
 	{
-		upstream, upstreamErr := scheduler.store.Upstream(ctx, repository.UpstreamID)
+		upstream, upstreamErr := scheduler.database().Upstream(ctx, repository.UpstreamID)
 		if upstreamErr != nil {
 			_ = logFile.Close()
 			return scheduler.finishInfrastructureFailure(ctx, run, repository, fmt.Errorf("load repository upstream: %w", upstreamErr))
@@ -903,9 +909,14 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 		if err != nil {
 			_ = logFile.Close()
 			journal := scheduler.store.(vmrunner.KVMJournal)
-			state, stateErr := journal.KVMPreflight(context.WithoutCancel(ctx), run.ID)
+			stateCtx, cancelState := boundedWorkspaceCleanupContext(ctx)
+			state, stateErr := retryDatabase(stateCtx, "KVMPreflight", func(ctx context.Context) (vmrunner.KVMExecution, error) { return journal.KVMPreflight(ctx, run.ID) })
+			cancelState()
 			if (stateErr != nil && !errors.Is(stateErr, store.ErrNotFound)) || (stateErr == nil && !state.Cleaned) {
 				reservation.retain()
+				if preflightDatabaseError(err) && ctx.Err() == nil {
+					return scheduler.recoverDatabasePreflight(ctx, run.ID, reservation)
+				}
 				return errors.Join(err, stateErr)
 			}
 			// Owner shutdown loses the observer, not the durable recovery obligation.
@@ -929,7 +940,7 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 		}
 	}
 	if !run.Credentialed && scheduler.pipelineCredentialed(ctx, jobRequest) {
-		if credErr := scheduler.store.SetRunCredentialed(ctx, run.ID); credErr != nil {
+		if credErr := scheduler.database().SetRunCredentialed(ctx, run.ID); credErr != nil {
 			_ = logFile.Close()
 			return scheduler.finishInfrastructureFailure(ctx, run, repository, fmt.Errorf("mark run credentialed: %w", credErr))
 		}
@@ -940,7 +951,7 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 		return err
 	}
 	if requirement.Contract != nil {
-		current, err = scheduler.store.SetRunJobName(ctx, run.ID, jobName)
+		current, err = scheduler.database().SetRunJobName(ctx, run.ID, jobName)
 	}
 	if err != nil {
 		_ = logFile.Close()
@@ -953,7 +964,7 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 	// A run granted without waiting was last read before admission. Re-read
 	// it so a supersede or cancel that landed since stops here, before any
 	// Workflow exists, instead of after MarkRunSubmitted.
-	if fresh, err := scheduler.store.Run(ctx, run.ID); err != nil {
+	if fresh, err := scheduler.database().Run(ctx, run.ID); err != nil {
 		_ = logFile.Close()
 		return scheduler.finishInfrastructureFailure(ctx, run, repository, fmt.Errorf("verify run before Job creation: %w", err))
 	} else if fresh.Preempted() {
@@ -988,7 +999,7 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 			_ = logFile.Close()
 			reservation.retain()
 			persistCtx, cancelPersist := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-			pendingErr := scheduler.store.MarkRunCreatePending(persistCtx, run.ID, jobName)
+			pendingErr := scheduler.database().MarkRunCreatePending(persistCtx, run.ID, jobName)
 			cancelPersist()
 			run.JobName = jobName
 			scheduler.registerCreateCleanup(run, reservation, pendingErr == nil)
@@ -1005,7 +1016,7 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 		return scheduler.finishInfrastructureFailure(ctx, run, repository, fmt.Errorf("create Job: %w", err))
 	}
 	reservation.markSubmitted()
-	current, err = scheduler.store.MarkRunSubmitted(ctx, run.ID)
+	current, err = scheduler.database().MarkRunSubmitted(ctx, run.ID)
 	if err != nil {
 		if _, ok := scheduler.jobs.(JobAdopter); ok && workflowRunAdoptable(run) && ctx.Err() != nil {
 			reservation.retain()
@@ -1033,12 +1044,12 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 			// A cancellation pass may already have settled the obligation
 			// before this Workflow existed; make it pending again so the next
 			// pass or restart deletes it rather than orphaning it.
-			rearmErr := scheduler.store.RearmRunCancellation(context.WithoutCancel(ctx), run.ID, jobName)
+			rearmErr := scheduler.database().RearmRunCancellation(context.WithoutCancel(ctx), run.ID, jobName)
 			cancelCleanup()
 			reservation.retain()
 			return errors.Join(fmt.Errorf("delete superseded Job %s: %w", jobName, err), rearmErr)
 		}
-		completeErr := scheduler.store.CompleteRunCancellation(cleanupCtx, run.ID, jobName)
+		completeErr := scheduler.database().CompleteRunCancellation(cleanupCtx, run.ID, jobName)
 		cancelCleanup()
 		scheduler.signals.NotifyRun(run.ID)
 		return completeErr
@@ -1119,7 +1130,7 @@ func (scheduler *Scheduler) observeRun(ctx context.Context, run model.Run, repos
 				// obligation owns the Job deletion, and whichever process next
 				// runs a cancellation pass — the successor's startup in the
 				// upgrade case — executes it before the replacement is claimed.
-				if requeued, requeueErr := scheduler.store.RequeueStrandedRun(finalizeCtx, run.ID); requeueErr == nil {
+				if requeued, requeueErr := scheduler.database().RequeueStrandedRun(finalizeCtx, run.ID); requeueErr == nil {
 					_ = logFile.Close()
 					scheduler.signals.NotifyRun(run.ID)
 					scheduler.signals.NotifyRun(requeued.ID)
@@ -1156,7 +1167,7 @@ func (scheduler *Scheduler) observeRun(ctx context.Context, run model.Run, repos
 	if observation.adopted && waitErr != nil {
 		// Cancel and supersede delete the Workflow under the adopted Wait;
 		// their durable obligation, not this observation error, settles it.
-		if current, lookupErr := scheduler.store.Run(finalizeCtx, run.ID); lookupErr == nil && current.Preempted() {
+		if current, lookupErr := scheduler.database().Run(finalizeCtx, run.ID); lookupErr == nil && current.Preempted() {
 			if err := scheduler.completePendingCancellationsWithGate(finalizeCtx, require); err != nil {
 				reservation.retain()
 				return err
@@ -1255,7 +1266,7 @@ func (scheduler *Scheduler) observeRun(ctx context.Context, run model.Run, repos
 			failureTail = string(tail)
 		}
 	}
-	_, err := scheduler.store.FinishRun(finalizeCtx, run.ID, model.RunResult{
+	_, err := scheduler.database().FinishRun(finalizeCtx, run.ID, model.RunResult{
 		TerminalObservation: jobResult.TerminalObservation, Status: jobResult.Status, Phase: jobResult.Phase, TestedSHA: checkoutSHA, BaseSHA: jobResult.BaseSHA,
 		FailedBurn: jobResult.FailedBurn, FailedStep: jobResult.FailedStep, Error: jobResult.Error,
 		FailureTail: failureTail,
@@ -1334,7 +1345,7 @@ func (scheduler *Scheduler) persistSteps(ctx context.Context, runID string, step
 			result.DeclaredSize = periapsis.M
 		}
 		result.LogStart, result.LogEnd = logOffsets(index, result.Burn, result.Step)
-		if _, err := scheduler.store.PutStepResult(ctx, result); err != nil {
+		if _, err := scheduler.database().PutStepResult(ctx, result); err != nil {
 			return fmt.Errorf("persist step result %s/%s: %w", result.Burn, result.Step, err)
 		}
 	}
@@ -1360,7 +1371,7 @@ func (scheduler *Scheduler) promotionForRun(ctx context.Context, run model.Run) 
 	if run.Trigger != "promotion" {
 		return model.Promotion{}, nil
 	}
-	promotion, err := scheduler.store.PromotionByRun(ctx, run.ID)
+	promotion, err := scheduler.database().PromotionByRun(ctx, run.ID)
 	if err != nil {
 		return model.Promotion{}, fmt.Errorf("load promotion for merged-tree run: %w", err)
 	}
@@ -1372,7 +1383,7 @@ func (scheduler *Scheduler) promotionForRun(ctx context.Context, run model.Run) 
 
 func (scheduler *Scheduler) beginRunPublication(ctx context.Context, repository model.Repository, run model.Run, promotion model.Promotion) (model.Publication, error) {
 	if promotion.ID != "" {
-		return scheduler.store.BeginPublication(ctx, model.PublicationSpec{
+		return scheduler.database().BeginPublication(ctx, model.PublicationSpec{
 			RepoID: repository.ID, RunID: run.ID, PromotionID: promotion.ID,
 			RefKind: model.RefBranch, Ref: promotion.TargetRef,
 			PreviousSHA: promotion.PreviousSHA, PreviousKnown: true,
@@ -1382,7 +1393,7 @@ func (scheduler *Scheduler) beginRunPublication(ctx context.Context, repository 
 	if _, err := canonicalPublicationRef(run.RefKind, run.Ref); err != nil {
 		return model.Publication{}, err
 	}
-	return scheduler.store.BeginPublication(ctx, model.PublicationSpec{
+	return scheduler.database().BeginPublication(ctx, model.PublicationSpec{
 		RepoID: repository.ID, RunID: run.ID, RefKind: run.RefKind, Ref: run.Ref,
 		PreviousKnown: false, ResultSHA: run.SHA, Actor: run.Actor,
 	})
@@ -1398,7 +1409,7 @@ func (scheduler *Scheduler) recoverPendingPublicationsWithGate(ctx context.Conte
 	if err := require(ctx); err != nil {
 		return err
 	}
-	pending, err := scheduler.store.PendingPublications(ctx)
+	pending, err := scheduler.database().PendingPublications(ctx)
 	if err != nil {
 		return fmt.Errorf("load pending publications: %w", err)
 	}
@@ -1477,7 +1488,7 @@ func (scheduler *Scheduler) deliverPublicationWithGate(
 	if err := require(ctx); err != nil {
 		return model.PublicationFinalization{}, err
 	}
-	publication, err := scheduler.store.Publication(ctx, publicationID)
+	publication, err := scheduler.database().Publication(ctx, publicationID)
 	if err != nil {
 		return model.PublicationFinalization{}, fmt.Errorf("load publication %s: %w", publicationID, err)
 	}
@@ -1492,7 +1503,7 @@ func (scheduler *Scheduler) deliverPublicationWithGate(
 	if publication.Status.Terminal() {
 		return scheduler.loadPublicationFinalization(ctx, publication)
 	}
-	repository, err := scheduler.store.Repository(ctx, publication.RepoID)
+	repository, err := scheduler.database().Repository(ctx, publication.RepoID)
 	if err != nil {
 		return model.PublicationFinalization{}, fmt.Errorf("load repository for publication %s: %w", publication.ID, err)
 	}
@@ -1504,17 +1515,17 @@ func (scheduler *Scheduler) deliverPublicationWithGate(
 		return model.PublicationFinalization{}, err
 	}
 	if policyErr != nil {
-		finalization, err := scheduler.store.FinalizePublication(ctx, publication.ID, model.PublicationFailed, policyErr.Error())
+		finalization, err := scheduler.database().FinalizePublication(ctx, publication.ID, model.PublicationFailed, policyErr.Error())
 		if err != nil {
 			return model.PublicationFinalization{}, err
 		}
 		return finalization, scheduler.finishPublication(ctx, repository, finalization)
 	}
 	publicationInput := repository.Name
-	if upstream, upstreamErr := scheduler.store.Upstream(ctx, repository.UpstreamID); upstreamErr == nil {
+	if upstream, upstreamErr := scheduler.database().Upstream(ctx, repository.UpstreamID); upstreamErr == nil {
 		publicationInput = upstream.QualifiedRepo(repository.Name)
 	}
-	finalization, err = deliverPublication(ctx, scheduler.store, scheduler.git, scheduler.auditor, repository, publicationInput, publication)
+	finalization, err = deliverPublication(ctx, scheduler.database(), scheduler.git, databaseAuditor{scheduler.auditor}, repository, publicationInput, publication)
 	if err != nil {
 		return model.PublicationFinalization{}, err
 	}
@@ -1532,13 +1543,13 @@ func (scheduler *Scheduler) loadPublicationFinalization(
 	finalization := model.PublicationFinalization{Publication: publication}
 	var err error
 	if publication.RunID != "" {
-		finalization.Run, err = scheduler.store.Run(ctx, publication.RunID)
+		finalization.Run, err = scheduler.database().Run(ctx, publication.RunID)
 		if err != nil {
 			return model.PublicationFinalization{}, fmt.Errorf("load finalized publication run %s: %w", publication.RunID, err)
 		}
 	}
 	if publication.PromotionID != "" {
-		finalization.Promotion, err = scheduler.store.Promotion(ctx, publication.PromotionID)
+		finalization.Promotion, err = scheduler.database().Promotion(ctx, publication.PromotionID)
 		if err != nil {
 			return model.PublicationFinalization{}, fmt.Errorf("load finalized publication promotion %s: %w", publication.PromotionID, err)
 		}
@@ -1559,7 +1570,7 @@ func (scheduler *Scheduler) finishPublication(_ context.Context, _ model.Reposit
 
 func (scheduler *Scheduler) finishInfrastructureFailure(ctx context.Context, run model.Run, _ model.Repository, failure error) error {
 	defer forgetActiveLogIndex(scheduler.logs, run.ID)
-	_, err := scheduler.store.FinishRun(ctx, run.ID, model.RunResult{Status: model.RunFailed, Phase: "infrastructure", Error: failure.Error()})
+	_, err := scheduler.database().FinishRun(ctx, run.ID, model.RunResult{Status: model.RunFailed, Phase: "infrastructure", Error: failure.Error()})
 	if errors.Is(err, store.ErrInvalidState) {
 		scheduler.signals.NotifyRun(run.ID)
 		return nil
@@ -1568,7 +1579,7 @@ func (scheduler *Scheduler) finishInfrastructureFailure(ctx context.Context, run
 		return errors.Join(failure, err)
 	}
 	if run.Trigger == "promotion" {
-		promotion, promotionErr := scheduler.store.PromotionByRun(ctx, run.ID)
+		promotion, promotionErr := scheduler.database().PromotionByRun(ctx, run.ID)
 		if promotionErr != nil {
 			return errors.Join(failure, promotionErr)
 		}
@@ -1588,7 +1599,7 @@ func (scheduler *Scheduler) reconcileStrandedRunsWithGate(ctx context.Context, r
 	if err := require(ctx); err != nil {
 		return err
 	}
-	runs, err := scheduler.store.RunningRunsWithJobs(ctx)
+	runs, err := scheduler.database().RunningRunsWithJobs(ctx)
 	if err != nil {
 		return fmt.Errorf("load stranded runs for reconciliation: %w", err)
 	}
@@ -1640,7 +1651,7 @@ func (scheduler *Scheduler) reconcileStrandedRunsWithGate(ctx context.Context, r
 				return err
 			}
 		} else {
-			requeued, requeueErr := scheduler.store.RequeueStrandedRun(ctx, run.ID)
+			requeued, requeueErr := scheduler.database().RequeueStrandedRun(ctx, run.ID)
 			if requeueErr == nil {
 				// The stranded Job's deletion is now owned by the durable
 				// supersede obligation the requeue recorded; the cancellation
@@ -1674,24 +1685,24 @@ func (scheduler *Scheduler) reconcileStrandedRunsWithGate(ctx context.Context, r
 			if gateErr := require(ctx); gateErr != nil {
 				return gateErr
 			}
-			_, finishErr := scheduler.store.FinishRun(ctx, run.ID, model.RunResult{
+			_, finishErr := scheduler.database().FinishRun(ctx, run.ID, model.RunResult{
 				Status: model.RunInterrupted, Phase: "interrupted", Error: errMsg,
 			})
 			if finishErr != nil && !errors.Is(finishErr, store.ErrInvalidState) {
 				return fmt.Errorf("interrupt stranded run %s: %w", run.ID, finishErr)
 			}
 			if run.Trigger == "promotion" {
-				if promotion, promotionErr := scheduler.store.PromotionByRun(ctx, run.ID); promotionErr == nil {
+				if promotion, promotionErr := scheduler.database().PromotionByRun(ctx, run.ID); promotionErr == nil {
 					scheduler.signals.NotifyPromotion(promotion.ID)
 				}
 			}
 			scheduler.signals.NotifyRun(run.ID)
 		}
-		_ = scheduler.store.CompleteRunCancellation(ctx, run.ID, run.JobName)
+		_ = scheduler.database().CompleteRunCancellation(ctx, run.ID, run.JobName)
 		cleanupCtx, cancelCleanup := boundedWorkspaceCleanupContext(ctx)
 		_ = scheduler.workspaces.cleanupRun(cleanupCtx, run.ID)
 		if run.Trigger == "promotion" {
-			if promotion, promotionErr := scheduler.store.PromotionByRun(cleanupCtx, run.ID); promotionErr == nil {
+			if promotion, promotionErr := scheduler.database().PromotionByRun(cleanupCtx, run.ID); promotionErr == nil {
 				_ = scheduler.workspaces.cleanupPromotion(cleanupCtx, promotion.ID)
 			}
 		}
@@ -1707,7 +1718,7 @@ func (scheduler *Scheduler) finalizeReconciledRun(ctx context.Context, run model
 	if err := require(ctx); err != nil {
 		return err
 	}
-	repository, err := scheduler.store.Repository(ctx, run.RepoID)
+	repository, err := scheduler.database().Repository(ctx, run.RepoID)
 	if err != nil {
 		return scheduler.finishInfrastructureFailure(ctx, run, model.Repository{}, fmt.Errorf("load reconciled run repository: %w", err))
 	}
@@ -1742,7 +1753,7 @@ func (scheduler *Scheduler) finalizeReconciledRun(ctx context.Context, run model
 			return nil
 		}
 	}
-	_, err = scheduler.store.FinishRun(ctx, run.ID, model.RunResult{
+	_, err = scheduler.database().FinishRun(ctx, run.ID, model.RunResult{
 		TerminalObservation: jobResult.TerminalObservation, Status: jobResult.Status, Phase: jobResult.Phase,
 		FailedBurn: jobResult.FailedBurn, FailedStep: jobResult.FailedStep,
 		Error: jobResult.Error,
@@ -1804,7 +1815,7 @@ func (scheduler *Scheduler) authorizeRunSize(ctx context.Context, run model.Run,
 	if run.Release || !ok {
 		return nil
 	}
-	maximum, err := limiter.MaxRunSize(ctx, run.RepoID)
+	maximum, err := retryDatabase(ctx, "MaxRunSize", func(ctx context.Context) (periapsis.Size, error) { return limiter.MaxRunSize(ctx, run.RepoID) })
 	if err != nil {
 		return fmt.Errorf("read repository size grant: %w", err)
 	}

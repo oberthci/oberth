@@ -127,7 +127,7 @@ SELECT COUNT(*) FROM publications WHERE run_id = ? AND status = 'pending'`, run.
 		return model.Run{}, err
 	}
 	if err := tx.Commit(); err != nil {
-		return model.Run{}, fmt.Errorf("commit stranded run requeue: %w", err)
+		return requeued, fmt.Errorf("commit stranded run requeue: %w", err)
 	}
 	return requeued, nil
 }
@@ -311,8 +311,16 @@ ON CONFLICT(run_id) DO UPDATE SET
 }
 
 func (s *Store) ClaimNextRun(ctx context.Context) (model.Run, error) {
+	// An explicit transaction ensures the candidate is known before commit.
+	// On a lost commit acknowledgement the scheduler can resolve that exact
+	// run instead of claiming a second run and abandoning the first.
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return model.Run{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
 	now := unixNano(s.now())
-	value, err := scanRun(s.db.QueryRowContext(ctx, `
+	value, err := scanRun(tx.QueryRowContext(ctx, `
 UPDATE runs
 SET status = 'running', phase = 'waiting', updated_at = ?
 WHERE queue_sequence = (
@@ -322,6 +330,9 @@ WHERE queue_sequence = (
 RETURNING `+runColumns, now))
 	if err != nil {
 		return model.Run{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return value, fmt.Errorf("commit run claim: %w", err)
 	}
 	return value, nil
 }

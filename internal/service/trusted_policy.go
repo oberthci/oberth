@@ -41,7 +41,7 @@ func (scheduler *Scheduler) trustedRequirement(ctx context.Context, repository m
 		}
 		details, err := json.Marshal(fields)
 		if err == nil {
-			_, err = scheduler.auditor.AppendAuditAction(ctx, model.AuditActionSpec{
+			_, err = (databaseAuditor{scheduler.auditor}).AppendAuditAction(ctx, model.AuditActionSpec{
 				Actor: "scheduler", Action: action, ResourceType: "repository",
 				ResourceID: strconv.FormatInt(repository.ID, 10), Details: string(details),
 			})
@@ -57,7 +57,7 @@ func (scheduler *Scheduler) trustedRequirement(ctx context.Context, repository m
 // All progress boundaries, including capacity retries, use trustedRequirement
 // to durably record decision changes without caching any policy authority.
 func (scheduler *Scheduler) resolveTrustedRequirement(ctx context.Context, repository model.Repository, candidateSHA string) (vmrunner.Requirement, error) {
-	upstream, err := scheduler.store.Upstream(ctx, repository.UpstreamID)
+	upstream, err := scheduler.database().Upstream(ctx, repository.UpstreamID)
 	if err != nil {
 		return vmrunner.Requirement{}, fmt.Errorf("load trusted test policy upstream: %w", err)
 	}
@@ -95,7 +95,7 @@ func (scheduler *Scheduler) trustedReceipt(ctx context.Context, repository model
 	if !ok {
 		return fmt.Errorf("trusted test journal unavailable")
 	}
-	execution, err := journal.KVMPreflight(ctx, run.ID)
+	execution, err := retryDatabase(ctx, "KVMPreflight", func(ctx context.Context) (vmrunner.KVMExecution, error) { return journal.KVMPreflight(ctx, run.ID) })
 	if err != nil {
 		return fmt.Errorf("read trusted test receipt: %w", err)
 	}
@@ -106,7 +106,7 @@ func (scheduler *Scheduler) trustedReceipt(ctx context.Context, repository model
 	if !execution.Cleaned || execution.Rejected || execution.Refusal != nil || execution.Receipt == nil || execution.WorkflowUID == "" || execution.WorkflowUID != execution.Receipt.WorkflowUID || intent.RunID != run.ID || intent.RepoID != repository.ID || intent.CandidateSHA != requirement.CandidateSHA || intent.BaselineSHA != requirement.BaselineSHA || vmrunner.ContractDigest(&intent.Contract) != vmrunner.ContractDigest(requirement.Contract) {
 		return fmt.Errorf("trusted test receipt does not match publication policy")
 	}
-	upstream, err := scheduler.store.Upstream(ctx, repository.UpstreamID)
+	upstream, err := scheduler.database().Upstream(ctx, repository.UpstreamID)
 	if err != nil {
 		return err
 	}
@@ -121,7 +121,7 @@ func (scheduler *Scheduler) requirePublicationTestPolicy(ctx context.Context, re
 	var run model.Run
 	if publication.RunID != "" {
 		var err error
-		run, err = scheduler.store.Run(ctx, publication.RunID)
+		run, err = scheduler.database().Run(ctx, publication.RunID)
 		if err != nil {
 			return fmt.Errorf("load trusted test publication run: %w", err)
 		}
@@ -141,7 +141,9 @@ func (scheduler *Scheduler) requirePublicationTestPolicy(ctx context.Context, re
 		if !ok {
 			sourceErr = fmt.Errorf("trusted fast-forward source run unavailable")
 		} else {
-			run, sourceErr = lookup.LatestRunForSHA(ctx, repository.ID, candidateSHA)
+			run, sourceErr = retryDatabase(ctx, "LatestRunForSHA", func(ctx context.Context) (model.Run, error) {
+				return lookup.LatestRunForSHA(ctx, repository.ID, candidateSHA)
+			})
 		}
 	}
 	requirement, err := scheduler.trustedRequirement(ctx, repository, run.ID, candidateSHA)
@@ -166,7 +168,7 @@ func (scheduler *Scheduler) recoverTrustedPreflights(ctx context.Context) error 
 	if !ok {
 		return nil
 	}
-	pending, err := journal.PendingKVMPreflights(ctx)
+	pending, err := retryDatabase(ctx, "PendingKVMPreflights", journal.PendingKVMPreflights)
 	if err != nil {
 		log.Printf("WARN: trusted preflight recovery inventory unavailable: %v", err)
 		return nil
@@ -177,7 +179,7 @@ func (scheduler *Scheduler) recoverTrustedPreflights(ctx context.Context) error 
 	if scheduler.trusted == nil {
 		return fmt.Errorf("pending trusted preflight cleanup requires configured executor")
 	}
-	runs, err := scheduler.trusted.Recover(ctx)
+	runs, err := retryDatabase(ctx, "RecoverTrustedPreflights", scheduler.trusted.Recover)
 	if err != nil {
 		log.Printf("WARN: trusted preflight recovery remains pending: %v", err)
 	}
@@ -191,6 +193,32 @@ func (scheduler *Scheduler) recoverTrustedPreflights(ctx context.Context) error 
 	return nil
 }
 
+// Execute has already returned. Recover only that run's uncertain preflight;
+// the startup-wide Recover inventory could cancel unrelated live executions.
+func (scheduler *Scheduler) recoverDatabasePreflight(ctx context.Context, id string, reservation *admissionReservation) error {
+	recoverer, ok := scheduler.trusted.(interface {
+		RecoverRun(context.Context, string) error
+	})
+	if !ok {
+		return fmt.Errorf("trusted preflight per-run recovery is unavailable")
+	}
+	total := scheduler.databaseRetryCount.Add(1)
+	log.Printf("WARN: scheduler database operation=TrustedPreflight retry_pending=true retries_total=%d", total)
+	_, err := retryDatabaseClassified(ctx, "RecoverTrustedRun", func(ctx context.Context) (struct{}, error) {
+		return struct{}{}, recoverer.RecoverRun(ctx, id)
+	}, func(err error, expired bool) bool {
+		return transientDatabaseAttemptError(err, expired) || preflightDatabaseError(err)
+	})
+	if err != nil {
+		return err
+	}
+	if err := scheduler.interruptRecoveredPreflight(ctx, id); err != nil {
+		return err
+	}
+	reservation.release()
+	return nil
+}
+
 func (scheduler *Scheduler) interruptRecoveredPreflight(ctx context.Context, id string) error {
 	recoverer, ok := scheduler.store.(interface {
 		RecoverKVMPreflight(context.Context, string) (model.Run, error)
@@ -198,16 +226,16 @@ func (scheduler *Scheduler) interruptRecoveredPreflight(ctx context.Context, id 
 	if !ok {
 		return fmt.Errorf("trusted preflight durable recovery is unavailable")
 	}
-	next, err := recoverer.RecoverKVMPreflight(ctx, id)
+	next, err := retryDatabase(ctx, "RecoverKVMPreflight", func(ctx context.Context) (model.Run, error) { return recoverer.RecoverKVMPreflight(ctx, id) })
 	if err != nil {
 		return err
 	}
 	scheduler.signals.NotifyRun(id)
-	if promotion, err := scheduler.store.PromotionByRun(ctx, id); err == nil {
+	if promotion, err := scheduler.database().PromotionByRun(ctx, id); err == nil {
 		scheduler.signals.NotifyPromotion(promotion.ID)
 	}
 	if next.Trigger == "promotion" {
-		if promotion, err := scheduler.store.PromotionByRun(ctx, next.ID); err == nil {
+		if promotion, err := scheduler.database().PromotionByRun(ctx, next.ID); err == nil {
 			scheduler.signals.NotifyPromotion(promotion.ID)
 		}
 	}

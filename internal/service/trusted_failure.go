@@ -24,7 +24,7 @@ func (scheduler *Scheduler) finishTrustedPreflightFailure(ctx context.Context, r
 	stepsErr := scheduler.persistSteps(ctx, run.ID, result.Steps, index)
 	tail, tailErr := scheduler.failureExcerpt(run.ID, result.FailedBurn, result.FailedStep)
 	failure = errors.Join(failure, indexErr, stepsErr, tailErr)
-	_, err := scheduler.store.FinishRun(ctx, run.ID, model.RunResult{
+	_, err := scheduler.database().FinishRun(ctx, run.ID, model.RunResult{
 		Status: model.RunFailed, Phase: result.Phase, TestedSHA: run.TestedSHA, BaseSHA: run.BaseSHA,
 		FailedBurn: result.FailedBurn, FailedStep: result.FailedStep, Error: failure.Error(), FailureTail: string(tail),
 	})
@@ -36,7 +36,7 @@ func (scheduler *Scheduler) finishTrustedPreflightFailure(ctx context.Context, r
 		return errors.Join(failure, fmt.Errorf("finish trusted preflight run: %w", err))
 	}
 	if run.Trigger == "promotion" {
-		promotion, err := scheduler.store.PromotionByRun(ctx, run.ID)
+		promotion, err := scheduler.database().PromotionByRun(ctx, run.ID)
 		if err != nil {
 			return err
 		}

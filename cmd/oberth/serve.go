@@ -853,6 +853,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 	health.Version = version
 	health.AdmissionBlocker = scheduler.AdmissionBlocker
 	health.Admission = scheduler.AdmissionState
+	health.DatabaseRetries = scheduler.DatabaseRetries
 	health.ControllerProfile = argoJobs.ControllerProfileStatus
 	health.SchemaVersion = store.LatestMigrationVersion()
 	health.Identity = func(ctx context.Context) (string, error) {
@@ -1164,10 +1165,10 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 		if err := waitForAuditIntegrity(activationCtx, anchors.AllowMutation); err != nil {
 			return err
 		}
-		if err := database.RecoverOwnerState(activationCtx); err != nil {
+		if err := scheduler.RetryRecovery(activationCtx, "RecoverOwnerState", database.RecoverOwnerState); err != nil {
 			return fmt.Errorf("recover owner state after audit verification: %w", err)
 		}
-		if err := sshService.ReplayPending(activationCtx); err != nil {
+		if err := scheduler.RetryRecovery(activationCtx, "ReplayPending", sshService.ReplayPending); err != nil {
 			return fmt.Errorf("replay accepted Git events after audit verification: %w", err)
 		}
 		return nil

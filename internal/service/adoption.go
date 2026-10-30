@@ -32,7 +32,7 @@ func (scheduler *Scheduler) withoutPendingPreflight(ctx context.Context, run mod
 	if !ok {
 		return true, nil
 	}
-	pending, err := journal.PendingKVMPreflights(ctx)
+	pending, err := retryDatabase(ctx, "PendingKVMPreflights", journal.PendingKVMPreflights)
 	if err != nil {
 		return false, fmt.Errorf("load pending preflights before adoption: %w", err)
 	}
@@ -113,7 +113,7 @@ func (scheduler *Scheduler) resumeAdoptedRun(ctx context.Context, run model.Run,
 		reservation.retain()
 		return err
 	}
-	repository, err := scheduler.store.Repository(ctx, run.RepoID)
+	repository, err := scheduler.database().Repository(ctx, run.RepoID)
 	if err != nil {
 		reservation.retain()
 		return err
@@ -121,7 +121,7 @@ func (scheduler *Scheduler) resumeAdoptedRun(ctx context.Context, run model.Run,
 	scheduler.admission.mu.Lock()
 	reservation.repo = repository.Name
 	scheduler.admission.mu.Unlock()
-	current, err := scheduler.store.Run(ctx, run.ID)
+	current, err := scheduler.database().Run(ctx, run.ID)
 	if err != nil {
 		reservation.retain()
 		return err
@@ -140,7 +140,7 @@ func (scheduler *Scheduler) resumeAdoptedRun(ctx context.Context, run model.Run,
 	}
 	// A previous owner can stop between Workflow creation and this transition.
 	if run.Phase == "waiting" {
-		run, err = scheduler.store.MarkRunSubmitted(ctx, run.ID)
+		run, err = scheduler.database().MarkRunSubmitted(ctx, run.ID)
 		if err != nil {
 			_ = file.Close()
 			reservation.retain()
@@ -157,13 +157,13 @@ func (scheduler *Scheduler) resumeAdoptedRun(ctx context.Context, run model.Run,
 	})
 	cleanupCtx, cancel := boundedWorkspaceCleanupContext(ctx)
 	defer cancel()
-	current, lookupErr := scheduler.store.Run(cleanupCtx, run.ID)
+	current, lookupErr := scheduler.database().Run(cleanupCtx, run.ID)
 	if lookupErr != nil || !current.Status.Terminal() {
 		return errors.Join(err, lookupErr)
 	}
 	cleanupErr := scheduler.workspaces.cleanupRun(cleanupCtx, run.ID)
 	if run.Trigger == "promotion" {
-		promotion, promotionErr := scheduler.store.PromotionByRun(cleanupCtx, run.ID)
+		promotion, promotionErr := scheduler.database().PromotionByRun(cleanupCtx, run.ID)
 		if promotionErr != nil {
 			cleanupErr = errors.Join(cleanupErr, promotionErr)
 		} else {

@@ -101,7 +101,7 @@ WHERE id = ? AND status = 'running'`, now, spec.RunID)
 		return model.Publication{}, err
 	}
 	if err := tx.Commit(); err != nil {
-		return model.Publication{}, fmt.Errorf("commit publication intent: %w", err)
+		return value, fmt.Errorf("commit publication intent: %w", err)
 	}
 	return value, nil
 }
