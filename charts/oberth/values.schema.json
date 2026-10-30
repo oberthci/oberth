@@ -84,6 +84,17 @@
           "minimum": 0,
           "description": "Opt-in disk-space admission floor in bytes. 0 = disabled."
         },
+        "pressure": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Linux host PSI admission hold; unavailable readings fail open. Set both thresholds to 0 to disable.",
+          "properties": {
+            "ioFullAvg60Max": {"type": "number", "minimum": 0, "maximum": 100},
+            "cpuSomeAvg60Max": {"type": "number", "minimum": 0, "maximum": 100},
+            "hysteresis": {"type": "number", "minimum": 0, "maximum": 100, "description": "Percentage points below each enabled threshold; must be below that threshold."},
+            "maxDefer": {"type": "string", "pattern": "^(0|([0-9]+(\\.[0-9]+)?(ns|us|ms|s|m|h))+)$", "description": "Positive Go duration when enabled; only bypasses pressure, never other admission rules."}
+          }
+        },
         "maxHeadWait": {
           "type": "string",
           "pattern": "^(0|([0-9]+(\\.[0-9]+)?(ns|us|ms|s|m|h))+)$",

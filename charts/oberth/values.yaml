@@ -68,6 +68,17 @@ promotion:
 # Default 0 = disabled. The proposal from #602/#673 is 160000000000 (160 GB).
 admission:
   diskFloorBytes: 0
+  # Host-wide Linux PSI admission hold. No running work is paused. Missing or
+  # malformed PSI fails open with one warning. Zero disables each threshold.
+  pressure:
+    ioFullAvg60Max: 30
+    cpuSomeAvg60Max: 0
+    # Percentage points; below each enabled threshold. Resume strictly below
+    # threshold minus hysteresis; maxDefer bypasses only this pressure gate.
+    hysteresis: 10
+    # Each prepared, unparked waiter gets its own clock; this does not limit
+    # admission to one job per maxDefer. Capacity and priority still apply.
+    maxDefer: "20m"
   # Bounded backfill (#1085): while the admission queue head does not fit
   # (an XL waiting for a full drain, say), later runs that fit the spare
   # weight are admitted beside it until it has waited this long, and a run

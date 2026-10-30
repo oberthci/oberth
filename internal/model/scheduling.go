@@ -20,14 +20,15 @@ type RunScheduling struct {
 }
 
 type AdmissionObservation struct {
-	KubeVirtCapacity bool   `json:"kubevirt_capacity,omitempty"`
-	VMCapacity       bool   `json:"vm_capacity,omitempty"`
-	State            string `json:"state"`
-	Position         int    `json:"position,omitempty"`
-	Size             string `json:"size,omitempty"`
-	Weight           int    `json:"weight,omitempty"`
-	Used             int    `json:"used"`
-	Capacity         int    `json:"capacity"`
+	Pressure         *PressureDeferral `json:"pressure,omitempty"`
+	KubeVirtCapacity bool              `json:"kubevirt_capacity,omitempty"`
+	VMCapacity       bool              `json:"vm_capacity,omitempty"`
+	State            string            `json:"state"`
+	Position         int               `json:"position,omitempty"`
+	Size             string            `json:"size,omitempty"`
+	Weight           int               `json:"weight,omitempty"`
+	Used             int               `json:"used"`
+	Capacity         int               `json:"capacity"`
 	// Group is the repository-declared concurrency group the run was admitted
 	// or is waiting under (#658). GroupHolder names the run of the same
 	// repository currently holding that group; GroupAhead names the earlier run
@@ -51,12 +52,13 @@ type AdmissionObservation struct {
 // AdmissionBlocker is the claimed run at the head of the weighted admission
 // queue that does not fit, which holds back every run claimed after it.
 type AdmissionBlocker struct {
-	RunID  string `json:"run_id"`
-	RepoID int64  `json:"-"`
-	Repo   string `json:"repo"`
-	Ref    string `json:"ref"`
-	Size   string `json:"size"`
-	Weight int    `json:"weight"`
+	Pressure *PressureDeferral `json:"pressure,omitempty"`
+	RunID    string            `json:"run_id"`
+	RepoID   int64             `json:"-"`
+	Repo     string            `json:"repo"`
+	Ref      string            `json:"ref"`
+	Size     string            `json:"size"`
+	Weight   int               `json:"weight"`
 	// FullDrain is set for an XL run, which is admitted only once nothing
 	// else holds weight.
 	FullDrain bool `json:"full_drain,omitempty"`
@@ -108,6 +110,8 @@ func waitText(seconds int64) string {
 // "XL, needs a full drain".
 func (blocker AdmissionBlocker) Reason() string {
 	switch {
+	case blocker.Pressure != nil:
+		return blocker.Size + ", " + blocker.Pressure.Reason()
 	case blocker.DiskFloor:
 		return blocker.Size + ", held by the disk floor"
 	case blocker.FullDrain:
@@ -176,10 +180,11 @@ type SchedulingReason struct {
 // budget, every reservation it holds, and every concurrency group in use. It
 // is an ephemeral observation of one server process, never durable evidence.
 type AdmissionState struct {
-	Capacity int `json:"capacity"`
-	Used     int `json:"used"`
-	Runs     int `json:"runs"`
-	MaxRuns  int `json:"max_runs"`
+	Pressure *AdmissionPressure `json:"pressure,omitempty"`
+	Capacity int                `json:"capacity"`
+	Used     int                `json:"used"`
+	Runs     int                `json:"runs"`
+	MaxRuns  int                `json:"max_runs"`
 	// MaxHeadWaitSeconds is the backfill bound (#1085); 0 is strict FIFO.
 	MaxHeadWaitSeconds int64                  `json:"max_head_wait_seconds"`
 	Reservations       []AdmissionReservation `json:"reservations"`
@@ -193,17 +198,18 @@ type AdmissionState struct {
 // capacity), granted, or retained (granted, and kept held after its owner
 // stopped on an error that may have left its Workflow running).
 type AdmissionReservation struct {
-	RunID    string    `json:"run_id"`
-	RepoID   int64     `json:"-"`
-	Repo     string    `json:"repo,omitempty"`
-	Ref      string    `json:"ref,omitempty"`
-	Workflow string    `json:"workflow,omitempty"`
-	Size     string    `json:"size,omitempty"`
-	Weight   int       `json:"weight"`
-	State    string    `json:"state"`
-	Group    string    `json:"group,omitempty"`
-	Position int       `json:"position,omitempty"`
-	Since    time.Time `json:"since"`
+	Pressure *PressureDeferral `json:"pressure,omitempty"`
+	RunID    string            `json:"run_id"`
+	RepoID   int64             `json:"-"`
+	Repo     string            `json:"repo,omitempty"`
+	Ref      string            `json:"ref,omitempty"`
+	Workflow string            `json:"workflow,omitempty"`
+	Size     string            `json:"size,omitempty"`
+	Weight   int               `json:"weight"`
+	State    string            `json:"state"`
+	Group    string            `json:"group,omitempty"`
+	Position int               `json:"position,omitempty"`
+	Since    time.Time         `json:"since"`
 	// Backfilled marks a grant made beside a waiting head (#1085).
 	Backfilled bool `json:"backfilled,omitempty"`
 }
@@ -238,4 +244,50 @@ func IsExecutionDeadlineReason(message string) bool {
 	default:
 		return false
 	}
+}
+
+// Pressure values are host-wide PSI percentages averaged over sixty seconds.
+// CPU full is undefined at host scope and is reported as zero.
+type PressureResource struct {
+	SomeAvg60 float64 `json:"some_avg60"`
+	FullAvg60 float64 `json:"full_avg60"`
+}
+type PressureSample struct {
+	IO     PressureResource `json:"io"`
+	CPU    PressureResource `json:"cpu"`
+	Memory PressureResource `json:"memory"`
+}
+type AdmissionPressure struct {
+	Enabled         bool            `json:"enabled"`
+	Available       bool            `json:"available"`
+	ObservedAt      time.Time       `json:"observed_at,omitzero"`
+	Sample          *PressureSample `json:"sample,omitempty"`
+	IOFullAvg60Max  float64         `json:"io_full_avg60_max"`
+	CPUSomeAvg60Max float64         `json:"cpu_some_avg60_max"`
+	Hysteresis      float64         `json:"hysteresis"`
+	MaxDeferSeconds int64           `json:"max_defer_seconds"`
+	Holding         bool            `json:"holding"`
+	Resource        string          `json:"resource,omitempty"`
+	Deferred        int             `json:"deferred"`
+}
+type PressureDeferral struct {
+	Redacted        bool      `json:"redacted,omitempty"`
+	Resource        string    `json:"resource"`
+	Avg60           float64   `json:"avg60,omitempty"`
+	Since           time.Time `json:"since,omitzero"`
+	MaxDeferSeconds int64     `json:"max_defer_seconds,omitempty"`
+}
+
+// Public preserves an actionable cause without host-wide numeric telemetry.
+func (p *PressureDeferral) Public() *PressureDeferral {
+	if p == nil {
+		return nil
+	}
+	return &PressureDeferral{Resource: p.Resource, Redacted: true}
+}
+func (p *PressureDeferral) Reason() string {
+	if p.Redacted {
+		return "deferred: host " + p.Resource + " pressure"
+	}
+	return fmt.Sprintf("deferred: %s pressure %.1f%%", p.Resource, p.Avg60)
 }
