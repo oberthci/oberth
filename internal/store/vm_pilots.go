@@ -67,7 +67,7 @@ func (s *Store) ReservePilot(ctx context.Context, plan vmrunner.PilotPlan) (vmru
 }
 
 func (s *Store) PilotExecution(ctx context.Context, runID string) (vmrunner.PilotExecution, error) {
-	value, err := scanPilot(s.db.QueryRowContext(ctx, `SELECT `+pilotColumns+` FROM vm_suite_executions WHERE run_id=?`, runID))
+	value, err := scanPilot(s.reader().QueryRowContext(ctx, `SELECT `+pilotColumns+` FROM vm_suite_executions WHERE run_id=?`, runID))
 	if errors.Is(err, sql.ErrNoRows) {
 		err = ErrNotFound
 	}
@@ -75,7 +75,7 @@ func (s *Store) PilotExecution(ctx context.Context, runID string) (vmrunner.Pilo
 }
 
 func (s *Store) PendingPilots(ctx context.Context) ([]vmrunner.PilotExecution, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT `+pilotColumns+` FROM vm_suite_executions WHERE cleaned=0 ORDER BY created_at,run_id`)
+	rows, err := s.reader().QueryContext(ctx, `SELECT `+pilotColumns+` FROM vm_suite_executions WHERE cleaned=0 ORDER BY created_at,run_id`)
 	if err != nil {
 		return nil, err
 	}
@@ -93,7 +93,7 @@ func (s *Store) PendingPilots(ctx context.Context) ([]vmrunner.PilotExecution, e
 
 func (s *Store) PilotResources(ctx context.Context, runID string) ([]vmrunner.PilotResource, error) {
 	// One read transaction keeps the immutable plan and resource snapshot bound.
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.reader().BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
 		return nil, err
 	}

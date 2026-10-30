@@ -151,7 +151,7 @@ RETURNING `+issueColumns, spec.Title, spec.Body, now, now, scopeUpstreamID))
 }
 
 func (s *Store) Issue(ctx context.Context, id int64) (model.Issue, error) {
-	value, err := scanIssue(s.db.QueryRowContext(ctx, `SELECT `+issueColumns+` FROM issues WHERE id = ?`, id))
+	value, err := scanIssue(s.reader().QueryRowContext(ctx, `SELECT `+issueColumns+` FROM issues WHERE id = ?`, id))
 	if err != nil {
 		return model.Issue{}, translateNotFound("issue", err)
 	}
@@ -164,7 +164,7 @@ func (s *Store) OpenCIIssue(ctx context.Context, repoID int64, branch string) (m
 	if repoID <= 0 || strings.TrimSpace(branch) == "" {
 		return model.Issue{}, fmt.Errorf("%w: repository and CI branch are required", ErrInvalid)
 	}
-	value, err := scanIssue(s.db.QueryRowContext(ctx, `
+	value, err := scanIssue(s.reader().QueryRowContext(ctx, `
 SELECT `+issueColumns+` FROM issues
 WHERE repo_id = ? AND kind = 'ci' AND branch = ? AND state = 'open'`, repoID, branch))
 	if err != nil {
@@ -371,7 +371,7 @@ func (s *Store) ListIssues(ctx context.Context, filter model.IssueListFilter) (m
 		filter.RepoID, filter.RepoID, filter.Query, filter.Query, filter.Query, filter.Query}
 	countArgs = append(countArgs, restrictionArgs...)
 	page := model.IssuePage{}
-	if err := s.db.QueryRowContext(ctx, `
+	if err := s.reader().QueryRowContext(ctx, `
 SELECT COUNT(CASE WHEN (? = '' OR kind = ?) AND (? = '' OR state = ?) THEN 1 END),
        COUNT(CASE WHEN (? = '' OR kind = ?) AND state = 'open' THEN 1 END),
        COUNT(CASE WHEN (? = '' OR kind = ?) AND state = 'closed' THEN 1 END),
@@ -400,7 +400,7 @@ WHERE (? = 0 OR repo_id = ?)
 	// upstream it is filed under (#073).
 	query += restriction + ` ORDER BY id DESC LIMIT ?` // #nosec G202 -- the restriction is a fixed column and ? placeholders from repoRestriction.
 	args = append(append(args, restrictionArgs...), limit+1)
-	rows, err := s.db.QueryContext(ctx, query, args...)
+	rows, err := s.reader().QueryContext(ctx, query, args...)
 	if err != nil {
 		return model.IssuePage{}, fmt.Errorf("list issues: %w", err)
 	}

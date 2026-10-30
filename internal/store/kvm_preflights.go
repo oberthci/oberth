@@ -83,7 +83,7 @@ func eligibleKVMParent(ctx context.Context, tx *sql.Tx, intent vmrunner.KVMInten
 }
 
 func (s *Store) KVMPreflight(ctx context.Context, runID string) (vmrunner.KVMExecution, error) {
-	value, err := scanKVMExecution(s.db.QueryRowContext(ctx, `SELECT `+kvmExecutionColumns+` FROM vm_executions WHERE execution_kind='kvm-preflight' AND run_id=?`, runID))
+	value, err := scanKVMExecution(s.reader().QueryRowContext(ctx, `SELECT `+kvmExecutionColumns+` FROM vm_executions WHERE execution_kind='kvm-preflight' AND run_id=?`, runID))
 	if errors.Is(err, sql.ErrNoRows) {
 		err = ErrNotFound
 	}
@@ -94,7 +94,7 @@ func (s *Store) KVMPreflight(ctx context.Context, runID string) (vmrunner.KVMExe
 // no Job, closing the crash window between cleanup and delivery. Recovery
 // interrupts those parents; it never resumes publication from their receipt.
 func (s *Store) PendingKVMPreflights(ctx context.Context) ([]vmrunner.KVMExecution, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT `+kvmExecutionColumns+` FROM vm_executions WHERE execution_kind='kvm-preflight' AND (cleaned=0 OR EXISTS (SELECT 1 FROM runs WHERE runs.id=vm_executions.run_id AND runs.status='running' AND runs.job_name='')) ORDER BY created_at,run_id`)
+	rows, err := s.reader().QueryContext(ctx, `SELECT `+kvmExecutionColumns+` FROM vm_executions WHERE execution_kind='kvm-preflight' AND (cleaned=0 OR EXISTS (SELECT 1 FROM runs WHERE runs.id=vm_executions.run_id AND runs.status='running' AND runs.job_name='')) ORDER BY created_at,run_id`)
 	if err != nil {
 		return nil, err
 	}

@@ -47,7 +47,7 @@ ON CONFLICT(repo, entry) DO UPDATE SET
 }
 
 func (s *Store) ScheduleFires(ctx context.Context, repo string) (map[string]time.Time, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.reader().QueryContext(ctx, `
 SELECT entry, last_fired_at FROM schedule_fires WHERE repo = ? AND last_fired_at IS NOT NULL`, repo)
 	if err != nil {
 		return nil, fmt.Errorf("read schedule fires: %w", err)
@@ -73,7 +73,7 @@ SELECT entry, last_fired_at FROM schedule_fires WHERE repo = ? AND last_fired_at
 }
 
 func (s *Store) ScheduleOutcomes(ctx context.Context, repo string) ([]ScheduleOutcome, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.reader().QueryContext(ctx, `
 SELECT entry, outcome, fired_at FROM schedule_fires WHERE repo = ? ORDER BY entry`, repo)
 	if err != nil {
 		return nil, fmt.Errorf("read schedule outcomes: %w", err)

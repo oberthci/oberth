@@ -9,7 +9,7 @@ import (
 // not predict execution order, which can bypass publication-gated refs.
 func (s *Store) QueuedRunPosition(ctx context.Context, id string) (int64, error) {
 	var position int64
-	err := s.db.QueryRowContext(ctx, `WITH queue AS (
+	err := s.reader().QueryRowContext(ctx, `WITH queue AS (
  SELECT id, ROW_NUMBER() OVER (ORDER BY `+priorityOrderSQL(s.now())+`) AS position
  FROM runs WHERE status='queued' OR (status='running' AND started_at IS NULL)
 ) SELECT position FROM queue WHERE id=?`, id).Scan(&position)

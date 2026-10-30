@@ -9,6 +9,29 @@ import (
 	"time"
 )
 
+const liveReadConnections = 8
+
+// Initialize only after migrations and startup recovery, before publishing the
+// Store to callers. Authentication and idle sampling retain their own pools so
+// expensive list queries cannot consume their reserved reader connections.
+func (s *Store) configureReadPool(ctx context.Context) error {
+	db, err := s.openLiveReaders(ctx, liveReadConnections)
+	if err != nil {
+		return err
+	}
+	s.readDB = db
+	return nil
+}
+
+func (s *Store) reader() *sql.DB {
+	if s.readDB != nil {
+		return s.readDB
+	}
+	// Private immutable inspection handles, startup and internal fixtures keep
+	// their original connection policy. Live Stores always have a reader pool.
+	return s.db
+}
+
 // configureLiveReaders resolves the actual filename once at startup. Audit
 // readers and SSH identity readers share this DSN builder; opening a reader
 // never needs to acquire the primary connection held by another transaction.

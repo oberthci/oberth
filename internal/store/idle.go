@@ -9,8 +9,9 @@ import (
 
 // OpenIdleQueueReaders isolates the background queue sampler from the primary
 // writer. The server calls this once at startup, before sharing the Store with
-// goroutines. CLI/inspection handles retain primary-connection reads. Close owns
-// this single-connection read-only WAL pool; it shares the live-reader policy
+// goroutines. CLI handles use ordinary readers; inspection handles retain their
+// private connection. Close owns this single-connection read-only WAL pool;
+// it shares the live-reader policy
 // used by SSH authentication readers.
 func (s *Store) OpenIdleQueueReaders(ctx context.Context) error {
 	if s.idleDB != nil {
@@ -30,7 +31,7 @@ func (s *Store) IdleQueueStatus(ctx context.Context) (model.IdleQueueStatus, err
 	state := model.IdleQueueStatus{Version: 1}
 	db := s.idleDB
 	if db == nil {
-		db = s.db
+		db = s.reader()
 	}
 	rows, err := db.QueryContext(ctx, `SELECT status, started_at IS NOT NULL, ref_kind, trigger, release, COUNT(*)
 FROM runs WHERE status IN ('queued','running') GROUP BY status, started_at IS NOT NULL, ref_kind, trigger, release`)

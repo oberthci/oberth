@@ -198,7 +198,7 @@ func (s *Store) RunRerunOf(ctx context.Context, runID string) (string, error) {
 }
 
 func (s *Store) loadRerunLineage(ctx context.Context) (map[string]string, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.reader().QueryContext(ctx, `
 SELECT resource_id, json_extract(details, '$.source_run_id') FROM audit_actions
 WHERE action = 'run.rerun' AND resource_type = 'run'`)
 	if err != nil {

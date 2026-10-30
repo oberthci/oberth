@@ -445,7 +445,7 @@ func matchUplinksByIdentity(ctx context.Context, tx *sql.Tx, identity, fingerpri
 // ListUplinkStatuses returns every registered uplink with the usage state of
 // its bound token credential, ordered by identity for stable listings.
 func (s *Store) ListUplinkStatuses(ctx context.Context) ([]UplinkStatus, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.reader().QueryContext(ctx, `
 SELECT u.id, u.fingerprint, u.identity, u.token_credential_id, u.auth_actor, u.admin, u.created_at, u.updated_at,
        COALESCE(t.last_used_at, 0), t.revoked_at,
        EXISTS (SELECT 1 FROM pending_token_credentials p WHERE p.token_credential_id = t.id)
@@ -479,7 +479,7 @@ ORDER BY u.identity, u.fingerprint`)
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("list uplinks: %w", err)
 	}
-	scopes, err := loadAllUplinkScopes(ctx, s.db)
+	scopes, err := loadAllUplinkScopes(ctx, s.reader())
 	if err != nil {
 		return nil, err
 	}

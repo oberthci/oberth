@@ -14,7 +14,7 @@ func (s *Store) RunWorkspaceCleanupEligible(ctx context.Context, id string) (boo
 		return false, fmt.Errorf("%w: run workspace owner is required", ErrInvalid)
 	}
 	var eligible bool
-	if err := s.db.QueryRowContext(ctx, `
+	if err := s.reader().QueryRowContext(ctx, `
 SELECT EXISTS (
     SELECT 1 FROM runs
     WHERE id = ?
@@ -40,7 +40,7 @@ func (s *Store) PromotionWorkspaceCleanupEligible(ctx context.Context, id string
 		return false, fmt.Errorf("%w: promotion workspace owner is required", ErrInvalid)
 	}
 	var eligible bool
-	if err := s.db.QueryRowContext(ctx, `
+	if err := s.reader().QueryRowContext(ctx, `
 SELECT EXISTS (
     SELECT 1 FROM promotions
     WHERE id = ?
@@ -59,7 +59,7 @@ SELECT EXISTS (
 // same exact cleanup predicate used immediately before removal. The cursor is
 // the last owner ID returned by the previous page.
 func (s *Store) RunWorkspaceCleanupCandidates(ctx context.Context, afterID string, limit int) ([]string, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.reader().QueryContext(ctx, `
 SELECT id FROM runs
 WHERE id > ?
   AND status IN ('passed', 'failed', 'interrupted')
@@ -90,7 +90,7 @@ LIMIT ?`, afterID, pageLimit(limit))
 // PromotionWorkspaceCleanupCandidates is the promotion counterpart to
 // RunWorkspaceCleanupCandidates.
 func (s *Store) PromotionWorkspaceCleanupCandidates(ctx context.Context, afterID string, limit int) ([]string, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.reader().QueryContext(ctx, `
 SELECT id FROM promotions
 WHERE id > ?
   AND status IN ('passed', 'failed', 'interrupted')

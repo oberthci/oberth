@@ -4,7 +4,8 @@ import "context"
 
 // OpenSSHAuthReaders isolates SSH identity reads from the serialized writer.
 // The long-running server calls this once before sharing the Store with any
-// goroutines. CLI and inspection handles use only the primary connection.
+// goroutines. CLI handles use the ordinary reader pool; inspection handles
+// retain their private primary connection.
 // The shared live-reader opener uses the Store's startup-cached read-only WAL
 // policy and busy timeout. Close owns the reader pool.
 func (s *Store) OpenSSHAuthReaders(ctx context.Context) error {

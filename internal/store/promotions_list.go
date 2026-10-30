@@ -22,7 +22,7 @@ func (s *Store) ListPromotions(ctx context.Context, filter model.PromotionListFi
 	args := append([]any{filter.RepoID, filter.RepoID,
 		filter.SourceSHA, filter.SourceSHA, filter.Status, filter.Status,
 		filter.Before, filter.Before}, restrictionArgs...)
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.reader().QueryContext(ctx, `
 SELECT sequence, id, repo_id, source_branch, source_sha, target_ref, previous_sha,
        result_sha, actor, status, run_id, grant_id, error, created_at, updated_at
 FROM promotions

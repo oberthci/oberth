@@ -109,7 +109,7 @@ func (s *Store) FailPilot(ctx context.Context, runID, code string) error {
 // same transaction. It is a prerequisite for publication, not an enabled
 // scheduler provider. The caller must also compare its current policy seal.
 func (s *Store) CompletedPilotReceipt(ctx context.Context, runID string) (vmrunner.PilotReceipt, error) {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.reader().BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
 		return vmrunner.PilotReceipt{}, err
 	}

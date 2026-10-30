@@ -167,7 +167,7 @@ RETURNING `+publicationColumns, sha, now, id))
 }
 
 func (s *Store) Publication(ctx context.Context, id string) (model.Publication, error) {
-	value, err := scanPublication(s.db.QueryRowContext(ctx, `
+	value, err := scanPublication(s.reader().QueryRowContext(ctx, `
 SELECT `+publicationColumns+` FROM publications WHERE id = ?`, id))
 	if err != nil {
 		return model.Publication{}, translateNotFound("publication", err)
@@ -176,7 +176,7 @@ SELECT `+publicationColumns+` FROM publications WHERE id = ?`, id))
 }
 
 func (s *Store) PendingPublications(ctx context.Context) ([]model.Publication, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.reader().QueryContext(ctx, `
 SELECT `+publicationColumns+` FROM publications
 WHERE status = 'pending' ORDER BY sequence`)
 	if err != nil {

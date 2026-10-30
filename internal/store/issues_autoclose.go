@@ -18,7 +18,7 @@ func (s *Store) CIBranchWasPublishedOrDeleted(ctx context.Context, repoID int64,
 		return false, fmt.Errorf("%w: CI branch is required", ErrInvalid)
 	}
 	var published bool
-	if err := s.db.QueryRowContext(ctx, `SELECT EXISTS(
+	if err := s.reader().QueryRowContext(ctx, `SELECT EXISTS(
 SELECT 1 FROM publications
 WHERE repo_id = ? AND ref_kind = 'branch' AND ref = ? AND status = 'delivered'
 )`, repoID, branch).Scan(&published); err != nil {
@@ -28,7 +28,7 @@ WHERE repo_id = ? AND ref_kind = 'branch' AND ref = ? AND status = 'delivered'
 		return true, nil
 	}
 	var outcome string
-	err := s.db.QueryRowContext(ctx, `SELECT outcome FROM receive_events
+	err := s.reader().QueryRowContext(ctx, `SELECT outcome FROM receive_events
 WHERE repo_id = ? AND ref_kind = 'branch' AND ref = ?
 ORDER BY created_at DESC, rowid DESC LIMIT 1`, repoID, branch).Scan(&outcome)
 	if errors.Is(err, sql.ErrNoRows) {

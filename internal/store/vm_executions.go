@@ -79,7 +79,7 @@ func (s *Store) ReserveVMExecution(ctx context.Context, intent vmrunner.Executio
 }
 
 func (s *Store) VMExecution(ctx context.Context, runID string) (vmrunner.Execution, error) {
-	value, err := scanVMExecution(s.db.QueryRowContext(ctx, `SELECT `+vmExecutionColumns+` FROM vm_executions WHERE execution_kind='vm' AND run_id=?`, runID))
+	value, err := scanVMExecution(s.reader().QueryRowContext(ctx, `SELECT `+vmExecutionColumns+` FROM vm_executions WHERE execution_kind='vm' AND run_id=?`, runID))
 	if errors.Is(err, sql.ErrNoRows) {
 		return value, ErrNotFound
 	}
@@ -203,7 +203,7 @@ func releaseVMCapacity(ctx context.Context, tx *sql.Tx, runID string) error {
 }
 
 func (s *Store) PendingVMExecutions(ctx context.Context) ([]vmrunner.Execution, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT `+vmExecutionColumns+` FROM vm_executions WHERE execution_kind='vm' AND cleaned=0 ORDER BY created_at,run_id`)
+	rows, err := s.reader().QueryContext(ctx, `SELECT `+vmExecutionColumns+` FROM vm_executions WHERE execution_kind='vm' AND cleaned=0 ORDER BY created_at,run_id`)
 	if err != nil {
 		return nil, err
 	}

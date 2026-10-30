@@ -123,7 +123,7 @@ func (s *Store) MatchingPromotionGrant(ctx context.Context, repoID int64, sha, t
 		return model.PromotionGrant{}, fmt.Errorf("%w: matching grant fields are required", ErrInvalid)
 	}
 	now := unixNano(s.now())
-	value, err := scanPromotionGrant(s.db.QueryRowContext(ctx, `
+	value, err := scanPromotionGrant(s.reader().QueryRowContext(ctx, `
 SELECT id, repo_id, source_sha, target_ref, issuer, issuer_fingerprint, note,
        created_at, expires_at, revoked_by, revoked_at, consumed_by, consumed_at
 FROM promotion_grants
@@ -136,7 +136,7 @@ WHERE repo_id = ? AND source_sha = ? AND target_ref = ?
 ORDER BY created_at LIMIT 1`, repoID, strings.ToLower(sha), target, now))
 	if errors.Is(err, sql.ErrNoRows) {
 		var holder string
-		holderErr := s.db.QueryRowContext(ctx, `
+		holderErr := s.reader().QueryRowContext(ctx, `
 SELECT promotions.id FROM promotion_grants
 JOIN promotions ON promotions.grant_id = promotion_grants.id AND promotions.status = 'pending'
 WHERE promotion_grants.repo_id = ? AND promotion_grants.source_sha = ? AND promotion_grants.target_ref = ?
@@ -213,7 +213,7 @@ WHERE (? = 0 OR repo_id = ?) AND (? = '' OR source_sha = ?)`
 		}
 	}
 	query += ` ORDER BY created_at DESC LIMIT 200`
-	rows, err := s.db.QueryContext(ctx, query, args...)
+	rows, err := s.reader().QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list promotion grants: %w", err)
 	}
@@ -240,7 +240,7 @@ func (s *Store) PromotionGrant(ctx context.Context, id string) (model.PromotionG
 	if strings.TrimSpace(id) == "" {
 		return model.PromotionGrant{}, fmt.Errorf("%w: promotion grant ID is required", ErrInvalid)
 	}
-	value, err := scanPromotionGrant(s.db.QueryRowContext(ctx, `
+	value, err := scanPromotionGrant(s.reader().QueryRowContext(ctx, `
 SELECT id, repo_id, source_sha, target_ref, issuer, issuer_fingerprint, note,
        created_at, expires_at, revoked_by, revoked_at, consumed_by, consumed_at
 FROM promotion_grants WHERE id = ?`, id))
