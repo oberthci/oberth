@@ -110,10 +110,10 @@ func waitText(seconds int64) string {
 // "XL, needs a full drain".
 func (blocker AdmissionBlocker) Reason() string {
 	switch {
-	case blocker.Pressure != nil:
-		return blocker.Size + ", " + blocker.Pressure.Reason()
 	case blocker.DiskFloor:
 		return blocker.Size + ", held by the disk floor"
+	case blocker.Pressure != nil:
+		return blocker.Size + ", " + blocker.Pressure.Reason()
 	case blocker.FullDrain:
 		return blocker.Size + ", needs a full drain"
 	case blocker.RunCeiling:

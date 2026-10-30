@@ -1,12 +1,18 @@
 # v0.17.73 schema-35 upgrade requirement
 
-This is a supplement for the coordinator's final release assembly; final
-candidate/chart/image pins and the complete behavior list remain coordinator
-owned. Approved inputs include DB-deadline R2, RCA UX R2, restart-cut R3,
-runtime capacity #1215 and controller admission #1214. Log-continuity R2 and
-the init-readonly review nit still need their final approval/pins before
-assembly. API read-pool #1217 is the next input, not a blocker for the reviewed
-release components.
+This candidate includes DB-deadline R2, init-readonly R2, IO admission R2,
+restart-cut R3, RCA UX R2, runtime capacity #1215, controller admission #1214
+R3 and API reader isolation #1217. IO R2 de95c99 is Opus approved with the two
+nits folded into assembly: disk-floor reasons take precedence over pressure,
+and a pressure clock that has not started cannot be considered expired.
+Final candidate/chart/image pins and the final-pin restore rehearsal await
+approved log-continuity R2.
+
+**During a long IO-pressure hold, lower admission capacity; do not raise it.**
+Raising capacity can send more work onto the saturated disk when pressure clears
+or individual maximum-deferral clocks expire. Lowering preserves running work
+and lets it drain; it does not cancel existing grants. Use the effective runtime
+capacity shown in Status and the [runtime-capacity procedure](runtime-admission-capacity.md).
 
 Upgrading from v0.17.72 applies migration **35** (`runs_latest_ref_idx`). Take
 and independently verify a fresh pre-upgrade **schema-34** backup immediately

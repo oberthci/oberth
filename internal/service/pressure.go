@@ -157,7 +157,7 @@ func (gate *weightedAdmission) deferPressureLocked(r *admissionReservation, now 
 	if p == nil || !p.state.Holding {
 		return false
 	}
-	if now.Sub(r.pressureSince) >= p.config.MaxDefer {
+	if !r.pressureSince.IsZero() && now.Sub(r.pressureSince) >= p.config.MaxDefer {
 		p.bypasses++ // Called only immediately before an otherwise valid grant.
 		p.config.Logf("admission pressure max defer reached; granting run=%s", r.runID)
 		return false

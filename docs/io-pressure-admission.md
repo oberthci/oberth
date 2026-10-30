@@ -112,3 +112,10 @@ change the thresholds or disable both gates while inspecting the observed
 values. IO pressure does not identify its source, reserve disk bandwidth, or
 guarantee tests will meet their deadlines. The independent free-space floor
 still protects disk capacity and is never waived by `maxDefer`.
+
+During a long IO hold, lower admission capacity; do not raise it to clear the
+hold. More concurrent work can worsen disk contention when the hold clears or
+individual pressure clocks expire. Lowering does not cancel running grants;
+existing work drains before the smaller capacity admits more. Follow the
+[runtime capacity procedure](runtime-admission-capacity.md) and check the
+effective configuration in Status.

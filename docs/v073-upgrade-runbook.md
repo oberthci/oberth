@@ -104,7 +104,10 @@ upgrade path; re-check the actual audit mode/configuration before each operation
 The generic `oberth upgrade` command has no `--atomic` or `--force-replace`;
 if using that separate installer path, use `--dry-run`, review, then `--yes`.
 Confirm the new binary's support and a newly verified backup's actual schema 35,
-readiness/liveness, admission and run recovery. New writes and witness publication
+readiness/liveness, admission and run recovery. During a long IO-pressure hold,
+lower admission capacity; do not raise it. Existing grants drain without being
+cancelled; raising capacity can worsen contention as pressure clocks expire.
+New writes and witness publication
 can make the old backup unusable even when schema compatibility was rehearsed.
 
 ## The witness deadline

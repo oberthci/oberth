@@ -188,6 +188,36 @@ func TestPressureMaximumDeferralAdmitsButPreservesOtherGates(t *testing.T) {
 	}
 }
 
+func TestPressureZeroStartDoesNotExpire(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		since    func(time.Time) time.Time
+		deferred bool
+	}{
+		{"not-started", func(time.Time) time.Time { return time.Time{} }, true},
+		{"before-boundary", func(now time.Time) time.Time { return now.Add(-20*time.Minute + time.Nanosecond) }, true},
+		{"at-boundary", func(now time.Time) time.Time { return now.Add(-20 * time.Minute) }, false},
+		{"after-boundary", func(now time.Time) time.Time { return now.Add(-21 * time.Minute) }, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := pressureTestGate()
+			f.gate.pressure.state.Holding = true
+			r := &admissionReservation{runID: "waiting", pressureSince: tc.since(f.now)}
+			f.gate.mu.Lock()
+			defer f.gate.mu.Unlock()
+			if got := f.gate.deferPressureLocked(r, f.now); got != tc.deferred {
+				t.Fatalf("deferred=%t, want %t", got, tc.deferred)
+			}
+			if tc.deferred && (f.gate.pressure.bypasses != 0 || !r.pressureDeferred) {
+				t.Fatal("unexpired waiter bypassed pressure")
+			}
+			if !tc.deferred && f.gate.pressure.bypasses != 1 {
+				t.Fatal("expired waiter did not record its bypass")
+			}
+		})
+	}
+}
+
 func TestPressureTimeoutDoesNotJumpHigherPriorityOrGroupHead(t *testing.T) {
 	f := pressureTestGate()
 	f.sample.IO.FullAvg60 = 80
