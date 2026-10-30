@@ -220,7 +220,7 @@ func cleanupIsInfrastructure(err error) bool {
 	if err == nil {
 		return false
 	}
-	if _, ok := err.(*cleanupInfrastructureError); ok {
+	if _, ok := err.(*cleanupInfrastructureError); ok { //nolint:errorlint // errors.As would misclassify a mixed join; inspect each branch below.
 		return true
 	}
 	if joined, ok := err.(interface{ Unwrap() []error }); ok {
@@ -606,7 +606,7 @@ func (c *Controller) cleanupVerdict(ctx context.Context, wf *wfv1.Workflow, runI
 		} else {
 			// Losing the log must not turn an already-proven leftover or
 			// ownership failure into a retryable infrastructure failure.
-			err = fmt.Errorf("%w; %v", err, logErr)
+			err = fmt.Errorf("%w; %w", err, logErr)
 		}
 		message = failedMessage(err)
 		step.Status, step.ExitCode = runprogress.StepFailed, 1

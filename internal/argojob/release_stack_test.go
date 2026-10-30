@@ -17,7 +17,8 @@ import (
 
 // The release combines two last-stage Build transformations. A measured driver
 // must retain inherited selectors while VMI resource Pods retain the create
-// guard and the proven two-VM peak, all sealed in the final adoption identity.
+// and delete guards and the proven two-VM peak, all sealed in the final
+// adoption identity.
 func TestReleaseStackPreservesVMIQuotaAndStepUsage(t *testing.T) {
 	source, err := os.ReadFile("../../pkg/argoworkflow/testdata/vmi-phases.yaml")
 	if err != nil {
@@ -66,8 +67,8 @@ func TestReleaseStackPreservesVMIQuotaAndStepUsage(t *testing.T) {
 				}
 				creates++
 			case "delete":
-				if !slices.Equal(main.Command, []string{"argoexec", "resource", "delete"}) || len(main.Args) != 0 {
-					t.Fatalf("VMI delete command changed: %+v", main)
+				if !guardedResourceCommand(main.Command, main.Args, []string{"argoexec", "version"}) {
+					t.Fatalf("VMI server delete guard lost: %+v", main)
 				}
 				deletes++
 			default:

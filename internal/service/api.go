@@ -563,14 +563,14 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 		if err := decodeTool(raw, &arguments); err != nil {
 			return nil, err
 		}
-		if err := arguments.issueReadOptions.validate(); err != nil {
+		if err := arguments.validate(); err != nil {
 			return nil, err
 		}
 		issue, err := service.issueGet(ctx, actor, arguments.ID)
 		if err != nil {
 			return nil, err
 		}
-		return arguments.issueReadOptions.project(issue), nil
+		return arguments.project(issue), nil
 	case "issue_get_many":
 		var arguments struct {
 			IDs []int64 `json:"ids"`
@@ -579,7 +579,7 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 		if err := decodeTool(raw, &arguments); err != nil {
 			return nil, err
 		}
-		if err := arguments.issueReadOptions.validate(); err != nil {
+		if err := arguments.validate(); err != nil {
 			return nil, err
 		}
 		return service.issueGetMany(ctx, actor, arguments.IDs, arguments.issueReadOptions)
