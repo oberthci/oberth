@@ -82,7 +82,7 @@ SELECT COUNT(*) FROM publications WHERE run_id = ? AND status = 'pending'`, curr
 	}
 	cancelled, err := scanRun(tx.QueryRowContext(ctx, `
 UPDATE runs
-SET status = 'interrupted', phase = ?, reason = ?, error = ?, finished_at = ?, updated_at = ?
+SET status = 'interrupted', phase = ?, reason = ?, error = CASE WHEN phase='infrastructure-pending' THEN error ELSE ? END, finished_at = ?, updated_at = ?
 WHERE id = ? AND status IN ('queued', 'running')
 RETURNING `+runColumns, model.PhaseCancelled, text, text, now, now, current.ID))
 	if err != nil {
@@ -104,6 +104,7 @@ ON CONFLICT(run_id) DO UPDATE SET
     job_name = excluded.job_name,
     superseded_by = '',
     reason = excluded.reason,
+    created_at = excluded.created_at,
     completed_at = NULL`, cancelled.ID, cancelled.JobName, cleanupReason, now); err != nil {
 			return model.RunCancelResult{}, fmt.Errorf("record run cancellation: %w", err)
 		}

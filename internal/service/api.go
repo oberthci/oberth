@@ -1523,6 +1523,8 @@ func visibleRun(run model.Run) model.Run {
 
 func displayRunStatus(run model.Run) string {
 	switch {
+	case run.Status == model.RunRunning && isPendingCreate(run):
+		return "infra-pending"
 	case run.Status == model.RunQueued, run.Status == model.RunWaiting:
 		return string(model.RunQueued)
 	case run.Status == model.RunRunning && run.StartedAt == nil:
@@ -1553,6 +1555,9 @@ func presentationRunAt(run model.Run, now time.Time) model.Run {
 		if run.Status.Active() {
 			visible.DisplayReason = run.PriorityMessage(now)
 		}
+	}
+	if run.Status == model.RunRunning && isPendingCreate(run) {
+		visible.DisplayReason = pendingCreateMessage
 	}
 	return visible
 }

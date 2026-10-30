@@ -33,7 +33,7 @@ func (s *Store) MarkRunCreatePending(ctx context.Context, id, jobName string) er
 		return fmt.Errorf("%w: run cannot own pending create", ErrInvalidState)
 	}
 	now := unixNano(s.now())
-	if _, err := tx.ExecContext(ctx, `UPDATE runs SET phase='infrastructure-pending', error='Workflow create outcome uncertain; cleanup pending', updated_at=? WHERE id=? AND status='running'`, now, id); err != nil {
+	if _, err := tx.ExecContext(ctx, `UPDATE runs SET phase=CASE WHEN status='running' THEN 'infrastructure-pending' ELSE phase END, error='Workflow create outcome uncertain; cleanup pending', updated_at=? WHERE id=?`, now, id); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `
@@ -49,9 +49,13 @@ ON CONFLICT(run_id) DO UPDATE SET job_name=excluded.job_name, reason='owner_rest
 // after this pass read it (for example, after Delete observed NotFound while a
 // timed-out POST was still in flight).
 func (s *Store) CompleteObservedRunCancellation(ctx context.Context, observed model.RunCancellation) error {
-	result, err := s.db.ExecContext(ctx, `UPDATE run_cancellations SET completed_at=?
- WHERE run_id=? AND job_name=? AND reason=? AND created_at=? AND completed_at IS NULL`,
-		unixNano(s.now()), observed.RunID, observed.JobName, observed.Reason, unixNano(observed.CreatedAt))
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	result, err := tx.ExecContext(ctx, `UPDATE run_cancellations SET completed_at=?
+ WHERE run_id=? AND job_name=? AND reason=? AND created_at=? AND completed_at IS NULL`, unixNano(s.now()), observed.RunID, observed.JobName, observed.Reason, unixNano(observed.CreatedAt))
 	if err != nil {
 		return err
 	}
@@ -60,12 +64,17 @@ func (s *Store) CompleteObservedRunCancellation(ctx context.Context, observed mo
 		return err
 	}
 	if changed == 1 {
-		return nil
+		// A cancelled/superseded run keeps its classification, but must not keep
+		// displaying "cleanup pending" after the exact obligation is completed.
+		if _, err := tx.ExecContext(ctx, `UPDATE runs SET error=reason, updated_at=? WHERE id=? AND status='interrupted' AND error='Workflow create outcome uncertain; cleanup pending'`, unixNano(s.now()), observed.RunID); err != nil {
+			return err
+		}
+		return tx.Commit()
 	}
 	var completed sql.NullInt64
-	err = s.reader().QueryRowContext(ctx, `SELECT completed_at FROM run_cancellations WHERE run_id=? AND job_name=? AND reason=? AND created_at=?`, observed.RunID, observed.JobName, observed.Reason, unixNano(observed.CreatedAt)).Scan(&completed)
+	err = tx.QueryRowContext(ctx, `SELECT completed_at FROM run_cancellations WHERE run_id=? AND job_name=? AND reason=? AND created_at=?`, observed.RunID, observed.JobName, observed.Reason, unixNano(observed.CreatedAt)).Scan(&completed)
 	if err == nil && completed.Valid {
-		return nil
+		return tx.Commit()
 	}
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return err

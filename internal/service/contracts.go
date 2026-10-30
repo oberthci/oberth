@@ -437,12 +437,11 @@ type JobAdopter interface {
 	JobNamespace() string
 }
 
-// JobCreateSettler closes a lost-acknowledgement submission before admission
-// can be freed. It must wait through its bounded late-commit window, delete only
-// the run's UID-fenced Workflows, and end with a fresh NotFound. An error leaves
-// the durable cancellation and admission reservation owned for restart.
+// JobCreateSettler performs one bounded cleanup observation, with no sleeps.
+// done requires a fresh NotFound at/after the supplied late-commit boundary.
+// false or an error is deferred by the background reconciler, never fatal.
 type JobCreateSettler interface {
-	SettleCreate(context.Context, string, string) error
+	SettleCreate(context.Context, string, string, time.Time) (bool, error)
 }
 
 type ReleaseJobController interface {

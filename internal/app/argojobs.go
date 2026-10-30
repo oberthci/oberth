@@ -739,24 +739,25 @@ func (jobs *ArgoJobs) Delete(ctx context.Context, name, runID string) error {
 
 // SettleCreate bypasses the in-flight Delete shortcut: an ambiguous POST may
 // still commit even after an earlier Cancel returned NotFound.
-func (jobs *ArgoJobs) SettleCreate(ctx context.Context, name, runID string) error {
+func (jobs *ArgoJobs) SettleCreate(ctx context.Context, name, runID string, notBefore time.Time) (bool, error) {
 	jobs.mu.Lock()
 	intent, exists := jobs.intents[name]
 	jobs.mu.Unlock()
 	if exists && intent.runID != runID {
-		return errors.New("app: pending Workflow belongs to a different in-process run")
+		return false, errors.New("app: pending Workflow belongs to a different in-process run")
 	}
 	controller, ok := jobs.controller.(interface {
-		SettleCreate(context.Context, string, string) error
+		SettleCreate(context.Context, string, string, time.Time) (bool, error)
 	})
 	if !ok {
-		return errors.New("app: controller cannot settle uncertain Workflow creates")
+		return false, errors.New("app: controller cannot settle uncertain Workflow creates")
 	}
-	if err := controller.SettleCreate(ctx, name, runID); err != nil {
-		return err
+	done, err := controller.SettleCreate(ctx, name, runID, notBefore)
+	if err != nil || !done {
+		return false, err
 	}
 	jobs.forget(name, runID)
-	return nil
+	return true, nil
 }
 
 // TerminalResult reconstructs a run's outcome from the Workflow object alone,

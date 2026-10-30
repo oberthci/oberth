@@ -301,6 +301,7 @@ ON CONFLICT(run_id) DO UPDATE SET
     job_name = excluded.job_name,
     superseded_by = excluded.superseded_by,
     reason = excluded.reason,
+    created_at = excluded.created_at,
     completed_at = NULL`, cancellation.RunID, cancellation.JobName, cancellation.SupersededBy, cancellation.Reason, now); err != nil {
 				return model.EnqueueRunResult{}, fmt.Errorf("record run cancellation: %w", err)
 			}

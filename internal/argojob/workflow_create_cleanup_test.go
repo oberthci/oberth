@@ -27,93 +27,137 @@ func (c *cleanupWorkflowClient) Delete(ctx context.Context, _ string, opts metav
 	return nil
 }
 
-func TestWorkflowCreateCleanupHoldsThroughLateCommitAndFinalAbsence(t *testing.T) {
-	for _, mode := range []string{"absent", "late", "second-late", "foreign", "uid-conflict", "stuck", "final-read-error", "blocked-reads", "cancel"} {
+func TestWorkflowCreateCleanupOneBoundedObservation(t *testing.T) {
+	for _, mode := range []string{"early-absence", "final-absence", "found", "deleting", "foreign", "uid-conflict", "blocked-read", "blocked-delete", "cancel"} {
 		t.Run(mode, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				start := time.Now()
-				wf := &wfv1.Workflow{ObjectMeta: metav1.ObjectMeta{Name: "wf", UID: "late-uid", Annotations: map[string]string{runIDAnnotation: "run", identityAnnotation: "spec"}}}
+				boundary := start.Add(60 * time.Second)
+				wf := &wfv1.Workflow{ObjectMeta: metav1.ObjectMeta{Name: "wf", UID: "owned-uid", Annotations: map[string]string{runIDAnnotation: "run"}}}
 				client := &cleanupWorkflowClient{}
+				reads := 0
 				client.getHook = func(ctx context.Context, name string) (*wfv1.Workflow, error) {
-					elapsed := time.Since(start)
-					if mode == "blocked-reads" {
+					reads++
+					if mode == "blocked-read" {
 						<-ctx.Done()
 						return nil, ctx.Err()
 					}
-					if mode == "final-read-error" && elapsed >= 60*time.Second {
-						return nil, apierrors.NewServiceUnavailable("unavailable")
+					if mode == "early-absence" || mode == "final-absence" {
+						return nil, apierrors.NewNotFound(workflowTestResource, name)
 					}
-					if mode == "foreign" && elapsed >= 20*time.Second {
-						foreign := wf.DeepCopy()
-						foreign.Annotations[runIDAnnotation] = "other"
-						return foreign, nil
+					copy := wf.DeepCopy()
+					if mode == "foreign" {
+						copy.Annotations[runIDAnnotation] = "other"
 					}
-					visible := mode == "late" || mode == "second-late" || mode == "uid-conflict" || mode == "stuck"
-					if visible && elapsed >= 20*time.Second && (len(client.deletes) == 0 || mode == "stuck") {
-						return wf.DeepCopy(), nil
+					if mode == "deleting" {
+						stamp := metav1.Now()
+						copy.DeletionTimestamp = &stamp
 					}
-					if mode == "second-late" && elapsed >= 45*time.Second && len(client.deletes) == 1 {
-						second := wf.DeepCopy()
-						second.UID = "second-uid"
-						return second, nil
-					}
-					return nil, apierrors.NewNotFound(workflowTestResource, name)
+					return copy, nil
 				}
-				client.deleteHook = func(_ context.Context, opts metav1.DeleteOptions) error {
-					if opts.Preconditions == nil || opts.Preconditions.UID == nil || *opts.Preconditions.UID == "" || opts.PropagationPolicy == nil || *opts.PropagationPolicy != metav1.DeletePropagationForeground {
-						t.Fatal("deletion not UID-fenced/foreground")
+				client.deleteHook = func(ctx context.Context, opts metav1.DeleteOptions) error {
+					if opts.Preconditions == nil || opts.Preconditions.UID == nil || *opts.Preconditions.UID != "owned-uid" || opts.PropagationPolicy == nil || *opts.PropagationPolicy != metav1.DeletePropagationForeground || opts.GracePeriodSeconds == nil || *opts.GracePeriodSeconds != 10 {
+						t.Fatal("delete lost UID/foreground/10s grace fence")
 					}
 					if mode == "uid-conflict" {
 						return apierrors.NewConflict(workflowTestResource, "wf", errors.New("UID changed"))
 					}
+					if mode == "blocked-delete" || mode == "cancel" {
+						<-ctx.Done()
+						return ctx.Err()
+					}
 					return nil
 				}
 				ctx := t.Context()
+				if mode == "final-absence" {
+					time.Sleep(60 * time.Second)
+				}
 				if mode == "cancel" {
 					var cancel context.CancelFunc
-					ctx, cancel = context.WithTimeout(ctx, 7*time.Second)
+					ctx, cancel = context.WithTimeout(ctx, 3*time.Second)
 					defer cancel()
 				}
-				err := (&Controller{workflows: client}).SettleCreate(ctx, "wf", "run")
+				callStart := time.Now()
+				done, err := (&Controller{workflows: client}).SettleCreate(ctx, "wf", "run", boundary)
+				if reads != 1 || len(client.posts) != 0 || time.Since(callStart) > 10*time.Second {
+					t.Fatalf("attempt retried or escaped 10s: reads=%d elapsed=%s err=%v", reads, time.Since(callStart), err)
+				}
 				switch mode {
-				case "absent", "late", "second-late":
-					expected := 0
-					if mode == "late" {
-						expected = 1
+				case "final-absence":
+					if !done || err != nil {
+						t.Fatalf("final absence unconfirmed: %t %v", done, err)
 					}
-					if mode == "second-late" {
-						expected = 2
-					}
-					if err != nil || time.Since(start) != 60*time.Second || len(client.deletes) != expected {
-						t.Fatalf("released without window/final proof: elapsed=%s deletes=%d err=%v", time.Since(start), len(client.deletes), err)
-					}
-					if expected > 0 && *client.deletes[0].Preconditions.UID != "late-uid" {
-						t.Fatal("wrong Workflow UID deleted")
-					}
-					if expected == 2 && *client.deletes[1].Preconditions.UID != "second-uid" {
-						t.Fatal("late replacement not fenced separately")
+				case "early-absence", "found", "deleting":
+					if done || err != nil || time.Since(callStart) != 0 {
+						t.Fatalf("pending attempt slept/completed: done=%t elapsed=%s err=%v", done, time.Since(callStart), err)
 					}
 				case "foreign":
-					if err == nil || !strings.Contains(err.Error(), "belongs to run") || len(client.deletes) != 0 {
+					if done || err == nil || !strings.Contains(err.Error(), "belongs to run") || len(client.deletes) != 0 {
 						t.Fatalf("foreign object deleted: %v", err)
 					}
 				case "uid-conflict":
-					if !apierrors.IsConflict(err) || len(client.deletes) != 1 {
-						t.Fatalf("UID conflict treated as success: %v", err)
-					}
-				case "cancel":
-					if !errors.Is(err, context.DeadlineExceeded) || time.Since(start) != 7*time.Second {
-						t.Fatalf("cancellation ignored: elapsed=%s err=%v", time.Since(start), err)
+					if done || !apierrors.IsConflict(err) {
+						t.Fatalf("UID conflict completed: %v", err)
 					}
 				default:
-					if err == nil || time.Since(start) > 65*time.Second || time.Since(start) < 60*time.Second {
-						t.Fatalf("unknown/still-present outcome freed or escaped budget: elapsed=%s err=%v", time.Since(start), err)
+					if done || !errors.Is(err, context.DeadlineExceeded) {
+						t.Fatalf("request budget/cancellation lost: %t %v", done, err)
 					}
 				}
-				if len(client.posts) != 0 {
-					t.Fatal("cleanup submitted a Workflow")
+				if mode == "deleting" && len(client.deletes) != 0 {
+					t.Fatal("already-deleting UID deleted again")
 				}
 			})
 		})
 	}
+}
+
+func TestWorkflowCreateCleanupSlowForegroundDeletionDefersPastWindow(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		boundary := time.Now().Add(60 * time.Second)
+		wf := &wfv1.Workflow{ObjectMeta: metav1.ObjectMeta{Name: "wf", UID: "owned-uid", Annotations: map[string]string{runIDAnnotation: "run"}}}
+		client := &cleanupWorkflowClient{}
+		client.stored = wf
+		client.deleteHook = func(context.Context, metav1.DeleteOptions) error {
+			stamp := metav1.Now()
+			client.stored.DeletionTimestamp = &stamp
+			return nil
+		}
+		controller := &Controller{workflows: client}
+		for _, advance := range []time.Duration{0, 60 * time.Second, 60 * time.Second} {
+			time.Sleep(advance)
+			done, err := controller.SettleCreate(t.Context(), "wf", "run", boundary)
+			if done || err != nil {
+				t.Fatalf("slow foreground deletion became fatal/done: %t %v", done, err)
+			}
+		}
+		if len(client.deletes) != 1 {
+			t.Fatal("deletion was reissued while terminating")
+		}
+		client.stored = nil
+		done, err := controller.SettleCreate(t.Context(), "wf", "run", boundary)
+		if !done || err != nil {
+			t.Fatalf("recovered absence not settled: %t %v", done, err)
+		}
+	})
+}
+
+func TestWorkflowCreateCleanupEarlyReadCannotBecomeFinalByReturningLate(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		boundary := time.Now().Add(60 * time.Second)
+		client := &cleanupWorkflowClient{}
+		client.getHook = func(context.Context, string) (*wfv1.Workflow, error) {
+			time.Sleep(2 * time.Second)
+			return nil, apierrors.NewNotFound(workflowTestResource, "wf")
+		}
+		time.Sleep(59 * time.Second)
+		done, err := (&Controller{workflows: client}).SettleCreate(t.Context(), "wf", "run", boundary)
+		if done || err != nil {
+			t.Fatalf("pre-window observation became a final proof: %t %v", done, err)
+		}
+		done, err = (&Controller{workflows: client}).SettleCreate(t.Context(), "wf", "run", boundary)
+		if !done || err != nil {
+			t.Fatalf("post-window observation not accepted: %t %v", done, err)
+		}
+	})
 }

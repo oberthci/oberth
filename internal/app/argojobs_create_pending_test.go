@@ -2,42 +2,39 @@ package app
 
 import (
 	"context"
-	"errors"
 	"testing"
+	"time"
 )
 
 type settlingArgoControl struct {
 	configuredController
-	settle func(context.Context, string, string) error
+	settle func(context.Context, string, string, time.Time) (bool, error)
 }
 
-func (c *settlingArgoControl) SettleCreate(ctx context.Context, name, id string) error {
-	return c.settle(ctx, name, id)
+func (c *settlingArgoControl) SettleCreate(ctx context.Context, name, id string, boundary time.Time) (bool, error) {
+	return c.settle(ctx, name, id, boundary)
 }
-
 func TestArgoJobsPendingCreateSettlementBypassesInflightDeleteShortcut(t *testing.T) {
-	for _, fail := range []bool{false, true} {
+	for _, mode := range []string{"done", "pending", "error"} {
 		jobs := &ArgoJobs{intents: map[string]argoIntent{"wf": {runID: "run", cancelled: true}}}
+		boundary := time.Now().Add(time.Minute)
 		called := false
-		jobs.controller = &settlingArgoControl{settle: func(_ context.Context, name, id string) error {
+		jobs.controller = &settlingArgoControl{settle: func(_ context.Context, name, id string, notBefore time.Time) (bool, error) {
 			called = true
-			if name != "wf" || id != "run" {
-				t.Fatal("cleanup identity changed")
+			if name != "wf" || id != "run" || notBefore != boundary {
+				t.Fatal("cleanup identity/boundary changed")
 			}
-			if fail {
-				return context.DeadlineExceeded
+			if mode == "error" {
+				return false, context.DeadlineExceeded
 			}
-			return nil
+			return mode == "done", nil
 		}}
-		err := jobs.SettleCreate(t.Context(), "wf", "run")
-		if !called || (err != nil) != fail {
-			t.Fatalf("cleanup bypassed or error lost: %v", err)
+		done, err := jobs.SettleCreate(t.Context(), "wf", "run", boundary)
+		if !called || done != (mode == "done") || (err != nil) != (mode == "error") {
+			t.Fatalf("cleanup shortcut/error: %t %v", done, err)
 		}
-		if fail && !errors.Is(err, context.DeadlineExceeded) {
-			t.Fatal(err)
-		}
-		if (len(jobs.intents) == 1) != fail {
-			t.Fatal("cleanup forgot unresolved intent or retained confirmed one")
+		if (len(jobs.intents) == 1) != (mode != "done") {
+			t.Fatal("unconfirmed intent forgotten")
 		}
 	}
 }

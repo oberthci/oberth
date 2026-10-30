@@ -96,6 +96,11 @@ type Scheduler struct {
 	// finished startup recovery and is about to enter its dispatch loop.
 	onStartupRecovered func()
 	dispatchTicks      <-chan time.Time // test-only idle polling clock
+	createMu           sync.Mutex
+	createPending      map[string]*pendingCreate
+	createWake         chan struct{}
+	createNow          func() time.Time // test-only reconciliation clock
+	createTicks        <-chan time.Time // test-only reconciliation ticks
 }
 
 // PromotionRetrier re-promotes a promotion whose publication failed because
@@ -164,6 +169,7 @@ func NewScheduler(config SchedulerConfig) (*Scheduler, error) {
 		admission:      newWeightedAdmissionForJobsWeights(config.MaxConcurrent, config.SizeWeights),
 		maxRunLogBytes: config.MaxRunLogBytes, mutationGate: mutationGate,
 		wake: make(chan struct{}, 1), publicationWake: make(chan struct{}, 1),
+		createWake: make(chan struct{}, 1), createPending: make(map[string]*pendingCreate),
 		publicationSet: make(map[string]struct{}), deliveryPermit: deliveryPermit, capacityWait: waitTrustedCapacity,
 	}
 	// Runs parked on their concurrency group (#658) do not hold a dispatch
@@ -375,24 +381,17 @@ func (scheduler *Scheduler) completeCancellationsWithGate(ctx context.Context, c
 		if err != nil {
 			return err
 		}
+		if isPendingCreate(run) || scheduler.ownsCreateCleanup(run.ID) {
+			scheduler.registerCreateCleanup(run, nil, isPendingCreate(run))
+			continue // Never wait for Kubernetes on dispatch/push/cancel.
+		}
 		if err := runDispatchExternal(ctx, func(ctx context.Context) error {
-			if settler, ok := scheduler.jobs.(JobCreateSettler); ok && cancellation.Reason == "owner_restart" {
-				return settler.SettleCreate(ctx, cancellation.JobName, cancellation.RunID)
-			}
-			if run.Phase == "infrastructure-pending" {
-				return errors.New("service: engine cannot settle uncertain Workflow create")
-			}
 			return scheduler.jobs.Delete(ctx, cancellation.JobName, cancellation.RunID)
 		}); err != nil {
 			return fmt.Errorf("delete superseded Job %s: %w", cancellation.JobName, err)
 		}
 		if err := scheduler.store.CompleteObservedRunCancellation(ctx, cancellation); err != nil {
 			return fmt.Errorf("complete cancellation for run %s: %w", cancellation.RunID, err)
-		}
-		if run.Phase == "infrastructure-pending" {
-			if err := scheduler.finishInfrastructureFailure(ctx, run, model.Repository{}, errors.New("workflow create outcome uncertain; cleanup confirmed absence")); err != nil {
-				return err
-			}
 		}
 		scheduler.admission.releaseDeletedRun(cancellation.RunID)
 		cleanupCtx, cancelCleanup := boundedWorkspaceCleanupContext(ctx)
@@ -489,6 +488,8 @@ func (scheduler *Scheduler) Run(ctx context.Context) error {
 		defer workers.Done()
 		scheduler.runHeadEvents(workerCtx)
 	}()
+	workers.Add(1)
+	go func() { defer workers.Done(); scheduler.runCreateCleanup(workerCtx) }()
 	completed := make(chan error, max(2*scheduler.maxConcurrent, len(adopted)))
 	active := len(adopted)
 	for _, adopted := range adopted {
@@ -958,6 +959,13 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 		return nil
 	}
 
+	if _, ok := scheduler.jobs.(JobCreateSettler); ok {
+		if err := scheduler.recordCreateAdmission(run, jobName, size, kubeVirt.Demand); err != nil {
+			_ = logFile.Close()
+			return scheduler.finishInfrastructureFailure(ctx, run, repository, fmt.Errorf("record Workflow admission contract: %w", err))
+		}
+	}
+
 	switch {
 	case run.Release:
 		if scheduler.releaseJobs == nil {
@@ -972,20 +980,16 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 		var uncertain interface{ AmbiguousCreate() bool }
 		if errors.As(err, &uncertain) && uncertain.AmbiguousCreate() {
 			_ = logFile.Close()
-			// The pending phase and cancellation are one durable transaction.
-			// A preempting Delete/NotFound may already have completed the old
-			// obligation; re-arm it before any path may release this grant.
-			persistCtx, cancelPersist := boundedWorkspaceCleanupContext(ctx)
+			reservation.retain()
+			persistCtx, cancelPersist := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 			pendingErr := scheduler.store.MarkRunCreatePending(persistCtx, run.ID, jobName)
 			cancelPersist()
-			if pendingErr == nil {
-				pendingErr = scheduler.completeCancellationsWithGate(ctx, []model.RunCancellation{{RunID: run.ID, JobName: jobName}}, require)
-			}
+			run.JobName = jobName
+			scheduler.registerCreateCleanup(run, reservation, pendingErr == nil)
 			if pendingErr != nil {
-				reservation.retain()
-				return errors.Join(fmt.Errorf("uncertain create Job: %w", err), pendingErr)
+				log.Printf("WARN: create_cleanup run=%q persistence_deferred=true", run.ID)
 			}
-			return nil
+			return nil // The reconciler owns this grant, not the dispatcher.
 		}
 		if _, ok := scheduler.jobs.(JobAdopter); ok && workflowRunAdoptable(run) && ctx.Err() != nil {
 			reservation.retain()
@@ -1015,6 +1019,7 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 		}
 		return scheduler.finishInfrastructureFailure(ctx, run, repository, failure)
 	}
+	_ = os.Remove(scheduler.createAdmissionPath(run.ID))
 	if current.Preempted() {
 		_ = logFile.Close()
 		cleanupCtx, cancelCleanup := boundedWorkspaceCleanupContext(ctx)
@@ -1582,13 +1587,17 @@ func (scheduler *Scheduler) reconcileStrandedRunsWithGate(ctx context.Context, r
 		return fmt.Errorf("load stranded runs for reconciliation: %w", err)
 	}
 	for _, run := range runs {
-		if run.Phase == "infrastructure-pending" {
-			if err := scheduler.store.MarkRunCreatePending(ctx, run.ID, run.JobName); err != nil {
+		_, canSettle := scheduler.jobs.(JobCreateSettler)
+		unacknowledged := canSettle && run.Phase == "waiting"
+		if unacknowledged {
+			eligible, err := scheduler.withoutPendingPreflight(ctx, run)
+			if err != nil {
 				return err
 			}
-			if err := scheduler.completeCancellationsWithGate(ctx, []model.RunCancellation{{RunID: run.ID, JobName: run.JobName}}, require); err != nil {
-				return err
-			}
+			unacknowledged = eligible
+		}
+		if isPendingCreate(run) || unacknowledged {
+			scheduler.registerCreateCleanup(run, nil, isPendingCreate(run))
 			continue
 		}
 		if adopter, ok := scheduler.jobs.(JobAdopter); ok && workflowRunAdoptable(run) {
@@ -1609,13 +1618,6 @@ func (scheduler *Scheduler) reconcileStrandedRunsWithGate(ctx context.Context, r
 						return adoptionFailure(adopter, run, err)
 					}
 					continue
-				}
-				if run.Phase == "waiting" {
-					if settler, ok := scheduler.jobs.(JobCreateSettler); ok {
-						if err := settler.SettleCreate(ctx, run.JobName, run.ID); err != nil {
-							return err
-						}
-					}
 				}
 			}
 		}
