@@ -237,13 +237,49 @@ func readonlyMounts(t *wfv1.Template) []corev1.VolumeMount {
 }
 
 func preserveWorkspaceReadOnly(t *wfv1.Template, protected []corev1.VolumeMount) {
+	// Sequential init containers may populate a Pod-local emptyDir before
+	// main/sidecars consume it read-only. Never extend this exception to a
+	// claim, shared workspace, server-owned volume or restartable init sidecar.
+	local := map[string]bool{}
+	for _, v := range t.Volumes {
+		if v.EmptyDir != nil && !sharedWorkspaceMount(corev1.VolumeMount{Name: v.Name}) &&
+			v.Name != SourceVolumeName && v.Name != ReleaseTokenVolumeName &&
+			v.Name != SecretsVolumeName && v.Name != stepTmpVolumeName {
+			local[v.Name] = true
+		}
+	}
+	initProtected := make([]corev1.VolumeMount, 0, len(protected))
+	for _, p := range protected {
+		if !local[p.Name] {
+			initProtected = append(initProtected, p)
+		}
+	}
+	sequentialInit := map[*corev1.Container]bool{}
+	for i := range t.InitContainers {
+		c := &t.InitContainers[i].Container
+		if c.RestartPolicy != nil && *c.RestartPolicy == corev1.ContainerRestartPolicyAlways {
+			continue
+		}
+		sequentialInit[c] = true
+		// Authored init readonly requests still protect overlapping init
+		// aliases, including mounts in later sequential init containers.
+		for _, m := range c.VolumeMounts {
+			if local[m.Name] && m.ReadOnly {
+				initProtected = append(initProtected, m)
+			}
+		}
+	}
 	templateContainers(t, func(c *corev1.Container) {
+		applicable := protected
+		if sequentialInit[c] {
+			applicable = initProtected
+		}
 		for i := range c.VolumeMounts {
 			m := &c.VolumeMounts[i]
 			if workspaceMountMode(t) == argoworkflow.WorkspaceMountsReadonly && sharedWorkspaceMount(*m) {
 				m.ReadOnly = true
 			}
-			for _, p := range protected {
+			for _, p := range applicable {
 				if mountOverlaps(*m, p) {
 					m.ReadOnly = true
 				}

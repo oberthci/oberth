@@ -140,6 +140,14 @@ after Argo's mount mirroring to keep those wait-container mirrors read-only.
 Repository-authored Pod patches, identities and security contexts remain
 forbidden.
 
+A sequential init container may write a template-local `emptyDir` that main or
+sidecar containers mount read-only: init populates the tools before those readers
+start. Oberth keeps the readers and their aliases read-only without propagating
+their request backward to that init container. Explicit init read-only requests
+still protect overlapping init aliases. This exception does not apply to PVCs,
+workflow-level volumes, shared workspace/source or server-owned mounts, or
+restartable init sidecars; their existing protections remain in force.
+
 Controls apply to container, script and container-set leaves, including their
 init containers and sidecars and leaves inside inline DAG/steps. Put workspace
 mirroring in `mirrorVolumeMounts: true` when needed: Oberth resolves it once,
