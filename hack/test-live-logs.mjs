@@ -253,14 +253,26 @@ run(`
 `);
 await run('statusRefreshPromise');
 assert.equal(run('profileStatusCalls'), 0, 'fresh status must not be polled per log/run refresh');
-run(`state.statusLoadedAt = Date.now()-31000; statusRefreshPromise = ensureStatus(); secondRefreshPromise = ensureStatus();`);
+run(`state.statusLoadedAt = Date.now()-31000; statusRefreshPromise = ensureStatus();`);
+await run('statusRefreshPromise');
+assert.equal(run('profileStatusCalls'), 0, '30s run refresh must not re-probe upstreams');
+run(`state.statusLoadedAt = Date.now()-300001; statusRefreshPromise = ensureStatus(); secondRefreshPromise = ensureStatus();`);
 assert.equal(run('statusRefreshPromise === secondRefreshPromise'), true, 'concurrent background refreshes coalesce');
 await run('statusRefreshPromise');
 assert.equal(run('profileStatusCalls'), 1);
 assert.equal(run('admissionPausedBanner(state.status.controller_profile)'), '', 'recovery clears cached admission banner');
-run(`state.statusLoadedAt=Date.now()-31000; api=async()=>{profileStatusCalls++;throw new Error('status unavailable')}; statusRefreshPromise=ensureStatus();`);
+run(`statusRefreshPromise=loadStatus();`);
+await run('statusRefreshPromise');
+assert.equal(run('profileStatusCalls'), 2, 'visiting Status must fetch fresh data during the background cooldown');
+run(`state.statusLoadedAt=Date.now()-300001; api=async()=>{profileStatusCalls++;throw new Error('status unavailable')}; statusRefreshPromise=ensureStatus();`);
 await run('statusRefreshPromise');
 run('statusRefreshPromise=ensureStatus();');
 await run('statusRefreshPromise');
-assert.equal(run('profileStatusCalls'), 2, 'status failures retain the 30s retry backoff');
+assert.equal(run('profileStatusCalls'), 3, 'status failures retain the 30s retry backoff');
 run('api=capacityStatusSavedAPI;');
+
+// The shared regression ships in both topic bundles and runs once both UI
+// features are present in the assembled tree.
+if (run(`typeof capacityStatusCard === 'function' && typeof controllerProfileStatusCard === 'function'`)) {
+  await import('./test-runtime-controller-combined.mjs');
+}

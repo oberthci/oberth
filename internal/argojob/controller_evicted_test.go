@@ -37,10 +37,13 @@ func evictedControllerFixture() (*corev1.Pod, *corev1.Pod, *corev1.ConfigMap, *a
 	return live, old, cm, rs
 }
 func TestControllerEvictedHistoryReadyReplacementRestoresProof(t *testing.T) {
-	for _, mode := range []string{"unknown-exit", "missing-status", "scaled-zero-predecessor"} {
+	for _, mode := range []string{"unknown-exit", "missing-status", "node-shutdown", "scaled-zero-predecessor"} {
 		t.Run(mode, func(t *testing.T) {
 			live, old, cm, rs := evictedControllerFixture()
 			objects := []runtime.Object{live, old, cm, rs}
+			if mode == "node-shutdown" {
+				old.Status.Reason = "NodeShutdown"
+			}
 			if mode == "missing-status" {
 				old.Status.ContainerStatuses = nil
 			}
@@ -224,4 +227,21 @@ func TestControllerEvictedHistoryAdmissionPauseIsObservableAndRecovers(t *testin
 			t.Fatal("pause did not clear", status)
 		}
 	})
+}
+
+func TestControllerNodeShutdownRequiresReadyReplacement(t *testing.T) {
+	for _, ready := range []int32{0, 1} {
+		t.Run(map[int32]string{0: "unready", 1: "ready"}[ready], func(t *testing.T) {
+			live, old, cm, rs := evictedControllerFixture()
+			old.Status.Reason = "NodeShutdown"
+			rs.Status.ReadyReplicas = ready
+			proof, err := verifyNonrootController(t.Context(), fake.NewClientset(live, old, cm, rs), testNamespace, testRequest(periapsis.TriggerCI, nonrootTestDocument))
+			if ready == 0 && (err == nil || proof != nil) {
+				t.Fatal("shutdown bypassed Ready replacement proof", proof, err)
+			}
+			if ready == 1 && (err != nil || proof == nil) {
+				t.Fatal("verified shutdown replacement remained blocked", proof, err)
+			}
+		})
+	}
 }

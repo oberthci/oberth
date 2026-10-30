@@ -229,7 +229,7 @@ while unchanged. Existing work retains cleanup and publication authority.
 
 ## Evicted controller history and admission visibility
 
-An API `Failed` / `Evicted` controller Pod can retain missing or synthetic kubelet
+An API `Failed` / `Evicted` or `Failed` / `NodeShutdown` controller Pod can retain missing or synthetic kubelet
 termination data after a Ready replacement takes over. It no longer blocks
 admission solely for that incomplete exit history when replacement is positively
 verified. The live controller must still pass the exact pinned image, executor,
@@ -243,8 +243,9 @@ blocked. Ordinary non-eviction history keeps the existing strict checks.
 
 `system_status.controller_profile` now reports `admission_paused`, a bounded
 reason and an operator remedy. The dashboard shows the hold in Status and above
-the runs list; aggregate status refreshes in the background at most every thirty
-seconds, without making log/run rendering wait for those reads. Restoring the
+the runs list; aggregate status refreshes in the background at most every five
+minutes, without making log/run rendering wait for those reads. A banner can
+therefore lag by up to five minutes; visiting Status fetches a fresh observation. Restoring the
 supported controller profile/readiness clears the hold on the existing retry
 loop. Running work keeps its observation and cleanup authority.
 

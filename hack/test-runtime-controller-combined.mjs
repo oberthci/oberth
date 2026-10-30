@@ -1,0 +1,22 @@
+import { readFileSync } from 'node:fs';
+import vm from 'node:vm';
+import assert from 'node:assert/strict';
+const source = readFileSync(new URL('../internal/api/static/app.js', import.meta.url), 'utf8');
+const sandbox = vm.createContext({console,URLSearchParams,Map,Set,Date,location:{pathname:'/status'},document:{body:{dataset:{version:'test'}},getElementById(){return null}},localStorage:{getItem(){return null}},setInterval(){},clearInterval(){},requestAnimationFrame(){return 1},cancelAnimationFrame(){}});
+vm.runInContext(source.slice(0,source.indexOf('/* ---------- events ---------- */')),sandbox);
+vm.runInContext(`
+ let combinedHTML='';
+ let combinedProfile={state:'blocked',admission_paused:true,reason:'ReplicaSet <not-ready>',remedy:'Restore one Ready replacement'};
+ replaceApp=html=>{combinedHTML=html};
+ api=async path=>path==='/api/status'?{version:'test',database:'ready',audit:'ready',cluster:'ready',vcs:'ready',controller_profile:combinedProfile,admission:{used:20,capacity:16,configuration:{max_concurrent_jobs:8,source:'file'},pressure:{available:false}}}:[];
+`,sandbox);
+await vm.runInContext('renderStatus(0)',sandbox);
+const first=vm.runInContext('combinedHTML',sandbox);
+for(const text of ['admission capacity','8 M jobs','20/16 weight used','workflow admission','admission paused','ReplicaSet &lt;not-ready&gt;','Restore one Ready replacement','host pressure'])assert.ok(first.includes(text),text);
+assert.ok(!first.includes('ReplicaSet <not-ready>'));
+vm.runInContext("combinedProfile={state:'verified',admission_paused:false};",sandbox);
+await vm.runInContext('renderStatus(0)',sandbox);
+const recovered=vm.runInContext('combinedHTML',sandbox);
+assert.ok(recovered.includes('accepting new admissions')&&!recovered.includes('admission paused'));
+assert.ok(recovered.includes('8 M jobs'));
+console.log('combined capacity/controller status rendering passed');

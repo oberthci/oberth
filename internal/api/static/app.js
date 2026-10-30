@@ -230,12 +230,12 @@ function normalizeRepoSelector(value, everything) {
   const named = state.repos.filter(repo => repo.Name === value);
   return named.length === 1 ? repoKey(named[0]) : everything;
 }
-/* ensureStatus refreshes /api/status at most once per 30s in the background. It probes every
+/* ensureStatus refreshes /api/status at most once per five minutes in the background. It probes every
    upstream, so pages render without waiting for it and re-render when it
    arrives; a failure is not retried for 30 seconds, so a live view polling
    every two seconds does not hammer it. */
 function ensureStatus() {
-  if (state.status && Date.now() - state.statusLoadedAt < 30000) return Promise.resolve();
+  if (state.status && Date.now() - state.statusLoadedAt < 5 * 60 * 1000) return Promise.resolve();
   if (state.statusPending) return state.statusPending;
   if (Date.now() - (state.statusFailedAt || 0) < 30000) return Promise.resolve();
   state.statusPending = loadStatus({ detached: true })

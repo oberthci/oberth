@@ -18,7 +18,7 @@ func evictedControllerCandidates(pods []corev1.Pod) map[types.UID]bool {
 	now := time.Now()
 	for i := range pods {
 		p := &pods[i]
-		if p.Status.Phase == corev1.PodFailed && p.Status.Reason == "Evicted" && !nonrootControllerHistoryIsTerminal(p, now) {
+		if p.Status.Phase == corev1.PodFailed && (p.Status.Reason == "Evicted" || p.Status.Reason == "NodeShutdown") && !nonrootControllerHistoryIsTerminal(p, now) {
 			candidates[p.UID] = true
 		}
 	}
@@ -54,10 +54,10 @@ func replicaSetSelects(rs *appsv1.ReplicaSet, pod *corev1.Pod) bool {
 	return err == nil && !selector.Empty() && selector.Matches(labels.Set(pod.Labels))
 }
 
-// Eviction can leave missing/Unknown kubelet termination status forever. Use
+// Eviction or node shutdown can leave missing/Unknown termination status. Use
 // positive controller reconciliation evidence instead of inventing an exit:
 // one fully verified live replacement, its exact converged ReplicaSet, and
-// an older Failed/Evicted Pod bound to that set (or its scaled-zero predecessor
+// an older Failed/Evicted or Failed/NodeShutdown Pod bound to that set (or its scaled-zero predecessor
 // in the same Deployment). No historical object supplies profile authority.
 func verifyEvictedControllerHistory(ctx context.Context, client kubernetes.Interface, namespace string, pods []corev1.Pod, current *corev1.Pod, candidates map[types.UID]bool) error {
 	invalid := func() error {
