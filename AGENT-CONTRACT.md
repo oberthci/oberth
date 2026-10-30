@@ -3224,10 +3224,12 @@ rejects invalid threshold/hysteresis pairs and zero enabled maxDefer. See
 
 ### Evicted controller replacement and visible admission holds (#1214)
 
-Incomplete `Failed/Evicted` or `Failed/NodeShutdown` controller history is ignored only after exact live
+Incomplete kubelet eviction/shutdown controller history is ignored only after exact live
 profile verification and a converged controlling ReplicaSet (observed generation,
 selector and UID, one desired/current/Ready replica). A predecessor ReplicaSet
-must be fully scaled to zero and belong to the same Deployment. Uncertain live
+must be fully scaled to zero and belong to the same Deployment. Failed/Terminated
+history needs the exact kubelet imminent-shutdown message; generic termination
+is not eligible for replacement evidence. Uncertain live
 or historical authority stays blocked. ReplicaSet API failures retain the
 profile-read retry class and five-second per-attempt budget. The chart grants
 only namespaced ReplicaSet GET in a new Role, preserving frozen existing rules.

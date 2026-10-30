@@ -37,12 +37,16 @@ func evictedControllerFixture() (*corev1.Pod, *corev1.Pod, *corev1.ConfigMap, *a
 	return live, old, cm, rs
 }
 func TestControllerEvictedHistoryReadyReplacementRestoresProof(t *testing.T) {
-	for _, mode := range []string{"unknown-exit", "missing-status", "node-shutdown", "scaled-zero-predecessor"} {
+	for _, mode := range []string{"unknown-exit", "missing-status", "node-shutdown", "graceful-node-shutdown", "scaled-zero-predecessor"} {
 		t.Run(mode, func(t *testing.T) {
 			live, old, cm, rs := evictedControllerFixture()
 			objects := []runtime.Object{live, old, cm, rs}
 			if mode == "node-shutdown" {
 				old.Status.Reason = "NodeShutdown"
+			}
+			if mode == "graceful-node-shutdown" {
+				old.Status.Reason = "Terminated"
+				old.Status.Message = "Pod was terminated in response to imminent node shutdown."
 			}
 			if mode == "missing-status" {
 				old.Status.ContainerStatuses = nil
@@ -230,17 +234,36 @@ func TestControllerEvictedHistoryAdmissionPauseIsObservableAndRecovers(t *testin
 }
 
 func TestControllerNodeShutdownRequiresReadyReplacement(t *testing.T) {
-	for _, ready := range []int32{0, 1} {
-		t.Run(map[int32]string{0: "unready", 1: "ready"}[ready], func(t *testing.T) {
+	for _, reason := range []string{"NodeShutdown", "Terminated"} {
+		for _, ready := range []int32{0, 1} {
+			t.Run(reason+"/"+map[int32]string{0: "unready", 1: "ready"}[ready], func(t *testing.T) {
+				live, old, cm, rs := evictedControllerFixture()
+				old.Status.Reason = reason
+				if reason == "Terminated" {
+					old.Status.Message = "Pod was terminated in response to imminent node shutdown."
+				}
+				rs.Status.ReadyReplicas = ready
+				proof, err := verifyNonrootController(t.Context(), fake.NewClientset(live, old, cm, rs), testNamespace, testRequest(periapsis.TriggerCI, nonrootTestDocument))
+				if ready == 0 && (err == nil || proof != nil) {
+					t.Fatal("shutdown bypassed Ready replacement proof", proof, err)
+				}
+				if ready == 1 && (err != nil || proof == nil) {
+					t.Fatal("verified shutdown replacement remained blocked", proof, err)
+				}
+			})
+		}
+	}
+}
+
+func TestControllerTerminatedHistoryNeedsShutdownMessage(t *testing.T) {
+	for _, message := range []string{"", "some other termination"} {
+		t.Run(message, func(t *testing.T) {
 			live, old, cm, rs := evictedControllerFixture()
-			old.Status.Reason = "NodeShutdown"
-			rs.Status.ReadyReplicas = ready
+			old.Status.Reason = "Terminated"
+			old.Status.Message = message
 			proof, err := verifyNonrootController(t.Context(), fake.NewClientset(live, old, cm, rs), testNamespace, testRequest(periapsis.TriggerCI, nonrootTestDocument))
-			if ready == 0 && (err == nil || proof != nil) {
-				t.Fatal("shutdown bypassed Ready replacement proof", proof, err)
-			}
-			if ready == 1 && (err != nil || proof == nil) {
-				t.Fatal("verified shutdown replacement remained blocked", proof, err)
+			if err == nil || proof != nil {
+				t.Fatal("generic Terminated Pod bypassed history verification", proof, err)
 			}
 		})
 	}

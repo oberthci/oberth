@@ -241,6 +241,12 @@ the same Deployment. Explicit running/Ready historical state, wrong ownership,
 later timestamps, incomplete Pod listings and unobservable ReplicaSets stay
 blocked. Ordinary non-eviction history keeps the existing strict checks.
 
+Graceful node shutdown uses `Failed/Terminated`, rather than the admission
+rejection reason `NodeShutdown`. Its exact kubelet message must be
+`Pod was terminated in response to imminent node shutdown.` to enter the same
+replacement-proof path; generic Terminated history remains fail-closed.
+Kubernetes source: https://github.com/kubernetes/kubernetes/blob/v1.37.0/pkg/kubelet/nodeshutdown/nodeshutdown_manager.go
+
 `system_status.controller_profile` now reports `admission_paused`, a bounded
 reason and an operator remedy. The dashboard shows the hold in Status and above
 the runs list; aggregate status refreshes in the background at most every five

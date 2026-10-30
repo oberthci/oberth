@@ -18,7 +18,10 @@ func evictedControllerCandidates(pods []corev1.Pod) map[types.UID]bool {
 	now := time.Now()
 	for i := range pods {
 		p := &pods[i]
-		if p.Status.Phase == corev1.PodFailed && (p.Status.Reason == "Evicted" || p.Status.Reason == "NodeShutdown") && !nonrootControllerHistoryIsTerminal(p, now) {
+		// NodeShutdown is kubelet's admission rejection; graceful shutdown of
+		// an existing Pod uses Terminated with this specific kubelet message.
+		shutdown := p.Status.Reason == "NodeShutdown" || (p.Status.Reason == "Terminated" && p.Status.Message == "Pod was terminated in response to imminent node shutdown.")
+		if p.Status.Phase == corev1.PodFailed && (p.Status.Reason == "Evicted" || shutdown) && !nonrootControllerHistoryIsTerminal(p, now) {
 			candidates[p.UID] = true
 		}
 	}
@@ -57,8 +60,9 @@ func replicaSetSelects(rs *appsv1.ReplicaSet, pod *corev1.Pod) bool {
 // Eviction or node shutdown can leave missing/Unknown termination status. Use
 // positive controller reconciliation evidence instead of inventing an exit:
 // one fully verified live replacement, its exact converged ReplicaSet, and
-// an older Failed/Evicted or Failed/NodeShutdown Pod bound to that set (or its scaled-zero predecessor
-// in the same Deployment). No historical object supplies profile authority.
+// an older Failed Pod with a kubelet eviction/shutdown reason bound to that set
+// (or its scaled-zero predecessor in the same Deployment). No historical object
+// supplies profile authority.
 func verifyEvictedControllerHistory(ctx context.Context, client kubernetes.Interface, namespace string, pods []corev1.Pod, current *corev1.Pod, candidates map[types.UID]bool) error {
 	invalid := func() error {
 		return errors.New("argojob: evicted controller history is not bound to a verified Ready replacement")
