@@ -106,6 +106,31 @@ requests report an unavailable service with a public reason to retry. As before,
 the fence ends before the caller's application mutation begins; the gate does
 not hold a writer across that mutation, backoff or network I/O.
 
+## Remaining contention limitation (Fable P2)
+
+The final fence still uses the reader connection's whole-database
+`data_version`. Every commit from another connection changes that value,
+including the primary Store's run-status, log-metadata and token-touch writes
+that leave the audit head unchanged. Such a write can consume a local
+re-verification round. Sustained writes can exhaust those rounds and make the
+manager repeat the complete gate, including external checks, until its deadline.
+This remains an availability and cost limitation in v0.17.68.
+
+Narrowing the check to the audit head or audit-table insertions is unsafe:
+same-head prefix edits, checkpoint receipt changes and pending-publication
+changes are also protected by verification. SQLite's `data_version` does not
+identify changed tables. A database-resident per-table counter or trigger can
+be modified or removed by the same outside writer whose edits must be detected;
+it cannot replace the connection-local signal under the trust boundary above.
+Comparing table contents or hashing the chain inside the writer fence would
+also put unbounded verification work back under the writer reservation.
+
+The conservative fence is therefore retained. A future optimization needs a
+trusted signal covering every verified table and schema change, with tests
+that preserve prefix, receipt, pending-publication and change-then-restore
+tamper detection under sustained unrelated writes. Table-scoped busy detection
+is deferred rather than weakening those checks for this release.
+
 ## Detection guarantees and cost
 
 An outside edit to an already verified row forces full hashing at the next

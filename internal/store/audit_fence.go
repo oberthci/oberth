@@ -150,6 +150,9 @@ func (s *Store) auditVerificationFence(ctx context.Context, conn *sql.Conn, head
 		return false, err
 	}
 	if currentVersion != version {
+		// data_version is database-wide, so unrelated commits also require
+		// re-verification. A mutable per-table counter cannot safely detect
+		// outside tampering; see docs/audit-verification-cache.md (Fable P2).
 		return true, nil
 	}
 	if err := fence.Commit(); err != nil {
