@@ -320,9 +320,8 @@ func (entry *runningIndex) snapshot(burn, step string, filter Filter) (selected 
 			matches += label.refs
 		}
 	}
-	// Allocate once: growing []Range for every short interleaved record would
-	// copy several times its final size on each tail poll.
-	selected = make([]Range, 0, matches)
+	// Start small: a clipped cursor may select few of the retained matches.
+	selected = make([]Range, 0, min(matches, 1024))
 	var bytes int64
 	for n := range entry.count {
 		i := n
