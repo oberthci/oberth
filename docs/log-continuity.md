@@ -79,3 +79,10 @@ GC or a terminated main container. The separate init-readonly fix addresses the
 write refusal. The port case 82921a70 was already garbage-collected before dumps
 were collected; its original final-read error class cannot be established from
 the available evidence.
+
+## Host-crash replay scope
+
+Journal replay is entered through the scheduler's observeRun path. It is not a
+general startup or log-read repair pass; other startup/finalization/read paths
+do not replay the journal. A durable journal must not be interpreted as proof
+that every host-crash recovery path has already reconstructed its projection.

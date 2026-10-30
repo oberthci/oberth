@@ -147,6 +147,9 @@ their request backward to that init container. Explicit init read-only requests
 still protect overlapping init aliases. This exception does not apply to PVCs,
 workflow-level volumes, shared workspace/source or server-owned mounts, or
 restartable init sidecars; their existing protections remain in force.
+A sequential writer before a restartable init reader of the same protected
+volume is also forced read-only. That conservative shape can fail the write;
+it fails closed rather than introducing an order-sensitive exemption.
 
 Controls apply to container, script and container-set leaves, including their
 init containers and sidecars and leaves inside inline DAG/steps. Put workspace
