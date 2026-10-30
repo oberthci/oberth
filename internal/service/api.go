@@ -1061,6 +1061,7 @@ func (service *API) readRun(ctx context.Context, actor api.Actor, id string, sum
 	}
 	response := RunDetailResponse{Run: service.presentationRun(ctx, run), Steps: steps, Scheduling: service.scheduling(ctx, run, steps),
 		RerunOf: service.runRerunOf(ctx, run.ID)}
+	applyExecutionDisplay(&response.Run, response.Scheduling)
 	if reader, ok := service.history.(RunTimingReader); ok {
 		timing, timingErr := reader.RunTiming(ctx, run.ID)
 		if timingErr != nil {
@@ -1365,6 +1366,8 @@ func (service *API) statusForRun(ctx context.Context, repository model.Repositor
 	}
 	response.Scheduling = service.scheduling(ctx, run, response.Steps)
 	response.Run = presented
+	applyExecutionDisplay(&response.Run, response.Scheduling)
+	response.DisplayStatus, response.DisplayReason = response.Run.DisplayStatus, response.Run.DisplayReason
 	if presented.DisplayStatus == "queued" && response.Scheduling != nil {
 		response.DisplayReason = response.Scheduling.Message
 		response.Run.DisplayReason = response.DisplayReason
@@ -1484,6 +1487,8 @@ func (service *API) statusFromRun(ctx context.Context, repository model.Reposito
 	}
 	response.Scheduling = service.scheduling(ctx, run, response.Steps)
 	response.Run = presented
+	applyExecutionDisplay(&response.Run, response.Scheduling)
+	response.DisplayStatus, response.DisplayReason = response.Run.DisplayStatus, response.Run.DisplayReason
 	if presented.DisplayStatus == "queued" && response.Scheduling != nil {
 		response.DisplayReason = response.Scheduling.Message
 		response.Run.DisplayReason = response.DisplayReason
@@ -1537,6 +1542,9 @@ func presentationRunAt(run model.Run, now time.Time) model.Run {
 	visible := visibleRun(run)
 	visible.DisplayStatus = displayRunStatus(run)
 	visible.DisplayReason = runDisplayReason(run)
+	if run.Status == model.RunFailed && model.IsExecutionDeadlineReason(run.Error) {
+		visible.DisplayStatus, visible.DisplayReason = "deadline-exceeded", model.ExecutionDeadlineMessage
+	}
 	if run.Priority != "" {
 		visible.Priority, visible.PriorityReason = run.EffectivePriority(now)
 		// Active display_reason intentionally describes queue priority. Scheduling
@@ -1610,6 +1618,7 @@ func (service *API) presentationRuns(ctx context.Context, runs []model.Run) ([]m
 }
 
 func (service *API) presentationRunWithSuccessor(ctx context.Context, run model.Run, successors map[string]model.Run) model.Run {
+	run = service.withAdmissionPriority(run)
 	visible := presentationRunAt(run, service.schedulingClock().Now())
 	if run.Status == model.RunRunning && run.StartedAt != nil && service.submittedKVMPreflight(ctx, run) {
 		visible.Phase = "preflight"

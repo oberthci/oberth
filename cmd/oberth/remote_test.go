@@ -619,3 +619,17 @@ func TestLogSummaryReportsIncompleteCountsAndContinuation(t *testing.T) {
 		t.Fatal("old server counts changed meaning")
 	}
 }
+
+func TestRunDetailShowsDeadlineAndFinalizationLag(t *testing.T) {
+	payload := `{"Run":{"ID":"deadline","Status":"running","display_status":"deadline-exceeded","display_reason":"Execution deadline exceeded.","SHA":"abc","Ref":"main"},"Steps":[],"Scheduling":{"message":"Execution deadline exceeded.","execution":{"phase":"Failed","reconciliation_lag_seconds":3080,"deadline":{"budget_seconds":5400,"clock":"workflow_started_at","expires_at":"2026-10-30T10:33:37Z","remaining_seconds":0,"elapsed":true}}}}`
+	configure(t, remoteServer(t, payload))
+	var output bytes.Buffer
+	if err := runRunDetail(t.Context(), []string{"deadline"}, &output); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"deadline-exceeded", "Execution deadline exceeded", "2026-10-30T10:33:37Z", "0s remaining", "clock: Workflow start", "finalization lag: 3080s"} {
+		if !strings.Contains(output.String(), want) {
+			t.Fatalf("missing %q: %s", want, output.String())
+		}
+	}
+}

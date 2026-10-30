@@ -662,6 +662,9 @@ func completionFor(workflow *wfv1.Workflow) Completion {
 	if !completion.Succeeded && completion.Reason == "" {
 		completion.Reason = "Workflow " + strings.ToLower(completion.Phase)
 	}
+	if !completion.Succeeded && workflowDeadlineExceeded(workflow) {
+		completion.Reason = model.ExecutionDeadlineMessage
+	}
 	completion.classifyInfrastructure()
 	return completion
 }

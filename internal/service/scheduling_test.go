@@ -10,6 +10,7 @@ import (
 	"time"
 
 	clocktesting "k8s.io/utils/clock/testing"
+	"k8s.io/utils/ptr"
 
 	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/model"
@@ -139,7 +140,7 @@ func TestSubmittedKVMPreflightHasDistinctSchedulingState(t *testing.T) {
 	check("waiting")
 }
 
-func TestSchedulingProjectionSkipsTerminalAndProgressedRuns(t *testing.T) {
+func TestSchedulingProjectionSkipsTerminalAndProgressedListRows(t *testing.T) {
 	service := &API{schedulingObserver: schedulingObserverFunc(func(context.Context, model.Run) (*model.ExecutionObservation, error) {
 		t.Fatal("unexpected live observation")
 		return nil, nil
@@ -150,7 +151,7 @@ func TestSchedulingProjectionSkipsTerminalAndProgressedRuns(t *testing.T) {
 		}
 	}
 	for _, state := range []model.StepStatus{model.StepRunning, model.StepPassed, model.StepFailed, model.StepSkipped} {
-		if result := service.scheduling(t.Context(), model.Run{Status: model.RunRunning}, []model.StepResult{{Status: state}}); result != nil {
+		if result := service.observeScheduling(t.Context(), model.Run{Status: model.RunRunning}, []model.StepResult{{Status: state}}, false); result != nil {
 			t.Fatalf("progressed=%#v", result)
 		}
 	}
@@ -341,5 +342,65 @@ func TestWaitSchedulingAgeIncludesLongPoll(t *testing.T) {
 	}
 	if !response.StillRunning || response.Scheduling == nil || response.Scheduling.AgeSeconds < 1 {
 		t.Fatalf("stale observation age=%#v", response.Scheduling)
+	}
+}
+
+func TestSchedulingDeadlineVisibleAfterProgressWithoutChangingDurableStatus(t *testing.T) {
+	fixture := newControlFixture(t)
+	ctx := t.Context()
+	enqueued, err := fixture.scheduler.EnqueueCI(ctx, CIRequest{EventID: "deadline-observation", Repository: fixture.repo, Branch: "feature/deadline", SHA: strings.Repeat("a", 40), Actor: "agent@host"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = fixture.store.ClaimNextRun(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = fixture.store.SetRunJobName(ctx, enqueued.ID, "wf"); err != nil {
+		t.Fatal(err)
+	}
+	run, err := fixture.store.MarkRunSubmitted(ctx, enqueued.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = fixture.store.PutStepResult(ctx, model.StepResult{RunID: run.ID, Burn: "test", Step: "unit", Status: model.StepPassed, DeclaredSize: periapsis.Size("S")}); err != nil {
+		t.Fatal(err)
+	}
+	service := fixture.api(t)
+	service.schedulingObserver = schedulingObserverFunc(func(ctx context.Context, _ model.Run) (*model.ExecutionObservation, error) {
+		if deadline, ok := ctx.Deadline(); !ok || time.Until(deadline) > 2*time.Second {
+			t.Fatal("unbounded observation")
+		}
+		return &model.ExecutionObservation{State: "deadline_exceeded", Reason: "DeadlineExceeded", Phase: "Failed", Message: model.ExecutionDeadlineMessage, ReconciliationLagSeconds: ptr.To(int64(3080))}, nil
+	})
+	status, err := service.status(ctx, fixture.repo.Name, run.SHA, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status.Status != "running" || status.DisplayStatus != "deadline-exceeded" || status.Scheduling.Execution.Reason != "DeadlineExceeded" {
+		t.Fatalf("status = %+v", status)
+	}
+	value, err := service.CallTool(ctx, api.Actor{Identity: "agent@host"}, "run_get", json.RawMessage(`{"id":"`+run.ID+`"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	detail := value.(RunDetailResponse)
+	if detail.Run.DisplayStatus != "deadline-exceeded" || *detail.Scheduling.Execution.ReconciliationLagSeconds != 3080 {
+		t.Fatalf("detail = %+v", detail)
+	}
+	stored, err := fixture.store.Run(ctx, run.ID)
+	if err != nil || stored.Status != model.RunRunning || stored.FinishedAt != nil {
+		t.Fatalf("read mutated execution state: %+v %v", stored, err)
+	}
+	for _, state := range []string{"deadline_elapsed", "terminal_observed"} {
+		presented := presentationRun(run)
+		applyExecutionDisplay(&presented, &model.RunScheduling{Message: "Awaiting finalization.", Execution: &model.ExecutionObservation{State: state}})
+		if presented.DisplayStatus != "running" {
+			t.Fatal("unconfirmed expiry changed display status")
+		}
+	}
+	terminal := run
+	terminal.Status, terminal.Error = model.RunFailed, "Step exceeded its deadline"
+	if got := presentationRun(terminal); got.DisplayStatus != "deadline-exceeded" {
+		t.Fatal("retained terminal deadline reason hidden")
 	}
 }

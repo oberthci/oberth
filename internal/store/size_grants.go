@@ -19,8 +19,8 @@ import (
 const DefaultMaxRunSize = periapsis.L
 
 // SizeGrant raises one repository's maximum admission size. It belongs to a
-// durable repository ID, never an ambiguous name. An active grant also permits
-// automatic highest queue priority for this repository's tag/release runs.
+// durable repository ID, never an ambiguous name. Revoking also disables the
+// automatic tag boost; granting re-enables it within the maximum size.
 type SizeGrant struct {
 	RepoID    int64          `json:"repo_id"`
 	MaxSize   periapsis.Size `json:"max_size"`
@@ -79,7 +79,8 @@ func (s *Store) SizeGrant(ctx context.Context, repoID int64) (SizeGrant, error) 
 // SetSizeGrant grants (max non-empty) or revokes (max empty) a repository's
 // size maximum, with its audit entry in the same transaction. Granting over
 // an active grant replaces its maximum; granting the maximum already active,
-// or revoking when none is active, is an invalid state.
+// or revoking an already revoked grant, is an invalid state. A first revoke
+// records an opt-out even when no size grant was ever needed.
 func (s *Store) SetSizeGrant(ctx context.Context, repoID int64, actor string, max periapsis.Size) (SizeGrant, error) {
 	if repoID <= 0 || strings.TrimSpace(actor) == "" {
 		return SizeGrant{}, fmt.Errorf("%w: repository and actor are required", ErrInvalid)
@@ -115,19 +116,20 @@ func (s *Store) SetSizeGrant(ctx context.Context, repoID int64, actor string, ma
 	switch {
 	case allow && active && periapsis.Size(currentSize) == max:
 		return SizeGrant{}, fmt.Errorf("%w: size grant %s is already active", ErrInvalidState, max)
-	case !allow && !active:
-		return SizeGrant{}, fmt.Errorf("%w: size grant is not active", ErrInvalidState)
+	case !allow && revoked.Valid:
+		return SizeGrant{}, fmt.Errorf("%w: size grant is already revoked", ErrInvalidState)
 	case allow:
 		_, err = tx.ExecContext(ctx, `INSERT INTO size_grants(repo_id,max_size,granted_by,granted_at) VALUES(?,?,?,?)
 ON CONFLICT(repo_id) DO UPDATE SET max_size=excluded.max_size,granted_by=excluded.granted_by,granted_at=excluded.granted_at,revoked_by='',revoked_at=NULL`,
 			repoID, string(max), actor, now)
 	default:
-		_, err = tx.ExecContext(ctx, `UPDATE size_grants SET revoked_by=?,revoked_at=? WHERE repo_id=? AND revoked_at IS NULL`, actor, now, repoID)
+		_, err = tx.ExecContext(ctx, `INSERT INTO size_grants(repo_id,max_size,granted_by,granted_at,revoked_by,revoked_at) VALUES(?,?,?,?,?,?)
+ON CONFLICT(repo_id) DO UPDATE SET revoked_by=excluded.revoked_by,revoked_at=excluded.revoked_at`, repoID, string(DefaultMaxRunSize), actor, now, actor, now)
 	}
 	if err != nil {
 		return SizeGrant{}, err
 	}
-	details, err := json.Marshal(map[string]any{"repo_id": repoID, "max_size": string(max), "previous_max_size": previous, "tag_priority": allow, "previous_tag_priority": active})
+	details, err := json.Marshal(map[string]any{"repo_id": repoID, "max_size": string(max), "previous_max_size": previous, "automatic_tag_priority_enabled": allow, "previous_automatic_tag_priority_enabled": !revoked.Valid})
 	if err != nil {
 		return SizeGrant{}, err
 	}

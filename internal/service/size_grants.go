@@ -62,6 +62,9 @@ func (service *API) sizeGrantTool(ctx context.Context, actor api.Actor, name, re
 	if err != nil {
 		return nil, err
 	}
+	if err := service.notifyPriorityChange(ctx); err != nil {
+		return nil, err
+	}
 	current := store.DefaultMaxRunSize
 	if grant.RevokedAt == nil {
 		current = grant.MaxSize

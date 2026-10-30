@@ -267,6 +267,23 @@ credentialed tier and are not gated, so a reviewed release.yaml keeps its size. 
 head of the admission queue, the runs behind it say so: "blocked behind
 <repo>/<ref> (XL, needs a full drain)".
 
+When deploying the [release-priority changes](docs/release-priority.md) held for
+v0.17.72, check existing size-grant state before upgrading: an old revoked grant
+now disables that repository's automatic release boost. An administrator should
+inspect these repositories:
+
+```bash
+oberth mcp call size_grant_get '{"repo":"oberth"}'
+oberth mcp call size_grant_get '{"repo":"cloudtaser-wrapper"}'
+oberth mcp call size_grant_get '{"repo":"cloudtaser-ebpf"}'
+```
+
+`revoked` disables the automatic boost; `never_granted` enables it within L.
+If priority should be re-enabled, an admin grants L (or XL when appropriate)
+with `size_grant`. Only the oldest waiting tag per repository gets the boost;
+this caps waiting tags, not a continuous stream. An oversized tag uses normal
+order but holds that repository's waiting-tag slot until admission or finish.
+
 `oberth.ci/size-by-trigger` sizes each kind of run separately, so a heavy
 gate (a kernel matrix, say) can hold the host only on promotion and nightly
 runs while branch pushes stay small. Triggers are `branch`, `promotion` and

@@ -27,20 +27,33 @@ CREATE TABLE IF NOT EXISTS run_priority_overrides (
 ) WITHOUT ROWID;`
 
 // These correlated expressions also work in RETURNING and in run-list CTEs.
-// Inner priority tables have no id/ref columns, so those bind to the outer run.
+// Priority tables do not shadow id/ref; run-list CTEs alias their rows as runs.
 // Apply/plan cancellation guards protect external state, not queue urgency: those
 // triggers remain ordinary work unless an admin pattern/bump or aging raises them.
-// Tag/release fields are pusher-controlled; require an explicit active size grant
-// (including L) before giving them installation-wide priority. Grant/revoke audits
-// record this capability. Evaluate it on reads so old reruns cannot bypass revocation.
-const tagReleaseSQL = `(release=1 OR ref_kind='tag' OR trigger IN ('tag','release'))`
-const tagPriorityGrantSQL = `(repo_id IN (SELECT repo_id FROM size_grants WHERE revoked_at IS NULL))`
-const priorityTagReleaseSQL = `(` + tagReleaseSQL + ` AND ` + tagPriorityGrantSQL + `)`
-const naturalHighestSQL = `(trigger='promotion' OR ` + priorityTagReleaseSQL + `)`
+// Only the server's tag-ref classification can get automatic release urgency.
+// A branch cannot gain it through its name, release flag or trigger spelling.
+// Only the oldest waiting tag per repository gets the automatic boost. Claimed
+// runs still waiting for weight count too; an explicit revoke disables the boost.
+// Size eligibility is checked after exact checkout, at the weighted gate.
+const priorityTagReleaseSQL = `(ref_kind='tag' AND (release=1 OR trigger IN ('tag','release')))`
+const tagPriorityEnabledSQL = `NOT EXISTS (SELECT 1 FROM size_grants AS priority_grant WHERE priority_grant.repo_id=runs.repo_id AND priority_grant.revoked_at IS NOT NULL)`
+
+// v30 fills every durable admission_sequence. Use its existing status/order
+// index to search waiting work, rather than walking a repository's log history.
+const oldestWaitingTagSQL = `NOT EXISTS (
+ SELECT 1 FROM runs AS earlier_tag INDEXED BY runs_admission_idx
+ WHERE earlier_tag.status IN ('queued','running') AND earlier_tag.started_at IS NULL
+ AND earlier_tag.repo_id=runs.repo_id AND earlier_tag.ref_kind='tag'
+ AND (earlier_tag.release=1 OR earlier_tag.trigger IN ('tag','release'))
+ AND (earlier_tag.admission_sequence,earlier_tag.queue_sequence) <
+     (COALESCE(runs.admission_sequence,runs.queue_sequence),runs.queue_sequence)
+)`
+const automaticTagPrioritySQL = `(` + priorityTagReleaseSQL + ` AND ` + tagPriorityEnabledSQL + ` AND ` + oldestWaitingTagSQL + `)`
+const naturalHighestSQL = `(trigger='promotion' OR ` + automaticTagPrioritySQL + `)`
 const overridePrioritySQL = `(SELECT priority FROM run_priority_overrides WHERE run_id=id)`
 const rcPatternSQL = `(SELECT pattern FROM queue_priority_patterns WHERE ref_kind='branch' AND ref GLOB pattern ORDER BY pattern LIMIT 1)`
 const basePrioritySQL = `CASE WHEN ` + naturalHighestSQL + ` THEN 'highest' WHEN ` + overridePrioritySQL + ` IS NOT NULL THEN ` + overridePrioritySQL + ` WHEN ` + rcPatternSQL + ` IS NOT NULL THEN 'high' ELSE 'normal' END`
-const priorityReasonSQL = `CASE WHEN ` + priorityTagReleaseSQL + ` THEN 'tag/release run: active repository size grant' WHEN trigger='promotion' THEN 'promotion run' WHEN ` + overridePrioritySQL + ` IS NOT NULL THEN 'admin bump: ' || (SELECT reason FROM run_priority_overrides WHERE run_id=id) WHEN ` + rcPatternSQL + ` IS NOT NULL THEN 'release-candidate pattern: ' || ` + rcPatternSQL + ` ELSE 'ordinary run' END`
+const priorityReasonSQL = `CASE WHEN trigger='promotion' THEN 'promotion run' WHEN ` + automaticTagPrioritySQL + ` THEN '` + model.TagReleasePriorityReason + `' WHEN ` + overridePrioritySQL + ` IS NOT NULL THEN 'admin bump: ' || (SELECT reason FROM run_priority_overrides WHERE run_id=id) WHEN ` + rcPatternSQL + ` IS NOT NULL THEN 'release-candidate pattern: ' || ` + rcPatternSQL + ` WHEN ` + priorityTagReleaseSQL + ` THEN CASE WHEN NOT ` + tagPriorityEnabledSQL + ` THEN 'tag/release automatic priority disabled by size_revoke' ELSE 'tag/release waiting behind an earlier tag of this repository' END ELSE 'ordinary run' END`
 
 // priorityOrderSQL shares the effective class with the in-memory gate. The
 // clock is rendered from an int64, never request text, and is fixed per query.

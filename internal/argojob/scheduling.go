@@ -5,6 +5,7 @@ import (
 	"errors"
 	"sort"
 	"strings"
+	"time"
 
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
@@ -37,6 +38,10 @@ func (controller *Controller) ObserveScheduling(ctx context.Context, name, runID
 	if workflow.Status.Message != "" {
 		result.Message = safeWorkflowMessage(workflow.Status.Message)
 	}
+	if workflow.Status.Message == "" && workflow.Status.Phase == wfv1.WorkflowRunning {
+		result.Message = "Workflow execution is running."
+	}
+	observeWorkflowDeadline(workflow, result, time.Now().UTC())
 	// Sort only a bounded sample using insertion, avoiding an allocation for every
 	// node in a large Workflow. No node name is returned: expanded names can carry
 	// user-supplied parameter values.
@@ -77,12 +82,20 @@ func (controller *Controller) ObserveScheduling(ctx context.Context, name, runID
 		return result, nil
 	}
 	result.Truncated = result.Truncated || pods.Continue != "" || len(pods.Items) > maxSchedulingItems
+	var deadlineNodes map[string]bool
+	if deadlineVerdictVisible(workflow, result) {
+		deadlineNodes = currentDeadlineNodes(workflow)
+	}
 	for _, pod := range pods.Items[:min(len(pods.Items), maxSchedulingItems)] {
 		owner := metav1.GetControllerOf(&pod)
 		if owner == nil || owner.UID != workflow.UID || owner.Name != name || owner.Kind != "Workflow" || owner.APIVersion != "argoproj.io/v1alpha1" {
 			continue
 		}
-		result.Pods = append(result.Pods, podSchedulingReason(pod))
+		reason := podSchedulingReason(pod)
+		result.Pods = append(result.Pods, reason)
+		if reason.Reason == "DeadlineExceeded" && deadlineNodes[pod.Annotations["workflows.argoproj.io/node-id"]] {
+			markDeadlineExceeded(result)
+		}
 	}
 	return result, nil
 }
@@ -107,6 +120,8 @@ func safeWorkflowMessage(message string) string {
 		return "Waiting for a workflow synchronization lock."
 	case strings.HasPrefix(message, "Pending "):
 		return "Workflow node is pending."
+	case model.IsExecutionDeadlineReason(message):
+		return model.ExecutionDeadlineMessage
 	case message == "Pod was deleted":
 		return "Workflow pod was deleted."
 	default:
@@ -116,6 +131,10 @@ func safeWorkflowMessage(message string) string {
 
 func podSchedulingReason(pod corev1.Pod) model.SchedulingReason {
 	result := model.SchedulingReason{Phase: safePhase(string(pod.Status.Phase))}
+	if pod.Status.Reason == "DeadlineExceeded" {
+		result.Reason, result.Message = "DeadlineExceeded", model.ExecutionDeadlineMessage
+		return result
+	}
 	for _, condition := range pod.Status.Conditions {
 		if condition.Type == corev1.PodScheduled && condition.Status == corev1.ConditionFalse {
 			result.Reason = "Unscheduled"

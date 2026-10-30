@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/pkg/periapsis"
 )
 
 // QueuePriorityStore is an installation-wide admin capability. It is not
@@ -117,6 +119,7 @@ func (scheduler *Scheduler) BumpRunPriority(ctx context.Context, actor, id strin
 	for _, r := range gate.waiters {
 		if r.runID == id {
 			r.priority, r.priorityReason = run.Priority, run.PriorityReason
+			r.priorityOverride, r.priorityOverrideReason = run.PriorityOverride, run.PriorityOverrideReason
 		}
 	}
 	gate.sortWaitersLocked()
@@ -162,11 +165,26 @@ func (scheduler *Scheduler) refreshPriorities(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	// Read grant state outside the gate as well. An unavailable size limit
+	// drops automatic urgency but must never fail a release or abort refresh.
+	maxima := make(map[int64]periapsis.Size)
+	lookupFailed := make(map[int64]bool)
+	for _, run := range runs {
+		if _, seen := maxima[run.RepoID]; seen || run.RefKind != model.RefTag {
+			continue
+		}
+		maximum, err := scheduler.releasePriorityMaximum(ctx, run)
+		maxima[run.RepoID] = maximum
+		lookupFailed[run.RepoID] = err != nil
+	}
 	gate.mu.Lock()
 	defer gate.mu.Unlock()
 	for _, r := range gate.waiters {
 		if run, ok := runs[r.runID]; ok {
+			r.priorityMaximum = maxima[run.RepoID]
+			r.priorityLookupFailed = lookupFailed[run.RepoID]
 			r.priority, r.priorityReason = run.Priority, run.PriorityReason
+			r.priorityOverride, r.priorityOverrideReason = run.PriorityOverride, run.PriorityOverrideReason
 		}
 	}
 	gate.sortWaitersLocked()
@@ -216,7 +234,7 @@ func (scheduler *Scheduler) priorityDispatchAvailable(ctx context.Context, activ
 }
 
 func (r *admissionReservation) effectivePriority(now time.Time) model.RunPriority {
-	run := model.Run{Priority: r.priority, PriorityReason: r.priorityReason, QueuedAt: r.queuedAt}
+	run := r.priorityRun()
 	p, _ := run.EffectivePriority(now)
 	return p
 }
@@ -224,3 +242,64 @@ func (r *admissionReservation) effectivePriority(now time.Time) model.RunPriorit
 // pollPriority is a bounded wake for aging and external configuration changes.
 // The normal notification path applies local admin changes immediately.
 const priorityPollInterval = 15 * time.Second
+
+// priorityRun applies the exact-checkout size restriction every time priority
+// is used, including after polling/admin refresh. Aging still applies normally.
+func (r *admissionReservation) priorityRun() model.Run {
+	run := model.Run{Priority: r.priority, PriorityReason: r.priorityReason, QueuedAt: r.queuedAt}
+	maximum := r.priorityMaximum
+	if maximum == "" {
+		maximum = store.DefaultMaxRunSize
+	}
+	if run.PriorityReason == model.TagReleasePriorityReason && (r.priorityLookupFailed || (r.prepared && sizeRank(r.size) > sizeRank(maximum))) {
+		run.Priority = model.PriorityNormal
+		run.PriorityReason = fmt.Sprintf("tag/release automatic priority withheld: size %s exceeds repository maximum %s", r.size, maximum)
+		if r.priorityLookupFailed {
+			run.PriorityReason = "tag/release automatic priority withheld: repository size limit unavailable"
+		}
+		if r.priorityOverride != "" {
+			run.Priority = r.priorityOverride
+			run.PriorityReason = "admin bump: " + r.priorityOverrideReason
+		}
+	}
+	return run
+}
+
+// releasePriorityMaximum is advisory: callers drop automatic urgency on error,
+// never fail the run. Log the cause without depending on an audit DB write.
+func (scheduler *Scheduler) releasePriorityMaximum(ctx context.Context, run model.Run) (periapsis.Size, error) {
+	if limiter, ok := scheduler.store.(RunSizeLimiter); ok && run.RefKind == model.RefTag {
+		maximum, err := limiter.MaxRunSize(ctx, run.RepoID)
+		if err != nil {
+			log.Printf("WARN: release priority withheld run=%s repo_id=%d reason=size_limit_unavailable error=%v", run.ID, run.RepoID, err)
+			return "", fmt.Errorf("read release priority size limit: %w", err)
+		}
+		return maximum, nil
+	}
+	return store.DefaultMaxRunSize, nil
+}
+
+// AdmissionPriority reports the gate's exact-checkout priority for run_get and
+// scheduling messages; before checkout the durable classification is provisional.
+func (scheduler *Scheduler) AdmissionPriority(sequence int64) (model.RunPriority, string, bool) {
+	gate := scheduler.admission
+	gate.mu.Lock()
+	defer gate.mu.Unlock()
+	r := gate.reservations[sequence]
+	if r == nil || !r.prepared {
+		return "", "", false
+	}
+	run := r.priorityRun()
+	return run.Priority, run.PriorityReason, true
+}
+
+func (service *API) withAdmissionPriority(run model.Run) model.Run {
+	if observer, ok := service.admission.(interface {
+		AdmissionPriority(int64) (model.RunPriority, string, bool)
+	}); ok {
+		if priority, reason, found := observer.AdmissionPriority(run.QueueSequence); found {
+			run.Priority, run.PriorityReason = priority, reason
+		}
+	}
+	return run
+}

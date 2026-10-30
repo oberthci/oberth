@@ -59,11 +59,14 @@ type admissionReservation struct {
 	gate     *weightedAdmission
 	sequence int64
 	// order retains restart FIFO position; sequence stays the unique run key.
-	order          int64
-	priority       model.RunPriority
-	priorityReason string
-	queuedAt       time.Time
-	runID          string
+	order int64
+
+	priority               model.RunPriority
+	priorityReason         string
+	priorityOverride       model.RunPriority
+	priorityOverrideReason string
+	queuedAt               time.Time
+	runID                  string
 	// repoID, repo and ref identify the run when it blocks the queue head
 	// (#1021); preparedAt is when it started waiting for weight.
 	repoID     int64
@@ -87,7 +90,10 @@ type admissionReservation struct {
 	backfilled bool
 	kubeVirt   KubeVirtResources
 	size       periapsis.Size
-	weight     int
+	// priorityMaximum caps only automatic tag urgency, not release execution.
+	priorityMaximum      periapsis.Size
+	priorityLookupFailed bool
+	weight               int
 	// group is the repository-scoped key of the run's concurrency group and
 	// groupName the name the repository declared; both empty when ungrouped.
 	group     string
@@ -120,13 +126,15 @@ var errAdmissionAbandoned = errors.New("service: admission abandoned: run is no 
 // admissionRequest is what a claimed run knows once its immutable checkout has
 // been read: its declared size and, optionally, its repository-scoped group.
 type admissionRequest struct {
-	RunID    string
-	RepoID   int64
-	Repo     string
-	Ref      string
-	Size     periapsis.Size
-	Group    string
-	KubeVirt *KubeVirtResources
+	RunID                string
+	RepoID               int64
+	Repo                 string
+	Ref                  string
+	Size                 periapsis.Size
+	PriorityMaximum      periapsis.Size
+	PriorityLookupFailed bool
+	Group                string
+	KubeVirt             *KubeVirtResources
 	// RefKind and SHA key the durable head-wait origin; HeadSince is that
 	// origin when one was recorded before a restart; Estimate is the run's
 	// predicted duration from history (#1085).
@@ -202,6 +210,7 @@ func (gate *weightedAdmission) reservePriorityRun(sequence, order int64, run mod
 	reservation.runID, reservation.repoID, reservation.ref = run.ID, run.RepoID, run.Ref
 	reservation.refKind, reservation.sha = run.RefKind, run.SHA
 	reservation.priority, reservation.priorityReason, reservation.queuedAt = run.Priority, run.PriorityReason, run.QueuedAt
+	reservation.priorityOverride, reservation.priorityOverrideReason = run.PriorityOverride, run.PriorityOverrideReason
 	gate.mu.Lock()
 	gate.reservations[sequence] = reservation
 	gate.waiters = append(gate.waiters, reservation)
@@ -290,6 +299,8 @@ func (reservation *admissionReservation) acquireRequest(ctx context.Context, req
 		reservation.preparedAt = time.Now().UTC()
 	}
 	reservation.size = size
+	reservation.priorityMaximum = request.PriorityMaximum
+	reservation.priorityLookupFailed = request.PriorityLookupFailed
 	reservation.weight = gate.weights.of(size, gate.capacity)
 	if request.Group != "" {
 		reservation.group = concurrencyGroupKey(request.RepoID, request.Group)

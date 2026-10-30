@@ -444,11 +444,22 @@ trust assumptions and complete invalidation rules.
   XL), S ≤ M ≤ L ≤ XL; sizes left unset keep their defaults. The queue-head
   message names a finite XL by weight ("XL · 11w") and a whole-budget XL as
   "needs a full drain". S packing uses the configured S and M weights.
-- Run priority is computed server-side: `highest` for tag/release and promotion
-  runs, `high` for branch refs matching administrator RC globs, otherwise
-  `normal`. Repositories/pipelines cannot supply priority. Both durable claims
+- Run priority is computed server-side: `highest` for promotion runs and the
+  oldest waiting server-classified tag per repository (tag ref plus release
+  flag or tag/release trigger). Claimed but unadmitted tags count as waiting;
+  later tags stay normal. No grant record enables the automatic tag boost up
+  to L. Exact-checkout size above the repository maximum withholds that boost
+  and explains why in admission/run projections; the tag keeps its execution
+  size. Before checkout priority is provisional. `size_revoke` durably disables
+  the automatic boost, including on never-granted repos; `size_grant` with L/XL
+  re-enables it within the maximum. Existing revoked records also opt out.
+  Local MCP grant/revoke refreshes waiters immediately; CLI changes are polled.
+  Explicit admin bumps, promotions and aging remain independent. Branch
+  names/flags/triggers cannot claim automatic release priority. `high` is for
+  administrator RC globs, otherwise `normal`. Repositories/pipelines cannot
+  supply priority. Both durable claims
   and weighted admission sort by effective class, then original admission FIFO.
-  Normal work waiting 60 minutes joins `highest` with its original FIFO place;
+  Normal and high work waiting 60 minutes join `highest` with their original FIFO place;
   automatic restart refires preserve its wait and explicit admin bump. Existing
   grants are never preempted. Backfill/head-wait rules apply within each class;
   a waiting higher class prevents lower-class backfill. Group/VM parking still
@@ -463,9 +474,10 @@ trust assumptions and complete invalidation rules.
   one unadmitted run to `high`/`highest`; no lowering or preemption. Config and
   bump mutations use the audit gate and atomically append `queue.priority.config`
   / `run.priority` with actor, previous value and reason. Waiting reservations
-  refresh on notification and a one-second poll; admin calls refresh local
+  refresh on notification and a 15-second poll; admin calls refresh local
   waiting reservations before returning. Schema v34 stores only admin patterns
   and per-run overrides, never repository declarations.
+  See [release-priority.md](docs/release-priority.md) for resource and fairness bounds.
 - Bounded backfill (#1085): when the queue head (the first claimed,
   prepared, unparked run) does not fit, later runs that fit the spare weight
   are admitted beside it, marked `backfilled`, until the head has waited
@@ -541,7 +553,9 @@ trust assumptions and complete invalidation rules.
   and audited as `size.grant` / `size.revoke`. The XL size grant applies to
   branch, promotion and schedule runs; tag/release runs are the credentialed
   tier and are not gated: they keep their reviewed release.yaml size, XL
-  included, without a grant.
+  included, without a grant. Automatic queue urgency is limited to the size
+  maximum; oversized tags use normal order and bounded backfill. Size audits
+  also record `automatic_tag_priority_enabled` and its previous value.
 - The server-owned workflow parameter `oberth-trigger`
   (`branch|promotion|schedule|tag`, the same durable run trigger) is set on
   every document that declares or mentions it, so `when:` guards can skip
@@ -1185,6 +1199,13 @@ trust assumptions and complete invalidation rules.
   terminal-only sequence paging; `view=active` remains an unpaged, bounded
   deprecated compatibility view. Repository/ref filters and uplink scope apply
   to both.
+  Detailed status/run reads can also expose an ephemeral Argo deadline and
+  finalization-lag observation after steps have progressed. The clock is the
+  submitted budget plus Argo's Workflow start, not weighted admission. Only
+  explicit controller/current-attempt Pod deadline evidence yields the display
+  label `deadline-exceeded`; elapsed time or exit 143 alone does not. Durable
+  terminal state, admission release and replay evidence are unchanged. See
+  [workflow-deadlines.md](docs/workflow-deadlines.md).
   Durable `Status` values are unchanged and `RunStatus.Valid` still refuses
   the read-only `waiting` projection.
 
