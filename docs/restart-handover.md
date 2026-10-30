@@ -33,9 +33,9 @@ Transient exec/transport errors allow **three attempts total (two retries)**.
 Each target-read/exec attempt has a 20-second budget; backoffs have one- and
 two-second bases with ±50% jitter. A final failed exec gets one reconciliation
 read of at most two seconds, for at most 66.5 seconds in that exec sequence,
-shortened by caller cancellation. Remote exits get one reconciliation read
-inside their attempt and no re-exec. A verified waiter that terminated with
-exit code zero proves that the marker was committed, including after a lost
+shortened by caller cancellation. Remote exits get one caller-bound
+reconciliation read of at most two seconds and no re-exec, even if their stream
+deadline has expired. A verified waiter that terminated with exit code zero proves that the marker was committed, including after a lost
 acknowledgement on the final attempt.
 
 Each attempt rechecks the Pod UID, Workflow owner, deletion state and waiter
@@ -73,7 +73,6 @@ Bounded `executor_identity` logs record the Workflow, Pod UID, stage, reason
 class and attempt, never token bytes or raw response bodies. A delivery error
 alone cannot establish whether an old failure was an API timeout, a
 kubelet/runtime exec delay or a lost response.
-
 
 On SIGTERM the server marks `/readyz` unavailable before cancelling scheduler
 workers. New HTTP/MCP requests receive 503 with `Retry-After: 1`; `/healthz` and

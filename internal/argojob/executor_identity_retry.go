@@ -257,7 +257,15 @@ func (controller *Controller) execExecutorIdentity(ctx context.Context, workflow
 			err = controller.seeder.exec(attemptCtx, workflow.Namespace, pod.Name, executorTokenWaiter,
 				[]string{"sh", "-c", executorIdentityDeliveryCommand}, bytes.NewReader(bytes.Clone(payload)), io.Discard, io.Discard)
 			if err == nil || executorIdentityErrorClass(err) == "remote_exit" {
-				err = controller.reconcileExecutorIdentity(attemptCtx, workflow, original, launcher, err)
+				if err == nil {
+					err = controller.reconcileExecutorIdentity(attemptCtx, workflow, original, launcher, nil)
+				} else {
+					// A remote exit may arrive exactly as the stream deadline expires.
+					// Its one reconciliation read still needs a usable caller-bound budget.
+					reconcileCtx, stop := context.WithTimeout(ctx, 2*time.Second)
+					err = controller.reconcileExecutorIdentity(reconcileCtx, workflow, original, launcher, err)
+					stop()
+				}
 				reconciled = true
 				if errors.Is(err, errExecutorIdentityTargetGone) {
 					cancel()

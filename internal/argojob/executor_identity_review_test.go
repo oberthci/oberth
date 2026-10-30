@@ -21,6 +21,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/fake"
 	ktesting "k8s.io/client-go/testing"
+	kexec "k8s.io/client-go/util/exec"
 )
 
 func TestExecutorIdentityAPILoadBeforeExecDefersWithoutMinting(t *testing.T) {
@@ -103,26 +104,31 @@ func TestExecutorIdentityTokenRequestHasOneBoundedRetry(t *testing.T) {
 }
 
 func TestExecutorIdentityFinalDeadlineCancellationReconcilesCommit(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		controller, wf, pod, _ := executorRetryFixture(t)
-		calls := 0
-		controller.seeder.exec = func(ctx context.Context, _, _, _ string, _ []string, _ io.Reader, _, _ io.Writer) error {
-			calls++
-			<-ctx.Done()
-			if calls == 3 {
-				current := pod.DeepCopy()
-				current.Status.InitContainerStatuses[0].State = corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{ExitCode: 0}}
-				if _, err := controller.kube.CoreV1().Pods(wf.Namespace).Update(t.Context(), current, metav1.UpdateOptions{}); err != nil {
-					t.Fatal(err)
+	for _, remoteExit := range []bool{false, true} {
+		synctest.Test(t, func(t *testing.T) {
+			controller, wf, pod, _ := executorRetryFixture(t)
+			calls := 0
+			controller.seeder.exec = func(ctx context.Context, _, _, _ string, _ []string, _ io.Reader, _, _ io.Writer) error {
+				calls++
+				<-ctx.Done()
+				if calls == 3 {
+					current := pod.DeepCopy()
+					current.Status.InitContainerStatuses[0].State = corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{ExitCode: 0}}
+					if _, err := controller.kube.CoreV1().Pods(wf.Namespace).Update(t.Context(), current, metav1.UpdateOptions{}); err != nil {
+						t.Fatal(err)
+					}
 				}
+				if calls == 3 && remoteExit {
+					return kexec.CodeExitError{Err: errors.New("waiter stopped exec"), Code: 137}
+				}
+				return context.Canceled // client-go can translate an expired stream to canceled.
 			}
-			return context.Canceled // client-go can translate an expired stream to canceled.
-		}
-		delivered := map[types.UID]bool{}
-		if err := controller.deliverExecutorTokens(t.Context(), wf, delivered); err != nil || calls != 3 || !delivered[pod.UID] {
-			t.Fatalf("deadline cancellation/final commit lost: calls=%d err=%v", calls, err)
-		}
-	})
+			delivered := map[types.UID]bool{}
+			if err := controller.deliverExecutorTokens(t.Context(), wf, delivered); err != nil || calls != 3 || !delivered[pod.UID] {
+				t.Fatalf("deadline cancellation/final commit lost: calls=%d err=%v", calls, err)
+			}
+		})
+	}
 }
 
 func TestExecutorIdentityPostExecRevalidatesAndRetiresBoundToken(t *testing.T) {
