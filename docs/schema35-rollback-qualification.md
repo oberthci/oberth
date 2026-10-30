@@ -1,75 +1,112 @@
-# Schema 35 rollback qualification — database restore only
+# Schema-35 emergency restore qualification
 
-Qualification date: 2026-10-30T20:47:16.817453+00:00.
-Source implementations: released v0.17.72 `3f9cac207e235235d84a3965c90837e24f40a062` (schema 34)
-and approved RCA UX R2 `f9cbe94297c37a87b86dbb22158b36820a9f0d1a` (schema 35).
+The named operator procedure is now [the v0.17.73 runbook](v073-upgrade-runbook.md),
+not an unspecified offline restore. This qualification supersedes the earlier
+store-API-only claim. **Rollback is verified pre-upgrade database restore only.**
+No index/ledger edits and no ordinary Helm rollback against schema 35.
 
-## Decision
+## Real operator-path rehearsal, 2026-10-30
 
-Schema 35 adds `runs_latest_ref_idx`, but migration policy remains forward-only.
-**Rollback is database restore only.** v0.17.72 refuses a schema-35 database or
-backup with ErrSchemaTooNew. Helm rollback alone cannot make it start. Dropping
-the index or deleting migration-ledger rows is not a supported rollback path.
-The earlier local index/ledger-removal experiment is not product qualification
-and is superseded by this restore-only result and policy.
+A new, disposable kind cluster `oberth-schema35-rehearsal` ran real Helm 4.3.1,
+Kubernetes v1.37.0, a PVC, and actual Oberth servers. Source pins:
 
-**Take and verify a fresh backup immediately before the upgrade**, using the
-current server's supported encrypted backup/verification workflow. Confirm the
-backup's actual schema is 34, retain a protected off-volume copy and its restore
-keys, and record its audit head and the current external witness state. The
-binary's `version --schema` reports support, not the database's actual ledger.
-A schema-35 backup cannot be the rollback backup for a schema-34 binary.
+- Old CLI/server: released v0.17.72 `3f9cac207e235235d84a3965c90837e24f40a062`, schema 34.
+- New CLI/server: approved RCA UX R2 `f9cbe94297c37a87b86dbb22158b36820a9f0d1a`, schema 35.
+- Linux/arm64 server builds: Go 1.26.10, CGO disabled; FROM-scratch Git substrate
+  reused from the previously qualified local image, replacing only Oberth.
+  Darwin/arm64 operator CLIs: Go 1.27.2. Exact binary/image hashes in JSON.
+- Old/new chart templates/values schemas from those exact commits; only chart
+  version/appVersion metadata labelled the local lab versions. These are
+  rehearsal builds, not an assembled/published v0.17.73 release image.
+- Digest-pinned preloaded OpenBao 2.6.1 and BusyBox utility images. Preparation
+  downloaded pinned images; the exercise used local cluster endpoints and
+  preloaded images, without a production cluster or external witness. This
+  was not a network-egress-denied cluster test.
+- A real disposable OpenBao dev instance, Kubernetes auth role and generated
+  installation identities were used. No production key retrieval, CA rotation
+  or production OpenBao disaster recovery was exercised.
 
-## Closed-copy rehearsal
+The original proposed sequence failed on a real chart: `replicaCount=0` is
+rejected in both JSON schema and template validation. Skipping one validation
+would not fix it. The successful sequence uses a disposable old-chart
+maintenance copy whose **only** source difference is Deployment `replicas: 0`.
+Values remain at the required one. Both the real applied Deployment and Pod
+list were checked: exact old image, zero desired replicas, no server Pod,
+before any database replacement. No old server briefly ran against schema 35.
 
-Probe executables linked directly against the exact store implementations above
-ran offline in Linux/arm64 Go 1.26.10 (`oberth-1204-go:lab`, network disabled,
-GOMAXPROCS=2, CPUs 0–1). They used WriteVerifiedBackup and VerifyBackupArchive,
-not a raw copy of an open SQLite database. No server image/cluster was deployed.
-
-| Step | Result |
+| Rehearsed operation | Observed result |
 | --- | --- |
-| Seed schema 34 and nonempty audit chain | 1 run; audit head ID 1 |
-| Online snapshot and independently verify archive 34 | schema 34; integrity/FKs true; identical audit report |
-| Open with schema-35 implementation and write a failed source plus automatic child | schema 35; 3 runs; audit head ID 3 |
-| Open migrated DB with schema-34 implementation | ErrSchemaTooNew, database=35 binary=34 |
-| Verify schema-35 archive using old implementation | ErrSchemaTooNew |
-| Verify archive 34, restore its database into an empty destination, open with old implementation | schema 34; 1 run; exact original nonempty audit head retained |
-| Independent SQLite inspection of restored copy | integrity_check=ok; no FK violations; ledger max 34; no v35 index |
-| Corrupt an archive and verify it | rejected |
+| Real old server + CLI history-only backup to a fresh RSA recipient | CMS AES-GCM encrypted archive, verified actual schema 34, nonempty audit |
+| Old CLI `restore --inspect` | Full envelope/member/database integrity/FK/audit validation passed |
+| Helm upgrade to actual new server, record new audit data, new CLI backup | Actual snapshot schema 35, original prefix plus post-upgrade audit |
+| Stop writers and stage the old maintenance chart with old values | Deployment old image/replicas 0, zero server Pods |
+| Old CLI `restore --only history --dry-run` | Concrete swap plan and orphan deletion, no mutation |
+| Same old CLI command with `--yes` | Helper validates staged old image schema, uploads/verifies/swaps DB, retains original files, starts one old Pod |
+| Old rollout + version support + independent new backup/inspect | Ready, pinned old image, actual DB schema 34 with valid integrity/FKs/audit |
+| Re-apply unmodified normal old chart/values | Remains one old Ready Pod and schema 34 |
+| Real post-backup Workflow absent from restored DB | Deleted by the real restore CLI (no Workflow controller or task execution in this fixture) |
+| Decrypt independently verified archives and compare audit rows/hashes | Exact original nonempty prefix preserved, post-upgrade audit data absent, restore.completed appended |
+| Repeat using the runbook's literal Bash blocks, inserting a real upgrade between them | Bash syntax checks and whole sequence passed; schema 34 -> 35 -> 34 |
+| Witness-prefix screen | Empty local evidence/matching completion pass; ahead head, wrong hash, pending intent and unknown evidence refuse |
 
-The two post-upgrade run rows and their later audit history are absent after
-restore. This demonstrates real data loss at rollback, not preservation of
-post-upgrade writes. The schema-35 source copy remains at 3 runs; it was not
-modified into schema 34. **No migration-ledger/index edits were used.**
+First pass: backup held 2 audit entries, upgraded snapshot 4, restored snapshot
+3 (original two plus restore.completed). Literal-Bash pass: backup held 4,
+restored 5. This demonstrates real loss of post-backup audit history, not
+preservation of post-upgrade changes. Previous database files remain separately
+under `/data/pre-restore-<timestamp>/`; the restore does not turn them into
+schema 34. Compatibility identities and OpenBao data were retained through
+`--only history`. A read-only helper inspected both retained original databases:
+both remain schema 35, keep runs_latest_ref_idx and pass integrity checks. The
+throwaway cluster was removed after evidence collection; existing clusters were
+not changed.
 
-Verified pre-upgrade fixture archive SHA256: `ea95d7a55de56112d1a1634322ba86df0fb9f706a07863d6406b78d7459e78e8`.
-Log SHA256: `bf27fdf97e36b3d6910d151561cec7aadc9ec75b6ba719c96fab07d958fa8c58`. Handoff evidence: `schema35-restore-qualification-linux.log`,
-`schema35-restore-qualification-linux.json`, runner `schema35-restore-qualify-linux.py`.
-The JSON records exact synthetic fixture paths, both probe-source hashes and
-archive/restored-file hashes. A separate host rehearsal also passed.
+## Witness deadline and operational limits
 
-## Operational limits
+The first Rekor publication outside the backup's audit prefix can close
+ordinary restore. That can precede the upgrade, since backup records its own
+completion after its snapshot. Pending publication intents are uncertain
+external writes until reconciled. The runbook names the live argument/Helm
+setting, immutable continuity/intent ConfigMaps, exact backup prefix screen and
+required authenticated remote-history verification. Its local screen is a
+necessary refusal check, not Rekor receipt-signature verification or proof of
+complete remote history. This rehearsal configured local audit mode; no real
+external Rekor publication/rollback or production witness authorization was
+performed. An enabled installation with unprovable continuity must choose
+forward repair, without resetting/disabling witnesses.
 
-This qualifies store snapshot/schema/audit compatibility on synthetic copies.
-The fixtures contain no production data or secrets. Production OpenBao key
-retrieval, outer backup encryption/signature transport, external TSA/witness
-restore authorization and live Workflow/resource recovery were not exercised.
-The inner synthetic tar archives are plaintext test artifacts, not production
-backup instructions.
+History restore drops newer runs, tokens, uplinks and audit records and deletes
+orphan Workflows; it does not reverse external publishes/VMs/resources. The CLI
+rehearsal used no run executions, secrets grants or external publishes. The
+separate closed-copy store experiment below covers nonempty run-row loss and
+old-version refusal. History-only backup/restore does not recover OpenBao KV,
+policies/grants, chart values, identities or log/artifact files. Retain separate
+recovery material and preserve current DB/WAL/SHM and ownership before recovery.
+Actual production storage/PVC capacity/failure behavior needs its own rehearsal.
 
-Restoring loses all database changes after the backup; it does not undo external
-publishes, running Workflows, VM resources, OpenBao changes, chart values,
-identities or log/artifact files. Preserve their separate recovery state and
-ownership. A verified backup alone is not an operational rollback guarantee:
-external witnesses ahead of its audit head can refuse ordinary restore. Do not
-reset witnesses or erase audit evidence to force acceptance. If restore is not
-authorized by the installation's existing continuity policy, use forward repair
-or its explicitly approved disaster-recovery procedure.
+## Evidence delivered with the handoff
 
-Before any restore, stop all writers/controllers that can restart the new
-server, preserve the schema-35 DB/WAL/SHM, and use the qualified offline restore
-procedure. The pinned old chart/image must be installed before the server starts
-again, or the new binary will immediately migrate the restored copy back to 35.
-Repeat backup verification and restore feasibility on a fresh production backup
-right before deployment. This rehearsal performed no live or PVC operation.
+`SCHEMA35-RESTORE-CLI-QUALIFICATION.log` contains real commands, the failed
+replicaCount attempt and successful corrected restore, literal-Bash execution,
+independent archive checks and preserved-file checks.
+`SCHEMA35-RESTORE-CLI-QUALIFICATION.json` records exact pins/hashes, schema/audit
+checks, zero-replica/image/Pod assertions and witness-screen vectors. Runners,
+source hashes and the earlier missing store qualification log/JSON are included
+in `schema35-runbook-handoff.tar.gz`; its manifest records SHA256s. No private
+keys, kubeconfig, database, encrypted backup, server binary or image is in that
+handoff archive. The coordinator owns final image/chart pins and deployment.
+
+## Earlier closed-copy store qualification (retained, narrower evidence)
+
+The Linux Go1.26.10 store probes used WriteVerifiedBackup/VerifyBackupArchive:
+schema34 with one run/audit entry -> schema35 with three runs/audit entries ->
+old implementation refuses schema35 -> verified backup34 restores one run and
+its exact original audit head. Corrupted and schema35 archives were refused by
+the old verifier. Independent SQLite integrity/FK/schema/index checks passed.
+No migration ledger or index edits were used. This established database/schema
+compatibility but did not exercise `oberth restore` or Helm; the operator-path
+rehearsal above supplies that missing evidence.
+
+Retained evidence names: `schema35-restore-qualification-linux.log` and
+`schema35-restore-qualification-linux.json` (both now explicitly packaged),
+`schema35-restore-qualify-linux.py`, and exact old/new probe sources. The
+plaintext synthetic archives are test artifacts, not operator backup guidance.
