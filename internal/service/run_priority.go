@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/oberthci/oberth/internal/api"
@@ -164,24 +165,24 @@ func (scheduler *Scheduler) refreshPriorities(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	// Read grant state outside the gate as well. Any read error leaves the old
-	// snapshot intact; a grant refresh must never silently fail open.
+	// Read grant state outside the gate as well. An unavailable size limit
+	// drops automatic urgency but must never fail a release or abort refresh.
 	maxima := make(map[int64]periapsis.Size)
+	lookupFailed := make(map[int64]bool)
 	for _, run := range runs {
 		if _, seen := maxima[run.RepoID]; seen || run.RefKind != model.RefTag {
 			continue
 		}
 		maximum, err := scheduler.releasePriorityMaximum(ctx, run)
-		if err != nil {
-			return err
-		}
 		maxima[run.RepoID] = maximum
+		lookupFailed[run.RepoID] = err != nil
 	}
 	gate.mu.Lock()
 	defer gate.mu.Unlock()
 	for _, r := range gate.waiters {
 		if run, ok := runs[r.runID]; ok {
 			r.priorityMaximum = maxima[run.RepoID]
+			r.priorityLookupFailed = lookupFailed[run.RepoID]
 			r.priority, r.priorityReason = run.Priority, run.PriorityReason
 			r.priorityOverride, r.priorityOverrideReason = run.PriorityOverride, run.PriorityOverrideReason
 		}
@@ -250,9 +251,12 @@ func (r *admissionReservation) priorityRun() model.Run {
 	if maximum == "" {
 		maximum = store.DefaultMaxRunSize
 	}
-	if r.prepared && run.PriorityReason == model.TagReleasePriorityReason && sizeRank(r.size) > sizeRank(maximum) {
+	if run.PriorityReason == model.TagReleasePriorityReason && (r.priorityLookupFailed || (r.prepared && sizeRank(r.size) > sizeRank(maximum))) {
 		run.Priority = model.PriorityNormal
 		run.PriorityReason = fmt.Sprintf("tag/release automatic priority withheld: size %s exceeds repository maximum %s", r.size, maximum)
+		if r.priorityLookupFailed {
+			run.PriorityReason = "tag/release automatic priority withheld: repository size limit unavailable"
+		}
 		if r.priorityOverride != "" {
 			run.Priority = r.priorityOverride
 			run.PriorityReason = "admin bump: " + r.priorityOverrideReason
@@ -261,10 +265,13 @@ func (r *admissionReservation) priorityRun() model.Run {
 	return run
 }
 
+// releasePriorityMaximum is advisory: callers drop automatic urgency on error,
+// never fail the run. Log the cause without depending on an audit DB write.
 func (scheduler *Scheduler) releasePriorityMaximum(ctx context.Context, run model.Run) (periapsis.Size, error) {
 	if limiter, ok := scheduler.store.(RunSizeLimiter); ok && run.RefKind == model.RefTag {
 		maximum, err := limiter.MaxRunSize(ctx, run.RepoID)
 		if err != nil {
+			log.Printf("WARN: release priority withheld run=%s repo_id=%d reason=size_limit_unavailable error=%v", run.ID, run.RepoID, err)
 			return "", fmt.Errorf("read release priority size limit: %w", err)
 		}
 		return maximum, nil

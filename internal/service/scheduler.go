@@ -757,11 +757,9 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 		_ = logFile.Close()
 		return scheduler.finishInfrastructureFailure(ctx, run, repository, err)
 	}
-	priorityMaximum, err := scheduler.releasePriorityMaximum(ctx, run)
-	if err != nil {
-		_ = logFile.Close()
-		return scheduler.finishInfrastructureFailure(ctx, run, repository, err)
-	}
+	// Priority is advisory: an unavailable grant read withholds the boost,
+	// never the release's execution or publication.
+	priorityMaximum, priorityErr := scheduler.releasePriorityMaximum(ctx, run)
 	jobRequest.Size = size
 	group, err := scheduler.pipelineConcurrencyGroup(ctx, jobRequest)
 	if err != nil {
@@ -790,7 +788,7 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 	headSince, estimate := scheduler.admissionHistory(ctx, run)
 	releaseAdmission, err := reservation.acquireRequest(ctx, admissionRequest{
 		RunID: run.ID, RepoID: run.RepoID, Repo: repository.Name, Ref: run.Ref, Size: size, Group: group,
-		RefKind: run.RefKind, SHA: run.SHA, HeadSince: headSince, Estimate: estimate, KubeVirt: &kubeVirt, PriorityMaximum: priorityMaximum,
+		RefKind: run.RefKind, SHA: run.SHA, HeadSince: headSince, Estimate: estimate, KubeVirt: &kubeVirt, PriorityMaximum: priorityMaximum, PriorityLookupFailed: priorityErr != nil,
 	})
 	if errors.Is(err, errAdmissionAbandoned) {
 		// Superseded or cancelled while waiting: the reservation is already

@@ -48,7 +48,11 @@ window. Its admission/scheduling priority reason explains the withheld boost.
 Tag execution still keeps its reviewed release.yaml size without requiring a
 grant. Priority before checkout is provisional; durable queue positions do not
 incorporate the gate's resolved size. Polling/admin refresh preserves the size
-cap. An XL grant permits automatic urgency at XL; an explicit admin bump and
+cap. If the size-limit lookup fails, automatic urgency is withheld at every
+size, with a public reason and server warning (`reason=size_limit_unavailable`).
+The release continues in normal order; a later successful refresh can restore
+its eligible boost. This advisory lookup never fails release execution.
+An XL grant permits automatic urgency at XL; an explicit admin bump and
 60-minute aging are independent of this automatic size restriction.
 
 Admin `size_revoke` / `oberth size revoke <repo>` disables automatic tag
@@ -70,3 +74,8 @@ priority also skips only the youngest 60 minutes of branch backlog; older
 branches retain their aged FIFO place. After deployment, inspect `run_get`
 priority reasons and the admission view on the next tag before attributing the
 reported load incident entirely to priority classification.
+
+An oversized tag that loses its boost still occupies its repository's oldest
+waiting-tag slot until admission or termination. The next tag does not inherit
+a boost while that older tag waits; it can age or receive an explicit admin
+bump. See the README's pre-deploy grant checks for existing revoked records.
