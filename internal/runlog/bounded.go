@@ -120,7 +120,10 @@ func scanBoundedRanges(file io.ReaderAt, ranges []Range, total int64, filter Fil
 				meta.ScannedBytes++
 				discard = previous[0] != '\n'
 			}
-			reader := bufio.NewReaderSize(contextReader{filter.ctx(), io.NewSectionReader(file, r.Start, r.End-r.Start)}, maxFilterLineBytes)
+			// Parallel steps can produce one tiny range per record. Size the buffer
+			// to that span (+1 for EOF detection), not 64 KiB per interleaved line.
+			bufferSize := int(min(int64(maxFilterLineBytes-1), r.End-r.Start)) + 1
+			reader := bufio.NewReaderSize(contextReader{filter.ctx(), io.NewSectionReader(file, r.Start, r.End-r.Start)}, bufferSize)
 			position, oversized := r.Start, false
 			wholeEnd := originalEnd(ranges, r)
 			if first {

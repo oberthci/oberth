@@ -169,10 +169,20 @@ Repeated head requests can therefore find steps beyond the first 4 MiB even
 without changing the cursor. Until the index catches up, deep cursors and tail
 reads use a bounded discovery window within the same 4 MiB discovery budget.
 Use `has_more` and byte cursors for complete traversal, including empty pages.
-The cache keeps at most 64 runs, evicts idle entries by least recent use, and
-caps each run at 4096 ranges, 128 KiB of marker labels and a 64 KiB partial-record
-prefix. Runs exceeding those limits use bounded window discovery. Finishing or
-purging a run releases its cache entry; restarting the server starts it cold.
+The cache keeps at most 64 runs (including detached readers), evicts idle entries
+by least recent use, and stores each distinct step label once. Each run can
+retain 64K compact ranges, up to 4096 distinct labels / 128 KiB of label bytes,
+and a 64 KiB partial-record prefix. A shared 512K-slot range capacity budget
+covers all runs, including in-flight entries being forgotten. When capacity or
+label bounds are reached, the index drops older ranges and continues indexing
+the newest output. Byte cursors into discarded coverage use bounded raw-window
+discovery; completeness/count flags remain conservative. Default head polling
+can still need byte continuation once its old prefix has been discarded.
+Finishing or purging a run releases its entry; restarting starts the cache cold.
+On observed growth, a one-byte newline check at the last complete record catches
+some same-inode truncate/regrow cases; its byte is included in `discovery_bytes`
+in addition to new bytes. Production logs are append-only: this guard does not
+detect every rewrite that preserves the boundary newline.
 No active read publishes the durable terminal index.
 
 Individual records above 64 KiB are omitted and counted as `omitted_long_lines`. Output remains capped at 4 MiB.

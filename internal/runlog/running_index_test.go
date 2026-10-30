@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -85,7 +86,7 @@ func TestRunningIndexFindsLateStepWithoutRepeatingDiscovery(t *testing.T) {
 	}
 	appendRunning(t, store, "late", "[wanted/step] new bytes\n")
 	body, meta, err := store.ReadActiveFiltered("late", "wanted", "step", Filter{Tail: true, Limit: 1})
-	if err != nil || string(body) != "[wanted/step] new bytes\n" || meta.DiscoveryBytes != int64(len("[wanted/step] new bytes\n")) {
+	if err != nil || string(body) != "[wanted/step] new bytes\n" || meta.DiscoveryBytes != int64(len("[wanted/step] new bytes\n"))+1 {
 		t.Fatalf("append was not incremental: %q %+v %v", body, meta, err)
 	}
 }
@@ -103,8 +104,11 @@ func TestRunningIndexCarriesPartialRecordsAndDeliveryAttribution(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(entry.ranges, index.Ranges) {
-		t.Fatalf("incremental attribution differs: %+v / %+v", entry.ranges, index.Ranges)
+	actual, _, _, _ := entry.snapshot("a", "", Filter{})
+	other, _, _, _ := entry.snapshot("b", "", Filter{})
+	actual = append(actual, other...)
+	if !reflect.DeepEqual(actual, index.Ranges) {
+		t.Fatalf("incremental attribution differs: %+v / %+v", actual, index.Ranges)
 	}
 	store := runningLog(t, "partial", "[a/s] first\n[b/u] 界")
 	_, _, err = store.ReadActiveFiltered("partial", "a", "s", Filter{})
@@ -113,7 +117,7 @@ func TestRunningIndexCarriesPartialRecordsAndDeliveryAttribution(t *testing.T) {
 	}
 	appendRunning(t, store, "partial", " last\n")
 	body, meta, err := store.ReadActiveFiltered("partial", "b", "u", Filter{})
-	if err != nil || string(body) != "[b/u] 界 last\n" || meta.DiscoveryBytes != int64(len(" last\n")) {
+	if err != nil || string(body) != "[b/u] 界 last\n" || meta.DiscoveryBytes != int64(len(" last\n"))+1 {
 		t.Fatalf("partial UTF8 record was reread/lost: %q %+v %v", body, meta, err)
 	}
 }
@@ -221,16 +225,7 @@ func TestRunningIndexMemoryBoundsAndLifecycle(t *testing.T) {
 	if store.running["r-064"] != nil {
 		t.Fatal("purge retained index")
 	}
-	var fragmented strings.Builder
-	for i := 0; i < maxRunningRanges+10; i++ {
-		fmt.Fprintf(&fragmented, "[a/s%d] line\n", i%2)
-	}
-	overflow := runningLog(t, "overflow", fragmented.String())
-	body, meta, err := overflow.ReadActiveFiltered("overflow", "a", "s0", Filter{Limit: 1})
-	entry := overflow.running["overflow"]
-	if err != nil || len(body) == 0 || !entry.overflow || len(entry.ranges) != 0 || cap(entry.prefix) != 0 || meta.DiscoveryBytes > MaxScanBytes {
-		t.Fatalf("range cap/fallback failed: %+v %v", meta, err)
-	}
+
 }
 
 func TestRunningIndexConcurrentAppendReadAndFinish(t *testing.T) {
@@ -297,9 +292,9 @@ func TestRunningIndexMarkerStorageIsBounded(t *testing.T) {
 	label := strings.Repeat("b", 60000)
 	raw := "[" + label + "/s0] x\n[" + label + "/s1] x\n[" + label + "/s2] x\n[wanted/s] final\n"
 	store := runningLog(t, "labels", raw)
-	body, meta, err := store.ReadActiveFiltered("labels", "wanted", "s", Filter{})
+	body, meta, err := store.ReadActiveFiltered("labels", "wanted", "s", Filter{Tail: true})
 	entry := store.running["labels"]
-	if err != nil || string(body) != "[wanted/s] final\n" || !entry.overflow || entry.labelBytes != 0 || len(entry.ranges) != 0 || meta.DiscoveryBytes > MaxScanBytes {
+	if err != nil || string(body) != "[wanted/s] final\n" || entry.floor == 0 || entry.labelBytes > maxRunningLabelBytes || len(entry.labelIDs) != 3 || meta.DiscoveryBytes > MaxScanBytes {
 		t.Fatalf("label bound/fallback failed: %+v %v", meta, err)
 	}
 }
@@ -383,5 +378,303 @@ func TestRunningIndexPinnedCapacityFallsBackWithoutGrowingCache(t *testing.T) {
 	indexPath, _ := store.indexPath("fallback")
 	if _, err := os.Stat(indexPath); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("active read published a terminal index: %v", err)
+	}
+}
+
+func TestRunningIndexInterleavingKeepsAdvancingPastOldCap(t *testing.T) {
+	var raw strings.Builder
+	for i := range 8000 {
+		fmt.Fprintf(&raw, "[parallel/s%d] line\n", i%2)
+	}
+	raw.WriteString(strings.Repeat("[noise/step] noise\n", 360000))
+	wanted := "[late/step] found\n"
+	raw.WriteString(wanted)
+	store := runningLog(t, "interleaved", raw.String())
+	var discovery int64
+	found := false
+	for range 12 {
+		body, meta, err := store.ReadActiveFiltered("interleaved", "late", "step", Filter{Limit: 1})
+		if err != nil {
+			t.Fatal(err)
+		}
+		discovery += meta.DiscoveryBytes
+		if string(body) == wanted {
+			found = true
+			break
+		}
+		if !meta.HasMore {
+			t.Fatalf("lost late-step progress: %+v", meta)
+		}
+	}
+	entry := store.running["interleaved"]
+	if !found || discovery != int64(raw.Len()) || entry.count < 8000 || len(entry.labelIDs) != 4 || entry.labelBytes != len("parallels0parallels1noisesteplatestep") {
+		t.Fatalf("interleaving lost index or duplicated labels: found=%v read=%d ranges=%d labels=%d labelBytes=%d", found, discovery, entry.count, len(entry.labelIDs), entry.labelBytes)
+	}
+	for range 3 {
+		body, meta, err := store.ReadActiveFiltered("interleaved", "late", "step", Filter{Tail: true, Limit: 1})
+		if err != nil || string(body) != wanted || meta.DiscoveryBytes != 0 {
+			t.Fatalf("interleaving became sticky fallback: %q %+v %v", body, meta, err)
+		}
+	}
+}
+
+func TestRunningIndexRollingSuffixRetainsNewOutputAndOldPaging(t *testing.T) {
+	var raw strings.Builder
+	raw.WriteString("[a/s0] first\n")
+	for i := range maxRunningRanges + 200 {
+		fmt.Fprintf(&raw, "[a/s%d] old\n", i%2)
+	}
+	store := runningLog(t, "rolling", raw.String())
+	body, meta, err := store.ReadActiveFiltered("rolling", "a", "s1", Filter{Tail: true, Limit: 1})
+	entry := store.running["rolling"]
+	if err != nil || string(body) != "[a/s1] old\n" || entry.floor == 0 || entry.count > maxRunningRanges || meta.BytesExact || !meta.HasMore {
+		t.Fatalf("overflow failed to retain newest: %q %+v entry=%+v err=%v", body, meta, entry, err)
+	}
+	next := "[a/s1] new\n"
+	appendRunning(t, store, "rolling", next)
+	body, meta, err = store.ReadActiveFiltered("rolling", "a", "s1", Filter{Tail: true, Limit: 1})
+	if err != nil || string(body) != next || meta.DiscoveryBytes != int64(len(next))+1 || entry.position != int64(raw.Len()+len(next)) {
+		t.Fatalf("overflow stopped advancing: %q %+v %v", body, meta, err)
+	}
+	cursor := entry.floor
+	body, meta, err = store.ReadActiveFiltered("rolling", "a", "s0", Filter{Tail: true, Pattern: "first", ByteOffset: &cursor})
+	if err != nil || string(body) != "[a/s0] first\n" || meta.HasMore || meta.DiscoveryBytes > MaxScanBytes {
+		t.Fatalf("dropped prefix became inaccessible: %q %+v %v", body, meta, err)
+	}
+	cursor = entry.position
+	finished := false
+	for range 12 {
+		body, meta, err = store.ReadActiveFiltered("rolling", "absent", "step", Filter{Tail: true, ByteOffset: &cursor})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !meta.HasMore {
+			finished = true
+			break
+		}
+		if meta.NextByteOffset >= cursor {
+			t.Fatalf("suffix/prefix tail handoff stalled: %q %+v", body, meta)
+		}
+		cursor = meta.NextByteOffset
+	}
+	if !finished {
+		t.Fatal("suffix/prefix handoff never finished")
+	}
+}
+
+func TestRunningIndexGlobalRangeBudget(t *testing.T) {
+	var raw strings.Builder
+	for i := range maxRunningRanges + 2 {
+		fmt.Fprintf(&raw, "[a/s%d] x\n", i%2)
+	}
+	for _, pinned := range []bool{false, true} {
+		t.Run(fmt.Sprintf("pinned-%t", pinned), func(t *testing.T) {
+			store, err := Open(t.TempDir())
+			if err != nil {
+				t.Fatal(err)
+			}
+			var entries []*runningIndex
+			if pinned {
+				for i := range 9 {
+					entries = append(entries, store.pinRunningIndex(fmt.Sprintf("r-%d", i)))
+				}
+			}
+			for i := range 9 {
+				var entry *runningIndex
+				if pinned {
+					entry = entries[i]
+				} else {
+					entry = store.pinRunningIndex(fmt.Sprintf("r-%d", i))
+				}
+				if entry == nil {
+					t.Fatal("could not reserve a bounded initial entry")
+				}
+				if _, err := entry.advance(t.Context(), strings.NewReader(raw.String()), int64(raw.Len())); err != nil {
+					t.Fatal(err)
+				}
+				if entry.position != int64(raw.Len()) || store.runningSlots > maxRunningRangeSlots {
+					t.Fatal("global capacity overflow or stopped index")
+				}
+				if !pinned {
+					store.unpinRunningIndex(entry)
+				}
+			}
+			if pinned {
+				if entries[8].floor == 0 {
+					t.Fatal("pinned budget pressure failed to roll own suffix")
+				}
+				for _, entry := range entries {
+					store.unpinRunningIndex(entry)
+				}
+			} else if store.running["r-0"] != nil {
+				t.Fatal("range pressure failed to evict idle LRU")
+			}
+			for id := range store.running {
+				store.ForgetActiveIndex(id)
+			}
+			if store.runningSlots != 0 || store.runningEntries != 0 {
+				t.Fatalf("budget leaked after release: slots=%d entries=%d", store.runningSlots, store.runningEntries)
+			}
+		})
+	}
+}
+
+func TestRunningIndexDetachedReadersRemainCharged(t *testing.T) {
+	store, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries := make([]*runningIndex, maxRunningIndexes)
+	for i := range entries {
+		entries[i] = store.pinRunningIndex(fmt.Sprintf("r-%d", i))
+	}
+	store.ForgetActiveIndex("r-0")
+	if store.runningEntries != maxRunningIndexes || store.pinRunningIndex("replacement") != nil {
+		t.Fatal("detached readers bypassed global entry budget")
+	}
+	store.unpinRunningIndex(entries[0])
+	replacement := store.pinRunningIndex("replacement")
+	if replacement == nil {
+		t.Fatal("last detached reader did not return capacity")
+	}
+	store.unpinRunningIndex(replacement)
+	for _, entry := range entries[1:] {
+		store.unpinRunningIndex(entry)
+	}
+	for id := range store.running {
+		store.ForgetActiveIndex(id)
+	}
+	if store.runningSlots != 0 || store.runningEntries != 0 {
+		t.Fatal("detached entry accounting leaked")
+	}
+}
+
+func TestRunningIndexTruncateRegrowChecksNewlineBoundary(t *testing.T) {
+	old := "[a/s] one\n[b/s] two\n"
+	store := runningLog(t, "regrow", old)
+	if _, _, err := store.ReadActiveFiltered("regrow", "a", "s", Filter{}); err != nil {
+		t.Fatal(err)
+	}
+	replacement := "[b/s] " + strings.Repeat("x", len(old)+20) + "\n[a/s] new-a\n"
+	path, _ := store.logPath("regrow")
+	if err := os.WriteFile(path, []byte(replacement), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	body, meta, err := store.ReadActiveFiltered("regrow", "a", "s", Filter{})
+	if err != nil || string(body) != "[a/s] new-a\n" || meta.DiscoveryBytes != int64(len(replacement))+1 {
+		t.Fatalf("regrow spliced another step: %q %+v %v", body, meta, err)
+	}
+}
+
+func TestRunningIndexPendingOmissionDoesNotCountAheadOfHeadPage(t *testing.T) {
+	raw := strings.Repeat("[a/s] line\n", 10000) + "[a/s] " + strings.Repeat("x", maxFilterLineBytes+1)
+	store := runningLog(t, "pending", raw)
+	body, meta, err := store.ReadActiveFiltered("pending", "a", "s", Filter{Limit: 1})
+	if err != nil || string(body) != "[a/s] line\n" || !meta.HasMore || meta.OmittedLongLines != 0 {
+		t.Fatalf("head page counted a distant pending record: %q %+v %v", body, meta, err)
+	}
+}
+
+func TestRunningIndexConcurrentGlobalBudget(t *testing.T) {
+	store, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw := strings.Repeat("[a/s0] x\n[a/s1] y\n", maxRunningRanges/2+1)
+	var entries []*runningIndex
+	for i := range 12 {
+		entries = append(entries, store.pinRunningIndex(fmt.Sprintf("concurrent-%d", i)))
+	}
+	var wg sync.WaitGroup
+	errs := make(chan error, len(entries))
+	for _, entry := range entries {
+		wg.Go(func() {
+			_, err := entry.advance(t.Context(), strings.NewReader(raw), int64(len(raw)))
+			if err != nil {
+				errs <- err
+			}
+		})
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Fatal(err)
+	}
+	if store.runningSlots > maxRunningRangeSlots {
+		t.Fatalf("concurrent reservation exceeded global budget: %d", store.runningSlots)
+	}
+	for _, entry := range entries {
+		if entry.position != int64(len(raw)) {
+			t.Fatal("global pressure stopped a writer's index")
+		}
+		store.unpinRunningIndex(entry)
+	}
+	for id := range store.running {
+		store.ForgetActiveIndex(id)
+	}
+	if store.runningSlots != 0 || store.runningEntries != 0 {
+		t.Fatal("concurrent reservations leaked")
+	}
+}
+
+func TestBoundedShortUnterminatedRangeIsNotOversized(t *testing.T) {
+	raw := "[a/s] final without newline"
+	body, meta, err := scanBoundedRanges(strings.NewReader(raw), []Range{{Start: 0, End: int64(len(raw))}}, int64(len(raw)), Filter{})
+	if err != nil || string(body) != raw || meta.OmittedLongLines != 0 || meta.ReturnedLines != 1 {
+		t.Fatalf("small range buffer misclassified EOF: %q %+v %v", body, meta, err)
+	}
+}
+
+func TestRunningIndexInterleavedSnapshotPaging(t *testing.T) {
+	var raw, expected strings.Builder
+	for i := range 5000 {
+		line := fmt.Sprintf("[a/s] match %04d %s\n", i, strings.Repeat("x", 900))
+		raw.WriteString(line)
+		raw.WriteString("[b/s] unrelated\n")
+		expected.WriteString(line)
+	}
+	for _, tail := range []bool{false, true} {
+		t.Run(fmt.Sprintf("tail-%t", tail), func(t *testing.T) {
+			store := runningLog(t, "pages", raw.String())
+			for range 4 {
+				if _, _, err := store.ReadActiveFiltered("pages", "a", "s", Filter{Tail: true, Limit: 1}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			var cursor *int64
+			var pages []string
+			finished := false
+			for range 20 {
+				body, meta, err := store.ReadActiveFiltered("pages", "a", "s", Filter{Tail: tail, Pattern: "match", Limit: 10000, ByteOffset: cursor})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if meta.DiscoveryBytes != 0 || meta.ScannedBytes > MaxScanBytes {
+					t.Fatalf("warm interleaved page exceeded bounds: %+v", meta)
+				}
+				pages = append(pages, string(body))
+				if !meta.HasMore {
+					finished = true
+					break
+				}
+				before := int64(0)
+				if tail {
+					before = int64(raw.Len())
+				}
+				if cursor != nil {
+					before = *cursor
+				}
+				if (tail && meta.NextByteOffset >= before) || (!tail && meta.NextByteOffset <= before) {
+					t.Fatalf("interleaved cursor stalled: %+v", meta)
+				}
+				cursor = &meta.NextByteOffset
+			}
+			if tail {
+				slices.Reverse(pages)
+			}
+			if !finished || strings.Join(pages, "") != expected.String() {
+				t.Fatalf("snapshot paging lost/duplicated lines: finished=%v pages=%d bytes=%d want=%d", finished, len(pages), len(strings.Join(pages, "")), expected.Len())
+			}
+		})
 	}
 }

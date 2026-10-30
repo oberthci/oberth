@@ -87,11 +87,13 @@ type Meta struct {
 }
 
 type Store struct {
-	directory    string
-	progressMu   sync.RWMutex
-	runningMu    sync.Mutex
-	running      map[string]*runningIndex
-	runningClock uint64
+	directory      string
+	progressMu     sync.RWMutex
+	runningMu      sync.Mutex
+	running        map[string]*runningIndex
+	runningClock   uint64
+	runningSlots   int
+	runningEntries int
 }
 
 func Open(directory string) (*Store, error) {

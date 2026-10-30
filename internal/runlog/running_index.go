@@ -7,30 +7,83 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"strings"
 
 	"github.com/oberthci/oberth/internal/runprogress"
 )
 
 const (
-	maxRunningIndexes          = 64
-	maxRunningRanges           = 4096
+	maxRunningIndexes = 64
+	// Per-run suffix limit and shared allocated capacity; neither makes overflow sticky.
+	maxRunningRanges           = 64 << 10
+	maxRunningRangeSlots       = 512 << 10
+	initialRunningRanges       = 64
+	maxRunningLabels           = 4096
 	maxRunningLabelBytes       = 128 << 10
 	runningIndexAdvance  int64 = MaxScanBytes / 2
 )
 
+type runningLabel struct {
+	burn, step string
+}
+
+type runningLabelRef struct {
+	key   runningLabel
+	refs  int
+	bytes int64
+}
+
+// Labels live once in the intern table. Each range uses two int64 offsets and
+// a parallel uint16 label ID (18 bytes of payload instead of Range's 48).
+type runningSpan struct{ start, end int64 }
+
 type runningIndex struct {
-	gate       chan struct{}
-	refs       int
-	used       uint64
-	info       os.FileInfo
-	position   int64
-	lineStart  int64
-	prefix     []byte
-	ranges     []Range
-	labelBytes int
-	active     bool
-	overflow   bool
+	gate                chan struct{}
+	refs                int // refs, used, charged and detached are protected by runningMu.
+	used                uint64
+	charged             int
+	detached            bool
+	store               *Store
+	info                os.FileInfo
+	position, lineStart int64
+	floor               int64 // Older indexed coverage was discarded; raw-file paging still works.
+	prefix              []byte
+	ranges              []runningSpan
+	rangeLabels         []uint16
+	first, count        int
+	labels              []runningLabelRef
+	labelIDs            map[runningLabel]uint16
+	freeLabels          []uint16
+	labelBytes          int
+	active              bool
+}
+
+// Called only under runningMu, with no readers left on this entry.
+func (store *Store) releaseRunningIndex(entry *runningIndex) {
+	store.runningEntries--
+	store.runningSlots -= entry.charged
+	entry.charged = 0
+	entry.ranges, entry.rangeLabels = nil, nil
+	entry.labels, entry.labelIDs, entry.freeLabels, entry.prefix = nil, nil, nil, nil
+	entry.count = 0
+}
+
+func (store *Store) evictRunningIndex(except *runningIndex) bool {
+	victim := ""
+	var oldest uint64
+	for id, candidate := range store.running {
+		if candidate != except && candidate.refs == 0 && (victim == "" || candidate.used < oldest) {
+			victim, oldest = id, candidate.used
+		}
+	}
+	if victim == "" {
+		return false
+	}
+	entry := store.running[victim]
+	delete(store.running, victim)
+	store.releaseRunningIndex(entry)
+	return true
 }
 
 func (store *Store) pinRunningIndex(runID string) *runningIndex {
@@ -41,20 +94,15 @@ func (store *Store) pinRunningIndex(runID string) *runningIndex {
 	}
 	entry := store.running[runID]
 	if entry == nil {
-		if len(store.running) >= maxRunningIndexes {
-			victim := ""
-			var oldest uint64
-			for id, candidate := range store.running {
-				if candidate.refs == 0 && (victim == "" || candidate.used < oldest) {
-					victim, oldest = id, candidate.used
-				}
-			}
-			if victim == "" {
+		for store.runningEntries >= maxRunningIndexes || store.runningSlots+initialRunningRanges > maxRunningRangeSlots {
+			if !store.evictRunningIndex(nil) {
 				return nil
 			}
-			delete(store.running, victim)
 		}
-		entry = &runningIndex{gate: make(chan struct{}, 1)}
+		entry = &runningIndex{gate: make(chan struct{}, 1), store: store, charged: initialRunningRanges,
+			ranges: make([]runningSpan, initialRunningRanges), rangeLabels: make([]uint16, initialRunningRanges)}
+		store.runningEntries++
+		store.runningSlots += entry.charged
 		store.running[strings.Clone(runID)] = entry
 	}
 	store.runningClock++
@@ -65,27 +113,113 @@ func (store *Store) pinRunningIndex(runID string) *runningIndex {
 
 func (store *Store) unpinRunningIndex(entry *runningIndex) {
 	store.runningMu.Lock()
+	defer store.runningMu.Unlock()
 	entry.refs--
-	store.runningMu.Unlock()
+	if entry.refs == 0 && entry.detached {
+		store.releaseRunningIndex(entry)
+	}
 }
 
-// ForgetActiveIndex releases retained index state without waiting for a log
-// reader. An already-running read owns its snapshot until that request ends.
+// ForgetActiveIndex releases retained state without waiting for a log reader.
+// Detached, in-flight entries remain charged until their last reader leaves.
 func (store *Store) ForgetActiveIndex(runID string) {
 	store.runningMu.Lock()
-	delete(store.running, runID)
-	store.runningMu.Unlock()
+	defer store.runningMu.Unlock()
+	if entry := store.running[runID]; entry != nil {
+		delete(store.running, runID)
+		entry.detached = true
+		if entry.refs == 0 {
+			store.releaseRunningIndex(entry)
+		}
+	}
 }
 
 func (entry *runningIndex) reset(info os.FileInfo) {
 	entry.info = info
-	entry.position = 0
-	entry.lineStart = 0
-	entry.prefix = nil
-	entry.ranges = nil
+	entry.position, entry.lineStart, entry.floor = 0, 0, 0
+	entry.first, entry.count = 0, 0
+	entry.labels, entry.labelIDs, entry.freeLabels, entry.prefix = nil, nil, nil, nil
 	entry.labelBytes = 0
 	entry.active = false
-	entry.overflow = false
+}
+
+func (entry *runningIndex) slot(i int) int { return (entry.first + i) % len(entry.ranges) }
+
+func (entry *runningIndex) grow() bool {
+	capacity := min(maxRunningRanges, max(initialRunningRanges, len(entry.ranges)*2))
+	if capacity <= len(entry.ranges) {
+		return false
+	}
+	if entry.store != nil {
+		store := entry.store
+		store.runningMu.Lock()
+		for store.runningSlots+capacity-entry.charged > maxRunningRangeSlots {
+			if !store.evictRunningIndex(entry) {
+				store.runningMu.Unlock()
+				return false
+			}
+		}
+		store.runningSlots += capacity - entry.charged
+		entry.charged = capacity
+		store.runningMu.Unlock()
+	}
+	ranges := make([]runningSpan, capacity)
+	labels := make([]uint16, capacity)
+	for i := range entry.count {
+		slot := entry.slot(i)
+		ranges[i], labels[i] = entry.ranges[slot], entry.rangeLabels[slot]
+	}
+	entry.ranges, entry.rangeLabels, entry.first = ranges, labels, 0
+	return true
+}
+
+func (entry *runningIndex) dropOldest(count int) {
+	for range count {
+		slot := entry.first
+		span := entry.ranges[slot]
+		id := entry.rangeLabels[slot]
+		label := &entry.labels[id]
+		label.refs--
+		label.bytes -= span.end - span.start
+		if label.refs == 0 {
+			delete(entry.labelIDs, label.key)
+			entry.labelBytes -= len(label.key.burn) + len(label.key.step)
+			*label = runningLabelRef{}
+			entry.freeLabels = append(entry.freeLabels, id)
+		}
+		entry.floor = max(entry.floor, span.end)
+		entry.first = (entry.first + 1) % len(entry.ranges)
+		entry.count--
+	}
+	if entry.count == 0 {
+		entry.active = false
+	}
+}
+
+func (entry *runningIndex) intern(burn, step string) uint16 {
+	key := runningLabel{burn, step}
+	if id, ok := entry.labelIDs[key]; ok {
+		return id
+	}
+	for entry.labelBytes+len(burn)+len(step) > maxRunningLabelBytes || len(entry.labelIDs) == maxRunningLabels {
+		entry.dropOldest(max(1, entry.count/2))
+	}
+	if entry.labelIDs == nil {
+		entry.labelIDs = make(map[runningLabel]uint16)
+	}
+	key = runningLabel{strings.Clone(burn), strings.Clone(step)}
+	var id uint16
+	if n := len(entry.freeLabels); n > 0 {
+		id = entry.freeLabels[n-1]
+		entry.freeLabels = entry.freeLabels[:n-1]
+		entry.labels[id] = runningLabelRef{key: key}
+	} else {
+		id = uint16(len(entry.labels)) //nolint:gosec // No free IDs means all slots are live; intern caps those at 4096.
+		entry.labels = append(entry.labels, runningLabelRef{key: key})
+	}
+	entry.labelIDs[key] = id
+	entry.labelBytes += len(burn) + len(step)
+	return id
 }
 
 func (entry *runningIndex) appendPrefix(fragment []byte) {
@@ -105,28 +239,30 @@ func (entry *runningIndex) completeLine() {
 	}
 	burn, step, marked := ParseMarker(entry.prefix)
 	if marked {
-		last := len(entry.ranges) - 1
-		if !entry.active || entry.ranges[last].Burn != burn || entry.ranges[last].Step != step {
-			if len(entry.ranges) == maxRunningRanges || entry.labelBytes+len(burn)+len(step) > maxRunningLabelBytes {
-				entry.overflow = true
-				entry.ranges = nil
-				entry.prefix = nil
-				entry.active = false
-				entry.labelBytes = 0
-				return
+		same := false
+		if entry.active {
+			last := entry.slot(entry.count - 1)
+			key := entry.labels[entry.rangeLabels[last]].key
+			same = key.burn == burn && key.step == step
+		}
+		if !same {
+			if entry.count == len(entry.ranges) && !entry.grow() {
+				entry.dropOldest(max(1, entry.count/2))
 			}
-			if len(entry.ranges) == cap(entry.ranges) {
-				ranges := make([]Range, len(entry.ranges), min(maxRunningRanges, max(8, cap(entry.ranges)*2)))
-				copy(ranges, entry.ranges)
-				entry.ranges = ranges
-			}
-			entry.ranges = append(entry.ranges, Range{Burn: strings.Clone(burn), Step: strings.Clone(step), Start: entry.lineStart})
-			entry.labelBytes += len(burn) + len(step)
+			id := entry.intern(burn, step)
+			slot := entry.slot(entry.count)
+			entry.ranges[slot] = runningSpan{start: entry.lineStart, end: entry.lineStart}
+			entry.rangeLabels[slot] = id
+			entry.labels[id].refs++
+			entry.count++
 		}
 		entry.active = true
 	}
 	if entry.active {
-		entry.ranges[len(entry.ranges)-1].End = entry.position
+		slot := entry.slot(entry.count - 1)
+		span := &entry.ranges[slot]
+		entry.labels[entry.rangeLabels[slot]].bytes += entry.position - span.end
+		span.end = entry.position
 	}
 	entry.lineStart = entry.position
 	entry.prefix = entry.prefix[:0]
@@ -141,7 +277,7 @@ func (entry *runningIndex) advance(ctx context.Context, file io.ReaderAt, size i
 	}
 	var read int64
 	buffer := make([]byte, 64<<10)
-	for entry.position < end && !entry.overflow {
+	for entry.position < end {
 		if err := ctx.Err(); err != nil {
 			return read, err
 		}
@@ -154,7 +290,7 @@ func (entry *runningIndex) advance(ctx context.Context, file io.ReaderAt, size i
 			return read, err
 		}
 		fragment := buffer[:n]
-		for len(fragment) > 0 && !entry.overflow {
+		for len(fragment) > 0 {
 			newline := bytes.IndexByte(fragment, '\n')
 			take := len(fragment)
 			if newline >= 0 {
@@ -172,6 +308,63 @@ func (entry *runningIndex) advance(ctx context.Context, file io.ReaderAt, size i
 		}
 	}
 	return read, nil
+}
+
+// snapshot copies at most a filtering budget of matching ranges. Older/newer
+// coverage outside the snapshot is advertised separately for byte continuation.
+func (entry *runningIndex) snapshot(burn, step string, filter Filter) (selected []Range, total int64, earlier, later bool) {
+	matches := 0
+	for _, label := range entry.labels {
+		if label.refs > 0 && label.key.burn == burn && (step == "" || label.key.step == step) {
+			total += label.bytes
+			matches += label.refs
+		}
+	}
+	// Allocate once: growing []Range for every short interleaved record would
+	// copy several times its final size on each tail poll.
+	selected = make([]Range, 0, matches)
+	var bytes int64
+	for n := range entry.count {
+		i := n
+		if filter.Tail {
+			i = entry.count - 1 - n
+		}
+		slot := entry.slot(i)
+		span, key := entry.ranges[slot], entry.labels[entry.rangeLabels[slot]].key
+		if key.burn != burn || (step != "" && key.step != step) {
+			continue
+		}
+		if filter.ByteOffset != nil {
+			if filter.Tail && span.start >= *filter.ByteOffset {
+				continue
+			}
+			if !filter.Tail && span.end <= *filter.ByteOffset {
+				continue
+			}
+		}
+		if bytes >= MaxScanBytes {
+			if filter.Tail {
+				earlier = true
+			} else {
+				later = true
+			}
+			break
+		}
+		selected = append(selected, Range{Burn: key.burn, Step: key.step, Start: span.start, End: span.end})
+		start, end := span.start, span.end
+		if filter.ByteOffset != nil {
+			if filter.Tail {
+				end = min(end, *filter.ByteOffset)
+			} else {
+				start = max(start, *filter.ByteOffset)
+			}
+		}
+		bytes += end - start
+	}
+	if filter.Tail {
+		slices.Reverse(selected)
+	}
+	return selected, total, earlier, later
 }
 
 // terminalIndex recognizes a published terminal index. Rechecking after cache
@@ -264,13 +457,24 @@ func (store *Store) readActiveIndexed(runID, burn, step string, filter Filter) (
 	if entry.info == nil || !os.SameFile(entry.info, info) || info.Size() < entry.info.Size() || (info.Size() == entry.info.Size() && !info.ModTime().Equal(entry.info.ModTime())) {
 		entry.reset(info)
 	}
-	entry.info = info
 	var discovered int64
-	if !entry.overflow {
-		discovered, err = entry.advance(ctx, file, info.Size())
-		if err != nil {
+	if entry.lineStart > 0 && info.Size() > entry.info.Size() {
+		var previous [1]byte
+		if _, err := file.ReadAt(previous[:], entry.lineStart-1); err != nil {
 			return nil, Meta{}, err
 		}
+		// Catch truncate/regrow that passes the size/inode checks. Production is
+		// append-only; checking this boundary is a cheap corruption guard, not a hash.
+		if previous[0] != '\n' {
+			entry.reset(info)
+		}
+		discovered++
+	}
+	entry.info = info
+	advanced, err := entry.advance(ctx, file, info.Size())
+	discovered += advanced
+	if err != nil {
+		return nil, Meta{}, err
 	}
 	position, complete := entry.position, entry.lineStart
 	caughtUp := position == info.Size()
@@ -278,25 +482,23 @@ func (store *Store) readActiveIndexed(runID, burn, step string, filter Filter) (
 	if filter.ByteOffset != nil {
 		cursor = *filter.ByteOffset
 	}
-	usable := !entry.overflow && (caughtUp || (!filter.Tail && cursor <= complete) || (filter.Tail && filter.ByteOffset != nil && cursor <= complete))
+	covered := (!filter.Tail && cursor >= entry.floor) || (filter.Tail && (filter.ByteOffset == nil || cursor > entry.floor))
+	usable := covered && (caughtUp || (!filter.Tail && cursor <= complete) || (filter.Tail && filter.ByteOffset != nil && cursor <= complete))
 	if !usable {
 		unlock()
 		body, meta, err := store.readActiveWindow(runID, burn, step, filter, MaxScanBytes-discovered)
 		meta.DiscoveryBytes += discovered
 		return body, meta, err
 	}
-	var selected []Range
-	for _, r := range entry.ranges {
-		if r.Burn == burn && (step == "" || r.Step == step) {
-			selected = append(selected, r)
-		}
-	}
+	selected, total, earlier, later := entry.snapshot(burn, step, filter)
+	floor := entry.floor
 	pendingOmitted := false
 	if position-complete > maxFilterLineBytes {
 		b, s, marked := ParseMarker(entry.prefix)
 		if !marked && entry.active && !bytes.HasPrefix(entry.prefix, []byte(runprogress.LogDeliveryPrefix)) {
-			last := entry.ranges[len(entry.ranges)-1]
-			b, s = last.Burn, last.Step
+			last := entry.slot(entry.count - 1)
+			key := entry.labels[entry.rangeLabels[last]].key
+			b, s = key.burn, key.step
 		}
 		pendingOmitted = b == burn && (step == "" || s == step)
 	}
@@ -304,22 +506,37 @@ func (store *Store) readActiveIndexed(runID, burn, step string, filter Filter) (
 	if position-complete > maxFilterLineBytes {
 		frontier = position
 	}
-	exact := caughtUp && complete == position
+	exact := caughtUp && complete == position && floor == 0
 	unlock()
-	if len(selected) == 0 && caughtUp && !pendingOmitted {
+	if total == 0 && caughtUp && floor == 0 && !pendingOmitted {
 		return nil, Meta{}, fmt.Errorf("active log slice %s/%s: %w", burn, step, os.ErrNotExist)
 	}
-	body, meta, err := filterRanges(file, selected, rangeBytes(selected), filter)
+	body, meta, err := filterRanges(file, selected, total, filter)
 	if err != nil {
 		return nil, Meta{}, err
 	}
 	meta.DiscoveryBytes = discovered
 	meta.BytesExact = exact
 	meta.ScanComplete = meta.ScanComplete && exact
-	if pendingOmitted {
+	if pendingOmitted && (filter.Tail || (!meta.HasMore && !later)) {
 		meta.OmittedLongLines++
 		meta.TotalLines++
 		meta.WithheldLines++
+	}
+	if filter.Tail && (earlier || floor > 0) {
+		if !meta.HasMore {
+			meta.NextByteOffset = floor
+			if len(selected) > 0 {
+				meta.NextByteOffset = selected[0].Start
+			}
+		}
+		meta.HasMore = true
+	}
+	if !filter.Tail && later {
+		if !meta.HasMore && len(selected) > 0 {
+			meta.NextByteOffset = selected[len(selected)-1].End
+		}
+		meta.HasMore = true
 	}
 	if !filter.Tail && !caughtUp {
 		if !meta.HasMore {
