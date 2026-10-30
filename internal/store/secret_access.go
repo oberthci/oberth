@@ -62,7 +62,7 @@ func (s *Store) SecretAccessList(ctx context.Context, repo string, includeRevoke
 			args = append(args, repo)
 		}
 	}
-	rows, err := s.db.QueryContext(ctx, query, args...)
+	rows, err := s.reader().QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list secret access: %w", err)
 	}
@@ -199,7 +199,7 @@ func (s *Store) SecretAccessCheck(ctx context.Context, repo, step, secret string
 		return false, fmt.Errorf("%w: repo, step, and secret are required", ErrInvalid)
 	}
 	var count int
-	if err := s.db.QueryRowContext(ctx, `
+	if err := s.reader().QueryRowContext(ctx, `
 SELECT count(*) FROM secret_access
 WHERE repo = ? AND step = ? AND secret = ? AND revoked_at IS NULL`,
 		repo, step, secret).Scan(&count); err != nil {
@@ -226,7 +226,7 @@ func (s *Store) ActiveSecretGrants(ctx context.Context, repoID int64) (map[strin
 	// bare row (only possible for a repo that was unregistered at both of
 	// those boundaries) is deliberately inert until its grant is re-issued
 	// against the registered identity.
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.reader().QueryContext(ctx, `
 SELECT step, secret FROM secret_access
 WHERE repo = ? AND revoked_at IS NULL`, qualifiedName)
 	if err != nil {
@@ -317,7 +317,7 @@ WHERE NOT EXISTS (
 	}
 	query += " ORDER BY d.repo, d.step, d.path"
 
-	rows, err := s.db.QueryContext(ctx, query, args...)
+	rows, err := s.reader().QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("query pending grant declarations: %w", err)
 	}

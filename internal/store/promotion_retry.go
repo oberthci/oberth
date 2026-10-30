@@ -238,11 +238,11 @@ func (s *Store) PromotionLineage(ctx context.Context, id string) (model.Promotio
 	if strings.TrimSpace(id) == "" {
 		return model.PromotionLineage{}, fmt.Errorf("%w: promotion ID is required", ErrInvalid)
 	}
-	lineage, err := promotionRetryRecord(ctx, s.db, id)
+	lineage, err := promotionRetryRecord(ctx, s.reader(), id)
 	if err != nil {
 		return model.PromotionLineage{}, err
 	}
-	lineage.RetriedAs, err = promotionSuccessor(ctx, s.db, id)
+	lineage.RetriedAs, err = promotionSuccessor(ctx, s.reader(), id)
 	if err != nil {
 		return model.PromotionLineage{}, err
 	}
@@ -273,7 +273,7 @@ func (s *Store) UplinksByIdentity(ctx context.Context, identity string) ([]model
 }
 
 func (s *Store) uplinkFingerprintsByIdentity(ctx context.Context, identity string) ([]string, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT fingerprint FROM uplinks WHERE identity = ? ORDER BY id`, identity)
+	rows, err := s.reader().QueryContext(ctx, `SELECT fingerprint FROM uplinks WHERE identity = ? ORDER BY id`, identity)
 	if err != nil {
 		return nil, fmt.Errorf("list uplinks by identity: %w", err)
 	}

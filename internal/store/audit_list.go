@@ -123,7 +123,7 @@ ORDER BY id DESC LIMIT ?`
 	if err != nil {
 		return nil, 0, err
 	}
-	rows, err := s.db.QueryContext(ctx, query, args...)
+	rows, err := s.reader().QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, 0, fmt.Errorf("list audit actions: %w", err)
 	}

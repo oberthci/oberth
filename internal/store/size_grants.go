@@ -44,7 +44,7 @@ func (s *Store) MaxRunSize(ctx context.Context, repoID int64) (periapsis.Size, e
 		return "", fmt.Errorf("%w: repository ID is required", ErrInvalid)
 	}
 	var size string
-	err := s.db.QueryRowContext(ctx, `SELECT max_size FROM size_grants WHERE repo_id=? AND revoked_at IS NULL`, repoID).Scan(&size)
+	err := s.reader().QueryRowContext(ctx, `SELECT max_size FROM size_grants WHERE repo_id=? AND revoked_at IS NULL`, repoID).Scan(&size)
 	if errors.Is(err, sql.ErrNoRows) {
 		return DefaultMaxRunSize, nil
 	}
@@ -59,7 +59,7 @@ func (s *Store) SizeGrant(ctx context.Context, repoID int64) (SizeGrant, error) 
 	var size string
 	var grantedAt int64
 	var revokedAt sql.NullInt64
-	err := s.db.QueryRowContext(ctx, `SELECT repo_id, max_size, granted_by, granted_at, revoked_by, revoked_at FROM size_grants WHERE repo_id=?`, repoID).
+	err := s.reader().QueryRowContext(ctx, `SELECT repo_id, max_size, granted_by, granted_at, revoked_by, revoked_at FROM size_grants WHERE repo_id=?`, repoID).
 		Scan(&grant.RepoID, &size, &grant.GrantedBy, &grantedAt, &grant.RevokedBy, &revokedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return SizeGrant{}, fmt.Errorf("%w: size grant", ErrNotFound)

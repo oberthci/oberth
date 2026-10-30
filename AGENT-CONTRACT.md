@@ -178,8 +178,13 @@ verify its new suffix; outside commits, connection/schema/checkpoint changes,
 failed gates and one-minute expiry force full verification. Startup and periodic
 cycles still scan the complete chain. Local prefix pins survive fresh cycles
 and failed gates, so a valid shorter history cannot clear a rollback refusal.
-SSH identity readers open explicitly during daemon startup; one-shot Store
-openers retain only the primary connection. See
+Writable Store openers create an eight-connection read-only WAL pool after
+migration and recovery. Repository/upstream mappings, status/list queries and
+pilot read snapshots use it; they never reserve the single writer. SSH identity
+and idle sampler pools still open explicitly during daemon startup and keep
+their reserved capacity. Private inspection snapshots retain their original
+connection policy. Audit cache-key sampling and the final mutation fence still
+use the writer connection for their continuity guarantees. See
 [audit-verification-cache.md](docs/audit-verification-cache.md) for the cache's
 trust assumptions and complete invalidation rules.
 

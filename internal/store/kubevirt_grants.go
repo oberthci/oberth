@@ -81,7 +81,7 @@ func (s *Store) ActiveKubeVirtGrant(ctx context.Context, repoID int64) (KubeVirt
 		return KubeVirtBudget{}, false, fmt.Errorf("%w: repository ID is required", ErrInvalid)
 	}
 	var budget KubeVirtBudget
-	err := s.db.QueryRowContext(ctx, `SELECT max_vms, max_cores, max_memory_bytes FROM kubevirt_grants WHERE repo_id=? AND revoked_at IS NULL`, repoID).
+	err := s.reader().QueryRowContext(ctx, `SELECT max_vms, max_cores, max_memory_bytes FROM kubevirt_grants WHERE repo_id=? AND revoked_at IS NULL`, repoID).
 		Scan(&budget.MaxVMs, &budget.MaxCores, &budget.MaxMemoryBytes)
 	if errors.Is(err, sql.ErrNoRows) {
 		return KubeVirtBudget{}, false, nil
@@ -93,7 +93,7 @@ func (s *Store) ActiveKubeVirtGrant(ctx context.Context, repoID int64) (KubeVirt
 }
 
 func (s *Store) KubeVirtGrant(ctx context.Context, repoID int64) (KubeVirtGrant, error) {
-	grant, err := scanKubeVirtGrant(s.db.QueryRowContext(ctx, `SELECT repo_id, max_vms, max_cores, max_memory_bytes, granted_by, granted_at, revoked_by, revoked_at FROM kubevirt_grants WHERE repo_id=?`, repoID))
+	grant, err := scanKubeVirtGrant(s.reader().QueryRowContext(ctx, `SELECT repo_id, max_vms, max_cores, max_memory_bytes, granted_by, granted_at, revoked_by, revoked_at FROM kubevirt_grants WHERE repo_id=?`, repoID))
 	if errors.Is(err, sql.ErrNoRows) {
 		return KubeVirtGrant{}, fmt.Errorf("%w: KubeVirt grant", ErrNotFound)
 	}

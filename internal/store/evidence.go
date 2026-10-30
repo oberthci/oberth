@@ -134,7 +134,7 @@ type EvidenceRetentionRun struct {
 // EvidenceRetentionRuns pre-filters a sweep with one read query. Purges still
 // check protection in their intent transaction to cover changes since this read.
 func (s *Store) EvidenceRetentionRuns(ctx context.Context, keepNewest int) (map[string]EvidenceRetentionRun, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT r.id, r.finished_at, r.queue_sequence, `+evidenceProtectionSQL+` FROM runs r`, unixNano(s.now()), keepNewest, keepNewest)
+	rows, err := s.reader().QueryContext(ctx, `SELECT r.id, r.finished_at, r.queue_sequence, `+evidenceProtectionSQL+` FROM runs r`, unixNano(s.now()), keepNewest, keepNewest)
 	if err != nil {
 		return nil, err
 	}
@@ -155,7 +155,7 @@ func (s *Store) EvidenceRetentionRuns(ctx context.Context, keepNewest int) (map[
 // RunEvidencePurges projects the append-only audit intents and outcomes, so no
 // run-row mutation or numbered schema migration is needed for purge markers.
 func (s *Store) RunEvidencePurges(ctx context.Context, id string) ([]model.EvidencePurge, error) {
-	return runEvidencePurges(ctx, s.db, id)
+	return runEvidencePurges(ctx, s.reader(), id)
 }
 
 func runEvidencePurges(ctx context.Context, query interface {

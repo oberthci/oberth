@@ -23,7 +23,7 @@ func (err *IssueLockHeldError) Unwrap() error { return ErrLockHeld }
 // ActiveIssueLock observes transient ownership without changing issue state.
 // API callers resolve issue visibility before using this reader.
 func (s *Store) ActiveIssueLock(ctx context.Context, id int64) (*model.IssueLock, error) {
-	lock, err := scanIssueLock(s.db.QueryRowContext(ctx, `SELECT issue_id,owner,acquired_at,expires_at FROM issue_locks WHERE issue_id=? AND expires_at>?`, id, unixNano(s.now())))
+	lock, err := scanIssueLock(s.reader().QueryRowContext(ctx, `SELECT issue_id,owner,acquired_at,expires_at FROM issue_locks WHERE issue_id=? AND expires_at>?`, id, unixNano(s.now())))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}

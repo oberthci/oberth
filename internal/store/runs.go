@@ -35,7 +35,7 @@ func (s *Store) RunsByIDs(ctx context.Context, ids []string) (map[string]model.R
 	for i, id := range ids {
 		args[i] = id
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT `+runColumns+` FROM runs WHERE id IN (`+placeholders+`)`, args...) // #nosec G202 -- only placeholders are interpolated.
+	rows, err := s.reader().QueryContext(ctx, `SELECT `+runColumns+` FROM runs WHERE id IN (`+placeholders+`)`, args...) // #nosec G202 -- only placeholders are interpolated.
 	if err != nil {
 		return nil, fmt.Errorf("list runs by ID: %w", err)
 	}
@@ -407,7 +407,7 @@ RETURNING `+runColumns, now, now, id))
 // deterministic Job name, excluding runs owned by a pending publication.
 // The scheduler uses this at startup to reconcile runs stranded by a crash.
 func (s *Store) RunningRunsWithJobs(ctx context.Context) ([]model.Run, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.reader().QueryContext(ctx, `
 SELECT `+runColumns+` FROM runs
 WHERE status = 'running' AND job_name != ''
   AND NOT EXISTS (
@@ -434,7 +434,7 @@ ORDER BY queue_sequence`)
 }
 
 func (s *Store) Run(ctx context.Context, id string) (model.Run, error) {
-	value, err := scanRun(s.db.QueryRowContext(ctx, `SELECT `+runColumns+` FROM runs WHERE id = ?`, id))
+	value, err := scanRun(s.reader().QueryRowContext(ctx, `SELECT `+runColumns+` FROM runs WHERE id = ?`, id))
 	if err != nil {
 		return model.Run{}, translateNotFound("run", err)
 	}
@@ -449,7 +449,7 @@ func (s *Store) RunIDsExist(ctx context.Context, ids []string) (map[string]bool,
 	exists := make(map[string]bool, len(ids))
 	for _, id := range ids {
 		var found int
-		if err := s.db.QueryRowContext(ctx, `SELECT count(*) FROM runs WHERE id = ?`, id).Scan(&found); err != nil {
+		if err := s.reader().QueryRowContext(ctx, `SELECT count(*) FROM runs WHERE id = ?`, id).Scan(&found); err != nil {
 			return nil, fmt.Errorf("look up run %s: %w", id, err)
 		}
 		exists[id] = found > 0
@@ -478,7 +478,7 @@ func (s *Store) ResolveRunIDIn(ctx context.Context, id string, repoIDs []int64) 
 	restriction, restrictionArgs := repoRestriction("repo_id", repoIDs)
 	// Hex IDs sort below 'g', so this range uses the existing primary key.
 	// Restrict scope before checking ambiguity or returning matching IDs.
-	rows, err := s.db.QueryContext(ctx, `SELECT id FROM runs WHERE id >= ? AND id < ?`+restriction+` ORDER BY id`, // #nosec G202 -- the restriction is a fixed column and ? placeholders from repoRestriction.
+	rows, err := s.reader().QueryContext(ctx, `SELECT id FROM runs WHERE id >= ? AND id < ?`+restriction+` ORDER BY id`, // #nosec G202 -- the restriction is a fixed column and ? placeholders from repoRestriction.
 		append([]any{id, id + "g"}, restrictionArgs...)...)
 	if err != nil {
 		return model.Run{}, fmt.Errorf("resolve run ID prefix: %w", err)
@@ -512,7 +512,7 @@ func (s *Store) ResolveRunIDIn(ctx context.Context, id string, repoIDs []int64) 
 }
 
 func (s *Store) LatestRunForRef(ctx context.Context, repoID int64, ref string) (model.Run, error) {
-	value, err := scanRun(s.db.QueryRowContext(ctx, `
+	value, err := scanRun(s.reader().QueryRowContext(ctx, `
 SELECT `+runColumns+` FROM runs
 WHERE repo_id = ? AND ref = ? ORDER BY queue_sequence DESC LIMIT 1`, repoID, ref))
 	if err != nil {
@@ -522,7 +522,7 @@ WHERE repo_id = ? AND ref = ? ORDER BY queue_sequence DESC LIMIT 1`, repoID, ref
 }
 
 func (s *Store) LatestRunForSHA(ctx context.Context, repoID int64, sha string) (model.Run, error) {
-	value, err := scanRun(s.db.QueryRowContext(ctx, `
+	value, err := scanRun(s.reader().QueryRowContext(ctx, `
 SELECT `+runColumns+` FROM runs
 WHERE repo_id = ? AND sha = ? ORDER BY queue_sequence DESC LIMIT 1`, repoID, sha))
 	if err != nil {
@@ -542,7 +542,7 @@ func (s *Store) HasPassedRunForSHA(ctx context.Context, name, sha string) (bool,
 		return false, err
 	}
 	var passed bool
-	err = s.db.QueryRowContext(ctx, `SELECT EXISTS(
+	err = s.reader().QueryRowContext(ctx, `SELECT EXISTS(
 SELECT 1 FROM runs WHERE repo_id = ? AND tested_sha = ? AND status = 'passed'
 )`, repo.ID, sha).Scan(&passed)
 	if err != nil {
@@ -587,7 +587,7 @@ func (s *Store) ResolveRun(ctx context.Context, repoID int64, selector string) (
 			}
 		}
 		var matches int
-		if err := s.db.QueryRowContext(ctx, `
+		if err := s.reader().QueryRowContext(ctx, `
 SELECT count(DISTINCT sha) FROM runs WHERE repo_id = ? AND sha LIKE ?`, repoID, lower+"%").Scan(&matches); err != nil {
 			return model.Run{}, fmt.Errorf("resolve abbreviated SHA: %w", err)
 		}
@@ -595,7 +595,7 @@ SELECT count(DISTINCT sha) FROM runs WHERE repo_id = ? AND sha LIKE ?`, repoID, 
 		case matches > 1:
 			return model.Run{}, fmt.Errorf("%w: %q", ErrAmbiguous, selector)
 		case matches == 1:
-			value, err := scanRun(s.db.QueryRowContext(ctx, `
+			value, err := scanRun(s.reader().QueryRowContext(ctx, `
 SELECT `+runColumns+` FROM runs
 WHERE repo_id = ? AND sha LIKE ? ORDER BY queue_sequence DESC LIMIT 1`, repoID, lower+"%"))
 			if err != nil {
@@ -624,7 +624,7 @@ func (s *Store) ResolveWaitRun(ctx context.Context, repoID int64, selector, trig
 
 	// Count identities, not runs: several annotated tags may peel to the
 	// same selected commit, but a prefix spanning distinct objects is unsafe.
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.reader().QueryContext(ctx, `
 SELECT sha FROM runs
 WHERE repo_id = ? AND (? = '' OR trigger = ?) AND sha LIKE ?
 UNION
@@ -661,7 +661,7 @@ LIMIT 2`, repoID, trigger, trigger, selector+"%", repoID, trigger, trigger, sele
 }
 
 func (s *Store) latestWaitRunForSHA(ctx context.Context, repoID int64, sha, trigger string) (model.Run, error) {
-	run, err := scanRun(s.db.QueryRowContext(ctx, `
+	run, err := scanRun(s.reader().QueryRowContext(ctx, `
 SELECT `+runColumns+` FROM runs
 WHERE repo_id = ? AND (? = '' OR trigger = ?)
   AND (sha = ? OR (ref_kind = 'tag' AND tested_sha = ?))
@@ -676,7 +676,7 @@ ORDER BY queue_sequence DESC LIMIT 1`, repoID, trigger, trigger, sha, sha))
 // ErrAmbiguous when the same name appears as both a branch and a tag ref.
 func (s *Store) latestRunForRefWithAmbiguityCheck(ctx context.Context, repoID int64, ref string) (model.Run, error) {
 	var kinds int
-	if err := s.db.QueryRowContext(ctx, `
+	if err := s.reader().QueryRowContext(ctx, `
 SELECT count(DISTINCT ref_kind) FROM runs WHERE repo_id = ? AND ref = ?`, repoID, ref).Scan(&kinds); err != nil {
 		return model.Run{}, fmt.Errorf("check ref kind ambiguity: %w", err)
 	}
@@ -693,7 +693,7 @@ func (s *Store) ResolveRunByRefKind(ctx context.Context, repoID int64, ref strin
 	if repoID <= 0 || ref == "" || !kind.Valid() {
 		return model.Run{}, fmt.Errorf("%w: repository, ref, and kind are required", ErrInvalid)
 	}
-	value, err := scanRun(s.db.QueryRowContext(ctx, `
+	value, err := scanRun(s.reader().QueryRowContext(ctx, `
 SELECT `+runColumns+` FROM runs
 WHERE repo_id = ? AND ref = ? AND ref_kind = ? ORDER BY queue_sequence DESC LIMIT 1`, repoID, ref, kind))
 	if err != nil {
@@ -710,7 +710,7 @@ func (s *Store) DistinctBranchRefsForSHA(ctx context.Context, repoID int64, sha 
 	if repoID <= 0 || !validOID(sha) {
 		return nil, fmt.Errorf("%w: repository and full SHA are required", ErrInvalid)
 	}
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.reader().QueryContext(ctx, `
 SELECT DISTINCT ref FROM runs
 WHERE repo_id = ? AND sha = ? AND ref_kind = 'branch'
   AND trigger NOT IN ('promotion', 'release', 'plan', 'apply')
@@ -776,7 +776,7 @@ WHERE run_cancellations.completed_at IS NULL`, value.ID, jobName, value.Supersed
 }
 
 func (s *Store) PendingRunCancellations(ctx context.Context) ([]model.RunCancellation, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.reader().QueryContext(ctx, `
 SELECT run_id, job_name, superseded_by, reason, created_at, completed_at
 FROM run_cancellations WHERE completed_at IS NULL ORDER BY created_at, run_id`)
 	if err != nil {
@@ -815,7 +815,7 @@ WHERE run_id = ? AND job_name = ? AND completed_at IS NULL`, unixNano(s.now()), 
 		return nil
 	}
 	var completed sql.NullInt64
-	err = s.db.QueryRowContext(ctx, `
+	err = s.reader().QueryRowContext(ctx, `
 SELECT completed_at FROM run_cancellations WHERE run_id = ? AND job_name = ?`, runID, jobName).Scan(&completed)
 	if errors.Is(err, sql.ErrNoRows) {
 		return fmt.Errorf("%w: pending run cancellation", ErrNotFound)
@@ -952,7 +952,7 @@ func (s *Store) ListRecentRuns(ctx context.Context, filter model.RunListFilter) 
 	}
 	restriction, restrictionArgs := repoRestriction("repo_id", filter.RepoIDs)
 	args := append([]any{filter.RepoID, filter.RepoID, filter.Ref, filter.Ref, filter.Before, filter.Before, filter.Terminal}, restrictionArgs...)
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.reader().QueryContext(ctx, `
 SELECT `+runColumns+` FROM runs
 WHERE (? = 0 OR repo_id = ?) AND (? = '' OR ref = ?) AND (? <= 0 OR queue_sequence < ?)
   AND (? = 0 OR status NOT IN ('queued', 'running'))`+restriction+`
@@ -980,7 +980,7 @@ ORDER BY queue_sequence DESC LIMIT ?`, append(args, pageLimit(filter.Limit))...)
 // page loads cannot move onto an older page and appear twice. Both blocks
 // and the cursor are read from one snapshot so admission cannot duplicate a row.
 func (s *Store) listFlatRuns(ctx context.Context, filter model.RunListFilter) ([]model.Run, error) {
-	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	tx, err := s.reader().BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
 		return nil, fmt.Errorf("begin flat run list snapshot: %w", err)
 	}
@@ -1090,7 +1090,7 @@ func runListTime(run model.Run) time.Time {
 // paged list can show how many runs exist beyond the page it holds.
 func (s *Store) CountRuns(ctx context.Context) (model.RunCounts, error) {
 	counts := model.RunCounts{ByRepo: map[int64]int{}, QueuedByRepo: map[int64]int{}, RunningByRepo: map[int64]int{}}
-	rows, err := s.db.QueryContext(ctx, `SELECT repo_id, COUNT(*),
+	rows, err := s.reader().QueryContext(ctx, `SELECT repo_id, COUNT(*),
 SUM(status = 'queued' OR (status = 'running' AND started_at IS NULL)),
 SUM(status = 'running' AND started_at IS NOT NULL)
 FROM runs GROUP BY repo_id`)
@@ -1128,7 +1128,7 @@ func (s *Store) ListLatestRunsPerRepo(ctx context.Context, perRepo int) ([]model
 	if perRepo > 50 {
 		perRepo = 50
 	}
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.reader().QueryContext(ctx, `
 SELECT `+runColumns+` FROM (
     SELECT *, ROW_NUMBER() OVER (PARTITION BY repo_id ORDER BY queue_sequence DESC) AS rn
     FROM runs
@@ -1195,7 +1195,7 @@ RETURNING run_id, burn, step, ordinal, status, exit_code, log_start, log_end,
 }
 
 func (s *Store) StepResults(ctx context.Context, runID string) ([]model.StepResult, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.reader().QueryContext(ctx, `
 SELECT run_id, burn, step, ordinal, status, exit_code, log_start, log_end,
 	   declared_size, max_rss_bytes, user_cpu_ns, system_cpu_ns, started_at, finished_at, recorded_at, termination_json, memory_peak_bytes
 FROM step_results WHERE run_id = ? ORDER BY ordinal, burn, step`, runID)

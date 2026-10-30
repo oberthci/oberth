@@ -65,6 +65,7 @@ type Store struct {
 
 	authDB   *sql.DB // bounded, read-only WAL readers; no cached authorization
 	idleDB   *sql.DB // read-only WAL pool for the upgrade queue sampler
+	readDB   *sql.DB // bounded, read-only WAL pool for ordinary live queries
 	db       *sql.DB
 	now      func() time.Time
 	mu       sync.Mutex
@@ -276,6 +277,10 @@ func open(
 		_ = s.Close()
 		return nil, err
 	}
+	if err := s.configureReadPool(ctx); err != nil {
+		_ = s.Close()
+		return nil, err
+	}
 	return s, nil
 }
 
@@ -300,6 +305,10 @@ func openCurrent(ctx context.Context, path string, opts Options, readOnly bool) 
 	}
 	if !readOnly {
 		if err := s.configureAuditCache(ctx); err != nil {
+			_ = s.Close()
+			return nil, err
+		}
+		if err := s.configureReadPool(ctx); err != nil {
 			_ = s.Close()
 			return nil, err
 		}
@@ -1072,14 +1081,17 @@ func (s *Store) Close() error {
 		return nil
 	}
 	s.done = true
-	var authErr, idleErr error
+	var authErr, idleErr, readErr error
 	if s.authDB != nil {
 		authErr = s.authDB.Close()
 	}
 	if s.idleDB != nil {
 		idleErr = s.idleDB.Close()
 	}
-	readersErr := errors.Join(authErr, idleErr)
+	if s.readDB != nil {
+		readErr = s.readDB.Close()
+	}
+	readersErr := errors.Join(authErr, idleErr, readErr)
 	if s.readOnly {
 		closeErr := s.db.Close()
 		if s.cleanup != nil {
@@ -1116,7 +1128,7 @@ INSERT INTO upstreams(name, kind, base_url, key_name, created_at, updated_at) VA
 }
 
 func (s *Store) Upstream(ctx context.Context, id int64) (model.Upstream, error) {
-	row := s.db.QueryRowContext(ctx, `SELECT id, name, kind, base_url, key_name, created_at, updated_at FROM upstreams WHERE id = ?`, id)
+	row := s.reader().QueryRowContext(ctx, `SELECT id, name, kind, base_url, key_name, created_at, updated_at FROM upstreams WHERE id = ?`, id)
 	var value model.Upstream
 	var created, updated int64
 	if err := row.Scan(&value.ID, &value.Name, &value.Kind, &value.BaseURL, &value.KeyName, &created, &updated); err != nil {
@@ -1145,7 +1157,7 @@ INSERT INTO repositories(name, upstream_id, default_branch, created_at, updated_
 }
 
 func (s *Store) Repository(ctx context.Context, id int64) (model.Repository, error) {
-	return scanRepository(s.db.QueryRowContext(ctx, `
+	return scanRepository(s.reader().QueryRowContext(ctx, `
 SELECT `+repositoryColumns+` FROM repositories r WHERE r.id = ?`, id))
 }
 
@@ -1175,7 +1187,7 @@ func (s *Store) RepositoryByName(ctx context.Context, name string) (model.Reposi
 }
 
 func (s *Store) repositoryByBareName(ctx context.Context, name string) (model.Repository, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.reader().QueryContext(ctx, `
 SELECT `+repositoryColumns+`,
        u.name
 FROM repositories r
@@ -1235,7 +1247,7 @@ func (s *Store) repositoryByOrgName(ctx context.Context, org, name string) (mode
 	}
 	// Query with each matching upstream.
 	for _, upstreamID := range matchingUpstreamIDs {
-		repo, err := scanRepository(s.db.QueryRowContext(ctx, `
+		repo, err := scanRepository(s.reader().QueryRowContext(ctx, `
 SELECT `+repositoryColumns+`
 FROM repositories r WHERE r.name = ? AND r.upstream_id = ?`, name, upstreamID))
 		if err == nil {
@@ -1257,7 +1269,7 @@ func (s *Store) repositoryByUpstreamOrgName(ctx context.Context, upstreamName, o
 		return model.Repository{}, fmt.Errorf(
 			"%w: upstream %q has org %q, not %q", ErrInvalid, upstreamName, upstream.Org(), org)
 	}
-	return scanRepository(s.db.QueryRowContext(ctx, `
+	return scanRepository(s.reader().QueryRowContext(ctx, `
 SELECT `+repositoryColumns+`
 FROM repositories r WHERE r.name = ? AND r.upstream_id = ?`, name, upstream.ID))
 }
@@ -1320,7 +1332,7 @@ func (s *Store) SetRepositoryDefaultBranch(ctx context.Context, id int64, branch
 }
 
 func (s *Store) ListRepositories(ctx context.Context) ([]model.Repository, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.reader().QueryContext(ctx, `
 SELECT `+repositoryColumns+`
 FROM repositories r ORDER BY r.name`)
 	if err != nil {
@@ -1363,7 +1375,7 @@ func scanRepository(row rowScanner) (model.Repository, error) {
 // the same bare name under different upstreams have different qualified
 // names and therefore cannot alias each other's grants or schedule state.
 func (s *Store) QualifiedRepoName(ctx context.Context, repoID int64) (string, error) {
-	return qualifiedRepoName(ctx, s.db, repoID)
+	return qualifiedRepoName(ctx, s.reader(), repoID)
 }
 
 func qualifiedRepoName(ctx context.Context, q interface {
@@ -1685,7 +1697,7 @@ func (s *Store) PromotionByRun(ctx context.Context, runID string) (model.Promoti
 		return model.Promotion{}, fmt.Errorf("%w: promotion run ID is required", ErrInvalid)
 	}
 	var matches int
-	if err := s.db.QueryRowContext(ctx, `SELECT count(*) FROM promotions WHERE run_id = ?`, runID).Scan(&matches); err != nil {
+	if err := s.reader().QueryRowContext(ctx, `SELECT count(*) FROM promotions WHERE run_id = ?`, runID).Scan(&matches); err != nil {
 		return model.Promotion{}, fmt.Errorf("count promotion run associations: %w", err)
 	}
 	if matches == 0 {
@@ -1694,7 +1706,7 @@ func (s *Store) PromotionByRun(ctx context.Context, runID string) (model.Promoti
 	if matches > 1 {
 		return model.Promotion{}, fmt.Errorf("%w: promotion run %s", ErrAmbiguous, runID)
 	}
-	value, err := scanPromotion(s.db.QueryRowContext(ctx, `
+	value, err := scanPromotion(s.reader().QueryRowContext(ctx, `
 SELECT sequence, id, repo_id, source_branch, source_sha, target_ref, previous_sha,
        result_sha, actor, status, run_id, grant_id, error, created_at, updated_at
 FROM promotions WHERE run_id = ?`, runID))
@@ -1719,7 +1731,7 @@ FROM promotions WHERE run_id = ?`, runID))
 }
 
 func (s *Store) Promotion(ctx context.Context, id string) (model.Promotion, error) {
-	value, err := scanPromotion(s.db.QueryRowContext(ctx, `
+	value, err := scanPromotion(s.reader().QueryRowContext(ctx, `
 SELECT sequence, id, repo_id, source_branch, source_sha, target_ref, previous_sha,
        result_sha, actor, status, run_id, grant_id, error, created_at, updated_at
 FROM promotions WHERE id = ?`, id))
@@ -1794,7 +1806,7 @@ func (s *Store) TrustedPlan(ctx context.Context, id string) (model.TrustedPlan, 
 	var value model.TrustedPlan
 	var created, expires, updated int64
 	var consumed sql.NullInt64
-	err := s.db.QueryRowContext(ctx, `
+	err := s.reader().QueryRowContext(ctx, `
 SELECT sequence, id, repo_id, upstream_id, source_ref, source_sha, target_ref,
        base_sha, result_sha, green_run_id, plan_run_id, promotion_id, apply_id,
        apply_enqueue_error, backend_identity, backend_key, tool_digest, lock_digest,
@@ -1826,7 +1838,7 @@ func (s *Store) TrustedApply(ctx context.Context, id string) (model.TrustedApply
 	var value model.TrustedApply
 	var created, updated int64
 	var started, finished sql.NullInt64
-	err := s.db.QueryRowContext(ctx, `
+	err := s.reader().QueryRowContext(ctx, `
 SELECT sequence, id, plan_id, promotion_id, repo_id, target_ref, sha, run_id,
        artifact_digest, backend_key, actor, status, error,
        created_at, started_at, finished_at, updated_at
@@ -1913,7 +1925,7 @@ RETURNING id, fingerprint, identity, token_credential_id, auth_actor, admin, cre
 func (s *Store) UplinkByFingerprint(ctx context.Context, fingerprint string) (model.Uplink, error) {
 	db := s.authDB
 	if db == nil {
-		db = s.db // CLI, inspection handles and internal fixtures
+		db = s.reader() // CLI, inspection handles and internal fixtures
 	}
 	// A fresh deferred transaction binds the key and all its scopes to one
 	// committed snapshot. End it before returning; never retain a snapshot
@@ -2029,7 +2041,7 @@ func (s *Store) TokenCredentialByDigest(ctx context.Context, digest []byte) (mod
 	if len(digest) != 32 {
 		return model.TokenCredential{}, ErrNotFound
 	}
-	value, err := scanTokenCredential(s.db.QueryRowContext(ctx, `
+	value, err := scanTokenCredential(s.reader().QueryRowContext(ctx, `
 SELECT id, name, digest, created_at, activated_at, last_used_at, revoked_at
 FROM token_credentials WHERE digest = ?`, digest))
 	if err != nil {
@@ -2042,7 +2054,7 @@ func (s *Store) AuthenticatedUplinkByDigest(ctx context.Context, digest []byte) 
 	if len(digest) != 32 {
 		return model.AuthenticatedUplink{}, ErrNotFound
 	}
-	row := s.db.QueryRowContext(ctx, `
+	row := s.reader().QueryRowContext(ctx, `
 SELECT u.id, u.fingerprint, u.identity, u.token_credential_id, u.auth_actor, u.admin, u.created_at, u.updated_at,
        t.id, t.name, t.digest, t.created_at, t.activated_at, t.last_used_at, t.revoked_at
 FROM token_credentials t
@@ -2061,7 +2073,7 @@ WHERE t.digest = ? AND t.activated_at IS NOT NULL AND t.revoked_at IS NULL`, dig
 		return model.AuthenticatedUplink{}, translateNotFound("authenticated uplink", err)
 	}
 	// A scope that cannot be read must not authenticate as unscoped (#073).
-	scopes, err := loadUplinkScopes(ctx, s.db, value.ID)
+	scopes, err := loadUplinkScopes(ctx, s.reader(), value.ID)
 	if err != nil {
 		return model.AuthenticatedUplink{}, err
 	}

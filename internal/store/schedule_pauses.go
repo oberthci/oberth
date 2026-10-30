@@ -23,7 +23,7 @@ func ScheduleAuditResourceID(qualifiedRepo, entry string) string {
 // entry is due or an operator lists schedules.
 func (s *Store) SchedulePauses(ctx context.Context, qualifiedRepo string) (map[string]model.SchedulePause, error) {
 	prefix := qualifiedRepo + "#"
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.reader().QueryContext(ctx, `
 SELECT action, actor, resource_id, details, created_at FROM audit_actions
 WHERE resource_type = 'schedule' AND action IN ('schedule.pause', 'schedule.resume')
   AND substr(resource_id, 1, ?) = ?

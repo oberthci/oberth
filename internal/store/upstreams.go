@@ -8,12 +8,12 @@ import (
 )
 
 func (s *Store) UpstreamByName(ctx context.Context, name string) (model.Upstream, error) {
-	return scanUpstream(s.db.QueryRowContext(ctx, `
+	return scanUpstream(s.reader().QueryRowContext(ctx, `
 SELECT id, name, kind, base_url, key_name, created_at, updated_at FROM upstreams WHERE name = ?`, name))
 }
 
 func (s *Store) ListUpstreams(ctx context.Context) ([]model.Upstream, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.reader().QueryContext(ctx, `
 SELECT id, name, kind, base_url, key_name, created_at, updated_at FROM upstreams ORDER BY name`)
 	if err != nil {
 		return nil, fmt.Errorf("list upstreams: %w", err)

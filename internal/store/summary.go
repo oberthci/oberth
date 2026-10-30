@@ -28,17 +28,17 @@ type ContentSummary struct {
 func (s *Store) Summary(ctx context.Context) (ContentSummary, error) {
 	var summary ContentSummary
 	var last sql.NullInt64
-	if err := s.db.QueryRowContext(ctx, `SELECT count(*), max(created_at) FROM runs`).Scan(&summary.Runs, &last); err != nil {
+	if err := s.reader().QueryRowContext(ctx, `SELECT count(*), max(created_at) FROM runs`).Scan(&summary.Runs, &last); err != nil {
 		return summary, fmt.Errorf("count runs: %w", err)
 	}
 	if last.Valid {
 		summary.LastRunAt = fromUnixNano(last.Int64)
 	}
-	if err := s.db.QueryRowContext(ctx, `SELECT count(*), count(CASE WHEN state = 'open' THEN 1 END) FROM issues`).
+	if err := s.reader().QueryRowContext(ctx, `SELECT count(*), count(CASE WHEN state = 'open' THEN 1 END) FROM issues`).
 		Scan(&summary.Issues, &summary.OpenIssues); err != nil {
 		return summary, fmt.Errorf("count issues: %w", err)
 	}
-	if err := s.db.QueryRowContext(ctx, `SELECT count(*) FROM promotions`).Scan(&summary.Promotions); err != nil {
+	if err := s.reader().QueryRowContext(ctx, `SELECT count(*) FROM promotions`).Scan(&summary.Promotions); err != nil {
 		return summary, fmt.Errorf("count promotions: %w", err)
 	}
 	var err error
@@ -57,7 +57,7 @@ SELECT identity || CASE WHEN admin THEN ' (admin)' ELSE '' END FROM uplinks ORDE
 }
 
 func (s *Store) summaryNames(ctx context.Context, query string) ([]string, error) {
-	rows, err := s.db.QueryContext(ctx, query)
+	rows, err := s.reader().QueryContext(ctx, query)
 	if err != nil {
 		return nil, err
 	}

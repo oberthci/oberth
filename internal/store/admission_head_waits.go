@@ -28,7 +28,7 @@ const (
 // head of the admission queue, if that is recorded and recent (#1085).
 func (s *Store) AdmissionHeadWait(ctx context.Context, repoID int64, refKind model.RefKind, ref, sha string) (time.Time, bool, error) {
 	var since int64
-	err := s.db.QueryRowContext(ctx, `SELECT since FROM admission_head_waits WHERE repo_id=? AND ref_kind=? AND ref=? AND sha=?`,
+	err := s.reader().QueryRowContext(ctx, `SELECT since FROM admission_head_waits WHERE repo_id=? AND ref_kind=? AND ref=? AND sha=?`,
 		repoID, string(refKind), ref, strings.ToLower(sha)).Scan(&since)
 	if errors.Is(err, sql.ErrNoRows) {
 		return time.Time{}, false, nil
@@ -80,7 +80,7 @@ func (s *Store) RunDurationEstimate(ctx context.Context, repoID int64, class str
 	default:
 		return 0, false, fmt.Errorf("%w: run duration class %q", ErrInvalid, class)
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT finished_at - started_at FROM runs
+	rows, err := s.reader().QueryContext(ctx, `SELECT finished_at - started_at FROM runs
 WHERE repo_id = ?1 AND status = 'passed' AND started_at IS NOT NULL AND finished_at IS NOT NULL
   AND finished_at >= started_at
   AND ((?2 = 'release' AND release = 1)

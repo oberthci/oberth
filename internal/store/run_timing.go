@@ -109,21 +109,45 @@ func (s *Store) RecordStepTimings(ctx context.Context, values []model.StepTiming
 	if len(values) > model.MaxTimingTasks {
 		return fmt.Errorf("%w: too many step timings", ErrInvalid)
 	}
+	if len(values) == 0 {
+		return ctx.Err()
+	}
+	// Validation includes JSON encoding and size checks. Do that CPU work
+	// before reserving SQLite's single writer, including for invalid batches.
+	bodies := make([]string, len(values))
+	for i, value := range values {
+		if value.Validate() != nil {
+			return fmt.Errorf("%w: invalid step timing", ErrInvalid)
+		}
+		body, _ := json.Marshal(value)
+		bodies[i] = string(body)
+	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	for _, value := range values {
-		if value.Validate() != nil {
-			return fmt.Errorf("%w: invalid step timing", ErrInvalid)
+	// A Workflow graph can have 2048 tasks. Decoding and validating that graph
+	// for every task made a batch quadratic while holding the write lock.
+	// Cache only inside this transaction, preserving the atomic binding checks.
+	type workflowBinding struct{ UID, Name, Namespace string }
+	workflows := make(map[string]workflowBinding)
+	counts := make(map[string]int)
+	for i, value := range values {
+		workflow, found := workflows[value.RunID]
+		if !found {
+			var workflowJSON sql.NullString
+			if err := tx.QueryRowContext(ctx, `SELECT workflow_json FROM run_timings WHERE run_id=?`, value.RunID).Scan(&workflowJSON); err != nil {
+				return err
+			}
+			var decoded model.WorkflowTiming
+			if !workflowJSON.Valid || json.Unmarshal([]byte(workflowJSON.String), &decoded) != nil || decoded.Validate() != nil {
+				return fmt.Errorf("%w: step timing Workflow binding mismatch", ErrInvalidState)
+			}
+			workflow = workflowBinding{UID: decoded.UID, Name: decoded.Name, Namespace: decoded.Namespace}
+			workflows[value.RunID] = workflow
 		}
-		var workflowJSON sql.NullString
-		if err := tx.QueryRowContext(ctx, `SELECT workflow_json FROM run_timings WHERE run_id=?`, value.RunID).Scan(&workflowJSON); err != nil {
-			return err
-		}
-		var workflow model.WorkflowTiming
-		if !workflowJSON.Valid || json.Unmarshal([]byte(workflowJSON.String), &workflow) != nil || workflow.Validate() != nil || workflow.UID != value.WorkflowUID || workflow.Name != value.WorkflowName || workflow.Namespace != value.Namespace {
+		if workflow.UID != value.WorkflowUID || workflow.Name != value.WorkflowName || workflow.Namespace != value.Namespace {
 			return fmt.Errorf("%w: step timing Workflow binding mismatch", ErrInvalidState)
 		}
 		var oldJSON string
@@ -154,21 +178,23 @@ func (s *Store) RecordStepTimings(ctx context.Context, values []model.StepTiming
 				continue
 			}
 		} else {
-			var count int
-			if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM step_timings WHERE run_id=?`, value.RunID).Scan(&count); err != nil {
-				return err
+			count, found := counts[value.RunID]
+			if !found {
+				if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM step_timings WHERE run_id=?`, value.RunID).Scan(&count); err != nil {
+					return err
+				}
 			}
 			if count >= model.MaxTimingTasks {
 				return fmt.Errorf("%w: step timing attempt bound exceeded", ErrInvalidState)
 			}
+			counts[value.RunID] = count + 1
 		}
-		body, _ := json.Marshal(value)
 		available := 0
 		if value.Available {
 			available = 1
 		}
 		if _, err := tx.ExecContext(ctx, `INSERT INTO step_timings(run_id,node_id,workflow_uid,pod_uid,available,ordinal,timing_json)
-VALUES(?,?,?,?,?,?,?) ON CONFLICT(run_id,node_id) DO UPDATE SET pod_uid=excluded.pod_uid,available=excluded.available,timing_json=excluded.timing_json`, value.RunID, value.NodeID, value.WorkflowUID, value.PodUID, available, value.Ordinal, string(body)); err != nil {
+VALUES(?,?,?,?,?,?,?) ON CONFLICT(run_id,node_id) DO UPDATE SET pod_uid=excluded.pod_uid,available=excluded.available,timing_json=excluded.timing_json`, value.RunID, value.NodeID, value.WorkflowUID, value.PodUID, available, value.Ordinal, bodies[i]); err != nil {
 			return err
 		}
 	}
@@ -183,7 +209,7 @@ func (s *Store) RunTiming(ctx context.Context, id string) (model.RunTiming, erro
 	value := model.RunTiming{Version: model.TimingVersion, RunID: id, QueuedAt: run.QueuedAt, Admissions: []model.AdmissionTiming{}, Steps: []model.StepTiming{}}
 	var claimed, checkout, seed, source, created, terminal sql.NullInt64
 	var workflow sql.NullString
-	err = s.db.QueryRowContext(ctx, `SELECT claimed_at,checkout_ready_at,source_seed_started_at,source_ready_at,workflow_created_at,terminal_at,workflow_json FROM run_timings WHERE run_id=?`, id).Scan(&claimed, &checkout, &seed, &source, &created, &terminal, &workflow)
+	err = s.reader().QueryRowContext(ctx, `SELECT claimed_at,checkout_ready_at,source_seed_started_at,source_ready_at,workflow_created_at,terminal_at,workflow_json FROM run_timings WHERE run_id=?`, id).Scan(&claimed, &checkout, &seed, &source, &created, &terminal, &workflow)
 	if errors.Is(err, sql.ErrNoRows) {
 		value.Unavailable = "not-recorded"
 		return value, nil
@@ -199,7 +225,7 @@ func (s *Store) RunTiming(ctx context.Context, id string) (model.RunTiming, erro
 		}
 		value.Workflow = &binding
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT episode,requested_at,granted_at,closed_at FROM run_admission_timings WHERE run_id=? ORDER BY episode`, id)
+	rows, err := s.reader().QueryContext(ctx, `SELECT episode,requested_at,granted_at,closed_at FROM run_admission_timings WHERE run_id=? ORDER BY episode`, id)
 	if err != nil {
 		return value, err
 	}
@@ -216,7 +242,7 @@ func (s *Store) RunTiming(ctx context.Context, id string) (model.RunTiming, erro
 	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
 		return value, err
 	}
-	rows, err = s.db.QueryContext(ctx, `SELECT node_id,workflow_uid,pod_uid,available,ordinal,timing_json FROM step_timings WHERE run_id=? ORDER BY ordinal,node_id`, id)
+	rows, err = s.reader().QueryContext(ctx, `SELECT node_id,workflow_uid,pod_uid,available,ordinal,timing_json FROM step_timings WHERE run_id=? ORDER BY ordinal,node_id`, id)
 	if err != nil {
 		return value, err
 	}
