@@ -214,36 +214,84 @@ func (err *cleanupInfrastructureError) Error() string { return err.cause.Error()
 func (err *cleanupInfrastructureError) Unwrap() error { return err.cause }
 func cleanupInfrastructureFailure(err error) error    { return &cleanupInfrastructureError{cause: err} }
 
+// A mixed failure retains any ownership/residue failure as a pipeline
+// failure; a sibling API outage must not make that verdict retryable.
+func cleanupIsInfrastructure(err error) bool {
+	if err == nil {
+		return false
+	}
+	if _, ok := err.(*cleanupInfrastructureError); ok {
+		return true
+	}
+	if joined, ok := err.(interface{ Unwrap() []error }); ok {
+		causes := joined.Unwrap()
+		for _, cause := range causes {
+			if !cleanupIsInfrastructure(cause) {
+				return false
+			}
+		}
+		return len(causes) != 0
+	}
+	if wrapped, ok := err.(interface{ Unwrap() error }); ok {
+		return cleanupIsInfrastructure(wrapped.Unwrap())
+	}
+	return false
+}
+
+type cleanupPendingIdentityError struct{}
+
+func (*cleanupPendingIdentityError) Error() string {
+	return "unconfirmed VMI create intent; absence cannot prove an in-flight POST finished"
+}
+
 // Label-filtered lists discover run resources. An initial and final prefix
 // scan also find unlabeled volumeClaimTemplates, source and CDI PVCs. While
 // waiting, read those known names directly instead of relisting a shared
 // namespace. Only matching run objects count against the inventory bound.
 func (c *Controller) cleanupObjects(ctx context.Context, wf *wfv1.Workflow, known map[string]types.UID, scanPrefix bool) ([]cleanupObject, error) {
 	var objects []cleanupObject
+	var failures []error
 	for _, resource := range []schema.GroupVersionResource{vmiResource, dataVolumeResource, pvcResource} {
 		client := c.vmi.Resource(resource).Namespace(wf.Namespace)
 		seen := map[string]bool{}
 		add := func(object unstructured.Unstructured) error {
-			if object.GetNamespace() != wf.Namespace || !strings.HasPrefix(object.GetName(), wf.Name+"-") || seen[object.GetName()] {
+			if object.GetNamespace() != wf.Namespace {
+				return errors.New("cleanup namespace mismatch")
+			}
+			if !strings.HasPrefix(object.GetName(), wf.Name+"-") {
+				if object.GetLabels()["oberth.ci/workflow"] == wf.Name {
+					return errors.New("cleanup run label has invalid name prefix")
+				}
+				return nil
+			}
+			if seen[object.GetName()] {
 				return nil
 			}
 			seen[object.GetName()] = true
 			if len(seen) > 2048 {
 				return fmt.Errorf("run %s exceeds 2048-object cleanup bound for %s", wf.Name, resource.Resource)
 			}
-			owned := object.GetUID() != "" && known[cleanupKey(resource, object.GetName())] == object.GetUID()
-			if !owned {
-				var err error
-				owned, err = c.runOwnsResource(ctx, wf, &object)
-				if err != nil {
-					return cleanupInfrastructureFailure(fmt.Errorf("read cleanup ownership: %w", err))
-				}
-			}
 			candidate := cleanupObject{resource: resource, object: object}
-			objects = append(objects, candidate)
-			if !owned {
+			pinned := known[cleanupKey(resource, object.GetName())]
+			if pinned != "" && pinned != object.GetUID() {
+				return fmt.Errorf("replacement UID at %s; original uid=%s", candidate.identity(), pinned)
+			}
+			if resource == vmiResource && object.GetLabels()["oberth.ci/workflow"] != wf.Name {
+				return fmt.Errorf("run label mismatch at %s", candidate.identity())
+			}
+			owned, err := c.runOwnsResource(ctx, wf, &object)
+			if err != nil {
+				return cleanupInfrastructureFailure(fmt.Errorf("read cleanup ownership: %w", err))
+			}
+			// A pinned CDI child can outlive its deleted parent. Other owner
+			// checks, including every VMI's Workflow owner, remain mandatory.
+			if !owned && resource == pvcResource && pinned == object.GetUID() && pinned != "" {
+				owned = true
+			}
+			if !owned || object.GetUID() == "" {
 				return fmt.Errorf("refusing delete of foreign or unproven %s", candidate.identity())
 			}
+			objects = append(objects, candidate)
 			return nil
 		}
 		list := func(selector string) error {
@@ -255,13 +303,16 @@ func (c *Controller) cleanupObjects(ctx context.Context, wf *wfv1.Workflow, know
 				page, err := client.List(ctx, metav1.ListOptions{LabelSelector: selector, Limit: 256, Continue: next})
 				if apierrors.IsNotFound(err) && resource != pvcResource {
 					return nil
-				} // Optional CRD absent.
+				}
 				if err != nil {
 					return cleanupInfrastructureFailure(fmt.Errorf("list %s: %w", resource.Resource, err))
 				}
 				for _, object := range page.Items {
 					if err := add(object); err != nil {
-						return err
+						failures = append(failures, err)
+					}
+					if len(seen) > 2048 {
+						return errors.New("cleanup inventory bound exceeded")
 					}
 				}
 				if page.GetContinue() == "" {
@@ -274,7 +325,7 @@ func (c *Controller) cleanupObjects(ctx context.Context, wf *wfv1.Workflow, know
 			}
 		}
 		if err := list("oberth.ci/workflow=" + wf.Name); err != nil {
-			return objects, err
+			failures = append(failures, err)
 		}
 		for key := range known {
 			name, matches := strings.CutPrefix(key, resource.String()+"/")
@@ -286,19 +337,119 @@ func (c *Controller) cleanupObjects(ctx context.Context, wf *wfv1.Workflow, know
 				continue
 			}
 			if err != nil {
-				return objects, cleanupInfrastructureFailure(fmt.Errorf("read cleanup %s/%s: %w", resource.Resource, name, err))
+				failures = append(failures, cleanupInfrastructureFailure(fmt.Errorf("read cleanup %s/%s: %w", resource.Resource, name, err)))
+				continue
 			}
 			if err := add(*object); err != nil {
-				return objects, err
+				failures = append(failures, err)
 			}
 		}
 		if scanPrefix {
 			if err := list(""); err != nil {
-				return objects, err
+				failures = append(failures, err)
 			}
 		}
 	}
-	return objects, nil
+	return objects, errors.Join(failures...)
+}
+
+// Recover original UIDs even after an early delete and after the resource Pod
+// has gone. The server ledger is bounded and contains no guest credentials.
+func (c *Controller) cleanupIdentities(ctx context.Context, wf *wfv1.Workflow) (map[string]types.UID, error) {
+	known := map[string]types.UID{}
+	for _, t := range wf.Spec.Templates {
+		if t.Resource == nil || t.Resource.Action != "create" {
+			continue
+		}
+		op, err := argoworkflow.VMIOperation(t.Resource)
+		if err != nil {
+			return known, err
+		}
+		known[cleanupKey(vmiResource, strings.ReplaceAll(op.Name, "{{workflow.name}}", wf.Name))] = ""
+	}
+	if c.kube == nil {
+		return known, cleanupInfrastructureFailure(errors.New("cleanup Pod/identity observer unavailable"))
+	}
+	cm, err := c.getVMILedger(ctx)
+	if err != nil {
+		return known, cleanupInfrastructureFailure(err)
+	}
+	ledger, err := readVMILedger(cm)
+	if err != nil {
+		return known, cleanupInfrastructureFailure(err)
+	}
+	var pending bool
+	for _, claim := range ledger.Claims {
+		if claim.WorkflowUID != wf.UID {
+			continue
+		}
+		if claim.CleanupWorkflow != wf.Name || claim.CleanupRun != wf.Annotations[runIDAnnotation] || !strings.HasPrefix(claim.Name, wf.Name+"-") {
+			return known, errors.New("cleanup creation receipt identity mismatch")
+		}
+		if claim.UID == "" && !claim.Closed {
+			pending = true
+		}
+		key := cleanupKey(vmiResource, claim.Name)
+		if _, exists := known[key]; !exists {
+			known[key] = ""
+		}
+		if previous := known[key]; previous != "" && claim.UID != "" && previous != claim.UID {
+			return known, errors.New("multiple original VMI UIDs at one cleanup name")
+		}
+		if claim.UID != "" {
+			known[key] = claim.UID
+		}
+	}
+	if pending {
+		return known, &cleanupPendingIdentityError{}
+	}
+	return known, nil
+}
+
+// Launcher Pods own the ephemeral disks. VMI NotFound alone is insufficient:
+// independently read the whole Pod collection, including terminating Pods.
+func (c *Controller) cleanupLaunchers(ctx context.Context, wf *wfv1.Workflow, known map[string]types.UID) ([]string, error) {
+	if c.kube == nil {
+		return nil, cleanupInfrastructureFailure(errors.New("cleanup Pod observer unavailable"))
+	}
+	names, uids := map[string]bool{}, map[types.UID]bool{}
+	for key, uid := range known {
+		if name, ok := strings.CutPrefix(key, vmiResource.String()+"/"); ok {
+			names[name] = true
+			if uid != "" {
+				uids[uid] = true
+			}
+		}
+	}
+	var remaining []string
+	next := ""
+	for {
+		pods, err := c.kube.CoreV1().Pods(wf.Namespace).List(ctx, metav1.ListOptions{Limit: 256, Continue: next})
+		if err != nil {
+			return remaining, cleanupInfrastructureFailure(fmt.Errorf("read launcher absence: %w", err))
+		}
+		for _, pod := range pods.Items {
+			match := uids[types.UID(pod.Labels["kubevirt.io/created-by"])] || names[pod.Labels["kubevirt.io/domain"]] || strings.HasPrefix(pod.Name, "virt-launcher-"+wf.Name+"-")
+			for _, owner := range pod.OwnerReferences {
+				if owner.APIVersion == "kubevirt.io/v1" && owner.Kind == "VirtualMachineInstance" && (uids[owner.UID] || names[owner.Name]) {
+					match = true
+				}
+			}
+			if match {
+				remaining = append(remaining, fmt.Sprintf("Pod/%s uid=%s", pod.Name, pod.UID))
+				if len(remaining) > 2048 {
+					return remaining, errors.New("cleanup launcher inventory bound exceeded")
+				}
+			}
+		}
+		if pods.Continue == "" {
+			return remaining, nil
+		}
+		if pods.Continue == next {
+			return remaining, cleanupInfrastructureFailure(errors.New("cleanup Pod pagination did not advance"))
+		}
+		next = pods.Continue
+	}
 }
 
 type cleanupLogWriter struct {
@@ -358,9 +509,30 @@ func (c *Controller) cleanupVerdict(ctx context.Context, wf *wfv1.Workflow, runI
 	var remaining []string
 	attempted := map[string]bool{}
 	known := map[string]types.UID{}
+	if err == nil {
+		known, err = c.cleanupIdentities(cleanupCtx, wf)
+	}
+	var identityFailure error
+	var pending *cleanupPendingIdentityError
+	if errors.As(err, &pending) {
+		identityFailure, err = err, nil
+	}
+	if destination != nil {
+		writeLine(destination, step, fmt.Sprintf("cleanup receipt run=%s Workflow/%s namespace=%s uid=%s", runID, wf.Name, wf.Namespace, wf.UID))
+		keys := make([]string, 0, len(known))
+		for key := range known {
+			keys = append(keys, key)
+		}
+		slices.Sort(keys)
+		for _, key := range keys {
+			writeLine(destination, step, fmt.Sprintf("original %s uid=%s", key, known[key]))
+		}
+	}
+	firstScan := true
 	pollDelay := initialCleanupPollDelay
 	for err == nil {
-		scanPrefix := len(known) == 0
+		scanPrefix := firstScan
+		firstScan = false
 		objects, readErr := c.cleanupObjects(cleanupCtx, wf, known, scanPrefix)
 		if readErr == nil && len(objects) == 0 && !scanPrefix {
 			// Catch late unlabeled resources before accepting complete absence.
@@ -372,13 +544,9 @@ func (c *Controller) cleanupVerdict(ctx context.Context, wf *wfv1.Workflow, runI
 				remaining = append(remaining, object.identity())
 			}
 		}
-		if readErr != nil {
-			err = readErr
-			break
-		}
-		if len(objects) == 0 {
-			break
-		}
+		// Inventory failures stay failed, but cannot suppress safe sibling
+		// deletion attempts from the same independent inventory.
+		err = errors.Join(identityFailure, readErr)
 		for _, object := range objects {
 			key := object.identity()
 			known[cleanupKey(object.resource, object.object.GetName())] = object.object.GetUID()
@@ -387,21 +555,28 @@ func (c *Controller) cleanupVerdict(ctx context.Context, wf *wfv1.Workflow, runI
 			}
 			uid := object.object.GetUID()
 			if uid == "" {
-				err = cleanupInfrastructureFailure(fmt.Errorf("cleanup object has no UID: %s", key))
-				break
+				err = errors.Join(err, cleanupInfrastructureFailure(fmt.Errorf("cleanup object has no UID: %s", key)))
+				continue
 			}
 			if destination != nil {
 				writeLine(destination, step, "delete "+key)
 			}
 			deleteErr := c.vmi.Resource(object.resource).Namespace(wf.Namespace).Delete(cleanupCtx, object.object.GetName(), cleanupDeleteOptions(object.resource, uid))
 			if deleteErr != nil && !apierrors.IsNotFound(deleteErr) {
-				err = fmt.Errorf("delete %s: %w", key, deleteErr)
+				failure := fmt.Errorf("delete %s: %w", key, deleteErr)
 				if !apierrors.IsConflict(deleteErr) {
-					err = cleanupInfrastructureFailure(err)
+					failure = cleanupInfrastructureFailure(failure)
 				}
-				break
+				err = errors.Join(err, failure)
+				continue
 			}
 			attempted[key] = true
+		}
+		launchers, launcherErr := c.cleanupLaunchers(cleanupCtx, wf, known)
+		remaining = append(remaining, launchers...)
+		err = errors.Join(err, launcherErr)
+		if err == nil && len(objects) == 0 && len(launchers) == 0 {
+			break
 		}
 		if err == nil {
 			err = waitCleanupPoll(cleanupCtx, pollDelay)
@@ -411,7 +586,7 @@ func (c *Controller) cleanupVerdict(ctx context.Context, wf *wfv1.Workflow, runI
 	finish := time.Now().UTC()
 	step.FinishedAt = &finish
 	step.Status = runprogress.StepPassed
-	message := "PASS: run-created VMIs, DataVolumes and PVCs are absent"
+	message := "PASS: independent API read confirms original VMI names, virt-launcher Pods, DataVolumes and PVCs absent"
 	failedMessage := func(err error) string {
 		slices.Sort(remaining)
 		return fmt.Sprintf("FAIL: cleanup verdict: %v; remaining objects: [%s]", err, strings.Join(remaining, ", "))
@@ -438,12 +613,12 @@ func (c *Controller) cleanupVerdict(ctx context.Context, wf *wfv1.Workflow, runI
 	}
 	if err != nil {
 		pipelineFailed := !completion.Succeeded && !completion.Infrastructure
-		var infrastructure *cleanupInfrastructureError
-		if errors.As(err, &infrastructure) {
-			step.InfrastructureReason = infrastructure.Error()
+		infrastructure := cleanupIsInfrastructure(err)
+		if infrastructure {
+			step.InfrastructureReason = err.Error()
 		}
 		completion.Succeeded = false
-		completion.Infrastructure = infrastructure != nil && !pipelineFailed
+		completion.Infrastructure = infrastructure && !pipelineFailed
 		if !pipelineFailed || completion.FailedStep == "" {
 			completion.FailedBurn, completion.FailedStep = step.Burn, step.Step
 		}

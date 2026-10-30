@@ -188,9 +188,10 @@ func admitVMIResource(where string, tmpl *wfv1.ResourceTemplate, prefixes []stri
 	if !tmpl.SetOwnerReference {
 		return fmt.Errorf("argoworkflow: %s.setOwnerReference must be true", where)
 	}
-	if tmpl.ManifestFrom != nil || tmpl.MergeStrategy != "" || len(tmpl.Flags) != 0 ||
+	if tmpl.ManifestFrom != nil || tmpl.MergeStrategy != "" ||
+		(len(tmpl.Flags) != 0 && (tmpl.Action != "get" || !slices.Equal(tmpl.Flags, []string{"--ignore-not-found"}))) ||
 		tmpl.SuccessCondition != "" || tmpl.FailureCondition != "" {
-		return fmt.Errorf("argoworkflow: %s may use only action, inline manifest, and setOwnerReference", where)
+		return fmt.Errorf("argoworkflow: %s may use only action, inline manifest, setOwnerReference, and --ignore-not-found on get", where)
 	}
 	if len(tmpl.Manifest) == 0 || len(tmpl.Manifest) > maxVMIManifestBytes {
 		return fmt.Errorf("argoworkflow: %s.manifest must be inline and at most %d bytes", where, maxVMIManifestBytes)
