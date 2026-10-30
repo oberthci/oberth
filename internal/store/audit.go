@@ -273,8 +273,9 @@ func readAuditHead(ctx context.Context, reader auditStateQuerier) (model.AuditHe
 
 // VerifyAuditMutationState verifies protected state in a read-only WAL
 // snapshot, then runs external verification with no writer connection held.
-// A short BEGIN IMMEDIATE fence accepts the result only if the head and the
-// reader's data_version are unchanged. No result is cached across invocations.
+// A short BEGIN IMMEDIATE fence compares the head, checkpoint and trusted
+// writer key; arbitrary outside edits require fresh verification. No gate
+// permission is cached across invocations.
 func (s *Store) VerifyAuditMutationState(
 	ctx context.Context,
 	intents []model.AuditWitnessIntent,

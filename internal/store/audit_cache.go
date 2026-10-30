@@ -113,6 +113,16 @@ func auditSchemaDigest(ctx context.Context, reader auditStateQuerier) ([sha256.S
 // that connection invalidates the key even if SQLite reuses a counter value.
 // No chain hashing or external work runs while this connection is held.
 func (s *Store) auditCacheKey(ctx context.Context) (key auditCacheKey, resultErr error) {
+	conn, err := s.db.Conn(ctx)
+	if err != nil {
+		return key, err
+	}
+	defer func() { resultErr = errors.Join(resultErr, conn.Close()) }()
+	return s.auditCacheKeyOnConnection(ctx, conn, conn)
+}
+
+// The fence samples the same primary connection while its writer reservation is held.
+func (s *Store) auditCacheKeyOnConnection(ctx context.Context, conn *sql.Conn, reader auditStateQuerier) (key auditCacheKey, err error) {
 	info, err := os.Stat(s.livePath)
 	if err != nil {
 		return key, fmt.Errorf("stat audit cache database: %w", err)
@@ -120,18 +130,13 @@ func (s *Store) auditCacheKey(ctx context.Context) (key auditCacheKey, resultErr
 	if !os.SameFile(s.liveFile, info) {
 		return key, fmt.Errorf("%w: database file replaced; reopen Store before verification", ErrAuditStateChanged)
 	}
-	conn, err := s.db.Conn(ctx)
-	if err != nil {
-		return key, err
-	}
-	defer func() { resultErr = errors.Join(resultErr, conn.Close()) }()
 	if err := conn.Raw(func(driverConn any) error {
 		key.connection = driverConn
 		return nil
 	}); err != nil {
 		return key, err
 	}
-	err = conn.QueryRowContext(ctx, `SELECT data_version, recursive_triggers FROM pragma_data_version, pragma_recursive_triggers`).Scan(&key.version, &key.recursive)
+	err = reader.QueryRowContext(ctx, `SELECT data_version, recursive_triggers FROM pragma_data_version, pragma_recursive_triggers`).Scan(&key.version, &key.recursive)
 	key.domain = s.protocol.AuditDomain
 	return key, err
 }

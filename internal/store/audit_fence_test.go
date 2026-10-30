@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -190,5 +191,106 @@ func TestLocalAuditFencePreservesVerifiedPrefixPin(t *testing.T) {
 	}
 	if _, _, err := s.VerifyLocalAuditMutationState(t.Context(), pinned, acceptAuditMutationState); err == nil || !strings.Contains(err.Error(), "verified audit prefix") {
 		t.Fatalf("shortened chain bypassed prefix pin: %v", err)
+	}
+}
+
+func TestAuditFenceOutsidePrefixEditWithRestoredSchemaFailsClosed(t *testing.T) {
+	now := time.Now()
+	s := testStore(t, &now)
+	seedAuditMetricRows(t, s, 3, now)
+	_, _, err := s.VerifyAuditMutationStateUnanchored(t.Context(), nil, nil, func(model.AuditHead, model.AuditAnchor) error {
+		outsideAuditEdit(t, s, `UPDATE audit_actions SET actor='forged' WHERE id=1`)
+		return nil
+	})
+	if err == nil || !strings.Contains(err.Error(), "audit action 1 hash is invalid") || errors.Is(err, ErrAuditVerificationBusy) {
+		t.Fatalf("outside prefix edit accepted/retried: %v", err)
+	}
+}
+
+func TestAuditFenceFileReplacementDuringCallbackFailsClosed(t *testing.T) {
+	for _, mode := range []string{"local", "witnessed"} {
+		t.Run(mode, func(t *testing.T) {
+			now := time.Now()
+			s := testStore(t, &now)
+			seedAuditMetricRows(t, s, 3, now)
+			verify := func(callback func(model.AuditHead, model.AuditAnchor) error) error {
+				if mode == "local" {
+					_, _, err := s.VerifyLocalAuditMutationState(t.Context(), model.AuditHead{}, callback)
+					return err
+				}
+				_, _, err := s.VerifyAuditMutationStateUnanchored(t.Context(), nil, nil, callback)
+				return err
+			}
+			err := verify(func(model.AuditHead, model.AuditAnchor) error {
+				if err := os.Rename(s.livePath, s.livePath+".original"); err != nil {
+					return err
+				}
+				t.Cleanup(func() {
+					if err := os.Rename(s.livePath+".original", s.livePath); err != nil {
+						t.Error(err)
+					}
+				})
+				return os.WriteFile(s.livePath, nil, 0600)
+			})
+			if !errors.Is(err, ErrAuditStateChanged) || errors.Is(err, ErrAuditVerificationBusy) || !strings.Contains(err.Error(), "file replaced") {
+				t.Fatalf("file replacement accepted/retried: %v", err)
+			}
+		})
+	}
+}
+
+func TestAuditFenceBoundsUntrustedCommitsWithoutBusyRetry(t *testing.T) {
+	now := time.Now()
+	s := testStore(t, &now)
+	credential, err := s.CreateTokenCredential(t.Context(), model.TokenCredentialSpec{Name: "outside", Digest: make([]byte, 32)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	outside, err := sql.Open("sqlite", s.livePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer outside.Close()
+	snapshots, external := 0, 0
+	_, _, err = s.verifyAuditWithFence(t.Context(), func(tx *sql.Tx) (model.AuditHead, model.AuditAnchor, error) {
+		snapshots++
+		head, anchor, _, err := s.verifyAuditMutationState(t.Context(), tx, nil, nil, false)
+		if err == nil {
+			_, err = outside.ExecContext(t.Context(), `UPDATE token_credentials SET last_used_at=COALESCE(last_used_at,0)+1 WHERE id=?`, credential.ID)
+		}
+		return head, anchor, err
+	}, func(model.AuditHead, model.AuditAnchor) error { external++; return nil })
+	if !errors.Is(err, ErrAuditStateChanged) || errors.Is(err, ErrAuditVerificationBusy) || snapshots != auditFenceExtraRounds+1 || external != 1 {
+		t.Fatalf("err=%v snapshots=%d external=%d", err, snapshots, external)
+	}
+}
+
+func TestAuditFenceRejectsRegressedOrReplacedHeadWithoutBusyRetry(t *testing.T) {
+	for _, change := range []string{"regressed", "replaced", "replaced-and-advanced"} {
+		t.Run(change, func(t *testing.T) {
+			now := time.Now()
+			s := testStore(t, &now)
+			head := seedAuditMetricRows(t, s, 3, now)
+			_, _, err := s.VerifyAuditMutationStateUnanchored(t.Context(), nil, nil, func(model.AuditHead, model.AuditAnchor) error {
+				switch change {
+				case "regressed":
+					_, err := s.db.ExecContext(t.Context(), `DROP TRIGGER audit_actions_no_delete; DELETE FROM audit_actions WHERE id=3`)
+					return err
+				default:
+					if change == "replaced-and-advanced" {
+						if _, err := s.AppendAuditAction(t.Context(), model.AuditActionSpec{Actor: "outside", Action: "append.before.replacement", ResourceType: "test"}); err != nil {
+							return err
+						}
+					}
+					if _, err := s.db.ExecContext(t.Context(), `DROP TRIGGER audit_actions_no_update; UPDATE audit_actions SET sha256=? WHERE id=?`, make([]byte, 32), head.ID); err != nil {
+						return err
+					}
+					return nil
+				}
+			})
+			if !errors.Is(err, ErrAuditStateChanged) || errors.Is(err, ErrAuditVerificationBusy) {
+				t.Fatalf("%s head accepted/retried: %v", change, err)
+			}
+		})
 	}
 }

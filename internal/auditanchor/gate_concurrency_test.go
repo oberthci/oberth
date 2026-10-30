@@ -188,3 +188,34 @@ func TestMutationGateDoesNotRetryChangedProof(t *testing.T) {
 		t.Fatalf("non-contention change retried: attempts=%d err=%v", racing.calls, err)
 	}
 }
+
+func TestMutationGateReconcilesChangedHistoryOnAppendRetry(t *testing.T) {
+	manager, racing, database, _ := concurrentGateManager(t, "witness")
+	continuity := &countingContinuity{Continuity: manager.continuity}
+	manager.continuity = continuity
+	witness := manager.witness.(*fakeWitness)
+	racing.afterVerification = func(ctx context.Context) error {
+		if racing.calls != 1 {
+			return nil
+		}
+		if err := appendGateAction(ctx, database); err != nil {
+			return err
+		}
+		head, err := database.AuditHeadHint(ctx)
+		if err != nil {
+			return err
+		}
+		previous := witness.history[len(witness.history)-1].UUID
+		if err := continuity.Prepare(ctx, model.AuditWitnessIntent{Sequence: len(witness.history) + 1, AuditID: head.ID, AuditSHA256: head.SHA256, PreviousUUID: previous}); err != nil {
+			return err
+		}
+		_, err = witness.Publish(ctx, head)
+		return err
+	}
+	if err := manager.AllowMutation(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if racing.calls != 2 || continuity.reconcileCalls != 2 {
+		t.Fatalf("attempts=%d reconciles=%d", racing.calls, continuity.reconcileCalls)
+	}
+}
