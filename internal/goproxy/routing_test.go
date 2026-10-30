@@ -88,12 +88,12 @@ func TestPrivateRoutingAllShapes(t *testing.T) {
 
 func TestPrivateRoutingCacheFailures(t *testing.T) {
 	for _, request := range []string{"@latest", "@v/list", "@v/v1.0.0.info", "@v/v1.0.0.mod", "@v/v1.0.0.zip"} {
-		assertRoutingStatus(t, routingFixture("list"), "/go.example.test/issue764-fixture/"+request, http.StatusBadGateway)
+		assertRoutingStatus(t, routingFixture("list"), "/go.example.test/issue764-fixture/"+request, http.StatusServiceUnavailable)
 	}
 	for _, op := range []string{"info", "mod", "zip"} {
-		assertRoutingStatus(t, routingFixture(op), "/go.example.test/issue764-fixture/@v/v1.0.0."+op, http.StatusBadGateway)
+		assertRoutingStatus(t, routingFixture(op), "/go.example.test/issue764-fixture/@v/v1.0.0."+op, http.StatusServiceUnavailable)
 	}
-	assertRoutingStatus(t, routingFixture("info"), "/go.example.test/issue764-fixture/@latest", http.StatusBadGateway)
+	assertRoutingStatus(t, routingFixture("info"), "/go.example.test/issue764-fixture/@latest", http.StatusServiceUnavailable)
 }
 
 func TestLatestAndListUseSupportedTags(t *testing.T) {

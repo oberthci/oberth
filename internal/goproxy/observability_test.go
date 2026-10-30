@@ -19,10 +19,10 @@ func TestProxyFailureClasses(t *testing.T) {
 		{"public miss", "GET", "/public.example.test/module/@v/list", "", "", 404},
 		{"method", "POST", "/go.example.test/issue764-fixture/@v/list", "", "method_not_allowed", 405},
 		{"private miss", "GET", "/go.example.test/unknown/@v/list?token=secret-canary", "", "private_unavailable", 403},
-		{"backend tags", "GET", "/go.example.test/issue764-fixture/@v/list", "list", "private_backend_unavailable", 502},
-		{"backend info", "GET", "/go.example.test/issue764-fixture/@v/v1.0.0.info", "info", "private_backend_unavailable", 502},
-		{"backend mod", "GET", "/go.example.test/issue764-fixture/@v/v1.0.0.mod", "mod", "private_backend_unavailable", 502},
-		{"backend zip", "GET", "/go.example.test/issue764-fixture/@v/v1.0.0.zip", "zip", "private_backend_unavailable", 502},
+		{"backend tags", "GET", "/go.example.test/issue764-fixture/@v/list", "list", "private_backend_unavailable", 503},
+		{"backend info", "GET", "/go.example.test/issue764-fixture/@v/v1.0.0.info", "info", "private_backend_unavailable", 503},
+		{"backend mod", "GET", "/go.example.test/issue764-fixture/@v/v1.0.0.mod", "mod", "private_backend_unavailable", 503},
+		{"backend zip", "GET", "/go.example.test/issue764-fixture/@v/v1.0.0.zip", "zip", "private_backend_unavailable", 503},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			var output bytes.Buffer

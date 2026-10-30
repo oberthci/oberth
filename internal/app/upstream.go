@@ -269,6 +269,11 @@ func UpstreamKind(baseURL string) (string, error) {
 // same discovery rules a push uses; a bare name that exists under multiple
 // upstreams is refused with the store's disambiguation guidance.
 func (upstreams Upstreams) QualifyInput(input string) (gitcache.RepoQualification, error) {
+	return upstreams.QualifyInputContext(context.Background(), input)
+}
+
+// QualifyInputContext preserves catalog authority within a bounded reader call.
+func (upstreams Upstreams) QualifyInputContext(ctx context.Context, input string) (gitcache.RepoQualification, error) {
 	if upstreams.Catalog == nil {
 		return gitcache.RepoQualification{}, errors.New("app: upstream catalog is required")
 	}
@@ -276,7 +281,7 @@ func (upstreams Upstreams) QualifyInput(input string) (gitcache.RepoQualificatio
 	if err != nil {
 		return gitcache.RepoQualification{}, err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), upstreams.timeout())
+	ctx, cancel := context.WithTimeout(ctx, upstreams.timeout())
 	defer cancel()
 	upstream, err := upstreams.selectUpstream(ctx, upstreamName, org, repositoryName)
 	if err != nil {

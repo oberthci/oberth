@@ -695,12 +695,13 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 	upstreams := app.Upstreams{Catalog: database}
 	git, err := gitcache.New(gitcache.Config{
 		Root: filepath.Join(options.dataRoot, "git"), Upstream: upstreams.Remote,
-		CommandTimeout:  options.gitCommandTimeout,
-		Env:             sshEnvironment,
-		Logger:          logger,
-		RepoQualifier:   upstreams.QualifyInput,
-		RepositoryGate:  upstreams.RequireActive,
-		PreFinalizeGate: anchors.AllowMutation,
+		CommandTimeout:       options.gitCommandTimeout,
+		Env:                  sshEnvironment,
+		Logger:               logger,
+		RepoQualifier:        upstreams.QualifyInput,
+		RepoQualifierContext: upstreams.QualifyInputContext,
+		RepositoryGate:       upstreams.RequireActive,
+		PreFinalizeGate:      anchors.AllowMutation,
 	})
 	if err != nil {
 		return err
@@ -1127,7 +1128,11 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 		if err != nil {
 			return err
 		}
-		proxyHandler := goproxy.NewHandler(git, options.argoGoProxyNamespace.ModulePrefix, repoMap).WithLogger(logger)
+		proxyHandler, err := goproxy.NewHandler(git, options.argoGoProxyNamespace.ModulePrefix, repoMap).WithArtifactCache(filepath.Join(options.dataRoot, "goproxy"))
+		if err != nil {
+			return fmt.Errorf("open Go module artifact cache: %w", err)
+		}
+		proxyHandler.WithLogger(logger)
 		// Route directly: ServeMux cleans paths before invoking handlers, which
 		// could redirect a malformed private path out of its namespace. The
 		// handler enforces GET-only and classifies before parsing (#764).

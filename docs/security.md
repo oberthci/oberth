@@ -143,7 +143,8 @@
 
 The enabled Go module mirror routes the complete administrator-configured private namespace
 locally. Private missing modules/versions and unsupported requests return 403;
-backend failures return 502 or 500. No private failure returns the 404/410
+backend unavailability returns 503 with `Retry-After`; artifact integrity or
+generation failures return 500. No private failure returns the 404/410
 statuses that authorize Go to try another proxy. The listener avoids path
 redirects before namespace classification. `@latest` uses canonical tags only,
 preferring stable releases; nested modules and branch pseudo-versions remain

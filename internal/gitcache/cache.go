@@ -44,6 +44,7 @@ type Cache struct {
 	globalConfig    string
 	upstream        func(string) (string, error)
 	qualify         func(string) (RepoQualification, error)
+	qualifyContext  func(context.Context, string) (RepoQualification, error)
 	gitBinary       string
 	timeout         time.Duration
 	env             map[string]string
@@ -97,6 +98,7 @@ func New(config Config) (*Cache, error) {
 		globalConfig:    globalConfig,
 		upstream:        config.Upstream,
 		qualify:         config.RepoQualifier,
+		qualifyContext:  config.RepoQualifierContext,
 		gitBinary:       gitBinary,
 		timeout:         defaultTimeout(config.CommandTimeout),
 		env:             cloneMap(config.Env),
@@ -795,12 +797,16 @@ func (c *Cache) isBare(ctx context.Context, path string) bool {
 }
 
 func (c *Cache) path(input string) (string, string, error) {
+	return c.pathWithQualifier(input, c.qualify)
+}
+
+func (c *Cache) pathWithQualifier(input string, qualify func(string) (RepoQualification, error)) (string, string, error) {
 	upstream, org, repo, err := ParseRepoPath(input)
 	if err != nil {
 		return "", "", err
 	}
-	if c.qualify != nil {
-		qualification, qualifyErr := c.qualify(input)
+	if qualify != nil {
+		qualification, qualifyErr := qualify(input)
 		if qualifyErr != nil {
 			return "", "", fmt.Errorf("resolve cache identity for %q: %w", input, qualifyErr)
 		}
@@ -1053,13 +1059,15 @@ func cloneMap(source map[string]string) map[string]string {
 // ListTags returns all tag names (without refs/tags/) in the cached bare
 // repository. Used by the GOPROXY handler (#662).
 func (c *Cache) ListTags(ctx context.Context, input string) ([]string, error) {
-	_, path, err := c.path(input)
+	_, path, err := c.modulePath(ctx, input)
 	if err != nil {
 		return nil, err
 	}
-	lock := c.repoLock(path)
-	lock.Lock()
-	defer lock.Unlock()
+	unlock, err := c.lockModuleRepository(ctx, path)
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
 	if !c.isBare(ctx, path) {
 		return nil, fmt.Errorf("repository is not cached")
 	}
@@ -1078,13 +1086,15 @@ func (c *Cache) ListTags(ctx context.Context, input string) ([]string, error) {
 // TagTime returns the tagger date for an annotated tag, or the author date
 // for a lightweight tag's commit. Used by the GOPROXY handler (#662).
 func (c *Cache) TagTime(ctx context.Context, input, tag string) (time.Time, error) {
-	_, path, err := c.path(input)
+	_, path, err := c.modulePath(ctx, input)
 	if err != nil {
 		return time.Time{}, err
 	}
-	lock := c.repoLock(path)
-	lock.Lock()
-	defer lock.Unlock()
+	unlock, err := c.lockModuleRepository(ctx, path)
+	if err != nil {
+		return time.Time{}, err
+	}
+	defer unlock()
 	if !c.isBare(ctx, path) {
 		return time.Time{}, fmt.Errorf("repository is not cached")
 	}
@@ -1106,13 +1116,15 @@ func (c *Cache) TagTime(ctx context.Context, input, tag string) (time.Time, erro
 // Go's checksum verification (go.sum /go.mod h1: lines) hashes the exact
 // file bytes and any whitespace change breaks the hash (#726).
 func (c *Cache) ShowFile(ctx context.Context, input, ref, filePath string) ([]byte, error) {
-	_, repoPath, err := c.path(input)
+	_, repoPath, err := c.modulePath(ctx, input)
 	if err != nil {
 		return nil, err
 	}
-	lock := c.repoLock(repoPath)
-	lock.Lock()
-	defer lock.Unlock()
+	unlock, err := c.lockModuleRepository(ctx, repoPath)
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
 	if !c.isBare(ctx, repoPath) {
 		return nil, fmt.Errorf("repository is not cached")
 	}
@@ -1134,13 +1146,15 @@ func (c *Cache) ShowFile(ctx context.Context, input, ref, filePath string) ([]by
 // ArchiveTar writes a tar archive of the tree at the given ref.
 // Used by the GOPROXY handler (#662) to build module zip files.
 func (c *Cache) ArchiveTar(ctx context.Context, input, ref string, w io.Writer) error {
-	_, repoPath, err := c.path(input)
+	_, repoPath, err := c.modulePath(ctx, input)
 	if err != nil {
 		return err
 	}
-	lock := c.repoLock(repoPath)
-	lock.Lock()
-	defer lock.Unlock()
+	unlock, err := c.lockModuleRepository(ctx, repoPath)
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	if !c.isBare(ctx, repoPath) {
 		return fmt.Errorf("repository is not cached")
 	}

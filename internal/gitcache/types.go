@@ -173,6 +173,9 @@ type Config struct {
 	// caller to qualify the path. When nil, the cache falls back to the
 	// flat layout (<root>/<repo>.git); production wiring always sets it.
 	RepoQualifier func(input string) (RepoQualification, error)
+	// RepoQualifierContext lets bounded module reads include catalog resolution
+	// in their caller budget. Other callers retain RepoQualifier semantics.
+	RepoQualifierContext func(context.Context, string) (RepoQualification, error)
 	// PreFinalizeGate is an optional server-owned check invoked after
 	// receive-pack applies ref updates and BEFORE finalization records
 	// the delta in the durable outbox. When it returns an error,

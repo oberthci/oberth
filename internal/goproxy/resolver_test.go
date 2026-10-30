@@ -124,10 +124,19 @@ func servePublicFixture(t *testing.T, w http.ResponseWriter, r *http.Request) {
 }
 
 func (f resolverFixture) run(t *testing.T, args ...string) (string, error) {
+	return f.runWithSum(t, "", args...)
+}
+
+func (f resolverFixture) runWithSum(t *testing.T, sums string, args ...string) (string, error) {
 	t.Helper()
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module fixture.invalid/root\n\ngo 1.22\n"), 0o600); err != nil {
 		t.Fatal(err)
+	}
+	if sums != "" {
+		if err := os.WriteFile(filepath.Join(dir, "go.sum"), []byte(sums), 0600); err != nil {
+			t.Fatal(err)
+		}
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), testtimeout.Start(30*time.Second))
 	defer cancel()

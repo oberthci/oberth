@@ -2442,10 +2442,34 @@ upstream with a different organization fail startup.
 **Private routing (#764):** classify the entire configured namespace
 (including its root) before parsing any request shape. Unknown private modules,
 unsupported nested modules, missing tags, malformed requests and unsupported
-versions return 403. Cache failures return 502; archive/zip failures return 500.
+versions return 403. Backend unavailability returns 503 with `Retry-After: 1`;
+artifact-integrity and archive/zip failures return 500.
 Private failures never return 404 or 410. The dedicated listener passes requests
 directly to the handler so a mux cannot redirect a malformed private path into
 another namespace. Canonical `.mod` and `.zip` bytes remain unchanged.
+
+**Immutable artifact cache:** the enabled server stores complete tagged-version
+bundles under `<data>/goproxy`. SHA-256-addressed `.info`, verbatim `.mod`, and
+canonical `.zip` objects are fsynced before an atomic, no-clobber version
+manifest is published. Keys include the mapped repository, module path and
+version. The cold fill verifies tag membership and pins one Git object for all
+representations; warm requests verify the cached object's size/digest and do
+no Git or catalog lookup. Cache hits still require the current handler's
+namespace/repository mapping. Private cache data stays on the server PVC;
+pipeline mounts and network authority are unchanged. Corrupt entries fail
+closed without rebuilding from a possibly moved tag. `list` and `@latest`
+remain live queries.
+
+At most two cold version fills execute per handler, with duplicate requests
+sharing one fill. Each fill gets two read-only attempts of at most 15 seconds
+with 250ms backoff, under a shared 31-second request context including admission
+waits. Git repository-lock and catalog waits honor that context; local filesystem
+operations and Git process teardown retain their OS/cleanup behavior. Failed
+fills are not cached. Go does not automatically retry a terminal 503 or interpret
+`Retry-After` as a retry policy; these safe retries happen inside the proxy, not
+by replaying pipeline steps. Exhaustion is 503 with `Retry-After: 1`. The cache
+has no automatic expiry/GC and consumes server data volume space; see
+[cache operations](docs/goproxy-availability.md#immutable-version-artifacts).
 
 **GOPROXY ordering:** `<mirror>,https://proxy.golang.org|direct`
 - Comma after mirror: fall through only on 404/410.
@@ -2466,7 +2490,8 @@ explicitly replaces its own environment is not a network isolation boundary.
 pod addresses, so server dependency-readiness failures do not withdraw its sole
 healthy listener from running pipelines. API/SSH readiness and all mutation,
 namespace, TLS and network-policy gates remain unchanged. All server probes use
-explicit five-second timeouts, including TLS/scheduling time. Proxy HTTP failures
+explicit timeouts including TLS/scheduling time (five seconds for startup and
+readiness, fifteen for liveness). Proxy HTTP failures
 carry a fixed `X-Oberth-GoProxy-Error` class and emit bounded, quoted diagnostics
 at most once per class per handler per 30 seconds, including the count suppressed
 since the preceding emission. Fixed class windows bound limiter memory;

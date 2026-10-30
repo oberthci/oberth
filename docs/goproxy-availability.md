@@ -18,7 +18,8 @@ ownership and NetworkPolicy boundaries remain enforced. The listener is still
 owned by the server process and closes during shutdown. Publication is not a guarantee that
 a pod starting up or shutting down already has a usable listener.
 
-Readiness, liveness and startup probes have explicit five-second timeouts. The
+Startup and readiness probes have explicit five-second timeouts; liveness
+uses fifteen seconds. The
 previous implicit one-second deadline included TLS handshake and CPU scheduling,
 not just handler execution. Readiness dependency checks already run in a bounded
 background snapshot; `/readyz` does not perform those checks inline.
@@ -66,3 +67,63 @@ failure. Chart checks pin the proxy-only readiness exception and all probe
 timeouts. The #1204 report also records an isolated Kubernetes reproduction
 using four cold downloads of Oberth's actual 140-module graph, including the
 before/after EndpointSlice and listener evidence.
+
+## Immutable version artifacts
+
+The enabled proxy stores generated module artifacts under `<data>/goproxy`
+(`/data/goproxy` with the default data root), on the existing server data volume.
+It does not fetch from Codeberg during a module request: cold reads use Oberth's
+already mirrored bare repository. The producer that maintains that mirror still
+has its existing fetch policy. Before this cache, each request listed tags and
+then read tag metadata, `git show` or `git archive`; zip requests extracted and
+recompressed the tree every time. These operations shared the repository mutex
+with other Git work. A backend failure surfaced as a generic 502, including
+failures caused by a slow or canceled local command.
+
+The first explicit canonical tagged-version request builds `.info`, `.mod` and
+`.zip` together. It first confirms tag membership, resolves one immutable Git
+object and timestamp, and uses that object for both file and archive reads.
+`.mod` stays byte-for-byte verbatim; `.zip` uses the existing canonical
+`golang.org/x/mod/zip` conversion and filtering. A changing tag cannot mix
+representations during a fill. Pseudo-versions and branch names remain refused.
+
+Objects are addressed by SHA-256. All objects are synced before publishing an
+atomic, no-clobber manifest keyed by mapped repository, module path and version.
+A cached explicit version stays pinned across process restarts and tag changes.
+Warm reads check object size and SHA-256 before serving, without Git processes,
+repository locks or catalog reads. Unknown/unmapped private modules remain
+refused before cache access. `list` and `@latest` remain live queries; a cache
+cannot determine whether a newer tag exists while Git is unavailable.
+
+Concurrent requests for one missing version share a fill; at most two fills run
+at once per handler. Warm reads bypass those slots. Read-only backend work has
+two attempts, a 15-second context per attempt and 250ms backoff under a shared
+31-second request context, including waiting. Catalog resolution and repository
+lock waits now inherit the request deadline. Disk syscalls and existing Git
+process-group cleanup are not made interruptible by that context. Backend
+exhaustion returns **503 with `Retry-After: 1` and `Cache-Control: no-store`**;
+failed fills are not negative-cached. Corrupt/contradictory cache data fails
+closed as 500 and is not regenerated from a possibly moved tag.
+
+The Go resolver does **not** automatically retry 503 or honor `Retry-After` as
+an automatic HTTP retry policy. There is no injected GOFLAGS retry option.
+Automatic recovery for transient Git failures happens in the proxy's bounded,
+read-only fill attempts; an exhausted request still fails the Go command. A
+caller may rerun a failed read/download command under its own deadline. Do not
+replay an arbitrary build step based on stderr. Preserve
+`<mirror>,https://proxy.golang.org|direct`: changing the private boundary to `|`
+would send private coordinates to public resolution on 503. Go's documented
+[proxy fallback rules](https://go.dev/ref/mod#goproxy-protocol) explain that
+comma/pipe distinction. Real-Go tests verify successful recovery, go.sum
+checks, and that exhausted private failures reach neither public nor direct
+resolution.
+
+No migration or additional configuration is required. The cache is derived
+private source, not a history backup or an authority database. It has no
+automatic expiry or garbage collection: monitor space alongside the existing
+Git, log and artifact stores. Interrupted fills can leave unreferenced objects
+or temporary files, but no partial published version. To reclaim/reset the
+cache, stop/quiesce proxy service and remove its entire derived cache directory;
+the next request rebuilds from Git and may be slow. Do not edit manifests or
+objects in place. Keep an authoritative copy if repairing corruption; existing
+client go.sum checks still reject changed module content after a reset.
