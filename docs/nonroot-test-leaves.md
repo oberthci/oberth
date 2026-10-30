@@ -226,3 +226,39 @@ workflows, until verification succeeds. `controller_profile.reason` identifies
 the fixed validation predicate that failed; API response bodies are never
 reported. The server logs the reason on change and at most once every 30 seconds
 while unchanged. Existing work retains cleanup and publication authority.
+
+## Evicted controller history and admission visibility
+
+An API `Failed` / `Evicted` or `Failed` / `NodeShutdown` controller Pod can retain missing or synthetic kubelet
+termination data after a Ready replacement takes over. It no longer blocks
+admission solely for that incomplete exit history when replacement is positively
+verified. The live controller must still pass the exact pinned image, executor,
+immutable configuration, mount, watch-scope and identity checks. Its controlling
+ReplicaSet must match by name/UID, have observed its current generation, select
+the Pod and have exactly one desired, current and Ready replica. Older eviction
+records must bind to that ReplicaSet, or to a fully scaled-zero predecessor of
+the same Deployment. Explicit running/Ready historical state, wrong ownership,
+later timestamps, incomplete Pod listings and unobservable ReplicaSets stay
+blocked. Ordinary non-eviction history keeps the existing strict checks.
+
+Graceful node shutdown uses `Failed/Terminated`, rather than the admission
+rejection reason `NodeShutdown`. Its exact kubelet message must be
+`Pod was terminated in response to imminent node shutdown.` to enter the same
+replacement-proof path; generic Terminated history remains fail-closed.
+Kubernetes source: https://github.com/kubernetes/kubernetes/blob/v1.37.0/pkg/kubelet/nodeshutdown/nodeshutdown_manager.go
+
+`system_status.controller_profile` now reports `admission_paused`, a bounded
+reason and an operator remedy. The dashboard shows the hold in Status and above
+the runs list; aggregate status refreshes in the background at most every five
+minutes, without making log/run rendering wait for those reads. A banner can
+therefore lag by up to five minutes; visiting Status fetches a fresh observation. Restoring the
+supported controller profile/readiness clears the hold on the existing retry
+loop. Running work keeps its observation and cleanup authority.
+
+The chart adds a separate, namespaced `-argo-controller-history` Role and binding
+with only `get` on `apps/replicasets` when the nonroot profile is enabled. The
+established `-argo` Role remains unchanged for server-side-apply compatibility.
+Use the matching chart with the image: an old chart lacks this read permission,
+so replacement verification fails closed until that binding is installed. The
+status remedy directs operators to ReplicaSet readiness/profile configuration
+and server read permissions; no Pod deletion is performed by this change.

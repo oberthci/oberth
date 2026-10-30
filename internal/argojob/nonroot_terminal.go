@@ -13,6 +13,12 @@ import (
 // Historical records grant no authority. The one remaining candidate still
 // undergoes every existing live controller and immutable configuration check.
 func selectNonrootController(pods []corev1.Pod, namespace string) (*corev1.Pod, error) {
+	return selectNonrootControllerWithHistory(pods, namespace, nil)
+}
+
+// prior contains only provisional Evicted records. The API verifier must prove
+// their ReplicaSet replacement before returning submission authority.
+func selectNonrootControllerWithHistory(pods []corev1.Pod, namespace string, prior map[types.UID]bool) (*corev1.Pod, error) {
 	var selected *corev1.Pod
 	seen := make(map[types.UID]bool, len(pods))
 	names := make(map[string]bool, len(pods))
@@ -25,7 +31,7 @@ func selectNonrootController(pods []corev1.Pod, namespace string) (*corev1.Pod, 
 		seen[pod.UID] = true
 		names[pod.Name] = true
 		if pod.Status.Phase == corev1.PodFailed || pod.Status.Phase == corev1.PodSucceeded {
-			if !nonrootControllerHistoryIsTerminal(pod, observedAt) {
+			if !prior[pod.UID] && !nonrootControllerHistoryIsTerminal(pod, observedAt) {
 				return nil, errors.New("argojob: controller terminal history is incomplete or contradictory")
 			}
 			continue

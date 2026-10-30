@@ -29,7 +29,7 @@ const state = {
   lastList: "/runs",
   authGen: 0, // incremented on sign-out and token replacement
   pendingController: null, // AbortController for in-flight API requests
-  statusPending: null, statusFailedAt: 0, // the background /api/status fetch (ensureStatus)
+  statusPending: null, statusFailedAt: 0, statusLoadedAt: 0, // the background /api/status fetch (ensureStatus)
 };
 const runFilters = ["all", "queued", "running", "passed", "failed", "infra-retried", "superseded", "cancelled"];
 
@@ -237,12 +237,12 @@ function normalizeRepoSelector(value, everything) {
   const named = state.repos.filter(repo => repo.Name === value);
   return named.length === 1 ? repoKey(named[0]) : everything;
 }
-/* ensureStatus fetches /api/status once in the background. It probes every
+/* ensureStatus refreshes /api/status at most once per five minutes in the background. It probes every
    upstream, so pages render without waiting for it and re-render when it
    arrives; a failure is not retried for 30 seconds, so a live view polling
    every two seconds does not hammer it. */
 function ensureStatus() {
-  if (state.status) return Promise.resolve();
+  if (state.status && Date.now() - state.statusLoadedAt < 5 * 60 * 1000) return Promise.resolve();
   if (state.statusPending) return state.statusPending;
   if (Date.now() - (state.statusFailedAt || 0) < 30000) return Promise.resolve();
   state.statusPending = loadStatus({ detached: true })
@@ -267,8 +267,9 @@ async function loadRepoContext() {
 /* rerenderWhenStatus re-renders a page once /api/status arrives, so names
    shared across upstreams gain their org/ qualifier. */
 function rerenderWhenStatus(pending, seq) {
-  if (state.status || !pending) return;
-  pending.then(() => { if (state.status && currentRoute(seq)) route(true); });
+  if (!pending) return;
+  const before = state.status;
+  pending.then(() => { if (state.status && state.status !== before && currentRoute(seq)) route(true); });
 }
 
 /* ---------- chrome ---------- */
@@ -424,6 +425,7 @@ function changeRunRepo(repo) {
 }
 async function loadStatus(opts) {
   state.status = await api("/api/status", opts);
+  state.statusLoadedAt = Date.now();
   setVersion(true, state.status?.version);
 }
 
@@ -546,6 +548,7 @@ async function renderRuns(seq) {
   replaceApp(`
   <section class="screen">
     <h1 class="sr-only">Runs</h1>
+    ${admissionPausedBanner(state.status?.controller_profile)}
     <div class="runs-layout">
       <aside class="repo-side">
         <div class="repo-filter-row"><button class="repo-filter ${state.repo === "all" ? "on" : ""}" data-repo-filter="all"><span class="name">All repos</span><span class="count">${esc(counts.get("all") || 0)}</span></button></div>
@@ -1344,6 +1347,16 @@ function capacityStatusCard(admission) {
   const detail = `${admission.used}/${admission.capacity} weight used · source ${config.source}${config.file ? ` (${config.file})` : ""}${config.error ? ` · keeping last good value: ${config.error}` : ""}`;
   return svcCard("admission capacity", `${config.max_concurrent_jobs} M jobs`, esc(detail), config.error ? "warn" : "ok");
 }
+function controllerProfileStatusCard(profile) {
+ if (!profile) return "";
+ const paused = profile.admission_paused ?? profile.state !== "verified";
+ const detail = [profile.reason || (paused ? "Controller profile is unverified" : "Controller profile verified"), profile.remedy || ""].filter(Boolean).join(" · ");
+ return svcCard("workflow admission", paused ? "admission paused" : "accepting new admissions", esc(detail), paused ? "warn" : "ok");
+}
+function admissionPausedBanner(profile) {
+ if (!profile || !(profile.admission_paused ?? profile.state !== "verified")) return "";
+ return `<div role="status" class="svc warn"><strong>Admission paused</strong><div>${esc(profile.reason || "Controller profile is unverified")}</div><div>${esc(profile.remedy || "Check controller profile and ReplicaSet readiness in Status.")}</div></div>`;
+}
 async function renderStatus(seq) {
   setChrome("status", "/ status");
   await Promise.all([loadStatus(), loadRepos().catch(() => { })]);
@@ -1365,6 +1378,7 @@ async function renderStatus(seq) {
       ${svcCard("server", s.version || document.body.dataset.version || "dev", "", "ok")}
       ${pressureStatusCard(s.admission?.pressure)}
       ${capacityStatusCard(s.admission)}
+      ${controllerProfileStatusCard(s.controller_profile)}
     </div>
     <div class="vcs-panel">
       <div class="vcs-head">Upstreams</div>

@@ -3291,3 +3291,20 @@ and run ceilings change together; lowering never cancels running work.
 source and reload errors; scoped views omit this host-wide configuration.
 The chart mounts `<fullname>-admission` read-only as a directory, without
 subPath or a pod-template checksum. See [runtime capacity](docs/runtime-admission-capacity.md).
+
+### Evicted controller replacement and visible admission holds (#1214)
+
+Incomplete kubelet eviction/shutdown controller history is ignored only after exact live
+profile verification and a converged controlling ReplicaSet (observed generation,
+selector and UID, one desired/current/Ready replica). A predecessor ReplicaSet
+must be fully scaled to zero and belong to the same Deployment. Failed/Terminated
+history needs the exact kubelet imminent-shutdown message; generic termination
+is not eligible for replacement evidence. Uncertain live
+or historical authority stays blocked. ReplicaSet API failures retain the
+profile-read retry class and five-second per-attempt budget. The chart grants
+only namespaced ReplicaSet GET in a new Role, preserving frozen existing rules.
+`controller_profile.admission_paused`, reason and remedy are exposed in status;
+the dashboard shows a runs-list banner and Status card, refreshing aggregate
+status in the background at most every five minutes; direct Status visits remain
+fresh. Existing work is not
+canceled or re-authorized by profile recovery.

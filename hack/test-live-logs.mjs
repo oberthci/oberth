@@ -268,6 +268,43 @@ const capacityCard = run(`capacityStatusCard({used:8,capacity:4,configuration:{m
 for (const text of ['2 M jobs', '8/4 weight used', 'source file', 'keeping last good value', 'invalid &lt;override&gt;']) assert.ok(capacityCard.includes(text), text);
 assert.ok(!capacityCard.includes('invalid <override>'));
 
+// Controller-profile holds must be visible and refresh without delaying logs.
+assert.equal(run(`controllerProfileStatusCard(null)`), '');
+const pausedProfile = `{state:'blocked',admission_paused:true,reason:'ReplicaSet <not-ready>',remedy:'Restore one Ready replacement'}`;
+const profileCard = run(`controllerProfileStatusCard(${pausedProfile})`);
+const pauseBanner = run(`admissionPausedBanner(${pausedProfile})`);
+for (const text of ['admission paused','ReplicaSet &lt;not-ready&gt;','Restore one Ready replacement']) assert.ok(profileCard.includes(text), text);
+assert.ok(pauseBanner.includes('Admission paused') && pauseBanner.includes('ReplicaSet &lt;not-ready&gt;'));
+assert.equal(run(`admissionPausedBanner({state:'verified',admission_paused:false})`), '');
+assert.ok(run(`admissionPausedBanner({state:'unverified'})`).includes('Admission paused'));
+run(`
+ const capacityStatusSavedAPI = api;
+ let profileStatusCalls = 0;
+ state.status = {version:'test',controller_profile:${pausedProfile}};
+ state.statusLoadedAt = Date.now(); state.statusFailedAt = 0;
+ api = async () => { profileStatusCalls++; return {version:'test',controller_profile:{state:'verified',admission_paused:false}}; };
+ statusRefreshPromise = ensureStatus();
+`);
+await run('statusRefreshPromise');
+assert.equal(run('profileStatusCalls'), 0, 'fresh status must not be polled per log/run refresh');
+run(`state.statusLoadedAt = Date.now()-31000; statusRefreshPromise = ensureStatus();`);
+await run('statusRefreshPromise');
+assert.equal(run('profileStatusCalls'), 0, '30s run refresh must not re-probe upstreams');
+run(`state.statusLoadedAt = Date.now()-300001; statusRefreshPromise = ensureStatus(); secondRefreshPromise = ensureStatus();`);
+assert.equal(run('statusRefreshPromise === secondRefreshPromise'), true, 'concurrent background refreshes coalesce');
+await run('statusRefreshPromise');
+assert.equal(run('profileStatusCalls'), 1);
+assert.equal(run('admissionPausedBanner(state.status.controller_profile)'), '', 'recovery clears cached admission banner');
+run(`statusRefreshPromise=loadStatus();`);
+await run('statusRefreshPromise');
+assert.equal(run('profileStatusCalls'), 2, 'visiting Status must fetch fresh data during the background cooldown');
+run(`state.statusLoadedAt=Date.now()-300001; api=async()=>{profileStatusCalls++;throw new Error('status unavailable')}; statusRefreshPromise=ensureStatus();`);
+await run('statusRefreshPromise');
+run('statusRefreshPromise=ensureStatus();');
+await run('statusRefreshPromise');
+assert.equal(run('profileStatusCalls'), 3, 'status failures retain the 30s retry backoff');
+run('api=capacityStatusSavedAPI;');
+
 // The shared regression ships in both topic bundles and runs once both UI
 // features are present in the assembled tree.
 if (run(`typeof capacityStatusCard === 'function' && typeof controllerProfileStatusCard === 'function'`)) {
