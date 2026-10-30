@@ -662,6 +662,9 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 	if err := database.OpenIdleQueueReaders(ctx); err != nil {
 		return fmt.Errorf("open upgrade queue readers: %w", err)
 	}
+	if err := database.OpenReadinessReaders(ctx, app.ReadinessProbeBudget); err != nil {
+		return fmt.Errorf("open readiness readers: %w", err)
+	}
 	anchors, err := auditanchor.NewManager(newAuditManagerConfig(database))
 	if err != nil {
 		return err
@@ -787,43 +790,13 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 			options.sizeWeights.XL, budget, options.maxConcurrent, options.sizeWeights.M, budget)
 	}
 	retention.AcquirePurge = scheduler.AcquireEvidencePurge
-	health := app.Health{Store: database, Audit: anchors.Ready, VCSCache: &app.VCSSnapshot{}, Configured: func(ctx context.Context) error {
-		if err := ctx.Err(); err != nil {
-			return err
+	var secretConfigured func(context.Context, []model.Upstream) error
+	if !identityStoreEnabled() {
+		secretConfigured = func(ctx context.Context, registered []model.Upstream) error {
+			return checkUpstreamSecretConfigured(ctx, kube, options.namespace, options.upstreamKey, options.knownHosts, registered)
 		}
-		// The Git transport is configured when at least one complete SSH
-		// identity validates: the shared fallback key, or any per-upstream
-		// key projected from the Secret volume. A fresh install whose first
-		// `upstream add` provisioned only a dedicated key has no shared key
-		// and must still become ready; a broken individual upstream surfaces
-		// through the per-upstream VCS probe instead.
-		_, globalErr := app.GitSSHCommand(options.upstreamKey, options.knownHosts)
-		if globalErr == nil {
-			return nil
-		}
-		registered, listErr := database.ListUpstreams(ctx)
-		if listErr != nil {
-			return globalErr
-		}
-		keyDirectory := filepath.Dir(options.upstreamKey)
-		for _, upstream := range registered {
-			if upstream.Kind != "ssh" || upstream.KeyName == "" || !app.ValidUpstreamKeyName(upstream.KeyName) {
-				continue
-			}
-			if _, err := app.GitSSHCommand(filepath.Join(keyDirectory, upstream.KeyName), options.knownHosts); err == nil {
-				return nil
-			}
-		}
-		// File-based checks exhausted. Fall back to the Kubernetes API:
-		// after `upstream add` stores an SSH key in the Secret, the kubelet
-		// may take up to ~60s to project the update into the volume mount.
-		// Reading the Secrets directly confirms configuration without
-		// waiting for file projection.
-		if !identityStoreEnabled() && checkUpstreamSecretConfigured(ctx, kube, options.namespace, options.upstreamKey, options.knownHosts, registered) == nil {
-			return nil
-		}
-		return globalErr
-	}, VCS: func(ctx context.Context, upstream model.Upstream) error {
+	}
+	health := app.Health{Store: database, Audit: anchors.Ready, VCSCache: &app.VCSSnapshot{}, Configured: upstreamReadinessProbe(options, secretConfigured), VCS: func(ctx context.Context, upstream model.Upstream) error {
 		if upstream.Kind == "local" {
 			info, err := os.Stat(upstream.BaseURL)
 			if err != nil {
@@ -868,6 +841,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 		return nil
 	}
 	health.Readiness = &app.ReadinessSnapshot{}
+	health.ReadinessUpstreams = database.ListReadinessUpstreams
 	health.Log = logger.Printf
 	readinessCtx, stopReadiness := context.WithCancel(ctx)
 	readinessDone := make(chan struct{})
@@ -1064,6 +1038,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 	}
 	httpAPI, err := api.New(authenticator, controlAPI, controlAPI, version,
 		api.WithErrorClassifier(classifyViewError),
+		api.WithMetrics(health.Readiness.WriteMetrics),
 		api.WithMaximumToolWait(service.DefaultMaximumWait),
 	)
 	if err != nil {

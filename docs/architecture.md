@@ -260,7 +260,16 @@ identity. Kubernetes availability and periodic audit health are diagnostics in
 `/api/status`; they do not withdraw an otherwise usable cached Git/SSH endpoint.
 Every mutation still passes its audit integrity gate. Serving prerequisites
 refresh a bounded background snapshot; the HTTP probe performs no network or
-store calls. Shutdown
+store calls. The sampler owns a separate single-connection read-only WAL pool,
+with a ten-second read budget and five-second cadence. Successful readiness
+samples expire after 90 seconds of elapsed time, regardless of attempt count.
+Ten-second reads overrun the five-second ticker, which drops missed ticks.
+Deadlines retain the last successful sample without extending it; hard errors
+and startup recovery still refuse immediately. This avoids withdrawing HTTP
+readiness for a slow but progressing sampler under CPU contention.
+
+See [readiness under load](readyz-load-flap.md) for the sampling policy and
+remaining Service routing behavior. Shutdown
 removes readiness before stopping admission and drains HTTP/SSE observers. See
 [restart handover](restart-handover.md) for client retries and upgrade behavior.
 Upstream availability is a bounded diagnostic in `/status`, not a readiness

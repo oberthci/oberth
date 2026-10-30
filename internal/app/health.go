@@ -26,11 +26,14 @@ type Health struct {
 	ReadyGate ClusterProbe
 	// Readiness is refreshed off the HTTP request path; nil retains direct probes.
 	Readiness *ReadinessSnapshot
-	// Log optionally records readiness transitions from the background watcher.
+	// ReadinessUpstreams reserves a DB reader for the background sampler;
+	// dashboard/mapping queries must not consume its connection. Nil uses Store.
+	ReadinessUpstreams func(context.Context) ([]model.Upstream, error)
+	// Log records readiness transitions and the watcher's first retained deadline.
 	Log        func(string, ...any)
 	Storage    func(context.Context) (any, error)
 	Store      HealthStore
-	Configured ClusterProbe
+	Configured func(context.Context, []model.Upstream) error
 	Cluster    ClusterProbe
 	Audit      ClusterProbe
 	VCS        VCSProbe
@@ -154,13 +157,15 @@ type HealthStatus struct {
 // taking those dependencies down must not remove the cached Git/SSH endpoint.
 // Audit authorization remains enforced by each operation's mutation gate.
 func (health Health) Ready(ctx context.Context) error {
+	var gateErr error
 	if health.ReadyGate != nil {
-		if err := health.ReadyGate(ctx); err != nil {
-			return err
-		}
+		gateErr = health.ReadyGate(ctx)
 	}
 	if health.Readiness != nil {
-		return health.Readiness.ready()
+		return health.observeReadiness(gateErr)
+	}
+	if gateErr != nil {
+		return gateErr
 	}
 	return health.probeReady(ctx)
 }
@@ -177,7 +182,11 @@ func (health Health) probeReadySample(ctx context.Context) (time.Duration, error
 		return 0, errReadinessDependencies
 	}
 	started := time.Now()
-	upstreams, err := health.Store.ListUpstreams(ctx)
+	read := health.ReadinessUpstreams
+	if read == nil {
+		read = health.Store.ListUpstreams
+	}
+	upstreams, err := read(ctx)
 	dbWait := time.Since(started)
 	if err != nil {
 		return dbWait, fmt.Errorf("%w: %w", errReadinessDatabase, err)
@@ -186,7 +195,7 @@ func (health Health) probeReadySample(ctx context.Context) (time.Duration, error
 		return dbWait, errReadinessNoUpstream
 	}
 	if requiresSSHIdentity(upstreams) {
-		if err := health.Configured(ctx); err != nil {
+		if err := health.Configured(ctx, upstreams); err != nil {
 			return dbWait, fmt.Errorf("%w: %w", errReadinessConfiguration, err)
 		}
 	}

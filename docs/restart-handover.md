@@ -33,17 +33,20 @@ adoptable Workflows.
 
 Readiness stays unavailable until owner recovery and Workflow adoption finish.
 Database/configuration checks run immediately in the background, then serially
-on a two-second ticker with a three-second probe deadline. Slow probes reduce
-the effective cadence to about three seconds. A deadline retains the last green
-sample without renewing its timestamp: transient waits for the single shared DB
-connection are tolerated only until that sample is 15 seconds old (roughly four
-to five consecutive full-deadline probes). All hard errors fail immediately.
+on a five-second ticker with a ten-second probe deadline, using a reserved
+read-only WAL connection. A deadline retains the last green sample without
+renewing its timestamp; scheduling delays are tolerated for 90 seconds of
+elapsed time, independent of attempt count. Ten-second probes overrun the
+five-second ticker, which drops missed ticks. All hard errors fail immediately.
 `/readyz` reads the snapshot without database, credential or Kubernetes calls.
-Missing, failed or older-than-15-second samples fail closed. The background
-watcher logs readiness transitions only, including a bounded reason class,
-sample age and `db_wait` (database check elapsed time, including pool wait and
-query execution), plus probe and outage durations. Startup recovery is included
+Missing, failed or older-than-90-second samples fail closed. The background
+watcher and HTTP readiness path log transitions, and the watcher also logs the
+first retained deadline after each successful sample. Logs include a bounded
+reason class, sample age and `db_wait` (database check elapsed time, including
+pool wait and query execution), plus probe and outage durations. Startup recovery is included
 in these transitions; HTTP shutdown drain remains a separate request-time gate.
+The chart requires six consecutive five-second HTTPS readiness failures to
+withdraw the endpoint, allowing about 30 seconds for TLS/scheduling delays.
 Kubernetes availability, periodic audit health and upstream forge
 reachability remain status diagnostics rather than readiness dependencies.
 Startup audit verification, owner recovery and operation-level mutation gates

@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 
 	"github.com/oberthci/oberth/internal/model"
@@ -13,7 +14,11 @@ SELECT id, name, kind, base_url, key_name, created_at, updated_at FROM upstreams
 }
 
 func (s *Store) ListUpstreams(ctx context.Context) ([]model.Upstream, error) {
-	rows, err := s.reader().QueryContext(ctx, `
+	return listUpstreams(ctx, s.reader())
+}
+
+func listUpstreams(ctx context.Context, db *sql.DB) ([]model.Upstream, error) {
+	rows, err := db.QueryContext(ctx, `
 SELECT id, name, kind, base_url, key_name, created_at, updated_at FROM upstreams ORDER BY name`)
 	if err != nil {
 		return nil, fmt.Errorf("list upstreams: %w", err)

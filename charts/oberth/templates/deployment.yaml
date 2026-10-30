@@ -396,6 +396,8 @@ spec:
             # dependency snapshot itself remains off the HTTP request path.
             timeoutSeconds: 5
             periodSeconds: 5
+            # Tolerate TLS/scheduling delays for about 30s under CPU load.
+            failureThreshold: 6
           startupProbe:
             httpGet:
               scheme: HTTPS

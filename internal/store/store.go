@@ -65,6 +65,7 @@ type Store struct {
 
 	authDB      *sql.DB // bounded, read-only WAL readers; no cached authorization
 	idleDB      *sql.DB // read-only WAL pool for the upgrade queue sampler
+	readinessDB *sql.DB // reserved read-only WAL connection for readiness sampling
 	readDB      *sql.DB // bounded, read-only WAL pool for ordinary live queries
 	auditReadDB *sql.DB // separate bounded WAL pool for audit scans
 	db          *sql.DB
@@ -74,13 +75,14 @@ type Store struct {
 	readOnly    bool
 	cleanup     func() error
 
-	liveReaderDSN  string // immutable after startup; shared live WAL reader settings
-	livePath       string
-	liveFile       os.FileInfo
-	auditGate      chan struct{}
-	auditSchema    [sha256.Size]byte
-	auditCacheSafe bool
-	localAudit     localAuditCache // protected by auditGate
+	liveReaderDSN   string // immutable after startup; shared live WAL reader settings
+	liveBusyTimeout time.Duration
+	livePath        string
+	liveFile        os.FileInfo
+	auditGate       chan struct{}
+	auditSchema     [sha256.Size]byte
+	auditCacheSafe  bool
+	localAudit      localAuditCache // protected by auditGate
 
 	// reruns caches run_rerun lineage (#1098); see RunRerunOf.
 	reruns rerunLineage
@@ -1085,12 +1087,15 @@ func (s *Store) Close() error {
 	// Claim shutdown once, then let active database operations finish without
 	// holding the Store mutex across connection closes or the WAL checkpoint.
 	s.mu.Unlock()
-	var authErr, idleErr, readErr, auditReadErr error
+	var authErr, idleErr, readErr, auditReadErr, readinessErr error
 	if s.authDB != nil {
 		authErr = s.authDB.Close()
 	}
 	if s.idleDB != nil {
 		idleErr = s.idleDB.Close()
+	}
+	if s.readinessDB != nil {
+		readinessErr = s.readinessDB.Close()
 	}
 	if s.readDB != nil {
 		readErr = s.readDB.Close()
@@ -1098,7 +1103,7 @@ func (s *Store) Close() error {
 	if s.auditReadDB != nil {
 		auditReadErr = s.auditReadDB.Close()
 	}
-	readersErr := errors.Join(authErr, idleErr, readErr, auditReadErr)
+	readersErr := errors.Join(authErr, idleErr, readErr, auditReadErr, readinessErr)
 	if s.readOnly {
 		closeErr := s.db.Close()
 		if s.cleanup != nil {

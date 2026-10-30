@@ -165,7 +165,7 @@ func TestHealthStatus_AuditChainError(t *testing.T) {
 	t.Parallel()
 	health := Health{
 		Store:      fakeHealthStore{upstreams: []model.Upstream{{ID: 1}}},
-		Configured: func(context.Context) error { return nil },
+		Configured: func(context.Context, []model.Upstream) error { return nil },
 		Cluster:    func(context.Context) error { return nil },
 		Audit:      func(context.Context) error { return nil },
 		VCS:        func(context.Context, model.Upstream) error { return nil },
@@ -188,7 +188,7 @@ func TestHealthStatus_IdentityError(t *testing.T) {
 	t.Parallel()
 	health := Health{
 		Store:      fakeHealthStore{upstreams: []model.Upstream{{ID: 1}}},
-		Configured: func(context.Context) error { return nil },
+		Configured: func(context.Context, []model.Upstream) error { return nil },
 		Cluster:    func(context.Context) error { return nil },
 		Audit:      func(context.Context) error { return nil },
 		VCS:        func(context.Context, model.Upstream) error { return nil },

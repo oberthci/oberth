@@ -3,11 +3,20 @@ package app
 import (
 	"context"
 	"errors"
+	"fmt"
+	"io"
 	"sync"
 	"time"
 )
 
-const readinessMaxAge = 15 * time.Second
+const (
+	readinessInterval = 5 * time.Second
+	// ReadinessProbeBudget also sets the minimum SQLite readiness busy timeout.
+	ReadinessProbeBudget = 10 * time.Second
+	// This is an elapsed-time bound, independent of how many attempts complete.
+	// The ticker drops missed ticks: full-budget reads run about every ten seconds.
+	readinessMaxAge = 90 * time.Second
+)
 
 var (
 	errReadinessStale         = errors.New("app: readiness probe pending or stale")
@@ -20,19 +29,18 @@ var (
 // ReadinessSnapshot prevents database/credential checks from blocking HTTP
 // readiness requests. An absent or stale sample fails closed.
 type ReadinessSnapshot struct {
-	mu      sync.RWMutex
-	checked time.Time
-	err     error
-	// Transition state belongs to the shared snapshot, like the sample itself.
+	mu                sync.RWMutex
+	checked           time.Time
+	err               error
+	dbWait            time.Duration
+	probeDuration     time.Duration
+	retainedDeadlines uint64
+	retainedLogged    bool
+	// Shared by HTTP observations and the watcher so an expiry during a stalled
+	// read is logged once, even if many concurrent requests observe it.
 	observed     bool
 	wasReady     bool
 	unreadySince time.Time
-}
-
-func (snapshot *ReadinessSnapshot) ready() error {
-	snapshot.mu.RLock()
-	defer snapshot.mu.RUnlock()
-	return snapshot.readyAt(time.Now())
 }
 
 // readyAt requires snapshot.mu to be held.
@@ -43,27 +51,30 @@ func (snapshot *ReadinessSnapshot) readyAt(now time.Time) error {
 	return snapshot.err
 }
 
-func (health Health) refreshReadiness(ctx context.Context) {
-	// ReadyGate is process-local; include startup recovery in transition logs.
-	var gateErr error
-	if health.ReadyGate != nil {
-		gateErr = health.ReadyGate(ctx)
+// sampleAge requires snapshot.mu to be held.
+func (snapshot *ReadinessSnapshot) sampleAge(now time.Time) time.Duration {
+	if snapshot.checked.IsZero() {
+		return 0
 	}
-	started := time.Now()
-	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
-	defer cancel()
-	dbWait, err := health.probeReadySample(ctx)
-	now := time.Now()
+	return max(time.Duration(0), now.Sub(snapshot.checked))
+}
+
+// WriteMetrics reports fixed, unlabeled process metrics without probing storage.
+// Sample presence distinguishes an uninitialized snapshot from an age of zero.
+func (snapshot *ReadinessSnapshot) WriteMetrics(w io.Writer) {
+	snapshot.mu.RLock()
+	age, retained, present := snapshot.sampleAge(time.Now()).Seconds(), snapshot.retainedDeadlines, 0
+	if !snapshot.checked.IsZero() {
+		present = 1
+	}
+	snapshot.mu.RUnlock()
+	_, _ = fmt.Fprintf(w, "# TYPE oberth_readiness_sample_present gauge\noberth_readiness_sample_present %d\n# TYPE oberth_readiness_sample_age_seconds gauge\noberth_readiness_sample_age_seconds %g\n# TYPE oberth_readiness_retained_deadlines_total counter\noberth_readiness_retained_deadlines_total %d\n", present, age, retained)
+}
+
+func (health Health) observeReadiness(gateErr error) error {
 	snapshot := health.Readiness
 	snapshot.mu.Lock()
-	// A deadline can mean waiting for the single shared DB connection. Retain
-	// the last green sample without renewing its age, even if already stale.
-	// Cancellation and all hard errors still replace it immediately.
-	retainGreen := errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, context.Canceled) &&
-		!errors.Is(ctx.Err(), context.Canceled) && !snapshot.checked.IsZero() && snapshot.err == nil
-	if !retainGreen {
-		snapshot.checked, snapshot.err = now, err
-	}
+	now := time.Now()
 	readyErr := snapshot.readyAt(now)
 	reason := readinessReason(readyErr)
 	if gateErr != nil {
@@ -79,7 +90,7 @@ func (health Health) refreshReadiness(ctx context.Context) {
 		outage = now.Sub(snapshot.unreadySince)
 		snapshot.unreadySince = time.Time{}
 	}
-	sampleAge := now.Sub(snapshot.checked)
+	age, dbWait, duration := snapshot.sampleAge(now), snapshot.dbWait, snapshot.probeDuration
 	snapshot.observed, snapshot.wasReady = true, isReady
 	snapshot.mu.Unlock()
 	if changed && health.Log != nil {
@@ -87,9 +98,52 @@ func (health Health) refreshReadiness(ctx context.Context) {
 		if isReady {
 			state = "ready"
 		}
-		health.Log("readiness: state=%s reason=%s sample_age=%s db_wait=%s probe_duration=%s outage_duration=%s",
-			state, reason, sampleAge, dbWait, now.Sub(started), outage)
+		health.Log("readiness: state=%s reason=%s sample_age=%s db_wait=%s probe_duration=%s outage_duration=%s", state, reason, age, dbWait, duration, outage)
 	}
+	return readyErr
+}
+
+func (health Health) refreshReadiness(ctx context.Context) {
+	var gateErr error
+	if health.ReadyGate != nil {
+		gateErr = health.ReadyGate(ctx)
+	}
+	// Observe before replacing the sample, including expiry during a long pause.
+	health.Readiness.mu.RLock()
+	initialized := !health.Readiness.checked.IsZero()
+	health.Readiness.mu.RUnlock()
+	if initialized {
+		_ = health.observeReadiness(gateErr)
+	}
+	started := time.Now()
+	ctx, cancel := context.WithTimeout(ctx, ReadinessProbeBudget)
+	defer cancel()
+	dbWait, err := health.probeReadySample(ctx)
+	now := time.Now()
+	snapshot := health.Readiness
+	snapshot.mu.Lock()
+	// A deadline retains the last success without renewing its age. Cancellation
+	// and hard errors still replace it immediately.
+	retainGreen := errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, context.Canceled) &&
+		!errors.Is(ctx.Err(), context.Canceled) && !snapshot.checked.IsZero() && snapshot.err == nil
+	logRetained := false
+	if retainGreen {
+		snapshot.retainedDeadlines++
+		logRetained = !snapshot.retainedLogged
+		snapshot.retainedLogged = true
+	} else {
+		snapshot.checked, snapshot.err = now, err
+		if err == nil {
+			snapshot.retainedLogged = false
+		}
+	}
+	snapshot.dbWait, snapshot.probeDuration = dbWait, now.Sub(started)
+	age := snapshot.sampleAge(now)
+	snapshot.mu.Unlock()
+	if logRetained && health.Log != nil {
+		health.Log("readiness: event=retained_deadline sample_age=%s db_wait=%s probe_duration=%s", age, dbWait, now.Sub(started))
+	}
+	_ = health.observeReadiness(gateErr)
 }
 
 func readinessReason(err error) string {
@@ -115,13 +169,16 @@ func readinessReason(err error) string {
 	}
 }
 
-// WatchReadiness probes immediately, then on a two-second ticker. Probes run
-// serially and can take up to three seconds, so slow probes reduce the cadence.
+// WatchReadiness probes immediately, then on a five-second ticker. Probes run
+// serially and can take up to ten seconds, so slow probes reduce the cadence.
 // All remote probes must honor the context to avoid stalling process shutdown.
 func (health Health) WatchReadiness(ctx context.Context) {
-	ticker := time.NewTicker(2 * time.Second)
+	ticker := time.NewTicker(readinessInterval)
 	defer ticker.Stop()
 	for {
+		if ctx.Err() != nil {
+			return
+		}
 		health.refreshReadiness(ctx)
 		select {
 		case <-ctx.Done():
