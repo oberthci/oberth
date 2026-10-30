@@ -281,46 +281,17 @@ func (controller *Controller) Create(ctx context.Context, request Request) (name
 	for _, warning := range stepUsageMemoryWarnings(intended) {
 		log.Printf("WARN: %s", warning)
 	}
-	created, createErr := controller.workflows.Create(ctx, intended, metav1.CreateOptions{})
-	if createErr == nil {
-		controller.adoptClaimBestEffort(ctx, volume.ClaimName, created.Name, string(created.UID))
-		controller.retainWorkflowTiming(ctx, created)
-		return created.Name, nil
-	}
-	if apierrors.IsAlreadyExists(createErr) {
-		// Race: the Workflow appeared between our GET and Create.
-		existing, getErr = controller.workflows.Get(ctx, intended.Name, metav1.GetOptions{})
-		if getErr != nil {
-			return "", errors.Join(fmt.Errorf("argojob: create Workflow %s: %w", intended.Name, createErr), getErr)
-		}
-		if _, verifyErr := controller.refreshNonroot(ctx, request); verifyErr != nil {
-			return "", verifyErr
-		}
-		if subErr := sameSubmission(existing, intended); subErr != nil {
-			return "", subErr
-		}
-		controller.adoptClaimBestEffort(ctx, volume.ClaimName, existing.Name, string(existing.UID))
-		controller.retainWorkflowTiming(ctx, existing)
-		return existing.Name, nil
-	}
-	// Non-definitive Create error: GET to check state.
-	existing, getErr = controller.workflows.Get(ctx, intended.Name, metav1.GetOptions{})
-	if getErr != nil {
-		if apierrors.IsNotFound(getErr) {
-			definitelyRejected = apierrors.IsInvalid(createErr) || apierrors.IsForbidden(createErr) || apierrors.IsBadRequest(createErr)
+	created, rejected, createErr := controller.createWorkflowWithRetry(ctx, request, intended)
+	definitelyRejected = rejected
+	if createErr != nil {
+		if rejected {
 			controller.seeder.DeleteClaim(context.WithoutCancel(ctx), volume.ClaimName)
 		}
-		return "", fmt.Errorf("argojob: create Workflow %s: %w", intended.Name, createErr)
+		return "", createErr
 	}
-	if _, verifyErr := controller.refreshNonroot(ctx, request); verifyErr != nil {
-		return "", verifyErr
-	}
-	if subErr := sameSubmission(existing, intended); subErr != nil {
-		return "", subErr
-	}
-	controller.adoptClaimBestEffort(ctx, volume.ClaimName, existing.Name, string(existing.UID))
-	controller.retainWorkflowTiming(ctx, existing)
-	return existing.Name, nil
+	controller.adoptClaimBestEffort(ctx, volume.ClaimName, created.Name, string(created.UID))
+	controller.retainWorkflowTiming(ctx, created)
+	return created.Name, nil
 }
 
 // adoptClaimBestEffort binds the claim's lifetime to the Workflow's so
