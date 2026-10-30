@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/oberthci/oberth/internal/model"
@@ -49,7 +50,7 @@ func TestReadinessSnapshotNeverProbesOnRequestAndFailsClosed(t *testing.T) {
 		t.Fatal("startup gate bypassed")
 	}
 	health.ReadyGate = nil
-	setReadinessChecked(health.Readiness, time.Now().Add(-time.Minute))
+	setReadinessChecked(health.Readiness, time.Now().Add(-readinessMaxAge-time.Second))
 	if health.Ready(t.Context()) == nil {
 		t.Fatal("stale green sample accepted")
 	}
@@ -265,4 +266,61 @@ func TestReadinessCanceledRefreshCannotPublishGreen(t *testing.T) {
 	if err := health.Ready(t.Context()); !errors.Is(err, context.Canceled) {
 		t.Fatalf("canceled refresh = %v, want not ready", err)
 	}
+}
+
+// Replay the observed 17s age and longer recovery gaps without a load-sensitive
+// wall-clock test. Slow successful reads must fit the sampler's own budget.
+func TestReadinessSlowProgressUnderContention(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		health := Health{
+			Store:      fakeHealthStore{err: errors.New("ordinary reader pool is saturated")},
+			Configured: func(context.Context) error { return nil }, Readiness: &ReadinessSnapshot{},
+			ReadinessUpstreams: func(ctx context.Context) ([]model.Upstream, error) {
+				select {
+				case <-time.After(4 * time.Second):
+					return []model.Upstream{{Kind: "local"}}, nil
+				case <-ctx.Done():
+					return nil, ctx.Err()
+				}
+			},
+		}
+		health.refreshReadiness(t.Context())
+		if err := health.Ready(t.Context()); err != nil {
+			t.Fatalf("slow successful sample was refused: %v", err)
+		}
+		for _, gap := range []time.Duration{17 * time.Second, 49 * time.Second} {
+			time.Sleep(gap)
+			if err := health.Ready(t.Context()); err != nil {
+				t.Fatalf("progressing sampler lost readiness after %s: %v", gap, err)
+			}
+			health.refreshReadiness(t.Context())
+			if err := health.Ready(t.Context()); err != nil {
+				t.Fatalf("slow refresh failed after %s: %v", gap, err)
+			}
+		}
+		// A watcher that makes no more successful progress still expires.
+		time.Sleep(readinessMaxAge + time.Second)
+		if err := health.Ready(t.Context()); !errors.Is(err, errReadinessStale) {
+			t.Fatalf("stopped sampler remained ready: %v", err)
+		}
+	})
+}
+
+func TestReadinessPersistentDeadlinesExpireWithoutRenewingGreen(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		health := Health{Store: fakeHealthStore{upstreams: []model.Upstream{{Kind: "local"}}},
+			Configured: func(context.Context) error { return nil }, Readiness: &ReadinessSnapshot{}}
+		health.refreshReadiness(t.Context())
+		checked := health.Readiness.checked
+		health.Store = readinessBlockingStore{}
+		for time.Since(checked) <= readinessMaxAge {
+			health.refreshReadiness(t.Context())
+			if health.Readiness.checked != checked {
+				t.Fatal("deadline renewed green sample")
+			}
+		}
+		if err := health.Ready(t.Context()); !errors.Is(err, errReadinessStale) {
+			t.Fatalf("persistent database timeouts remained ready: %v", err)
+		}
+	})
 }

@@ -662,6 +662,9 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 	if err := database.OpenIdleQueueReaders(ctx); err != nil {
 		return fmt.Errorf("open upgrade queue readers: %w", err)
 	}
+	if err := database.OpenReadinessReaders(ctx); err != nil {
+		return fmt.Errorf("open readiness readers: %w", err)
+	}
 	anchors, err := auditanchor.NewManager(newAuditManagerConfig(database))
 	if err != nil {
 		return err
@@ -801,9 +804,10 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 		if globalErr == nil {
 			return nil
 		}
-		registered, listErr := database.ListUpstreams(ctx)
+		registered, listErr := database.ListReadinessUpstreams(ctx)
 		if listErr != nil {
-			return globalErr
+			// Preserve scheduling/storage deadlines as transient samples.
+			return listErr
 		}
 		keyDirectory := filepath.Dir(options.upstreamKey)
 		for _, upstream := range registered {
@@ -821,6 +825,9 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 		// waiting for file projection.
 		if !identityStoreEnabled() && checkUpstreamSecretConfigured(ctx, kube, options.namespace, options.upstreamKey, options.knownHosts, registered) == nil {
 			return nil
+		}
+		if err := ctx.Err(); err != nil {
+			return err
 		}
 		return globalErr
 	}, VCS: func(ctx context.Context, upstream model.Upstream) error {
@@ -868,6 +875,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 		return nil
 	}
 	health.Readiness = &app.ReadinessSnapshot{}
+	health.ReadinessUpstreams = database.ListReadinessUpstreams
 	health.Log = logger.Printf
 	readinessCtx, stopReadiness := context.WithCancel(ctx)
 	readinessDone := make(chan struct{})

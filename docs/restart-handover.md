@@ -33,13 +33,12 @@ adoptable Workflows.
 
 Readiness stays unavailable until owner recovery and Workflow adoption finish.
 Database/configuration checks run immediately in the background, then serially
-on a two-second ticker with a three-second probe deadline. Slow probes reduce
-the effective cadence to about three seconds. A deadline retains the last green
-sample without renewing its timestamp: transient waits for the single shared DB
-connection are tolerated only until that sample is 15 seconds old (roughly four
-to five consecutive full-deadline probes). All hard errors fail immediately.
+on a five-second ticker with a ten-second probe deadline, using a reserved
+read-only WAL connection. A deadline retains the last green sample without
+renewing its timestamp; scheduling delays are tolerated for six full
+budget-plus-cadence windows (90 seconds). All hard errors fail immediately.
 `/readyz` reads the snapshot without database, credential or Kubernetes calls.
-Missing, failed or older-than-15-second samples fail closed. The background
+Missing, failed or older-than-90-second samples fail closed. The background
 watcher logs readiness transitions only, including a bounded reason class,
 sample age and `db_wait` (database check elapsed time, including pool wait and
 query execution), plus probe and outage durations. Startup recovery is included

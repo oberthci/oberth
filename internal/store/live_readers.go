@@ -15,7 +15,7 @@ const (
 )
 
 // Initialize only after migrations and startup recovery, before publishing the
-// Store to callers. Authentication and idle sampling retain their own pools so
+// Store to callers. Authentication, idle and readiness have their own pools so
 // expensive list queries cannot consume their reserved reader connections.
 func (s *Store) configureReadPool(ctx context.Context) error {
 	db, err := s.openLiveReaders(ctx, liveReadConnections)

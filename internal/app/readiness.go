@@ -7,7 +7,14 @@ import (
 	"time"
 )
 
-const readinessMaxAge = 15 * time.Second
+const (
+	readinessInterval    = 5 * time.Second
+	readinessProbeBudget = 10 * time.Second
+	// Allow six slow sampling cycles before withdrawing HTTP readiness. This
+	// is time-based hysteresis, not a lease renewed by failed probes: a stuck
+	// sampler or persistent deadlines still expire the last successful sample.
+	readinessMaxAge = 6 * (readinessInterval + readinessProbeBudget)
+)
 
 var (
 	errReadinessStale         = errors.New("app: readiness probe pending or stale")
@@ -50,13 +57,13 @@ func (health Health) refreshReadiness(ctx context.Context) {
 		gateErr = health.ReadyGate(ctx)
 	}
 	started := time.Now()
-	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, readinessProbeBudget)
 	defer cancel()
 	dbWait, err := health.probeReadySample(ctx)
 	now := time.Now()
 	snapshot := health.Readiness
 	snapshot.mu.Lock()
-	// A deadline can mean waiting for the single shared DB connection. Retain
+	// A deadline can mean CPU scheduling delay or slow storage. Retain
 	// the last green sample without renewing its age, even if already stale.
 	// Cancellation and all hard errors still replace it immediately.
 	retainGreen := errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, context.Canceled) &&
@@ -115,11 +122,11 @@ func readinessReason(err error) string {
 	}
 }
 
-// WatchReadiness probes immediately, then on a two-second ticker. Probes run
-// serially and can take up to three seconds, so slow probes reduce the cadence.
+// WatchReadiness probes immediately, then on a five-second ticker. Probes run
+// serially and can take up to ten seconds, so slow probes reduce the cadence.
 // All remote probes must honor the context to avoid stalling process shutdown.
 func (health Health) WatchReadiness(ctx context.Context) {
-	ticker := time.NewTicker(2 * time.Second)
+	ticker := time.NewTicker(readinessInterval)
 	defer ticker.Stop()
 	for {
 		health.refreshReadiness(ctx)

@@ -181,7 +181,7 @@ and failed gates, so a valid shorter history cannot clear a rollback refusal.
 Writable Store openers create an eight-connection read-only WAL pool after
 migration and recovery. Repository/upstream mappings, status/list queries and
 pilot read snapshots use it; they never reserve the single writer. SSH identity
-and idle sampler pools still open explicitly during daemon startup and keep
+and idle/readiness sampler pools open explicitly during daemon startup and keep
 their reserved capacity. Audit listings and chain/witness scan queries have a
 separate two-connection read-only pool so they cannot exhaust mapping slots;
 audit verification snapshots retain their dedicated readers.
@@ -843,6 +843,9 @@ trust assumptions and complete invalidation rules.
   `Running` but not ready until its first upstream is registered in-pod;
   registration then also requires the upstream's durable SSH credentials for
   readiness to hold.
+- Readiness sampling has its own read-only WAL connection, a ten-second budget
+  and five-second cadence. A successful sample expires after 90 seconds;
+  deadlines do not renew it. Hard errors and startup recovery refuse at once.
 - `/mcp` and `/api/*` require a bearer token. Static connection guidance may be
   served unauthenticated without exposing repository or run data.
 - The dashboard pages `/runs`, `/repos`, `/issues`, `/status`, and
