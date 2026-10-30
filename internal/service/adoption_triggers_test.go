@@ -314,21 +314,49 @@ func TestAdoptedPromotionRechecksMovedMainBeforePublication(t *testing.T) {
 	jobs := &adoptingJobs{found: true, recoveryJobs: recoveryJobs{terminalErr: ErrJobNotTerminal, waitBlocks: make(chan struct{}), waitEntered: make(chan struct{}), waitResult: JobResult{Status: model.RunPassed}}}
 	reopenSlice2Owner(t, fixture)
 	scheduler := slice2Scheduler(t, fixture, jobs, git)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	done := make(chan error, 1)
-	go func() { done <- scheduler.Run(ctx) }()
-	waitSlice2Worker(t, done, jobs.waitEntered)
+	// Hold removal until owner shutdown, modelling slow filesystem cleanup.
+	// A terminal run row is committed before this work finishes, so polling
+	// that row (or a fixed cleanup timeout) is not a cleanup barrier.
+	allowCleanup := make(chan struct{})
+	cleanupEntered := make(chan struct{})
+	var entered sync.Once
+	remove := scheduler.workspaces.remove
+	scheduler.workspaces.remove = func(path string) error {
+		entered.Do(func() { close(cleanupEntered) })
+		<-allowCleanup
+		return remove(path)
+	}
+	owner := startSlice2Owner(t, scheduler)
+	cancel := owner.cancel
+	owner.cancel = func() { close(allowCleanup); cancel() }
+	owner.waitEntered(t, jobs.waitEntered)
 	moved := strings.Repeat("d", 40)
 	git.mu.Lock()
 	git.setRemoteRefLocked("refs/heads/main", moved)
 	git.mu.Unlock()
 	close(jobs.waitBlocks)
-	failed := waitAdoptedStatus(t, fixture.store, run.ID, model.RunFailed)
-	waitSlice2Cleanup(t, paths)
-	cancel()
-	if err := <-done; err != nil {
-		t.Fatal(err)
+	failed := owner.waitTerminal(t, scheduler, fixture.store, run.ID)
+	if failed.Status != model.RunFailed {
+		t.Fatalf("run = %s, want failed", failed.Status)
+	}
+	select {
+	case <-cleanupEntered:
+	case <-owner.done:
+		t.Fatalf("owner stopped before cleanup: %v", owner.err)
+	case <-time.After(testStartTimeout(5 * time.Second)):
+		t.Fatal("cleanup not entered after terminal verdict")
+	}
+	for _, path := range paths {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("blocked cleanup already removed %s: %v", path, err)
+		}
+	}
+	// Run joins adopted workers, including both terminal workspace removals.
+	owner.stop(t)
+	for _, path := range paths {
+		if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("terminal workspace %s retained after join: %v", path, err)
+		}
 	}
 	git.mu.Lock()
 	pushes := len(git.promotions)
