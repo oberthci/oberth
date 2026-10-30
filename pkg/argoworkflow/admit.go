@@ -97,6 +97,12 @@ func Admit(workflow *wfv1.Workflow, policy Policy) error {
 		}
 	}
 	problems = append(problems, admitTemplates(workflow, policy)...)
+	if _, err := CleanupVerdictTimeout(workflow); err != nil {
+		problems = append(problems, err)
+	} else if _, declared := workflow.Annotations[CleanupVerdictAnnotation]; declared && !policy.KubeVirt {
+		problems = append(problems, errors.New("argoworkflow: cleanup verdict requires an active repository KubeVirt admin grant"))
+	}
+
 	if _, err := DeclaredNonrootTemplates(workflow); err != nil {
 		problems = append(problems, err)
 	}
@@ -296,7 +302,9 @@ func admitTemplates(workflow *wfv1.Workflow, policy Policy) []error {
 		}
 		problems = append(problems, admitTemplate(location, template, policy, 0)...)
 		if policy.KubeVirt && template.Resource != nil && !strings.HasPrefix(template.Name, "frag-") {
-			vmiTemplates++
+			if _, err := VMIOperation(template.Resource); err == nil {
+				vmiTemplates++
+			}
 			if template.Resource.Action == "create" {
 				// The individual manifest is validated above. A malformed one
 				// already fails admission and contributes no trusted budget data.

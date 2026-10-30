@@ -37,18 +37,25 @@ func TestCleanupVMIsDeletesOnlyRunLabelAndNameWithUID(t *testing.T) {
 		{name + "-arm64", name},
 		{"other-run-amd64", name},
 		{name + "-foreign", "other-run"},
+		{name + "-foreign-owner", name},
 	} {
 		object := &unstructured.Unstructured{Object: map[string]any{"apiVersion": "kubevirt.io/v1", "kind": "VirtualMachineInstance"}}
 		object.SetName(tc.name)
 		object.SetNamespace(testNamespace)
 		object.SetUID(types.UID(tc.name + "-uid"))
 		object.SetLabels(map[string]string{"oberth.ci/workflow": tc.label})
+		object.SetOwnerReferences([]metav1.OwnerReference{{APIVersion: "argoproj.io/v1alpha1", Kind: "Workflow", Name: name, UID: "wf-id"}})
+		if strings.HasSuffix(tc.name, "-foreign-owner") {
+			object.SetOwnerReferences(nil)
+		}
 		if _, err := client.Resource(vmiResource).Namespace(testNamespace).Create(ctx, object, metav1.CreateOptions{}); err != nil {
 			t.Fatal(err)
 		}
 	}
 	workflow := &wfv1.Workflow{Spec: wfv1.WorkflowSpec{Templates: []wfv1.Template{{Name: "vm", Resource: &wfv1.ResourceTemplate{Action: "create"}}}}}
 	workflow.Name = name
+	workflow.Namespace = testNamespace
+	workflow.UID = "wf-id"
 	workflow.Annotations = map[string]string{runIDAnnotation: "run-abc"}
 	controller, err := NewController(&staticWorkflowClient{workflow: workflow}, nil, testConfig())
 	if err != nil {
@@ -72,7 +79,7 @@ func TestCleanupVMIsDeletesOnlyRunLabelAndNameWithUID(t *testing.T) {
 	if len(deleted) != 2 {
 		t.Fatalf("deleted VMIs = %v", deleted)
 	}
-	for _, foreign := range []string{"other-run-amd64", name + "-foreign"} {
+	for _, foreign := range []string{"other-run-amd64", name + "-foreign", name + "-foreign-owner"} {
 		if _, err := client.Resource(vmiResource).Namespace(testNamespace).Get(ctx, foreign, metav1.GetOptions{}); err != nil {
 			t.Fatalf("foreign VMI %s was deleted: %v", foreign, err)
 		}
@@ -196,6 +203,7 @@ func newVMIClient(t *testing.T, names ...string) *fake.FakeDynamicClient {
 		object.SetNamespace(testNamespace)
 		object.SetUID(types.UID(name + "-uid"))
 		object.SetLabels(map[string]string{"oberth.ci/workflow": "run-workflow"})
+		object.SetOwnerReferences([]metav1.OwnerReference{{APIVersion: "argoproj.io/v1alpha1", Kind: "Workflow", Name: "run-workflow", UID: "wf-id"}})
 		if _, err := client.Resource(vmiResource).Namespace(testNamespace).Create(t.Context(), object, metav1.CreateOptions{}); err != nil {
 			t.Fatal(err)
 		}

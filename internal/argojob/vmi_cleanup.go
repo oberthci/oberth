@@ -29,7 +29,8 @@ func (controller *Controller) CleanupVMIs(ctx context.Context, workflowName, run
 	} else if !missingWorkflow {
 		return fmt.Errorf("argojob: read Workflow before VMI cleanup: %w", err)
 	}
-	return controller.cleanupVMIsForRun(ctx, workflowName, true)
+	// Without the Workflow UID, labels and names cannot prove ownership.
+	return nil
 }
 
 // cleanupVMIsForWorkflow reuses the Workflow already observed by Wait or
@@ -44,26 +45,22 @@ func (controller *Controller) cleanupVMIsForWorkflow(ctx context.Context, workfl
 	if !hasVMIResources(workflow) {
 		return nil
 	}
-	return controller.cleanupVMIsForRun(ctx, workflow.Name, false)
+	return controller.cleanupVMIsForRun(ctx, workflow)
 }
 
-func (controller *Controller) cleanupVMIsForRun(ctx context.Context, workflowName string, missingWorkflow bool) error {
+func (controller *Controller) cleanupVMIsForRun(ctx context.Context, workflow *wfv1.Workflow) error {
+	workflowName := workflow.Name
 	selector := "oberth.ci/workflow=" + workflowName
 	client := controller.vmi.Resource(vmiResource).Namespace(controller.config.Namespace)
 	objects, err := client.List(ctx, metav1.ListOptions{LabelSelector: selector})
 	if apierrors.IsNotFound(err) {
 		return nil
 	} // KubeVirt CRD is absent.
-	if missingWorkflow && apierrors.IsForbidden(err) {
-		// An ordinary cancelled run may never have had VMI access. Its
-		// missing Workflow cannot distinguish that case, so do not block it.
-		return nil
-	}
 	if err != nil {
 		return fmt.Errorf("argojob: list run VMIs: %w", err)
 	}
 	for _, object := range objects.Items {
-		if object.GetLabels()["oberth.ci/workflow"] != workflowName || !strings.HasPrefix(object.GetName(), workflowName+"-") {
+		if object.GetLabels()["oberth.ci/workflow"] != workflowName || !strings.HasPrefix(object.GetName(), workflowName+"-") || !workflowOwnsResource(workflow, &object) {
 			continue
 		}
 		uid := object.GetUID()

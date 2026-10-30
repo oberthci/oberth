@@ -539,6 +539,7 @@ func (controller *Controller) wait(ctx context.Context, name, runID string, dest
 					budgetBreachErr = err
 				}
 			}
+			controller.cleanupVerdict(ctx, settled, runID, budget, &completion)
 			reporter.finish(budget)
 			if err := controller.retireExecutorIdentity(ctx, settled); err != nil {
 				return completion, fmt.Errorf("retire executor identity: %w", err)
@@ -549,7 +550,6 @@ func (controller *Controller) wait(ctx context.Context, name, runID string, dest
 			if progressErr := reporter.failure(); progressErr != nil {
 				return completion, fmt.Errorf("argojob: run progress markers degraded: %w", progressErr)
 			}
-			controller.cleanupVMIsForObservedWorkflow(ctx, settled, runID)
 			return completion, nil
 		}
 		if controller.timings != nil {
@@ -708,7 +708,7 @@ func (controller *Controller) TerminalState(ctx context.Context, name string) (*
 	controller.retainWorkflowTiming(ctx, workflow)
 	controller.collectVMIFailure(ctx, workflow, &completion, nil)
 	controller.collectStepDiagnostics(ctx, workflow, &completion)
-	controller.cleanupVMIsForObservedWorkflow(ctx, workflow, runID)
+	controller.cleanupVerdict(ctx, workflow, runID, nil, &completion)
 	return &completion, nil
 }
 

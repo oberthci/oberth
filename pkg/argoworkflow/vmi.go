@@ -25,6 +25,7 @@ type vmiManifest struct {
 	Kind       string `json:"kind"`
 	Metadata   struct {
 		Name   string            `json:"name"`
+		UID    string            `json:"uid,omitempty"`
 		Labels map[string]string `json:"labels"`
 	} `json:"metadata"`
 	Spec struct {
@@ -197,12 +198,6 @@ func admitVMIResource(where string, tmpl *wfv1.ResourceTemplate, prefixes []stri
 	if strings.Contains(tmpl.Manifest, "\r") {
 		return fmt.Errorf("argoworkflow: %s.manifest must not contain carriage returns", where)
 	}
-	// Argo substitutes parameters after this admission check. Only the exact
-	// workflow name in metadata.name and the run label is permitted to vary.
-	if strings.Contains(tmpl.Manifest, "{{=") || strings.Count(tmpl.Manifest, "{{workflow.name}}") != 2 ||
-		strings.Contains(strings.ReplaceAll(tmpl.Manifest, "{{workflow.name}}", ""), "{{") {
-		return fmt.Errorf("argoworkflow: %s.manifest permits only two {{workflow.name}} substitutions in metadata.name and the run label", where)
-	}
 	if yamlDocumentMarker.MatchString(tmpl.Manifest) {
 		return fmt.Errorf("argoworkflow: %s.manifest must contain one YAML document", where)
 	}
@@ -216,8 +211,30 @@ func admitVMIResource(where string, tmpl *wfv1.ResourceTemplate, prefixes []stri
 	if err := decoder.Decode(&manifest); err != nil {
 		return fmt.Errorf("argoworkflow: %s.manifest contains an unapproved field or value: %w", where, err)
 	}
-	if manifest.APIVersion != "kubevirt.io/v1" || manifest.Kind != "VirtualMachineInstance" {
-		return fmt.Errorf("argoworkflow: %s.manifest must be a kubevirt.io/v1 VirtualMachineInstance", where)
+	// A UID may be a literal or one entire input parameter. No other new
+	// interpolation is admitted, and the runtime revalidates the scalar.
+	static := tmpl.Manifest
+	if manifest.Metadata.UID != "" {
+		if tmpl.Action != "delete" || (!ValidCleanupUID(manifest.Metadata.UID) && CleanupUIDInput(manifest.Metadata.UID) == "") {
+			return fmt.Errorf("argoworkflow: %s.manifest.metadata.uid is allowed only on delete as a bounded UID or an entire inputs.parameters value", where)
+		}
+		if CleanupUIDInput(manifest.Metadata.UID) != "" {
+			if strings.Count(static, manifest.Metadata.UID) != 1 {
+				return fmt.Errorf("argoworkflow: %s UID substitution must occur only in metadata.uid", where)
+			}
+			static = strings.Replace(static, manifest.Metadata.UID, "", 1)
+		}
+	}
+	if strings.Contains(static, "{{=") || strings.Count(static, "{{workflow.name}}") != 2 ||
+		strings.Contains(strings.ReplaceAll(static, "{{workflow.name}}", ""), "{{") {
+		return fmt.Errorf("argoworkflow: %s.manifest permits only two {{workflow.name}} substitutions in metadata.name and the run label", where)
+	}
+	vmi := manifest.APIVersion == "kubevirt.io/v1" && manifest.Kind == "VirtualMachineInstance"
+	diskDelete := tmpl.Action == "delete" && manifest.Metadata.UID != "" &&
+		((manifest.APIVersion == "cdi.kubevirt.io/v1beta1" && manifest.Kind == "DataVolume") ||
+			(manifest.APIVersion == "v1" && manifest.Kind == "PersistentVolumeClaim"))
+	if !vmi && !diskDelete {
+		return fmt.Errorf("argoworkflow: %s.manifest must be a kubevirt.io/v1 VirtualMachineInstance, or a UID-pinned DataVolume/PVC delete", where)
 	}
 	if !vmiNamePattern.MatchString(manifest.Metadata.Name) {
 		return fmt.Errorf("argoworkflow: %s.manifest.metadata.name must be {{workflow.name}}-<suffix>", where)
@@ -494,7 +511,7 @@ func SummedVMIDemand(workflow *wfv1.Workflow) (VMIDemand, error) {
 }
 
 // DeclaresVMIResources reports whether a workflow has any resource template.
-// Admission admits resource templates only as VMI create/get/delete.
+// Admission admits VMI create/get/delete and UID-pinned disk deletes.
 func DeclaresVMIResources(workflow *wfv1.Workflow) bool {
 	if workflow == nil {
 		return false
@@ -551,4 +568,21 @@ func VMIOperation(t *wfv1.ResourceTemplate) (VMIResourceOperation, error) {
 // ValidateVMIResource rechecks a resource operation at its execution boundary.
 func ValidateVMIResource(t *wfv1.ResourceTemplate, prefixes []string) error {
 	return admitVMIResource("VMI create", t, prefixes)
+}
+
+// ValidCleanupUID admits an inert, bounded Kubernetes UID scalar.
+func ValidCleanupUID(uid string) bool {
+	return cleanupUIDPattern.MatchString(uid)
+}
+
+var cleanupUIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`)
+var cleanupUIDInputPattern = regexp.MustCompile(`^\{\{inputs\.parameters\.([A-Za-z0-9_-]{1,63})\}\}$`)
+
+// CleanupUIDInput returns the sole permitted dynamic UID input name.
+func CleanupUIDInput(uid string) string {
+	match := cleanupUIDInputPattern.FindStringSubmatch(uid)
+	if len(match) == 2 {
+		return match[1]
+	}
+	return ""
 }
