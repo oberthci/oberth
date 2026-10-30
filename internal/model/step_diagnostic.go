@@ -5,6 +5,7 @@ import (
 	"errors"
 	"regexp"
 	"time"
+	"unicode/utf8"
 )
 
 // StepDiagnostic is a bounded Kubernetes observation, not execution authority.
@@ -24,6 +25,9 @@ type StepTermination struct {
 	NodeID                string    `json:"node_id"`
 	PodName               string    `json:"pod_name"`
 	PodUID                string    `json:"pod_uid"`
+	ContainerKind         string    `json:"container_kind,omitempty"`
+	Message               string    `json:"message,omitempty"`
+	MessageTruncated      bool      `json:"message_truncated,omitempty"`
 	ContainerName         string    `json:"container_name"`
 	ContainerID           string    `json:"container_id"`
 	RestartCount          int32     `json:"restart_count"`
@@ -73,7 +77,12 @@ func (d StepDiagnostic) Validate() error {
 		return fail
 	}
 	c := d.Container
-	if !diagnosticRun.MatchString(c.RunID) || !diagnosticUID.MatchString(c.WorkflowUID) || !diagnosticUID.MatchString(c.PodUID) || !diagnosticCID.MatchString(c.ContainerID) || c.ContainerName != "main" {
+	if !diagnosticRun.MatchString(c.RunID) || !diagnosticUID.MatchString(c.WorkflowUID) || !diagnosticUID.MatchString(c.PodUID) || !diagnosticCID.MatchString(c.ContainerID) {
+		return fail
+	}
+	if (c.ContainerKind != "" && c.ContainerKind != "main" && c.ContainerKind != "init") ||
+		(c.ContainerKind != "init" && c.ContainerName != "main") ||
+		!diagnosticName.MatchString(c.ContainerName) || len(c.Message) > 1536 || !utf8.ValidString(c.Message) {
 		return fail
 	}
 	for _, s := range []string{c.Namespace, c.WorkflowName, c.NodeID, c.PodName} {

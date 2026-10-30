@@ -1068,10 +1068,27 @@ func (scheduler *Scheduler) observeRun(ctx context.Context, run model.Run, repos
 		checkoutSHA = run.SHA
 	}
 	releaseAdmission := reservation.release
+	journal, journalErr := runlog.OpenPodLogJournal(logFile, scheduler.maxRunLogBytes)
+	if journalErr != nil {
+		reservation.retain()
+		_ = logFile.Close()
+		return fmt.Errorf("recover durable pod logs: %w", journalErr)
+	}
+	defer func() { _ = journal.Close() }()
+	if info, err := logFile.Stat(); err == nil {
+		observation.retained = info.Size()
+	} else {
+		reservation.retain()
+		_ = logFile.Close()
+		return err
+	}
+
 	progressLog := newStepProgressLogWriter(
 		newRunLogWriter(logFile, scheduler.maxRunLogBytes-observation.retained),
 		func(event runprogress.Event) error { return scheduler.logs.AppendStepProgress(run.ID, event) },
 	)
+	progressLog.journal = journal
+
 	// The plan is recorded here: after the pipeline object exists, so a run
 	// that never reached submission carries no claim about work it would have
 	// done, and before the engine's first observation, so the step list is

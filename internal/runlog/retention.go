@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-var evidenceSuffixes = []string{".log", ".index.json", ".progress.jsonl", ".plan.json"}
+var evidenceSuffixes = []string{".log", ".index.json", ".progress.jsonl", ".plan.json", ".log.pods.jsonl"}
 
 // UsageByRun includes indexes and progress journals as well as log bodies.
 func (store *Store) UsageByRun() (map[string]int64, error) {

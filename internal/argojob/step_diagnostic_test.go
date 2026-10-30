@@ -47,10 +47,10 @@ func TestStepDiagnosticExactCurrentMainAndReason(t *testing.T) {
 	}
 	pod.Status.Reason = "DeadlineExceeded"
 	pod.Status.ContainerStatuses[0].State.Terminated.Reason = "secret-canary"
-	pod.Status.ContainerStatuses[0].State.Terminated.Message = "secret-canary"
+	pod.Status.ContainerStatuses[0].State.Terminated.Message = "observed termination detail"
 	d = projectStepDiagnostic(wf, node, pod, at)
 	raw, _ := json.Marshal(d)
-	if !d.Available || d.Container.Reason != "other" || d.Container.PodReason != "DeadlineExceeded" || strings.Contains(string(raw), "secret-canary") {
+	if !d.Available || d.Container.Reason != "other" || d.Container.PodReason != "DeadlineExceeded" || d.Container.Message != "observed termination detail" || strings.Contains(string(raw), "secret-canary") {
 		t.Fatal("raw reason leaked or Pod deadline conflated")
 	}
 }

@@ -221,10 +221,16 @@ func projectStepTiming(workflow *wfv1.Workflow, node wfv1.NodeStatus, pod *corev
 			value.CompletedAt = &at
 		}
 		if diagnostic.Available {
-			value.Available = true
-			value.Unavailable = ""
-			main := diagnostic.Container
-			value.Main = &model.ContainerTiming{Name: "main", ContainerID: main.ContainerID, RestartCount: main.RestartCount, StartedAt: main.StartedAt, FinishedAt: main.FinishedAt}
+			if diagnostic.Container.ContainerKind == "init" {
+				// The setup failure is real, but main never executed. Keep observed
+				// init timings without relabelling that container as main.
+				value.Unavailable = "termination-unavailable"
+			} else {
+				value.Available = true
+				value.Unavailable = ""
+				main := diagnostic.Container
+				value.Main = &model.ContainerTiming{Name: "main", ContainerID: main.ContainerID, RestartCount: main.RestartCount, StartedAt: main.StartedAt, FinishedAt: main.FinishedAt}
+			}
 			seen := map[string]bool{}
 			specs := map[string]bool{}
 			for _, container := range pod.Spec.InitContainers {
@@ -247,7 +253,7 @@ func projectStepTiming(workflow *wfv1.Workflow, node wfv1.NodeStatus, pod *corev
 				}
 				value.Init = append(value.Init, model.ContainerTiming{Name: status.Name, ContainerID: status.ContainerID, RestartCount: status.RestartCount, StartedAt: ended.StartedAt.Time, FinishedAt: ended.FinishedAt.Time})
 			}
-			if !value.Available {
+			if value.Unavailable == "unsupported-shape" {
 				value.Main = nil
 				value.Init = []model.ContainerTiming{}
 			}

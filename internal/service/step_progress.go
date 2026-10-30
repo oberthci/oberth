@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/oberthci/oberth/internal/runlog"
 	"github.com/oberthci/oberth/internal/runprogress"
 )
 
@@ -13,6 +14,8 @@ import (
 // log and journals them as they arrive. It buffers at most one bounded marker;
 // ordinary long lines stream directly to the retained-log limiter.
 type stepProgressLogWriter struct {
+	journal     *runlog.PodLogJournal
+	journalErr  error
 	destination io.Writer
 	persist     func(runprogress.Event) error
 	pending     []byte
@@ -25,6 +28,9 @@ func newStepProgressLogWriter(destination io.Writer, persist func(runprogress.Ev
 }
 
 func (writer *stepProgressLogWriter) Write(body []byte) (int, error) {
+	if writer.journalErr != nil {
+		return 0, writer.journalErr
+	}
 	if writer.closed {
 		return 0, errors.New("step progress log writer is closed")
 	}
@@ -120,4 +126,22 @@ func writeProgressBytes(destination io.Writer, body []byte) error {
 		body = body[written:]
 	}
 	return nil
+}
+
+func (writer *stepProgressLogWriter) CommitPodLog(cursor runlog.PodLogCursor, body []byte) error {
+	if writer.journal == nil {
+		_, err := writer.Write(body)
+		return err
+	}
+	err := writer.journal.Commit(cursor, body, writer.Write)
+	if err != nil {
+		writer.journalErr = err
+	}
+	return err
+}
+func (writer *stepProgressLogWriter) PodLogCursors() map[string]runlog.PodLogCursor {
+	if writer.journal == nil {
+		return nil
+	}
+	return writer.journal.Cursors()
 }

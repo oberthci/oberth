@@ -2,7 +2,9 @@ package argojob
 
 import (
 	"context"
+	"strings"
 	"time"
+	"unicode/utf8"
 
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
@@ -59,6 +61,9 @@ func (controller *Controller) collectStepDiagnostics(ctx context.Context, workfl
 			step.Termination = &model.StepDiagnostic{Unavailable: reason, ObservedAt: &at}
 		} else {
 			step.Termination = projectStepDiagnostic(workflow, node, pod, at)
+			if step.Termination.Available && step.Termination.Container.ContainerKind == "init" {
+				step.ExitCode = int(step.Termination.Container.ExitCode)
+			}
 			step.Usage = projectStepUsage(workflow, node, pod)
 			if reason := podInfrastructureReason(workflow, node, pod); reason != "" {
 				step.InfrastructureReason = reason
@@ -128,35 +133,51 @@ func projectStepDiagnostic(workflow *wfv1.Workflow, node wfv1.NodeStatus, pod *c
 	unavailable := func(reason string) *model.StepDiagnostic {
 		return &model.StepDiagnostic{Unavailable: reason, ObservedAt: &observed}
 	}
-	if !stepPodBound(workflow, node, pod) {
+	if !stepPodIdentityBound(workflow, node, pod) {
 		return unavailable("binding-mismatch")
 	}
 	runID, _, _ := WorkflowMeta(workflow)
 	var main *corev1.Container
-	seen := map[string]bool{}
-	for i := range pod.Spec.Containers {
-		c := &pod.Spec.Containers[i]
-		if seen[c.Name] || (c.Name != "main" && c.Name != "wait") {
+	kind := ""
+	status := failedInitContainer(pod)
+	if status != nil {
+		kind = "init"
+		for i := range pod.Spec.InitContainers {
+			if pod.Spec.InitContainers[i].Name == status.Name {
+				if main != nil {
+					return unavailable("unsupported-shape")
+				}
+				main = &pod.Spec.InitContainers[i]
+			}
+		}
+		if main == nil {
 			return unavailable("unsupported-shape")
 		}
-		seen[c.Name] = true
-		if c.Name == "main" {
-			main = c
+	} else {
+		seen := map[string]bool{}
+		for i := range pod.Spec.Containers {
+			c := &pod.Spec.Containers[i]
+			if seen[c.Name] || (c.Name != "main" && c.Name != "wait") {
+				return unavailable("unsupported-shape")
+			}
+			seen[c.Name] = true
+			if c.Name == "main" {
+				main = c
+			}
 		}
-	}
-	if main == nil {
-		return unavailable("unsupported-shape")
-	}
-	var status *corev1.ContainerStatus
-	seen = map[string]bool{}
-	for i := range pod.Status.ContainerStatuses {
-		c := &pod.Status.ContainerStatuses[i]
-		if seen[c.Name] || (c.Name != "main" && c.Name != "wait") {
+		if main == nil {
 			return unavailable("unsupported-shape")
 		}
-		seen[c.Name] = true
-		if c.Name == "main" {
-			status = c
+		seen = map[string]bool{}
+		for i := range pod.Status.ContainerStatuses {
+			c := &pod.Status.ContainerStatuses[i]
+			if seen[c.Name] || (c.Name != "main" && c.Name != "wait") {
+				return unavailable("unsupported-shape")
+			}
+			seen[c.Name] = true
+			if c.Name == "main" {
+				status = c
+			}
 		}
 	}
 	if status == nil || status.State.Terminated == nil || status.State.Running != nil || status.State.Waiting != nil {
@@ -166,7 +187,7 @@ func projectStepDiagnostic(workflow *wfv1.Workflow, node wfv1.NodeStatus, pod *c
 	if status.ContainerID == "" || status.ContainerID != t.ContainerID || status.Ready || t.StartedAt.IsZero() || t.FinishedAt.IsZero() {
 		return unavailable("invalid-termination")
 	}
-	if node.Outputs != nil && node.Outputs.ExitCode != nil {
+	if kind != "init" && node.Outputs != nil && node.Outputs.ExitCode != nil {
 		code, err := parseExitCode(*node.Outputs.ExitCode)
 		if err != nil || code != int(t.ExitCode) {
 			return unavailable("invalid-termination")
@@ -199,7 +220,7 @@ func projectStepDiagnostic(workflow *wfv1.Workflow, node wfv1.NodeStatus, pod *c
 			}
 		}
 	}
-	evidence := &model.StepTermination{RunID: runID, Namespace: workflow.Namespace, WorkflowName: workflow.Name, WorkflowUID: string(workflow.UID), NodeID: node.ID, PodName: pod.Name, PodUID: string(pod.UID), ContainerName: "main", ContainerID: status.ContainerID, RestartCount: status.RestartCount, Reason: reason, PodReason: podReason, ExitCode: t.ExitCode, Signal: t.Signal, StartedAt: t.StartedAt.Time, FinishedAt: t.FinishedAt.Time, ActiveDeadlineSeconds: pod.Spec.ActiveDeadlineSeconds}
+	evidence := &model.StepTermination{RunID: runID, Namespace: workflow.Namespace, WorkflowName: workflow.Name, WorkflowUID: string(workflow.UID), NodeID: node.ID, PodName: pod.Name, PodUID: string(pod.UID), ContainerName: status.Name, ContainerKind: kind, ContainerID: status.ContainerID, RestartCount: status.RestartCount, Reason: reason, PodReason: podReason, ExitCode: t.ExitCode, Signal: t.Signal, StartedAt: t.StartedAt.Time, FinishedAt: t.FinishedAt.Time, ActiveDeadlineSeconds: pod.Spec.ActiveDeadlineSeconds}
 	if value, ok := main.Resources.Requests[corev1.ResourceCPU]; ok {
 		n := value.MilliValue()
 		evidence.CPURequestMilli = &n
@@ -216,7 +237,19 @@ func projectStepDiagnostic(workflow *wfv1.Workflow, node wfv1.NodeStatus, pod *c
 		n := value.Value()
 		evidence.MemoryLimitBytes = &n
 	}
+	evidence.Message = strings.ToValidUTF8(t.Message, "�")
+	for len(evidence.Message) > 1536 {
+		_, n := utf8.DecodeLastRuneInString(evidence.Message)
+		evidence.Message = evidence.Message[:len(evidence.Message)-n]
+		evidence.MessageTruncated = true
+	}
 	result := &model.StepDiagnostic{Available: true, ObservedAt: &observed, Container: evidence}
+	// Keep the entire bounded diagnostic valid even for escaped control bytes.
+	for result.Validate() != nil && len(evidence.Message) > 0 {
+		_, n := utf8.DecodeLastRuneInString(evidence.Message)
+		evidence.Message = evidence.Message[:len(evidence.Message)-n]
+		evidence.MessageTruncated = true
+	}
 	if result.Validate() != nil {
 		return unavailable("invalid-termination")
 	}
@@ -224,8 +257,11 @@ func projectStepDiagnostic(workflow *wfv1.Workflow, node wfv1.NodeStatus, pod *c
 }
 
 func stepPodBound(workflow *wfv1.Workflow, node wfv1.NodeStatus, pod *corev1.Pod) bool {
+	return node.Phase.Completed() && stepPodIdentityBound(workflow, node, pod)
+}
+func stepPodIdentityBound(workflow *wfv1.Workflow, node wfv1.NodeStatus, pod *corev1.Pod) bool {
 	_, _, ok := WorkflowMeta(workflow)
-	if !ok || workflow.UID == "" || pod == nil || pod.UID == "" || pod.Namespace != workflow.Namespace || pod.Name != PodName(workflow, node) || node.Type != wfv1.NodeTypePod || !node.Phase.Completed() || pod.Annotations["workflows.argoproj.io/node-id"] != node.ID || pod.Annotations["workflows.argoproj.io/node-name"] != node.Name {
+	if !ok || workflow.UID == "" || pod == nil || pod.UID == "" || pod.Namespace != workflow.Namespace || pod.Name != PodName(workflow, node) || node.Type != wfv1.NodeTypePod || pod.Annotations["workflows.argoproj.io/node-id"] != node.ID || pod.Annotations["workflows.argoproj.io/node-name"] != node.Name {
 		return false
 	}
 	owners := 0
@@ -238,4 +274,25 @@ func stepPodBound(workflow *wfv1.Workflow, node wfv1.NodeStatus, pod *corev1.Pod
 		}
 	}
 	return owners == 1
+}
+
+// Main never started when a setup init fails. Only one current failed init
+// status is an unambiguous source; never substitute last-state or wait logs.
+func failedInitContainer(pod *corev1.Pod) *corev1.ContainerStatus {
+	for _, s := range pod.Status.ContainerStatuses {
+		if s.Name == mainContainerName && (s.ContainerID != "" || s.State.Running != nil || s.State.Terminated != nil) {
+			return nil
+		}
+	}
+	var failed *corev1.ContainerStatus
+	for i := range pod.Status.InitContainerStatuses {
+		s := &pod.Status.InitContainerStatuses[i]
+		if s.State.Terminated != nil && s.State.Terminated.ExitCode != 0 && s.State.Running == nil && s.State.Waiting == nil {
+			if failed != nil {
+				return nil
+			}
+			failed = s
+		}
+	}
+	return failed
 }

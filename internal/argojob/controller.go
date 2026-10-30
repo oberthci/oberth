@@ -24,6 +24,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 
 	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/runlog"
 	"github.com/oberthci/oberth/internal/runprogress"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 	"github.com/oberthci/oberth/pkg/periapsis"
@@ -79,6 +80,7 @@ type Controller struct {
 	logs              PodLogReader
 	followLogs        PodLogFollower
 	logIdentity       podLogIdentityReader
+	logPod            func(context.Context, string, string) (*corev1.Pod, error)
 	seeder            *SourceSeeder
 	config            Config
 	vmi               dynamic.Interface
@@ -121,17 +123,8 @@ func NewController(workflows WorkflowClient, client kubernetes.Interface, config
 	}
 	controller := &Controller{workflows: workflows, kube: client, config: config, interval: pollInterval, readGrace: workflowReadGrace}
 	if client != nil {
-		controller.logIdentity = func(ctx context.Context, namespace, pod string) (string, error) {
-			object, err := client.CoreV1().Pods(namespace).Get(ctx, pod, metav1.GetOptions{})
-			if err != nil {
-				return "", err
-			}
-			for _, status := range object.Status.ContainerStatuses {
-				if status.Name == mainContainerName && status.ContainerID != "" {
-					return fmt.Sprintf("%s/%s/%d", object.UID, status.ContainerID, status.RestartCount), nil
-				}
-			}
-			return "", errors.New("main container identity is not available yet")
+		controller.logPod = func(ctx context.Context, namespace, pod string) (*corev1.Pod, error) {
+			return client.CoreV1().Pods(namespace).Get(ctx, pod, metav1.GetOptions{})
 		}
 		controller.followLogs = func(ctx context.Context, namespace, pod string, options corev1.PodLogOptions) (io.ReadCloser, error) {
 			return client.CoreV1().Pods(namespace).GetLogs(pod, &options).Stream(ctx)
@@ -439,6 +432,7 @@ func (controller *Controller) wait(ctx context.Context, name, runID string, dest
 	if controller.followLogs != nil {
 		live = newStepLogFollowers(ctx, controller.followLogs, budget, events)
 		live.identity = controller.logIdentity
+		live.pod = controller.logPod
 		live.goProxyURL = controller.config.GoProxyURL
 		defer live.close()
 	}
@@ -487,6 +481,11 @@ func (controller *Controller) wait(ctx context.Context, name, runID string, dest
 		if binding.UID != "" && !binding.matches(workflow) {
 			return Completion{}, errors.New("argojob: adopted Workflow identity changed")
 		}
+		// Observe already-created Pods before identity delivery can block on a
+		// later Pod: early step output must not wait behind that setup RPC.
+		if live != nil {
+			live.observe(workflow)
+		}
 		if err := controller.deliverExecutorTokens(ctx, workflow, delivered); err != nil {
 			return Completion{}, err
 		}
@@ -510,6 +509,7 @@ func (controller *Controller) wait(ctx context.Context, name, runID string, dest
 			}
 			if live != nil {
 				live.drain(settled)
+				live.applyDiagnostics(&completion)
 				if err := live.failure(); err != nil && budgetBreachErr == nil {
 					budgetBreachErr = err
 				}
@@ -952,11 +952,15 @@ type runBudgetWriter struct {
 	mu          sync.Mutex
 	destination io.Writer
 	remaining   int64
+	failure     error
 }
 
 func (writer *runBudgetWriter) Write(body []byte) (int, error) {
 	writer.mu.Lock()
 	defer writer.mu.Unlock()
+	if writer.failure != nil {
+		return 0, writer.failure
+	}
 	if writer.remaining <= 0 {
 		return 0, errRunLogBudget
 	}
@@ -1151,3 +1155,40 @@ func pipelineDeclaresSecretPaths(source []byte) bool {
 }
 
 var errEmptyExitCode = errors.New("argojob: node reported no usable exit code")
+
+func (writer *runBudgetWriter) PodLogCursors() map[string]runlog.PodLogCursor {
+	writer.mu.Lock()
+	defer writer.mu.Unlock()
+	if sink, ok := writer.destination.(runlog.PodLogSink); ok {
+		return sink.PodLogCursors()
+	}
+	return nil
+}
+func (writer *runBudgetWriter) CommitPodLog(cursor runlog.PodLogCursor, body []byte) (result error) {
+	writer.mu.Lock()
+	defer writer.mu.Unlock()
+	if writer.failure != nil {
+		return writer.failure
+	}
+	defer func() {
+		if result != nil {
+			writer.failure = result
+		}
+	}()
+	if int64(len(body)) > writer.remaining {
+		return errRunLogBudget
+	}
+	if sink, ok := writer.destination.(runlog.PodLogSink); ok {
+		if err := sink.CommitPodLog(cursor, body); err != nil {
+			return err
+		}
+		writer.remaining -= int64(len(body))
+		return nil
+	}
+	n, err := writer.destination.Write(body)
+	writer.remaining -= int64(n)
+	if err == nil && n != len(body) {
+		err = io.ErrShortWrite
+	}
+	return err
+}
