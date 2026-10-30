@@ -20,11 +20,15 @@ import (
 
 type countingVMIWorkflowClient struct {
 	*staticWorkflowClient
-	gets int
+	gets    int
+	settled *wfv1.Workflow
 }
 
 func (client *countingVMIWorkflowClient) Get(ctx context.Context, name string, options metav1.GetOptions) (*wfv1.Workflow, error) {
 	client.gets++
+	if client.gets > 1 && client.settled != nil {
+		return client.settled.DeepCopy(), nil
+	}
 	return client.staticWorkflowClient.Get(ctx, name, options)
 }
 
@@ -96,7 +100,12 @@ func TestCleanupVMIsDeletesOnlyRunLabelAndNameWithUID(t *testing.T) {
 
 func TestTerminalStateSurvivesVMICleanupFailure(t *testing.T) {
 	workflow := &wfv1.Workflow{ObjectMeta: metav1.ObjectMeta{Name: "run-workflow", Namespace: testNamespace, UID: "wf-id", Annotations: map[string]string{runIDAnnotation: "run-abc"}}, Spec: wfv1.WorkflowSpec{Templates: []wfv1.Template{{Name: "vm", Resource: &wfv1.ResourceTemplate{Action: "create"}}}}, Status: wfv1.WorkflowStatus{Phase: wfv1.WorkflowSucceeded}}
-	workflows := &countingVMIWorkflowClient{staticWorkflowClient: &staticWorkflowClient{workflow: workflow}}
+	// Only the final settle read carries a complete terminal observation.
+	// Reusing the first snapshot must not satisfy the replay-evidence check.
+	settled := workflow.DeepCopy()
+	settled.Status.FinishedAt = metav1.Now()
+	settled.Status.Message = "final settled snapshot"
+	workflows := &countingVMIWorkflowClient{staticWorkflowClient: &staticWorkflowClient{workflow: workflow}, settled: settled}
 	controller, err := NewController(workflows, nil, testConfig())
 	if err != nil {
 		t.Fatal(err)
@@ -120,8 +129,11 @@ func TestTerminalStateSurvivesVMICleanupFailure(t *testing.T) {
 	if observed == nil || !strings.Contains(observed.Error(), "virt-api unavailable") {
 		t.Fatal("cleanup failure not observed")
 	}
-	if workflows.gets != 1 || len(client.Actions()) != 1 {
-		t.Fatalf("terminal cleanup made %d Workflow reads and %d VMI calls, want one each", workflows.gets, len(client.Actions()))
+	if !result.ObservationComplete || result.Reason != "final settled snapshot" {
+		t.Fatalf("terminal result did not use the final node-tree observation: %+v", result)
+	}
+	if workflows.gets != 2 || len(client.Actions()) != 1 {
+		t.Fatalf("terminal result needs initial + settle Workflow reads, but cleanup only once: reads=%d VMI calls=%d", workflows.gets, len(client.Actions()))
 	}
 }
 

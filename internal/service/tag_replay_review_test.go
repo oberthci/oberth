@@ -178,6 +178,16 @@ func TestTagReplayReviewMovedOrMissingTagRequiresForce(t *testing.T) {
 			}
 			requireTagForce(t, h, source.ID)
 			h.rerun(t, rerunAdmin, map[string]any{"id": source.ID, "force": true})
+			audit, err := h.fixture.store.LatestAuditActionByType(t.Context(), "run.rerun", "run")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !missing && !strings.Contains(audit.Details, `"tag_moved":true`) {
+				t.Fatalf("forced moved-tag replay was not recorded: %s", audit.Details)
+			}
+			if missing && strings.Contains(audit.Details, `"tag_moved"`) {
+				t.Fatalf("unknown lookup was reported as a known move: %s", audit.Details)
+			}
 		})
 	}
 }

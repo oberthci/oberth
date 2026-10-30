@@ -21,6 +21,7 @@ type RunReplayAttempt struct {
 	Observation        *RunTerminalObservation
 }
 type RunReplayAudit struct {
+	TagMoved           *bool  `json:"tag_moved,omitempty"`
 	Basis              string `json:"replay_basis"`
 	RunsChecked        int    `json:"replay_runs_checked"`
 	StepsChecked       int    `json:"replay_steps_checked"`

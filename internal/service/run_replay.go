@@ -11,22 +11,27 @@ import (
 )
 
 // prepareReplayTagCheck resolves DB scope before entering the single writer.
-// The exact local tag object is rechecked by the authorization callback.
-func (service *API) prepareReplayTagCheck(ctx context.Context, run model.Run) (func(model.Run) bool, error) {
+// The callback rechecks the exact local tag object and returns whether it
+// moved; nil means unknown, not an observed move or match.
+func (service *API) prepareReplayTagCheck(ctx context.Context, run model.Run) (func(model.Run) *bool, error) {
 	resolver, ok := service.refs.(interface {
 		TagObjectSHA(context.Context, string, string) (string, error)
 	})
 	if !ok {
-		return func(model.Run) bool { return false }, nil
+		return func(model.Run) *bool { return nil }, nil
 	}
 	repository, err := service.repositoryByID(ctx, run.RepoID)
 	if err != nil {
 		return nil, err
 	}
 	input := service.cacheInputFor(ctx, repository)
-	return func(current model.Run) bool {
+	return func(current model.Run) *bool {
 		sha, err := resolver.TagObjectSHA(ctx, input, current.Ref)
-		return err == nil && sameOID(sha, current.SHA)
+		if err != nil {
+			return nil
+		}
+		moved := !sameOID(sha, current.SHA)
+		return &moved
 	}, nil
 }
 

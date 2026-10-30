@@ -112,20 +112,29 @@ func (service *API) rerunRun(ctx context.Context, actor api.Actor, id, reason st
 		}
 	}
 	audit := &model.RunReplayAudit{Basis: "branch"}
-	tagCheck := func(model.Run) bool { return false }
-	if !force && (source.Release || source.RefKind == model.RefTag) {
-		tagCheck, err = service.prepareReplayTagCheck(ctx, source)
-		if err != nil {
-			return api.RunRerunResponse{}, err
+	tagCheck := func(model.Run) *bool { return nil }
+	if source.Release || source.RefKind == model.RefTag {
+		check, lookupErr := service.prepareReplayTagCheck(ctx, source)
+		if lookupErr != nil {
+			if !force {
+				return api.RunRerunResponse{}, lookupErr
+			}
+		} else {
+			tagCheck = check
 		}
 	}
 	result, err := service.runReruns.RerunRun(ctx, model.RunRerunRequest{
 		RunID: source.ID, Actor: actor.Identity, Reason: reason, Force: force, ReplayAudit: audit,
 		Authorize: func(current model.Run, evidence model.RunReplayEvidence) (string, error) {
 			safe := false
-			if !force && (current.Release || current.RefKind == model.RefTag) {
-				*audit, safe = service.releaseReplayDecision(current, evidence, tagCheck(current))
+			var moved *bool
+			if current.Release || current.RefKind == model.RefTag {
+				moved = tagCheck(current)
 			}
+			if !force && (current.Release || current.RefKind == model.RefTag) {
+				*audit, safe = service.releaseReplayDecision(current, evidence, moved != nil && !*moved)
+			}
+			audit.TagMoved = moved
 			if force && (current.Release || current.RefKind == model.RefTag) {
 				audit.Basis = "forced"
 				audit.PublicationStarted = evidence.PublicationStarted

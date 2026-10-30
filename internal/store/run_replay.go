@@ -138,6 +138,9 @@ func replayAuditDetails(release bool, audit *model.RunReplayAudit) map[string]an
 		result["replay_runs_checked"] = audit.RunsChecked
 		result["replay_steps_checked"] = audit.StepsChecked
 		result["publication_started"] = audit.PublicationStarted
+		if audit.TagMoved != nil {
+			result["tag_moved"] = *audit.TagMoved
+		}
 	}
 	return result
 }
