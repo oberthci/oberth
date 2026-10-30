@@ -13,13 +13,16 @@ import (
 	"github.com/oberthci/oberth/internal/store"
 )
 
-type identityObservationFailure struct{ cause error }
+type identityObservationFailure struct {
+	cause error
+	hard  bool
+}
 
 func (failure *identityObservationFailure) Error() string {
 	return "deliver executor identity failed (stage=exec reason=deadline attempts=3)"
 }
-func (failure *identityObservationFailure) Unwrap() error       { return failure.cause }
-func (*identityObservationFailure) InfrastructureFailure() bool { return true }
+func (failure *identityObservationFailure) Unwrap() error               { return failure.cause }
+func (failure *identityObservationFailure) InfrastructureFailure() bool { return !failure.hard }
 
 func TestExecutorIdentityFailureIsInfrastructureAndRunRetryApplies(t *testing.T) {
 	fixture := newControlFixture(t)
@@ -80,5 +83,21 @@ func TestExecutorIdentityFailureKeepsTerminalResultAndDeletionSafety(t *testing.
 				t.Fatal("unsafe or actual test failure became retryable", err)
 			}
 		})
+	}
+}
+
+func TestExecutorIdentityValidationFailureStaysJob(t *testing.T) {
+	fixture := newRecoveryFixture(t)
+	run := fixture.enqueueAndClaim(t, "feature/invalid-identity", strings.Repeat("c", 40))
+	jobs := &recoveryJobs{waitErr: &identityObservationFailure{cause: errors.New("invalid identity target"), hard: true}, terminalErr: ErrJobNotTerminal}
+	if err := fixture.scheduler(t, jobs).executeAndCleanup(t.Context(), run); err != nil {
+		t.Fatal(err)
+	}
+	failed, err := fixture.store.Run(t.Context(), run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if failed.Status != model.RunFailed || failed.Phase != "job" || len(jobs.deleted) != 1 {
+		t.Fatalf("validation failure was labelled infrastructure or left alive: %+v", failed)
 	}
 }

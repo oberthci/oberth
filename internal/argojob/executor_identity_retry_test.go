@@ -2,6 +2,7 @@ package argojob
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"io"
 	"os"
@@ -251,18 +252,33 @@ func TestExecutorIdentityDeliveryCommandIsAtomicAndReplaySafe(t *testing.T) {
 		cmd.Dir, cmd.Stdin = dir, strings.NewReader(payload)
 		return cmd.Run()
 	}
-	incomplete := t.TempDir()
-	if err := invoke(incomplete, "incomplete-token"); err == nil {
-		t.Fatal("truncated delivery succeeded")
-	}
-	if _, err := os.Stat(filepath.Join(incomplete, "token")); !errors.Is(err, os.ErrNotExist) {
-		t.Fatal("partial delivery published the marker")
+	for name, payload := range map[string]string{
+		"token-cut":     "incomplete-token",
+		"namespace-cut": "token\nnamespace",
+		"ca-cut":        "token\nnamespace\ncHVibGlj",
+		"ca-empty-eof":  "token\nnamespace\n",
+		"ca-empty-line": "token\nnamespace\n\n",
+		"ca-invalid":    "token\nnamespace\n!invalid!\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			incomplete := t.TempDir()
+			if err := invoke(incomplete, payload); err == nil {
+				t.Fatal("incomplete/invalid delivery succeeded")
+			}
+			for _, name := range []string{"token", "ca.crt", "namespace"} {
+				if _, err := os.Stat(filepath.Join(incomplete, name)); !errors.Is(err, os.ErrNotExist) {
+					t.Fatal("partial delivery published", name, err)
+				}
+			}
+		})
 	}
 	dir := t.TempDir()
 	var workers sync.WaitGroup
 	failures := make(chan error, 8)
 	for range 8 {
-		workers.Go(func() { failures <- invoke(dir, "first-token\nnamespace\npublic-ca") })
+		workers.Go(func() {
+			failures <- invoke(dir, "first-token\nnamespace\n"+base64.StdEncoding.EncodeToString([]byte("public-ca"))+"\n")
+		})
 	}
 	workers.Wait()
 	close(failures)
@@ -271,7 +287,7 @@ func TestExecutorIdentityDeliveryCommandIsAtomicAndReplaySafe(t *testing.T) {
 			t.Fatal("concurrent retry failed", err)
 		}
 	}
-	if err := invoke(dir, "replacement-token\nother-namespace\nother-ca"); err != nil {
+	if err := invoke(dir, "replacement-token\nother-namespace\n"+base64.StdEncoding.EncodeToString([]byte("other-ca"))+"\n"); err != nil {
 		t.Fatal(err)
 	}
 	for name, want := range map[string]string{"token": "first-token", "namespace": "namespace", "ca.crt": "public-ca"} {
@@ -283,5 +299,35 @@ func TestExecutorIdentityDeliveryCommandIsAtomicAndReplaySafe(t *testing.T) {
 	stages, err := filepath.Glob(filepath.Join(dir, ".identity.*"))
 	if err != nil || len(stages) != 0 {
 		t.Fatal("staging files retained credentials", stages, err)
+	}
+}
+
+func TestExecutorIdentityClassificationRequiresTransportOrAPIEvidence(t *testing.T) {
+	for _, tc := range []struct {
+		stage string
+		cause error
+		infra bool
+	}{
+		{"pod_list", apierrors.NewTooManyRequests("busy", 1), true},
+		{"pod_read", context.DeadlineExceeded, true},
+		{"identity_pod", apierrors.NewServiceUnavailable("unavailable"), true},
+		{"token_request", apierrors.NewInternalError(errors.New("api failed")), true},
+		{"trust_anchor", io.EOF, true},
+		{"exec", io.ErrUnexpectedEOF, true},
+		{"retry_wait", context.DeadlineExceeded, true},
+		{"target_validation", io.EOF, false},
+		{"token_response", context.DeadlineExceeded, false},
+		{"trust_anchor_response", io.EOF, false},
+		{"launcher_provision", apierrors.NewServiceUnavailable("unavailable"), false},
+		{"identity_pod", errors.New("owner changed"), false},
+		{"exec", kexec.CodeExitError{Err: errors.New("shell exited"), Code: 137}, false},
+		{"exec", apierrors.NewForbidden(schema.GroupResource{Resource: "pods/exec"}, "step", errors.New("denied")), false},
+		{"exec", errors.New("unclassified local failure"), false},
+		{"pod_read", apierrors.NewNotFound(schema.GroupResource{Resource: "pods"}, "step"), false},
+	} {
+		failure := identityFailure(tc.stage, tc.cause).(*executorIdentityError)
+		if failure.InfrastructureFailure() != tc.infra {
+			t.Errorf("stage=%s reason=%s infrastructure=%t want %t", tc.stage, failure.reason, failure.InfrastructureFailure(), tc.infra)
+		}
 	}
 }

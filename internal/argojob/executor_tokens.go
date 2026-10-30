@@ -3,6 +3,7 @@ package argojob
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -173,7 +174,7 @@ func (controller *Controller) deliverExecutorTokens(ctx context.Context, wf *wfv
 		if ca.Data["ca.crt"] == "" {
 			return identityFailure("trust_anchor_response", errors.New("executor API trust anchor is empty"))
 		}
-		payload := []byte(token.Status.Token + "\n" + wf.Namespace + "\n" + ca.Data["ca.crt"])
+		payload := []byte(token.Status.Token + "\n" + wf.Namespace + "\n" + base64.StdEncoding.EncodeToString([]byte(ca.Data["ca.crt"])) + "\n")
 		err = controller.execExecutorIdentity(ctx, wf, pod, launcher, payload)
 		clear(payload)
 		if err != nil {

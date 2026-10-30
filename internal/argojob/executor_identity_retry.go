@@ -24,8 +24,10 @@ const executorIdentityAttemptTimeout = 20 * time.Second
 // Commit the token marker last, using a no-clobber hard link. Each concurrent
 // or timed-out attempt has private staging files. Retried execs use the SAME
 // payload; an ambiguous acknowledgement cannot replace a committed identity.
-// The pinned busybox image supplies mktemp, ln, mv and the POSIX shell.
-const executorIdentityDeliveryCommand = `set -eu; umask 077; cd /var/run/secrets/kubernetes.io/serviceaccount; test ! -f token || exit 0; stage=$(mktemp -d .identity.XXXXXX); trap 'rm -rf "$stage"' EXIT; IFS= read -r token; IFS= read -r namespace; cat > "$stage/ca.crt"; printf '%s' "$namespace" > "$stage/namespace"; printf '%s' "$token" > "$stage/token"; chmod 0444 "$stage/ca.crt" "$stage/namespace" "$stage/token"; mv "$stage/ca.crt" ca.crt; mv "$stage/namespace" namespace; ln "$stage/token" token 2>/dev/null || test -f token`
+// The CA is a nonempty base64 line terminated by a newline: EOF inside any
+// field must fail before publishing the marker. The pinned busybox image
+// supplies base64, mktemp, ln, mv and the POSIX shell.
+const executorIdentityDeliveryCommand = `set -eu; umask 077; cd /var/run/secrets/kubernetes.io/serviceaccount; test ! -f token || exit 0; stage=$(mktemp -d .identity.XXXXXX); trap 'rm -rf "$stage"' EXIT; IFS= read -r token; IFS= read -r namespace; IFS= read -r ca; test -n "$token"; test -n "$namespace"; test -n "$ca"; printf '%s' "$ca" | base64 -d > "$stage/ca.crt"; test -s "$stage/ca.crt"; printf '%s' "$namespace" > "$stage/namespace"; printf '%s' "$token" > "$stage/token"; chmod 0444 "$stage/ca.crt" "$stage/namespace" "$stage/token"; mv "$stage/ca.crt" ca.crt; mv "$stage/namespace" namespace; ln "$stage/token" token 2>/dev/null || test -f token`
 
 // The cause is available to errors.Is/As but is never interpolated into public
 // errors or logs: transport errors can contain arbitrary server response text.
@@ -39,8 +41,17 @@ type executorIdentityError struct {
 func (err *executorIdentityError) Error() string {
 	return fmt.Sprintf("deliver executor identity failed (stage=%s reason=%s attempts=%d)", err.stage, err.reason, err.attempts)
 }
-func (err *executorIdentityError) Unwrap() error           { return err.cause }
-func (*executorIdentityError) InfrastructureFailure() bool { return true }
+func (err *executorIdentityError) Unwrap() error { return err.cause }
+func (err *executorIdentityError) InfrastructureFailure() bool {
+	switch err.stage {
+	case "pod_list", "pod_read", "identity_pod", "token_request", "trust_anchor", "exec", "retry_wait":
+		switch err.reason {
+		case "deadline", "transport_timeout", "transport_eof", "transport", "throttled", "api_timeout", "api_unavailable", "api_internal":
+			return true
+		}
+	}
+	return false
+}
 
 func identityFailure(stage string, err error) error {
 	reason := executorIdentityErrorClass(err)
@@ -50,9 +61,7 @@ func identityFailure(stage string, err error) error {
 	if stage == "token_response" || stage == "trust_anchor_response" {
 		reason = "invalid_response"
 	}
-	if reason == "transport" && stage != "exec" {
-		reason = "control_plane"
-	}
+
 	return &executorIdentityError{stage: stage, reason: reason, attempts: 1, cause: err}
 }
 
@@ -74,6 +83,8 @@ func executorIdentityErrorClass(err error) string {
 		return "api_timeout"
 	case apierrors.IsServiceUnavailable(err):
 		return "api_unavailable"
+	case apierrors.IsInternalError(err):
+		return "api_internal"
 	case apierrors.IsNotFound(err):
 		return "not_found"
 	case apierrors.IsInvalid(err) || apierrors.IsBadRequest(err):
@@ -84,8 +95,10 @@ func executorIdentityErrorClass(err error) string {
 		return "transport_timeout"
 	case errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF):
 		return "transport_eof"
-	default:
+	case errors.As(err, &network):
 		return "transport"
+	default:
+		return "unknown"
 	}
 }
 
