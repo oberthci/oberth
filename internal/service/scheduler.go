@@ -101,6 +101,9 @@ type Scheduler struct {
 	createWake         chan struct{}
 	createNow          func() time.Time // test-only reconciliation clock
 	createTicks        <-chan time.Time // test-only reconciliation ticks
+	// onDispatchIdle, when set (tests only), observes the completed dispatch
+	// iteration immediately before its idle select.
+	onDispatchIdle func()
 }
 
 // PromotionRetrier re-promotes a promotion whose publication failed because
@@ -578,6 +581,9 @@ func (scheduler *Scheduler) Run(ctx context.Context) error {
 		scheduler.admission.mu.Lock()
 		scheduler.admission.grantLocked()
 		scheduler.admission.mu.Unlock()
+		if scheduler.onDispatchIdle != nil {
+			scheduler.onDispatchIdle()
+		}
 		select {
 		case <-ticks:
 		case <-ctx.Done():
