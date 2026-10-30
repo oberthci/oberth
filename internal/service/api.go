@@ -2644,6 +2644,9 @@ func (service *API) requireMutation(ctx context.Context) error {
 		return nil
 	}
 	if err := service.mutationGate(ctx); err != nil {
+		if errors.Is(err, store.ErrAuditVerificationBusy) {
+			return refuse(fmt.Errorf("%w: %w", ErrUnavailable, err), "transient audit verification contention; retry the request")
+		}
 		return fmt.Errorf("%w: audit integrity is unavailable: %w", ErrUnavailable, err)
 	}
 	return nil

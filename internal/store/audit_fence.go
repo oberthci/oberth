@@ -10,10 +10,18 @@ import (
 	"github.com/oberthci/oberth/internal/model"
 )
 
-// ErrAuditStateChanged is a retryable refusal, never a successful gate.
-// Local re-verification is bounded; external verification runs only once.
+// ErrAuditStateChanged refuses a stale verification, never granting a gate.
+// Only ErrAuditVerificationBusy permits an automatic fresh attempt; changed
+// proofs, replaced files and regressed heads must remain fail-closed.
 var ErrAuditStateChanged = errors.New("store: audit state changed during verification; retry")
 
+// ErrAuditVerificationBusy classifies concurrent commits as transient. Callers
+// must repeat ALL verification, including external proof checks, before allowing
+// a mutation. It also matches ErrAuditStateChanged for existing callers.
+var ErrAuditVerificationBusy = fmt.Errorf("%w: transient verification contention", ErrAuditStateChanged)
+
+// These are cheap local retries within one external proof. The Manager waits
+// and retries fresh proofs under its overall gate deadline when they run out.
 const auditFenceExtraRounds = 2
 
 // Keep this exact reader connection across every snapshot and fence: only its
@@ -76,7 +84,7 @@ func (s *Store) verifyAuditWithFence(
 			return head, anchor, nil
 		}
 		if round == auditFenceExtraRounds {
-			return model.AuditHead{}, model.AuditAnchor{}, fmt.Errorf("%w: local re-verification rounds exhausted", ErrAuditStateChanged)
+			return model.AuditHead{}, model.AuditAnchor{}, fmt.Errorf("%w: local re-verification rounds exhausted", ErrAuditVerificationBusy)
 		}
 		// The writer fence has ended. Re-verify protected state on a new read
 		// snapshot, using the same reader and a fresh counter. The local gate
@@ -87,8 +95,11 @@ func (s *Store) verifyAuditWithFence(
 		if err != nil {
 			return model.AuditHead{}, model.AuditAnchor{}, err
 		}
-		if nextHead.ID != head.ID || !bytes.Equal(nextHead.SHA256, head.SHA256) || !sameVerifiedAuditAnchor(nextAnchor, anchor) {
+		if !sameVerifiedAuditAnchor(nextAnchor, anchor) {
 			return model.AuditHead{}, model.AuditAnchor{}, fmt.Errorf("%w: re-verified head or checkpoint differs from external proof", ErrAuditStateChanged)
+		}
+		if nextHead.ID != head.ID || !bytes.Equal(nextHead.SHA256, head.SHA256) {
+			return model.AuditHead{}, model.AuditAnchor{}, auditFenceHeadChanged(head, nextHead)
 		}
 		version = nextVersion
 	}
@@ -132,7 +143,7 @@ func (s *Store) auditVerificationFence(ctx context.Context, conn *sql.Conn, head
 		return false, err
 	}
 	if current.ID != head.ID || !bytes.Equal(current.SHA256, head.SHA256) {
-		return false, fmt.Errorf("%w: verified head %d differs from current head %d", ErrAuditStateChanged, head.ID, current.ID)
+		return false, auditFenceHeadChanged(head, current)
 	}
 	currentVersion, err := auditDataVersion(ctx, conn)
 	if err != nil {
@@ -145,6 +156,14 @@ func (s *Store) auditVerificationFence(ctx context.Context, conn *sql.Conn, head
 		return false, fmt.Errorf("commit audit verification fence: %w", err)
 	}
 	return false, nil
+}
+
+func auditFenceHeadChanged(verified, current model.AuditHead) error {
+	kind := ErrAuditStateChanged
+	if current.ID > verified.ID {
+		kind = ErrAuditVerificationBusy
+	}
+	return fmt.Errorf("%w: verified head %d differs from current head %d", kind, verified.ID, current.ID)
 }
 
 // withAuditReadSnapshot keeps full-chain CPU work off the primary connection

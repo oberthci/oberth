@@ -277,6 +277,33 @@ func (manager *Manager) AllowMutation(ctx context.Context) error {
 		return fmt.Errorf("audit anchor: mutation gate refresh wait: %w", err)
 	}
 	defer manager.refreshMu.Unlock()
+	delay := 10 * time.Millisecond
+	var contention error
+	for {
+		err := manager.allowMutation(ctx)
+		if !errors.Is(err, store.ErrAuditVerificationBusy) {
+			if contention != nil && ctx.Err() != nil && errors.Is(err, ctx.Err()) {
+				return errors.Join(contention, err)
+			}
+			return err
+		}
+		contention = err
+		// No SQLite transaction or reader survives the attempt. The refresh
+		// lock serializes gates while ordinary application writers can finish.
+		// Rebuild local snapshots AND external proofs on every fresh attempt;
+		// a changed head never inherits permission from a stale proof.
+		timer := time.NewTimer(delay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return errors.Join(contention, ctx.Err())
+		case <-timer.C:
+		}
+		delay = min(delay*2, 250*time.Millisecond)
+	}
+}
+
+func (manager *Manager) allowMutation(ctx context.Context) error {
 	if err := manager.Ready(ctx); err != nil {
 		return err
 	}

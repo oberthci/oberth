@@ -2,7 +2,6 @@ package auditanchor
 
 import (
 	"context"
-	"errors"
 	"path/filepath"
 	"sync/atomic"
 	"testing"
@@ -58,6 +57,7 @@ func TestSlowKubernetesReconcileDoesNotBlockWriter(t *testing.T) {
 				}
 				return false, nil, nil
 			})
+			reconcilesBefore := continuity.reconcileCalls
 			gateDone := make(chan error, 1)
 			go func() { gateDone <- manager.AllowMutation(t.Context()) }()
 			select {
@@ -78,10 +78,10 @@ func TestSlowKubernetesReconcileDoesNotBlockWriter(t *testing.T) {
 			if writeErr != nil {
 				t.Fatalf("writer blocked by Kubernetes: %v", writeErr)
 			}
-			if !errors.Is(gateErr, store.ErrAuditStateChanged) {
-				t.Fatalf("head moved during Kubernetes but gate returned %v", gateErr)
+			if gateErr != nil || continuity.reconcileCalls != reconcilesBefore+2 {
+				t.Fatalf("head moved during Kubernetes: gate=%v, fresh proof checks=%d, want 2", gateErr, continuity.reconcileCalls-reconcilesBefore)
 			}
-			t.Logf("%s writer committed during blocked Kubernetes GET in %s; gate refused stale proof", writer, elapsed)
+			t.Logf("%s writer committed during blocked Kubernetes GET in %s; gate retried with fresh proof", writer, elapsed)
 			if err := manager.AllowMutation(t.Context()); err != nil {
 				t.Fatalf("fresh retry failed: %v", err)
 			}

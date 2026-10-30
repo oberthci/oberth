@@ -22,7 +22,7 @@ func TestAuditFenceRejectsMovedHeadAndAllowsFreshRetry(t *testing.T) {
 		_, err := s.AppendAuditAction(t.Context(), model.AuditActionSpec{Actor: "test", Action: "head.move", ResourceType: "test"})
 		return err
 	})
-	if !errors.Is(err, ErrAuditStateChanged) || calls != 1 {
+	if !errors.Is(err, ErrAuditVerificationBusy) || calls != 1 {
 		t.Fatalf("moved-head gate = %v, callbacks=%d", err, calls)
 	}
 	head, _, err := s.VerifyAuditMutationStateUnanchored(t.Context(), nil, nil, acceptAuditMutationState)
@@ -75,7 +75,7 @@ func TestAuditFenceReverifiesChangesWithUnchangedHead(t *testing.T) {
 					t.Fatalf("prefix not rejected by re-verification: %v", err)
 				}
 			case "receipt":
-				if !errors.Is(err, ErrAuditStateChanged) || !strings.Contains(err.Error(), "checkpoint differs") {
+				if !errors.Is(err, ErrAuditStateChanged) || errors.Is(err, ErrAuditVerificationBusy) || !strings.Contains(err.Error(), "checkpoint differs") {
 					t.Fatalf("changed external proof accepted: %v", err)
 				}
 			default:

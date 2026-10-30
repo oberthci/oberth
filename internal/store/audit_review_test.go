@@ -111,7 +111,7 @@ func TestAuditFenceBoundsLocalReverificationWithoutRepeatingExternalIO(t *testin
 		_, err = s.db.ExecContext(t.Context(), `UPDATE gate_progress SET value=value+1`)
 		return head, anchor, err
 	}, func(model.AuditHead, model.AuditAnchor) error { external++; return nil })
-	if !errors.Is(err, ErrAuditStateChanged) || !strings.Contains(err.Error(), "exhausted") || snapshots != 3 || external != 1 {
+	if !errors.Is(err, ErrAuditVerificationBusy) || !errors.Is(err, ErrAuditStateChanged) || !strings.Contains(err.Error(), "exhausted") || snapshots != 3 || external != 1 {
 		t.Fatalf("err=%v, snapshots=%d, external=%d", err, snapshots, external)
 	}
 }
