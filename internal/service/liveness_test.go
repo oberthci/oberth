@@ -34,10 +34,14 @@ func (store *stalledClaimStore) ClaimNextRun(ctx context.Context) (model.Run, er
 func TestSchedulerLivenessDetectsStalledLocalDispatch(t *testing.T) {
 	fixture := newRecoveryFixture(t)
 	scheduler := fixture.scheduler(t, &recoveryJobs{})
+	// Boundary assertions must not spend their one-second virtual margin on
+	// wall-clock scheduling delay between the worker signal and the check.
+	now := time.Now()
+	scheduler.dispatchProgress.Now = func() time.Time { return now }
 	stalled := &stalledClaimStore{SchedulerStore: scheduler.store, entered: make(chan struct{}), release: make(chan struct{})}
 	scheduler.store = stalled
 	// This wrapper omits optional HeadWaitStore, so this tests dispatch alone.
-	if err := scheduler.liveAt(time.Now().Add(24 * time.Hour)); err != nil {
+	if err := scheduler.liveAt(now.Add(24 * time.Hour)); err != nil {
 		t.Fatal("startup recovery is not a local wedge", err)
 	}
 	ctx, cancel := context.WithCancel(t.Context())
@@ -45,10 +49,10 @@ func TestSchedulerLivenessDetectsStalledLocalDispatch(t *testing.T) {
 	go func() { done <- scheduler.Run(ctx) }()
 	defer func() { cancel(); awaitLivenessDone(t, done) }()
 	awaitLivenessSignal(t, stalled.entered)
-	if err := scheduler.liveAt(time.Now().Add(liveness.MaxStall - time.Second)); err != nil {
+	if err := scheduler.liveAt(now.Add(liveness.MaxStall - time.Second)); err != nil {
 		t.Fatal("short queue wait killed liveness", err)
 	}
-	if err := scheduler.liveAt(time.Now().Add(liveness.MaxStall + time.Second)); !errors.Is(err, liveness.ErrStalled) || !strings.HasPrefix(err.Error(), "scheduler:") {
+	if err := scheduler.liveAt(now.Add(liveness.MaxStall + time.Second)); !errors.Is(err, liveness.ErrStalled) || !strings.HasPrefix(err.Error(), "scheduler:") {
 		t.Fatalf("stalled dispatch: %v", err)
 	}
 	close(stalled.release)
@@ -361,17 +365,18 @@ func TestLivenessMovedPromotionHandoffStripsDispatchCapability(t *testing.T) {
 
 type idleLivenessStore struct {
 	SchedulerStore
-	now    func() time.Time
-	claims chan time.Time
+	claims atomic.Int64
 }
 
 func (store *idleLivenessStore) ClaimNextRun(ctx context.Context) (model.Run, error) {
 	run, err := store.SchedulerStore.ClaimNextRun(ctx)
-	select {
-	case store.claims <- store.now():
-	case <-ctx.Done():
-	}
+	store.claims.Add(1)
 	return run, err
+}
+
+type idleLivenessPoint struct {
+	claims int64
+	resume chan struct{}
 }
 
 func TestSchedulerLivenessIdleRunStaysLiveAcrossVirtualHour(t *testing.T) {
@@ -383,37 +388,75 @@ func TestSchedulerLivenessIdleRunStaysLiveAcrossVirtualHour(t *testing.T) {
 	scheduler.dispatchProgress.Now = clock
 	ticks := make(chan time.Time)
 	scheduler.dispatchTicks = ticks
-	idle := &idleLivenessStore{SchedulerStore: scheduler.store, now: clock, claims: make(chan time.Time, 64)}
+	idle := &idleLivenessStore{SchedulerStore: scheduler.store}
 	scheduler.store = idle // omit optional head-persistence worker to isolate dispatch
 	ctx, cancel := context.WithCancel(t.Context())
+	points := make(chan idleLivenessPoint)
+	scheduler.onDispatchIdle = func() {
+		point := idleLivenessPoint{claims: idle.claims.Load(), resume: make(chan struct{})}
+		select {
+		case points <- point:
+		case <-ctx.Done():
+			return
+		}
+		// Keep virtual time stable throughout the entire dispatch iteration. A
+		// claim-return timestamp alone can belong to a cycle whose heartbeat ran
+		// before the test advanced time. Acknowledge the actual idle boundary.
+		select {
+		case <-point.resume:
+		case <-ctx.Done():
+		}
+	}
 	done := make(chan error, 1)
 	go func() { done <- scheduler.Run(ctx) }()
 	defer func() { cancel(); awaitLivenessDone(t, done) }()
-	for step := 0; step <= 10; step++ {
-		want := clock()
-		if step > 0 {
-			select {
-			case ticks <- want:
-			case <-time.After(testStartTimeout(5 * time.Second)):
-				t.Fatal("idle scheduler never polled")
-			}
+	nextPoint := func() idleLivenessPoint {
+		select {
+		case point := <-points:
+			return point
+		case <-time.After(testStartTimeout(5 * time.Second)):
+			t.Fatal("scheduler did not finish its idle iteration")
+			return idleLivenessPoint{}
 		}
-		for {
-			select {
-			case got := <-idle.claims:
-				if !got.Equal(want) {
-					continue
-				}
-			case <-time.After(testStartTimeout(5 * time.Second)):
-				t.Fatal("idle tick did not make an actual queue claim")
-			}
-			break
+	}
+	var previousClaims int64
+	checkPoint := func(point idleLivenessPoint) {
+		if point.claims <= previousClaims {
+			t.Fatal("idle iteration did not make an actual queue claim")
 		}
+		previousClaims = point.claims
 		if err := scheduler.Live(); err != nil {
 			t.Fatalf("idle after %s: %v", time.Duration(elapsed.Load()), err)
 		}
-		if step < 10 {
-			elapsed.Add(int64(6 * time.Minute))
+	}
+	point := nextPoint()
+	for step := 0; step <= 10; step++ {
+		checkPoint(point)
+		if step == 10 {
+			close(point.resume)
+			break
 		}
+		// The scheduler is parked at its observed idle boundary, not midway
+		// through DB work, when the test advances the clock by more than MaxStall.
+		elapsed.Add(int64(6 * time.Minute))
+		want := clock()
+		close(point.resume)
+		deadline := time.NewTimer(testStartTimeout(5 * time.Second))
+		sent := false
+		for !sent {
+			select {
+			case ticks <- want:
+				sent = true
+			case extra := <-points:
+				// Startup also queues a wake. Let any such completed iteration pass
+				// without moving time again, so it cannot deadlock the tick handshake.
+				checkPoint(extra)
+				close(extra.resume)
+			case <-deadline.C:
+				t.Fatal("idle scheduler never polled")
+			}
+		}
+		deadline.Stop()
+		point = nextPoint()
 	}
 }

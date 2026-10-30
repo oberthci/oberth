@@ -96,6 +96,9 @@ type Scheduler struct {
 	// finished startup recovery and is about to enter its dispatch loop.
 	onStartupRecovered func()
 	dispatchTicks      <-chan time.Time // test-only idle polling clock
+	// onDispatchIdle, when set (tests only), observes the completed dispatch
+	// iteration immediately before its idle select.
+	onDispatchIdle func()
 }
 
 // PromotionRetrier re-promotes a promotion whose publication failed because
@@ -547,6 +550,9 @@ func (scheduler *Scheduler) Run(ctx context.Context) error {
 		scheduler.admission.mu.Lock()
 		scheduler.admission.grantLocked()
 		scheduler.admission.mu.Unlock()
+		if scheduler.onDispatchIdle != nil {
+			scheduler.onDispatchIdle()
+		}
 		select {
 		case <-ticks:
 		case <-ctx.Done():
