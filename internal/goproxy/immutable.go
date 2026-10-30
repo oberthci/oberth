@@ -60,9 +60,12 @@ func (h *Handler) WithArtifactCache(root string) (*Handler, error) {
 	if root == "" {
 		return nil, errors.New("module artifact cache root is required")
 	}
-	for _, dir := range []string{"objects", "versions"} {
+	for _, dir := range []string{"", "objects", "versions", "revoked"} {
 		if err := os.MkdirAll(filepath.Join(root, dir), 0700); err != nil {
 			return nil, fmt.Errorf("initialize module artifact cache: %w", err)
+		}
+		if err := os.Chmod(filepath.Join(root, dir), 0700); err != nil { //nolint:gosec // Directories require owner execute/search permission.
+			return nil, fmt.Errorf("secure module artifact cache: %w", err)
 		}
 	}
 	// Persist newly created directory entries as well as their later contents.
@@ -93,7 +96,12 @@ func validArtifactDigest(value string) bool {
 }
 
 func (c *artifactCache) lookup(repository, modulePath, version string) (*artifactVersion, error) {
-	file, err := os.Open(c.versionPath(artifactKey(repository, modulePath, version))) //nolint:gosec // Digest-only path under the private cache root.
+	return c.lookupStage(repository, modulePath, version, "")
+}
+
+// Zip publication is separate so metadata never depends on tree extraction.
+func (c *artifactCache) lookupStage(repository, modulePath, version, stage string) (*artifactVersion, error) {
+	file, err := os.Open(c.versionPath(artifactKey(repository, modulePath, version) + stage)) //nolint:gosec // Digest-only path under the private cache root.
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil
 	}
@@ -106,10 +114,19 @@ func (c *artifactCache) lookup(repository, modulePath, version string) (*artifac
 		return nil, err
 	}
 	var entry artifactVersion
-	if len(data) > 8192 || json.Unmarshal(data, &entry) != nil || entry.Format != 1 || entry.Repository != repository || entry.Module != modulePath || entry.Version != version || entry.Source == "" || len(entry.Objects) != 3 {
+	if len(data) > 8192 || json.Unmarshal(data, &entry) != nil || entry.Format != 1 || entry.Repository != repository || entry.Module != modulePath || entry.Version != version || entry.Source == "" {
 		return nil, errors.New("invalid immutable module manifest")
 	}
-	for _, ext := range []string{".info", ".mod", ".zip"} {
+	extensions := []string{".info", ".mod"}
+	if stage == ".zip" {
+		extensions = []string{".zip"}
+	} else if len(entry.Objects) == 3 {
+		extensions = append(extensions, ".zip")
+	} // R1 manifests remain readable.
+	if len(entry.Objects) != len(extensions) {
+		return nil, errors.New("invalid immutable module manifest objects")
+	}
+	for _, ext := range extensions {
 		object, ok := entry.Objects[ext]
 		if !ok || !validArtifactDigest(object.SHA256) || object.Size < 0 || object.Size > 500<<20 {
 			return nil, errors.New("invalid immutable module object")
@@ -118,75 +135,88 @@ func (c *artifactCache) lookup(repository, modulePath, version string) (*artifac
 	return &entry, nil
 }
 
-func (c *artifactCache) get(ctx context.Context, repository, modulePath, version string, build func(context.Context) (string, map[string][]byte, error)) (*artifactVersion, error) {
+// Each waiter owns only its wait. Shared work has a separate, bounded lifetime,
+// including build-slot admission; disconnecting the first client cannot abort it.
+func (c *artifactCache) get(ctx context.Context, repository, modulePath, version, stage string, budget time.Duration, build func(context.Context) (string, map[string][]byte, error)) (*artifactVersion, error) {
 	if ctx.Err() != nil {
 		return nil, backendBuildError()
 	}
-	entry, err := c.lookup(repository, modulePath, version)
+	entry, err := c.lookupStage(repository, modulePath, version, stage)
 	if err != nil || entry != nil {
 		return entry, err
 	}
-	key := artifactKey(repository, modulePath, version)
+	key := artifactKey(repository, modulePath, version) + stage
 	c.mu.Lock()
-	if flight := c.flights[key]; flight != nil {
-		c.mu.Unlock()
-		select {
-		case <-ctx.Done():
-			return nil, backendBuildError()
-		case <-flight.done:
-			return flight.version, flight.err
-		}
+	flight := c.flights[key]
+	if flight == nil {
+		flight = &artifactFlight{done: make(chan struct{})}
+		c.flights[key] = flight
+		workCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), budget)
+		go func() {
+			defer cancel()
+			entry, err := c.fill(workCtx, repository, modulePath, version, stage, build)
+			c.mu.Lock()
+			flight.version, flight.err = entry, err
+			delete(c.flights, key)
+			close(flight.done)
+			c.mu.Unlock()
+		}()
 	}
-	flight := &artifactFlight{done: make(chan struct{})}
-	c.flights[key] = flight
 	c.mu.Unlock()
-	defer func() {
-		c.mu.Lock()
-		if flight.version == nil && flight.err == nil {
-			flight.err = errors.New("module artifact generation aborted")
-		}
-		delete(c.flights, key)
-		close(flight.done)
-		c.mu.Unlock()
-	}()
+	select {
+	case <-ctx.Done():
+		return nil, backendBuildError()
+	case <-flight.done:
+		return flight.version, flight.err
+	}
+}
+
+func (c *artifactCache) fill(ctx context.Context, repository, modulePath, version, stage string, build func(context.Context) (string, map[string][]byte, error)) (*artifactVersion, error) {
 	select {
 	case c.builds <- struct{}{}:
 		defer func() { <-c.builds }()
 	case <-ctx.Done():
-		flight.err = backendBuildError()
-		return nil, flight.err
+		return nil, backendBuildError()
 	}
-	// Another process may have committed while this request waited for a slot.
-	entry, err = c.lookup(repository, modulePath, version)
-	if err == nil && entry == nil {
-		var source string
-		var objects map[string][]byte
-		source, objects, err = build(ctx)
-		if err == nil {
-			entry = &artifactVersion{Format: 1, Repository: repository, Module: modulePath, Version: version, Source: source, Objects: make(map[string]artifactObject)}
-			for ext, data := range objects {
-				digest := sha256.Sum256(data)
-				object := artifactObject{SHA256: hex.EncodeToString(digest[:]), Size: int64(len(data))}
-				if object.Size > 500<<20 {
-					err = errors.New("immutable module object exceeds limit")
-					break
-				}
-				if err = publishArtifact(ctx, c.objectPath(object.SHA256), data); err != nil {
-					break
-				}
-				entry.Objects[ext] = object
-			}
-			if err == nil {
-				var manifest []byte
-				manifest, err = json.Marshal(entry)
-				if err == nil {
-					err = publishArtifact(ctx, c.versionPath(key), manifest)
-				}
-			}
+	// Another process may have published while this fill waited for a slot.
+	entry, err := c.lookupStage(repository, modulePath, version, stage)
+	if err != nil || entry != nil {
+		return entry, err
+	}
+	source, objects, err := build(ctx)
+	if err != nil {
+		return nil, err
+	}
+	entry = &artifactVersion{Format: 1, Repository: repository, Module: modulePath, Version: version, Source: source, Objects: make(map[string]artifactObject)}
+	for ext, data := range objects {
+		digest := sha256.Sum256(data)
+		object := artifactObject{SHA256: hex.EncodeToString(digest[:]), Size: int64(len(data))}
+		if object.Size > 500<<20 {
+			return nil, errors.New("immutable module object exceeds limit")
 		}
+		if err := publishArtifact(ctx, c.objectPath(object.SHA256), data); err != nil {
+			return nil, err
+		}
+		entry.Objects[ext] = object
 	}
-	flight.version, flight.err = entry, err
+	manifest, err := json.Marshal(entry)
+	if err == nil {
+		err = publishArtifact(ctx, c.versionPath(artifactKey(repository, modulePath, version)+stage), manifest)
+	}
 	return entry, err
+}
+
+// A durable deny marker takes precedence over both warm and cold artifacts.
+// Stat failures fail closed; only a positively absent marker permits serving.
+func (c *artifactCache) revoked(repository, modulePath, version string) error {
+	_, err := os.Lstat(filepath.Join(c.root, "revoked", artifactKey(repository, modulePath, version))) //nolint:gosec // Coordinate strings enter paths only through a SHA-256 hex key.
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	return &proxyBuildError{class: "private_unavailable", status: http.StatusForbidden}
 }
 
 // Publish content and then its manifest using no-clobber links. Readers cannot
@@ -253,26 +283,35 @@ func syncArtifactDirectory(path string) error {
 func (h *Handler) serveImmutable(w http.ResponseWriter, r *http.Request, repository, modulePath, version, ext string) {
 	ctx, cancel := context.WithTimeout(r.Context(), 2*h.backendBudget+time.Second)
 	defer cancel()
-	entry, err := h.artifacts.get(ctx, repository, modulePath, version, func(ctx context.Context) (string, map[string][]byte, error) {
-		var source string
-		var data map[string][]byte
-		var err error
-		for attempt := 0; attempt < 2; attempt++ {
-			attemptCtx, stop := context.WithTimeout(ctx, h.backendBudget)
-			source, data, err = h.buildVersion(attemptCtx, repository, modulePath, version)
-			stop()
-			var failure *proxyBuildError
-			if err == nil || !errors.As(err, &failure) || failure.status != http.StatusServiceUnavailable || attempt == 1 {
-				break
-			}
-			select {
-			case <-ctx.Done():
-				return "", nil, backendBuildError()
-			case <-time.After(250 * time.Millisecond):
+	if err := h.artifacts.revoked(repository, modulePath, version); err != nil {
+		writeBuildError(w, err)
+		return
+	}
+	budget := 2*h.backendBudget + time.Second
+	entry, err := h.artifacts.get(ctx, repository, modulePath, version, "", budget, func(work context.Context) (string, map[string][]byte, error) {
+		return h.buildWithRetry(work, func(attempt context.Context) (string, map[string][]byte, error) {
+			return h.buildVersion(attempt, repository, modulePath, version)
+		})
+	})
+	if err == nil && ext == ".zip" {
+		if _, exists := entry.Objects[".zip"]; !exists {
+			source := entry.Source
+			var zipEntry *artifactVersion
+			zipEntry, err = h.artifacts.get(ctx, repository, modulePath, version, ".zip", budget, func(work context.Context) (string, map[string][]byte, error) {
+				return h.buildWithRetry(work, func(attempt context.Context) (string, map[string][]byte, error) {
+					data, err := h.buildZip(attempt, repository, modulePath, version, source)
+					return source, map[string][]byte{".zip": data}, err
+				})
+			})
+			if err == nil {
+				if zipEntry.Source != source {
+					err = errors.New("immutable module zip source conflict")
+				} else {
+					entry = zipEntry
+				}
 			}
 		}
-		return source, data, err
-	})
+	}
 	if err != nil {
 		writeBuildError(w, err)
 		return
@@ -284,6 +323,8 @@ func (h *Handler) serveImmutable(w http.ResponseWriter, r *http.Request, reposit
 		return
 	}
 	defer func() { _ = file.Close() }()
+	// Verify before emitting headers, then stream from the same descriptor. The
+	// second pass usually reads page cache, and never serves unchecked bytes.
 	hash := sha256.New()
 	n, err := io.Copy(hash, io.LimitReader(proxyContextReader{ctx, file}, object.Size+1))
 	if err != nil || n != object.Size || hex.EncodeToString(hash.Sum(nil)) != object.SHA256 {
@@ -295,6 +336,10 @@ func (h *Handler) serveImmutable(w http.ResponseWriter, r *http.Request, reposit
 		return
 	}
 	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		writeBuildError(w, err)
+		return
+	}
+	if err := h.artifacts.revoked(repository, modulePath, version); err != nil {
 		writeBuildError(w, err)
 		return
 	}
@@ -324,15 +369,28 @@ func (h *Handler) buildVersion(ctx context.Context, repository, modulePath, vers
 	if err != nil {
 		return "", nil, backendBuildError()
 	}
-	archive, err := h.buildZip(ctx, repository, modulePath, version, source)
-	if err != nil {
-		return "", nil, err
-	}
 	info, err := json.Marshal(map[string]string{"Version": version, "Time": timestamp.UTC().Format(time.RFC3339)})
 	if err != nil {
 		return "", nil, err
 	}
-	return source, map[string][]byte{".info": append(info, '\n'), ".mod": mod, ".zip": archive}, nil
+	return source, map[string][]byte{".info": append(info, '\n'), ".mod": mod}, nil
+}
+
+func (h *Handler) buildWithRetry(ctx context.Context, build func(context.Context) (string, map[string][]byte, error)) (string, map[string][]byte, error) {
+	for attempt := 0; ; attempt++ {
+		attemptCtx, stop := context.WithTimeout(ctx, h.backendBudget)
+		source, data, err := build(attemptCtx)
+		stop()
+		var failure *proxyBuildError
+		if err == nil || !errors.As(err, &failure) || failure.status != http.StatusServiceUnavailable || attempt == 1 {
+			return source, data, err
+		}
+		select {
+		case <-ctx.Done():
+			return "", nil, backendBuildError()
+		case <-time.After(250 * time.Millisecond):
+		}
+	}
 }
 
 type proxyBuildError struct {

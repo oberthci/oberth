@@ -2448,10 +2448,10 @@ Private failures never return 404 or 410. The dedicated listener passes requests
 directly to the handler so a mux cannot redirect a malformed private path into
 another namespace. Canonical `.mod` and `.zip` bytes remain unchanged.
 
-**Immutable artifact cache:** the enabled server stores complete tagged-version
-bundles under `<data>/goproxy`. SHA-256-addressed `.info`, verbatim `.mod`, and
-canonical `.zip` objects are fsynced before an atomic, no-clobber version
-manifest is published. Keys include the mapped repository, module path and
+**Immutable artifact cache:** the enabled server stores tagged-version artifacts
+under `<data>/goproxy`. SHA-256-addressed `.info` and verbatim `.mod` publish as
+cheap metadata; canonical `.zip` is built lazily from the same pinned source and
+published separately. Objects are fsynced before atomic, no-clobber manifests. Keys include the mapped repository, module path and
 version. The cold fill verifies tag membership and pins one Git object for all
 representations; warm requests verify the cached object's size/digest and do
 no Git or catalog lookup. Cache hits still require the current handler's
@@ -2462,13 +2462,18 @@ remain live queries.
 
 At most two cold version fills execute per handler, with duplicate requests
 sharing one fill. Each fill gets two read-only attempts of at most 15 seconds
-with 250ms backoff, under a shared 31-second request context including admission
-waits. Git repository-lock and catalog waits honor that context; local filesystem
+with 250ms backoff, under a separate 31-second fill context including admission
+waits. Waiters have their own request deadlines and cannot cancel shared work.
+All repository-lock callers join one fair queue; deadline-aware module readers
+can leave it. Git repository-lock and catalog waits honor the fill context; local filesystem
 operations and Git process teardown retain their OS/cleanup behavior. Failed
 fills are not cached. Go does not automatically retry a terminal 503 or interpret
 `Retry-After` as a retry policy; these safe retries happen inside the proxy, not
 by replaying pipeline steps. Exhaustion is 503 with `Retry-After: 1`. The cache
-has no automatic expiry/GC and consumes server data volume space; see
+has no automatic expiry/GC and consumes server data volume space. Tag deletion
+does not revoke already pinned bytes; administrator-owned per-version markers
+under `revoked/` deny all explicit reads without Git, including after restart.
+The local `hack/goproxy-revoke.py` utility creates these durable markers; see
 [cache operations](docs/goproxy-availability.md#immutable-version-artifacts).
 
 **GOPROXY ordering:** `<mirror>,https://proxy.golang.org|direct`

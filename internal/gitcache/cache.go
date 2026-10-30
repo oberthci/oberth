@@ -851,9 +851,9 @@ func (c *Cache) qualifiedCachePath(upstream, org, repo string) string {
 // by the resolved cache path — never by the bare name — so every spelling of
 // one repository shares a lock and same-named repositories under different
 // upstreams do not contend or alias (issue #264).
-func (c *Cache) repoLock(cachePath string) *sync.Mutex {
-	value, _ := c.locks.LoadOrStore(cachePath, &sync.Mutex{})
-	return value.(*sync.Mutex)
+func (c *Cache) repoLock(cachePath string) *repositoryLock {
+	value, _ := c.locks.LoadOrStore(cachePath, newRepositoryLock())
+	return value.(*repositoryLock)
 }
 
 // receiveLock serializes complete receive lifecycles, including durable

@@ -166,3 +166,12 @@ public checksum verification. An enabled listener without a complete authority
 configuration is rejected. Existing deployments must carry their configured
 namespace through upgrades; no domain-name inference or permissive discovery
 fallback exists.
+
+Cached private module versions retain first-observed bytes after tag moves or
+deletion, including for clients without go.sum. Tag deletion or Go retraction
+alone is not revocation. Administrators can durably deny one mapped
+(repository, module, version) with `hack/goproxy-revoke.py` against the server
+volume; its `revoked/` marker overrides warm and cold reads with 403 without
+consulting Git. Preserve these policy markers during cache maintenance. Already
+streaming responses and client caches cannot be recalled; see
+[revocation operations](goproxy-availability.md#tag-deletion-and-per-version-revocation).

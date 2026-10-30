@@ -7,30 +7,14 @@ import (
 	"time"
 )
 
-// Proxy reads must be able to leave the repository queue at their deadline.
-// Other Git operations retain their existing serialization; no detached waiter
-// goroutine can take this mutex after its HTTP request has returned.
+// All repository operations join the same fair queue. Context-aware readers
+// can leave it without a detached goroutine acquiring the lock later.
 func (c *Cache) lockModuleRepository(ctx context.Context, path string) (func(), error) {
 	lock := c.repoLock(path)
-	ticker := time.NewTicker(10 * time.Millisecond)
-	defer ticker.Stop()
-	for {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		if lock.TryLock() {
-			if err := ctx.Err(); err != nil {
-				lock.Unlock()
-				return nil, err
-			}
-			return lock.Unlock, nil
-		}
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case <-ticker.C:
-		}
+	if err := lock.LockContext(ctx); err != nil {
+		return nil, err
 	}
+	return lock.Unlock, nil
 }
 
 // ModuleTagSnapshot resolves an exact public tag and its published timestamp

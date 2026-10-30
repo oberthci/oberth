@@ -80,9 +80,13 @@ recompressed the tree every time. These operations shared the repository mutex
 with other Git work. A backend failure surfaced as a generic 502, including
 failures caused by a slow or canceled local command.
 
-The first explicit canonical tagged-version request builds `.info`, `.mod` and
-`.zip` together. It first confirms tag membership, resolves one immutable Git
-object and timestamp, and uses that object for both file and archive reads.
+The first explicit canonical tagged-version request builds cheap `.info` and
+`.mod` metadata. It confirms tag membership and pins one immutable Git object
+and timestamp. Only a `.zip` request archives and compresses that pinned object,
+then publishes a separate no-clobber zip manifest with the same source identity.
+Metadata requests never need a zip or consume archive/extraction IO; an invalid
+zip cannot break module-graph metadata resolution. Existing complete manifests
+remain readable.
 `.mod` stays byte-for-byte verbatim; `.zip` uses the existing canonical
 `golang.org/x/mod/zip` conversion and filtering. A changing tag cannot mix
 representations during a fill. Pseudo-versions and branch names remain refused.
@@ -97,9 +101,15 @@ cannot determine whether a newer tag exists while Git is unavailable.
 
 Concurrent requests for one missing version share a fill; at most two fills run
 at once per handler. Warm reads bypass those slots. Read-only backend work has
-two attempts, a 15-second context per attempt and 250ms backoff under a shared
-31-second request context, including waiting. Catalog resolution and repository
-lock waits now inherit the request deadline. Disk syscalls and existing Git
+two attempts per stage, a 15-second context per attempt and 250ms backoff under
+a separate 31-second shared-fill deadline, including slot waiting. Each HTTP
+waiter has its own 31-second deadline; disconnecting or timing out the first
+waiter does not cancel work needed by other waiters. A fill may finish after its
+last waiter leaves, but is still bounded. Metadata and zip each have their own
+fill budget; the HTTP request deadline bounds waiting across both stages.
+Catalog resolution and repository lock waits honor the fill deadline. All Git
+repository-lock callers now share one fair queue, including ordinary operations;
+module readers can leave that queue at their deadline without polling. Disk syscalls and existing Git
 process-group cleanup are not made interruptible by that context. Backend
 exhaustion returns **503 with `Retry-After: 1` and `Cache-Control: no-store`**;
 failed fills are not negative-cached. Corrupt/contradictory cache data fails
@@ -127,3 +137,41 @@ cache, stop/quiesce proxy service and remove its entire derived cache directory;
 the next request rebuilds from Git and may be slow. Do not edit manifests or
 objects in place. Keep an authoritative copy if repairing corruption; existing
 client go.sum checks still reject changed module content after a reset.
+
+## Tag deletion and per-version revocation
+
+A moved or deleted tag does **not** change an already cached explicit version.
+This preserves first-observed bytes and existing go.sum checks; a deleted tag
+still disappears from live `list`/`@latest`. Go module retractions are advisory
+module metadata, not removal of cached source. A previously unobserved deleted
+version is refused. Do not use tag deletion alone to revoke sensitive content.
+
+To deny a compromised version, run the source maintenance utility as the data
+volume owner against the initialized proxy cache (no live API or Git needed):
+
+```sh
+python3 hack/goproxy-revoke.py --cache-root /data/goproxy \
+  --repository forge/owner/repository \
+  --module go.example.test/module --version v1.2.3
+```
+
+Use the **exact mapped Git input**, full module path, and canonical version.
+The utility prints the SHA-256 keyed marker in `<cache>/revoked`. Its existence
+returns private 403 for every explicit representation, including warm hits and
+cold fills, across restarts and tag recreation. The marker is checked before
+work and again before serving; an already streaming response cannot be recalled.
+For immediate containment of in-flight responses, quiesce the proxy first.
+Markers are administrator-owned policy: retain them during cache reclamation,
+and remove one only to deliberately re-enable its original pinned bytes. No
+rebind occurs on unrevocation. Whole-cache resets lose both pins and revocations;
+copy markers aside and restore them before resuming service. Clients' existing
+local caches and already downloaded secrets require separate remediation.
+
+The cache has no GC or size metric. Budget for each selected version's compressed
+zip plus metadata and temporary extracted/archived trees during two concurrent
+fills; warm integrity verification reads each object before streaming it again.
+Publication requires filesystem hard links and directory fsync; a full disk or
+unsupported filesystem fails cold publication closed (500). Existing directories
+are tightened to mode 0700 at startup. Repository removal/remapping makes old
+entries unreachable after the handler map refresh at restart, but does not erase
+derived source; remove that data under the same quiesced maintenance procedure.

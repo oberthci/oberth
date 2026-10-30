@@ -160,7 +160,7 @@ func TestImmutableArtifactCorruptionFailsClosedWithoutRegenerating(t *testing.T)
 	if r := artifactRequest(h, ".zip"); r.Code != 200 {
 		t.Fatal(r.Body)
 	}
-	entry, err := h.artifacts.lookup("forge/owner/repository", artifactModule, "v1.0.0")
+	entry, err := h.artifacts.lookupStage("forge/owner/repository", artifactModule, "v1.0.0", ".zip")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -264,16 +264,34 @@ func TestImmutableCacheFullBuildGateDoesNotBlockWarmReads(t *testing.T) {
 	if r := artifactRequest(h, ".zip"); r.Code != http.StatusOK || g.calls.Load() != 4 {
 		t.Fatalf("warm hit queued behind cold builds: status=%d calls=%d", r.Code, g.calls.Load())
 	}
-	ctx, cancel := context.WithCancel(t.Context())
-	cancel()
-	called := false
-	_, err := h.artifacts.get(ctx, "other/repository", artifactModule, "v1.0.0", func(context.Context) (string, map[string][]byte, error) {
-		called = true
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Millisecond)
+	defer cancel()
+	var called atomic.Bool
+	_, err := h.artifacts.get(ctx, "other/repository", artifactModule, "v1.0.0", "", 40*time.Millisecond, func(context.Context) (string, map[string][]byte, error) {
+		called.Store(true)
 		return "", nil, nil
 	})
 	var failure *proxyBuildError
-	if called || !errors.As(err, &failure) || failure.status != http.StatusServiceUnavailable || len(h.artifacts.flights) != 0 {
-		t.Fatalf("canceled queued miss generated work or leaked admission: %v", err)
+	if called.Load() || !errors.As(err, &failure) || failure.status != http.StatusServiceUnavailable {
+		t.Fatalf("canceled queued miss generated work: %v", err)
+	}
+	// Shared work outlives its canceled waiter, but its own deadline releases it.
+	deadline := time.After(time.Second)
+	for {
+		h.artifacts.mu.Lock()
+		remaining := len(h.artifacts.flights)
+		h.artifacts.mu.Unlock()
+		if remaining == 0 {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatal("queued shared fill leaked")
+		case <-time.After(time.Millisecond):
+		}
+	}
+	if called.Load() {
+		t.Fatal("expired queued fill called backend")
 	}
 }
 

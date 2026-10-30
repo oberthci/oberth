@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -114,5 +115,46 @@ func TestModuleCatalogQualificationUsesCallerDeadline(t *testing.T) {
 	defer cancel()
 	if _, err := cache.ListTags(ctx, "example"); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("catalog wait escaped the proxy read budget: %v", err)
+	}
+}
+
+// Counterfactual: with the old 10ms TryLock poller, the ordinary Lock waiters
+// hand off to one another and ListTags times out under this sustained load.
+func TestModuleListTagsIsNotStarvedByOrdinaryRepositoryUsers(t *testing.T) {
+	repository := newTestRepository(t)
+	cache := newTestCache(t, repository.upstream)
+	ready, err := cache.Ensure(t.Context(), "example")
+	if err != nil {
+		t.Fatal(err)
+	}
+	lock := cache.repoLock(ready.Path)
+	stop := make(chan struct{})
+	started := make(chan struct{}, 2)
+	var workers sync.WaitGroup
+	for range 2 {
+		workers.Go(func() {
+			lock.Lock()
+			started <- struct{}{}
+			for {
+				time.Sleep(20 * time.Millisecond)
+				lock.Unlock()
+				select {
+				case <-stop:
+					return
+				default:
+				}
+				lock.Lock()
+			}
+		})
+	}
+	<-started
+	<-started
+	ctx, cancel := context.WithTimeout(t.Context(), 750*time.Millisecond)
+	defer cancel()
+	_, err = cache.ListTags(ctx, "example")
+	close(stop)
+	workers.Wait()
+	if err != nil {
+		t.Fatalf("ordinary users starved deadline-aware ListTags: %v", err)
 	}
 }
