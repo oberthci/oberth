@@ -1437,6 +1437,21 @@ trust assumptions and complete invalidation rules.
   running the token waiter. A Workflow that finished while the owner was down
   uses the same observation, artifact collection, step persistence and normal
   publication/issue finalization as a newly submitted Workflow.
+  Verified adoption distinguishes a missing process exit from the legacy
+  synthetic exit-code-1 display fallback. A failed Pod attempt without durable
+  exit evidence becomes `interrupted` / phase `interrupted`, with no failed-step
+  attribution; the existing amber/cancelled presentation and `run_retry` apply.
+  A continuity-gap line alone never overrides a known nonzero node or bound-Pod
+  exit, or turns a successful Workflow into an interruption. Ambiguous attempts,
+  malformed/foreign or conflicting exit evidence, an independent real test failure, hard cleanup
+  failures and an explicit workflow deadline keep their existing verdicts.
+  An ownership-bound Pod deletion already in progress when an Argo Error node's
+  container receives SIGTERM/SIGKILL is also cut evidence; signal-derived 137/143
+  alone, post-failure Pod GC and memory-limit OOM are not. If Wait ends in a log
+  or observer error, its result carries an immutable adoption binding into the
+  fresh terminal read after the in-process intent is forgotten. Retained exact
+  journal failures and real exits already observed for that attempt survive a
+  later incomplete snapshot; fallback still accepts a newly reported real failure. Restart cuts do not publish or create a new CI-red issue.
   Observation retries failed Workflow reads for a bounded grace (2 minutes).
   An adopted run whose observation still fails settles like a submitted one:
   a terminal Workflow keeps its real result and artifacts (also after a log

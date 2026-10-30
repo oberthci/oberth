@@ -1177,7 +1177,11 @@ func (scheduler *Scheduler) observeRun(ctx context.Context, run model.Run, repos
 		// terminalize the run without first checking whether the Workflow
 		// actually reached a terminal state. If it did, use the real result
 		// rather than fabricating a failure from the observation error.
-		if recovered, termErr := scheduler.jobs.TerminalResult(finalizeCtx, jobName); termErr == nil {
+		terminalRead := jobResult.Reobserve
+		if terminalRead == nil {
+			terminalRead = func(ctx context.Context) (JobResult, error) { return scheduler.jobs.TerminalResult(ctx, jobName) }
+		}
+		if recovered, termErr := terminalRead(finalizeCtx); termErr == nil {
 			jobResult = recovered
 			waitErr = nil
 		} else {
@@ -1241,7 +1245,9 @@ func (scheduler *Scheduler) observeRun(ctx context.Context, run model.Run, repos
 		}
 	}
 	failureTail := ""
-	if jobResult.Status != model.RunPassed {
+	// Interrupted work does not project a CI-red issue. Historical-log loss
+	// must not replace its already-established cut verdict with a red collect error.
+	if jobResult.Status == model.RunFailed {
 		tail, tailErr := scheduler.failureExcerpt(run.ID, jobResult.FailedBurn, jobResult.FailedStep)
 		if tailErr != nil {
 			jobResult.Status = model.RunFailed

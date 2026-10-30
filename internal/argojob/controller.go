@@ -503,7 +503,9 @@ func (controller *Controller) wait(ctx context.Context, name, runID string, dest
 			completion := completionFor(settled)
 			completion.ObservationComplete = completion.ObservationComplete && completeRead
 			completion.Steps = reporter.order(completion.Steps)
-			controller.collectStepDiagnostics(ctx, settled, &completion)
+			preserveObservedExitCodes(&completion, workflow)
+			preserveRecordedExitCodes(&completion, events)
+			controller.collectRestartStepDiagnostics(ctx, settled, &completion, binding.UID != "")
 			controller.collectVMIFailure(ctx, settled, &completion, budget)
 			if publishErr := controller.publishLogs(ctx, settled, reporter, budget, live); publishErr != nil && budgetBreachErr == nil {
 				budgetBreachErr = publishErr
@@ -515,6 +517,7 @@ func (controller *Controller) wait(ctx context.Context, name, runID string, dest
 				}
 			}
 			controller.cleanupVerdict(ctx, settled, runID, budget, &completion)
+			completion.classifyRestartCut()
 			reporter.finish(budget)
 			if err := controller.retireExecutorIdentity(ctx, settled); err != nil {
 				return completion, fmt.Errorf("retire executor identity: %w", err)
@@ -665,6 +668,19 @@ func (controller *Controller) replayStepLog(ctx context.Context, workflow *wfv1.
 // in-process state, so a server that restarted mid-run can still record the
 // real outcome instead of fabricating an interruption.
 func (controller *Controller) TerminalState(ctx context.Context, name string) (*Completion, error) {
+	return controller.terminalState(ctx, name, "", Adoption{}, nil)
+}
+
+// TerminalStateResumed keeps the verified adoption binding on the fallback read
+// after a terminal Wait error, such as lost logs or executor identity retirement.
+func (controller *Controller) TerminalStateResumed(ctx context.Context, name, runID string, binding Adoption, events []runprogress.Event) (*Completion, error) {
+	if binding.UID == "" {
+		return nil, errors.New("argojob: missing resumed Workflow binding")
+	}
+	return controller.terminalState(ctx, name, runID, binding, events)
+}
+
+func (controller *Controller) terminalState(ctx context.Context, name, wantedRun string, binding Adoption, events []runprogress.Event) (*Completion, error) {
 	workflow, err := controller.workflows.Get(ctx, name, metav1.GetOptions{})
 	if apierrors.IsNotFound(err) {
 		return nil, ErrNotTerminal
@@ -676,16 +692,28 @@ func (controller *Controller) TerminalState(ctx context.Context, name string) (*
 	if !ok {
 		return nil, ErrNotTerminal
 	}
+	if wantedRun != "" && runID != wantedRun {
+		return nil, errors.New("argojob: resumed Workflow belongs to another run")
+	}
+	if binding.UID != "" && !binding.matches(workflow) {
+		return nil, errors.New("argojob: resumed Workflow identity changed")
+	}
 	if !workflow.Status.Phase.Completed() {
 		return nil, ErrNotTerminal
 	}
 	settled, completeRead := controller.settle(ctx, name, runID, workflow)
+	if binding.UID != "" && !binding.matches(settled) {
+		return nil, errors.New("argojob: resumed Workflow identity changed at completion")
+	}
 	completion := completionFor(settled)
 	completion.ObservationComplete = completion.ObservationComplete && completeRead
 	controller.retainWorkflowTiming(ctx, settled)
 	controller.collectVMIFailure(ctx, settled, &completion, nil)
-	controller.collectStepDiagnostics(ctx, settled, &completion)
+	preserveObservedExitCodes(&completion, workflow)
+	preserveRecordedExitCodes(&completion, events)
+	controller.collectRestartStepDiagnostics(ctx, settled, &completion, binding.UID != "")
 	controller.cleanupVerdict(ctx, settled, runID, nil, &completion)
+	completion.classifyRestartCut()
 	return &completion, nil
 }
 
