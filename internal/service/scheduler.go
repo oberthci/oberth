@@ -1185,7 +1185,7 @@ func (scheduler *Scheduler) observeRun(ctx context.Context, run model.Run, repos
 		}
 	}
 	_, err := scheduler.store.FinishRun(finalizeCtx, run.ID, model.RunResult{
-		Status: jobResult.Status, Phase: jobResult.Phase, TestedSHA: checkoutSHA, BaseSHA: jobResult.BaseSHA,
+		TerminalObservation: jobResult.TerminalObservation, Status: jobResult.Status, Phase: jobResult.Phase, TestedSHA: checkoutSHA, BaseSHA: jobResult.BaseSHA,
 		FailedBurn: jobResult.FailedBurn, FailedStep: jobResult.FailedStep, Error: jobResult.Error,
 		FailureTail: failureTail,
 	})
@@ -1651,7 +1651,7 @@ func (scheduler *Scheduler) finalizeReconciledRun(ctx context.Context, run model
 		}
 	}
 	_, err = scheduler.store.FinishRun(ctx, run.ID, model.RunResult{
-		Status: jobResult.Status, Phase: jobResult.Phase,
+		TerminalObservation: jobResult.TerminalObservation, Status: jobResult.Status, Phase: jobResult.Phase,
 		FailedBurn: jobResult.FailedBurn, FailedStep: jobResult.FailedStep,
 		Error: jobResult.Error,
 	})

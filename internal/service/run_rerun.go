@@ -111,12 +111,24 @@ func (service *API) rerunRun(ctx context.Context, actor api.Actor, id, reason st
 			return api.RunRerunResponse{}, err
 		}
 	}
+	audit := &model.RunReplayAudit{Basis: "branch"}
+	tagCheck := func(model.Run) bool { return false }
+	if !force && (source.Release || source.RefKind == model.RefTag) {
+		tagCheck, err = service.prepareReplayTagCheck(ctx, source)
+		if err != nil {
+			return api.RunRerunResponse{}, err
+		}
+	}
 	result, err := service.runReruns.RerunRun(ctx, model.RunRerunRequest{
-		RunID: source.ID, Actor: actor.Identity, Reason: reason, Force: force,
+		RunID: source.ID, Actor: actor.Identity, Reason: reason, Force: force, ReplayAudit: audit,
 		Authorize: func(current model.Run, evidence model.RunReplayEvidence) (string, error) {
 			safe := false
 			if !force && (current.Release || current.RefKind == model.RefTag) {
-				safe = service.releaseReplaySafe(current, evidence)
+				*audit, safe = service.releaseReplayDecision(current, evidence, tagCheck(current))
+			}
+			if force && (current.Release || current.RefKind == model.RefTag) {
+				audit.Basis = "forced"
+				audit.PublicationStarted = evidence.PublicationStarted
 			}
 			return RunRerunPolicy(current, actor.Admin, force, safe)
 		},

@@ -79,13 +79,20 @@ no longer the newest of its branch (as long as the branch head is still that
 SHA), and tag/release runs. The new run is linked to the original (`oberth
 run` prints `rerun of`), and `status`, `wait` and `promote` on the SHA follow
 it. A non-admin uplink may rerun branch-push runs; a tag/release rerun needs
-an admin. It needs `--force` when any `Secrets=true` step or publication started,
-or when the plan/progress evidence is unavailable. Failing test/build steps before
-unreached credentialed steps needs no force. A skipped credentialed step without
-start/log evidence does not require force; a started one does, even if it failed.
-Runs that failed before Workflow intent with no step evidence can be replayed
-without a plan. A tag that is already published or green is refused. When every step passed and only the upstream push failed, the push
-is retried instead of re-running the pipeline.
+an admin. Force-free tag replay requires the newest run, an unchanged exact tag
+object, and safe evidence for every run of that tag. Submitted attempts need a
+version 2 credential-aware plan and a durable complete terminal Workflow
+observation. Secret-store and release WIF steps both count as credentialed.
+A started credentialed step, incomplete observation (including observation
+outages or synthesized interruption), legacy plan, missing evidence, older
+source or moved tag requires `--force`. A missing journal is unknown unless
+an observed terminal Workflow explicitly had zero nodes. Pre-intent attempts
+with no step evidence can be replayed without a plan. These rules also apply
+to tag infrastructure retries; `run retry` has no force override.
+Pending Workflow deletion blocks retry and rerun even with force, until cleanup
+is confirmed. A published/green tag remains refused. When every step passed and
+only the upstream push failed, the push is retried instead of executing the
+pipeline. Audit records include the replay basis and evidence counts.
 
 `oberth promotion retry` calls the `promote_retry` MCP tool with the same
 uplink token. A failed or interrupted promotion (the push failed, the target

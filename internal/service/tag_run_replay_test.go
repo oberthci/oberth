@@ -15,17 +15,18 @@ import (
 )
 
 func tagReplayPlan() []runprogress.PlannedStep {
-	return []runprogress.PlannedStep{{Burn: "test", Step: "unit", Ordinal: 0}, {Burn: "publish", Step: "push", Ordinal: 1, Secrets: true}}
+	return []runprogress.PlannedStep{{Burn: "test", Step: "unit", Ordinal: 0}, {Burn: "publish", Step: "push", Ordinal: 1, Secrets: true, Credentialed: true}}
 }
 func skippedPublisher() model.StepResult {
 	return model.StepResult{Burn: "publish", Step: "push", Ordinal: 1, Status: model.StepSkipped, DeclaredSize: "M"}
 }
 
 func TestTagRunRerunBeforeCredentialedStepsNeedsNoForce(t *testing.T) {
-	harness := newRerunHarness(t, JobResult{Status: model.RunFailed, Phase: "test", FailedBurn: "test", FailedStep: "unit", Steps: []model.StepResult{stepResult(model.StepFailed), skippedPublisher()}}, greenResult)
+	harness := newRerunHarness(t, observedTagResult(JobResult{Status: model.RunFailed, Phase: "test", FailedBurn: "test", FailedStep: "unit", Steps: []model.StepResult{stepResult(model.StepFailed), skippedPublisher()}}), greenResult)
 	harness.fixture.jobs.plan = tagReplayPlan()
 	harness.fixture.jobs.transcripts = []string{"[test/unit] failed before publish\n"}
 	failed := admitRerunTag(t, harness)
+	ensureTagJournal(t, harness, failed)
 	if _, err := harness.call(rerunUplink, "run_rerun", map[string]any{"id": failed.ID}); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("tag lost admin gate: %v", err)
 	}
@@ -57,7 +58,7 @@ func TestTagRunReplayRequiresForceAfterSecretsStarted(t *testing.T) {
 			if kind == "failed step without result" {
 				result = JobResult{Status: model.RunFailed, Phase: "test", FailedBurn: "publish", FailedStep: "push"}
 			}
-			harness := newRerunHarness(t, result)
+			harness := newRerunHarness(t, observedTagResult(result))
 			harness.fixture.jobs.plan = tagReplayPlan()
 			failed := admitRerunTag(t, harness)
 			now := time.Now()
@@ -108,7 +109,7 @@ func TestTagRunReplayRequiresForceAfterSecretsStarted(t *testing.T) {
 func TestTagRunRetryInfrastructureKeepsReleaseAdmission(t *testing.T) {
 	for _, phase := range []string{"infrastructure", "job"} {
 		t.Run(phase, func(t *testing.T) {
-			harness := newRerunHarness(t, JobResult{Status: model.RunFailed, Phase: phase, Error: "executor identity unavailable"}, greenResult)
+			harness := newRerunHarness(t, observedTagResult(JobResult{Status: model.RunFailed, Phase: phase, Error: "executor identity unavailable"}), greenResult)
 			harness.fixture.jobs.plan = tagReplayPlan()
 			failed := admitRerunTag(t, harness)
 			if _, err := harness.call(rerunUplink, "run_retry", map[string]any{"id": failed.ID}); !errors.Is(err, ErrForbidden) {
@@ -117,6 +118,10 @@ func TestTagRunRetryInfrastructureKeepsReleaseAdmission(t *testing.T) {
 			value, err := harness.call(rerunAdmin, "run_retry", map[string]any{"id": failed.ID[:8]})
 			if err != nil {
 				t.Fatal(err)
+			}
+			audit, err := harness.fixture.store.LatestAuditActionByType(t.Context(), "run.retry", "run")
+			if err != nil || !strings.Contains(audit.Details, `"replay_basis":"observed-terminal-no-credential-start"`) {
+				t.Fatalf("tag retry audit basis: %+v %v", audit, err)
 			}
 			retried := value.(model.Run)
 			if !retried.Release || !retried.Credentialed || retried.SHA != failed.SHA || retried.TestedSHA != failed.TestedSHA || retried.Trigger != failed.Trigger || retried.Ref != failed.Ref || retried.Actor != rerunAdmin.Identity {
@@ -180,6 +185,10 @@ func TestTagRunRetryBeforeWorkflowIntentNeedsNoPlan(t *testing.T) {
 	if _, err := harness.call(rerunAdmin, "run_retry", map[string]any{"id": queued.ID}); err != nil {
 		t.Fatal(err)
 	}
+	audit, err := harness.fixture.store.LatestAuditActionByType(t.Context(), "run.retry", "run")
+	if err != nil || !strings.Contains(audit.Details, `"replay_basis":"pre-intent"`) || !strings.Contains(audit.Details, `"replay_steps_checked":0`) {
+		t.Fatalf("pre-intent basis: %+v %v", audit, err)
+	}
 }
 
 func TestTagRunPublicationFailureStillNeedsForce(t *testing.T) {
@@ -196,5 +205,23 @@ func TestTagRunPublicationFailureStillNeedsForce(t *testing.T) {
 	response := harness.rerun(t, rerunAdmin, map[string]any{"id": failed.ID, "force": true})
 	if response.Mode != "publish_retry" || len(harness.fixture.jobs.createdReleases) != 1 || harness.git.tagAttempts() != 2 {
 		t.Fatalf("failed publication re-executed steps: %+v", response)
+	}
+}
+
+func observedTagResult(result JobResult) JobResult {
+	observation := &model.RunTerminalObservation{Version: 1, Nodes: 0}
+	if len(result.Steps) > 0 {
+		observation.Nodes = len(result.Steps) + 1
+	}
+	for _, step := range result.Steps {
+		observation.Steps = append(observation.Steps, model.RunObservedStep{Burn: step.Burn, Step: step.Step, Status: step.Status, Started: step.StartedAt != nil || step.Status != model.StepSkipped})
+	}
+	result.TerminalObservation = observation
+	return result
+}
+func ensureTagJournal(t *testing.T, harness *rerunHarness, run model.Run) {
+	t.Helper()
+	if err := harness.fixture.logs.AppendStepProgress(run.ID, runprogress.Event{Version: 1, Burn: "test", Step: "unit", Ordinal: 0, DeclaredSize: "M", Status: runprogress.StepQueued}); err != nil {
+		t.Fatal(err)
 	}
 }

@@ -354,6 +354,7 @@ type LogStore interface {
 	// not as a failure.
 	WriteStepPlan(string, []runprogress.PlannedStep) error
 	StepPlan(string) ([]runprogress.PlannedStep, error)
+	StepPlanRecord(string) (runprogress.Plan, error)
 }
 
 type JobRequest struct {
@@ -383,14 +384,15 @@ type JobRequest struct {
 }
 
 type JobResult struct {
-	Status     model.RunStatus
-	Phase      string
-	TestedSHA  string
-	BaseSHA    string
-	FailedBurn string
-	FailedStep string
-	Error      string
-	Steps      []model.StepResult
+	TerminalObservation *model.RunTerminalObservation
+	Status              model.RunStatus
+	Phase               string
+	TestedSHA           string
+	BaseSHA             string
+	FailedBurn          string
+	FailedStep          string
+	Error               string
+	Steps               []model.StepResult
 }
 
 // ErrJobNotTerminal is returned by TerminalResult when the named Job has not

@@ -60,15 +60,26 @@ func (s *Store) RerunRun(ctx context.Context, request model.RunRerunRequest) (mo
 	case source.Trigger == "plan" || source.Trigger == "apply":
 		return model.RunRerunResult{}, fmt.Errorf("%w: %s runs are re-driven by the trusted plan flow, not rerun", ErrInvalidState, source.Trigger)
 	}
+	if err := requireReplayDeletionCompleteTx(ctx, tx, source); err != nil {
+		return model.RunRerunResult{}, err
+	}
+	if (source.Release || source.RefKind == model.RefTag) && request.Authorize == nil {
+		return model.RunRerunResult{}, fmt.Errorf("%w: release replay authorization is required", ErrInvalidState)
+	}
+	var evidence model.RunReplayEvidence
 	var warning string
 	if request.Authorize != nil {
-		evidence, evidenceErr := replayEvidenceTx(ctx, tx, source.ID)
+		var evidenceErr error
+		evidence, evidenceErr = replayEvidenceTx(ctx, tx, source)
 		if evidenceErr != nil {
 			return model.RunRerunResult{}, evidenceErr
 		}
 		if warning, err = request.Authorize(source, evidence); err != nil {
 			return model.RunRerunResult{}, err
 		}
+	}
+	if err := requireReplayAudit(source.Release || source.RefKind == model.RefTag, request.Force, request.ReplayAudit, evidence); err != nil {
+		return model.RunRerunResult{}, err
 	}
 	var activeID string
 	err = tx.QueryRowContext(ctx, `
@@ -102,11 +113,15 @@ ORDER BY queue_sequence LIMIT 1`, source.RepoID, source.RefKind, source.Ref, sou
 	if err != nil {
 		return model.RunRerunResult{}, fmt.Errorf("enqueue rerun: %w", err)
 	}
-	details, err := json.Marshal(map[string]any{
+	detailsMap := replayAuditDetails(source.Release || source.RefKind == model.RefTag, request.ReplayAudit)
+	for key, value := range map[string]any{
 		"source_run_id": source.ID, "run_id": enqueued.ID, "repo_id": source.RepoID,
 		"ref_kind": source.RefKind, "ref": source.Ref, "sha": source.SHA, "trigger": source.Trigger,
 		"reason": request.Reason, "force": request.Force, "warning": warning,
-	})
+	} {
+		detailsMap[key] = value
+	}
+	details, err := json.Marshal(detailsMap)
 	if err != nil {
 		return model.RunRerunResult{}, err
 	}

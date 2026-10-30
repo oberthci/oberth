@@ -19,12 +19,14 @@ import (
 // Secrets reports whether the step's template runs a recognised credential
 // chain (UsesSecrets), which is the same condition that mounts the secret
 // store login token into exactly that Pod. It is read from the document like
-// everything else here: a declared intent, not an observed read.
+// everything else here: a declared intent, not an observed read. Credentialed
+// also includes release WIF and is the replay-safety classification.
 type PlannedStep struct {
-	Burn    string
-	Step    string
-	Ordinal int
-	Secrets bool
+	Burn         string
+	Step         string
+	Ordinal      int
+	Secrets      bool
+	Credentialed bool
 }
 
 // MaxPlannedSteps bounds the enumeration. A repository-authored document is
@@ -156,7 +158,7 @@ func (walk *planWalk) descend(template *wfv1.Template, enclosing string, depth i
 			if len(walk.steps) >= MaxPlannedSteps {
 				return fmt.Errorf("argoworkflow: pipeline declares more than %d steps", MaxPlannedSteps)
 			}
-			walk.steps = append(walk.steps, PlannedStep{Burn: burn, Step: step, Ordinal: len(walk.steps), Secrets: UsesSecrets(target)})
+			walk.steps = append(walk.steps, PlannedStep{Burn: burn, Step: step, Ordinal: len(walk.steps), Secrets: UsesSecrets(target), Credentialed: UsesCredentials(target)})
 		}
 	}
 	return nil

@@ -46,15 +46,18 @@ type StepResult struct {
 
 // Completion is the terminal outcome of one submitted Workflow.
 type Completion struct {
-	VMIDiagnostics []byte
-	Name           string
-	Succeeded      bool
-	Infrastructure bool
-	Phase          string
-	Reason         string
-	FailedBurn     string
-	FailedStep     string
-	Steps          []StepResult
+	ObservationComplete bool
+	ObservedNodes       int
+	ReplayAttempts      []StepResult
+	VMIDiagnostics      []byte
+	Name                string
+	Succeeded           bool
+	Infrastructure      bool
+	Phase               string
+	Reason              string
+	FailedBurn          string
+	FailedStep          string
+	Steps               []StepResult
 }
 
 // StepResults maps a Workflow's node tree onto Oberth's two-level burn/step
@@ -580,9 +583,62 @@ func optionalTime(value metav1.Time) *time.Time {
 // Status.Nodes, and a task that never reached pod creation has no node row at
 // all, so "no failed rows" cannot distinguish "all work passed" from "work
 // never ran" (stopped, deadline-exceeded, or controller failure).
+// completeTerminalTree refuses compressed/offloaded, dangling or unfinished
+// trees. A terminal phase alone says nothing about unobserved credential starts.
+func completeTerminalTree(workflow *wfv1.Workflow) bool {
+	if workflow == nil || !workflow.Status.Phase.Completed() || workflow.Status.FinishedAt.IsZero() || workflow.Status.CompressedNodes != "" || workflow.Status.OffloadNodeStatusVersion != "" || len(workflow.Status.Nodes) > 4096 {
+		return false
+	}
+	root := len(workflow.Status.Nodes) == 0
+	for id, node := range workflow.Status.Nodes {
+		if node.ID == "" || node.ID != id {
+			return false
+		}
+		if node.Name == workflow.Name {
+			root = true
+		}
+		switch node.Phase {
+		case wfv1.NodeSucceeded, wfv1.NodeFailed, wfv1.NodeError, wfv1.NodeSkipped, wfv1.NodeOmitted:
+		default:
+			return false
+		}
+		for _, id := range append(append([]string{}, node.Children...), node.OutboundNodes...) {
+			if _, ok := workflow.Status.Nodes[id]; !ok {
+				return false
+			}
+		}
+		if node.BoundaryID != "" {
+			if _, ok := workflow.Status.Nodes[node.BoundaryID]; !ok {
+				return false
+			}
+		}
+	}
+	if !root {
+		return false
+	}
+	attempts := stepAttempts(workflow)
+	mapped := make(map[string]bool, len(attempts))
+	for _, step := range attempts {
+		mapped[step.NodeID] = true
+	}
+	for _, node := range workflow.Status.Nodes {
+		switch node.Type {
+		case wfv1.NodeTypePod:
+			if !mapped[node.ID] {
+				return false
+			}
+		case wfv1.NodeTypeDAG, wfv1.NodeTypeSteps, wfv1.NodeTypeStepGroup, wfv1.NodeTypeRetry, wfv1.NodeTypeSkipped:
+		default:
+			return false
+		}
+	}
+	return true
+}
+
 func completionFor(workflow *wfv1.Workflow) Completion {
 	completion := Completion{
-		Name:      workflow.Name,
+		Name:                workflow.Name,
+		ObservationComplete: completeTerminalTree(workflow), ObservedNodes: len(workflow.Status.Nodes), ReplayAttempts: stepAttempts(workflow),
 		Phase:     string(workflow.Status.Phase),
 		Reason:    strings.TrimSpace(workflow.Status.Message),
 		Succeeded: workflow.Status.Phase == wfv1.WorkflowSucceeded,

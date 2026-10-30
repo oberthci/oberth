@@ -461,34 +461,55 @@ func (store *Store) WriteStepPlan(runID string, steps []runprogress.PlannedStep)
 // file; the error wraps os.ErrNotExist so callers can treat that as "no plan"
 // rather than as a failure.
 func (store *Store) StepPlan(runID string) ([]runprogress.PlannedStep, error) {
+	plan, err := store.StepPlanRecord(runID)
+	return plan.Steps, err
+}
+
+// StepPlanRecord retains version provenance for fail-closed replay decisions.
+func (store *Store) StepPlanRecord(runID string) (runprogress.Plan, error) {
 	path, err := store.planPath(runID)
 	if err != nil {
-		return nil, err
+		return runprogress.Plan{}, err
 	}
 	// planPath validated the run ID and confined this path to the log root.
 	file, err := os.Open(path) //nolint:gosec
 	if err != nil {
-		return nil, fmt.Errorf("open step plan: %w", err)
+		return runprogress.Plan{}, fmt.Errorf("open step plan: %w", err)
 	}
 	defer func() { _ = file.Close() }()
 	body, err := io.ReadAll(io.LimitReader(file, runprogress.MaxPlanBytes+1))
 	if err != nil {
-		return nil, fmt.Errorf("read step plan: %w", err)
+		return runprogress.Plan{}, fmt.Errorf("read step plan: %w", err)
 	}
 	if len(body) > runprogress.MaxPlanBytes {
-		return nil, errors.New("step plan exceeds its byte bound")
+		return runprogress.Plan{}, errors.New("step plan exceeds its byte bound")
 	}
 	decoder := json.NewDecoder(bytes.NewReader(body))
 	decoder.DisallowUnknownFields()
 	var plan runprogress.Plan
 	if err := decoder.Decode(&plan); err != nil {
-		return nil, fmt.Errorf("decode step plan: %w", err)
+		return runprogress.Plan{}, fmt.Errorf("decode step plan: %w", err)
 	}
 	if err := plan.Validate(); err != nil {
-		return nil, fmt.Errorf("decode step plan: %w", err)
+		return runprogress.Plan{}, fmt.Errorf("decode step plan: %w", err)
+	}
+	if plan.Version == runprogress.PlanVersion {
+		var wire struct {
+			Steps []struct {
+				Credentialed *bool `json:"credentialed"`
+			}
+		}
+		if err := json.Unmarshal(body, &wire); err != nil {
+			return runprogress.Plan{}, err
+		}
+		for _, step := range wire.Steps {
+			if step.Credentialed == nil {
+				return runprogress.Plan{}, errors.New("current plan lacks explicit credential classification")
+			}
+		}
 	}
 	sort.Slice(plan.Steps, func(left, right int) bool { return plan.Steps[left].Ordinal < plan.Steps[right].Ordinal })
-	return plan.Steps, nil
+	return plan, nil
 }
 
 // StepProgress returns the latest transition for every planned step in stable

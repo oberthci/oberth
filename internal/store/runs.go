@@ -943,6 +943,9 @@ RETURNING `+runColumns,
 	} else if err := s.projectRunIssue(ctx, tx, value, result.FailureTail, now); err != nil {
 		return model.Run{}, err
 	}
+	if err := s.recordTerminalObservationTx(ctx, tx, value, result.TerminalObservation, now); err != nil {
+		return model.Run{}, err
+	}
 	return value, nil
 }
 

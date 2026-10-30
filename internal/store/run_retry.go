@@ -33,6 +33,9 @@ func (s *Store) RetryRun(ctx context.Context, request model.RunRetryRequest) (mo
 	if err := requireRepositoryActive(ctx, tx, previous.RepoID); err != nil {
 		return model.EnqueueRunResult{}, err
 	}
+	if err := requireReplayDeletionCompleteTx(ctx, tx, previous); err != nil {
+		return model.EnqueueRunResult{}, err
+	}
 	var newestID string
 	if err := tx.QueryRowContext(ctx, `SELECT id FROM runs WHERE repo_id = ? AND ref_kind = ? AND ref = ? AND schedule_entry = ?
 		ORDER BY queue_sequence DESC LIMIT 1`, previous.RepoID, previous.RefKind, previous.Ref, previous.ScheduleEntry).Scan(&newestID); err != nil {
@@ -51,11 +54,14 @@ func (s *Store) RetryRun(ctx context.Context, request model.RunRetryRequest) (mo
 		if request.Authorize == nil {
 			return model.EnqueueRunResult{}, fmt.Errorf("%w: tag/release retry requires replay safety authorization; use run_rerun with force if needed", ErrInvalidState)
 		}
-		evidence, err := replayEvidenceTx(ctx, tx, previous.ID)
+		evidence, err := replayEvidenceTx(ctx, tx, previous)
 		if err != nil {
 			return model.EnqueueRunResult{}, err
 		}
 		if err := request.Authorize(previous, evidence); err != nil {
+			return model.EnqueueRunResult{}, err
+		}
+		if err := requireReplayAudit(true, false, request.ReplayAudit, evidence); err != nil {
 			return model.EnqueueRunResult{}, err
 		}
 	}
@@ -87,8 +93,11 @@ func (s *Store) RetryRun(ctx context.Context, request model.RunRetryRequest) (mo
 	if err != nil {
 		return model.EnqueueRunResult{}, fmt.Errorf("enqueue retry: %w", err)
 	}
-	details, err := json.Marshal(map[string]any{"source_run_id": previous.ID, "run_id": enqueued.ID,
-		"repo_id": previous.RepoID, "ref_kind": previous.RefKind, "ref": previous.Ref, "sha": previous.SHA})
+	detailsMap := replayAuditDetails(previous.Release || previous.RefKind == model.RefTag, request.ReplayAudit)
+	for key, value := range map[string]any{"source_run_id": previous.ID, "run_id": enqueued.ID, "repo_id": previous.RepoID, "ref_kind": previous.RefKind, "ref": previous.Ref, "sha": previous.SHA} {
+		detailsMap[key] = value
+	}
+	details, err := json.Marshal(detailsMap)
 	if err != nil {
 		return model.EnqueueRunResult{}, err
 	}

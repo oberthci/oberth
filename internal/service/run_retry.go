@@ -27,10 +27,20 @@ func (service *API) retryRun(ctx context.Context, actor api.Actor, id string) (m
 			return model.Run{}, err
 		}
 	}
+	audit := &model.RunReplayAudit{Basis: "branch"}
+	tagCheck := func(model.Run) bool { return false }
+	if previous.Release || previous.RefKind == model.RefTag {
+		tagCheck, err = service.prepareReplayTagCheck(ctx, previous)
+		if err != nil {
+			return model.Run{}, err
+		}
+	}
 	enqueued, err := service.runRetries.RetryRun(ctx, model.RunRetryRequest{
-		RunID: previous.ID, Actor: actor.Identity,
+		RunID: previous.ID, Actor: actor.Identity, ReplayAudit: audit,
 		Authorize: func(current model.Run, evidence model.RunReplayEvidence) error {
-			_, err := RunRerunPolicy(current, actor.Admin, false, service.releaseReplaySafe(current, evidence))
+			decision, safe := service.releaseReplayDecision(current, evidence, tagCheck(current))
+			*audit = decision
+			_, err := RunRerunPolicy(current, actor.Admin, false, safe)
 			return err
 		},
 	})

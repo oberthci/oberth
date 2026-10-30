@@ -66,3 +66,44 @@ func TestTagSHARefusesAMissingTagAndABranchName(t *testing.T) {
 		t.Fatal("TagSHA resolved a branch name; a fragment must be pinned to a tag")
 	}
 }
+
+func TestTagObjectSHAKeepsAnnotatedTagIdentity(t *testing.T) {
+	repository := newTestRepository(t)
+	cache := newTestCache(t, repository.upstream)
+	commit := commitFragment(t, repository, "fragment", "kind: Workflow\n")
+	runGit(t, repository.work, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "tag", "-a", "v-object", "-m", "first object")
+	object := runGit(t, repository.work, "rev-parse", "refs/tags/v-object")
+	runGit(t, repository.work, "push", "origin", "v-object")
+	if _, err := cache.Ensure(t.Context(), "example"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := cache.TagObjectSHA(t.Context(), "example", "v-object")
+	if err != nil || got != object || got == commit {
+		t.Fatalf("tag object was peeled: %s object=%s commit=%s err=%v", got, object, commit, err)
+	}
+	peeled, err := cache.TagSHA(t.Context(), "example", "v-object")
+	if err != nil || peeled != commit {
+		t.Fatalf("existing fragment resolution changed: %s %v", peeled, err)
+	}
+	if _, err := cache.TagObjectSHA(t.Context(), "example", "missing"); err == nil {
+		t.Fatal("missing tag accepted")
+	}
+}
+
+func TestTagObjectSHARefusesBusyRepositoryLock(t *testing.T) {
+	repository := newTestRepository(t)
+	cache := newTestCache(t, repository.upstream)
+	if _, err := cache.Ensure(t.Context(), "example"); err != nil {
+		t.Fatal(err)
+	}
+	_, path, err := cache.path("example")
+	if err != nil {
+		t.Fatal(err)
+	}
+	lock := cache.repoLock(path)
+	lock.Lock()
+	defer lock.Unlock()
+	if _, err := cache.TagObjectSHA(t.Context(), "example", "v-busy"); err == nil {
+		t.Fatal("busy exact-tag lookup did not fail closed")
+	}
+}

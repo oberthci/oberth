@@ -89,3 +89,36 @@ func TestStepPlanRejectsAnUnsafeRunID(t *testing.T) {
 		t.Fatal("a traversing run ID was accepted for read")
 	}
 }
+
+func TestReplayPlanVersionDistinguishesLegacyClassification(t *testing.T) {
+	logs := planStore(t)
+	path, _ := logs.planPath("legacy")
+	if err := os.WriteFile(path, []byte(`{"version":1,"steps":[{"burn":"publish","step":"push","ordinal":0}]}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := logs.StepPlan("legacy"); err != nil {
+		t.Fatalf("legacy display plan unreadable: %v", err)
+	}
+	record, err := logs.StepPlanRecord("legacy")
+	if err != nil || record.Version == runprogress.PlanVersion {
+		t.Fatalf("legacy plan presented as current credential evidence: %+v %v", record, err)
+	}
+	if err := logs.WriteStepPlan("current", []runprogress.PlannedStep{{Burn: "publish", Step: "push", Ordinal: 0, Credentialed: true}}); err != nil {
+		t.Fatal(err)
+	}
+	record, err = logs.StepPlanRecord("current")
+	if err != nil || record.Version != 2 || !record.Steps[0].Credentialed {
+		t.Fatalf("new plan lost classification provenance: %+v %v", record, err)
+	}
+}
+
+func TestReplayPlanV2MissingCredentialMarkerIsUnknown(t *testing.T) {
+	logs := planStore(t)
+	path, _ := logs.planPath("missing-marker")
+	if err := os.WriteFile(path, []byte(`{"version":2,"steps":[{"burn":"publish","step":"push","ordinal":0}]}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := logs.StepPlanRecord("missing-marker"); err == nil {
+		t.Fatal("v2 without per-step credential marker accepted")
+	}
+}

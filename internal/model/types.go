@@ -185,13 +185,14 @@ type RunSpec struct {
 }
 
 type RunResult struct {
-	Status     RunStatus
-	Phase      string
-	TestedSHA  string
-	BaseSHA    string
-	FailedBurn string
-	FailedStep string
-	Error      string
+	TerminalObservation *RunTerminalObservation
+	Status              RunStatus
+	Phase               string
+	TestedSHA           string
+	BaseSHA             string
+	FailedBurn          string
+	FailedStep          string
+	Error               string
 	// FailureTail is transient issue-projection input. Store implementations must
 	// not persist it in the run record or expose it through run status.
 	FailureTail string

@@ -1094,7 +1094,7 @@ func (jobs *fakeJobs) CreateApply(_ context.Context, request JobRequest) error {
 	return nil
 }
 
-func (jobs *fakeJobs) Wait(_ context.Context, _ string, output io.Writer) (JobResult, error) {
+func (jobs *fakeJobs) Wait(_ context.Context, name string, output io.Writer) (JobResult, error) {
 	jobs.mu.Lock()
 	if jobs.waitErr != nil {
 		err := jobs.waitErr
@@ -1106,6 +1106,11 @@ func (jobs *fakeJobs) Wait(_ context.Context, _ string, output io.Writer) (JobRe
 		return JobResult{}, errors.New("no fake Job result")
 	}
 	result := jobs.results[0]
+	if result.TerminalObservation != nil {
+		observation := *result.TerminalObservation
+		observation.JobName = name
+		result.TerminalObservation = &observation
+	}
 	jobs.results = jobs.results[1:]
 	transcript := ""
 	if len(jobs.transcripts) > 0 {
