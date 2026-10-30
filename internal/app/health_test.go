@@ -29,7 +29,7 @@ func (store fakeHealthStore) ListRepositories(context.Context) ([]model.Reposito
 func TestHealthRequiresConfiguredUpstreamAndDatabase(t *testing.T) {
 	t.Parallel()
 	health := Health{
-		Store: fakeHealthStore{}, Configured: func(context.Context) error { return nil },
+		Store: fakeHealthStore{}, Configured: func(context.Context, []model.Upstream) error { return nil },
 		Cluster: func(context.Context) error { return nil }, VCS: func(context.Context, model.Upstream) error { return nil },
 		Audit: func(context.Context) error { return nil },
 	}
@@ -43,11 +43,11 @@ func TestHealthRequiresConfiguredUpstreamAndDatabase(t *testing.T) {
 		t.Fatal("readiness passed with an unavailable database")
 	}
 	health.Store = fakeHealthStore{upstreams: []model.Upstream{{ID: 1}}}
-	health.Configured = func(context.Context) error { return errors.New("credentials missing") }
+	health.Configured = func(context.Context, []model.Upstream) error { return errors.New("credentials missing") }
 	if err := health.Ready(context.Background()); err == nil {
 		t.Fatal("readiness passed without durable upstream credentials")
 	}
-	health.Configured = func(context.Context) error { return nil }
+	health.Configured = func(context.Context, []model.Upstream) error { return nil }
 	health.VCS = func(context.Context, model.Upstream) error { return errors.New("VCS down") }
 	if err := health.Ready(context.Background()); err != nil {
 		t.Fatalf("transient VCS outage removed cached service from readiness: %v", err)
@@ -80,7 +80,7 @@ func TestHealthSkipsSSHCheckForLocalOnlyUpstreams(t *testing.T) {
 	t.Parallel()
 	health := Health{
 		Store:      fakeHealthStore{upstreams: []model.Upstream{{ID: 1, Kind: "local"}}},
-		Configured: func(context.Context) error { return errors.New("SSH identity missing") },
+		Configured: func(context.Context, []model.Upstream) error { return errors.New("SSH identity missing") },
 		Cluster:    func(context.Context) error { return nil },
 		Audit:      func(context.Context) error { return nil },
 		VCS:        func(context.Context, model.Upstream) error { return nil },
@@ -103,7 +103,7 @@ func TestHealthStatusIsUsefulDuringOutage(t *testing.T) {
 	t.Parallel()
 	health := Health{
 		Store:      fakeHealthStore{upstreams: []model.Upstream{{ID: 1}}, repositories: []model.Repository{{ID: 1}, {ID: 2}}},
-		Configured: func(context.Context) error { return nil },
+		Configured: func(context.Context, []model.Upstream) error { return nil },
 		Cluster:    func(context.Context) error { return errors.New("cluster down") },
 		Audit:      func(context.Context) error { return nil },
 		VCS:        func(context.Context, model.Upstream) error { return nil },
@@ -122,7 +122,7 @@ func TestHealthStatusReportsSchemaVersion(t *testing.T) {
 	t.Parallel()
 	health := Health{
 		Store:         fakeHealthStore{upstreams: []model.Upstream{{ID: 1}}, repositories: []model.Repository{{ID: 1}}},
-		Configured:    func(context.Context) error { return nil },
+		Configured:    func(context.Context, []model.Upstream) error { return nil },
 		Cluster:       func(context.Context) error { return nil },
 		Audit:         func(context.Context) error { return nil },
 		VCS:           func(context.Context, model.Upstream) error { return nil },
@@ -148,7 +148,7 @@ func TestHealthStatusReportsDashboardDetail(t *testing.T) {
 			},
 			repositories: []model.Repository{{ID: 1}},
 		},
-		Configured: func(context.Context) error { return nil },
+		Configured: func(context.Context, []model.Upstream) error { return nil },
 		Cluster:    func(context.Context) error { return nil },
 		Audit:      func(context.Context) error { return errors.New("audit anchor: latest checkpoint is stale by 3m") },
 		VCS: func(_ context.Context, upstream model.Upstream) error {
@@ -204,7 +204,7 @@ func TestHealthStatusReportsLocalAuditMode(t *testing.T) {
 			upstreams:    []model.Upstream{{ID: 1, Name: "codeberg", Kind: "forgejo", BaseURL: "git@codeberg.org:acme"}},
 			repositories: []model.Repository{{ID: 1}},
 		},
-		Configured: func(context.Context) error { return nil },
+		Configured: func(context.Context, []model.Upstream) error { return nil },
 		Cluster:    func(context.Context) error { return nil },
 		Audit:      func(context.Context) error { return nil },
 		VCS:        func(context.Context, model.Upstream) error { return nil },
@@ -234,7 +234,7 @@ func TestHealthStatusIncludesSecretStoreProbeReady(t *testing.T) {
 			upstreams:    []model.Upstream{{ID: 1, Name: "codeberg", Kind: "forgejo", BaseURL: "git@codeberg.org:acme"}},
 			repositories: []model.Repository{{ID: 1}},
 		},
-		Configured:       func(context.Context) error { return nil },
+		Configured:       func(context.Context, []model.Upstream) error { return nil },
 		Cluster:          func(context.Context) error { return nil },
 		Audit:            func(context.Context) error { return nil },
 		VCS:              func(context.Context, model.Upstream) error { return nil },
@@ -262,7 +262,7 @@ func TestHealthStatusIncludesSecretStoreProbeFailure(t *testing.T) {
 			upstreams:    []model.Upstream{{ID: 1, Name: "codeberg", Kind: "forgejo", BaseURL: "git@codeberg.org:acme"}},
 			repositories: []model.Repository{{ID: 1}},
 		},
-		Configured:  func(context.Context) error { return nil },
+		Configured:  func(context.Context, []model.Upstream) error { return nil },
 		Cluster:     func(context.Context) error { return nil },
 		Audit:       func(context.Context) error { return nil },
 		VCS:         func(context.Context, model.Upstream) error { return nil },
@@ -288,7 +288,7 @@ func TestHealthStatusOmitsProbeWhenUnconfigured(t *testing.T) {
 			upstreams:    []model.Upstream{{ID: 1, Name: "codeberg", Kind: "forgejo", BaseURL: "git@codeberg.org:acme"}},
 			repositories: []model.Repository{{ID: 1}},
 		},
-		Configured:  func(context.Context) error { return nil },
+		Configured:  func(context.Context, []model.Upstream) error { return nil },
 		Cluster:     func(context.Context) error { return nil },
 		Audit:       func(context.Context) error { return nil },
 		VCS:         func(context.Context, model.Upstream) error { return nil },
@@ -316,7 +316,7 @@ func TestHealthStatusConcurrentSecretStoreProbeNoDataRace(t *testing.T) {
 			upstreams:    []model.Upstream{{ID: 1, Name: "codeberg", Kind: "forgejo", BaseURL: "git@codeberg.org:acme"}},
 			repositories: []model.Repository{{ID: 1}},
 		},
-		Configured:       func(context.Context) error { return nil },
+		Configured:       func(context.Context, []model.Upstream) error { return nil },
 		Cluster:          func(context.Context) error { return nil },
 		Audit:            func(context.Context) error { return nil },
 		VCS:              func(context.Context, model.Upstream) error { return nil },
@@ -353,7 +353,7 @@ func TestHealthProbeReportsSealed(t *testing.T) {
 			upstreams:    []model.Upstream{{ID: 1, Name: "codeberg", Kind: "forgejo", BaseURL: "git@codeberg.org:acme"}},
 			repositories: []model.Repository{{ID: 1}},
 		},
-		Configured:  func(context.Context) error { return nil },
+		Configured:  func(context.Context, []model.Upstream) error { return nil },
 		Cluster:     func(context.Context) error { return nil },
 		Audit:       func(context.Context) error { return nil },
 		VCS:         func(context.Context, model.Upstream) error { return nil },
@@ -385,7 +385,7 @@ func TestHealthProbeReportsLoginDetailWhenSealStatusErrors(t *testing.T) {
 			upstreams:    []model.Upstream{{ID: 1, Name: "codeberg", Kind: "forgejo", BaseURL: "git@codeberg.org:acme"}},
 			repositories: []model.Repository{{ID: 1}},
 		},
-		Configured:  func(context.Context) error { return nil },
+		Configured:  func(context.Context, []model.Upstream) error { return nil },
 		Cluster:     func(context.Context) error { return nil },
 		Audit:       func(context.Context) error { return nil },
 		VCS:         func(context.Context, model.Upstream) error { return nil },
@@ -421,7 +421,7 @@ func TestHealthProbeReadyIgnoresSealedCallback(t *testing.T) {
 			upstreams:    []model.Upstream{{ID: 1, Name: "codeberg", Kind: "forgejo", BaseURL: "git@codeberg.org:acme"}},
 			repositories: []model.Repository{{ID: 1}},
 		},
-		Configured:  func(context.Context) error { return nil },
+		Configured:  func(context.Context, []model.Upstream) error { return nil },
 		Cluster:     func(context.Context) error { return nil },
 		Audit:       func(context.Context) error { return nil },
 		VCS:         func(context.Context, model.Upstream) error { return nil },
@@ -456,7 +456,7 @@ func TestRefreshSecretStoreUpdatesCachedSnapshot(t *testing.T) {
 			upstreams:    []model.Upstream{{ID: 1, Name: "codeberg", Kind: "forgejo", BaseURL: "git@codeberg.org:acme"}},
 			repositories: []model.Repository{{ID: 1}},
 		},
-		Configured:  func(context.Context) error { return nil },
+		Configured:  func(context.Context, []model.Upstream) error { return nil },
 		Cluster:     func(context.Context) error { return nil },
 		Audit:       func(context.Context) error { return nil },
 		VCS:         func(context.Context, model.Upstream) error { return nil },
@@ -566,7 +566,7 @@ func TestReadyIgnoresSecretStoreState(t *testing.T) {
 	t.Parallel()
 	health := Health{
 		Store:       fakeHealthStore{upstreams: []model.Upstream{{ID: 1, Kind: "local"}}},
-		Configured:  func(context.Context) error { return nil },
+		Configured:  func(context.Context, []model.Upstream) error { return nil },
 		Cluster:     func(context.Context) error { return nil },
 		Audit:       func(context.Context) error { return nil },
 		VCS:         func(context.Context, model.Upstream) error { return nil },

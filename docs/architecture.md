@@ -262,7 +262,8 @@ Every mutation still passes its audit integrity gate. Serving prerequisites
 refresh a bounded background snapshot; the HTTP probe performs no network or
 store calls. The sampler owns a separate single-connection read-only WAL pool,
 with a ten-second read budget and five-second cadence. Successful readiness
-samples expire after six complete budget-plus-cadence windows (90 seconds).
+samples expire after 90 seconds of elapsed time, regardless of attempt count.
+Ten-second reads overrun the five-second ticker, which drops missed ticks.
 Deadlines retain the last successful sample without extending it; hard errors
 and startup recovery still refuse immediately. This avoids withdrawing HTTP
 readiness for a slow but progressing sampler under CPU contention.

@@ -75,13 +75,14 @@ type Store struct {
 	readOnly    bool
 	cleanup     func() error
 
-	liveReaderDSN  string // immutable after startup; shared live WAL reader settings
-	livePath       string
-	liveFile       os.FileInfo
-	auditGate      chan struct{}
-	auditSchema    [sha256.Size]byte
-	auditCacheSafe bool
-	localAudit     localAuditCache // protected by auditGate
+	liveReaderDSN   string // immutable after startup; shared live WAL reader settings
+	liveBusyTimeout time.Duration
+	livePath        string
+	liveFile        os.FileInfo
+	auditGate       chan struct{}
+	auditSchema     [sha256.Size]byte
+	auditCacheSafe  bool
+	localAudit      localAuditCache // protected by auditGate
 
 	// reruns caches run_rerun lineage (#1098); see RunRerunOf.
 	reruns rerunLineage

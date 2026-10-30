@@ -27,7 +27,7 @@ func TestReadinessSnapshotNeverProbesOnRequestAndFailsClosed(t *testing.T) {
 	database := &readinessCountingStore{fakeHealthStore: fakeHealthStore{upstreams: []model.Upstream{{Kind: "local"}}}}
 	health := Health{
 		Store:      database,
-		Configured: func(context.Context) error { return nil },
+		Configured: func(context.Context, []model.Upstream) error { return nil },
 		Cluster:    func(context.Context) error { t.Fatal("readiness called Kubernetes"); return nil },
 		Audit:      func(context.Context) error { t.Fatal("readiness called audit"); return nil },
 		VCS:        func(context.Context, model.Upstream) error { t.Fatal("readiness called upstream"); return nil },
@@ -92,7 +92,7 @@ func TestReadinessDeadlineRetainsGreenWithoutRenewingAge(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			health := Health{
 				Store:      fakeHealthStore{upstreams: []model.Upstream{{Kind: "local"}}},
-				Configured: func(context.Context) error { return nil }, Readiness: &ReadinessSnapshot{},
+				Configured: func(context.Context, []model.Upstream) error { return nil }, Readiness: &ReadinessSnapshot{},
 			}
 			health.refreshReadiness(t.Context())
 			checked := time.Now().Add(-test.age)
@@ -138,11 +138,11 @@ func TestReadinessHardErrorsImmediatelyReplaceGreen(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			health := Health{
 				Store:      fakeHealthStore{upstreams: []model.Upstream{{Kind: "local"}}},
-				Configured: func(context.Context) error { return nil }, Readiness: &ReadinessSnapshot{},
+				Configured: func(context.Context, []model.Upstream) error { return nil }, Readiness: &ReadinessSnapshot{},
 			}
 			health.refreshReadiness(t.Context())
 			health.Store = test.store
-			health.Configured = func(context.Context) error { return test.configuredErr }
+			health.Configured = func(context.Context, []model.Upstream) error { return test.configuredErr }
 			ctx, cancel := context.WithCancel(t.Context())
 			defer cancel()
 			if test.cancel {
@@ -162,7 +162,7 @@ func TestReadinessDeadlineCannotCreateGreen(t *testing.T) {
 		if priorErr != nil {
 			snapshot.checked, snapshot.err = time.Now(), priorErr
 		}
-		health := Health{Store: readinessBlockingStore{}, Configured: func(context.Context) error { return nil }, Readiness: snapshot}
+		health := Health{Store: readinessBlockingStore{}, Configured: func(context.Context, []model.Upstream) error { return nil }, Readiness: snapshot}
 		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Millisecond)
 		health.refreshReadiness(ctx)
 		cancel()
@@ -176,7 +176,7 @@ func TestReadinessLogsOnlyTransitions(t *testing.T) {
 	var messages []string
 	database := &fakeHealthStore{upstreams: []model.Upstream{{Kind: "local"}}}
 	health := Health{
-		Store: database, Configured: func(context.Context) error { return nil }, Readiness: &ReadinessSnapshot{},
+		Store: database, Configured: func(context.Context, []model.Upstream) error { return nil }, Readiness: &ReadinessSnapshot{},
 		Log: func(format string, args ...any) { messages = append(messages, fmt.Sprintf(format, args...)) },
 	}
 	health.refreshReadiness(t.Context())
@@ -212,7 +212,7 @@ func TestReadinessLogsStaleDeadlineAndRecoveryGateTransitions(t *testing.T) {
 	var messages []string
 	health := Health{
 		Store:      fakeHealthStore{upstreams: []model.Upstream{{Kind: "local"}}},
-		Configured: func(context.Context) error { return nil }, Readiness: &ReadinessSnapshot{},
+		Configured: func(context.Context, []model.Upstream) error { return nil }, Readiness: &ReadinessSnapshot{},
 		Log: func(format string, args ...any) { messages = append(messages, fmt.Sprintf(format, args...)) },
 	}
 	health.refreshReadiness(t.Context())
@@ -220,8 +220,8 @@ func TestReadinessLogsStaleDeadlineAndRecoveryGateTransitions(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Millisecond)
 	defer cancel()
 	health.refreshReadiness(ctx)
-	if len(messages) != 0 {
-		t.Fatalf("tolerated deadline logged a transition: %v", messages)
+	if len(messages) != 1 || !strings.Contains(messages[0], "event=retained_deadline") {
+		t.Fatalf("first retained deadline was not logged: %v", messages)
 	}
 	setReadinessChecked(health.Readiness, time.Now().Add(-readinessMaxAge-time.Second))
 	health.refreshReadiness(ctx)
@@ -233,7 +233,7 @@ func TestReadinessLogsStaleDeadlineAndRecoveryGateTransitions(t *testing.T) {
 	health.refreshReadiness(t.Context())
 	health.ReadyGate = nil
 	health.refreshReadiness(t.Context())
-	want := []string{"state=unready reason=stale", "state=ready reason=ready", "state=unready reason=startup_recovery", "state=ready reason=ready"}
+	want := []string{"event=retained_deadline", "state=unready reason=stale", "state=ready reason=ready", "state=unready reason=startup_recovery", "state=ready reason=ready"}
 	if len(messages) != len(want) {
 		t.Fatalf("logs = %v, want %v", messages, want)
 	}
@@ -247,7 +247,7 @@ func TestReadinessLogsStaleDeadlineAndRecoveryGateTransitions(t *testing.T) {
 func TestReadinessDoesNotRequireDiagnosticProbes(t *testing.T) {
 	health := Health{
 		Store:      fakeHealthStore{upstreams: []model.Upstream{{Kind: "ssh"}}},
-		Configured: func(context.Context) error { return nil }, Readiness: &ReadinessSnapshot{},
+		Configured: func(context.Context, []model.Upstream) error { return nil }, Readiness: &ReadinessSnapshot{},
 	}
 	health.refreshReadiness(t.Context())
 	if err := health.Ready(t.Context()); err != nil {
@@ -258,7 +258,7 @@ func TestReadinessDoesNotRequireDiagnosticProbes(t *testing.T) {
 func TestReadinessCanceledRefreshCannotPublishGreen(t *testing.T) {
 	health := Health{
 		Store:      fakeHealthStore{upstreams: []model.Upstream{{Kind: "local"}}},
-		Configured: func(context.Context) error { return nil }, Readiness: &ReadinessSnapshot{},
+		Configured: func(context.Context, []model.Upstream) error { return nil }, Readiness: &ReadinessSnapshot{},
 	}
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
@@ -274,7 +274,7 @@ func TestReadinessSlowProgressUnderContention(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		health := Health{
 			Store:      fakeHealthStore{err: errors.New("ordinary reader pool is saturated")},
-			Configured: func(context.Context) error { return nil }, Readiness: &ReadinessSnapshot{},
+			Configured: func(context.Context, []model.Upstream) error { return nil }, Readiness: &ReadinessSnapshot{},
 			ReadinessUpstreams: func(ctx context.Context) ([]model.Upstream, error) {
 				select {
 				case <-time.After(4 * time.Second):
@@ -309,7 +309,7 @@ func TestReadinessSlowProgressUnderContention(t *testing.T) {
 func TestReadinessPersistentDeadlinesExpireWithoutRenewingGreen(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		health := Health{Store: fakeHealthStore{upstreams: []model.Upstream{{Kind: "local"}}},
-			Configured: func(context.Context) error { return nil }, Readiness: &ReadinessSnapshot{}}
+			Configured: func(context.Context, []model.Upstream) error { return nil }, Readiness: &ReadinessSnapshot{}}
 		health.refreshReadiness(t.Context())
 		checked := health.Readiness.checked
 		health.Store = readinessBlockingStore{}

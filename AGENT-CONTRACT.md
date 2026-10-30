@@ -844,8 +844,14 @@ trust assumptions and complete invalidation rules.
   registration then also requires the upstream's durable SSH credentials for
   readiness to hold.
 - Readiness sampling has its own read-only WAL connection, a ten-second budget
-  and five-second cadence. A successful sample expires after 90 seconds;
-  deadlines do not renew it. Hard errors and startup recovery refuse at once.
+  and five-second cadence. A successful sample expires after 90 seconds of
+  elapsed time, independent of attempt count; deadlines do not renew it.
+  Ten-second probes overrun the ticker, which drops missed ticks. Hard errors
+  and startup recovery refuse at once. The reader busy timeout is at least
+  the probe budget. Configuration checks reuse the sampled upstream rows.
+  Stale transitions and the first retained deadline after each success are
+  logged; sample age and the retained-deadline count are administrator metrics.
+  The chart requires six consecutive five-second HTTPS readiness failures.
 - `/mcp` and `/api/*` require a bearer token. Static connection guidance may be
   served unauthenticated without exposing repository or run data.
 - The dashboard pages `/runs`, `/repos`, `/issues`, `/status`, and

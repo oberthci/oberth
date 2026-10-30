@@ -71,6 +71,7 @@ func (s *Store) configureLiveReaders(ctx context.Context, busyTimeout time.Durat
 	query.Add("_pragma", fmt.Sprintf("busy_timeout(%d)", busyTimeout.Milliseconds()))
 	location.RawQuery = query.Encode()
 	s.liveReaderDSN = location.String()
+	s.liveBusyTimeout = busyTimeout
 	s.livePath = path
 	s.liveFile, err = os.Stat(path)
 	if err != nil {
@@ -83,13 +84,17 @@ func (s *Store) configureLiveReaders(ctx context.Context, busyTimeout time.Durat
 // caller DSN transaction mode nor immutable settings. Every pool connection
 // gets the configured busy timeout and query_only pragma through the DSN.
 func (s *Store) openLiveReaders(ctx context.Context, maxConnections int) (*sql.DB, error) {
-	if s.liveReaderDSN == "" {
+	return s.openLiveReadersWithDSN(ctx, maxConnections, s.liveReaderDSN)
+}
+
+func (s *Store) openLiveReadersWithDSN(ctx context.Context, maxConnections int, dsn string) (*sql.DB, error) {
+	if dsn == "" {
 		return nil, fmt.Errorf("%w: live readers are not configured", ErrInvalidState)
 	}
 	if maxConnections <= 0 {
 		return nil, fmt.Errorf("%w: reader connection limit must be positive", ErrInvalid)
 	}
-	db, err := sql.Open("sqlite", s.liveReaderDSN)
+	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open live readers: %w", err)
 	}

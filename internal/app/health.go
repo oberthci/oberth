@@ -29,11 +29,11 @@ type Health struct {
 	// ReadinessUpstreams reserves a DB reader for the background sampler;
 	// dashboard/mapping queries must not consume its connection. Nil uses Store.
 	ReadinessUpstreams func(context.Context) ([]model.Upstream, error)
-	// Log optionally records readiness transitions from the background watcher.
+	// Log records readiness transitions and the watcher's first retained deadline.
 	Log        func(string, ...any)
 	Storage    func(context.Context) (any, error)
 	Store      HealthStore
-	Configured ClusterProbe
+	Configured func(context.Context, []model.Upstream) error
 	Cluster    ClusterProbe
 	Audit      ClusterProbe
 	VCS        VCSProbe
@@ -157,13 +157,15 @@ type HealthStatus struct {
 // taking those dependencies down must not remove the cached Git/SSH endpoint.
 // Audit authorization remains enforced by each operation's mutation gate.
 func (health Health) Ready(ctx context.Context) error {
+	var gateErr error
 	if health.ReadyGate != nil {
-		if err := health.ReadyGate(ctx); err != nil {
-			return err
-		}
+		gateErr = health.ReadyGate(ctx)
 	}
 	if health.Readiness != nil {
-		return health.Readiness.ready()
+		return health.observeReadiness(gateErr)
+	}
+	if gateErr != nil {
+		return gateErr
 	}
 	return health.probeReady(ctx)
 }
@@ -193,7 +195,7 @@ func (health Health) probeReadySample(ctx context.Context) (time.Duration, error
 		return dbWait, errReadinessNoUpstream
 	}
 	if requiresSSHIdentity(upstreams) {
-		if err := health.Configured(ctx); err != nil {
+		if err := health.Configured(ctx, upstreams); err != nil {
 			return dbWait, fmt.Errorf("%w: %w", errReadinessConfiguration, err)
 		}
 	}

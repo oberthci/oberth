@@ -3,7 +3,9 @@ package store
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"errors"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -18,11 +20,11 @@ func TestReadinessReaderSurvivesWriterAndMappingPoolSaturation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.OpenReadinessReaders(t.Context()); err != nil {
+	if err := s.OpenReadinessReaders(t.Context(), 10*time.Second); err != nil {
 		t.Fatal(err)
 	}
 	pool := s.readinessDB
-	if err := s.OpenReadinessReaders(t.Context()); err != nil || s.readinessDB != pool {
+	if err := s.OpenReadinessReaders(t.Context(), 10*time.Second); err != nil || s.readinessDB != pool {
 		t.Fatalf("startup is not idempotent: %v", err)
 	}
 	var held []*sql.Conn
@@ -69,7 +71,7 @@ func TestReadinessReaderReadOnlyBoundedAndClosed(t *testing.T) {
 	if _, err := s.ListReadinessUpstreams(t.Context()); !errors.Is(err, ErrInvalidState) {
 		t.Fatalf("missing startup reader silently fell back: %v", err)
 	}
-	if err := s.OpenReadinessReaders(t.Context()); err != nil {
+	if err := s.OpenReadinessReaders(t.Context(), 10*time.Second); err != nil {
 		t.Fatal(err)
 	}
 	conn, err := s.readinessDB.Conn(t.Context())
@@ -95,5 +97,42 @@ func TestReadinessReaderReadOnlyBoundedAndClosed(t *testing.T) {
 	}
 	if err := s.readinessDB.PingContext(t.Context()); err == nil {
 		t.Fatal("Store.Close left readiness reader open")
+	}
+}
+
+func TestReadinessReaderBusyTimeoutCoversBudgetOnEveryConnection(t *testing.T) {
+	for _, configured := range []time.Duration{5 * time.Second, 25 * time.Second} {
+		t.Run(configured.String(), func(t *testing.T) {
+			s, err := OpenAdminClient(t.Context(), filepath.Join(t.TempDir(), "readiness.db"), Options{BusyTimeout: configured})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = s.Close() }()
+			if err := s.OpenReadinessReaders(t.Context(), 10*time.Second); err != nil {
+				t.Fatal(err)
+			}
+			for range 2 {
+				conn, err := s.readinessDB.Conn(t.Context())
+				if err != nil {
+					t.Fatal(err)
+				}
+				var timeout, queryOnly int64
+				err = conn.QueryRowContext(t.Context(), "PRAGMA busy_timeout").Scan(&timeout)
+				if err != nil || timeout != max(configured, 10*time.Second).Milliseconds() {
+					t.Fatalf("readiness busy_timeout=%d: %v", timeout, err)
+				}
+				if err := conn.QueryRowContext(t.Context(), "PRAGMA query_only").Scan(&queryOnly); err != nil || queryOnly != 1 {
+					t.Fatalf("readiness query_only=%d: %v", queryOnly, err)
+				}
+				// Discard the physical connection; the replacement must inherit
+				// the timeout from the DSN, rather than a one-time PRAGMA.
+				_ = conn.Raw(func(any) error { return driver.ErrBadConn })
+				_ = conn.Close()
+			}
+			var ordinary int64
+			if err := s.readDB.QueryRowContext(t.Context(), "PRAGMA busy_timeout").Scan(&ordinary); err != nil || ordinary != configured.Milliseconds() {
+				t.Fatalf("ordinary reader timeout changed: %d, %v", ordinary, err)
+			}
+		})
 	}
 }
