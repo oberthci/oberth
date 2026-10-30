@@ -26,7 +26,7 @@ func TestChartReadinessToleratesHTTPSDelays(t *testing.T) {
 		probe.TimeoutSeconds != 5 || probe.PeriodSeconds != 5 || probe.FailureThreshold != 6 {
 		t.Fatalf("unexpected readiness timing: %+v", probe)
 	}
-	if container.StartupProbe.HTTPGet.Path != "/healthz" || container.StartupProbe.FailureThreshold != 60 || container.LivenessProbe.HTTPGet.Path != "/healthz" {
+	if container.StartupProbe.HTTPGet.Path != "/healthz" || container.StartupProbe.FailureThreshold != 60 || container.LivenessProbe.HTTPGet.Path != "/livez" || container.LivenessProbe.TimeoutSeconds != 15 {
 		t.Fatal("readiness timing changed the independent startup/liveness policy")
 	}
 }

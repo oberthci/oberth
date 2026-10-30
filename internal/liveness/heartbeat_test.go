@@ -3,7 +3,9 @@ package liveness
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -14,7 +16,7 @@ func TestHeartbeatStallThresholdAndExternalWait(t *testing.T) {
 	if err := h.CheckAt(start.Add(time.Hour)); err != nil {
 		t.Fatal("unstarted recovery", err)
 	}
-	h.now = func() time.Time { return start }
+	h.Now = func() time.Time { return start }
 	h.Beat()
 	if err := h.CheckAt(start.Add(MaxStall)); err != nil {
 		t.Fatal("threshold boundary", err)
@@ -39,7 +41,7 @@ func TestHeartbeatStallThresholdAndExternalWait(t *testing.T) {
 func TestWriterHeartbeatSlowProgressStallAndRecovery(t *testing.T) {
 	start := time.Now()
 	var elapsed atomic.Int64
-	h := Heartbeat{now: func() time.Time { return start.Add(time.Duration(elapsed.Load())) }}
+	h := Heartbeat{Now: func() time.Time { return start.Add(time.Duration(elapsed.Load())) }}
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	entered := make(chan context.Context)
@@ -85,8 +87,8 @@ func TestWriterHeartbeatSlowProgressStallAndRecovery(t *testing.T) {
 	if !errors.Is(h.Check(), ErrStalled) {
 		t.Fatal("wedged writer stayed live")
 	}
-	complete <- errors.New("database unavailable")
-	receive(t, entered) // failed attempts cannot renew progress
+	complete <- context.DeadlineExceeded
+	receive(t, entered) // deadlines cannot renew progress
 	if !errors.Is(h.Check(), ErrStalled) {
 		t.Fatal("failed write renewed progress")
 	}
@@ -151,4 +153,95 @@ func TestHeartbeatConcurrentProbeReads(t *testing.T) {
 		}
 	}
 	<-done
+}
+
+func TestHeartbeatPauseOwnership(t *testing.T) {
+	var h Heartbeat
+	h.Beat()
+	owner := h.Suspend()
+	stray := h.Suspend()
+	stray()
+	h.Beat() // a stray loop tick must not clear the owner's external wait
+	if err := h.CheckAt(time.Now().Add(24 * time.Hour)); err != nil {
+		t.Fatal("another caller cleared an owned pause", err)
+	}
+	owner()
+	newer := h.Suspend()
+	owner() // stale and repeated resumes cannot clear the newer pause
+	if err := h.CheckAt(time.Now().Add(24 * time.Hour)); err != nil {
+		t.Fatal("stale resume cleared a newer pause", err)
+	}
+	newer()
+	if !errors.Is(h.CheckAt(time.Now().Add(MaxStall+time.Second)), ErrStalled) {
+		t.Fatal("owner's resume did not re-arm progress")
+	}
+}
+
+type sqliteProbeError int
+
+func (err sqliteProbeError) Error() string { return "private database failure" }
+func (err sqliteProbeError) Code() int     { return int(err) }
+
+func TestWriterHeartbeatFastErrorsStayLiveAndExposeReadinessFailure(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		err   error
+		class string
+	}{
+		{"disk full", syscall.ENOSPC, "disk_full"},
+		{"read-only filesystem", syscall.EROFS, "read_only"},
+		{"SQLite busy", sqliteProbeError(5), "busy"},
+		{"SQLite locked", sqliteProbeError(6), "busy"},
+		{"SQLite full", sqliteProbeError(13), "disk_full"},
+		{"SQLite readonly", sqliteProbeError(8), "read_only"},
+		{"SQLite corrupt", sqliteProbeError(11), "corrupt"},
+		{"SQLite not a database", sqliteProbeError(26), "corrupt"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			start := time.Now()
+			var elapsed atomic.Int64
+			h := Heartbeat{Now: func() time.Time { return start.Add(time.Duration(elapsed.Load())) }}
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			entered := make(chan struct{})
+			complete := make(chan error)
+			done := make(chan struct{})
+			go func() {
+				defer close(done)
+				h.Watch(ctx, time.Millisecond, func(ctx context.Context) error {
+					select {
+					case entered <- struct{}{}:
+					case <-ctx.Done():
+						return ctx.Err()
+					}
+					select {
+					case err := <-complete:
+						return err
+					case <-ctx.Done():
+						return ctx.Err()
+					}
+				})
+			}()
+			defer func() { cancel(); receive(t, done) }()
+			for range 6 {
+				receive(t, entered)
+				elapsed.Add(int64(2 * time.Minute))
+				complete <- fmt.Errorf("write heartbeat: %w", test.err)
+				awaitSample(t, &h, start.Add(time.Duration(elapsed.Load())))
+				if err := h.Check(); err != nil {
+					t.Fatal("fast persistent DB error caused a restart", err)
+				}
+				if !errors.Is(h.ProbeError(), test.err) || h.ErrorClass() != test.class {
+					t.Fatalf("missing failure diagnostics: %v, %s", h.ProbeError(), h.ErrorClass())
+				}
+			}
+			receive(t, entered)
+			elapsed.Add(int64(time.Second))
+			complete <- nil
+			awaitSample(t, &h, start.Add(time.Duration(elapsed.Load())))
+			if h.ProbeError() != nil || h.ErrorClass() != "none" {
+				t.Fatal("writer recovery did not clear diagnostics")
+			}
+		})
+	}
 }

@@ -3,10 +3,12 @@ package store
 import (
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"testing"
 	"time"
 
+	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/testtimeout"
 )
 
@@ -106,5 +108,46 @@ func TestWriterHeartbeatCannotSucceedOnReadOnlyOrClosedStore(t *testing.T) {
 	}
 	if s.WriterHeartbeat(t.Context()) == nil {
 		t.Fatal("closed writer advertised progress")
+	}
+}
+
+func TestWriterHeartbeatDoesNotContendWithRCAuditFence(t *testing.T) {
+	for _, local := range []bool{false, true} {
+		t.Run(fmt.Sprintf("local=%t", local), func(t *testing.T) {
+			now := time.Now()
+			s := testStore(t, &now) // real latest migrated schema, not a fake SQL writer
+			head := seedAuditMetricRows(t, s, 2, now)
+			for range 5 {
+				callbacks := 0
+				external := func(model.AuditHead, model.AuditAnchor) error {
+					callbacks++
+					done := make(chan error, 1)
+					go func() {
+						for range 5 {
+							if err := s.WriterHeartbeat(t.Context()); err != nil {
+								done <- err
+								return
+							}
+						}
+						done <- nil
+					}()
+					select {
+					case err := <-done:
+						return err
+					case <-time.After(testtimeout.Start(5 * time.Second)):
+						return errors.New("heartbeat blocked by external-proof window")
+					}
+				}
+				var err error
+				if local {
+					_, _, err = s.VerifyLocalAuditMutationState(t.Context(), head, external)
+				} else {
+					_, _, err = s.VerifyAuditMutationStateUnanchored(t.Context(), nil, nil, external)
+				}
+				if err != nil || callbacks != 1 {
+					t.Fatalf("RC fence refused own writer heartbeats: callbacks=%d, err=%v", callbacks, err)
+				}
+			}
+		})
 	}
 }

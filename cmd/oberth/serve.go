@@ -797,7 +797,8 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 			return checkUpstreamSecretConfigured(ctx, kube, options.namespace, options.upstreamKey, options.knownHosts, registered)
 		}
 	}
-	health := app.Health{Store: database, Audit: anchors.Ready, VCSCache: &app.VCSSnapshot{}, Configured: upstreamReadinessProbe(options, secretConfigured), VCS: func(ctx context.Context, upstream model.Upstream) error {
+	writerProgress := &liveness.Heartbeat{}
+	health := app.Health{WriterReady: writerProgress.ProbeError, Store: database, Audit: anchors.Ready, VCSCache: &app.VCSSnapshot{}, Configured: upstreamReadinessProbe(options, secretConfigured), VCS: func(ctx context.Context, upstream model.Upstream) error {
 		if upstream.Kind == "local" {
 			info, err := os.Stat(upstream.BaseURL)
 			if err != nil {
@@ -1039,15 +1040,24 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 	}
 	// The writer heartbeat has its own serial, local-only probe. Shutdown joins
 	// it before closing SQLite, including on an early setup error.
-	writerProgress := &liveness.Heartbeat{}
 	writerProgress.Beat()
 	liveCtx, stopLiveness := context.WithCancel(ctx)
 	liveDone := make(chan struct{})
+	walkProgress := func(visit func(string, *liveness.Heartbeat)) {
+		visit("writer", writerProgress)
+		scheduler.WalkLiveness(visit)
+		controlAPI.WalkLiveness(visit)
+	}
+	transitionsDone := make(chan struct{})
+	go func() {
+		defer close(transitionsDone)
+		liveness.WatchTransitions(liveCtx, liveness.Interval, walkProgress, logger.Printf)
+	}()
 	go func() {
 		defer close(liveDone)
 		writerProgress.Watch(liveCtx, liveness.Interval, database.WriterHeartbeat)
 	}()
-	defer func() { stopLiveness(); <-liveDone }()
+	defer func() { stopLiveness(); <-liveDone; <-transitionsDone }()
 	httpAPI, err := api.New(authenticator, controlAPI, controlAPI, version,
 		api.WithErrorClassifier(classifyViewError),
 		api.WithMetrics(health.Readiness.WriteMetrics),

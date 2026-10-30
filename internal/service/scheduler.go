@@ -95,6 +95,7 @@ type Scheduler struct {
 	// onStartupRecovered, when set (tests only), is called once Run has
 	// finished startup recovery and is about to enter its dispatch loop.
 	onStartupRecovered func()
+	dispatchTicks      <-chan time.Time // test-only idle polling clock
 }
 
 // PromotionRetrier re-promotes a promotion whose publication failed because
@@ -118,7 +119,7 @@ func (scheduler *Scheduler) retryMovedPromotion(ctx context.Context, finalizatio
 		finalization.Publication.Status != model.PublicationFailed || finalization.TargetMovedTo == "" {
 		return
 	}
-	hook.retrier.RetryMovedPromotion(ctx, finalization.Promotion)
+	hook.retrier.RetryMovedPromotion(withoutDispatchProgress(ctx), finalization.Promotion)
 }
 
 func NewScheduler(config SchedulerConfig) (*Scheduler, error) {
@@ -470,6 +471,10 @@ func (scheduler *Scheduler) Run(ctx context.Context) error {
 	}
 	priorityPoll := time.NewTicker(priorityPollInterval)
 	defer priorityPoll.Stop()
+	ticks := priorityPoll.C
+	if scheduler.dispatchTicks != nil {
+		ticks = scheduler.dispatchTicks
+	}
 	for {
 		scheduler.dispatchProgress.Beat()
 		priorityErr := scheduler.refreshPriorities(workerCtx)
@@ -540,7 +545,7 @@ func (scheduler *Scheduler) Run(ctx context.Context) error {
 		scheduler.admission.grantLocked()
 		scheduler.admission.mu.Unlock()
 		select {
-		case <-priorityPoll.C:
+		case <-ticks:
 		case <-ctx.Done():
 			join()
 			return nil
@@ -1351,10 +1356,14 @@ func (scheduler *Scheduler) recoverPublicationIDsWithGate(ctx context.Context, i
 		}
 		var cleanupErr error
 		if finalization.Run.ID != "" {
+			beatDispatch(ctx)
 			cleanupErr = scheduler.workspaces.cleanupRun(ctx, finalization.Run.ID)
+			beatDispatch(ctx)
 		}
 		if finalization.Promotion.ID != "" {
+			beatDispatch(ctx)
 			cleanupErr = errors.Join(cleanupErr, scheduler.workspaces.cleanupPromotion(ctx, finalization.Promotion.ID))
+			beatDispatch(ctx)
 		}
 		if cleanupErr != nil {
 			recoveryErr = errors.Join(recoveryErr, fmt.Errorf("clean finalized publication workspace %s: %w", id, cleanupErr))

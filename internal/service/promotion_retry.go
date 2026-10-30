@@ -178,7 +178,7 @@ func (service *API) RetryMovedPromotion(ctx context.Context, failed model.Promot
 		log.Printf("oberth: automatic retry of moved promotion %s skipped: server is shutting down", failed.ID)
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), promotionAutoRetryTimeout)
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(withoutDispatchProgress(ctx)), promotionAutoRetryTimeout)
 	if err := service.requireMutation(ctx); err != nil {
 		cancel()
 		log.Printf("oberth: automatic retry of moved promotion %s skipped: %v", failed.ID, err)

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -289,4 +290,130 @@ func TestPublicationLivenessExcludesGitButDetectsLocalFinalizationStall(t *testi
 	}
 	close(store.release)
 	awaitLivenessDone(t, done)
+}
+
+func TestLivenessDispatchPauseSurvivesOtherGoroutine(t *testing.T) {
+	fixture := newRecoveryFixture(t)
+	jobs := &livenessAdmissionJobs{entered: make(chan struct{})}
+	scheduler := fixture.scheduler(t, jobs)
+	scheduler.dispatchProgress.Beat()
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	dispatchCtx := withDispatchProgress(ctx, &scheduler.dispatchProgress)
+	done := make(chan error, 1)
+	go func() { done <- scheduler.awaitDispatchAdmission(dispatchCtx) }()
+	awaitLivenessSignal(t, jobs.entered)
+	otherDone := make(chan struct{})
+	go func() {
+		defer close(otherDone)
+		suspendDispatch(context.WithoutCancel(dispatchCtx))()
+		beatDispatch(context.WithoutCancel(dispatchCtx))
+	}()
+	awaitLivenessSignal(t, otherDone)
+	if err := scheduler.dispatchProgress.CheckAt(time.Now().Add(24 * time.Hour)); err != nil {
+		t.Fatal("background promotion context cleared dispatch's admission pause", err)
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(testStartTimeout(5 * time.Second)):
+		t.Fatal("admission did not stop")
+	}
+}
+
+type livenessRetryHook func(context.Context, model.Promotion)
+
+func (hook livenessRetryHook) RetryMovedPromotion(ctx context.Context, promotion model.Promotion) {
+	hook(ctx, promotion)
+}
+
+func TestLivenessMovedPromotionHandoffStripsDispatchCapability(t *testing.T) {
+	var heartbeat liveness.Heartbeat
+	heartbeat.Beat()
+	resume := heartbeat.Suspend()
+	defer resume()
+	scheduler := &Scheduler{}
+	called := false
+	scheduler.SetPromotionRetrier(livenessRetryHook(func(ctx context.Context, _ model.Promotion) {
+		called = true
+		if value, ok := ctx.Value(dispatchProgressKey{}).(*liveness.Heartbeat); ok && value != nil {
+			t.Fatal("retry inherited dispatch heartbeat")
+		}
+		detached := context.WithoutCancel(ctx)
+		suspendDispatch(detached)()
+		beatDispatch(detached)
+	}))
+	scheduler.retryMovedPromotion(withDispatchProgress(t.Context(), &heartbeat), model.PublicationFinalization{
+		Promotion:   model.Promotion{ID: "moved", Status: model.PromotionFailed},
+		Publication: model.Publication{Status: model.PublicationFailed}, TargetMovedTo: strings.Repeat("a", 40),
+	})
+	if !called {
+		t.Fatal("retry handoff not exercised")
+	}
+	if err := heartbeat.CheckAt(time.Now().Add(24 * time.Hour)); err != nil {
+		t.Fatal("detached handoff altered dispatch", err)
+	}
+	// A typed nil must be as harmless as a stripped key.
+	nilCtx := withDispatchProgress(t.Context(), nil)
+	suspendDispatch(nilCtx)()
+	beatDispatch(nilCtx)
+}
+
+type idleLivenessStore struct {
+	SchedulerStore
+	now    func() time.Time
+	claims chan time.Time
+}
+
+func (store *idleLivenessStore) ClaimNextRun(ctx context.Context) (model.Run, error) {
+	run, err := store.SchedulerStore.ClaimNextRun(ctx)
+	select {
+	case store.claims <- store.now():
+	case <-ctx.Done():
+	}
+	return run, err
+}
+
+func TestSchedulerLivenessIdleRunStaysLiveAcrossVirtualHour(t *testing.T) {
+	fixture := newRecoveryFixture(t)
+	scheduler := fixture.scheduler(t, &recoveryJobs{})
+	start := time.Now()
+	var elapsed atomic.Int64
+	clock := func() time.Time { return start.Add(time.Duration(elapsed.Load())) }
+	scheduler.dispatchProgress.Now = clock
+	ticks := make(chan time.Time)
+	scheduler.dispatchTicks = ticks
+	idle := &idleLivenessStore{SchedulerStore: scheduler.store, now: clock, claims: make(chan time.Time, 64)}
+	scheduler.store = idle // omit optional head-persistence worker to isolate dispatch
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() { done <- scheduler.Run(ctx) }()
+	defer func() { cancel(); awaitLivenessDone(t, done) }()
+	for step := 0; step <= 10; step++ {
+		want := clock()
+		if step > 0 {
+			select {
+			case ticks <- want:
+			case <-time.After(testStartTimeout(5 * time.Second)):
+				t.Fatal("idle scheduler never polled")
+			}
+		}
+		for {
+			select {
+			case got := <-idle.claims:
+				if !got.Equal(want) {
+					continue
+				}
+			case <-time.After(testStartTimeout(5 * time.Second)):
+				t.Fatal("idle tick did not make an actual queue claim")
+			}
+			break
+		}
+		if err := scheduler.Live(); err != nil {
+			t.Fatalf("idle after %s: %v", time.Duration(elapsed.Load()), err)
+		}
+		if step < 10 {
+			elapsed.Add(int64(6 * time.Minute))
+		}
+	}
 }

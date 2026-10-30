@@ -35,7 +35,7 @@ func TestChartLivenessUsesConservativeLocalProgressProbe(t *testing.T) {
 			t.Fatalf("probe must use HTTPS %s: %+v", check.path, check.probe)
 		}
 	}
-	if server.LivenessProbe.PeriodSeconds < 60 || server.LivenessProbe.FailureThreshold < 3 || server.LivenessProbe.TimeoutSeconds < 5 {
+	if server.LivenessProbe.PeriodSeconds < 60 || server.LivenessProbe.FailureThreshold < 3 || server.LivenessProbe.TimeoutSeconds < 10 || server.LivenessProbe.TimeoutSeconds > 15 {
 		t.Fatalf("liveness restart budget too short: %+v", server.LivenessProbe)
 	}
 }

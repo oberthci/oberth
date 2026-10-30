@@ -9,7 +9,9 @@ import (
 // lock and commit path, including on an idle installation. The no-op UPDATE
 // leaves migration metadata and the audit chain unchanged and needs no schema
 // migration. It deliberately avoids the mutation gate, whose external witness
-// services must not determine process liveness.
+// services must not determine process liveness. TestWriterHeartbeat uses the
+// real migrated schema: a future migration that forbids updates to this table
+// must change the heartbeat target and its test together.
 func (s *Store) WriterHeartbeat(ctx context.Context) error {
 	if s.readOnly {
 		return fmt.Errorf("%w: heartbeat requires a writer", ErrInvalidState)

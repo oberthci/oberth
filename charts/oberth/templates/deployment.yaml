@@ -411,7 +411,7 @@ spec:
               scheme: HTTPS
               path: /livez
               port: https
-            timeoutSeconds: 5
+            timeoutSeconds: 15
             # Five minutes without local progress, then three failures a minute
             # apart, tolerates sustained CI load before restarting the process.
             periodSeconds: 60

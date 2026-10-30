@@ -81,7 +81,7 @@ func (service *API) planOrQueuePromotion(ctx context.Context, actor api.Actor, r
 			// recovery, rather than start a wait nothing would cancel.
 			return promotion, nil
 		}
-		planCtx := context.WithoutCancel(ctx)
+		planCtx := context.WithoutCancel(withoutDispatchProgress(ctx))
 		waitCtx, cancelWait := context.WithCancel(planCtx)
 		stopAfter := context.AfterFunc(service.lifetime, cancelWait)
 		progress := &liveness.Heartbeat{}

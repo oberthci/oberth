@@ -324,3 +324,27 @@ func TestReadinessPersistentDeadlinesExpireWithoutRenewingGreen(t *testing.T) {
 		}
 	})
 }
+
+func TestReadinessWriterHardFailureOverridesReadableWALAndRecovers(t *testing.T) {
+	database := &readinessCountingStore{fakeHealthStore: fakeHealthStore{upstreams: []model.Upstream{{Kind: "local"}}}}
+	var writeErr error
+	health := Health{Store: database, Configured: func(context.Context, []model.Upstream) error { return nil }, Readiness: &ReadinessSnapshot{}, WriterReady: func() error { return writeErr }}
+	health.refreshReadiness(t.Context())
+	if err := health.Ready(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	writeErr = errors.New("disk full")
+	reads := database.reads.Load()
+	health.refreshReadiness(t.Context())
+	if err := health.Ready(t.Context()); !errors.Is(err, errReadinessDatabase) {
+		t.Fatal("readable WAL hid a hard writer failure", err)
+	}
+	if database.reads.Load() != reads {
+		t.Fatal("writer error path unexpectedly probed storage")
+	}
+	writeErr = nil
+	health.refreshReadiness(t.Context())
+	if err := health.Ready(t.Context()); err != nil {
+		t.Fatal("writer recovery did not restore readiness", err)
+	}
+}
