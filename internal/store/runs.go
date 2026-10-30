@@ -213,7 +213,7 @@ func (s *Store) enqueueRunTx(ctx context.Context, tx *sql.Tx, spec model.RunSpec
 	// newer work stays queued behind that durable obligation.
 	if spec.RefKind == model.RefBranch && spec.Trigger != "promotion" {
 		rows, err := tx.QueryContext(ctx, `
-SELECT id, job_name FROM runs
+SELECT id, job_name, phase FROM runs
 WHERE repo_id = ? AND ref_kind = 'branch' AND ref = ? AND schedule_entry = ?
   AND trigger != 'promotion'
   AND NOT EXISTS (
@@ -228,12 +228,16 @@ ORDER BY queue_sequence`, spec.RepoID, spec.Ref, spec.ScheduleEntry)
 		defer func() { _ = rows.Close() }()
 		for rows.Next() {
 			var cancellation model.RunCancellation
-			if err := rows.Scan(&cancellation.RunID, &cancellation.JobName); err != nil {
+			var phase string
+			if err := rows.Scan(&cancellation.RunID, &cancellation.JobName, &phase); err != nil {
 				_ = rows.Close()
 				return model.EnqueueRunResult{}, fmt.Errorf("scan running superseded run: %w", err)
 			}
 			cancellation.SupersededBy = id
 			cancellation.Reason = "superseded"
+			if phase == "infrastructure-pending" {
+				cancellation.Reason = "owner_restart"
+			}
 			cancellation.CreatedAt = fromUnixNano(now)
 			cancellations = append(cancellations, cancellation)
 		}
@@ -287,16 +291,17 @@ WHERE id != ? AND repo_id = ? AND ref_kind = 'branch' AND ref = ? AND schedule_e
 		for _, cancellation := range cancellations {
 			// Upsert: a run superseded across a restart may already carry an
 			// owner_restart obligation (run_id is the primary key). The fresh
-			// supersede obligation replaces it and re-arms completion so the
+			// supersede obligation re-arms completion (retaining late-create
+			// cleanup for infrastructure-pending runs) so the
 			// stranded Job is still deleted exactly once (issue #270).
 			if _, err := tx.ExecContext(ctx, `
 INSERT INTO run_cancellations(run_id, job_name, superseded_by, reason, created_at)
-VALUES(?, ?, ?, 'superseded', ?)
+VALUES(?, ?, ?, ?, ?)
 ON CONFLICT(run_id) DO UPDATE SET
     job_name = excluded.job_name,
     superseded_by = excluded.superseded_by,
     reason = excluded.reason,
-    completed_at = NULL`, cancellation.RunID, cancellation.JobName, cancellation.SupersededBy, now); err != nil {
+    completed_at = NULL`, cancellation.RunID, cancellation.JobName, cancellation.SupersededBy, cancellation.Reason, now); err != nil {
 				return model.EnqueueRunResult{}, fmt.Errorf("record run cancellation: %w", err)
 			}
 		}

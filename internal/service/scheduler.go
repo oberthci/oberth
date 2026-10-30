@@ -351,18 +351,48 @@ func (scheduler *Scheduler) completeCancellationsWithGate(ctx context.Context, c
 	if err := require(ctx); err != nil {
 		return err
 	}
+	// Supplied snapshots can predate a lost-acknowledgement re-arm. Use the
+	// current ledger entry and compare it again when completing the pass.
+	pending, err := scheduler.store.PendingRunCancellations(ctx)
+	if err != nil {
+		return err
+	}
+	currentCancellations := make(map[string]model.RunCancellation, len(pending))
+	for _, current := range pending {
+		currentCancellations[current.RunID] = current
+	}
 	for _, cancellation := range cancellations {
 		beatDispatch(ctx)
 		if strings.TrimSpace(cancellation.JobName) == "" {
 			continue
 		}
+		current, pending := currentCancellations[cancellation.RunID]
+		if !pending {
+			continue
+		}
+		cancellation = current
+		run, err := scheduler.store.Run(ctx, cancellation.RunID)
+		if err != nil {
+			return err
+		}
 		if err := runDispatchExternal(ctx, func(ctx context.Context) error {
+			if settler, ok := scheduler.jobs.(JobCreateSettler); ok && cancellation.Reason == "owner_restart" {
+				return settler.SettleCreate(ctx, cancellation.JobName, cancellation.RunID)
+			}
+			if run.Phase == "infrastructure-pending" {
+				return errors.New("service: engine cannot settle uncertain Workflow create")
+			}
 			return scheduler.jobs.Delete(ctx, cancellation.JobName, cancellation.RunID)
 		}); err != nil {
 			return fmt.Errorf("delete superseded Job %s: %w", cancellation.JobName, err)
 		}
-		if err := scheduler.store.CompleteRunCancellation(ctx, cancellation.RunID, cancellation.JobName); err != nil {
+		if err := scheduler.store.CompleteObservedRunCancellation(ctx, cancellation); err != nil {
 			return fmt.Errorf("complete cancellation for run %s: %w", cancellation.RunID, err)
+		}
+		if run.Phase == "infrastructure-pending" {
+			if err := scheduler.finishInfrastructureFailure(ctx, run, model.Repository{}, errors.New("workflow create outcome uncertain; cleanup confirmed absence")); err != nil {
+				return err
+			}
 		}
 		scheduler.admission.releaseDeletedRun(cancellation.RunID)
 		cleanupCtx, cancelCleanup := boundedWorkspaceCleanupContext(ctx)
@@ -939,6 +969,24 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 		err = scheduler.jobs.CreateCI(ctx, jobRequest)
 	}
 	if err != nil {
+		var uncertain interface{ AmbiguousCreate() bool }
+		if errors.As(err, &uncertain) && uncertain.AmbiguousCreate() {
+			_ = logFile.Close()
+			// The pending phase and cancellation are one durable transaction.
+			// A preempting Delete/NotFound may already have completed the old
+			// obligation; re-arm it before any path may release this grant.
+			persistCtx, cancelPersist := boundedWorkspaceCleanupContext(ctx)
+			pendingErr := scheduler.store.MarkRunCreatePending(persistCtx, run.ID, jobName)
+			cancelPersist()
+			if pendingErr == nil {
+				pendingErr = scheduler.completeCancellationsWithGate(ctx, []model.RunCancellation{{RunID: run.ID, JobName: jobName}}, require)
+			}
+			if pendingErr != nil {
+				reservation.retain()
+				return errors.Join(fmt.Errorf("uncertain create Job: %w", err), pendingErr)
+			}
+			return nil
+		}
 		if _, ok := scheduler.jobs.(JobAdopter); ok && workflowRunAdoptable(run) && ctx.Err() != nil {
 			reservation.retain()
 			return logFile.Close()
@@ -1534,6 +1582,15 @@ func (scheduler *Scheduler) reconcileStrandedRunsWithGate(ctx context.Context, r
 		return fmt.Errorf("load stranded runs for reconciliation: %w", err)
 	}
 	for _, run := range runs {
+		if run.Phase == "infrastructure-pending" {
+			if err := scheduler.store.MarkRunCreatePending(ctx, run.ID, run.JobName); err != nil {
+				return err
+			}
+			if err := scheduler.completeCancellationsWithGate(ctx, []model.RunCancellation{{RunID: run.ID, JobName: run.JobName}}, require); err != nil {
+				return err
+			}
+			continue
+		}
 		if adopter, ok := scheduler.jobs.(JobAdopter); ok && workflowRunAdoptable(run) {
 			eligible, err := scheduler.withoutPendingPreflight(ctx, run)
 			if err != nil {
@@ -1552,6 +1609,13 @@ func (scheduler *Scheduler) reconcileStrandedRunsWithGate(ctx context.Context, r
 						return adoptionFailure(adopter, run, err)
 					}
 					continue
+				}
+				if run.Phase == "waiting" {
+					if settler, ok := scheduler.jobs.(JobCreateSettler); ok {
+						if err := settler.SettleCreate(ctx, run.JobName, run.ID); err != nil {
+							return err
+						}
+					}
 				}
 			}
 		}

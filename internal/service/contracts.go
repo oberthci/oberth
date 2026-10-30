@@ -93,6 +93,7 @@ type RunRetryStore interface {
 type RunQueueStore interface {
 	EnqueueReceiveEvent(context.Context, model.ReceiveEventSpec, model.RunSpec) (model.EnqueueRunResult, error)
 	ClaimNextRun(context.Context) (model.Run, error)
+	MarkRunCreatePending(context.Context, string, string) error
 	MarkRunSubmitted(context.Context, string) (model.Run, error)
 	MarkRunAdmitted(context.Context, string) (model.Run, error)
 	MarkRunParked(context.Context, string) (model.Run, error)
@@ -102,6 +103,7 @@ type RunQueueStore interface {
 	SetRunConcurrencyGroup(context.Context, string, string) error
 	PendingRunCancellations(context.Context) ([]model.RunCancellation, error)
 	CompleteRunCancellation(context.Context, string, string) error
+	CompleteObservedRunCancellation(context.Context, model.RunCancellation) error
 	RearmRunCancellation(context.Context, string, string) error
 	CompleteSupersededRunCancellationWithoutJob(context.Context, string) error
 	FinishRun(context.Context, string, model.RunResult) (model.Run, error)
@@ -433,6 +435,14 @@ type JobAdopter interface {
 	Adopt(context.Context, model.Run) (periapsis.Size, bool, error)
 	WaitResumed(context.Context, string, io.Writer, []runprogress.Event, int64) (JobResult, error)
 	JobNamespace() string
+}
+
+// JobCreateSettler closes a lost-acknowledgement submission before admission
+// can be freed. It must wait through its bounded late-commit window, delete only
+// the run's UID-fenced Workflows, and end with a fresh NotFound. An error leaves
+// the durable cancellation and admission reservation owned for restart.
+type JobCreateSettler interface {
+	SettleCreate(context.Context, string, string) error
 }
 
 type ReleaseJobController interface {

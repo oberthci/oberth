@@ -90,21 +90,25 @@ RETURNING `+runColumns, model.PhaseCancelled, text, text, now, now, current.ID))
 	}
 	result := model.RunCancelResult{Run: cancelled, PreviousState: previous}
 	if current.Status == model.RunRunning {
+		cleanupReason := "superseded"
+		if current.Phase == "infrastructure-pending" {
+			cleanupReason = "owner_restart"
+		}
 		// The same obligation a supersede records, without a successor. An
 		// empty Job name means the owner has not published one yet; it does
 		// so through SetRunJobName, or settles the obligation when it exits.
 		if _, err := tx.ExecContext(ctx, `
 INSERT INTO run_cancellations(run_id, job_name, superseded_by, reason, created_at)
-VALUES(?, ?, '', 'superseded', ?)
+VALUES(?, ?, '', ?, ?)
 ON CONFLICT(run_id) DO UPDATE SET
     job_name = excluded.job_name,
     superseded_by = '',
     reason = excluded.reason,
-    completed_at = NULL`, cancelled.ID, cancelled.JobName, now); err != nil {
+    completed_at = NULL`, cancelled.ID, cancelled.JobName, cleanupReason, now); err != nil {
 			return model.RunCancelResult{}, fmt.Errorf("record run cancellation: %w", err)
 		}
 		result.Cancellations = []model.RunCancellation{{
-			RunID: cancelled.ID, JobName: cancelled.JobName, Reason: "superseded", CreatedAt: fromUnixNano(now),
+			RunID: cancelled.ID, JobName: cancelled.JobName, Reason: cleanupReason, CreatedAt: fromUnixNano(now),
 		}}
 	}
 	if cancelled.Trigger == "promotion" {

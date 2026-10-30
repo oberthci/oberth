@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"reflect"
 	"strings"
 	"testing"
@@ -121,6 +122,10 @@ func TestWorkflowCreateRetryReconcilesWithoutReseeding(t *testing.T) {
 						t.Fatalf("exhaustion is not infrastructure: name=%s err=%v", name, err)
 					}
 				} else if strings.HasPrefix(mode, "foreign-") {
+					var uncertain interface{ AmbiguousCreate() bool }
+					if errors.As(err, &uncertain) && uncertain.AmbiguousCreate() {
+						t.Fatal("foreign submission refusal routed to cancellation")
+					}
 					if name != "" || err == nil || (!strings.Contains(err.Error(), "belongs to run") && !strings.Contains(err.Error(), "different spec")) {
 						t.Fatalf("foreign Workflow accepted: name=%s err=%v", name, err)
 					}
@@ -188,7 +193,7 @@ func TestWorkflowCreateRetryErrorClassesAndUncertainGet(t *testing.T) {
 			}
 			start := time.Now()
 			_, rejected, err := (&Controller{workflows: client}).createWorkflowWithRetry(t.Context(), request, intended)
-			if len(client.posts) != 1 || rejected || !errors.Is(err, context.DeadlineExceeded) || time.Since(start) != workflowCreateBudget {
+			if len(client.posts) != 1 || rejected || !errors.Is(err, context.DeadlineExceeded) || time.Since(start) != 60*time.Second {
 				t.Fatalf("unknown GET permitted POST/escaped budget: posts=%d elapsed=%s err=%v", len(client.posts), time.Since(start), err)
 			}
 		})
@@ -274,7 +279,7 @@ func TestWorkflowCreateRetryBudgetBoundsPostAndRetryAfter(t *testing.T) {
 				}
 				start := time.Now()
 				_, rejected, err := (&Controller{workflows: client}).createWorkflowWithRetry(t.Context(), request, intended)
-				if len(client.posts) != 1 || rejected || !errors.Is(err, context.DeadlineExceeded) || time.Since(start) != workflowCreateBudget {
+				if len(client.posts) != 1 || rejected || !errors.Is(err, context.DeadlineExceeded) || time.Since(start) != 60*time.Second {
 					t.Fatalf("budget escaped: posts=%d elapsed=%s err=%v", len(client.posts), time.Since(start), err)
 				}
 			})
@@ -313,4 +318,23 @@ func TestWorkflowCreateRetryRechecksControllerProfile(t *testing.T) {
 			})
 		})
 	}
+}
+
+func TestWorkflowCreateRetryWrappedCancellationDoesNotWait(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		client := &createRetryWorkflowClient{postHook: func(context.Context, *wfv1.Workflow) (*wfv1.Workflow, error) {
+			return nil, &url.Error{Op: "Post", URL: "https://kube.invalid", Err: context.Canceled}
+		}}
+		request := testRequest(periapsis.TriggerCI, greedyDocument)
+		intended, err := Build(testConfig(), request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		start := time.Now()
+		_, rejected, err := (&Controller{workflows: client}).createWorkflowWithRetry(t.Context(), request, intended)
+		var uncertain interface{ AmbiguousCreate() bool }
+		if len(client.posts) != 1 || rejected || !errors.Is(err, context.Canceled) || time.Since(start) != 0 || !errors.As(err, &uncertain) || !uncertain.AmbiguousCreate() {
+			t.Fatalf("wrapped cancellation retried/waited or lost uncertainty: posts=%d elapsed=%s err=%v", len(client.posts), time.Since(start), err)
+		}
+	})
 }

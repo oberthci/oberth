@@ -901,6 +901,7 @@ WHERE reason = 'owner_restart' AND completed_at IS NULL
   AND EXISTS (
       SELECT 1 FROM runs
       WHERE runs.id = run_cancellations.run_id AND status = 'running'
+        AND phase != 'infrastructure-pending'
         AND job_name != ''
         AND NOT EXISTS (
             SELECT 1 FROM vm_executions

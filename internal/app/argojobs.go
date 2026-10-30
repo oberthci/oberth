@@ -737,6 +737,28 @@ func (jobs *ArgoJobs) Delete(ctx context.Context, name, runID string) error {
 	return nil
 }
 
+// SettleCreate bypasses the in-flight Delete shortcut: an ambiguous POST may
+// still commit even after an earlier Cancel returned NotFound.
+func (jobs *ArgoJobs) SettleCreate(ctx context.Context, name, runID string) error {
+	jobs.mu.Lock()
+	intent, exists := jobs.intents[name]
+	jobs.mu.Unlock()
+	if exists && intent.runID != runID {
+		return errors.New("app: pending Workflow belongs to a different in-process run")
+	}
+	controller, ok := jobs.controller.(interface {
+		SettleCreate(context.Context, string, string) error
+	})
+	if !ok {
+		return errors.New("app: controller cannot settle uncertain Workflow creates")
+	}
+	if err := controller.SettleCreate(ctx, name, runID); err != nil {
+		return err
+	}
+	jobs.forget(name, runID)
+	return nil
+}
+
 // TerminalResult reconstructs a run's outcome from the Workflow object alone,
 // so a server that restarted mid-run records what really happened.
 func (jobs *ArgoJobs) TerminalResult(ctx context.Context, name string) (service.JobResult, error) {
@@ -907,6 +929,7 @@ func (jobs *ArgoJobs) PipelineCredentialed(_ context.Context, request service.Jo
 
 var (
 	_ service.JobController              = (*ArgoJobs)(nil)
+	_ service.JobCreateSettler           = (*ArgoJobs)(nil)
 	_ service.JobAdopter                 = (*ArgoJobs)(nil)
 	_ service.ReleaseJobController       = (*ArgoJobs)(nil)
 	_ service.PipelineSizer              = (*ArgoJobs)(nil)

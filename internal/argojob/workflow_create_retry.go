@@ -23,6 +23,7 @@ type workflowCreateFailure struct {
 	attempts    int
 	cause       error
 	infra       bool
+	ambiguous   bool
 }
 
 func (e *workflowCreateFailure) Error() string {
@@ -30,6 +31,7 @@ func (e *workflowCreateFailure) Error() string {
 }
 func (e *workflowCreateFailure) Unwrap() error               { return e.cause }
 func (e *workflowCreateFailure) InfrastructureFailure() bool { return e.infra }
+func (e *workflowCreateFailure) AmbiguousCreate() bool       { return e.ambiguous }
 
 func transientWorkflowCreate(err error) bool {
 	return !errors.Is(err, context.Canceled) && retryExecutorIdentityRead(err)
@@ -51,7 +53,7 @@ func (controller *Controller) createWorkflowWithRetry(ctx context.Context, reque
 	reconcile, backedOff, ambiguous, mayRetry := false, false, false, false
 	var createErr, lastErr error
 	failure := func(stage string, cause error, infra bool) (*wfv1.Workflow, bool, error) {
-		return nil, false, &workflowCreateFailure{name: intended.Name, stage: stage, attempts: attempts, cause: cause, infra: infra}
+		return nil, false, &workflowCreateFailure{name: intended.Name, stage: stage, attempts: attempts, cause: cause, infra: infra, ambiguous: ambiguous}
 	}
 	wait := func(stage string, cause error) error {
 		waits++
@@ -76,11 +78,14 @@ func (controller *Controller) createWorkflowWithRetry(ctx context.Context, reque
 		if reconcile {
 			existing, err := controller.workflows.Get(retryCtx, intended.Name, metav1.GetOptions{})
 			if err == nil {
-				if _, err := controller.refreshNonroot(retryCtx, request); err != nil {
+				if err := sameSubmission(existing, intended); err != nil {
+					// A known foreign object owns this name. Never route this
+					// refusal into cleanup, whose ordinary cancellation fence
+					// is the run ID rather than the full submission spec.
 					return nil, false, err
 				}
-				if err := sameSubmission(existing, intended); err != nil {
-					return nil, false, err
+				if _, err := controller.refreshNonroot(retryCtx, request); err != nil {
+					return nil, false, fmt.Errorf("%w: %w", &workflowCreateFailure{name: intended.Name, stage: "identity", attempts: attempts, ambiguous: ambiguous}, err)
 				}
 				return existing, false, nil
 			}
@@ -95,7 +100,7 @@ func (controller *Controller) createWorkflowWithRetry(ctx context.Context, reque
 				continue // Never POST while the outcome of GET is unknown.
 			}
 			if !mayRetry || attempts >= workflowCreateAttempts {
-				return nil, !ambiguous && definiteWorkflowRejection(createErr), &workflowCreateFailure{name: intended.Name, stage: "create", attempts: attempts, cause: createErr, infra: mayRetry}
+				return nil, !ambiguous && definiteWorkflowRejection(createErr), &workflowCreateFailure{name: intended.Name, stage: "create", attempts: attempts, cause: createErr, infra: mayRetry, ambiguous: ambiguous}
 			}
 			if !backedOff {
 				if err := wait("create", createErr); err != nil {
@@ -107,7 +112,7 @@ func (controller *Controller) createWorkflowWithRetry(ctx context.Context, reque
 		}
 		if attempts > 0 {
 			if _, err := controller.refreshNonroot(retryCtx, request); err != nil {
-				return nil, false, err
+				return nil, false, fmt.Errorf("%w: %w", &workflowCreateFailure{name: intended.Name, stage: "identity", attempts: attempts, ambiguous: ambiguous}, err)
 			}
 		}
 		if err := retryCtx.Err(); err != nil {
@@ -120,7 +125,7 @@ func (controller *Controller) createWorkflowWithRetry(ctx context.Context, reque
 		}
 		createErr, lastErr = err, err
 		mayRetry = transientWorkflowCreate(err) || apierrors.IsAlreadyExists(err)
-		ambiguous = ambiguous || (!definiteWorkflowRejection(err) && !apierrors.IsAlreadyExists(err))
+		ambiguous = ambiguous || !definiteWorkflowRejection(err)
 		reconcile, backedOff = true, false
 	}
 }

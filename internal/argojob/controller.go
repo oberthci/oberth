@@ -395,6 +395,9 @@ func sameSubmission(existing, intended *wfv1.Workflow) error {
 			return errors.New("argojob: existing Workflow does not carry the verified nonroot policy and profile")
 		}
 	}
+	// Ordinary pipelines retain the legacy annotation-only identity check.
+	// Namespace Workflow-create RBAC is part of this trust boundary; only the
+	// nonroot/trusted-KVM cases above compare the actual stored spec.
 	existingRun, existingIdentity, ok := WorkflowMeta(existing)
 	if !ok {
 		return fmt.Errorf("argojob: Workflow %s already exists and is not an Oberth run", intended.Name)
