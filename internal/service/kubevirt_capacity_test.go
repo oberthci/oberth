@@ -180,7 +180,7 @@ func TestKubeVirtSchedulerConcurrentRunsAndQueueReason(t *testing.T) {
 			continue
 		}
 		found = true
-		if run.DisplayStatus != "queued" || run.DisplayReason != "KubeVirt capacity" || run.StartedAt != nil || run.ConcurrencyGroup != "" {
+		if run.DisplayStatus != "queued" || !strings.Contains(run.DisplayReason, "KubeVirt capacity") || run.StartedAt != nil || run.ConcurrencyGroup != "" {
 			t.Fatalf("parked presentation = %#v", run)
 		}
 	}

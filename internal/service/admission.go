@@ -59,8 +59,11 @@ type admissionReservation struct {
 	gate     *weightedAdmission
 	sequence int64
 	// order retains restart FIFO position; sequence stays the unique run key.
-	order int64
-	runID string
+	order          int64
+	priority       model.RunPriority
+	priorityReason string
+	queuedAt       time.Time
+	runID          string
 	// repoID, repo and ref identify the run when it blocks the queue head
 	// (#1021); preparedAt is when it started waiting for weight.
 	repoID     int64
@@ -188,14 +191,21 @@ func (gate *weightedAdmission) reserve(sequence int64) *admissionReservation {
 }
 
 func (gate *weightedAdmission) reserveInOrder(sequence, order int64) *admissionReservation {
+	return gate.reservePriorityRun(sequence, order, model.Run{})
+}
+
+func (gate *weightedAdmission) reservePriorityRun(sequence, order int64, run model.Run) *admissionReservation {
 	if order <= 0 {
 		order = sequence
 	}
 	reservation := &admissionReservation{gate: gate, sequence: sequence, order: order, ready: make(chan struct{}), claimedAt: time.Now().UTC()}
+	reservation.runID, reservation.repoID, reservation.ref = run.ID, run.RepoID, run.Ref
+	reservation.refKind, reservation.sha = run.RefKind, run.SHA
+	reservation.priority, reservation.priorityReason, reservation.queuedAt = run.Priority, run.PriorityReason, run.QueuedAt
 	gate.mu.Lock()
 	gate.reservations[sequence] = reservation
 	gate.waiters = append(gate.waiters, reservation)
-	sort.SliceStable(gate.waiters, func(i, j int) bool { return admissionBefore(gate.waiters[i], gate.waiters[j]) })
+	gate.sortWaitersLocked()
 	gate.grantLocked()
 	gate.mu.Unlock()
 	return reservation
@@ -205,17 +215,18 @@ func (gate *weightedAdmission) reserveInOrder(sequence, order int64) *admissionR
 // identity from the claim on, so a run still preparing (checking out, reading
 // its document) is already addressable by its run ID.
 func (gate *weightedAdmission) reserveRun(run model.Run) *admissionReservation {
-	reservation := gate.reserveInOrder(run.QueueSequence, run.AdmissionSequence)
-	gate.mu.Lock()
-	if reservation.runID == "" {
-		reservation.runID, reservation.repoID, reservation.ref = run.ID, run.RepoID, run.Ref
-		reservation.refKind, reservation.sha = run.RefKind, run.SHA
-	}
-	gate.mu.Unlock()
-	return reservation
+	return gate.reservePriorityRun(run.QueueSequence, run.AdmissionSequence, run)
 }
 
 func admissionBefore(a, b *admissionReservation) bool {
+	return admissionBeforeAt(a, b, a.gate.clock())
+}
+
+func admissionBeforeAt(a, b *admissionReservation, now time.Time) bool {
+	ap, bp := a.effectivePriority(now), b.effectivePriority(now)
+	if ap != bp {
+		return ap.Rank() > bp.Rank()
+	}
 	if a.order != b.order {
 		return a.order < b.order
 	}
@@ -416,6 +427,7 @@ func (gate *weightedAdmission) grantLocked() {
 	// at the head again so the budget drains for it.
 	var head *admissionReservation
 	now := gate.clock()
+	gate.sortWaitersLocked()
 	for index := 0; index < len(gate.waiters); {
 		reservation := gate.waiters[index]
 		if reservation.vmParked || gate.kubeVirtBlockedLocked(reservation) {
@@ -448,6 +460,11 @@ func (gate *weightedAdmission) grantLocked() {
 		}
 		reservation.backfilled = false
 		if head != nil {
+			// Backfill is confined to the head's class; lower classes wait
+			// for the higher class to drain even while its window is open.
+			if reservation.effectivePriority(now) != head.effectivePriority(now) {
+				return
+			}
 			if !gate.backfillFitsLocked(head, reservation, now) {
 				index++
 				continue
@@ -717,10 +734,16 @@ func (reservation *admissionReservation) parkVM() error {
 		delete(gate.groups, reservation.group)
 	}
 	gate.waiters = append(gate.waiters, reservation)
-	sort.SliceStable(gate.waiters, func(i, j int) bool { return admissionBefore(gate.waiters[i], gate.waiters[j]) })
+	gate.sortWaitersLocked()
 	gate.grantLocked()
 	if gate.onPark != nil {
 		gate.onPark()
 	}
 	return nil
+}
+
+// Re-sort on every admission pass because starvation changes effective class.
+func (gate *weightedAdmission) sortWaitersLocked() {
+	now := gate.clock()
+	sort.SliceStable(gate.waiters, func(i, j int) bool { return admissionBeforeAt(gate.waiters[i], gate.waiters[j], now) })
 }

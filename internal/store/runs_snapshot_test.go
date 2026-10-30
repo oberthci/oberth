@@ -88,7 +88,7 @@ func TestFlatRunsUseOneSnapshotAcrossAdmission(t *testing.T) {
 	}})
 	db.SetMaxOpenConns(1)
 	t.Cleanup(func() { _ = db.Close() })
-	reader := &Store{db: db}
+	reader := &Store{db: db, now: func() time.Time { return now }}
 	rows, err := reader.ListRecentRuns(ctx, model.RunListFilter{Limit: 1})
 	if err != nil {
 		t.Fatal(err)

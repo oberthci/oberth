@@ -128,8 +128,10 @@ type RepositorySpec struct {
 }
 
 type Run struct {
-	ID            string
-	QueueSequence int64
+	Priority       RunPriority `json:"priority_class"`
+	PriorityReason string      `json:"priority_reason"`
+	ID             string
+	QueueSequence  int64
 	// AdmissionSequence retains restart FIFO order; QueueSequence is the cursor.
 	AdmissionSequence int64 `json:"-"`
 	QueuePosition     int64 `json:"QueuePosition,omitempty"`

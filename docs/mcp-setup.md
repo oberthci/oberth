@@ -236,6 +236,9 @@ call the proxy hostname directly.
 | `size_grant` | Set a repository's maximum admission size, `L` or `XL` (admin-only, audited); without a grant the maximum is `L` |
 | `size_revoke` | Revoke a repository's size grant, returning it to `L` (admin-only, audited) |
 | `size_grant_get` | Read a repository's maximum admission size (`max_size`) and grant state: `never_granted`, `granted`, or `revoked` |
+| `queue_priority_config` | Replace administrator RC globs with `rc_patterns` (e.g. `["rc/*", "release/*"]`); `[]` disables; unscoped admin, audited |
+| `queue_priority_get` | Read RC patterns and the 60-minute normal-run starvation threshold; unscoped admin |
+| `run_priority` | Bump a waiting run using exact `run_id`, `priority` (`high` or `highest`) and `reason`; unscoped admin, audited |
 | `admission_release` | Release one admission reservation no owner will release, typically a granted one held for a terminal run whose owner hung; deletes the Workflow first as proof, `force` without it (admin-only, unscoped, audited) |
 
 For `access_allow` and `access_revoke`, `secret` is the exact path recorded in
@@ -740,3 +743,25 @@ Only public policy/capability reasons are included. Dependency error chains
 remain masked. A resource outside the uplink's scope still answers like a
 missing resource, without revealing its existence. An HTTP authentication
 failure is separate from an authenticated tool refusal.
+
+### Queue priority administration
+
+Priority is server-owned: tags/releases and promotions are `highest`, configured
+RC branches are `high`, and other runs are `normal`. A normal run waiting 60
+minutes joins `highest` in its original FIFO position. Running work keeps its
+resources. Backfill and head-wait bounds apply within each class.
+
+An unscoped admin can call `queue_priority_config` with
+`{"rc_patterns":["rc/*","release/*"]}`. Patterns are case-sensitive; `*` and `?`
+match slash as well as other characters. Up to 16 unique patterns of 256 bytes
+are allowed; brackets and backslashes are refused. The default list is empty;
+`{"rc_patterns":[]}` disables RC classification. Changes also cover already
+waiting runs. `queue_priority_get {}` returns the list and `starvation_minutes`.
+
+For an urgent individual run, call `run_priority` with
+`{"run_id":"<exact ID>","priority":"highest","reason":"release blocker"}`.
+Only `high` and `highest` are accepted, and the class must rise. Admitted and
+terminal runs refuse. Both changes are audited with the administrator's identity.
+Automatic restart refires retain the wait and bump; manual retries get a new
+queue place. Run views include `priority_class`, `priority_reason`, and active
+`display_reason`; dashboard badges show the class with the reason on hover.

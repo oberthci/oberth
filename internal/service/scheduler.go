@@ -74,6 +74,7 @@ type Scheduler struct {
 	workspaceRoot      string
 	maxConcurrent      int
 	admission          *weightedAdmission
+	priorityMu         sync.Mutex // serialize durable priority refresh snapshots
 	maxRunLogBytes     int64
 	mutationGate       func(context.Context) error
 	wake               chan struct{}
@@ -459,8 +460,30 @@ func (scheduler *Scheduler) Run(ctx context.Context) error {
 			}
 		}()
 	}
+	priorityPoll := time.NewTicker(priorityPollInterval)
+	defer priorityPoll.Stop()
 	for {
-		for scheduler.dispatchSlotAvailable(active) {
+		if err := scheduler.refreshPriorities(workerCtx); err != nil {
+			join()
+			if ctx.Err() != nil {
+				return nil
+			}
+			return err
+		}
+		for {
+			if !scheduler.dispatchSlotAvailable(active) {
+				available, err := scheduler.priorityDispatchAvailable(workerCtx, active)
+				if err != nil {
+					join()
+					if ctx.Err() != nil {
+						return nil
+					}
+					return err
+				}
+				if !available {
+					break
+				}
+			}
 			if err := scheduler.awaitMutation(workerCtx); err != nil {
 				join()
 				if ctx.Err() != nil {
@@ -484,7 +507,7 @@ func (scheduler *Scheduler) Run(ctx context.Context) error {
 				if ctx.Err() != nil || errors.Is(err, context.Canceled) {
 					return nil
 				}
-				return fmt.Errorf("claim FIFO run: %w", err)
+				return fmt.Errorf("claim priority run: %w", err)
 			}
 			reservation := scheduler.admission.reserveRun(run)
 			active++
@@ -498,7 +521,12 @@ func (scheduler *Scheduler) Run(ctx context.Context) error {
 				}
 			}(run, reservation)
 		}
+		// Claim higher work before letting a refreshed/aged waiter grant.
+		scheduler.admission.mu.Lock()
+		scheduler.admission.grantLocked()
+		scheduler.admission.mu.Unlock()
 		select {
+		case <-priorityPoll.C:
 		case <-ctx.Done():
 			join()
 			return nil

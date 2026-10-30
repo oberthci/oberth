@@ -825,7 +825,7 @@ func TestMCPToolCountMatchesDocumented(t *testing.T) {
 	t.Parallel()
 	// The documented count in docs/mcp-setup.md must match the registered
 	// tool count. A mismatch means the table drifted from the code.
-	const documented = 62
+	const documented = 65
 	definitions := toolDefinitions()
 	if len(definitions) != documented {
 		t.Fatalf("registered %d tools, documented %d in docs/mcp-setup.md — update the table", len(definitions), documented)
@@ -850,7 +850,7 @@ func TestMCPToolSurfaceMatchesContract(t *testing.T) {
 		"uplink_list", "uplink_revoke", "uplink_rotate", "access_dismiss", "kubevirt_grant_list",
 		"access_list", "access_allow", "access_revoke",
 		"kubevirt_grant", "kubevirt_revoke", "kubevirt_grant_get",
-		"size_grant", "size_revoke", "size_grant_get", "admission_release",
+		"size_grant", "size_revoke", "size_grant_get", "queue_priority_config", "queue_priority_get", "run_priority", "admission_release",
 		"repo_list", "repo_archive", "repo_unarchive", "repo_remove", "run_list", "audit_list", "schedule_list", "schedule_pause", "schedule_resume", "schedule_trigger", "system_status", "publish_retry", "secretstore_plan", "secretstore_sync_receipt", "secretstore_verify",
 		"promote_grant", "promote_grant_revoke", "promote_grant_list",
 	}

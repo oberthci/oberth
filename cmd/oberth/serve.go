@@ -1028,6 +1028,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 		SecretAccess:           database,
 		KubeVirtGrants:         database,
 		SizeGrants:             database,
+		QueuePriorities:        database,
 		SecretStoreVerifier:    buildSecretStoreVerifier(options, kube),
 		SecretAccessReconciler: accessReconciler,
 		RepositoryArchiver:     database,

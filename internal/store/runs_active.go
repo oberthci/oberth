@@ -20,17 +20,18 @@ const MaxActiveRuns = 500
 //  1. runs whose Workflow has started, oldest start first;
 //  2. claimed runs not yet started (preparing, waiting for admission, or
 //     admitted and awaiting submission), in admission order: the weighted
-//     admission gate reserves and grants in ascending admission_sequence, the
-//     same order ClaimNextRun claims in;
-//  3. unclaimed queued runs, in ascending admission_sequence (accepted order).
+//     admission gate reserves and grants by effective class then FIFO, the
+//     same priority/FIFO order ClaimNextRun claims in;
+//  3. unclaimed queued runs, by effective priority then ascending admission_sequence.
 //
 // Before, Limit and Terminal are ignored: the view is one bounded list.
 func (s *Store) ListActiveRuns(ctx context.Context, filter model.RunListFilter) ([]model.Run, error) {
 	restriction, restrictionArgs := repoRestriction("repo_id", filter.RepoIDs)
 	args := append([]any{filter.RepoID, filter.RepoID, filter.Ref, filter.Ref}, restrictionArgs...)
+	priorityOrder := priorityOrderSQL(s.now())
 	rows, err := s.db.QueryContext(ctx, `
 WITH queue AS (
- SELECT id AS queued_id, ROW_NUMBER() OVER (ORDER BY admission_sequence, queue_sequence) AS queue_position FROM runs
+ SELECT id AS queued_id, ROW_NUMBER() OVER (ORDER BY `+priorityOrder+`) AS queue_position FROM runs
  WHERE status = 'queued' OR (status = 'running' AND started_at IS NULL)
 )
 SELECT `+runColumns+`, COALESCE(queue_position, 0) FROM runs LEFT JOIN queue ON runs.id = queue.queued_id
@@ -40,7 +41,7 @@ ORDER BY CASE
     WHEN status = 'running' AND started_at IS NOT NULL THEN 0
     WHEN status = 'running' THEN 1
     ELSE 2
-  END, started_at, admission_sequence, queue_sequence
+  END, started_at, `+priorityOrder+`
 LIMIT ?`, append(args, MaxActiveRuns)...) // #nosec G202 -- the restriction is a fixed column and ? placeholders from repoRestriction.
 	if err != nil {
 		return nil, fmt.Errorf("list active runs: %w", err)
