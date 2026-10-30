@@ -522,6 +522,8 @@ type LogResponse struct {
 	Burn          string `json:"burn"`
 	Step          string `json:"step,omitempty"`
 	Output        string `json:"output"`
+	Note          string `json:"note,omitempty"`
+	RunError      string `json:"run_error,omitempty"`
 	TotalLines    int    `json:"total_lines"`
 	MatchedLines  int    `json:"matched_lines"`
 	ReturnedLines int    `json:"returned_lines"`
@@ -550,9 +552,18 @@ type RunDetailResponse struct {
 	RerunOf string `json:"RerunOf,omitempty"`
 }
 
-// MCPToolText keeps the MCP text block as the exact bounded log slice while
-// structuredContent retains the range metadata.
-func (response LogResponse) MCPToolText() string { return response.Output }
+// MCPToolText keeps recorded output exact and explains an unexecuted step to
+// text-only clients while structuredContent retains the empty slice metadata.
+func (response LogResponse) MCPToolText() string {
+	if response.Note != "" {
+		text := response.Note
+		if response.RunError != "" {
+			text += "\nRun error: " + response.RunError
+		}
+		return text
+	}
+	return response.Output
+}
 
 type WaitResponse struct {
 	StatusResponse

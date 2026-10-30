@@ -524,6 +524,8 @@ type remoteLog struct {
 	Burn          string `json:"burn"`
 	Step          string `json:"step"`
 	Output        string `json:"output"`
+	Note          string `json:"note"`
+	RunError      string `json:"run_error"`
 	TotalLines    int    `json:"total_lines"`
 	MatchedLines  int    `json:"matched_lines"`
 	ReturnedLines int    `json:"returned_lines"`
@@ -593,6 +595,16 @@ func runRemoteLog(ctx context.Context, arguments []string, output io.Writer) err
 	}
 	if body != "" && !strings.HasSuffix(body, "\n") {
 		if _, err := io.WriteString(output, "\n"); err != nil {
+			return err
+		}
+	}
+	if log.Note != "" {
+		if _, err := fmt.Fprintln(output, log.Note); err != nil {
+			return err
+		}
+	}
+	if log.RunError != "" {
+		if _, err := fmt.Fprintln(output, "Run error: "+log.RunError); err != nil {
 			return err
 		}
 	}

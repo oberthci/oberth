@@ -1,11 +1,13 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -27,7 +29,7 @@ func (toolingAuthenticator) Authenticate(context.Context, string) (api.Actor, er
 
 // Exercise the production MCP handler and error classifier, not only the Go
 // error: pending logs and malformed IDs must be useful to text-only clients.
-func TestMCPRunToolsExposePendingAndInvalidIDs(t *testing.T) {
+func TestMCPRunToolsExposePendingNotExecutedAndInvalidIDs(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
 	database, err := store.Open(ctx, filepath.Join(root, "oberth.sqlite"), store.Options{})
@@ -82,8 +84,9 @@ func TestMCPRunToolsExposePendingAndInvalidIDs(t *testing.T) {
 		}
 		var envelope struct {
 			Result struct {
-				IsError bool `json:"isError"`
-				Content []struct {
+				IsError    bool                `json:"isError"`
+				Structured service.LogResponse `json:"structuredContent"`
+				Content    []struct {
 					Text string `json:"text"`
 				} `json:"content"`
 			} `json:"result"`
@@ -93,6 +96,13 @@ func TestMCPRunToolsExposePendingAndInvalidIDs(t *testing.T) {
 		}
 		if len(envelope.Result.Content) != 1 {
 			t.Fatalf("MCP result = %s", response.Body)
+		}
+		if got := envelope.Result.Structured; (tool == "run_logs" || tool == "logs") && !envelope.Result.IsError {
+			want := service.LogResponse{RunID: run.ID, Burn: "release-build-variants", Step: "release-build-variants",
+				Note: "step was not executed; no log recorded", RunError: "Workflow error"}
+			if got != want {
+				t.Fatalf("MCP log metadata = %#v, want %#v", got, want)
+			}
 		}
 		return envelope.Result.IsError, envelope.Result.Content[0].Text
 	}
@@ -129,6 +139,96 @@ func TestMCPRunToolsExposePendingAndInvalidIDs(t *testing.T) {
 	server.Handler().ServeHTTP(response, request)
 	if response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), "step log is pending") {
 		t.Fatalf("dashboard pending response = %d %s", response.Code, response.Body)
+	}
+
+	// A workflow failure can leave a failed step that never had a pod or log
+	// marker. Exercise both wire formats with no file, an empty file, and a
+	// finalized index containing only another step's output.
+	if _, err := database.PutStepResult(ctx, model.StepResult{
+		RunID: run.ID, Burn: "release-build-variants", Step: "release-build-variants",
+		Status: model.StepFailed, DeclaredSize: "M", Termination: model.UnavailableStepDiagnostic("not-executed"),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.FinishRun(ctx, run.ID, model.RunResult{
+		Status: model.RunFailed, FailedBurn: "release-build-variants", FailedStep: "release-build-variants", Error: "Workflow error",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	want := service.LogResponse{RunID: run.ID, Burn: "release-build-variants", Step: "release-build-variants",
+		Note: "step was not executed; no log recorded", RunError: "Workflow error"}
+	for _, storage := range []string{"missing", "empty", "other-step"} {
+		if storage != "missing" {
+			content := ""
+			if storage == "other-step" {
+				content = "[setup/prepare] other step output\n"
+			}
+			if err := os.WriteFile(filepath.Join(root, "logs", run.ID+".log"), []byte(content), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := logs.BuildIndex(run.ID); err != nil {
+				t.Fatal(err)
+			}
+		}
+		for _, filter := range []struct{ arguments, query string }{
+			{"", ""}, {`,"tail":true`, "&tail=true"},
+			{`,"pattern":"FAIL","context":2`, "&pattern=FAIL&context=2"},
+			{`,"offset":10,"limit":5`, "&offset=10&limit=5"},
+			{`,"tail":true,"pattern":"FAIL","context":2,"offset":10,"limit":5`, "&tail=true&pattern=FAIL&context=2&offset=10&limit=5"},
+		} {
+			for _, tool := range []string{"run_logs", "logs"} {
+				args := fmt.Sprintf(`"id":%q,"step":"release-build-variants"`, run.ID[:8])
+				if tool == "logs" {
+					args = fmt.Sprintf(`"repo":"repo","sha":%q,"step":"release-build-variants"`, run.SHA)
+				}
+				isError, text := call(tool, "{"+args+filter.arguments+"}")
+				if isError || text != want.MCPToolText() {
+					t.Fatalf("%s %s %s: isError=%t text=%q", storage, tool, filter.arguments, isError, text)
+				}
+			}
+			request := httptest.NewRequest(http.MethodGet, "/api/runs/"+run.ID[:8]+"/logs?step=release-build-variants"+filter.query, nil)
+			request.Header.Set("Authorization", "Bearer test-token")
+			response := httptest.NewRecorder()
+			server.Handler().ServeHTTP(response, request)
+			var got service.LogResponse
+			if err := json.Unmarshal(response.Body.Bytes(), &got); err != nil {
+				t.Fatal(err)
+			}
+			if response.Code != http.StatusOK || got != want {
+				t.Fatalf("%s %s: HTTP %d %s", storage, filter.query, response.Code, response.Body)
+			}
+		}
+	}
+
+	remote := httptest.NewServer(server.Handler())
+	t.Cleanup(remote.Close)
+	configure(t, remote)
+	for _, flags := range [][]string{nil, {"--raw"}, {"--tail", "--pattern", "FAIL", "--offset", "10"}} {
+		var out bytes.Buffer
+		args := append([]string{run.ID, "--burn", want.Burn, "--step", want.Step}, flags...)
+		if err := runRemoteLog(ctx, args, &out); err != nil {
+			t.Fatal(err)
+		}
+		if out.String() != want.MCPToolText()+"\n" {
+			t.Fatalf("CLI %v: %q", flags, out.String())
+		}
+	}
+
+	// Unexpected missing output is still a storage error. Neither a zero
+	// range alone nor a not-executed diagnostic with a real range qualifies.
+	for _, step := range []model.StepResult{
+		{Termination: model.UnavailableStepDiagnostic("not-recorded")},
+		{Termination: model.UnavailableStepDiagnostic("not-executed"), LogEnd: 1},
+	} {
+		step.RunID, step.Burn, step.Step = run.ID, want.Burn, want.Step
+		step.Status, step.DeclaredSize = model.StepFailed, "M"
+		if _, err := database.PutStepResult(ctx, step); err != nil {
+			t.Fatal(err)
+		}
+		isError, text := call("run_logs", fmt.Sprintf(`{"id":%q,"step":%q}`, run.ID, want.Step))
+		if !isError || !strings.Contains(text, "internal error") {
+			t.Fatalf("unexpected missing log was hidden: isError=%t text=%q", isError, text)
+		}
 	}
 }
 

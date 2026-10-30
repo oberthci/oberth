@@ -1084,11 +1084,7 @@ func (service *API) RunLogFiltered(ctx context.Context, actor api.Actor, id, bur
 	if !recorded {
 		return nil, fmt.Errorf("no log range for burn %q step %q: %w", burn, step, store.ErrNotFound)
 	}
-	body, meta, err := service.readStepLogFiltered(ctx, run, burn, step, filter)
-	if err != nil {
-		return nil, fmt.Errorf("read bounded run log: %w", err)
-	}
-	return newLogResponse(run.ID, burn, step, body, meta), nil
+	return service.stepLogResponse(ctx, run, steps, burn, step, filter)
 }
 
 // maxLiveLogChunk bounds one live-log poll response. 256 KiB keeps a fast
@@ -1809,6 +1805,33 @@ func (service *API) logsFor(ctx context.Context, repositoryName, selector, wante
 	burn, step, err := selectLogRange(steps, wanted)
 	if err != nil {
 		return LogResponse{}, err
+	}
+	return service.stepLogResponse(ctx, run, steps, burn, step, filter)
+}
+
+func (service *API) stepLogResponse(ctx context.Context, run model.Run, steps []model.StepResult, burn, step string, filter runlog.Filter) (LogResponse, error) {
+	for _, result := range steps {
+		if result.Burn != burn || result.Step != step {
+			continue
+		}
+		// A workflow can fail before this step ever gets a pod or writes a
+		// log marker. Its durable diagnostic explains the absent file/range;
+		// do not turn that expected absence into a storage failure.
+		if run.Status.Terminal() && result.LogStart == 0 && result.LogEnd == 0 &&
+			result.Termination != nil && !result.Termination.Available && result.Termination.Unavailable == "not-executed" {
+			if err := service.purgedEvidence(ctx, run, "logs"); err != nil {
+				return LogResponse{}, err
+			}
+			body, meta, err := runlog.FilterBytes(nil, filter)
+			if err != nil {
+				return LogResponse{}, err
+			}
+			response := newLogResponse(run.ID, burn, step, body, meta)
+			response.Note = "step was not executed; no log recorded"
+			response.RunError = run.Error
+			return response, nil
+		}
+		break
 	}
 	body, meta, err := service.readStepLogFiltered(ctx, run, burn, step, filter)
 	if err != nil {
