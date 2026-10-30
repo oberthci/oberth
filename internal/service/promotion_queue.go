@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/oberthci/oberth/internal/api"
+	"github.com/oberthci/oberth/internal/liveness"
 	"github.com/oberthci/oberth/internal/model"
 )
 
@@ -83,11 +84,15 @@ func (service *API) planOrQueuePromotion(ctx context.Context, actor api.Actor, r
 		planCtx := context.WithoutCancel(ctx)
 		waitCtx, cancelWait := context.WithCancel(planCtx)
 		stopAfter := context.AfterFunc(service.lifetime, cancelWait)
+		progress := &liveness.Heartbeat{}
+		progress.Beat()
+		service.promotionProgress.Store(promotion.ID, progress)
 		go func(promotion model.Promotion) {
 			defer service.background.Done()
+			defer service.promotionProgress.Delete(promotion.ID)
 			defer cancelWait()
 			defer stopAfter()
-			service.planQueuedPromotion(waitCtx, planCtx, actor, repository, candidate, target, promotion)
+			service.planQueuedPromotion(waitCtx, planCtx, actor, repository, candidate, target, promotion, progress)
 		}(promotion)
 		return promotion, nil
 	}
@@ -101,7 +106,7 @@ func (service *API) planOrQueuePromotion(ctx context.Context, actor api.Actor, r
 // promotion pending with no plan; owner-startup recovery interrupts it, the
 // same as any promotion that never recorded its plan.
 func (service *API) planQueuedPromotion(ctx, planCtx context.Context, actor api.Actor, repository model.Repository, candidate model.Run,
-	target string, promotion model.Promotion) {
+	target string, promotion model.Promotion, progress *liveness.Heartbeat) {
 	deadline := time.Now().Add(promotionQueueMaxWait)
 	for {
 		// Read the signal channel before durable state, so a transition
@@ -109,8 +114,13 @@ func (service *API) planQueuedPromotion(ctx, planCtx context.Context, actor api.
 		wake := service.signals.Promotion(promotion.ID)
 		ahead, err := service.pendingPromotionAhead(ctx, promotion)
 		if err == nil && ahead == nil {
+			resume := progress.Suspend()
 			err = service.requireMutation(ctx)
+			resume()
 			if err == nil && ctx.Err() == nil {
+				// Queue waiting is complete. Merge planning and delivery may wait
+				// indefinitely on external services without making liveness red.
+				service.promotionProgress.Delete(promotion.ID)
 				_, _ = service.planAdmittedPromotion(planCtx, actor, repository, candidate, target, promotion)
 				return
 			}
@@ -123,6 +133,7 @@ func (service *API) planQueuedPromotion(ctx, planCtx context.Context, actor api.
 			_, _ = service.failAdmittedPromotion(planCtx, promotion, reason, "")
 			return
 		}
+		progress.Beat()
 		timer := time.NewTimer(promotionQueuePoll)
 		select {
 		case <-wake:

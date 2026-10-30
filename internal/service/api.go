@@ -104,6 +104,7 @@ type APIConfig struct {
 }
 
 type API struct {
+	promotionProgress         *sync.Map
 	releasePreflight          ReleasePreflighter
 	uplinkLifecycle           UplinkLifecycle
 	declarationDismissal      DeclarationDismissal
@@ -222,7 +223,8 @@ func NewAPI(config APIConfig) (*API, error) {
 		repositoryRemover: config.RepositoryRemover, removeGitCache: config.RemoveGitCache,
 		promotionGrants: config.PromotionGrants, promotionGrantMaxLifetime: promotionGrantMaxLifetime,
 		runCancels: config.RunCancels, retention: config.Retention, runReruns: config.RunReruns, schedules: config.Schedules, uplinks: config.Uplinks, background: &sync.WaitGroup{},
-		lifetime: lifetime, stopLifetime: stopLifetime, closing: &backgroundClosing{},
+		promotionProgress: &sync.Map{},
+		lifetime:          lifetime, stopLifetime: stopLifetime, closing: &backgroundClosing{},
 	}, nil
 }
 

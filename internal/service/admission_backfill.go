@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/oberthci/oberth/internal/liveness"
 	"github.com/oberthci/oberth/internal/model"
 )
 
@@ -133,15 +134,20 @@ func (scheduler *Scheduler) runHeadEvents(ctx context.Context) {
 	sweeper, canSweep := store.(interface {
 		SweepAdmissionHeadWaits(context.Context) error
 	})
+	scheduler.headProgress.Beat()
+	pulse := time.NewTicker(liveness.Interval)
+	defer pulse.Stop()
 	sweep := time.NewTicker(time.Hour)
 	defer sweep.Stop()
 	if canSweep {
 		_ = sweeper.SweepAdmissionHeadWaits(ctx)
 	}
 	for {
+		scheduler.headProgress.Beat()
 		select {
 		case <-ctx.Done():
 			return
+		case <-pulse.C:
 		case <-sweep.C:
 			// Heads whose run ended without being abandoned through the gate
 			// (an interrupted promotion or tag) leave rows behind.

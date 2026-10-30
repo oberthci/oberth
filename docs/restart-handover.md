@@ -20,8 +20,8 @@ cannot be established. Browser polling and pod delivery have separate health
 indicators; a quiet command can have a healthy connection without new output.
 
 On SIGTERM the server marks `/readyz` unavailable before cancelling scheduler
-workers. New HTTP/MCP requests receive 503 with `Retry-After: 1`; `/healthz` stays
-healthy during drain. Scheduler observers stop and adoption-capable Workflows
+workers. New HTTP/MCP requests receive 503 with `Retry-After: 1`; `/healthz` and
+`/livez` stay healthy during drain. Scheduler observers stop and adoption-capable Workflows
 continue in Kubernetes. Already accepted mutations retain their request contexts
 and can finish. HTTP connections share a 15-second graceful drain budget, after
 which remaining connections are closed. Scheduler observers then get up to 30
@@ -51,6 +51,32 @@ Kubernetes availability, periodic audit health and upstream forge
 reachability remain status diagnostics rather than readiness dependencies.
 Startup audit verification, owner recovery and operation-level mutation gates
 remain required; keeping the endpoint routable does not authorize writes.
+
+Liveness is separate from readiness. `/healthz` keeps its always-OK compatibility
+behavior and remains the startup probe. `/livez` returns 503 only after more than
+five minutes without local writer or monitored worker progress. The chart checks
+it every 60 seconds and requires three consecutive failures, so a persistent
+wedge normally restarts the pod about seven to eight minutes after its last
+progress (plus container restart time).
+
+A serial background heartbeat attempts a no-op write and commit through the
+production SQLite writer every 30 seconds. Each attempt has a five-minute
+deadline, so slow queued writes can complete; failed attempts never renew the
+heartbeat. This uses existing migration metadata without changing its values,
+adding audit actions, or requiring a schema migration. HTTP probes read only
+process memory and never acquire the writer or worker locks.
+
+The scheduler dispatch loop is monitored after startup recovery, including idle
+priority polling and local admission locking. Admission head-wait persistence
+has its own heartbeat. Each queued promotion is monitored independently until
+merge planning starts, then removed from the local queue checks. Explicit waits
+on Kubernetes admission, audit witnesses, upstream policy/ref reads and pushes,
+and the delivery permit are excluded from the dispatch window. A dependency
+outage alone must not restart the process; external planning/delivery operations
+are governed by their own contexts. This does not detect every possible worker
+fault during an external wait or before scheduler recovery completes. The
+writer is monitored throughout, and readiness still gates startup completion.
+The writer heartbeat is cancelled and joined before the database closes.
 
 `oberth mcp call` reconnects only for an explicit list of pure reads: `wait`,
 `status`, `logs`, `system_status`, `run_get`, `run_logs`, `run_list`,

@@ -535,7 +535,8 @@ Authenticated `GET` endpoints serve the same state as a web dashboard:
 | `/api/issues` | Paged issues with `total` for the selected filters and `counts` by state and kind |
 | `/api/status` | System health summary |
 
-Unauthenticated: `/healthz` (liveness) and `/readyz` (startup and serving readiness).
+Unauthenticated: `/healthz` (compatibility/startup), `/livez` (local writer and
+worker progress), and `/readyz` (startup and serving readiness).
 
 ## Notes
 

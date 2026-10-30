@@ -327,7 +327,7 @@ metadata:
 | `access_revoke` | Revoke a secret access grant |
 
 Authenticated `GET` endpoints (`/api/runs`, `/api/repos`, `/api/issues`,
-`/api/status`) serve the same state; `/healthz` and `/readyz` are
+`/api/status`) serve the same state; `/healthz`, `/livez`, and `/readyz` are
 unauthenticated.
 
 ## Architecture
