@@ -159,17 +159,28 @@ Log reads have bounded work: at most 4 MiB of retained-file discovery for an
 active run, then at most 4 MiB of filtering (including tail lookback retries).
 Head reads stop when the returned-line limit is met; regexes never scan the
 whole step solely to count matches. At most two interactive API/MCP run-log
-pattern scans execute at once across the process; queued requests use their
-existing deadline. Internal CI issue excerpts keep their byte/record bounds
+pattern scans execute at once across the process, with at most one per
+authenticated bearer token across MCP and dashboard reads. Token admission comes
+before global admission, so one token cannot reserve both slots. Queued
+requests use their existing ten-second read deadline; cancellation releases
+queued admission state. Distinct tokens sharing a display identity remain
+independent. Plain log reads and live-log polling do not use pattern slots. Internal CI issue excerpts keep their byte/record bounds
 and do not wait for those interactive slots.
 Individual records above 64 KiB are omitted and counted as `omitted_long_lines`. Output remains capped at 4 MiB.
 
 Structured HTTP/MCP responses report `scan_complete`, `bytes_exact`,
-`scanned_bytes`, `discovery_bytes`, `withheld_lines`, `withheld_bytes`,
+`scanned_bytes`, `discovery_bytes`, `total_scanned_bytes`, `scan_limit_bytes`,
+`withheld_lines`, `withheld_bytes`,
 `has_more` and `next_byte_offset`. Line/match/withheld-line counts are lower
 bounds unless `scan_complete` is true; byte/withheld-byte counts are lower
 bounds unless `bytes_exact` is true. Counts describe this call, not cumulative
-paging totals. A zero-match incomplete page does not prove absence.
+paging totals. `total_scanned_bytes` sums raw-log discovery and filtering,
+including buffered read-ahead and repeated tail lookbacks; existing per-phase
+counters keep their meaning. `scan_limit_bytes` reports the hard aggregate bound:
+4 MiB for terminal logs and 8 MiB for active logs (at most 4 MiB per phase).
+Index metadata has its separate bounded reader and is not raw-log scan bytes.
+The CLI prints the consumed scan budget in its summary; JSON carries the same
+fields. A zero-match incomplete page does not prove absence.
 
 When `has_more` is true, pass `next_byte_offset` as `byte_offset` (CLI:
 `--byte-offset`), keep the same `tail`, `pattern` and `context`, and reset

@@ -24,9 +24,11 @@ import (
 const maxRequestBytes = 1 << 20
 
 type Actor struct {
-	Identity    string `json:"identity"`
-	Fingerprint string `json:"fingerprint"`
-	Admin       bool   `json:"admin"`
+	// TokenCredentialID is an internal admission key, never response data.
+	TokenCredentialID string `json:"-"`
+	Identity          string `json:"identity"`
+	Fingerprint       string `json:"fingerprint"`
+	Admin             bool   `json:"admin"`
 	// Scope limits the uplink to the repositories of these upstreams, by
 	// name. Empty sees every repository (#073).
 	Scope []string `json:"scope,omitempty"`

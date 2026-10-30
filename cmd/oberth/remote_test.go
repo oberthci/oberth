@@ -608,9 +608,9 @@ func TestRunsAllCountsDatedRowsAndPrintsDisplayReason(t *testing.T) {
 func TestLogSummaryReportsIncompleteCountsAndContinuation(t *testing.T) {
 	exact, incomplete := true, false
 	log := remoteLog{ReturnedLines: 2, TotalLines: 10, MatchedLines: 3, Bytes: 1000,
-		ScanComplete: &incomplete, BytesExact: &exact, HasMore: true, NextByteOffset: 500, WithheldLines: 8, WithheldBytes: 900}
+		ScanComplete: &incomplete, BytesExact: &exact, HasMore: true, NextByteOffset: 500, WithheldLines: 8, WithheldBytes: 900, TotalScannedBytes: 512, ScanLimitBytes: 4 << 20}
 	text := log.readSummary()
-	for _, want := range []string{"at least 10 lines", "at least 3 matched", "1000 bytes", "withheld at least 8 lines / 900 bytes", "byte_offset=500", "offset=0"} {
+	for _, want := range []string{"at least 10 lines", "at least 3 matched", "1000 bytes", "withheld at least 8 lines / 900 bytes", "byte_offset=500", "offset=0", "scanned 512 of 4194304 byte scan budget"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("missing %q in %s", want, text)
 		}

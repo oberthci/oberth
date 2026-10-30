@@ -14,7 +14,10 @@ import (
 const (
 	// Discovery and filtering have separate byte budgets. Active reads perform
 	// at most two bounded passes, independent of the total retained run size.
-	MaxScanBytes       int64 = 4 << 20
+	MaxScanBytes int64 = 4 << 20
+	// Active reads can spend one bounded pass discovering ranges and one
+	// filtering them. This is the aggregate per-call bound, not a deadline.
+	MaxCallScanBytes   int64 = 2 * MaxScanBytes
 	initialTailBytes   int64 = 64 << 10
 	maxFilterLineBytes       = 64 << 10
 )
@@ -239,6 +242,7 @@ func scanBoundedRanges(file io.ReaderAt, ranges []Range, total int64, filter Fil
 		window = min(window*2, remaining)
 	}
 	meta.ScannedBytes = scanned
+	meta.TotalScannedBytes, meta.ScanLimitBytes = scanned, MaxScanBytes
 	return body, meta, nil
 }
 
@@ -366,6 +370,7 @@ func (store *Store) readActiveBounded(runID, burn, step string, filter Filter) (
 		return nil, Meta{}, err
 	}
 	meta.DiscoveryBytes = discoveryBytes
+	meta.TotalScannedBytes, meta.ScanLimitBytes = meta.ScannedBytes+discoveryBytes, MaxCallScanBytes
 	meta.OmittedLongLines += discoveryOmitted
 	meta.TotalLines += discoveryOmitted
 	meta.WithheldLines += discoveryOmitted

@@ -68,22 +68,26 @@ func (filter Filter) ctx() context.Context {
 }
 
 type Meta struct {
-	TotalLines       int     `json:"total_lines"`
-	MatchedLines     int     `json:"matched_lines"`
-	ReturnedLines    int     `json:"returned_lines"`
-	Truncated        bool    `json:"truncated"`
-	Bytes            int64   `json:"bytes"`
-	LineNumbers      []int   `json:"line_numbers,omitempty"`
-	LineOffsets      []int64 `json:"line_offsets,omitempty"`
-	ScanComplete     bool    `json:"scan_complete"`
-	BytesExact       bool    `json:"bytes_exact"`
-	ScannedBytes     int64   `json:"scanned_bytes"`
-	DiscoveryBytes   int64   `json:"discovery_bytes"`
-	WithheldBytes    int64   `json:"withheld_bytes"`
-	WithheldLines    int     `json:"withheld_lines"`
-	OmittedLongLines int     `json:"omitted_long_lines"`
-	HasMore          bool    `json:"has_more"`
-	NextByteOffset   int64   `json:"next_byte_offset"`
+	// Aggregate I/O includes discovery plus filtering (including read-ahead and
+	// repeated tail windows). Existing per-phase counters retain their meaning.
+	TotalScannedBytes int64   `json:"total_scanned_bytes"`
+	ScanLimitBytes    int64   `json:"scan_limit_bytes"`
+	TotalLines        int     `json:"total_lines"`
+	MatchedLines      int     `json:"matched_lines"`
+	ReturnedLines     int     `json:"returned_lines"`
+	Truncated         bool    `json:"truncated"`
+	Bytes             int64   `json:"bytes"`
+	LineNumbers       []int   `json:"line_numbers,omitempty"`
+	LineOffsets       []int64 `json:"line_offsets,omitempty"`
+	ScanComplete      bool    `json:"scan_complete"`
+	BytesExact        bool    `json:"bytes_exact"`
+	ScannedBytes      int64   `json:"scanned_bytes"`
+	DiscoveryBytes    int64   `json:"discovery_bytes"`
+	WithheldBytes     int64   `json:"withheld_bytes"`
+	WithheldLines     int     `json:"withheld_lines"`
+	OmittedLongLines  int     `json:"omitted_long_lines"`
+	HasMore           bool    `json:"has_more"`
+	NextByteOffset    int64   `json:"next_byte_offset"`
 }
 
 type Store struct {

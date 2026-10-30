@@ -17,6 +17,7 @@ import (
 
 	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/runlog"
 )
 
 type blockedRunHistory struct{ RunHistory }
@@ -94,6 +95,9 @@ func TestRunLogsBoundedMetadataAndByteCursorReachCaller(t *testing.T) {
 			t.Fatal(err)
 		}
 		got := value.(LogResponse)
+		if got.ScanLimitBytes != runlog.MaxScanBytes || got.TotalScannedBytes != got.ScannedBytes+got.DiscoveryBytes || got.TotalScannedBytes > got.ScanLimitBytes {
+			t.Fatalf("MCP lost aggregate scan cap: %+v", got)
+		}
 		if got.Output != line || got.ScanComplete || !got.HasMore || !got.BytesExact || got.WithheldBytes == 0 || got.NextByteOffset != cursor+int64(len(line)) {
 			t.Fatalf("lost bounded metadata: %+v", got)
 		}
@@ -146,6 +150,9 @@ func TestRunLogsEmptyActiveWindowHasMCPContinuation(t *testing.T) {
 			t.Fatalf("MCP failed: %d %s", response.Code, response.Body)
 		}
 		got, text := rpc.Result.StructuredContent, rpc.Result.Content[0].Text
+		if got.ScanLimitBytes != runlog.MaxCallScanBytes || got.TotalScannedBytes != got.ScannedBytes+got.DiscoveryBytes || got.TotalScannedBytes > got.ScanLimitBytes {
+			t.Fatalf("MCP active read lost aggregate cap: %+v", got)
+		}
 		if page == 0 {
 			if got.Output != "" || !got.HasMore || got.NextByteOffset <= 0 || !strings.Contains(text, "No lines in this bounded window") || !strings.Contains(text, fmt.Sprintf("byte_offset=%d", got.NextByteOffset)) || !strings.Contains(text, "offset=0") {
 				t.Fatalf("empty page lacks continuation: %+v text=%q", got, text)

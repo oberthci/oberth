@@ -11,7 +11,7 @@ const runReadBudget = 10 * time.Second
 
 // Only interactive API/MCP log reads share these slots. Internal CI excerpts
 // read the same bounded store directly and must not wait for user scans.
-var runLogPatternScans = make(chan struct{}, 2)
+var runLogPatternScans = patternScanLimiter{global: make(chan struct{}, 2)}
 
 func boundedRunReadError(err error) error {
 	var refusal *toolRefusal

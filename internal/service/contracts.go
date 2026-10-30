@@ -520,26 +520,28 @@ type StatusResponse struct {
 }
 
 type LogResponse struct {
-	RunID            string `json:"run_id"`
-	Burn             string `json:"burn"`
-	Step             string `json:"step,omitempty"`
-	Output           string `json:"output"`
-	Note             string `json:"note,omitempty"`
-	RunError         string `json:"run_error,omitempty"`
-	TotalLines       int    `json:"total_lines"`
-	MatchedLines     int    `json:"matched_lines"`
-	ReturnedLines    int    `json:"returned_lines"`
-	Truncated        bool   `json:"truncated"`
-	Bytes            int64  `json:"bytes"`
-	ScanComplete     bool   `json:"scan_complete"`
-	BytesExact       bool   `json:"bytes_exact"`
-	ScannedBytes     int64  `json:"scanned_bytes"`
-	DiscoveryBytes   int64  `json:"discovery_bytes"`
-	WithheldBytes    int64  `json:"withheld_bytes"`
-	WithheldLines    int    `json:"withheld_lines"`
-	OmittedLongLines int    `json:"omitted_long_lines"`
-	HasMore          bool   `json:"has_more"`
-	NextByteOffset   int64  `json:"next_byte_offset"`
+	TotalScannedBytes int64  `json:"total_scanned_bytes"`
+	ScanLimitBytes    int64  `json:"scan_limit_bytes"`
+	RunID             string `json:"run_id"`
+	Burn              string `json:"burn"`
+	Step              string `json:"step,omitempty"`
+	Output            string `json:"output"`
+	Note              string `json:"note,omitempty"`
+	RunError          string `json:"run_error,omitempty"`
+	TotalLines        int    `json:"total_lines"`
+	MatchedLines      int    `json:"matched_lines"`
+	ReturnedLines     int    `json:"returned_lines"`
+	Truncated         bool   `json:"truncated"`
+	Bytes             int64  `json:"bytes"`
+	ScanComplete      bool   `json:"scan_complete"`
+	BytesExact        bool   `json:"bytes_exact"`
+	ScannedBytes      int64  `json:"scanned_bytes"`
+	DiscoveryBytes    int64  `json:"discovery_bytes"`
+	WithheldBytes     int64  `json:"withheld_bytes"`
+	WithheldLines     int    `json:"withheld_lines"`
+	OmittedLongLines  int    `json:"omitted_long_lines"`
+	HasMore           bool   `json:"has_more"`
+	NextByteOffset    int64  `json:"next_byte_offset"`
 }
 
 // LiveLogResponse is one polled slice of a running Job's redacted log stream.

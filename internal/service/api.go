@@ -269,6 +269,9 @@ func (service *API) Shutdown(ctx context.Context) error {
 }
 
 func (service *API) CallTool(ctx context.Context, actor api.Actor, name string, raw json.RawMessage) (value any, resultErr error) {
+	if name == "run_logs" || name == "logs" {
+		ctx = withRunLogCaller(ctx, actor)
+	}
 	if name == "run_get" || name == "run_logs" || name == "logs" {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, runReadBudget)
@@ -1095,6 +1098,7 @@ func (service *API) RunLog(ctx context.Context, actor api.Actor, id, burn, step 
 }
 
 func (service *API) RunLogFiltered(ctx context.Context, actor api.Actor, id, burn, step string, filter runlog.Filter) (value any, resultErr error) {
+	ctx = withRunLogCaller(ctx, actor)
 	var cancel context.CancelFunc
 	ctx, cancel = context.WithTimeout(ctx, runReadBudget)
 	defer func() {
@@ -1927,11 +1931,15 @@ func (service *API) stepLogResponse(ctx context.Context, run model.Run, steps []
 }
 
 func newLogResponse(runID, burn, step string, body []byte, meta runlog.Meta) LogResponse {
+	if meta.ScanLimitBytes == 0 {
+		meta.ScanLimitBytes = runlog.MaxScanBytes
+	}
 	return LogResponse{
 		RunID: runID, Burn: burn, Step: step, Output: string(body),
 		TotalLines: meta.TotalLines, MatchedLines: meta.MatchedLines,
 		ReturnedLines: meta.ReturnedLines, Truncated: meta.Truncated, Bytes: meta.Bytes,
 		ScanComplete: meta.ScanComplete, BytesExact: meta.BytesExact, ScannedBytes: meta.ScannedBytes, DiscoveryBytes: meta.DiscoveryBytes,
+		TotalScannedBytes: meta.ScannedBytes + meta.DiscoveryBytes, ScanLimitBytes: meta.ScanLimitBytes,
 		WithheldBytes: meta.WithheldBytes, WithheldLines: meta.WithheldLines, OmittedLongLines: meta.OmittedLongLines,
 		HasMore: meta.HasMore, NextByteOffset: meta.NextByteOffset,
 	}
@@ -1943,12 +1951,11 @@ func (service *API) readStepLogFiltered(ctx context.Context, run model.Run, burn
 		return nil, runlog.Meta{}, err
 	}
 	if filter.Pattern != "" {
-		select {
-		case runLogPatternScans <- struct{}{}:
-			defer func() { <-runLogPatternScans }()
-		case <-ctx.Done():
-			return nil, runlog.Meta{}, ctx.Err()
+		release, err := runLogPatternScans.acquire(ctx)
+		if err != nil {
+			return nil, runlog.Meta{}, err
 		}
+		defer release()
 	}
 	if run.Status.Active() {
 		body, meta, err := service.logs.ReadActiveFiltered(run.ID, burn, step, filter)
