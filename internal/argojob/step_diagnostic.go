@@ -20,6 +20,11 @@ import (
 // One total five-second budget bounds all API reads, including large workflows
 // and recovery.
 func (controller *Controller) collectStepDiagnostics(ctx context.Context, workflow *wfv1.Workflow, completion *Completion) {
+	controller.collectRestartStepDiagnostics(ctx, workflow, completion, time.Time{})
+}
+
+func (controller *Controller) collectRestartStepDiagnostics(ctx context.Context, workflow *wfv1.Workflow, completion *Completion, restartedAt time.Time) {
+	adopted := !restartedAt.IsZero() && !workflowDeadlineExceeded(workflow)
 	readCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
 	pods, snapshotReason := controller.timingPodSnapshot(readCtx, workflow)
@@ -49,7 +54,7 @@ func (controller *Controller) collectStepDiagnostics(ctx context.Context, workfl
 				default:
 					pod = pods[step.PodName]
 					if pod == nil {
-						reason = "observation-unavailable"
+						reason = "pod-absent"
 					}
 				}
 			}
@@ -63,6 +68,9 @@ func (controller *Controller) collectStepDiagnostics(ctx context.Context, workfl
 			if reason := podInfrastructureReason(workflow, node, pod); reason != "" {
 				step.InfrastructureReason = reason
 			}
+		}
+		if adopted && ok && step.StartedAt != nil && !step.StartedAt.After(restartedAt) && !step.AttemptAmbiguous && reason != "binding-mismatch" && reason != "ambiguous-attempt" {
+			recordRestartCut(workflow, node, pod, step)
 		}
 		step.Timing = projectStepTiming(workflow, node, pod, *step, step.Termination, at)
 	}

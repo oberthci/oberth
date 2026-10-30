@@ -140,7 +140,7 @@ func (value StepTiming) Validate() error {
 		}
 	} else {
 		switch value.Unavailable {
-		case "not-executed", "ambiguous-attempt", "binding-mismatch", "observation-unavailable", "snapshot-incomplete", "unsupported-shape", "termination-unavailable", "invalid-termination":
+		case "not-executed", "ambiguous-attempt", "binding-mismatch", "observation-unavailable", "pod-absent", "snapshot-incomplete", "unsupported-shape", "termination-unavailable", "invalid-termination":
 		default:
 			return fail
 		}

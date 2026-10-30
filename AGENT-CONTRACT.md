@@ -1462,6 +1462,29 @@ trust assumptions and complete invalidation rules.
   running the token waiter. A Workflow that finished while the owner was down
   uses the same observation, artifact collection, step persistence and normal
   publication/issue finalization as a newly submitted Workflow.
+  Verified adoption distinguishes a missing process exit from the legacy
+  synthetic exit-code-1 display fallback. New progress markers omit unknown
+  exit codes rather than persisting the synthetic 1. A failed Pod attempt that
+  started before this server process initialized, without durable exit evidence,
+  becomes `interrupted` / phase `interrupted`, with no failed-step
+  attribution only when a complete Pod snapshot confirms `pod-absent`, or an
+  exact readable owned Pod lacks a main termination. LIST errors, incomplete
+  snapshots and nodes that never got a Pod stay ambiguous/red; the existing
+  amber/cancelled presentation and `run_retry` apply.
+  A continuity-gap line alone never overrides a known nonzero node or bound-Pod
+  exit, or turns a successful Workflow into an interruption. Ambiguous attempts,
+  malformed/foreign or conflicting exit evidence, an independent real test failure, hard cleanup
+  failures and an explicit workflow deadline keep their existing verdicts.
+  An ownership-bound Pod deletion already in progress when an Argo Error node's
+  container receives SIGTERM/SIGKILL is also cut evidence; signal-derived 137/143
+  alone, post-failure Pod GC and memory-limit OOM are not. If Wait ends in a log
+  or observer error, its result carries an immutable adoption binding into the
+  fresh terminal read after the in-process intent is forgotten. Retained exact
+  journal failures and real exits already observed for that attempt survive a
+  later incomplete snapshot; fallback still accepts a newly reported real failure.
+  Only an explicitly terminal earlier Workflow verdict can override a fresh cut;
+  a partial running observation cannot fabricate a red Workflow-running result.
+  Restart cuts do not publish or create a new CI-red issue.
   Observation retries failed Workflow reads for a bounded grace (2 minutes).
   An adopted run whose observation still fails settles like a submitted one:
   a terminal Workflow keeps its real result and artifacts (also after a log
@@ -3221,3 +3244,9 @@ metrics expose cached observations only. Non-admin/MCP run reasons preserve the
 non-numeric host-pressure cause; scoped status omits host PSI numbers. Helm
 rejects invalid threshold/hysteresis pairs and zero enabled maxDefer. See
 [configuration and semantics](docs/io-pressure-admission.md).
+
+A currently observed nonzero init-container termination always refuses restart-cut
+classification, including when main is still Waiting/PodInitializing. This guard
+is local to restart-cut and does not depend on the log-continuity input. The
+shared partial-execution evidence contract and its RCA/fallback regression are
+compiled in this topic and included in its bundle.

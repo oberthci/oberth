@@ -20,6 +20,9 @@ import (
 // StepResult is one executed pipeline step, in Oberth's vocabulary rather than
 // Argo's. The engine derives it from the Workflow's node tree.
 type StepResult struct {
+	ExitCodeKnown        bool
+	restartCutReason     string
+	exitEvidenceConflict bool
 	Usage                stepusage.Usage
 	Timing               *model.StepTiming
 	NodeID               string
@@ -46,6 +49,8 @@ type StepResult struct {
 
 // Completion is the terminal outcome of one submitted Workflow.
 type Completion struct {
+	Terminal            bool
+	Interrupted         bool
 	ObservationComplete bool
 	ObservedNodes       int
 	ReplayAttempts      []StepResult
@@ -140,6 +145,7 @@ func stepAttempts(workflow *wfv1.Workflow) []StepResult {
 			Step:                 step,
 			Status:               stepStatus(node.Phase),
 			ExitCode:             exitCode(node),
+			ExitCodeKnown:        nodeExitCodeKnown(node),
 			PodName:              podName,
 			StartedAt:            optionalTime(node.StartedAt),
 			FinishedAt:           optionalTime(node.FinishedAt),
@@ -519,6 +525,14 @@ func stepStatus(phase wfv1.NodePhase) runprogress.Status {
 	}
 }
 
+func nodeExitCodeKnown(node wfv1.NodeStatus) bool {
+	if node.Outputs == nil || node.Outputs.ExitCode == nil {
+		return false
+	}
+	_, err := parseExitCode(*node.Outputs.ExitCode)
+	return err == nil
+}
+
 // exitCode reports the step's process exit code when Argo captured one. Argo
 // records it as a string output field; a node that failed without one (an
 // infrastructure error, an evicted pod) reports 1 so a failure is never
@@ -638,6 +652,7 @@ func completeTerminalTree(workflow *wfv1.Workflow) bool {
 func completionFor(workflow *wfv1.Workflow) Completion {
 	completion := Completion{
 		Name:                workflow.Name,
+		Terminal:            workflow.Status.Phase.Completed(),
 		ObservationComplete: completeTerminalTree(workflow), ObservedNodes: len(workflow.Status.Nodes), ReplayAttempts: stepAttempts(workflow),
 		Phase:     string(workflow.Status.Phase),
 		Reason:    strings.TrimSpace(workflow.Status.Message),

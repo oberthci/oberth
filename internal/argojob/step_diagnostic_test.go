@@ -128,7 +128,7 @@ func TestStepDiagnosticCollectionPreservesVerdictAndAttempt(t *testing.T) {
 	completion.Steps[0].AttemptAmbiguous = false
 	controller.kube = fake.NewClientset()
 	controller.collectStepDiagnostics(context.Background(), wf, &completion)
-	if completion.Succeeded != before || completion.Steps[0].Termination.Unavailable != "observation-unavailable" {
+	if completion.Succeeded != before || completion.Steps[0].Termination.Unavailable != "pod-absent" {
 		t.Fatal("read failure changed verdict")
 	}
 }

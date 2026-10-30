@@ -58,6 +58,10 @@ const (
 	workflowReadGrace = 2 * time.Minute
 )
 
+// Process initialization is the conservative boundary for restart attribution.
+// A step first started later cannot have been cut by this server restart.
+var serverStartedAt = time.Now().UTC()
+
 // ErrNotTerminal reports that a Workflow has not reached a terminal phase.
 var ErrNotTerminal = errors.New("argojob: Workflow has not reached a terminal state")
 
@@ -67,6 +71,7 @@ var errRunLogBudget = errors.New("argojob: aggregate run log budget exceeded")
 
 // Controller submits Workflows and supervises them to a terminal result.
 type Controller struct {
+	restartedAt       time.Time
 	vmiQuotaMu        sync.Mutex
 	profileVerifyMu   sync.Mutex
 	profileMu         sync.Mutex
@@ -119,7 +124,7 @@ func NewController(workflows WorkflowClient, client kubernetes.Interface, config
 	if err := config.Validate(); err != nil {
 		return nil, err
 	}
-	controller := &Controller{workflows: workflows, kube: client, config: config, interval: pollInterval, readGrace: workflowReadGrace}
+	controller := &Controller{restartedAt: serverStartedAt, workflows: workflows, kube: client, config: config, interval: pollInterval, readGrace: workflowReadGrace}
 	if client != nil {
 		controller.logIdentity = func(ctx context.Context, namespace, pod string) (string, error) {
 			object, err := client.CoreV1().Pods(namespace).Get(ctx, pod, metav1.GetOptions{})
@@ -427,6 +432,9 @@ func (controller *Controller) Wait(ctx context.Context, name, runID string, dest
 
 // WaitResumed restores progress and the aggregate budget for an adopted Workflow.
 func (controller *Controller) WaitResumed(ctx context.Context, name, runID string, destination io.Writer, events []runprogress.Event, retained int64, binding Adoption) (Completion, error) {
+	if binding.UID == "" {
+		binding.RestartedAt = time.Time{}
+	}
 	return controller.wait(ctx, name, runID, destination, events, retained, binding)
 }
 
@@ -503,7 +511,9 @@ func (controller *Controller) wait(ctx context.Context, name, runID string, dest
 			completion := completionFor(settled)
 			completion.ObservationComplete = completion.ObservationComplete && completeRead
 			completion.Steps = reporter.order(completion.Steps)
-			controller.collectStepDiagnostics(ctx, settled, &completion)
+			preserveObservedExitCodes(&completion, workflow)
+			preserveRecordedExitCodes(&completion, events)
+			controller.collectRestartStepDiagnostics(ctx, settled, &completion, binding.RestartedAt)
 			controller.collectVMIFailure(ctx, settled, &completion, budget)
 			if publishErr := controller.publishLogs(ctx, settled, reporter, budget, live); publishErr != nil && budgetBreachErr == nil {
 				budgetBreachErr = publishErr
@@ -515,6 +525,7 @@ func (controller *Controller) wait(ctx context.Context, name, runID string, dest
 				}
 			}
 			controller.cleanupVerdict(ctx, settled, runID, budget, &completion)
+			completion.classifyRestartCut()
 			reporter.finish(budget)
 			if err := controller.retireExecutorIdentity(ctx, settled); err != nil {
 				return completion, fmt.Errorf("retire executor identity: %w", err)
@@ -665,6 +676,19 @@ func (controller *Controller) replayStepLog(ctx context.Context, workflow *wfv1.
 // in-process state, so a server that restarted mid-run can still record the
 // real outcome instead of fabricating an interruption.
 func (controller *Controller) TerminalState(ctx context.Context, name string) (*Completion, error) {
+	return controller.terminalState(ctx, name, "", Adoption{}, nil)
+}
+
+// TerminalStateResumed keeps the verified adoption binding on the fallback read
+// after a terminal Wait error, such as lost logs or executor identity retirement.
+func (controller *Controller) TerminalStateResumed(ctx context.Context, name, runID string, binding Adoption, events []runprogress.Event) (*Completion, error) {
+	if binding.UID == "" {
+		return nil, errors.New("argojob: missing resumed Workflow binding")
+	}
+	return controller.terminalState(ctx, name, runID, binding, events)
+}
+
+func (controller *Controller) terminalState(ctx context.Context, name, wantedRun string, binding Adoption, events []runprogress.Event) (*Completion, error) {
 	workflow, err := controller.workflows.Get(ctx, name, metav1.GetOptions{})
 	if apierrors.IsNotFound(err) {
 		return nil, ErrNotTerminal
@@ -676,16 +700,28 @@ func (controller *Controller) TerminalState(ctx context.Context, name string) (*
 	if !ok {
 		return nil, ErrNotTerminal
 	}
+	if wantedRun != "" && runID != wantedRun {
+		return nil, errors.New("argojob: resumed Workflow belongs to another run")
+	}
+	if binding.UID != "" && !binding.matches(workflow) {
+		return nil, errors.New("argojob: resumed Workflow identity changed")
+	}
 	if !workflow.Status.Phase.Completed() {
 		return nil, ErrNotTerminal
 	}
 	settled, completeRead := controller.settle(ctx, name, runID, workflow)
+	if binding.UID != "" && !binding.matches(settled) {
+		return nil, errors.New("argojob: resumed Workflow identity changed at completion")
+	}
 	completion := completionFor(settled)
 	completion.ObservationComplete = completion.ObservationComplete && completeRead
 	controller.retainWorkflowTiming(ctx, settled)
 	controller.collectVMIFailure(ctx, settled, &completion, nil)
-	controller.collectStepDiagnostics(ctx, settled, &completion)
+	preserveObservedExitCodes(&completion, workflow)
+	preserveRecordedExitCodes(&completion, events)
+	controller.collectRestartStepDiagnostics(ctx, settled, &completion, binding.RestartedAt)
 	controller.cleanupVerdict(ctx, settled, runID, nil, &completion)
+	completion.classifyRestartCut()
 	return &completion, nil
 }
 
@@ -900,6 +936,11 @@ func (reporter *progressReporter) emit(destination io.Writer, step StepResult) {
 		Burn:    step.Burn, Step: step.Step, Ordinal: step.Ordinal,
 		Status: step.Status, ExitCode: step.ExitCode,
 		StartedAt: step.StartedAt, FinishedAt: step.FinishedAt,
+	}
+	// Unknown Argo exits use a display-only synthetic 1. Omit that exit from
+	// durable progress so a second restart cannot promote it to real evidence.
+	if !step.ExitCodeKnown {
+		event.ExitCode = 0
 	}
 	// The progress contract requires timestamps consistent with the status.
 	// Argo can report a terminal node before its timestamps settle, so fill

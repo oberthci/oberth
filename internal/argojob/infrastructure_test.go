@@ -27,7 +27,7 @@ func TestCompletionKubeletMessagesSurvivePodGC(t *testing.T) {
 			if completion.Succeeded || !completion.Infrastructure || !strings.Contains(completion.Reason, message) || strings.Contains(completion.Reason, "application-controlled") {
 				t.Fatalf("lost kubelet reason: %#v", completion)
 			}
-			if completion.Steps[0].Termination.Unavailable != "observation-unavailable" {
+			if completion.Steps[0].Termination.Unavailable != "pod-absent" {
 				t.Fatal("invented termination evidence after Pod GC")
 			}
 		})

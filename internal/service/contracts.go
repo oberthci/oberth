@@ -386,6 +386,11 @@ type JobRequest struct {
 }
 
 type JobResult struct {
+	// Includes earlier workflow attempts even when the latest display row is queued.
+	ObservedStepStart bool
+	// Reobserve pins a fallback terminal read to this observation's immutable
+	// engine identity. It is not terminal evidence by itself and is never stored.
+	Reobserve           func(context.Context) (JobResult, error) `json:"-"`
 	TerminalObservation *model.RunTerminalObservation
 	Status              model.RunStatus
 	Phase               string

@@ -673,6 +673,7 @@ func (jobs *ArgoJobs) wait(ctx context.Context, name string, destination io.Writ
 	defer jobs.forget(name, intent.runID)
 	var completion argojob.Completion
 	var err error
+
 	if intent.adoption != nil {
 		controller, ok := jobs.controller.(interface {
 			WaitResumed(context.Context, string, string, io.Writer, []runprogress.Event, int64, argojob.Adoption) (argojob.Completion, error)
@@ -684,16 +685,63 @@ func (jobs *ArgoJobs) wait(ctx context.Context, name string, destination io.Writ
 	} else {
 		completion, err = jobs.controller.Wait(ctx, name, intent.runID, destination)
 	}
+	var reobserve func(context.Context) (service.JobResult, error)
+	if intent.adoption != nil {
+		if reader, ok := jobs.controller.(interface {
+			TerminalStateResumed(context.Context, string, string, argojob.Adoption, []runprogress.Event) (*argojob.Completion, error)
+		}); ok {
+			binding := *intent.adoption
+			retainedEvents := append([]runprogress.Event(nil), events...)
+			// A completed observation may have found a real exit after the seed
+			// journal was read. Keep that evidence if a later fallback snapshot
+			// loses the exit field; a log/index error must not erase a test failure.
+			for _, step := range completion.Steps {
+				if step.ExitCodeKnown && step.ExitCode > 0 && step.Status == runprogress.StepFailed && step.Attempt == "" && !step.AttemptAmbiguous {
+					retainedEvents = append(retainedEvents, runprogress.Event{Version: runprogress.Version, Burn: step.Burn, Step: step.Step, Ordinal: step.Ordinal, Status: step.Status, ExitCode: step.ExitCode, StartedAt: step.StartedAt, FinishedAt: step.FinishedAt})
+				}
+			}
+			for i := range retainedEvents {
+				if value := retainedEvents[i].StartedAt; value != nil {
+					copy := *value
+					retainedEvents[i].StartedAt = &copy
+				}
+				if value := retainedEvents[i].FinishedAt; value != nil {
+					copy := *value
+					retainedEvents[i].FinishedAt = &copy
+				}
+			}
+			reobserve = func(ctx context.Context) (service.JobResult, error) {
+				fresh, err := reader.TerminalStateResumed(ctx, name, intent.runID, binding, retainedEvents)
+				if errors.Is(err, argojob.ErrNotTerminal) || (err == nil && fresh == nil) {
+					return service.JobResult{}, service.ErrJobNotTerminal
+				}
+				if err != nil {
+					return service.JobResult{}, err
+				}
+				// A weaker later cut snapshot cannot erase a terminal red verdict
+				// already observed for this binding (including conflicting exits).
+				// A newly observed real failure still replaces an earlier cut.
+				if fresh.Interrupted && completion.Terminal && !completion.Succeeded && !completion.Infrastructure && !completion.Interrupted {
+					return jobs.result(completion), nil
+				}
+				return jobs.result(*fresh), nil
+			}
+		}
+	}
 	if err != nil && completion.Name == "" {
-		return service.JobResult{}, err
+		return service.JobResult{Reobserve: reobserve}, err
 	}
 	// A terminal Workflow keeps its outputs even when its observation ended in
-	// error (log budget breach, executor identity retirement): the scheduler
-	// then records the Workflow's real result, which includes its artifacts.
-	if reason := jobs.collectArtifacts(context.WithoutCancel(ctx), name, intent.runID, intent.trigger, completion.VMIDiagnostics); reason != "" {
-		jobs.recordArtifactFailure(context.WithoutCancel(ctx), intent.runID, reason)
+	// error (log budget breach, executor identity retirement). Partial evidence
+	// from a running Workflow must not trigger live artifact collection.
+	if completion.Terminal || completion.Succeeded {
+		if reason := jobs.collectArtifacts(context.WithoutCancel(ctx), name, intent.runID, intent.trigger, completion.VMIDiagnostics); reason != "" {
+			jobs.recordArtifactFailure(context.WithoutCancel(ctx), intent.runID, reason)
+		}
 	}
-	return jobs.result(completion), err
+	result := jobs.result(completion)
+	result.Reobserve = reobserve
+	return result, err
 }
 
 func (jobs *ArgoJobs) Delete(ctx context.Context, name, runID string) error {
@@ -808,6 +856,11 @@ func (jobs *ArgoJobs) forget(name, runID string) {
 // engine produces, so nothing downstream can tell which engine ran.
 func (jobs *ArgoJobs) result(completion argojob.Completion) service.JobResult {
 	result := service.JobResult{Status: model.RunFailed, Phase: "job"}
+	for _, step := range completion.ReplayAttempts {
+		if step.StartedAt != nil || (step.Status != runprogress.StepQueued && step.Status != runprogress.StepSkipped) {
+			result.ObservedStepStart = true
+		}
+	}
 	if completion.ObservationComplete {
 		observation := &model.RunTerminalObservation{Version: 1, JobName: completion.Name, Nodes: completion.ObservedNodes}
 		for _, step := range completion.ReplayAttempts {
@@ -848,6 +901,10 @@ func (jobs *ArgoJobs) result(completion argojob.Completion) service.JobResult {
 	}
 	if result.Status == model.RunFailed && completion.Infrastructure {
 		result.Phase = "infrastructure"
+		result.FailedBurn, result.FailedStep = "", ""
+	}
+	if completion.Interrupted && completion.Infrastructure && !completion.Succeeded && completion.FailedStep == "" {
+		result.Status, result.Phase = model.RunInterrupted, "interrupted"
 		result.FailedBurn, result.FailedStep = "", ""
 	}
 	return result
