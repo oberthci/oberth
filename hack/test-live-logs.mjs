@@ -233,3 +233,8 @@ assert.equal(run(`pressureStatusCard(null)`), '', 'scoped status omits host PSI'
 assert.ok(run(`pressureStatusCard({available:false})`).includes('admission fails open'));
 assert.ok(run(`pressureStatusCard({available:true,holding:true,resource:'io',sample:{io:{full_avg60:40},cpu:{some_avg60:20},memory:{full_avg60:5}}})`).includes('deferring new grants'));
 assert.equal(run(`queueReason({Scheduling:{state:'waiting',admission:{state:'waiting',pressure:{resource:'io',redacted:true}}}})`), 'deferred: host io pressure');
+
+assert.equal(run(`capacityStatusCard({})`), '');
+const capacityCard = run(`capacityStatusCard({used:8,capacity:4,configuration:{max_concurrent_jobs:2,source:'file',file:'/etc/capacity',error:'invalid <override>'}})`);
+for (const text of ['2 M jobs', '8/4 weight used', 'source file', 'keeping last good value', 'invalid &lt;override&gt;']) assert.ok(capacityCard.includes(text), text);
+assert.ok(!capacityCard.includes('invalid <override>'));

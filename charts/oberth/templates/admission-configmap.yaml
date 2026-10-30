@@ -1,0 +1,11 @@
+{{- $runtimeCapacity := (.Values.admission).runtimeCapacity | default dict -}}
+{{- if $runtimeCapacity.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "oberth.fullname" . }}-admission
+  labels:
+    {{- include "oberth.labels" . | nindent 4 }}
+data:
+  max-concurrent-jobs: {{ coalesce $runtimeCapacity.maxConcurrentJobs .Values.maxConcurrentJobs | quote }}
+{{- end }}

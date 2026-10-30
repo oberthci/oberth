@@ -1303,6 +1303,12 @@ function pressureStatusCard(pressure) {
   const value = pressure.holding ? `deferring new grants (${pressure.resource})` : pressure.available ? "accepting new grants" : "unavailable";
   return svcCard("host pressure", value, detail, pressure.holding || !pressure.available ? "warn" : "ok");
 }
+function capacityStatusCard(admission) {
+  const config = admission?.configuration;
+  if (!config) return "";
+  const detail = `${admission.used}/${admission.capacity} weight used · source ${config.source}${config.file ? ` (${config.file})` : ""}${config.error ? ` · keeping last good value: ${config.error}` : ""}`;
+  return svcCard("admission capacity", `${config.max_concurrent_jobs} M jobs`, esc(detail), config.error ? "warn" : "ok");
+}
 async function renderStatus(seq) {
   setChrome("status", "/ status");
   await Promise.all([loadStatus(), loadRepos().catch(() => { })]);
@@ -1323,6 +1329,7 @@ async function renderStatus(seq) {
       ${svcCard("secret store", storeValue, store && store.address ? esc(store.address) : "OpenBao release secrets disabled", storeMood)}
       ${svcCard("server", s.version || document.body.dataset.version || "dev", "", "ok")}
       ${pressureStatusCard(s.admission?.pressure)}
+      ${capacityStatusCard(s.admission)}
     </div>
     <div class="vcs-panel">
       <div class="vcs-head">Upstreams</div>

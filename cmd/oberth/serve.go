@@ -136,6 +136,7 @@ type serveOptions struct {
 	retentionInterval       time.Duration
 	retentionKeepNewest     int
 	maxConcurrent           int
+	maxConcurrentFile       string
 	admissionDiskFloorBytes int64
 	admissionPressure       service.AdmissionPressureConfig
 	admissionSizeWeights    string
@@ -262,7 +263,8 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 	flags.IntVar(&options.retentionKeepNewest, "retention-keep-newest", 1, "terminal runs retained per repository/ref during automatic sweeps")
 	flags.Float64Var(&options.kubernetesQPS, "kubernetes-client-qps", 50, "Kubernetes API requests per second per server client")
 	flags.IntVar(&options.kubernetesBurst, "kubernetes-client-burst", 100, "Kubernetes API burst allowance per server client")
-	flags.IntVar(&options.maxConcurrent, "max-concurrent-jobs", 3, "maximum concurrent Jobs")
+	flags.IntVar(&options.maxConcurrent, "max-concurrent-jobs", 3, "maximum concurrent Jobs (boot default)")
+	flags.StringVar(&options.maxConcurrentFile, "max-concurrent-jobs-file", "", "mounted ConfigMap key to reload max concurrent Jobs without restart; invalid or missing keeps the last good value")
 	flags.StringVar(&options.admissionSizeWeights, "admission-size-weights", service.DefaultSizeWeights.String(), "admission weight per size as S=..,M=..,L=..,XL=..; XL=0 is the whole budget (an XL run runs alone), a positive XL lets XL share the host; the budget is --max-concurrent-jobs M runs (#1021)")
 	flags.DurationVar(&options.admissionMaxHeadWait, "admission-max-head-wait", service.DefaultMaxHeadWait, "bounded backfill (#1085): while the admission queue head does not fit, later runs that fit are admitted beside it until it has waited this long; then the budget drains for it (0 = strict FIFO)")
 	flags.Float64Var(&options.admissionPressure.IOFullAvg60Max, "admission-pressure-io-full-avg60-max", 30, "host IO full PSI avg60 percentage that holds new grants (0 = disabled)")
@@ -788,6 +790,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 	scheduler, err := service.NewScheduler(service.SchedulerConfig{
 		Store: database, Git: git, Logs: logs, Jobs: argoJobs, ReleaseJobs: argoJobs, Auditor: database,
 		TrustedPreflight: trusted, Signals: signals, WorkspaceRoot: filepath.Join(options.dataRoot, "work"), MaxConcurrent: options.maxConcurrent,
+		MaxConcurrentFile:       options.maxConcurrentFile,
 		MutationGate:            anchors.AllowMutation,
 		AdmissionDiskFloorBytes: options.admissionDiskFloorBytes,
 		AdmissionPressure:       options.admissionPressure,

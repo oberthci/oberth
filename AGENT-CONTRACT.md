@@ -3221,3 +3221,18 @@ metrics expose cached observations only. Non-admin/MCP run reasons preserve the
 non-numeric host-pressure cause; scoped status omits host PSI numbers. Helm
 rejects invalid threshold/hysteresis pairs and zero enabled maxDefer. See
 [configuration and semantics](docs/io-pressure-admission.md).
+
+### Runtime admission capacity
+
+The optional `--max-concurrent-jobs-file` is re-opened every five seconds, so
+projected ConfigMap symlink swaps take effect without restart. The boot flag
+remains the initial default. Accepted changes are audited before application;
+invalid/unreadable values, overflow, a positive XL weight larger than the new
+budget, or audit failure retain the last good configuration without pausing the
+queue. Budget is jobs times M weight. Held grants retain their weights and a
+whole-budget XL remains exclusive across increases. Pending weights, dispatch
+and run ceilings change together; lowering never cancels running work.
+`system_status.admission.configuration` and the dashboard show effective jobs,
+source and reload errors; scoped views omit this host-wide configuration.
+The chart mounts `<fullname>-admission` read-only as a directory, without
+subPath or a pod-template checksum. See [runtime capacity](docs/runtime-admission-capacity.md).

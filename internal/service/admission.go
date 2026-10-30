@@ -15,8 +15,9 @@ import (
 )
 
 type weightedAdmission struct {
-	mu       sync.Mutex
-	capacity int
+	mu             sync.Mutex
+	capacity       int
+	capacityConfig model.AdmissionCapacityConfig
 	// weights is the operator's weight per size (#1021).
 	weights SizeWeights
 	// maxHeadWait bounds bounded backfill (#1085): while the queue head has
@@ -561,6 +562,12 @@ func (gate *weightedAdmission) canGrantLocked(reservation *admissionReservation)
 	// so calling it under the lock is safe.
 	if gate.diskFloor != nil && !gate.diskFloor.freeAboveFloor() {
 		return false
+	}
+	// A whole-budget XL grant stays exclusive even if capacity is raised.
+	for _, held := range gate.reservations {
+		if held.granted && !held.released && gate.weights.wholeBudget(held.size) {
+			return false
+		}
 	}
 	if gate.weights.wholeBudget(reservation.size) {
 		return gate.used == 0
