@@ -3221,3 +3221,17 @@ metrics expose cached observations only. Non-admin/MCP run reasons preserve the
 non-numeric host-pressure cause; scoped status omits host PSI numbers. Helm
 rejects invalid threshold/hysteresis pairs and zero enabled maxDefer. See
 [configuration and semantics](docs/io-pressure-admission.md).
+
+### Evicted controller replacement and visible admission holds (#1214)
+
+Incomplete `Failed/Evicted` controller history is ignored only after exact live
+profile verification and a converged controlling ReplicaSet (observed generation,
+selector and UID, one desired/current/Ready replica). A predecessor ReplicaSet
+must be fully scaled to zero and belong to the same Deployment. Uncertain live
+or historical authority stays blocked. ReplicaSet API failures retain the
+profile-read retry class and five-second per-attempt budget. The chart grants
+only namespaced ReplicaSet GET in a new Role, preserving frozen existing rules.
+`controller_profile.admission_paused`, reason and remedy are exposed in status;
+the dashboard shows a runs-list banner and Status card, refreshing aggregate
+status in the background at most every thirty seconds. Existing work is not
+canceled or re-authorized by profile recovery.

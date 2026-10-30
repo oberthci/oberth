@@ -132,12 +132,21 @@ func verifyNonrootController(ctx context.Context, client kubernetes.Interface, n
 	if err != nil {
 		return nil, &profileReadError{message: "argojob: cannot verify nonroot controller Pod identity", object: namespace + "/Pod/workflow-controller", cause: err}
 	}
-	pod, err := selectNonrootController(pods.Items, namespace)
+	if pods.Continue != "" || (pods.RemainingItemCount != nil && *pods.RemainingItemCount > 0) {
+		return nil, errors.New("argojob: controller Pod list is incomplete")
+	}
+	evicted := evictedControllerCandidates(pods.Items)
+	pod, err := selectNonrootControllerWithHistory(pods.Items, namespace, evicted)
 	if err != nil {
 		return nil, err
 	}
 	if err := verifyNonrootControllerPod(pod); err != nil {
 		return nil, err
+	}
+	if len(evicted) > 0 {
+		if err := verifyEvictedControllerHistory(ctx, client, namespace, pods.Items, pod, evicted); err != nil {
+			return nil, err
+		}
 	}
 	cm, err := client.CoreV1().ConfigMaps(namespace).Get(ctx, argoworkflow.NonrootProfileConfigMap, metav1.GetOptions{})
 	if err != nil {

@@ -233,3 +233,34 @@ assert.equal(run(`pressureStatusCard(null)`), '', 'scoped status omits host PSI'
 assert.ok(run(`pressureStatusCard({available:false})`).includes('admission fails open'));
 assert.ok(run(`pressureStatusCard({available:true,holding:true,resource:'io',sample:{io:{full_avg60:40},cpu:{some_avg60:20},memory:{full_avg60:5}}})`).includes('deferring new grants'));
 assert.equal(run(`queueReason({Scheduling:{state:'waiting',admission:{state:'waiting',pressure:{resource:'io',redacted:true}}}})`), 'deferred: host io pressure');
+
+// Controller-profile holds must be visible and refresh without delaying logs.
+assert.equal(run(`controllerProfileStatusCard(null)`), '');
+const pausedProfile = `{state:'blocked',admission_paused:true,reason:'ReplicaSet <not-ready>',remedy:'Restore one Ready replacement'}`;
+const profileCard = run(`controllerProfileStatusCard(${pausedProfile})`);
+const pauseBanner = run(`admissionPausedBanner(${pausedProfile})`);
+for (const text of ['admission paused','ReplicaSet &lt;not-ready&gt;','Restore one Ready replacement']) assert.ok(profileCard.includes(text), text);
+assert.ok(pauseBanner.includes('Admission paused') && pauseBanner.includes('ReplicaSet &lt;not-ready&gt;'));
+assert.equal(run(`admissionPausedBanner({state:'verified',admission_paused:false})`), '');
+assert.ok(run(`admissionPausedBanner({state:'unverified'})`).includes('Admission paused'));
+run(`
+ const capacityStatusSavedAPI = api;
+ let profileStatusCalls = 0;
+ state.status = {version:'test',controller_profile:${pausedProfile}};
+ state.statusLoadedAt = Date.now(); state.statusFailedAt = 0;
+ api = async () => { profileStatusCalls++; return {version:'test',controller_profile:{state:'verified',admission_paused:false}}; };
+ statusRefreshPromise = ensureStatus();
+`);
+await run('statusRefreshPromise');
+assert.equal(run('profileStatusCalls'), 0, 'fresh status must not be polled per log/run refresh');
+run(`state.statusLoadedAt = Date.now()-31000; statusRefreshPromise = ensureStatus(); secondRefreshPromise = ensureStatus();`);
+assert.equal(run('statusRefreshPromise === secondRefreshPromise'), true, 'concurrent background refreshes coalesce');
+await run('statusRefreshPromise');
+assert.equal(run('profileStatusCalls'), 1);
+assert.equal(run('admissionPausedBanner(state.status.controller_profile)'), '', 'recovery clears cached admission banner');
+run(`state.statusLoadedAt=Date.now()-31000; api=async()=>{profileStatusCalls++;throw new Error('status unavailable')}; statusRefreshPromise=ensureStatus();`);
+await run('statusRefreshPromise');
+run('statusRefreshPromise=ensureStatus();');
+await run('statusRefreshPromise');
+assert.equal(run('profileStatusCalls'), 2, 'status failures retain the 30s retry backoff');
+run('api=capacityStatusSavedAPI;');

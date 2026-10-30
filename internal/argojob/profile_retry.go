@@ -50,6 +50,10 @@ func (controller *Controller) ControllerProfileStatus() *model.ControllerProfile
 	if status.State == "" {
 		status.State = "unverified"
 	}
+	status.AdmissionPaused = status.State != "verified"
+	if status.AdmissionPaused {
+		status.Remedy = "Restore one Ready controller matching the pinned profile and its immutable ConfigMap; verify ReplicaSet readiness and server read permissions. Obsolete Failed/Evicted records are accepted automatically when replacement is proven."
+	}
 	return &status
 }
 
