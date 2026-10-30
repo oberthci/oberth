@@ -395,6 +395,14 @@ type JobResult struct {
 	Steps               []model.StepResult
 }
 
+// InfrastructureError marks a trusted engine/control-plane failure, rather than
+// a pipeline command failure. Real terminal results still take precedence and
+// live workloads must be deleted successfully before recording this failure.
+type InfrastructureError interface {
+	error
+	InfrastructureFailure() bool
+}
+
 // ErrJobNotTerminal is returned by TerminalResult when the named Job has not
 // reached a terminal Kubernetes state (either absent or still active).
 var ErrJobNotTerminal = errors.New("service: job has not reached terminal state")

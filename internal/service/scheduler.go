@@ -1087,6 +1087,10 @@ func (scheduler *Scheduler) observeRun(ctx context.Context, run model.Run, repos
 		waitErr = indexErr
 	}
 	failurePhase := "job"
+	var infrastructure InfrastructureError
+	if errors.As(waitErr, &infrastructure) && infrastructure.InfrastructureFailure() {
+		failurePhase = "infrastructure"
+	}
 	if observation.adopted && waitErr != nil {
 		// Cancel and supersede delete the Workflow under the adopted Wait;
 		// their durable obligation, not this observation error, settles it.

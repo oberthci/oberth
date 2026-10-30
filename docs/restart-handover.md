@@ -19,6 +19,27 @@ time. Previously terminal steps also report that their historical completeness
 cannot be established. Browser polling and pod delivery have separate health
 indicators; a quiet command can have a healthy connection without new output.
 
+Executor identity delivery uses a Pod-bound Kubernetes TokenRequest, streamed
+on stdin into the workflow-owned executor waiter. It does not use a Kubernetes
+Secret or the application's OpenBao credentials. Transient exec/transport errors
+are retried at most three times, with a 20-second budget for each target read and
+exec attempt, and one- then two-second backoff (at most 63 seconds for that retry
+sequence, shortened by cancellation). Each attempt rechecks the Pod UID,
+Workflow owner and waiter configuration. The same payload is reused, staging is
+private to each exec, and the token marker is committed without overwriting an
+existing marker. A successfully completed waiter reconciles a lost exec
+acknowledgement. Access denials, invalid targets and remote command exit errors
+are not retried.
+
+Exhausted executor-identity delivery is recorded as `failed` with phase
+`infrastructure`, after the existing terminal-result check and ownership-checked
+Workflow deletion. A real terminal CI result takes precedence; unsuccessful
+deletion leaves the run owned for recovery. `run_retry` retains its existing
+branch/newest-run restrictions. Bounded `executor_identity` logs record the
+Workflow, Pod UID, stage, reason class and attempt, never token bytes or raw
+transport response bodies. A delivery error alone cannot establish whether an
+old failure was an API timeout, a kubelet/runtime exec delay or a lost response.
+
 On SIGTERM the server marks `/readyz` unavailable before cancelling scheduler
 workers. New HTTP/MCP requests receive 503 with `Retry-After: 1`; `/healthz` and
 `/livez` stay healthy during drain. Scheduler observers stop and adoption-capable
