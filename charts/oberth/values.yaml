@@ -67,6 +67,11 @@ promotion:
 # is held until the server's data filesystem has at least this many free bytes.
 # Default 0 = disabled. The proposal from #602/#673 is 160000000000 (160 GB).
 admission:
+  # Mounted directory is re-read every 5s; direct ConfigMap edits need no restart.
+  # Null initializes the runtime value from the boot maxConcurrentJobs above.
+  runtimeCapacity:
+    enabled: true
+    maxConcurrentJobs: null
   diskFloorBytes: 0
   # Host-wide Linux PSI admission hold. No running work is paused. Missing or
   # malformed PSI fails open with one warning. Zero disables each threshold.

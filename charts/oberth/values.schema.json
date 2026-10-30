@@ -79,6 +79,14 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
+        "runtimeCapacity": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "maxConcurrentJobs": { "type": ["integer", "null"], "minimum": 1, "maximum": 64 }
+          }
+        },
         "diskFloorBytes": {
           "type": "integer",
           "minimum": 0,

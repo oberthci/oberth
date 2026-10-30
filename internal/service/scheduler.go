@@ -34,19 +34,20 @@ var errMutationBlocked = errors.New("service: mutation blocked by unavailable au
 type mutationRequirement func(context.Context) error
 
 type SchedulerConfig struct {
-	Store            SchedulerStore
-	Git              WorkspaceGit
-	Logs             LogStore
-	Jobs             JobController
-	ReleaseJobs      ReleaseJobController
-	TrustedPreflight TrustedPreflight
-	Auditor          Auditor
-	Signals          *Signals
-	WorkspaceRoot    string
-	RemoveWorkspace  func(string) error
-	MaxConcurrent    int
-	MaxRunLogBytes   int64
-	MutationGate     func(context.Context) error
+	Store             SchedulerStore
+	Git               WorkspaceGit
+	Logs              LogStore
+	Jobs              JobController
+	ReleaseJobs       ReleaseJobController
+	TrustedPreflight  TrustedPreflight
+	Auditor           Auditor
+	Signals           *Signals
+	WorkspaceRoot     string
+	RemoveWorkspace   func(string) error
+	MaxConcurrent     int
+	MaxConcurrentFile string
+	MaxRunLogBytes    int64
+	MutationGate      func(context.Context) error
 	// MaxHeadWait bounds bounded backfill (#1085): while the queue head that
 	// does not fit has waited less than this, later runs that fit are
 	// admitted beside it. Zero is strict FIFO; serve defaults it to
@@ -77,7 +78,9 @@ type Scheduler struct {
 	signals            *Signals
 	workspaces         *workspaceLifecycle
 	workspaceRoot      string
-	maxConcurrent      int
+	maxConcurrent      int // immutable boot default
+	capacityFile       string
+	capacityReloadMu   sync.Mutex
 	admission          *weightedAdmission
 	priorityMu         sync.Mutex // serialize durable priority refresh snapshots
 	maxRunLogBytes     int64
@@ -148,6 +151,9 @@ func NewScheduler(config SchedulerConfig) (*Scheduler, error) {
 	if err := config.SizeWeights.Validate(); err != nil {
 		return nil, fmt.Errorf("service: admission size weights: %w", err)
 	}
+	if _, err := admissionCapacityBudget(config.MaxConcurrent, config.SizeWeights, false); err != nil {
+		return nil, err
+	}
 	if config.MaxRunLogBytes <= 0 {
 		config.MaxRunLogBytes = 64 << 20
 	}
@@ -174,6 +180,7 @@ func NewScheduler(config SchedulerConfig) (*Scheduler, error) {
 		releaseJobs: config.ReleaseJobs, trusted: config.TrustedPreflight,
 		auditor: config.Auditor, signals: signals,
 		workspaces: workspaces, workspaceRoot: workspaceRoot, maxConcurrent: config.MaxConcurrent,
+		capacityFile:   config.MaxConcurrentFile,
 		admission:      newWeightedAdmissionForJobsWeights(config.MaxConcurrent, config.SizeWeights),
 		maxRunLogBytes: config.MaxRunLogBytes, mutationGate: mutationGate,
 		wake: make(chan struct{}, 1), publicationWake: make(chan struct{}, 1),
@@ -188,6 +195,7 @@ func NewScheduler(config SchedulerConfig) (*Scheduler, error) {
 	// (weight 1) pack two per M slot. A grant wakes the loop too, so it can
 	// claim into weight a small run left spare.
 	scheduler.admission.maxRuns = scheduler.admission.capacity
+	scheduler.admission.capacityConfig = model.AdmissionCapacityConfig{MaxConcurrentJobs: config.MaxConcurrent, BootDefault: config.MaxConcurrent, Source: "boot", File: config.MaxConcurrentFile}
 	scheduler.admission.pressure = newPressureCheck(config.AdmissionPressure)
 	scheduler.admission.onPark = scheduler.signalQueue
 	scheduler.admission.onGrant = scheduler.signalQueue
@@ -443,6 +451,7 @@ func (scheduler *Scheduler) Run(ctx context.Context) error {
 	workerCtx, cancelWorkers := context.WithCancel(ctx)
 	workerCtx = context.WithValue(workerCtx, databaseRetryKey{}, &databaseRetryScope{lifetime: workerCtx, owner: scheduler})
 	defer cancelWorkers()
+	scheduler.refreshRuntimeCapacity(workerCtx)
 	var workers sync.WaitGroup
 	join := func() {
 		cancelWorkers()
@@ -494,6 +503,10 @@ func (scheduler *Scheduler) Run(ctx context.Context) error {
 		scheduler.onStartupRecovered()
 	}
 	scheduler.signalQueue()
+	if scheduler.capacityFile != "" {
+		workers.Add(1)
+		go func() { defer workers.Done(); scheduler.watchRuntimeCapacity(workerCtx, nil) }()
+	}
 	workers.Add(1)
 	go func() {
 		defer workers.Done()
@@ -646,8 +659,9 @@ func (scheduler *Scheduler) Run(ctx context.Context) error {
 // instead of stopping at MaxConcurrent runs. At most one such claim waits at a
 // time, so this never piles up checkouts behind a full budget.
 func (scheduler *Scheduler) dispatchSlotAvailable(active int) bool {
-	parked := min(scheduler.admission.groupParked(), scheduler.maxConcurrent)
-	if active-parked < scheduler.maxConcurrent {
+	limit := scheduler.concurrentJobs()
+	parked := min(scheduler.admission.groupParked(), limit)
+	if active-parked < limit {
 		return true
 	}
 	return scheduler.admission.spareWeightForClaim(active - parked)

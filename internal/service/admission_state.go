@@ -70,9 +70,11 @@ func (scheduler *Scheduler) AdmissionState() *model.AdmissionState {
 	gate := scheduler.admission
 	gate.mu.Lock()
 	defer gate.mu.Unlock()
+	configuration := gate.capacityConfig
 	state := &model.AdmissionState{
-		Pressure: gate.pressureStateLocked(),
-		Capacity: gate.capacity, Used: gate.used, Runs: gate.runs, MaxRuns: gate.maxRuns,
+		Configuration: &configuration,
+		Pressure:      gate.pressureStateLocked(),
+		Capacity:      gate.capacity, Used: gate.used, Runs: gate.runs, MaxRuns: gate.maxRuns,
 		MaxHeadWaitSeconds: int64(gate.maxHeadWait / time.Second),
 		Reservations:       []model.AdmissionReservation{}, Groups: []model.AdmissionGroup{},
 	}

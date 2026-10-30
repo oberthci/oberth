@@ -1,3 +1,4 @@
+{{- $runtimeCapacity := (.Values.admission).runtimeCapacity | default dict -}}
 {{- $trustedTests := .Values.trustedTests | default dict -}}
 {{- if not .Values.secretstore.enabled }}
 {{- fail "OpenBao is required for server and upstream identities; configure secretstore.enabled" }}
@@ -178,6 +179,9 @@ spec:
             */}}
             - "--runner-image-prefixes={{ join "," .Values.runnerImagePrefixes }}"
             - --max-concurrent-jobs={{ .Values.maxConcurrentJobs }}
+            {{- if $runtimeCapacity.enabled }}
+            - --max-concurrent-jobs-file=/etc/oberth/runtime-capacity/max-concurrent-jobs
+            {{- end }}
             {{- $kubernetesClient := .Values.kubernetesClient | default dict }}
             - --kubernetes-client-qps={{ $kubernetesClient.qps | default 50 }}
             - --kubernetes-client-burst={{ $kubernetesClient.burst | default 100 }}
@@ -443,6 +447,11 @@ spec:
             capabilities:
               drop: ["ALL"]
           volumeMounts:
+            {{- if $runtimeCapacity.enabled }}
+            - name: runtime-capacity
+              mountPath: /etc/oberth/runtime-capacity
+              readOnly: true
+            {{- end }}
             {{- if $trustedTests.recipes }}
             - name: trusted-test-recipes
               mountPath: /etc/oberth/trusted-tests
@@ -499,6 +508,12 @@ spec:
               readOnly: true
             {{- end }}
       volumes:
+        {{- if $runtimeCapacity.enabled }}
+        - name: runtime-capacity
+          configMap:
+            name: {{ include "oberth.fullname" . }}-admission
+            optional: true
+        {{- end }}
         {{- if $trustedTests.recipes }}
         - name: trusted-test-recipes
           configMap:

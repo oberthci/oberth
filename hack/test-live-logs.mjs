@@ -262,3 +262,14 @@ await run('awaitResult');
 assert.equal(run(`JSON.stringify(state.attempts.get('rca-head').rows.map(row=>row.ID))`), JSON.stringify(['our-old']));
 
 assert.equal(run(`summaryLines({Run:{ID:'original',Status:'failed',auto_retried_by:'retry',display_reason:'infra error, retried as retry'},Steps:[]}).some(line => line.startsWith('[queued]'))`), false);
+
+assert.equal(run(`capacityStatusCard({})`), '');
+const capacityCard = run(`capacityStatusCard({used:8,capacity:4,configuration:{max_concurrent_jobs:2,source:'file',file:'/etc/capacity',error:'invalid <override>'}})`);
+for (const text of ['2 M jobs', '8/4 weight used', 'source file', 'keeping last good value', 'invalid &lt;override&gt;']) assert.ok(capacityCard.includes(text), text);
+assert.ok(!capacityCard.includes('invalid <override>'));
+
+// The shared regression ships in both topic bundles and runs once both UI
+// features are present in the assembled tree.
+if (run(`typeof capacityStatusCard === 'function' && typeof controllerProfileStatusCard === 'function'`)) {
+  await import('./test-runtime-controller-combined.mjs');
+}

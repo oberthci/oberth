@@ -176,15 +176,26 @@ type SchedulingReason struct {
 	Message string `json:"message,omitempty"`
 }
 
+// AdmissionCapacityConfig describes the effective operator capacity and reload health.
+type AdmissionCapacityConfig struct {
+	MaxConcurrentJobs int       `json:"max_concurrent_jobs"`
+	BootDefault       int       `json:"boot_default"`
+	Source            string    `json:"source"`
+	File              string    `json:"file,omitempty"`
+	Error             string    `json:"error,omitempty"`
+	ChangedAt         time.Time `json:"changed_at,omitzero"`
+}
+
 // AdmissionState is the whole in-memory admission gate as data (#1099): its
 // budget, every reservation it holds, and every concurrency group in use. It
 // is an ephemeral observation of one server process, never durable evidence.
 type AdmissionState struct {
-	Pressure *AdmissionPressure `json:"pressure,omitempty"`
-	Capacity int                `json:"capacity"`
-	Used     int                `json:"used"`
-	Runs     int                `json:"runs"`
-	MaxRuns  int                `json:"max_runs"`
+	Configuration *AdmissionCapacityConfig `json:"configuration,omitempty"`
+	Pressure      *AdmissionPressure       `json:"pressure,omitempty"`
+	Capacity      int                      `json:"capacity"`
+	Used          int                      `json:"used"`
+	Runs          int                      `json:"runs"`
+	MaxRuns       int                      `json:"max_runs"`
 	// MaxHeadWaitSeconds is the backfill bound (#1085); 0 is strict FIFO.
 	MaxHeadWaitSeconds int64                  `json:"max_head_wait_seconds"`
 	Reservations       []AdmissionReservation `json:"reservations"`
