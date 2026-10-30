@@ -302,9 +302,7 @@ func admitTemplates(workflow *wfv1.Workflow, policy Policy) []error {
 		}
 		problems = append(problems, admitTemplate(location, template, policy, 0)...)
 		if policy.KubeVirt && template.Resource != nil && !strings.HasPrefix(template.Name, "frag-") {
-			if _, err := VMIOperation(template.Resource); err == nil {
-				vmiTemplates++
-			}
+			vmiTemplates++
 			if template.Resource.Action == "create" {
 				// The individual manifest is validated above. A malformed one
 				// already fails admission and contributes no trusted budget data.

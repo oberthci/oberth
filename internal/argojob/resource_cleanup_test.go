@@ -5,6 +5,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"sort"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -13,6 +16,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
@@ -322,6 +326,7 @@ func TestCleanupVerdictBackoffBoundsListRate(t *testing.T) {
 	wf.Annotations[argoworkflow.CleanupVerdictAnnotation] = "1"
 	client := cleanupClient()
 	object := ownedCleanupObject(wf, vmiResource, "slow")
+	object.SetLabels(nil)
 	if _, err := client.Resource(vmiResource).Namespace(wf.Namespace).Create(t.Context(), object, metav1.CreateOptions{}); err != nil {
 		t.Fatal(err)
 	}
@@ -334,9 +339,18 @@ func TestCleanupVerdictBackoffBoundsListRate(t *testing.T) {
 	completion := Completion{Succeeded: true}
 	c.cleanupVerdict(t.Context(), wf, wf.Annotations[runIDAnnotation], nil, &completion)
 	counts := map[string]int{}
+	fallback := map[string]int{}
+	reads := 0
 	for _, action := range client.Actions() {
 		if action.GetVerb() == "list" {
-			counts[action.GetResource().Resource]++
+			if action.(ktesting.ListAction).GetListRestrictions().Labels.String() != "" {
+				counts[action.GetResource().Resource]++
+			} else {
+				fallback[action.GetResource().Resource]++
+			}
+		}
+		if action.GetVerb() == "get" {
+			reads++
 		}
 	}
 	for resource, count := range counts {
@@ -344,7 +358,195 @@ func TestCleanupVerdictBackoffBoundsListRate(t *testing.T) {
 			t.Fatalf("%s: %d LISTs in one-second verdict, want 2..4 backoff polls", resource, count)
 		}
 	}
+	for resource, count := range fallback {
+		if count != 1 {
+			t.Fatalf("%s repeated shared-namespace scans while pending: %d", resource, count)
+		}
+	}
+	if reads < 2 {
+		t.Fatal("unlabeled pending object was not observed by name")
+	}
 	if completion.Succeeded || !strings.Contains(completion.Reason, object.GetName()) {
 		t.Fatalf("backoff lost bounded leftover verdict: %+v", completion)
+	}
+}
+
+func TestCleanupVerdictSharedNamespaceInventory(t *testing.T) {
+	config, wf, _ := guardedVMIFixture(t, 1)
+	wf.Annotations[argoworkflow.CleanupVerdictAnnotation] = "5"
+	client := cleanupClient()
+	for index := range 2050 {
+		object := ownedCleanupObject(wf, pvcResource, fmt.Sprintf("unrelated%d", index))
+		object.SetName(fmt.Sprintf("foreign-%04d", index))
+		object.SetLabels(nil)
+		object.SetOwnerReferences(nil)
+		if _, err := client.Resource(pvcResource).Namespace(wf.Namespace).Create(t.Context(), object, metav1.CreateOptions{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	object := ownedCleanupObject(wf, pvcResource, "unlabeled")
+	object.SetLabels(nil)
+	if _, err := client.Resource(pvcResource).Namespace(wf.Namespace).Create(t.Context(), object, metav1.CreateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	// The real API paginates namespace fallback scans; unrelated pages must
+	// neither consume the run bound nor hide an unlabeled run PVC on page 9.
+	scoped, fallbackPages := 0, 0
+	client.PrependReactor("list", "persistentvolumeclaims", func(action ktesting.Action) (bool, runtime.Object, error) {
+		listAction := action.(ktesting.ListAction)
+		options := action.(interface{ GetListOptions() metav1.ListOptions }).GetListOptions()
+		raw, err := client.Tracker().List(pvcResource, schema.GroupVersionKind{Version: "v1", Kind: "PersistentVolumeClaim"}, wf.Namespace)
+		if err != nil {
+			return true, nil, err
+		}
+		list := raw.(*unstructured.UnstructuredList)
+		sort.Slice(list.Items, func(i, j int) bool { return list.Items[i].GetName() < list.Items[j].GetName() })
+		filtered := []unstructured.Unstructured{}
+		for _, item := range list.Items {
+			if listAction.GetListRestrictions().Labels.Matches(labels.Set(item.GetLabels())) {
+				filtered = append(filtered, item)
+			}
+		}
+		start := 0
+		if options.Continue != "" {
+			start, err = strconv.Atoi(options.Continue)
+			if err != nil {
+				return true, nil, err
+			}
+		}
+		end := min(start+int(options.Limit), len(filtered))
+		page := &unstructured.UnstructuredList{Items: filtered[start:end]}
+		if end < len(filtered) {
+			page.SetContinue(strconv.Itoa(end))
+		}
+		if options.LabelSelector == "" {
+			fallbackPages++
+		} else {
+			scoped++
+		}
+		return true, page, nil
+	})
+	c, err := NewController(&staticWorkflowClient{workflow: wf}, nil, config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.WithVMIClient(client)
+	completion := Completion{Succeeded: true}
+	var log bytes.Buffer
+	c.cleanupVerdict(t.Context(), wf, wf.Annotations[runIDAnnotation], &log, &completion)
+	if !completion.Succeeded {
+		t.Fatalf("unrelated PVCs broke cleanup: %+v %s", completion, log.String())
+	}
+	if scoped == 0 || fallbackPages < 18 {
+		t.Fatalf("missing scoped inventory or complete initial/final fallback: scoped=%d pages=%d", scoped, fallbackPages)
+	}
+	for _, action := range client.Actions() {
+		if action.GetVerb() == "delete" && action.(ktesting.DeleteAction).GetName() != object.GetName() {
+			t.Fatal("deleted an unrelated PVC")
+		}
+	}
+	remaining, err := client.Resource(pvcResource).Namespace(wf.Namespace).List(t.Context(), metav1.ListOptions{Limit: 256})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(remaining.Items) != 256 || remaining.GetContinue() == "" {
+		t.Fatal("unrelated namespace PVCs did not survive")
+	}
+}
+
+func TestCleanupVerdictFinalPrefixScanFindsLateUnlabeledPVC(t *testing.T) {
+	config, wf, _ := guardedVMIFixture(t, 1)
+	wf.Annotations[argoworkflow.CleanupVerdictAnnotation] = "2"
+	client := cleanupClient()
+	vmi := ownedCleanupObject(wf, vmiResource, "vm")
+	pvc := ownedCleanupObject(wf, pvcResource, "late")
+	pvc.SetLabels(nil)
+	if _, err := client.Resource(vmiResource).Namespace(wf.Namespace).Create(t.Context(), vmi, metav1.CreateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	client.PrependReactor("delete", "virtualmachineinstances", func(ktesting.Action) (bool, runtime.Object, error) {
+		if err := client.Tracker().Create(pvcResource, pvc, wf.Namespace); err != nil {
+			t.Fatal(err)
+		}
+		return false, nil, nil
+	})
+	c, err := NewController(&staticWorkflowClient{workflow: wf}, nil, config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.WithVMIClient(client)
+	completion := Completion{Succeeded: true}
+	var log bytes.Buffer
+	c.cleanupVerdict(t.Context(), wf, wf.Annotations[runIDAnnotation], &log, &completion)
+	if !completion.Succeeded || !strings.Contains(log.String(), pvc.GetName()) {
+		t.Fatalf("late PVC escaped cleanup: %+v %s", completion, log.String())
+	}
+	if _, err := client.Resource(pvcResource).Namespace(wf.Namespace).Get(t.Context(), pvc.GetName(), metav1.GetOptions{}); !apierrors.IsNotFound(err) {
+		t.Fatalf("late PVC survived: %v", err)
+	}
+}
+
+func TestCleanupVerdictFailureAttribution(t *testing.T) {
+	for _, mode := range []string{"nil-client", "list-forbidden", "delete-forbidden", "api-unavailable", "log-writer", "leftover", "foreign", "leftover-and-log"} {
+		for _, pipelineFailed := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/pipeline-failed=%t", mode, pipelineFailed), func(t *testing.T) {
+				config, wf, _ := guardedVMIFixture(t, 1)
+				wf.Annotations[argoworkflow.CleanupVerdictAnnotation] = "1"
+				client := cleanupClient()
+				if mode == "leftover" || mode == "leftover-and-log" || mode == "delete-forbidden" || mode == "foreign" {
+					object := ownedCleanupObject(wf, vmiResource, "leftover")
+					if mode == "foreign" {
+						object.SetOwnerReferences(nil)
+					}
+					if _, err := client.Resource(vmiResource).Namespace(wf.Namespace).Create(t.Context(), object, metav1.CreateOptions{}); err != nil {
+						t.Fatal(err)
+					}
+				}
+				if mode == "list-forbidden" {
+					client.PrependReactor("list", "*", func(ktesting.Action) (bool, runtime.Object, error) {
+						return true, nil, apierrors.NewForbidden(pvcResource.GroupResource(), "", errors.New("RBAC unavailable"))
+					})
+				}
+				if mode == "api-unavailable" {
+					client.PrependReactor("list", "*", func(ktesting.Action) (bool, runtime.Object, error) {
+						return true, nil, apierrors.NewServiceUnavailable("API unavailable")
+					})
+				}
+				if mode == "delete-forbidden" {
+					client.PrependReactor("delete", "*", func(ktesting.Action) (bool, runtime.Object, error) {
+						return true, nil, apierrors.NewForbidden(vmiResource.GroupResource(), "leftover", errors.New("RBAC unavailable"))
+					})
+				}
+				if mode == "leftover" || mode == "leftover-and-log" {
+					client.PrependReactor("delete", "*", func(ktesting.Action) (bool, runtime.Object, error) { return true, nil, nil })
+				}
+				c, err := NewController(&staticWorkflowClient{workflow: wf}, nil, config)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if mode != "nil-client" {
+					c.WithVMIClient(client)
+				}
+				completion := Completion{Succeeded: !pipelineFailed}
+				if pipelineFailed {
+					completion.FailedBurn = "test"
+					completion.FailedStep = "driver"
+					completion.Reason = "guest failed"
+				}
+				var log bytes.Buffer
+				var destination io.Writer = &log
+				if mode == "log-writer" || mode == "leftover-and-log" {
+					destination = brokenCleanupLog{}
+				}
+				c.cleanupVerdict(t.Context(), wf, wf.Annotations[runIDAnnotation], destination, &completion)
+				wantInfra := !pipelineFailed && mode != "leftover" && mode != "foreign" && mode != "leftover-and-log"
+				if completion.Succeeded || completion.Infrastructure != wantInfra {
+					t.Fatalf("wrong cleanup attribution: %+v", completion)
+				}
+				if pipelineFailed && (completion.FailedStep != "driver" || !strings.Contains(completion.Reason, "guest failed")) {
+					t.Fatalf("pipeline failure masked: %+v", completion)
+				}
+			})
+		}
 	}
 }

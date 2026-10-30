@@ -206,54 +206,95 @@ func (o cleanupObject) identity() string {
 	return fmt.Sprintf("%s/%s uid=%s", o.object.GetKind(), o.object.GetName(), o.object.GetUID())
 }
 
-// Snapshot complete bounded lists, including unlabeled Workflow-owned PVCs
-// from volumeClaimTemplates. Incomplete reads can never produce PASS.
-func (c *Controller) cleanupObjects(ctx context.Context, wf *wfv1.Workflow, known map[string]types.UID) ([]cleanupObject, error) {
+// API/configuration failures belong to the cleanup observer, not to guest
+// tests. Keep a typed cause so leftover/ownership failures stay pipeline red.
+type cleanupInfrastructureError struct{ cause error }
+
+func (err *cleanupInfrastructureError) Error() string { return err.cause.Error() }
+func (err *cleanupInfrastructureError) Unwrap() error { return err.cause }
+func cleanupInfrastructureFailure(err error) error    { return &cleanupInfrastructureError{cause: err} }
+
+// Label-filtered lists discover run resources. An initial and final prefix
+// scan also find unlabeled volumeClaimTemplates, source and CDI PVCs. While
+// waiting, read those known names directly instead of relisting a shared
+// namespace. Only matching run objects count against the inventory bound.
+func (c *Controller) cleanupObjects(ctx context.Context, wf *wfv1.Workflow, known map[string]types.UID, scanPrefix bool) ([]cleanupObject, error) {
 	var objects []cleanupObject
 	for _, resource := range []schema.GroupVersionResource{vmiResource, dataVolumeResource, pvcResource} {
-		next := ""
-		count := 0
-		for {
-			list, err := c.vmi.Resource(resource).Namespace(wf.Namespace).List(ctx, metav1.ListOptions{Limit: 256, Continue: next})
-			if apierrors.IsNotFound(err) && resource != pvcResource {
-				break
-			} // Optional CRD absent.
-			if err != nil {
-				return objects, fmt.Errorf("list %s: %w", resource.Resource, err)
+		client := c.vmi.Resource(resource).Namespace(wf.Namespace)
+		seen := map[string]bool{}
+		add := func(object unstructured.Unstructured) error {
+			if object.GetNamespace() != wf.Namespace || !strings.HasPrefix(object.GetName(), wf.Name+"-") || seen[object.GetName()] {
+				return nil
 			}
-			count += len(list.Items)
-			if count > 2048 {
-				return objects, fmt.Errorf("list %s exceeds 2048-object cleanup bound", resource.Resource)
+			seen[object.GetName()] = true
+			if len(seen) > 2048 {
+				return fmt.Errorf("run %s exceeds 2048-object cleanup bound for %s", wf.Name, resource.Resource)
 			}
-			for _, object := range list.Items {
-				if object.GetNamespace() != wf.Namespace || !strings.HasPrefix(object.GetName(), wf.Name+"-") {
-					continue
-				}
-				owned := object.GetUID() != "" && known[cleanupKey(resource, object.GetName())] == object.GetUID()
+			owned := object.GetUID() != "" && known[cleanupKey(resource, object.GetName())] == object.GetUID()
+			if !owned {
 				var err error
-				if !owned {
-					owned, err = c.runOwnsResource(ctx, wf, &object)
-				}
+				owned, err = c.runOwnsResource(ctx, wf, &object)
 				if err != nil {
-					return objects, err
+					return cleanupInfrastructureFailure(fmt.Errorf("read cleanup ownership: %w", err))
 				}
-				candidate := cleanupObject{resource: resource, object: object}
-				if !owned {
-					// A same-name foreign replacement or orphan is not proof of
-					// absence, even if its run label was removed.
-					return append(objects, candidate), fmt.Errorf("refusing delete of foreign or unproven %s", candidate.identity())
+			}
+			candidate := cleanupObject{resource: resource, object: object}
+			objects = append(objects, candidate)
+			if !owned {
+				return fmt.Errorf("refusing delete of foreign or unproven %s", candidate.identity())
+			}
+			return nil
+		}
+		list := func(selector string) error {
+			next := ""
+			for {
+				if err := ctx.Err(); err != nil {
+					return cleanupInfrastructureFailure(err)
 				}
-				objects = append(objects, candidate)
+				page, err := client.List(ctx, metav1.ListOptions{LabelSelector: selector, Limit: 256, Continue: next})
+				if apierrors.IsNotFound(err) && resource != pvcResource {
+					return nil
+				} // Optional CRD absent.
+				if err != nil {
+					return cleanupInfrastructureFailure(fmt.Errorf("list %s: %w", resource.Resource, err))
+				}
+				for _, object := range page.Items {
+					if err := add(object); err != nil {
+						return err
+					}
+				}
+				if page.GetContinue() == "" {
+					return nil
+				}
+				if next == page.GetContinue() {
+					return cleanupInfrastructureFailure(errors.New("cleanup list pagination did not advance"))
+				}
+				next = page.GetContinue()
 			}
-			if list.GetContinue() == "" {
-				break
+		}
+		if err := list("oberth.ci/workflow=" + wf.Name); err != nil {
+			return objects, err
+		}
+		for key := range known {
+			name, matches := strings.CutPrefix(key, resource.String()+"/")
+			if !matches || seen[name] {
+				continue
 			}
-			if next == list.GetContinue() {
-				return objects, errors.New("cleanup list pagination did not advance")
+			object, err := client.Get(ctx, name, metav1.GetOptions{})
+			if apierrors.IsNotFound(err) {
+				continue
 			}
-			next = list.GetContinue()
-			if count >= 2048 {
-				return objects, fmt.Errorf("incomplete %s cleanup list", resource.Resource)
+			if err != nil {
+				return objects, cleanupInfrastructureFailure(fmt.Errorf("read cleanup %s/%s: %w", resource.Resource, name, err))
+			}
+			if err := add(*object); err != nil {
+				return objects, err
+			}
+		}
+		if scanPrefix {
+			if err := list(""); err != nil {
+				return objects, err
 			}
 		}
 	}
@@ -307,17 +348,24 @@ func (c *Controller) cleanupVerdict(ctx context.Context, wf *wfv1.Workflow, runI
 	defer cancel()
 	err := declarationErr
 	if err == nil {
-		err = c.verifyOwnership(wf, runID)
+		if ownershipErr := c.verifyOwnership(wf, runID); ownershipErr != nil {
+			err = cleanupInfrastructureFailure(ownershipErr)
+		}
 	}
 	if err == nil && (c.vmi == nil || wf.UID == "" || wf.Namespace != c.config.Namespace) {
-		err = errors.New("cleanup verdict unavailable: missing client or Workflow identity")
+		err = cleanupInfrastructureFailure(errors.New("cleanup verdict unavailable: missing client or Workflow identity"))
 	}
 	var remaining []string
 	attempted := map[string]bool{}
 	known := map[string]types.UID{}
 	pollDelay := initialCleanupPollDelay
 	for err == nil {
-		objects, readErr := c.cleanupObjects(cleanupCtx, wf, known)
+		scanPrefix := len(known) == 0
+		objects, readErr := c.cleanupObjects(cleanupCtx, wf, known, scanPrefix)
+		if readErr == nil && len(objects) == 0 && !scanPrefix {
+			// Catch late unlabeled resources before accepting complete absence.
+			objects, readErr = c.cleanupObjects(cleanupCtx, wf, known, true)
+		}
 		if readErr == nil || len(objects) > 0 {
 			remaining = nil
 			for _, object := range objects {
@@ -339,7 +387,7 @@ func (c *Controller) cleanupVerdict(ctx context.Context, wf *wfv1.Workflow, runI
 			}
 			uid := object.object.GetUID()
 			if uid == "" {
-				err = fmt.Errorf("cleanup object has no UID: %s", key)
+				err = cleanupInfrastructureFailure(fmt.Errorf("cleanup object has no UID: %s", key))
 				break
 			}
 			if destination != nil {
@@ -348,6 +396,9 @@ func (c *Controller) cleanupVerdict(ctx context.Context, wf *wfv1.Workflow, runI
 			deleteErr := c.vmi.Resource(object.resource).Namespace(wf.Namespace).Delete(cleanupCtx, object.object.GetName(), cleanupDeleteOptions(object.resource, uid))
 			if deleteErr != nil && !apierrors.IsNotFound(deleteErr) {
 				err = fmt.Errorf("delete %s: %w", key, deleteErr)
+				if !apierrors.IsConflict(deleteErr) {
+					err = cleanupInfrastructureFailure(err)
+				}
 				break
 			}
 			attempted[key] = true
@@ -374,14 +425,28 @@ func (c *Controller) cleanupVerdict(ctx context.Context, wf *wfv1.Workflow, runI
 	}
 	emit(step.Status)
 	if output != nil && output.err != nil {
-		err = errors.Join(err, fmt.Errorf("cleanup verdict step log unavailable: %w", output.err))
+		logErr := cleanupInfrastructureFailure(fmt.Errorf("cleanup verdict step log unavailable: %w", output.err))
+		if err == nil {
+			err = logErr
+		} else {
+			// Losing the log must not turn an already-proven leftover or
+			// ownership failure into a retryable infrastructure failure.
+			err = fmt.Errorf("%w; %v", err, logErr)
+		}
 		message = failedMessage(err)
 		step.Status, step.ExitCode = runprogress.StepFailed, 1
 	}
 	if err != nil {
+		pipelineFailed := !completion.Succeeded && !completion.Infrastructure
+		var infrastructure *cleanupInfrastructureError
+		if errors.As(err, &infrastructure) {
+			step.InfrastructureReason = infrastructure.Error()
+		}
 		completion.Succeeded = false
-		completion.Infrastructure = false
-		completion.FailedBurn, completion.FailedStep = step.Burn, step.Step
+		completion.Infrastructure = infrastructure != nil && !pipelineFailed
+		if !pipelineFailed || completion.FailedStep == "" {
+			completion.FailedBurn, completion.FailedStep = step.Burn, step.Step
+		}
 		completion.Reason = strings.TrimPrefix(strings.TrimSpace(completion.Reason+"; "+message), "; ")
 	}
 	completion.Steps = append(completion.Steps, step)

@@ -81,3 +81,26 @@ func TestCleanupVerdictAdmission(t *testing.T) {
 		}
 	}
 }
+
+func TestCleanupDiskDeletesCountAgainstTemplateCap(t *testing.T) {
+	deadline := int64(60)
+	wf := &wfv1.Workflow{Spec: wfv1.WorkflowSpec{Entrypoint: "vm", ActiveDeadlineSeconds: &deadline, Templates: []wfv1.Template{{Name: "vm", Resource: &wfv1.ResourceTemplate{Action: "create", SetOwnerReference: true, Manifest: admittedVMIManifest}}}}}
+	metadata := admittedVMIManifest[:strings.Index(admittedVMIManifest, "spec:\n")]
+	metadata = strings.Replace(metadata, "metadata:\n", "metadata:\n  uid: 'disk-uid'\n", 1)
+	for _, disk := range []struct{ api, kind, name string }{{"cdi.kubevirt.io/v1beta1", "DataVolume", "dv"}, {"v1", "PersistentVolumeClaim", "pvc"}} {
+		manifest := strings.ReplaceAll(strings.ReplaceAll(metadata, "kubevirt.io/v1", disk.api), "VirtualMachineInstance", disk.kind)
+		wf.Spec.Templates = append(wf.Spec.Templates, wfv1.Template{Name: disk.name, Resource: &wfv1.ResourceTemplate{Action: "delete", SetOwnerReference: true, Manifest: manifest}})
+	}
+	budget := DefaultVMIBudget()
+	budget.MaxVMs = 1
+	policy := Policy{KubeVirt: true, VMIBudget: budget, ContainerDiskPrefixes: []string{"quay.io/example/"}}
+	if err := Admit(wf, policy); err != nil {
+		t.Fatalf("three total resource templates should fit: %v", err)
+	}
+	extra := *wf.Spec.Templates[2].DeepCopy()
+	extra.Name = "extra-pvc"
+	wf.Spec.Templates = append(wf.Spec.Templates, extra)
+	if err := Admit(wf, policy); err == nil || !strings.Contains(err.Error(), "4 VMI resource templates, maximum is 3") {
+		t.Fatalf("disk delete bypassed cap: %v", err)
+	}
+}

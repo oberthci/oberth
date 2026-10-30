@@ -359,12 +359,17 @@ foreign replacements, missing ownership proof, API errors or incomplete lists
 fail the hook and the run. Recovery applies the same gate before reporting a
 terminal result. Polling backs off exponentially from 100ms to a 2s cap,
 within the declared total deadline. A clean verdict preserves an earlier
-pipeline failure.
+pipeline failure. Observer API, configuration and log-storage failures are
+classified as infrastructure failures; leftovers and unproven ownership remain
+pipeline failures. An existing pipeline failure keeps that attribution.
 
 Cleanup includes Workflow-owned volumeClaimTemplates and source PVCs. PVCs
 owned by a DataVolume must prove that parent's UID and Workflow ownership.
-Inspection is bounded to 2,048 namespace objects per resource type, with
-pagination; exceeding the bound fails closed. Same-prefix objects with
+Label-filtered inventory is bounded to 2,048 matching run objects per resource
+type. Initial and final prefix scans discover unlabeled PVCs without counting
+unrelated namespace objects against that bound. Waiting polls read known
+unlabeled names directly. All lists paginate; incomplete reads fail closed.
+Same-prefix objects with
 unproven ownership are listed as leftovers and never deleted. The hook name
 `oberth-cleanup` is reserved when this annotation is present.
 
@@ -403,6 +408,7 @@ The same metadata-only, UID-pinned delete is admitted for
 `cdi.kubevirt.io/v1beta1` `DataVolume` and `v1` `PersistentVolumeClaim`.
 DataVolume deletion uses foreground propagation. This adds no DataVolume/PVC
 create or get templates, disk cloning, external volume references, or pipeline
-storage permissions. Existing creation admission remains in force. Drain
+storage permissions. Disk deletes count toward the existing per-VM resource
+template cap. Existing creation admission remains in force. Drain
 running resource-delete workflows before upgrading, since legacy Pods lack
 the server delete guard and the launcher account no longer has delete access.
