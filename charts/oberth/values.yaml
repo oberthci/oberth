@@ -76,6 +76,8 @@ admission:
     # Percentage points; below each enabled threshold. Resume strictly below
     # threshold minus hysteresis; maxDefer bypasses only this pressure gate.
     hysteresis: 10
+    # Each prepared, unparked waiter gets its own clock; this does not limit
+    # admission to one job per maxDefer. Capacity and priority still apply.
     maxDefer: "20m"
   # Bounded backfill (#1085): while the admission queue head does not fit
   # (an XL waiting for a full drain, say), later runs that fit the spare

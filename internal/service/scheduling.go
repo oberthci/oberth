@@ -87,7 +87,7 @@ func (service *API) observeScheduling(ctx context.Context, run model.Run, steps 
 			// pool of invisible work must not show (#073).
 			admission := *result.Admission
 			admission.Position, admission.Used, admission.Capacity, admission.DiskFloor = 0, 0, 0, nil
-			admission.Pressure = nil
+			admission.Pressure = admission.Pressure.Public()
 			if blocker := service.visibleBlocker(admission.BlockedBy); blocker != nil {
 				admission.BlockedBy = blocker
 			} else {
@@ -95,6 +95,13 @@ func (service *API) observeScheduling(ctx context.Context, run model.Run, steps 
 			}
 			result.Admission = &admission
 		}
+		if result.Admission != nil && service.redactPressure {
+			copy := *result.Admission
+			copy.Pressure = copy.Pressure.Public()
+			copy.BlockedBy = service.visibleBlocker(copy.BlockedBy)
+			result.Admission = &copy
+		}
+
 		if result.Admission != nil {
 			result.State = result.Admission.State
 			switch result.Admission.State {
@@ -103,7 +110,7 @@ func (service *API) observeScheduling(ctx context.Context, run model.Run, steps 
 				return result
 			case "waiting":
 				result.Message = waitingAdmissionMessage(result.Admission)
-				if result.Admission.KubeVirtCapacity {
+				if result.Admission.KubeVirtCapacity || result.Admission.Pressure != nil {
 					// This repository's grant is the blocker, independent of
 					// shared weight or other repositories' visibility.
 					return result
@@ -200,7 +207,10 @@ func waitingAdmissionMessage(admission *model.AdmissionObservation) string {
 		return fmt.Sprintf("Waiting for concurrency group %q behind run %s of the same repository, "+
 			"which is queued ahead in the group.", admission.Group, admission.GroupAhead)
 	case admission.Pressure != nil:
-		return fmt.Sprintf("Deferred: %s pressure %.1f%% (host PSI avg60); bounded by %ds per eligible run.", admission.Pressure.Resource, admission.Pressure.Avg60, admission.Pressure.MaxDeferSeconds)
+		if admission.Pressure.Redacted {
+			return admission.Pressure.Reason()
+		}
+		return fmt.Sprintf("Deferred: %s pressure %.1f%% (host PSI avg60); bounded by %ds per run.", admission.Pressure.Resource, admission.Pressure.Avg60, admission.Pressure.MaxDeferSeconds)
 	case admission.HeadOfQueue && admission.BlockedBy != nil && admission.BlockedBy.Backfilling:
 		return fmt.Sprintf("At the head of the weighted resource admission queue (%s); %s smaller runs that fit beside it.",
 			admission.BlockedBy.Reason(), admission.BlockedBy.Backfill())
@@ -233,15 +243,17 @@ func (service *API) visibleBlocker(blocker *model.AdmissionBlocker) *model.Admis
 	if blocker == nil {
 		return nil
 	}
-	if service.scope == nil {
+	if service.scope == nil && !service.redactPressure {
 		return blocker
 	}
-	if !service.scope.seesRepo(blocker.RepoID) {
+	if service.scope != nil && !service.scope.seesRepo(blocker.RepoID) {
 		return nil
 	}
 	scoped := *blocker
-	scoped.Used, scoped.Capacity = 0, 0
-	scoped.Pressure = nil
+	if service.scope != nil {
+		scoped.Used, scoped.Capacity = 0, 0
+	}
+	scoped.Pressure = scoped.Pressure.Public()
 	return &scoped
 }
 

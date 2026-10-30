@@ -452,7 +452,7 @@ function queueReason(run) {
   if (a.disk_floor?.below_floor) return "waiting for disk space";
   if (a.group_holder || a.group_ahead) return `waiting for group ${a.group}`;
   const pressure = a.pressure || b?.pressure;
-  if (pressure) return `deferred: ${pressure.resource} pressure ${Number(pressure.avg60).toFixed(1)}%`;
+  if (pressure) return pressure.redacted ? `deferred: host ${pressure.resource} pressure` : `deferred: ${pressure.resource} pressure ${Number(pressure.avg60).toFixed(1)}%`;
   if (a.head_of_queue && b) return `waiting for capacity (${b.size}${b.full_drain ? ", needs the whole host" : ""})`
     + (b.backfilling ? " · smaller runs admitted meanwhile" : b.draining ? " · host draining for it" : "");
   if (b) return `waiting behind ${b.repo}/${b.ref} (${b.size})`;

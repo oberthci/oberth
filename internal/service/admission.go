@@ -442,13 +442,8 @@ func (gate *weightedAdmission) grantLocked() {
 	var head *admissionReservation
 	now := gate.clock()
 	gate.pressure.refresh(now)
-	for _, r := range gate.waiters {
-		r.pressureDeferred = false
-		if gate.pressure == nil || !gate.pressure.state.Holding {
-			r.pressureSince = time.Time{}
-		}
-	}
 	gate.sortWaitersLocked()
+	gate.preparePressureWaitsLocked(now)
 	for index := 0; index < len(gate.waiters); {
 		reservation := gate.waiters[index]
 		if reservation.vmParked || gate.kubeVirtBlockedLocked(reservation) {

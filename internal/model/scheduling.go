@@ -111,7 +111,7 @@ func waitText(seconds int64) string {
 func (blocker AdmissionBlocker) Reason() string {
 	switch {
 	case blocker.Pressure != nil:
-		return fmt.Sprintf("%s, deferred: %s pressure %.1f%%", blocker.Size, blocker.Pressure.Resource, blocker.Pressure.Avg60)
+		return blocker.Size + ", " + blocker.Pressure.Reason()
 	case blocker.DiskFloor:
 		return blocker.Size + ", held by the disk floor"
 	case blocker.FullDrain:
@@ -271,8 +271,23 @@ type AdmissionPressure struct {
 	Deferred        int             `json:"deferred"`
 }
 type PressureDeferral struct {
+	Redacted        bool      `json:"redacted,omitempty"`
 	Resource        string    `json:"resource"`
-	Avg60           float64   `json:"avg60"`
-	Since           time.Time `json:"since"`
-	MaxDeferSeconds int64     `json:"max_defer_seconds"`
+	Avg60           float64   `json:"avg60,omitempty"`
+	Since           time.Time `json:"since,omitzero"`
+	MaxDeferSeconds int64     `json:"max_defer_seconds,omitempty"`
+}
+
+// Public preserves an actionable cause without host-wide numeric telemetry.
+func (p *PressureDeferral) Public() *PressureDeferral {
+	if p == nil {
+		return nil
+	}
+	return &PressureDeferral{Resource: p.Resource, Redacted: true}
+}
+func (p *PressureDeferral) Reason() string {
+	if p.Redacted {
+		return "deferred: host " + p.Resource + " pressure"
+	}
+	return fmt.Sprintf("deferred: %s pressure %.1f%%", p.Resource, p.Avg60)
 }

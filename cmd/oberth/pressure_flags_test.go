@@ -39,7 +39,7 @@ func TestChartPressureDefaultsOverridesAndExplicitZero(t *testing.T) {
 		want []string
 	}{
 		{want: []string{"--admission-pressure-io-full-avg60-max=30", "--admission-pressure-cpu-some-avg60-max=0", "--admission-pressure-hysteresis=10", "--admission-pressure-max-defer=20m"}},
-		{set: []string{"admission.pressure.ioFullAvg60Max=0", "admission.pressure.hysteresis=0"}, want: []string{"--admission-pressure-io-full-avg60-max=0", "--admission-pressure-hysteresis=0"}},
+		{set: []string{"admission.pressure.ioFullAvg60Max=0", "admission.pressure.hysteresis=0", "admission.pressure.maxDefer=0s"}, want: []string{"--admission-pressure-io-full-avg60-max=0", "--admission-pressure-hysteresis=0"}},
 		{set: []string{"admission.pressure.ioFullAvg60Max=45.5", "admission.pressure.cpuSomeAvg60Max=70", "admission.pressure.hysteresis=5", "admission.pressure.maxDefer=7m"}, want: []string{"--admission-pressure-io-full-avg60-max=45.5", "--admission-pressure-cpu-some-avg60-max=70", "--admission-pressure-hysteresis=5", "--admission-pressure-max-defer=7m"}},
 	} {
 		args := []string{"template", "oberth", "../../charts/oberth", "--set", "image.ref=example.invalid/oberth@" + goProxyDigest}
@@ -60,7 +60,7 @@ func TestChartPressureDefaultsOverridesAndExplicitZero(t *testing.T) {
 			}
 		}
 	}
-	for _, value := range []string{"admission.pressure.ioFullAvg60Max=-1", "admission.pressure.cpuSomeAvg60Max=101", "admission.pressure.maxDefer=soon"} {
+	for _, value := range []string{"admission.pressure.ioFullAvg60Max=-1", "admission.pressure.cpuSomeAvg60Max=101", "admission.pressure.maxDefer=soon", "admission.pressure.ioFullAvg60Max=5", "admission.pressure.cpuSomeAvg60Max=10", "admission.pressure.maxDefer=0", "admission.pressure.maxDefer=0s", "admission.pressure.maxDefer=0m0s", "admission.pressure.maxDefer=0.0s"} {
 		if output, err := exec.Command("helm", "template", "oberth", "../../charts/oberth", "--set", "image.ref=example.invalid/oberth@"+goProxyDigest, "--set", value).CombinedOutput(); err == nil {
 			t.Fatalf("invalid pressure chart value accepted: %s %s", value, output)
 		}

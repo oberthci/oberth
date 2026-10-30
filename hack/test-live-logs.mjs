@@ -232,3 +232,4 @@ assert.equal(run(`queueReason({Scheduling:{state:'waiting',admission:{state:'wai
 assert.equal(run(`pressureStatusCard(null)`), '', 'scoped status omits host PSI');
 assert.ok(run(`pressureStatusCard({available:false})`).includes('admission fails open'));
 assert.ok(run(`pressureStatusCard({available:true,holding:true,resource:'io',sample:{io:{full_avg60:40},cpu:{some_avg60:20},memory:{full_avg60:5}}})`).includes('deferring new grants'));
+assert.equal(run(`queueReason({Scheduling:{state:'waiting',admission:{state:'waiting',pressure:{resource:'io',redacted:true}}}})`), 'deferred: host io pressure');

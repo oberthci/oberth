@@ -21,7 +21,7 @@ func TestScopedAdmissionKeepsOnlyVisibleRepositoriesAndHidesTheBudget(t *testing
 	upstreams := []model.Upstream{{ID: 10, Name: "codeberg"}, {ID: 11, Name: "github"}}
 	repositories := []model.Repository{{ID: 1, UpstreamID: 10}, {ID: 2, UpstreamID: 11}}
 	scoped := scopedAdmission(state, upstreams, repositories, api.Actor{Identity: "agent@host", Scope: []string{"codeberg"}})
-	if scoped.Pressure != nil || scoped.Reservations[0].Pressure != nil || scoped.Capacity != 0 || scoped.Used != 0 || scoped.Blocker != nil || len(scoped.Groups) != 0 ||
+	if scoped.Pressure != nil || (scoped.Reservations[0].Pressure == nil || !scoped.Reservations[0].Pressure.Redacted || scoped.Reservations[0].Pressure.Avg60 != 0) || scoped.Capacity != 0 || scoped.Used != 0 || scoped.Blocker != nil || len(scoped.Groups) != 0 ||
 		len(scoped.Reservations) != 1 || scoped.Reservations[0].RunID != "mine" || scoped.Reservations[0].Position != 0 {
 		t.Fatalf("scoped admission = %#v", scoped)
 	}

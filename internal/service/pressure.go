@@ -88,6 +88,7 @@ func (p *pressureCheck) refresh(now time.Time) {
 			p.warned = true
 		}
 	} else {
+		p.warned = false // One warning per outage; recovery re-arms reporting.
 		p.state.Sample = &sample
 		p.ioHeld = pressureLatch(p.ioHeld, sample.IO.FullAvg60, p.config.IOFullAvg60Max, p.config.Hysteresis)
 		p.cpuHeld = pressureLatch(p.cpuHeld, sample.CPU.SomeAvg60, p.config.CPUSomeAvg60Max, p.config.Hysteresis)
@@ -126,15 +127,35 @@ func (gate *weightedAdmission) pressureWaitLocked(r *admissionReservation) *mode
 	return &model.PressureDeferral{Resource: p.state.Resource, Avg60: value, Since: r.pressureSince, MaxDeferSeconds: int64(p.config.MaxDefer / time.Second)}
 }
 
+// Give every prepared, unparked waiter its own clock, even when an earlier
+// pressure-held candidate ends the grant pass. Capacity/order still gate grants.
+func (gate *weightedAdmission) preparePressureWaitsLocked(now time.Time) {
+	p := gate.pressure
+	for _, r := range gate.waiters {
+		r.pressureDeferred = false
+		if p == nil || !p.state.Holding {
+			r.pressureSince = time.Time{}
+			continue
+		}
+		if !r.prepared || r.vmParked || gate.kubeVirtBlockedLocked(r) {
+			continue
+		}
+		if holder, ahead := gate.groupBlockerLocked(r); holder != "" || ahead != "" {
+			continue
+		}
+		if r.pressureSince.IsZero() {
+			r.pressureSince = now
+			p.deferrals++
+			p.config.Logf("admission deferred: %s pressure; run=%s", p.state.Resource, r.runID)
+		}
+		r.pressureDeferred = now.Sub(r.pressureSince) < p.config.MaxDefer
+	}
+}
+
 func (gate *weightedAdmission) deferPressureLocked(r *admissionReservation, now time.Time) bool {
 	p := gate.pressure
 	if p == nil || !p.state.Holding {
 		return false
-	}
-	if r.pressureSince.IsZero() {
-		r.pressureSince = now
-		p.deferrals++
-		p.config.Logf("admission deferred: %s pressure; run=%s", p.state.Resource, r.runID)
 	}
 	if now.Sub(r.pressureSince) >= p.config.MaxDefer {
 		p.bypasses++ // Called only immediately before an otherwise valid grant.
@@ -264,6 +285,11 @@ func (scheduler *Scheduler) WritePressureMetrics(w io.Writer) {
 		deferrals, bypasses = p.deferrals, p.bypasses
 	}
 	gate.mu.Unlock()
+	for _, metric := range []struct{ name, kind string }{
+		{"avg60", "gauge"}, {"enabled", "gauge"}, {"available", "gauge"}, {"holding", "gauge"}, {"deferred", "gauge"}, {"deferrals_total", "counter"}, {"bypasses_total", "counter"},
+	} {
+		_, _ = fmt.Fprintf(w, "# TYPE oberth_admission_pressure_%s %s\n", metric.name, metric.kind)
+	}
 	enabled, available, held, deferred := 0, 0, 0, 0
 	if state != nil {
 		enabled = 1

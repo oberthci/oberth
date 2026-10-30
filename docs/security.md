@@ -170,5 +170,6 @@ Host pressure admission reads only the fixed Linux `/proc/pressure/{io,cpu,memor
 files, with bounded parsing and no host mount or extra privilege. The observations
 are scheduling hints; malformed/unavailable PSI fails open and never changes
 running-workflow authority or execution verdicts. Scoped status, reservation and
-run views omit host PSI and pressure-derived reasons, as they omit aggregate
-capacity. The existing unscoped admin metrics authorization remains in force.
+run views omit host PSI numbers while retaining a non-numeric pressure cause,
+as they omit aggregate capacity. Non-admin and MCP run reasons also omit
+pressure percentages and timing details. The existing unscoped admin metrics authorization remains in force.

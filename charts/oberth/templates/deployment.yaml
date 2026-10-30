@@ -216,6 +216,12 @@ spec:
             {{- if hasKey $pressure "hysteresis" }}{{- $hysteresis = $pressure.hysteresis }}{{- end }}
             {{- $maxDefer := "20m" }}
             {{- if hasKey $pressure "maxDefer" }}{{- $maxDefer = $pressure.maxDefer }}{{- end }}
+            {{- if or (and (gt (float64 $ioMax) 0.0) (ge (float64 $hysteresis) (float64 $ioMax))) (and (gt (float64 $cpuMax) 0.0) (ge (float64 $hysteresis) (float64 $cpuMax))) }}
+            {{- fail "admission.pressure.hysteresis must be below every enabled threshold" }}
+            {{- end }}
+            {{- if and (or (gt (float64 $ioMax) 0.0) (gt (float64 $cpuMax) 0.0)) (regexMatch "^(0|([0]+(\\.[0]+)?(ns|us|ms|s|m|h))+)$" (toString $maxDefer)) }}
+            {{- fail "admission.pressure.maxDefer must be positive when pressure is enabled" }}
+            {{- end }}
             - {{ printf "--admission-pressure-io-full-avg60-max=%v" $ioMax | quote }}
             - {{ printf "--admission-pressure-cpu-some-avg60-max=%v" $cpuMax | quote }}
             - {{ printf "--admission-pressure-hysteresis=%v" $hysteresis | quote }}

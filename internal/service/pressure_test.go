@@ -2,11 +2,13 @@ package service
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -237,8 +239,8 @@ func TestPressureTimeoutPreservesBackfillDrain(t *testing.T) {
 	f.gate.mu.Lock()
 	f.gate.releaseLocked(running)
 	f.gate.mu.Unlock()
-	if head.granted {
-		t.Fatal("newly eligible XL bypassed its own pressure wait")
+	if !head.granted || small.granted {
+		t.Fatal("expired per-run pressure wait did not preserve XL drain ordering")
 	}
 	f.sample.IO.FullAvg60 = 0
 	f.advance(time.Second)
@@ -331,7 +333,7 @@ func TestPressureObservationsMetricsAndScopedRedaction(t *testing.T) {
 		t.Fatal("missing run reason", got.Message)
 	}
 	service.scope = &repoScope{actor: api.Actor{Scope: []string{"forge"}}, repos: map[int64]model.Repository{1: {ID: 1}}} // Visible blocker must still hide host-wide pressure.
-	if got := service.scheduling(t.Context(), run, nil); got.Admission.Pressure != nil || strings.Contains(got.Message, "pressure") {
+	if got := service.scheduling(t.Context(), run, nil); got.Admission.Pressure == nil || !got.Admission.Pressure.Redacted || !strings.Contains(got.Message, "host io pressure") || strings.Contains(got.Message, "%") {
 		t.Fatal("scoped run leaked host pressure", got)
 	}
 }
@@ -359,7 +361,12 @@ func TestPressureParsingAndFailOpenReadErrors(t *testing.T) {
 	}
 	root := t.TempDir()
 	for _, name := range []string{"io", "memory", "cpu"} {
-		if err := os.WriteFile(filepath.Join(root, name), []byte(valid), 0600); err != nil {
+		if err := os.WriteFile(filepath.Join(root, name), []byte(func() string {
+			if name == "cpu" {
+				return psiRows("10.25", "")
+			}
+			return valid
+		}()), 0600); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -467,5 +474,118 @@ func TestPressureEpisodeResetsWhileCapacityBlocks(t *testing.T) {
 				t.Fatal("fresh episode did not honor maximum defer")
 			}
 		})
+	}
+}
+
+func TestPressureEachQueuedRunHasOwnMaximumWait(t *testing.T) {
+	f := pressureTestGate()
+	f.gate.capacity = 16
+	f.sample.IO.FullAvg60 = 40
+	var order []int64
+	seen := map[int64]bool{}
+	f.gate.onGrant = func() {
+		for id, r := range f.gate.reservations {
+			if r.granted && !seen[id] {
+				seen[id] = true
+				order = append(order, id)
+			}
+		}
+	}
+	runs := []*admissionReservation{f.prepare(1, model.PriorityNormal, "", periapsis.S), f.prepare(2, model.PriorityHighest, "", periapsis.S), f.prepare(3, model.PriorityHigh, "", periapsis.S), f.prepare(4, model.PriorityNormal, "", periapsis.S)}
+	if state := (&Scheduler{admission: f.gate}).AdmissionState().Pressure; state.Deferred != 4 {
+		t.Fatal("not all queued pressure waiters counted", state)
+	}
+	for _, r := range runs {
+		if !r.pressureSince.Equal(f.now) {
+			t.Fatal("tail did not start its own clock", r.sequence)
+		}
+	}
+	f.sample.IO.FullAvg60 = 25 // Remains latched, so only maxDefer can grant these.
+	f.advance(20*time.Minute - time.Second)
+	if len(order) != 0 {
+		t.Fatal("granted before maximum wait", order)
+	}
+	f.advance(time.Second)
+	if !reflect.DeepEqual(order, []int64{2, 3, 1, 4}) {
+		t.Fatal("four runs did not all grant at maxDefer in priority/FIFO order", order)
+	}
+	if f.gate.pressure.bypasses != 4 || !f.gate.pressure.state.Holding {
+		t.Fatal("recovery rather than per-run expiry admitted the wave")
+	}
+}
+
+func TestPressureSourceWarnsOncePerOutageAndMetricsAreTyped(t *testing.T) {
+	f := pressureTestGate()
+	f.err = errors.New("first outage")
+	f.advance(time.Second)
+	f.advance(time.Second)
+	f.err = nil
+	f.advance(time.Second)
+	f.err = errors.New("second outage")
+	f.advance(time.Second)
+	f.advance(time.Second)
+	warnings := 0
+	for _, line := range f.logs {
+		if strings.Contains(line, "PSI unavailable") {
+			warnings++
+		}
+	}
+	if warnings != 2 {
+		t.Fatal("recovery failed to re-arm warning", f.logs)
+	}
+	var metrics bytes.Buffer
+	(&Scheduler{admission: f.gate}).WritePressureMetrics(&metrics)
+	for _, want := range []string{"# TYPE oberth_admission_pressure_avg60 gauge", "# TYPE oberth_admission_pressure_deferrals_total counter", "# TYPE oberth_admission_pressure_bypasses_total counter"} {
+		if !strings.Contains(metrics.String(), want) {
+			t.Fatal("missing type", want)
+		}
+	}
+}
+
+func TestPressureNonAdminAndMCPViewsKeepNonNumericReason(t *testing.T) {
+	fixture := newControlFixture(t)
+	source, err := fixture.scheduler.EnqueueCI(t.Context(), CIRequest{EventID: "pressure", Repository: fixture.repo, Branch: "feature/pressure", SHA: strings.Repeat("a", 40), Actor: "pusher"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	claimed, err := fixture.store.ClaimNextRun(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := pressureTestGate()
+	f.sample.IO.FullAvg60 = 67.25
+	r := f.prepare(claimed.QueueSequence, model.PriorityNormal, "", periapsis.M)
+	r.runID = source.ID
+	r.repoID = fixture.repo.ID
+	fixture.scheduler.admission = f.gate
+	control := fixture.api(t)
+	control.admission = fixture.scheduler
+	for _, admin := range []bool{false, true} {
+		actor := api.Actor{Identity: "viewer@host", Admin: admin}
+		view, err := control.forActor(t.Context(), actor)
+		if err != nil {
+			t.Fatal(err)
+		}
+		run := claimed
+		run.JobName = "reserved"
+		observed := view.scheduling(t.Context(), run, nil)
+		if admin {
+			if !strings.Contains(observed.Message, "67.2%") {
+				t.Fatal("admin HTTP lost detail", observed.Message)
+			}
+		} else if !strings.Contains(observed.Message, "host io pressure") || strings.Contains(observed.Message, "%") {
+			t.Fatal("non-admin reason numeric or misleading", observed.Message)
+		}
+		value, err := control.CallTool(t.Context(), actor, "run_get", json.RawMessage(`{"id":"`+source.ID+`"}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, err := json.Marshal(value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Contains(body, []byte("host io pressure")) || bytes.Contains(body, []byte("67.25")) || bytes.Contains(body, []byte(`"avg60"`)) {
+			t.Fatalf("MCP reason missing or numeric: %s", body)
+		}
 	}
 }
