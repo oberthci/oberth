@@ -2973,8 +2973,13 @@ cursors do not replay old Pods. Final requests have a 60-second lease, at most
 three attempts, and a shared 120-second drain budget including follower overflow.
 Submitted Workflows retain owned Pods through their completion TTL (minimum
 180 seconds, no immediate PodGC or indefinite finalizer). Missing logs and
-termination details remain explicit unknowns. Journals count toward retention
-and purge with run logs. See [log continuity](docs/log-continuity.md).
+termination details remain explicit unknowns. Journal errors mark continuity lost
+for that run, fall back to retained output without restart cursors, and never
+escape as a fatal dispatcher error. A fixed retained marker and best-effort
+`run.log-continuity.lost` audit observation record the degradation. Commits capture
+intervening prefixes and use one WAL sync, with one final projection sync; active journals count
+toward retention, and synced/indexed terminal runs prune them immediately. See
+[log continuity](docs/log-continuity.md).
 
 `run_get` exposes this record through the existing typed step JSON. Old NULL
 records explicitly mean `not-recorded`; no historical cause is backfilled.

@@ -37,6 +37,12 @@ type PodLogCursor struct {
 	Complete            bool                  `json:"complete,omitempty"`
 }
 
+// PodLogContinuityLostMarker exposes degraded delivery without turning an optional
+// journal into execution authority or a scheduler/component failure.
+const PodLogContinuityLostMarker = "oberth: log continuity gap: durable pod journal unavailable; continuing without restart cursors"
+
+var ErrPodLogProjection = errors.New("pod log projection write failed")
+
 type PodLogSink interface {
 	CommitPodLog(PodLogCursor, []byte) error
 	PodLogCursors() map[string]PodLogCursor
@@ -55,16 +61,24 @@ type podLogFrame struct {
 // between durable journal append and projection, without fetching or inventing
 // bytes. The caller serializes all writes to the run log, including controls.
 type PodLogJournal struct {
-	log      *os.File
-	journal  *os.File
-	cursors  map[string]PodLogCursor
-	limit    int64
-	runLimit int64
+	log       *os.File
+	journal   *os.File
+	cursors   map[string]PodLogCursor
+	limit     int64
+	runLimit  int64
+	projected int64
 }
 
 func OpenPodLogJournal(file *os.File, runLimit int64) (*PodLogJournal, error) {
 	if runLimit <= 0 || runLimit > 1<<40 {
 		return nil, errors.New("invalid pod journal budget")
+	}
+	// A prior degradation is recorded in the ordinary retained log. Never
+	// trust a stale journal again if removal failed (for example permissions).
+	if lost, err := podLogContinuityLost(file, runLimit); err != nil {
+		return nil, err
+	} else if lost {
+		return nil, errors.New("pod log continuity was previously lost")
 	}
 	path := file.Name() + ".pods.jsonl"
 	journal, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0600) //nolint:gosec // Derived from the already validated, server-owned run log path.
@@ -150,6 +164,7 @@ func (j *PodLogJournal) recover() error {
 			return errors.New("invalid pod log journal frame")
 		}
 		projectionEnd = frame.Offset + int64(len(frame.Data))
+		j.projected = projectionEnd
 		if err := j.repair(frame); err != nil {
 			return err
 		}
@@ -176,23 +191,19 @@ func (j *PodLogJournal) repair(frame podLogFrame) error {
 	if _, err := j.log.ReadAt(actual, frame.Offset); err != nil && !errors.Is(err, io.EOF) {
 		return err
 	}
-	if !bytes.Equal(actual, frame.Data[:n]) {
-		return errors.New("pod log projection disagrees with journal")
-	}
-	if n == int64(len(frame.Data)) {
+	if n == int64(len(frame.Data)) && bytes.Equal(actual, frame.Data) {
 		return nil
 	}
-	// No later append is valid before a partial projection is repaired.
-	if err := j.log.Truncate(frame.Offset); err != nil {
+	// A valid checksummed WAL contains actual received bytes, even if an
+	// unsynced projection was torn/zeroed. Repair only its recorded range;
+	// never fill a legacy gap or overwrite an unjournaled trailing range.
+	repair, err := os.OpenFile(j.log.Name(), os.O_RDWR, 0) //nolint:gosec // Same validated, run-owned log; separate descriptor avoids O_APPEND.
+	if err != nil {
 		return err
 	}
-	if _, err := j.log.Seek(0, io.SeekEnd); err != nil {
-		return err
-	}
-	if _, err := j.log.Write(frame.Data); err != nil {
-		return err
-	}
-	return j.log.Sync()
+	defer func() { _ = repair.Close() }()
+	_, err = repair.WriteAt(frame.Data, frame.Offset)
+	return err
 }
 
 // Commit journals before writing the projection. No cursor can advance beyond
@@ -205,17 +216,56 @@ func (j *PodLogJournal) Commit(cursor PodLogCursor, body []byte, write func([]by
 	if len(body) > (1<<20)+8192 {
 		return errors.New("pod log frame exceeds bound")
 	}
-	if err := j.log.Sync(); err != nil {
-		return err
-	}
 	info, err := j.log.Stat()
 	if err != nil {
 		return err
 	}
-	if info.Size()+int64(len(body)) > j.runLimit {
-		return errors.New("pod log projection byte budget reached")
+	if info.Size()+int64(len(body)) > j.runLimit || info.Size() < j.projected {
+		return errors.New("pod log projection byte budget or prefix changed")
 	}
-	frame := podLogFrame{Version: 1, Offset: info.Size(), Cursor: cursor, Data: body}
+	// Plain progress/delivery/seed writes between commits belong to the
+	// recoverable prefix too. Snapshot them in bounded frames, retaining the
+	// OLD cursor until the body frame. A torn prefix batch cannot advance a
+	// source cursor past output that was never projected.
+	prefixCursor, ok := j.cursors[cursor.Key]
+	if !ok {
+		prefixCursor = PodLogCursor{Key: cursor.Key, WorkflowUID: cursor.WorkflowUID, Node: cursor.Node, Pod: cursor.Pod, Container: cursor.Container}
+	}
+	for offset := j.projected; offset < info.Size(); {
+		length := min(int64(1<<20), info.Size()-offset)
+		prefix := make([]byte, length)
+		if _, err := j.log.ReadAt(prefix, offset); err != nil {
+			return err
+		}
+		if err := j.appendFrame(podLogFrame{Version: 1, Offset: offset, Cursor: prefixCursor, Data: prefix}); err != nil {
+			return err
+		}
+		offset += length
+	}
+	if err := j.appendFrame(podLogFrame{Version: 1, Offset: info.Size(), Cursor: cursor, Data: body}); err != nil {
+		return err
+	}
+	// One durability barrier covers prefix, bytes and checkpoint. The ordinary
+	// log is a projection; terminal finalization syncs it before WAL removal.
+	if err := j.journal.Sync(); err != nil {
+		return err
+	}
+	if len(body) > 0 {
+		n, err := write(body)
+		if err != nil {
+			return errors.Join(ErrPodLogProjection, err)
+		}
+		if n != len(body) {
+			return errors.Join(ErrPodLogProjection, io.ErrShortWrite)
+		}
+	}
+	j.projected = info.Size() + int64(len(body))
+	j.cursors[cursor.Key] = cursor
+	return nil
+}
+
+func (j *PodLogJournal) appendFrame(frame podLogFrame) error {
+	var err error
 	frame.SHA256, err = frameDigest(frame)
 	if err != nil {
 		return err
@@ -225,33 +275,15 @@ func (j *PodLogJournal) Commit(cursor PodLogCursor, body []byte, write func([]by
 		return err
 	}
 	encoded = append(encoded, '\n')
-	journalInfo, err := j.journal.Stat()
+	info, err := j.journal.Stat()
 	if err != nil {
 		return err
 	}
-	if journalInfo.Size()+int64(len(encoded)) > j.limit {
+	if info.Size()+int64(len(encoded)) > j.limit {
 		return errors.New("pod log journal byte budget reached")
 	}
-	if _, err := j.journal.Write(encoded); err != nil {
-		return err
-	}
-	if err := j.journal.Sync(); err != nil {
-		return err
-	}
-	if len(body) > 0 {
-		n, err := write(body)
-		if err != nil {
-			return err
-		}
-		if n != len(body) {
-			return io.ErrShortWrite
-		}
-	}
-	if err := j.log.Sync(); err != nil {
-		return err
-	}
-	j.cursors[cursor.Key] = cursor
-	return nil
+	_, err = j.journal.Write(encoded)
+	return err
 }
 
 func (j *PodLogJournal) Cursors() map[string]PodLogCursor {
@@ -261,7 +293,7 @@ func (j *PodLogJournal) Cursors() map[string]PodLogCursor {
 	}
 	return result
 }
-func (j *PodLogJournal) Close() error { return errors.Join(j.journal.Sync(), j.journal.Close()) }
+func (j *PodLogJournal) Close() error { return j.journal.Close() }
 
 func (j *PodLogJournal) validCursor(c PodLogCursor) bool {
 	if c.Termination != nil {
@@ -281,4 +313,61 @@ func (j *PodLogJournal) validCursor(c PodLogCursor) bool {
 		}
 	}
 	return !c.At.IsZero() || c.Count == 0
+}
+
+// PrunePodLogJournal removes only the journal attached to an already-owned run
+// log path. Directories/symlinks are not recursively removed or followed.
+func PrunePodLogJournal(logPath string) error {
+	name := logPath + ".pods.jsonl"
+	info, err := os.Lstat(name)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if !info.Mode().IsRegular() {
+		return errors.New("refuse nonregular pod journal")
+	}
+	if err := os.Remove(name); err != nil {
+		return err
+	}
+	dir, err := os.Open(filepath.Dir(name))
+	if err != nil {
+		return err
+	}
+	defer func() { _ = dir.Close() }()
+	return dir.Sync()
+}
+
+func podLogContinuityLost(file *os.File, limit int64) (bool, error) {
+	// ReadAt does not disturb append positioning. A source line always carries
+	// [burn/step], so only an exact unattributed server record is a marker.
+	reader := bufio.NewReaderSize(io.NewSectionReader(file, 0, limit), 64<<10)
+	marker := []byte(PodLogContinuityLostMarker + "\n")
+	matched, eligible := 0, true
+	for {
+		fragment, err := reader.ReadSlice('\n')
+		if eligible {
+			if matched+len(fragment) > len(marker) || !bytes.Equal(fragment, marker[matched:matched+len(fragment)]) {
+				eligible = false
+			} else {
+				matched += len(fragment)
+			}
+		}
+		if err == nil {
+			if eligible && matched == len(marker) {
+				return true, nil
+			}
+			matched, eligible = 0, true
+			continue
+		}
+		if errors.Is(err, bufio.ErrBufferFull) {
+			continue
+		}
+		if errors.Is(err, io.EOF) {
+			return false, nil
+		}
+		return false, err
+	}
 }

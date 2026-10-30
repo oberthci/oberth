@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 
 	"github.com/oberthci/oberth/internal/runlog"
 	"github.com/oberthci/oberth/internal/runprogress"
@@ -14,13 +15,16 @@ import (
 // log and journals them as they arrive. It buffers at most one bounded marker;
 // ordinary long lines stream directly to the retained-log limiter.
 type stepProgressLogWriter struct {
-	journal     *runlog.PodLogJournal
-	journalErr  error
-	destination io.Writer
-	persist     func(runprogress.Event) error
-	pending     []byte
-	passthrough bool
-	closed      bool
+	journal          *runlog.PodLogJournal
+	journalErr       error
+	durabilityLost   bool
+	onContinuityLost func()
+	logFile          *os.File
+	destination      io.Writer
+	persist          func(runprogress.Event) error
+	pending          []byte
+	passthrough      bool
+	closed           bool
 }
 
 func newStepProgressLogWriter(destination io.Writer, persist func(runprogress.Event) error) *stepProgressLogWriter {
@@ -42,6 +46,10 @@ func (writer *stepProgressLogWriter) Write(body []byte) (int, error) {
 }
 
 func (writer *stepProgressLogWriter) Close() error {
+	if writer.journalErr != nil {
+		writer.closed = true
+		return writer.journalErr
+	}
 	if writer.closed {
 		return nil
 	}
@@ -134,14 +142,67 @@ func (writer *stepProgressLogWriter) CommitPodLog(cursor runlog.PodLogCursor, bo
 		return err
 	}
 	err := writer.journal.Commit(cursor, body, writer.Write)
-	if err != nil {
-		writer.journalErr = err
+	if err == nil {
+		return nil
 	}
-	return err
+	if errors.Is(err, runlog.ErrPodLogProjection) {
+		// A partial projection still has its valid WAL and must not be appended
+		// again. Preserve it for recovery and stop only this log writer.
+		writer.journalErr = err
+		return err
+	}
+	// No projection callback has run on a journal failure: retain the actual
+	// body once, abandon cursor authority, and keep observing the Workflow.
+	_ = writer.journal.Close()
+	writer.journal = nil
+	_, writeErr := writer.Write(body)
+	writer.losePodLogDurability()
+	return writeErr
 }
+
+func (writer *stepProgressLogWriter) PodLogContinuityLost() bool { return writer.durabilityLost }
+func (writer *stepProgressLogWriter) losePodLogDurability() {
+	if writer.durabilityLost {
+		return
+	}
+	writer.durabilityLost = true
+	if writer.onContinuityLost != nil {
+		writer.onContinuityLost()
+	}
+	_, _ = writer.Write([]byte("\n" + runlog.PodLogContinuityLostMarker + "\n"))
+	if writer.logFile != nil {
+		// Once per degradation, not once per burst. The marker prevents reuse of
+		// a stale journal even when filesystem permissions prevent its removal.
+		if writer.logFile.Sync() == nil {
+			_ = runlog.PrunePodLogJournal(writer.logFile.Name())
+		}
+	}
+}
+
 func (writer *stepProgressLogWriter) PodLogCursors() map[string]runlog.PodLogCursor {
 	if writer.journal == nil {
 		return nil
 	}
 	return writer.journal.Cursors()
+}
+
+// Restore a valid WAL after a partial projection before final sync/index/prune.
+// Dropping the parser's pending fragment is safe only after restoring the full
+// received frame; retrying that fragment through Write would duplicate bytes.
+func (writer *stepProgressLogWriter) recoverPodProjection(limit int64) {
+	if writer.journalErr == nil || writer.journal == nil || writer.logFile == nil {
+		return
+	}
+	_ = writer.journal.Close()
+	writer.journal = nil
+	recovered, err := runlog.OpenPodLogJournal(writer.logFile, limit)
+	writer.pending = nil
+	writer.passthrough = false
+	writer.journalErr = nil
+	if err != nil {
+		_, _ = writer.logFile.Seek(0, io.SeekEnd)
+		writer.losePodLogDurability()
+		return
+	}
+	writer.journal = recovered
 }

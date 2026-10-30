@@ -24,10 +24,36 @@ explicit adoption gap because arbitrary historical replay could duplicate output
 The journal is bounded to twice the configured run-log byte budget plus 8 MiB of
 checkpoint overhead; a frame is bounded to 2 MiB including JSON/base64 encoding.
 The normal run and per-step output limits still apply. Journals count toward log
-retention usage and are purged with their run. Corrupt journals/projections are
-refused rather than guessed. The shared writer serializes cursor commits, output
-and progress controls. Filesystem writes and syncs provide durability; the
-network retry deadlines do not cancel a kernel filesystem operation.
+retention usage while active. After the run's durable terminal verdict and a
+synced, indexed log projection, the journal is pruned immediately. Active owner
+resumptions keep it; a failed sync/index/cleanup preserves recovery evidence and
+never makes cleanup a scheduler gate.
+
+Corrupt or unopenable journals lose cursor authority for that run. Oberth writes
+an explicit continuity gap, records a best-effort `run.log-continuity.lost` audit
+observation, and continues observing the Workflow without restart cursors. A
+retained loss marker prevents stale cursor reuse even if file removal failed.
+Journal failure before projection falls back to writing the received body once;
+a partial projection keeps its valid WAL for recovery rather than appending the
+same bytes again. An unavailable retained-file handle cannot turn an observed
+terminal Workflow into an API re-probe/delete failure: progress/termination
+observation continues, unavailable output stays lost, and the audit/global warning
+identifies the gap. Corrupt data is never trusted or guessed.
+
+Each normal commit captures any intervening plain-log prefix in bounded WAL
+frames, retaining the previous source cursor until the body frame. One WAL sync
+protects the prefix, received bytes and new checkpoint before body projection.
+The main log is synced once at terminal finalization before pruning. Recovery
+uses checksummed received bytes to repair partial or zeroed projection ranges;
+an unrecorded legacy prefix gap remains explicitly lost. The existing v1 wire
+format is retained, including safe old-cursor prefix frames. A torn prefix batch
+cannot advance a source cursor over an unprojected body.
+
+Complete records are grouped within bounded 64 KiB scanner reads/batches; a lone
+burst still commits durably, without a one-second asynchronous durability
+window. The shared writer serializes cursor commits, output and progress
+controls. Filesystem writes and syncs provide durability; network deadlines do
+not cancel a kernel filesystem operation.
 
 Final log reads allow 60 seconds per request and at most three attempts, with
 short bounded backoff. A 120-second total drain budget also covers follower

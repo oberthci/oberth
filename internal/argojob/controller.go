@@ -1192,3 +1192,12 @@ func (writer *runBudgetWriter) CommitPodLog(cursor runlog.PodLogCursor, body []b
 	}
 	return err
 }
+
+func (writer *runBudgetWriter) PodLogContinuityLost() bool {
+	writer.mu.Lock()
+	defer writer.mu.Unlock()
+	if state, ok := writer.destination.(interface{ PodLogContinuityLost() bool }); ok {
+		return state.PodLogContinuityLost()
+	}
+	return false
+}

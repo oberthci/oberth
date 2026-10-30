@@ -235,6 +235,7 @@ func (worker *stepLogFollower) discontinuity(message string) {
 
 func (worker *stepLogFollower) run() {
 	defer close(worker.done)
+	worker.noteDurabilityLoss()
 
 	_, hasCursor := worker.owner.restored[worker.key]
 	if worker.complete {
@@ -508,7 +509,7 @@ func (worker *stepLogFollower) consumeRecords(reader io.Reader, final bool) (res
 	defer func() { result = errors.Join(result, worker.flush(false)) }()
 	source := &logRecordReader{Reader: reader, beforeRead: func() error { return worker.flush(false) }}
 	scanner := bufio.NewScanner(source)
-	scanner.Buffer(make([]byte, 4096), maxLogRecordBytes+1)
+	scanner.Buffer(make([]byte, 64<<10), maxLogRecordBytes+1)
 	scanner.Split(func(data []byte, atEOF bool) (int, []byte, error) {
 		if i := bytes.IndexByte(data, '\n'); i >= 0 {
 			return i + 1, data[:i], nil
@@ -579,7 +580,7 @@ func (worker *stepLogFollower) consumeRecords(reader io.Reader, final bool) (res
 		}
 		worker.cursor.count++
 		worker.cursor.digest = logRecordDigest(worker.cursor.digest, digest)
-		if len(worker.pending) >= 32<<10 {
+		if len(worker.pending) >= 64<<10 {
 			if err := worker.flush(false); err != nil {
 				return err
 			}
@@ -621,6 +622,7 @@ func (worker *stepLogFollower) flush(force bool) error {
 		return err
 	}
 	worker.pending = nil
+	worker.noteDurabilityLoss()
 	return nil
 }
 func logFailureClass(err error) string {
@@ -701,5 +703,11 @@ func (logs *stepLogFollowers) applyDiagnostics(completion *Completion) {
 		if worker.diagnostic.Container.ContainerKind == "init" {
 			step.ExitCode = int(worker.diagnostic.Container.ExitCode)
 		}
+	}
+}
+
+func (worker *stepLogFollower) noteDurabilityLoss() {
+	if state, ok := worker.owner.output.(interface{ PodLogContinuityLost() bool }); ok && state.PodLogContinuityLost() {
+		worker.discontinuity("durable pod journal unavailable; retained output is preserved but restart continuity is lost")
 	}
 }
