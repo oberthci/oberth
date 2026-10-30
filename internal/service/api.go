@@ -1471,6 +1471,9 @@ func presentationRunAt(run model.Run, now time.Time) model.Run {
 	visible.DisplayReason = runDisplayReason(run)
 	if run.Priority != "" {
 		visible.Priority, visible.PriorityReason = run.EffectivePriority(now)
+		// Active display_reason intentionally describes queue priority. Scheduling
+		// presentation may replace it with a more specific wait/preflight reason;
+		// priority_class/reason remain available. Terminal causes keep their text.
 		if run.Status.Active() {
 			visible.DisplayReason = run.PriorityMessage(now)
 		}

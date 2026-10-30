@@ -8,6 +8,7 @@ import (
 
 	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/store"
 )
 
 // QueuePriorityStore is an installation-wide admin capability. It is not
@@ -62,7 +63,13 @@ func (service *API) queuePriorityTool(ctx context.Context, actor api.Actor, name
 	if err := decodeTool(raw, &args); err != nil {
 		return nil, err
 	}
-	run, err := service.queuePriorities.BumpRunPriority(ctx, actor.Identity, args.RunID, args.Priority, args.Reason)
+	bump := service.queuePriorities.BumpRunPriority
+	if guarded, ok := service.enqueues.(interface {
+		BumpRunPriority(context.Context, string, string, model.RunPriority, string) (model.Run, error)
+	}); ok {
+		bump = guarded.BumpRunPriority
+	}
+	run, err := bump(ctx, actor.Identity, args.RunID, args.Priority, args.Reason)
 	if err != nil {
 		return nil, err
 	}
@@ -83,6 +90,37 @@ func (service *API) notifyPriorityChange(ctx context.Context) error {
 		service.enqueues.NotifyQueue()
 	}
 	return nil
+}
+
+// BumpRunPriority holds the admission gate through the durable bump and its
+// in-memory update. A weighted grant may precede started_at being persisted;
+// refuse that window too, rather than auditing a bump of already granted work.
+func (scheduler *Scheduler) BumpRunPriority(ctx context.Context, actor, id string, priority model.RunPriority, reason string) (model.Run, error) {
+	state, ok := scheduler.store.(QueuePriorityStore)
+	if !ok {
+		return model.Run{}, refuse(ErrUnavailable, "queue priority")
+	}
+	scheduler.priorityMu.Lock()
+	defer scheduler.priorityMu.Unlock()
+	gate := scheduler.admission
+	gate.mu.Lock()
+	defer gate.mu.Unlock()
+	for _, r := range gate.reservations {
+		if r.runID == id && r.granted {
+			return model.Run{}, fmt.Errorf("%w: run already holds an admission grant", store.ErrInvalidState)
+		}
+	}
+	run, err := state.BumpRunPriority(ctx, actor, id, priority, reason)
+	if err != nil {
+		return model.Run{}, err
+	}
+	for _, r := range gate.waiters {
+		if r.runID == id {
+			r.priority, r.priorityReason = run.Priority, run.PriorityReason
+		}
+	}
+	gate.sortWaitersLocked()
+	return run, nil
 }
 
 // priorityQueueReader keeps production priority support optional for small
@@ -148,6 +186,13 @@ func (scheduler *Scheduler) priorityDispatchAvailable(ctx context.Context, activ
 	if active >= scheduler.admission.capacity+scheduler.maxConcurrent+2 {
 		return false, nil
 	}
+	gate := scheduler.admission
+	gate.mu.Lock()
+	hasWaiters := len(gate.waiters) > 0
+	gate.mu.Unlock()
+	if !hasWaiters {
+		return false, nil
+	}
 	next, err := reader.NextQueuedRun(ctx)
 	if queueEmpty(err) {
 		return false, nil
@@ -155,7 +200,6 @@ func (scheduler *Scheduler) priorityDispatchAvailable(ctx context.Context, activ
 	if err != nil {
 		return false, err
 	}
-	gate := scheduler.admission
 	gate.mu.Lock()
 	defer gate.mu.Unlock()
 	p, _ := next.EffectivePriority(gate.clock())
@@ -179,4 +223,4 @@ func (r *admissionReservation) effectivePriority(now time.Time) model.RunPriorit
 
 // pollPriority is a bounded wake for aging and external configuration changes.
 // The normal notification path applies local admin changes immediately.
-const priorityPollInterval = time.Second
+const priorityPollInterval = 15 * time.Second

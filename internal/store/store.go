@@ -615,6 +615,12 @@ func retrySQLiteLock(ctx context.Context, budget time.Duration, operation func(c
 	}
 }
 
+// IsTransientLockError identifies SQLite BUSY/LOCKED, including extended codes.
+// Background readers can defer a refresh instead of stopping their owner loop.
+func IsTransientLockError(err error) bool {
+	return isSQLiteLockError(err)
+}
+
 func isSQLiteLockError(err error) bool {
 	var result interface{ Code() int }
 	if !errors.As(err, &result) {

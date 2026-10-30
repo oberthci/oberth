@@ -415,6 +415,9 @@ func (fixture *groupFixture) awaitParked(t *testing.T, run model.Run, holder str
 // an unrelated repository's run is admitted during the group's run.
 func TestSchedulerSerializesAConcurrencyGroupAcrossTriggersWhileOtherRepositoriesRun(t *testing.T) {
 	fixture := newGroupFixture(t, 3)
+	if _, err := fixture.store.SetSizeGrant(t.Context(), fixture.terraform.ID, "admin", periapsis.L); err != nil {
+		t.Fatal(err)
+	}
 	fixture.engine.declare("fix-a", terraformState, periapsis.M)
 	fixture.engine.declare("fix-b", terraformState, periapsis.M)
 	fixture.engine.declare("apply-1", terraformState, periapsis.M)

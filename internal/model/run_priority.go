@@ -26,8 +26,8 @@ func (p RunPriority) Rank() int {
 	}
 }
 
-// EffectivePriority ages normal work into the highest class, where its original
-// FIFO position precedes newer releases. Admission/end freezes the aging clock.
+// EffectivePriority ages normal and high work into the highest class, where
+// original FIFO position precedes newer releases. Admission/end freezes aging.
 func (run Run) EffectivePriority(now time.Time) (RunPriority, string) {
 	priority, reason := run.Priority, run.PriorityReason
 	if priority == "" {
@@ -38,8 +38,8 @@ func (run Run) EffectivePriority(now time.Time) (RunPriority, string) {
 	} else if run.FinishedAt != nil {
 		now = *run.FinishedAt
 	}
-	if priority == PriorityNormal && !run.QueuedAt.IsZero() && now.Sub(run.QueuedAt) >= PriorityStarvationWait {
-		return PriorityHighest, "starvation guard: normal run waited at least 60 minutes"
+	if (priority == PriorityNormal || priority == PriorityHigh) && !run.QueuedAt.IsZero() && now.Sub(run.QueuedAt) >= PriorityStarvationWait {
+		return PriorityHighest, fmt.Sprintf("starvation guard: %s run waited at least 60 minutes", priority)
 	}
 	return priority, reason
 }

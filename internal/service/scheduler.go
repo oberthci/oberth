@@ -463,16 +463,20 @@ func (scheduler *Scheduler) Run(ctx context.Context) error {
 	priorityPoll := time.NewTicker(priorityPollInterval)
 	defer priorityPoll.Stop()
 	for {
-		if err := scheduler.refreshPriorities(workerCtx); err != nil {
+		priorityErr := scheduler.refreshPriorities(workerCtx)
+		if priorityErr != nil && !store.IsTransientLockError(priorityErr) {
 			join()
 			if ctx.Err() != nil {
 				return nil
 			}
-			return err
+			return priorityErr
 		}
-		for {
+		for priorityErr == nil {
 			if !scheduler.dispatchSlotAvailable(active) {
 				available, err := scheduler.priorityDispatchAvailable(workerCtx, active)
+				if store.IsTransientLockError(err) {
+					break // Keep workers alive; retry on the next notification or poll.
+				}
 				if err != nil {
 					join()
 					if ctx.Err() != nil {

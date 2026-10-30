@@ -4,12 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/store"
 	"github.com/oberthci/oberth/pkg/periapsis"
 )
 
@@ -162,6 +165,9 @@ func TestQueuePriorityToolsAdminOnlyAuditedAndGated(t *testing.T) {
 func TestPriorityDispatchClaimsPastLowerClassWaitersAndRefreshesBumps(t *testing.T) {
 	f := newControlFixture(t)
 	ctx := context.Background()
+	if _, err := f.store.SetSizeGrant(ctx, f.repo.ID, "admin", periapsis.L); err != nil {
+		t.Fatal(err)
+	}
 	g := newWeightedAdmission(2)
 	scheduler := &Scheduler{store: f.store, admission: g, maxConcurrent: 1}
 	holder := g.reserve(-1)
@@ -285,4 +291,163 @@ func TestSchedulerReleaseCandidateOvertakesAlreadyClaimedBranchQueue(t *testing.
 		t.Fatalf("remaining branch lost: %v", created)
 	}
 	f.engine.finish(t, ordinaryB.ID)
+}
+
+func TestPriorityAdmissionAgesHighBeforeNewerNormal(t *testing.T) {
+	clock := &fakeClock{now: time.Now()}
+	g := newWeightedAdmission(4)
+	g.now = clock.Now
+	holder := g.reserve(1)
+	release, err := holder.acquire(t.Context(), periapsis.XL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	high := priorityWaiter(g, 2, model.PriorityHigh, clock.now, periapsis.XL)
+	clock.now = clock.now.Add(time.Minute)
+	normal := priorityWaiter(g, 3, model.PriorityNormal, clock.now, periapsis.XL)
+	clock.now = clock.now.Add(time.Hour)
+	release()
+	if !granted(g, high) || granted(g, normal) {
+		t.Fatal("aged normal leapfrogged older high")
+	}
+	high.release()
+	if !granted(g, normal) {
+		t.Fatal("aged normal did not follow aged high")
+	}
+	normal.release()
+}
+
+func TestQueuePriorityToolRefusesGrantedBeforeStartIsPersisted(t *testing.T) {
+	f := newControlFixture(t)
+	ctx := t.Context()
+	control, err := NewAPI(APIConfig{Runs: f.store, QueuePriorities: f.store, Enqueues: f.scheduler})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = control.Shutdown(ctx) }()
+	enqueued, err := f.store.EnqueueRun(ctx, model.RunSpec{RepoID: f.repo.ID, RefKind: model.RefBranch, Ref: "main", SHA: strings.Repeat("a", 40), Actor: "dev", Trigger: "push"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := f.store.ClaimNextRun(ctx)
+	if err != nil || run.ID != enqueued.ID {
+		t.Fatalf("claim=%+v %v", run, err)
+	}
+	r := f.scheduler.admission.reserveRun(run)
+	release, err := r.acquire(ctx, periapsis.M)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	if run.StartedAt != nil {
+		t.Fatal("test needs a grant without durable started_at")
+	}
+	_, err = control.CallTool(ctx, api.Actor{Identity: "admin", Admin: true}, "run_priority", json.RawMessage(`{"run_id":"`+run.ID+`","priority":"highest","reason":"too late"}`))
+	if !errors.Is(err, store.ErrInvalidState) {
+		t.Fatalf("granted run bump=%v", err)
+	}
+	actions, _, err := f.store.ListAuditActions(ctx, model.AuditListFilter{ActionPrefix: "run.priority"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, action := range actions {
+		if action.Action == "run.priority" {
+			t.Fatalf("refused bump was audited as success: %+v", action)
+		}
+	}
+}
+
+func TestPriorityPresentationUsesActivePriorityAndKeepsTerminalCause(t *testing.T) {
+	now := time.Now()
+	run := model.Run{Status: model.RunQueued, Priority: model.PriorityHigh, PriorityReason: "RC", QueuedAt: now}
+	if shown := presentationRunAt(run, now); shown.DisplayReason != "Priority high: RC." || shown.PriorityReason != "RC" {
+		t.Fatalf("active display=%+v", shown)
+	}
+	run.Status, run.Phase, run.Reason = model.RunInterrupted, model.PhaseCancelled, "cancelled by admin: obsolete"
+	if shown := presentationRunAt(run, now); shown.DisplayReason != run.Reason || shown.PriorityReason != "RC" {
+		t.Fatalf("terminal display=%+v", shown)
+	}
+}
+
+type prioritySQLiteError int
+
+func (e prioritySQLiteError) Error() string { return fmt.Sprintf("SQLite lock %d", e) }
+func (e prioritySQLiteError) Code() int     { return int(e) }
+
+type busyPriorityStore struct {
+	*store.Store
+	refreshBusy atomic.Bool
+	peekBusy    atomic.Bool
+	observed    chan string
+}
+
+func (s *busyPriorityStore) RunsByIDs(ctx context.Context, ids []string) (map[string]model.Run, error) {
+	if s.refreshBusy.CompareAndSwap(true, false) {
+		s.observed <- "refresh"
+		return nil, fmt.Errorf("refresh priorities: %w", prioritySQLiteError(261)) // SQLITE_BUSY_RECOVERY
+	}
+	return s.Store.RunsByIDs(ctx, ids)
+}
+
+func (s *busyPriorityStore) NextQueuedRun(ctx context.Context) (model.Run, error) {
+	if s.peekBusy.CompareAndSwap(true, false) {
+		s.observed <- "dispatch"
+		return model.Run{}, fmt.Errorf("peek priorities: %w", prioritySQLiteError(5)) // SQLITE_BUSY
+	}
+	return s.Store.NextQueuedRun(ctx)
+}
+
+func TestPrioritySchedulerSurvivesBusyReadsAndResumesDispatch(t *testing.T) {
+	for _, operation := range []string{"refresh", "dispatch"} {
+		t.Run(operation, func(t *testing.T) {
+			f := newGroupFixture(t, 2)
+			busy := &busyPriorityStore{Store: f.store, observed: make(chan string, 1)}
+			f.scheduler.store = busy
+			f.engine.declare("running", "", periapsis.L)
+			f.engine.declare("waiting", "", periapsis.L)
+			f.engine.declare("rc/v1", "", periapsis.S)
+			if _, err := f.store.SetQueuePriorityPatterns(t.Context(), "admin", []string{"rc/*"}); err != nil {
+				t.Fatal(err)
+			}
+			running := f.branch(t, f.terraform, "running", "a")
+			f.start(t)
+			f.awaitCreated(t, 1)
+			waiting := f.branch(t, f.terraform, "waiting", "b")
+			deadline := time.Now().Add(testStartTimeout(10 * time.Second))
+			for {
+				if snapshot := f.scheduler.AdmissionSnapshot(waiting.QueueSequence); snapshot != nil && snapshot.State == "waiting" {
+					break
+				}
+				if time.Now().After(deadline) {
+					t.Fatal("ordinary run never waited for weight")
+				}
+				time.Sleep(testTimeout(5 * time.Millisecond))
+			}
+			if operation == "refresh" {
+				busy.refreshBusy.Store(true)
+			} else {
+				busy.peekBusy.Store(true)
+			}
+			f.scheduler.NotifyQueue()
+			select {
+			case got := <-busy.observed:
+				if got != operation {
+					t.Fatalf("busy read=%s", got)
+				}
+			case <-time.After(testStartTimeout(10 * time.Second)):
+				t.Fatal("busy read was not exercised")
+			}
+			rc := f.branch(t, f.terraform, "rc/v1", "c")
+			if created := f.awaitCreated(t, 1); !created[rc.ID] {
+				t.Fatalf("dispatch did not recover after busy %s: %v", operation, created)
+			}
+			f.engine.finish(t, rc.ID)
+			f.engine.finish(t, running.ID)
+			if created := f.awaitCreated(t, 1); !created[waiting.ID] {
+				t.Fatalf("ordinary waiter did not resume: %v", created)
+			}
+			f.engine.finish(t, waiting.ID)
+			f.awaitTerminal(t, waiting.ID)
+		})
+	}
 }

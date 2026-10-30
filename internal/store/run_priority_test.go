@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/pkg/periapsis"
 )
 
 func TestQueuePriorityClassificationAndFIFO(t *testing.T) {
@@ -16,6 +17,9 @@ func TestQueuePriorityClassificationAndFIFO(t *testing.T) {
 	s := testStore(t, &now)
 	repo := createRepo(t, s)
 	ctx := context.Background()
+	if _, err := s.SetSizeGrant(ctx, repo.ID, "admin", periapsis.L); err != nil {
+		t.Fatal(err)
+	}
 	enqueue := func(ref string, kind model.RefKind, trigger string) model.Run {
 		t.Helper()
 		spec := testRunSpec(repo.ID, ref, strings.Repeat("a", 40))
@@ -79,6 +83,9 @@ func TestQueuePriorityStarvationAtBoundary(t *testing.T) {
 	s := testStore(t, &now)
 	repo := createRepo(t, s)
 	ctx := context.Background()
+	if _, err := s.SetSizeGrant(ctx, repo.ID, "admin", periapsis.L); err != nil {
+		t.Fatal(err)
+	}
 	normal, err := s.EnqueueRun(ctx, testRunSpec(repo.ID, "feature/old", strings.Repeat("a", 40)))
 	if err != nil {
 		t.Fatal(err)
@@ -230,6 +237,9 @@ func TestQueuePriorityMigrationFromV33ClassifiesExistingWork(t *testing.T) {
 	s := testStore(t, &now)
 	repo := createRepo(t, s)
 	ctx := context.Background()
+	if _, err := s.SetSizeGrant(ctx, repo.ID, "admin", periapsis.L); err != nil {
+		t.Fatal(err)
+	}
 	normal, err := s.EnqueueRun(ctx, testRunSpec(repo.ID, "feature/a", strings.Repeat("a", 40)))
 	if err != nil {
 		t.Fatal(err)
@@ -257,6 +267,137 @@ func TestQueuePriorityMigrationFromV33ClassifiesExistingWork(t *testing.T) {
 		r, err := upgraded.ClaimNextRun(ctx)
 		if err != nil || r.ID != id {
 			t.Fatalf("migrated queue order: %+v %v", r, err)
+		}
+	}
+}
+
+func TestQueuePriorityHighAgesWithoutLosingFIFOToNormals(t *testing.T) {
+	now := time.Now()
+	s := testStore(t, &now)
+	repo := createRepo(t, s)
+	ctx := t.Context()
+	if _, err := s.SetQueuePriorityPatterns(ctx, "admin", []string{"rc/*"}); err != nil {
+		t.Fatal(err)
+	}
+	high, err := s.EnqueueRun(ctx, testRunSpec(repo.ID, "rc/old", strings.Repeat("a", 40)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	now = now.Add(time.Minute)
+	normal, err := s.EnqueueRun(ctx, testRunSpec(repo.ID, "feature/newer", strings.Repeat("b", 40)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	now = now.Add(time.Hour)
+	for i, want := range []string{high.ID, normal.ID} {
+		flat, err := s.ListRecentRuns(ctx, model.RunListFilter{})
+		if err != nil || flat[0].ID != want || flat[0].QueuePosition != 1 {
+			t.Fatalf("aged queue view at %d: %+v %v", i, flat, err)
+		}
+		next, err := s.ClaimNextRun(ctx)
+		if err != nil || next.ID != want {
+			t.Fatalf("aged claim at %d: %+v %v", i, next, err)
+		}
+		p, _ := next.EffectivePriority(now)
+		if p != model.PriorityHighest {
+			t.Fatalf("aged %s priority=%s", want, p)
+		}
+		if _, err := s.MarkRunAdmitted(ctx, next.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestQueuePriorityTagGrantIsScopedAuditedAndRecheckedForReruns(t *testing.T) {
+	now := time.Now()
+	s := testStore(t, &now)
+	repo := createRepo(t, s)
+	ctx := t.Context()
+	other, err := s.CreateRepository(ctx, model.RepositorySpec{Name: "other", UpstreamID: repo.UpstreamID, DefaultBranch: "main"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	enqueue := func(repoID int64, ref string, kind model.RefKind, trigger string, release bool) model.Run {
+		t.Helper()
+		spec := testRunSpec(repoID, ref, strings.Repeat("a", 40))
+		spec.RefKind, spec.Trigger, spec.Release = kind, trigger, release
+		r, err := s.EnqueueRun(ctx, spec)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return r.Run
+	}
+	ordinary := enqueue(repo.ID, "ordinary", model.RefBranch, "push", false)
+	tag := enqueue(repo.ID, "v1", model.RefTag, "tag", true)
+	otherTag := enqueue(other.ID, "junk", model.RefTag, "tag", true)
+	// Each receive-controlled tag/release signal independently needs a grant.
+	ungranted := []model.Run{tag, otherTag,
+		enqueue(other.ID, "ref-only", model.RefTag, "push", false),
+		enqueue(other.ID, "trigger-only", model.RefBranch, "tag", false),
+		enqueue(other.ID, "release-trigger", model.RefBranch, "release", false),
+		enqueue(other.ID, "release-flag", model.RefBranch, "push", true),
+	}
+	for _, r := range ungranted {
+		if r.Priority != model.PriorityNormal {
+			t.Fatalf("ungranted tag/release jumped queue: %+v", r)
+		}
+	}
+	if _, err = s.SetSizeGrant(ctx, repo.ID, "admin", periapsis.L); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		id   string
+		want model.RunPriority
+	}{{tag.ID, model.PriorityHighest}, {otherTag.ID, model.PriorityNormal}, {ordinary.ID, model.PriorityNormal}} {
+		r, err := s.Run(ctx, tc.id)
+		if err != nil || r.Priority != tc.want {
+			t.Fatalf("scoped grant: %+v %v", r, err)
+		}
+	}
+	flat, err := s.ListRecentRuns(ctx, model.RunListFilter{})
+	if err != nil || flat[0].ID != tag.ID {
+		t.Fatalf("granted list order: %+v %v", flat, err)
+	}
+	claimed, err := s.ClaimNextRun(ctx)
+	if err != nil || claimed.ID != tag.ID {
+		t.Fatalf("granted claim: %+v %v", claimed, err)
+	}
+	if _, err = s.FinishRun(ctx, tag.ID, model.RunResult{Status: model.RunFailed, Error: "failed before publication"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.SetSizeGrant(ctx, repo.ID, "admin", ""); err != nil {
+		t.Fatal(err)
+	}
+	retry, err := s.RerunRun(ctx, model.RunRerunRequest{RunID: tag.ID, Actor: "scoped-dev", Reason: "retry"})
+	if err != nil || retry.Enqueued.Priority != model.PriorityNormal {
+		t.Fatalf("rerun bypassed revoked grant: %+v %v", retry, err)
+	}
+	next, err := s.NextQueuedRun(ctx)
+	if err != nil || next.ID != ordinary.ID {
+		t.Fatalf("junk tags or rerun jumped ordinary FIFO: %+v %v", next, err)
+	}
+	for _, tc := range []struct {
+		action            string
+		previous, current bool
+	}{{"size.grant", false, true}, {"size.revoke", true, false}} {
+		var actor, details string
+		err := s.db.QueryRowContext(ctx, `SELECT actor,details FROM audit_actions WHERE action=? AND resource_id=?`, tc.action, repo.ID).Scan(&actor, &details)
+		var data map[string]any
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err = json.Unmarshal([]byte(details), &data); err != nil {
+			t.Fatal(err)
+		}
+		if actor != "admin" || data["tag_priority"] != tc.current || data["previous_tag_priority"] != tc.previous {
+			t.Fatalf("tag grant audit %s by %s: %s", tc.action, actor, details)
+		}
+	}
+	// Trusted plan/apply have cancellation guards, but no automatic urgency.
+	for _, trigger := range []string{"plan", "apply"} {
+		r := enqueue(repo.ID, trigger, model.RefBranch, trigger, false)
+		if r.Priority != model.PriorityNormal {
+			t.Fatalf("trusted %s acquired automatic priority: %+v", trigger, r)
 		}
 	}
 }

@@ -27,18 +27,26 @@ CREATE TABLE IF NOT EXISTS run_priority_overrides (
 ) WITHOUT ROWID;`
 
 // These correlated expressions also work in RETURNING and in run-list CTEs.
-// Neither inner table has id/ref columns, so those names bind to the outer run.
-const naturalHighestSQL = `(release=1 OR ref_kind='tag' OR trigger IN ('tag','release','promotion'))`
+// Inner priority tables have no id/ref columns, so those bind to the outer run.
+// Apply/plan cancellation guards protect external state, not queue urgency: those
+// triggers remain ordinary work unless an admin pattern/bump or aging raises them.
+// Tag/release fields are pusher-controlled; require an explicit active size grant
+// (including L) before giving them installation-wide priority. Grant/revoke audits
+// record this capability. Evaluate it on reads so old reruns cannot bypass revocation.
+const tagReleaseSQL = `(release=1 OR ref_kind='tag' OR trigger IN ('tag','release'))`
+const tagPriorityGrantSQL = `(repo_id IN (SELECT repo_id FROM size_grants WHERE revoked_at IS NULL))`
+const priorityTagReleaseSQL = `(` + tagReleaseSQL + ` AND ` + tagPriorityGrantSQL + `)`
+const naturalHighestSQL = `(trigger='promotion' OR ` + priorityTagReleaseSQL + `)`
 const overridePrioritySQL = `(SELECT priority FROM run_priority_overrides WHERE run_id=id)`
 const rcPatternSQL = `(SELECT pattern FROM queue_priority_patterns WHERE ref_kind='branch' AND ref GLOB pattern ORDER BY pattern LIMIT 1)`
 const basePrioritySQL = `CASE WHEN ` + naturalHighestSQL + ` THEN 'highest' WHEN ` + overridePrioritySQL + ` IS NOT NULL THEN ` + overridePrioritySQL + ` WHEN ` + rcPatternSQL + ` IS NOT NULL THEN 'high' ELSE 'normal' END`
-const priorityReasonSQL = `CASE WHEN release=1 OR ref_kind='tag' OR trigger IN ('tag','release') THEN 'tag/release run' WHEN trigger='promotion' THEN 'promotion run' WHEN ` + overridePrioritySQL + ` IS NOT NULL THEN 'admin bump: ' || (SELECT reason FROM run_priority_overrides WHERE run_id=id) WHEN ` + rcPatternSQL + ` IS NOT NULL THEN 'release-candidate pattern: ' || ` + rcPatternSQL + ` ELSE 'ordinary run' END`
+const priorityReasonSQL = `CASE WHEN ` + priorityTagReleaseSQL + ` THEN 'tag/release run: active repository size grant' WHEN trigger='promotion' THEN 'promotion run' WHEN ` + overridePrioritySQL + ` IS NOT NULL THEN 'admin bump: ' || (SELECT reason FROM run_priority_overrides WHERE run_id=id) WHEN ` + rcPatternSQL + ` IS NOT NULL THEN 'release-candidate pattern: ' || ` + rcPatternSQL + ` ELSE 'ordinary run' END`
 
 // priorityOrderSQL shares the effective class with the in-memory gate. The
 // clock is rendered from an int64, never request text, and is fixed per query.
 func priorityOrderSQL(now time.Time) string {
 	base := basePrioritySQL
-	return `CASE WHEN (` + base + `)='highest' OR ((` + base + `)='normal' AND queued_at <= ` + fmt.Sprint(unixNano(now)) + ` - 3600000000000) THEN 2 WHEN (` + base + `)='high' THEN 1 ELSE 0 END DESC, admission_sequence, queue_sequence`
+	return `CASE WHEN (` + base + `)='highest' OR ((` + base + `) IN ('normal','high') AND queued_at <= ` + fmt.Sprint(unixNano(now)) + ` - 3600000000000) THEN 2 WHEN (` + base + `)='high' THEN 1 ELSE 0 END DESC, admission_sequence, queue_sequence`
 }
 
 func (s *Store) QueuePriorityPatterns(ctx context.Context) ([]string, error) {
@@ -106,7 +114,8 @@ func (s *Store) SetQueuePriorityPatterns(ctx context.Context, actor string, patt
 }
 
 // BumpRunPriority accepts only waiting work and only raises its effective class.
-// The service owns admin authorization; the state change and audit are atomic.
+// The service owns admin authorization and holds its admission gate through
+// this call; the durable state change and audit are atomic.
 func (s *Store) BumpRunPriority(ctx context.Context, actor, id string, priority model.RunPriority, reason string) (model.Run, error) {
 	reason = strings.TrimSpace(reason)
 	if strings.TrimSpace(actor) == "" || id == "" || (priority != model.PriorityHigh && priority != model.PriorityHighest) || reason == "" || len(reason) > 512 || strings.IndexFunc(reason, unicode.IsControl) >= 0 {

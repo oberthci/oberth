@@ -19,7 +19,8 @@ import (
 const DefaultMaxRunSize = periapsis.L
 
 // SizeGrant raises one repository's maximum admission size. It belongs to a
-// durable repository ID, never an ambiguous name.
+// durable repository ID, never an ambiguous name. An active grant also permits
+// automatic highest queue priority for this repository's tag/release runs.
 type SizeGrant struct {
 	RepoID    int64          `json:"repo_id"`
 	MaxSize   periapsis.Size `json:"max_size"`
@@ -126,7 +127,7 @@ ON CONFLICT(repo_id) DO UPDATE SET max_size=excluded.max_size,granted_by=exclude
 	if err != nil {
 		return SizeGrant{}, err
 	}
-	details, err := json.Marshal(map[string]any{"repo_id": repoID, "max_size": string(max), "previous_max_size": previous})
+	details, err := json.Marshal(map[string]any{"repo_id": repoID, "max_size": string(max), "previous_max_size": previous, "tag_priority": allow, "previous_tag_priority": active})
 	if err != nil {
 		return SizeGrant{}, err
 	}
