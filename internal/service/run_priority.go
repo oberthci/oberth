@@ -161,7 +161,9 @@ func (scheduler *Scheduler) refreshPriorities(ctx context.Context) error {
 	if len(ids) == 0 {
 		return nil
 	}
-	runs, err := reader.RunsByIDs(ctx, ids)
+	runs, err := retryDatabase(ctx, "RunsByIDs", func(ctx context.Context) (map[string]model.Run, error) {
+		return reader.RunsByIDs(ctx, ids)
+	})
 	if err != nil {
 		return err
 	}
@@ -211,7 +213,7 @@ func (scheduler *Scheduler) priorityDispatchAvailable(ctx context.Context, activ
 	if !hasWaiters {
 		return false, nil
 	}
-	next, err := reader.NextQueuedRun(ctx)
+	next, err := retryDatabase(ctx, "NextQueuedRun", reader.NextQueuedRun)
 	if queueEmpty(err) {
 		return false, nil
 	}

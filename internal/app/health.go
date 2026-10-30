@@ -68,7 +68,8 @@ type Health struct {
 	// queue head (#1021).
 	AdmissionBlocker func() *model.AdmissionBlocker
 	// Admission optionally reports the whole admission gate (#1099).
-	Admission func() *model.AdmissionState
+	Admission       func() *model.AdmissionState
+	DatabaseRetries func() uint64
 	// SchemaVersion is the database schema version the running binary last
 	// applied, reported on the status view and the version command so the
 	// upgrade path can detect pending forward-only migrations.
@@ -120,6 +121,7 @@ type AuditChainStatus struct {
 }
 
 type HealthStatus struct {
+	DatabaseRetries   uint64                         `json:"database_retries_total,omitempty"`
 	ControllerProfile *model.ControllerProfileStatus `json:"controller_profile,omitempty"`
 	Storage           any                            `json:"storage,omitempty"`
 	Database          string                         `json:"database"`
@@ -222,6 +224,9 @@ func requiresSSHIdentity(upstreams []model.Upstream) bool {
 
 func (health Health) Status(ctx context.Context) (any, error) {
 	status := HealthStatus{Database: "unavailable", SchemaVersion: health.SchemaVersion, VCS: "unavailable", Cluster: "unavailable", Audit: "unavailable", AuditMode: health.AuditMode, Version: health.Version, SecretStore: health.SecretStore}
+	if health.DatabaseRetries != nil {
+		status.DatabaseRetries = health.DatabaseRetries()
+	}
 	if health.ControllerProfile != nil {
 		status.ControllerProfile = health.ControllerProfile()
 	}
