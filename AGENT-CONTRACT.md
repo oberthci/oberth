@@ -1185,6 +1185,13 @@ trust assumptions and complete invalidation rules.
   terminal-only sequence paging; `view=active` remains an unpaged, bounded
   deprecated compatibility view. Repository/ref filters and uplink scope apply
   to both.
+  Detailed status/run reads can also expose an ephemeral Argo deadline and
+  finalization-lag observation after steps have progressed. The clock is the
+  submitted budget plus Argo's Workflow start, not weighted admission. Only
+  explicit controller/current-attempt Pod deadline evidence yields the display
+  label `deadline-exceeded`; elapsed time or exit 143 alone does not. Durable
+  terminal state, admission release and replay evidence are unchanged. See
+  [workflow-deadlines.md](docs/workflow-deadlines.md).
   Durable `Status` values are unchanged and `RunStatus.Valid` still refuses
   the read-only `waiting` projection.
 

@@ -130,7 +130,7 @@ function renderMarkdown(raw) {
 function statusKind(status) {
   switch (String(status || "").toLowerCase()) {
     case "passed": case "delivered": return "pass";
-    case "failed": case "timed_out": return "fail";
+    case "failed": case "timed_out": case "deadline-exceeded": return "fail";
     case "running": return "run";
     /* "queued" is Argo made a Pod for this and it has not started; "pending"
        is the pipeline declares this and execution has not reached it. Both
@@ -810,6 +810,14 @@ function summaryLines(detail) {
   }
   else if (kind === "cancel") lines.push(`[${status}] ${runMessage(run)}`);
   else lines.push(`[queued] queued behind earlier work for this repository`);
+  const execution = detail.Scheduling?.execution;
+  if (execution) {
+    if (["deadline_exceeded", "deadline_elapsed", "terminal_observed"].includes(execution.state)) lines.push(`[execution] ${detail.Scheduling.message}`);
+    const deadline = execution.deadline;
+    if (deadline?.expires_at) lines.push(`[deadline] ${deadline.expires_at} · ${deadline.remaining_seconds ?? "unknown"}s remaining · clock: Workflow start`);
+    else if (deadline) lines.push(`[deadline] ${deadline.budget_seconds}s budget · Workflow start not observed`);
+    if (execution.reconciliation_lag_seconds != null) lines.push(`[execution] observed ${execution.phase} · finalization lag ${execution.reconciliation_lag_seconds}s`);
+  }
   if (unreached) lines.push(`${unreached} declared step${unreached === 1 ? "" : "s"} not reached`);
   if (run.SupersededBy) lines.push({successor: run.SupersededBy, text: run.display_reason || `view successor ${shortSuccessor(run.SupersededBy)}`});
   if (run.Error) lines.push("", `error: ${run.Error}`);
@@ -1077,8 +1085,9 @@ async function renderRunDetailView(detail, seq) {
   const stepCount = steps.length;
   // A running run streams live output in the terminal: on the summary view and
   // on any still-running step. Completed steps keep their retained slice.
-  const live = (kind === "run" && (!selected || ["running", "queued"].includes(selected.Status))) || state.step === "__summary__";
-  const terminal = live ? await liveLogContent(run, selected?.Burn, selected?.Step) : selected ? await stepLogContent(run.ID, selected, kind === "run") : renderLogLines(summaryLines(detail));
+  const executing = run.Status === "running";
+  const live = (executing && (!selected || ["running", "queued"].includes(selected.Status))) || state.step === "__summary__";
+  const terminal = live ? await liveLogContent(run, selected?.Burn, selected?.Step) : selected ? await stepLogContent(run.ID, selected, executing) : renderLogLines(summaryLines(detail));
   if (!currentRoute(seq) || (live && !state.live)) return;
   // Preserve the reader's place across the poll re-render: stick to the
   // bottom while they are at the bottom, hold their position when they have

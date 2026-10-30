@@ -2,6 +2,7 @@ package model
 
 import (
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -134,15 +135,35 @@ type DiskFloorObservation struct {
 	BelowFloor bool  `json:"below_floor"`
 }
 
-// ExecutionObservation contains only curated status vocabulary. Arbitrary
-// controller messages, names, commands, specs and credentials never cross it.
+// ExecutionDeadlineMessage is a fixed presentation label, never raw controller text.
+const ExecutionDeadlineMessage = "Execution deadline exceeded."
+
+// ExecutionDeadline is a read-only clock projection, never terminal evidence.
+// Argo anchors workflow deadlines to status.startedAt, not Oberth admission.
+type ExecutionDeadline struct {
+	BudgetSeconds    int64      `json:"budget_seconds"`
+	Clock            string     `json:"clock"`
+	CreatedAt        *time.Time `json:"created_at,omitempty"`
+	StartedAt        *time.Time `json:"started_at,omitempty"`
+	ExpiresAt        *time.Time `json:"expires_at,omitempty"`
+	RemainingSeconds *int64     `json:"remaining_seconds,omitempty"`
+	Elapsed          bool       `json:"elapsed"`
+}
+
+// ExecutionObservation contains only curated vocabulary and execution timestamps.
+// Controller messages, names, commands, specs and credentials never cross it.
 type ExecutionObservation struct {
-	State     string             `json:"state"`
-	Phase     string             `json:"phase,omitempty"`
-	Message   string             `json:"message"`
-	Nodes     []SchedulingReason `json:"nodes,omitempty"`
-	Pods      []SchedulingReason `json:"pods,omitempty"`
-	Truncated bool               `json:"truncated,omitempty"`
+	ObservedAt               time.Time          `json:"observed_at,omitzero"`
+	FinishedAt               *time.Time         `json:"finished_at,omitempty"`
+	ReconciliationLagSeconds *int64             `json:"reconciliation_lag_seconds,omitempty"`
+	Deadline                 *ExecutionDeadline `json:"deadline,omitempty"`
+	Reason                   string             `json:"reason,omitempty"`
+	State                    string             `json:"state"`
+	Phase                    string             `json:"phase,omitempty"`
+	Message                  string             `json:"message"`
+	Nodes                    []SchedulingReason `json:"nodes,omitempty"`
+	Pods                     []SchedulingReason `json:"pods,omitempty"`
+	Truncated                bool               `json:"truncated,omitempty"`
 }
 
 type SchedulingReason struct {
@@ -207,4 +228,14 @@ type AdmissionRelease struct {
 	Verified bool   `json:"verified"`
 	Forced   bool   `json:"forced,omitempty"`
 	Warning  string `json:"warning,omitempty"`
+}
+
+// IsExecutionDeadlineReason recognizes fixed controller vocabulary, not exit signals.
+func IsExecutionDeadlineReason(message string) bool {
+	switch strings.TrimSpace(message) {
+	case "DeadlineExceeded", "Deadline exceeded", "Step exceeded its deadline", "Workflow deadline exceeded", "workflow deadline exceeded", ExecutionDeadlineMessage:
+		return true
+	default:
+		return false
+	}
 }

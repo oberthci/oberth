@@ -217,4 +217,11 @@ await run('awaitResult');
 assert.ok(run('renderedHTML').includes('title="schedule entry">nightly&lt;unsafe&gt;'));
 assert.ok(run(`summaryLines({Run:scheduleRun,Steps:[]}).join(' ')`).includes('schedule=nightly<unsafe>'));
 
+assert.equal(run(`statusKind('deadline-exceeded')`), 'fail');
+const deadlineSummary = run(`summaryLines({Run:{ID:'deadline',Status:'running',display_status:'deadline-exceeded'},Steps:[],Scheduling:{message:'Execution deadline exceeded.',execution:{state:'deadline_exceeded',phase:'Failed',reconciliation_lag_seconds:3080,deadline:{budget_seconds:5400,expires_at:'2026-10-30T10:33:37Z',remaining_seconds:0}}}}).join(' ')`);
+for (const text of ['deadline-exceeded', 'Execution deadline exceeded', '3080s', '0s remaining', 'clock: Workflow start']) assert.ok(deadlineSummary.includes(text), text);
+assert.ok(!deadlineSummary.includes('[queued]'));
+run(`state.step='build / compile'; state.stepRunID='scroll-run'; termReads=0; stepReads=0; awaitResult=renderRunDetailView({Run:{ID:'scroll-run',RepoID:1,Status:'running',display_status:'deadline-exceeded',StartedAt:new Date().toISOString(),Ref:'fix/live'},Steps:[{Burn:'build',Step:'compile',Status:'running',Ordinal:0}]},0);`);
+await run('awaitResult');
+assert.ok(run('renderedHTML').includes('fixture log') && run('renderedHTML').includes('live output'), 'an execution display label must not stop durable-running log refresh');
 console.log('live log dashboard checks passed');

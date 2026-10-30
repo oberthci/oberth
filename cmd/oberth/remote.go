@@ -456,6 +456,9 @@ func runRunDetail(ctx context.Context, arguments []string, output io.Writer) err
 			}
 		}
 	}
+	if err := renderExecutionClock(output, detail.Scheduling); err != nil {
+		return err
+	}
 	// The reason first, before the step list: a failed run is read to find out
 	// what went wrong, and burying it under timings makes the reader scroll
 	// past the answer.
@@ -914,6 +917,29 @@ func remoteArtifacts(ctx context.Context, config client.Config, rest []string, o
 			entry.Size, entry.Modified.UTC().Format("2006-01-02 15:04:05"), entry.Name); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+func renderExecutionClock(output io.Writer, scheduling *model.RunScheduling) error {
+	if scheduling == nil || scheduling.Execution == nil {
+		return nil
+	}
+	execution := scheduling.Execution
+	if deadline := execution.Deadline; deadline != nil {
+		if deadline.ExpiresAt != nil && deadline.RemainingSeconds != nil {
+			if _, err := fmt.Fprintf(output, "workflow deadline: %s; %ds remaining (clock: Workflow start)\n", deadline.ExpiresAt.UTC().Format(time.RFC3339), *deadline.RemainingSeconds); err != nil {
+				return err
+			}
+		} else {
+			if _, err := fmt.Fprintf(output, "workflow deadline: %ds budget; Workflow start not observed\n", deadline.BudgetSeconds); err != nil {
+				return err
+			}
+		}
+	}
+	if execution.ReconciliationLagSeconds != nil {
+		_, err := fmt.Fprintf(output, "execution observed %s; finalization lag: %ds\n", execution.Phase, *execution.ReconciliationLagSeconds)
+		return err
 	}
 	return nil
 }

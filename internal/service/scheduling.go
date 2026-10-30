@@ -38,7 +38,7 @@ func (service *API) observeScheduling(ctx context.Context, run model.Run, steps 
 		return nil
 	}
 	for _, step := range steps {
-		if step.Status != model.StepPending && step.Status != model.StepQueued {
+		if step.Status != model.StepPending && step.Status != model.StepQueued && !lookupPosition {
 			return nil
 		}
 	}
@@ -246,4 +246,18 @@ func (service *API) schedulingClock() clock.Clock {
 		return service.waitClock
 	}
 	return clock.RealClock{}
+}
+
+// Execution display never changes durable status or decides wait completion.
+func applyExecutionDisplay(run *model.Run, scheduling *model.RunScheduling) {
+	if scheduling == nil || scheduling.Execution == nil {
+		return
+	}
+	switch scheduling.Execution.State {
+	case "deadline_exceeded":
+		run.DisplayStatus = "deadline-exceeded"
+		run.DisplayReason = scheduling.Message
+	case "deadline_elapsed", "terminal_observed":
+		run.DisplayReason = scheduling.Message
+	}
 }
