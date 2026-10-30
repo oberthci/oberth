@@ -16,7 +16,7 @@ func TestScheduleCursorMigrationBackfillsWithoutChangingLatestOutcomes(t *testin
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = s.Close() })
-	if _, err := s.db.Exec(`DROP TABLE IF EXISTS run_priority_overrides; DROP TABLE IF EXISTS queue_priority_patterns; DELETE FROM schema_migrations WHERE version>=34; ALTER TABLE step_results DROP COLUMN memory_peak_bytes; DELETE FROM schema_migrations WHERE version>=33; ALTER TABLE schedule_fires DROP COLUMN last_fired_at`); err != nil {
+	if _, err := s.db.Exec(`DROP INDEX IF EXISTS runs_latest_ref_idx; DROP TABLE IF EXISTS run_priority_overrides; DROP TABLE IF EXISTS queue_priority_patterns; DELETE FROM schema_migrations WHERE version>=34; ALTER TABLE step_results DROP COLUMN memory_peak_bytes; DELETE FROM schema_migrations WHERE version>=33; ALTER TABLE schedule_fires DROP COLUMN last_fired_at`); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.db.Exec(`DELETE FROM schema_migrations WHERE version=?`, scheduleCursorMigrationVersion); err != nil {

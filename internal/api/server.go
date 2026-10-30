@@ -51,9 +51,10 @@ type ToolService interface {
 }
 
 type RunFilter struct {
-	Repository string
-	Ref        string
-	Limit      int
+	LatestPerRef bool
+	Repository   string
+	Ref          string
+	Limit        int
 	// Before pages to runs older than this QueueSequence (exclusive).
 	Before int64
 	// BeforeRun pages to runs older than this run, by ID: the cursor a
@@ -342,11 +343,21 @@ func actorFrom(ctx context.Context) Actor {
 func (server *Server) handleRuns(writer http.ResponseWriter, request *http.Request) {
 	query := request.URL.Query()
 	filter := RunFilter{
-		Repository: query.Get("repo"),
-		Ref:        query.Get("ref"),
-		Limit:      queryLimit(request, 100, 100),
-		View:       query.Get("view"),
+		Repository:   query.Get("repo"),
+		LatestPerRef: query.Get("latest_per_ref") == "1",
+		Ref:          query.Get("ref"),
+		Limit:        queryLimit(request, 100, 100),
+		View:         query.Get("view"),
 	}
+	if raw := query.Get("latest_per_ref"); raw != "" && raw != "0" && raw != "1" {
+		writeJSON(writer, http.StatusBadRequest, map[string]string{"error": "latest_per_ref must be 0 or 1"})
+		return
+	}
+	if filter.LatestPerRef && filter.View != "" && filter.View != RunViewAll {
+		writeJSON(writer, http.StatusBadRequest, map[string]string{"error": "latest_per_ref requires the all view"})
+		return
+	}
+
 	// ?view=history is terminal runs only, paged like the default list;
 	// ?view=active is the unpaged non-terminal list in scheduling order.
 	// Without view the body and its paging are unchanged.
@@ -392,7 +403,7 @@ func RunPageFull(runs []model.Run, filter RunFilter) bool {
 	if len(runs) == 0 || filter.View == RunViewActive {
 		return false
 	}
-	if filter.View == RunViewHistory {
+	if filter.LatestPerRef || filter.View == RunViewHistory {
 		return len(runs) == filter.Limit
 	}
 	count := 0

@@ -129,3 +129,37 @@ func (controller *Controller) createWorkflowWithRetry(ctx context.Context, reque
 		reconcile, backedOff = true, false
 	}
 }
+
+// Issued only after a definitive NotFound and before any Workflow POST. A
+// generic create failure or a failed GET cannot make this non-execution claim.
+type beforeWorkflowCreateFailure struct{ cause error }
+
+func (e *beforeWorkflowCreateFailure) Error() string {
+	return "argojob: prepare before Workflow create: " + e.cause.Error()
+}
+func (e *beforeWorkflowCreateFailure) Unwrap() error              { return e.cause }
+func (e *beforeWorkflowCreateFailure) BeforeWorkflowCreate() bool { return true }
+func (e *beforeWorkflowCreateFailure) InfrastructureFailure() bool {
+	return retryableWorkflowPreparation(e.cause)
+}
+func retryableWorkflowPreparation(err error) bool {
+	if joined, ok := err.(interface{ Unwrap() []error }); ok {
+		children := joined.Unwrap()
+		if len(children) == 0 {
+			return false
+		}
+		for _, child := range children {
+			if !retryableWorkflowPreparation(child) {
+				return false
+			}
+		}
+		return true
+	}
+	if classified, ok := err.(interface{ InfrastructureFailure() bool }); ok {
+		return classified.InfrastructureFailure()
+	}
+	if wrapped, ok := err.(interface{ Unwrap() error }); ok {
+		return retryableWorkflowPreparation(wrapped.Unwrap())
+	}
+	return retryExecutorIdentityRead(err)
+}

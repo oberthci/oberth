@@ -261,3 +261,10 @@ input,select{height:32px;border:1px solid var(--line);background:var(--panel);co
 @media (max-width:680px){.dlg{width:100vw;max-width:none;height:100dvh;max-height:none;border:0;border-radius:0;margin:0}.dlg-shell{height:100dvh;min-height:0}.dlg-body{padding:12px}}
 
 .log-delivery { padding: 8px 12px; color: var(--muted, #aaa); border-bottom: 1px solid var(--line); font-size: 12px; white-space: normal; }
+
+/* Retried infrastructure attempts keep their error detail without a red verdict. */
+.pill.warn,.ic.warn{color:var(--orange);background:color-mix(in srgb,var(--orange) 12%,transparent)}
+.history .hist.warn{background:color-mix(in srgb,var(--orange) 70%,var(--line))}
+.attempt-toggle{padding:.35rem 1rem;color:var(--dim);font-size:.8rem}
+.attempt-toggle button,button.attempt-toggle{cursor:pointer;color:var(--cyan);background:transparent;border:0;text-align:left}
+.attempt-note{padding:.35rem 1rem}

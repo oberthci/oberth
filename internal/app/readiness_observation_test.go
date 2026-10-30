@@ -67,12 +67,12 @@ func TestReadinessRetainedDeadlinesLogOncePerSuccessAndCountEveryAttempt(t *test
 		for range 2 {
 			health.refreshReadiness(t.Context())
 		}
-		if len(messages) != 1 || !strings.Contains(messages[0], "event=retained_deadline sample_age=10s db_wait=10s") {
+		if len(messages) != 1 || !strings.Contains(messages[0], "event=retained_deadline sample_age=30s db_wait=30s") {
 			t.Fatalf("deadline logging not bounded: %v", messages)
 		}
 		metrics.Reset()
 		health.Readiness.WriteMetrics(&metrics)
-		for _, want := range []string{"oberth_readiness_sample_present 1\n", "oberth_readiness_sample_age_seconds 20\n", "oberth_readiness_retained_deadlines_total 2\n"} {
+		for _, want := range []string{"oberth_readiness_sample_present 1\n", "oberth_readiness_sample_age_seconds 60\n", "oberth_readiness_retained_deadlines_total 2\n"} {
 			if !strings.Contains(metrics.String(), want) {
 				t.Fatalf("missing %q: %s", want, metrics.String())
 			}
@@ -139,7 +139,7 @@ func TestWatchReadinessCadenceAfterFullBudgetAndCancel(t *testing.T) {
 		synctest.Wait()
 		time.Sleep(ReadinessProbeBudget)
 		synctest.Wait()
-		if len(calls) != 3 || calls[0] != 0 || calls[1] != 5*time.Second || calls[2] != 15*time.Second {
+		if len(calls) != 3 || calls[0] != 0 || calls[1] != 5*time.Second || calls[2] != readinessInterval+ReadinessProbeBudget {
 			t.Fatalf("ticker cadence after overrun: %v", calls)
 		}
 		cancel()

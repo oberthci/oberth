@@ -46,9 +46,12 @@ func TestExecutorIdentityFailureIsInfrastructureAndRunRetryApplies(t *testing.T)
 	if len(fixture.jobs.deleted) != 1 {
 		t.Fatal("live Workflow was not deleted before recording infrastructure failure")
 	}
+	if failed.AutoRetriedBy != "" {
+		t.Fatal("post-create identity observation incorrectly authorized automatic replay", failed)
+	}
 	control := fixture.api(t)
 	control.runRetries = fixture.store
-	value, err := control.CallTool(t.Context(), api.Actor{Identity: "operator@host"}, "run_retry", json.RawMessage(fmt.Sprintf(`{"id":%q}`, failed.ID)))
+	value, err := control.CallTool(t.Context(), api.Actor{Identity: "operator@host"}, "run_retry", json.RawMessage(fmt.Sprintf(`{"id":%q}`, source.ID)))
 	if err != nil {
 		t.Fatal(err)
 	}

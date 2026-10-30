@@ -178,6 +178,9 @@ WHERE repo_id = ? AND ref_kind = 'branch' AND ref = ? AND id != ? AND schedule_e
 	if _, err := tx.ExecContext(ctx, `UPDATE runs SET reason = 're-queued after restart' WHERE id = ? AND superseded_by = ?`, run.ID, result.ID); err != nil {
 		return model.Run{}, fmt.Errorf("record restart requeue reason: %w", err)
 	}
+	if err := s.inheritAutoRetryTx(ctx, tx, run, &result.Run); err != nil {
+		return model.Run{}, err
+	}
 	return s.inheritQueuePriorityTx(ctx, tx, run, result.Run)
 }
 
@@ -935,6 +938,13 @@ RETURNING `+runColumns,
 	if err != nil {
 		return model.Run{}, fmt.Errorf("finish run: %w", err)
 	}
+	if result.AutoRetryPreStep {
+		value, err = s.autoRetryPreStepTx(ctx, tx, value, now)
+		if err != nil {
+			return model.Run{}, err
+		}
+	}
+
 	if value.Trigger == "promotion" {
 		promotion, promotionErr := promotionByRunTx(ctx, tx, value.ID)
 		if promotionErr != nil {
@@ -958,8 +968,10 @@ RETURNING `+runColumns,
 		if err := s.projectPromotionIssue(ctx, tx, promotion, now); err != nil {
 			return model.Run{}, err
 		}
-	} else if err := s.projectRunIssue(ctx, tx, value, result.FailureTail, now); err != nil {
-		return model.Run{}, err
+	} else if value.AutoRetriedBy == "" {
+		if err := s.projectRunIssue(ctx, tx, value, result.FailureTail, now); err != nil {
+			return model.Run{}, err
+		}
 	}
 	if err := s.recordTerminalObservationTx(ctx, tx, value, result.TerminalObservation, now); err != nil {
 		return model.Run{}, err
@@ -968,6 +980,9 @@ RETURNING `+runColumns,
 }
 
 func (s *Store) ListRecentRuns(ctx context.Context, filter model.RunListFilter) ([]model.Run, error) {
+	if filter.LatestPerRef {
+		return s.listLatestRefRuns(ctx, filter)
+	}
 	if !filter.Terminal {
 		return s.listFlatRuns(ctx, filter)
 	}
@@ -1258,6 +1273,14 @@ func scanRun(row rowScanner, extra ...any) (model.Run, error) {
 	}
 	if err := row.Scan(append(dest, extra...)...); err != nil {
 		return model.Run{}, err
+	}
+	value.AutoRetryOf = strings.TrimPrefix(value.Reason, autoRetryOfPrefix)
+	if value.AutoRetryOf == value.Reason {
+		value.AutoRetryOf = ""
+	}
+	value.AutoRetriedBy = strings.TrimPrefix(value.Reason, autoRetriedByPrefix)
+	if value.AutoRetriedBy == value.Reason {
+		value.AutoRetriedBy = ""
 	}
 	value.Release = release != 0
 	value.Credentialed = credentialed != 0

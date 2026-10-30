@@ -292,3 +292,7 @@ unsupported filesystem fails cold publication closed (500). Existing directories
 are tightened to mode 0700 at startup. Repository removal/remapping makes old
 entries unreachable after the handler map refresh at restart, but does not erase
 derived source; remove that data under the same quiesced maintenance procedure.
+
+For API Service availability under database contention, see
+[readiness under database stalls](rca-run-recovery.md#readiness-under-database-stalls).
+The private proxy's independent readiness-bypass policy above is unchanged.

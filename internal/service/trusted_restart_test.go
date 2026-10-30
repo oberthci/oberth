@@ -268,7 +268,7 @@ func TestTrustedShutdownAfterCleanupLeavesParentForRecovery(t *testing.T) {
 		t.Fatal(err)
 	}
 	shown := value.(RunDetailResponse).Run
-	if want := "server restart, re-queued as " + shortRunID(source.SupersededBy); shown.DisplayStatus != "cancelled" || shown.DisplayReason != want {
+	if want := "server restart, re-queued as " + shortRunID(source.SupersededBy); shown.DisplayStatus != "superseded" || shown.DisplayReason != want {
 		t.Fatalf("retried parent presentation = %q/%q, want cancelled/%q", shown.DisplayStatus, shown.DisplayReason, want)
 	}
 }

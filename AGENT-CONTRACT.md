@@ -857,10 +857,12 @@ trust assumptions and complete invalidation rules.
   `Running` but not ready until its first upstream is registered in-pod;
   registration then also requires the upstream's durable SSH credentials for
   readiness to hold.
-- Readiness sampling has its own read-only WAL connection, a ten-second budget
+- Readiness sampling has its own read-only WAL connection, a thirty-second budget
   and five-second cadence. A successful sample expires after 90 seconds of
-  elapsed time, independent of attempt count; deadlines do not renew it.
-  Ten-second probes overrun the ticker, which drops missed ticks. Hard errors
+  elapsed time, independent of attempt count; reader deadlines and typed
+  SQLite BUSY/LOCKED do not renew it. Confirmed writer failures refuse at the
+  next sample without receiving another last-green grace window.
+  Thirty-second probes overrun the ticker, which drops missed ticks. Hard errors
   and startup recovery refuse at once. The reader busy timeout is at least
   the probe budget. Configuration checks reuse the sampled upstream rows.
   Stale transitions and the first retained deadline after each success are
@@ -1215,13 +1217,17 @@ trust assumptions and complete invalidation rules.
   | admitted, including trusted preflight | `running` | empty (phase is `preflight` while its VM executes) |
   | passed CI / published release | `passed` | empty |
   | failed step or infrastructure | `failed` | empty; error and failed step remain separately available |
-  | superseded (`reason='superseded by newer run'`) | `cancelled` | `superseded by <short SHA>`; successor run remains linked |
-  | restart re-fire (`reason='re-queued after restart'`; fallback when an adoptable branch Workflow is missing, #1172) | `cancelled` | `server restart, re-queued as <run12>` |
-  | trusted preflight restart retry (`reason='retried once after trusted preflight owner restart'`, linked fresh attempt, #1172) | `cancelled` | `server restart, re-queued as <run12>` |
+  | infrastructure failure automatically retried | `infra-retried` | `infra error, retried`; linked successor |
+  | superseded (`reason='superseded by newer run'`) | `superseded` | `superseded by <short SHA>`; successor run remains linked |
+  | restart re-fire (`reason='re-queued after restart'`; fallback when an adoptable branch Workflow is missing, #1172) | `superseded` | `server restart, re-queued as <run12>` |
+  | trusted preflight restart retry (`reason='retried once after trusted preflight owner restart'`, linked fresh attempt, #1172) | `superseded` | `server restart, re-queued as <run12>` |
   | explicit cancel | `cancelled` | `cancelled by <actor>: <reason>` |
   | restart requiring an operator retry, including a trusted preflight whose automatic retry was spent or refused | `cancelled` | `server restart, retry needed` |
 
-  The display pair is additive on default API, MCP and CLI responses; retry
+  Raw status fields retain their values, but existing `display_status` values
+  can change from `cancelled` to `superseded`, or `failed` to `infra-retried`.
+  Clients must accept these display enum values. The display pair is additive
+  on default API, MCP and CLI responses; retry
   and rerun eligibility still uses the durable cause. The `status`/`wait`
   tool's `status: "delivered"` remains the legacy alias of `passed` for every
   passed run, including releases; `display_status` is always `passed`.
@@ -2707,6 +2713,7 @@ alone is never evidence that missing migrations ran.
 | v32 | Unreleased (#1190) | schedule_fires: durable successful-fire cursor, pending first-fire catch-up; latest outcome/time retained | Database restore |
 | v33 | Unreleased (step resource usage) | Nullable RSS/CPU, container memory peak; ambiguous legacy zero counters become NULL | Database restore |
 | v34 | Unreleased (queue priority) | Administrator RC branch patterns and audited per-run priority bumps; no pipeline-controlled priority | Database restore |
+| v35 | v0.17.73 candidate | Covering latest-ref index on repository/ref-kind/ref/queue sequence; exact indexed head/count aggregation | Database restore |
 
 **Contract test:** `TestEveryMigrationDocumentedInAgentContract` asserts that
 every migration version in `internal/store/schema.go` has a corresponding
@@ -3250,3 +3257,22 @@ classification, including when main is still Waiting/PodInitializing. This guard
 is local to restart-cut and does not depend on the log-continuity input. The
 shared partial-execution evidence contract and its RCA/fallback regression are
 compiled in this topic and included in its bundle.
+
+
+**RCA recovery / run-list UX:** allow-listed branch preparation failures with
+positive proof that no Workflow POST occurred can receive one atomic, audited
+retry at the same SHA. A missing progress journal is unknown; only fresh
+execution initializes an empty journal. Submitted, adopted/reconciled and
+uncertain-create settlement paths never opt in. Release,
+tag, promotion, plan and apply runs never auto-retry. All progress attempts,
+engine observations, cleanup completion and writer-side newest/step/publication
+fences apply. The automatic budget survives restart and manual replay lineage.
+Raw failed/interrupted statuses remain; additive retry links and `infra-retried`
+(amber) / `superseded` display states explain them. The dashboard defaults to
+scoped latest-ref heads with expandable retained history, hiding superseded
+attempts unless requested; `latest_per_ref=1` is opt-in for HTTP clients.
+Readiness uses a 30s background reader budget, retaining green on deadline or
+typed SQLite reader contention without renewing the 90s last-success age.
+Confirmed writer failures receive no second 90s grace. Hard errors,
+startup recovery, liveness, write integrity and admission gates remain enforced.
+See [recovery, history and readiness semantics](docs/rca-run-recovery.md).

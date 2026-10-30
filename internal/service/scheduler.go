@@ -749,8 +749,17 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 	if err != nil {
 		return scheduler.finishInfrastructureFailure(ctx, run, repository, fmt.Errorf("load run repository upstream: %w", err))
 	}
+	// Only fresh execution initializes empty evidence. Recovery/adoption and
+	// create settlement never manufacture an empty journal for missing history.
+	if run.JobName == "" && run.StartedAt == nil {
+		if initializer, ok := scheduler.logs.(interface{ InitializeStepProgress(string) error }); ok {
+			if err := initializer.InitializeStepProgress(run.ID); err != nil {
+				return scheduler.finishInfrastructureFailure(ctx, run, repository, err)
+			}
+		}
+	}
 	if err := scheduler.git.Checkout(ctx, upstream.QualifiedRepo(repository.Name), checkoutSHA, sourceDir); err != nil {
-		return scheduler.finishInfrastructureFailure(ctx, run, repository, fmt.Errorf("checkout run workspace: %w", err))
+		return scheduler.finishPreCreateInfrastructureFailure(ctx, run, repository, &checkoutPreparationFailure{cause: err})
 	}
 	scheduler.timingMilestone(ctx, run.ID, "checkout-ready")
 	requirement, err := scheduler.trustedRequirement(ctx, repository, run.ID, checkoutSHA)
@@ -1002,15 +1011,7 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 		var uncertain interface{ AmbiguousCreate() bool }
 		if errors.As(err, &uncertain) && uncertain.AmbiguousCreate() {
 			_ = logFile.Close()
-			reservation.retain()
-			persistCtx, cancelPersist := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-			pendingErr := scheduler.database().MarkRunCreatePending(persistCtx, run.ID, jobName)
-			cancelPersist()
-			run.JobName = jobName
-			scheduler.registerCreateCleanup(run, reservation, pendingErr == nil)
-			if pendingErr != nil {
-				log.Printf("WARN: create_cleanup run=%q persistence_deferred=true", run.ID)
-			}
+			scheduler.deferCreateCleanup(ctx, run, jobName, reservation)
 			return nil // The reconciler owns this grant, not the dispatcher.
 		}
 		if _, ok := scheduler.jobs.(JobAdopter); ok && workflowRunAdoptable(run) && ctx.Err() != nil {
@@ -1018,6 +1019,12 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 			return logFile.Close()
 		}
 		_ = logFile.Close()
+		// Definite rejection/foreign-name refusal never goes through Delete.
+		// Native uncertain POSTs were registered above with the shared settler.
+		var before interface{ BeforeWorkflowCreate() bool }
+		if requirement.Contract == nil && errors.As(err, &before) && before.BeforeWorkflowCreate() {
+			return scheduler.finishPreCreateInfrastructureFailure(ctx, run, repository, err)
+		}
 		return scheduler.finishInfrastructureFailure(ctx, run, repository, fmt.Errorf("create Job: %w", err))
 	}
 	reservation.markSubmitted()
@@ -1032,6 +1039,10 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 		deleteErr := scheduler.jobs.Delete(cleanupCtx, jobName, run.ID)
 		cancelCleanup()
 		if deleteErr != nil {
+			if _, ok := scheduler.jobs.(JobCreateSettler); ok {
+				scheduler.deferCreateCleanup(ctx, run, jobName, reservation)
+				return nil
+			}
 			// Keep the run active with its durable Job name. Returning the error
 			// stops this owner; startup recovery will then create and retry the
 			// exact cancellation instead of terminalizing an orphaned Job. The
@@ -1220,7 +1231,7 @@ func (scheduler *Scheduler) observeRun(ctx context.Context, run model.Run, repos
 				return fmt.Errorf("delete Workflow %s before terminalizing failed run %s: %w",
 					jobName, run.ID, deleteErr)
 			}
-			jobResult = JobResult{Status: model.RunFailed, Phase: failurePhase, Error: waitErr.Error()}
+			jobResult = JobResult{Status: model.RunFailed, Phase: failurePhase, Error: waitErr.Error(), Steps: jobResult.Steps, ObservedStepStart: jobResult.ObservedStepStart, TerminalObservation: jobResult.TerminalObservation}
 		}
 	}
 	// The Workflow is now terminal or its deletion has been accepted, so its
@@ -1277,7 +1288,7 @@ func (scheduler *Scheduler) observeRun(ctx context.Context, run model.Run, repos
 			failureTail = string(tail)
 		}
 	}
-	_, err := scheduler.database().FinishRun(finalizeCtx, run.ID, model.RunResult{
+	finished, err := scheduler.database().FinishRun(finalizeCtx, run.ID, model.RunResult{
 		TerminalObservation: jobResult.TerminalObservation, Status: jobResult.Status, Phase: jobResult.Phase, TestedSHA: checkoutSHA, BaseSHA: jobResult.BaseSHA,
 		FailedBurn: jobResult.FailedBurn, FailedStep: jobResult.FailedStep, Error: jobResult.Error,
 		FailureTail: failureTail,
@@ -1290,6 +1301,10 @@ func (scheduler *Scheduler) observeRun(ctx context.Context, run model.Run, repos
 	}
 	if err != nil {
 		return fmt.Errorf("finish run %s: %w", run.ID, err)
+	}
+	if finished.AutoRetriedBy != "" {
+		scheduler.signals.NotifyRun(finished.AutoRetriedBy)
+		scheduler.signalQueue()
 	}
 	if promotion.ID != "" {
 		scheduler.signals.NotifyPromotion(promotion.ID)
@@ -1579,15 +1594,30 @@ func (scheduler *Scheduler) finishPublication(_ context.Context, _ model.Reposit
 	return nil
 }
 
-func (scheduler *Scheduler) finishInfrastructureFailure(ctx context.Context, run model.Run, _ model.Repository, failure error) error {
+func (scheduler *Scheduler) finishInfrastructureFailure(ctx context.Context, run model.Run, repository model.Repository, failure error) error {
+	return scheduler.finishInfrastructureFailureWithRetry(ctx, run, repository, failure, false)
+}
+
+// Only call before any Workflow POST or with the engine's positive pre-POST
+// proof. Submitted/reconciled/uncertain-create paths use the default helper.
+func (scheduler *Scheduler) finishPreCreateInfrastructureFailure(ctx context.Context, run model.Run, repository model.Repository, failure error) error {
+	return scheduler.finishInfrastructureFailureWithRetry(ctx, run, repository, failure, retryablePreCreateCause(failure))
+}
+
+func (scheduler *Scheduler) finishInfrastructureFailureWithRetry(ctx context.Context, run model.Run, _ model.Repository, failure error, allow bool) error {
 	defer forgetActiveLogIndex(scheduler.logs, run.ID)
-	_, err := scheduler.database().FinishRun(ctx, run.ID, model.RunResult{Status: model.RunFailed, Phase: "infrastructure", Error: failure.Error()})
+	result := JobResult{Status: model.RunFailed, Phase: "infrastructure", Error: failure.Error()}
+	finished, err := scheduler.database().FinishRun(ctx, run.ID, model.RunResult{AutoRetryPreStep: allow && scheduler.preStepAutoRetry(run, result), Status: model.RunFailed, Phase: "infrastructure", Error: failure.Error()})
 	if errors.Is(err, store.ErrInvalidState) {
 		scheduler.signals.NotifyRun(run.ID)
 		return nil
 	}
 	if err != nil {
 		return errors.Join(failure, err)
+	}
+	if finished.AutoRetriedBy != "" {
+		scheduler.signals.NotifyRun(finished.AutoRetriedBy)
+		scheduler.signalQueue()
 	}
 	if run.Trigger == "promotion" {
 		promotion, promotionErr := scheduler.database().PromotionByRun(ctx, run.ID)
