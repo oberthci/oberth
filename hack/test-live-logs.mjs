@@ -238,3 +238,9 @@ assert.equal(run(`capacityStatusCard({})`), '');
 const capacityCard = run(`capacityStatusCard({used:8,capacity:4,configuration:{max_concurrent_jobs:2,source:'file',file:'/etc/capacity',error:'invalid <override>'}})`);
 for (const text of ['2 M jobs', '8/4 weight used', 'source file', 'keeping last good value', 'invalid &lt;override&gt;']) assert.ok(capacityCard.includes(text), text);
 assert.ok(!capacityCard.includes('invalid <override>'));
+
+// The shared regression ships in both topic bundles and runs once both UI
+// features are present in the assembled tree.
+if (run(`typeof capacityStatusCard === 'function' && typeof controllerProfileStatusCard === 'function'`)) {
+  await import('./test-runtime-controller-combined.mjs');
+}

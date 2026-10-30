@@ -70,6 +70,13 @@ func (scheduler *Scheduler) concurrentJobs() int {
 	gate := scheduler.admission
 	gate.mu.Lock()
 	defer gate.mu.Unlock()
+	return scheduler.concurrentJobsLocked()
+}
+
+// concurrentJobsLocked shares the effective-limit policy when a caller needs
+// one coherent snapshot with other admission fields. Caller holds admission.mu.
+func (scheduler *Scheduler) concurrentJobsLocked() int {
+	gate := scheduler.admission
 	if gate.capacityConfig.Source == "file" && gate.capacityConfig.MaxConcurrentJobs > 0 {
 		return gate.capacityConfig.MaxConcurrentJobs
 	}

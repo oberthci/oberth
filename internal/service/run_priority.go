@@ -203,14 +203,12 @@ func (scheduler *Scheduler) priorityDispatchAvailable(ctx context.Context, activ
 	}
 	// Normal dispatch can already reach the weight budget plus parked claims.
 	// Priority adds only the two non-normal classes.
-	if active >= scheduler.admission.capacity+scheduler.maxConcurrent+2 {
-		return false, nil
-	}
 	gate := scheduler.admission
 	gate.mu.Lock()
+	ceiling := gate.capacity + scheduler.concurrentJobsLocked() + 2
 	hasWaiters := len(gate.waiters) > 0
 	gate.mu.Unlock()
-	if !hasWaiters {
+	if active >= ceiling || !hasWaiters {
 		return false, nil
 	}
 	next, err := retryDatabase(ctx, "NextQueuedRun", reader.NextQueuedRun)

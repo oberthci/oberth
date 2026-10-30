@@ -10,7 +10,9 @@ their historical oversized-weight clamp and warning.
 
 The chart enables `admission.runtimeCapacity.enabled` by default. It creates
 `<release-fullname>-admission` with key `max-concurrent-jobs` and mounts its
-whole directory read-only, without `subPath` or a rollout checksum. Initial data
+whole directory read-only and optional, without `subPath` or a rollout checksum.
+A missing ConfigMap cannot prevent the server Pod from starting; on that restart
+the boot flag is the initial last-good value. Initial data
 comes from `maxConcurrentJobs`, unless
 `admission.runtimeCapacity.maxConcurrentJobs` overrides it. An administrator can
 edit this ConfigMap directly while the server is running; allow for Kubernetes'

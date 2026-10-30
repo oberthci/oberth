@@ -81,7 +81,7 @@ func TestRuntimeCapacityChartProjectedDirectoryAndOverrides(t *testing.T) {
 			for _, v := range deployment.Spec.Template.Spec.Volumes {
 				if v.Name == "runtime-capacity" {
 					volume = true
-					if v.ConfigMap == nil || v.ConfigMap.Name != config.Name {
+					if v.ConfigMap == nil || v.ConfigMap.Name != config.Name || v.ConfigMap.Optional == nil || !*v.ConfigMap.Optional {
 						t.Fatal("wrong ConfigMap reference", v)
 					}
 				}

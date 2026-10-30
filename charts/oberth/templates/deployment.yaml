@@ -512,6 +512,7 @@ spec:
         - name: runtime-capacity
           configMap:
             name: {{ include "oberth.fullname" . }}-admission
+            optional: true
         {{- end }}
         {{- if $trustedTests.recipes }}
         - name: trusted-test-recipes
