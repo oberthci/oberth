@@ -53,17 +53,43 @@ Behavior changes in this release:
   other startup/finalization/read paths do not replay it. This is not a universal
   startup or read-time journal recovery pass.
 
-Upgrading from v0.17.72 applies migration **35** (`runs_latest_ref_idx`). Take
-and independently verify a fresh pre-upgrade **schema-34** backup immediately
+Actual tuxbox upgrades start from **v0.17.67/schema33**. They apply migration
+**34** (queue_priority_patterns and run_priority_overrides) plus **35**
+(runs_latest_ref_idx), with ledger entries, and include the v0.17.68–72
+behavior changes. Use the [from-67 pin preparation](v073-from67-pins.md),
+[from-67 upgrade/restore procedure](v073-from67-upgrade-runbook.md) and
+[cumulative change digest/first-hours watch](v073-from67-watch.md), including
+reserved readers/auth partitions, bounded log cursors and running index,
+last-used throttling, safe tag reruns, priority aging/size-grant effects,
+less backfill, compact issue acknowledgments and resource-delete/RBAC changes.
+Drain **all** KubeVirt/resource-delete runs before upgrade; old submitted
+workflows can fail across it even without cleanup-verdict.
+
+For this direct upgrade, /livez is new: >5 min without monitored local progress
+can trigger restart around 7–8+ min total. Match chart/image and keep it enabled.
+PSI has no startup grace: an eligible admission can hold immediately at IO full
+avg60 >=30%, resuming below 20%. The reported host full≈15.5% does not trip it;
+IO some≈35.7% is a different signal. Proposed first-hours settings preserve
+capacity 4/default PSI; confirm the chosen overrides in reviewed live values.
+
+**Known limitation:** an adopted run whose Pod was GC’d and whose real init
+failure is no longer observable may show interrupted. Visible nonzero init
+failures remain failed. The new 180s retention floor applies to new Workflows
+only. Retain the journal-replay/init-readonly limitations listed above.
+
+For installations actually on v0.17.72/schema34, upgrading applies migration
+**35** (`runs_latest_ref_idx`). Take and independently verify a fresh pre-upgrade **schema-34** backup immediately
 before upgrade, retain it off-volume with its restore key, old values and old
 chart/image/CLI pins, and drain KubeVirt/resource-delete runs first. Binary
 `version --schema` reports support; the verified backup establishes actual DB
 schema and audit head.
 
-**Rollback is database restore only.** v0.17.72 refuses schema 35; Helm rollback
-alone cannot recover it. Index/ledger edits are unsupported. `oberth restore`
+**Rollback is database restore only.** v0.17.67 refuses schemas 34/35, and
+v0.17.72 refuses schema 35; Helm rollback alone cannot recover either. Index/ledger edits are unsupported.
+`oberth restore`
 alone does not downgrade the binary and the new binary migrates a restored old
-DB back to 35. Follow the [named old-chart/old-CLI emergency procedure](v073-upgrade-runbook.md):
+DB back to 35. For tuxbox follow the [from-67 old-chart/old-CLI emergency procedure](v073-from67-upgrade-runbook.md)
+(the [from-72 variant](v073-upgrade-runbook.md) is only for actual schema34):
 stop writers, stage a maintenance copy of the old chart at zero replicas, use
 the old CLI's `restore --only history` dry-run then confirmed restore, verify
 old-version readiness/schema and re-apply the normal old chart. The old chart
@@ -87,6 +113,13 @@ The earlier [local qualification](schema35-rollback-qualification.md) exercises 
 encrypted CLI backup/inspect/dry-run/history restore, Helm staging, old-server
 readiness, schema 34 -> 35 -> 34, nonempty audit-prefix preservation and actual
 orphan Workflow deletion. It uses disposable identities/storage and no external
-Rekor. It is not production witness/storage authorization or qualification of an
+Rekor. It is not production witness/storage authorization or qualification of a
 published/signed release image. The final assembly handoff also records its
 exact-head rehearsal separately, with complete logs and JSON.
+
+The [from-67 qualification](v073-from67-qualification.md) separately exercises the actual published/signed
+v0.17.67 CLI and image (source 5e567d5c1f60), a manually stamped Git-tag chart,
+and exact 863a88eb new artifacts, for **33 → 35 → 33**. It validates both new
+migrations and unchanged rollback prefix, without SQL schema/ledger edits.
+The candidate image is a local exact-head build, not a published/signed 73 image;
+production identities, external witness policy and real-host IO are not covered.

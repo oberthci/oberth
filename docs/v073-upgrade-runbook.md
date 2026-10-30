@@ -1,5 +1,10 @@
 # v0.17.73: schema-35 upgrade and emergency history restore
 
+For tuxbox's actual v0.17.67/schema33 baseline, use the
+[from-67 runbook](v073-from67-upgrade-runbook.md), including verified v0.17.67
+CLI/chart pins and schema33 asserts. The v0.17.62 operator CLI is not valid.
+This original 72-to-73 procedure remains for genuine schema34 installations.
+
 Use the coordinator's final candidate pins. This procedure does not deploy a
 candidate or authorize changing a production installation. Rehearsal evidence
 and its limits are in [schema-35 qualification](schema35-rollback-qualification.md).
