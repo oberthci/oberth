@@ -1,13 +1,12 @@
 package argojob
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"time"
 
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
@@ -98,7 +97,10 @@ func (controller *Controller) deliverExecutorTokens(ctx context.Context, wf *wfv
 	}
 	pods, err := controller.kube.CoreV1().Pods(wf.Namespace).List(ctx, metav1.ListOptions{LabelSelector: "workflows.argoproj.io/workflow=" + wf.Name})
 	if err != nil {
-		return err
+		if ctx.Err() == nil && retryExecutorIdentityRead(err) {
+			return nil
+		}
+		return identityFailure("pod_list", err)
 	}
 	for i := range pods.Items {
 		pod := &pods.Items[i]
@@ -133,7 +135,7 @@ func (controller *Controller) deliverExecutorTokens(ctx context.Context, wf *wfv
 		}
 		launcher := resourcePodTemplate(wf, pod, controller.config.VMLauncherServiceAccount)
 		if err := validateExecutorTokenTarget(pod, controller.config.SourceSeedImage, launcher); err != nil {
-			return err
+			return identityFailure("target_validation", err)
 		}
 		serviceAccount := controller.config.ExecutorServiceAccount
 		if launcher {
@@ -141,7 +143,7 @@ func (controller *Controller) deliverExecutorTokens(ctx context.Context, wf *wfv
 				if errors.Is(err, errResourceDeletePending) {
 					continue
 				}
-				return err
+				return identityFailure("launcher_provision", err)
 			}
 			serviceAccount = controller.config.VMLauncherServiceAccount
 		}
@@ -156,34 +158,39 @@ func (controller *Controller) deliverExecutorTokens(ctx context.Context, wf *wfv
 		}
 		holder, err := controller.executorIdentityPod(ctx, wf, serviceAccount)
 		if err != nil {
-			return err
-		}
-		token, err := controller.kube.CoreV1().ServiceAccounts(wf.Namespace).CreateToken(ctx, serviceAccount, &authenticationv1.TokenRequest{Spec: authenticationv1.TokenRequestSpec{ExpirationSeconds: &seconds, BoundObjectRef: &authenticationv1.BoundObjectReference{Kind: "Pod", APIVersion: "v1", Name: holder.Name, UID: holder.UID}}}, metav1.CreateOptions{})
-		if err != nil {
-			return fmt.Errorf("request executor identity: %w", err)
-		}
-		if token.Status.ExpirationTimestamp.Time.Before(time.Now().Add(time.Duration(seconds-60) * time.Second)) {
-			return errors.New("executor token lifetime is shorter than the workflow deadline")
-		}
-		if token.Status.Token == "" {
-			return errors.New("empty executor token response")
+			if ctx.Err() == nil && retryExecutorIdentityRead(err) {
+				continue
+			}
+			return identityFailure("identity_pod", err)
 		}
 		ca, err := controller.kube.CoreV1().ConfigMaps(wf.Namespace).Get(ctx, "kube-root-ca.crt", metav1.GetOptions{})
 		if err != nil {
-			return err
+			if ctx.Err() == nil && retryExecutorIdentityRead(err) {
+				continue
+			}
+			return identityFailure("trust_anchor", err)
 		}
 		if ca.Data["ca.crt"] == "" {
-			return errors.New("executor API trust anchor is empty")
+			return identityFailure("trust_anchor_response", errors.New("executor API trust anchor is empty"))
 		}
-		payload := []byte(token.Status.Token + "\n" + wf.Namespace + "\n" + ca.Data["ca.crt"])
-		// The marker is renamed last, after the public metadata is complete.
-		command := []string{"sh", "-c", `umask 077; cd /var/run/secrets/kubernetes.io/serviceaccount || exit 1; IFS= read -r token; IFS= read -r namespace; cat > ca.crt; printf '%s' "$namespace" > namespace; printf '%s' "$token" > .token; chmod 0444 ca.crt namespace .token; mv .token token`}
-		deliveryCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
-		err = controller.seeder.exec(deliveryCtx, wf.Namespace, pod.Name, executorTokenWaiter, command, bytes.NewReader(payload), io.Discard, io.Discard)
-		cancel()
-		clear(payload)
+		token, err := controller.requestExecutorIdentity(ctx, wf.Namespace, serviceAccount, &authenticationv1.TokenRequest{Spec: authenticationv1.TokenRequestSpec{ExpirationSeconds: &seconds, BoundObjectRef: &authenticationv1.BoundObjectReference{Kind: "Pod", APIVersion: "v1", Name: holder.Name, UID: holder.UID}}})
 		if err != nil {
-			return errors.New("deliver executor identity failed")
+			return identityFailure("token_request", err)
+		}
+		if token.Status.ExpirationTimestamp.Time.Before(time.Now().Add(time.Duration(seconds-60) * time.Second)) {
+			return identityFailure("token_response", errors.New("executor token lifetime is shorter than the workflow deadline"))
+		}
+		if token.Status.Token == "" {
+			return identityFailure("token_response", errors.New("empty executor token response"))
+		}
+		payload := []byte(token.Status.Token + "\n" + wf.Namespace + "\n" + base64.StdEncoding.EncodeToString([]byte(ca.Data["ca.crt"])) + "\n")
+		err = controller.execExecutorIdentity(ctx, wf, pod, launcher, payload)
+		clear(payload)
+		if errors.Is(err, errExecutorIdentityTargetGone) {
+			continue
+		}
+		if err != nil {
+			return err
 		}
 		delivered[pod.UID] = true
 	}
@@ -335,4 +342,26 @@ func (controller *Controller) retireIdentityPod(ctx context.Context, wf *wfv1.Wo
 		return nil
 	}
 	return err
+}
+
+// TokenRequest gets at most one re-request, only for explicit load/timeouts.
+// Both calls and their backoff share a single 20-second per-Pod deadline.
+func (controller *Controller) requestExecutorIdentity(ctx context.Context, namespace, account string, request *authenticationv1.TokenRequest) (*authenticationv1.TokenRequest, error) {
+	requestCtx, cancel := context.WithTimeout(ctx, executorIdentityAttemptTimeout)
+	defer cancel()
+	for attempt := 1; ; attempt++ {
+		token, err := controller.kube.CoreV1().ServiceAccounts(namespace).CreateToken(requestCtx, account, request, metav1.CreateOptions{})
+		var network interface{ Timeout() bool }
+		transient := apierrors.IsTooManyRequests(err) || apierrors.IsServiceUnavailable(err) || apierrors.IsTimeout(err) || apierrors.IsServerTimeout(err) || errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &network) && network.Timeout())
+		if err == nil || attempt == 2 || !transient || requestCtx.Err() != nil {
+			return token, err
+		}
+		timer := time.NewTimer(executorIdentityBackoff(1))
+		select {
+		case <-requestCtx.Done():
+			timer.Stop()
+			return nil, requestCtx.Err()
+		case <-timer.C:
+		}
+	}
 }

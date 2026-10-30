@@ -349,8 +349,13 @@ func TestVMICreateBrokerRefusesBeforeAnyTokenIsIssued(t *testing.T) {
 		deliveries++
 		return nil
 	}}
-	if err := c.deliverExecutorTokens(t.Context(), wf, map[types.UID]bool{}); err == nil || !strings.Contains(err.Error(), "over grant") {
-		t.Fatalf("over-grant Pod got through broker: %v", err)
+	failure := c.deliverExecutorTokens(t.Context(), wf, map[types.UID]bool{})
+	if failure == nil || !strings.Contains(failure.Error(), "over grant") {
+		t.Fatalf("over-grant Pod got through broker: %v", failure)
+	}
+	var classified interface{ InfrastructureFailure() bool }
+	if !errors.As(failure, &classified) || classified.InfrastructureFailure() {
+		t.Fatalf("quota refusal was labelled infrastructure: %v", failure)
 	}
 	if requests != 0 || deliveries != 0 {
 		t.Fatalf("over-grant VMI received a token: requests=%d deliveries=%d", requests, deliveries)

@@ -1087,6 +1087,10 @@ func (scheduler *Scheduler) observeRun(ctx context.Context, run model.Run, repos
 		waitErr = indexErr
 	}
 	failurePhase := "job"
+	var infrastructure InfrastructureError
+	if errors.As(waitErr, &infrastructure) && infrastructure.InfrastructureFailure() {
+		failurePhase = "infrastructure"
+	}
 	if observation.adopted && waitErr != nil {
 		// Cancel and supersede delete the Workflow under the adopted Wait;
 		// their durable obligation, not this observation error, settles it.
@@ -1101,7 +1105,9 @@ func (scheduler *Scheduler) observeRun(ctx context.Context, run model.Run, repos
 		// Otherwise it settles exactly like a submitted run: a terminal
 		// Workflow keeps its real result, and one that can no longer be
 		// observed is deleted and fails only this run, never the scheduler.
-		failurePhase = "infrastructure"
+		if infrastructure == nil || infrastructure.InfrastructureFailure() {
+			failurePhase = "infrastructure"
+		}
 		waitErr = fmt.Errorf("observe adopted Workflow %s: %w", jobName, waitErr)
 	}
 	if waitErr != nil {
