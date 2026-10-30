@@ -53,7 +53,7 @@ oberth promotion retry <promotion-id> [--json]
 oberth runs cancel --repo NAME --ref BRANCH [--reason TEXT] [--force] [--json]
 oberth admission [--json]
 oberth admission release <run-id> [--force] [--json]
-oberth log <run-id> --burn B --step S [--pattern P] [--context N] [--offset N] [--limit N] [--tail]
+oberth log <run-id> --burn B --step S [--pattern P] [--context N] [--offset N] [--limit N] [--tail] [--byte-offset N]
 oberth artifacts <run-id> [name]
 oberth repos
 oberth issues
@@ -147,13 +147,46 @@ Publishing stays in the dashboard and MCP.
 `--json` on any of them emits the server's own payload unchanged, so a script
 never parses a rendered table.
 
-`oberth log` accepts the same five filters as the `logs` MCP tool and prints the
+`oberth log` accepts the same filters as the `logs` MCP tool and prints the
 same counts, on stderr. A step log can exceed a context window, so prefer a
 pattern over retrieving the whole thing:
 
 ```
 oberth log run-abc --burn ci --step test --pattern 'FAIL|Error' --context 3
 ```
+
+Log reads have bounded work: at most 4 MiB of retained-file discovery for an
+active run, then at most 4 MiB of filtering (including tail lookback retries).
+Head reads stop when the returned-line limit is met; regexes never scan the
+whole step solely to count matches. Individual records above 64 KiB are omitted
+and counted as `omitted_long_lines`. Output remains capped at 4 MiB.
+
+Structured HTTP/MCP responses report `scan_complete`, `bytes_exact`,
+`scanned_bytes`, `discovery_bytes`, `withheld_lines`, `withheld_bytes`,
+`has_more` and `next_byte_offset`. Line/match/withheld-line counts are lower
+bounds unless `scan_complete` is true; byte/withheld-byte counts are lower
+bounds unless `bytes_exact` is true. Counts describe this call, not cumulative
+paging totals. A zero-match incomplete page does not prove absence.
+
+When `has_more` is true, pass `next_byte_offset` as `byte_offset` (CLI:
+`--byte-offset`), keep the same `tail`, `pattern` and `context`, and reset
+`offset` to zero. The cursor is an absolute retained run-file byte position;
+head pages move forward and tail pages backward. `offset` still skips lines or
+matches inside the scanned window. Context is local to each page; it can be
+clipped at page boundaries. Logs can grow while active, so these are not
+snapshot cursors. `oberth log` and `oberth mcp call ... run_logs` print the
+completeness/count/cursor summary on stderr; MCP text content remains the exact
+raw slice and structuredContent carries the metadata.
+
+Run/log tool reads have a 10s server budget including scope and DB-pool waits;
+optional live scheduling observation has its existing 2s sub-budget. Bearer
+authentication has a separate 5s budget, including the authoritative token
+last-used update. Auth contention fails closed with retryable HTTP 503 rather
+than claiming a valid credential is invalid. CPU scheduling or a stuck kernel
+file read can still delay wall-clock return; cancellation is checked between
+bounded reads. `run_get` does not fetch pod logs; use `summary:true` when timing
+and repository details are unnecessary. This does not change artifact reads or
+live log streaming.
 
 The `[burn/step] ` prefix is stripped from each line, since the step is already
 named in the command. Argo executor lifecycle lines (`time=… level=INFO …

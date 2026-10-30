@@ -266,7 +266,21 @@ func (service *API) Shutdown(ctx context.Context) error {
 	}
 }
 
-func (service *API) CallTool(ctx context.Context, actor api.Actor, name string, raw json.RawMessage) (any, error) {
+func (service *API) CallTool(ctx context.Context, actor api.Actor, name string, raw json.RawMessage) (value any, resultErr error) {
+	if name == "run_get" || name == "run_logs" || name == "logs" {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, runReadBudget)
+		defer func() {
+			if resultErr == nil {
+				resultErr = ctx.Err()
+			}
+			resultErr = boundedRunReadError(resultErr)
+			if resultErr != nil {
+				value = nil
+			}
+			cancel()
+		}()
+	}
 	if strings.TrimSpace(actor.Identity) == "" {
 		return nil, errors.New("service: acting uplink identity is required")
 	}
@@ -286,7 +300,7 @@ func (service *API) CallTool(ctx context.Context, actor api.Actor, name string, 
 	if err != nil {
 		return nil, err
 	}
-	value, err := service.callTool(ctx, actor, name, raw)
+	value, err = service.callTool(ctx, actor, name, raw)
 	return service.redact(value), err
 }
 
@@ -355,14 +369,15 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 		return service.status(ctx, arguments.Repo, arguments.Ref, actor.Identity)
 	case "logs":
 		var arguments struct {
-			Repo    string `json:"repo"`
-			SHA     string `json:"sha"`
-			Step    string `json:"step"`
-			Pattern string `json:"pattern"`
-			Context int    `json:"context"`
-			Offset  int    `json:"offset"`
-			Limit   int    `json:"limit"`
-			Tail    bool   `json:"tail"`
+			Repo       string `json:"repo"`
+			SHA        string `json:"sha"`
+			Step       string `json:"step"`
+			Pattern    string `json:"pattern"`
+			Context    int    `json:"context"`
+			Offset     int    `json:"offset"`
+			Limit      int    `json:"limit"`
+			Tail       bool   `json:"tail"`
+			ByteOffset *int64 `json:"byte_offset"`
 		}
 		if err := decodeTool(raw, &arguments); err != nil {
 			return nil, err
@@ -371,6 +386,10 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 		if err != nil {
 			return nil, err
 		}
+		if arguments.ByteOffset != nil && *arguments.ByteOffset < 0 {
+			return nil, fmt.Errorf("%w: byte_offset must be nonnegative", ErrInvalidInput)
+		}
+		filter.ByteOffset = arguments.ByteOffset
 		return service.logsFor(ctx, arguments.Repo, arguments.SHA, arguments.Step, filter)
 	case "run_kvm_preflight":
 		var arguments struct {
@@ -445,14 +464,15 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 		return value, err
 	case "run_logs":
 		var arguments struct {
-			ID      string `json:"id"`
-			Burn    string `json:"burn"`
-			Step    string `json:"step"`
-			Pattern string `json:"pattern"`
-			Context int    `json:"context"`
-			Offset  int    `json:"offset"`
-			Limit   int    `json:"limit"`
-			Tail    bool   `json:"tail"`
+			ID         string `json:"id"`
+			Burn       string `json:"burn"`
+			Step       string `json:"step"`
+			Pattern    string `json:"pattern"`
+			Context    int    `json:"context"`
+			Offset     int    `json:"offset"`
+			Limit      int    `json:"limit"`
+			Tail       bool   `json:"tail"`
+			ByteOffset *int64 `json:"byte_offset"`
 		}
 		if err := decodeTool(raw, &arguments); err != nil {
 			return nil, err
@@ -464,6 +484,10 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 		if err != nil {
 			return nil, err
 		}
+		if arguments.ByteOffset != nil && *arguments.ByteOffset < 0 {
+			return nil, fmt.Errorf("%w: byte_offset must be nonnegative", ErrInvalidInput)
+		}
+		filter.ByteOffset = arguments.ByteOffset
 		return service.RunLogFiltered(ctx, actor, arguments.ID, arguments.Burn, arguments.Step, filter)
 	case "artifacts":
 		var arguments struct {
@@ -995,7 +1019,20 @@ func (service *API) Run(ctx context.Context, actor api.Actor, id string) (any, e
 	return service.readRun(ctx, actor, id, false)
 }
 
-func (service *API) readRun(ctx context.Context, actor api.Actor, id string, summary bool) (any, error) {
+func (service *API) readRun(ctx context.Context, actor api.Actor, id string, summary bool) (value any, resultErr error) {
+	var cancel context.CancelFunc
+	ctx, cancel = context.WithTimeout(ctx, runReadBudget)
+	defer func() {
+		if resultErr == nil {
+			resultErr = ctx.Err()
+		}
+		resultErr = boundedRunReadError(resultErr)
+		if resultErr != nil {
+			value = nil
+		}
+		cancel()
+	}()
+
 	service, err := service.forActor(ctx, actor)
 	if err != nil {
 		return nil, err
@@ -1055,7 +1092,20 @@ func (service *API) RunLog(ctx context.Context, actor api.Actor, id, burn, step 
 	return service.RunLogFiltered(ctx, actor, id, burn, step, runlog.Filter{})
 }
 
-func (service *API) RunLogFiltered(ctx context.Context, actor api.Actor, id, burn, step string, filter runlog.Filter) (any, error) {
+func (service *API) RunLogFiltered(ctx context.Context, actor api.Actor, id, burn, step string, filter runlog.Filter) (value any, resultErr error) {
+	var cancel context.CancelFunc
+	ctx, cancel = context.WithTimeout(ctx, runReadBudget)
+	defer func() {
+		if resultErr == nil {
+			resultErr = ctx.Err()
+		}
+		resultErr = boundedRunReadError(resultErr)
+		if resultErr != nil {
+			value = nil
+		}
+		cancel()
+	}()
+
 	service, err := service.forActor(ctx, actor)
 	if err != nil {
 		return nil, err
@@ -1879,10 +1929,14 @@ func newLogResponse(runID, burn, step string, body []byte, meta runlog.Meta) Log
 		RunID: runID, Burn: burn, Step: step, Output: string(body),
 		TotalLines: meta.TotalLines, MatchedLines: meta.MatchedLines,
 		ReturnedLines: meta.ReturnedLines, Truncated: meta.Truncated, Bytes: meta.Bytes,
+		ScanComplete: meta.ScanComplete, BytesExact: meta.BytesExact, ScannedBytes: meta.ScannedBytes, DiscoveryBytes: meta.DiscoveryBytes,
+		WithheldBytes: meta.WithheldBytes, WithheldLines: meta.WithheldLines, OmittedLongLines: meta.OmittedLongLines,
+		HasMore: meta.HasMore, NextByteOffset: meta.NextByteOffset,
 	}
 }
 
 func (service *API) readStepLogFiltered(ctx context.Context, run model.Run, burn, step string, filter runlog.Filter) ([]byte, runlog.Meta, error) {
+	filter = filter.WithContext(ctx)
 	if err := service.purgedEvidence(ctx, run, "logs"); err != nil {
 		return nil, runlog.Meta{}, err
 	}

@@ -604,3 +604,18 @@ func TestRunsAllCountsDatedRowsAndPrintsDisplayReason(t *testing.T) {
 		t.Fatalf("cursors=%v output=%s", befores, out.String())
 	}
 }
+
+func TestLogSummaryReportsIncompleteCountsAndContinuation(t *testing.T) {
+	exact, incomplete := true, false
+	log := remoteLog{ReturnedLines: 2, TotalLines: 10, MatchedLines: 3, Bytes: 1000,
+		ScanComplete: &incomplete, BytesExact: &exact, HasMore: true, NextByteOffset: 500, WithheldLines: 8, WithheldBytes: 900}
+	text := log.readSummary()
+	for _, want := range []string{"at least 10 lines", "at least 3 matched", "1000 bytes", "withheld at least 8 lines / 900 bytes", "byte_offset=500", "offset=0"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("missing %q in %s", want, text)
+		}
+	}
+	if strings.Contains((remoteLog{TotalLines: 3}).readSummary(), "at least") {
+		t.Fatal("old server counts changed meaning")
+	}
+}

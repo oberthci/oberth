@@ -3,6 +3,7 @@ package runlog
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,7 +11,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -49,15 +49,41 @@ type Filter struct {
 	Offset  int
 	Limit   int
 	Tail    bool
+	// ByteOffset is an absolute offset in the retained run log, returned by
+	// NextByteOffset. Head reads continue forward; tail reads continue backward.
+	ByteOffset  *int64
+	readContext context.Context
+}
+
+func (filter Filter) WithContext(ctx context.Context) Filter {
+	filter.readContext = ctx
+	return filter
+}
+
+func (filter Filter) ctx() context.Context {
+	if filter.readContext != nil {
+		return filter.readContext
+	}
+	return context.Background()
 }
 
 type Meta struct {
-	TotalLines    int   `json:"total_lines"`
-	MatchedLines  int   `json:"matched_lines"`
-	ReturnedLines int   `json:"returned_lines"`
-	Truncated     bool  `json:"truncated"`
-	Bytes         int64 `json:"bytes"`
-	LineNumbers   []int `json:"line_numbers,omitempty"`
+	TotalLines       int     `json:"total_lines"`
+	MatchedLines     int     `json:"matched_lines"`
+	ReturnedLines    int     `json:"returned_lines"`
+	Truncated        bool    `json:"truncated"`
+	Bytes            int64   `json:"bytes"`
+	LineNumbers      []int   `json:"line_numbers,omitempty"`
+	LineOffsets      []int64 `json:"line_offsets,omitempty"`
+	ScanComplete     bool    `json:"scan_complete"`
+	BytesExact       bool    `json:"bytes_exact"`
+	ScannedBytes     int64   `json:"scanned_bytes"`
+	DiscoveryBytes   int64   `json:"discovery_bytes"`
+	WithheldBytes    int64   `json:"withheld_bytes"`
+	WithheldLines    int     `json:"withheld_lines"`
+	OmittedLongLines int     `json:"omitted_long_lines"`
+	HasMore          bool    `json:"has_more"`
+	NextByteOffset   int64   `json:"next_byte_offset"`
 }
 
 type Store struct {
@@ -145,7 +171,7 @@ func (store *Store) Read(runID, burn, step string) ([]byte, error) {
 }
 
 func (store *Store) ReadFiltered(runID, burn, step string, filter Filter) ([]byte, Meta, error) {
-	index, err := store.loadIndex(runID)
+	index, err := store.loadIndexContext(filter.ctx(), runID)
 	if err != nil {
 		return nil, Meta{}, err
 	}
@@ -179,99 +205,12 @@ func (store *Store) ReadFiltered(runID, burn, step string, filter Filter) ([]byt
 // growing redacted log. It builds an in-memory snapshot index only; the durable
 // terminal index remains written exclusively by BuildIndex after Job exit.
 func (store *Store) ReadActive(runID, burn, step string) ([]byte, error) {
-	path, err := store.logPath(runID)
-	if err != nil {
-		return nil, err
-	}
-	// logPath validated the run ID and confined this path to the log root.
-	file, err := os.Open(path) //nolint:gosec
-	if err != nil {
-		return nil, fmt.Errorf("open active run log: %w", err)
-	}
-	defer func() { _ = file.Close() }()
-	index, err := indexReader(runID, file)
-	if err != nil {
-		return nil, fmt.Errorf("index active run log: %w", err)
-	}
-	ranges := make([]Range, 0)
-	for _, candidate := range index.Ranges {
-		if candidate.Burn == burn && candidate.Step == step {
-			ranges = append(ranges, candidate)
-		}
-	}
-	if len(ranges) == 0 {
-		return nil, fmt.Errorf("active log slice %s/%s: %w", burn, step, os.ErrNotExist)
-	}
-	return readRangeTail(file, ranges, maxReadBytes)
+	body, _, err := store.ReadActiveFiltered(runID, burn, step, Filter{Tail: true})
+	return body, err
 }
 
 func (store *Store) ReadActiveFiltered(runID, burn, step string, filter Filter) ([]byte, Meta, error) {
-	path, err := store.logPath(runID)
-	if err != nil {
-		return nil, Meta{}, err
-	}
-	// logPath validated the run ID and confined this path to the log root.
-	file, err := os.Open(path) //nolint:gosec
-	if err != nil {
-		return nil, Meta{}, fmt.Errorf("open active run log: %w", err)
-	}
-	defer func() { _ = file.Close() }()
-	index, err := indexReader(runID, file)
-	if err != nil {
-		return nil, Meta{}, fmt.Errorf("index active run log: %w", err)
-	}
-	ranges := make([]Range, 0)
-	var total int64
-	for _, candidate := range index.Ranges {
-		if candidate.Burn == burn && candidate.Step == step {
-			ranges = append(ranges, candidate)
-			total += candidate.End - candidate.Start
-		}
-	}
-	if len(ranges) == 0 {
-		return nil, Meta{}, fmt.Errorf("active log slice %s/%s: %w", burn, step, os.ErrNotExist)
-	}
-	return filterRanges(file, ranges, total, filter)
-}
-
-func readRangeTail(file *os.File, ranges []Range, maximum int64) ([]byte, error) {
-	selected := make([]Range, 0, len(ranges))
-	remaining := maximum
-	partialFirst := false
-	for index := len(ranges) - 1; index >= 0 && remaining > 0; index-- {
-		candidate := ranges[index]
-		length := candidate.End - candidate.Start
-		if length <= 0 {
-			continue
-		}
-		if length > remaining {
-			candidate.Start = candidate.End - remaining
-			length = remaining
-			partialFirst = true
-		}
-		remaining -= length
-		selected = append(selected, candidate)
-	}
-	slices.Reverse(selected)
-	total := maximum - remaining
-	body := make([]byte, int(total))
-	offset := 0
-	for _, wanted := range selected {
-		if _, err := file.Seek(wanted.Start, io.SeekStart); err != nil {
-			return nil, err
-		}
-		length := int(wanted.End - wanted.Start)
-		if _, err := io.ReadFull(file, body[offset:offset+length]); err != nil {
-			return nil, err
-		}
-		offset += length
-	}
-	if partialFirst {
-		if newline := bytes.IndexByte(body, '\n'); newline >= 0 && newline+1 < len(body) {
-			body = body[newline+1:]
-		}
-	}
-	return body, nil
+	return store.readActiveBounded(runID, burn, step, filter)
 }
 
 // LiveLogSize stats the append-only log without opening or reading its bytes.
@@ -560,8 +499,9 @@ func (store *Store) StepProgress(runID string) ([]runprogress.Event, error) {
 	if err != nil {
 		return nil, err
 	}
-	store.progressMu.RLock()
-	defer store.progressMu.RUnlock()
+	// Writers append one validated record and only repair an unterminated tail.
+	// Readers consume the immutable newline-terminated prefix below, so a
+	// slow append for any run must not hold all run_get requests behind a lock.
 	file, err := os.Open(path) //nolint:gosec
 	if err != nil {
 		return nil, fmt.Errorf("open step progress journal: %w", err)
@@ -655,7 +595,8 @@ func indexReader(runID string, reader io.Reader) (Index, error) {
 	for {
 		lineStart := offset
 		lineLength := 0
-		prefix := make([]byte, 0, maxMarkerBytes)
+		// Allocate for the actual prefix, rather than 64 KiB for every short line.
+		var prefix []byte
 		var readErr error
 		for {
 			fragment, err := buffered.ReadSlice('\n')
@@ -753,7 +694,7 @@ func (store *Store) writeIndex(runID string, index Index) error {
 	return nil
 }
 
-func (store *Store) loadIndex(runID string) (Index, error) {
+func (store *Store) loadIndexContext(ctx context.Context, runID string) (Index, error) {
 	path, err := store.indexPath(runID)
 	if err != nil {
 		return Index{}, err
@@ -765,7 +706,7 @@ func (store *Store) loadIndex(runID string) (Index, error) {
 	}
 	defer func() { _ = file.Close() }()
 	var index Index
-	decoder := json.NewDecoder(io.LimitReader(file, 8<<20))
+	decoder := json.NewDecoder(contextReader{ctx, io.LimitReader(file, 8<<20)})
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&index); err != nil {
 		return Index{}, fmt.Errorf("decode log index: %w", err)
@@ -843,48 +784,9 @@ func compilePattern(pattern string) (*regexp.Regexp, error) {
 }
 
 type numberedLine struct {
-	number int
-	text   string
-}
-
-func filterRanges(file *os.File, ranges []Range, total int64, filter Filter) ([]byte, Meta, error) {
-	meta := Meta{Bytes: total}
-	if filter.Context < 0 || filter.Context > maxContextLines {
-		return nil, Meta{}, fmt.Errorf("%w: context must be between 0 and %d", ErrInvalidPattern, maxContextLines)
-	}
-	pattern, err := compilePattern(filter.Pattern)
-	if err != nil {
-		return nil, Meta{}, err
-	}
-	collector := newCollector(pattern, filter)
-	number := 0
-	for _, wanted := range ranges {
-		if _, err := file.Seek(wanted.Start, io.SeekStart); err != nil {
-			return nil, Meta{}, err
-		}
-		reader := bufio.NewReader(io.LimitReader(file, wanted.End-wanted.Start))
-		for {
-			line, readErr := reader.ReadString('\n')
-			if line != "" {
-				number++
-				meta.TotalLines++
-				collector.offer(numberedLine{number: number, text: line})
-			}
-			if readErr != nil {
-				break
-			}
-		}
-	}
-	collector.close()
-	meta.MatchedLines = collector.matched
-	if pattern == nil {
-		meta.MatchedLines = meta.TotalLines
-	}
-	out, numbers, truncatedByBytes := collector.bytes(maxReadBytes)
-	meta.ReturnedLines = len(numbers)
-	meta.LineNumbers = numbers
-	meta.Truncated = truncatedByBytes || collector.withheld()
-	return out, meta, nil
+	number     int
+	text       string
+	byteOffset int64
 }
 
 type collector struct {
@@ -1145,5 +1047,7 @@ func FilterBytes(raw []byte, filter Filter) ([]byte, Meta, error) {
 	meta.ReturnedLines = len(numbers)
 	meta.LineNumbers = numbers
 	meta.Truncated = truncatedByBytes || collector.withheld()
+	meta.ScanComplete, meta.BytesExact, meta.ScannedBytes = true, true, int64(len(raw))
+	meta.WithheldLines, meta.WithheldBytes = max(0, meta.TotalLines-meta.ReturnedLines), max(int64(0), int64(len(raw))-int64(len(out)))
 	return out, meta, nil
 }

@@ -58,7 +58,7 @@ func stepFailureExcerpt(logs LogStore, runID, burn, step string, budget int64) [
 	if err != nil {
 		return nil
 	}
-	tail := numberedExcerptLines(tailBody, tailMeta.LineNumbers)
+	tail := numberedExcerptLines(tailBody, excerptNumbers(tailMeta))
 	if len(tail) == 0 {
 		return nil
 	}
@@ -66,7 +66,7 @@ func stepFailureExcerpt(logs LogStore, runID, burn, step string, budget int64) [
 	if body, meta, diagnosticErr := logs.ReadFiltered(runID, burn, step, runlog.Filter{
 		Pattern: failureDiagnosticPattern, Tail: true, Limit: excerptDiagnosticLines,
 	}); diagnosticErr == nil {
-		diagnostics = numberedExcerptLines(body, meta.LineNumbers)
+		diagnostics = numberedExcerptLines(body, excerptNumbers(meta))
 	}
 
 	window := newestWithin(tail, budget)
@@ -170,4 +170,15 @@ func joinExcerptLines(diagnostics, tail []excerptLine) []byte {
 		out.WriteString(line.text)
 	}
 	return out.Bytes()
+}
+
+func excerptNumbers(meta runlog.Meta) []int {
+	if len(meta.LineOffsets) != len(meta.LineNumbers) {
+		return meta.LineNumbers
+	}
+	numbers := make([]int, len(meta.LineOffsets))
+	for i, offset := range meta.LineOffsets {
+		numbers[i] = int(offset)
+	}
+	return numbers
 }

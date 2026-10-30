@@ -520,17 +520,24 @@ func runRunRetry(ctx context.Context, arguments []string, output io.Writer) erro
 }
 
 type remoteLog struct {
-	RunID         string `json:"run_id"`
-	Burn          string `json:"burn"`
-	Step          string `json:"step"`
-	Output        string `json:"output"`
-	Note          string `json:"note"`
-	RunError      string `json:"run_error"`
-	TotalLines    int    `json:"total_lines"`
-	MatchedLines  int    `json:"matched_lines"`
-	ReturnedLines int    `json:"returned_lines"`
-	Truncated     bool   `json:"truncated"`
-	Bytes         int64  `json:"bytes"`
+	RunID            string `json:"run_id"`
+	Burn             string `json:"burn"`
+	Step             string `json:"step"`
+	Output           string `json:"output"`
+	Note             string `json:"note"`
+	RunError         string `json:"run_error"`
+	TotalLines       int    `json:"total_lines"`
+	MatchedLines     int    `json:"matched_lines"`
+	ReturnedLines    int    `json:"returned_lines"`
+	Truncated        bool   `json:"truncated"`
+	Bytes            int64  `json:"bytes"`
+	ScanComplete     *bool  `json:"scan_complete"`
+	BytesExact       *bool  `json:"bytes_exact"`
+	HasMore          bool   `json:"has_more"`
+	NextByteOffset   int64  `json:"next_byte_offset"`
+	WithheldLines    int    `json:"withheld_lines"`
+	WithheldBytes    int64  `json:"withheld_bytes"`
+	OmittedLongLines int    `json:"omitted_long_lines"`
 }
 
 func runRemoteLog(ctx context.Context, arguments []string, output io.Writer) error {
@@ -541,6 +548,7 @@ func runRemoteLog(ctx context.Context, arguments []string, output io.Writer) err
 	pattern := flags.String("pattern", "", "RE2 pattern; offset and limit then page over matches")
 	context_ := flags.Int("context", 0, "lines of context around each match")
 	offset := flags.Int("offset", 0, "skip this many")
+	byteOffset := flags.Int64("byte-offset", 0, "absolute log cursor from next_byte_offset")
 	limit := flags.Int("limit", 0, "return at most this many")
 	tail := flags.Bool("tail", false, "read from the end")
 	raw := flags.Bool("raw", false, "keep the [burn/step] prefix on each line and the Argo executor lines")
@@ -575,6 +583,14 @@ func runRemoteLog(ctx context.Context, arguments []string, output io.Writer) err
 			query[name] = fmt.Sprint(value)
 		}
 	}
+	if *byteOffset < 0 {
+		return fmt.Errorf("%w: --byte-offset must be nonnegative", errUsage)
+	}
+	flags.Visit(func(f *flag.Flag) {
+		if f.Name == "byte-offset" {
+			query["byte_offset"] = fmt.Sprint(*byteOffset)
+		}
+	})
 	if *tail {
 		query["tail"] = "true"
 	}
@@ -608,9 +624,27 @@ func runRemoteLog(ctx context.Context, arguments []string, output io.Writer) err
 			return err
 		}
 	}
-	_, err = fmt.Fprintf(os.Stderr, "%d of %d lines returned, %d matched, %d bytes in the step%s%s\n",
-		log.ReturnedLines, log.TotalLines, log.MatchedLines, log.Bytes, hiddenNote(hidden), truncatedNote(log.Truncated))
+	_, err = fmt.Fprintln(os.Stderr, log.readSummary()+hiddenNote(hidden)+truncatedNote(log.Truncated))
 	return err
+}
+
+// Missing completeness flags preserve compatibility with older servers.
+func (log remoteLog) readSummary() string {
+	lineQualifier, byteQualifier := "", ""
+	if log.ScanComplete != nil && !*log.ScanComplete {
+		lineQualifier = "at least "
+	}
+	if log.BytesExact != nil && !*log.BytesExact {
+		byteQualifier = "at least "
+	}
+	summary := fmt.Sprintf("%d of %s%d lines returned, %s%d matched, %s%d bytes in the step", log.ReturnedLines, lineQualifier, log.TotalLines, lineQualifier, log.MatchedLines, byteQualifier, log.Bytes)
+	if log.ScanComplete != nil {
+		summary += fmt.Sprintf("; withheld %s%d lines / %s%d bytes; %d oversized lines omitted", lineQualifier, log.WithheldLines, byteQualifier, log.WithheldBytes, log.OmittedLongLines)
+	}
+	if log.HasMore {
+		summary += fmt.Sprintf("; continue with byte_offset=%d (--byte-offset %d), offset=0 and the same tail/pattern/context", log.NextByteOffset, log.NextByteOffset)
+	}
+	return summary
 }
 
 // dropExecutorLines removes Argo executor chatter (runlog.IsExecutorNoise)

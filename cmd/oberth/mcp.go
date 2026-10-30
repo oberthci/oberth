@@ -257,6 +257,14 @@ func runMCPCall(ctx context.Context, arguments []string, output io.Writer) error
 			return err
 		}
 	}
+	if (toolName == "run_logs" || toolName == "logs") && !result.IsError {
+		var log remoteLog
+		if json.Unmarshal(structured, &log) == nil && log.ScanComplete != nil {
+			if _, err := fmt.Fprintln(os.Stderr, log.readSummary()); err != nil {
+				return err
+			}
+		}
+	}
 	if result.IsError {
 		return errMCPToolError
 	}

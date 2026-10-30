@@ -284,8 +284,18 @@ func (server *Server) requireAuth(next http.Handler) http.Handler {
 			writeJSON(writer, http.StatusUnauthorized, map[string]string{"error": "authentication required"})
 			return
 		}
-		actor, err := server.auth.Authenticate(request.Context(), token)
+		authCtx, cancel := context.WithTimeout(request.Context(), 5*time.Second)
+		actor, err := server.auth.Authenticate(authCtx, token)
+		if err == nil {
+			err = authCtx.Err()
+		}
+		cancel()
 		if server.refuseDuringDrain(writer) {
+			return
+		}
+		if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+			writer.Header().Set("Retry-After", "1")
+			writeJSON(writer, http.StatusServiceUnavailable, map[string]string{"error": "authentication temporarily unavailable; retry the request"})
 			return
 		}
 		if err != nil || strings.TrimSpace(actor.Identity) == "" {
@@ -434,6 +444,16 @@ func logFilterFrom(query url.Values) (runlog.Filter, error) {
 			return runlog.Filter{}, fmt.Errorf("invalid log %s: must be a non-negative integer line count", name)
 		}
 		*target = value
+	}
+	if raw, present := query["byte_offset"]; present {
+		if len(raw) != 1 {
+			return runlog.Filter{}, errors.New("byte_offset must be a single nonnegative byte offset")
+		}
+		value, err := strconv.ParseInt(raw[0], 10, 64)
+		if err != nil || value < 0 {
+			return runlog.Filter{}, errors.New("byte_offset must be a nonnegative byte offset")
+		}
+		filter.ByteOffset = &value
 	}
 	if len(filter.Pattern) > maxLogPatternBytes {
 		return runlog.Filter{}, fmt.Errorf("log pattern exceeds %d bytes", maxLogPatternBytes)
