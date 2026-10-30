@@ -63,17 +63,19 @@ type Options struct {
 type Store struct {
 	protocol ProtocolConfig
 
-	authDB      *sql.DB // reserved SSH/bearer read-only WAL readers; no cached authorization
-	idleDB      *sql.DB // read-only WAL pool for the upgrade queue sampler
-	readinessDB *sql.DB // reserved read-only WAL connection for readiness sampling
-	readDB      *sql.DB // bounded, read-only WAL pool for ordinary live queries
-	auditReadDB *sql.DB // separate bounded WAL pool for audit scans
-	db          *sql.DB
-	now         func() time.Time
-	mu          sync.Mutex
-	done        bool
-	readOnly    bool
-	cleanup     func() error
+	authDB          *sql.DB       // reserved SSH/bearer read-only WAL readers; no cached authorization
+	sshAuthSlots    chan struct{} // per-Store admission; initialized before serving
+	bearerAuthSlots chan struct{}
+	idleDB          *sql.DB // read-only WAL pool for the upgrade queue sampler
+	readinessDB     *sql.DB // reserved read-only WAL connection for readiness sampling
+	readDB          *sql.DB // bounded, read-only WAL pool for ordinary live queries
+	auditReadDB     *sql.DB // separate bounded WAL pool for audit scans
+	db              *sql.DB
+	now             func() time.Time
+	mu              sync.Mutex
+	done            bool
+	readOnly        bool
+	cleanup         func() error
 
 	liveReaderDSN   string // immutable after startup; shared live WAL reader settings
 	liveBusyTimeout time.Duration
@@ -1935,6 +1937,11 @@ RETURNING id, fingerprint, identity, token_credential_id, auth_actor, admin, cre
 }
 
 func (s *Store) UplinkByFingerprint(ctx context.Context, fingerprint string) (model.Uplink, error) {
+	release, err := acquireAuthSlot(ctx, s.sshAuthSlots)
+	if err != nil {
+		return model.Uplink{}, fmt.Errorf("wait for SSH identity reader: %w", err)
+	}
+	defer release()
 	// A fresh deferred transaction binds the key and all its scopes to one
 	// committed snapshot. End it before returning; never retain a snapshot
 	// across authentication requests or across the public-key probe/signature.
@@ -2049,6 +2056,11 @@ func (s *Store) TokenCredentialByDigest(ctx context.Context, digest []byte) (mod
 	if len(digest) != 32 {
 		return model.TokenCredential{}, ErrNotFound
 	}
+	release, err := acquireAuthSlot(ctx, s.bearerAuthSlots)
+	if err != nil {
+		return model.TokenCredential{}, fmt.Errorf("wait for bearer credential reader: %w", err)
+	}
+	defer release()
 	value, err := scanTokenCredential(s.authReader().QueryRowContext(ctx, `
 SELECT id, name, digest, created_at, activated_at, last_used_at, revoked_at
 FROM token_credentials WHERE digest = ?`, digest))
@@ -2062,6 +2074,11 @@ func (s *Store) AuthenticatedUplinkByDigest(ctx context.Context, digest []byte) 
 	if len(digest) != 32 {
 		return model.AuthenticatedUplink{}, ErrNotFound
 	}
+	release, err := acquireAuthSlot(ctx, s.bearerAuthSlots)
+	if err != nil {
+		return model.AuthenticatedUplink{}, fmt.Errorf("wait for bearer identity reader: %w", err)
+	}
+	defer release()
 	// Bind token authority and scopes to the same fresh committed snapshot.
 	tx, err := s.authReader().BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
@@ -2139,6 +2156,11 @@ WHERE id = ? AND activated_at IS NOT NULL AND revoked_at IS NULL
 	// A concurrent request may already have touched the token. Distinguish
 	// that benign no-op from an inactive/revoked credential, without caching
 	// authority or converting a revocation race into a successful touch.
+	release, err := acquireAuthSlot(ctx, s.bearerAuthSlots)
+	if err != nil {
+		return fmt.Errorf("wait for bearer use reader: %w", err)
+	}
+	defer release()
 	var active string
 	err = s.authReader().QueryRowContext(ctx, `SELECT id FROM token_credentials
 WHERE id = ? AND activated_at IS NOT NULL AND revoked_at IS NULL`, id).Scan(&active)

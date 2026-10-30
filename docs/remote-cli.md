@@ -190,9 +190,15 @@ optional live scheduling observation has its existing 2s sub-budget. Bearer
 authentication has a separate 5s budget, including the authoritative token
 last-used update when due. A committed `last_used_at` newer than one minute skips
 the writer; every request still reads fresh identity/scopes/revocation. Server
-token lookups use the same four reserved read-only auth connections as SSH,
-separate from the eight ordinary dashboard/list readers. Due updates are conditional so concurrent requests write the timestamp at most once
-per minute. Errors while recording due use still fail closed. Auth contention
+token lookups and SSH share four reserved read-only auth connections, separate
+from the eight ordinary dashboard/list readers. Per-Store admission limits each
+protocol to three reads, including connection waiters, preserving at least one
+connection for the other protocol. Waiting uses the caller's existing deadline.
+Malformed bearer strings are rejected before hashing or database access: issued
+tokens are `oberth_` plus 43 unpadded URL-base64 characters (50 bytes total).
+Correctly shaped unknown tokens still require a fresh lookup. Due updates are
+conditional so concurrent requests write the timestamp at most once per minute.
+Errors while recording due use still fail closed. Auth contention
 fails closed with retryable HTTP 503 rather than claiming a valid credential is invalid. CPU scheduling or a stuck kernel
 file read can still delay wall-clock return; cancellation is checked between
 bounded reads. `run_get` does not fetch pod logs; use `summary:true` when timing
