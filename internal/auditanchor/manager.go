@@ -277,10 +277,35 @@ func (manager *Manager) AllowMutation(ctx context.Context) error {
 		return fmt.Errorf("audit anchor: mutation gate refresh wait: %w", err)
 	}
 	defer manager.refreshMu.Unlock()
+	// Immutable continuity records already reconciled during this AllowMutation
+	// call need no repeated Kubernetes GET on an audit-append retry. Every retry
+	// still recovers and verifies fresh external history; changed history is
+	// reconciled again, and this cache is discarded when the gate returns.
+	var reconciled []model.AuditWitness
+	haveReconciled := false
+	reconcile := func(history []model.AuditWitness) error {
+		same := haveReconciled && len(history) == len(reconciled)
+		if same {
+			for i := range history {
+				if !sameAuditWitness(history[i], reconciled[i]) {
+					same = false
+					break
+				}
+			}
+		}
+		if same {
+			return nil
+		}
+		if err := manager.continuity.Reconcile(ctx, history); err != nil {
+			return err
+		}
+		reconciled, haveReconciled = cloneAuditWitnesses(history), true
+		return nil
+	}
 	delay := 10 * time.Millisecond
 	var contention error
 	for {
-		err := manager.allowMutation(ctx)
+		err := manager.allowMutation(ctx, reconcile)
 		if !errors.Is(err, store.ErrAuditVerificationBusy) {
 			if contention != nil && ctx.Err() != nil && errors.Is(err, ctx.Err()) {
 				return errors.Join(contention, err)
@@ -303,7 +328,7 @@ func (manager *Manager) AllowMutation(ctx context.Context) error {
 	}
 }
 
-func (manager *Manager) allowMutation(ctx context.Context) error {
+func (manager *Manager) allowMutation(ctx context.Context, reconcile func([]model.AuditWitness) error) error {
 	if err := manager.Ready(ctx); err != nil {
 		return err
 	}
@@ -341,7 +366,7 @@ func (manager *Manager) allowMutation(ctx context.Context) error {
 				return gateErr
 			}
 		}
-		if err := manager.continuity.Reconcile(ctx, history); err != nil {
+		if err := reconcile(history); err != nil {
 			gateErr = fmt.Errorf("audit anchor: mutation gate refresh external witness history: reconcile durable external witness history: %w", err)
 			return gateErr
 		}

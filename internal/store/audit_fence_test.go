@@ -5,6 +5,8 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -124,7 +126,7 @@ func TestAuditVerificationCPUDoesNotOwnPrimaryConnection(t *testing.T) {
 	s := testStore(t, &now)
 	// Pause inside verification itself, with a real read-only snapshot open.
 	// The primary connection and SQLite writer reservation must both be free.
-	_, _, err := s.verifyAuditWithFence(t.Context(), func(tx *sql.Tx) (model.AuditHead, model.AuditAnchor, error) {
+	_, _, err := s.verifyAuditWithFence(t.Context(), nil, func(tx *sql.Tx) (model.AuditHead, model.AuditAnchor, error) {
 		head, anchor, _, err := s.verifyAuditMutationState(t.Context(), tx, nil, nil, false)
 		if err != nil {
 			return head, anchor, err
@@ -190,5 +192,190 @@ func TestLocalAuditFencePreservesVerifiedPrefixPin(t *testing.T) {
 	}
 	if _, _, err := s.VerifyLocalAuditMutationState(t.Context(), pinned, acceptAuditMutationState); err == nil || !strings.Contains(err.Error(), "verified audit prefix") {
 		t.Fatalf("shortened chain bypassed prefix pin: %v", err)
+	}
+}
+
+func TestAuditFenceOutsidePrefixEditWithRestoredSchemaFailsClosed(t *testing.T) {
+	now := time.Now()
+	s := testStore(t, &now)
+	seedAuditMetricRows(t, s, 3, now)
+	_, _, err := s.VerifyAuditMutationStateUnanchored(t.Context(), nil, nil, func(model.AuditHead, model.AuditAnchor) error {
+		outsideAuditEdit(t, s, `UPDATE audit_actions SET actor='forged' WHERE id=1`)
+		return nil
+	})
+	if err == nil || !strings.Contains(err.Error(), "audit action 1 hash is invalid") || errors.Is(err, ErrAuditVerificationBusy) {
+		t.Fatalf("outside prefix edit accepted/retried: %v", err)
+	}
+}
+
+func TestAuditFenceFileReplacementDuringCallbackFailsClosed(t *testing.T) {
+	for _, mode := range []string{"local", "witnessed"} {
+		t.Run(mode, func(t *testing.T) {
+			now := time.Now()
+			s := testStore(t, &now)
+			seedAuditMetricRows(t, s, 3, now)
+			verify := func(callback func(model.AuditHead, model.AuditAnchor) error) error {
+				if mode == "local" {
+					_, _, err := s.VerifyLocalAuditMutationState(t.Context(), model.AuditHead{}, callback)
+					return err
+				}
+				_, _, err := s.VerifyAuditMutationStateUnanchored(t.Context(), nil, nil, callback)
+				return err
+			}
+			err := verify(func(model.AuditHead, model.AuditAnchor) error {
+				if err := os.Rename(s.livePath, s.livePath+".original"); err != nil {
+					return err
+				}
+				t.Cleanup(func() {
+					if err := os.Rename(s.livePath+".original", s.livePath); err != nil {
+						t.Error(err)
+					}
+				})
+				return os.WriteFile(s.livePath, nil, 0600)
+			})
+			if !errors.Is(err, ErrAuditStateChanged) || errors.Is(err, ErrAuditVerificationBusy) || !strings.Contains(err.Error(), "file replaced") {
+				t.Fatalf("file replacement accepted/retried: %v", err)
+			}
+		})
+	}
+}
+
+func TestAuditFenceRetriesCleanForeignCommitBursts(t *testing.T) {
+	for _, commits := range []int{1, auditFenceExtraRounds + 1, 2 * (auditFenceExtraRounds + 1)} {
+		t.Run(fmt.Sprintf("commits=%d", commits), func(t *testing.T) {
+			now := time.Now()
+			s := testStore(t, &now)
+			credential, err := s.CreateTokenCredential(t.Context(), model.TokenCredentialSpec{Name: "outside", Digest: make([]byte, 32)})
+			if err != nil {
+				t.Fatal(err)
+			}
+			outside, err := sql.Open("sqlite", s.livePath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer outside.Close()
+			snapshots, external, writes, busy := 0, 0, 0, 0
+			ctx, cancel := context.WithTimeout(t.Context(), testtimeout.Start(5*time.Second))
+			defer cancel()
+			for {
+				before := snapshots
+				_, _, err = s.verifyAuditWithFence(ctx, nil, func(tx *sql.Tx) (model.AuditHead, model.AuditAnchor, error) {
+					snapshots++
+					head, anchor, _, err := s.verifyAuditMutationState(ctx, tx, nil, nil, false)
+					if err == nil && writes < commits {
+						_, err = outside.ExecContext(ctx, `UPDATE token_credentials SET last_used_at=COALESCE(last_used_at,0)+1 WHERE id=?`, credential.ID)
+						if err == nil {
+							writes++
+						}
+					}
+					return head, anchor, err
+				}, func(model.AuditHead, model.AuditAnchor) error { external++; return nil })
+				if err == nil {
+					break
+				}
+				if !errors.Is(err, ErrAuditVerificationBusy) || !errors.Is(err, ErrAuditStateChanged) || !strings.Contains(err.Error(), "rounds exhausted") || snapshots-before != auditFenceExtraRounds+1 {
+					t.Fatalf("clean commits not transient: err=%v snapshots=%d external=%d", err, snapshots, external)
+				}
+				busy++
+			}
+			wantBusy := commits / (auditFenceExtraRounds + 1)
+			if snapshots != commits+1 || writes != commits || busy != wantBusy || external != wantBusy+1 {
+				t.Fatalf("snapshots=%d writes=%d busy=%d external=%d", snapshots, writes, busy, external)
+			}
+			// A single foreign commit is absorbed locally with one extra snapshot.
+			// Longer bursts exceed the bound and succeed only after a fresh attempt.
+			t.Logf("foreign commits=%d snapshots=%d busy=%d external=%d", writes, snapshots, busy, external)
+		})
+	}
+}
+
+func TestAuditFenceForeignTamperFailsAtFirstFailedRound(t *testing.T) {
+	for _, tamperAt := range []int{1, auditFenceExtraRounds + 1} {
+		t.Run(fmt.Sprintf("tamper-round=%d", tamperAt), func(t *testing.T) {
+			now := time.Now()
+			s := testStore(t, &now)
+			seedAuditMetricRows(t, s, 3, now)
+			snapshots, external, attempts := 0, 0, 0
+			for {
+				attempts++
+				_, _, err := s.verifyAuditWithFence(t.Context(), nil, func(tx *sql.Tx) (model.AuditHead, model.AuditAnchor, error) {
+					snapshots++
+					head, anchor, _, err := s.verifyAuditMutationState(t.Context(), tx, nil, nil, false)
+					if err != nil {
+						return head, anchor, err
+					}
+					statement := `UPDATE audit_actions SET actor=actor WHERE id=1`
+					if snapshots == tamperAt {
+						statement = `UPDATE audit_actions SET actor='forged' WHERE id=1`
+					}
+					outsideAuditEdit(t, s, statement)
+					return head, anchor, nil
+				}, func(model.AuditHead, model.AuditAnchor) error { external++; return nil })
+				if errors.Is(err, ErrAuditVerificationBusy) && attempts == 1 && tamperAt == auditFenceExtraRounds+1 {
+					continue
+				}
+				if err == nil || errors.Is(err, ErrAuditVerificationBusy) || !strings.Contains(err.Error(), "audit action 1 hash is invalid") || snapshots != tamperAt+1 || external != 1 {
+					t.Fatalf("tampering not stopped at first failed round: err=%v snapshots=%d external=%d attempts=%d", err, snapshots, external, attempts)
+				}
+				break
+			}
+		})
+	}
+}
+
+func TestAuditFenceRejectsTrustedCheckpointAppendWithIntactGuards(t *testing.T) {
+	now := time.Now()
+	s := testStore(t, &now)
+	seedAuditMetricRows(t, s, 3, now)
+	snapshots := 0
+	_, _, err := s.verifyAuditWithFence(t.Context(), nil, func(tx *sql.Tx) (model.AuditHead, model.AuditAnchor, error) {
+		snapshots++
+		head, anchor, _, err := s.verifyAuditMutationState(t.Context(), tx, nil, nil, false)
+		return head, anchor, err
+	}, func(head model.AuditHead, _ model.AuditAnchor) error {
+		_, err := s.RecordAuditAnchor(t.Context(), model.AuditAnchorSpec{AuditID: head.ID, AuditSHA256: head.SHA256, TSAURL: "https://tsa.example", Receipt: []byte("new checkpoint"), AnchoredAt: now})
+		return err
+	})
+	if !errors.Is(err, ErrAuditStateChanged) || errors.Is(err, ErrAuditVerificationBusy) || !strings.Contains(err.Error(), "checkpoint differs") || snapshots != 1 {
+		t.Fatalf("checkpoint append accepted/retried: err=%v snapshots=%d", err, snapshots)
+	}
+}
+
+func TestAuditFenceRejectsRegressedOrReplacedHeadWithoutBusyRetry(t *testing.T) {
+	for _, writer := range []string{"primary", "foreign"} {
+		for _, change := range []string{"regressed", "replaced", "replaced-and-advanced"} {
+			t.Run(writer+"/"+change, func(t *testing.T) {
+				now := time.Now()
+				s := testStore(t, &now)
+				head := seedAuditMetricRows(t, s, 3, now)
+				writeStore := s
+				if writer == "foreign" {
+					var err error
+					writeStore, err = OpenAdminClient(t.Context(), s.livePath, Options{})
+					if err != nil {
+						t.Fatal(err)
+					}
+					defer writeStore.Close()
+				}
+				_, _, err := s.VerifyAuditMutationStateUnanchored(t.Context(), nil, nil, func(model.AuditHead, model.AuditAnchor) error {
+					switch change {
+					case "regressed":
+						_, err := writeStore.db.ExecContext(t.Context(), `DROP TRIGGER audit_actions_no_delete; DELETE FROM audit_actions WHERE id=3`)
+						return err
+					default:
+						if change == "replaced-and-advanced" {
+							if _, err := writeStore.AppendAuditAction(t.Context(), model.AuditActionSpec{Actor: "outside", Action: "append.before.replacement", ResourceType: "test"}); err != nil {
+								return err
+							}
+						}
+						_, err := writeStore.db.ExecContext(t.Context(), `DROP TRIGGER audit_actions_no_update; UPDATE audit_actions SET sha256=? WHERE id=?`, make([]byte, 32), head.ID)
+						return err
+					}
+				})
+				if !errors.Is(err, ErrAuditStateChanged) || errors.Is(err, ErrAuditVerificationBusy) {
+					t.Fatalf("%s head accepted/retried: %v", change, err)
+				}
+			})
+		}
 	}
 }

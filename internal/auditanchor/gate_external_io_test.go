@@ -78,12 +78,15 @@ func TestSlowKubernetesReconcileDoesNotBlockWriter(t *testing.T) {
 			if writeErr != nil {
 				t.Fatalf("writer blocked by Kubernetes: %v", writeErr)
 			}
-			if gateErr != nil || continuity.reconcileCalls != reconcilesBefore+2 {
-				t.Fatalf("head moved during Kubernetes: gate=%v, fresh proof checks=%d, want 2", gateErr, continuity.reconcileCalls-reconcilesBefore)
+			if gateErr != nil || continuity.reconcileCalls != reconcilesBefore+1 {
+				t.Fatalf("head moved during Kubernetes: gate=%v, reconcile calls=%d, want 1", gateErr, continuity.reconcileCalls-reconcilesBefore)
 			}
 			t.Logf("%s writer committed during blocked Kubernetes GET in %s; gate retried with fresh proof", writer, elapsed)
 			if err := manager.AllowMutation(t.Context()); err != nil {
 				t.Fatalf("fresh retry failed: %v", err)
+			}
+			if continuity.reconcileCalls != reconcilesBefore+2 {
+				t.Fatalf("new gate reused previous reconciliation: calls=%d", continuity.reconcileCalls-reconcilesBefore)
 			}
 		})
 	}

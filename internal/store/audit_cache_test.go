@@ -238,7 +238,7 @@ func TestLocalAuditCacheReusesPrefixAfterOwnUnrelatedWrite(t *testing.T) {
 		_, err := s.CreateUpstream(t.Context(), model.UpstreamSpec{Name: "test", Kind: "forgejo", BaseURL: "https://example.test"})
 		return err
 	})
-	if err != nil || s.localAudit.fullScans != 1 || s.localAudit.suffixes != 2 {
+	if err != nil || s.localAudit.fullScans != 1 || s.localAudit.suffixes != 1 {
 		t.Fatalf("benign write forced full verification: %+v err=%v", s.localAudit, err)
 	}
 }

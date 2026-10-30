@@ -24,8 +24,12 @@ they cannot update or delete a verified prefix. Cache eligibility requires
 the binary's canonical audit table and unconditional update/delete guards.
 Writable connections enable `recursive_triggers`, making the delete guard
 apply to `INSERT OR REPLACE` too, including replacements from other triggers.
-Disabling that setting disables cache reuse. A modified startup guard never
-becomes a cache trust root even if the current rows pass a full hash scan.
+The setting is sampled before the snapshot and inside the fence; observing
+it disabled prevents reuse. The primary connection's Store code is trusted
+not to toggle it off and back on between samples. These observations cannot
+detect such a toggle by code controlling that same connection. A modified
+startup guard never becomes a cache trust root even if the current rows pass
+a full hash scan.
 
 The startup schema fingerprint and guard eligibility are captured atomically.
 A later schema fingerprint must match that baseline before a full scan can
@@ -88,48 +92,63 @@ an additional background timer. Full gate scans are not skipped just because
 a periodic cycle recently scanned the database.
 
 A concurrent head advance makes the final fence refuse the current attempt
-with `ErrAuditVerificationBusy` (also matching `ErrAuditStateChanged`). If only
-the reader's version changed, up to two extra local snapshots can salvage the
-same external proof; exhaustion also reports contention. The manager retries
-these refusals automatically with backoff from 10 ms to 250 ms, under the gate's
-overall 30-second default deadline, including its serialized queue wait. Each
-fresh attempt repeats all local and configured external checks. External
-verification runs once per attempt, and the head and complete checkpoint must
-remain identical to its inputs. Own unrelated writes can reuse the prefix;
-outside commits force the full scan.
+with `ErrAuditVerificationBusy` (also matching `ErrAuditStateChanged`). The old
+verified boundary must still match; a replaced boundary or regressed head is
+an integrity failure. The manager retries transient contention with backoff
+from 10 ms to 250 ms, under the gate's overall 30-second default deadline, including its
+serialized queue wait. Each fresh attempt repeats local verification and
+recovers fresh external history.
+
+Successful Kubernetes reconciliation is reused only within that one
+`AllowMutation` call and only for an identical complete witness history.
+Immutable continuity records make that proof independent of local audit
+appends. Changed history requires reconciliation again, failures are never
+cached, and every subsequent gate performs its own reconciliation. Timestamp
+receipt checks and unresolved-intent checks still run on each attempt.
+Same-history retries also reuse the latest-record GET from reconciliation;
+a continuity record deleted during those retries is detected at the next
+gate rather than by another GET within this gate's bounded deadline.
+
+## Narrow commit fence
+
+The reader's whole-database `data_version` is a pre-check, not an audit-busy
+signal. After a commit, the short writer reservation compares the audit head
+ID/SHA and complete latest checkpoint. It also compares a primary connection
+key sampled before the read snapshot, the current file identity and schema
+cookie. The snapshot's schema fingerprint must match the startup baseline,
+the startup audit guards must be canonical, and recursive triggers must be
+enabled at both primary-key samples. The primary connection itself remains
+trusted not to toggle that setting between samples.
+
+The primary connection's own commits leave its `data_version` unchanged.
+With that trusted key and schema unchanged, run-status, token-touch and log
+writes need no new verification snapshot and cannot consume busy retries.
+Own audited appends move the head; checkpoint appends change the checkpoint.
+No chain hashing or network I/O runs under the writer reservation.
+
+A commit from any other connection changes the primary key even when the
+head and checkpoint remain identical. Such edits still require fresh local
+verification outside the writer reservation: head-only comparisons cannot
+detect prefix or pending-publication tampering. Altered schemas also retain
+this conservative path. Up to two extra snapshots can salvage an unchanged
+proof. If every extra round verifies cleanly with the identical head and
+checkpoint, exhaustion returns `ErrAuditVerificationBusy`. This refuses the
+current attempt and lets the manager retry under its overall deadline, so
+legitimate concurrent CLI/admin writers need not cause an immediate refusal.
+The first failed verification or changed proof still fails immediately, without
+Busy. A retry recovers fresh external history; the per-gate reconciliation
+cache avoids repeating Kubernetes reconciliation for identical history.
+Sustained outside writes can still exhaust the overall gate deadline, and the
+API reports the transient contention reason to clients. Such connections remain
+outside the trusted Store-write optimization; table-scoped counters cannot
+safely classify their writes.
 
 Integrity failures, changed checkpoints, head regressions and file replacements
-do not receive the contention classification and fail immediately. A retry
-never grants permission without a new successful fence. A contention timeout
-preserves both the transient classification and the context error; MCP mutation
-requests report an unavailable service with a public reason to retry. As before,
-the fence ends before the caller's application mutation begins; the gate does
-not hold a writer across that mutation, backoff or network I/O.
-
-## Remaining contention limitation (Fable P2)
-
-The final fence still uses the reader connection's whole-database
-`data_version`. Every commit from another connection changes that value,
-including the primary Store's run-status, log-metadata and token-touch writes
-that leave the audit head unchanged. Such a write can consume a local
-re-verification round. Sustained writes can exhaust those rounds and make the
-manager repeat the complete gate, including external checks, until its deadline.
-This remains an availability and cost limitation in v0.17.68.
-
-Narrowing the check to the audit head or audit-table insertions is unsafe:
-same-head prefix edits, checkpoint receipt changes and pending-publication
-changes are also protected by verification. SQLite's `data_version` does not
-identify changed tables. A database-resident per-table counter or trigger can
-be modified or removed by the same outside writer whose edits must be detected;
-it cannot replace the connection-local signal under the trust boundary above.
-Comparing table contents or hashing the chain inside the writer fence would
-also put unbounded verification work back under the writer reservation.
-
-The conservative fence is therefore retained. A future optimization needs a
-trusted signal covering every verified table and schema change, with tests
-that preserve prefix, receipt, pending-publication and change-then-restore
-tamper detection under sustained unrelated writes. Table-scoped busy detection
-is deferred rather than weakening those checks for this release.
+fail immediately without the contention classification. A retry never grants
+permission without a new successful fence. A contention timeout preserves both
+the transient classification and context error. As before, the fence ends
+before the caller's application mutation begins; the gate does not hold a
+writer across that mutation, backoff or network I/O.
 
 ## Detection guarantees and cost
 

@@ -2701,6 +2701,8 @@ func (service *API) requireMutation(ctx context.Context) error {
 		return nil
 	}
 	if err := service.mutationGate(ctx); err != nil {
+		// Busy includes clean foreign-writer re-verification exhaustion, including
+		// a Manager deadline wrapping that contention. Keep the public retry reason.
 		if errors.Is(err, store.ErrAuditVerificationBusy) {
 			return refuse(fmt.Errorf("%w: %w", ErrUnavailable, err), "transient audit verification contention; retry the request")
 		}

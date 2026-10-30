@@ -3,8 +3,6 @@ package store
 import (
 	"context"
 	"database/sql"
-	"errors"
-	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -28,7 +26,7 @@ func TestAuditFenceSucceedsUnderContinuousTokenTouches(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), testtimeout.Start(5*time.Second))
 	defer cancel()
-	touches := make(chan struct{}, 16)
+	touches := make(chan struct{}, 128)
 	done := make(chan error, 1)
 	var commits atomic.Int32
 	start := make(chan struct{})
@@ -39,7 +37,7 @@ func TestAuditFenceSucceedsUnderContinuousTokenTouches(t *testing.T) {
 			done <- nil
 			return
 		}
-		ticker := time.NewTicker(5 * time.Millisecond)
+		ticker := time.NewTicker(time.Millisecond)
 		defer ticker.Stop()
 		for {
 			select {
@@ -65,16 +63,16 @@ func TestAuditFenceSucceedsUnderContinuousTokenTouches(t *testing.T) {
 	}()
 	calls := 0
 	verifies := 0
-	_, _, err = s.verifyAuditWithFence(ctx, func(tx *sql.Tx) (model.AuditHead, model.AuditAnchor, error) {
+	_, _, err = s.verifyAuditWithFence(ctx, nil, func(tx *sql.Tx) (model.AuditHead, model.AuditAnchor, error) {
 		verifies++
 		head, anchor, _, err := s.verifyAuditMutationState(ctx, tx, nil, nil, false)
 		return head, anchor, err
 	}, func(model.AuditHead, model.AuditAnchor) error {
 		calls++
 		close(start)
-		// At least ten real token-touch commits during external I/O. The writer
+		// At least 100 real token-touch commits during external I/O. The writer
 		// keeps ticking until the gate returns, including local re-verification.
-		for range 10 {
+		for range 100 {
 			select {
 			case <-touches:
 			case <-ctx.Done():
@@ -87,31 +85,32 @@ func TestAuditFenceSucceedsUnderContinuousTokenTouches(t *testing.T) {
 	if writeErr := <-done; writeErr != nil {
 		t.Fatal(writeErr)
 	}
-	if err != nil || calls != 1 || verifies < 2 || commits.Load() < 10 {
+	if err != nil || calls != 1 || verifies != 1 || commits.Load() < 100 {
 		t.Fatalf("gate=%v, external=%d, snapshots=%d, token commits=%d", err, calls, verifies, commits.Load())
 	}
 	t.Logf("gate succeeded with %d continuous token-touch commits, %d snapshots, %d external call", commits.Load(), verifies, calls)
 }
 
-func TestAuditFenceBoundsLocalReverificationWithoutRepeatingExternalIO(t *testing.T) {
+func TestAuditFenceIgnoresNonAuditCommitInEveryVerificationWindow(t *testing.T) {
 	now := time.Now()
 	s := testStore(t, &now)
-	if _, err := s.db.ExecContext(t.Context(), `CREATE TABLE gate_progress(value INTEGER); INSERT INTO gate_progress VALUES(0)`); err != nil {
+	credential, err := s.CreateTokenCredential(t.Context(), model.TokenCredentialSpec{Name: "poller", Digest: make([]byte, 32)})
+	if err != nil {
 		t.Fatal(err)
 	}
 	snapshots, external := 0, 0
-	_, _, err := s.verifyAuditWithFence(t.Context(), func(tx *sql.Tx) (model.AuditHead, model.AuditAnchor, error) {
+	_, _, err = s.verifyAuditWithFence(t.Context(), nil, func(tx *sql.Tx) (model.AuditHead, model.AuditAnchor, error) {
 		snapshots++
 		head, anchor, _, err := s.verifyAuditMutationState(t.Context(), tx, nil, nil, false)
 		if err != nil {
 			return head, anchor, err
 		}
-		// Force a benign commit into every verification window to exhaust the
-		// bound deterministically, rather than relying on goroutine scheduling.
-		_, err = s.db.ExecContext(t.Context(), `UPDATE gate_progress SET value=value+1`)
+		// Force a benign commit into every snapshot window. This previously
+		// exhausted the retry bound deterministically.
+		_, err = s.db.ExecContext(t.Context(), `UPDATE token_credentials SET last_used_at=COALESCE(last_used_at,0)+1 WHERE id=?`, credential.ID)
 		return head, anchor, err
 	}, func(model.AuditHead, model.AuditAnchor) error { external++; return nil })
-	if !errors.Is(err, ErrAuditVerificationBusy) || !errors.Is(err, ErrAuditStateChanged) || !strings.Contains(err.Error(), "exhausted") || snapshots != 3 || external != 1 {
+	if err != nil || snapshots != 1 || external != 1 {
 		t.Fatalf("err=%v, snapshots=%d, external=%d", err, snapshots, external)
 	}
 }
