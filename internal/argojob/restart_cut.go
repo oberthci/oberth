@@ -27,6 +27,15 @@ func recordRestartCut(workflow *wfv1.Workflow, node wfv1.NodeStatus, pod *corev1
 	if strings.Contains(message, "oomkilled") || strings.Contains(message, "deadline") {
 		return
 	}
+	// Main can still be PodInitializing after a deterministic init failure.
+	// A missing main exit must never erase a current observed init exit.
+	if pod != nil {
+		for _, status := range pod.Status.InitContainerStatuses {
+			if terminated := status.State.Terminated; terminated != nil && terminated.ExitCode != 0 {
+				return
+			}
+		}
+	}
 	diagnostic := step.Termination
 	if diagnostic != nil && diagnostic.Available && diagnostic.Container != nil {
 		t := diagnostic.Container

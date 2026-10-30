@@ -3205,3 +3205,9 @@ A same-version no-op exits zero with `Already running vX; no upgrade performed`;
 explicit dry-run/help also succeed.
 Existing Workflow adoption, preflight recovery and publication ownership rules
 are unchanged. See [restart handover](docs/restart-handover.md).
+
+A currently observed nonzero init-container termination always refuses restart-cut
+classification, including when main is still Waiting/PodInitializing. This guard
+is local to restart-cut and does not depend on the log-continuity input. The
+shared partial-execution evidence contract and its RCA/fallback regression are
+compiled in this topic and included in its bundle.
