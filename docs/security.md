@@ -165,3 +165,10 @@ public checksum verification. An enabled listener without a complete authority
 configuration is rejected. Existing deployments must carry their configured
 namespace through upgrades; no domain-name inference or permissive discovery
 fallback exists.
+
+Host pressure admission reads only the fixed Linux `/proc/pressure/{io,cpu,memory}`
+files, with bounded parsing and no host mount or extra privilege. The observations
+are scheduling hints; malformed/unavailable PSI fails open and never changes
+running-workflow authority or execution verdicts. Scoped status, reservation and
+run views omit host PSI and pressure-derived reasons, as they omit aggregate
+capacity. The existing unscoped admin metrics authorization remains in force.

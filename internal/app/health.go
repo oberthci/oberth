@@ -391,6 +391,7 @@ func scopedAdmission(state *model.AdmissionState, upstreams []model.Upstream, re
 	for _, reservation := range state.Reservations {
 		if visible[reservation.RepoID] {
 			reservation.Position = 0
+			reservation.Pressure = nil
 			scoped.Reservations = append(scoped.Reservations, reservation)
 		}
 	}

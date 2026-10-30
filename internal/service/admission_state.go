@@ -39,7 +39,8 @@ func (gate *weightedAdmission) reservationViewLocked(reservation *admissionReser
 	view := model.AdmissionReservation{
 		RunID: reservation.runID, RepoID: reservation.repoID, Repo: reservation.repo, Ref: reservation.ref,
 		Size: string(reservation.size), Weight: reservation.weight, Group: reservation.groupName,
-		State: gate.reservationStateLocked(reservation), Backfilled: reservation.granted && reservation.backfilled,
+		Pressure: gate.pressureWaitLocked(reservation),
+		State:    gate.reservationStateLocked(reservation), Backfilled: reservation.granted && reservation.backfilled,
 	}
 	if reservation.repo != "" && reservation.runID != "" {
 		if name, err := deterministicJobName(reservation.repo, reservation.runID); err == nil {
@@ -70,6 +71,7 @@ func (scheduler *Scheduler) AdmissionState() *model.AdmissionState {
 	gate.mu.Lock()
 	defer gate.mu.Unlock()
 	state := &model.AdmissionState{
+		Pressure: gate.pressureStateLocked(),
 		Capacity: gate.capacity, Used: gate.used, Runs: gate.runs, MaxRuns: gate.maxRuns,
 		MaxHeadWaitSeconds: int64(gate.maxHeadWait / time.Second),
 		Reservations:       []model.AdmissionReservation{}, Groups: []model.AdmissionGroup{},

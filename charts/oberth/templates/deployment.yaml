@@ -207,6 +207,19 @@ spec:
             {{- if gt (int ($admission.diskFloorBytes | default 0)) 0 }}
             - --admission-disk-floor-bytes={{ $admission.diskFloorBytes }}
             {{- end }}
+            {{- $pressure := $admission.pressure | default dict }}
+            {{- $ioMax := 30 }}
+            {{- if hasKey $pressure "ioFullAvg60Max" }}{{- $ioMax = $pressure.ioFullAvg60Max }}{{- end }}
+            {{- $cpuMax := 0 }}
+            {{- if hasKey $pressure "cpuSomeAvg60Max" }}{{- $cpuMax = $pressure.cpuSomeAvg60Max }}{{- end }}
+            {{- $hysteresis := 10 }}
+            {{- if hasKey $pressure "hysteresis" }}{{- $hysteresis = $pressure.hysteresis }}{{- end }}
+            {{- $maxDefer := "20m" }}
+            {{- if hasKey $pressure "maxDefer" }}{{- $maxDefer = $pressure.maxDefer }}{{- end }}
+            - {{ printf "--admission-pressure-io-full-avg60-max=%v" $ioMax | quote }}
+            - {{ printf "--admission-pressure-cpu-some-avg60-max=%v" $cpuMax | quote }}
+            - {{ printf "--admission-pressure-hysteresis=%v" $hysteresis | quote }}
+            - {{ printf "--admission-pressure-max-defer=%v" $maxDefer | quote }}
             {{- if $admission.maxHeadWait }}
             - --admission-max-head-wait={{ $admission.maxHeadWait }}
             {{- end }}

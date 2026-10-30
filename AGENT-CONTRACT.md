@@ -3147,3 +3147,15 @@ A same-version no-op exits zero with `Already running vX; no upgrade performed`;
 explicit dry-run/help also succeed.
 Existing Workflow adoption, preflight recovery and publication ownership rules
 are unchanged. See [restart handover](docs/restart-handover.md).
+
+**Host PSI admission:** `serve`/Helm default to deferring new grants at Linux
+IO `full avg60 >= 30`, resuming strictly below 20 (10 point hysteresis). CPU
+`some avg60` is independently configurable and disabled by default; memory is
+observed only. The pressure gate runs after existing grant eligibility and stops
+the grant pass while held. A per-eligible-run 20m maximum wait bypasses only
+pressure, preserving release/tag priority, groups, weights/XL, VM, disk floor and
+backfill drain rules. Existing/adopted work is never stopped. Invalid or missing
+PSI fails open with one process warning and later recovery; both zero thresholds
+disable reads. `/api/status`, scheduling reasons, dashboard and fixed-label
+metrics expose cached observations only; scoped actors see no host PSI. See
+[configuration and semantics](docs/io-pressure-admission.md).

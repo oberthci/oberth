@@ -137,6 +137,7 @@ type serveOptions struct {
 	retentionKeepNewest     int
 	maxConcurrent           int
 	admissionDiskFloorBytes int64
+	admissionPressure       service.AdmissionPressureConfig
 	admissionSizeWeights    string
 	admissionMaxHeadWait    time.Duration
 	sizeWeights             service.SizeWeights
@@ -264,6 +265,11 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 	flags.IntVar(&options.maxConcurrent, "max-concurrent-jobs", 3, "maximum concurrent Jobs")
 	flags.StringVar(&options.admissionSizeWeights, "admission-size-weights", service.DefaultSizeWeights.String(), "admission weight per size as S=..,M=..,L=..,XL=..; XL=0 is the whole budget (an XL run runs alone), a positive XL lets XL share the host; the budget is --max-concurrent-jobs M runs (#1021)")
 	flags.DurationVar(&options.admissionMaxHeadWait, "admission-max-head-wait", service.DefaultMaxHeadWait, "bounded backfill (#1085): while the admission queue head does not fit, later runs that fit are admitted beside it until it has waited this long; then the budget drains for it (0 = strict FIFO)")
+	flags.Float64Var(&options.admissionPressure.IOFullAvg60Max, "admission-pressure-io-full-avg60-max", 30, "host IO full PSI avg60 percentage that holds new grants (0 = disabled)")
+	flags.Float64Var(&options.admissionPressure.CPUSomeAvg60Max, "admission-pressure-cpu-some-avg60-max", 0, "host CPU some PSI avg60 percentage that holds new grants (0 = disabled)")
+	flags.Float64Var(&options.admissionPressure.Hysteresis, "admission-pressure-hysteresis", 10, "percentage points below each enabled threshold required to resume grants")
+	flags.DurationVar(&options.admissionPressure.MaxDefer, "admission-pressure-max-defer", 20*time.Minute, "maximum pressure deferral per eligible run; other admission gates still apply")
+
 	flags.Int64Var(&options.admissionDiskFloorBytes, "admission-disk-floor-bytes", 0, "opt-in disk-space admission floor in bytes (0 = disabled); when enabled and free bytes on /data are below this floor, admission is held until disk frees up (#673)")
 	flags.StringVar(&options.ciCacheRoot, "ci-cache-root", "/var/cache/oberth/ci", "CI host cache root")
 	flags.StringVar(&options.releaseCacheRoot, "release-cache-root", "/var/cache/oberth/release", "release host cache root")
@@ -349,6 +355,9 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 		return serveOptions{}, fmt.Errorf("serve: --admission-size-weights: %w", err)
 	}
 	options.sizeWeights = weights
+	if err := options.admissionPressure.Validate(); err != nil {
+		return serveOptions{}, fmt.Errorf("serve: --admission-pressure: %w", err)
+	}
 	if options.admissionMaxHeadWait < 0 {
 		return serveOptions{}, errors.New("serve: --admission-max-head-wait must be zero (strict FIFO) or positive")
 	}
@@ -780,6 +789,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 		TrustedPreflight: trusted, Signals: signals, WorkspaceRoot: filepath.Join(options.dataRoot, "work"), MaxConcurrent: options.maxConcurrent,
 		MutationGate:            anchors.AllowMutation,
 		AdmissionDiskFloorBytes: options.admissionDiskFloorBytes,
+		AdmissionPressure:       options.admissionPressure,
 		SizeWeights:             options.sizeWeights,
 		MaxHeadWait:             options.admissionMaxHeadWait,
 	})
@@ -1060,7 +1070,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 	defer func() { stopLiveness(); <-liveDone; <-transitionsDone }()
 	httpAPI, err := api.New(authenticator, controlAPI, controlAPI, version,
 		api.WithErrorClassifier(classifyViewError),
-		api.WithMetrics(health.Readiness.WriteMetrics),
+		api.WithMetrics(func(w io.Writer) { health.Readiness.WriteMetrics(w); scheduler.WritePressureMetrics(w) }),
 		api.WithMaximumToolWait(service.DefaultMaximumWait),
 		api.WithLiveness(func() error {
 			if err := writerProgress.Check(); err != nil {

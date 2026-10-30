@@ -225,3 +225,10 @@ run(`state.step='build / compile'; state.stepRunID='scroll-run'; termReads=0; st
 await run('awaitResult');
 assert.ok(run('renderedHTML').includes('fixture log') && run('renderedHTML').includes('live output'), 'an execution display label must not stop durable-running log refresh');
 console.log('live log dashboard checks passed');
+
+// Host pressure is a scheduling hold, distinct from running-work failures.
+assert.equal(run(`queueReason({Scheduling:{state:'waiting',admission:{state:'waiting',pressure:{resource:'io',avg60:42.25}}}})`), 'deferred: io pressure 42.3%');
+assert.equal(run(`queueReason({Scheduling:{state:'waiting',admission:{state:'waiting',blocked_by:{pressure:{resource:'cpu',avg60:75},size:'M'}}}})`), 'deferred: cpu pressure 75.0%');
+assert.equal(run(`pressureStatusCard(null)`), '', 'scoped status omits host PSI');
+assert.ok(run(`pressureStatusCard({available:false})`).includes('admission fails open'));
+assert.ok(run(`pressureStatusCard({available:true,holding:true,resource:'io',sample:{io:{full_avg60:40},cpu:{some_avg60:20},memory:{full_avg60:5}}})`).includes('deferring new grants'));

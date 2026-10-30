@@ -87,6 +87,7 @@ func (service *API) observeScheduling(ctx context.Context, run model.Run, steps 
 			// pool of invisible work must not show (#073).
 			admission := *result.Admission
 			admission.Position, admission.Used, admission.Capacity, admission.DiskFloor = 0, 0, 0, nil
+			admission.Pressure = nil
 			if blocker := service.visibleBlocker(admission.BlockedBy); blocker != nil {
 				admission.BlockedBy = blocker
 			} else {
@@ -198,6 +199,8 @@ func waitingAdmissionMessage(admission *model.AdmissionObservation) string {
 	case admission.GroupAhead != "":
 		return fmt.Sprintf("Waiting for concurrency group %q behind run %s of the same repository, "+
 			"which is queued ahead in the group.", admission.Group, admission.GroupAhead)
+	case admission.Pressure != nil:
+		return fmt.Sprintf("Deferred: %s pressure %.1f%% (host PSI avg60); bounded by %ds per eligible run.", admission.Pressure.Resource, admission.Pressure.Avg60, admission.Pressure.MaxDeferSeconds)
 	case admission.HeadOfQueue && admission.BlockedBy != nil && admission.BlockedBy.Backfilling:
 		return fmt.Sprintf("At the head of the weighted resource admission queue (%s); %s smaller runs that fit beside it.",
 			admission.BlockedBy.Reason(), admission.BlockedBy.Backfill())
@@ -238,6 +241,7 @@ func (service *API) visibleBlocker(blocker *model.AdmissionBlocker) *model.Admis
 	}
 	scoped := *blocker
 	scoped.Used, scoped.Capacity = 0, 0
+	scoped.Pressure = nil
 	return &scoped
 }
 

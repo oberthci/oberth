@@ -53,6 +53,7 @@ type weightedAdmission struct {
 	// and below the configured floor, no new runs are admitted until disk
 	// frees up.
 	diskFloor *diskFloorCheck
+	pressure  *pressureCheck
 }
 
 type admissionReservation struct {
@@ -69,10 +70,12 @@ type admissionReservation struct {
 	runID                  string
 	// repoID, repo and ref identify the run when it blocks the queue head
 	// (#1021); preparedAt is when it started waiting for weight.
-	repoID     int64
-	repo       string
-	ref        string
-	preparedAt time.Time
+	repoID           int64
+	repo             string
+	ref              string
+	preparedAt       time.Time
+	pressureSince    time.Time
+	pressureDeferred bool
 	// claimedAt and grantedAt date the reservation's other states for the
 	// admission view (#1099).
 	claimedAt time.Time
@@ -438,6 +441,13 @@ func (gate *weightedAdmission) grantLocked() {
 	// at the head again so the budget drains for it.
 	var head *admissionReservation
 	now := gate.clock()
+	gate.pressure.refresh(now)
+	for _, r := range gate.waiters {
+		r.pressureDeferred = false
+		if gate.pressure == nil || !gate.pressure.state.Holding {
+			r.pressureSince = time.Time{}
+		}
+	}
 	gate.sortWaitersLocked()
 	for index := 0; index < len(gate.waiters); {
 		reservation := gate.waiters[index]
@@ -481,6 +491,11 @@ func (gate *weightedAdmission) grantLocked() {
 				continue
 			}
 			reservation.backfilled = true
+		}
+		// Stop at the first otherwise eligible candidate. A pressure timeout
+		// never bypasses priority, group, VM, disk, weight or backfill rules.
+		if gate.deferPressureLocked(reservation, now) {
+			return
 		}
 		gate.waiters = append(gate.waiters[:index], gate.waiters[index+1:]...)
 		reservation.granted = true
@@ -656,6 +671,7 @@ func (gate *weightedAdmission) blockerLocked(reservation *admissionReservation) 
 		RunID: reservation.runID, RepoID: reservation.repoID, Repo: reservation.repo, Ref: reservation.ref,
 		Size: string(reservation.size), Weight: reservation.weight, Used: gate.used, Capacity: gate.capacity,
 		WaitingSince: reservation.preparedAt,
+		Pressure:     gate.pressureWaitLocked(reservation),
 	}
 	switch {
 	case gate.diskFloor != nil && !gate.diskFloor.freeAboveFloor():
@@ -711,6 +727,7 @@ func (scheduler *Scheduler) AdmissionSnapshot(sequence int64) *model.AdmissionOb
 			break
 		}
 	}
+	result.Pressure = gate.pressureWaitLocked(reservation)
 	result.GroupHolder, result.GroupAhead = gate.groupBlockerLocked(reservation)
 	if reservation.prepared && !reservation.vmParked && !result.KubeVirtCapacity && result.GroupHolder == "" && result.GroupAhead == "" {
 		if head := gate.headBlockerLocked(); head == reservation {
