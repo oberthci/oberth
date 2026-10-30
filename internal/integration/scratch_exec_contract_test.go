@@ -173,7 +173,7 @@ func TestNativeGitCacheGatesCIBuilds(t *testing.T) {
 		}
 		for _, task := range template.DAG.Tasks {
 			if task.Name == "test-gitcache" {
-				gate = task.Template == "test-gitcache" && task.Depends == "lint"
+				gate = task.Template == "test-gitcache" && task.Depends == "setup"
 			}
 			if task.Name != "build-static-git-runtime" && strings.HasPrefix(task.Name, "build-") && !strings.Contains(task.Depends, "test-gitcache") {
 				t.Errorf("%s bypasses native Git cache gate", task.Name)
