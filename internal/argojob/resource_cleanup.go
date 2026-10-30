@@ -176,8 +176,14 @@ func cleanupDeleteOptions(resource schema.GroupVersionResource, uid types.UID) m
 	return options
 }
 
-func waitCleanupPoll(ctx context.Context) error {
-	timer := time.NewTimer(100 * time.Millisecond)
+const initialCleanupPollDelay = 100 * time.Millisecond
+
+func nextCleanupPollDelay(delay time.Duration) time.Duration {
+	return min(2*delay, 2*time.Second)
+}
+
+func waitCleanupPoll(ctx context.Context, delay time.Duration) error {
+	timer := time.NewTimer(delay)
 	defer timer.Stop()
 	select {
 	case <-ctx.Done():
@@ -309,6 +315,7 @@ func (c *Controller) cleanupVerdict(ctx context.Context, wf *wfv1.Workflow, runI
 	var remaining []string
 	attempted := map[string]bool{}
 	known := map[string]types.UID{}
+	pollDelay := initialCleanupPollDelay
 	for err == nil {
 		objects, readErr := c.cleanupObjects(cleanupCtx, wf, known)
 		if readErr == nil || len(objects) > 0 {
@@ -346,7 +353,8 @@ func (c *Controller) cleanupVerdict(ctx context.Context, wf *wfv1.Workflow, runI
 			attempted[key] = true
 		}
 		if err == nil {
-			err = waitCleanupPoll(cleanupCtx)
+			err = waitCleanupPoll(cleanupCtx, pollDelay)
+			pollDelay = nextCleanupPollDelay(pollDelay)
 		}
 	}
 	finish := time.Now().UTC()

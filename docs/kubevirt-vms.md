@@ -357,7 +357,9 @@ list to the step log. It deletes run-created VMIs, DataVolumes and PVCs with
 UID preconditions and waits for complete absence readback. Remaining objects,
 foreign replacements, missing ownership proof, API errors or incomplete lists
 fail the hook and the run. Recovery applies the same gate before reporting a
-terminal result. A clean verdict preserves an earlier pipeline failure.
+terminal result. Polling backs off exponentially from 100ms to a 2s cap,
+within the declared total deadline. A clean verdict preserves an earlier
+pipeline failure.
 
 Cleanup includes Workflow-owned volumeClaimTemplates and source PVCs. PVCs
 owned by a DataVolume must prove that parent's UID and Workflow ownership.

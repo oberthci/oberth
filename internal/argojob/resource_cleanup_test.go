@@ -301,3 +301,50 @@ func TestCleanupVerdictPreservesPipelineFailure(t *testing.T) {
 		t.Fatalf("pipeline failure changed: %+v", completion)
 	}
 }
+
+func TestCleanupPollBackoffCapsAtTwoSeconds(t *testing.T) {
+	delay := initialCleanupPollDelay
+	for _, want := range []time.Duration{100 * time.Millisecond, 200 * time.Millisecond, 400 * time.Millisecond, 800 * time.Millisecond, 1600 * time.Millisecond, 2 * time.Second, 2 * time.Second} {
+		if delay != want {
+			t.Fatalf("poll delay %s, want %s", delay, want)
+		}
+		delay = nextCleanupPollDelay(delay)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if err := waitCleanupPoll(ctx, 2*time.Second); !errors.Is(err, context.Canceled) {
+		t.Fatalf("backoff ignored deadline/cancellation: %v", err)
+	}
+}
+
+func TestCleanupVerdictBackoffBoundsListRate(t *testing.T) {
+	config, wf, _ := guardedVMIFixture(t, 1)
+	wf.Annotations[argoworkflow.CleanupVerdictAnnotation] = "1"
+	client := cleanupClient()
+	object := ownedCleanupObject(wf, vmiResource, "slow")
+	if _, err := client.Resource(vmiResource).Namespace(wf.Namespace).Create(t.Context(), object, metav1.CreateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	client.PrependReactor("delete", "*", func(ktesting.Action) (bool, runtime.Object, error) { return true, nil, nil })
+	c, err := NewController(&staticWorkflowClient{workflow: wf}, nil, config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.WithVMIClient(client)
+	completion := Completion{Succeeded: true}
+	c.cleanupVerdict(t.Context(), wf, wf.Annotations[runIDAnnotation], nil, &completion)
+	counts := map[string]int{}
+	for _, action := range client.Actions() {
+		if action.GetVerb() == "list" {
+			counts[action.GetResource().Resource]++
+		}
+	}
+	for resource, count := range counts {
+		if count > 4 || count < 2 {
+			t.Fatalf("%s: %d LISTs in one-second verdict, want 2..4 backoff polls", resource, count)
+		}
+	}
+	if completion.Succeeded || !strings.Contains(completion.Reason, object.GetName()) {
+		t.Fatalf("backoff lost bounded leftover verdict: %+v", completion)
+	}
+}
