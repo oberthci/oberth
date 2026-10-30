@@ -257,10 +257,7 @@ func preserveWorkspaceReadOnly(t *wfv1.Template, protected []corev1.VolumeMount)
 	sequentialInit := map[*corev1.Container]bool{}
 	for i := range t.InitContainers {
 		c := &t.InitContainers[i].Container
-		if c.RestartPolicy != nil && *c.RestartPolicy == corev1.ContainerRestartPolicyAlways {
-			continue
-		}
-		sequentialInit[c] = true
+		sequentialInit[c] = c.RestartPolicy == nil || *c.RestartPolicy != corev1.ContainerRestartPolicyAlways
 		// Authored init readonly requests still protect overlapping init
 		// aliases, including mounts in later sequential init containers.
 		for _, m := range c.VolumeMounts {

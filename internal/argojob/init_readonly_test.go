@@ -161,3 +161,18 @@ func TestInitWorkspaceAndSourceProtectionWithLocalTools(t *testing.T) {
 		t.Fatalf("missing mounts: source=%v workspace=%v tools=%v", source, workspace, tools)
 	}
 }
+
+func TestRestartableInitReaderProtectsLaterSequentialWriter(t *testing.T) {
+	tmpl := &wfv1.Template{
+		Container: &corev1.Container{VolumeMounts: []corev1.VolumeMount{{Name: "tools", MountPath: "/tools", ReadOnly: true}}},
+		Volumes:   []corev1.Volume{{Name: "tools", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}}},
+		InitContainers: []wfv1.UserContainer{
+			{Container: corev1.Container{Name: "reader", RestartPolicy: ptr.To(corev1.ContainerRestartPolicyAlways), VolumeMounts: []corev1.VolumeMount{{Name: "tools", MountPath: "/read", SubPath: "bin", ReadOnly: true}}}},
+			{Container: corev1.Container{Name: "writer", VolumeMounts: []corev1.VolumeMount{{Name: "tools", MountPath: "/write"}}}},
+		},
+	}
+	preserveWorkspaceReadOnly(tmpl, readonlyMounts(tmpl))
+	if !tmpl.InitContainers[1].VolumeMounts[0].ReadOnly {
+		t.Fatal("later init can mutate tools while restartable reader is live")
+	}
+}
