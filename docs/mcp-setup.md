@@ -195,7 +195,7 @@ call the proxy hostname directly.
 | `status` | CI status for a SHA or branch, including the failed step |
 | `logs` | One named step's log output for a SHA, optionally filtered |
 | `run_kvm_preflight` | Bounded historical KVM intent, receipt/refusal and cleanup by exact run ID or unique 8+ character prefix |
-| `run_get` | One durable run and its steps by full run ID or unique 8+ character prefix |
+| `run_get` | One durable run and its steps by full run ID or unique 8+ character prefix; `summary:true` returns only status/failure and compact steps |
 | `run_retry` | Requeue the newest interrupted or infrastructure-failed branch run using its same repo/ref/SHA; workflow-level failures without a failed step qualify, while test failures and older runs are refused |
 | `run_rerun` | Rerun a failed or interrupted run at the same SHA and ref (`id`, optional `reason`, admin-only `force`), linked by `rerun_of`: covers failed steps (flaky tests), non-newest runs and tag/release runs. Refused while the ref has an active run, once a branch moved past the SHA, for promotion/plan/apply runs, and for a tag that is already published or green or whose release failed only in publication (use `publish_retry` on that run). A publishing-only failure is re-pushed as `publish_retry` does instead of re-run. Non-admins: branch-push runs; tags need admin and `force`. Audited as `run.rerun` |
 | `run_cancel` | Cancel one queued, waiting or running run (audited; `id`, optional `reason`, admin-only `force`). The run becomes `interrupted` with phase `cancelled` and a reason naming the caller; a claimed run's Workflow is deleted and its admission released at once; it is never re-fired and opens no CI issue. Non-admins: branch-push runs outside a concurrency group only. Admins: any run, with `force` for tag/release and apply runs. Cancelling promotion CI fails the promotion without merging. Terminal runs are refused |
@@ -211,11 +211,11 @@ call the proxy hostname directly.
 | `promote_retry` | Retry a failed or interrupted promotion (`id`): a new promotion of the same repo/source SHA/target, merged onto the target's current head and re-tested. Same authorization as `promote`; the original grant still authorizes it, because a grant is consumed only by a delivered promotion. Audited as `promotion.retry` |
 | `publish_retry` | Retry upstream publication for a branch or tag run whose burns passed but whose upstream push failed; a promotion is retried with `promote_retry` instead |
 | `issue_create` | Create a manual issue, workspace-global or filed under one `upstream` |
-| `issue_get` | Get an issue by ID |
-| `issue_get_many` | Get 1..50 complete issues in request order, with explicit missing/size-limit results |
-| `issue_update` | Update an issue title and body or move a manual issue with `upstream`; optional `expected_body_sha256` rejects the update on mismatch |
-| `issue_append` | Append text to an issue body with a dated separator (no full-body re-send) |
-| `issue_close` | Close an issue |
+| `issue_get` | Get an issue by ID; optional `fields` and `body_limit` reduce the response |
+| `issue_get_many` | Get 1..50 issues in request order, with optional `fields`/`body_limit` and explicit missing/size-limit results |
+| `issue_update` | Update an issue title and body or move a manual issue with `upstream`; optional `expected_body_sha256` rejects the update on mismatch; returns a compact acknowledgment |
+| `issue_append` | Append text to an issue body with a dated separator (no full-body re-send); returns a compact acknowledgment |
+| `issue_close` | Close an issue; returns a compact acknowledgment |
 | `issue_reopen` | Reopen a manual issue by ID; an already-open issue is unchanged, CI issues are rejected |
 | `issue_delete` | Delete an accidentally created manual issue |
 | `issue_list` | List issue metadata with repo/kind/state/query filters, total and faceted counts, and 1..50 records per page |
@@ -636,14 +636,49 @@ uplinks can only move visible issues to upstreams in their scope; CI issues
 cannot move. The CLI can call the same tool with
 `oberth mcp call issue_update '{"id":1094,"upstream":"github"}'`.
 
+`issue_append`, `issue_update`, and `issue_close` return only an acknowledgment:
+`{"id":1094,"state":"open","updated_at":"2026-10-30T00:00:00Z","occurrences":1,"appended_bytes":42}`.
+`appended_bytes` is the UTF-8 byte length of the caller's append text, excluding
+the dated separator; it is zero for update and close. Read content separately
+with `issue_get` when needed.
+
 Read selected bodies in one call: `issue_get_many({"ids":[787,743,426]})`.
 The `results` array preserves that order. Each result contains `id` and either
-`issue` (the complete existing issue record) or `error` (`not_found` or
-`response_limit`). The encoded structured response is limited to 256 KiB;
-no body is truncated and every requested ID has a result. Later small issues
-can still fit after a large issue. Retrieve any `response_limit` IDs with
-`issue_get`. Requests must contain 1..50 unique positive IDs. Neither read tool
-acquires or renews locks. This is live pagination, not a point-in-time snapshot.
+`issue` or `error` (`not_found` or `response_limit`). Both `issue_get` and
+`issue_get_many` preserve full records and unlimited bodies by default for
+compatibility. To reduce context use, pass either or both of:
+
+- `fields`: a nonempty list of unique public field names. For example,
+  `issue_get_many({"ids":[787,743,426],"fields":["id","title","state","updated_at"]})`.
+  Only selected fields appear in each issue, including selected zero values.
+  Supported names: `id`, `lock`, `upstream`, `kind`, `title`, `body`, `state`,
+  `repo_id`, `branch`, `occurrences`, `ci_origin`, `ci_work_id`, `created_at`,
+  `updated_at`. Internal storage and sequence fields cannot be selected.
+- `body_limit`: a nonnegative byte limit for the retained prefix of each body,
+  including occurrence history embedded in the body. For example,
+  `issue_get({"id":787,"body_limit":4096})`. A longer body ends with
+  `\n[truncated N bytes]`, where N is the exact number of withheld source bytes.
+  The prefix ends at a UTF-8 boundary; the marker is additional to the byte
+  limit. Zero returns only the marker for a nonempty body, and an empty body
+  stays empty. The numeric `occurrences` count always remains exact. This
+  option has no effect when `fields` excludes `body`.
+
+The bulk encoded structured response remains limited to 256 KiB, after field
+selection and body truncation. Every requested ID has a result, and later small
+issues can still fit after a large issue. Retry `response_limit` IDs with compact
+options or `issue_get`. Requests must contain 1..50 unique positive IDs. Neither
+read tool acquires or renews locks, and neither changes stored content. This is
+live pagination, not a point-in-time snapshot.
+
+For a compact run read, use `run_get({"id":"<run ID or unique 8+ character prefix>","summary":true})`.
+It returns `id`, `status`, `phase`, `failed_burn`, `failed_step`, `error`, and
+`steps`. Each step contains `burn`, `name`, `status`, `started_at`, and
+`finished_at`; unknown times are null and an empty step list is `[]`. Burn
+names distinguish steps with the same name in different burns. This read omits
+retained timing, repository details, diagnostics, and telemetry and does not
+load the retained timing record. Omit `summary` or pass false for the existing
+full `Run`/`Steps`/`Repository` response. Authorization and upstream scope are
+the same for compact and full reads.
 
 ### Historical KVM preflight evidence
 

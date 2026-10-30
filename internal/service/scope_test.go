@@ -553,7 +553,7 @@ func TestIssueUpdateMovesScopeWithAuditAndPreservesIssue(t *testing.T) {
 	if _, err := fixture.call(scopedActor, "issue_get", map[string]any{"id": global.ID}); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("global issue visible before move: %v", err)
 	}
-	moved := mustCall(t, fixture, unscopedActor, "issue_update", map[string]any{"id": global.ID, "upstream": "github"}).(api.IssueResponse)
+	moved := readAcknowledgedIssue(t, fixture.service, unscopedActor, mustCall(t, fixture, unscopedActor, "issue_update", map[string]any{"id": global.ID, "upstream": "github"}))
 	if moved.ID != global.ID || moved.Upstream != "github" || moved.Title != global.Title || moved.Body != global.Body {
 		t.Fatalf("moved issue = %#v", moved)
 	}
@@ -606,14 +606,14 @@ func TestIssueUpdateMovesScopeWithAuditAndPreservesIssue(t *testing.T) {
 	if _, err := fixture.call(unscopedActor, "issue_update", map[string]any{"id": fixture.issues["github"][0].ID, "upstream": "github"}); !errors.Is(err, store.ErrInvalid) {
 		t.Fatalf("CI issue scope move = %v", err)
 	}
-	back := mustCall(t, fixture, unscopedActor, "issue_update", map[string]any{"id": global.ID, "upstream": ""}).(api.IssueResponse)
+	back := readAcknowledgedIssue(t, fixture.service, unscopedActor, mustCall(t, fixture, unscopedActor, "issue_update", map[string]any{"id": global.ID, "upstream": ""}))
 	if back.Upstream != "" || back.ID != global.ID {
 		t.Fatalf("global issue after move back = %#v", back)
 	}
 	if _, err := fixture.call(scopedActor, "issue_get", map[string]any{"id": global.ID}); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("global issue visible after move back: %v", err)
 	}
-	if movedByAdmin := mustCall(t, fixture, scopedAdmin, "issue_update", map[string]any{"id": global.ID, "upstream": "github"}).(api.IssueResponse); movedByAdmin.Upstream != "github" {
+	if movedByAdmin := readAcknowledgedIssue(t, fixture.service, unscopedActor, mustCall(t, fixture, scopedAdmin, "issue_update", map[string]any{"id": global.ID, "upstream": "github"})); movedByAdmin.Upstream != "github" {
 		t.Fatalf("scoped admin cannot repair global scope: %#v", movedByAdmin)
 	}
 }

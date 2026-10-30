@@ -3371,7 +3371,10 @@ func TestIssueMutationLockRenewalIsNotPostCommit(t *testing.T) {
 		}
 		value, err := service.CallTool(ctx, owner, "issue_update",
 			json.RawMessage(fmt.Sprintf(`{"id":%d,"title":"changed","body":"body"}`, issue.ID)))
-		if err != nil || value.(api.IssueResponse).Title != "changed" {
+		if err != nil {
+			t.Fatalf("owner issue_update = %#v, %v", value, err)
+		}
+		if readAcknowledgedIssue(t, service, owner, value).Title != "changed" {
 			t.Fatalf("owner issue_update = %#v, %v", value, err)
 		}
 	})
@@ -3404,7 +3407,7 @@ func TestIssueMutationLockRenewalIsNotPostCommit(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		closed := value.(api.IssueResponse)
+		closed := readAcknowledgedIssue(t, service, actor, value)
 		if closed.State != string(model.IssueClosed) || failing.calls != 0 {
 			t.Fatalf("closed issue = %#v, renew calls = %d", closed, failing.calls)
 		}
@@ -3464,7 +3467,7 @@ func TestIssueToolsListBothKindsAndUseActingIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	updated := updatedValue.(api.IssueResponse)
+	updated := readAcknowledgedIssue(t, service, actor, updatedValue)
 	if updated.Title != "updated" || updated.Body != "new" {
 		t.Fatalf("issue update response = %#v", updated)
 	}
@@ -3472,7 +3475,7 @@ func TestIssueToolsListBothKindsAndUseActingIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	closed := closedValue.(api.IssueResponse)
+	closed := readAcknowledgedIssue(t, service, actor, closedValue)
 	if closed.State != string(model.IssueClosed) {
 		t.Fatalf("issue close response = %#v", closed)
 	}

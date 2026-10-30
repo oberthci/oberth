@@ -380,7 +380,8 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 		return service.readKVMPreflight(ctx, arguments.ID)
 	case "run_get":
 		var arguments struct {
-			ID string `json:"id"`
+			ID      string `json:"id"`
+			Summary bool   `json:"summary"`
 		}
 		if err := decodeTool(raw, &arguments); err != nil {
 			return nil, err
@@ -388,7 +389,7 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 		if strings.TrimSpace(arguments.ID) == "" {
 			return nil, fmt.Errorf("%w: run ID is required", ErrInvalidInput)
 		}
-		return service.Run(ctx, actor, arguments.ID)
+		return service.readRun(ctx, actor, arguments.ID, arguments.Summary)
 	case "run_retry":
 		var arguments struct {
 			ID string `json:"id"`
@@ -552,23 +553,31 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 	case "issue_get":
 		var arguments struct {
 			ID int64 `json:"id"`
+			issueReadOptions
 		}
 		if err := decodeTool(raw, &arguments); err != nil {
+			return nil, err
+		}
+		if err := arguments.issueReadOptions.validate(); err != nil {
 			return nil, err
 		}
 		issue, err := service.issueGet(ctx, actor, arguments.ID)
 		if err != nil {
 			return nil, err
 		}
-		return wireIssue(issue), nil
+		return arguments.issueReadOptions.project(issue), nil
 	case "issue_get_many":
 		var arguments struct {
 			IDs []int64 `json:"ids"`
+			issueReadOptions
 		}
 		if err := decodeTool(raw, &arguments); err != nil {
 			return nil, err
 		}
-		return service.issueGetMany(ctx, actor, arguments.IDs)
+		if err := arguments.issueReadOptions.validate(); err != nil {
+			return nil, err
+		}
+		return service.issueGetMany(ctx, actor, arguments.IDs, arguments.issueReadOptions)
 	case "issue_update":
 		var arguments struct {
 			ID                 int64   `json:"id"`
@@ -584,7 +593,7 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 		if err != nil {
 			return nil, err
 		}
-		return wireIssue(issue), nil
+		return wireIssueMutation(issue, 0), nil
 	case "issue_append":
 		var arguments struct {
 			ID   int64  `json:"id"`
@@ -597,7 +606,7 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 		if err != nil {
 			return nil, err
 		}
-		return wireIssue(issue), nil
+		return wireIssueMutation(issue, len(arguments.Text)), nil
 	case "issue_close":
 		var arguments struct {
 			ID int64 `json:"id"`
@@ -609,7 +618,7 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 		if err != nil {
 			return nil, err
 		}
-		return wireIssue(issue), nil
+		return wireIssueMutation(issue, 0), nil
 	case "issue_reopen":
 		var arguments struct {
 			ID int64 `json:"id"`
@@ -978,6 +987,10 @@ func (service *API) resolveReadRunID(ctx context.Context, id string) (model.Run,
 // tool it resolves by run ID, never renews an issue lock, and has no other
 // side effects, so an idle dashboard cannot hold agent coordination state.
 func (service *API) Run(ctx context.Context, actor api.Actor, id string) (any, error) {
+	return service.readRun(ctx, actor, id, false)
+}
+
+func (service *API) readRun(ctx context.Context, actor api.Actor, id string, summary bool) (any, error) {
 	service, err := service.forActor(ctx, actor)
 	if err != nil {
 		return nil, err
@@ -995,6 +1008,9 @@ func (service *API) Run(ctx context.Context, actor api.Actor, id string) (any, e
 	steps, err := service.stepsForRun(ctx, run)
 	if err != nil {
 		return nil, fmt.Errorf("load run steps: %w", err)
+	}
+	if summary {
+		return summarizeRun(run, steps), nil
 	}
 	response := RunDetailResponse{Run: service.presentationRun(ctx, run), Steps: steps, Scheduling: service.scheduling(ctx, run, steps),
 		RerunOf: service.runRerunOf(ctx, run.ID)}

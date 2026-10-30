@@ -147,14 +147,25 @@ type IssueResponse struct {
 	UpdatedAt   string           `json:"updated_at,omitempty"`
 }
 
+// IssueMutationResponse acknowledges a write without echoing issue content.
+// AppendedBytes counts caller text bytes (excluding the dated separator), and
+// is zero for update/close.
+type IssueMutationResponse struct {
+	ID            int64  `json:"id"`
+	State         string `json:"state"`
+	UpdatedAt     string `json:"updated_at"`
+	Occurrences   int64  `json:"occurrences"`
+	AppendedBytes int    `json:"appended_bytes"`
+}
+
 // IssueGetManyMaximumBytes bounds encoded structured content, including all
-// result rows. Complete records that do not fit use an explicit fallback row.
+// result rows. Records that do not fit use an explicit fallback row.
 const IssueGetManyMaximumBytes = 256 << 10
 
 type IssueGetManyResult struct {
-	ID    int64          `json:"id"`
-	Issue *IssueResponse `json:"issue,omitempty"`
-	Error string         `json:"error,omitempty"`
+	ID    int64  `json:"id"`
+	Issue any    `json:"issue,omitempty"` // IssueResponse or a fields projection.
+	Error string `json:"error,omitempty"`
 }
 
 type IssueGetManyResponse struct {
@@ -278,7 +289,7 @@ func (server *Server) handleMCP(writer http.ResponseWriter, request *http.Reques
 			"protocolVersion": mcpProtocolVersion,
 			"capabilities":    map[string]any{"tools": map[string]any{}},
 			"serverInfo":      map[string]string{"name": "oberth", "version": server.version},
-			"instructions":    "Use status/wait/logs for SHA-oriented CI, run_get/run_logs for exact promotion run IDs, sync only to park the selected exact WIP branch upstream without a green gate, and promote to merge, test, and push a target branch. Sync is not completion evidence. Filter logs with pattern/context/offset/limit/tail rather than retrieving a whole step; a step can exceed a context window and the response reports what it withheld. A step named frag-<hash>-<template> came from another repository's pinned pipeline fragment, not from the repository under test, so a failure there is usually the pinned version rather than this commit. Authenticated JSON dashboard state is available at /api/runs, /api/repos, /api/issues, /api/grants, and /api/status.",
+			"instructions":    "Use status/wait/logs for SHA-oriented CI, run_get/run_logs for exact promotion run IDs, sync only to park the selected exact WIP branch upstream without a green gate, and promote to merge, test, and push a target branch. Sync is not completion evidence. Prefer issue_get/issue_get_many with fields/body_limit and run_get with summary:true for routine status reads; full records remain available. Filter logs with pattern/context/offset/limit/tail rather than retrieving a whole step; a step can exceed a context window and the response reports what it withheld. A step named frag-<hash>-<template> came from another repository's pinned pipeline fragment, not from the repository under test, so a failure there is usually the pinned version rather than this commit. Authenticated JSON dashboard state is available at /api/runs, /api/repos, /api/issues, /api/grants, and /api/status.",
 		}
 	case "ping":
 		response.Result = map[string]any{}
@@ -437,7 +448,7 @@ func toolDefinitions() []map[string]any {
 		tool("status", "Return concise CI status for a full SHA, short SHA, or branch, including the failed step.", object(map[string]any{"repo": stringProperty("Repository name when the selector is ambiguous"), "ref": stringProperty("Full SHA, short SHA, or branch")}, "ref")),
 		tool("logs", "Return one named step log for a SHA, optionally filtered server-side. Prefer a pattern over retrieving a whole step: the response reports total and matched line counts so a narrowed read is never mistaken for a complete one.", object(logFilterProperties(map[string]any{"repo": stringProperty("Repository name when the SHA is ambiguous"), "sha": stringProperty("Full or short SHA"), "step": stringProperty("Step name")}), "sha", "step")),
 		tool("run_kvm_preflight", "Read bounded immutable KVM preflight evidence for one full run ID or unique hexadecimal prefix (at least 8 characters). Receipt validity and cleanup are historical evidence, not publication eligibility; parent status is separate. A known run without a preflight returns present=false.", object(map[string]any{"id": stringProperty("Full run ID or unique hexadecimal prefix (at least 8 characters)")}, "id")),
-		tool("run_get", "Return one run, its named step results and versioned retained phase/step timing by full durable run ID or unique hexadecimal prefix (at least 8 characters). Missing timing is explicitly unknown.", object(map[string]any{"id": stringProperty("Full run ID or unique hexadecimal prefix (at least 8 characters)")}, "id")),
+		tool("run_get", "Return one run by full durable ID or unique hexadecimal prefix (at least 8 characters). Default: full run, step results and versioned retained timing; missing timing is unknown. Set summary:true for only id/status/phase/failed_burn/failed_step/error and steps (burn, name, status, started_at, finished_at), omitting Timing, repository and diagnostics.", object(map[string]any{"id": stringProperty("Full run ID or unique hexadecimal prefix (at least 8 characters)"), "summary": map[string]any{"type": "boolean", "description": "Return only run status/failure and compact steps; default false"}}, "id")),
 		tool("run_retry", "Queue a fresh attempt for the newest interrupted or infrastructure-failed branch run, retaining its repository, ref and SHA. Workflow-level failures without a failed step qualify; test failures, older runs, release runs, and branches with an active run are refused. The caller is recorded as actor.", object(map[string]any{"id": stringProperty("Full run ID or unique hexadecimal prefix (at least 8 characters)")}, "id")),
 		tool("run_cancel", "Cancel one queued, waiting or running run. The run becomes interrupted with phase cancelled and a reason naming the caller; a claimed run's Workflow is deleted and its admission released, and it is never re-fired. Cancelling a terminal run is refused. Non-admin uplinks may cancel only branch-push runs outside a concurrency group; admins may cancel any run but must set force for tag/release and apply runs, whose publication may be left partial. Cancelling promotion CI fails the promotion without merging. Audited.", object(map[string]any{
 			"id":     stringProperty("Full run ID or unique hexadecimal prefix (at least 8 characters)"),
@@ -470,11 +481,11 @@ func toolDefinitions() []map[string]any {
 		tool("promote_status", "Wait for an append-only promotion record to become terminal. A failed or interrupted promotion that was retried names its successor in retried_as. Timeout defaults to 600 seconds and cannot exceed 600; larger values are rejected. The CLI allows at least 60 seconds, or the tool timeout plus 30 seconds, unless --timeout overrides its client deadline.", object(map[string]any{"id": stringProperty("Promotion ID"), "timeout": timeoutProperty()}, "id")),
 		tool("promote_retry", "Retry a failed or interrupted promotion: a new promotion of the same repository, source SHA and target, merged onto the target's current head and re-tested like promote, so a moved target or a transient push failure is recovered without a new commit. Same authorization as promote; a grant is consumed only by a delivered promotion, so the original grant authorizes the retry. Refused while a promotion of the same tuple is pending or delivered, or when the source SHA's newest run is not green. Audited as promotion.retry.", object(map[string]any{"id": stringProperty("Promotion ID of the failed or interrupted promotion")}, "id")),
 		tool("issue_create", "Create a manual issue, workspace-global or filed under one upstream. Uplinks scoped to that upstream see it; an uplink scoped to one upstream files there by default.", object(map[string]any{"title": stringProperty("Issue title"), "body": stringProperty("Issue body"), "upstream": stringProperty("Upstream name to file the issue under (required for an uplink scoped to several upstreams)")}, "title", "body")),
-		tool("issue_get", "Get an issue by ID.", object(map[string]any{"id": integerProperty("Issue ID")}, "id")),
-		tool("issue_get_many", "Get complete issue records for 1..50 unique positive IDs in request order. Each result contains issue or error (not_found or response_limit). Structured JSON is bounded to 256 KiB; use issue_get for response_limit IDs. Bodies are never truncated. Read-only; does not renew locks.", object(map[string]any{"ids": map[string]any{"type": "array", "minItems": 1, "maxItems": 50, "uniqueItems": true, "items": map[string]any{"type": "integer", "minimum": 1}}}, "ids")),
-		tool("issue_update", "Update an issue title and body, or move a manual issue to an upstream (empty or global means workspace-global, admin only). A non-admin can move only a visible issue to an upstream in scope. When expected_body_sha256 is set, the server rejects the update if the SHA-256 of the existing body does not match.", object(map[string]any{"id": integerProperty("Issue ID"), "title": stringProperty("Issue title (send with body)"), "body": stringProperty("Issue body (send with title)"), "upstream": stringProperty("New upstream name, or empty/global for workspace-global (admin only)"), "expected_body_sha256": stringProperty("Hex-encoded SHA-256 of the existing body; the server rejects the update on mismatch")}, "id")),
-		tool("issue_append", "Append text to an issue body with a dated separator, without replacing the existing content. Safer than issue_update for checkpoints on large issues: the caller never re-sends the existing body.", object(map[string]any{"id": integerProperty("Issue ID"), "text": stringProperty("Text to append")}, "id", "text")),
-		tool("issue_close", "Close an issue without deleting its history.", object(map[string]any{"id": integerProperty("Issue ID")}, "id")),
+		tool("issue_get", "Get an issue by ID. Full record by default for compatibility. Optional fields selects only named fields; body_limit caps retained body/occurrence-history bytes with an explicit truncated N bytes marker. The numeric occurrences count remains exact. Read-only; does not renew locks.", object(issueReadProperties("id", integerProperty("Issue ID")), "id")),
+		tool("issue_get_many", "Get 1..50 issues in request order, each with issue or error (not_found or response_limit). Full records by default. Optional fields and body_limit apply to each issue before the 256 KiB structured JSON budget; body_limit truncates body/occurrence history with a truncated N bytes marker, keeping numeric occurrences exact. Use compact options or issue_get for response_limit IDs. Read-only; does not renew locks.", object(issueReadProperties("ids", map[string]any{"type": "array", "minItems": 1, "maxItems": 50, "uniqueItems": true, "items": map[string]any{"type": "integer", "minimum": 1}}), "ids")),
+		tool("issue_update", "Update an issue title and body, or move a manual issue to an upstream (empty or global means workspace-global, admin only). A non-admin can move only a visible issue to an upstream in scope. When expected_body_sha256 is set, the server rejects the update if the SHA-256 of the existing body does not match. Returns only id, state, updated_at, occurrences, appended_bytes (zero); use issue_get to read content.", object(map[string]any{"id": integerProperty("Issue ID"), "title": stringProperty("Issue title (send with body)"), "body": stringProperty("Issue body (send with title)"), "upstream": stringProperty("New upstream name, or empty/global for workspace-global (admin only)"), "expected_body_sha256": stringProperty("Hex-encoded SHA-256 of the existing body; the server rejects the update on mismatch")}, "id")),
+		tool("issue_append", "Append text to an issue body with a dated separator, without replacing the existing content. Safer than issue_update for checkpoints on large issues: the caller never re-sends the existing body. Returns only id, state, updated_at, occurrences, appended_bytes (UTF-8 bytes of text, excluding separator); use issue_get to read content.", object(map[string]any{"id": integerProperty("Issue ID"), "text": stringProperty("Text to append")}, "id", "text")),
+		tool("issue_close", "Close an issue without deleting its history. Returns only id, state, updated_at, occurrences, appended_bytes (zero); use issue_get to read content.", object(map[string]any{"id": integerProperty("Issue ID")}, "id")),
 		tool("issue_reopen", "Reopen a manual issue without changing its ID or history. Already-open manual issues are unchanged; CI issues cannot be reopened manually.", object(map[string]any{"id": integerProperty("Issue ID")}, "id")),
 		tool("issue_delete", "Delete an accidentally created manual issue.", object(map[string]any{"id": integerProperty("Issue ID")}, "id")),
 		tool("issue_list", "List issue metadata, newest creation ID first (not latest updated), with total and faceted state/kind counts. Filters apply before pagination; counts exclude the cursor. Defaults to all issues, 50 per page; pass next_before as before with the same filters until absent for a complete queue scan.", object(map[string]any{
@@ -570,5 +581,27 @@ func toolDefinitions() []map[string]any {
 			"sha":    stringProperty("Filter by exact full source SHA"),
 			"status": map[string]any{"type": "string", "enum": []string{"active", "revoked", "expired", "consumed", "all"}, "description": "Filter by grant status (default: all)"},
 		})),
+	}
+}
+
+// IssueReadFields is the public MCP field allowlist; persistence-only fields
+// cannot be selected. Keep the schema and service validation on this list.
+var IssueReadFields = []string{
+	"id", "lock", "upstream", "kind", "title", "body", "state", "repo_id",
+	"branch", "occurrences", "ci_origin", "ci_work_id", "created_at", "updated_at",
+}
+
+func issueReadProperties(key string, value any) map[string]any {
+	return map[string]any{
+		key: value,
+		"fields": map[string]any{
+			"type": "array", "minItems": 1, "uniqueItems": true,
+			"items":       map[string]any{"type": "string", "enum": IssueReadFields},
+			"description": "Return only these issue fields; omit for the full record",
+		},
+		"body_limit": map[string]any{
+			"type": "integer", "minimum": 0,
+			"description": "Maximum retained UTF-8 body bytes, including occurrence history; marker added outside limit. Zero returns only a truncation marker for a nonempty body. Omit for unlimited body",
+		},
 	}
 }

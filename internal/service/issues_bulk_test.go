@@ -50,7 +50,7 @@ func TestIssueGetManyOrderMissingAndReadOnly(t *testing.T) {
 	if !reflect.DeepEqual(reader.calls, []int64{2, 999, 1}) || len(got.Results) != 3 {
 		t.Fatalf("order/reads: %#v %#v", got, reader.calls)
 	}
-	if got.Results[0].Issue == nil || *got.Results[0].Issue != wireIssue(reader.issues[2]) || got.Results[1].Error != "not_found" || got.Results[1].Issue != nil || got.Results[2].Issue == nil || *got.Results[2].Issue != wireIssue(reader.issues[1]) {
+	if got.Results[0].Issue == nil || got.Results[0].Issue != wireIssue(reader.issues[2]) || got.Results[1].Error != "not_found" || got.Results[1].Issue != nil || got.Results[2].Issue == nil || got.Results[2].Issue != wireIssue(reader.issues[1]) {
 		t.Fatalf("records: %#v", got)
 	}
 }
@@ -105,7 +105,7 @@ func TestIssueGetManyEncodedBudgetBoundary(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if extra == 0 && (len(encoded) != api.IssueGetManyMaximumBytes || got.Results[0].Issue == nil || got.Results[0].Issue.Body != issue.Body) {
+		if extra == 0 && (len(encoded) != api.IssueGetManyMaximumBytes || got.Results[0].Issue == nil || got.Results[0].Issue.(api.IssueResponse).Body != issue.Body) {
 			t.Fatalf("exact fit: %d %#v", len(encoded), got.Results[0].Error)
 		}
 		if extra == 1 && (got.Results[0].Error != "response_limit" || got.Results[0].Issue != nil) {
@@ -135,7 +135,7 @@ func TestIssueGetManyReservesEveryIDAndAllowsLaterSmallRecords(t *testing.T) {
 			t.Fatalf("overflow %d hidden", i)
 		}
 	}
-	if got.Results[2].Issue == nil || got.Results[4].Issue == nil || got.Results[4].Issue.Body != reader.issues[5].Body {
+	if got.Results[2].Issue == nil || got.Results[4].Issue == nil || got.Results[4].Issue.(api.IssueResponse).Body != reader.issues[5].Body {
 		t.Fatal("later records lost")
 	}
 	for i := 5; i < 50; i++ {

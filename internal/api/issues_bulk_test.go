@@ -39,7 +39,7 @@ func TestIssueBulkMCPEncodingBoundAndFullRecords(t *testing.T) {
 		if err := json.Unmarshal([]byte(content[0]["text"]), &textPayload); err != nil {
 			t.Fatal(err)
 		}
-		if textPayload.Results[0].Issue.Body != body || len(textPayload.Results) != 3 || textPayload.Results[2].Error != "response_limit" {
+		if textPayload.Results[0].Issue.(map[string]any)["body"] != body || len(textPayload.Results) != 3 || textPayload.Results[2].Error != "response_limit" {
 			t.Fatal("text client lost complete records or fallback")
 		}
 	}
