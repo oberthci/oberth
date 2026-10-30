@@ -184,18 +184,7 @@ func (p *TrustedPreflights) Execute(ctx context.Context, job service.JobRequest,
 		defer close(watched)
 		ticker := time.NewTicker(500 * time.Millisecond)
 		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				run, e := p.store.Run(ctx, intent.RunID)
-				if e != nil || run.Status != model.RunRunning || run.SupersededBy != "" {
-					cancel()
-					return
-				}
-			}
-		}
+		p.watchParentRun(ctx, intent.RunID, ticker.C, cancel)
 	}()
 	uid := ""
 	submitted := false
@@ -323,6 +312,36 @@ const trustedRecoveryBound = 2 * time.Minute
 // Recover never replays execution or grants publication. It cleans durable
 // obligations first; the scheduler then interrupts undelivered parents and
 // may durably queue one fresh attempt.
+// A completed transient read is not evidence the parent was canceled. Keep
+// observing under the execution deadline; only authoritative state or a hard
+// read failure cancels the credential-free preflight.
+func (p *TrustedPreflights) watchParentRun(ctx context.Context, id string, ticks <-chan time.Time, cancel context.CancelFunc) {
+	var retries uint64
+	var nextLog time.Time
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticks:
+			readCtx, stop := context.WithTimeout(ctx, 5*time.Second)
+			run, err := p.store.Run(readCtx, id)
+			stop()
+			if service.IsTransientDatabaseError(err) && ctx.Err() == nil {
+				retries++
+				if now := time.Now(); !now.Before(nextLog) {
+					log.Printf("WARN: trusted parent DB read run=%s retry_pending=true retries_total=%d error=%q", id, retries, err)
+					nextLog = now.Add(30 * time.Second)
+				}
+				continue
+			}
+			if err != nil || run.Status != model.RunRunning || run.SupersededBy != "" {
+				cancel()
+				return
+			}
+		}
+	}
+}
+
 func (p *TrustedPreflights) Recover(ctx context.Context) ([]string, error) {
 	pending, err := p.store.PendingKVMPreflights(ctx)
 	if err != nil {
@@ -343,6 +362,16 @@ func (p *TrustedPreflights) Recover(ctx context.Context) ([]string, error) {
 		ids = append(ids, execution.Intent.RunID)
 	}
 	return ids, errors.Join(failures...)
+}
+
+// RecoverRun is used after the live owner of this exact execution has returned
+// a transient storage failure. Never enumerate/cancel another live preflight.
+func (p *TrustedPreflights) RecoverRun(ctx context.Context, id string) error {
+	execution, err := p.store.KVMPreflight(ctx, id)
+	if err != nil {
+		return err
+	}
+	return p.recoverOne(ctx, execution)
 }
 
 func (p *TrustedPreflights) recoverOne(ctx context.Context, execution vmrunner.KVMExecution) error {

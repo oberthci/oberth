@@ -25,20 +25,20 @@ func (scheduler *Scheduler) executeTrustedWithCapacity(ctx context.Context, job 
 			return false, err
 		}
 		journal := scheduler.store.(vmrunner.KVMJournal)
-		if _, lookupErr := journal.KVMPreflight(ctx, job.Run.ID); !errors.Is(lookupErr, store.ErrNotFound) {
+		if _, lookupErr := retryDatabase(ctx, "KVMPreflight", func(ctx context.Context) (vmrunner.KVMExecution, error) { return journal.KVMPreflight(ctx, job.Run.ID) }); !errors.Is(lookupErr, store.ErrNotFound) {
 			return false, errors.Join(err, lookupErr)
 		}
 		if err := reservation.parkVM(); err != nil {
 			return false, err
 		}
-		if _, err := scheduler.store.MarkRunParked(ctx, job.Run.ID); err != nil {
+		if _, err := scheduler.database().MarkRunParked(ctx, job.Run.ID); err != nil {
 			return false, err
 		}
 		if err := scheduler.capacityWait(ctx); err != nil {
 			return false, err
 		}
 
-		current, err := scheduler.store.Run(ctx, job.Run.ID)
+		current, err := scheduler.database().Run(ctx, job.Run.ID)
 		if err != nil {
 			return false, err
 		}
@@ -59,7 +59,7 @@ func (scheduler *Scheduler) executeTrustedWithCapacity(ctx context.Context, job 
 		}
 		// Reacquiring resources can itself wait: check cancellation and the mutation
 		// gate again before any external preflight work.
-		current, err = scheduler.store.Run(ctx, job.Run.ID)
+		current, err = scheduler.database().Run(ctx, job.Run.ID)
 		if err != nil {
 			return false, err
 		}
@@ -69,7 +69,7 @@ func (scheduler *Scheduler) executeTrustedWithCapacity(ctx context.Context, job 
 		if err := require(ctx); err != nil {
 			return false, err
 		}
-		readmitted, err := scheduler.store.MarkRunAdmitted(ctx, job.Run.ID)
+		readmitted, err := scheduler.database().MarkRunAdmitted(ctx, job.Run.ID)
 		if err != nil {
 			return false, err
 		}

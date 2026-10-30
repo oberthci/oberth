@@ -1165,9 +1165,9 @@ trust assumptions and complete invalidation rules.
   owner will release. The practical case is a granted reservation still held
   for a run that is already terminal because its owner hung or was lost; an
   ungranted reservation of a terminal run qualifies too. A `retained`
-  reservation is reachable only while a stopping scheduler drains: every
-  `retain()` path returns the error that stops the scheduler, so it lasts
-  only until that process exits. A reservation of an active owned run is
+  reservation normally belongs to a stopping scheduler. A live owner can
+  also retain it while recovering an exact trusted preflight after a transient
+  DB failure; cleanup must be confirmed before that owner releases it. A reservation of an active owned run is
   refused (use `run_cancel`), and so is one without a durable run unless
   `force`. Before a granted reservation is released the run's recorded
   Workflow is deleted through the engine and an accepted deletion is the
@@ -1411,6 +1411,31 @@ trust assumptions and complete invalidation rules.
   with an explicit `force`, tag/release runs. The response carries `mode`
   (`rerun` or `publish_retry`), `run_id`, `rerun_of`, `status`, `ref`, `sha`
   and optional `publication_id`, `warning` and `error`.
+- Background scheduler storage deadlines and SQLite BUSY/LOCKED errors keep
+  the exact operation pending with fresh 10-second attempt budgets and capped
+  exponential backoff (250ms to 5s), until recovery or owner shutdown. They do
+  not return a fatal scheduler completion, replay a Workflow create/Wait/Git
+  push, or change an already observed run result. Lost commit acknowledgements
+  resolve the exact claim/requeue/publication identity before retrying.
+  Intentional retry backoff is excluded from local dispatch liveness; a DB
+  call that ignores its deadline remains detectable as a local wedge. Warnings carry
+  `operation`, `retry_pending`, `retries_total` and `retry_in`; unscoped
+  `system_status`/`GET /api/status` exposes `database_retries_total` (process
+  lifetime, omitted at zero). Client request contexts keep their own deadline
+  and ordinary error behavior. Composite startup recovery and Git replay keep
+  their caller's operation budget; the 10-second budget applies to storage
+  calls, not Kubernetes cleanup or a whole replay. Bare external deadlines do
+  not authorize database retries. Trusted startup cleanup logs pending failures
+  and continues with its durable obligations intact. Owner shutdown stops
+  retries between attempts and leaves in-flight detached cleanup/finalization
+  to finish. The create-settlement worker keeps its own bounded attempts/backoff.
+  A transient parent-run observation retries without canceling the trusted
+  preflight; only authoritative terminal state or a hard read failure cancels it.
+  A trusted preflight that returned a DB failure is cleaned by exact run ID,
+  retaining its grant until journal cleanup and parent settlement succeed.
+  Invalid immutable/admission bindings, missing required recovery capabilities,
+  schema/corruption and other non-transient failures keep their fatal behavior;
+  a joined invariant error cannot be hidden by a concurrent DB deadline.
 - A server stop or restart adopts an existing Argo Workflow for an active
   branch, promotion, tag or release run without a pending trusted KVM
   preflight (#1172, slices 1-4; trusted preflights recover separately, see

@@ -263,6 +263,9 @@ func (scheduler *Scheduler) settleOneCreate(ctx context.Context) {
 	log.Printf("WARN: create_cleanup run=%q pending_for=%s attempt=%d reason=%s retry_in=%s", pending.runID, age, pending.attempts, reason, delay)
 }
 func (scheduler *Scheduler) settleCreateAttempt(ctx context.Context, pending *pendingCreate) (bool, error) {
+	// This reconciler owns its own bounded attempts and backoff. Nested DB
+	// adapters must not acquire the scheduler's unbounded retry continuation.
+	ctx = context.WithValue(ctx, databaseRetryKey{}, (*databaseRetryScope)(nil))
 	if err := scheduler.requireMutation(ctx); err != nil {
 		return false, err
 	}
@@ -341,7 +344,7 @@ func (scheduler *Scheduler) settleCreateAttempt(ctx context.Context, pending *pe
 			return false, nil
 		}
 	}
-	cleanupCtx, cancel := boundedWorkspaceCleanupContext(ctx)
+	cleanupCtx, cancel := context.WithTimeout(ctx, workspaceCleanupTimeout)
 	err = scheduler.workspaces.cleanupRun(cleanupCtx, run.ID)
 	cancel()
 	if err != nil {
