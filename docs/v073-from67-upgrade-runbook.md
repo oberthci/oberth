@@ -1,5 +1,11 @@
 # tuxbox: v0.17.67/schema33 to v0.17.73/schema35 and back
 
+For v0.17.74, follow the [schema36 upgrade note](schema36-upgrade-note.md)
+for the **33→36→33** migration/restore assertions and new release pins.
+This runbook's pinned 33→35→33 rehearsal remains historical evidence, not
+qualification of schema36. Its zero-writer, old-image schema-33 restore
+procedure remains the rollback basis; do not start the old binary on schema36.
+
 Use the exact old/new pins described in [from-67 pin preparation](v073-from67-pins.md).
 The v0.17.62 CLI currently on the operator machine must never perform this
 backup/restore. Use absolute paths to the verified v0.17.67 and v0.17.73 CLIs;

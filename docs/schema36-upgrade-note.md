@@ -34,6 +34,21 @@ operator deliberately targets an older schema-34 release, it needs its own
 schema-34 backup/CLI/image and must instead assert **34→36→34**. A schema-35
 backup is not a substitute for restoring schema 34.
 
+For tuxbox's reported **v0.17.67/schema33** predecessor, the required path is
+**33→36→33**. Startup applies migrations 34, 35 and 36 and their ledger entries
+in one transaction: all commit together, or the database remains at schema 33.
+The old v0.17.67 binary refuses the upgraded database as too new; restarting it
+or rolling back Helm cannot downgrade schema 36. Rollback requires restoring
+the verified pre-upgrade **schema-33** backup with the pinned v0.17.67 CLI/image
+and zero-writer maintenance chart from the
+[from-67 runbook](v073-from67-upgrade-runbook.md). Use its
+[pin preparation](v073-from67-pins.md),
+[qualification and limits](v073-from67-qualification.md) and
+[watch procedure](v073-from67-watch.md) as the starting procedure, with new
+v0.17.74 pins and explicit 33→36→33 assertions. Their historical 33→35→33
+evidence does not qualify this rollout; retain the schema-33 backup rather
+than asserting a schema-35 backup exists on that host.
+
 Assertions for the new qualification:
 
 - Before migration: actual old schema and pinned old image/CLI; verified backup
