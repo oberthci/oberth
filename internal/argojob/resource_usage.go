@@ -2,6 +2,7 @@ package argojob
 
 import (
 	"context"
+	"io"
 	"log"
 	"sync"
 	"time"
@@ -27,6 +28,12 @@ func (c *Controller) WithResourceSampler(source ResourceUsageSource, recorder Re
 	c.resourceSource = source
 	c.resourceRecorder = recorder
 	return c
+}
+
+func (c *Controller) WriteResourceMetrics(w io.Writer) {
+	if source, ok := c.resourceSource.(interface{ WriteMetrics(io.Writer) }); ok {
+		source.WriteMetrics(w)
+	}
 }
 
 type resourceSession struct {

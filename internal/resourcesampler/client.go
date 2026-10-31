@@ -8,7 +8,9 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
+	"log"
 	"maps"
 	"net"
 	"net/http"
@@ -102,6 +104,10 @@ type Client struct {
 	mu     sync.Mutex
 	cache  map[string]*cacheEntry
 	now    func() time.Time
+	logf   func(string, ...any)
+	// Bounded by the configured nodes, independent of runs and cache entries.
+	unavailable map[string]bool
+	failures    uint64
 }
 
 func NewClient(c Config) (*Client, error) {
@@ -123,7 +129,7 @@ func NewClient(c Config) (*Client, error) {
 		return nil, errors.New("invalid resource sampler CA")
 	}
 	tr := &http.Transport{Proxy: nil, DialContext: (&net.Dialer{Timeout: 2 * time.Second, KeepAlive: 15 * time.Second}).DialContext, TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12, RootCAs: roots}, TLSHandshakeTimeout: 2 * time.Second, ResponseHeaderTimeout: 2 * time.Second, MaxResponseHeaderBytes: 64 << 10, MaxIdleConns: 32, MaxConnsPerHost: 2, IdleConnTimeout: 30 * time.Second}
-	return &Client{config: c, http: &http.Client{Transport: tr, Timeout: 3 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}, gate: make(chan struct{}, 2), cache: map[string]*cacheEntry{}, now: time.Now}, nil
+	return &Client{config: c, http: &http.Client{Transport: tr, Timeout: 3 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}, gate: make(chan struct{}, 2), cache: map[string]*cacheEntry{}, now: time.Now, logf: log.Printf, unavailable: map[string]bool{}}, nil
 }
 
 // A shared scrape has its own bounded lifetime. One cancelled run cannot
@@ -166,7 +172,7 @@ func (c *Client) fill(node string, entry *cacheEntry) {
 	case c.gate <- struct{}{}:
 		defer func() { <-c.gate }()
 	case <-ctx.Done():
-		c.finish(entry, value)
+		c.finish(node, entry, value)
 		return
 	}
 	if raw, err := c.get(ctx, node, "/stats/summary"); err == nil {
@@ -180,15 +186,39 @@ func (c *Client) fill(node string, entry *cacheEntry) {
 			value.MetricsOK = true
 		}
 	}
-	c.finish(entry, value)
+	c.finish(node, entry, value)
 }
-func (c *Client) finish(entry *cacheEntry, value Snapshot) {
+func (c *Client) finish(node string, entry *cacheEntry, value Snapshot) {
 	c.mu.Lock()
-	defer c.mu.Unlock()
+	failed := !value.SummaryOK || !value.MetricsOK
+	wasUnavailable := c.unavailable[node]
+	if failed {
+		c.failures++
+		c.unavailable[node] = true
+	} else {
+		delete(c.unavailable, node)
+	}
 	entry.value = value
 	entry.at = c.now()
 	close(entry.ready)
 	entry.ready = nil
+	c.mu.Unlock()
+	// Only fixed diagnostic fields, never credentials, URLs, response bodies or
+	// transport/parse errors. Log and metric IO cannot hold the cache mutex.
+	if failed && !wasUnavailable {
+		c.logf("WARN: external resource sampler node=%q scrape incomplete summary_ok=%t metrics_ok=%t; missing usage remains unknown", node, value.SummaryOK, value.MetricsOK)
+	} else if !failed && wasUnavailable {
+		c.logf("external resource sampler node=%q scrape recovered", node)
+	}
+}
+
+// WriteMetrics reports completed shared scrapes without IO to kubelets/storage.
+// A partial scrape is one failure, not one per endpoint, waiter or run.
+func (c *Client) WriteMetrics(w io.Writer) {
+	c.mu.Lock()
+	failures, unavailable := c.failures, len(c.unavailable)
+	c.mu.Unlock()
+	_, _ = fmt.Fprintf(w, "# TYPE oberth_resource_sampler_scrape_failures_total counter\noberth_resource_sampler_scrape_failures_total %d\n# TYPE oberth_resource_sampler_nodes_unavailable gauge\noberth_resource_sampler_nodes_unavailable %d\n", failures, unavailable)
 }
 func (c *Client) get(ctx context.Context, node, path string) ([]byte, error) {
 	// Re-read projected tokens so rotation is honoured; never use a caller's

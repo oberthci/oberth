@@ -31,3 +31,26 @@ repeat while a step is active, not a qualification pass.
 This read-only host-admin API proxy probe does not grant the server nodes/proxy
 and does not prove its direct-kubelet TLS, SAN, token audience or stats/metrics
 RBAC path. Qualify that separately before enabling the opt-in 15s sampler.
+
+When the sampler is enabled, a failed or partial node scrape emits one
+`WARN: external resource sampler node="..." scrape incomplete` per node outage,
+with `summary_ok` and `metrics_ok` fields. TLS/SAN, token/RBAC, HTTP, response
+bound, parse and shared-gate timeout failures all leave the affected data
+unknown; no raw endpoint, token, response body or error detail is logged.
+The existing unscoped-admin `/metrics` endpoint exposes
+`oberth_resource_sampler_scrape_failures_total` (one increment per completed
+shared fill missing either endpoint, not per run/waiter) and
+`oberth_resource_sampler_nodes_unavailable` (nodes whose last attempted fill
+was incomplete). Both reset on server restart; unattempted nodes are not
+counted unavailable. Metrics reads do not trigger scrapes or query storage.
+Cached failed snapshots do not increment the counter. Failures continue to be
+retried on the sampling cadence without repeating the warning. Both endpoints
+must succeed to log `scrape recovered`, clear that node's unavailable state
+and re-arm its next outage warning. Partial success remains usable.
+
+During qualification, check the warning/counter and actual fresh usage rows;
+an unavailable scrape or unsampled result is not evidence of low resource use.
+These diagnostics never change run results, readiness or admission, and the
+metrics are absent when no sampler is configured. They establish endpoint
+fetch/parse health only: successful scrapes alone do not prove timestamp,
+UID/container binding or workload coverage. Confirm those separately above.

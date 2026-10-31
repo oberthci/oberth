@@ -1081,7 +1081,11 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 	defer func() { stopLiveness(); <-liveDone; <-transitionsDone }()
 	httpAPI, err := api.New(authenticator, controlAPI, controlAPI, version,
 		api.WithErrorClassifier(classifyViewError),
-		api.WithMetrics(func(w io.Writer) { health.Readiness.WriteMetrics(w); scheduler.WritePressureMetrics(w) }),
+		api.WithMetrics(func(w io.Writer) {
+			health.Readiness.WriteMetrics(w)
+			scheduler.WritePressureMetrics(w)
+			argoJobs.WriteResourceMetrics(w)
+		}),
 		api.WithMaximumToolWait(service.DefaultMaximumWait),
 		api.WithLiveness(func() error {
 			if err := writerProgress.Check(); err != nil {

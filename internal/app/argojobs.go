@@ -35,6 +35,12 @@ type argoControl interface {
 	Namespace() string
 }
 
+func (jobs *ArgoJobs) WriteResourceMetrics(w io.Writer) {
+	if controller, ok := jobs.controller.(interface{ WriteResourceMetrics(io.Writer) }); ok {
+		controller.WriteResourceMetrics(w)
+	}
+}
+
 // SecretAccessLoader loads approved secret grants for a repository at
 // admission time. The store.Store satisfies this interface directly.
 // The repository is identified by its durable ID to prevent same-name

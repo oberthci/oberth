@@ -4,6 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
+	"reflect"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -193,5 +197,73 @@ func TestResourceSizeComparisonTriggerClassOrUnknown(t *testing.T) {
 	delete(wf.Annotations, argoworkflow.SizeAnnotation)
 	if size := observedResourceWorkflowSize(wf); size != "M" {
 		t.Fatal("valid Workflow default not respected", size)
+	}
+}
+
+func TestResourceScrapeFailureDoesNotChangeWaitOrMutateWorkload(t *testing.T) {
+	for _, succeeded := range []bool{false, true} {
+		t.Run(fmt.Sprint("succeeded=", succeeded), func(t *testing.T) {
+			wf, node, pod, _ := diagnosticFixture()
+			pod.Spec.NodeName = "node-a"
+			if succeeded {
+				wf.Status.Phase = wfv1.WorkflowSucceeded
+				node.Phase = wfv1.NodeSucceeded
+				code := "0"
+				node.Outputs.ExitCode = &code
+				wf.Status.Nodes[node.ID] = node
+				pod.Status.ContainerStatuses[0].State.Terminated.ExitCode = 0
+				pod.Status.ContainerStatuses[0].State.Terminated.Reason = "Completed"
+			}
+			before := wf.DeepCopy()
+			kube := fake.NewClientset(pod)
+			controller := &Controller{
+				workflows: &staticWorkflowClient{workflow: wf}, kube: kube,
+				config: Config{Namespace: wf.Namespace, MaxRunLogBytes: 1 << 20}, interval: time.Millisecond,
+				logs: func(context.Context, string, string, string) (io.ReadCloser, error) {
+					return io.NopCloser(strings.NewReader("step output\n")), nil
+				},
+			}
+			baseline, err := controller.Wait(t.Context(), wf.Name, wf.Annotations[runIDAnnotation], io.Discard)
+			if err != nil {
+				t.Fatal(err)
+			}
+			kube.ClearActions()
+			source := &resourceSource{fail: true}
+			recorder := &resourceRecorder{}
+			controller.WithResourceSampler(source, recorder)
+			measured, err := controller.Wait(t.Context(), wf.Name, wf.Annotations[runIDAnnotation], io.Discard)
+			if err != nil || measured.Succeeded != succeeded {
+				t.Fatalf("sampler changed verdict: %+v %v", measured, err)
+			}
+			// Local collection timestamps/durations differ between Wait calls; execution
+			// evidence and verdict fields must be identical with or without the sampler.
+			for _, result := range []*Completion{&baseline, &measured} {
+				for i := range result.Steps {
+					result.Steps[i].Timing = nil
+					if result.Steps[i].Termination != nil {
+						result.Steps[i].Termination.ObservedAt = nil
+					}
+				}
+			}
+			if !reflect.DeepEqual(baseline, measured) {
+				t.Fatalf("sampler failure changed completion: baseline=%+v measured=%+v", baseline, measured)
+			}
+			if source.calls == 0 {
+				t.Fatal("test never reached failed scrape")
+			}
+			if !reflect.DeepEqual(wf, before) {
+				t.Fatal("sampler changed Workflow")
+			}
+			for _, action := range kube.Actions() {
+				if action.GetVerb() != "list" && action.GetVerb() != "get" {
+					t.Fatalf("sampler failure mutated Kubernetes: %v", action)
+				}
+			}
+			for _, row := range recorder.values {
+				if row.Samples != 0 || row.MemoryPeakBytes != nil {
+					t.Fatal("failed scrape manufactured metrics", row)
+				}
+			}
+		})
 	}
 }
