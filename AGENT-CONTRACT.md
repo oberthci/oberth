@@ -929,7 +929,7 @@ trust assumptions and complete invalidation rules.
   it encodes the same result object. Authenticated tool refusal text keeps its
   stable error class and may append only an explicitly public service reason.
   Raw dependency chains stay masked; scoped missing/hidden equivalence remains.
-- MCP exposes 65 tools: `status`, bounded named-step `logs`, exact-run
+- MCP exposes 66 tools: `status`, bounded named-step `logs`, exact-run
   `run_get`/`run_logs`, `run_retry`, audited `run_rerun` (#1098), audited `run_cancel`/`run_purge`, `run_kvm_preflight`, `artifacts`/`artifact_get`, `wait`, `sync`, `promote`,
   `promotion_list`, `promote_status`, audited `promote_retry` (#1097), `publish_retry`, issue
   create/get/get_many/update/append/close/reopen/delete/list/lock/unlock/close_many,
@@ -937,7 +937,7 @@ trust assumptions and complete invalidation rules.
   `access_dismiss` and `kubevirt_grant_list`, admin-only `kubevirt_grant` and
   `kubevirt_revoke`, read-only `kubevirt_grant_get`, admin-only `size_grant`
   and `size_revoke`, read-only `size_grant_get` (#1021), admin-only
-  unscoped `admission_release` (#1099), `queue_priority_config`, `queue_priority_get`, `run_priority`, `repo_list`, `repo_remove`, `repo_archive`, `repo_unarchive`, `run_list`,
+  unscoped `admission_release` (#1099), `queue_priority_config`, `queue_priority_get`, `run_priority`, `repo_usage`, `repo_list`, `repo_remove`, `repo_archive`, `repo_unarchive`, `run_list`,
   admin-only `audit_list` (#1104; verified entries, never available to a scoped uplink;
   `GET /api/audit` shares its filters, response and restrictions),
   `schedule_list` (also `GET /api/schedules`, with the same repository scope) plus admin-only audited `schedule_pause`, `schedule_resume` and `schedule_trigger` (#1106; pause state is the audit chain, trigger goes through `EnqueueCI`),
@@ -2714,6 +2714,7 @@ alone is never evidence that missing migrations ran.
 | v33 | Unreleased (step resource usage) | Nullable RSS/CPU, container memory peak; ambiguous legacy zero counters become NULL | Database restore |
 | v34 | Unreleased (queue priority) | Administrator RC branch patterns and audited per-run priority bumps; no pipeline-controlled priority | Database restore |
 | v35 | v0.17.73 candidate | Covering latest-ref index on repository/ref-kind/ref/queue sequence; exact indexed head/count aggregation | Database restore |
+| v36 | v0.17.74 / #1216 stage 1 | Server-observed, UID/container-bound sampled step resource usage and bounded repository/time/step indexes; no ingestion API or admission change | Database restore |
 
 **Contract test:** `TestEveryMigrationDocumentedInAgentContract` asserts that
 every migration version in `internal/store/schema.go` has a corresponding

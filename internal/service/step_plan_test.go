@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -34,7 +35,7 @@ func TestTerminalDeclaredRowsKeepOrdinalsAndRealOutcomes(t *testing.T) {
 				t.Fatalf("steps: %+v", steps)
 			}
 			result.Ordinal = 26
-			if steps[0] != result {
+			if !reflect.DeepEqual(steps[0], result) {
 				t.Fatalf("changed actual outcome: %+v, want %+v", steps[0], result)
 			}
 			want := model.StepPending

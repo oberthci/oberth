@@ -80,6 +80,8 @@ type Controller struct {
 	profileBackoff    time.Duration
 	profileLogAt      time.Time
 	timings           TimingRecorder
+	resourceSource    ResourceUsageSource
+	resourceRecorder  ResourceUsageRecorder
 	workflows         WorkflowClient
 	kube              kubernetes.Interface
 	logs              PodLogReader
@@ -432,6 +434,8 @@ func (controller *Controller) WaitResumed(ctx context.Context, name, runID strin
 }
 
 func (controller *Controller) wait(ctx context.Context, name, runID string, destination io.Writer, events []runprogress.Event, retained int64, binding Adoption) (Completion, error) {
+	session := controller.resourceSession(ctx, runID)
+	defer session.finish()
 	if retained < 0 {
 		return Completion{}, errors.New("argojob: invalid retained log size")
 	}
@@ -494,6 +498,7 @@ func (controller *Controller) wait(ctx context.Context, name, runID string, dest
 		if live != nil {
 			live.observe(workflow)
 		}
+		session.update(workflow)
 		if err := controller.deliverExecutorTokens(ctx, workflow, delivered); err != nil {
 			// Preserve observed execution evidence; a delivery error on a later
 			// Pod must not make already executed steps look like a pre-step failure.
@@ -508,6 +513,7 @@ func (controller *Controller) wait(ctx context.Context, name, runID string, dest
 			if binding.UID != "" && !binding.matches(settled) {
 				return Completion{}, errors.New("argojob: adopted Workflow identity changed at completion")
 			}
+			session.update(settled)
 			controller.retainWorkflowTiming(ctx, settled)
 			completion := completionFor(settled)
 			completion.ObservationComplete = completion.ObservationComplete && completeRead

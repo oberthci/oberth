@@ -53,6 +53,7 @@ const grantPolicySyncAdvisory = "Grant recorded; the identity map refreshes auto
 	"Until then, access fails closed."
 
 type APIConfig struct {
+	Resources                 ResourceUsageReader
 	ReleasePreflight          ReleasePreflighter
 	UplinkLifecycle           UplinkLifecycle
 	DeclarationDismissal      DeclarationDismissal
@@ -105,6 +106,7 @@ type APIConfig struct {
 
 type API struct {
 	redactPressure            bool
+	resources                 ResourceUsageReader
 	promotionProgress         *sync.Map
 	releasePreflight          ReleasePreflighter
 	uplinkLifecycle           UplinkLifecycle
@@ -167,6 +169,9 @@ type API struct {
 }
 
 func NewAPI(config APIConfig) (*API, error) {
+	if config.Resources == nil {
+		config.Resources, _ = config.History.(ResourceUsageReader)
+	}
 	if config.Runs == nil {
 		return nil, errors.New("service: run resolver is required")
 	}
@@ -210,7 +215,7 @@ func NewAPI(config APIConfig) (*API, error) {
 		issueLifecycle:     config.IssueLifecycle,
 		kvmPreflights:      config.KVMPreflights,
 		schedulingObserver: config.SchedulingObserver, admission: config.Admission,
-		runs: config.Runs, history: config.History, runRetries: config.RunRetries, repositories: config.Repositories,
+		resources: config.Resources, runs: config.Runs, history: config.History, runRetries: config.RunRetries, repositories: config.Repositories,
 		issues: config.Issues, promotions: config.Promotions, promotionRuns: config.PromotionRuns,
 		enqueues: config.Enqueues, git: config.Git, refs: config.Refs, logs: config.Logs, artifacts: config.Artifacts, auditor: config.Auditor,
 		health: config.Health, signals: signals, maximumWait: maximumWait, mutationGate: mutationGate,
@@ -799,6 +804,8 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 			return nil, err
 		}
 		return service.accessRevoke(ctx, actor, arguments.Repo, arguments.Step, arguments.Secret)
+	case "repo_usage":
+		return service.repoUsage(ctx, raw)
 	case "repo_list":
 		repos, err := service.Repositories(ctx, actor)
 		if err != nil {
@@ -1753,7 +1760,17 @@ func matchesFailedStep(step model.StepResult, run model.Run) bool {
 // an empty step list, discarding both the plan it was admitted with and the
 // progress it had visibly made. Its honest record is the plan, with the steps
 // that reached a state filled in and unreached declarations marked skipped.
-func (service *API) stepsForRun(ctx context.Context, run model.Run) ([]model.StepResult, error) {
+func (service *API) stepsForRun(ctx context.Context, run model.Run) (result []model.StepResult, resultErr error) {
+	defer func() {
+		if resultErr != nil || service.resources == nil {
+			return
+		}
+		values, truncated, err := service.resources.StepResourceUsage(ctx, run.ID)
+		if err == nil {
+			model.AttachResourceUsage(result, values, truncated)
+		}
+	}()
+
 	steps, err := service.history.StepResults(ctx, run.ID)
 	if err != nil {
 		return nil, err

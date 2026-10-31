@@ -333,16 +333,19 @@ func (s StepStatus) Progress() int {
 }
 
 type StepResult struct {
-	Termination  *StepDiagnostic
-	RunID        string
-	Burn         string
-	Step         string
-	Ordinal      int
-	Status       StepStatus
-	ExitCode     int
-	LogStart     int64
-	LogEnd       int64
-	DeclaredSize periapsis.Size
+	// MeasuredUsage is outside-step, identity-bound sampled telemetry; legacy usage fields below remain self-reported.
+	MeasuredUsage          []StepResourceUsage `json:",omitempty"`
+	MeasuredUsageTruncated bool                `json:",omitempty"`
+	Termination            *StepDiagnostic
+	RunID                  string
+	Burn                   string
+	Step                   string
+	Ordinal                int
+	Status                 StepStatus
+	ExitCode               int
+	LogStart               int64
+	LogEnd                 int64
+	DeclaredSize           periapsis.Size
 	// Usage counters are self-reported by untrusted build code, never evidence
 	// for admission or size grants. Any aggregation must saturate on overflow.
 	// Pointers distinguish unavailable telemetry from measured zero.

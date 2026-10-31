@@ -1,5 +1,8 @@
 # Schema-35 emergency restore qualification
 
+For v0.17.74/schema 36, use the [new qualification note](schema36-upgrade-note.md).
+The pins and assertions below remain evidence for v0.17.73 only.
+
 The named operator procedure is now [the v0.17.73 runbook](v073-upgrade-runbook.md),
 not an unspecified offline restore. This qualification supersedes the earlier
 store-API-only claim. **Rollback is verified pre-upgrade database restore only.**

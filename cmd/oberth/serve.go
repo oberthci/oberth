@@ -178,6 +178,7 @@ type serveOptions struct {
 	argoReleaseTagRoutesConfig   string
 	argoWorkflowTimeout          time.Duration
 	argoWorkflowTTL              int
+	argoResourceSamplerConfig    string
 	// argoSourceStorageClass names the class for the per-run source claim the
 	// server creates in the pipeline namespace. Empty selects the cluster
 	// default, which is what a single-node install wants.
@@ -315,6 +316,7 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 	flags.StringVar(&options.argoGoProxyNamespace.Organization, "argo-goproxy-organization", "", "Exact organization owning private module repositories")
 	flags.DurationVar(&options.argoWorkflowTimeout, "argo-workflow-timeout", 12*time.Hour, "ceiling on a Workflow's own activeDeadlineSeconds")
 	flags.IntVar(&options.argoWorkflowTTL, "argo-workflow-ttl", 3600, "finished Workflow retention in seconds")
+	flags.StringVar(&options.argoResourceSamplerConfig, "argo-resource-sampler-config", "", "administrator-owned kubelet sampler JSON config; disabled when empty")
 	flags.BoolVar(&options.vmKVMEnabled, "vm-kvm-enabled", false, "enable server-injected KVM device access for annotated leaves (requires KubeVirt device plugin)")
 	flags.StringVar(&options.trustedRecipesFile, "trusted-tests-recipes", "", "public operator-approved trusted suite recipes JSON file (requires --vm-kvm-enabled)")
 	flags.Int64Var(&options.trustedKVMGroup, "trusted-tests-kvm-group", 0, "operator-approved positive /dev/kvm supplemental GID required for trusted suites; no default device group")

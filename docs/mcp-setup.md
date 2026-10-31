@@ -353,6 +353,7 @@ A step above the 4 MiB response ceiling returns a truncated result with
 `truncated: true` rather than failing. Prefer a pattern to retrieving a whole
 step: a single step can exceed a model's context window.
 
+| `repo_usage` | Bounded external resource report by repository/step: sampled p50/p95/max, requests, coverage and used/request ratios. |
 | `repo_list` | List registered repositories with upstream and probe state |
 | `repo_archive` / `repo_unarchive` | Archive or restore a repository, preserving history (unscoped admin only); archived repositories refuse new grants |
 | `repo_remove` | Remove a repository mapping and its Git cache (admin-only) |

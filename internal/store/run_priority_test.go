@@ -249,7 +249,7 @@ func TestQueuePriorityMigrationFromV33ClassifiesExistingWork(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = s.db.ExecContext(ctx, `DROP INDEX IF EXISTS runs_latest_ref_idx; DROP TABLE run_priority_overrides; DROP TABLE queue_priority_patterns; DELETE FROM schema_migrations WHERE version>=34`); err != nil {
+	if _, err = s.db.ExecContext(ctx, `DROP TABLE IF EXISTS step_resource_usage; DROP INDEX IF EXISTS runs_latest_ref_idx; DROP TABLE run_priority_overrides; DROP TABLE queue_priority_patterns; DELETE FROM schema_migrations WHERE version>=34`); err != nil {
 		t.Fatal(err)
 	}
 	upgraded, err := Open(ctx, s.livePath, Options{})

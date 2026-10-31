@@ -1,0 +1,51 @@
+{{- $sampler := .Values.argo.resourceSampler | default dict -}}
+{{- if $sampler.enabled -}}
+{{- if not $sampler.nodes -}}
+{{- fail "argo.resourceSampler.nodes must explicitly allowlist node names and HTTPS kubelet endpoints" -}}
+{{- end -}}
+{{- if gt (len $sampler.nodes) 32 -}}
+{{- fail "argo.resourceSampler.nodes exceeds 32 nodes" -}}
+{{- end -}}
+{{- $ca := required "argo.resourceSampler.caCert must contain the public kubelet serving CA" $sampler.caCert -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "oberth.fullname" . }}-resource-sampler
+  labels:
+    {{- include "oberth.labels" . | nindent 4 }}
+  namespace: {{ .Release.Namespace }}
+data:
+  ca.crt: |
+    {{- $ca | nindent 4 }}
+  config.json: {{ dict "nodes" $sampler.nodes "ca_file" "/etc/oberth/resource-sampler/ca.crt" "token_file" "/var/run/secrets/kubernetes.io/serviceaccount/token" "interval" ($sampler.interval | default "15s") | toJson | quote }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "oberth.fullname" . }}-{{ .Release.Namespace }}-resource-sampler
+  labels:
+    {{- include "oberth.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["nodes/stats", "nodes/metrics"]
+    resourceNames:
+      {{- range $node, $_ := $sampler.nodes }}
+      - {{ $node | quote }}
+      {{- end }}
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "oberth.fullname" . }}-{{ .Release.Namespace }}-resource-sampler
+  labels:
+    {{- include "oberth.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "oberth.fullname" . }}-{{ .Release.Namespace }}-resource-sampler
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "oberth.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}

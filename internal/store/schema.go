@@ -15,7 +15,7 @@ func LatestMigrationVersion() int { return latestMigrationVersion }
 const (
 	admissionSequenceMigrationVersion = 28
 	repositoryArchiveMigrationVersion = 29
-	latestMigrationVersion            = latestRefMigrationVersion
+	latestMigrationVersion            = resourceUsageMigrationVersion
 	latestRefMigrationVersion         = 35
 	// oberthSchemaIdentity is the fresh-deployment default. Existing deployments
 	// supply their original immutable identity through ProtocolConfig; bootstrap
@@ -1136,4 +1136,5 @@ CREATE INDEX runs_admission_idx ON runs(status, admission_sequence, queue_sequen
 	{version: stepUsageMigrationVersion, sql: stepUsageSchema},
 	{version: queuePriorityMigrationVersion, sql: queuePrioritySchema},
 	{version: latestRefMigrationVersion, sql: `CREATE INDEX runs_latest_ref_idx ON runs(repo_id, ref_kind, ref, queue_sequence DESC);`},
+	{version: resourceUsageMigrationVersion, sql: resourceUsageSchema},
 }

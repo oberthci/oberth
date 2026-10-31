@@ -673,6 +673,7 @@ var toolScopeBehaviour = map[string]string{
 	"promote_status": "lookup", "issue_get": "lookup", "issue_get_many": "lookup",
 	"run_list": "filtered", "promotion_list": "filtered", "issue_list": "filtered",
 	"access_list": "filtered", "repo_list": "filtered", "promote_grant_list": "filtered",
+	"repo_usage":         "lookup",
 	"kubevirt_grant_get": "lookup",
 	"size_grant_get":     "lookup",
 	"system_status":      "filtered",

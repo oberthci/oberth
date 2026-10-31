@@ -5,6 +5,8 @@ For tuxbox's actual v0.17.67/schema33 baseline, use the
 CLI/chart pins and schema33 asserts. The v0.17.62 operator CLI is not valid.
 This original 72-to-73 procedure remains for genuine schema34 installations.
 
+For v0.17.74/schema 36, see [the separate upgrade/rollback qualification note](schema36-upgrade-note.md). The pins and assertions here remain specific to v0.17.73.
+
 Use the coordinator's final candidate pins. This procedure does not deploy a
 candidate or authorize changing a production installation. Rehearsal evidence
 and its limits are in [schema-35 qualification](schema35-rollback-qualification.md).

@@ -87,6 +87,9 @@ spec:
         {{- if $trustedTests.recipes }}
         checksum/trusted-recipes: {{ $trustedTests.recipes | toJson | sha256sum | quote }}
         {{- end }}
+        {{- if (.Values.argo.resourceSampler).enabled }}
+        checksum/resource-sampler: {{ .Values.argo.resourceSampler | toJson | sha256sum | quote }}
+        {{- end }}
         checksum/per-repo-identities: {{ list .Values.argo.perRepoIdentities .Values.argo.perRepoCIIdentities | toJson | sha256sum | quote }}
         {{- if .Values.auditAnchor.rekorPublicKey }}
         checksum/audit-rekor-pubkey: {{ .Values.auditAnchor.rekorPublicKey | sha256sum | quote }}
@@ -321,6 +324,9 @@ spec:
             - --argo-kubevirt-max-cores={{ (.Values.argo.kubevirtCeiling).maxCores | default 24 }}
             - --argo-kubevirt-max-memory={{ (.Values.argo.kubevirtCeiling).maxMemory | default "48Gi" }}
             - --argo-workflow-timeout={{ .Values.argo.workflowTimeout }}
+            {{- if (.Values.argo.resourceSampler).enabled }}
+            - --argo-resource-sampler-config=/etc/oberth/resource-sampler/config.json
+            {{- end }}
             - --argo-executor-scratch-size-limit={{ .Values.argo.executorScratchSizeLimit | default "1Gi" }}
             - --argo-workflow-ttl={{ .Values.argo.workflowTTL }}
             {{- if .Values.argo.sourceStorageClass }}
@@ -452,6 +458,11 @@ spec:
               mountPath: /etc/oberth/runtime-capacity
               readOnly: true
             {{- end }}
+            {{- if (.Values.argo.resourceSampler).enabled }}
+            - name: resource-sampler
+              mountPath: /etc/oberth/resource-sampler
+              readOnly: true
+            {{- end }}
             {{- if $trustedTests.recipes }}
             - name: trusted-test-recipes
               mountPath: /etc/oberth/trusted-tests
@@ -513,6 +524,11 @@ spec:
           configMap:
             name: {{ include "oberth.fullname" . }}-admission
             optional: true
+        {{- end }}
+        {{- if (.Values.argo.resourceSampler).enabled }}
+        - name: resource-sampler
+          configMap:
+            name: {{ include "oberth.fullname" . }}-resource-sampler
         {{- end }}
         {{- if $trustedTests.recipes }}
         - name: trusted-test-recipes

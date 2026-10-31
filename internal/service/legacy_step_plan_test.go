@@ -142,7 +142,7 @@ func TestCanonicalOutcomeSupersedesLegacyAlias(t *testing.T) {
 	legacy := model.StepResult{Burn: "probe(0)", Step: "check", Status: model.StepFailed, ExitCode: 42}
 	for _, rows := range [][]model.StepResult{{legacy, canonical}, {canonical, legacy}} {
 		steps := mergeSteps(model.Run{Status: model.RunPassed}, plan, nil, rows)
-		if len(steps) != 1 || steps[0] != canonical {
+		if len(steps) != 1 || !reflect.DeepEqual(steps[0], canonical) {
 			t.Fatalf("stale legacy failure replaced canonical outcome: %+v", steps)
 		}
 	}

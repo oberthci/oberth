@@ -78,7 +78,7 @@ func TestSchemaV34LatestRefIndexUpgrade(t *testing.T) {
 	}
 	repo := createRepo(t, s)
 	source := autoRetrySource(t, s, repo.ID, "kept")
-	if _, err := s.db.Exec(`DROP INDEX runs_latest_ref_idx; DELETE FROM schema_migrations WHERE version=35`); err != nil {
+	if _, err := s.db.Exec(`DROP TABLE step_resource_usage; DROP INDEX runs_latest_ref_idx; DELETE FROM schema_migrations WHERE version>=35`); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.Close(); err != nil {
