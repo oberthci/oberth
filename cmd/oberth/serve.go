@@ -269,8 +269,8 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 	flags.StringVar(&options.admissionSizeWeights, "admission-size-weights", service.DefaultSizeWeights.String(), "admission weight per size as S=..,M=..,L=..,XL=..; XL=0 is the whole budget (an XL run runs alone), a positive XL lets XL share the host; the budget is --max-concurrent-jobs M runs (#1021)")
 	flags.DurationVar(&options.admissionMaxHeadWait, "admission-max-head-wait", service.DefaultMaxHeadWait, "bounded backfill (#1085): while the admission queue head does not fit, later runs that fit are admitted beside it until it has waited this long; then the budget drains for it (0 = strict FIFO)")
 	flags.StringVar(&options.admissionPressure.Mode, "admission-pressure-mode", service.PressureObserve, "host PSI policy: observe (report only) or enforce (hold new grants)")
-	flags.Float64Var(&options.admissionPressure.IOFullAvg60Max, "admission-pressure-io-full-avg60-max", 30, "host IO full PSI avg60 percentage that holds new grants (0 = disabled)")
-	flags.Float64Var(&options.admissionPressure.CPUSomeAvg60Max, "admission-pressure-cpu-some-avg60-max", 0, "host CPU some PSI avg60 percentage that holds new grants (0 = disabled)")
+	flags.Float64Var(&options.admissionPressure.IOFullAvg60Max, "admission-pressure-io-full-avg60-max", 30, "host IO full PSI avg60 threshold; holds grants only in enforce mode (0 = disabled)")
+	flags.Float64Var(&options.admissionPressure.CPUSomeAvg60Max, "admission-pressure-cpu-some-avg60-max", 0, "host CPU some PSI avg60 threshold; holds grants only in enforce mode (0 = disabled)")
 	flags.Float64Var(&options.admissionPressure.Hysteresis, "admission-pressure-hysteresis", 10, "percentage points below each enabled threshold required to resume grants")
 	flags.DurationVar(&options.admissionPressure.MaxDefer, "admission-pressure-max-defer", 20*time.Minute, "maximum pressure deferral per eligible run; other admission gates still apply")
 
@@ -360,6 +360,9 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 		return serveOptions{}, fmt.Errorf("serve: --admission-size-weights: %w", err)
 	}
 	options.sizeWeights = weights
+	if options.admissionPressure.Mode == "" {
+		return serveOptions{}, errors.New("serve: --admission-pressure-mode must be observe or enforce")
+	}
 	if err := options.admissionPressure.Validate(); err != nil {
 		return serveOptions{}, fmt.Errorf("serve: --admission-pressure: %w", err)
 	}

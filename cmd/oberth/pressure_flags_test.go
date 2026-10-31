@@ -15,6 +15,7 @@ func TestServePressureDefaultsAndValidation(t *testing.T) {
 	}
 	for _, args := range [][]string{
 		{"--admission-pressure-mode=typo"},
+		{"--admission-pressure-mode="},
 		{"--admission-pressure-io-full-avg60-max=NaN"},
 		{"--admission-pressure-cpu-some-avg60-max=Inf"},
 		{"--admission-pressure-io-full-avg60-max=101"},
