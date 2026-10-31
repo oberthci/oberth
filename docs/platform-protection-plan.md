@@ -157,8 +157,11 @@ and the `admission.capacity.change` audit. A ConfigMap edit/command success alon
 is not acceptance. A failed read/audit retains last-good capacity. Boot jobs=2 is
 the safe restart fallback. Lowering does not revoke existing grants: pause intake
 and fully drain before reducing allocatable. Keep the disk floor (qualified
-160 GB starting point) and IO pressure hold. Its per-run maxDefer bypass does not
-reserve CPU/memory and is not the safety gate.
+160 GB starting point). The default `admission.pressure.mode=observe` provides
+no IO pressure hold. Enable a hold only with explicit
+`admission.pressure.mode=enforce` after qualifying the threshold and capacity
+together. Its per-run maxDefer bypass does not reserve CPU/memory and is not
+the safety gate.
 
 ## 3. Pressure recovery needs both tolerations and a critical platform class
 

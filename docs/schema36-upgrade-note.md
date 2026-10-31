@@ -18,6 +18,16 @@ from emergency shell variable setup. Take and independently inspect the matching
 encrypted pre-upgrade backup before migration. Preserve the current OpenBao,
 schema/audit identities and kubelet/runtime admission state.
 
+Before applying the release's git-tag chart, render it with the actual ordered
+values files, including `capacity-values.yaml`, and explicitly set `image.ref`
+to the approved new server digest. Check that the rendered Oberth Deployment
+uses that digest, rather than a persisted old image pin; no later values file
+or `--set` may override it. Verify the installed image and Ready state after
+the upgrade. The chart always passes `--admission-pressure-mode` and uses
+`strategy.type: Recreate`: an older image that lacks the flag fails startup,
+and the old Pod is removed rather than kept serving. Matching the new chart
+and image is therefore a release prerequisite, even with sampling disabled.
+
 The usual v0.17.73 predecessor is schema 35, so a v0.17.74 rollback rehearsal
 must assert **35→36→35** using the schema-35 backup and old CLI/image. If an
 operator deliberately targets an older schema-34 release, it needs its own

@@ -25,9 +25,12 @@ repository population, independent jobs, or a complete Workflow census.
 The size label comes from the verified observed Workflow declaration. A
 size-by-trigger annotation requires one valid server-bound oberth-trigger
 parameter; otherwise that observation's class is unknown. This cannot recover
-an unstamped trigger for old submitted objects. A valid ordinary Workflow with
-no size annotation uses its documented M default. Old stored observations with
-no class remain unknown; a later trusted observation may fill it. Conflicting
+an unstamped trigger for old submitted objects or new Workflows declaring
+`oberth.ci/size-by-trigger` without declaring or referencing `oberth-trigger`
+in their spec: the server stamps the parameter only when the spec uses it.
+A valid ordinary Workflow with no size annotation uses its documented M default.
+Old stored observations with no class remain unknown; a later trusted
+observation may fill it. Conflicting
 labels clear it permanently and flag the observation without losing measured
 usage. Termination-message/progress-declared classes are never used as trusted
 comparison labels, and no Pod/Workflow spec is changed to add reporting metadata.
