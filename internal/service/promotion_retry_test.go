@@ -4,9 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -175,6 +178,65 @@ var passedPromotionCI = JobResult{Status: model.RunPassed, Phase: "passed", Step
 // re-merged onto the new head, re-tested, and delivered, with no new commit
 // and no caller action (#1097).
 func TestMovedTargetPromotionIsRetriedOntoNewHeadAndDelivered(t *testing.T) {
+	testMovedTargetPromotionDelivery(t, "")
+}
+
+// The two reads in the CI failure must recover without executing either CI or
+// either Git push again. Permanent failures still escape Run; a real stall
+// fails the bounded completion wait above rather than being ignored.
+func TestMovedTargetPromotionRetriesTerminalCleanupDeadline(t *testing.T) {
+	for _, operation := range []string{"RunWorkspaceCleanupEligible", "PromotionByRun"} {
+		t.Run(operation, func(t *testing.T) { testMovedTargetPromotionDelivery(t, operation) })
+	}
+}
+
+type promotionRetryBarrierJobs struct {
+	*fakeJobs
+	waits        atomic.Int32
+	retryEntered chan struct{}
+	releaseRetry chan struct{}
+}
+
+func (jobs *promotionRetryBarrierJobs) Wait(ctx context.Context, name string, output io.Writer) (JobResult, error) {
+	if jobs.waits.Add(1) == 2 {
+		close(jobs.retryEntered)
+		select {
+		case <-jobs.releaseRetry:
+		case <-ctx.Done():
+			return JobResult{}, ctx.Err()
+		}
+	}
+	return jobs.fakeJobs.Wait(ctx, name, output)
+}
+
+// Limit the association fault to the terminal owner read named by the CI
+// failure; earlier promotion execution also loads this association.
+type promotionRetryCleanupFaultStore struct {
+	*deadlineFaultStore
+}
+
+func (s *promotionRetryCleanupFaultStore) PromotionByRun(ctx context.Context, id string) (model.Promotion, error) {
+	run, err := s.Store.Run(ctx, id)
+	if err != nil {
+		return model.Promotion{}, err
+	}
+	if run.Status.Terminal() {
+		if err := s.fault("PromotionByRun"); err != nil {
+			return model.Promotion{}, fmt.Errorf("count promotion run associations: %w", err)
+		}
+	}
+	return s.Store.PromotionByRun(ctx, id)
+}
+
+func (s *promotionRetryCleanupFaultStore) RunWorkspaceCleanupEligible(ctx context.Context, id string) (bool, error) {
+	if err := s.fault("RunWorkspaceCleanupEligible"); err != nil {
+		return false, fmt.Errorf("check run workspace owner %s: %w", id, err)
+	}
+	return s.Store.RunWorkspaceCleanupEligible(ctx, id)
+}
+
+func testMovedTargetPromotionDelivery(t *testing.T, cleanupFault string) {
+	t.Helper()
 	git := &scriptedPromotionGit{
 		plans: []gitcache.MergeCandidate{
 			{BaseSHA: retryBaseSHA, MergedSHA: retryMergedSHA},
@@ -183,15 +245,34 @@ func TestMovedTargetPromotionIsRetriedOntoNewHeadAndDelivered(t *testing.T) {
 		pushes: []scriptedPush{{err: errors.New("rejected: non-fast-forward"), moveTo: retryMovedSHA}, {}},
 	}
 	fixture, scheduler, service := newPromotionRetryHarness(t, git, passedPromotionCI, passedPromotionCI)
+	// Run supplies the production DB retry owner; ProcessNext deliberately does
+	// not. A transient terminal-cleanup timeout must not become a promotion
+	// failure just because this test used the single-shot recovery entrypoint.
+	jobs := &promotionRetryBarrierJobs{fakeJobs: fixture.jobs, retryEntered: make(chan struct{}), releaseRetry: make(chan struct{})}
+	scheduler.jobs, scheduler.releaseJobs = jobs, jobs
+	var faults *deadlineFaultStore
+	if cleanupFault != "" {
+		faults = &deadlineFaultStore{Store: fixture.store, failures: map[string]int{cleanupFault: 1}, calls: make(map[string]int), faultError: context.DeadlineExceeded}
+		scheduler.store = &promotionRetryCleanupFaultStore{deadlineFaultStore: faults}
+		scheduler.workspaces.owners = scheduler.database()
+	}
 	admin := api.Actor{Identity: "agent@host", Admin: true}
 	originalID := promoteForRetry(t, service, admin)
 
-	// The merged CI passes, the push finds main moved, and the scheduler's
-	// hook re-promotes onto the moved head, queueing re-test CI.
-	if err := scheduler.ProcessNext(context.Background()); err != nil {
-		t.Fatal(err)
+	// Wait for the second CI to enter, then keep it blocked while inspecting
+	// the immutable failed attempt and its fully prepared pending successor.
+	// This barrier preserves the intermediate assertions under any CPU speed.
+	done, cancel := startDeadlineScheduler(t, scheduler)
+	ctx, stopWait := context.WithTimeout(t.Context(), testStartTimeout(15*time.Second))
+	defer stopWait()
+	select {
+	case <-jobs.retryEntered:
+	case err := <-done:
+		t.Fatalf("scheduler stopped before retry CI: %v", err)
+	case <-ctx.Done():
+		t.Fatalf("retry CI did not start: %v", ctx.Err())
 	}
-	original, err := fixture.store.Promotion(context.Background(), originalID)
+	original, err := fixture.store.Promotion(ctx, originalID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -205,7 +286,7 @@ func TestMovedTargetPromotionIsRetriedOntoNewHeadAndDelivered(t *testing.T) {
 	if status.RetriedAs == "" || status.RetriedAs == originalID {
 		t.Fatalf("promote_status of the moved promotion = %#v, want retried_as", status)
 	}
-	retry, err := fixture.store.Promotion(context.Background(), status.RetriedAs)
+	retry, err := fixture.store.Promotion(ctx, status.RetriedAs)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -213,25 +294,57 @@ func TestMovedTargetPromotionIsRetriedOntoNewHeadAndDelivered(t *testing.T) {
 		t.Fatalf("retry before its CI = %#v, want pending re-test of a merge onto %s", retry, retryMovedSHA)
 	}
 
-	if err := scheduler.ProcessNext(context.Background()); err != nil {
-		t.Fatal(err)
+	close(jobs.releaseRetry)
+	for {
+		changed := fixture.signals.Promotion(retry.ID) // subscribe before read
+		retry, err = fixture.store.Promotion(ctx, retry.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if retry.Status == model.PromotionPassed {
+			break
+		}
+		if retry.Status.Terminal() {
+			t.Fatalf("retried promotion = %#v, want passed", retry)
+		}
+		select {
+		case <-changed:
+		case err := <-done:
+			t.Fatalf("scheduler stopped before delivery: %v; last promotion = %#v", err, retry)
+		case <-ctx.Done():
+			t.Fatalf("promotion delivery stalled: %v; last promotion = %#v", ctx.Err(), retry)
+		}
 	}
-	retry, err = fixture.store.Promotion(context.Background(), retry.ID)
-	if err != nil || retry.Status != model.PromotionPassed {
-		t.Fatalf("retried promotion = %#v, %v, want passed", retry, err)
+	// Join terminal cleanup before checking shared Git state and workspaces.
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-ctx.Done():
+		t.Fatalf("scheduler terminal cleanup did not stop: %v", ctx.Err())
 	}
+	if faults != nil && (faults.count(cleanupFault) < 2 || scheduler.DatabaseRetries() == 0) {
+		t.Fatalf("cleanup failure was not retried: calls=%d retries=%d", faults.count(cleanupFault), scheduler.DatabaseRetries())
+	}
+	if prepared, pushed := git.counts(); prepared != 2 || pushed != 2 || jobs.waits.Load() != 2 {
+		t.Fatalf("execution was replayed: prepares=%d pushes=%d CI waits=%d", prepared, pushed, jobs.waits.Load())
+	}
+	assertWorkspaceMissing(t, filepath.Join(scheduler.workspaceRoot, original.RunID))
+	assertWorkspaceMissing(t, filepath.Join(scheduler.workspaceRoot, retry.RunID))
 	if git.pushed[len(git.pushed)-1] != "main:"+retryMerged2 {
 		t.Fatalf("pushes = %v, want the re-tested merge delivered last", git.pushed)
 	}
-	lineage, err := fixture.store.PromotionLineage(context.Background(), retry.ID)
+	lineage, err := fixture.store.PromotionLineage(ctx, retry.ID)
 	if err != nil || lineage.RetryOf != originalID || lineage.Mode != model.PromotionRetryAuto || lineage.AutoAttempt != 1 {
 		t.Fatalf("retry lineage = %#v, %v", lineage, err)
 	}
-	if action, err := fixture.store.LatestAuditActionByType(context.Background(), "promotion.retry", "promotion"); err != nil || action.ResourceID != retry.ID {
+	if action, err := fixture.store.LatestAuditActionByType(ctx, "promotion.retry", "promotion"); err != nil || action.ResourceID != retry.ID {
 		t.Fatalf("promotion.retry audit = %#v, %v", action, err)
 	}
 	// The original stays failed: it is immutable history, not reactivated.
-	if again, _ := fixture.store.Promotion(context.Background(), originalID); again.Status != model.PromotionFailed {
+	if again, _ := fixture.store.Promotion(ctx, originalID); again.Status != model.PromotionFailed {
 		t.Fatalf("original after retry delivered = %#v", again)
 	}
 }

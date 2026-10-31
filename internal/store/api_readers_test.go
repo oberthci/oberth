@@ -21,6 +21,14 @@ func TestAPIReadsWhileWriterTransactionHeld(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Seed the immutable association before reserving the writer. The reads
+	// below must not reacquire that connection, even for terminal cleanup.
+	promotion, err := s.appendPromotion(t.Context(), model.PromotionSpec{
+		RepoID: repo.ID, SourceBranch: run.Ref, SourceSHA: run.SHA, TargetRef: "main", Actor: run.Actor,
+	}, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if _, err := s.SetQueuePriorityPatterns(t.Context(), "admin", []string{"rc/*"}); err != nil {
 		t.Fatal(err)
 	}
@@ -68,6 +76,27 @@ func TestAPIReadsWhileWriterTransactionHeld(t *testing.T) {
 			got, err := s.QueuePriorityPatterns(ctx)
 			if err == nil && (len(got) != 1 || got[0] != "rc/*") {
 				return fmt.Errorf("unexpected priority patterns: %v", got)
+			}
+			return err
+		},
+		"run-workspace-owner": func(ctx context.Context) error {
+			eligible, err := s.RunWorkspaceCleanupEligible(ctx, run.ID)
+			if err == nil && eligible {
+				return fmt.Errorf("queued run is cleanup eligible")
+			}
+			return err
+		},
+		"promotion-workspace-owner": func(ctx context.Context) error {
+			eligible, err := s.PromotionWorkspaceCleanupEligible(ctx, promotion.ID)
+			if err == nil && eligible {
+				return fmt.Errorf("pending promotion is cleanup eligible")
+			}
+			return err
+		},
+		"promotion-run-association": func(ctx context.Context) error {
+			got, err := s.PromotionByRun(ctx, run.ID)
+			if err == nil && got.ID != promotion.ID {
+				return fmt.Errorf("promotion association=%s, want %s", got.ID, promotion.ID)
 			}
 			return err
 		},
