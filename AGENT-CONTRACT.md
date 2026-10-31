@@ -3336,3 +3336,12 @@ the dashboard shows a runs-list banner and Status card, refreshing aggregate
 status in the background at most every five minutes; direct Status visits remain
 fresh. Existing work is not
 canceled or re-authorized by profile recovery.
+
+**Report-only size comparison:** outside-step usage rows may carry the observed
+Workflow admission label; legacy/ambiguous/conflicting classes remain unknown.
+Per-step run views and repo_usage group sampled peaks by S/M/L/XL/unknown with
+coverage/kill flags. Labels are not numeric resource budgets. Progress or
+termination-message declarations are not authority for these labels. The view
+never changes authored requests/limits, weights, grants or execution results;
+unknowns and OOM lower bounds cannot authorize smaller resources. Details:
+[measured size reports](docs/measured-size-report.md).

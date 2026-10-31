@@ -825,3 +825,9 @@ queue place. Run views include `priority_class`, `priority_reason`, and active
 Active `display_reason` is explicitly the priority message unless a more specific
 scheduling/preflight reason replaces it. Terminal `display_reason` describes the
 terminal cause; `priority_class` and `priority_reason` remain separate fields.
+
+`repo_usage` also exposes each step's `by_workflow_size` sampled peak groups
+(S/M/L/XL/unknown), `report_only:true` and explicit class semantics. Full run
+views attach the same `MeasuredSizeComparison`. This is reporting, not a
+request recommendation or change to admission; see
+[coverage, units and class provenance](measured-size-report.md).

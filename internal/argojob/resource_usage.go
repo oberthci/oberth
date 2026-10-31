@@ -11,6 +11,8 @@ import (
 
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/resourcesampler"
+	"github.com/oberthci/oberth/pkg/argoworkflow"
+	"github.com/oberthci/oberth/pkg/periapsis"
 )
 
 type ResourceUsageRecorder interface {
@@ -136,6 +138,7 @@ func (c *Controller) sampleResourceUsage(ctx context.Context, wf *wfv1.Workflow,
 	for i := range pods.Items[:min(len(pods.Items), 2048)] {
 		byName[pods.Items[i].Name] = i
 	}
+	workflowSize := observedResourceWorkflowSize(wf)
 	snapshots := map[string]resourcesampler.Snapshot{}
 	batch := make([]model.StepResourceUsage, 0, 256)
 	flush := func() error {
@@ -171,6 +174,7 @@ func (c *Controller) sampleResourceUsage(ctx context.Context, wf *wfv1.Workflow,
 		if !ok {
 			continue
 		}
+		value.WorkflowSize = workflowSize
 		batch = append(batch, value)
 		if len(batch) == 256 {
 			if err := flush(); err != nil {
@@ -179,4 +183,41 @@ func (c *Controller) sampleResourceUsage(ctx context.Context, wf *wfv1.Workflow,
 		}
 	}
 	return flush()
+}
+
+// Read only the verified Workflow's existing declaration and server-bound
+// trigger parameter. Never use progress/termination messages as class evidence.
+// A size-by-trigger declaration without an unambiguous bound trigger is unknown.
+func observedResourceWorkflowSize(wf *wfv1.Workflow) periapsis.Size {
+	byTrigger, err := argoworkflow.DeclaredSizesByTrigger(wf)
+	if err != nil {
+		return ""
+	}
+	if len(byTrigger) == 0 {
+		size, err := argoworkflow.DeclaredSize(wf)
+		if err != nil {
+			return ""
+		}
+		return size
+	}
+	var trigger argoworkflow.RunTrigger
+	seen := false
+	for _, parameter := range wf.Spec.Arguments.Parameters {
+		if parameter.Name != argoworkflow.TriggerParameter {
+			continue
+		}
+		if seen || parameter.Value == nil || parameter.ValueFrom != nil {
+			return ""
+		}
+		seen = true
+		trigger = argoworkflow.RunTrigger(parameter.Value.String())
+	}
+	if !seen || !trigger.Valid() {
+		return ""
+	}
+	size, err := argoworkflow.DeclaredSizeFor(wf, trigger)
+	if err != nil {
+		return ""
+	}
+	return size
 }

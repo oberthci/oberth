@@ -52,5 +52,5 @@ func (s *API) repoUsage(ctx context.Context, raw json.RawMessage) (any, error) {
 	if stepsTruncated {
 		steps = steps[:128]
 	}
-	return model.ResourceUsageReport{StepsTruncated: stepsTruncated, Repository: args.Repo, Since: args.Since, Limit: args.Limit, Observations: len(rows), Truncated: truncated, PeakSemantics: "sampled lower bounds; missing is unknown; observations are container attempts, including running/killed attempts; CPU/memory/IO main scope; ephemeral/PSI pod scope; no PVC/VM disk accounting", Steps: steps}, nil
+	return model.ResourceUsageReport{ReportOnly: true, SizeClassSemantics: "observed Workflow admission labels, not numeric per-step budgets; legacy/missing/conflicting class is unknown; sampled lower bounds do not establish safe smaller requests or classes", StepsTruncated: stepsTruncated, Repository: args.Repo, Since: args.Since, Limit: args.Limit, Observations: len(rows), Truncated: truncated, PeakSemantics: "sampled lower bounds; missing is unknown; observations are container attempts, including running/killed attempts; CPU/memory/IO main scope; ephemeral/PSI pod scope; no PVC/VM disk accounting", Steps: steps}, nil
 }

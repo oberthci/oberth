@@ -146,3 +146,49 @@ func TestResourceUsageMigrationPreservesSchema35AndExistingRows(t *testing.T) {
 		t.Fatal(fmt.Errorf("RCA index lost: %w", err))
 	}
 }
+
+func TestResourceSizeComparisonPersistsClassAndKeepsConflictsUnknown(t *testing.T) {
+	at := time.Now().UTC()
+	s := testStore(t, &at)
+	repo := createRepo(t, s)
+	run, err := s.EnqueueRun(t.Context(), testRunSpec(repo.ID, "feature/size-report", strings.Repeat("a", 40)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.SetRunJobName(t.Context(), run.ID, "workflow-test"); err != nil {
+		t.Fatal(err)
+	}
+	v := resourceRow(run.ID, at)
+	if err = s.RecordStepResourceUsage(t.Context(), []model.StepResourceUsage{v}); err != nil {
+		t.Fatal(err)
+	}
+	v.WorkflowSize = "XL"
+	v.LastObservedAt = at.Add(time.Second)
+	if err = s.RecordStepResourceUsage(t.Context(), []model.StepResourceUsage{v}); err != nil {
+		t.Fatal(err)
+	}
+	rows, _, err := s.StepResourceUsage(t.Context(), run.ID)
+	if err != nil || len(rows) != 1 || rows[0].WorkflowSize != "XL" {
+		t.Fatal("legacy unknown class did not upgrade", rows, err)
+	}
+	v.WorkflowSize = "M"
+	v.LastObservedAt = at.Add(2 * time.Second)
+	if err = s.RecordStepResourceUsage(t.Context(), []model.StepResourceUsage{v}); err != nil {
+		t.Fatal(err)
+	}
+	// Conflicting metadata must not discard the measured peak or later recover
+	// a confident class merely because a subsequent sample has another label.
+	v.WorkflowSize = "XL"
+	v.LastObservedAt = at.Add(3 * time.Second)
+	if err = s.RecordStepResourceUsage(t.Context(), []model.StepResourceUsage{v}); err != nil {
+		t.Fatal(err)
+	}
+	rows, _, err = s.StepResourceUsage(t.Context(), run.ID)
+	if err != nil || len(rows) != 1 || rows[0].WorkflowSize != "" || !rows[0].SizeClassChanged || *rows[0].MemoryPeakBytes != 123 {
+		t.Fatal("class conflict became confident or erased usage", rows, err)
+	}
+	v.WorkflowSize = "XXL"
+	if err = s.RecordStepResourceUsage(t.Context(), []model.StepResourceUsage{v}); !errors.Is(err, ErrInvalid) {
+		t.Fatal("invalid size label accepted", err)
+	}
+}

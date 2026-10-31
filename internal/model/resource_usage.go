@@ -7,58 +7,68 @@ import (
 	"math/bits"
 	"slices"
 	"time"
+
+	"github.com/oberthci/oberth/pkg/periapsis"
 )
 
 // StepResourceUsage is an external kubelet/cAdvisor observation. It never
 // consumes the step's termination message or changes admission. Peaks are
 // sampled lower bounds, including when a step is killed between polls.
 type StepResourceUsage struct {
-	Version                   int       `json:"version"`
-	Source                    string    `json:"source"`
-	RunID                     string    `json:"run_id"`
-	WorkflowName              string    `json:"workflow_name"`
-	WorkflowUID               string    `json:"workflow_uid"`
-	Namespace                 string    `json:"namespace"`
-	NodeID                    string    `json:"node_id"`
-	PodName                   string    `json:"pod_name"`
-	PodUID                    string    `json:"pod_uid"`
-	NodeName                  string    `json:"node_name"`
-	ContainerID               string    `json:"container_id"`
-	ContainerName             string    `json:"container_name"`
-	RestartCount              int32     `json:"restart_count"`
-	Burn                      string    `json:"burn"`
-	Step                      string    `json:"step"`
-	FirstObservedAt           time.Time `json:"first_observed_at"`
-	LastObservedAt            time.Time `json:"last_observed_at"`
-	SourceAt                  time.Time `json:"source_at"`
-	ContainerSourceAt         time.Time `json:"container_source_at"`
-	IOPressureAt              time.Time `json:"io_pressure_at"`
-	Samples                   int64     `json:"samples"`
-	SampledLowerBound         bool      `json:"sampled_lower_bound"`
-	Terminal                  bool      `json:"terminal"`
-	ExitCode                  *int32    `json:"exit_code"`
-	Reason                    string    `json:"reason,omitempty"`
-	CPURequestNanoCores       *int64    `json:"cpu_request_nanocores"`
-	MemoryRequestBytes        *int64    `json:"memory_request_bytes"`
-	EphemeralRequestBytes     *int64    `json:"ephemeral_request_bytes"`
-	CPUTimeNS                 *int64    `json:"cpu_time_ns"`
-	CPUTimeAt                 time.Time `json:"cpu_time_at"`
-	CPUPeakNanoCores          *int64    `json:"cpu_peak_nanocores"`
-	MemoryPeakBytes           *int64    `json:"memory_peak_bytes"`
-	EphemeralStoragePeakBytes *int64    `json:"ephemeral_storage_peak_bytes"`
-	IOReadBytes               *int64    `json:"io_read_bytes"`
-	IOWriteBytes              *int64    `json:"io_write_bytes"`
-	IOReadOps                 *int64    `json:"io_read_ops"`
-	IOWriteOps                *int64    `json:"io_write_ops"`
-	IOPressureSomeNS          *int64    `json:"io_pressure_some_ns"`
-	IOPressureFullNS          *int64    `json:"io_pressure_full_ns"`
-	Saturated                 bool      `json:"saturated"`
-	CounterReset              bool      `json:"counter_reset"`
-	RequestsChanged           bool      `json:"requests_changed"`
+	// WorkflowSize is the observed Workflow admission label, never a numeric
+	// per-step resource budget or a termination-message claim. Legacy unknowns
+	// remain empty. Conflicting observed labels permanently mark it unknown.
+	WorkflowSize              periapsis.Size `json:"workflow_size,omitempty"`
+	SizeClassChanged          bool           `json:"size_class_changed,omitempty"`
+	Version                   int            `json:"version"`
+	Source                    string         `json:"source"`
+	RunID                     string         `json:"run_id"`
+	WorkflowName              string         `json:"workflow_name"`
+	WorkflowUID               string         `json:"workflow_uid"`
+	Namespace                 string         `json:"namespace"`
+	NodeID                    string         `json:"node_id"`
+	PodName                   string         `json:"pod_name"`
+	PodUID                    string         `json:"pod_uid"`
+	NodeName                  string         `json:"node_name"`
+	ContainerID               string         `json:"container_id"`
+	ContainerName             string         `json:"container_name"`
+	RestartCount              int32          `json:"restart_count"`
+	Burn                      string         `json:"burn"`
+	Step                      string         `json:"step"`
+	FirstObservedAt           time.Time      `json:"first_observed_at"`
+	LastObservedAt            time.Time      `json:"last_observed_at"`
+	SourceAt                  time.Time      `json:"source_at"`
+	ContainerSourceAt         time.Time      `json:"container_source_at"`
+	IOPressureAt              time.Time      `json:"io_pressure_at"`
+	Samples                   int64          `json:"samples"`
+	SampledLowerBound         bool           `json:"sampled_lower_bound"`
+	Terminal                  bool           `json:"terminal"`
+	ExitCode                  *int32         `json:"exit_code"`
+	Reason                    string         `json:"reason,omitempty"`
+	CPURequestNanoCores       *int64         `json:"cpu_request_nanocores"`
+	MemoryRequestBytes        *int64         `json:"memory_request_bytes"`
+	EphemeralRequestBytes     *int64         `json:"ephemeral_request_bytes"`
+	CPUTimeNS                 *int64         `json:"cpu_time_ns"`
+	CPUTimeAt                 time.Time      `json:"cpu_time_at"`
+	CPUPeakNanoCores          *int64         `json:"cpu_peak_nanocores"`
+	MemoryPeakBytes           *int64         `json:"memory_peak_bytes"`
+	EphemeralStoragePeakBytes *int64         `json:"ephemeral_storage_peak_bytes"`
+	IOReadBytes               *int64         `json:"io_read_bytes"`
+	IOWriteBytes              *int64         `json:"io_write_bytes"`
+	IOReadOps                 *int64         `json:"io_read_ops"`
+	IOWriteOps                *int64         `json:"io_write_ops"`
+	IOPressureSomeNS          *int64         `json:"io_pressure_some_ns"`
+	IOPressureFullNS          *int64         `json:"io_pressure_full_ns"`
+	Saturated                 bool           `json:"saturated"`
+	CounterReset              bool           `json:"counter_reset"`
+	RequestsChanged           bool           `json:"requests_changed"`
 }
 
 func (u StepResourceUsage) Validate() error {
 	bad := errors.New("invalid external step resource observation")
+	if !u.WorkflowSize.Valid() || (u.SizeClassChanged && u.WorkflowSize != "") {
+		return bad
+	}
 	if u.Version != 1 || u.Source != "kubelet-cadvisor" || !u.SampledLowerBound || !diagnosticRun.MatchString(u.RunID) || !diagnosticUID.MatchString(u.WorkflowUID) || !diagnosticUID.MatchString(u.PodUID) || !diagnosticCID.MatchString(u.ContainerID) || u.ContainerName != "main" || u.RestartCount < 0 || u.Samples < 0 || (u.Samples == 0 && !u.Terminal) || u.FirstObservedAt.IsZero() || u.LastObservedAt.Before(u.FirstObservedAt) || (u.Samples > 0 && u.SourceAt.IsZero()) || u.SourceAt.After(u.LastObservedAt.Add(2*time.Second)) {
 		return bad
 	}
@@ -112,6 +122,13 @@ func MergeResourceUsage(old, next StepResourceUsage) (StepResourceUsage, error) 
 		return StepResourceUsage{}, errors.New("resource observation binding changed")
 	}
 	out := old
+	out.SizeClassChanged = old.SizeClassChanged || next.SizeClassChanged ||
+		(old.WorkflowSize != "" && next.WorkflowSize != "" && old.WorkflowSize != next.WorkflowSize)
+	if out.SizeClassChanged {
+		out.WorkflowSize = ""
+	} else if out.WorkflowSize == "" {
+		out.WorkflowSize = next.WorkflowSize
+	}
 	if next.CPUTimeNS != nil && next.CPUTimeAt.After(old.CPUTimeAt) {
 		if old.CPUTimeNS != nil {
 			if *next.CPUTimeNS < *old.CPUTimeNS {

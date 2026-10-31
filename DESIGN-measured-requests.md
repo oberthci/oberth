@@ -251,3 +251,18 @@ unexecuted-only watchdog retry, and dashboard queue/attempt continuity. Exercise
 memory/disk/IO pressure with platform/token/DB recovery before a production canary.
 Rollback restores the old gate and resource policy while retaining measurements;
 increased CI utilisation cannot survive rollback of platform protection.
+
+## Report-only size comparison follow-up
+
+The next reviewed stage adds per-step sampled peaks grouped by the observed
+Workflow S/M/L/XL admission label (or unknown), in run_get and repo_usage. It
+does not implement stage2 resource policy or change stage3 admission. There
+are no universal numeric CPU/memory envelopes behind these size labels.
+No class is inferred from peaks or untrusted termination-message declarations.
+See [report semantics and coverage](docs/measured-size-report.md).
+
+Host PSI now defaults to observation-only. Explicit enforce mode retains the
+30/20 hysteresis and bounded holds; capacity/disk/ownership gates remain
+independent. The pause-Pod platform qualification does not qualify a PSI
+threshold or application recovery. Do not substitute a larger unmeasured
+threshold for coverage/qualification or raise capacity during a long IO hold.

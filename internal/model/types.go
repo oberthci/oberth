@@ -334,8 +334,9 @@ func (s StepStatus) Progress() int {
 
 type StepResult struct {
 	// MeasuredUsage is outside-step, identity-bound sampled telemetry; legacy usage fields below remain self-reported.
-	MeasuredUsage          []StepResourceUsage `json:",omitempty"`
-	MeasuredUsageTruncated bool                `json:",omitempty"`
+	MeasuredUsage          []StepResourceUsage      `json:",omitempty"`
+	MeasuredUsageTruncated bool                     `json:",omitempty"`
+	MeasuredSizeComparison []ResourceSizeComparison `json:",omitempty"`
 	Termination            *StepDiagnostic
 	RunID                  string
 	Burn                   string

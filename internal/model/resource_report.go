@@ -4,9 +4,13 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/oberthci/oberth/pkg/periapsis"
 )
 
 type ResourceUsageReport struct {
+	ReportOnly              bool                 `json:"report_only"`
+	SizeClassSemantics      string               `json:"size_class_semantics"`
 	StepsTruncated          bool                 `json:"steps_truncated"`
 	Repository              string               `json:"repository"`
 	Since                   time.Time            `json:"since"`
@@ -18,14 +22,15 @@ type ResourceUsageReport struct {
 	Steps                   []ResourceStepReport `json:"steps"`
 }
 type ResourceStepReport struct {
-	Burn         string                          `json:"burn"`
-	Step         string                          `json:"step"`
-	Observations int                             `json:"observations"`
-	Terminal     int                             `json:"terminal"`
-	Killed       int                             `json:"oom_killed"`
-	Unsampled    int                             `json:"unsampled"`
-	Flagged      int                             `json:"flagged"`
-	Metrics      map[string]ResourceMetricReport `json:"metrics"`
+	ByWorkflowSize []ResourceSizeComparison        `json:"by_workflow_size"`
+	Burn           string                          `json:"burn"`
+	Step           string                          `json:"step"`
+	Observations   int                             `json:"observations"`
+	Terminal       int                             `json:"terminal"`
+	Killed         int                             `json:"oom_killed"`
+	Unsampled      int                             `json:"unsampled"`
+	Flagged        int                             `json:"flagged"`
+	Metrics        map[string]ResourceMetricReport `json:"metrics"`
 }
 type ResourceMetricReport struct {
 	Scope     string            `json:"scope"`
@@ -62,7 +67,7 @@ func BuildResourceReport(values []StepResourceUsage) []ResourceStepReport {
 			if v.Samples == 0 {
 				r.Unsampled++
 			}
-			if v.Saturated || v.CounterReset || v.RequestsChanged {
+			if v.Saturated || v.CounterReset || v.RequestsChanged || v.SizeClassChanged {
 				r.Flagged++
 			}
 		}
@@ -99,6 +104,7 @@ func BuildResourceReport(values []StepResourceUsage) []ResourceStepReport {
 			}
 			r.Metrics[metric.name] = ResourceMetricReport{Scope: metric.scope, Used: Quantiles(used), Requested: Quantiles(requested), UsedRequestPPM: Quantiles(ratios)}
 		}
+		r.ByWorkflowSize = CompareResourceSize(rows)
 		out = append(out, r)
 	}
 	return out
@@ -113,5 +119,65 @@ func AttachResourceUsage(steps []StepResult, values []StepResourceUsage, truncat
 	for i := range steps {
 		steps[i].MeasuredUsage = grouped[steps[i].Burn+"\x00"+steps[i].Step]
 		steps[i].MeasuredUsageTruncated = truncated
+		steps[i].MeasuredSizeComparison = CompareResourceSize(steps[i].MeasuredUsage)
 	}
+}
+
+// ResourceSizeComparison reports sampled peaks within one observed Workflow
+// admission class. It does not map usage to a smaller class or invent class
+// CPU/memory limits. Main-container and pod-wide peaks are never summed.
+type ResourceSizeComparison struct {
+	WorkflowSize              string            `json:"workflow_size"`
+	Observations              int               `json:"observations"`
+	OOMKilled                 int               `json:"oom_killed"`
+	Unsampled                 int               `json:"unsampled"`
+	Flagged                   int               `json:"flagged"`
+	CPUPeakNanoCores          ResourceQuantiles `json:"main_cpu_peak_nanocores"`
+	MemoryPeakBytes           ResourceQuantiles `json:"main_memory_peak_bytes"`
+	EphemeralStoragePeakBytes ResourceQuantiles `json:"pod_ephemeral_peak_bytes"`
+}
+
+func CompareResourceSize(values []StepResourceUsage) []ResourceSizeComparison {
+	out := make([]ResourceSizeComparison, 0, 5)
+	for _, size := range []periapsis.Size{periapsis.S, periapsis.M, periapsis.L, periapsis.XL, ""} {
+		r := ResourceSizeComparison{WorkflowSize: string(size)}
+		if size == "" {
+			r.WorkflowSize = "unknown"
+		}
+		var cpu, memory, ephemeral []int64
+		for _, v := range values {
+			observed := v.WorkflowSize
+			if !observed.Valid() || v.SizeClassChanged {
+				observed = ""
+			}
+			if observed != size {
+				continue
+			}
+			r.Observations++
+			if v.Reason == "OOMKilled" {
+				r.OOMKilled++
+			}
+			if v.Samples == 0 {
+				r.Unsampled++
+			}
+			if v.Saturated || v.CounterReset || v.RequestsChanged || v.SizeClassChanged {
+				r.Flagged++
+			}
+			if v.CPUPeakNanoCores != nil {
+				cpu = append(cpu, *v.CPUPeakNanoCores)
+			}
+			if v.MemoryPeakBytes != nil {
+				memory = append(memory, *v.MemoryPeakBytes)
+			}
+			if v.EphemeralStoragePeakBytes != nil {
+				ephemeral = append(ephemeral, *v.EphemeralStoragePeakBytes)
+			}
+		}
+		if r.Observations == 0 {
+			continue
+		}
+		r.CPUPeakNanoCores, r.MemoryPeakBytes, r.EphemeralStoragePeakBytes = Quantiles(cpu), Quantiles(memory), Quantiles(ephemeral)
+		out = append(out, r)
+	}
+	return out
 }
