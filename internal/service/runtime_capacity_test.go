@@ -45,6 +45,45 @@ func runtimeCapacityFixture(t *testing.T, jobs int) (*Scheduler, *capacityAudit)
 	auditor := &capacityAudit{}
 	return &Scheduler{admission: gate, maxConcurrent: jobs, capacityFile: path, auditor: auditor, mutationGate: func(context.Context) error { return nil }, wake: make(chan struct{}, 1)}, auditor
 }
+
+func TestRuntimeCapacityPlatformProtectionFiniteXLFourSharesAfterRaise(t *testing.T) {
+	s, _ := runtimeCapacityFixture(t, 4)
+	s.admission.weights = SizeWeights{S: 1, M: 2, L: 3, XL: 8}
+	writeCapacity(t, s, "2")
+	s.refreshRuntimeCapacity(t.Context())
+	state := s.AdmissionState()
+	if state.Capacity != 8 || state.Configuration.MaxConcurrentJobs != 4 || state.Configuration.Error == "" {
+		t.Fatalf("positive XL compatibility trap not retained: %#v", state)
+	}
+	// The operator changes this startup configuration while intake is drained;
+	// runtime reload itself does not change the configured size weights.
+	s.admission.weights = SizeWeights{S: 1, M: 2, L: 3, XL: 4}
+	s.refreshRuntimeCapacity(t.Context())
+	state = s.AdmissionState()
+	if state.Capacity != 4 || state.Configuration.MaxConcurrentJobs != 2 || state.Configuration.Source != "file" || state.Configuration.Error != "" {
+		t.Fatalf("qualified two-job budget not effective: %#v", state)
+	}
+	// Positive XL=4 fills the initial budget by weight, without an exclusion
+	// flag. Raising capacity to six lets a waiting M share the held XL grant.
+	releaseXL, err := acquireWithinBudget(t, s.admission.reserve(1), periapsis.XL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer releaseXL()
+	_, ready := capacityWaiting(t, s.admission, 2, periapsis.M)
+	writeCapacity(t, s, "3")
+	s.refreshRuntimeCapacity(t.Context())
+	select {
+	case releaseM := <-ready:
+		defer releaseM()
+	case <-time.After(testStartTimeout(time.Second)):
+		t.Fatal("XL=4 retained exclusive semantics after capacity rose to six")
+	}
+	state = s.AdmissionState()
+	if state.Used != 6 || state.Runs != 2 || state.Capacity != 6 {
+		t.Fatalf("XL=4 and M=2 did not share the raised budget: %#v", state)
+	}
+}
 func writeCapacity(t *testing.T, s *Scheduler, text string) {
 	t.Helper()
 	if err := os.WriteFile(s.capacityFile, []byte(text), 0600); err != nil {
