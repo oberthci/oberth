@@ -619,3 +619,95 @@ func TestPressureNonAdminAndMCPViewsKeepNonNumericReason(t *testing.T) {
 		}
 	}
 }
+
+func TestPressureObserveHighLoadKeepsOtherAdmissionGates(t *testing.T) {
+	f := pressureTestGate()
+	f.gate.pressure.config.Mode = PressureObserve
+	f.gate.pressure.state.Mode = PressureObserve
+	f.sample.IO.FullAvg60 = 72
+	first := f.prepare(1, model.PriorityNormal, "", periapsis.L)
+	second := f.prepare(2, model.PriorityNormal, "", periapsis.L)
+	if !first.granted || second.granted { // L weighs 3; a budget of 4 still binds.
+		t.Fatal("observation bypassed weighted capacity or blocked the first grant")
+	}
+	state := (&Scheduler{admission: f.gate}).AdmissionState().Pressure
+	if state == nil || state.Mode != PressureObserve || !state.Available || !state.ThresholdExceeded || state.Holding || state.Sample.IO.FullAvg60 != 72 || state.Deferred != 0 {
+		t.Fatalf("high pressure must be visible without a hold: %+v", state)
+	}
+	f.advance(21 * time.Minute)
+	if second.granted || !second.pressureSince.IsZero() || f.gate.pressure.deferrals != 0 || f.gate.pressure.bypasses != 0 {
+		t.Fatal("observation acquired a deferral clock or bypassed capacity")
+	}
+	first.cancel()
+	if !second.granted {
+		t.Fatal("capacity release did not progress under high PSI")
+	}
+	var metrics bytes.Buffer
+	(&Scheduler{admission: f.gate}).WritePressureMetrics(&metrics)
+	for _, want := range []string{"oberth_admission_pressure_enforcing 0", "oberth_admission_pressure_threshold_exceeded 1", "oberth_admission_pressure_holding 0"} {
+		if !strings.Contains(metrics.String(), want) {
+			t.Fatal("missing observation metric", want)
+		}
+	}
+	f.err = errors.New("PSI unavailable")
+	f.advance(time.Second)
+	state = (&Scheduler{admission: f.gate}).AdmissionState().Pressure
+	if state.Available || state.Holding || state.ThresholdExceeded || state.Sample != nil {
+		t.Fatal("unavailable PSI must be explicitly unknown", state)
+	}
+	f.err = nil
+	f.sample.IO.FullAvg60 = 15
+	f.advance(time.Second)
+	state = (&Scheduler{admission: f.gate}).AdmissionState().Pressure
+	if !state.Available || state.ThresholdExceeded || state.Holding {
+		t.Fatal("observation did not recover in place", state)
+	}
+}
+
+func TestPressureExplicitEnforcementRecoversWithoutRestart(t *testing.T) {
+	f := pressureTestGate()
+	f.gate.pressure.config.Mode = PressureEnforce
+	f.sample.IO.FullAvg60 = 65
+	waiting := f.prepare(1, model.PriorityNormal, "", periapsis.M)
+	if waiting.granted || !f.gate.pressure.state.Holding {
+		t.Fatal("explicit enforcement failed to hold at loaded-host pressure")
+	}
+	f.sample.IO.FullAvg60 = 20
+	f.advance(time.Second)
+	if waiting.granted {
+		t.Fatal("enforcement lost its hysteresis")
+	}
+	f.sample.IO.FullAvg60 = 19.99
+	f.advance(time.Second)
+	if !waiting.granted || f.gate.pressure.state.Holding || f.gate.pressure.state.ThresholdExceeded {
+		t.Fatal("enforcement did not resume without a restart")
+	}
+	if err := (AdmissionPressureConfig{Mode: "typo"}).Validate(); err == nil {
+		t.Fatal("invalid mode disabled protection silently")
+	}
+}
+
+func TestPressureObserveDoesNotBypassDiskOrGroupOwnership(t *testing.T) {
+	f := pressureTestGate()
+	f.gate.pressure.config.Mode = PressureObserve
+	f.gate.pressure.state.Mode = PressureObserve
+	f.sample.IO.FullAvg60 = 70
+	f.gate.diskFloor = &diskFloorCheck{floorBytes: 100, cachedFree: 0, cacheTime: time.Now(), cacheTTL: time.Hour}
+	waiting := f.prepare(1, model.PriorityNormal, "deploy", periapsis.S)
+	if waiting.granted {
+		t.Fatal("observation waived the disk floor")
+	}
+	f.gate.diskFloor = nil
+	f.advance(time.Second)
+	if !waiting.granted {
+		t.Fatal("disk recovery did not progress")
+	}
+	follower := f.prepare(2, model.PriorityNormal, "deploy", periapsis.S)
+	if follower.granted {
+		t.Fatal("observation waived group ownership")
+	}
+	waiting.cancel()
+	if !follower.granted {
+		t.Fatal("group release did not progress")
+	}
+}

@@ -73,9 +73,11 @@ admission:
     enabled: true
     maxConcurrentJobs: null
   diskFloorBytes: 0
-  # Host-wide Linux PSI admission hold. No running work is paused. Missing or
-  # malformed PSI fails open with one warning. Zero disables each threshold.
+  # Observe host PSI by default: unqualified stall percentages must not stop
+  # every grant at upgrade. Explicit enforce mode holds only new grants.
+  # Both modes retain capacity/disk/ownership gates; unavailable PSI fails open.
   pressure:
+    mode: observe
     ioFullAvg60Max: 30
     cpuSomeAvg60Max: 0
     # Percentage points; below each enabled threshold. Resume strictly below

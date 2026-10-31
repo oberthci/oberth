@@ -1338,8 +1338,10 @@ function pressureStatusCard(pressure) {
   if (!pressure) return "";
   const sample = pressure.sample;
   const detail = sample ? `IO full ${Number(sample.io.full_avg60).toFixed(1)}% · CPU some ${Number(sample.cpu.some_avg60).toFixed(1)}% · memory full ${Number(sample.memory.full_avg60).toFixed(1)}% (avg60)` : "PSI unavailable; admission fails open";
-  const value = pressure.holding ? `deferring new grants (${pressure.resource})` : pressure.available ? "accepting new grants" : "unavailable";
-  return svcCard("host pressure", value, detail, pressure.holding || !pressure.available ? "warn" : "ok");
+  const observing = pressure.mode === "observe";
+  const value = observing ? "observation only" : pressure.holding ? `deferring new grants (${pressure.resource})` : pressure.available ? "no pressure hold" : "unavailable";
+  const policy = observing ? " · PSI does not defer grants; other admission gates still apply" : "";
+  return svcCard("host pressure", value, detail + policy, pressure.holding || pressure.threshold_exceeded || !pressure.available ? "warn" : "ok");
 }
 function capacityStatusCard(admission) {
   const config = admission?.configuration;

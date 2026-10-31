@@ -215,6 +215,9 @@ spec:
             - --admission-disk-floor-bytes={{ $admission.diskFloorBytes }}
             {{- end }}
             {{- $pressure := $admission.pressure | default dict }}
+            {{- $pressureMode := $pressure.mode | default "observe" }}
+            {{- if not (has $pressureMode (list "observe" "enforce")) }}{{- fail "admission.pressure.mode must be observe or enforce" }}{{- end }}
+            - {{ printf "--admission-pressure-mode=%s" $pressureMode | quote }}
             {{- $ioMax := 30 }}
             {{- if hasKey $pressure "ioFullAvg60Max" }}{{- $ioMax = $pressure.ioFullAvg60Max }}{{- end }}
             {{- $cpuMax := 0 }}

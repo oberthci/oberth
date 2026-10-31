@@ -10,10 +10,11 @@ import (
 
 func TestServePressureDefaultsAndValidation(t *testing.T) {
 	defaults, err := parseServeOptions([]string{"--argo-namespace", "argo-pipelines"}, io.Discard)
-	if err != nil || defaults.admissionPressure.IOFullAvg60Max != 30 || defaults.admissionPressure.CPUSomeAvg60Max != 0 || defaults.admissionPressure.Hysteresis != 10 || defaults.admissionPressure.MaxDefer != 20*time.Minute {
+	if err != nil || defaults.admissionPressure.Mode != "observe" || defaults.admissionPressure.IOFullAvg60Max != 30 || defaults.admissionPressure.CPUSomeAvg60Max != 0 || defaults.admissionPressure.Hysteresis != 10 || defaults.admissionPressure.MaxDefer != 20*time.Minute {
 		t.Fatal("bad pressure defaults", defaults.admissionPressure, err)
 	}
 	for _, args := range [][]string{
+		{"--admission-pressure-mode=typo"},
 		{"--admission-pressure-io-full-avg60-max=NaN"},
 		{"--admission-pressure-cpu-some-avg60-max=Inf"},
 		{"--admission-pressure-io-full-avg60-max=101"},
@@ -27,6 +28,10 @@ func TestServePressureDefaultsAndValidation(t *testing.T) {
 			t.Fatal("invalid pressure flags accepted", args)
 		}
 	}
+	enforced, err := parseServeOptions([]string{"--argo-namespace", "argo-pipelines", "--admission-pressure-mode=enforce"}, io.Discard)
+	if err != nil || enforced.admissionPressure.Mode != "enforce" {
+		t.Fatal("explicit enforcement rejected", err)
+	}
 	disabled, err := parseServeOptions([]string{"--argo-namespace", "argo-pipelines", "--admission-pressure-io-full-avg60-max=0", "--admission-pressure-max-defer=0"}, io.Discard)
 	if err != nil || disabled.admissionPressure.IOFullAvg60Max != 0 {
 		t.Fatal("explicitly disabling pressure rejected", err)
@@ -38,9 +43,9 @@ func TestChartPressureDefaultsOverridesAndExplicitZero(t *testing.T) {
 		set  []string
 		want []string
 	}{
-		{want: []string{"--admission-pressure-io-full-avg60-max=30", "--admission-pressure-cpu-some-avg60-max=0", "--admission-pressure-hysteresis=10", "--admission-pressure-max-defer=20m"}},
+		{want: []string{"--admission-pressure-mode=observe", "--admission-pressure-io-full-avg60-max=30", "--admission-pressure-cpu-some-avg60-max=0", "--admission-pressure-hysteresis=10", "--admission-pressure-max-defer=20m"}},
 		{set: []string{"admission.pressure.ioFullAvg60Max=0", "admission.pressure.hysteresis=0", "admission.pressure.maxDefer=0s"}, want: []string{"--admission-pressure-io-full-avg60-max=0", "--admission-pressure-hysteresis=0"}},
-		{set: []string{"admission.pressure.ioFullAvg60Max=45.5", "admission.pressure.cpuSomeAvg60Max=70", "admission.pressure.hysteresis=5", "admission.pressure.maxDefer=7m"}, want: []string{"--admission-pressure-io-full-avg60-max=45.5", "--admission-pressure-cpu-some-avg60-max=70", "--admission-pressure-hysteresis=5", "--admission-pressure-max-defer=7m"}},
+		{set: []string{"admission.pressure.mode=enforce", "admission.pressure.ioFullAvg60Max=45.5", "admission.pressure.cpuSomeAvg60Max=70", "admission.pressure.hysteresis=5", "admission.pressure.maxDefer=7m"}, want: []string{"--admission-pressure-mode=enforce", "--admission-pressure-io-full-avg60-max=45.5", "--admission-pressure-cpu-some-avg60-max=70", "--admission-pressure-hysteresis=5", "--admission-pressure-max-defer=7m"}},
 	} {
 		args := []string{"template", "oberth", "../../charts/oberth", "--set", "image.ref=example.invalid/oberth@" + goProxyDigest}
 		for _, value := range tc.set {
@@ -60,7 +65,7 @@ func TestChartPressureDefaultsOverridesAndExplicitZero(t *testing.T) {
 			}
 		}
 	}
-	for _, value := range []string{"admission.pressure.ioFullAvg60Max=-1", "admission.pressure.cpuSomeAvg60Max=101", "admission.pressure.maxDefer=soon", "admission.pressure.ioFullAvg60Max=5", "admission.pressure.cpuSomeAvg60Max=10", "admission.pressure.maxDefer=0", "admission.pressure.maxDefer=0s", "admission.pressure.maxDefer=0m0s", "admission.pressure.maxDefer=0.0s"} {
+	for _, value := range []string{"admission.pressure.mode=typo", "admission.pressure.ioFullAvg60Max=-1", "admission.pressure.cpuSomeAvg60Max=101", "admission.pressure.maxDefer=soon", "admission.pressure.ioFullAvg60Max=5", "admission.pressure.cpuSomeAvg60Max=10", "admission.pressure.maxDefer=0", "admission.pressure.maxDefer=0s", "admission.pressure.maxDefer=0m0s", "admission.pressure.maxDefer=0.0s"} {
 		if output, err := exec.Command("helm", "template", "oberth", "../../charts/oberth", "--set", "image.ref=example.invalid/oberth@"+goProxyDigest, "--set", value).CombinedOutput(); err == nil {
 			t.Fatalf("invalid pressure chart value accepted: %s %s", value, output)
 		}

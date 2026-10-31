@@ -1,7 +1,7 @@
 # Host pressure admission
 
-Oberth can defer **new resource grants** while the host is under sustained IO
-pressure. This helps avoid starting more work during an overloaded disk wave.
+Oberth observes host pressure by default. Explicit enforcement can defer
+**new resource grants** while the host is under sustained IO pressure. This helps avoid starting more work during an overloaded disk wave.
 It does not pause, kill, resize or revoke a running workflow, retained grant, or
 adopted workflow. It is a scheduling signal, never a run verdict or a readiness
 or liveness failure.
@@ -20,6 +20,7 @@ Default Helm values (also the `serve` defaults):
 ```yaml
 admission:
   pressure:
+    mode: observe
     ioFullAvg60Max: 30
     cpuSomeAvg60Max: 0
     hysteresis: 10
@@ -28,6 +29,7 @@ admission:
 
 The equivalent flags are:
 
+- `--admission-pressure-mode=observe`
 - `--admission-pressure-io-full-avg60-max=30`
 - `--admission-pressure-cpu-some-avg60-max=0`
 - `--admission-pressure-hysteresis=10`
@@ -42,7 +44,22 @@ file or e.g. `--set-json admission.pressure.ioFullAvg60Max=35.5`; Helm's plain
 `--set` treats decimals as strings, which the schema rejects. Explicit zeros are
 preserved during chart rendering, including reused values.
 
-IO holds when `full avg60 >= 30` and resumes only below `20`. CPU, when enabled,
+In `observe` mode, samples, threshold-exceeded state, recovery and warnings
+remain visible but PSI starts no deferral clocks and withholds no grants. The
+configured weighted capacity, run ceiling, disk floor and ownership/priority
+rules still apply. This does not claim a host resource guarantee: conservative
+capacity and the independently qualified platform protection remain necessary.
+
+Set `admission.pressure.mode: enforce` (or
+`--admission-pressure-mode=enforce`) to opt in after observing a representative
+workload and qualifying its threshold/capacity together. **Upgrade behavior
+changes intentionally:** existing threshold flags alone no longer turn on the
+public CLI's gate; deployments that require enforcement must persist the mode
+explicitly in their reviewed Helm values. Match the chart and image, because an
+older binary does not recognize the new mode flag. Direct Go configurations
+with an empty mode retain their historical enforcement semantics.
+
+In `enforce` mode, IO holds when `full avg60 >= 30` and resumes only below `20`. CPU, when enabled,
 has an independent latch using its own threshold minus the same hysteresis.
 Either resource can hold grants. One recovering resource cannot clear the
 other's hold. A valid low reading clears the pressure-wait episode; the next
@@ -81,7 +98,7 @@ process logs one source warning per outage (re-armed on recovery), clears stale 
 on later admission passes. A later valid sample restores protection. No host
 mount, elevated privilege or Kubernetes API query is required.
 
-Unscoped `/api/status` exposes `admission.pressure`: thresholds, hysteresis,
+Unscoped `/api/status` exposes `admission.pressure`: mode, threshold_exceeded, thresholds, hysteresis,
 max defer, availability, observation time, the three PSI samples, holding
 resource, and the count of all prepared, unparked waiters whose own pressure
 clocks have not expired. The
@@ -97,7 +114,7 @@ aggregate status is available.
 The existing authenticated admin metrics endpoint adds:
 
 - `oberth_admission_pressure_avg60{resource="io|cpu|memory",kind="some|full"}`
-- `oberth_admission_pressure_enabled`, `_available`, `_holding`, `_deferred`
+- `oberth_admission_pressure_enabled`, `_enforcing`, `_threshold_exceeded`, `_available`, `_holding`, `_deferred`
 - `oberth_admission_pressure_deferrals_total`, `_bypasses_total`
 
 Metrics declare Prometheus gauge/counter types. The gauges reflect the last admission sample; averages are absent without a
@@ -107,9 +124,15 @@ source recovery and hold changes; each directly deferred run and bounded bypass 
 one line. A slow metrics consumer does not hold the admission mutex while the
 response is written.
 
-This default introduces admission delay under high pressure. Operators can
-change the thresholds or disable both gates while inspecting the observed
-values. IO pressure does not identify its source, reserve disk bandwidth, or
+The default is observation rather than an unqualified higher threshold.
+The supplied tuxbox observation of 65–72% IO stall would exceed 30 immediately;
+raising 30 to an arbitrary larger number would still promise unsupported
+protection. The platform pressure rehearsal proves critical pause-Pod admission
+and re-creation, not application recovery or an appropriate PSI/throughput knee.
+Collect a representative observation window before choosing enforcement.
+No startup grace, automatic capacity raise or restart is needed to keep new
+upgrades progressing. Explicit enforcement retains its bounded wait and
+hysteresis, and recovers in place on low samples or source recovery. IO pressure does not identify its source, reserve disk bandwidth, or
 guarantee tests will meet their deadlines. The independent free-space floor
 still protects disk capacity and is never waived by `maxDefer`.
 

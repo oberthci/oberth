@@ -269,17 +269,19 @@ type PressureSample struct {
 	Memory PressureResource `json:"memory"`
 }
 type AdmissionPressure struct {
-	Enabled         bool            `json:"enabled"`
-	Available       bool            `json:"available"`
-	ObservedAt      time.Time       `json:"observed_at,omitzero"`
-	Sample          *PressureSample `json:"sample,omitempty"`
-	IOFullAvg60Max  float64         `json:"io_full_avg60_max"`
-	CPUSomeAvg60Max float64         `json:"cpu_some_avg60_max"`
-	Hysteresis      float64         `json:"hysteresis"`
-	MaxDeferSeconds int64           `json:"max_defer_seconds"`
-	Holding         bool            `json:"holding"`
-	Resource        string          `json:"resource,omitempty"`
-	Deferred        int             `json:"deferred"`
+	Mode              string          `json:"mode"`
+	ThresholdExceeded bool            `json:"threshold_exceeded"`
+	Enabled           bool            `json:"enabled"`
+	Available         bool            `json:"available"`
+	ObservedAt        time.Time       `json:"observed_at,omitzero"`
+	Sample            *PressureSample `json:"sample,omitempty"`
+	IOFullAvg60Max    float64         `json:"io_full_avg60_max"`
+	CPUSomeAvg60Max   float64         `json:"cpu_some_avg60_max"`
+	Hysteresis        float64         `json:"hysteresis"`
+	MaxDeferSeconds   int64           `json:"max_defer_seconds"`
+	Holding           bool            `json:"holding"`
+	Resource          string          `json:"resource,omitempty"`
+	Deferred          int             `json:"deferred"`
 }
 type PressureDeferral struct {
 	Redacted        bool      `json:"redacted,omitempty"`

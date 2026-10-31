@@ -310,3 +310,5 @@ run('api=capacityStatusSavedAPI;');
 if (run(`typeof capacityStatusCard === 'function' && typeof controllerProfileStatusCard === 'function'`)) {
   await import('./test-runtime-controller-combined.mjs');
 }
+assert.ok(run(`pressureStatusCard({mode:'observe',available:true,threshold_exceeded:true,holding:false,resource:'io',sample:{io:{full_avg60:72},cpu:{some_avg60:20},memory:{full_avg60:5}}})`).includes('observation only'));
+assert.ok(!run(`pressureStatusCard({mode:'observe',available:true,threshold_exceeded:true,holding:false,resource:'io'})`).includes('deferring new grants'));

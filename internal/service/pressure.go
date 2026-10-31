@@ -16,9 +16,17 @@ import (
 	"github.com/oberthci/oberth/internal/model"
 )
 
-// AdmissionPressureConfig gates only new grants. Zero thresholds disable it.
+const (
+	PressureObserve = "observe"
+	PressureEnforce = "enforce"
+)
+
+// AdmissionPressureConfig observes host pressure and optionally gates new grants.
+// Empty Mode preserves enforcement for existing in-process configurations; the
+// public CLI and chart explicitly default to observe. Zero thresholds disable it.
 // Source and Logf permit deterministic tests without observing the test host.
 type AdmissionPressureConfig struct {
+	Mode            string
 	IOFullAvg60Max  float64
 	CPUSomeAvg60Max float64
 	Hysteresis      float64
@@ -28,6 +36,9 @@ type AdmissionPressureConfig struct {
 }
 
 func (c AdmissionPressureConfig) Validate() error {
+	if c.Mode != "" && c.Mode != PressureObserve && c.Mode != PressureEnforce {
+		return errors.New("pressure mode must be observe or enforce")
+	}
 	for _, value := range []float64{c.IOFullAvg60Max, c.CPUSomeAvg60Max, c.Hysteresis} {
 		if math.IsNaN(value) || math.IsInf(value, 0) || value < 0 || value > 100 {
 			return errors.New("pressure thresholds and hysteresis must be finite percentages in [0,100]")
@@ -54,6 +65,9 @@ type pressureCheck struct {
 }
 
 func newPressureCheck(config AdmissionPressureConfig) *pressureCheck {
+	if config.Mode == "" {
+		config.Mode = PressureEnforce
+	}
 	if config.IOFullAvg60Max == 0 && config.CPUSomeAvg60Max == 0 {
 		return nil
 	}
@@ -63,7 +77,7 @@ func newPressureCheck(config AdmissionPressureConfig) *pressureCheck {
 	if config.Logf == nil {
 		config.Logf = log.Printf
 	}
-	return &pressureCheck{config: config, state: model.AdmissionPressure{Enabled: true, IOFullAvg60Max: config.IOFullAvg60Max, CPUSomeAvg60Max: config.CPUSomeAvg60Max, Hysteresis: config.Hysteresis, MaxDeferSeconds: int64(config.MaxDefer / time.Second)}}
+	return &pressureCheck{config: config, state: model.AdmissionPressure{Enabled: true, Mode: config.Mode, IOFullAvg60Max: config.IOFullAvg60Max, CPUSomeAvg60Max: config.CPUSomeAvg60Max, Hysteresis: config.Hysteresis, MaxDeferSeconds: int64(config.MaxDefer / time.Second)}}
 }
 
 // Read at most once per second in admission, never from status/metrics requests.
@@ -73,7 +87,7 @@ func (p *pressureCheck) refresh(now time.Time) {
 		return
 	}
 	p.sampledAt = now
-	wasHeld, wasAvailable := p.state.Holding, p.state.Available
+	wasHeld, wasExceeded, wasAvailable := p.state.Holding, p.state.ThresholdExceeded, p.state.Available
 	sample, err := p.config.Source()
 	if err == nil {
 		err = validatePressureSample(sample)
@@ -93,15 +107,16 @@ func (p *pressureCheck) refresh(now time.Time) {
 		p.ioHeld = pressureLatch(p.ioHeld, sample.IO.FullAvg60, p.config.IOFullAvg60Max, p.config.Hysteresis)
 		p.cpuHeld = pressureLatch(p.cpuHeld, sample.CPU.SomeAvg60, p.config.CPUSomeAvg60Max, p.config.Hysteresis)
 	}
-	p.state.Holding = p.ioHeld || p.cpuHeld
+	p.state.ThresholdExceeded = p.ioHeld || p.cpuHeld
+	p.state.Holding = p.state.ThresholdExceeded && p.config.Mode == PressureEnforce
 	p.state.Resource = ""
 	if p.ioHeld {
 		p.state.Resource = "io"
 	} else if p.cpuHeld {
 		p.state.Resource = "cpu"
 	}
-	if wasHeld != p.state.Holding || (!wasAvailable && p.state.Available) {
-		p.config.Logf("admission pressure transition: available=%t holding=%t resource=%s", p.state.Available, p.state.Holding, p.state.Resource)
+	if wasHeld != p.state.Holding || wasExceeded != p.state.ThresholdExceeded || (!wasAvailable && p.state.Available) {
+		p.config.Logf("admission pressure transition: mode=%s available=%t threshold_exceeded=%t holding=%t resource=%s", p.state.Mode, p.state.Available, p.state.ThresholdExceeded, p.state.Holding, p.state.Resource)
 	}
 }
 
@@ -286,13 +301,19 @@ func (scheduler *Scheduler) WritePressureMetrics(w io.Writer) {
 	}
 	gate.mu.Unlock()
 	for _, metric := range []struct{ name, kind string }{
-		{"avg60", "gauge"}, {"enabled", "gauge"}, {"available", "gauge"}, {"holding", "gauge"}, {"deferred", "gauge"}, {"deferrals_total", "counter"}, {"bypasses_total", "counter"},
+		{"avg60", "gauge"}, {"enabled", "gauge"}, {"enforcing", "gauge"}, {"threshold_exceeded", "gauge"}, {"available", "gauge"}, {"holding", "gauge"}, {"deferred", "gauge"}, {"deferrals_total", "counter"}, {"bypasses_total", "counter"},
 	} {
 		_, _ = fmt.Fprintf(w, "# TYPE oberth_admission_pressure_%s %s\n", metric.name, metric.kind)
 	}
-	enabled, available, held, deferred := 0, 0, 0, 0
+	enabled, enforcing, exceeded, available, held, deferred := 0, 0, 0, 0, 0, 0
 	if state != nil {
 		enabled = 1
+		if state.Mode == PressureEnforce {
+			enforcing = 1
+		}
+		if state.ThresholdExceeded {
+			exceeded = 1
+		}
 		if state.Available {
 			available = 1
 		}
@@ -309,5 +330,6 @@ func (scheduler *Scheduler) WritePressureMetrics(w io.Writer) {
 			}
 		}
 	}
+	_, _ = fmt.Fprintf(w, "oberth_admission_pressure_enforcing %d\noberth_admission_pressure_threshold_exceeded %d\n", enforcing, exceeded)
 	_, _ = fmt.Fprintf(w, "oberth_admission_pressure_enabled %d\noberth_admission_pressure_available %d\noberth_admission_pressure_holding %d\noberth_admission_pressure_deferred %d\noberth_admission_pressure_deferrals_total %d\noberth_admission_pressure_bypasses_total %d\n", enabled, available, held, deferred, deferrals, bypasses)
 }

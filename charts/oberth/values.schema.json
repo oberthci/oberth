@@ -95,8 +95,9 @@
         "pressure": {
           "type": "object",
           "additionalProperties": false,
-          "description": "Linux host PSI admission hold; unavailable readings fail open. Set both thresholds to 0 to disable.",
+          "description": "Host PSI observation by default; explicit enforce holds new grants. Capacity/disk gates remain independent. Missing PSI is visible and fails open.",
           "properties": {
+            "mode": {"type": "string", "enum": ["observe", "enforce"], "description": "observe reports only (default); enforce holds new grants."},
             "ioFullAvg60Max": {"type": "number", "minimum": 0, "maximum": 100},
             "cpuSomeAvg60Max": {"type": "number", "minimum": 0, "maximum": 100},
             "hysteresis": {"type": "number", "minimum": 0, "maximum": 100, "description": "Percentage points below each enabled threshold; must be below that threshold."},

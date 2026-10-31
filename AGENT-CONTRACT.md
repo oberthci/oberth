@@ -3262,8 +3262,12 @@ explicit dry-run/help also succeed.
 Existing Workflow adoption, preflight recovery and publication ownership rules
 are unchanged. See [restart handover](docs/restart-handover.md).
 
-**Host PSI admission:** `serve`/Helm default to deferring new grants at Linux
-IO `full avg60 >= 30`, resuming strictly below 20 (10 point hysteresis). CPU
+**Host PSI admission:** `serve`/Helm default to `mode=observe`: PSI samples
+and threshold-exceeded state are visible but do not withhold grants. Explicit
+`mode=enforce` defers new grants at Linux IO `full avg60 >= 30`, resuming strictly
+below 20 (10 point hysteresis). Existing deployments needing enforcement must
+persist that mode explicitly; unqualified thresholds must not stall a fresh
+upgrade. Capacity/disk/ownership gates remain independent. CPU
 `some avg60` is independently configurable and disabled by default; memory is
 observed only. The pressure gate runs after existing grant eligibility and stops
 the grant pass while held. All prepared, unparked waiters start independent 20m pressure clocks; expiry bypasses only
