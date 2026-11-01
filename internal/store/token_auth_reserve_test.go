@@ -29,16 +29,9 @@ func holdGeneralReaders(t *testing.T, s *Store) {
 
 func TestTokenAuthReserveSurvivesGeneralPoolAndWriterSaturation(t *testing.T) {
 	s, uplink := authReaderFixture(t)
-	// A concurrent-touch no-op must not fall back onto dashboard readers either.
-	if err := s.TouchTokenCredential(t.Context(), uplink.TokenCredentialID); err != nil {
-		t.Fatal(err)
-	}
 	holdGeneralReaders(t, s)
 	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
 	defer cancel()
-	if err := s.TouchTokenCredential(ctx, uplink.TokenCredentialID); err != nil {
-		t.Fatalf("no-op touch queued behind dashboard readers: %v", err)
-	}
 	tx, err := s.db.BeginTx(t.Context(), nil)
 	if err != nil {
 		t.Fatal(err)
@@ -46,7 +39,7 @@ func TestTokenAuthReserveSurvivesGeneralPoolAndWriterSaturation(t *testing.T) {
 	defer tx.Rollback()
 	for range 8 {
 		got, err := s.AuthenticatedUplinkByDigest(ctx, make([]byte, 32))
-		if err != nil || got.ID != uplink.ID || got.TokenCredential.LastUsedAt == nil {
+		if err != nil || got.ID != uplink.ID || got.TokenCredentialID != uplink.TokenCredentialID {
 			t.Fatalf("token identity queued behind dashboard/writer: %+v %v", got, err)
 		}
 		credential, err := s.TokenCredentialByDigest(ctx, make([]byte, 32))

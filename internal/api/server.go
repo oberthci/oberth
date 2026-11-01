@@ -315,6 +315,9 @@ func (server *Server) requireAuth(next http.Handler) http.Handler {
 			return
 		}
 		if !errors.Is(err, ErrInvalidToken) && (err != nil || strings.TrimSpace(actor.Identity) == "") {
+			if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+				log.Printf("api: authentication failure: %v", err)
+			}
 			writer.Header().Set("Retry-After", "1")
 			writeJSON(writer, http.StatusServiceUnavailable, map[string]string{"error": "authentication temporarily unavailable; retry the request"})
 			return

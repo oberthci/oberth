@@ -2,14 +2,13 @@ package store
 
 import (
 	"context"
-	"errors"
 	"testing"
 	"time"
 )
 
-// Direct token touches still wait for the writer. Bearer authentication queues
-// these as optional telemetry after reading fresh identity and scope via WAL.
-func TestBearerIdentityReadIsIndependentButTokenTouchWaitsForWriter(t *testing.T) {
+// Bearer authentication reads fresh identity and scope via WAL while optional
+// token-use telemetry waits for the writer in the background.
+func TestBearerIdentityReadIsIndependentOfWriter(t *testing.T) {
 	s, uplink := authReaderFixture(t)
 	tx, err := s.db.BeginTx(t.Context(), nil)
 	if err != nil {
@@ -22,17 +21,11 @@ func TestBearerIdentityReadIsIndependentButTokenTouchWaitsForWriter(t *testing.T
 	if err != nil || identity.TokenCredentialID != uplink.TokenCredentialID {
 		t.Fatalf("reader queued behind writer: %+v %v", identity, err)
 	}
-	touchCtx, cancelTouch := context.WithTimeout(t.Context(), 20*time.Millisecond)
-	defer cancelTouch()
-	if err := s.TouchTokenCredential(touchCtx, uplink.TokenCredentialID); !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("token touch did not expose writer wait: %v", err)
-	}
 }
 
 func TestTokenUseWritesAtMostOncePerMinuteUnderConcurrentTouches(t *testing.T) {
 	s, uplink := authReaderFixture(t)
 	now := time.Now().UTC()
-	s.now = func() time.Time { return now }
 	changes := func() int {
 		t.Helper()
 		var n int
@@ -42,14 +35,14 @@ func TestTokenUseWritesAtMostOncePerMinuteUnderConcurrentTouches(t *testing.T) {
 		return n
 	}
 	before := changes()
-	if err := s.TouchTokenCredential(t.Context(), uplink.TokenCredentialID); err != nil {
+	if _, err := s.touchTokenCredentialAt(t.Context(), uplink.TokenCredentialID, now); err != nil {
 		t.Fatal(err)
 	}
 	if changes()-before != 1 {
 		t.Fatal("first touch was not one actual update")
 	}
 	now = now.Add(59 * time.Second)
-	if err := s.TouchTokenCredential(t.Context(), uplink.TokenCredentialID); err != nil {
+	if _, err := s.touchTokenCredentialAt(t.Context(), uplink.TokenCredentialID, now); err != nil {
 		t.Fatal(err)
 	}
 	if changes()-before != 1 {
@@ -58,7 +51,10 @@ func TestTokenUseWritesAtMostOncePerMinuteUnderConcurrentTouches(t *testing.T) {
 	now = now.Add(time.Second)
 	done := make(chan error, 12)
 	for range 12 {
-		go func() { done <- s.TouchTokenCredential(t.Context(), uplink.TokenCredentialID) }()
+		go func() {
+			_, err := s.touchTokenCredentialAt(t.Context(), uplink.TokenCredentialID, now)
+			done <- err
+		}()
 	}
 	for range 12 {
 		if err := <-done; err != nil {
@@ -71,7 +67,7 @@ func TestTokenUseWritesAtMostOncePerMinuteUnderConcurrentTouches(t *testing.T) {
 	if err := s.RevokeTokenCredential(t.Context(), uplink.TokenCredentialID); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.TouchTokenCredential(t.Context(), uplink.TokenCredentialID); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("throttle hid revocation: %v", err)
+	if changed, err := s.touchTokenCredentialAt(t.Context(), uplink.TokenCredentialID, now.Add(time.Minute)); err != nil || changed {
+		t.Fatalf("telemetry updated revoked credential: changed=%t err=%v", changed, err)
 	}
 }

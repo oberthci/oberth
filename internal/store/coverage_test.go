@@ -1455,53 +1455,6 @@ func TestAuthenticatedUplinkByDigest(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// TouchTokenCredential
-// ---------------------------------------------------------------------------
-
-func TestTouchTokenCredential(t *testing.T) {
-	now := time.Date(2026, 8, 17, 14, 0, 0, 0, time.UTC)
-	s := testStore(t, &now)
-	ctx := context.Background()
-
-	digest := make([]byte, 32)
-	digest[0] = 0xEE
-	cred, err := s.CreateTokenCredential(ctx, model.TokenCredentialSpec{Name: "touch@host", Digest: digest})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := s.UpsertUplink(ctx, model.UplinkSpec{
-		Fingerprint: "SHA256:touch-test", Identity: "touch@host",
-		TokenCredentialID: cred.ID, AuthActor: "token:" + cred.ID,
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := s.ActivateTokenCredential(ctx, cred.ID); err != nil {
-		t.Fatal(err)
-	}
-
-	// Touch updates last_used_at.
-	now = now.Add(time.Minute)
-	if err := s.TouchTokenCredential(ctx, cred.ID); err != nil {
-		t.Fatal(err)
-	}
-	readback, err := s.TokenCredentialByDigest(ctx, digest)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if readback.LastUsedAt == nil {
-		t.Fatal("last_used_at should be set after touch")
-	}
-
-	// Touch a revoked credential: fails.
-	if err := s.RevokeTokenCredential(ctx, cred.ID); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.TouchTokenCredential(ctx, cred.ID); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("touch revoked = %v, want ErrNotFound", err)
-	}
-}
-
-// ---------------------------------------------------------------------------
 // RevokeTokenCredential
 // ---------------------------------------------------------------------------
 

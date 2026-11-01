@@ -202,7 +202,7 @@ func TestTokenUseNoOpsDoNotAcquireAuthenticationReaders(t *testing.T) {
 			id := uplink.TokenCredentialID
 			switch state {
 			case "recent":
-				if err := s.TouchTokenCredential(t.Context(), id); err != nil {
+				if _, err := s.touchTokenCredentialAt(t.Context(), id, s.now()); err != nil {
 					t.Fatal(err)
 				}
 			case "revoked":

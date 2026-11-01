@@ -59,7 +59,15 @@ func TestReposWithDueTokenUseWhileWriterHeld(t *testing.T) {
 						t.Fatal(err)
 					}
 					if usedBefore {
-						if err := db.TouchTokenCredential(t.Context(), credential.ID); err != nil {
+						seed, err := store.HoldWriterForTest(t.Context(), db)
+						if err != nil {
+							t.Fatal(err)
+						}
+						defer seed.Rollback()
+						if _, err := seed.ExecContext(t.Context(), "UPDATE token_credentials SET last_used_at=? WHERE id=?", now.UnixNano(), credential.ID); err != nil {
+							t.Fatal(err)
+						}
+						if err := seed.Commit(); err != nil {
 							t.Fatal(err)
 						}
 						now = now.Add(store.TokenCredentialTouchInterval)

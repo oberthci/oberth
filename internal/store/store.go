@@ -2171,27 +2171,6 @@ func scanTokenCredential(row rowScanner) (model.TokenCredential, error) {
 
 const TokenCredentialTouchInterval = time.Minute
 
-func (s *Store) TouchTokenCredential(ctx context.Context, id string) error {
-	changed, err := s.touchTokenCredentialAt(ctx, id, s.now())
-	if err != nil {
-		return err
-	}
-	if changed {
-		return nil
-	}
-	// A concurrent request may already have touched the token. Distinguish
-	// that benign no-op from an inactive/revoked credential for direct callers.
-	release, err := acquireAuthSlot(ctx, s.bearerAuthSlots)
-	if err != nil {
-		return fmt.Errorf("wait for bearer use reader: %w", err)
-	}
-	defer release()
-	var active string
-	err = s.authReader().QueryRowContext(ctx, `SELECT id FROM token_credentials
-WHERE id = ? AND activated_at IS NOT NULL AND revoked_at IS NULL`, id).Scan(&active)
-	return translateNotFound("token credential", err)
-}
-
 // touchTokenCredentialAt is UPDATE-only. Telemetry must not consume reserved
 // authentication readers to distinguish a benign no-op from revocation.
 func (s *Store) touchTokenCredentialAt(ctx context.Context, id string, at time.Time) (bool, error) {

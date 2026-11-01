@@ -123,6 +123,11 @@ Pod-template assignment to the rendered cloudflared class.
 oberth upgrade --namespace "$oberth_ns" --set platformProtection.enabled=true
 ```
 
+Operators using raw Helm with `--reset-values` must persist
+`platformProtection: {enabled: true}` in a dedicated values file passed to every
+future upgrade, or the next upgrade deletes the Oberth and cloudflared
+PriorityClasses.
+
 Immediately before the Argo upgrade, the exact overlay class must exist with
 value 1,000,000 and global default false (which the API may omit). **Stop if any check fails.**
 The upgrade must retain existing namespace scope, identities, profile images,

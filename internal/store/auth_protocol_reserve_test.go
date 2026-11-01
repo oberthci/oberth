@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/testtimeout"
 )
 
@@ -46,7 +45,7 @@ func holdProtocolAuthReads(t *testing.T, s *Store, slots chan struct{}) func() {
 	return release
 }
 
-func bearerReadOperations(s *Store, uplink model.Uplink) []func(context.Context) error {
+func bearerReadOperations(s *Store) []func(context.Context) error {
 	return []func(context.Context) error{
 		func(ctx context.Context) error {
 			_, err := s.AuthenticatedUplinkByDigest(ctx, make([]byte, 32))
@@ -56,7 +55,6 @@ func bearerReadOperations(s *Store, uplink model.Uplink) []func(context.Context)
 			_, err := s.TokenCredentialByDigest(ctx, make([]byte, 32))
 			return err
 		},
-		func(ctx context.Context) error { return s.TouchTokenCredential(ctx, uplink.TokenCredentialID) },
 	}
 }
 
@@ -64,10 +62,6 @@ func TestAuthProtocolReservePreventsConcurrentCrossStarvation(t *testing.T) {
 	for _, floodProtocol := range []string{"bearer", "ssh"} {
 		t.Run(floodProtocol+"-flood", func(t *testing.T) {
 			s, uplink := authReaderFixture(t)
-			// The touch operation must reach its no-op active-token read.
-			if err := s.TouchTokenCredential(t.Context(), uplink.TokenCredentialID); err != nil {
-				t.Fatal(err)
-			}
 			ssh := func(ctx context.Context) error { _, err := s.UplinkByFingerprint(ctx, uplink.Fingerprint); return err }
 			unknownBearer := func(ctx context.Context) error {
 				digest := make([]byte, 32)
@@ -85,7 +79,7 @@ func TestAuthProtocolReservePreventsConcurrentCrossStarvation(t *testing.T) {
 				}
 				return err
 			}
-			bearer := bearerReadOperations(s, uplink)
+			bearer := bearerReadOperations(s)
 			slots, flood, peer := s.bearerAuthSlots, append([]func(context.Context) error{unknownBearer}, bearer...), []func(context.Context) error{ssh}
 			if floodProtocol == "ssh" {
 				slots, flood, peer = s.sshAuthSlots, []func(context.Context) error{unknownSSH, ssh}, bearer
