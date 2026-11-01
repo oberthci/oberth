@@ -57,9 +57,9 @@ recreation. No pressure-survival qualification is claimed.
 
 ## Activation in a quiet window
 
-Pause intake through the existing maintenance procedure and drain all runs,
+Pause intake through the [maintenance-window procedure](upgrade-v0.17.59.md) and drain all runs,
 including tag, release, apply, promotion, trusted KVM, source/helper and VM cells.
-Keep intake paused through all replacements and health checks. Enabling the
+Keep intake paused through all replacements and health checks; `--wait-idle` is advisory, not an admission freeze. Enabling the
 Oberth option restarts Oberth (`Recreate`) and chart-managed cloudflared
 (`RollingUpdate`, surge one) in the same Helm upgrade. While Oberth is down, the
 executor token barrier stalls and already-started Pod deadlines keep ticking.
@@ -67,10 +67,12 @@ Keep independent operator access for tunnel recovery.
 
 Run the following from the checkout containing the reviewed overlays. Set the
 release/namespace variables to the actual existing releases. The chart pins
-below must match the installed versions; stop and review if they differ. Set
-`protection_chart` to the reviewed Oberth chart containing this feature. Review
+below must match the installed versions; stop and review if they differ. Use the
+CLI of the target Oberth release for activation; set `protection_chart` to that
+same release's chart for the later same-version disable command. Review
 renders against existing namespace policy before making changes; creating
 PriorityClasses requires cluster-scoped Helm permissions.
+Run these blocks in one subshell so `set -eu` failures do not close the interactive shell; keep the named snapshot directory on persistent storage.
 
 ```sh
 set -eu
@@ -92,7 +94,7 @@ test -n "$argo_class"
 test -n "$bao_class"
 
 umask 077
-protection_values_dir=$(mktemp -d)
+protection_values_dir=$(mktemp -d "$PWD/platform-protection-before.XXXXXXXX")
 helm list -n "$oberth_ns" --filter "^${oberth_release}$"
 helm list -n "$argo_ns" --filter "^${argo_release}$"
 helm list -n "$bao_ns" --filter "^${bao_release}$"
@@ -107,26 +109,31 @@ required:** establish and verify the classes before changing either external
 release. Argo uses `Recreate`; a missing class can remove the old controller and
 leave its replacement refused immediately. OpenBao's `OnDelete` hides a wrong
 class until the next Pod recreation, when it also prevents replacement.
+For external charts, prefer `helm pull` plus a trusted upstream SHA256 check before upgrading from the downloaded archive.
 
-First enable Oberth, preserving all existing values, then verify its token/DB
+First enable Oberth through the target-release CLI, which merges new chart defaults,
+pins the matching server image and compatibility values, and runs schema preflight;
+raw Helm `--reuse-values` can retain the old server image under a newer chart.
+This also supports same-version re-apply. Then verify its token/DB
 health and external ingress. `watchTunnel.enabled` still controls whether the
 chart manages cloudflared. An externally managed connector requires its own
 Pod-template assignment to the rendered cloudflared class.
 
 ```sh
-helm upgrade "$oberth_release" "$protection_chart" -n "$oberth_ns" \
-  --reuse-values --set platformProtection.enabled=true --wait --timeout 10m
+oberth upgrade --namespace "$oberth_ns" --set platformProtection.enabled=true
 ```
 
 Immediately before the Argo upgrade, the exact overlay class must exist with
-value 1,000,000 and `globalDefault: false`. **Stop if either command fails.**
+value 1,000,000 and global default false (which the API may omit). **Stop if any check fails.**
 The upgrade must retain existing namespace scope, identities, profile images,
 immutable profile ConfigMap and executor settings. Omitting `--reuse-values`
 would reset them to chart defaults.
 
 ```sh
 kubectl get priorityclass "$argo_class"
-test "$(kubectl get priorityclass "$argo_class" -o jsonpath='{.value} {.globalDefault}')" = '1000000 false'
+test "$(kubectl get priorityclass "$argo_class" -o jsonpath='{.value}')" = 1000000
+argo_global_default=$(kubectl get priorityclass "$argo_class" -o jsonpath='{.globalDefault}')
+test "$argo_global_default" != true
 helm upgrade "$argo_release" argo-workflows \
   --repo https://argoproj.github.io/argo-helm --version "$argo_chart_version" \
   -n "$argo_ns" --reuse-values -f "$argo_overlay" --wait --timeout 10m
@@ -145,7 +152,9 @@ or the old Pod's health as activation success.
 
 ```sh
 kubectl get priorityclass "$bao_class"
-test "$(kubectl get priorityclass "$bao_class" -o jsonpath='{.value} {.globalDefault}')" = '1000000 false'
+test "$(kubectl get priorityclass "$bao_class" -o jsonpath='{.value}')" = 1000000
+bao_global_default=$(kubectl get priorityclass "$bao_class" -o jsonpath='{.globalDefault}')
+test "$bao_global_default" != true
 helm upgrade "$bao_release" openbao \
   --repo https://openbao.github.io/openbao-helm --version "$bao_chart_version" \
   -n "$bao_ns" --reuse-values -f "$bao_overlay" --timeout 10m
@@ -158,6 +167,7 @@ manual unseal completes. While sealed, credentialed steps cannot log in. Hosts
 without auto-unseal need the operator to unseal by hand. For installations with
 more than one server Pod, use the existing HA maintenance procedure one Pod at
 a time; the following commands describe the single-server case.
+On hosts using systemd auto-unseal, run `systemctl is-active oberth-openbao-unseal` before deletion and inspect `journalctl -u oberth-openbao-unseal --since '-10 minutes' --no-pager` afterward.
 
 ```sh
 old_bao_uid=$(kubectl get pod "$bao_pod" -n "$bao_ns" -o jsonpath='{.metadata.uid}')
@@ -179,8 +189,8 @@ Then confirm `initialized: true`, `sealed: false`, Pod readiness, the exact clas
 numeric priority, Burstable QoS and CPU/memory requests on the **new** Pod:
 
 ```sh
-kubectl exec -n "$bao_ns" "$bao_pod" -- bao status -format=json
 kubectl wait --for=condition=Ready "pod/$bao_pod" -n "$bao_ns" --timeout=5m
+kubectl exec -n "$bao_ns" "$bao_pod" -- bao status -format=json
 test "$(kubectl get pod "$bao_pod" -n "$bao_ns" -o jsonpath='{.spec.priorityClassName}')" = "$bao_class"
 test "$(kubectl get pod "$bao_pod" -n "$bao_ns" -o jsonpath='{.spec.priority} {.status.qosClass}')" = '1000000 Burstable'
 kubectl get pod "$bao_pod" -n "$bao_ns" -o jsonpath='{.spec.containers[?(@.name=="openbao")].resources.requests}{"\n"}'
