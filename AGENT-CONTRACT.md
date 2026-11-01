@@ -466,7 +466,7 @@ trust assumptions and complete invalidation rules.
   releases weight and lets unrelated work proceed. Bounded extra priority claims
   let higher classes reach the gate past ordinary waiting dispatch slots.
   `priority_class` and `priority_reason` are run projections; active
-  `display_reason` and dashboard badges also explain them.
+  `display_reason` and the dashboard run-detail priority badge also explain them.
   Unscoped-admin MCP `queue_priority_config {rc_patterns}` atomically replaces
   up to 16 case-sensitive globs (1..256 bytes, `*`/`?` match slash; `[]` disables).
   Defaults have no RC globs. `queue_priority_get {}` reads them and the fixed
@@ -571,7 +571,8 @@ trust assumptions and complete invalidation rules.
   of a (repository, group) holds admission at a time, across branch,
   promotion and tag triggers, and members are admitted by priority, then claim FIFO.
   VMI resource templates do not imply a concurrency group. Any valid declared
-  group is allowed, and an ungrouped VMI run shows no group badge (#1173).
+  group is allowed. Run rows have no group badge; a queued run waiting on
+  its group names it in the message column.
   The group never changes a run's weight or identity, XL keeps its
   exclusivity, and the same-branch supersede rule is unchanged. A member
   waiting on its group holds no weight and no dispatch slot, so other

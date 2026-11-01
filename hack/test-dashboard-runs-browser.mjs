@@ -17,8 +17,8 @@ const shell = serverSource.match(/io.WriteString\(writer, `(<\!doctype html>.*?)
   .replaceAll('`+view+`', 'runs');
 const now = Date.now();
 const makeRun = (ID, extra = {}) => ({ID, RepoID: 1, Ref: 'main', RefKind: 'branch', Status: 'passed', SHA: 'abc123456789', Actor: 'fixture', Trigger: 'push', QueuedAt: new Date(now-90000).toISOString(), StartedAt: new Date(now-80000).toISOString(), FinishedAt: new Date(now-20000).toISOString(), ...extra});
-const heads = [makeRun('head-main', {earlier_attempts: 3}), makeRun('head-tag', {Ref:'v1', RefKind:'tag', Release:true, Credentialed:true}), makeRun('head-branch', {Ref:'v1', Status:'failed'}), makeRun('head-queued', {RepoID:2, Status:'queued', StartedAt:null, FinishedAt:null}), makeRun('head-retry', {Ref:'feature', Status:'queued', StartedAt:null, FinishedAt:null, auto_retry_of:'retry-failed'})];
-const older = makeRun('old-failed', {Status:'failed', Error:'fixture failure'});
+const heads = [makeRun('head-main', {earlier_attempts: 3, priority_class:'highest', priority_reason:'fixture priority', ConcurrencyGroup:'deploy'}), makeRun('head-tag', {Ref:'v1', RefKind:'tag', Release:true, Credentialed:true}), makeRun('head-branch', {Ref:'v1', Status:'failed'}), makeRun('head-queued', {RepoID:2, Status:'queued', StartedAt:null, FinishedAt:null}), makeRun('head-retry', {Ref:'feature', Status:'queued', StartedAt:null, FinishedAt:null, auto_retry_of:'retry-failed'})];
+const older = makeRun('old-failed', {Status:'failed', Error:'fixture failure', Trigger:'schedule', ScheduleEntry:'weekly', priority_class:'high', priority_reason:'history priority', ConcurrencyGroup:'deploy'});
 const superseded = makeRun('old-superseded', {Status:'interrupted', SupersededBy:'head-main'});
 const oldest = makeRun('oldest');
 const scheduled = makeRun('scheduled-running', {Status:'running', Trigger:'schedule', ScheduleEntry:'nightly', FinishedAt:null});
@@ -128,6 +128,10 @@ try {
     const layout = await page.evaluate(() => ({side:document.querySelector('.repo-side').getBoundingClientRect().top,table:document.querySelector('.runs-table').getBoundingClientRect().top,screen:document.querySelector('.screen').getBoundingClientRect().width,viewport:innerWidth,sideRight:document.querySelector('.repo-side').getBoundingClientRect().right,tableRight:document.querySelector('.runs-table').getBoundingClientRect().right,filterRight:Math.max(...[...document.querySelectorAll('.runs-toolbar button')].map(button=>button.getBoundingClientRect().right))}));
     if (width > 980) assert.equal(layout.side, layout.table, `sidebar/table alignment at ${width}`);
     assert.ok(layout.screen <= width && layout.sideRight <= width && layout.tableRight <= width && layout.filterRight <= width, `list, repository counts and every filter fit ${width}px: ${JSON.stringify(layout)}`);
+    assert.equal(await page.locator('.runs-table .repo-name .v4b').count(),0,'list rows have no inline badges');
+    assert.equal(await page.locator('.runs-table > [data-run-id="head-tag"] > div:last-child').textContent(),'release');
+    assert.equal(await page.locator('.runs-table > [data-run-id="scheduled-running"] > div:last-child').textContent(),'schedule: nightly');
+    assert.equal(await page.locator('.runs-table > [data-run-id="scheduled-queued"] > div:last-child').textContent(),'preparing to run');
     assert.equal(await page.locator('.repo-side .side-head').textContent(),'Retained runs');
     await capture('after-runs');
     if (width === 1440) {
@@ -164,10 +168,13 @@ try {
     assert.deepEqual(await page.locator('#stepList .nm').allTextContents(), ['Run summary','ci/test','ci/publish']);
     assert.equal(await page.locator('#stepList .tag').textContent(), 'secret');
     assert.ok(!(await page.locator('.rh').textContent()).toLowerCase().includes('credentialed'));
+    assert.equal(await page.locator('.rh [title="fixture priority"]').textContent(),'highest priority');
     await capture('after-detail');
     await page.locator('[data-action="toggle-attempts"]').click();
     await page.locator('#runHistory [data-run-id="old-superseded"]').first().waitFor();
     assert.equal(await page.locator('#runHistory .runs-table > [data-run-id]').count(), 2);
+    assert.equal(await page.locator('#runHistory .repo-name .v4b').count(),0,'history rows have no inline badges');
+    assert.equal(await page.locator('#runHistory .runs-table > [data-run-id="old-failed"] > div:last-child').textContent(),'fixture failure','existing history message wins over schedule fallback');
     delayOlder=true;
     await page.locator('[data-action="older-attempts"]').focus();
     await page.locator('[data-action="older-attempts"]').press('Enter');

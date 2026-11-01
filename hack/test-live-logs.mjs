@@ -205,10 +205,10 @@ run(`
 await run('awaitResult');
 assert.ok(run('renderedHTML').includes('fixture log'), 'a queued pod can emit before Argo publishes Running');
 
-// Schedule entries distinguish otherwise identical runs and remain escaped.
+// Empty row messages identify schedules, escaped; detail keeps its schedule badge.
 run(`const scheduleRun = {ID:'scroll-run', RepoID:1, Status:'passed', Ref:'main', Trigger:'schedule', ScheduleEntry:'nightly<unsafe>'};`);
 html = run(`runsTable([scheduleRun, {...scheduleRun, ID:'weekly-run', ScheduleEntry:'weekly-sweep'}])`);
-assert.ok(html.includes('nightly&lt;unsafe&gt;') && html.includes('weekly-sweep'));
+assert.ok(html.includes('schedule: nightly&lt;unsafe&gt;') && html.includes('schedule: weekly-sweep'));
 assert.ok(!html.includes('nightly<unsafe>'));
 assert.equal(run(`scheduleBadge({...scheduleRun, Trigger:'branch'})`), '');
 assert.equal(run(`scheduleBadge({...scheduleRun, ScheduleEntry:''})`), '');

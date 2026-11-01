@@ -360,16 +360,18 @@ func TestRunDetailStepsAreUniformOrderedRows(t *testing.T) {
 		}
 		return source[from : from+to]
 	}
-	// The run-level badge is gone from the list, the detail header and the
-	// step-list heading; the release badge stays where it was.
+	// The credentialed badge is gone everywhere; release/priority/schedule
+	// badges remain on run detail, while list rows keep only repo and ref.
 	for _, unwanted := range []string{"credentialedBadge", "CREDENTIALED"} {
 		if strings.Contains(source, unwanted) {
 			t.Fatalf("dashboard retains the credentialed badge: %q", unwanted)
 		}
 	}
-	table := section("function runRow(", "\nasync function renderRuns(")
-	if !strings.Contains(table, "${releaseBadge(run)}") {
-		t.Fatal("runs table lost the release badge")
+	rowSource := section("function runRow(", "\nfunction runsTable(")
+	for _, unwanted := range []string{"releaseBadge", "priorityBadge", "scheduleBadge", "ConcurrencyGroup", "const group ="} {
+		if strings.Contains(rowSource, unwanted) {
+			t.Fatalf("run row retains inline badge code: %s", unwanted)
+		}
 	}
 	detail := section("async function renderRunDetailView(", "\n/* ---------- repositories")
 	if !strings.Contains(detail, `${releaseBadge(run)}`) || !strings.Contains(detail, `${run.Release ? " · RELEASE" : ""}`) {

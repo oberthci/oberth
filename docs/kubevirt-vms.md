@@ -58,8 +58,9 @@ adoption with a drain-before-upgrade hint.
 Each is counted exactly once before new work is admitted, even if its grant
 was reduced or revoked while it ran; new work waits for capacity to drain.
 
-VMI resources do not select a run type or an implicit `kubevirt` group. An
-ungrouped VMI workflow has no group badge. Any valid
+VMI resources do not select a run type or an implicit `kubevirt` group. Run
+rows have no group badges; a queued run waiting on a group names it in the
+message column. Any valid
 `oberth.ci/concurrency-group` remains available to serialize work explicitly,
 including across branch, promotion and tag runs. Different repositories have
 independent grants, so size grants and the ceiling with their combined demand

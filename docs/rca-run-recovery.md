@@ -106,6 +106,13 @@ before choosing a qualified selector for shared names. Token changes and
 repository selection clear history; collapse, replacement requests and auth
 generation checks discard late responses.
 
+List and history rows show only repository and ref in the run column, without
+priority, release, schedule-entry or concurrency-group badges. Existing message
+text takes precedence; an empty message falls back to `release` for a release
+run, otherwise `schedule: <entry>` for a named scheduled run. Priority and group
+appear in a queued run's message only through its existing wait reason. The
+`release` filter remains, and run-detail badges are unchanged.
+
 The old `latest per ref` and `show superseded` switches are removed; their saved
 localStorage values are ignored. Status, release and repository choices still
 persist. The repository sidebar shows retained-run counts with accessible labels

@@ -821,7 +821,8 @@ Only `high` and `highest` are accepted, and the class must rise. Admitted and
 terminal runs refuse. Both changes are audited with the administrator's identity.
 Automatic restart refires retain the wait and bump; manual retries get a new
 queue place. Run views include `priority_class`, `priority_reason`, and active
-`display_reason`; dashboard badges show the class with the reason on hover.
+`display_reason`; the dashboard run-detail badge shows the class with the
+reason on hover. List and history rows do not show priority badges.
 Active `display_reason` is explicitly the priority message unless a more specific
 scheduling/preflight reason replaces it. Terminal `display_reason` describes the
 terminal cause; `priority_class` and `priority_reason` remain separate fields.

@@ -128,3 +128,18 @@ if (!process.env.DASHBOARD_RUNS_CASE || process.env.DASHBOARD_RUNS_CASE === 'R4'
   assert.equal(run('olderCalls'),1,'queued older click runs after refresh');
   console.log('R4 passed: active 503/network/400/404/409 failures, stale saved repository, polling and recovery');
 }
+
+// The shared row renderer serves /runs and run history; detail badges stay separate.
+run(`state.repos=[{ID:1,Name:'ours'}];`);
+const badgeRow = run(`runRow({ID:'labels',RepoID:1,Ref:'v1',RefKind:'tag',Status:'passed',Release:true,Trigger:'schedule',ScheduleEntry:'nightly',priority_class:'highest',priority_reason:'urgent',ConcurrencyGroup:'deploy',Scheduling:{admission:{group:'deploy'}}})`);
+assert.ok(badgeRow.includes('<div class="repo-name">ours</div>'));
+assert.ok(!badgeRow.includes('class="v4b') && !badgeRow.includes('priority') && !badgeRow.includes('nightly') && !badgeRow.includes('deploy'),'list/history repo cell has no inline labels');
+assert.equal(run(`runMessageCell({Status:'passed',Release:true})`),'release');
+assert.equal(run(`runMessageCell({Status:'passed',Trigger:'schedule',ScheduleEntry:'nightly<unsafe>'})`),'schedule: nightly&lt;unsafe&gt;');
+assert.equal(run(`runMessageCell({Status:'passed',priority_class:'highest',ConcurrencyGroup:'deploy'})`),'');
+for(const extra of [`display_reason:'existing reason'`, `Error:'existing reason'`, `FailedStep:'test'`, `Reason:'existing reason'`]) {
+  assert.equal(run(`runMessageCell({Status:'failed',Release:true,Trigger:'schedule',ScheduleEntry:'nightly',${extra}})`), extra.startsWith('FailedStep')?'failed at test':'existing reason');
+}
+assert.equal(run(`runMessageCell({Status:'queued',Release:true,Trigger:'schedule',ScheduleEntry:'nightly',Scheduling:{state:'waiting',admission:{group_holder:true,group:'deploy'}}})`),'waiting for group deploy');
+assert.ok(run(`releaseBadge({Release:true,priority_class:'highest',priority_reason:'urgent'})`).includes('highest priority'),'detail priority and reason remain available');
+console.log('R4B passed: label-free rows, empty-message fallbacks, existing reasons and detail badges');

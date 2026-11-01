@@ -506,7 +506,8 @@ function runTimeLabel(run) {
   return `ended ${ago(run.FinishedAt || run.QueuedAt)}`;
 }
 function runMessageCell(run) {
-  const message = displayRunStatus(run) === "queued" ? queueReason(run) : runMessage(run);
+  const message = (displayRunStatus(run) === "queued" ? queueReason(run) : runMessage(run))
+    || (run.Release ? "release" : run.Trigger === "schedule" && run.ScheduleEntry ? `schedule: ${run.ScheduleEntry}` : "");
   if (run.auto_retried_by) return `<button type="button" class="run-successor retry-warning" data-run-id="${esc(run.auto_retried_by)}">${esc(message)}</button>`;
  if (run.SupersededBy) {
     return `<button type="button" class="run-successor" data-run-id="${esc(run.SupersededBy)}">${esc(message)}</button>`;
@@ -516,8 +517,7 @@ function runMessageCell(run) {
 function runRow(run) {
     const queued = displayRunStatus(run) === "queued";
     const status = queuePhase(run);
-    const group = admissionOf(run)?.group || run.ConcurrencyGroup;
-    return `<div class="trow" data-run-id="${esc(run.ID)}"><div class="status-cell run-status">${statusIcon(status)}${pill(statusLabel(status), statusKind(status))}</div><div class="primary"><div class="repo-name">${esc(repoName(run.RepoID))} ${releaseBadge(run)}${scheduleBadge(run)}${group ? ` <span class="v4b dim" title="concurrency group">${esc(group)}</span>` : ""}</div><div class="branch">${esc(run.RefKind === "tag" ? "tag " : "")}${esc(run.Ref)}</div></div><div class="sha">${esc(shortSha(run.SHA))}</div><div class="clip" title="${esc(run.Actor)}">${esc(run.Actor || "--")}</div><div class="nowrap" title="${esc(fmtTime(runWhen(run)))}">${esc(runTimeLabel(run))}<br><span class="meta"${queued ? ` title="${esc(queueSizeTitle(run))}"` : ""}>${queued ? esc(queueSize(run)) : esc(fmtDur(runDuration(run)))}</span></div><div class="clip" title="${esc(queueDetail(run))}">${runMessageCell(run)}</div></div>`;
+    return `<div class="trow" data-run-id="${esc(run.ID)}"><div class="status-cell run-status">${statusIcon(status)}${pill(statusLabel(status), statusKind(status))}</div><div class="primary"><div class="repo-name">${esc(repoName(run.RepoID))}</div><div class="branch">${esc(run.RefKind === "tag" ? "tag " : "")}${esc(run.Ref)}</div></div><div class="sha">${esc(shortSha(run.SHA))}</div><div class="clip" title="${esc(run.Actor)}">${esc(run.Actor || "--")}</div><div class="nowrap" title="${esc(fmtTime(runWhen(run)))}">${esc(runTimeLabel(run))}<br><span class="meta"${queued ? ` title="${esc(queueSizeTitle(run))}"` : ""}>${queued ? esc(queueSize(run)) : esc(fmtDur(runDuration(run)))}</span></div><div class="clip" title="${esc(queueDetail(run))}">${runMessageCell(run)}</div></div>`;
 }
 function runsTable(runs) {
   return `<div class="table runs-table"><div class="trow head"><div>status</div><div>run</div><div>sha</div><div>actor</div><div>when</div><div>message</div></div>${runs.map(runRow).join("")}</div>`;

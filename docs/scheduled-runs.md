@@ -61,7 +61,9 @@ entry and branch. Resource admission and declared concurrency groups bound
 execution.
 
 Run list/detail APIs expose `ScheduleEntry`; `status` and `wait` expose
-`schedule_entry`. The dashboard shows the name in the run stream and detail.
+`schedule_entry`. The dashboard run detail shows the entry name. List and
+history rows use `schedule: <entry>` only when their message would otherwise
+be empty; existing queue and failure messages take precedence.
 Historical runs created before this feature retain an empty/unknown identity;
 it is never guessed from the current file.
 
@@ -185,7 +187,8 @@ oberth schedules            # every repository, with next due time and last outc
 oberth schedules <repo>     # one repository, including why an entry was refused
 ```
 
-Scheduled runs are marked in the dashboard's run stream.
+Scheduled runs retain their entry badge on the dashboard run detail; their
+list/history messages follow the fallback rule above.
 
 A failing scheduled branch run opens or updates one CI issue per repository and
 branch, even on a non-default branch, and green closes it on recovery. Projection
