@@ -17,6 +17,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/oberthci/oberth/internal/gitoid"
@@ -76,9 +77,16 @@ type Store struct {
 	done            bool
 	readOnly        bool
 	cleanup         func() error
-	tokenUses       chan string // bounded best-effort telemetry; lifecycle protected by mu
-	stopTokenUses   context.CancelFunc
-	tokenUsesDone   chan struct{}
+
+	tokenUses             chan tokenUse       // bounded best-effort telemetry; lifecycle protected by mu
+	pendingTokenUses      map[string]struct{} // includes the in-flight update; protected by mu
+	tokenUseRetryAt       time.Time           // global failure cooldown; protected by mu
+	tokenUseAttempts      atomic.Uint64
+	tokenUseFailures      atomic.Uint64
+	tokenUseQueueDrops    atomic.Uint64
+	tokenUseCooldownDrops atomic.Uint64
+	stopTokenUses         context.CancelFunc
+	tokenUsesDone         chan struct{}
 
 	liveReaderDSN   string // immutable after startup; shared live WAL reader settings
 	liveBusyTimeout time.Duration
@@ -2149,24 +2157,15 @@ func scanTokenCredential(row rowScanner) (model.TokenCredential, error) {
 const TokenCredentialTouchInterval = time.Minute
 
 func (s *Store) TouchTokenCredential(ctx context.Context, id string) error {
-	now := s.now()
-	result, err := s.db.ExecContext(ctx, `
-UPDATE token_credentials SET last_used_at = ?
-WHERE id = ? AND activated_at IS NOT NULL AND revoked_at IS NULL
-  AND (last_used_at IS NULL OR last_used_at <= ?)`, unixNano(now), id, unixNano(now.Add(-TokenCredentialTouchInterval)))
+	changed, err := s.touchTokenCredentialAt(ctx, id, s.now())
 	if err != nil {
-		return fmt.Errorf("touch token credential: %w", err)
+		return err
 	}
-	changed, err := result.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("read token use change: %w", err)
-	}
-	if changed != 0 {
+	if changed {
 		return nil
 	}
 	// A concurrent request may already have touched the token. Distinguish
-	// that benign no-op from an inactive/revoked credential, without caching
-	// authority or converting a revocation race into a successful touch.
+	// that benign no-op from an inactive/revoked credential for direct callers.
 	release, err := acquireAuthSlot(ctx, s.bearerAuthSlots)
 	if err != nil {
 		return fmt.Errorf("wait for bearer use reader: %w", err)
@@ -2176,6 +2175,23 @@ WHERE id = ? AND activated_at IS NOT NULL AND revoked_at IS NULL
 	err = s.authReader().QueryRowContext(ctx, `SELECT id FROM token_credentials
 WHERE id = ? AND activated_at IS NOT NULL AND revoked_at IS NULL`, id).Scan(&active)
 	return translateNotFound("token credential", err)
+}
+
+// touchTokenCredentialAt is UPDATE-only. Telemetry must not consume reserved
+// authentication readers to distinguish a benign no-op from revocation.
+func (s *Store) touchTokenCredentialAt(ctx context.Context, id string, at time.Time) (bool, error) {
+	result, err := s.db.ExecContext(ctx, `
+UPDATE token_credentials SET last_used_at = ?
+WHERE id = ? AND activated_at IS NOT NULL AND revoked_at IS NULL
+  AND (last_used_at IS NULL OR last_used_at <= ?)`, unixNano(at), id, unixNano(at.Add(-TokenCredentialTouchInterval)))
+	if err != nil {
+		return false, fmt.Errorf("touch token credential: %w", err)
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("read token use change: %w", err)
+	}
+	return changed != 0, nil
 }
 
 func (s *Store) RevokeTokenCredential(ctx context.Context, id string) error {

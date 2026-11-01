@@ -236,10 +236,15 @@ Run/log tool reads have a 10s server budget including scope and DB-pool waits;
 optional live scheduling observation has its existing 2s sub-budget. Bearer
 authentication has a separate 5s budget for fresh identity/scopes/revocation.
 A due `last_used_at` update is best-effort telemetry, queued to one background
-worker with at most 64 pending entries per Store. Authentication never waits for
-that worker, a writer slot, or a timestamp commit. A full queue, failed update,
-or shutdown can drop telemetry; a later request retries while the timestamp
-remains due. A committed timestamp newer than one minute skips enqueueing. Server
+worker with at most 64 queued distinct tokens plus one in flight per Store.
+Pending IDs are deduplicated, so repeated use of one token cannot fill the queue.
+The worker records the accepted request's use time, not the delayed commit time,
+and does only an UPDATE; it never consumes authentication slots or readers.
+Authentication does not wait for telemetry's writer slot or commit. A full queue,
+failed update or shutdown can drop telemetry. A failed update suppresses all
+telemetry attempts for one minute; queued and incoming uses during that cooldown
+are dropped. Later requests retry while the committed timestamp remains due.
+A committed timestamp newer than one minute skips enqueueing. Server
 token lookups and SSH share four reserved read-only auth connections, separate
 from the eight ordinary dashboard/list readers. Per-Store admission limits each
 protocol to three reads, including connection waiters, preserving at least one
@@ -248,11 +253,15 @@ Malformed bearer strings are rejected before hashing or database access: issued
 tokens are `oberth_` plus 43 unpadded URL-base64 characters (50 bytes total).
 Correctly shaped unknown tokens still require a fresh lookup. Due updates are
 conditional so concurrent requests write the timestamp at most once per minute.
-The worker is canceled and joined when the Store closes. Failed authority reads
-still fail closed with retryable HTTP 503 on cancellation rather than claiming
-a valid credential is invalid. CPU scheduling or a stuck kernel file read can
-still delay wall-clock return; cancellation is checked between
-bounded reads. `run_get` does not fetch pod logs; use `summary:true` when timing
+The administrator metrics endpoint exposes `oberth_token_use_attempts_total`,
+`oberth_token_use_failures_total`, `oberth_token_use_queue_drops_total` and
+`oberth_token_use_cooldown_drops_total`, without token identifiers.
+The worker is canceled and joined when the Store closes; a worker inside SQLite's
+external busy wait may still take up to the busy timeout to return. Failed
+authority reads, including non-context database errors, fail closed with
+retryable HTTP 503. Only invalid credentials receive an invalid-token HTTP 401.
+CPU scheduling or a stuck kernel file read can still delay wall-clock return;
+cancellation is checked between bounded reads. `run_get` does not fetch pod logs; use `summary:true` when timing
 and repository details are unnecessary. This does not change artifact reads or
 live log streaming.
 

@@ -2,6 +2,8 @@ package api
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -9,6 +11,39 @@ import (
 	"testing/synctest"
 	"time"
 )
+
+func TestAuthenticationFailuresAreClassified(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		err    error
+		status int
+	}{
+		{"invalid", fmt.Errorf("wrapped: %w", ErrInvalidToken), http.StatusUnauthorized},
+		{"read-error", errors.New("private database failure"), http.StatusServiceUnavailable},
+		{"deadline", context.DeadlineExceeded, http.StatusServiceUnavailable},
+		{"canceled", context.Canceled, http.StatusServiceUnavailable},
+		{"missing-identity", nil, http.StatusServiceUnavailable},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server, _ := testServer(t)
+			server.auth = streamAuthFunc(func(context.Context, string) (Actor, error) { return Actor{}, tc.err })
+			request := httptest.NewRequest(http.MethodGet, "/api/repos", nil)
+			request.Header.Set("Authorization", "Bearer valid-token")
+			response := httptest.NewRecorder()
+			server.Handler().ServeHTTP(response, request)
+			if response.Code != tc.status || strings.Contains(response.Body.String(), "private database") {
+				t.Fatalf("authentication failure misclassified: %d %s", response.Code, response.Body)
+			}
+			if tc.status == http.StatusServiceUnavailable {
+				if response.Header().Get("Retry-After") != "1" || response.Header().Get("WWW-Authenticate") != "" {
+					t.Fatalf("temporary failure claimed invalid token: %v", response.Header())
+				}
+			} else if response.Header().Get("WWW-Authenticate") == "" || response.Header().Get("Retry-After") != "" {
+				t.Fatalf("invalid token did not challenge: %v", response.Header())
+			}
+		})
+	}
+}
 
 func TestAuthenticationWriterWaitIsBoundedAndNotAnInvalidToken(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {

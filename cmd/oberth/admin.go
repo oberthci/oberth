@@ -1509,13 +1509,6 @@ func (tokens gatedAdminTokens) ActivateTokenCredential(ctx context.Context, id s
 	return tokens.Store.ActivateTokenCredential(ctx, id)
 }
 
-func (tokens gatedAdminTokens) TouchTokenCredential(ctx context.Context, id string) error {
-	if err := tokens.Gate(ctx, "uplink.token.touch"); err != nil {
-		return err
-	}
-	return tokens.Store.TouchTokenCredential(ctx, id)
-}
-
 // runAccess implements the `oberth access` subcommand family for managing the
 // secret access approval table.
 func runAccess(ctx context.Context, arguments []string, output io.Writer) error {

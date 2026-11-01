@@ -43,8 +43,12 @@ func (actor Actor) SeesUpstream(upstream string) bool {
 }
 
 type Authenticator interface {
+	// Return ErrInvalidToken only for invalid credentials. Other errors are
+	// temporary authentication failures and must never be reported as 401.
 	Authenticate(context.Context, string) (Actor, error)
 }
+
+var ErrInvalidToken = errors.New("api: invalid bearer token")
 
 type ToolService interface {
 	CallTool(context.Context, Actor, string, json.RawMessage) (any, error)
@@ -310,12 +314,12 @@ func (server *Server) requireAuth(next http.Handler) http.Handler {
 		if server.refuseDuringDrain(writer) {
 			return
 		}
-		if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+		if !errors.Is(err, ErrInvalidToken) && (err != nil || strings.TrimSpace(actor.Identity) == "") {
 			writer.Header().Set("Retry-After", "1")
 			writeJSON(writer, http.StatusServiceUnavailable, map[string]string{"error": "authentication temporarily unavailable; retry the request"})
 			return
 		}
-		if err != nil || strings.TrimSpace(actor.Identity) == "" {
+		if errors.Is(err, ErrInvalidToken) {
 			writer.Header().Set("WWW-Authenticate", `Bearer realm="oberth", error="invalid_token"`)
 			writeJSON(writer, http.StatusUnauthorized, map[string]string{"error": "invalid bearer token"})
 			return

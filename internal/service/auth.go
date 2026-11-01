@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/oberthci/oberth/internal/api"
+	"github.com/oberthci/oberth/internal/auth"
 )
 
 type Authenticator struct {
@@ -21,6 +22,9 @@ func NewAuthenticator(source UplinkAuthenticator) (*Authenticator, error) {
 
 func (authenticator *Authenticator) Authenticate(ctx context.Context, token string) (api.Actor, error) {
 	authenticated, err := authenticator.source.Authenticate(ctx, token)
+	if errors.Is(err, auth.ErrInvalidToken) {
+		return api.Actor{}, api.ErrInvalidToken
+	}
 	if err != nil {
 		return api.Actor{}, err
 	}

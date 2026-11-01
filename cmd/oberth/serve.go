@@ -1082,6 +1082,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 	httpAPI, err := api.New(authenticator, controlAPI, controlAPI, version,
 		api.WithErrorClassifier(classifyViewError),
 		api.WithMetrics(func(w io.Writer) {
+			database.WriteTokenUseMetrics(w)
 			health.Readiness.WriteMetrics(w)
 			scheduler.WritePressureMetrics(w)
 			argoJobs.WriteResourceMetrics(w)

@@ -49,7 +49,7 @@ type fakeBackend struct {
 
 func (backend *fakeBackend) Authenticate(_ context.Context, token string) (Actor, error) {
 	if token != "valid-token" {
-		return Actor{}, errors.New("invalid")
+		return Actor{}, ErrInvalidToken
 	}
 	return Actor{Identity: "agent@host", Fingerprint: "SHA256:key"}, nil
 }

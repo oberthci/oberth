@@ -343,25 +343,6 @@ func TestValidateAdminSocketAcceptsValidPaths(t *testing.T) {
 	}
 }
 
-func TestGatedAdminTokensTouchTokenCredential(t *testing.T) {
-	t.Parallel()
-	gateCalls := 0
-	gateErr := errors.New("gate blocked")
-	tokens := gatedAdminTokens{
-		Gate: func(_ context.Context, operation string) error {
-			gateCalls++
-			if operation != "uplink.token.touch" {
-				t.Fatalf("unexpected operation %q", operation)
-			}
-			return gateErr
-		},
-	}
-	err := tokens.TouchTokenCredential(context.Background(), "test-id")
-	if !errors.Is(err, gateErr) || gateCalls != 1 {
-		t.Fatalf("TouchTokenCredential = %v, calls=%d", err, gateCalls)
-	}
-}
-
 func TestGatedAdminTokensCreateAndActivateErrorPaths(t *testing.T) {
 	t.Parallel()
 	gateErr := errors.New("gate blocked")
