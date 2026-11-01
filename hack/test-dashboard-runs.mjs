@@ -9,7 +9,14 @@ const run = code => vm.runInContext(code, sandbox);
 run(`
   let html='', requests=[], listNext='', flatPaging=false;
   replaceApp=value=>{html=value};
-  const makeRun=(ID,extra={})=>({ID,RepoID:1,Ref:'main',RefKind:'branch',Status:'passed',StartedAt:'2026-11-01T10:00:00Z',FinishedAt:'2026-11-01T10:01:00Z',...extra});
+  const makeRun=(ID,extra={})=>{
+    const row={ID,RepoID:1,Ref:'main',RefKind:'branch',Status:'passed',StartedAt:'2026-11-01T10:00:00Z',FinishedAt:'2026-11-01T10:01:00Z',...extra};
+    if(['running','queued'].includes(row.Status)) {
+      row.priority_class ??= 'normal'; row.priority_reason ??= 'ordinary run';
+      row.display_reason ??= 'Priority '+row.priority_class+': '+row.priority_reason+'.';
+    }
+    return row;
+  };
   const head=makeRun('push-head',{Status:'queued',StartedAt:null,FinishedAt:null});
   const scheduled=makeRun('scheduled-running',{Status:'running',Trigger:'schedule',ScheduleEntry:'nightly',FinishedAt:null});
   const queued=makeRun('publication-queued',{Status:'queued',Ref:'other',StartedAt:null,FinishedAt:null});
@@ -29,6 +36,7 @@ run(`
     else rows=[head,scheduled,queued,failed,superseded,retried,makeRun('retry-head',{Ref:'feature'})];
     return {body:rows,next:listNext};
   };
+  const apiFixture=api;
 `);
 // URL is supplied separately so the script's browser globals stay minimal.
 sandbox.URL = URL;
@@ -127,6 +135,38 @@ if (!process.env.DASHBOARD_RUNS_CASE || process.env.DASHBOARD_RUNS_CASE === 'R4'
   await run('pendingRefresh');
   assert.equal(run('olderCalls'),1,'queued older click runs after refresh');
   console.log('R4 passed: active 503/network/400/404/409 failures, stale saved repository, polling and recovery');
+}
+
+if (!process.env.DASHBOARD_RUNS_CASE || process.env.DASHBOARD_RUNS_CASE === 'R5A') {
+  for (const [extra, expected] of [[{Trigger:'schedule',ScheduleEntry:'nightly'},'schedule: nightly'],[{Release:true},'release'],[{},''],[{Error:'execution failed'},'execution failed'],[{display_reason:'KVM preflight running'},'KVM preflight running']]) {
+    sandbox.rowExtra=extra;
+    run(`rowFixture=makeRun('row-message',{Status:'running',FinishedAt:null,...rowExtra})`);
+    assert.equal(run('runMessageCell(rowFixture)'),expected,'R5A: priority-only display reason must not replace the row message fallback');
+    const tooltip=[...run('runRow(rowFixture)').matchAll(/<div class="clip" title="([^"]*)">/g)].at(-1)[1];
+    assert.equal(tooltip,expected,'R5A: tooltip uses the same priority suppression and fallback');
+  }
+  assert.equal(run(`runMessage(makeRun('detail',{Status:'running'}))`),'Priority normal: ordinary run.','detail presentation keeps the original priority reason');
+  console.log('R5A passed: real active priority projection, row/tooltip fallbacks and preserved execution reasons');
+}
+if (!process.env.DASHBOARD_RUNS_CASE || process.env.DASHBOARD_RUNS_CASE === 'R5B') {
+  run(`
+    api=apiFixture;state.status=null;state.statusPending=null;ensureStatus=()=>Promise.resolve();
+    state.filter='all';flatPaging=false;changeRunRepo('github/org/ours');state.activeRuns=[];
+    let r5PollMs=0;setAuto=ms=>{r5PollMs=ms};hasToken=()=>true;setConn=()=>{};
+  `);
+  await run('route(true)');
+  assert.ok(ids().includes('scheduled-running'),'R5B: a successful scoped active fetch must stay visible before status arrives');
+  assert.ok(run('html').includes('all active runs included'));
+  run(`api=async path=>{if(path.includes('view=active'))throw Object.assign(new Error('offline'),{status:503});return apiFixture(path)};`);
+  await run('route(true)');
+  assert.ok(ids().includes('scheduled-running'),'same-selector cached rows remain usable without status');
+  run(`changeRunRepo('github/org/theirs');`);
+  await run('route(true)');
+  assert.ok(!ids().includes('scheduled-running'),'failed fetch must not retain active rows from another selector');
+  assert.equal(run('state.activeRuns.length'),0);
+  assert.ok(!run('html').includes('all active runs included'));
+  assert.equal(run('r5PollMs'),4000);
+  console.log('R5B passed: cold valid saved repo, missing status, same-scope retention and cross-scope failure');
 }
 
 // The shared row renderer serves /runs and run history; detail badges stay separate.

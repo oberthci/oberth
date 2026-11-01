@@ -16,7 +16,14 @@ const shell = serverSource.match(/io.WriteString\(writer, `(<\!doctype html>.*?)
   .replaceAll('`+html.EscapeString(server.version)+`', 'test-fixture')
   .replaceAll('`+view+`', 'runs');
 const now = Date.now();
-const makeRun = (ID, extra = {}) => ({ID, RepoID: 1, Ref: 'main', RefKind: 'branch', Status: 'passed', SHA: 'abc123456789', Actor: 'fixture', Trigger: 'push', QueuedAt: new Date(now-90000).toISOString(), StartedAt: new Date(now-80000).toISOString(), FinishedAt: new Date(now-20000).toISOString(), ...extra});
+const makeRun = (ID, extra = {}) => {
+  const row = {ID, RepoID: 1, Ref: 'main', RefKind: 'branch', Status: 'passed', SHA: 'abc123456789', Actor: 'fixture', Trigger: 'push', QueuedAt: new Date(now-90000).toISOString(), StartedAt: new Date(now-80000).toISOString(), FinishedAt: new Date(now-20000).toISOString(), ...extra};
+  if (['running','queued'].includes(row.Status)) {
+    row.priority_class ??= 'normal'; row.priority_reason ??= 'ordinary run';
+    row.display_reason ??= `Priority ${row.priority_class}: ${row.priority_reason}.`;
+  }
+  return row;
+};
 const heads = [makeRun('head-main', {earlier_attempts: 3, priority_class:'highest', priority_reason:'fixture priority', ConcurrencyGroup:'deploy'}), makeRun('head-tag', {Ref:'v1', RefKind:'tag', Release:true, Credentialed:true}), makeRun('head-branch', {Ref:'v1', Status:'failed'}), makeRun('head-queued', {RepoID:2, Status:'queued', StartedAt:null, FinishedAt:null}), makeRun('head-retry', {Ref:'feature', Status:'queued', StartedAt:null, FinishedAt:null, auto_retry_of:'retry-failed'})];
 const older = makeRun('old-failed', {Status:'failed', Error:'fixture failure', Trigger:'schedule', ScheduleEntry:'weekly', priority_class:'high', priority_reason:'history priority', ConcurrencyGroup:'deploy'});
 const superseded = makeRun('old-superseded', {Status:'interrupted', SupersededBy:'head-main'});
@@ -131,6 +138,8 @@ try {
     assert.equal(await page.locator('.runs-table .repo-name .v4b').count(),0,'list rows have no inline badges');
     assert.equal(await page.locator('.runs-table > [data-run-id="head-tag"] > div:last-child').textContent(),'release');
     assert.equal(await page.locator('.runs-table > [data-run-id="scheduled-running"] > div:last-child').textContent(),'schedule: nightly');
+    assert.equal(await page.locator('.runs-table > [data-run-id="scheduled-running"] > div:last-child').getAttribute('title'),'schedule: nightly');
+    assert.ok(!(await page.locator('.runs-table > .trow > div:last-child').allTextContents()).some(text=>text.startsWith('Priority ')));
     assert.equal(await page.locator('.runs-table > [data-run-id="scheduled-queued"] > div:last-child').textContent(),'preparing to run');
     assert.equal(await page.locator('.repo-side .side-head').textContent(),'Retained runs');
     await capture('after-runs');
@@ -268,6 +277,18 @@ try {
   await direct.waitForFunction(()=>document.querySelector('#runHistory .trow[data-run-id="old-failed"] .pill').textContent.trim()==='passed');
   older.Status='failed';
   await direct.close();
+  sharedNames=false; delayStatus=true;
+  const cold = await browser.newPage();
+  await cold.addInitScript(()=>{
+    localStorage.setItem('oberth-token','fixture-token');
+    localStorage.setItem('oberth-repo','github/org/oberth');
+  });
+  await cold.goto(`${origin}/runs`);
+  await cold.locator('.runs-table > [data-run-id="scheduled-running"]').waitFor();
+  assert.ok(await cold.evaluate(()=>state.status===null && state.activeRunsComplete),'valid saved scope remains visible while status is pending');
+  assert.ok((await cold.locator('.runs-footer').textContent()).includes('all active runs included'));
+  delayStatus=false; releaseStatus();
+  await cold.close();
   if (evidence) writeFileSync(`${evidence}/browser-results.json`, JSON.stringify({browser:await browser.version(),results,requests},null,2));
   console.log('Rendered dashboard checks passed: 1440px, 1100px, 390px, 320px; active scheduled/queued rows on both pages, flat status filters, direct shared-name links, history refresh/focus/scroll, step order and secret/release markers.');
 } finally {

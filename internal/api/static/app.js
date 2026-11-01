@@ -10,7 +10,7 @@ const listPollMs = 4000;
 const slowPollMs = 10000;
 const livePollMs = 2000;
 const state = {
-  repos: [], runs: [], repoRuns: [], activeRuns: [], activeRunsComplete: false, status: null,
+  repos: [], runs: [], repoRuns: [], activeRuns: [], activeRunsRepo: null, activeRunsComplete: false, status: null,
   runCounts: null, runCursor: 0, runCursorHistory: [],
   runNext: 0, runsNext: "", repoRunsNext: "",
   timer: null, routeSeq: 0,
@@ -413,20 +413,22 @@ async function loadRepoRuns() {
 /* Fetch on every page: an active run may be behind a newer push, in another
    schedule lane, or have its own head beyond the current page of 100 refs. */
 async function loadActiveRuns() {
+  const repo = state.repo;
   const query = new URLSearchParams({ view: "active" });
-  if (state.repo !== "all") query.set("repo", state.repo);
+  if (repo !== "all") query.set("repo", repo);
   try {
     state.activeRuns = await api("/api/runs?" + query) || [];
+    state.activeRunsRepo = repo;
     state.activeRunsComplete = true;
   } catch (err) {
     if (err.message === "stale request" || err.message === "authentication required" || err.name === "AbortError") throw err;
-    if ([400, 404, 409].includes(err.status)) state.activeRuns = [];
+    if ([400, 404, 409].includes(err.status) || state.activeRunsRepo !== repo) state.activeRuns = [];
     state.activeRunsComplete = false;
   }
 }
 function runsWithActive(source) {
   const seen = new Set(source.map(run => run.ID));
-  return [...state.activeRuns.filter(run => (state.repo === "all" || repoKeyOf(run.RepoID) === state.repo) && !seen.has(run.ID) && seen.add(run.ID)), ...source];
+  return [...state.activeRuns.filter(run => !seen.has(run.ID) && seen.add(run.ID)), ...source];
 }
 function runPageFull(source) {
   // The flat first page includes the whole queue in addition to its dated
@@ -505,9 +507,13 @@ function runTimeLabel(run) {
   if (run.StartedAt) return `started ${ago(run.StartedAt)}`;
   return `ended ${ago(run.FinishedAt || run.QueuedAt)}`;
 }
-function runMessageCell(run) {
-  const message = (displayRunStatus(run) === "queued" ? queueReason(run) : runMessage(run))
+function rowMessage(run, tooltip = false) {
+  if (run.priority_class && run.display_reason === `Priority ${run.priority_class}: ${run.priority_reason}.`) run = {...run, display_reason: ""};
+  return (tooltip ? queueDetail(run) : displayRunStatus(run) === "queued" ? queueReason(run) : runMessage(run))
     || (run.Release ? "release" : run.Trigger === "schedule" && run.ScheduleEntry ? `schedule: ${run.ScheduleEntry}` : "");
+}
+function runMessageCell(run) {
+  const message = rowMessage(run);
   if (run.auto_retried_by) return `<button type="button" class="run-successor retry-warning" data-run-id="${esc(run.auto_retried_by)}">${esc(message)}</button>`;
  if (run.SupersededBy) {
     return `<button type="button" class="run-successor" data-run-id="${esc(run.SupersededBy)}">${esc(message)}</button>`;
@@ -517,7 +523,7 @@ function runMessageCell(run) {
 function runRow(run) {
     const queued = displayRunStatus(run) === "queued";
     const status = queuePhase(run);
-    return `<div class="trow" data-run-id="${esc(run.ID)}"><div class="status-cell run-status">${statusIcon(status)}${pill(statusLabel(status), statusKind(status))}</div><div class="primary"><div class="repo-name">${esc(repoName(run.RepoID))}</div><div class="branch">${esc(run.RefKind === "tag" ? "tag " : "")}${esc(run.Ref)}</div></div><div class="sha">${esc(shortSha(run.SHA))}</div><div class="clip" title="${esc(run.Actor)}">${esc(run.Actor || "--")}</div><div class="nowrap" title="${esc(fmtTime(runWhen(run)))}">${esc(runTimeLabel(run))}<br><span class="meta"${queued ? ` title="${esc(queueSizeTitle(run))}"` : ""}>${queued ? esc(queueSize(run)) : esc(fmtDur(runDuration(run)))}</span></div><div class="clip" title="${esc(queueDetail(run))}">${runMessageCell(run)}</div></div>`;
+    return `<div class="trow" data-run-id="${esc(run.ID)}"><div class="status-cell run-status">${statusIcon(status)}${pill(statusLabel(status), statusKind(status))}</div><div class="primary"><div class="repo-name">${esc(repoName(run.RepoID))}</div><div class="branch">${esc(run.RefKind === "tag" ? "tag " : "")}${esc(run.Ref)}</div></div><div class="sha">${esc(shortSha(run.SHA))}</div><div class="clip" title="${esc(run.Actor)}">${esc(run.Actor || "--")}</div><div class="nowrap" title="${esc(fmtTime(runWhen(run)))}">${esc(runTimeLabel(run))}<br><span class="meta"${queued ? ` title="${esc(queueSizeTitle(run))}"` : ""}>${queued ? esc(queueSize(run)) : esc(fmtDur(runDuration(run)))}</span></div><div class="clip" title="${esc(rowMessage(run, true))}">${runMessageCell(run)}</div></div>`;
 }
 function runsTable(runs) {
   return `<div class="table runs-table"><div class="trow head"><div>status</div><div>run</div><div>sha</div><div>actor</div><div>when</div><div>message</div></div>${runs.map(runRow).join("")}</div>`;

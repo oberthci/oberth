@@ -232,7 +232,7 @@ func TestRunsPageIsOneFlatFilteredList(t *testing.T) {
 		}
 	}
 	table := section("function runRow(", "\nasync function renderRuns(")
-	for _, want := range []string{"queuePhase(run)", "queueSize(run)", "queueSizeTitle(run)", `title="${esc(queueDetail(run))}"`, "runMessageCell(run)", "runTimeLabel(run)"} {
+	for _, want := range []string{"queuePhase(run)", "queueSize(run)", "queueSizeTitle(run)", `title="${esc(rowMessage(run, true))}"`, "runMessageCell(run)", "runTimeLabel(run)"} {
 		if !strings.Contains(table, want) {
 			t.Fatalf("flat runs table is missing %s", want)
 		}
