@@ -97,7 +97,7 @@ func TestResourceSessionSkipsFinishedOnlyAfterSuccessfulRecording(t *testing.T) 
 	pod.Spec.NodeName = "node-a"
 	source, recorder := &resourceSource{}, &retryResourceRecorder{fail: true}
 	c := &Controller{kube: fake.NewClientset(pod), resourceSource: source, resourceRecorder: recorder}
-	finished := map[string]struct{}{}
+	finished := map[string]time.Time{}
 	if err := c.sampleResourceUsageWithState(t.Context(), wf, wf.Annotations[runIDAnnotation], finished); err == nil || len(finished) != 0 {
 		t.Fatal("failed recording suppressed final evidence", err, finished)
 	}
@@ -113,9 +113,9 @@ func TestResourceSessionSkipsFinishedOnlyAfterSuccessfulRecording(t *testing.T) 
 	}
 	// A long run may have more lifetime IDs than durable row capacity. The
 	// session's suppression set must stay bounded across later passes too.
-	finished = map[string]struct{}{}
+	finished = map[string]time.Time{}
 	for i := 0; i < 4096; i++ {
-		finished[fmt.Sprint(i)] = struct{}{}
+		finished[fmt.Sprint(i)] = time.Time{}
 	}
 	if err := c.sampleResourceUsageWithState(t.Context(), wf, wf.Annotations[runIDAnnotation], finished); err != nil || len(finished) != 4096 {
 		t.Fatal("finished-ID cache exceeded bound", len(finished), err)
@@ -210,5 +210,43 @@ func TestResourceCandidateCapsWorkflowAndLauncherPasses(t *testing.T) {
 				t.Fatal("node reads not coalesced", source.calls)
 			}
 		})
+	}
+}
+
+func TestResourceSessionRecordsLatePodFinishOnce(t *testing.T) {
+	wf, _, pod, _ := diagnosticFixture()
+	pod.Spec.NodeName = "node-a"
+	started := pod.Status.ContainerStatuses[0].State.Terminated.StartedAt
+	pod.Status.StartTime = &started
+	pod.Status.Phase = corev1.PodRunning
+	pod.Status.ContainerStatuses[1].ContainerID = "containerd://" + strings.Repeat("c", 64)
+	pod.Status.ContainerStatuses[1].State.Terminated.StartedAt = started
+	pod.Status.ContainerStatuses[1].State.Terminated.FinishedAt = pod.Status.ContainerStatuses[0].State.Terminated.FinishedAt
+	source, recorder := &resourceSource{}, &resourceRecorder{}
+	c := &Controller{kube: fake.NewClientset(pod), resourceSource: source, resourceRecorder: recorder}
+	finished := map[string]time.Time{}
+	if err := c.sampleResourceUsageWithState(t.Context(), wf, wf.Annotations[runIDAnnotation], finished); err != nil {
+		t.Fatal(err)
+	}
+	if len(recorder.values) != 2 || !recorder.values[0].PodFinishedAt.IsZero() {
+		t.Fatal("fixture did not precede terminal phase", recorder.values)
+	}
+	// Exercise the same transition with the bounded cache already full.
+	for len(finished) < 4096 {
+		finished[fmt.Sprint(len(finished))] = time.Time{}
+	}
+	pod.Status.Phase = corev1.PodFailed
+	c.kube = fake.NewClientset(pod)
+	if err := c.sampleResourceUsageWithState(t.Context(), wf, wf.Annotations[runIDAnnotation], finished); err != nil {
+		t.Fatal(err)
+	}
+	if len(recorder.values) != 4 || recorder.values[2].PodFinishedAt.IsZero() || recorder.values[3].PodFinishedAt.IsZero() {
+		t.Fatal("suppression lost late pod finish", recorder.values)
+	}
+	if err := c.sampleResourceUsageWithState(t.Context(), wf, wf.Annotations[runIDAnnotation], finished); err != nil {
+		t.Fatal(err)
+	}
+	if len(recorder.values) != 4 || source.calls != 2 || len(finished) != 4096 {
+		t.Fatal("pod finish update did not return to suppression", len(recorder.values), source.calls, len(finished))
 	}
 }

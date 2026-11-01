@@ -2,6 +2,8 @@ package store
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -111,18 +113,32 @@ func TestResourceRetentionOldestFirstBoundedAndIndependentOfPrimary(t *testing.T
 		t.Fatal(err)
 	}
 	defer primary.Close()
-	deleted, err := s.PruneResourceUsage(t.Context())
-	if err != nil || deleted != resourceUsageSweepRows {
-		t.Fatal("sweep cap/connection isolation", deleted, err)
+	// The production one-second budget may expire under race instrumentation
+	// or host load. Check ordering/caps after every partial sweep and allow
+	// bounded catch-up instead of requiring all 1,000 deletes in one budget.
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+	total := int64(0)
+	for pass := 0; pass < 20 && total < resourceUsageSweepRows+2; pass++ {
+		deleted, err := s.PruneResourceUsage(ctx)
+		if err != nil && !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatal("sweep/connection isolation", deleted, err)
+		}
+		if deleted < 0 || deleted > resourceUsageSweepRows {
+			t.Fatal("sweep cap", deleted)
+		}
+		total += deleted
+		var count int
+		var oldest sql.NullInt64
+		if err := s.reader().QueryRowContext(ctx, `SELECT count(*),min(last_observed_at) FROM step_resource_usage`).Scan(&count, &oldest); err != nil {
+			t.Fatal(err)
+		}
+		if count != resourceUsageSweepRows+2-int(total) || (count > 0 && (!oldest.Valid || oldest.Int64 != unixNano(old)+total)) {
+			t.Fatal("partial sweep was not oldest first", count, oldest, total)
+		}
 	}
-	var count int
-	var oldest int64
-	if err := s.reader().QueryRow(`SELECT count(*),min(last_observed_at) FROM step_resource_usage`).Scan(&count, &oldest); err != nil || count != 2 || oldest != unixNano(old)+resourceUsageSweepRows {
-		t.Fatal("not oldest first", count, oldest, err)
-	}
-	deleted, err = s.PruneResourceUsage(t.Context())
-	if err != nil || deleted != 2 {
-		t.Fatal("backlog did not drain", deleted, err)
+	if total != resourceUsageSweepRows+2 {
+		t.Fatal("bounded backlog did not drain while primary pool slot held", total)
 	}
 }
 
@@ -168,5 +184,69 @@ func TestResourceRunViewPrioritizesMainBeforeHelpers(t *testing.T) {
 	rows, more, err := s.StepResourceUsage(t.Context(), run.ID)
 	if err != nil || !more || len(rows) != 256 || !rows[0].IsWorkflowMain() {
 		t.Fatal("helpers displaced main", len(rows), more, err)
+	}
+}
+
+func TestResourceRetentionDeleteRechecksRenewedClock(t *testing.T) {
+	s, run, at := resourceStoreFixture(t)
+	old := at.Add(-resourceUsageMaxAge - time.Hour)
+	seedResourceRows(t, s, run.ID, old, 2)
+	rows, err := s.reader().QueryContext(t.Context(), `SELECT rowid,last_observed_at FROM step_resource_usage ORDER BY last_observed_at`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var selected []resourceUsageCandidate
+	for rows.Next() {
+		var v resourceUsageCandidate
+		if err := rows.Scan(&v.id, &v.at); err != nil {
+			t.Fatal(err)
+		}
+		selected = append(selected, v)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	_ = rows.Close()
+	// Selection has finished; the current incarnation is renewed before the
+	// production DELETE predicate obtains a writer reservation.
+	v := resourceRow(run.ID, at)
+	if err := s.RecordStepResourceUsage(t.Context(), []model.StepResourceUsage{v}); err != nil {
+		t.Fatal(err)
+	}
+	deleted, err := deleteResourceUsageBatch(t.Context(), s.db, selected)
+	if err != nil || deleted != 1 {
+		t.Fatal("renewed observation deleted", deleted, err)
+	}
+	values, _, err := s.StepResourceUsage(t.Context(), run.ID)
+	if err != nil || len(values) != 1 || values[0].ContainerID != v.ContainerID || !values[0].LastObservedAt.Equal(at) {
+		t.Fatal("DELETE failed to protect renewed clock", values, err)
+	}
+}
+
+func TestResourceRetentionCommitInvalidatesAuditCache(t *testing.T) {
+	s, run, at := resourceStoreFixture(t)
+	seedAuditMetricRows(t, s, 32, at)
+	localGate(t, s)
+	localGate(t, s)
+	before := s.localAudit.fullScans
+	if before != 1 {
+		t.Fatal("cache did not warm", before)
+	}
+	if n, err := s.PruneResourceUsage(t.Context()); err != nil || n != 0 {
+		t.Fatal(n, err)
+	}
+	localGate(t, s)
+	if s.localAudit.fullScans != before {
+		t.Fatal("empty sweep invalidated cache")
+	}
+	seedResourceRows(t, s, run.ID, at.Add(-resourceUsageMaxAge-time.Hour), 2)
+	localGate(t, s)
+	before = s.localAudit.fullScans
+	if n, err := s.PruneResourceUsage(t.Context()); err != nil || n != 2 {
+		t.Fatal(n, err)
+	}
+	localGate(t, s)
+	if s.localAudit.fullScans != before+1 {
+		t.Fatal("separate retention commit did not reset primary audit cache", before, s.localAudit.fullScans)
 	}
 }

@@ -56,3 +56,33 @@ writer pool's cumulative connection wait, not transaction hold time. Results
 reflect the local fixture, hardware and contention, not an installation-wide
 latency bound or a census of every write operation. Busy deadlines and external
 witness/admission gates remain independent of this routing change.
+
+## Telemetry-retention writer exception
+
+Resource-usage retention is the deliberate exception to the single primary
+writer pool. It selects candidates through an ordinary WAL reader, then opens
+its own one-connection writable pool for at most 100 rows per DELETE and 1,000
+rows per sweep. It does not acquire a primary pool slot. SQLite still serializes
+file-wide writes: while a retention batch commits, a primary writer can wait
+inside its busy handler while holding its own pool slot. The sweeper's 25ms busy
+wait and one-second context favor yielding; a stalled filesystem commit cannot
+necessarily be interrupted at the context deadline.
+
+A deleting retention commit counts as an outside commit to the primary's
+`PRAGMA data_version`, even though the Store initiated it and it touches no
+audit rows. The next local audit mutation gate invalidates prefix-cache reuse
+and scans the chain again. A sweep deleting nothing does not reset that cache.
+Gates interleaved with multiple committed batches can require repeated local
+verification; retaining a separate writer and avoiding these invalidations
+cannot both be assumed. No exception bypasses the audit fence or classifies
+another connection's table-specific writes as trusted. See
+[audit-cache invalidation](audit-verification-cache.md#telemetry-retention-commits).
+
+The ordinary sweep interval is 10 minutes by default. SQLite BUSY/LOCKED is a
+DEBUG-level skip rather than `retention.LastError`; resource telemetry alone
+retries after one minute (or the configured sweep interval if shorter), without
+rescanning log/artifact evidence. Other failures remain errors. Under continuous
+writes, every retry can yield with no deletion; age/count targets may remain
+exceeded indefinitely until a writer gap is available. Partial committed batches
+remain deleted, and later sweeps select the oldest remaining rows. No retry
+extends the 25ms busy wait, one-second pass or batch bounds.

@@ -180,3 +180,27 @@ GOWORK=off go test ./internal/store -run '^$' \
 The benchmark asserts that cached and append cases perform only their warmup
 full scan. Allocation counts provide an additional check independent of host
 load; compare the forced-full case's growth with the stable cached cases.
+
+## Telemetry-retention commits
+
+The resource-usage sweeper deliberately writes through a separate SQLite
+connection, leaving the primary pool slot available. Its committed DELETEs
+therefore change the primary connection's `data_version` and invalidate this
+cache exactly like any other outside commit, even though only telemetry rows
+were removed. The first gate afterward performs fresh full-chain verification;
+a no-op sweep has no effect. This is a performance cost, not a weaker integrity
+check. `TestResourceRetentionCommitInvalidatesAuditCache` pins both outcomes.
+
+The normal sweep interval is 10 minutes. Busy sweeps skip at DEBUG level and
+retry resource telemetry after at most one minute; a retry that commits rows
+also invalidates the cache. Gates interleaved with a sweep's batches can see more
+than one invalidation. There is no per-sweep guarantee of exactly one extra scan,
+and real-chain scan cost on tuxbox has not been measured.
+
+A gate racing these commits retains the same conservative outside-writer path:
+it can re-verify locally for up to two extra rounds, then return audit-verification
+busy for the manager's bounded retry. Reconciliation, prefix pins, final fences
+and the 30-second gate deadline remain intact. Continuous competing writes can
+prevent pruning and can exhaust a gate's own deadline; retention never whitelists
+its connection to preserve cache reuse. The independent writer and its file-wide
+SQLite lock trade-off are documented in [store reader isolation](store-read-pools.md#telemetry-retention-writer-exception).

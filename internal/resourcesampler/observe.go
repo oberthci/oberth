@@ -133,7 +133,7 @@ func observe(b Binding, pod *corev1.Pod, snapshot Snapshot, now time.Time, name,
 	if running := status.State.Running; running != nil {
 		v.ContainerStartedAt = running.StartedAt.Time
 	}
-	v.PodFinishedAt = podFinishedAt(pod)
+	v.PodFinishedAt = PodFinishedAt(pod)
 	if term := status.State.Terminated; term != nil {
 		if term.ContainerID != "" && term.ContainerID != status.ContainerID {
 			return model.StepResourceUsage{}, false
@@ -360,7 +360,9 @@ func validContainerID(id string) bool {
 	return true
 }
 
-func podFinishedAt(pod *corev1.Pod) time.Time {
+// PodFinishedAt returns a finish only when terminal phase and every declared
+// container status prove it. The controller uses it for one late timing update.
+func PodFinishedAt(pod *corev1.Pod) time.Time {
 	if pod.Status.StartTime == nil || (pod.Status.Phase != corev1.PodSucceeded && pod.Status.Phase != corev1.PodFailed) || len(pod.Status.ContainerStatuses) != len(pod.Spec.Containers) || len(pod.Status.InitContainerStatuses) != len(pod.Spec.InitContainers) || len(pod.Status.EphemeralContainerStatuses) != len(pod.Spec.EphemeralContainers) {
 		return time.Time{}
 	}

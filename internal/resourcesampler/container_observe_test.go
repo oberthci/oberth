@@ -261,7 +261,7 @@ func TestResourceDeclarationAndPodFinishGuards(t *testing.T) {
 	p.Status.StartTime = &started
 	p.Status.Phase = corev1.PodSucceeded
 	p.Status.ContainerStatuses[0].State = corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{StartedAt: started, FinishedAt: metav1.NewTime(at)}}
-	if podFinishedAt(p).IsZero() {
+	if PodFinishedAt(p).IsZero() {
 		t.Fatal("known finish lost")
 	}
 	for _, kind := range []string{"app", "init", "ephemeral"} {
@@ -274,7 +274,7 @@ func TestResourceDeclarationAndPodFinishGuards(t *testing.T) {
 		case "ephemeral":
 			copy.Spec.EphemeralContainers = []corev1.EphemeralContainer{{EphemeralContainerCommon: corev1.EphemeralContainerCommon{Name: "missing"}}}
 		}
-		if !podFinishedAt(copy).IsZero() {
+		if !PodFinishedAt(copy).IsZero() {
 			t.Fatal("partial statuses established pod finish", kind)
 		}
 	}

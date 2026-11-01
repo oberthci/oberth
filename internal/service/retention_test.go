@@ -1,7 +1,9 @@
 package service
 
 import (
+	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -566,8 +568,8 @@ func TestRetentionStatusUsesLastSweepTotals(t *testing.T) {
 	}
 }
 
-func TestRetentionPrunesResourceUsageWithEvidencePoliciesDisabled(t *testing.T) {
-	f := newRetentionFixture(t)
+func seedRetentionResourceUsage(t *testing.T, f *retentionFixture) model.Run {
+	t.Helper()
 	run := f.run(t, "telemetry", "branch", false)
 	if _, err := f.retention.Database.SetRunJobName(t.Context(), run.ID, "workflow-test"); err != nil {
 		t.Fatal(err)
@@ -578,6 +580,12 @@ func TestRetentionPrunesResourceUsageWithEvidencePoliciesDisabled(t *testing.T) 
 	if err := f.retention.Database.RecordStepResourceUsage(t.Context(), []model.StepResourceUsage{v}); err != nil {
 		t.Fatal(err)
 	}
+	return run
+}
+
+func TestRetentionPrunesResourceUsageWithEvidencePoliciesDisabled(t *testing.T) {
+	f := newRetentionFixture(t)
+	run := seedRetentionResourceUsage(t, f)
 	if err := f.retention.Sweep(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -586,4 +594,76 @@ func TestRetentionPrunesResourceUsageWithEvidencePoliciesDisabled(t *testing.T) 
 		t.Fatal("disabled evidence policies disabled telemetry retention", len(rows), err)
 	}
 	f.retained(t, run.ID, true)
+}
+
+type retentionRetryLog struct {
+	bytes.Buffer
+	ready chan struct{}
+}
+
+func (w *retentionRetryLog) Write(p []byte) (int, error) {
+	n, err := w.Buffer.Write(p)
+	if bytes.Contains(p, []byte("DEBUG: resource telemetry retention busy")) {
+		select {
+		case w.ready <- struct{}{}:
+		default:
+		}
+	}
+	return n, err
+}
+
+func TestRetentionBusyIsSkippedAndRetriedWithoutEvidenceSweep(t *testing.T) {
+	f := newRetentionFixture(t)
+	run := seedRetentionResourceUsage(t, f)
+	other, err := sql.Open("sqlite", "file:"+filepath.Join(f.root, "oberth.sqlite")+"?mode=rw&_txlock=immediate")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer other.Close()
+	tx, err := other.BeginTx(t.Context(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	ctx, cancel := context.WithTimeout(t.Context(), testStartTimeout(10*time.Second))
+	out := &retentionRetryLog{ready: make(chan struct{}, 8)}
+	done := make(chan struct{})
+	go func() { defer close(done); f.retention.run(ctx, time.Hour, 10*time.Millisecond, log.New(out, "", 0)) }()
+	defer func() { cancel(); <-done }()
+	// Observe both the first skip and a retry while writes remain locked.
+	for range 2 {
+		select {
+		case <-out.ready:
+		case <-ctx.Done():
+			t.Fatal("busy sweep did not retry", ctx.Err())
+		}
+	}
+	value, err := f.retention.Status(ctx)
+	if err != nil || value.(RetentionStatus).LastError != "" {
+		t.Fatal("busy skip became status error", value, err)
+	}
+	if err := tx.Rollback(); err != nil {
+		t.Fatal(err)
+	}
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		rows, _, err := f.retention.Database.StepResourceUsage(ctx, run.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(rows) == 0 {
+			break
+		}
+		select {
+		case <-ticker.C:
+		case <-ctx.Done():
+			t.Fatal("retry did not drain after writers yielded", ctx.Err())
+		}
+	}
+	cancel()
+	<-done
+	if strings.Contains(out.String(), "retention sweep:") || strings.Contains(out.String(), "retention retry:") {
+		t.Fatal("busy skip logged as error", out.String())
+	}
 }

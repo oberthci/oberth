@@ -184,7 +184,9 @@ unknown. JSON is capped at 8 KiB: at most 32 MiB observation payload per retaine
 run, excluding keys/indexes/SQLite WAL. Running timing updates may write every pass even with cached/unavailable
 metrics. Unchanged terminal observations execute no UPDATE, and each sampling
 session remembers at most 4,096 successfully recorded finished container IDs to
-skip their subsequent scrapes/SELECTs/merges. A failed recording is not cached.
+skip their subsequent scrapes/SELECTs/merges. A known terminal Pod finish that
+arrives after its containers terminate is recorded once, then suppressed again;
+this transition also works when the cache is full. A failed recording is not cached.
 A server restart rebuilds this suppression set on the first pass.
 
 Telemetry retention runs through the existing evidence sweep timer (default
@@ -198,7 +200,12 @@ Rows renewed after selection are preserved. Backlog, failures and arrivals
 between sweeps can temporarily exceed the targets; these are retention targets,
 not a hard database-size ceiling. At target occupancy the JSON payload ceiling
 is 100,000 x 8 KiB (about 781 MiB), plus keys/indexes/SQLite/WAL. Backlogs drain
-at most 1,000 rows per sweep. Sweep errors appear through retention status/logs.
+at most 1,000 rows per sweep. SQLite BUSY/LOCKED is a DEBUG skip, with a telemetry-only retry after one
+minute (or a shorter configured sweep interval). Other errors appear through
+retention status/logs. Continuous writes may prevent all retries from pruning
+until a gap appears, so targets can remain exceeded indefinitely. Retention
+commits also reset the primary audit cache and force fresh verification; see
+[reader/writer trade-offs](store-read-pools.md#telemetry-retention-writer-exception).
 Run history is not routinely deleted, so an FK cascade is not a retention policy.
 Reports read 1,000/default–5,000/max rows, return at most 128 groups in
 each of `steps`, `containers` and `pods` with separate truncation flags; run views

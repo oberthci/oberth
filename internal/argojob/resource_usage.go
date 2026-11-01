@@ -62,7 +62,7 @@ func (c *Controller) resourceSession(ctx context.Context, runID string) *resourc
 				log.Print("WARN: external resource sampler stopped after panic; usage remains incomplete")
 			}
 		}()
-		finished := map[string]struct{}{}
+		finished := map[string]time.Time{}
 		interval := c.resourceSource.Interval()
 		if interval < time.Second {
 			interval = time.Second
@@ -148,7 +148,7 @@ func (c *Controller) sampleResourceUsage(ctx context.Context, wf *wfv1.Workflow,
 	return c.sampleResourceUsageWithState(ctx, wf, runID, nil)
 }
 
-func (c *Controller) sampleResourceUsageWithState(ctx context.Context, wf *wfv1.Workflow, runID string, finished map[string]struct{}) error {
+func (c *Controller) sampleResourceUsageWithState(ctx context.Context, wf *wfv1.Workflow, runID string, finished map[string]time.Time) error {
 	if c.verifyOwnership(wf, runID) != nil || wf.UID == "" || len(wf.Status.Nodes) > 2048 {
 		return nil
 	}
@@ -172,8 +172,10 @@ func (c *Controller) sampleResourceUsageWithState(ctx context.Context, wf *wfv1.
 		err := c.resourceRecorder.RecordStepResourceUsage(ctx, batch)
 		if err == nil {
 			for _, value := range batch {
-				if finished != nil && len(finished) < 4096 && value.Terminal && !value.ContainerFinishedAt.IsZero() {
-					finished[resourceContainerKey(value.PodUID, value.ContainerID)] = struct{}{}
+				key := resourceContainerKey(value.PodUID, value.ContainerID)
+				_, known := finished[key]
+				if finished != nil && (known || len(finished) < 4096) && value.Terminal && !value.ContainerFinishedAt.IsZero() {
+					finished[key] = value.PodFinishedAt
 				}
 			}
 			batch = batch[:0]
@@ -182,7 +184,7 @@ func (c *Controller) sampleResourceUsageWithState(ctx context.Context, wf *wfv1.
 	}
 	appendValues := func(values []model.StepResourceUsage) error {
 		for _, value := range values {
-			if _, done := finished[resourceContainerKey(value.PodUID, value.ContainerID)]; done {
+			if resourceContainerRecorded(resourceContainerKey(value.PodUID, value.ContainerID), value.PodFinishedAt, finished) {
 				continue
 			}
 			value.WorkflowSize = workflowSize
@@ -350,17 +352,25 @@ func observedResourceWorkflowSize(wf *wfv1.Workflow) periapsis.Size {
 
 func resourceContainerKey(podUID, containerID string) string { return podUID + "\x00" + containerID }
 
-func resourceContainerCandidates(pod *corev1.Pod, finished map[string]struct{}) int {
+func resourceContainerCandidates(pod *corev1.Pod, finished map[string]time.Time) int {
 	n := 0
+	podFinished := resourcesampler.PodFinishedAt(pod)
 	for _, group := range [][]corev1.ContainerStatus{pod.Status.ContainerStatuses, pod.Status.InitContainerStatuses, pod.Status.EphemeralContainerStatuses} {
 		for _, status := range group {
 			if status.ContainerID == "" || (status.State.Running == nil && status.State.Terminated == nil) {
 				continue
 			}
-			if _, done := finished[resourceContainerKey(string(pod.UID), status.ContainerID)]; !done {
+			if !resourceContainerRecorded(resourceContainerKey(string(pod.UID), status.ContainerID), podFinished, finished) {
 				n++
 			}
 		}
 	}
 	return n
+}
+
+// A finish can arrive one poll after the containers terminate. Re-observe that
+// transition once, including when the bounded container cache is already full.
+func resourceContainerRecorded(key string, podFinished time.Time, finished map[string]time.Time) bool {
+	previous, ok := finished[key]
+	return ok && (podFinished.IsZero() || !previous.IsZero())
 }

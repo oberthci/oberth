@@ -38,11 +38,10 @@ func (s *Store) PruneResourceUsage(ctx context.Context) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	type candidate struct{ id, at int64 }
-	var selected []candidate
+	var selected []resourceUsageCandidate
 	cutoff := unixNano(s.now().Add(-resourceUsageMaxAge))
 	for rows.Next() {
-		var v candidate
+		var v resourceUsageCandidate
 		if err := rows.Scan(&v.id, &v.at); err != nil {
 			_ = rows.Close()
 			return 0, err
@@ -84,19 +83,7 @@ func (s *Store) PruneResourceUsage(ctx context.Context) (int64, error) {
 	var deleted int64
 	for len(selected) > 0 {
 		batch := selected[:min(len(selected), resourceUsageDeleteBatch)]
-		predicates := make([]string, 0, len(batch))
-		args := make([]any, 0, len(batch)*2)
-		for _, v := range batch {
-			predicates = append(predicates, "(rowid=? AND last_observed_at=?)")
-			args = append(args, v.id, v.at)
-		}
-		// Recheck the observation clock: never delete a row renewed since the
-		// reader snapshot selected it. No run/evidence/audit rows are touched.
-		result, err := db.ExecContext(ctx, `DELETE FROM step_resource_usage WHERE `+strings.Join(predicates, " OR "), args...)
-		if err != nil {
-			return deleted, err
-		}
-		n, err := result.RowsAffected()
+		n, err := deleteResourceUsageBatch(ctx, db, batch)
 		if err != nil {
 			return deleted, err
 		}
@@ -104,4 +91,28 @@ func (s *Store) PruneResourceUsage(ctx context.Context) (int64, error) {
 		selected = selected[len(batch):]
 	}
 	return deleted, nil
+}
+
+type resourceUsageCandidate struct{ id, at int64 }
+
+func deleteResourceUsageBatch(ctx context.Context, db *sql.DB, batch []resourceUsageCandidate) (int64, error) {
+	if len(batch) == 0 {
+		return 0, nil
+	}
+	if len(batch) > resourceUsageDeleteBatch {
+		return 0, ErrInvalid
+	}
+	predicates := make([]string, 0, len(batch))
+	args := make([]any, 0, len(batch)*2)
+	for _, v := range batch {
+		predicates = append(predicates, "(rowid=? AND last_observed_at=?)")
+		args = append(args, v.id, v.at)
+	}
+	// Selection does not reserve a writer. A later observation must survive
+	// even if it was selected as old before this DELETE obtains its lock.
+	result, err := db.ExecContext(ctx, `DELETE FROM step_resource_usage WHERE `+strings.Join(predicates, " OR "), args...)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
