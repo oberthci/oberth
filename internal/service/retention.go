@@ -142,6 +142,9 @@ func (r *Retention) Sweep(ctx context.Context) (resultErr error) {
 		r.status = status
 		r.statusMu.Unlock()
 	}()
+	// Resource telemetry is independently bounded even with log/artifact
+	// retention disabled. Its sweeper uses a separate SQLite connection.
+	defer func() { _, err := r.Database.PruneResourceUsage(ctx); resultErr = errors.Join(resultErr, err) }()
 	logs, err := r.Logs.UsageByRun()
 	if err != nil {
 		return err

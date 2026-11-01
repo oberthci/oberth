@@ -1,5 +1,9 @@
 # v0.17.74: schema 36 and platform/sampler qualification
 
+The extended #1216 measurement branch now targets schema 37; its [schema-37
+upgrade/rollback supplement](schema37-upgrade-note.md) takes precedence for that
+branch. The schema-36 qualification below remains historical for its pinned target.
+
 The #1216 sampler targets **v0.17.74**, based on final v0.17.73 `ac5f7138`.
 Schema v36 is applied even when the sampler is disabled. It adds
 `step_resource_usage` and its repository/time/step indexes; v35's covering

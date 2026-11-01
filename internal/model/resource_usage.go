@@ -242,7 +242,7 @@ func MergeResourceUsage(old, next StepResourceUsage) (StepResourceUsage, error) 
 	out.RequestsChanged = out.RequestsChanged || next.RequestsChanged
 	// Summary and cAdvisor have independent clocks. A newer CPU/memory sample
 	// must still merge when a cached pod summary has the larger SourceAt.
-	if (out != old || next.Version == 2) && next.LastObservedAt.After(out.LastObservedAt) {
+	if (out != old || (next.Version == 2 && !next.Terminal)) && next.LastObservedAt.After(out.LastObservedAt) {
 		out.LastObservedAt = next.LastObservedAt
 	}
 	return out, out.Validate()

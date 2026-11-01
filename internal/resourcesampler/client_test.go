@@ -148,3 +148,20 @@ func TestResourceGlobalScrapeGateBounded(t *testing.T) {
 		t.Fatalf("scrape concurrency %d", peak.Load())
 	}
 }
+
+type panicSamplerTransport struct{}
+
+func (panicSamplerTransport) RoundTrip(*http.Request) (*http.Response, error) {
+	panic("scrape panic canary")
+}
+
+func TestResourceSharedFillPanicPublishesUnavailableAndReleasesGate(t *testing.T) {
+	c, _, _ := testClient(t, func(http.ResponseWriter, *http.Request) { t.Error("unexpected request") })
+	c.http.Transport = panicSamplerTransport{}
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	v, err := c.Snapshot(ctx, "node-a")
+	if err != nil || v.SummaryOK || v.MetricsOK || c.failures != 1 || len(c.gate) != 0 {
+		t.Fatal("scrape panic escaped or left waiters blocked", v, err)
+	}
+}

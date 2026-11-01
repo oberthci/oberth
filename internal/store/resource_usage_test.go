@@ -117,7 +117,11 @@ func TestResourceUsageMigrationPreservesSchema35AndExistingRows(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = s.Close() })
+	t.Cleanup(func() {
+		if s != nil {
+			_ = s.Close()
+		}
+	})
 	ctx := context.Background()
 	repo := createRepo(t, s)
 	if _, err := s.db.Exec(`DROP TABLE step_resource_usage;DELETE FROM schema_migrations WHERE version>=36`); err != nil {
@@ -247,7 +251,11 @@ func TestResourceFormatGuardMigrationPreservesSchema36Rows(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = s.Close() })
+	t.Cleanup(func() {
+		if s != nil {
+			_ = s.Close()
+		}
+	})
 	repo := createRepo(t, s)
 	run, err := s.EnqueueRun(t.Context(), testRunSpec(repo.ID, "feature/format", strings.Repeat("a", 40)))
 	if err != nil {
@@ -264,7 +272,7 @@ func TestResourceFormatGuardMigrationPreservesSchema36Rows(t *testing.T) {
 	if err = s.db.QueryRow(`SELECT observation_json FROM step_resource_usage WHERE run_id=?`, run.ID).Scan(&before); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = s.db.Exec(`DELETE FROM schema_migrations WHERE version=37; UPDATE schema_migrations SET applied_at=123 WHERE version=36`); err != nil {
+	if _, err = s.db.Exec(`DROP INDEX step_resource_usage_retention_idx; DELETE FROM schema_migrations WHERE version=37; UPDATE schema_migrations SET applied_at=123 WHERE version=36`); err != nil {
 		t.Fatal(err)
 	}
 	if err = s.Close(); err != nil {

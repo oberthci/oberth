@@ -10,6 +10,7 @@ import (
 	"time"
 
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/oberthci/oberth/internal/model"
@@ -54,6 +55,14 @@ func (c *Controller) resourceSession(ctx context.Context, runID string) *resourc
 	s := &resourceSession{wake: make(chan struct{}, 1), stop: make(chan struct{}), done: make(chan struct{}), runID: runID}
 	go func() {
 		defer close(s.done)
+		// An unrecovered panic in any goroutine terminates the Go server.
+		// Telemetry failure must stop this session, not execution supervision.
+		defer func() {
+			if recover() != nil {
+				log.Print("WARN: external resource sampler stopped after panic; usage remains incomplete")
+			}
+		}()
+		finished := map[string]struct{}{}
 		interval := c.resourceSource.Interval()
 		if interval < time.Second {
 			interval = time.Second
@@ -73,7 +82,7 @@ func (c *Controller) resourceSession(ctx context.Context, runID string) *resourc
 			}
 			sampleCtx, cancel := context.WithTimeout(parent, 5*time.Second)
 			defer cancel()
-			if err := c.sampleResourceUsage(sampleCtx, wf, runID); err != nil && !warned {
+			if err := c.sampleResourceUsageWithState(sampleCtx, wf, runID, finished); err != nil && !warned {
 				log.Print("WARN: external step resource sampling incomplete; missing usage remains unknown")
 				warned = true
 			}
@@ -136,6 +145,10 @@ func (s *resourceSession) finish() {
 }
 
 func (c *Controller) sampleResourceUsage(ctx context.Context, wf *wfv1.Workflow, runID string) error {
+	return c.sampleResourceUsageWithState(ctx, wf, runID, nil)
+}
+
+func (c *Controller) sampleResourceUsageWithState(ctx context.Context, wf *wfv1.Workflow, runID string, finished map[string]struct{}) error {
 	if c.verifyOwnership(wf, runID) != nil || wf.UID == "" || len(wf.Status.Nodes) > 2048 {
 		return nil
 	}
@@ -157,11 +170,21 @@ func (c *Controller) sampleResourceUsage(ctx context.Context, wf *wfv1.Workflow,
 			return nil
 		}
 		err := c.resourceRecorder.RecordStepResourceUsage(ctx, batch)
-		batch = batch[:0]
+		if err == nil {
+			for _, value := range batch {
+				if finished != nil && len(finished) < 4096 && value.Terminal && !value.ContainerFinishedAt.IsZero() {
+					finished[resourceContainerKey(value.PodUID, value.ContainerID)] = struct{}{}
+				}
+			}
+			batch = batch[:0]
+		}
 		return err
 	}
 	appendValues := func(values []model.StepResourceUsage) error {
 		for _, value := range values {
+			if _, done := finished[resourceContainerKey(value.PodUID, value.ContainerID)]; done {
+				continue
+			}
 			value.WorkflowSize = workflowSize
 			batch = append(batch, value)
 			if len(batch) == 256 {
@@ -202,7 +225,11 @@ func (c *Controller) sampleResourceUsage(ctx context.Context, wf *wfv1.Workflow,
 		}
 		binding := resourcesampler.Binding{RunID: runID, WorkflowName: wf.Name, WorkflowUID: string(wf.UID), Namespace: wf.Namespace, NodeID: node.ID, NodeName: node.Name, PodName: step.PodName, Burn: step.Burn, Step: step.Step}
 		bindings[string(pod.UID)] = binding
-		candidates += len(pod.Status.ContainerStatuses) + len(pod.Status.InitContainerStatuses) + len(pod.Status.EphemeralContainerStatuses)
+		pending := resourceContainerCandidates(pod, finished)
+		if pending == 0 {
+			continue
+		}
+		candidates += pending
 		if candidates > 4096 {
 			break
 		}
@@ -225,7 +252,7 @@ func (c *Controller) sampleResourceUsage(ctx context.Context, wf *wfv1.Workflow,
 	if !needsVM || c.vmi == nil || candidates >= 4096 {
 		return nil
 	}
-	vmis, err := c.vmi.Resource(vmiResource).Namespace(wf.Namespace).List(ctx, metav1.ListOptions{Limit: 2048})
+	vmis, err := c.vmi.Resource(vmiResource).Namespace(wf.Namespace).List(ctx, metav1.ListOptions{LabelSelector: "oberth.ci/workflow=" + wf.Name, Limit: 2048})
 	if err != nil {
 		return err
 	}
@@ -266,7 +293,11 @@ func (c *Controller) sampleResourceUsage(ctx context.Context, wf *wfv1.Workflow,
 		if !ok || owner.APIVersion != "kubevirt.io/v1" || owner.Kind != "VirtualMachineInstance" || owner.Name != parent.name {
 			continue
 		}
-		candidates += len(pod.Status.ContainerStatuses) + len(pod.Status.InitContainerStatuses) + len(pod.Status.EphemeralContainerStatuses)
+		pending := resourceContainerCandidates(&pod, finished)
+		if pending == 0 {
+			continue
+		}
+		candidates += pending
 		if candidates > 4096 {
 			break
 		}
@@ -315,4 +346,21 @@ func observedResourceWorkflowSize(wf *wfv1.Workflow) periapsis.Size {
 		return ""
 	}
 	return size
+}
+
+func resourceContainerKey(podUID, containerID string) string { return podUID + "\x00" + containerID }
+
+func resourceContainerCandidates(pod *corev1.Pod, finished map[string]struct{}) int {
+	n := 0
+	for _, group := range [][]corev1.ContainerStatus{pod.Status.ContainerStatuses, pod.Status.InitContainerStatuses, pod.Status.EphemeralContainerStatuses} {
+		for _, status := range group {
+			if status.ContainerID == "" || (status.State.Running == nil && status.State.Terminated == nil) {
+				continue
+			}
+			if _, done := finished[resourceContainerKey(string(pod.UID), status.ContainerID)]; !done {
+				n++
+			}
+		}
+	}
+	return n
 }

@@ -2716,6 +2716,7 @@ alone is never evidence that missing migrations ran.
 | v34 | Unreleased (queue priority) | Administrator RC branch patterns and audited per-run priority bumps; no pipeline-controlled priority | Database restore |
 | v35 | v0.17.73 candidate | Covering latest-ref index on repository/ref-kind/ref/queue sequence; exact indexed head/count aggregation | Database restore |
 | v36 | v0.17.74 / #1216 stage 1 | Server-observed, UID/container-bound sampled step resource usage and bounded repository/time/step indexes; no ingestion API or admission change | Database restore |
+| v37 | Unreleased (#1216 measurement) | Guard version-2 container telemetry and add the global observation-age retention index; preserve version-1 observations | Database restore |
 
 **Contract test:** `TestEveryMigrationDocumentedInAgentContract` asserts that
 every migration version in `internal/store/schema.go` has a corresponding
@@ -3352,12 +3353,20 @@ unknowns and OOM lower bounds cannot authorize smaller resources. Details:
 
 
 **External container measurements (#1216):** schema 37 guards version-2 telemetry
-JSON while preserving schema-36 tables and version-1 main rows. The opt-in sampler
+JSON while preserving schema-36 tables and version-1 main rows; v37 also adds
+the global observation-age retention index. The opt-in sampler
 covers verified Workflow app/init/sidecar/ContainerSet/ephemeral containers and
 UID-bound VMI launchers, with Kubernetes lifetime timing and optional kubelet pod
 CPU/memory, rootfs/log and complete mounted-PVC usage. `repo_usage` adds separate
 container/pod quantiles and per-run overlap without changing main-only size
 comparisons or admission. Shared PVC usage is not additive across Pods; launcher
 totals cannot separate guest use from hypervisor cost. Existing 4,096-row/run,
-8-KiB/row, bounded read/batch windows remain. Full scopes, exclusions and overhead:
+8-KiB/row, bounded read/batch windows remain. Retention targets 90 days/100,000
+newest rows globally in oldest-first sweeps
+of at most 1,000 rows, with 100-row DELETE batches on a separate SQLite connection
+(one-second pass, 25ms busy wait; backlog may exceed targets until swept).
+Unchanged terminal rows are not rewritten and sessions suppress up to 4,096
+successfully recorded finishes. Helm rollback alone fails schema-too-new and
+requires a pre-upgrade database restore; see [schema 37](docs/schema37-upgrade-note.md).
+Full scopes, exclusions and overhead:
 [external sampler coverage](docs/step-resource-usage.md#external-sampler-coverage-1216).

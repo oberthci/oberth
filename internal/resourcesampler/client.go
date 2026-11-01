@@ -197,11 +197,19 @@ func (c *Client) fill(node string, entry *cacheEntry) {
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
 	defer cancel()
 	var value Snapshot
+	// This fill runs in its own goroutine, outside the workflow session's
+	// recovery boundary. Publish an unavailable snapshot on a scraping panic
+	// so it cannot terminate the server or leave cache waiters blocked.
+	defer func() {
+		if recover() != nil {
+			value = Snapshot{}
+		}
+		c.finish(node, entry, value)
+	}()
 	select {
 	case c.gate <- struct{}{}:
 		defer func() { <-c.gate }()
 	case <-ctx.Done():
-		c.finish(node, entry, value)
 		return
 	}
 	if raw, err := c.get(ctx, node, "/stats/summary"); err == nil {
@@ -215,7 +223,6 @@ func (c *Client) fill(node string, entry *cacheEntry) {
 			value.MetricsOK = true
 		}
 	}
-	c.finish(node, entry, value)
 }
 func (c *Client) finish(node string, entry *cacheEntry, value Snapshot) {
 	value = IndexSnapshot(value)

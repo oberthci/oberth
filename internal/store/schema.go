@@ -1139,5 +1139,5 @@ CREATE INDEX runs_admission_idx ON runs(status, admission_sequence, queue_sequen
 	{version: resourceUsageMigrationVersion, sql: resourceUsageSchema},
 	// Guard the version-2 observation format: older binaries validate main-only
 	// version-1 JSON and must not reopen a database containing container rows.
-	{version: containerResourceUsageMigrationVersion, sql: `SELECT 1;`},
+	{version: containerResourceUsageMigrationVersion, sql: `CREATE INDEX step_resource_usage_retention_idx ON step_resource_usage(last_observed_at);`},
 }

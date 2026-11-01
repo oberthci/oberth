@@ -216,14 +216,14 @@ func observe(b Binding, pod *corev1.Pod, snapshot Snapshot, now time.Time, name,
 					v.SourceAt = mem.Time
 				}
 			}
-			// Summary container stats lack runtime IDs: require the exact current
-			// incarnation start time before accepting rootfs/log samples.
+			// Summary startTime is CRI/cAdvisor creation time, not running start.
+			// Bound it between the previous finish and this incarnation's start.
 			containerStats := stats.Containers
 			if len(containerStats) > 128 {
 				containerStats = nil
 			}
 			for _, cs := range containerStats {
-				if cs.Name != name || v.ContainerStartedAt.IsZero() || !cs.StartTime.Equal(v.ContainerStartedAt) {
+				if cs.Name != name || !summaryIncarnationMatches(cs.StartTime, status, v.ContainerStartedAt) {
 					continue
 				}
 				for _, fs := range []struct {
@@ -270,6 +270,19 @@ func observe(b Binding, pod *corev1.Pod, snapshot Snapshot, now time.Time, name,
 	}
 	if v.Samples == 0 && !v.Terminal && v.ContainerStartedAt.IsZero() {
 		return model.StepResourceUsage{}, false
+	}
+	// A skewed node clock must not discard otherwise valid usage. Only timing
+	// fields beyond the server's tolerance become unknown.
+	for _, at := range []*time.Time{&v.PodCreatedAt, &v.PodStartedAt, &v.PodFinishedAt, &v.ContainerStartedAt, &v.ContainerFinishedAt} {
+		if at.After(now.Add(2 * time.Second)) {
+			*at = time.Time{}
+		}
+	}
+	if v.ContainerStartedAt.IsZero() {
+		v.ContainerFinishedAt = time.Time{}
+	}
+	if v.PodStartedAt.IsZero() {
+		v.PodFinishedAt = time.Time{}
 	}
 	return v, v.Validate() == nil
 }
@@ -371,6 +384,9 @@ func pvcUsage(pod *corev1.Pod, stats PodStats, now time.Time, saturated *bool) (
 	}
 	claims := map[string]string{}
 	for _, volume := range pod.Spec.Volumes {
+		if volume.Ephemeral != nil {
+			return nil, time.Time{}
+		}
 		if volume.PersistentVolumeClaim != nil {
 			claims[volume.Name] = volume.PersistentVolumeClaim.ClaimName
 		}
@@ -405,4 +421,19 @@ func pvcUsage(pod *corev1.Pod, stats PodStats, now time.Time, saturated *bool) (
 		seen[claim] = true
 	}
 	return used, at
+}
+
+// Kubelet v1.36.5 cri_stats_provider.go uses container.CreatedAt for summary
+// startTime; the cAdvisor provider uses info.Spec.CreationTime. Both precede
+// Kubernetes Running.StartedAt. On restart, only a known previous finish can
+// exclude the old incarnation's name-only summary entry.
+func summaryIncarnationMatches(created time.Time, status *corev1.ContainerStatus, started time.Time) bool {
+	if created.IsZero() || started.IsZero() || created.After(started) {
+		return false
+	}
+	if status.RestartCount == 0 {
+		return true
+	}
+	previous := status.LastTerminationState.Terminated
+	return previous != nil && !previous.FinishedAt.IsZero() && !created.Before(previous.FinishedAt.Time)
 }

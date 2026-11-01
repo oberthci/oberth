@@ -1009,6 +1009,7 @@ func TestFreshSchemaIsCompleteAndIdempotent(t *testing.T) {
 		"runs_sha_idx",
 		"secret_access_active",
 		"step_resource_usage_repo_idx",
+		"step_resource_usage_retention_idx",
 		"step_resource_usage_step_idx",
 		"step_results_order_idx",
 		"trusted_applies_repo_idx",

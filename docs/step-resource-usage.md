@@ -124,13 +124,16 @@ cost. Missing original resource Pods/VMIs leave that binding unknown.
 The existing `/stats/summary` response adds these optional storage/pod scopes:
 
 - Per-container writable-rootfs and log used-byte peaks, accepted only when the
-  summary container start matches the current Kubernetes incarnation.
+  summary container creation time is no later than the Kubernetes running start.
+  After a restart it must also be no earlier than the known previous finish;
+  an unknown previous finish leaves container storage unknown.
 - Pod cgroup CPU interval-rate and memory-usage peaks, including pod overhead;
   they are measured directly, never a sum of independent container peaks.
 - Existing pod ephemeral-storage and IO PSI counters.
 - Pod PVC used-byte peaks: a sampled sum over distinct referenced PVCs only when
   every claim has fresh matching summary volume stats with equal source times. Incomplete/unsupported
-  stats stay null. Shared claims must not be added across Pods. Differently timed claim stats remain unknown rather than a synthetic simultaneous total. This is mounted
+  stats stay null; generic ephemeral volumes also leave the aggregate unknown.
+  Shared claims must not be added across Pods. Differently timed claim stats remain unknown rather than a synthetic simultaneous total. This is mounted
   filesystem usage, not per-run attribution on a shared filesystem.
 
 The read-only, repository-authorized MCP call remains:
@@ -164,10 +167,13 @@ nodes, two concurrent fills, four seconds per fill and five seconds per run
 sampling pass. New scopes add no kubelet requests. A shared immutable index
 covers at most 65,536 retained metric lines and 4,096 summary Pods, avoiding a
 whole-node metric scan per container. Each pass reads at most 2,048 Workflow
-Pods; VM workflows additionally read at most 2,048 VMIs and 2,048 launcher Pods.
+Pods; VM workflows additionally read at most 2,048 VMIs filtered by Workflow label and 2,048 launcher Pods.
+The launcher inventory still spans the namespace; owner UIDs remain authoritative.
 Pagination is deliberately not followed; coverage can be incomplete. Pods with
-more than 128 declared containers or container statuses are excluded; container/volume storage lookups also cap each relevant list at 128; a pass visits at most 4,096
-container candidates and writes batches of at most 256. Index/observation cost
+more than 128 declared containers or container statuses are excluded;
+container/volume storage lookups also cap each relevant list at 128; a pass
+visits at most 4,096
+uncached container candidates and writes batches of at most 256. Index/observation cost
 and extra VM API reads are the added overhead; production CPU/RSS/IO cost has
 not been qualified on tuxbox.
 
@@ -175,18 +181,39 @@ Storage remains one upserted JSON row per run/node/Pod UID/runtime container ID,
 not one row per poll. Existing incarnations remain updatable at the 4,096-row
 per-run cap; additional incarnations are omitted, so population coverage remains
 unknown. JSON is capped at 8 KiB: at most 32 MiB observation payload per retained
-run, excluding keys/indexes/SQLite WAL. Timing updates may write every pass even
-with cached/unavailable metrics. Run deletion cascades; this adds no retention
-sweeper. Reports read 1,000/default–5,000/max rows, return at most 128 groups in
-each of `steps`, `containers` and `pods` with separate truncation flags; run views
-remain capped at 256 observations. More containers consume those existing caps.
+run, excluding keys/indexes/SQLite WAL. Running timing updates may write every pass even with cached/unavailable
+metrics. Unchanged terminal observations execute no UPDATE, and each sampling
+session remembers at most 4,096 successfully recorded finished container IDs to
+skip their subsequent scrapes/SELECTs/merges. A failed recording is not cached.
+A server restart rebuilds this suppression set on the first pass.
 
-Schema 37 is a format guard (`SELECT 1` migration); table/index definitions are
-unchanged. New JSON observations use version 2; version-1 main rows remain
+Telemetry retention runs through the existing evidence sweep timer (default
+10 minutes), including with log/artifact age/budget policies disabled. It targets
+90 days since last observation and the newest 100,000 rows globally, deleting
+oldest first. Each pass selects at most 1,000 rows and issues autocommit DELETEs
+of at most 100 rows on a separate one-connection pool; it never borrows the
+primary connection. The pass has a one-second context and a 25ms SQLite busy
+timeout. File-wide writer serialization and filesystem commit time still apply.
+Rows renewed after selection are preserved. Backlog, failures and arrivals
+between sweeps can temporarily exceed the targets; these are retention targets,
+not a hard database-size ceiling. At target occupancy the JSON payload ceiling
+is 100,000 x 8 KiB (about 781 MiB), plus keys/indexes/SQLite/WAL. Backlogs drain
+at most 1,000 rows per sweep. Sweep errors appear through retention status/logs.
+Run history is not routinely deleted, so an FK cascade is not a retention policy.
+Reports read 1,000/default–5,000/max rows, return at most 128 groups in
+each of `steps`, `containers` and `pods` with separate truncation flags; run views
+remain capped at 256 observations, prioritizing workflow/main rows before helpers.
+More containers consume those existing caps. Limits and `observations` count
+container rows, not Pods; all report populations remain explicitly incomplete.
+
+Schema 37 guards the format and adds the observation-age retention index;
+existing table/index definitions are unchanged. New JSON observations use version 2; version-1 main rows remain
 readable and upgrade on observation without duplication. Older binaries reject
 version-2/non-main rows, so schema 37 prevents opening them. The migration applies
 even with sampling disabled and follows the existing forward-only backup/restore
-contract. No admission, authored requests, limits, weights or workload specs are
+contract. Helm rollback alone stops the old server with schema-too-new; rollback
+requires restoring the pre-upgrade database backup. See the [schema-37
+upgrade/rollback note](schema37-upgrade-note.md). No admission, authored requests, limits, weights or workload specs are
 changed. Low/unknown/OOM-censored observations cannot authorize smaller resources.
 
 The optional storage field shapes and pod-cgroup scope follow the pinned
@@ -194,3 +221,12 @@ The optional storage field shapes and pod-cgroup scope follow the pinned
 Availability depends on the runtime/volume driver; the
 [CRI stats provider](https://github.com/kubernetes/kubernetes/blob/v1.36.5/pkg/kubelet/stats/cri_stats_provider.go)
 can omit statistics it cannot obtain. No new dependency on these packages is added.
+
+R2 isolation: the Workflow sampling goroutine and shared node-fill goroutine
+recover scraping/recording panics so optional telemetry cannot crash the server.
+The session stops on panic; shared fills publish unavailable snapshots and
+release waiters/gate slots. Panic payloads are not logged. Node-clock timing
+fields more than two seconds ahead become unknown without dropping independent
+valid usage. A partial batch at a canceled pass deadline is still not retried
+under a fresh context; batch-error isolation and previous-incarnation
+LastTerminationState recording also remain follow-up work.

@@ -76,7 +76,7 @@ func (s *Store) RecordStepResourceUsage(ctx context.Context, values []model.Step
 	return tx.Commit()
 }
 func (s *Store) StepResourceUsage(ctx context.Context, runID string) ([]model.StepResourceUsage, bool, error) {
-	rows, err := s.reader().QueryContext(ctx, `SELECT observation_json FROM step_resource_usage WHERE run_id=? ORDER BY node_id,pod_uid,container_id LIMIT 257`, runID)
+	rows, err := s.reader().QueryContext(ctx, `SELECT observation_json FROM step_resource_usage WHERE run_id=? ORDER BY CASE WHEN json_extract(observation_json,'$.container_name')='main' AND COALESCE(json_extract(observation_json,'$.container_kind'),'app')='app' AND COALESCE(json_extract(observation_json,'$.pod_kind'),'workflow')='workflow' THEN 0 ELSE 1 END,node_id,pod_uid,container_id LIMIT 257`, runID)
 	if err != nil {
 		return nil, false, err
 	}

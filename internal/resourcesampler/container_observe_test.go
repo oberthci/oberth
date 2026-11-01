@@ -33,13 +33,22 @@ func TestResourceContainersIncludeHelpersAndMainlessContainerSet(t *testing.T) {
 		metric.Labels = map[string]string{"namespace": pod.Namespace, "pod": pod.Name, "container": name, "id": "/kubepods/pod" + string(pod.UID) + "/" + strings.TrimPrefix(status.ContainerID, "containerd://")}
 		snapshot.Metrics = append(snapshot.Metrics, metric)
 	}
+	ephemeral := pod.Status.ContainerStatuses[0]
+	ephemeral.Name, ephemeral.ContainerID = "debug", "containerd://"+strings.Repeat("f", 64)
+	pod.Spec.EphemeralContainers = []corev1.EphemeralContainer{{EphemeralContainerCommon: corev1.EphemeralContainerCommon{Name: "debug"}}}
+	pod.Status.EphemeralContainerStatuses = []corev1.ContainerStatus{ephemeral}
+	metric := Metric{Name: "container_memory_usage_bytes", At: at, Value: 104, Labels: map[string]string{"namespace": pod.Namespace, "pod": pod.Name, "container": "debug", "id": "/kubepods/pod" + string(pod.UID) + "/" + strings.Repeat("f", 64)}}
+	snapshot.Metrics = append(snapshot.Metrics, metric)
 	values := ObserveContainers(b, pod, snapshot, at)
-	if len(values) != 4 {
+	if len(values) != 5 {
 		t.Fatalf("missing containers: %+v", values)
 	}
 	for _, v := range values {
 		if v.Version != 2 || v.MemoryPeakBytes == nil || !v.ContainerStartedAt.Equal(started.Time) || !v.PodStartedAt.Equal(started.Time) || v.Validate() != nil {
 			t.Fatalf("bad container observation: %+v", v)
+		}
+		if v.ContainerName == "debug" && v.ContainerKind != "ephemeral" {
+			t.Fatal("ephemeral scope lost")
 		}
 		if v.ContainerName == "init" && v.ContainerKind != "init" {
 			t.Fatal("init scope lost")
@@ -48,12 +57,12 @@ func TestResourceContainersIncludeHelpersAndMainlessContainerSet(t *testing.T) {
 	// ContainerSets need not have a container called main.
 	pod.Spec.Containers = pod.Spec.Containers[1:]
 	pod.Status.ContainerStatuses = pod.Status.ContainerStatuses[1:]
-	if values = ObserveContainers(b, pod, snapshot, at); len(values) != 3 {
+	if values = ObserveContainers(b, pod, snapshot, at); len(values) != 4 {
 		t.Fatalf("mainless set lost: %+v", values)
 	}
 	// A scrape failure still records independently observed timing, never usage.
 	values = ObserveContainers(b, pod, Snapshot{}, at)
-	if len(values) != 3 || values[0].Samples != 0 || values[0].MemoryPeakBytes != nil {
+	if len(values) != 4 || values[0].Samples != 0 || values[0].MemoryPeakBytes != nil {
 		t.Fatal("missing became measured", values)
 	}
 	pod.OwnerReferences[0].UID = "foreign"
@@ -62,15 +71,27 @@ func TestResourceContainersIncludeHelpersAndMainlessContainerSet(t *testing.T) {
 	}
 }
 
-func TestResourceStorageSummaryRequiresIncarnationAndCompletePVCStats(t *testing.T) {
+func storageFixture(t *testing.T) (Binding, *corev1.Pod, Snapshot, time.Time) {
+	t.Helper()
 	b, pod, snapshot, at := sampleFixture(t)
 	start := pod.Status.ContainerStatuses[0].State.Running.StartedAt.Time
+	// Pinned upstream CRI stats uses container.CreatedAt, two seconds before
+	// Running.StartedAt here. The previous incarnation ended before creation.
+	created := start.Add(-2 * time.Second)
+	pod.Status.ContainerStatuses[0].RestartCount = 1
+	pod.Status.ContainerStatuses[0].LastTerminationState.Terminated = &corev1.ContainerStateTerminated{FinishedAt: metav1.NewTime(start.Add(-3 * time.Second))}
 	pod.Spec.Volumes = []corev1.Volume{{Name: "source", VolumeSource: corev1.VolumeSource{PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: "source-pvc"}}}, {Name: "cache", VolumeSource: corev1.VolumeSource{PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: "cache-pvc"}}}}
-	raw := fmt.Sprintf(`{"pods":[{"podRef":{"name":%q,"namespace":%q,"uid":%q},"cpu":{"time":%q,"usageNanoCores":1234},"memory":{"time":%q,"usageBytes":5678},"containers":[{"name":"main","startTime":%q,"rootfs":{"time":%q,"usedBytes":12},"logs":{"time":%q,"usedBytes":0}}],"volume":[{"name":"source","pvcRef":{"name":"source-pvc","namespace":%q},"time":%q,"usedBytes":100},{"name":"cache","pvcRef":{"name":"cache-pvc","namespace":%q},"time":%q,"usedBytes":200}]}]}`, pod.Name, pod.Namespace, pod.UID, at.Format(time.RFC3339Nano), at.Format(time.RFC3339Nano), start.Format(time.RFC3339Nano), at.Format(time.RFC3339Nano), at.Format(time.RFC3339Nano), pod.Namespace, at.Format(time.RFC3339Nano), pod.Namespace, at.Format(time.RFC3339Nano))
+	raw := fmt.Sprintf(`{"pods":[{"podRef":{"name":%q,"namespace":%q,"uid":%q},"cpu":{"time":%q,"usageNanoCores":1234},"memory":{"time":%q,"usageBytes":5678},"containers":[{"name":"main","startTime":%q,"rootfs":{"time":%q,"usedBytes":12},"logs":{"time":%q,"usedBytes":0}}],"volume":[{"name":"source","pvcRef":{"name":"source-pvc","namespace":%q},"time":%q,"usedBytes":100},{"name":"cache","pvcRef":{"name":"cache-pvc","namespace":%q},"time":%q,"usedBytes":200}]}]}`, pod.Name, pod.Namespace, pod.UID, at.Format(time.RFC3339Nano), at.Format(time.RFC3339Nano), created.Format(time.RFC3339Nano), at.Format(time.RFC3339Nano), at.Format(time.RFC3339Nano), pod.Namespace, at.Format(time.RFC3339Nano), pod.Namespace, at.Format(time.RFC3339Nano))
 	if err := json.Unmarshal([]byte(raw), &snapshot.Summary); err != nil {
 		t.Fatal(err)
 	}
 	snapshot.SummaryOK = true
+	return b, pod, snapshot, at
+}
+
+func TestResourceStorageSummaryRequiresIncarnationAndCompletePVCStats(t *testing.T) {
+	b, pod, snapshot, at := storageFixture(t)
+	start := pod.Status.ContainerStatuses[0].State.Running.StartedAt.Time
 	v, ok := Observe(b, pod, snapshot, at)
 	if !ok || v.RootfsPeakBytes == nil || *v.RootfsPeakBytes != 12 || v.LogsPeakBytes == nil || *v.LogsPeakBytes != 0 || v.PodPVCUsedPeakBytes == nil || *v.PodPVCUsedPeakBytes != 300 || v.PodCPUPeakNanoCores == nil || *v.PodCPUPeakNanoCores != 1234 || v.PodMemoryPeakBytes == nil || *v.PodMemoryPeakBytes != 5678 {
 		t.Fatalf("storage: %+v", v)
@@ -142,5 +163,119 @@ func TestResourceContainerObservationBound(t *testing.T) {
 	}
 	if len(ObserveContainers(b, pod, s, at)) != 0 {
 		t.Fatal("oversized pod not bounded")
+	}
+}
+
+func TestResourceSummaryCreationBoundsAndFreshness(t *testing.T) {
+	for _, change := range []string{"first-incarnation", "missing-previous-finish", "old-incarnation", "after-start", "pod-name", "pod-namespace", "stale-pvc", "stale-rootfs", "stale-logs", "stale-pod-cpu", "duplicate-claim", "generic-ephemeral"} {
+		t.Run(change, func(t *testing.T) {
+			b, p, s, at := storageFixture(t)
+			stats := &s.Summary.Pods[0]
+			wantStorage := true
+			switch change {
+			case "first-incarnation":
+				p.Status.ContainerStatuses[0].RestartCount = 0
+				p.Status.ContainerStatuses[0].LastTerminationState = corev1.ContainerState{}
+			case "missing-previous-finish":
+				p.Status.ContainerStatuses[0].LastTerminationState = corev1.ContainerState{}
+				wantStorage = false
+			case "old-incarnation":
+				stats.Containers[0].StartTime = p.Status.ContainerStatuses[0].LastTerminationState.Terminated.FinishedAt.Add(-time.Second)
+				wantStorage = false
+			case "after-start":
+				stats.Containers[0].StartTime = p.Status.ContainerStatuses[0].State.Running.StartedAt.Add(time.Second)
+				wantStorage = false
+			case "pod-name":
+				stats.PodRef.Name = "foreign"
+				wantStorage = false
+			case "pod-namespace":
+				stats.PodRef.Namespace = "foreign"
+				wantStorage = false
+			case "stale-pvc":
+				for i := range stats.Volumes {
+					stats.Volumes[i].Time = at.Add(-MaxSampleAge - time.Second)
+				}
+			case "stale-rootfs":
+				stats.Containers[0].Rootfs.Time = at.Add(-MaxSampleAge - time.Second)
+				wantStorage = false
+			case "stale-logs":
+				stats.Containers[0].Logs.Time = at.Add(-MaxSampleAge - time.Second)
+			case "stale-pod-cpu":
+				stats.CPU.Time = at.Add(-MaxSampleAge - time.Second)
+			case "duplicate-claim":
+				v := p.Spec.Volumes[0]
+				v.Name = "same-source"
+				p.Spec.Volumes = append(p.Spec.Volumes, v)
+				vs := stats.Volumes[0]
+				vs.Name = v.Name
+				stats.Volumes = append(stats.Volumes, vs)
+			case "generic-ephemeral":
+				p.Spec.Volumes = append(p.Spec.Volumes, corev1.Volume{Name: "ephemeral", VolumeSource: corev1.VolumeSource{Ephemeral: &corev1.EphemeralVolumeSource{}}})
+			}
+			v, ok := Observe(b, p, s, at)
+			if !ok || (v.RootfsPeakBytes != nil) != wantStorage {
+				t.Fatal("creation binding or rootfs freshness", change, v)
+			}
+			if (change == "stale-logs" || change == "missing-previous-finish" || change == "old-incarnation" || change == "after-start" || change == "pod-name" || change == "pod-namespace") && v.LogsPeakBytes != nil {
+				t.Fatal("unbound/stale logs accepted", v)
+			}
+			if (change == "stale-pvc" || change == "generic-ephemeral" || change == "pod-name" || change == "pod-namespace") && v.PodPVCUsedPeakBytes != nil {
+				t.Fatal("unknown PVC total accepted", v)
+			}
+			if (change == "stale-pod-cpu" || change == "pod-name" || change == "pod-namespace") && v.PodCPUPeakNanoCores != nil {
+				t.Fatal("unbound/stale pod CPU accepted", v)
+			}
+			if change == "duplicate-claim" && (v.PodPVCUsedPeakBytes == nil || *v.PodPVCUsedPeakBytes != 300) {
+				t.Fatal("duplicate PVC counted", v)
+			}
+		})
+	}
+}
+
+func TestResourceSkewedTimingDoesNotDiscardUsage(t *testing.T) {
+	b, p, s, at := sampleFixture(t)
+	future := metav1.NewTime(at.Add(time.Minute))
+	p.CreationTimestamp = future
+	p.Status.StartTime = &future
+	p.Status.ContainerStatuses[0].State.Running.StartedAt = future
+	v, ok := Observe(b, p, s, at)
+	if !ok || v.MemoryPeakBytes == nil || !v.PodCreatedAt.IsZero() || !v.PodStartedAt.IsZero() || !v.ContainerStartedAt.IsZero() {
+		t.Fatal("skewed timing discarded independent usage", v)
+	}
+}
+
+func TestResourceDeclarationAndPodFinishGuards(t *testing.T) {
+	b, p, s, at := sampleFixture(t)
+	for _, duplicate := range []bool{false, true} {
+		copy := p.DeepCopy()
+		if duplicate {
+			copy.Spec.Containers = append(copy.Spec.Containers, copy.Spec.Containers[0])
+		} else {
+			copy.Spec.Containers = nil
+		}
+		if _, ok := Observe(b, copy, s, at); ok {
+			t.Fatal("undeclared/duplicate container accepted")
+		}
+	}
+	started := p.Status.ContainerStatuses[0].State.Running.StartedAt
+	p.Status.StartTime = &started
+	p.Status.Phase = corev1.PodSucceeded
+	p.Status.ContainerStatuses[0].State = corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{StartedAt: started, FinishedAt: metav1.NewTime(at)}}
+	if podFinishedAt(p).IsZero() {
+		t.Fatal("known finish lost")
+	}
+	for _, kind := range []string{"app", "init", "ephemeral"} {
+		copy := p.DeepCopy()
+		switch kind {
+		case "app":
+			copy.Spec.Containers = append(copy.Spec.Containers, corev1.Container{Name: "missing"})
+		case "init":
+			copy.Spec.InitContainers = []corev1.Container{{Name: "missing"}}
+		case "ephemeral":
+			copy.Spec.EphemeralContainers = []corev1.EphemeralContainer{{EphemeralContainerCommon: corev1.EphemeralContainerCommon{Name: "missing"}}}
+		}
+		if !podFinishedAt(copy).IsZero() {
+			t.Fatal("partial statuses established pod finish", kind)
+		}
 	}
 }

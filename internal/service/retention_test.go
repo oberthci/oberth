@@ -565,3 +565,25 @@ func TestRetentionStatusUsesLastSweepTotals(t *testing.T) {
 		t.Fatalf("failed sweep lost cached totals: %#v %v", failed, err)
 	}
 }
+
+func TestRetentionPrunesResourceUsageWithEvidencePoliciesDisabled(t *testing.T) {
+	f := newRetentionFixture(t)
+	run := f.run(t, "telemetry", "branch", false)
+	if _, err := f.retention.Database.SetRunJobName(t.Context(), run.ID, "workflow-test"); err != nil {
+		t.Fatal(err)
+	}
+	at := f.now.Add(-91 * 24 * time.Hour)
+	code := int32(0)
+	v := model.StepResourceUsage{Version: 2, Source: "kubelet-cadvisor", RunID: run.ID, WorkflowName: "workflow-test", WorkflowUID: "11111111-1111-4111-8111-111111111111", Namespace: "argo", NodeID: "node-1", PodName: "pod-1", PodUID: "22222222-2222-4222-8222-222222222222", NodeName: "node-a", ContainerID: "containerd://" + strings.Repeat("a", 64), ContainerName: "main", ContainerKind: "app", PodKind: "workflow", Burn: "ci", Step: "test", FirstObservedAt: at, LastObservedAt: at, Terminal: true, ExitCode: &code, Reason: "Completed", SampledLowerBound: true}
+	if err := f.retention.Database.RecordStepResourceUsage(t.Context(), []model.StepResourceUsage{v}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.retention.Sweep(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	rows, _, err := f.retention.Database.StepResourceUsage(t.Context(), run.ID)
+	if err != nil || len(rows) != 0 {
+		t.Fatal("disabled evidence policies disabled telemetry retention", len(rows), err)
+	}
+	f.retained(t, run.ID, true)
+}

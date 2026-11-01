@@ -72,7 +72,12 @@ func TestResourceSizeComparisonRunGetIsScopedAndReadOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	peak := int64(3 << 30)
-	reader := &reportReader{values: []model.StepResourceUsage{{RunID: run.ID, Burn: "test", Step: "unit", WorkflowSize: "XL", Samples: 1, MemoryPeakBytes: &peak}}}
+	reader := &reportReader{values: []model.StepResourceUsage{{RunID: run.ID, Burn: "test", Step: "unit", WorkflowSize: "XL", Samples: 1, MemoryPeakBytes: &peak, ContainerName: "main"}}}
+	helper := reader.values[0]
+	helper.ContainerName = "wait"
+	large := int64(100 << 30)
+	helper.MemoryPeakBytes = &large
+	reader.values = append(reader.values, helper)
 	f.service.resources = reader
 	pressure := pressureTestGate()
 	pressure.sample.IO.FullAvg60 = 72
@@ -94,6 +99,18 @@ func TestResourceSizeComparisonRunGetIsScopedAndReadOnly(t *testing.T) {
 	body, _ := json.Marshal(value)
 	if !strings.Contains(string(body), "MeasuredSizeComparison") || !strings.Contains(string(body), `"workflow_size":"XL"`) || reader.stepCalls == 0 {
 		t.Fatalf("comparison absent: %s", body)
+	}
+	var decoded struct {
+		Steps []struct {
+			MeasuredUsage          []model.StepResourceUsage
+			MeasuredSizeComparison []model.ResourceSizeComparison
+		}
+	}
+	if err := json.Unmarshal(body, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if len(decoded.Steps) != 1 || len(decoded.Steps[0].MeasuredUsage) != 2 || len(decoded.Steps[0].MeasuredSizeComparison) != 1 || decoded.Steps[0].MeasuredSizeComparison[0].Observations != 1 || *decoded.Steps[0].MeasuredSizeComparison[0].MemoryPeakBytes.Max != peak {
+		t.Fatalf("run_get helper entered main size comparison: %s", body)
 	}
 	after, _ := json.Marshal(observer.AdmissionState())
 	afterSteps, err := f.store.StepResults(t.Context(), run.ID)
