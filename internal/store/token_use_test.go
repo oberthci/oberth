@@ -200,15 +200,16 @@ func TestTokenUseNoOpsDoNotAcquireAuthenticationReaders(t *testing.T) {
 		t.Run(state, func(t *testing.T) {
 			s, uplink := authReaderFixture(t)
 			id := uplink.TokenCredentialID
-			if state == "recent" {
+			switch state {
+			case "recent":
 				if err := s.TouchTokenCredential(t.Context(), id); err != nil {
 					t.Fatal(err)
 				}
-			} else if state == "revoked" {
+			case "revoked":
 				if err := s.RevokeTokenCredential(t.Context(), id); err != nil {
 					t.Fatal(err)
 				}
-			} else {
+			default:
 				id = "unknown"
 			}
 			before, err := s.TokenCredentialByDigest(t.Context(), make([]byte, 32))
