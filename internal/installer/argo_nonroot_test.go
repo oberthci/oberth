@@ -9,6 +9,8 @@ import (
 	"slices"
 	"testing"
 
+	"sigs.k8s.io/yaml"
+
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 )
 
@@ -94,6 +96,19 @@ func TestNonrootArgoRejectsCustomReuse(t *testing.T) {
 		`{"executor":{"env":[{"name":"INJECT","value":"private"}]}}`,
 		`{"extraObjects":[{"kind":"Secret"}]}`,
 		`{"singleNamespace":false}`,
+		`{"controller":{"priorityClassName":"oberth-platform","resources":{"limits":{"memory":"128Mi"}}}}`,
+		`{"controller":{"resources":{"requests":{"cpu":"25m","memory":"128Mi","ephemeral-storage":"1Gi"}}}}`,
+		`{"controller":{"resources":{"requests":{"cpu":"25m"},"claims":[]}}}`,
+		`{"controller":{"resources":{"requests":{"cpu":"0"}}}}`,
+		`{"controller":{"resources":{"requests":{"memory":"-1Gi"}}}}`,
+		`{"controller":{"resources":{"requests":{"memory":"invalid"}}}}`,
+		`{"controller":{"resources":{"requests":{"cpu":25}}}}`,
+		`{"controller":{"resources":{"requests":null}}}`,
+		`{"controller":{"resources":{"requests":{"cpu":{"value":"25m"}}}}}`,
+		`{"controller":{"resources":"25m"}}`,
+		`{"controller":{"priorityClassName":true}}`,
+		`{"controller":{"priorityClassName":"invalid/name"}}`,
+		`{"executor":{"resources":{"requests":{"cpu":"25m"}}}}`,
 	}
 	for _, data := range cases {
 		var values map[string]any
@@ -127,6 +142,72 @@ func TestNonrootArgoRejectsCustomReuse(t *testing.T) {
 		cleanup()
 		if err == nil {
 			t.Fatal("invalid existing profile accepted")
+		}
+	}
+}
+
+func TestNonrootArgoAcceptsPlatformProtectionReuse(t *testing.T) {
+	body, err := os.ReadFile("../../deploy/platform-protection/argo-workflows-values.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var overlay map[string]any
+	if err := yaml.Unmarshal(body, &overlay); err != nil {
+		t.Fatal(err)
+	}
+	for _, profile := range []bool{false, true} {
+		values := map[string]any{}
+		if profile {
+			values = nonrootArgoValues(DefaultArgoNamespace)
+		}
+		values["singleNamespace"] = true
+		values["server"] = map[string]any{"enabled": false}
+		controller, ok := values["controller"].(map[string]any)
+		if !ok {
+			controller = map[string]any{}
+			values["controller"] = controller
+		}
+		controller["clusterWorkflowTemplates"] = map[string]any{"enabled": false}
+		controller["extraEnv"] = []any{map[string]any{"name": podNamesEnv, "value": podNamesFormat}}
+		for key, value := range overlay["controller"].(map[string]any) {
+			controller[key] = value
+		}
+		encoded, err := json.Marshal(values)
+		if err != nil {
+			t.Fatal(err)
+		}
+		deps := Deps{RunHelm: func(_ context.Context, args []string) ([]byte, error) {
+			if args[0] != "get" {
+				t.Fatal("reuse validation caused mutation")
+			}
+			return encoded, nil
+		}}
+		file, cleanup, err := prepareNonrootArgoValues(t.Context(), Config{ArgoControllerProfile: argoworkflow.NonrootStaticProfile, ArgoNamespace: DefaultArgoNamespace}, deps, true, DefaultArgoChartVersion)
+		if err != nil {
+			cleanup()
+			t.Fatalf("profile=%v: platform overlay refused: %v", profile, err)
+		}
+		actual, readErr := os.ReadFile(file)
+		cleanup()
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		want, err := json.Marshal(nonrootArgoValues(DefaultArgoNamespace))
+		if err != nil || string(actual) != string(want) {
+			t.Fatal("profile overlay changed or overwrote reused platform settings")
+		}
+	}
+	for _, body := range []string{
+		`{"controller":{"priorityClassName":"other-namespace-platform"}}`,
+		`{"controller":{"priorityClassName":""}}`,
+		`{"controller":{"resources":{"requests":{"cpu":"1","memory":"256Mi"}}}}`,
+	} {
+		var values map[string]any
+		if err := json.Unmarshal([]byte(body), &values); err != nil {
+			t.Fatal(err)
+		}
+		if err := validateNonrootReuse(values, DefaultArgoNamespace); err != nil {
+			t.Fatal(err)
 		}
 	}
 }

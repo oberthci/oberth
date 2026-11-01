@@ -9,6 +9,9 @@ import (
 	"os"
 	"strings"
 
+	"k8s.io/apimachinery/pkg/api/resource"
+	"k8s.io/apimachinery/pkg/util/validation"
+
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 )
 
@@ -36,7 +39,8 @@ func nonrootArgoValues(namespace string) map[string]any {
 }
 
 // validateNonrootReuse admits only the ordinary installer options or the exact
-// built-in profile. It rejects customization instead of silently overwriting
+// built-in profile, plus controller priority and CPU/memory requests. It rejects
+// other customization instead of silently overwriting
 // archive, plugin, controller or environment settings under --reuse-values.
 func validateNonrootReuse(values map[string]any, namespace string) error {
 	allowed := map[string]any{
@@ -48,6 +52,33 @@ func validateNonrootReuse(values map[string]any, namespace string) error {
 			"clusterWorkflowTemplates": map[string]any{"enabled": false},
 			"extraEnv":                 []any{map[string]any{"name": podNamesEnv, "value": podNamesFormat}},
 		},
+	}
+	// These platform overlay fields do not change controller/executor identity.
+	// Keep the nested allowlist exact: limits and other resource keys stay refused.
+	controllerAllowed := allowed["controller"].(map[string]any)
+	if controller, ok := values["controller"].(map[string]any); ok {
+		if value, exists := controller["priorityClassName"]; exists {
+			name, ok := value.(string)
+			if !ok || (name != "" && len(validation.IsDNS1123Subdomain(name)) != 0) {
+				return errors.New("nonroot profile requires a valid controller.priorityClassName")
+			}
+			controllerAllowed["priorityClassName"] = value
+		}
+		if resources, ok := controller["resources"].(map[string]any); ok {
+			requests, _ := resources["requests"].(map[string]any)
+			allowedRequests := map[string]any{}
+			for _, key := range []string{"cpu", "memory"} {
+				if value, exists := requests[key]; exists {
+					text, ok := value.(string)
+					quantity, err := resource.ParseQuantity(text)
+					if !ok || err != nil || quantity.Sign() <= 0 {
+						return fmt.Errorf("nonroot profile requires a positive controller.resources.requests.%s quantity string", key)
+					}
+					allowedRequests[key] = value
+				}
+			}
+			controllerAllowed["resources"] = map[string]any{"requests": allowedRequests}
+		}
 	}
 	profile := nonrootArgoValues(namespace)
 	for key, value := range profile {

@@ -5,6 +5,16 @@ chart=${1:-charts/oberth}
 helm_tool=${HELM:-helm}
 script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 root=$(dirname -- "$script_dir")
+bao_chart=$root/internal/installer/testdata/openbao-0.28.6.tgz
+if command -v sha256sum >/dev/null 2>&1; then
+  bao_digest=$(sha256sum "$bao_chart" | awk '{print $1}')
+else
+  bao_digest=$(shasum -a 256 "$bao_chart" | awk '{print $1}')
+fi
+if test "$bao_digest" != 175c5cea2d36b68d348eca872044656bd8740c4dbe26b7dc8eb7c7438474a8b3; then
+  echo 'OpenBao chart fixture SHA256 mismatch' >&2
+  exit 1
+fi
 work=$(mktemp -d)
 trap 'rm -rf -- "$work"' EXIT
 
@@ -38,6 +48,11 @@ test "$(grep -c '^kind: PriorityClass$' "$work/on.yaml")" -eq 4
 test "$(grep -c '^value: 1000000$' "$work/on.yaml")" -eq 4
 test "$(grep -c '^globalDefault: false$' "$work/on.yaml")" -eq 4
 test "$(grep -c '^preemptionPolicy: PreemptLowerPriority$' "$work/on.yaml")" -eq 4
+test "$(awk '/^kind:/ { priority=($0 == "kind: PriorityClass") } priority && /^    helm.sh\/resource-policy: keep$/ { count++ } END { print count+0 }' "$work/on.yaml")" -eq 2
+for component in argo-controller openbao; do
+  grep -A2 -Fx "  name: oberth-oberth-platform-$component" "$work/on.yaml" | \
+    grep -Fxq '    helm.sh/resource-policy: keep'
+done
 test "$(grep -c '^      priorityClassName:' "$work/on.yaml")" -eq 2
 for component in oberth cloudflared argo-controller openbao; do
   grep -Fxq "  name: oberth-oberth-platform-$component" "$work/on.yaml"
@@ -100,7 +115,7 @@ fi
 
 openbao_render() {
   "$helm_tool" template openbao \
-    "$root/internal/installer/testdata/openbao-0.28.6.tgz" \
+    "$bao_chart" \
     --namespace openbao --show-only templates/server-statefulset.yaml "$@"
 }
 openbao_render >"$work/bao-off.yaml"
@@ -109,6 +124,9 @@ if grep -q 'priorityClassName:' "$work/bao-off.yaml"; then
   exit 1
 fi
 openbao_render -f "$root/deploy/platform-protection/openbao-values.yaml" >"$work/bao-on.yaml"
+for source in "$work/bao-off.yaml" "$work/bao-on.yaml"; do
+  grep -A1 -Fx '  updateStrategy:' "$source" | grep -Fxq '    type: OnDelete'
+done
 test "$(grep -c '^[[:space:]]*priorityClassName:' "$work/bao-on.yaml")" -eq 1
 grep -Fxq '      priorityClassName: oberth-oberth-platform-openbao' "$work/bao-on.yaml"
 grep -Eq '^[[:space:]]+cpu: 100m$' "$work/bao-on.yaml"

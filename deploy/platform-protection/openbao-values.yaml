@@ -2,10 +2,13 @@
 # These names assume Oberth release=oberth, namespace=oberth. Adjust together
 # with the rendered PriorityClasses for any other release/namespace.
 server:
+  # Template changes require an explicit Pod delete; restart seals OpenBao
+  # until auto-unseal or an operator unseals it. See the rollout instructions.
+  updateStrategyType: OnDelete
   priorityClassName: oberth-oberth-platform-openbao
   resources:
-    # 2026-11-01 idle sample: 42m / 46Mi. Margins: 2.38x / 1.39x.
-    # Initial requests only; UNMEASURED UNDER LOAD. No new CPU/memory limits.
+    # Initial sizing from a coordinator-supplied idle sample and margin;
+    # UNMEASURED UNDER LOAD. No new CPU/memory limits.
     requests:
       cpu: 100m
       memory: 64Mi

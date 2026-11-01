@@ -4,8 +4,8 @@
 controller:
   priorityClassName: oberth-oberth-platform-argo-controller
   resources:
-    # 2026-11-01 idle sample: 12m / 89Mi. Margins: 2.08x / 1.44x.
-    # Initial requests only; UNMEASURED UNDER LOAD. No new CPU/memory limits.
+    # Initial sizing from a coordinator-supplied idle sample and margin;
+    # UNMEASURED UNDER LOAD. No new CPU/memory limits.
     requests:
       cpu: 25m
       memory: 128Mi

@@ -5,6 +5,10 @@ apiVersion: scheduling.k8s.io/v1
 kind: PriorityClass
 metadata:
   name: {{ include "oberth.platformPriorityClass" (dict "root" $ "component" $component) }}
+  {{- if has $component (list "argo-controller" "openbao") }}
+  annotations:
+    helm.sh/resource-policy: keep
+  {{- end }}
   labels:
     {{- include "oberth.labels" $ | nindent 4 }}
     app.kubernetes.io/component: {{ $component }}
