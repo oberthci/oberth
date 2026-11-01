@@ -1,6 +1,7 @@
 package api
 
 import (
+	"os"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -10,12 +11,25 @@ import (
 	"github.com/oberthci/oberth/internal/runprogress"
 )
 
-// The release tooling provisions pinned Node; a developer may also execute
-// `node hack/test-live-logs.mjs` directly. The Go-only runner has no JS runtime.
+func TestDashboardBehaviorRequiresNode(t *testing.T) {
+	binary, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	command := exec.Command(binary, "-test.run=^TestDashboardLiveLogBehavior$", "-test.v")
+	command.Env = append(os.Environ(), "PATH="+t.TempDir())
+	output, err := command.CombinedOutput()
+	if err == nil || !strings.Contains(string(output), "dashboard behavior checks require Node on PATH") {
+		t.Fatalf("missing Node must fail the test: %v\n%s", err, output)
+	}
+}
+
+// CI test leaves provision pinned Node with hack/with-test-node.sh. Keep a
+// missing runtime fatal so dashboard coverage cannot silently disappear.
 func TestDashboardLiveLogBehavior(t *testing.T) {
 	node, err := exec.LookPath("node")
 	if err != nil {
-		t.Skip("dashboard behavior checks need Node: node hack/test-live-logs.mjs")
+		t.Fatal("dashboard behavior checks require Node on PATH: install Node or use hack/with-test-node.sh on Linux/x86_64")
 	}
 	for _, script := range []string{"test-live-logs.mjs", "test-dashboard-runs.mjs"} {
 		t.Run(script, func(t *testing.T) {

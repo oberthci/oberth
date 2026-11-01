@@ -974,8 +974,10 @@ spec:
     container:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
       workingDir: /work/src
-      command: ["/usr/bin/python3"]
-      args: ["-I", "-S", "-B", ".oberth/test-packages.py", "rest"]
+      # Reuse a verified Node archive from the existing repository cache; only
+      # this leaf extracts/runs Node. No extra Pod or global setup dependency.
+      command: ["/bin/sh"]
+      args: ["hack/with-test-node.sh", "/usr/bin/python3", "-I", "-S", "-B", ".oberth/test-packages.py", "rest"]
       env:
       # Scale test fixture waits on loaded CI hosts.
       - name: OBERTH_TEST_TIMEOUT_SCALE

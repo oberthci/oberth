@@ -14,6 +14,13 @@ import (
 	"github.com/oberthci/oberth/pkg/periapsis"
 )
 
+func TestOberthTestNodeCacheAndFailures(t *testing.T) {
+	command := exec.Command("python3", "-I", "-S", "-B", "../../hack/test-test-node.py")
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("test Node launcher: %v\n%s", err, output)
+	}
+}
+
 func oberthTestPackages(t *testing.T) []string {
 	t.Helper()
 	command := exec.Command("go", "list", "./...")
@@ -146,6 +153,10 @@ func TestOberthSplitBurnsUseTheRaceGroupLauncher(t *testing.T) {
 			container := template.Container
 			wantCommand := []string{"/usr/bin/python3"}
 			wantArgs := []string{"-I", "-S", "-B", ".oberth/test-packages.py", group}
+			if group == "rest" {
+				wantCommand = []string{"/bin/sh"}
+				wantArgs = append([]string{"hack/with-test-node.sh", "/usr/bin/python3"}, wantArgs...)
+			}
 			if group == "gitcache" {
 				// Retain the static-Git package contract before the dedicated
 				// race suite, which must not also run in the rest group.

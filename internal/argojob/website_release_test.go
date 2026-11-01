@@ -193,10 +193,18 @@ func TestOberthReleaseWebsiteLeafIsolation(t *testing.T) {
 		}
 	}
 
+	// The Go test leaf can reuse the pinned Node archive read-only. It verifies
+	// a private copy and cannot alter inputs later consumed by the publisher.
+	goTests := releaseTemplate(t, workflow, "release-test")
+	input, ok := mountNames(goTests.Container)["bootstrap-website-inputs"]
+	if !ok || !input.ReadOnly || input.MountPath != "/tmp/oberth-website-inputs" ||
+		!strings.Contains(goTests.Container.Args[0], "OBERTH_TEST_NODE_ARCHIVE=/tmp/oberth-website-inputs/node.tar.gz") {
+		t.Fatal("release tests must reuse the Node archive through a read-only input")
+	}
 	// No other Pod may write or read the staged website inputs.
 	for index := range workflow.Spec.Templates {
 		template := &workflow.Spec.Templates[index]
-		if _, website := websiteTokenlessTemplates[template.Name]; website || template.Name == "release-website" {
+		if _, website := websiteTokenlessTemplates[template.Name]; website || template.Name == "release-website" || template.Name == "release-test" {
 			continue
 		}
 		templateContainers(template, func(container *corev1.Container) {

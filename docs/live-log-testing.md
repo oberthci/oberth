@@ -17,11 +17,9 @@ the final unterminated tail and terminal flag without duplicate bytes.
 The Playwright suite in `hack/test-live-log-stream.mjs` remains an optional
 browser check. The existing Go test images (`golang:1.26.10-trixie`) and setup
 leaves do not provision Playwright or Chromium and its shared-library/font
-runtime. The branch setup also does not provision Node. Release website tooling
-provisions pinned Node in a separate leaf, which does not provide a browser to
-the Go test leaf. The suite cannot run headless with the current provisioned
-tools; enabling it requires a separately pinned browser runtime and dependencies.
-No CI image or network installer is added for this small hardening batch.
+runtime. The Go test leaves provision Node for the function-level checks below;
+this does not provide a browser. The Playwright suite requires a separately
+pinned browser runtime and dependencies.
 
 On a developer machine with Playwright and its Chromium installed:
 
@@ -31,6 +29,21 @@ PLAYWRIGHT_MODULE=/absolute/path/to/playwright/index.mjs node hack/test-live-log
 
 The browser suite additionally checks DOM identity, animation-frame batching,
 scroll preservation, row eviction, navigation and sign-out. The Go tests do not
-establish those browser-layout behaviors. `hack/test-live-logs.mjs` checks the
-shipped dashboard functions when Node is available; its Go wrapper skips when
-Node is absent. The transport tests above are Go-only and do not skip in CI.
+establish those browser-layout behaviors.
+
+`TestDashboardLiveLogBehavior` runs both `hack/test-live-logs.mjs` and
+`hack/test-dashboard-runs.mjs` against the shipped dashboard functions. Missing
+Node is a test failure, including on developer machines. These scripts use only
+Node built-ins: no npm install, Playwright or browser is needed.
+
+Branch `test-rest` and release `release-test` use `hack/with-test-node.sh`
+(Linux/x86_64, matching the existing website Node pin). It verifies both the
+archive and extracted binary against `.oberth/pins/node*.sha256` before execution.
+Branch CI caches only the archive under `GOCACHE/oberth-test-node`, so warm runs
+need no Node download. A private copy is verified on every run; missing/corrupt
+cache entries are downloaded again with bounded curl retries. With no persistent
+Go cache, the archive cache lasts only as long as that leaf. Release tests reuse
+the already fetched website archive through a read-only mount, without another
+download. Extraction and execution use Pod-private scratch, removed on exit.
+Setup/publisher tools, other test leaves and the workflow DAG are unchanged.
+Both Go suites keep `-race` and `-count=1`, so this gate runs on every CI attempt.
