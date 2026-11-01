@@ -3,10 +3,10 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"net/url"
 	"os"
-	"strings"
 	"time"
 )
 
@@ -38,12 +38,12 @@ func (s *Store) PruneResourceUsage(ctx context.Context) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
+	defer func() { _ = rows.Close() }()
 	var selected []resourceUsageCandidate
 	cutoff := unixNano(s.now().Add(-resourceUsageMaxAge))
 	for rows.Next() {
 		var v resourceUsageCandidate
 		if err := rows.Scan(&v.id, &v.at); err != nil {
-			_ = rows.Close()
 			return 0, err
 		}
 		if len(selected) < excess || v.at < cutoff {
@@ -102,15 +102,23 @@ func deleteResourceUsageBatch(ctx context.Context, db *sql.DB, batch []resourceU
 	if len(batch) > resourceUsageDeleteBatch {
 		return 0, ErrInvalid
 	}
-	predicates := make([]string, 0, len(batch))
-	args := make([]any, 0, len(batch)*2)
-	for _, v := range batch {
-		predicates = append(predicates, "(rowid=? AND last_observed_at=?)")
-		args = append(args, v.id, v.at)
+	pairs := make([][2]int64, len(batch))
+	for i, v := range batch {
+		pairs[i] = [2]int64{v.id, v.at}
+	}
+	payload, err := json.Marshal(pairs)
+	if err != nil {
+		return 0, err
 	}
 	// Selection does not reserve a writer. A later observation must survive
 	// even if it was selected as old before this DELETE obtains its lock.
-	result, err := db.ExecContext(ctx, `DELETE FROM step_resource_usage WHERE `+strings.Join(predicates, " OR "), args...)
+	// The SQL shape is fixed. JSON binds at most 100 exact int64 pairs as data,
+	// retaining the rowid lookup and observation-clock recheck without SQL
+	// concatenation or a variable-length placeholder list.
+	result, err := db.ExecContext(ctx, `DELETE FROM step_resource_usage
+WHERE (rowid,last_observed_at) IN (
+ SELECT json_extract(value,'$[0]'),json_extract(value,'$[1]') FROM json_each(?)
+)`, string(payload))
 	if err != nil {
 		return 0, err
 	}

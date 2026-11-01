@@ -9,8 +9,6 @@ import (
 	"time"
 
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
-	"github.com/oberthci/oberth/internal/model"
-	"github.com/oberthci/oberth/internal/resourcesampler"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -20,6 +18,9 @@ import (
 	dynamicfake "k8s.io/client-go/dynamic/fake"
 	"k8s.io/client-go/kubernetes/fake"
 	"k8s.io/utils/ptr"
+
+	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/resourcesampler"
 )
 
 func TestResourceLauncherRequiresWorkflowVMIPodUIDChain(t *testing.T) {
