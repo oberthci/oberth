@@ -1981,6 +1981,9 @@ FROM uplinks WHERE fingerprint = ? AND NOT EXISTS (
 	if err := row.Scan(&value.ID, &value.Fingerprint, &value.Identity, &value.TokenCredentialID, &value.AuthActor, &admin, &created, &updated); err != nil {
 		return model.Uplink{}, translateNotFound("uplink", err)
 	}
+	if err := validateUplinkBinding(value); err != nil {
+		return model.Uplink{}, err
+	}
 	value.Admin = admin != 0
 	value.CreatedAt, value.UpdatedAt = fromUnixNano(created), fromUnixNano(updated)
 	scopes, err := loadUplinkScopes(ctx, tx, value.ID)
@@ -2122,6 +2125,9 @@ WHERE t.digest = ? AND t.activated_at IS NOT NULL AND t.revoked_at IS NULL`, dig
 	); err != nil {
 		return model.AuthenticatedUplink{}, translateNotFound("authenticated uplink", err)
 	}
+	if err := validateUplinkBinding(value.Uplink); err != nil {
+		return model.AuthenticatedUplink{}, err
+	}
 	// A scope that cannot be read must not authenticate as unscoped (#073).
 	scopes, err := loadUplinkScopes(ctx, tx, value.ID)
 	if err != nil {
@@ -2138,6 +2144,15 @@ WHERE t.digest = ? AND t.activated_at IS NOT NULL AND t.revoked_at IS NULL`, dig
 	value.TokenCredential.LastUsedAt = nullableTime(lastUsed)
 	value.TokenCredential.RevokedAt = nullableTime(revoked)
 	return value, nil
+}
+
+// Auth lookups must reject malformed persisted bindings even though mutation
+// paths validate these fields. The schema's NOT NULL checks permit blanks.
+func validateUplinkBinding(uplink model.Uplink) error {
+	if strings.TrimSpace(uplink.Identity) == "" || strings.TrimSpace(uplink.Fingerprint) == "" {
+		return fmt.Errorf("%w: uplink has no unique identity binding", ErrInvalidState)
+	}
+	return nil
 }
 
 func scanTokenCredential(row rowScanner) (model.TokenCredential, error) {

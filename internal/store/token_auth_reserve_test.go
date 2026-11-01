@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/oberthci/oberth/internal/testtimeout"
 )
 
 func holdGeneralReaders(t *testing.T, s *Store) {
@@ -62,7 +64,10 @@ func TestTokenAuthReserveReadsFreshScopeAndRevocation(t *testing.T) {
 		t.Run(kind, func(t *testing.T) {
 			s, uplink := authReaderFixture(t)
 			holdGeneralReaders(t, s)
-			ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+			// This is a progress budget for several reads and durable writes,
+			// not a one-second product timeout. Allow loaded race-test hosts to
+			// schedule the fixture without expiring the later lookup's context.
+			ctx, cancel := context.WithTimeout(t.Context(), testtimeout.Start(time.Second))
 			defer cancel()
 			if _, err := s.AuthenticatedUplinkByDigest(ctx, make([]byte, 32)); err != nil {
 				t.Fatal(err)
@@ -71,8 +76,11 @@ func TestTokenAuthReserveReadsFreshScopeAndRevocation(t *testing.T) {
 				t.Fatal(err)
 			}
 			got, err := s.AuthenticatedUplinkByDigest(ctx, make([]byte, 32))
-			if err != nil || len(got.Scope) != 1 || got.Scope[0] != "restricted" {
-				t.Fatalf("cached or incomplete scope: %+v %v", got, err)
+			if err != nil {
+				t.Fatalf("read fresh scope: %v", err)
+			}
+			if got.ID != uplink.ID || got.Identity != uplink.Identity || len(got.Scope) != 1 || got.Scope[0] != "restricted" {
+				t.Fatalf("cached or incomplete identity/scope: %+v", got)
 			}
 			switch kind {
 			case "uplink":
