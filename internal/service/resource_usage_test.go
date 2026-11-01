@@ -3,18 +3,21 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
 )
 
 type reportReader struct {
-	calls     []int64
-	values    []model.StepResourceUsage
-	stepCalls int
+	repoValues []model.StepResourceUsage
+	calls      []int64
+	values     []model.StepResourceUsage
+	stepCalls  int
 }
 
 func (r *reportReader) StepResourceUsage(context.Context, string) ([]model.StepResourceUsage, bool, error) {
@@ -23,6 +26,9 @@ func (r *reportReader) StepResourceUsage(context.Context, string) ([]model.StepR
 }
 func (r *reportReader) RepositoryResourceUsage(_ context.Context, id int64, _ store.ResourceUsageFilter) ([]model.StepResourceUsage, bool, error) {
 	r.calls = append(r.calls, id)
+	if r.repoValues != nil {
+		return r.repoValues, true, nil
+	}
 	return []model.StepResourceUsage{{Burn: "checks", Step: "unit", Samples: 0, Terminal: true}}, true, nil
 }
 func TestResourceReportScopesBeforeReadingStorage(t *testing.T) {
@@ -93,5 +99,29 @@ func TestResourceSizeComparisonRunGetIsScopedAndReadOnly(t *testing.T) {
 	afterSteps, err := f.store.StepResults(t.Context(), run.ID)
 	if err != nil || string(before) != string(after) || !reflect.DeepEqual(beforeSteps, afterSteps) || *reader.values[0].MemoryPeakBytes != peak {
 		t.Fatal("read-only report changed admission, authored class or telemetry", err)
+	}
+}
+
+func TestResourceReportIncludesBoundedContainersPodsAndOverlap(t *testing.T) {
+	f := newScopeFixture(t)
+	at := time.Now().UTC()
+	reader := &reportReader{repoValues: []model.StepResourceUsage{}}
+	for i := 0; i < 129; i++ {
+		peak := int64(i + 1)
+		reader.repoValues = append(reader.repoValues, model.StepResourceUsage{RunID: "run", PodUID: fmt.Sprintf("pod-%d", i), Burn: "ci", Step: fmt.Sprintf("step-%d", i), ContainerName: "wait", ContainerKind: "app", PodKind: "workflow", Samples: 1, MemoryPeakBytes: &peak, PodMemoryPeakBytes: &peak, PodStartedAt: at, PodFinishedAt: at.Add(time.Second)})
+	}
+	f.service.resources = reader
+	before, _ := json.Marshal(reader.repoValues)
+	value, err := f.call(scopedActor, "repo_usage", map[string]any{"repo": "oberth"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := value.(model.ResourceUsageReport)
+	if !r.ReportOnly || !r.Truncated || !r.ContainersTruncated || !r.PodsTruncated || len(r.Containers) != 128 || len(r.Pods) != 128 || len(r.Steps) != 0 || r.Overlap.Pods != 129 || *r.Overlap.PerRunPeakPods.Max != 129 || r.PopulationCoverageKnown {
+		t.Fatal("report bounds/scopes lost", r)
+	}
+	after, _ := json.Marshal(reader.repoValues)
+	if string(before) != string(after) {
+		t.Fatal("report mutated observations")
 	}
 }

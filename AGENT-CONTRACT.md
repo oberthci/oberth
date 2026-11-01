@@ -3349,3 +3349,15 @@ termination-message declarations are not authority for these labels. The view
 never changes authored requests/limits, weights, grants or execution results;
 unknowns and OOM lower bounds cannot authorize smaller resources. Details:
 [measured size reports](docs/measured-size-report.md).
+
+
+**External container measurements (#1216):** schema 37 guards version-2 telemetry
+JSON while preserving schema-36 tables and version-1 main rows. The opt-in sampler
+covers verified Workflow app/init/sidecar/ContainerSet/ephemeral containers and
+UID-bound VMI launchers, with Kubernetes lifetime timing and optional kubelet pod
+CPU/memory, rootfs/log and complete mounted-PVC usage. `repo_usage` adds separate
+container/pod quantiles and per-run overlap without changing main-only size
+comparisons or admission. Shared PVC usage is not additive across Pods; launcher
+totals cannot separate guest use from hypervisor cost. Existing 4,096-row/run,
+8-KiB/row, bounded read/batch windows remain. Full scopes, exclusions and overhead:
+[external sampler coverage](docs/step-resource-usage.md#external-sampler-coverage-1216).

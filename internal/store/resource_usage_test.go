@@ -120,7 +120,7 @@ func TestResourceUsageMigrationPreservesSchema35AndExistingRows(t *testing.T) {
 	t.Cleanup(func() { _ = s.Close() })
 	ctx := context.Background()
 	repo := createRepo(t, s)
-	if _, err := s.db.Exec(`DROP TABLE step_resource_usage;DELETE FROM schema_migrations WHERE version=36`); err != nil {
+	if _, err := s.db.Exec(`DROP TABLE step_resource_usage;DELETE FROM schema_migrations WHERE version>=36`); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.db.Exec(`UPDATE schema_migrations SET applied_at=123 WHERE version=35`); err != nil {
@@ -190,5 +190,104 @@ func TestResourceSizeComparisonPersistsClassAndKeepsConflictsUnknown(t *testing.
 	v.WorkflowSize = "XXL"
 	if err = s.RecordStepResourceUsage(t.Context(), []model.StepResourceUsage{v}); !errors.Is(err, ErrInvalid) {
 		t.Fatal("invalid size label accepted", err)
+	}
+}
+
+func TestResourceContainerRowsUpgradeLegacyAndRetainDistinctHelpers(t *testing.T) {
+	at := time.Now().UTC()
+	s := testStore(t, &at)
+	repo := createRepo(t, s)
+	run, err := s.EnqueueRun(t.Context(), testRunSpec(repo.ID, "feature/containers", strings.Repeat("a", 40)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.SetRunJobName(t.Context(), run.ID, "workflow-test"); err != nil {
+		t.Fatal(err)
+	}
+	v := resourceRow(run.ID, at)
+	if err = s.RecordStepResourceUsage(t.Context(), []model.StepResourceUsage{v}); err != nil {
+		t.Fatal(err)
+	}
+	v.Version = 2
+	v.ContainerKind = "app"
+	v.PodKind = "workflow"
+	v.ContainerStartedAt = at.Add(-time.Minute)
+	v.PodStartedAt = v.ContainerStartedAt
+	if err = s.RecordStepResourceUsage(t.Context(), []model.StepResourceUsage{v}); err != nil {
+		t.Fatal("legacy upgrade failed", err)
+	}
+	helper := v
+	helper.ContainerName = "wait"
+	helper.ContainerID = "containerd://" + strings.Repeat("c", 64)
+	helper.MemoryPeakBytes = nil
+	for range 3 {
+		if err = s.RecordStepResourceUsage(t.Context(), []model.StepResourceUsage{v, helper}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rows, more, err := s.StepResourceUsage(t.Context(), run.ID)
+	if err != nil || more || len(rows) != 2 || rows[0].Version != 2 || rows[1].Version != 2 {
+		t.Fatal("row growth or read failure", rows, err)
+	}
+	bad := helper
+	bad.ContainerName = "forged"
+	if err = s.RecordStepResourceUsage(t.Context(), []model.StepResourceUsage{bad}); err == nil {
+		t.Fatal("container identity changed within incarnation")
+	}
+	rows, _, err = s.RepositoryResourceUsage(t.Context(), repo.ID, ResourceUsageFilter{})
+	if err != nil || len(rows) != 2 || len(model.BuildContainerResourceReport(rows)) != 2 || len(model.BuildResourceReport(rows)) != 1 {
+		t.Fatal("report lost distinct scopes", err)
+	}
+}
+
+func TestResourceFormatGuardMigrationPreservesSchema36Rows(t *testing.T) {
+	at := time.Now().UTC()
+	path := filepath.Join(t.TempDir(), "usage.db")
+	s, err := Open(t.Context(), path, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	repo := createRepo(t, s)
+	run, err := s.EnqueueRun(t.Context(), testRunSpec(repo.ID, "feature/format", strings.Repeat("a", 40)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.SetRunJobName(t.Context(), run.ID, "workflow-test"); err != nil {
+		t.Fatal(err)
+	}
+	v := resourceRow(run.ID, at)
+	if err = s.RecordStepResourceUsage(t.Context(), []model.StepResourceUsage{v}); err != nil {
+		t.Fatal(err)
+	}
+	var before string
+	if err = s.db.QueryRow(`SELECT observation_json FROM step_resource_usage WHERE run_id=?`, run.ID).Scan(&before); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.db.Exec(`DELETE FROM schema_migrations WHERE version=37; UPDATE schema_migrations SET applied_at=123 WHERE version=36`); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	s, err = Open(t.Context(), path, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var previous int64
+	var after string
+	var version int
+	if err = s.db.QueryRow(`SELECT applied_at FROM schema_migrations WHERE version=36`).Scan(&previous); err != nil || previous != 123 {
+		t.Fatal("shipped migration replayed", previous, err)
+	}
+	if err = s.db.QueryRow(`SELECT MAX(version) FROM schema_migrations`).Scan(&version); err != nil || version != 37 {
+		t.Fatal("format guard missing", version, err)
+	}
+	if err = s.db.QueryRow(`SELECT observation_json FROM step_resource_usage WHERE run_id=?`, run.ID).Scan(&after); err != nil || before != after {
+		t.Fatal("legacy JSON rewritten", err)
+	}
+	rows, _, err := s.StepResourceUsage(t.Context(), run.ID)
+	if err != nil || len(rows) != 1 || rows[0].Version != 1 {
+		t.Fatal("legacy no longer readable", rows, err)
 	}
 }

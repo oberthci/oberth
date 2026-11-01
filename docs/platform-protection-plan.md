@@ -433,3 +433,12 @@ missing coverage. A step can move work outside main and sampled peaks can be
 censored. No automatic resource tuning or removal of admission is in stage 1.
 The sampler stays opt-in; a future IO-pressure write backoff must preserve last
 samples/final killed-step evidence rather than discarding it silently.
+
+
+The #1216 measurement extension adds verified per-container helper/sidecar/
+ContainerSet and VMI-launcher observations, pod lifetimes/overlap, pod cgroup
+CPU/memory and optional rootfs/log/PVC filesystem statistics. It does not complete
+the representative measurement day or guest/hypervisor separation, platform and
+independent-helper coverage. The sampler uses schema 37 as a JSON-format guard;
+this plan's proposed capacity/resources are not applied. See [measured scopes,
+unknowns and overhead bounds](step-resource-usage.md#external-sampler-coverage-1216).

@@ -12,7 +12,7 @@ most five buckets: S, M, L, XL, unknown. Existing repository/time/step filters,
 1,000/default–5,000/max observation window, 128 step-group cap and run-view
 256-observation cap still apply, with their existing truncation indicators.
 No additional query, table, migration or scan window is introduced by this view.
-The stage1 prerequisite still applies schema36 even with sampling disabled.
+The extended sampler applies schema37 as a format guard even with sampling disabled; see [external sampler coverage](step-resource-usage.md#external-sampler-coverage-1216).
 
 Each bucket reports observation count, OOM-killed, unsampled and flagged counts,
 plus known-value count/p50/p95/max for main-container CPU interval peaks and
@@ -42,7 +42,7 @@ recommended class. Mixed pipeline/image implementations can share a label and
 burn/step; do not treat those aggregates as an approved policy or training set.
 
 All peaks are sampled lower bounds. OOM/killed/unsampled attempts and missing
-helper, sidecar, ContainerSet or VM coverage can conceal higher demand. A CPU
+helper, sidecar, ContainerSet or VM coverage can conceal higher demand. The extended sampler collects verified sidecar/init/ContainerSet and launcher containers in separate report groups; this main-only comparison does not fold their peaks into main. A CPU
 interval rate is not instantaneous CPU demand. Pod ephemeral usage excludes
 source PVCs/shared caches/VM disks; main memory is not whole-Workflow/VM memory.
 The existing used/request ratios compare the observed metric's documented

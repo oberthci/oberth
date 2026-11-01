@@ -15,6 +15,24 @@ import (
 // consumes the step's termination message or changes admission. Peaks are
 // sampled lower bounds, including when a step is killed between polls.
 type StepResourceUsage struct {
+	// Version 2 adds container identity, Kubernetes timing and storage scopes.
+	// Version 1 rows remain readable and mean workflow/main/app.
+	ContainerKind       string    `json:"container_kind,omitempty"`
+	PodKind             string    `json:"pod_kind,omitempty"`
+	PodCreatedAt        time.Time `json:"pod_created_at,omitzero"`
+	PodStartedAt        time.Time `json:"pod_started_at,omitzero"`
+	PodFinishedAt       time.Time `json:"pod_finished_at,omitzero"`
+	ContainerStartedAt  time.Time `json:"container_started_at,omitzero"`
+	ContainerFinishedAt time.Time `json:"container_finished_at,omitzero"`
+	RootfsPeakBytes     *int64    `json:"rootfs_peak_bytes,omitempty"`
+	LogsPeakBytes       *int64    `json:"logs_peak_bytes,omitempty"`
+	// PVC use is the sum of fresh, known volume stats for every distinct PVC
+	// mounted by this pod, with one common fresh source timestamp. Shared claims must not be added
+	// across pods. Unsupported/incomplete volume stats remain unknown.
+	PodPVCUsedPeakBytes *int64 `json:"pod_pvc_used_peak_bytes,omitempty"`
+	PodCPUPeakNanoCores *int64 `json:"pod_cpu_peak_nanocores,omitempty"`
+	PodMemoryPeakBytes  *int64 `json:"pod_memory_peak_bytes,omitempty"`
+
 	// WorkflowSize is the observed Workflow admission label, never a numeric
 	// per-step resource budget or a termination-message claim. Legacy unknowns
 	// remain empty. Conflicting observed labels permanently mark it unknown.
@@ -69,7 +87,18 @@ func (u StepResourceUsage) Validate() error {
 	if !u.WorkflowSize.Valid() || (u.SizeClassChanged && u.WorkflowSize != "") {
 		return bad
 	}
-	if u.Version != 1 || u.Source != "kubelet-cadvisor" || !u.SampledLowerBound || !diagnosticRun.MatchString(u.RunID) || !diagnosticUID.MatchString(u.WorkflowUID) || !diagnosticUID.MatchString(u.PodUID) || !diagnosticCID.MatchString(u.ContainerID) || u.ContainerName != "main" || u.RestartCount < 0 || u.Samples < 0 || (u.Samples == 0 && !u.Terminal) || u.FirstObservedAt.IsZero() || u.LastObservedAt.Before(u.FirstObservedAt) || (u.Samples > 0 && u.SourceAt.IsZero()) || u.SourceAt.After(u.LastObservedAt.Add(2*time.Second)) {
+	if (u.Version != 1 && u.Version != 2) || u.Source != "kubelet-cadvisor" || !u.SampledLowerBound || !diagnosticRun.MatchString(u.RunID) || !diagnosticUID.MatchString(u.WorkflowUID) || !diagnosticUID.MatchString(u.PodUID) || !diagnosticCID.MatchString(u.ContainerID) || !diagnosticName.MatchString(u.ContainerName) || (u.Version == 1 && u.ContainerName != "main") || u.RestartCount < 0 || u.Samples < 0 || (u.Samples == 0 && !u.Terminal && (u.Version == 1 || u.ContainerStartedAt.IsZero())) || u.FirstObservedAt.IsZero() || u.LastObservedAt.Before(u.FirstObservedAt) || (u.Samples > 0 && u.SourceAt.IsZero()) || u.SourceAt.After(u.LastObservedAt.Add(2*time.Second)) {
+		return bad
+	}
+	if u.Version == 2 && ((u.ContainerKind != "app" && u.ContainerKind != "init" && u.ContainerKind != "ephemeral") || (u.PodKind != "workflow" && u.PodKind != "vm-launcher")) {
+		return bad
+	}
+	for _, at := range []time.Time{u.PodCreatedAt, u.PodStartedAt, u.PodFinishedAt, u.ContainerStartedAt, u.ContainerFinishedAt} {
+		if at.After(u.LastObservedAt.Add(2 * time.Second)) {
+			return bad
+		}
+	}
+	if (!u.ContainerFinishedAt.IsZero() && (!u.Terminal || u.ContainerStartedAt.IsZero() || u.ContainerFinishedAt.Before(u.ContainerStartedAt))) || (!u.PodFinishedAt.IsZero() && (u.PodStartedAt.IsZero() || u.PodFinishedAt.Before(u.PodStartedAt))) {
 		return bad
 	}
 	for _, s := range []string{u.WorkflowName, u.Namespace, u.NodeID, u.PodName, u.NodeName, u.Burn, u.Step} {
@@ -112,16 +141,36 @@ func (u StepResourceUsage) Validate() error {
 	return nil
 }
 func (u StepResourceUsage) counters() []*int64 {
-	return []*int64{u.CPURequestNanoCores, u.MemoryRequestBytes, u.EphemeralRequestBytes, u.CPUPeakNanoCores, u.MemoryPeakBytes, u.EphemeralStoragePeakBytes, u.IOReadBytes, u.IOWriteBytes, u.IOReadOps, u.IOWriteOps, u.IOPressureSomeNS, u.IOPressureFullNS}
+	return []*int64{u.CPURequestNanoCores, u.MemoryRequestBytes, u.EphemeralRequestBytes, u.CPUPeakNanoCores, u.MemoryPeakBytes, u.EphemeralStoragePeakBytes, u.IOReadBytes, u.IOWriteBytes, u.IOReadOps, u.IOWriteOps, u.IOPressureSomeNS, u.IOPressureFullNS, u.RootfsPeakBytes, u.LogsPeakBytes, u.PodPVCUsedPeakBytes, u.PodCPUPeakNanoCores, u.PodMemoryPeakBytes}
 }
 
 // MergeResourceUsage never sums repeated cumulative samples or erases known
 // measurements with missing data. Container incarnations are separate records.
 func MergeResourceUsage(old, next StepResourceUsage) (StepResourceUsage, error) {
-	if old.Validate() != nil || next.Validate() != nil || old.RunID != next.RunID || old.WorkflowUID != next.WorkflowUID || old.Namespace != next.Namespace || old.WorkflowName != next.WorkflowName || old.NodeID != next.NodeID || old.PodUID != next.PodUID || old.PodName != next.PodName || old.NodeName != next.NodeName || old.ContainerID != next.ContainerID || old.RestartCount != next.RestartCount || old.Burn != next.Burn || old.Step != next.Step {
+	if old.Validate() != nil || next.Validate() != nil || old.RunID != next.RunID || old.WorkflowUID != next.WorkflowUID || old.Namespace != next.Namespace || old.WorkflowName != next.WorkflowName || old.NodeID != next.NodeID || old.PodUID != next.PodUID || old.PodName != next.PodName || old.NodeName != next.NodeName || old.ContainerID != next.ContainerID || old.ContainerName != next.ContainerName || old.EffectiveContainerKind() != next.EffectiveContainerKind() || old.EffectivePodKind() != next.EffectivePodKind() || old.RestartCount != next.RestartCount || old.Burn != next.Burn || old.Step != next.Step {
 		return StepResourceUsage{}, errors.New("resource observation binding changed")
 	}
 	out := old
+	if next.Version == 2 {
+		out.Version = 2
+		out.ContainerKind = next.ContainerKind
+		out.PodKind = next.PodKind
+	}
+	// Immutable starts are filled once; finishes may arrive on the final poll.
+	for _, pair := range []struct {
+		dst   *time.Time
+		value time.Time
+	}{
+		{&out.PodCreatedAt, next.PodCreatedAt}, {&out.PodStartedAt, next.PodStartedAt},
+		{&out.PodFinishedAt, next.PodFinishedAt}, {&out.ContainerStartedAt, next.ContainerStartedAt},
+		{&out.ContainerFinishedAt, next.ContainerFinishedAt},
+	} {
+		if pair.dst.IsZero() {
+			*pair.dst = pair.value
+		} else if !pair.value.IsZero() && !pair.dst.Equal(pair.value) {
+			return StepResourceUsage{}, errors.New("resource timing binding changed")
+		}
+	}
 	out.SizeClassChanged = old.SizeClassChanged || next.SizeClassChanged ||
 		(old.WorkflowSize != "" && next.WorkflowSize != "" && old.WorkflowSize != next.WorkflowSize)
 	if out.SizeClassChanged {
@@ -165,7 +214,7 @@ func MergeResourceUsage(old, next StepResourceUsage) (StepResourceUsage, error) 
 		}
 	}
 	oldValues, newValues := old.counters(), next.counters()
-	targets := []**int64{&out.CPURequestNanoCores, &out.MemoryRequestBytes, &out.EphemeralRequestBytes, &out.CPUPeakNanoCores, &out.MemoryPeakBytes, &out.EphemeralStoragePeakBytes, &out.IOReadBytes, &out.IOWriteBytes, &out.IOReadOps, &out.IOWriteOps, &out.IOPressureSomeNS, &out.IOPressureFullNS}
+	targets := []**int64{&out.CPURequestNanoCores, &out.MemoryRequestBytes, &out.EphemeralRequestBytes, &out.CPUPeakNanoCores, &out.MemoryPeakBytes, &out.EphemeralStoragePeakBytes, &out.IOReadBytes, &out.IOWriteBytes, &out.IOReadOps, &out.IOWriteOps, &out.IOPressureSomeNS, &out.IOPressureFullNS, &out.RootfsPeakBytes, &out.LogsPeakBytes, &out.PodPVCUsedPeakBytes, &out.PodCPUPeakNanoCores, &out.PodMemoryPeakBytes}
 	for i, p := range newValues {
 		if p == nil {
 			continue
@@ -174,7 +223,7 @@ func MergeResourceUsage(old, next StepResourceUsage) (StepResourceUsage, error) 
 			if i < 3 && *p != *oldValues[i] {
 				out.RequestsChanged = true
 			}
-			if ((i >= 6 && i <= 9 && newContainer) || (i >= 10 && newPSI)) && *p < *oldValues[i] {
+			if ((i >= 6 && i <= 9 && newContainer) || (i >= 10 && i <= 11 && newPSI)) && *p < *oldValues[i] {
 				out.CounterReset = true
 			}
 		}
@@ -193,7 +242,7 @@ func MergeResourceUsage(old, next StepResourceUsage) (StepResourceUsage, error) 
 	out.RequestsChanged = out.RequestsChanged || next.RequestsChanged
 	// Summary and cAdvisor have independent clocks. A newer CPU/memory sample
 	// must still merge when a cached pod summary has the larger SourceAt.
-	if out != old && next.LastObservedAt.After(out.LastObservedAt) {
+	if (out != old || next.Version == 2) && next.LastObservedAt.After(out.LastObservedAt) {
 		out.LastObservedAt = next.LastObservedAt
 	}
 	return out, out.Validate()
@@ -230,4 +279,20 @@ func ResourceRate(delta int64, elapsed time.Duration) (int64, bool) {
 		return math.MaxInt64, true
 	}
 	return int64(q), false
+}
+
+func (u StepResourceUsage) EffectiveContainerKind() string {
+	if u.ContainerKind == "" {
+		return "app"
+	}
+	return u.ContainerKind
+}
+func (u StepResourceUsage) EffectivePodKind() string {
+	if u.PodKind == "" {
+		return "workflow"
+	}
+	return u.PodKind
+}
+func (u StepResourceUsage) IsWorkflowMain() bool {
+	return u.ContainerName == "main" && u.EffectiveContainerKind() == "app" && u.EffectivePodKind() == "workflow"
 }

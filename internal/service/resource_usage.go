@@ -47,10 +47,20 @@ func (s *API) repoUsage(ctx context.Context, raw json.RawMessage) (any, error) {
 	if err != nil {
 		return nil, err
 	}
+	containers := model.BuildContainerResourceReport(rows)
+	containersTruncated := len(containers) > 128
+	if containersTruncated {
+		containers = containers[:128]
+	}
+	pods, overlap := model.BuildPodResourceReport(rows)
+	podsTruncated := len(pods) > 128
+	if podsTruncated {
+		pods = pods[:128]
+	}
 	steps := model.BuildResourceReport(rows)
 	stepsTruncated := len(steps) > 128
 	if stepsTruncated {
 		steps = steps[:128]
 	}
-	return model.ResourceUsageReport{ReportOnly: true, SizeClassSemantics: "observed Workflow admission labels, not numeric per-step budgets; legacy/missing/conflicting class is unknown; sampled lower bounds do not establish safe smaller requests or classes", StepsTruncated: stepsTruncated, Repository: args.Repo, Since: args.Since, Limit: args.Limit, Observations: len(rows), Truncated: truncated, PeakSemantics: "sampled lower bounds; missing is unknown; observations are container attempts, including running/killed attempts; CPU/memory/IO main scope; ephemeral/PSI pod scope; no PVC/VM disk accounting", Steps: steps}, nil
+	return model.ResourceUsageReport{Containers: containers, ContainersTruncated: containersTruncated, Pods: pods, PodsTruncated: podsTruncated, Overlap: overlap, ReportOnly: true, SizeClassSemantics: "observed Workflow admission labels, not numeric per-step budgets; legacy/missing/conflicting class is unknown; sampled lower bounds do not establish safe smaller requests or classes", StepsTruncated: stepsTruncated, Repository: args.Repo, Since: args.Since, Limit: args.Limit, Observations: len(rows), Truncated: truncated, PeakSemantics: "sampled lower bounds; missing is unknown; observations are container attempts, including running/killed attempts; steps retain workflow/main scope; containers separate app/init/ephemeral and VM launcher totals; pods deduplicate cgroup CPU/memory (including overhead) and ephemeral/PVC peaks; PVC stats are optional and shared claims are not additive across pods; VM guest versus hypervisor overhead and block-volume use are unknown; p95 is across incarnation peaks, not time samples", Steps: steps}, nil
 }

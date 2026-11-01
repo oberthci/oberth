@@ -9,6 +9,12 @@ import (
 )
 
 type ResourceUsageReport struct {
+	Containers          []ResourceContainerReport `json:"containers"`
+	ContainersTruncated bool                      `json:"containers_truncated"`
+	Pods                []ResourcePodReport       `json:"pods"`
+	PodsTruncated       bool                      `json:"pods_truncated"`
+	Overlap             ResourceOverlapReport     `json:"overlap"`
+
 	ReportOnly              bool                 `json:"report_only"`
 	SizeClassSemantics      string               `json:"size_class_semantics"`
 	StepsTruncated          bool                 `json:"steps_truncated"`
@@ -44,6 +50,9 @@ type ResourceMetricReport struct {
 func BuildResourceReport(values []StepResourceUsage) []ResourceStepReport {
 	grouped := map[string][]StepResourceUsage{}
 	for _, v := range values {
+		if v.ContainerName != "" && !v.IsWorkflowMain() {
+			continue
+		}
 		key := v.Burn + "\x00" + v.Step
 		grouped[key] = append(grouped[key], v)
 	}
@@ -85,24 +94,7 @@ func BuildResourceReport(values []StepResourceUsage) []ResourceStepReport {
 			{"io_pressure_some_ns", "pod", func(v StepResourceUsage) *int64 { return v.IOPressureSomeNS }, nil},
 			{"io_pressure_full_ns", "pod", func(v StepResourceUsage) *int64 { return v.IOPressureFullNS }, nil},
 		} {
-			used, requested, ratios := []int64{}, []int64{}, []int64{}
-			for _, v := range rows {
-				u := metric.used(v)
-				if u != nil {
-					used = append(used, *u)
-				}
-				if metric.request != nil {
-					q := metric.request(v)
-					if q != nil {
-						requested = append(requested, *q)
-						if u != nil && *q > 0 {
-							ratio, _ := ResourceRate(*u, time.Duration(*q))
-							ratios = append(ratios, ratio/1000)
-						}
-					}
-				}
-			}
-			r.Metrics[metric.name] = ResourceMetricReport{Scope: metric.scope, Used: Quantiles(used), Requested: Quantiles(requested), UsedRequestPPM: Quantiles(ratios)}
+			r.Metrics[metric.name] = resourceMetric(rows, metric.scope, metric.used, metric.request)
 		}
 		r.ByWorkflowSize = CompareResourceSize(rows)
 		out = append(out, r)
@@ -146,6 +138,9 @@ func CompareResourceSize(values []StepResourceUsage) []ResourceSizeComparison {
 		}
 		var cpu, memory, ephemeral []int64
 		for _, v := range values {
+			if v.ContainerName != "" && !v.IsWorkflowMain() {
+				continue
+			}
 			observed := v.WorkflowSize
 			if !observed.Valid() || v.SizeClassChanged {
 				observed = ""

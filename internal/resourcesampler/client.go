@@ -87,7 +87,36 @@ func (c Config) NodeNames() []string {
 	return out
 }
 
+type snapshotIndex struct {
+	metrics map[string][]Metric
+	pods    map[string]PodStats
+}
+
+// IndexSnapshot builds bounded lookups once per shared node scrape, avoiding a
+// full cAdvisor scan per container. Never mutate the indexed snapshot.
+func IndexSnapshot(s Snapshot) Snapshot {
+	if s.index != nil {
+		return s
+	}
+	i := &snapshotIndex{metrics: map[string][]Metric{}, pods: map[string]PodStats{}}
+	if s.MetricsOK {
+		for _, m := range s.Metrics {
+			key := m.Labels["namespace"] + "\x00" + m.Labels["pod"] + "\x00" + m.Labels["container"]
+			i.metrics[key] = append(i.metrics[key], m)
+		}
+	}
+	if s.SummaryOK {
+		for _, p := range s.Summary.Pods {
+			i.pods[p.PodRef.UID] = p
+		}
+	}
+	s.index = i
+	return s
+}
+
 type Snapshot struct {
+	index *snapshotIndex
+
 	Summary              Summary
 	Metrics              []Metric
 	SummaryOK, MetricsOK bool
@@ -189,6 +218,7 @@ func (c *Client) fill(node string, entry *cacheEntry) {
 	c.finish(node, entry, value)
 }
 func (c *Client) finish(node string, entry *cacheEntry, value Snapshot) {
+	value = IndexSnapshot(value)
 	c.mu.Lock()
 	failed := !value.SummaryOK || !value.MetricsOK
 	wasUnavailable := c.unavailable[node]

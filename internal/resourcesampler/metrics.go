@@ -17,7 +17,37 @@ type Summary struct {
 	} `json:"node"`
 	Pods []PodStats `json:"pods"`
 }
+type FSStats struct {
+	Time      time.Time `json:"time"`
+	UsedBytes *uint64   `json:"usedBytes"`
+}
+type ContainerStats struct {
+	Name      string    `json:"name"`
+	StartTime time.Time `json:"startTime"`
+	Rootfs    *FSStats  `json:"rootfs"`
+	Logs      *FSStats  `json:"logs"`
+}
+type VolumeStats struct {
+	FSStats
+	Name   string `json:"name"`
+	PVCRef *struct {
+		Name      string `json:"name"`
+		Namespace string `json:"namespace"`
+	} `json:"pvcRef"`
+}
 type PodStats struct {
+	CPU *struct {
+		Time           time.Time `json:"time"`
+		UsageNanoCores *uint64   `json:"usageNanoCores"`
+	} `json:"cpu"`
+	Memory *struct {
+		Time       time.Time `json:"time"`
+		UsageBytes *uint64   `json:"usageBytes"`
+	} `json:"memory"`
+
+	Containers []ContainerStats `json:"containers"`
+	Volumes    []VolumeStats    `json:"volume"`
+
 	PodRef           struct{ Name, Namespace, UID string } `json:"podRef"`
 	EphemeralStorage *struct {
 		Time      time.Time `json:"time"`

@@ -15,20 +15,60 @@ import (
 // resolves this Pod node through the admitted Workflow's step tree.
 type Binding struct {
 	RunID, WorkflowName, WorkflowUID, Namespace, NodeID, NodeName, PodName, Burn, Step string
+	LauncherOwnerName, LauncherOwnerUID                                                string
 }
 
 // Observe does not trust metric labels alone: UID, current container incarnation
 // and the kubelet cgroup path must agree. CPU/memory/IO are main-container scope;
 // ephemeral storage and PSI are pod scope (including helpers), not PVC/VM disks.
 func Observe(b Binding, pod *corev1.Pod, snapshot Snapshot, now time.Time) (model.StepResourceUsage, bool) {
-	if pod == nil || string(pod.UID) == "" || pod.Namespace != b.Namespace || pod.Name != b.PodName || pod.Spec.NodeName == "" || pod.Annotations["workflows.argoproj.io/node-id"] != b.NodeID || pod.Annotations["workflows.argoproj.io/node-name"] != b.NodeName {
+	v, ok := observe(b, pod, IndexSnapshot(snapshot), now, "main", "app", "workflow", false)
+	return v, ok && (v.Samples > 0 || v.Terminal)
+}
+
+// ObserveContainers covers app containers (including ContainerSets and Argo
+// wait), ordinary/restartable init helpers, and ephemeral containers. All use
+// the same UID, full runtime ID, freshness and cgroup checks as main.
+func ObserveContainers(b Binding, pod *corev1.Pod, snapshot Snapshot, now time.Time) []model.StepResourceUsage {
+	return observeContainers(b, pod, snapshot, now, "workflow", false)
+}
+
+// ObserveLauncher is called only after the controller verifies the complete
+// Workflow -> VMI -> Pod owner chain by UID. It measures launcher totals;
+// kubelet data cannot separate guest consumption from hypervisor overhead.
+func ObserveLauncher(b Binding, pod *corev1.Pod, snapshot Snapshot, now time.Time) []model.StepResourceUsage {
+	return observeContainers(b, pod, snapshot, now, "vm-launcher", true)
+}
+func observeContainers(b Binding, pod *corev1.Pod, snapshot Snapshot, now time.Time, podKind string, launcher bool) []model.StepResourceUsage {
+	if pod == nil || len(pod.Status.ContainerStatuses)+len(pod.Status.InitContainerStatuses)+len(pod.Status.EphemeralContainerStatuses) > 128 || len(pod.Spec.Containers)+len(pod.Spec.InitContainers)+len(pod.Spec.EphemeralContainers) > 128 {
+		return nil
+	}
+	snapshot = IndexSnapshot(snapshot)
+	out := []model.StepResourceUsage{}
+	for _, group := range []struct {
+		kind     string
+		statuses []corev1.ContainerStatus
+	}{{"app", pod.Status.ContainerStatuses}, {"init", pod.Status.InitContainerStatuses}, {"ephemeral", pod.Status.EphemeralContainerStatuses}} {
+		for _, status := range group.statuses {
+			if v, ok := observe(b, pod, snapshot, now, status.Name, group.kind, podKind, launcher); ok {
+				out = append(out, v)
+			}
+		}
+	}
+	return out
+}
+func observe(b Binding, pod *corev1.Pod, snapshot Snapshot, now time.Time, name, kind, podKind string, launcher bool) (model.StepResourceUsage, bool) {
+	if pod == nil || string(pod.UID) == "" || pod.Namespace != b.Namespace || pod.Name != b.PodName || pod.Spec.NodeName == "" || (!launcher && (pod.Annotations["workflows.argoproj.io/node-id"] != b.NodeID || pod.Annotations["workflows.argoproj.io/node-name"] != b.NodeName)) {
 		return model.StepResourceUsage{}, false
 	}
 	owners := 0
 	for _, owner := range pod.OwnerReferences {
 		if owner.Controller != nil && *owner.Controller {
 			owners++
-			if owner.APIVersion != "argoproj.io/v1alpha1" || owner.Kind != "Workflow" || owner.Name != b.WorkflowName || owner.UID != types.UID(b.WorkflowUID) {
+			if launcher && (b.LauncherOwnerUID == "" || owner.APIVersion != "kubevirt.io/v1" || owner.Kind != "VirtualMachineInstance" || owner.Name != b.LauncherOwnerName || string(owner.UID) != b.LauncherOwnerUID) {
+				return model.StepResourceUsage{}, false
+			}
+			if !launcher && (owner.APIVersion != "argoproj.io/v1alpha1" || owner.Kind != "Workflow" || owner.Name != b.WorkflowName || owner.UID != types.UID(b.WorkflowUID)) {
 				return model.StepResourceUsage{}, false
 			}
 		}
@@ -36,21 +76,36 @@ func Observe(b Binding, pod *corev1.Pod, snapshot Snapshot, now time.Time) (mode
 	if owners != 1 {
 		return model.StepResourceUsage{}, false
 	}
+	statuses := pod.Status.ContainerStatuses
+	containers := pod.Spec.Containers
+	if kind == "init" {
+		statuses = pod.Status.InitContainerStatuses
+		containers = pod.Spec.InitContainers
+	}
+	if kind == "ephemeral" {
+		statuses = pod.Status.EphemeralContainerStatuses
+		containers = nil
+		for _, c := range pod.Spec.EphemeralContainers {
+			containers = append(containers, corev1.Container{Name: c.Name, Resources: c.Resources})
+		}
+	}
 	var status *corev1.ContainerStatus
-	for i := range pod.Status.ContainerStatuses {
-		if pod.Status.ContainerStatuses[i].Name == "main" {
+	for i := range statuses {
+		if statuses[i].Name == name {
 			if status != nil {
 				return model.StepResourceUsage{}, false
 			}
-			status = &pod.Status.ContainerStatuses[i]
+			status = &statuses[i]
 		}
 	}
 	if status == nil || status.ContainerID == "" || (status.State.Running == nil && status.State.Terminated == nil) {
 		return model.StepResourceUsage{}, false
 	}
-	v := model.StepResourceUsage{Version: 1, Source: "kubelet-cadvisor", RunID: b.RunID, WorkflowName: b.WorkflowName, WorkflowUID: b.WorkflowUID, Namespace: b.Namespace, NodeID: b.NodeID, PodName: pod.Name, PodUID: string(pod.UID), NodeName: pod.Spec.NodeName, ContainerID: status.ContainerID, ContainerName: "main", RestartCount: status.RestartCount, Burn: b.Burn, Step: b.Step, FirstObservedAt: now, LastObservedAt: now, SampledLowerBound: true}
-	for _, container := range pod.Spec.Containers {
-		if container.Name == "main" {
+	v := model.StepResourceUsage{Version: 2, ContainerKind: kind, PodKind: podKind, Source: "kubelet-cadvisor", RunID: b.RunID, WorkflowName: b.WorkflowName, WorkflowUID: b.WorkflowUID, Namespace: b.Namespace, NodeID: b.NodeID, PodName: pod.Name, PodUID: string(pod.UID), NodeName: pod.Spec.NodeName, ContainerID: status.ContainerID, ContainerName: name, RestartCount: status.RestartCount, Burn: b.Burn, Step: b.Step, FirstObservedAt: now, LastObservedAt: now, SampledLowerBound: true}
+	declared := 0
+	for _, container := range containers {
+		if container.Name == name {
+			declared++
 			if q, ok := container.Resources.Requests[corev1.ResourceCPU]; ok {
 				v.CPURequestNanoCores = number(q.AsApproximateFloat64()*1e9, &v.Saturated)
 			}
@@ -58,6 +113,9 @@ func Observe(b Binding, pod *corev1.Pod, snapshot Snapshot, now time.Time) (mode
 				v.MemoryRequestBytes = number(q.AsApproximateFloat64(), &v.Saturated)
 			}
 		}
+	}
+	if declared != 1 {
+		return model.StepResourceUsage{}, false
 	}
 	// An absent Kubernetes request schedules as zero. That known zero differs
 	// from an absent measurement and is never used as a ratio denominator.
@@ -68,9 +126,21 @@ func Observe(b Binding, pod *corev1.Pod, snapshot Snapshot, now time.Time) (mode
 		v.MemoryRequestBytes = int64ptr(0)
 	}
 	v.EphemeralRequestBytes = number(ephemeralRequest(pod), &v.Saturated)
+	v.PodCreatedAt = pod.CreationTimestamp.Time
+	if pod.Status.StartTime != nil {
+		v.PodStartedAt = pod.Status.StartTime.Time
+	}
+	if running := status.State.Running; running != nil {
+		v.ContainerStartedAt = running.StartedAt.Time
+	}
+	v.PodFinishedAt = podFinishedAt(pod)
 	if term := status.State.Terminated; term != nil {
 		if term.ContainerID != "" && term.ContainerID != status.ContainerID {
 			return model.StepResourceUsage{}, false
+		}
+		v.ContainerStartedAt = term.StartedAt.Time
+		if !v.ContainerStartedAt.IsZero() {
+			v.ContainerFinishedAt = term.FinishedAt.Time
 		}
 		code := term.ExitCode
 		v.Terminal = true
@@ -84,9 +154,9 @@ func Observe(b Binding, pod *corev1.Pod, snapshot Snapshot, now time.Time) (mode
 	}
 	devices := map[string]bool{}
 	if snapshot.MetricsOK {
-		for _, metric := range snapshot.Metrics {
+		for _, metric := range snapshot.index.metrics[pod.Namespace+"\x00"+pod.Name+"\x00"+name] {
 			l := metric.Labels
-			if l["namespace"] != pod.Namespace || l["pod"] != pod.Name || l["container"] != "main" || !fresh(metric.At, now) || !CgroupMatches(l["id"], string(pod.UID), status.ContainerID) {
+			if l["namespace"] != pod.Namespace || l["pod"] != pod.Name || l["container"] != name || !fresh(metric.At, now) || !CgroupMatches(l["id"], string(pod.UID), status.ContainerID) {
 				continue
 			}
 			if metric.At.After(v.ContainerSourceAt) {
@@ -130,9 +200,49 @@ func Observe(b Binding, pod *corev1.Pod, snapshot Snapshot, now time.Time) (mode
 		}
 	}
 	if snapshot.SummaryOK {
-		for _, stats := range snapshot.Summary.Pods {
+		for _, stats := range []PodStats{snapshot.index.pods[string(pod.UID)]} {
 			if stats.PodRef.Namespace != pod.Namespace || stats.PodRef.Name != pod.Name || stats.PodRef.UID != string(pod.UID) {
 				continue
+			}
+			if cpu := stats.CPU; cpu != nil && cpu.UsageNanoCores != nil && fresh(cpu.Time, now) {
+				v.PodCPUPeakNanoCores = unsigned(*cpu.UsageNanoCores, &v.Saturated)
+				if cpu.Time.After(v.SourceAt) {
+					v.SourceAt = cpu.Time
+				}
+			}
+			if mem := stats.Memory; mem != nil && mem.UsageBytes != nil && fresh(mem.Time, now) {
+				v.PodMemoryPeakBytes = unsigned(*mem.UsageBytes, &v.Saturated)
+				if mem.Time.After(v.SourceAt) {
+					v.SourceAt = mem.Time
+				}
+			}
+			// Summary container stats lack runtime IDs: require the exact current
+			// incarnation start time before accepting rootfs/log samples.
+			containerStats := stats.Containers
+			if len(containerStats) > 128 {
+				containerStats = nil
+			}
+			for _, cs := range containerStats {
+				if cs.Name != name || v.ContainerStartedAt.IsZero() || !cs.StartTime.Equal(v.ContainerStartedAt) {
+					continue
+				}
+				for _, fs := range []struct {
+					src *FSStats
+					dst **int64
+				}{{cs.Rootfs, &v.RootfsPeakBytes}, {cs.Logs, &v.LogsPeakBytes}} {
+					if fs.src != nil && fs.src.UsedBytes != nil && fresh(fs.src.Time, now) && !fs.src.Time.Before(v.ContainerStartedAt) {
+						*fs.dst = unsigned(*fs.src.UsedBytes, &v.Saturated)
+						if fs.src.Time.After(v.SourceAt) {
+							v.SourceAt = fs.src.Time
+						}
+					}
+				}
+			}
+			if used, at := pvcUsage(pod, stats, now, &v.Saturated); used != nil {
+				v.PodPVCUsedPeakBytes = used
+				if at.After(v.SourceAt) {
+					v.SourceAt = at
+				}
 			}
 			if fs := stats.EphemeralStorage; fs != nil && fs.UsedBytes != nil && fresh(fs.Time, now) {
 				v.EphemeralStoragePeakBytes = unsigned(*fs.UsedBytes, &v.Saturated)
@@ -158,7 +268,7 @@ func Observe(b Binding, pod *corev1.Pod, snapshot Snapshot, now time.Time) (mode
 	if !v.SourceAt.IsZero() {
 		v.Samples = 1
 	}
-	if v.Samples == 0 && !v.Terminal {
+	if v.Samples == 0 && !v.Terminal && v.ContainerStartedAt.IsZero() {
 		return model.StepResourceUsage{}, false
 	}
 	return v, v.Validate() == nil
@@ -235,4 +345,64 @@ func validContainerID(id string) bool {
 		}
 	}
 	return true
+}
+
+func podFinishedAt(pod *corev1.Pod) time.Time {
+	if pod.Status.StartTime == nil || (pod.Status.Phase != corev1.PodSucceeded && pod.Status.Phase != corev1.PodFailed) || len(pod.Status.ContainerStatuses) != len(pod.Spec.Containers) || len(pod.Status.InitContainerStatuses) != len(pod.Spec.InitContainers) || len(pod.Status.EphemeralContainerStatuses) != len(pod.Spec.EphemeralContainers) {
+		return time.Time{}
+	}
+	var end time.Time
+	for _, group := range [][]corev1.ContainerStatus{pod.Status.ContainerStatuses, pod.Status.InitContainerStatuses, pod.Status.EphemeralContainerStatuses} {
+		for _, status := range group {
+			if status.State.Terminated == nil || status.State.Terminated.FinishedAt.IsZero() {
+				return time.Time{}
+			}
+			if status.State.Terminated.FinishedAt.After(end) {
+				end = status.State.Terminated.FinishedAt.Time
+			}
+		}
+	}
+	return end
+}
+
+func pvcUsage(pod *corev1.Pod, stats PodStats, now time.Time, saturated *bool) (*int64, time.Time) {
+	if len(pod.Spec.Volumes) > 128 || len(stats.Volumes) > 128 {
+		return nil, time.Time{}
+	}
+	claims := map[string]string{}
+	for _, volume := range pod.Spec.Volumes {
+		if volume.PersistentVolumeClaim != nil {
+			claims[volume.Name] = volume.PersistentVolumeClaim.ClaimName
+		}
+	}
+	if len(claims) == 0 {
+		return nil, time.Time{}
+	}
+	seen := map[string]bool{}
+	var used *int64
+	var at time.Time
+	for _, claim := range claims {
+		if seen[claim] {
+			continue
+		}
+		found := false
+		for _, v := range stats.Volumes {
+			if claims[v.Name] != claim || v.PVCRef == nil || v.PVCRef.Name != claim || v.PVCRef.Namespace != pod.Namespace || v.UsedBytes == nil || !fresh(v.Time, now) {
+				continue
+			}
+			// Do not invent a simultaneous total from independently timed peaks.
+			if !at.IsZero() && !v.Time.Equal(at) {
+				return nil, time.Time{}
+			}
+			add(&used, unsigned(*v.UsedBytes, saturated), saturated)
+			at = v.Time
+			found = true
+			break
+		}
+		if !found {
+			return nil, time.Time{}
+		}
+		seen[claim] = true
+	}
+	return used, at
 }

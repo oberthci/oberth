@@ -1,6 +1,7 @@
 package store
 
 const resourceUsageMigrationVersion = 36
+const containerResourceUsageMigrationVersion = 37
 const resourceUsageSchema = `
 CREATE TABLE step_resource_usage (
  run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,

@@ -97,3 +97,100 @@ they exclude Pod scheduling, PVC provisioning and source archive delivery.
 Production uses the existing Go exec client rather than kubectl processes;
 network latency, remote PVC storage and CPU contention can change the cost.
 Run the shipped harness from tuxbox's server network to measure that deployment.
+
+## External sampler coverage (#1216)
+
+The opt-in kubelet/cAdvisor sampler records each current container incarnation
+in verified Workflow step Pods: ordinary app/sidecar containers (including Argo
+`wait` and mainless ContainerSets), ordinary/restartable init helpers, and
+ephemeral containers. CPU cumulative time/interval peak, memory current/high-water
+peak and filesystem IO counters retain full Pod UID/runtime container ID/cgroup
+binding and timestamp freshness checks. Termination messages and progress
+telemetry never supply these observations or admission evidence.
+
+Kubernetes creation, kubelet pod start, container start/finish and fully known
+terminal pod finish times accompany the observations. Timing-only running rows
+can survive a failed scrape with zero metric samples. A final killed observation
+merges without erasing earlier measurements. Missing start/finish times and
+unobserved/garbage-collected incarnations remain unknown.
+
+For workflows declaring VM resources, two additional bounded inventories can
+bind a launcher through Workflow controller UID -> VMI UID -> launcher controller
+UID. The VMI operation annotation must bind its original resource step Pod UID.
+All launcher containers use the same cgroup checks. These are launcher totals
+(including QEMU/guest consumption), not a measurement of guest versus hypervisor
+cost. Missing original resource Pods/VMIs leave that binding unknown.
+
+The existing `/stats/summary` response adds these optional storage/pod scopes:
+
+- Per-container writable-rootfs and log used-byte peaks, accepted only when the
+  summary container start matches the current Kubernetes incarnation.
+- Pod cgroup CPU interval-rate and memory-usage peaks, including pod overhead;
+  they are measured directly, never a sum of independent container peaks.
+- Existing pod ephemeral-storage and IO PSI counters.
+- Pod PVC used-byte peaks: a sampled sum over distinct referenced PVCs only when
+  every claim has fresh matching summary volume stats with equal source times. Incomplete/unsupported
+  stats stay null. Shared claims must not be added across Pods. Differently timed claim stats remain unknown rather than a synthetic simultaneous total. This is mounted
+  filesystem usage, not per-run attribution on a shared filesystem.
+
+The read-only, repository-authorized MCP call remains:
+
+```json
+{"name":"repo_usage","arguments":{"repo":"oberth","burn":"checks","step":"test","limit":1000}}
+```
+
+It returns the existing main-only `steps` and separate `containers`, deduplicated
+`pods`, and `overlap` summaries. Container and pod metrics report known-value
+count/p50/p95/max; p95 is across incarnation/pod peaks, not time samples.
+`overlap.per_run_peak_pods` reports quantiles of each run's maximum overlapping
+kubelet pod lifetimes in the selected rows. Intervals are half-open; unknown
+finishes end at the last observed running container or a known container finish,
+not at the report's current time. Missing timing is excluded and counted through
+`pods`/`timed_pods`; `open_pods` lacks a fully known pod finish. Raw timing fields
+also appear in the existing `run_get` measured observations. Resource peaks are
+not summed to invent simultaneous whole-run demand. Filters/truncation can make
+both the overlap and usage population incomplete; coverage is never claimed.
+
+The source cannot separate guest/hypervisor memory or CPU, inspect guest files,
+measure raw block-volume used space, attribute shared PVC use to a run, or recover
+missed peaks/GC'd containers. Platform Pods, independent source-seed/artifact
+helpers outside Workflow supervision and CDI importer Pods without the verified
+step/VMI chain are outside this collector. They still need separate observations;
+stage 2 remains blocked on representative, complete coverage.
+
+Collection overhead is bounded: default 15s (existing configurable 1–30s), two
+shared node HTTP GETs per interval, each at most 16 MiB; at most 32 configured
+nodes, two concurrent fills, four seconds per fill and five seconds per run
+sampling pass. New scopes add no kubelet requests. A shared immutable index
+covers at most 65,536 retained metric lines and 4,096 summary Pods, avoiding a
+whole-node metric scan per container. Each pass reads at most 2,048 Workflow
+Pods; VM workflows additionally read at most 2,048 VMIs and 2,048 launcher Pods.
+Pagination is deliberately not followed; coverage can be incomplete. Pods with
+more than 128 declared containers or container statuses are excluded; container/volume storage lookups also cap each relevant list at 128; a pass visits at most 4,096
+container candidates and writes batches of at most 256. Index/observation cost
+and extra VM API reads are the added overhead; production CPU/RSS/IO cost has
+not been qualified on tuxbox.
+
+Storage remains one upserted JSON row per run/node/Pod UID/runtime container ID,
+not one row per poll. Existing incarnations remain updatable at the 4,096-row
+per-run cap; additional incarnations are omitted, so population coverage remains
+unknown. JSON is capped at 8 KiB: at most 32 MiB observation payload per retained
+run, excluding keys/indexes/SQLite WAL. Timing updates may write every pass even
+with cached/unavailable metrics. Run deletion cascades; this adds no retention
+sweeper. Reports read 1,000/default–5,000/max rows, return at most 128 groups in
+each of `steps`, `containers` and `pods` with separate truncation flags; run views
+remain capped at 256 observations. More containers consume those existing caps.
+
+Schema 37 is a format guard (`SELECT 1` migration); table/index definitions are
+unchanged. New JSON observations use version 2; version-1 main rows remain
+readable and upgrade on observation without duplication. Older binaries reject
+version-2/non-main rows, so schema 37 prevents opening them. The migration applies
+even with sampling disabled and follows the existing forward-only backup/restore
+contract. No admission, authored requests, limits, weights or workload specs are
+changed. Low/unknown/OOM-censored observations cannot authorize smaller resources.
+
+The optional storage field shapes and pod-cgroup scope follow the pinned
+[Kubernetes v1.36.5 summary API](https://github.com/kubernetes/kubelet/blob/v0.36.5/pkg/apis/stats/v1alpha1/types.go).
+Availability depends on the runtime/volume driver; the
+[CRI stats provider](https://github.com/kubernetes/kubernetes/blob/v1.36.5/pkg/kubelet/stats/cri_stats_provider.go)
+can omit statistics it cannot obtain. No new dependency on these packages is added.
