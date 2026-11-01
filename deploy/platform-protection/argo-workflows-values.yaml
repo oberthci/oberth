@@ -1,0 +1,11 @@
+# Opt in explicitly on the separate argo-workflows chart 1.0.24 release.
+# These names assume Oberth release=oberth, namespace=oberth. Adjust together
+# with the rendered PriorityClasses for any other release/namespace.
+controller:
+  priorityClassName: oberth-oberth-platform-argo-controller
+  resources:
+    # 2026-11-01 idle sample: 12m / 89Mi. Margins: 2.08x / 1.44x.
+    # Initial requests only; UNMEASURED UNDER LOAD. No new CPU/memory limits.
+    requests:
+      cpu: 25m
+      memory: 128Mi

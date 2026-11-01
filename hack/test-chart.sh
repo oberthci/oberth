@@ -13,6 +13,7 @@ render() {
 
 # Also gate upgrades from the actual previous released values shape (#1207).
 "$(dirname -- "$0")/test-chart-upgrade.sh" "$chart"
+"$(dirname -- "$0")/test-platform-protection.sh" "$chart"
 
 helm lint "$chart" \
   --set "image.ref=$server_image" >/dev/null

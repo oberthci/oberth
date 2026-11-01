@@ -32,6 +32,13 @@ runnerImagePrefixes:
 replicaCount: 1
 maxConcurrentJobs: 3
 
+# Opt-in platform priority. Creates release/namespace-specific PriorityClasses
+# and assigns only the Oberth and cloudflared pod templates. Argo and OpenBao
+# are separate releases: see docs/platform-protection.md for their overlays.
+# Requests in those overlays are based on one idle sample, unmeasured under load.
+platformProtection:
+  enabled: false
+
 # Per-client API limits with headroom for eight concurrent jobs and trusted
 # preflight pod polling. Admission retries read failures without exiting.
 # Either key may be set independently; omitted qps/burst default to 50/100.

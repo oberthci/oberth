@@ -83,6 +83,7 @@ func trustedKVMBuilt(t *testing.T) (Config, Request, *wfv1.Workflow, *wfv1.Templ
 }
 func TestTrustedKVMBuildClosedLeafAndWrapper(t *testing.T) {
 	config, request, wf, leaf := trustedKVMBuilt(t)
+	assertOrdinaryWorkflowPriority(t, wf)
 	if wf.Spec.Entrypoint != trustedKVMWrapper || len(leaf.Container.VolumeMounts) != 2 || leaf.Container.Image != request.TrustedKVM.Recipe.HarnessImage || leaf.Container.WorkingDir != "/trusted" {
 		t.Fatalf("unexpected leaf: %#v", leaf)
 	}
@@ -241,6 +242,9 @@ func trustedKVMObservedFixture(t *testing.T) (Config, Request, *wfv1.Workflow, *
 }
 func TestTrustedKVMObserverMaterializationAndAttacks(t *testing.T) {
 	config, request, wf, pod := trustedKVMObservedFixture(t)
+	if pod.Spec.PriorityClassName != "" || pod.Spec.Priority != nil {
+		t.Fatal("the trusted CI pod received a priority override")
+	}
 	controller, err := NewController(&staticWorkflowClient{workflow: wf}, trustedControllerClient(pod), config)
 	if err != nil {
 		t.Fatal(err)

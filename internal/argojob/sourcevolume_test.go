@@ -215,6 +215,9 @@ func TestSeedPodHoldsNoServiceAccountToken(t *testing.T) {
 	if created.Spec.AutomountServiceAccountToken == nil || *created.Spec.AutomountServiceAccountToken {
 		t.Fatal("the seed pod mounts a ServiceAccount token")
 	}
+	if created.Spec.PriorityClassName != "" || created.Spec.Priority != nil {
+		t.Fatal("the CI seed pod received a priority override")
+	}
 	container := created.Spec.Containers[0]
 	if container.SecurityContext == nil || container.SecurityContext.ReadOnlyRootFilesystem == nil ||
 		!*container.SecurityContext.ReadOnlyRootFilesystem {

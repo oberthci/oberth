@@ -93,6 +93,7 @@ func TestOberthBuildPipelineIsAdmissible(t *testing.T) {
 	if built.Spec.ServiceAccountName != testPipelineAcct {
 		t.Fatalf("ServiceAccount = %q, want %q", built.Spec.ServiceAccountName, testPipelineAcct)
 	}
+	assertOrdinaryWorkflowPriority(t, built)
 	if built.Spec.AutomountServiceAccountToken == nil || *built.Spec.AutomountServiceAccountToken {
 		t.Fatal("the CI pipeline automounts a ServiceAccount token")
 	}
@@ -167,6 +168,7 @@ func TestOberthReleasePipelineIsAdmissible(t *testing.T) {
 	if built.Spec.ServiceAccountName != "oberth-per-repo" {
 		t.Fatalf("ServiceAccount = %q, want %q", built.Spec.ServiceAccountName, testCredentialedAcct)
 	}
+	assertOrdinaryWorkflowPriority(t, built)
 	if built.Spec.AutomountServiceAccountToken == nil || *built.Spec.AutomountServiceAccountToken {
 		t.Fatal("the WIF release pipeline must disable ambient ServiceAccount tokens")
 	}

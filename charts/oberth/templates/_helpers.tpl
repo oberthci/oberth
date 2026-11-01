@@ -32,6 +32,13 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{ include "oberth.fullname" . }}
 {{- end }}
 
+{{- /* PriorityClasses are cluster-scoped. Include both namespace and release
+identity; do not truncate away the component or collide across installations.
+The resulting DNS subdomain fits the 253-character object-name limit. */ -}}
+{{- define "oberth.platformPriorityClass" -}}
+{{- printf "%s-%s-platform-%s" .root.Release.Namespace (include "oberth.fullname" .root) .component -}}
+{{- end }}
+
 {{- define "oberth.pvcName" -}}
 {{- if .Values.persistence.existingClaim -}}
 {{ .Values.persistence.existingClaim }}

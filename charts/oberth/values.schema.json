@@ -21,6 +21,14 @@
     "compatibility"
   ],
   "properties": {
+    "platformProtection": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {"type": "boolean", "default": false}
+      },
+      "description": "Opt-in platform PriorityClasses; external Argo/OpenBao releases require their own values overlays."
+    },
     "gitBackend": {
       "type": "string",
       "enum": ["cli"],

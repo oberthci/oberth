@@ -107,6 +107,9 @@ spec:
         {{- toYaml . | nindent 8 }}
         {{- end }}
     spec:
+      {{- if (.Values.platformProtection | default dict).enabled }}
+      priorityClassName: {{ include "oberth.platformPriorityClass" (dict "root" . "component" "oberth") }}
+      {{- end }}
       serviceAccountName: {{ include "oberth.serviceAccountName" . }}
       automountServiceAccountToken: true
       # SIGTERM drains HTTP/MCP (15s), lets scheduler observers finalize

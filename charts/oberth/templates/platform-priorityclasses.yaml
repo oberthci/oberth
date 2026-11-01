@@ -1,0 +1,16 @@
+{{- if (.Values.platformProtection | default dict).enabled }}
+{{- range $component := list "oberth" "cloudflared" "argo-controller" "openbao" }}
+---
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: {{ include "oberth.platformPriorityClass" (dict "root" $ "component" $component) }}
+  labels:
+    {{- include "oberth.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: {{ $component }}
+value: 1000000
+globalDefault: false
+preemptionPolicy: PreemptLowerPriority
+description: {{ printf "Oberth platform recovery priority for %s; never assign to CI workloads." $component | quote }}
+{{- end }}
+{{- end }}
