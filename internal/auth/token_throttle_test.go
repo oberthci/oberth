@@ -8,11 +8,13 @@ import (
 	"errors"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/internal/testtimeout"
 )
 
 type countingTouchRepository struct {
@@ -20,9 +22,9 @@ type countingTouchRepository struct {
 	touches, lookups int
 }
 
-func (r *countingTouchRepository) TouchTokenCredential(ctx context.Context, id string) error {
+func (r *countingTouchRepository) RecordTokenCredentialUse(ctx context.Context, id string) {
 	r.touches++
-	return r.Store.TouchTokenCredential(ctx, id)
+	r.Store.RecordTokenCredentialUse(ctx, id)
 }
 func (r *countingTouchRepository) AuthenticatedUplinkByDigest(ctx context.Context, digest []byte) (model.AuthenticatedUplink, error) {
 	r.lookups++
@@ -31,8 +33,11 @@ func (r *countingTouchRepository) AuthenticatedUplinkByDigest(ctx context.Contex
 
 func TestTokenUseThrottleSkipsWriterButReadsRevocationEveryTime(t *testing.T) {
 	now := time.Now().UTC()
+	var clock atomic.Int64
+	clock.Store(now.UnixNano())
+	readClock := func() time.Time { return time.Unix(0, clock.Load()).UTC() }
 	path := filepath.Join(t.TempDir(), "token.sqlite")
-	db, err := store.Open(t.Context(), path, store.Options{Now: func() time.Time { return now }})
+	db, err := store.Open(t.Context(), path, store.Options{Now: readClock})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -47,14 +52,33 @@ func TestTokenUseThrottleSkipsWriterButReadsRevocationEveryTime(t *testing.T) {
 		t.Fatal(err)
 	}
 	plaintext := strings.TrimSpace(out.String())
+	digest := sha256.Sum256([]byte(plaintext))
+	waitForUse := func() {
+		t.Helper()
+		deadline := time.Now().Add(testtimeout.Start(2 * time.Second))
+		for {
+			readback, err := db.TokenCredentialByDigest(t.Context(), digest[:])
+			if err != nil {
+				t.Fatal(err)
+			}
+			if readback.LastUsedAt != nil && readback.LastUsedAt.Equal(now) {
+				return
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("due use not recorded: %+v", readback)
+			}
+			time.Sleep(time.Millisecond)
+		}
+	}
 	repository := &countingTouchRepository{Store: db}
-	auth := Authenticator{Tokens: repository, Now: func() time.Time { return now }}
+	auth := Authenticator{Tokens: repository, Now: readClock}
 	if _, err := auth.Authenticate(t.Context(), plaintext); err != nil {
 		t.Fatal(err)
 	}
 	if repository.touches != 1 {
-		t.Fatal("first use was not recorded")
+		t.Fatal("first use was not queued")
 	}
+	waitForUse()
 	raw, err := sql.Open("sqlite", path)
 	if err != nil {
 		t.Fatal(err)
@@ -69,7 +93,7 @@ func TestTokenUseThrottleSkipsWriterButReadsRevocationEveryTime(t *testing.T) {
 		t.Fatal(err)
 	}
 	// A fresh token identity snapshot still succeeds while a different writer
-	// holds the DB. Neither a hot token nor a token at59s needs the writer.
+	// holds the DB. Neither a hot token nor a token at 59s queues an update.
 	for range 4 {
 		ctx, cancel := context.WithTimeout(t.Context(), 200*time.Millisecond)
 		_, err := auth.Authenticate(ctx, plaintext)
@@ -79,6 +103,7 @@ func TestTokenUseThrottleSkipsWriterButReadsRevocationEveryTime(t *testing.T) {
 		}
 	}
 	now = now.Add(59 * time.Second)
+	clock.Store(now.UnixNano())
 	if _, err := auth.Authenticate(t.Context(), plaintext); err != nil {
 		t.Fatal(err)
 	}
@@ -86,11 +111,12 @@ func TestTokenUseThrottleSkipsWriterButReadsRevocationEveryTime(t *testing.T) {
 		t.Fatalf("throttle cached authority or touched: %+v", repository)
 	}
 	now = now.Add(time.Second)
+	clock.Store(now.UnixNano())
 	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Millisecond)
 	_, err = auth.Authenticate(ctx, plaintext)
 	cancel()
-	if !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("due touch ignored writer/deadline: %v", err)
+	if err != nil || repository.touches != 2 {
+		t.Fatalf("due telemetry blocked authentication or was not queued: %v touches=%d", err, repository.touches)
 	}
 	if err := tx.Rollback(); err != nil {
 		t.Fatal(err)
@@ -98,11 +124,7 @@ func TestTokenUseThrottleSkipsWriterButReadsRevocationEveryTime(t *testing.T) {
 	if _, err := auth.Authenticate(t.Context(), plaintext); err != nil {
 		t.Fatal(err)
 	}
-	digest := sha256.Sum256([]byte(plaintext))
-	readback, err := db.TokenCredentialByDigest(t.Context(), digest[:])
-	if err != nil || readback.LastUsedAt == nil || !readback.LastUsedAt.Equal(now) {
-		t.Fatalf("due use not recorded: %+v %v", readback, err)
-	}
+	waitForUse()
 	if err := db.RevokeTokenCredential(t.Context(), token.ID); err != nil {
 		t.Fatal(err)
 	}

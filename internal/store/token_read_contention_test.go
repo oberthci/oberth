@@ -7,9 +7,8 @@ import (
 	"time"
 )
 
-// Bearer authentication has a hidden write dependency even though its identity
-// and scope lookup uses WAL readers. Keep this regression as evidence for the
-// HTTP authentication budget; it must not be "fixed" by ignoring revocation.
+// Direct token touches still wait for the writer. Bearer authentication queues
+// these as optional telemetry after reading fresh identity and scope via WAL.
 func TestBearerIdentityReadIsIndependentButTokenTouchWaitsForWriter(t *testing.T) {
 	s, uplink := authReaderFixture(t)
 	tx, err := s.db.BeginTx(t.Context(), nil)

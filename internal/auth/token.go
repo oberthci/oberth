@@ -24,7 +24,7 @@ type TokenRepository interface {
 	CreateTokenCredential(context.Context, model.TokenCredentialSpec) (model.TokenCredential, error)
 	ActivateTokenCredential(context.Context, string) (model.TokenCredential, error)
 	AuthenticatedUplinkByDigest(context.Context, []byte) (model.AuthenticatedUplink, error)
-	TouchTokenCredential(context.Context, string) error
+	RecordTokenCredentialUse(context.Context, string)
 }
 
 type Issuer struct {
@@ -104,16 +104,12 @@ func (a Authenticator) Authenticate(ctx context.Context, plaintext string) (mode
 		now = a.Now()
 	}
 	// Authority and revocation above are always freshly read. Last-used is
-	// telemetry, so a recent committed timestamp needs no writer connection.
+	// best-effort telemetry; neither a writer slot nor a commit belongs on
+	// the authentication path, even on first use or after the interval expires.
 	if credential.LastUsedAt != nil && now.Sub(*credential.LastUsedAt) < store.TokenCredentialTouchInterval {
 		return authenticated, nil
 	}
-	if err := a.Tokens.TouchTokenCredential(ctx, credential.ID); err != nil {
-		if errors.Is(err, store.ErrNotFound) {
-			return model.AuthenticatedUplink{}, ErrInvalidToken
-		}
-		return model.AuthenticatedUplink{}, fmt.Errorf("auth: record token use: %w", err)
-	}
+	a.Tokens.RecordTokenCredentialUse(ctx, credential.ID)
 	return authenticated, nil
 }
 

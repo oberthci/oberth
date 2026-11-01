@@ -14,6 +14,14 @@ Opening readers uses the filename resolved at startup, without querying the
 writer again. Private immutable inspection handles retain their existing
 connection policy.
 
+Bearer authentication reads current identity, scope and revocation before
+enqueueing any due token-use timestamp update. One Store-owned background worker
+performs those conditional updates on the serialized writer. Its bounded queue
+holds at most 64 pending entries and drops telemetry under saturation or during
+shutdown. The timestamp is best-effort; no authentication request waits for its
+write, including first use and the one-minute refresh boundary. Store close
+cancels and joins the worker before closing SQLite.
+
 The primary still performs startup PRAGMAs, migrations and schema/protocol
 validation. `UPDATE`/`INSERT ... RETURNING` statements are writes, even though
 Go executes them with `QueryRowContext`. Audit mutation fences deliberately

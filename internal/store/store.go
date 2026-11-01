@@ -76,6 +76,9 @@ type Store struct {
 	done            bool
 	readOnly        bool
 	cleanup         func() error
+	tokenUses       chan string // bounded best-effort telemetry; lifecycle protected by mu
+	stopTokenUses   context.CancelFunc
+	tokenUsesDone   chan struct{}
 
 	liveReaderDSN   string // immutable after startup; shared live WAL reader settings
 	liveBusyTimeout time.Duration
@@ -1087,9 +1090,16 @@ func (s *Store) Close() error {
 		return nil
 	}
 	s.done = true
+	if s.stopTokenUses != nil {
+		s.stopTokenUses()
+	}
+	tokenUsesDone := s.tokenUsesDone
 	// Claim shutdown once, then let active database operations finish without
 	// holding the Store mutex across connection closes or the WAL checkpoint.
 	s.mu.Unlock()
+	if tokenUsesDone != nil {
+		<-tokenUsesDone
+	}
 	var authErr, idleErr, readErr, auditReadErr, readinessErr error
 	if s.authDB != nil {
 		authErr = s.authDB.Close()
