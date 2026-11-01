@@ -564,8 +564,6 @@ async function renderRuns(seq) {
         <div class="toolbar runs-toolbar">
           ${runFilters.map(f => `<button class="chip ${state.filter === f ? "on" : ""}" data-status-filter="${esc(f)}">${esc(f)}</button>`).join("")}
           <button class="chip ${state.releaseOnly ? "on" : ""}" data-kind-filter="release" aria-pressed="${state.releaseOnly}">release</button>
-          <span class="count">${source.length} branches/tags · page ${page}${state.filter === "all" && !state.releaseOnly ? "" : ` · ${visible.length} match this page`}</span>
-          <span class="meta">Latest run for each branch or tag</span>
         </div>
       <aside class="repo-side" aria-label="Repositories and retained run counts">
         <div class="repo-filter-row"><button class="repo-filter ${state.repo === "all" ? "on" : ""}" data-repo-filter="all"><span class="name">All repos</span><span class="count">${esc(counts.get("all") || 0)} runs</span></button></div>
@@ -576,10 +574,13 @@ async function renderRuns(seq) {
       </aside>
       <section>
         ${visible.length ? runsTable(visible) : `<div class="empty">No runs match the current filters.</div>`}
-        ${page > 1 || state.runNext ? `<div class="issue-pager">
-          <button type="button" data-action="runs-newer" ${page > 1 ? "" : "disabled"}>‹ newer</button>
-          <button type="button" data-action="runs-older" ${state.runNext ? "" : "disabled"}>older ›</button>
-        </div>` : ""}
+        <div class="runs-footer">
+          <span class="meta">Latest run for each branch or tag · ${source.length} branches/tags · page ${page}${state.filter === "all" && !state.releaseOnly ? "" : ` · ${visible.length} match this page`}</span>
+          ${page > 1 || state.runNext ? `<div class="issue-pager">
+            <button type="button" data-action="runs-newer" ${page > 1 ? "" : "disabled"}>‹ newer</button>
+            <button type="button" data-action="runs-older" ${state.runNext ? "" : "disabled"}>older ›</button>
+          </div>` : ""}
+        </div>
       </section>
     </div>
   </section>`);
