@@ -17,40 +17,54 @@ const shell = serverSource.match(/io.WriteString\(writer, `(<\!doctype html>.*?)
   .replaceAll('`+view+`', 'runs');
 const now = Date.now();
 const makeRun = (ID, extra = {}) => ({ID, RepoID: 1, Ref: 'main', RefKind: 'branch', Status: 'passed', SHA: 'abc123456789', Actor: 'fixture', Trigger: 'push', QueuedAt: new Date(now-90000).toISOString(), StartedAt: new Date(now-80000).toISOString(), FinishedAt: new Date(now-20000).toISOString(), ...extra});
-const heads = [makeRun('head-main', {earlier_attempts: 3}), makeRun('head-tag', {Ref:'v1', RefKind:'tag', Release:true, Credentialed:true}), makeRun('head-branch', {Ref:'v1', Status:'failed'}), makeRun('head-queued', {RepoID:2, Status:'queued', StartedAt:null, FinishedAt:null}), makeRun('head-superseded', {Ref:'retired', Status:'interrupted', SupersededBy:'head-main'})];
+const heads = [makeRun('head-main', {earlier_attempts: 3}), makeRun('head-tag', {Ref:'v1', RefKind:'tag', Release:true, Credentialed:true}), makeRun('head-branch', {Ref:'v1', Status:'failed'}), makeRun('head-queued', {RepoID:2, Status:'queued', StartedAt:null, FinishedAt:null}), makeRun('head-retry', {Ref:'feature', Status:'queued', StartedAt:null, FinishedAt:null, auto_retry_of:'retry-failed'})];
 const older = makeRun('old-failed', {Status:'failed', Error:'fixture failure'});
 const superseded = makeRun('old-superseded', {Status:'interrupted', SupersededBy:'head-main'});
 const oldest = makeRun('oldest');
+const scheduled = makeRun('scheduled-running', {Status:'running', Trigger:'schedule', ScheduleEntry:'nightly', FinishedAt:null});
+const scheduledQueued = makeRun('scheduled-queued', {Status:'queued', Trigger:'schedule', ScheduleEntry:'daily', StartedAt:null, FinishedAt:null});
+const nightlyFailed = makeRun('nightly-failed', {Status:'failed', Trigger:'schedule', ScheduleEntry:'nightly', Error:'nightly failed before a newer successful push'});
+const retried = makeRun('retry-failed', {Ref:'feature', Status:'failed', auto_retried_by:'head-retry'});
+const active = [scheduled, scheduledQueued, heads[3], heads[4]];
+const flat = [...heads, older, superseded, oldest, nightlyFailed, retried, scheduled, scheduledQueued];
 const repos = [{ID:1, Name:'oberth', UpstreamID:1}, {ID:2, Name:'example', UpstreamID:1}, {ID:3, Name:'work-laptop-identities', UpstreamID:1}];
 const status = {version:'test-fixture', upstream_info:[{id:1,name:'github',base_url:'https://example.test/org'}]};
 const requests = [];
-let baseline = false, paging = false, historyError = false;
+let baseline = false, paging = false, historyError = false, sharedNames = false, delayStatus = false, releaseStatus;
 const server = createServer((req, res) => {
   const url = new URL(req.url, 'http://localhost');
   requests.push(url.pathname + url.search);
   const json = (body, next) => {res.writeHead(200, {'Content-Type':'application/json', ...(next ? {'X-Oberth-Next-Before':next} : {})}); res.end(JSON.stringify(body));};
   if (url.pathname.startsWith('/api/')) assert.equal(req.headers.authorization, 'Bearer fixture-token');
-  if (url.pathname === '/api/repos') return json(repos);
-  if (url.pathname === '/api/status') return json(status);
-  if (url.pathname === '/api/runs/counts') return json({Total:8, ByRepo:{1:7,2:1,3:0}});
+  if (url.pathname === '/api/repos') return json(sharedNames ? [repos[0], {ID:4,Name:'oberth',UpstreamID:2}] : repos);
+  if (url.pathname === '/api/status') {
+    const value = sharedNames ? {...status, upstream_info:[...status.upstream_info, {id:2,name:'codeberg',base_url:'https://example.test/team'}]} : status;
+    if (delayStatus) {releaseStatus = () => json(value); return;}
+    return json(value);
+  }
+  if (url.pathname === '/api/runs/counts') return json({Total:12, ByRepo:{1:11,2:1,3:0}});
   if (url.pathname === '/api/runs') {
+    if (url.searchParams.get('view') === 'active') {
+      assert.ok(!url.searchParams.has('before') && !url.searchParams.has('latest_per_ref'));
+      return json(active.filter(run => !url.searchParams.has('repo') || `github/org/${repos.find(repo=>repo.ID===run.RepoID)?.Name}` === url.searchParams.get('repo')));
+    }
     if (url.searchParams.has('ref')) {
+      if (sharedNames && !url.searchParams.get('repo')?.includes('/')) {res.writeHead(409, {'Content-Type':'application/json'}); return res.end(JSON.stringify({error:'ambiguous repository'}));}
       if (historyError) {res.writeHead(503, {'Content-Type':'application/json'}); return res.end(JSON.stringify({error:'fixture history unavailable'}));}
       if (url.searchParams.has('before')) return json([older, oldest]);
       return json([heads[0], older, superseded, makeRun('same-name-tag',{RefKind:'tag'}), makeRun('other-repo',{RepoID:2}), makeRun('other-ref',{Ref:'elsewhere'})], 'opaque-history-cursor');
     }
     if (paging) {
-      assert.equal(url.searchParams.get('latest_per_ref'), '1');
       if (url.searchParams.has('before')) return json([makeRun('page-two', {Ref:'old-branch'})]);
       return json(Array.from({length:100}, (_,i)=>makeRun(`page-one-${i}`, {Ref:`branch-${i}`})), 'opaque-list-cursor');
     }
-    let rows = heads;
+    let rows = url.searchParams.has('latest_per_ref') ? heads : flat;
     if (url.searchParams.has('repo')) rows = rows.filter(run => run.RepoID === repos.find(repo => `github/org/${repo.Name}` === url.searchParams.get('repo'))?.ID);
     return json(rows);
   }
   if (url.pathname.startsWith('/api/runs/')) {
     const id = decodeURIComponent(url.pathname.split('/')[3]);
-    const Run = [...heads, older, superseded, oldest].find(run => run.ID === id);
+    const Run = flat.find(run => run.ID === id);
     return json({Run, Steps:[{Burn:'ci',Step:'publish',Ordinal:2,Status:'passed',Secrets:true,StartedAt:new Date(now-40000).toISOString(),FinishedAt:new Date(now-20000).toISOString()}, {Burn:'ci',Step:'test',Ordinal:1,Status:'passed',StartedAt:new Date(now-60000).toISOString(),FinishedAt:new Date(now-40000).toISOString()}]});
   }
   if (url.pathname === '/assets/app.js' || url.pathname === '/assets/app.css') {
@@ -97,13 +111,29 @@ try {
     baseline = false;
     await page.goto(`${origin}/runs`);
     await page.locator('.runs-table').waitFor();
-    assert.equal(await page.locator('.runs-table > [data-run-id]').count(), heads.length);
+    assert.equal(await page.locator('.runs-table > [data-run-id]').count(), heads.length + 2);
     assert.equal(await page.locator('[data-action="toggle-attempts"],[data-action="toggle-collapse-runs"],[data-action="toggle-superseded"]').count(), 0);
-    assert.equal(await page.locator('[data-repo-filter="github/org/work-laptop-identities"] .count').textContent(), '0 runs');
+    assert.equal(await page.locator('[data-repo-filter="github/org/work-laptop-identities"] .count').textContent(), '0');
+    assert.equal(await page.locator('[data-repo-filter="github/org/work-laptop-identities"] .count').getAttribute('aria-label'), '0 retained runs');
+    assert.equal(await page.locator('[data-repo-filter="github/org/example"] .count').getAttribute('title'), '1 retained run');
+    assert.equal(await page.locator('[data-repo-filter="github/org/work-laptop-identities"] .name').evaluate(el=>el.scrollWidth<=el.clientWidth), true, 'long repository name is fully visible');
+    assert.equal(await page.locator('.runs-table > [data-run-id="scheduled-running"]').count(), 1);
+    assert.equal(await page.locator('.runs-table > [data-run-id="head-queued"]').count(), 1);
+    assert.ok(!(await page.locator('.runs-toolbar').textContent()).includes('Latest run'));
+    assert.ok((await page.locator('.runs-footer').textContent()).includes('all active runs included'));
     const layout = await page.evaluate(() => ({side:document.querySelector('.repo-side').getBoundingClientRect().top,table:document.querySelector('.runs-table').getBoundingClientRect().top,screen:document.querySelector('.screen').getBoundingClientRect().width,viewport:innerWidth,sideRight:document.querySelector('.repo-side').getBoundingClientRect().right,tableRight:document.querySelector('.runs-table').getBoundingClientRect().right,filterRight:Math.max(...[...document.querySelectorAll('.runs-toolbar button')].map(button=>button.getBoundingClientRect().right))}));
     if (width > 980) assert.equal(layout.side, layout.table, `sidebar/table alignment at ${width}`);
     assert.ok(layout.screen <= width && layout.sideRight <= width && layout.tableRight <= width && layout.filterRight <= width, `list, repository counts and every filter fit ${width}px: ${JSON.stringify(layout)}`);
     await capture('after-runs');
+    for (const [filter, id] of [['failed','nightly-failed'],['superseded','old-superseded'],['infra-retried','retry-failed'],['running','scheduled-running']]) {
+      const start = requests.length;
+      await page.locator(`[data-status-filter="${filter}"]`).click();
+      await page.locator(`.runs-table > [data-run-id="${id}"]`).waitFor();
+      assert.ok(requests.slice(start).some(path=>path.startsWith('/api/runs?')&&!path.includes('view=active')&&!path.includes('latest_per_ref')));
+      assert.ok((await page.locator('.runs-footer').textContent()).includes('All retained runs'));
+    }
+    await page.locator('[data-status-filter="all"]').click();
+    await page.locator('.runs-table > [data-run-id="head-main"]').waitFor();
     await page.locator('[data-kind-filter="release"]').click();
     await page.waitForFunction(() => document.querySelectorAll('.runs-table > [data-run-id]').length === 1);
     assert.equal(await page.locator('.runs-table > [data-run-id]').getAttribute('data-run-id'), 'head-tag');
@@ -126,7 +156,21 @@ try {
     await page.locator('#runHistory [data-run-id="oldest"]').waitFor();
     assert.equal(await page.locator('#runHistory .runs-table > [data-run-id]').count(), 3);
     assert.ok(requests.some(path => path.includes('before=opaque-history-cursor')));
+    await page.evaluate(() => {
+      window.historyToggle = document.querySelector('#runHistory [data-action="toggle-attempts"]');
+      window.historyTable = document.querySelector('#runHistory .runs-table');
+      historyToggle.focus(); historyTable.scrollLeft = 140; window.historyLeft = historyTable.scrollLeft;
+      return route(true);
+    });
+    await page.waitForFunction(()=>!state.attempts.get('head-main').refreshing);
+    assert.equal(await page.evaluate(()=>document.activeElement===historyToggle && historyToggle.isConnected && historyTable===document.querySelector('#runHistory .runs-table') && historyTable.scrollLeft===historyLeft), true, 'unchanged poll preserves history nodes, focus and scroll');
+    older.Status = 'passed';
+    await page.evaluate(()=>route(true));
+    await page.waitForFunction(()=>document.querySelector('#runHistory .trow[data-run-id="old-failed"] .pill').textContent.trim()==='passed');
+    assert.equal(await page.evaluate(()=>document.activeElement===document.querySelector('#runHistory [data-action="toggle-attempts"]') && document.querySelector('#runHistory .runs-table').scrollLeft===historyLeft), true, 'changed poll refreshes status and restores focus/scroll');
+    older.Status = 'failed';
     await page.locator('[data-action="refresh"]').click();
+    await page.waitForFunction(()=>document.querySelector('#runHistory .trow[data-run-id="old-failed"] .pill').textContent.trim()==='failed');
     await page.locator('#runHistory [data-run-id="oldest"]').waitFor();
     assert.equal(await page.locator('#stepList .tag').textContent(), 'secret');
     const detailLayout = await page.evaluate(() => ({width:document.querySelector('.screen').getBoundingClientRect().width, viewport:innerWidth, rows:document.querySelector('#runHistory .runs-table').getBoundingClientRect().width}));
@@ -161,12 +205,34 @@ try {
   await page.goto(`${origin}/runs`);
   await page.locator('[data-action="runs-older"]').click();
   await page.locator('[data-run-id="page-two"]').waitFor();
+  assert.equal(await page.locator('.runs-table > [data-run-id="scheduled-running"]').count(),1,'page two keeps an active scheduled run hidden by its newer push');
+  assert.equal(await page.locator('.runs-table > [data-run-id="head-queued"]').count(),1,'page two keeps active heads from page one');
   assert.ok(requests.some(path => path.includes('before=opaque-list-cursor') && path.includes('latest_per_ref=1')));
   await page.locator('[data-action="runs-newer"]').click();
   await page.locator('[data-run-id="page-one-0"]').waitFor();
-  assert.equal(await page.locator('.runs-table > [data-run-id]').count(), 100);
+  assert.equal(await page.locator('.runs-table > [data-run-id]').count(), 100 + active.length);
+  await page.locator('[data-action="runs-older"]').click();
+  await page.locator('[data-run-id="page-two"]').waitFor();
+  const filterStart = requests.length;
+  await page.locator('[data-status-filter="running"]').click();
+  await page.locator('[data-status-filter="running"].on').waitFor();
+  await page.locator('.runs-table > [data-run-id="scheduled-running"]').waitFor();
+  assert.ok(requests.slice(filterStart).some(path=>path.startsWith('/api/runs?')&&!path.includes('view=active')&&!path.includes('latest_per_ref')&&!path.includes('before=')),'changing status on page two resets to the flat first page');
+  paging = false; sharedNames = true; delayStatus = true;
+  const direct = await browser.newPage();
+  await direct.addInitScript(()=>localStorage.setItem('oberth-token','fixture-token'));
+  await direct.goto(`${origin}/runs/head-main`);
+  await direct.locator('[data-detail-run="head-main"]').waitFor();
+  const historyStart = requests.length;
+  await direct.locator('[data-action="toggle-attempts"]').click();
+  await direct.getByText('Loading run history…').waitFor();
+  assert.ok(!requests.slice(historyStart).some(path=>path.includes('ref=main')),'history waits for pending shared-name repository context');
+  delayStatus = false; releaseStatus();
+  await direct.locator('#runHistory .trow[data-run-id="old-failed"]').waitFor();
+  assert.ok(requests.slice(historyStart).some(path=>path.includes('ref=main')&&path.includes('repo=github%2Forg%2Foberth')),'history uses the qualified selector after status resolves');
+  await direct.close();
   if (evidence) writeFileSync(`${evidence}/browser-results.json`, JSON.stringify({browser:await browser.version(),results,requests},null,2));
-  console.log('Rendered dashboard checks passed: 1440px, 1100px, 390px, 320px; list/detail/history, filters, paging, retry, refresh, step order and secret/release markers.');
+  console.log('Rendered dashboard checks passed: 1440px, 1100px, 390px, 320px; active scheduled/queued rows on both pages, flat status filters, direct shared-name links, history refresh/focus/scroll, step order and secret/release markers.');
 } finally {
   await browser?.close();
   server.closeAllConnections();

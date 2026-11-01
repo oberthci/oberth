@@ -210,7 +210,7 @@ func TestRunsPageIsOneFlatFilteredList(t *testing.T) {
 		}
 		return source[from : from+to]
 	}
-	for _, want := range []string{"`/api/runs?limit=${runPageSize}&latest_per_ref=1`", `new URLSearchParams({ limit: String(runPageSize) })`, `api("/api/runs/counts")`} {
+	for _, want := range []string{"`/api/runs?limit=${runPageSize}${groupedRuns() ?", `new URLSearchParams({ limit: String(runPageSize) })`, `api("/api/runs/counts")`} {
 		if !strings.Contains(source, want) {
 			t.Fatalf("app.js run loading is missing %s", want)
 		}
@@ -273,7 +273,7 @@ func TestDashboardUsesBranchTagCountsAndIssueFacets(t *testing.T) {
 	source := string(staticAssets["app.js"].body)
 	for _, want := range []string{
 		"function pageRange(start, length, total)",
-		"${source.length} branches/tags · page ${page}",
+		"All retained runs",
 		"Latest run for each branch or tag",
 		"pageRange(issueStart, issues.length, total)",
 		"const facets = page.counts || {}",
@@ -302,7 +302,7 @@ func TestRunsFiltersCountsAndCancelledSuccessors(t *testing.T) {
 		`if (saved === "waiting") return "queued"`,
 		`if (saved === "interrupted") return "cancelled"`,
 		`localStorage.getItem("oberth-filter") === "release"`,
-		`state.runNext = source.length === runPageSize`,
+		`state.runNext = runPageFull(source)`,
 		`function shortSuccessor(s) { return String(s || "").slice(0, 12); }`,
 		`view successor ${esc(shortSuccessor(run.SupersededBy))}`,
 		`(status === "cancelled" || status === "superseded") ?`, `esc(runMessage(run))`, `server restart, retry needed`, `retry-warning`,
@@ -311,7 +311,7 @@ func TestRunsFiltersCountsAndCancelledSuccessors(t *testing.T) {
 			t.Fatalf("dashboard missing %q", want)
 		}
 	}
-	for _, unwanted := range []string{`view=active`, `loadActiveRuns`, `SUPERSEDED`, `return "delivered"`, `[pending] running`, `[pending] queued`} {
+	for _, unwanted := range []string{`SUPERSEDED`, `return "delivered"`, `[pending] running`, `[pending] queued`} {
 		if strings.Contains(source, unwanted) {
 			t.Fatalf("dashboard retains %q", unwanted)
 		}

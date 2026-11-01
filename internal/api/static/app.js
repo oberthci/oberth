@@ -10,7 +10,7 @@ const listPollMs = 4000;
 const slowPollMs = 10000;
 const livePollMs = 2000;
 const state = {
-  repos: [], runs: [], repoRuns: [], status: null,
+  repos: [], runs: [], repoRuns: [], activeRuns: [], status: null,
   runCounts: null, runCursor: 0, runCursorHistory: [],
   runNext: 0, runsNext: "", repoRunsNext: "",
   timer: null, routeSeq: 0,
@@ -384,9 +384,10 @@ function setAuto(ms) {
 /* ---------- data loading ---------- */
 async function loadRepos() { state.repos = await api("/api/repos") || []; }
 const runPageSize = 100;
-/* One latest run per repository/branch/tag, newest first. */
+/* Status filters search retained attempts; the all view groups by ref. */
+function groupedRuns() { return state.filter === "all"; }
 async function loadRuns() {
-  const page = await api(`/api/runs?limit=${runPageSize}&latest_per_ref=1`, { withNext: true });
+  const page = await api(`/api/runs?limit=${runPageSize}${groupedRuns() ? "&latest_per_ref=1" : ""}`, { withNext: true });
   state.runs = page.body || [];
   state.runsNext = page.next;
 }
@@ -395,7 +396,7 @@ async function loadRuns() {
 async function loadRepoRuns() {
   if (state.repo === "all" && !state.runCursor) { state.repoRuns = []; state.repoRunsNext = ""; return; }
   const query = new URLSearchParams({ limit: String(runPageSize) });
-  query.set("latest_per_ref", "1");
+  if (groupedRuns()) query.set("latest_per_ref", "1");
   if (state.repo !== "all") query.set("repo", state.repo);
   if (state.runCursor) query.set("before", String(state.runCursor));
   try {
@@ -407,6 +408,24 @@ async function loadRepoRuns() {
     throw err;
   }
 }
+/* Fetch on every page: an active run may be behind a newer push, in another
+   schedule lane, or have its own head beyond the current page of 100 refs. */
+async function loadActiveRuns() {
+  const query = new URLSearchParams({ view: "active" });
+  if (state.repo !== "all") query.set("repo", state.repo);
+  state.activeRuns = await api("/api/runs?" + query) || [];
+}
+function runsWithActive(source) {
+  const seen = new Set(source.map(run => run.ID));
+  return [...state.activeRuns.filter(run => !seen.has(run.ID) && seen.add(run.ID)), ...source];
+}
+function runPageFull(source) {
+  // The flat first page includes the whole queue in addition to its dated
+  // page. Count exactly the admitted/terminal portion, as the API does.
+  const dated = source.filter(run => run.StartedAt || run.FinishedAt || ["passed", "failed", "interrupted"].includes(run.Status));
+  return (groupedRuns() ? source.length : dated.length) === runPageSize;
+}
+function retainedRunCount(count) { return `${count} retained ${count === 1 ? "run" : "runs"}`; }
 /* Older servers have no counts route; the sidebar then counts the page. */
 async function loadRunCounts() {
   try { state.runCounts = await api("/api/runs/counts"); } catch (err) {
@@ -503,32 +522,58 @@ function runHistory(run) {
 }
 function updateRunHistory(run) {
   const section = app?.querySelector("[data-detail-run]");
-  if (section?.dataset.detailRun === run.ID) section.querySelector("#runHistory").innerHTML = runHistory(run);
+  if (!section || section.dataset.detailRun !== run.ID) return;
+  const panel = section.querySelector("#runHistory"), html = runHistory(run);
+  if (panel._historyHTML === html) return;
+  const tableLeft = panel.querySelector(".runs-table")?.scrollLeft || 0;
+  const panelTop = panel.scrollTop;
+  const focused = panel.contains(document.activeElement) ? document.activeElement : null;
+  const action = focused?.dataset.action, runID = focused?.dataset.runId;
+  panel.innerHTML = html;
+  panel._historyHTML = html;
+  if (focused) {
+    [...panel.querySelectorAll("button")].find(button => button.dataset.action === action && button.dataset.runId === runID)?.focus({preventScroll: true});
+  }
+  const table = panel.querySelector(".runs-table");
+  if (table) table.scrollLeft = tableLeft;
+  panel.scrollTop = panelTop;
 }
-async function loadRunAttempts(id, older) {
+async function loadRunAttempts(id, older, refresh = false) {
   const head = state.detailRun;
   if (!head || head.ID !== id) return;
   const previous = state.attempts.get(id);
-  if (!older && previous) { state.attempts.delete(id); updateRunHistory(head); return; }
-  if (previous?.loading || (older && !previous)) return;
+  if (!older && previous && !refresh) { state.attempts.delete(id); updateRunHistory(head); return; }
+  refresh ||= !!(older && previous?.refreshError);
+  if (previous?.loading || previous?.refreshing || ((older || refresh) && !previous)) return;
   const generation = state.authGen;
-  const history = { rows: previous?.rows || [], next: previous?.next || "", loading: true, error: "" };
+  const history = { rows: previous?.rows || [], next: previous?.next || "", olderLoaded: previous?.olderLoaded || (older && !refresh), loading: !refresh, refreshing: refresh, error: "" };
   state.attempts.set(id, history);
-  updateRunHistory(head);
-  const query = new URLSearchParams({repo: repoKeyOf(head.RepoID), ref: head.Ref, limit: String(runPageSize)});
-  if (history.next) query.set("before", String(history.next));
+  if (!refresh) updateRunHistory(head);
   try {
+    // Shared repository names require the qualified key supplied by status.
+    // Direct links can reach this control before the background probe finishes.
+    if (state.statusPending) await state.statusPending;
+    if (generation !== state.authGen || state.attempts.get(id) !== history) return;
+    const repo = repoKeyOf(head.RepoID);
+    if (!repo) throw new Error("Repository information unavailable; refresh and retry");
+    const query = new URLSearchParams({repo, ref: head.Ref, limit: String(runPageSize)});
+    if (!refresh && history.next) query.set("before", String(history.next));
     const page = await api("/api/runs?" + query, {withNext: true, detached: true});
     if (generation !== state.authGen || state.attempts.get(id) !== history) return;
-    const rows = [...history.rows, ...(page.body || []).filter(run => run.ID !== id && run.RepoID === head.RepoID && run.Ref === head.Ref && run.RefKind === head.RefKind)];
+    const fresh = (page.body || []).filter(run => run.ID !== id && run.RepoID === head.RepoID && run.Ref === head.Ref && run.RefKind === head.RefKind);
+    // Refresh page one, retaining already loaded older rows. Fresh records win
+    // by ID, so changing statuses are reflected without losing expanded pages.
+    const rows = refresh ? [...fresh, ...history.rows] : [...history.rows, ...fresh];
     const seen = new Set();
     history.rows = rows.filter(run => !seen.has(run.ID) && seen.add(run.ID));
-    history.next = page.next;
+    history.next = refresh && previous.olderLoaded ? previous.next : page.next;
   } catch (err) {
     if (generation !== state.authGen || state.attempts.get(id) !== history) return;
     history.error = `Could not load run history: ${err.message}`;
+    history.refreshError = refresh;
   } finally {
     history.loading = false;
+    history.refreshing = false;
     if (generation === state.authGen && state.attempts.get(id) === history) updateRunHistory(head);
   }
 }
@@ -538,14 +583,14 @@ async function renderRuns(seq) {
   const pending = ensureStatus();
   if (state.repo !== "all" && !isQualifiedSelector(state.repo)) await pending;
   state.repo = normalizeRepoSelector(state.repo, "all");
-  await Promise.all([loadRuns(), loadRepoRuns(), loadRunCounts()]);
+  await Promise.all([loadRuns(), loadRepoRuns(), loadActiveRuns(), loadRunCounts()]);
   if (!currentRoute(seq)) return;
   rerenderWhenStatus(pending, seq);
   localStorage.setItem("oberth-filter", state.filter);
   localStorage.setItem("oberth-kind", state.releaseOnly ? "release" : "all");
   localStorage.setItem("oberth-repo", state.repo);
   const runs = state.runs, source = state.repo !== "all" || state.runCursor ? state.repoRuns : runs;
-  const visible = source.filter(runMatches), counts = repoCounts(runs);
+  const visible = runsWithActive(source).filter(runMatches), counts = repoCounts(runs);
   if (state.runCounts) {
     counts.set("all", state.runCounts.Total || 0);
     for (const repo of state.repos) counts.set(repoKey(repo), state.runCounts.ByRepo?.[repo.ID] || 0);
@@ -554,7 +599,7 @@ async function renderRuns(seq) {
      for an uplink scoped to some upstreams, which sees no sequences (#073).
      A server without the header pages by the oldest run's sequence. */
   const named = source === runs ? state.runsNext : state.repoRunsNext;
-  state.runNext = source.length === runPageSize ? (named || source[source.length - 1].QueueSequence || 0) : 0;
+  state.runNext = runPageFull(source) ? (named || source[source.length - 1].QueueSequence || 0) : 0;
   const page = state.runCursorHistory.length + 1;
   replaceApp(`
   <section class="screen">
@@ -566,16 +611,16 @@ async function renderRuns(seq) {
           <button class="chip ${state.releaseOnly ? "on" : ""}" data-kind-filter="release" aria-pressed="${state.releaseOnly}">release</button>
         </div>
       <aside class="repo-side" aria-label="Repositories and retained run counts">
-        <div class="repo-filter-row"><button class="repo-filter ${state.repo === "all" ? "on" : ""}" data-repo-filter="all"><span class="name">All repos</span><span class="count">${esc(counts.get("all") || 0)} runs</span></button></div>
+        <div class="repo-filter-row"><button class="repo-filter ${state.repo === "all" ? "on" : ""}" data-repo-filter="all"><span class="name">All repos</span><span class="count" title="${esc(retainedRunCount(counts.get("all") || 0))}" aria-label="${esc(retainedRunCount(counts.get("all") || 0))}">${esc(counts.get("all") || 0)}</span></button></div>
         ${orderedRepos().map((repo, index, repos) => {
           const divider = repo.ArchivedAt && (index === 0 || !repos[index - 1].ArchivedAt) ? '<div class="repo-filter-row repo-archived-divider"><span class="meta">archived</span></div>' : "";
-          return `${divider}<div class="repo-filter-row"><button class="${repo.ArchivedAt ? "repo-filter archived" : "repo-filter"}${state.repo === repoKey(repo) ? " on" : ""}" data-repo-filter="${esc(repoKey(repo))}" title="${esc(repoKey(repo))}"><span class="name">${esc(repoLabel(repo))}</span><span class="count">${esc(counts.get(repoKey(repo)) || 0)} runs</span></button></div>`;
+          return `${divider}<div class="repo-filter-row"><button class="${repo.ArchivedAt ? "repo-filter archived" : "repo-filter"}${state.repo === repoKey(repo) ? " on" : ""}" data-repo-filter="${esc(repoKey(repo))}" title="${esc(repoKey(repo))}"><span class="name">${esc(repoLabel(repo))}</span><span class="count" title="${esc(retainedRunCount(counts.get(repoKey(repo)) || 0))}" aria-label="${esc(retainedRunCount(counts.get(repoKey(repo)) || 0))}">${esc(counts.get(repoKey(repo)) || 0)}</span></button></div>`;
         }).join("")}
       </aside>
       <section>
         ${visible.length ? runsTable(visible) : `<div class="empty">No runs match the current filters.</div>`}
         <div class="runs-footer">
-          <span class="meta">Latest run for each branch or tag · ${source.length} branches/tags · page ${page}${state.filter === "all" && !state.releaseOnly ? "" : ` · ${visible.length} match this page`}</span>
+          <span class="meta">${groupedRuns() ? "Latest run for each branch or tag · all active runs included" : "All retained runs"} · page ${page}${state.filter === "all" && !state.releaseOnly ? "" : ` · ${visible.length} match this page`}</span>
           ${page > 1 || state.runNext ? `<div class="issue-pager">
             <button type="button" data-action="runs-newer" ${page > 1 ? "" : "disabled"}>‹ newer</button>
             <button type="button" data-action="runs-older" ${state.runNext ? "" : "disabled"}>older ›</button>
@@ -1119,6 +1164,7 @@ async function renderRunDetail(runID, seq, background) {
   }
   if (!currentRoute(seq)) return;
   await renderRunDetailView(detail, seq);
+  if (currentRoute(seq) && state.attempts.has(runID)) loadRunAttempts(runID, false, true);
   rerenderWhenStatus(pending, seq);
 }
 async function renderRunDetailView(detail, seq) {
@@ -1191,12 +1237,17 @@ async function renderRunDetailView(detail, seq) {
   if (existing?.dataset.detailRun === run.ID) {
     const template = document.createElement("template");
     template.innerHTML = detailHTML;
-    for (const selector of [".rh", "#runBanners", "#runHistory", "#stepList", "#logHead", ".term-bar"]) {
+    for (const selector of [".rh", "#runBanners", "#stepList", "#logHead", ".term-bar"]) {
       existing.querySelector(selector).innerHTML = template.content.querySelector(selector).innerHTML;
     }
     const preserve = live && state.live?.view?.body === previousTerm;
     if (!preserve) existing.querySelector(".terminal").replaceWith(template.content.querySelector(".terminal"));
-  } else replaceApp(detailHTML);
+  } else {
+    replaceApp(detailHTML);
+    const panel = app?.querySelector("#runHistory");
+    if (panel) panel._historyHTML = runHistory(run);
+  }
+  updateRunHistory(run);
   const termBody = document.getElementById("termBody");
   if (live && state.live?.view) {
     state.live.view.body = termBody;
@@ -1501,7 +1552,7 @@ app.addEventListener("click", event => {
   if ((target = event.target.closest("[data-repo-runs]"))) { changeRunRepo(target.dataset.repoRuns); go("/runs"); return; }
   if ((target = event.target.closest("[data-repo-filter]"))) { changeRunRepo(target.dataset.repoFilter); route(); return; }
   if ((target = event.target.closest("[data-kind-filter]"))) { state.releaseOnly = !state.releaseOnly; route(); return; }
-  if ((target = event.target.closest("[data-status-filter]"))) { state.filter = target.dataset.statusFilter; route(); return; }
+  if ((target = event.target.closest("[data-status-filter]"))) { state.filter = target.dataset.statusFilter; changeRunRepo(state.repo); route(); return; }
   if ((target = event.target.closest("[data-issue-kind]"))) { changeIssueFilter({ issueKind: target.dataset.issueKind }); return; }
   if ((target = event.target.closest("[data-issue-state]"))) { changeIssueFilter({ issueState: target.dataset.issueState }); return; }
   if ((target = event.target.closest("[data-select-step]")) && target.dataset.selectStep !== undefined) {

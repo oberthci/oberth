@@ -3296,9 +3296,12 @@ tag, promotion, plan and apply runs never auto-retry. All progress attempts,
 engine observations, cleanup completion and writer-side newest/step/publication
 fences apply. The automatic budget survives restart and manual replay lineage.
 Raw failed/interrupted statuses remain; additive retry links and `infra-retried`
-(amber) / `superseded` display states explain them. The dashboard defaults to
-scoped latest-ref heads with expandable retained history, hiding superseded
-attempts unless requested; `latest_per_ref=1` is opt-in for HTTP clients.
+(amber) / `superseded` display states explain them. The dashboard's all-status
+view shows scoped latest-ref heads plus any missing active runs on every page;
+status chips use the flat retained list, so failures in other schedule lanes,
+superseded attempts and automatic retries remain findable. Branch/tag history
+lives on run detail and includes superseded runs. `latest_per_ref=1` remains
+opt-in for HTTP clients.
 Readiness uses a 30s background reader budget, retaining green on deadline or
 typed SQLite reader contention without renewing the 90s last-success age.
 Confirmed writer failures receive no second 90s grace. Hard errors,

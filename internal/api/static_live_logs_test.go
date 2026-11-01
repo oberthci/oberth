@@ -17,9 +17,13 @@ func TestDashboardLiveLogBehavior(t *testing.T) {
 	if err != nil {
 		t.Skip("dashboard behavior checks need Node: node hack/test-live-logs.mjs")
 	}
-	command := exec.Command(node, "../../hack/test-live-logs.mjs")
-	if output, err := command.CombinedOutput(); err != nil {
-		t.Fatalf("dashboard behavior: %v\n%s", err, output)
+	for _, script := range []string{"test-live-logs.mjs", "test-dashboard-runs.mjs"} {
+		t.Run(script, func(t *testing.T) {
+			command := exec.Command(node, "../../hack/"+script)
+			if output, err := command.CombinedOutput(); err != nil {
+				t.Fatalf("dashboard behavior: %v\n%s", err, output)
+			}
+		})
 	}
 }
 

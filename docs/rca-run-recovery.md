@@ -67,24 +67,49 @@ particular execution was automatic.
 
 ## Dashboard history
 
-The dashboard defaults to the latest run for each `(repository, ref kind, ref)`.
-The optional HTTP parameter `latest_per_ref=1` asks `/api/runs` for this view;
-it accepts the ordinary `all` view only. Each head has `earlier_attempts`, the
-count of all retained older attempts for that exact group. The server first
-groups a narrow covering index into exact heads, then applies the page cursor
-to those heads before fetching selected wide rows. An older page cannot
-resurrect an earlier attempt as the current head. Counts and heads honor the actor's repository
-scope. Existing requests without the parameter keep their flat list and paging.
+With the `all` status chip selected, the dashboard lists the latest run for each
+`(repository, ref kind, ref)`. It also fetches the existing unpaged
+`/api/runs?view=active` view, scoped by repository when selected, on **every**
+page. Any active run missing from that page's heads appears first, without
+duplicating a head. Thus a running nightly hidden by a newer push, work in
+another schedule lane, a pending publication, and active heads outside the
+current page remain visible. Status and release filters still apply to the
+combined rows. The active endpoint retains its existing server bound of 500;
+the UI adds no further active-run limit.
 
-Click `n earlier attempts` to load history for that ref, with further history
-paged in batches of 100. Superseded attempts are hidden by default; `show
-superseded` includes them in expanded history. Turn off `latest per ref` for the
-flat historical list. These preferences persist in localStorage. History data
-is cleared on token changes and repository selection, and late responses obey
-the existing route/auth generation checks. Filters apply to current heads in
-collapsed mode, rather than counting an old failure as a current branch failure.
-The earlier-attempt count includes hidden superseded records, so it can exceed
-the number of expanded visible rows.
+Selecting any status other than `all` requests the **flat retained list**, then
+filters its loaded page. In particular, `failed` can find a finished nightly
+behind a newer successful push, while `superseded` and `infra-retried` can find
+non-head attempts. Page through older results when needed. Changing the status
+chip resets pagination; it does not mistake a head-view cursor for a flat-list
+cursor. The quiet footer under the table names the current view and page.
+
+The optional HTTP parameter `latest_per_ref=1` asks `/api/runs` for the grouped
+view; it accepts the ordinary `all` view only. Each head has `earlier_attempts`,
+the count of all retained older attempts for that exact group. The server groups
+a narrow covering index into exact heads, then applies the page cursor to those
+heads before fetching selected wide rows. An older page cannot resurrect an
+earlier attempt as the current head. Counts and heads honor the actor's
+repository scope. Existing requests without the parameter keep their flat list
+and paging.
+
+Open an individual run and select **Run history for this branch** or **Run
+history for this tag**. History includes superseded runs, excludes the current
+run, and matches its exact repository, ref name and ref kind; an older run's
+history can include newer runs too. Older results load in batches of 100 with
+the server's cursor. Open history refreshes page one on detail poll or refresh,
+merging fresh records by ID while retaining already loaded older rows. Unchanged
+history keeps its DOM, keyboard focus and scroll position; updates also restore
+focus and the table's horizontal scroll. Older cached rows outside page one are
+refetched when history is reopened. History waits for pending repository context
+before choosing a qualified selector for shared names. Token changes and
+repository selection clear history; collapse, replacement requests and auth
+generation checks discard late responses.
+
+The old `latest per ref` and `show superseded` switches are removed; their saved
+localStorage values are ignored. Status, release and repository choices still
+persist. The repository sidebar shows retained-run counts with accessible labels
+and tooltips; these count runs, not identities.
 
 ## Readiness under database stalls
 
