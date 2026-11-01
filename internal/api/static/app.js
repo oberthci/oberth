@@ -10,7 +10,7 @@ const listPollMs = 4000;
 const slowPollMs = 10000;
 const livePollMs = 2000;
 const state = {
-  repos: [], runs: [], repoRuns: [], activeRuns: [], status: null,
+  repos: [], runs: [], repoRuns: [], activeRuns: [], activeRunsComplete: false, status: null,
   runCounts: null, runCursor: 0, runCursorHistory: [],
   runNext: 0, runsNext: "", repoRunsNext: "",
   timer: null, routeSeq: 0,
@@ -318,6 +318,7 @@ function submitToken() {
   closeLiveLog();
   state.authGen++;
   state.detailRun = null;
+  state.activeRuns = [];
   state.attempts.clear();
   if (state.pendingController) { state.pendingController.abort(); state.pendingController = null; }
   setToken(value);
@@ -327,6 +328,7 @@ function clearToken() {
   closeLiveLog();
   state.authGen++;
   state.detailRun = null;
+  state.activeRuns = [];
   state.attempts.clear();
   if (state.pendingController) { state.pendingController.abort(); state.pendingController = null; }
   setToken(null); setConn(false, "signed out"); showTokenPrompt();
@@ -413,11 +415,18 @@ async function loadRepoRuns() {
 async function loadActiveRuns() {
   const query = new URLSearchParams({ view: "active" });
   if (state.repo !== "all") query.set("repo", state.repo);
-  state.activeRuns = await api("/api/runs?" + query) || [];
+  try {
+    state.activeRuns = await api("/api/runs?" + query) || [];
+    state.activeRunsComplete = true;
+  } catch (err) {
+    if (err.message === "stale request" || err.message === "authentication required" || err.name === "AbortError") throw err;
+    if ([400, 404, 409].includes(err.status)) state.activeRuns = [];
+    state.activeRunsComplete = false;
+  }
 }
 function runsWithActive(source) {
   const seen = new Set(source.map(run => run.ID));
-  return [...state.activeRuns.filter(run => !seen.has(run.ID) && seen.add(run.ID)), ...source];
+  return [...state.activeRuns.filter(run => (state.repo === "all" || repoKeyOf(run.RepoID) === state.repo) && !seen.has(run.ID) && seen.add(run.ID)), ...source];
 }
 function runPageFull(source) {
   // The flat first page includes the whole queue in addition to its dated
@@ -518,7 +527,7 @@ function runsTable(runs) {
 function runHistory(run) {
   const history = state.attempts.get(run.ID);
   const expanded = !!history;
-  return `<button type="button" class="chip" data-action="toggle-attempts" data-head="${esc(run.ID)}" aria-expanded="${expanded}" aria-controls="runHistoryRows">${expanded ? "▾" : "▸"} Run history for this ${run.RefKind === "tag" ? "tag" : "branch"}</button>${expanded ? `<div id="runHistoryRows">${history.rows.length ? runsTable(history.rows) : `<p class="meta">${history.loading ? "Loading run history…" : history.error ? "" : "No other retained runs for this " + (run.RefKind === "tag" ? "tag." : "branch.")}</p>`}${history.error ? `<p class="meta" role="status">${esc(history.error)}</p>` : ""}${history.next || history.error ? `<button type="button" class="chip" data-action="older-attempts" data-head="${esc(run.ID)}" ${history.loading ? "disabled" : ""}>${history.loading ? "Loading…" : history.error ? "Retry" : "Older runs ›"}</button>` : ""}</div>` : ""}`;
+  return `<button type="button" class="chip" data-action="toggle-attempts" data-head="${esc(run.ID)}" aria-expanded="${expanded}" aria-controls="runHistoryRows">${expanded ? "▾" : "▸"} Run history for this ${run.RefKind === "tag" ? "tag" : "branch"}</button>${expanded ? `<div id="runHistoryRows">${history.rows.length ? runsTable(history.rows) : `<p class="meta">${history.loading ? "Loading run history…" : history.error ? "" : "No other retained runs for this " + (run.RefKind === "tag" ? "tag." : "branch.")}</p>`}${history.error ? `<p class="meta" role="status">${esc(history.error)}</p>` : ""}${history.next || history.error ? `<button type="button" class="chip" data-action="older-attempts" data-head="${esc(run.ID)}" ${history.loading ? 'aria-disabled="true"' : ""}>${history.loading ? "Loading…" : history.error ? "Retry" : "Older runs ›"}</button>` : ""}</div>` : ""}`;
 }
 function updateRunHistory(run) {
   const section = app?.querySelector("[data-detail-run]");
@@ -532,7 +541,8 @@ function updateRunHistory(run) {
   panel.innerHTML = html;
   panel._historyHTML = html;
   if (focused) {
-    [...panel.querySelectorAll("button")].find(button => button.dataset.action === action && button.dataset.runId === runID)?.focus({preventScroll: true});
+    const buttons = [...panel.querySelectorAll("button")];
+    (buttons.find(button => button.dataset.action === action && button.dataset.runId === runID) || buttons.find(button => button.dataset.action === "toggle-attempts"))?.focus({preventScroll: true});
   }
   const table = panel.querySelector(".runs-table");
   if (table) table.scrollLeft = tableLeft;
@@ -544,6 +554,7 @@ async function loadRunAttempts(id, older, refresh = false) {
   const previous = state.attempts.get(id);
   if (!older && previous && !refresh) { state.attempts.delete(id); updateRunHistory(head); return; }
   refresh ||= !!(older && previous?.refreshError);
+  if (older && previous?.refreshing) { previous.olderRequested = true; return; }
   if (previous?.loading || previous?.refreshing || ((older || refresh) && !previous)) return;
   const generation = state.authGen;
   const history = { rows: previous?.rows || [], next: previous?.next || "", olderLoaded: previous?.olderLoaded || (older && !refresh), loading: !refresh, refreshing: refresh, error: "" };
@@ -574,7 +585,10 @@ async function loadRunAttempts(id, older, refresh = false) {
   } finally {
     history.loading = false;
     history.refreshing = false;
-    if (generation === state.authGen && state.attempts.get(id) === history) updateRunHistory(head);
+    if (generation === state.authGen && state.attempts.get(id) === history) {
+      updateRunHistory(head);
+      if (history.olderRequested) loadRunAttempts(id, true);
+    }
   }
 }
 async function renderRuns(seq) {
@@ -611,6 +625,7 @@ async function renderRuns(seq) {
           <button class="chip ${state.releaseOnly ? "on" : ""}" data-kind-filter="release" aria-pressed="${state.releaseOnly}">release</button>
         </div>
       <aside class="repo-side" aria-label="Repositories and retained run counts">
+        <div class="side-head">Retained runs</div>
         <div class="repo-filter-row"><button class="repo-filter ${state.repo === "all" ? "on" : ""}" data-repo-filter="all"><span class="name">All repos</span><span class="count" title="${esc(retainedRunCount(counts.get("all") || 0))}" aria-label="${esc(retainedRunCount(counts.get("all") || 0))}">${esc(counts.get("all") || 0)}</span></button></div>
         ${orderedRepos().map((repo, index, repos) => {
           const divider = repo.ArchivedAt && (index === 0 || !repos[index - 1].ArchivedAt) ? '<div class="repo-filter-row repo-archived-divider"><span class="meta">archived</span></div>' : "";
@@ -620,7 +635,7 @@ async function renderRuns(seq) {
       <section>
         ${visible.length ? runsTable(visible) : `<div class="empty">No runs match the current filters.</div>`}
         <div class="runs-footer">
-          <span class="meta">${groupedRuns() ? "Latest run for each branch or tag · all active runs included" : "All retained runs"} · page ${page}${state.filter === "all" && !state.releaseOnly ? "" : ` · ${visible.length} match this page`}</span>
+          <span class="meta">${groupedRuns() ? "Latest run for each branch or tag" : "All retained runs"}${state.activeRunsComplete ? groupedRuns() ? " · all active runs included" : "" : " · active runs unavailable"} · page ${page}${state.filter === "all" && !state.releaseOnly ? "" : ` · ${visible.length} match this page`}</span>
           ${page > 1 || state.runNext ? `<div class="issue-pager">
             <button type="button" data-action="runs-newer" ${page > 1 ? "" : "disabled"}>‹ newer</button>
             <button type="button" data-action="runs-older" ${state.runNext ? "" : "disabled"}>older ›</button>
@@ -1164,7 +1179,8 @@ async function renderRunDetail(runID, seq, background) {
   }
   if (!currentRoute(seq)) return;
   await renderRunDetailView(detail, seq);
-  if (currentRoute(seq) && state.attempts.has(runID)) loadRunAttempts(runID, false, true);
+  const resolvedID = state.detailRun?.ID;
+  if (currentRoute(seq) && state.attempts.has(resolvedID)) loadRunAttempts(resolvedID, false, true);
   rerenderWhenStatus(pending, seq);
 }
 async function renderRunDetailView(detail, seq) {

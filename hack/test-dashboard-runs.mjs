@@ -61,3 +61,70 @@ if (!process.env.DASHBOARD_RUNS_CASE || process.env.DASHBOARD_RUNS_CASE === 'F2'
   assert.equal(run('state.runNext'),'opaque-flat-cursor','flat paging counts dated rows, not its extra queued rows');
   console.log('F2 passed: failed nightly, superseded and infra-retried filters; flat-list queue pagination');
 }
+if (!process.env.DASHBOARD_RUNS_CASE || process.env.DASHBOARD_RUNS_CASE === 'R4') {
+  run(`
+    state.filter='all';flatPaging=false;changeRunRepo('all');
+    let pollMs=0, activeFailure=null;
+    const workingAPI=api;
+    setAuto=ms=>{pollMs=ms};hasToken=()=>true;setConn=()=>{};
+    api=async path=>{
+      const query=new URL(path,'https://example.test').searchParams;
+      if(query.get('view')==='active' && activeFailure)throw activeFailure;
+      return workingAPI(path);
+    };
+  `);
+  await run('route(true)');
+  for (const status of [503, undefined]) {
+    run(`activeFailure=Object.assign(new Error('active fetch unavailable'),{status:${JSON.stringify(status)}});pollMs=0;`);
+    await run('route(true)');
+    assert.ok(ids().includes('push-head'), 'R4: active fetch failure must keep the run table');
+    assert.ok(ids().includes('scheduled-running'), 'R4: transient failure retains the last active rows');
+    assert.equal(run('pollMs'),4000,'R4: active fetch failure must not stop polling');
+    assert.ok(!run('html').includes('all active runs included'),'R4: unavailable active data must not be advertised as complete');
+    assert.ok(run('html').includes('active runs unavailable'));
+  }
+  run(`changeRunRepo('github/org/ours');`);
+  await run('route(true)');
+  assert.ok(!ids().includes('foreign-running'),'retained active rows still obey the selected repository');
+  run(`changeRunRepo('all');`);
+  for (const status of [400,404,409]) {
+    run(`activeFailure=Object.assign(new Error('invalid repository'),{status:${status}});pollMs=0;`);
+    await run('route(true)');
+    assert.ok(ids().includes('push-head'));
+    assert.equal(run('state.activeRuns.length'),0,'invalid selectors clear the active list');
+    assert.equal(run('pollMs'),4000);
+  }
+  // Cold load with a removed qualified selector and status still unavailable.
+  run(`
+    state.status=null;ensureStatus=()=>Promise.resolve();changeRunRepo('github/org/removed');
+    api=async path=>{
+      if(new URL(path,'https://example.test').searchParams.get('repo')==='github/org/removed')throw Object.assign(new Error('repository not found'),{status:404});
+      return workingAPI(path);
+    };pollMs=0;
+  `);
+  await run('route(true)');
+  assert.equal(run('state.repo'),'all');
+  assert.ok(ids().includes('push-head'),'stale saved repository falls back to the all-repository table');
+  assert.equal(run('pollMs'),4000);
+  run(`api=workingAPI;activeFailure=null;pollMs=0;`);
+  await run('route(true)');
+  assert.ok(ids().includes('scheduled-running'));
+  assert.ok(run('html').includes('all active runs included'),'a successful poll clears the unavailable notice');
+  assert.ok(run('html').includes('Retained runs'),'touch users have a visible explanation of the sidebar counts');
+  run(`
+    state.detailRun={ID:'history-full-id',RepoID:1,Ref:'main',RefKind:'branch'};
+    state.attempts.set('history-full-id',{rows:[],next:'older-cursor'});
+    let finishRefresh, olderCalls=0;
+    api=async path=>{
+      if(new URL(path,'https://example.test').searchParams.has('before')){olderCalls++;return {body:[],next:''};}
+      return new Promise(resolve=>{finishRefresh=resolve});
+    };
+    pendingRefresh=loadRunAttempts('history-full-id',false,true);
+  `);
+  await run(`loadRunAttempts('history-full-id',true)`);
+  assert.equal(run('olderCalls'),0,'older click waits for the in-flight refresh');
+  run(`finishRefresh({body:[],next:'older-cursor'})`);
+  await run('pendingRefresh');
+  assert.equal(run('olderCalls'),1,'queued older click runs after refresh');
+  console.log('R4 passed: active 503/network/400/404/409 failures, stale saved repository, polling and recovery');
+}

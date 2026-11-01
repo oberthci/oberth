@@ -30,7 +30,7 @@ const flat = [...heads, older, superseded, oldest, nightlyFailed, retried, sched
 const repos = [{ID:1, Name:'oberth', UpstreamID:1}, {ID:2, Name:'example', UpstreamID:1}, {ID:3, Name:'work-laptop-identities', UpstreamID:1}];
 const status = {version:'test-fixture', upstream_info:[{id:1,name:'github',base_url:'https://example.test/org'}]};
 const requests = [];
-let baseline = false, paging = false, historyError = false, sharedNames = false, delayStatus = false, releaseStatus;
+let baseline = false, paging = false, historyError = false, sharedNames = false, delayStatus = false, releaseStatus, activeError = 0, delayOlder = false, releaseOlder;
 const server = createServer((req, res) => {
   const url = new URL(req.url, 'http://localhost');
   requests.push(url.pathname + url.search);
@@ -46,12 +46,16 @@ const server = createServer((req, res) => {
   if (url.pathname === '/api/runs') {
     if (url.searchParams.get('view') === 'active') {
       assert.ok(!url.searchParams.has('before') && !url.searchParams.has('latest_per_ref'));
+      if (activeError) {res.writeHead(activeError, {'Content-Type':'application/json'}); return res.end(JSON.stringify({error:'active list temporarily unavailable'}));}
       return json(active.filter(run => !url.searchParams.has('repo') || `github/org/${repos.find(repo=>repo.ID===run.RepoID)?.Name}` === url.searchParams.get('repo')));
     }
     if (url.searchParams.has('ref')) {
       if (sharedNames && !url.searchParams.get('repo')?.includes('/')) {res.writeHead(409, {'Content-Type':'application/json'}); return res.end(JSON.stringify({error:'ambiguous repository'}));}
       if (historyError) {res.writeHead(503, {'Content-Type':'application/json'}); return res.end(JSON.stringify({error:'fixture history unavailable'}));}
-      if (url.searchParams.has('before')) return json([older, oldest]);
+      if (url.searchParams.has('before')) {
+        if (delayOlder) {releaseOlder=()=>json([older, oldest]); return;}
+        return json([older, oldest]);
+      }
       return json([heads[0], older, superseded, makeRun('same-name-tag',{RefKind:'tag'}), makeRun('other-repo',{RepoID:2}), makeRun('other-ref',{Ref:'elsewhere'})], 'opaque-history-cursor');
     }
     if (paging) {
@@ -64,7 +68,7 @@ const server = createServer((req, res) => {
   }
   if (url.pathname.startsWith('/api/runs/')) {
     const id = decodeURIComponent(url.pathname.split('/')[3]);
-    const Run = flat.find(run => run.ID === id);
+    const Run = flat.find(run => run.ID === id || (id.length >= 8 && run.ID.startsWith(id)));
     return json({Run, Steps:[{Burn:'ci',Step:'publish',Ordinal:2,Status:'passed',Secrets:true,StartedAt:new Date(now-40000).toISOString(),FinishedAt:new Date(now-20000).toISOString()}, {Burn:'ci',Step:'test',Ordinal:1,Status:'passed',StartedAt:new Date(now-60000).toISOString(),FinishedAt:new Date(now-40000).toISOString()}]});
   }
   if (url.pathname === '/assets/app.js' || url.pathname === '/assets/app.css') {
@@ -124,7 +128,19 @@ try {
     const layout = await page.evaluate(() => ({side:document.querySelector('.repo-side').getBoundingClientRect().top,table:document.querySelector('.runs-table').getBoundingClientRect().top,screen:document.querySelector('.screen').getBoundingClientRect().width,viewport:innerWidth,sideRight:document.querySelector('.repo-side').getBoundingClientRect().right,tableRight:document.querySelector('.runs-table').getBoundingClientRect().right,filterRight:Math.max(...[...document.querySelectorAll('.runs-toolbar button')].map(button=>button.getBoundingClientRect().right))}));
     if (width > 980) assert.equal(layout.side, layout.table, `sidebar/table alignment at ${width}`);
     assert.ok(layout.screen <= width && layout.sideRight <= width && layout.tableRight <= width && layout.filterRight <= width, `list, repository counts and every filter fit ${width}px: ${JSON.stringify(layout)}`);
+    assert.equal(await page.locator('.repo-side .side-head').textContent(),'Retained runs');
     await capture('after-runs');
+    if (width === 1440) {
+      activeError=503;
+      await page.evaluate(()=>route(true));
+      assert.equal(await page.locator('.runs-table > [data-run-id="scheduled-running"]').count(),1);
+      assert.ok((await page.locator('.runs-footer').textContent()).includes('active runs unavailable'));
+      assert.ok(await page.evaluate(()=>!!state.timer),'polling stays enabled after active fetch failure');
+      await capture('after-active-unavailable');
+      activeError=0;
+      await page.evaluate(()=>route(true));
+      assert.ok((await page.locator('.runs-footer').textContent()).includes('all active runs included'));
+    }
     for (const [filter, id] of [['failed','nightly-failed'],['superseded','old-superseded'],['infra-retried','retry-failed'],['running','scheduled-running']]) {
       const start = requests.length;
       await page.locator(`[data-status-filter="${filter}"]`).click();
@@ -152,8 +168,14 @@ try {
     await page.locator('[data-action="toggle-attempts"]').click();
     await page.locator('#runHistory [data-run-id="old-superseded"]').first().waitFor();
     assert.equal(await page.locator('#runHistory .runs-table > [data-run-id]').count(), 2);
-    await page.locator('[data-action="older-attempts"]').click();
+    delayOlder=true;
+    await page.locator('[data-action="older-attempts"]').focus();
+    await page.locator('[data-action="older-attempts"]').press('Enter');
+    await page.locator('[data-action="older-attempts"][aria-disabled="true"]').waitFor();
+    assert.equal(await page.evaluate(()=>document.activeElement?.dataset.action),'older-attempts','keyboard focus stays on the loading Older button');
+    delayOlder=false; releaseOlder();
     await page.locator('#runHistory [data-run-id="oldest"]').waitFor();
+    assert.equal(await page.evaluate(()=>document.activeElement?.dataset.action),'toggle-attempts','exhausted history returns focus to its toggle');
     assert.equal(await page.locator('#runHistory .runs-table > [data-run-id]').count(), 3);
     assert.ok(requests.some(path => path.includes('before=opaque-history-cursor')));
     await page.evaluate(() => {
@@ -230,6 +252,14 @@ try {
   delayStatus = false; releaseStatus();
   await direct.locator('#runHistory .trow[data-run-id="old-failed"]').waitFor();
   assert.ok(requests.slice(historyStart).some(path=>path.includes('ref=main')&&path.includes('repo=github%2Forg%2Foberth')),'history uses the qualified selector after status resolves');
+  await direct.goto(`${origin}/runs/head-mai`);
+  await direct.locator('[data-detail-run="head-main"]').waitFor();
+  await direct.locator('[data-action="toggle-attempts"]').click();
+  await direct.locator('#runHistory .trow[data-run-id="old-failed"]').waitFor();
+  older.Status='passed';
+  await direct.locator('[data-action="refresh"]').click();
+  await direct.waitForFunction(()=>document.querySelector('#runHistory .trow[data-run-id="old-failed"] .pill').textContent.trim()==='passed');
+  older.Status='failed';
   await direct.close();
   if (evidence) writeFileSync(`${evidence}/browser-results.json`, JSON.stringify({browser:await browser.version(),results,requests},null,2));
   console.log('Rendered dashboard checks passed: 1440px, 1100px, 390px, 320px; active scheduled/queued rows on both pages, flat status filters, direct shared-name links, history refresh/focus/scroll, step order and secret/release markers.');

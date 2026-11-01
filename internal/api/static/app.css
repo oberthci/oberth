@@ -273,3 +273,5 @@ input,select{height:32px;border:1px solid var(--line);background:var(--panel);co
 .run-history{flex:0 0 auto;max-height:35vh;overflow:auto;margin-bottom:12px}
 .run-history .runs-table{margin-top:8px}
 .run-history .chip{margin:4px 0}
+
+.run-history [aria-disabled="true"]{cursor:not-allowed;opacity:.48}
