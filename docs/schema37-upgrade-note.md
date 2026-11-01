@@ -52,6 +52,8 @@ and synthetic history created on that fresh install. Do not restore production
 history or reuse production values, witnesses, credentials or backup keys.
 The blocks assume the verified disposable release and Deployment are named `oberth`.
 
+Install the rehearsal Argo controller with `crds.install=false`, because CRDs are cluster-wide and shared with production.
+
 Provision an Argo controller watching only the dedicated rehearsal namespace,
 and authenticate with the disposable OpenBao's credentials. Keep Rekor unset;
 no rehearsal head should be published to the production or public witness log.

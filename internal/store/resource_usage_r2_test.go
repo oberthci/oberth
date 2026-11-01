@@ -223,6 +223,45 @@ func TestResourceRetentionDeleteRechecksRenewedClock(t *testing.T) {
 	}
 }
 
+func TestResourceRetentionDeleteMatchesRowAndClockPairwise(t *testing.T) {
+	s, run, at := resourceStoreFixture(t)
+	seedResourceRows(t, s, run.ID, at, 2)
+	rows, err := s.reader().QueryContext(t.Context(), `SELECT rowid,last_observed_at FROM step_resource_usage ORDER BY rowid`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rows.Close() }()
+	var selected []resourceUsageCandidate
+	for rows.Next() {
+		var v resourceUsageCandidate
+		if err := rows.Scan(&v.id, &v.at); err != nil {
+			t.Fatal(err)
+		}
+		selected = append(selected, v)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	_ = rows.Close()
+	if len(selected) != 2 || selected[0].at == selected[1].at {
+		t.Fatal("fixture needs two distinct row/clock pairs", selected)
+	}
+	// Both IDs and both clocks exist, but neither crossed tuple exists. Two
+	// independent IN predicates would incorrectly delete both observations.
+	crossed := []resourceUsageCandidate{{id: selected[0].id, at: selected[1].at}, {id: selected[1].id, at: selected[0].at}}
+	if deleted, err := deleteResourceUsageBatch(t.Context(), s.db, crossed); err != nil || deleted != 0 {
+		t.Fatal("crossed row/clock pairs deleted observations", deleted, err)
+	}
+	var remaining int
+	if err := s.reader().QueryRowContext(t.Context(), `SELECT count(*) FROM step_resource_usage`).Scan(&remaining); err != nil || remaining != 2 {
+		t.Fatal("crossed pairs changed retained rows", remaining, err)
+	}
+	// Positive control: the original matching tuples must still delete both.
+	if deleted, err := deleteResourceUsageBatch(t.Context(), s.db, selected); err != nil || deleted != 2 {
+		t.Fatal("matching row/clock pairs did not delete both observations", deleted, err)
+	}
+}
+
 func TestResourceRetentionCommitInvalidatesAuditCache(t *testing.T) {
 	s, run, at := resourceStoreFixture(t)
 	seedAuditMetricRows(t, s, 32, at)
