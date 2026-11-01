@@ -24,7 +24,7 @@ const canonicalGARPrefix = "europe-west4-docker.pkg.dev/skipopsmain/oberth/"
 
 // watchTunnelImageDefault is the digest-pinned cloudflared image the chart
 // and installer pin by default. Update deliberately.
-const watchTunnelImageDefault = "docker.io/cloudflare/cloudflared:2026.9.3@sha256:072c067d25ccbe61d46e18f0d0723255f2bb5304f7317caa95b27031520ff92c"
+const watchTunnelImageDefault = "docker.io/cloudflare/cloudflared:2026.10.6@sha256:004d843fa5fdc3103983fd580ee19fab4a8fa98add31f87249c1659e848c98e0"
 
 // watchTunnelOpenbaoImageDefault is the digest-pinned OpenBao image used by
 // the init container that fetches the connector token.
