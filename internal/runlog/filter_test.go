@@ -2,7 +2,10 @@ package runlog
 
 import (
 	"bufio"
+	"context"
 	"errors"
+	"os"
+	"os/exec"
 	"regexp"
 	"strconv"
 	"strings"
@@ -403,23 +406,60 @@ func TestAPatternCannotRecoverASecretTheWriterRedacted(t *testing.T) {
 }
 
 func TestAPathologicalPatternOverALargeStepStaysBounded(t *testing.T) {
-	lines := make([]string, 0, 60000)
-	for i := 0; i < 60000; i++ {
-		lines = append(lines, "[t/u] "+strings.Repeat("a", 40))
+	const lineCount = 60000
+	const childDirectory = "OBERTH_RUNLOG_BOUND_CHILD_DIRECTORY"
+	read := func(store *Store, pattern string) time.Duration {
+		t.Helper()
+		started := time.Now()
+		body, meta, err := store.ReadFiltered("r-slow", "t", "u", Filter{Pattern: pattern, Limit: 10})
+		elapsed := time.Since(started)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(body) != 0 || meta.MatchedLines != 0 || meta.TotalLines != lineCount || !meta.ScanComplete {
+			t.Fatalf("pattern %q: meta = %#v, body length = %d; want a complete scan with no matches", pattern, meta, len(body))
+		}
+		t.Logf("pattern %q: %s", pattern, elapsed)
+		return elapsed
+	}
+
+	// Isolate the suspect matcher so even backtracking on the first line can
+	// be stopped. A context on ReadFiltered cannot interrupt a regexp call.
+	if directory := os.Getenv(childDirectory); directory != "" {
+		// The parent has already created the directory and published its index.
+		read(&Store{directory: directory}, "(a+)+b")
+		return
+	}
+
+	lines := make([]string, lineCount)
+	for i := range lines {
+		lines[i] = "[t/u] " + strings.Repeat("a", 40)
 	}
 	store := seedRun(t, "r-slow", lines)
-
-	started := time.Now()
-	_, meta, err := store.ReadFiltered("r-slow", "t", "u", Filter{Pattern: "(a+)+b", Limit: 10})
+	// Warm the file and regexp machinery before calibrating. a+b accepts the
+	// same language as (a+)+b and scans the same bytes without nested repeats.
+	read(store, "a+b")
+	baseline := read(store, "a+b")
+	// Allow ample room for regexp constants, process startup and race-detector
+	// shutdown. The budget scales with this machine/load, not a fixed deadline;
+	// exponential backtracking on forty a's still cannot fit within it.
+	budget := 16 * baseline
+	ctx, cancel := context.WithTimeout(t.Context(), budget)
+	defer cancel()
+	executable, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if elapsed := time.Since(started); elapsed > 10*time.Second {
-		t.Fatalf("a catastrophic-looking pattern took %s; RE2 should not backtrack", elapsed)
+	cmd := exec.CommandContext(ctx, executable, "-test.run=^"+t.Name()+"$", "-test.count=1", "-test.v")
+	cmd.Env = append(os.Environ(), childDirectory+"="+store.directory)
+	output, err := cmd.CombinedOutput()
+	if ctx.Err() != nil {
+		t.Fatalf("pathological pattern exceeded 16x the plain-pattern scan (%s; budget %s); RE2 should not backtrack\n%s", baseline, budget, output)
 	}
-	if meta.MatchedLines != 0 {
-		t.Fatalf("meta = %#v, want no matches", meta)
+	if err != nil {
+		t.Fatalf("pathological-pattern subprocess: %v\n%s", err, output)
 	}
+	t.Logf("plain-pattern scan: %s; subprocess budget: %s\n%s", baseline, budget, output)
 }
 
 func seedOversized(t *testing.T, runID string) *Store {
