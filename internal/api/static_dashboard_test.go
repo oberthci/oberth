@@ -210,7 +210,7 @@ func TestRunsPageIsOneFlatFilteredList(t *testing.T) {
 		}
 		return source[from : from+to]
 	}
-	for _, want := range []string{"`/api/runs?limit=${runPageSize}${state.collapseRuns ?", `new URLSearchParams({ limit: String(runPageSize) })`, `api("/api/runs/counts")`} {
+	for _, want := range []string{"`/api/runs?limit=${runPageSize}&latest_per_ref=1`", `new URLSearchParams({ limit: String(runPageSize) })`, `api("/api/runs/counts")`} {
 		if !strings.Contains(source, want) {
 			t.Fatalf("app.js run loading is missing %s", want)
 		}
@@ -268,13 +268,13 @@ func TestRunsPageIsOneFlatFilteredList(t *testing.T) {
 	}
 }
 
-func TestDashboardUsesTotalRangesAndIssueFacets(t *testing.T) {
+func TestDashboardUsesBranchTagCountsAndIssueFacets(t *testing.T) {
 	t.Parallel()
 	source := string(staticAssets["app.js"].body)
 	for _, want := range []string{
 		"function pageRange(start, length, total)",
-		"pageRange(state.runStart, dated.length, datedTotal)",
-		"state.runStart += state.runSourceCount",
+		"${source.length} branches/tags · page ${page}",
+		"Latest run for each branch or tag",
 		"pageRange(issueStart, issues.length, total)",
 		"const facets = page.counts || {}",
 		"${facets.open || 0} open · ${facets.manual || 0} manual · ${facets.ci || 0} CI · ${facets.closed || 0} closed",
@@ -302,9 +302,7 @@ func TestRunsFiltersCountsAndCancelledSuccessors(t *testing.T) {
 		`if (saved === "waiting") return "queued"`,
 		`if (saved === "interrupted") return "cancelled"`,
 		`localStorage.getItem("oberth-filter") === "release"`,
-		`state.runCounts?.Queued`, `state.runCounts?.QueuedByRepo?.[selectedRepo?.ID]`,
-		`const datedTotal = Math.max(0, (counts.get(state.repo) || 0) - queued)`,
-		`state.runSourceCount = state.collapseRuns ? source.length : dated.length`,
+		`state.runNext = source.length === runPageSize`,
 		`function shortSuccessor(s) { return String(s || "").slice(0, 12); }`,
 		`view successor ${esc(shortSuccessor(run.SupersededBy))}`,
 		`(status === "cancelled" || status === "superseded") ?`, `esc(runMessage(run))`, `server restart, retry needed`, `retry-warning`,

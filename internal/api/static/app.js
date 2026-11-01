@@ -11,12 +11,10 @@ const slowPollMs = 10000;
 const livePollMs = 2000;
 const state = {
   repos: [], runs: [], repoRuns: [], status: null,
-  runCounts: null, runCursor: 0, runCursorHistory: [], runStart: 1, runStartHistory: [], runSourceCount: 0,
+  runCounts: null, runCursor: 0, runCursorHistory: [],
   runNext: 0, runsNext: "", repoRunsNext: "",
   timer: null, routeSeq: 0,
- collapseRuns: localStorage.getItem("oberth-collapse-runs") !== "false",
- showSuperseded: localStorage.getItem("oberth-show-superseded") === "true",
- attempts: new Map(),
+  attempts: new Map(), detailRun: null,
   filter: readRunFilter(),
   releaseOnly: localStorage.getItem("oberth-kind") === "release" || localStorage.getItem("oberth-filter") === "release",
   repo: localStorage.getItem("oberth-repo") || "all",
@@ -319,6 +317,7 @@ function submitToken() {
   if (!value) return;
   closeLiveLog();
   state.authGen++;
+  state.detailRun = null;
   state.attempts.clear();
   if (state.pendingController) { state.pendingController.abort(); state.pendingController = null; }
   setToken(value);
@@ -327,6 +326,7 @@ function submitToken() {
 function clearToken() {
   closeLiveLog();
   state.authGen++;
+  state.detailRun = null;
   state.attempts.clear();
   if (state.pendingController) { state.pendingController.abort(); state.pendingController = null; }
   setToken(null); setConn(false, "signed out"); showTokenPrompt();
@@ -384,10 +384,9 @@ function setAuto(ms) {
 /* ---------- data loading ---------- */
 async function loadRepos() { state.repos = await api("/api/repos") || []; }
 const runPageSize = 100;
-/* The default list has the whole queue first, then admitted and terminal
-   runs in descending admission time. */
+/* One latest run per repository/branch/tag, newest first. */
 async function loadRuns() {
-  const page = await api(`/api/runs?limit=${runPageSize}${state.collapseRuns ? "&latest_per_ref=1" : ""}`, { withNext: true });
+  const page = await api(`/api/runs?limit=${runPageSize}&latest_per_ref=1`, { withNext: true });
   state.runs = page.body || [];
   state.runsNext = page.next;
 }
@@ -396,7 +395,7 @@ async function loadRuns() {
 async function loadRepoRuns() {
   if (state.repo === "all" && !state.runCursor) { state.repoRuns = []; state.repoRunsNext = ""; return; }
   const query = new URLSearchParams({ limit: String(runPageSize) });
- if (state.collapseRuns) query.set("latest_per_ref", "1");
+  query.set("latest_per_ref", "1");
   if (state.repo !== "all") query.set("repo", state.repo);
   if (state.runCursor) query.set("before", String(state.runCursor));
   try {
@@ -420,8 +419,6 @@ function changeRunRepo(repo) {
   state.attempts.clear();
   state.runCursor = 0;
   state.runCursorHistory = [];
-  state.runStart = 1;
-  state.runStartHistory = [];
 }
 async function loadStatus(opts) {
   state.status = await api("/api/status", opts);
@@ -434,7 +431,7 @@ async function loadStatus(opts) {
    release kind compose on the loaded page. */
 function runMatches(run) {
   const statusOK = state.filter === "all" || displayRunStatus(run) === state.filter;
-  return statusOK && (!state.releaseOnly || run.Release) && (state.showSuperseded || state.filter === "superseded" || displayRunStatus(run) !== "superseded");
+  return statusOK && (!state.releaseOnly || run.Release);
 }
 function repoCounts(runs) {
   const counts = new Map([["all", runs.length]]);
@@ -495,25 +492,45 @@ function runRow(run) {
     return `<div class="trow" data-run-id="${esc(run.ID)}"><div class="status-cell run-status">${statusIcon(status)}${pill(statusLabel(status), statusKind(status))}</div><div class="primary"><div class="repo-name">${esc(repoName(run.RepoID))} ${releaseBadge(run)}${scheduleBadge(run)}${group ? ` <span class="v4b dim" title="concurrency group">${esc(group)}</span>` : ""}</div><div class="branch">${esc(run.RefKind === "tag" ? "tag " : "")}${esc(run.Ref)}</div></div><div class="sha">${esc(shortSha(run.SHA))}</div><div class="clip" title="${esc(run.Actor)}">${esc(run.Actor || "--")}</div><div class="nowrap" title="${esc(fmtTime(runWhen(run)))}">${esc(runTimeLabel(run))}<br><span class="meta"${queued ? ` title="${esc(queueSizeTitle(run))}"` : ""}>${queued ? esc(queueSize(run)) : esc(fmtDur(runDuration(run)))}</span></div><div class="clip" title="${esc(queueDetail(run))}">${runMessageCell(run)}</div></div>`;
 }
 function runsTable(runs) {
- return `<div class="table runs-table"><div class="trow head"><div>status</div><div>run</div><div>sha</div><div>actor</div><div>when</div><div>message</div></div>${runs.map(run => {
-  const expanded = state.attempts.get(run.ID);
-  const earlier = Number(run.earlier_attempts || 0);
-  return runRow(run) + (state.collapseRuns && earlier ? `<div class="attempt-toggle"><button type="button" data-action="toggle-attempts" data-head="${esc(run.ID)}" aria-expanded="${!!expanded}">${expanded ? "▾" : "▸"} ${esc(earlier)} earlier attempts</button></div>${expanded ? expanded.rows.filter(row => state.showSuperseded || displayRunStatus(row) !== "superseded").map(runRow).join("") + (!state.showSuperseded ? '<div class="meta attempt-note">Superseded attempts hidden; enable “show superseded” to include them.</div>' : '') + (expanded.next ? `<button type="button" class="attempt-toggle" data-action="older-attempts" data-head="${esc(run.ID)}">older attempts ›</button>` : '') : ""}` : "");
- }).join("")}</div>`;
+  return `<div class="table runs-table"><div class="trow head"><div>status</div><div>run</div><div>sha</div><div>actor</div><div>when</div><div>message</div></div>${runs.map(runRow).join("")}</div>`;
+}
+/* History belongs to the individual run, including superseded runs. The
+   API cursor is opaque (scoped uplinks get IDs rather than sequences). */
+function runHistory(run) {
+  const history = state.attempts.get(run.ID);
+  const expanded = !!history;
+  return `<button type="button" class="chip" data-action="toggle-attempts" data-head="${esc(run.ID)}" aria-expanded="${expanded}" aria-controls="runHistoryRows">${expanded ? "▾" : "▸"} Run history for this ${run.RefKind === "tag" ? "tag" : "branch"}</button>${expanded ? `<div id="runHistoryRows">${history.rows.length ? runsTable(history.rows) : `<p class="meta">${history.loading ? "Loading run history…" : history.error ? "" : "No other retained runs for this " + (run.RefKind === "tag" ? "tag." : "branch.")}</p>`}${history.error ? `<p class="meta" role="status">${esc(history.error)}</p>` : ""}${history.next || history.error ? `<button type="button" class="chip" data-action="older-attempts" data-head="${esc(run.ID)}" ${history.loading ? "disabled" : ""}>${history.loading ? "Loading…" : history.error ? "Retry" : "Older runs ›"}</button>` : ""}</div>` : ""}`;
+}
+function updateRunHistory(run) {
+  const section = app?.querySelector("[data-detail-run]");
+  if (section?.dataset.detailRun === run.ID) section.querySelector("#runHistory").innerHTML = runHistory(run);
 }
 async function loadRunAttempts(id, older) {
- const head = [...state.runs, ...state.repoRuns].find(run => run.ID === id);
- if (!head || (older && !state.attempts.has(id))) return;
- if (!older && state.attempts.has(id)) { state.attempts.delete(id); route(); return; }
- const previous = state.attempts.get(id), generation = state.authGen;
- const query = new URLSearchParams({repo: repoKeyOf(head.RepoID), ref: head.Ref, limit: String(runPageSize)});
- if (older && previous?.next) query.set("before", String(previous.next));
- const page = await api("/api/runs?" + query, {withNext:true});
- if (generation !== state.authGen) return;
- const rows = [...(older ? previous.rows : []), ...(page.body || []).filter(run => run.ID !== id && run.RepoID === head.RepoID && run.Ref === head.Ref && run.RefKind === head.RefKind)];
- const seen = new Set();
- state.attempts.set(id, {rows: rows.filter(run => !seen.has(run.ID) && seen.add(run.ID)), next: page.next});
- route();
+  const head = state.detailRun;
+  if (!head || head.ID !== id) return;
+  const previous = state.attempts.get(id);
+  if (!older && previous) { state.attempts.delete(id); updateRunHistory(head); return; }
+  if (previous?.loading || (older && !previous)) return;
+  const generation = state.authGen;
+  const history = { rows: previous?.rows || [], next: previous?.next || "", loading: true, error: "" };
+  state.attempts.set(id, history);
+  updateRunHistory(head);
+  const query = new URLSearchParams({repo: repoKeyOf(head.RepoID), ref: head.Ref, limit: String(runPageSize)});
+  if (history.next) query.set("before", String(history.next));
+  try {
+    const page = await api("/api/runs?" + query, {withNext: true, detached: true});
+    if (generation !== state.authGen || state.attempts.get(id) !== history) return;
+    const rows = [...history.rows, ...(page.body || []).filter(run => run.ID !== id && run.RepoID === head.RepoID && run.Ref === head.Ref && run.RefKind === head.RefKind)];
+    const seen = new Set();
+    history.rows = rows.filter(run => !seen.has(run.ID) && seen.add(run.ID));
+    history.next = page.next;
+  } catch (err) {
+    if (generation !== state.authGen || state.attempts.get(id) !== history) return;
+    history.error = `Could not load run history: ${err.message}`;
+  } finally {
+    history.loading = false;
+    if (generation === state.authGen && state.attempts.get(id) === history) updateRunHistory(head);
+  }
 }
 async function renderRuns(seq) {
   setChrome("runs", "/ runs");
@@ -537,34 +554,27 @@ async function renderRuns(seq) {
      for an uplink scoped to some upstreams, which sees no sequences (#073).
      A server without the header pages by the oldest run's sequence. */
   const named = source === runs ? state.runsNext : state.repoRunsNext;
-  const dated = source.filter(run => displayRunStatus(run) !== "queued");
-  state.runSourceCount = state.collapseRuns ? source.length : dated.length;
-  state.runNext = (state.collapseRuns ? source.length : dated.length) === runPageSize ? (named || source[source.length - 1].QueueSequence || 0) : 0;
+  state.runNext = source.length === runPageSize ? (named || source[source.length - 1].QueueSequence || 0) : 0;
   const page = state.runCursorHistory.length + 1;
-  const selectedRepo = state.repos.find(repo => repoKey(repo) === state.repo);
-  const current = runs.filter(run => state.repo === "all" || repoKeyOf(run.RepoID) === state.repo);
-  const queued = (state.repo === "all" ? state.runCounts?.Queued : state.runCounts?.QueuedByRepo?.[selectedRepo?.ID]) ?? current.filter(run => displayRunStatus(run) === "queued").length;
-  const datedTotal = Math.max(0, (counts.get(state.repo) || 0) - queued);
   replaceApp(`
   <section class="screen">
     <h1 class="sr-only">Runs</h1>
     ${admissionPausedBanner(state.status?.controller_profile)}
     <div class="runs-layout">
-      <aside class="repo-side">
-        <div class="repo-filter-row"><button class="repo-filter ${state.repo === "all" ? "on" : ""}" data-repo-filter="all"><span class="name">All repos</span><span class="count">${esc(counts.get("all") || 0)}</span></button></div>
+        <div class="toolbar runs-toolbar">
+          ${runFilters.map(f => `<button class="chip ${state.filter === f ? "on" : ""}" data-status-filter="${esc(f)}">${esc(f)}</button>`).join("")}
+          <button class="chip ${state.releaseOnly ? "on" : ""}" data-kind-filter="release" aria-pressed="${state.releaseOnly}">release</button>
+          <span class="count">${source.length} branches/tags · page ${page}${state.filter === "all" && !state.releaseOnly ? "" : ` · ${visible.length} match this page`}</span>
+          <span class="meta">Latest run for each branch or tag</span>
+        </div>
+      <aside class="repo-side" aria-label="Repositories and retained run counts">
+        <div class="repo-filter-row"><button class="repo-filter ${state.repo === "all" ? "on" : ""}" data-repo-filter="all"><span class="name">All repos</span><span class="count">${esc(counts.get("all") || 0)} runs</span></button></div>
         ${orderedRepos().map((repo, index, repos) => {
           const divider = repo.ArchivedAt && (index === 0 || !repos[index - 1].ArchivedAt) ? '<div class="repo-filter-row repo-archived-divider"><span class="meta">archived</span></div>' : "";
-          return `${divider}<div class="repo-filter-row"><button class="${repo.ArchivedAt ? "repo-filter archived" : "repo-filter"}${state.repo === repoKey(repo) ? " on" : ""}" data-repo-filter="${esc(repoKey(repo))}" title="${esc(repoKey(repo))}"><span class="name">${esc(repoLabel(repo))}</span><span class="count">${esc(counts.get(repoKey(repo)) || 0)}</span></button></div>`;
+          return `${divider}<div class="repo-filter-row"><button class="${repo.ArchivedAt ? "repo-filter archived" : "repo-filter"}${state.repo === repoKey(repo) ? " on" : ""}" data-repo-filter="${esc(repoKey(repo))}" title="${esc(repoKey(repo))}"><span class="name">${esc(repoLabel(repo))}</span><span class="count">${esc(counts.get(repoKey(repo)) || 0)} runs</span></button></div>`;
         }).join("")}
       </aside>
       <section>
-        <div class="toolbar">
-          ${runFilters.map(f => `<button class="chip ${state.filter === f ? "on" : ""}" data-status-filter="${esc(f)}">${esc(f)}</button>`).join("")}
-          <button class="chip ${state.releaseOnly ? "on" : ""}" data-kind-filter="release" aria-pressed="${state.releaseOnly}">release</button>
-          <button class="chip ${state.collapseRuns ? "on" : ""}" data-action="toggle-collapse-runs" aria-pressed="${state.collapseRuns}">latest per ref</button>
-          <button class="chip ${state.showSuperseded ? "on" : ""}" data-action="toggle-superseded" title="Include superseded in expanded history; turn off latest per ref for the full list" aria-pressed="${state.showSuperseded}">show superseded</button>
-          <span class="count">${state.collapseRuns ? `${source.length} latest refs · page ${page}` : pageRange(state.runStart, dated.length, datedTotal)}${state.filter === "all" && !state.releaseOnly ? "" : ` · ${visible.length} match this page`}</span>
-        </div>
         ${visible.length ? runsTable(visible) : `<div class="empty">No runs match the current filters.</div>`}
         ${page > 1 || state.runNext ? `<div class="issue-pager">
           <button type="button" data-action="runs-newer" ${page > 1 ? "" : "disabled"}>‹ newer</button>
@@ -1112,6 +1122,7 @@ async function renderRunDetail(runID, seq, background) {
 }
 async function renderRunDetailView(detail, seq) {
   const run = detail.Run || {}, steps = detail.Steps || [];
+  state.detailRun = run;
   const repository = state.repos.some(repo => repo.ID === run.RepoID) ? repoName(run.RepoID) : (detail.Repository?.Name || repoName(run.RepoID));
   if (state.stepRunID !== run.ID) { state.step = ""; state.stepRunID = run.ID; }
   const keys = steps.map(stepKey);
@@ -1160,7 +1171,9 @@ async function renderRunDetailView(detail, seq) {
     <div id="runBanners">${kind === "fail" ? `<div class="fbanner"><b>✗ ${esc(run.FailedStep ? (run.FailedBurn ? run.FailedBurn + " / " : "") + run.FailedStep : "run failed")}</b><span class="err" title="${esc(run.Error)}">${esc(run.Error || "")}</span></div>` : ""}
     ${(status === "cancelled" || status === "superseded") ? `<div class="sbanner${runMessage(run) === "server restart, retry needed" ? " retry-warning" : ""}"><span class="err">${esc(runMessage(run))}</span>${run.SupersededBy ? `<button class="chip" data-run-id="${esc(run.SupersededBy)}">view successor ${esc(shortSuccessor(run.SupersededBy))}</button>` : ""}</div>` : ""}
     ${status === "infra-retried" ? `<div class="sbanner retry-warning"><span>${esc(runMessage(run))}</span><button class="chip" data-run-id="${esc(run.auto_retried_by)}">view retry</button><span>${esc(run.Error || "")}</span></div>` : ""}
-    </div><div class="v4-body">
+    </div>
+    <div id="runHistory" class="run-history">${runHistory(run)}</div>
+    <div class="v4-body">
       <div class="slist" id="stepList">
         <div class="sl-h"><span>STEPS · ${stepCount}${run.Release ? " · RELEASE" : ""}</span></div>
         <button class="v4row summary${selected ? "" : " sel"}" data-select-step=""><span class="ic ${kind === "pass" ? "g" : kind === "fail" ? "r" : kind === "run" ? "o" : "d"}">≡</span><span class="nm">Run summary</span><span class="dur">${esc(fmtDur(seconds))}</span></button>
@@ -1177,7 +1190,7 @@ async function renderRunDetailView(detail, seq) {
   if (existing?.dataset.detailRun === run.ID) {
     const template = document.createElement("template");
     template.innerHTML = detailHTML;
-    for (const selector of [".rh", "#runBanners", "#stepList", "#logHead", ".term-bar"]) {
+    for (const selector of [".rh", "#runBanners", "#runHistory", "#stepList", "#logHead", ".term-bar"]) {
       existing.querySelector(selector).innerHTML = template.content.querySelector(selector).innerHTML;
     }
     const preserve = live && state.live?.view?.body === previousTerm;
@@ -1437,10 +1450,8 @@ document.addEventListener("click", event => {
     case "toggle-theme": toggleTheme(); break;
     case "refresh": state.logCache.clear(); route(); break;
     case "toggle-exec": toggleExecutorLines(); break;
-    case "toggle-collapse-runs": state.collapseRuns = !state.collapseRuns; localStorage.setItem("oberth-collapse-runs", String(state.collapseRuns)); changeRunRepo(state.repo); state.attempts.clear(); route(); break;
-    case "toggle-superseded": state.showSuperseded = !state.showSuperseded; localStorage.setItem("oberth-show-superseded", String(state.showSuperseded)); route(); break;
-    case "toggle-attempts": loadRunAttempts(target.dataset.head, false).catch(err => { if (err.message !== "stale request") replaceApp(`<div class="empty">${esc(err.message)}</div>`); }); break;
-    case "older-attempts": loadRunAttempts(target.dataset.head, true).catch(err => { if (err.message !== "stale request") replaceApp(`<div class="empty">${esc(err.message)}</div>`); }); break;
+    case "toggle-attempts": loadRunAttempts(target.dataset.head, false); break;
+    case "older-attempts": loadRunAttempts(target.dataset.head, true); break;
     case "clear-token": clearToken(); break;
     case "submit-token": submitToken(); break;
     case "close-issue": closeIssue(); break;
@@ -1451,11 +1462,11 @@ document.addEventListener("click", event => {
       break;
     }
     case "runs-older": {
-      if (state.runNext) { state.runCursorHistory.push(state.runCursor); state.runStartHistory.push(state.runStart); state.runStart += state.runSourceCount; state.runCursor = state.runNext; route(); }
+      if (state.runNext) { state.runCursorHistory.push(state.runCursor); state.runCursor = state.runNext; route(); }
       break;
     }
     case "runs-newer": {
-      if (state.runCursorHistory.length) { state.runCursor = state.runCursorHistory.pop(); state.runStart = state.runStartHistory.pop(); route(); }
+      if (state.runCursorHistory.length) { state.runCursor = state.runCursorHistory.pop(); route(); }
       break;
     }
     case "issue-newer": {

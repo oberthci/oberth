@@ -6,8 +6,6 @@ const source = readFileSync(new URL('../internal/api/static/app.js', import.meta
 const sandbox = vm.createContext({ console, URLSearchParams, Map, Set, Date, location:{pathname:'/runs/live-run'}, document: {getElementById(){return null;}}, localStorage:{getItem(){return null;}}, setInterval() {}, clearInterval() {}, requestAnimationFrame() {return 1;}, cancelAnimationFrame() {} });
 vm.runInContext(source.slice(0, source.indexOf('/* ---------- events ---------- */')), sandbox);
 const run = code => vm.runInContext(code, sandbox);
-assert.equal(run("state.collapseRuns"), true);
-assert.equal(run("state.showSuperseded"), false);
 run(`
   repoName = () => 'oberth';
   const fixtureRun = { ID: 'live-run', Ref: 'fix/live', Phase: 'test', Status: 'running' };
@@ -241,25 +239,53 @@ assert.equal(run(`displayRunStatus({Status:'failed',auto_retried_by:'retry'})`),
 assert.equal(run(`statusKind('infra-retried')`), 'warn');
 assert.equal(run(`displayRunStatus({Status:'interrupted',SupersededBy:'new'})`), 'superseded');
 assert.equal(run(`displayRunStatus({Status:'interrupted'})`), 'cancelled');
-assert.equal(run(`state.showSuperseded=false;state.filter='all';runMatches({Status:'interrupted',SupersededBy:'new'})`), false);
-assert.equal(run(`state.showSuperseded=true;runMatches({Status:'interrupted',SupersededBy:'new'})`), true);
-run(`state.showSuperseded=false;state.collapseRuns=true;state.attempts.clear();state.attempts.set('head',{rows:[{ID:'old',RepoID:1,Status:'interrupted',SupersededBy:'head'}],next:''});`);
-assert.ok(run(`runsTable([{ID:'head',RepoID:1,Status:'passed',Ref:'feature',earlier_attempts:1}])`).includes('1 earlier attempts'));
-assert.ok(!run(`runsTable([{ID:'head',RepoID:1,Status:'passed',Ref:'feature',earlier_attempts:1}])`).includes('data-run-id="old"'));
-run(`state.showSuperseded=true;`);
-assert.ok(run(`runsTable([{ID:'head',RepoID:1,Status:'passed',Ref:'feature',earlier_attempts:1}])`).includes('data-run-id="old"'));
+// The list always shows branch/tag heads, with history only on run detail.
+assert.equal(run(`state.filter='all';runMatches({Status:'interrupted',SupersededBy:'new'})`), true);
+run(`state.attempts.clear();state.attempts.set('head',{rows:[{ID:'old',RepoID:1,Status:'interrupted',SupersededBy:'head'}],next:''});`);
+const headTable = run(`runsTable([{ID:'head',RepoID:1,Status:'passed',Ref:'feature',earlier_attempts:1}])`);
+assert.ok(!headTable.includes('earlier attempts') && !headTable.includes('data-run-id="old"'));
+assert.ok(run(`runHistory({ID:'head',RefKind:'branch'})`).includes('data-run-id="old"'), 'superseded runs remain available in detail history');
+assert.ok(run(`runHistory({ID:'unloaded',RefKind:'tag'})`).includes('Run history for this tag'));
 
-run(`state.collapseRuns=true; let rcaRequests=[]; api=async path=>{rcaRequests.push(path);return {body:[],next:''};};awaitResult=loadRuns();`);
+run(`let rcaRequests=[]; api=async path=>{rcaRequests.push(path);return {body:[],next:''};};awaitResult=loadRuns();`);
 await run('awaitResult');
 assert.ok(run(`rcaRequests[0]`).includes('latest_per_ref=1'));
+run(`state.repo='ours';state.runCursor='opaque-cursor';awaitResult=loadRepoRuns();`);
+await run('awaitResult');
+assert.ok(run(`rcaRequests[1]`).includes('latest_per_ref=1') && run(`rcaRequests[1]`).includes('before=opaque-cursor'));
 run(`
  state.repos=[{ID:1,Name:'ours'},{ID:2,Name:'theirs'}];state.status={upstream_info:[]};
- state.runs=[{ID:'rca-head',RepoID:1,Ref:'feature',RefKind:'branch',Status:'passed'}];state.repoRuns=[];state.attempts.clear();route=()=>{};
- api=async path=>({body:[state.runs[0],{ID:'our-old',RepoID:1,Ref:'feature',RefKind:'branch'},{ID:'other-repo',RepoID:2,Ref:'feature',RefKind:'branch'},{ID:'other-ref',RepoID:1,Ref:'elsewhere',RefKind:'branch'}],next:''});
+ // A directly loaded detail has no list-page head in memory.
+ state.runs=[];state.repoRuns=[];state.attempts.clear();
+ state.detailRun={ID:'rca-head',RepoID:1,Ref:'feature',RefKind:'branch',Status:'passed'};
+ api=async path=>{rcaRequests.push(path);return {body:[state.detailRun,{ID:'our-old',RepoID:1,Ref:'feature',RefKind:'branch',Status:'interrupted',SupersededBy:'rca-head'},{ID:'tag-same-name',RepoID:1,Ref:'feature',RefKind:'tag'},{ID:'other-repo',RepoID:2,Ref:'feature',RefKind:'branch'},{ID:'other-ref',RepoID:1,Ref:'elsewhere',RefKind:'branch'}],next:'opaque-history-cursor'};};
  awaitResult=loadRunAttempts('rca-head',false);
 `);
 await run('awaitResult');
 assert.equal(run(`JSON.stringify(state.attempts.get('rca-head').rows.map(row=>row.ID))`), JSON.stringify(['our-old']));
+assert.ok(!run(`rcaRequests.at(-1)`).includes('latest_per_ref'));
+run(`api=async path=>{rcaRequests.push(path);return {body:[{ID:'our-old',RepoID:1,Ref:'feature',RefKind:'branch'},{ID:'older',RepoID:1,Ref:'feature',RefKind:'branch'}],next:''};};awaitResult=loadRunAttempts('rca-head',true);`);
+await run('awaitResult');
+assert.ok(run(`rcaRequests.at(-1)`).includes('before=opaque-history-cursor'));
+assert.equal(run(`JSON.stringify(state.attempts.get('rca-head').rows.map(row=>row.ID))`), JSON.stringify(['our-old','older']));
+// A failed history page keeps loaded rows and offers a local retry.
+run(`api=async()=>{throw new Error('<offline>')};awaitResult=loadRunAttempts('rca-head',true);`);
+await run('awaitResult');
+assert.ok(run(`runHistory(state.detailRun)`).includes('&lt;offline&gt;'));
+assert.ok(run(`runHistory(state.detailRun)`).includes('Retry'));
+assert.equal(run(`state.attempts.get('rca-head').rows.length`), 2);
+await run(`loadRunAttempts('rca-head',false)`);
+assert.equal(run(`state.attempts.has('rca-head')`), false);
+// A collapsed or signed-out view must not be repopulated by a late response.
+run(`let finishHistory;api=()=>new Promise(resolve=>{finishHistory=resolve});awaitResult=loadRunAttempts('rca-head',false);`);
+await run(`loadRunAttempts('rca-head',false)`);
+run(`finishHistory({body:[],next:''})`);
+await run('awaitResult');
+assert.equal(run(`state.attempts.has('rca-head')`), false);
+run(`awaitResult=loadRunAttempts('rca-head',false);state.authGen++;state.attempts.clear();finishHistory({body:[],next:''});`);
+await run('awaitResult');
+assert.equal(run(`state.attempts.size`), 0);
+console.log('run-list grouping and detail-history checks passed');
 
 assert.equal(run(`summaryLines({Run:{ID:'original',Status:'failed',auto_retried_by:'retry',display_reason:'infra error, retried as retry'},Steps:[]}).some(line => line.startsWith('[queued]'))`), false);
 
