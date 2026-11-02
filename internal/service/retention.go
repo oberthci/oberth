@@ -64,8 +64,11 @@ func (r *Retention) Purge(ctx context.Context, actor api.Actor, id, what, reason
 	if !actor.Admin || actor.Scoped() {
 		return model.EvidencePurge{}, refuse(ErrForbidden, "run_purge requires an unscoped admin uplink")
 	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
+	// The store's purge transaction and AcquirePurge serialize each run.
+	// A manual request must not wait for a sweep of unrelated evidence.
+	if err := ctx.Err(); err != nil {
+		return model.EvidencePurge{}, err
+	}
 	run, err := r.Database.ResolveRunID(ctx, id)
 	if err != nil {
 		return model.EvidencePurge{}, err
