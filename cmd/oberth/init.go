@@ -19,8 +19,6 @@ const (
 	projectGeneric projectType = "generic"
 )
 
-var allProjectTypes = []projectType{projectGo, projectNode, projectPython, projectGeneric}
-
 func runInit(_ context.Context, arguments []string, output io.Writer) error {
 	var force bool
 	flags := flag.NewFlagSet("init", flag.ContinueOnError)

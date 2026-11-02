@@ -36,3 +36,5 @@ func runReleaseTierVerify(
 ) error {
 	return runReleaseTierVerifyWithSources(ctx, explicit, positionalPaths, repo, tier, timeout, output, secretStoreVerifySourcesFromCmdline(procCmdline, newKube))
 }
+
+var allProjectTypes = []projectType{projectGo, projectNode, projectPython, projectGeneric}
