@@ -130,6 +130,7 @@ type ErrorClassifier func(error) (int, string)
 const writeDeadlineMargin = 1 * time.Minute
 
 type Server struct {
+	authFailures          authFailureLimiter
 	metrics               func(io.Writer)
 	liveness              func() error
 	draining              atomic.Bool
@@ -301,8 +302,16 @@ func (server *Server) routes() {
 
 func (server *Server) requireAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if server.authFailures.check(authPeer(request), false) {
+			server.logAuthFailure(request, "rate_limited")
+			writeAuthRateLimit(writer)
+			return
+		}
 		token, ok := bearerToken(request.Header.Values("Authorization"))
 		if !ok {
+			if server.recordAuthFailure(writer, request, "missing_or_malformed") {
+				return
+			}
 			writer.Header().Set("WWW-Authenticate", `Bearer realm="oberth"`)
 			writeJSON(writer, http.StatusUnauthorized, map[string]string{"error": "authentication required"})
 			return
@@ -317,14 +326,15 @@ func (server *Server) requireAuth(next http.Handler) http.Handler {
 			return
 		}
 		if !errors.Is(err, ErrInvalidToken) && (err != nil || strings.TrimSpace(actor.Identity) == "") {
-			if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
-				log.Printf("api: authentication failure: %v", err)
-			}
+			server.logAuthFailure(request, "unavailable")
 			writer.Header().Set("Retry-After", "1")
 			writeJSON(writer, http.StatusServiceUnavailable, map[string]string{"error": "authentication temporarily unavailable; retry the request"})
 			return
 		}
 		if errors.Is(err, ErrInvalidToken) {
+			if server.recordAuthFailure(writer, request, "invalid_token") {
+				return
+			}
 			writer.Header().Set("WWW-Authenticate", `Bearer realm="oberth", error="invalid_token"`)
 			writeJSON(writer, http.StatusUnauthorized, map[string]string{"error": "invalid bearer token"})
 			return
