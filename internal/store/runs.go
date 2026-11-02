@@ -1237,7 +1237,8 @@ INSERT INTO step_results(
     run_id, burn, step, ordinal, status, exit_code, log_start, log_end,
     declared_size, max_rss_bytes, user_cpu_ns, system_cpu_ns, started_at, finished_at, recorded_at, termination_json, memory_peak_bytes
 )
-VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+WHERE EXISTS (SELECT 1 FROM runs WHERE id = ? AND status IN ('queued','running'))
 ON CONFLICT(run_id, burn, step) DO UPDATE SET
     ordinal = excluded.ordinal,
     status = excluded.status,
@@ -1258,8 +1259,11 @@ RETURNING run_id, burn, step, ordinal, status, exit_code, log_start, log_end,
 		result.RunID, result.Stage, result.Step, result.Ordinal, result.Status,
 		result.ExitCode, result.LogStart, result.LogEnd, result.DeclaredSize,
 		result.MaxRSSBytes, result.UserCPU, result.SystemCPU,
-		nullableUnixNano(result.StartedAt), nullableUnixNano(result.FinishedAt), recorded, stepDiagnosticJSON(result.Termination, result.RunID), result.MemoryPeakBytes)
+		nullableUnixNano(result.StartedAt), nullableUnixNano(result.FinishedAt), recorded, stepDiagnosticJSON(result.Termination, result.RunID), result.MemoryPeakBytes, result.RunID)
 	value, err := scanStepResult(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return model.StepResult{}, fmt.Errorf("%w: terminal or missing run cannot accept step evidence", ErrInvalidState)
+	}
 	if err != nil {
 		return model.StepResult{}, fmt.Errorf("put step result: %w", err)
 	}
