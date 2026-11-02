@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/storetest"
 )
 
 // TestAccessListResolvesRepoSpelling is the #256 regression test: persisted
@@ -80,7 +81,7 @@ func TestAccessListResolvesRepoSpelling(t *testing.T) {
 	// Once a same-name repository exists under a second upstream, the bare
 	// spelling names neither: refuse it, and keep both qualified spellings
 	// resolving to their own repository only.
-	upstream2, err := fixture.store.CreateUpstream(ctx, model.UpstreamSpec{
+	upstream2, err := storetest.CreateUpstream(fixture.store, ctx, model.UpstreamSpec{
 		Name: "github", Kind: "ssh", BaseURL: "ssh://git@github.com/beta",
 	})
 	if err != nil {

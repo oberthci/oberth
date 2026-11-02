@@ -41,7 +41,7 @@ func newRetentionFixture(t *testing.T) *retentionFixture {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	upstream, err := db.CreateUpstream(context.Background(), model.UpstreamSpec{Name: "github", Kind: "ssh", BaseURL: "ssh://git@github.com/acme"})
+	upstream, err := storetest.CreateUpstream(db, context.Background(), model.UpstreamSpec{Name: "github", Kind: "ssh", BaseURL: "ssh://git@github.com/acme"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,7 +69,7 @@ func (f *retentionFixture) run(t *testing.T, ref, trigger string, terminal bool)
 	t.Helper()
 	ctx := context.Background()
 	f.count++
-	enqueued, err := f.retention.Database.EnqueueRun(ctx, model.RunSpec{RepoID: f.repo.ID, RefKind: model.RefBranch, Ref: ref, SHA: fmt.Sprintf("%040x", f.count), Actor: "operator", Trigger: trigger})
+	enqueued, err := storetest.EnqueueRun(f.retention.Database, ctx, model.RunSpec{RepoID: f.repo.ID, RefKind: model.RefBranch, Ref: ref, SHA: fmt.Sprintf("%040x", f.count), Actor: "operator", Trigger: trigger})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -276,7 +276,7 @@ func TestRunPurgeNeverOverridesEvidenceProtection(t *testing.T) {
 					t.Fatal(err)
 				}
 			case "open issue":
-				if _, err := f.retention.Database.UpsertCIIssue(ctx, "owner", f.repo.ID, run.Ref, "open investigation", "evidence needed"); err != nil {
+				if _, err := storetest.UpsertCIIssue(f.retention.Database, ctx, "owner", f.repo.ID, run.Ref, "open investigation", "evidence needed"); err != nil {
 					t.Fatal(err)
 				}
 			case "active grant":
@@ -332,7 +332,7 @@ func TestPurgeWaitsForCancelledSchedulerWriter(t *testing.T) {
 		t.Fatal(err)
 	}
 	retention := &Retention{Database: fixture.store, Logs: fixture.logs, Artifacts: kept, AcquirePurge: fixture.scheduler.AcquireEvidencePurge}
-	run, err := fixture.store.EnqueueRun(ctx, model.RunSpec{RepoID: fixture.repo.ID, RefKind: model.RefBranch, Ref: "feature/cancel-purge", SHA: strings.Repeat("a", 40), Actor: "owner", Trigger: "branch"})
+	run, err := storetest.EnqueueRun(fixture.store, ctx, model.RunSpec{RepoID: fixture.repo.ID, RefKind: model.RefBranch, Ref: "feature/cancel-purge", SHA: strings.Repeat("a", 40), Actor: "owner", Trigger: "branch"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -381,7 +381,7 @@ func TestTerminalClaimCannotRecreatePurgedEvidence(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	fixture := newControlFixture(t)
-	run, err := fixture.store.EnqueueRun(ctx, model.RunSpec{RepoID: fixture.repo.ID, RefKind: model.RefBranch, Ref: "feature/late-dispatch", SHA: strings.Repeat("a", 40), Actor: "owner", Trigger: "branch"})
+	run, err := storetest.EnqueueRun(fixture.store, ctx, model.RunSpec{RepoID: fixture.repo.ID, RefKind: model.RefBranch, Ref: "feature/late-dispatch", SHA: strings.Repeat("a", 40), Actor: "owner", Trigger: "branch"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -419,7 +419,7 @@ func TestProtectedPurgeRetryResolvesCrashedIntent(t *testing.T) {
 	if err := f.retention.EvidenceError(ctx, run.ID, "logs"); !errors.Is(err, ErrEvidencePurged) {
 		t.Fatalf("unresolved intent not fenced: %v", err)
 	}
-	if _, err := f.retention.Database.UpsertCIIssue(ctx, "owner", f.repo.ID, run.Ref, "keep evidence", "investigation"); err != nil {
+	if _, err := storetest.UpsertCIIssue(f.retention.Database, ctx, "owner", f.repo.ID, run.Ref, "keep evidence", "investigation"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := f.retention.Purge(ctx, api.Actor{Identity: "owner", Admin: true}, run.ID, "both", "retry cleanup"); !errors.Is(err, store.ErrEvidenceProtected) {

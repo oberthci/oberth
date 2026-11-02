@@ -202,7 +202,7 @@ func TestReleaseRoutesForPushedTagsThroughReceiveAdapter(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	upstream, err := db.CreateUpstream(ctx, model.UpstreamSpec{Name: "github", Kind: "github", BaseURL: "https://github.com/org"})
+	upstream, err := storetest.CreateUpstream(db, ctx, model.UpstreamSpec{Name: "github", Kind: "github", BaseURL: "https://github.com/org"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -270,7 +270,7 @@ func TestReleaseRoutesForPushedTagsThroughReceiveAdapter(t *testing.T) {
 		if event.Update.Ref != "refs/tags/"+tc.tag || event.Update.NewSHA != object || event.ReleaseAdmission.SHA != commit {
 			t.Fatalf("wrong durable receive: %+v", event)
 		}
-		run, err := db.LatestRunForRef(ctx, repo.ID, tc.tag)
+		run, err := storetest.LatestRunForRef(db, ctx, repo.ID, tc.tag)
 		if err != nil {
 			t.Fatal(err)
 		}

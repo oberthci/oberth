@@ -1268,3 +1268,6 @@ func validateModuleRef(ref string) error {
 	}
 	return ValidateTag(ref)
 }
+
+// CacheRoot identifies the daemon-owned repository cache for removal requests.
+func (c *Cache) CacheRoot() string { return c.root }

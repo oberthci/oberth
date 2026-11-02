@@ -25,6 +25,7 @@ import (
 
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/internal/storetest"
 	"github.com/oberthci/oberth/internal/testtimeout"
 )
 
@@ -274,7 +275,7 @@ func TestUpstreamRemoveFailsClosedWhenRepositoryHasHistory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := database.EnqueueRun(context.Background(), model.RunSpec{
+	if _, err := storetest.EnqueueRun(database, context.Background(), model.RunSpec{
 		RepoID: repository.ID, RefKind: model.RefBranch, Ref: "refs/heads/main",
 		SHA: strings.Repeat("a", 40), Actor: "test@host", Trigger: "push",
 	}); err != nil {
@@ -755,7 +756,7 @@ func TestUpstreamAddStoresPerUpstreamDataKeys(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = database.Close() }()
-	registered, err := database.UpstreamByName(ctx, "codeberg")
+	registered, err := storetest.UpstreamByName(database, ctx, "codeberg")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2092,7 +2093,7 @@ func TestRepoRemoveRefusesInFlightRuns(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := database.EnqueueRun(context.Background(), model.RunSpec{
+	if _, err := storetest.EnqueueRun(database, context.Background(), model.RunSpec{
 		RepoID: repository.ID, RefKind: model.RefBranch, Ref: "main",
 		SHA: strings.Repeat("a", 40), Actor: "test@host", Trigger: "push",
 	}); err != nil {

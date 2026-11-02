@@ -10,6 +10,7 @@ import (
 	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/internal/storetest"
 )
 
 func TestIssueReopenPreservesManualIssueAndVisibility(t *testing.T) {
@@ -70,7 +71,7 @@ func TestIssueReopenDeniesCIInvalidInputAndOtherOwners(t *testing.T) {
 	fixture := newControlFixture(t)
 	service := fixture.api(t)
 	actor := api.Actor{Identity: "agent@host"}
-	ci, err := fixture.store.UpsertCIIssue(ctx, actor.Identity, fixture.repo.ID, "feature", "red", "failure")
+	ci, err := storetest.UpsertCIIssue(fixture.store, ctx, actor.Identity, fixture.repo.ID, "feature", "red", "failure")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -256,7 +256,7 @@ func TestSupersededWorkspaceWaitsForCancellationCompletion(t *testing.T) {
 	if _, err := fixture.store.SetRunWorkflowName(ctx, first.ID, workflowName); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := fixture.store.EnqueueRun(ctx, model.RunSpec{
+	if _, err := storetest.EnqueueRun(fixture.store, ctx, model.RunSpec{
 		RepoID: fixture.repo.ID, RefKind: model.RefBranch, Ref: first.Ref,
 		SHA: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", Actor: first.Actor, Trigger: "branch",
 	}); err != nil {
@@ -293,7 +293,7 @@ func TestOwnerRestartCompletesEmptyNameSupersedeBeforeCleanup(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(workspace, "src"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := fixture.store.EnqueueRun(ctx, model.RunSpec{
+	if _, err := storetest.EnqueueRun(fixture.store, ctx, model.RunSpec{
 		RepoID: fixture.repo.ID, RefKind: model.RefBranch, Ref: first.Ref,
 		SHA: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", Actor: first.Actor, Trigger: "branch",
 	}); err != nil {
@@ -615,7 +615,7 @@ func seedWorkspacePromotionCandidate(t *testing.T, fixture *controlFixture, sha 
 
 func enqueueWorkspaceRun(t *testing.T, fixture *controlFixture, ref, sha string) model.Run {
 	t.Helper()
-	enqueued, err := fixture.store.EnqueueRun(context.Background(), model.RunSpec{
+	enqueued, err := storetest.EnqueueRun(fixture.store, context.Background(), model.RunSpec{
 		RepoID: fixture.repo.ID, RefKind: model.RefBranch, Ref: ref,
 		SHA: sha, Actor: "agent@host", Trigger: "branch",
 	})

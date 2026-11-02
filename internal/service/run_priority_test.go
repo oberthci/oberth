@@ -13,6 +13,7 @@ import (
 	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/internal/storetest"
 	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
@@ -126,7 +127,7 @@ func TestQueuePriorityToolsAdminOnlyAuditedAndGated(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = control.Shutdown(ctx) }()
-	run, err := f.store.EnqueueRun(ctx, model.RunSpec{RepoID: f.repo.ID, RefKind: model.RefBranch, Ref: "rc/v1", SHA: strings.Repeat("a", 40), Actor: "dev", Trigger: "push"})
+	run, err := storetest.EnqueueRun(f.store, ctx, model.RunSpec{RepoID: f.repo.ID, RefKind: model.RefBranch, Ref: "rc/v1", SHA: strings.Repeat("a", 40), Actor: "dev", Trigger: "push"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -186,7 +187,7 @@ func TestPriorityDispatchClaimsPastLowerClassWaitersAndRefreshesBumps(t *testing
 		if kind == model.RefTag {
 			trigger = "tag"
 		}
-		r, err := f.store.EnqueueRun(ctx, model.RunSpec{RepoID: f.repo.ID, RefKind: kind, Ref: ref, SHA: strings.Repeat("a", 40), Actor: "dev", Trigger: trigger})
+		r, err := storetest.EnqueueRun(f.store, ctx, model.RunSpec{RepoID: f.repo.ID, RefKind: kind, Ref: ref, SHA: strings.Repeat("a", 40), Actor: "dev", Trigger: trigger})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -333,7 +334,7 @@ func TestQueuePriorityToolRefusesGrantedBeforeStartIsPersisted(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = control.Shutdown(ctx) }()
-	enqueued, err := f.store.EnqueueRun(ctx, model.RunSpec{RepoID: f.repo.ID, RefKind: model.RefBranch, Ref: "main", SHA: strings.Repeat("a", 40), Actor: "dev", Trigger: "push"})
+	enqueued, err := storetest.EnqueueRun(f.store, ctx, model.RunSpec{RepoID: f.repo.ID, RefKind: model.RefBranch, Ref: "main", SHA: strings.Repeat("a", 40), Actor: "dev", Trigger: "push"})
 	if err != nil {
 		t.Fatal(err)
 	}

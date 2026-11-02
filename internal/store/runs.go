@@ -56,35 +56,6 @@ func (s *Store) RunsByIDs(ctx context.Context, ids []string) (map[string]model.R
 	return result, nil
 }
 
-// EnqueueRun creates a standalone run without a durable receive event
-// association. Production callers go through EnqueueReceiveEvent which binds
-// the receive idempotency key atomically; this wrapper is retained for test
-// setup where fabricating a receive event is unnecessary overhead.
-func (s *Store) EnqueueRun(ctx context.Context, spec model.RunSpec) (model.EnqueueRunResult, error) {
-	spec, err := validateRunSpec(spec)
-	if err != nil {
-		return model.EnqueueRunResult{}, err
-	}
-	id, err := randomID()
-	if err != nil {
-		return model.EnqueueRunResult{}, fmt.Errorf("generate run id: %w", err)
-	}
-	now := unixNano(s.now())
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return model.EnqueueRunResult{}, fmt.Errorf("begin enqueue run: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-	result, err := s.enqueueRunTx(ctx, tx, spec, id, now, 0)
-	if err != nil {
-		return model.EnqueueRunResult{}, err
-	}
-	if err := tx.Commit(); err != nil {
-		return model.EnqueueRunResult{}, fmt.Errorf("commit enqueue run: %w", err)
-	}
-	return result, nil
-}
-
 // ErrRequeueIneligible marks a stranded run that restart recovery must
 // terminalize instead of re-firing: promotion CI, tag or release or
 // credentialed work, a run owned by a pending publication, or a branch that
@@ -568,7 +539,7 @@ func (s *Store) ResolveRunIDIn(ctx context.Context, id string, repoIDs []int64) 
 	}
 }
 
-func (s *Store) LatestRunForRef(ctx context.Context, repoID int64, ref string) (model.Run, error) {
+func (s *Store) latestRunForRef(ctx context.Context, repoID int64, ref string) (model.Run, error) {
 	value, err := scanRun(s.reader().QueryRowContext(ctx, `
 SELECT `+runColumns+` FROM runs
 WHERE repo_id = ? AND ref = ? ORDER BY queue_sequence DESC LIMIT 1`, repoID, ref))
@@ -740,7 +711,7 @@ SELECT count(DISTINCT ref_kind) FROM runs WHERE repo_id = ? AND ref = ?`, repoID
 	if kinds > 1 {
 		return model.Run{}, fmt.Errorf("%w: ref %q exists as both branch and tag; use the full refs/heads/ or refs/tags/ prefix to disambiguate", ErrAmbiguous, ref)
 	}
-	return s.LatestRunForRef(ctx, repoID, ref)
+	return s.latestRunForRef(ctx, repoID, ref)
 }
 
 // ResolveRunByRefKind resolves a ref name constrained to a specific ref kind,

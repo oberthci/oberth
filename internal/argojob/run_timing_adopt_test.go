@@ -78,7 +78,7 @@ func TestAdoptedWaitRetainsTimingWithoutDuplicateAttempts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	upstream, err := db.CreateUpstream(ctx, model.UpstreamSpec{Name: "codeberg", Kind: "forgejo", BaseURL: "https://codeberg.org"})
+	upstream, err := storetest.CreateUpstream(db, ctx, model.UpstreamSpec{Name: "codeberg", Kind: "forgejo", BaseURL: "https://codeberg.org"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,7 +87,7 @@ func TestAdoptedWaitRetainsTimingWithoutDuplicateAttempts(t *testing.T) {
 		t.Fatal(err)
 	}
 	sha := strings.Repeat("b", 40)
-	run, err := db.EnqueueRun(ctx, model.RunSpec{RepoID: repo.ID, RefKind: model.RefBranch, Ref: "feature/adopt", SHA: sha, Actor: "SHA256:test", Trigger: "push"})
+	run, err := storetest.EnqueueRun(db, ctx, model.RunSpec{RepoID: repo.ID, RefKind: model.RefBranch, Ref: "feature/adopt", SHA: sha, Actor: "SHA256:test", Trigger: "push"})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -39,7 +39,7 @@ func TestAuthenticationReadFailureIsUnavailableForValidToken(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.UpsertUplink(t.Context(), model.UplinkSpec{Identity: "reader", Fingerprint: "SHA256:reader", TokenCredentialID: credential.ID, AuthActor: "test"}); err != nil {
+	if _, err := storetest.UpsertUplink(db, t.Context(), model.UplinkSpec{Identity: "reader", Fingerprint: "SHA256:reader", TokenCredentialID: credential.ID, AuthActor: "test"}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := db.ActivateTokenCredential(t.Context(), credential.ID); err != nil {

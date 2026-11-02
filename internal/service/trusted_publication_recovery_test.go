@@ -14,6 +14,7 @@ import (
 
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/internal/storetest"
 	"github.com/oberthci/oberth/internal/vmrunner"
 )
 
@@ -51,7 +52,7 @@ func trustedPublicationFixture(t *testing.T, release, cleaned bool) (*controlFix
 		spec.Credentialed = true
 		spec.Trigger = "tag"
 	}
-	if _, err = f.store.EnqueueRun(ctx, spec); err != nil {
+	if _, err = storetest.EnqueueRun(f.store, ctx, spec); err != nil {
 		t.Fatal(err)
 	}
 	run, err := f.store.ClaimNextRun(ctx)
@@ -94,7 +95,7 @@ func TestTrustedPublicationGateRejectsMismatchedEvidence(t *testing.T) {
 			case "release object mismatch":
 				publication.ResultSHA = run.TestedSHA
 			case "fast forward newer failed run":
-				if _, err = f.store.EnqueueRun(ctx, model.RunSpec{RepoID: f.repo.ID, RefKind: model.RefBranch, Ref: "feature/newer", SHA: run.TestedSHA, TestedSHA: run.TestedSHA, Actor: "agent", Trigger: "branch"}); err != nil {
+				if _, err = storetest.EnqueueRun(f.store, ctx, model.RunSpec{RepoID: f.repo.ID, RefKind: model.RefBranch, Ref: "feature/newer", SHA: run.TestedSHA, TestedSHA: run.TestedSHA, Actor: "agent", Trigger: "branch"}); err != nil {
 					t.Fatal(err)
 				}
 				newer, err := f.store.ClaimNextRun(ctx)

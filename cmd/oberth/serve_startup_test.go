@@ -18,6 +18,7 @@ import (
 	"github.com/oberthci/oberth/internal/auditanchor"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/internal/storetest"
 )
 
 type staticStartupContinuity struct {
@@ -574,7 +575,8 @@ func seedPreviousV2Database(t *testing.T, path string) (model.AuditHead, string)
 	if err != nil {
 		t.Fatal(err)
 	}
-	upstream, err := database.CreateUpstream(ctx, model.UpstreamSpec{
+	storetest.Track(database, path, store.Options{})
+	upstream, err := storetest.CreateUpstream(database, ctx, model.UpstreamSpec{
 		Name: "codeberg", Kind: "forgejo", BaseURL: "https://codeberg.org",
 	})
 	if err != nil {
@@ -588,7 +590,7 @@ func seedPreviousV2Database(t *testing.T, path string) (model.AuditHead, string)
 		_ = database.Close()
 		t.Fatal(err)
 	}
-	run, err := database.EnqueueRun(ctx, model.RunSpec{
+	run, err := storetest.EnqueueRun(database, ctx, model.RunSpec{
 		RepoID: repository.ID, RefKind: model.RefBranch, Ref: "feature/v2",
 		SHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Actor: "SHA256:test", Trigger: "push",
 	})

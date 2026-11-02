@@ -49,7 +49,7 @@ func TestIssueAndAuthenticateTokenWithoutPlaintextPersistence(t *testing.T) {
 	}
 
 	issuer := Issuer{Tokens: database, Bind: func(ctx context.Context, pending model.TokenCredential) error {
-		_, err := database.UpsertUplink(ctx, model.UplinkSpec{
+		_, err := storetest.UpsertUplink(database, ctx, model.UplinkSpec{
 			Fingerprint: "SHA256:key", Identity: "agent@host", TokenCredentialID: pending.ID, AuthActor: "bootstrap",
 		})
 		return err
@@ -100,7 +100,7 @@ func TestIssueLeavesCredentialInactiveWhenOutputOrActivationFails(t *testing.T) 
 	now := time.Date(2026, 8, 4, 12, 0, 0, 0, time.UTC)
 	bind := func(database *store.Store, fingerprint string) func(context.Context, model.TokenCredential) error {
 		return func(ctx context.Context, pending model.TokenCredential) error {
-			_, err := database.UpsertUplink(ctx, model.UplinkSpec{
+			_, err := storetest.UpsertUplink(database, ctx, model.UplinkSpec{
 				Fingerprint: fingerprint, Identity: fingerprint + "@host", TokenCredentialID: pending.ID, AuthActor: "bootstrap",
 			})
 			return err
@@ -139,7 +139,7 @@ func TestIssueLeavesCredentialInactiveWhenOutputOrActivationFails(t *testing.T) 
 				t.Fatalf("Issue error = %v, want io.ErrShortWrite", issueErr)
 			}
 			digest := sha256.Sum256(plaintext)
-			credential, err := database.TokenCredentialByDigest(ctx, digest[:])
+			credential, err := storetest.TokenCredentialByDigest(database, ctx, digest[:])
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -179,7 +179,7 @@ func TestIssuedTokensAreRandom(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = database.Close() })
 	issuer := Issuer{Tokens: database, Bind: func(ctx context.Context, pending model.TokenCredential) error {
-		_, err := database.UpsertUplink(ctx, model.UplinkSpec{
+		_, err := storetest.UpsertUplink(database, ctx, model.UplinkSpec{
 			Fingerprint: "SHA256:" + pending.ID, Identity: pending.Name + "@host", TokenCredentialID: pending.ID, AuthActor: "bootstrap",
 		})
 		return err

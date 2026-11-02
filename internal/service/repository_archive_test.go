@@ -11,6 +11,7 @@ import (
 	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/internal/storetest"
 )
 
 func TestRepositoryArchiveToolsRequireUnscopedAdminAndKeepCatalog(t *testing.T) {
@@ -93,7 +94,7 @@ func TestArchivedRepositoryStatusReadsHistoryWithoutGitCache(t *testing.T) {
 	t.Parallel()
 	fixture := newControlFixture(t)
 	ctx := context.Background()
-	run, err := fixture.store.EnqueueRun(ctx, model.RunSpec{RepoID: fixture.repo.ID, RefKind: model.RefBranch, Ref: "main", SHA: strings.Repeat("a", 40), Actor: "agent", Trigger: "push"})
+	run, err := storetest.EnqueueRun(fixture.store, ctx, model.RunSpec{RepoID: fixture.repo.ID, RefKind: model.RefBranch, Ref: "main", SHA: strings.Repeat("a", 40), Actor: "agent", Trigger: "push"})
 	if err != nil {
 		t.Fatal(err)
 	}

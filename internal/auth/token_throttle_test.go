@@ -44,7 +44,7 @@ func TestTokenUseThrottleSkipsWriterButReadsRevocationEveryTime(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = db.Close() })
 	issuer := Issuer{Tokens: db, Bind: func(ctx context.Context, pending model.TokenCredential) error {
-		_, err := db.UpsertUplink(ctx, model.UplinkSpec{Identity: "reader", Fingerprint: "SHA256:" + pending.ID, TokenCredentialID: pending.ID, AuthActor: "test"})
+		_, err := storetest.UpsertUplink(db, ctx, model.UplinkSpec{Identity: "reader", Fingerprint: "SHA256:" + pending.ID, TokenCredentialID: pending.ID, AuthActor: "test"})
 		return err
 	}}
 	var out bytes.Buffer
@@ -58,7 +58,7 @@ func TestTokenUseThrottleSkipsWriterButReadsRevocationEveryTime(t *testing.T) {
 		t.Helper()
 		deadline := time.Now().Add(testtimeout.Start(2 * time.Second))
 		for {
-			readback, err := db.TokenCredentialByDigest(t.Context(), digest[:])
+			readback, err := storetest.TokenCredentialByDigest(db, t.Context(), digest[:])
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -126,7 +126,7 @@ func TestTokenUseThrottleSkipsWriterButReadsRevocationEveryTime(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitForUse()
-	if err := db.RevokeTokenCredential(t.Context(), token.ID); err != nil {
+	if err := storetest.RevokeTokenCredential(db, t.Context(), token.ID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := auth.Authenticate(t.Context(), plaintext); !errors.Is(err, ErrInvalidToken) {

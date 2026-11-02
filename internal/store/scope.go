@@ -41,29 +41,6 @@ func repoRestriction(column string, ids []int64) (string, []any) {
 	return " AND " + column + " IN (" + placeholders + ")", args
 }
 
-// RepositoryUpstreamNames maps every registered repository ID to the name of
-// its upstream, which uplink scopes match against.
-func (s *Store) RepositoryUpstreamNames(ctx context.Context) (map[int64]string, error) {
-	rows, err := s.reader().QueryContext(ctx, `SELECT r.id, u.name FROM repositories r JOIN upstreams u ON u.id = r.upstream_id`)
-	if err != nil {
-		return nil, fmt.Errorf("list repository upstreams: %w", err)
-	}
-	defer func() { _ = rows.Close() }()
-	names := map[int64]string{}
-	for rows.Next() {
-		var id int64
-		var upstream string
-		if err := rows.Scan(&id, &upstream); err != nil {
-			return nil, fmt.Errorf("scan repository upstream: %w", err)
-		}
-		names[id] = upstream
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("list repository upstreams: %w", err)
-	}
-	return names, nil
-}
-
 func normalizeUplinkScopes(scopes []string) ([]string, error) {
 	if len(scopes) > maximumUplinkScopes {
 		return nil, fmt.Errorf("%w: at most %d uplink scopes", ErrInvalid, maximumUplinkScopes)

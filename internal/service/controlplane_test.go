@@ -536,7 +536,7 @@ func TestPublicationRecoveryWakeDoesNotSeizeUnrelatedLivePublication(t *testing.
 
 	beginPending := func(branch, sha string) (model.Run, model.Publication) {
 		t.Helper()
-		run, enqueueErr := fixture.store.EnqueueRun(context.Background(), model.RunSpec{
+		run, enqueueErr := storetest.EnqueueRun(fixture.store, context.Background(), model.RunSpec{
 			RepoID: fixture.repo.ID, RefKind: model.RefBranch, Ref: branch,
 			SHA: sha, Actor: "agent@host", Trigger: "branch", TestedSHA: sha,
 		})
@@ -725,7 +725,7 @@ func beginPendingPromotionPublication(
 
 func seedGreenPromotionCandidate(t *testing.T, fixture *controlFixture, sha string) {
 	t.Helper()
-	run, err := fixture.store.EnqueueRun(context.Background(), model.RunSpec{
+	run, err := storetest.EnqueueRun(fixture.store, context.Background(), model.RunSpec{
 		RepoID: fixture.repo.ID, RefKind: model.RefBranch, Ref: "feature/promote",
 		SHA: sha, Actor: "agent@host", Trigger: "branch", TestedSHA: sha,
 	})
@@ -758,7 +758,7 @@ func TestSchedulerPausesAndResumesCompletedWorkWhenMutationGateCloses(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	run, err := fixture.store.EnqueueRun(context.Background(), model.RunSpec{
+	run, err := storetest.EnqueueRun(fixture.store, context.Background(), model.RunSpec{
 		RepoID: fixture.repo.ID, RefKind: model.RefBranch, Ref: "feature/audit-pause",
 		SHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Actor: "agent@host", Trigger: "branch",
 		TestedSHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -1276,7 +1276,7 @@ func (value *issueCloseInterleaver) Issue(ctx context.Context, id int64) (model.
 	if _, err := value.CloseCIIssue(ctx, "runner@oberth", issue.ID, "interleaving close"); err != nil {
 		return model.Issue{}, err
 	}
-	value.replacement, err = value.UpsertCIIssue(
+	value.replacement, err = storetest.UpsertCIIssue(value.Store,
 		ctx, "runner@oberth", issue.RepoID, issue.Branch, "replacement failure", "new incident",
 	)
 	return issue, err
@@ -1317,7 +1317,7 @@ func newControlFixture(t *testing.T, results ...JobResult) *controlFixture {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = database.Close() })
-	upstream, err := database.CreateUpstream(ctx, model.UpstreamSpec{Name: "codeberg", Kind: "ssh", BaseURL: "ssh://codeberg.org/acme"})
+	upstream, err := storetest.CreateUpstream(database, ctx, model.UpstreamSpec{Name: "codeberg", Kind: "ssh", BaseURL: "ssh://codeberg.org/acme"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1463,7 +1463,7 @@ func TestSchedulerUpdatesOneCIIssueAcrossRedRedGreen(t *testing.T) {
 			if _, err := fixture.store.AcquireIssueLock(ctx, issueID, "monitor@host"); err != nil {
 				t.Fatalf("projected issue should be unlocked: %v", err)
 			}
-			if err := fixture.store.ReleaseIssueLock(ctx, issueID, "monitor@host"); err != nil {
+			if err := storetest.ReleaseIssueLock(fixture.store, ctx, issueID, "monitor@host"); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -1950,7 +1950,7 @@ func TestSchedulerCompletesSupersedeAndRestartCancellationObligations(t *testing
 		t.Fatal(err)
 	}
 
-	restart, err := fixture.store.EnqueueRun(ctx, model.RunSpec{
+	restart, err := storetest.EnqueueRun(fixture.store, ctx, model.RunSpec{
 		RepoID: fixture.repo.ID, RefKind: model.RefBranch, Ref: "feature/restart-intent",
 		SHA: "cccccccccccccccccccccccccccccccccccccccc", Actor: "agent@host", Trigger: "branch",
 	})
@@ -2477,7 +2477,7 @@ func TestBranchPublicationRecoveryForcePublishesOverAnyRemoteFeatureState(t *tes
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			fixture := newControlFixture(t)
-			run, err := fixture.store.EnqueueRun(context.Background(), model.RunSpec{
+			run, err := storetest.EnqueueRun(fixture.store, context.Background(), model.RunSpec{
 				RepoID: fixture.repo.ID, RefKind: model.RefBranch, Ref: "feature/recover",
 				SHA: result, Actor: "agent@host", Trigger: "branch", TestedSHA: result,
 			})
@@ -2522,7 +2522,7 @@ func TestDivergentPromotionRecoversPushBeforeAtomicFinalization(t *testing.T) {
 		Status: model.RunPassed, Phase: "passed", Steps: []model.StepResult{stepResult(model.StepPassed)},
 	})
 	seedGreen := func() {
-		run, err := fixture.store.EnqueueRun(context.Background(), model.RunSpec{
+		run, err := storetest.EnqueueRun(fixture.store, context.Background(), model.RunSpec{
 			RepoID: fixture.repo.ID, RefKind: model.RefBranch, Ref: "feature/promote-crash",
 			SHA: sourceSHA, Actor: "agent@host", Trigger: "branch", TestedSHA: sourceSHA,
 		})
@@ -2577,7 +2577,7 @@ func TestPublicationFailureTerminalizesWithoutBackgroundRetry(t *testing.T) {
 		baseSHA   = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 	)
 	fixture := newControlFixture(t)
-	green, err := fixture.store.EnqueueRun(context.Background(), model.RunSpec{
+	green, err := storetest.EnqueueRun(fixture.store, context.Background(), model.RunSpec{
 		RepoID: fixture.repo.ID, RefKind: model.RefBranch, Ref: "feature/retry-publication",
 		SHA: sourceSHA, Actor: "agent@host", Trigger: "branch", TestedSHA: sourceSHA,
 	})
@@ -2619,7 +2619,7 @@ func TestPromotionFastForwardDivergentAndNonFastForwardFailure(t *testing.T) {
 	const mergedSHA = "cccccccccccccccccccccccccccccccccccccccc"
 	seedGreen := func(t *testing.T, fixture *controlFixture) {
 		t.Helper()
-		run, err := fixture.store.EnqueueRun(context.Background(), model.RunSpec{
+		run, err := storetest.EnqueueRun(fixture.store, context.Background(), model.RunSpec{
 			RepoID: fixture.repo.ID, RefKind: model.RefBranch, Ref: "feature/promote",
 			SHA: sourceSHA, Actor: "agent@host", Trigger: "branch", TestedSHA: sourceSHA,
 		})
@@ -2834,7 +2834,7 @@ func TestFastForwardPromotionPublicationWakesSameRefQueue(t *testing.T) {
 	fixture := newControlFixture(t,
 		JobResult{Status: model.RunPassed, Phase: "passed", Steps: []model.StepResult{stepResult(model.StepPassed)}},
 	)
-	seed, err := fixture.store.EnqueueRun(context.Background(), model.RunSpec{
+	seed, err := storetest.EnqueueRun(fixture.store, context.Background(), model.RunSpec{
 		RepoID: fixture.repo.ID, RefKind: model.RefBranch, Ref: "feature/promote-wake",
 		SHA: sourceSHA, Actor: "agent@host", Trigger: "branch", TestedSHA: sourceSHA,
 	})
@@ -2974,7 +2974,7 @@ func TestAdmittedPromotionAlwaysReturnsDurableID(t *testing.T) {
 	const sourceSHA = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	seedGreen := func(t *testing.T, fixture *controlFixture, branch string) {
 		t.Helper()
-		run, err := fixture.store.EnqueueRun(context.Background(), model.RunSpec{
+		run, err := storetest.EnqueueRun(fixture.store, context.Background(), model.RunSpec{
 			RepoID: fixture.repo.ID, RefKind: model.RefBranch, Ref: branch,
 			SHA: sourceSHA, Actor: "agent@host", Trigger: "branch", TestedSHA: sourceSHA,
 		})
@@ -3023,7 +3023,7 @@ func TestAdmittedPromotionCompensationSurvivesRequestCancellation(t *testing.T) 
 	const mergedSHA = "cccccccccccccccccccccccccccccccccccccccc"
 	seedGreen := func(t *testing.T, fixture *controlFixture, branch string) {
 		t.Helper()
-		enqueued, err := fixture.store.EnqueueRun(context.Background(), model.RunSpec{
+		enqueued, err := storetest.EnqueueRun(fixture.store, context.Background(), model.RunSpec{
 			RepoID: fixture.repo.ID, RefKind: model.RefBranch, Ref: branch,
 			SHA: sourceSHA, Actor: "agent@host", Trigger: "branch", TestedSHA: sourceSHA,
 		})
@@ -3316,7 +3316,7 @@ func TestMutationGateBlocksIssueLockTool(t *testing.T) {
 func TestIssueCloseRejectsAReplacementIncident(t *testing.T) {
 	fixture := newControlFixture(t)
 	ctx := context.Background()
-	first, err := fixture.store.UpsertCIIssue(
+	first, err := storetest.UpsertCIIssue(fixture.store,
 		ctx, "runner@oberth", fixture.repo.ID, "feature/stale-close", "first failure", "old incident",
 	)
 	if err != nil {
@@ -3417,7 +3417,7 @@ func TestIssueMutationLockRenewalIsNotPostCommit(t *testing.T) {
 		if closed.State != string(model.IssueClosed) || failing.calls != 0 {
 			t.Fatalf("closed issue = %#v, renew calls = %d", closed, failing.calls)
 		}
-		if err := fixture.store.ReleaseIssueLock(ctx, issue.ID, actor.Identity); !errors.Is(err, store.ErrLockNotOwned) {
+		if err := storetest.ReleaseIssueLock(fixture.store, ctx, issue.ID, actor.Identity); !errors.Is(err, store.ErrLockNotOwned) {
 			t.Fatalf("released close lock error = %v, want ErrLockNotOwned", err)
 		}
 	})
@@ -3446,7 +3446,7 @@ func TestIssueToolsListBothKindsAndUseActingIdentity(t *testing.T) {
 	if _, err := service.CallTool(ctx, actor, "issue_create", json.RawMessage(`{"title":"missing body"}`)); !errors.Is(err, ErrInvalidInput) {
 		t.Fatalf("missing issue body error = %v", err)
 	}
-	ciIssue, err := fixture.store.UpsertCIIssue(ctx, "runner@oberth", fixture.repo.ID, "feature/red", "CI red", "failed")
+	ciIssue, err := storetest.UpsertCIIssue(fixture.store, ctx, "runner@oberth", fixture.repo.ID, "feature/red", "CI red", "failed")
 	if err != nil {
 		t.Fatal(err)
 	}

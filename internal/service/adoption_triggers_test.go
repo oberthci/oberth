@@ -39,9 +39,9 @@ func slice2ClaimedRun(t *testing.T, kind string) (*recoveryFixture, model.Run, m
 		spec.BaseSHA = adoptionBaseSHA
 		spec.Trigger = "promotion"
 		spec.Release = false
-		enqueued, promotion, err = fixture.store.EnqueuePromotionRun(ctx, spec, model.PromotionSpec{RepoID: fixture.repo.ID, SourceBranch: "feature/adopt", SourceSHA: spec.SHA, TargetRef: "main", PreviousSHA: spec.BaseSHA, ResultSHA: spec.SHA, Actor: spec.Actor})
+		enqueued, promotion, err = storetest.EnqueuePromotionRun(fixture.store, ctx, spec, model.PromotionSpec{RepoID: fixture.repo.ID, SourceBranch: "feature/adopt", SourceSHA: spec.SHA, TargetRef: "main", PreviousSHA: spec.BaseSHA, ResultSHA: spec.SHA, Actor: spec.Actor})
 	} else {
-		enqueued, err = fixture.store.EnqueueRun(ctx, spec)
+		enqueued, err = storetest.EnqueueRun(fixture.store, ctx, spec)
 	}
 	if err != nil {
 		t.Fatal(err)
@@ -525,7 +525,7 @@ func TestNewPromotionTagAndReleaseKeepWorkflowAndWorkspaceOnShutdown(t *testing.
 func TestLegacyNonReleaseTagKeepsFallbackWithoutInferringRelease(t *testing.T) {
 	fixture := newRecoveryFixture(t)
 	ctx := context.Background()
-	enqueued, err := fixture.store.EnqueueRun(ctx, model.RunSpec{RepoID: fixture.repo.ID, RefKind: model.RefTag, Ref: "v1.0.0", SHA: adoptionTagObjectSHA, TestedSHA: adoptionTestedSHA, Actor: "agent@host", Trigger: "tag"})
+	enqueued, err := storetest.EnqueueRun(fixture.store, ctx, model.RunSpec{RepoID: fixture.repo.ID, RefKind: model.RefTag, Ref: "v1.0.0", SHA: adoptionTagObjectSHA, TestedSHA: adoptionTestedSHA, Actor: "agent@host", Trigger: "tag"})
 	if err != nil {
 		t.Fatal(err)
 	}

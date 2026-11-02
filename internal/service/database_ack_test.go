@@ -9,6 +9,7 @@ import (
 
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/internal/storetest"
 )
 
 type lostDatabaseAck struct {
@@ -57,11 +58,11 @@ func (s *lostDatabaseAck) MarkRunParked(ctx context.Context, id string) (model.R
 
 func TestDatabaseDeadlineLostClaimAckKeepsExactRun(t *testing.T) {
 	fixture := newRecoveryFixture(t)
-	first, err := fixture.store.EnqueueRun(t.Context(), model.RunSpec{RepoID: fixture.repo.ID, RefKind: model.RefBranch, Ref: "one", SHA: strings.Repeat("a", 40), Actor: "test", Trigger: "branch"})
+	first, err := storetest.EnqueueRun(fixture.store, t.Context(), model.RunSpec{RepoID: fixture.repo.ID, RefKind: model.RefBranch, Ref: "one", SHA: strings.Repeat("a", 40), Actor: "test", Trigger: "branch"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := fixture.store.EnqueueRun(t.Context(), model.RunSpec{RepoID: fixture.repo.ID, RefKind: model.RefBranch, Ref: "two", SHA: strings.Repeat("b", 40), Actor: "test", Trigger: "branch"})
+	second, err := storetest.EnqueueRun(fixture.store, t.Context(), model.RunSpec{RepoID: fixture.repo.ID, RefKind: model.RefBranch, Ref: "two", SHA: strings.Repeat("b", 40), Actor: "test", Trigger: "branch"})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -10,6 +10,7 @@ import (
 
 	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/storetest"
 )
 
 func TestPromotionRetainsFailedTrustedPreflightEvidence(t *testing.T) {
@@ -26,7 +27,7 @@ func TestPromotionRetainsFailedTrustedPreflightEvidence(t *testing.T) {
 			}
 			f.scheduler.trusted = &protectedFixture{store: f.store, failure: &TrustedPreflightFailure{Result: result, Cause: errors.New(result.Error)}}
 			sha, base := strings.Repeat("c", 40), strings.Repeat("d", 40)
-			queued, promotion, err := f.store.EnqueuePromotionRun(ctx, model.RunSpec{RepoID: f.repo.ID, RefKind: model.RefBranch, Ref: "promotion/main/preflight", SHA: sha, TestedSHA: sha, BaseSHA: base, Actor: "agent@host", Trigger: "promotion"}, model.PromotionSpec{RepoID: f.repo.ID, SourceBranch: "feature/preflight", SourceSHA: sha, TargetRef: "main", PreviousSHA: base, ResultSHA: sha, Actor: "agent@host"})
+			queued, promotion, err := storetest.EnqueuePromotionRun(f.store, ctx, model.RunSpec{RepoID: f.repo.ID, RefKind: model.RefBranch, Ref: "promotion/main/preflight", SHA: sha, TestedSHA: sha, BaseSHA: base, Actor: "agent@host", Trigger: "promotion"}, model.PromotionSpec{RepoID: f.repo.ID, SourceBranch: "feature/preflight", SourceSHA: sha, TargetRef: "main", PreviousSHA: base, ResultSHA: sha, Actor: "agent@host"})
 			if err != nil {
 				t.Fatal(err)
 			}

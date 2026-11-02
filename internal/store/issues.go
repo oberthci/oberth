@@ -16,53 +16,6 @@ const issueColumns = `
 id, repo_id, kind, branch, title, body, state, occurrences,
 ci_origin, ci_work_sequence, ci_work_id, created_at, updated_at, closed_at, scope_upstream_id`
 
-// UpsertCIIssue creates or updates a CI issue for a red branch. Production
-// callers go through the issue projection system; this method is retained for
-// test fixtures that need a CI issue without a full run lifecycle.
-func (s *Store) UpsertCIIssue(ctx context.Context, actor string, repoID int64, branch, title, body string) (model.Issue, error) {
-	if strings.TrimSpace(actor) == "" || repoID <= 0 || strings.TrimSpace(branch) == "" || strings.TrimSpace(title) == "" {
-		return model.Issue{}, fmt.Errorf("%w: CI issue fields are invalid", ErrInvalid)
-	}
-	acquired := s.now().UTC()
-	now := unixNano(acquired)
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return model.Issue{}, fmt.Errorf("begin upsert CI issue: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-	value, err := scanIssue(tx.QueryRowContext(ctx, `
-INSERT INTO issues(repo_id, kind, branch, title, body, state, occurrences, created_at, updated_at)
-VALUES(?, 'ci', ?, ?, ?, 'open', 1, ?, ?)
-ON CONFLICT(repo_id, branch) WHERE kind = 'ci' AND state = 'open' DO UPDATE SET
-    title = excluded.title,
-    body = excluded.body,
-    occurrences = issues.occurrences + 1,
-    updated_at = excluded.updated_at
-RETURNING `+issueColumns, repoID, branch, title, body, now, now))
-	if err != nil {
-		return model.Issue{}, fmt.Errorf("upsert CI issue: %w", err)
-	}
-	if err := s.appendIssueAudit(ctx, tx, actor, "issue.ci.upsert", value.ID, map[string]any{"branch": branch, "occurrences": value.Occurrences}, now); err != nil {
-		return model.Issue{}, err
-	}
-	expires := acquired.Add(IssueLockTTL)
-	if _, err := tx.ExecContext(ctx, `
-INSERT INTO issue_locks(issue_id, owner, acquired_at, expires_at) VALUES(?, ?, ?, ?)
-ON CONFLICT(issue_id) DO UPDATE SET
-    owner = excluded.owner,
-    acquired_at = excluded.acquired_at,
-    expires_at = excluded.expires_at`, value.ID, actor, now, unixNano(expires)); err != nil {
-		return model.Issue{}, fmt.Errorf("lock CI issue for pushing uplink: %w", err)
-	}
-	if err := s.appendIssueAudit(ctx, tx, actor, "issue.lock.acquire", value.ID, map[string]any{"expires_at": expires.Format(time.RFC3339Nano), "source": "ci_red"}, now); err != nil {
-		return model.Issue{}, err
-	}
-	if err := tx.Commit(); err != nil {
-		return model.Issue{}, fmt.Errorf("commit upsert CI issue: %w", err)
-	}
-	return value, nil
-}
-
 func (s *Store) CloseCIIssue(ctx context.Context, actor string, issueID int64, resolution string) (model.Issue, error) {
 	resolution = strings.TrimSpace(resolution)
 	if strings.TrimSpace(actor) == "" || issueID <= 0 || resolution == "" {
@@ -547,36 +500,6 @@ RETURNING issue_id, owner, acquired_at, expires_at`,
 		return model.IssueLock{}, fmt.Errorf("commit renew issue lock: %w", err)
 	}
 	return value, nil
-}
-
-// ReleaseIssueLock explicitly releases a lock before expiry. Production callers
-// rely on TTL expiry; this method is retained for test fixtures that need
-// immediate lock release without waiting.
-func (s *Store) ReleaseIssueLock(ctx context.Context, issueID int64, owner string) error {
-	if issueID <= 0 || strings.TrimSpace(owner) == "" {
-		return fmt.Errorf("%w: issue and lock owner are required", ErrInvalid)
-	}
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("begin release issue lock: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-	value, err := scanIssueLock(tx.QueryRowContext(ctx, `
-DELETE FROM issue_locks WHERE issue_id = ? AND owner = ?
-RETURNING issue_id, owner, acquired_at, expires_at`, issueID, owner))
-	if errors.Is(err, sql.ErrNoRows) {
-		return ErrLockNotOwned
-	}
-	if err != nil {
-		return fmt.Errorf("release issue lock: %w", err)
-	}
-	if err := s.appendIssueAudit(ctx, tx, owner, "issue.lock.release", issueID, map[string]any{"acquired_at": value.AcquiredAt.Format(time.RFC3339Nano)}, unixNano(s.now())); err != nil {
-		return err
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit release issue lock: %w", err)
-	}
-	return nil
 }
 
 func scanIssue(row rowScanner) (model.Issue, error) {

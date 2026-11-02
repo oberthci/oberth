@@ -12,6 +12,7 @@ import (
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/runlog"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/internal/storetest"
 )
 
 type rcaPreparedFailure struct{ infra bool }
@@ -169,7 +170,7 @@ func testRCACreateCleanupOutage(t *testing.T, knownCreate bool) {
 	fixture := newRecoveryFixture(t)
 	var runs []model.Run
 	for _, ref := range []string{"uncertain", "independent"} {
-		r, err := fixture.store.EnqueueRun(t.Context(), model.RunSpec{RepoID: fixture.repo.ID, RefKind: model.RefBranch, Ref: ref, SHA: strings.Repeat("a", 40), Actor: "agent", Trigger: "branch"})
+		r, err := storetest.EnqueueRun(fixture.store, t.Context(), model.RunSpec{RepoID: fixture.repo.ID, RefKind: model.RefBranch, Ref: ref, SHA: strings.Repeat("a", 40), Actor: "agent", Trigger: "branch"})
 		if err != nil {
 			t.Fatal(err)
 		}

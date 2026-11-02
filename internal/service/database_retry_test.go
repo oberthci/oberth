@@ -14,6 +14,7 @@ import (
 
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/internal/storetest"
 )
 
 type deadlineBusyError int
@@ -111,7 +112,7 @@ func TestDatabaseDeadlineSchedulerConverges(t *testing.T) {
 			t.Run(operation+"/"+fault.name, func(t *testing.T) {
 				t.Parallel()
 				fixture := newRecoveryFixture(t)
-				queued, err := fixture.store.EnqueueRun(t.Context(), model.RunSpec{RepoID: fixture.repo.ID, RefKind: model.RefBranch, Ref: "db-deadline", SHA: strings.Repeat("a", 40), Actor: "test", Trigger: "branch"})
+				queued, err := storetest.EnqueueRun(fixture.store, t.Context(), model.RunSpec{RepoID: fixture.repo.ID, RefKind: model.RefBranch, Ref: "db-deadline", SHA: strings.Repeat("a", 40), Actor: "test", Trigger: "branch"})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -154,7 +155,7 @@ func testDatabasePublicationDoesNotReplayJobOrPush(t *testing.T, failure error) 
 		t.Run(operation, func(t *testing.T) {
 			t.Parallel()
 			fixture := newRecoveryFixture(t)
-			queued, err := fixture.store.EnqueueRun(t.Context(), model.RunSpec{RepoID: fixture.repo.ID, RefKind: model.RefBranch, Ref: "main", SHA: strings.Repeat("a", 40), Actor: "test", Trigger: "branch"})
+			queued, err := storetest.EnqueueRun(fixture.store, t.Context(), model.RunSpec{RepoID: fixture.repo.ID, RefKind: model.RefBranch, Ref: "main", SHA: strings.Repeat("a", 40), Actor: "test", Trigger: "branch"})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -205,7 +206,7 @@ func testDatabaseCancellationContinuesLiveDispatch(t *testing.T, failure error) 
 			before := database.calls[operation]
 			database.failures[operation] = 2
 			database.mu.Unlock()
-			successor, err := fixture.store.EnqueueRun(t.Context(), model.RunSpec{RepoID: fixture.beacon.ID, RefKind: model.RefBranch, Ref: "supersede-db", SHA: strings.Repeat("b", 40), Actor: "test", Trigger: "branch"})
+			successor, err := storetest.EnqueueRun(fixture.store, t.Context(), model.RunSpec{RepoID: fixture.beacon.ID, RefKind: model.RefBranch, Ref: "supersede-db", SHA: strings.Repeat("b", 40), Actor: "test", Trigger: "branch"})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -423,7 +424,7 @@ func (s *deadlineJoinStore) Run(context.Context, string) (model.Run, error) {
 }
 func TestDatabaseDeadlineFatalInvariantCancelsOtherRetryingWorkers(t *testing.T) {
 	fixture := newRecoveryFixture(t)
-	if _, err := fixture.store.EnqueueRun(t.Context(), model.RunSpec{RepoID: fixture.repo.ID, RefKind: model.RefBranch, Ref: "pending", SHA: strings.Repeat("a", 40), Actor: "test", Trigger: "branch"}); err != nil {
+	if _, err := storetest.EnqueueRun(fixture.store, t.Context(), model.RunSpec{RepoID: fixture.repo.ID, RefKind: model.RefBranch, Ref: "pending", SHA: strings.Repeat("a", 40), Actor: "test", Trigger: "branch"}); err != nil {
 		t.Fatal(err)
 	}
 	scheduler := fixture.scheduler(t, &deadlineJobs{})

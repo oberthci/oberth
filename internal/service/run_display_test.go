@@ -347,7 +347,7 @@ func TestRunListsUseStorePositionsWithoutPerRowQueries(t *testing.T) {
 func TestPromotionRestartDisplaysRetryNeededWithoutCIIssue(t *testing.T) {
 	f := newControlFixture(t)
 	ctx := t.Context()
-	enqueued, _, err := f.store.EnqueuePromotionRun(ctx, model.RunSpec{RepoID: f.repo.ID, RefKind: model.RefBranch, Ref: "promotion/main/bbbbbbbbbbbb", SHA: strings.Repeat("b", 40), Actor: "agent", Trigger: "promotion", TestedSHA: strings.Repeat("b", 40), BaseSHA: strings.Repeat("a", 40)}, model.PromotionSpec{RepoID: f.repo.ID, SourceBranch: "feature/restart", SourceSHA: strings.Repeat("b", 40), TargetRef: "main", PreviousSHA: strings.Repeat("a", 40), ResultSHA: strings.Repeat("b", 40), Actor: "agent"})
+	enqueued, _, err := storetest.EnqueuePromotionRun(f.store, ctx, model.RunSpec{RepoID: f.repo.ID, RefKind: model.RefBranch, Ref: "promotion/main/bbbbbbbbbbbb", SHA: strings.Repeat("b", 40), Actor: "agent", Trigger: "promotion", TestedSHA: strings.Repeat("b", 40), BaseSHA: strings.Repeat("a", 40)}, model.PromotionSpec{RepoID: f.repo.ID, SourceBranch: "feature/restart", SourceSHA: strings.Repeat("b", 40), TargetRef: "main", PreviousSHA: strings.Repeat("a", 40), ResultSHA: strings.Repeat("b", 40), Actor: "agent"})
 	if err != nil {
 		t.Fatal(err)
 	}

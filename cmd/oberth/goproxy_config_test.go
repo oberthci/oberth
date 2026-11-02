@@ -25,7 +25,7 @@ func TestGoProxyDiscoveryBindsExactCatalogOwner(t *testing.T) {
 		t.Fatalf("unenrolled namespace: %v %v", empty, err)
 	}
 	for _, spec := range []model.UpstreamSpec{{Name: "forge", Kind: "ssh", BaseURL: "ssh://git@forge.example.test/example"}, {Name: "other", Kind: "ssh", BaseURL: "ssh://git@other.example.test/untrusted"}} {
-		owner, err := db.CreateUpstream(ctx, spec)
+		owner, err := storetest.CreateUpstream(db, ctx, spec)
 		if err != nil {
 			t.Fatal(err)
 		}

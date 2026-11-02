@@ -19,7 +19,7 @@ func TestKubeVirtGrantCLIReadsDurableRepoGrant(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	upstream, err := database.CreateUpstream(ctx, model.UpstreamSpec{Name: "github", Kind: "ssh", BaseURL: "ssh://github.com/acme"})
+	upstream, err := storetest.CreateUpstream(database, ctx, model.UpstreamSpec{Name: "github", Kind: "ssh", BaseURL: "ssh://github.com/acme"})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -366,7 +366,7 @@ func TestAdoptedRunStillHonorsCancelAndSupersede(t *testing.T) {
 				t.Fatal("Wait not entered")
 			}
 			if supersede {
-				if _, err := fixture.store.EnqueueRun(context.Background(), model.RunSpec{RepoID: fixture.repo.ID, RefKind: model.RefBranch, Ref: run.Ref, SHA: "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", Actor: "agent@host", Trigger: "branch"}); err != nil {
+				if _, err := storetest.EnqueueRun(fixture.store, context.Background(), model.RunSpec{RepoID: fixture.repo.ID, RefKind: model.RefBranch, Ref: run.Ref, SHA: "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", Actor: "agent@host", Trigger: "branch"}); err != nil {
 					t.Fatal(err)
 				}
 			} else {
@@ -446,10 +446,10 @@ func TestNonAdoptingEngineKeepsPromotionAndReleaseRecovery(t *testing.T) {
 		var enqueued model.EnqueueRunResult
 		var err error
 		if release {
-			enqueued, err = fixture.store.EnqueueRun(context.Background(), spec)
+			enqueued, err = storetest.EnqueueRun(fixture.store, context.Background(), spec)
 		} else {
 			spec.TestedSHA, spec.BaseSHA = spec.SHA, "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-			enqueued, _, err = fixture.store.EnqueuePromotionRun(context.Background(), spec, model.PromotionSpec{
+			enqueued, _, err = storetest.EnqueuePromotionRun(fixture.store, context.Background(), spec, model.PromotionSpec{
 				RepoID: fixture.repo.ID, SourceBranch: spec.Ref, SourceSHA: spec.SHA, TargetRef: "main", Actor: "agent@host",
 				ResultSHA: spec.SHA, PreviousSHA: spec.BaseSHA,
 			})
@@ -528,7 +528,7 @@ func TestAdoptedObservationFailureFailsOnlyThatRun(t *testing.T) {
 	case <-time.After(testTimeout(50 * time.Millisecond)):
 	}
 	// The scheduler keeps dispatching new work after the failed adoption.
-	next, err := fixture.store.EnqueueRun(context.Background(), model.RunSpec{RepoID: fixture.repo.ID, RefKind: model.RefBranch, Ref: "feature/next", SHA: "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd", Actor: "agent@host", Trigger: "branch"})
+	next, err := storetest.EnqueueRun(fixture.store, context.Background(), model.RunSpec{RepoID: fixture.repo.ID, RefKind: model.RefBranch, Ref: "feature/next", SHA: "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd", Actor: "agent@host", Trigger: "branch"})
 	if err != nil {
 		t.Fatal(err)
 	}

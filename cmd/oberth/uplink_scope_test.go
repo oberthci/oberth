@@ -52,7 +52,7 @@ func TestUplinkScopeLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	for name, base := range map[string]string{"github": "ssh://git@github.com/oberthci", "codeberg": "ssh://git@codeberg.org/exampleorg"} {
-		if _, err := seed.CreateUpstream(ctx, model.UpstreamSpec{Name: name, Kind: "ssh", BaseURL: base}); err != nil {
+		if _, err := storetest.CreateUpstream(seed, ctx, model.UpstreamSpec{Name: name, Kind: "ssh", BaseURL: base}); err != nil {
 			t.Fatal(err)
 		}
 	}

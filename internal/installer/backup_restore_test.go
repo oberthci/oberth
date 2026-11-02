@@ -31,6 +31,7 @@ import (
 
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/internal/storetest"
 )
 
 const (
@@ -505,7 +506,8 @@ func sourceDatabase(t *testing.T) ([]byte, map[string][]byte, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	upstream, err := database.CreateUpstream(ctx, model.UpstreamSpec{Name: "codeberg", Kind: "forgejo", BaseURL: "https://codeberg.org"})
+	storetest.Track(database, path, opts)
+	upstream, err := storetest.CreateUpstream(database, ctx, model.UpstreamSpec{Name: "codeberg", Kind: "forgejo", BaseURL: "https://codeberg.org"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -513,7 +515,7 @@ func sourceDatabase(t *testing.T) ([]byte, map[string][]byte, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	run, err := database.EnqueueRun(ctx, model.RunSpec{RepoID: repo.ID, RefKind: model.RefBranch, Ref: "main",
+	run, err := storetest.EnqueueRun(database, ctx, model.RunSpec{RepoID: repo.ID, RefKind: model.RefBranch, Ref: "main",
 		SHA: strings.Repeat("a", 40), Actor: "SHA256:test", Trigger: "push"})
 	if err != nil {
 		t.Fatal(err)
@@ -549,7 +551,8 @@ func freshInstallDatabase(t *testing.T) []byte {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := database.CreateUpstream(ctx, model.UpstreamSpec{Name: "github", Kind: "github", BaseURL: "https://github.com"}); err != nil {
+	storetest.Track(database, path, opts)
+	if _, err := storetest.CreateUpstream(database, ctx, model.UpstreamSpec{Name: "github", Kind: "github", BaseURL: "https://github.com"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := database.Close(); err != nil {

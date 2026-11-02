@@ -53,7 +53,7 @@ func TestReposWithDueTokenUseWhileWriterHeld(t *testing.T) {
 					}
 					var output bytes.Buffer
 					credential, err := (auth.Issuer{Tokens: db, Bind: func(ctx context.Context, pending model.TokenCredential) error {
-						_, err := db.UpsertUplink(ctx, model.UplinkSpec{Identity: "reader", Fingerprint: "SHA256:reader", TokenCredentialID: pending.ID, AuthActor: "test"})
+						_, err := storetest.UpsertUplink(db, ctx, model.UplinkSpec{Identity: "reader", Fingerprint: "SHA256:reader", TokenCredentialID: pending.ID, AuthActor: "test"})
 						return err
 					}}).Issue(t.Context(), "reader", &output)
 					if err != nil {
@@ -117,7 +117,7 @@ func TestReposWithDueTokenUseWhileWriterHeld(t *testing.T) {
 					// Once the writer is available, usage must eventually be recorded.
 					deadline := time.Now().Add(testtimeout.Start(2 * time.Second))
 					for {
-						got, err := db.TokenCredentialByDigest(t.Context(), credential.Digest)
+						got, err := storetest.TokenCredentialByDigest(db, t.Context(), credential.Digest)
 						if err != nil {
 							t.Fatal(err)
 						}

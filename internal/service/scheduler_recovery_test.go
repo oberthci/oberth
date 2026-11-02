@@ -77,7 +77,7 @@ func newRecoveryFixture(t *testing.T) *recoveryFixture {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = database.Close() })
-	upstream, err := database.CreateUpstream(context.Background(), model.UpstreamSpec{
+	upstream, err := storetest.CreateUpstream(database, context.Background(), model.UpstreamSpec{
 		Name: "codeberg", Kind: "ssh", BaseURL: "ssh://codeberg.org/acme",
 	})
 	if err != nil {
@@ -94,7 +94,7 @@ func newRecoveryFixture(t *testing.T) *recoveryFixture {
 
 func (f *recoveryFixture) enqueueAndClaim(t *testing.T, ref, sha string) model.Run {
 	t.Helper()
-	enqueued, err := f.store.EnqueueRun(context.Background(), model.RunSpec{
+	enqueued, err := storetest.EnqueueRun(f.store, context.Background(), model.RunSpec{
 		RepoID: f.repo.ID, RefKind: model.RefBranch, Ref: ref, SHA: sha,
 		Actor: "agent@host", Trigger: "branch",
 	})
@@ -266,7 +266,7 @@ func TestCompensationPathRequeuesWhenJobStillRunning(t *testing.T) {
 func TestCompensationPathInterruptsIneligibleTagRun(t *testing.T) {
 	t.Parallel()
 	fixture := newRecoveryFixture(t)
-	enqueued, err := fixture.store.EnqueueRun(context.Background(), model.RunSpec{
+	enqueued, err := storetest.EnqueueRun(fixture.store, context.Background(), model.RunSpec{
 		RepoID: fixture.repo.ID, RefKind: model.RefTag, Ref: "v1.2.3",
 		SHA: "abcdefabcdefabcdefabcdefabcdefabcdefabcd", Actor: "agent@host", Trigger: "tag",
 	})
@@ -328,7 +328,7 @@ func TestStartupReconciliationFinishesRunWhoseJobCompleted(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	upstream, err := database.CreateUpstream(ctx, model.UpstreamSpec{
+	upstream, err := storetest.CreateUpstream(database, ctx, model.UpstreamSpec{
 		Name: "codeberg", Kind: "ssh", BaseURL: "ssh://codeberg.org/acme",
 	})
 	if err != nil {
@@ -340,7 +340,7 @@ func TestStartupReconciliationFinishesRunWhoseJobCompleted(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	enqueued, err := database.EnqueueRun(ctx, model.RunSpec{
+	enqueued, err := storetest.EnqueueRun(database, ctx, model.RunSpec{
 		RepoID: repo.ID, RefKind: model.RefBranch, Ref: "feature/reconcile",
 		SHA: "cccccccccccccccccccccccccccccccccccccccc", Actor: "agent@host", Trigger: "branch",
 	})
@@ -427,7 +427,7 @@ func TestStartupReconciliationRequeuesRunWithVanishedJob(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	upstream, err := database.CreateUpstream(ctx, model.UpstreamSpec{
+	upstream, err := storetest.CreateUpstream(database, ctx, model.UpstreamSpec{
 		Name: "codeberg", Kind: "ssh", BaseURL: "ssh://codeberg.org/acme",
 	})
 	if err != nil {
@@ -439,7 +439,7 @@ func TestStartupReconciliationRequeuesRunWithVanishedJob(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	enqueued, err := database.EnqueueRun(ctx, model.RunSpec{
+	enqueued, err := storetest.EnqueueRun(database, ctx, model.RunSpec{
 		RepoID: repo.ID, RefKind: model.RefBranch, Ref: "feature/vanished",
 		SHA: "dddddddddddddddddddddddddddddddddddddddd", Actor: "agent@host", Trigger: "branch",
 	})
@@ -550,7 +550,7 @@ func TestStartupReconciliationTerminalizesIneligibleStrandedRun(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	upstream, err := database.CreateUpstream(ctx, model.UpstreamSpec{
+	upstream, err := storetest.CreateUpstream(database, ctx, model.UpstreamSpec{
 		Name: "codeberg", Kind: "ssh", BaseURL: "ssh://codeberg.org/acme",
 	})
 	if err != nil {
@@ -562,8 +562,8 @@ func TestStartupReconciliationTerminalizesIneligibleStrandedRun(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	enqueued, err := database.EnqueueRun(ctx, model.RunSpec{
-		RepoID: repo.ID, RefKind: model.RefTag, Ref: "v9.9.9",
+	enqueued, err := storetest.EnqueueRun(database, ctx, model.RunSpec{
+		RepoID: repo.ID, RefKind: model.RefTag, Ref: "v9.9.9", Release: true,
 		SHA: "cccccccccccccccccccccccccccccccccccccccc", Actor: "agent@host", Trigger: "tag",
 	})
 	if err != nil {

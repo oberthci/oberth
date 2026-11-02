@@ -751,28 +751,6 @@ SELECT id, audit_id, audit_sha256, tsa_url, receipt, anchored_at, created_at
 FROM audit_anchors ORDER BY id DESC LIMIT 1`))
 }
 
-func (s *Store) AuditAnchors(ctx context.Context) ([]model.AuditAnchor, error) {
-	rows, err := s.auditReader().QueryContext(ctx, `
-SELECT id, audit_id, audit_sha256, tsa_url, receipt, anchored_at, created_at
-FROM audit_anchors ORDER BY id`)
-	if err != nil {
-		return nil, fmt.Errorf("list audit anchors: %w", err)
-	}
-	defer func() { _ = rows.Close() }()
-	var anchors []model.AuditAnchor
-	for rows.Next() {
-		anchor, err := scanAuditAnchor(rows)
-		if err != nil {
-			return nil, fmt.Errorf("scan audit anchor: %w", err)
-		}
-		anchors = append(anchors, anchor)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate audit anchors: %w", err)
-	}
-	return anchors, nil
-}
-
 func (s *Store) VerifyAuditWitnesses(ctx context.Context, witnesses []model.AuditWitness) error {
 	if _, err := s.VerifyAuditChain(ctx); err != nil {
 		return err
@@ -876,10 +854,6 @@ func (s *Store) auditHashIndex(ctx context.Context) (map[int64][sha256.Size]byte
 		return nil, fmt.Errorf("iterate audit hash index: %w", err)
 	}
 	return byID, nil
-}
-
-func (s *Store) VerifyAuditAnchorReference(ctx context.Context, anchor model.AuditAnchor) error {
-	return s.VerifyAuditAnchorReferences(ctx, []model.AuditAnchor{anchor})
 }
 
 func (s *Store) VerifyAuditAnchorReferences(ctx context.Context, anchors []model.AuditAnchor) error {

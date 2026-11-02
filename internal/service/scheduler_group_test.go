@@ -16,6 +16,7 @@ import (
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/runlog"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/internal/storetest"
 	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
@@ -251,7 +252,7 @@ func newGroupFixture(t *testing.T, maxConcurrent int) *groupFixture {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = database.Close() })
-	upstream, err := database.CreateUpstream(ctx, model.UpstreamSpec{Name: "codeberg", Kind: "ssh", BaseURL: "ssh://codeberg.org/acme"})
+	upstream, err := storetest.CreateUpstream(database, ctx, model.UpstreamSpec{Name: "codeberg", Kind: "ssh", BaseURL: "ssh://codeberg.org/acme"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -689,7 +690,7 @@ func TestSchedulerPromotionCIWaitsForItsConcurrencyGroup(t *testing.T) {
 
 	result := strings.Repeat("b", 40)
 	base := strings.Repeat("c", 40)
-	enqueued, _, err := fixture.store.EnqueuePromotionRun(context.Background(), model.RunSpec{
+	enqueued, _, err := storetest.EnqueuePromotionRun(fixture.store, context.Background(), model.RunSpec{
 		RepoID: fixture.terraform.ID, RefKind: model.RefBranch, Ref: "promotion/main", Trigger: "promotion",
 		SHA: result, TestedSHA: result, BaseSHA: base, Actor: "agent@host",
 	}, model.PromotionSpec{

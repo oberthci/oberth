@@ -188,7 +188,7 @@ func TestTrustedPreflightAdapterLifecycle(t *testing.T) {
 			if org == "" {
 				baseURL = "/" // Root-based local upstream: no org component.
 			}
-			upstream, err := database.CreateUpstream(ctx, model.UpstreamSpec{Name: "upstream", Kind: "ssh", BaseURL: baseURL})
+			upstream, err := storetest.CreateUpstream(database, ctx, model.UpstreamSpec{Name: "upstream", Kind: "ssh", BaseURL: baseURL})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -197,7 +197,7 @@ func TestTrustedPreflightAdapterLifecycle(t *testing.T) {
 				t.Fatal(err)
 			}
 			sha := strings.Repeat("a", 40)
-			if _, err = database.EnqueueRun(ctx, model.RunSpec{RepoID: repo.ID, RefKind: model.RefBranch, Ref: "feature", SHA: sha, TestedSHA: sha, Actor: "agent", Trigger: "schedule", ScheduleEntry: "nightly"}); err != nil {
+			if _, err = storetest.EnqueueRun(database, ctx, model.RunSpec{RepoID: repo.ID, RefKind: model.RefBranch, Ref: "feature", SHA: sha, TestedSHA: sha, Actor: "agent", Trigger: "schedule", ScheduleEntry: "nightly"}); err != nil {
 				t.Fatal(err)
 			}
 			run, err := database.ClaimNextRun(ctx)
@@ -329,7 +329,7 @@ func TestTrustedPreflightAdapterLifecycle(t *testing.T) {
 						if recoverErr != nil || !state.Rejected || !state.Cleaned || state.WorkflowUID != "" {
 							t.Fatalf("absent create not rejected/cleaned: %#v %v", state, recoverErr)
 						}
-						if _, recoverErr = database.EnqueueRun(ctx, model.RunSpec{RepoID: repo.ID, RefKind: model.RefBranch, Ref: "next", SHA: sha, TestedSHA: sha, Actor: "agent", Trigger: "branch"}); recoverErr != nil {
+						if _, recoverErr = storetest.EnqueueRun(database, ctx, model.RunSpec{RepoID: repo.ID, RefKind: model.RefBranch, Ref: "next", SHA: sha, TestedSHA: sha, Actor: "agent", Trigger: "branch"}); recoverErr != nil {
 							t.Fatal(recoverErr)
 						}
 						next, recoverErr := database.ClaimNextRun(ctx)

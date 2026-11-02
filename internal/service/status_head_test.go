@@ -10,11 +10,12 @@ import (
 	"github.com/oberthci/oberth/internal/gitcache"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/internal/storetest"
 )
 
 func seedStatusRun(t *testing.T, fixture *controlFixture, ref, sha, trigger string, kind model.RefKind, state model.RunStatus) model.Run {
 	t.Helper()
-	enqueued, err := fixture.store.EnqueueRun(t.Context(), model.RunSpec{
+	enqueued, err := storetest.EnqueueRun(fixture.store, t.Context(), model.RunSpec{
 		RepoID: fixture.repo.ID, RefKind: kind, Ref: ref, SHA: sha, Trigger: trigger, Actor: "agent@host",
 	})
 	if err != nil {

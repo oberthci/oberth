@@ -6,12 +6,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/oberthci/oberth/internal/auditanchor"
-	"github.com/oberthci/oberth/internal/model"
-	"github.com/oberthci/oberth/internal/store"
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/oberthci/oberth/internal/auditanchor"
+	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/internal/storetest"
 )
 
 func seedLegacyPublicationRetry(t *testing.T, path string) (model.Publication, model.AuditHead) {
@@ -22,7 +24,7 @@ func seedLegacyPublicationRetry(t *testing.T, path string) (model.Publication, m
 		t.Fatal(err)
 	}
 	defer s.Close()
-	u, err := s.CreateUpstream(ctx, model.UpstreamSpec{Name: "origin", Kind: "ssh", BaseURL: "ssh://git@example.invalid/org", KeyName: "key"})
+	u, err := s.RegisterUpstream(ctx, "fixture", model.UpstreamSpec{Name: "origin", Kind: "ssh", BaseURL: "ssh://git@example.invalid/org", KeyName: "key"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -30,7 +32,7 @@ func seedLegacyPublicationRetry(t *testing.T, path string) (model.Publication, m
 	if err != nil {
 		t.Fatal(err)
 	}
-	run, err := s.EnqueueRun(ctx, model.RunSpec{RepoID: repo.ID, RefKind: model.RefBranch, Ref: "feature/retry", SHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Actor: "actor", Trigger: "branch"})
+	run, err := storetest.EnqueueRun(s, ctx, model.RunSpec{RepoID: repo.ID, RefKind: model.RefBranch, Ref: "feature/retry", SHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Actor: "actor", Trigger: "branch"})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -20,10 +20,10 @@ import (
 	"sync/atomic"
 	"time"
 
+	_ "modernc.org/sqlite"
+
 	"github.com/oberthci/oberth/internal/gitoid"
 	"github.com/oberthci/oberth/internal/model"
-
-	_ "modernc.org/sqlite"
 )
 
 const (
@@ -1136,27 +1136,6 @@ func (s *Store) Close() error {
 	return errors.Join(readersErr, s.db.Close())
 }
 
-// CreateUpstream inserts a named upstream. Production callers go through the
-// discovery-based bootstrap path; this method is retained for test fixtures
-// where fabricating a discovery response is unnecessary overhead.
-func (s *Store) CreateUpstream(ctx context.Context, spec model.UpstreamSpec) (model.Upstream, error) {
-	if strings.TrimSpace(spec.Name) == "" || strings.TrimSpace(spec.Kind) == "" || strings.TrimSpace(spec.BaseURL) == "" {
-		return model.Upstream{}, fmt.Errorf("%w: upstream fields are required", ErrInvalid)
-	}
-	now := unixNano(s.now())
-	result, err := s.db.ExecContext(ctx, `
-INSERT INTO upstreams(name, kind, base_url, key_name, created_at, updated_at) VALUES(?, ?, ?, ?, ?, ?)`,
-		spec.Name, spec.Kind, spec.BaseURL, spec.KeyName, now, now)
-	if err != nil {
-		return model.Upstream{}, fmt.Errorf("create upstream: %w", err)
-	}
-	id, err := result.LastInsertId()
-	if err != nil {
-		return model.Upstream{}, fmt.Errorf("read upstream id: %w", err)
-	}
-	return s.Upstream(ctx, id)
-}
-
 func (s *Store) Upstream(ctx context.Context, id int64) (model.Upstream, error) {
 	row := s.reader().QueryRowContext(ctx, `SELECT id, name, kind, base_url, key_name, created_at, updated_at FROM upstreams WHERE id = ?`, id)
 	var value model.Upstream
@@ -1291,7 +1270,7 @@ FROM repositories r WHERE r.name = ? AND r.upstream_id = ?`, name, upstreamID))
 }
 
 func (s *Store) repositoryByUpstreamOrgName(ctx context.Context, upstreamName, org, name string) (model.Repository, error) {
-	upstream, err := s.UpstreamByName(ctx, upstreamName)
+	upstream, err := s.upstreamByName(ctx, upstreamName)
 	if err != nil {
 		return model.Repository{}, fmt.Errorf("look up upstream %q: %w", upstreamName, err)
 	}
@@ -1496,56 +1475,6 @@ func (s *Store) appendPromotion(ctx context.Context, spec model.PromotionSpec, r
 		return model.Promotion{}, fmt.Errorf("commit append promotion: %w", err)
 	}
 	return value, nil
-}
-
-// EnqueuePromotionRun commits the merged-tree run and its immutable promotion
-// association together. Production callers go through the admitted plan/apply
-// path; this method is retained for test fixtures that need a promotion-bound
-// run without fabricating a full trusted plan flow.
-func (s *Store) EnqueuePromotionRun(ctx context.Context, runSpec model.RunSpec, promotionSpec model.PromotionSpec) (model.EnqueueRunResult, model.Promotion, error) {
-	validatedRun, err := validateRunSpec(runSpec)
-	if err != nil {
-		return model.EnqueueRunResult{}, model.Promotion{}, err
-	}
-	if err := validatePromotionSpec(promotionSpec); err != nil {
-		return model.EnqueueRunResult{}, model.Promotion{}, err
-	}
-	if validatedRun.Trigger != "promotion" || validatedRun.Release || validatedRun.RefKind != model.RefBranch ||
-		validatedRun.RepoID != promotionSpec.RepoID || validatedRun.Actor != promotionSpec.Actor ||
-		!strings.EqualFold(validatedRun.SHA, promotionSpec.ResultSHA) ||
-		!strings.EqualFold(validatedRun.TestedSHA, promotionSpec.ResultSHA) ||
-		!strings.EqualFold(validatedRun.BaseSHA, promotionSpec.PreviousSHA) {
-		return model.EnqueueRunResult{}, model.Promotion{}, fmt.Errorf("%w: promotion run does not match promotion", ErrInvalid)
-	}
-	runID, err := randomID()
-	if err != nil {
-		return model.EnqueueRunResult{}, model.Promotion{}, fmt.Errorf("generate promotion run id: %w", err)
-	}
-	promotionID, err := randomID()
-	if err != nil {
-		return model.EnqueueRunResult{}, model.Promotion{}, fmt.Errorf("generate promotion id: %w", err)
-	}
-	now := unixNano(s.now())
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return model.EnqueueRunResult{}, model.Promotion{}, fmt.Errorf("begin promotion run enqueue: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-	enqueued, err := s.enqueueRunTx(ctx, tx, validatedRun, runID, now, 0)
-	if err != nil {
-		return model.EnqueueRunResult{}, model.Promotion{}, err
-	}
-	promotion, err := insertPromotion(ctx, tx, promotionSpec, promotionID, runID, promotionSpec.GrantID, now)
-	if err != nil {
-		return model.EnqueueRunResult{}, model.Promotion{}, err
-	}
-	if err := s.appendPromotionAdmissionAudit(ctx, tx, promotion, now); err != nil {
-		return model.EnqueueRunResult{}, model.Promotion{}, err
-	}
-	if err := tx.Commit(); err != nil {
-		return model.EnqueueRunResult{}, model.Promotion{}, fmt.Errorf("commit promotion run enqueue: %w", err)
-	}
-	return enqueued, promotion, nil
 }
 
 // PlanPromotion fills the immutable Git plan for an already admitted
@@ -1841,59 +1770,6 @@ func scanPromotion(row rowScanner) (model.Promotion, error) {
 	return value, nil
 }
 
-// UpsertUplink inserts or updates an uplink record. Production callers go
-// through the admin CLI gate which assembles the full admission chain; this
-// method is retained for test fixtures that need an uplink without the CLI.
-func (s *Store) UpsertUplink(ctx context.Context, spec model.UplinkSpec) (model.Uplink, error) {
-	if strings.TrimSpace(spec.Fingerprint) == "" || strings.TrimSpace(spec.Identity) == "" ||
-		strings.TrimSpace(spec.TokenCredentialID) == "" || strings.TrimSpace(spec.AuthActor) == "" {
-		return model.Uplink{}, fmt.Errorf("%w: uplink fields are required", ErrInvalid)
-	}
-	adminInt := 0
-	if spec.Admin {
-		adminInt = 1
-	}
-	scopes, err := normalizeUplinkScopes(spec.Scope)
-	if err != nil {
-		return model.Uplink{}, err
-	}
-	now := unixNano(s.now())
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return model.Uplink{}, fmt.Errorf("begin upsert uplink: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-	row := tx.QueryRowContext(ctx, `
-INSERT INTO uplinks(fingerprint, identity, token_credential_id, auth_actor, admin, created_at, updated_at)
-VALUES(?, ?, ?, ?, ?, ?, ?)
-ON CONFLICT(fingerprint) DO UPDATE SET
-    identity = excluded.identity,
-    token_credential_id = excluded.token_credential_id,
-    auth_actor = excluded.auth_actor,
-    admin = excluded.admin,
-    updated_at = excluded.updated_at
-RETURNING id, fingerprint, identity, token_credential_id, auth_actor, admin, created_at, updated_at`,
-		spec.Fingerprint, spec.Identity, spec.TokenCredentialID, spec.AuthActor, adminInt, now, now)
-	var value model.Uplink
-	var created, updated int64
-	var scannedAdmin int
-	if err := row.Scan(&value.ID, &value.Fingerprint, &value.Identity, &value.TokenCredentialID, &value.AuthActor, &scannedAdmin, &created, &updated); err != nil {
-		return model.Uplink{}, fmt.Errorf("upsert uplink: %w", err)
-	}
-	value.Admin = scannedAdmin != 0
-	if err := replaceUplinkScopes(ctx, tx, value.ID, scopes); err != nil {
-		return model.Uplink{}, err
-	}
-	if err := tx.Commit(); err != nil {
-		return model.Uplink{}, fmt.Errorf("commit upsert uplink: %w", err)
-	}
-	if len(scopes) > 0 {
-		value.Scope = scopes
-	}
-	value.CreatedAt, value.UpdatedAt = fromUnixNano(created), fromUnixNano(updated)
-	return value, nil
-}
-
 func (s *Store) UplinkByFingerprint(ctx context.Context, fingerprint string) (model.Uplink, error) {
 	release, err := acquireAuthSlot(ctx, s.sshAuthSlots)
 	if err != nil {
@@ -2009,28 +1885,6 @@ RETURNING id, name, digest, created_at, activated_at, last_used_at, revoked_at`,
 	return value, nil
 }
 
-// TokenCredentialByDigest looks up a credential by its SHA-256 digest.
-// Production callers use AuthenticatedUplinkByDigest which joins the uplink in
-// one query; this method is retained for test fixtures that verify credential
-// lifecycle state independently.
-func (s *Store) TokenCredentialByDigest(ctx context.Context, digest []byte) (model.TokenCredential, error) {
-	if len(digest) != 32 {
-		return model.TokenCredential{}, ErrNotFound
-	}
-	release, err := acquireAuthSlot(ctx, s.bearerAuthSlots)
-	if err != nil {
-		return model.TokenCredential{}, fmt.Errorf("wait for bearer credential reader: %w", err)
-	}
-	defer release()
-	value, err := scanTokenCredential(s.authReader().QueryRowContext(ctx, `
-SELECT id, name, digest, created_at, activated_at, last_used_at, revoked_at
-FROM token_credentials WHERE digest = ?`, digest))
-	if err != nil {
-		return model.TokenCredential{}, translateNotFound("token credential", err)
-	}
-	return value, nil
-}
-
 func (s *Store) AuthenticatedUplinkByDigest(ctx context.Context, digest []byte) (model.AuthenticatedUplink, error) {
 	if len(digest) != 32 {
 		return model.AuthenticatedUplink{}, ErrNotFound
@@ -2125,26 +1979,6 @@ WHERE id = ? AND activated_at IS NOT NULL AND revoked_at IS NULL
 		return false, fmt.Errorf("read token use change: %w", err)
 	}
 	return changed != 0, nil
-}
-
-func (s *Store) RevokeTokenCredential(ctx context.Context, id string) error {
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("begin revoke token credential: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-	changed, err := revokeTokenCredentialTx(ctx, tx, id, unixNano(s.now()))
-	if err != nil {
-		return err
-	}
-	if !changed {
-		return fmt.Errorf("%w: token credential", ErrNotFound)
-	}
-
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit revoke token credential: %w", err)
-	}
-	return nil
 }
 
 func randomID() (string, error) {

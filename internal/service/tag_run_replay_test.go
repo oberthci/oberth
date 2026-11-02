@@ -12,6 +12,7 @@ import (
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/runprogress"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/internal/storetest"
 )
 
 func tagReplayPlan() []runprogress.PlannedStep {
@@ -175,7 +176,7 @@ func TestTagRunRerunUnknownEvidenceStillNeedsForce(t *testing.T) {
 
 func TestTagRunRetryBeforeWorkflowIntentNeedsNoPlan(t *testing.T) {
 	harness := newRerunHarness(t)
-	queued, err := harness.fixture.store.EnqueueRun(context.Background(), model.RunSpec{RepoID: harness.fixture.repo.ID, RefKind: model.RefTag, Ref: rerunTag, SHA: rerunTagObject, TestedSHA: rerunTagCommit, Release: true, Credentialed: true, Trigger: "tag", Actor: "pusher"})
+	queued, err := storetest.EnqueueRun(harness.fixture.store, context.Background(), model.RunSpec{RepoID: harness.fixture.repo.ID, RefKind: model.RefTag, Ref: rerunTag, SHA: rerunTagObject, TestedSHA: rerunTagCommit, Release: true, Credentialed: true, Trigger: "tag", Actor: "pusher"})
 	if err != nil {
 		t.Fatal(err)
 	}

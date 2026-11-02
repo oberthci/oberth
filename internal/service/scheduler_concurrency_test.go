@@ -13,6 +13,7 @@ import (
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/runlog"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/internal/storetest"
 	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
@@ -177,7 +178,7 @@ func newConcurrencyFixture(t *testing.T, size pipeline.Size, maxConcurrentJobs i
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = database.Close() })
-	upstream, err := database.CreateUpstream(ctx, model.UpstreamSpec{
+	upstream, err := storetest.CreateUpstream(database, ctx, model.UpstreamSpec{
 		Name: "codeberg", Kind: "ssh", BaseURL: "ssh://codeberg.org/acme",
 	})
 	if err != nil {

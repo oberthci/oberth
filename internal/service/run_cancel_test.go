@@ -15,6 +15,7 @@ import (
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/runlog"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/internal/storetest"
 	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
@@ -332,7 +333,7 @@ func TestRunCancelPromotionFailsThePromotionWithoutMerging(t *testing.T) {
 		previous = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 		result   = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 	)
-	enqueued, promotion, err := fixture.store.EnqueuePromotionRun(t.Context(), model.RunSpec{
+	enqueued, promotion, err := storetest.EnqueuePromotionRun(fixture.store, t.Context(), model.RunSpec{
 		RepoID: fixture.beacon.ID, RefKind: model.RefBranch, Ref: "promotion/main/bbbbbbbbbbbb",
 		SHA: result, Actor: "agent@host", Trigger: "promotion", TestedSHA: result, BaseSHA: previous,
 	}, model.PromotionSpec{

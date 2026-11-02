@@ -11,6 +11,7 @@ import (
 	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/internal/storetest"
 	"github.com/oberthci/oberth/internal/vmrunner"
 )
 
@@ -163,7 +164,7 @@ func TestTrustedRestartPromotionStillChecksMainBeforePush(t *testing.T) {
 				t.Fatal(err)
 			}
 			base := strings.Repeat("b", 40)
-			_, promotion, err := f.store.EnqueuePromotionRun(t.Context(), model.RunSpec{RepoID: f.repo.ID, RefKind: model.RefBranch, Ref: "promotion/main/restart", SHA: source.SHA, TestedSHA: source.SHA, BaseSHA: base, Actor: source.Actor, Trigger: "promotion"}, model.PromotionSpec{RepoID: f.repo.ID, SourceBranch: source.Ref, SourceSHA: source.SHA, TargetRef: "main", PreviousSHA: base, ResultSHA: source.SHA, Actor: source.Actor})
+			_, promotion, err := storetest.EnqueuePromotionRun(f.store, t.Context(), model.RunSpec{RepoID: f.repo.ID, RefKind: model.RefBranch, Ref: "promotion/main/restart", SHA: source.SHA, TestedSHA: source.SHA, BaseSHA: base, Actor: source.Actor, Trigger: "promotion"}, model.PromotionSpec{RepoID: f.repo.ID, SourceBranch: source.Ref, SourceSHA: source.SHA, TargetRef: "main", PreviousSHA: base, ResultSHA: source.SHA, Actor: source.Actor})
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -9,6 +9,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/storetest"
 )
 
 func grantsConfigMap(rv, grants string) *corev1.ConfigMap {
@@ -34,7 +35,7 @@ func TestReconcileCanonicalizesBareEntryOntoQualifiedRow(t *testing.T) {
 	reconciler, database := testAccessReconciler(t, cm)
 	ctx := context.Background()
 
-	upstream, err := database.CreateUpstream(ctx, model.UpstreamSpec{
+	upstream, err := storetest.CreateUpstream(database, ctx, model.UpstreamSpec{
 		Name: "codeberg", Kind: "ssh", BaseURL: "ssh://git@codeberg.org/acme",
 	})
 	if err != nil {
@@ -97,13 +98,13 @@ func TestReconcileSkipsAmbiguousBareEntryFailClosed(t *testing.T) {
 	reconciler, database := testAccessReconciler(t, cm)
 	ctx := context.Background()
 
-	upstream1, err := database.CreateUpstream(ctx, model.UpstreamSpec{
+	upstream1, err := storetest.CreateUpstream(database, ctx, model.UpstreamSpec{
 		Name: "codeberg", Kind: "ssh", BaseURL: "ssh://git@codeberg.org/acme",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	upstream2, err := database.CreateUpstream(ctx, model.UpstreamSpec{
+	upstream2, err := storetest.CreateUpstream(database, ctx, model.UpstreamSpec{
 		Name: "skipops", Kind: "ssh", BaseURL: "ssh://git@codeberg.org/skipops",
 	})
 	if err != nil {
@@ -155,7 +156,7 @@ func TestRemoveGrantCanonicalBareEntry(t *testing.T) {
 	reconciler, database := testAccessReconciler(t, cm)
 	ctx := context.Background()
 
-	upstream, err := database.CreateUpstream(ctx, model.UpstreamSpec{
+	upstream, err := storetest.CreateUpstream(database, ctx, model.UpstreamSpec{
 		Name: "codeberg", Kind: "ssh", BaseURL: "ssh://git@codeberg.org/acme",
 	})
 	if err != nil {
@@ -207,7 +208,7 @@ func TestRemoveGrantCanonicalBareAndQualifiedDuplicates(t *testing.T) {
 	reconciler, database := testAccessReconciler(t, cm)
 	ctx := context.Background()
 
-	upstream, err := database.CreateUpstream(ctx, model.UpstreamSpec{
+	upstream, err := storetest.CreateUpstream(database, ctx, model.UpstreamSpec{
 		Name: "codeberg", Kind: "ssh", BaseURL: "ssh://git@codeberg.org/acme",
 	})
 	if err != nil {
@@ -253,13 +254,13 @@ func TestRemoveGrantCanonicalAmbiguousFailsClosed(t *testing.T) {
 	ctx := context.Background()
 
 	// Create two same-name repos under different upstreams.
-	upstream1, err := database.CreateUpstream(ctx, model.UpstreamSpec{
+	upstream1, err := storetest.CreateUpstream(database, ctx, model.UpstreamSpec{
 		Name: "codeberg", Kind: "ssh", BaseURL: "ssh://git@codeberg.org/acme",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	upstream2, err := database.CreateUpstream(ctx, model.UpstreamSpec{
+	upstream2, err := storetest.CreateUpstream(database, ctx, model.UpstreamSpec{
 		Name: "skipops", Kind: "ssh", BaseURL: "ssh://git@codeberg.org/skipops",
 	})
 	if err != nil {
@@ -322,7 +323,7 @@ func TestAddGrantCanonicalDedupeAgainstBareEntry(t *testing.T) {
 	reconciler, database := testAccessReconciler(t, cm)
 	ctx := context.Background()
 
-	upstream, err := database.CreateUpstream(ctx, model.UpstreamSpec{
+	upstream, err := storetest.CreateUpstream(database, ctx, model.UpstreamSpec{
 		Name: "codeberg", Kind: "ssh", BaseURL: "ssh://git@codeberg.org/acme",
 	})
 	if err != nil {
@@ -390,7 +391,7 @@ func TestReconcileKeepsUnregisteredEntryInert(t *testing.T) {
 
 	// Once the repository registers, the next converge canonicalizes the
 	// entry onto the qualified key.
-	upstream, err := database.CreateUpstream(ctx, model.UpstreamSpec{
+	upstream, err := storetest.CreateUpstream(database, ctx, model.UpstreamSpec{
 		Name: "codeberg", Kind: "ssh", BaseURL: "ssh://git@codeberg.org/acme",
 	})
 	if err != nil {

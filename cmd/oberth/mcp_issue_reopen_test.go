@@ -24,7 +24,7 @@ func TestMCPIssueReopenRejectsCIWithActionableErrorWithoutMutation(t *testing.T)
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = database.Close() })
-	upstream, err := database.CreateUpstream(ctx, model.UpstreamSpec{Name: "origin", Kind: "forgejo", BaseURL: "https://forge.example.test/org"})
+	upstream, err := storetest.CreateUpstream(database, ctx, model.UpstreamSpec{Name: "origin", Kind: "forgejo", BaseURL: "https://forge.example.test/org"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -32,7 +32,7 @@ func TestMCPIssueReopenRejectsCIWithActionableErrorWithoutMutation(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	issue, err := database.UpsertCIIssue(ctx, "tooling-test@host", repo.ID, "feature", "red", "failure")
+	issue, err := storetest.UpsertCIIssue(database, ctx, "tooling-test@host", repo.ID, "feature", "red", "failure")
 	if err != nil {
 		t.Fatal(err)
 	}

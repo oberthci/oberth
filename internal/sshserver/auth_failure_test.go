@@ -166,7 +166,7 @@ func TestDurableKeyAuthDuringWriterHoldAndRevocation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = db.UpsertUplink(t.Context(), model.UplinkSpec{Fingerprint: ssh.FingerprintSHA256(signer.PublicKey()), Identity: "ssh-test", TokenCredentialID: credential.ID, AuthActor: "test"})
+	_, err = storetest.UpsertUplink(db, t.Context(), model.UplinkSpec{Fingerprint: ssh.FingerprintSHA256(signer.PublicKey()), Identity: "ssh-test", TokenCredentialID: credential.ID, AuthActor: "test"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -204,7 +204,7 @@ func TestDurableKeyAuthDuringWriterHoldAndRevocation(t *testing.T) {
 	// Commit a real revoke between the unsigned probe and signed auth.
 	config := clientConfig(signer)
 	config.Auth = []ssh.AuthMethod{ssh.PublicKeys(&revokeOnSign{Signer: signer, revoke: func() {
-		if err := db.RevokeTokenCredential(t.Context(), credential.ID); err != nil {
+		if err := storetest.RevokeTokenCredential(db, t.Context(), credential.ID); err != nil {
 			t.Error(err)
 		}
 	}})}

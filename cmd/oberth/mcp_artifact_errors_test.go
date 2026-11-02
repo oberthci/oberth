@@ -25,7 +25,7 @@ func TestMCPArtifactMissingFileIsNotFoundButIOFailureIsInternal(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	u, err := db.CreateUpstream(t.Context(), model.UpstreamSpec{Name: "origin", Kind: "forgejo", BaseURL: "https://forge.example.test/org"})
+	u, err := storetest.CreateUpstream(db, t.Context(), model.UpstreamSpec{Name: "origin", Kind: "forgejo", BaseURL: "https://forge.example.test/org"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -33,7 +33,7 @@ func TestMCPArtifactMissingFileIsNotFoundButIOFailureIsInternal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	run, err := db.EnqueueRun(t.Context(), model.RunSpec{RepoID: r.ID, RefKind: model.RefBranch, Ref: "main", SHA: strings.Repeat("a", 40), Trigger: "branch", Actor: "test@host"})
+	run, err := storetest.EnqueueRun(db, t.Context(), model.RunSpec{RepoID: r.ID, RefKind: model.RefBranch, Ref: "main", SHA: strings.Repeat("a", 40), Trigger: "branch", Actor: "test@host"})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -11,6 +11,7 @@ import (
 	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/internal/storetest"
 )
 
 func observedTestFailure() JobResult {
@@ -72,7 +73,7 @@ func (*deferredReplayCancel) AcceptCancellations(context.Context, []model.RunCan
 }
 func TestTagReplayReviewPendingDeletionRefusesEvenForce(t *testing.T) {
 	h := newRerunHarness(t)
-	source, err := h.fixture.store.EnqueueRun(t.Context(), model.RunSpec{RepoID: h.fixture.repo.ID, RefKind: model.RefTag, Ref: rerunTag, SHA: rerunTagObject, TestedSHA: rerunTagCommit, Actor: "pusher", Release: true, Credentialed: true, Trigger: "tag"})
+	source, err := storetest.EnqueueRun(h.fixture.store, t.Context(), model.RunSpec{RepoID: h.fixture.repo.ID, RefKind: model.RefTag, Ref: rerunTag, SHA: rerunTagObject, TestedSHA: rerunTagCommit, Actor: "pusher", Release: true, Credentialed: true, Trigger: "tag"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -240,7 +241,7 @@ func TestTagReplayReviewHistoryLimitAndUnknownResolverFailClosed(t *testing.T) {
 				h.service.refs = struct{ RefResolver }{h.refs}
 			} else {
 				for range 64 {
-					queued, err := h.fixture.store.EnqueueRun(t.Context(), model.RunSpec{RepoID: h.fixture.repo.ID, RefKind: model.RefTag, Ref: rerunTag, SHA: rerunTagObject, TestedSHA: rerunTagCommit, Actor: "pusher", Release: true, Credentialed: true, Trigger: "tag"})
+					queued, err := storetest.EnqueueRun(h.fixture.store, t.Context(), model.RunSpec{RepoID: h.fixture.repo.ID, RefKind: model.RefTag, Ref: rerunTag, SHA: rerunTagObject, TestedSHA: rerunTagCommit, Actor: "pusher", Release: true, Credentialed: true, Trigger: "tag"})
 					if err != nil {
 						t.Fatal(err)
 					}

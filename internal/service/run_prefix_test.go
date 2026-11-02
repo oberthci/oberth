@@ -12,6 +12,7 @@ import (
 	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/internal/storetest"
 )
 
 func TestRunLogDefaults(t *testing.T) {
@@ -31,7 +32,7 @@ func TestRunLogDefaults(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			f := newRetentionFixture(t)
 			ctx := t.Context()
-			enqueued, err := f.retention.Database.EnqueueRun(ctx, model.RunSpec{RepoID: f.repo.ID, RefKind: model.RefBranch,
+			enqueued, err := storetest.EnqueueRun(f.retention.Database, ctx, model.RunSpec{RepoID: f.repo.ID, RefKind: model.RefBranch,
 				Ref: "feature/defaults", SHA: strings.Repeat("a", 40), Actor: "reader", Trigger: "branch"})
 			if err != nil {
 				t.Fatal(err)

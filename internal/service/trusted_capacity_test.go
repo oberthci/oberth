@@ -83,7 +83,7 @@ func TestTrustedCapacityRetryBoundaries(t *testing.T) {
 			f.scheduler.git = git
 			executor := &capacityFixture{protectedFixture: &protectedFixture{store: f.store}}
 			f.scheduler.trusted = executor
-			_, err := f.store.EnqueueRun(ctx, model.RunSpec{RepoID: f.repo.ID, RefKind: model.RefBranch, Ref: "feature/capacity", SHA: strings.Repeat("c", 40), TestedSHA: strings.Repeat("c", 40), Actor: "agent", Trigger: "branch"})
+			_, err := storetest.EnqueueRun(f.store, ctx, model.RunSpec{RepoID: f.repo.ID, RefKind: model.RefBranch, Ref: "feature/capacity", SHA: strings.Repeat("c", 40), TestedSHA: strings.Repeat("c", 40), Actor: "agent", Trigger: "branch"})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -133,7 +133,7 @@ func TestTrustedCapacityRetryBoundaries(t *testing.T) {
 				case "cancel":
 					return context.Canceled
 				case "supersede":
-					_, err := f.store.EnqueueRun(ctx, model.RunSpec{RepoID: f.repo.ID, RefKind: model.RefBranch, Ref: run.Ref, SHA: strings.Repeat("d", 40), Actor: "agent", Trigger: "branch"})
+					_, err := storetest.EnqueueRun(f.store, ctx, model.RunSpec{RepoID: f.repo.ID, RefKind: model.RefBranch, Ref: run.Ref, SHA: strings.Repeat("d", 40), Actor: "agent", Trigger: "branch"})
 					return err
 				case "policy changed":
 					git.candidate = []byte(strings.ReplaceAll(string(raw), "build/program", "build/changed"))
@@ -223,7 +223,7 @@ func TestTrustedCapacityRotationAuditsOnceAcrossRetries(t *testing.T) {
 	f.scheduler.git = git
 	executor := &capacityFixture{protectedFixture: &protectedFixture{store: f.store}, refusals: 3}
 	f.scheduler.trusted = executor
-	_, err := f.store.EnqueueRun(ctx, model.RunSpec{RepoID: f.repo.ID, RefKind: model.RefBranch, Ref: "feature/rotation", SHA: strings.Repeat("e", 40), TestedSHA: strings.Repeat("e", 40), Actor: "agent", Trigger: "branch"})
+	_, err := storetest.EnqueueRun(f.store, ctx, model.RunSpec{RepoID: f.repo.ID, RefKind: model.RefBranch, Ref: "feature/rotation", SHA: strings.Repeat("e", 40), TestedSHA: strings.Repeat("e", 40), Actor: "agent", Trigger: "branch"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -287,7 +287,7 @@ func TestTrustedCapacityAuditsRotationThatAppearsWhileParked(t *testing.T) {
 	f.scheduler.git = git
 	executor := &capacityFixture{protectedFixture: &protectedFixture{store: f.store}, refusals: 2}
 	f.scheduler.trusted = executor
-	_, err := f.store.EnqueueRun(ctx, model.RunSpec{RepoID: f.repo.ID, RefKind: model.RefBranch, Ref: "feature/parked", SHA: strings.Repeat("e", 40), TestedSHA: strings.Repeat("e", 40), Actor: "agent", Trigger: "branch"})
+	_, err := storetest.EnqueueRun(f.store, ctx, model.RunSpec{RepoID: f.repo.ID, RefKind: model.RefBranch, Ref: "feature/parked", SHA: strings.Repeat("e", 40), TestedSHA: strings.Repeat("e", 40), Actor: "agent", Trigger: "branch"})
 	if err != nil {
 		t.Fatal(err)
 	}

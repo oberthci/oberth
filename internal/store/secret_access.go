@@ -192,22 +192,6 @@ RETURNING id, repo, step, secret, approved_by, approved_at, revoked_by, revoked_
 	return grant, nil
 }
 
-// SecretAccessCheck reports whether an active (non-revoked) grant exists for
-// the given (repo, step, secret) triple.
-func (s *Store) SecretAccessCheck(ctx context.Context, repo, step, secret string) (bool, error) {
-	if strings.TrimSpace(repo) == "" || strings.TrimSpace(step) == "" || strings.TrimSpace(secret) == "" {
-		return false, fmt.Errorf("%w: repo, step, and secret are required", ErrInvalid)
-	}
-	var count int
-	if err := s.reader().QueryRowContext(ctx, `
-SELECT count(*) FROM secret_access
-WHERE repo = ? AND step = ? AND secret = ? AND revoked_at IS NULL`,
-		repo, step, secret).Scan(&count); err != nil {
-		return false, fmt.Errorf("check secret access: %w", err)
-	}
-	return count > 0, nil
-}
-
 // ActiveSecretGrants returns all active grants for a repository, keyed by
 // (step, secret). The repository is identified by its durable ID so that
 // same-name repos under different upstreams cannot alias each other's

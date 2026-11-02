@@ -153,46 +153,6 @@ LIMIT 1`, repoID, strings.ToLower(sha), target, now).Scan(&holder)
 	return value, nil
 }
 
-// ConsumePromotionGrant marks a grant as consumed by a specific promotion.
-func (s *Store) ConsumePromotionGrant(ctx context.Context, grantID, promotionID, actor string) error {
-	if strings.TrimSpace(grantID) == "" || strings.TrimSpace(promotionID) == "" {
-		return fmt.Errorf("%w: grant ID and promotion ID are required", ErrInvalid)
-	}
-	now := unixNano(s.now())
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("begin consume promotion grant: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-	result, err := tx.ExecContext(ctx, `
-UPDATE promotion_grants SET consumed_by = ?, consumed_at = ?
-WHERE id = ? AND consumed_at IS NULL AND revoked_at IS NULL AND expires_at > ?`,
-		promotionID, now, grantID, now)
-	if err != nil {
-		return fmt.Errorf("consume promotion grant: %w", err)
-	}
-	rows, err := result.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("consume promotion grant rows: %w", err)
-	}
-	if rows == 0 {
-		return fmt.Errorf("%w: promotion grant is not active", ErrInvalidState)
-	}
-	details, _ := json.Marshal(map[string]string{
-		"promotion_id": promotionID,
-	})
-	if _, err := s.appendAuditAction(ctx, tx, model.AuditActionSpec{
-		Actor: actor, Action: "promotion_grant.consume", ResourceType: "promotion_grant",
-		ResourceID: grantID, Details: string(details),
-	}, now); err != nil {
-		return fmt.Errorf("audit promotion grant consumption: %w", err)
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit consume promotion grant: %w", err)
-	}
-	return nil
-}
-
 // ListPromotionGrants returns grants filtered by repository and optionally SHA
 // and active status.
 func (s *Store) ListPromotionGrants(ctx context.Context, filter model.PromotionGrantListFilter) ([]model.PromotionGrant, error) {

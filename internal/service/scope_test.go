@@ -17,6 +17,7 @@ import (
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/runlog"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/internal/storetest"
 )
 
 // Upstream-scoped uplinks (#073): a work laptop scoped to github must get only
@@ -78,10 +79,10 @@ func newScopeFixture(t *testing.T) *scopeFixture {
 	fixture := &scopeFixture{store: database, health: &scopedHealthStub{},
 		runs: map[string][]model.Run{}, issues: map[string][]model.Issue{},
 		promoted: map[string]model.Promotion{}, grants: map[string]model.PromotionGrant{}}
-	if fixture.github, err = database.CreateUpstream(ctx, model.UpstreamSpec{Name: "github", Kind: "ssh", BaseURL: "ssh://git@github.com/oberthci"}); err != nil {
+	if fixture.github, err = storetest.CreateUpstream(database, ctx, model.UpstreamSpec{Name: "github", Kind: "ssh", BaseURL: "ssh://git@github.com/oberthci"}); err != nil {
 		t.Fatal(err)
 	}
-	if fixture.codeberg, err = database.CreateUpstream(ctx, model.UpstreamSpec{Name: "codeberg", Kind: "ssh", BaseURL: "ssh://git@codeberg.org/exampleorg"}); err != nil {
+	if fixture.codeberg, err = storetest.CreateUpstream(database, ctx, model.UpstreamSpec{Name: "codeberg", Kind: "ssh", BaseURL: "ssh://git@codeberg.org/exampleorg"}); err != nil {
 		t.Fatal(err)
 	}
 	if fixture.visible, err = database.CreateRepository(ctx, model.RepositorySpec{Name: "oberth", UpstreamID: fixture.github.ID, DefaultBranch: "main"}); err != nil {
@@ -98,7 +99,7 @@ func newScopeFixture(t *testing.T) *scopeFixture {
 		seeds string
 	}{"github": {fixture.visible, 2, "ab"}, "codeberg": {fixture.hidden, 5, "cd"}} {
 		for index := range setup.runs {
-			enqueued, err := database.EnqueueRun(ctx, model.RunSpec{RepoID: setup.repo.ID, RefKind: model.RefBranch,
+			enqueued, err := storetest.EnqueueRun(database, ctx, model.RunSpec{RepoID: setup.repo.ID, RefKind: model.RefBranch,
 				Ref: fmt.Sprintf("feature/%s-%d", upstream, index), SHA: sha(fmt.Sprintf("%c%d", setup.seeds[0], index)),
 				Actor: "owner@tuxbox", Trigger: "push"})
 			if err != nil {
@@ -109,7 +110,7 @@ func newScopeFixture(t *testing.T) *scopeFixture {
 				t.Fatal(err)
 			}
 			fixture.runs[upstream] = append(fixture.runs[upstream], run)
-			issue, err := database.UpsertCIIssue(ctx, "owner@tuxbox", setup.repo.ID, run.Ref, "red "+upstream+" "+hiddenIssueText[:0]+run.Ref, "body")
+			issue, err := storetest.UpsertCIIssue(database, ctx, "owner@tuxbox", setup.repo.ID, run.Ref, "red "+upstream+" "+hiddenIssueText[:0]+run.Ref, "body")
 			if err != nil {
 				t.Fatal(err)
 			}

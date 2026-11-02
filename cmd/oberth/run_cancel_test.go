@@ -146,7 +146,7 @@ func TestRunCancelInPodRecordsTheCancelAndWakesTheDaemon(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	upstream, err := database.CreateUpstream(ctx, model.UpstreamSpec{Name: "github", Kind: "ssh", BaseURL: "ssh://github.com/acme"})
+	upstream, err := storetest.CreateUpstream(database, ctx, model.UpstreamSpec{Name: "github", Kind: "ssh", BaseURL: "ssh://github.com/acme"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -155,7 +155,7 @@ func TestRunCancelInPodRecordsTheCancelAndWakesTheDaemon(t *testing.T) {
 		t.Fatal(err)
 	}
 	enqueue := func(ref string, kind model.RefKind, trigger, digit string, release bool) model.Run {
-		enqueued, err := database.EnqueueRun(ctx, model.RunSpec{RepoID: repository.ID, RefKind: kind, Ref: ref,
+		enqueued, err := storetest.EnqueueRun(database, ctx, model.RunSpec{RepoID: repository.ID, RefKind: kind, Ref: ref,
 			SHA: strings.Repeat(digit, 40), Actor: "pusher@host", Trigger: trigger, Release: release})
 		if err != nil {
 			t.Fatal(err)
