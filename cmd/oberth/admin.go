@@ -80,6 +80,7 @@ type hostUpstreamDeps struct {
 }
 
 type uplinkDependencies struct {
+	tokenExpiry  *time.Time // Rotation preserves an existing absolute expiry.
 	mutationGate func(context.Context, string, string) error
 }
 
@@ -864,7 +865,7 @@ func runUplinkList(ctx context.Context, arguments []string, output io.Writer) er
 		return err
 	}
 	writer := tabwriter.NewWriter(output, 0, 0, 3, ' ', 0)
-	if _, err := fmt.Fprintln(writer, "IDENTITY\tFINGERPRINT\tADMIN\tSCOPE\tCREATED\tLAST SEEN"); err != nil {
+	if _, err := fmt.Fprintln(writer, "IDENTITY\tFINGERPRINT\tADMIN\tSCOPE\tCREATED\tLAST SEEN\tEXPIRES"); err != nil {
 		return err
 	}
 	for _, uplink := range uplinks {
@@ -872,12 +873,16 @@ func runUplinkList(ctx context.Context, arguments []string, output io.Writer) er
 		if !uplink.LastUsedAt.IsZero() {
 			lastSeen = uplink.LastUsedAt.UTC().Format("2006-01-02 15:04")
 		}
+		expires := "never"
+		if uplink.ExpiresAt != nil {
+			expires = uplink.ExpiresAt.UTC().Format(time.RFC3339)
+		}
 		adminLabel := "no"
 		if uplink.Admin {
 			adminLabel = "yes"
 		}
-		if _, err := fmt.Fprintf(writer, "%s\t%s\t%s\t%s\t%s\t%s\n",
-			uplink.Identity, uplink.Fingerprint, adminLabel, scopeLabel(uplink.Scope), uplink.CreatedAt.UTC().Format("2006-01-02 15:04"), lastSeen); err != nil {
+		if _, err := fmt.Fprintf(writer, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+			uplink.Identity, uplink.Fingerprint, adminLabel, scopeLabel(uplink.Scope), uplink.CreatedAt.UTC().Format("2006-01-02 15:04"), lastSeen, expires); err != nil {
 			return err
 		}
 	}
@@ -1277,7 +1282,7 @@ func runUplinkWithDependencies(ctx context.Context, arguments []string, input io
 	case "scope":
 		return runUplinkScope(ctx, arguments[1:], output, dependencies.mutationGate)
 	default:
-		return fmt.Errorf("%w: uplink add [--admin] [--scope UPSTREAM[,UPSTREAM]] [--database PATH] [--tls-cert PATH] <public-key-file|raw-key|-> <identity@host> | uplink list | uplink remove <identity> | uplink rotate <public-key-file|raw-key|-> <identity@host> | uplink scope [--fingerprint SHA256:...] (--set UPSTREAM[,UPSTREAM] | --clear) <identity@host>", errUsage)
+		return fmt.Errorf("%w: uplink add [--admin] [--ttl DURATION] [--scope UPSTREAM[,UPSTREAM]] [--database PATH] [--tls-cert PATH] <public-key-file|raw-key|-> <identity@host> | uplink list | uplink remove <identity> | uplink rotate <public-key-file|raw-key|-> <identity@host> | uplink scope [--fingerprint SHA256:...] (--set UPSTREAM[,UPSTREAM] | --clear) <identity@host>", errUsage)
 	}
 	flags := flag.NewFlagSet("uplink add", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
@@ -1287,6 +1292,7 @@ func runUplinkWithDependencies(ctx context.Context, arguments []string, input io
 		defaultCertificate = identityRoot + "/server/tls.crt"
 	}
 	certificatePath := flags.String("tls-cert", defaultCertificate, "HTTPS certificate path (in-pod; requires the live admin daemon)")
+	ttl := flags.String("ttl", "", "bearer token lifetime (positive Go duration; omitted preserves no expiry)")
 	isAdmin := flags.Bool("admin", false, "Grant admin privileges (required for access_allow/access_revoke)")
 	var scope []string
 	flags.Func("scope", "limit the uplink to these upstreams' repositories (repeatable or comma-separated; default: every repository)", func(value string) error { scope = append(scope, splitScope(value)...); return nil })
@@ -1300,6 +1306,14 @@ func runUplinkWithDependencies(ctx context.Context, arguments []string, input io
 	}
 	if flags.NArg() != 2 {
 		return fmt.Errorf("%w: uplink add requires one public-key source and identity", errUsage)
+	}
+	var lifetime time.Duration
+	if *ttl != "" {
+		var err error
+		lifetime, err = time.ParseDuration(*ttl)
+		if err != nil || lifetime <= 0 {
+			return fmt.Errorf("%w: ttl must be a positive Go duration", errUsage)
+		}
 	}
 	identity := flags.Arg(1)
 	if err := app.ValidateUplinkIdentity(identity); err != nil {
@@ -1339,7 +1353,8 @@ func runUplinkWithDependencies(ctx context.Context, arguments []string, input io
 	}
 	tokens := gatedAdminTokens{Store: database, Gate: gate}
 	issuer := auth.Issuer{
-		Tokens: tokens,
+		Tokens:    tokens,
+		ExpiresAt: dependencies.tokenExpiry,
 		Bind: func(ctx context.Context, pending model.TokenCredential) error {
 			if err := gate(ctx, "uplink.register"); err != nil {
 				return err
@@ -1360,6 +1375,10 @@ func runUplinkWithDependencies(ctx context.Context, arguments []string, input io
 	}
 	if _, err := fmt.Fprintf(output, "Uplink token for %s%s (shown once):\n", identity, adminLabel); err != nil {
 		return err
+	}
+	if lifetime > 0 {
+		expires := time.Now().Add(lifetime)
+		issuer.ExpiresAt = &expires
 	}
 	if _, err := issuer.Issue(ctx, identity, output); err != nil {
 		return err
@@ -1677,6 +1696,7 @@ func runUplinkRotate(ctx context.Context, arguments []string, input io.Reader, o
 	flags := flag.NewFlagSet("uplink rotate", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	databasePath := flags.String("database", "/data/oberth.sqlite", "SQLite database path (in-pod; requires the live admin daemon)")
+	ttl := flags.String("ttl", "", "new bearer token lifetime (default: preserve the earliest existing expiry)")
 	certificatePath := flags.String("tls-cert", "", "HTTPS certificate path passed to uplink add (default: the add default)")
 	if err := flags.Parse(arguments); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -1687,7 +1707,7 @@ func runUplinkRotate(ctx context.Context, arguments []string, input io.Reader, o
 		return fmt.Errorf("%w: %w", errUsage, err)
 	}
 	if flags.NArg() != 2 {
-		return fmt.Errorf("%w: uplink rotate [--database PATH] <public-key-file|raw-key|-> <identity@host>", errUsage)
+		return fmt.Errorf("%w: uplink rotate [--database PATH] [--ttl DURATION] <public-key-file|raw-key|-> <identity@host>", errUsage)
 	}
 	source, identity := flags.Arg(0), flags.Arg(1)
 	if err := app.ValidateUplinkIdentity(identity); err != nil {
@@ -1719,12 +1739,16 @@ func runUplinkRotate(ctx context.Context, arguments []string, input io.Reader, o
 	var old []string
 	admin := false
 	var scope []string
+	var expiry *time.Time
 	seen := false
 	for _, status := range statuses {
 		if status.Identity != identity {
 			continue
 		}
 		admin = admin || status.Admin
+		if status.ExpiresAt != nil && (expiry == nil || status.ExpiresAt.Before(*expiry)) {
+			expiry = status.ExpiresAt
+		}
 		// Rotation keeps the scope (#073). Keys of one identity with
 		// different scopes are refused: the new key's scope would be a guess.
 		if seen && !slices.Equal(scope, status.Scope) {
@@ -1739,6 +1763,14 @@ func runUplinkRotate(ctx context.Context, arguments []string, input io.Reader, o
 		return fmt.Errorf("uplink %s has no other key to rotate from; use uplink add", identity)
 	}
 	addArguments := []string{"add", "--database", *databasePath}
+	if *ttl != "" {
+		addArguments = append(addArguments, "--ttl", *ttl)
+	} else {
+		if expiry != nil && !expiry.After(time.Now()) {
+			return errors.New("existing bearer token has expired; specify --ttl when rotating")
+		}
+		dependencies.tokenExpiry = expiry
+	}
 	if *certificatePath != "" {
 		addArguments = append(addArguments, "--tls-cert", *certificatePath)
 	}

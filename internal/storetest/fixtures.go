@@ -124,14 +124,15 @@ func TokenCredentialByDigest(database *store.Store, ctx context.Context, digest 
 	defer db.Close()
 	var value model.TokenCredential
 	var created int64
-	var activated, used, revoked sql.NullInt64
-	if err = db.QueryRowContext(ctx, `SELECT id,name,digest,created_at,activated_at,last_used_at,revoked_at FROM token_credentials WHERE digest=?`, digest).Scan(&value.ID, &value.Name, &value.Digest, &created, &activated, &used, &revoked); err != nil {
+	var activated, used, revoked, expiry sql.NullInt64
+	if err = db.QueryRowContext(ctx, `SELECT id,name,digest,created_at,activated_at,last_used_at,revoked_at,expires_at FROM token_credentials WHERE digest=?`, digest).Scan(&value.ID, &value.Name, &value.Digest, &created, &activated, &used, &revoked, &expiry); err != nil {
 		return model.TokenCredential{}, fixtureNotFound(err)
 	}
 	value.CreatedAt = time.Unix(0, created).UTC()
 	value.ActivatedAt = fixtureTime(activated)
 	value.LastUsedAt = fixtureTime(used)
 	value.RevokedAt = fixtureTime(revoked)
+	value.ExpiresAt = fixtureTime(expiry)
 	return value, nil
 }
 func fixtureTime(value sql.NullInt64) *time.Time {

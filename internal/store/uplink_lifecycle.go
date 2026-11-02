@@ -51,7 +51,7 @@ func (s *Store) RevokeUplink(ctx context.Context, actor, identity, fingerprint, 
 			return model.Uplink{}, err
 		}
 		var active bool
-		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM token_credentials WHERE id=? AND activated_at IS NOT NULL AND revoked_at IS NULL)`, next.TokenCredentialID).Scan(&active); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM token_credentials WHERE id=? AND activated_at IS NOT NULL AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at>?))`, next.TokenCredentialID, unixNano(s.now())).Scan(&active); err != nil {
 			return model.Uplink{}, err
 		}
 		if !active || next.Admin != value.Admin || !slices.Equal(scope, value.Scope) {
@@ -66,7 +66,7 @@ func (s *Store) RevokeUplink(ctx context.Context, actor, identity, fingerprint, 
 	if revoked.Valid && !pending {
 		return value, nil
 	}
-	if err := guardLastActiveAdmin(ctx, tx, value.ID); err != nil {
+	if err := guardLastActiveAdmin(ctx, tx, value.ID, unixNano(s.now())); err != nil {
 		return model.Uplink{}, err
 	}
 	now := unixNano(s.now())
@@ -89,12 +89,13 @@ func (s *Store) RevokeUplink(ctx context.Context, actor, identity, fingerprint, 
 
 // Both administrative removal and remote revocation must retain a usable
 // installation administrator. Run inside the mutation's serialized transaction.
-func guardLastActiveAdmin(ctx context.Context, tx *sql.Tx, id int64) error {
+func guardLastActiveAdmin(ctx context.Context, tx *sql.Tx, id, now int64) error {
 	var targetActive, otherActive bool
 	const active = `SELECT u.id FROM uplinks u JOIN token_credentials t ON t.id=u.token_credential_id
 WHERE u.admin=1 AND t.activated_at IS NOT NULL AND t.revoked_at IS NULL
+AND (t.expires_at IS NULL OR t.expires_at>?)
 AND NOT EXISTS(SELECT 1 FROM uplink_scopes sc WHERE sc.uplink_id=u.id)`
-	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM (`+active+`) WHERE id=?), EXISTS(SELECT 1 FROM (`+active+`) WHERE id<>?)`, id, id).Scan(&targetActive, &otherActive); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM (`+active+`) WHERE id=?), EXISTS(SELECT 1 FROM (`+active+`) WHERE id<>?)`, now, id, now, id).Scan(&targetActive, &otherActive); err != nil {
 		return err
 	}
 	if targetActive && !otherActive {

@@ -310,7 +310,7 @@ func (s *Store) TokenCredentialByDigest(ctx context.Context, digest []byte) (mod
 	}
 	defer release()
 	value, err := scanTokenCredential(s.authReader().QueryRowContext(ctx, `
-SELECT id, name, digest, created_at, activated_at, last_used_at, revoked_at
+SELECT id, name, digest, created_at, activated_at, last_used_at, revoked_at, expires_at
 FROM token_credentials WHERE digest = ?`, digest))
 	if err != nil {
 		return model.TokenCredential{}, translateNotFound("token credential", err)

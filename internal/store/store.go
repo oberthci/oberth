@@ -1833,6 +1833,15 @@ func (s *Store) CreateTokenCredential(ctx context.Context, spec model.TokenCrede
 	if strings.TrimSpace(spec.Name) == "" || len(spec.Digest) != 32 {
 		return model.TokenCredential{}, fmt.Errorf("%w: token name and SHA-256 digest are required", ErrInvalid)
 	}
+	var expires any
+	var expiresAt *time.Time
+	if spec.ExpiresAt != nil {
+		value := spec.ExpiresAt.UTC()
+		if !value.After(s.now()) || !fromUnixNano(unixNano(value)).Equal(value) {
+			return model.TokenCredential{}, fmt.Errorf("%w: token expiry must be a future timestamp representable in nanoseconds", ErrInvalid)
+		}
+		expires, expiresAt = unixNano(value), &value
+	}
 	id, err := randomID()
 	if err != nil {
 		return model.TokenCredential{}, fmt.Errorf("generate token credential id: %w", err)
@@ -1844,8 +1853,8 @@ func (s *Store) CreateTokenCredential(ctx context.Context, spec model.TokenCrede
 	}
 	defer func() { _ = tx.Rollback() }()
 	if _, err := tx.ExecContext(ctx, `
-INSERT INTO token_credentials(id, name, digest, created_at, revoked_at) VALUES(?, ?, ?, ?, ?)`,
-		id, spec.Name, append([]byte(nil), spec.Digest...), now, now); err != nil {
+INSERT INTO token_credentials(id, name, digest, created_at, revoked_at, expires_at) VALUES(?, ?, ?, ?, ?, ?)`,
+		id, spec.Name, append([]byte(nil), spec.Digest...), now, now, expires); err != nil {
 		return model.TokenCredential{}, fmt.Errorf("create token credential: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, `
@@ -1856,7 +1865,7 @@ INSERT INTO pending_token_credentials(token_credential_id, created_at) VALUES(?,
 		return model.TokenCredential{}, fmt.Errorf("commit token credential: %w", err)
 	}
 	pendingAt := fromUnixNano(now)
-	return model.TokenCredential{ID: id, Name: spec.Name, Digest: append([]byte(nil), spec.Digest...), CreatedAt: pendingAt, RevokedAt: &pendingAt}, nil
+	return model.TokenCredential{ID: id, Name: spec.Name, Digest: append([]byte(nil), spec.Digest...), CreatedAt: pendingAt, ExpiresAt: expiresAt, RevokedAt: &pendingAt}, nil
 }
 
 func (s *Store) ActivateTokenCredential(ctx context.Context, id string) (model.TokenCredential, error) {
@@ -1873,9 +1882,9 @@ DELETE FROM pending_token_credentials WHERE token_credential_id = ? RETURNING to
 	}
 	value, err := scanTokenCredential(tx.QueryRowContext(ctx, `
 UPDATE token_credentials SET activated_at = ?, revoked_at = NULL
-WHERE id = ? AND activated_at IS NULL
+WHERE id = ? AND activated_at IS NULL AND (expires_at IS NULL OR expires_at > ?)
   AND EXISTS (SELECT 1 FROM uplinks WHERE token_credential_id = token_credentials.id)
-RETURNING id, name, digest, created_at, activated_at, last_used_at, revoked_at`, now, id))
+RETURNING id, name, digest, created_at, activated_at, last_used_at, revoked_at, expires_at`, now, id, now))
 	if err != nil {
 		return model.TokenCredential{}, translateNotFound("pending token credential", err)
 	}
@@ -1902,19 +1911,20 @@ func (s *Store) AuthenticatedUplinkByDigest(ctx context.Context, digest []byte) 
 	defer func() { _ = tx.Rollback() }()
 	row := tx.QueryRowContext(ctx, `
 SELECT u.id, u.fingerprint, u.identity, u.token_credential_id, u.auth_actor, u.admin, u.created_at, u.updated_at,
-       t.id, t.name, t.digest, t.created_at, t.activated_at, t.last_used_at, t.revoked_at
+       t.id, t.name, t.digest, t.created_at, t.activated_at, t.last_used_at, t.revoked_at, t.expires_at
 FROM token_credentials t
 JOIN uplinks u ON u.token_credential_id = t.id
-WHERE t.digest = ? AND t.activated_at IS NOT NULL AND t.revoked_at IS NULL`, digest)
+WHERE t.digest = ? AND t.activated_at IS NOT NULL AND t.revoked_at IS NULL
+AND (t.expires_at IS NULL OR t.expires_at > ?)`, digest, unixNano(s.now()))
 	var value model.AuthenticatedUplink
 	var uplinkCreated, uplinkUpdated, tokenCreated int64
 	var admin int
-	var activated, lastUsed, revoked sql.NullInt64
+	var activated, lastUsed, revoked, expiry sql.NullInt64
 	if err := row.Scan(
 		&value.ID, &value.Fingerprint, &value.Identity, &value.TokenCredentialID,
 		&value.AuthActor, &admin, &uplinkCreated, &uplinkUpdated,
 		&value.TokenCredential.ID, &value.TokenCredential.Name, &value.TokenCredential.Digest,
-		&tokenCreated, &activated, &lastUsed, &revoked,
+		&tokenCreated, &activated, &lastUsed, &revoked, &expiry,
 	); err != nil {
 		return model.AuthenticatedUplink{}, translateNotFound("authenticated uplink", err)
 	}
@@ -1936,6 +1946,7 @@ WHERE t.digest = ? AND t.activated_at IS NOT NULL AND t.revoked_at IS NULL`, dig
 	value.TokenCredential.ActivatedAt = nullableTime(activated)
 	value.TokenCredential.LastUsedAt = nullableTime(lastUsed)
 	value.TokenCredential.RevokedAt = nullableTime(revoked)
+	value.TokenCredential.ExpiresAt = nullableTime(expiry)
 	return value, nil
 }
 
@@ -1959,6 +1970,7 @@ func scanTokenCredential(row rowScanner) (model.TokenCredential, error) {
 	value.ActivatedAt = nullableTime(activated)
 	value.LastUsedAt = nullableTime(lastUsed)
 	value.RevokedAt = nullableTime(revoked)
+	value.ExpiresAt = nullableTime(expiry)
 	return value, nil
 }
 
@@ -1970,7 +1982,8 @@ func (s *Store) touchTokenCredentialAt(ctx context.Context, id string, at time.T
 	result, err := s.db.ExecContext(ctx, `
 UPDATE token_credentials SET last_used_at = ?
 WHERE id = ? AND activated_at IS NOT NULL AND revoked_at IS NULL
-  AND (last_used_at IS NULL OR last_used_at <= ?)`, unixNano(at), id, unixNano(at.Add(-TokenCredentialTouchInterval)))
+  AND (expires_at IS NULL OR expires_at > ?)
+  AND (last_used_at IS NULL OR last_used_at <= ?)`, unixNano(at), id, unixNano(at), unixNano(at.Add(-TokenCredentialTouchInterval)))
 	if err != nil {
 		return false, fmt.Errorf("touch token credential: %w", err)
 	}

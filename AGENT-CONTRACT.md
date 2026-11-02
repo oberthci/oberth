@@ -2832,6 +2832,7 @@ alone is never evidence that missing migrations ran.
 | v37 | Unreleased (#1216 measurement) | Guard version-2 container telemetry and add the global observation-age retention index; preserve version-1 observations | Database restore |
 | v38 | Upstream publication retry | Persist bounded attempts, retry deadlines and audited owner progress without changing the pushed object or promotion plan | Database restore |
 | v39 | Submission priority | Persist expiring identity grants, audited priority requests and supersession protection; existing priority ordering remains compatible | Database restore |
+| v39 | Bearer token expiry | Nullable absolute expiry; existing credentials retain their lifetime | Database restore |
 
 **Contract test:** `TestEveryMigrationDocumentedInAgentContract` asserts that
 every migration version in `internal/store/schema.go` has a corresponding
@@ -3218,7 +3219,7 @@ Release admission remains authoritative and forced tag reruns recheck live grant
 ## Remote credential and grant lifecycle (#1105)
 
 `uplink_list` returns public identity, fingerprint, admin flag, scope, creation,
-last-seen and revocation times, plus pending activation status. Pending
+last-seen, expiry and revocation times, plus pending activation status. Pending
 credentials have no reported revocation time. All five new lifecycle tools
 require an unscoped admin; ordinary and scoped uplinks are refused. `uplink_revoke` and
 `uplink_rotate` require an unscoped admin and the mutation gate, atomically revoke
@@ -3226,6 +3227,14 @@ SSH/bearer authority and audit the action, retaining the public registration.
 The last active unscoped admin credential cannot be revoked. Rotation is a
 handoff to an already-issued, active, distinct replacement with the same
 identity, admin flag and scope; key/token issuance remains in-pod.
+
+`uplink add --ttl 24h` sets an absolute bearer-token expiry. `uplink list`
+and `uplink_list` show it; authentication refuses the token at the exact
+expiry boundary, including during the last-used telemetry interval. Omitted
+`--ttl` and pre-v40 credentials retain no expiry. CLI rotation preserves the
+earliest existing expiry unless `--ttl` explicitly sets a new lifetime.
+Expiry affects the bearer token; SSH-key revocation remains a separate action.
+Expired replacements cannot satisfy rotation or last-active-admin checks.
 
 Admission replaces pending declaration observations from both immutable pipeline
 documents at the tested commit, including an empty snapshot. Malformed or

@@ -761,11 +761,14 @@ type TokenCredential struct {
 	ActivatedAt *time.Time
 	LastUsedAt  *time.Time
 	RevokedAt   *time.Time
+	// ExpiresAt is the absolute bearer expiry; nil preserves legacy lifetime.
+	ExpiresAt *time.Time
 }
 
 type TokenCredentialSpec struct {
-	Name   string
-	Digest []byte
+	ExpiresAt *time.Time
+	Name      string
+	Digest    []byte
 }
 
 type AuthenticatedUplink struct {

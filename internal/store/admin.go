@@ -17,6 +17,7 @@ import (
 // token has never authenticated.
 type UplinkStatus struct {
 	model.Uplink
+	ExpiresAt  *time.Time
 	LastUsedAt time.Time
 	RevokedAt  *time.Time
 	Pending    bool
@@ -447,7 +448,7 @@ func matchUplinksByIdentity(ctx context.Context, tx *sql.Tx, identity, fingerpri
 func (s *Store) ListUplinkStatuses(ctx context.Context) ([]UplinkStatus, error) {
 	rows, err := s.reader().QueryContext(ctx, `
 SELECT u.id, u.fingerprint, u.identity, u.token_credential_id, u.auth_actor, u.admin, u.created_at, u.updated_at,
-       COALESCE(t.last_used_at, 0), t.revoked_at,
+       COALESCE(t.last_used_at, 0), t.revoked_at, t.expires_at,
        EXISTS (SELECT 1 FROM pending_token_credentials p WHERE p.token_credential_id = t.id)
 FROM uplinks u LEFT JOIN token_credentials t ON t.id = u.token_credential_id
 ORDER BY u.identity, u.fingerprint`)
@@ -459,12 +460,13 @@ ORDER BY u.identity, u.fingerprint`)
 	for rows.Next() {
 		var value UplinkStatus
 		var created, updated, lastUsed int64
-		var revoked sql.NullInt64
+		var revoked, expiry sql.NullInt64
 		var admin int
 		if err := rows.Scan(&value.ID, &value.Fingerprint, &value.Identity, &value.TokenCredentialID,
-			&value.AuthActor, &admin, &created, &updated, &lastUsed, &revoked, &value.Pending); err != nil {
+			&value.AuthActor, &admin, &created, &updated, &lastUsed, &revoked, &expiry, &value.Pending); err != nil {
 			return nil, fmt.Errorf("scan uplink: %w", err)
 		}
+		value.ExpiresAt = nullableTime(expiry)
 		// Pending credentials are deliberately stored as revoked until activation.
 		if !value.Pending {
 			value.RevokedAt = nullableTime(revoked)
@@ -519,7 +521,7 @@ func (s *Store) RemoveUplink(ctx context.Context, actor, identity, fingerprint s
 			ErrAmbiguous, identity, len(matches), strings.Join(fingerprints, ", "))
 	}
 	value := matches[0]
-	if err := guardLastActiveAdmin(ctx, tx, value.ID); err != nil {
+	if err := guardLastActiveAdmin(ctx, tx, value.ID, now); err != nil {
 		return model.Uplink{}, err
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM uplinks WHERE id = ?`, value.ID); err != nil {
