@@ -1655,6 +1655,15 @@ func (scheduler *Scheduler) deliverPublicationWithGate(
 	if err != nil {
 		return model.PublicationFinalization{}, fmt.Errorf("load publication %s: %w", publicationID, err)
 	}
+	// Idle backoff ticks neither attempt delivery nor re-evaluate trusted
+	// policy. Only actual attempts emit the attempt/outcome evidence pair.
+	if publication.Status.Terminal() {
+		return scheduler.loadPublicationFinalization(ctx, publication)
+	}
+	if time.Now().Before(publication.RetryAfter) && strings.HasPrefix(publication.Error, "upstream publication retry ") {
+		scheduler.queuePublicationRetry(publicationID)
+		return scheduler.loadPublicationFinalization(ctx, publication)
+	}
 	log.Printf("publication attempt run=%s publication=%s status=%s", publication.RunID, publication.ID, publication.Status)
 	defer func() {
 		outcome := "unconfirmed"
@@ -1663,9 +1672,6 @@ func (scheduler *Scheduler) deliverPublicationWithGate(
 		}
 		log.Printf("publication outcome run=%s publication=%s status=%s", publication.RunID, publication.ID, outcome)
 	}()
-	if publication.Status.Terminal() {
-		return scheduler.loadPublicationFinalization(ctx, publication)
-	}
 	repository, err := scheduler.database().Repository(ctx, publication.RepoID)
 	if err != nil {
 		return model.PublicationFinalization{}, fmt.Errorf("load repository for publication %s: %w", publication.ID, err)

@@ -1087,6 +1087,9 @@ trust assumptions and complete invalidation rules.
   `oberth publication abandon <publication-id> --reason "stop delivery"`.
   Find the publication ID in attempt logs or in `audit_list` with
   `action: "publication.pending"`, matching the entry details to the run ID.
+- Idle publication backoff ticks preserve the queued retry without re-evaluating
+  trusted policy or logging an attempt/outcome pair. Due attempts still check
+  current policy and record their attempt/outcome evidence.
 - `publish_retry` retries the upstream publication for a branch or tag run
   whose burns all passed but whose upstream push failed (#696). Input is
   exactly one durable run ID — never a ref, SHA, or tag name.
