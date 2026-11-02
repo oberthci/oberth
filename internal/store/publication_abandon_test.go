@@ -36,7 +36,7 @@ func TestPublicationAbandonMigrationRestartAndGuards(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = s.db.ExecContext(ctx, publicationAbandonDowngradeSQL); err != nil {
+	if _, err = s.db.ExecContext(ctx, integrationDowngradeSQL); err != nil {
 		t.Fatal(err)
 	}
 	if err = s.Close(); err != nil {
