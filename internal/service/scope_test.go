@@ -312,11 +312,11 @@ func TestScopedUplinkSeesOnlyItsUpstream(t *testing.T) {
 	}
 	issues, err := fixture.service.Issues(ctx, scopedActor, api.IssueFilter{})
 	fixture.assertNoLeak(t, "Issues view", issues, err)
-	if page := issues.(model.IssuePage); len(page.Issues) != wantIssues || page.Total != int64(wantIssues) {
+	if page := issues.(api.IssueListPage); len(page.Issues) != wantIssues || page.Total != int64(wantIssues) {
 		t.Fatalf("Issues view = %d", len(page.Issues))
 	}
-	if page, _ := fixture.service.Issues(ctx, unscopedActor, api.IssueFilter{}); len(page.(model.IssuePage).Issues) != wantIssues+len(fixture.issues["codeberg"])+2 {
-		t.Fatalf("unscoped issues = %d", len(page.(model.IssuePage).Issues))
+	if page, _ := fixture.service.Issues(ctx, unscopedActor, api.IssueFilter{}); len(page.(api.IssueListPage).Issues) != wantIssues+len(fixture.issues["codeberg"])+2 {
+		t.Fatalf("unscoped issues = %d", len(page.(api.IssueListPage).Issues))
 	}
 
 	// promotion_list and the grants views.

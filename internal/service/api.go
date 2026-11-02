@@ -1334,7 +1334,26 @@ func (service *API) Issues(ctx context.Context, actor api.Actor, filter api.Issu
 	if err != nil {
 		return nil, err
 	}
-	return service.stripScopedSequences(page), nil
+	result := api.IssueListPage{Issues: make([]api.IssueListSummary, len(page.Issues)), NextBefore: page.NextBefore, Total: page.Total, Counts: page.Counts}
+	for i, issue := range page.Issues {
+		result.Issues[i] = api.IssueListSummary{
+			ID:            issue.ID,
+			RepoID:        issue.RepoID,
+			Kind:          issue.Kind,
+			Branch:        issue.Branch,
+			Title:         issue.Title,
+			State:         issue.State,
+			Occurrences:   issue.Occurrences,
+			CIOrigin:      issue.CIOrigin,
+			CIWorkID:      issue.CIWorkID,
+			Upstream:      issue.Upstream,
+			Lock:          issue.Lock,
+			CreatedAt:     issue.CreatedAt,
+			UpdatedAt:     issue.UpdatedAt,
+			ClosedAt:      issue.ClosedAt,
+		}
+	}
+	return result, nil
 }
 
 func (service *API) Status(ctx context.Context, actor api.Actor) (any, error) {
