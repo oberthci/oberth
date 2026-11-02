@@ -9,11 +9,14 @@ import (
 	"strings"
 
 	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/pushretry"
 )
 
-const publicationColumns = `
+const legacyPublicationColumns = `
 sequence, id, repo_id, run_id, promotion_id, ref_kind, ref, previous_sha,
 previous_known, result_sha, actor, status, error, created_at, updated_at`
+
+const publicationColumns = legacyPublicationColumns + ", attempts, retry_after"
 
 // BeginPublication durably records the exact external Git mutation before it
 // can happen. When a run owns the publication, changing its phase in the same
@@ -233,6 +236,9 @@ SELECT `+publicationColumns+` FROM publications WHERE id = ?`, id))
 		runStatus, phase := model.RunPassed, "passed"
 		if status == model.PublicationFailed {
 			runStatus, phase = model.RunFailed, "publishing"
+			if pushretry.PublicationFailure(failure) {
+				phase = "infrastructure"
+			}
 		}
 		finalization.Run, err = scanRun(tx.QueryRowContext(ctx, `
 UPDATE runs
@@ -310,7 +316,7 @@ func (s *Store) appendPublicationAudit(ctx context.Context, tx *sql.Tx, publicat
 }
 
 func publicationAuditDetails(publication model.Publication, failure string) (string, error) {
-	details, err := json.Marshal(map[string]string{
+	fields := map[string]string{
 		"repo_id":        fmt.Sprint(publication.RepoID),
 		"ref_kind":       string(publication.RefKind),
 		"ref":            publication.Ref,
@@ -320,7 +326,13 @@ func publicationAuditDetails(publication model.Publication, failure string) (str
 		"run_id":         publication.RunID,
 		"promotion_id":   publication.PromotionID,
 		"error":          failure,
-	})
+	}
+	if publication.Attempts > 0 {
+		fields["attempts"] = fmt.Sprint(publication.Attempts)
+		fields["retry_after"] = fmt.Sprint(publication.RetryAfter.UnixNano())
+		fields["retry_message"] = publication.Error
+	}
+	details, err := json.Marshal(fields)
 	if err != nil {
 		return "", fmt.Errorf("encode publication audit: %w", err)
 	}
@@ -333,9 +345,7 @@ type publicationAuditQuerier interface {
 }
 
 func verifyPendingPublicationIntents(ctx context.Context, querier publicationAuditQuerier) error {
-	rows, err := querier.QueryContext(ctx, `
-SELECT `+publicationColumns+` FROM publications
-WHERE status = 'pending' ORDER BY sequence`)
+	rows, err := pendingPublicationRows(ctx, querier)
 	if err != nil {
 		return fmt.Errorf("verify pending publication intents: %w", err)
 	}
@@ -446,7 +456,7 @@ func (s *Store) RetryFailedPublication(ctx context.Context, runID, promotionID, 
 	if failed.RunID != "" {
 		result, updateErr := tx.ExecContext(ctx, `
 UPDATE runs SET status = 'running', phase = 'publishing', error = '', finished_at = NULL, updated_at = ?
-WHERE id = ? AND status = 'failed' AND phase = 'publishing'`, now, failed.RunID)
+WHERE id = ? AND status = 'failed' AND (phase = 'publishing' OR (phase = 'infrastructure' AND error LIKE ?))`, now, failed.RunID, pushretry.Failure("")+"%")
 		if updateErr != nil {
 			return model.Publication{}, fmt.Errorf("reactivate publishing-failed run: %w", updateErr)
 		}
@@ -465,7 +475,7 @@ WHERE id = ? AND status = 'failed' AND phase = 'publishing'`, now, failed.RunID)
 	// Reset the failed publication to pending. Clear previous_sha so the
 	// delivery path re-reads the exact remote state before mutation.
 	value, err := scanPublication(tx.QueryRowContext(ctx, `
-UPDATE publications SET status = 'pending', error = '', previous_sha = '', previous_known = 0,
+UPDATE publications SET status = 'pending', error = '', previous_sha = '', previous_known = 0, attempts = 0, retry_after = 0,
     actor = ?, updated_at = ?
 WHERE id = ? AND status = 'failed'
 RETURNING `+publicationColumns, actor, now, failed.ID))
@@ -614,13 +624,37 @@ func nullableID(value string) any {
 func scanPublication(row rowScanner) (model.Publication, error) {
 	var value model.Publication
 	var runID, promotionID sql.NullString
-	var created, updated int64
+	var created, updated, retryAfter int64
 	if err := row.Scan(&value.Sequence, &value.ID, &value.RepoID, &runID, &promotionID,
 		&value.RefKind, &value.Ref, &value.PreviousSHA, &value.PreviousKnown, &value.ResultSHA, &value.Actor,
-		&value.Status, &value.Error, &created, &updated); err != nil {
+		&value.Status, &value.Error, &created, &updated, &value.Attempts, &retryAfter); err != nil {
 		return model.Publication{}, err
+	}
+	if retryAfter != 0 {
+		value.RetryAfter = fromUnixNano(retryAfter)
 	}
 	value.RunID, value.PromotionID = runID.String, promotionID.String
 	value.CreatedAt, value.UpdatedAt = fromUnixNano(created), fromUnixNano(updated)
 	return value, nil
+}
+
+// Inspection precedes owner migration. Older snapshots have no retry columns;
+// accept their legacy projection only when the ledger is genuinely pre-v38.
+// A missing column in a v38 database still fails closed.
+func pendingPublicationRows(ctx context.Context, querier publicationAuditQuerier) (*sql.Rows, error) {
+	query := func(columns string) (*sql.Rows, error) {
+		return querier.QueryContext(ctx, "SELECT "+columns+" FROM publications WHERE status='pending' ORDER BY sequence")
+	}
+	rows, err := query(publicationColumns)
+	if err == nil || !strings.Contains(err.Error(), "no such column: attempts") {
+		return rows, err
+	}
+	var version int
+	if readErr := querier.QueryRowContext(ctx, `SELECT MAX(version) FROM schema_migrations`).Scan(&version); readErr != nil {
+		return nil, errors.Join(err, readErr)
+	}
+	if version >= publicationRetryMigrationVersion {
+		return nil, err
+	}
+	return query(legacyPublicationColumns + ", 0, 0")
 }

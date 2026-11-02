@@ -408,9 +408,9 @@ func TestTransientPushFailureDoesNotBurnPromotionGrant(t *testing.T) {
 			{BaseSHA: retryBaseSHA, MergedSHA: retrySourceSHA, FastForward: true},
 		},
 		// An SSH blip: the push fails and main does not move.
-		pushes: []scriptedPush{{err: errors.New("ssh: connection reset by peer")}, {}},
+		pushes: []scriptedPush{{err: errors.New("ssh: connection reset by peer")}, {err: errors.New("ssh: connection reset by peer")}, {err: errors.New("ssh: connection reset by peer")}, {err: errors.New("ssh: connection reset by peer")}, {err: errors.New("ssh: connection reset by peer")}, {}},
 	}
-	fixture, _, service := newPromotionRetryHarness(t, git)
+	fixture, scheduler, service := newPromotionRetryHarness(t, git)
 	ctx := context.Background()
 	admin := api.Actor{Identity: "admin@host", Fingerprint: "SHA256:admin", Admin: true}
 	uplink := api.Actor{Identity: "agent@host", Fingerprint: "SHA256:agent"}
@@ -424,6 +424,19 @@ func TestTransientPushFailureDoesNotBurnPromotionGrant(t *testing.T) {
 	}
 
 	originalID := promoteForRetry(t, service, uplink)
+	for attempt := 2; attempt <= 5; attempt++ {
+		pubs, err := fixture.store.PendingPublications(ctx)
+		if err != nil || len(pubs) != 1 {
+			t.Fatalf("pending = %+v %v", pubs, err)
+		}
+		pub := pubs[0]
+		if _, err = fixture.store.UpdatePublicationAttempt(ctx, pub.ID, pub.Attempts, pub.Attempts, time.Now().Add(-time.Second), pub.Error); err != nil {
+			t.Fatal(err)
+		}
+		if _, err = scheduler.DeliverPublication(ctx, pub.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
 	original := promoteStatus(t, service, uplink, originalID)
 	if original.Promotion.Status != model.PromotionFailed || original.RetriedAs != "" || original.Promotion.GrantID != grant.ID {
 		t.Fatalf("transiently failed promotion = %#v, want failed, holding the grant, not auto-retried", original)

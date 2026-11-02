@@ -1025,7 +1025,8 @@ trust assumptions and complete invalidation rules.
   exactly one durable run ID — never a ref, SHA, or tag name.
   Preconditions (all fail closed with `ErrInvalidInput`): the run is
   terminal; every burn/step passed; the failure is recorded in the publishing
-  phase (`run.phase = "publishing"`); the recorded SHA still resolves in
+  phase (`run.phase = "publishing"`) or as an exhausted upstream publication
+  infrastructure failure; the recorded SHA still resolves in
   Oberth's git cache (re-read, not trusted from the row alone). For tag runs
   the exact tag object SHA recorded at admission is what gets pushed; for
   branch runs the exact SHA (force-sync semantics identical to the original
@@ -1033,7 +1034,9 @@ trust assumptions and complete invalidation rules.
   with `ErrInvalidInput` naming `promote_retry` (and the head the target moved
   to, when it moved) and changes nothing: a promotion row is immutable once
   terminal and its merge was made against a head that may have moved, so a
-  promotion is re-run, never re-pushed (#1097). `Store.RetryFailedPublication`
+  promotion gets a new retry row (#1097). After a transient push-only failure,
+  an unchanged target permits reuse of the exact tested merge SHA; a moved
+  target requires a fresh merge and tests. `Store.RetryFailedPublication`
   refuses a promotion-owned publication the same way, before any state
   change. Zero repository code executes. Idempotent: if upstream already has
   the object, succeeds without pushing. Rate-limited by the delivery permit (one
@@ -1042,9 +1045,25 @@ trust assumptions and complete invalidation rules.
   `passed`/`phase=passed` and the CI issue closes; on failure the error is
   stored verbatim (minus anything secret) and the run stays retryable.
   If finalization is uncertain and recovery still owns the publication, the
-  response is `pending` with run/publication IDs; poll `run_get` or `wait` for
+  response is `pending`, plainly saying publication is queued, with
+  run/publication IDs; poll `run_get` or `wait` for
   the run. Only a durable terminal publication row justifies a terminal
   response. Delivery attempts and outcomes log both IDs (#1189).
+  Transient upstream server/transport failures retain the exact durable intent.
+  Five attempts are allowed, with backoff of 2, 4, 8 and 16 minutes (about
+  thirty minutes total, excluding I/O). Schema v38 persists the attempt count
+  before external mutation, next-attempt time and owner progress message;
+  canonical audit intents bind the retry state. Waiting holds no worker or
+  delivery permit. Dispatch ticks and owner-startup recovery resume due work.
+  A remote ref read precedes every mutation decision. After a lost
+  finalization reply, recovery can confirm an already-delivered result during
+  backoff without another push.
+  Promotions/default targets use ordinary non-forced pushes; tags retain their
+  admitted object identity. A hook refusal alone, permission/policy denial or
+  non-fast-forward remains a permanent failure. Exhaustion marks the run
+  failed/infrastructure, with an upstream-publication reason. `run_retry` and
+  `run_rerun` route these failures to publication retry without repeating CI
+  or release work. Explicit publication retry resets the bounded budget.
   Publishing-phase failures get their own CI issue title
   (`Publish red: <branch> — upstream publish failed`) so automation and humans
   can distinguish code red from forge red.
@@ -1405,7 +1424,8 @@ trust assumptions and complete invalidation rules.
   earlier rerun of the tag, means every release step already passed once:
   the refusal names that run and `publish_retry` for it, so `release.yaml` is
   never executed again for a tag that only failed to publish. A source that passed every step and failed
-  only in publication (`phase = "publishing"`) is not re-executed: its
+  only in publication (`phase = "publishing"`, or exhausted upstream publication
+  infrastructure failure) is not re-executed: its
   publication is retried exactly as `publish_retry` does (response `mode:
   "publish_retry"`), so a release's publishing work never repeats. A tag
   rerun re-executes `release.yaml` with the original admission (the tag
@@ -1596,7 +1616,11 @@ trust assumptions and complete invalidation rules.
   work that failed. `promote_retry {id}`
   (CLI `oberth promotion retry <id>`) does the same on request for any failed
   or interrupted promotion (push failure, CI or infrastructure failure,
-  restart), with `promote`'s authorization. A retry is refused while a
+  restart), with `promote`'s authorization. A transient push-only failure may
+  reuse its exact tested result when a fresh remote read still finds the
+  planned base (or the exact result). The source must still be green; current
+  release policy, trusted-test receipts, actor scope and grants are rechecked.
+  A moved target follows normal merge-and-test planning. A retry is refused while a
   promotion of the same tuple is pending or delivered, when the promotion was
   already retried, or when the source SHA's newest run is not green. Promotion
   rows stay immutable: the lineage is the `promotion.retry` audit action
@@ -2717,6 +2741,7 @@ alone is never evidence that missing migrations ran.
 | v35 | v0.17.73 candidate | Covering latest-ref index on repository/ref-kind/ref/queue sequence; exact indexed head/count aggregation | Database restore |
 | v36 | v0.17.74 / #1216 stage 1 | Server-observed, UID/container-bound sampled step resource usage and bounded repository/time/step indexes; no ingestion API or admission change | Database restore |
 | v37 | Unreleased (#1216 measurement) | Guard version-2 container telemetry and add the global observation-age retention index; preserve version-1 observations | Database restore |
+| v38 | Upstream publication retry | Persist bounded attempts, retry deadlines and audited owner progress without changing the pushed object or promotion plan | Database restore |
 
 **Contract test:** `TestEveryMigrationDocumentedInAgentContract` asserts that
 every migration version in `internal/store/schema.go` has a corresponding

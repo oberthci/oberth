@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/pushretry"
 )
 
 // RetryRun creates a fresh branch or admitted tag run for an interrupted
@@ -43,6 +44,9 @@ func (s *Store) RetryRun(ctx context.Context, request model.RunRetryRequest) (mo
 	}
 	if newestID != previous.ID {
 		return model.EnqueueRunResult{}, fmt.Errorf("%w: retry source is not the newest run for its ref", ErrInvalidState)
+	}
+	if pushretry.PublicationFailure(previous.Error) {
+		return model.EnqueueRunResult{}, fmt.Errorf("%w: upstream publication failed; use publish_retry without repeating CI", ErrInvalidState)
 	}
 	eligibleStatus := previous.Status == model.RunInterrupted ||
 		(previous.Status == model.RunFailed && (previous.Phase == "infrastructure" || previous.Phase == "job") && previous.FailedStep == "")

@@ -124,7 +124,7 @@ func TestResourceUsageMigrationPreservesSchema35AndExistingRows(t *testing.T) {
 	})
 	ctx := context.Background()
 	repo := createRepo(t, s)
-	if _, err := s.db.Exec(`DROP TABLE step_resource_usage;DELETE FROM schema_migrations WHERE version>=36`); err != nil {
+	if _, err := s.db.Exec(publicationRetryDowngradeSQL + `DROP TABLE step_resource_usage;DELETE FROM schema_migrations WHERE version>=36`); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.db.Exec(`UPDATE schema_migrations SET applied_at=123 WHERE version=35`); err != nil {
@@ -272,7 +272,7 @@ func TestResourceFormatGuardMigrationPreservesSchema36Rows(t *testing.T) {
 	if err = s.db.QueryRow(`SELECT observation_json FROM step_resource_usage WHERE run_id=?`, run.ID).Scan(&before); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = s.db.Exec(`DROP INDEX step_resource_usage_retention_idx; DELETE FROM schema_migrations WHERE version=37; UPDATE schema_migrations SET applied_at=123 WHERE version=36`); err != nil {
+	if _, err = s.db.Exec(publicationRetryDowngradeSQL + `DROP INDEX step_resource_usage_retention_idx; DELETE FROM schema_migrations WHERE version=37; UPDATE schema_migrations SET applied_at=123 WHERE version=36`); err != nil {
 		t.Fatal(err)
 	}
 	if err = s.Close(); err != nil {
@@ -288,7 +288,7 @@ func TestResourceFormatGuardMigrationPreservesSchema36Rows(t *testing.T) {
 	if err = s.db.QueryRow(`SELECT applied_at FROM schema_migrations WHERE version=36`).Scan(&previous); err != nil || previous != 123 {
 		t.Fatal("shipped migration replayed", previous, err)
 	}
-	if err = s.db.QueryRow(`SELECT MAX(version) FROM schema_migrations`).Scan(&version); err != nil || version != 37 {
+	if err = s.db.QueryRow(`SELECT MAX(version) FROM schema_migrations`).Scan(&version); err != nil || version != latestMigrationVersion {
 		t.Fatal("format guard missing", version, err)
 	}
 	if err = s.db.QueryRow(`SELECT observation_json FROM step_resource_usage WHERE run_id=?`, run.ID).Scan(&after); err != nil || before != after {

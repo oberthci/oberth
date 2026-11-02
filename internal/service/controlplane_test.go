@@ -4015,12 +4015,13 @@ func TestPublishRetrySucceedsAfterSimulatedForge500(t *testing.T) {
 	if err := fixture.scheduler.ProcessNext(context.Background()); err != nil {
 		t.Fatal(err)
 	}
+	exhaustPublicationRetries(t, fixture)
 	run, err := fixture.store.Run(context.Background(), enqueued.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if run.Status != model.RunFailed || run.Phase != "publishing" {
-		t.Fatalf("run after forge 500 = %s/%s, want failed/publishing", run.Status, run.Phase)
+	if run.Status != model.RunFailed || run.Phase != "infrastructure" {
+		t.Fatalf("run after forge 500 = %s/%s, want failed/infrastructure", run.Status, run.Phase)
 	}
 
 	// Clear the forge error and retry.
@@ -4094,6 +4095,7 @@ func TestPublishRetryIdempotentWhenUpstreamAlreadyHasObject(t *testing.T) {
 	if err := fixture.scheduler.ProcessNext(context.Background()); err != nil {
 		t.Fatal(err)
 	}
+	exhaustPublicationRetries(t, fixture)
 	run, err := fixture.store.Run(context.Background(), enqueued.ID)
 	if err != nil || run.Status != model.RunFailed {
 		t.Fatalf("run = %s, %v", run.Status, err)
@@ -4134,8 +4136,9 @@ func TestPublishIssueKindDistinguishesPublishFromCodeFailure(t *testing.T) {
 	if err := fixture.scheduler.ProcessNext(context.Background()); err != nil {
 		t.Fatal(err)
 	}
+	exhaustPublicationRetries(t, fixture)
 	run, err := fixture.store.Run(context.Background(), enqueued.ID)
-	if err != nil || run.Status != model.RunFailed || run.Phase != "publishing" {
+	if err != nil || run.Status != model.RunFailed || run.Phase != "infrastructure" {
 		t.Fatalf("run = %s/%s, %v", run.Status, run.Phase, err)
 	}
 	// Check that the CI issue has the distinct publish title.

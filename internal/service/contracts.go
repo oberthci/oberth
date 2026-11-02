@@ -173,6 +173,8 @@ type PromotionRepository interface {
 }
 
 type PublicationStore interface {
+	UpdatePublicationAttempt(context.Context, string, int, int, time.Time, string) (model.Publication, error)
+	FailedPromotionPublication(context.Context, string) (model.Publication, error)
 	BeginPublication(context.Context, model.PublicationSpec) (model.Publication, error)
 	SetPublicationPredecessor(context.Context, string, string, bool) (model.Publication, error)
 	Publication(context.Context, string) (model.Publication, error)

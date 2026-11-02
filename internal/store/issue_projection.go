@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/pushretry"
 )
 
 const (
@@ -103,6 +104,9 @@ func (s *Store) projectRunIssue(ctx context.Context, tx *sql.Tx, run model.Run, 
 	}
 	if phase == "" {
 		phase = "run"
+	}
+	if pushretry.PublicationFailure(run.Error) {
+		phase = "publishing"
 	}
 	var title string
 	switch phase {

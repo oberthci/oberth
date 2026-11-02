@@ -102,7 +102,7 @@ func TestStepUsageV32MigrationPreservesDataAndUnknowns(t *testing.T) {
 	}
 	// Reconstitute the actual old NOT NULL/default-zero schema, not just its
 	// ledger. This also covers migration from populated, recorded step results.
-	_, err = s.db.Exec(`
+	_, err = s.db.Exec(publicationRetryDowngradeSQL + `
 DROP TABLE IF EXISTS step_resource_usage; DROP INDEX IF EXISTS runs_latest_ref_idx;
 DROP TABLE IF EXISTS run_priority_overrides;
 DROP TABLE IF EXISTS queue_priority_patterns;

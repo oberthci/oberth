@@ -29,8 +29,8 @@ func TestSchemaMigrationsAreContiguous(t *testing.T) {
 	if err := validateMigrations(migrations, latestMigrationVersion); err != nil {
 		t.Fatal(err)
 	}
-	if latestMigrationVersion != 37 {
-		t.Fatalf("latest migration version = %d, want 37", latestMigrationVersion)
+	if latestMigrationVersion != 38 {
+		t.Fatalf("latest migration version = %d, want 38", latestMigrationVersion)
 	}
 	if len(migrations) != latestMigrationVersion {
 		t.Fatalf("migration count = %d, want %d", len(migrations), latestMigrationVersion)
@@ -583,7 +583,7 @@ func TestInspectLegacyV1RejectsDowngradedV2Shape(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := raw.Exec(`
+	if _, err := raw.Exec(publicationRetryDowngradeSQL + `
 DROP TABLE audit_anchors;
 CREATE TABLE uplinks_v1 (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1080,7 +1080,7 @@ func TestFreshSchemaIsCompleteAndIdempotent(t *testing.T) {
 		"run_cancellations":         {"run_id", "job_name", "superseded_by", "reason", "created_at", "completed_at"},
 		"receive_events":            {"id", "actor", "repo_id", "ref_kind", "ref", "old_sha", "object_sha", "commit_sha", "outcome", "run_id", "created_at"},
 		"pending_token_credentials": {"token_credential_id", "created_at"},
-		"publications":              {"sequence", "id", "repo_id", "run_id", "promotion_id", "ref_kind", "ref", "previous_sha", "previous_known", "result_sha", "actor", "status", "error", "created_at", "updated_at"},
+		"publications":              {"sequence", "id", "repo_id", "run_id", "promotion_id", "ref_kind", "ref", "previous_sha", "previous_known", "result_sha", "actor", "status", "error", "created_at", "updated_at", "attempts", "retry_after"},
 		"ci_issue_work":             {"sequence", "repo_id", "branch", "origin", "run_id", "promotion_id", "actor", "created_at"},
 		"ci_issue_projections":      {"repo_id", "branch", "origin", "work_sequence", "work_id", "outcome", "title", "body", "actor", "updated_at"},
 		"secret_access":             {"id", "repo", "step", "secret", "approved_by", "approved_at", "revoked_by", "revoked_at"},

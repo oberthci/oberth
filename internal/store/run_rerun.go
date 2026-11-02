@@ -10,6 +10,7 @@ import (
 	"sync"
 
 	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/pushretry"
 )
 
 // RerunRun queues a new run with the same repository, ref, SHA, trigger,
@@ -53,7 +54,7 @@ func (s *Store) RerunRun(ctx context.Context, request model.RunRerunRequest) (mo
 		return model.RunRerunResult{}, fmt.Errorf("%w: run %s is still %s; wait for it or cancel it first", ErrInvalidState, source.ID, source.Status)
 	case source.Status == model.RunPassed:
 		return model.RunRerunResult{}, fmt.Errorf("%w: run %s already passed", ErrInvalidState, source.ID)
-	case source.Status == model.RunFailed && source.Phase == "publishing":
+	case source.Status == model.RunFailed && (source.Phase == "publishing" || pushretry.PublicationFailure(source.Error)):
 		return model.RunRerunResult{}, fmt.Errorf("%w: run %s passed every step and only its upstream publication failed; publish_retry re-pushes it without re-running", ErrInvalidState, source.ID)
 	case source.Trigger == "promotion":
 		return model.RunRerunResult{}, fmt.Errorf("%w: run %s is promotion CI; retry its promotion with promote_retry", ErrInvalidState, source.ID)

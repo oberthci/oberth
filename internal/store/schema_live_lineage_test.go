@@ -77,7 +77,7 @@ func TestMigrationLiveLineageAppliesRebuildAfterRecordedV10(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := raw.ExecContext(ctx, `
+	if _, err := raw.ExecContext(ctx, publicationRetryDowngradeSQL+`
 PRAGMA foreign_keys = OFF;
 CREATE TABLE repositories_live (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

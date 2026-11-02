@@ -463,9 +463,7 @@ func readPendingPublications(
 	ctx context.Context,
 	querier auditStateQuerier,
 ) ([]model.Publication, error) {
-	rows, err := querier.QueryContext(ctx, `
-SELECT `+publicationColumns+` FROM publications
-WHERE status = 'pending' ORDER BY sequence`)
+	rows, err := pendingPublicationRows(ctx, querier)
 	if err != nil {
 		return nil, fmt.Errorf("verify pending publication intents: %w", err)
 	}

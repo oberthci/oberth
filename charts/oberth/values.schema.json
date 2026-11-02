@@ -25,7 +25,7 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "enabled": {"type": "boolean", "default": false}
+        "enabled": {"type": "boolean", "default": true}
       },
       "description": "Opt-in platform PriorityClasses; external Argo/OpenBao releases require their own values overlays."
     },

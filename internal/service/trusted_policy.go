@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/pushretry"
+	"github.com/oberthci/oberth/internal/store"
 	"github.com/oberthci/oberth/internal/vmrunner"
 )
 
@@ -147,6 +149,43 @@ func (scheduler *Scheduler) requirePublicationTestPolicy(ctx context.Context, re
 			})
 		}
 	}
+	reused := false
+	if publication.RunID == "" && publication.PromotionID != "" {
+		lineage, err := scheduler.database().PromotionLineage(ctx, publication.PromotionID)
+		if err != nil {
+			return err
+		}
+		// A manual retry can itself exhaust its push budget. Follow only
+		// unchanged failed push intents back to the original tested run.
+		for depth := 0; lineage.RetryOf != "" && depth < 100; depth++ {
+			failed, err := scheduler.database().FailedPromotionPublication(ctx, lineage.RetryOf)
+			if errors.Is(err, store.ErrNotFound) {
+				break
+			}
+			if err != nil {
+				return err
+			}
+			if failed.PreviousSHA != publication.PreviousSHA || !sameOID(failed.ResultSHA, publication.ResultSHA) || failed.RepoID != repository.ID || failed.Ref != publication.Ref || (!pushretry.PublicationFailure(failed.Error) && !pushretry.Transient(errors.New(failed.Error))) {
+				break
+			}
+			if failed.RunID != "" {
+				tested, err := scheduler.database().Run(ctx, failed.RunID)
+				if err != nil {
+					return err
+				}
+				if reusablePublicationRun(tested, failed) {
+					run = tested
+					reused = true
+					sourceErr = nil
+				}
+				break
+			}
+			lineage, err = scheduler.database().PromotionLineage(ctx, failed.PromotionID)
+			if err != nil {
+				return err
+			}
+		}
+	}
 	requirement, err := scheduler.trustedRequirement(ctx, repository, run.ID, candidateSHA)
 	if err != nil || requirement.Contract == nil {
 		return err
@@ -157,7 +196,7 @@ func (scheduler *Scheduler) requirePublicationTestPolicy(ctx context.Context, re
 		return fmt.Errorf("publication differs from trusted tested candidate")
 	}
 	if publication.RunID == "" {
-		if sourceErr != nil || run.Status != model.RunPassed || run.TestedSHA != candidateSHA {
+		if sourceErr != nil || (run.Status != model.RunPassed && !reused) || run.TestedSHA != candidateSHA {
 			return fmt.Errorf("trusted fast-forward requires a passed exact candidate run")
 		}
 	}

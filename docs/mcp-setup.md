@@ -209,8 +209,8 @@ call the proxy hostname directly.
 | `promote` | Green-gate a SHA, merge with target branch, push without force |
 | `promotion_list` | Recover durable promotion IDs by exact repo/full source SHA/status; bounded pages with an admission-sequence cursor |
 | `promote_status` | Wait for a promotion record to become terminal; a failed or interrupted promotion that was retried names its successor in `retried_as` |
-| `promote_retry` | Retry a failed or interrupted promotion (`id`): a new promotion of the same repo/source SHA/target, merged onto the target's current head and re-tested. Same authorization as `promote`; the original grant still authorizes it, because a grant is consumed only by a delivered promotion. Audited as `promotion.retry` |
-| `publish_retry` | Retry upstream publication for a branch or tag run whose burns passed but whose upstream push failed; a promotion is retried with `promote_retry` instead |
+| `promote_retry` | Retry a failed or interrupted promotion (`id`): a new promotion of the same repo/source SHA/target, merged onto the target's current head and re-tested; a transient push-only failure reuses its exact tested SHA when the target is unchanged. Same authorization as `promote`; the original grant still authorizes it, because a grant is consumed only by a delivered promotion. Audited as `promotion.retry` |
+| `publish_retry` | Retry upstream publication for a branch or tag run whose burns passed but whose upstream push failed, including exhausted infrastructure failures. Transient errors get five durable attempts with 2/4/8/16-minute backoff, and pending responses say queued; a promotion is retried with `promote_retry` instead |
 | `issue_create` | Create a manual issue, workspace-global or filed under one `upstream` |
 | `issue_get` | Get an issue by ID; optional `fields` and `body_limit` reduce the response |
 | `issue_get_many` | Get 1..50 issues in request order, with optional `fields`/`body_limit` and explicit missing/size-limit results |

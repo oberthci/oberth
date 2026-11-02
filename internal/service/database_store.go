@@ -6,6 +6,7 @@ package service
 // original deadline and error behavior.
 import (
 	"context"
+	"time"
 
 	"github.com/oberthci/oberth/internal/model"
 )
@@ -160,4 +161,15 @@ func (database schedulerDatabase) PromotionByRun(ctx context.Context, runID stri
 
 func (database schedulerDatabase) Promotion(ctx context.Context, id string) (model.Promotion, error) {
 	return retryDatabase(ctx, "Promotion", func(ctx context.Context) (model.Promotion, error) { return database.SchedulerStore.Promotion(ctx, id) })
+}
+
+func (database schedulerDatabase) UpdatePublicationAttempt(ctx context.Context, id string, expected, attempts int, retryAfter time.Time, message string) (model.Publication, error) {
+	return retryDatabase(ctx, "UpdatePublicationAttempt", func(ctx context.Context) (model.Publication, error) {
+		return database.SchedulerStore.UpdatePublicationAttempt(ctx, id, expected, attempts, retryAfter, message)
+	})
+}
+func (database schedulerDatabase) FailedPromotionPublication(ctx context.Context, id string) (model.Publication, error) {
+	return retryDatabase(ctx, "FailedPromotionPublication", func(ctx context.Context) (model.Publication, error) {
+		return database.SchedulerStore.FailedPromotionPublication(ctx, id)
+	})
 }

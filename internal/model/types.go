@@ -526,6 +526,8 @@ func (s PublicationStatus) Valid() bool {
 func (s PublicationStatus) Terminal() bool { return s.Valid() && s != PublicationPending }
 
 type Publication struct {
+	Attempts      int
+	RetryAfter    time.Time
 	ID            string
 	Sequence      int64
 	RepoID        int64

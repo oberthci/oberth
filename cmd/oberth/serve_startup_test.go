@@ -650,6 +650,8 @@ ALTER TABLE runs DROP COLUMN admission_sequence;
 ALTER TABLE runs DROP COLUMN credentialed;
 ALTER TABLE runs DROP COLUMN concurrency_group;
 DROP TRIGGER publications_guard_update;
+ALTER TABLE publications DROP COLUMN attempts;
+ALTER TABLE publications DROP COLUMN retry_after;
 CREATE TRIGGER publications_guard_update
 BEFORE UPDATE ON publications
 WHEN NOT (
@@ -875,6 +877,8 @@ ALTER TABLE runs DROP COLUMN admission_sequence;
 ALTER TABLE runs DROP COLUMN credentialed;
 ALTER TABLE runs DROP COLUMN concurrency_group;
 DROP TRIGGER publications_guard_update;
+ALTER TABLE publications DROP COLUMN attempts;
+ALTER TABLE publications DROP COLUMN retry_after;
 CREATE TRIGGER publications_guard_update
 BEFORE UPDATE ON publications
 WHEN NOT (

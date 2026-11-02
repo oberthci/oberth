@@ -5,8 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/pushretry"
 )
 
 type remotePublicationState uint8
@@ -18,9 +20,8 @@ const (
 )
 
 // deliverPublication classifies an exact durable intent against the remote
-// before deciding whether a mutation is safe. An ambiguous transport failure
-// is classified by one final ref read. Every bounded attempt terminalizes;
-// only an actual process crash can leave an intent for one-shot startup recovery.
+// before deciding whether a mutation is safe. Transient failures retain the
+// durable intent with a bounded retry budget; every lost reply is re-read.
 func deliverPublication(
 	ctx context.Context,
 	publications PublicationStore,
@@ -43,12 +44,40 @@ func deliverPublication(
 	if err != nil {
 		return model.PublicationFinalization{}, err
 	}
+	if time.Now().Before(publication.RetryAfter) && strings.HasPrefix(publication.Error, "upstream publication retry ") {
+		return model.PublicationFinalization{Publication: publication}, nil
+	}
 	resume := suspendDispatch(ctx)
 	remoteSHA, exists, err := git.RemoteRef(ctx, repositoryInput, ref)
 	resume()
 	if err != nil {
+		if !publication.RetryAfter.IsZero() && time.Now().Before(publication.RetryAfter) {
+			return model.PublicationFinalization{Publication: publication}, nil
+		}
 		failure := fmt.Errorf("read remote ref for publication %s: %w", publication.ID, err)
-		return publications.FinalizePublication(ctx, publication.ID, model.PublicationFailed, failure.Error())
+		readFinalizeCtx, cancelReadFinalize := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+		defer cancelReadFinalize()
+		ctx = readFinalizeCtx
+		if pushretry.Transient(failure) && publication.Attempts < pushretry.MaxAttempts {
+			attempt := publication.Attempts + 1
+			delay := pushretry.Delay(attempt)
+			if delay == 0 {
+				delay = time.Minute
+			}
+			publication, err = publications.UpdatePublicationAttempt(ctx, publication.ID, publication.Attempts, attempt, time.Now().Add(delay), failure.Error())
+			if err != nil {
+				return model.PublicationFinalization{}, err
+			}
+		}
+		return retryPublicationFailure(ctx, publications, publication, failure)
+	}
+	// Read-back is safe even during backoff: a lost finalization reply must
+	// never defer confirmation of a result already visible at the forge.
+	if exists && sameOID(remoteSHA, publication.ResultSHA) {
+		return finalizePublication(ctx, publications, publication.ID, model.PublicationDelivered, "")
+	}
+	if !publication.RetryAfter.IsZero() && time.Now().Before(publication.RetryAfter) {
+		return model.PublicationFinalization{Publication: publication}, nil
 	}
 	// Feature branches (non-promotion, non-default) use forced push with no
 	// predecessor check. The default branch is excluded: a direct push to the
@@ -56,9 +85,6 @@ func deliverPublication(
 	// push so it cannot silently overwrite a just-delivered promotion (#432).
 	forceBranch := publication.PromotionID == "" && publication.RefKind == model.RefBranch && publication.Ref != repository.DefaultBranch
 	if forceBranch {
-		if exists && sameOID(remoteSHA, publication.ResultSHA) {
-			return publications.FinalizePublication(ctx, publication.ID, model.PublicationDelivered, "")
-		}
 		return attemptPublicationMutation(ctx, publications, git, auditor, repository, repositoryInput, publication, ref, true)
 	}
 	if !publication.PreviousKnown {
@@ -69,7 +95,7 @@ func deliverPublication(
 	}
 	switch classifyRemotePublication(publication, remoteSHA, exists) {
 	case remotePublicationResult:
-		return publications.FinalizePublication(ctx, publication.ID, model.PublicationDelivered, "")
+		return finalizePublication(ctx, publications, publication.ID, model.PublicationDelivered, "")
 	case remotePublicationOther:
 		return finalizeMovedPublication(ctx, publications, publication, remoteSHA, exists,
 			publicationConcurrencyError(publication, remoteSHA, exists).Error())
@@ -88,12 +114,29 @@ func attemptPublicationMutation(
 	ref string,
 	forceBranch bool,
 ) (model.PublicationFinalization, error) {
+	if publication.Attempts >= pushretry.MaxAttempts {
+		return finalizePublication(ctx, publications, publication.ID, model.PublicationFailed, pushretry.Failure("retry budget exhausted; "+publication.Error))
+	}
+	attempt := publication.Attempts + 1
+	delay := pushretry.Delay(attempt)
+	if delay == 0 {
+		delay = time.Minute
+	}
+	next := time.Now().Add(delay)
+	var err error
+	publication, err = publications.UpdatePublicationAttempt(ctx, publication.ID, publication.Attempts, attempt, next, fmt.Sprintf("upstream publication attempt %d/%d", attempt, pushretry.MaxAttempts))
+	if err != nil {
+		return model.PublicationFinalization{}, err
+	}
 	mutationErr := auditedGitMutation(ctx, auditor, publication.Actor,
 		publicationAuditAction(publication), publicationAuditResource(publication), publicationAuditResourceID(publication),
 		publicationAuditDetails(repository, publication),
 		func() error { return mutatePublication(ctx, git, repositoryInput, publication, forceBranch) })
+	finalizeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	defer cancel()
+	ctx = finalizeCtx
 	if mutationErr == nil {
-		return publications.FinalizePublication(ctx, publication.ID, model.PublicationDelivered, "")
+		return finalizePublication(ctx, publications, publication.ID, model.PublicationDelivered, "")
 	}
 
 	// A failed push or audit response can be ambiguous: the remote may already
@@ -106,19 +149,16 @@ func attemptPublicationMutation(
 			fmt.Errorf("publication %s mutation was ambiguous: %w", publication.ID, mutationErr),
 			fmt.Errorf("verify remote ref after ambiguous publication: %w", verifyErr),
 		)
-		return publications.FinalizePublication(ctx, publication.ID, model.PublicationFailed, failure.Error())
+		return retryPublicationFailure(ctx, publications, publication, failure)
 	}
 	switch classifyRemotePublication(publication, remoteSHA, exists) {
 	case remotePublicationResult:
-		return publications.FinalizePublication(ctx, publication.ID, model.PublicationDelivered, "")
+		return finalizePublication(ctx, publications, publication.ID, model.PublicationDelivered, "")
 	case remotePublicationPrevious:
-		// The bounded publication attempt did not move the ref. Terminalize it;
-		// There is no background publication loop; a later explicit sync
-		// or promotion is the retry boundary.
-		return publications.FinalizePublication(ctx, publication.ID, model.PublicationFailed, mutationErr.Error())
+		return retryPublicationFailure(ctx, publications, publication, mutationErr)
 	default:
 		if forceBranch {
-			return publications.FinalizePublication(ctx, publication.ID, model.PublicationFailed, mutationErr.Error())
+			return retryPublicationFailure(ctx, publications, publication, mutationErr)
 		}
 		failure := errors.Join(mutationErr, publicationConcurrencyError(publication, remoteSHA, exists))
 		return finalizeMovedPublication(ctx, publications, publication, remoteSHA, exists, failure.Error())
@@ -131,7 +171,7 @@ func attemptPublicationMutation(
 // (#1097) is decided on this typed signal and never on error text.
 func finalizeMovedPublication(ctx context.Context, publications PublicationStore, publication model.Publication,
 	remoteSHA string, exists bool, failure string) (model.PublicationFinalization, error) {
-	finalization, err := publications.FinalizePublication(ctx, publication.ID, model.PublicationFailed, failure)
+	finalization, err := finalizePublication(ctx, publications, publication.ID, model.PublicationFailed, failure)
 	if err == nil && exists && publication.PromotionID != "" && validOID(remoteSHA) {
 		finalization.TargetMovedTo = strings.ToLower(remoteSHA)
 	}
@@ -224,4 +264,31 @@ func publicationAuditDetails(repository model.Repository, publication model.Publ
 		"repo": repository.Name, "ref_kind": publication.RefKind, "ref": publication.Ref,
 		"previous_sha": publication.PreviousSHA, "result_sha": publication.ResultSHA,
 	}
+}
+
+// retryPublicationFailure queues a transient outage without holding a delivery
+// permit or worker across backoff. Attempts are reserved before each mutation;
+// a failed initial remote read also consumes one attempt.
+func retryPublicationFailure(ctx context.Context, publications PublicationStore, publication model.Publication, failure error) (model.PublicationFinalization, error) {
+	finalizeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	defer cancel()
+	ctx = finalizeCtx
+	if !pushretry.Transient(failure) {
+		return finalizePublication(ctx, publications, publication.ID, model.PublicationFailed, failure.Error())
+	}
+	if publication.Attempts >= pushretry.MaxAttempts {
+		return finalizePublication(ctx, publications, publication.ID, model.PublicationFailed, pushretry.Failure(fmt.Sprintf("all %d attempts exhausted: %v", pushretry.MaxAttempts, failure)))
+	}
+	next := time.Now().Add(pushretry.Delay(publication.Attempts))
+	message := fmt.Sprintf("upstream publication retry %d/%d queued for %s after transient error: %v", publication.Attempts+1, pushretry.MaxAttempts, next.UTC().Format(time.RFC3339), failure)
+	updated, err := publications.UpdatePublicationAttempt(ctx, publication.ID, publication.Attempts, publication.Attempts, next, message)
+	return model.PublicationFinalization{Publication: updated}, err
+}
+
+// Git I/O may consume its entire request budget. Local completion always has
+// a fresh bounded storage context, including idempotent read-back paths.
+func finalizePublication(ctx context.Context, publications PublicationStore, id string, status model.PublicationStatus, failure string) (model.PublicationFinalization, error) {
+	finalCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	defer cancel()
+	return publications.FinalizePublication(finalCtx, id, status, failure)
 }

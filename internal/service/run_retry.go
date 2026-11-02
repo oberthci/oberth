@@ -7,6 +7,7 @@ import (
 
 	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/pushretry"
 )
 
 func (service *API) retryRun(ctx context.Context, actor api.Actor, id string) (model.Run, error) {
@@ -26,6 +27,12 @@ func (service *API) retryRun(ctx context.Context, actor api.Actor, id string) (m
 		if err := authorizeRunRerun(previous, actor.Admin); err != nil {
 			return model.Run{}, err
 		}
+	}
+	if previous.Status == model.RunFailed && pushretry.PublicationFailure(previous.Error) {
+		if _, err := service.publishRetry(ctx, actor, previous.ID); err != nil {
+			return model.Run{}, err
+		}
+		return service.history.Run(ctx, previous.ID)
 	}
 	audit := &model.RunReplayAudit{Basis: "branch"}
 	tagCheck := func(model.Run) *bool { return nil }

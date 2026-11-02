@@ -640,6 +640,13 @@ func (scheduler *Scheduler) Run(ctx context.Context) error {
 		}
 		select {
 		case <-ticks:
+			if err := scheduler.recoverNotifiedPublicationsWithGate(dispatchCtx, scheduler.awaitDispatchMutation); err != nil {
+				join()
+				if ctx.Err() != nil {
+					return nil
+				}
+				return err
+			}
 		case <-ctx.Done():
 			join()
 			return nil
@@ -1599,6 +1606,9 @@ func (scheduler *Scheduler) recoverPublicationIDsWithGate(ctx context.Context, i
 			recoveryErr = errors.Join(recoveryErr, fmt.Errorf("recover publication %s: %w", id, err))
 			continue
 		}
+		if !finalization.Publication.Status.Terminal() {
+			continue
+		}
 		var cleanupErr error
 		if finalization.Run.ID != "" {
 			beatDispatch(ctx)
@@ -1692,7 +1702,17 @@ func (scheduler *Scheduler) deliverPublicationWithGate(
 	if err != nil {
 		return model.PublicationFinalization{}, err
 	}
-	finalizedHere = true
+	finishCtx, cancelFinish := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	defer cancelFinish()
+	ctx = finishCtx
+	if finalization.Publication.Status == model.PublicationPending {
+		scheduler.queuePublicationRetry(publicationID)
+		finalization, err = scheduler.loadPublicationFinalization(ctx, finalization.Publication)
+		if err != nil {
+			return finalization, err
+		}
+	}
+	finalizedHere = finalization.Publication.Status.Terminal()
 	if err := scheduler.finishPublication(ctx, repository, finalization); err != nil {
 		return model.PublicationFinalization{}, err
 	}
@@ -2174,5 +2194,14 @@ func (scheduler *Scheduler) pruneTerminalPodJournal(parent context.Context, runI
 	}
 	if err := runlog.PrunePodLogJournal(logPath); err != nil {
 		log.Print("WARN: terminal pod-log journal cleanup unavailable")
+	}
+}
+
+func (scheduler *Scheduler) queuePublicationRetry(id string) {
+	scheduler.publicationMu.Lock()
+	defer scheduler.publicationMu.Unlock()
+	if _, exists := scheduler.publicationSet[id]; !exists {
+		scheduler.publicationSet[id] = struct{}{}
+		scheduler.publicationIDs = append(scheduler.publicationIDs, id)
 	}
 }

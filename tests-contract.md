@@ -363,3 +363,12 @@ backfill and head-wait drains. The complete scheduler regression
 behind ordinary claimed L runs and proves it reaches the spare weight first,
 then preserves ordinary FIFO. Cross-trigger group tests retain the live holder
 while a waiting tag takes priority over a waiting branch.
+
+Upstream publication retry uses conservative server/transport classification,
+five durable attempts and 2/4/8/16-minute backoff. Tests cover permanent hook,
+policy and identity refusals; lost push and finalization replies; ordinary
+non-forced default/promotion pushes; exact tag identity; fresh finalization
+contexts after a push deadline; progress/audit persistence across restart;
+budget reset only by explicit retry; and promote_retry reuse of an unchanged
+tested merge versus re-testing after target movement. Historical migration
+fixtures remove v38 before reconstructing older schemas.

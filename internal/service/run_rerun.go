@@ -7,6 +7,7 @@ import (
 
 	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/pushretry"
 	"github.com/oberthci/oberth/internal/store"
 )
 
@@ -91,7 +92,7 @@ func (service *API) rerunRun(ctx context.Context, actor api.Actor, id, reason st
 	if service.enqueues == nil {
 		return api.RunRerunResponse{}, refuse(ErrUnavailable, "run rerun queue")
 	}
-	if source.Status == model.RunFailed && source.Phase == "publishing" {
+	if source.Status == model.RunFailed && (source.Phase == "publishing" || pushretry.PublicationFailure(source.Error)) {
 		if _, err := RunRerunPolicy(source, actor.Admin, force, false); err != nil {
 			return api.RunRerunResponse{}, err
 		}

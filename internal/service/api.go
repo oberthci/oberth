@@ -22,6 +22,7 @@ import (
 
 	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/pushretry"
 	"github.com/oberthci/oberth/internal/runlog"
 	"github.com/oberthci/oberth/internal/runprogress"
 	"github.com/oberthci/oberth/internal/store"
@@ -2379,7 +2380,10 @@ func (service *API) planAdmittedPromotion(ctx context.Context, actor api.Actor, 
 		defer cancelCleanup()
 		result = service.cleanupTerminalPromotionWorkspace(cleanupCtx, result)
 	}()
-	plan, err := service.git.PreparePromotion(ctx, service.cacheInputFor(ctx, repository), candidate.SHA, target, workspaceSource)
+	plan, reused, err := service.reusablePromotionPlan(ctx, repository, promotion)
+	if err == nil && !reused {
+		plan, err = service.git.PreparePromotion(ctx, service.cacheInputFor(ctx, repository), candidate.SHA, target, workspaceSource)
+	}
 	if err != nil {
 		return service.failAdmittedPromotion(ctx, promotion, "prepare promotion: "+err.Error(), "")
 	}
@@ -3223,7 +3227,7 @@ func (service *API) publishRetry(ctx context.Context, actor api.Actor, id string
 				}
 				return api.PublishRetryResponse{}, fmt.Errorf("%w: run %s is promotion CI; retry its promotion with promote_retry", ErrInvalidInput, run.ID)
 			}
-			if run.Status != model.RunFailed || run.Phase != "publishing" {
+			if run.Status != model.RunFailed || (run.Phase != "publishing" && !pushretry.PublicationFailure(run.Error)) {
 				return api.PublishRetryResponse{}, fmt.Errorf("%w: run %s is %s/%s, not publishing-failed; retry is only valid for runs that failed during upstream publication",
 					ErrInvalidInput, id, run.Status, run.Phase)
 			}
@@ -3268,7 +3272,7 @@ func (service *API) publishRetry(ctx context.Context, actor api.Actor, id string
 		// Recovery still owns that intent; only a durable terminal row can
 		// justify reporting failed or delivered to this caller.
 		response.Status = string(model.PublicationPending)
-		response.Error = deliveryErr.Error()
+		response.Error = "publication queued for recovery; follow run_status for the result"
 		readCtx, cancelRead := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 		current, readErr := service.promotions.Publication(readCtx, publication.ID)
 		cancelRead()
@@ -3280,6 +3284,13 @@ func (service *API) publishRetry(ctx context.Context, actor api.Actor, id string
 	}
 
 	response.Status = string(finalization.Publication.Status)
+	if finalization.Publication.Status == model.PublicationPending {
+		service.enqueues.NotifyPublicationRecovery(publication.ID)
+		response.Error = finalization.Publication.Error
+		if response.Error == "" {
+			response.Error = "publication queued for recovery; follow run_status for the result"
+		}
+	}
 	if finalization.Publication.Status == model.PublicationFailed {
 		response.Error = finalization.Publication.Error
 	}
