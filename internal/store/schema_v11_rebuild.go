@@ -42,7 +42,7 @@ func migrateV11CanonicalPersistence(ctx context.Context, db *sql.DB, now func() 
 		return fmt.Errorf("migration v11: inspect repositories schema: %w", err)
 	}
 	if strings.Contains(createSQL, "UNIQUE(upstream_id, name)") {
-		return nil // already migrated
+		return v11ForeignKeyCheck(ctx, db) // version recording can fail after rebuild
 	}
 
 	// Step 1: Build the upstream lookup for schedule_fires migration.
