@@ -1660,7 +1660,7 @@ func (scheduler *Scheduler) deliverPublicationWithGate(
 	if publication.Status.Terminal() {
 		return scheduler.loadPublicationFinalization(ctx, publication)
 	}
-	if time.Now().Before(publication.RetryAfter) && strings.HasPrefix(publication.Error, "upstream publication retry ") {
+	if time.Now().Before(publication.RetryAfter) && strings.HasPrefix(publication.Error, publicationRetryPrefix) {
 		scheduler.queuePublicationRetry(publicationID)
 		return scheduler.loadPublicationFinalization(ctx, publication)
 	}

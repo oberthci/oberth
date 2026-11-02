@@ -69,7 +69,7 @@ func TestIssueMutationsReturnOnlyAcknowledgments(t *testing.T) {
 			if err := json.Unmarshal(encoded, &fields); err != nil {
 				t.Fatal(err)
 			}
-			if len(fields) != 5 || len(encoded) > 256 || fields["id"] == nil || fields["state"] == nil || fields["updated_at"] == nil || fields["occurrences"] == nil || fields["appended_bytes"] == nil {
+			if len(fields) != 6 || len(encoded) > 256 || fields["id"] == nil || fields["state"] == nil || fields["updated_at"] == nil || fields["occurrences"] == nil || fields["appended_bytes"] == nil || fields["revision"] == nil || ack.Revision < 1 {
 				t.Fatalf("unexpected acknowledgment: %s", encoded)
 			}
 		})

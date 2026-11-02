@@ -77,6 +77,10 @@ func (r *Retention) Purge(ctx context.Context, actor api.Actor, id, what, reason
 }
 
 func (r *Retention) purge(ctx context.Context, actor, id, what, reason string, keep int) (model.EvidencePurge, error) {
+	return r.purgeWithMode(ctx, actor, id, what, reason, keep, false)
+}
+
+func (r *Retention) purgeWithMode(ctx context.Context, actor, id, what, reason string, keep int, automatic bool) (model.EvidencePurge, error) {
 	if err := ctx.Err(); err != nil {
 		return model.EvidencePurge{}, err
 	}
@@ -91,6 +95,20 @@ func (r *Retention) purge(ctx context.Context, actor, id, what, reason string, k
 			return model.EvidencePurge{}, err
 		}
 		defer release()
+	}
+	if automatic {
+		// A sweep can have selected this run before a manual purge won its
+		// permit. A completed marker is immutable evidence of that removal.
+		previous, err := r.Database.RunEvidencePurges(ctx, id)
+		if err != nil {
+			return model.EvidencePurge{}, err
+		}
+		for _, value := range previous {
+			if value.State == "complete" && (value.What == what || value.What == "both") {
+				value.Bytes = 0
+				return value, nil
+			}
+		}
 	}
 	return r.Database.PurgeRunEvidence(ctx, actor, id, what, reason, keep, func() (int64, error) {
 		var bytes int64
@@ -219,7 +237,7 @@ func (r *Retention) Sweep(ctx context.Context) (resultErr error) {
 			if orphan {
 				reason = "orphaned evidence"
 			}
-			value, err := r.purge(ctx, "oberth-retention", run.ID, item.what, reason, r.KeepNewest)
+			value, err := r.purgeSweepCandidate(ctx, run.ID, item.what, reason, r.KeepNewest)
 			if errors.Is(err, store.ErrEvidenceProtected) {
 				continue
 			}
@@ -309,5 +327,5 @@ func (service *API) purgedEvidence(ctx context.Context, run model.Run, what stri
 }
 
 func (r *Retention) purgeSweepCandidate(ctx context.Context, id, what, reason string, keep int) (model.EvidencePurge, error) {
-	return r.purge(ctx, "oberth-retention", id, what, reason, keep)
+	return r.purgeWithMode(ctx, "oberth-retention", id, what, reason, keep, true)
 }

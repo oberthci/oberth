@@ -693,6 +693,7 @@ func TestMCPToolInputsMatchContract(t *testing.T) {
 		"issue_get_many":     {"body_limit", "fields", "ids"},
 		"secretstore_verify": {"expect", "keys", "paths", "release_tier", "repo", "tier", "timeout"},
 		"publication_abandon": {"id", "reason"},
+		"issue_update":        {"body", "expected_body_sha256", "expected_revision", "id", "title", "upstream"},
 	}
 	for _, definition := range toolDefinitions() {
 		name, ok := definition["name"].(string)

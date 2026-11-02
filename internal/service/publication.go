@@ -23,6 +23,8 @@ const (
 // deliverPublication classifies an exact durable intent against the remote
 // before deciding whether a mutation is safe. Transient failures retain the
 // durable intent with a bounded retry budget; every lost reply is re-read.
+const publicationRetryPrefix = "upstream publication retry "
+
 func deliverPublication(
 	ctx context.Context,
 	publications PublicationStore,
@@ -45,7 +47,7 @@ func deliverPublication(
 	if err != nil {
 		return model.PublicationFinalization{}, err
 	}
-	if time.Now().Before(publication.RetryAfter) && strings.HasPrefix(publication.Error, "upstream publication retry ") {
+	if time.Now().Before(publication.RetryAfter) && strings.HasPrefix(publication.Error, publicationRetryPrefix) {
 		return model.PublicationFinalization{Publication: publication}, nil
 	}
 	resume := suspendDispatch(ctx)
@@ -285,7 +287,7 @@ func retryPublicationFailure(ctx context.Context, publications PublicationStore,
 		return finalizePublication(ctx, publications, publication.ID, model.PublicationFailed, pushretry.Failure(fmt.Sprintf("all %d attempts exhausted: %v", pushretry.MaxAttempts, failure)))
 	}
 	next := time.Now().Add(pushretry.Delay(publication.Attempts))
-	message := fmt.Sprintf("upstream publication retry %d/%d queued for %s after transient error: %v", publication.Attempts+1, pushretry.MaxAttempts, next.UTC().Format(time.RFC3339), failure)
+	message := fmt.Sprintf(publicationRetryPrefix+"%d/%d queued for %s after transient error: %v", publication.Attempts+1, pushretry.MaxAttempts, next.UTC().Format(time.RFC3339), failure)
 	updated, err := publications.UpdatePublicationAttempt(ctx, publication.ID, publication.Attempts, publication.Attempts, next, message)
 	return model.PublicationFinalization{Publication: updated}, err
 }

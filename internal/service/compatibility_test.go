@@ -21,7 +21,7 @@ func TestRunIDCompatibilityAliasesUseScopedResolution(t *testing.T) {
 			t.Fatalf("alias lost identity or scope redaction: %+v", detail.Run)
 		}
 	}
-	for _, args := range []map[string]any{{"id": run.ID, "run_id": f.runs["codeberg"][0].ID}, {"run_id": nil}, {"run_id": 17}} {
+	for _, args := range []map[string]any{{}, {"id": run.ID, "run_id": f.runs["codeberg"][0].ID}, {"run_id": nil}, {"run_id": 17}} {
 		if _, err := f.call(scopedActor, "run_get", args); !errors.Is(err, ErrInvalidInput) {
 			t.Fatalf("bad alias accepted: %v", err)
 		}

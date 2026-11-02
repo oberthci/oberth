@@ -211,6 +211,7 @@ type IssueGetManyResponse struct {
 }
 
 type IssueListItem struct {
+	Revision    int64            `json:"revision"`
 	Lock        *model.IssueLock `json:"lock"`
 	ID          int64            `json:"id"`
 	Upstream    string           `json:"upstream"`
