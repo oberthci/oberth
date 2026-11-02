@@ -4,6 +4,7 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"os"
 	"path/filepath"
 	"testing"
 )
@@ -30,5 +31,13 @@ func TestRetiredProductionSurface(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestRetiredFilesAbsent(t *testing.T) {
+	for _, path := range []string{"pkg/argoworkflow/nonblocking.go", "internal/integration/testdata/gitssh/main.go"} {
+		if _, err := os.Stat(filepath.Join("..", "..", path)); !os.IsNotExist(err) {
+			t.Errorf("retired file %s must be absent (stat: %v)", path, err)
+		}
 	}
 }
