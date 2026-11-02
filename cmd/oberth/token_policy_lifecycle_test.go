@@ -76,8 +76,12 @@ func TestCLIUsesLiveTokenPolicyAndRejectsAboveServerMaximum(t *testing.T) {
 	if remaining := time.Until(*statuses[0].ExpiresAt); remaining < policy.DefaultTTL-time.Minute || remaining > policy.DefaultTTL {
 		t.Fatalf("CLI ignored live default: %s", remaining)
 	}
-	if err := runUplinkWithDependencies(t.Context(), append([]string{"add", "--ttl", "1464h"}, args[1:]...), strings.NewReader(""), io.Discard, deps); err == nil {
+	var refused bytes.Buffer
+	if err := runUplinkWithDependencies(t.Context(), append([]string{"add", "--ttl", "1464h"}, args[1:]...), strings.NewReader(""), &refused, deps); err == nil {
 		t.Fatal("CLI accepted TTL above server maximum")
+	}
+	if strings.Contains(refused.String(), "shown once") {
+		t.Fatal("printed credential header before rejecting TTL")
 	}
 	if _, err := requestUplinkTokenPolicy(t.Context(), socket, "other-database"); err == nil {
 		t.Fatal("policy accepted for a different database")
@@ -169,4 +173,43 @@ func TestLegacyTokenWarningReadErrorDoesNotExposeDetails(t *testing.T) {
 		cancel()
 		<-done
 	})
+}
+
+func TestUplinkRotateIgnoresRevokedExpiredCredentials(t *testing.T) {
+	directory := t.TempDir()
+	database := filepath.Join(directory, "oberth.sqlite")
+	oldKey, certificateKey := newTestUplinkKey(t)
+	certificatePath := filepath.Join(directory, "tls.crt")
+	writeTestCertificate(t, certificatePath, certificateKey.Public().(ed25519.PublicKey), certificateKey)
+	deps := uplinkDependencies{mutationGate: allowTestMutation}
+	if err := runUplinkWithDependencies(context.Background(), []string{
+		"add", "--database", database, "--tls-cert", certificatePath,
+		strings.TrimSpace(string(ssh.MarshalAuthorizedKey(oldKey))), "agent@host",
+	}, strings.NewReader(""), io.Discard, deps); err != nil {
+		t.Fatal(err)
+	}
+	revokedKey, _ := newTestUplinkKey(t)
+	if err := runUplinkWithDependencies(t.Context(), []string{"add", "--database", database, "--tls-cert", certificatePath, strings.TrimSpace(string(ssh.MarshalAuthorizedKey(revokedKey))), "agent@host"}, strings.NewReader(""), io.Discard, deps); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := sql.Open("sqlite", database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = raw.ExecContext(t.Context(), `UPDATE token_credentials SET expires_at=?, revoked_at=? WHERE id IN (SELECT token_credential_id FROM uplinks WHERE fingerprint=?)`, time.Now().Add(-time.Hour).UnixNano(), time.Now().UnixNano(), ssh.FingerprintSHA256(revokedKey))
+	raw.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	newKey, _ := newTestUplinkKey(t)
+	var output bytes.Buffer
+	if err := runUplinkWithDependencies(context.Background(), []string{
+		"rotate", "--database", database, "--tls-cert", certificatePath, "-", "agent@host",
+	}, bytes.NewReader(ssh.MarshalAuthorizedKey(newKey)), &output, deps); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), "Uplink token for agent@host") ||
+		!strings.Contains(output.String(), "removed uplink agent@host ("+ssh.FingerprintSHA256(oldKey)+")") {
+		t.Fatalf("rotate output = %q", output.String())
+	}
 }
