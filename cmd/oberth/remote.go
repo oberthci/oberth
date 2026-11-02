@@ -41,18 +41,18 @@ type remoteRun struct {
 	// Phase and Error carry why a run failed. Without them the client decodes
 	// a failed run into a struct that says only "failed", which is the one
 	// thing the reader already knows.
-	Phase      string
-	Error      string
-	Reason     string
-	FailedBurn string
-	FailedStep string
-	QueuedAt   time.Time
-	StartedAt  *time.Time
-	FinishedAt *time.Time
+	Phase       string
+	Error       string
+	Reason      string
+	FailedStage string `json:"FailedBurn"`
+	FailedStep  string
+	QueuedAt    time.Time
+	StartedAt   *time.Time
+	FinishedAt  *time.Time
 }
 
 type remoteStep struct {
-	Burn       string
+	Stage      string `json:"Burn"`
 	Step       string
 	Status     string
 	StartedAt  *time.Time
@@ -451,11 +451,11 @@ func runRunDetail(ctx context.Context, arguments []string, output io.Writer) err
 	}
 	for _, step := range detail.Steps {
 		marker := " "
-		if step.Burn == detail.Run.FailedBurn && step.Step == detail.Run.FailedStep {
+		if step.Stage == detail.Run.FailedStage && step.Step == detail.Run.FailedStep {
 			marker = "*"
 		}
 		if _, err := fmt.Fprintf(output, "%s %-12s %-20s %-9s %s\n",
-			marker, step.Burn, step.Step, step.Status, span(step.StartedAt, step.FinishedAt)); err != nil {
+			marker, step.Stage, step.Step, step.Status, span(step.StartedAt, step.FinishedAt)); err != nil {
 			return err
 		}
 	}
@@ -491,7 +491,7 @@ type remoteLog struct {
 	TotalScannedBytes int64  `json:"total_scanned_bytes"`
 	ScanLimitBytes    int64  `json:"scan_limit_bytes"`
 	RunID             string `json:"run_id"`
-	Burn              string `json:"burn"`
+	Stage             string `json:"burn"`
 	Step              string `json:"step"`
 	Output            string `json:"output"`
 	Note              string `json:"note"`
@@ -513,7 +513,7 @@ type remoteLog struct {
 func runRemoteLog(ctx context.Context, arguments []string, output io.Writer) error {
 	flags := flag.NewFlagSet("log", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
-	burn := flags.String("burn", "", "burn name")
+	stage := flags.String("burn", "", "burn name")
 	step := flags.String("step", "", "step name")
 	pattern := flags.String("pattern", "", "RE2 pattern; offset and limit then page over matches")
 	context_ := flags.Int("context", 0, "lines of context around each match")
@@ -534,7 +534,7 @@ func runRemoteLog(ctx context.Context, arguments []string, output io.Writer) err
 	if flags.NArg() != 1 {
 		return fmt.Errorf("%w: log <run-id> --burn <burn> --step <step>", errUsage)
 	}
-	if strings.TrimSpace(*burn) == "" || strings.TrimSpace(*step) == "" {
+	if strings.TrimSpace(*stage) == "" || strings.TrimSpace(*step) == "" {
 		return fmt.Errorf("%w: --burn and --step are required; oberth run <id> lists them", errUsage)
 	}
 	api, err := remoteClient(ctx)
@@ -547,7 +547,7 @@ func runRemoteLog(ctx context.Context, arguments []string, output io.Writer) err
 		return err
 	}
 	path := "/api/runs/" + runID + "/logs"
-	query := map[string]string{"burn": *burn, "step": *step, "pattern": *pattern}
+	query := map[string]string{"burn": *stage, "step": *step, "pattern": *pattern}
 	for name, value := range map[string]int{"context": *context_, "offset": *offset, "limit": *limit} {
 		if value > 0 {
 			query[name] = fmt.Sprint(value)
@@ -573,7 +573,7 @@ func runRemoteLog(ctx context.Context, arguments []string, output io.Writer) err
 	}
 	body, hidden := log.Output, 0
 	if !*raw {
-		body = stripStepPrefix(body, log.Burn, log.Step)
+		body = stripStepPrefix(body, log.Stage, log.Step)
 		body, hidden = dropExecutorLines(body)
 	}
 	if _, err := io.WriteString(output, body); err != nil {
@@ -650,8 +650,8 @@ func truncatedNote(truncated bool) string {
 	return ""
 }
 
-func stripStepPrefix(body, burn, step string) string {
-	prefix := "[" + burn + "/" + step + "] "
+func stripStepPrefix(body, stage, step string) string {
+	prefix := "[" + stage + "/" + step + "] "
 	lines := strings.Split(body, "\n")
 	for index, line := range lines {
 		lines[index] = strings.TrimPrefix(line, prefix)

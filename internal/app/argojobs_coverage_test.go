@@ -100,7 +100,7 @@ func TestSetReconcilerHealth(t *testing.T) {
 	jobs.mu.Unlock()
 }
 
-func TestCreateCI_ReconcilerUnhealthyBlocks(t *testing.T) {
+func TestCreateWorkflow_ReconcilerUnhealthyBlocks(t *testing.T) {
 	t.Parallel()
 	fixture := newRaceFixture(t)
 	checker := &fakeReconciler{healthy: false}
@@ -108,7 +108,7 @@ func TestCreateCI_ReconcilerUnhealthyBlocks(t *testing.T) {
 
 	request := fixture.request("wf-unhealthy", "run-unhealthy")
 	request.Run.Credentialed = true
-	err := fixture.jobs.CreateCI(context.Background(), request)
+	err := fixture.jobs.CreateWorkflow(context.Background(), request)
 	if err == nil || !strings.Contains(err.Error(), "initial reconciliation") {
 		t.Fatalf("expected reconciler health gate error, got: %v", err)
 	}
@@ -194,8 +194,8 @@ spec:
 		t.Fatal(err)
 	}
 
-	request := service.JobRequest{
-		JobName: "release-wf-01",
+	request := service.WorkflowRequest{
+		WorkflowName: "release-wf-01",
 		Run: model.Run{
 			ID: "run-release-01", Ref: "refs/tags/v1.0.0",
 			SHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Actor: "agent@host",
@@ -230,8 +230,8 @@ func TestCreateRelease_TriggerMismatch(t *testing.T) {
 	}
 
 	// Run is CI (Release=false), but trying CreateRelease -- mismatch.
-	request := service.JobRequest{
-		JobName: "mismatch-wf",
+	request := service.WorkflowRequest{
+		WorkflowName: "mismatch-wf",
 		Run: model.Run{
 			ID: "run-mismatch", Ref: "refs/heads/main",
 			SHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Actor: "agent@host",
@@ -289,7 +289,7 @@ spec:
 	}
 
 	jobs := &ArgoJobs{intents: map[string]argoIntent{}}
-	steps, err := jobs.PlannedSteps(context.Background(), service.JobRequest{
+	steps, err := jobs.PlannedSteps(context.Background(), service.WorkflowRequest{
 		Run:        model.Run{Ref: "refs/heads/main"},
 		Repository: model.Repository{Name: "test-repo"},
 		SourceDir:  dir,
@@ -312,7 +312,7 @@ func TestPlannedSteps_MissingFile(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	jobs := &ArgoJobs{intents: map[string]argoIntent{}}
-	_, err := jobs.PlannedSteps(context.Background(), service.JobRequest{
+	_, err := jobs.PlannedSteps(context.Background(), service.WorkflowRequest{
 		Run:        model.Run{Ref: "refs/heads/main"},
 		Repository: model.Repository{Name: "missing-repo"},
 		SourceDir:  dir,
@@ -337,7 +337,7 @@ func TestPlannedSteps_InvalidDocument(t *testing.T) {
 	}
 
 	jobs := &ArgoJobs{intents: map[string]argoIntent{}}
-	_, err := jobs.PlannedSteps(context.Background(), service.JobRequest{
+	_, err := jobs.PlannedSteps(context.Background(), service.WorkflowRequest{
 		Run:        model.Run{Ref: "refs/heads/main"},
 		Repository: model.Repository{Name: "bad-repo"},
 		SourceDir:  dir,
@@ -381,7 +381,7 @@ func TestWait_Success(t *testing.T) {
 		waitResult: argojob.Completion{
 			Succeeded: true,
 			Steps: []argojob.StepResult{
-				{Burn: "test", Step: "lint", Ordinal: 0, Status: "passed", ExitCode: 0},
+				{Stage: "test", Step: "lint", Ordinal: 0, Status: "passed", ExitCode: 0},
 			},
 		},
 	}
@@ -488,7 +488,7 @@ func TestTerminalResult_Succeeded(t *testing.T) {
 			Succeeded: true,
 			Phase:     "Succeeded",
 			Steps: []argojob.StepResult{
-				{Burn: "build", Step: "compile", Ordinal: 0, Status: "passed", ExitCode: 0,
+				{Stage: "build", Step: "compile", Ordinal: 0, Status: "passed", ExitCode: 0,
 					StartedAt: &now, FinishedAt: &now},
 			},
 		},
@@ -512,7 +512,7 @@ func TestTerminalResult_Succeeded(t *testing.T) {
 	if result.Status != model.RunPassed {
 		t.Fatalf("status = %q, want passed", result.Status)
 	}
-	if len(result.Steps) != 1 || result.Steps[0].Burn != "build" {
+	if len(result.Steps) != 1 || result.Steps[0].Stage != "build" {
 		t.Fatalf("steps = %+v", result.Steps)
 	}
 }
@@ -749,7 +749,7 @@ func TestResultMapping(t *testing.T) {
 			name: "kubelet infrastructure with failed step",
 			completion: argojob.Completion{
 				Infrastructure: true, Reason: "Evicted: kubelet storage message",
-				FailedBurn: "test", FailedStep: "unit",
+				FailedStage: "test", FailedStep: "unit",
 			},
 			wantStatus: model.RunFailed,
 			wantPhase:  "infrastructure",
@@ -758,7 +758,7 @@ func TestResultMapping(t *testing.T) {
 		{
 			name: "container memory limit OOM",
 			completion: argojob.Completion{
-				Reason: "main: OOMKilled (exit code 137)", FailedBurn: "test", FailedStep: "unit",
+				Reason: "main: OOMKilled (exit code 137)", FailedStage: "test", FailedStep: "unit",
 			},
 			wantStatus: model.RunFailed,
 			wantPhase:  "test",
@@ -781,9 +781,9 @@ func TestResultMapping(t *testing.T) {
 		{
 			name: "failed with failed step",
 			completion: argojob.Completion{
-				Succeeded:  false,
-				FailedBurn: "test",
-				FailedStep: "lint",
+				Succeeded:   false,
+				FailedStage: "test",
+				FailedStep:  "lint",
 			},
 			wantStatus: model.RunFailed,
 			wantPhase:  "test",
@@ -791,9 +791,9 @@ func TestResultMapping(t *testing.T) {
 		{
 			name: "succeeded but reports failed step -- inconsistent",
 			completion: argojob.Completion{
-				Succeeded:  true,
-				FailedBurn: "build",
-				FailedStep: "compile",
+				Succeeded:   true,
+				FailedStage: "build",
+				FailedStep:  "compile",
 			},
 			wantStatus: model.RunFailed,
 			wantPhase:  "build",
@@ -804,9 +804,9 @@ func TestResultMapping(t *testing.T) {
 			completion: argojob.Completion{
 				Succeeded: true,
 				Steps: []argojob.StepResult{
-					{Burn: "test", Step: "unit", Ordinal: 0, Status: "passed", ExitCode: 0,
+					{Stage: "test", Step: "unit", Ordinal: 0, Status: "passed", ExitCode: 0,
 						StartedAt: &now, FinishedAt: &now},
-					{Burn: "build", Step: "compile", Ordinal: 1, Status: "passed", ExitCode: 0},
+					{Stage: "build", Step: "compile", Ordinal: 1, Status: "passed", ExitCode: 0},
 				},
 			},
 			wantStatus: model.RunPassed,
@@ -816,7 +816,7 @@ func TestResultMapping(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			result := jobs.result(tc.completion)
-			if tc.completion.Infrastructure && (result.FailedBurn != "" || result.FailedStep != "") {
+			if tc.completion.Infrastructure && (result.FailedStage != "" || result.FailedStep != "") {
 				t.Fatal("infrastructure failure retained test-failure attribution")
 			}
 			if !tc.completion.Infrastructure && result.FailedStep != tc.completion.FailedStep {
@@ -835,8 +835,8 @@ func TestResultMapping(t *testing.T) {
 				t.Fatalf("steps length = %d, want %d", len(result.Steps), len(tc.completion.Steps))
 			}
 			for i, step := range result.Steps {
-				if step.Burn != tc.completion.Steps[i].Burn {
-					t.Fatalf("step[%d].Burn = %q, want %q", i, step.Burn, tc.completion.Steps[i].Burn)
+				if step.Stage != tc.completion.Steps[i].Stage {
+					t.Fatalf("step[%d].Burn = %q, want %q", i, step.Stage, tc.completion.Steps[i].Stage)
 				}
 				if step.Step != tc.completion.Steps[i].Step {
 					t.Fatalf("step[%d].Step = %q, want %q", i, step.Step, tc.completion.Steps[i].Step)
@@ -969,7 +969,7 @@ func TestDelete_NoIntent(t *testing.T) {
 // create edge cases
 // ---------------------------------------------------------------------------
 
-func TestCreate_EmptyJobName(t *testing.T) {
+func TestCreate_EmptyWorkflowName(t *testing.T) {
 	t.Parallel()
 	config := argojob.Config{
 		Namespace:                  "test-pipeline",
@@ -983,15 +983,15 @@ func TestCreate_EmptyJobName(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	request := service.JobRequest{
-		JobName: "",
+	request := service.WorkflowRequest{
+		WorkflowName: "",
 		Run: model.Run{
 			ID: "run-empty-name", Ref: "refs/heads/main",
 			SHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Actor: "agent@host",
 		},
 		Repository: model.Repository{Name: "test-repo"},
 	}
-	err = jobs.CreateCI(context.Background(), request)
+	err = jobs.CreateWorkflow(context.Background(), request)
 	if err == nil || !strings.Contains(err.Error(), "required") {
 		t.Fatalf("expected required-fields error, got: %v", err)
 	}
@@ -1002,7 +1002,7 @@ func TestCreate_EmptyActor(t *testing.T) {
 	fixture := newRaceFixture(t)
 	request := fixture.request("wf-no-actor", "run-no-actor")
 	request.Run.Actor = ""
-	err := fixture.jobs.CreateCI(context.Background(), request)
+	err := fixture.jobs.CreateWorkflow(context.Background(), request)
 	if err == nil || !strings.Contains(err.Error(), "attributable uplink identity") {
 		t.Fatalf("expected actor-required error, got: %v", err)
 	}
@@ -1014,12 +1014,12 @@ func TestCreate_InFlightDifferentRun(t *testing.T) {
 
 	const name = "wf-conflict"
 	// First create succeeds.
-	if err := fixture.jobs.CreateCI(context.Background(), fixture.request(name, "run-first")); err != nil {
+	if err := fixture.jobs.CreateWorkflow(context.Background(), fixture.request(name, "run-first")); err != nil {
 		t.Fatal(err)
 	}
 
 	// Second create for the same name but different run ID.
-	err := fixture.jobs.CreateCI(context.Background(), fixture.request(name, "run-second"))
+	err := fixture.jobs.CreateWorkflow(context.Background(), fixture.request(name, "run-second"))
 	if err == nil || !strings.Contains(err.Error(), "in flight for a different run") {
 		t.Fatalf("expected in-flight conflict error, got: %v", err)
 	}
@@ -1075,7 +1075,7 @@ spec:
 	}
 
 	jobs := &ArgoJobs{intents: map[string]argoIntent{}}
-	size, err := jobs.PipelineSize(context.Background(), service.JobRequest{
+	size, err := jobs.PipelineSize(context.Background(), service.WorkflowRequest{
 		Run:        model.Run{Ref: "refs/tags/v1.0.0", Release: true},
 		Repository: model.Repository{Name: "test-repo"},
 		SourceDir:  dir,
@@ -1171,7 +1171,7 @@ spec:
 	}
 
 	jobs := &ArgoJobs{intents: map[string]argoIntent{}}
-	steps, err := jobs.PlannedSteps(context.Background(), service.JobRequest{
+	steps, err := jobs.PlannedSteps(context.Background(), service.WorkflowRequest{
 		Run:        model.Run{Ref: "refs/heads/main"},
 		Repository: model.Repository{Name: "test-repo"},
 		SourceDir:  dir,
@@ -1181,7 +1181,7 @@ spec:
 	}
 	// Verify that every step has the correct type.
 	for _, step := range steps {
-		_ = runprogress.PlannedStep{Burn: step.Burn, Step: step.Step, Ordinal: step.Ordinal}
+		_ = runprogress.PlannedStep{Stage: step.Stage, Step: step.Step, Ordinal: step.Ordinal}
 	}
 }
 
@@ -1226,7 +1226,7 @@ spec:
 		t.Fatal(err)
 	}
 	jobs := &ArgoJobs{intents: map[string]argoIntent{}}
-	steps, err := jobs.PlannedSteps(context.Background(), service.JobRequest{
+	steps, err := jobs.PlannedSteps(context.Background(), service.WorkflowRequest{
 		Run:        model.Run{Ref: "refs/heads/main"},
 		Repository: model.Repository{Name: "test-repo"},
 		SourceDir:  dir,

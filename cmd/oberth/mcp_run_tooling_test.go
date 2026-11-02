@@ -61,7 +61,7 @@ func TestMCPRunToolsExposePendingNotExecutedAndInvalidIDs(t *testing.T) {
 		t.Fatal(err)
 	}
 	started := time.Now()
-	if err := logs.AppendStepProgress(run.ID, runprogress.Event{Version: runprogress.Version, Burn: "release-build-variants", Step: "release-build-variants", Status: runprogress.StepRunning, StartedAt: &started}); err != nil {
+	if err := logs.AppendStepProgress(run.ID, runprogress.Event{Version: runprogress.Version, Stage: "release-build-variants", Step: "release-build-variants", Status: runprogress.StepRunning, StartedAt: &started}); err != nil {
 		t.Fatal(err)
 	}
 	control, err := service.NewAPI(service.APIConfig{Runs: database, History: database, Repositories: database, Logs: logs, KVMPreflights: database})
@@ -98,7 +98,7 @@ func TestMCPRunToolsExposePendingNotExecutedAndInvalidIDs(t *testing.T) {
 			t.Fatalf("MCP result = %s", response.Body)
 		}
 		if got := envelope.Result.Structured; (tool == "run_logs" || tool == "logs") && !envelope.Result.IsError {
-			want := service.LogResponse{RunID: run.ID, Burn: "release-build-variants", Step: "release-build-variants",
+			want := service.LogResponse{RunID: run.ID, Stage: "release-build-variants", Step: "release-build-variants",
 				Note: "step was not executed; no log recorded", RunError: "Workflow error", ScanComplete: true, BytesExact: true,
 				TotalScannedBytes: 0, ScanLimitBytes: runlog.MaxScanBytes}
 			if got != want {
@@ -146,17 +146,17 @@ func TestMCPRunToolsExposePendingNotExecutedAndInvalidIDs(t *testing.T) {
 	// marker. Exercise both wire formats with no file, an empty file, and a
 	// finalized index containing only another step's output.
 	if _, err := database.PutStepResult(ctx, model.StepResult{
-		RunID: run.ID, Burn: "release-build-variants", Step: "release-build-variants",
+		RunID: run.ID, Stage: "release-build-variants", Step: "release-build-variants",
 		Status: model.StepFailed, DeclaredSize: "M", Termination: model.UnavailableStepDiagnostic("not-executed"),
 	}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := database.FinishRun(ctx, run.ID, model.RunResult{
-		Status: model.RunFailed, FailedBurn: "release-build-variants", FailedStep: "release-build-variants", Error: "Workflow error",
+		Status: model.RunFailed, FailedStage: "release-build-variants", FailedStep: "release-build-variants", Error: "Workflow error",
 	}); err != nil {
 		t.Fatal(err)
 	}
-	want := service.LogResponse{RunID: run.ID, Burn: "release-build-variants", Step: "release-build-variants",
+	want := service.LogResponse{RunID: run.ID, Stage: "release-build-variants", Step: "release-build-variants",
 		Note: "step was not executed; no log recorded", RunError: "Workflow error", ScanComplete: true, BytesExact: true,
 		TotalScannedBytes: 0, ScanLimitBytes: runlog.MaxScanBytes}
 	for _, storage := range []string{"missing", "empty", "other-step"} {
@@ -207,7 +207,7 @@ func TestMCPRunToolsExposePendingNotExecutedAndInvalidIDs(t *testing.T) {
 	configure(t, remote)
 	for _, flags := range [][]string{nil, {"--raw"}, {"--tail", "--pattern", "FAIL", "--offset", "10"}} {
 		var out bytes.Buffer
-		args := append([]string{run.ID, "--burn", want.Burn, "--step", want.Step}, flags...)
+		args := append([]string{run.ID, "--burn", want.Stage, "--step", want.Step}, flags...)
 		if err := runRemoteLog(ctx, args, &out); err != nil {
 			t.Fatal(err)
 		}
@@ -222,7 +222,7 @@ func TestMCPRunToolsExposePendingNotExecutedAndInvalidIDs(t *testing.T) {
 		{Termination: model.UnavailableStepDiagnostic("not-recorded")},
 		{Termination: model.UnavailableStepDiagnostic("not-executed"), LogEnd: 1},
 	} {
-		step.RunID, step.Burn, step.Step = run.ID, want.Burn, want.Step
+		step.RunID, step.Stage, step.Step = run.ID, want.Stage, want.Step
 		step.Status, step.DeclaredSize = model.StepFailed, "M"
 		if _, err := database.PutStepResult(ctx, step); err != nil {
 			t.Fatal(err)
@@ -257,7 +257,7 @@ func TestMCPBothLogRoutesBoundActualFilteredTailLines(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := logs.WriteStepPlan(run.ID, []runprogress.PlannedStep{{Burn: "test", Step: "test"}}); err != nil {
+	if err := logs.WriteStepPlan(run.ID, []runprogress.PlannedStep{{Stage: "test", Step: "test"}}); err != nil {
 		t.Fatal(err)
 	}
 	f, err := logs.Create(run.ID)

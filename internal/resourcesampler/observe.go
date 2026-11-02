@@ -14,9 +14,9 @@ import (
 // Binding is supplied only after the controller verifies Workflow ownership and
 // resolves this Pod node through the admitted Workflow's step tree.
 type Binding struct {
-	TemplateName, FragmentRepository                                                   string
-	RunID, WorkflowName, WorkflowUID, Namespace, NodeID, NodeName, PodName, Burn, Step string
-	LauncherOwnerName, LauncherOwnerUID                                                string
+	TemplateName, FragmentRepository                                                    string
+	RunID, WorkflowName, WorkflowUID, Namespace, NodeID, NodeName, PodName, Stage, Step string
+	LauncherOwnerName, LauncherOwnerUID                                                 string
 }
 
 // Observe does not trust metric labels alone: UID, current container incarnation
@@ -102,7 +102,7 @@ func observe(b Binding, pod *corev1.Pod, snapshot Snapshot, now time.Time, name,
 	if status == nil || status.ContainerID == "" || (status.State.Running == nil && status.State.Terminated == nil) {
 		return model.StepResourceUsage{}, false
 	}
-	v := model.StepResourceUsage{Version: 2, ContainerKind: kind, PodKind: podKind, Source: "kubelet-cadvisor", RunID: b.RunID, WorkflowName: b.WorkflowName, WorkflowUID: b.WorkflowUID, Namespace: b.Namespace, NodeID: b.NodeID, PodName: pod.Name, PodUID: string(pod.UID), NodeName: pod.Spec.NodeName, ContainerID: status.ContainerID, ContainerName: name, RestartCount: status.RestartCount, Burn: b.Burn, Step: b.Step, FirstObservedAt: now, LastObservedAt: now, SampledLowerBound: true}
+	v := model.StepResourceUsage{Version: 2, ContainerKind: kind, PodKind: podKind, Source: "kubelet-cadvisor", RunID: b.RunID, WorkflowName: b.WorkflowName, WorkflowUID: b.WorkflowUID, Namespace: b.Namespace, NodeID: b.NodeID, PodName: pod.Name, PodUID: string(pod.UID), NodeName: pod.Spec.NodeName, ContainerID: status.ContainerID, ContainerName: name, RestartCount: status.RestartCount, Stage: b.Stage, Step: b.Step, FirstObservedAt: now, LastObservedAt: now, SampledLowerBound: true}
 	v.TemplateName, v.FragmentRepository = b.TemplateName, b.FragmentRepository
 	declared := 0
 	for _, container := range containers {

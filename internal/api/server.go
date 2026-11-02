@@ -447,8 +447,8 @@ const (
 func (server *Server) handleRunLog(writer http.ResponseWriter, request *http.Request) {
 	id := request.PathValue("run")
 	query := request.URL.Query()
-	burn, step := query.Get("burn"), query.Get("step")
-	if !validRunSelector(id) || (burn != "" && !validRunSelector(burn)) || (step != "" && !validRunSelector(step)) {
+	stage, step := query.Get("burn"), query.Get("step")
+	if !validRunSelector(id) || (stage != "" && !validRunSelector(stage)) || (step != "" && !validRunSelector(step)) {
 		writeJSON(writer, http.StatusBadRequest, map[string]string{"error": "run ID is required; burn and step must be valid selectors when provided"})
 		return
 	}
@@ -457,7 +457,7 @@ func (server *Server) handleRunLog(writer http.ResponseWriter, request *http.Req
 		writeJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
-	value, err := server.views.RunLogFiltered(request.Context(), actorFrom(request.Context()), id, burn, step, filter)
+	value, err := server.views.RunLogFiltered(request.Context(), actorFrom(request.Context()), id, stage, step, filter)
 	server.writeView(writer, value, err)
 }
 

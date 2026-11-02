@@ -22,7 +22,7 @@ type TrustedPreflight interface {
 	// Supports requires an exact suite/guest pair in the current operator recipes.
 	Supports(vmrunner.Contract) error
 	RecipeAllowed(vmrunner.KVMRecipe) error
-	Execute(context.Context, JobRequest, vmrunner.Requirement, io.Writer) error
+	Execute(context.Context, WorkflowRequest, vmrunner.Requirement, io.Writer) error
 	Recover(context.Context) ([]string, error)
 }
 

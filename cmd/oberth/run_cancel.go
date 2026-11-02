@@ -317,7 +317,7 @@ func (pod *podRunCanceller) cancel(ctx context.Context, id, reason string, force
 	}
 	if len(result.Cancellations) > 0 {
 		response.Workflow = "pending"
-		if result.Cancellations[0].JobName == "" {
+		if result.Cancellations[0].WorkflowName == "" {
 			response.Workflow = "not_submitted"
 		}
 		if err := requestAdminSchedulerWake(ctx, pod.socket, pod.path); err != nil {

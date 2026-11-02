@@ -165,10 +165,10 @@ type Run struct {
 	Trigger       string
 	ScheduleEntry string `json:",omitempty"`
 	Phase         string
-	JobName       string
+	WorkflowName  string `json:"JobName"`
 	TestedSHA     string
 	BaseSHA       string
-	FailedBurn    string
+	FailedStage   string `json:"FailedBurn"`
 	FailedStep    string
 	Error         string
 	Status        RunStatus
@@ -209,7 +209,7 @@ type RunResult struct {
 	Phase               string
 	TestedSHA           string
 	BaseSHA             string
-	FailedBurn          string
+	FailedStage         string `json:"FailedBurn"`
 	FailedStep          string
 	Error               string
 	// FailureTail is transient issue-projection input. Store implementations must
@@ -247,7 +247,7 @@ type RunCounts struct {
 
 type RunCancellation struct {
 	RunID        string
-	JobName      string
+	WorkflowName string `json:"JobName"`
 	SupersededBy string
 	Reason       string
 	CreatedAt    time.Time
@@ -349,7 +349,7 @@ type StepResult struct {
 	MeasuredSizeComparison []ResourceSizeComparison `json:",omitempty"`
 	Termination            *StepDiagnostic
 	RunID                  string
-	Burn                   string
+	Stage                  string `json:"Burn"`
 	Step                   string
 	Ordinal                int
 	Status                 StepStatus

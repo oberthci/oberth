@@ -316,7 +316,7 @@ func TestLiveWorkflowRunsToCompletion(t *testing.T) {
 		t.Fatalf("controller: %v", err)
 	}
 	controller = controller.WithSourceSeeder(NewSourceSeeder(cluster.kube, cluster.execStreamer(), cluster.config()))
-	request := liveRequest("oberth-live-success", pipeline.TriggerCI, liveTwoBurnDocument)
+	request := liveRequest("oberth-live-success", pipeline.TriggerCI, liveTwoStageDocument)
 	t.Cleanup(func() {
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), time.Minute)
 		defer cleanupCancel()
@@ -339,16 +339,16 @@ func TestLiveWorkflowRunsToCompletion(t *testing.T) {
 	}
 
 	// Every step is attributed to the burn (the nested DAG) that encloses it.
-	burns := map[string][]string{}
+	stages := map[string][]string{}
 	for _, step := range completion.Steps {
-		burns[step.Burn] = append(burns[step.Burn], step.Step)
+		stages[step.Stage] = append(stages[step.Stage], step.Step)
 		if step.Status != runprogress.StepPassed {
-			t.Errorf("step %s/%s = %s", step.Burn, step.Step, step.Status)
+			t.Errorf("step %s/%s = %s", step.Stage, step.Step, step.Status)
 		}
 	}
-	for _, burn := range []string{"setup", "verify"} {
-		if len(burns[burn]) == 0 {
-			t.Errorf("no steps attributed to burn %q; observed %v", burn, burns)
+	for _, stage := range []string{"setup", "verify"} {
+		if len(stages[stage]) == 0 {
+			t.Errorf("no steps attributed to burn %q; observed %v", stage, stages)
 		}
 	}
 
@@ -423,7 +423,7 @@ func TestLiveTerminalStateReconstructsWithoutInProcessState(t *testing.T) {
 		t.Fatalf("controller: %v", err)
 	}
 	controller = controller.WithSourceSeeder(NewSourceSeeder(cluster.kube, cluster.execStreamer(), cluster.config()))
-	request := liveRequest("oberth-live-recovery", pipeline.TriggerCI, liveTwoBurnDocument)
+	request := liveRequest("oberth-live-recovery", pipeline.TriggerCI, liveTwoStageDocument)
 	t.Cleanup(func() {
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), time.Minute)
 		defer cleanupCancel()
@@ -473,7 +473,7 @@ func TestLiveCreateIsIdempotentForTheSameRun(t *testing.T) {
 		t.Fatalf("controller: %v", err)
 	}
 	controller = controller.WithSourceSeeder(NewSourceSeeder(cluster.kube, cluster.execStreamer(), cluster.config()))
-	request := liveRequest("oberth-live-idempotent", pipeline.TriggerCI, liveTwoBurnDocument)
+	request := liveRequest("oberth-live-idempotent", pipeline.TriggerCI, liveTwoStageDocument)
 	t.Cleanup(func() {
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), time.Minute)
 		defer cleanupCancel()
@@ -545,7 +545,7 @@ spec:
 
 // liveTwoBurnDocument is the burn/step shape Oberth's model expects: an
 // entrypoint DAG of burns, each burn a nested DAG of steps.
-const liveTwoBurnDocument = `
+const liveTwoStageDocument = `
 apiVersion: argoproj.io/v1alpha1
 kind: Workflow
 spec:

@@ -10,20 +10,20 @@ import (
 
 type submissionInspectingJobs struct {
 	*fakeJobs
-	inspect func(context.Context, JobRequest) error
+	inspect func(context.Context, WorkflowRequest) error
 }
 
-func (jobs *submissionInspectingJobs) CreateCI(ctx context.Context, request JobRequest) error {
+func (jobs *submissionInspectingJobs) CreateWorkflow(ctx context.Context, request WorkflowRequest) error {
 	if err := jobs.inspect(ctx, request); err != nil {
 		return err
 	}
-	return jobs.fakeJobs.CreateCI(ctx, request)
+	return jobs.fakeJobs.CreateWorkflow(ctx, request)
 }
 
 func TestSchedulerStartsRunAtWeightedAdmission(t *testing.T) {
 	fixture := newControlFixture(t, JobResult{Status: model.RunPassed, Phase: "passed"})
 	observed := false
-	fixture.scheduler.jobs = &submissionInspectingJobs{fakeJobs: fixture.jobs, inspect: func(ctx context.Context, request JobRequest) error {
+	fixture.scheduler.jobs = &submissionInspectingJobs{fakeJobs: fixture.jobs, inspect: func(ctx context.Context, request WorkflowRequest) error {
 		observed = true
 		run, err := fixture.store.Run(ctx, request.Run.ID)
 		if err != nil {

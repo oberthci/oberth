@@ -19,14 +19,14 @@ func TestRestartCutAdoptionPersistsRetryableWithoutTestIssue(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			fixture := newRecoveryFixture(t)
 			run := fixture.enqueueAndClaim(t, fixture.repo.DefaultBranch, strings.Repeat("a", 40))
-			fixture.setJobName(t, run.ID, "adopted-workflow")
+			fixture.setWorkflowName(t, run.ID, "adopted-workflow")
 			if _, err := fixture.store.MarkRunSubmitted(t.Context(), run.ID); err != nil {
 				t.Fatal(err)
 			}
 			result := JobResult{Status: model.RunInterrupted, Phase: "interrupted", Error: "server restart interrupted build/test: no recorded process exit code", Steps: []model.StepResult{stepResult(model.StepFailed)}}
 			if mode == "real-nonzero" {
 				result.Status, result.Phase, result.Error = model.RunFailed, "test", "real test failed"
-				result.FailedBurn, result.FailedStep = "test", "unit"
+				result.FailedStage, result.FailedStep = "test", "unit"
 			}
 			jobs := &adoptingJobs{found: true, recoveryJobs: recoveryJobs{waitResult: result, terminalErr: ErrJobNotTerminal}}
 			scheduler := fixture.scheduler(t, jobs)
@@ -115,7 +115,7 @@ func TestRestartCutLocalLogFailureUsesPinnedReobserve(t *testing.T) {
 		t.Run(map[bool]string{false: "cut", true: "late-real-failure"}[lateFailure], func(t *testing.T) {
 			fixture := newRecoveryFixture(t)
 			run := fixture.enqueueAndClaim(t, fixture.repo.DefaultBranch, strings.Repeat("a", 40))
-			fixture.setJobName(t, run.ID, "adopted-workflow")
+			fixture.setWorkflowName(t, run.ID, "adopted-workflow")
 			if _, err := fixture.store.MarkRunSubmitted(t.Context(), run.ID); err != nil {
 				t.Fatal(err)
 			}
@@ -128,11 +128,11 @@ func TestRestartCutLocalLogFailureUsesPinnedReobserve(t *testing.T) {
 			cut.Reobserve = func(context.Context) (JobResult, error) {
 				reads.Add(1)
 				if lateFailure {
-					return JobResult{Status: model.RunFailed, Phase: "test", FailedBurn: "test", FailedStep: "unit", Error: "late real failure"}, nil
+					return JobResult{Status: model.RunFailed, Phase: "test", FailedStage: "test", FailedStep: "unit", Error: "late real failure"}, nil
 				}
 				return JobResult{Status: model.RunInterrupted, Phase: "interrupted", Error: "server restart cut"}, nil
 			}
-			jobs := &adoptingJobs{found: true, recoveryJobs: recoveryJobs{waitResult: cut, terminalResult: JobResult{Status: model.RunFailed, Phase: "test", FailedBurn: "test", FailedStep: "unit", Error: "unbound synthetic failure"}}}
+			jobs := &adoptingJobs{found: true, recoveryJobs: recoveryJobs{waitResult: cut, terminalResult: JobResult{Status: model.RunFailed, Phase: "test", FailedStage: "test", FailedStep: "unit", Error: "unbound synthetic failure"}}}
 			scheduler := fixture.scheduler(t, jobs)
 			file, err := scheduler.logs.Create(run.ID)
 			if err != nil {

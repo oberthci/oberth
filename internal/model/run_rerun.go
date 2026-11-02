@@ -3,13 +3,13 @@ package model
 // RunTerminalObservation is a complete terminal Workflow snapshot, never a
 // synthesized scheduler result. It retains every step attempt, not just latest.
 type RunTerminalObservation struct {
-	Version int               `json:"version"`
-	JobName string            `json:"job_name"`
-	Nodes   int               `json:"nodes"`
-	Steps   []RunObservedStep `json:"steps"`
+	Version      int               `json:"version"`
+	WorkflowName string            `json:"job_name"`
+	Nodes        int               `json:"nodes"`
+	Steps        []RunObservedStep `json:"steps"`
 }
 type RunObservedStep struct {
-	Burn    string     `json:"burn"`
+	Stage   string     `json:"burn"`
 	Step    string     `json:"step"`
 	Status  StepStatus `json:"status"`
 	Started bool       `json:"started"`

@@ -15,16 +15,16 @@ func TestLegacyRetryOrphansDoNotOwnJournalOrdinals(t *testing.T) {
 				t.Fatal(err)
 			}
 			if canonicalSource == "plan" {
-				if err := logs.WriteStepPlan("run", []runprogress.PlannedStep{{Burn: "x", Step: "step", Ordinal: 1}}); err != nil {
+				if err := logs.WriteStepPlan("run", []runprogress.PlannedStep{{Stage: "x", Step: "step", Ordinal: 1}}); err != nil {
 					t.Fatal(err)
 				}
 			}
 			events := []runprogress.Event{
-				{Version: 1, Burn: "x(0)", Step: "step", Ordinal: 0, Status: runprogress.StepQueued},
-				{Version: 1, Burn: "parallel", Step: "step", Ordinal: 0, Status: runprogress.StepQueued},
+				{Version: 1, Stage: "x(0)", Step: "step", Ordinal: 0, Status: runprogress.StepQueued},
+				{Version: 1, Stage: "parallel", Step: "step", Ordinal: 0, Status: runprogress.StepQueued},
 			}
 			if canonicalSource == "journal" {
-				events = append(events, runprogress.Event{Version: 1, Burn: "x", Step: "step", Ordinal: 1, Status: runprogress.StepQueued})
+				events = append(events, runprogress.Event{Version: 1, Stage: "x", Step: "step", Ordinal: 1, Status: runprogress.StepQueued})
 			}
 			for _, event := range events {
 				if err := logs.AppendStepProgress("run", event); err != nil {
@@ -41,7 +41,7 @@ func TestLegacyRetryOrphansDoNotOwnJournalOrdinals(t *testing.T) {
 			}
 			_ = file.Close()
 			for _, event := range resumed {
-				if event.Burn == "x(0)" {
+				if event.Stage == "x(0)" {
 					t.Fatalf("legacy orphan restored: %+v", event)
 				}
 			}
@@ -56,20 +56,20 @@ func TestRetryCompatibilityStillRejectsGenuineOrdinalConflicts(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			orphan := runprogress.Event{Version: 1, Burn: "x(0)", Step: "step", Ordinal: 0, Status: runprogress.StepQueued}
+			orphan := runprogress.Event{Version: 1, Stage: "x(0)", Step: "step", Ordinal: 0, Status: runprogress.StepQueued}
 			canonical := orphan
-			canonical.Burn, canonical.Ordinal = "x", 1
+			canonical.Stage, canonical.Ordinal = "x", 1
 			bad := canonical
 			want := "ordinal changed"
 			switch conflict {
 			case "changed":
 				bad.Ordinal = 2
 			case "shared":
-				bad.Burn = "parallel"
+				bad.Stage = "parallel"
 				want = "ordinal is shared"
 			case "planned-suffix":
 				if err := logs.WriteStepPlan("run", []runprogress.PlannedStep{
-					{Burn: "x(0)", Step: "step", Ordinal: 0}, {Burn: "x", Step: "step", Ordinal: 1},
+					{Stage: "x(0)", Step: "step", Ordinal: 0}, {Stage: "x", Step: "step", Ordinal: 1},
 				}); err != nil {
 					t.Fatal(err)
 				}

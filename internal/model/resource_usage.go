@@ -59,7 +59,7 @@ type StepResourceUsage struct {
 	ContainerID               string        `json:"container_id"`
 	ContainerName             string        `json:"container_name"`
 	RestartCount              int32         `json:"restart_count"`
-	Burn                      string        `json:"burn"`
+	Stage                     string        `json:"burn"`
 	Step                      string        `json:"step"`
 	FirstObservedAt           time.Time     `json:"first_observed_at"`
 	LastObservedAt            time.Time     `json:"last_observed_at"`
@@ -117,7 +117,7 @@ func (u StepResourceUsage) Validate() error {
 	if (!u.ContainerFinishedAt.IsZero() && (!u.Terminal || u.ContainerStartedAt.IsZero() || u.ContainerFinishedAt.Before(u.ContainerStartedAt))) || (!u.PodFinishedAt.IsZero() && (u.PodStartedAt.IsZero() || u.PodFinishedAt.Before(u.PodStartedAt))) {
 		return bad
 	}
-	for _, s := range []string{u.WorkflowName, u.Namespace, u.NodeID, u.PodName, u.NodeName, u.Burn, u.Step} {
+	for _, s := range []string{u.WorkflowName, u.Namespace, u.NodeID, u.PodName, u.NodeName, u.Stage, u.Step} {
 		if !diagnosticName.MatchString(s) {
 			return bad
 		}
@@ -163,7 +163,7 @@ func (u StepResourceUsage) counters() []*int64 {
 // MergeResourceUsage never sums repeated cumulative samples or erases known
 // measurements with missing data. Container incarnations are separate records.
 func MergeResourceUsage(old, next StepResourceUsage) (StepResourceUsage, error) {
-	if old.Validate() != nil || next.Validate() != nil || old.RunID != next.RunID || old.WorkflowUID != next.WorkflowUID || old.Namespace != next.Namespace || old.WorkflowName != next.WorkflowName || old.NodeID != next.NodeID || old.PodUID != next.PodUID || old.PodName != next.PodName || old.NodeName != next.NodeName || old.ContainerID != next.ContainerID || old.ContainerName != next.ContainerName || old.EffectiveContainerKind() != next.EffectiveContainerKind() || old.EffectivePodKind() != next.EffectivePodKind() || old.RestartCount != next.RestartCount || old.Burn != next.Burn || old.Step != next.Step {
+	if old.Validate() != nil || next.Validate() != nil || old.RunID != next.RunID || old.WorkflowUID != next.WorkflowUID || old.Namespace != next.Namespace || old.WorkflowName != next.WorkflowName || old.NodeID != next.NodeID || old.PodUID != next.PodUID || old.PodName != next.PodName || old.NodeName != next.NodeName || old.ContainerID != next.ContainerID || old.ContainerName != next.ContainerName || old.EffectiveContainerKind() != next.EffectiveContainerKind() || old.EffectivePodKind() != next.EffectivePodKind() || old.RestartCount != next.RestartCount || old.Stage != next.Stage || old.Step != next.Step {
 		return StepResourceUsage{}, errors.New("resource observation binding changed")
 	}
 	out := old

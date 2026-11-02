@@ -281,7 +281,7 @@ WHERE id != ? AND repo_id = ? AND ref_kind = 'branch' AND ref = ? AND schedule_e
 		for rows.Next() {
 			var cancellation model.RunCancellation
 			var phase string
-			if err := rows.Scan(&cancellation.RunID, &cancellation.JobName, &phase); err != nil {
+			if err := rows.Scan(&cancellation.RunID, &cancellation.WorkflowName, &phase); err != nil {
 				_ = rows.Close()
 				return model.EnqueueRunResult{}, fmt.Errorf("scan running superseded run: %w", err)
 			}
@@ -341,7 +341,7 @@ ON CONFLICT(run_id) DO UPDATE SET
     superseded_by = excluded.superseded_by,
     reason = excluded.reason,
     created_at = excluded.created_at,
-    completed_at = NULL`, cancellation.RunID, cancellation.JobName, cancellation.SupersededBy, cancellation.Reason, now); err != nil {
+    completed_at = NULL`, cancellation.RunID, cancellation.WorkflowName, cancellation.SupersededBy, cancellation.Reason, now); err != nil {
 				return model.EnqueueRunResult{}, fmt.Errorf("record run cancellation: %w", err)
 			}
 		}
@@ -787,8 +787,8 @@ ORDER BY ref`, repoID, sha)
 	return refs, rows.Err()
 }
 
-func (s *Store) SetRunJobName(ctx context.Context, id, jobName string) (model.Run, error) {
-	if strings.TrimSpace(id) == "" || strings.TrimSpace(jobName) == "" {
+func (s *Store) SetRunWorkflowName(ctx context.Context, id, workflowName string) (model.Run, error) {
+	if strings.TrimSpace(id) == "" || strings.TrimSpace(workflowName) == "" {
 		return model.Run{}, fmt.Errorf("%w: run ID and job name are required", ErrInvalid)
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -803,7 +803,7 @@ WHERE id = ? AND (
     (status = 'interrupted' AND (superseded_by != '' OR phase = 'cancelled'))
 )
 AND NOT EXISTS (SELECT 1 FROM vm_executions WHERE run_id=runs.id AND execution_kind='kvm-preflight' AND (cleaned=0 OR receipt_json='' OR refusal_json!=''))
-RETURNING `+runColumns, jobName, unixNano(s.now()), id))
+RETURNING `+runColumns, workflowName, unixNano(s.now()), id))
 	if errors.Is(err, sql.ErrNoRows) {
 		var exists int
 		if lookupErr := tx.QueryRowContext(ctx, `SELECT count(*) FROM runs WHERE id = ?`, id).Scan(&exists); lookupErr != nil {
@@ -822,7 +822,7 @@ RETURNING `+runColumns, jobName, unixNano(s.now()), id))
 INSERT INTO run_cancellations(run_id, job_name, superseded_by, reason, created_at)
 VALUES(?, ?, ?, 'superseded', ?)
 ON CONFLICT(run_id) DO UPDATE SET job_name = excluded.job_name
-WHERE run_cancellations.completed_at IS NULL`, value.ID, jobName, value.SupersededBy, unixNano(s.now())); err != nil {
+WHERE run_cancellations.completed_at IS NULL`, value.ID, workflowName, value.SupersededBy, unixNano(s.now())); err != nil {
 			return model.Run{}, fmt.Errorf("retain superseded run cancellation: %w", err)
 		}
 	}
@@ -854,13 +854,13 @@ FROM run_cancellations WHERE completed_at IS NULL ORDER BY created_at, run_id`)
 	return cancellations, nil
 }
 
-func (s *Store) CompleteRunCancellation(ctx context.Context, runID, jobName string) error {
-	if strings.TrimSpace(runID) == "" || strings.TrimSpace(jobName) == "" {
+func (s *Store) CompleteRunCancellation(ctx context.Context, runID, workflowName string) error {
+	if strings.TrimSpace(runID) == "" || strings.TrimSpace(workflowName) == "" {
 		return fmt.Errorf("%w: run ID and job name are required", ErrInvalid)
 	}
 	result, err := s.db.ExecContext(ctx, `
 UPDATE run_cancellations SET completed_at = ?
-WHERE run_id = ? AND job_name = ? AND completed_at IS NULL`, unixNano(s.now()), runID, jobName)
+WHERE run_id = ? AND job_name = ? AND completed_at IS NULL`, unixNano(s.now()), runID, workflowName)
 	if err != nil {
 		return fmt.Errorf("complete run cancellation: %w", err)
 	}
@@ -873,7 +873,7 @@ WHERE run_id = ? AND job_name = ? AND completed_at IS NULL`, unixNano(s.now()), 
 	}
 	var completed sql.NullInt64
 	err = s.reader().QueryRowContext(ctx, `
-SELECT completed_at FROM run_cancellations WHERE run_id = ? AND job_name = ?`, runID, jobName).Scan(&completed)
+SELECT completed_at FROM run_cancellations WHERE run_id = ? AND job_name = ?`, runID, workflowName).Scan(&completed)
 	if errors.Is(err, sql.ErrNoRows) {
 		return fmt.Errorf("%w: pending run cancellation", ErrNotFound)
 	}
@@ -960,7 +960,7 @@ RETURNING `+runColumns,
 		result.Status, phase,
 		result.TestedSHA, result.TestedSHA,
 		result.BaseSHA, result.BaseSHA,
-		result.FailedBurn, result.FailedStep, result.Error, now, now, id))
+		result.FailedStage, result.FailedStep, result.Error, now, now, id))
 	if errors.Is(err, sql.ErrNoRows) {
 		var exists int
 		if lookupErr := tx.QueryRowContext(ctx, `SELECT count(*) FROM runs WHERE id = ?`, id).Scan(&exists); lookupErr != nil {
@@ -1225,7 +1225,7 @@ ORDER BY queue_sequence DESC`, perRepo)
 }
 
 func (s *Store) PutStepResult(ctx context.Context, result model.StepResult) (model.StepResult, error) {
-	if strings.TrimSpace(result.RunID) == "" || strings.TrimSpace(result.Burn) == "" ||
+	if strings.TrimSpace(result.RunID) == "" || strings.TrimSpace(result.Stage) == "" ||
 		strings.TrimSpace(result.Step) == "" || result.Ordinal < 0 || !result.Status.Terminal() ||
 		result.LogStart < 0 || result.LogEnd < result.LogStart || result.DeclaredSize == "" || !result.DeclaredSize.Valid() ||
 		negativeMeasurement(result.MaxRSSBytes) || negativeMeasurement(result.MemoryPeakBytes) || negativeMeasurement(result.UserCPU) || negativeMeasurement(result.SystemCPU) {
@@ -1255,7 +1255,7 @@ ON CONFLICT(run_id, burn, step) DO UPDATE SET
     termination_json = excluded.termination_json
 RETURNING run_id, burn, step, ordinal, status, exit_code, log_start, log_end,
 		  declared_size, max_rss_bytes, user_cpu_ns, system_cpu_ns, started_at, finished_at, recorded_at, termination_json, memory_peak_bytes`,
-		result.RunID, result.Burn, result.Step, result.Ordinal, result.Status,
+		result.RunID, result.Stage, result.Step, result.Ordinal, result.Status,
 		result.ExitCode, result.LogStart, result.LogEnd, result.DeclaredSize,
 		result.MaxRSSBytes, result.UserCPU, result.SystemCPU,
 		nullableUnixNano(result.StartedAt), nullableUnixNano(result.FinishedAt), recorded, stepDiagnosticJSON(result.Termination, result.RunID), result.MemoryPeakBytes)
@@ -1302,8 +1302,8 @@ func scanRun(row rowScanner, extra ...any) (model.Run, error) {
 	var started, finished sql.NullInt64
 	dest := []any{
 		&value.QueueSequence, &value.AdmissionSequence, &value.ID, &value.RepoID, &value.RefKind, &value.Ref,
-		&value.SHA, &value.Actor, &release, &credentialed, &value.Trigger, &value.Phase, &value.JobName,
-		&value.TestedSHA, &value.BaseSHA, &value.FailedBurn, &value.FailedStep, &value.Error,
+		&value.SHA, &value.Actor, &release, &credentialed, &value.Trigger, &value.Phase, &value.WorkflowName,
+		&value.TestedSHA, &value.BaseSHA, &value.FailedStage, &value.FailedStep, &value.Error,
 		&value.Status, &value.Reason, &value.SupersededBy, &queued, &started, &finished,
 		&created, &updated, &value.ConcurrencyGroup, &value.ScheduleEntry, &value.Priority, &value.PriorityReason, &value.PriorityOverride, &value.PriorityOverrideReason, &value.PriorityAccepted, &value.PriorityAcceptedReason, &value.PriorityRequestedBy, &value.PriorityRefusal, &value.PriorityProtected,
 	}
@@ -1332,7 +1332,7 @@ func scanStepResult(row rowScanner) (model.StepResult, error) {
 	var userCPUNanos, systemCPUNanos, rss, peak sql.NullInt64
 	var recorded int64
 	var diagnostic sql.NullString
-	if err := row.Scan(&value.RunID, &value.Burn, &value.Step, &value.Ordinal,
+	if err := row.Scan(&value.RunID, &value.Stage, &value.Step, &value.Ordinal,
 		&value.Status, &value.ExitCode, &value.LogStart, &value.LogEnd,
 		&value.DeclaredSize, &rss, &userCPUNanos, &systemCPUNanos,
 		&started, &finished, &recorded, &diagnostic, &peak); err != nil {
@@ -1352,7 +1352,7 @@ func scanRunCancellation(row rowScanner) (model.RunCancellation, error) {
 	var value model.RunCancellation
 	var created int64
 	var completed sql.NullInt64
-	if err := row.Scan(&value.RunID, &value.JobName, &value.SupersededBy, &value.Reason, &created, &completed); err != nil {
+	if err := row.Scan(&value.RunID, &value.WorkflowName, &value.SupersededBy, &value.Reason, &created, &completed); err != nil {
 		return model.RunCancellation{}, err
 	}
 	value.CreatedAt = fromUnixNano(created)

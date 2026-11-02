@@ -98,7 +98,7 @@ func (s *Store) projectRunIssue(ctx context.Context, tx *sql.Tx, run model.Run, 
 	if run.Status == model.RunPassed {
 		outcome = ciOutcomePassed
 	}
-	phase := strings.TrimSpace(run.FailedBurn)
+	phase := strings.TrimSpace(run.FailedStage)
 	if phase == "" {
 		phase = strings.TrimSpace(run.Phase)
 	}
@@ -141,8 +141,8 @@ func runIssueBody(run model.Run, failureTail string) string {
 		sha = strings.TrimSpace(run.SHA)
 	}
 	header := fmt.Sprintf("run %s, sha %s", run.ID, sha)
-	if burn, step := strings.TrimSpace(run.FailedBurn), strings.TrimSpace(run.FailedStep); burn != "" || step != "" {
-		header += fmt.Sprintf("\nfailed: %s / %s", burn, step)
+	if stage, step := strings.TrimSpace(run.FailedStage), strings.TrimSpace(run.FailedStep); stage != "" || step != "" {
+		header += fmt.Sprintf("\nfailed: %s / %s", stage, step)
 	}
 	sections := []string{header}
 	if runError := strings.TrimSpace(run.Error); runError != "" {
@@ -151,8 +151,8 @@ func runIssueBody(run model.Run, failureTail string) string {
 	if tail := strings.TrimSpace(failureTail); tail != "" {
 		sections = append(sections, tail)
 	}
-	if burn, step := strings.TrimSpace(run.FailedBurn), strings.TrimSpace(run.FailedStep); burn != "" && step != "" {
-		sections = append(sections, fmt.Sprintf("full step log: run_logs %s %s %s", run.ID, burn, step))
+	if stage, step := strings.TrimSpace(run.FailedStage), strings.TrimSpace(run.FailedStep); stage != "" && step != "" {
+		sections = append(sections, fmt.Sprintf("full step log: run_logs %s %s %s", run.ID, stage, step))
 	} else if step != "" && sha != "" {
 		// Legacy fallback: no burn recorded, fall back to SHA-based hint.
 		sections = append(sections, fmt.Sprintf("full step log: logs %s %s", sha, step))

@@ -125,7 +125,7 @@ func TestStatusCurrentHeadWithoutRunDoesNotReuseHistory(t *testing.T) {
 	fixture.refs = stubRefResolver{branches: map[string]map[string]string{"codeberg/acme/oberth": {"main": headSHA}}}
 	for _, repo := range []string{"", "oberth"} {
 		got, err := statusHeadCall(t, fixture.api(t), repo, "main")
-		if err != nil || got.Status != "no-runs" || got.SHA != headSHA || got.RunID != "" || len(got.Burns) != 0 {
+		if err != nil || got.Status != "no-runs" || got.SHA != headSHA || got.RunID != "" || len(got.Stages) != 0 {
 			t.Fatalf("current untested HEAD = %#v, %v", got, err)
 		}
 	}

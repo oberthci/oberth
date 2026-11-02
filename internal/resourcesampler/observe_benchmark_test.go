@@ -15,7 +15,7 @@ import (
 // and database writes. The shared index is rebuilt on each benchmark iteration.
 func BenchmarkResourceContainerSampling(b *testing.B) {
 	now := time.Now().UTC().Truncate(time.Second)
-	binding := Binding{RunID: strings.Repeat("a", 32), WorkflowName: "wf", WorkflowUID: "11111111-1111-4111-8111-111111111111", Namespace: "argo", NodeID: "wf-123", NodeName: "wf.test", PodName: "wf-123", Burn: "ci", Step: "test"}
+	binding := Binding{RunID: strings.Repeat("a", 32), WorkflowName: "wf", WorkflowUID: "11111111-1111-4111-8111-111111111111", Namespace: "argo", NodeID: "wf-123", NodeName: "wf.test", PodName: "wf-123", Stage: "ci", Step: "test"}
 	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: binding.PodName, Namespace: binding.Namespace, UID: "22222222-2222-4222-8222-222222222222", Annotations: map[string]string{"workflows.argoproj.io/node-id": binding.NodeID, "workflows.argoproj.io/node-name": binding.NodeName}, OwnerReferences: []metav1.OwnerReference{{APIVersion: "argoproj.io/v1alpha1", Kind: "Workflow", Name: binding.WorkflowName, UID: "11111111-1111-4111-8111-111111111111", Controller: ptr.To(true)}}}, Spec: corev1.PodSpec{NodeName: "node-a"}}
 	snapshot := Snapshot{MetricsOK: true}
 	for i := 0; i < 8; i++ {

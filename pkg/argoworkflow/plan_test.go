@@ -66,7 +66,7 @@ func plannedKeys(t *testing.T, source string) []string {
 		if step.Ordinal != index {
 			t.Fatalf("ordinal %d at position %d: %+v", step.Ordinal, index, planned)
 		}
-		keys = append(keys, step.Burn+"/"+step.Step)
+		keys = append(keys, step.Stage+"/"+step.Step)
 	}
 	return keys
 }
@@ -85,7 +85,7 @@ func TestPlannedStepsEnumeratesEveryDeclaredStepInDeclarationOrder(t *testing.T)
 // TestPlannedStepsNamesADirectPodAsItsOwnBurn pins the second half of the
 // naming rule: a Pod the entrypoint invokes directly is a burn of one step,
 // which is what the runtime derives for a Pod node bounded by the root.
-func TestPlannedStepsNamesADirectPodAsItsOwnBurn(t *testing.T) {
+func TestPlannedStepsNamesADirectPodAsItsOwnStage(t *testing.T) {
 	for _, key := range plannedKeys(t, planDocument) {
 		if strings.HasPrefix(key, "test/") && key != "test/test" {
 			t.Fatalf("direct container task named %q", key)
@@ -225,16 +225,16 @@ func TestPlannedStepsRequiresAResolvableEntrypoint(t *testing.T) {
 // TestBurnAndStepIsTheOneRule is the guard that keeps the static enumeration
 // and the runtime projection from drifting: both call this, so a change here
 // changes both or neither.
-func TestBurnAndStepIsTheOneRule(t *testing.T) {
-	if burn, step := BurnAndStep("", "solo"); burn != "solo" || step != "solo" {
-		t.Fatalf("unbounded pod = %q/%q, want solo/solo", burn, step)
+func TestStageAndStepIsTheOneRule(t *testing.T) {
+	if stage, step := StageAndStep("", "solo"); stage != "solo" || step != "solo" {
+		t.Fatalf("unbounded pod = %q/%q, want solo/solo", stage, step)
 	}
-	if burn, step := BurnAndStep("setup", "tools-dir"); burn != "setup" || step != "tools-dir" {
-		t.Fatalf("bounded pod = %q/%q, want setup/tools-dir", burn, step)
+	if stage, step := StageAndStep("setup", "tools-dir"); stage != "setup" || step != "tools-dir" {
+		t.Fatalf("bounded pod = %q/%q, want setup/tools-dir", stage, step)
 	}
 	// The characters the progress protocol and the run-log index cannot carry.
-	if burn, step := BurnAndStep("  se[t]up  ", "a\nb"); burn != "se-t-up" || step != "a-b" {
-		t.Fatalf("normalised = %q/%q", burn, step)
+	if stage, step := StageAndStep("  se[t]up  ", "a\nb"); stage != "se-t-up" || step != "a-b" {
+		t.Fatalf("normalised = %q/%q", stage, step)
 	}
 }
 
@@ -340,7 +340,7 @@ func TestPlannedStepsMarksTheStepsThatRunACredentialChain(t *testing.T) {
 	}
 	got := make(map[string]bool, len(planned))
 	for _, step := range planned {
-		got[step.Burn+"/"+step.Step] = step.Secrets
+		got[step.Stage+"/"+step.Step] = step.Secrets
 	}
 	want := map[string]bool{
 		"setup/setup":     false,
@@ -405,7 +405,7 @@ func TestPlannedStepsCredentialedIncludesReleaseWIF(t *testing.T) {
 	}
 	found := false
 	for _, step := range planned {
-		if step.Burn == "test" && step.Step == "test" {
+		if step.Stage == "test" && step.Step == "test" {
 			found = true
 			if !step.Credentialed || step.Secrets {
 				t.Fatalf("WIF plan was not credentialed independently of secret store: %+v", step)

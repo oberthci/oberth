@@ -401,7 +401,7 @@ func TestMovedTargetAutomaticRetryIsBounded(t *testing.T) {
 // A scoped uplink's grant survives a transient push failure: the promotion
 // held it but nothing was delivered, so promote_retry with the same grant
 // delivers, and only then is the grant consumed (#1097).
-func TestTransientPushFailureDoesNotBurnPromotionGrant(t *testing.T) {
+func TestTransientPushFailureDoesNotStagePromotionGrant(t *testing.T) {
 	git := &scriptedPromotionGit{
 		plans: []gitcache.MergeCandidate{
 			{BaseSHA: retryBaseSHA, MergedSHA: retrySourceSHA, FastForward: true},

@@ -206,7 +206,7 @@ func TestLogHidesExecutorLinesUnlessRaw(t *testing.T) {
 	}
 }
 
-func TestLogRequiresBurnAndStep(t *testing.T) {
+func TestLogRequiresStageAndStep(t *testing.T) {
 	configure(t, remoteServer(t, `{}`))
 	var out bytes.Buffer
 	err := runRemoteLog(context.Background(), []string{"run-abc"}, &out)

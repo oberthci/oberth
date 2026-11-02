@@ -13,8 +13,8 @@ import (
 // MarkRunCreatePending retains an uncertain submission and re-arms its cleanup
 // atomically, even if cancel/supersede already completed an earlier NotFound.
 // owner_restart also denotes a lost submission observer; no schema change.
-func (s *Store) MarkRunCreatePending(ctx context.Context, id, jobName string) error {
-	if strings.TrimSpace(id) == "" || strings.TrimSpace(jobName) == "" {
+func (s *Store) MarkRunCreatePending(ctx context.Context, id, workflowName string) error {
+	if strings.TrimSpace(id) == "" || strings.TrimSpace(workflowName) == "" {
 		return fmt.Errorf("%w: run ID and Job name required", ErrInvalid)
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -29,7 +29,7 @@ func (s *Store) MarkRunCreatePending(ctx context.Context, id, jobName string) er
 	if err != nil {
 		return err
 	}
-	if run.JobName != jobName || (run.Status != model.RunRunning && !run.Preempted()) {
+	if run.WorkflowName != workflowName || (run.Status != model.RunRunning && !run.Preempted()) {
 		return fmt.Errorf("%w: run cannot own pending create", ErrInvalidState)
 	}
 	now := unixNano(s.now())
@@ -39,7 +39,7 @@ func (s *Store) MarkRunCreatePending(ctx context.Context, id, jobName string) er
 	if _, err := tx.ExecContext(ctx, `
 INSERT INTO run_cancellations(run_id, job_name, superseded_by, reason, created_at)
 VALUES(?, ?, ?, 'owner_restart', ?)
-ON CONFLICT(run_id) DO UPDATE SET job_name=excluded.job_name, reason='owner_restart', created_at=excluded.created_at, completed_at=NULL`, id, jobName, run.SupersededBy, now); err != nil {
+ON CONFLICT(run_id) DO UPDATE SET job_name=excluded.job_name, reason='owner_restart', created_at=excluded.created_at, completed_at=NULL`, id, workflowName, run.SupersededBy, now); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -55,7 +55,7 @@ func (s *Store) CompleteObservedRunCancellation(ctx context.Context, observed mo
 	}
 	defer func() { _ = tx.Rollback() }()
 	result, err := tx.ExecContext(ctx, `UPDATE run_cancellations SET completed_at=?
- WHERE run_id=? AND job_name=? AND reason=? AND created_at=? AND completed_at IS NULL`, unixNano(s.now()), observed.RunID, observed.JobName, observed.Reason, unixNano(observed.CreatedAt))
+ WHERE run_id=? AND job_name=? AND reason=? AND created_at=? AND completed_at IS NULL`, unixNano(s.now()), observed.RunID, observed.WorkflowName, observed.Reason, unixNano(observed.CreatedAt))
 	if err != nil {
 		return err
 	}
@@ -72,7 +72,7 @@ func (s *Store) CompleteObservedRunCancellation(ctx context.Context, observed mo
 		return tx.Commit()
 	}
 	var completed sql.NullInt64
-	err = tx.QueryRowContext(ctx, `SELECT completed_at FROM run_cancellations WHERE run_id=? AND job_name=? AND reason=? AND created_at=?`, observed.RunID, observed.JobName, observed.Reason, unixNano(observed.CreatedAt)).Scan(&completed)
+	err = tx.QueryRowContext(ctx, `SELECT completed_at FROM run_cancellations WHERE run_id=? AND job_name=? AND reason=? AND created_at=?`, observed.RunID, observed.WorkflowName, observed.Reason, unixNano(observed.CreatedAt)).Scan(&completed)
 	if err == nil && completed.Valid {
 		return tx.Commit()
 	}

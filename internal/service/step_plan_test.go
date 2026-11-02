@@ -21,11 +21,11 @@ func TestTerminalDeclaredRowsKeepOrdinalsAndRealOutcomes(t *testing.T) {
 		t.Run(string(status), func(t *testing.T) {
 			run := model.Run{ID: "declared", Status: status}
 			plan := []runprogress.PlannedStep{
-				{Burn: "retry", Step: "check", Ordinal: 26},
-				{Burn: "branch", Step: "unused", Ordinal: 30},
+				{Stage: "retry", Step: "check", Ordinal: 26},
+				{Stage: "branch", Step: "unused", Ordinal: 30},
 			}
 			at := time.Unix(1000, 0).UTC()
-			result := model.StepResult{RunID: run.ID, Burn: "retry", Step: "check", Ordinal: 0,
+			result := model.StepResult{RunID: run.ID, Stage: "retry", Step: "check", Ordinal: 0,
 				Status: model.StepPassed, StartedAt: &at, FinishedAt: &at, LogStart: 10, LogEnd: 100}
 			if status == model.RunFailed {
 				result.Status, result.ExitCode = model.StepFailed, 42
@@ -58,14 +58,14 @@ func TestDeclaredRetryOutcomeInRunDetailAndStatus(t *testing.T) {
 		t.Run(map[bool]string{false: "passed", true: "failed"}[failed], func(t *testing.T) {
 			at := time.Unix(1000, 0).UTC()
 			result := JobResult{Status: model.RunPassed, Phase: "passed", Steps: []model.StepResult{
-				{Burn: "retry", Step: "check", Status: model.StepPassed, StartedAt: &at, FinishedAt: &at},
+				{Stage: "retry", Step: "check", Status: model.StepPassed, StartedAt: &at, FinishedAt: &at},
 			}}
 			if failed {
-				result.Status, result.FailedBurn, result.FailedStep = model.RunFailed, "retry", "check"
+				result.Status, result.FailedStage, result.FailedStep = model.RunFailed, "retry", "check"
 				result.Steps[0].Status, result.Steps[0].ExitCode = model.StepFailed, 42
 			}
 			fixture := newControlFixture(t, result)
-			fixture.jobs.plan = []runprogress.PlannedStep{{Burn: "retry", Step: "check", Ordinal: 26}}
+			fixture.jobs.plan = []runprogress.PlannedStep{{Stage: "retry", Step: "check", Ordinal: 26}}
 			ctx := context.Background()
 			run, err := fixture.scheduler.EnqueueCI(ctx, CIRequest{
 				EventID: "retry", Repository: fixture.repo, Branch: "feature/retry",
@@ -79,7 +79,7 @@ func TestDeclaredRetryOutcomeInRunDetailAndStatus(t *testing.T) {
 			}
 			// Assign a real indexed range as persistSteps does for replayed logs.
 			if err := fixture.scheduler.persistSteps(ctx, run.ID, result.Steps, runlog.Index{Ranges: []runlog.Range{
-				{Burn: "retry", Step: "check", Start: 10, End: 100},
+				{Stage: "retry", Step: "check", Start: 10, End: 100},
 			}}); err != nil {
 				t.Fatal(err)
 			}
@@ -91,7 +91,7 @@ func TestDeclaredRetryOutcomeInRunDetailAndStatus(t *testing.T) {
 				t.Fatalf("declared result: %+v", steps)
 			}
 			status, err := control.status(ctx, fixture.repo.Name, run.SHA, "")
-			if err != nil || status.Burns["retry"] != string(result.Steps[0].Status) || len(status.Burns) != 1 {
+			if err != nil || status.Stages["retry"] != string(result.Steps[0].Status) || len(status.Stages) != 1 {
 				t.Fatalf("status: %+v: %v", status, err)
 			}
 		})
@@ -112,7 +112,7 @@ func unwrapPathError(err error) error {
 
 // PlannedSteps makes the fake engine a PipelinePlanner, so these tests drive
 // the same seam the Argo engine does rather than writing the plan file by hand.
-func (jobs *fakeJobs) PlannedSteps(context.Context, JobRequest) ([]runprogress.PlannedStep, error) {
+func (jobs *fakeJobs) PlannedSteps(context.Context, WorkflowRequest) ([]runprogress.PlannedStep, error) {
 	jobs.mu.Lock()
 	defer jobs.mu.Unlock()
 	if jobs.planErr != nil {
@@ -126,19 +126,19 @@ func (jobs *fakeJobs) PlannedSteps(context.Context, JobRequest) ([]runprogress.P
 // in the DAG will never reach.
 func oberthLikePlan() []runprogress.PlannedStep {
 	return []runprogress.PlannedStep{
-		{Burn: "setup", Step: "tools-dir", Ordinal: 0},
-		{Burn: "setup", Step: "link-go", Ordinal: 1},
-		{Burn: "lint", Step: "vet", Ordinal: 2},
-		{Burn: "test", Step: "test", Ordinal: 3},
-		{Burn: "build-amd64", Step: "build-amd64", Ordinal: 4},
-		{Burn: "build-arm64", Step: "build-arm64", Ordinal: 5},
+		{Stage: "setup", Step: "tools-dir", Ordinal: 0},
+		{Stage: "setup", Step: "link-go", Ordinal: 1},
+		{Stage: "lint", Step: "vet", Ordinal: 2},
+		{Stage: "test", Step: "test", Ordinal: 3},
+		{Stage: "build-amd64", Step: "build-amd64", Ordinal: 4},
+		{Stage: "build-arm64", Step: "build-arm64", Ordinal: 5},
 	}
 }
 
 func stepStates(steps []model.StepResult) string {
 	parts := make([]string, 0, len(steps))
 	for _, step := range steps {
-		parts = append(parts, step.Burn+"/"+step.Step+"="+string(step.Status))
+		parts = append(parts, step.Stage+"/"+step.Step+"="+string(step.Status))
 	}
 	return strings.Join(parts, " ")
 }
@@ -172,7 +172,7 @@ func TestSeededPlanIsVisibleBeforeAnyStepStarts(t *testing.T) {
 	}
 	// Record the plan directly to keep this run active: failing the fake engine
 	// would terminalize it and project its untouched declarations as skipped.
-	if err := fixture.scheduler.recordStepPlan(ctx, JobRequest{Run: run}); err != nil {
+	if err := fixture.scheduler.recordStepPlan(ctx, WorkflowRequest{Run: run}); err != nil {
 		t.Fatal(err)
 	}
 	planned, err := fixture.logs.StepPlan(enqueued.ID)
@@ -189,7 +189,7 @@ func TestSeededPlanIsVisibleBeforeAnyStepStarts(t *testing.T) {
 	}
 	for _, step := range steps {
 		if step.Status != model.StepPending {
-			t.Fatalf("step %s/%s = %q, want pending", step.Burn, step.Step, step.Status)
+			t.Fatalf("step %s/%s = %q, want pending", step.Stage, step.Step, step.Status)
 		}
 	}
 	// Plan order, not observation order.
@@ -202,12 +202,12 @@ func TestSeededPlanIsVisibleBeforeAnyStepStarts(t *testing.T) {
 // terminal run without suggesting that they are still waiting to execute.
 func TestPlannedStepsThatNeverRanReportSkipped(t *testing.T) {
 	fixture := newControlFixture(t, JobResult{
-		Status: model.RunFailed, Phase: "test", FailedBurn: "test", FailedStep: "test",
+		Status: model.RunFailed, Phase: "test", FailedStage: "test", FailedStep: "test",
 		Steps: []model.StepResult{
-			{Burn: "setup", Step: "tools-dir", Status: model.StepPassed},
-			{Burn: "setup", Step: "link-go", Status: model.StepPassed},
-			{Burn: "lint", Step: "vet", Status: model.StepPassed},
-			{Burn: "test", Step: "test", Status: model.StepFailed, ExitCode: 2},
+			{Stage: "setup", Step: "tools-dir", Status: model.StepPassed},
+			{Stage: "setup", Step: "link-go", Status: model.StepPassed},
+			{Stage: "lint", Step: "vet", Status: model.StepPassed},
+			{Stage: "test", Step: "test", Status: model.StepFailed, ExitCode: 2},
 		},
 	})
 	fixture.jobs.plan = oberthLikePlan()
@@ -234,12 +234,12 @@ func TestPlannedStepsThatNeverRanReportSkipped(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for burn, wanted := range map[string]string{
+	for stage, wanted := range map[string]string{
 		"setup": "passed", "lint": "passed", "test": "failed",
 		"build-amd64": "-", "build-arm64": "-",
 	} {
-		if status.Burns[burn] != wanted {
-			t.Errorf("burn %q = %q, want %q (burns = %#v)", burn, status.Burns[burn], wanted, status.Burns)
+		if status.Stages[stage] != wanted {
+			t.Errorf("burn %q = %q, want %q (burns = %#v)", stage, status.Stages[stage], wanted, status.Stages)
 		}
 	}
 	if status.ExitCode == nil || *status.ExitCode != 2 {
@@ -340,8 +340,8 @@ func TestRunWithoutAPlanKeepsItsExistingBehaviour(t *testing.T) {
 	fixture := newControlFixture(t, JobResult{
 		Status: model.RunPassed, Phase: "passed",
 		Steps: []model.StepResult{
-			{Burn: "test", Step: "unit", Status: model.StepPassed},
-			{Burn: "test", Step: "race", Status: model.StepPassed},
+			{Stage: "test", Step: "unit", Status: model.StepPassed},
+			{Stage: "test", Step: "race", Status: model.StepPassed},
 		},
 	})
 	fixture.jobs.plan = nil
@@ -371,7 +371,7 @@ func TestRunWithoutAPlanKeepsItsExistingBehaviour(t *testing.T) {
 func TestUnenumerablePipelineStillRuns(t *testing.T) {
 	fixture := newControlFixture(t, JobResult{
 		Status: model.RunPassed, Phase: "passed",
-		Steps: []model.StepResult{{Burn: "test", Step: "unit", Status: model.StepPassed}},
+		Steps: []model.StepResult{{Stage: "test", Step: "unit", Status: model.StepPassed}},
 	})
 	fixture.jobs.planErr = errUnplannable
 	ctx := context.Background()
@@ -404,31 +404,31 @@ func TestUnenumerablePipelineStillRuns(t *testing.T) {
 // TestWireBurnsDoesNotDependOnStepOrder guards the burns projection against the
 // order its input happens to arrive in. A burn with a passed step and a step
 // that was never reached is not a passed burn.
-func TestWireBurnsDoesNotDependOnStepOrder(t *testing.T) {
+func TestWireStagesDoesNotDependOnStepOrder(t *testing.T) {
 	forward := []model.StepResult{
-		{Burn: "setup", Step: "one", Status: model.StepPassed},
-		{Burn: "setup", Step: "two", Status: model.StepPending},
+		{Stage: "setup", Step: "one", Status: model.StepPassed},
+		{Stage: "setup", Step: "two", Status: model.StepPending},
 	}
 	reversed := []model.StepResult{forward[1], forward[0]}
 	for name, steps := range map[string][]model.StepResult{"forward": forward, "reversed": reversed} {
-		burns, _ := wireBurns(steps, model.Run{})
-		if burns["setup"] != "pending" {
-			t.Errorf("%s: burn = %q, want pending", name, burns["setup"])
+		stages, _ := wireStages(steps, model.Run{})
+		if stages["setup"] != "pending" {
+			t.Errorf("%s: burn = %q, want pending", name, stages["setup"])
 		}
 	}
-	burns, _ := wireBurns([]model.StepResult{
-		{Burn: "b", Step: "skipped", Status: model.StepSkipped},
-		{Burn: "b", Step: "passed", Status: model.StepPassed},
+	stages, _ := wireStages([]model.StepResult{
+		{Stage: "b", Step: "skipped", Status: model.StepSkipped},
+		{Stage: "b", Step: "passed", Status: model.StepPassed},
 	}, model.Run{})
-	if burns["b"] != "passed" {
-		t.Errorf("a burn of one passed and one skipped step = %q, want passed", burns["b"])
+	if stages["b"] != "passed" {
+		t.Errorf("a burn of one passed and one skipped step = %q, want passed", stages["b"])
 	}
-	burns, _ = wireBurns([]model.StepResult{
-		{Burn: "c", Step: "pending", Status: model.StepPending},
-		{Burn: "c", Step: "failed", Status: model.StepFailed},
+	stages, _ = wireStages([]model.StepResult{
+		{Stage: "c", Step: "pending", Status: model.StepPending},
+		{Stage: "c", Step: "failed", Status: model.StepFailed},
 	}, model.Run{})
-	if burns["c"] != "failed" {
-		t.Errorf("a burn containing a failure = %q, want failed", burns["c"])
+	if stages["c"] != "failed" {
+		t.Errorf("a burn containing a failure = %q, want failed", stages["c"])
 	}
 }
 
@@ -438,8 +438,8 @@ func TestWireBurnsDoesNotDependOnStepOrder(t *testing.T) {
 // credential chain.
 func TestMergeStepsCarriesPlannedSecrets(t *testing.T) {
 	plan := []runprogress.PlannedStep{
-		{Burn: "setup", Step: "setup", Ordinal: 0},
-		{Burn: "publish", Step: "push", Ordinal: 1, Secrets: true},
+		{Stage: "setup", Step: "setup", Ordinal: 0},
+		{Stage: "publish", Step: "push", Ordinal: 1, Secrets: true},
 	}
 	at := time.Unix(1000, 0).UTC()
 	cases := []struct {
@@ -450,17 +450,17 @@ func TestMergeStepsCarriesPlannedSecrets(t *testing.T) {
 	}{
 		{"plan only", nil, nil, map[string]bool{"setup/setup": false, "publish/push": true}},
 		{"journal event", []runprogress.Event{
-			{Version: runprogress.Version, Burn: "publish", Step: "push", Ordinal: 1, Status: runprogress.StepRunning, StartedAt: &at},
+			{Version: runprogress.Version, Stage: "publish", Step: "push", Ordinal: 1, Status: runprogress.StepRunning, StartedAt: &at},
 		}, nil, map[string]bool{"setup/setup": false, "publish/push": true}},
 		{"durable result", nil, []model.StepResult{
-			{Burn: "publish", Step: "push", Status: model.StepPassed, StartedAt: &at, FinishedAt: &at},
-			{Burn: "setup", Step: "setup", Status: model.StepPassed, StartedAt: &at, FinishedAt: &at},
+			{Stage: "publish", Step: "push", Status: model.StepPassed, StartedAt: &at, FinishedAt: &at},
+			{Stage: "setup", Step: "setup", Status: model.StepPassed, StartedAt: &at, FinishedAt: &at},
 		}, map[string]bool{"setup/setup": false, "publish/push": true}},
 		{"legacy retry alias", nil, []model.StepResult{
-			{Burn: "publish(1)", Step: "push", Status: model.StepPassed, StartedAt: &at, FinishedAt: &at},
+			{Stage: "publish(1)", Step: "push", Status: model.StepPassed, StartedAt: &at, FinishedAt: &at},
 		}, map[string]bool{"setup/setup": false, "publish/push": true}},
 		{"unplanned observation", nil, []model.StepResult{
-			{Burn: "extra", Step: "extra", Status: model.StepPassed, StartedAt: &at, FinishedAt: &at},
+			{Stage: "extra", Step: "extra", Status: model.StepPassed, StartedAt: &at, FinishedAt: &at},
 		}, map[string]bool{"setup/setup": false, "publish/push": true, "extra/extra": false}},
 	}
 	for _, testCase := range cases {
@@ -468,7 +468,7 @@ func TestMergeStepsCarriesPlannedSecrets(t *testing.T) {
 			steps := mergeSteps(model.Run{ID: "secrets", Status: model.RunRunning}, plan, testCase.events, testCase.persisted)
 			got := make(map[string]bool, len(steps))
 			for _, step := range steps {
-				got[step.Burn+"/"+step.Step] = step.Secrets
+				got[step.Stage+"/"+step.Step] = step.Secrets
 			}
 			if len(got) != len(testCase.want) {
 				t.Fatalf("steps %+v, want keys %v", steps, testCase.want)

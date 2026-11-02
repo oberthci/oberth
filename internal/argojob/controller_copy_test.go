@@ -15,7 +15,7 @@ func TestCopyPrefixedStopsOnBudgetExceeded(t *testing.T) {
 	t.Parallel()
 	// Generate input that will exceed the budget: many short lines produce
 	// many prefixed writes. Each line is ~5 bytes of content plus the prefix.
-	step := StepResult{Burn: "test", Step: "log"}
+	step := StepResult{Stage: "test", Step: "log"}
 	prefix := "[test/log] "
 	lineContent := "x\n"
 	// Each output line is len(prefix) + 1 + 1 = ~13 bytes. We need enough
@@ -59,7 +59,7 @@ func (w *failWriter) Write(p []byte) (int, error) {
 // an unbounded buffer.
 func TestCopyPrefixedStopsOnDestinationFailure(t *testing.T) {
 	t.Parallel()
-	step := StepResult{Burn: "build", Step: "compile"}
+	step := StepResult{Stage: "build", Step: "compile"}
 	// Many lines of input; destination fails after 100 bytes.
 	input := strings.Repeat("some output line\n", 100000)
 	destination := &failWriter{limit: 100}
@@ -77,7 +77,7 @@ func TestCopyPrefixedStopsOnDestinationFailure(t *testing.T) {
 // correctly prefixed with the burn/step marker.
 func TestCopyPrefixedPrefixesEveryLine(t *testing.T) {
 	t.Parallel()
-	step := StepResult{Burn: "setup", Step: "prepare"}
+	step := StepResult{Stage: "setup", Step: "prepare"}
 	input := "line one\nline two\nline three"
 	var destination bytes.Buffer
 	if err := copyPrefixed(&destination, step, strings.NewReader(input), ""); err != nil {
@@ -99,7 +99,7 @@ func TestCopyPrefixedPrefixesEveryLine(t *testing.T) {
 // newline), which reduces syscall overhead and avoids interleaving.
 func TestCopyPrefixedAssemblesOneWrite(t *testing.T) {
 	t.Parallel()
-	step := StepResult{Burn: "a", Step: "b"}
+	step := StepResult{Stage: "a", Step: "b"}
 	input := "hello\nworld\n"
 
 	var writes []string
@@ -131,7 +131,7 @@ func (w writeCounter) Write(p []byte) (int, error) {
 // output and no error.
 func TestCopyPrefixedHandlesEmptyInput(t *testing.T) {
 	t.Parallel()
-	step := StepResult{Burn: "a", Step: "b"}
+	step := StepResult{Stage: "a", Step: "b"}
 	var destination bytes.Buffer
 	if err := copyPrefixed(&destination, step, io.LimitReader(strings.NewReader(""), 0), ""); err != nil {
 		t.Fatalf("unexpected error: %v", err)

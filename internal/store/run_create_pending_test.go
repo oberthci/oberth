@@ -24,7 +24,7 @@ func TestPendingCreateCleanupSurvivesRecoveryAndPreemption(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := s.SetRunJobName(ctx, run.ID, "wf"); err != nil {
+			if _, err := s.SetRunWorkflowName(ctx, run.ID, "wf"); err != nil {
 				t.Fatal(err)
 			}
 			if mode == "already-completed" {
@@ -33,7 +33,7 @@ func TestPendingCreateCleanupSurvivesRecoveryAndPreemption(t *testing.T) {
 					t.Fatal(err)
 				}
 				old := canceled.Cancellations[0]
-				if err := s.CompleteRunCancellation(ctx, old.RunID, old.JobName); err != nil {
+				if err := s.CompleteRunCancellation(ctx, old.RunID, old.WorkflowName); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -64,7 +64,7 @@ func TestPendingCreateCleanupSurvivesRecoveryAndPreemption(t *testing.T) {
 			}
 			current, _ := s.Run(ctx, run.ID)
 			pending, _ := s.PendingRunCancellations(ctx)
-			if len(pending) != 1 || pending[0].Reason != "owner_restart" || pending[0].JobName != "wf" {
+			if len(pending) != 1 || pending[0].Reason != "owner_restart" || pending[0].WorkflowName != "wf" {
 				t.Fatalf("restart/preemption lost cleanup: %+v", pending)
 			}
 			if mode == "restart" && (current.Status != model.RunRunning || current.Phase != "infrastructure-pending") {

@@ -10,7 +10,7 @@ func TestResourceContainerReportsSeparateScopesAndDeduplicatePodOverlap(t *testi
 	p := func(n int64) *int64 { return &n }
 	rows := []StepResourceUsage{}
 	for i := 0; i < 20; i++ {
-		rows = append(rows, StepResourceUsage{RunID: "run", PodUID: string(rune('a' + i)), Burn: "ci", Step: "test", ContainerName: "main", PodStartedAt: at, PodFinishedAt: at.Add(time.Second), MemoryPeakBytes: p(int64(i + 1)), EphemeralStoragePeakBytes: p(10), PodPVCUsedPeakBytes: p(100), Samples: 1})
+		rows = append(rows, StepResourceUsage{RunID: "run", PodUID: string(rune('a' + i)), Stage: "ci", Step: "test", ContainerName: "main", PodStartedAt: at, PodFinishedAt: at.Add(time.Second), MemoryPeakBytes: p(int64(i + 1)), EphemeralStoragePeakBytes: p(10), PodPVCUsedPeakBytes: p(100), Samples: 1})
 	}
 	wait := rows[0]
 	wait.ContainerName = "wait"

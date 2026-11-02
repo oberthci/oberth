@@ -31,10 +31,10 @@ func replayAttemptTx(ctx context.Context, tx *sql.Tx, run model.Run) (model.RunR
 	}
 	if body.Valid {
 		var observation model.RunTerminalObservation
-		if json.Unmarshal([]byte(body.String), &observation) == nil && observation.Version == 1 && observation.JobName == run.JobName && observation.Nodes >= 0 && observation.Nodes <= 4096 && len(observation.Steps) <= 4096 {
+		if json.Unmarshal([]byte(body.String), &observation) == nil && observation.Version == 1 && observation.WorkflowName == run.WorkflowName && observation.Nodes >= 0 && observation.Nodes <= 4096 && len(observation.Steps) <= 4096 {
 			valid := true
 			for _, step := range observation.Steps {
-				if step.Burn == "" || step.Step == "" || !step.Status.Terminal() {
+				if step.Stage == "" || step.Step == "" || !step.Status.Terminal() {
 					valid = false
 					break
 				}
@@ -112,11 +112,11 @@ func (s *Store) recordTerminalObservationTx(ctx context.Context, tx *sql.Tx, run
 	if observation == nil || (!run.Release && run.RefKind != model.RefTag) {
 		return nil
 	}
-	if observation.Version != 1 || observation.JobName == "" || observation.JobName != run.JobName || observation.Nodes < 0 || observation.Nodes > 4096 || len(observation.Steps) > observation.Nodes || run.Status == model.RunInterrupted {
+	if observation.Version != 1 || observation.WorkflowName == "" || observation.WorkflowName != run.WorkflowName || observation.Nodes < 0 || observation.Nodes > 4096 || len(observation.Steps) > observation.Nodes || run.Status == model.RunInterrupted {
 		return fmt.Errorf("%w: invalid terminal observation", ErrInvalid)
 	}
 	for _, step := range observation.Steps {
-		if step.Burn == "" || step.Step == "" || !step.Status.Terminal() {
+		if step.Stage == "" || step.Step == "" || !step.Status.Terminal() {
 			return fmt.Errorf("%w: incomplete terminal step observation", ErrInvalid)
 		}
 	}

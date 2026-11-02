@@ -31,7 +31,7 @@ func TestTimingProjectionRejectsUnboundedOrRawFields(t *testing.T) {
 			}
 		})
 	}
-	step := StepTiming{Version: 1, RunID: workflow.RunID, Namespace: workflow.Namespace, WorkflowName: workflow.Name, WorkflowUID: workflow.UID, NodeID: "node", Burn: "test", Step: "unit", Unavailable: "snapshot-incomplete", ObservedAt: now, ScriptTiming: "mixed", ImagePullTiming: "not-observed"}
+	step := StepTiming{Version: 1, RunID: workflow.RunID, Namespace: workflow.Namespace, WorkflowName: workflow.Name, WorkflowUID: workflow.UID, NodeID: "node", Stage: "test", Step: "unit", Unavailable: "snapshot-incomplete", ObservedAt: now, ScriptTiming: "mixed", ImagePullTiming: "not-observed"}
 	if step.Validate() != nil {
 		t.Fatal("valid unavailable rejected")
 	}

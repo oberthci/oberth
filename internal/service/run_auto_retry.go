@@ -12,7 +12,7 @@ import (
 // Read every retained attempt, not the latest-only display projection. Missing
 // log store, missing journal or corrupt/torn progress refuses automatic replay.
 func (scheduler *Scheduler) preStepAutoRetry(run model.Run, result JobResult) bool {
-	if run.RefKind != model.RefBranch || releaseLikeRun(run) || (run.Trigger != "branch" && run.Trigger != "push" && run.Trigger != "schedule" && run.Trigger != "manual") || run.AutoRetryOf != "" || run.AutoRetriedBy != "" || result.Status != model.RunFailed || (result.Phase != "infrastructure" && result.Phase != "job") || result.FailedStep != "" || result.FailedBurn != "" || result.ObservedStepStart {
+	if run.RefKind != model.RefBranch || releaseLikeRun(run) || (run.Trigger != "branch" && run.Trigger != "push" && run.Trigger != "schedule" && run.Trigger != "manual") || run.AutoRetryOf != "" || run.AutoRetriedBy != "" || result.Status != model.RunFailed || (result.Phase != "infrastructure" && result.Phase != "job") || result.FailedStep != "" || result.FailedStage != "" || result.ObservedStepStart {
 		return false
 	}
 	for _, step := range result.Steps {

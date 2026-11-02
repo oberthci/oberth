@@ -35,7 +35,7 @@ func timingBatchFixture(t testing.TB, tasks int) (*Store, []model.StepTiming) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.SetRunJobName(ctx, run.ID, "workflow-test"); err != nil {
+	if _, err := s.SetRunWorkflowName(ctx, run.ID, "workflow-test"); err != nil {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC()
@@ -44,7 +44,7 @@ func timingBatchFixture(t testing.TB, tasks int) (*Store, []model.StepTiming) {
 	for i := range values {
 		name := fmt.Sprintf("task-%d", i)
 		wf.Tasks = append(wf.Tasks, model.TimingTask{ID: name, Template: name, Readiness: "all"})
-		values[i] = model.StepTiming{Version: 1, RunID: run.ID, Namespace: wf.Namespace, WorkflowName: wf.Name, WorkflowUID: wf.UID, NodeID: name, Burn: "test", Step: name, Ordinal: i, ObservedAt: now, Unavailable: "not-executed", ScriptTiming: "mixed", ImagePullTiming: "not-observed"}
+		values[i] = model.StepTiming{Version: 1, RunID: run.ID, Namespace: wf.Namespace, WorkflowName: wf.Name, WorkflowUID: wf.UID, NodeID: name, Stage: "test", Step: name, Ordinal: i, ObservedAt: now, Unavailable: "not-executed", ScriptTiming: "mixed", ImagePullTiming: "not-observed"}
 	}
 	if err := s.RecordWorkflowTiming(ctx, wf); err != nil {
 		t.Fatal(err)

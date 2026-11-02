@@ -47,12 +47,12 @@ func siblingInterleavedTranscript() string {
 // the tail window.
 func TestCIIssueExcerptIsTheFailedStepSliceNotSiblingTail(t *testing.T) {
 	fixture := newControlFixture(t, JobResult{
-		Status: model.RunFailed, Phase: "security", FailedBurn: "security", FailedStep: "security",
+		Status: model.RunFailed, Phase: "security", FailedStage: "security", FailedStep: "security",
 		Error: "step security/security failed with exit code 2",
 		Steps: []model.StepResult{
-			{Burn: "security", Step: "security", Status: model.StepFailed, ExitCode: 2},
-			{Burn: "test", Step: "test", Status: model.StepPassed},
-			{Burn: "build-amd64", Step: "build-amd64", Status: model.StepPassed},
+			{Stage: "security", Step: "security", Status: model.StepFailed, ExitCode: 2},
+			{Stage: "test", Step: "test", Status: model.StepPassed},
+			{Stage: "build-amd64", Step: "build-amd64", Status: model.StepPassed},
 		},
 	})
 	transcript := siblingInterleavedTranscript()

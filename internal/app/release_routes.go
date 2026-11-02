@@ -11,7 +11,7 @@ import (
 	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
-func (jobs *ArgoJobs) runSourceFile(request service.JobRequest) (string, error) {
+func (jobs *ArgoJobs) runSourceFile(request service.WorkflowRequest) (string, error) {
 	trigger, err := runTrigger(request.Run)
 	if err != nil {
 		return "", err
@@ -28,7 +28,7 @@ func (jobs *ArgoJobs) runSourceFile(request service.JobRequest) (string, error) 
 	return jobs.config.ReleaseTagRoutes.Resolve(repo, request.Run.RefKind, request.Run.Ref)
 }
 
-func (jobs *ArgoJobs) readRunSource(request service.JobRequest) ([]byte, error) {
+func (jobs *ArgoJobs) readRunSource(request service.WorkflowRequest) ([]byte, error) {
 	file, err := jobs.runSourceFile(request)
 	if err != nil {
 		return nil, err
@@ -38,11 +38,11 @@ func (jobs *ArgoJobs) readRunSource(request service.JobRequest) ([]byte, error) 
 
 // ReleasePreflightFiles makes all admin-routed files participate in the same
 // branch warning / promotion refusal checks as the default release document.
-func (jobs *ArgoJobs) ReleasePreflightFiles(_ context.Context, request service.JobRequest) ([]string, error) {
+func (jobs *ArgoJobs) ReleasePreflightFiles(_ context.Context, request service.WorkflowRequest) ([]string, error) {
 	return jobs.config.ReleaseTagRoutes.Files(declarationRepo(request)), nil
 }
 
-func (jobs *ArgoJobs) noRunPipelineError(err error, request service.JobRequest) error {
+func (jobs *ArgoJobs) noRunPipelineError(err error, request service.WorkflowRequest) error {
 	trigger, triggerErr := runTrigger(request.Run)
 	if triggerErr != nil {
 		return triggerErr

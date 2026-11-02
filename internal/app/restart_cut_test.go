@@ -40,8 +40,8 @@ func (c *restartReadController) TerminalStateResumed(_ context.Context, name, ru
 }
 
 func TestRestartCutArgoJobsMapsInterruptionAndKeepsFallbackBinding(t *testing.T) {
-	cut := argojob.Completion{Name: "workflow", Interrupted: true, Infrastructure: true, Reason: "server restart interrupted build/test: missing exit", Steps: []argojob.StepResult{{Burn: "build", Step: "test", Status: runprogress.StepFailed, ExitCode: 1}}}
-	real := argojob.Completion{Name: "workflow", Terminal: true, FailedBurn: "build", FailedStep: "test", Reason: "test exited 2", Steps: []argojob.StepResult{{Burn: "build", Step: "test", Status: runprogress.StepFailed, ExitCode: 2, ExitCodeKnown: true}}}
+	cut := argojob.Completion{Name: "workflow", Interrupted: true, Infrastructure: true, Reason: "server restart interrupted build/test: missing exit", Steps: []argojob.StepResult{{Stage: "build", Step: "test", Status: runprogress.StepFailed, ExitCode: 1}}}
+	real := argojob.Completion{Name: "workflow", Terminal: true, FailedStage: "build", FailedStep: "test", Reason: "test exited 2", Steps: []argojob.StepResult{{Stage: "build", Step: "test", Status: runprogress.StepFailed, ExitCode: 2, ExitCodeKnown: true}}}
 	for _, mode := range []string{"normal", "terminal-log-error", "late-terminal", "partial-running", "late-real-failure", "real-failure", "earlier-real-failure", "read-error"} {
 		t.Run(mode, func(t *testing.T) {
 			c := &restartReadController{adoptingArgoControl: adoptingArgoControl{found: true, binding: argojob.Adoption{UID: "workflow-uid", Identity: "identity", Size: pipeline.M}}, observed: cut, next: cut}
@@ -63,11 +63,11 @@ func TestRestartCutArgoJobsMapsInterruptionAndKeepsFallbackBinding(t *testing.T)
 				c.readError = errors.New("foreign binding")
 			}
 			jobs := &ArgoJobs{controller: c, intents: map[string]argoIntent{}}
-			run := model.Run{ID: "run", JobName: "workflow", RefKind: model.RefBranch, Ref: "feature", SHA: "sha", Trigger: "branch"}
+			run := model.Run{ID: "run", WorkflowName: "workflow", RefKind: model.RefBranch, Ref: "feature", SHA: "sha", Trigger: "branch"}
 			if _, found, err := jobs.Adopt(t.Context(), run); err != nil || !found {
 				t.Fatal(found, err)
 			}
-			result, err := jobs.WaitResumed(t.Context(), run.JobName, io.Discard, nil, 0)
+			result, err := jobs.WaitResumed(t.Context(), run.WorkflowName, io.Discard, nil, 0)
 			if mode == "normal" {
 				if err != nil || result.Status != model.RunInterrupted || result.Phase != "interrupted" || result.FailedStep != "" || len(jobs.intents) != 0 {
 					t.Fatal("interruption mapping failed", result, err)
@@ -109,26 +109,26 @@ var _ service.JobAdopter = (*ArgoJobs)(nil)
 func TestRestartCutFallbackOwnsJournalAndNewlyObservedExit(t *testing.T) {
 	start := time.Now().UTC()
 	finish := start.Add(time.Second)
-	completion := argojob.Completion{Name: "workflow", Terminal: true, FailedBurn: "build", FailedStep: "test", Steps: []argojob.StepResult{{Burn: "build", Step: "test", Status: runprogress.StepFailed, ExitCode: 2, ExitCodeKnown: true, StartedAt: &start, FinishedAt: &finish}}}
+	completion := argojob.Completion{Name: "workflow", Terminal: true, FailedStage: "build", FailedStep: "test", Steps: []argojob.StepResult{{Stage: "build", Step: "test", Status: runprogress.StepFailed, ExitCode: 2, ExitCodeKnown: true, StartedAt: &start, FinishedAt: &finish}}}
 	c := &restartReadController{adoptingArgoControl: adoptingArgoControl{found: true, binding: argojob.Adoption{UID: "workflow-uid", Identity: "identity", Size: pipeline.M}}, observed: completion, next: completion}
 	jobs := &ArgoJobs{controller: c, intents: map[string]argoIntent{}}
-	run := model.Run{ID: "run", JobName: "workflow", RefKind: model.RefBranch, Ref: "feature", SHA: "sha", Trigger: "branch"}
+	run := model.Run{ID: "run", WorkflowName: "workflow", RefKind: model.RefBranch, Ref: "feature", SHA: "sha", Trigger: "branch"}
 	if _, found, err := jobs.Adopt(t.Context(), run); err != nil || !found {
 		t.Fatal(found, err)
 	}
-	retained := []runprogress.Event{{Version: runprogress.Version, Burn: "build", Step: "test", Ordinal: 0, Status: runprogress.StepRunning, StartedAt: &start}}
+	retained := []runprogress.Event{{Version: runprogress.Version, Stage: "build", Step: "test", Ordinal: 0, Status: runprogress.StepRunning, StartedAt: &start}}
 	savedStart, savedFinish := start, finish
-	result, err := jobs.WaitResumed(t.Context(), run.JobName, io.Discard, retained, 0)
+	result, err := jobs.WaitResumed(t.Context(), run.WorkflowName, io.Discard, retained, 0)
 	if err != nil || result.Reobserve == nil || len(jobs.intents) != 0 {
 		t.Fatal("successful Wait lost fallback binding", result, err)
 	}
-	retained[0].Burn = "foreign"
+	retained[0].Stage = "foreign"
 	start = start.Add(time.Hour)
 	finish = finish.Add(time.Hour)
 	if _, err := result.Reobserve(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	if len(c.readEvents) != 2 || c.readEvents[0].Burn != "build" || !c.readEvents[0].StartedAt.Equal(savedStart) || c.readEvents[1].ExitCode != 2 || !c.readEvents[1].StartedAt.Equal(savedStart) || !c.readEvents[1].FinishedAt.Equal(savedFinish) {
+	if len(c.readEvents) != 2 || c.readEvents[0].Stage != "build" || !c.readEvents[0].StartedAt.Equal(savedStart) || c.readEvents[1].ExitCode != 2 || !c.readEvents[1].StartedAt.Equal(savedStart) || !c.readEvents[1].FinishedAt.Equal(savedFinish) {
 		t.Fatal("fallback evidence aliased or discarded", c.readEvents)
 	}
 }
@@ -143,11 +143,11 @@ func TestRestartCutR2PartialRunningObservationAllowsTerminalCut(t *testing.T) {
 	}
 	collector, artifacts := &fakeCollector{body: []byte("archive")}, &fakeArtifactStore{}
 	jobs := &ArgoJobs{controller: c, intents: map[string]argoIntent{}, collector: collector, artifacts: artifacts, artifactLimit: 1 << 20}
-	run := model.Run{ID: "run", JobName: "workflow", RefKind: model.RefBranch, Ref: "feature", SHA: "sha", Trigger: "branch"}
+	run := model.Run{ID: "run", WorkflowName: "workflow", RefKind: model.RefBranch, Ref: "feature", SHA: "sha", Trigger: "branch"}
 	if _, found, err := jobs.Adopt(t.Context(), run); err != nil || !found {
 		t.Fatal(found, err)
 	}
-	result, err := jobs.WaitResumed(t.Context(), run.JobName, io.Discard, nil, 0)
+	result, err := jobs.WaitResumed(t.Context(), run.WorkflowName, io.Discard, nil, 0)
 	if !errors.Is(err, failure) || result.Reobserve == nil || collector.calls != 0 {
 		t.Fatal("partial read lost bound fallback or collected live artifacts", result, err, collector.calls)
 	}

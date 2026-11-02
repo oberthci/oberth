@@ -144,21 +144,21 @@ func nestedWorkflow() *wfv1.Workflow {
 
 // TestStepResultsMapsNestedDAGsOntoBurnsAndSteps proves the two-level model
 // falls out of an idiomatic Argo pipeline without any Oberth-specific naming.
-func TestStepResultsMapsNestedDAGsOntoBurnsAndSteps(t *testing.T) {
+func TestStepResultsMapsNestedDAGsOntoStagesAndSteps(t *testing.T) {
 	results := StepResults(nestedWorkflow())
 	found := map[string]string{}
 	for _, result := range results {
-		found[result.Step] = result.Burn
+		found[result.Step] = result.Stage
 	}
-	for step, burn := range map[string]string{
+	for step, stage := range map[string]string{
 		"prepare": "setup",
 		"lint":    "verify",
 		"omitted": "verify",
 		// A Pod directly under the entrypoint is a burn of one step.
 		"solo": "solo",
 	} {
-		if found[step] != burn {
-			t.Errorf("step %q attributed to burn %q, want %q", step, found[step], burn)
+		if found[step] != stage {
+			t.Errorf("step %q attributed to burn %q, want %q", step, found[step], stage)
 		}
 	}
 	// Pod nodes and skipped Pod-producing tasks become steps; StepGroup, Retry
@@ -269,7 +269,7 @@ func TestStepResultsStripsRetryAttemptSuffix(t *testing.T) {
 	if _, ok := found["publish"]; !ok {
 		t.Error("expected step 'publish' (retry suffix stripped); not found")
 		for _, r := range results {
-			t.Logf("  got burn=%q step=%q", r.Burn, r.Step)
+			t.Logf("  got burn=%q step=%q", r.Stage, r.Step)
 		}
 	}
 	if _, ok := found["publish(0)"]; ok {
@@ -277,8 +277,8 @@ func TestStepResultsStripsRetryAttemptSuffix(t *testing.T) {
 	}
 	// Both steps belong to the "release" burn.
 	for _, step := range []string{"build", "publish"} {
-		if r, ok := found[step]; ok && r.Burn != "release" {
-			t.Errorf("step %q burn = %q, want 'release'", step, r.Burn)
+		if r, ok := found[step]; ok && r.Stage != "release" {
+			t.Errorf("step %q burn = %q, want 'release'", step, r.Stage)
 		}
 	}
 }
@@ -438,8 +438,8 @@ func TestRetryAllFailedSetsFailedStep(t *testing.T) {
 	if completion.FailedStep != "publish" {
 		t.Errorf("FailedStep = %q, want 'publish'", completion.FailedStep)
 	}
-	if completion.FailedBurn != "release" {
-		t.Errorf("FailedBurn = %q, want 'release'", completion.FailedBurn)
+	if completion.FailedStage != "release" {
+		t.Errorf("FailedBurn = %q, want 'release'", completion.FailedStage)
 	}
 	if completion.Succeeded {
 		t.Error("a failed Workflow reported success")
@@ -487,7 +487,7 @@ func TestExitCodeNeverReportsSuccessForAFailedNode(t *testing.T) {
 	}
 }
 
-func TestCompletionNamesTheFailedBurnAndStep(t *testing.T) {
+func TestCompletionNamesTheFailedStageAndStep(t *testing.T) {
 	workflow := nestedWorkflow()
 	node := workflow.Status.Nodes["lint"]
 	node.Phase = wfv1.NodeFailed
@@ -499,8 +499,8 @@ func TestCompletionNamesTheFailedBurnAndStep(t *testing.T) {
 	if completion.Succeeded {
 		t.Fatal("a failed Workflow reported success")
 	}
-	if completion.FailedBurn != "verify" || completion.FailedStep != "lint" {
-		t.Fatalf("failed burn/step = %q/%q, want verify/lint", completion.FailedBurn, completion.FailedStep)
+	if completion.FailedStage != "verify" || completion.FailedStep != "lint" {
+		t.Fatalf("failed burn/step = %q/%q, want verify/lint", completion.FailedStage, completion.FailedStep)
 	}
 	if completion.Reason != "lint failed" {
 		t.Fatalf("reason = %q", completion.Reason)
@@ -567,9 +567,9 @@ func TestCompletionSucceededWorkflowWithFailedStepIsRed(t *testing.T) {
 	if completion.Succeeded {
 		t.Fatal("a Succeeded Workflow with a failed configured step must NOT stay Succeeded")
 	}
-	if completion.FailedBurn != "homebrew" || completion.FailedStep != "homebrew" {
+	if completion.FailedStage != "homebrew" || completion.FailedStep != "homebrew" {
 		t.Errorf("FailedBurn/FailedStep = %q/%q, want homebrew/homebrew",
-			completion.FailedBurn, completion.FailedStep)
+			completion.FailedStage, completion.FailedStep)
 	}
 
 	// The individual step's status is still Failed in the Steps slice.
@@ -638,9 +638,9 @@ func TestCompletionFailedWorkflowIsNeverOverridden(t *testing.T) {
 	if completion.Succeeded {
 		t.Fatal("a Failed Workflow must never be overridden to Succeeded by step-row inspection")
 	}
-	if completion.FailedBurn != "homebrew" || completion.FailedStep != "homebrew" {
+	if completion.FailedStage != "homebrew" || completion.FailedStep != "homebrew" {
 		t.Errorf("FailedBurn/FailedStep = %q/%q, want homebrew/homebrew",
-			completion.FailedBurn, completion.FailedStep)
+			completion.FailedStage, completion.FailedStep)
 	}
 	if completion.Reason == "" {
 		t.Error("Reason must carry the Workflow's own failure message")
@@ -689,8 +689,8 @@ func TestCompletionPreservesBlockingFailure(t *testing.T) {
 	}
 	// Both steps failed; the last in iteration order (sorted by start time,
 	// then burn name) is attributed. "build" < "homebrew" lexically.
-	if completion.FailedBurn != "homebrew" {
-		t.Errorf("FailedBurn = %q, want 'homebrew' (last failed step in iteration order)", completion.FailedBurn)
+	if completion.FailedStage != "homebrew" {
+		t.Errorf("FailedBurn = %q, want 'homebrew' (last failed step in iteration order)", completion.FailedStage)
 	}
 }
 
@@ -728,8 +728,8 @@ func TestCompletionNoOverrideWithoutNonBlockingFailure(t *testing.T) {
 	if completion.Succeeded {
 		t.Fatal("a Failed Workflow with only blocking failures must not be overridden")
 	}
-	if completion.FailedBurn != "build" || completion.FailedStep != "build" {
-		t.Errorf("FailedBurn/FailedStep = %q/%q, want build/build", completion.FailedBurn, completion.FailedStep)
+	if completion.FailedStage != "build" || completion.FailedStep != "build" {
+		t.Errorf("FailedBurn/FailedStep = %q/%q, want build/build", completion.FailedStage, completion.FailedStep)
 	}
 }
 
@@ -775,8 +775,8 @@ func TestCompletionRetriedStepFinalPassIsGreen(t *testing.T) {
 	if !completion.Succeeded {
 		t.Fatal("a retried step whose final attempt succeeded must keep the run green")
 	}
-	if completion.FailedBurn != "" || completion.FailedStep != "" {
-		t.Errorf("FailedBurn/FailedStep = %q/%q, want empty", completion.FailedBurn, completion.FailedStep)
+	if completion.FailedStage != "" || completion.FailedStep != "" {
+		t.Errorf("FailedBurn/FailedStep = %q/%q, want empty", completion.FailedStage, completion.FailedStep)
 	}
 }
 
@@ -787,7 +787,7 @@ func TestProgressReporterEmitsAMonotonicStream(t *testing.T) {
 	reporter := newProgressReporter(destination)
 	started := time.Unix(1000, 0).UTC()
 	finished := time.Unix(1010, 0).UTC()
-	step := StepResult{Burn: "verify", Step: "lint", StartedAt: &started}
+	step := StepResult{Stage: "verify", Step: "lint", StartedAt: &started}
 
 	step.Status = runprogress.StepRunning
 	if reporter.observe(destination, step) {
@@ -819,7 +819,7 @@ func TestProgressReporterSynthesizesRunningForAFastStep(t *testing.T) {
 	finished := time.Unix(1010, 0).UTC()
 
 	if !reporter.observe(destination, StepResult{
-		Burn: "setup", Step: "prepare", Status: runprogress.StepPassed,
+		Stage: "setup", Step: "prepare", Status: runprogress.StepPassed,
 		StartedAt: &started, FinishedAt: &finished,
 	}) {
 		t.Fatal("a first-seen terminal step did not ask for its log")
@@ -864,7 +864,7 @@ func splitLines(body string) []string {
 // each line of a step's Pod log to its burn and step.
 func TestCopyPrefixedAttributesEveryLine(t *testing.T) {
 	destination := &recordingWriter{}
-	if err := copyPrefixed(destination, StepResult{Burn: "setup", Step: "prepare"},
+	if err := copyPrefixed(destination, StepResult{Stage: "setup", Step: "prepare"},
 		stringReader("first\r\nsecond\nthird without newline"), ""); err != nil {
 		t.Fatalf("copyPrefixed: %v", err)
 	}
@@ -900,7 +900,7 @@ func TestProgressReporterRetryAttemptResetsFrozenStatus(t *testing.T) {
 	retryStart := time.Unix(1010, 0).UTC()
 	retryEnd := time.Unix(1015, 0).UTC()
 
-	step := StepResult{Burn: "release", Step: "publish", Ordinal: 0}
+	step := StepResult{Stage: "release", Step: "publish", Ordinal: 0}
 
 	// First attempt: running -> failed.
 	step.Status = runprogress.StepRunning

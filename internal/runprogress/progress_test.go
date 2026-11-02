@@ -12,7 +12,7 @@ import (
 func TestMarkerRoundTripAndStrictValidation(t *testing.T) {
 	started := time.Now().UTC()
 	event := Event{
-		Version: Version, Burn: "test", Step: "unit", Ordinal: 2,
+		Version: Version, Stage: "test", Step: "unit", Ordinal: 2,
 		Status: StepRunning, DeclaredSize: pipeline.L, StartedAt: &started,
 	}
 	marker, err := MarshalMarker(event)
@@ -20,7 +20,7 @@ func TestMarkerRoundTripAndStrictValidation(t *testing.T) {
 		t.Fatal(err)
 	}
 	decoded, found, err := ParseMarker(marker)
-	if err != nil || !found || decoded.Burn != event.Burn || decoded.Step != event.Step ||
+	if err != nil || !found || decoded.Stage != event.Stage || decoded.Step != event.Step ||
 		decoded.Ordinal != event.Ordinal || decoded.Status != StepRunning || decoded.StartedAt == nil {
 		t.Fatalf("decoded marker = %#v, found=%v, err=%v", decoded, found, err)
 	}
@@ -82,7 +82,7 @@ func TestEventValidate(t *testing.T) {
 
 	valid := func(status Status, started, finished *time.Time) Event {
 		return Event{
-			Version: Version, Burn: "test", Step: "unit", Ordinal: 0,
+			Version: Version, Stage: "test", Step: "unit", Ordinal: 0,
 			Status: status, DeclaredSize: pipeline.M,
 			StartedAt: started, FinishedAt: finished,
 		}
@@ -127,7 +127,7 @@ func TestEventValidate(t *testing.T) {
 	})
 	t.Run("empty burn", func(t *testing.T) {
 		e := valid(StepQueued, nil, nil)
-		e.Burn = ""
+		e.Stage = ""
 		if err := e.Validate(); err == nil {
 			t.Fatal("accepted empty burn")
 		}
@@ -191,7 +191,7 @@ func TestEventValidate(t *testing.T) {
 	})
 	t.Run("burn with NUL", func(t *testing.T) {
 		e := valid(StepQueued, nil, nil)
-		e.Burn = "test\x00burn"
+		e.Stage = "test\x00burn"
 		if err := e.Validate(); err == nil {
 			t.Fatal("accepted burn with NUL byte")
 		}
@@ -210,9 +210,9 @@ func TestPlanValidate(t *testing.T) {
 		plan := Plan{
 			Version: PlanVersion,
 			Steps: []PlannedStep{
-				{Burn: "test", Step: "lint", Ordinal: 0},
-				{Burn: "test", Step: "unit", Ordinal: 1},
-				{Burn: "build", Step: "compile", Ordinal: 2},
+				{Stage: "test", Step: "lint", Ordinal: 0},
+				{Stage: "test", Step: "unit", Ordinal: 1},
+				{Stage: "build", Step: "compile", Ordinal: 2},
 			},
 		}
 		if err := plan.Validate(); err != nil {
@@ -234,7 +234,7 @@ func TestPlanValidate(t *testing.T) {
 	t.Run("empty burn", func(t *testing.T) {
 		plan := Plan{
 			Version: PlanVersion,
-			Steps:   []PlannedStep{{Burn: "", Step: "lint", Ordinal: 0}},
+			Steps:   []PlannedStep{{Stage: "", Step: "lint", Ordinal: 0}},
 		}
 		if err := plan.Validate(); err == nil {
 			t.Fatal("accepted empty burn in plan step")
@@ -243,7 +243,7 @@ func TestPlanValidate(t *testing.T) {
 	t.Run("empty step", func(t *testing.T) {
 		plan := Plan{
 			Version: PlanVersion,
-			Steps:   []PlannedStep{{Burn: "test", Step: "", Ordinal: 0}},
+			Steps:   []PlannedStep{{Stage: "test", Step: "", Ordinal: 0}},
 		}
 		if err := plan.Validate(); err == nil {
 			t.Fatal("accepted empty step in plan step")
@@ -252,7 +252,7 @@ func TestPlanValidate(t *testing.T) {
 	t.Run("negative ordinal", func(t *testing.T) {
 		plan := Plan{
 			Version: PlanVersion,
-			Steps:   []PlannedStep{{Burn: "test", Step: "lint", Ordinal: -1}},
+			Steps:   []PlannedStep{{Stage: "test", Step: "lint", Ordinal: -1}},
 		}
 		if err := plan.Validate(); err == nil {
 			t.Fatal("accepted negative ordinal in plan step")
@@ -262,8 +262,8 @@ func TestPlanValidate(t *testing.T) {
 		plan := Plan{
 			Version: PlanVersion,
 			Steps: []PlannedStep{
-				{Burn: "test", Step: "lint", Ordinal: 0},
-				{Burn: "test", Step: "lint", Ordinal: 1},
+				{Stage: "test", Step: "lint", Ordinal: 0},
+				{Stage: "test", Step: "lint", Ordinal: 1},
 			},
 		}
 		if err := plan.Validate(); err == nil {
@@ -274,8 +274,8 @@ func TestPlanValidate(t *testing.T) {
 		plan := Plan{
 			Version: PlanVersion,
 			Steps: []PlannedStep{
-				{Burn: "test", Step: "lint", Ordinal: 0},
-				{Burn: "test", Step: "unit", Ordinal: 0},
+				{Stage: "test", Step: "lint", Ordinal: 0},
+				{Stage: "test", Step: "unit", Ordinal: 0},
 			},
 		}
 		if err := plan.Validate(); err == nil {
@@ -285,7 +285,7 @@ func TestPlanValidate(t *testing.T) {
 	t.Run("burn with NUL", func(t *testing.T) {
 		plan := Plan{
 			Version: PlanVersion,
-			Steps:   []PlannedStep{{Burn: "test\x00x", Step: "lint", Ordinal: 0}},
+			Steps:   []PlannedStep{{Stage: "test\x00x", Step: "lint", Ordinal: 0}},
 		}
 		if err := plan.Validate(); err == nil {
 			t.Fatal("accepted burn with NUL in plan")
@@ -302,8 +302,8 @@ func TestPlannedStepSecretsIsAdditive(t *testing.T) {
 		step     PlannedStep
 		wantJSON string
 	}{
-		{"plain", PlannedStep{Burn: "test", Step: "lint", Ordinal: 0}, `{"burn":"test","step":"lint","ordinal":0,"credentialed":false}`},
-		{"secrets", PlannedStep{Burn: "publish", Step: "push", Ordinal: 1, Secrets: true}, `{"burn":"publish","step":"push","ordinal":1,"secrets":true,"credentialed":false}`},
+		{"plain", PlannedStep{Stage: "test", Step: "lint", Ordinal: 0}, `{"burn":"test","step":"lint","ordinal":0,"credentialed":false}`},
+		{"secrets", PlannedStep{Stage: "publish", Step: "push", Ordinal: 1, Secrets: true}, `{"burn":"publish","step":"push","ordinal":1,"secrets":true,"credentialed":false}`},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {

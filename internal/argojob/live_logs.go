@@ -99,7 +99,7 @@ func newStepLogFollowers(ctx context.Context, reader PodLogFollower, output io.W
 	ctx, cancel := context.WithCancel(ctx)
 	resumed := map[string]runprogress.Status{}
 	for _, event := range events {
-		resumed[event.Burn+"/"+event.Step] = event.Status
+		resumed[event.Stage+"/"+event.Step] = event.Status
 	}
 	var restored map[string]runlog.PodLogCursor
 	if sink, ok := output.(runlog.PodLogSink); ok {
@@ -116,7 +116,7 @@ func (logs *stepLogFollowers) observe(workflow *wfv1.Workflow) {
 		case <-worker.done:
 		default:
 			active++
-			busySteps[worker.step.Burn+"/"+worker.step.Step] = true
+			busySteps[worker.step.Stage+"/"+worker.step.Step] = true
 		}
 	}
 	for _, step := range stepAttempts(workflow) {
@@ -134,7 +134,7 @@ func (logs *stepLogFollowers) observe(workflow *wfv1.Workflow) {
 		}
 		// Overflow stays eligible on the next observation and is always collected
 		// during drain. Do not allocate one goroutine or buffer per pending leaf.
-		if active >= maxLogFollowers || busySteps[step.Burn+"/"+step.Step] {
+		if active >= maxLogFollowers || busySteps[step.Stage+"/"+step.Step] {
 			continue
 		}
 		worker := &stepLogFollower{owner: logs, step: step, namespace: workflow.Namespace, done: make(chan struct{}), workflow: workflow, node: workflow.Status.Nodes[step.NodeID], key: string(workflow.UID) + "/" + key, container: mainContainerName}
@@ -152,7 +152,7 @@ func (logs *stepLogFollowers) observe(workflow *wfv1.Workflow) {
 		worker.terminal.Store(terminal(step.Status))
 		logs.workers[key] = worker
 		active++
-		busySteps[step.Burn+"/"+step.Step] = true
+		busySteps[step.Stage+"/"+step.Step] = true
 		go worker.run()
 	}
 }
@@ -201,21 +201,21 @@ func (worker *stepLogFollower) status(state, message string) {
 	// Separate control namespace: these records are delivery observations, not
 	// fabricated command output. Step readers continue indexing only [burn/step].
 	body, _ := json.Marshal(struct {
-		Burn    string    `json:"burn"`
+		Stage   string    `json:"burn"`
 		Step    string    `json:"step"`
 		Node    string    `json:"node"`
 		State   string    `json:"state"`
 		At      time.Time `json:"at"`
 		Message string    `json:"message,omitempty"`
 		Gap     bool      `json:"gap,omitempty"`
-	}{worker.step.Burn, worker.step.Step, worker.step.NodeID, state, time.Now().UTC(), message, worker.gap})
+	}{worker.step.Stage, worker.step.Step, worker.step.NodeID, state, time.Now().UTC(), message, worker.gap})
 	worker.write(append(append([]byte(runprogress.LogDeliveryPrefix), body...), '\n'))
 }
 
 func (worker *stepLogFollower) write(body []byte) bool {
 	if _, err := worker.owner.output.Write(body); err != nil {
 		worker.owner.mu.Lock()
-		worker.owner.err = errors.Join(worker.owner.err, fmt.Errorf("step %s/%s log write: %w", worker.step.Burn, worker.step.Step, err))
+		worker.owner.err = errors.Join(worker.owner.err, fmt.Errorf("step %s/%s log write: %w", worker.step.Stage, worker.step.Step, err))
 		worker.owner.mu.Unlock()
 		return false
 	}
@@ -230,7 +230,7 @@ func (worker *stepLogFollower) discontinuity(message string) {
 	worker.lastGap = message
 	worker.status("gap", message)
 	// Retain the diagnostic with the step too, so CLI/MCP readers see gaps.
-	worker.write([]byte("[" + worker.step.Burn + "/" + worker.step.Step + "] oberth: log continuity gap: " + message + "\n"))
+	worker.write([]byte("[" + worker.step.Stage + "/" + worker.step.Step + "] oberth: log continuity gap: " + message + "\n"))
 }
 
 func (worker *stepLogFollower) run() {
@@ -242,10 +242,10 @@ func (worker *stepLogFollower) run() {
 		return
 	}
 	if worker.step.Attempt != "" && !hasCursor {
-		worker.write([]byte("[" + worker.step.Burn + "/" + worker.step.Step + "] oberth: Argo retry attempt " + worker.step.Attempt + "\n"))
+		worker.write([]byte("[" + worker.step.Stage + "/" + worker.step.Step + "] oberth: Argo retry attempt " + worker.step.Attempt + "\n"))
 	}
 
-	if previous, restored := worker.owner.resumed[worker.step.Burn+"/"+worker.step.Step]; restored && !hasCursor && (worker.step.StartedAt == nil || worker.step.StartedAt.Before(worker.owner.resumedAt)) {
+	if previous, restored := worker.owner.resumed[worker.step.Stage+"/"+worker.step.Step]; restored && !hasCursor && (worker.step.StartedAt == nil || worker.step.StartedAt.Before(worker.owner.resumedAt)) {
 		if terminal(previous) && worker.step.Attempt == "" {
 			worker.discontinuity("controller adopted a previously terminal step; its retained output is preserved without historical replay")
 			worker.status("gapped", "historical log completeness cannot be established after adoption")
@@ -553,7 +553,7 @@ func (worker *stepLogFollower) consumeRecords(reader io.Reader, final bool) (res
 			worker.discontinuity("last timestamp boundary is missing; pod logs may have rotated")
 			checked = true
 		}
-		prefix := "[" + worker.step.Burn + "/" + worker.step.Step + "] "
+		prefix := "[" + worker.step.Stage + "/" + worker.step.Step + "] "
 		body := []byte(prefix + text + "\n")
 		if hint := worker.proxyDiagnostic.observe(text, worker.owner.goProxyURL); hint != "" {
 			body = append(body, []byte(prefix+hint+"\n")...)
@@ -658,7 +658,7 @@ func (worker *stepLogFollower) reportTermination() {
 	if c.ContainerKind == "init" {
 		label = "init container"
 	}
-	body := "[" + worker.step.Burn + "/" + worker.step.Step + "] oberth: " + label + " " + c.ContainerName + " terminated: exit code " + strconv.Itoa(int(c.ExitCode)) + ", reason " + c.Reason
+	body := "[" + worker.step.Stage + "/" + worker.step.Step + "] oberth: " + label + " " + c.ContainerName + " terminated: exit code " + strconv.Itoa(int(c.ExitCode)) + ", reason " + c.Reason
 	if c.Message != "" {
 		body += ", message " + strconv.Quote(c.Message)
 	}
@@ -683,7 +683,7 @@ func (worker *stepLogFollower) reportUnknownTermination() {
 			message = "Argo node exit code " + strconv.Itoa(code) + "; Kubernetes container termination message unavailable"
 		}
 	}
-	worker.write([]byte("[" + worker.step.Burn + "/" + worker.step.Step + "] oberth: " + message + "\n"))
+	worker.write([]byte("[" + worker.step.Stage + "/" + worker.step.Step + "] oberth: " + message + "\n"))
 }
 
 // Prefer actual observed termination over a later unavailable Pod snapshot.

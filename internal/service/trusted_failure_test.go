@@ -19,9 +19,9 @@ func TestPromotionRetainsFailedTrustedPreflightEvidence(t *testing.T) {
 			f := newControlFixture(t)
 			contract := []byte("version: 2\nprofile: kvm-suite-amd64-v1\nsuite_sha256: " + strings.Repeat("a", 64) + "\nguest_sha256: " + strings.Repeat("b", 64) + "\nartifacts: [build/program]\n")
 			f.scheduler.git = &policyTestGit{controlGit: f.git, candidate: contract, baseline: contract}
-			result := JobResult{Status: model.RunFailed, Phase: "test", FailedBurn: "test", FailedStep: "unit", Error: "command exited 1", Steps: []model.StepResult{{Burn: "test", Step: "unit", Status: model.StepFailed, ExitCode: 1}}}
+			result := JobResult{Status: model.RunFailed, Phase: "test", FailedStage: "test", FailedStep: "unit", Error: "command exited 1", Steps: []model.StepResult{{Stage: "test", Step: "unit", Status: model.StepFailed, ExitCode: 1}}}
 			if infrastructure {
-				result.Phase, result.FailedBurn, result.FailedStep, result.Error = "infrastructure", "", "", "Evicted: node memory pressure"
+				result.Phase, result.FailedStage, result.FailedStep, result.Error = "infrastructure", "", "", "Evicted: node memory pressure"
 				result.Steps[0].ExitCode = 137
 			}
 			f.scheduler.trusted = &protectedFixture{store: f.store, failure: &TrustedPreflightFailure{Result: result, Cause: errors.New(result.Error)}}

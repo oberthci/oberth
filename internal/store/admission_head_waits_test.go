@@ -71,7 +71,7 @@ func TestRunDurationEstimateIsTheMedianOfRecentPassedRuns(t *testing.T) {
 		if _, err := database.ClaimNextRun(ctx); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := database.SetRunJobName(ctx, run.ID, "job-"+run.ID[:8]); err != nil {
+		if _, err := database.SetRunWorkflowName(ctx, run.ID, "job-"+run.ID[:8]); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := database.MarkRunSubmitted(ctx, run.ID); err != nil {

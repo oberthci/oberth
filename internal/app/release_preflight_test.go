@@ -11,7 +11,7 @@ import (
 func TestReleasePreflightRecordsDeniedCanonicalDeclarations(t *testing.T) {
 	recorder := &fakeDeclarationRecorder{}
 	jobs := &ArgoJobs{declarations: recorder}
-	problems, err := jobs.PreflightRelease(context.Background(), service.JobRequest{
+	problems, err := jobs.PreflightRelease(context.Background(), service.WorkflowRequest{
 		Repository: model.Repository{ID: 42, Name: "repo"}, UpstreamName: "forge", UpstreamOrg: "org",
 		Run: model.Run{SHA: "object", TestedSHA: "commit"},
 	}, []byte(declarationWorkflow))
@@ -36,7 +36,7 @@ func (loader *changingPreflightGrants) ActiveSecretGrants(context.Context, int64
 func TestReleasePreflightReloadsGrantsAfterApproval(t *testing.T) {
 	loader := &changingPreflightGrants{}
 	jobs := &ArgoJobs{secretAccess: loader}
-	request := service.JobRequest{Repository: model.Repository{ID: 42, Name: "repo"}, UpstreamName: "forge", UpstreamOrg: "org"}
+	request := service.WorkflowRequest{Repository: model.Repository{ID: 42, Name: "repo"}, UpstreamName: "forge", UpstreamOrg: "org"}
 	problems, err := jobs.PreflightRelease(context.Background(), request, []byte(declarationWorkflow))
 	if err != nil || len(problems.Problems) == 0 {
 		t.Fatalf("missing grant: %v %v", problems, err)
@@ -51,7 +51,7 @@ func TestReleasePreflightReloadsGrantsAfterApproval(t *testing.T) {
 func TestReleasePlanDoesNotRecordDeclarations(t *testing.T) {
 	recorder := &fakeDeclarationRecorder{}
 	jobs := &ArgoJobs{declarations: recorder}
-	result, err := jobs.PlanRelease(context.Background(), service.JobRequest{
+	result, err := jobs.PlanRelease(context.Background(), service.WorkflowRequest{
 		Repository: model.Repository{ID: 42, Name: "repo"}, UpstreamName: "forge", UpstreamOrg: "org",
 	}, []byte(declarationWorkflow))
 	if err != nil || len(result.Problems) == 0 || recorder.called {

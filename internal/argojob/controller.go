@@ -453,9 +453,9 @@ func (controller *Controller) wait(ctx context.Context, name, runID string, dest
 		if err := event.Validate(); err != nil {
 			return Completion{}, err
 		}
-		reporter.reported[event.Burn+"/"+event.Step] = event.Status
-		reporter.ordinals[event.Burn+"/"+event.Step] = event.Ordinal
-		reporter.ordinalOwners[event.Ordinal] = event.Burn + "/" + event.Step
+		reporter.reported[event.Stage+"/"+event.Step] = event.Status
+		reporter.ordinals[event.Stage+"/"+event.Step] = event.Ordinal
+		reporter.ordinalOwners[event.Ordinal] = event.Stage + "/" + event.Step
 	}
 	ticker := time.NewTicker(controller.interval)
 	defer ticker.Stop()
@@ -666,7 +666,7 @@ func (controller *Controller) replayStepLog(ctx context.Context, workflow *wfv1.
 			// Best-effort banner -- the budget is exhausted so this write
 			// will likely fail, but writeLine silently drops write errors.
 			writeLine(destination, step, "oberth: run log truncated: aggregate budget exceeded")
-			return fmt.Errorf("step %s/%s breached the aggregate run log budget", step.Burn, step.Step)
+			return fmt.Errorf("step %s/%s breached the aggregate run log budget", step.Stage, step.Step)
 		}
 		writeLine(destination, step, fmt.Sprintf("oberth: step log truncated: %v", err))
 	}
@@ -819,7 +819,7 @@ func newProgressReporter(destination io.Writer) *progressReporter {
 // assignOrdinal requires reporter.mu. Journal assignments survive adoption;
 // newly named keys take an unused slot instead of displacing a sibling.
 func (reporter *progressReporter) assignOrdinal(step StepResult) StepResult {
-	key := step.Burn + "/" + step.Step
+	key := step.Stage + "/" + step.Step
 	if ordinal, exists := reporter.ordinals[key]; exists {
 		step.Ordinal = ordinal
 	} else {
@@ -859,7 +859,7 @@ func (reporter *progressReporter) order(steps []StepResult) []StepResult {
 func (reporter *progressReporter) observe(destination io.Writer, step StepResult) bool {
 	reporter.mu.Lock()
 	defer reporter.mu.Unlock()
-	key := step.Burn + "/" + step.Step
+	key := step.Stage + "/" + step.Step
 	step = reporter.assignOrdinal(step)
 	if step.NodeID != "" && reporter.done[step.NodeID] {
 		// This attempt's terminal state is already in the run log.
@@ -901,7 +901,7 @@ func (reporter *progressReporter) observe(destination io.Writer, step StepResult
 		// between two polls). Emit its running event first so the log reads
 		// as a sequence rather than a jump.
 		reporter.emit(destination, StepResult{
-			Burn: step.Burn, Step: step.Step, Ordinal: step.Ordinal,
+			Stage: step.Stage, Step: step.Step, Ordinal: step.Ordinal,
 			Status: runprogress.StepRunning, StartedAt: step.StartedAt,
 		})
 	}
@@ -934,7 +934,7 @@ func rank(status runprogress.Status) int {
 func (reporter *progressReporter) emit(destination io.Writer, step StepResult) {
 	event := runprogress.Event{
 		Version: runprogress.Version,
-		Burn:    step.Burn, Step: step.Step, Ordinal: step.Ordinal,
+		Stage:   step.Stage, Step: step.Step, Ordinal: step.Ordinal,
 		Status: step.Status, ExitCode: step.ExitCode,
 		StartedAt: step.StartedAt, FinishedAt: step.FinishedAt,
 	}
@@ -1031,7 +1031,7 @@ func (writer *runBudgetWriter) Write(body []byte) (int, error) {
 // the per-step budget, and stops reading immediately in either case.
 func copyPrefixed(destination io.Writer, step StepResult, body io.Reader, proxyURL string) error {
 	var diagnostic goProxyDiagnostic
-	prefix := []byte("[" + step.Burn + "/" + step.Step + "] ")
+	prefix := []byte("[" + step.Stage + "/" + step.Step + "] ")
 	buffered := make([]byte, 0, 8192)
 	chunk := make([]byte, 4096)
 	var written int64
@@ -1081,7 +1081,7 @@ func copyPrefixed(destination io.Writer, step StepResult, body io.Reader, proxyU
 }
 
 func writeLine(destination io.Writer, step StepResult, text string) {
-	_, _ = destination.Write([]byte("[" + step.Burn + "/" + step.Step + "] " + text + "\n"))
+	_, _ = destination.Write([]byte("[" + step.Stage + "/" + step.Step + "] " + text + "\n"))
 }
 
 func indexByte(body []byte, target byte) int {

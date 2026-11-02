@@ -105,17 +105,17 @@ func wireIssueMutation(issue model.Issue, appendedBytes int) api.IssueMutationRe
 // RunSummaryResponse deliberately excludes retained Timing, repository data,
 // diagnostics and telemetry. Unknown step times remain null.
 type RunSummaryResponse struct {
-	ID         string           `json:"id"`
-	Status     model.RunStatus  `json:"status"`
-	Phase      string           `json:"phase"`
-	FailedBurn string           `json:"failed_burn"`
-	FailedStep string           `json:"failed_step"`
-	Error      string           `json:"error"`
-	Steps      []RunStepSummary `json:"steps"`
+	ID          string           `json:"id"`
+	Status      model.RunStatus  `json:"status"`
+	Phase       string           `json:"phase"`
+	FailedStage string           `json:"failed_burn"`
+	FailedStep  string           `json:"failed_step"`
+	Error       string           `json:"error"`
+	Steps       []RunStepSummary `json:"steps"`
 }
 
 type RunStepSummary struct {
-	Burn       string           `json:"burn"`
+	Stage      string           `json:"burn"`
 	Name       string           `json:"name"`
 	Status     model.StepStatus `json:"status"`
 	StartedAt  *time.Time       `json:"started_at"`
@@ -125,12 +125,12 @@ type RunStepSummary struct {
 func summarizeRun(run model.Run, steps []model.StepResult) RunSummaryResponse {
 	response := RunSummaryResponse{
 		ID: run.ID, Status: run.Status, Phase: run.Phase,
-		FailedBurn: run.FailedBurn, FailedStep: run.FailedStep, Error: run.Error,
+		FailedStage: run.FailedStage, FailedStep: run.FailedStep, Error: run.Error,
 		Steps: make([]RunStepSummary, len(steps)),
 	}
 	for i, step := range steps {
 		response.Steps[i] = RunStepSummary{
-			Burn: step.Burn, Name: step.Step, Status: step.Status,
+			Stage: step.Stage, Name: step.Step, Status: step.Status,
 			StartedAt: step.StartedAt, FinishedAt: step.FinishedAt,
 		}
 	}

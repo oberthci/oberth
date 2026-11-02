@@ -148,7 +148,7 @@ func newScopeFixture(t *testing.T) *scopeFixture {
 	// A red github run projects a CI issue with a CI work sequence, a global
 	// counter that must not reach scoped actors.
 	red := fixture.runs["github"][0]
-	if _, err := database.FinishRun(ctx, red.ID, model.RunResult{Status: model.RunFailed, Phase: "test", FailedBurn: "test", FailedStep: "unit", Error: "red"}); err != nil {
+	if _, err := database.FinishRun(ctx, red.ID, model.RunResult{Status: model.RunFailed, Phase: "test", FailedStage: "test", FailedStep: "unit", Error: "red"}); err != nil {
 		t.Fatal(err)
 	}
 	// The secret upstream's manual issue body names the confidential project.

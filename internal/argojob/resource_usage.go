@@ -224,7 +224,7 @@ func (c *Controller) sampleResourceUsageWithState(ctx context.Context, wf *wfv1.
 		if owner == nil || owner.APIVersion != "argoproj.io/v1alpha1" || owner.Kind != "Workflow" || owner.UID != wf.UID || owner.Name != wf.Name || pod.Namespace != wf.Namespace || pod.Annotations["workflows.argoproj.io/node-id"] != node.ID || pod.Annotations["workflows.argoproj.io/node-name"] != node.Name || pod.Spec.NodeName == "" {
 			continue
 		}
-		binding := resourcesampler.Binding{RunID: runID, WorkflowName: wf.Name, WorkflowUID: string(wf.UID), Namespace: wf.Namespace, NodeID: node.ID, NodeName: node.Name, PodName: step.PodName, Burn: step.Burn, Step: step.Step}
+		binding := resourcesampler.Binding{RunID: runID, WorkflowName: wf.Name, WorkflowUID: string(wf.UID), Namespace: wf.Namespace, NodeID: node.ID, NodeName: node.Name, PodName: step.PodName, Stage: step.Stage, Step: step.Step}
 		binding.TemplateName = node.TemplateName
 		binding.FragmentRepository, _ = argoworkflow.FragmentTemplateOwner(node.TemplateName, fragmentLock)
 		bindings[string(pod.UID)] = binding

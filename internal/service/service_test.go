@@ -307,13 +307,13 @@ func TestWaitReturnsCleanTimeoutWithoutPolling(t *testing.T) {
 func TestSelectLogRangeRequiresOneUnambiguousNamedStep(t *testing.T) {
 	t.Parallel()
 	steps := []model.StepResult{
-		{Burn: "test", Step: "unit"},
-		{Burn: "test", Step: "integration"},
+		{Stage: "test", Step: "unit"},
+		{Stage: "test", Step: "integration"},
 	}
-	if burn, step, err := selectLogRange(steps, "unit"); err != nil || burn != "test" || step != "unit" {
-		t.Fatalf("named step selection = %q/%q, %v", burn, step, err)
+	if stage, step, err := selectLogRange(steps, "unit"); err != nil || stage != "test" || step != "unit" {
+		t.Fatalf("named step selection = %q/%q, %v", stage, step, err)
 	}
-	steps = append(steps, model.StepResult{Burn: "release", Step: "unit"})
+	steps = append(steps, model.StepResult{Stage: "release", Step: "unit"})
 	if _, _, err := selectLogRange(steps, "unit"); !errors.Is(err, ErrInvalidInput) {
 		t.Fatalf("ambiguous step error = %v, want ErrInvalidInput", err)
 	}

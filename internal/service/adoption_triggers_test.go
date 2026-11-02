@@ -64,7 +64,7 @@ func slice2RecoveryRun(t *testing.T, kind string) (*recoveryFixture, model.Run, 
 	if _, err = fixture.store.MarkRunAdmitted(ctx, run.ID); err != nil {
 		t.Fatal(err)
 	}
-	fixture.setJobName(t, run.ID, "oberth-"+kind+"-adopt")
+	fixture.setWorkflowName(t, run.ID, "oberth-"+kind+"-adopt")
 	run, err = fixture.store.MarkRunSubmitted(ctx, run.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -531,7 +531,7 @@ func TestLegacyNonReleaseTagKeepsFallbackWithoutInferringRelease(t *testing.T) {
 	if _, err = fixture.store.ClaimNextRun(ctx); err != nil {
 		t.Fatal(err)
 	}
-	fixture.setJobName(t, enqueued.ID, "legacy-tag-job")
+	fixture.setWorkflowName(t, enqueued.ID, "legacy-tag-job")
 	jobs := &adoptingJobs{found: true, recoveryJobs: recoveryJobs{terminalErr: ErrJobNotTerminal}}
 	scheduler := fixture.scheduler(t, jobs)
 	if err = scheduler.reconcileStrandedRunsWithGate(ctx, scheduler.requireMutation, func(model.Run, pipeline.Size) error { return errors.New("legacy tag adopted") }); err != nil {

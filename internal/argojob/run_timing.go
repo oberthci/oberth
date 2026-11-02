@@ -212,7 +212,7 @@ func dependencyReady(workflow *wfv1.Workflow, node wfv1.NodeStatus) *time.Time {
 
 func projectStepTiming(workflow *wfv1.Workflow, node wfv1.NodeStatus, pod *corev1.Pod, step StepResult, diagnostic *model.StepDiagnostic, observed time.Time) *model.StepTiming {
 	runID, _, _ := WorkflowMeta(workflow)
-	value := &model.StepTiming{Version: model.TimingVersion, RunID: runID, Namespace: workflow.Namespace, WorkflowName: workflow.Name, WorkflowUID: string(workflow.UID), NodeID: step.NodeID, PodName: step.PodName, Burn: step.Burn, Step: step.Step, Ordinal: step.Ordinal, ObservedAt: observed, Init: []model.ContainerTiming{}, Missing: []string{}, ScriptTiming: "mixed", ImagePullTiming: "not-observed"}
+	value := &model.StepTiming{Version: model.TimingVersion, RunID: runID, Namespace: workflow.Namespace, WorkflowName: workflow.Name, WorkflowUID: string(workflow.UID), NodeID: step.NodeID, PodName: step.PodName, Stage: step.Stage, Step: step.Step, Ordinal: step.Ordinal, ObservedAt: observed, Init: []model.ContainerTiming{}, Missing: []string{}, ScriptTiming: "mixed", ImagePullTiming: "not-observed"}
 	value.Unavailable = diagnostic.Unavailable
 	if stepPodBound(workflow, node, pod) {
 		value.PodUID = string(pod.UID)

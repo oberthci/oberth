@@ -48,7 +48,7 @@ func (status Status) terminal() bool {
 // output so the progress channel can never carry credentials.
 type Event struct {
 	Version      int           `json:"version"`
-	Burn         string        `json:"burn"`
+	Stage        string        `json:"burn"`
 	Step         string        `json:"step"`
 	Ordinal      int           `json:"ordinal"`
 	Status       Status        `json:"status"`
@@ -62,7 +62,7 @@ func (event Event) Validate() error {
 	if event.Version != Version {
 		return fmt.Errorf("unsupported progress version %d", event.Version)
 	}
-	if !validName(event.Burn) || !validName(event.Step) || event.Ordinal < 0 {
+	if !validName(event.Stage) || !validName(event.Step) || event.Ordinal < 0 {
 		return errors.New("progress burn, step, or ordinal is invalid")
 	}
 	if !event.DeclaredSize.Valid() {
@@ -171,7 +171,7 @@ const (
 // adds every admitted credential class, including WIF; version 2 records it
 // explicitly even when false.
 type PlannedStep struct {
-	Burn         string `json:"burn"`
+	Stage        string `json:"burn"`
 	Step         string `json:"step"`
 	Ordinal      int    `json:"ordinal"`
 	Secrets      bool   `json:"secrets,omitempty"`
@@ -193,12 +193,12 @@ func (plan Plan) Validate() error {
 	keys := make(map[string]struct{}, len(plan.Steps))
 	ordinals := make(map[int]struct{}, len(plan.Steps))
 	for index, step := range plan.Steps {
-		if !validName(step.Burn) || !validName(step.Step) || step.Ordinal < 0 {
+		if !validName(step.Stage) || !validName(step.Step) || step.Ordinal < 0 {
 			return fmt.Errorf("plan entry %d has an invalid burn, step, or ordinal", index)
 		}
-		key := step.Burn + "\x00" + step.Step
+		key := step.Stage + "\x00" + step.Step
 		if _, duplicate := keys[key]; duplicate {
-			return fmt.Errorf("plan declares %s/%s more than once", step.Burn, step.Step)
+			return fmt.Errorf("plan declares %s/%s more than once", step.Stage, step.Step)
 		}
 		// A shared ordinal would make the plan's own ordering ambiguous, and
 		// the run log's progress journal refuses the same thing for the same

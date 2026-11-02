@@ -81,7 +81,7 @@ func TestClaimedRunShowsCapacityWaitUntilSubmission(t *testing.T) {
 		t.Fatal("unsubmitted run reached workflow observation")
 		return nil, nil
 	})}
-	run := model.Run{Status: model.RunRunning, QueueSequence: 2, QueuePosition: 1, JobName: "reserved-workflow"}
+	run := model.Run{Status: model.RunRunning, QueueSequence: 2, QueuePosition: 1, WorkflowName: "reserved-workflow"}
 	observation := service.scheduling(t.Context(), run, nil)
 	if observation.State != "waiting" || observation.Admission == nil || observation.Admission.Weight != 2 ||
 		observation.Admission.Used != 3 || observation.Admission.Capacity != 3 || observation.Admission.Position != 1 ||
@@ -176,7 +176,7 @@ func TestSchedulingProjectionStartupUnavailableAndContext(t *testing.T) {
 	if result := service.scheduling(t.Context(), run, nil); result.State != "startup" || calls != 0 {
 		t.Fatalf("startup=%#v calls=%d", result, calls)
 	}
-	run.JobName = "wf"
+	run.WorkflowName = "wf"
 	result := service.scheduling(t.Context(), run, []model.StepResult{{Status: model.StepQueued}, {Status: model.StepPending}})
 	if result.Execution.State != "unavailable" || result.ObservedAt.IsZero() || result.AgeSeconds < 0 || calls != 1 {
 		t.Fatalf("unavailable=%#v calls=%d", result, calls)
@@ -214,7 +214,7 @@ func TestSchedulingAvailableInMCPStatusRunGetAndAPIRun(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	running, err = fixture.store.SetRunJobName(t.Context(), running.ID, "wf")
+	running, err = fixture.store.SetRunWorkflowName(t.Context(), running.ID, "wf")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -355,14 +355,14 @@ func TestSchedulingDeadlineVisibleAfterProgressWithoutChangingDurableStatus(t *t
 	if _, err = fixture.store.ClaimNextRun(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = fixture.store.SetRunJobName(ctx, enqueued.ID, "wf"); err != nil {
+	if _, err = fixture.store.SetRunWorkflowName(ctx, enqueued.ID, "wf"); err != nil {
 		t.Fatal(err)
 	}
 	run, err := fixture.store.MarkRunSubmitted(ctx, enqueued.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = fixture.store.PutStepResult(ctx, model.StepResult{RunID: run.ID, Burn: "test", Step: "unit", Status: model.StepPassed, DeclaredSize: pipeline.Size("S")}); err != nil {
+	if _, err = fixture.store.PutStepResult(ctx, model.StepResult{RunID: run.ID, Stage: "test", Step: "unit", Status: model.StepPassed, DeclaredSize: pipeline.Size("S")}); err != nil {
 		t.Fatal(err)
 	}
 	service := fixture.api(t)

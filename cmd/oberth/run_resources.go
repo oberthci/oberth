@@ -18,7 +18,7 @@ func runRunResources(ctx context.Context, arguments []string, output io.Writer) 
 	repo := flags.String("repo", "", "registered repository (optional with --run)")
 	run := flags.String("run", "", "exact run ID or unique prefix")
 	ref := flags.String("ref", "", "exact ref; default includes default branch and its promotion runs; any includes all refs")
-	burn := flags.String("burn", "", "optional burn")
+	stage := flags.String("burn", "", "optional burn")
 	step := flags.String("step", "", "optional template name")
 	last := flags.Int("last", measured.DefaultRuns, "last N runs, maximum 100")
 	includeFailed := flags.Bool("include-failed", false, "include failed and incomplete runs")
@@ -54,7 +54,7 @@ func runRunResources(ctx context.Context, arguments []string, output io.Writer) 
 	if e != nil {
 		return e
 	}
-	query := map[string]string{"repo": *repo, "run": *run, "ref": *ref, "burn": *burn, "step": *step, "last": strconv.Itoa(*last), "include_failed": strconv.FormatBool(*includeFailed)}
+	query := map[string]string{"repo": *repo, "run": *run, "ref": *ref, "burn": *stage, "step": *step, "last": strconv.Itoa(*last), "include_failed": strconv.FormatBool(*includeFailed)}
 	var report measured.Report
 	if e = api.Get(ctx, "/api/run-resources", query, &report); e != nil {
 		return e

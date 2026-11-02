@@ -38,7 +38,7 @@ func (s *Store) RecoverKVMPreflight(ctx context.Context, runID string) (model.Ru
 	if err != nil {
 		return model.Run{}, err
 	}
-	if !execution.Cleaned || run.JobName != "" || execution.Intent.RunID != run.ID || execution.Intent.RepoID != run.RepoID || execution.Intent.CandidateSHA != run.TestedSHA {
+	if !execution.Cleaned || run.WorkflowName != "" || execution.Intent.RunID != run.ID || execution.Intent.RepoID != run.RepoID || execution.Intent.CandidateSHA != run.TestedSHA {
 		return model.Run{}, ErrInvalidState
 	}
 	var publications int

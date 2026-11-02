@@ -107,7 +107,7 @@ func TestAdoptedWaitRetainsTimingWithoutDuplicateAttempts(t *testing.T) {
 		{Name: "dag", DAG: &wfv1.DAGTemplate{Tasks: []wfv1.DAGTask{{Name: "test", Template: "leaf"}, {Name: "unit", Template: "leaf"}}}},
 		{Name: "leaf", Container: &corev1.Container{Name: "main"}},
 	}
-	if _, err = db.SetRunJobName(ctx, run.ID, terminal.Name); err != nil {
+	if _, err = db.SetRunWorkflowName(ctx, run.ID, terminal.Name); err != nil {
 		t.Fatal(err)
 	}
 	first.Phase = wfv1.NodeSucceeded
@@ -178,7 +178,7 @@ func TestAdoptedWaitRetainsTimingWithoutDuplicateAttempts(t *testing.T) {
 	var events []runprogress.Event
 	for _, step := range steps {
 		if step.NodeID == first.ID {
-			events = append(events, runprogress.Event{Version: runprogress.Version, Burn: step.Burn, Step: step.Step, Ordinal: step.Ordinal, Status: step.Status, StartedAt: step.StartedAt, FinishedAt: step.FinishedAt})
+			events = append(events, runprogress.Event{Version: runprogress.Version, Stage: step.Stage, Step: step.Step, Ordinal: step.Ordinal, Status: step.Status, StartedAt: step.StartedAt, FinishedAt: step.FinishedAt})
 		}
 	}
 	resumed := &Controller{workflows: &scriptedWorkflowClient{states: []*wfv1.Workflow{running, terminal}}, kube: fake.NewClientset(secondPod.DeepCopy()), logs: logs, config: config, interval: time.Millisecond, timings: recorder}

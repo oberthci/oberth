@@ -13,7 +13,7 @@ import (
 
 type declaredJobs struct{ *concurrentJobs }
 
-func (j declaredJobs) PipelineKubeVirt(_ context.Context, req JobRequest) (KubeVirtResources, error) {
+func (j declaredJobs) PipelineKubeVirt(_ context.Context, req WorkflowRequest) (KubeVirtResources, error) {
 	source := []byte(`apiVersion: argoproj.io/v1alpha1
 kind: Workflow
 metadata:
@@ -80,9 +80,9 @@ func TestDeclaredSubmissionIgnoresSizeGrantAndKillSwitchRestoresIt(t *testing.T)
 
 func TestDeclaredCreateContractRestoresNumericReservationWithKillSwitch(t *testing.T) {
 	f := newConcurrencyFixture(t, pipeline.M, 3)
-	run := model.Run{ID: strings.Repeat("a", 32), JobName: "step-abc12345", SHA: strings.Repeat("b", 40), RepoID: f.repo.ID, QueueSequence: 1}
+	run := model.Run{ID: strings.Repeat("a", 32), WorkflowName: "step-abc12345", SHA: strings.Repeat("b", 40), RepoID: f.repo.ID, QueueSequence: 1}
 	d := &argoworkflow.PodDemand{CPUMilli: 6000, MemoryBytes: 8 << 30, Pods: 2}
-	if err := f.scheduler.recordCreateAdmission(run, run.JobName, pipeline.S, argoworkflow.VMIDemand{}, d); err != nil {
+	if err := f.scheduler.recordCreateAdmission(run, run.WorkflowName, pipeline.S, argoworkflow.VMIDemand{}, d); err != nil {
 		t.Fatal(err)
 	}
 	f.scheduler.admission.resources.Disabled = true

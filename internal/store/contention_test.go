@@ -103,11 +103,11 @@ func TestConcurrentStatusWritersAndReceiveLookups(t *testing.T) {
 		wg.Go(func() {
 			<-start
 			for i := range rounds {
-				if _, err := s.SetRunJobName(ctx, id, fmt.Sprintf("workflow-%d", i)); err != nil {
+				if _, err := s.SetRunWorkflowName(ctx, id, fmt.Sprintf("workflow-%d", i)); err != nil {
 					errs <- err
 					return
 				}
-				if _, err := s.PutStepResult(ctx, model.StepResult{RunID: id, Burn: "test", Step: fmt.Sprintf("step-%d", i), Ordinal: i, Status: model.StepPassed, DeclaredSize: "S"}); err != nil {
+				if _, err := s.PutStepResult(ctx, model.StepResult{RunID: id, Stage: "test", Step: fmt.Sprintf("step-%d", i), Ordinal: i, Status: model.StepPassed, DeclaredSize: "S"}); err != nil {
 					errs <- err
 					return
 				}

@@ -35,7 +35,7 @@ func TestOwnerRecoveryRetiresLegacyTriggerRestartDeletionButKeepsCancel(t *testi
 			if err != nil || run.ID != enqueued.ID {
 				t.Fatal(err)
 			}
-			if _, err = s.SetRunJobName(ctx, run.ID, "workflow"); err != nil {
+			if _, err = s.SetRunWorkflowName(ctx, run.ID, "workflow"); err != nil {
 				t.Fatal(err)
 			}
 			if _, err = s.db.Exec(`INSERT INTO run_cancellations(run_id,job_name,superseded_by,reason,created_at) VALUES(?,?,'','owner_restart',?)`, run.ID, "workflow", unixNano(now)); err != nil {
@@ -60,7 +60,7 @@ func TestOwnerRecoveryRetiresLegacyTriggerRestartDeletionButKeepsCancel(t *testi
 				t.Fatal(err)
 			}
 			pending, err := s.PendingRunCancellations(ctx)
-			if err != nil || len(pending) != 1 || pending[0].RunID != run.ID || pending[0].Reason != "superseded" || pending[0].JobName != "workflow" {
+			if err != nil || len(pending) != 1 || pending[0].RunID != run.ID || pending[0].Reason != "superseded" || pending[0].WorkflowName != "workflow" {
 				t.Fatalf("explicit deletion was retired: %+v %v", pending, err)
 			}
 			if counts, err := s.CountRuns(ctx); err != nil || counts.Total != 1 {

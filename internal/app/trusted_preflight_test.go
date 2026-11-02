@@ -108,8 +108,8 @@ func (c *protectedControllerFixture) Wait(_ context.Context, _ string, runID str
 	completion := argojob.Completion{Succeeded: !c.failed, Infrastructure: c.infrastructureReason != "", Reason: c.infrastructureReason}
 	if c.failed {
 		completion.Name, completion.Phase = "trusted", "Failed"
-		completion.FailedBurn, completion.FailedStep = "test", "unit"
-		completion.Steps = []argojob.StepResult{{Burn: "test", Step: "unit", Status: runprogress.StepFailed, ExitCode: 1}}
+		completion.FailedStage, completion.FailedStep = "test", "unit"
+		completion.Steps = []argojob.StepResult{{Stage: "test", Step: "unit", Status: runprogress.StepFailed, ExitCode: 1}}
 	}
 	return completion, c.waitErr
 }
@@ -230,7 +230,7 @@ func TestTrustedPreflightAdapterLifecycle(t *testing.T) {
 			if scenario == "unapproved" {
 				contract.SuiteSHA256 = strings.Repeat("e", 64)
 			}
-			err = p.Execute(ctx, service.JobRequest{JobName: "run-test", Run: run, Repository: repo, UpstreamName: "upstream", UpstreamOrg: org, SourceDir: fixture.sourceDir}, vmrunner.Requirement{CandidateSHA: sha, BaselineSHA: strings.Repeat("d", 40), Contract: &contract}, io.Discard)
+			err = p.Execute(ctx, service.WorkflowRequest{WorkflowName: "run-test", Run: run, Repository: repo, UpstreamName: "upstream", UpstreamOrg: org, SourceDir: fixture.sourceDir}, vmrunner.Requirement{CandidateSHA: sha, BaselineSHA: strings.Repeat("d", 40), Contract: &contract}, io.Discard)
 			if scenario == "unapproved" {
 				if err == nil || fetches != 0 {
 					t.Fatal("unapproved content fetched")

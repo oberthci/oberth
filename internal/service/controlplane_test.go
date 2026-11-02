@@ -196,7 +196,7 @@ func TestSchedulerSkipsSameRefRunWhilePublicationPending(t *testing.T) {
 	)
 	fixture := newControlFixture(t,
 		JobResult{Status: model.RunPassed, Phase: "passed", Steps: []model.StepResult{stepResult(model.StepPassed)}},
-		JobResult{Status: model.RunFailed, Phase: "test", FailedBurn: "test", FailedStep: "unit", Error: "independent red", Steps: []model.StepResult{stepResult(model.StepFailed)}},
+		JobResult{Status: model.RunFailed, Phase: "test", FailedStage: "test", FailedStep: "unit", Error: "independent red", Steps: []model.StepResult{stepResult(model.StepFailed)}},
 		JobResult{Status: model.RunPassed, Phase: "passed", Steps: []model.StepResult{stepResult(model.StepPassed)}},
 	)
 	fixture.git.publishStarted = make(chan struct{})
@@ -897,10 +897,10 @@ type fakeJobs struct {
 	// interleaved multi-step log.
 	transcripts     []string
 	waitErr         error
-	createdCI       []JobRequest
-	createdReleases []JobRequest
-	createdPlans    []JobRequest
-	createdApplies  []JobRequest
+	createdCI       []WorkflowRequest
+	createdReleases []WorkflowRequest
+	createdPlans    []WorkflowRequest
+	createdApplies  []WorkflowRequest
 	deleted         []string
 	size            pipeline.Size
 	plan            []runprogress.PlannedStep
@@ -921,13 +921,13 @@ type completingJobs struct {
 	once    sync.Once
 }
 
-func (*completingJobs) CreateCI(context.Context, JobRequest) error      { return nil }
-func (*completingJobs) CreateRelease(context.Context, JobRequest) error { return nil }
+func (*completingJobs) CreateWorkflow(context.Context, WorkflowRequest) error { return nil }
+func (*completingJobs) CreateRelease(context.Context, WorkflowRequest) error  { return nil }
 func (jobs *completingJobs) Wait(_ context.Context, _ string, output io.Writer) (JobResult, error) {
 	jobs.once.Do(func() { close(jobs.started) })
 	<-jobs.release
 	for _, step := range jobs.result.Steps {
-		_, _ = fmt.Fprintf(output, "[%s/%s] output for %s\n", step.Burn, step.Step, step.Status)
+		_, _ = fmt.Fprintf(output, "[%s/%s] output for %s\n", step.Stage, step.Step, step.Status)
 	}
 	return jobs.result, nil
 }
@@ -966,7 +966,7 @@ type createCancellationRaceJobs struct {
 	deleteFailures int
 }
 
-func (jobs *createCancellationRaceJobs) CreateCI(context.Context, JobRequest) error {
+func (jobs *createCancellationRaceJobs) CreateWorkflow(context.Context, WorkflowRequest) error {
 	close(jobs.createStarted)
 	<-jobs.allowCreate
 	jobs.mu.Lock()
@@ -975,7 +975,7 @@ func (jobs *createCancellationRaceJobs) CreateCI(context.Context, JobRequest) er
 	return nil
 }
 
-func (*createCancellationRaceJobs) CreateRelease(context.Context, JobRequest) error { return nil }
+func (*createCancellationRaceJobs) CreateRelease(context.Context, WorkflowRequest) error { return nil }
 
 func (*createCancellationRaceJobs) Wait(context.Context, string, io.Writer) (JobResult, error) {
 	return JobResult{}, errors.New("superseded Job unexpectedly reached Wait")
@@ -1041,9 +1041,9 @@ func newBlockingJobs() *blockingJobs {
 	}
 }
 
-func (*blockingJobs) CreateCI(context.Context, JobRequest) error { return nil }
+func (*blockingJobs) CreateWorkflow(context.Context, WorkflowRequest) error { return nil }
 
-func (*blockingJobs) CreateRelease(context.Context, JobRequest) error { return nil }
+func (*blockingJobs) CreateRelease(context.Context, WorkflowRequest) error { return nil }
 
 func (jobs *blockingJobs) Wait(ctx context.Context, _ string, _ io.Writer) (JobResult, error) {
 	close(jobs.started)
@@ -1062,32 +1062,32 @@ func (*blockingJobs) TerminalResult(context.Context, string) (JobResult, error) 
 	return JobResult{}, ErrJobNotTerminal
 }
 
-func (jobs *fakeJobs) CreateCI(_ context.Context, request JobRequest) error {
+func (jobs *fakeJobs) CreateWorkflow(_ context.Context, request WorkflowRequest) error {
 	jobs.mu.Lock()
 	defer jobs.mu.Unlock()
 	jobs.createdCI = append(jobs.createdCI, request)
 	return nil
 }
 
-func (jobs *fakeJobs) PipelineSize(context.Context, JobRequest) (pipeline.Size, error) {
+func (jobs *fakeJobs) PipelineSize(context.Context, WorkflowRequest) (pipeline.Size, error) {
 	return jobs.size.Effective(), nil
 }
 
-func (jobs *fakeJobs) CreateRelease(_ context.Context, request JobRequest) error {
+func (jobs *fakeJobs) CreateRelease(_ context.Context, request WorkflowRequest) error {
 	jobs.mu.Lock()
 	defer jobs.mu.Unlock()
 	jobs.createdReleases = append(jobs.createdReleases, request)
 	return nil
 }
 
-func (jobs *fakeJobs) CreatePlan(_ context.Context, request JobRequest) error {
+func (jobs *fakeJobs) CreatePlan(_ context.Context, request WorkflowRequest) error {
 	jobs.mu.Lock()
 	defer jobs.mu.Unlock()
 	jobs.createdPlans = append(jobs.createdPlans, request)
 	return nil
 }
 
-func (jobs *fakeJobs) CreateApply(_ context.Context, request JobRequest) error {
+func (jobs *fakeJobs) CreateApply(_ context.Context, request WorkflowRequest) error {
 	jobs.mu.Lock()
 	defer jobs.mu.Unlock()
 	jobs.createdApplies = append(jobs.createdApplies, request)
@@ -1108,7 +1108,7 @@ func (jobs *fakeJobs) Wait(_ context.Context, name string, output io.Writer) (Jo
 	result := jobs.results[0]
 	if result.TerminalObservation != nil {
 		observation := *result.TerminalObservation
-		observation.JobName = name
+		observation.WorkflowName = name
 		result.TerminalObservation = &observation
 	}
 	jobs.results = jobs.results[1:]
@@ -1123,7 +1123,7 @@ func (jobs *fakeJobs) Wait(_ context.Context, name string, output io.Writer) (Jo
 		return result, nil
 	}
 	for _, step := range result.Steps {
-		_, _ = fmt.Fprintf(output, "[%s/%s] output for %s\n", step.Burn, step.Step, step.Status)
+		_, _ = fmt.Fprintf(output, "[%s/%s] output for %s\n", step.Stage, step.Step, step.Status)
 	}
 	return result, nil
 }
@@ -1358,7 +1358,7 @@ func (fixture *controlFixture) api(t *testing.T) *API {
 }
 
 func stepResult(status model.StepStatus) model.StepResult {
-	return model.StepResult{Burn: "test", Step: "unit", Status: status, ExitCode: map[bool]int{true: 0, false: 1}[status == model.StepPassed]}
+	return model.StepResult{Stage: "test", Step: "unit", Status: status, ExitCode: map[bool]int{true: 0, false: 1}[status == model.StepPassed]}
 }
 
 func TestSchedulerPassesStaticSizeIntoJobCreation(t *testing.T) {
@@ -1417,8 +1417,8 @@ func waitForFixtureRunStatus(t *testing.T, fixture *controlFixture, runID string
 
 func TestSchedulerUpdatesOneCIIssueAcrossRedRedGreen(t *testing.T) {
 	fixture := newControlFixture(t,
-		JobResult{Status: model.RunFailed, Phase: "test", FailedBurn: "test", FailedStep: "unit", Error: "first red", Steps: []model.StepResult{stepResult(model.StepFailed)}},
-		JobResult{Status: model.RunFailed, Phase: "test", FailedBurn: "test", FailedStep: "unit", Error: "second red", Steps: []model.StepResult{stepResult(model.StepFailed)}},
+		JobResult{Status: model.RunFailed, Phase: "test", FailedStage: "test", FailedStep: "unit", Error: "first red", Steps: []model.StepResult{stepResult(model.StepFailed)}},
+		JobResult{Status: model.RunFailed, Phase: "test", FailedStage: "test", FailedStep: "unit", Error: "second red", Steps: []model.StepResult{stepResult(model.StepFailed)}},
 		JobResult{Status: model.RunPassed, Phase: "passed", Steps: []model.StepResult{stepResult(model.StepPassed)}},
 	)
 	ctx := context.Background()
@@ -1474,13 +1474,13 @@ func TestSchedulerUpdatesOneCIIssueAcrossRedRedGreen(t *testing.T) {
 			t.Fatal(err)
 		}
 		status := value.(StatusResponse)
-		if status.Repo != "oberth" || status.Ref != "main" || status.SHA != sha || status.RunID == "" || status.Burns["test"] == "" {
+		if status.Repo != "oberth" || status.Ref != "main" || status.SHA != sha || status.RunID == "" || status.Stages["test"] == "" {
 			t.Fatalf("wire status after run %d = %#v", index, status)
 		}
-		if index < 2 && (status.Status != "failed" || status.FailedStep != "unit" || status.ExitCode == nil || *status.ExitCode != 1 || status.Issue == nil || *status.Issue != issueID || status.Burns["test"] != "failed") {
+		if index < 2 && (status.Status != "failed" || status.FailedStep != "unit" || status.ExitCode == nil || *status.ExitCode != 1 || status.Issue == nil || *status.Issue != issueID || status.Stages["test"] != "failed") {
 			t.Fatalf("red wire status = %#v", status)
 		}
-		if index == 2 && (status.Status != "delivered" || status.Issue != nil || status.Burns["test"] != "passed") {
+		if index == 2 && (status.Status != "delivered" || status.Issue != nil || status.Stages["test"] != "passed") {
 			t.Fatalf("green wire status = %#v", status)
 		}
 		encoded, err := json.Marshal(status)
@@ -1514,7 +1514,7 @@ func TestStatusReturnsRefWithoutRunWhenBranchExists(t *testing.T) {
 	}
 	status := value.(StatusResponse)
 	if status.Repo != "oberth" || status.Ref != "feature/no-runs" || status.SHA != branchSHA ||
-		status.Status != "no-runs" || status.RunID != "" || len(status.Burns) != 0 {
+		status.Status != "no-runs" || status.RunID != "" || len(status.Stages) != 0 {
 		t.Fatalf("no-runs response = %#v", status)
 	}
 	encoded, err := json.Marshal(status)
@@ -1583,11 +1583,11 @@ func TestStatusRefWithoutRunRespectsRepoDisambiguator(t *testing.T) {
 
 func TestLogsReturnOnlyOneNamedStep(t *testing.T) {
 	fixture := newControlFixture(t, JobResult{
-		Status: model.RunFailed, Phase: "test", FailedBurn: "test", FailedStep: "unit", Error: "unit failed",
+		Status: model.RunFailed, Phase: "test", FailedStage: "test", FailedStep: "unit", Error: "unit failed",
 		Steps: []model.StepResult{
-			{Burn: "lint", Step: "vet", Status: model.StepPassed, ExitCode: 0},
-			{Burn: "test", Step: "setup", Status: model.StepPassed, ExitCode: 0},
-			{Burn: "test", Step: "unit", Status: model.StepFailed, ExitCode: 1},
+			{Stage: "lint", Step: "vet", Status: model.StepPassed, ExitCode: 0},
+			{Stage: "test", Step: "setup", Status: model.StepPassed, ExitCode: 0},
+			{Stage: "test", Step: "unit", Status: model.StepFailed, ExitCode: 1},
 		},
 	})
 	const sha = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -1607,7 +1607,7 @@ func TestLogsReturnOnlyOneNamedStep(t *testing.T) {
 		t.Fatal(err)
 	}
 	response := value.(LogResponse)
-	if response.Burn != "test" || response.Step != "unit" ||
+	if response.Stage != "test" || response.Step != "unit" ||
 		strings.Contains(response.Output, "[test/setup]") ||
 		!strings.Contains(response.Output, "[test/unit]") ||
 		strings.Contains(response.Output, "[lint/vet]") {
@@ -1617,10 +1617,10 @@ func TestLogsReturnOnlyOneNamedStep(t *testing.T) {
 
 func TestDashboardRunDetailAndLogViewsAreReadOnly(t *testing.T) {
 	fixture := newControlFixture(t, JobResult{
-		Status: model.RunFailed, Phase: "test", FailedBurn: "test", FailedStep: "unit", Error: "unit failed",
+		Status: model.RunFailed, Phase: "test", FailedStage: "test", FailedStep: "unit", Error: "unit failed",
 		Steps: []model.StepResult{
-			{Burn: "lint", Step: "vet", Status: model.StepPassed, ExitCode: 0},
-			{Burn: "test", Step: "unit", Status: model.StepFailed, ExitCode: 1},
+			{Stage: "lint", Step: "vet", Status: model.StepPassed, ExitCode: 0},
+			{Stage: "test", Step: "unit", Status: model.StepFailed, ExitCode: 1},
 		},
 	})
 	const sha = "abababababababababababababababababababab"
@@ -1652,7 +1652,7 @@ func TestDashboardRunDetailAndLogViewsAreReadOnly(t *testing.T) {
 	if detail.Run.ID != enqueued.ID || detail.Run.Status != model.RunFailed || detail.Repository.Name != fixture.repo.Name {
 		t.Fatalf("run detail = %#v", detail)
 	}
-	if len(detail.Steps) != 2 || detail.Steps[0].Burn != "lint" || detail.Steps[1].Step != "unit" || detail.Steps[1].Status != model.StepFailed {
+	if len(detail.Steps) != 2 || detail.Steps[0].Stage != "lint" || detail.Steps[1].Step != "unit" || detail.Steps[1].Status != model.StepFailed {
 		t.Fatalf("run detail steps = %#v", detail.Steps)
 	}
 	// The read-only view preserves the explicitly acquired issue lock; the
@@ -1694,7 +1694,7 @@ func TestDashboardRunDetailAndLogViewsAreReadOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	mcpLog := mcpLogValue.(LogResponse)
-	if mcpLog.RunID != enqueued.ID || mcpLog.Burn != "test" || mcpLog.Step != "unit" || !strings.Contains(mcpLog.Output, "[test/unit]") {
+	if mcpLog.RunID != enqueued.ID || mcpLog.Stage != "test" || mcpLog.Step != "unit" || !strings.Contains(mcpLog.Output, "[test/unit]") {
 		t.Fatalf("run_logs response = %#v", mcpLog)
 	}
 	if _, err := control.CallTool(ctx, api.Actor{Identity: "agent@host"}, "run_logs",
@@ -1736,16 +1736,16 @@ func TestActiveRunDetailAndStatusExposePersistedStepProgress(t *testing.T) {
 		t.Fatal(err)
 	}
 	detail := value.(RunDetailResponse)
-	if len(detail.Steps) != 2 || detail.Steps[0].Burn != "test" || string(detail.Steps[0].Status) != "running" ||
-		detail.Steps[1].Burn != "release" || string(detail.Steps[1].Status) != "queued" {
+	if len(detail.Steps) != 2 || detail.Steps[0].Stage != "test" || string(detail.Steps[0].Status) != "running" ||
+		detail.Steps[1].Stage != "release" || string(detail.Steps[1].Status) != "queued" {
 		t.Fatalf("active run detail steps = %#v", detail.Steps)
 	}
 	status, err := control.status(ctx, fixture.repo.Name, sha, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if status.Burns["test"] != "running" || status.Burns["release"] != "queued" {
-		t.Fatalf("active run burn states = %#v", status.Burns)
+	if status.Stages["test"] != "running" || status.Stages["release"] != "queued" {
+		t.Fatalf("active run burn states = %#v", status.Stages)
 	}
 }
 
@@ -1779,7 +1779,7 @@ func TestActiveMCPAndDashboardLogsReadCurrentStepRange(t *testing.T) {
 	}
 	started := time.Now().UTC()
 	if err := fixture.logs.AppendStepProgress(enqueued.ID, runprogress.Event{
-		Version: runprogress.Version, Burn: "release", Step: "advance-stable-aliases", Ordinal: 0,
+		Version: runprogress.Version, Stage: "release", Step: "advance-stable-aliases", Ordinal: 0,
 		Status: runprogress.StepRunning, DeclaredSize: pipeline.M, StartedAt: &started,
 	}); err != nil {
 		t.Fatal(err)
@@ -1921,11 +1921,11 @@ func TestSchedulerCompletesSupersedeAndRestartCancellationObligations(t *testing
 	if _, err := fixture.store.ClaimNextRun(ctx); err != nil {
 		t.Fatal(err)
 	}
-	jobName, err := deterministicJobName(fixture.repo.Name, first.ID)
+	workflowName, err := deterministicWorkflowName(fixture.repo.Name, first.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := fixture.store.SetRunJobName(ctx, first.ID, jobName); err != nil {
+	if _, err := fixture.store.SetRunWorkflowName(ctx, first.ID, workflowName); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := fixture.scheduler.EnqueueCI(ctx, CIRequest{
@@ -1934,7 +1934,7 @@ func TestSchedulerCompletesSupersedeAndRestartCancellationObligations(t *testing
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if len(fixture.jobs.deleted) != 1 || fixture.jobs.deleted[0] != jobName {
+	if len(fixture.jobs.deleted) != 1 || fixture.jobs.deleted[0] != workflowName {
 		t.Fatalf("supersede deletions = %#v", fixture.jobs.deleted)
 	}
 	pending, err := fixture.store.PendingRunCancellations(ctx)
@@ -1959,8 +1959,8 @@ func TestSchedulerCompletesSupersedeAndRestartCancellationObligations(t *testing
 	if _, err := fixture.store.ClaimNextRun(ctx); err != nil {
 		t.Fatal(err)
 	}
-	restartJob, _ := deterministicJobName(fixture.repo.Name, restart.ID)
-	if _, err := fixture.store.SetRunJobName(ctx, restart.ID, restartJob); err != nil {
+	restartJob, _ := deterministicWorkflowName(fixture.repo.Name, restart.ID)
+	if _, err := fixture.store.SetRunWorkflowName(ctx, restart.ID, restartJob); err != nil {
 		t.Fatal(err)
 	}
 	// This models a crash after the durable Job intent and before idempotent
@@ -1993,14 +1993,14 @@ func TestSchedulerCompletesSupersedeAndRestartCancellationObligations(t *testing
 	}
 }
 
-func TestDeterministicJobNameExposesRepositoryAndDistinctRunIdentity(t *testing.T) {
+func TestDeterministicWorkflowNameExposesRepositoryAndDistinctRunIdentity(t *testing.T) {
 	firstRun := "2d2f0986" + strings.Repeat("a", 24)
 	secondRun := "2d2f0986" + strings.Repeat("b", 24)
-	first, err := deterministicJobName("Acme_CLI", firstRun)
+	first, err := deterministicWorkflowName("Acme_CLI", firstRun)
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := deterministicJobName("Acme_CLI", secondRun)
+	second, err := deterministicWorkflowName("Acme_CLI", secondRun)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2010,12 +2010,12 @@ func TestDeterministicJobNameExposesRepositoryAndDistinctRunIdentity(t *testing.
 	if first == second || len(first) > 57 || len(second) > 57 {
 		t.Fatalf("Job names = %q and %q, want distinct names no longer than 57 bytes", first, second)
 	}
-	long, err := deterministicJobName(strings.Repeat("repository_", 8), firstRun)
+	long, err := deterministicWorkflowName(strings.Repeat("repository_", 8), firstRun)
 	if err != nil || len(long) > 57 {
 		t.Fatalf("long repository Job name = %q, %v", long, err)
 	}
 	for _, repository := range []string{"", "***"} {
-		if _, err := deterministicJobName(repository, firstRun); err == nil {
+		if _, err := deterministicWorkflowName(repository, firstRun); err == nil {
 			t.Fatalf("repository %q formed a Job name", repository)
 		}
 	}
@@ -2164,10 +2164,10 @@ func TestPostCreateReadAndDeleteFailureRecoversExactJobOnRestart(t *testing.T) {
 		t.Fatalf("process error = %v, want exact Job deletion failure", err)
 	}
 	running, err := fixture.store.Run(ctx, enqueued.ID)
-	if err != nil || running.Status != model.RunRunning || running.JobName == "" {
+	if err != nil || running.Status != model.RunRunning || running.WorkflowName == "" {
 		t.Fatalf("run retained for owner recovery = %#v, %v", running, err)
 	}
-	jobName := running.JobName
+	workflowName := running.WorkflowName
 	if err := fixture.store.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -2194,7 +2194,7 @@ func TestPostCreateReadAndDeleteFailureRecoversExactJobOnRestart(t *testing.T) {
 	attempted := append([]string(nil), jobs.attempted...)
 	deleted := append([]string(nil), jobs.deleted...)
 	jobs.mu.Unlock()
-	if len(attempted) != 2 || attempted[0] != jobName || attempted[1] != jobName || len(deleted) != 1 || deleted[0] != jobName {
+	if len(attempted) != 2 || attempted[0] != workflowName || attempted[1] != workflowName || len(deleted) != 1 || deleted[0] != workflowName {
 		t.Fatalf("exact Job recovery attempts = %#v, successful = %#v", attempted, deleted)
 	}
 }
@@ -2226,7 +2226,7 @@ func TestSchedulerShutdownCancelsAndJoinsWorkers(t *testing.T) {
 	case <-time.After(testStartTimeout(time.Second)):
 		t.Fatal("scheduler did not start the Job")
 	}
-	jobName, err := deterministicJobName(fixture.repo.Name, enqueued.ID)
+	workflowName, err := deterministicWorkflowName(fixture.repo.Name, enqueued.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2234,8 +2234,8 @@ func TestSchedulerShutdownCancelsAndJoinsWorkers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if running.JobName != jobName {
-		t.Fatalf("persisted Job intent = %q, want %q", running.JobName, jobName)
+	if running.WorkflowName != workflowName {
+		t.Fatalf("persisted Job intent = %q, want %q", running.WorkflowName, workflowName)
 	}
 
 	cancel()
@@ -2284,9 +2284,9 @@ func TestSchedulerShutdownCancelsAndJoinsWorkers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(pending) != 1 || pending[0].RunID != enqueued.ID || pending[0].JobName != jobName ||
+	if len(pending) != 1 || pending[0].RunID != enqueued.ID || pending[0].WorkflowName != workflowName ||
 		pending[0].SupersededBy != requeued.ID {
-		t.Fatalf("pending obligations = %#v, want the canceled Job %q owned by the requeue", pending, jobName)
+		t.Fatalf("pending obligations = %#v, want the canceled Job %q owned by the requeue", pending, workflowName)
 	}
 }
 
@@ -3145,7 +3145,7 @@ func TestAdmittedPromotionCompensationSurvivesRequestCancellation(t *testing.T) 
 
 func TestStatusUsesDirectIssueLookupWithoutRenewal(t *testing.T) {
 	fixture := newControlFixture(t, JobResult{
-		Status: model.RunFailed, Phase: "test", FailedBurn: "test", FailedStep: "unit",
+		Status: model.RunFailed, Phase: "test", FailedStage: "test", FailedStep: "unit",
 		Error: "red", Steps: []model.StepResult{stepResult(model.StepFailed)},
 	})
 	ctx := context.Background()
@@ -3236,7 +3236,7 @@ func TestStatusUsesDirectIssueLookupWithoutRenewal(t *testing.T) {
 // should be renewable only through the explicit issue_lock tool.
 func TestStatusPollingDoesNotExtendExpiringLock(t *testing.T) {
 	fixture := newControlFixture(t, JobResult{
-		Status: model.RunFailed, Phase: "test", FailedBurn: "test", FailedStep: "unit",
+		Status: model.RunFailed, Phase: "test", FailedStage: "test", FailedStep: "unit",
 		Error: "red", Steps: []model.StepResult{stepResult(model.StepFailed)},
 	})
 	ctx := context.Background()
@@ -4051,7 +4051,7 @@ func TestPublishRetryRefusedForRedRun(t *testing.T) {
 	const sha = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	fixture := newControlFixture(t, JobResult{
 		Status: model.RunFailed, Phase: "test", Error: "unit test failed",
-		Steps: []model.StepResult{{Burn: "test", Step: "unit", Status: model.StepFailed, ExitCode: 1}},
+		Steps: []model.StepResult{{Stage: "test", Step: "unit", Status: model.StepFailed, ExitCode: 1}},
 	})
 	enqueued, err := fixture.scheduler.EnqueueCI(context.Background(), CIRequest{
 		EventID: "receive-red", Repository: fixture.repo,

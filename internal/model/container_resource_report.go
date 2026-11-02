@@ -11,7 +11,7 @@ import (
 // legacy workflow/main report. Quantiles describe per-incarnation peaks, never
 // time-series p95 or simultaneous whole-run resource demand.
 type ResourceContainerReport struct {
-	Burn          string                          `json:"burn"`
+	Stage         string                          `json:"burn"`
 	Step          string                          `json:"step"`
 	ContainerName string                          `json:"container_name"`
 	ContainerKind string                          `json:"container_kind"`
@@ -24,7 +24,7 @@ type ResourceContainerReport struct {
 }
 
 type ResourcePodReport struct {
-	Burn                      string            `json:"burn"`
+	Stage                     string            `json:"burn"`
 	Step                      string            `json:"step"`
 	PodKind                   string            `json:"pod_kind"`
 	Pods                      int               `json:"pods"`
@@ -65,7 +65,7 @@ func resourceMetric(rows []StepResourceUsage, scope string, use, request func(St
 func BuildContainerResourceReport(values []StepResourceUsage) []ResourceContainerReport {
 	groups := map[string][]StepResourceUsage{}
 	for _, v := range values {
-		key := strings.Join([]string{v.Burn, v.Step, v.EffectivePodKind(), v.EffectiveContainerKind(), v.ContainerName}, "\x00")
+		key := strings.Join([]string{v.Stage, v.Step, v.EffectivePodKind(), v.EffectiveContainerKind(), v.ContainerName}, "\x00")
 		groups[key] = append(groups[key], v)
 	}
 	keys := make([]string, 0, len(groups))
@@ -77,7 +77,7 @@ func BuildContainerResourceReport(values []StepResourceUsage) []ResourceContaine
 	for _, key := range keys {
 		rows := groups[key]
 		v := rows[0]
-		r := ResourceContainerReport{Burn: v.Burn, Step: v.Step, ContainerName: v.ContainerName, ContainerKind: v.EffectiveContainerKind(), PodKind: v.EffectivePodKind(), Observations: len(rows), Metrics: map[string]ResourceMetricReport{}}
+		r := ResourceContainerReport{Stage: v.Stage, Step: v.Step, ContainerName: v.ContainerName, ContainerKind: v.EffectiveContainerKind(), PodKind: v.EffectivePodKind(), Observations: len(rows), Metrics: map[string]ResourceMetricReport{}}
 		for _, row := range rows {
 			if row.Samples == 0 {
 				r.Unsampled++
@@ -154,7 +154,7 @@ func BuildPodResourceReport(values []StepResourceUsage) ([]ResourcePodReport, Re
 	events := map[string][]event{}
 	overlap := ResourceOverlapReport{Semantics: "per-run maximum overlapping kubelet pod lifetimes in selected rows; half-open intervals; incomplete lifetimes end at last observed running container or known container finish; missing/truncated/GC'd pods remain unknown; no sum of independent resource peaks", Pods: len(pods)}
 	for podKey, v := range pods {
-		key := v.Burn + "\x00" + v.Step + "\x00" + v.EffectivePodKind()
+		key := v.Stage + "\x00" + v.Step + "\x00" + v.EffectivePodKind()
 		groups[key] = append(groups[key], v)
 		if v.PodStartedAt.IsZero() {
 			continue
@@ -210,7 +210,7 @@ func BuildPodResourceReport(values []StepResourceUsage) ([]ResourcePodReport, Re
 				pvc = append(pvc, *row.PodPVCUsedPeakBytes)
 			}
 		}
-		out = append(out, ResourcePodReport{Burn: v.Burn, Step: v.Step, PodKind: v.EffectivePodKind(), Pods: len(rows), CPUPeakNanoCores: Quantiles(cpu), MemoryPeakBytes: Quantiles(memory), EphemeralStoragePeakBytes: Quantiles(ephemeral), PVCUsedPeakBytes: Quantiles(pvc)})
+		out = append(out, ResourcePodReport{Stage: v.Stage, Step: v.Step, PodKind: v.EffectivePodKind(), Pods: len(rows), CPUPeakNanoCores: Quantiles(cpu), MemoryPeakBytes: Quantiles(memory), EphemeralStoragePeakBytes: Quantiles(ephemeral), PVCUsedPeakBytes: Quantiles(pvc)})
 	}
 	return out, overlap
 }

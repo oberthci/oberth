@@ -19,7 +19,7 @@ type projectedVMIEngine struct {
 	receipts  sync.Map
 }
 
-func (e *projectedVMIEngine) PipelineKubeVirt(_ context.Context, r JobRequest) (KubeVirtResources, error) {
+func (e *projectedVMIEngine) PipelineKubeVirt(_ context.Context, r WorkflowRequest) (KubeVirtResources, error) {
 	resolved, err := argoworkflow.ResolveRunSource(e.source, e.fragments, argoworkflow.RunSourceBinding{RunID: r.Run.ID, RepositoryID: r.Repository.ID, SHA: r.Run.SHA, File: argoworkflow.BuildFile, Trigger: argoworkflow.RunTriggerBranch})
 	if err != nil {
 		return KubeVirtResources{}, err
@@ -31,7 +31,7 @@ func (e *projectedVMIEngine) PipelineKubeVirt(_ context.Context, r JobRequest) (
 	e.receipts.Store(r.Run.ID, receipt)
 	return KubeVirtResources{Demand: receipt.Summary().Demand, Limit: argoworkflow.VMIDemand{VMs: 4, Cores: 8, MemoryBytes: 24 << 30}, Receipt: receipt}, nil
 }
-func (e *projectedVMIEngine) CreateCI(_ context.Context, r JobRequest) error {
+func (e *projectedVMIEngine) CreateWorkflow(_ context.Context, r WorkflowRequest) error {
 	receipt, ok := e.receipts.Load(r.Run.ID)
 	if !ok || receipt != r.VMIDemandReceipt {
 		return fmt.Errorf("lost run-aware demand receipt for %s", r.Run.ID)

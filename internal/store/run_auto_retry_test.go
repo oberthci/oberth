@@ -77,7 +77,7 @@ func TestAutoRetryRefusesExecutedStepsReleasesAndStaleWork(t *testing.T) {
 			result := autoRetryResult()
 			switch kind {
 			case "step-started", "step-passed":
-				step := model.StepResult{RunID: r.ID, Burn: "ci", Step: "one", Status: model.StepPassed, DeclaredSize: "M"}
+				step := model.StepResult{RunID: r.ID, Stage: "ci", Step: "one", Status: model.StepPassed, DeclaredSize: "M"}
 				if kind == "step-started" {
 					step.Status = model.StepFailed
 					step.StartedAt = &now
@@ -90,7 +90,7 @@ func TestAutoRetryRefusesExecutedStepsReleasesAndStaleWork(t *testing.T) {
 					t.Fatal(err)
 				}
 			case "failed-step":
-				result.FailedBurn = "ci"
+				result.FailedStage = "ci"
 				result.FailedStep = "unit"
 			case "newer-terminal":
 				newer := autoRetrySource(t, s, repo.ID, spec.Ref)

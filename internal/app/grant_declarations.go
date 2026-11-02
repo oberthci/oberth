@@ -23,7 +23,7 @@ func (snapshot *declarationSnapshot) RecordGrantDeclarations(_ context.Context, 
 	return nil
 }
 
-func (jobs *ArgoJobs) recordCurrentDeclarations(ctx context.Context, request service.JobRequest) {
+func (jobs *ArgoJobs) recordCurrentDeclarations(ctx context.Context, request service.WorkflowRequest) {
 	jobs.mu.Lock()
 	declarations := jobs.declarations
 	jobs.mu.Unlock()
@@ -97,6 +97,6 @@ func (jobs *ArgoJobs) recordCurrentDeclarations(ctx context.Context, request ser
 }
 
 // Match Upstream.QualifiedRepo even when the upstream has no organization.
-func declarationRepo(request service.JobRequest) string {
+func declarationRepo(request service.WorkflowRequest) string {
 	return model.CanonicalRepoKey(request.UpstreamName, request.UpstreamOrg, request.Repository.Name)
 }

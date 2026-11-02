@@ -68,7 +68,7 @@ func TestRunResourcesReadsOwnPeakOnlyForMatchingFinalAttempt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = s.SetRunJobName(t.Context(), run.ID, "step-abc12345"); err != nil {
+	if _, err = s.SetRunWorkflowName(t.Context(), run.ID, "step-abc12345"); err != nil {
 		t.Fatal(err)
 	}
 	v := resourceRow(run.ID, at)
@@ -76,14 +76,14 @@ func TestRunResourcesReadsOwnPeakOnlyForMatchingFinalAttempt(t *testing.T) {
 	v.PodName = "step-abc12345-1"
 	v.NodeID = v.PodName
 	v.Namespace = "oberth"
-	v.Burn = "step-12345678"
+	v.Stage = "step-12345678"
 	v.Step = "step-abc12345"
 	if err = s.RecordStepResourceUsage(t.Context(), []model.StepResourceUsage{v}); err != nil {
 		t.Fatal(err)
 	}
 	c := &model.StepTermination{RunID: run.ID, Namespace: v.Namespace, WorkflowName: v.WorkflowName, WorkflowUID: v.WorkflowUID, NodeID: v.NodeID, PodName: v.PodName, PodUID: v.PodUID, ContainerName: "main", ContainerID: v.ContainerID, Reason: "Error", PodReason: "DeadlineExceeded", ExitCode: 143, Signal: 15, StartedAt: at.Add(-time.Minute), FinishedAt: at}
 	peak := int64(1536 << 20)
-	if _, err = s.PutStepResult(t.Context(), model.StepResult{RunID: run.ID, Burn: v.Burn, Step: v.Step, Status: model.StepTimedOut, DeclaredSize: "M", MemoryPeakBytes: &peak, Termination: &model.StepDiagnostic{Available: true, ObservedAt: &at, Container: c}}); err != nil {
+	if _, err = s.PutStepResult(t.Context(), model.StepResult{RunID: run.ID, Stage: v.Stage, Step: v.Step, Status: model.StepTimedOut, DeclaredSize: "M", MemoryPeakBytes: &peak, Termination: &model.StepDiagnostic{Available: true, ObservedAt: &at, Container: c}}); err != nil {
 		t.Fatal(err)
 	}
 	v.ContainerID = "containerd://" + strings.Repeat("c", 64)
@@ -123,7 +123,7 @@ func TestRunResourcesWorkflowDeadlineCensorsWithoutStepDiagnostic(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = s.SetRunJobName(t.Context(), run.ID, "step-abc12345"); err != nil {
+	if _, err = s.SetRunWorkflowName(t.Context(), run.ID, "step-abc12345"); err != nil {
 		t.Fatal(err)
 	}
 	v := resourceRow(run.ID, at)

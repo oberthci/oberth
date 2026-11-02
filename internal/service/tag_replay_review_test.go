@@ -14,7 +14,7 @@ import (
 )
 
 func observedTestFailure() JobResult {
-	return observedTagResult(JobResult{Status: model.RunFailed, Phase: "test", FailedBurn: "test", FailedStep: "unit", Steps: []model.StepResult{stepResult(model.StepFailed)}})
+	return observedTagResult(JobResult{Status: model.RunFailed, Phase: "test", FailedStage: "test", FailedStep: "unit", Steps: []model.StepResult{stepResult(model.StepFailed)}})
 }
 func requireTagForce(t *testing.T, h *rerunHarness, id string) {
 	t.Helper()
@@ -29,7 +29,7 @@ func requireTagForce(t *testing.T, h *rerunHarness, id string) {
 func TestTagReplayReviewWIFStartedRequiresForce(t *testing.T) {
 	result := observedTagResult(infraFailure)
 	result.TerminalObservation.Nodes = 1
-	result.TerminalObservation.Steps = []model.RunObservedStep{{Burn: "publish", Step: "push", Status: model.StepFailed, Started: true}}
+	result.TerminalObservation.Steps = []model.RunObservedStep{{Stage: "publish", Step: "push", Status: model.StepFailed, Started: true}}
 	h := newRerunHarness(t, result)
 	plan := tagReplayPlan()
 	plan[1].Secrets = false
@@ -79,7 +79,7 @@ func TestTagReplayReviewPendingDeletionRefusesEvenForce(t *testing.T) {
 	if _, err := h.fixture.store.ClaimNextRun(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := h.fixture.store.SetRunJobName(t.Context(), source.ID, "live-source"); err != nil {
+	if _, err := h.fixture.store.SetRunWorkflowName(t.Context(), source.ID, "live-source"); err != nil {
 		t.Fatal(err)
 	}
 	h.service.runCancels = h.fixture.store
@@ -119,7 +119,7 @@ func TestTagReplayReviewWholeChainAndNewest(t *testing.T) {
 			if unsafe {
 				first = observedTagResult(infraFailure)
 				first.TerminalObservation.Nodes = 1
-				first.TerminalObservation.Steps = []model.RunObservedStep{{Burn: "publish", Step: "push", Status: model.StepFailed, Started: true}}
+				first.TerminalObservation.Steps = []model.RunObservedStep{{Stage: "publish", Step: "push", Status: model.StepFailed, Started: true}}
 			}
 			second := observedTestFailure()
 			if unsafe {
@@ -151,7 +151,7 @@ func TestTagReplayReviewWholeChainAndNewest(t *testing.T) {
 func TestTagReplayReviewSafeAncestorCannotHideNewPublisher(t *testing.T) {
 	publisher := observedTagResult(infraFailure)
 	publisher.TerminalObservation.Nodes = 1
-	publisher.TerminalObservation.Steps = []model.RunObservedStep{{Burn: "publish", Step: "push", Status: model.StepFailed, Started: true}}
+	publisher.TerminalObservation.Steps = []model.RunObservedStep{{Stage: "publish", Step: "push", Status: model.StepFailed, Started: true}}
 	h := newRerunHarness(t, observedTestFailure(), publisher)
 	h.fixture.jobs.plan = tagReplayPlan()
 	a := admitRerunTag(t, h)

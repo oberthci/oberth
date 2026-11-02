@@ -37,10 +37,10 @@ func (resources KubeVirtResources) Validate() error {
 // PipelineKubeVirtSizer reads the same immutable document used for submission.
 // Engines without VMI resources need not implement it.
 type PipelineKubeVirtSizer interface {
-	PipelineKubeVirt(context.Context, JobRequest) (KubeVirtResources, error)
+	PipelineKubeVirt(context.Context, WorkflowRequest) (KubeVirtResources, error)
 }
 
-func (scheduler *Scheduler) pipelineKubeVirt(ctx context.Context, request JobRequest) (KubeVirtResources, error) {
+func (scheduler *Scheduler) pipelineKubeVirt(ctx context.Context, request WorkflowRequest) (KubeVirtResources, error) {
 	engine := any(scheduler.jobs)
 	if request.Run.Release {
 		if _, ok := scheduler.releaseJobs.(PipelineKubeVirtSizer); ok {

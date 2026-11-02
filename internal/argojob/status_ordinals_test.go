@@ -91,7 +91,7 @@ func TestRetryOrdinalsSurviveParallelPollsInRealJournal(t *testing.T) {
 					t.Fatalf("poll %d: progress %v: %v", poll, events, err)
 				}
 				for _, event := range events {
-					if event.Ordinal != want[event.Burn+"/"+event.Step] {
+					if event.Ordinal != want[event.Stage+"/"+event.Step] {
 						t.Fatalf("poll %d: changed ordinal %+v", poll, event)
 					}
 				}
@@ -104,8 +104,8 @@ func TestRetryOrdinalsSurviveParallelPollsInRealJournal(t *testing.T) {
 				// Assert both the public final rows and superseded attempt rows.
 				for _, rows := range [][]StepResult{stepAttempts(wf), final} {
 					for _, step := range rows {
-						if step.Ordinal != want[step.Burn+"/"+step.Step] {
-							t.Fatalf("poll %d: %s/%s ordinal %d: %+v", poll, step.Burn, step.Step, step.Ordinal, rows)
+						if step.Ordinal != want[step.Stage+"/"+step.Step] {
+							t.Fatalf("poll %d: %s/%s ordinal %d: %+v", poll, step.Stage, step.Step, step.Ordinal, rows)
 						}
 					}
 				}
@@ -131,7 +131,7 @@ func TestWaitResumedLegacyRetryKeyKeepsSiblingOrdinal(t *testing.T) {
 				}
 				var journalPlan []runprogress.PlannedStep
 				for _, step := range plan {
-					journalPlan = append(journalPlan, runprogress.PlannedStep{Burn: step.Burn, Step: step.Step, Ordinal: step.Ordinal})
+					journalPlan = append(journalPlan, runprogress.PlannedStep{Stage: step.Stage, Step: step.Step, Ordinal: step.Ordinal})
 				}
 				if err := logs.WriteStepPlan("run-retry", journalPlan); err != nil {
 					t.Fatal(err)
@@ -139,8 +139,8 @@ func TestWaitResumedLegacyRetryKeyKeepsSiblingOrdinal(t *testing.T) {
 			}
 			at := time.Unix(1000, 0).UTC()
 			for _, event := range []runprogress.Event{
-				{Version: 1, Burn: "address(0)", Step: "check", Ordinal: 0, Status: runprogress.StepFailed, StartedAt: &at, FinishedAt: &at},
-				{Version: 1, Burn: "create", Step: "create", Ordinal: 1, Status: runprogress.StepPassed, StartedAt: &at, FinishedAt: &at},
+				{Version: 1, Stage: "address(0)", Step: "check", Ordinal: 0, Status: runprogress.StepFailed, StartedAt: &at, FinishedAt: &at},
+				{Version: 1, Stage: "create", Step: "create", Ordinal: 1, Status: runprogress.StepPassed, StartedAt: &at, FinishedAt: &at},
 			} {
 				if err := logs.AppendStepProgress("run-retry", event); err != nil {
 					t.Fatal(err)
@@ -166,7 +166,7 @@ func TestWaitResumedLegacyRetryKeyKeepsSiblingOrdinal(t *testing.T) {
 				t.Fatalf("resumed progress: %+v: %v", progress, err)
 			}
 			for _, event := range progress {
-				if event.Burn == "address(0)" || (event.Burn == "create" && event.Ordinal != 1) {
+				if event.Stage == "address(0)" || (event.Stage == "create" && event.Ordinal != 1) {
 					t.Fatalf("orphan or moved surviving sibling: %+v", event)
 				}
 			}

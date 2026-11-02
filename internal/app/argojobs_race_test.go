@@ -151,9 +151,9 @@ spec:
 	return &raceFixture{jobs: jobs, controller: controller, sourceDir: dir}
 }
 
-func (f *raceFixture) request(name, runID string) service.JobRequest {
-	return service.JobRequest{
-		JobName: name,
+func (f *raceFixture) request(name, runID string) service.WorkflowRequest {
+	return service.WorkflowRequest{
+		WorkflowName: name,
 		Run: model.Run{
 			ID: runID, Ref: "refs/heads/main",
 			SHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Actor: "agent@host",
@@ -183,7 +183,7 @@ func TestDeleteDuringInflightCreateAbortsAndCleansUp(t *testing.T) {
 	// Start create in a goroutine.
 	createErr := make(chan error, 1)
 	go func() {
-		createErr <- fixture.jobs.CreateCI(context.Background(), fixture.request(name, runID))
+		createErr <- fixture.jobs.CreateWorkflow(context.Background(), fixture.request(name, runID))
 	}()
 
 	// Wait for Create to begin.
@@ -244,14 +244,14 @@ func TestConcurrentCreatesOfDifferentNamesDontSerialize(t *testing.T) {
 	// Start the slow create.
 	slowErr := make(chan error, 1)
 	go func() {
-		slowErr <- fixture.jobs.CreateCI(context.Background(), fixture.request(slowName, slowRunID))
+		slowErr <- fixture.jobs.CreateWorkflow(context.Background(), fixture.request(slowName, slowRunID))
 	}()
 
 	// Wait for the slow create's controller.Create to begin.
 	<-entered
 
 	// The fast create must complete while slow is still blocked.
-	if err := fixture.jobs.CreateCI(context.Background(), fixture.request(fastName, fastRunID)); err != nil {
+	if err := fixture.jobs.CreateWorkflow(context.Background(), fixture.request(fastName, fastRunID)); err != nil {
 		t.Fatalf("fast create blocked or failed: %v", err)
 	}
 
@@ -284,12 +284,12 @@ func TestSameNameSameRunIDConcurrentCreateIsIdempotent(t *testing.T) {
 	const runID = "run-idem-03"
 
 	// First create succeeds.
-	if err := fixture.jobs.CreateCI(context.Background(), fixture.request(name, runID)); err != nil {
+	if err := fixture.jobs.CreateWorkflow(context.Background(), fixture.request(name, runID)); err != nil {
 		t.Fatalf("first create: %v", err)
 	}
 
 	// Second create with same (name, runID) returns nil (idempotent).
-	if err := fixture.jobs.CreateCI(context.Background(), fixture.request(name, runID)); err != nil {
+	if err := fixture.jobs.CreateWorkflow(context.Background(), fixture.request(name, runID)); err != nil {
 		t.Fatalf("second create (idempotent): %v", err)
 	}
 
@@ -391,8 +391,8 @@ spec:
 
 	createErr := make(chan error, 1)
 	go func() {
-		createErr <- jobs.CreateCI(context.Background(), service.JobRequest{
-			JobName: name,
+		createErr <- jobs.CreateWorkflow(context.Background(), service.WorkflowRequest{
+			WorkflowName: name,
 			Run: model.Run{
 				ID: runID, Ref: "refs/heads/main",
 				SHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Actor: "agent@host",

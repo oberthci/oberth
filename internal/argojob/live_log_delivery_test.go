@@ -137,13 +137,13 @@ func TestLiveLogDeliveryMatchesPodOutput(t *testing.T) {
 					t.Errorf("healthy local delivery exceeded 5s: %s", lag)
 				}
 			}
-			key := step.Burn + "/" + step.Step
+			key := step.Stage + "/" + step.Step
 			expected[key] = append(expected[key], "["+key+"] "+text)
 		}
 	}
 	for key, want := range expected {
-		burn, step, _ := strings.Cut(key, "/")
-		body, err := store.Read(runID, burn, step)
+		stage, step, _ := strings.Cut(key, "/")
+		body, err := store.Read(runID, stage, step)
 		if err != nil {
 			t.Fatal(err)
 		}

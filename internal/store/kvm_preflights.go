@@ -76,7 +76,7 @@ func eligibleKVMParent(ctx context.Context, tx *sql.Tx, intent vmrunner.KVMInten
 	if err := tx.QueryRowContext(ctx, `SELECT r.name,u.name,u.kind,u.base_url FROM repositories r JOIN upstreams u ON u.id=r.upstream_id WHERE r.id=?`, run.RepoID).Scan(&repo, &upstream.Name, &upstream.Kind, &upstream.BaseURL); err != nil {
 		return "", err
 	}
-	if run.Status != model.RunRunning || run.JobName != "" || run.RepoID != intent.RepoID || run.TestedSHA != intent.CandidateSHA || intent.Repository != upstream.QualifiedRepo(repo) {
+	if run.Status != model.RunRunning || run.WorkflowName != "" || run.RepoID != intent.RepoID || run.TestedSHA != intent.CandidateSHA || intent.Repository != upstream.QualifiedRepo(repo) {
 		return "", fmt.Errorf("%w: KVM preflight requires its exact active parent before Job delivery", ErrInvalidState)
 	}
 	return run.Actor, nil

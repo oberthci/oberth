@@ -22,12 +22,12 @@ const createSettlementAttemptBudget = 15 * time.Second
 const pendingCreateMessage = "Workflow create outcome uncertain; cleanup pending"
 
 type createAdmission struct {
-	Fallback                   model.ResourceAdmissionFallback `json:",omitempty"`
-	Pods                       *argoworkflow.PodDemand         `json:",omitempty"`
-	RunID, JobName, SHA, Group string
-	RepoID                     int64
-	Size                       pipeline.Size
-	Demand                     argoworkflow.VMIDemand
+	Fallback                        model.ResourceAdmissionFallback `json:",omitempty"`
+	Pods                            *argoworkflow.PodDemand         `json:",omitempty"`
+	RunID, WorkflowName, SHA, Group string
+	RepoID                          int64
+	Size                            pipeline.Size
+	Demand                          argoworkflow.VMIDemand
 }
 
 type pendingCreate struct {
@@ -64,7 +64,7 @@ func (scheduler *Scheduler) recordResourceAdmission(run model.Run, name string, 
 	if err := os.MkdirAll(filepath.Dir(target), 0700); err != nil {
 		return err
 	}
-	body, err := json.Marshal(createAdmission{Fallback: fallback, Pods: peak, RunID: run.ID, JobName: name, SHA: run.SHA, RepoID: run.RepoID, Group: run.ConcurrencyGroup, Size: size.Effective(), Demand: demand})
+	body, err := json.Marshal(createAdmission{Fallback: fallback, Pods: peak, RunID: run.ID, WorkflowName: name, SHA: run.SHA, RepoID: run.RepoID, Group: run.ConcurrencyGroup, Size: size.Effective(), Demand: demand})
 	if err != nil {
 		return err
 	}
@@ -104,7 +104,7 @@ func (scheduler *Scheduler) readCreateAdmission(run model.Run) (createAdmission,
 		return createAdmission{}, err
 	}
 	var saved createAdmission
-	if len(body) > 4096 || json.Unmarshal(body, &saved) != nil || saved.RunID != run.ID || saved.JobName != run.JobName || saved.RepoID != run.RepoID || saved.SHA != run.SHA || saved.Group != run.ConcurrencyGroup || !saved.Size.Valid() || saved.Size != saved.Size.Effective() {
+	if len(body) > 4096 || json.Unmarshal(body, &saved) != nil || saved.RunID != run.ID || saved.WorkflowName != run.WorkflowName || saved.RepoID != run.RepoID || saved.SHA != run.SHA || saved.Group != run.ConcurrencyGroup || !saved.Size.Valid() || saved.Size != saved.Size.Effective() {
 		return createAdmission{}, errors.New("service: pending create admission binding mismatch")
 	}
 	if err := (KubeVirtResources{Demand: saved.Demand, Limit: argoworkflow.VMIBudgetLimit().DemandLimit()}).Validate(); err != nil {
@@ -285,7 +285,7 @@ func (scheduler *Scheduler) settleCreateAttempt(ctx context.Context, pending *pe
 		return false, err
 	}
 	if !pending.persisted {
-		if err := scheduler.store.MarkRunCreatePending(ctx, run.ID, run.JobName); err != nil {
+		if err := scheduler.store.MarkRunCreatePending(ctx, run.ID, run.WorkflowName); err != nil {
 			return false, err
 		}
 		pending.persisted = true
@@ -318,7 +318,7 @@ func (scheduler *Scheduler) settleCreateAttempt(ctx context.Context, pending *pe
 		if !ok {
 			return false, errors.New("service: engine cannot settle uncertain create")
 		}
-		done, err := settler.SettleCreate(ctx, observed.JobName, run.ID, observed.CreatedAt.Add(createObservationWindow))
+		done, err := settler.SettleCreate(ctx, observed.WorkflowName, run.ID, observed.CreatedAt.Add(createObservationWindow))
 		if err != nil || !done {
 			return false, err
 		}
@@ -330,7 +330,7 @@ func (scheduler *Scheduler) settleCreateAttempt(ctx context.Context, pending *pe
 	if !pending.confirmed {
 		// A prior owner may have committed completion but lost finalization.
 		// Re-arm one observation window rather than wedging the grant forever.
-		if err := scheduler.store.MarkRunCreatePending(ctx, run.ID, run.JobName); err != nil {
+		if err := scheduler.store.MarkRunCreatePending(ctx, run.ID, run.WorkflowName); err != nil {
 			return false, err
 		}
 		return false, nil
@@ -372,7 +372,7 @@ func (scheduler *Scheduler) deferCreateCleanup(ctx context.Context, run model.Ru
 	persistCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	err := scheduler.database().MarkRunCreatePending(persistCtx, run.ID, name)
 	cancel()
-	run.JobName = name
+	run.WorkflowName = name
 	scheduler.registerCreateCleanup(run, grant, err == nil)
 	if err != nil {
 		log.Printf("WARN: create_cleanup run=%q persistence_deferred=true", run.ID)

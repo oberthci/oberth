@@ -34,12 +34,12 @@ func (p *protectedFixture) RecipeAllowed(vmrunner.KVMRecipe) error {
 func (p *protectedFixture) Recover(context.Context) ([]string, error) {
 	return p.recoverIDs, p.recoverErr
 }
-func (p *protectedFixture) Execute(ctx context.Context, job JobRequest, requirement vmrunner.Requirement, output io.Writer) error {
+func (p *protectedFixture) Execute(ctx context.Context, job WorkflowRequest, requirement vmrunner.Requirement, output io.Writer) error {
 	run, err := p.store.Run(ctx, job.Run.ID)
 	if err != nil {
 		return err
 	}
-	if run.JobName != "" {
+	if run.WorkflowName != "" {
 		return errors.New("main delivery occurred before suite")
 	}
 	if p.fail {
@@ -109,7 +109,7 @@ func TestTrustedPreflightGatesReleaseBeforeCredentials(t *testing.T) {
 				}
 				return
 			}
-			if len(fixture.jobs.createdReleases) != 0 || len(fixture.jobs.createdCI) != 0 || run.JobName != "" {
+			if len(fixture.jobs.createdReleases) != 0 || len(fixture.jobs.createdCI) != 0 || run.WorkflowName != "" {
 				t.Fatalf("suite failure delivered credentials/workflow: %#v", run)
 			}
 			if mode == "uncertain cleanup" {

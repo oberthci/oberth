@@ -31,7 +31,7 @@ func TestReleaseRoutesUseOneDocumentForEveryRead(t *testing.T) {
 	writePipeline(t, dir, "build.yaml", strings.ReplaceAll(groupedPipeline(""), "oberth.ci/size: M", "oberth.ci/size: S"))
 	writePipeline(t, dir, "release.yaml", strings.ReplaceAll(groupedPipeline(""), "oberth.ci/size: M", "oberth.ci/size: XL"))
 	jobs := &ArgoJobs{config: argojob.Config{ReleaseTagRoutes: argojob.ReleaseTagRoutes{"github/org/repo": {{Pattern: "deploy-*", File: ".oberth/deploy.yaml"}}}}}
-	request := service.JobRequest{SourceDir: dir, UpstreamName: "github", UpstreamOrg: "org", Repository: model.Repository{Name: "repo"}, Run: model.Run{Release: true, RefKind: model.RefTag, Ref: "deploy-1"}}
+	request := service.WorkflowRequest{SourceDir: dir, UpstreamName: "github", UpstreamOrg: "org", Repository: model.Repository{Name: "repo"}, Run: model.Run{Release: true, RefKind: model.RefTag, Ref: "deploy-1"}}
 	if size, err := jobs.PipelineSize(t.Context(), request); err != nil || size != pipeline.M {
 		t.Fatalf("routed size=%s err=%v", size, err)
 	}
@@ -84,7 +84,7 @@ func TestReleaseRoutesExecutionAndAuditBindSelectedFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	config.ReleaseTagRoutes["github/org/repo"][0].File = ".oberth/release.yaml" // Startup snapshot must remain pinned.
-	request := service.JobRequest{SourceDir: dir, JobName: "route-run", UpstreamName: "github", UpstreamOrg: "org", Repository: model.Repository{Name: "repo"}, Run: model.Run{ID: "route-run", Actor: "admin", Release: true, RefKind: model.RefTag, Ref: "deploy-1", SHA: strings.Repeat("a", 40)}}
+	request := service.WorkflowRequest{SourceDir: dir, WorkflowName: "route-run", UpstreamName: "github", UpstreamOrg: "org", Repository: model.Repository{Name: "repo"}, Run: model.Run{ID: "route-run", Actor: "admin", Release: true, RefKind: model.RefTag, Ref: "deploy-1", SHA: strings.Repeat("a", 40)}}
 	if err := jobs.CreateRelease(t.Context(), request); err != nil {
 		t.Fatal(err)
 	}
@@ -128,7 +128,7 @@ func TestGrantFreeWIFReleaseAndBranchRefusalThroughEngine(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			request := service.JobRequest{SourceDir: dir, JobName: "wif-route", UpstreamName: "github", UpstreamOrg: org, Repository: model.Repository{Name: "repo"}, Run: model.Run{ID: "wif-route", Actor: "admin", Release: true, RefKind: model.RefTag, Ref: "deploy-1", SHA: strings.Repeat("a", 40)}}
+			request := service.WorkflowRequest{SourceDir: dir, WorkflowName: "wif-route", UpstreamName: "github", UpstreamOrg: org, Repository: model.Repository{Name: "repo"}, Run: model.Run{ID: "wif-route", Actor: "admin", Release: true, RefKind: model.RefTag, Ref: "deploy-1", SHA: strings.Repeat("a", 40)}}
 			if err := jobs.CreateRelease(t.Context(), request); err != nil {
 				t.Fatal(err)
 			}
@@ -141,18 +141,18 @@ func TestGrantFreeWIFReleaseAndBranchRefusalThroughEngine(t *testing.T) {
 			}
 			control.request = argojob.Request{}
 			request.Run.Ref = "v1"
-			request.Run.ID, request.JobName = "default-wif", "default-wif"
+			request.Run.ID, request.WorkflowName = "default-wif", "default-wif"
 			if err := jobs.CreateRelease(t.Context(), request); err == nil || control.request.RunID != "" {
 				t.Fatal("default v* release reused the demo route's identity")
 			}
 			control.request = argojob.Request{}
-			request.JobName = "branch-route"
+			request.WorkflowName = "branch-route"
 			request.Run.ID = "branch-route"
 			request.Run.Release = false
 			request.Run.Trigger = "branch"
 			request.Run.Ref = "deploy-1"
 			request.Run.RefKind = model.RefBranch
-			if err := jobs.CreateCI(t.Context(), request); err == nil || control.request.RunID != "" {
+			if err := jobs.CreateWorkflow(t.Context(), request); err == nil || control.request.RunID != "" {
 				t.Fatal("branch reached controller with a release WIF identity")
 			}
 		})
@@ -280,7 +280,7 @@ func TestReleaseRoutesForPushedTagsThroughReceiveAdapter(t *testing.T) {
 		if run.RefKind != model.RefTag || run.Ref != tc.tag {
 			t.Fatalf("unexpected durable tag: %+v", run)
 		}
-		request := service.JobRequest{Run: run, Repository: repo, UpstreamName: "github", UpstreamOrg: "org", SourceDir: work, JobName: "push-" + tc.tag}
+		request := service.WorkflowRequest{Run: run, Repository: repo, UpstreamName: "github", UpstreamOrg: "org", SourceDir: work, WorkflowName: "push-" + tc.tag}
 		if size, err := jobs.PipelineSize(ctx, request); err != nil || size != tc.size {
 			t.Fatalf("%s size=%s err=%v", tc.tag, size, err)
 		}

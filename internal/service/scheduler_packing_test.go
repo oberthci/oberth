@@ -15,7 +15,7 @@ import (
 // scheduler can be fed a mix of sizes.
 type sizedByBranch struct{ *concurrentJobs }
 
-func (jobs sizedByBranch) PipelineSize(_ context.Context, request JobRequest) (pipeline.Size, error) {
+func (jobs sizedByBranch) PipelineSize(_ context.Context, request WorkflowRequest) (pipeline.Size, error) {
 	prefix, _, _ := strings.Cut(strings.TrimPrefix(request.Run.Ref, "pack/"), "-")
 	return pipeline.Size(strings.ToUpper(prefix)), nil
 }

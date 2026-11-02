@@ -34,7 +34,7 @@ type journalRecoveryJobs struct {
 func (*journalRecoveryJobs) Adopt(context.Context, model.Run) (pipeline.Size, bool, error) {
 	return pipeline.M, true, nil
 }
-func (*journalRecoveryJobs) JobNamespace() string { return "oberth-argo" }
+func (*journalRecoveryJobs) WorkflowNamespace() string { return "oberth-argo" }
 func (j *journalRecoveryJobs) WaitResumed(ctx context.Context, name string, out io.Writer, _ []runprogress.Event, _ int64) (JobResult, error) {
 	j.resumed = true
 	return j.Wait(ctx, name, out)
@@ -93,7 +93,7 @@ func TestSchedulerPodJournalFailureDegradesWithoutStrandingRun(t *testing.T) {
 			t.Run(mode+"/"+kind, func(t *testing.T) {
 				fixture := newRecoveryFixture(t)
 				run := fixture.enqueueAndClaim(t, "feature/journal", strings.Repeat("a", 40))
-				fixture.setJobName(t, run.ID, "oberth-journal")
+				fixture.setWorkflowName(t, run.ID, "oberth-journal")
 				if _, err := fixture.store.MarkRunSubmitted(context.Background(), run.ID); err != nil {
 					t.Fatal(err)
 				}
@@ -226,7 +226,7 @@ func TestSchedulerPodJournalFailureDegradesWithoutStrandingRun(t *testing.T) {
 func TestSchedulerActiveOwnerRetainsPodJournalForRestart(t *testing.T) {
 	fixture := newRecoveryFixture(t)
 	run := fixture.enqueueAndClaim(t, "feature/owner", strings.Repeat("b", 40))
-	fixture.setJobName(t, run.ID, "oberth-owner")
+	fixture.setWorkflowName(t, run.ID, "oberth-owner")
 	if _, err := fixture.store.MarkRunSubmitted(context.Background(), run.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -280,7 +280,7 @@ func TestSchedulerActiveOwnerRetainsPodJournalForRestart(t *testing.T) {
 func TestSchedulerPendingCancellationKeepsPodJournal(t *testing.T) {
 	fixture := newRecoveryFixture(t)
 	run := fixture.enqueueAndClaim(t, "feature/cancel-owner", strings.Repeat("c", 40))
-	fixture.setJobName(t, run.ID, "oberth-cancel-owner")
+	fixture.setWorkflowName(t, run.ID, "oberth-cancel-owner")
 	if _, err := fixture.store.MarkRunSubmitted(context.Background(), run.ID); err != nil {
 		t.Fatal(err)
 	}

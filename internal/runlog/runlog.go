@@ -31,7 +31,7 @@ var ErrLogSliceTooLarge = errors.New("run log slice exceeds response limit")
 var ErrInvalidPattern = errors.New("invalid log pattern")
 
 type Range struct {
-	Burn  string `json:"burn"`
+	Stage string `json:"burn"`
 	Step  string `json:"step,omitempty"`
 	Start int64  `json:"start"`
 	End   int64  `json:"end"`
@@ -170,8 +170,8 @@ func (store *Store) BuildIndex(runID string) (Index, error) {
 	return index, nil
 }
 
-func (store *Store) Read(runID, burn, step string) ([]byte, error) {
-	body, meta, err := store.ReadFiltered(runID, burn, step, Filter{})
+func (store *Store) Read(runID, stage, step string) ([]byte, error) {
+	body, meta, err := store.ReadFiltered(runID, stage, step, Filter{})
 	if err != nil {
 		return nil, err
 	}
@@ -181,7 +181,7 @@ func (store *Store) Read(runID, burn, step string) ([]byte, error) {
 	return body, nil
 }
 
-func (store *Store) ReadFiltered(runID, burn, step string, filter Filter) ([]byte, Meta, error) {
+func (store *Store) ReadFiltered(runID, stage, step string, filter Filter) ([]byte, Meta, error) {
 	index, err := store.loadIndexContext(filter.ctx(), runID)
 	if err != nil {
 		return nil, Meta{}, err
@@ -189,7 +189,7 @@ func (store *Store) ReadFiltered(runID, burn, step string, filter Filter) ([]byt
 	var selected []Range
 	var total int64
 	for _, candidate := range index.Ranges {
-		if candidate.Burn != burn || (step != "" && candidate.Step != step) {
+		if candidate.Stage != stage || (step != "" && candidate.Step != step) {
 			continue
 		}
 		length := candidate.End - candidate.Start
@@ -200,7 +200,7 @@ func (store *Store) ReadFiltered(runID, burn, step string, filter Filter) ([]byt
 		selected = append(selected, candidate)
 	}
 	if len(selected) == 0 {
-		return nil, Meta{}, fmt.Errorf("log slice %s/%s: %w", burn, step, os.ErrNotExist)
+		return nil, Meta{}, fmt.Errorf("log slice %s/%s: %w", stage, step, os.ErrNotExist)
 	}
 	path, _ := store.logPath(runID)
 	// logPath validated the owner ID and confined this path to the log root.
@@ -215,13 +215,13 @@ func (store *Store) ReadFiltered(runID, burn, step string, filter Filter) ([]byt
 // ReadActive returns the most recent bounded bytes for one step from a run's
 // growing redacted log. It extends a bounded in-memory index with new bytes;
 // BuildIndex alone publishes the durable terminal index after Job exit.
-func (store *Store) ReadActive(runID, burn, step string) ([]byte, error) {
-	body, _, err := store.ReadActiveFiltered(runID, burn, step, Filter{Tail: true})
+func (store *Store) ReadActive(runID, stage, step string) ([]byte, error) {
+	body, _, err := store.ReadActiveFiltered(runID, stage, step, Filter{Tail: true})
 	return body, err
 }
 
-func (store *Store) ReadActiveFiltered(runID, burn, step string, filter Filter) ([]byte, Meta, error) {
-	return store.readActiveIndexed(runID, burn, step, filter)
+func (store *Store) ReadActiveFiltered(runID, stage, step string, filter Filter) ([]byte, Meta, error) {
+	return store.readActiveIndexed(runID, stage, step, filter)
 }
 
 // LiveLogSize stats the append-only log without opening or reading its bytes.
@@ -553,21 +553,21 @@ func (store *Store) StepProgress(runID string) ([]runprogress.Event, error) {
 	}
 	known := make(map[string]bool)
 	for _, event := range events {
-		known[event.Burn+"\x00"+event.Step] = true
+		known[event.Stage+"\x00"+event.Step] = true
 	}
 	// Legacy aliases remain filtered only in this display projection.
 	planned := make(map[string]bool)
 	if plan, err := store.StepPlan(runID); err == nil {
 		for _, step := range plan {
-			key := step.Burn + "\x00" + step.Step
+			key := step.Stage + "\x00" + step.Step
 			planned[key], known[key] = true, true
 		}
 	}
 	latest := make(map[string]runprogress.Event)
 	ordinals := make(map[int]string)
 	for _, event := range events {
-		key := event.Burn + "\x00" + event.Step
-		if canonical := LegacyRetryBurn(event.Burn); canonical != event.Burn &&
+		key := event.Stage + "\x00" + event.Step
+		if canonical := LegacyRetryStage(event.Stage); canonical != event.Stage &&
 			!planned[key] && known[canonical+"\x00"+event.Step] {
 			continue
 		}
@@ -640,20 +640,20 @@ func (store *Store) readStepProgress(runID string, strict bool) ([]runprogress.E
 // legacy burn name. Callers must also establish that the original key is
 // unplanned and the canonical key is known before treating it as an alias.
 // Hook names such as task(N).onExit do not have an attempt suffix.
-func LegacyRetryBurn(burn string) string {
-	if !strings.HasSuffix(burn, ")") {
-		return burn
+func LegacyRetryStage(stage string) string {
+	if !strings.HasSuffix(stage, ")") {
+		return stage
 	}
-	open := strings.LastIndexByte(burn, '(')
-	if open < 1 || open == len(burn)-2 {
-		return burn
+	open := strings.LastIndexByte(stage, '(')
+	if open < 1 || open == len(stage)-2 {
+		return stage
 	}
-	for _, digit := range burn[open+1 : len(burn)-1] {
+	for _, digit := range stage[open+1 : len(stage)-1] {
 		if digit < '0' || digit > '9' {
-			return burn
+			return stage
 		}
 	}
-	return burn[:open]
+	return stage[:open]
 }
 
 func indexReader(runID string, reader io.Reader) (Index, error) {
@@ -689,14 +689,14 @@ func indexReader(runID string, reader io.Reader) (Index, error) {
 			}
 			activeRange = false
 		}
-		burn, step, found := ParseMarker(prefix)
+		stage, step, found := ParseMarker(prefix)
 		if found {
 			length := len(index.Ranges)
-			if !activeRange || index.Ranges[length-1].Burn != burn || index.Ranges[length-1].Step != step {
+			if !activeRange || index.Ranges[length-1].Stage != stage || index.Ranges[length-1].Step != step {
 				if activeRange {
 					index.Ranges[length-1].End = lineStart
 				}
-				index.Ranges = append(index.Ranges, Range{Burn: burn, Step: step, Start: lineStart})
+				index.Ranges = append(index.Ranges, Range{Stage: stage, Step: step, Start: lineStart})
 			}
 			activeRange = true
 		}
@@ -724,11 +724,11 @@ func ParseMarker(line []byte) (string, string, bool) {
 	if end < 4 {
 		return "", "", false
 	}
-	burn, step, found := strings.Cut(text[1:end], "/")
-	if !found || burn == "" || step == "" || strings.ContainsAny(burn+step, "\x00\r\n[]") {
+	stage, step, found := strings.Cut(text[1:end], "/")
+	if !found || stage == "" || step == "" || strings.ContainsAny(stage+step, "\x00\r\n[]") {
 		return "", "", false
 	}
-	return burn, step, true
+	return stage, step, true
 }
 
 func (store *Store) writeIndex(runID string, index Index) error {

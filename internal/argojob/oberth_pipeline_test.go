@@ -128,7 +128,7 @@ func TestOberthBuildPipelineIsAdmissible(t *testing.T) {
 
 	// Every burn build.yaml declares for the CI trigger is present, with the
 	// same dependency edges.
-	assertBurnGraph(t, built, "ci", map[string]string{
+	assertStageGraph(t, built, "ci", map[string]string{
 		"setup":                    "",
 		"generic-names":            "",
 		"lint":                     "setup",
@@ -187,7 +187,7 @@ func TestOberthReleasePipelineIsAdmissible(t *testing.T) {
 		t.Fatalf("declared paths = %v, want %v", paths, want)
 	}
 
-	assertBurnGraph(t, built, "release", map[string]string{
+	assertStageGraph(t, built, "release", map[string]string{
 		"release-setup":                  "",
 		"release-lint":                   "release-setup && release-scan",
 		"release-scan":                   "release-setup",
@@ -501,7 +501,7 @@ func TestOberthPipelinesMountTheServerProvidedSource(t *testing.T) {
 
 // assertBurnGraph checks that the entrypoint DAG's tasks and their depends
 // expressions match the burn graph pipeline.go declares.
-func assertBurnGraph(t *testing.T, workflow *wfv1.Workflow, entrypoint string, want map[string]string) {
+func assertStageGraph(t *testing.T, workflow *wfv1.Workflow, entrypoint string, want map[string]string) {
 	t.Helper()
 	if workflow.Spec.Entrypoint != entrypoint {
 		t.Fatalf("entrypoint = %q, want %q", workflow.Spec.Entrypoint, entrypoint)
@@ -519,19 +519,19 @@ func assertBurnGraph(t *testing.T, workflow *wfv1.Workflow, entrypoint string, w
 	for _, task := range dag.Tasks {
 		found[task.Name] = task.Depends
 	}
-	for burn, depends := range want {
-		got, present := found[burn]
+	for stage, depends := range want {
+		got, present := found[stage]
 		if !present {
-			t.Errorf("burn %q is missing from the %s DAG", burn, entrypoint)
+			t.Errorf("burn %q is missing from the %s DAG", stage, entrypoint)
 			continue
 		}
 		if got != depends {
-			t.Errorf("burn %q depends on %q, want %q", burn, got, depends)
+			t.Errorf("burn %q depends on %q, want %q", stage, got, depends)
 		}
 	}
-	for burn := range found {
-		if _, expected := want[burn]; !expected {
-			t.Errorf("burn %q is not declared in the expected %s DAG", burn, entrypoint)
+	for stage := range found {
+		if _, expected := want[stage]; !expected {
+			t.Errorf("burn %q is not declared in the expected %s DAG", stage, entrypoint)
 		}
 	}
 }

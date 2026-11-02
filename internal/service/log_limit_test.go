@@ -41,7 +41,7 @@ func TestStepProgressLogWriterJournalsControlRecordsWithoutRetainingThem(t *test
 	}
 	started := time.Now().UTC()
 	event := runprogress.Event{
-		Version: runprogress.Version, Burn: "test", Step: "unit", Ordinal: 0,
+		Version: runprogress.Version, Stage: "test", Step: "unit", Ordinal: 0,
 		Status: runprogress.StepRunning, DeclaredSize: pipeline.M, StartedAt: &started,
 	}
 	marker, err := runprogress.MarshalMarker(event)
@@ -73,8 +73,8 @@ func TestStepProgressLogWriterJournalsControlRecordsWithoutRetainingThem(t *test
 
 type overflowingJobs struct{}
 
-func (overflowingJobs) CreateCI(context.Context, JobRequest) error   { return nil }
-func (overflowingJobs) Delete(context.Context, string, string) error { return nil }
+func (overflowingJobs) CreateWorkflow(context.Context, WorkflowRequest) error { return nil }
+func (overflowingJobs) Delete(context.Context, string, string) error          { return nil }
 func (overflowingJobs) TerminalResult(context.Context, string) (JobResult, error) {
 	return JobResult{}, ErrJobNotTerminal
 }

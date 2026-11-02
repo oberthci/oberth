@@ -28,7 +28,7 @@ type recoveryJobs struct {
 	deleteErr      error // error returned by Delete
 }
 
-func (j *recoveryJobs) CreateCI(context.Context, JobRequest) error { return nil }
+func (j *recoveryJobs) CreateWorkflow(context.Context, WorkflowRequest) error { return nil }
 
 func (j *recoveryJobs) Wait(ctx context.Context, _ string, _ io.Writer) (JobResult, error) {
 	if j.waitEntered != nil {
@@ -110,9 +110,9 @@ func (f *recoveryFixture) enqueueAndClaim(t *testing.T, ref, sha string) model.R
 	return claimed
 }
 
-func (f *recoveryFixture) setJobName(t *testing.T, runID, jobName string) {
+func (f *recoveryFixture) setWorkflowName(t *testing.T, runID, workflowName string) {
 	t.Helper()
-	if _, err := f.store.SetRunJobName(context.Background(), runID, jobName); err != nil {
+	if _, err := f.store.SetRunWorkflowName(context.Background(), runID, workflowName); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -145,7 +145,7 @@ func TestCompensationPathRecordsRealResultWhenJobCompleted(t *testing.T) {
 	t.Parallel()
 	fixture := newRecoveryFixture(t)
 	run := fixture.enqueueAndClaim(t, "feature/completed", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
-	fixture.setJobName(t, run.ID, "oberth-completed-job")
+	fixture.setWorkflowName(t, run.ID, "oberth-completed-job")
 
 	jobs := &recoveryJobs{
 		waitBlocks:  make(chan struct{}),
@@ -202,7 +202,7 @@ func TestCompensationPathRequeuesWhenJobStillRunning(t *testing.T) {
 	t.Parallel()
 	fixture := newRecoveryFixture(t)
 	run := fixture.enqueueAndClaim(t, "feature/running", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
-	fixture.setJobName(t, run.ID, "oberth-running-job")
+	fixture.setWorkflowName(t, run.ID, "oberth-running-job")
 
 	jobs := &recoveryJobs{
 		waitBlocks:  make(chan struct{}),
@@ -253,9 +253,9 @@ func TestCompensationPathRequeuesWhenJobStillRunning(t *testing.T) {
 	}
 	// execute() replaces the fixture Job name with its deterministic one;
 	// the obligation must carry the run's actual JobName.
-	if len(pending) != 1 || pending[0].RunID != run.ID || pending[0].JobName != recovered.JobName ||
-		pending[0].JobName == "" || pending[0].SupersededBy != requeued.ID {
-		t.Fatalf("pending obligations = %#v, want the stranded Job (%q) owned by the requeue", pending, recovered.JobName)
+	if len(pending) != 1 || pending[0].RunID != run.ID || pending[0].WorkflowName != recovered.WorkflowName ||
+		pending[0].WorkflowName == "" || pending[0].SupersededBy != requeued.ID {
+		t.Fatalf("pending obligations = %#v, want the stranded Job (%q) owned by the requeue", pending, recovered.WorkflowName)
 	}
 }
 
@@ -279,7 +279,7 @@ func TestCompensationPathInterruptsIneligibleTagRun(t *testing.T) {
 	if run.ID != enqueued.ID {
 		t.Fatalf("claimed = %#v, want the tag run", run)
 	}
-	fixture.setJobName(t, run.ID, "oberth-tag-running-job")
+	fixture.setWorkflowName(t, run.ID, "oberth-tag-running-job")
 
 	jobs := &recoveryJobs{
 		waitBlocks:  make(chan struct{}),
@@ -308,8 +308,8 @@ func TestCompensationPathInterruptsIneligibleTagRun(t *testing.T) {
 	if recovered.Status != model.RunInterrupted || recovered.SupersededBy != "" || recovered.Error != "scheduler stopped" {
 		t.Fatalf("tag run = %#v, want terminally interrupted without requeue", recovered)
 	}
-	if len(jobs.deleted) != 1 || jobs.deleted[0] != recovered.JobName || recovered.JobName == "" {
-		t.Fatalf("deleted = %v, want exactly the run's Job %q", jobs.deleted, recovered.JobName)
+	if len(jobs.deleted) != 1 || jobs.deleted[0] != recovered.WorkflowName || recovered.WorkflowName == "" {
+		t.Fatalf("deleted = %v, want exactly the run's Job %q", jobs.deleted, recovered.WorkflowName)
 	}
 }
 
@@ -349,7 +349,7 @@ func TestStartupReconciliationFinishesRunWhoseJobCompleted(t *testing.T) {
 	if _, err := database.ClaimNextRun(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := database.SetRunJobName(ctx, enqueued.ID, "oberth-reconcile-job"); err != nil {
+	if _, err := database.SetRunWorkflowName(ctx, enqueued.ID, "oberth-reconcile-job"); err != nil {
 		t.Fatal(err)
 	}
 	if err := database.Close(); err != nil {
@@ -448,7 +448,7 @@ func TestStartupReconciliationRequeuesRunWithVanishedJob(t *testing.T) {
 	if _, err := database.ClaimNextRun(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := database.SetRunJobName(ctx, enqueued.ID, "oberth-vanished-job"); err != nil {
+	if _, err := database.SetRunWorkflowName(ctx, enqueued.ID, "oberth-vanished-job"); err != nil {
 		t.Fatal(err)
 	}
 	if err := database.Close(); err != nil {
@@ -516,7 +516,7 @@ func TestStartupReconciliationRequeuesRunWithVanishedJob(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(pending) != 1 || pending[0].RunID != enqueued.ID ||
-		pending[0].JobName != "oberth-vanished-job" || pending[0].Reason != "superseded" ||
+		pending[0].WorkflowName != "oberth-vanished-job" || pending[0].Reason != "superseded" ||
 		pending[0].SupersededBy != requeued.ID {
 		t.Fatalf("pending cancellations = %#v, want superseded obligation for the stranded Job", pending)
 	}
@@ -571,7 +571,7 @@ func TestStartupReconciliationTerminalizesIneligibleStrandedRun(t *testing.T) {
 	if _, err := database.ClaimNextRun(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := database.SetRunJobName(ctx, enqueued.ID, "oberth-tag-job"); err != nil {
+	if _, err := database.SetRunWorkflowName(ctx, enqueued.ID, "oberth-tag-job"); err != nil {
 		t.Fatal(err)
 	}
 	if err := database.Close(); err != nil {

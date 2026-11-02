@@ -59,7 +59,7 @@ func (completion *Completion) classifyInfrastructure() {
 		return
 	}
 	reason := ""
-	failedBurn, failedStep := "", ""
+	failedStage, failedStep := "", ""
 	for _, step := range completion.Steps {
 		if step.Status == runprogress.StepPassed || step.Status == runprogress.StepSkipped || !terminal(step.Status) {
 			continue
@@ -67,7 +67,7 @@ func (completion *Completion) classifyInfrastructure() {
 		// A separate test failure must still open a CI-red issue and must not
 		// become eligible for infrastructure retry.
 		if step.AttemptAmbiguous || step.InfrastructureReason == "" {
-			failedBurn, failedStep = step.Burn, step.Step
+			failedStage, failedStep = step.Stage, step.Step
 			continue
 		}
 		if reason == "" {
@@ -76,7 +76,7 @@ func (completion *Completion) classifyInfrastructure() {
 	}
 	if failedStep != "" {
 		if reason != "" {
-			completion.FailedBurn, completion.FailedStep = failedBurn, failedStep
+			completion.FailedStage, completion.FailedStep = failedStage, failedStep
 		}
 		return
 	}

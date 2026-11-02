@@ -50,11 +50,11 @@ func (scheduler *Scheduler) withoutPendingPreflight(ctx context.Context, run mod
 // fallback and re-queues the run. A failed read names the same object but
 // asks for nothing: the next start retries it.
 func adoptionFailure(adopter JobAdopter, run model.Run, err error) error {
-	namespace := adopter.JobNamespace()
-	failure := fmt.Errorf("adopt run %s: Workflow %s/%s: %w", run.ID, namespace, run.JobName, err)
+	namespace := adopter.WorkflowNamespace()
+	failure := fmt.Errorf("adopt run %s: Workflow %s/%s: %w", run.ID, namespace, run.WorkflowName, err)
 	if errors.Is(err, ErrAdoptionRefused) {
 		failure = fmt.Errorf("%w; startup stops until it is deleted (kubectl -n %s delete workflow %s), after which the run is re-queued",
-			failure, namespace, run.JobName)
+			failure, namespace, run.WorkflowName)
 	}
 	log.Printf("ERROR: %v", failure)
 	return failure

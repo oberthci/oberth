@@ -58,7 +58,7 @@ func trustedPublicationFixture(t *testing.T, release, cleaned bool) (*controlFix
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = executor.Execute(ctx, JobRequest{Run: run, Repository: f.repo, UpstreamName: "codeberg", UpstreamOrg: "acme"}, vmrunner.Requirement{CandidateSHA: run.TestedSHA, BaselineSHA: strings.Repeat("b", 40), Contract: &contract}, io.Discard)
+	err = executor.Execute(ctx, WorkflowRequest{Run: run, Repository: f.repo, UpstreamName: "codeberg", UpstreamOrg: "acme"}, vmrunner.Requirement{CandidateSHA: run.TestedSHA, BaselineSHA: strings.Repeat("b", 40), Contract: &contract}, io.Discard)
 	if cleaned && err != nil {
 		t.Fatal(err)
 	}
@@ -179,7 +179,7 @@ func TestTrustedPreflightSchedulerStartupRecovery(t *testing.T) {
 					t.Fatalf("undelivered parent not interrupted: %#v", got)
 				}
 				retry, err := f.store.Run(context.Background(), got.SupersededBy)
-				if err != nil || retry.Status != model.RunQueued || retry.JobName != "" || retry.AdmissionSequence != got.AdmissionSequence || retry.SHA != got.SHA {
+				if err != nil || retry.Status != model.RunQueued || retry.WorkflowName != "" || retry.AdmissionSequence != got.AdmissionSequence || retry.SHA != got.SHA {
 					t.Fatalf("fresh retry not durably gated: %+v %v", retry, err)
 				}
 				if _, err := f.store.KVMPreflight(context.Background(), retry.ID); !errors.Is(err, store.ErrNotFound) {

@@ -25,7 +25,7 @@ const (
 )
 
 type runningLabel struct {
-	burn, step string
+	stage, step string
 }
 
 type runningLabelRef struct {
@@ -183,7 +183,7 @@ func (entry *runningIndex) dropOldest(count int) {
 		label.bytes -= span.end - span.start
 		if label.refs == 0 {
 			delete(entry.labelIDs, label.key)
-			entry.labelBytes -= len(label.key.burn) + len(label.key.step)
+			entry.labelBytes -= len(label.key.stage) + len(label.key.step)
 			*label = runningLabelRef{}
 			entry.freeLabels = append(entry.freeLabels, id)
 		}
@@ -196,18 +196,18 @@ func (entry *runningIndex) dropOldest(count int) {
 	}
 }
 
-func (entry *runningIndex) intern(burn, step string) uint16 {
-	key := runningLabel{burn, step}
+func (entry *runningIndex) intern(stage, step string) uint16 {
+	key := runningLabel{stage, step}
 	if id, ok := entry.labelIDs[key]; ok {
 		return id
 	}
-	for entry.labelBytes+len(burn)+len(step) > maxRunningLabelBytes || len(entry.labelIDs) == maxRunningLabels {
+	for entry.labelBytes+len(stage)+len(step) > maxRunningLabelBytes || len(entry.labelIDs) == maxRunningLabels {
 		entry.dropOldest(max(1, entry.count/2))
 	}
 	if entry.labelIDs == nil {
 		entry.labelIDs = make(map[runningLabel]uint16)
 	}
-	key = runningLabel{strings.Clone(burn), strings.Clone(step)}
+	key = runningLabel{strings.Clone(stage), strings.Clone(step)}
 	var id uint16
 	if n := len(entry.freeLabels); n > 0 {
 		id = entry.freeLabels[n-1]
@@ -218,7 +218,7 @@ func (entry *runningIndex) intern(burn, step string) uint16 {
 		entry.labels = append(entry.labels, runningLabelRef{key: key})
 	}
 	entry.labelIDs[key] = id
-	entry.labelBytes += len(burn) + len(step)
+	entry.labelBytes += len(stage) + len(step)
 	return id
 }
 
@@ -237,19 +237,19 @@ func (entry *runningIndex) completeLine() {
 	if bytes.HasPrefix(entry.prefix, []byte(runprogress.LogDeliveryPrefix)) {
 		entry.active = false
 	}
-	burn, step, marked := ParseMarker(entry.prefix)
+	stage, step, marked := ParseMarker(entry.prefix)
 	if marked {
 		same := false
 		if entry.active {
 			last := entry.slot(entry.count - 1)
 			key := entry.labels[entry.rangeLabels[last]].key
-			same = key.burn == burn && key.step == step
+			same = key.stage == stage && key.step == step
 		}
 		if !same {
 			if entry.count == len(entry.ranges) && !entry.grow() {
 				entry.dropOldest(max(1, entry.count/2))
 			}
-			id := entry.intern(burn, step)
+			id := entry.intern(stage, step)
 			slot := entry.slot(entry.count)
 			entry.ranges[slot] = runningSpan{start: entry.lineStart, end: entry.lineStart}
 			entry.rangeLabels[slot] = id
@@ -312,10 +312,10 @@ func (entry *runningIndex) advance(ctx context.Context, file io.ReaderAt, size i
 
 // snapshot copies at most a filtering budget of matching ranges. Older/newer
 // coverage outside the snapshot is advertised separately for byte continuation.
-func (entry *runningIndex) snapshot(burn, step string, filter Filter) (selected []Range, total int64, earlier, later bool) {
+func (entry *runningIndex) snapshot(stage, step string, filter Filter) (selected []Range, total int64, earlier, later bool) {
 	matches := 0
 	for _, label := range entry.labels {
-		if label.refs > 0 && label.key.burn == burn && (step == "" || label.key.step == step) {
+		if label.refs > 0 && label.key.stage == stage && (step == "" || label.key.step == step) {
 			total += label.bytes
 			matches += label.refs
 		}
@@ -330,7 +330,7 @@ func (entry *runningIndex) snapshot(burn, step string, filter Filter) (selected 
 		}
 		slot := entry.slot(i)
 		span, key := entry.ranges[slot], entry.labels[entry.rangeLabels[slot]].key
-		if key.burn != burn || (step != "" && key.step != step) {
+		if key.stage != stage || (step != "" && key.step != step) {
 			continue
 		}
 		if filter.ByteOffset != nil {
@@ -349,7 +349,7 @@ func (entry *runningIndex) snapshot(burn, step string, filter Filter) (selected 
 			}
 			break
 		}
-		selected = append(selected, Range{Burn: key.burn, Step: key.step, Start: span.start, End: span.end})
+		selected = append(selected, Range{Stage: key.stage, Step: key.step, Start: span.start, End: span.end})
 		start, end := span.start, span.end
 		if filter.ByteOffset != nil {
 			if filter.Tail {
@@ -395,7 +395,7 @@ func (store *Store) terminalIndex(ctx context.Context, runID string, info os.Fil
 	return nil, nil
 }
 
-func (store *Store) readActiveIndexed(runID, burn, step string, filter Filter) ([]byte, Meta, error) {
+func (store *Store) readActiveIndexed(runID, stage, step string, filter Filter) ([]byte, Meta, error) {
 	ctx := filter.ctx()
 	if err := ctx.Err(); err != nil {
 		return nil, Meta{}, err
@@ -420,11 +420,11 @@ func (store *Store) readActiveIndexed(runID, burn, step string, filter Filter) (
 	}
 	if terminal != nil {
 		store.ForgetActiveIndex(runID)
-		return filterPublishedIndex(file, *terminal, burn, step, filter)
+		return filterPublishedIndex(file, *terminal, stage, step, filter)
 	}
 	entry := store.pinRunningIndex(runID)
 	if entry == nil {
-		return store.readActiveWindow(runID, burn, step, filter, MaxScanBytes)
+		return store.readActiveWindow(runID, stage, step, filter, MaxScanBytes)
 	}
 	defer store.unpinRunningIndex(entry)
 	select {
@@ -451,7 +451,7 @@ func (store *Store) readActiveIndexed(runID, burn, step string, filter Filter) (
 	if terminal != nil {
 		store.ForgetActiveIndex(runID)
 		unlock()
-		return filterPublishedIndex(file, *terminal, burn, step, filter)
+		return filterPublishedIndex(file, *terminal, stage, step, filter)
 	}
 	if entry.info == nil || !os.SameFile(entry.info, info) || info.Size() < entry.info.Size() || (info.Size() == entry.info.Size() && !info.ModTime().Equal(entry.info.ModTime())) {
 		entry.reset(info)
@@ -485,12 +485,12 @@ func (store *Store) readActiveIndexed(runID, burn, step string, filter Filter) (
 	usable := covered && (caughtUp || (!filter.Tail && cursor <= complete) || (filter.Tail && filter.ByteOffset != nil && cursor <= complete))
 	if !usable {
 		unlock()
-		body, meta, err := store.readActiveWindow(runID, burn, step, filter, MaxScanBytes-discovered)
+		body, meta, err := store.readActiveWindow(runID, stage, step, filter, MaxScanBytes-discovered)
 		meta.DiscoveryBytes += discovered
 		meta.TotalScannedBytes = meta.ScannedBytes + meta.DiscoveryBytes
 		return body, meta, err
 	}
-	selected, total, earlier, later := entry.snapshot(burn, step, filter)
+	selected, total, earlier, later := entry.snapshot(stage, step, filter)
 	floor := entry.floor
 	pendingOmitted := false
 	if position-complete > maxFilterLineBytes {
@@ -498,9 +498,9 @@ func (store *Store) readActiveIndexed(runID, burn, step string, filter Filter) (
 		if !marked && entry.active && !bytes.HasPrefix(entry.prefix, []byte(runprogress.LogDeliveryPrefix)) {
 			last := entry.slot(entry.count - 1)
 			key := entry.labels[entry.rangeLabels[last]].key
-			b, s = key.burn, key.step
+			b, s = key.stage, key.step
 		}
-		pendingOmitted = b == burn && (step == "" || s == step)
+		pendingOmitted = b == stage && (step == "" || s == step)
 	}
 	frontier := complete
 	if position-complete > maxFilterLineBytes {
@@ -509,7 +509,7 @@ func (store *Store) readActiveIndexed(runID, burn, step string, filter Filter) (
 	exact := caughtUp && complete == position && floor == 0
 	unlock()
 	if total == 0 && caughtUp && floor == 0 && !pendingOmitted {
-		return nil, Meta{}, fmt.Errorf("active log slice %s/%s: %w", burn, step, os.ErrNotExist)
+		return nil, Meta{}, fmt.Errorf("active log slice %s/%s: %w", stage, step, os.ErrNotExist)
 	}
 	body, meta, err := filterRanges(file, selected, total, filter)
 	if err != nil {
@@ -552,17 +552,17 @@ func (store *Store) readActiveIndexed(runID, burn, step string, filter Filter) (
 
 // Reuse the already-decoded published index when an active DB snapshot races
 // terminalization; do not spend the index JSON budget a second time.
-func filterPublishedIndex(file *os.File, index Index, burn, step string, filter Filter) ([]byte, Meta, error) {
+func filterPublishedIndex(file *os.File, index Index, stage, step string, filter Filter) ([]byte, Meta, error) {
 	var selected []Range
 	var total int64
 	for _, r := range index.Ranges {
-		if r.Burn == burn && (step == "" || r.Step == step) && r.End >= r.Start {
+		if r.Stage == stage && (step == "" || r.Step == step) && r.End >= r.Start {
 			selected = append(selected, r)
 			total += r.End - r.Start
 		}
 	}
 	if len(selected) == 0 {
-		return nil, Meta{}, fmt.Errorf("log slice %s/%s: %w", burn, step, os.ErrNotExist)
+		return nil, Meta{}, fmt.Errorf("log slice %s/%s: %w", stage, step, os.ErrNotExist)
 	}
 	return filterRanges(file, selected, total, filter)
 }

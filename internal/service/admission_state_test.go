@@ -52,7 +52,7 @@ func TestRetainedReservationIsListedAndReleasable(t *testing.T) {
 	if _, err := fixture.store.ClaimNextRun(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := fixture.store.SetRunJobName(ctx, stale.ID, "oberth-oberth-stale"); err != nil {
+	if _, err := fixture.store.SetRunWorkflowName(ctx, stale.ID, "oberth-oberth-stale"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := fixture.store.FinishRun(ctx, stale.ID, model.RunResult{Status: model.RunFailed, Phase: "job", Error: "lost"}); err != nil {

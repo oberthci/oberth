@@ -208,10 +208,10 @@ func TestRunCancelRunningRunDeletesItsWorkflowAndKeepsTheCancel(t *testing.T) {
 		t.Fatalf("cancel rewrote the start of a running run: %#v", final)
 	}
 	fixture.engine.mu.Lock()
-	deleted := slices.Contains(fixture.engine.deleted, submitted.JobName)
+	deleted := slices.Contains(fixture.engine.deleted, submitted.WorkflowName)
 	fixture.engine.mu.Unlock()
 	if !deleted {
-		t.Fatalf("Workflow %s was not deleted", submitted.JobName)
+		t.Fatalf("Workflow %s was not deleted", submitted.WorkflowName)
 	}
 	// The owner's late result never replaces the cancel.
 	time.Sleep(testTimeout(100 * time.Millisecond))
@@ -387,7 +387,7 @@ func TestRunCancelIsNotRefiredAcrossARestart(t *testing.T) {
 		if _, err := fixture.store.ClaimNextRun(ctx); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := fixture.store.SetRunJobName(ctx, run.ID, "oberth-beacon-"+run.ID[:8]); err != nil {
+		if _, err := fixture.store.SetRunWorkflowName(ctx, run.ID, "oberth-beacon-"+run.ID[:8]); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := fixture.store.MarkRunSubmitted(ctx, run.ID); err != nil {
@@ -442,7 +442,7 @@ func TestRunCancelIsNotRefiredAcrossARestart(t *testing.T) {
 	}
 	assertCancelled(t, runs[0], cancelAgent.Identity, "abandon")
 	fixture.engine.mu.Lock()
-	deleted := slices.Contains(fixture.engine.deleted, cancelled.JobName) || slices.Contains(fixture.engine.deleted, "oberth-beacon-"+cancelled.ID[:8])
+	deleted := slices.Contains(fixture.engine.deleted, cancelled.WorkflowName) || slices.Contains(fixture.engine.deleted, "oberth-beacon-"+cancelled.ID[:8])
 	fixture.engine.mu.Unlock()
 	if !deleted {
 		t.Fatal("the successor never deleted the cancelled run's Workflow")

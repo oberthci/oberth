@@ -29,7 +29,7 @@ type ResourceUsageReport struct {
 }
 type ResourceStepReport struct {
 	ByWorkflowSize []ResourceSizeComparison        `json:"by_workflow_size"`
-	Burn           string                          `json:"burn"`
+	Stage          string                          `json:"burn"`
 	Step           string                          `json:"step"`
 	Observations   int                             `json:"observations"`
 	Terminal       int                             `json:"terminal"`
@@ -53,7 +53,7 @@ func BuildResourceReport(values []StepResourceUsage) []ResourceStepReport {
 		if v.ContainerName != "" && !v.IsWorkflowMain() {
 			continue
 		}
-		key := v.Burn + "\x00" + v.Step
+		key := v.Stage + "\x00" + v.Step
 		grouped[key] = append(grouped[key], v)
 	}
 	keys := make([]string, 0, len(grouped))
@@ -63,9 +63,9 @@ func BuildResourceReport(values []StepResourceUsage) []ResourceStepReport {
 	slices.Sort(keys)
 	out := make([]ResourceStepReport, 0, len(keys))
 	for _, key := range keys {
-		burn, step, _ := strings.Cut(key, "\x00")
+		stage, step, _ := strings.Cut(key, "\x00")
 		rows := grouped[key]
-		r := ResourceStepReport{Burn: burn, Step: step, Observations: len(rows), Metrics: map[string]ResourceMetricReport{}}
+		r := ResourceStepReport{Stage: stage, Step: step, Observations: len(rows), Metrics: map[string]ResourceMetricReport{}}
 		for _, v := range rows {
 			if v.Terminal {
 				r.Terminal++
@@ -105,11 +105,11 @@ func BuildResourceReport(values []StepResourceUsage) []ResourceStepReport {
 func AttachResourceUsage(steps []StepResult, values []StepResourceUsage, truncated bool) {
 	grouped := map[string][]StepResourceUsage{}
 	for _, v := range values {
-		key := v.Burn + "\x00" + v.Step
+		key := v.Stage + "\x00" + v.Step
 		grouped[key] = append(grouped[key], v)
 	}
 	for i := range steps {
-		steps[i].MeasuredUsage = grouped[steps[i].Burn+"\x00"+steps[i].Step]
+		steps[i].MeasuredUsage = grouped[steps[i].Stage+"\x00"+steps[i].Step]
 		steps[i].MeasuredUsageTruncated = truncated
 		steps[i].MeasuredSizeComparison = CompareResourceSize(steps[i].MeasuredUsage)
 	}

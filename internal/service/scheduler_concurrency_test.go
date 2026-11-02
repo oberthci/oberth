@@ -36,7 +36,7 @@ func newConcurrentJobs(size pipeline.Size, capacity int) *concurrentJobs {
 	}
 }
 
-func (jobs *concurrentJobs) CreateCI(_ context.Context, request JobRequest) error {
+func (jobs *concurrentJobs) CreateWorkflow(_ context.Context, request WorkflowRequest) error {
 	jobs.mu.Lock()
 	jobs.created = append(jobs.created, request.Run.ID)
 	jobs.mu.Unlock()
@@ -44,9 +44,9 @@ func (jobs *concurrentJobs) CreateCI(_ context.Context, request JobRequest) erro
 	return nil
 }
 
-func (jobs *concurrentJobs) CreateRelease(context.Context, JobRequest) error { return nil }
+func (jobs *concurrentJobs) CreateRelease(context.Context, WorkflowRequest) error { return nil }
 
-func (jobs *concurrentJobs) PipelineSize(context.Context, JobRequest) (pipeline.Size, error) {
+func (jobs *concurrentJobs) PipelineSize(context.Context, WorkflowRequest) (pipeline.Size, error) {
 	return jobs.size.Effective(), nil
 }
 

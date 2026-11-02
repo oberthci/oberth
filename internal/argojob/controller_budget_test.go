@@ -211,7 +211,7 @@ func TestProgressWriterFailurePropagatesFromWait(t *testing.T) {
 // check, not by the aggregate ceiling.
 func TestPerStepBudgetUnchangedWithAggregateBudget(t *testing.T) {
 	t.Parallel()
-	step := StepResult{Burn: "test", Step: "log"}
+	step := StepResult{Stage: "test", Step: "log"}
 	prefix := "[test/log] "
 	lineContent := "x\n"
 	// Enough lines to exceed the 32 MiB per-step budget.

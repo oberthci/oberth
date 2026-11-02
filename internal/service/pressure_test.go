@@ -361,7 +361,7 @@ func TestPressureObservationsMetricsAndScopedRedaction(t *testing.T) {
 		t.Fatal("status caller mutated admission sample")
 	}
 	service := &API{admission: scheduler}
-	run := model.Run{ID: "1", Status: model.RunRunning, QueueSequence: 1, RepoID: 1, JobName: "reserved"}
+	run := model.Run{ID: "1", Status: model.RunRunning, QueueSequence: 1, RepoID: 1, WorkflowName: "reserved"}
 	if got := service.scheduling(t.Context(), run, nil); !strings.Contains(got.Message, "io pressure 61.2%") {
 		t.Fatal("missing run reason", got.Message)
 	}
@@ -600,7 +600,7 @@ func TestPressureNonAdminAndMCPViewsKeepNonNumericReason(t *testing.T) {
 			t.Fatal(err)
 		}
 		run := claimed
-		run.JobName = "reserved"
+		run.WorkflowName = "reserved"
 		observed := view.scheduling(t.Context(), run, nil)
 		if admin {
 			if !strings.Contains(observed.Message, "67.2%") {

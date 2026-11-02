@@ -133,7 +133,7 @@ type kubeVirtEngine struct {
 	holdWait  bool
 }
 
-func (engine *kubeVirtEngine) PipelineKubeVirt(_ context.Context, request JobRequest) (KubeVirtResources, error) {
+func (engine *kubeVirtEngine) PipelineKubeVirt(_ context.Context, request WorkflowRequest) (KubeVirtResources, error) {
 	return engine.resources[request.Run.Ref], nil
 }
 
@@ -336,12 +336,12 @@ type adoptingKubeVirtEngine struct {
 	adopted chan string
 }
 
-func (engine *adoptingKubeVirtEngine) JobNamespace() string { return "workflows" }
+func (engine *adoptingKubeVirtEngine) WorkflowNamespace() string { return "workflows" }
 
 func (engine *adoptingKubeVirtEngine) Adopt(_ context.Context, run model.Run) (pipeline.Size, bool, error) {
 	engine.mu.Lock()
 	defer engine.mu.Unlock()
-	job := engine.jobs[run.JobName]
+	job := engine.jobs[run.WorkflowName]
 	return pipeline.M, job != nil && job.runID == run.ID, nil
 }
 
@@ -365,12 +365,12 @@ func TestKubeVirtRestartRestoresTwoRunsBeforeAdmittingThird(t *testing.T) {
 	for i, ref := range []string{"first", "second"} {
 		engine.resources[ref] = KubeVirtResources{Demand: unit, Limit: limit}
 		run := fixture.enqueueAndClaim(t, ref, strings.Repeat(string(rune('a'+i)), 40))
-		run.JobName = "workflow-" + ref
-		fixture.setJobName(t, run.ID, run.JobName)
+		run.WorkflowName = "workflow-" + ref
+		fixture.setWorkflowName(t, run.ID, run.WorkflowName)
 		if _, err := fixture.store.MarkRunSubmitted(t.Context(), run.ID); err != nil {
 			t.Fatal(err)
 		}
-		if err := engine.CreateCI(t.Context(), JobRequest{Run: run, JobName: run.JobName}); err != nil {
+		if err := engine.CreateWorkflow(t.Context(), WorkflowRequest{Run: run, WorkflowName: run.WorkflowName}); err != nil {
 			t.Fatal(err)
 		}
 		<-engine.created
@@ -410,7 +410,7 @@ func TestKubeVirtRestartRestoresTwoRunsBeforeAdmittingThird(t *testing.T) {
 	}
 	for _, run := range runs {
 		current := group.run(t, run.ID)
-		if current.Status != model.RunRunning || current.JobName != run.JobName || current.SupersededBy != "" {
+		if current.Status != model.RunRunning || current.WorkflowName != run.WorkflowName || current.SupersededBy != "" {
 			t.Fatalf("restart replaced run: %#v", current)
 		}
 	}

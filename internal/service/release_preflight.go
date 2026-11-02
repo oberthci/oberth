@@ -14,7 +14,7 @@ import (
 
 // ReleasePreflighter observes declarations and public capabilities only.
 type ReleasePreflighter interface {
-	PreflightRelease(context.Context, JobRequest, []byte) (ReleasePreflightResult, error)
+	PreflightRelease(context.Context, WorkflowRequest, []byte) (ReleasePreflightResult, error)
 }
 
 // ReleasePreflightResult separates capability failures from public identity advice.
@@ -26,7 +26,7 @@ type ReleasePreflightResult struct {
 const releasePreflightFile = ".oberth/release.yaml"
 const releasePreflightLimit = 1 << 20
 
-func releasePreflight(ctx context.Context, git vmrunner.PolicyGit, checker ReleasePreflighter, request JobRequest, base string, defaultBase bool) (ReleasePreflightResult, error) {
+func releasePreflight(ctx context.Context, git vmrunner.PolicyGit, checker ReleasePreflighter, request WorkflowRequest, base string, defaultBase bool) (ReleasePreflightResult, error) {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	repo := model.CanonicalRepoKey(request.UpstreamName, request.UpstreamOrg, request.Repository.Name)
@@ -88,7 +88,7 @@ func releasePreflight(ctx context.Context, git vmrunner.PolicyGit, checker Relea
 	return combined, nil
 }
 
-func (scheduler *Scheduler) checkReleasePreflight(ctx context.Context, request JobRequest, output io.Writer) error {
+func (scheduler *Scheduler) checkReleasePreflight(ctx context.Context, request WorkflowRequest, output io.Writer) error {
 	checker, ok := scheduler.jobs.(ReleasePreflighter)
 	if !ok || request.Run.Release {
 		return nil
@@ -133,7 +133,7 @@ func (service *API) checkPromotionRelease(ctx context.Context, repository model.
 	if err != nil {
 		return err
 	}
-	request := JobRequest{Repository: repository, UpstreamName: upstream.Name, UpstreamOrg: upstream.Org(), Run: model.Run{SHA: sha, TestedSHA: sha, RefKind: model.RefBranch, Trigger: "promotion"}}
+	request := WorkflowRequest{Repository: repository, UpstreamName: upstream.Name, UpstreamOrg: upstream.Org(), Run: model.Run{SHA: sha, TestedSHA: sha, RefKind: model.RefBranch, Trigger: "promotion"}}
 	result, err := releasePreflight(ctx, git, service.releasePreflight, request, base, false)
 	if err != nil {
 		return err
@@ -146,9 +146,9 @@ func (service *API) checkPromotionRelease(ctx context.Context, repository model.
 
 // An optional engine capability extends preflight to administrator-pinned tag
 // documents. Legacy engines keep exactly their default release file.
-func releasePreflightFiles(ctx context.Context, checker any, request JobRequest) ([]string, error) {
+func releasePreflightFiles(ctx context.Context, checker any, request WorkflowRequest) ([]string, error) {
 	if lister, ok := checker.(interface {
-		ReleasePreflightFiles(context.Context, JobRequest) ([]string, error)
+		ReleasePreflightFiles(context.Context, WorkflowRequest) ([]string, error)
 	}); ok {
 		return lister.ReleasePreflightFiles(ctx, request)
 	}

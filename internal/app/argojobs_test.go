@@ -54,7 +54,7 @@ func TestPipelineSize_MissingFile(t *testing.T) {
 	// Empty directory — no .oberth/build.yaml exists.
 
 	jobs := &ArgoJobs{intents: map[string]argoIntent{}}
-	_, err := jobs.PipelineSize(context.Background(), service.JobRequest{
+	_, err := jobs.PipelineSize(context.Background(), service.WorkflowRequest{
 		Run:        model.Run{Ref: "refs/heads/main"},
 		Repository: model.Repository{Name: "terraform"},
 		SourceDir:  dir,
@@ -98,7 +98,7 @@ spec:
 	}
 
 	jobs := &ArgoJobs{intents: map[string]argoIntent{}}
-	size, err := jobs.PipelineSize(context.Background(), service.JobRequest{
+	size, err := jobs.PipelineSize(context.Background(), service.WorkflowRequest{
 		Run:        model.Run{Ref: "refs/heads/main"},
 		Repository: model.Repository{Name: "terraform"},
 		SourceDir:  dir,
@@ -154,7 +154,7 @@ spec:
 	}
 	jobs := &ArgoJobs{auditor: auditor, config: config, intents: map[string]argoIntent{}}
 
-	request := service.JobRequest{
+	request := service.WorkflowRequest{
 		Run: model.Run{
 			ID: "run-test-audit", Ref: "refs/tags/v1.0.0",
 			SHA: tagObjectSHA, TestedSHA: commitSHA,
@@ -240,7 +240,7 @@ func TestNonrootPreparationPrecedesAuditAndCreation(t *testing.T) {
 			}
 			audited = true
 		}}
-		err := fixture.jobs.CreateCI(t.Context(), fixture.request("wf-nonroot-order", "run-nonroot-order"))
+		err := fixture.jobs.CreateWorkflow(t.Context(), fixture.request("wf-nonroot-order", "run-nonroot-order"))
 		if (err != nil) != fail || !prepared || audited == fail || created == fail {
 			t.Fatalf("failed=%v prepared=%v audited=%v created=%v error=%v", fail, prepared, audited, created, err)
 		}
@@ -260,7 +260,7 @@ func TestSelectedNonrootWithoutProofCannotBeAudited(t *testing.T) {
 	}
 	fixture.jobs.config.NonrootProfile = argoworkflow.NonrootStaticProfile
 	fixture.jobs.auditor = &stubAuditor{onAppend: func(model.AuditActionSpec) { t.Fatal("unproved nonroot submission audited") }}
-	if err := fixture.jobs.CreateCI(t.Context(), fixture.request("wf-no-proof", "run-no-proof")); err == nil {
+	if err := fixture.jobs.CreateWorkflow(t.Context(), fixture.request("wf-no-proof", "run-no-proof")); err == nil {
 		t.Fatal("nonroot declaration manufactured proof")
 	}
 	if len(fixture.controller.created) != 0 {

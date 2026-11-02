@@ -19,17 +19,17 @@ func TestRestartCutR2CombinedKeepsRunningEvidenceAndTerminalFallback(t *testing.
 	failure := errors.New("executor identity delivery unavailable")
 	c := &restartReadController{
 		adoptingArgoControl: adoptingArgoControl{found: true, binding: argojob.Adoption{UID: "workflow-uid", Identity: "identity", Size: pipeline.M}},
-		observed:            argojob.Completion{Name: "workflow", Phase: "Running", Reason: "Workflow running", ReplayAttempts: []argojob.StepResult{{Burn: "ci", Step: "test", Status: runprogress.StepRunning, StartedAt: &started}}},
+		observed:            argojob.Completion{Name: "workflow", Phase: "Running", Reason: "Workflow running", ReplayAttempts: []argojob.StepResult{{Stage: "ci", Step: "test", Status: runprogress.StepRunning, StartedAt: &started}}},
 		observationError:    failure,
 		next:                argojob.Completion{Name: "workflow", Terminal: true, Interrupted: true, Infrastructure: true, Reason: "server restart interrupted ci/test: missing exit"},
 	}
 	collector, artifacts := &fakeCollector{body: []byte("archive")}, &fakeArtifactStore{}
 	jobs := &ArgoJobs{controller: c, intents: map[string]argoIntent{}, collector: collector, artifacts: artifacts, artifactLimit: 1 << 20}
-	run := model.Run{ID: "run", JobName: "workflow", RefKind: model.RefBranch, Ref: "feature", SHA: "sha", Trigger: "branch"}
+	run := model.Run{ID: "run", WorkflowName: "workflow", RefKind: model.RefBranch, Ref: "feature", SHA: "sha", Trigger: "branch"}
 	if _, found, err := jobs.Adopt(t.Context(), run); err != nil || !found {
 		t.Fatal(found, err)
 	}
-	observed, err := jobs.WaitResumed(t.Context(), run.JobName, io.Discard, nil, 0)
+	observed, err := jobs.WaitResumed(t.Context(), run.WorkflowName, io.Discard, nil, 0)
 	if !errors.Is(err, failure) || !observed.ObservedStepStart || observed.Reobserve == nil || collector.calls != 0 || len(jobs.intents) != 0 {
 		t.Fatal("running evidence lost or live artifacts collected", observed, err, collector.calls)
 	}

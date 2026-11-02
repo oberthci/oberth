@@ -18,7 +18,7 @@ const trustedCapacityRetryInterval = 5 * time.Second
 // submitted or otherwise uncertain execution. Execute constructs fresh absolute
 // admission/deadline times after each retry; an unsuccessful transaction has not
 // journaled an intent, started a Workflow, or delivered credentials.
-func (scheduler *Scheduler) executeTrustedWithCapacity(ctx context.Context, job JobRequest, requirement vmrunner.Requirement, output io.Writer, reservation *admissionReservation, require mutationRequirement) (bool, error) {
+func (scheduler *Scheduler) executeTrustedWithCapacity(ctx context.Context, job WorkflowRequest, requirement vmrunner.Requirement, output io.Writer, reservation *admissionReservation, require mutationRequirement) (bool, error) {
 	for {
 		err := scheduler.trusted.Execute(ctx, job, requirement, output)
 		if !errors.Is(err, store.ErrVMCapacity) {

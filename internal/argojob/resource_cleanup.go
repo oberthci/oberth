@@ -479,7 +479,7 @@ func (c *Controller) cleanupVerdict(ctx context.Context, wf *wfv1.Workflow, runI
 		output = &cleanupLogWriter{Writer: destination}
 		destination = output
 	}
-	step := StepResult{Burn: "oberth-cleanup", Step: "cleanup-verdict", Status: runprogress.StepRunning}
+	step := StepResult{Stage: "oberth-cleanup", Step: "cleanup-verdict", Status: runprogress.StepRunning}
 	for _, existing := range completion.Steps {
 		step.Ordinal = max(step.Ordinal, existing.Ordinal+1)
 	}
@@ -489,7 +489,7 @@ func (c *Controller) cleanupVerdict(ctx context.Context, wf *wfv1.Workflow, runI
 		if destination == nil {
 			return
 		}
-		marker, err := runprogress.MarshalMarker(runprogress.Event{Version: runprogress.Version, Burn: step.Burn, Step: step.Step, Ordinal: step.Ordinal, Status: status, ExitCode: step.ExitCode, StartedAt: step.StartedAt, FinishedAt: step.FinishedAt})
+		marker, err := runprogress.MarshalMarker(runprogress.Event{Version: runprogress.Version, Stage: step.Stage, Step: step.Step, Ordinal: step.Ordinal, Status: status, ExitCode: step.ExitCode, StartedAt: step.StartedAt, FinishedAt: step.FinishedAt})
 		if err == nil {
 			_, _ = destination.Write(marker)
 		}
@@ -620,7 +620,7 @@ func (c *Controller) cleanupVerdict(ctx context.Context, wf *wfv1.Workflow, runI
 		completion.Succeeded = false
 		completion.Infrastructure = infrastructure && !pipelineFailed
 		if !pipelineFailed || completion.FailedStep == "" {
-			completion.FailedBurn, completion.FailedStep = step.Burn, step.Step
+			completion.FailedStage, completion.FailedStep = step.Stage, step.Step
 		}
 		completion.Reason = strings.TrimPrefix(strings.TrimSpace(completion.Reason+"; "+message), "; ")
 	}

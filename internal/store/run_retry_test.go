@@ -63,9 +63,9 @@ func TestRetryRunRefusesTestFailuresAndUnauthorizedReleaseRuns(t *testing.T) {
 		spec   model.RunSpec
 		result model.RunResult
 	}{
-		{name: "test failure", result: model.RunResult{Status: model.RunFailed, Phase: "test", FailedBurn: "test", FailedStep: "unit"}},
-		{name: "fake infrastructure phase", result: model.RunResult{Status: model.RunFailed, Phase: "infrastructure", FailedBurn: "test", FailedStep: "unit"}},
-		{name: "job phase with failed step", result: model.RunResult{Status: model.RunFailed, Phase: "job", FailedBurn: "test", FailedStep: "unit"}},
+		{name: "test failure", result: model.RunResult{Status: model.RunFailed, Phase: "test", FailedStage: "test", FailedStep: "unit"}},
+		{name: "fake infrastructure phase", result: model.RunResult{Status: model.RunFailed, Phase: "infrastructure", FailedStage: "test", FailedStep: "unit"}},
+		{name: "job phase with failed step", result: model.RunResult{Status: model.RunFailed, Phase: "job", FailedStage: "test", FailedStep: "unit"}},
 		{name: "release", spec: model.RunSpec{RefKind: model.RefTag, Ref: "v1", Release: true, Trigger: "release"}, result: model.RunResult{Status: model.RunInterrupted}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -176,7 +176,7 @@ func TestTagReplayEvidenceAndPublicationGuardAreTransactional(t *testing.T) {
 	if _, err := s.ClaimNextRun(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.PutStepResult(ctx, model.StepResult{RunID: source.ID, Burn: "build", Step: "build", Status: model.StepPassed, DeclaredSize: "M"}); err != nil {
+	if _, err := s.PutStepResult(ctx, model.StepResult{RunID: source.ID, Stage: "build", Step: "build", Status: model.StepPassed, DeclaredSize: "M"}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.BeginPublication(ctx, model.PublicationSpec{RepoID: repo.ID, RunID: source.ID, RefKind: model.RefTag, Ref: source.Ref, ResultSHA: source.SHA, Actor: source.Actor}); err != nil {

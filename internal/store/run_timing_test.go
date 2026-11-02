@@ -107,7 +107,7 @@ func TestRunTimingWorkflowAndPodAttemptSurviveReopen(t *testing.T) {
 	if _, err = s.ClaimNextRun(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = s.SetRunJobName(ctx, run.ID, "workflow-test"); err != nil {
+	if _, err = s.SetRunWorkflowName(ctx, run.ID, "workflow-test"); err != nil {
 		t.Fatal(err)
 	}
 	binding := model.WorkflowTiming{RunID: run.ID, Namespace: "pipelines", Name: "workflow-test", UID: "11111111-1111-4111-8111-111111111111", SpecIdentity: strings.Repeat("a", 64), CreatedAt: now, Tasks: []model.TimingTask{{ID: "unit", Template: "unit", Readiness: "all", Dependencies: []string{}}}}
@@ -115,7 +115,7 @@ func TestRunTimingWorkflowAndPodAttemptSurviveReopen(t *testing.T) {
 		t.Fatal(err)
 	}
 	main := &model.ContainerTiming{Name: "main", ContainerID: "containerd://" + strings.Repeat("c", 64), StartedAt: now, FinishedAt: now.Add(time.Second)}
-	value := model.StepTiming{Version: 1, RunID: run.ID, Namespace: binding.Namespace, WorkflowName: binding.Name, WorkflowUID: binding.UID, NodeID: "node-1234", PodName: "pod-1234", Burn: "test", Step: "unit", ObservedAt: now.Add(2 * time.Second), ScriptTiming: "mixed", ImagePullTiming: "not-observed", Init: []model.ContainerTiming{}, Missing: []string{"main"}, Unavailable: "observation-unavailable"}
+	value := model.StepTiming{Version: 1, RunID: run.ID, Namespace: binding.Namespace, WorkflowName: binding.Name, WorkflowUID: binding.UID, NodeID: "node-1234", PodName: "pod-1234", Stage: "test", Step: "unit", ObservedAt: now.Add(2 * time.Second), ScriptTiming: "mixed", ImagePullTiming: "not-observed", Init: []model.ContainerTiming{}, Missing: []string{"main"}, Unavailable: "observation-unavailable"}
 	if err = s.RecordStepTimings(ctx, []model.StepTiming{value}); err != nil {
 		t.Fatal(err)
 	}
@@ -228,7 +228,7 @@ func TestRunTimingDoesNotInferAdmissionFromLegacySubmission(t *testing.T) {
 	if _, err = s.ClaimNextRun(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = s.SetRunJobName(ctx, run.ID, "workflow-legacy"); err != nil {
+	if _, err = s.SetRunWorkflowName(ctx, run.ID, "workflow-legacy"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = s.MarkRunSubmitted(ctx, run.ID); err != nil {
@@ -256,7 +256,7 @@ func TestRunTimingMigrationDoesNotBackfillLegacyStartedAt(t *testing.T) {
 	if _, err = s.ClaimNextRun(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = s.SetRunJobName(ctx, run.ID, "workflow-legacy"); err != nil {
+	if _, err = s.SetRunWorkflowName(ctx, run.ID, "workflow-legacy"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = s.MarkRunSubmitted(ctx, run.ID); err != nil {

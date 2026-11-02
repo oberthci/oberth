@@ -23,9 +23,9 @@ func planStore(t *testing.T) *Store {
 func TestStepPlanRoundTripsInOrdinalOrder(t *testing.T) {
 	store := planStore(t)
 	written := []runprogress.PlannedStep{
-		{Burn: "setup", Step: "tools-dir", Ordinal: 0},
-		{Burn: "setup", Step: "link-go", Ordinal: 1},
-		{Burn: "test", Step: "test", Ordinal: 2},
+		{Stage: "setup", Step: "tools-dir", Ordinal: 0},
+		{Stage: "setup", Step: "link-go", Ordinal: 1},
+		{Stage: "test", Step: "test", Ordinal: 2},
 	}
 	if err := store.WriteStepPlan("run-plan", written); err != nil {
 		t.Fatalf("write step plan: %v", err)
@@ -61,18 +61,18 @@ func TestWriteStepPlanRefusesAnAmbiguousPlan(t *testing.T) {
 	store := planStore(t)
 	for name, plan := range map[string][]runprogress.PlannedStep{
 		"duplicate key": {
-			{Burn: "setup", Step: "tools-dir", Ordinal: 0},
-			{Burn: "setup", Step: "tools-dir", Ordinal: 1},
+			{Stage: "setup", Step: "tools-dir", Ordinal: 0},
+			{Stage: "setup", Step: "tools-dir", Ordinal: 1},
 		},
 		"shared ordinal": {
-			{Burn: "setup", Step: "tools-dir", Ordinal: 0},
-			{Burn: "setup", Step: "link-go", Ordinal: 0},
+			{Stage: "setup", Step: "tools-dir", Ordinal: 0},
+			{Stage: "setup", Step: "link-go", Ordinal: 0},
 		},
-		"empty step": {{Burn: "setup", Step: "", Ordinal: 0}},
+		"empty step": {{Stage: "setup", Step: "", Ordinal: 0}},
 		"control character": {
-			{Burn: "setup", Step: "a\nb", Ordinal: 0},
+			{Stage: "setup", Step: "a\nb", Ordinal: 0},
 		},
-		"negative ordinal": {{Burn: "setup", Step: "tools-dir", Ordinal: -1}},
+		"negative ordinal": {{Stage: "setup", Step: "tools-dir", Ordinal: -1}},
 	} {
 		if err := store.WriteStepPlan("run-"+name, plan); err == nil {
 			t.Errorf("%s: plan was accepted", name)
@@ -82,7 +82,7 @@ func TestWriteStepPlanRefusesAnAmbiguousPlan(t *testing.T) {
 
 func TestStepPlanRejectsAnUnsafeRunID(t *testing.T) {
 	store := planStore(t)
-	if err := store.WriteStepPlan("../escape", []runprogress.PlannedStep{{Burn: "a", Step: "b"}}); err == nil {
+	if err := store.WriteStepPlan("../escape", []runprogress.PlannedStep{{Stage: "a", Step: "b"}}); err == nil {
 		t.Fatal("a traversing run ID was accepted")
 	}
 	if _, err := store.StepPlan("../escape"); err == nil {
@@ -103,7 +103,7 @@ func TestReplayPlanVersionDistinguishesLegacyClassification(t *testing.T) {
 	if err != nil || record.Version == runprogress.PlanVersion {
 		t.Fatalf("legacy plan presented as current credential evidence: %+v %v", record, err)
 	}
-	if err := logs.WriteStepPlan("current", []runprogress.PlannedStep{{Burn: "publish", Step: "push", Ordinal: 0, Credentialed: true}}); err != nil {
+	if err := logs.WriteStepPlan("current", []runprogress.PlannedStep{{Stage: "publish", Step: "push", Ordinal: 0, Credentialed: true}}); err != nil {
 		t.Fatal(err)
 	}
 	record, err = logs.StepPlanRecord("current")

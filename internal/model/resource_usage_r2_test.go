@@ -8,7 +8,7 @@ import (
 
 func resourceModelRow() StepResourceUsage {
 	at := time.Now().UTC()
-	return StepResourceUsage{Version: 2, Source: "kubelet-cadvisor", RunID: strings.Repeat("a", 32), WorkflowName: "wf", WorkflowUID: "11111111-1111-4111-8111-111111111111", Namespace: "argo", NodeID: "wf-1", PodName: "wf-1", PodUID: "22222222-2222-4222-8222-222222222222", NodeName: "node-a", ContainerID: "containerd://" + strings.Repeat("b", 64), ContainerName: "main", ContainerKind: "app", PodKind: "workflow", Burn: "ci", Step: "test", FirstObservedAt: at, LastObservedAt: at, SourceAt: at, ContainerSourceAt: at, IOPressureAt: at, Samples: 1, SampledLowerBound: true, ContainerStartedAt: at.Add(-time.Minute)}
+	return StepResourceUsage{Version: 2, Source: "kubelet-cadvisor", RunID: strings.Repeat("a", 32), WorkflowName: "wf", WorkflowUID: "11111111-1111-4111-8111-111111111111", Namespace: "argo", NodeID: "wf-1", PodName: "wf-1", PodUID: "22222222-2222-4222-8222-222222222222", NodeName: "node-a", ContainerID: "containerd://" + strings.Repeat("b", 64), ContainerName: "main", ContainerKind: "app", PodKind: "workflow", Stage: "ci", Step: "test", FirstObservedAt: at, LastObservedAt: at, SourceAt: at, ContainerSourceAt: at, IOPressureAt: at, Samples: 1, SampledLowerBound: true, ContainerStartedAt: at.Add(-time.Minute)}
 }
 
 func TestResourceKindsTimingAndGaugeMergeGuards(t *testing.T) {

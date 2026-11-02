@@ -138,7 +138,7 @@ else:
 	}
 }
 
-func TestOberthSplitBurnsUseTheRaceGroupLauncher(t *testing.T) {
+func TestOberthSplitStagesUseTheRaceGroupLauncher(t *testing.T) {
 	built, err := buildOberthPipelineForIsolation(t, pipeline.TriggerCI, loadPipeline(t, "build.yaml"))
 	if err != nil {
 		t.Fatal(err)

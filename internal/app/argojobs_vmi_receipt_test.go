@@ -35,7 +35,7 @@ func (f *vmiReceiptFragments) Load(_ context.Context, key argoworkflow.FragmentK
 	return argoworkflow.Fragment{Key: key, SHA: strings.Repeat("a", 40), Source: body}, err
 }
 
-func appVMIReceiptFixture(t *testing.T, trigger string) (*ArgoJobs, *routeController, *vmiReceiptFragments, service.JobRequest) {
+func appVMIReceiptFixture(t *testing.T, trigger string) (*ArgoJobs, *routeController, *vmiReceiptFragments, service.WorkflowRequest) {
 	t.Helper()
 	source, err := os.ReadFile("../../pkg/argoworkflow/testdata/vmi-run-projection.yaml")
 	if err != nil {
@@ -51,7 +51,7 @@ func appVMIReceiptFixture(t *testing.T, trigger string) (*ArgoJobs, *routeContro
 			return store.KubeVirtBudget{MaxVMs: 4, MaxCores: 12, MaxMemoryBytes: 24 << 30}, true, nil
 		}),
 	}
-	request := service.JobRequest{JobName: "workflow", Run: model.Run{ID: "run", RepoID: 7, Trigger: trigger, RefKind: model.RefBranch, Ref: "main", SHA: strings.Repeat("b", 40), Actor: "agent@example"}, Repository: model.Repository{ID: 7, Name: "repo"}, SourceDir: dir}
+	request := service.WorkflowRequest{WorkflowName: "workflow", Run: model.Run{ID: "run", RepoID: 7, Trigger: trigger, RefKind: model.RefBranch, Ref: "main", SHA: strings.Repeat("b", 40), Actor: "agent@example"}, Repository: model.Repository{ID: 7, Name: "repo"}, SourceDir: dir}
 	return jobs, controller, fragments, request
 }
 
@@ -67,7 +67,7 @@ func TestVMIDemandReceiptConnectsReservationToSubmission(t *testing.T) {
 				t.Fatalf("resources=%+v", resources)
 			}
 			request.VMIDemandReceipt = resources.Receipt
-			if err := jobs.CreateCI(t.Context(), request); err != nil {
+			if err := jobs.CreateWorkflow(t.Context(), request); err != nil {
 				t.Fatal(err)
 			}
 			if fragments.calls != 2 {
@@ -183,7 +183,7 @@ func TestRawPartitionGuardUsesSumWithoutRewriting(t *testing.T) {
 		t.Fatalf("raw partition guards earned credits: %+v", resources)
 	}
 	request.VMIDemandReceipt = resources.Receipt
-	if err := jobs.CreateCI(t.Context(), request); err != nil {
+	if err := jobs.CreateWorkflow(t.Context(), request); err != nil {
 		t.Fatal(err)
 	}
 	submitted, err := argojob.Build(jobs.config, controller.request)
@@ -247,7 +247,7 @@ func TestVMIDemandReceiptRefusesChangedSubmission(t *testing.T) {
 				}
 				writePipeline(t, request.SourceDir, "build.yaml", string(source))
 			case "fragment-content":
-				if err := jobs.CreateCI(t.Context(), request); err != nil {
+				if err := jobs.CreateWorkflow(t.Context(), request); err != nil {
 					t.Fatal(err)
 				}
 				submission := controller.request
@@ -262,7 +262,7 @@ func TestVMIDemandReceiptRefusesChangedSubmission(t *testing.T) {
 				}
 				return
 			}
-			if err := jobs.CreateCI(t.Context(), request); err == nil {
+			if err := jobs.CreateWorkflow(t.Context(), request); err == nil {
 				t.Fatal("changed submission was admitted")
 			}
 			if controller.request.Source != nil {

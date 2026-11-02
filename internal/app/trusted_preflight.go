@@ -81,7 +81,7 @@ func (p *TrustedPreflights) Supports(contract vmrunner.Contract) error {
 	return err
 }
 
-func (p *TrustedPreflights) request(job service.JobRequest, intent vmrunner.KVMIntent) (argojob.Request, error) {
+func (p *TrustedPreflights) request(job service.WorkflowRequest, intent vmrunner.KVMIntent) (argojob.Request, error) {
 	source, err := readArgoSource(job.SourceDir, pipeline.TriggerCI)
 	if err != nil {
 		return argojob.Request{}, err
@@ -97,7 +97,7 @@ func (p *TrustedPreflights) request(job service.JobRequest, intent vmrunner.KVMI
 	return argojob.Request{RunID: job.Run.ID, RepositoryID: job.Repository.ID, Name: intent.WorkflowName, Repo: job.Repository.Name, UpstreamName: job.UpstreamName, UpstreamOrg: job.UpstreamOrg, Ref: job.Run.Ref, SHA: intent.CandidateSHA, Trigger: pipeline.TriggerCI, RunTrigger: kind, ScheduleEntry: job.Run.ScheduleEntry, Source: source, SourceDir: job.SourceDir, ApprovedSecrets: map[string]bool{}, StepGrants: map[string]map[string]bool{}, TrustedKVM: &intent}, nil
 }
 
-func (p *TrustedPreflights) Execute(ctx context.Context, job service.JobRequest, requirement vmrunner.Requirement, output io.Writer) (retErr error) {
+func (p *TrustedPreflights) Execute(ctx context.Context, job service.WorkflowRequest, requirement vmrunner.Requirement, output io.Writer) (retErr error) {
 	if requirement.Contract == nil {
 		return errors.New("missing trusted contract")
 	}
@@ -128,7 +128,7 @@ func (p *TrustedPreflights) Execute(ctx context.Context, job service.JobRequest,
 	if duration <= 0 || duration > vmrunner.MaxDeadline {
 		duration = vmrunner.MaxDeadline
 	}
-	intent := vmrunner.KVMIntent{RunID: job.Run.ID, RepoID: job.Repository.ID, Repository: model.CanonicalRepoKey(job.UpstreamName, job.UpstreamOrg, job.Repository.Name), CandidateSHA: requirement.CandidateSHA, BaselineSHA: requirement.BaselineSHA, Contract: *requirement.Contract, Recipe: recipe, Namespace: p.jobs.controller.Namespace(), WorkflowName: job.JobName + "-trusted", WorkflowSpecDigest: hex.EncodeToString(sum[:]), InventoryDigest: inventory, CaseCount: count, AdmittedAt: now, Deadline: now.Add(duration)}
+	intent := vmrunner.KVMIntent{RunID: job.Run.ID, RepoID: job.Repository.ID, Repository: model.CanonicalRepoKey(job.UpstreamName, job.UpstreamOrg, job.Repository.Name), CandidateSHA: requirement.CandidateSHA, BaselineSHA: requirement.BaselineSHA, Contract: *requirement.Contract, Recipe: recipe, Namespace: p.jobs.controller.Namespace(), WorkflowName: job.WorkflowName + "-trusted", WorkflowSpecDigest: hex.EncodeToString(sum[:]), InventoryDigest: inventory, CaseCount: count, AdmittedAt: now, Deadline: now.Add(duration)}
 	submission, err := p.request(job, intent)
 	if err != nil {
 		return err
@@ -301,7 +301,7 @@ func (p *TrustedPreflights) failure(completion argojob.Completion, cause error) 
 	// a failed Workflow/Pod, and receipt collection failures remain infrastructure.
 	if completion.Succeeded || completion.Infrastructure || result.FailedStep == "" {
 		result.Phase = "infrastructure"
-		result.FailedBurn, result.FailedStep = "", ""
+		result.FailedStage, result.FailedStep = "", ""
 	}
 	result.Status = model.RunFailed
 	result.Error = cause.Error()
@@ -413,7 +413,7 @@ func (p *TrustedPreflights) recoverOne(ctx context.Context, execution vmrunner.K
 			if err != nil {
 				return err
 			}
-			job := service.JobRequest{Run: run, Repository: repo, UpstreamName: upstream.Name, UpstreamOrg: upstream.Org(), SourceDir: filepath.Join(p.workspaceRoot, run.ID, "src")}
+			job := service.WorkflowRequest{Run: run, Repository: repo, UpstreamName: upstream.Name, UpstreamOrg: upstream.Org(), SourceDir: filepath.Join(p.workspaceRoot, run.ID, "src")}
 			request, err := p.request(job, intent)
 			if err != nil {
 				return err
@@ -460,7 +460,7 @@ func (p *TrustedPreflights) RecipeAllowed(recipe vmrunner.KVMRecipe) error {
 	}
 	return errors.New("journaled trusted recipe has been revoked or changed")
 }
-func (p *TrustedPreflights) Size(_ context.Context, job service.JobRequest) (pipeline.Size, error) {
+func (p *TrustedPreflights) Size(_ context.Context, job service.WorkflowRequest) (pipeline.Size, error) {
 	source, err := readArgoSource(job.SourceDir, pipeline.TriggerCI)
 	if err != nil {
 		return "", err

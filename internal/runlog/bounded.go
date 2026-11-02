@@ -285,7 +285,7 @@ func (r *completeRecordReader) Read(p []byte) (int, error) {
 // readActiveWindow discovers ranges only inside a bounded raw-log window.
 // A missing step in a partial window is an incomplete observation, not proof
 // that the step has no output. Continuation cursors are absolute file offsets.
-func (store *Store) readActiveWindow(runID, burn, step string, filter Filter, maximum int64) ([]byte, Meta, error) {
+func (store *Store) readActiveWindow(runID, stage, step string, filter Filter, maximum int64) ([]byte, Meta, error) {
 	path, err := store.logPath(runID)
 	if err != nil {
 		return nil, Meta{}, err
@@ -351,7 +351,7 @@ func (store *Store) readActiveWindow(runID, burn, step string, filter Filter, ma
 	}
 	ranges := make([]Range, 0)
 	for _, r := range index.Ranges {
-		if r.Burn == burn && r.Step == step {
+		if r.Stage == stage && r.Step == step {
 			// Only count a discovery omission when its marker attributes it
 			// to this step. An unmarked leading fragment has unknown ownership.
 			if rawEnd < info.Size() && rawEnd-end > maxFilterLineBytes && r.End+base == rawEnd {
@@ -366,7 +366,7 @@ func (store *Store) readActiveWindow(runID, burn, step string, filter Filter, ma
 	}
 	partial := start > 0 || end < info.Size()
 	if len(ranges) == 0 && !partial {
-		return nil, Meta{}, fmt.Errorf("active log slice %s/%s: %w", burn, step, os.ErrNotExist)
+		return nil, Meta{}, fmt.Errorf("active log slice %s/%s: %w", stage, step, os.ErrNotExist)
 	}
 	body, meta, err := filterRanges(file, ranges, rangeBytes(ranges), filter)
 	if err != nil {

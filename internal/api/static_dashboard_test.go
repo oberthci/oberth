@@ -45,7 +45,7 @@ func TestRunDetailRefreshKeepsResolvedBreadcrumb(t *testing.T) {
 	}
 }
 
-func TestRunDetailKeepsQueuedBurnsPending(t *testing.T) {
+func TestRunDetailKeepsQueuedStagesPending(t *testing.T) {
 	t.Parallel()
 	script, ok := staticAssets["app.js"]
 	if !ok {

@@ -15,14 +15,14 @@ import (
 )
 
 func tagReplayPlan() []runprogress.PlannedStep {
-	return []runprogress.PlannedStep{{Burn: "test", Step: "unit", Ordinal: 0}, {Burn: "publish", Step: "push", Ordinal: 1, Secrets: true, Credentialed: true}}
+	return []runprogress.PlannedStep{{Stage: "test", Step: "unit", Ordinal: 0}, {Stage: "publish", Step: "push", Ordinal: 1, Secrets: true, Credentialed: true}}
 }
 func skippedPublisher() model.StepResult {
-	return model.StepResult{Burn: "publish", Step: "push", Ordinal: 1, Status: model.StepSkipped, DeclaredSize: "M"}
+	return model.StepResult{Stage: "publish", Step: "push", Ordinal: 1, Status: model.StepSkipped, DeclaredSize: "M"}
 }
 
 func TestTagRunRerunBeforeCredentialedStepsNeedsNoForce(t *testing.T) {
-	harness := newRerunHarness(t, observedTagResult(JobResult{Status: model.RunFailed, Phase: "test", FailedBurn: "test", FailedStep: "unit", Steps: []model.StepResult{stepResult(model.StepFailed), skippedPublisher()}}), greenResult)
+	harness := newRerunHarness(t, observedTagResult(JobResult{Status: model.RunFailed, Phase: "test", FailedStage: "test", FailedStep: "unit", Steps: []model.StepResult{stepResult(model.StepFailed), skippedPublisher()}}), greenResult)
 	harness.fixture.jobs.plan = tagReplayPlan()
 	harness.fixture.jobs.transcripts = []string{"[test/unit] failed before publish\n"}
 	failed := admitRerunTag(t, harness)
@@ -56,7 +56,7 @@ func TestTagRunReplayRequiresForceAfterSecretsStarted(t *testing.T) {
 		t.Run(kind, func(t *testing.T) {
 			result := infraFailure
 			if kind == "failed step without result" {
-				result = JobResult{Status: model.RunFailed, Phase: "test", FailedBurn: "publish", FailedStep: "push"}
+				result = JobResult{Status: model.RunFailed, Phase: "test", FailedStage: "publish", FailedStep: "push"}
 			}
 			harness := newRerunHarness(t, observedTagResult(result))
 			harness.fixture.jobs.plan = tagReplayPlan()
@@ -64,12 +64,12 @@ func TestTagRunReplayRequiresForceAfterSecretsStarted(t *testing.T) {
 			now := time.Now()
 			switch kind {
 			case "running journal":
-				if err := harness.fixture.logs.AppendStepProgress(failed.ID, runprogress.Event{Version: 1, Burn: "publish", Step: "push", Ordinal: 1, DeclaredSize: "M", Status: runprogress.StepRunning, StartedAt: &now}); err != nil {
+				if err := harness.fixture.logs.AppendStepProgress(failed.ID, runprogress.Event{Version: 1, Stage: "publish", Step: "push", Ordinal: 1, DeclaredSize: "M", Status: runprogress.StepRunning, StartedAt: &now}); err != nil {
 					t.Fatal(err)
 				}
 			case "failed step without result": // source's failed-step identity is evidence, too.
 			case "started then queued":
-				for _, event := range []runprogress.Event{{Version: 1, Burn: "publish", Step: "push", Ordinal: 1, DeclaredSize: "M", Status: runprogress.StepRunning, StartedAt: &now}, {Version: 1, Burn: "publish", Step: "push", Ordinal: 1, DeclaredSize: "M", Status: runprogress.StepQueued}} {
+				for _, event := range []runprogress.Event{{Version: 1, Stage: "publish", Step: "push", Ordinal: 1, DeclaredSize: "M", Status: runprogress.StepRunning, StartedAt: &now}, {Version: 1, Stage: "publish", Step: "push", Ordinal: 1, DeclaredSize: "M", Status: runprogress.StepQueued}} {
 					if err := harness.fixture.logs.AppendStepProgress(failed.ID, event); err != nil {
 						t.Fatal(err)
 					}
@@ -85,7 +85,7 @@ func TestTagRunReplayRequiresForceAfterSecretsStarted(t *testing.T) {
 				case "skipped after start":
 					result.StartedAt = &now
 				case "legacy attempt":
-					result.Burn = "publish(0)"
+					result.Stage = "publish(0)"
 					result.Status = model.StepPassed
 				}
 				result.RunID = failed.ID
@@ -214,14 +214,14 @@ func observedTagResult(result JobResult) JobResult {
 		observation.Nodes = len(result.Steps) + 1
 	}
 	for _, step := range result.Steps {
-		observation.Steps = append(observation.Steps, model.RunObservedStep{Burn: step.Burn, Step: step.Step, Status: step.Status, Started: step.StartedAt != nil || step.Status != model.StepSkipped})
+		observation.Steps = append(observation.Steps, model.RunObservedStep{Stage: step.Stage, Step: step.Step, Status: step.Status, Started: step.StartedAt != nil || step.Status != model.StepSkipped})
 	}
 	result.TerminalObservation = observation
 	return result
 }
 func ensureTagJournal(t *testing.T, harness *rerunHarness, run model.Run) {
 	t.Helper()
-	if err := harness.fixture.logs.AppendStepProgress(run.ID, runprogress.Event{Version: 1, Burn: "test", Step: "unit", Ordinal: 0, DeclaredSize: "M", Status: runprogress.StepQueued}); err != nil {
+	if err := harness.fixture.logs.AppendStepProgress(run.ID, runprogress.Event{Version: 1, Stage: "test", Step: "unit", Ordinal: 0, DeclaredSize: "M", Status: runprogress.StepQueued}); err != nil {
 		t.Fatal(err)
 	}
 }

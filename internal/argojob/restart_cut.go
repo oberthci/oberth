@@ -97,13 +97,13 @@ func (completion *Completion) classifyRestartCut() {
 	}
 	if real != nil {
 		completion.Infrastructure = false
-		completion.FailedBurn, completion.FailedStep = real.Burn, real.Step
+		completion.FailedStage, completion.FailedStep = real.Stage, real.Step
 		return
 	}
 	completion.Interrupted = true
 	completion.Infrastructure = true
-	completion.FailedBurn, completion.FailedStep = "", ""
-	completion.Reason = fmt.Sprintf("server restart interrupted %s/%s: %s; %s", cut.Burn, cut.Step, cut.restartCutReason, completion.Reason)
+	completion.FailedStage, completion.FailedStep = "", ""
+	completion.Reason = fmt.Sprintf("server restart interrupted %s/%s: %s; %s", cut.Stage, cut.Step, cut.restartCutReason, completion.Reason)
 }
 
 // Older journals did not distinguish the synthetic display exit 1. Conservatively
@@ -116,7 +116,7 @@ func preserveRecordedExitCodes(completion *Completion, events []runprogress.Even
 			continue
 		}
 		for _, event := range events {
-			if event.Validate() != nil || event.Burn != step.Burn || event.Step != step.Step || event.Status != runprogress.StepFailed || event.ExitCode <= 0 || event.StartedAt == nil || event.FinishedAt == nil || !event.StartedAt.Equal(*step.StartedAt) || !event.FinishedAt.Equal(*step.FinishedAt) {
+			if event.Validate() != nil || event.Stage != step.Stage || event.Step != step.Step || event.Status != runprogress.StepFailed || event.ExitCode <= 0 || event.StartedAt == nil || event.FinishedAt == nil || !event.StartedAt.Equal(*step.StartedAt) || !event.FinishedAt.Equal(*step.FinishedAt) {
 				continue
 			}
 			if step.ExitCodeKnown && step.ExitCode != event.ExitCode {
@@ -140,7 +140,7 @@ func preserveObservedExitCodes(completion *Completion, observed *wfv1.Workflow) 
 	for i := range completion.Steps {
 		step := &completion.Steps[i]
 		prior, ok := known[step.NodeID]
-		if !ok || prior.Burn != step.Burn || prior.Step != step.Step || prior.Attempt != step.Attempt || prior.StartedAt == nil || prior.FinishedAt == nil || step.StartedAt == nil || step.FinishedAt == nil || !prior.StartedAt.Equal(*step.StartedAt) || !prior.FinishedAt.Equal(*step.FinishedAt) {
+		if !ok || prior.Stage != step.Stage || prior.Step != step.Step || prior.Attempt != step.Attempt || prior.StartedAt == nil || prior.FinishedAt == nil || step.StartedAt == nil || step.FinishedAt == nil || !prior.StartedAt.Equal(*step.StartedAt) || !prior.FinishedAt.Equal(*step.FinishedAt) {
 			continue
 		}
 		if step.ExitCodeKnown && step.ExitCode != prior.ExitCode {

@@ -32,7 +32,7 @@ spec:
 	submission := argojob.Request{RunID: "run-wif", Name: "wif-test", Repo: "repo", UpstreamName: "github", UpstreamOrg: "org", Ref: "v1.0.0", SHA: strings.Repeat("a", 40), Trigger: pipeline.TriggerRelease, Source: []byte(document), ApprovedSecrets: map[string]bool{}}
 	var captured model.AuditActionSpec
 	jobs := &ArgoJobs{config: config, auditor: &stubAuditor{onAppend: func(s model.AuditActionSpec) { captured = s }}}
-	request := service.JobRequest{Run: model.Run{ID: submission.RunID, Actor: "reviewer@host", Ref: "v1.0.0", SHA: strings.Repeat("b", 40)}, Repository: model.Repository{Name: "repo"}, UpstreamOrg: "org"}
+	request := service.WorkflowRequest{Run: model.Run{ID: submission.RunID, Actor: "reviewer@host", Ref: "v1.0.0", SHA: strings.Repeat("b", 40)}, Repository: model.Repository{Name: "repo"}, UpstreamOrg: "org"}
 	if err := jobs.auditSubmission(t.Context(), request, submission); err != nil {
 		t.Fatal(err)
 	}

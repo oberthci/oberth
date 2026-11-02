@@ -162,7 +162,7 @@ func TestMigration16AddsAnUngroupedConcurrencyGroupToExistingRuns(t *testing.T) 
 	}
 	// A durable Job name keeps the run "running" across the reopen, for the
 	// scheduler's startup reconciliation, so the upgrade meets a live run.
-	if _, err := s.SetRunJobName(ctx, running.ID, "oberth-oberth-running"); err != nil {
+	if _, err := s.SetRunWorkflowName(ctx, running.ID, "oberth-oberth-running"); err != nil {
 		t.Fatal(err)
 	}
 	queued, err := s.EnqueueRun(ctx, testRunSpec(repo.ID, "feature/queued", strings.Repeat("c", 40)))

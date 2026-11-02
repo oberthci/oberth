@@ -16,10 +16,10 @@ type fallbackJobs struct {
 	graph bool
 }
 
-func (j fallbackJobs) PipelineSize(context.Context, JobRequest) (pipeline.Size, error) {
+func (j fallbackJobs) PipelineSize(context.Context, WorkflowRequest) (pipeline.Size, error) {
 	return pipeline.M, nil
 }
-func (j fallbackJobs) PipelineKubeVirt(ctx context.Context, req JobRequest) (KubeVirtResources, error) {
+func (j fallbackJobs) PipelineKubeVirt(ctx context.Context, req WorkflowRequest) (KubeVirtResources, error) {
 	if !j.graph {
 		return j.declaredJobs.PipelineKubeVirt(ctx, req)
 	}
@@ -96,8 +96,8 @@ func TestFallbackSurvivesUncertainCreateRecovery(t *testing.T) {
 	for _, reason := range []model.ResourceAdmissionFallback{model.ResourceFallbackGraph, model.ResourceFallbackMemory, model.ResourceFallbackRequests} {
 		t.Run(string(reason), func(t *testing.T) {
 			f := newConcurrencyFixture(t, pipeline.M, 3)
-			run := model.Run{ID: strings.Repeat("a", 32), JobName: "step-abc12345", SHA: strings.Repeat("b", 40), RepoID: f.repo.ID, QueueSequence: 1}
-			if err := f.scheduler.recordResourceAdmission(run, run.JobName, pipeline.M, argoworkflow.VMIDemand{}, nil, reason); err != nil {
+			run := model.Run{ID: strings.Repeat("a", 32), WorkflowName: "step-abc12345", SHA: strings.Repeat("b", 40), RepoID: f.repo.ID, QueueSequence: 1}
+			if err := f.scheduler.recordResourceAdmission(run, run.WorkflowName, pipeline.M, argoworkflow.VMIDemand{}, nil, reason); err != nil {
 				t.Fatal(err)
 			}
 			r, err := f.scheduler.restoreCreateGrant(run, nil)

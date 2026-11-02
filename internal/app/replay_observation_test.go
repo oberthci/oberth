@@ -12,11 +12,11 @@ func TestReplayObservationMappingRetainsAllAttempts(t *testing.T) {
 	now := time.Now()
 	jobs := &ArgoJobs{}
 	completion := argojob.Completion{Name: "actual-workflow", ObservationComplete: true, ObservedNodes: 3, ReplayAttempts: []argojob.StepResult{
-		{Burn: "publish", Step: "push", Status: runprogress.StepFailed, StartedAt: &now},
-		{Burn: "publish", Step: "push", Status: runprogress.StepSkipped},
+		{Stage: "publish", Step: "push", Status: runprogress.StepFailed, StartedAt: &now},
+		{Stage: "publish", Step: "push", Status: runprogress.StepSkipped},
 	}}
 	result := jobs.result(completion)
-	if result.TerminalObservation == nil || result.TerminalObservation.JobName != completion.Name || len(result.TerminalObservation.Steps) != 2 || !result.TerminalObservation.Steps[0].Started {
+	if result.TerminalObservation == nil || result.TerminalObservation.WorkflowName != completion.Name || len(result.TerminalObservation.Steps) != 2 || !result.TerminalObservation.Steps[0].Started {
 		t.Fatalf("earlier start lost in engine mapping: %+v", result.TerminalObservation)
 	}
 	completion.ObservationComplete = false

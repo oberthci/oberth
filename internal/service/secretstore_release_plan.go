@@ -20,7 +20,7 @@ type SecretStoreReleasePlan struct {
 }
 
 type releasePlanner interface {
-	PlanRelease(context.Context, JobRequest, []byte) (ReleasePreflightResult, error)
+	PlanRelease(context.Context, WorkflowRequest, []byte) (ReleasePreflightResult, error)
 }
 
 func (service *API) addReleasePlans(ctx context.Context, response *SecretStorePlanResponse) {
@@ -53,7 +53,7 @@ func (service *API) addReleasePlans(ctx context.Context, response *SecretStorePl
 			if org == "" {
 				org = upstream.Name
 			}
-			request := JobRequest{Repository: repo, UpstreamName: upstream.Name, UpstreamOrg: org, Run: model.Run{RefKind: model.RefBranch}}
+			request := WorkflowRequest{Repository: repo, UpstreamName: upstream.Name, UpstreamOrg: org, Run: model.Run{RefKind: model.RefBranch}}
 			var files []string
 			files, err = releasePreflightFiles(ctx, planner, request)
 			found := false

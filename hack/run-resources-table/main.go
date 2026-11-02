@@ -26,7 +26,7 @@ import (
 type row struct {
 	Repo          string `json:"repo"`
 	Run           string `json:"run"`
-	Burn          string
+	Stage         string `json:"Burn"`
 	Step          string
 	Fragment      bool `json:"fragment"`
 	MeasuredUsage []model.StepResourceUsage
@@ -74,7 +74,7 @@ func run(input, output string) error {
 		if e := json.Unmarshal(scanner.Bytes(), &r); e != nil {
 			return errors.New("invalid anonymous capture JSON")
 		}
-		if !repoLabel.MatchString(r.Repo) || !stepLabel.MatchString(r.Burn) || !stepLabel.MatchString(r.Step) || !runLabel.MatchString(r.Run) {
+		if !repoLabel.MatchString(r.Repo) || !stepLabel.MatchString(r.Stage) || !stepLabel.MatchString(r.Step) || !runLabel.MatchString(r.Run) {
 			return errors.New("anonymous repo-NN, step hashes and run hash required")
 		}
 		rowCount++
@@ -86,7 +86,7 @@ func run(input, output string) error {
 		if r.Fragment {
 			owner = ""
 		}
-		d := measured.Declaration{Burn: r.Burn, Template: r.Step, OwnerRepository: owner, Resources: map[string]map[string]string{"requests": {}, "limits": {}}}
+		d := measured.Declaration{Stage: r.Stage, Template: r.Step, OwnerRepository: owner, Resources: map[string]map[string]string{"requests": {}, "limits": {}}}
 		// Version 1 had only main-container scope. This export removes v2
 		// container names and all incarnation IDs. Array order and numeric
 		// diagnostics are explicitly not a guaranteed main/attempt binding.
@@ -96,17 +96,17 @@ func run(input, output string) error {
 			v = r.MeasuredUsage[0]
 		} else {
 			v = model.StepResourceUsage{Version: 2, Source: "kubelet-cadvisor", ContainerKind: "app", PodKind: "workflow"}
-			ambiguous[r.Repo+"\x00"+r.Burn+"\x00"+r.Step]++
+			ambiguous[r.Repo+"\x00"+r.Stage+"\x00"+r.Step]++
 		}
 		// Anonymous grouping keys are not reconstructed execution evidence.
 		// All offline rows retain the ambiguity flag: original incarnation
 		// identity and numeric diagnostic pairing were removed.
 		v.RunID = r.Run
-		v.Burn = r.Burn
+		v.Stage = r.Stage
 		v.Step = r.Step
 		v.TemplateName = r.Step
 		v.ContainerName = "main"
-		v.PodUID = r.Run + "/" + r.Burn + "/" + r.Step
+		v.PodUID = r.Run + "/" + r.Stage + "/" + r.Step
 		v.ContainerID = v.PodUID
 		if unambiguous {
 			for _, q := range []struct {
@@ -122,7 +122,7 @@ func run(input, output string) error {
 			}
 		}
 		groups[r.Repo] = append(groups[r.Repo], measured.Observation{Usage: v, Template: r.Step, Owner: owner, Ambiguous: true})
-		k := r.Burn + "\x00" + r.Step
+		k := r.Stage + "\x00" + r.Step
 		previous, ok := declarations[r.Repo][k]
 		if !ok || v.LastObservedAt.After(previous.at) {
 			declarations[r.Repo][k] = captured{d, v.LastObservedAt}
@@ -155,7 +155,7 @@ func run(input, output string) error {
 				}
 			}
 			notes := strings.Join(s.NoSuggestion, "; ") + "; anonymous incarnation/diagnostic pairing is ambiguous"
-			if n := ambiguous[id+"\x00"+s.Burn+"\x00"+s.Template]; n > 0 {
+			if n := ambiguous[id+"\x00"+s.Stage+"\x00"+s.Template]; n > 0 {
 				notes += fmt.Sprintf("; %d rows lack attributable main-container scope", n)
 			}
 			if s.OwnerRepository == "" {
@@ -164,7 +164,7 @@ func run(input, output string) error {
 			if s.Suggested != nil {
 				return errors.New("anonymous ambiguity unexpectedly produced a suggestion")
 			}
-			fmt.Fprintf(&b, "| %s | %s / %s | %d / %d | %s / %s | - | - | - | %s |\n", id, s.Burn, s.Template, s.Runs, s.Samples, todayCPU, todayMem, strings.Trim(notes, "; "))
+			fmt.Fprintf(&b, "| %s | %s / %s | %d / %d | %s / %s | - | - | - | %s |\n", id, s.Stage, s.Template, s.Runs, s.Samples, todayCPU, todayMem, strings.Trim(notes, "; "))
 		}
 	}
 	b.WriteString("\nNo complete, attributable population supports a suggestion. Total CPU and\nmemory saved or added are **unknown**, not zero. Existing git declarations are\nunchanged. Re-run the live tool after release with its identity-bound records.\n")

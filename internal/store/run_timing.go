@@ -178,7 +178,7 @@ func (s *Store) RecordStepTimings(ctx context.Context, values []model.StepTiming
 			if decodeTiming(oldJSON, &old) != nil || old.Validate() != nil {
 				return fmt.Errorf("%w: corrupt step timing", ErrInvalidState)
 			}
-			if old.WorkflowUID != value.WorkflowUID || old.Namespace != value.Namespace || old.WorkflowName != value.WorkflowName || old.PodName != value.PodName || old.Burn != value.Burn || old.Step != value.Step || old.Ordinal != value.Ordinal || (old.PodUID != "" && old.PodUID != value.PodUID && value.PodUID != "") {
+			if old.WorkflowUID != value.WorkflowUID || old.Namespace != value.Namespace || old.WorkflowName != value.WorkflowName || old.PodName != value.PodName || old.Stage != value.Stage || old.Step != value.Step || old.Ordinal != value.Ordinal || (old.PodUID != "" && old.PodUID != value.PodUID && value.PodUID != "") {
 				return fmt.Errorf("%w: step timing attempt changed", ErrInvalidState)
 			}
 			if old.Available {
@@ -238,7 +238,7 @@ func (s *Store) RunTiming(ctx context.Context, id string) (model.RunTiming, erro
 	value.ClaimedAt, value.CheckoutReadyAt, value.SourceSeedStartedAt, value.SourceReadyAt, value.WorkflowCreatedAt, value.TerminalAt = nullableTime(claimed), nullableTime(checkout), nullableTime(seed), nullableTime(source), nullableTime(created), nullableTime(terminal)
 	if workflow.Valid {
 		var binding model.WorkflowTiming
-		if len(workflow.String) > 256<<10 || decodeTiming(workflow.String, &binding) != nil || binding.Validate() != nil || binding.RunID != id || binding.Name != run.JobName {
+		if len(workflow.String) > 256<<10 || decodeTiming(workflow.String, &binding) != nil || binding.Validate() != nil || binding.RunID != id || binding.Name != run.WorkflowName {
 			return value, fmt.Errorf("%w: corrupt Workflow timing", ErrInvalidState)
 		}
 		value.Workflow = &binding

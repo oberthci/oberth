@@ -51,7 +51,7 @@ func TestKVMPreflightReleaseInterlocksAndReceipt(t *testing.T) {
 	mustPilot(t, err)
 	_, err = s.ReserveKVMPreflight(ctx, intent)
 	mustPilot(t, err)
-	_, err = s.SetRunJobName(ctx, intent.RunID, "main-workflow")
+	_, err = s.SetRunWorkflowName(ctx, intent.RunID, "main-workflow")
 	requireKVMStateError(t, err)
 	mustPilot(t, s.SubmitKVMPreflight(ctx, intent.RunID))
 	mustPilot(t, s.BindKVMPreflight(ctx, intent.RunID, "workflow-uid"))
@@ -61,12 +61,12 @@ func TestKVMPreflightReleaseInterlocksAndReceipt(t *testing.T) {
 	if value.Receipt == nil || value.Cleaned {
 		t.Fatalf("receipt must persist before cleanup: %#v", value)
 	}
-	_, err = s.SetRunJobName(ctx, intent.RunID, "main-workflow")
+	_, err = s.SetRunWorkflowName(ctx, intent.RunID, "main-workflow")
 	requireKVMStateError(t, err)
 	requireKVMStateError(t, s.CompleteKVMPreflightCleanup(ctx, intent.RunID, "replacement"))
 	mustPilot(t, s.CompleteKVMPreflightCleanup(ctx, intent.RunID, "workflow-uid"))
 	mustPilot(t, s.CompleteKVMPreflightCleanup(ctx, intent.RunID, "workflow-uid"))
-	_, err = s.SetRunJobName(ctx, intent.RunID, "main-workflow")
+	_, err = s.SetRunWorkflowName(ctx, intent.RunID, "main-workflow")
 	mustPilot(t, err)
 	value, err = s.KVMPreflight(ctx, intent.RunID)
 	mustPilot(t, err)
@@ -99,7 +99,7 @@ func TestKVMPreflightAdmissionAndIntentImmutability(t *testing.T) {
 				_, err := s.db.Exec(`UPDATE runs SET status='failed' WHERE id=?`, intent.RunID)
 				mustPilot(t, err)
 			case "main-job":
-				_, err := s.SetRunJobName(ctx, intent.RunID, "main-job")
+				_, err := s.SetRunWorkflowName(ctx, intent.RunID, "main-job")
 				mustPilot(t, err)
 			case "future":
 				intent.AdmittedAt = now.Add(time.Second)
@@ -140,7 +140,7 @@ func TestKVMPreflightAdmissionAndIntentImmutability(t *testing.T) {
 	}
 	requireKVMStateError(t, s.SetRunCredentialed(ctx, intent.RunID))
 	mustPilot(t, s.CompleteKVMPreflightCleanup(ctx, intent.RunID, ""))
-	_, err = s.SetRunJobName(ctx, intent.RunID, "main-job")
+	_, err = s.SetRunWorkflowName(ctx, intent.RunID, "main-job")
 	requireKVMStateError(t, err)
 	mustPilot(t, s.SetRunCredentialed(ctx, intent.RunID))
 	requireKVMStateError(t, s.SubmitKVMPreflight(ctx, intent.RunID))
@@ -444,7 +444,7 @@ func TestKVMPreflightRefusalIsImmutableAndSurvivesCleanup(t *testing.T) {
 	if !value.Cleaned || value.Receipt != nil || value.Refusal == nil || value.Refusal.Termination.RestartCount != 1 {
 		t.Fatalf("negative evidence lost: %#v", value)
 	}
-	_, err = s.SetRunJobName(ctx, intent.RunID, "main")
+	_, err = s.SetRunWorkflowName(ctx, intent.RunID, "main")
 	requireKVMStateError(t, err)
 }
 func TestKVMPreflightRefusalRejectsReplayAndCannotReplaceSuccess(t *testing.T) {

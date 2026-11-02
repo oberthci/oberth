@@ -22,7 +22,7 @@ type deadlinePreflight struct {
 	beforeCleanup func()
 }
 
-func (p *deadlinePreflight) Execute(ctx context.Context, job JobRequest, requirement vmrunner.Requirement, output io.Writer) error {
+func (p *deadlinePreflight) Execute(ctx context.Context, job WorkflowRequest, requirement vmrunner.Requirement, output io.Writer) error {
 	if job.Run.ID == p.executedRunID {
 		p.executed.Add(1)
 	}

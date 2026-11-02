@@ -10,16 +10,16 @@ import (
 	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
-func (jobs *ArgoJobs) PreflightRelease(ctx context.Context, request service.JobRequest, source []byte) (service.ReleasePreflightResult, error) {
+func (jobs *ArgoJobs) PreflightRelease(ctx context.Context, request service.WorkflowRequest, source []byte) (service.ReleasePreflightResult, error) {
 	return jobs.preflightRelease(ctx, request, source, true)
 }
 
 // PlanRelease inspects public release capabilities without recording declarations.
-func (jobs *ArgoJobs) PlanRelease(ctx context.Context, request service.JobRequest, source []byte) (service.ReleasePreflightResult, error) {
+func (jobs *ArgoJobs) PlanRelease(ctx context.Context, request service.WorkflowRequest, source []byte) (service.ReleasePreflightResult, error) {
 	return jobs.preflightRelease(ctx, request, source, false)
 }
 
-func (jobs *ArgoJobs) preflightRelease(ctx context.Context, request service.JobRequest, source []byte, record bool) (service.ReleasePreflightResult, error) {
+func (jobs *ArgoJobs) preflightRelease(ctx context.Context, request service.WorkflowRequest, source []byte, record bool) (service.ReleasePreflightResult, error) {
 	jobs.mu.Lock()
 	health, identities, recorder := jobs.reconcilerHealthy, jobs.identities, jobs.declarations
 	jobs.mu.Unlock()

@@ -71,7 +71,7 @@ func (engine *groupEngine) declare(ref, group string, size pipeline.Size) {
 	engine.sizes[ref] = size
 }
 
-func (engine *groupEngine) create(request JobRequest) error {
+func (engine *groupEngine) create(request WorkflowRequest) error {
 	engine.mu.Lock()
 	defer engine.mu.Unlock()
 	key := ""
@@ -88,21 +88,21 @@ func (engine *groupEngine) create(request JobRequest) error {
 			fmt.Sprintf("run %s submitted with group %q, document declares %q", request.Run.ID, request.ConcurrencyGroup, engine.groups[request.Run.Ref]))
 	}
 	job := &groupEngineJob{runID: request.Run.ID, key: key, result: make(chan JobResult, 1), waitErr: make(chan error, 1)}
-	engine.jobs[request.JobName] = job
+	engine.jobs[request.WorkflowName] = job
 	engine.byRun[request.Run.ID] = job
 	engine.created <- request.Run.ID
 	return nil
 }
 
-func (engine *groupEngine) CreateCI(_ context.Context, request JobRequest) error {
+func (engine *groupEngine) CreateWorkflow(_ context.Context, request WorkflowRequest) error {
 	return engine.create(request)
 }
 
-func (engine *groupEngine) CreateRelease(_ context.Context, request JobRequest) error {
+func (engine *groupEngine) CreateRelease(_ context.Context, request WorkflowRequest) error {
 	return engine.create(request)
 }
 
-func (engine *groupEngine) PipelineSize(_ context.Context, request JobRequest) (pipeline.Size, error) {
+func (engine *groupEngine) PipelineSize(_ context.Context, request WorkflowRequest) (pipeline.Size, error) {
 	engine.mu.Lock()
 	defer engine.mu.Unlock()
 	if size, ok := engine.sizes[request.Run.Ref]; ok {
@@ -111,7 +111,7 @@ func (engine *groupEngine) PipelineSize(_ context.Context, request JobRequest) (
 	return pipeline.M, nil
 }
 
-func (engine *groupEngine) PipelineConcurrencyGroup(_ context.Context, request JobRequest) (string, error) {
+func (engine *groupEngine) PipelineConcurrencyGroup(_ context.Context, request WorkflowRequest) (string, error) {
 	engine.mu.Lock()
 	defer engine.mu.Unlock()
 	if err := engine.groupErrs[request.Run.Ref]; err != nil {
@@ -211,7 +211,7 @@ func (engine *groupEngine) finish(t *testing.T, runID string) {
 		t.Fatalf("run %s has no Job to finish", runID)
 	}
 	job.result <- JobResult{
-		Status: model.RunFailed, Phase: "failed", FailedBurn: "test", FailedStep: "unit",
+		Status: model.RunFailed, Phase: "failed", FailedStage: "test", FailedStep: "unit",
 		Steps: []model.StepResult{stepResult(model.StepFailed)},
 	}
 }

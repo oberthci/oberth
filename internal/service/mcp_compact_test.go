@@ -227,7 +227,7 @@ func TestRunGetSummary(t *testing.T) {
 			status = model.StepFailed
 		}
 		_, err := fixture.store.PutStepResult(ctx, model.StepResult{
-			RunID: run.ID, Burn: "test", Step: name, Ordinal: i, Status: status, DeclaredSize: "M",
+			RunID: run.ID, Stage: "test", Step: name, Ordinal: i, Status: status, DeclaredSize: "M",
 			StartedAt: &started, FinishedAt: &ended,
 		})
 		if err != nil {
@@ -235,7 +235,7 @@ func TestRunGetSummary(t *testing.T) {
 		}
 	}
 	_, err = fixture.store.FinishRun(ctx, run.ID, model.RunResult{
-		Status: model.RunFailed, Phase: "testing", FailedBurn: "test", FailedStep: "unit", Error: "exit status 1",
+		Status: model.RunFailed, Phase: "testing", FailedStage: "test", FailedStep: "unit", Error: "exit status 1",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -247,10 +247,10 @@ func TestRunGetSummary(t *testing.T) {
 			t.Fatal(err)
 		}
 		got := value.(RunSummaryResponse)
-		if got.ID != run.ID || got.Status != model.RunFailed || got.Phase != "testing" || got.FailedBurn != "test" || got.FailedStep != "unit" || got.Error != "exit status 1" {
+		if got.ID != run.ID || got.Status != model.RunFailed || got.Phase != "testing" || got.FailedStage != "test" || got.FailedStep != "unit" || got.Error != "exit status 1" {
 			t.Fatalf("run summary: %#v", got)
 		}
-		if len(got.Steps) != 2 || got.Steps[0].Name != "setup" || got.Steps[1].Name != "unit" || got.Steps[1].Burn != "test" || got.Steps[1].Status != model.StepFailed || !got.Steps[1].StartedAt.Equal(started) || !got.Steps[1].FinishedAt.Equal(ended) {
+		if len(got.Steps) != 2 || got.Steps[0].Name != "setup" || got.Steps[1].Name != "unit" || got.Steps[1].Stage != "test" || got.Steps[1].Status != model.StepFailed || !got.Steps[1].StartedAt.Equal(started) || !got.Steps[1].FinishedAt.Equal(ended) {
 			t.Fatalf("step summaries: %#v", got.Steps)
 		}
 		encoded, _ := json.Marshal(got)

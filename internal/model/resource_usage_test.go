@@ -8,7 +8,7 @@ import (
 
 func TestResourceQuantilesMissingZeroAndPairedRatios(t *testing.T) {
 	p := func(v int64) *int64 { return &v }
-	rows := []StepResourceUsage{{Burn: "checks", Step: "test", MemoryPeakBytes: p(0), MemoryRequestBytes: p(100), Samples: 1}, {Burn: "checks", Step: "test", MemoryPeakBytes: p(100), MemoryRequestBytes: p(200), Samples: 1, Terminal: true, Reason: "OOMKilled"}, {Burn: "checks", Step: "test", MemoryRequestBytes: p(0), Samples: 0, Terminal: true}}
+	rows := []StepResourceUsage{{Stage: "checks", Step: "test", MemoryPeakBytes: p(0), MemoryRequestBytes: p(100), Samples: 1}, {Stage: "checks", Step: "test", MemoryPeakBytes: p(100), MemoryRequestBytes: p(200), Samples: 1, Terminal: true, Reason: "OOMKilled"}, {Stage: "checks", Step: "test", MemoryRequestBytes: p(0), Samples: 0, Terminal: true}}
 	r := BuildResourceReport(rows)
 	m := r[0].Metrics["memory_bytes"]
 	if len(r) != 1 || r[0].Observations != 3 || r[0].Unsampled != 1 || r[0].Killed != 1 || m.Used.Count != 2 || *m.Used.P50 != 0 || *m.Used.P95 != 100 || *m.Used.Max != 100 || m.UsedRequestPPM.Count != 2 || *m.UsedRequestPPM.Max != 500000 || m.Requested.Count != 3 {

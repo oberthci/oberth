@@ -38,7 +38,7 @@ var _ JobCreateSettler = (*createRecoveryJobs)(nil)
 func recoveryWaitingRun(t *testing.T, f *recoveryFixture, ref, name, group string) model.Run {
 	t.Helper()
 	run := f.enqueueAndClaim(t, ref, strings.Repeat("a", 40))
-	f.setJobName(t, run.ID, name)
+	f.setWorkflowName(t, run.ID, name)
 	if group != "" {
 		if err := f.store.SetRunConcurrencyGroup(t.Context(), run.ID, group); err != nil {
 			t.Fatal(err)
@@ -105,7 +105,7 @@ func TestWorkflowCreateRecoveryParkedGroupMateRequeuesInEitherOrder(t *testing.T
 			if adopted != 1 || scheduler.pendingCreateCount() != 0 || state.Used != 1 || state.Runs != 1 || len(state.Groups) != 1 || state.Groups[0].Holder != holder.ID || jobs.settleCalls != 0 {
 				t.Fatalf("placeholder took a grant/quarantine or displaced sibling: adopted=%d pending=%d state=%+v settles=%d", adopted, scheduler.pendingCreateCount(), state, jobs.settleCalls)
 			}
-			if len(jobs.deleted) != 1 || jobs.deleted[0] != parked.JobName {
+			if len(jobs.deleted) != 1 || jobs.deleted[0] != parked.WorkflowName {
 				t.Fatalf("real sibling was deleted: %v", jobs.deleted)
 			}
 		})
@@ -120,7 +120,7 @@ func TestWorkflowCreateRecoveryWaitingExistingWorkflowAdoptsBeforeCleanup(t *tes
 			jobs := &createRecoveryJobs{present: map[string]bool{run.ID: true}, adoptingJobs: adoptingJobs{recoveryJobs: recoveryJobs{terminalErr: ErrJobNotTerminal, waitBlocks: make(chan struct{}), waitEntered: make(chan struct{})}}}
 			scheduler := f.scheduler(t, jobs)
 			if contract {
-				if err := scheduler.recordCreateAdmission(run, run.JobName, pipeline.S, argoworkflow.VMIDemand{}); err != nil {
+				if err := scheduler.recordCreateAdmission(run, run.WorkflowName, pipeline.S, argoworkflow.VMIDemand{}); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -190,7 +190,7 @@ func TestWorkflowCreateRecoveryAbsentWorkflowRequiresContractToSettle(t *testing
 			jobs := &createRecoveryJobs{present: map[string]bool{}, adoptingJobs: adoptingJobs{recoveryJobs: recoveryJobs{terminalErr: ErrJobNotTerminal}}}
 			scheduler := f.scheduler(t, jobs)
 			if contract != "none" {
-				if err := scheduler.recordCreateAdmission(run, run.JobName, pipeline.S, argoworkflow.VMIDemand{}); err != nil {
+				if err := scheduler.recordCreateAdmission(run, run.WorkflowName, pipeline.S, argoworkflow.VMIDemand{}); err != nil {
 					t.Fatal(err)
 				}
 				if contract == "corrupt" {

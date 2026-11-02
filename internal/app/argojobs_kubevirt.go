@@ -11,7 +11,7 @@ import (
 
 // PipelineKubeVirt reads declared VMI demand before the scheduler grants any
 // resource. The full submission policy still validates the exact manifests.
-func (jobs *ArgoJobs) PipelineKubeVirt(ctx context.Context, request service.JobRequest) (service.KubeVirtResources, error) {
+func (jobs *ArgoJobs) PipelineKubeVirt(ctx context.Context, request service.WorkflowRequest) (service.KubeVirtResources, error) {
 	source, err := jobs.readRunSource(request)
 	if err != nil {
 		return service.KubeVirtResources{}, jobs.noRunPipelineError(err, request)
@@ -92,7 +92,7 @@ var _ service.PipelineKubeVirtSizer = (*ArgoJobs)(nil)
 func (jobs *ArgoJobs) AdoptedKubeVirtDemand(run model.Run) (argoworkflow.VMIDemand, error) {
 	jobs.mu.Lock()
 	defer jobs.mu.Unlock()
-	intent, ok := jobs.intents[run.JobName]
+	intent, ok := jobs.intents[run.WorkflowName]
 	if !ok || intent.runID != run.ID || intent.cancelled || intent.adoption == nil {
 		return argoworkflow.VMIDemand{}, fmt.Errorf("app: no adopted resource binding for run %s", run.ID)
 	}
@@ -105,7 +105,7 @@ var _ service.AdoptedKubeVirtSizer = (*ArgoJobs)(nil)
 func (jobs *ArgoJobs) AdoptedPodDemand(run model.Run) (*argoworkflow.PodDemand, error) {
 	jobs.mu.Lock()
 	defer jobs.mu.Unlock()
-	intent, ok := jobs.intents[run.JobName]
+	intent, ok := jobs.intents[run.WorkflowName]
 	if !ok || intent.runID != run.ID || intent.adoption == nil {
 		return nil, fmt.Errorf("app: no adopted resource binding for run %s", run.ID)
 	}
@@ -119,7 +119,7 @@ func (jobs *ArgoJobs) AdoptedPodDemand(run model.Run) (*argoworkflow.PodDemand, 
 func (jobs *ArgoJobs) AdoptedResourceFallback(run model.Run) (model.ResourceAdmissionFallback, error) {
 	jobs.mu.Lock()
 	defer jobs.mu.Unlock()
-	intent, ok := jobs.intents[run.JobName]
+	intent, ok := jobs.intents[run.WorkflowName]
 	if !ok || intent.runID != run.ID || intent.adoption == nil {
 		return "", fmt.Errorf("app: no adopted resource binding for run %s", run.ID)
 	}

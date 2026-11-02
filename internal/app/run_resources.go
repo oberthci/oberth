@@ -18,7 +18,7 @@ func (jobs *ArgoJobs) SetResourceBlobs(blobs vmrunner.PolicyGit) { jobs.resource
 
 // ResourceDeclarations reads only the exact selected commit in the local git
 // cache. It returns numeric resource fields, never commands or complete specs.
-func (jobs *ArgoJobs) ResourceDeclarations(ctx context.Context, request service.JobRequest) ([]measured.Declaration, error) {
+func (jobs *ArgoJobs) ResourceDeclarations(ctx context.Context, request service.WorkflowRequest) ([]measured.Declaration, error) {
 	if jobs.resourceBlobs == nil {
 		return nil, errors.New("resource declaration git reader unavailable")
 	}
@@ -74,7 +74,7 @@ func (jobs *ArgoJobs) ResourceDeclarations(ctx context.Context, request service.
 			owner = request.Repository.Name
 			ownerSHA = sha
 		}
-		d := measured.Declaration{ResolvedTemplate: name, Burn: measured.NormalizeTemplate(step.Burn), Template: measured.NormalizeTemplate(name), OwnerRepository: owner, SHA: ownerSHA, Resources: map[string]map[string]string{"requests": {}, "limits": {}}}
+		d := measured.Declaration{ResolvedTemplate: name, Stage: measured.NormalizeTemplate(step.Stage), Template: measured.NormalizeTemplate(name), OwnerRepository: owner, SHA: ownerSHA, Resources: map[string]map[string]string{"requests": {}, "limits": {}}}
 		var c *corev1.Container
 		if t.Container != nil {
 			c = t.Container

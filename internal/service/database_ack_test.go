@@ -97,7 +97,7 @@ func TestDatabaseDeadlineLostTransitionAcksConverge(t *testing.T) {
 					t.Fatal(current, err)
 				}
 			case "MarkRunSubmitted":
-				fixture.setJobName(t, run.ID, "known-job")
+				fixture.setWorkflowName(t, run.ID, "known-job")
 				current, err := database.MarkRunSubmitted(ctx, run.ID)
 				if err != nil || current.Phase != "running" {
 					t.Fatal(current, err)
@@ -111,7 +111,7 @@ func TestDatabaseDeadlineLostTransitionAcksConverge(t *testing.T) {
 					t.Fatal(current, err)
 				}
 			case "RequeueStrandedRun":
-				fixture.setJobName(t, run.ID, "known-job")
+				fixture.setWorkflowName(t, run.ID, "known-job")
 				successor, err := database.RequeueStrandedRun(ctx, run.ID)
 				if err != nil || successor.ID == "" || successor.ID == run.ID {
 					t.Fatal(successor, err)

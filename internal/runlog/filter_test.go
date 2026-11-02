@@ -169,7 +169,7 @@ func TestOffsetBeyondTheStepReturnsNothingWithoutError(t *testing.T) {
 	}
 }
 
-func TestFilterSpansEveryRangeOfAMultiBurnStep(t *testing.T) {
+func TestFilterSpansEveryRangeOfAMultiStageStep(t *testing.T) {
 	store := seedRun(t, "r-multi", []string{
 		"[build/compile] first",
 		"[test/unit] alpha",

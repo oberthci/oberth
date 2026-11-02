@@ -173,7 +173,7 @@ func TestNewBranchRunWaitsForPendingPublicationOwner(t *testing.T) {
 	if _, err := s.ClaimNextRun(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.SetRunJobName(ctx, first.ID, "completed-job"); err != nil {
+	if _, err := s.SetRunWorkflowName(ctx, first.ID, "completed-job"); err != nil {
 		t.Fatal(err)
 	}
 	publication, err := s.BeginPublication(ctx, model.PublicationSpec{
@@ -421,7 +421,7 @@ func TestFastForwardPromotionCanOwnPublicationWithoutRun(t *testing.T) {
 	}
 }
 
-func TestPublishFailureLeavesDeliveredBurnsIntact(t *testing.T) {
+func TestPublishFailureLeavesDeliveredStagesIntact(t *testing.T) {
 	ctx := context.Background()
 	now := time.Date(2026, 9, 29, 12, 0, 0, 0, time.UTC)
 	s := testStore(t, &now)
@@ -439,8 +439,8 @@ func TestPublishFailureLeavesDeliveredBurnsIntact(t *testing.T) {
 	}
 	// Record step results (simulating burns that passed).
 	for _, step := range []model.StepResult{
-		{RunID: run.ID, Burn: "test", Step: "unit", Status: model.StepPassed, DeclaredSize: "M"},
-		{RunID: run.ID, Burn: "build", Step: "compile", Status: model.StepPassed, DeclaredSize: "M"},
+		{RunID: run.ID, Stage: "test", Step: "unit", Status: model.StepPassed, DeclaredSize: "M"},
+		{RunID: run.ID, Stage: "build", Step: "compile", Status: model.StepPassed, DeclaredSize: "M"},
 	} {
 		if _, err := s.PutStepResult(ctx, step); err != nil {
 			t.Fatal(err)
@@ -472,7 +472,7 @@ func TestPublishFailureLeavesDeliveredBurnsIntact(t *testing.T) {
 	}
 	for _, step := range steps {
 		if step.Status != model.StepPassed {
-			t.Fatalf("step %s/%s = %s after publish failure, want passed", step.Burn, step.Step, step.Status)
+			t.Fatalf("step %s/%s = %s after publish failure, want passed", step.Stage, step.Step, step.Status)
 		}
 	}
 }

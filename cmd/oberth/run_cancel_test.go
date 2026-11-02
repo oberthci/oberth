@@ -165,7 +165,7 @@ func TestRunCancelInPodRecordsTheCancelAndWakesTheDaemon(t *testing.T) {
 	if _, err := database.ClaimNextRun(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := database.SetRunJobName(ctx, claimed.ID, "oberth-oberth-"+claimed.ID[:8]); err != nil {
+	if _, err := database.SetRunWorkflowName(ctx, claimed.ID, "oberth-oberth-"+claimed.ID[:8]); err != nil {
 		t.Fatal(err)
 	}
 	release := enqueue("v1.2.3", model.RefTag, "tag", "b", true)
@@ -204,7 +204,7 @@ func TestRunCancelInPodRecordsTheCancelAndWakesTheDaemon(t *testing.T) {
 		t.Fatal("the daemon was not asked to run its cancellation pass")
 	}
 	pending, err := database.PendingRunCancellations(ctx)
-	if err != nil || len(pending) != 1 || pending[0].RunID != claimed.ID || pending[0].JobName == "" {
+	if err != nil || len(pending) != 1 || pending[0].RunID != claimed.ID || pending[0].WorkflowName == "" {
 		t.Fatalf("in-pod cancel obligation = %#v, %v", pending, err)
 	}
 	audit, err := database.LatestAuditActionByType(ctx, "run.cancel", "run")

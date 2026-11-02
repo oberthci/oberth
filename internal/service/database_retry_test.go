@@ -28,11 +28,14 @@ type deadlineJobs struct {
 	passed  bool
 }
 
-func (j *deadlineJobs) CreateCI(context.Context, JobRequest) error { j.creates.Add(1); return nil }
-func (j *deadlineJobs) PipelineConcurrencyGroup(context.Context, JobRequest) (string, error) {
+func (j *deadlineJobs) CreateWorkflow(context.Context, WorkflowRequest) error {
+	j.creates.Add(1)
+	return nil
+}
+func (j *deadlineJobs) PipelineConcurrencyGroup(context.Context, WorkflowRequest) (string, error) {
 	return "db-deadline", nil
 }
-func (j *deadlineJobs) PipelineCredentialed(context.Context, JobRequest) (bool, error) {
+func (j *deadlineJobs) PipelineCredentialed(context.Context, WorkflowRequest) (bool, error) {
 	return true, nil
 }
 func (j *deadlineJobs) Wait(context.Context, string, io.Writer) (JobResult, error) {
@@ -40,7 +43,7 @@ func (j *deadlineJobs) Wait(context.Context, string, io.Writer) (JobResult, erro
 	if j.passed {
 		return JobResult{Status: model.RunPassed, Phase: "job"}, nil
 	}
-	return JobResult{Status: model.RunFailed, Phase: "job", Error: "test failed", Steps: []model.StepResult{{Burn: "build", Step: "test", Status: model.StepFailed}}}, nil
+	return JobResult{Status: model.RunFailed, Phase: "job", Error: "test failed", Steps: []model.StepResult{{Stage: "build", Step: "test", Status: model.StepFailed}}}, nil
 }
 
 func deadlineScope(ctx context.Context, scheduler *Scheduler) context.Context {

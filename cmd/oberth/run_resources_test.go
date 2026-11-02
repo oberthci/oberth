@@ -17,7 +17,7 @@ func TestRunResourcesCLIUsesAuthenticatedHistoryAndYAML(t *testing.T) {
 		if r.URL.Path != "/api/run-resources" || r.URL.Query().Get("run") != "aaaaaaaa" || r.Header.Get("Authorization") != "Bearer fixture" {
 			t.Errorf("request %s", r.URL)
 		}
-		_ = json.NewEncoder(w).Encode(measured.Report{Repository: "repo-01", Steps: []measured.Step{{Burn: "step-12345678", Template: "step-abc12345", Suggested: &measured.Suggested{CPUMilli: 100, MemoryRequestBytes: 64 << 20, MemoryLimitBytes: 128 << 20, ActiveDeadlineSeconds: 120}}}})
+		_ = json.NewEncoder(w).Encode(measured.Report{Repository: "repo-01", Steps: []measured.Step{{Stage: "step-12345678", Template: "step-abc12345", Suggested: &measured.Suggested{CPUMilli: 100, MemoryRequestBytes: 64 << 20, MemoryLimitBytes: 128 << 20, ActiveDeadlineSeconds: 120}}}})
 	}))
 	defer server.Close()
 	t.Setenv("OBERTH_BASE_URL", server.URL)

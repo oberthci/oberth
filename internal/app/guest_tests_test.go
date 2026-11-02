@@ -84,7 +84,7 @@ func TestGuestTestsReadLiveGrantAndAuditBeforeCreate(t *testing.T) {
 		if i == 2 {
 			loader.err = errors.New("grant database unavailable")
 		}
-		err := fixture.jobs.CreateCI(t.Context(), request)
+		err := fixture.jobs.CreateWorkflow(t.Context(), request)
 		if (err == nil) != (i == 0) {
 			t.Fatalf("%s: %v", name, err)
 		}

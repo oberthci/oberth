@@ -77,7 +77,7 @@ func (f *retentionFixture) run(t *testing.T, ref, trigger string, terminal bool)
 		if _, err := f.retention.Database.ClaimNextRun(ctx); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := f.retention.Database.PutStepResult(ctx, model.StepResult{RunID: run.ID, Burn: "test", Step: "unit", Status: model.StepPassed, DeclaredSize: "M"}); err != nil {
+		if _, err := f.retention.Database.PutStepResult(ctx, model.StepResult{RunID: run.ID, Stage: "test", Step: "unit", Status: model.StepPassed, DeclaredSize: "M"}); err != nil {
 			t.Fatal(err)
 		}
 		run, err = f.retention.Database.FinishRun(ctx, run.ID, model.RunResult{Status: model.RunPassed, TestedSHA: run.SHA})
@@ -352,7 +352,7 @@ func TestPurgeWaitsForCancelledSchedulerWriter(t *testing.T) {
 	if len(cancelled.Cancellations) != 1 {
 		t.Fatalf("cancellation=%#v", cancelled)
 	}
-	if err := fixture.store.CompleteRunCancellation(ctx, run.ID, cancelled.Cancellations[0].JobName); err != nil {
+	if err := fixture.store.CompleteRunCancellation(ctx, run.ID, cancelled.Cancellations[0].WorkflowName); err != nil {
 		t.Fatal(err)
 	}
 	actor := api.Actor{Identity: "owner", Admin: true}
@@ -571,12 +571,12 @@ func TestRetentionStatusUsesLastSweepTotals(t *testing.T) {
 func seedRetentionResourceUsage(t *testing.T, f *retentionFixture) model.Run {
 	t.Helper()
 	run := f.run(t, "telemetry", "branch", false)
-	if _, err := f.retention.Database.SetRunJobName(t.Context(), run.ID, "workflow-test"); err != nil {
+	if _, err := f.retention.Database.SetRunWorkflowName(t.Context(), run.ID, "workflow-test"); err != nil {
 		t.Fatal(err)
 	}
 	at := f.now.Add(-91 * 24 * time.Hour)
 	code := int32(0)
-	v := model.StepResourceUsage{Version: 2, Source: "kubelet-cadvisor", RunID: run.ID, WorkflowName: "workflow-test", WorkflowUID: "11111111-1111-4111-8111-111111111111", Namespace: "argo", NodeID: "node-1", PodName: "pod-1", PodUID: "22222222-2222-4222-8222-222222222222", NodeName: "node-a", ContainerID: "containerd://" + strings.Repeat("a", 64), ContainerName: "main", ContainerKind: "app", PodKind: "workflow", Burn: "ci", Step: "test", FirstObservedAt: at, LastObservedAt: at, Terminal: true, ExitCode: &code, Reason: "Completed", SampledLowerBound: true}
+	v := model.StepResourceUsage{Version: 2, Source: "kubelet-cadvisor", RunID: run.ID, WorkflowName: "workflow-test", WorkflowUID: "11111111-1111-4111-8111-111111111111", Namespace: "argo", NodeID: "node-1", PodName: "pod-1", PodUID: "22222222-2222-4222-8222-222222222222", NodeName: "node-a", ContainerID: "containerd://" + strings.Repeat("a", 64), ContainerName: "main", ContainerKind: "app", PodKind: "workflow", Stage: "ci", Step: "test", FirstObservedAt: at, LastObservedAt: at, Terminal: true, ExitCode: &code, Reason: "Completed", SampledLowerBound: true}
 	if err := f.retention.Database.RecordStepResourceUsage(t.Context(), []model.StepResourceUsage{v}); err != nil {
 		t.Fatal(err)
 	}

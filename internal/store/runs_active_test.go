@@ -48,7 +48,7 @@ func TestListActiveRunsOrdersByStartThenAdmissionThenQueue(t *testing.T) {
 	submit := func(run model.Run) {
 		t.Helper()
 		now = now.Add(time.Second)
-		if _, err := s.SetRunJobName(ctx, run.ID, "oberth-"+run.ID[:12]); err != nil {
+		if _, err := s.SetRunWorkflowName(ctx, run.ID, "oberth-"+run.ID[:12]); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := s.MarkRunSubmitted(ctx, run.ID); err != nil {

@@ -112,7 +112,7 @@ func dagRetryWorkflow(phase wfv1.WorkflowPhase, attempts ...[2]wfv1.NodePhase) *
 func stepKeys(results []StepResult) []string {
 	keys := make([]string, 0, len(results))
 	for _, result := range results {
-		keys = append(keys, result.Burn+"/"+result.Step)
+		keys = append(keys, result.Stage+"/"+result.Step)
 	}
 	sort.Strings(keys)
 	return keys
@@ -121,7 +121,7 @@ func stepKeys(results []StepResult) []string {
 func stepByKey(t *testing.T, results []StepResult, key string) StepResult {
 	t.Helper()
 	for _, result := range results {
-		if result.Burn+"/"+result.Step == key {
+		if result.Stage+"/"+result.Step == key {
 			return result
 		}
 	}
@@ -139,11 +139,11 @@ func assertPlanned(t *testing.T, workflow *wfv1.Workflow, results []StepResult) 
 	}
 	keys := map[string]bool{}
 	for _, step := range planned {
-		keys[step.Burn+"/"+step.Step] = true
+		keys[step.Stage+"/"+step.Step] = true
 	}
 	for _, result := range results {
-		if !keys[result.Burn+"/"+result.Step] {
-			t.Errorf("observed step %s/%s is not in the plan %v", result.Burn, result.Step, keys)
+		if !keys[result.Stage+"/"+result.Step] {
+			t.Errorf("observed step %s/%s is not in the plan %v", result.Stage, result.Step, keys)
 		}
 	}
 }
@@ -165,7 +165,7 @@ func TestDAGRetryThenPassIsPassed(t *testing.T) {
 	assertPlanned(t, workflow, results)
 	for _, result := range results {
 		if result.Status != runprogress.StepPassed || result.Superseded {
-			t.Errorf("%s/%s = %s superseded=%v, want passed", result.Burn, result.Step, result.Status, result.Superseded)
+			t.Errorf("%s/%s = %s superseded=%v, want passed", result.Stage, result.Step, result.Status, result.Superseded)
 		}
 	}
 	check := stepByKey(t, results, "address/check")
@@ -174,8 +174,8 @@ func TestDAGRetryThenPassIsPassed(t *testing.T) {
 	}
 
 	completion := completionFor(workflow)
-	if !completion.Succeeded || completion.FailedBurn != "" || completion.FailedStep != "" {
-		t.Fatalf("completion = succeeded %v failed %q/%q, want green", completion.Succeeded, completion.FailedBurn, completion.FailedStep)
+	if !completion.Succeeded || completion.FailedStage != "" || completion.FailedStep != "" {
+		t.Fatalf("completion = succeeded %v failed %q/%q, want green", completion.Succeeded, completion.FailedStage, completion.FailedStep)
 	}
 
 	// The failed first attempt stays observable as a superseded attempt.
@@ -226,8 +226,8 @@ func TestDAGRetryEveryAttemptFailsIsFailed(t *testing.T) {
 			if completion.Succeeded {
 				t.Fatal("exhausted retries reported success")
 			}
-			if completion.FailedBurn != "address" || completion.FailedStep != test.failed {
-				t.Fatalf("FailedBurn/FailedStep = %q/%q, want address/%s", completion.FailedBurn, completion.FailedStep, test.failed)
+			if completion.FailedStage != "address" || completion.FailedStep != test.failed {
+				t.Fatalf("FailedBurn/FailedStep = %q/%q, want address/%s", completion.FailedStage, completion.FailedStep, test.failed)
 			}
 		})
 	}
@@ -273,8 +273,8 @@ func TestPodRetryEveryAttemptFailsPointsAtLastAttempt(t *testing.T) {
 		t.Fatalf("publish = %+v, want the failed last attempt pub-2 exit 3", got)
 	}
 	completion := completionFor(workflow)
-	if completion.Succeeded || completion.FailedBurn != "release" || completion.FailedStep != "publish" {
-		t.Fatalf("completion = %v %q/%q, want failed release/publish", completion.Succeeded, completion.FailedBurn, completion.FailedStep)
+	if completion.Succeeded || completion.FailedStage != "release" || completion.FailedStep != "publish" {
+		t.Fatalf("completion = %v %q/%q, want failed release/publish", completion.Succeeded, completion.FailedStage, completion.FailedStep)
 	}
 }
 
@@ -305,8 +305,8 @@ func TestNoRetryStrategyIsUnchanged(t *testing.T) {
 	node.Phase = wfv1.NodeFailed
 	failed.Status.Nodes["unit-pod"] = node
 	completion := completionFor(failed)
-	if completion.Succeeded || completion.FailedBurn != "test" || completion.FailedStep != "unit" {
-		t.Fatalf("failed step without retry = %v %q/%q, want failed test/unit", completion.Succeeded, completion.FailedBurn, completion.FailedStep)
+	if completion.Succeeded || completion.FailedStage != "test" || completion.FailedStep != "unit" {
+		t.Fatalf("failed step without retry = %v %q/%q, want failed test/unit", completion.Succeeded, completion.FailedStage, completion.FailedStep)
 	}
 }
 
@@ -385,7 +385,7 @@ func TestNestedRetryInsideDAG(t *testing.T) {
 			t.Fatalf("superseded = %v, want both pushes of group(0)", superseded)
 		}
 		if completion := completionFor(workflow); !completion.Succeeded || completion.FailedStep != "" {
-			t.Fatalf("completion = %v %q/%q, want green", completion.Succeeded, completion.FailedBurn, completion.FailedStep)
+			t.Fatalf("completion = %v %q/%q, want green", completion.Succeeded, completion.FailedStage, completion.FailedStep)
 		}
 	})
 	t.Run("outer retry exhausted", func(t *testing.T) {
@@ -395,8 +395,8 @@ func TestNestedRetryInsideDAG(t *testing.T) {
 			t.Fatalf("group/push = %+v, want failed from the last attempt g1-push-0", push)
 		}
 		completion := completionFor(workflow)
-		if completion.Succeeded || completion.FailedBurn != "group" || completion.FailedStep != "push" {
-			t.Fatalf("completion = %v %q/%q, want failed group/push", completion.Succeeded, completion.FailedBurn, completion.FailedStep)
+		if completion.Succeeded || completion.FailedStage != "group" || completion.FailedStep != "push" {
+			t.Fatalf("completion = %v %q/%q, want failed group/push", completion.Succeeded, completion.FailedStage, completion.FailedStep)
 		}
 	})
 }
@@ -406,7 +406,7 @@ func progressStatuses(body, key string) []runprogress.Status {
 	var statuses []runprogress.Status
 	for _, line := range splitLines(body) {
 		event, found, err := runprogress.ParseMarker([]byte(line + "\n"))
-		if !found || err != nil || event.Burn+"/"+event.Step != key {
+		if !found || err != nil || event.Stage+"/"+event.Step != key {
 			continue
 		}
 		statuses = append(statuses, event.Status)
@@ -506,7 +506,7 @@ func TestWaitResumedRetriedDAGIsGreen(t *testing.T) {
 		config: Config{Namespace: workflow.Namespace, MaxRunLogBytes: 1 << 20}, interval: time.Millisecond}
 	// Before the restart the first attempt's failure had been reported.
 	failedAt := time.Unix(1_700_000_100, 0).UTC()
-	events := []runprogress.Event{{Version: runprogress.Version, Burn: "address", Step: "check",
+	events := []runprogress.Event{{Version: runprogress.Version, Stage: "address", Step: "check",
 		Status: runprogress.StepFailed, ExitCode: 1, StartedAt: &failedAt, FinishedAt: &failedAt}}
 	var output bytes.Buffer
 	completion, err := controller.WaitResumed(context.Background(), workflow.Name, "run-retry", &output, events, 0, Adoption{})
@@ -514,7 +514,7 @@ func TestWaitResumedRetriedDAGIsGreen(t *testing.T) {
 		t.Fatalf("WaitResumed: %v", err)
 	}
 	if !completion.Succeeded || completion.FailedStep != "" {
-		t.Fatalf("completion = %v %q/%q, want green", completion.Succeeded, completion.FailedBurn, completion.FailedStep)
+		t.Fatalf("completion = %v %q/%q, want green", completion.Succeeded, completion.FailedStage, completion.FailedStep)
 	}
 	if got := strings.Join(stepKeys(completion.Steps), " "); got != "address/check address/get create/create install/install" {
 		t.Fatalf("durable steps = %q", got)
@@ -565,8 +565,8 @@ func TestDAGRetryWithExitHook(t *testing.T) {
 			if completion.Succeeded != (final == wfv1.NodeSucceeded) {
 				t.Fatalf("completion success = %v, final attempt = %s", completion.Succeeded, final)
 			}
-			if final == wfv1.NodeFailed && (completion.FailedBurn != "address" || completion.FailedStep != "check") {
-				t.Fatalf("failure = %s/%s, want address/check", completion.FailedBurn, completion.FailedStep)
+			if final == wfv1.NodeFailed && (completion.FailedStage != "address" || completion.FailedStep != "check") {
+				t.Fatalf("failure = %s/%s, want address/check", completion.FailedStage, completion.FailedStep)
 			}
 		})
 	}

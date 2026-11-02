@@ -58,7 +58,7 @@ func TestDeclaredRetryRowsResolveThroughWait(t *testing.T) {
 				}
 				var plan []runprogress.PlannedStep
 				for _, step := range planned {
-					plan = append(plan, runprogress.PlannedStep{Burn: step.Burn, Step: step.Step, Ordinal: step.Ordinal})
+					plan = append(plan, runprogress.PlannedStep{Stage: step.Stage, Step: step.Step, Ordinal: step.Ordinal})
 				}
 				if err := logs.WriteStepPlan("run-retry", plan); err != nil {
 					t.Fatal(err)
@@ -66,9 +66,9 @@ func TestDeclaredRetryRowsResolveThroughWait(t *testing.T) {
 				if restored {
 					at := last.StartedAt.Time
 					for _, event := range []runprogress.Event{
-						{Version: 1, Burn: "address(0)", Step: "check", Ordinal: 0, Status: runprogress.StepFailed, ExitCode: 1, StartedAt: &at, FinishedAt: &at},
-						{Version: 1, Burn: "create", Step: "create", Ordinal: 7, Status: runprogress.StepPassed, StartedAt: &at, FinishedAt: &at},
-						{Version: 1, Burn: "address", Step: "check", Ordinal: 26, Status: runprogress.StepQueued},
+						{Version: 1, Stage: "address(0)", Step: "check", Ordinal: 0, Status: runprogress.StepFailed, ExitCode: 1, StartedAt: &at, FinishedAt: &at},
+						{Version: 1, Stage: "create", Step: "create", Ordinal: 7, Status: runprogress.StepPassed, StartedAt: &at, FinishedAt: &at},
+						{Version: 1, Stage: "address", Step: "check", Ordinal: 26, Status: runprogress.StepQueued},
 					} {
 						if err := logs.AppendStepProgress("run-retry", event); err != nil {
 							t.Fatal(err)
@@ -102,7 +102,7 @@ func TestDeclaredRetryRowsResolveThroughWait(t *testing.T) {
 				}
 				found := false
 				for _, event := range progress {
-					if event.Burn == "address" && event.Step == "check" {
+					if event.Stage == "address" && event.Step == "check" {
 						found = true
 						if event.Status != test.want || (restored && event.Ordinal != 26) {
 							t.Fatalf("unresolved or renumbered declaration: %+v", event)

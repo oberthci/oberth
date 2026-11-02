@@ -136,7 +136,7 @@ func plannedKeys(t *testing.T, workflow *wfv1.Workflow) []string {
 	}
 	keys := make([]string, 0, len(planned))
 	for _, step := range planned {
-		keys = append(keys, step.Burn+"/"+step.Step)
+		keys = append(keys, step.Stage+"/"+step.Step)
 	}
 	sort.Strings(keys)
 	return keys
@@ -149,7 +149,7 @@ func observedKeys(t *testing.T, workflow *wfv1.Workflow) []string {
 	results := StepResults(executed)
 	keys := make([]string, 0, len(results))
 	for _, result := range results {
-		keys = append(keys, result.Burn+"/"+result.Step)
+		keys = append(keys, result.Stage+"/"+result.Step)
 	}
 	sort.Strings(keys)
 	return keys

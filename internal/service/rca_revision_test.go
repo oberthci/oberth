@@ -105,13 +105,13 @@ func TestRCARevisionNoRetryAfterWorkflowMayHaveRun(t *testing.T) {
 					t.Fatal("did not exercise create then delete", jobs.createCalls, jobs.deleted)
 				}
 			case "completed-while-down":
-				fixture.setJobName(t, run.ID, "workflow")
+				fixture.setWorkflowName(t, run.ID, "workflow")
 				scheduler.store = &rcaRevisionStore{Store: fixture.store, repoFailure: true}
-				if err := scheduler.finalizeReconciledRun(t.Context(), run, JobResult{Status: model.RunFailed, Phase: "test", Steps: []model.StepResult{{Burn: "ci", Step: "ran", Status: model.StepFailed}}}, scheduler.requireMutation); err != nil {
+				if err := scheduler.finalizeReconciledRun(t.Context(), run, JobResult{Status: model.RunFailed, Phase: "test", Steps: []model.StepResult{{Stage: "ci", Step: "ran", Status: model.StepFailed}}}, scheduler.requireMutation); err != nil {
 					t.Fatal(err)
 				}
 			case "create-settlement":
-				fixture.setJobName(t, run.ID, "workflow")
+				fixture.setWorkflowName(t, run.ID, "workflow")
 				if err := fixture.store.MarkRunCreatePending(t.Context(), run.ID, "workflow"); err != nil {
 					t.Fatal(err)
 				}
@@ -146,11 +146,11 @@ type rcaPendingJobs struct {
 	calls       atomic.Int64
 }
 
-func (j *rcaPendingJobs) CreateCI(ctx context.Context, req JobRequest) error {
+func (j *rcaPendingJobs) CreateWorkflow(ctx context.Context, req WorkflowRequest) error {
 	if req.Run.Ref == "uncertain" && !j.knownCreate {
 		return &uncertainWorkflowCreateError{}
 	}
-	return j.recoveryJobs.CreateCI(ctx, req)
+	return j.recoveryJobs.CreateWorkflow(ctx, req)
 }
 func (j *rcaPendingJobs) SettleCreate(context.Context, string, string, time.Time) (bool, error) {
 	j.calls.Add(1)
@@ -247,11 +247,11 @@ func testRCACreateCleanupOutage(t *testing.T, knownCreate bool) {
 func TestRCARevisionExistingIntentDoesNotManufactureMissingJournal(t *testing.T) {
 	fixture := newRecoveryFixture(t)
 	run := fixture.enqueueAndClaim(t, "existing-intent", strings.Repeat("a", 40))
-	name, err := deterministicJobName(fixture.repo.Name, run.ID)
+	name, err := deterministicWorkflowName(fixture.repo.Name, run.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	fixture.setJobName(t, run.ID, name)
+	fixture.setWorkflowName(t, run.ID, name)
 	run, err = fixture.store.Run(t.Context(), run.ID)
 	if err != nil {
 		t.Fatal(err)

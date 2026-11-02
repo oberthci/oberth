@@ -195,17 +195,17 @@ func executeValidate(target validateTarget, output io.Writer) error {
 			report.problem("enumerate steps in %s: %v", entry.file, err)
 			continue
 		}
-		burns := 0
+		stages := 0
 		previous := ""
 		for _, step := range planned {
-			if step.Burn != previous {
-				burns++
-				previous = step.Burn
+			if step.Stage != previous {
+				stages++
+				previous = step.Stage
 			}
 		}
-		report.line("  ok  %d step(s) across %d burn(s)", len(planned), burns)
+		report.line("  ok  %d step(s) across %d burn(s)", len(planned), stages)
 		for _, step := range planned {
-			report.line("      %2d  %s / %s", step.Ordinal, step.Burn, step.Step)
+			report.line("      %2d  %s / %s", step.Ordinal, step.Stage, step.Step)
 		}
 	}
 

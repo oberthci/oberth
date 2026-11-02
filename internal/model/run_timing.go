@@ -76,7 +76,7 @@ type StepTiming struct {
 	NodeID            string            `json:"node_id"`
 	PodName           string            `json:"pod_name,omitempty"`
 	PodUID            string            `json:"pod_uid,omitempty"`
-	Burn              string            `json:"burn"`
+	Stage             string            `json:"burn"`
 	Step              string            `json:"step"`
 	Ordinal           int               `json:"ordinal"`
 	DependencyReadyAt *time.Time        `json:"dependency_ready_at,omitempty"`
@@ -129,7 +129,7 @@ func (value WorkflowTiming) Validate() error {
 
 func (value StepTiming) Validate() error {
 	fail := errors.New("invalid step timing")
-	if value.Version != TimingVersion || !diagnosticRun.MatchString(value.RunID) || !timingName.MatchString(value.Namespace) || !timingName.MatchString(value.WorkflowName) || !diagnosticUID.MatchString(value.WorkflowUID) || !timingName.MatchString(value.NodeID) || !timingName.MatchString(value.Burn) || !timingName.MatchString(value.Step) || value.Ordinal < 0 || value.ObservedAt.IsZero() || len(value.Init) > 16 || value.ScriptTiming != "mixed" || value.ImagePullTiming != "not-observed" {
+	if value.Version != TimingVersion || !diagnosticRun.MatchString(value.RunID) || !timingName.MatchString(value.Namespace) || !timingName.MatchString(value.WorkflowName) || !diagnosticUID.MatchString(value.WorkflowUID) || !timingName.MatchString(value.NodeID) || !timingName.MatchString(value.Stage) || !timingName.MatchString(value.Step) || value.Ordinal < 0 || value.ObservedAt.IsZero() || len(value.Init) > 16 || value.ScriptTiming != "mixed" || value.ImagePullTiming != "not-observed" {
 		return fail
 	}
 	if value.PodName != "" && !timingName.MatchString(value.PodName) {

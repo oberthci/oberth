@@ -87,12 +87,12 @@ func (s *deadlineFaultStore) Run(a0 context.Context, a1 string) (model.Run, erro
 	return s.Store.Run(a0, a1)
 }
 
-func (s *deadlineFaultStore) SetRunJobName(a0 context.Context, a1 string, a2 string) (model.Run, error) {
+func (s *deadlineFaultStore) SetRunWorkflowName(a0 context.Context, a1 string, a2 string) (model.Run, error) {
 	if err := s.fault("SetRunJobName"); err != nil {
 		var zero model.Run
 		return zero, err
 	}
-	return s.Store.SetRunJobName(a0, a1, a2)
+	return s.Store.SetRunWorkflowName(a0, a1, a2)
 }
 
 func (s *deadlineFaultStore) SetRunCredentialed(a0 context.Context, a1 string) error {

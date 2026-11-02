@@ -33,7 +33,7 @@ type fakeBackend struct {
 	runFilter       RunFilter
 	runPage         []model.Run
 	runID           string
-	logBurn         string
+	logStage        string
 	logStep         string
 	logCalls        int
 	logFilter       runlog.Filter
@@ -85,10 +85,10 @@ func (backend *fakeBackend) Run(_ context.Context, _ Actor, id string) (any, err
 	backend.runID = id
 	return map[string]any{"Run": map[string]any{"ID": id}, "Steps": []any{}}, nil
 }
-func (backend *fakeBackend) RunLog(_ context.Context, _ Actor, id, burn, step string) (any, error) {
-	backend.runID, backend.logBurn, backend.logStep = id, burn, step
+func (backend *fakeBackend) RunLog(_ context.Context, _ Actor, id, stage, step string) (any, error) {
+	backend.runID, backend.logStage, backend.logStep = id, stage, step
 	backend.logCalls++
-	return map[string]string{"run_id": id, "burn": burn, "step": step, "output": "[test/unit] ok\n"}, nil
+	return map[string]string{"run_id": id, "burn": stage, "step": step, "output": "[test/unit] ok\n"}, nil
 }
 func (backend *fakeBackend) RunArtifacts(_ context.Context, _ Actor, id string) (any, error) {
 	backend.runID = id
@@ -123,11 +123,11 @@ type fakeArtifact struct {
 func (f fakeArtifact) ArtifactBytes() []byte { return []byte(f.body) }
 func (f fakeArtifact) ArtifactName() string  { return f.name }
 
-func (backend *fakeBackend) RunLogFiltered(_ context.Context, _ Actor, id, burn, step string, filter runlog.Filter) (any, error) {
-	backend.runID, backend.logBurn, backend.logStep = id, burn, step
+func (backend *fakeBackend) RunLogFiltered(_ context.Context, _ Actor, id, stage, step string, filter runlog.Filter) (any, error) {
+	backend.runID, backend.logStage, backend.logStep = id, stage, step
 	backend.logFilter = filter
 	backend.logCalls++
-	return map[string]any{"run_id": id, "burn": burn, "step": step, "output": "[test/unit] ok\n"}, nil
+	return map[string]any{"run_id": id, "burn": stage, "step": step, "output": "[test/unit] ok\n"}, nil
 }
 func (backend *fakeBackend) RunLogLive(_ context.Context, _ Actor, id string, offset int64) (any, error) {
 	backend.runID, backend.liveOffset = id, offset
@@ -493,8 +493,8 @@ func TestRunDetailAndLogViewsRequireAuthAndForwardSelectors(t *testing.T) {
 	logRequest.Header.Set("Authorization", "Bearer valid-token")
 	logResponse := httptest.NewRecorder()
 	server.Handler().ServeHTTP(logResponse, logRequest)
-	if logResponse.Code != http.StatusOK || backend.logBurn != "test" || backend.logStep != "unit" {
-		t.Fatalf("run log = %d, forwarded %q/%q", logResponse.Code, backend.logBurn, backend.logStep)
+	if logResponse.Code != http.StatusOK || backend.logStage != "test" || backend.logStep != "unit" {
+		t.Fatalf("run log = %d, forwarded %q/%q", logResponse.Code, backend.logStage, backend.logStep)
 	}
 	backend.logCalls = 0
 	for _, query := range []string{"burn=%20&step=unit", "burn=test&step=%20"} {

@@ -50,7 +50,7 @@ func TestKVMRestartDefersOwnerRequeueUntilCleanupAndRetriesOnce(t *testing.T) {
 	}
 	original, err = s.Run(t.Context(), source.ID)
 	mustPilot(t, err)
-	if original.Status != model.RunInterrupted || original.SupersededBy != next.ID || original.JobName != "" {
+	if original.Status != model.RunInterrupted || original.SupersededBy != next.ID || original.WorkflowName != "" {
 		t.Fatalf("parent not cleanly interrupted: %+v", original)
 	}
 	if duplicate, err := s.RecoverKVMPreflight(t.Context(), source.ID); err != nil || duplicate.ID != "" {
@@ -181,7 +181,7 @@ func TestKVMRestartReleaseRetestsBeforeAnyPublication(t *testing.T) {
 	reserveRestartPreflight(t, s, intent, true)
 	next, err := s.RecoverKVMPreflight(t.Context(), intent.RunID)
 	mustPilot(t, err)
-	if next.ID == "" || !next.Release || !next.Credentialed || next.Trigger != "tag" || next.JobName != "" {
+	if next.ID == "" || !next.Release || !next.Credentialed || next.Trigger != "tag" || next.WorkflowName != "" {
 		t.Fatalf("release identity lost: %+v", next)
 	}
 	if _, err = s.KVMPreflight(t.Context(), next.ID); !errors.Is(err, ErrNotFound) {

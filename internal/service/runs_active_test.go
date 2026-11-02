@@ -53,7 +53,7 @@ func TestActiveRunsOrderAndWaitReasons(t *testing.T) {
 	// 2: holds concurrency group "deploy" and has started.
 	holder := enqueue("feature/holder")
 	cleanup = append(cleanup, acquireRequestWithinBudget(t, gate.reserve(holder.QueueSequence), groupRequest(holder.ID, holder.RepoID, pipeline.M, "deploy")))
-	if _, err := fixture.store.SetRunJobName(ctx, holder.ID, "wf-holder"); err != nil {
+	if _, err := fixture.store.SetRunWorkflowName(ctx, holder.ID, "wf-holder"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := fixture.store.MarkRunSubmitted(ctx, holder.ID); err != nil {

@@ -22,7 +22,7 @@ import (
 // everything else here: a declared intent, not an observed read. Credentialed
 // also includes release WIF and is the replay-safety classification.
 type PlannedStep struct {
-	Burn         string
+	Stage        string `json:"Burn"`
 	Step         string
 	Ordinal      int
 	Secrets      bool
@@ -98,12 +98,12 @@ func PlannedSteps(workflow *wfv1.Workflow) ([]PlannedStep, error) {
 	// so one branch's result and log would disappear.
 	seen := make(map[[2]string]struct{}, len(walk.steps))
 	for _, step := range walk.steps {
-		key := [2]string{step.Burn, step.Step}
+		key := [2]string{step.Stage, step.Step}
 		if _, duplicate := seen[key]; duplicate {
 			return nil, fmt.Errorf("argoworkflow: duplicate step key (%s, %s) — "+
 				"two pipeline branches invoke templates that normalize to the same burn/step name; "+
 				"rename one of the invoking tasks to disambiguate",
-				step.Burn, step.Step)
+				step.Stage, step.Step)
 		}
 		seen[key] = struct{}{}
 	}
@@ -154,14 +154,14 @@ func (walk *planWalk) descend(template *wfv1.Template, enclosing string, depth i
 				return err
 			}
 		case podProducing(target):
-			burn, step := BurnAndStep(enclosing, called.name)
-			if burn == "" || step == "" {
+			stage, step := StageAndStep(enclosing, called.name)
+			if stage == "" || step == "" {
 				continue
 			}
 			if len(walk.steps) >= MaxPlannedSteps {
 				return fmt.Errorf("argoworkflow: pipeline declares more than %d steps", MaxPlannedSteps)
 			}
-			walk.steps = append(walk.steps, PlannedStep{Burn: burn, Step: step, Ordinal: len(walk.steps), Secrets: UsesSecrets(target), Credentialed: UsesCredentials(target), Template: target})
+			walk.steps = append(walk.steps, PlannedStep{Stage: stage, Step: step, Ordinal: len(walk.steps), Secrets: UsesSecrets(target), Credentialed: UsesCredentials(target), Template: target})
 		}
 	}
 	return nil
@@ -232,13 +232,13 @@ func podProducing(template *wfv1.Template) bool {
 // tree. They agree by construction because the rule lives here rather than
 // being restated on each side -- a divergence would seed one set of step rows
 // and then record a second, disjoint set beside them.
-func BurnAndStep(enclosing, invoked string) (string, string) {
+func StageAndStep(enclosing, invoked string) (string, string) {
 	step := StepName(invoked)
-	burn := StepName(enclosing)
-	if burn == "" {
+	stage := StepName(enclosing)
+	if stage == "" {
 		return step, step
 	}
-	return burn, step
+	return stage, step
 }
 
 // StepName normalises one burn or step name. The characters removed are the

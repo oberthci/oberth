@@ -31,7 +31,7 @@ func (p *capacityFixture) Supports(contract vmrunner.Contract) error {
 	return p.protectedFixture.Supports(contract)
 }
 
-func (p *capacityFixture) Execute(ctx context.Context, job JobRequest, requirement vmrunner.Requirement, output io.Writer) error {
+func (p *capacityFixture) Execute(ctx context.Context, job WorkflowRequest, requirement vmrunner.Requirement, output io.Writer) error {
 	p.calls++
 	p.requirements = append(p.requirements, requirement)
 	if p.calls <= max(1, p.refusals) {
@@ -97,7 +97,7 @@ func TestTrustedCapacityRetryBoundaries(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			job := JobRequest{Run: run, Repository: f.repo, Size: pipeline.M, ConcurrencyGroup: "group", UpstreamName: "codeberg", UpstreamOrg: "acme"}
+			job := WorkflowRequest{Run: run, Repository: f.repo, Size: pipeline.M, ConcurrencyGroup: "group", UpstreamName: "codeberg", UpstreamOrg: "acme"}
 			reservation := f.scheduler.admission.reserve(1)
 			defer acquireRequestWithinBudget(t, reservation, groupRequest(run.ID, f.repo.ID, job.Size, job.ConcurrencyGroup))()
 			if mode == "existing journal" {
@@ -250,7 +250,7 @@ func TestTrustedCapacityRotationAuditsOnceAcrossRetries(t *testing.T) {
 		assertOneAudit()
 		return nil
 	}
-	job := JobRequest{Run: run, Repository: f.repo, Size: pipeline.M, ConcurrencyGroup: "group"}
+	job := WorkflowRequest{Run: run, Repository: f.repo, Size: pipeline.M, ConcurrencyGroup: "group"}
 	reservation := f.scheduler.admission.reserve(1)
 	defer acquireRequestWithinBudget(t, reservation, groupRequest(run.ID, f.repo.ID, job.Size, job.ConcurrencyGroup))()
 	stopped, err := f.scheduler.executeTrustedWithCapacity(ctx, job, requirement, io.Discard, reservation, func(context.Context) error { return nil })
@@ -317,7 +317,7 @@ func TestTrustedCapacityAuditsRotationThatAppearsWhileParked(t *testing.T) {
 		git.baseline = []byte(older)
 		return nil
 	}
-	job := JobRequest{Run: run, Repository: f.repo, Size: pipeline.M, ConcurrencyGroup: "group"}
+	job := WorkflowRequest{Run: run, Repository: f.repo, Size: pipeline.M, ConcurrencyGroup: "group"}
 	reservation := f.scheduler.admission.reserve(1)
 	defer acquireRequestWithinBudget(t, reservation, groupRequest(run.ID, f.repo.ID, job.Size, job.ConcurrencyGroup))()
 	stopped, err := f.scheduler.executeTrustedWithCapacity(ctx, job, requirement, io.Discard, reservation, func(context.Context) error { return nil })

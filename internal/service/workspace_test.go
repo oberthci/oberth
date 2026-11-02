@@ -248,11 +248,11 @@ func TestSupersededWorkspaceWaitsForCancellationCompletion(t *testing.T) {
 	if _, err := fixture.store.ClaimNextRun(ctx); err != nil {
 		t.Fatal(err)
 	}
-	jobName, err := deterministicJobName(fixture.repo.Name, first.ID)
+	workflowName, err := deterministicWorkflowName(fixture.repo.Name, first.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := fixture.store.SetRunJobName(ctx, first.ID, jobName); err != nil {
+	if _, err := fixture.store.SetRunWorkflowName(ctx, first.ID, workflowName); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := fixture.store.EnqueueRun(ctx, model.RunSpec{
@@ -303,7 +303,7 @@ func TestOwnerRestartCompletesEmptyNameSupersedeBeforeCleanup(t *testing.T) {
 		t.Fatalf("pre-Job superseded workspace owner = %#v, %v", interrupted, err)
 	}
 	pending, err := fixture.store.PendingRunCancellations(ctx)
-	if err != nil || len(pending) != 1 || pending[0].RunID != first.ID || pending[0].JobName != "" {
+	if err != nil || len(pending) != 1 || pending[0].RunID != first.ID || pending[0].WorkflowName != "" {
 		t.Fatalf("pre-Job cancellation = %#v, %v", pending, err)
 	}
 	// The original process may still be checking out until owner shutdown, so
@@ -380,7 +380,7 @@ func TestWorkerJoinCompletesEmptyNameSupersedeBeforeCleanup(t *testing.T) {
 		t.Fatal(err)
 	}
 	pending, err := fixture.store.PendingRunCancellations(ctx)
-	if err != nil || len(pending) != 1 || pending[0].RunID != first.ID || pending[0].JobName != "" {
+	if err != nil || len(pending) != 1 || pending[0].RunID != first.ID || pending[0].WorkflowName != "" {
 		close(git.release)
 		t.Fatalf("live empty-name cancellation = %#v, %v", pending, err)
 	}

@@ -29,7 +29,7 @@ type StepResult struct {
 	AttemptAmbiguous     bool
 	Termination          *model.StepDiagnostic
 	InfrastructureReason string
-	Burn                 string
+	Stage                string `json:"Burn"`
 	Step                 string
 	Ordinal              int
 	Status               runprogress.Status
@@ -60,7 +60,7 @@ type Completion struct {
 	Infrastructure      bool
 	Phase               string
 	Reason              string
-	FailedBurn          string
+	FailedStage         string `json:"FailedBurn"`
 	FailedStep          string
 	Steps               []StepResult
 }
@@ -126,8 +126,8 @@ func stepAttempts(workflow *wfv1.Workflow) []StepResult {
 		if !stepNode(workflow, node) {
 			continue
 		}
-		burn, step := burnAndStep(workflow.Status.Nodes, node, rootID, retries)
-		if burn == "" || step == "" {
+		stage, step := stageAndStep(workflow.Status.Nodes, node, rootID, retries)
+		if stage == "" || step == "" {
 			continue
 		}
 		podName := ""
@@ -141,7 +141,7 @@ func stepAttempts(workflow *wfv1.Workflow) []StepResult {
 			NodeID:               node.ID,
 			Attempt:              attempt,
 			Superseded:           superseded,
-			Burn:                 burn,
+			Stage:                stage,
 			Step:                 step,
 			Status:               stepStatus(node.Phase),
 			ExitCode:             exitCode(node),
@@ -164,8 +164,8 @@ func stepAttempts(workflow *wfv1.Workflow) []StepResult {
 		case leftStart != nil && rightStart != nil && !leftStart.Equal(*rightStart):
 			return leftStart.Before(*rightStart)
 		}
-		if results[left].Burn != results[right].Burn {
-			return results[left].Burn < results[right].Burn
+		if results[left].Stage != results[right].Stage {
+			return results[left].Stage < results[right].Stage
 		}
 		if results[left].Step != results[right].Step {
 			return results[left].Step < results[right].Step
@@ -177,7 +177,7 @@ func stepAttempts(workflow *wfv1.Workflow) []StepResult {
 	})
 	ordinals := make(map[string]int)
 	for index := range results {
-		key := results[index].Burn + "\x00" + results[index].Step
+		key := results[index].Stage + "\x00" + results[index].Step
 		ordinal, exists := ordinals[key]
 		if !exists {
 			ordinal = len(ordinals)
@@ -286,7 +286,7 @@ func PodName(workflow *wfv1.Workflow, node wfv1.NodeStatus) string {
 // attempt the boundary of every pod inside it. The suffix is stripped in both
 // cases so the result resolves against the planned name from the document,
 // which never carries one.
-func burnAndStep(nodes wfv1.Nodes, node wfv1.NodeStatus, rootID string, retries retryAttempts) (string, string) {
+func stageAndStep(nodes wfv1.Nodes, node wfv1.NodeStatus, rootID string, retries retryAttempts) (string, string) {
 	enclosing := ""
 	if boundary, ok := nodes[node.BoundaryID]; ok && node.BoundaryID != "" && node.BoundaryID != rootID {
 		enclosing = displayName(boundary)
@@ -298,7 +298,7 @@ func burnAndStep(nodes wfv1.Nodes, node wfv1.NodeStatus, rootID string, retries 
 	if retries.isAttempt(node.ID) {
 		name = stripRetrySuffix(name)
 	}
-	return argoworkflow.BurnAndStep(enclosing, name)
+	return argoworkflow.StageAndStep(enclosing, name)
 }
 
 func displayName(node wfv1.NodeStatus) string {
@@ -461,10 +461,10 @@ func retryAttemptIndex(name string) (int, bool) {
 // attempt (the step's natural place in the pipeline) but uses the final
 // attempt's status, exit code, pod name, and timestamps.
 func deduplicateRetries(results []StepResult) []StepResult {
-	type key struct{ burn, step string }
+	type key struct{ stage, step string }
 	lastIndex := make(map[key]int, len(results))
 	for i, r := range results {
-		lastIndex[key{r.Burn, r.Step}] = i
+		lastIndex[key{r.Stage, r.Step}] = i
 	}
 	if len(lastIndex) == len(results) {
 		return results
@@ -472,14 +472,14 @@ func deduplicateRetries(results []StepResult) []StepResult {
 	deduped := make([]StepResult, 0, len(lastIndex))
 	emitted := make(map[key]bool, len(lastIndex))
 	for _, r := range results {
-		k := key{r.Burn, r.Step}
+		k := key{r.Stage, r.Step}
 		if emitted[k] {
 			continue
 		}
 		emitted[k] = true
 		selected := results[lastIndex[k]]
 		for _, candidate := range results {
-			if candidate.Burn != selected.Burn || candidate.Step != selected.Step || candidate.NodeID == selected.NodeID {
+			if candidate.Stage != selected.Stage || candidate.Step != selected.Step || candidate.NodeID == selected.NodeID {
 				continue
 			}
 			if selected.StartedAt == nil || candidate.StartedAt == nil || selected.StartedAt.Equal(*candidate.StartedAt) {
@@ -670,7 +670,7 @@ func completionFor(workflow *wfv1.Workflow) Completion {
 		// Any terminally failed configured step is attributed as the
 		// run-level failure. The DAG's depends expressions control Argo's
 		// execution flow but do not control Oberth's success gate.
-		completion.FailedBurn, completion.FailedStep = step.Burn, step.Step
+		completion.FailedStage, completion.FailedStep = step.Stage, step.Step
 		completion.Succeeded = false
 	}
 

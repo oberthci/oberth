@@ -98,7 +98,7 @@ func TestRecordDeclarations_TemplateAndAnnotationPaths(t *testing.T) {
 
 	jobs := &ArgoJobs{declarations: recorder, intents: map[string]argoIntent{}}
 
-	request := service.JobRequest{
+	request := service.WorkflowRequest{
 		Run: model.Run{
 			ID: "run-decl-01", Ref: "refs/heads/main",
 			SHA: "cccccccccccccccccccccccccccccccccccccccc", Actor: "agent@host",
@@ -149,7 +149,7 @@ func TestRecordDeclarations_RecorderErrorDoesNotBlockAdmission(t *testing.T) {
 
 	jobs := &ArgoJobs{declarations: recorder, intents: map[string]argoIntent{}}
 
-	request := service.JobRequest{
+	request := service.WorkflowRequest{
 		Run: model.Run{
 			ID: "run-decl-err", Ref: "refs/heads/main",
 			SHA: "dddddddddddddddddddddddddddddddddddddddd", Actor: "agent@host",
@@ -174,7 +174,7 @@ func TestRecordDeclarations_NilRecorderIsNoOp(t *testing.T) {
 	// declarations field is nil (SetDeclarationRecorder was never called).
 	jobs := &ArgoJobs{intents: map[string]argoIntent{}}
 
-	request := service.JobRequest{
+	request := service.WorkflowRequest{
 		Run: model.Run{
 			ID: "run-no-recorder", Ref: "refs/heads/main",
 			SHA: "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", Actor: "agent@host",
@@ -211,7 +211,7 @@ spec:
 
 	jobs := &ArgoJobs{declarations: recorder, intents: map[string]argoIntent{}}
 
-	request := service.JobRequest{
+	request := service.WorkflowRequest{
 		Run: model.Run{
 			ID: "run-no-secrets", Ref: "refs/heads/main",
 			SHA: "ffffffffffffffffffffffffffffffffffffffff", Actor: "agent@host",

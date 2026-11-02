@@ -192,18 +192,18 @@ func (jobs *ArgoJobs) SetIdentityStore(store *argojob.IdentityStore) {
 	jobs.identities = store
 }
 
-func (jobs *ArgoJobs) CreateCI(ctx context.Context, request service.JobRequest) error {
+func (jobs *ArgoJobs) CreateWorkflow(ctx context.Context, request service.WorkflowRequest) error {
 	return jobs.create(ctx, request, pipeline.TriggerCI)
 }
 
-func (jobs *ArgoJobs) CreateRelease(ctx context.Context, request service.JobRequest) error {
+func (jobs *ArgoJobs) CreateRelease(ctx context.Context, request service.WorkflowRequest) error {
 	return jobs.create(ctx, request, pipeline.TriggerRelease)
 }
 
 // PipelineSize reads the run's declared scheduler weight from the checked-out
 // document without evaluating anything: the size-by-trigger entry for this
 // run's own trigger when the document names one, oberth.ci/size otherwise.
-func (jobs *ArgoJobs) PipelineSize(_ context.Context, request service.JobRequest) (pipeline.Size, error) {
+func (jobs *ArgoJobs) PipelineSize(_ context.Context, request service.WorkflowRequest) (pipeline.Size, error) {
 	source, err := jobs.readRunSource(request)
 	if err != nil {
 		return "", jobs.noRunPipelineError(err, request)
@@ -226,7 +226,7 @@ func (jobs *ArgoJobs) PipelineSize(_ context.Context, request service.JobRequest
 // PipelineConcurrencyGroup reads the run's declared concurrency group (#658)
 // from the same checked-out document PipelineSize reads, without evaluating
 // anything. The group is scoped to the run's repository by the scheduler.
-func (jobs *ArgoJobs) PipelineConcurrencyGroup(_ context.Context, request service.JobRequest) (string, error) {
+func (jobs *ArgoJobs) PipelineConcurrencyGroup(_ context.Context, request service.WorkflowRequest) (string, error) {
 	source, err := jobs.readRunSource(request)
 	if err != nil {
 		return "", jobs.noRunPipelineError(err, request)
@@ -253,7 +253,7 @@ func (jobs *ArgoJobs) PipelineConcurrencyGroup(_ context.Context, request servic
 // -- so a run that has not reached a burn does not report it as pending, it
 // omits it, and an agent reading `status` on a failed run sees a plausible
 // complete pipeline that is missing exactly the work that never ran.
-func (jobs *ArgoJobs) PlannedSteps(_ context.Context, request service.JobRequest) ([]runprogress.PlannedStep, error) {
+func (jobs *ArgoJobs) PlannedSteps(_ context.Context, request service.WorkflowRequest) ([]runprogress.PlannedStep, error) {
 	source, err := jobs.readRunSource(request)
 	if err != nil {
 		return nil, jobs.noRunPipelineError(err, request)
@@ -268,13 +268,13 @@ func (jobs *ArgoJobs) PlannedSteps(_ context.Context, request service.JobRequest
 	}
 	steps := make([]runprogress.PlannedStep, 0, len(planned))
 	for _, step := range planned {
-		steps = append(steps, runprogress.PlannedStep{Burn: step.Burn, Step: step.Step, Ordinal: step.Ordinal, Secrets: step.Secrets, Credentialed: step.Credentialed})
+		steps = append(steps, runprogress.PlannedStep{Stage: step.Stage, Step: step.Step, Ordinal: step.Ordinal, Secrets: step.Secrets, Credentialed: step.Credentialed})
 	}
 	return steps, nil
 }
 
-func (jobs *ArgoJobs) create(ctx context.Context, request service.JobRequest, trigger pipeline.Trigger) error {
-	if strings.TrimSpace(request.JobName) == "" || strings.TrimSpace(request.Run.ID) == "" || request.Repository.Name == "" {
+func (jobs *ArgoJobs) create(ctx context.Context, request service.WorkflowRequest, trigger pipeline.Trigger) error {
+	if strings.TrimSpace(request.WorkflowName) == "" || strings.TrimSpace(request.Run.ID) == "" || request.Repository.Name == "" {
 		return errors.New("app: deterministic Workflow name, run, and repository are required")
 	}
 	// The durable run's own classification decides the trigger, never the
@@ -290,12 +290,12 @@ func (jobs *ArgoJobs) create(ctx context.Context, request service.JobRequest, tr
 	// held only for the map check and the reconciler health gate (both
 	// in-memory), not for audit/seeding/controller calls.
 	jobs.mu.Lock()
-	if existing, occupied := jobs.intents[request.JobName]; occupied {
+	if existing, occupied := jobs.intents[request.WorkflowName]; occupied {
 		jobs.mu.Unlock()
 		if existing.runID == request.Run.ID {
 			return nil // same submission already in flight
 		}
-		return fmt.Errorf("app: Workflow %s is in flight for a different run %s", request.JobName, existing.runID)
+		return fmt.Errorf("app: Workflow %s is in flight for a different run %s", request.WorkflowName, existing.runID)
 	}
 	// Gate on reconciler health: a credentialed submission must not proceed
 	// when the access reconciler has never successfully read the ConfigMap.
@@ -303,7 +303,7 @@ func (jobs *ArgoJobs) create(ctx context.Context, request service.JobRequest, tr
 		jobs.mu.Unlock()
 		return fmt.Errorf("app: access reconciler has not completed initial reconciliation; credentialed admission is blocked for %s", request.Repository.Name)
 	}
-	jobs.intents[request.JobName] = argoIntent{runID: request.Run.ID, trigger: trigger}
+	jobs.intents[request.WorkflowName] = argoIntent{runID: request.Run.ID, trigger: trigger}
 	jobs.mu.Unlock()
 
 	// Everything below runs outside the lock. On failure, remove the
@@ -314,8 +314,8 @@ func (jobs *ArgoJobs) create(ctx context.Context, request service.JobRequest, tr
 	defer func() {
 		if !success {
 			jobs.mu.Lock()
-			if current, ok := jobs.intents[request.JobName]; ok && current.runID == request.Run.ID && !current.cancelled {
-				delete(jobs.intents, request.JobName)
+			if current, ok := jobs.intents[request.WorkflowName]; ok && current.runID == request.Run.ID && !current.cancelled {
+				delete(jobs.intents, request.WorkflowName)
 			}
 			jobs.mu.Unlock()
 		}
@@ -323,10 +323,10 @@ func (jobs *ArgoJobs) create(ctx context.Context, request service.JobRequest, tr
 
 	// Early abort: Delete arrived between reservation and seeding.
 	jobs.mu.Lock()
-	if jobs.intents[request.JobName].cancelled {
+	if jobs.intents[request.WorkflowName].cancelled {
 		// Delete already marked the intent cancelled and owns cleanup.
 		// Remove the tombstone now — no workflow exists to cancel.
-		delete(jobs.intents, request.JobName)
+		delete(jobs.intents, request.WorkflowName)
 		jobs.mu.Unlock()
 		return ErrSuperseded
 	}
@@ -382,7 +382,7 @@ func (jobs *ArgoJobs) create(ctx context.Context, request service.JobRequest, tr
 		ResourceFallback: request.ResourceFallback,
 		VMIDemandReceipt: request.VMIDemandReceipt,
 		PipelineFile:     pipelineFile,
-		RunID:            request.Run.ID, RepositoryID: request.Repository.ID, Name: request.JobName,
+		RunID:            request.Run.ID, RepositoryID: request.Repository.ID, Name: request.WorkflowName,
 		Repo: request.Repository.Name, UpstreamName: request.UpstreamName, UpstreamOrg: request.UpstreamOrg,
 		Ref: request.Run.Ref, SHA: testedSHA, Trigger: trigger, RunTrigger: kind, ScheduleEntry: request.Run.ScheduleEntry, Source: source,
 		SourceDir: request.SourceDir, ApprovedSecrets: approvedSecrets,
@@ -429,26 +429,26 @@ func (jobs *ArgoJobs) create(ctx context.Context, request service.JobRequest, tr
 	if err != nil {
 		return err
 	}
-	if createdName != request.JobName {
+	if createdName != request.WorkflowName {
 		_ = jobs.controller.Cancel(ctx, createdName, request.Run.ID)
-		return fmt.Errorf("app: Argo created Workflow %q, expected %q", createdName, request.JobName)
+		return fmt.Errorf("app: Argo created Workflow %q, expected %q", createdName, request.WorkflowName)
 	}
 
 	// Post-create check: if Delete arrived while controller.Create was
 	// running, the live Workflow must be cancelled. The intent is removed
 	// here because Delete left the tombstone for create() to clean up.
 	jobs.mu.Lock()
-	if intent, ok := jobs.intents[request.JobName]; ok && intent.cancelled {
-		delete(jobs.intents, request.JobName)
+	if intent, ok := jobs.intents[request.WorkflowName]; ok && intent.cancelled {
+		delete(jobs.intents, request.WorkflowName)
 		jobs.mu.Unlock()
 		_ = jobs.controller.Cancel(ctx, createdName, request.Run.ID)
 		return ErrSuperseded
 	}
 	// Mark the intent as created so Delete (and Wait) know the Workflow
 	// exists and can be cancelled via the controller.
-	if intent, ok := jobs.intents[request.JobName]; ok && intent.runID == request.Run.ID {
+	if intent, ok := jobs.intents[request.WorkflowName]; ok && intent.runID == request.Run.ID {
 		intent.created = true
-		jobs.intents[request.JobName] = intent
+		jobs.intents[request.WorkflowName] = intent
 	}
 	jobs.mu.Unlock()
 
@@ -465,7 +465,7 @@ func (jobs *ArgoJobs) create(ctx context.Context, request service.JobRequest, tr
 // which namespace, which ServiceAccount, and which paths the document declared
 // it would read. Joined with OpenBao's own audit device, that is what makes an
 // access attributable to a push.
-func (jobs *ArgoJobs) auditSubmission(ctx context.Context, request service.JobRequest, submission argojob.Request) error {
+func (jobs *ArgoJobs) auditSubmission(ctx context.Context, request service.WorkflowRequest, submission argojob.Request) error {
 	actor := strings.TrimSpace(request.Run.Actor)
 	if actor == "" {
 		return errors.New("app: Workflow submission requires an attributable uplink identity")
@@ -556,7 +556,7 @@ func (jobs *ArgoJobs) auditSubmission(ctx context.Context, request service.JobRe
 // recordDeclarations extracts (step, path) declarations from the workflow
 // source and records them for `access_list --pending`. Best-effort: failures
 // are logged to the run context and never block admission. Issue #623, finding 4.
-func (jobs *ArgoJobs) recordDeclarations(ctx context.Context, request service.JobRequest, source []byte, trigger pipeline.Trigger) {
+func (jobs *ArgoJobs) recordDeclarations(ctx context.Context, request service.WorkflowRequest, source []byte, trigger pipeline.Trigger) {
 	if jobs.declarations == nil {
 		return
 	}
@@ -642,7 +642,7 @@ func (jobs *ArgoJobs) Adopt(ctx context.Context, run model.Run) (pipeline.Size, 
 		sha = run.SHA
 	}
 	binding, found, err := controller.Adopt(ctx, argojob.AdoptionRequest{
-		Name: run.JobName, RunID: run.ID, Ref: run.Ref, SHA: sha,
+		Name: run.WorkflowName, RunID: run.ID, Ref: run.Ref, SHA: sha,
 		Group: run.ConcurrencyGroup, Trigger: trigger, RunTrigger: kind, ScheduleEntry: run.ScheduleEntry,
 	})
 	if errors.Is(err, argojob.ErrAdoptionRefused) {
@@ -653,18 +653,18 @@ func (jobs *ArgoJobs) Adopt(ctx context.Context, run model.Run) (pipeline.Size, 
 	}
 	jobs.mu.Lock()
 	defer jobs.mu.Unlock()
-	if current, exists := jobs.intents[run.JobName]; exists {
+	if current, exists := jobs.intents[run.WorkflowName]; exists {
 		if current.runID != run.ID || current.cancelled || current.adoption == nil || *current.adoption != binding {
 			return "", false, fmt.Errorf("%w: app: conflicting Workflow adoption intent", service.ErrAdoptionRefused)
 		}
 		return binding.Size, true, nil
 	}
-	jobs.intents[run.JobName] = argoIntent{runID: run.ID, trigger: trigger, created: true, adoption: &binding}
+	jobs.intents[run.WorkflowName] = argoIntent{runID: run.ID, trigger: trigger, created: true, adoption: &binding}
 	return binding.Size, true, nil
 }
 
 // JobNamespace names the namespace the engine's Workflows live in.
-func (jobs *ArgoJobs) JobNamespace() string {
+func (jobs *ArgoJobs) WorkflowNamespace() string {
 	return jobs.controller.Namespace()
 }
 
@@ -710,7 +710,7 @@ func (jobs *ArgoJobs) wait(ctx context.Context, name string, destination io.Writ
 			// loses the exit field; a log/index error must not erase a test failure.
 			for _, step := range completion.Steps {
 				if step.ExitCodeKnown && step.ExitCode > 0 && step.Status == runprogress.StepFailed && step.Attempt == "" && !step.AttemptAmbiguous {
-					retainedEvents = append(retainedEvents, runprogress.Event{Version: runprogress.Version, Burn: step.Burn, Step: step.Step, Ordinal: step.Ordinal, Status: step.Status, ExitCode: step.ExitCode, StartedAt: step.StartedAt, FinishedAt: step.FinishedAt})
+					retainedEvents = append(retainedEvents, runprogress.Event{Version: runprogress.Version, Stage: step.Stage, Step: step.Step, Ordinal: step.Ordinal, Status: step.Status, ExitCode: step.ExitCode, StartedAt: step.StartedAt, FinishedAt: step.FinishedAt})
 				}
 			}
 			for i := range retainedEvents {
@@ -875,10 +875,10 @@ func (jobs *ArgoJobs) result(completion argojob.Completion) service.JobResult {
 		}
 	}
 	if completion.ObservationComplete {
-		observation := &model.RunTerminalObservation{Version: 1, JobName: completion.Name, Nodes: completion.ObservedNodes}
+		observation := &model.RunTerminalObservation{Version: 1, WorkflowName: completion.Name, Nodes: completion.ObservedNodes}
 		for _, step := range completion.ReplayAttempts {
 			started := step.StartedAt != nil || step.Status == runprogress.StepRunning || step.Status == runprogress.StepPassed || step.Status == runprogress.StepFailed || step.Status == runprogress.StepTimedOut
-			observation.Steps = append(observation.Steps, model.RunObservedStep{Burn: step.Burn, Step: step.Step, Status: model.StepStatus(step.Status), Started: started})
+			observation.Steps = append(observation.Steps, model.RunObservedStep{Stage: step.Stage, Step: step.Step, Status: model.StepStatus(step.Status), Started: started})
 		}
 		result.TerminalObservation = observation
 	}
@@ -894,7 +894,7 @@ func (jobs *ArgoJobs) result(completion argojob.Completion) service.JobResult {
 	result.Steps = make([]model.StepResult, 0, len(completion.Steps))
 	for _, step := range completion.Steps {
 		result.Steps = append(result.Steps, model.StepResult{
-			Burn: step.Burn, Step: step.Step, Ordinal: step.Ordinal, Termination: step.Termination,
+			Stage: step.Stage, Step: step.Step, Ordinal: step.Ordinal, Termination: step.Termination,
 			Status: model.StepStatus(step.Status), ExitCode: step.ExitCode,
 			StartedAt: step.StartedAt, FinishedAt: step.FinishedAt,
 			MaxRSSBytes:     step.Usage.MaxRSSBytes,
@@ -904,21 +904,21 @@ func (jobs *ArgoJobs) result(completion argojob.Completion) service.JobResult {
 		})
 	}
 	if completion.FailedStep != "" {
-		result.FailedBurn, result.FailedStep = completion.FailedBurn, completion.FailedStep
-		result.Phase = completion.FailedBurn
+		result.FailedStage, result.FailedStep = completion.FailedStage, completion.FailedStep
+		result.Phase = completion.FailedStage
 	}
 	if result.Status == model.RunPassed && result.FailedStep != "" {
 		result.Status = model.RunFailed
-		result.Phase = result.FailedBurn
+		result.Phase = result.FailedStage
 		result.Error = "successful Workflow reported a failed step"
 	}
 	if result.Status == model.RunFailed && completion.Infrastructure {
 		result.Phase = "infrastructure"
-		result.FailedBurn, result.FailedStep = "", ""
+		result.FailedStage, result.FailedStep = "", ""
 	}
 	if completion.Interrupted && completion.Infrastructure && !completion.Succeeded && completion.FailedStep == "" {
 		result.Status, result.Phase = model.RunInterrupted, "interrupted"
-		result.FailedBurn, result.FailedStep = "", ""
+		result.FailedStage, result.FailedStep = "", ""
 	}
 	return result
 }
@@ -951,7 +951,7 @@ func noPipelineError(err error, trigger pipeline.Trigger, repoName string) error
 
 // PipelineCredentialed reports whether the checked-out pipeline declares
 // secret-store paths by decoding the same document PipelineSize reads.
-func (jobs *ArgoJobs) PipelineCredentialed(_ context.Context, request service.JobRequest) (bool, error) {
+func (jobs *ArgoJobs) PipelineCredentialed(_ context.Context, request service.WorkflowRequest) (bool, error) {
 	source, err := jobs.readRunSource(request)
 	if err != nil {
 		return false, jobs.noRunPipelineError(err, request)
@@ -1022,7 +1022,7 @@ func (jobs *ArgoJobs) ObserveScheduling(ctx context.Context, run model.Run) (*mo
 	if sha == "" {
 		sha = run.SHA
 	}
-	return observer.ObserveScheduling(ctx, run.JobName, run.ID, sha)
+	return observer.ObserveScheduling(ctx, run.WorkflowName, run.ID, sha)
 }
 
 // kubeVirtBudget converts a stored grant budget to the admission policy's

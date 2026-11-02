@@ -46,7 +46,7 @@ func restartCutFixture(t *testing.T, change func(*wfv1.Workflow, *wfv1.NodeStatu
 		t.Fatal("verified adoption failed", binding, found, err)
 	}
 	step := StepResults(wf)[0]
-	events := []runprogress.Event{{Version: runprogress.Version, Burn: step.Burn, Step: step.Step, Ordinal: step.Ordinal, Status: runprogress.StepRunning, StartedAt: step.StartedAt}}
+	events := []runprogress.Event{{Version: runprogress.Version, Stage: step.Stage, Step: step.Step, Ordinal: step.Ordinal, Status: runprogress.StepRunning, StartedAt: step.StartedAt}}
 	return controller, wf, binding, events
 }
 
@@ -163,7 +163,7 @@ func TestRestartCutRealParallelFailureAndCleanupStayRed(t *testing.T) {
 	if err != nil || !result.Interrupted {
 		t.Fatal(result, err)
 	}
-	result.Steps = append(result.Steps, StepResult{Burn: "cleanup", Step: "delete", Status: runprogress.StepFailed, ExitCode: 1})
+	result.Steps = append(result.Steps, StepResult{Stage: "cleanup", Step: "delete", Status: runprogress.StepFailed, ExitCode: 1})
 	result.classifyRestartCut()
 	if result.Interrupted || result.Infrastructure || result.FailedStep != "delete" {
 		t.Fatal("hard cleanup became retryable", result)
@@ -250,7 +250,7 @@ func TestRestartCutRetainedJournalFailureBindsExactAttempt(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			controller, wf, binding, events := restartCutFixture(t, func(_ *wfv1.Workflow, _ *wfv1.NodeStatus, p *corev1.Pod) { p.Name = "" })
 			step := StepResults(wf)[0]
-			event := runprogress.Event{Version: runprogress.Version, Burn: step.Burn, Step: step.Step, Ordinal: step.Ordinal, Status: runprogress.StepFailed, ExitCode: 2, StartedAt: step.StartedAt, FinishedAt: step.FinishedAt}
+			event := runprogress.Event{Version: runprogress.Version, Stage: step.Stage, Step: step.Step, Ordinal: step.Ordinal, Status: runprogress.StepFailed, ExitCode: 2, StartedAt: step.StartedAt, FinishedAt: step.FinishedAt}
 			switch mode {
 			case "old-attempt":
 				start := step.StartedAt.Add(-time.Minute)
@@ -343,7 +343,7 @@ func TestRestartCutConflictingExitEvidenceStaysRed(t *testing.T) {
 			step := StepResults(wf)[0]
 			var events []runprogress.Event
 			if source == "journal" {
-				events = []runprogress.Event{{Version: runprogress.Version, Burn: step.Burn, Step: step.Step, Ordinal: step.Ordinal, Status: runprogress.StepFailed, ExitCode: 2, StartedAt: step.StartedAt, FinishedAt: step.FinishedAt}}
+				events = []runprogress.Event{{Version: runprogress.Version, Stage: step.Stage, Step: step.Step, Ordinal: step.Ordinal, Status: runprogress.StepFailed, ExitCode: 2, StartedAt: step.StartedAt, FinishedAt: step.FinishedAt}}
 			} else {
 				earlier := wf.DeepCopy()
 				for id, node := range earlier.Status.Nodes {

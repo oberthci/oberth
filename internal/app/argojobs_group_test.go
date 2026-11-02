@@ -57,7 +57,7 @@ func TestPipelineConcurrencyGroupReadsTheRunsOwnDocument(t *testing.T) {
 		{model.Run{Ref: "promotion/main", Trigger: "promotion"}, "terraform-state"},
 		{model.Run{Ref: "apply-1", Trigger: "tag", Release: true}, "release-lane"},
 	} {
-		group, err := jobs.PipelineConcurrencyGroup(context.Background(), service.JobRequest{
+		group, err := jobs.PipelineConcurrencyGroup(context.Background(), service.WorkflowRequest{
 			Run: tc.run, Repository: model.Repository{Name: "terraform"}, SourceDir: dir,
 		})
 		if err != nil || group != tc.want {
@@ -67,7 +67,7 @@ func TestPipelineConcurrencyGroupReadsTheRunsOwnDocument(t *testing.T) {
 
 	ungrouped := t.TempDir()
 	writePipeline(t, ungrouped, "build.yaml", groupedPipeline(""))
-	if group, err := jobs.PipelineConcurrencyGroup(context.Background(), service.JobRequest{
+	if group, err := jobs.PipelineConcurrencyGroup(context.Background(), service.WorkflowRequest{
 		Run: model.Run{Ref: "main"}, Repository: model.Repository{Name: "beacon"}, SourceDir: ungrouped,
 	}); err != nil || group != "" {
 		t.Fatalf("undeclared group = %q, %v", group, err)
@@ -78,12 +78,12 @@ func TestPipelineConcurrencyGroupRefusesMalformedAndMissingDocuments(t *testing.
 	jobs := &ArgoJobs{intents: map[string]argoIntent{}}
 	malformed := t.TempDir()
 	writePipeline(t, malformed, "build.yaml", groupedPipeline("    oberth.ci/concurrency-group: Terraform_State\n"))
-	if _, err := jobs.PipelineConcurrencyGroup(context.Background(), service.JobRequest{
+	if _, err := jobs.PipelineConcurrencyGroup(context.Background(), service.WorkflowRequest{
 		Run: model.Run{Ref: "main"}, Repository: model.Repository{Name: "terraform"}, SourceDir: malformed,
 	}); err == nil || !strings.Contains(err.Error(), "invalid concurrency group") {
 		t.Fatalf("malformed group = %v", err)
 	}
-	if _, err := jobs.PipelineConcurrencyGroup(context.Background(), service.JobRequest{
+	if _, err := jobs.PipelineConcurrencyGroup(context.Background(), service.WorkflowRequest{
 		Run: model.Run{Ref: "main"}, Repository: model.Repository{Name: "terraform"}, SourceDir: t.TempDir(),
 	}); err == nil || !strings.Contains(err.Error(), "has no pipeline configuration") {
 		t.Fatalf("missing document = %v", err)
@@ -121,7 +121,7 @@ func TestAuditSubmissionRecordsTheAdmittedConcurrencyGroup(t *testing.T) {
 		{"terraform-state", "terraform-state"},
 		{"", nil},
 	} {
-		request := service.JobRequest{
+		request := service.WorkflowRequest{
 			Run:        model.Run{ID: "run-grouped", Ref: "fix-a", SHA: commit, Actor: "agent@tuxbox", ConcurrencyGroup: tc.group},
 			Repository: model.Repository{Name: "terraform"}, SourceDir: dir, ConcurrencyGroup: tc.group,
 		}
@@ -163,7 +163,7 @@ func TestPipelineConcurrencyGroupOnlyUsesDeclaredVMIGroup(t *testing.T) {
 	} {
 		dir := t.TempDir()
 		writePipeline(t, dir, "build.yaml", vmiPipeline(tc.annotations))
-		group, err := jobs.PipelineConcurrencyGroup(context.Background(), service.JobRequest{
+		group, err := jobs.PipelineConcurrencyGroup(context.Background(), service.WorkflowRequest{
 			Run: model.Run{Ref: "main"}, Repository: model.Repository{Name: "cttv"}, SourceDir: dir,
 		})
 		if err != nil || group != tc.want {

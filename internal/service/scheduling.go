@@ -176,7 +176,7 @@ func (service *API) observeScheduling(ctx context.Context, run model.Run, steps 
 	if service.schedulingObserver == nil {
 		return result
 	}
-	if run.JobName == "" {
+	if run.WorkflowName == "" {
 		result.State = "startup"
 		result.Message = "No execution object name has been recorded; startup cause is unknown."
 		return result
@@ -193,7 +193,7 @@ func (service *API) observeScheduling(ctx context.Context, run model.Run, steps 
 }
 
 func (service *API) submittedKVMPreflight(ctx context.Context, run model.Run) bool {
-	if service.kvmPreflights == nil || run.JobName != "" || run.Status != model.RunRunning {
+	if service.kvmPreflights == nil || run.WorkflowName != "" || run.Status != model.RunRunning {
 		return false
 	}
 	preflight, err := service.kvmPreflights.KVMPreflight(ctx, run.ID)

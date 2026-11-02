@@ -518,7 +518,7 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 	case "run_logs":
 		var arguments struct {
 			ID         string `json:"id"`
-			Burn       string `json:"burn"`
+			Stage      string `json:"burn"`
 			Step       string `json:"step"`
 			Pattern    string `json:"pattern"`
 			Context    int    `json:"context"`
@@ -541,7 +541,7 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 			return nil, fmt.Errorf("%w: byte_offset must be nonnegative", ErrInvalidInput)
 		}
 		filter.ByteOffset = arguments.ByteOffset
-		return service.RunLogFiltered(ctx, actor, arguments.ID, arguments.Burn, arguments.Step, filter)
+		return service.RunLogFiltered(ctx, actor, arguments.ID, arguments.Stage, arguments.Step, filter)
 	case "artifacts":
 		var arguments struct {
 			ID string `json:"id"`
@@ -1150,11 +1150,11 @@ func (service *API) readRun(ctx context.Context, actor api.Actor, id string, sum
 // log. Active runs authorize against their progress journal and read an
 // in-memory index snapshot; terminal runs authorize against durable results
 // and their finalized retained-log index.
-func (service *API) RunLog(ctx context.Context, actor api.Actor, id, burn, step string) (any, error) {
-	return service.RunLogFiltered(ctx, actor, id, burn, step, runlog.Filter{})
+func (service *API) RunLog(ctx context.Context, actor api.Actor, id, stage, step string) (any, error) {
+	return service.RunLogFiltered(ctx, actor, id, stage, step, runlog.Filter{})
 }
 
-func (service *API) RunLogFiltered(ctx context.Context, actor api.Actor, id, burn, step string, filter runlog.Filter) (value any, resultErr error) {
+func (service *API) RunLogFiltered(ctx context.Context, actor api.Actor, id, stage, step string, filter runlog.Filter) (value any, resultErr error) {
 	ctx = withRunLogCaller(ctx, actor)
 	var cancel context.CancelFunc
 	ctx, cancel = context.WithTimeout(ctx, runReadBudget)
@@ -1187,38 +1187,38 @@ func (service *API) RunLogFiltered(ctx context.Context, actor api.Actor, id, bur
 	if err != nil {
 		return nil, fmt.Errorf("load run steps: %w", err)
 	}
-	if strings.TrimSpace(burn) == "" {
-		burn = run.FailedBurn
+	if strings.TrimSpace(stage) == "" {
+		stage = run.FailedStage
 		if strings.TrimSpace(step) == "" {
 			step = run.FailedStep
 		}
 	}
-	if strings.TrimSpace(burn) == "" {
+	if strings.TrimSpace(stage) == "" {
 		return nil, fmt.Errorf("%w: burn is required when the run has no failed burn", ErrInvalidInput)
 	}
 	if strings.TrimSpace(step) == "" {
 		var count int
 		for _, result := range steps {
-			if result.Burn == burn {
+			if result.Stage == stage {
 				step = result.Step
 				count++
 			}
 		}
 		if count != 1 {
-			return nil, fmt.Errorf("%w: step is required unless burn %q has exactly one step", ErrInvalidInput, burn)
+			return nil, fmt.Errorf("%w: step is required unless burn %q has exactly one step", ErrInvalidInput, stage)
 		}
 	}
 	recorded := false
 	for _, result := range steps {
-		if result.Burn == burn && result.Step == step {
+		if result.Stage == stage && result.Step == step {
 			recorded = true
 			break
 		}
 	}
 	if !recorded {
-		return nil, fmt.Errorf("no log range for burn %q step %q: %w", burn, step, store.ErrNotFound)
+		return nil, fmt.Errorf("no log range for burn %q step %q: %w", stage, step, store.ErrNotFound)
 	}
-	return service.stepLogResponse(ctx, run, steps, burn, step, filter)
+	return service.stepLogResponse(ctx, run, steps, stage, step, filter)
 }
 
 // maxLiveLogChunk bounds one live-log poll response. 256 KiB keeps a fast
@@ -1407,7 +1407,7 @@ func (service *API) statusForRun(ctx context.Context, repository model.Repositor
 	response := StatusResponse{
 		Priority: presented.Priority, PriorityReason: presented.PriorityReason, PriorityRequestedBy: presented.PriorityRequestedBy, PriorityRefusal: presented.PriorityRefusal,
 		Repository: repository, Run: run, Repo: repository.Name, Ref: run.Ref,
-		SHA: run.SHA, RunID: run.ID, Status: wireRunStatus(visibleRun(run).Status), Burns: map[string]string{},
+		SHA: run.SHA, RunID: run.ID, Status: wireRunStatus(visibleRun(run).Status), Stages: map[string]string{},
 		DisplayStatus:    presented.DisplayStatus,
 		DisplayReason:    presented.DisplayReason,
 		ResourceMessage:  presented.ResourceMessage,
@@ -1420,7 +1420,7 @@ func (service *API) statusForRun(ctx context.Context, repository model.Repositor
 			return StatusResponse{}, fmt.Errorf("load run steps: %w", err)
 		}
 		response.Steps = steps
-		response.Burns, response.ExitCode = wireBurns(response.Steps, run)
+		response.Stages, response.ExitCode = wireStages(response.Steps, run)
 	}
 	response.Scheduling = service.scheduling(ctx, run, response.Steps)
 	response.Run = presented
@@ -1487,7 +1487,7 @@ func (service *API) statusForBranchRef(ctx context.Context, repositoryName, sele
 		}
 		return StatusResponse{
 			Repository: repository, Repo: repository.Name, Ref: selector,
-			SHA: sha, Status: "no-runs", Burns: map[string]string{},
+			SHA: sha, Status: "no-runs", Stages: map[string]string{},
 		}, nil
 	}
 	repositories, err := service.runs.ListRepositories(ctx)
@@ -1518,7 +1518,7 @@ func (service *API) statusForBranchRef(ctx context.Context, repositoryName, sele
 	}
 	return StatusResponse{
 		Repository: matched, Repo: matched.Name, Ref: selector,
-		SHA: matchedSHA, Status: "no-runs", Burns: map[string]string{},
+		SHA: matchedSHA, Status: "no-runs", Stages: map[string]string{},
 	}, nil
 }
 
@@ -1530,7 +1530,7 @@ func (service *API) statusFromRun(ctx context.Context, repository model.Reposito
 	presented := service.presentationRun(ctx, run)
 	response := StatusResponse{
 		Repository: repository, Run: run, Repo: repository.Name, Ref: ref,
-		SHA: run.SHA, RunID: run.ID, Status: wireRunStatus(visibleRun(run).Status), Burns: map[string]string{},
+		SHA: run.SHA, RunID: run.ID, Status: wireRunStatus(visibleRun(run).Status), Stages: map[string]string{},
 		DisplayStatus:   presented.DisplayStatus,
 		DisplayReason:   presented.DisplayReason,
 		ResourceMessage: presented.ResourceMessage,
@@ -1542,7 +1542,7 @@ func (service *API) statusFromRun(ctx context.Context, repository model.Reposito
 		if err != nil {
 			return StatusResponse{}, fmt.Errorf("load run steps: %w", err)
 		}
-		response.Burns, response.ExitCode = wireBurns(response.Steps, run)
+		response.Stages, response.ExitCode = wireStages(response.Steps, run)
 	}
 	response.Scheduling = service.scheduling(ctx, run, response.Steps)
 	response.Run = presented
@@ -1750,24 +1750,24 @@ func (service *API) presentationRunWithSuccessor(ctx context.Context, run model.
 // one passed step and one the run never reached is not a passed burn, and
 // before the plan existed it could not say so -- the unreached step was absent
 // from the list entirely, so the burn read "passed".
-var burnPrecedence = map[string]int{"-": 0, "passed": 1, "pending": 2, "queued": 3, "running": 4, "failed": 5}
+var stagePrecedence = map[string]int{"-": 0, "passed": 1, "pending": 2, "queued": 3, "running": 4, "failed": 5}
 
-func wireBurns(steps []model.StepResult, run model.Run) (map[string]string, *int) {
-	burns := make(map[string]string)
+func wireStages(steps []model.StepResult, run model.Run) (map[string]string, *int) {
+	stages := make(map[string]string)
 	var exitCode *int
-	if canonical := runlog.LegacyRetryBurn(run.FailedBurn); canonical != run.FailedBurn {
+	if canonical := runlog.LegacyRetryStage(run.FailedStage); canonical != run.FailedStage {
 		// A legacy result may now resolve a declaration under its canonical
 		// name. Match that failure identity too, while preserving literal
 		// suffixed burns that still have their own row.
 		literal := false
 		for _, step := range steps {
-			if step.Burn == run.FailedBurn {
+			if step.Stage == run.FailedStage {
 				literal = true
 				break
 			}
 		}
 		if !literal {
-			run.FailedBurn = canonical
+			run.FailedStage = canonical
 		}
 	}
 	for _, step := range steps {
@@ -1794,11 +1794,11 @@ func wireBurns(steps []model.StepResult, run model.Run) (map[string]string, *int
 		default:
 			continue
 		}
-		if current, seen := burns[step.Burn]; !seen || burnPrecedence[state] > burnPrecedence[current] {
-			burns[step.Burn] = state
+		if current, seen := stages[step.Stage]; !seen || stagePrecedence[state] > stagePrecedence[current] {
+			stages[step.Stage] = state
 		}
 	}
-	return burns, exitCode
+	return stages, exitCode
 }
 
 // matchesFailedStep returns true when the given step result matches the run's
@@ -1807,14 +1807,14 @@ func wireBurns(steps []model.StepResult, run model.Run) (map[string]string, *int
 // When neither is populated, the first failed step wins (the caller already
 // checks exitCode == nil).
 func matchesFailedStep(step model.StepResult, run model.Run) bool {
-	burnRecorded := run.FailedBurn != ""
+	stageRecorded := run.FailedStage != ""
 	stepRecorded := run.FailedStep != ""
-	if !burnRecorded && !stepRecorded {
+	if !stageRecorded && !stepRecorded {
 		return true // no identity recorded; take the first failed step
 	}
-	burnMatch := !burnRecorded || step.Burn == run.FailedBurn
+	stageMatch := !stageRecorded || step.Stage == run.FailedStage
 	stepMatch := !stepRecorded || step.Step == run.FailedStep
-	return burnMatch && stepMatch
+	return stageMatch && stepMatch
 }
 
 // stepsForRun assembles the run's step list from the three records that each
@@ -1879,32 +1879,32 @@ func mergeSteps(run model.Run, planned []runprogress.PlannedStep, events []runpr
 	order := make(map[string]int, len(planned))
 	secrets := make(map[string]bool, len(planned))
 	for _, step := range planned {
-		order[step.Burn+"\x00"+step.Step] = step.Ordinal
-		secrets[step.Burn+"\x00"+step.Step] = step.Secrets
+		order[step.Stage+"\x00"+step.Step] = step.Ordinal
+		secrets[step.Stage+"\x00"+step.Step] = step.Secrets
 	}
 	canonicalObserved := make(map[string]bool)
 	for _, event := range events {
-		canonicalObserved[event.Burn+"\x00"+event.Step] = true
+		canonicalObserved[event.Stage+"\x00"+event.Step] = true
 	}
 	for _, result := range persisted {
-		canonicalObserved[result.Burn+"\x00"+result.Step] = true
+		canonicalObserved[result.Stage+"\x00"+result.Step] = true
 	}
 	merged := make([]model.StepResult, 0, len(planned)+len(events)+len(persisted))
 	position := make(map[string]int, cap(merged))
 	latestLegacy := make(map[string]int)
 	advance := func(candidate model.StepResult) {
-		key := candidate.Burn + "\x00" + candidate.Step
+		key := candidate.Stage + "\x00" + candidate.Step
 		newAttempt := false
 		if _, isPlanned := order[key]; !isPlanned {
-			canonical := runlog.LegacyRetryBurn(candidate.Burn)
+			canonical := runlog.LegacyRetryStage(candidate.Stage)
 			canonicalKey := canonical + "\x00" + candidate.Step
-			if _, planned := order[canonicalKey]; planned && canonical != candidate.Burn {
+			if _, planned := order[canonicalKey]; planned && canonical != candidate.Stage {
 				// A modern canonical observation supersedes the legacy alias,
 				// as it does when the journal is restored for adoption.
 				if canonicalObserved[canonicalKey] {
 					return
 				}
-				attempt, err := strconv.Atoi(candidate.Burn[len(canonical)+1 : len(candidate.Burn)-1])
+				attempt, err := strconv.Atoi(candidate.Stage[len(canonical)+1 : len(candidate.Stage)-1])
 				if err == nil {
 					// Old durable results used the attempt as their burn. Select
 					// by attempt number, not result order or timestamps, and keep
@@ -1915,7 +1915,7 @@ func mergeSteps(run model.Run, planned []runprogress.PlannedStep, events []runpr
 					}
 					newAttempt = !seen || attempt > previous
 					latestLegacy[canonicalKey] = attempt
-					candidate.Burn, key = canonical, canonicalKey
+					candidate.Stage, key = canonical, canonicalKey
 				}
 			}
 		}
@@ -1940,7 +1940,7 @@ func mergeSteps(run model.Run, planned []runprogress.PlannedStep, events []runpr
 	}
 	for _, step := range planned {
 		advance(model.StepResult{
-			RunID: run.ID, Burn: step.Burn, Step: step.Step,
+			RunID: run.ID, Stage: step.Stage, Step: step.Step,
 			Ordinal: step.Ordinal, Status: model.StepPending, Secrets: step.Secrets,
 		})
 	}
@@ -1965,8 +1965,8 @@ func mergeSteps(run model.Run, planned []runprogress.PlannedStep, events []runpr
 		if merged[left].Ordinal != merged[right].Ordinal {
 			return merged[left].Ordinal < merged[right].Ordinal
 		}
-		if merged[left].Burn != merged[right].Burn {
-			return merged[left].Burn < merged[right].Burn
+		if merged[left].Stage != merged[right].Stage {
+			return merged[left].Stage < merged[right].Stage
 		}
 		return merged[left].Step < merged[right].Step
 	})
@@ -1975,7 +1975,7 @@ func mergeSteps(run model.Run, planned []runprogress.PlannedStep, events []runpr
 
 func progressStepResult(runID string, event runprogress.Event) model.StepResult {
 	return model.StepResult{
-		RunID: runID, Burn: event.Burn, Step: event.Step, Ordinal: event.Ordinal,
+		RunID: runID, Stage: event.Stage, Step: event.Step, Ordinal: event.Ordinal,
 		Status: model.StepStatus(event.Status), ExitCode: event.ExitCode,
 		DeclaredSize: event.DeclaredSize.Effective(), StartedAt: event.StartedAt, FinishedAt: event.FinishedAt,
 	}
@@ -2008,19 +2008,19 @@ func (service *API) logsFor(ctx context.Context, repositoryName, selector, wante
 	if err != nil {
 		return LogResponse{}, fmt.Errorf("load run steps: %w", err)
 	}
-	burn, step, err := selectLogRange(steps, wanted)
+	stage, step, err := selectLogRange(steps, wanted)
 	if err != nil {
 		return LogResponse{}, err
 	}
-	return service.stepLogResponse(ctx, run, steps, burn, step, filter)
+	return service.stepLogResponse(ctx, run, steps, stage, step, filter)
 }
 
-func (service *API) stepLogResponse(ctx context.Context, run model.Run, steps []model.StepResult, burn, step string, filter runlog.Filter) (LogResponse, error) {
+func (service *API) stepLogResponse(ctx context.Context, run model.Run, steps []model.StepResult, stage, step string, filter runlog.Filter) (LogResponse, error) {
 	if run.Status.Terminal() {
 		forgetActiveLogIndex(service.logs, run.ID)
 	}
 	for _, result := range steps {
-		if result.Burn != burn || result.Step != step {
+		if result.Stage != stage || result.Step != step {
 			continue
 		}
 		// A workflow can fail before this step ever gets a pod or writes a
@@ -2035,26 +2035,26 @@ func (service *API) stepLogResponse(ctx context.Context, run model.Run, steps []
 			if err != nil {
 				return LogResponse{}, err
 			}
-			response := newLogResponse(run.ID, burn, step, body, meta)
+			response := newLogResponse(run.ID, stage, step, body, meta)
 			response.Note = "step was not executed; no log recorded"
 			response.RunError = run.Error
 			return response, nil
 		}
 		break
 	}
-	body, meta, err := service.readStepLogFiltered(ctx, run, burn, step, filter)
+	body, meta, err := service.readStepLogFiltered(ctx, run, stage, step, filter)
 	if err != nil {
 		return LogResponse{}, fmt.Errorf("read bounded run log: %w", err)
 	}
-	return newLogResponse(run.ID, burn, step, body, meta), nil
+	return newLogResponse(run.ID, stage, step, body, meta), nil
 }
 
-func newLogResponse(runID, burn, step string, body []byte, meta runlog.Meta) LogResponse {
+func newLogResponse(runID, stage, step string, body []byte, meta runlog.Meta) LogResponse {
 	if meta.ScanLimitBytes == 0 {
 		meta.ScanLimitBytes = runlog.MaxScanBytes
 	}
 	return LogResponse{
-		RunID: runID, Burn: burn, Step: step, Output: string(body),
+		RunID: runID, Stage: stage, Step: step, Output: string(body),
 		TotalLines: meta.TotalLines, MatchedLines: meta.MatchedLines,
 		ReturnedLines: meta.ReturnedLines, Truncated: meta.Truncated, Bytes: meta.Bytes,
 		ScanComplete: meta.ScanComplete, BytesExact: meta.BytesExact, ScannedBytes: meta.ScannedBytes, DiscoveryBytes: meta.DiscoveryBytes,
@@ -2064,7 +2064,7 @@ func newLogResponse(runID, burn, step string, body []byte, meta runlog.Meta) Log
 	}
 }
 
-func (service *API) readStepLogFiltered(ctx context.Context, run model.Run, burn, step string, filter runlog.Filter) ([]byte, runlog.Meta, error) {
+func (service *API) readStepLogFiltered(ctx context.Context, run model.Run, stage, step string, filter runlog.Filter) ([]byte, runlog.Meta, error) {
 	filter = filter.WithContext(ctx)
 	if err := service.purgedEvidence(ctx, run, "logs"); err != nil {
 		return nil, runlog.Meta{}, err
@@ -2077,33 +2077,33 @@ func (service *API) readStepLogFiltered(ctx context.Context, run model.Run, burn
 		defer release()
 	}
 	if run.Status.Active() {
-		body, meta, err := service.logs.ReadActiveFiltered(run.ID, burn, step, filter)
+		body, meta, err := service.logs.ReadActiveFiltered(run.ID, stage, step, filter)
 		if errors.Is(err, os.ErrNotExist) {
 			// Argo may journal progress before the first pod output arrives.
 			// Only an already-authorized step reaches this retained-log read;
 			// a missing file or range while active is pending, not a fault.
-			return nil, runlog.Meta{}, fmt.Errorf("%w: run %s is %s; retained output for burn %q step %q is not available yet; retry while the step runs", ErrStepLogPending, run.ID, run.Status, burn, step)
+			return nil, runlog.Meta{}, fmt.Errorf("%w: run %s is %s; retained output for burn %q step %q is not available yet; retry while the step runs", ErrStepLogPending, run.ID, run.Status, stage, step)
 		}
 		return body, meta, err
 	}
-	return service.logs.ReadFiltered(run.ID, burn, step, filter)
+	return service.logs.ReadFiltered(run.ID, stage, step, filter)
 }
 
 func selectLogRange(results []model.StepResult, wanted string) (string, string, error) {
-	selectedBurn := ""
+	selectedStage := ""
 	for _, result := range results {
 		if result.Step != wanted {
 			continue
 		}
-		if selectedBurn != "" {
+		if selectedStage != "" {
 			return "", "", fmt.Errorf("%w: step %q is ambiguous across burns", ErrInvalidInput, wanted)
 		}
-		selectedBurn = result.Burn
+		selectedStage = result.Stage
 	}
-	if selectedBurn == "" {
+	if selectedStage == "" {
 		return "", "", fmt.Errorf("no log range for step %q: %w", wanted, store.ErrNotFound)
 	}
-	return selectedBurn, wanted, nil
+	return selectedStage, wanted, nil
 }
 
 func (service *API) prepareWaitRun(ctx context.Context, repositoryName, selector, trigger string, requestedSeconds int, actor string) (func(context.Context) (WaitResponse, error), error) {

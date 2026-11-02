@@ -36,7 +36,7 @@ type priorityObservingReleaseJobs struct {
 	reason    string
 }
 
-func (jobs *priorityObservingReleaseJobs) CreateRelease(ctx context.Context, request JobRequest) error {
+func (jobs *priorityObservingReleaseJobs) CreateRelease(ctx context.Context, request WorkflowRequest) error {
 	var found bool
 	jobs.priority, jobs.reason, found = jobs.scheduler.AdmissionPriority(request.Run.QueueSequence)
 	if !found {

@@ -98,7 +98,7 @@ type RunQueueStore interface {
 	MarkRunAdmitted(context.Context, string) (model.Run, error)
 	MarkRunParked(context.Context, string) (model.Run, error)
 	Run(context.Context, string) (model.Run, error)
-	SetRunJobName(context.Context, string, string) (model.Run, error)
+	SetRunWorkflowName(context.Context, string, string) (model.Run, error)
 	SetRunCredentialed(context.Context, string) error
 	SetRunConcurrencyGroup(context.Context, string, string) error
 	PendingRunCancellations(context.Context) ([]model.RunCancellation, error)
@@ -364,12 +364,12 @@ type LogStore interface {
 	StepPlanRecord(string) (runprogress.Plan, error)
 }
 
-type JobRequest struct {
+type WorkflowRequest struct {
 	ResourceFallback model.ResourceAdmissionFallback
 	PodDemand        *argoworkflow.PodDemand
 	// VMIDemandReceipt carries the exact graph reserved before submission.
 	VMIDemandReceipt *argoworkflow.VMIDemandReceipt
-	JobName          string
+	WorkflowName     string `json:"JobName"`
 	Run              model.Run
 	Repository       model.Repository
 	// UpstreamName is the registered name of the repository's upstream,
@@ -403,7 +403,7 @@ type JobResult struct {
 	Phase               string
 	TestedSHA           string
 	BaseSHA             string
-	FailedBurn          string
+	FailedStage         string `json:"FailedBurn"`
 	FailedStep          string
 	Error               string
 	Steps               []model.StepResult
@@ -422,7 +422,7 @@ type InfrastructureError interface {
 var ErrJobNotTerminal = errors.New("service: job has not reached terminal state")
 
 type JobController interface {
-	CreateCI(context.Context, JobRequest) error
+	CreateWorkflow(context.Context, WorkflowRequest) error
 	Wait(context.Context, string, io.Writer) (JobResult, error)
 	Delete(context.Context, string, string) error
 	// TerminalResult checks whether a named K8s Job has reached a terminal
@@ -446,7 +446,7 @@ var ErrAdoptionRefused = errors.New("service: Workflow refused for adoption")
 type JobAdopter interface {
 	Adopt(context.Context, model.Run) (pipeline.Size, bool, error)
 	WaitResumed(context.Context, string, io.Writer, []runprogress.Event, int64) (JobResult, error)
-	JobNamespace() string
+	WorkflowNamespace() string
 }
 
 // JobCreateSettler performs one bounded cleanup observation, with no sleeps.
@@ -457,13 +457,13 @@ type JobCreateSettler interface {
 }
 
 type ReleaseJobController interface {
-	CreateRelease(context.Context, JobRequest) error
+	CreateRelease(context.Context, WorkflowRequest) error
 }
 
 // PipelineSizer statically reads the immutable checked-out pipeline without
 // evaluating repository code in the server process.
 type PipelineSizer interface {
-	PipelineSize(context.Context, JobRequest) (pipeline.Size, error)
+	PipelineSize(context.Context, WorkflowRequest) (pipeline.Size, error)
 }
 
 // PipelineConcurrencyGrouper reads the concurrency group the immutable
@@ -472,7 +472,7 @@ type PipelineSizer interface {
 // error, exactly as a malformed size is. It is optional: an engine that does
 // not implement it runs every pipeline ungrouped.
 type PipelineConcurrencyGrouper interface {
-	PipelineConcurrencyGroup(context.Context, JobRequest) (string, error)
+	PipelineConcurrencyGroup(context.Context, WorkflowRequest) (string, error)
 }
 
 // PipelinePlanner enumerates the steps the immutable checked-out pipeline
@@ -483,7 +483,7 @@ type PipelineConcurrencyGrouper interface {
 // its own format simply has no plan, and its runs behave as they always have:
 // steps appear as execution reaches them.
 type PipelinePlanner interface {
-	PlannedSteps(context.Context, JobRequest) ([]runprogress.PlannedStep, error)
+	PlannedSteps(context.Context, WorkflowRequest) ([]runprogress.PlannedStep, error)
 }
 
 // PipelineCredentialDetector reports whether the checked-out pipeline declares
@@ -492,7 +492,7 @@ type PipelinePlanner interface {
 // assumed to have no credentialed CI pipelines; release runs are always
 // credentialed regardless.
 type PipelineCredentialDetector interface {
-	PipelineCredentialed(context.Context, JobRequest) (bool, error)
+	PipelineCredentialed(context.Context, WorkflowRequest) (bool, error)
 }
 
 type Health interface {
@@ -557,14 +557,14 @@ type StatusResponse struct {
 	// ConcurrencyGroup is the repository-declared concurrency group the run
 	// was admitted under (#658), once the scheduler has read it.
 	ConcurrencyGroup string            `json:"concurrency_group,omitempty"`
-	Burns            map[string]string `json:"burns"`
+	Stages           map[string]string `json:"burns"`
 }
 
 type LogResponse struct {
 	TotalScannedBytes int64  `json:"total_scanned_bytes"`
 	ScanLimitBytes    int64  `json:"scan_limit_bytes"`
 	RunID             string `json:"run_id"`
-	Burn              string `json:"burn"`
+	Stage             string `json:"burn"`
 	Step              string `json:"step,omitempty"`
 	Output            string `json:"output"`
 	Note              string `json:"note,omitempty"`

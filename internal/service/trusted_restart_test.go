@@ -19,7 +19,7 @@ type shutdownPreflight struct {
 	started chan struct{}
 }
 
-func (p *shutdownPreflight) Execute(ctx context.Context, job JobRequest, requirement vmrunner.Requirement, output io.Writer) error {
+func (p *shutdownPreflight) Execute(ctx context.Context, job WorkflowRequest, requirement vmrunner.Requirement, output io.Writer) error {
 	// Persist a submitted, bound VM without results or cleanup, then lose the
 	// process's observer. The new owner must not infer a positive result.
 	if err := p.protectedFixture.Execute(ctx, job, requirement, output); err == nil {
@@ -37,7 +37,7 @@ type cleanedShutdownPreflight struct {
 	started chan struct{}
 }
 
-func (p *cleanedShutdownPreflight) Execute(ctx context.Context, job JobRequest, requirement vmrunner.Requirement, output io.Writer) error {
+func (p *cleanedShutdownPreflight) Execute(ctx context.Context, job WorkflowRequest, requirement vmrunner.Requirement, output io.Writer) error {
 	if err := p.protectedFixture.Execute(ctx, job, requirement, output); err == nil {
 		return errors.New("fixture unexpectedly completed")
 	}
@@ -101,7 +101,7 @@ func TestTrustedRestartInterruptsThenRunsFreshPreflightBeforeDelivery(t *testing
 		t.Fatal(err)
 	}
 	source, err := fixture.store.Run(t.Context(), queued.ID)
-	if err != nil || source.Status != model.RunRunning || source.JobName != "" {
+	if err != nil || source.Status != model.RunRunning || source.WorkflowName != "" {
 		t.Fatalf("shutdown lost recovery obligation: %+v %v", source, err)
 	}
 	if len(fixture.jobs.createdCI) != 0 || len(fixture.git.syncedBranches) != 0 {
@@ -172,7 +172,7 @@ func TestTrustedRestartPromotionStillChecksMainBeforePush(t *testing.T) {
 				t.Fatal(err)
 			}
 			contract := executor.intent.Contract
-			if err = executor.Execute(t.Context(), JobRequest{Run: original, Repository: f.repo, UpstreamName: "codeberg", UpstreamOrg: "acme"}, vmrunner.Requirement{CandidateSHA: original.TestedSHA, BaselineSHA: base, Contract: &contract}, io.Discard); err != nil {
+			if err = executor.Execute(t.Context(), WorkflowRequest{Run: original, Repository: f.repo, UpstreamName: "codeberg", UpstreamOrg: "acme"}, vmrunner.Requirement{CandidateSHA: original.TestedSHA, BaselineSHA: base, Contract: &contract}, io.Discard); err != nil {
 				t.Fatal(err)
 			}
 			oldEvidence, err := f.store.KVMPreflight(t.Context(), original.ID)
@@ -241,7 +241,7 @@ func TestTrustedShutdownAfterCleanupLeavesParentForRecovery(t *testing.T) {
 		t.Fatalf("cleaned shutdown reported failure: %v", err)
 	}
 	source, err := fixture.store.Run(t.Context(), queued.ID)
-	if err != nil || source.Status != model.RunRunning || source.JobName != "" {
+	if err != nil || source.Status != model.RunRunning || source.WorkflowName != "" {
 		t.Fatalf("cleaned shutdown settled parent: %+v %v", source, err)
 	}
 	state, err := fixture.store.KVMPreflight(t.Context(), queued.ID)

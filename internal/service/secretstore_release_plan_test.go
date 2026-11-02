@@ -10,10 +10,10 @@ import (
 
 type releasePlanChecker struct {
 	releaseChecker
-	requests []JobRequest
+	requests []WorkflowRequest
 }
 
-func (c *releasePlanChecker) PlanRelease(_ context.Context, request JobRequest, _ []byte) (ReleasePreflightResult, error) {
+func (c *releasePlanChecker) PlanRelease(_ context.Context, request WorkflowRequest, _ []byte) (ReleasePreflightResult, error) {
 	c.requests = append(c.requests, request)
 	return ReleasePreflightResult{Checks: c.checks, Problems: c.problems}, nil
 }

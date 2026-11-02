@@ -735,7 +735,7 @@ func TestRunningRunsWithJobs(t *testing.T) {
 	}
 
 	// Set job name.
-	if _, err := s.SetRunJobName(ctx, enqueued.ID, "oberth-job-test"); err != nil {
+	if _, err := s.SetRunWorkflowName(ctx, enqueued.ID, "oberth-job-test"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -744,7 +744,7 @@ func TestRunningRunsWithJobs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(runs) != 1 || runs[0].ID != enqueued.ID || runs[0].JobName != "oberth-job-test" {
+	if len(runs) != 1 || runs[0].ID != enqueued.ID || runs[0].WorkflowName != "oberth-job-test" {
 		t.Fatalf("running runs with jobs = %#v", runs)
 	}
 
@@ -1594,7 +1594,7 @@ func TestCompleteRunCancellationIdempotent(t *testing.T) {
 	if _, err := s.ClaimNextRun(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.SetRunJobName(ctx, first.ID, "job-cancel"); err != nil {
+	if _, err := s.SetRunWorkflowName(ctx, first.ID, "job-cancel"); err != nil {
 		t.Fatal(err)
 	}
 	now = now.Add(time.Second)
@@ -1629,7 +1629,7 @@ func TestCompleteRunCancellationIdempotent(t *testing.T) {
 // SetRunJobName — terminal run rejection
 // ---------------------------------------------------------------------------
 
-func TestSetRunJobNameTerminalRejection(t *testing.T) {
+func TestSetRunWorkflowNameTerminalRejection(t *testing.T) {
 	now := time.Date(2026, 8, 17, 14, 0, 0, 0, time.UTC)
 	s := testStore(t, &now)
 	repo := createRepo(t, s)
@@ -1651,20 +1651,20 @@ func TestSetRunJobNameTerminalRejection(t *testing.T) {
 	}
 
 	// Setting job name on a terminal run: rejected.
-	if _, err := s.SetRunJobName(ctx, enqueued.ID, "late-job"); !errors.Is(err, ErrInvalidState) {
+	if _, err := s.SetRunWorkflowName(ctx, enqueued.ID, "late-job"); !errors.Is(err, ErrInvalidState) {
 		t.Fatalf("terminal job name = %v, want ErrInvalidState", err)
 	}
 
 	// Nonexistent run.
-	if _, err := s.SetRunJobName(ctx, "nonexistent", "job"); !errors.Is(err, ErrNotFound) {
+	if _, err := s.SetRunWorkflowName(ctx, "nonexistent", "job"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("missing run job name = %v, want ErrNotFound", err)
 	}
 
 	// Validation.
-	if _, err := s.SetRunJobName(ctx, "", "job"); !errors.Is(err, ErrInvalid) {
+	if _, err := s.SetRunWorkflowName(ctx, "", "job"); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("empty run ID = %v, want ErrInvalid", err)
 	}
-	if _, err := s.SetRunJobName(ctx, enqueued.ID, ""); !errors.Is(err, ErrInvalid) {
+	if _, err := s.SetRunWorkflowName(ctx, enqueued.ID, ""); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("empty job name = %v, want ErrInvalid", err)
 	}
 }
@@ -2944,7 +2944,7 @@ func TestResolveRunNonHexSelector(t *testing.T) {
 // SetRunJobName on queued run
 // ---------------------------------------------------------------------------
 
-func TestSetRunJobNameOnQueuedRun(t *testing.T) {
+func TestSetRunWorkflowNameOnQueuedRun(t *testing.T) {
 	now := time.Date(2026, 8, 17, 14, 0, 0, 0, time.UTC)
 	s := testStore(t, &now)
 	repo := createRepo(t, s)
@@ -2955,11 +2955,11 @@ func TestSetRunJobNameOnQueuedRun(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Setting job name on a queued run should work.
-	updated, err := s.SetRunJobName(ctx, enqueued.ID, "queued-job-name")
+	updated, err := s.SetRunWorkflowName(ctx, enqueued.ID, "queued-job-name")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if updated.JobName != "queued-job-name" || updated.Status != model.RunQueued {
+	if updated.WorkflowName != "queued-job-name" || updated.Status != model.RunQueued {
 		t.Fatalf("queued run after SetRunJobName = %#v", updated)
 	}
 }
@@ -2968,7 +2968,7 @@ func TestSetRunJobNameOnQueuedRun(t *testing.T) {
 // Restart recovery — running run with job name that is a promotion
 // ---------------------------------------------------------------------------
 
-func TestRestartRecoveryRunningPromotionWithJobName(t *testing.T) {
+func TestRestartRecoveryRunningPromotionWithWorkflowName(t *testing.T) {
 	ctx := context.Background()
 	now := time.Date(2026, 8, 17, 14, 0, 0, 0, time.UTC)
 	path := filepath.Join(t.TempDir(), "oberth-prom-job.db")
@@ -3003,7 +3003,7 @@ func TestRestartRecoveryRunningPromotionWithJobName(t *testing.T) {
 	if _, err := s.ClaimNextRun(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.SetRunJobName(ctx, enqueued.ID, "prom-job-restart"); err != nil {
+	if _, err := s.SetRunWorkflowName(ctx, enqueued.ID, "prom-job-restart"); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.Close(); err != nil {
@@ -3177,7 +3177,7 @@ func TestFinishRunWithFailureTail(t *testing.T) {
 	finished, err := s.FinishRun(ctx, enqueued.ID, model.RunResult{
 		Status:      model.RunFailed,
 		Phase:       "test",
-		FailedBurn:  "test",
+		FailedStage: "test",
 		FailedStep:  "unit",
 		Error:       "tests failed",
 		FailureTail: "--- FAIL: TestSomething\nExpected 1, got 2",
@@ -3185,7 +3185,7 @@ func TestFinishRunWithFailureTail(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if finished.FailedBurn != "test" || finished.FailedStep != "unit" {
+	if finished.FailedStage != "test" || finished.FailedStep != "unit" {
 		t.Fatalf("finished run = %#v", finished)
 	}
 }
@@ -3207,7 +3207,7 @@ func TestPutStepResultWithTimes(t *testing.T) {
 	startedAt := now
 	finishedAt := now.Add(5 * time.Second)
 	result, err := s.PutStepResult(ctx, model.StepResult{
-		RunID: run.ID, Burn: "test", Step: "unit", Ordinal: 0,
+		RunID: run.ID, Stage: "test", Step: "unit", Ordinal: 0,
 		Status: model.StepPassed, ExitCode: 0, LogStart: 0, LogEnd: 100,
 		DeclaredSize: "S", StartedAt: &startedAt, FinishedAt: &finishedAt,
 	})
@@ -3379,7 +3379,7 @@ func TestPutStepResultUpsert(t *testing.T) {
 	}
 	// First insert.
 	if _, err := s.PutStepResult(ctx, model.StepResult{
-		RunID: run.ID, Burn: "test", Step: "unit", Ordinal: 0,
+		RunID: run.ID, Stage: "test", Step: "unit", Ordinal: 0,
 		Status: model.StepPassed, ExitCode: 0, LogStart: 0, LogEnd: 100,
 		DeclaredSize: "S",
 	}); err != nil {
@@ -3388,7 +3388,7 @@ func TestPutStepResultUpsert(t *testing.T) {
 	// Upsert: same burn+step, different data.
 	now = now.Add(time.Second)
 	result, err := s.PutStepResult(ctx, model.StepResult{
-		RunID: run.ID, Burn: "test", Step: "unit", Ordinal: 1,
+		RunID: run.ID, Stage: "test", Step: "unit", Ordinal: 1,
 		Status: model.StepFailed, ExitCode: 1, LogStart: 0, LogEnd: 200,
 		DeclaredSize: "M",
 	})

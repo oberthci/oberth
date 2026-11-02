@@ -20,7 +20,7 @@ func TestRunResourcesReadHistoryRefFailedAndRepoBounds(t *testing.T) {
 			t.Fatal(e)
 		}
 		ids = append(ids, run.ID)
-		if _, e = s.SetRunJobName(t.Context(), run.ID, "workflow-test"); e != nil {
+		if _, e = s.SetRunWorkflowName(t.Context(), run.ID, "workflow-test"); e != nil {
 			t.Fatal(e)
 		}
 		v := resourceRow(run.ID, at)

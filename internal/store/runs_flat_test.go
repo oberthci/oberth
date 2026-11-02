@@ -47,7 +47,7 @@ func TestParkedRunLosesAdmissionTimeUntilReacquired(t *testing.T) {
 	if err != nil || readmitted.StartedAt == nil || !readmitted.StartedAt.Equal(now) {
 		t.Fatalf("readmitted: %+v, %v", readmitted, err)
 	}
-	if _, err := s.SetRunJobName(t.Context(), run.ID, "workflow"); err != nil {
+	if _, err := s.SetRunWorkflowName(t.Context(), run.ID, "workflow"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.MarkRunParked(t.Context(), run.ID); !errors.Is(err, ErrInvalidState) {
@@ -78,7 +78,7 @@ func TestFlatRunsKeepQueueFirstAndPageByAdmissionTime(t *testing.T) {
 		if _, err := s.MarkRunAdmitted(ctx, run.ID); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := s.SetRunJobName(ctx, run.ID, "wf-"+run.ID); err != nil {
+		if _, err := s.SetRunWorkflowName(ctx, run.ID, "wf-"+run.ID); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := s.MarkRunSubmitted(ctx, run.ID); err != nil {

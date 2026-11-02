@@ -68,7 +68,7 @@ func TestContinuityAdoptsDurableCursorAndRepeatedRecords(t *testing.T) {
 	}
 	sink.journal = j
 	defer j.Close()
-	events := []runprogress.Event{{Burn: step.Burn, Step: step.Step, Status: runprogress.StepPassed}}
+	events := []runprogress.Event{{Stage: step.Stage, Step: step.Step, Status: runprogress.StepPassed}}
 	reads := 0
 	logs := newStepLogFollowers(context.Background(), func(_ context.Context, _, _ string, o corev1.PodLogOptions) (io.ReadCloser, error) {
 		reads++
@@ -264,7 +264,7 @@ func TestContinuityProvidedInitErrorStatusDumps(t *testing.T) {
 			if !d.Available || d.Container.ContainerKind != "init" || d.Container.ContainerName != "install-jq" || d.Container.ExitCode != 23 || d.Container.Reason != "Error" || d.Container.Message != "" {
 				t.Fatalf("failed init not projected: %+v", d)
 			}
-			timing := projectStepTiming(wf, node, pod, StepResult{NodeID: node.ID, PodName: pod.Name, Burn: "test", Step: "stock-cos"}, d, time.Now().UTC())
+			timing := projectStepTiming(wf, node, pod, StepResult{NodeID: node.ID, PodName: pod.Name, Stage: "test", Step: "stock-cos"}, d, time.Now().UTC())
 			if timing.Main != nil || timing.Available || len(timing.Init) != 3 || timing.Validate() != nil {
 				t.Fatalf("init mislabeled as main timing: %+v", timing)
 			}

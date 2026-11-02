@@ -149,12 +149,12 @@ type routedPatternLogs struct {
 	release map[string]<-chan struct{}
 }
 
-func (logs routedPatternLogs) ReadFiltered(id, burn, step string, filter runlog.Filter) ([]byte, runlog.Meta, error) {
+func (logs routedPatternLogs) ReadFiltered(id, stage, step string, filter runlog.Filter) ([]byte, runlog.Meta, error) {
 	if filter.Pattern != "" {
 		logs.entered <- filter.Pattern
 		<-logs.release[filter.Pattern]
 	}
-	return logs.LogStore.ReadFiltered(id, burn, step, filter)
+	return logs.LogStore.ReadFiltered(id, stage, step, filter)
 }
 
 func TestPatternScanTokenLimitSharedByMCPAndDashboardAndPlainReadsBypass(t *testing.T) {

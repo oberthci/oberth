@@ -40,7 +40,7 @@ func TestRunKindReadsOnlyTheDurableRun(t *testing.T) {
 		}
 	}
 	jobs := &ArgoJobs{intents: map[string]argoIntent{}}
-	if _, err := jobs.PipelineSize(context.Background(), service.JobRequest{
+	if _, err := jobs.PipelineSize(context.Background(), service.WorkflowRequest{
 		Run: model.Run{Trigger: "apply"}, Repository: model.Repository{Name: "infra"}, SourceDir: writeBuild(t, perTriggerBuild),
 	}); err == nil {
 		t.Fatal("PipelineSize sized an apply run")
@@ -84,7 +84,7 @@ func TestPipelineSizeIsPerRunTrigger(t *testing.T) {
 		"promotion": pipeline.XL,
 		"schedule":  pipeline.XL, // unnamed: oberth.ci/size
 	} {
-		request := service.JobRequest{
+		request := service.WorkflowRequest{
 			Run:        model.Run{Ref: "feature/x", Trigger: trigger},
 			Repository: model.Repository{Name: "ebpf"},
 			SourceDir:  dir,
@@ -101,7 +101,7 @@ func TestPipelineSizeIsPerRunTrigger(t *testing.T) {
 		}
 	}
 	// A tag run's preflight of build.yaml gates a release: promotion's size.
-	size, err := preflight.Size(context.Background(), service.JobRequest{
+	size, err := preflight.Size(context.Background(), service.WorkflowRequest{
 		Run: model.Run{Ref: "v1.0.0", Trigger: "tag", Release: true}, Repository: model.Repository{Name: "ebpf"}, SourceDir: dir,
 	})
 	if err != nil || size != pipeline.XL {
@@ -116,14 +116,14 @@ func TestPipelineSizeRefusesAMisdeclaredTrigger(t *testing.T) {
 		t.Fatal(err)
 	}
 	jobs := &ArgoJobs{intents: map[string]argoIntent{}}
-	if _, err := jobs.PipelineSize(context.Background(), service.JobRequest{
+	if _, err := jobs.PipelineSize(context.Background(), service.WorkflowRequest{
 		Run: model.Run{Ref: "feature/x", Trigger: "branch"}, Repository: model.Repository{Name: "ebpf"}, SourceDir: dir,
 	}); err == nil {
 		t.Fatal("PipelineSize admitted an unknown trigger")
 	}
 }
 
-func TestCreateCIStampsTheRunsOwnTrigger(t *testing.T) {
+func TestCreateWorkflowStampsTheRunsOwnTrigger(t *testing.T) {
 	fixture := newRaceFixture(t)
 	for name, trigger := range map[string]string{"wf-branch": "branch", "wf-promotion": "promotion", "wf-schedule": "schedule"} {
 		request := fixture.request(name, "run-"+name)
@@ -131,7 +131,7 @@ func TestCreateCIStampsTheRunsOwnTrigger(t *testing.T) {
 		if trigger == "schedule" {
 			request.Run.ScheduleEntry = "weekly-sweep"
 		}
-		if err := fixture.jobs.CreateCI(context.Background(), request); err != nil {
+		if err := fixture.jobs.CreateWorkflow(context.Background(), request); err != nil {
 			t.Fatalf("CreateCI %s: %v", trigger, err)
 		}
 		if got := fixture.controller.scheduleEntries[name]; got != request.Run.ScheduleEntry {
