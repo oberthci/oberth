@@ -93,5 +93,5 @@ func retryableCheckoutCause(err error) bool {
 	if wrapped, ok := err.(interface{ Unwrap() error }); ok {
 		return retryableCheckoutCause(wrapped.Unwrap())
 	}
-	return errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, context.Canceled)
+	return errors.Is(err, context.DeadlineExceeded)
 }
