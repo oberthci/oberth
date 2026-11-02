@@ -386,4 +386,3 @@ func validatePromotionSpec(spec model.PromotionSpec) error {
 	}
 	return nil
 }
-
