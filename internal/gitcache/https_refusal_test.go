@@ -11,7 +11,7 @@ import (
 func TestHTTPSRefusalNeverServesStaleCache(t *testing.T) {
 	repository := newTestRepository(t)
 	remote := repository.upstream
-	cache, err := New(Config{Root: filepath.Join(t.TempDir(), "cache"), Upstream: func(string) (string, error) { return remote, nil }})
+	cache, err := New(Config{AllowLocalUpstreams: true, Root: filepath.Join(t.TempDir(), "cache"), Upstream: func(string) (string, error) { return remote, nil }})
 	if err != nil {
 		t.Fatal(err)
 	}

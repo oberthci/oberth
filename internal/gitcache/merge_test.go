@@ -61,7 +61,7 @@ func TestNativeGitPromotionMerge(t *testing.T) {
 					runGit(t, repository.work, "checkout", "main")
 					base := change(test.left, targetBody, "target")
 					runGit(t, repository.work, "push", "origin", "main")
-					cache, err := New(Config{Root: filepath.Join(t.TempDir(), "cache"), Upstream: func(string) (string, error) { return repository.upstream, nil }})
+					cache, err := New(Config{AllowLocalUpstreams: true, Root: filepath.Join(t.TempDir(), "cache"), Upstream: func(string) (string, error) { return repository.upstream, nil }})
 					if err != nil {
 						t.Fatal(err)
 					}
