@@ -104,6 +104,9 @@ func (g *weightedAdmission) selectDeclaredDemand(receipt *argoworkflow.VMIDemand
 		return nil, ""
 	}
 	d, err := receipt.DeclaredPodDemand()
+	if errors.Is(err, argoworkflow.ErrMemoryUnbounded) {
+		return nil, model.ResourceFallbackMemory
+	}
 	if errors.Is(err, argoworkflow.ErrVMHostUndeclared) {
 		return nil, model.ResourceFallbackVM
 	}

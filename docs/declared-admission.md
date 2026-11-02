@@ -2,12 +2,14 @@
 
 Git remains the source of truth. A workflow whose reachable pod-producing steps
 all declare positive CPU and memory requests can use numeric admission at peak
-concurrency. CPU reserves the request; memory reserves the higher of its request
-and positive declared limit, including inherited limits. On that numeric path,
+concurrency only when every container also has a positive memory limit, directly
+or inherited. This includes scripts, container-set members, init containers and
+sidecars. CPU reserves the request; memory reserves the higher of its request
+and declared limit, including inherited limits. On that numeric path,
 its size annotation no longer determines its reservation or requires a size
 grant. The administrator's per-container declaration ceilings
 still apply at trusted submission. No resource value, missing limit or retry is
-changed. Requests reserve capacity; an absent runtime limit remains unbounded.
+changed. An absent runtime limit remains unbounded and keeps legacy admission.
 
 Workflows with incomplete or unknown declarations retain size admission. Their
 combined weight reserves the same fraction of both CPU and memory budgets when
@@ -40,6 +42,8 @@ notice appears in the existing run-message cell through `resource_message`,
 without changing `display_reason`. It is available while waiting, retained in
 submission timing metadata, and restored after uncertain creation/restart.
 Work with missing helper requests or unknown coverage also keeps the legacy path.
+Missing or nonpositive memory limits use the same legacy path with a fixed
+memory-limit notice in the run message. No memory or CPU limits are manufactured.
 Existing source validity, grants and per-container ceilings still apply.
 
 Each concurrent pod also reserves 100m CPU and 256Mi memory for server/executor
@@ -52,7 +56,10 @@ not detected host capacity or measurements.
 ## VM host demand and memory policy
 
 A VM reserves its declared CPU request, or its CPU limit when no request exists.
-Memory reserves the higher declared request/limit. Each VM adds a separate
+VMI memory requires a positive declared limit and reserves the higher request/limit.
+Ordinary containers in VM workflows and init containers/sidecars on their resource
+templates follow the same memory-limit rule, including inherited helpers.
+Each VM adds a separate
 100m CPU / 256Mi launcher reserve; workflow executor pods retain their own
 100m/256Mi reserve. The existing run-aware create/delete lifetime proof computes
 VM peaks in these host-cost units. If that proof is unavailable, the conservative
@@ -68,12 +75,14 @@ still fail validation; guest-core bounds, image/identity policy and cell grants
 remain enforced. No request or limit is inserted into the manifest.
 
 Reserving memory limits avoids packing a known larger limit as a small request.
-It does **not** make a missing limit bounded: such a container reserves its
-request and can still exceed it at runtime. The choice preserves the owner's
-existing default behavior rather than adding limits or another eligibility
-mode. Existing running reservations restore their sealed cost rather than being
-silently resized. Host-memory isolation still requires reviewed limits in git.
+A request-only container or VMI cannot earn numeric host credit: it falls back
+to legacy admission with a visible notice. Review and commit the missing limits
+in git to become eligible; Oberth does not fill them in. Existing running
+reservations restore their sealed cost rather than being silently resized.
 Both helper allowances must be checked against deployment defaults before rollout.
+VM workflows that exceed the default 8 CPU / 16Gi budget retain legacy admission;
+sharing those runs requires an administrator to raise the host budget to fit
+their declarations plus helper/launcher reserve. This is an operator rollout step.
 
 ## Administrator settings
 

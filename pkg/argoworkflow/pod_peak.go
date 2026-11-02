@@ -28,6 +28,10 @@ const maxPodGraphWork = 4096
 var errPodGraph = errors.New("declared resource graph cannot be bounded; use static calls or positive workflow parallelism")
 var errPodUndeclared = errors.New("pod has undeclared CPU/memory requests")
 
+// ErrMemoryUnbounded keeps request-only containers on legacy admission. A
+// reservation is not a runtime bound; never infer or insert a missing limit.
+var ErrMemoryUnbounded = errors.New("pod or VM lacks a positive declared memory limit")
+
 type podGraph struct {
 	resourcePods bool
 	templates    map[string]*wfv1.Template
@@ -50,6 +54,13 @@ func (g *podGraph) node(d PodDemand) (int, error) {
 }
 
 func containerDemand(c, defaults *corev1.Container) (PodDemand, error) {
+	limit, limited := c.Resources.Limits[corev1.ResourceMemory]
+	if !limited && defaults != nil {
+		limit, limited = defaults.Resources.Limits[corev1.ResourceMemory]
+	}
+	if !limited || limit.Sign() <= 0 {
+		return PodDemand{}, ErrMemoryUnbounded
+	}
 	d := PodDemand{Pods: 1}
 	for _, name := range []corev1.ResourceName{corev1.ResourceCPU, corev1.ResourceMemory} {
 		q, ok := c.Resources.Requests[name]
@@ -91,24 +102,51 @@ func addPodDemand(a, b PodDemand) PodDemand {
 	return PodDemand{CPUMilli: a.CPUMilli + b.CPUMilli, MemoryBytes: a.MemoryBytes + b.MemoryBytes, Pods: max(a.Pods, b.Pods)}
 }
 
-func templatePodDemand(t, defaults *wfv1.Template, resourcePods bool) (PodDemand, error) {
-	if resourcePods && t.Resource != nil {
-		return PodDemand{Pods: 1}, nil
+type podContainer struct {
+	container, defaults *corev1.Container
+}
+
+// Template defaults merge helper lists by name. Check inherited limits on the
+// effective helper, and count that helper once rather than appending duplicates.
+func podHelpers(authored, inherited []wfv1.UserContainer) []podContainer {
+	defaults := map[string]*corev1.Container{}
+	for i := range inherited {
+		defaults[inherited[i].Name] = &inherited[i].Container
 	}
-	var main, inherited *corev1.Container
-	if defaults != nil {
-		inherited = defaults.Container
-		if defaults.Script != nil {
-			inherited = &defaults.Script.Container
+	shadowed := map[string]bool{}
+	var out []podContainer
+	for i := range authored {
+		c := &authored[i].Container
+		out = append(out, podContainer{c, defaults[c.Name]})
+		shadowed[c.Name] = true
+	}
+	for i := range inherited {
+		c := &inherited[i].Container
+		if !shadowed[c.Name] {
+			out = append(out, podContainer{container: c})
 		}
 	}
+	return out
+}
+
+func templatePodDemand(t, defaults *wfv1.Template, resourcePods bool) (PodDemand, error) {
+	resourceOnly := resourcePods && t.Resource != nil
+	var main, inherited *corev1.Container
 	switch {
 	case t.Container != nil:
 		main = t.Container
+		if defaults != nil {
+			inherited = defaults.Container
+		}
 	case t.Script != nil:
 		main = &t.Script.Container
+		if defaults != nil && defaults.Script != nil {
+			inherited = &defaults.Script.Container
+		}
 	case t.ContainerSet == nil:
-		return PodDemand{}, errPodGraph
+		if !resourceOnly {
+			return PodDemand{}, errPodGraph
+		}
 	}
 	var d PodDemand
 	if main != nil {
@@ -117,7 +155,9 @@ func templatePodDemand(t, defaults *wfv1.Template, resourcePods bool) (PodDemand
 		if err != nil {
 			return d, err
 		}
-	} else {
+	} else if t.ContainerSet != nil {
+		// Container-set lists replace defaults; unlike sidecars/init they do
+		// not merge by name. Each authored member needs its own limit.
 		for _, c := range t.ContainerSet.Containers {
 			n, err := containerDemand(&c.Container, nil)
 			if err != nil {
@@ -126,29 +166,33 @@ func templatePodDemand(t, defaults *wfv1.Template, resourcePods bool) (PodDemand
 			d = addPodDemand(d, n)
 		}
 	}
+	// Resource executor capacity is held by the separate helper reserve; its
+	// authored/inherited init containers and sidecars still require limits.
 	// Sidecars stay resident. Summing all init requests is conservative for
 	// both sequential init and restartable init; never subtract their requests.
 	var sidecars, init, restartable PodDemand
-	sidecarContainers := append([]wfv1.UserContainer{}, t.Sidecars...)
-	initContainers := append([]wfv1.UserContainer{}, t.InitContainers...)
+	var defaultSidecars, defaultInit []wfv1.UserContainer
 	if defaults != nil {
-		sidecarContainers = append(sidecarContainers, defaults.Sidecars...)
-		initContainers = append(initContainers, defaults.InitContainers...)
+		defaultSidecars, defaultInit = defaults.Sidecars, defaults.InitContainers
 	}
-	for _, c := range sidecarContainers {
-		n, err := containerDemand(&c.Container, nil)
+	for _, c := range podHelpers(t.Sidecars, defaultSidecars) {
+		n, err := containerDemand(c.container, c.defaults)
 		if err != nil {
 			return d, err
 		}
 		sidecars = addPodDemand(sidecars, n)
 	}
-	for _, c := range initContainers {
-		n, err := containerDemand(&c.Container, nil)
+	for _, c := range podHelpers(t.InitContainers, defaultInit) {
+		n, err := containerDemand(c.container, c.defaults)
 		if err != nil {
 			return d, err
 		}
 		init = addPodDemand(init, n)
-		if c.RestartPolicy != nil && *c.RestartPolicy == corev1.ContainerRestartPolicyAlways {
+		restart := c.container.RestartPolicy
+		if restart == nil && c.defaults != nil {
+			restart = c.defaults.RestartPolicy
+		}
+		if restart != nil && *restart == corev1.ContainerRestartPolicyAlways {
 			restartable = addPodDemand(restartable, n)
 		}
 	}
@@ -273,7 +317,8 @@ func (g *podGraph) expand(t *wfv1.Template, depth int) (int, int, error) {
 	return start, end, nil
 }
 
-// DeclaredPodPeak returns nil for incomplete declarations. Fully declared but
+// DeclaredPodPeak returns nil for incomplete requests and ErrMemoryUnbounded
+// for a missing effective memory limit. Fully declared but
 // dynamic/unsupported graphs require a workflow parallelism bound; that path
 // reserves the largest possible pod in each dimension times the bound. It does
 // not infer fanout size or condition results from mutable inputs.
@@ -298,6 +343,9 @@ func declaredPodPeak(wf *wfv1.Workflow, resourcePods bool) (*PodDemand, error) {
 	_, _, err := g.expand(g.templates[wf.Spec.Entrypoint], 0)
 	if errors.Is(err, errPodUndeclared) {
 		return nil, nil
+	}
+	if errors.Is(err, ErrMemoryUnbounded) {
+		return nil, err
 	}
 	if wf.Spec.OnExit != "" || len(wf.Spec.Hooks) != 0 {
 		return nil, errPodGraph
@@ -376,7 +424,7 @@ func boundedPodPeak(wf *wfv1.Workflow, resourcePods bool) (*PodDemand, error) {
 		if depth > 32 || work > maxPodGraphWork || (t.Daemon != nil && *t.Daemon) {
 			return errPodGraph
 		}
-		if t.Container != nil || t.Script != nil || t.ContainerSet != nil {
+		if t.Container != nil || t.Script != nil || t.ContainerSet != nil || resourcePods && t.Resource != nil {
 			d, err := templatePodDemand(t, wf.Spec.TemplateDefaults, resourcePods)
 			if err != nil {
 				return err

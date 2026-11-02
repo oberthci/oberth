@@ -7,10 +7,11 @@ const (
 	ResourceFallbackBudget ResourceAdmissionFallback = "budget"
 	ResourceFallbackGraph  ResourceAdmissionFallback = "graph"
 	ResourceFallbackVM     ResourceAdmissionFallback = "vm_undeclared"
+	ResourceFallbackMemory ResourceAdmissionFallback = "memory_unbounded"
 )
 
 func (r ResourceAdmissionFallback) Valid() bool {
-	return r == "" || r == ResourceFallbackBudget || r == ResourceFallbackGraph || r == ResourceFallbackVM
+	return r == "" || r == ResourceFallbackBudget || r == ResourceFallbackGraph || r == ResourceFallbackVM || r == ResourceFallbackMemory
 }
 
 func (r ResourceAdmissionFallback) Message() string {
@@ -21,6 +22,8 @@ func (r ResourceAdmissionFallback) Message() string {
 		return "Using legacy size admission: the declared resource graph cannot be bounded."
 	case ResourceFallbackVM:
 		return "Using legacy size admission: VM CPU or memory declarations are unavailable."
+	case ResourceFallbackMemory:
+		return "Using legacy size admission: a pod or VM container lacks a positive declared memory limit."
 	default:
 		return ""
 	}

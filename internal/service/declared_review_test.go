@@ -35,6 +35,7 @@ spec:
       image: example.invalid/repo-01@sha256:` + strings.Repeat("a", 64) + `
       resources:
         requests: {cpu: 1, memory: 1Gi}
+        limits: {memory: 1Gi}
   - name: step-11111111
     container: *step
 `)
@@ -92,14 +93,18 @@ func TestDeclaredBudgetFallbackAdmitsAndExplains(t *testing.T) {
 }
 
 func TestFallbackSurvivesUncertainCreateRecovery(t *testing.T) {
-	f := newConcurrencyFixture(t, periapsis.M, 3)
-	run := model.Run{ID: strings.Repeat("a", 32), JobName: "step-abc12345", SHA: strings.Repeat("b", 40), RepoID: f.repo.ID, QueueSequence: 1}
-	if err := f.scheduler.recordResourceAdmission(run, run.JobName, periapsis.M, argoworkflow.VMIDemand{}, nil, model.ResourceFallbackGraph); err != nil {
-		t.Fatal(err)
-	}
-	r, err := f.scheduler.restoreCreateGrant(run, nil)
-	if err != nil || r.fallback != model.ResourceFallbackGraph || r.pods != nil || r.weight != 2 {
-		t.Fatalf("restored fallback: %+v %v", r, err)
+	for _, reason := range []model.ResourceAdmissionFallback{model.ResourceFallbackGraph, model.ResourceFallbackMemory} {
+		t.Run(string(reason), func(t *testing.T) {
+			f := newConcurrencyFixture(t, periapsis.M, 3)
+			run := model.Run{ID: strings.Repeat("a", 32), JobName: "step-abc12345", SHA: strings.Repeat("b", 40), RepoID: f.repo.ID, QueueSequence: 1}
+			if err := f.scheduler.recordResourceAdmission(run, run.JobName, periapsis.M, argoworkflow.VMIDemand{}, nil, reason); err != nil {
+				t.Fatal(err)
+			}
+			r, err := f.scheduler.restoreCreateGrant(run, nil)
+			if err != nil || r.fallback != reason || r.pods != nil || r.weight != 2 {
+				t.Fatalf("restored fallback: %+v %v", r, err)
+			}
+		})
 	}
 }
 

@@ -11,7 +11,7 @@ import (
 func TestDeclaredPodSubmissionBindsExactDemandAndRejectsChanges(t *testing.T) {
 	cfg := testConfig()
 	cfg.RunnerImagePrefixes = []string{"example.invalid/"}
-	r := resourceBoundsRequest(resourceBoundsSource("      resources:\n        requests: {cpu: 1000m, memory: 1Gi}\n"))
+	r := resourceBoundsRequest(resourceBoundsSource("      resources:\n        requests: {cpu: 1000m, memory: 1Gi}\n        limits: {memory: 1Gi}\n"))
 	r.PodDemand = &argoworkflow.PodDemand{CPUMilli: 1000, MemoryBytes: 1 << 30, Pods: 1}
 	wf, err := Build(cfg, r)
 	if err != nil {
@@ -21,6 +21,12 @@ func TestDeclaredPodSubmissionBindsExactDemandAndRejectsChanges(t *testing.T) {
 	if err != nil || d == nil || *d != *r.PodDemand {
 		t.Fatalf("submission binding: %+v %v", d, err)
 	}
+	source := string(r.Source)
+	r.Source = []byte(strings.Replace(source, "        limits: {memory: 1Gi}\n", "", 1))
+	if _, err := Build(cfg, r); err == nil || !strings.Contains(err.Error(), "changed after reservation") {
+		t.Fatalf("removed memory limit retained numeric reservation: %v", err)
+	}
+	r.Source = []byte(source)
 	r.Source = []byte(strings.Replace(string(r.Source), "cpu: 1000m", "cpu: 2000m", 1))
 	if _, err := Build(cfg, r); err == nil || !strings.Contains(err.Error(), "changed after reservation") {
 		t.Fatalf("source change: %v", err)

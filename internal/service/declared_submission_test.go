@@ -27,6 +27,7 @@ spec:
       image: example.invalid/repo-01@sha256:` + strings.Repeat("a", 64) + `
       resources:
         requests: {cpu: 1000m, memory: 1Gi}
+        limits: {memory: 1Gi}
 `)
 	resolved, err := argoworkflow.ResolveRunSource(source, nil, argoworkflow.RunSourceBinding{RunID: req.Run.ID, RepositoryID: req.Repository.ID, SHA: req.Run.SHA, File: ".oberth/build.yaml", Trigger: argoworkflow.RunTriggerBranch})
 	if err != nil {

@@ -10,7 +10,7 @@ import (
 )
 
 func declaredLeaf(name, cpu, memory string) wfv1.Template {
-	return wfv1.Template{Name: name, Container: &corev1.Container{Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse(cpu), corev1.ResourceMemory: resource.MustParse(memory)}}}}
+	return wfv1.Template{Name: name, Container: &corev1.Container{Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse(cpu), corev1.ResourceMemory: resource.MustParse(memory)}, Limits: corev1.ResourceList{corev1.ResourceMemory: resource.MustParse(memory)}}}}
 }
 
 func TestDeclaredPodPeakMatchesExhaustiveSmallDAGs(t *testing.T) {
