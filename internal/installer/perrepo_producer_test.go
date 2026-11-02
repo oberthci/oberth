@@ -789,3 +789,21 @@ func TestProduceFromConfigMapExcludesNamedStepGrants(t *testing.T) {
 		t.Fatalf("ConfigMap per-repo grants: got %v want %v", got, want)
 	}
 }
+
+func TestSyncRefusesConfigMapFallbackDesiredSet(t *testing.T) {
+	kube := fake.NewSimpleClientset(&corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{Name: secretAccessConfigMapName, Namespace: "oberth"},
+		Data:       map[string]string{secretAccessConfigMapKey: "- repo: bare\n  step: '*'\n  secret: oberth/data/key\n"},
+	})
+	failedExec := func(context.Context, []byte, string, ...string) ([]byte, error) {
+		return nil, errors.New("exec unavailable")
+	}
+	_, _, err := ProducePerRepoIdentitiesForSync(t.Context(), kube, failedExec, "", "oberth")
+	if err == nil {
+		t.Fatal("sync accepted a partial ConfigMap desired set for orphan removal")
+	}
+	_, _, err = ProducePerRepoIdentitiesForSync(t.Context(), kube, nil, "", "oberth")
+	if err == nil {
+		t.Fatal("sync accepted ConfigMap-only desired set")
+	}
+}

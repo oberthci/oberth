@@ -1001,7 +1001,7 @@ func runSecretStoreSync(ctx context.Context, arguments []string, output io.Write
 
 	// Read per-repo identities from the running Oberth server.
 	_, _ = fmt.Fprintln(output, "Reading per-repo identities from the running server...")
-	identities, warnings, produceErr := installer.ProducePerRepoIdentities(
+	identities, warnings, produceErr := installer.ProducePerRepoIdentitiesForSync(
 		ctx, kube, installer.DefaultRunCommand, *kubeContext, *namespace,
 	)
 	for _, warn := range warnings {
