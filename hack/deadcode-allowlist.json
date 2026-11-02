@@ -1,6 +1,7 @@
 {
   "github.com/oberthci/oberth/internal/api.ToolNames": "Shared MCP schema inventory used by cross-package scope and restart contract tests.",
   "github.com/oberthci/oberth/internal/installer.watchBinaryDigest": "Instance recovery qualification helper owned by #1292; remove with that cleanup.",
+  "github.com/oberthci/oberth/internal/storetest.ConsumePromotionGrant": "Cross-package historical grant status fixture, called only from tests.",
   "github.com/oberthci/oberth/internal/storetest.CreateUpstream": "Cross-package database fixture infrastructure, called only from tests; keep production open and mutation semantics separate from explicit historical seeds.",
   "github.com/oberthci/oberth/internal/storetest.EnqueuePromotionRun": "Cross-package database fixture infrastructure, called only from tests; keep production open and mutation semantics separate from explicit historical seeds.",
   "github.com/oberthci/oberth/internal/storetest.EnqueueRun": "Cross-package database fixture infrastructure, called only from tests; keep production open and mutation semantics separate from explicit historical seeds.",

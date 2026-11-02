@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"reflect"
 	"testing"
 	"time"
 
@@ -76,7 +77,7 @@ func TestSweepCandidateAlreadyPurgedManuallyAddsNoAudit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if before != after {
+	if !reflect.DeepEqual(before, after) {
 		t.Fatalf("stale sweep duplicated audit: %+v -> %+v", before, after)
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"github.com/oberthci/oberth/internal/model"
 	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 )
@@ -115,7 +116,7 @@ func TestIssueRevisionMigrationPreservesPopulatedV38AndRestarts(t *testing.T) {
 		t.Fatalf("migration lost issue: %+v %v", got, err)
 	}
 	after, err := s.VerifyAuditState(t.Context())
-	if err != nil || head != after {
+	if err != nil || !reflect.DeepEqual(head, after) {
 		t.Fatalf("migration changed audit: %+v %+v %v", head, after, err)
 	}
 	title := "new title"

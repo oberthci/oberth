@@ -164,3 +164,27 @@ func ReleaseIssueLock(database *store.Store, ctx context.Context, id int64, owne
 	_, err = database.AppendAuditAction(ctx, model.AuditActionSpec{Actor: owner, Action: "issue.lock.release", ResourceType: "issue", ResourceID: fmt.Sprint(id), Details: string(details)})
 	return err
 }
+
+// ConsumePromotionGrant seeds historical consumed status for list fixtures.
+func ConsumePromotionGrant(database *store.Store, ctx context.Context, id, promotionID, actor string) error {
+	db, fixture, err := fixtureDB(database)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	now := fixtureNow(fixture).UnixNano()
+	result, err := db.ExecContext(ctx, `UPDATE promotion_grants SET consumed_by=?,consumed_at=? WHERE id=? AND consumed_at IS NULL AND revoked_at IS NULL AND expires_at>?`, promotionID, now, id, now)
+	if err != nil {
+		return err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows != 1 {
+		return store.ErrInvalidState
+	}
+	details, _ := json.Marshal(map[string]string{"promotion_id": promotionID})
+	_, err = database.AppendAuditAction(ctx, model.AuditActionSpec{Actor: actor, Action: "promotion_grant.consume", ResourceType: "promotion_grant", ResourceID: id, Details: string(details)})
+	return err
+}
