@@ -730,11 +730,29 @@ func runIssues(ctx context.Context, arguments []string, output io.Writer) error 
 		return err
 	}
 	reportMode("server")
+	raw, err := collectIssuePages(ctx, func(ctx context.Context, before int64) (json.RawMessage, error) {
+		query := map[string]string{}
+		if before > 0 {
+			query["before"] = strconv.FormatInt(before, 10)
+		}
+		return api.GetRaw(ctx, "/api/issues", query)
+	})
+	if err != nil {
+		return err
+	}
 	if *asJSON {
-		return emitJSON(ctx, api, "/api/issues", nil, output)
+		var document any
+		decoder := json.NewDecoder(bytes.NewReader(raw))
+		decoder.UseNumber()
+		if err = decoder.Decode(&document); err != nil {
+			return err
+		}
+		encoder := json.NewEncoder(output)
+		encoder.SetIndent("", "  ")
+		return encoder.Encode(document)
 	}
 	var page remoteIssuePage
-	if err := api.Get(ctx, "/api/issues", nil, &page); err != nil {
+	if err = json.Unmarshal(raw, &page); err != nil {
 		return err
 	}
 	if len(page.Issues) == 0 {
