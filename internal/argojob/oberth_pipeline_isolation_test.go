@@ -49,7 +49,7 @@ var oberthReleaseToolWriters = map[string]bool{
 // artifacts. They receive their own read-only tool copies, never the trusted
 // publisher tools.
 var oberthReleaseTestLeaves = map[string]bool{
-	"vet": true, "golangci-lint-run": true, "release-test": true, "release-chart-test": true,
+	"vet": true, "golangci-lint-run": true, "deadcode": true, "release-test": true, "release-chart-test": true,
 	"release-build": true, "release-runtime": true, "release-scan": true,
 }
 
@@ -58,11 +58,11 @@ var oberthReleaseTestLeaves = map[string]bool{
 // other leaf opts out of the shared workspace entirely.
 var (
 	oberthBuildToolWriters = map[string]bool{
-		"tools-dir": true, "link-go": true, "install-golangci-lint": true, "install-helm": true,
+		"tools-dir": true, "link-go": true, "install-golangci-lint": true, "install-deadcode": true, "install-helm": true,
 		"fetch-shellcheck": true, "verify-shellcheck": true, "decompress-shellcheck": true, "install-shellcheck": true,
 	}
 	oberthBuildCachedGoLeaves = map[string]bool{
-		"vet": true, "golangci-lint-run": true,
+		"vet": true, "golangci-lint-run": true, "deadcode": true,
 		"test-store": true, "test-service": true, "test-rest": true,
 		"test-gitcache":            true,
 		"build-static-git-runtime": true,

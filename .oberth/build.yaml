@@ -165,7 +165,7 @@ spec:
           cpu: '1'
           memory: 256Mi
 
-  # ---- setup burn (8 sequential steps) ----
+  # ---- setup stage (9 sequential steps) ----
   # Maps to: Test("setup", repositorySteps(inlineToolchainSteps()...)...)
   #
   # trivy and cosign are NOT installed here:
@@ -179,6 +179,8 @@ spec:
         template: link-go
     - - name: install-golangci-lint
         template: install-golangci-lint
+    - - name: install-deadcode
+        template: install-deadcode
     - - name: install-helm
         template: install-helm
     - - name: fetch-shellcheck
@@ -359,6 +361,64 @@ spec:
         limits:
           cpu: 2000m
           memory: 4Gi
+
+  # [install-helm] go install helm v4.2.3
+  - name: install-deadcode
+    automountServiceAccountToken: false
+    container:
+      image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
+      workingDir: /work/src
+      command: ["/usr/local/go/bin/go"]
+      args: ["install", "golang.org/x/tools/cmd/deadcode@v0.49.0"]
+      env:
+      - name: GOBIN
+        value: "/tmp/oberth-tools/bin"
+      - name: PATH
+        value: "/tmp/oberth-tools/bin:/usr/local/bin:/usr/bin:/bin"
+      - name: OBERTH_TOOLS_DIR
+        value: "/tmp/oberth-tools"
+      - name: HOME
+        value: "/tmp"
+      - name: GOPATH
+        value: "/tmp/oberth-tools/gopath"
+      - name: GOTOOLCHAIN
+        value: "local"
+      - name: GOWORK
+        value: "off"
+      - name: GOENV
+        value: "off"
+      - name: GOMODCACHE
+        value: "/cache/gomod"
+      - name: GOCACHE
+        value: "/cache/gobuild"
+      - name: GIT_TERMINAL_PROMPT
+        value: "0"
+      - name: KUBEBUILDER_ASSETS
+        value: ""
+      - name: TRIVY_CACHE_DIR
+        value: "/tmp/oberth-trivy"
+      - name: GOLANGCI_LINT_CACHE
+        value: "/tmp/oberth-tools/cache/golangci-lint"
+      volumeMounts:
+      - name: work
+        mountPath: /tmp/oberth-tools
+        subPath: tools
+      - name: work
+        mountPath: /cache/gomod
+        subPath: gomod
+      - name: work
+        mountPath: /cache/gobuild
+        subPath: gobuild
+      - name: work
+        mountPath: /tmp/oberth-trivy
+        subPath: trivy-cache
+      resources:
+        requests:
+          cpu: "2"
+          memory: "4Gi"
+        limits:
+          cpu: "2"
+          memory: "4Gi"
 
   # [install-helm] go install helm v4.2.3
   - name: install-helm
@@ -735,6 +795,8 @@ spec:
         template: vet
     - - name: golangci-lint-run
         template: golangci-lint-run
+    - - name: deadcode
+        template: deadcode
 
   # [go-vet-./...]
   - name: vet
@@ -854,6 +916,72 @@ spec:
         limits:
           cpu: 4000m
           memory: 8Gi
+  # ---- parallel race-test burns ----
+  # Each package runs once: dedicated store/service/gitcache groups and the
+  # remainder discovered by go list ./.... Git-cache already has a required
+  # parallel burn below; exclude it from rest to avoid running that suite twice.
+  # The package-union contract covers new packages.
+  # All groups keep the race detector and uncached execution. The explicit
+  # twenty-minute timeout provides headroom; independent Pods bound contention.
+  # Give each group a bounded two-CPU lane; workflow parallelism remains two.
+  - name: deadcode
+    automountServiceAccountToken: false
+    container:
+      image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
+      workingDir: /work/src
+      command: ["/bin/bash"]
+      args: ["hack/test-deadcode.sh"]
+      env:
+      - name: GOMEMLIMIT
+        value: "6GiB"
+      - name: PATH
+        value: "/tmp/oberth-tools/bin:/usr/local/bin:/usr/bin:/bin"
+      - name: OBERTH_TOOLS_DIR
+        value: "/tmp/oberth-tools"
+      - name: HOME
+        value: "/tmp"
+      - name: GOPATH
+        value: "/tmp/oberth-tools/gopath"
+      - name: GOTOOLCHAIN
+        value: "local"
+      - name: GOWORK
+        value: "off"
+      - name: GOENV
+        value: "off"
+      - name: GOMODCACHE
+        value: "/cache/gomod"
+      - name: GOCACHE
+        value: "/cache/gobuild"
+      - name: GIT_TERMINAL_PROMPT
+        value: "0"
+      - name: KUBEBUILDER_ASSETS
+        value: ""
+      - name: TRIVY_CACHE_DIR
+        value: "/tmp/oberth-trivy"
+      - name: GOLANGCI_LINT_CACHE
+        value: "/tmp/oberth-tools/cache/golangci-lint"
+      volumeMounts:
+      - name: work
+        mountPath: /tmp/oberth-tools
+        subPath: tools
+        readOnly: true
+      - name: work
+        mountPath: /cache/gomod
+        subPath: gomod
+      - name: work
+        mountPath: /cache/gobuild
+        subPath: gobuild
+      - name: work
+        mountPath: /tmp/oberth-trivy
+        subPath: trivy-cache
+      resources:
+        requests:
+          cpu: "4"
+          memory: "8Gi"
+        limits:
+          cpu: "4"
+          memory: "8Gi"
+
   # ---- parallel race-test burns ----
   # Each package runs once: dedicated store/service/gitcache groups and the
   # remainder discovered by go list ./.... Git-cache already has a required

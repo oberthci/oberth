@@ -1029,6 +1029,8 @@ spec:
         template: vet
     - - name: golangci-lint-run
         template: golangci-lint-run
+    - - name: deadcode
+        template: deadcode
   - name: vet
     automountServiceAccountToken: false
     metadata:
@@ -1134,6 +1136,57 @@ spec:
         limits:
           cpu: 4000m
           memory: 8384Mi
+  - name: deadcode
+    automountServiceAccountToken: false
+    metadata:
+      annotations:
+        oberth.ci/workspace-mounts: none
+        oberth.ci/workspace-env: none
+    container:
+      image: golang:1.26.10-trixie@sha256:3eca740eb349175cc59f462d409fc324a8239ab3ffdf73d8e63175a041c08b6b
+      workingDir: /work/src
+      command:
+      - /bin/sh
+      - -c
+      args:
+      - |
+        set -eu
+        exec /usr/bin/env -i PATH=/tmp/oberth-tools/bin:/usr/local/go/bin:/usr/bin:/bin \
+          HOME=/tmp \
+          OBERTH_TOOLS_DIR=/tmp/oberth-tools \
+          GOTOOLCHAIN=local \
+          GOWORK=off \
+          GOENV=off \
+          GOPATH=/tmp/bootstrap-private/gopath \
+          GOMODCACHE=/tmp/bootstrap-private/gomod \
+          GOCACHE=/tmp/bootstrap-private/gobuild \
+          GOLANGCI_LINT_CACHE=/tmp/bootstrap-private/lint \
+          TRIVY_CACHE_DIR=/tmp/oberth-trivy \
+          GIT_TERMINAL_PROMPT=0 \
+          KUBEBUILDER_ASSETS= \
+          OBERTH_RELEASE_SHA="$OBERTH_RELEASE_SHA" \
+          OBERTH_RELEASE_TAG="$OBERTH_RELEASE_TAG" \
+          GOBIN=/tmp/oberth-tools/bin \
+          CGO_ENABLED=1 \
+          GOMEMLIMIT=2GiB "$@"
+      - bootstrap-clean
+      - /bin/bash
+      - hack/test-deadcode.sh
+      env:
+      - name: PATH
+        value: /usr/bin:/bin
+      volumeMounts:
+      - name: bootstrap-test-tools
+        mountPath: /tmp/oberth-tools
+        subPath: deadcode
+        readOnly: true
+      resources:
+        requests:
+          cpu: '4'
+          memory: 8Gi
+        limits:
+          cpu: '4'
+          memory: 8Gi
   - name: release-scan
     automountServiceAccountToken: false
     metadata:
@@ -1934,11 +1987,19 @@ spec:
       args:
       - |
         set -eu
-        for leaf in golangci-lint-run release-build release-chart-test release-runtime release-test vet; do
+        for leaf in deadcode golangci-lint-run release-build release-chart-test release-runtime release-test vet; do
           /bin/mkdir -p "/test-tools/$leaf"
           /bin/cp -a /trusted-tools/bin "/test-tools/$leaf/bin"
           /bin/cp -a /trusted-tools/python "/test-tools/$leaf/python"
         done
+        # Build analysis tooling only into its test-tools copy. Publisher tools
+        # stay read-only and cannot receive binaries installed by a lint stage.
+        /usr/bin/env -i PATH=/usr/local/go/bin:/usr/bin:/bin HOME=/tmp \
+          GOTOOLCHAIN=local GOWORK=off GOENV=off \
+          GOPATH=/tmp/deadcode/gopath GOMODCACHE=/tmp/deadcode/gomod \
+          GOCACHE=/tmp/deadcode/gobuild GOBIN=/test-tools/deadcode/bin \
+          CGO_ENABLED=0 /usr/local/go/bin/go install \
+          golang.org/x/tools/cmd/deadcode@v0.49.0
       env:
       - name: PATH
         value: /usr/bin:/bin
@@ -1948,7 +2009,7 @@ spec:
         readOnly: true
       - name: bootstrap-test-tools
         mountPath: /test-tools
-      # Six copies of the trusted tools go through the page cache; under
+      # Seven copies of the trusted tools go through the page cache; under
       # heavy node I/O, dirty pages outrun writeback and a 512Mi limit
       # OOM-killed this step (v0.17.38 release run ef637d76).
       resources:
