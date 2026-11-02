@@ -2512,7 +2512,10 @@ func promotionRunRef(target, sha string) string {
 }
 
 func (service *API) prepareWaitPromotion(ctx context.Context, id string, requestedSeconds int) (func(context.Context) (PromotionWaitResponse, error), error) {
-	if service.promotions == nil || strings.TrimSpace(id) == "" {
+	if service.promotions == nil {
+		return nil, refuse(ErrUnavailable, "promotions")
+	}
+	if strings.TrimSpace(id) == "" {
 		return nil, fmt.Errorf("%w: promotion ID is required", ErrInvalidInput)
 	}
 	duration, err := service.waitDuration(requestedSeconds)
@@ -2571,7 +2574,10 @@ func (service *API) prepareWaitPromotion(ctx context.Context, id string, request
 }
 
 func (service *API) issueCreate(ctx context.Context, actor api.Actor, title, body, upstream string) (model.Issue, error) {
-	if service.issues == nil || strings.TrimSpace(title) == "" {
+	if service.issues == nil {
+		return model.Issue{}, refuse(ErrUnavailable, "issues")
+	}
+	if strings.TrimSpace(title) == "" {
 		return model.Issue{}, fmt.Errorf("%w: issue title is required", ErrInvalidInput)
 	}
 	spec := model.ManualIssueSpec{Title: title, Body: body}
@@ -2621,7 +2627,10 @@ func (service *API) upstreamID(ctx context.Context, name string) (int64, error) 
 }
 
 func (service *API) issueGet(ctx context.Context, _ api.Actor, id int64) (model.Issue, error) {
-	if service.issues == nil || id <= 0 {
+	if service.issues == nil {
+		return model.Issue{}, refuse(ErrUnavailable, "issues")
+	}
+	if id <= 0 {
 		return model.Issue{}, fmt.Errorf("%w: issue ID is required", ErrInvalidInput)
 	}
 	issue, err := service.issues.Issue(ctx, id)
@@ -2636,7 +2645,10 @@ func (service *API) issueGet(ctx context.Context, _ api.Actor, id int64) (model.
 }
 
 func (service *API) issueUpdate(ctx context.Context, actor api.Actor, id int64, title, body, upstream *string, expectedBodySHA256 string) (model.Issue, error) {
-	if service.issues == nil || id <= 0 || (title == nil && body == nil && upstream == nil) || (title == nil) != (body == nil) {
+	if service.issues == nil {
+		return model.Issue{}, refuse(ErrUnavailable, "issues")
+	}
+	if id <= 0 || (title == nil && body == nil && upstream == nil) || (title == nil) != (body == nil) {
 		return model.Issue{}, fmt.Errorf("%w: issue ID and either upstream or both title and body are required", ErrInvalidInput)
 	}
 	patch := model.IssuePatch{Title: title, Body: body}
@@ -2686,7 +2698,10 @@ func (service *API) issueUpdate(ctx context.Context, actor api.Actor, id int64, 
 }
 
 func (service *API) issueAppend(ctx context.Context, actor api.Actor, id int64, text string) (model.Issue, error) {
-	if service.issues == nil || id <= 0 {
+	if service.issues == nil {
+		return model.Issue{}, refuse(ErrUnavailable, "issues")
+	}
+	if id <= 0 {
 		return model.Issue{}, fmt.Errorf("%w: issue ID is required", ErrInvalidInput)
 	}
 	if strings.TrimSpace(text) == "" {
@@ -2720,7 +2735,10 @@ func (service *API) issueClose(ctx context.Context, actor api.Actor, id int64) (
 }
 
 func (service *API) issueDelete(ctx context.Context, actor api.Actor, id int64) error {
-	if service.issues == nil || id <= 0 {
+	if service.issues == nil {
+		return refuse(ErrUnavailable, "issues")
+	}
+	if id <= 0 {
 		return fmt.Errorf("%w: issue ID is required", ErrInvalidInput)
 	}
 	return service.issues.DeleteManualIssue(ctx, actor.Identity, id)
