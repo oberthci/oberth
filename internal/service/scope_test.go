@@ -395,6 +395,7 @@ func TestScopedUplinkCannotTellHiddenFromMissing(t *testing.T) {
 		hidden, missing map[string]any
 	}{
 		{"run_get", map[string]any{"id": hiddenRun.ID}, map[string]any{"id": missingRunID}},
+		{"run_resources", map[string]any{"run": hiddenRun.ID}, map[string]any{"run": missingRunID}},
 		{"run_get", map[string]any{"id": hiddenRun.ID[:16]}, map[string]any{"id": missingRunID[:16]}},
 		{"run_logs", map[string]any{"id": hiddenRun.ID, "burn": "test", "step": "unit"}, map[string]any{"id": missingRunID, "burn": "test", "step": "unit"}},
 		{"artifacts", map[string]any{"id": hiddenRun.ID}, map[string]any{"id": missingRunID}},
@@ -674,6 +675,7 @@ var toolScopeBehaviour = map[string]string{
 	"run_list": "filtered", "promotion_list": "filtered", "issue_list": "filtered",
 	"access_list": "filtered", "repo_list": "filtered", "promote_grant_list": "filtered",
 	"repo_usage":         "lookup",
+	"run_resources":      "lookup",
 	"kubevirt_grant_get": "lookup",
 	"size_grant_get":     "lookup",
 	"system_status":      "filtered",

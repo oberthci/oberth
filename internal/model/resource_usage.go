@@ -6,6 +6,7 @@ import (
 	"math"
 	"math/bits"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/oberthci/oberth/pkg/periapsis"
@@ -15,6 +16,13 @@ import (
 // consumes the step's termination message or changes admission. Peaks are
 // sampled lower bounds, including when a step is killed between polls.
 type StepResourceUsage struct {
+	// Optional server-captured provenance and numeric limits. Stored in the
+	// existing observation JSON; old v2 rows remain readable without migration.
+	TemplateName        string `json:"template_name,omitempty"`
+	FragmentRepository  string `json:"fragment_repository,omitempty"`
+	CPULimitNanoCores   *int64 `json:"cpu_limit_nanocores,omitempty"`
+	MemoryLimitBytes    *int64 `json:"memory_limit_bytes,omitempty"`
+	EphemeralLimitBytes *int64 `json:"ephemeral_limit_bytes,omitempty"`
 	// Version 2 adds container identity, Kubernetes timing and storage scopes.
 	// Version 1 rows remain readable and mean workflow/main/app.
 	ContainerKind       string    `json:"container_kind,omitempty"`
@@ -84,6 +92,14 @@ type StepResourceUsage struct {
 
 func (u StepResourceUsage) Validate() error {
 	bad := errors.New("invalid external step resource observation")
+	if u.TemplateName != "" && !diagnosticName.MatchString(u.TemplateName) || len(u.FragmentRepository) > 253 || strings.ContainsAny(u.FragmentRepository, "\x00\r\n\t ") {
+		return bad
+	}
+	for _, p := range []*int64{u.CPULimitNanoCores, u.MemoryLimitBytes, u.EphemeralLimitBytes} {
+		if p != nil && *p < 0 {
+			return bad
+		}
+	}
 	if !u.WorkflowSize.Valid() || (u.SizeClassChanged && u.WorkflowSize != "") {
 		return bad
 	}
@@ -151,6 +167,26 @@ func MergeResourceUsage(old, next StepResourceUsage) (StepResourceUsage, error) 
 		return StepResourceUsage{}, errors.New("resource observation binding changed")
 	}
 	out := old
+	for _, p := range []struct {
+		old  *string
+		next string
+	}{{&out.TemplateName, next.TemplateName}, {&out.FragmentRepository, next.FragmentRepository}} {
+		if *p.old == "" {
+			*p.old = p.next
+		} else if p.next != "" && *p.old != p.next {
+			return StepResourceUsage{}, errors.New("resource provenance binding changed")
+		}
+	}
+	for _, p := range []struct {
+		old  **int64
+		next *int64
+	}{{&out.CPULimitNanoCores, next.CPULimitNanoCores}, {&out.MemoryLimitBytes, next.MemoryLimitBytes}, {&out.EphemeralLimitBytes, next.EphemeralLimitBytes}} {
+		if *p.old == nil {
+			*p.old = p.next
+		} else if p.next != nil && **p.old != *p.next {
+			out.RequestsChanged = true
+		}
+	}
 	if next.Version == 2 {
 		out.Version = 2
 		out.ContainerKind = next.ContainerKind

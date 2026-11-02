@@ -2,6 +2,7 @@ package argojob
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"log"
@@ -161,6 +162,8 @@ func (c *Controller) sampleResourceUsageWithState(ctx context.Context, wf *wfv1.
 		byName[pods.Items[i].Name] = i
 	}
 	workflowSize := observedResourceWorkflowSize(wf)
+	var fragmentLock argoworkflow.Lock
+	_ = json.Unmarshal([]byte(wf.Annotations[FragmentsAnnotation]), &fragmentLock)
 	bindings := map[string]resourcesampler.Binding{}
 	candidates := 0
 	snapshots := map[string]resourcesampler.Snapshot{}
@@ -226,6 +229,8 @@ func (c *Controller) sampleResourceUsageWithState(ctx context.Context, wf *wfv1.
 			continue
 		}
 		binding := resourcesampler.Binding{RunID: runID, WorkflowName: wf.Name, WorkflowUID: string(wf.UID), Namespace: wf.Namespace, NodeID: node.ID, NodeName: node.Name, PodName: step.PodName, Burn: step.Burn, Step: step.Step}
+		binding.TemplateName = node.TemplateName
+		binding.FragmentRepository, _ = argoworkflow.FragmentTemplateOwner(node.TemplateName, fragmentLock)
 		bindings[string(pod.UID)] = binding
 		pending := resourceContainerCandidates(pod, finished)
 		if pending == 0 {

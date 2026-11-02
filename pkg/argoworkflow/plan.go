@@ -27,6 +27,9 @@ type PlannedStep struct {
 	Ordinal      int
 	Secrets      bool
 	Credentialed bool
+	// Template is the resolved pod-producing template, for read-only numeric
+	// resource reporting. It is never serialized as part of a plan.
+	Template *wfv1.Template `json:"-"`
 }
 
 // MaxPlannedSteps bounds the enumeration. A repository-authored document is
@@ -158,7 +161,7 @@ func (walk *planWalk) descend(template *wfv1.Template, enclosing string, depth i
 			if len(walk.steps) >= MaxPlannedSteps {
 				return fmt.Errorf("argoworkflow: pipeline declares more than %d steps", MaxPlannedSteps)
 			}
-			walk.steps = append(walk.steps, PlannedStep{Burn: burn, Step: step, Ordinal: len(walk.steps), Secrets: UsesSecrets(target), Credentialed: UsesCredentials(target)})
+			walk.steps = append(walk.steps, PlannedStep{Burn: burn, Step: step, Ordinal: len(walk.steps), Secrets: UsesSecrets(target), Credentialed: UsesCredentials(target), Template: target})
 		}
 	}
 	return nil

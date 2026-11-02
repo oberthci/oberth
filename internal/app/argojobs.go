@@ -20,6 +20,7 @@ import (
 	"github.com/oberthci/oberth/internal/runprogress"
 	"github.com/oberthci/oberth/internal/service"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/internal/vmrunner"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 	"github.com/oberthci/oberth/pkg/periapsis"
 )
@@ -73,6 +74,7 @@ type DeclarationRecorder interface {
 // contracts the Kubernetes Job engine satisfies, so the scheduler, admission
 // gate, store, and audit chain need no knowledge of which engine ran a run.
 type ArgoJobs struct {
+	resourceBlobs     vmrunner.PolicyGit
 	controller        argoControl
 	auditor           service.Auditor
 	config            argojob.Config

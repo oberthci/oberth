@@ -9,7 +9,7 @@ func toolOutputSchema(name string) map[string]any {
 	switch name {
 	case "promote_grant_list", "kubevirt_grant_list":
 		collection = "grants"
-	case "repo_usage":
+	case "repo_usage", "run_resources":
 		collection = "steps"
 	case "run_list":
 		collection = "runs"

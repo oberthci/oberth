@@ -273,6 +273,8 @@ func (server *Server) routes() {
 	server.mux.Handle("POST /mcp", server.requireAuth(http.HandlerFunc(server.handleMCP)))
 	server.mux.Handle("GET /api/runs", server.requireAuth(http.HandlerFunc(server.handleRuns)))
 	server.mux.Handle("GET /api/runs/counts", server.requireAuth(http.HandlerFunc(server.handleRunCounts)))
+	server.mux.Handle("GET /api/run-resources", server.requireAuth(http.HandlerFunc(server.handleRunResources)))
+	server.mux.Handle("GET /api/runs/{run}/resources", server.requireAuth(http.HandlerFunc(server.handleRunResources)))
 	server.mux.Handle("GET /api/runs/{run}", server.requireAuth(http.HandlerFunc(server.handleRunDetail)))
 	server.mux.Handle("GET /api/runs/{run}/logs", server.requireAuth(http.HandlerFunc(server.handleRunLog)))
 	server.mux.Handle("GET /api/runs/{run}/livelog/stream", server.requireAuth(http.HandlerFunc(server.handleRunLogLiveStream)))

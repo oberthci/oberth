@@ -1014,9 +1014,11 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 			logger.Printf("WARNING: archived repository cache cleanup failed for %s: %v", qualified, err)
 		}
 	}
+	argoJobs.SetResourceBlobs(git)
 	controlAPI, err := service.NewAPI(service.APIConfig{
-		ReleasePreflight: argoJobs,
-		UplinkLifecycle:  database, DeclarationDismissal: database,
+		ResourceDeclarations: argoJobs,
+		ReleasePreflight:     argoJobs,
+		UplinkLifecycle:      database, DeclarationDismissal: database,
 		IssueLifecycle:     database,
 		KVMPreflights:      database,
 		SchedulingObserver: argoJobs, Admission: scheduler,

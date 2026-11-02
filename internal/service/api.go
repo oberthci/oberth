@@ -53,6 +53,8 @@ const grantPolicySyncAdvisory = "Grant recorded; the identity map refreshes auto
 	"Until then, access fails closed."
 
 type APIConfig struct {
+	RunResources              RunResourceReader
+	ResourceDeclarations      ResourceDeclarationReader
 	Resources                 ResourceUsageReader
 	ReleasePreflight          ReleasePreflighter
 	UplinkLifecycle           UplinkLifecycle
@@ -105,6 +107,8 @@ type APIConfig struct {
 }
 
 type API struct {
+	runResources              RunResourceReader
+	resourceDeclarations      ResourceDeclarationReader
 	redactPressure            bool
 	resources                 ResourceUsageReader
 	promotionProgress         *sync.Map
@@ -169,6 +173,9 @@ type API struct {
 }
 
 func NewAPI(config APIConfig) (*API, error) {
+	if config.RunResources == nil {
+		config.RunResources, _ = config.History.(RunResourceReader)
+	}
 	if config.Resources == nil {
 		config.Resources, _ = config.History.(ResourceUsageReader)
 	}
@@ -215,6 +222,7 @@ func NewAPI(config APIConfig) (*API, error) {
 		issueLifecycle:     config.IssueLifecycle,
 		kvmPreflights:      config.KVMPreflights,
 		schedulingObserver: config.SchedulingObserver, admission: config.Admission,
+		runResources: config.RunResources, resourceDeclarations: config.ResourceDeclarations,
 		resources: config.Resources, runs: config.Runs, history: config.History, runRetries: config.RunRetries, repositories: config.Repositories,
 		issues: config.Issues, promotions: config.Promotions, promotionRuns: config.PromotionRuns,
 		enqueues: config.Enqueues, git: config.Git, refs: config.Refs, logs: config.Logs, artifacts: config.Artifacts, auditor: config.Auditor,
@@ -281,7 +289,7 @@ func (service *API) CallTool(ctx context.Context, actor api.Actor, name string, 
 	if name == "run_logs" || name == "logs" {
 		ctx = withRunLogCaller(ctx, actor)
 	}
-	if name == "run_get" || name == "run_logs" || name == "logs" {
+	if name == "run_get" || name == "run_logs" || name == "logs" || name == "run_resources" {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, runReadBudget)
 		defer func() {
@@ -428,6 +436,8 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 			return nil, fmt.Errorf("%w: run ID is required", ErrInvalidInput)
 		}
 		return service.readRun(ctx, actor, arguments.ID, arguments.Summary)
+	case "run_resources":
+		return service.readRunResources(ctx, raw)
 	case "run_retry":
 		var arguments struct {
 			ID string `json:"id"`
