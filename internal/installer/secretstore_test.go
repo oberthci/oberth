@@ -64,7 +64,7 @@ func TestSetupProductionSecretStoreInteractiveTokenPrompt(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	configured, err := SetupProductionSecretStore(context.Background(), cfg, deps, productionOpenBaoResult())
+	configured, err := setupProductionSecretStoreFixture(context.Background(), cfg, deps, productionOpenBaoResult())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -135,7 +135,7 @@ func TestSetupProductionSecretStoreNonInteractiveTokenPromptNotShown(t *testing.
 	cfg := Config{InstallSecretStore: true}
 	_ = cfg.Validate()
 
-	_, err := SetupProductionSecretStore(context.Background(), cfg, deps, productionOpenBaoResult())
+	_, err := setupProductionSecretStoreFixture(context.Background(), cfg, deps, productionOpenBaoResult())
 	if err == nil || !strings.Contains(err.Error(), baoTokenEnvVar) {
 		t.Fatalf("non-interactive missing-token error = %v", err)
 	}

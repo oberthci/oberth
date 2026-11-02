@@ -3366,7 +3366,7 @@ func TestSetupProductionSecretStoreInitializesAndConfigures(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	configured, err := SetupProductionSecretStore(context.Background(), cfg, deps, productionOpenBaoResult())
+	configured, err := setupProductionSecretStoreFixture(context.Background(), cfg, deps, productionOpenBaoResult())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3376,7 +3376,7 @@ func TestSetupProductionSecretStoreInitializesAndConfigures(t *testing.T) {
 
 	output := buf.String()
 	for _, want := range []string{
-		"OpenBao credentials (save now, shown once)",
+		"Credentials (save now, shown once)",
 		rootToken,
 		unsealKey,
 		"└──",
@@ -3418,7 +3418,7 @@ func TestSetupProductionSecretStoreSealedRerunFails(t *testing.T) {
 	cfg := Config{InstallSecretStore: true}
 	_ = cfg.Validate()
 
-	_, err := SetupProductionSecretStore(context.Background(), cfg, deps, productionOpenBaoResult())
+	_, err := setupProductionSecretStoreFixture(context.Background(), cfg, deps, productionOpenBaoResult())
 	if err == nil {
 		t.Fatal("sealed already-initialized store must fail with unseal guidance")
 	}
@@ -3502,7 +3502,7 @@ func TestSetupProductionSecretStoreAlreadyInitializedWithoutTokenFailsBeforeRunt
 	openbao := productionOpenBaoResult()
 	openbao.Namespace = openBaoNamespace
 
-	_, err := SetupProductionSecretStore(context.Background(), cfg, deps, openbao)
+	_, err := setupProductionSecretStoreFixture(context.Background(), cfg, deps, openbao)
 	if err == nil || !strings.Contains(err.Error(), baoTokenEnvVar) {
 		t.Fatalf("missing-token production setup error = %v", err)
 	}
@@ -3545,7 +3545,7 @@ func TestSetupProductionSecretStoreAlreadyInitializedUsesEnvToken(t *testing.T) 
 	cfg := Config{InstallSecretStore: true}
 	_ = cfg.Validate()
 
-	configured, err := SetupProductionSecretStore(context.Background(), cfg, deps, productionOpenBaoResult())
+	configured, err := setupProductionSecretStoreFixture(context.Background(), cfg, deps, productionOpenBaoResult())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3579,7 +3579,7 @@ func TestSetupProductionSecretStoreRefusesDevStore(t *testing.T) {
 	cfg := Config{InstallSecretStore: true}
 	_ = cfg.Validate()
 
-	_, err := SetupProductionSecretStore(context.Background(), cfg, deps, productionOpenBaoResult())
+	_, err := setupProductionSecretStoreFixture(context.Background(), cfg, deps, productionOpenBaoResult())
 	if err == nil || !strings.Contains(err.Error(), "dev mode (in-memory storage)") {
 		t.Fatalf("want dev-store refusal, got %v", err)
 	}

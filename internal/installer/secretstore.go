@@ -415,12 +415,8 @@ func SetupDevSecretStore(ctx context.Context, cfg Config, deps Deps, openbao Ope
 	return nil
 }
 
-// SetupProductionSecretStoreDeferred is like SetupProductionSecretStore but
-// returns the init result (when a fresh initialization occurred) instead of
-// printing credentials immediately. The caller collects credentials into a
-// heldCredentials pool and displays them once after the install table closes.
-// interactiveDeps is used for prompts (root token re-entry on re-runs);
-// quietDeps is used for non-interactive bao operations.
+// SetupProductionSecretStoreDeferred retains newly created credentials for the
+// caller to display once, including when a later setup step fails.
 func SetupProductionSecretStoreDeferred(ctx context.Context, cfg Config, interactiveDeps, quietDeps Deps, openbao OpenBaoResult) (SecretStoreResult, *baoInitResult, error) {
 	client, status, err := waitForOpenBaoStatus(ctx, cfg, quietDeps, openbao.Namespace)
 	if err != nil {
